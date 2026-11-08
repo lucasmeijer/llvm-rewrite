@@ -400,6 +400,57 @@ fn kb_clmul(l: KB, r: KB) -> KB {
     return res;
 }
 
+// KnownBits comparisons: 1 true, 0 false, -1 unknown
+fn kb_ugt(l: KB, r: KB) -> i64 {
+    if kb_max(l) <= kb_min(r) { return 0; }
+    if kb_min(l) > kb_max(r) { return 1; }
+    return -1;
+}
+fn kb_uge(l: KB, r: KB) -> i64 { let x = kb_ugt(r, l); if x < 0 { -1 } else { 1 - x } }
+fn kb_ult(l: KB, r: KB) -> i64 { kb_ugt(r, l) }
+fn kb_ule(l: KB, r: KB) -> i64 { kb_uge(r, l) }
+fn kb_sgt(l: KB, r: KB) -> i64 {
+    let w = l.w as i64;
+    if sext_w(kb_smax(l), w) <= sext_w(kb_smin(r), w) { return 0; }
+    if sext_w(kb_smin(l), w) > sext_w(kb_smax(r), w) { return 1; }
+    return -1;
+}
+fn kb_sge(l: KB, r: KB) -> i64 { let x = kb_sgt(r, l); if x < 0 { -1 } else { 1 - x } }
+fn kb_slt(l: KB, r: KB) -> i64 { kb_sgt(r, l) }
+fn kb_sle(l: KB, r: KB) -> i64 { kb_sge(r, l) }
+fn kb_eq(l: KB, r: KB) -> i64 {
+    if kb_is_constant(l) && kb_is_constant(r) { return if l.o == r.o { 1 } else { 0 }; }
+    if (l.o & r.z) != 0 || (r.o & l.z) != 0 { return 0; }
+    return -1;
+}
+fn kb_min_pop(k: KB) -> i64 { popcount(k.o) }
+// KnownBits::abs
+fn kb_abs(k: KB, int_min_is_poison: bool) -> KB {
+    let w = k.w as i64;
+    if kb_is_nonneg(k) { return k; }
+    var ka = kb_unknown(w);
+    if kb_is_neg(k) {
+        var t = k;
+        if int_min_is_poison && popcount(k.z) + 2 == w { t.o |= (1 as u64) << kb_min_tz(k); }
+        ka = kb_add_sub(false, int_min_is_poison, false, kb_const(0, w), t);
+        if int_min_is_poison && kb_min_pop(t) == 1 && kb_max_pop(t) != 1 {
+            t.o &= ~sbit(w);
+            t.z |= sbit(w);
+            ka.o |= bits_range(w - kb_min_lz(t), w - 1);
+        }
+    } else {
+        let maxtz = kb_max_tz(k);
+        let mintz = kb_min_tz(k);
+        ka.z |= low_bits(mintz);
+        if maxtz == mintz && maxtz < w { ka.o |= (1 as u64) << maxtz; }
+        if int_min_is_poison || (k.o != 0 && k.o != sbit(w)) {
+            ka.o &= ~sbit(w);
+            ka.z |= sbit(w);
+        }
+    }
+    return ka;
+}
+
 // ---------------------------------------------------------------------------------------------
 // computeKnownBits
 

@@ -129,10 +129,6 @@ fn upgrade_intrinsic_function1(f: i32) -> bool, i32 {
             return true, au_get_declaration(id, [t]);
         }
     }
-    if c == 'c' && np == 2 && name == "coro.end" {
-        au_rename_old(f);
-        return true, au_get_declaration(au_intr_id("llvm.coro.end"), []);
-    }
     if c == 'd' && starts_with(name, "dbg.") {
         let r = name[4..];
         if r == "addr" || r == "value" || r == "assign" || r == "declare" || r == "label" { return true, -1; }
@@ -371,14 +367,6 @@ fn upgrade_intrinsic_call(ci: i32, nf: i32) {
     let id = func_iid(nf);
     let iname = intr_name(id);
     let nargs = cb_nargs(ci);
-    if iname == "llvm.coro.end" {
-        var a: i32[>..] = [];
-        for k in nargs { a.push(op(ci, k)); }
-        a.push(c_simple(VK_CTOKENNONE, T_TOKEN));
-        let nc = au_create_call(ci, nf, a);
-        au_replace_call(ci, nc);
-        return;
-    }
     if iname == "llvm.ctlz" || iname == "llvm.cttz" {
         if nargs == 1 {
             let nc = au_create_call(ci, nf, [op(ci, 0), c_false()]);

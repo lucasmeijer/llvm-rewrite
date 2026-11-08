@@ -179,19 +179,6 @@ fn lex_ident() {
     lpos = k;
     te = k;
     // integer types
-    if word.len > 1 && word[0] == 'b' {
-        // byte types bN (LLVM 23 ByteType)
-        var allb = true;
-        for c in word[1..] { if !is_digit(c) { allb = false; } }
-        if allb {
-            var bits = 0;
-            for c in word[1..] { bits = bits * 10 + (c - '0') as i64; if bits > 16777215 { perr("bitwidth for byte type out of range"); } }
-            if bits == 0 { perr("bitwidth for byte type out of range"); }
-            ttype = ty_byte(bits);
-            tk = T_TYPE;
-            return;
-        }
-    }
     if word.len > 1 && word[0] == 'i' {
         var all = true;
         for c in word[1..] { if !is_digit(c) { all = false; } }

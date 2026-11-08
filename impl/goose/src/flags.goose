@@ -17,7 +17,6 @@ let KNOWN_FLAGS: const u8[:][] = [
     "adce-remove-loops", "adce-remove-control-flow",
     "verify-dom-info",                                   // no-op: extra verification only
     "simplifycfg-require-and-preserve-domtree",          // read by simplifycfg
-    "sroa-skip-mem2reg",                                 // read by sroa
 ];
 
 fn flag_known(name: const u8[:]) -> bool {

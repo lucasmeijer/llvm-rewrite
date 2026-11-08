@@ -14,9 +14,6 @@ var dl_struct_pref: i64 = 8;
 var dl_stack_align: i64 = 0;
 var dl_vec_elem_aligned: bool = false;
 var dl_prog_as: i64 = 0;      // P<n>: program address space (functions, calls)
-var dl_native: i64[>..<];          // "n" legal integer widths
-var dl_nonintegral: i64[>..<];     // "ni" address spaces
-var dl_big_endian: bool = false;
 
 fn dl_set_spec(xs: PrimSpec[>..<]&, bits: i64, abi: i64, pref: i64) {
     for &s in xs { if s.bits == bits { s.abi = abi; s.pref = pref; return; } }
@@ -36,9 +33,6 @@ fn dl_reset() {
     dl_floats.clear();
     dl_vecs.clear();
     dl_ptrs.clear();
-    dl_native.clear();
-    dl_nonintegral.clear();
-    dl_big_endian = false;
     dl_set_spec(dl_ints, 8, 1, 1);
     dl_set_spec(dl_ints, 16, 2, 2);
     dl_set_spec(dl_ints, 32, 4, 4);
@@ -108,30 +102,11 @@ fn dl_parse(s: const u8[:]) {
             if !found { dl_ptrs.push(PtrSpec { as_: as_, bits: bits, abi: abi, pref: pref, idx: idx }); }
         } else if c == 'P' {
             dl_prog_as = parse_num(part[1..]);
-        } else if c == 'n' && part.len > 1 && part[1] == 'i' {
-            // ni:AS:AS...
-            var st = 3;
-            for j in 3..part.len + 1 {
-                if j == part.len || part[j] == ':' { if j > st { dl_nonintegral.push(parse_num(part[st..j])); } st = j + 1; }
-            }
-        } else if c == 'n' {
-            var st = 1;
-            for j in 1..part.len + 1 {
-                if j == part.len || part[j] == ':' { if j > st { dl_native.push(parse_num(part[st..j])); } st = j + 1; }
-            }
-        } else if c == 'E' {
-            dl_big_endian = true;
-        } else if c == 'e' {
-            dl_big_endian = false;
         } else if c == 'S' {
             dl_stack_align = parse_num(part[1..]) / 8;
         }
     }
 }
-
-// DataLayout::isLegalInteger / isNonIntegralAddressSpace
-fn dl_is_legal_integer(bits: i64) -> bool { for w in dl_native { if w == bits { return true; } } return false; }
-fn dl_is_nonintegral_as(as_: i64) -> bool { for a in dl_nonintegral { if a == as_ { return true; } } return false; }
 
 fn dl_ptr(as_: i64) -> PtrSpec {
     for p in dl_ptrs { if p.as_ == as_ { return p; } }
@@ -169,7 +144,7 @@ fn target_layout_type(t: i32) -> i32 {
 recursive fn dl_size_bits(t: i32) -> i64 {
     let k = types[t].kind;
     if k == TK_TARGETEXT { return dl_size_bits(target_layout_type(t)); }
-    if k == TK_INT || k == TK_BYTE { return types[t].n as i64; }
+    if k == TK_INT { return types[t].n as i64; }
     if k == TK_PTR { return dl_ptr(types[t].n).bits; }
     if k == TK_LABEL { return dl_ptr(0).bits; }
     if k == TK_HALF || k == TK_BFLOAT { return 16; }
@@ -197,7 +172,7 @@ recursive fn dl_align(t: i32, abi: bool) -> i64 {
         let base = if abi { dl_struct_abi } else { dl_struct_pref };
         return max(base, sa);
     }
-    if k == TK_INT || k == TK_BYTE { return dl_int_align(types[t].n, abi); }
+    if k == TK_INT { return dl_int_align(types[t].n, abi); }
     if k >= TK_HALF && k <= TK_PPC_FP128 {
         let bits = dl_size_bits(t);
         for s in dl_floats { if s.bits == bits { return if abi { s.abi } else { s.pref }; } }
@@ -215,11 +190,7 @@ recursive fn dl_align(t: i32, abi: bool) -> i64 {
 }
 
 fn dl_store_size(t: i32) -> i64 { (dl_size_bits(t) + 7) / 8 }
-recursive fn dl_alloc_size(t: i32) -> i64 {
-    // DataLayout::getTypeAllocSize: arrays in bytes (no overflow through bits)
-    if types[t].kind == TK_ARRAY { return types[t].cnt * dl_alloc_size(types[t].a); }
-    return align_to(dl_store_size(t), dl_align(t, true));
-}
+recursive fn dl_alloc_size(t: i32) -> i64 { align_to(dl_store_size(t), dl_align(t, true)) }
 
 // StructLayout: (size, alignment)
 recursive fn dl_struct_layout(t: i32) -> i64, i64 {

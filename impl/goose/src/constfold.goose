@@ -11,6 +11,7 @@ import std;
 import ir;
 import apfloat;
 import bignum;
+import fpu;
 
 // ---------------------------------------------------------------------------------------------
 // APInt subset (bit width <= 128): value in (lo, hi), always truncated to w bits.
@@ -197,7 +198,8 @@ fn c_splat_value(v: i32) -> i32 {
     if k == VK_POISON { return c_poison(et); }
     if k == VK_AGGZERO { return c_null(et); }
     if k == VK_CNULL { return c_null(et); }
-    if (k == VK_CINT || k == VK_CFP) && ty_is_vector(ty) { fatal("vector-typed ConstantInt/ConstantFP"); }
+    if k == VK_CINT && ty_is_vector(ty) { return c_int_words(et, cint_lo(v), cint_hi(v)); }
+    if k == VK_CFP && ty_is_vector(ty) { return c_fp(et, cint_lo(v), cint_hi(v)); }
     if k == VK_CDVECTOR || k == VK_CVECTOR {
         let n = vals[v].nops as i64;
         if n == 0 { return -1; }
@@ -497,12 +499,13 @@ recursive fn binop_identity(o: i64, ty: i32, allow_rhs: bool) -> i32 {
     if o == OP_ADD || o == OP_OR || o == OP_XOR { return c_null(ty); }
     if o == OP_MUL { return ai_const(ty, ai_new(1, 0, ty_bits(ty_scalar(ty)))); }
     if o == OP_AND { return c_all_ones(ty); }
-    if o == OP_FADD || o == OP_FMUL { fatal("FP binary constant folding is not supported yet"); }
+    if o == OP_FADD { return c_fp_neg_zero_ty(ty); }
+    if o == OP_FMUL { return c_fp_one_ty(ty); }
     if !allow_rhs { return -1; }
     if o == OP_SUB || o == OP_SHL || o == OP_LSHR || o == OP_ASHR { return c_null(ty); }
     if o == OP_FSUB { return c_null(ty); }
     if o == OP_SDIV || o == OP_UDIV { return ai_const(ty, ai_new(1, 0, ty_bits(ty_scalar(ty)))); }
-    if o == OP_FDIV { fatal("FP binary constant folding is not supported yet"); }
+    if o == OP_FDIV { return c_fp_one_ty(ty); }
     return -1;
 }
 
@@ -553,7 +556,10 @@ recursive fn cf_binop(o: i64, c1: i32, c2: i32) -> i32 {
         }
         if o == OP_OR { if u1 && u2 { return c1; } return c_all_ones(ty); }
         if o == OP_LSHR || o == OP_ASHR || o == OP_SHL { if u2 { return c_poison(vals[c2].ty); } return c_null(ty); }
-        fatal("FP binary constant folding is not supported yet");
+        // FP: -0.0 - undef --> undef; [any flop] undef, undef -> undef; otherwise NaN
+        if o == OP_FSUB && u2 && fp_const_is_neg_zero(c1) { return c2; }
+        if u1 && u2 { return c1; }
+        return c_fp_nan_ty(ty);
     }
     if cf_is_cint(c2) {
         let ab = binop_absorber(o, vals[c2].ty, false);
@@ -592,7 +598,14 @@ recursive fn cf_binop(o: i64, c1: i32, c2: i32) -> i32 {
         let ab = binop_absorber(o, ty, true);
         if ab >= 0 && c1 == ab { return c1; }
     } else if cf_is_cfp(c1) && cf_is_cfp(c2) {
-        fatal("FP binary constant folding is not supported yet");
+        var fo: i64 = -1;
+        if o == OP_FADD { fo = FOP_ADD; } else if o == OP_FSUB { fo = FOP_SUB; } else if o == OP_FMUL { fo = FOP_MUL; }
+        else if o == OP_FDIV { fo = FOP_DIV; } else if o == OP_FREM { fo = FOP_MOD; }
+        if fo >= 0 {
+            let k = types[ty].kind as i64;
+            let lo, hi = fp_arith(k, fo, cint_lo(c1), cint_hi(c1), cint_lo(c2), cint_hi(c2));
+            return c_fp(ty, lo, hi);
+        }
     }
     if ty_is_vector(ty) {
         let s2 = c_splat_value(c2);
@@ -887,4 +900,338 @@ fn inrange_id(lo: i64, hi: i64) -> i32 {
     gep_inranges.push(lo);
     gep_inranges.push(hi);
     return ((gep_inranges.len - 2) / 2) as i32;
+}
+
+// ---------------------------------------------------------------------------------------------
+// FP constants
+
+fn fp_kind_ty(ty: i32) -> i64 { types[ty_scalar(ty)].kind as i64 }
+fn c_fp_bits_ty(ty: i32, lo: u64, hi: u64) -> i32 {
+    let e = c_fp(ty_scalar(ty), lo, hi);
+    if ty_is_vector(ty) { return c_splat(ty, e); }
+    return e;
+}
+// ConstantFP::getNaN(Ty)
+fn c_fp_nan_ty(ty: i32) -> i32 { let lo, hi = fp_default_nan(fp_kind_ty(ty)); return c_fp_bits_ty(ty, lo, hi); }
+fn c_fp_nan(ty: i32) -> i32 { c_fp_nan_ty(ty) }
+// ConstantFP::getNegativeZero / getZero(Ty, Negative)
+fn c_fp_neg_zero_ty(ty: i32) -> i32 { let lo, hi = fp_neg_bits(fp_kind_ty(ty), 0, 0); return c_fp_bits_ty(ty, lo, hi); }
+fn c_fp_neg_zero(ty: i32) -> i32 { c_fp_neg_zero_ty(ty) }
+fn c_fp_one_ty(ty: i32) -> i32 { let lo, hi = fp_from_f64(fp_kind_ty(ty), 1.0); return c_fp_bits_ty(ty, lo, hi); }
+// ConstantFP::get(Ty, double)
+fn c_fp_from_f64(ty: i32, d: f64) -> i32 { let lo, hi = fp_from_f64(fp_kind_ty(ty), d); return c_fp_bits_ty(ty, lo, hi); }
+// ConstantFP::get(Ty, V.makeQuiet()) for a scalar ConstantFP c
+fn c_fp_quiet(c: i32) -> i32 {
+    let ty = vals[c].ty;
+    let lo, hi = fp_make_quiet(fp_kind_ty(ty), cint_lo(c), cint_hi(c));
+    return c_fp(ty, lo, hi);
+}
+fn fp_const_is_neg_zero(c: i32) -> bool {
+    var s = c;
+    if ty_is_vector(vals[c].ty) {
+        if vals[c].kind == VK_CFP { s = c_fp(ty_scalar(vals[c].ty), cint_lo(c), cint_hi(c)); }
+        else { s = c_splat_value(c); }
+        if s < 0 { return false; }
+    }
+    if vals[s].kind != VK_CFP { return false; }
+    let p = fp_decompose(fp_kind_ty(vals[s].ty), cint_lo(s), cint_hi(s));
+    return p.cat == FC_ZERO && p.neg;
+}
+fn cfp_is_largest(c: i32) -> bool { fp_is_largest(fp_kind_ty(vals[c].ty), cint_lo(c), cint_hi(c)) }
+fn fp_cmp_gt(a: i32, b: i32) -> bool { fp_compare(fp_kind_ty(vals[a].ty), cint_lo(a), cint_hi(a), cint_lo(b), cint_hi(b)) == 2 }
+fn fp_cmp_lt(a: i32, b: i32) -> bool { fp_compare(fp_kind_ty(vals[a].ty), cint_lo(a), cint_hi(a), cint_lo(b), cint_hi(b)) == 0 }
+
+// ConstantFoldUnaryInstruction (FNeg)
+recursive fn cf_unary(o: i64, c: i32) -> i32 {
+    let ty = vals[c].ty;
+    let sc = types[ty].kind == TK_SVEC;
+    if (!ty_is_vector(ty) || sc) && cf_is_undef(c) { return c; }
+    if vals[c].kind == VK_CFP && !ty_is_vector(ty) {
+        let lo, hi = fp_neg_bits(fp_kind_ty(ty), cint_lo(c), cint_hi(c));
+        return c_fp(ty, lo, hi);
+    }
+    if ty_is_vector(ty) {
+        var s: i32 = -1;
+        if vals[c].kind == VK_CFP { s = c_fp(ty_scalar(ty), cint_lo(c), cint_hi(c)); } else { s = c_splat_value(c); }
+        if s >= 0 {
+            let e = cf_unary(o, s);
+            if e >= 0 { return c_splat(ty, e); }
+        }
+        if types[ty].kind == TK_FVEC {
+            let mark = cf_stack.len;
+            for i in types[ty].cnt {
+                let e = ce_extractelement(c, c_int(T_I32, i));
+                let r = cf_unary(o, e);
+                if r < 0 { cf_stack.resize(mark); return -1; }
+                cf_stack.push(r);
+            }
+            let r = c_aggregate(ty, cf_stack[mark..]);
+            cf_stack.resize(mark);
+            return r;
+        }
+    }
+    return -1;
+}
+
+// ConstantFoldSelectInstruction
+recursive fn cf_select(cond: i32, v1: i32, v2: i32) -> i32 {
+    if is_null_value(cond) { return v2; }
+    if is_all_ones_value(cond) { return v1; }
+    if vals[cond].kind == VK_CVECTOR {
+        let n = types[vals[cond].ty].cnt;
+        let mark = cf_stack.len;
+        var ok = true;
+        for i in n {
+            let e1 = ce_extractelement(v1, c_int(T_I32, i));
+            let e2 = ce_extractelement(v2, c_int(T_I32, i));
+            let c = op(cond, i);
+            var v: i32 = -1;
+            if cf_is_poison(c) { v = c_poison(vals[e1].ty); }
+            else if e1 == e2 { v = e1; }
+            else if cf_is_undef(c) { v = if cf_is_undef(e1) { e1 } else { e2 }; }
+            else {
+                if vals[c].kind != VK_CINT { ok = false; break; }
+                v = if is_null_value(c) { e2 } else { e1 };
+            }
+            cf_stack.push(v);
+        }
+        if ok {
+            let r = c_aggregate(vals[v1].ty, cf_stack[mark..]);
+            cf_stack.resize(mark);
+            return r;
+        }
+        cf_stack.resize(mark);
+    }
+    if cf_is_poison(cond) { return c_poison(vals[v1].ty); }
+    if cf_is_undef(cond) { if cf_is_undef(v1) { return v1; } return v2; }
+    if v1 == v2 { return v1; }
+    if cf_is_poison(v1) { return v2; }
+    if cf_is_poison(v2) { return v1; }
+    if cf_is_undef(v1) && cf_select_not_poison(v2) { return v2; }
+    if cf_is_undef(v2) && cf_select_not_poison(v1) { return v1; }
+    return -1;
+}
+recursive fn cf_contains_kind(c: i32, k: i64) -> bool {
+    let kind = vals[c].kind;
+    if kind == k { return true; }
+    if kind == VK_CVECTOR { for i in nops(c) { if cf_contains_kind(op(c, i), k) { return true; } } }
+    return false;
+}
+fn cf_select_not_poison(c: i32) -> bool {
+    let k = vals[c].kind;
+    if k == VK_POISON { return false; }
+    if k == VK_CEXPR { return false; }
+    if (k == VK_CINT || k == VK_CFP || k == VK_CNULL) && !ty_is_vector(vals[c].ty) { return true; }
+    if k == VK_GVAR || k == VK_FUNC { return true; }
+    if ty_is_vector(vals[c].ty) { return !cf_contains_kind(c, VK_POISON) && !cf_contains_kind(c, VK_CEXPR); }
+    return false;
+}
+
+// ConstantFoldInsertValueInstruction
+recursive fn cf_insertvalue(agg: i32, val: i32, idxs: const i32[:]) -> i32 {
+    if idxs.len == 0 { return val; }
+    let ty = vals[agg].ty;
+    let n = types[ty].cnt;
+    let mark = cf_stack.len;
+    for i in n {
+        var c = c_aggregate_element(agg, i);
+        if c < 0 { cf_stack.resize(mark); return -1; }
+        if idxs[0] as i64 == i { c = cf_insertvalue(c, val, idxs[1..]); if c < 0 { cf_stack.resize(mark); return -1; } }
+        cf_stack.push(c);
+    }
+    let r = c_aggregate(ty, cf_stack[mark..]);
+    cf_stack.resize(mark);
+    return r;
+}
+
+// ---------------------------------------------------------------------------------------------
+// ConstantFoldCompareInstruction
+
+fn global_unsafe_for_equality(g: i32) -> bool {
+    let x = globs[glob_of(g)];
+    let l = x.linkage as i64;
+    if l == LK_LINKONCE_ANY || l == LK_WEAK_ANY || l == LK_COMMON || l == LK_EXTERN_WEAK { return true; }
+    if x.unnamed == 1 { return true; }
+    if vals[g].kind == VK_GVAR {
+        let t = x.vty;
+        if !cf_ty_is_sized(t) { return true; }
+        if cf_ty_is_empty(t) { return true; }
+    }
+    return false;
+}
+recursive fn cf_ty_is_sized(t: i32) -> bool {
+    let k = types[t].kind;
+    if k == TK_VOID || k == TK_LABEL || k == TK_METADATA || k == TK_FUNC || k == TK_TOKEN { return false; }
+    if k == TK_STRUCT { if (types[t].flags & TF_OPAQUE) != 0 { return false; } for i in types[t].cnt { if !cf_ty_is_sized(ty_field(t, i)) { return false; } } return true; }
+    if k == TK_ARRAY || k == TK_FVEC || k == TK_SVEC { return cf_ty_is_sized(types[t].a); }
+    return true;
+}
+// Type::isEmptyTy
+recursive fn cf_ty_is_empty(t: i32) -> bool {
+    let k = types[t].kind;
+    if k == TK_ARRAY { return types[t].cnt == 0 || cf_ty_is_empty(types[t].a); }
+    if k == TK_STRUCT { for i in types[t].cnt { if !cf_ty_is_empty(ty_field(t, i)) { return false; } } return true; }
+    return false;
+}
+fn globals_potentially_equal(a: i32, b: i32) -> i64 {
+    if vals[a].kind != VK_ALIAS && vals[b].kind != VK_ALIAS {
+        if !global_unsafe_for_equality(a) && !global_unsafe_for_equality(b) { return 33; }
+    }
+    return -1;
+}
+fn cf_complexity(v: i32) -> i64 {
+    let k = vals[v].kind;
+    if k == VK_CEXPR { return 3; }
+    if is_global(v) { return 2; }
+    if k == VK_BLOCKADDR { return 1; }
+    return 0;
+}
+fn cf_pred_swap(p: i64) -> i64 { match p { 34 => 36, 35 => 37, 36 => 34, 37 => 35, 38 => 40, 39 => 41, 40 => 38, 41 => 39, _ => p } }
+fn gep_all_zero_indices(g: i32) -> bool {
+    for k in 1..nops(g) { let x = op(g, k); if !(vals[x].kind == VK_CINT && cint_is_zero(x)) && !(is_null_value(x)) { return false; } }
+    return true;
+}
+// evaluateICmpRelation: an icmp predicate or -1
+recursive fn evaluate_icmp_relation(v1: i32, v2: i32) -> i64 {
+    if v1 == v2 { return 32; }
+    if types[vals[v1].ty].kind != TK_PTR { return -1; }
+    if cf_complexity(v1) < cf_complexity(v2) {
+        let r = evaluate_icmp_relation(v2, v1);
+        if r >= 0 { return cf_pred_swap(r); }
+        return -1;
+    }
+    let k1 = vals[v1].kind;
+    let k2 = vals[v2].kind;
+    if k1 == VK_BLOCKADDR {
+        if k2 == VK_BLOCKADDR {
+            if op(v1, 0) != op(v2, 0) { return 33; }
+        } else if k2 == VK_CNULL { return 33; }
+    } else if is_global(v1) {
+        if is_global(v2) { return globals_potentially_equal(v1, v2); }
+        if k2 == VK_BLOCKADDR { return 33; }
+        if k2 == VK_CNULL {
+            let g = globs[glob_of(v1)];
+            if g.linkage as i64 != LK_EXTERN_WEAK && k1 != VK_ALIAS && types[vals[v1].ty].n == 0 { return 34; }
+        }
+    } else if k1 == VK_CEXPR {
+        let o = cexpr_op(v1);
+        let b = op(v1, 0);
+        if o == OP_GEP {
+            if k2 == VK_CNULL {
+                if is_global(b) {
+                    if globs[glob_of(b)].linkage as i64 != LK_EXTERN_WEAK && (csts[vals[v1].sub].flags & GEP_INBOUNDS) != 0 { return 34; }
+                }
+            } else if is_global(v2) {
+                if is_global(b) && b != v2 {
+                    if gep_all_zero_indices(v1) { return globals_potentially_equal(b, v2); }
+                    return -1;
+                }
+            } else if k2 == VK_CEXPR && cexpr_op(v2) == OP_GEP {
+                let b2 = op(v2, 0);
+                if is_global(b) && is_global(b2) && b != b2 {
+                    if gep_all_zero_indices(v1) && gep_all_zero_indices(v2) { return globals_potentially_equal(b, b2); }
+                    return -1;
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+fn cf_icmp_ai(p: i64, a: AI, b: AI) -> bool {
+    return match p {
+        32 => ai_eq(a, b), 33 => !ai_eq(a, b), 34 => ai_ult(b, a), 35 => !ai_ult(a, b), 36 => ai_ult(a, b), 37 => !ai_ult(b, a),
+        38 => ai_slt(b, a), 39 => !ai_slt(a, b), 40 => ai_slt(a, b), _ => !ai_slt(b, a),
+    };
+}
+fn cf_true_when_equal(p: i64) -> bool { p == 32 || p == 35 || p == 37 || p == 39 || p == 41 || p == 15 || p == 9 || p == 11 || p == 13 }
+
+recursive fn cf_compare(p0: i64, c10: i32, c20: i32) -> i32 {
+    let p = p0;
+    let c1 = c10;
+    let c2 = c20;
+    let t1 = vals[c1].ty;
+    var rt = T_I1;
+    if ty_is_vector(t1) { rt = ty_vector(T_I1, types[t1].cnt, types[t1].kind == TK_SVEC); }
+    if p == 0 { return c_null(rt); }
+    if p == 15 { return c_all_ones(rt); }
+    if cf_is_poison(c1) || cf_is_poison(c2) { return c_poison(rt); }
+    if cf_is_undef(c1) || cf_is_undef(c2) {
+        let is_int = p >= 32;
+        if p == 32 || p == 33 || (is_int && c1 == c2) { return c_undef(rt); }
+        if is_int { return cf_bool(rt, cf_true_when_equal(p)); }
+        return cf_bool(rt, p >= 8 && p <= 14);
+    }
+    if is_null_value(c2) {
+        if p == 35 { return c_all_ones(rt); }
+        if p == 36 { return c_null(rt); }
+    }
+    let st = ty_scalar(t1);
+    if types[st].kind == TK_INT && types[st].n == 1 {
+        if p == 32 {
+            if cf_is_cexpr(c1) { return ce_binop(OP_XOR, c1, ce_not(c2), 0); }
+            return ce_binop(OP_XOR, ce_not(c1), c2, 0);
+        }
+        if p == 33 { return ce_binop(OP_XOR, c1, c2, 0); }
+    }
+    if cf_is_cint(c1) && cf_is_cint(c2) { return cf_bool(rt, cf_icmp_ai(p, ai_of(c1), ai_of(c2))); }
+    if vals[c1].kind == VK_CINT && vals[c2].kind == VK_CINT && ty_is_vector(t1) {
+        return c_splat(rt, cf_bool(T_I1, cf_icmp_ai(p, ai_of(c1), ai_of(c2))));
+    }
+    if cf_is_cfp(c1) && cf_is_cfp(c2) {
+        return cf_bool(rt, fp_fcmp(types[st].kind as i64, p, cint_lo(c1), cint_hi(c1), cint_lo(c2), cint_hi(c2)));
+    }
+    if ty_is_vector(t1) {
+        var s1 = c_splat_value_any(c1);
+        var s2 = c_splat_value_any(c2);
+        if s1 >= 0 && s2 >= 0 {
+            let e = cf_compare(p, s1, s2);
+            if e >= 0 { return c_splat(rt, e); }
+        }
+        if types[t1].kind == TK_SVEC { return -1; }
+        let mark = cf_stack.len;
+        for i in types[t1].cnt {
+            let a = ce_extractelement(c1, c_int(T_I32, i));
+            let b = ce_extractelement(c2, c_int(T_I32, i));
+            let e = cf_compare(p, a, b);
+            if e < 0 { cf_stack.resize(mark); return -1; }
+            cf_stack.push(e);
+        }
+        let r = c_aggregate(rt, cf_stack[mark..]);
+        cf_stack.resize(mark);
+        return r;
+    }
+    if ty_is_fp(st) {
+        if c1 == c2 {
+            if p == 6 { return cf_bool(rt, false); }
+            if p == 9 { return cf_bool(rt, true); }
+        }
+        return -1;
+    }
+    var res: i64 = -1;
+    let rel = evaluate_icmp_relation(c1, c2);
+    if rel == 32 { res = if cf_true_when_equal(p) { 1 } else { 0 }; }
+    else if rel == 36 { if p == 36 || p == 33 || p == 37 { res = 1; } else if p == 34 || p == 32 || p == 35 { res = 0; } }
+    else if rel == 40 { if p == 40 || p == 33 || p == 41 { res = 1; } else if p == 38 || p == 32 || p == 39 { res = 0; } }
+    else if rel == 34 { if p == 34 || p == 33 || p == 35 { res = 1; } else if p == 36 || p == 32 || p == 37 { res = 0; } }
+    else if rel == 38 { if p == 38 || p == 33 || p == 39 { res = 1; } else if p == 40 || p == 32 || p == 41 { res = 0; } }
+    else if rel == 37 { if p == 34 { res = 0; } if p == 36 || p == 37 { res = 1; } }
+    else if rel == 41 { if p == 38 { res = 0; } if p == 40 || p == 41 { res = 1; } }
+    else if rel == 35 { if p == 36 { res = 0; } if p == 34 || p == 35 { res = 1; } }
+    else if rel == 39 { if p == 40 { res = 0; } if p == 38 || p == 39 { res = 1; } }
+    else if rel == 33 { if p == 32 { res = 0; } if p == 33 { res = 1; } }
+    if res != -1 { return cf_bool(rt, res == 1); }
+    if (!cf_is_cexpr(c1) && cf_is_cexpr(c2)) || (is_null_value(c1) && !is_null_value(c2)) {
+        return cf_compare(cf_pred_swap(p), c2, c1);
+    }
+    return -1;
+}
+fn cf_bool(rt: i32, b: bool) -> i32 { if b { c_all_ones(rt) } else { c_null(rt) } }
+// getSplatValue that also handles vector-typed ConstantInt/ConstantFP
+fn c_splat_value_any(v: i32) -> i32 {
+    let k = vals[v].kind;
+    let ty = vals[v].ty;
+    if k == VK_CINT && ty_is_vector(ty) { return c_int_words(ty_scalar(ty), cint_lo(v), cint_hi(v)); }
+    if k == VK_CFP && ty_is_vector(ty) { return c_fp(ty_scalar(ty), cint_lo(v), cint_hi(v)); }
+    return c_splat_value(v);
 }

@@ -251,7 +251,8 @@ recursive fn implied_condition(lhs0: i32, rp: i64, r0: i32, r1: i32, lhs_true0: 
 }
 
 // isImpliedByDomCondition(Pred, LHS, RHS, ContextI): 1 true, 0 false, -1 unknown.
-fn implied_by_dom_condition(p: i64, l: i32, r: i32, cxt: i32) -> i64 {
+fn implied_by_dom_condition(p: i64, l: i32, r: i32, cxt: i32) -> i64 { implied_by_dom_condition_cp(cp(p, false), l, r, cxt) }
+fn implied_by_dom_condition_cp(pcp: i64, l: i32, r: i32, cxt: i32) -> i64 {
     if cxt < 0 { return -1; }
     let bb = inst_parent(cxt);
     if bb < 0 { return -1; }
@@ -262,5 +263,5 @@ fn implied_by_dom_condition(p: i64, l: i32, r: i32, cxt: i32) -> i64 {
     let tb = op(t, 1);
     let fb = op(t, 2);
     if tb == fb { return -1; }
-    return implied_condition(op(t, 0), cp(p, false), l, r, tb == bb, 0);
+    return implied_condition(op(t, 0), pcp, l, r, tb == bb, 0);
 }

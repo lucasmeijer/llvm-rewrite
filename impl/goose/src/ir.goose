@@ -109,7 +109,6 @@ let TK_ARRAY = 16;
 let TK_FVEC = 17;
 let TK_SVEC = 18;
 let TK_TARGETEXT = 19;
-let TK_BYTE = 20;          // byte type bN: n = bits
 
 let TF_VARARG: u8 = 1;
 let TF_PACKED: u8 = 2;
@@ -182,7 +181,6 @@ fn ty_get(t0: Ty) -> i32 {
 
 fn ty_simple(kind: i64) -> i32 { ty_get(Ty { kind: kind as u8, flags: 0, n: 0, a: 0, cnt: 0, name: -1, hash: 0 }) }
 fn ty_int(bits: i64) -> i32 { ty_get(Ty { kind: TK_INT, flags: 0, n: bits as i32, a: 0, cnt: 0, name: -1, hash: 0 }) }
-fn ty_byte(bits: i64) -> i32 { ty_get(Ty { kind: TK_BYTE, flags: 0, n: bits as i32, a: 0, cnt: 0, name: -1, hash: 0 }) }
 fn ty_ptr(as_: i64) -> i32 { ty_get(Ty { kind: TK_PTR, flags: 0, n: as_ as i32, a: 0, cnt: 0, name: -1, hash: 0 }) }
 fn ty_array(elem: i32, n: i64) -> i32 { ty_get(Ty { kind: TK_ARRAY, flags: 0, n: 0, a: elem, cnt: n, name: -1, hash: 0 }) }
 fn ty_vector(elem: i32, n: i64, scalable: bool) -> i32 {

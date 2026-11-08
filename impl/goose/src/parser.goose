@@ -739,7 +739,7 @@ recursive fn parse_constant(ty: i32) -> i32 {
     if tk == T_GVAR { let nm = tstr_id(); lex(); return get_global_by_name(nm, ty); }
     if tk == T_GID { let n = tuint; lex(); return get_global_by_id(n, ty); }
     if tk == T_INT {
-        if !ty_is_int(ty) && types[ty].kind != TK_BYTE { perr("integer constant must have integer type"); }
+        if !ty_is_int(ty) { perr("integer constant must have integer type"); }
         let c = tnum_to_int_const(ty);
         lex();
         return c;
@@ -1742,9 +1742,7 @@ fn parse_global_def(nm: i32, num: i64) {
             let at = parse_type();
             aliasee = parse_constant(at);
         }
-        // GlobalAlias::create(Ty, AddrSpace of the aliasee's pointer type, ...)
-        let aty = vals[aliasee].ty;
-        let pt = if types[aty].kind == TK_PTR { aty } else { ty_ptr(f.addrspace) };
+        let pt = ty_ptr(f.addrspace);
         let v = new_glob(if is_alias { VK_ALIAS } else { VK_IFUNC }, pt, -1, 1);
         globs[glob_of(v)].vty = vt;
         apply_glob_flags(v, f);
