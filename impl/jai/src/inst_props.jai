@@ -296,9 +296,9 @@ mb_called_function :: (i: Value_Id) -> Value_Id {
 is_int32_or_64 :: (t: Type_Id) -> bool { return type_kind(t) == .INT && (type_int_width(t) == 32 || type_int_width(t) == 64); }
 
 // isAllocLikeFn(CB, TLI)
-is_alloc_like_fn :: (i: Value_Id) -> bool {
+is_alloc_like_fn :: (i: Value_Id, use_tli := true) -> bool {
     callee := mb_called_function(i);
-    if callee != NONE {
+    if callee != NONE && use_tli {
         ft := glob(callee).value_type;
         if is_ptr_type(func_ret(ft)) && !glob(callee).intrinsic && tli_available(value_function(i), vname(callee)) {
             for ALLOC_FNS {
@@ -312,12 +312,12 @@ is_alloc_like_fn :: (i: Value_Id) -> bool {
     }
     return (call_alloc_kind(i) & AFK_ALLOC) != 0;
 }
-is_removable_alloc :: (i: Value_Id) -> bool { return is_alloc_like_fn(i); }
+is_removable_alloc :: (i: Value_Id, use_tli := true) -> bool { return is_alloc_like_fn(i, use_tli); }
 
 // getFreedOperand(CB, TLI)
-get_freed_operand :: (i: Value_Id) -> Value_Id {
+get_freed_operand :: (i: Value_Id, use_tli := true) -> Value_Id {
     callee := mb_called_function(i);
-    if callee != NONE && !glob(callee).intrinsic && tli_available(value_function(i), vname(callee)) {
+    if use_tli && callee != NONE && !glob(callee).intrinsic && tli_available(value_function(i), vname(callee)) {
         ft := glob(callee).value_type;
         for FREE_FNS {
             if it.name != vname(callee) continue;
@@ -495,12 +495,13 @@ constrained_fp_is_strict :: (i: Value_Id) -> bool {
     return ir.mds[md].str == "fpexcept.strict";
 }
 
-// wouldInstructionBeTriviallyDead(I, TLI)
-would_instruction_be_trivially_dead :: (i: Value_Id) -> bool {
+// wouldInstructionBeTriviallyDead(I, TLI). use_tli = false is a call with TLI == nullptr (BDCE): library
+// allocation/free functions and isMathLibCallNoop don't count then, only `allockind` attributes.
+would_instruction_be_trivially_dead :: (i: Value_Id, use_tli := true) -> bool {
     opc := inst_op(i);
     if is_terminator(opc) return false;
     if is_eh_pad(i) return false;
-    if is_call_base(i) && is_removable_alloc(i) return true;
+    if is_call_base(i) && is_removable_alloc(i, use_tli) return true;
     id := intrinsic_id_of_call(i);
     if !will_return(i) {
         if id.count == 0 return false;
@@ -535,10 +536,10 @@ would_instruction_be_trivially_dead :: (i: Value_Id) -> bool {
         if begins_with(id, "llvm.experimental.constrained.") return !constrained_fp_is_strict(i);
     }
     if is_call_base(i) {
-        freed := get_freed_operand(i);
+        freed := get_freed_operand(i, use_tli);
         if freed != NONE && is_constant_kind(vkind(freed))
             return is_null_value(freed) || vkind(freed) == .C_UNDEF || vkind(freed) == .C_POISON;
-        if is_math_lib_call_noop(i) return true;
+        if use_tli && is_math_lib_call_noop(i) return true;
     }
     if opc == .LOAD {
         gv := strip_pointer_casts(op(i, 0));

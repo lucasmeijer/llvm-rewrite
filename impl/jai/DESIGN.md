@@ -14,6 +14,15 @@ src/
   printer.jai     AsmWriter + SlotTracker + TypeFinder port
   apfloat.jai     the bits of APFloat/APInt the printer and constant folder need (exact decimal printing)
   intrinsics.jai  intrinsic-ID table and the attributes Intrinsic::getAttributes attaches to declarations
+  apint.jai       APInt (arbitrary width, words in temp) and KnownBits arithmetic
+  ir_edit.jai     mutation/CFG API for passes: iterators, successors/predecessors, phi edits, builders, split block
+  inst_props.jai  mayHaveSideEffects, willReturn, wouldInstructionBeTriviallyDead, the TLI subset
+  domtree.jai     DominatorTree/PostDominatorTree (SemiNCA, incremental updates, IDF calculator, printer)
+  known_bits.jai  computeKnownBits (partial port of ValueTracking)
+  demanded_bits.jai  DemandedBits analysis and print<demanded-bits>
+  print_util.jai  printAsOperand / Instruction::print for analysis printers
+  passes.jai      pass registry, pipeline parser, pass and analysis managers, opt's command line (opt_main)
+  pass_<name>.jai one file per ported pass (dce + break-crit-edges, adce, bdce)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 
@@ -153,8 +162,8 @@ while parsing stays on its global's use list, as in LLVM (until a `removeDeadCon
   `removeIncomingValue` keeps them in lockstep. LLVM's removal copies later entries down one slot with `Use::set`,
   which moves those uses to the front of their values' lists; the port must do the same (not patch links).
 
-Analyses (dominator tree, loop info, …) are separate tables keyed by block id and built on demand into the temporary
-allocator or a per-analysis arena; passes invalidate them explicitly, mirroring the new-PM preserved-analyses sets.
+Analyses (dominator tree, loop info, …) are separate tables keyed by block id, built on demand on the heap and
+cached per function; passes return the preserved set and the pass manager invalidates the rest (§9).
 
 ## 5. Allocation
 
@@ -198,3 +207,79 @@ APFloat values print the way `AsmWriter`'s `writeAPFloatInternal` does: `double`
 Every unsupported construct (token, instruction, attribute, flag) makes the tool print
 `<tool>: <file>:<line>:<col>: error: …` to stderr and exit 1. Output is only written once the whole module has been
 processed, so a failure never leaves partial IR behind.
+
+## 9. Pass infrastructure (passes.jai)
+
+Ported from `llvm/lib/Passes/PassBuilder.cpp`, `llvm/include/llvm/IR/PassManager.h` and the instrumentation in
+`StandardInstrumentations.cpp` / `OptBisect.cpp`. Everything is tables and switches:
+
+- **Registry**: `PASS_TABLE` rows `{name, level (MODULE/FUNCTION/LOOP), kind: Pass_Kind, required, analysis}`.
+  `name` is the textual PassRegistry.def name including parameters (`print<domtree>`). `required` passes (printers,
+  `require<>`, `invalidate<>`) run on `optnone` functions and aren't counted by `-opt-bisect-limit`.
+- **Pipeline**: `parse_pipeline_text` splits the text on `,()` into `Pipeline_Element` rows (tree via
+  first_child/next), `parse_pass_pipeline` turns that into `Pass_Node` rows: `MODULE_PM`, `FUNCTION_ADAPTOR` and
+  pass nodes, with LLVM's wrapping rules (first element not a module pass: the whole list goes into one
+  `function(...)`; a function pass inside a module list gets its own adaptor). `loop`/`loop-mssa`/`cgscc` and
+  unknown names fail loudly. `-O<n>` fails loudly in `opt_main`.
+- **Running**: `run_module_pm` → `run_function_adaptor` (every defined function in module order) →
+  `should_run_pass` (OptNone, then OptBisect: prints `BISECT: ...` lines like LLVM) → `run_function_pass`, a
+  `switch` on `Pass_Kind` that returns a `Preserved`. After each pass: `fam_invalidate(f, preserved)` and
+  `reset_temporary_storage()`.
+- **Preserved** = `PreservedAnalyses`: `all`, `cfg` (`preserveSet<CFGAnalyses>`), and a bit mask per
+  `Analysis_Kind`. `analysis_survives` encodes each result's `invalidate`: dom/post-dom trees survive `cfg`.
+- **Analyses** live in `fam: Table(Value_Id, Fn_Analyses)`, one heap-allocated result per kind and function:
+  `get_domtree(f)` (= `AM.getResult`), `cached_domtree(f)` (= `getCachedResult`), same for post-dom and
+  DemandedBits. Results that a pass keeps up to date (break-crit-edges updates a cached DT with `dt_apply_updates`)
+  are returned as preserved.
+- **Options**: `opts` holds the `cl::opt`s we know (`-adce-remove-loops`, `-opt-bisect-limit`, ...); `cl_opts()` maps
+  names to fields; `parse_cl_opt` accepts `-x`, `--x`, `-x=v`. Unknown flags fail loudly.
+- **Memory**: passes allocate scratch from `temp` explicitly (`arr.allocator = temp`); APInt words are always temp.
+  Anything that must outlive the pass (analysis results) uses the heap (`New`, `ap_heap_copy`).
+- **Printing inside passes**: `value_as_operand` / `inst_to_string` (print_util.jai) reproduce LLVM's per-call
+  SlotTracker; the module printer for `-S` always starts from a fresh state (`print_module_fresh`).
+
+### IR editing conventions (ir_edit.jai)
+
+- Iterate with `for b: fn_blocks(f)`, `for i: block_insts(b)`, `for i: fn_insts(f)`. Use `for :early_inc` (next
+  read before the body, LLVM's `make_early_inc_range`) when the body may erase `it`, `for :reverse_early_inc` for
+  `reverse(instructions(F))`.
+- Successor *i* of a terminator: `get_successor/set_successor` (operand layout per opcode in `succ_operand_index`).
+  `block_predecessors` = `predecessors(BB)`: use-list order, one entry per edge, so it depends on use lists being
+  right.
+- New instructions: `create_br/create_cond_br/create_cast/create_binop/create_phi` build an unlinked instruction;
+  `insert_before_named(i, pos, name)` links it and *then* names it (IRBuilder order, so `makeUniqueName` sees the
+  current symbol table: BDCE's zext named after the still-live sext becomes `%x1`). New blocks: `create_block` or
+  `new_block` + `fn_insert_block_after` + `note_block_created` + `set_name`.
+- Erasing: `erase_inst` asserts that there are no uses. For a group of dead instructions do what LLVM does:
+  `drop_all_references` on all of them first, then erase.
+- Phis: `phi_remove_incoming` moves the last entry into the hole (LLVM 23), `block_remove_predecessor` is
+  `BasicBlock::removePredecessor` (may fold a phi to its constant value).
+- `drop_poison_generating_annotations`, `copy_debug_loc`, `is_critical_edge`, `find_function_backedges` are there
+  too. Grep this file and inst_props.jai before writing a helper: names are global in Jai, a duplicate is a compile
+  error (`call_arg`, `call_callee`, `strip_pointer_casts` live in autoupgrade.jai).
+
+### Dominator trees (domtree.jai)
+
+`Dom_Tree` rows `Dom_Node{block, idom, first_child, last_child, sibling, level, dfs_in, dfs_out}`; one struct for both
+directions (`post`). Construction, `dt_apply_updates` (GraphDiff/LegalizeUpdates, InsertEdge/DeleteEdge with
+LLVM's recalculation thresholds), `dt_dominates` (with LLVM's slow-query counter, which shows in the printer),
+`dt_find_nca`, `dt_add_new_block`, `dt_change_idom`, `dt_erase_node` and `idf_calculate` (IDFCalculator) are ports of
+GenericDomTree*. Child lists are in insertion order, exactly as LLVM's, so any pass that walks the tree sees LLVM's
+order. Keep the tree updated the way the LLVM pass does (eager `applyUpdates` or the specific helper it calls);
+recomputing gives a different child order.
+
+## 10. How to add a pass
+
+1. Read the LLVM source (`/opt/llvm-project-23.1.5/llvm/lib/Transforms/...`) and note which analyses it gets with
+   `getResult` vs `getCachedResult`, what it preserves, and which utilities it calls.
+2. Create `src/pass_<name>.jai` with a header comment naming the LLVM file(s), and a
+   `<name>_run :: (f: Value_Id) -> Preserved` (function pass). Return `PRESERVE_ALL` when nothing changed, otherwise
+   exactly what LLVM's `run` preserves (`preserved_cfg()`, `preserve(*pa, .DOMTREE)`, ...).
+3. Register it: a `Pass_Kind` value, a `PASS_TABLE` row with its PassRegistry.def name, and a `case` in
+   `run_function_pass`. Pass parameters (`name<...>`): match the prefix in `lookup_pass`/`parse_function_pass` and
+   parse the parameters into the `Pass_Node` (add a field) — not needed yet by any ported pass.
+4. `#load` the file in `opt.jai`.
+5. New analysis: add an `Analysis_Kind`, a field in `Fn_Analyses`, `get_x`/`cached_x`, its invalidation rule in
+   `analysis_survives`/`fam_invalidate`, `require<x>`/`invalidate<x>`/`print<x>` rows.
+6. New `cl::opt`: a field in `opts` and an entry in `cl_opts()` (default = LLVM's default).
+7. Anything LLVM does that you don't port must `fatal(...)` when reached, never silently do something else.

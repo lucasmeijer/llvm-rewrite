@@ -37,7 +37,7 @@ bdce_run :: (f: Value_Id) -> Preserved {
         if may_have_side_effects(i) && !has_uses(i) continue;
         t := vtype(i);
         if db_is_instruction_dead(db, i) ||
-           (is_int_or_int_vector(t) && ap_is_zero(db_demanded_bits(db, i)) && would_instruction_be_trivially_dead(i)) {
+           (is_int_or_int_vector(t) && ap_is_zero(db_demanded_bits(db, i)) && would_instruction_be_trivially_dead(i, use_tli = false)) {
             array_add(*wl, i);
             changed = true;
             continue;

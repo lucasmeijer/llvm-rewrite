@@ -24,7 +24,46 @@
   `range(iN ...)` is stored as `range(i@ ...)` and gets the return width at run time). An intrinsic that isn't in
   the table fails loudly: add a test that uses it and rerun the script.
 
+## Pass infrastructure status (see DESIGN.md §9-10)
+
+- Passes: dce, adce (+ `-adce-remove-loops`, `-adce-remove-control-flow`), bdce, break-crit-edges; printers
+  print<domtree>, print<postdomtree>, print<demanded-bits>; require<>/invalidate<> for domtree, postdomtree,
+  demanded-bits. L1.analysis.domtree is COMPLETE. L1.dce: all checks that only need dce/adce/bdce pass; the rest need
+  simplifycfg, sroa, gvn, licm (loop-mssa), instcombine, debugify, redundant-dbg-inst-elim, debug-info metadata,
+  `--preserve-ll-uselistorder` printing or `--enable-knowledge-retention` (AssumeBundleBuilder), and fail loudly.
+- Cross-checked beyond the corpus: dce, adce, adce -adce-remove-loops, bdce and break-crit-edges output, and
+  print<domtree>/print<postdomtree> (also after break-crit-edges and adce with cached trees), are identical to LLVM's
+  on every imported test that round-trips (6635 files), except BDCE on `InstCombine/known-bits.ll` (assume-based
+  known bits).
+- **Sweep beyond the unit's tests** (found 6 bugs the unit tests didn't): for every round-tripping imported file,
+  run our opt and LLVM's with the same pipeline and compare canonicalized IR (`llvm-as | llvm-dis`) or, for
+  printers, stderr (sorted for demanded-bits):
+  `grep ::roundtrip impl/jai/passing.txt | sed 's/::roundtrip//' | grep imported | xargs -P8 -I{} cmp.sh "-passes=adce" {}`
+  where cmp.sh runs both tools into a temp dir and prints OK/DIFF/JAI-FAIL. Do this for every new pass.
+- **known_bits.jai is a partial computeKnownBits**: no assumptions/dominating conditions, no isKnownNonZero, no
+  mul/div/rem/intrinsics/abs/min/max, no getKnownBitsFromAndXorOr idioms, no adjustKnownBitsForSelectArm, no
+  computeKnownBitsAddSub dom-condition refinement. print<demanded-bits> matches LLVM (unordered) on 6538 of 6635
+  files; the rest are these gaps or intrinsic-name upgrades. Note that missing known bits is *not* always
+  conservative for BDCE: an operand with fewer known bits can look dead (`and 0, %phi`). Replace the file with the
+  full ValueTracking port when InstSimplify/InstCombine need it.
+- TLI: only what DCE/ADCE need (MemoryBuiltins' new/delete/strdup tables, allockind, isMathLibCallNoop with host
+  libm + fenv via `#foreign`, "no-builtins"/"no-builtin-<f>"). Its `getLibFunc` prototype checks are simplified.
+- Debug info: salvageDebugInfo/dbg-record dropping are no-ops because the parser rejects debug records.
+- Perf (x64 build, sqlite3.ll, `-disable-output`): parse 1.01 s (LLVM 0.28 s); dce +0.0 s (LLVM +0.0), adce +0.23 s
+  (LLVM +0.01), bdce +0.31 s (LLVM +0.03), require<domtree>,require<postdomtree> +0.01 s. ADCE/BDCE cost is in
+  `Table` lookups and temp APInt allocation (every APInt op allocates); no `@perf` benchmark times these passes, so
+  nothing in `harness/run perf` covers them yet.
+
 ## Jai traps hit so far
+
+- **`cast(T) x << y` casts the whole shift**: `cast(u64) 1 << 63` computes `1 << 63` as s64 and then fails the
+  cast check; `cast(u64) a << 32` with a u32 `a` shifts in 32 bits (silently 0). Write `(cast(u64) 1) << n`.
+- `x := NONE` gives `x` type s64 (NONE is an untyped constant); write `x: Value_Id = NONE`.
+- `for * CONST_ARRAY` iterates a temporary copy: a pointer into a `::` constant array dangles. Copy constant tables
+  into a `[..]` array before handing out pointers (passes.jai `pass_table`).
+- Procedure names are global across all `#load`ed files and only type-checked when used: a duplicate name added by
+  another agent shows up as an "ambiguous overload" error in code that didn't change.
+- `table_find` returns `(found, value)`; `found, x := table_find(...)` order matters (we got it backwards twice).
 
 - `for i: 0..n-1` with an unsigned `n == 0` underflows and loops ~4 billion times (and then hits a bounds check).
   Loops over `u32` counts are written `if n > 0 for i: 0..n-1`, or the bound is cast to `s64`.

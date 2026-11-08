@@ -6,7 +6,15 @@
   at -O0 too, not GlobalISel. Verified by running it on clang -O0 and -O2 IR.
 - **`-opt-bisect-limit=N`** prints one stderr line per bisectable pass:
   `BISECT: running pass (N) <pass> on <function|[module]>` or `BISECT: NOT running pass …`. With `-O2` on a small
-  module there are about 190 bisectable passes. Required passes (verifier, analyses) aren't counted.
+  module there are about 190 bisectable passes. Required passes (verifier, analyses, printers, `require<>`,
+  `invalidate<>`, pass managers/adaptors) aren't counted. The `<pass>` is the textual pipeline name (`dce`), the IR
+  is the function's name. Passes on `optnone` functions are still counted and printed: every shouldRun callback
+  runs (`ShouldRun &= C(...)`), OptNone's just vetoes them. Declarations aren't visited at all.
+- **Pipeline wrapping** (`PassBuilder::parsePassPipeline`): if the *first* element isn't a module pass, the whole
+  list is wrapped in `function(...)` (or `cgscc(...)`, `function(loop(...))`). Otherwise each function pass appearing
+  directly in the module list gets its own `ModuleToFunctionPassAdaptor`, so `module-pass,dce,adce` runs dce over all
+  functions, then adce over all functions. `parsePipelineText` splits on `,()` only: `<...>` parameters are part of
+  the name and can't contain those characters.
 - **`opt -O2 -print-pipeline-passes`** prints the full textual pipeline, with every pass parameter spelled out
   (e.g. `simplifycfg<bonus-inst-threshold=1;…>`). That's the ground truth for pipeline order.
 - **ModuleID**: `opt -S file.ll` prints `; ModuleID = 'file.ll'`, using the path exactly as given. `llvm-dis` reading
