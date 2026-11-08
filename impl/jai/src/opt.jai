@@ -13,35 +13,19 @@
 #load "gen_iit.jai";
 #load "autoupgrade.jai";
 
-main :: () {
-    tool_name = "opt";
-    args := get_command_line_arguments();
-    input := "";
-    output := "-";
-    passes := "";
-    for i: 1..args.count-1 {
-        a := args[i];
-        if a == "-S" continue;
-        if a == "-o" { i += 1; output = args[i]; continue; }
-        if begins_with(a, "-passes=") { passes = slice(a, 8, a.count - 8); continue; }
-        if begins_with(a, "-") && a != "-" fatal("unsupported option '%'", a);
-        input = a;
-    }
-    if passes.count fatal("unsupported pass pipeline '%' (no passes are implemented yet)", passes);
-    if input.count == 0 fatal("no input file");
-    src: string;
-    ok: bool;
-    if input == "-" fatal("reading from stdin is not supported");
-    src, ok = read_entire_file(input);
-    if !ok fatal("could not open input file '%'", input);
-    ir_init();
-    ir.module_id = input;
-    parse_module(src, input);
-    if ir.source_filename.count == 0 && !saw_source_filename ir.source_filename = input;
-    text := print_module();
-    if output == "-" write_string(text);
-    else if !write_entire_file(output, text) fatal("could not write '%'", output);
-}
+#load "apint.jai";
+#load "ir_edit.jai";
+#load "inst_props.jai";
+#load "print_util.jai";
+#load "domtree.jai";
+#load "known_bits.jai";
+#load "demanded_bits.jai";
+#load "passes.jai";
+#load "pass_dce.jai";
+#load "pass_adce.jai";
+#load "pass_bdce.jai";
+
+main :: () { opt_main(); }
 
 #import "Basic";
 #import "File";

@@ -1,0 +1,140 @@
+// DCE: port of llvm/lib/Transforms/Scalar/DCE.cpp (DCEPass: eliminateDeadCode / DCEInstruction).
+// salvageDebugInfo and salvageKnowledge have nothing to do: debug records aren't parsed yet and
+// --enable-knowledge-retention is off.
+
+Small_Set_Vector :: struct {
+    items: [..] Value_Id;
+    set: Table(Value_Id, bool);
+}
+ssv_init :: (s: *Small_Set_Vector) { s.items.allocator = temp; s.set.allocator = temp; }
+ssv_insert :: (s: *Small_Set_Vector, v: Value_Id) -> bool {
+    if table_contains(*s.set, v) return false;
+    table_set(*s.set, v, true);
+    array_add(*s.items, v);
+    return true;
+}
+ssv_contains :: (s: *Small_Set_Vector, v: Value_Id) -> bool { return table_contains(*s.set, v); }
+ssv_pop :: (s: *Small_Set_Vector) -> Value_Id {
+    v := pop(*s.items);
+    table_remove(*s.set, v);
+    return v;
+}
+
+dce_instruction :: (i: Value_Id, wl: *Small_Set_Vector) -> bool {
+    if !is_instruction_trivially_dead(i) return false;
+    n := nops(i);
+    if n > 0 for k: 0..n-1 {
+        opv := op(i, k);
+        set_op(i, k, NONE);
+        if opv == NONE || has_uses(opv) || opv == i continue;
+        if is_inst(opv) && is_instruction_trivially_dead(opv) ssv_insert(wl, opv);
+    }
+    erase_inst(i);
+    return true;
+}
+
+dce_run :: (f: Value_Id) -> Preserved {
+    changed := false;
+    wl: Small_Set_Vector; ssv_init(*wl);
+    for :early_inc fn_insts(f) {
+        if !ssv_contains(*wl, it) changed |= dce_instruction(it, *wl);
+    }
+    while wl.items.count {
+        i := ssv_pop(*wl);
+        changed |= dce_instruction(i, *wl);
+    }
+    if !changed return PRESERVE_ALL;
+    return preserved_cfg();
+}
+
+// ---------------------------------------------------------------- break-crit-edges
+// Port of llvm/lib/Transforms/Utils/BreakCriticalEdges.cpp (BreakCriticalEdgesPass, SplitCriticalEdge,
+// SplitKnownCriticalEdge) and SplitAllCriticalEdges (BasicBlockUtils.cpp). LoopInfo isn't ported yet, so a cached
+// LoopInfo would be ignored; none exists.
+
+// CriticalEdgeSplittingOptions
+Crit_Edge_Options :: struct {
+    dt: *Dom_Tree;
+    pdt: *Dom_Tree;
+    merge_identical_edges: bool;
+    keep_one_input_phis: bool;
+    ignore_unreachable_dests: bool;
+}
+
+split_critical_edge :: (t: Value_Id, succ: u32, o: *Crit_Edge_Options, name := "") -> Value_Id {
+    if !is_critical_edge(t, succ, o.merge_identical_edges) return NONE;
+    return split_known_critical_edge(t, succ, o, name);
+}
+
+split_known_critical_edge :: (t: Value_Id, succ: u32, o: *Crit_Edge_Options, name := "") -> Value_Id {
+    tibb := inst_block(t);
+    dest := get_successor(t, succ);
+    if block_is_eh_pad(dest) || inst_op(t) == .INDIRECTBR return NONE;
+    if o.ignore_unreachable_dests fatal("split_known_critical_edge: IgnoreUnreachableDests is not supported yet");
+    f := block_fn(tibb);
+    bbname := name;
+    if bbname.count == 0 bbname = tprint("%.%_crit_edge", vname(tibb), vname(dest));
+    // BasicBlock::Create(Ctx, Name) then F.insert(++TIBB, NewBB): named on insertion
+    nb := new_block(f);
+    nbr := create_br(dest);
+    block_append_inst(nb, nbr);
+    copy_debug_loc(nbr, t);
+    found, loop_kind := table_find(*ir.md_kind_map, "llvm.loop");
+    if found {
+        lmd := get_metadata(t, loop_kind);
+        if lmd != NONE set_metadata(nbr, loop_kind, lmd);
+    }
+    fn_insert_block_after(f, tibb, nb);
+    note_block_created(f, nb);
+    set_name(nb, bbname);
+    set_successor(t, succ, nb);
+    {
+        idx: u32 = 0;
+        for block_insts(dest) {
+            if inst_op(it) != .PHI break;
+            if phi_block(it, idx) != tibb idx = cast(u32) phi_block_index(it, tibb);
+            phi_set_block(it, idx, nb);
+        }
+    }
+    if o.merge_identical_edges {
+        n := num_successors(t);
+        k := succ + 1;
+        while k < n {
+            if get_successor(t, k) == dest {
+                block_remove_predecessor(dest, tibb, o.keep_one_input_phis);
+                set_successor(t, k, nb);
+            }
+            k += 1;
+        }
+    }
+    if !o.dt && !o.pdt return nb;
+    updates: [..] Dom_Update; updates.allocator = temp;
+    array_add(*updates, .{true, tibb, nb});
+    array_add(*updates, .{true, nb, dest});
+    if !succ_contains(tibb, dest) array_add(*updates, .{false, tibb, dest});
+    if o.dt dt_apply_updates(o.dt, updates);
+    if o.pdt dt_apply_updates(o.pdt, updates);
+    return nb;
+}
+
+split_all_critical_edges :: (f: Value_Id, o: *Crit_Edge_Options) -> u32 {
+    n: u32 = 0;
+    for b: fn_blocks(f) {
+        t := block_terminator(b);
+        if num_successors(t) > 1 && inst_op(t) != .INDIRECTBR {
+            e := num_successors(t);
+            for i: 0..e-1 if split_critical_edge(t, i, o) != NONE n += 1;
+        }
+    }
+    return n;
+}
+
+break_crit_edges_run :: (f: Value_Id) -> Preserved {
+    o: Crit_Edge_Options;
+    o.dt = cached_domtree(f);
+    n := split_all_critical_edges(f, *o);
+    if n == 0 return PRESERVE_ALL;
+    pa: Preserved;
+    preserve(*pa, .DOMTREE);
+    return pa;
+}
