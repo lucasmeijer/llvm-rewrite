@@ -2537,7 +2537,7 @@ fn rewrite_select_mem_ops(si: i32, at: i64, n: i64) -> bool {
         if spec == 3 {
             speculate_select_loads(si, i);
         } else {
-            sr_not_ported("rewriting a select's memory operation by splitting the CFG (sroa<modify-cfg>)");
+            rewrite_mem_op_of_select(si, i, spec);
             cfg_changed = true;
         }
         sr_erase(i);
@@ -3814,4 +3814,148 @@ fn sr_is_assume_like(i: i32) -> bool {
     let nm = intr_name(id as i64);
     for n in names { if starts_with(nm, n) && (nm.len == n.len || nm[n.len] == '.') { return true; } }
     return false;
+}
+
+// Instruction::clone for a load or store (operands, flags, alignment, ordering, metadata; no name)
+fn sr_clone_ldst(i: i32) -> i32 {
+    var opsv: i32[>..<] = [];
+    for k in nops(i) { opsv.push(op(i, k)); }
+    let c = create_inst(iop(i), vals[i].ty, opsv);
+    let ci = inst_of(c);
+    let oi = inst_of(i);
+    insts[ci].align = insts[oi].align; insts[ci].ord = insts[oi].ord; insts[ci].ord2 = insts[oi].ord2;
+    insts[ci].ss = insts[oi].ss; insts[ci].bits = insts[oi].bits; insts[ci].flags = insts[oi].flags;
+    insts[ci].fmf = insts[oi].fmf; insts[ci].ty2 = insts[oi].ty2; insts[ci].as_ = insts[oi].as_;
+    for k in insts[oi].nmd { inst_set_md(c, md_att[insts[oi].md + 2 * k], md_att[insts[oi].md + 2 * k + 1]); }
+    return c;
+}
+
+// Instruction::dropUBImplyingAttrsAndMetadata() for a load/store
+fn sr_drop_ub_md(i: i32) {
+    let keep: const u8[:][] = ["annotation", "range", "nonnull", "align", "fpmath", "prof", "mem.cache_hint", "nofpclass", "DIAssignID"];
+    let ii = inst_of(i);
+    let at = insts[ii].md;
+    var w: i32 = 0;
+    for k in insts[ii].nmd {
+        let kind = md_att[at + 2 * k];
+        var kp = kind == 0;
+        let nm = sbytes(md_kind_names[kind]);
+        for n in keep { if n == nm { kp = true; } }
+        if kp { md_att[at + 2 * w] = kind; md_att[at + 2 * w + 1] = md_att[at + 2 * k + 1]; w++; }
+    }
+    insts[ii].nmd = w;
+}
+
+// SplitBlockAndInsertIfThenElse(Cond, SplitBefore, then?, else?) -> (head, tail, then, else)
+fn sr_split_if_then_else(cond: i32, at: i32, want_then: bool, want_else: bool, prof: i32) -> i32, i32, i32, i32 {
+    let head = inst_parent(at);
+    let fv = block_func(head);
+    let dl = inst_get_md(at, 0);
+    let tail = split_block(head, at, "");
+    let hbr = block_terminator(head);
+    if dl >= 0 { inst_set_md(hbr, 0, dl); }
+    var tb = tail;
+    var fb = tail;
+    var thenb: i32 = -1;
+    var elseb: i32 = -1;
+    if want_then {
+        thenb = create_block_after(fv, block_prev(tail), "");
+        let br = create_inst(OP_BR, T_VOID, [tail]);
+        block_append_inst(thenb, br);
+        if dl >= 0 { inst_set_md(br, 0, dl); }
+        tb = thenb;
+    }
+    if want_else {
+        elseb = create_block_after(fv, block_prev(tail), "");
+        let br = create_inst(OP_BR, T_VOID, [tail]);
+        block_append_inst(elseb, br);
+        if dl >= 0 { inst_set_md(br, 0, dl); }
+        fb = elseb;
+    }
+    // CondBrInst::Create(Cond, TrueBlock, FalseBlock) replacing the head's branch (ReplaceInstWithInst)
+    let nb = create_inst(OP_CONDBR, T_VOID, [cond, tb, fb]);
+    if prof >= 0 { inst_set_md(nb, md_kind_id("prof"), prof); }
+    inst_insert_before(nb, hbr);
+    let odl = inst_get_md(hbr, 0);
+    if odl >= 0 && inst_get_md(nb, 0) < 0 { inst_set_md(nb, 0, odl); }
+    sr_erase(hbr);
+    dt_invalidate(fv, DT_DOM);
+    dt_invalidate(fv, DT_POST);
+    return head, tail, thenb, elseb;
+}
+
+// rewriteMemOpOfSelect(SI, I, Spec, DTU)
+fn rewrite_mem_op_of_select(si: i32, i: i32, spec: i32) {
+    let prof = inst_get_md(si, md_kind_id("prof"));
+    var head: i32 = -1;
+    var tail: i32 = -1;
+    if spec <= 0 {
+        let h, t, a, b = sr_split_if_then_else(op(si, 0), i, true, true, prof);
+        head = h; tail = t;
+    } else {
+        let h, t, a, b = sr_split_if_then_else(op(si, 0), i, true, false, prof);
+        head = h; tail = t;
+        if (spec & 1) != 0 {
+            // CondBrInst::swapSuccessors (with !prof swapped)
+            let hb = block_terminator(head);
+            let pk = md_kind_id("prof");
+            let pm = inst_get_md(hb, pk);
+            if pm >= 0 {
+                // swapProfMetadata: the two branch weights trade places
+                let n = mds[pm].nops as i64;
+                let o0 = md_op(pm, 0);
+                if n >= 3 && o0 >= 0 && mds[o0].kind == MK_STRING && sbytes(mds[o0].extra) == "branch_weights" {
+                    var ops: i32[>..<] = [];
+                    for j in n - 2 { ops.push(md_op(pm, j)); }
+                    ops.push(md_op(pm, n - 1));
+                    ops.push(md_op(pm, n - 2));
+                    inst_set_md(hb, pk, md_get(MK_TUPLE, -1, ops, false));
+                }
+            }
+            let s0 = op(hb, 1);
+            let s1 = op(hb, 2);
+            set_op(hb, 1, s1);
+            set_op(hb, 2, s0);
+        }
+    }
+    let hbi = block_terminator(head);
+    var nm: u8[>..] = [];
+    nm.append(val_name(head)); nm.append(".cont");
+    set_name(tail, nm);
+    let is_load = iop(i) == OP_LOAD;
+    var pn: i32 = -1;
+    if is_load {
+        pn = new_inst(OP_PHI, vals[i].ty, 2);
+        vals[pn].nops = 0;
+        inst_insert_before(pn, i);
+    }
+    for k in term_nsucc(hbi) {
+        let succ = term_succ(hbi, k);
+        let is_then = succ == term_succ(hbi, 0);
+        let idx: i64 = if is_then { 0 } else { 1 };
+        let nmb = if succ == tail { head } else { succ };
+        let c = sr_clone_ldst(i);
+        if nmb != head {
+            nm.clear(); nm.append(val_name(head)); nm.append(if is_then { ".then" } else { ".else" });
+            set_name(nmb, nm);
+        } else {
+            sr_drop_ub_md(c);
+        }
+        m2r_insert_before_adopting(c, block_terminator(nmb));
+        let ptr = op(si, 1 + idx);
+        set_op(c, if is_load { 0 } else { 1 }, ptr);
+        if is_load {
+            nm.clear(); nm.append(val_name(i)); nm.append(if is_then { ".then" } else { ".else" }); nm.append(".val");
+            set_name(c, nm);
+            phi_add_incoming(pn, c, nmb);
+        }
+    }
+    if is_load {
+        // PN->takeName(&I)
+        var n2: u8[>..] = [];
+        n2.append(val_name(i));
+        set_name(i, "");
+        if n2.len > 0 { set_name(pn, n2); }
+        sr_rauw(i, pn);
+    }
 }
