@@ -3933,6 +3933,7 @@ tests/imported/llvm/Transforms/InstCombine/and-xor-merge.ll::opt
 tests/imported/llvm/Transforms/InstCombine/and-xor-merge.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/and-xor-or.ll::opt
 tests/imported/llvm/Transforms/InstCombine/and-xor-or.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/and.ll::opt
 tests/imported/llvm/Transforms/InstCombine/and.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/and2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/and2.ll::roundtrip
@@ -4315,6 +4316,7 @@ tests/imported/llvm/Transforms/InstCombine/fcmp-denormals-are-zero.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-fadd-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fcmp-fadd-select.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-range-check-idiom.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fcmp-select-sign.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fcmp-select-sign.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fcmp-select.ll::roundtrip

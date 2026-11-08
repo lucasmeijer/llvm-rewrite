@@ -283,16 +283,17 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   fixpoint verification), the shared binop folds, InstCombineAddSub.cpp (incl. FAddCombine and the FP visitors),
   InstCombineNegator.cpp, InstCombineMulDivRem.cpp (int and FP), the integer half of
   InstCombineSimplifyDemanded.cpp, `convertOrOfShiftsToFunnelShift`, `mergeStoreIntoSuccessor`.
-- **Bitwise (L1.instcombine.bitwise 40/86 ::opt, arith 68/115)**: InstCombineAndOrXor.cpp (ic_andorxor.jai) and
+- **Bitwise (L1.instcombine.bitwise 53/86 ::opt, arith 78/115)**: InstCombineAndOrXor.cpp (ic_andorxor.jai) and
   InstCombineShifts.cpp (ic_shifts.jai) are ported completely, in LLVM's order, plus the Local.cpp
   recognizeBSwapOrBitReverseIdiom/collectBitParts that visitOr needs. A function-by-function comparison of every
   InstCombine test (only functions using int binops/icmp) and a random differential fuzzer (~40k straight-line
   functions over and/or/xor/shifts/add/sub/icmp, scalar and `<2 x i8>` with poison lanes) show no difference left
-  that comes from these files: the remaining bitwise failures need the select visitor (`*_logical` tests,
-  select-of-constants canonicalization, `select C, false, true` -> not), the call visitor (fshl/fshr amount
-  folding, `range` on ctpop, umin/umax), visitTrunc (`trunc (lshr X, C) to i1` -> bit test) and the vector ops.
-  Temporary copies of foldAndOrOfSelectUsingImpliedCond/simplifyNestedSelectsUsingImpliedCond sit at the end of
-  ic_andorxor.jai until ic_select.jai lands. Fail loudly: getInsertionPointAfterDef of invoke/callbr (freelyInvert),
+  that comes from these files. The remaining bitwise failures need the cast visitors (`zext (trunc X)` -> `and`,
+  `trunc (lshr X, C) to i1` -> bit test, canEvaluateTruncated), the call visitor (fshl/fshr amount folding,
+  `range` on ctpop/cttz, umin/umax, is.fpclass -> fcmp), vector ops (shufflevector/extractelement/bitcast) and
+  foldVectorBinop's unshuffleConstant. The fuzzer is a 60-line throwaway (random chains of binops on 3 args,
+  `llvm-extract`-free: compare canonicalized outputs per function); rebuild it when touching these files.
+  Fail loudly: getInsertionPointAfterDef of invoke/callbr (freelyInvert),
   replaceUsesWithIf with a constant user.
 - **Partial visitors** (ic_misc.jai: their comments say where they stop): casts (commonCastTransforms; zext/sext/trunc/[su]itofp flag folds), call (InstSimplify +
   nounwind inference), phi, gep, load, freeze, extractvalue, vector ops (InstSimplify only), terminators (ret,

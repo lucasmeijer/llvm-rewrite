@@ -263,6 +263,15 @@ and_ir_flags :: (dst: Value_Id, src: Value_Id) {
     if is_possibly_exact_op(src) && is_possibly_exact_op(dst) && (sf & F_EXACT) == 0 d.flags &= ~cast(u32) F_EXACT;
     if opr_code(src) == .OR && d.op == .OR && (sf & F_EXACT) == 0 d.flags &= ~cast(u32) F_EXACT;
     if is_fp_math_op_value(src) && is_fp_math_op_value(dst) set_fmf(dst, get_fmf(dst) & ((sf >> FMF_SHIFT) & FMF_ALL));
+    // TruncInst nuw/nsw, PossiblyNonNegInst (zext, uitofp) nneg, ICmpInst samesign
+    so := ifx is_inst(src) then inst_op(src) else Opcode.NONE_OP;
+    if so == .TRUNC && d.op == .TRUNC {
+        if (sf & F_NSW) == 0 d.flags &= ~cast(u32) F_NSW;
+        if (sf & F_NUW) == 0 d.flags &= ~cast(u32) F_NUW;
+    }
+    if (so == .ZEXT || so == .UITOFP) && (d.op == .ZEXT || d.op == .UITOFP) && (sf & F_EXACT) == 0 d.flags &= ~cast(u32) F_EXACT;
+    if so == .ICMP && d.op == .ICMP && (sf & F_EXACT) == 0 d.flags &= ~cast(u32) F_EXACT;
+    if so == .GEP && d.op == .GEP fatal("instcombine: andIRFlags of GEPs is not supported yet");
 }
 
 // Instruction::isIdenticalTo (same opcode, type, operands and "special state")
