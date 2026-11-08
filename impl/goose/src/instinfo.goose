@@ -8,48 +8,9 @@ import irutil;
 import calls;
 import gen_attrs;
 import gen_iids;
+import intrinsics;
 
-// ---------------------------------------------------------------------------------------------
-// Intrinsic ids (Function::getIntrinsicID). Cached per global record.
-
-var iid_cache: i32[>..];      // glob index -> id + 1 (0 = not computed yet)
-
-// Intrinsic::lookupIntrinsicID: the longest name in the table that is the whole name or a prefix of it
-// ending at a '.', accepted only if exact or the intrinsic is overloaded.
-fn intrinsic_lookup(name: const u8[:]) -> i32 {
-    if !starts_with(name, "llvm.") { return 0; }
-    var end = name.len;
-    loop {
-        let cand = name[..end];
-        var lo: i64 = 1;
-        var hi: i64 = INTRINSIC_NAMES.len - 1;
-        while lo <= hi {
-            let mid = (lo + hi) / 2;
-            let c = bytes_cmp(INTRINSIC_NAMES[mid], cand);
-            if c == 0 {
-                if end == name.len || INTRINSIC_OVERLOADED[mid] { return mid as i32; }
-                return 0;
-            }
-            if c < 0 { lo = mid + 1; } else { hi = mid - 1; }
-        }
-        // strip the last component
-        var k = end - 1;
-        while k > 5 && name[k] != '.' { k--; }
-        if k <= 5 { return 0; }
-        end = k;
-    }
-}
-
-fn fn_iid(fv: i32) -> i32 {
-    let g = glob_of(fv) as i64;
-    while iid_cache.len <= g { iid_cache.push(0); }
-    let c = iid_cache[g];
-    if c > 0 { return c - 1; }
-    var id: i32 = 0;
-    if globs[g].intrinsic != 0 && vals[fv].name >= 0 { id = intrinsic_lookup(sbytes(vals[fv].name)); }
-    iid_cache[g] = id + 1;
-    return id;
-}
+// Intrinsic ids: func_iid (intrinsics.goose, LLVM numbering) and the IID_* constants (gen_iids.goose).
 
 // CallBase::getCalledFunction: the callee if it is a Function of the call's function type.
 fn called_function(iv: i32) -> i32 {
@@ -63,7 +24,7 @@ fn called_function(iv: i32) -> i32 {
 fn call_iid(iv: i32) -> i32 {
     if !is_callbase(iv) { return 0; }
     let c = cb_callee(iv);
-    if c >= 0 && vals[c].kind == VK_FUNC { return fn_iid(c); }
+    if c >= 0 && vals[c].kind == VK_FUNC { return func_iid(c) as i32; }
     return 0;
 }
 fn inst_iid(iv: i32) -> i32 { if is_inst(iv) && iop(iv) == OP_CALL { call_iid(iv) } else { 0 } }

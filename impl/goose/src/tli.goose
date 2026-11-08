@@ -20,14 +20,16 @@ var tli_avail: bool[>..];
 var tli_avail_triple: i32 = -2;
 var tli_cur_fn: i32 = -1;        // the function the current pass runs on (TargetLibraryAnalysis(F))
 
-fn tli_unavail(names: const u8[:][]) {
-    for nm in names {
-        let lf = tli_lookup_name(nm);
-        if lf < 0 { fatal(str("internal: unknown libfunc ", nm)); }
-        tli_avail[lf] = false;
-    }
+fn tli_def(name: const u8[:]) -> i64 {
+    for d, i in TLI_DEFS { if d == name { return i; } }
+    fatal(str("internal: unknown LibFunc ", name));
+    return -1;
 }
+// TLI.setUnavailable(LibFunc_<def>) for each def name
+fn tli_unavail(names: const u8[:][:]) { for nm in names { tli_avail[tli_def(nm)] = false; } }
+fn tli_avail_set(names: const u8[:][:]) { for nm in names { tli_avail[tli_def(nm)] = true; } }
 
+// initializeLibCalls, for the triples we support (no Darwin/Windows/FreeBSD/AIX/PS/GPU targets).
 fn tli_init(m: i32) {
     let tt = modules[m].triple;
     if tli_avail_triple == tt && tli_avail.len == LF_COUNT { return; }
@@ -39,7 +41,8 @@ fn tli_init(m: i32) {
     if find(t, "darwin") >= 0 || find(t, "macos") >= 0 || find(t, "ios") >= 0 || find(t, "windows") >= 0 ||
        find(t, "freebsd") >= 0 || find(t, "aix") >= 0 || find(t, "nvptx") >= 0 || find(t, "amdgcn") >= 0 ||
        find(t, "ps4") >= 0 || find(t, "ps5") >= 0 || find(t, "solaris") >= 0 || find(t, "dxil") >= 0 ||
-       find(t, "emscripten") >= 0 || find(t, "mingw") >= 0 || find(t, "cygwin") >= 0 {
+       find(t, "emscripten") >= 0 || find(t, "mingw") >= 0 || find(t, "cygwin") >= 0 || find(t, "watchos") >= 0 ||
+       find(t, "android") >= 0 || find(t, "xcore") >= 0 {
         fatal(str("TargetLibraryInfo: triple '", t, "' is not supported yet (only Linux and generic triples)"));
     }
     tli_avail.clear();
@@ -47,37 +50,39 @@ fn tli_init(m: i32) {
     tli_unavail(["getc_unlocked", "getchar_unlocked", "putc_unlocked", "putchar_unlocked", "fputc_unlocked",
         "fgetc_unlocked", "fread_unlocked", "fwrite_unlocked", "fputs_unlocked", "fgets_unlocked"]);
     tli_unavail(["memset_pattern4", "memset_pattern8", "memset_pattern16"]);
-    tli_unavail(["sinpi", "sinpif", "cospi", "cospif", "__sincospi_stret", "__sincospif_stret"]);
+    tli_unavail(["sinpi", "sinpif", "cospi", "cospif", "sincospi_stret", "sincospif_stret"]);
     if !(is_linux && (is_gnu || is_musl)) { tli_unavail(["bcmp"]); }
-    tli_unavail(["iprintf", "siprintf", "fiprintf", "__small_printf", "__small_sprintf", "__small_fprintf"]);
-    tli_unavail(["??2@YAPAXI@Z", "??2@YAPAXIABUnothrow_t@std@@@Z", "??2@YAPEAX_K@Z", "??2@YAPEAX_KAEBUnothrow_t@std@@@Z",
-        "??3@YAXPAX@Z", "??3@YAXPAXABUnothrow_t@std@@@Z", "??3@YAXPAXI@Z", "??3@YAXPEAX@Z",
-        "??3@YAXPEAXAEBUnothrow_t@std@@@Z", "??3@YAXPEAX_K@Z", "??_U@YAPAXI@Z", "??_U@YAPAXIABUnothrow_t@std@@@Z",
-        "??_U@YAPEAX_K@Z", "??_U@YAPEAX_KAEBUnothrow_t@std@@@Z", "??_V@YAXPAX@Z", "??_V@YAXPAXABUnothrow_t@std@@@Z",
-        "??_V@YAXPAXI@Z", "??_V@YAXPEAX@Z", "??_V@YAXPEAXAEBUnothrow_t@std@@@Z", "??_V@YAXPEAX_K@Z"]);
+    tli_unavail(["iprintf", "siprintf", "fiprintf", "small_printf", "small_sprintf", "small_fprintf"]);
+    tli_unavail(["msvc_new_int", "msvc_new_int_nothrow", "msvc_new_longlong", "msvc_new_longlong_nothrow",
+        "msvc_delete_ptr32", "msvc_delete_ptr32_nothrow", "msvc_delete_ptr32_int", "msvc_delete_ptr64",
+        "msvc_delete_ptr64_nothrow", "msvc_delete_ptr64_longlong", "msvc_new_array_int",
+        "msvc_new_array_int_nothrow", "msvc_new_array_longlong", "msvc_new_array_longlong_nothrow",
+        "msvc_delete_array_ptr32", "msvc_delete_array_ptr32_nothrow", "msvc_delete_array_ptr32_int",
+        "msvc_delete_array_ptr64", "msvc_delete_array_ptr64_nothrow", "msvc_delete_array_ptr64_longlong"]);
     tli_unavail(["exp10", "exp10f", "exp10l"]);
-    if !is_linux { tli_unavail(["ffsl", "ffsll"]); }
+    if !is_linux { tli_unavail(["ffsl"]); tli_unavail(["ffsll"]); }
     tli_unavail(["fls", "flsl", "flsll"]);
-    if !(is_linux && is_gnu) {
-        tli_unavail(["__strdup", "__strtok_r", "__isoc99_scanf", "__isoc99_sscanf", "_IO_getc", "_IO_putc"]);
+    if !is_linux || !is_gnu {
+        tli_unavail(["dunder_strdup", "dunder_strtok_r", "dunder_isoc99_scanf", "dunder_isoc99_sscanf",
+            "under_IO_getc", "under_IO_putc"]);
         if !is_musl { tli_unavail(["memalign"]); }
         tli_unavail(["fopen64", "fseeko64", "fstat64", "fstatvfs64", "ftello64", "lstat64", "open64", "stat64",
             "statvfs64", "tmpfile64"]);
-        tli_unavail(["__acos_finite", "__acosf_finite", "__acosl_finite", "__acosh_finite", "__acoshf_finite",
-            "__acoshl_finite", "__asin_finite", "__asinf_finite", "__asinl_finite", "__atan2_finite",
-            "__atan2f_finite", "__atan2l_finite", "__atanh_finite", "__atanhf_finite", "__atanhl_finite",
-            "__cosh_finite", "__coshf_finite", "__coshl_finite", "__exp10_finite", "__exp10f_finite",
-            "__exp10l_finite", "__exp2_finite", "__exp2f_finite", "__exp2l_finite", "__exp_finite",
-            "__expf_finite", "__expl_finite", "__log10_finite", "__log10f_finite", "__log10l_finite",
-            "__log2_finite", "__log2f_finite", "__log2l_finite", "__log_finite", "__logf_finite",
-            "__logl_finite", "__pow_finite", "__powf_finite", "__powl_finite", "__sinh_finite",
-            "__sinhf_finite", "__sinhl_finite", "__sqrt_finite", "__sqrtf_finite", "__sqrtl_finite"]);
-    } else {
-        let ok: const u8[:][] = ["getc_unlocked", "getchar_unlocked", "putc_unlocked", "putchar_unlocked",
-            "fputc_unlocked", "fgetc_unlocked", "fread_unlocked", "fwrite_unlocked", "fputs_unlocked", "fgets_unlocked"];
-        for nm in ok { tli_avail[tli_lookup_name(nm)] = true; }
+        tli_unavail(["acos_finite", "acosf_finite", "acosl_finite", "acosh_finite", "acoshf_finite",
+            "acoshl_finite", "asin_finite", "asinf_finite", "asinl_finite", "atan2_finite", "atan2f_finite",
+            "atan2l_finite", "atanh_finite", "atanhf_finite", "atanhl_finite", "cosh_finite", "coshf_finite",
+            "coshl_finite", "exp10_finite", "exp10f_finite", "exp10l_finite", "exp2_finite", "exp2f_finite",
+            "exp2l_finite", "exp_finite", "expf_finite", "expl_finite", "log10_finite", "log10f_finite",
+            "log10l_finite", "log2_finite", "log2f_finite", "log2l_finite", "log_finite", "logf_finite",
+            "logl_finite", "pow_finite", "powf_finite", "powl_finite", "sinh_finite", "sinhf_finite",
+            "sinhl_finite", "sqrt_finite", "sqrtf_finite", "sqrtl_finite"]);
     }
-    tli_unavail(["__nvvm_reflect", "vec_calloc", "vec_malloc", "vec_realloc", "vec_free"]);
+    if is_linux && is_gnu {
+        tli_avail_set(["getc_unlocked", "getchar_unlocked", "putc_unlocked", "putchar_unlocked", "fputc_unlocked",
+            "fgetc_unlocked", "fread_unlocked", "fwrite_unlocked", "fputs_unlocked", "fgets_unlocked"]);
+    }
+    tli_unavail(["nvvm_reflect"]);
+    tli_unavail(["vec_calloc", "vec_malloc", "vec_realloc", "vec_free"]);
 }
 
 // getLibFunc(StringRef): exact name lookup (binary search over the sorted table).

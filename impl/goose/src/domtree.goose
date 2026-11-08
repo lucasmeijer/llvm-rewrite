@@ -23,25 +23,24 @@ var dt_heads: DTHead[>..];
 var dt_roots_pool: i32[>..];
 var dt_next_epoch: i32 = 1;
 
-fn dt_head_idx(fv: i32, t: i64) -> i64 {
-    let k = (glob_of(fv) as i64) * 2 + t;
-    while dt_heads.len <= k { dt_heads.push(DTHead { epoch: 0, valid: false, root: -1, vfirst: -1, vlast: -1, roots_at: 0, nroots: 0 }); }
-    return k;
-}
-fn dt_node_idx(bv: i32, t: i64) -> i64 {
-    let k = (block_of(bv) as i64) * 2 + t;
-    while dt_nodes.len <= k { dt_nodes.push(DTNode { epoch: 0, idom: -1, first: -1, last: -1, next: -1, prev: -1, level: 0 }); }
-    return k;
+// Index computations never grow the tables (Goose evaluates `a[f()]`'s bounds before f runs); dt_grow does.
+fn dt_head_idx(fv: i32, t: i64) -> i64 { (glob_of(fv) as i64) * 2 + t }
+fn dt_node_idx(bv: i32, t: i64) -> i64 { (block_of(bv) as i64) * 2 + t }
+fn dt_grow() {
+    while dt_heads.len < globs.len * 2 { dt_heads.push(DTHead { epoch: 0, valid: false, root: -1, vfirst: -1, vlast: -1, roots_at: 0, nroots: 0 }); }
+    while dt_nodes.len < blocks.len * 2 { dt_nodes.push(DTNode { epoch: 0, idom: -1, first: -1, last: -1, next: -1, prev: -1, level: 0 }); }
 }
 
-fn dt_valid(fv: i32, t: i64) -> bool { dt_heads[dt_head_idx(fv, t)].valid }
-fn dt_invalidate(fv: i32, t: i64) { dt_heads[dt_head_idx(fv, t)].valid = false; }
+fn dt_valid(fv: i32, t: i64) -> bool { let k = dt_head_idx(fv, t); return k < dt_heads.len && dt_heads[k].valid; }
+fn dt_invalidate(fv: i32, t: i64) { let k = dt_head_idx(fv, t); if k < dt_heads.len { dt_heads[k].valid = false; } }
 
 // Is bv in the tree (reachable, for dominators)? DT.getNode(BB) != nullptr.
 fn dt_has_node(t: i64, bv: i32) -> bool {
     let f = block_func(bv);
-    let e = dt_heads[dt_head_idx(f, t)].epoch;
-    return dt_nodes[dt_node_idx(bv, t)].epoch == e;
+    let hk = dt_head_idx(f, t);
+    let e = dt_heads[hk].epoch;
+    let nk = dt_node_idx(bv, t);
+    return nk < dt_nodes.len && dt_nodes[nk].epoch == e;
 }
 // Immediate dominator: a block, DT_VROOT (post-dominator virtual root) or -1 (root / not in tree).
 fn dt_idom(t: i64, bv: i32) -> i32 { if dt_has_node(t, bv) { dt_nodes[dt_node_idx(bv, t)].idom } else { -1 } }
@@ -91,6 +90,7 @@ fn dt_each_preorder<F>(fv: i32, t: i64) {
 var dt_bnum: i32[>..];      // block index -> local number in the function being computed
 
 fn dt_compute(fv: i32, t: i64) {
+    dt_grow();
     let post = t == DT_POST;
     // Number the blocks (BasicBlock::getNumber) and build the CFG in local numbers + 1 (0 = virtual root).
     var blk: i32[>..<] = [];

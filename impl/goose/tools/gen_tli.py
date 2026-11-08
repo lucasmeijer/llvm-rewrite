@@ -29,6 +29,7 @@ for i, (d, s, sig) in enumerate(defs):
     out.append(f"let LF_{d} = {i};")
 out.append(f"let LF_COUNT = {len(defs)};")
 out.append("let TLI_NAMES: const u8[:][] = [" + ", ".join('"' + s.replace("\\", "\\\\") + '"' for _, s, _ in defs) + "];")
+out.append("let TLI_DEFS: const u8[:][] = [" + ", ".join(f'"{d}"' for d, _, _ in defs) + "];")
 out.append("let TLI_SIGS: const u8[:][] = [" + ", ".join(f'"{sig}"' for _, _, sig in defs) + "];")
 order = sorted(range(len(defs)), key=lambda i: defs[i][1].encode())
 out.append("let TLI_SORTED: i32[] = [" + ", ".join(str(i) for i in order) + "];")

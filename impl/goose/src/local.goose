@@ -9,6 +9,7 @@ import instinfo;
 import tli;
 import gen_attrs;
 import gen_iids;
+import intrinsics;
 
 // MemoryBuiltins.cpp getCalledFunction: not for intrinsics, not for nobuiltin calls.
 fn mb_called_function(iv: i32) -> i32 {
@@ -153,7 +154,7 @@ fn gep_all_zero(v: i32) -> bool {
 // ConstrainedFPIntrinsic
 fn is_constrained_fp_iid(id: i32) -> bool {
     if id == 0 { return false; }
-    return starts_with(INTRINSIC_NAMES[id], "llvm.experimental.constrained.");
+    return starts_with(intr_name(id as i64), "llvm.experimental.constrained.");
 }
 // fp::ExceptionBehavior from the trailing metadata string: 0 ignore, 1 maytrap, 2 strict (default strict).
 fn constrained_exception_behavior(iv: i32) -> i64 {
