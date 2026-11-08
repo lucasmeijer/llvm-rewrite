@@ -792,6 +792,7 @@ fn ic_lrt_set(fv: i32, b: bool) {
 fn ic_lrt_invalidate(fv: i32) { ic_lrt_set(fv, false); }
 
 fn instcombine_run(fv: i32, verify_fixpoint: bool, max_iter: i64) -> u32 {
+    if dl_allones_null { ic_not_ported("constant folding with an all-ones null pointer (DataLayout 'po' spec)"); }
     if ic_lrt_get(fv) && !flag_bool("disable-last-run-tracking", false) { return PA_ALL; }
     tli_cur_fn = fv;
     local_have_tli = true;

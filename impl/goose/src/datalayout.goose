@@ -34,7 +34,9 @@ fn dl_set_spec(xs: PrimSpec[>..<]&, bits: i64, abi: i64, pref: i64) {
     }
 }
 
+var dl_allones_null: bool = false;   // some address space has an all-ones null pointer ('po' spec)
 fn dl_reset() {
+    dl_allones_null = false;
     dl_cache_clear();
     dl_ints.clear();
     dl_floats.clear();
@@ -91,9 +93,14 @@ fn dl_parse(s: const u8[:]) {
         var pu = false;
         var pe = false;
         var pbuf: u8[..256] = [];
-        if part0[0] == 'p' && part0.len > 1 && (part0[1] == 'u' || part0[1] == 'e') {
+        if part0[0] == 'p' && part0.len > 1 && (part0[1] == 'u' || part0[1] == 'e' || part0[1] == 'o' || part0[1] == 'z') {
             var j: i64 = 1;
-            while j < part0.len && (part0[j] == 'u' || part0[j] == 'e') { if part0[j] == 'u' { pu = true; } else { pe = true; } j++; }
+            while j < part0.len && (part0[j] == 'u' || part0[j] == 'e' || part0[j] == 'o' || part0[j] == 'z') {
+                if part0[j] == 'u' { pu = true; } else if part0[j] == 'e' { pe = true; }
+                // 'o': the null pointer of this address space is all-ones; constant folding assumes zero
+                else if part0[j] == 'o' { dl_allones_null = true; }
+                j++;
+            }
             pbuf.push('p');
             for k in j..part0.len { if pbuf.len < 256 { pbuf.push(part0[k]); } }
         } else {

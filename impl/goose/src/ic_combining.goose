@@ -157,7 +157,7 @@ fn unshuffle_constant(mask: const i32[:], c: i32, ncty: i32) -> i32 {
     if ty_kind(ncty) == TK_SVEC {
         let sp = splat_value(c, false);
         if sp < 0 { return -1; }
-        return c_splat(ncty, sp);
+        return c_splat(ty_vector(vals[sp].ty, ty_count(ncty), true), sp);
     }
     let ct = vals[c].ty;
     if ty_count(ncty) > ty_count(ct) { return -1; }
@@ -176,7 +176,7 @@ fn unshuffle_constant(mask: const i32[:], c: i32, ncty: i32) -> i32 {
             nv[me] = ce;
         }
     }
-    return c_aggregate(ncty, nv);
+    return c_aggregate(ty_vector(ty_scalar(ct), nn, false), nv);
 }
 
 // constantFoldBinOpWithSplat(Opcode, Vector, Splat, SplatLHS, DL)

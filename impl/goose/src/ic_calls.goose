@@ -1030,15 +1030,20 @@ fn fold_minimum_over_tz_lz_count(i0: i32, i1: i32, id: i64) -> i32 {
 }
 // m_CheckedInt(pred) with pred = C.ult(bw): ConstantInt, or a fixed vector constant whose elements all are
 fn icx_checked_int_ult(v: i32, bw: i64) -> bool {
-    if vals[v].kind == VK_CINT { return ap_ult_u64(ci_ap(v), bw as u64); }
-    if !is_constant(v) || ty_kind(vals[v].ty) != TK_FVEC { return false; }
-    let s = splat_value(v, false);
+    if vals[v].kind == VK_CINT && !ty_is_vector(vals[v].ty) { return ap_ult_u64(ci_ap(v), bw as u64); }
+    if !is_constant(v) || !ty_is_vector(vals[v].ty) { return false; }
+    let s = splat_value(v, true);
     if s >= 0 { return vals[s].kind == VK_CINT && ap_ult_u64(ci_ap(s), bw as u64); }
+    if ty_kind(vals[v].ty) != TK_FVEC { return false; }
+    var any = false;
     for k in ty_count(vals[v].ty) {
         let e = c_aggregate_element(v, k);
-        if e < 0 || vals[e].kind != VK_CINT || !ap_ult_u64(ci_ap(e), bw as u64) { return false; }
+        if e < 0 { return false; }
+        if vals[e].kind == VK_POISON { continue; }
+        if vals[e].kind != VK_CINT || !ap_ult_u64(ci_ap(e), bw as u64) { return false; }
+        any = true;
     }
-    return true;
+    return any;
 }
 
 fn left_distributes_over_right_ii(lop: i64, nuw: bool, nsw: bool, rop: i32) -> bool {
@@ -1411,10 +1416,11 @@ fn visit_intrinsic_switch(ii: i32, iid: i32) -> i32 {
                 if x >= 0 { return icx_new_call_same(ii, [x, pw]); }
             }
         }
-        if vals[a0].kind == VK_CFP {
+        let base = icx_cfp_scalar(a0);
+        if base >= 0 {
             var e = cb_arg(ii, 1);
             let ty = vals[a0].ty;
-            if (icx_fmf(ii) & FMF_AFN) != 0 && fp_is_exactly(a0, 2.0) {
+            if (icx_fmf(ii) & FMF_AFN) != 0 && fp_is_exactly(base, 2.0) {
                 let one = c_fp_from_f64(ty, 1.0);
                 if ty_is_vector(ty) { e = icb_vector_splat(ty_with_elem(ty, vals[e].ty), e, ""); }
                 let ld = icx_ldexp(one, e, icx_fmf(ii), "");
@@ -1848,9 +1854,9 @@ fn visit_min_max(ii: i32, iid: i32) -> i32 {
             return ic_new_binop(OP_AND, mm, c_int_ap(rty, rhsc));
         }
     }
-    if is_known_negation(i0, i1, false, false) {
+    if is_known_negation(i0, i1, false, true) {
         if has_one_use(i0) && !has_one_use(i1) { let t = i0; i0 = i1; i1 = t; }
-        let imp = is_known_negation(i0, i1, true, false);
+        let imp = is_known_negation(i0, i1, true, true);
         var abs = icx_binary_intrinsic(IID_abs, i0, c_bool_ty(T_I1, imp), "");
         if iid == IID_smin || iid == IID_umax { abs = icb_neg(abs, "nabs", imp); }
         return ic_replace_inst_uses_with(ci, abs);
@@ -2150,8 +2156,8 @@ fn visit_matrix_multiply(ii: i32, iid: i32) -> i32 {
 }
 
 // simplifyFMulInst(Op0, Op1, FMF, SQ) / simplifyFMAFMul
-fn simplify_fmul_inst(a: i32, b: i32, fmf: u8, cx: i32) -> i32 { simplify_fmul(a, b, fmf, sq_at(cx), 3, 0, 0) }
-fn simplify_fma_fmul_inst(a: i32, b: i32, fmf: u8, cx: i32) -> i32 { simplify_fma_fmul(a, b, fmf, sq_at(cx), 3, 0, 0) }
+fn simplify_fmul_inst(a: i32, b: i32, fmf: u8, cx: i32) -> i32 { simplify_fmul(a, b, fmf, sq_at(cx), RECURSION_LIMIT, EB_IGNORE, RM_NEAREST) }
+fn simplify_fma_fmul_inst(a: i32, b: i32, fmf: u8, cx: i32) -> i32 { simplify_fma_fmul(a, b, fmf, sq_at(cx), RECURSION_LIMIT, EB_IGNORE, RM_NEAREST) }
 
 // case Intrinsic::fma (and the fmuladd fallthrough)
 fn visit_fma(ii: i32, iid: i32) -> i32 {
@@ -2843,8 +2849,8 @@ fn simplify_any_mem_transfer(mi: i32) -> i32 {
     let dest = cb_arg(mi, 0);
     let l = icb_aligned_load(it, src, csa as i64, "");
     icx_set_aa_md_for_access(l, mi, size);
-    let kpar = md_kind_id("mem.parallel_loop_access");
-    let kag = md_kind_id("access_group");
+    let kpar = md_kind_id("llvm.mem.parallel_loop_access");
+    let kag = md_kind_id("llvm.access.group");
     let lpm = inst_get_md(mi, kpar);
     if lpm >= 0 { inst_set_md(l, kpar, lpm); }
     let agm = inst_get_md(mi, kag);
@@ -3666,4 +3672,14 @@ fn lcs_optimize_call(ci: i32) -> i32 {
 fn icx_mod_set_dest(mi: i32) -> bool {
     ic_aa_ensure();
     return mr_is_mod(aa_mod_ref_mask_simple(ml_before_or_after(strip_ptr_casts(cb_arg(mi, 0))), false));
+}
+
+// dyn_cast<ConstantFP>(V): a scalar ConstantFP, or a vector ConstantFP splat (goose keeps those as data vectors,
+// c_is_vector_cfp); returns the scalar value or -1
+fn icx_cfp_scalar(v: i32) -> i32 {
+    if vals[v].kind == VK_CFP && !ty_is_vector(vals[v].ty) { return v; }
+    if !c_is_vector_cfp(v) { return -1; }
+    if vals[v].kind == VK_CFP { return c_fp(ty_scalar(vals[v].ty), cint_lo(v), cint_hi(v)); }
+    if vals[v].kind == VK_AGGZERO { return c_null(ty_scalar(vals[v].ty)); }
+    return op(v, 0);
 }
