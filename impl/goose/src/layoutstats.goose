@@ -30,6 +30,6 @@ fn layout_stats_print() {
     ls_line(out, "strs", strs.len, bytes_of(strs).len + bytes_of(chars).len);
     ls_line(out, "ints", ints.len, bytes_of(ints).len);
     ls_line(out, "vs/vm scratch", vs_stamp.len, bytes_of(vs_stamp).len + bytes_of(vm_stamp).len + bytes_of(vm_data).len);
-    ls_line(out, "sroa scratch", sr_stamp.len, bytes_of(sr_stamp).len + bytes_of(sr_data).len);
+    ls_line(out, "sroa scratch", sr_tab.len, bytes_of(sr_tab).len);
     write_stderr(out);
 }

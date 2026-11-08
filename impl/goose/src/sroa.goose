@@ -35,8 +35,14 @@ fn sr_not_ported(what: const u8[:]) { fatal(str("SROA: ", what, " is not ported 
 // Scratch sets and maps keyed by value or use ids (epoch-stamped, O(1) clear), private to SROA.
 
 let SR_NS = 20;
-var sr_stamp: i32[>..];
-var sr_data: i64[>..];
+// One open-addressing hash table for all 20 slots, keyed by (id, slot): memory proportional to what a pass
+// touches, not to the largest id (an id-indexed table with 20 slots was 240 bytes per value/use id: 120 MB
+// on SPASS). An entry is live while its stamp equals its slot's epoch; clearing a slot bumps the epoch and leaves
+// the stale entries in place, and they are dropped when the table is rebuilt. Nothing iterates the table.
+struct SrEnt { key: i64, stamp: i32, data: i64 }
+var sr_tab: SrEnt[>..<];
+var sr_used: i64 = 0;          // entries with a key (live or stale)
+var sr_shift: u64 = 64;
 var sr_epoch: i32[20] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
 let S_VUSES = 0;       // PtrUseVisitor VisitedUses (use ids)
 let S_VDEAD = 1;       // SliceBuilder VisitedDeadInsts
@@ -60,37 +66,71 @@ let S_REPL = 18;       // LoadAndStorePromoter ReplacedLoads
 let S_UBB = 19;        // LoadAndStorePromoter UsesByBlock (block -> count, -1 = processed)
 
 fn sr_clear(s: i64) { sr_epoch[s] += 1; }
-fn sr_has(s: i64, id: i32) -> bool {
-    let k = (id as i64) * SR_NS + s;
-    return k < sr_stamp.len && sr_stamp[k] == sr_epoch[s];
+fn sr_key(s: i64, id: i32) -> i64 { (id as i64) * 32 + s }
+// The table position of `key`, or of the empty entry where it would go (-1 if the table is empty).
+fn sr_find(key: i64) -> i64 {
+    if sr_tab.len == 0 { return -1; }
+    let mask = sr_tab.len - 1;
+    var j = (((key as u64) * 0x9E3779B97F4A7C15) >> sr_shift) as i64;
+    loop {
+        let k = sr_tab[j].key;
+        if k == key || k < 0 { return j; }
+        j = (j + 1) & mask;
+    }
 }
-fn sr_grow(id: i32) {
-    var n = sr_stamp.len / SR_NS;
-    if n < 1024 { n = 1024; }
-    while n <= id as i64 { n *= 2; }
-    while sr_stamp.len < n * SR_NS { sr_stamp.push(0); sr_data.push(0); }
+fn sr_live(j: i64, s: i64) -> bool { j >= 0 && sr_tab[j].key >= 0 && sr_tab[j].stamp == sr_epoch[s] }
+// Rebuilds the table without its stale entries, doubling it while more than a quarter would be live.
+fn sr_rehash() {
+    var old: SrEnt[>..<] = [];
+    var live: i64 = 0;
+    for e in sr_tab {
+        if e.key >= 0 && e.stamp == sr_epoch[e.key & 31] { old.push(e); live++; }
+    }
+    var n: i64 = if sr_tab.len == 0 { 1024 } else { sr_tab.len };
+    while live * 4 > n { n *= 2; }
+    var lg: u64 = 0;
+    while ((1 as i64) << lg) < n { lg++; }
+    sr_shift = 64 - lg;
+    sr_tab.clear();
+    sr_tab.resize(n, SrEnt { key: -1, stamp: 0, data: 0 });
+    sr_used = 0;
+    for e in old {
+        let j = sr_find(e.key);
+        sr_tab[j] = e;
+        sr_used++;
+    }
 }
+// The position of (s, id), inserting it (not yet live) if absent.
+fn sr_slot(s: i64, id: i32) -> i64 {
+    let key = sr_key(s, id);
+    var j = sr_find(key);
+    if j >= 0 && sr_tab[j].key == key { return j; }
+    if (sr_used + 1) * 2 > sr_tab.len { sr_rehash(); j = sr_find(key); }
+    sr_tab[j].key = key;
+    sr_tab[j].stamp = 0;
+    sr_used++;
+    return j;
+}
+fn sr_has(s: i64, id: i32) -> bool { sr_live(sr_find(sr_key(s, id)), s) }
 fn sr_add(s: i64, id: i32) -> bool {
-    let k = (id as i64) * SR_NS + s;
-    if k >= sr_stamp.len { sr_grow(id); }
-    if sr_stamp[k] == sr_epoch[s] { return false; }
-    sr_stamp[k] = sr_epoch[s];
+    let j = sr_slot(s, id);
+    if sr_tab[j].stamp == sr_epoch[s] { return false; }
+    sr_tab[j].stamp = sr_epoch[s];
     return true;
 }
 fn sr_del(s: i64, id: i32) {
-    let k = (id as i64) * SR_NS + s;
-    if k < sr_stamp.len && sr_stamp[k] == sr_epoch[s] { sr_stamp[k] = 0; }
+    let j = sr_find(sr_key(s, id));
+    if sr_live(j, s) { sr_tab[j].stamp = 0; }
 }
 fn sr_get(s: i64, id: i32, dflt: i64) -> i64 {
-    let k = (id as i64) * SR_NS + s;
-    if k < sr_stamp.len && sr_stamp[k] == sr_epoch[s] { return sr_data[k]; }
+    let j = sr_find(sr_key(s, id));
+    if sr_live(j, s) { return sr_tab[j].data; }
     return dflt;
 }
 fn sr_set(s: i64, id: i32, x: i64) {
-    let k = (id as i64) * SR_NS + s;
-    if k >= sr_stamp.len { sr_grow(id); }
-    sr_stamp[k] = sr_epoch[s];
-    sr_data[k] = x;
+    let j = sr_slot(s, id);
+    sr_tab[j].stamp = sr_epoch[s];
+    sr_tab[j].data = x;
 }
 
 // ---------------------------------------------------------------------------------------------
