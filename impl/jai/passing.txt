@@ -4265,6 +4265,7 @@ tests/imported/llvm/Transforms/InstCombine/builtin-object-size-custom-dl.ll::rou
 tests/imported/llvm/Transforms/InstCombine/builtin-object-size-offset.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/builtin-object-size-ptr.ll::opt
 tests/imported/llvm/Transforms/InstCombine/builtin-object-size-ptr.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/builtin-object-size-strdup-family.ll::opt
 tests/imported/llvm/Transforms/InstCombine/builtin-object-size-strdup-family.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/byval.ll::opt
 tests/imported/llvm/Transforms/InstCombine/byval.ll::roundtrip
@@ -4509,6 +4510,7 @@ tests/imported/llvm/Transforms/InstCombine/demorgan.ll::opt
 tests/imported/llvm/Transforms/InstCombine/demorgan.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/dependent-ivs.ll::opt
 tests/imported/llvm/Transforms/InstCombine/dependent-ivs.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/deref-alloc-fns.ll::opt
 tests/imported/llvm/Transforms/InstCombine/deref-alloc-fns.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/disable-builtin.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/disable-simplify-libcalls.ll::opt
@@ -5120,9 +5122,11 @@ tests/imported/llvm/Transforms/InstCombine/lshr-trunc-sext-to-ashr-sext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/lshr-trunc-sext-to-ashr-sext.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/lshr.ll::opt
 tests/imported/llvm/Transforms/InstCombine/lshr.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/malloc-free-addrspace.ll::opt
 tests/imported/llvm/Transforms/InstCombine/malloc-free-addrspace.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/malloc-free-mismatched.ll::opt
 tests/imported/llvm/Transforms/InstCombine/malloc-free-mismatched.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/malloc-free.ll::opt
 tests/imported/llvm/Transforms/InstCombine/malloc-free.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/masked-merge-add.ll::opt
 tests/imported/llvm/Transforms/InstCombine/masked-merge-add.ll::roundtrip
