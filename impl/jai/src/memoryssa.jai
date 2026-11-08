@@ -4,7 +4,7 @@
 // OptimizeUses (ensureOptimizedUses); the ClobberWalker with phi optimization and the CachingWalker / SkipSelfWalker
 // entry points; dominance between accesses; the print<memoryssa> and print<memoryssa-walker> annotated printers),
 // of the MemoryAccess / MemoryUseOrDef / MemoryDef / MemoryPhi classes and upward_defs_iterator / def_chain from
-// llvm/include/llvm/Analysis/MemorySSA.h, of llvm/lib/Analysis/PHITransAddr.cpp (translateValue), and of the parts
+// llvm/include/llvm/Analysis/MemorySSA.h (PHITransAddr is in phi_trans_addr.jai), and of the parts
 // of llvm/lib/IR/Value.cpp / User.cpp / Use.cpp that decide the order of MemoryAccess use lists (Use::set,
 // doRAUW, replaceUsesWithIf, growHungoffUses) and llvm/include/llvm/IR/ValueHandle.h (WeakVH, TrackingVH).
 //
@@ -802,115 +802,8 @@ mssa_def_clobbers_use_or_def :: (m: *Memory_SSA, q: *Aa_Query, md: s32, mu: s32)
     return mssa_clobbers_use(m, q, md, mu, mloc_or_call_of(m.acc[mu].inst));
 }
 
-// ---------------------------------------------------------------- PHITransAddr
+// ---------------------------------------------------------------- PHITransAddr: phi_trans_addr.jai
 
-Phi_Trans_Addr :: struct {
-    addr: Value_Id;
-    inputs: [..] Value_Id;   // InstInputs
-    dt: *Dom_Tree;
-}
-pta_add_as_input :: (t: *Phi_Trans_Addr, v: Value_Id) -> Value_Id {
-    if is_inst(v) array_add(*t.inputs, v);
-    return v;
-}
-pta_input_index :: (t: *Phi_Trans_Addr, v: Value_Id) -> s64 { for t.inputs if it == v return it_index; return -1; }
-pta_remove_inst_inputs :: (t: *Phi_Trans_Addr, v: Value_Id) {
-    if !is_inst(v) return;
-    k := pta_input_index(t, v);
-    if k >= 0 { array_ordered_remove_by_index(*t.inputs, k); return; }
-    n := nops(v);
-    if n > 0 for j: 0..n-1 { o := op(v, j); if is_inst(o) pta_remove_inst_inputs(t, o); }
-}
-can_phi_trans :: (i: Value_Id) -> bool {
-    o := inst_op(i);
-    if o == .PHI || o == .GEP || is_cast_op(o) return true;
-    return o == .ADD && is_scalar_const_int(op(i, 1));
-}
-// translateSubExpr (no select condition)
-pta_translate_sub_expr :: (t: *Phi_Trans_Addr, v: Value_Id, cur_bb: Value_Id, pred_bb: Value_Id) -> Value_Id {
-    if !is_inst(v) return v;
-    i := v;
-    k := pta_input_index(t, i);
-    if k >= 0 {
-        if inst_block(i) != cur_bb return i;
-        array_ordered_remove_by_index(*t.inputs, k);
-        if inst_op(i) == .PHI return pta_add_as_input(t, phi_incoming_value_for_block(i, pred_bb));
-        if !can_phi_trans(i) return NONE;
-        n := nops(i);
-        if n > 0 for j: 0..n-1 pta_add_as_input(t, op(i, j));
-    }
-    sq: Simplify_Query; sq.dt = t.dt; sq.ac = null;
-    o := inst_op(i);
-    if is_cast_op(o) {
-        phi_in := pta_translate_sub_expr(t, op(i, 0), cur_bb, pred_bb);
-        if phi_in == NONE return NONE;
-        if phi_in == op(i, 0) return i;
-        s := simplify_cast_inst(o, phi_in, vtype(i), sq);
-        if s != NONE { pta_remove_inst_inputs(t, phi_in); return pta_add_as_input(t, s); }
-        u := ir.v_first_use[phi_in];
-        while u != NONE {
-            usr := ir.u_user[u];
-            if is_inst(usr) && inst_op(usr) == o && vtype(usr) == vtype(i) && (!t.dt || dt_dominates(t.dt, inst_block(usr), pred_bb)) return usr;
-            u = ir.u_next[u];
-        }
-        return NONE;
-    }
-    if o == .GEP {
-        n := nops(i);
-        ops: [..] Value_Id; ops.allocator = temp;
-        any_changed := false;
-        for j: 0..n-1 {
-            x := pta_translate_sub_expr(t, op(i, j), cur_bb, pred_bb);
-            if x == NONE return NONE;
-            any_changed = any_changed || x != op(i, j);
-            array_add(*ops, x);
-        }
-        if !any_changed return i;
-        idxs: [] Value_Id; idxs.data = ops.data + 1; idxs.count = ops.count - 1;
-        s := simplify_gep_inst(inst(i).ty2, ops[0], idxs, inst(i).flags & (F_INBOUNDS | F_NUSW | F_GEP_NUW), sq);
-        if s != NONE { for ops pta_remove_inst_inputs(t, it); return pta_add_as_input(t, s); }
-        aphi := ops[0];
-        if is_constant_data(aphi) return NONE;
-        u := ir.v_first_use[aphi];
-        while u != NONE {
-            usr := ir.u_user[u];
-            if is_inst(usr) && inst_op(usr) == .GEP && vtype(usr) == vtype(i) && inst(usr).ty2 == inst(i).ty2 && nops(usr) == cast(u32) ops.count &&
-               inst_fn(usr) == block_fn(cur_bb) && (!t.dt || dt_dominates(t.dt, inst_block(usr), pred_bb)) {
-                same := true;
-                for ops if op(usr, cast(u32) it_index) != it { same = false; break; }
-                if same return usr;
-            }
-            u = ir.u_next[u];
-        }
-        return NONE;
-    }
-    if o == .ADD && is_scalar_const_int(op(i, 1)) {
-        rhs := op(i, 1);
-        is_nsw := (inst(i).flags & F_NSW) != 0;
-        is_nuw := (inst(i).flags & F_NUW) != 0;
-        lhs := pta_translate_sub_expr(t, op(i, 0), cur_bb, pred_bb);
-        if lhs == NONE return NONE;
-        if is_inst(lhs) && inst_op(lhs) == .ADD && is_scalar_const_int(op(lhs, 1)) {
-            bop := lhs;
-            lhs = op(bop, 0);
-            rhs = ce_add_const(rhs, op(bop, 1));
-            is_nsw = false; is_nuw = false;
-            if pta_input_index(t, bop) >= 0 { pta_remove_inst_inputs(t, bop); pta_add_as_input(t, lhs); }
-        }
-        s := simplify_add_inst(lhs, rhs, is_nsw, is_nuw, sq);
-        if s != NONE { pta_remove_inst_inputs(t, lhs); return pta_add_as_input(t, s); }
-        if lhs == op(i, 0) && rhs == op(i, 1) return i;
-        u := ir.v_first_use[lhs];
-        while u != NONE {
-            usr := ir.u_user[u];
-            if is_inst(usr) && inst_op(usr) == .ADD && op(usr, 0) == lhs && op(usr, 1) == rhs &&
-               inst_fn(usr) == block_fn(cur_bb) && (!t.dt || dt_dominates(t.dt, inst_block(usr), pred_bb)) return usr;
-            u = ir.u_next[u];
-        }
-        return NONE;
-    }
-    return NONE;
-}
 // ConstantExpr::getAdd of two ConstantInts (folds)
 ce_add_const :: (a: Value_Id, b: Value_Id) -> Value_Id {
     return const_int_ap(vtype(a), ap_add(const_ap(a), const_ap(b)));
@@ -922,16 +815,6 @@ is_constant_data :: (v: Value_Id) -> bool {
     return k == .C_INT || k == .C_FP || k == .C_NULL || k == .C_ZERO || k == .C_TOKEN_NONE || k == .C_UNDEF ||
            k == .C_POISON || k == .C_DATA || k == .C_TARGET_NONE;
 }
-// PHITransAddr(Addr).translateValue(CurBB, PredBB, DT, MustDominate)
-phi_translate_value :: (addr: Value_Id, cur_bb: Value_Id, pred_bb: Value_Id, dt: *Dom_Tree, must_dominate: bool) -> Value_Id {
-    t: Phi_Trans_Addr; t.addr = addr; t.dt = dt; t.inputs.allocator = temp;
-    pta_add_as_input(*t, addr);
-    if dt && dt_is_reachable_from_entry(dt, pred_bb) t.addr = pta_translate_sub_expr(*t, t.addr, cur_bb, pred_bb);
-    else t.addr = NONE;
-    if must_dominate && t.addr != NONE && is_inst(t.addr) && !dt_dominates(dt, inst_block(t.addr), pred_bb) t.addr = NONE;
-    return t.addr;
-}
-
 // ---------------------------------------------------------------- upward_defs
 
 Upward_Defs_Elem :: struct { ma: s32; loc: Mem_Loc; mbci: bool; }
