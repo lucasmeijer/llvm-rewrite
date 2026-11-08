@@ -2590,8 +2590,9 @@ can_losslessly_bitcast_to :: (a: Type_Id, b: Type_Id) -> bool {
     return false;
 }
 // CallBase::paramHasAttr-style dereferenceable bytes
+// CallBase::getParamDereferenceableBytes: the call site's attributes only
 call_param_dereferenceable_bytes :: (c: Value_Id, k: u32) -> u64 {
-    a := call_param_attr(c, k, .Dereferenceable);
+    a := attr_set_find(attr_list_param(inst(c).attrs, k), .Dereferenceable);
     if !a return 0;
     return a.ival;
 }

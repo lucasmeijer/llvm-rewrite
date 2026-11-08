@@ -75,7 +75,7 @@ neg_visit_impl :: (n: *Negator, v: Value_Id, is_nsw_in: bool, depth: u32) -> Val
             src := op(i, 0);
             sw := scalar_bits(src);
             okl, lx, la := pm_binop(src, .LSHR);
-            if n.is_truly_negation && okl && pm_specific_int(la, sw - 1) {
+            if n.is_truly_negation && okl && pm_specific_int(la, sw - 1, true) {
                 ashr := icb_ashr(lx, const_int_of(vtype(lx), sw - 1));
                 return icb_sext(ashr, vtype(i));
             }

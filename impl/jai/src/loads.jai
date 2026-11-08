@@ -331,8 +331,9 @@ get_available_load_store :: (i: Value_Id, ptr: Value_Id, access_ty: Type_Id, at_
         load_size := dl_type_size_bits(access_ty);
         lenv := const_ap(len);
         lhs := ap_mul(lenv, ap_from_u64(lenv.bits, 8));
-        rhs := ap_from_u64(lenv.bits, load_size + cast(u64)(load_off - store_off) * 8);
-        if ap_ult(lhs, rhs) return NONE;
+        // APInt::ult(uint64_t): the right side is not truncated to the length's width
+        rhs := load_size + cast(u64)(load_off - store_off) * 8;
+        if ap_active_bits(lhs) <= 64 && ap_zext_value(lhs) < rhs return NONE;
         vv := const_ap(val);
         splat: APInt;
         if load_size >= 8 splat = ap_get_splat(cast(u32) load_size, vv);
