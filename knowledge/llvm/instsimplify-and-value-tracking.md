@@ -77,7 +77,22 @@ Verified against LLVM 23.1.5 source and the imported InstSimplify tests.
 - **The oracle has no `HAS_LOGF128`**: `log`/`logl` on fp128 are never folded. Math libcalls are folded with the
   host libm (the oracle links the system libm.so.6), rejected on errno ERANGE/EDOM or any fenv exception but
   FE_INEXACT.
-- **`findScalarElement(V, unsigned)`** gets `getZExtValue()` truncated to 32 bits.
+- **`findScalarElement(V, unsigned)`** gets `getZExtValue()` truncated to 32 bits. Through an `add` it needs only
+  the *demanded element* of the constant operand to be null (`m_Add(m_Value(Val), m_Constant(C))`,
+  `C->getAggregateElement(EltNo)->isNullValue()`), so `extractelement (add (splat %x), <0, 1, 2, 3>), 0` is `%x`
+  (InstCombine/extractelement.ll); out-of-range elements are poison, not undef (VectorUtils.cpp:306).
+- **InstSimplify's cast-pair fold uses the DataLayout** (`isEliminableCastPair(..., &Q.DL)`, as does
+  ConstantFoldCastOperand): `inttoptr (ptrtoint P)` folds to P when the integer is at least pointer-sized
+  (case 7), `ptrtoint (inttoptr X)` to a trunc/zext/bitcast of X (case 11). ConstantFold.cpp (no DL) passes
+  nullptr and keeps them (InstCombine/IntPtrCast.ll, phi-int2ptr-fold.ll under instsimplify).
+- **InstSimplifyPass tests deadness without a TLI** (`isInstructionTriviallyDead(&I)`), so an unused
+  `call double @exp(double 100.0)` is kept; only RecursivelyDeleteTriviallyDeadInstructions (with TLI) erases
+  operands that become dead (EarlyCSE/math-1.ll under instsimplify). DCE and EarlyCSE pass the TLI.
+- **`isAssumeWithEmptyBundle`**: an `llvm.assume(i1 true)` whose bundles are all `"ignore"` is trivially dead
+  (Local.cpp:498, AssumeBundleQueries.cpp:113).
+- **`CallBase::paramHasNonNullAttr(ArgNo, AllowUndefOrPoison=false)`** also holds for `dereferenceable(N)` when null
+  is not defined (Instructions.cpp:442), so `call @f(ptr dereferenceable(1) %p)` makes a later `icmp eq %p, null`
+  false (CorrelatedValuePropagation/non-null.ll under instsimplify).
 
 ## Constant folding of FP calls (ConstantFolding.cpp)
 

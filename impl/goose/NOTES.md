@@ -26,6 +26,17 @@
   'add*' 'sub*' 'mul*' '*div*' '*rem*'`): icmp 34, and 16, select 12, or 8, xor 6, then insertelement, libcalls,
   min/max intrinsics, GEP, load, fdiv, other passes (cgscc/inline, debugify). With `-goose-ic-lenient` (unported
   visitors do nothing) 25 arith tests already match, so most remaining work is the other visitors, not arith.
+- L1.early-cse 93/96 (all 48 roundtrip, 45/48 opt). Left: `math-2.ll` (ConstantFolding of `remainder`),
+  `masked-intrinsics.ll` (ValueTracking demanded elements of a `<128 x i8>`), `reuse-preserved-memoryssa.ll`
+  (runs `gvn`). early-cse, early-cse<memssa> (both also with `--enable-knowledge-retention`), instsimplify and dce
+  give output identical to LLVM's on all 5007 `tests/imported/llvm/Transforms/*/*.ll` files that don't stop
+  loudly (~75 do), on every tests/e2e and tests/function O0/pipeline input after sroa, and on the four
+  tests/perf/compile programs. Speed (`perf`, scaling/straightline is the only `@perf` line): 0.5-0.65x LLVM's
+  time, k 1.04 (LLVM 1.15); by hand `sroa,early-cse<memssa>` on sqlite3/SPASS is 0.30/0.29 s vs LLVM's
+  0.38/0.49 s, and every tests/perf/scaling shape is 1-4.5x faster than LLVM. Found by the sweeps and fixed on
+  the way: InstSimplify silently differed (isEliminableCastPair needs the DataLayout; BinaryOp_match matches no
+  ConstantExprs; findScalarElement; m_FPOne; isAssumeWithEmptyBundle; InstSimplifyPass checks deadness without
+  TLI; the dereferenceable-argument case of isKnownNonNullFromDominatingCondition), and x86 cvt folding.
 - L1.sccp 331/340 (all 170 roundtrip, 161/170 opt). Left: 7 tests run other passes (simplifycfg ×2,
   loop-deletion, internalize, deadargelim, instcombine, debugify); `overdefined-ext.ll` passes its
   `-use-constant-int-for-fixed-length-splat=false` line but not the `=true` line (vector-typed ConstantInt
@@ -116,6 +127,11 @@
 | `src/capture.goose`, `src/aautil.goose` | CaptureTracking (3 trackers); private stamp sets (`ss_*`) and CFG reachability (`cfr_*`) |
 | `src/memoryssa.goose`, `src/phitrans.goose` | MemorySSA (build, walker, OptimizeUses, printers); PHITransAddr |
 | `src/aaeval.goose` | the aa-eval pass |
+| `src/mssaupdater.goose` | MemorySSAUpdater (removal: removeMemoryAccess, tryRemoveTrivialPhi) |
+| `src/earlycse.goose` | EarlyCSE (early-cse, early-cse<memssa>): scoped hash tables, combineMetadataForCSE, replaceDominatedUsesWith |
+| `src/instident.goose` | isIdenticalToWhenDefined, hasSameSpecialState, attribute intersection, andIRFlags |
+| `src/salvage.goose` | salvageDebugInfo and the DIExpression helpers it needs (foldConstantMath, appendOpsToArg, ...) |
+| `src/knowledge.goose` | salvageKnowledge (`--enable-knowledge-retention`, AssumeBundleBuilder) |
 | `tools/gb.sh` | `tools/gb.sh src/opt.goose bin/opt` builds with warnings hidden (Goose has no `-w`) |
 
 ## Goose traps (cost me time)
@@ -339,9 +355,9 @@
 - AA files keep private stamp sets (`aautil.goose` `SS_*`) so they never touch the pass scratch slots of
   irutil.goose; a pass may hold any VS_/VM_ slot across AA queries.
 - MemorySSA: one instance (`mssa_fn`); `mssa_get(fv)` builds; invalidated by `invalidate_function` unless the
-  pass preserves `A_MEMORYSSA`, `A_DOMTREE` and `A_AA`. A pass that keeps it must update it — there is no
-  MemorySSAUpdater yet (needed by LICM, MemCpyOpt, DSE, loop-mssa): port it next to memoryssa.goose, using the
-  use lists (`mssa_first_use`…) and the list helpers there. GVN needs MemoryDependenceAnalysis (not ported).
+  pass preserves `A_MEMORYSSA`, `A_DOMTREE` and `A_AA`. A pass that keeps it must update it through
+  mssaupdater.goose (DESIGN.md §8.6): only removal is ported (EarlyCSE); LICM, MemCpyOpt, DSE and loop-mssa need
+  the insertion/move parts, to be added there using the use lists (`mssa_first_use`…) and `msu_use_set`. GVN needs MemoryDependenceAnalysis (not ported).
 - Not ported (fail loudly or absent): separate_storage assumptions in BasicAA, APInt widths over 64 bits,
   `!callback` metadata in the CallGraph, MemorySSA's loop constructor and verifier, the
   `scev-aa`, `objc-arc-aa`. EarliestEscapeAnalysis and the CFG reachability with LoopInfo/CycleInfo are ported
@@ -397,3 +413,20 @@
   but it stops at the unported `xor` visitor). Known linear scans to revisit when it matters: removing an
   entry from the deferred worklist, DeadEdges, DomConditionCache dedupe per value, the cast TypeEvaluationHelper
   visited map, the Negator cache (all small in practice).
+
+## EarlyCSE (earlycse.goose, mssaupdater.goose, instident.goose, salvage.goose, knowledge.goose)
+
+- Design: DESIGN.md §13. Facts: knowledge/llvm/early-cse.md.
+- `-earlycse-debug-hash` is accepted and ignored: it only changes hashing under `#ifndef NDEBUG`, and the LLVM we
+  compare with is a release build. The tests that pass it check release behaviour.
+- `simplify_instruction` is called on every instruction (EarlyCSE does, InstSimplifyPass only on used ones), so
+  InstSimplify must not choke on stores, branches or void calls.
+- The sweep that found every silent mismatch here: run LLVM's and our opt with one pipeline on every
+  `tests/imported/llvm/Transforms/*/*.ll`, canonicalize both with llvm-as|llvm-dis, compare (16 parallel jobs,
+  ~20 s). `./harness/run sweep` now does this; run it after touching instsimplify, cfold or vt.
+- Not ported (fail loudly): combineMetadataForCSE for `!fpmath`/`!captures` that differ, DIAssignID, `!mmra`,
+  `!memprof`, `!callsite`, `!prof`, `!callee_type`; GEP offsets with index widths over 64 bits; dbg_assign address
+  salvaging. TTI.getTgtMemIntrinsic is false (x86 and the default target have no target memory intrinsics).
+- Trap: `msu_remove_memory_access` is recursive (through tryRemoveTrivialPhi), so its PhisToCheck set lives on the
+  global `msu_check` stack with a mark, not in a local growable array.
+

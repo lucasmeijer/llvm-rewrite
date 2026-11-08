@@ -224,7 +224,7 @@ LLVM container: `SmallVector` = `i32[>..<]` with `push`/`pop`; `SetVector` = arr
 
 ### 8.4 Scratch sets and maps (O(1) clear)
 `vs_clear/vs_add/vs_has/vs_del` (sets) and `vm_clear/vm_set/vm_get/vm_has` (maps to `i64`) over value ids (or use
-ids), 4 slots each, with an epoch stamp per entry so clearing is O(1). Owners: `VS_PASS0/VS_PASS1`,
+ids), 6 slots each, with an epoch stamp per entry so clearing is O(1). Owners: `VS_PASS0/VS_PASS1`,
 `VM_PASS0/VM_PASS1` belong to the running transform pass (ADCE: live set, dead-terminator set, block numbers);
 `VS_ANA0/VS_ANA1/VM_ANA0` belong to DemandedBits (Visited, DeadUses, AliveBits), which also borrows `VS_PASS1`
 for its worklist while it runs. A pass that calls an analysis must not hold data in the slots the analysis uses.
@@ -234,7 +234,10 @@ programUndefinedIfUndefOrPoison uses VS_ANA1. A pass with more state keeps its o
 20 slots keyed by value or use id). SCCP (sccp.goose) keeps one stamped record per value id (`ScRec`: lattice
 index, struct-lattice base, additional-users list, tracked return/global, bit flags for executable/visited/
 in-worklist/argument-tracked blocks and functions) and PredicateInfo (predinfo.goose) another (`PiRec`); its
-transform phase uses VS_PASS1 through `m2r_collect_records` (debug-record RAUW).
+transform phase uses VS_PASS1 through `m2r_collect_records` (debug-record RAUW). `m2r_collect_records(fv)` +
+VS_PASS1 is the general "values that debug records mention" set: InstSimplifyPass, DCE and EarlyCSE use it for
+RAUW (`m2r_dbg_rauw`), `salvage_debug_info` and `m2r_erase`; InstSimplifyPass keeps its ToSimplify/Next sets in
+VS_PASS2/VS_PASS3 for that reason.
 
 Block numbers (`BasicBlock::getNumber`) are tracked in ir.goose (`block_set_parent`, `block_number`,
 `func_max_block_number`): assigned from a per-function counter when a block's parent changes. Every place that
@@ -339,8 +342,16 @@ Ports of `MemoryLocation.cpp`, `AliasAnalysis.cpp`, `BasicAliasAnalysis.cpp`, `T
   `mssa_get_clobbering(ma, q)` (CachingWalker, MaxCheckLimit), `mssa_get_clobbering_loc(ma, loc, q)`,
   `mssa_clobbering_access(ma, q, skip_self, use_invariant_group)` with `cw_limit` as the UpwardWalkLimit;
   `mssa_ensure_optimized()`, `mssa_dominates`, `mssa_locally_dominates`, `mssa_def_clobbers`
-  (instructionClobbersQuery). Not ported: MemorySSAUpdater, the loop (`MemorySSA(Loop&)`) constructor, the
-  verifier (`verify<memoryssa>` only builds), DOT output.
+  (instructionClobbersQuery). Not ported: the loop (`MemorySSA(Loop&)`) constructor, the verifier
+  (`verify<memoryssa>` only builds), DOT output.
+- **MemorySSAUpdater** (mssaupdater.goose): only the removal part so far: `msu_remove_memory_access(ma,
+  optimize_phis)` / `msu_remove_inst_access(i, optimize_phis)` (removeMemoryAccess with tryRemoveTrivialPhi /
+  recursePhi), `msu_rauw`, `mssa_remove_from_lookups` / `mssa_remove_from_lists`. A removed access gets kind
+  `MAK_DEAD` (WeakVH lists test `msu_is_dead`); `msu_repl` records RAUWs for TrackingVH-style lists
+  (`msu_track`). Every operand change of an access must go through `msu_use_set`, which keeps the cached
+  `def`/`opt`/phi-incoming values in sync with the use. `msu_reset()` when a pass starts using the updater.
+  Insertion (createMemoryAccess*, insertUse/insertDef with phi placement), moves and block removal are for LICM,
+  DSE, MemCpyOpt and the loop passes to add here.
 - **Printing with annotations** (`F->print(OS, &AnnotationWriter)`): `pr_annot_set(v, text)` registers a line for
   a block (printed after its label) or an instruction (printed before it), `pr_annot_on` while `print_function`
   runs (printer.goose); the annotation texts are computed first in printing order.
@@ -513,3 +524,27 @@ max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
 5. Run `tools/ic_failures.py [globs]` after a `check` to see the first blocker of every failing test, and
    `opt -goose-ic-lenient` (development only: unported visitors do nothing instead of failing) to see which tests
    would pass if only the unported visitors were missing.
+
+## 13. EarlyCSE and its shared helpers (earlycse.goose, instident.goose, salvage.goose, knowledge.goose)
+
+- **Scoped hash tables** (earlycse.goose): the five `ScopedHashTable`s are one chained hash map (`ec_ents`,
+  buckets `ec_bk`) whose entries are tagged with the table (`ET_VALUES/LOADS/INVARIANTS/CALLS/GEPS`). An entry
+  is a DenseMap bucket: the key of its first insertion, the head of the value chain, and the hash computed when
+  it was created. Value records (`ec_vals`, ScopedHashTableVal) hold NextForKey and NextInScope; a scope is the
+  `NextInScope` chain from `ec_scope_last`, saved and restored by the DFS stack nodes (`ENode.saved_last`).
+  Lookups compare the hash computed now with the stored one, so an instruction whose operands changed after its
+  insertion is not found under its new hash, which is what a DenseMap does. Hashes are LLVM's getHashValue with
+  value ids instead of pointers; equal keys always hash equally. Chains are searched oldest first.
+- **instident.goose** (shared): `ii_is_identical_when_defined(a, b, intersect_attrs)`, `ii_has_same_special_state`,
+  `ii_alist_intersect` / `ii_aset_intersect` (AttributeList/AttributeSet::intersectWith with the
+  `ATTR_INTERSECT` rule table generated from Attributes.td), `ii_try_intersect_attributes`, `ii_and_ir_flags`
+  (Instruction::andIRFlags for two instructions), `ii_is_commutative` / `ii_intrinsic_is_commutative`. GVN and
+  SimplifyCFG hoisting/sinking need exactly these.
+- **salvage.goose** (shared): `salvage_debug_info(i)` (salvageDebugInfo: casts, GEPs via collectOffset, binops,
+  icmps; DIExpression appendOpsToArg/prependOpcodes/appendOffset, foldConstantMath, DIArgList growth, kill
+  locations). Needs `m2r_collect_records(fv)` at the start of the pass. dbg_assign address salvaging fails loudly.
+- **knowledge.goose** (shared): `salvage_knowledge(i, use_ac)` for `--enable-knowledge-retention`
+  (AssumeBuilderState: attribute and access knowledge, canonicalization, tryToPreserveWithoutAddingAssume through
+  the AssumptionCache, the new `llvm.assume` with operand bundles). Callers in LLVM: DCE, EarlyCSE (ported), DSE,
+  GVN, NewGVN, LICM, the inliner.
+
