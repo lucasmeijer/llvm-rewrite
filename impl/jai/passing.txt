@@ -4492,6 +4492,7 @@ tests/imported/llvm/Transforms/InstCombine/debuginfo-dce.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo-dce2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-dce2.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo-invert.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/debuginfo-invoke.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-invoke.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo-scalable-typesize.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo-sink.ll::roundtrip
@@ -5019,6 +5020,7 @@ tests/imported/llvm/Transforms/InstCombine/invert-variable-mask-in-masked-merge-
 tests/imported/llvm/Transforms/InstCombine/invert-variable-mask-in-masked-merge-scalar.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/invert-variable-mask-in-masked-merge-vector.ll::opt
 tests/imported/llvm/Transforms/InstCombine/invert-variable-mask-in-masked-merge-vector.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/invoke.ll::opt
 tests/imported/llvm/Transforms/InstCombine/invoke.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/is_fpclass.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/isascii-1.ll::roundtrip
