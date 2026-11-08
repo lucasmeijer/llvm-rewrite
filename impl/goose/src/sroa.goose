@@ -288,6 +288,25 @@ fn irb_cast(o: i64, v: i32, dty: i32, name: const u8[:], named: bool) -> i32 {
     return irb_insert(iv, name, named);
 }
 fn irb_bitcast(v: i32, t: i32) -> i32 { irb_cast(OP_BITCAST, v, t, "", false) }
+// CreateBitCastLike in CreateBitPreservingCastChain: fixed <-> scalable through llvm.vector.insert/extract
+fn irb_bitcast_like(v: i32, t: i32) -> i32 {
+    let it = vals[v].ty;
+    if it == t { return v; }
+    if types[it].kind == TK_FVEC && types[t].kind == TK_SVEC {
+        let vt = vec_with_size_and_scalar(t, it);
+        let pz = c_poison(vt);
+        let z = c_int(T_I64, 0);
+        let ins = irb_intrinsic_call(IID_vector_insert, [vt, it], [pz, v, z], []);
+        return irb_bitcast(ins, t);
+    }
+    if types[it].kind == TK_SVEC && types[t].kind == TK_FVEC {
+        let vt = vec_with_size_and_scalar(it, t);
+        let bc = irb_bitcast(v, vt);
+        let z = c_int(T_I64, 0);
+        return irb_intrinsic_call(IID_vector_extract, [t, vt], [bc, z], []);
+    }
+    return irb_bitcast(v, t);
+}
 
 fn irb_binop(o: i64, a: i32, b: i32, name: const u8[:], named: bool) -> i32 {
     if is_constant(a) && is_constant(b) {
@@ -407,20 +426,19 @@ fn sr_dl_intptr_type(t: i32) -> i32 {
 fn irb_bit_cast_chain(v: i32, nt: i32) -> i32 {
     let ot = vals[v].ty;
     if ot == nt { return v; }
-    if types[ot].kind == TK_SVEC || types[nt].kind == TK_SVEC { sr_not_ported("bit-preserving casts of scalable vectors"); }
     if sr_ty_is_int_or_int_vec(ot) && sr_ty_is_ptr_or_ptr_vec(nt) {
-        return irb_cast(OP_INTTOPTR, irb_bitcast(v, sr_dl_intptr_type(nt)), nt, "", false);
+        return irb_cast(OP_INTTOPTR, irb_bitcast_like(v, sr_dl_intptr_type(nt)), nt, "", false);
     }
     if sr_ty_is_ptr_or_ptr_vec(ot) && sr_ty_is_int_or_int_vec(nt) {
-        return irb_bitcast(irb_cast(OP_PTRTOINT, v, sr_dl_intptr_type(ot), "", false), nt);
+        return irb_bitcast_like(irb_cast(OP_PTRTOINT, v, sr_dl_intptr_type(ot), "", false), nt);
     }
     if sr_ty_is_ptr_or_ptr_vec(ot) && sr_ty_is_ptr_or_ptr_vec(nt) {
         if sr_ptr_as_of(ot) != sr_ptr_as_of(nt) {
             let i1 = irb_cast(OP_PTRTOINT, v, sr_dl_intptr_type(ot), "", false);
-            return irb_cast(OP_INTTOPTR, irb_bitcast(i1, sr_dl_intptr_type(nt)), nt, "", false);
+            return irb_cast(OP_INTTOPTR, irb_bitcast_like(i1, sr_dl_intptr_type(nt)), nt, "", false);
         }
     }
-    return irb_bitcast(v, nt);
+    return irb_bitcast_like(v, nt);
 }
 
 // CreatePointerBitCastOrAddrSpaceCast
@@ -550,8 +568,13 @@ fn sb_load_or_store(t: i32, i: i32, size: i64, vol: bool) {
 fn sb_visit_load(li: i32) {
     if !pv_known { pv_escaped_ro = li; return; }
     let t = vals[li].ty;
-    if sr_ty_is_scalable(t) { sr_not_ported("loads of scalable types"); }
-    sb_load_or_store(t, li, dl_store_size(t), inst_is_volatile(li));
+    var size = dl_store_size(t);
+    if sr_ty_is_scalable(t) {
+        let vs = func_vscale(inst_func(li));
+        if vs == 0 { pv_aborted = li; return; }
+        size = size * vs;
+    }
+    sb_load_or_store(t, li, size, inst_is_volatile(li));
 }
 
 fn sb_visit_store(si: i32) {
@@ -559,8 +582,12 @@ fn sb_visit_store(si: i32) {
     if v == uses[pv_u].val && sr_use_opno(pv_u) == 0 { pv_escaped = si; pv_aborted = si; return; }
     if !pv_known { pv_aborted = si; return; }
     let t = vals[v].ty;
-    if sr_ty_is_scalable(t) { sr_not_ported("stores of scalable types"); }
-    let size = dl_store_size(t);
+    var size = dl_store_size(t);
+    if sr_ty_is_scalable(t) {
+        let vs = func_vscale(inst_func(si));
+        if vs == 0 { pv_aborted = si; return; }
+        size = size * vs;
+    }
     // Size > AllocSize || Offset.ugt(AllocSize - Size)
     if size > sb_alloc_size || pv_off < 0 || pv_off > sb_alloc_size - size { sb_mark_dead(si); return; }
     sb_load_or_store(t, si, size, inst_is_volatile(si));
@@ -919,23 +946,42 @@ fn find_common_type(bi: i64, ei: i64, end_off: i64) -> i32, i32 {
     return if common { t } else { -1 }, ity;
 }
 
-// canConvertValue(DL, OldTy, NewTy)
-fn can_convert_value(ot0: i32, nt0: i32) -> bool {
+// VectorType::getWithSizeAndScalar(SizeTy, EltTy): -1 = nullptr
+fn vec_with_size_and_scalar(sz: i32, et: i32) -> i32 {
+    let ets = ty_scalar(et);
+    if types[sz].a == ets { return sz; }
+    let esz = dl_size_bits(ets);
+    let prim = types[sz].cnt * dl_size_bits(types[sz].a);
+    if prim % esz != 0 { return -1; }
+    return ty_vector(ets, prim / esz, types[sz].kind == TK_SVEC);
+}
+
+// canConvertValue(DL, OldTy, NewTy, VScale)
+fn can_convert_value(ot0: i32, nt0: i32) -> bool { return can_convert_value_vs(ot0, nt0, 0); }
+fn can_convert_value_vs(ot0: i32, nt0: i32, vscale: i64) -> bool {
     if ot0 == nt0 { return true; }
     if ty_is_int(ot0) && ty_is_int(nt0) { return false; }
-    if types[ot0].kind == TK_SVEC || types[nt0].kind == TK_SVEC {
-        if (types[ot0].kind == TK_SVEC) != (types[nt0].kind == TK_SVEC) &&
-           (sr_ty_is_fixed_vector(ot0) || sr_ty_is_fixed_vector(nt0)) {
-            sr_not_ported("canConvertValue between fixed and scalable vectors");
+    var nsize = dl_size_bits(nt0);
+    var osize = dl_size_bits(ot0);
+    var nscal = sr_ty_is_scalable(nt0);
+    var oscal = sr_ty_is_scalable(ot0);
+    if (types[nt0].kind == TK_SVEC && types[ot0].kind == TK_FVEC) || (types[ot0].kind == TK_SVEC && types[nt0].kind == TK_FVEC) {
+        if vscale == 0 { return false; }
+        let ovt = if sr_ty_is_ptr_or_ptr_vec(ot0) { sr_dl_intptr_type(ot0) } else { ot0 };
+        let nvt = if sr_ty_is_ptr_or_ptr_vec(nt0) { sr_dl_intptr_type(nt0) } else { nt0 };
+        if types[nt0].kind == TK_SVEC {
+            if vec_with_size_and_scalar(nvt, ovt) < 0 { return false; }
+            nsize = nsize * vscale; nscal = false;
+        } else {
+            if vec_with_size_and_scalar(ovt, nvt) < 0 { return false; }
+            osize = osize * vscale; oscal = false;
         }
-        sr_not_ported("canConvertValue of scalable vectors");
     }
+    if nsize != osize || nscal != oscal { return false; }
     if !sr_ty_is_single_value(nt0) || !sr_ty_is_single_value(ot0) {
         // sizes are compared first in LLVM; unsized types never get here
-        if dl_size_bits(nt0) != dl_size_bits(ot0) { return false; }
         return false;
     }
-    if dl_size_bits(nt0) != dl_size_bits(ot0) { return false; }
     let ot = ty_scalar(ot0);
     let nt = ty_scalar(nt0);
     if sr_ty_is_ptr(nt) || sr_ty_is_ptr(ot) {
@@ -983,13 +1029,13 @@ fn vec_viable_for_slice(pi: i64, k: i64, vty: i32, esize: i64) -> bool {
         var lt = vals[u].ty;
         if ty_is_struct(lt) { return false; }
         if p.b > s.b || p.e < s.e { lt = split_int; }
-        if !can_convert_value(slice_ty, lt) { return false; }
+        if !can_convert_value_vs(slice_ty, lt, rw_fn_vscale) { return false; }
     } else if iop(u) == OP_STORE {
         if inst_is_volatile(u) { return false; }
         var st = vals[op(u, 0)].ty;
         if ty_is_struct(st) { return false; }
         if p.b > s.b || p.e < s.e { st = split_int; }
-        if !can_convert_value(st, slice_ty) { return false; }
+        if !can_convert_value_vs(st, slice_ty, rw_fn_vscale) { return false; }
     } else {
         return false;
     }
@@ -1079,6 +1125,7 @@ fn vp_create_and_check(pi: i64, others: const i32[:], copy: const i32[:]) -> i32
 }
 
 // isVectorPromotionViable(P, DL, VScale)
+var rw_fn_vscale: i64 = 0;
 fn vector_promotion_viable(pi: i64) -> i32 {
     vp_cands.clear();
     vp_common_elt = -1; vp_common_vecptr = -1;
@@ -1272,6 +1319,7 @@ fn struct_to_vector(sty: i32, pi: i64) -> i32 {
 fn select_partition_type(pi: i64, ai: i32, agg_to_vec: bool) -> i32, bool, i32 {
     let p = parts[pi];
     let psize = p.e - p.b;
+    rw_fn_vscale = func_vscale(inst_func(ai));
     let vty = vector_promotion_viable(pi);
     if vty >= 0 && ty_is_fp(types[vty].a) && types[vty].cnt > 1 { return vty, false, vty; }
     let cty, lity = find_common_type(p.si, p.sj, p.e);
@@ -4166,4 +4214,14 @@ fn sr_migrate_one(ai: i32, r: i32, frag_ai: const i32[:], frag_off: const i64[:]
             sr_not_ported("migrating dbg_value records of split allocas");
         }
     }
+}
+
+// Function::getVScaleValue: vscale_range(N, N) -> N, else 0
+fn func_vscale(fv: i32) -> i64 {
+    let a = aset_find(alist_fn(func_attrs(fv)), AK_VScaleRange);
+    if a < 0 { return 0; }
+    let lo = (attrs[a].i1 >> 32) as! i64;
+    let hi = (attrs[a].i1 & 0xFFFFFFFF) as! i64;
+    if lo != 0 && lo == hi { return lo; }
+    return 0;
 }
