@@ -196,7 +196,7 @@ fn lr_merge_block_into_predecessor(bb: i32, two_succ: bool) -> bool {
     var start = block_first(bb);
     if start == sti { start = pti; }
     // PredBB->splice(PTI, BB, BB->begin(), STI)
-    cu_splice_before(pti, block_first(bb), sti);
+    block_splice(pred, pti, false, bb, block_first(bb), true, sti, false);
     if lr_mssau { msu_move_all_after_merge_blocks(bb, pred, start); }
     cu_block_rauw(bb, pred);
     if two_succ {
@@ -205,7 +205,7 @@ fn lr_merge_block_into_predecessor(bb: i32, two_succ: bool) -> bool {
         term_set_succ(pti, fall_thru, new_succ);
     } else {
         inst_erase_from_parent(pti);
-        inst_move_to_end(sti, pred);
+        inst_move_impl(sti, pred, -1, false, true);     // moveBeforePreserving(*PredBB, PredBB->end())
         block_append_inst(bb, create_inst(OP_UNREACHABLE, T_VOID, []));
         if lr_mssau {
             let mud = mssa_access_of(block_terminator(pred));

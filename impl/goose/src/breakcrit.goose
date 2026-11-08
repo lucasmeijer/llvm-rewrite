@@ -194,7 +194,7 @@ fn create_phis_for_split_loop_exit(preds: const i32[:], split_bb: i32, dest: i32
         let np = new_phi(vals[pn].ty, preds.len);
         let fnp = first_non_phi(split_bb);
         let is_lp = fnp >= 0 && iop(fnp) == OP_LANDINGPAD;
-        if is_lp { inst_insert_before(np, block_first(split_bb)); } else { inst_insert_before(np, block_terminator(split_bb)); }
+        if is_lp { inst_insert_before_head(np, block_first(split_bb)); } else { inst_insert_before(np, block_terminator(split_bb)); }
         set_name(np, "split");
         for b in preds { phi_add_incoming(np, v, b); }
         set_op(pn, idx, np);
