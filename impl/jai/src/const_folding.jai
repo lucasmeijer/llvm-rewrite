@@ -772,7 +772,7 @@ cfo_inst_operands_impl :: (v: Value_Id, opc: Opcode, ops: [] Value_Id, allow_non
     if opc == .GEP {
         src := opr_gep_source_type(v);
         // ConstantExpr::isSupportedGetElementPtr: not a target extension type... (sized-ness is checked later)
-        if type_kind(src) == .TARGET_EXT return NONE;
+        if type_kind(src) == .TARGET_EXT || type_is_scalable(src) return NONE;   // !isScalableTy()
         c := symbolically_evaluate_gep(v, ops);
         if c != NONE return c;
         has_ir, irr := gep_inrange(v);

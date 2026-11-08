@@ -81,11 +81,6 @@ fn_does_not_free_memory :: (f: Value_Id) -> bool {
     if fn_has_fn_attr(f, .NoFree) return true;
     return (me_mod_ref(fn_memory(f)) & MR_MOD) == 0;   // onlyReadsMemory
 }
-// Argument::onlyReadsMemory: readonly or readnone parameter attribute
-arg_only_reads_memory :: (a: Value_Id) -> bool {
-    s := arg_attrs(a);
-    return attr_set_has(s, .ReadOnly) || attr_set_has(s, .ReadNone);
-}
 
 // getKnowledgeFromBundle for the "dereferenceable" / "align" tags: (kind found, was_on, arg value)
 Retained_Knowledge :: struct { kind: Attr_Kind; was_on: Value_Id = NONE; arg: u64; }
@@ -303,7 +298,7 @@ get_pointer_base_with_constant_offset :: (ptr: Value_Id) -> (Value_Id, s64) {
 get_available_load_store :: (i: Value_Id, ptr: Value_Id, access_ty: Type_Id, at_least_atomic: bool, is_load_cse: *bool) -> Value_Id {
     o := inst_op(i);
     if o == .LOAD {
-        if (inst(i).ord1 != 0) < at_least_atomic return NONE;
+        if inst(i).ord1 == 0 && at_least_atomic return NONE;
         lp := strip_pointer_casts(op(i, 0));
         if !ld_equivalent_address_values(lp, ptr) return NONE;
         if is_bit_or_noop_pointer_castable(vtype(i), access_ty) {
@@ -312,7 +307,7 @@ get_available_load_store :: (i: Value_Id, ptr: Value_Id, access_ty: Type_Id, at_
         }
     }
     if o == .STORE {
-        if (inst(i).ord1 != 0) < at_least_atomic return NONE;
+        if inst(i).ord1 == 0 && at_least_atomic return NONE;
         sp := strip_pointer_casts(op(i, 1));
         if !ld_equivalent_address_values(sp, ptr) return NONE;
         if is_load_cse is_load_cse.* = false;

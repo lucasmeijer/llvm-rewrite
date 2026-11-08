@@ -355,7 +355,7 @@ vu_get_splat_value :: (v: Value_Id) -> Value_Id {
             idx := op(ie, 2);
             if is_const_int(idx) && ap_is_zero(cf_ap(idx)) {
                 mask := shuffle_mask(v);
-                for mask if it != 0 return NONE;
+                for mask if it != 0 && it != 0xFFFF_FFFF return NONE;   // m_ZeroMask: 0 or poison
                 return op(ie, 1);
             }
         }

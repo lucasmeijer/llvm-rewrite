@@ -116,10 +116,6 @@ is_mem_transfer_inst :: (i: Value_Id) -> bool {
 // MemTransferInst::getSource: getRawSource()->stripPointerCasts()
 mti_source :: (mti: Value_Id) -> Value_Id { return strip_pointer_casts(call_arg(mti, 1)); }
 
-// AA->getModRefInfoMask(Ptr) (MemoryLocation::getBeforeOrAfter, a fresh AAQueryInfo)
-ic_mod_ref_info_mask :: (ptr: Value_Id) -> u8 {
-    return aa_mod_ref_mask(aa_query_new(ic_aa()), mloc_before_or_after(ptr));
-}
 
 // ---------------------------------------------------------------- Local.cpp: alignment
 
@@ -192,7 +188,7 @@ ic_is_only_copied_from_constant_memory :: (ai: Value_Id, to_delete: *[..] Value_
             }
             if o == .PHI || o == .SELECT { array_add(*work, .{i, true}); continue; }
             if o == .BITCAST || o == .ADDRSPACECAST { array_add(*work, .{i, e.off}); continue; }
-            if o == .GEP { array_add(*work, .{i, e.off || !gep_has_all_zero_indices_v(i)}); continue; }
+            if o == .GEP { array_add(*work, .{i, e.off || !gep_has_all_zero_indices(i)}); continue; }
             opno := use_operand_no(u);
             if is_call_base(i) {
                 if opno == nops(i) - 1 continue;   // isCallee
@@ -208,18 +204,13 @@ ic_is_only_copied_from_constant_memory :: (ai: Value_Id, to_delete: *[..] Value_
             if the_copy != NONE return NONE;
             if e.off return NONE;
             if opno != 0 return NONE;
-            if (ic_mod_ref_info_mask(mti_source(i)) & MR_MOD) != 0 return NONE;
+            if (ic_points_to_const_mem_mask(mti_source(i)) & MR_MOD) != 0 return NONE;
             the_copy = i;
         }
     }
     return the_copy;
 }
 
-// AllocaInst::isArrayAllocation
-alloca_is_array_allocation :: (ai: Value_Id) -> bool {
-    n := op(ai, 0);
-    return !(is_scalar_const_int(n) && ap_is_one(const_ap(n)));
-}
 
 // isDereferenceableForAllocaSize
 ic_is_dereferenceable_for_alloca_size :: (v: Value_Id, ai: Value_Id) -> bool {
@@ -408,9 +399,7 @@ pr_replace :: (pr: *Ptr_Replacer, i: Value_Id) {
         t := op(i, 1); f := op(i, 2);
         rt := pr_lookup(pr, t); if rt != NONE t = rt;
         rf := pr_lookup(pr, f); if rf != NONE f = rf;
-        ns := create_select(op(i, 0), t, f);
-        copy_metadata(ns, i);   // SelectInst::Create(..., MDFrom = SI)
-        set_metadata(ns, 0, NONE);
+        ns := create_select_md_from(op(i, 0), t, f, i);
         ic_insert_new_inst_with(ns, i);
         ic_take_name(ns, i);
         pr_set(pr, i, ns);
@@ -576,7 +565,7 @@ ic_unpack_load_to_aggregate :: (li: Value_Id) -> Value_Id {
         addr := op(li, 0);
         idx_ty := dl_index_type(vtype(addr));
         v := const_poison(t);
-        for e: 0..n-1 {
+        if n > 0 for e: 0..n-1 {
             off := dl_struct_offset(t, e);
             p := icb_inbounds_ptr_add(addr, const_int(idx_ty, off), tprint("%.elt", name));
             l := icb_aligned_load(type_sub(t, e), p, common_alignment(al, off), tprint("%.unpack", name));
@@ -601,7 +590,7 @@ ic_unpack_load_to_aggregate :: (li: Value_Id) -> Value_Id {
     zero := const_int(ir.t_i64, 0);
     v := const_poison(t);
     offset: u64 = 0;
-    for e: 0..n-1 {
+    if n > 0 for e: 0..n-1 {
         p := icb_gep(t, addr, .[zero, const_int(ir.t_i64, e)], tprint("%.elt", name), F_INBOUNDS);
         l := icb_aligned_load(et, p, common_alignment(al, offset), tprint("%.unpack", name));
         set_aa_metadata(l, get_aa_metadata(li));
@@ -610,12 +599,6 @@ ic_unpack_load_to_aggregate :: (li: Value_Id) -> Value_Id {
     }
     set_name(v, name);
     return ic_replace_inst_uses_with(li, v);
-}
-// commonAlignment(A, Offset)
-common_alignment :: (a: u64, offset: u64) -> u64 {
-    if offset == 0 return a;
-    lo := offset & (~offset + 1);
-    return min(a, lo);
 }
 // StructLayout::hasPadding
 dl_struct_has_padding :: (t: Type_Id) -> bool {
@@ -626,11 +609,9 @@ dl_struct_has_padding :: (t: Type_Id) -> bool {
         et := type_sub(t, e);
         if dl_struct_offset(t, e) != sum return true;
         sum += dl_type_alloc_size(et);
-        if is_struct_type_kind(et) && dl_struct_has_padding(et) return true;   // hasPadding is IsPadded (own padding only)
     }
     return sum != size;
 }
-is_struct_type_kind :: (t: Type_Id) -> bool { return false; }
 
 // isObjectSizeLessThanOrEq
 ic_is_object_size_less_than_or_eq :: (v: Value_Id, max_size: u64) -> bool {
@@ -699,7 +680,7 @@ ic_replace_gep_idx_with_zero :: (ptr: Value_Id, mem_i: Value_Id) -> Value_Id {
     ng := ic_clone_inst(ptr);
     set_op(ng, idx, const_int(vtype(op(ptr, idx)), 0));
     ic_insert_new_inst_before(ng, ptr);
-    if inst_block(ptr) == inst_block(mem_i) && is_guaranteed_to_transfer_execution_range(ptr, mem_i) {
+    if inst_block(ptr) == inst_block(mem_i) && is_guaranteed_to_transfer_execution_range(ptr, mem_i, 32) {
         ic_replace_inst_uses_with(ptr, ng);
         ic_erase_inst(ptr);
     }
@@ -800,10 +781,7 @@ ic_visit_load :: (li: Value_Id) -> Value_Id {
                 v2 := icb_load_props(vtype(li), lo2, li, tprint("%.val", vname(lo2)));
                 copy_poison_generating_metadata(v1, li);
                 copy_poison_generating_metadata(v2, li);
-                ns := create_select(op(si, 0), v1, v2);
-                copy_metadata(ns, si);   // SelectInst::Create(..., MDFrom = SI)
-                set_metadata(ns, 0, NONE);
-                return ns;
+                return create_select_md_from(op(si, 0), v1, v2, si);
             }
         }
     }
@@ -893,7 +871,7 @@ ic_unpack_store_to_aggregate :: (si: Value_Id) -> bool {
         addr := op(si, 1);
         addr_name := tprint("%.repack", vname(addr));
         idx_ty := dl_index_type(vtype(addr));
-        for e: 0..n-1 {
+        if n > 0 for e: 0..n-1 {
             off := dl_struct_offset(t, e);
             p := icb_inbounds_ptr_add(addr, const_int(idx_ty, off), addr_name);
             val := icb_extract_value(v, .[e], elt_name);
@@ -916,7 +894,7 @@ ic_unpack_store_to_aggregate :: (si: Value_Id) -> bool {
     addr_name := tprint("%.repack", vname(addr));
     zero := const_int(ir.t_i64, 0);
     offset: u64 = 0;
-    for e: 0..n-1 {
+    if n > 0 for e: 0..n-1 {
         p := icb_gep(t, addr, .[zero, const_int(ir.t_i64, e)], addr_name, F_INBOUNDS);
         val := icb_extract_value(v, .[cast(u32) e], elt_name);
         ns := icb_aligned_store(val, p, common_alignment(al, offset));
@@ -950,7 +928,7 @@ ic_visit_store :: (si: Value_Id) -> Value_Id {
             if is_inst(b) && inst_op(b) == .ALLOCA && has_one_use(b) return ic_erase_inst(si);
         }
     }
-    if (ic_mod_ref_info_mask(ptr) & MR_MOD) == 0 return ic_erase_inst(si);
+    if (ic_points_to_const_mem_mask(ptr) & MR_MOD) == 0 return ic_erase_inst(si);
     // really simple DSE
     bbi := si;
     scan := 6;

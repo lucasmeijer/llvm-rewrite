@@ -24,7 +24,7 @@ ic_visit_call :: (i: Value_Id) -> Value_Id {
         v := simplify_call(i, call_callee(i), args, ic_q(i));
         if v != NONE return ic_replace_inst_uses_with(i, v);
     }
-    if get_freed_operand(i) != NONE fatal("instcombine: visitFree is not supported yet");
+    { fo := get_freed_operand(i); if fo != NONE return ic_visit_free(i, fo); }
     if fn_has_fn_attr(ic.f, .NoUnwind) && !call_has_fn_attr(i, .NoUnwind) {
         call_add_fn_attr(i, .NoUnwind);
         return i;

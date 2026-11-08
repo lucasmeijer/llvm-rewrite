@@ -43,6 +43,10 @@ ic_visit :: (i: Value_Id) -> Value_Id {
         case .FREEZE; return ic_visit_freeze(i);
         case .EXTRACTVALUE; return ic_visit_extract_value(i);
         case .LOAD; return ic_visit_load(i);
+        case .STORE; return ic_visit_store(i);
+        case .ALLOCA; return ic_visit_alloca(i);
+        case .SWITCH; return ic_visit_switch(i);
+        case .LANDINGPAD; return ic_visit_landing_pad(i);
         case .EXTRACTELEMENT; #through;
         case .INSERTELEMENT; #through;
         case .INSERTVALUE; #through;
@@ -169,22 +173,6 @@ ic_freely_invert_all_users_of :: (v: Value_Id, ignored: Value_Id = NONE) {
     find_dbg_users(ic.f, v, *users);
     if users.count fatal("instcombine: freelyInvertAllUsersOf with debug users (DW_OP_not) is not supported yet");
 }
-// visitGetElementPtrInst: InstSimplify. Not ported: everything after.
-ic_visit_gep :: (i: Value_Id) -> Value_Id { return ic_visit_simplify_only(i); }
-// visitLoadInst: InstSimplify. Not ported: everything after.
-ic_visit_load :: (i: Value_Id) -> Value_Id { return ic_visit_simplify_only(i); }
-// visitFreeze: InstSimplify, foldOpIntoPhi. Not ported: everything after.
-ic_visit_freeze :: (i: Value_Id) -> Value_Id {
-    v := simplify_freeze_inst(op(i, 0), ic_q(i));
-    if v != NONE return ic_replace_inst_uses_with(i, v);
-    if is_phi(op(i, 0)) { r := ic_fold_op_into_phi(i, op(i, 0)); if r != NONE return r; }
-    return NONE;
-}
-// visitExtractValueInst: no indices, InstSimplify. Not ported: everything after.
-ic_visit_extract_value :: (i: Value_Id) -> Value_Id {
-    if inst(i).nidx == 0 return ic_replace_inst_uses_with(i, op(i, 0));
-    return ic_visit_simplify_only(i);
-}
 
 // CallBase::addFnAttr(Kind)
 call_add_fn_attr :: (i: Value_Id, k: Attr_Kind) {
@@ -241,85 +229,13 @@ ic_visit_uncond_br :: (i: Value_Id) -> Value_Id {
     return NONE;
 }
 
-// mergeStoreIntoSuccessor (InstCombineLoadStoreAlloca.cpp)
-ic_merge_store_into_successor :: (si: Value_Id) -> bool {
-    if !is_unordered(si) return false;
-    store_bb := inst_block(si);
-    dest := get_successor(block_terminator(store_bb), 0);
-    preds: [..] Value_Id; preds.allocator = temp;
-    block_predecessors(dest, *preds);
-    if preds.count != 2 return false;
-    other_bb := preds[0];
-    if other_bb == store_bb other_bb = preds[1];
-    if store_bb == dest || other_bb == dest return false;
-    bbi := block_terminator(other_bb);
-    if bbi == block_first(other_bb) return false;
-    mergeable :: (os: Value_Id, si: Value_Id) -> bool {
-        if os == NONE || !is_inst(os) || inst_op(os) != .STORE || op(os, 1) != op(si, 1) return false;
-        st := vtype(op(si, 0)); ot := vtype(op(os, 0));
-        if st != ot fatal("instcombine: mergeStoreIntoSuccessor with differently typed stores is not supported yet");
-        a := inst(si); b := inst(os);
-        return (a.flags & F_VOLATILE) == (b.flags & F_VOLATILE) && a.align == b.align && a.ord1 == b.ord1 && a.sync == b.sync;
-    }
-    other: Value_Id = NONE;
-    if inst_op(bbi) == .BR {
-        bbi = inst(bbi).prev;
-        while is_debug_or_pseudo_inst(bbi) {
-            if bbi == block_first(other_bb) return false;
-            bbi = inst(bbi).prev;
-        }
-        other = bbi;
-        if !mergeable(other, si) return false;
-    } else if inst_op(bbi) == .CONDBR {
-        if get_successor(bbi, 0) != store_bb && get_successor(bbi, 1) != store_bb return false;
-        while true {
-            if mergeable(bbi, si) { other = bbi; break; }
-            if may_read_from_memory(bbi) || may_throw(bbi) || may_write_to_memory(bbi) || bbi == block_first(other_bb) return false;
-            bbi = inst(bbi).prev;
-        }
-        x := block_first(store_bb);
-        while x != si {
-            if may_read_from_memory(x) || may_throw(x) || may_write_to_memory(x) return false;
-            x = inst(x).next;
-        }
-    } else return false;
-    for k: 0..1 {
-        s := ifx k == 0 then si else other;
-        if get_metadata(s, md_kind_id("tbaa")) != NONE || get_metadata(s, md_kind_id("tbaa.struct")) != NONE ||
-           get_metadata(s, md_kind_id("alias.scope")) != NONE || get_metadata(s, md_kind_id("noalias")) != NONE ||
-           get_metadata(s, md_kind_id("DIAssignID")) != NONE
-            fatal("instcombine: mergeStoreIntoSuccessor with AA metadata or DIAssignID is not supported yet");
-    }
-    merged_val := op(other, 0);
-    merged_loc := merged_debug_loc(get_metadata(si, 0), get_metadata(other, 0));
-    if merged_val != op(si, 0) {
-        pn := create_phi(vtype(op(si, 0)), 2);
-        set_name(pn, "storemerge");
-        phi_add_incoming(pn, op(si, 0), inst_block(si));
-        icb_set_insert_point(other);
-        phi_add_incoming(pn, icb_bit_or_pointer_cast(merged_val, vtype(pn)), other_bb);
-        merged_val = ic_insert_new_inst_before(pn, block_first(dest));
-        set_metadata(pn, 0, merged_loc);
-    }
-    pos := block_first_insertion_pt(dest);
-    nsi := new_inst(.STORE, ir.t_void, 2);
-    set_op(nsi, 0, merged_val); set_op(nsi, 1, op(si, 1));
-    r := inst(nsi); src := inst(si);
-    r.align = src.align; r.flags = src.flags & cast(u32) F_VOLATILE; r.ord1 = src.ord1; r.sync = src.sync;
-    if pos == NONE { ic_link_at_end(nsi, dest); wl_add(nsi); }
-    else ic_insert_new_inst_before(nsi, pos);
-    set_metadata(nsi, 0, merged_loc);
-    ic_erase_inst(si);
-    ic_erase_inst(other);
-    return true;
-}
 // CreateBitOrPointerCast
-icb_bit_or_pointer_cast :: (v: Value_Id, t: Type_Id) -> Value_Id {
+icb_bit_or_pointer_cast :: (v: Value_Id, t: Type_Id, name: string = "") -> Value_Id {
     if vtype(v) == t return v;
     st := vtype(v);
-    if is_ptr_or_ptr_vector(st) && !is_ptr_or_ptr_vector(t) return icb_cast(.PTRTOINT, v, t);
-    if !is_ptr_or_ptr_vector(st) && is_ptr_or_ptr_vector(t) return icb_cast(.INTTOPTR, v, t);
-    return icb_cast(.BITCAST, v, t);
+    if is_ptr_or_ptr_vector(st) && !is_ptr_or_ptr_vector(t) return icb_cast(.PTRTOINT, v, t, name);
+    if !is_ptr_or_ptr_vector(st) && is_ptr_or_ptr_vector(t) return icb_cast(.INTTOPTR, v, t, name);
+    return icb_cast(.BITCAST, v, t, name);
 }
 
 // CondBrInst::swapSuccessors (+ Instruction::swapProfMetadata)

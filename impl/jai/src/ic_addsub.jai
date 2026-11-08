@@ -1080,19 +1080,26 @@ ic_emit_gep_offset_raw :: (g: Value_Id, no_assumptions := false) -> Value_Id {
                 continue;
             }
         }
-        if is_vector_type(idx_ty) && !is_vector_type(vtype(o)) fatal("instcombine: emitGEPOffset of a vector GEP with scalar indices is not supported yet");
+        if is_vector_type(idx_ty) && !is_vector_type(vtype(o)) o = icb_vector_splat(type_count(idx_ty), type_kind(idx_ty) == .SVECTOR, o);
         if vtype(o) != idx_ty o = icb_int_cast(o, idx_ty, true, tprint("%.c", vname(o)));
-        if type_is_scalable(indexed) fatal("instcombine: emitGEPOffset with scalable strides is not supported yet");
         stride := gep_seq_stride(cur, k, indexed);
-        if stride != 1 {
-            scale := const_int_of(scalar_type(idx_ty), stride);
-            if is_vector_type(idx_ty) scale = cf_get_splat(idx_ty, scale);
+        scalable := type_is_scalable(indexed) && stride != 0;
+        if stride != 1 || scalable {
+            scale := icb_type_size(scalar_type(idx_ty), stride, scalable);
+            if is_vector_type(idx_ty) scale = icb_vector_splat(type_count(idx_ty), type_kind(idx_ty) == .SVECTOR, scale);
             o = icb_mul(o, scale, tprint("%.idx", vname(g)), nuw, nsw);
         }
         add_offset(*result, o, g, nuw, nsw);
     }
     if result == NONE return const_null_value(idx_ty);
     return result;
+}
+// IRBuilder::CreateTypeSize(Ty, Size): a constant, or vscale (* known minimum, nuw) for scalable sizes
+icb_type_size :: (ty: Type_Id, size: u64, scalable: bool) -> Value_Id {
+    if !scalable || size == 0 return const_int_of(ty, size);
+    vs := icb_intrinsic(IID_VSCALE, .[ty], .[]);
+    if size == 1 return vs;
+    return icb_mul(vs, const_int_of(ty, size), "", nuw = true);
 }
 // InstCombinerImpl::EmitGEPOffset(GEP, RewriteGEP = false)
 ic_emit_gep_offset :: (g: Value_Id) -> Value_Id { return ic_emit_gep_offset_raw(g); }
@@ -1116,7 +1123,7 @@ ic_emit_gep_offsets :: (geps: [] Value_Id, nw: u32, idx_ty: Type_Id, rewrite: bo
             defer ic.b = saved;
             if rewrite && is_inst(g) irb_set_before(*ic.b, g);
             off = ic_emit_gep_offset_raw(g);
-            if vtype(off) != idx_ty fatal("instcombine: EmitGEPOffsets with vector index types is not supported yet");
+            if vtype(off) != idx_ty off = icb_vector_splat(type_count(idx_ty), type_kind(idx_ty) == .SVECTOR, off);
             if has_one_use(g) {
                 one_use_sum = add(one_use_sum, off, nw);
                 one_use_flags = gep_nw_intersect_for_offset_add(one_use_flags, gep_nw_bits(g));
