@@ -130,7 +130,18 @@ fn ac_build(fv: i32) {
     ac_has_any = false;
     var handles: i32[>..<] = [];
     each_inst(fv) { i => if inst_iid(i) == IID_assume { handles.push(i); } };
-    for a in handles {
+    for a in handles { ac_update_affected(a); }
+}
+
+// AssumptionCache::registerAssumption(CI): only once the cache has scanned the function
+fn ac_register_assumption(a: i32) {
+    if ac_fn < 0 || ac_fn != inst_func(a) { return; }
+    ac_update_affected(a);
+}
+
+// AssumptionCache::updateAffectedValues(CI)
+fn ac_update_affected(a: i32) {
+    {
         ac_has_any = true;
         // operand bundles first
         for k in cb_nbundles(a) {

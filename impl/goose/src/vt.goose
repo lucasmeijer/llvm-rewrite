@@ -9,6 +9,7 @@
 // not ported yet; every query that would consult the cache fails loudly when the function contains an
 // llvm.assume (vt_check_assumes). DomConditionCache: not used by InstSimplify (Q.DC == nullptr).
 import std;
+import domcond;
 import ir;
 import irutil;
 import calls;
@@ -955,6 +956,7 @@ recursive fn is_known_pow2(v: i32, or_zero: bool, depth0: i64) -> bool {
     }
     if or_zero && scalar_bits(v) == 1 { return true; }
     if kb_cxt >= 0 && pow2_from_assume(v, or_zero) { return true; }
+    if kb_cxt >= 0 && pow2_from_dom_conditions(v, or_zero) { return true; }
     if !is_inst(v) { return false; }
     if kb_cxt >= 0 && inst_iid(v) == IID_vscale { return func_has_fn_attr(inst_func(kb_cxt), AK_VScaleRange); }
     let o = iop(v);
@@ -1208,7 +1210,8 @@ recursive fn ikne(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
             return ikne(a, b, de, depth + 1);
         }
     }
-    // isKnownNonEqualFromContext: no DC; assumptions
+    // isKnownNonEqualFromContext: dominating conditions (domcond.goose), then assumptions
+    if kb_cxt >= 0 && nonequal_from_dom_conditions(v1, v2, depth) { return true; }
     if kb_cxt >= 0 && nonequal_from_assume(v1, v2, depth) { return true; }
     return false;
 }

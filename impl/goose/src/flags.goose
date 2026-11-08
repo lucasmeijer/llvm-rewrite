@@ -37,6 +37,8 @@ let KNOWN_FLAGS: const u8[:][] = [
     "earlycse-debug-hash",                               // no-op in release builds (see earlycse.goose)
     "earlycse-mssa-optimization-cap",                    // read by early-cse<memssa>
     "verify-scev",                                       // no-op: extra verification only
+    "instcombine-code-sinking", "instcombine-max-sink-users", "instcombine-negator-enabled",   // read by instcombine
+    "instcombine-negator-max-depth", "instcombine-lower-dbg-declare", "disable-last-run-tracking",
 ];
 
 // Flags whose non-default value is not supported (checked before the pipeline runs).

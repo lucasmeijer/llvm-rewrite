@@ -10,6 +10,7 @@
 // Denormal modes come from the function's denormal_fpenv attribute (DenormalMode encoded input << 2 | output).
 // ConstantFPRange is only implemented for IEEE formats of at most 64 bits (fails loudly otherwise).
 import std;
+import domcond;
 import constrange;
 import apint;
 import demandedbits;
@@ -841,6 +842,7 @@ recursive fn kfc_from_cond(v: i32, cond: i32, cond_true: bool, known0: KFC, dept
 recursive fn kfc_from_context(v: i32) -> KFC {
     var known = kfc_unknown();
     if kb_cxt < 0 { return known; }
+    known = kfc_from_dom_conditions(v, known);
     if !ac_ready() { return known; }
     let cx = kb_cxt;
     var k: i64 = 0;

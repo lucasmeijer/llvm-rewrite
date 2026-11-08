@@ -7,6 +7,7 @@
 // between vector shapes, vscale, target intrinsics, vectors of more than 64 elements (the demanded-elements
 // mask is a u64). Assumptions: assume.goose.
 import std;
+import domcond;
 import ir;
 import irutil;
 import calls;
@@ -1073,10 +1074,12 @@ recursive fn kb_adjust_for_select_arm(known: KB, cond: i32, arm: i32, invert: bo
     return cr;
 }
 
-// computeKnownBitsFromContext (Q.DC == nullptr; assumptions: assume.goose)
+// computeKnownBitsFromContext: dominating conditions (domcond.goose, InstCombine's DomConditionCache) and
+// assumptions (assume.goose)
 recursive fn kb_from_context(v: i32, known: KB, depth: i64) -> KB {
     if kb_cxt < 0 { return known; }
-    return kb_from_assumptions(v, known, depth);
+    let k = kb_from_dom_conditions(v, known, depth);
+    return kb_from_assumptions(v, k, depth);
 }
 
 // breakSelfRecursivePHI: (value, context instruction, phi)

@@ -15,6 +15,7 @@ import dce;
 import adce;
 import bdce;
 import instsimplify;
+import ic;
 import mem2reg;
 import sroa;
 import earlycse;
@@ -60,6 +61,7 @@ let P_VERIFY_FUNCTION = 109;
 let P_MEM2REG = 130;
 let P_SROA = 131;          // arg: 1 = preserve-cfg, 2 = aggregate-to-vector
 let P_INSTSIMPLIFY = 140;
+let P_INSTCOMBINE = 170;   // arg: bit 0 = verify-fixpoint, bits 1.. = max-iterations
 let P_BREAK_CRIT_EDGES = 110;
 let P_PRINT_LOOPS = 111;
 let P_PRINT_CYCLES = 112;
@@ -125,6 +127,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_MEM2REG => "PromotePass",
         P_SROA => "SROAPass",
         P_INSTSIMPLIFY => "InstSimplifyPass",
+        P_INSTCOMBINE => "InstCombinePass",
         P_BREAK_CRIT_EDGES => "BreakCriticalEdgesPass",
         P_LOOP_SIMPLIFY => "LoopSimplifyPass",
         P_LCSSA => "LCSSAPass",
@@ -375,6 +378,35 @@ recursive fn parse_function_elem(e: i32) -> i32 {
         }
         return new_pnode(PK_PASS, P_EARLY_CSE as i32, arg, false, pelems[e].name);
     }
+    if is_param_name(name, "instcombine") {
+        // parseInstCombineOptions: verify-fixpoint is on by default for "instcombine" in -passes
+        var verify = true;
+        var maxit: i64 = 1;
+        if name != "instcombine" {
+            let ps = name[12..name.len - 1];
+            var st: i64 = 0;
+            for j in 0..ps.len + 1 {
+                if j < ps.len && ps[j] != ';' { continue; }
+                var pn = ps[st..j];
+                st = j + 1;
+                var enable = true;
+                if starts_with(pn, "no-") { enable = false; pn = pn[3..]; }
+                if pn == "verify-fixpoint" { verify = enable; }
+                else if enable && starts_with(pn, "max-iterations=") {
+                    let num = pn[15..];
+                    var v: i64 = 0;
+                    var ok = num.len > 0;
+                    for c in num { if c < '0' || c > '9' { ok = false; } else { v = v * 10 + ((c - '0') as i64); } }
+                    if !ok { perr_pipeline(str("invalid argument to InstCombine pass max-iterations parameter: '", num, "'")); }
+                    maxit = v;
+                } else { perr_pipeline(str("invalid InstCombine pass parameter '", pn, "'")); }
+            }
+        }
+        var arg: i32 = 0;
+        if verify { arg = 1; }
+        arg |= (maxit as i32) << 1;
+        return new_pnode(PK_PASS, P_INSTCOMBINE as i32, arg, false, pelems[e].name);
+    }
     if is_param_name(name, "sroa") {
         // parseSROAOptions: default modify-cfg
         var arg: i32 = 0;
@@ -580,6 +612,7 @@ fn should_run(n: i32, unit: const u8[:]) -> bool {
 fn invalidate_function(fv: i32, preserved: u32) {
     if preserved == PA_ALL { return; }
     slots_invalidate();
+    if (preserved & (1 << A_LRT)) == 0 { ic::ic_lrt_invalidate(fv); }
     if (preserved & (1 << A_DOMTREE)) == 0 { dt_invalidate(fv, DT_DOM); }
     if (preserved & (1 << A_POSTDOMTREE)) == 0 { dt_invalidate(fv, DT_POST); }
     if (preserved & (1 << A_LOOPS)) == 0 { li_invalidate(fv); }
@@ -608,6 +641,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_MEM2REG => { return mem2reg_run(fv); },
         P_SROA => { let a = pnodes[n].arg; return sroa_run(fv, (a & 1) != 0, (a & 2) != 0); },
         P_INSTSIMPLIFY => { return instsimplify_run(fv); },
+        P_INSTCOMBINE => { let a = pnodes[n].arg; return ic::instcombine_run(fv, (a & 1) != 0, (a >> 1) as i64); },
         P_PRINT_DOMTREE => { print_domtree(fv, DT_DOM); return PA_ALL; },
         P_PRINT_POSTDOMTREE => { print_domtree(fv, DT_POST); return PA_ALL; },
         P_PRINT_DEMANDED_BITS => { print_demanded_bits(fv); return PA_ALL; },

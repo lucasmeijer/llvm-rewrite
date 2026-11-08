@@ -10,6 +10,7 @@ let A_LOOPS = 3;
 let A_CYCLES = 4;
 let A_MEMORYSSA = 5;
 let A_AA = 6;              // AAManager: stateless; invalidating it (or the DT) invalidates MemorySSA
+let A_LRT = 8;               // LastRunTrackingAnalysis (InstCombine skips a rerun with no change in between)
 let A_SCEV = 7;              // ScalarEvolution: invalidated unless preserved explicitly, or when domtree/loops go
 let A_VERIFY = 20;           // VerifierAnalysis: require<verify> is accepted; no verifier yet (the harness verifies our output)
 let PA_ALL: u32 = 0xFFFFFFFF;
