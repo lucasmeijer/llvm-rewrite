@@ -35,6 +35,7 @@ import lpm;
 import tli;
 import scev;
 import loopnest;
+import simplifycfg;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -61,6 +62,7 @@ let P_VERIFY_FUNCTION = 109;
 let P_MEM2REG = 130;
 let P_SROA = 131;          // arg: 1 = preserve-cfg, 2 = aggregate-to-vector
 let P_INSTSIMPLIFY = 140;
+let P_SIMPLIFYCFG = 141;   // arg: index into scf_opt_table
 let P_INSTCOMBINE = 175;   // arg: bit 0 = verify-fixpoint, bits 1.. = max-iterations
 let P_BREAK_CRIT_EDGES = 110;
 let P_PRINT_LOOPS = 111;
@@ -127,6 +129,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_MEM2REG => "PromotePass",
         P_SROA => "SROAPass",
         P_INSTSIMPLIFY => "InstSimplifyPass",
+        P_SIMPLIFYCFG => "SimplifyCFGPass",
         P_INSTCOMBINE => "InstCombinePass",
         P_BREAK_CRIT_EDGES => "BreakCriticalEdgesPass",
         P_LOOP_SIMPLIFY => "LoopSimplifyPass",
@@ -407,6 +410,40 @@ recursive fn parse_function_elem(e: i32) -> i32 {
         arg |= (maxit as i32) << 1;
         return new_pnode(PK_PASS, P_INSTCOMBINE as i32, arg, false, pelems[e].name);
     }
+    if is_param_name(name, "simplifycfg") {
+        // parseSimplifyCFGOptions
+        var o = scf_default_opts();
+        if name != "simplifycfg" {
+            let ps = name[12..name.len - 1];
+            var st: i64 = 0;
+            for j in 0..ps.len + 1 {
+                if j < ps.len && ps[j] != ';' { continue; }
+                var pn = ps[st..j];
+                st = j + 1;
+                var en = true;
+                if starts_with(pn, "no-") { en = false; pn = pn[3..]; }
+                if pn == "speculate-blocks" { o.spec_blocks = en; }
+                else if pn == "simplify-cond-branch" { o.simplify_condbr = en; }
+                else if pn == "forward-switch-cond" { o.fwd_switch_cond = en; }
+                else if pn == "switch-range-to-icmp" { o.range_to_icmp = en; }
+                else if pn == "switch-to-arithmetic" { o.to_arith = en; }
+                else if pn == "switch-to-lookup" { o.to_lookup = en; }
+                else if pn == "keep-loops" { o.keep_loops = en; }
+                else if pn == "hoist-common-insts" { o.hoist_common = en; }
+                else if pn == "hoist-loads-stores-with-cond-faulting" { o.hoist_ldst_cf = en; }
+                else if pn == "sink-common-insts" { o.sink_common = en; }
+                else if pn == "speculate-unpredictables" { o.spec_unpred = en; }
+                else if en && starts_with(pn, "bonus-inst-threshold=") {
+                    let v, ok = parse_int(pn[21..]);
+                    if !ok { perr_pipeline(str("invalid argument to SimplifyCFG pass bonus-threshold parameter: '", pn[21..], "'")); }
+                    o.bonus = v;
+                } else { perr_pipeline(str("invalid SimplifyCFG pass parameter '", pn, "'")); }
+            }
+        }
+        let idx = scf_opt_table.len as i32;
+        scf_opt_table.push(o);
+        return new_pnode(PK_PASS, P_SIMPLIFYCFG as i32, idx, false, pelems[e].name);
+    }
     if is_param_name(name, "sroa") {
         // parseSROAOptions: default modify-cfg
         var arg: i32 = 0;
@@ -641,6 +678,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_MEM2REG => { return mem2reg_run(fv); },
         P_SROA => { let a = pnodes[n].arg; return sroa_run(fv, (a & 1) != 0, (a & 2) != 0); },
         P_INSTSIMPLIFY => { return instsimplify_run(fv); },
+        P_SIMPLIFYCFG => { return simplifycfg_run(fv, scf_opt_table[pnodes[n].arg]); },
         P_INSTCOMBINE => { let a = pnodes[n].arg; return ic::instcombine_run(fv, (a & 1) != 0, (a >> 1) as i64); },
         P_PRINT_DOMTREE => { print_domtree(fv, DT_DOM); return PA_ALL; },
         P_PRINT_POSTDOMTREE => { print_domtree(fv, DT_POST); return PA_ALL; },

@@ -10,6 +10,8 @@ import printer;
 
 struct Flag { name: i32, value: i32 }
 var cl_flags: Flag[>..];
+var cl_mattr: u8[>..];     // -mattr (target features for the TargetTransformInfo)
+var cl_mcpu: u8[>..];      // -mcpu
 
 // Options passes read. Options that would change output in ways we don't implement are not listed, so they
 // fail loudly. Options listed as no-ops change nothing we print (e.g. extra verification).
@@ -18,6 +20,17 @@ let KNOWN_FLAGS: const u8[:][] = [
     "verify-dom-info",                                   // no-op: extra verification only
     "verify-loop-info", "verify-loop-lcssa",             // no-op: extra verification only
     "simplifycfg-require-and-preserve-domtree",          // read by simplifycfg
+    "bonus-inst-threshold", "keep-loops", "switch-range-to-icmp", "switch-to-lookup", "forward-switch-cond",
+    "hoist-common-insts", "hoist-loads-stores-with-cond-faulting", "sink-common-insts", "speculate-unpredictables",
+    "phi-node-folding-threshold", "two-entry-phi-node-folding-threshold", "simplifycfg-hoist-common",
+    "simplifycfg-hoist-loads-with-cond-faulting", "simplifycfg-hoist-stores-with-cond-faulting",
+    "hoist-loads-stores-with-cond-faulting-threshold", "simplifycfg-hoist-common-skip-limit",
+    "simplifycfg-sink-common", "simplifycfg-hoist-cond-stores", "simplifycfg-merge-cond-stores",
+    "simplifycfg-merge-cond-stores-aggressively", "speculate-one-expensive-inst", "max-speculation-depth",
+    "simplifycfg-max-small-block-size", "simplifycfg-branch-fold-threshold",
+    "simplifycfg-branch-fold-common-dest-vector-multiplier", "simplifycfg-merge-compatible-invokes",
+    "max-switch-cases-per-result", "max-jump-threading-live-blocks",
+    "max-phi-entries-increase-after-removing-empty-block",   // read by simplifycfg (Local.cpp)
     "sroa-skip-mem2reg",                                 // read by sroa
     "aa-pipeline",                                       // the AAManager pipeline (aa.goose)
     "print-all-alias-modref-info", "print-no-aliases", "print-may-aliases", "print-partial-aliases",
@@ -71,6 +84,12 @@ fn flag_bool(name: const u8[:], dflt: bool) -> bool {
         else { fatal(str("opt: for the --", name, " option: '", v, "' is invalid value for boolean argument!")); }
     }
     return r;
+}
+
+// cl::opt::getNumOccurrences() > 0
+fn flag_given(name: const u8[:]) -> bool {
+    for f in cl_flags { if sbytes(f.name) == name { return true; } }
+    return false;
 }
 
 fn flag_int(name: const u8[:], dflt: i64) -> i64 {

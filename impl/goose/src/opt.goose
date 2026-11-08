@@ -7,6 +7,19 @@ import printer;
 import flags;
 import passmgr;
 
+// Triple::normalize for the triples the tests use: empty components become "unknown".
+fn triple_normalize(t: const u8[:], out: u8[>..]&) {
+    var st: i64 = 0;
+    var first = true;
+    for j in 0..t.len + 1 {
+        if j < t.len && t[j] != '-' { continue; }
+        if !first { out.push('-'); }
+        first = false;
+        if j == st { out.append("unknown"); } else { out.append(t[st..j]); }
+        st = j + 1;
+    }
+}
+
 fn main() {
     let av = args();
     var input: u8[>..] = [];
@@ -34,6 +47,9 @@ fn main() {
             exit(1);
         }
         else if starts_with(a, "-data-layout=") { cl_datalayout.append(a[13..]); }
+        else if starts_with(a, "-mtriple=") { triple_normalize(a[9..], cl_mtriple); }
+        else if starts_with(a, "-mattr=") { cl_mattr.append(a[7..]); }
+        else if starts_with(a, "-mcpu=") { cl_mcpu.append(a[6..]); }
         else if starts_with(a, "-opt-bisect-limit=") {
             let v, ok = parse_int(a[18..]);
             if !ok { write_stderr("opt: invalid -opt-bisect-limit\n"); exit(1); }
@@ -56,6 +72,8 @@ fn main() {
     if input.len == 0 { write_stderr("opt: no input file\n"); exit(1); }
     init_ir();
     parse_module(input);
+    // -mtriple overrides the module's triple (M->setTargetTriple(Triple::normalize(TargetTriple)))
+    if cl_mtriple.len > 0 { modules[cur_module].triple = intern(cl_mtriple); }
     if have_pipeline {
         let root = parse_pass_pipeline(pipeline);
         run_pipeline(root, cur_module);
