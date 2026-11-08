@@ -181,10 +181,11 @@ fn ld_get_available_load_store(inst: i32, ptr: i32, access_ty: i32, at_least_ato
         if ty_contains_scalable(access_ty) { return -1; }
         let lsize = dl_size_bits(access_ty);
         // (Len * 8).ult(LoadSize + (LoadOffset - StoreOffset) * 8)
+        // (Len * 8).ult(uint64_t): Len * 8 wraps in Len's width, the right side is not truncated
         let lw = ty_bits(vals[len].ty);
         let lhs = ap_mul(ci_ap(len), ap_u64(8, lw));
-        let rhs = ap_u64((lsize + (loff - soff) * 8) as u64, lw);
-        if ap_ult(lhs, rhs) { return -1; }
+        let rhs = (lsize + (loff - soff) * 8) as u64;
+        if ap_ult_u64(lhs, rhs) { return -1; }
         let bv = ci_ap(mv);
         let splat = if lsize >= 8 { ap_splat(lsize, bv) } else { ap_trunc(bv, lsize) };
         let sc = c_int_ap(ty_int(lsize), splat);

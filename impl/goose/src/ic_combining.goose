@@ -1017,10 +1017,6 @@ fn is_alloc_site_removable(ai: i32, know_init: bool) -> i64 {
 fn visit_alloc_site(mi: i32) -> i32 {
     as_users.clear();
     let is_alloca = iop(mi) == OP_ALLOCA;
-    if is_alloca && dbgrecs.len > 0 && dbg_records_use_value(mi) {
-        // findDbgUsers + ConvertDebugDeclareToDebugValue / erasing the records
-        ic_not_ported("visitAllocSite of an alloca that debug records describe");
-    }
     var know_undef = false;
     var know_zero = false;
     let init = mb_initial_value_of_allocation(mi, T_I8);
@@ -1031,6 +1027,10 @@ fn visit_alloc_site(mi: i32) -> i32 {
     if func_has_fn_attr(f, AK_SanitizeMemory) || func_has_fn_attr(f, AK_SanitizeAddress) { know_undef = false; }
     let removable = is_alloc_site_removable(mi, know_zero || know_undef);
     if removable < 0 { return -1; }
+    if is_alloca && dbgrecs.len > 0 && dbg_records_use_value(mi) {
+        // findDbgUsers + ConvertDebugDeclareToDebugValue / erasing the records
+        ic_not_ported("visitAllocSite of a removable alloca that debug records describe");
+    }
     var users: i32[>..<] = [];
     for x in as_users { users.push(x); }
     for k in users.len {

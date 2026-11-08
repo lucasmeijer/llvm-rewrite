@@ -6,11 +6,11 @@ lib/Transforms/Utils/BasicBlockUtils.cpp 0.25
 lib/Transforms/Utils/Local.cpp 0.4
 lib/Analysis/TargetTransformInfo.cpp 0.15
 lib/Analysis/CFG.cpp 0.2
-lib/Analysis/Loads.cpp 0.33
+lib/Analysis/Loads.cpp 0.6
 lib/Analysis/ValueTracking.cpp 0.6
 lib/IR/Value.cpp 0.3
 lib/IR/Instruction.cpp 0.4
-lib/IR/Instructions.cpp 0.05
+lib/IR/Instructions.cpp 0.08
 lib/IR/ProfDataUtils.cpp 0.4
 lib/IR/MDBuilder.cpp 0.1
 lib/Target/X86/X86TargetTransformInfo.cpp 0.3
@@ -33,7 +33,7 @@ lib/AsmParser/LLParser.cpp 0.7  # manual: own parser structure; all IR construct
 lib/IR/AutoUpgrade.cpp 0.25
 lib/Analysis/InstructionSimplify.cpp 0.9
 lib/IR/AsmWriter.cpp 0.75  # manual: own printer structure, table-driven DI nodes; no summary-index printing or use-list-order prediction (~17%) (heuristic 0.17)
-lib/Transforms/InstCombine/InstructionCombining.cpp 0.55
+lib/Transforms/InstCombine/InstructionCombining.cpp 0.85
 lib/Support/APFloat.cpp 0.25
 lib/Transforms/Scalar/SROA.cpp 0.85
 lib/Transforms/InstCombine/InstCombineCalls.cpp 0.1
@@ -105,3 +105,8 @@ lib/Analysis/ValueLatticeUtils.cpp 1  # manual: renamed: sc_can_track_* in sccp.
 lib/Analysis/DomConditionCache.cpp 1
 lib/Transforms/InstCombine/InstCombineSelect.cpp 0.95
 lib/Transforms/InstCombine/InstCombinePHI.cpp 0.9
+lib/Analysis/VectorUtils.cpp 0.15
+lib/Analysis/MemoryBuiltins.cpp 0.55
+lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
+lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
+lib/IR/EHPersonalities.cpp 0.5

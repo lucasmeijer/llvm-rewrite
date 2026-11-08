@@ -229,6 +229,36 @@ icmp*/fcmp* tests.
 - `combineLoadToOperationType` uses `CastUser->replaceAllUsesWith(NewLoad)` (no worklist push of the users), then
   erases the cast and returns the old load (which then dies as trivially dead).
 
+- **LLVM 23 null vectors of FP elements are `ConstantFP`, null vectors of pointers `ConstantPointerNull`**
+  (`Constant::getNullValue`, Constants.cpp:384), so `isa<ConstantAggregateZero>` is false for a parsed
+  `<4 x float> zeroinitializer`: collectShuffleElements then takes the identity-mask fallback and
+  `insertelement <4 x float> zeroinitializer, (extractelement <2 x float> %v, 0), 0` becomes
+  `shufflevector %wide, <poison, 0.0, 0.0, 0.0>, <0, 5, 6, 7>` (InstCombine/insert-element-shuffle-vector-debugloc.ll).
+- `FoldOpIntoSelect(Op, SI, FoldWithMultiUse = false, SimplifyBothArms = false)`: visitExtractValueInst,
+  visitExtractElementInst and visitShuffleVectorInst fold through a select when only one arm simplifies
+  (InstCombine/extract-select-agg.ll).
+- **`InstCombiner::ComputeNumSignBits` / `ComputeMaxSignificantBits` build a query without the DomConditionCache**
+  (InstCombiner.h:491), while computeKnownBits / MaskedValueIsZero use SQ with it: under `br (icmp ult %x, 8)` a
+  `trunc i32 %x to i16` gets `nuw` but not `nsw`. ValueTracking's own computeOverflowForSigned* call
+  `::ComputeNumSignBits(V, SQ)` and do see the DC (ValueTracking.cpp:7523).
+- **TargetFolder::FoldGEP never folds a GEP whose source element type is scalable** (`isSupportedGetElementPtr`),
+  even over a constant base: the GEP instruction is then canonicalized with `llvm.vscale` (the declaration stays
+  in the module even when the code dies; GlobalOpt/2022-08-23-ScalableVectorArrayCrash.ll). EmitGEPOffset and
+  unpackLoad/StoreToAggregate use `CreateTypeSize` = `mul nuw (vscale), MinSize`, which instcombine turns into
+  `shl nuw`.
+- **`ni:<AS>` address spaces get HasUnstableRepresentation** (DataLayout.cpp:705): mustNotIntroduceIntToPtr is
+  true for them, so `gep i8, ptr addrspace(4) null, i64 50` is not folded to `inttoptr` and a store of `i64 5`
+  is not forwarded to a `ptr addrspace(4)` load (isBitOrNoopPointerCastable / FoldReinterpretLoadFromConst refuse
+  non-integral pointers).
+- `MemoryLocation::getForDest(CallBase)` looks at `getMemoryEffects() & writeOnly()` only: a call with
+  `memory(read, argmem: readwrite)` whose only written pointer is an unescaped alloca is a removable write, so
+  visitAllocSite deletes both (DeadStoreElimination/trivial-dse-calls.ll).
+- `handleUnreachableFrom(I)` erases `[I, terminator)`: started at the terminator (a `store ..., ptr undef` right
+  before `ret`) it erases nothing and the store stays as the unreachable marker (InstCombine/store.ll).
+- `Value::getPointerDereferenceableBytes` of a `dereferenceable(N)` argument reports CanBeNull = false even in a
+  `null_pointer_is_valid` function, so computePointerICmp folds `icmp eq %p, %alloca` to false
+  (InstSimplify/compare.ll icmp_eq_arg_derefable_null_valid_and_alloca).
+
 ## Facts found by the per-function sweep (jai, 2026-11)
 
 - **canRewriteGEPAsOffset's "PHI node users" check never fires**: it iterates `Val->uses()` and converts each `Use`

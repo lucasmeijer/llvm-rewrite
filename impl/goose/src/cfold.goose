@@ -8,6 +8,7 @@
 // vector element count) fail loudly.
 import std;
 import ir;
+import memloc;
 import irutil;
 import calls;
 import instinfo;
@@ -445,13 +446,16 @@ recursive fn cf_fold_load_through_bitcast(c0: i32, dty: i32) -> i32 {
     while c >= 0 {
         let st = vals[c].ty;
         if st == dty { return c; }
-        if ty_kind(st) == TK_SVEC || ty_kind(dty) == TK_SVEC { cfa_not_ported("loads through bitcasts of scalable vectors"); }
+        // TypeSize: known-minimum bits, scalable flag
         let dsz = dl_size_bits(dty);
         let ssz = dl_size_bits(st);
-        if ssz < dsz { return -1; }
+        let dsc = ty_size_scalable(dty);
+        let ssc = ty_size_scalable(st);
+        // TypeSize::isKnownGE(SrcSize, DestSize)
+        if ssz < dsz || (dsc && !ssc) { return -1; }
         let u = cf_fold_load_from_uniform(c, dty);
         if u >= 0 { return u; }
-        if ssz == dsz && cf_is_nonintegral_ptr_ty(st) == cf_is_nonintegral_ptr_ty(dty) {
+        if ssz == dsz && ssc == dsc && cf_is_nonintegral_ptr_ty(st) == cf_is_nonintegral_ptr_ty(dty) {
             var o = OP_BITCAST;
             if ty_is_int(st) && ty_kind(dty) == TK_PTR { o = OP_INTTOPTR; }
             else if ty_kind(st) == TK_PTR && ty_is_int(dty) { o = OP_PTRTOINT; }

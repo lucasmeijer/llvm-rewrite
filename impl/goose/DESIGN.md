@@ -480,6 +480,10 @@ max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
 | `ic_select.goose` | InstCombineSelect.cpp, whole: `visit_select` and every helper in file order (matchSelectPattern with casts locally) |
 | `ic_phi.goose` | InstCombinePHI.cpp, whole: `visit_phi`, the foldPHIArg* folds, SliceUpIllegalIntegerPHI, PredOrder (reset per iteration) |
 | `ic_demanded_elts.goose` | SimplifyDemandedVectorElts (InstCombineSimplifyDemanded.cpp) |
+| `ic_loadstorealloca.goose` | InstCombineLoadStoreAlloca.cpp, whole (alloca/load/store visitors, PointerReplacer, mergeStoreIntoSuccessor), copyMetadataForLoad, getOrEnforceKnownAlignment |
+| `ic_combining.goose` | the rest of InstructionCombining.cpp's visitors: GEP (+ visitGEPOfGEP, foldGEPOfPhi), visitAllocSite/visitFree, switch, extractvalue, landingpad, freeze, foldVectorBinop |
+| `ic_vectorops.goose` | InstCombineVectorOps.cpp, whole (extractelement, insertelement, insertvalue, shufflevector), the ShuffleVectorInst mask predicates |
+| `loads.goose`, `memorybuiltins.goose` (global) | Loads.cpp (isSafeToLoadUnconditionally, FindAvailableLoadedValue), MemoryBuiltins.cpp (allocation data/families, getAllocSize, ObjectSizeOffsetVisitor, lowerObjectSizeCall) |
 | `ic_visit_misc.goose` | calls (`visitCallInst`/`visitCallBase` for ordinary functions, `llvm.assume`), and the fail-loudly fallback for every visitor that isn't ported |
 | `domcond.goose` (global) | DomConditionCache; ValueTracking consults it (knownbits, pow2, non-equal, fpclass) while `dc_active` |
 | `overflow.goose` (global) | computeOverflowFor*, haveNoCommonBitsSet |

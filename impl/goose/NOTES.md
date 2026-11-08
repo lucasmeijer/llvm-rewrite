@@ -431,8 +431,7 @@
 - Fixed in shared code on the way: TLI size_t is now the DataLayout index size of AS 0 (`tli_sizet_bits`,
   was a constant 64); `ac_register_assumption` / `ac_update_affected` (assume.goose) for assumes created or
   changed by a pass.
-- Not ported / known gaps (fail loudly): SimplifyDemandedFPClass, foldVectorBinop
-  with shuffle/intrinsic operands, OptimizePointerDifference, LibCallSimplifier, alloc-site handling, salvaging
+- Not ported / known gaps (fail loudly): SimplifyDemandedFPClass, OptimizePointerDifference, LibCallSimplifier, salvaging
   debug info (erasing an instruction used by a debug record), dropDroppableUses when sinking, AliasScopeTracker,
   LowerDbgDeclare, the !annotation copy, branch-weight updates, foldBinopWithRecurrence.
 - Perf: not measurable yet (`tests/perf/scaling/straightline/*` has an `@perf: opt -passes=instcombine` line,
@@ -452,6 +451,37 @@
   getMaskedTypeForICmpPair's outputs are the globals `mk_*`: copy them before calling it again.
   Still loud: setExplicitlyUnknownBranchWeightsIfProfiled in reassociateBooleanAndOr (profiled functions),
   shufflevector of constants in foldIntegerPackFromVector, APFloat negation of ppc_fp128.
+- memory/GEP/vector (ic_loadstorealloca.goose, ic_combining.goose, ic_vectorops.goose, loads.goose,
+  memorybuiltins.goose): InstCombineLoadStoreAlloca.cpp and InstCombineVectorOps.cpp whole, in file order; the
+  InstructionCombining.cpp visitors for GEP, alloc sites, free, switch, extractvalue, landingpad, freeze and
+  foldVectorBinop (ic_common's `fold_vector_binop` forwards to `fold_vector_binop_impl`). Shared pieces:
+  loads.goose (global: `ld_safe_to_load_unconditionally(_ty)` on top of speculate.goose's spec_deref_aligned,
+  `ld_find_available_loaded_value(li, q, max)` + `ld_is_load_cse`, `ld_is_bit_or_noop_ptr_castable`),
+  memorybuiltins.goose (global: `mb_alloc_data`, `mb_allocation_family` (families generated into gen_tli.goose by
+  tools/gen_tli.py), `mb_initial_value_of_allocation`, `mb_reallocated_operand`, `mb_get_alloc_size`,
+  `mb_get_object_size` = ObjectSizeOffsetVisitor in all four modes, `mb_lower_object_size_call` (static path),
+  `mb_memloc_for_dest`), builders in ic_builder.goose (`icb_load_like/icb_aligned_load/icb_aligned_store/icb_alloca/
+  icb_extract_value/icb_insert_value/icb_extract_element/icb_insert_element/icb_shuffle(1)/ic_new_shuffle(1)/
+  icb_phi/icb_bit_or_pointer_cast/icb_type_size`), `ic_sdve(v, demanded, allow_multi)`, `lsa_copy_metadata_for_load`
+  (copyMetadataForLoad with copyNonnull/RangeMetadata), `lsa_get_or_enforce_known_alignment`, `inst_copy_all_md`.
+  AA: `ic_aa_ensure()` calls aa_begin once per InstCombinePass run; FindAvailableLoadedValue uses one BatchAA
+  query context per load (aq_push/aq_pop).
+  Masks of shufflevectors are runs in `ints`; every fold copies a mask into a local array before creating
+  instructions (`sv_mask`, `shuf_mask_copy`) because creating a shuffle appends to the pool.
+  Still loud: ObjectSizeOffsetEvaluator (dynamic objectsize) and findLoadOffsetRange (objectsize of a loaded
+  pointer), getAllocSize of strdup-like calls (GetStringLength), visitAllocSite of a removable alloca that debug
+  records describe (ConvertDebugDeclareToDebugValue), mergeDIAssignID, getMostGenericTBAA of different tags in
+  AAMDNodes::merge, the ptrauth `llvm.protected.field.ptr` load/store folds, tryEnforceAlignment of a thread-local
+  global. The memory unit's remaining failures are LibCallSimplifier/memory intrinsics (InstCombineCalls.cpp).
+  Shared fixes found by the per-function sweep (all in knowledge/llvm/instcombine.md): ic.goose
+  handleUnreachableFrom erased the whole block when started at the terminator; canRewriteGEPAsOffset's phi check;
+  stripPointerCasts follows `returned` arguments; non-integral (`ni:`) = unstable representation (load folding, GEP
+  folding to inttoptr); top-level ComputeNumSignBits without the DomConditionCache (vt `num_sign_bits` at depth 0;
+  `ncsb_q` keeps it for computeOverflowForSigned*); unnamed_addr is `Glob.unnamed == 2`; isStaticAlloca's inalloca
+  bit is `Inst.bits & 1`; dereferenceable arguments are not "can be null" in null_pointer_is_valid functions; byte
+  all-ones/zero constants; array counts print unsigned; no constant GEPs of scalable source types.
+  Per-function sweep `--passes instcombine`: 21403 identical / 2 differs before (main at 6a83260) -> 44866 identical
+  / 0 differs (with the select/phi, FP and calls ports landing at the same time).
 - select/phi (ic_select.goose, ic_phi.goose, ic_demanded_elts.goose): InstCombineSelect.cpp and InstCombinePHI.cpp
   whole, in file order, and SimplifyDemandedVectorElts (entries `ic_simplify_demanded_vector_elts(v, demanded, depth,
   allow_multi) -> i32, AP` and `ic_simplify_demanded_vector_elts_root`). matchSelectPattern with a CastOp
