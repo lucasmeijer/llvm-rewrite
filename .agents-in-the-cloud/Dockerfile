@@ -6,10 +6,15 @@ FROM agents-in-the-cloud-workspace
 # Jai can't be baked in (its download URL is private): scripts/ensure-jai.sh installs it at runtime from
 # $JAI_COMPILER_URL into /persistent.
 # C (gcc/clang), Rust (rustup) and Python 3 come with the base image.
-# valgrind: `harness/run perf` counts executed instructions with cachegrind (the VM exposes no hardware counters).
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends zstd xz-utils ca-certificates curl git unzip libc6-dev valgrind
+ && apt-get install -y --no-install-recommends zstd xz-utils ca-certificates curl git unzip libc6-dev
 
 COPY .agents-in-the-cloud/image/install-toolchains.sh /tmp/install-toolchains.sh
 RUN bash /tmp/install-toolchains.sh && rm /tmp/install-toolchains.sh
+
+# Extra packages go in their own step, after the toolchains. Editing an earlier step invalidates the cached toolchain
+# layer, and rebuilding it fails here: large GitHub release downloads (LLVM, Goose) time out with 504 through the proxy.
+# valgrind: `harness/run perf --instr` counts executed instructions with cachegrind (the VM has no hardware counters).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends valgrind
