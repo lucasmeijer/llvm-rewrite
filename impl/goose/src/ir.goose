@@ -1329,7 +1329,11 @@ let MK_STRING = 1;     // MDString: extra = string id
 let MK_VALUE = 2;      // ConstantAsMetadata / LocalAsMetadata: extra = value id
 let MK_TEMP = 3;       // forward reference placeholder
 let MK_DILOCATION = 4;
-let MK_GENERIC = 5;    // specialized DI node: printed from its field list (extra = name string, fields in md_ops)
+let MK_GENERIC = 5;    // unused
+let MK_DI = 6;         // specialized DI node (dinfo.goose): extra = DIK_* kind, ops = fields in schema order
+let MK_INTLIT = 7;     // integer field value of a DI node: extra = low 32 bits, ops = [high 32 bits]
+let MK_DIEXPR = 8;     // DIExpression: ops = elements (MK_INTLIT); a node, but printed inline (no slot)
+let MK_DIARGLIST = 9;  // DIArgList: ops = ValueAsMetadata; not a node
 
 struct Md { kind: u8, distinct: u8, ops: i32, nops: i32, extra: i32, hash: u32 }
 var mds: Md[>..];
@@ -1389,7 +1393,7 @@ fn md_get(kind: i64, extra: i32, opsv: const i32[:], distinct: bool) -> i32 {
 fn md_string(s: const u8[:]) -> i32 { md_get(MK_STRING, intern(s), [], false) }
 fn md_value(v: i32) -> i32 { md_get(MK_VALUE, v, [], false) }
 fn md_op(m: i32, k: i64) -> i32 { md_ops[mds[m].ops + k] }
-fn md_is_node(m: i32) -> bool { let k = mds[m].kind; k == MK_TUPLE || k >= MK_DILOCATION }
+fn md_is_node(m: i32) -> bool { let k = mds[m].kind; k == MK_TUPLE || k == MK_DILOCATION || k == MK_GENERIC || k == MK_DI || k == MK_DIEXPR }
 
 // Metadata kinds (FixedMetadataKinds.def, then custom kinds in registration order).
 var md_kind_names: i32[>..];

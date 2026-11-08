@@ -11,6 +11,8 @@ import printer;
 import calls;
 import intrinsics;
 import autoupgrade;
+import dinfo;
+import gen_dwarf;
 
 // ---------------------------------------------------------------------------------------------
 // Parser state
@@ -981,7 +983,7 @@ recursive fn parse_metadata_operand() -> i32 {
         perr("expected metadata operand");
     }
     if tk == T_MDVAR {
-        perr("specialized metadata nodes (!DI...) are not supported yet");
+        return parse_di_node(false);
     }
     if tok_is("distinct") { lex(); if tk != T_EXCL { perr("expected '!'"); } lex(); return parse_md_tuple(true); }
     if tok_is("null") { lex(); return -1; }
@@ -1016,10 +1018,14 @@ fn parse_md_def() {
     expect_punct('=', "'='");
     var distinct = false;
     if tok_is("distinct") { lex(); distinct = true; }
-    if tk == T_MDVAR { perr("specialized metadata nodes (!DI...) are not supported yet"); }
-    if tk != T_EXCL { perr("expected metadata node"); }
-    lex();
-    let m = parse_md_tuple(distinct);
+    var m: i32 = -1;
+    let before = mds.len;
+    if tk == T_MDVAR { m = parse_di_node(distinct); }
+    else {
+        if tk != T_EXCL { perr("expected metadata node"); }
+        lex();
+        m = parse_md_tuple(distinct);
+    }
     let old = idx_get(md_slots, n as i32);
     if old >= 0 && mds[old].kind == MK_TEMP {
         // overwrite the placeholder in place with the definition, so references stay valid
@@ -1030,10 +1036,11 @@ fn parse_md_def() {
         mds[old].nops = d.nops;
         mds[old].extra = d.extra;
         mds[old].hash = d.hash;
-        if d.distinct == 0 {
+        if d.distinct == 0 && m >= before {
             // make the old id the canonical uniqued node if the new one was freshly created
             md_rebuild_tab_prefer(old, m);
         }
+        // otherwise the placeholder is now a copy of an existing uniqued node; md_merge_uniqued merges them
         return;
     }
     if old >= 0 { perr(str("Metadata id is already used")); }
@@ -1041,9 +1048,18 @@ fn parse_md_def() {
 }
 
 fn md_rebuild_tab_prefer(keep: i32, drop: i32) {
-    // mark the duplicate as distinct garbage so it is never found again
+    // mark the duplicate as distinct garbage so it is never found again; the table entry points at keep
     mds[drop].distinct = 1;
     mds[drop].kind = MK_TEMP;
+    if md_tab.len == 0 { md_rebuild_tab(); return; }
+    let mask = md_tab.len - 1;
+    var j = (mds[keep].hash as i64) & mask;
+    loop {
+        let e = md_tab[j];
+        if e < 0 { break; }
+        if e == drop { md_tab[j] = keep; return; }
+        j = (j + 1) & mask;
+    }
     md_rebuild_tab();
 }
 
@@ -1061,6 +1077,7 @@ fn parse_md_node_ref() -> i32 {
         if tk == T_INT { let n = parse_uint(); return get_md_slot(n); }
         if tok_punct('{') { return parse_md_tuple(false); }
     }
+    if tk == T_MDVAR { return parse_di_node(false); }
     if tok_is("distinct") { lex(); lex(); return parse_md_tuple(true); }
     perr("expected metadata node");
     return -1;
@@ -2825,6 +2842,7 @@ fn parse_module(path: const u8[:]) {
     declare_forward_intrinsics();
     for m in md_slots { if m >= 0 && mds[m].kind == MK_TEMP { perr_at(src.len, "use of undefined metadata"); } }
     md_mark_cycles();
+    md_merge_uniqued();
     if symtabs[gfwd_st].count > 0 { perr_at(src.len, "use of undefined value"); }
     for f in gfwd_num { if f >= 0 { perr_at(src.len, "use of undefined value"); } }
     for k in ba_fwd.len / 4 { if ba_fwd[4 * k] >= 0 { perr_at(src.len, "expected function name in blockaddress"); } }
@@ -2892,20 +2910,305 @@ fn infer_datalayout() {
     dl_parse(d);
 }
 
-// Uniqued nodes that are part of a cycle through themselves cannot be uniqued; LLVM prints them distinct.
-recursive fn md_reaches(from: i32, target: i32, depth: i64) -> bool {
-    if depth > 64 { return false; }
-    for k in mds[from].nops {
-        let o = md_ops[mds[from].ops + k];
-        if o < 0 || !md_is_node(o) { continue; }
-        if o == target { return true; }
-        if mds[o].distinct == 0 && md_reaches(o, target, depth + 1) { return true; }
-    }
-    return false;
-}
-
+// A uniqued node whose operand is resolved to itself (MDNode::handleChangedOperand with New == this) is made
+// distinct. With placeholders overwritten in place, that is a node that has itself as a direct operand.
 fn md_mark_cycles() {
     for m in md_slots {
-        if m >= 0 && mds[m].kind == MK_TUPLE && mds[m].distinct == 0 && md_reaches(m, m, 0) { mds[m].distinct = 1; }
+        if m < 0 || mds[m].distinct != 0 { continue; }
+        let k = mds[m].kind;
+        if k != MK_TUPLE && k != MK_DI { continue; }
+        for j in mds[m].nops { if md_op(m, j) == m { mds[m].distinct = 1; } }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Specialized metadata (LLParser::parseSpecializedMDNode and the parseDI* functions).
+
+fn tok_int_i64() -> i64 {
+    if tk != T_INT { perr("expected integer"); }
+    if bn_active_bits(tnum) > 64 { perr("integer too large for a debug-info field"); }
+    let v = bn_word(tnum, 0) as! i64;
+    if tneg { return -v; }
+    return v;
+}
+
+fn parse_dw_enum(names: const u8[:][:], vals: const i64[:], what: const u8[:]) -> i64 {
+    if tk == T_INT { let v = tok_int_i64(); lex(); return v; }
+    if tk != T_KW { perr(str("expected ", what)); }
+    let v = dw_value(names, vals, tok_text());
+    if v < 0 { perr(str("invalid ", what, " '", tok_text(), "'")); }
+    lex();
+    return v;
+}
+
+// DIFlag / DISPFlag lists: A | B | 12
+fn parse_flag_list(names: const u8[:][:], vals: const i64[:]) -> i64 {
+    var r: i64 = 0;
+    loop {
+        if tk == T_INT { r |= tok_int_i64(); lex(); }
+        else {
+            if tk != T_KW { perr("expected debug info flag"); }
+            let v = dw_value(names, vals, tok_text());
+            if v < 0 { perr(str("invalid debug info flag '", tok_text(), "'")); }
+            r |= v;
+            lex();
+        }
+        if !eat_punct('|') { break; }
+    }
+    return r;
+}
+
+fn parse_keyword_enum(names: const u8[:][:], what: const u8[:]) -> i64 {
+    if tk == T_INT { let v = tok_int_i64(); lex(); return v; }
+    for n, i in names { if tok_is(n) { lex(); return i; } }
+    perr(str("expected ", what));
+    return 0;
+}
+
+// MDField: null or any metadata
+recursive fn parse_md_field_value() -> i32 {
+    if tok_is("null") { lex(); return -1; }
+    return parse_metadata_operand();
+}
+
+// !DIExpression(...) with the current token on "DIExpression" (T_MDVAR)
+recursive fn parse_di_expression(distinct: bool) -> i32 {
+    lex();
+    expect_punct('(', "'(' here");
+    let mark = mstack.len;
+    if !tok_punct(')') {
+        loop {
+            if tk == T_KW {
+                let w = tok_text();
+                var v = dw_value(NAME_OP, VAL_OP, w);
+                if v < 0 { v = dw_value(NAME_ATE, VAL_ATE, w); }
+                if v < 0 { perr(str("invalid DWARF op '", w, "'")); }
+                mstack.push(md_int(v));
+                lex();
+            } else {
+                if tk != T_INT || tneg { perr("expected unsigned integer"); }
+                mstack.push(md_int(bn_word(tnum, 0) as! i64));
+                lex();
+            }
+            if !eat_punct(',') { break; }
+        }
+    }
+    expect_punct(')', "')' here");
+    let r = md_get(MK_DIEXPR, -1, mstack[mark..], distinct);
+    mstack.resize(mark);
+    return r;
+}
+
+// !DIArgList(ty v, ...)
+recursive fn parse_di_arglist() -> i32 {
+    lex();
+    expect_punct('(', "'(' here");
+    let mark = mstack.len;
+    if !tok_punct(')') {
+        loop {
+            let t = parse_type();
+            let v = parse_value(t);
+            mstack.push(md_value(v));
+            if !eat_punct(',') { break; }
+        }
+    }
+    expect_punct(')', "')' here");
+    let r = md_get(MK_DIARGLIST, -1, mstack[mark..], false);
+    mstack.resize(mark);
+    return r;
+}
+
+// Current token: T_MDVAR naming the node kind.
+recursive fn parse_di_node(distinct: bool) -> i32 {
+    if tstr == "DIExpression" { return parse_di_expression(distinct); }
+    if tstr == "DIArgList" { return parse_di_arglist(); }
+    let kind = dik_lookup(tstr);
+    if kind < 0 { perr("expected metadata type"); }
+    if kind == DIK_GENERIC { perr("GenericDINode is not supported yet"); }
+    di_init();
+    let st = dik_start[kind] as i64;
+    let nf = dik_count[kind] as i64;
+    let saved_ic = ignore_colon;
+    ignore_colon = true;
+    lex();
+    expect_punct('(', "'(' here");
+    let mark = mstack.len;
+    for k in nf { mstack.push(-1); }
+    // values of fields written explicitly but equal to the default (needed for legacy flags)
+    var sp_isdef: i64 = 1;
+    var sp_local: i64 = 0;
+    var sp_opt: i64 = 0;
+    var sp_virt: i64 = 0;
+    var sp_seen = false;
+    if !tok_punct(')') {
+        loop {
+            if tk != T_KW { perr("expected field label here"); }
+            let fname = tstr_id_kw();
+            var fi: i64 = -1;
+            for k in nf { if di_fields[st + k].name == fname { fi = k; } }
+            if fi < 0 { perr(str("invalid field '", sbytes(fname), "'")); }
+            lex();
+            expect_punct(':', "':' here");
+            let f = di_fields[st + fi];
+            let ty = f.ty;
+            var slot: i32 = -1;
+            var iv: i64 = 0;
+            var is_int = true;
+            if ty == 'm' { slot = parse_md_field_value(); is_int = false; }
+            else if ty == 's' || ty == 'S' {
+                if tk != T_STR { perr("expected string constant"); }
+                if tstr.len > 0 || ty == 'S' { slot = md_string(tstr); }
+                lex();
+                is_int = false;
+            }
+            else if ty == 'u' || ty == 'i' || ty == 'A' { iv = tok_int_i64(); lex(); }
+            else if ty == 'b' {
+                if tok_is("true") { iv = 1; } else if tok_is("false") { iv = 0; } else { perr("expected 'true' or 'false'"); }
+                lex();
+            }
+            else if ty == 't' { iv = parse_dw_enum(NAME_TAG, VAL_TAG, "DWARF tag"); }
+            else if ty == 'a' { iv = parse_dw_enum(NAME_ATE, VAL_ATE, "DWARF type attribute encoding"); }
+            else if ty == 'L' { iv = parse_dw_enum(NAME_LANG, VAL_LANG, "DWARF language"); }
+            else if ty == 'N' { iv = parse_dw_enum(NAME_LNAME, VAL_LNAME, "DWARF source language name"); }
+            else if ty == 'C' { iv = parse_dw_enum(NAME_CC, VAL_CC, "DWARF calling convention"); }
+            else if ty == 'V' { iv = parse_dw_enum(NAME_VIRT, VAL_VIRT, "DWARF virtuality code"); }
+            else if ty == 'M' { iv = parse_dw_enum(NAME_MACINFO, VAL_MACINFO, "DWARF macinfo type"); }
+            else if ty == 'K' { iv = parse_dw_enum(NAME_ENUMKIND, VAL_ENUMKIND, "DWARF enum kind"); }
+            else if ty == 'D' { iv = parse_dw_enum(NAME_DIALECT, VAL_DIALECT, "DWARF language dialect"); }
+            else if ty == 'f' { iv = parse_flag_list(NAME_DIFLAG, VAL_DIFLAG); }
+            else if ty == 'p' { iv = parse_flag_list(NAME_SPFLAG, VAL_SPFLAG); }
+            else if ty == 'E' { iv = parse_keyword_enum(["NoDebug", "FullDebug", "LineTablesOnly", "DebugDirectivesOnly"], "emission kind"); }
+            else if ty == 'T' { iv = parse_keyword_enum(["Default", "GNU", "None", "Apple"], "nameTable kind"); }
+            else if ty == 'X' { iv = parse_keyword_enum(["CSK_None", "CSK_MD5", "CSK_SHA1", "CSK_SHA256"], "checksum kind"); }
+            else if ty == 'F' { iv = parse_keyword_enum(["Binary", "Decimal", "Rational"], "fixed point kind"); }
+            else if ty == 'U' || ty == 'I' || ty == 'G' {
+                is_int = false;
+                if tk == T_INT {
+                    let v = tok_int_i64();
+                    lex();
+                    if ty == 'G' {
+                        let ops2 = [md_int(0x11), md_int(v)];
+                        slot = md_get(MK_DIEXPR, -1, ops2, false);
+                    } else {
+                        slot = md_value(c_int(T_I64, v));
+                    }
+                } else {
+                    slot = parse_md_field_value();
+                }
+            }
+            else { perr("unsupported debug info field type"); }
+            if is_int {
+                if kind == DIK_SUBPROGRAM {
+                    let fnm = sbytes(fname);
+                    if fnm == "isDefinition" { sp_isdef = iv; }
+                    else if fnm == "isLocal" { sp_local = iv; }
+                    else if fnm == "isOptimized" { sp_opt = iv; }
+                    else if fnm == "virtuality" { sp_virt = iv; }
+                    else if fnm == "spFlags" { sp_seen = true; }
+                }
+                if f.has_default != 0 && iv == f.def { slot = -1; } else { slot = md_int(iv); }
+            }
+            mstack[mark + fi] = slot;
+            if !eat_punct(',') { break; }
+        }
+    }
+    ignore_colon = saved_ic;
+    expect_punct(')', "')' here");
+    if kind == DIK_SUBPROGRAM {
+        // DISubprogram::toSPFlags for IR without spFlags
+        let spi = di_field_index(kind, "spFlags");
+        if !sp_seen {
+            var fl: i64 = sp_virt & 3;
+            if sp_local != 0 { fl |= 4; }
+            if sp_isdef != 0 { fl |= 8; }
+            if sp_opt != 0 { fl |= 16; }
+            mstack[mark + spi] = md_int(fl);
+        }
+        for nm in ["isLocal", "isDefinition", "isOptimized", "virtuality"] { mstack[mark + di_field_index(kind, nm)] = -1; }
+    }
+    if kind == DIK_LOCATION || kind == DIK_LEXICALBLOCK || kind == DIK_LABEL {
+        // adjustColumn: columns >= 2^16 become 0
+        let ci = di_field_index(kind, "column");
+        let c = mstack[mark + ci];
+        if c >= 0 && md_int_val(c) >= 65536 { mstack[mark + ci] = -1; }
+    }
+    if kind == DIK_ENUMERATOR {
+        let ui = di_field_index(kind, "isUnsigned");
+        if mstack[mark + ui] >= 0 && mstack[mark + di_field_index(kind, "value")] < 0 { mstack[mark + di_field_index(kind, "value")] = md_int(0); }
+    }
+    if kind == DIK_ASSIGNID && !distinct { perr("missing 'distinct', required for !DIAssignID()"); }
+    let r = md_get(MK_DI, kind as i32, mstack[mark..], distinct);
+    mstack.resize(mark);
+    return r;
+}
+
+fn tstr_id_kw() -> i32 { intern(tok_text()) }
+
+// Uniqued nodes that became equal only after their forward references were resolved are merged, as LLVM's
+// re-uniquing on operand change (MDNode::handleChangedOperand -> RAUW to the existing node) does.
+var md_canon: i32[>..<];
+var md_ktab: i32[>..<];
+
+fn md_canon_of(m: i32) -> i32 { if m < 0 { return m; } return md_canon[m]; }
+
+fn md_key_hash(m: i32) -> u32 {
+    var h: u32 = (mds[m].kind as u32) * 2654435761 + (mds[m].extra as! u32) * 31;
+    for k in mds[m].nops { h = (h ^ (md_canon_of(md_op(m, k)) as! u32)) * 16777619; }
+    return h;
+}
+
+fn md_key_eq(a: i32, b: i32) -> bool {
+    if mds[a].kind != mds[b].kind || mds[a].extra != mds[b].extra || mds[a].nops != mds[b].nops { return false; }
+    for k in mds[a].nops { if md_canon_of(md_op(a, k)) != md_canon_of(md_op(b, k)) { return false; } }
+    return true;
+}
+
+fn md_merge_uniqued() {
+    let n = mds.len;
+    md_canon.clear();
+    for i in n { md_canon.push(i as i32); }
+    var cap: i64 = 64;
+    while cap < n * 2 + 2 { cap *= 2; }
+    loop {
+        var changed = false;
+        md_ktab.clear();
+        md_ktab.resize(cap, -1);
+        let mask = cap - 1;
+        for i in n {
+            let m = i as i32;
+            if md_canon[m] != m || mds[m].distinct != 0 { continue; }
+            let k = mds[m].kind;
+            if k != MK_TUPLE && k != MK_DI && k != MK_DIEXPR && k != MK_DIARGLIST { continue; }
+            var j = (md_key_hash(m) as i64) & mask;
+            loop {
+                let e = md_ktab[j];
+                if e < 0 { md_ktab[j] = m; break; }
+                if md_key_eq(e, m) { md_canon[m] = e; changed = true; break; }
+                j = (j + 1) & mask;
+            }
+        }
+        if !changed { break; }
+    }
+    var any = false;
+    for i in n { if md_canon[i] != i as i32 { any = true; } }
+    if !any { return; }
+    for i in n {
+        let k = mds[i].kind;
+        if k == MK_INTLIT || k == MK_STRING || k == MK_VALUE || k == MK_TEMP { continue; }
+        for j in mds[i].nops { let x = md_ops[mds[i].ops + j]; if x >= 0 { md_ops[mds[i].ops + j] = md_canon[x]; } }
+    }
+    for &x in md_slots { if x >= 0 { x = md_canon[x]; } }
+    for k in md_att.len / 2 { let x = md_att[2 * k + 1]; if x >= 0 { md_att[2 * k + 1] = md_canon[x]; } }
+    for &v in vals { if v.kind == VK_MDVAL && v.sub >= 0 { v.sub = md_canon[v.sub]; } }
+    for &r in dbgrecs {
+        r.loc = md_canon_of(r.loc); r.dvar = md_canon_of(r.dvar); r.expr = md_canon_of(r.expr);
+        r.aid = md_canon_of(r.aid); r.addr = md_canon_of(r.addr); r.aexpr = md_canon_of(r.aexpr); r.dl = md_canon_of(r.dl);
+    }
+    for i in n {
+        if md_canon[i] != i as i32 { mds[i].kind = MK_TEMP; mds[i].distinct = 1; }
+    }
+    for i in n {
+        if mds[i].kind != MK_TEMP { mds[i].hash = md_hash(mds[i].kind as i64, mds[i].extra, md_ops[mds[i].ops..mds[i].ops + mds[i].nops]); }
+    }
+    md_rebuild_tab();
 }

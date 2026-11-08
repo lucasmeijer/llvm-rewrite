@@ -7,6 +7,8 @@ import bignum;
 import apfloat;
 import calls;
 import intrinsics;
+import dinfo;
+import gen_dwarf;
 
 var out: u8[>..];
 
@@ -39,6 +41,7 @@ fn create_as_slot(s: i32) {
 recursive fn create_md_slot(m: i32) {
     if m < 0 { return; }
     if !md_is_node(m) { return; }
+    if mds[m].kind == MK_DIEXPR { return; }
     if mdslot[m] >= 0 { return; }
     mdslot[m] = md_order.len as i32;
     md_order.push(m);
@@ -631,8 +634,16 @@ recursive fn put_operand(v: i32, print_type: bool) {
 recursive fn put_md_operand(m: i32, from_value: bool) {
     if m < 0 { put("null"); return; }
     let k = mds[m].kind;
+    if k == MK_DIEXPR { put_diexpr(m); return; }
+    if k == MK_DIARGLIST {
+        put("!DIArgList(");
+        for i in mds[m].nops { if i > 0 { put(", "); } put_md_operand(md_op(m, i), true); }
+        putc(')');
+        return;
+    }
     if md_is_node(m) {
         let s = mdslot[m];
+        if s < 0 && k == MK_DI && di_kind(m) == DIK_LOCATION { put_di_body(m); return; }
         if s < 0 { put("<badref>"); return; }
         putc('!');
         put_int(s as i64);
@@ -666,7 +677,482 @@ recursive fn put_md_body(m: i32) {
         putc('}');
         return;
     }
+    if k == MK_DI || k == MK_DIEXPR {
+        if mds[m].distinct != 0 { put("distinct "); }
+        if k == MK_DIEXPR { put_diexpr(m); } else { put_di_body(m); }
+        return;
+    }
     put("<unsupported metadata>");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Specialized debug-info nodes (AsmWriter.cpp writeDI* and MDFieldPrinter)
+
+var fs_first: bool = true;
+fn pf_sep() { if !fs_first { put(", "); } fs_first = false; }
+fn pf_label(name: const u8[:]) { pf_sep(); put(name); put(": "); }
+
+fn pf_str(m: i32, name: const u8[:], skip_empty: bool) {
+    let v = di_str(m, name);
+    if skip_empty && v.len == 0 { return; }
+    pf_label(name);
+    putc('"');
+    put_escaped(v);
+    putc('"');
+}
+recursive fn pf_mdv(name: const u8[:], o: i32, skip_null: bool) {
+    if skip_null && o < 0 { return; }
+    pf_label(name);
+    let saved = fs_first;
+    put_md_operand(o, false);
+    fs_first = saved;
+}
+recursive fn pf_md(m: i32, name: const u8[:], skip_null: bool) { pf_mdv(name, di_slot(m, name), skip_null); }
+fn pf_intv(name: const u8[:], v: i64, skip_zero: bool) {
+    if skip_zero && v == 0 { return; }
+    pf_label(name);
+    put_int(v);
+}
+fn pf_uintv(name: const u8[:], v: i64, skip_zero: bool) {
+    if skip_zero && v == 0 { return; }
+    pf_label(name);
+    put_uint(v as! u64);
+}
+fn pf_int(m: i32, name: const u8[:], skip_zero: bool) { pf_intv(name, di_int(m, name), skip_zero); }
+fn pf_uint(m: i32, name: const u8[:], skip_zero: bool) { pf_uintv(name, di_int(m, name), skip_zero); }
+// printBool: dflt -1 = always print
+fn pf_bool(m: i32, name: const u8[:], dflt: i64) {
+    let v = di_int(m, name);
+    let b: i64 = if v != 0 { 1 } else { 0 };
+    if dflt >= 0 && b == dflt { return; }
+    pf_label(name);
+    put(if b != 0 { "true" } else { "false" });
+}
+// printMetadataOrInt
+recursive fn pf_mdint(m: i32, name: const u8[:], unsigned: bool, skip_zero: bool) {
+    let o = di_slot(m, name);
+    if o < 0 { return; }
+    if mds[o].kind == MK_VALUE && vals[mds[o].extra].kind == VK_CINT {
+        let c = mds[o].extra;
+        if unsigned { pf_uintv(name, cint_lo(c) as! i64, skip_zero); } else { pf_intv(name, cint_sext(c), skip_zero); }
+        return;
+    }
+    pf_mdv(name, o, true);
+}
+fn pf_dwenum(name: const u8[:], v: i64, names: const u8[:][:], valsv: const i64[:], skip_zero: bool) {
+    if skip_zero && v == 0 { return; }
+    pf_label(name);
+    let s = dw_name(names, valsv, v);
+    if s.len > 0 { put(s); } else { put_uint(v as! u64); }
+}
+fn pf_tag(m: i32) {
+    pf_label("tag");
+    let v = di_int(m, "tag");
+    let s = dw_name(NAME_TAG, VAL_TAG, v);
+    if s.len > 0 { put(s); } else { put_uint(v as! u64); }
+}
+// printDIFlags (DINode::splitFlags)
+fn pf_diflags(name: const u8[:], v0: i64) {
+    if v0 == 0 { return; }
+    pf_label(name);
+    var fl = v0;
+    var first = true;
+    let acc = fl & 3;
+    if acc != 0 {
+        put(if acc == 1 { "DIFlagPrivate" } else if acc == 2 { "DIFlagProtected" } else { "DIFlagPublic" });
+        first = false;
+        fl &= ~3;
+    }
+    let ptm = fl & (3 << 16);
+    if ptm != 0 {
+        if !first { put(" | "); }
+        put(if ptm == (1 << 16) { "DIFlagSingleInheritance" } else if ptm == (2 << 16) { "DIFlagMultipleInheritance" } else { "DIFlagVirtualInheritance" });
+        first = false;
+        fl &= ~(3 << 16);
+    }
+    if (fl & 36) == 36 {
+        if !first { put(" | "); }
+        put("DIFlagIndirectVirtualBase");
+        first = false;
+        fl &= ~36;
+    }
+    for fv, i in VAL_DIFLAG {
+        let bit = fl & fv;
+        if bit != 0 {
+            if !first { put(" | "); }
+            put(dw_name(NAME_DIFLAG, VAL_DIFLAG, bit));
+            first = false;
+            fl &= ~bit;
+        }
+    }
+    if fl != 0 || first { if !first { put(" | "); } put_uint(fl as! u64); }
+}
+fn pf_spflags(name: const u8[:], v0: i64) {
+    pf_label(name);
+    if v0 == 0 { putc('0'); return; }
+    var fl = v0;
+    var first = true;
+    for fv, i in VAL_SPFLAG {
+        let bit = fl & fv;
+        if bit != 0 {
+            if !first { put(" | "); }
+            put(dw_name(NAME_SPFLAG, VAL_SPFLAG, bit));
+            first = false;
+            fl &= ~bit;
+        }
+    }
+    if fl != 0 || first { if !first { put(" | "); } put_uint(fl as! u64); }
+}
+
+// writeDIExpression
+fn put_diexpr(m: i32) {
+    put("!DIExpression(");
+    let n = mds[m].nops as i64;
+    // isValid
+    var valid = true;
+    var k: i64 = 0;
+    while k < n {
+        let op = md_int_val(md_op(m, k));
+        let sz = diexpr_op_size(op);
+        if k + sz > n { valid = false; break; }
+        if (op >= 0x50 && op <= 0x6f) || (op >= 0x70 && op <= 0x8f) { break; }
+        if op == 0x1000 { if k + sz != n { valid = false; } break; }
+        if op == 0x9f {
+            if k + sz != n && md_int_val(md_op(m, k + sz)) != 0x1000 { valid = false; break; }
+        } else if op == 0x16 {
+            if n == 1 { valid = false; break; }
+        } else if op == 0x1003 {
+            var first: i64 = 0;
+            if md_int_val(md_op(m, 0)) == 0x1005 && n > 1 && md_int_val(md_op(m, 1)) == 0 { first = 2; }
+            if !(k == first && md_int_val(md_op(m, k + 1)) == 1) { valid = false; }
+            break;
+        } else if !(op == 0x1004 || op == 0x1001 || op == 0x1005 || op == 0x1002 || op == 0x1006 || op == 0x1007 ||
+                    op == 0x10 || op == 0x23 || op == 0x22 || op == 0x1c || op == 0x1e || op == 0x1b || op == 0x1d ||
+                    op == 0x21 || op == 0x1a || op == 0x27 || op == 0x24 || op == 0x25 || op == 0x26 || op == 0x06 ||
+                    op == 0x94 || op == 0x18 || op == 0x30 || op == 0x20 || op == 0x12 || op == 0x90 || op == 0x92 ||
+                    op == 0x97 || op == 0x14 || op == 0x17 || op == 0x11 || op == 0x29 || op == 0x2e || op == 0x2b ||
+                    op == 0x2a || op == 0x2d || op == 0x2c || op == 0x1f || op == 0x19) {
+            valid = false;
+            break;
+        }
+        k += sz;
+    }
+    if valid {
+        var i: i64 = 0;
+        var first = true;
+        while i < n {
+            let op = md_int_val(md_op(m, i));
+            let sz = diexpr_op_size(op);
+            if !first { put(", "); }
+            first = false;
+            put(dw_name(NAME_OP, VAL_OP, op));
+            if op == 0x1001 {
+                put(", ");
+                put_uint(md_int_val(md_op(m, i + 1)) as! u64);
+                put(", ");
+                put(dw_name(NAME_ATE, VAL_ATE, md_int_val(md_op(m, i + 2))));
+            } else {
+                for a in 1..sz { put(", "); put_uint(md_int_val(md_op(m, i + a)) as! u64); }
+            }
+            i += sz;
+        }
+    } else {
+        for i in n { if i > 0 { put(", "); } put_uint(md_int_val(md_op(m, i)) as! u64); }
+    }
+    putc(')');
+}
+
+recursive fn put_di_body(m: i32) {
+    let kind = di_kind(m);
+    let saved = fs_first;
+    fs_first = true;
+    putc('!');
+    put(DIK_NAMES[kind]);
+    putc('(');
+    if kind == DIK_LOCATION {
+        pf_uint(m, "line", false);
+        pf_uint(m, "column", true);
+        pf_md(m, "scope", false);
+        pf_md(m, "inlinedAt", true);
+        pf_bool(m, "isImplicitCode", 0);
+        pf_uint(m, "atomGroup", true);
+        pf_uint(m, "atomRank", true);
+    } else if kind == DIK_ASSIGNID {
+    } else if kind == DIK_SUBRANGE {
+        pf_mdint(m, "count", false, false);
+        pf_mdint(m, "lowerBound", false, false);
+        pf_mdint(m, "upperBound", false, false);
+        pf_mdint(m, "stride", false, false);
+    } else if kind == DIK_GENERICSUBRANGE {
+        for nm in ["count", "lowerBound", "upperBound", "stride"] {
+            let o = di_slot(m, nm);
+            if o >= 0 && mds[o].kind == MK_DIEXPR && mds[o].nops == 2 && md_int_val(md_op(o, 0)) == 0x11 {
+                pf_intv(nm, md_int_val(md_op(o, 1)), false);
+            } else { pf_mdv(nm, o, true); }
+        }
+    } else if kind == DIK_ENUMERATOR {
+        pf_str(m, "name", false);
+        let u = di_int(m, "isUnsigned") != 0;
+        if u { pf_uint(m, "value", false); } else { pf_int(m, "value", false); }
+        if u { pf_label("isUnsigned"); put("true"); }
+    } else if kind == DIK_BASICTYPE || kind == DIK_FIXEDPOINTTYPE {
+        if di_int(m, "tag") != 36 { pf_tag(m); }
+        pf_str(m, "name", true);
+        pf_md(m, "scope", true);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+        pf_mdint(m, "size", true, true);
+        pf_uint(m, "align", true);
+        if kind == DIK_BASICTYPE { pf_uint(m, "dataSize", true); }
+        pf_dwenum("encoding", di_int(m, "encoding"), NAME_ATE, VAL_ATE, true);
+        if kind == DIK_BASICTYPE { pf_uint(m, "num_extra_inhabitants", true); }
+        pf_diflags("flags", di_int(m, "flags"));
+        if kind == DIK_FIXEDPOINTTYPE {
+            let fk = di_int(m, "kind");
+            pf_label("kind");
+            put(if fk == 0 { "Binary" } else if fk == 1 { "Decimal" } else { "Rational" });
+            if fk == 2 {
+                pf_int(m, "numerator", false);
+                pf_int(m, "denominator", false);
+            } else { pf_int(m, "factor", true); }
+        }
+    } else if kind == DIK_STRINGTYPE {
+        if di_int(m, "tag") != 18 { pf_tag(m); }
+        pf_str(m, "name", true);
+        pf_md(m, "stringLength", true);
+        pf_md(m, "stringLengthExpression", true);
+        pf_md(m, "stringLocationExpression", true);
+        pf_mdint(m, "size", true, true);
+        pf_uint(m, "align", true);
+        pf_dwenum("encoding", di_int(m, "encoding"), NAME_ATE, VAL_ATE, true);
+    } else if kind == DIK_DERIVEDTYPE {
+        pf_tag(m);
+        pf_str(m, "name", true);
+        pf_md(m, "scope", true);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+        pf_md(m, "baseType", false);
+        pf_mdint(m, "size", true, true);
+        pf_uint(m, "align", true);
+        pf_mdint(m, "offset", true, true);
+        pf_diflags("flags", di_int(m, "flags"));
+        pf_md(m, "extraData", true);
+        if di_has(m, "dwarfAddressSpace") && di_int(m, "dwarfAddressSpace") != 4294967295 { pf_uint(m, "dwarfAddressSpace", false); }
+        pf_md(m, "annotations", true);
+        if di_int(m, "ptrAuthKey") != 0 {
+            pf_uint(m, "ptrAuthKey", true);
+            pf_bool(m, "ptrAuthIsAddressDiscriminated", -1);
+            pf_uint(m, "ptrAuthExtraDiscriminator", true);
+            pf_bool(m, "ptrAuthIsaPointer", -1);
+            pf_bool(m, "ptrAuthAuthenticatesNullValues", -1);
+        }
+    } else if kind == DIK_SUBRANGETYPE {
+        pf_str(m, "name", true);
+        pf_md(m, "scope", true);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+        pf_mdint(m, "size", true, true);
+        pf_uint(m, "align", true);
+        pf_diflags("flags", di_int(m, "flags"));
+        pf_md(m, "baseType", false);
+        pf_md(m, "lowerBound", true);
+        pf_md(m, "upperBound", true);
+        pf_md(m, "stride", true);
+        pf_md(m, "bias", true);
+    } else if kind == DIK_COMPOSITETYPE {
+        pf_tag(m);
+        pf_str(m, "name", true);
+        pf_md(m, "scope", true);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+        pf_md(m, "baseType", true);
+        pf_mdint(m, "size", true, true);
+        pf_uint(m, "align", true);
+        pf_mdint(m, "offset", true, true);
+        pf_uint(m, "num_extra_inhabitants", true);
+        pf_diflags("flags", di_int(m, "flags"));
+        pf_md(m, "elements", true);
+        pf_dwenum("runtimeLang", di_int(m, "runtimeLang"), NAME_LANG, VAL_LANG, true);
+        pf_md(m, "vtableHolder", true);
+        pf_md(m, "templateParams", true);
+        pf_str(m, "identifier", true);
+        pf_md(m, "discriminator", true);
+        pf_md(m, "dataLocation", true);
+        pf_md(m, "associated", true);
+        pf_md(m, "allocated", true);
+        let r = di_slot(m, "rank");
+        if r >= 0 && mds[r].kind == MK_VALUE && vals[mds[r].extra].kind == VK_CINT { pf_intv("rank", cint_sext(mds[r].extra), false); }
+        else { pf_mdv("rank", r, true); }
+        pf_md(m, "annotations", true);
+        pf_md(m, "specification", true);
+        if di_has(m, "enumKind") && di_int(m, "enumKind") != 4294967295 { pf_dwenum("enumKind", di_int(m, "enumKind"), NAME_ENUMKIND, VAL_ENUMKIND, false); }
+        pf_md(m, "bitStride", true);
+    } else if kind == DIK_SUBROUTINETYPE {
+        pf_diflags("flags", di_int(m, "flags"));
+        pf_dwenum("cc", di_int(m, "cc"), NAME_CC, VAL_CC, true);
+        pf_md(m, "types", false);
+    } else if kind == DIK_FILE {
+        pf_str(m, "filename", false);
+        pf_str(m, "directory", false);
+        if di_has(m, "checksumkind") {
+            pf_label("checksumkind");
+            let ck = di_int(m, "checksumkind");
+            put(if ck == 1 { "CSK_MD5" } else if ck == 2 { "CSK_SHA1" } else { "CSK_SHA256" });
+            pf_str(m, "checksum", false);
+        }
+        if di_has(m, "source") { pf_str(m, "source", false); }
+    } else if kind == DIK_COMPILEUNIT {
+        if di_has(m, "sourceLanguageName") {
+            pf_dwenum("sourceLanguageName", di_int(m, "sourceLanguageName"), NAME_LNAME, VAL_LNAME, false);
+            pf_uint(m, "sourceLanguageVersion", true);
+        } else {
+            pf_dwenum("language", di_int(m, "language"), NAME_LANG, VAL_LANG, false);
+        }
+        pf_md(m, "file", false);
+        pf_str(m, "producer", true);
+        pf_bool(m, "isOptimized", -1);
+        pf_str(m, "flags", true);
+        pf_uint(m, "runtimeVersion", false);
+        pf_str(m, "splitDebugFilename", true);
+        pf_label("emissionKind");
+        let ek = di_int(m, "emissionKind");
+        put(if ek == 0 { "NoDebug" } else if ek == 1 { "FullDebug" } else if ek == 2 { "LineTablesOnly" } else { "DebugDirectivesOnly" });
+        pf_md(m, "enums", true);
+        pf_md(m, "retainedTypes", true);
+        pf_md(m, "globals", true);
+        pf_md(m, "imports", true);
+        pf_md(m, "macros", true);
+        pf_uint(m, "dwoId", true);
+        pf_bool(m, "splitDebugInlining", 1);
+        pf_bool(m, "debugInfoForProfiling", 0);
+        let nt = di_int(m, "nameTableKind");
+        if nt != 0 { pf_label("nameTableKind"); put(if nt == 1 { "GNU" } else if nt == 2 { "None" } else { "Apple" }); }
+        pf_bool(m, "rangesBaseAddress", 0);
+        pf_str(m, "sysroot", true);
+        pf_str(m, "sdk", true);
+        pf_dwenum("dialect", di_int(m, "dialect"), NAME_DIALECT, VAL_DIALECT, true);
+    } else if kind == DIK_SUBPROGRAM {
+        pf_str(m, "name", true);
+        pf_str(m, "linkageName", true);
+        pf_md(m, "scope", false);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+        pf_md(m, "type", true);
+        pf_uint(m, "scopeLine", true);
+        pf_md(m, "containingType", true);
+        let spf = di_int(m, "spFlags");
+        if (spf & 3) != 0 || di_int(m, "virtualIndex") != 0 { pf_uint(m, "virtualIndex", false); }
+        pf_int(m, "thisAdjustment", true);
+        pf_diflags("flags", di_int(m, "flags"));
+        pf_spflags("spFlags", spf);
+        pf_md(m, "unit", true);
+        pf_md(m, "templateParams", true);
+        pf_md(m, "declaration", true);
+        pf_md(m, "retainedNodes", true);
+        pf_md(m, "thrownTypes", true);
+        pf_md(m, "annotations", true);
+        pf_str(m, "targetFuncName", true);
+        pf_bool(m, "keyInstructions", 0);
+    } else if kind == DIK_LEXICALBLOCK {
+        pf_md(m, "scope", false);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+        pf_uint(m, "column", true);
+    } else if kind == DIK_LEXICALBLOCKFILE {
+        pf_md(m, "scope", false);
+        pf_md(m, "file", true);
+        pf_uint(m, "discriminator", false);
+    } else if kind == DIK_NAMESPACE {
+        pf_str(m, "name", true);
+        pf_md(m, "scope", false);
+        pf_bool(m, "exportSymbols", 0);
+    } else if kind == DIK_COMMONBLOCK {
+        pf_md(m, "scope", false);
+        pf_md(m, "declaration", false);
+        pf_str(m, "name", true);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+    } else if kind == DIK_MACRO {
+        pf_dwenum("type", di_int(m, "type"), NAME_MACINFO, VAL_MACINFO, false);
+        pf_uint(m, "line", true);
+        pf_str(m, "name", true);
+        pf_str(m, "value", true);
+    } else if kind == DIK_MACROFILE {
+        pf_uint(m, "line", true);
+        pf_md(m, "file", false);
+        pf_md(m, "nodes", true);
+    } else if kind == DIK_MODULE {
+        pf_md(m, "scope", false);
+        pf_str(m, "name", true);
+        pf_str(m, "configMacros", true);
+        pf_str(m, "includePath", true);
+        pf_str(m, "apinotes", true);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+        pf_bool(m, "isDecl", 0);
+    } else if kind == DIK_TEMPLATETYPEPARAM {
+        pf_str(m, "name", true);
+        pf_md(m, "type", false);
+        pf_bool(m, "defaulted", 0);
+    } else if kind == DIK_TEMPLATEVALUEPARAM {
+        if di_int(m, "tag") != 48 { pf_tag(m); }
+        pf_str(m, "name", true);
+        pf_md(m, "type", true);
+        pf_bool(m, "defaulted", 0);
+        pf_md(m, "value", false);
+    } else if kind == DIK_GLOBALVARIABLE {
+        pf_str(m, "name", true);
+        pf_str(m, "linkageName", true);
+        pf_md(m, "scope", false);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+        pf_md(m, "type", true);
+        pf_bool(m, "isLocal", -1);
+        pf_bool(m, "isDefinition", -1);
+        pf_md(m, "declaration", true);
+        pf_md(m, "templateParams", true);
+        pf_uint(m, "align", true);
+        pf_md(m, "annotations", true);
+    } else if kind == DIK_LOCALVARIABLE {
+        pf_str(m, "name", true);
+        pf_uint(m, "arg", true);
+        pf_md(m, "scope", false);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+        pf_md(m, "type", true);
+        pf_diflags("flags", di_int(m, "flags"));
+        pf_uint(m, "align", true);
+        pf_md(m, "annotations", true);
+    } else if kind == DIK_LABEL {
+        pf_md(m, "scope", false);
+        pf_str(m, "name", true);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", false);
+        pf_uint(m, "column", true);
+        pf_bool(m, "isArtificial", 0);
+        if di_has(m, "coroSuspendIdx") { pf_uint(m, "coroSuspendIdx", false); }
+    } else if kind == DIK_GLOBALVAREXPR {
+        pf_md(m, "var", true);
+        pf_md(m, "expr", true);
+    } else if kind == DIK_OBJCPROPERTY {
+        pf_str(m, "name", true);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+        pf_str(m, "setter", true);
+        pf_str(m, "getter", true);
+        pf_uint(m, "attributes", true);
+        pf_md(m, "type", true);
+    } else if kind == DIK_IMPORTEDENTITY {
+        pf_tag(m);
+        pf_str(m, "name", true);
+        pf_md(m, "scope", false);
+        pf_md(m, "entity", true);
+        pf_md(m, "file", true);
+        pf_uint(m, "line", true);
+        pf_md(m, "elements", true);
+    }
+    putc(')');
+    fs_first = saved;
 }
 
 // ---------------------------------------------------------------------------------------------
