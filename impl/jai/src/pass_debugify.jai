@@ -15,7 +15,7 @@ dbgify_opts: struct {
     enable := false;                 // opt -enable-debugify
     level_text: string;
 };
-DBGIFY_CL_OPT_COUNT :: 5;
+DBGIFY_CL_OPT_COUNT :: 6;
 add_dbgify_cl_opts :: (list: [] Cl_Opt, start: s64) {
     o := *dbgify_opts;
     list[start + 0] = .{"debugify-quiet", .BOOL, *o.quiet, null, null};
@@ -23,6 +23,7 @@ add_dbgify_cl_opts :: (list: [] Cl_Opt, start: s64) {
     list[start + 2] = .{"enable-debugify", .BOOL, *o.enable, null, null};
     list[start + 3] = .{"debugify-level", .STRING, null, null, *o.level_text};
     list[start + 4] = .{"instcombine-lower-dbg-declare", .BOOL, *opts.instcombine_lower_dbg_declare, null, null};
+    list[start + 5] = .{"instcombine-max-allocsite-removable-users", .INT, null, *ic_cl.max_alloc_site_removable_users, null};
 }
 dbgify_check_level :: () {
     t := dbgify_opts.level_text;

@@ -8,7 +8,8 @@
 // foldFreezeIntoRecurrence, freezeOtherUses, isUsedWithinShuffleVector, visitFreeze.
 // Also Instruction::getInsertionPointAfterDef and BasicBlock::getFirstNonPHIOrDbgOrAlloca.
 
-MAX_ALLOC_SITE_REMOVABLE_USERS :: 2048;   // -instcombine-max-allocsite-removable-users
+
+ic_cl: struct { max_alloc_site_removable_users: s64 = 2048; };   // -instcombine-max-allocsite-removable-users (registered in pass_debugify.jai)
 
 // ---------------------------------------------------------------- GEP helpers
 
@@ -551,7 +552,7 @@ is_alloc_site_removable :: (ai: Value_Id, users: *[..] Value_Id, know_init: bool
         while u != NONE {
             defer u = ir.u_next[u];
             i := ir.u_user[u];
-            if users.count >= MAX_ALLOC_SITE_REMOVABLE_USERS return false, 0;
+            if users.count >= ic_cl.max_alloc_site_removable_users return false, 0;
             o := inst_op(i);
             if o == .ADDRSPACECAST || o == .BITCAST || o == .GEP { array_add(users, i); array_add(*work, i); continue; }
             if o == .ICMP {

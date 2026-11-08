@@ -777,6 +777,13 @@ opt_main :: () {
         i += 1;
         if a == "-S" continue;
         if a == "-o" { if i >= args.count fatal("-o needs a file"); output = args[i]; i += 1; continue; }
+        // cl::list / value-required options also take their value from the next argument
+        if a == "-disable-builtin" || a == "--disable-builtin" || a == "-enable-builtin" || a == "--enable-builtin" {
+            if i >= args.count fatal("option % needs a value", a);
+            if !parse_cl_opt(tprint("%=%", a, args[i])) fatal("unsupported option '%'", a);
+            i += 1;
+            continue;
+        }
         if a == "-mtriple" || a == "--mtriple" { if i >= args.count fatal("-mtriple needs a value"); opts.mtriple = args[i]; i += 1; continue; }
         if a == "-disable-output" || a == "--disable-output" { disable_output = true; continue; }
         if begins_with(a, "-passes=") || begins_with(a, "--passes=") {

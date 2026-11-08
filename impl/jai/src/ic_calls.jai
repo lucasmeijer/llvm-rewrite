@@ -2728,18 +2728,136 @@ ic_transform_const_expr_cast_call :: (call: Value_Id) -> bool {
     if fn_has_str_attr(callee, "thunk") return false;
     if fn_has_fn_attr(callee, .Naked) return false;
     if ((inst(call).flags >> TAIL_SHIFT) & 3) == 2 return false;
+    caller_pal := inst(call).attrs;
     ft := glob(callee).value_type;
     old_ret := vtype(call); new_ret := func_ret(ft);
+    kinds: [..] Attr_Kind; kinds.allocator = temp;
     if old_ret != new_ret {
         if type_kind(new_ret) == .STRUCT return false;
         if !ic_is_bit_or_noop_pointer_castable(new_ret, old_ret) && has_uses(call) return false;
+        if caller_pal != 0 && has_uses(call) {
+            ic_type_incompatible(new_ret, attr_list_ret(caller_pal), ASK_ALL, *kinds);
+            if ic_attr_set_overlaps(attr_list_ret(caller_pal), kinds) return false;
+        }
+        if has_uses(call) && inst_op(call) == .INVOKE {
+            nd := get_successor(call, 0);
+            u := ir.v_first_use[call];
+            while u != NONE { us := ir.u_user[u]; if is_phi(us) && inst_block(us) == nd return false; u = ir.u_next[u]; }
+        }
     }
     na := call_arg_count(call);
-    nc := min(func_nparams(ft), na);
+    np := func_nparams(ft);
+    nc := min(np, na);
+    callee_pal := glob(callee).attrs;
+    if ic_attr_list_has_somewhere(callee_pal, .InAlloca) || ic_attr_list_has_somewhere(callee_pal, .Preallocated) return false;
     for k: 0..cast(s64) nc - 1 {
-        if !ic_is_bit_or_noop_pointer_castable(vtype(call_arg(call, cast(u32) k)), func_param(ft, cast(u32) k)) return false;
+        pty := func_param(ft, cast(u32) k);
+        if !ic_is_bit_or_noop_pointer_castable(vtype(call_arg(call, cast(u32) k)), pty) return false;
+        ps := attr_list_param(caller_pal, cast(u32) k);
+        kinds.count = 0;
+        ic_type_incompatible(pty, ps, ASK_UNSAFE_TO_DROP, *kinds);
+        if ic_attr_set_overlaps(ps, kinds) return false;
+        if attr_set_has(ps, .InAlloca) || attr_set_has(ps, .Preallocated) return false;
+        if attr_set_has(ps, .SwiftError) return false;
+        if attr_set_has(ps, .ByVal) != attr_set_has(attr_list_param(callee_pal, cast(u32) k), .ByVal) return false;
     }
-    fatal("instcombine: transformConstExprCastCall is not supported yet");
+    if np < na && func_vararg(ft) && caller_pal != 0 {
+        // hasAttrSomewhere(StructRet, &SRetIdx) with SRetIdx - FirstArgIndex >= NumParams
+        n := ifx caller_pal == 0 then 0 else ir.attr_lists[caller_pal].params.count;
+        for k: 0..n-1 if attr_set_has(attr_list_param(caller_pal, cast(u32) k), .StructRet) { if cast(u32) k >= np return false; break; }
+    }
+    if inst_op(call) != .CALL fatal("instcombine: transformConstExprCastCall of an invoke is not supported yet");
+
+    args: [..] Value_Id; args.allocator = temp;
+    arg_attrs: [..] u32; arg_attrs.allocator = temp;
+    rattrs := attr_list_ret(caller_pal);
+    kinds.count = 0;
+    ic_type_incompatible(new_ret, attr_list_ret(caller_pal), ASK_ALL, *kinds);
+    rattrs = attr_set_remove_kinds(rattrs, kinds);
+    for k: 0..cast(s64) nc - 1 {
+        pty := func_param(ft, cast(u32) k);
+        a := call_arg(call, cast(u32) k);
+        nv := a;
+        if vtype(a) != pty nv = icb_bit_or_pointer_cast(a, pty);
+        array_add(*args, nv);
+        ps := attr_list_param(caller_pal, cast(u32) k);
+        kinds.count = 0;
+        ic_type_incompatible(pty, ps, ASK_SAFE_TO_DROP, *kinds);
+        array_add(*arg_attrs, attr_set_remove_kinds(ps, kinds));
+    }
+    if np > nc for k: nc..np-1 { array_add(*args, const_null_value(func_param(ft, cast(u32) k))); array_add(*arg_attrs, 0); }
+    if np < na && func_vararg(ft) {
+        for k: np..na-1 {
+            a := call_arg(call, cast(u32) k);
+            t := vtype(a);
+            // InstCombiner::getPromotedType and CastInst::getCastOpcode(V, false, PTy, false)
+            pt := t;
+            if type_kind(t) == .INT && type_int_width(t) < 32 pt = ir.t_i32;
+            else if type_kind(t) == .FLOAT pt = type_simple(.DOUBLE);
+            nv := a;
+            if pt != t nv = icb_cast(ifx type_kind(t) == .INT then Opcode.ZEXT else .FPEXT, a, pt);
+            array_add(*args, nv);
+            array_add(*arg_attrs, attr_list_param(caller_pal, cast(u32) k));
+        }
+    }
+    fn_attrs := attr_list_fn(caller_pal);
+    if type_kind(new_ret) == .VOID && vname(call).count set_name(call, "");
+    new_pal := attr_list_get(fn_attrs, rattrs, arg_attrs);
+    nc_i := create_call_fn(callee, args);
+    if inst(call).nidx > 0 nc_i = call_with_default_bundles(nc_i, call);   // getOperandBundlesAsDefs
+    icb_insert(nc_i);
+    call_set_tail_kind(nc_i, (inst(call).flags >> TAIL_SHIFT) & 3);
+    ic_take_name(nc_i, call);
+    inst(nc_i).cc = inst(call).cc;
+    inst(nc_i).attrs = new_pal;
+    prof := get_metadata(call, md_kind_id("prof"));
+    if prof != NONE set_metadata(nc_i, md_kind_id("prof"), prof);
+    nv: Value_Id = nc_i;
+    if old_ret != vtype(nv) && has_uses(call) {
+        cst := ic_create_bit_or_pointer_cast(nc_i, old_ret);
+        set_metadata(cst, 0, get_metadata(call, 0));
+        pos, bb, head := inst_insertion_point_after_def(nc_i);
+        ic_insert_new_inst_before(cst, pos, head);
+        wl_push_users(call);
+        nv = cst;
+    }
+    if has_uses(call) ic_replace_inst_uses_with(call, nv);
+    ic_erase_inst(call);
+    return true;
+}
+
+ASK_SAFE_TO_DROP :: 1; ASK_UNSAFE_TO_DROP :: 2; ASK_ALL :: 3;
+// AttributeFuncs::typeIncompatible(Ty, AS, ASK)
+ic_type_incompatible :: (ty: Type_Id, s: u32, ask: u32, out: *[..] Attr_Kind) {
+    k := type_kind(ty);
+    safe := (ask & ASK_SAFE_TO_DROP) != 0; unsafe := (ask & ASK_UNSAFE_TO_DROP) != 0;
+    if k != .INT && safe array_add(out, .AllocAlign);
+    if k != .INT && k != .BYTE && unsafe { array_add(out, .SExt); array_add(out, .ZExt); }
+    if !is_int_or_int_vector(ty) { if safe array_add(out, .Range); }
+    else {
+        r := attr_set_find(s, .Range);
+        if r && cast(u32) r.ival != type_bits(scalar_type(ty)) array_add(out, .Range);
+    }
+    if k != .PTR {
+        if safe for Attr_Kind.[.NoAlias, .NonNull, .ReadNone, .ReadOnly, .Dereferenceable, .DereferenceableOrNull, .Writable,
+                               .DeadOnUnwind, .Initializes, .Captures, .DeadOnReturn] array_add(out, it);
+        if unsafe for Attr_Kind.[.Nest, .SwiftError, .Preallocated, .InAlloca, .ByVal, .StructRet, .ByRef, .ElementType,
+                                 .AllocatedPointer] array_add(out, it);
+    }
+    if !is_ptr_or_ptr_vector(ty) && safe array_add(out, .Alignment);
+    if safe && !fp_math_supported_type(ty) array_add(out, .NoFPClass);
+    if k == .VOID && safe array_add(out, .NoUndef);
+}
+// AttrBuilder(AS).overlaps(Mask)
+ic_attr_set_overlaps :: (s: u32, kinds: [] Attr_Kind) -> bool {
+    for kinds if attr_set_has(s, it) return true;
+    return false;
+}
+// AttributeList::hasAttrSomewhere(Kind)
+ic_attr_list_has_somewhere :: (l: u32, k: Attr_Kind) -> bool {
+    if l == 0 return false;
+    if attr_set_has(attr_list_fn(l), k) || attr_set_has(attr_list_ret(l), k) return true;
+    for ir.attr_lists[l].params if attr_set_has(it, k) return true;
     return false;
 }
 // CastInst::isBitOrNoopPointerCastable (approximation for the bail-out checks)
