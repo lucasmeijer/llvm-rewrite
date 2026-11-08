@@ -434,9 +434,11 @@ Port of `llvm/lib/Transforms/InstCombine/`. `instcombine.jai` `#load`s the files
 | `ic_addsub.jai`, `ic_fp_addsub.jai`, `ic_negator.jai` | InstCombineAddSub.cpp (incl. FAddCombine), InstCombineNegator.cpp |
 | `ic_muldivrem.jai`, `ic_fp_muldivrem.jai` | InstCombineMulDivRem.cpp |
 | `ic_demanded.jai` | InstCombineSimplifyDemanded.cpp, integer half (`SimplifyDemandedUseBits`, `SimplifyMultipleUseDemandedBits`, ...) |
-| `ic_compares.jai` | InstCombineCompares.cpp: `visitICmpInst`, `visitFCmpInst` and all their helpers; at its end the helpers it borrows from other files under their LLVM names (`insertRangeTest`, `canEvaluateShifted`/`getShiftedValue`, `reassociateShiftAmtsOfTwoSameDirectionShifts`, `simplifyIntToPtrRoundTripCast`, `canBeCastedExactlyIntToFP`): move them when their file is ported |
+| `ic_compares.jai` | InstCombineCompares.cpp: `visitICmpInst`, `visitFCmpInst` and all their helpers; at its end the helpers it borrows from other files under their LLVM names (`simplifyIntToPtrRoundTripCast`, `canBeCastedExactlyIntToFP`): move them when their file is ported |
+| `ic_shifts.jai` | InstCombineShifts.cpp: `visitShl/LShr/AShr`, `commonShiftTransforms`, `FoldShiftByConstant`, `setShiftFlags`, `canEvaluateShifted`/`getShiftedValue`, `reassociateShiftAmtsOfTwoSameDirectionShifts`; `Constant::replaceUndefsWith`/`mergeUndefsWith` (`ic_replace_undefs_with`, `ic_merge_undefs_with`) |
+| `ic_andorxor.jai` | InstCombineAndOrXor.cpp: `visitAnd/Or/Xor`, `foldAndOrOfICmps`, `foldLogOpOfMaskedICmps`, `foldLogicOfFCmps`, `foldNot`, `foldBooleanAndOr`, `FoldOrOfLogicalAnds`, `sinkNotInto*`, `convertOrOfShiftsToFunnelShift`, `insertRangeTest`, ...; CmpInstAnalysis.cpp's `getICmpCode`/`getPredForICmpCode`/`predicatesFoldable`; Local.cpp's `recognizeBSwapOrBitReverseIdiom`; matchers `pm_max_min` (MaxMin_match incl. the select form), `pm_c_binop_not_val`/`pm_c_binop_val_not` (commuted not-matchers with LLVM's try order) |
 | `ic_select.jai` | InstCombineSelect.cpp: `visitSelectInst` and all its helpers, in LLVM's order (SimplifyDemandedVectorElts is in `ic_demanded.jai`) |
-| `ic_misc.jai` | `ic_visit` (the opcode switch = InstVisitor) and the *partial* visitors of files not ported yet (casts, shifts, and/or/xor, calls, phi, gep, terminators, mergeStoreIntoSuccessor) |
+| `ic_misc.jai` | `ic_visit` (the opcode switch = InstVisitor) and the *partial* visitors of files not ported yet (casts, calls, phi, gep, terminators, mergeStoreIntoSuccessor) |
 
 **State.** One global `ic: Ic_State` (= one `InstCombinerImpl`), reset per iteration like LLVM's per-iteration
 object: worklist, DomConditionCache (`ic.dc`, also reachable through `ic.sq.dc` so every ValueTracking query made

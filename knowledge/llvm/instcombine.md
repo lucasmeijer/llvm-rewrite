@@ -74,6 +74,28 @@ noted, and by diffing `opt -passes=instcombine` output on the imported tests).
 - **foldICmpUsingKnownBits runs SimplifyDemandedBits without the DomConditionCache**
   (`SQ.getWithoutDomCondCache()`); foldICmpWithDominatingICmp is the place that uses dominating branches.
 - **rewriteGEPAsOffset uses a local `IRBuilder<>`**: the offset arithmetic it creates is not added to the worklist.
+- **`m_ConstantInt(uint64_t &)` matches splats** (`bind_const_intval_ty` goes through `m_APInt`, no poison lanes,
+  value must fit in 64 bits); `m_ConstantInt()` / `m_ConstantInt(ConstantInt *&)` match only a ConstantInt.
+  Verified by shift-sub.ll `shl_sub_vec_splat` (`shl C, (sub nuw 4, X)` on `<2 x i8>` folds) (PatternMatch.h:1000).
+- **`m_SpecificInt(V)` rejects splats with poison lanes** (`specific_intval<false>` uses `getSplatValue(false)`);
+  only `m_SpecificIntAllowPoison` accepts them. shl-sub.ll `shl_sub_i64_vec_poison_bad2` must not fold.
+- **`m_SMax`/`m_SMin`/`m_UMax`/`m_UMin` (MaxMin_match) also match `select (icmp pred A, B), A, B`** forms, not only
+  the intrinsics (FoldOrOfSelectSmaxToAbs uses this).
+- **Commuted matchers commit to the first operand order whose sub-pattern matches**: in
+  `m_c_And(m_Value(A), m_Not(m_Value(B)))` the `not` is looked for in operand 1 first; once an order matched, a
+  failing later matcher (`m_Specific`, `m_Deferred` in a sibling pattern) does not retry the other order. The
+  `m_Not`-first forms (`m_c_And(m_Not(X), m_Value(Y))`) look in operand 0 first. Getting the order wrong changes
+  which value is called `A`.
+- **IRBuilder `CreateIsNeg`/`CreateIsNotNeg` name the icmp only when the caller passes a name** (`"isneg"` in
+  visitAnd/foldNot/visitLShr, unnamed in foldAndOrOfICmps' and foldXorOfICmps' sign tests).
+- **`Constant::mergeUndefsWith` produces `undef` lanes (not poison)**, so
+  `or (shl X, <15,13>), (lshr Y, <poison,19>)` becomes `fshl(..., <i32 undef, i32 13>)` in visitOr; the `0` that
+  LLVM finally prints comes from the call visitor (funnel.ll `fshr_v2i32_constant_nonsplat_poison0`).
+- **`icmp ne (and (lshr X, C), 1), 0` becomes `trunc (lshr X, C) to i1` in visitICmp**, and visitTrunc then turns
+  that into `icmp ne (and X, 1 << C), 0`; without the trunc visitor the result stays a trunc (shift.ll test16).
+- **matchBSwapOrBitReverse** (visitOr) inserts the new trunc/bswap/and/zext before the `or` with the names
+  `trunc`, `rev`, `mask`, `zext`, pushes all but the last onto the worklist and returns the last one unlinked
+  (`removeFromParent`), which then takes the `or`'s name.
 
 ## Select
 

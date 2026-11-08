@@ -1034,31 +1034,6 @@ ic_visit_add :: (i: Value_Id) -> Value_Id {
 icmp_is_gt :: (p: u8) -> bool { return p == ICMP_SGT || p == ICMP_UGT; }
 icmp_is_lt :: (p: u8) -> bool { return p == ICMP_SLT || p == ICMP_ULT; }
 
-// foldBinOpOfDisplacedShifts (InstCombineAndOrXor.cpp)
-ic_fold_binop_of_displaced_shifts :: (i: Value_Id) -> Value_Id {
-    bw := scalar_bits(i);
-    for side: 0..1 {
-        s0 := op(i, cast(u32) side); s1 := op(i, cast(u32) (1 - side));
-        if !is_inst(s0) || !is_shift_op(inst_op(s0)) || !is_inst(s1) || !is_shift_op(inst_op(s1)) continue;
-        c1 := op(s0, 0); shamt := op(s0, 1);
-        c2 := op(s1, 0);
-        if !pm_imm_constant(c1) || !pm_imm_constant(c2) continue;
-        oka, aa, addc := pm_add_like(op(s1, 1));
-        if !oka continue;
-        if aa != shamt {
-            if addc == shamt { t := aa; aa = addc; addc = t; } else continue;
-        }
-        if !pm_imm_constant(addc) continue;
-        ult_bw :: (a: APInt) -> bool { return ap_ult_u64(a, a.bits); }
-        if !pm_int_pred(addc, ult_bw) return NONE;
-        sh := inst_op(s0);
-        if sh != inst_op(s1) return NONE;
-        if inst_op(i) == .ADD && sh != .SHL return NONE;
-        newc := icb_binop(inst_op(i), c1, icb_binop(sh, c2, addc));
-        return create_binop(sh, newc, shamt);
-    }
-    return NONE;
-}
 
 // ---------------------------------------------------------------- pointer differences
 

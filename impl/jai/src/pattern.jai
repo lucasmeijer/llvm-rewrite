@@ -78,10 +78,11 @@ pm_apint_ap :: (v: Value_Id) -> (bool, APInt) { ok, c := pm_apint(v, true); retu
 // m_ConstantInt() (isa<ConstantInt>)
 pm_constant_int :: (v: Value_Id) -> bool { return v != NONE && vkind(v) == .C_INT; }
 // m_ConstantInt(uint64_t &V): a ConstantInt whose value fits in 64 bits
+// m_ConstantInt(uint64_t &) (bind_const_intval_ty): m_APInt (scalar or non-poison splat) whose value fits in 64 bits
 pm_constant_int_u64 :: (v: Value_Id) -> (bool, u64) {
     if v == NONE return false, 0;
-    if vkind(v) != .C_INT return false, 0;
-    a := const_ap(v);
+    ok, a := pm_apint(v);
+    if !ok return false, 0;
     if ap_active_bits(a) > 64 return false, 0;
     return true, ap_zext_value(a);
 }
@@ -149,12 +150,13 @@ pm_negative_ap :: (v: Value_Id) -> (bool, APInt) { ok, c := pm_apint_pred(v, ap_
 pm_low_bit_mask_ap :: (v: Value_Id) -> (bool, APInt) { ok, c := pm_apint_pred(v, ap_is_mask); return ok, c; }
 pm_max_signed_value_ap :: (v: Value_Id) -> (bool, APInt) { ok, c := pm_apint_pred(v, ap_is_max_signed); return ok, c; }
 // m_SpecificInt(V): a constant (splat/vector, poison allowed) equal to V
-pm_specific_int :: (v: Value_Id, val: u64) -> bool {
+// (specific_intval<false>: a splat with poison lanes does not match; pm_specific_int_allow_poison is m_SpecificIntAllowPoison)
+pm_specific_int :: (v: Value_Id, val: u64, allow_poison := false) -> bool {
     if v == NONE return false;
     k := vkind(v);
     if k == .C_INT { a := const_ap(v); return ap_active_bits(a) <= 64 && ap_zext_value(a) == val; }
     if !is_vector_type(vtype(v)) || !is_constant_kind(k) return false;
-    s := get_splat_value(v, true);
+    s := get_splat_value(v, allow_poison);
     if s != NONE && vkind(s) == .C_INT { a := const_ap(s); return ap_active_bits(a) <= 64 && ap_zext_value(a) == val; }
     return false;
 }

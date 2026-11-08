@@ -277,17 +277,27 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   `dt_apply_updates`. Test with `print<memoryssa>` after `loop-mssa(loop-rotate)` (Analysis/MemorySSA/
   loop-rotate-update.ll) and a sweep of that pipeline (`tools/sweep.py ... --analysis`).
 
-## InstCombine (L1.instcombine.arith 48/115 ::opt; DESIGN.md §11)
+## InstCombine (L1.instcombine.arith 68/115, bitwise 40/86 ::opt; DESIGN.md §11)
 
 - Ported completely, in LLVM's order: the driver (InstructionCombining.cpp `prepareWorklist`/`run`/sinking/
   fixpoint verification), the shared binop folds, InstCombineAddSub.cpp (incl. FAddCombine and the FP visitors),
   InstCombineNegator.cpp, InstCombineMulDivRem.cpp (int and FP), the integer half of
   InstCombineSimplifyDemanded.cpp, `convertOrOfShiftsToFunnelShift`, `mergeStoreIntoSuccessor`.
-- **Partial visitors** (ic_misc.jai: their comments say where they stop): and/or/xor (up to SimplifyDemandedInstructionBits), shifts (start of commonShiftTransforms +
-  setShiftFlags), casts (commonCastTransforms; zext/sext/trunc/[su]itofp flag folds), call (InstSimplify +
+- **Bitwise (L1.instcombine.bitwise 40/86 ::opt, arith 68/115)**: InstCombineAndOrXor.cpp (ic_andorxor.jai) and
+  InstCombineShifts.cpp (ic_shifts.jai) are ported completely, in LLVM's order, plus the Local.cpp
+  recognizeBSwapOrBitReverseIdiom/collectBitParts that visitOr needs. A function-by-function comparison of every
+  InstCombine test (only functions using int binops/icmp) and a random differential fuzzer (~40k straight-line
+  functions over and/or/xor/shifts/add/sub/icmp, scalar and `<2 x i8>` with poison lanes) show no difference left
+  that comes from these files: the remaining bitwise failures need the select visitor (`*_logical` tests,
+  select-of-constants canonicalization, `select C, false, true` -> not), the call visitor (fshl/fshr amount
+  folding, `range` on ctpop, umin/umax), visitTrunc (`trunc (lshr X, C) to i1` -> bit test) and the vector ops.
+  Temporary copies of foldAndOrOfSelectUsingImpliedCond/simplifyNestedSelectsUsingImpliedCond sit at the end of
+  ic_andorxor.jai until ic_select.jai lands. Fail loudly: getInsertionPointAfterDef of invoke/callbr (freelyInvert),
+  replaceUsesWithIf with a constant user.
+- **Partial visitors** (ic_misc.jai: their comments say where they stop): casts (commonCastTransforms; zext/sext/trunc/[su]itofp flag folds), call (InstSimplify +
   nounwind inference), phi, gep, load, freeze, extractvalue, vector ops (InstSimplify only), terminators (ret,
   unreachable, br, condbr complete; switch not at all). A fold missing from these silently does not fire, so most
-  arith tests that still fail do so because of folds in those files (select/icmp/and/shift canonicalizations).
+  arith tests that still fail do so because of folds in those files (select/cast/call canonicalizations).
 - Fail loudly (grep `not supported yet` in ic_*.jai): SimplifyDemandedFPClass (nofpclass returns; 28 InstCombine
   tests), SimplifyDemandedVectorElts, foldVectorBinop's unshuffleConstant/vector.insert/reverse/splice cases,
   LowerDbgDeclare (any `#dbg_declare`), sinking or salvaging instructions with debug users, visitFree,
@@ -307,7 +317,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   not set it. `cl::opt`s: `-instcombine-code-sinking`, `-instcombine-lower-dbg-declare`,
   `-instcombine-max-sink-users`, `-instcombine-maxarray-size`, `-instcombine-negator-enabled`; `-mtriple X` (space
   form) is accepted.
-- Perf (x64 build, tests/perf/scaling/straightline): `opt -passes=instcombine` is ~21x LLVM's CPU time (parse
+- Perf (x64 build, tests/perf/scaling/straightline): `opt -passes=instcombine` is ~21x (~33x with the and/or/xor/shift visitors, which add known-bits queries) LLVM's CPU time (parse
   alone 4.4x), scaling exponent 1.05 (LLVM 1.09): linear. The time is ValueTracking (computeKnownBits /
   ComputeNumSignBits with temp-allocating APInt ops, ~60% inclusive), not the combiner.
 - Jai traps: `xx` is the auto-cast operator, not an identifier; `for < k: 0..n-1` iterates n-1 down to 0 (the

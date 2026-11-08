@@ -49,7 +49,7 @@ pm_specific_icmp :: (v: Value_Id, pred: u8) -> (bool, Value_Id, Value_Id) {
 // m_Constant: isa<Constant>
 pm_constant :: inline (v: Value_Id) -> bool { return v != NONE && is_const(v); }
 // m_SpecificIntAllowPoison(V) (same as m_SpecificInt in this port: splat with poison allowed)
-pm_specific_int_allow_poison :: (v: Value_Id, val: u64) -> bool { return pm_specific_int(v, val); }
+pm_specific_int_allow_poison :: (v: Value_Id, val: u64) -> bool { return pm_specific_int(v, val, true); }
 // m_APInt for an arbitrary value: scalar ConstantInt or non-poison splat
 pm_apint_v :: (v: Value_Id) -> (bool, APInt) { ok, c := pm_apint(v); return ok, c; }
 // m_Intrinsic<ID>(...) with operand capture

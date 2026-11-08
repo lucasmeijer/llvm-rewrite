@@ -132,6 +132,18 @@ ic_get_fcmp_value :: (code: u32, lhs: Value_Id, rhs: Value_Id, fmf: u32) -> Valu
     return icb_fcmp_fmf(p, lhs, rhs, fmf);
 }
 
+// insertRangeTest (InstCombineAndOrXor.cpp)
+ic_insert_range_test :: (v: Value_Id, lo: APInt, hi: APInt, is_signed: bool, inside: bool) -> Value_Id {
+    ty := vtype(v);
+    pred := ifx inside then cast(u8) ICMP_ULT else ICMP_UGE;
+    if ifx is_signed then ap_is_min_signed(lo) else ap_is_zero(lo) {
+        p := ifx is_signed then icmp_signed_predicate(pred) else pred;
+        return icb_cmp(p, v, const_int_ap(ty, hi));
+    }
+    v_minus_lo := icb_sub(v, const_int_ap(ty, lo), tprint("%.off", vname(v)));
+    return icb_cmp(pred, v_minus_lo, const_int_ap(ty, ap_sub(hi, lo)));
+}
+
 // ---------------------------------------------------------------- masked icmps
 
 AMASK_ALL_ONES :: 1;
@@ -1349,6 +1361,29 @@ ic_canonicalize_logic_first :: (i: Value_Id) -> Value_Id {
     return r;
 }
 
+// foldBinOpOfDisplacedShifts (InstCombineAndOrXor.cpp)
+ic_fold_binop_of_displaced_shifts :: (i: Value_Id) -> Value_Id {
+    bw := scalar_bits(i);
+    for side: 0..1 {
+        s0 := op(i, cast(u32) side); s1 := op(i, cast(u32) (1 - side));
+        if !is_inst(s0) || !is_shift_op(inst_op(s0)) || !is_inst(s1) || !is_shift_op(inst_op(s1)) continue;
+        c1 := op(s0, 0); shamt := op(s0, 1);
+        c2 := op(s1, 0);
+        if !pm_imm_constant(c1) || !pm_imm_constant(c2) continue;
+        oka, aa, addc := pm_add_like(op(s1, 1));
+        if !oka continue;
+        if aa != shamt || !pm_imm_constant(addc) continue;   // m_AddLike(m_Deferred(ShAmt), m_ImmConstant(AddC))
+        ult_bw :: (a: APInt) -> bool { return ap_ult_u64(a, a.bits); }
+        if !pm_int_pred(addc, ult_bw) return NONE;
+        sh := inst_op(s0);
+        if sh != inst_op(s1) return NONE;
+        if inst_op(i) == .ADD && sh != .SHL return NONE;
+        newc := icb_binop(inst_op(i), c1, icb_binop(sh, c2, addc));
+        return create_binop(sh, newc, shamt);
+    }
+    return NONE;
+}
+
 // foldBitwiseLogicWithIntrinsics
 ic_fold_bitwise_logic_with_intrinsics :: (i: Value_Id) -> Value_Id {
     op0 := op(i, 0); op1 := op(i, 1);
@@ -1791,7 +1826,7 @@ ic_fold_and_or_of_icmps :: (lhs: Value_Id, rhs: Value_Id, i: Value_Id, is_and: b
             if !ok && !true_if_signed_l && true_if_signed_r { ok, x, y = match_pair(lhs0, rhs0, .AND, .OR); }
             if ok {
                 new_xor := icb_xor(x, y);
-                return icb_cmp(ICMP_SLT, new_xor, const_null_value(vtype(new_xor)), "isneg");
+                return icb_cmp(ICMP_SLT, new_xor, const_null_value(vtype(new_xor)));
             }
         } else {
             ok := false; x, y: Value_Id;
@@ -1799,7 +1834,7 @@ ic_fold_and_or_of_icmps :: (lhs: Value_Id, rhs: Value_Id, i: Value_Id, is_and: b
             if !ok && !true_if_signed_l && true_if_signed_r { ok, x, y = match_pair(lhs0, rhs0, .OR, .AND); }
             if ok {
                 new_xor := icb_xor(x, y);
-                return icb_cmp(ICMP_SGT, new_xor, const_all_ones_of(vtype(new_xor)), "isnotneg");
+                return icb_cmp(ICMP_SGT, new_xor, const_all_ones_of(vtype(new_xor)));
             }
         }
     }
@@ -2082,7 +2117,6 @@ ic_fold_or_of_inversions :: (i: Value_Id) -> Value_Id {
     return NONE;
 }
 
-Sub_Pack :: struct { vec: Value_Id; offset: s64; }
 
 // matchSubIntegerPackFromVector (Mask is a bit vector of `mask.count` elements)
 ic_match_sub_integer_pack_from_vector :: (v: Value_Id, mask: *[..] bool) -> (bool, Value_Id, s64) {
@@ -3423,8 +3457,8 @@ ic_fold_xor_of_icmps :: (lhs: Value_Id, rhs: Value_Id, i: Value_Id) -> Value_Id 
         sbr, tsr := is_sign_bit_check(pred_r, rc);
         if (has_one_use(lhs) || has_one_use(rhs)) && sbl && sbr {
             xor_lr := icb_xor(lhs0, rhs0);
-            if tsl == tsr return icb_cmp(ICMP_SLT, xor_lr, const_null_value(vtype(xor_lr)), "isneg");
-            return icb_cmp(ICMP_SGT, xor_lr, const_all_ones_of(vtype(xor_lr)), "isnotneg");
+            if tsl == tsr return icb_cmp(ICMP_SLT, xor_lr, const_null_value(vtype(xor_lr)));
+            return icb_cmp(ICMP_SGT, xor_lr, const_all_ones_of(vtype(xor_lr)));
         }
         if lhs0 == rhs0 {
             cr1 := cr_exact_icmp_region(pred_l, lc);

@@ -1190,3 +1190,198 @@ ic_visit_ashr :: (i: Value_Id) -> Value_Id {
     }
     return NONE;
 }
+
+// ---------------------------------------------------------------- shift helpers used by the compare folds too
+
+// canTryToConstantAddTwoShiftAmounts (InstCombineShifts.cpp)
+ic_can_try_to_constant_add_two_shift_amounts :: (sh0: Value_Id, sh_amt0: Value_Id, sh1: Value_Id, sh_amt1: Value_Id) -> bool {
+    if vtype(sh_amt0) != vtype(sh_amt1) return false;
+    max_total := cast(u64) (scalar_bits(sh0) - 1) + cast(u64) (scalar_bits(sh1) - 1);
+    return ap_uge_u64(ap_all_ones(scalar_bits(sh_amt0)), max_total);
+}
+
+// reassociateShiftAmtsOfTwoSameDirectionShifts (InstCombineShifts.cpp)
+ic_reassociate_shift_amts_of_two_same_direction_shifts :: (sh0: Value_Id, sq: Simplify_Query, analyze_for_sign_bit_extraction := false) -> Value_Id {
+    if !(is_inst(sh0) && is_shift_op(inst_op(sh0))) return NONE;
+    sh0_op0 := op(sh0, 0);
+    if !is_inst(sh0_op0) return NONE;
+    sh_amt0 := zext_or_self_i(op(sh0, 1));
+    sh1: Value_Id = NONE; trunc: Value_Id = NONE;
+    okt, t := pmi_cast(sh0_op0, .TRUNC);
+    if okt && is_inst(t) { sh1 = t; trunc = sh0_op0; }
+    else sh1 = sh0_op0;
+    if !(is_inst(sh1) && is_shift_op(inst_op(sh1))) return NONE;
+    x := op(sh1, 0);
+    sh_amt1 := zext_or_self_i(op(sh1, 1));
+    if !ic_can_try_to_constant_add_two_shift_amounts(sh0, sh_amt0, sh1, sh_amt1) return NONE;
+    had_two_right := is_shr_op(inst_op(sh0)) && is_shr_op(inst_op(sh1));
+    if analyze_for_sign_bit_extraction && !had_two_right return NONE;
+    shift_opc := inst_op(sh0);
+    identical := inst_op(sh0) == inst_op(sh1);
+    if !identical && !analyze_for_sign_bit_extraction return NONE;
+    if trunc != NONE && !analyze_for_sign_bit_extraction && !(has_one_use(op(sh0, 0)) || has_one_use(op(sh0, 1))) return NONE;
+    new_sh_amt := simplify_add_inst(sh_amt0, sh_amt1, false, false, sq_with_instruction(sq, sh0));
+    if new_sh_amt == NONE || !is_const(new_sh_amt) return NONE;
+    nbw := scalar_bits(new_sh_amt);
+    xbw := scalar_bits(x);
+    ult :: (a: APInt, b: APInt) -> bool { return ap_ult(a, b); }
+    eq :: (a: APInt, b: APInt) -> bool { return ap_eq(a, b); }
+    if !pm_int_pred_arg(new_sh_amt, ult, ap_from_u64(nbw, cast(u64) xbw)) return NONE;
+    if had_two_right && (trunc != NONE || analyze_for_sign_bit_extraction) {
+        if !pm_int_pred_arg(new_sh_amt, eq, ap_from_u64(nbw, cast(u64) (xbw - 1))) return NONE;
+        if analyze_for_sign_bit_extraction return x;
+    }
+    if vtype(new_sh_amt) != vtype(x) {
+        new_sh_amt = cfo_cast_operand(.ZEXT, new_sh_amt, vtype(x));
+        if new_sh_amt == NONE return NONE;
+    }
+    new_shift := create_binop(shift_opc, x, new_sh_amt);
+    if trunc == NONE {
+        if shift_opc == .SHL {
+            set_nuw(new_shift, has_nuw(sh0) && has_nuw(sh1));
+            set_nsw(new_shift, has_nsw(sh0) && has_nsw(sh1));
+        } else set_exact(new_shift, is_exact(sh0) && is_exact(sh1));
+    }
+    ret := new_shift;
+    if trunc != NONE {
+        icb_insert(new_shift);
+        ret = create_cast(.TRUNC, new_shift, vtype(sh0));
+    }
+    return ret;
+}
+
+// ShiftSemantics (InstCombineInternal.h)
+Shift_Semantics :: enum u8 { LOSSY; SIGNED; UNSIGNED; }
+
+// canEvaluateShiftedShift (InstCombineShifts.cpp)
+ic_can_evaluate_shifted_shift :: (outer_sh_amt: u32, is_outer_shl: bool, sem: Shift_Semantics, inner: Value_Id, cxt: Value_Id) -> bool {
+    ok, inner_c := pm_apint(op(inner, 1));
+    if !ok return false;
+    is_inner_shl := inst_op(inner) == .SHL;
+    if !is_outer_shl && sem == .SIGNED return is_inner_shl && has_nsw(inner) && ap_eq_u64(inner_c, outer_sh_amt);
+    if is_inner_shl == is_outer_shl return sem == .LOSSY;
+    if ap_eq_u64(inner_c, outer_sh_amt) return true;
+    tw := scalar_bits(inner);
+    if ap_ugt_u64(inner_c, outer_sh_amt) && ap_ult_u64(inner_c, tw) {
+        inner_sh_amt := cast(u32) ap_zext_value(inner_c);
+        mask_shift := ifx is_inner_shl then tw - inner_sh_amt else inner_sh_amt - outer_sh_amt;
+        mask := ap_shl(ap_low_bits_set(tw, outer_sh_amt), mask_shift);
+        if ic_masked_value_is_zero(op(inner, 0), mask, cxt) return true;
+    }
+    return false;
+}
+
+// canEvaluateShifted (InstCombineShifts.cpp)
+ic_can_evaluate_shifted :: (v: Value_Id, num_bits: u32, is_left_shift: bool, sem: Shift_Semantics, cxt: Value_Id) -> bool {
+    if pm_imm_constant(v) {
+        if sem == .LOSSY return true;
+        ok, c := pm_apint_ap(v);
+        if ok && !is_left_shift return ap_ctz(c) >= num_bits;
+        return false;
+    }
+    if !is_inst(v) return false;
+    if !has_one_use(v) return false;
+    o := inst_op(v);
+    if o == {
+        case .AND; #through;
+        case .OR; #through;
+        case .XOR;
+            return ic_can_evaluate_shifted(op(v, 0), num_bits, is_left_shift, sem, v) && ic_can_evaluate_shifted(op(v, 1), num_bits, is_left_shift, sem, v);
+        case .SHL; #through;
+        case .LSHR;
+            return ic_can_evaluate_shifted_shift(num_bits, is_left_shift, sem, v, cxt);
+        case .SELECT;
+            return ic_can_evaluate_shifted(op(v, 1), num_bits, is_left_shift, sem, v) && ic_can_evaluate_shifted(op(v, 2), num_bits, is_left_shift, sem, v);
+        case .PHI;
+            n := phi_num_incoming(v);
+            if n > 0 for k: 0..n-1 if !ic_can_evaluate_shifted(phi_value(v, cast(u32) k), num_bits, is_left_shift, sem, v) return false;
+            return true;
+        case .MUL;
+            ok, mc := pm_apint(op(v, 1));
+            return !is_left_shift && sem == .UNSIGNED && ok && ap_is_negated_power_of_2(mc) && ap_ctz(mc) == num_bits;
+        case .ADD;
+            if is_left_shift {
+                if sem == .LOSSY return ic_can_evaluate_shifted(op(v, 0), num_bits, is_left_shift, sem, v) && ic_can_evaluate_shifted(op(v, 1), num_bits, is_left_shift, sem, v);
+                return false;
+            }
+            if sem == .LOSSY return false;
+            wrap := (sem == .SIGNED && has_nsw(v)) || (sem == .UNSIGNED && has_nuw(v));
+            return wrap && ic_can_evaluate_shifted(op(v, 0), num_bits, is_left_shift, sem, v) && ic_can_evaluate_shifted(op(v, 1), num_bits, is_left_shift, sem, v);
+    }
+    return false;
+}
+
+// foldShiftedShift (InstCombineShifts.cpp)
+ic_fold_shifted_shift :: (inner: Value_Id, outer_sh_amt: u32, is_outer_shl: bool, sem: Shift_Semantics) -> Value_Id {
+    is_inner_shl := inst_op(inner) == .SHL;
+    sht := vtype(inner);
+    tw := scalar_bits(inner);
+    _, c1 := pm_apint(op(inner, 1));
+    inner_sh_amt := cast(u32) ap_zext_value(c1);
+    new_inner_shift :: (inner: Value_Id, sh_amt: u32, is_inner_shl: bool) -> Value_Id {
+        set_op(inner, 1, const_int_of(vtype(inner), cast(u64) sh_amt));
+        if is_inner_shl { set_nuw(inner, false); set_nsw(inner, false); }
+        else set_exact(inner, false);
+        return inner;
+    }
+    if is_inner_shl == is_outer_shl {
+        if inner_sh_amt + outer_sh_amt >= tw return const_null_value(sht);
+        return new_inner_shift(inner, inner_sh_amt + outer_sh_amt, is_inner_shl);
+    }
+    if inner_sh_amt == outer_sh_amt {
+        if !is_outer_shl && sem == .SIGNED return op(inner, 0);
+        if !is_outer_shl && sem == .UNSIGNED && is_inner_shl && has_nuw(inner) return op(inner, 0);
+        mask := ifx is_inner_shl then ap_low_bits_set(tw, tw - outer_sh_amt) else ap_high_bits_set(tw, tw - outer_sh_amt);
+        a := icb_and(op(inner, 0), const_int_ap(sht, mask));
+        if is_inst(a) {
+            inst_move_before(a, inner);
+            ic_take_name(a, inner);
+        }
+        return a;
+    }
+    return new_inner_shift(inner, inner_sh_amt - outer_sh_amt, is_inner_shl);
+}
+
+// getShiftedValue (InstCombineShifts.cpp)
+ic_get_shifted_value :: (v: Value_Id, num_bits: u32, is_left_shift: bool, sem: Shift_Semantics) -> Value_Id {
+    if is_const(v) {
+        opc: Opcode = ifx is_left_shift then Opcode.SHL else (ifx sem == .SIGNED then Opcode.ASHR else .LSHR);
+        return icb_binop(opc, v, const_int_of(vtype(v), cast(u64) num_bits));
+    }
+    wl_push(v);
+    o := inst_op(v);
+    if o == {
+        case .AND; #through;
+        case .OR; #through;
+        case .XOR;
+            set_op(v, 0, ic_get_shifted_value(op(v, 0), num_bits, is_left_shift, sem));
+            set_op(v, 1, ic_get_shifted_value(op(v, 1), num_bits, is_left_shift, sem));
+            return v;
+        case .SHL; #through;
+        case .LSHR;
+            return ic_fold_shifted_shift(v, num_bits, is_left_shift, sem);
+        case .SELECT;
+            set_op(v, 1, ic_get_shifted_value(op(v, 1), num_bits, is_left_shift, sem));
+            set_op(v, 2, ic_get_shifted_value(op(v, 2), num_bits, is_left_shift, sem));
+            return v;
+        case .PHI;
+            n := phi_num_incoming(v);
+            if n > 0 for k: 0..n-1 phi_set_value(v, k, ic_get_shifted_value(phi_value(v, cast(u32) k), num_bits, is_left_shift, sem));
+            return v;
+        case .MUL;
+            neg := create_neg(op(v, 0));
+            ic_insert_new_inst_with(neg, v);
+            tw := scalar_bits(v);
+            mask := ap_low_bits_set(tw, tw - num_bits);
+            a := create_binop(.AND, neg, const_int_ap(vtype(v), mask));
+            ic_take_name(a, v);
+            return ic_insert_new_inst_with(a, v);
+        case .ADD;
+            if is_left_shift drop_poison_generating_flags(v);
+            set_op(v, 0, ic_get_shifted_value(op(v, 0), num_bits, is_left_shift, sem));
+            set_op(v, 1, ic_get_shifted_value(op(v, 1), num_bits, is_left_shift, sem));
+            return v;
+    }
+    fatal("internal: Inconsistency with CanEvaluateShifted");
+    return NONE;
+}
