@@ -138,7 +138,6 @@ var aqs: AQ[>..<];
 
 let AEK_ALIAS: u8 = 0;
 let AEK_CAPTURE: u8 = 1;       // SimpleCaptureAnalysis::IsCapturedCache
-let AEK_EARLIEST: u8 = 2;      // EarliestEscapeAnalysis::EarliestEscapes
 
 struct AE { q: i32, kind: u8, alive: bool, cross: bool, p1: i32, p2: i32, s1: u64, s2: u64, res: AR, nau: i32,
             next: i32, c1: i64, c2: i64, inst: i32 }
@@ -154,6 +153,7 @@ fn aq_push(ca: i64) -> i32 {
     aqs.push(AQ { depth: 0, nau: 0, abr_base: aq_abr.len as i32, ent_mark: aent.len as i32, cross: false, use_dt: true, ca: ca as u8 });
     return q;
 }
+
 fn aq_pop(q: i32) {
     if (q as i64) != aqs.len - 1 { fatal("internal: AAQueryInfo popped out of order"); }
     let mark = aqs[q].ent_mark as i64;
@@ -284,39 +284,52 @@ fn aq_captures_before(q: i32, obj: i32, i: i32, or_at: bool, return_captures: bo
         }
         return if return_captures { aent[e].c2 } else { aent[e].c1 };
     }
-    // EarliestEscapeAnalysis
-    var e = ae_find(q, AEK_EARLIEST, obj, 0, -1, 0, false);
-    if e < 0 {
+    // EarliestEscapeAnalysis (one instance: ea_*)
+    if !ea_has(obj) {
         let ei, wo, wr = ct_find_earliest_capture(obj, aa_cur_fn, CC_PROVENANCE);
-        e = ae_insert(q, AEK_EARLIEST, obj, 0, -1, 0, false);
-        aent[e].inst = ei;
-        aent[e].c1 = wo;
-        aent[e].c2 = wr;
+        ea_put(obj, ei, wo, wr);
     }
     if return_captures {
         if i >= 0 { fatal("internal: context instruction not supported with ReturnCaptures"); }
-        return aent[e].c2;
+        return ea_with_ret[obj];
     }
-    let ci = aent[e].inst;
+    let ci = ea_inst[obj];
     var not_before = false;
     if ci < 0 { not_before = true; }
     else if i < 0 { not_before = false; }
     else if i == ci {
-        not_before = if or_at { false } else { cfr_not_in_cycle(i, true) };
+        not_before = if or_at { false } else { cfr_not_in_cycle(i, true, ea_use_li, ea_use_ci) };
     } else {
-        not_before = !cfr_inst_reachable(ci, i, true, false);
+        not_before = !cfr_inst_reachable(ci, i, true, ea_use_li, ea_use_ci);
     }
     if not_before { return CC_NONE; }
-    return aent[e].c1;
+    return ea_without_ret[obj];
 }
 
+// EarliestEscapeAnalysis: one instance at a time (DSE and MemCpyOpt keep one per function and hand it to
+// their BatchAAResults). ea_begin(use_li, use_ci) = EarliestEscapeAnalysis(DT, LI, CI) (LoopInfo / CycleInfo
+// must be computed); the cache (EarliestEscapes) is keyed by object value id with an epoch.
+var ea_epoch: i32 = 0;
+var ea_stamp: i32[>..];
+var ea_inst: i32[>..];
+var ea_without_ret: i64[>..];
+var ea_with_ret: i64[>..];
+var ea_objs: i32[>..<];
+var ea_use_li: bool = false;
+var ea_use_ci: bool = false;
+fn ea_begin(use_li: bool, use_ci: bool) { ea_epoch++; ea_objs.clear(); ea_use_li = use_li; ea_use_ci = use_ci; }
+fn ea_has(obj: i32) -> bool { (obj as i64) < ea_stamp.len && ea_stamp[obj] == ea_epoch }
+fn ea_put(obj: i32, i: i32, wo: i64, wr: i64) {
+    while ea_stamp.len <= (obj as i64) { ea_stamp.push(0); ea_inst.push(-1); ea_without_ret.push(0); ea_with_ret.push(0); }
+    ea_stamp[obj] = ea_epoch;
+    ea_inst[obj] = i;
+    ea_without_ret[obj] = wo;
+    ea_with_ret[obj] = wr;
+    ea_objs.push(obj);
+}
 // EarliestEscapeAnalysis::removeInstruction: forget the objects whose earliest capture was I
-fn aq_remove_instruction(q: i32, iv: i32) {
-    var i = aqs[q].ent_mark as i64;
-    while i < aent.len {
-        if aent[i].alive && aent[i].q == q && aent[i].kind == AEK_EARLIEST && aent[i].inst == iv { ae_unlink(i as i32); }
-        i++;
-    }
+fn ea_remove_instruction(iv: i32) {
+    for o in ea_objs { if ea_has(o) && ea_inst[o] == iv { ea_stamp[o] = 0; } }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1208,7 +1221,7 @@ fn bas_value_equal(v: i32, v2: i32, q: i32) -> bool {
     if !is_inst(v) { return true; }
     let bb = inst_parent(v);
     if func_entry(block_func(bb)) == bb { return true; }
-    return cfr_not_in_cycle(v, aqs[q].use_dt);
+    return cfr_not_in_cycle(v, aqs[q].use_dt, false, false);
 }
 
 // subtractDecomposedGEPs (Dest's vars must be at the top of bas_vars)

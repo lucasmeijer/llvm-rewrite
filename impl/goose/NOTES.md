@@ -271,7 +271,8 @@
   use lists (`mssa_first_use`…) and the list helpers there. GVN needs MemoryDependenceAnalysis (not ported).
 - Not ported (fail loudly or absent): separate_storage assumptions in BasicAA, APInt widths over 64 bits,
   `!callback` metadata in the CallGraph, MemorySSA's loop constructor and verifier, the
-  `EarliestEscapeAnalysis` with LoopInfo/CycleInfo (DT only), `scev-aa`, `objc-arc-aa`.
+  `scev-aa`, `objc-arc-aa`. EarliestEscapeAnalysis and the CFG reachability with LoopInfo/CycleInfo are ported
+  but no printer exercises them (first checked by DSE/MemCpyOpt).
 - Printer issues seen in the sweeps (not AA bugs): `errs_inst` numbers metadata like a function-local SlotTracker;
   LLVM uses a module-wide one (`ShouldInitializeAllMetadata`) when the instruction has an MDNode operand
   (`llvm.read_register(metadata !1)` prints `!1` in LLVM, `!0` here); the parser doesn't print LLVM's "warning:

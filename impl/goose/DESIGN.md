@@ -307,8 +307,9 @@ Ports of `MemoryLocation.cpp`, `AliasAnalysis.cpp`, `BasicAliasAnalysis.cpp`, `T
 - **AAQueryInfo / BatchAAResults**: `q = aq_push(CA_SIMPLE | CA_EARLIEST)` ... `aq_pop(q)` (stack discipline). A
   query info owns an alias cache region in one chained hash table (`aent/abuck`, entries after `ent_mark`), the
   assumption-based results (`aq_abr`), `cross` (MayBeCrossIteration; `BatchAACrossIterationScope` = save/restore
-  `aqs[q].cross`), `use_dt`, and the capture-analysis cache (SimpleCaptureAnalysis or EarliestEscapeAnalysis;
-  `aq_remove_instruction(q, i)` is `EarliestEscapeAnalysis::removeInstruction`). Results depend on the cache
+  `aqs[q].cross`), `use_dt`, and the SimpleCaptureAnalysis cache. `CA_EARLIEST` query infos use the single
+  EarliestEscapeAnalysis instance instead, which outlives query infos as in DSE/MemCpyOpt: `ea_begin(use_li,
+  use_ci)` = `EarliestEscapeAnalysis(DT, LI, CI)`, `ea_remove_instruction(i)`. Results depend on the cache
   exactly as in LLVM (assumption-based PHI results), so reuse one `q` where LLVM reuses a BatchAAResults and make
   a fresh one where LLVM makes a SimpleAAQueryInfo (`aa_*_simple` helpers).
 - **Entry points**: `aa_alias(a, b, q, cxt)`, `aa_inst_loc_mr(i, loc, q)` (getModRefInfo(I, OptLoc)),
@@ -316,7 +317,8 @@ Ports of `MemoryLocation.cpp`, `AliasAnalysis.cpp`, `BasicAliasAnalysis.cpp`, `T
   (getMemoryEffects), `aa_mod_ref_mask` / `aa_points_to_constant_memory`, `aa_arg_mod_ref`,
   `aa_call_captures_before`, `aa_is_identified_object` & co., `aa_is_not_visible_on_unwind`,
   `aa_is_writable_object`. Capture tracking: `ct_pointer_may_be_captured`, `ct_may_be_captured_before`,
-  `ct_find_earliest_capture`. Reachability: `cfr_inst_reachable`, `cfr_block_reachable`, `cfr_from_many`.
+  `ct_find_earliest_capture`. Reachability (DT, optional LoopInfo / CycleInfo): `cfr_inst_reachable`, `cfr_block_reachable`,
+  `cfr_from_many`, `cfr_not_in_cycle`.
 - **Recursion**: the aggregator and BasicAA are mutually recursive (`AAQI.AAR.alias`), so they live in one file
   (aa.goose) and keep no growable locals: decomposed GEP indices are runs on `bas_vars`, aliasPHI's sources on
   `bas_srcs`, truncated to a mark before returning.

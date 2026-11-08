@@ -159,7 +159,7 @@ fn ct_too_many_uses() {
 fn ct_safe_to_prune(i: i32) -> bool {
     if ct_before == i { return !ct_include_i; }
     if !dt_has_node(DT_DOM, inst_parent(i)) { return true; }
-    return !cfr_inst_reachable(i, ct_before, true, ct_use_li);
+    return !cfr_inst_reachable(i, ct_before, true, ct_use_li, false);
 }
 
 // DominatorTree::findNearestCommonDominator(Instruction, Instruction)
