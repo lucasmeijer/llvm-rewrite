@@ -27,11 +27,14 @@ class Res:
         return self.err.decode(errors="replace")[-n:]
 
 
-def run(cmd: list[str], *, cwd=None, stdin: bytes | None = None, timeout: float = config.TOOL_TIMEOUT) -> Res:
+def run(cmd: list[str], *, cwd=None, stdin: bytes | None = None, timeout: float = config.TOOL_TIMEOUT,
+        env: dict | None = None) -> Res:
+    """env: extra variables on top of the harness's environment."""
     try:
         p = subprocess.run(
             cmd,
             cwd=cwd,
+            env={**os.environ, **env} if env else None,
             input=stdin if stdin is not None else b"",
             capture_output=True,
             timeout=timeout,

@@ -41,7 +41,7 @@ def write_passing(impl: str, ids: set[str]):
     passing_path(impl).write_text("".join(f"{i}\n" for i in sorted(ids)))
 
 
-def build(impl: str):
+def build(impl: str, env: dict | None = None):
     if impl == config.REFERENCE_IMPL:
         return
     d = config.IMPLS / impl
@@ -50,8 +50,9 @@ def build(impl: str):
     script = d / "build.sh"
     if not script.exists():
         raise SystemExit(f"impl/{impl}/build.sh is missing")
-    print(c(DIM, f"building impl/{impl} ..."), flush=True)
-    r = proc.run(["bash", str(script)], cwd=d, timeout=3600)
+    extra = "".join(f" {k}={v}" for k, v in (env or {}).items())
+    print(c(DIM, f"building impl/{impl}{extra} ..."), flush=True)
+    r = proc.run(["bash", str(script)], cwd=d, timeout=3600, env=env)
     if not r.ok:
         sys.stdout.write(r.out.decode(errors="replace")[-5000:])
         sys.stdout.write(r.err_tail(5000))

@@ -187,7 +187,7 @@ backend on LLVM's `opt` output for the file's first `@opt`.
 | --- | --- |
 | `llvm cpu s` | LLVM's CPU time (user + system), the minimum over the runs |
 | `cpu` | our CPU time ÷ LLVM's |
-| `rss` | our peak memory ÷ LLVM's |
+| `rss` | our peak resident memory ÷ LLVM's (max over the runs; never under valgrind) |
 | `instr` | only with `--instr`: our executed instructions ÷ LLVM's (see below) |
 | `Δprev` | change in our ratio to LLVM since the previous `perf` run of this implementation (from the history); `=` within the noise (10% for cpu, 0.05% for instr) |
 | `ok` | whether we pass the correctness check for that output (`::roundtrip` or `::opt`, from `passing.txt`); `-` if none |
@@ -209,6 +209,20 @@ no hardware counters). Repeatable to the instruction, so it shows 1% differences
 slower: a full run with a freshly built implementation takes several minutes. Counts are cached by (binary, args,
 input), so LLVM's are paid once and an unchanged binary is free. With `--instr`, scaling exponents and `Δprev` use
 instruction counts.
+
+**How RSS is measured.** Each timed run goes through a tiny C helper (source in `harness/lrh/perf.py`, built once
+with LLVM's clang into `.harness-out/perf/rss-helper-<hash>`) that forks the tool and reports the tool's own `wait4`
+rusage: CPU time and `ru_maxrss`. Taking `wait4` directly from the harness doesn't work: Linux carries a process's
+pre-exec memory high-water mark over `exec`, so a child forked from the ~160 MB harness Python process reports at
+least 160 MB whatever it runs (before 2026-11, every row read ~1.00x because of this). The helper's floor is under
+1 MB. `RUSAGE_CHILDREN` isn't used either: it's the maximum over all children, not this one.
+
+**Per-implementation environment: `impl/<lang>/perf.env`.** Optional; `KEY=VALUE` lines (`#` comments, no quoting
+or expansion). `perf` sets these variables for that implementation's `build.sh` and for every run it measures
+(timed and valgrind), so all perf numbers of a run come from one binary. Instruction counts are cached with the
+environment as part of the key. Use it for settings valgrind needs, e.g. goose's `GOOSE_STACK_RESERVE=128M` (its
+~490 data stacks reserve 2 GB of address space each by default, more than valgrind gives a client). Note that a
+build-time variable makes `check`'s next build rebuild with the default.
 
 Results: `.harness-out/perf/<impl>.json`; every run is appended to `/persistent/llvm-rewrite/perf-history/<impl>.jsonl`
 (with commit and dirty flag) unless `--no-history`.

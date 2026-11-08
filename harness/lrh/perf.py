@@ -6,7 +6,7 @@ For every `@perf: <tool> <args>` line of every selected file it measures, for LL
          default; CPU time stays within a few percent of a solo run up to that point on this VM), with LLVM and the
          implementations in the same batch, so they see the same load. Each benchmark is repeated until it has
          about a second of samples (at most 5 runs); --reps fixes the count instead.
-  rss    peak resident memory.
+  rss    peak resident memory of the tool itself (measured through a small fork+wait4 helper; see timed()).
   instr  only with --instr: instructions executed (valgrind --tool=cachegrind). Exact and repeatable, but valgrind
          is ~40x slower; cached by (tool binary, args, input), so LLVM's numbers and unchanged binaries are free.
 
@@ -84,35 +84,121 @@ def count_instr(impl: str, perf_line: str, input_text: str) -> dict:
             (wd / "in.ll").write_text(input_text)
             cmd = command(impl, perf_line, wd / "in.ll", wd / "out")
             r = proc.run(["valgrind", "--tool=cachegrind", "--cache-sim=no", "--trace-children=yes",
-                          "--cachegrind-out-file=/dev/null", *cmd], cwd=wd, timeout=VALGRIND_TIMEOUT)
+                          "--cachegrind-out-file=/dev/null", *cmd], cwd=wd, timeout=VALGRIND_TIMEOUT, env=env)
             counts = IREFS.findall(r.err.decode(errors="replace"))  # one summary per traced process
             if not r.ok or not counts:
                 tail = "\n".join(l for l in r.err.decode(errors="replace").splitlines() if not l.startswith("=="))
                 return {"ok": False, "msg": f"exit {r.rc}: {tail[-600:]}"}
             return {"ok": True, "instr": sum(int(n.replace(",", "")) for n in counts)}
 
+    env = perf_env(impl)
     k = bin_key(impl, perf_line)
     if k == "missing":
         return {"ok": False, "msg": "binary missing"}
-    return proc.cached(["perf-instr-v2", k, perf_line, input_text], compute)
+    return proc.cached(["perf-instr-v2", k, perf_line, input_text] + ([env] if env else []), compute)
 
 
-def timed(cmd: list[str], cwd: Path) -> dict:
+# Peak RSS has to come from a small parent. ru_maxrss of a waited child includes the high-water mark of the memory
+# it had before exec, and a child forked (or vforked) from the harness starts with the ~160 MB Python process mapped,
+# so wait4 from here reports the harness's size for every tool that peaks below that. This helper is exec'd fresh
+# (a few hundred KiB), forks the tool and reports the tool's own wait4 rusage on the fd given as argv[1].
+RSS_HELPER_C = r"""
+#include <errno.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
+int main(int argc, char **argv) {
+  if (argc < 3) return 2;
+  int fd = atoi(argv[1]);
+  FILE *res = fdopen(fd, "w");
+  if (!res) return 2;
+  pid_t p = fork();
+  if (p < 0) { fprintf(res, "error fork: %s\n", strerror(errno)); return 2; }
+  if (p == 0) {
+    close(fd);
+    execvp(argv[2], argv + 2);
+    fprintf(stderr, "could not execute %s: %s\n", argv[2], strerror(errno));
+    _exit(127);
+  }
+  int st; struct rusage ru;
+  while (wait4(p, &st, 0, &ru) < 0) if (errno != EINTR) { fprintf(res, "error wait4: %s\n", strerror(errno)); return 2; }
+  int code = WIFEXITED(st) ? WEXITSTATUS(st) : -WTERMSIG(st);
+  fprintf(res, "%ld %ld.%06ld %ld.%06ld %d\n", ru.ru_maxrss, (long)ru.ru_utime.tv_sec, (long)ru.ru_utime.tv_usec,
+          (long)ru.ru_stime.tv_sec, (long)ru.ru_stime.tv_usec, code);
+  return 0;
+}
+"""
+_rss_helper: list[str] = []
+
+
+def rss_helper() -> str:
+    """Path of the compiled helper (built once per source version, with LLVM's clang)."""
+    if _rss_helper:
+        return _rss_helper[0]
+    d = config.OUT / "perf"
+    d.mkdir(parents=True, exist_ok=True)
+    exe = d / f"rss-helper-{proc.sha(RSS_HELPER_C)[:12]}"
+    if not exe.exists():
+        src = d / "rss-helper.c"
+        src.write_text(RSS_HELPER_C)
+        tmp = d / f"rss-helper.{os.getpid()}"
+        for flags in (["-static"], []):  # static: smaller floor; fall back if no static libc
+            r = proc.run([config.llvm("clang"), "-O2", *flags, "-o", str(tmp), str(src)])
+            if r.ok:
+                break
+        else:
+            raise SystemExit(f"perf: could not build the RSS helper {src}:\n{r.err_tail()}")
+        os.replace(tmp, exe)
+    _rss_helper.append(str(exe))
+    return str(exe)
+
+
+def timed(cmd: list[str], cwd: Path, env: dict | None = None) -> dict:
     """One run: CPU seconds (user+sys), wall seconds, peak RSS in KiB, exit code, stderr tail on failure."""
     with tempfile.TemporaryFile() as err:
+        rfd, wfd = os.pipe()
         t0 = time.perf_counter()
         try:
-            p = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err)
+            p = subprocess.Popen([rss_helper(), str(wfd), *cmd], cwd=cwd, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=err, pass_fds=(wfd,),
+                                 env={**os.environ, **env} if env else None)
         except OSError as e:
+            os.close(rfd)
+            os.close(wfd)
             return {"rc": 127, "msg": f"could not execute: {e}"}
-        _, status, ru = os.wait4(p.pid, 0)
+        os.close(wfd)
+        with os.fdopen(rfd) as f:
+            res = f.read().split()
+        p.wait()
         wall = time.perf_counter() - t0
-        rc = os.waitstatus_to_exitcode(status)
+        if p.returncode or len(res) != 4:
+            return {"rc": 127, "msg": f"rss helper failed ({p.returncode}): {' '.join(res)}"}
+        rss, ut, st, rc = int(res[0]), float(res[1]), float(res[2]), int(res[3])
         msg = ""
         if rc:
             err.seek(0)
             msg = f"exit {rc}: " + err.read().decode(errors="replace").strip()[-600:]
-    return {"rc": rc, "cpu": ru.ru_utime + ru.ru_stime, "wall": wall, "rss": ru.ru_maxrss, "msg": msg}
+    return {"rc": rc, "cpu": ut + st, "wall": wall, "rss": rss, "msg": msg}
+
+
+def perf_env(impl: str) -> dict:
+    """impl/<lang>/perf.env: KEY=VALUE lines (# comments) set for the build and every run during `perf`."""
+    f = config.IMPLS / impl / "perf.env"
+    if impl == config.REFERENCE_IMPL or not f.exists():
+        return {}
+    env = {}
+    for n, line in enumerate(f.read_text().splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        k, eq, v = line.partition("=")
+        if not eq or not k.strip().isidentifier():
+            raise SystemExit(f"{f}:{n}: expected KEY=VALUE, got {line!r}")
+        env[k.strip()] = v.strip()
+    return env
 
 
 # ---------------------------------------------------------------- the run
@@ -174,6 +260,7 @@ def fit_exponent(points: list[tuple[int, float]]) -> float | None:
 def measure_cpu(whos, keys, inputs, jobs, fixed_reps) -> dict:
     """{(who, key): {"cpu", "wall", "rss", "reps", "rc", "msg"}} for key = (path, perf line)."""
     samples: dict = {}
+    envs = {w: perf_env(w) for w in whos}
     with proc.Workdir() as wd:
         files = {}
         for i, k in enumerate(keys):
@@ -185,7 +272,7 @@ def measure_cpu(whos, keys, inputs, jobs, fixed_reps) -> dict:
             who, k = job
             counter[0] += 1
             out = wd / f"out{counter[0]}"
-            r = timed(command(who, k[1], files[k], out), wd)
+            r = timed(command(who, k[1], files[k], out), wd, envs[who])
             out.unlink(missing_ok=True)
             return job, r
 
@@ -230,7 +317,7 @@ def cmd_perf(a):
     impls = [i.strip() for i in a.impl.split(",") if i.strip()]
     if not a.no_build:
         for i in impls:
-            build(i)
+            build(i, perf_env(i))
     if a.instr and proc.run(["valgrind", "--version"]).rc != 0:
         raise SystemExit("valgrind is not installed (it's in the workspace image); --instr needs it")
     benches = benchmarks(a.globs)
