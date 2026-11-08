@@ -97,7 +97,7 @@ sc_dominates :: (s: Scev_Id, bb: Value_Id) -> bool { return sc_get_block_disposi
 sc_properly_dominates :: (s: Scev_Id, bb: Value_Id) -> bool { return sc_get_block_disposition(s, bb) == .PROPERLY_DOMINATES; }
 // hasOperand
 sc_has_operand :: (s: Scev_Id, o: Scev_Id) -> bool {
-    return sc_expr_contains(s, (x: Scev_Id, d: *void) -> bool { return x == (cast(*Scev_Id) d).*; }, *o);
+    return sc_expr_contains(s, .CONTAINS_OPERAND, o);
 }
 
 // ---------------------------------------------------------------- finiteness
@@ -491,85 +491,82 @@ lg_collect_condition :: (g: *Loop_Guards, pred_in: u8, lhs_in: Scev_Id, rhs_in: 
     }
 }
 
+// LoopGuards::rewrite's SCEVLoopGuardRewriter (visit*)
+sc_rw_loop_guards_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
+    g := rw.guards;
+    k := sc_kind(s);
+    if k == {
+        case .ADDREC; return true, s;
+        case .UNKNOWN; r := lg_lookup(g, s); if r == SCEV_NULL return true, s; return true, r;
+        case .ZEXT;
+            r := lg_lookup(g, s);
+            if r != SCEV_NULL return true, r;
+            ty := sc_type(s);
+            o := sc_op(s, 0);
+            bits := type_int_width(ty) / 2;
+            while bits % 8 == 0 && bits >= 8 && bits > type_bits(sc_type(o)) {
+                narrow_ext := sc_get_zero_extend(o, type_int(bits));
+                r2 := lg_lookup(g, narrow_ext);
+                if r2 != SCEV_NULL return true, sc_get_zero_extend(r2, ty);
+                bits /= 2;
+            }
+            return false, 0;
+        case .SEXT; #through;
+        case .UMIN; #through;
+        case .SMIN;
+            r := lg_lookup(g, s);
+            if r != SCEV_NULL return true, r;
+            return false, 0;
+        case .ADD;
+            rewrite_subtraction :: (s: Scev_Id, g: *Loop_Guards) -> Scev_Id {
+                ok, l, r := match_binary_sub(s);
+                if ok && lg_ne_contains(g, l, r) {
+                    one_aligned_up := get_next_scev_divisible_by_divisor(sc_get_one(sc_type(s)), sc_get_constant_multiple(s));
+                    return sc_get_umax2(one_aligned_up, s);
+                }
+                return SCEV_NULL;
+            }
+            rr := rewrite_subtraction(s, g);
+            if rr != SCEV_NULL return true, rr;
+            if sc_is_const(sc_op(s, 0)) && sc_nops(s) == 3 {
+                add := sc_get_add2(sc_op(s, 1), sc_op(s, 2));
+                r2 := rewrite_subtraction(add, g);
+                if r2 != SCEV_NULL return true, sc_get_add2(sc_op(s, 0), r2, mask_flags(sc_flags(s), rw.flag_mask));
+                r3 := lg_lookup(g, add);
+                if r3 != SCEV_NULL return true, sc_get_add2(sc_op(s, 0), r3);
+            }
+            ops: [..] Scev_Id; ops.allocator = temp;
+            changed := false;
+            for i: 0..cast(s64) sc_nops(s) - 1 {
+                o := sc_op(s, cast(u32) i);
+                r := sc_rewrite(rw, o);
+                array_add(*ops, r);
+                changed |= r != o;
+            }
+            if !changed return true, s;
+            return true, sc_get_add(*ops, mask_flags(sc_flags(s), rw.flag_mask));
+        case .MUL;
+            ops: [..] Scev_Id; ops.allocator = temp;
+            changed := false;
+            for i: 0..cast(s64) sc_nops(s) - 1 {
+                o := sc_op(s, cast(u32) i);
+                r := sc_rewrite(rw, o);
+                array_add(*ops, r);
+                changed |= r != o;
+            }
+            if !changed return true, s;
+            return true, sc_get_mul(*ops, mask_flags(sc_flags(s), rw.flag_mask));
+    }
+    return false, 0;
+}
 // LoopGuards::rewrite
-Lg_Rewrite_Ctx :: struct { g: *Loop_Guards; flag_mask: u8; }
 lg_rewrite :: (g: *Loop_Guards, e: Scev_Id) -> Scev_Id {
     if g.keys.count == 0 && g.ne_a.count == 0 return e;
-    ctx: Lg_Rewrite_Ctx;
-    ctx.g = g;
-    ctx.flag_mask = SF_ANY;
-    if g.preserve_nuw ctx.flag_mask = set_flags(ctx.flag_mask, SF_NUW);
-    if g.preserve_nsw ctx.flag_mask = set_flags(ctx.flag_mask, SF_NSW);
-    rw: Sc_Rewriter; sc_rewriter_init(*rw);
-    rw.data = *ctx;
-    rw.hook = (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
-        c := cast(*Lg_Rewrite_Ctx) rw.data;
-        g := c.g;
-        k := sc_kind(s);
-        if k == {
-            case .ADDREC; return true, s;
-            case .UNKNOWN; r := lg_lookup(g, s); if r == SCEV_NULL return true, s; return true, r;
-            case .ZEXT;
-                r := lg_lookup(g, s);
-                if r != SCEV_NULL return true, r;
-                ty := sc_type(s);
-                o := sc_op(s, 0);
-                bits := type_int_width(ty) / 2;
-                while bits % 8 == 0 && bits >= 8 && bits > type_bits(sc_type(o)) {
-                    narrow_ext := sc_get_zero_extend(o, type_int(bits));
-                    r2 := lg_lookup(g, narrow_ext);
-                    if r2 != SCEV_NULL return true, sc_get_zero_extend(r2, ty);
-                    bits /= 2;
-                }
-                return false, 0;
-            case .SEXT; #through;
-            case .UMIN; #through;
-            case .SMIN;
-                r := lg_lookup(g, s);
-                if r != SCEV_NULL return true, r;
-                return false, 0;
-            case .ADD;
-                rewrite_subtraction :: (s: Scev_Id, g: *Loop_Guards) -> Scev_Id {
-                    ok, l, r := match_binary_sub(s);
-                    if ok && lg_ne_contains(g, l, r) {
-                        one_aligned_up := get_next_scev_divisible_by_divisor(sc_get_one(sc_type(s)), sc_get_constant_multiple(s));
-                        return sc_get_umax2(one_aligned_up, s);
-                    }
-                    return SCEV_NULL;
-                }
-                rr := rewrite_subtraction(s, g);
-                if rr != SCEV_NULL return true, rr;
-                if sc_is_const(sc_op(s, 0)) && sc_nops(s) == 3 {
-                    add := sc_get_add2(sc_op(s, 1), sc_op(s, 2));
-                    r2 := rewrite_subtraction(add, g);
-                    if r2 != SCEV_NULL return true, sc_get_add2(sc_op(s, 0), r2, mask_flags(sc_flags(s), c.flag_mask));
-                    r3 := lg_lookup(g, add);
-                    if r3 != SCEV_NULL return true, sc_get_add2(sc_op(s, 0), r3);
-                }
-                ops: [..] Scev_Id; ops.allocator = temp;
-                changed := false;
-                for i: 0..cast(s64) sc_nops(s) - 1 {
-                    o := sc_op(s, cast(u32) i);
-                    r := sc_rewrite(rw, o);
-                    array_add(*ops, r);
-                    changed |= r != o;
-                }
-                if !changed return true, s;
-                return true, sc_get_add(*ops, mask_flags(sc_flags(s), c.flag_mask));
-            case .MUL;
-                ops: [..] Scev_Id; ops.allocator = temp;
-                changed := false;
-                for i: 0..cast(s64) sc_nops(s) - 1 {
-                    o := sc_op(s, cast(u32) i);
-                    r := sc_rewrite(rw, o);
-                    array_add(*ops, r);
-                    changed |= r != o;
-                }
-                if !changed return true, s;
-                return true, sc_get_mul(*ops, mask_flags(sc_flags(s), c.flag_mask));
-        }
-        return false, 0;
-    };
+    rw: Sc_Rewriter; sc_rewriter_init(*rw, .LOOP_GUARDS);
+    rw.guards = g;
+    rw.flag_mask = SF_ANY;
+    if g.preserve_nuw rw.flag_mask = set_flags(rw.flag_mask, SF_NUW);
+    if g.preserve_nsw rw.flag_mask = set_flags(rw.flag_mask, SF_NSW);
     return sc_rewrite(*rw, e);
 }
 

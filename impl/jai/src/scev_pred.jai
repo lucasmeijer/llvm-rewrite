@@ -98,43 +98,39 @@ sc_pred_print :: (sb: *String_Builder, p: u32, depth: s64) {
 
 // ---------------------------------------------------------------- SCEVPredicateRewriter (NewPreds form)
 
-Pred_Rewrite_Ctx :: struct { new_preds: *[..] u32; }
+sc_rw_predicate_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
+    k := sc_kind(s);
+    if k == .UNKNOWN {
+        // convertToAddRecWithPreds
+        v := sc_value(s);
+        if !is_inst(v) || inst_op(v) != .PHI return true, s;
+        ok, res, preds := sc_create_add_rec_from_phi_with_casts(s);
+        if !ok return true, s;
+        for p: preds {
+            if se.preds[p].kind == .WRAP && rw.l != sc_loop(se.preds[p].a) return true, s;
+            array_add(rw.new_preds, p);
+        }
+        return true, res;
+    }
+    if k == .ZEXT || k == .SEXT {
+        operand := sc_rewrite(rw, sc_op(s, 0));
+        ty := sc_type(s);
+        if sc_is_addrec(operand) && sc_loop(operand) == rw.l && sc_is_affine(operand) {
+            step := sc_step_recurrence(operand);
+            flag := ifx k == .ZEXT then INCREMENT_NUSW else INCREMENT_NSSW;
+            array_add(rw.new_preds, sc_get_wrap_predicate(operand, flag));
+            start := ifx k == .ZEXT then sc_get_zero_extend(sc_start(operand), ty) else sc_get_sign_extend(sc_start(operand), ty);
+            return true, sc_get_add_rec(start, sc_get_sign_extend(step, ty), rw.l, sc_flags(operand));
+        }
+        if k == .ZEXT return true, sc_get_zero_extend(operand, ty);
+        return true, sc_get_sign_extend(operand, ty);
+    }
+    return false, 0;
+}
 scev_predicate_rewrite :: (s: Scev_Id, l: Loop_Id, new_preds: *[..] u32) -> Scev_Id {
-    ctx: Pred_Rewrite_Ctx;
-    ctx.new_preds = new_preds;
-    rw: Sc_Rewriter; sc_rewriter_init(*rw);
+    rw: Sc_Rewriter; sc_rewriter_init(*rw, .PREDICATE);
     rw.l = l;
-    rw.data = *ctx;
-    rw.hook = (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
-        c := cast(*Pred_Rewrite_Ctx) rw.data;
-        k := sc_kind(s);
-        if k == .UNKNOWN {
-            // convertToAddRecWithPreds
-            v := sc_value(s);
-            if !is_inst(v) || inst_op(v) != .PHI return true, s;
-            ok, res, preds := sc_create_add_rec_from_phi_with_casts(s);
-            if !ok return true, s;
-            for p: preds {
-                if se.preds[p].kind == .WRAP && rw.l != sc_loop(se.preds[p].a) return true, s;
-                array_add(c.new_preds, p);
-            }
-            return true, res;
-        }
-        if k == .ZEXT || k == .SEXT {
-            operand := sc_rewrite(rw, sc_op(s, 0));
-            ty := sc_type(s);
-            if sc_is_addrec(operand) && sc_loop(operand) == rw.l && sc_is_affine(operand) {
-                step := sc_step_recurrence(operand);
-                flag := ifx k == .ZEXT then INCREMENT_NUSW else INCREMENT_NSSW;
-                array_add(c.new_preds, sc_get_wrap_predicate(operand, flag));
-                start := ifx k == .ZEXT then sc_get_zero_extend(sc_start(operand), ty) else sc_get_sign_extend(sc_start(operand), ty);
-                return true, sc_get_add_rec(start, sc_get_sign_extend(step, ty), rw.l, sc_flags(operand));
-            }
-            if k == .ZEXT return true, sc_get_zero_extend(operand, ty);
-            return true, sc_get_sign_extend(operand, ty);
-        }
-        return false, 0;
-    };
+    rw.new_preds = new_preds;
     return sc_rewrite(*rw, s);
 }
 

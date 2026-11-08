@@ -417,10 +417,21 @@ recomputing gives a different child order.
   predicated variants, `sc_get_exit_count(l, bb, kind)`), getSCEVAtScope `sc_get_scev_at_scope`, isLoopInvariant
   `sc_is_loop_invariant`, getLoopDisposition, properlyDominates `sc_properly_dominates`, applyLoopGuards
   `sc_apply_loop_guards` / `sc_loop_guards_collect` + `sc_apply_loop_guards_with`, getSmallConstantTripCount /
-  TripMultiple, getConstantMultiple / getMinTrailingZeros, evaluateAtIteration, SCEVRewriteVisitor `Sc_Rewriter`
-  (a `hook` handles some kinds, the rest get the default rewrite), SCEVTraversal / SCEVExprContains
-  `sc_visit_all` / `sc_expr_contains`. Predicates (SCEVComparePredicate / SCEVWrapPredicate) are u32 rows of
+  TripMultiple, getConstantMultiple / getMinTrailingZeros, evaluateAtIteration, SCEVRewriteVisitor `Sc_Rewriter`,
+  SCEVTraversal / SCEVExprContains `sc_visit_all` / `sc_expr_contains` (see the next item). Predicates (SCEVComparePredicate / SCEVWrapPredicate) are u32 rows of
   `se.preds`.
+- **Visitors without vtables**: `Sc_Rewriter` (scev_create.jai) has `kind: Sc_Rewriter_Kind`, one value per
+  SCEVRewriteVisitor subclass we emulate (INIT, POST_INC, SHIFT, BACKEDGE_FOLD, LOOP_GUARDS, PREDICATE, NORMALIZE),
+  plus the union of their state fields (each commented with the kinds that use it) and the memo table.
+  `sc_rewrite_dispatch` is the virtual `visit` call: a `#complete` switch on the kind calls that kind's
+  `sc_rw_<kind>_visit(rw, s) -> (handled, result)` (defined next to the rewrite entry point, e.g.
+  `sc_rw_loop_guards_visit` in scev_guards.jai, `sc_rw_normalize_visit` in iv_users.jai); unhandled nodes get
+  `sc_rewrite_default` (the base class visit*). `Sc_Visitor` (scev.jai) does the same for SCEVTraversal:
+  `kind: Sc_Visitor_Kind` (CONTAINS_ADDREC / CONTAINS_UB_UDIV / CONTAINS_OPERAND for the SCEVExprContains
+  predicates, MIN_MAX_CONTAINS, CONST_IN_ADD_MUL_CHAIN, POISON_COLLECTOR, USED_LOOPS, INVALIDATION_ROOTS), with
+  `sc_visitor_follow` / `sc_visitor_is_done` as the two `#complete` switches. A new rewriter or traversal = a new
+  enum value, its fields, and a case in the switch; `sc_expr_contains(root, .CONTAINS_X, operand)` takes the
+  predicate as a kind, not a lambda.
 - **Keeping a cached SE valid** (scev_update.jai): `erase_inst` and `replace_all_uses_with` call `scev_note_erase` /
   `scev_note_rauw` (LLVM's SCEVCallbackVH and SCEVUnknown value handles). Passes call the same forget* LLVM calls
   through `pse_forget_value / _loop / _topmost_loop / _block_and_loop_dispositions`, which act on `scev_pass_se`

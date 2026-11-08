@@ -430,3 +430,13 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - Traps: Jai `for k: 0..n-1` with an unsigned `n == 0` runs 2^32 times — cast loop bounds to s64; `ifx` cannot
   pick between two multi-value calls; several helpers already existed under the same name in other agents' files
   (icb_fabs, pm_extract_value_idx, call_param_align, icb_vector_splat, ...): grep `^name ::` before adding one.
+
+## Procedure-typed parameters that remain (audited for the "no hand-rolled vtables" rule)
+
+No struct has a procedure-pointer field and there are no procedure-pointer tables (the SCEV `Sc_Rewriter.hook` and
+`Sc_Visitor.follow/is_done` were the last; they are now `kind` enums, see DESIGN.md). What is left are plain
+predicate/comparator parameters that mirror an LLVM `function_ref`, lambda template or function pointer at a single
+call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, `pm_apint_pred`, `pm_fp_pred`,
+`pm_int_pred_arg`, `const_fp_all`), `phi_remove_incoming_if` (removeIncomingValueIf), `ic_remove_trivially_empty_range`,
+`handle_guaranteed_{well_defined,non_poison}_ops` (function_ref Handle), `mvt_list`, the `gnu_stable_sort` comparator
+(std::stable_sort's Compare) and `Host_Fn1/2` (ConstantFoldFP's `double (*NativeFP)(double)`).

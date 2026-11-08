@@ -121,29 +121,29 @@ sc_forget_value :: (v: Value_Id) {
     sc_forget_memoized_results(to_forget);
 }
 
+// forgetLcssaPhiWithNewPredecessor's InvalidationRootCollector
+sc_vis_invalidation_roots_follow :: (v: *Sc_Visitor, s: Scev_Id) -> bool {
+    if sc_is_unknown(s) {
+        i := sc_value(s);
+        if is_inst(i) && li_contains(se.li, v.l, inst_block(i)) array_add(v.roots, s);
+    } else if sc_is_addrec(s) {
+        if li_contains_loop(se.li, v.l, sc_loop(s)) array_add(v.roots, s);
+    }
+    return true;
+}
 // forgetLcssaPhiWithNewPredecessor
 sc_forget_lcssa_phi_with_new_predecessor :: (l: Loop_Id, v: Value_Id) {
     if !sc_is_scevable(vtype(v)) return;
     s := sc_get_existing(v);
     if s != SCEV_CNC {
-        Ctx :: struct { l: Loop_Id; roots: [..] Scev_Id; }
-        ctx: Ctx;
-        ctx.l = l;
-        ctx.roots.allocator = temp;
+        roots: [..] Scev_Id;
+        roots.allocator = temp;
         vis: Sc_Visitor;
-        vis.data = *ctx;
-        vis.follow = (vis: *Sc_Visitor, s: Scev_Id) -> bool {
-            c := cast(*Ctx) vis.data;
-            if sc_is_unknown(s) {
-                i := sc_value(s);
-                if is_inst(i) && li_contains(se.li, c.l, inst_block(i)) array_add(*c.roots, s);
-            } else if sc_is_addrec(s) {
-                if li_contains_loop(se.li, c.l, sc_loop(s)) array_add(*c.roots, s);
-            }
-            return true;
-        };
+        vis.kind = .INVALIDATION_ROOTS;
+        vis.l = l;
+        vis.roots = *roots;
         sc_visit_all(s, *vis);
-        sc_forget_memoized_results(ctx.roots);
+        sc_forget_memoized_results(roots);
     }
     sc_forget_value(v);
 }

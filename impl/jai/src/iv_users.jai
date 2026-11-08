@@ -27,23 +27,23 @@ norm_pred :: (c: *Norm_Ctx, ar: Scev_Id) -> bool {
     if r { found := false; for c.loops.* if it == l found = true; if !found array_add(c.loops, l); }
     return r;
 }
+sc_rw_normalize_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
+    if !sc_is_addrec(s) return false, 0;
+    c := rw.norm;
+    ops: [..] Scev_Id; ops.allocator = temp;
+    for i: 0..cast(s64) sc_nops(s) - 1 array_add(*ops, sc_rewrite(rw, sc_op(s, cast(u32) i)));
+    if !norm_pred(c, s) return true, sc_get_add_rec_ops(*ops, sc_loop(s), SF_ANY);
+    if c.denormalize {
+        for i: 0..ops.count-2 ops[i] = sc_get_add2(ops[i], ops[i+1]);
+    } else {
+        i := ops.count - 2;
+        while i >= 0 { ops[i] = sc_get_minus(ops[i], ops[i+1]); i -= 1; }
+    }
+    return true, sc_get_add_rec_ops(*ops, sc_loop(s), SF_ANY);
+}
 normalize_rewrite :: (s: Scev_Id, c: *Norm_Ctx) -> Scev_Id {
-    rw: Sc_Rewriter; sc_rewriter_init(*rw);
-    rw.data = c;
-    rw.hook = (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
-        if !sc_is_addrec(s) return false, 0;
-        c := cast(*Norm_Ctx) rw.data;
-        ops: [..] Scev_Id; ops.allocator = temp;
-        for i: 0..cast(s64) sc_nops(s) - 1 array_add(*ops, sc_rewrite(rw, sc_op(s, cast(u32) i)));
-        if !norm_pred(c, s) return true, sc_get_add_rec_ops(*ops, sc_loop(s), SF_ANY);
-        if c.denormalize {
-            for i: 0..ops.count-2 ops[i] = sc_get_add2(ops[i], ops[i+1]);
-        } else {
-            i := ops.count - 2;
-            while i >= 0 { ops[i] = sc_get_minus(ops[i], ops[i+1]); i -= 1; }
-        }
-        return true, sc_get_add_rec_ops(*ops, sc_loop(s), SF_ANY);
-    };
+    rw: Sc_Rewriter; sc_rewriter_init(*rw, .NORMALIZE);
+    rw.norm = c;
     return sc_rewrite(*rw, s);
 }
 denormalize_for_post_inc_use :: (s: Scev_Id, loops: *[..] Loop_Id) -> Scev_Id {

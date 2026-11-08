@@ -207,19 +207,19 @@ cr_equivalent_icmp_no_offset :: (r: Const_Range) -> (bool, u8, APInt) {
 
 // ---------------------------------------------------------------- isKnownPredicate
 
-// getUsedLoops
+// getUsedLoops (FindUsedLoops)
+sc_vis_used_loops_follow :: (v: *Sc_Visitor, s: Scev_Id) -> bool {
+    if sc_is_addrec(s) {
+        l := sc_loop(s);
+        for v.loops.* if it == l return true;
+        array_add(v.loops, l);
+    }
+    return true;
+}
 sc_get_used_loops :: (s: Scev_Id, out: *[..] Loop_Id) {
     v: Sc_Visitor;
-    v.data = out;
-    v.follow = (v: *Sc_Visitor, s: Scev_Id) -> bool {
-        if sc_is_addrec(s) {
-            out := cast(*[..] Loop_Id) v.data;
-            l := sc_loop(s);
-            for out.* if it == l return true;
-            array_add(out, l);
-        }
-        return true;
-    };
+    v.kind = .USED_LOOPS;
+    v.loops = out;
     sc_visit_all(s, *v);
 }
 

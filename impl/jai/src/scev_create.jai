@@ -139,16 +139,33 @@ sc_forget_memoized_results_impl :: (s: Scev_Id) {
 
 // ---------------------------------------------------------------- the rewriter (SCEVRewriteVisitor)
 
-// `hook` may handle a node itself (return handled = true); everything else gets the default rewrite.
-Sc_Rewriter :: struct {
-    hook: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id);
-    data: *void;
-    memo: Table(Scev_Id, Scev_Id);
-    l: Loop_Id = NONE;
-    flag_a: bool;
-    flag_b: bool;
+// One kind per SCEVRewriteVisitor subclass we emulate, plus that kind's state. sc_rewrite_dispatch is the one
+// place LLVM makes the virtual visit call: each kind's visit procedure may handle a node itself (handled = true);
+// everything else gets the default rewrite.
+Sc_Rewriter_Kind :: enum u8 {
+    INIT;            // SCEVInitRewriter                   (scev_create.jai)
+    POST_INC;        // SCEVPostIncRewriter                (scev_create.jai)
+    SHIFT;           // SCEVShiftRewriter                  (scev_create.jai)
+    BACKEDGE_FOLD;   // SCEVBackedgeConditionFolder        (scev_create.jai)
+    LOOP_GUARDS;     // LoopGuards::rewrite's SCEVLoopGuardRewriter (scev_guards.jai)
+    PREDICATE;       // SCEVPredicateRewriter (NewPreds form)        (scev_pred.jai)
+    NORMALIZE;       // NormalizeDenormalizeRewriter                 (iv_users.jai)
 }
-sc_rewriter_init :: (rw: *Sc_Rewriter) { rw.memo.allocator = temp; }
+Sc_Rewriter :: struct {
+    kind: Sc_Rewriter_Kind;
+    memo: Table(Scev_Id, Scev_Id);
+    l: Loop_Id = NONE;                  // INIT, POST_INC, SHIFT, BACKEDGE_FOLD, PREDICATE
+    seen_loop_variant_unknown: bool;    // INIT, POST_INC, SHIFT
+    seen_other_loops: bool;             // INIT, POST_INC
+    invalid: bool;                      // SHIFT (!Valid)
+    be_cond: Value_Id = NONE;           // BACKEDGE_FOLD: BackedgeCond
+    is_positive_be_cond: bool;          // BACKEDGE_FOLD
+    guards: *Loop_Guards;               // LOOP_GUARDS
+    flag_mask: u8;                      // LOOP_GUARDS: FlagMask
+    new_preds: *[..] u32;               // PREDICATE: NewPreds
+    norm: *Norm_Ctx;                    // NORMALIZE
+}
+sc_rewriter_init :: (rw: *Sc_Rewriter, kind: Sc_Rewriter_Kind) { rw.kind = kind; rw.memo.allocator = temp; }
 sc_rewrite :: (rw: *Sc_Rewriter, s: Scev_Id) -> Scev_Id {
     found, r := table_find(*rw.memo, s);
     if found return r;
@@ -157,10 +174,18 @@ sc_rewrite :: (rw: *Sc_Rewriter, s: Scev_Id) -> Scev_Id {
     return res;
 }
 sc_rewrite_dispatch :: (rw: *Sc_Rewriter, s: Scev_Id) -> Scev_Id {
-    if rw.hook {
-        handled, r := rw.hook(rw, s);
-        if handled return r;
+    handled: bool;
+    r: Scev_Id;
+    if #complete rw.kind == {
+        case .INIT;          handled, r = sc_rw_init_visit(rw, s);
+        case .POST_INC;      handled, r = sc_rw_post_inc_visit(rw, s);
+        case .SHIFT;         handled, r = sc_rw_shift_visit(rw, s);
+        case .BACKEDGE_FOLD; handled, r = sc_rw_backedge_fold_visit(rw, s);
+        case .LOOP_GUARDS;   handled, r = sc_rw_loop_guards_visit(rw, s);
+        case .PREDICATE;     handled, r = sc_rw_predicate_visit(rw, s);
+        case .NORMALIZE;     handled, r = sc_rw_normalize_visit(rw, s);
     }
+    if handled return r;
     return sc_rewrite_default(rw, s);
 }
 sc_rewrite_default :: (rw: *Sc_Rewriter, s: Scev_Id) -> Scev_Id {
@@ -219,100 +244,99 @@ sc_rewrite_default :: (rw: *Sc_Rewriter, s: Scev_Id) -> Scev_Id {
     return s;
 }
 
-// SCEVInitRewriter::rewrite (flag_a = SeenLoopVariantSCEVUnknown, flag_b = SeenOtherLoops)
+// SCEVInitRewriter
+sc_rw_init_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
+    if sc_is_unknown(s) { if !sc_is_loop_invariant(s, rw.l) rw.seen_loop_variant_unknown = true; return true, s; }
+    if sc_is_addrec(s) {
+        if sc_loop(s) == rw.l return true, sc_start(s);
+        rw.seen_other_loops = true;
+        return true, s;
+    }
+    return false, 0;
+}
+// SCEVInitRewriter::rewrite
 scev_init_rewrite :: (s: Scev_Id, l: Loop_Id, ignore_other_loops := true) -> Scev_Id {
-    rw: Sc_Rewriter; sc_rewriter_init(*rw);
+    rw: Sc_Rewriter; sc_rewriter_init(*rw, .INIT);
     rw.l = l;
-    rw.hook = (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
-        if sc_is_unknown(s) { if !sc_is_loop_invariant(s, rw.l) rw.flag_a = true; return true, s; }
-        if sc_is_addrec(s) {
-            if sc_loop(s) == rw.l return true, sc_start(s);
-            rw.flag_b = true;
-            return true, s;
-        }
-        return false, 0;
-    };
     result := sc_rewrite(*rw, s);
-    if rw.flag_a return SCEV_CNC;
-    if rw.flag_b && !ignore_other_loops return SCEV_CNC;
+    if rw.seen_loop_variant_unknown return SCEV_CNC;
+    if rw.seen_other_loops && !ignore_other_loops return SCEV_CNC;
     return result;
+}
+// SCEVPostIncRewriter
+sc_rw_post_inc_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
+    if sc_is_unknown(s) { if !sc_is_loop_invariant(s, rw.l) rw.seen_loop_variant_unknown = true; return true, s; }
+    if sc_is_addrec(s) {
+        if sc_loop(s) == rw.l return true, sc_get_post_inc_expr(s);
+        rw.seen_other_loops = true;
+        return true, s;
+    }
+    return false, 0;
 }
 // SCEVPostIncRewriter::rewrite
 scev_post_inc_rewrite :: (s: Scev_Id, l: Loop_Id) -> Scev_Id {
-    rw: Sc_Rewriter; sc_rewriter_init(*rw);
+    rw: Sc_Rewriter; sc_rewriter_init(*rw, .POST_INC);
     rw.l = l;
-    rw.hook = (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
-        if sc_is_unknown(s) { if !sc_is_loop_invariant(s, rw.l) rw.flag_a = true; return true, s; }
-        if sc_is_addrec(s) {
-            if sc_loop(s) == rw.l return true, sc_get_post_inc_expr(s);
-            rw.flag_b = true;
-            return true, s;
-        }
-        return false, 0;
-    };
     result := sc_rewrite(*rw, s);
-    if rw.flag_a return SCEV_CNC;
+    if rw.seen_loop_variant_unknown return SCEV_CNC;
     return result;
 }
-// SCEVShiftRewriter::rewrite (flag_a = !Valid)
+// SCEVShiftRewriter
+sc_rw_shift_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
+    if sc_is_unknown(s) { if !sc_is_loop_invariant(s, rw.l) rw.invalid = true; return true, s; }
+    if sc_is_addrec(s) {
+        if sc_loop(s) == rw.l && sc_is_affine(s) return true, sc_get_minus(s, sc_step_recurrence(s));
+        rw.invalid = true;
+        return true, s;
+    }
+    return false, 0;
+}
+// SCEVShiftRewriter::rewrite
 scev_shift_rewrite :: (s: Scev_Id, l: Loop_Id) -> Scev_Id {
-    rw: Sc_Rewriter; sc_rewriter_init(*rw);
+    rw: Sc_Rewriter; sc_rewriter_init(*rw, .SHIFT);
     rw.l = l;
-    rw.hook = (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
-        if sc_is_unknown(s) { if !sc_is_loop_invariant(s, rw.l) rw.flag_a = true; return true, s; }
-        if sc_is_addrec(s) {
-            if sc_loop(s) == rw.l && sc_is_affine(s) return true, sc_get_minus(s, sc_step_recurrence(s));
-            rw.flag_a = true;
-            return true, s;
-        }
-        return false, 0;
-    };
     result := sc_rewrite(*rw, s);
-    if rw.flag_a return SCEV_CNC;
+    if rw.invalid return SCEV_CNC;
     return result;
+}
+// SCEVBackedgeConditionFolder::visitUnknown
+sc_rw_backedge_fold_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
+    if !sc_is_unknown(s) return false, 0;
+    result := s;
+    if !sc_is_loop_invariant(s, rw.l) {
+        i := sc_value(s);
+        compare :: (rw: *Sc_Rewriter, ic: Value_Id) -> (bool, Scev_Id) {
+            if rw.be_cond == ic {
+                if rw.is_positive_be_cond return true, sc_get_one(type_int(1));
+                return true, sc_get_zero(type_int(1));
+            }
+            return false, 0;
+        }
+        if inst_op(i) == .SELECT {
+            ok, res := compare(rw, op(i, 0));
+            if ok {
+                is_one := sc_is_one(res);
+                result = sc_get_scev(ifx is_one then op(i, 1) else op(i, 2));
+            }
+        } else {
+            ok, res := compare(rw, i);
+            if ok result = res;
+        }
+    }
+    return true, result;
 }
 // SCEVBackedgeConditionFolder::rewrite
-Be_Cond_Folder :: struct { be_cond: Value_Id; is_pos: bool; }
 scev_backedge_condition_fold :: (s: Scev_Id, l: Loop_Id) -> Scev_Id {
-    ctx: Be_Cond_Folder;
-    ctx.be_cond = NONE;
+    rw: Sc_Rewriter; sc_rewriter_init(*rw, .BACKEDGE_FOLD);
+    rw.l = l;
     latch := li_loop_latch(se.li, l);
     if latch != NONE {
         t := block_terminator(latch);
         if inst_op(t) == .CONDBR {
-            ctx.be_cond = op(t, 0);
-            ctx.is_pos = get_successor(t, 0) == li_header(se.li, l);
+            rw.be_cond = op(t, 0);
+            rw.is_positive_be_cond = get_successor(t, 0) == li_header(se.li, l);
         } else return s;
     }
-    rw: Sc_Rewriter; sc_rewriter_init(*rw);
-    rw.l = l;
-    rw.data = *ctx;
-    rw.hook = (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
-        if !sc_is_unknown(s) return false, 0;
-        c := cast(*Be_Cond_Folder) rw.data;
-        result := s;
-        if !sc_is_loop_invariant(s, rw.l) {
-            i := sc_value(s);
-            compare :: (c: *Be_Cond_Folder, ic: Value_Id) -> (bool, Scev_Id) {
-                if c.be_cond == ic {
-                    if c.is_pos return true, sc_get_one(type_int(1));
-                    return true, sc_get_zero(type_int(1));
-                }
-                return false, 0;
-            }
-            if inst_op(i) == .SELECT {
-                ok, res := compare(c, op(i, 0));
-                if ok {
-                    is_one := sc_is_one(res);
-                    result = sc_get_scev(ifx is_one then op(i, 1) else op(i, 2));
-                }
-            } else {
-                ok, res := compare(c, i);
-                if ok result = res;
-            }
-        }
-        return true, result;
-    };
     return sc_rewrite(*rw, s);
 }
 
@@ -936,12 +960,12 @@ sc_is_guaranteed_not_to_be_poison :: (s: Scev_Id) -> bool {
     return pc.count == 0;
 }
 // isGuaranteedNotToCauseUB
-sc_is_guaranteed_not_to_cause_ub :: (s: Scev_Id) -> bool {
-    return !sc_expr_contains(s, (x: Scev_Id, d: *void) -> bool {
-        if !sc_is_udiv(x) return false;
-        op1 := sc_op(x, 1);
-        return !sc_is_known_non_zero(op1) || !sc_is_guaranteed_not_to_be_poison(op1);
-    });
+sc_is_guaranteed_not_to_cause_ub :: (s: Scev_Id) -> bool { return !sc_expr_contains(s, .CONTAINS_UB_UDIV); }
+// isGuaranteedNotToCauseUB's predicate: a udiv whose divisor may be zero or poison
+sc_udiv_may_cause_ub :: (x: Scev_Id) -> bool {
+    if !sc_is_udiv(x) return false;
+    op1 := sc_op(x, 1);
+    return !sc_is_known_non_zero(op1) || !sc_is_guaranteed_not_to_be_poison(op1);
 }
 
 // isSCEVExprNeverPoison
@@ -1197,18 +1221,16 @@ range_ref_phi_allowed_operands :: (phi: Value_Id) -> bool {
 // ---------------------------------------------------------------- selects
 
 // SCEVMinMaxExprContains
+sc_vis_min_max_contains_follow :: (v: *Sc_Visitor, s: Scev_Id) -> bool {
+    v.found = s == v.operand;
+    k := sc_kind(s);
+    return !v.found && (k == v.root_kind || k == .UMIN || k == .ZEXT);
+}
 scev_min_max_expr_contains :: (root: Scev_Id, operand: Scev_Id, root_kind: Scev_Kind) -> bool {
-    Ctx :: struct { operand: Scev_Id; root_kind: Scev_Kind; }
-    ctx := Ctx.{operand, root_kind};
     v: Sc_Visitor;
-    v.data = *ctx;
-    v.follow = (v: *Sc_Visitor, s: Scev_Id) -> bool {
-        c := cast(*Ctx) v.data;
-        v.found = s == c.operand;
-        k := sc_kind(s);
-        return !v.found && (k == c.root_kind || k == .UMIN || k == .ZEXT);
-    };
-    v.is_done = (v: *Sc_Visitor) -> bool { return v.found; };
+    v.kind = .MIN_MAX_CONTAINS;
+    v.operand = operand;
+    v.root_kind = root_kind;
     sc_visit_all(root, *v);
     return v.found;
 }

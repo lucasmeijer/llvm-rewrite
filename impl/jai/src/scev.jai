@@ -490,13 +490,67 @@ sc_print :: (sb: *String_Builder, s: Scev_Id) {
 
 // ---------------------------------------------------------------- traversal (SCEVTraversal / SCEVExprContains)
 
-// visitAll with a visitor: `follow` decides whether to descend into a node; `done` stops the walk.
-Sc_Visitor :: struct {
-    follow: (v: *Sc_Visitor, s: Scev_Id) -> bool;
-    is_done: (v: *Sc_Visitor) -> bool;
-    data: *void;
-    found: bool;
+// One kind per SCEVTraversal visitor we emulate, plus that kind's state. sc_visitor_follow / sc_visitor_is_done are
+// the one place LLVM calls the visitor's follow() / isDone(): follow decides whether to descend into a node,
+// isDone stops the walk.
+Sc_Visitor_Kind :: enum u8 {
+    CONTAINS_ADDREC;         // SCEVExprContains(S, isa<SCEVAddRecExpr>)       (containsAddRecurrence)
+    CONTAINS_UB_UDIV;        // SCEVExprContains(S, udiv that may be UB)       (isGuaranteedNotToCauseUB)
+    CONTAINS_OPERAND;        // SCEVExprContains(S, == Op)                     (hasOperand)
+    MIN_MAX_CONTAINS;        // SCEVMinMaxExprContains's FindClosure           (scev_create.jai)
+    CONST_IN_ADD_MUL_CHAIN;  // containsConstantInAddMulChain's FindConstantInAddMulChain
+    POISON_COLLECTOR;        // SCEVPoisonCollector                            (scev_implied.jai)
+    USED_LOOPS;              // getUsedLoops's FindUsedLoops                   (scev_implied.jai)
+    INVALIDATION_ROOTS;      // forgetLcssaPhiWithNewPredecessor's InvalidationRootCollector (scev_update.jai)
 }
+Sc_Visitor :: struct {
+    kind: Sc_Visitor_Kind;
+    found: bool;                  // CONTAINS_*, MIN_MAX_CONTAINS, CONST_IN_ADD_MUL_CHAIN
+    operand: Scev_Id;             // CONTAINS_OPERAND, MIN_MAX_CONTAINS
+    root_kind: Scev_Kind;         // MIN_MAX_CONTAINS
+    look_through: bool;           // POISON_COLLECTOR: LookThroughMaybePoisonBlocking
+    poison: *[..] Scev_Id;        // POISON_COLLECTOR: MaybePoison (in insertion order)
+    loops: *[..] Loop_Id;         // USED_LOOPS
+    l: Loop_Id = NONE;            // INVALIDATION_ROOTS
+    roots: *[..] Scev_Id;         // INVALIDATION_ROOTS
+}
+// follow()
+sc_visitor_follow :: (v: *Sc_Visitor, s: Scev_Id) -> bool {
+    if #complete v.kind == {
+        case .CONTAINS_ADDREC;
+            if !v.found v.found = sc_is_addrec(s);
+            return !v.found;
+        case .CONTAINS_UB_UDIV;
+            if !v.found v.found = sc_udiv_may_cause_ub(s);
+            return !v.found;
+        case .CONTAINS_OPERAND;
+            if !v.found v.found = s == v.operand;
+            return !v.found;
+        case .MIN_MAX_CONTAINS;       return sc_vis_min_max_contains_follow(v, s);
+        case .CONST_IN_ADD_MUL_CHAIN;
+            v.found |= sc_is_const(s);
+            return sc_is_add(s) || sc_is_mul(s);
+        case .POISON_COLLECTOR;       return sc_vis_poison_collector_follow(v, s);
+        case .USED_LOOPS;             return sc_vis_used_loops_follow(v, s);
+        case .INVALIDATION_ROOTS;     return sc_vis_invalidation_roots_follow(v, s);
+    }
+    return false;
+}
+// isDone()
+sc_visitor_is_done :: (v: *Sc_Visitor) -> bool {
+    if #complete v.kind == {
+        case .CONTAINS_ADDREC; #through;
+        case .CONTAINS_UB_UDIV; #through;
+        case .CONTAINS_OPERAND; #through;
+        case .MIN_MAX_CONTAINS; #through;
+        case .CONST_IN_ADD_MUL_CHAIN; return v.found;
+        case .POISON_COLLECTOR; #through;
+        case .USED_LOOPS; #through;
+        case .INVALIDATION_ROOTS; return false;
+    }
+    return false;
+}
+// SCEVTraversal::visitAll
 sc_visit_all :: (root: Scev_Id, v: *Sc_Visitor) {
     visited: Table(Scev_Id, bool);
     visited.allocator = temp;
@@ -505,32 +559,25 @@ sc_visit_all :: (root: Scev_Id, v: *Sc_Visitor) {
     push :: (s: Scev_Id, visited: *Table(Scev_Id, bool), work: *[..] Scev_Id, v: *Sc_Visitor) {
         if table_contains(visited, s) return;
         table_set(visited, s, true);
-        if v.follow(v, s) array_add(work, s);
+        if sc_visitor_follow(v, s) array_add(work, s);
     }
     push(root, *visited, *work, v);
-    while work.count > 0 && !(v.is_done && v.is_done(v)) {
+    while work.count > 0 && !sc_visitor_is_done(v) {
         s := pop(*work);
         k := sc_kind(s);
         if k == .CONSTANT || k == .VSCALE || k == .UNKNOWN || k == .CNC continue;
         n := sc_nops(s);
         for i: 0..cast(s64) n - 1 {
             push(sc_op(s, cast(u32) i), *visited, *work, v);
-            if v.is_done && v.is_done(v) break;
+            if sc_visitor_is_done(v) break;
         }
     }
 }
-// SCEVExprContains(Root, Pred)
-sc_expr_contains :: (root: Scev_Id, pred: (s: Scev_Id, data: *void) -> bool, data: *void = null) -> bool {
-    Ctx :: struct { pred: (s: Scev_Id, data: *void) -> bool; data: *void; }
-    ctx := Ctx.{pred, data};
+// SCEVExprContains(Root, Pred) with Pred one of the CONTAINS_* kinds
+sc_expr_contains :: (root: Scev_Id, kind: Sc_Visitor_Kind, operand: Scev_Id = 0) -> bool {
     v: Sc_Visitor;
-    v.data = *ctx;
-    v.follow = (v: *Sc_Visitor, s: Scev_Id) -> bool {
-        c := cast(*Ctx) v.data;
-        if !v.found v.found = c.pred(s, c.data);
-        return !v.found;
-    };
-    v.is_done = (v: *Sc_Visitor) -> bool { return v.found; };
+    v.kind = kind;
+    v.operand = operand;
     sc_visit_all(root, *v);
     return v.found;
 }
@@ -1843,11 +1890,7 @@ choose_u64 :: (n_in: u64, k_in: u64, overflow: *bool) -> u64 {
 
 contains_constant_in_add_mul_chain :: (start: Scev_Id) -> bool {
     v: Sc_Visitor;
-    v.follow = (v: *Sc_Visitor, s: Scev_Id) -> bool {
-        v.found |= sc_is_const(s);
-        return sc_is_add(s) || sc_is_mul(s);
-    };
-    v.is_done = (v: *Sc_Visitor) -> bool { return v.found; };
+    v.kind = .CONST_IN_ADD_MUL_CHAIN;
     sc_visit_all(start, *v);
     return v.found;
 }
@@ -2427,21 +2470,20 @@ seq_dedup_visit :: (d: *Seq_Dedup, s: Scev_Id) -> (bool, Scev_Id) {
 scev_unconditionally_propagates_poison :: (k: Scev_Kind) -> bool { return k != .SEQ_UMIN; }
 
 // SCEVPoisonCollector
+sc_vis_poison_collector_follow :: (v: *Sc_Visitor, s: Scev_Id) -> bool {
+    if !v.look_through && !scev_unconditionally_propagates_poison(sc_kind(s)) return false;
+    if sc_is_unknown(s) && !is_guaranteed_not_to_be_poison(sc_value(s)) {
+        found := false;
+        for v.poison.* if it == s { found = true; break; }
+        if !found array_add(v.poison, s);
+    }
+    return true;
+}
 poison_collect :: (s: Scev_Id, look_through: bool, out: *[..] Scev_Id) {
-    Ctx :: struct { look_through: bool; out: *[..] Scev_Id; }
-    ctx := Ctx.{look_through, out};
     v: Sc_Visitor;
-    v.data = *ctx;
-    v.follow = (v: *Sc_Visitor, s: Scev_Id) -> bool {
-        c := cast(*Ctx) v.data;
-        if !c.look_through && !scev_unconditionally_propagates_poison(sc_kind(s)) return false;
-        if sc_is_unknown(s) && !is_guaranteed_not_to_be_poison(sc_value(s)) {
-            found := false;
-            for c.out.* if it == s { found = true; break; }
-            if !found array_add(c.out, s);
-        }
-        return true;
-    };
+    v.kind = .POISON_COLLECTOR;
+    v.look_through = look_through;
+    v.poison = out;
     sc_visit_all(s, *v);
 }
 // impliesPoison(AssumedPoison, S) (the SCEV version)
@@ -2621,7 +2663,7 @@ sc_get_minus :: (lhs_in: Scev_Id, rhs_in: Scev_Id, flags: u8 = SF_ANY, depth: u3
 sc_contains_add_recurrence :: (s: Scev_Id) -> bool {
     found, v := table_find(*se.has_rec, s);
     if found return v;
-    r := sc_expr_contains(s, (x: Scev_Id, d: *void) -> bool { return sc_is_addrec(x); });
+    r := sc_expr_contains(s, .CONTAINS_ADDREC);
     table_set(*se.has_rec, s, r);
     return r;
 }
