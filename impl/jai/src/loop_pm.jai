@@ -196,6 +196,7 @@ run_loop_pass :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater)
         case .INDVARS; return indvars_run(node, l, lar, u);
         case .LOOP_DELETION; return loop_deletion_run(node, l, lar, u);
         case .LOOP_INSTSIMPLIFY; return loop_instsimplify_run(node, l, lar, u);
+        case .LOOP_SIMPLIFYCFG; return loop_simplifycfg_run(node, l, lar, u);
         case .LNICM;
             // a loop-nest pass runs on the LoopNest of the outermost loop containing L
             root := l;
@@ -203,6 +204,7 @@ run_loop_pass :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater)
             return licm_run(node, root, lar, u, true);
         case .PRINT_LOOPNEST; return loop_nest_printer_run(l, lar);
         case .PRINT_IV_USERS; return iv_users_printer_run(l, lar);
+        case .REQUIRE_IV_USERS; return iv_users_require_run(l, lar);
     }
     fatal("internal: '%' is not a loop pass", node.name);
     return PRESERVE_NONE;

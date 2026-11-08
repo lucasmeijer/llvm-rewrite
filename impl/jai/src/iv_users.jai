@@ -129,18 +129,32 @@ iv_add_users_if_interesting :: (iu: *Iv_Users, i: Value_Id) -> bool {
     return true;
 }
 
-// LoopAnalysisManager::getResult<IVUsersAnalysis>(L, AR), then IVUsers::print (IVUsersPrinterPass)
-iv_users_printer_run :: (l: Loop_Id, lar: *Loop_Std_Results) -> Preserved {
+// IVUsers::IVUsers (IVUsersAnalysis::run)
+iv_users_compute :: (iu: *Iv_Users, l: Loop_Id, lar: *Loop_Std_Results) {
     se = lar.se;
-    iu: Iv_Users;
     iu.l = l;
     iu.processed.allocator = temp; iu.eph.allocator = temp; iu.uses.allocator = temp;
     collect_ephemeral_values(lar.li, l, lar.ac, *iu.eph);
     i := block_first(li_header(lar.li, l));
     while i != NONE && inst_op(i) == .PHI {
-        iv_add_users_if_interesting(*iu, i);
+        iv_add_users_if_interesting(iu, i);
         i = inst_next(i);
     }
+}
+
+// require<iv-users>: the analysis is computed for its effect on ScalarEvolution's caches (getSCEV of every
+// interesting user). LLVM caches the result in the LoopAnalysisManager until a pass does not preserve it; we
+// recompute it every time, which only repeats memoized getSCEV queries.
+iv_users_require_run :: (l: Loop_Id, lar: *Loop_Std_Results) -> Preserved {
+    iu: Iv_Users;
+    iv_users_compute(*iu, l, lar);
+    return PRESERVE_ALL;
+}
+
+// LoopAnalysisManager::getResult<IVUsersAnalysis>(L, AR), then IVUsers::print (IVUsersPrinterPass)
+iv_users_printer_run :: (l: Loop_Id, lar: *Loop_Std_Results) -> Preserved {
+    iu: Iv_Users;
+    iv_users_compute(*iu, l, lar);
     sb: String_Builder; sb.allocator = temp;
     append(*sb, "IV Users for loop ");
     append(*sb, value_as_operand(li_header(lar.li, l)));

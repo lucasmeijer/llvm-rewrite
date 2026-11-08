@@ -118,6 +118,7 @@
 #load "pass_indvars.jai";
 #load "pass_loop_deletion.jai";
 #load "pass_loop_instsimplify.jai";
+#load "pass_loop_simplifycfg.jai";
 
 main :: () { opt_main(); }
 

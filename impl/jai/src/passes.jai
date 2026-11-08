@@ -247,9 +247,9 @@ Pass_Kind :: enum u8 {
     // loops (loop_info.jai, cycle_info.jai)
     PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
     // loop passes (loop_pm.jai)
-    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS; LOOP_DELETION; LOOP_INSTSIMPLIFY;
+    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS; LOOP_DELETION; LOOP_INSTSIMPLIFY; LOOP_SIMPLIFYCFG;
     // ScalarEvolution (scev_print.jai)
-    PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS;
+    PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS; REQUIRE_IV_USERS;
     // TargetTransformInfo (tti.jai)
     PRINT_COST_MODEL;
     // SimplifyCFG (pass_simplifycfg*.jai)
@@ -340,6 +340,7 @@ PASS_TABLE :: Pass_Info.[
     .{"indvars", .LOOP, .INDVARS, false, .DOMTREE},
     .{"loop-deletion", .LOOP, .LOOP_DELETION, false, .DOMTREE},
     .{"loop-instsimplify", .LOOP, .LOOP_INSTSIMPLIFY, false, .DOMTREE},
+    .{"loop-simplifycfg", .LOOP, .LOOP_SIMPLIFYCFG, false, .DOMTREE},
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
@@ -360,6 +361,7 @@ PASS_TABLE :: Pass_Info.[
     .{"print<scalar-evolution>", .FUNCTION, .PRINT_SCEV, true, .SCEV},
     .{"print<loopnest>", .LOOP, .PRINT_LOOPNEST, true, .SCEV},
     .{"print<iv-users>", .LOOP, .PRINT_IV_USERS, true, .SCEV},
+    .{"require<iv-users>", .LOOP, .REQUIRE_IV_USERS, true, .SCEV},
     .{"verify<scalar-evolution>", .FUNCTION, .VERIFY_SCEV, true, .SCEV},
     .{"require<scalar-evolution>", .FUNCTION, .REQUIRE, true, .SCEV},
     .{"invalidate<scalar-evolution>", .FUNCTION, .INVALIDATE, true, .SCEV},
@@ -696,10 +698,11 @@ cl_opts :: () -> [] Cl_Opt {
 }
 
 // LastRunTracking and the L1.loop-misc passes (LoopDeletion, LoopIdiom, LoopLoadElim, LoopDistribute, ...)
-LM_CL_OPT_COUNT :: 2;
+LM_CL_OPT_COUNT :: 3;
 add_lm_cl_opts :: (list: [] Cl_Opt, base: s64) {
     list[base + 0] = .{"disable-last-run-tracking", .BOOL, *opts.disable_last_run_tracking, null, null};
     list[base + 1] = .{"loop-deletion-enable-symbolic-execution", .BOOL, *ld_opts.enable_symbolic_execution, null, null};
+    list[base + 2] = .{"enable-loop-simplifycfg-term-folding", .BOOL, *lscfg_opts.enable_term_folding, null, null};
 }
 
 // Parse `-name`, `--name`, `-name=value`. Returns false if the option isn't known.
