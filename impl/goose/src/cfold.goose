@@ -975,6 +975,15 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
     if n == 2 {
         let a = is_ops[mark];
         let b = is_ops[mark + 1];
+        if ty_is_fp(ty) && is_minmax_fp_iid(id) {
+            if is_undef_val(a) { return b; }
+            if is_undef_val(b) { return a; }
+        }
+        if ty_is_fp(ty) && vals[a].kind == VK_CFP && vals[b].kind == VK_CFP && !ty_is_vector(vals[a].ty) &&
+           vals[a].ty == vals[b].ty && !is_constrained_fp_iid(id) {
+            let r = cf_fp_binary_intrinsic(id, a, b);
+            if r >= 0 { return r; }
+        }
         if ty_is_fp(ty) || is_fp_or_fp_vec(vals[a].ty) {
             if id == IID_powi || id == IID_ldexp || id == IID_is_fpclass || id == IID_copysign || is_minmax_fp_iid(id) || id == IID_pow || id == IID_atan2 {
                 cfa_not_ported(str("constant folding of ", intr_name(id as i64)));
@@ -1100,6 +1109,42 @@ fn is_reduce_iid(id: i32) -> bool {
            id == IID_vector_reduce_smax || id == IID_vector_reduce_umin || id == IID_vector_reduce_umax;
 }
 fn ci_w_or(v: i32) -> i64 { ty_scalar_bits(vals[v].ty) }
+// ConstantFoldIntrinsicCall2: two ConstantFP operands (copysign and the min/max family; APFloat.h minnum etc.)
+fn cf_fp_binary_intrinsic(id: i32, a: i32, b: i32) -> i32 {
+    let kind = fp_kind_ty(vals[a].ty);
+    let pa = fp_decompose(kind, cint_lo(a), cint_hi(a));
+    let pb = fp_decompose(kind, cint_lo(b), cint_hi(b));
+    if id == IID_copysign {
+        if pa.neg == pb.neg { return a; }
+        let lo, hi = fp_neg_bits(kind, cint_lo(a), cint_hi(a));
+        return c_fp(vals[a].ty, lo, hi);
+    }
+    if !is_minmax_fp_iid(id) { return -1; }
+    let an = pa.cat == FC_NAN;
+    let bn = pb.cat == FC_NAN;
+    let a_s = an && cfp_is_signaling(a);
+    let b_s = bn && cfp_is_signaling(b);
+    let zeros_differ = pa.cat == FC_ZERO && pb.cat == FC_ZERO && pa.neg != pb.neg;
+    let is_min = id == IID_minnum || id == IID_minimum || id == IID_minimumnum;
+    if id == IID_minnum || id == IID_maxnum {
+        if a_s { return c_fp_quiet(a); }
+        if b_s { return c_fp_quiet(b); }
+        if an { return b; }
+        if bn { return a; }
+    } else if id == IID_minimum || id == IID_maximum {
+        if an { return c_fp_quiet(a); }
+        if bn { return c_fp_quiet(b); }
+    } else {
+        if an { return if bn { c_fp_quiet(b) } else { b }; }
+        if bn { return a; }
+    }
+    if zeros_differ {
+        if is_min { return if pa.neg { a } else { b }; }
+        return if pa.neg { b } else { a };
+    }
+    if is_min { return if fp_cmp_lt(b, a) { b } else { a }; }
+    return if fp_cmp_lt(a, b) { b } else { a };
+}
 fn is_minmax_fp_iid(id: i32) -> bool {
     return id == IID_maxnum || id == IID_minnum || id == IID_maximum || id == IID_minimum || id == IID_maximumnum || id == IID_minimumnum;
 }
