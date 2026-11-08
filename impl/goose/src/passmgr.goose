@@ -45,6 +45,8 @@ import simplifycfg;
 import subtarget;
 import debugify;
 import dbgutil;
+import lvi;
+import cvp;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -92,6 +94,11 @@ let P_VERIFY_MEMORYSSA = 153;
 let P_SCCP = 160;
 let P_EARLY_CSE = 170;     // arg: 1 = memssa
 let P_PRINT_SCEV = 118;
+let P_PRINT_LVI = 180;
+let P_CVP = 181;
+let P_JUMP_THREADING = 182;  // arg: threshold + 1 (0 = default)
+let P_PRINT_BPI = 183;
+let P_PRINT_BFI = 184;
 let P_VERIFY_SCEV = 119;
 // loop passes
 let P_PRINT_LOOPNEST = 200;
@@ -135,6 +142,10 @@ let PASS_TABLE: const u8[:][] = [
     "f:sccp:160:0",
     "f:print<scalar-evolution>:118:1",
     "f:verify<scalar-evolution>:119:1",
+    "f:print<lazy-value-info>:180:1",
+    "f:correlated-propagation:181:0",
+    "f:print<branch-prob>:183:1",
+    "f:print<block-freq>:184:1",
     "l:print<loopnest>:200:1",
     "l:no-op-loop:201:0",
 ];
@@ -157,6 +168,8 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_AA_EVAL => "AAEvaluator",
         P_SCCP => "SCCPPass",
         P_EARLY_CSE => "EarlyCSEPass",
+        P_CVP => "CorrelatedValuePropagationPass",
+        P_JUMP_THREADING => "JumpThreadingPass",
         P_IPSCCP => "IPSCCPPass",
         P_DEBUGIFY => "NewPMDebugifyPass",
         P_CHECK_DEBUGIFY => "NewPMCheckDebugifyPass",
@@ -181,6 +194,9 @@ fn analysis_id(name: const u8[:]) -> i64 {
     if name == "scalar-evolution" { return A_SCEV; }
     if name == "target-ir" { return A_TARGET_IR; }
     if name == "opt-remark-emit" { return A_ORE; }
+    if name == "lazy-value-info" { return A_LVI; }
+    if name == "branch-prob" { return A_BPI; }
+    if name == "block-freq" { return A_BFI; }
     return -1;
 }
 
@@ -739,6 +755,8 @@ fn invalidate_function(fv: i32, preserved: u32) {
     if (preserved & (1 << A_MEMORYSSA)) == 0 || (preserved & (1 << A_DOMTREE)) == 0 || aa_abandoned { mssa_invalidate(fv); }
     // ScalarEvolution::invalidate: also when the domtree or loops go
     if (preserved & (1 << A_SCEV)) == 0 || (preserved & (1 << A_DOMTREE)) == 0 || (preserved & (1 << A_LOOPS)) == 0 { scev_invalidate(fv); }
+    // LazyValueInfo::invalidate: only when not preserved (its AssumptionCache is never invalidated)
+    if (preserved & (1 << A_LVI)) == 0 { lvi_invalidate(); }
 }
 
 fn require_analysis(fv: i32, a: i64) {
@@ -749,6 +767,7 @@ fn require_analysis(fv: i32, a: i64) {
     else if a == A_MEMORYSSA { mssa_get(fv); }
     else if a == A_AA { aa_begin(fv); }
     else if a == A_SCEV { scev_get(fv); }
+    else if a == A_LVI { lvi_get(fv); }
 }
 
 // Passes whose LLVM counterpart asks for TargetIRAnalysis (directly or through AssumptionAnalysis) before it
@@ -762,7 +781,7 @@ fn pass_creates_subtarget(n: i32) -> bool {
     return p == P_BDCE || p == P_MEM2REG || p == P_SROA || p == P_INSTSIMPLIFY || p == P_SIMPLIFYCFG ||
         p == P_INSTCOMBINE || p == P_PRINT_DEMANDED_BITS || p == P_LOOP_SIMPLIFY || p == P_AA_EVAL ||
         p == P_PRINT_MEMORYSSA || p == P_PRINT_MEMORYSSA_WALKER || p == P_VERIFY_MEMORYSSA || p == P_SCCP ||
-        p == P_EARLY_CSE || p == P_VERIFY_SCEV;
+        p == P_EARLY_CSE || p == P_VERIFY_SCEV || p == P_CVP || p == P_JUMP_THREADING;
 }
 
 fn run_function_pass(n: i32, fv: i32) -> u32 {
@@ -799,6 +818,8 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_SCCP => { return sccp_run(fv); },
         P_EARLY_CSE => { return early_cse_run(fv, pnodes[n].arg != 0); },
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
+        P_PRINT_LVI => { lvi_print(fv); return PA_ALL; },
+        P_CVP => { return cvp_run(fv); },
         P_VERIFY_SCEV => { scev_get(fv); return PA_ALL; },     // ScalarEvolution::verify reports only mismatches
         _ => { fatal("internal: unknown function pass id"); return PA_ALL; },
     }

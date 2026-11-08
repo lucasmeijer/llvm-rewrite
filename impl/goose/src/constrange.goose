@@ -296,6 +296,24 @@ fn rg_allowed_icmp(p: i64, c: CRange) -> CRange {
     fatal("ConstantRange: invalid ICmp predicate to makeAllowedICmpRegion()");
     return c;
 }
+// areInsensitiveToSignednessOfICmpPredicate / areInsensitiveToSignednessOfInvertedICmpPredicate
+fn rg_insensitive_to_signedness(a: CRange, b: CRange) -> bool {
+    if rg_is_empty(a) || rg_is_empty(b) { return true; }
+    return (rg_is_all_nonneg(a) && rg_is_all_nonneg(b)) || (rg_is_all_negative(a) && rg_is_all_negative(b));
+}
+fn rg_insensitive_to_signedness_inverted(a: CRange, b: CRange) -> bool {
+    if rg_is_empty(a) || rg_is_empty(b) { return true; }
+    return (rg_is_all_nonneg(a) && rg_is_all_negative(b)) || (rg_is_all_negative(a) && rg_is_all_nonneg(b));
+}
+// getEquivalentPredWithFlippedSignedness (relational predicates only); -1 = BAD_ICMP_PREDICATE
+fn rg_equivalent_pred_flipped_signedness(p: i64, a: CRange, b: CRange) -> i64 {
+    // ICmpInst::getFlippedSignednessPredicate: ugt <-> sgt, uge <-> sge, ult <-> slt, ule <-> sle
+    let flipped = if p >= 38 { p - 4 } else { p + 4 };
+    if rg_insensitive_to_signedness(a, b) { return flipped; }
+    if rg_insensitive_to_signedness_inverted(a, b) { return rg_icmp_inverse(flipped); }
+    return -1;
+}
+
 fn rg_icmp_inverse(p: i64) -> i64 {
     if p == P_EQ { return P_NE; } if p == P_NE { return P_EQ; }
     if p == P_UGT { return P_ULE; } if p == P_ULE { return P_UGT; }

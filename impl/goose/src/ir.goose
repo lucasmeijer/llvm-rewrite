@@ -375,10 +375,16 @@ fn free_uses(at: i32, cap: i64) {
     free_runs[cap] = at;
 }
 
+// LazyValueInfo's LVIValueHandles (CallbackVH: deleted / allUsesReplacedWith): while LVI holds any (vh_lvi_n),
+// a RAUW'd or deleted value is queued; lvi.goose drains the queue (eraseValue) before it next reads its cache.
+var vh_lvi_n: i64 = 0;
+var vh_lvi_events: i32[>..<];
+
 // A value is erased: it becomes a VK_DEAD tombstone (its id is never reused, §2.3) and its operand run, whose
 // uses must already be dropped, goes back to the pool. ops = -1, so a stale op() of the dead value fails loudly
 // instead of reading the run's next owner.
 fn val_set_dead(v: i32) {
+    if vh_lvi_n > 0 { vh_lvi_events.push(v); }
     let at = vals[v].ops;
     let cap = vals[v].cap as i64;
     for k in vals[v].nops { if uses[at + k].val >= 0 { fatal("internal: erasing a value whose operands are still set"); } }
@@ -462,6 +468,7 @@ fn drop_all_refs(user: i32) {
 // Value::doRAUW: repeatedly take the head use and point it at `nv` (which reverses the order).
 // Value::replaceAllUsesWith: also ValueAsMetadata::handleRAUW when the value is used by debug records.
 fn rauw(old: i32, nv: i32) {
+    if vh_lvi_n > 0 { vh_lvi_events.push(old); }
     if old < val_vam.len && val_vam[old] >= 0 { vam_handle_rauw(old, nv); }
     while vals[old].first_use >= 0 {
         let u = vals[old].first_use;

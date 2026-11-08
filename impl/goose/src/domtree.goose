@@ -988,8 +988,35 @@ fn dt_inst_dominates_block(def: i32, ubb: i32) -> bool {
     if !dt_has_node(DT_DOM, dbb) { return false; }
     if dbb == ubb { return false; }
     let o = iop(def);
-    if o == OP_INVOKE || o == OP_CALLBR { fatal("DominatorTree::dominates for invoke/callbr definitions is not ported yet"); }
+    // invoke / callbr results are only usable in the normal (default) destination
+    if o == OP_INVOKE { return dt_edge_dominates_block(dbb, op(def, nops(def) - 3), ubb); }
+    if o == OP_CALLBR { return dt_edge_dominates_block(dbb, op(def, nops(def) - 2 - dt_callbr_nindirect(def)), ubb); }
     return dt_dominates_block(DT_DOM, dbb, ubb);
+}
+fn dt_callbr_nindirect(t: i32) -> i64 {
+    let x = insts[inst_of(t)];
+    if x.naux == 0 { return 0; }
+    return ints[x.aux + 1] as i64;
+}
+// DominatorTree::dominates(const BasicBlockEdge &BBE, const BasicBlock *UseBB)
+fn dt_edge_dominates_block(start: i32, end: i32, ubb: i32) -> bool {
+    if !dt_dominates_block(DT_DOM, end, ubb) { return false; }
+    if single_pred(end) >= 0 { return true; }
+    var dup = 0;
+    var u = vals[end].first_use;
+    while u >= 0 {
+        let user = uses[u].user;
+        u = uses[u].next;
+        if vals[user].kind != VK_INST || !is_terminator_op(iop(user)) { continue; }
+        let p = insts[inst_of(user)].parent;
+        if p == start {
+            if dup > 0 { return false; }
+            dup++;
+            continue;
+        }
+        if !dt_dominates_block(DT_DOM, end, p) { return false; }
+    }
+    return true;
 }
 // DominatorTree::dominates(const Value *Def, const Instruction *User)
 fn dt_value_dominates_inst(defv: i32, user: i32) -> bool {
