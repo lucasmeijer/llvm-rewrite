@@ -631,3 +631,302 @@ ic_simplify_shift_selecting_packed_element :: (i: Value_Id, demanded: APInt, dep
     ic_take_name(sel, i);
     return sel;
 }
+
+// ---------------------------------------------------------------- SimplifyDemandedVectorElts
+
+IC_SIMPLIFY_DEMANDED_VECTOR_ELTS_DEPTH_LIMIT :: 10;   // -instcombine-simplify-vector-elts-depth
+
+// canSkipDemandedEltsInInsertChain
+ic_can_skip_demanded_elts_in_insert_chain :: (ie: Value_Id, vwidth: u32, depth_limit: u32) -> bool {
+    if !has_one_use(ie) return false;
+    u := first_user(ie);
+    if !is_inst(u) || inst_op(u) != .INSERTELEMENT || op(u, 0) != ie return false;
+    seen := NewArray(cast(s64) vwidth, bool,, allocator = temp);
+    cur := ie;
+    for k: 0..cast(s64) depth_limit - 1 {
+        idx := op(cur, 2);
+        if vkind(idx) != .C_INT || is_vector_type(vtype(idx)) return false;
+        a := const_ap(idx);
+        if !ap_ult_u64(a, cast(u64) vwidth) return false;
+        index := ap_zext_value(a);
+        if seen[index] return false;
+        seen[index] = true;
+        base := op(cur, 0);
+        if pm_poison(base) return true;
+        if !is_inst(base) || inst_op(base) != .INSERTELEMENT || !has_one_use(base) return false;
+        cur = base;
+    }
+    return true;
+}
+
+// InsertElementInst::Create(Vec, Elt, Idx) (unlinked)
+ic_create_insert_element :: (v: Value_Id, e: Value_Id, idx: Value_Id) -> Value_Id {
+    i := new_inst(.INSERTELEMENT, vtype(v), 3);
+    set_op(i, 0, v); set_op(i, 1, e); set_op(i, 2, idx);
+    return i;
+}
+
+// InstCombinerImpl::SimplifyDemandedVectorElts
+ic_simplify_demanded_vector_elts :: (v: Value_Id, demanded_in: APInt, poison: *APInt, depth: u32 = 0, allow_multiple_users := false) -> Value_Id {
+    demanded := demanded_in;
+    vt := vtype(v);
+    if type_kind(vt) == .SVECTOR return NONE;
+    vwidth := cast(u32) type_count(vt);
+    elt_mask := ap_all_ones(vwidth);
+    if pm_poison(v) { poison.* = elt_mask; return NONE; }
+    if ap_is_zero(demanded) { poison.* = elt_mask; return const_poison(vt); }
+    poison.* = ap_zero(vwidth);
+    if is_const(v) {
+        if ap_is_all_ones(demanded) return NONE;
+        et := type_elem(vt);
+        pz := const_poison(et);
+        elts := NewArray(cast(s64) vwidth, Value_Id,, allocator = temp);
+        for i: 0..cast(s64) vwidth - 1 {
+            if !ap_get_bit(demanded, cast(u32) i) { elts[i] = pz; ap_set_bit(poison, cast(u32) i); continue; }
+            e := cf_elt(v, cast(u64) i);
+            if e == NONE return NONE;
+            elts[i] = e;
+            if vkind(e) == .C_POISON ap_set_bit(poison, cast(u32) i);
+        }
+        ncv := cf_vector(vt, elts);
+        return ifx ncv != v then ncv else NONE;
+    }
+    if depth == IC_SIMPLIFY_DEMANDED_VECTOR_ELTS_DEPTH_LIMIT return NONE;
+    if !allow_multiple_users && !has_one_use(v) {
+        if depth != 0 return NONE;
+        demanded = elt_mask;
+    }
+    if !is_inst(v) return NONE;
+    i := v;
+    made_change := false;
+    simplify_and_set_op :: (inst_: Value_Id, opnum: u32, dem: APInt, und: *APInt, depth: u32, made_change: *bool) {
+        o := op(inst_, opnum);   // getArgOperand(OpNum) == getOperand(OpNum) for calls
+        nv := ic_simplify_demanded_vector_elts(o, dem, und, depth + 1);
+        if nv != NONE { ic_replace_operand(inst_, opnum, nv); made_change.* = true; }
+    }
+    poison2 := ap_zero(vwidth);
+    poison3 := ap_zero(vwidth);
+    for 0..0 { if inst_op(i) == {
+        case .GEP;
+            may_index_struct := false;
+            t := inst(i).ty2;
+            for k: 2..nops(i) - 1 {
+                if type_kind(t) == .STRUCT { may_index_struct = true; break; }
+                if type_kind(t) == .ARRAY || is_vector_type(t) t = type_elem(t);
+                else break;
+            }
+            if may_index_struct break;
+            for k: 0..nops(i) - 1 {
+                o := op(i, k);
+                if ifx k == 0 then pm_undef(o) else pm_poison(o) { poison.* = elt_mask; return NONE; }
+                if is_vector_type(vtype(o)) {
+                    pop := ap_zero(vwidth);
+                    simplify_and_set_op(i, k, demanded, *pop, depth, *made_change);
+                    if k == 0 poison.* = ap_or(poison.*, pop);
+                }
+            }
+        case .INSERTELEMENT;
+            if depth == 0 && ap_is_all_ones(demanded) && vwidth > IC_SIMPLIFY_DEMANDED_VECTOR_ELTS_DEPTH_LIMIT &&
+               ic_can_skip_demanded_elts_in_insert_chain(i, vwidth, IC_SIMPLIFY_DEMANDED_VECTOR_ELTS_DEPTH_LIMIT) return NONE;
+            idx := op(i, 2);
+            if vkind(idx) != .C_INT || is_vector_type(vtype(idx)) {
+                simplify_and_set_op(i, 0, demanded, *poison2, depth, *made_change);
+                break;
+            }
+            idx_no := ap_zext_value(const_ap(idx));
+            pre := ap_copy(demanded);
+            if idx_no < cast(u64) vwidth ap_clear_bit(*pre, cast(u32) idx_no);
+            if ap_is_zero(pre) {
+                e1 := op(i, 1);
+                if is_inst(e1) && inst_op(e1) == .EXTRACTELEMENT && pm_specific_int(op(e1, 1), idx_no) && vtype(op(e1, 0)) == vtype(i) return op(e1, 0);
+            }
+            simplify_and_set_op(i, 0, pre, poison, depth, *made_change);
+            if idx_no >= cast(u64) vwidth || !ap_get_bit(demanded, cast(u32) idx_no) { wl_push(i); return op(i, 0); }
+            ap_clear_bit(poison, cast(u32) idx_no);
+        case .SHUFFLEVECTOR;
+            op_width := cast(u32) type_count(vtype(op(i, 0)));
+            mask := shuffle_mask(i);
+            all_zero := true;
+            for mask if it != 0 { all_zero = false; break; }
+            if all_zero && ap_is_all_ones(demanded) {
+                if !pm_poison(op(i, 1)) { set_op(i, 1, const_poison(vtype(op(i, 1)))); made_change = true; }
+                left := ap_from_u64(op_width, 1);
+                lp := ap_zero(op_width);
+                simplify_and_set_op(i, 0, left, *lp, depth, *made_change);
+                if ap_get_bit(lp, 0) poison.* = elt_mask; else poison.* = ap_zero(vwidth);
+                break;
+            }
+            left := ap_zero(op_width); right := ap_zero(op_width);
+            for k: 0..vwidth - 1 {
+                if ap_get_bit(demanded, k) {
+                    mv := mask[k];
+                    if mv != 0xFFFF_FFFF {
+                        if mv < op_width ap_set_bit(*left, mv); else ap_set_bit(*right, mv - op_width);
+                    }
+                }
+            }
+            lp := ap_zero(op_width);
+            simplify_and_set_op(i, 0, left, *lp, depth, *made_change);
+            rp := ap_zero(op_width);
+            simplify_and_set_op(i, 1, right, *rp, depth, *made_change);
+            mask = shuffle_mask(i);
+            if vwidth == op_width {
+                is_identity := true;
+                for k: 0..vwidth - 1 if ap_get_bit(demanded, k) && k != mask[k] { is_identity = false; break; }
+                if is_identity return op(i, 0);
+            }
+            new_poison := false;
+            NO :: 0xFFFF_FFFF;
+            lhs_idx, lhs_val_idx, rhs_idx, rhs_val_idx: u32 = NO, NO, NO, NO;
+            lhs_uniform := true; rhs_uniform := true;
+            for k: 0..vwidth - 1 {
+                mv := mask[k];
+                if mv == NO ap_set_bit(poison, k);
+                else if !ap_get_bit(demanded, k) { new_poison = true; ap_set_bit(poison, k); }
+                else if mv < op_width {
+                    if ap_get_bit(lp, mv) { new_poison = true; ap_set_bit(poison, k); }
+                    else {
+                        lhs_idx = ifx lhs_idx == NO then k else op_width;
+                        lhs_val_idx = ifx lhs_val_idx == NO then mv else op_width;
+                        lhs_uniform = lhs_uniform && mv == k;
+                    }
+                } else {
+                    if ap_get_bit(rp, mv - op_width) { new_poison = true; ap_set_bit(poison, k); }
+                    else {
+                        rhs_idx = ifx rhs_idx == NO then k else op_width;
+                        rhs_val_idx = ifx rhs_val_idx == NO then mv - op_width else op_width;
+                        rhs_uniform = rhs_uniform && mv - op_width == k;
+                    }
+                }
+            }
+            if op_width == cast(u32) type_count(vtype(i)) {
+                o: Value_Id = NONE; val: Value_Id = NONE; idx: u32 = NO;
+                if lhs_idx < op_width && rhs_uniform && vkind(op(i, 0)) == .C_VECTOR {
+                    o = op(i, 1); val = op(op(i, 0), lhs_val_idx); idx = lhs_idx;
+                }
+                if rhs_idx < op_width && lhs_uniform && vkind(op(i, 1)) == .C_VECTOR {
+                    o = op(i, 0); val = op(op(i, 1), rhs_val_idx); idx = rhs_idx;
+                }
+                if o != NONE && val != NONE {
+                    nw := ic_create_insert_element(o, val, const_int(ir.t_i64, cast(u64) idx));
+                    set_name(nw, vname(i));
+                    ic_insert_new_inst_with(nw, i);
+                    return nw;
+                }
+            }
+            if new_poison {
+                elts := NewArray(cast(s64) vwidth, u32,, allocator = temp);
+                for k: 0..vwidth - 1 elts[k] = ifx ap_get_bit(poison.*, k) then cast(u32) NO else mask[k];
+                r := inst(i);
+                r.idx = cast(u32) ir.u32_pool.count; r.nidx = vwidth;
+                for elts array_add(*ir.u32_pool, it);
+                made_change = true;
+            }
+        case .SELECT;
+            cond := op(i, 0);
+            if is_vector_type(vtype(cond)) simplify_and_set_op(i, 0, demanded, poison, depth, *made_change);
+            dl := ap_copy(demanded); dr := ap_copy(demanded);
+            cond = op(i, 0);
+            if vkind(cond) == .C_VECTOR {
+                for k: 0..vwidth - 1 {
+                    ce := cf_elt(cond, cast(u64) k);
+                    if is_null_value(ce) ap_clear_bit(*dl, k);
+                    else if is_one_value(ce) ap_clear_bit(*dr, k);
+                }
+            }
+            simplify_and_set_op(i, 1, dl, *poison2, depth, *made_change);
+            simplify_and_set_op(i, 2, dr, *poison3, depth, *made_change);
+            poison.* = ap_and(poison2, poison3);
+        case .BITCAST;
+            st := vtype(op(i, 0));
+            if !is_vector_type(st) break;
+            in_w := cast(u32) type_count(st);
+            in_dem := ap_zero(in_w);
+            poison2 = ap_zero(in_w);
+            ratio: u32;
+            if vwidth == in_w { ratio = 1; in_dem = demanded; }
+            else if vwidth % in_w == 0 {
+                ratio = vwidth / in_w;
+                for k: 0..vwidth - 1 if ap_get_bit(demanded, k) ap_set_bit(*in_dem, k / ratio);
+            } else if in_w % vwidth == 0 {
+                ratio = in_w / vwidth;
+                for k: 0..in_w - 1 if ap_get_bit(demanded, k / ratio) ap_set_bit(*in_dem, k);
+            } else break;
+            simplify_and_set_op(i, 0, in_dem, *poison2, depth, *made_change);
+            if vwidth == in_w poison.* = poison2;
+            else if vwidth % in_w == 0 {
+                for k: 0..vwidth - 1 if ap_get_bit(poison2, k / ratio) ap_set_bit(poison, k);
+            } else {
+                for k: 0..vwidth - 1 {
+                    all := true;
+                    for j: 0..ratio - 1 if !ap_get_bit(poison2, k * ratio + j) { all = false; break; }
+                    if all ap_set_bit(poison, k);
+                }
+            }
+        case .FPTRUNC; #through;
+        case .FPEXT;
+            simplify_and_set_op(i, 0, demanded, poison, depth, *made_change);
+        case .CALL;
+            id := call_iid(i);
+            if id == NOT_INTRINSIC break;
+            if id == IID_MASKED_GATHER || id == IID_MASKED_LOAD {
+                dptrs := ap_all_ones(vwidth); dpass := ap_copy(demanded);
+                cm := op(i, 1);
+                if is_const(cm) {
+                    for k: 0..vwidth - 1 {
+                        ce := cf_elt(cm, cast(u64) k);
+                        if ce != NONE {
+                            if is_null_value(ce) ap_clear_bit(*dptrs, k);
+                            else if vkind(ce) == .C_INT && ap_is_all_ones(const_ap(ce)) ap_clear_bit(*dpass, k);
+                        }
+                    }
+                }
+                if id == IID_MASKED_GATHER simplify_and_set_op(i, 0, dptrs, *poison2, depth, *made_change);
+                simplify_and_set_op(i, 2, dpass, *poison3, depth, *made_change);
+                poison.* = ap_and(poison2, poison3);
+            } else if begins_with(intrinsic_name(id), "llvm.x86.") {
+                fatal("instcombine: X86 simplifyDemandedVectorEltsIntrinsic is not supported yet");
+            }
+    } }
+    if ic_is_binop_any(i) && !is_int_div_rem(inst_op(i)) && !is_shift_op(inst_op(i)) {
+        x := op(i, 0); y := op(i, 1);
+        if ap_eq_u64(demanded, 1) && !has_one_use(x) && !has_one_use(y) && has_one_use(i) {
+            find_shuf_bo :: (bo: Value_Id, x: Value_Id, y: Value_Id, as_op0: bool) -> Value_Id {
+                other := ifx as_op0 then y else x;
+                shuf_op := ifx as_op0 then x else y;
+                opc := inst_op(bo);
+                u := ir.v_first_use[other];
+                while u != NONE {
+                    us := ir.u_user[u];
+                    u = ir.u_next[u];
+                    if !is_inst(us) || inst_op(us) != opc continue;
+                    is_shuf :: (s: Value_Id, shuf_op: Value_Id) -> bool {
+                        ok, a, _, m := pm_shuffle(s);
+                        if !ok || a != shuf_op return false;
+                        for m if it != 0 && it != 0xFFFF_FFFF return false;
+                        return m.count > 0 && m[0] != 0xFFFF_FFFF;
+                    }
+                    matched: bool;
+                    if is_commutative_op(opc) matched = (is_shuf(op(us, 0), shuf_op) && op(us, 1) == other) || (is_shuf(op(us, 1), shuf_op) && op(us, 0) == other);
+                    else if as_op0 matched = is_shuf(op(us, 0), shuf_op) && op(us, 1) == other;
+                    else matched = op(us, 0) == other && is_shuf(op(us, 1), shuf_op);
+                    if matched && dt_dominates_inst(ic.dt, us, bo) return us;
+                }
+                return NONE;
+            }
+            sb := find_shuf_bo(i, x, y, true);
+            if sb == NONE sb = find_shuf_bo(i, x, y, false);
+            if sb != NONE {
+                and_ir_flags(sb, i);
+                wl_add(sb);
+                return sb;
+            }
+        }
+        simplify_and_set_op(i, 0, demanded, poison, depth, *made_change);
+        simplify_and_set_op(i, 1, demanded, *poison2, depth, *made_change);
+        poison.* = ap_and(poison.*, poison2);
+    }
+    if ap_is_all_ones(poison.*) return const_poison(vtype(i));
+    return ifx made_change then i else NONE;
+}
+ic_is_binop_any :: (v: Value_Id) -> bool { return is_inst(v) && is_binary_operator(v); }

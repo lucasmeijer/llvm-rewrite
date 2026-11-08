@@ -2950,4 +2950,3 @@ ic_visit_select :: (si: Value_Id) -> Value_Id {
 ic_fold_boolean_and_or :: (lhs: Value_Id, rhs: Value_Id, i: Value_Id, is_and: bool, is_logical: bool) -> Value_Id { return NONE; }
 ic_fold_or_of_logical_ands :: (op0: Value_Id, op1: Value_Id) -> Value_Id { return NONE; }
 ic_sink_not_into_other_hand_of_logical_op :: (i: Value_Id) -> bool { return false; }
-ic_simplify_demanded_vector_elts :: (v: Value_Id, demanded: APInt, poison: *APInt, depth: u32 = 0, allow_multiple_users := false) -> Value_Id { return NONE; }  // TEMP

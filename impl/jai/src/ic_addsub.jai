@@ -1709,18 +1709,20 @@ ic_visit_sub :: (i: Value_Id) -> Value_Id {
 }
 
 // Constant::isElementWiseEqual
+// Constant::isElementWiseEqual
 const_is_element_wise_equal :: (a: Value_Id, b: Value_Id) -> bool {
     if a == b return true;
-    if vtype(a) != vtype(b) return false;
-    if !is_int_or_int_vector(vtype(a)) && !is_fp_type(scalar_type(vtype(a))) return false;
-    // ICmp eq of the two constants, all true (undef-friendly: m_One with poison allowed)
-    c := cfo_compare_inst_operands(ICMP_EQ, a, b);
-    if is_fp_type(scalar_type(vtype(a))) {
-        ia := cfo_cast_operand(.BITCAST, a, int_type_like(vtype(a)));
-        ib := cfo_cast_operand(.BITCAST, b, int_type_like(vtype(b)));
-        c = cfo_compare_inst_operands(ICMP_EQ, ia, ib);
+    t := vtype(a);
+    if !is_const(b) || !is_vector_type(t) || t != vtype(b) return false;
+    et := type_elem(t);
+    if !is_int_type(et) && !is_fp_type(et) return false;
+    ia := a; ib := b;
+    if is_fp_type(et) {
+        ia = cfo_cast_operand(.BITCAST, a, int_type_like(t));
+        ib = cfo_cast_operand(.BITCAST, b, int_type_like(t));
     }
-    return c != NONE && pm_one(c);
+    c := cfo_compare_inst_operands(ICMP_EQ, ia, ib);
+    return c != NONE && (vkind(c) == .C_POISON || pm_one(c));
 }
 int_type_like :: (t: Type_Id) -> Type_Id {
     it := type_int(type_bits(scalar_type(t)));
