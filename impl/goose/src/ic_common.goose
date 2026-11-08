@@ -97,7 +97,7 @@ fn icmp_is_gt(p: i64) -> bool { p == 34 || p == 35 || p == 38 || p == 39 }
 // InstCombiner::getComplexity
 fn get_complexity(v: i32) -> i64 {
     if is_constant(v) { return if is_undef_or_poison(v) { 0 } else { 1 }; }
-    if is_cast_inst(v) || m_neg(v) >= 0 || m_not(v) >= 0 || m_fneg_v(v) { return 2; }
+    if is_cast_inst(v) || m_neg(v) >= 0 || m_not(v) >= 0 || m_fneg(v) >= 0 { return 2; }
     return 3;
 }
 // m_FNeg: fneg X, or fsub -0.0, X
@@ -229,6 +229,15 @@ fn ic_match_symmetric_phis(l: i32, r: i32) -> bool {
     return true;
 }
 
+// Instruction::isAssociative(): fmul needs reassoc, fadd reassoc and nsz
+fn ic_inst_is_associative(i: i32) -> bool {
+    let o = iop(i);
+    if is_associative(o) { return true; }
+    let f = insts[inst_of(i)].fmf;
+    if o == OP_FMUL { return (f & FMF_REASSOC) != 0; }
+    if o == OP_FADD { return (f & FMF_REASSOC) != 0 && (f & FMF_NSZ) != 0; }
+    return false;
+}
 fn simplify_assoc_or_comm(i: i32) -> bool {
     let o = iop(i);
     var changed = false;
@@ -247,7 +256,7 @@ fn simplify_assoc_or_comm(i: i32) -> bool {
         }
         let op0 = if is_binop_inst(op(i, 0)) { op(i, 0) } else { -1 };
         let op1 = if is_binop_inst(op(i, 1)) { op(i, 1) } else { -1 };
-        if is_associative(o) {
+        if ic_inst_is_associative(i) {
             if op0 >= 0 && iop(op0) == o {
                 let a = op(op0, 0); let b = op(op0, 1); let c = op(i, 1);
                 let v = simplify_binop(o, b, c, sq_at(i), RECURSION_LIMIT);
@@ -274,7 +283,7 @@ fn simplify_assoc_or_comm(i: i32) -> bool {
                 }
             }
         }
-        if is_associative(o) && is_commutative(o) {
+        if ic_inst_is_associative(i) && is_commutative(o) {
             if simplify_assoc_cast_assoc(i) { changed = true; continue; }
             if op0 >= 0 && iop(op0) == o {
                 let a = op(op0, 0); let b = op(op0, 1); let c = op(i, 1);
@@ -611,14 +620,19 @@ fn replace_uses_of_with(i: i32, from: i32, to: i32) {
 
 // Instruction::dropUBImplyingAttrsAndMetadata
 fn drop_ub_implying_attrs_and_md(i: i32) {
-    // keep only the metadata kinds LLVM keeps (KnownIDs: annotation, range? no: dbg loc only and a few)
+    // Instruction::dropUBImplyingAttrsAndMetadata keeps !annotation, !range, !nonnull, !align, !fpmath, !prof (and
+    // the debug location); dropping any other attachment is not ported
     let ii = inst_of(i);
-    let keep_names: const u8[:][] = ["annotation", "range", "nonnull", "align", "nofpclass", "noundef"];
+    var keep: i32[>..<] = [];
+    keep.push(md_kind_id("annotation")); keep.push(md_kind_id("range")); keep.push(md_kind_id("nonnull"));
+    keep.push(md_kind_id("align")); keep.push(md_kind_id("fpmath")); keep.push(md_kind_id("prof"));
     var any = false;
     for k in insts[ii].nmd {
         let kind = md_att[insts[ii].md + 2 * k];
         if kind == 0 { continue; }
-        any = true;
+        var kept = false;
+        for kk in keep { if kk == kind { kept = true; } }
+        if !kept { any = true; }
     }
     if any { ic_not_ported("dropUBImplyingAttrsAndMetadata with metadata"); }
     if is_callbase(i) && insts[ii].attrs != 0 { ic_not_ported("dropUBImplyingAttrsAndMetadata on a call"); }
@@ -831,16 +845,69 @@ fn fold_binop_select_binop(i: i32) -> i32 {
 
 // foldBinopWithRecurrence(BO)
 fn fold_binop_with_recurrence(b: i32) -> i32 {
+    if !ic_inst_is_associative(b) { return -1; }
     let o = iop(b);
-    if !is_associative(o) { return -1; }
     let b0 = op(b, 0);
     let b1 = op(b, 1);
     if !is_binop_inst(b0) || !is_binop_inst(b1) || num_uses(b0) != 2 || num_uses(b1) != 2 || iop(b0) != o || iop(b1) != o ||
-       inst_parent(b0) != inst_parent(b1) { return -1; }
-    if match_simple_recurrence_bo(b0) >= 0 && match_simple_recurrence_bo(b1) >= 0 {
-        ic_not_ported("foldBinopWithRecurrence");
+       !ic_inst_is_associative(b0) || !ic_inst_is_associative(b1) || inst_parent(b0) != inst_parent(b1) { return -1; }
+    // matchSimpleRecurrence(BO0, PN0, Start0, Step0) && PN0->hasOneUse() (and the same for BO1)
+    let pn0 = fbr_recurrence_phi(b0);
+    if pn0 < 0 { return -1; }
+    let start0 = rec_start; let step0 = rec_step;
+    if !has_one_use(pn0) { return -1; }
+    let pn1 = fbr_recurrence_phi(b1);
+    if pn1 < 0 { return -1; }
+    let start1 = rec_start; let step1 = rec_step;
+    if !has_one_use(pn1) || inst_parent(pn0) != inst_parent(pn1) { return -1; }
+    if !is_constant(start0) || !is_constant(start1) || !is_constant(step0) || !is_constant(step1) { return -1; }
+    let init = cf_binop(o, start0, start1);
+    let c = cf_binop(o, step0, step1);
+    if init < 0 || c < 0 { return -1; }
+    let np = new_inst(OP_PHI, vals[pn0].ty, nops(pn0));
+    vals[np].nops = 0;
+    set_name(np, "reduced.phi");
+    let nbo = ic_new_binop(o, np, c);
+    if o == OP_FADD || o == OP_FMUL {
+        insts[inst_of(nbo)].fmf = insts[inst_of(b0)].fmf & insts[inst_of(b1)].fmf & insts[inst_of(b)].fmf;
+    } else {
+        // OverflowTracking with AllKnownNonNegative = AllKnownNonZero = false
+        var nuw = true; var nsw = true; var disj = true;
+        for x in [b0, b1, b] {
+            if is_overflowing_op(o) { nuw = nuw && has_nuw(x); nsw = nsw && has_nsw(x); }
+            if o == OP_OR { disj = disj && op_disjoint(x); }
+        }
+        if o == OP_ADD {
+            if nuw { set_nuw(nbo, true); }
+            if nsw && nuw { set_nsw(nbo, true); }
+        }
+        if o == OP_OR { set_disjoint(nbo, disj); }
     }
-    return -1;
+    ic_take_name(nbo, b);
+    for k in nops(pn0) {
+        let v = op(pn0, k);
+        let bb = phi_block(pn0, k);
+        if v == start0 { phi_add_incoming(np, init, bb); }
+        else if v == b0 { phi_add_incoming(np, nbo, bb); }
+        else { fatal("internal: foldBinopWithRecurrence: unexpected incoming value"); }
+    }
+    ic_insert_new_with(np, pn0);
+    ic_insert_new_with(nbo, b0);
+    ic_replace_inst_uses_with(b0, c_poison(vals[b0].ty));
+    ic_erase(b0);
+    ic_replace_inst_uses_with(b1, c_poison(vals[b1].ty));
+    ic_erase(b1);
+    ic_erase(pn0);
+    ic_erase(pn1);
+    return ic_replace_inst_uses_with(b, nbo);
+}
+// matchSimpleRecurrence(BO, PN, Start, Step): m_c_BinOp(m_Phi(P), m_Value()) then matchSimpleRecurrence(P, ...) with
+// BO == the binop; the phi (rec_start / rec_step set) or -1
+fn fbr_recurrence_phi(bo0: i32) -> i32 {
+    var p = op(bo0, 0);
+    if !is_phi_inst(p) { p = op(bo0, 1); if !is_phi_inst(p) { return -1; } }
+    if !match_simple_recurrence(p) || rec_bo != bo0 { return -1; }
+    return p;
 }
 // matchSimpleRecurrence(BO, PN, Start, Step): the phi or -1
 fn match_simple_recurrence_bo(i: i32) -> i32 {

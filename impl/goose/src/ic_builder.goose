@@ -455,3 +455,56 @@ fn icb_type_size(ty: i32, min: u64, scalable: bool) -> i32 {
     if min == 1 { return vs; }
     return icb_binop_fl(OP_MUL, vs, c_int_ty(ty, min), "", FL_NUW);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Floating point (IRBuilder Create*FMF with an explicit FMFSource: pass the source's `inst_fmf(src)`)
+
+// CreateFAddFMF / CreateFSubFMF / CreateFMulFMF / CreateFDivFMF / CreateBinOpFMF(Opc, L, R, FMFSource, Name)
+fn icb_fbinop_fmf(o: i64, a: i32, b: i32, fmf: u8, name: const u8[:]) -> i32 {
+    let f = tf_binop(o, a, b, 0);
+    if f >= 0 { return f; }
+    let i = ic_new_binop(o, a, b);
+    insts[inst_of(i)].fmf = fmf;
+    return icb_insert(i, name);
+}
+// CreateFNegFMF(V, FMFSource, Name) (TargetFolder::FoldUnOpFMF = ConstantFoldUnaryOpOperand)
+fn icb_fneg_fmf(v: i32, fmf: u8, name: const u8[:]) -> i32 {
+    if is_constant(v) {
+        let f = cf_fold_unary(OP_FNEG, v);
+        if f >= 0 { return f; }
+    }
+    return icb_insert(ic_new_fneg_fmf(v, fmf), name);
+}
+// BinaryOperator::CreateFMulFMF & co. (unattached, the given fast-math flags)
+fn ic_new_fbinop_fmf(o: i64, a: i32, b: i32, fmf: u8) -> i32 {
+    let i = ic_new_binop(o, a, b);
+    insts[inst_of(i)].fmf = fmf;
+    return i;
+}
+// UnaryOperator::CreateFNegFMF(V, FMFSource) (unattached)
+fn ic_new_fneg_fmf(v: i32, fmf: u8) -> i32 {
+    let i = create_inst(OP_FNEG, vals[v].ty, [v]);
+    insts[inst_of(i)].fmf = fmf;
+    return i;
+}
+// CreateIntrinsic / CreateUnaryIntrinsic / CreateBinaryIntrinsic with an explicit FMFSource
+fn icb_intrinsic_fmf(id: i64, ov: const i32[:], argsv: const i32[:], fmf: u8, name: const u8[:]) -> i32 {
+    let saved = icb_fmf;
+    icb_fmf = fmf;
+    let r = icb_intrinsic(id, ov, argsv, name);
+    icb_fmf = saved;
+    return r;
+}
+fn icb_unary_intrinsic_fmf(id: i64, a: i32, fmf: u8, name: const u8[:]) -> i32 { icb_intrinsic_fmf(id, [vals[a].ty], [a], fmf, name) }
+fn icb_binary_intrinsic_fmf(id: i64, a: i32, b: i32, fmf: u8, name: const u8[:]) -> i32 { icb_intrinsic_fmf(id, [vals[a].ty], [a, b], fmf, name) }
+// CreateFCmpFMF(P, L, R, FMFSource, Name)
+fn icb_fcmp_fmf(p: i64, a: i32, b: i32, fmf: u8, name: const u8[:]) -> i32 {
+    if is_constant(a) && is_constant(b) {
+        let f = cf_fold_cmp_operands(p, a, b, -1);
+        if f >= 0 { return f; }
+    }
+    let c = create_inst(OP_FCMP, cmp_result_ty(vals[a].ty), [a, b]);
+    insts[inst_of(c)].pred = p as u8;
+    insts[inst_of(c)].fmf = fmf;
+    return icb_insert(c, name);
+}

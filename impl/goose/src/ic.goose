@@ -38,6 +38,9 @@ import ic_builder;
 import ic_common;
 import ic_addsub;
 import ic_muldivrem;
+import ic_fp_addsub;
+import ic_fp_muldivrem;
+import ic_demanded_fp;
 import ic_shifts;
 import ic_casts;
 import ic_compares;
@@ -714,6 +717,12 @@ fn ic_visit(i: i32) -> i32 {
         OP_ADD => { return visit_add(i); },
         OP_SUB => { return visit_sub(i); },
         OP_MUL => { return visit_mul(i); },
+        OP_FNEG => { return visit_fneg(i); },
+        OP_FADD => { return visit_fadd(i); },
+        OP_FSUB => { return visit_fsub(i); },
+        OP_FMUL => { return visit_fmul(i); },
+        OP_FDIV => { return visit_fdiv(i); },
+        OP_FREM => { return visit_frem(i); },
         OP_UDIV => { return visit_udiv(i); },
         OP_SDIV => { return visit_sdiv(i); },
         OP_UREM => { return visit_urem(i); },
@@ -858,7 +867,8 @@ fn visit_return(ri: i32) -> i32 {
     if !nofpclass_compatible_type(rty) { return -1; }
     let rc = aset_int(alist_ret(func_attrs(fv)), AK_NoFPClass);
     if rc == 0 { return -1; }
-    ic_not_ported("SimplifyDemandedFPClass on a nofpclass return");
+    let ch, k = sd_fp_class(ri, 0, fcl_not(rc), ri, 0);
+    if ch { return ri; }
     return -1;
 }
 

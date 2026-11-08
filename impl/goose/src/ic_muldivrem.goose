@@ -73,7 +73,26 @@ recursive fn simplify_value_known_non_zero(v: i32, cx: i32) -> i32 {
 
 // foldMulSelectToNegate(I, Builder)
 fn fold_mul_select_to_negate(i: i32) -> i32 {
-    if is_fp_op(i) { return -1; }
+    if iop(i) == OP_FMUL {
+        // fmul (select Cond, 1.0, -1.0), OtherOp --> select Cond, OtherOp, -OtherOp (and the commuted/swapped forms)
+        for sw in 2 {
+            let tv = if sw == 0 { 1.0 } else { -1.0 };
+            for k in 2 {
+                let s = op(i, k);
+                let other = op(i, 1 - k);
+                if one_use(s) && is_select_inst(s) && m_specific_fp(op(s, 1), tv) && m_specific_fp(op(s, 2), -tv) {
+                    let f = insts[inst_of(i)].fmf;
+                    let ng = icb_fneg_fmf(other, f, "");
+                    let saved = icb_fmf;
+                    icb_fmf = f;
+                    let r = if sw == 0 { icb_select(op(s, 0), other, ng, "", -1) } else { icb_select(op(s, 0), ng, other, "", -1) };
+                    icb_fmf = saved;
+                    return r;
+                }
+            }
+        }
+        return -1;
+    }
     for k in 2 {
         let s = op(i, k);
         let other = op(i, 1 - k);

@@ -278,6 +278,7 @@ let FPP_ONE = 5;
 let FPP_NONNAN = 6;
 let FPP_FINITE = 7;
 let FPP_NONZERO_NOT_DENORMAL = 8;
+let FPP_NONZERO = 9;
 fn fp_pred(kind: i64, c: i32) -> bool {
     let p = cfp_parts(c);
     if kind == FPP_POSZERO { return p.cat == FC_ZERO && !p.neg; }
@@ -288,6 +289,7 @@ fn fp_pred(kind: i64, c: i32) -> bool {
     if kind == FPP_NONNAN { return p.cat != FC_NAN; }
     if kind == FPP_FINITE { return p.cat == FC_ZERO || p.cat == FC_NORMAL; }
     if kind == FPP_ONE { return fp_is_exactly(c, 1.0); }
+    if kind == FPP_NONZERO { return p.cat != FC_ZERO; }
     if kind == FPP_NONZERO_NOT_DENORMAL { return p.cat != FC_ZERO && !fp_is_denormal(c); }
     fatal("internal: unknown fp predicate");
     return false;
