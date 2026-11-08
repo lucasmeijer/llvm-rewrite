@@ -1,12 +1,13 @@
 // DemandedBits analysis: port of llvm/lib/Analysis/DemandedBits.cpp (determineLiveOperandBits, performAnalysis,
 // getDemandedBits, isInstructionDead, isUseDead, print, determineLiveOperandBitsAddCarry).
-// Uses known_bits.jai, which is a partial computeKnownBits (see there).
+// Known bits come from value_tracking.jai (computeKnownBits with the AssumptionCache and the user as context).
 //
 // Results (alive bits per instruction, dead uses) live on the heap; scratch in temp.
 
 Demanded_Bits :: struct {
     fn: Value_Id;
     dt: *Dom_Tree;
+    ac: *Assumption_Cache;
     analyzed: bool;
     visited: Table(Value_Id, bool);
     alive: Table(Value_Id, APInt);      // AliveBits (words on the heap)
@@ -66,11 +67,11 @@ Db_Known :: struct {
 determine_live_operand_bits :: (db: *Demanded_Bits, user: Value_Id, val: Value_Id, opno: u32, aout: APInt,
                                 ab: *APInt, kc: *Db_Known) {
     bits := ab.bits;
-    compute :: (kc: *Db_Known, v1: Value_Id, v2: Value_Id) {
+    compute :: (kc: *Db_Known, v1: Value_Id, v2: Value_Id, db: *Demanded_Bits, user: Value_Id) {
         if kc.computed return;
         kc.computed = true;
-        kc.known = compute_known_bits(v1);
-        if v2 != NONE kc.known2 = compute_known_bits(v2);
+        kc.known = known_bits_ctx(v1, user, db.dt, db.ac);
+        if v2 != NONE kc.known2 = known_bits_ctx(v2, user, db.dt, db.ac);
     }
     shifted_range :: (ab: *APInt, aout: APInt, mn: u64, mx: u64, shift_left: bool) {
         sh :: (m: APInt, a: u64, left: bool) -> APInt {
@@ -103,12 +104,12 @@ determine_live_operand_bits :: (db: *Demanded_Bits, user: Value_Id, val: Value_I
                 case "llvm.clmul"; ab.* = ap_low_bits_set(bits, ap_active_bits(aout));
                 case "llvm.ctlz";
                     if opno == 0 {
-                        compute(kc, val, NONE);
+                        compute(kc, val, NONE, db, user);
                         ab.* = ap_high_bits_set(bits, min(bits, kb_count_max_leading_zeros(kc.known) + 1));
                     }
                 case "llvm.cttz";
                     if opno == 0 {
-                        compute(kc, val, NONE);
+                        compute(kc, val, NONE, db, user);
                         ab.* = ap_low_bits_set(bits, min(bits, kb_count_max_trailing_zeros(kc.known) + 1));
                     }
                 case "llvm.fshl"; #through;
@@ -134,7 +135,7 @@ determine_live_operand_bits :: (db: *Demanded_Bits, user: Value_Id, val: Value_I
         case .SUB;
             if ap_is_mask(aout) ab.* = aout;
             else {
-                compute(kc, op(user, 0), op(user, 1));
+                compute(kc, op(user, 0), op(user, 1), db, user);
                 if r.op == .ADD ab.* = live_bits_add_carry(opno, aout, kc.known, kc.known2, true, false);
                 else {
                     nrhs: Known_Bits; nrhs.zero = kc.known2.one; nrhs.one = kc.known2.zero;
@@ -152,7 +153,7 @@ determine_live_operand_bits :: (db: *Demanded_Bits, user: Value_Id, val: Value_I
                     if r.flags & F_NSW ab.* = ap_or(ab.*, ap_high_bits_set(bits, (cast(u32) s) + 1));
                     else if r.flags & F_NUW ab.* = ap_or(ab.*, ap_high_bits_set(bits, cast(u32) s));
                 } else {
-                    compute(kc, op(user, 1), NONE);
+                    compute(kc, op(user, 1), NONE, db, user);
                     mn := ap_limited(kb_min_value(kc.known), bits - 1);
                     mx := ap_limited(kb_max_value(kc.known), bits - 1);
                     shifted_range(ab, aout, mn, mx, false);
@@ -168,7 +169,7 @@ determine_live_operand_bits :: (db: *Demanded_Bits, user: Value_Id, val: Value_I
                     ab.* = ap_shl(aout, cast(u32) s);
                     if r.flags & F_EXACT ab.* = ap_or(ab.*, ap_low_bits_set(bits, cast(u32) s));
                 } else {
-                    compute(kc, op(user, 1), NONE);
+                    compute(kc, op(user, 1), NONE, db, user);
                     mn := ap_limited(kb_min_value(kc.known), bits - 1);
                     mx := ap_limited(kb_max_value(kc.known), bits - 1);
                     shifted_range(ab, aout, mn, mx, true);
@@ -184,7 +185,7 @@ determine_live_operand_bits :: (db: *Demanded_Bits, user: Value_Id, val: Value_I
                     if ap_bool(ap_and(aout, ap_high_bits_set(bits, cast(u32) s))) ap_set_sign_bit(ab);
                     if r.flags & F_EXACT ab.* = ap_or(ab.*, ap_low_bits_set(bits, cast(u32) s));
                 } else {
-                    compute(kc, op(user, 1), NONE);
+                    compute(kc, op(user, 1), NONE, db, user);
                     mn := ap_limited(kb_min_value(kc.known), bits - 1);
                     mx := ap_limited(kb_max_value(kc.known), bits - 1);
                     shifted_range(ab, aout, mn, mx, true);
@@ -194,12 +195,12 @@ determine_live_operand_bits :: (db: *Demanded_Bits, user: Value_Id, val: Value_I
             }
         case .AND;
             ab.* = aout;
-            compute(kc, op(user, 0), op(user, 1));
+            compute(kc, op(user, 0), op(user, 1), db, user);
             if opno == 0 ab.* = ap_and(ab.*, ap_not(kc.known2.zero));
             else ab.* = ap_and(ab.*, ap_not(ap_and(kc.known.zero, ap_not(kc.known2.zero))));
         case .OR;
             ab.* = aout;
-            compute(kc, op(user, 0), op(user, 1));
+            compute(kc, op(user, 0), op(user, 1), db, user);
             if opno == 0 ab.* = ap_and(ab.*, ap_not(kc.known2.one));
             else ab.* = ap_and(ab.*, ap_not(ap_and(kc.known.one, ap_not(kc.known2.one))));
         case .XOR; #through;

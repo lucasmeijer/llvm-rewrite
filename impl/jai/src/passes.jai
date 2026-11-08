@@ -11,8 +11,8 @@
 
 // ---------------------------------------------------------------- analyses
 
-Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; }
-ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits"];
+Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; }
+ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions"];
 
 // PreservedAnalyses. `cfg` = preserveSet<CFGAnalyses>().
 Preserved :: struct {
@@ -38,6 +38,7 @@ Fn_Analyses :: struct {
     dt: *Dom_Tree;
     pdt: *Dom_Tree;
     db: *Demanded_Bits;
+    ac: *Assumption_Cache;
 }
 fam: Table(Value_Id, Fn_Analyses);
 
@@ -76,12 +77,23 @@ get_demanded_bits :: (f: Value_Id) -> *Demanded_Bits {
     if !e.db {
         dt := get_domtree(f);
         e = fam_entry(f);
+        ac := get_assumption_cache(f);
+        e = fam_entry(f);
         e.db = New(Demanded_Bits);
         e.db.fn = f;
         e.db.dt = dt;
+        e.db.ac = ac;
     }
     return e.db;
 }
+
+// AM.getResult<AssumptionAnalysis>(F)
+get_assumption_cache :: (f: Value_Id) -> *Assumption_Cache {
+    e := fam_entry(f);
+    if !e.ac e.ac = ac_build(f);
+    return e.ac;
+}
+cached_assumption_cache :: (f: Value_Id) -> *Assumption_Cache { e := table_find_pointer(*fam, f); if e return e.ac; return null; }
 
 dt_new :: (post: bool) -> *Dom_Tree {
     dt := New(Dom_Tree);
@@ -99,6 +111,7 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     if e.dt && !analysis_survives(.DOMTREE, pa) { dt_free(e.dt); e.dt = null; }
     if e.pdt && !analysis_survives(.POSTDOMTREE, pa) { dt_free(e.pdt); e.pdt = null; }
     if e.db && !analysis_survives(.DEMANDED_BITS, pa) { db_free(e.db); e.db = null; }
+    if e.ac && !analysis_survives(.ASSUMPTIONS, pa) { ac_free(e.ac); e.ac = null; }
     // a DemandedBits result points at the DominatorTree it was built with
     if e.db && !e.dt { db_free(e.db); e.db = null; }
 }
@@ -107,6 +120,7 @@ fam_require :: (f: Value_Id, k: Analysis_Kind) {
         case .DOMTREE; get_domtree(f);
         case .POSTDOMTREE; get_postdomtree(f);
         case .DEMANDED_BITS; get_demanded_bits(f);
+        case .ASSUMPTIONS; get_assumption_cache(f);
     }
 }
 fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
@@ -125,7 +139,7 @@ Pass_Kind :: enum u8 {
     // analysis utilities (required: they run on optnone functions and don't count for -opt-bisect-limit)
     REQUIRE; INVALIDATE; PRINT_DOMTREE; PRINT_POSTDOMTREE; PRINT_DEMANDED_BITS; NO_OP_FUNCTION; NO_OP_MODULE;
     // transforms
-    DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG;
+    DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG; INSTSIMPLIFY;
 }
 
 Pass_Info :: struct {
@@ -146,6 +160,9 @@ PASS_TABLE :: Pass_Info.[
     .{"break-crit-edges", .FUNCTION, .BREAK_CRIT_EDGES, false, .DOMTREE},
     .{"mem2reg", .FUNCTION, .MEM2REG, false, .DOMTREE},
     .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
+    .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
+    .{"require<assumptions>", .FUNCTION, .REQUIRE, true, .ASSUMPTIONS},
+    .{"invalidate<assumptions>", .FUNCTION, .INVALIDATE, true, .ASSUMPTIONS},
     .{"print<domtree>", .FUNCTION, .PRINT_DOMTREE, true, .DOMTREE},
     .{"print<postdomtree>", .FUNCTION, .PRINT_POSTDOMTREE, true, .DOMTREE},
     .{"print<demanded-bits>", .FUNCTION, .PRINT_DEMANDED_BITS, true, .DOMTREE},
@@ -481,6 +498,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .BDCE; return bdce_run(f);
         case .BREAK_CRIT_EDGES; return break_crit_edges_run(f);
         case .MEM2REG; return mem2reg_run(f);
+        case .INSTSIMPLIFY; return instsimplify_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

@@ -22,7 +22,16 @@
 #load "inst_props.jai";
 #load "print_util.jai";
 #load "domtree.jai";
-#load "known_bits.jai";
+#load "analysis_base.jai";
+#load "intrinsic_ids.jai";
+#load "cmp_pred.jai";
+#load "constant_range.jai";
+#load "pattern.jai";
+#load "value_tracking.jai";
+#load "value_tracking2.jai";
+#load "fpclass.jai";
+#load "const_folding.jai";
+#load "inst_simplify.jai";
 #load "demanded_bits.jai";
 #load "passes.jai";
 #load "pass_dce.jai";
@@ -30,6 +39,7 @@
 #load "pass_bdce.jai";
 #load "dbg_records.jai";
 #load "pass_mem2reg.jai";
+#load "pass_instsimplify.jai";
 
 main :: () { opt_main(); }
 

@@ -574,6 +574,7 @@ drop_all_references :: (user: Value_Id) {
 // Value::replaceAllUsesWith (llvm/lib/IR/Value.cpp doRAUW): take the head use each time.
 // Constant users are re-uniqued like Constant::handleOperandChange.
 replace_all_uses_with :: (old: Value_Id, new: Value_Id) {
+    ac_note_rauw(old, new);   // AssumptionCache's AffectedValueCallbackVH::allUsesReplacedWith
     while ir.v_first_use[old] != NONE {
         u := ir.v_first_use[old];
         user := ir.u_user[u];
