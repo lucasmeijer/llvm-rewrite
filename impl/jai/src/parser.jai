@@ -1458,7 +1458,31 @@ parse_constant_keyword :: (ty: Type_Id) -> Value_Id {
             perr("invalid operands to shufflevector");
         return ce_shuffle_vector(elts[0], elts[1], shuffle_mask_of(elts[2]));
     }
-    if s == "ptrauth" perr("ptrauth constants are not supported yet");
+    if s == "ptrauth" {
+        // ConstantPtrAuth: operands (ptr, i32 key, i64 disc, ptr addrdisc, ptr deactivation symbol)
+        next();
+        expect(.LPAREN, "'(' in constant ptrauth expression");
+        p := parse_global_type_and_value();
+        expect(.COMMA, "comma in constant ptrauth expression");
+        key := parse_global_type_and_value();
+        disc: Value_Id = NONE; addr: Value_Id = NONE; ds: Value_Id = NONE;
+        if eat(.COMMA) disc = parse_global_type_and_value();
+        if disc != NONE && eat(.COMMA) addr = parse_global_type_and_value();
+        if addr != NONE && eat(.COMMA) ds = parse_global_type_and_value();
+        expect(.RPAREN, "')' in constant ptrauth expression");
+        if !is_ptr_type(vtype(p)) perr("constant ptrauth base pointer must be a pointer");
+        if vkind(key) != .C_INT || vtype(key) != ir.t_i32 perr("constant ptrauth key must be i32 constant");
+        if disc == NONE disc = const_int(ir.t_i64, 0);
+        else if vkind(disc) != .C_INT || vtype(disc) != ir.t_i64 perr("constant ptrauth integer discriminator must be i64 constant");
+        if addr == NONE addr = const_null(type_ptr(0));
+        else if !is_ptr_type(vtype(addr)) perr("constant ptrauth address discriminator must be a pointer");
+        if ds == NONE ds = const_null(type_ptr(0));
+        else if !is_ptr_type(vtype(ds)) perr("constant ptrauth deactivation symbol must be a pointer");
+        ops := Value_Id.[p, key, disc, addr, ds];
+        k := const_key_begin(.C_PTRAUTH, vtype(p));
+        for ops key_u32(k, it);
+        return const_lookup_or_create(k, .C_PTRAUTH, vtype(p), ops, 0);
+    }
     perr("expected value token (got '%')", s);
     return NONE;
 }
@@ -2917,7 +2941,22 @@ skip_callee_tokens :: () {
         next();
         while is_kw("sideeffect") || is_kw("alignstack") || is_kw("inteldialect") || is_kw("unwind") next();
         parse_string(); expect(.COMMA, "','"); parse_string();
-    } else next();
+        return;
+    }
+    // a constant expression callee (ptrauth (...), bitcast (...), ...): skip the balanced parentheses
+    is_expr := is_kw("ptrauth") || is_kw("bitcast") || is_kw("getelementptr") || is_kw("inttoptr") ||
+               is_kw("addrspacecast") || is_kw("blockaddress") || is_kw("extractelement") || is_kw("select");
+    if is_kw("dso_local_equivalent") || is_kw("no_cfi") next();
+    next();
+    if is_expr && P.tok.kind == .LPAREN {
+        depth := 0;
+        while true {
+            if P.tok.kind == .LPAREN depth += 1;
+            else if P.tok.kind == .RPAREN { depth -= 1; if depth == 0 { next(); break; } }
+            else if P.tok.kind == .EOF perr("unterminated callee expression");
+            next();
+        }
+    }
 }
 
 // LLParser::parseCallBr; CallBrInst::init operand order: args, default dest, indirect dests, callee, bundles.

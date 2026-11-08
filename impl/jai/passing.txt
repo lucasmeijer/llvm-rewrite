@@ -3054,6 +3054,8 @@ tests/imported/llvm/Transforms/Inline/launder.invariant.group.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/lifetime-no-datalayout.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/lifetime.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/local-as-metadata-undominated-use.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/memprof_inline2.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/memprof_inline3.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/module-inliner-basic.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/module-inliner-cba-crash.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/module-inliner-cycle.ll::roundtrip
@@ -4231,7 +4233,9 @@ tests/imported/llvm/Transforms/InstCombine/protected-field-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptr-int-cast.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptr-int-ptr-icmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptr-replace-alloca.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/ptrauth-call.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptrauth-intrinsics-call.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/ptrauth-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptrmask.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptrtoaddr.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptrtoint-nullgep.ll::roundtrip

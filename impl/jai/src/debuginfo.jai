@@ -700,8 +700,35 @@ upgrade_debug_info :: () {
             break;
         }
     }
-    if version == 3 return;
+    if version == 3 && !debug_info_broken() return;
     strip_debug_info();
+}
+
+// The part of the Verifier's debug-info checks (Verifier.cpp, BrokenDebugInfo) that is ported: inlinable calls
+// in a function with a subprogram must have a !dbg location (Verifier::visitCallBase).
+debug_info_broken :: () -> bool {
+    for f: ir.m_functions {
+        if get_metadata(f, 0) == NONE continue;
+        b := glob(f).first_block;
+        while b != NONE {
+            i := block(b).first;
+            while i != NONE {
+                opc := inst_op(i);
+                if opc == .CALL || opc == .INVOKE || opc == .CALLBR {
+                    c := op(i, nops(i) - 1);
+                    if vkind(c) == .FUNCTION && glob(c).value_type == inst(i).ty2 && !gv_is_interposable(c) &&
+                       !is_declaration(c) && get_metadata(c, 0) != NONE && get_metadata(i, 0) == NONE {
+                        print("inlinable function call in a function with debug info must have a !dbg location\n", to_standard_error = true);
+                        print("warning: ignoring invalid debug info in %\n", P.lx.file, to_standard_error = true);
+                        return true;
+                    }
+                }
+                i = inst(i).next;
+            }
+            b = block(b).next;
+        }
+    }
+    return false;
 }
 
 // llvm::StripDebugInfo(Module &)

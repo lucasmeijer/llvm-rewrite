@@ -522,6 +522,14 @@ write_constant :: (v: Value_Id) {
             outc(#char ")");
         case .C_DSO_EQUIV; out("dso_local_equivalent "); write_operand(op(v, 0), false);
         case .C_NO_CFI; out("no_cfi "); write_operand(op(v, 0), false);
+        case .C_PTRAUTH;
+            out("ptrauth (");
+            nw: u32 = 2;
+            if !is_null_value(op(v, 2)) nw = 3;
+            if vkind(op(v, 3)) != .C_NULL nw = 4;
+            if vkind(op(v, 4)) != .C_NULL nw = 5;
+            for i: 0..nw-1 { if i > 0 out(", "); write_operand(op(v, i), true); }
+            outc(#char ")");
         case .C_ARRAY;
             outc(#char "[");
             if nops(v) > 0 for i: 0..nops(v)-1 { if i > 0 out(", "); write_operand(op(v, i), true); }
