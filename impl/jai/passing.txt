@@ -5521,6 +5521,7 @@ tests/imported/llvm/Transforms/InstCombine/volatile_store.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vp-reverse.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vscale.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vscale_alloca.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vscale_cmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vscale_cmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vscale_extractelement-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vscale_extractelement.ll::roundtrip
