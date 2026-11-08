@@ -4183,6 +4183,7 @@ tests/imported/llvm/Transforms/InstCombine/call-callconv-mismatch.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call-callconv-mismatch.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/call-callconv.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/call-cast-attrs.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/call-guard.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call-guard.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/call-intrinsics.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call-intrinsics.ll::roundtrip
