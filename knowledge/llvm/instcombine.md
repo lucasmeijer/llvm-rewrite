@@ -228,3 +228,24 @@ icmp*/fcmp* tests.
   end of the block before erasing the original (InstCombine/invoke.ll).
 - `combineLoadToOperationType` uses `CastUser->replaceAllUsesWith(NewLoad)` (no worklist push of the users), then
   erases the cast and returns the old load (which then dies as trivially dead).
+
+## Facts found by the per-function sweep (jai, 2026-11)
+
+- **canRewriteGEPAsOffset's "PHI node users" check never fires**: it iterates `Val->uses()` and converts each `Use`
+  to `Value*`, which is the used value itself, so `PHI` is null or equal to `Inst` and the loop always `continue`s
+  (InstCombineCompares.cpp:467). `icmp eq ptr %iv, (gep %start, 2)` with `%iv` a GEP/phi recurrence over `%start`
+  is rewritten to an index compare even when the phi and its GEP are in the same block.
+- `m_SpecificInt(const APInt &)` compares with `APInt::isSameValue` (different bit widths are fine), so
+  `trunc(umin(zext a + zext b, 255))` matches an i16 255 against `APInt::getMaxValue(8)` (InstCombineCasts.cpp:1157).
+- FindAvailableLoadedValue's memset case compares `(Len * 8).ult(LoadSize + Off * 8)` with the right side as a
+  `uint64_t`, not truncated to Len's width (an `i8 127` memset: 127*8 wraps to 248 in i8, which is < 1024).
+- `CallBase::getParamDereferenceableBytes` reads the call site's attributes only (unlike `paramHasAttr`, which
+  falls back to the callee): visitCallBase infers `nonnull` on an argument of a call to a function whose parameter
+  is `dereferenceable` but not `nonnull`.
+- foldBinopWithRecurrence's OverflowTracking has AllKnownNonNegative = AllKnownNonZero = false: an `add` keeps
+  `nuw` only if all three ops have it and `nsw` only together with `nuw`; a `mul` gets no flags.
+- `dyn_cast<ConstantFP>` succeeds on a vector splat FP constant, so `powi(<4 x float> splat 2.0, i)` with `afn`
+  becomes `ldexp(splat 1.0, splat i)` (visitCallInst powi).
+- SimplifyDemandedFPClass runs from visitReturnInst (functions with a `nofpclass` return) and at the very end of
+  visitFMul (SimplifyDemandedInstructionFPClass on every fmul): it infers `nnan`/`ninf` and folds fmuls whose
+  operand classes are known.

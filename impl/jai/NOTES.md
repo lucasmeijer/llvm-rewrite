@@ -82,11 +82,7 @@
 - known_bits.jai was replaced by the full ValueTracking port (value_tracking.jai, see "InstSimplify" below).
 - TLI: the full TargetLibraryInfo is in tli.jai (see "Library calls"); the MemoryBuiltins tables, isMathLibCallNoop
   (host libm + fenv via `#foreign`) and constant folding of libm calls consult it.
-- Debug info: dce/adce/bdce still don't salvage. instsimplify RAUWs with `rauw_with_metadata`, erases with
-  `erase_inst_with_metadata` (debug users of a deleted value become poison = setKillLocation) and fails loudly where
-  LLVM's salvageDebugInfo would rewrite the DIExpression (casts, GEPs, integer binops, icmps): 11 sweep files.
-  Porting salvageDebugInfoImpl needs DIExpression::appendOpsToArg/appendOffset/getExtOps and
-  DIExpressionOptimizer (foldConstantMath); put it in a shared file, every deleting pass needs it.
+- Debug info: see "Debug info utilities" below (salvageDebugInfo is ported; dce/adce/bdce/instsimplify use it).
 - Perf (x64 build, sqlite3.ll, `-disable-output`): parse 1.01 s (LLVM 0.28 s); dce +0.0 s (LLVM +0.0), adce +0.23 s
   (LLVM +0.01), bdce +0.31 s (LLVM +0.03), require<domtree>,require<postdomtree> +0.01 s. ADCE/BDCE cost is in
   `Table` lookups and temp APInt allocation (every APInt op allocates); no `@perf` benchmark times these passes, so
@@ -313,12 +309,10 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   nounwind inference), phi, gep, load, freeze, extractvalue, vector ops (InstSimplify only), terminators (ret,
   unreachable, br, condbr complete; switch not at all). A fold missing from these silently does not fire, so most
   arith tests that still fail do so because of folds in those files (select/cast/call canonicalizations).
-- Fail loudly (grep `not supported yet` in ic_*.jai): SimplifyDemandedFPClass (nofpclass returns; 28 InstCombine
-  tests), SimplifyDemandedVectorElts, foldVectorBinop's unshuffleConstant/vector.insert/reverse/splice cases,
-  LowerDbgDeclare (any `#dbg_declare`), sinking or salvaging instructions with debug users, visitFree,
-  simplifyNonNullOperand, sin/cos -> tan, convertFSqrtDivIntoFMul, mergeStoreIntoSuccessor with AA metadata,
-  `!annotation` metadata, dropping UB-implying call attributes. `SimplifyDemandedInstructionFPClass` at the end of
-  visitFMul is skipped silently (it is reached for every fmul; a design debt).
+- Fail loudly (grep `not supported yet` in ic_*.jai): sin/cos -> tan, convertFSqrtDivIntoFMul, `!annotation`
+  metadata, transformCallThroughTrampoline, transformConstExprCastCall of an invoke, gc.statepoint, ptrauth.
+  (SimplifyDemandedFPClass, LowerDbgDeclare, debug-user sinking/salvaging, visitAtomicRMWInst and the call half of
+  transformConstExprCastCall are ported now: see "InstCombine: FP classes, debug info, per-function sweep".)
 - Remaining arith failures that are not about other visitors: `sdiv-1` (cgscc inline), `storemerge-dbg`
   (debugify), `fptoui-of-fdiv` (ppc_fp128 folding), `sub-gep` (scalable GEP strides), `simplify-demanded-fpclass-fdiv`,
   `fsqrtdiv-transform`.
@@ -557,3 +551,47 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
 - Debug-record rule to remember: an instruction inserted at `I->getIterator()` adopts `I`'s records
   (`insert_at_position(.., head=false)`); `getFirstInsertionPt()`/`begin()` carry the head bit and insert in
   front of them. Most simplifycfg debug-info mismatches were a wrong head bit.
+
+## Debug info utilities (debugify, salvage, dbg.declare lowering)
+
+- Files: `pass_debugify.jai` (Debugify.cpp synthetic mode: `debugify`, `check-debugify`, `-enable-debugify`,
+  `-debugify-level/-quiet/-atoms`; the DIBuilder calls it makes are inlined as `di_get` rows), `salvage_debug.jai`
+  (Local.cpp salvageDebugInfo / salvageDebugInfoImpl / replaceAllDbgUsesWith / LowerDbgDeclare, BasicBlockUtils
+  RemoveRedundantDbgInstrs, the `redundant-dbg-inst-elim` pass, DIExpression appendOffset / appendOpsToArg /
+  prependOpcodes / append / appendToStack / appendExt / foldConstantMath, DbgVariableRecord location edits).
+  `-strip-debug` is opt's StripDebugInfo after parsing (pass_simplifycfg.jai owns the flag).
+- Use `dbgr_set_raw_location` / `dbgr_replace_variable_location_op` / `dbgr_add_variable_location_ops` /
+  `dbgr_set_kill_location` to change a record's location: they keep the value -> records index and the
+  "tracking stamp" (MetadataTracking's use-map index, which orders findDbgUsers) right. A new DIArgList is made with
+  `di_arg_list_get` (it gets a tracking stamp for findDbgUsers' arg-list order).
+- `md_value_rauw` keeps the old ValueAsMetadata row as an alias of the new value's row when that one already exists
+  (`vam_aliases`): records keep their Md_Id, and a later RAUW/deletion of the new value updates both. Without it a
+  record pointed at a dead value (`<badref>`).
+- Head bits: LLVM iterators from `getFirstInsertionPt`, `getFirstNonPHIIt`, `BasicBlock::begin()` and
+  `getInsertionPointAfterDef` insert *before* the records at that position; `I->getIterator()` / `Instruction*`
+  positions adopt them (`insert_at_position(.., head)`, `ic_link_before(.., head)`, `irb_set_at(.., head)`).
+  `moveBefore` (not Preserving) leaves the moved instruction's records behind: `inst_move_before_dbg`.
+  `split_basic_block(.., head=false)` leaves the split point's records in the old block on the new branch.
+- Sweeps after this work (`debugify,<pass>` vs LLVM, ~7600 files): dce/adce/bdce/sroa/mem2reg/lcssa/instsimplify 0
+  silent; instcombine 89 differs, all of which also differ without debugify except ~11 (DIArgList record order after
+  sinking: LLVM re-tracks an arg list when one of its values is RAUW'd onto an existing ValueAsMetadata, our
+  stamps approximate that; debug locations of a few folds).
+
+## InstCombine: FP classes, debug info, per-function sweep
+
+- `ic_demanded_fp.jai` ports the FP half of InstCombineSimplifyDemanded.cpp completely (SimplifyDemandedFPClass,
+  SimplifyDemandedUseFPClass, SimplifyMultipleUseDemandedFPClass, SimplifyDemandedInstructionFPClass and their
+  helpers); it runs for `nofpclass` returns (visitReturnInst) and at the end of visitFMul. `ic_atomicrmw.jai` is
+  InstCombineAtomicRMW.cpp. transformConstExprCastCall is ported for calls (invokes fail loudly).
+- `sweep --per-function --passes instcombine`: 147 -> 12 differs (69329 identical of 69711). Fixed on the way:
+  FPClassTest masks written `~cast(u32) FC_NAN & FC_ALL_FLAGS` (Jai's cast swallows the whole `&` expression: use
+  `fc_not`), `Builder.Insert(I)` clearing an unlinked instruction's name, canRewriteGEPAsOffset's PHI-user check
+  (a no-op in LLVM), m_SpecificInt(APInt) is APInt::isSameValue, OverflowTracking::applyFlags in
+  foldBinopWithRecurrence, assume-align on ptradd, powi(2.0 splat), known bits of llvm.pext/pdep, call-site-only
+  getParamDereferenceableBytes, memset forwarding's `APInt::ult(uint64_t)`, Negator zext-of-signbit poison lanes,
+  visitMul's m_CheckedInt over vector divisors.
+- Remaining per-function differs: modref/BasicAA load forwarding, ctor-memset (store to addrspacecast constant),
+  icmp-shr/select/trunc/and-or poison-lane folds, objectsize of huge allocas, active.lane.mask, ppc_fp128 copysign,
+  ldexp(intmin) metadata; loud: gc.statepoint, ptrauth, trampolines, nextafter folding, `!annotation`.
+- `pm_specific_int_ap` allows poison lanes although LLVM's m_SpecificInt(APInt) doesn't: two callers depend on that
+  (and-or-icmp-const-icmp, unsigned-add-lack-of-overflow-check) and should use an allow-poison matcher instead.

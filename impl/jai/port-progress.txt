@@ -1,12 +1,12 @@
 # Fractions for LLVM files named in src/ headers but only partly ported (see scripts/port-progress.py).
 # Format: lib/<path>.cpp <fraction 0.0-1.0>
-lib/Transforms/InstCombine/InstCombineCalls.cpp 0.87
+lib/Transforms/InstCombine/InstCombineCalls.cpp 0.9
 lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
 lib/Transforms/InstCombine/InstructionCombining.cpp 0.93
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
 lib/Analysis/MemoryBuiltins.cpp 0.9
 lib/Analysis/Loads.cpp 0.55
-lib/Transforms/Utils/Local.cpp 0.45
+lib/Transforms/Utils/Local.cpp 0.55
 lib/Analysis/TargetLibraryInfo.cpp 0.85
 lib/Transforms/Utils/SimplifyLibCalls.cpp 0.97
 lib/TargetParser/Triple.cpp 0.25
@@ -34,11 +34,11 @@ lib/Transforms/InstCombine/InstCombineSelect.cpp 0.95
 lib/IR/Instructions.cpp 0.65
 lib/Target/X86/X86InstCombineIntrinsic.cpp 1
 lib/IR/Constants.cpp 0.6
-lib/Transforms/InstCombine/InstCombineSimplifyDemanded.cpp 0.55
+lib/Transforms/InstCombine/InstCombineSimplifyDemanded.cpp 0.95
 lib/Transforms/InstCombine/InstCombineAddSub.cpp 0.9
 lib/Transforms/InstCombine/InstCombineCasts.cpp 0.95
 lib/Support/APInt.cpp 0.5
-lib/IR/DebugInfoMetadata.cpp 0.4
+lib/IR/DebugInfoMetadata.cpp 0.45
 lib/Transforms/Utils/BuildLibCalls.cpp 0.95
 lib/IR/DebugInfo.cpp 0.1
 lib/Analysis/MemorySSA.cpp 0.9  # no loop-scoped MemorySSA(Loop&), dot printer, legacy pass
@@ -48,7 +48,7 @@ lib/IR/Metadata.cpp 0.5
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.95
 lib/Analysis/TargetTransformInfo.cpp 0.3
-lib/Transforms/Utils/BasicBlockUtils.cpp 0.65
+lib/Transforms/Utils/BasicBlockUtils.cpp 0.7
 lib/Analysis/VectorUtils.cpp 0.45
 lib/IR/Intrinsics.cpp 0.75
 lib/IR/Instruction.cpp 0.7
@@ -66,7 +66,7 @@ lib/Transforms/Utils/PromoteMemoryToRegister.cpp 0.8
 lib/Analysis/GlobalsModRef.cpp 0.85
 lib/IR/BasicBlock.cpp 0.5
 lib/Analysis/AliasAnalysis.cpp 0.95
-lib/IR/DebugProgramInstruction.cpp 0.3
+lib/IR/DebugProgramInstruction.cpp 0.35
 lib/Transforms/Utils/LoopRotationUtils.cpp 1
 lib/IR/ConstantFPRange.cpp 0.3
 lib/Transforms/Utils/LoopSimplify.cpp 0.9
@@ -109,8 +109,8 @@ lib/Analysis/FloatingPointPredicateUtils.cpp 1  # manual: renamed: fcmp_to_class
 lib/Analysis/PtrUseVisitor.cpp 1
 lib/Analysis/DomConditionCache.cpp 1
 lib/IR/DIBuilder.cpp 0.15
-lib/Transforms/Utils/Debugify.cpp 0.4
-lib/IR/DIExpressionOptimizer.cpp 0.7
+lib/Transforms/Utils/Debugify.cpp 0.45  # synthetic mode (debugify, check-debugify, -enable-debugify); no original-debuginfo mode, -debugify-each, stats export
+lib/IR/DIExpressionOptimizer.cpp 1
 lib/Transforms/Scalar/LICM.cpp 0.97  # all of LICM/LNICM incl. ControlFlowHoister; no optimization remarks, no funclet-bundle call sinking
 lib/Analysis/MustExecute.cpp 0.35  # LoopSafetyInfo + ICFLoopSafetyInfo only (no SimpleLoopSafetyInfo, printers, MustBeExecutedContextExplorer)
 lib/Analysis/AliasSetTracker.cpp 0.85  # no printers
@@ -121,3 +121,4 @@ lib/CodeGen/TargetLoweringBase.cpp 0.3   # jai_simplifycfg: initActions, compute
 lib/Target/X86/X86ISelLowering.cpp 0.03   # jai_simplifycfg: the X86TargetLowering constructor's operation actions (generated), getPreferredVectorAction, isLegalAddressingMode, isCheapToSpeculateCt*, isNoopAddrSpaceCast
 lib/IR/Attributes.cpp 0.5
 lib/IR/MemoryModelRelaxationAnnotations.cpp 0.5
+lib/Transforms/InstCombine/InstCombineAtomicRMW.cpp 1

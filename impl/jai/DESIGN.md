@@ -49,6 +49,9 @@ src/
   passes.jai      pass registry, pipeline parser, pass and analysis managers, opt's command line (opt_main)
   pass_<name>.jai one file per ported pass (dce + break-crit-edges, adce, bdce, mem2reg, sroa, instsimplify, ...)
   ir_builder.jai  IRBuilder<ConstantFolder>: insertion point, debug location, name prefix (Irb, irb_*)
+  salvage_debug.jai  salvageDebugInfo, replaceAllDbgUsesWith, LowerDbgDeclare, RemoveRedundantDbgInstrs, DIExpression
+                  rewriting (appendOpsToArg, foldConstantMath, ...), record location edits
+  pass_debugify.jai debugify / check-debugify
   dbg_records.jai debug-record utilities (owners, findDbgUsers, ValueAsMetadata RAUW/deletion, DIExpression,
                   merged DILocations, dbg.declare -> dbg.value conversion)
   value_utils.jai GEP constant offsets and pointer stripping (sv_*)
@@ -486,6 +489,8 @@ Port of `llvm/lib/Transforms/InstCombine/`. `instcombine.jai` `#load`s the files
 | `ic_addsub.jai`, `ic_fp_addsub.jai`, `ic_negator.jai` | InstCombineAddSub.cpp (incl. FAddCombine), InstCombineNegator.cpp |
 | `ic_muldivrem.jai`, `ic_fp_muldivrem.jai` | InstCombineMulDivRem.cpp |
 | `ic_demanded.jai` | InstCombineSimplifyDemanded.cpp, integer half (`SimplifyDemandedUseBits`, `SimplifyMultipleUseDemandedBits`, ...) |
+| `ic_demanded_fp.jai` | InstCombineSimplifyDemanded.cpp, FP half, complete (`ic_simplify_demanded_fp_class`, `..._use_fp_class`, `..._multiple_use_demanded_fp_class`, `..._instruction_fp_class`) |
+| `ic_atomicrmw.jai` | InstCombineAtomicRMW.cpp, complete |
 | `ic_compares.jai` | InstCombineCompares.cpp: `visitICmpInst`, `visitFCmpInst` and all their helpers; at its end the helpers it borrows from other files under their LLVM names (`simplifyIntToPtrRoundTripCast`, `canBeCastedExactlyIntToFP`): move them when their file is ported |
 | `ic_shifts.jai` | InstCombineShifts.cpp: `visitShl/LShr/AShr`, `commonShiftTransforms`, `FoldShiftByConstant`, `setShiftFlags`, `canEvaluateShifted`/`getShiftedValue`, `reassociateShiftAmtsOfTwoSameDirectionShifts`; `Constant::replaceUndefsWith`/`mergeUndefsWith` (`ic_replace_undefs_with`, `ic_merge_undefs_with`) |
 | `ic_andorxor.jai` | InstCombineAndOrXor.cpp: `visitAnd/Or/Xor`, `foldAndOrOfICmps`, `foldLogOpOfMaskedICmps`, `foldLogicOfFCmps`, `foldNot`, `foldBooleanAndOr`, `FoldOrOfLogicalAnds`, `sinkNotInto*`, `convertOrOfShiftsToFunnelShift`, `insertRangeTest`, ...; CmpInstAnalysis.cpp's `getICmpCode`/`getPredForICmpCode`/`predicatesFoldable`; Local.cpp's `recognizeBSwapOrBitReverseIdiom`; matchers `pm_max_min` (MaxMin_match incl. the select form), `pm_c_binop_not_val`/`pm_c_binop_val_not` (commuted not-matchers with LLVM's try order) |
