@@ -10173,6 +10173,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cleanuppads.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cleanuppads.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad-debuginfo.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad-debuginfo.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cond-stores-cost.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cond-stores-cost.ll::roundtrip
@@ -10384,6 +10385,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/merge-cond-stores.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-cond-stores.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/merge-default.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-default.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/merge-deopt-bundle-constants.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-deopt-bundle-constants.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/merge-direct-call-branch-weights-in-hoist.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-direct-call-branch-weights-in-hoist.ll::roundtrip

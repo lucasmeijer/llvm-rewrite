@@ -167,8 +167,12 @@ ic_clone_inst :: (i: Value_Id) -> Value_Id {
     r.* = src;
     r.parent = NONE; r.prev = NONE; r.next = NONE; r.records = 0;
     if src.nidx > 0 {
+        // call-like instructions keep three entries per operand bundle (tag, begin, end)
+        cnt := src.nidx;
+        o := inst_op(i);
+        if o == .CALL || o == .INVOKE || o == .CALLBR cnt *= 3;
         r.idx = cast(u32) ir.u32_pool.count;
-        for k: 0..src.nidx-1 array_add(*ir.u32_pool, ir.u32_pool[src.idx + k]);
+        for k: 0..cnt-1 array_add(*ir.u32_pool, ir.u32_pool[src.idx + k]);
     }
     if inst_op(i) == .PHI {
         for k: 0..cast(s64) n - 1 { set_op(c, cast(u32) k, op(i, cast(u32) k)); ir.u_aux[ir.v_ops[c] + cast(u32) k] = ir.u_aux[ir.v_ops[i] + cast(u32) k]; }
