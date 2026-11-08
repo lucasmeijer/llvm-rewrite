@@ -670,7 +670,16 @@ ic_visit_alloc_site :: (mi: Value_Id) -> Value_Id {
         }
         ic_erase_inst(i);
     }
-    if inst_op(mi) == .INVOKE fatal("instcombine: removing an allocation made by an invoke is not supported yet");
+    if inst_op(mi) == .INVOKE {
+        // Replace invoke with a NOP intrinsic to maintain the original CFG
+        f := get_or_insert_intrinsic_declaration(IID_DONOTHING, .[]);
+        fty := glob(f).value_type;
+        ni := new_inst(.INVOKE, ir.t_void, 3);
+        inst(ni).ty2 = fty;
+        set_op(ni, 0, op(mi, nops(mi) - 3)); set_op(ni, 1, op(mi, nops(mi) - 2)); set_op(ni, 2, f);
+        block_append_inst(inst_block(mi), ni);
+        set_metadata(ni, 0, get_metadata(mi, 0));
+    }
     for r: dvrs {
         if dbgr(r).owner == NONE continue;
         if dbgr(r).kind == .DECLARE || dbgr(r).kind == .DECLARE_VALUE || diexpr_starts_with_deref(dbgr(r).expr) dbgr_erase(r);
