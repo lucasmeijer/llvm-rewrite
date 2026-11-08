@@ -3861,9 +3861,468 @@ fn simplify_duplicate_predecessors(bb: i32) -> bool {
 // ---------------------------------------------------------------------------------------------
 // simplifySwitch / simplifyIndirectBr
 
+// SwitchReplacement
+let SR_SINGLE = 0;
+let SR_LINEAR = 1;
+let SR_BITMAP = 2;
+let SR_TABLE = 3;
+struct SwRep { kind: i64, def: i32, vty: i32, single: i32, bitmap: i32, bm_elt: i32, lin_off: i32, lin_mul: i32, wrapped: bool, init: i32 }
+
+// SwitchReplacement::wouldFitInRegister
+fn would_fit_in_register(table_size: u64, et: i32) -> bool {
+    if !ty_is_int(et) { return false; }
+    let w = ty_bits(et) as u64;
+    if table_size >= 0xFFFFFFFF / w { return false; }
+    return dl_fits_in_legal_integer((table_size * w) as i64);
+}
+
+// isTypeLegalForLookupTable
+fn is_type_legal_for_lookup_table(t: i32) -> bool {
+    if tti_is_type_legal(t) { return true; }
+    if !ty_is_int(t) { return false; }
+    let w = ty_bits(t);
+    return w >= 8 && (w & (w - 1)) == 0 && dl_fits_in_legal_integer(w);
+}
+
+// shouldBuildLookupTable
+fn should_build_lookup_table(si: i32, table_size: u64, rtys: const i32[:]) -> bool {
+    if sw_ncases(si) as u64 > table_size { return false; }
+    var all_fit = true;
+    var illegal = false;
+    for t in rtys {
+        illegal = illegal || !is_type_legal_for_lookup_table(t);
+        all_fit = all_fit && would_fit_in_register(table_size, t);
+        if illegal && !all_fit { break; }
+    }
+    if all_fit { return true; }
+    if illegal { return false; }
+    return is_switch_dense_n(sw_ncases(si) as u64, table_size, fn_has_opt_size(inst_func(si)));
+}
+
+// shouldUseSwitchConditionAsTableIndex
+fn should_use_cond_as_table_index(minc: i32, maxc: i32, has_def: bool, rtys: const i32[:]) -> bool {
+    if is_null_value(minc) { return true; }
+    let mx = ap_limited(ci_ap(maxc), 0xFFFFFFFFFFFFFFFF);
+    if ap_is_neg(ci_ap(minc)) || mx == 0xFFFFFFFFFFFFFFFF || !has_def { return false; }
+    for t in rtys { if !would_fit_in_register(mx + 1, t) { return false; } }
+    return true;
+}
+
+// SwitchReplacement::SwitchReplacement
+fn sw_rep_build(table_size: u64, offset: i32, rcase: const i32[:], rval: const i32[:], def: i32) -> SwRep {
+    var r = SwRep { kind: SR_TABLE, def: def, vty: vals[rval[0]].ty, single: rval[0], bitmap: -1, bm_elt: -1, lin_off: -1, lin_mul: -1, wrapped: false, init: -1 };
+    var contents: i32[>..<] = [];
+    for k in table_size { contents.push(-1); }
+    for k in rcase.len {
+        let idx = ap_limited(ap_sub(ci_ap(rcase[k]), ci_ap(offset)), 0xFFFFFFFFFFFFFFFF);
+        contents[idx as i64] = rval[k];
+        if r.single >= 0 && !is_poison(rval[k]) && rval[k] != r.single {
+            r.single = if is_poison(r.single) { rval[k] } else { -1 };
+        }
+    }
+    if (rcase.len as u64) < table_size {
+        for k in table_size { if contents[k as i64] < 0 { contents[k as i64] = def; } }
+        if def != r.single && !is_poison(def) { r.single = -1; }
+    }
+    if r.single >= 0 { r.kind = SR_SINGLE; return r; }
+    if ty_is_int(r.vty) {
+        var possible = true;
+        var prev = ap_zero(1);
+        var dist = ap_zero(1);
+        var nonmono = false;
+        for k in table_size {
+            var cv = contents[k as i64];
+            if vals[cv].kind != VK_CINT && is_poison(cv) { cv = rval[0]; }
+            if vals[cv].kind != VK_CINT { possible = false; break; }
+            let v = ci_ap(cv);
+            if k != 0 {
+                let d = ap_sub(v, prev);
+                if k == 1 { dist = d; }
+                else if !ap_eq(d, dist) { possible = false; break; }
+                nonmono = nonmono || (if ap_is_strictly_pos(d) { ap_sle(v, prev) } else { ap_sgt(v, prev) });
+            }
+            prev = v;
+        }
+        if possible {
+            r.lin_off = contents[0];
+            r.lin_mul = c_int_ap(ty_int(dist.w as i64), dist);
+            let m = dist;
+            var may_wrap = true;
+            let w = m.w as i64;
+            let ts1 = table_size - 1;
+            if w >= 64 || ts1 < ((1 as u64) << w) {
+                let p, ov = ap_smul_ov(m, ap_u64(ts1, w));
+                may_wrap = ov;
+            }
+            r.wrapped = nonmono || may_wrap;
+            r.kind = SR_LINEAR;
+            return r;
+        }
+    }
+    if would_fit_in_register(table_size, r.vty) {
+        let ew = ty_bits(r.vty);
+        let tw = (table_size as i64) * ew;
+        var ti = ap_zero(tw);
+        var k = table_size as i64;
+        while k > 0 {
+            ti = ap_shl(ti, ew);
+            let c = contents[k - 1];
+            if !is_undef_or_poison(c) { ti = ap_or(ti, ap_zext(ci_ap(c), tw)); }
+            k--;
+        }
+        r.bitmap = c_int_ap(ty_int(tw), ti);
+        r.bm_elt = r.vty;
+        r.kind = SR_BITMAP;
+        return r;
+    }
+    if ty_is_int(r.vty) {
+        let w = ty_bits(r.vty);
+        var rng = rg_empty(w);
+        for c in contents { if !is_undef_or_poison(c) { rng = rg_union(rng, rg_single(ci_ap(c))); } }
+        let ab = rg_active_bits(rng);
+        var p2 = 1;
+        while p2 < ab { p2 *= 2; }
+        if ab == 0 { p2 = 0; }
+        let needed = max(tti_minimum_lookup_table_entry_bits(), p2);
+        if needed < w {
+            let dt = ty_int(needed);
+            for k in contents.len { contents[k] = cf_cast(OP_TRUNC, contents[k], dt); }
+        }
+    }
+    let tt = ty_array(vals[contents[0]].ty, table_size as i64);
+    r.init = c_aggregate(tt, contents);
+    r.kind = SR_TABLE;
+    return r;
+}
+
+// SwitchReplacement::replaceSwitch
+fn sw_rep_replace(r: SwRep, index0: i32, fv: i32) -> i32 {
+    var index = index0;
+    if r.kind == SR_SINGLE { return r.single; }
+    if r.kind == SR_LINEAR {
+        let mt = vals[r.lin_mul].ty;
+        var res = sb_int_cast(index, mt, false, "switch.idx.cast");
+        if !ap_is_one(ci_ap(r.lin_mul)) {
+            res = sb_binop_flags(OP_MUL, res, r.lin_mul, "switch.idx.mult", if r.wrapped { 0 } else { FL_NSW });
+        }
+        if !ap_is_zero(ci_ap(r.lin_off)) {
+            res = sb_binop_flags(OP_ADD, res, r.lin_off, "switch.offset", if r.wrapped { 0 } else { FL_NSW });
+        }
+        return res;
+    }
+    if r.kind == SR_BITMAP {
+        let mt = vals[r.bitmap].ty;
+        var sh = sb_zext_or_trunc(index, mt, "switch.cast");
+        sh = sb_binop_flags(OP_MUL, sh, c_int(mt, ty_bits(r.bm_elt)), "switch.shiftamt", FL_NUW | FL_NSW);
+        let ds = sb_binop(OP_LSHR, r.bitmap, sh, "switch.downshift");
+        return sb_cast(OP_TRUNC, ds, r.bm_elt, "switch.masked");
+    }
+    // LookupTableKind
+    let at = vals[r.init].ty;
+    let nm = name_plus(fv, "");
+    var gname: u8[>..] = [];
+    gname.append("switch.table.");
+    gname.append(nm);
+    let gv = new_glob(VK_GVAR, ty_ptr(0), -1, 1);
+    let g = glob_of(gv);
+    globs[g].module = globs[glob_of(fv)].module;
+    globs[g].vty = at;
+    globs[g].is_const = 1;
+    globs[g].is_decl = 0;
+    globs[g].linkage = LK_PRIVATE as u8;
+    globs[g].unnamed = 2;
+    globs[g].align = (log2_exact_i(dl_align(r.vty, false)) + 1) as u8;
+    set_op(gv, 0, r.init);
+    symtab_set_name(modules[globs[g].module].symtab, gv, gname, true);
+    module_append_global(gv);
+    let ity = ty_int(dl_ptr(0).idx);
+    if vals[index].ty != ity {
+        let old = ty_bits(vals[index].ty);
+        index = sb_zext_or_trunc(index, ity, "");
+        if is_inst(index) && iop(index) == OP_ZEXT {
+            let n1 = (ty_count(at) - 1) as u64;
+            let fits = old - 1 >= 64 || n1 < ((1 as u64) << (old - 1));
+            if fits { insts[inst_of(index)].flags |= FL_NNEG; } else { insts[inst_of(index)].flags &= ~FL_NNEG; }
+        }
+    }
+    let gep = sb_gep_inbounds(at, gv, [c_int(ity, 0), index], "switch.gep");
+    let et = ty_elem(at);
+    let ld = sb_load(et, gep, "switch.load");
+    if vals[ld].ty == r.vty { return ld; }
+    return sb_cast(OP_ZEXT, ld, r.vty, "switch.ext");
+}
+
+// CreateAdd/CreateSub/CreateMul(LHS, RHS, Name, HasNUW, HasNSW) (FoldNoWrapBinOp)
+fn sb_binop_flags(o: i64, a: i32, b: i32, name: const u8[:], flags: u8) -> i32 {
+    if !sb_nofold && is_constant(a) && is_constant(b) {
+        if is_desirable_binop(o) { return ce_binop(o, a, b, flags); }
+        let r = cf_binop(o, a, b);
+        if r >= 0 { return r; }
+    }
+    let iv = create_inst(o, vals[a].ty, [a, b]);
+    insts[inst_of(iv)].flags = flags;
+    return sb_insert(iv, name);
+}
+// CreateIntCast(V, DestTy, isSigned)
+fn sb_int_cast(v: i32, t: i32, signed: bool, name: const u8[:]) -> i32 {
+    let vb = ty_bits(vals[v].ty);
+    let tb = ty_bits(t);
+    if vb == tb { return v; }
+    if vb > tb { return sb_cast(OP_TRUNC, v, t, name); }
+    return sb_cast(if signed { OP_SEXT } else { OP_ZEXT }, v, t, name);
+}
+fn sb_zext_or_trunc(v: i32, t: i32, name: const u8[:]) -> i32 {
+    let vb = ty_bits(vals[v].ty);
+    let tb = ty_bits(t);
+    if vb < tb { return sb_cast(OP_ZEXT, v, t, name); }
+    if vb > tb { return sb_cast(OP_TRUNC, v, t, name); }
+    return v;
+}
+// CreateInBoundsGEP(Ty, Ptr, Idx, Name)
+fn sb_gep_inbounds(srcty: i32, p: i32, idxs: const i32[:], name: const u8[:]) -> i32 {
+    var allc = is_constant(p);
+    for x in idxs { if !is_constant(x) { allc = false; } }
+    if allc && !sb_nofold { return ce_gep(srcty, p, idxs, GEP_INBOUNDS, -1); }
+    var opsv: i32[>..<] = [];
+    opsv.push(p);
+    for x in idxs { opsv.push(x); }
+    let g = create_inst(OP_GEP, vals[p].ty, opsv);
+    insts[inst_of(g)].ty2 = srcty;
+    insts[inst_of(g)].flags = GEP_INBOUNDS;
+    return sb_insert(g, name);
+}
+// CreateLoad(Ty, Ptr, Name): ABI alignment of the type
+fn sb_load(t: i32, p: i32, name: const u8[:]) -> i32 {
+    let l = create_inst(OP_LOAD, t, [p]);
+    insts[inst_of(l)].align = (log2_exact_i(dl_align(t, true)) + 1) as u8;
+    return sb_insert(l, name);
+}
+
+// reuseTableCompare
+fn reuse_table_compare(user: i32, phibb: i32, rcb: i32, defv: i32, rval: const i32[:]) {
+    if !is_icmp(user) { return; }
+    if inst_parent(user) != phibb { return; }
+    let c1 = op(user, 1);
+    if !is_constant(c1) { return; }
+    let rc = br_cond(rcb);
+    let tc = c_int(vals[rc].ty, 1);
+    let fc = c_int(vals[rc].ty, 0);
+    let dc = cf_compare_inst_operands(inst_pred(user), defv, c1);
+    if dc != tc && dc != fc { return; }
+    for v in rval {
+        let cc = cf_compare_inst_operands(inst_pred(user), v, c1);
+        if cc < 0 || cc == dc || (cc != tc && cc != fc) { return; }
+    }
+    let brb = inst_parent(rcb);
+    var ok = true;
+    each_pred(phibb) { p => if p != brb && cu_unique_pred(p) != brb { ok = false; } };
+    if !ok { return; }
+    if dc == fc {
+        rauw(user, rc);
+    } else {
+        let x = create_inst(OP_XOR, vals[rc].ty, [rc, c_int(vals[rc].ty, 1)]);
+        inst_insert_before(x, rcb);
+        set_name(x, "inverted.cmp");
+        rauw(user, x);
+    }
+}
+// ConstantFoldCompareInstOperands
+fn cf_compare_inst_operands(p: i64, a: i32, b: i32) -> i32 { cf_fold_cmp_operands(p, a, b, -1) }
+
 fn simplify_switch_lookup(si: i32, use_tables: bool) -> bool {
-    scf_not_ported("switch to lookup table / arithmetic (simplifySwitchLookup)");
-    return false;
+    let bb = inst_parent(si);
+    let fv = block_func(bb);
+    if sw_ncases(si) < 3 { return false; }
+    var minc = sw_case_val(si, 0);
+    var maxc = sw_case_val(si, 0);
+    var common: i32 = -1;
+    // ResultLists: per PHI (in PHIs order) the (case, value) pairs
+    var phis: i32[>..<] = [];
+    var rl_phi: i64[>..<] = [];
+    var rl_case: i32[>..<] = [];
+    var rl_val: i32[>..<] = [];
+    var rtys: i32[>..<] = [];
+    for k in sw_ncases(si) {
+        let cv = sw_case_val(si, k);
+        if ap_slt(ci_ap(cv), ci_ap(minc)) { minc = cv; }
+        if ap_sgt(ci_ap(cv), ci_ap(maxc)) { maxc = cv; }
+        var res: i32[>..<] = [];
+        let ok, c2 = get_case_results(si, cv, sw_case_dest(si, k), common, res);
+        common = c2;
+        if !ok { return false; }
+        var j: i64 = 0;
+        while j < res.len {
+            let phi = res[j];
+            var pi = position(phis, phi);
+            if pi < 0 { phis.push(phi); pi = phis.len - 1; }
+            rl_phi.push(pi);
+            rl_case.push(cv);
+            rl_val.push(res[j + 1]);
+            rtys.push(vals[phi].ty);
+            j += 2;
+        }
+    }
+    var dres: i32[>..<] = [];
+    let has_def, c3 = get_case_results(si, -1, sw_default(si), common, dres);
+    common = c3;
+    fn default_result(phi: i32) -> i32 {
+        var j: i64 = 0;
+        var r: i32 = -1;
+        while j < dres.len { if dres[j] == phi { r = dres[j + 1]; } j += 2; }
+        return r;
+    }
+    let use_cond = should_use_cond_as_table_index(minc, maxc, has_def, rtys);
+    var table_size: u64 = 0;
+    var tio: i32 = -1;
+    if use_cond {
+        table_size = ap_limited(ci_ap(maxc), 0xFFFFFFFFFFFFFFFF) + 1;
+        tio = c_int(vals[maxc].ty, 0);
+    } else {
+        table_size = ap_limited(ap_sub(ci_ap(maxc), ci_ap(minc)), 0xFFFFFFFFFFFFFFFF) + 1;
+        tio = minc;
+    }
+    var nres: u64 = 0;
+    for x in rl_phi { if x == 0 { nres++; } }
+    var def_reachable = !cu_default_dest_unreachable(si);
+    let has_holes = nres < table_size;
+    let all_holes_poison = has_holes && !has_def;
+    let need_mask = all_holes_poison && def_reachable;
+    if need_mask {
+        if sw_ncases(si) < 4 { return false; }
+        if !dl_fits_in_legal_integer(table_size as i64) { return false; }
+    }
+    if !should_build_lookup_table(si, table_size, rtys) { return false; }
+    var tindex: i32 = -1;
+    if use_cond {
+        tindex = op(si, 0);
+        if has_def {
+            let s1 = sq_no_dt; let s2 = sq_no_ac;
+            sq_no_dt = true; sq_no_ac = true;
+            let sk = kb_cxt;
+            kb_cxt = -1;
+            let cr = compute_constant_range(tindex, false, true, 0);
+            kb_cxt = sk;
+            sq_no_dt = s1; sq_no_ac = s2;
+            let ub = ap_limited(cr.hi, 0xFFFFFFFFFFFFFFFF);
+            var allfit = true;
+            for t in rtys { if !would_fit_in_register(ub, t) { allfit = false; } }
+            if !rg_is_upper_wrapped(cr) && allfit {
+                table_size = max(ub, table_size);
+                def_reachable = false;
+            }
+        }
+    }
+    var reps: SwRep[>..<] = [];
+    for pi in phis.len {
+        var rc: i32[>..<] = [];
+        var rv: i32[>..<] = [];
+        for j in rl_phi.len { if rl_phi[j] == pi as i64 { rc.push(rl_case[j]); rv.push(rl_val[j]); } }
+        let rt = vals[rv[0]].ty;
+        let dv = if all_holes_poison { c_poison(rt) } else { default_result(phis[pi]) };
+        reps.push(sw_rep_build(table_size, tio, rc, rv, dv));
+    }
+    var any_tables = false;
+    var any_bitmaps = false;
+    for r in reps { if r.kind == SR_TABLE { any_tables = true; } if r.kind == SR_BITMAP { any_bitmaps = true; } }
+    if any_tables && (!tti_should_build_lookup_tables() || func_str_attr_is_true_scf(fv, "no-jump-tables")) { return false; }
+    if !use_tables && (any_tables || any_bitmaps || need_mask) { return false; }
+    sb_at(si);
+    if !use_cond {
+        var may_wrap = true;
+        if !def_reachable {
+            let rr, ov = ap_ssub_ov(ci_ap(maxc), ci_ap(minc));
+            may_wrap = ov;
+        }
+        tindex = sb_binop_flags(OP_SUB, op(si, 0), tio, "switch.tableidx", if may_wrap { 0 } else { FL_NSW });
+    }
+    var ups: DTUpdate[>..<] = [];
+    let csize = ty_bits(vals[minc].ty);
+    let max_table: u64 = if csize > 63 { 0xFFFFFFFFFFFFFFFF } else { (1 as u64) << csize };
+    var lookup = create_block_before(fv, common, "switch.lookup");
+    var rcb: i32 = -1;
+    var condbr: i32 = -1;
+    sb_set_before(si);
+    let covered = max_table == table_size;
+    if !def_reachable || covered {
+        sb_br(lookup);
+        if cu_dtu { cu_upd(ups, DT_INSERT, bb, lookup); }
+    } else {
+        let cmp = sb_icmp(P_ULT, tindex, c_int_ty(vals[minc].ty, table_size), "");
+        rcb = sb_condbr(cmp, lookup, sw_default(si));
+        condbr = rcb;
+        if cu_dtu { cu_upd(ups, DT_INSERT, bb, lookup); }
+    }
+    sb_set_end(lookup);
+    if need_mask {
+        let maskbb = lookup;
+        set_name(maskbb, "switch.hole_check");
+        lookup = create_block_before(fv, common, "switch.lookup");
+        var tsp2: u64 = 1;
+        let base = max(7, table_size - 1);
+        while tsp2 <= base { tsp2 *= 2; }
+        let mw = tsp2 as i64;
+        var mask = ap_zero(mw);
+        for j in rl_phi.len {
+            if rl_phi[j] != 0 { continue; }
+            let idx = ap_limited(ap_sub(ci_ap(rl_case[j]), ci_ap(tio)), 0xFFFFFFFFFFFFFFFF);
+            mask = ap_or(mask, ap_shl(ap_u64(1, mw), idx as i64));
+        }
+        let tm = c_int_ap(ty_int(mw), mask);
+        let mi = sb_zext_or_trunc(tindex, ty_int(mw), "switch.maskindex");
+        let shv = sb_binop(OP_LSHR, tm, mi, "switch.shifted");
+        let lob = sb_cast(OP_TRUNC, shv, T_I1, "switch.lobit");
+        condbr = sb_condbr(lob, lookup, sw_default(si));
+        if cu_dtu { cu_upd(ups, DT_INSERT, maskbb, lookup); cu_upd(ups, DT_INSERT, maskbb, sw_default(si)); }
+        sb_set_end(lookup);
+        add_predecessor_to_block(sw_default(si), maskbb, bb);
+    }
+    if !def_reachable || covered {
+        block_remove_predecessor(sw_default(si), bb, true);
+        if cu_dtu { cu_upd(ups, DT_DELETE, bb, sw_default(si)); }
+    }
+    for pi in phis.len {
+        let phi = phis[pi];
+        let r = reps[pi];
+        let res = sw_rep_replace(r, tindex, fv);
+        if !has_holes && has_def && rcb >= 0 {
+            let phibb = inst_parent(phi);
+            var rv: i32[>..<] = [];
+            for j in rl_phi.len { if rl_phi[j] == pi as i64 { rv.push(rl_val[j]); } }
+            var users: i32[>..<] = [];
+            var u = first_use(phi);
+            while u >= 0 { users.push(uses[u].user); u = use_next(u); }
+            for us in users { reuse_table_compare(us, phibb, rcb, r.def, rv); }
+        }
+        phi_add_incoming(phi, res, lookup);
+    }
+    sb_br(common);
+    if cu_dtu { cu_upd(ups, DT_INSERT, lookup, common); }
+    var bw: u64[>..<] = [];
+    let has_bw = condbr >= 0 && pd_extract(si, bw);
+    var to_lookup: u64 = 0;
+    var to_def: u64 = 0;
+    var removed: i32[>..<] = [];
+    for k in term_nsucc(si) {
+        let s = term_succ(si, k);
+        if s == sw_default(si) {
+            if has_bw { to_def += bw[k]; }
+            continue;
+        }
+        block_remove_predecessor(s, bb, false);
+        if cu_dtu && cu_push_unique(removed, s) { cu_upd(ups, DT_DELETE, bb, s); }
+        if has_bw { to_lookup += bw[k]; }
+    }
+    scf_erase(si);
+    if has_bw {
+        let w: u64[2] = [to_lookup, to_def];
+        pd_set_fitted(condbr, w, false, false);
+    }
+    cu_apply(ups);
+    return true;
+}
+fn func_str_attr_is_true_scf(fv: i32, key: const u8[:]) -> bool {
+    let a = aset_find_str(alist_fn(func_attrs(fv)), key);
+    return a >= 0 && attrs[a].sval >= 0 && sbytes(attrs[a].sval) == "true";
 }
 
 fn simplify_switch(si: i32) -> bool {
