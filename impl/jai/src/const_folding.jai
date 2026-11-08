@@ -26,18 +26,12 @@ dl_index_type :: (t: Type_Id) -> Type_Id {
 dl_address_type :: (t: Type_Id) -> Type_Id { return dl_index_type(t); }
 type_int :: (bits: u32) -> Type_Id { return intern_type(.INT, 0, bits, .[]); }
 // DataLayout::isNonIntegralPointerType / mustNotIntroduceIntToPtr: address spaces listed in "ni:" of the datalayout
-dl_is_non_integral_as :: (as: u32) -> bool {
-    s := ir.datalayout;
-    parts := split(s, "-",, allocator = temp);
-    for p: parts {
-        if !begins_with(p, "ni:") continue;
-        nums := split(slice(p, 3, p.count - 3), ":",, allocator = temp);
-        for nums { v, ok := string_to_int(it); if ok && cast(u32) v == as return true; }
-    }
-    return false;
-}
+dl_is_non_integral_as :: (as: u32) -> bool { return dl_ni_as(as); }
 dl_is_non_integral_pointer_type :: (t: Type_Id) -> bool { st := scalar_type(t); return is_ptr_type(st) && dl_is_non_integral_as(cast(u32) ir.types[st].a); }
-dl_must_not_introduce_int_to_ptr :: (t: Type_Id) -> bool { return dl_is_non_integral_pointer_type(t); }
+// DataLayout::mustNotIntroduceIntToPtr / mustNotIntroducePtrToInt / hasUnstableRepresentation / hasExternalState
+dl_ptr_spec_of :: (t: Type_Id) -> (bool, Ptr_Spec) { st := scalar_type(t); if !is_ptr_type(st) { z: Ptr_Spec; return false, z; } return true, dl_ptr_spec(cast(u32) ir.types[st].a); }
+dl_must_not_introduce_int_to_ptr :: (t: Type_Id) -> bool { ok, ps := dl_ptr_spec_of(t); return ok && (ps.unstable || ps.external); }
+dl_must_not_introduce_ptr_to_int :: (t: Type_Id) -> bool { ok, ps := dl_ptr_spec_of(t); return ok && ps.unstable; }
 // DataLayout::typeSizeEqualsStoreSize
 dl_type_size_equals_store_size :: (t: Type_Id) -> bool { return dl_type_size_bits(t) == dl_type_store_size(t) * 8; }
 

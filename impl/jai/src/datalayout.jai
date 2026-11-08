@@ -2,7 +2,7 @@
 // ABI/preferred alignment, struct layout.
 
 Prim_Spec :: struct { bits: u32; abi: u64; pref: u64; }
-Ptr_Spec  :: struct { as: u32; bits: u32; abi: u64; pref: u64; idx_bits: u32; unstable: bool; }
+Ptr_Spec  :: struct { as: u32; bits: u32; abi: u64; pref: u64; idx_bits: u32; unstable: bool; external: bool = false; null_all_ones: bool = false; }
 
 Data_Layout :: struct {
     big_endian: bool;
@@ -32,7 +32,7 @@ dl_set_ptr :: (as: u32, bits: u32, abi: u64, pref: u64, idx: u32) {
     for * dl.ptr_specs if it.as == as { it.bits = bits; it.abi = abi; it.pref = pref; it.idx_bits = idx; return; }
     i := 0;
     while i < dl.ptr_specs.count && dl.ptr_specs[i].as < as i += 1;
-    array_insert_at(*dl.ptr_specs, .{as, bits, abi, pref, idx, false}, i);
+    array_insert_at(*dl.ptr_specs, .{as, bits, abi, pref, idx, false, false, false}, i);
 }
 
 dl_init :: (s: string) {
@@ -78,12 +78,23 @@ dl_init :: (s: string) {
                 dl_set_prim(list, bits, abi, pref);
             case #char "p";
                 as: u32 = 0;
-                if nums[0].count as = cast(u32) num(nums[0]);
+                // DataLayout::parsePointerSpec flags: e (external state), u (unstable), z / o (null value)
+                flags := nums[0];
+                ext := false; uns := false; ones := false;
+                while flags.count && (flags[0] == #char "e" || flags[0] == #char "u" || flags[0] == #char "z" || flags[0] == #char "o") {
+                    if flags[0] == #char "e" ext = true;
+                    else if flags[0] == #char "u" uns = true;
+                    else if flags[0] == #char "o" ones = true;
+                    flags = slice(flags, 1, flags.count - 1);
+                }
+                if flags.count && !(flags[0] >= #char "0" && flags[0] <= #char "9") fatal("datalayout: unsupported pointer specification '%'", part);
+                if flags.count as = cast(u32) num(flags);
                 bits := cast(u32) num(nums[1]);
                 abi := num(nums[2]) / 8;
                 pref := ifx nums.count > 3 then num(nums[3]) / 8 else abi;
                 idx := ifx nums.count > 4 then cast(u32) num(nums[4]) else bits;
                 dl_set_ptr(as, bits, abi, pref, idx);
+                for * dl.ptr_specs if it.as == as { it.external = ext; if uns it.unstable = true; it.null_all_ones = ones; }
             case #char "a";
                 if nums.count > 1 { dl.struct_abi = max(num(nums[1]) / 8, 1); }
                 if nums.count > 2 dl.struct_pref = num(nums[2]) / 8;
@@ -105,7 +116,7 @@ dl_ptr_spec :: (as: u32) -> Ptr_Spec {
 // DataLayout::isLegalInteger
 dl_is_legal_integer :: (bits: u64) -> bool { for dl.legal_ints if it == bits return true; return false; }
 // DataLayout::isNonIntegralAddressSpace
-dl_ni_as :: (as: u32) -> bool { ps := dl_ptr_spec(as); return ps.bits != ps.idx_bits || ps.unstable; }
+dl_ni_as :: (as: u32) -> bool { ps := dl_ptr_spec(as); return ps.bits != ps.idx_bits || ps.unstable || ps.external; }
 dl_ni_ptr_type :: (t: Type_Id) -> bool { return type_kind(t) == .PTR && dl_ni_as(cast(u32) ir.types[t].a); }
 // DataLayout::getIndexSizeInBits / getIndexTypeSizeInBits
 dl_index_size_bits :: (as: u32) -> u32 { return dl_ptr_spec(as).idx_bits; }
