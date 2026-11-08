@@ -477,7 +477,10 @@ recursive fn sc_get_num_iterations_in_range(ar: i32, range: CRange) -> i32 {
         if rg_contains_ap(range, sc_ap(val)) { return SCEV_CNC; }
         return sc_get_constant(ev);
     }
-    if sc_is_quadratic(ar) { fatal("ScalarEvolution: SolveQuadraticAddRecRange is not ported"); }
+    if sc_is_quadratic(ar) {
+        let ok, x = sc_solve_quadratic_addrec_range(ar, range);
+        if ok { return sc_get_constant(x); }
+    }
     return SCEV_CNC;
 }
 
@@ -515,7 +518,16 @@ recursive fn sc_how_far_to_zero(v: i32, l: i32, only: bool, allow_preds: bool) -
     if !sc_is_addrec(ar) { ar = -1; }
     if ar < 0 && allow_preds { ar = sc_convert_to_addrec_with_predicates(v, l); }
     if ar < 0 || sc_loop(ar) != l { sc_lin_preds.resize(pm); return el_cnc(); }
-    if sc_is_quadratic(ar) && ty_is_int(sc_ty(ar)) { fatal("ScalarEvolution: SolveQuadraticAddRecExact is not ported"); }
+    if sc_is_quadratic(ar) && ty_is_int(sc_ty(ar)) {
+        let ok, x = sc_solve_quadratic_addrec_exact(ar);
+        if ok {
+            let r = sc_get_constant(x);
+            let pat, np = sc_preds_from_lin(pm);
+            return el_make(r, r, r, false, pat, np);
+        }
+        sc_lin_preds.resize(pm);
+        return el_cnc();
+    }
     if !sc_is_affine(ar) { sc_lin_preds.resize(pm); return el_cnc(); }
     let pl = loop_parent(l);
     let start = sc_get_scev_at_scope(sc_op(ar, 0), pl);
@@ -674,3 +686,157 @@ recursive fn sc_compute_block_disposition(s: i32, bb: i32) -> i64 {
 recursive fn sc_dominates(s: i32, bb: i32) -> bool { sc_get_block_disposition(s, bb) >= BD_DOMINATES }
 recursive fn sc_properly_dominates(s: i32, bb: i32) -> bool { sc_get_block_disposition(s, bb) == BD_PROPERLY_DOMINATES }
 recursive fn sc_is_available_at_loop_entry(s: i32, l: i32) -> bool { sc_is_loop_invariant(s, l) && sc_properly_dominates(s, loop_header(l)) }
+
+// ---------------------------------------------------------------------------------------------
+// Quadratic recurrences
+
+// APInt::sqrtFloor (exact)
+recursive fn ap_sqrt_floor(a: AP) -> AP {
+    let w = a.w as i64;
+    var lo = ap_zero(w);
+    var hi = ap_one_bit(w + 1, (ap_active_bits(a) + 1) / 2 + 1);
+    let a2 = ap_zext(a, w + 1);
+    var l2 = ap_zext(lo, w + 1);
+    // binary search on [l2, hi): largest x with x*x <= a
+    while ap_ult(ap_inc(l2), hi) {
+        let mid = ap_lshr(ap_add(l2, hi), 1);
+        let m2 = ap_mul(ap_zext(mid, 2 * w + 2), ap_zext(mid, 2 * w + 2));
+        if ap_ule(m2, ap_zext(a2, 2 * w + 2)) { l2 = mid; } else { hi = mid; }
+    }
+    lo = ap_trunc(l2, w);
+    return lo;
+}
+
+// APIntOps::SolveQuadraticEquationWrap: (ok, x)
+recursive fn sc_solve_quadratic_equation_wrap(a0: AP, b0: AP, c0: AP, rw: i64) -> bool, AP {
+    let cw0 = a0.w as i64;
+    if ap_is_zero(ap_sext_or_trunc(c0, rw)) { return true, ap_zero(cw0); }
+    let cw = cw0 * 3;
+    var a = ap_sext(a0, cw);
+    var b = ap_sext(b0, cw);
+    var c = ap_sext(c0, cw);
+    if ap_is_neg(a) { a = ap_neg(a); b = ap_neg(b); c = ap_neg(c); }
+    let r = ap_one_bit(cw, rw);
+    let two_a = ap_mul(ap_u64(2, cw), a);
+    let sqrb = ap_mul(b, b);
+    var pick_low = false;
+    fn round_up(v: AP, x: AP) -> AP {
+        let t = ap_urem(ap_abs(v), x);
+        if ap_is_zero(t) { return v; }
+        return if ap_is_neg(v) { ap_add(v, t) } else { ap_add(v, ap_sub(x, t)) };
+    }
+    if !ap_is_neg(b) {
+        c = ap_srem(c, r);
+        if ap_is_strictly_pos(c) { c = ap_sub(c, r); }
+        pick_low = false;
+    } else {
+        var lowkr = ap_sub(c, ap_udiv(sqrb, ap_mul(ap_u64(2, cw), two_a)));
+        lowkr = round_up(lowkr, r);
+        if ap_sgt(c, lowkr) {
+            c = ap_sub(c, ap_neg(round_up(ap_neg(c), r)));
+            pick_low = true;
+        } else {
+            c = ap_sub(c, lowkr);
+            pick_low = false;
+        }
+    }
+    let d = ap_sub(sqrb, ap_mul(ap_mul(ap_u64(4, cw), a), c));
+    let sq = ap_sqrt_floor(d);
+    let q = ap_mul(sq, sq);
+    let inexact = !ap_eq(q, d);
+    var x = ap_zero(cw);
+    var rem = ap_zero(cw);
+    if pick_low {
+        let t = ap_sub(ap_neg(b), ap_add(sq, ap_u64(if inexact { 1 } else { 0 }, cw)));
+        let qq, rr = ap_sdivrem(t, two_a);
+        x = qq; rem = rr;
+    } else {
+        let qq, rr = ap_sdivrem(ap_add(ap_neg(b), sq), two_a);
+        x = qq; rem = rr;
+    }
+    if !inexact && ap_is_zero(rem) { return true, x; }
+    let vx = ap_add(ap_mul(ap_add(ap_mul(a, x), b), x), c);
+    let vy = ap_add(ap_add(ap_add(vx, ap_mul(two_a, x)), a), b);
+    let sign_change = ap_is_neg(vx) != ap_is_neg(vy) || ap_is_zero(vx) != ap_is_zero(vy);
+    if !sign_change { return false, x; }
+    return true, ap_inc(x);
+}
+
+// GetQuadraticEquation: (ok, A, B, C, M, BitWidth)
+recursive fn sc_get_quadratic_equation(ar: i32) -> bool, AP, AP, AP, AP, i64 {
+    let z = ap_zero(1);
+    if !sc_is_const(sc_op(ar, 0)) || !sc_is_const(sc_op(ar, 1)) || !sc_is_const(sc_op(ar, 2)) { return false, z, z, z, z, 0; }
+    let bw = sc_ap(sc_op(ar, 0)).w as i64;
+    let nw = bw + 1;
+    let n = ap_sext(sc_ap(sc_op(ar, 2)), nw);
+    let m = ap_sext(sc_ap(sc_op(ar, 1)), nw);
+    let l = ap_sext(sc_ap(sc_op(ar, 0)), nw);
+    let a = n;
+    let b = ap_sub(ap_mul(ap_u64(2, nw), m), a);
+    let c = ap_mul(ap_u64(2, nw), l);
+    return true, a, b, c, ap_u64(2, nw), bw;
+}
+
+// TruncIfPossible
+fn sc_trunc_if_possible(x: AP, bw: i64) -> AP {
+    let w = x.w as i64;
+    if bw > 1 && bw < w && ap_is_int_n(x, bw) { return ap_trunc(x, bw); }
+    return x;
+}
+
+// EvaluateConstantChrecAtConstant
+recursive fn sc_eval_chrec_at_constant(ar: i32, x: AP) -> AP { sc_ap(sc_evaluate_at_iteration(ar, sc_get_constant(x))) }
+
+// SolveQuadraticAddRecExact
+recursive fn sc_solve_quadratic_addrec_exact(ar: i32) -> bool, AP {
+    let ok, a, b, c, m, bw = sc_get_quadratic_equation(ar);
+    if !ok { return false, a; }
+    let ok2, x = sc_solve_quadratic_equation_wrap(a, b, c, bw + 1);
+    if !ok2 { return false, x; }
+    let v = sc_eval_chrec_at_constant(ar, x);
+    if !ap_is_zero(v) { return false, x; }
+    return true, sc_trunc_if_possible(x, bw);
+}
+
+// SolveQuadraticAddRecRange
+recursive fn sc_solve_quadratic_addrec_range(ar: i32, range: CRange) -> bool, AP {
+    let ok, a, b, c, m, bw = sc_get_quadratic_equation(ar);
+    if !ok { return false, a; }
+    fn leaves_range(x: AP) -> bool {
+        let v0 = sc_eval_chrec_at_constant(ar, x);
+        if rg_contains_ap(range, v0) { return false; }
+        let v1 = sc_eval_chrec_at_constant(ar, ap_dec(x));
+        if rg_contains_ap(range, v1) { return true; }
+        return false;
+    }
+    // SolveForBoundary: (has value, value, ok)
+    fn solve_for_boundary(bound0: AP) -> bool, AP, bool {
+        let bound = ap_mul(bound0, m);
+        var so_ok = false;
+        var so = bound;
+        if bw > 1 { let o1, x1 = sc_solve_quadratic_equation_wrap(a, b, ap_neg(bound), bw); so_ok = o1; so = x1; }
+        let uo_ok, uo = sc_solve_quadratic_equation_wrap(a, b, ap_neg(bound), bw + 1);
+        if !so_ok || !uo_ok { return false, bound, false; }
+        // MinOptional(SO, UO)
+        let wmax = if so.w > uo.w { so.w as i64 } else { uo.w as i64 };
+        let min_is_so = ap_slt(ap_sext(so, wmax), ap_sext(uo, wmax));
+        let mn = if min_is_so { so } else { uo };
+        if leaves_range(mn) { return true, mn, true; }
+        let mx = if min_is_so { uo } else { so };
+        if leaves_range(mx) { return true, mx, true; }
+        return false, bound, true;
+    }
+    let lower = ap_dec(ap_sext(range.lo, a.w as i64));
+    let upper = ap_sext(range.hi, a.w as i64);
+    let lh, lv, lok = solve_for_boundary(lower);
+    let uh, uv, uok = solve_for_boundary(upper);
+    if !lok || !uok { return false, lv; }
+    // TruncIfPossible(MinOptional(SL.first, SU.first), BitWidth)
+    if lh && uh {
+        let wmax = if lv.w > uv.w { lv.w as i64 } else { uv.w as i64 };
+        let r = if ap_slt(ap_sext(lv, wmax), ap_sext(uv, wmax)) { lv } else { uv };
+        return true, sc_trunc_if_possible(r, bw);
+    }
+    if !lh && !uh { return false, lv; }
+    return true, sc_trunc_if_possible(if lh { lv } else { uv }, bw);
+}

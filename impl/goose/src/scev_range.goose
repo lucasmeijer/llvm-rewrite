@@ -44,7 +44,9 @@ recursive fn sc_set_nowrap_flags(ar: i32, f: u32) {
 }
 
 // computeKnownBits(V, DL, AC, CxtI, DT) as APInt known bits
-recursive fn sc_compute_known_bits_cx(v: i32, cx: i32) -> KB {
+// safeCxtI(V, CxtI): without a context, an instruction is its own context
+recursive fn sc_compute_known_bits_cx(v: i32, cx0: i32) -> KB {
+    let cx = if cx0 < 0 && is_inst(v) { v } else { cx0 };
     let save = kb_cxt;
     kb_cxt = cx;
     let k = kb_compute_all(v, 0);
@@ -54,7 +56,7 @@ recursive fn sc_compute_known_bits_cx(v: i32, cx: i32) -> KB {
 recursive fn sc_compute_known_bits_ap(v: i32) -> KB { sc_compute_known_bits_cx(v, -1) }
 recursive fn sc_num_sign_bits(v: i32) -> i64 {
     let save = kb_cxt;
-    kb_cxt = -1;
+    kb_cxt = if is_inst(v) { v } else { -1 };
     let r = num_sign_bits(v, 0);
     kb_cxt = save;
     return r;

@@ -16,6 +16,8 @@ var dl_vec_elem_aligned: bool = false;
 var dl_prog_as: i64 = 0;      // P<n>: program address space (functions, calls)
 var dl_native: i64[>..<];          // "n" legal integer widths
 var dl_nonintegral: i64[>..<];     // "ni" address spaces
+var dl_unstable: i64[>..<];        // "pu<AS>": unstable pointer representation
+var dl_extstate: i64[>..<];        // "pe<AS>": pointers with external state
 var dl_big_endian: bool = false;
 
 fn dl_set_spec(xs: PrimSpec[>..<]&, bits: i64, abi: i64, pref: i64) {
@@ -40,6 +42,8 @@ fn dl_reset() {
     dl_ptrs.clear();
     dl_native.clear();
     dl_nonintegral.clear();
+    dl_unstable.clear();
+    dl_extstate.clear();
     dl_big_endian = false;
     dl_set_spec(dl_ints, 8, 1, 1);
     dl_set_spec(dl_ints, 16, 2, 2);
@@ -80,9 +84,22 @@ fn dl_parse(s: const u8[:]) {
     var start = 0;
     for i in 0..s.len + 1 {
         if i < s.len && s[i] != '-' { continue; }
-        let part = s[start..i];
+        let part0 = s[start..i];
         start = i + 1;
-        if part.len == 0 { continue; }
+        if part0.len == 0 { continue; }
+        // "p[u][e]<AS>:...": pointer flags (unstable representation, external state) before the address space
+        var pu = false;
+        var pe = false;
+        var pbuf: u8[..256] = [];
+        if part0[0] == 'p' && part0.len > 1 && (part0[1] == 'u' || part0[1] == 'e') {
+            var j: i64 = 1;
+            while j < part0.len && (part0[j] == 'u' || part0[j] == 'e') { if part0[j] == 'u' { pu = true; } else { pe = true; } j++; }
+            pbuf.push('p');
+            for k in j..part0.len { if pbuf.len < 256 { pbuf.push(part0[k]); } }
+        } else {
+            for k in part0.len { if pbuf.len < 256 { pbuf.push(part0[k]); } }
+        }
+        let part = pbuf[..];
         let c = part[0];
         let f0, h0 = dl_field(part, 0);
         let f1, h1 = dl_field(part, 1);
@@ -108,6 +125,8 @@ fn dl_parse(s: const u8[:]) {
             var found = false;
             for &p in dl_ptrs { if p.as_ == as_ { p.bits = bits; p.abi = abi; p.pref = pref; p.idx = idx; found = true; } }
             if !found { dl_ptrs.push(PtrSpec { as_: as_, bits: bits, abi: abi, pref: pref, idx: idx }); }
+            if pu { dl_unstable.push(as_); }
+            if pe { dl_extstate.push(as_); }
         } else if c == 'P' {
             dl_prog_as = parse_num(part[1..]);
         } else if c == 'n' && part.len > 1 && part[1] == 'i' {
@@ -133,7 +152,13 @@ fn dl_parse(s: const u8[:]) {
 
 // DataLayout::isLegalInteger / isNonIntegralAddressSpace
 fn dl_is_legal_integer(bits: i64) -> bool { for w in dl_native { if w == bits { return true; } } return false; }
-fn dl_is_nonintegral_as(as_: i64) -> bool { for a in dl_nonintegral { if a == as_ { return true; } } return false; }
+fn dl_is_nonintegral_as(as_: i64) -> bool {
+    for a in dl_nonintegral { if a == as_ { return true; } }
+    let ps = dl_ptr(as_);
+    return ps.bits != ps.idx || dl_has_unstable_repr(as_) || dl_has_external_state(as_);
+}
+fn dl_has_unstable_repr(as_: i64) -> bool { for a in dl_unstable { if a == as_ { return true; } } return false; }
+fn dl_has_external_state(as_: i64) -> bool { for a in dl_extstate { if a == as_ { return true; } } return false; }
 
 fn dl_ptr(as_: i64) -> PtrSpec {
     for p in dl_ptrs { if p.as_ == as_ { return p; } }

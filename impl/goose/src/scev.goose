@@ -1357,7 +1357,9 @@ recursive fn sc_mul_n(b: i64, orig: u32, depth: i64) -> i32 {
             let tb = ss.len;
             ss.push(scale);
             ss.push(ar);
-            var fl = sc_flags(ar) & sc_strengthen_flags(SC_MUL, tb, 2, orig);
+            // ComputeFlags runs first (it may add flags to the AddRec through its ranges)
+            let cf = sc_strengthen_flags(SC_MUL, tb, 2, orig);
+            var fl = sc_flags(ar) & cf;
             ss.resize(tb);
             let nb = ss.len;
             for i in sc_nops(ar) {
@@ -2587,6 +2589,7 @@ recursive fn sc_get_ptr_to_int(o: i32, t: i32) -> i32 {
     return sc_get_truncate_or_zero_extend(io, t, 0);
 }
 recursive fn sc_get_ptr_to_addr(o: i32) -> i32 {
+    if dl_has_unstable_repr(sc_ptr_as(sc_ty(o))) { return SCEV_CNC; }
     // DataLayout::getAddressType: the index type of the address space
     let t = ty_int(dl_ptr(sc_ptr_as(sc_ty(o))).idx);
     return sc_cast_sink(o, t, true);

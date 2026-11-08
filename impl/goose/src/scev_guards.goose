@@ -276,8 +276,11 @@ recursive fn sc_collect_from_block(g: i32, blk: i32, pred: i32, vm: i64, depth: 
         for k in em..sc_gexprs.len {
             let e = sc_gexprs[k];
             let to = sc_gmap_get(g, e);
+            // RewriteMap.erase(Expr) before rewriting, then insert
+            hm_del(sc_gmap, hk2(g, e));
+            sc_guards[g].nmap -= 1;
             let r = sc_guards_rewrite(g, to);
-            hm_put(sc_gmap, hk2(g, e), r as i64);
+            sc_gmap_set(g, e, r);
         }
     }
     sc_gexprs.resize(em);
