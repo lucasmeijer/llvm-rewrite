@@ -249,29 +249,7 @@ tli_available :: (caller: Value_Id, name: string) -> bool {
     return true;
 }
 
-Alloc_Fn :: struct { name: string; nparams: s32; fst: s32; snd: s32; }
-// MemoryBuiltins.cpp AllocationFnData (all of them are AllocLike), x86_64-linux names only
-ALLOC_FNS :: Alloc_Fn.[
-    .{"_Znwj", 1, 0, -1}, .{"_ZnwjRKSt9nothrow_t", 2, 0, -1}, .{"_ZnwjSt11align_val_t", 2, 0, -1},
-    .{"_ZnwjSt11align_val_tRKSt9nothrow_t", 3, 0, -1}, .{"_Znwm", 1, 0, -1}, .{"_Znwm12__hot_cold_t", 2, 0, -1},
-    .{"_ZnwmRKSt9nothrow_t", 2, 0, -1}, .{"_ZnwmRKSt9nothrow_t12__hot_cold_t", 3, 0, -1},
-    .{"_ZnwmSt11align_val_t", 2, 0, -1}, .{"_ZnwmSt11align_val_t12__hot_cold_t", 3, 0, -1},
-    .{"_ZnwmSt11align_val_tRKSt9nothrow_t", 3, 0, -1}, .{"_ZnwmSt11align_val_tRKSt9nothrow_t12__hot_cold_t", 4, 0, -1},
-    .{"_Znaj", 1, 0, -1}, .{"_ZnajRKSt9nothrow_t", 2, 0, -1}, .{"_ZnajSt11align_val_t", 2, 0, -1},
-    .{"_ZnajSt11align_val_tRKSt9nothrow_t", 3, 0, -1}, .{"_Znam", 1, 0, -1}, .{"_Znam12__hot_cold_t", 2, 0, -1},
-    .{"_ZnamRKSt9nothrow_t", 2, 0, -1}, .{"_ZnamRKSt9nothrow_t12__hot_cold_t", 3, 0, -1},
-    .{"_ZnamSt11align_val_t", 2, 0, -1}, .{"_ZnamSt11align_val_t12__hot_cold_t", 3, 0, -1},
-    .{"_ZnamSt11align_val_tRKSt9nothrow_t", 3, 0, -1}, .{"_ZnamSt11align_val_tRKSt9nothrow_t12__hot_cold_t", 4, 0, -1},
-    .{"strdup", 1, -1, -1}, .{"__strdup", 1, -1, -1}, .{"strndup", 2, 1, -1}, .{"__strndup", 2, 1, -1},
-];
-// MemoryBuiltins.cpp FreeFnData (Itanium names) with their parameter counts
-FREE_FNS :: struct { name: string; nparams: s32; }.[
-    .{"_ZdlPv", 1}, .{"_ZdaPv", 1}, .{"_ZdlPvj", 2}, .{"_ZdlPvm", 2}, .{"_ZdlPvRKSt9nothrow_t", 2},
-    .{"_ZdlPvSt11align_val_t", 2}, .{"_ZdaPvj", 2}, .{"_ZdaPvm", 2}, .{"_ZdaPvRKSt9nothrow_t", 2},
-    .{"_ZdaPvSt11align_val_t", 2}, .{"_ZdlPvSt11align_val_tRKSt9nothrow_t", 3},
-    .{"_ZdaPvSt11align_val_tRKSt9nothrow_t", 3}, .{"_ZdlPvjSt11align_val_t", 3}, .{"_ZdlPvmSt11align_val_t", 3},
-    .{"_ZdaPvjSt11align_val_t", 3}, .{"_ZdaPvmSt11align_val_t", 3},
-];
+// The AllocationFnData / FreeFnData tables are in memory_builtins.jai.
 
 AFK_ALLOC :: 1; AFK_REALLOC :: 2; AFK_FREE :: 4;
 call_alloc_kind :: (i: Value_Id) -> u64 {
@@ -297,47 +275,31 @@ is_int32_or_64 :: (t: Type_Id) -> bool { return type_kind(t) == .INT && (type_in
 
 // isAllocLikeFn(CB, TLI)
 is_alloc_like_fn :: (i: Value_Id, use_tli := true) -> bool {
-    callee := mb_called_function(i);
-    if callee != NONE && use_tli {
-        ft := glob(callee).value_type;
-        if is_ptr_type(func_ret(ft)) && !glob(callee).intrinsic && tli_available(value_function(i), vname(callee)) {
-            for ALLOC_FNS {
-                if it.name != vname(callee) continue;
-                if func_nparams(ft) != cast(u32) it.nparams break;
-                if it.fst >= 0 && !is_int32_or_64(func_param(ft, cast(u32) it.fst)) break;
-                if it.snd >= 0 && !is_int32_or_64(func_param(ft, cast(u32) it.snd)) break;
-                return true;
-            }
-        }
-    }
-    return (call_alloc_kind(i) & AFK_ALLOC) != 0;
+    if use_tli { ok := mb_alloc_data(i, AT_ALLOC_LIKE); if ok return true; }
+    return is_inst(i) && is_call_base(i) && (call_alloc_kind(i) & AFK_ALLOC) != 0;
 }
 is_removable_alloc :: (i: Value_Id, use_tli := true) -> bool { return is_alloc_like_fn(i, use_tli); }
 
 // getFreedOperand(CB, TLI)
 get_freed_operand :: (i: Value_Id, use_tli := true) -> Value_Id {
     callee := mb_called_function(i);
-    if use_tli && callee != NONE && !glob(callee).intrinsic && tli_available(value_function(i), vname(callee)) {
+    if use_tli && callee != NONE && mb_tli_knows(callee, value_function(i)) {
         ft := glob(callee).value_type;
+        name := vname(callee);
+        is_free_fn := false;   // isLibFreeFunction
+        in_table := false;
         for FREE_FNS {
-            if it.name != vname(callee) continue;
-            // isLibFreeFunction prototype check
-            if func_ret(ft) == ir.t_void && func_nparams(ft) == cast(u32) it.nparams && is_ptr_type(func_param(ft, 0))
-                return call_arg(i, 0);
+            if it.name != name continue;
+            in_table = true;
+            is_free_fn = func_ret(ft) == ir.t_void && func_nparams(ft) == cast(u32) it.nparams && is_ptr_type(func_param(ft, 0));
             break;
         }
-        // not in the table: isLibFreeFunction falls back to the function's allockind(free) (only reached for
-        // functions TLI knows, i.e. the table above), so nothing here.
+        // not in FreeFnData: a TLI-known function (here: `free` with its prototype) with allockind("free")
+        if !in_table && name == "free" && func_ret(ft) == ir.t_void && func_nparams(ft) == 1 && is_ptr_type(func_param(ft, 0))
+            is_free_fn = (fn_alloc_kind(callee) & AFK_FREE) != 0;
+        if is_free_fn return call_arg(i, 0);
     }
-    if call_alloc_kind(i) & AFK_FREE {
-        n := call_num_args(i);
-        l := inst(i).attrs;
-        f := call_called_operand_fn(i);
-        if n > 0 for k: 0..n-1 {
-            if attr_set_has(attr_list_param(l, k), .AllocatedPointer) return call_arg(i, k);
-            if f != NONE && attr_set_has(attr_list_param(glob(f).attrs, k), .AllocatedPointer) return call_arg(i, k);
-        }
-    }
+    if call_alloc_kind(i) & AFK_FREE return call_arg_with_attribute(i, .AllocatedPointer);
     return NONE;
 }
 

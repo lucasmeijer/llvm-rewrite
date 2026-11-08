@@ -15,49 +15,7 @@ basic_aa_opts: struct {
 // ---------------------------------------------------------------- object sizes
 
 // getAllocSize(CB, TLI) without a Mapper: (known, size in the index width)
-get_alloc_size :: (cb: Value_Id) -> (bool, APInt) {
-    bits := dl_index_type_size_bits(vtype(cb));
-    fst: s32 = -1; snd: s32 = -1; strdup_like := false;
-    callee := mb_called_function(cb);
-    found := false;
-    if callee != NONE {
-        ft := glob(callee).value_type;
-        if is_ptr_type(func_ret(ft)) && !glob(callee).intrinsic && tli_available(value_function(cb), vname(callee)) {
-            for ALLOC_FNS {
-                if it.name != vname(callee) continue;
-                if func_nparams(ft) != cast(u32) it.nparams break;
-                if it.fst >= 0 && !is_int32_or_64(func_param(ft, cast(u32) it.fst)) break;
-                if it.snd >= 0 && !is_int32_or_64(func_param(ft, cast(u32) it.snd)) break;
-                fst = it.fst; snd = it.snd; found = true;
-                strdup_like = contains(it.name, "strdup") || contains(it.name, "strndup");
-                break;
-            }
-        }
-    }
-    if !found {
-        a := call_get_fn_attr(cb, .AllocSize);
-        if !a return false, .{};
-        // allocsize(ElemSizeArg[, NumElemsArg]): packed as (first << 32) | (second or 0xFFFFFFFF)
-        fst = cast(s32)(a.ival >> 32);
-        s := a.ival & 0xFFFF_FFFF;
-        snd = ifx s == 0xFFFF_FFFF then -1 else cast(s32) s;
-    }
-    if strdup_like fatal("BasicAA: object size of strdup-like calls (GetStringLength) is not supported yet");
-    arg := call_arg(cb, cast(u32) fst);
-    if !is_scalar_const_int(arg) return false, .{};
-    size := const_ap(arg);
-    if size.bits > bits { if ap_active_bits(size) > bits return false, .{}; size = ap_trunc(size, bits); }
-    else size = ap_zext(size, bits);
-    if snd < 0 return true, size;
-    arg2 := call_arg(cb, cast(u32) snd);
-    if !is_scalar_const_int(arg2) return false, .{};
-    ne := const_ap(arg2);
-    if ne.bits > bits { if ap_active_bits(ne) > bits return false, .{}; ne = ap_trunc(ne, bits); }
-    else ne = ap_zext(ne, bits);
-    r, ov := ap_umul_ov(size, ne);
-    if ov return false, .{};
-    return true, r;
-}
+get_alloc_size :: (cb: Value_Id) -> (bool, APInt) { ok, r := mb_get_alloc_size(cb); return ok, r; }
 
 // getBaseObjectSize(Ptr, DL, TLI, Opts{RoundToAlign, NullIsUnknownSize}) (fixed sizes only: BasicAA's getObjectSize
 // drops scalable ones)

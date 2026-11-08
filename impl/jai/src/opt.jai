@@ -49,6 +49,8 @@
 #load "capture_tracking.jai";
 #load "aa.jai";
 #load "basic_aa.jai";
+#load "memory_builtins.jai";
+#load "loads.jai";
 #load "tbaa.jai";
 #load "scoped_noalias_aa.jai";
 #load "memoryssa.jai";

@@ -321,21 +321,7 @@ tli_proto_matches :: (ft: Type_Id, proto: string) -> bool {
 TLI_INT_SIZE :: 32;   // TLI.getIntSize() on x86_64
 
 // MemoryBuiltins: isMallocOrCallocLikeFn (AllocationFnData entries other than strdup-like)
-is_malloc_or_calloc_like_fn :: (v: Value_Id) -> bool {
-    if !is_inst(v) || !is_call_base(v) return false;
-    callee := mb_called_function(v);
-    if callee == NONE return false;
-    ft := glob(callee).value_type;
-    if !is_ptr_type(func_ret(ft)) || glob(callee).intrinsic || !tli_available(value_function(v), vname(callee)) return false;
-    for ALLOC_FNS {
-        if it.name != vname(callee) continue;
-        if begins_with(it.name, "strdup") || begins_with(it.name, "__strdup") || begins_with(it.name, "strndup") || begins_with(it.name, "__strndup") return false;
-        if func_nparams(ft) != cast(u32) it.nparams return false;
-        if it.fst >= 0 && !is_int32_or_64(func_param(ft, cast(u32) it.fst)) return false;
-        return true;
-    }
-    return false;
-}
+is_malloc_or_calloc_like_fn :: (v: Value_Id) -> bool { ok := mb_alloc_data(v, AT_MALLOC_OR_OPNEW); return ok; }
 
 // ---------------------------------------------------------------- object classification (AliasAnalysis.cpp)
 
