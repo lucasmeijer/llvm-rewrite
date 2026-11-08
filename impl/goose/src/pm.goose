@@ -318,6 +318,18 @@ fn m_cfp_pred(v: i32, kind: i64) -> bool {
 }
 fn m_pos_zero_fp(v: i32) -> bool { m_cfp_pred(v, FPP_POSZERO) }
 fn m_neg_zero_fp(v: i32) -> bool { m_cfp_pred(v, FPP_NEGZERO) }
+// m_FNeg(m_Value(X)): fneg X, or fsub -0.0, X (fsub nsz with any zero); X or -1
+fn m_fneg(v: i32) -> i32 {
+    if v < 0 || !is_inst(v) { return -1; }
+    if iop(v) == OP_FNEG { return op(v, 0); }
+    if iop(v) == OP_FSUB {
+        let z = op(v, 0);
+        if (inst_fmf(v) & FMF_NSZ) != 0 { if !m_any_zero_fp(z) { return -1; } }
+        else if !m_neg_zero_fp(z) { return -1; }
+        return op(v, 1);
+    }
+    return -1;
+}
 fn m_any_zero_fp(v: i32) -> bool { m_cfp_pred(v, FPP_ANYZERO) }
 fn m_nan(v: i32) -> bool { m_cfp_pred(v, FPP_NAN) }
 fn m_inf(v: i32) -> bool { m_cfp_pred(v, FPP_INF) }

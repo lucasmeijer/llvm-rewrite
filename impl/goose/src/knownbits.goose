@@ -1171,7 +1171,39 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
             return known;
         }
         if ty_kind(st) != TK_FVEC || !ty_is_int(types[st].a) || !is_int_or_int_vec(vals[iv].ty) || ty_kind(vals[iv].ty) == TK_SVEC { return known; }
-        not_ported("known bits of a bitcast between integer vector shapes");
+        let nelts = if ty_kind(vals[iv].ty) == TK_FVEC { ty_count(vals[iv].ty) } else { 1 };
+        let subw = ty_bits(types[st].a);
+        if ty_count(st) > 64 { not_ported("a vector of more than 64 elements"); }
+        // Look through a cast from narrow vector elements to wider type (v4i32 -> v2i64, v3i8 -> i24)
+        if w % subw == 0 {
+            let scale = w / subw;
+            var sub_de: u64 = 0;
+            for i in nelts { if ((de >> i) & 1) != 0 { sub_de |= (1 as u64) << (i * scale); } }
+            for i in scale {
+                let ks = kb_compute(src, sub_de << i, depth + 1);
+                let se = if dl_big_endian { scale - 1 - i } else { i };
+                known = kb_insert_bits(known, ks, se * subw);
+            }
+        }
+        // Look through a cast from wider vector elements to narrow type (v2i64 -> v4i32)
+        if subw % w == 0 {
+            let scale = subw / w;
+            // APIntOps::ScaleBitMask(DemandedElts, NumElts / SubScale)
+            var sub_de: u64 = 0;
+            for j in nelts / scale {
+                if ((de >> (j * scale)) & low_bits(scale)) != 0 { sub_de |= (1 as u64) << j; }
+            }
+            let ks = kb_compute(src, sub_de, depth + 1);
+            known = kb_all_conflict(w);
+            for i in nelts {
+                if ((de >> i) & 1) != 0 {
+                    let sh = if dl_big_endian { nelts - 1 - i } else { i };
+                    let off = (sh % scale) * w;
+                    known = kb_intersect(known, kb_extract_bits(ks, w, off));
+                    if kb_is_unknown(known) { break; }
+                }
+            }
+        }
         return known;
     }
     if o == OP_SEXT {

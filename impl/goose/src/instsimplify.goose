@@ -3073,7 +3073,7 @@ recursive fn simplify_insertvalue(iv: i32, agg: i32, val: i32, q: SQ) -> i32 {
 recursive fn simplify_insertelement(vec: i32, val: i32, idx: i32, q: SQ) -> i32 {
     if is_constant(vec) && is_constant(val) && is_constant(idx) { return ce_insertelement(vec, val, idx); }
     let ci = m_constant_int(idx);
-    if ci >= 0 && is_fixed_vec(vals[vec].ty) && ci_val(ci) >= ty_count(vals[vec].ty) as u64 { return c_poison(vals[vec].ty); }
+    if ci >= 0 && is_fixed_vec(vals[vec].ty) && ap_uge_u64(ci_ap(ci), ty_count(vals[vec].ty) as u64) { return c_poison(vals[vec].ty); }
     if q_undef(q, idx) { return c_poison(vals[vec].ty); }
     if is_poison(val) || (q_undef(q, val) && is_guaranteed_not_to_be_poison(vec, -1, 0)) { return vec; }
     if is_constant(vec) && is_constant(val) && splat_value(vec, false) == val { return vec; }
@@ -3122,7 +3122,7 @@ recursive fn find_scalar_element(v: i32, en: i64) -> i32 {
     if is_inst_op(v, OP_INSERTELEMENT) {
         let ci = m_constant_int(op(v, 2));
         if ci < 0 { return -1; }
-        let ie = ci_val(ci) as i64;
+        let ie = ap_zext64(ci_ap(ci)) as i64;
         if ie == en { return op(v, 1); }
         if en < ty_count(vt) && ie < ty_count(vt) { return find_scalar_element(op(v, 0), en); }
         return -1;
@@ -3160,13 +3160,13 @@ recursive fn simplify_extractelement(vec: i32, idx: i32, q: SQ) -> i32 {
     let ci = m_constant_int(idx);
     if ci >= 0 {
         let mn = ty_count(vt);
-        let iv = ci_val(ci);
-        if ty_kind(vt) == TK_FVEC && iv >= mn as u64 { return c_poison(et); }
-        if iv < mn as u64 {
+        let iv = ci_ap(ci);
+        if ty_kind(vt) == TK_FVEC && ap_uge_u64(iv, mn as u64) { return c_poison(et); }
+        if ap_ult_u64(iv, mn as u64) {
             let s = get_splat_value_v(vec);
             if s >= 0 { return s; }
         }
-        let e = find_scalar_element(vec, iv as i64);
+        let e = find_scalar_element(vec, ap_zext64(iv) as i64);
         if e >= 0 { return e; }
     } else {
         if is_inst_op(vec, OP_INSERTELEMENT) && op(vec, 2) == idx { return op(vec, 1); }
@@ -3300,7 +3300,7 @@ recursive fn simplify_shufflevector(iv: i32, op00: i32, op10: i32, q: SQ, mr: i6
     }
     if !scalable && is_op(op0, OP_INSERTELEMENT) && is_constant(op(op0, 1)) && m_constant_int(op(op0, 2)) >= 0 {
         let c = op(op0, 1);
-        let ii = ci_val(op(op0, 2)) as i64;
+        let ii = ap_zext64(ci_ap(op(op0, 2))) as i64;
         var all = true;
         for k in nm { let m = is_ops[mark + k] as i64; if m != ii && m != -1 { all = false; } }
         if all {
@@ -3333,7 +3333,8 @@ recursive fn simplify_shufflevector(iv: i32, op00: i32, op10: i32, q: SQ, mr: i6
 
 recursive fn simplify_fneg(v: i32, fmf: u8, q: SQ) -> i32 {
     if is_constant(v) { return cf_fold_unary(OP_FNEG, v); }
-    if is_op(v, OP_FNEG) { return op(v, 0); }
+    let x = m_fneg(v);
+    if x >= 0 { return x; }
     return -1;
 }
 
@@ -3445,7 +3446,7 @@ recursive fn simplify_fadd(a0: i32, b0: i32, fmf: u8, q: SQ, mr: i64, eb: i64, r
         if (is_op(a, OP_FSUB) && m_any_zero_fp(op(a, 0)) && op(a, 1) == b) || (is_op(b, OP_FSUB) && m_any_zero_fp(op(b, 0)) && op(b, 1) == a) {
             return c_null(vals[a].ty);
         }
-        if (is_op(a, OP_FNEG) && op(a, 0) == b) || (is_op(b, OP_FNEG) && op(b, 0) == a) { return c_null(vals[a].ty); }
+        if (m_fneg(a) == b && b >= 0) || (m_fneg(b) == a && a >= 0) { return c_null(vals[a].ty); }
     }
     if nsz && (fmf & FMF_REASSOC) != 0 {
         if is_op(a, OP_FSUB) && op(a, 1) == b { return op(a, 0); }
@@ -3473,12 +3474,12 @@ recursive fn simplify_fsub(a0: i32, b0: i32, fmf: u8, q: SQ, mr: i64, eb: i64, r
         if m_neg_zero_fp(b) && (nsz || q_cannot_be_neg_zero(a, q)) { return a; }
     }
     if can_ignore_snan(eb, fmf) {
-        if m_neg_zero_fp(a) && is_op(b, OP_FNEG) { return op(b, 0); }
+        if m_neg_zero_fp(a) && m_fneg(b) >= 0 { return m_fneg(b); }
     }
     if can_ignore_snan(eb, fmf) {
         if nsz && m_any_zero_fp(a) {
             if is_op(b, OP_FSUB) && m_any_zero_fp(op(b, 0)) { return op(b, 1); }
-            if is_op(b, OP_FNEG) { return op(b, 0); }
+            if m_fneg(b) >= 0 { return m_fneg(b); }
         }
     }
     if !is_default_fp_env(eb, rm) { return -1; }
@@ -3872,7 +3873,7 @@ recursive fn simplify_binary_intrinsic(id: i32, rty: i32, a0: i32, b0: i32, fmf:
     if id == IID_ldexp { return simplify_ldexp(a, b, q, false); }
     if id == IID_copysign {
         if a == b { return a; }
-        if (is_op(a, OP_FNEG) && op(a, 0) == b) || (is_op(b, OP_FNEG) && op(b, 0) == a) { return b; }
+        if (m_fneg(a) == b && b >= 0) || (m_fneg(b) == a && a >= 0) { return b; }
         return -1;
     }
     if id == IID_is_fpclass {
@@ -3924,7 +3925,7 @@ recursive fn simplify_binary_intrinsic(id: i32, rty: i32, a0: i32, b0: i32, fmf:
         return -1;
     }
     if id == IID_vector_extract {
-        let idxn = ci_val(b);
+        let idxn = ap_zext64(ci_ap(b));
         if m_intrinsic(a, IID_vector_insert) && m_zero(op(a, 2)) && idxn == 0 && vals[op(a, 1)].ty == rty { return op(a, 1); }
         return -1;
     }
@@ -3998,7 +3999,7 @@ recursive fn simplify_intrinsic_args(id: i32, rty: i32, mark: i64, n: i64, fmf: 
     if id == IID_vector_insert {
         let vec = is_ops[mark];
         let sub = is_ops[mark + 1];
-        let ix = ci_val(is_ops[mark + 2]);
+        let ix = ap_zext64(ci_ap(is_ops[mark + 2]));
         if m_intrinsic(sub, IID_vector_extract) && m_zero(op(sub, 1)) {
             let x = op(sub, 0);
             if (q_undef(q, vec) || vec == x) && ix == 0 && vals[x].ty == rty { return x; }

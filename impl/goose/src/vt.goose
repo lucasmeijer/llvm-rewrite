@@ -137,10 +137,15 @@ fn range_attr_cr(s: i32) -> bool {
 fn arg_range(a: i32) -> bool { range_attr_cr(arg_attrs(a)) }
 // CallBase::getRange: call-site return attribute, then the callee's
 fn call_range(c: i32) -> bool {
-    if range_attr_cr(alist_ret(insts[inst_of(c)].attrs)) { return true; }
-    let f = cb_callee(c);
-    if is_func(f) && range_attr_cr(alist_ret(globs[glob_of(f)].attrs)) { return true; }
-    return false;
+    let has_call = range_attr_cr(alist_ret(insts[inst_of(c)].attrs));
+    let call_cr = vt_cr;
+    let f = called_function(c);
+    if f >= 0 && range_attr_cr(alist_ret(globs[glob_of(f)].attrs)) {
+        if has_call { vt_cr = rg_intersect(call_cr, vt_cr); }
+        return true;
+    }
+    if has_call { vt_cr = call_cr; }
+    return has_call;
 }
 // CallBase::paramHasAttr
 fn call_param_has_attr(c: i32, k: i64, kind: i64) -> bool {

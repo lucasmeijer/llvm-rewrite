@@ -73,12 +73,12 @@ fn shift_amount_known_in_range(a: i32) -> bool {
         for i in ty_count(t) {
             let e = agg_elem(a, i);
             if e < 0 || vals[e].kind != VK_CINT { return false; }
-            if ci_val(e) >= ty_bits(vals[e].ty) as u64 { return false; }
+            if ap_uge_u64(ci_ap(e), ty_bits(vals[e].ty) as u64) { return false; }
         }
         return true;
     }
     if vals[a].kind != VK_CINT { return false; }
-    return ci_val(a) < ty_bits(t) as u64;
+    return ap_ult_u64(ci_ap(a), ty_bits(t) as u64);
 }
 
 fn call_has_ret_attr(c: i32, k: i64) -> bool { call_ret_has_attr(c, k) }
@@ -104,7 +104,7 @@ fn can_create_undef_or_poison_k(v: i32, kind: i64, consider_flags: bool) -> bool
         let vt0 = vals[op(v, 0)].ty;
         let ix = op(v, if o == OP_INSERTELEMENT { 2 } else { 1 });
         let ci = m_constant_int(ix);
-        if inc_poison { return ci < 0 || ci_val(ci) >= ty_count(vt0) as u64; }
+        if inc_poison { return ci < 0 || ap_uge_u64(ci_ap(ci), ty_count(vt0) as u64); }
         return false;
     }
     if o == OP_SHUFFLEVECTOR {

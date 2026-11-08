@@ -187,8 +187,9 @@ recursive fn cf_fold_cast_operand(o: i64, c: i32, ty: i32) -> i32 {
     return cf_cast(o, c, ty);
 }
 
-// FoldBitCast(C, DestTy, DL)
-recursive fn cf_fold_bitcast_dl(c: i32, ty: i32) -> i32 {
+// FoldBitCast(C, DestTy, DL) (Analysis/ConstantFolding.cpp). Byte-typed vectors fail loudly.
+recursive fn cf_fold_bitcast_dl(c0: i32, ty: i32) -> i32 {
+    var c = c0;
     let u = cf_fold_load_from_uniform(c, ty);
     if u >= 0 { return u; }
     let st = vals[c].ty;
@@ -678,7 +679,7 @@ recursive fn symbolic_gep(srcty: i32, rty: i32, flags0: u8, inr: i32, mark: i64,
     var base_int: u64 = 0;
     if is_cexpr(ptr) && cexpr_op(ptr) == OP_INTTOPTR {
         let b = op(ptr, 0);
-        if vals[b].kind == VK_CINT && !ty_is_vector(vals[b].ty) { base_int = ci_val(b) & wmask64(pbits); }
+        if vals[b].kind == VK_CINT && !ty_is_vector(vals[b].ty) { base_int = ap_lo64(ap_zext_or_trunc(ci_ap(b), pbits)); }
     }
     if (is_null_value(ptr) || base_int != 0) && !must_not_introduce_inttoptr(vals[ptr].ty) {
         let low = ((base_int & wmask64(bw)) + (offset as! u64)) & wmask64(bw);

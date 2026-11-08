@@ -226,8 +226,10 @@ fn valid_assume_for_context(inv: i32, cx: i32) -> bool {
 // computeKnownBitsFromContext: the assumption loop
 recursive fn kb_from_assumptions(v: i32, known0: KB, depth: i64) -> KB {
     var known = known0;
-    if !ac_ready() { return known; }
     let w = kb_bw(known);
+    if kb_cxt < 0 || sq_no_ac { return known; }
+    // with an AssumptionCache, conflicting known bits are reset even when there are no assumptions
+    if !ac_ready() { if kb_has_conflict(known) { return kb_unknown(w); } return known; }
     let cx = kb_cxt;
     for k in ac_val.len {
         if ac_val[k] != v { continue; }

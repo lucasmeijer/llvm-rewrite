@@ -316,29 +316,26 @@ fn kfc_canonicalize(src: KFC, mode: i64) -> KFC {
 }
 
 // KnownFPClass::bitcast(FltSemantics, Bits): kind is the FP type kind
-fn kfc_bitcast(kind: i64, b0: KB) -> KFC {
+fn kfc_bitcast(kind: i64, b: KB) -> KFC {
     var k = kfc_unknown();
-    let b = kb64(b0);
-    if kb_is_nonneg(b0) { k = kfc_sign_bit_must_be_zero(k); }
-    else if kb_is_neg(b0) { k = kfc_sign_bit_must_be_one(k); }
-    if kind == TK_HALF || kind == TK_BFLOAT || kind == TK_FLOAT || kind == TK_DOUBLE {
-        let w = b.w as i64;
-        let m = wmask(w);
-        if fp_decompose(kind, b.o, 0).cat == FC_NAN { k.known = FCL_NAN; }
-        else if fp_decompose(kind, ~b.z & m, 0).cat != FC_NAN { k = kfc_known_not(k, FCL_NAN); }
-        let sb = sbit(w);
+    if kb_is_nonneg(b) { k = kfc_sign_bit_must_be_zero(k); }
+    else if kb_is_neg(b) { k = kfc_sign_bit_must_be_one(k); }
+    // APFloat::isIEEELikeFP: half, bfloat, float, double, fp128 (not x86_fp80 / ppc_fp128)
+    if kind == TK_HALF || kind == TK_BFLOAT || kind == TK_FLOAT || kind == TK_DOUBLE || kind == TK_FP128 {
+        let w = kb_bw(b);
+        let nz = ap_not(b.z);
+        if fp_decompose(kind, ap_word(b.o, 0), ap_word(b.o, 1)).cat == FC_NAN { k.known = FCL_NAN; }
+        else if fp_decompose(kind, ap_word(nz, 0), ap_word(nz, 1)).cat != FC_NAN { k = kfc_known_not(k, FCL_NAN); }
         let f = fp_fmt(kind);
-        let infb: u64 = (((1 as u64) << f.ebits) - 1) << (f.p - 1);
+        let infb = ap_shl(ap_low_bits(w, f.ebits), f.p - 1);
         // InfKB: the constant inf with the sign bit unknown
-        let iz = ~infb & m & ~sb;
+        let iz = ap_clear_bit(ap_not(infb), w - 1);
         let io = infb;
-        if ((b.z & io) | (b.o & iz)) != 0 { k = kfc_known_not(k, FCL_INF); }
-        else if b.z == iz && b.o == io { k.known = FCL_INF; }
-        let zz = m & ~sb;
-        if (b.o & zz) != 0 { k = kfc_known_not(k, FCL_ZERO); }
-        else if b.z == zz && b.o == 0 { k.known = FCL_ZERO; }
-    } else {
-        fp_not_ported("KnownFPClass::bitcast for this floating-point type");
+        if ap_intersects(b.z, io) || ap_intersects(b.o, iz) { k = kfc_known_not(k, FCL_INF); }
+        else if ap_eq(b.z, iz) && ap_eq(b.o, io) { k.known = FCL_INF; }
+        let zz = ap_smax_val(w);
+        if ap_intersects(b.o, zz) { k = kfc_known_not(k, FCL_ZERO); }
+        else if ap_eq(b.z, zz) && ap_is_zero(b.o) { k.known = FCL_ZERO; }
     }
     return k;
 }
@@ -932,7 +929,7 @@ recursive fn kfc_compute(v: i32, de: u64, interested0: u64, depth: i64) -> KFC {
         fp_not_ported("known FP class of a constant aggregate");
     }
     var knot: u64 = 0;
-    if k == VK_INST && iop(v) == OP_CALL {
+    if k == VK_INST && is_callbase(v) {
         knot |= nofpclass_of(alist_ret(insts[inst_of(v)].attrs));
         let f = cb_callee(v);
         if is_func(f) { knot |= nofpclass_of(alist_ret(globs[glob_of(f)].attrs)); }
