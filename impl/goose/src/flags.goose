@@ -44,6 +44,7 @@ let KNOWN_FLAGS: const u8[:][] = [
     "disable-licm-promotion", "licm-control-flow-hoisting", "licm-force-thread-model-single",   // read by licm
     "licm-max-num-uses-traversed", "licm-max-num-fp-reassociations", "licm-max-num-int-reassociations",
     "licm-mssa-optimization-cap", "licm-mssa-max-acc-promotion", "alias-set-saturation-threshold",
+    "rotation-max-header-size", "rotation-prepare-for-lto", "enable-loop-header-duplication-at-minsize",   // loop-rotate
     "use-constant-int-for-fixed-length-splat", "use-constant-fp-for-fixed-length-splat",   // only =false (the default)
     "use-constant-int-for-scalable-splat", "use-constant-fp-for-scalable-splat",           // is supported
     "scalar-evolution-max-iterations", "scalar-evolution-classify-expressions",      // read by ScalarEvolution

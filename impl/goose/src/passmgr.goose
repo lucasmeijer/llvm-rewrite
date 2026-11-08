@@ -31,6 +31,7 @@ import memoryssa;
 import aa;
 import mssaupdater;
 import licm;
+import looprotate;
 import apint;
 import sccp;
 import build_libcalls;
@@ -97,6 +98,7 @@ let P_NOOP_LOOP = 201;
 let P_PRINT_LOOP = 202;
 let P_LREQUIRE = 203;      // require<analysis> in a loop pipeline (arg = analysis id; none are cached)
 let P_LINVALIDATE = 204;
+let P_LOOP_ROTATE = 206;   // arg: bit 0 = header-duplication, 1 = prepare-for-lto, 2 = check-exit-count
 let P_LICM = 205;          // arg: bit 0 = AllowSpeculation, bit 1 = lnicm (a loop-nest pass)
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
@@ -546,6 +548,30 @@ recursive fn parse_loop_elem(e: i32) -> i32 {
         if llvm_knows(name, 'l') { not_implemented(name); }
         perr_pipeline(str("unknown loop pass '", name, "'"));
     }
+    if is_param_name(name, "loop-rotate") {
+        // parseLoopRotateOptions
+        var arg: i32 = 1;
+        let lt = find(name, "<");
+        if lt >= 0 {
+            let params = name[(lt as i64) + 1..name.len - 1];
+            var start: i64 = 0;
+            while start <= params.len {
+                var end = start;
+                while end < params.len && params[end] != ';' { end++; }
+                var pn = params[start..end];
+                var en = true;
+                if starts_with(pn, "no-") { en = false; pn = pn[3..]; }
+                var bit: i32 = -1;
+                if pn == "header-duplication" { bit = 1; }
+                else if pn == "prepare-for-lto" { bit = 2; }
+                else if pn == "check-exit-count" { bit = 4; }
+                else { perr_pipeline(str("invalid LoopRotate pass parameter '", pn, "'")); }
+                if en { arg |= bit; } else { arg &= ~bit; }
+                start = end + 1;
+            }
+        }
+        return new_pnode(PK_PASS, P_LOOP_ROTATE as i32, arg, false, pelems[e].name);
+    }
     if is_param_name(name, "licm") || is_param_name(name, "lnicm") {
         // parseLICMOptions
         let nest = is_param_name(name, "lnicm");
@@ -785,6 +811,12 @@ fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
     match p {
         P_PRINT_LOOPNEST => { print_loopnest(l); return PA_ALL; },
         P_NOOP_LOOP => { return PA_ALL; },
+        P_LOOP_ROTATE => {
+            let a = pnodes[n].arg;
+            let pa = loop_rotate_pass_run(l, (a & 1) != 0, (a & 2) != 0, (a & 4) != 0, lpm_use_mssa);
+            ap_pool_reset();
+            return pa;
+        },
         P_LICM => {
             let a = pnodes[n].arg;
             let nest = (a & 2) != 0;

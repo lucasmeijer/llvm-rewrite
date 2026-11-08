@@ -348,7 +348,12 @@ recursive fn sc_get_range_ref(s: i32, hint: i64, depth: i64) -> CRange {
             let rem = ap_urem(maxv, ap_u64(al as u64, bw));
             maxv = ap_sub(maxv, rem);
             var minv = ap_zero(bw);
-            if is_known_non_zero(v, 0) { minv = ap_u64(al as u64, bw); }
+            // isKnownNonZero(V, DL): a SimplifyQuery with only the DataLayout (no context, DT, AC, TLI)
+            let scx = kb_cxt; let sdt = sq_no_dt; let sac = sq_no_ac; let stli = sq_no_tli;
+            kb_cxt = -1; sq_no_dt = true; sq_no_ac = true; sq_no_tli = true;
+            let nz = is_known_non_zero(v, 0);
+            kb_cxt = scx; sq_no_dt = sdt; sq_no_ac = sac; sq_no_tli = stli;
+            if nz { minv = ap_u64(al as u64, bw); }
             cons = rg_intersect_t(cons, rg_nonempty(minv, ap_inc(maxv)), rt);
         }
     }

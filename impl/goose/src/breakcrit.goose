@@ -11,13 +11,15 @@ import analyses;
 import domtree;
 import loopinfo;
 import loopsimplify;
+import memoryssa;
+import mssaupdater;
 
 // CriticalEdgeSplittingOptions
 struct CESOpts { dt: bool, pdt: bool, li: bool, merge_identical: bool, keep_one_input_phis: bool, preserve_lcssa: bool,
-                 ignore_unreachable_dests: bool, preserve_loop_simplify: bool }
+                 ignore_unreachable_dests: bool, preserve_loop_simplify: bool, mssau: bool }
 fn ces_opts(dt: bool, li: bool, pdt: bool) -> CESOpts {
     CESOpts { dt: dt, pdt: pdt, li: li, merge_identical: false, keep_one_input_phis: false, preserve_lcssa: false,
-              ignore_unreachable_dests: false, preserve_loop_simplify: true }
+              ignore_unreachable_dests: false, preserve_loop_simplify: true, mssau: false }
 }
 
 // isCriticalEdge(TI, SuccNum, AllowIdenticalEdges)
@@ -112,6 +114,7 @@ fn split_known_critical_edge(ti: i32, k: i64, o: CESOpts, name: const u8[:]) -> 
             nsplit++;
         }
     }
+    if o.mssau { msu_wire_old_preds_to_new_pred(dest, nb, [tibb], o.merge_identical); }
     if !o.dt && !o.pdt && !o.li { return nb; }
     if o.dt || o.pdt {
         var ups: DTUpdate[>..<] = [];
@@ -137,9 +140,17 @@ fn split_known_critical_edge(ti: i32, k: i64, o: CESOpts, name: const u8[:]) -> 
                 }
             }
             if !loop_contains(til, dest) {
-                if o.preserve_lcssa { fatal("SplitCriticalEdge with PreserveLCSSA (createPHIsForSplitLoopExit) is not ported yet"); }
+                if o.preserve_lcssa {
+                    var reps: i32[>..<] = [];
+                    for r in nsplit { reps.push(tibb); }
+                    create_phis_for_split_loop_exit(reps, nb, dest);
+                }
                 if loop_preds.len > 0 {
-                    split_block_predecessors(dest, loop_preds, "split", o.dt, o.li, o.preserve_lcssa);
+                    let save = ls_mssau;
+                    ls_mssau = o.mssau;
+                    let neb = split_block_predecessors(dest, loop_preds, "split", o.dt, o.li, o.preserve_lcssa);
+                    ls_mssau = save;
+                    if o.preserve_lcssa { create_phis_for_split_loop_exit(loop_preds, neb, dest); }
                 }
             }
         }
@@ -168,4 +179,24 @@ fn break_crit_edges_run(fv: i32) -> u32 {
     let n = split_all_critical_edges(fv, ces_opts(dt_valid(fv, DT_DOM), li_valid(fv), false));
     if n == 0 { return PA_ALL; }
     return ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_LOOPS);
+}
+
+// createPHIsForSplitLoopExit(Preds, SplitBB, DestBB) (BasicBlockUtils.cpp)
+fn create_phis_for_split_loop_exit(preds: const i32[:], split_bb: i32, dest: i32) {
+    var i = block_first(dest);
+    while i >= 0 && iop(i) == OP_PHI {
+        let pn = i;
+        i = inst_next(i);
+        let idx = phi_block_index(pn, split_bb);
+        if idx < 0 { fatal("internal: createPHIsForSplitLoopExit: invalid block index"); }
+        let v = phi_value(pn, idx);
+        if is_inst_op(v, OP_PHI) && inst_parent(v) == split_bb { continue; }
+        let np = new_phi(vals[pn].ty, preds.len);
+        let fnp = first_non_phi(split_bb);
+        let is_lp = fnp >= 0 && iop(fnp) == OP_LANDINGPAD;
+        if is_lp { inst_insert_before(np, block_first(split_bb)); } else { inst_insert_before(np, block_terminator(split_bb)); }
+        set_name(np, "split");
+        for b in preds { phi_add_incoming(np, v, b); }
+        set_op(pn, idx, np);
+    }
 }
