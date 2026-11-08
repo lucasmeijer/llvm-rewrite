@@ -842,6 +842,7 @@ recursive fn kfc_from_cond(v: i32, cond: i32, cond_true: bool, known0: KFC, dept
 // computeKnownFPClassFromContext(V, Q): no CondContext / DomConditionCache in this pipeline; assumptions only
 recursive fn kfc_from_context(v: i32) -> KFC {
     var known = kfc_unknown();
+    if kb_cc_cond >= 0 && kb_cc_has(v) { known = kfc_from_cond(v, kb_cc_cond, !kb_cc_invert, known, 0); }
     if kb_cxt < 0 { return known; }
     known = kfc_from_dom_conditions(v, known);
     if !ac_ready() { return known; }
@@ -1192,7 +1193,11 @@ recursive fn kfc_from_operator(v: i32, de: u64, interested: u64, knot: u64, dept
         return kfc_compute(src, de, interested, depth + 1);
     }
     if o == OP_PHI {
-        return kfc_phi(v, de, interested, depth);
+        let scc = kb_cc_cond;
+        kb_cc_cond = -1;
+        let r = kfc_phi(v, de, interested, depth);
+        kb_cc_cond = scc;
+        return r;
     }
     if o == OP_BITCAST {
         let src = op(v, 0);

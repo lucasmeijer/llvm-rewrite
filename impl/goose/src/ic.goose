@@ -44,6 +44,7 @@ import ic_compares;
 import ic_andorxor;
 import ic_demanded;
 import ic_visit_misc;
+import ic_select;
 
 fn ic_not_ported(what: const u8[:]) { fatal(str("InstCombine: ", what, " is not ported yet")); }
 
@@ -724,6 +725,7 @@ fn ic_visit(i: i32) -> i32 {
         OP_SEXT => { return visit_sext(i); },
         OP_ICMP => { return visit_icmp(i); },
         OP_FCMP => { return visit_fcmp(i); },
+        OP_SELECT => { return visit_select(i); },
         OP_RET => { return visit_return(i); },
         OP_BR => { return visit_uncond_br(i); },
         OP_CONDBR => { return visit_cond_br(i); },

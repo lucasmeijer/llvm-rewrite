@@ -98,8 +98,36 @@ fn icb_copy_select_md(s: i32, from: i32) {
 }
 // createSelectInstWithUnknownProfile: setExplicitlyUnknownBranchWeightsIfProfiled
 fn ic_new_select_unknown_prof(c: i32, t: i32, f: i32) -> i32 {
-    if ic_fn >= 0 && ic_fn_has_entry_count(ic_fn) { ic_not_ported("explicitly unknown branch weights (function with profile)"); }
-    return ic_new_select(c, t, f);
+    let s = ic_new_select(c, t, f);
+    ic_set_unknown_branch_weights_if_profiled(s);
+    return s;
+}
+// setExplicitlyUnknownBranchWeightsIfProfiled(I, "instcombine") (ProfDataUtils.cpp): when the function has an
+// entry count > 0, !prof = !{!"unknown", !"instcombine"}
+fn ic_set_unknown_branch_weights_if_profiled(i: i32) {
+    if ic_fn < 0 || ic_fn_entry_count(ic_fn) == 0 { return; }
+    let ops: i32[2] = [md_string("unknown"), md_string("instcombine")];
+    inst_set_md(i, md_kind_id("prof"), md_get(MK_TUPLE, -1, ops, false));
+}
+// Function::getEntryCount()->getCount() (0 when absent)
+fn ic_fn_entry_count(fv: i32) -> u64 {
+    let g = glob_of(fv);
+    let k = md_kind_id("prof");
+    for j in globs[g].nmd {
+        if md_att[globs[g].md + 2 * j] != k { continue; }
+        let m = md_att[globs[g].md + 2 * j + 1];
+        if mds[m].nops < 2 { return 0; }
+        let s = md_op(m, 0);
+        if s < 0 || mds[s].kind != MK_STRING { return 0; }
+        let nm = sbytes(mds[s].extra);
+        if nm != "function_entry_count" { return 0; }
+        let o = md_op(m, 1);
+        if o < 0 || mds[o].kind != MK_VALUE { return 0; }
+        let c = mds[o].extra;
+        if vals[c].kind != VK_CINT { return 0; }
+        return ap_zext64(ci_ap(c));
+    }
+    return 0;
 }
 fn ic_fn_has_entry_count(fv: i32) -> bool {
     let g = glob_of(fv);

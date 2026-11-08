@@ -732,6 +732,7 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
     } else if o == OP_SELECT {
         if select_arm_nonzero(i, true, de, depth) && select_arm_nonzero(i, false, de, depth) { return true; }
     } else if o == OP_PHI {
+        kb_cc_check_phi("isKnownNonZero");
         if match_simple_recurrence(i) && is_non_zero_recurrence() { return true; }
         let nd = max(depth, VT_MAX_DEPTH - 1);
         let save = kb_cxt;
@@ -1008,6 +1009,7 @@ recursive fn is_known_pow2(v: i32, or_zero: bool, depth0: i64) -> bool {
     }
     if o == OP_SELECT { return is_known_pow2(op(v, 1), or_zero, depth) && is_known_pow2(op(v, 2), or_zero, depth); }
     if o == OP_PHI {
+        kb_cc_check_phi("isKnownToBeAPowerOfTwo");
         let save = kb_cxt;
         if pow2_recurrence(v, or_zero, depth) { kb_cxt = save; return true; }
         let nd = max(depth, VT_MAX_DEPTH - 1);
@@ -1142,6 +1144,7 @@ recursive fn non_equal_shl(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
 }
 recursive fn non_equal_phis(p1: i32, p2: i32, de: u64, depth: i64) -> bool {
     if inst_parent(p1) != inst_parent(p2) { return false; }
+    kb_cc_check_phi("isKnownNonEqual");
     var used_full = false;
     let save = kb_cxt;
     for k in nops(p1) {
@@ -1349,6 +1352,7 @@ recursive fn ncsb(v: i32, de: u64, depth: i64) -> i64 {
                 }
             }
         } else if o == OP_PHI {
+            kb_cc_check_phi("ComputeNumSignBits");
             let n = nops(v);
             if n <= 4 && n != 0 {
                 let save = kb_cxt;
@@ -1523,7 +1527,10 @@ fn vt_sp_known_non_zero(v: i32) -> bool {
     }
     return false;
 }
+// SelectPatternResult::Ordered of the last FP match (false for integer patterns and fast float clamps)
+var sp_ordered: bool = false;
 fn match_select_pattern_fp(p0: i64, fmf: u8, cl0: i32, cr0: i32, tv: i32, fv: i32) -> i64 {
+    sp_ordered = false;
     var p = p0;
     var cl = cl0;
     var cr = cr0;
@@ -1561,6 +1568,7 @@ fn match_select_pattern_fp(p0: i64, fmf: u8, cl0: i32, cr0: i32, tv: i32, fv: i3
         ordered = !ordered;
     }
     if tv == cl && fv == cr {
+        sp_ordered = ordered;
         if p == 10 || p == 11 || p == 2 || p == 3 { return SPF_FMAXNUM; }
         if p == 12 || p == 13 || p == 4 || p == 5 { return SPF_FMINNUM; }
         return SPF_UNKNOWN;

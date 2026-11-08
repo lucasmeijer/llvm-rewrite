@@ -2316,6 +2316,10 @@ fn is_trivially_vectorizable(id: i32) -> bool {
         id == IID_llround || id == IID_lrint || id == IID_llrint || id == IID_ucmp || id == IID_scmp || id == IID_clmul;
 }
 
+// The DropFlags vector of simplifyWithOpReplaced: on when the caller passes one (InstCombine's
+// foldSelectValueEquivalence); the instructions whose poison-generating annotations must be dropped.
+var swo_drop_on: bool = false;
+var swo_drop: i32[>..<];
 // Ops pairs live on is_ops at [pm .. pm + 2*np) as (from, to)
 recursive fn simplify_with_ops_replaced(v: i32, pmk: i64, np: i64, q: SQ, allow_ref: bool, mr0: i64) -> i32 {
     for k in np {
@@ -2360,7 +2364,10 @@ recursive fn simplify_with_ops_replaced(v: i32, pmk: i64, np: i64, q: SQ, allow_
                 if n1 == binop_identity(o, vals[i].ty, true) { is_ops.resize(mark); return n0; }
             }
             if (o == OP_AND || o == OP_OR) && n0 == n1 {
-                if o == OP_OR && op_disjoint(i) { is_ops.resize(mark); return -1; }
+                if o == OP_OR && op_disjoint(i) {
+                    if !swo_drop_on { is_ops.resize(mark); return -1; }
+                    swo_drop.push(i);
+                }
                 is_ops.resize(mark);
                 return n0;
             }
@@ -2381,7 +2388,10 @@ recursive fn simplify_with_ops_replaced(v: i32, pmk: i64, np: i64, q: SQ, allow_
             let n0 = is_ops[mark];
             let n1 = if n > 1 { is_ops[mark + 1] } else { -1 };
             if (id == IID_scmp || id == IID_ucmp) && n0 == n1 {
-                if has_poison_generating_annotations(i) { is_ops.resize(mark); return -1; }
+                if has_poison_generating_annotations(i) {
+                    if !swo_drop_on { is_ops.resize(mark); return -1; }
+                    swo_drop.push(i);
+                }
                 is_ops.resize(mark);
                 return c_int_ty(vals[i].ty, 0);
             }
@@ -2392,7 +2402,10 @@ recursive fn simplify_with_ops_replaced(v: i32, pmk: i64, np: i64, q: SQ, allow_
                 if m_specific_int_apv(n0, ident) { res = n1; }
                 else if m_specific_int_apv(n1, ident) { res = n0; }
                 if res >= 0 {
-                    if has_poison_generating_annotations(i) { is_ops.resize(mark); return -1; }
+                    if has_poison_generating_annotations(i) {
+                        if !swo_drop_on { is_ops.resize(mark); return -1; }
+                        swo_drop.push(i);
+                    }
                     is_ops.resize(mark);
                     return res;
                 }
@@ -2410,13 +2423,15 @@ recursive fn simplify_with_ops_replaced(v: i32, pmk: i64, np: i64, q: SQ, allow_
     for k in n { if !is_constant(is_ops[mark + k]) { is_ops.resize(mark); return -1; } }
     if !allow_ref {
         let id = inst_iid(i);
-        if can_create_poison(i, true) {
+        if can_create_poison(i, !swo_drop_on) {
             if id == IID_abs {
                 if !is_not_min_signed_value(is_ops[mark]) { is_ops.resize(mark); return -1; }
             } else { is_ops.resize(mark); return -1; }
         }
+        if swo_drop_on && (id == IID_abs || id == IID_ctlz || id == IID_cttz) { is_ops[mark + 1] = c_bool_ty(T_I1, false); }
         let r = cf_fold_inst_operands(i, mark, n, false);
         is_ops.resize(mark);
+        if swo_drop_on && r >= 0 && has_poison_generating_annotations(i) { swo_drop.push(i); }
         return r;
     }
     let r = cf_fold_inst_operands(i, mark, n, false);

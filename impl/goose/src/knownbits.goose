@@ -621,6 +621,14 @@ fn kb_reduce_add(k: KB, n: i64) -> KB {
 
 // SimplifyQuery::CxtI: the context instruction (DemandedBits passes the user of the operand).
 var kb_cxt: i32 = -1;
+// SimplifyQuery::CC (CondContext): the injected condition (-1 = none), its Invert flag and AffectedValues.
+// Set only by InstCombine's visitSelectInst; every phi recursion runs without it (getWithoutCondContext).
+var kb_cc_cond: i32 = -1;
+var kb_cc_invert: bool = false;
+var kb_cc_aff: i32[>..<];
+fn kb_cc_has(v: i32) -> bool { for a in kb_cc_aff { if a == v { return true; } } return false; }
+// the analyses whose phi handling is not yet wrapped fail loudly under a CondContext
+fn kb_cc_check_phi(what: const u8[:]) { if kb_cc_cond >= 0 { fatal(str("ValueTracking: CondContext through ", what, " of a phi is not ported yet")); } }
 
 fn not_ported(what: const u8[:]) { fatal(str("computeKnownBits: ", what, " is not ported yet")); }
 
@@ -1078,7 +1086,9 @@ recursive fn kb_adjust_for_select_arm(known: KB, cond: i32, arm: i32, invert: bo
 
 // computeKnownBitsFromContext: dominating conditions (domcond.goose, InstCombine's DomConditionCache) and
 // assumptions (assume.goose)
-recursive fn kb_from_context(v: i32, known: KB, depth: i64) -> KB {
+recursive fn kb_from_context(v: i32, known0: KB, depth: i64) -> KB {
+    var known = known0;
+    if kb_cc_cond >= 0 && kb_cc_has(v) { known = kb_from_cond(v, kb_cc_cond, known, kb_cc_invert, depth); }
     if kb_cxt < 0 { return known; }
     let k = kb_from_dom_conditions(v, known, depth);
     return kb_from_assumptions(v, k, depth);
@@ -1263,7 +1273,13 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         return known;
     }
     if o == OP_GEP { return kb_gep(iv, known, depth); }
-    if o == OP_PHI { return kb_phi(iv, de, known, depth); }
+    if o == OP_PHI {
+        let scc = kb_cc_cond;
+        kb_cc_cond = -1;
+        let r = kb_phi(iv, de, known, depth);
+        kb_cc_cond = scc;
+        return r;
+    }
     if o == OP_CALL || o == OP_INVOKE { return kb_call(iv, de, known, depth); }
     if o == OP_SHUFFLEVECTOR {
         if is_i {
