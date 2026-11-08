@@ -3997,6 +3997,7 @@ tests/imported/llvm/Transforms/InstCombine/align-external.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/alloc-realloc-free.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/alloca-big.ll::opt
 tests/imported/llvm/Transforms/InstCombine/alloca-big.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/alloca-cast-debuginfo.ll::opt
 tests/imported/llvm/Transforms/InstCombine/alloca-cast-debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/alloca-in-non-alloca-as.ll::opt
 tests/imported/llvm/Transforms/InstCombine/alloca-in-non-alloca-as.ll::roundtrip
@@ -6283,6 +6284,7 @@ tests/imported/llvm/Transforms/InstCombine/vscale_insertelement-inseltpoison.ll:
 tests/imported/llvm/Transforms/InstCombine/vscale_insertelement-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vscale_insertelement.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vscale_insertelement.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vscale_load.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vscale_load.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vscale_sext_and_zext.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vscale_trunc.ll::roundtrip
