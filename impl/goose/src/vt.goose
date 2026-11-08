@@ -287,7 +287,7 @@ fn get_underlying_objects(v: i32, out: i32[>..<]&) {
     wl.push(v);
     while wl.len > 0 {
         let p0 = wl.pop();
-        let p = get_underlying_object(p0, 6);
+        let p = get_underlying_object(p0, 10);
         var dup = false;
         for s in seen { if s == p { dup = true; } }
         if dup { continue; }
@@ -1944,10 +1944,10 @@ fn get_underlying_object_aggressive(v: i32) -> i32 {
     wl.push(v);
     var obj: i32 = -1;
     var first = true;
-    let first_obj = get_underlying_object(v, 6);
+    let first_obj = get_underlying_object(v, 10);
     while wl.len > 0 {
         let p0 = wl.pop();
-        let p = if first { first_obj } else { get_underlying_object(p0, 6) };
+        let p = if first { first_obj } else { get_underlying_object(p0, 10) };
         first = false;
         var seen = false;
         for x in visited { if x == p { seen = true; } }

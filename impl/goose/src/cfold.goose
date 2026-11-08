@@ -222,29 +222,143 @@ recursive fn cf_fold_load_from_uniform(c: i32, ty: i32) -> i32 {
 }
 fn ty_is_x86_amx(t: i32) -> bool { types[t].kind == TK_X86_AMX }
 
-// ConstantFoldLoadFromConstPtr(C, Ty, Offset) with have_off = explicit offset
+// ConstantFoldLoadFromConstPtr(C, Ty, Offset): off is the starting offset (0 for the overload without one)
 recursive fn cf_fold_load_from_const_ptr(c0: i32, ty: i32, off0: i64, have_off: bool) -> i32 {
-    var c = c0;
+    let gv = get_underlying_object(c0, 10);
+    if !is_gvar(gv) { return -1; }
+    let g = globs[glob_of(gv)];
+    if g.is_const == 0 || !gv_has_definitive_initializer(gv) { return -1; }
+    let c = strip_and_accumulate_offsets(c0, true, false, false);
+    let off = off0 + vt_off;
+    if c == gv {
+        let r = cf_fold_load_from_const(op(gv, 0), ty, off);
+        if r >= 0 { return r; }
+    }
+    return cf_fold_load_from_uniform(op(gv, 0), ty);
+}
+
+// getConstantAtOffset(Base, Offset)
+recursive fn cf_constant_at_offset(base: i32, off0: i64) -> i32 {
+    if off0 == 0 { return base; }
+    let k = vals[base].kind;
+    if !(k == VK_CARRAY || k == VK_CSTRUCT || k == VK_CVECTOR || k == VK_CDARRAY || k == VK_CDVECTOR) { return -1; }
+    // DL.getGEPIndicesForOffset(ElemTy, Offset)
+    var et = vals[base].ty;
     var off = off0;
-    if !have_off {
-        // ConstantFoldLoadFromConstPtr(C, Ty, DL): strip to a global with an offset
-        c = strip_and_accumulate_offsets(c0, true, false, false);
-        off = vt_off;
-    }
-    if is_gvar(c) {
-        let g = globs[glob_of(c)];
-        if g.is_const != 0 && gv_has_definitive_initializer(c) {
-            let init = op(c, 0);
-            let r = cf_fold_load_from_const(init, ty, off);
-            if r >= 0 { return r; }
+    let first = cf_element_index(dl_alloc_size(et), off);
+    off = cf_ei_off;
+    if first != 0 { return -1; }
+    var c = base;
+    while off != 0 {
+        var idx: i64 = 0;
+        let tk = ty_kind(et);
+        if tk == TK_ARRAY {
+            et = ty_elem(et);
+            idx = cf_element_index(dl_alloc_size(et), off);
+            off = cf_ei_off;
+        } else if tk == TK_STRUCT {
+            if off < 0 || off >= dl_struct_size(et) { break; }
+            idx = cf_struct_element_containing(et, off);
+            off -= dl_struct_offset(et, idx);
+            et = ty_field(et, idx);
+        } else {
+            break;
         }
+        if idx < 0 || idx >= 2147483648 { return -1; }
+        c = agg_elem(c, idx);
+        if c < 0 { return -1; }
     }
-    // ConstantFoldLoadFromUniformValue on the underlying object's initializer
-    let u = get_underlying_object(c0, 6);
-    if is_gvar(u) {
-        let g = globs[glob_of(u)];
-        if g.is_const != 0 && gv_has_definitive_initializer(u) {
-            return cf_fold_load_from_uniform(op(u, 0), ty);
+    if off != 0 { return -1; }
+    return c;
+}
+// getElementIndex(ElemSize, Offset): the index; the remaining offset in cf_ei_off
+var cf_ei_off: i64 = 0;
+fn cf_element_index(esz: i64, off: i64) -> i64 {
+    cf_ei_off = off;
+    if esz == 0 { return 0; }
+    var idx = off / esz;
+    var rem = off - idx * esz;
+    if rem < 0 { idx -= 1; rem += esz; }
+    cf_ei_off = rem;
+    return idx;
+}
+// StructLayout::getElementContainingOffset
+fn cf_struct_element_containing(t: i32, off: i64) -> i64 {
+    var idx: i64 = 0;
+    for k in ty_count(t) { if dl_struct_offset(t, k) <= off { idx = k; } }
+    return idx;
+}
+
+// Type::getPrimitiveSizeInBits
+recursive fn cf_prim_bits(t: i32) -> i64 {
+    let k = ty_kind(t);
+    if k == TK_FVEC || k == TK_SVEC { return ty_count(t) * cf_prim_bits(ty_elem(t)); }
+    if k == TK_HALF || k == TK_BFLOAT { return 16; }
+    if k == TK_FLOAT { return 32; }
+    if k == TK_DOUBLE { return 64; }
+    if k == TK_X86_FP80 { return 80; }
+    if k == TK_FP128 || k == TK_PPC_FP128 { return 128; }
+    if k == TK_X86_AMX { return 8192; }
+    if k == TK_INT || k == TK_BYTE { return ty_bits(t); }
+    return 0;
+}
+fn cf_ty_is_byte_or_byte_vec(t: i32) -> bool { ty_kind(ty_scalar(t)) == TK_BYTE }
+fn cf_ty_is_ptr_or_ptr_vec(t: i32) -> bool { ty_kind(ty_scalar(t)) == TK_PTR }
+fn cf_vec_count(t: i32) -> i64 { if ty_is_vector(t) { ty_count(t) } else { 0 } }
+// CastInst::castIsValid for BitCast / IntToPtr / PtrToInt
+fn cf_cast_is_valid(o: i64, st: i32, dt: i32) -> bool {
+    if !ty_is_first_class(st) || !ty_is_first_class(dt) || ty_is_aggregate(st) || ty_is_aggregate(dt) { return false; }
+    let sv = ty_is_vector(st);
+    let dv = ty_is_vector(dt);
+    let sec = cf_vec_count(st);
+    let dec = cf_vec_count(dt);
+    let ssc = ty_kind(st) == TK_SVEC;
+    let dsc = ty_kind(dt) == TK_SVEC;
+    if o == OP_PTRTOINT { return sec == dec && ssc == dsc && cf_ty_is_ptr_or_ptr_vec(st) && is_int_or_int_vec(dt); }
+    if o == OP_INTTOPTR { return sec == dec && ssc == dsc && is_int_or_int_vec(st) && cf_ty_is_ptr_or_ptr_vec(dt); }
+    let sp = cf_ty_is_ptr_or_ptr_vec(st);
+    let dp = cf_ty_is_ptr_or_ptr_vec(dt);
+    if (sp && cf_ty_is_byte_or_byte_vec(dt)) || (cf_ty_is_byte_or_byte_vec(st) && dp) { return true; }
+    if sp != dp { return false; }
+    if !sp { return cf_prim_bits(st) == cf_prim_bits(dt); }
+    if ptr_as(ty_scalar(st)) != ptr_as(ty_scalar(dt)) { return false; }
+    if sv && dv { return sec == dec && ssc == dsc; }
+    if sv { return sec == 1 && !ssc; }
+    if dv { return dec == 1 && !dsc; }
+    return true;
+}
+
+// ConstantFoldLoadThroughBitcast(C, DestTy)
+recursive fn cf_fold_load_through_bitcast(c0: i32, dty: i32) -> i32 {
+    var c = c0;
+    while c >= 0 {
+        let st = vals[c].ty;
+        if st == dty { return c; }
+        if ty_kind(st) == TK_SVEC || ty_kind(dty) == TK_SVEC { cfa_not_ported("loads through bitcasts of scalable vectors"); }
+        let dsz = dl_size_bits(dty);
+        let ssz = dl_size_bits(st);
+        if ssz < dsz { return -1; }
+        let u = cf_fold_load_from_uniform(c, dty);
+        if u >= 0 { return u; }
+        if ssz == dsz {
+            var o = OP_BITCAST;
+            if ty_is_int(st) && ty_kind(dty) == TK_PTR { o = OP_INTTOPTR; }
+            else if ty_kind(st) == TK_PTR && ty_is_int(dty) { o = OP_PTRTOINT; }
+            if cf_cast_is_valid(o, st, dty) { return cf_fold_cast_operand(o, c, dty); }
+        }
+        if !ty_is_aggregate(st) && !ty_is_vector(st) { return -1; }
+        if ty_kind(st) == TK_STRUCT {
+            var e: i64 = 0;
+            var ec: i32 = -1;
+            while true {
+                ec = agg_elem(c, e);
+                e++;
+                if ec < 0 || dl_size_bits(vals[ec].ty) != 0 { break; }
+            }
+            c = ec;
+        } else {
+            if ty_is_vector(st) && dl_size_bits(ty_elem(st)) != dl_store_size(ty_elem(st)) * 8 { return -1; }
+            c = agg_elem(c, 0);
         }
     }
     return -1;
@@ -252,12 +366,151 @@ recursive fn cf_fold_load_from_const_ptr(c0: i32, ty: i32, off0: i64, have_off: 
 
 // ConstantFoldLoadFromConst(C, Ty, Offset)
 recursive fn cf_fold_load_from_const(c: i32, ty: i32, off: i64) -> i32 {
-    // getConstantAtOffset + ConstantFoldLoadThroughBitcast
-    if off == 0 && vals[c].ty == ty { return c; }
+    let at = cf_constant_at_offset(c, off);
+    if at >= 0 {
+        let r = cf_fold_load_through_bitcast(at, ty);
+        if r >= 0 { return r; }
+    }
+    if ty_kind(vals[c].ty) != TK_SVEC && off >= dl_alloc_size(vals[c].ty) { return c_poison(ty); }
     let u = cf_fold_load_from_uniform(c, ty);
     if u >= 0 { return u; }
-    cfa_not_ported("loads from constant aggregates at an offset (getConstantAtOffset / FoldReinterpretLoadFromConst)");
-    return -1;
+    return cf_fold_reinterpret_load(c, ty, ty, off);
+}
+
+// ReadDataFromGlobal: bytes go to cf_raw[cur .. cur + left)
+var cf_raw: u8[>..<] = [];
+fn cint_word(c: i32, k: i64) -> u64 {
+    let bits = ty_bits(vals[c].ty);
+    if bits <= 128 { return if k == 0 { cint_lo(c) } else if k == 1 { cint_hi(c) } else { 0 }; }
+    return words[csts[vals[c].sub].ext + k];
+}
+recursive fn cf_read_data(c0: i32, boff0: i64, cur0: i64, left0: i64, byte_load: bool) -> bool {
+    var c = c0;
+    var boff = boff0;
+    var cur = cur0;
+    var left = left0;
+    let ct = vals[c].ty;
+    if boff >= dl_store_size(ct) { return true; }
+    let k = vals[c].kind;
+    if k == VK_AGGZERO || k == VK_UNDEF || k == VK_POISON { return true; }
+    if k == VK_CINT && ty_is_int(ct) {
+        let bw = ty_bits(ct);
+        if (bw & 7) != 0 { return false; }
+        let nb = bw / 8;
+        var i: i64 = 0;
+        while i != left && boff != nb {
+            var n = boff;
+            if dl_big_endian { n = nb - n - 1; }
+            cf_raw[cur + i] = ((cint_word(c, n / 8) >> ((n % 8) * 8)) & 255) as u8;
+            boff++;
+            i++;
+        }
+        return true;
+    }
+    if k == VK_CFP && ty_is_fp(ct) {
+        let fk = ty_kind(ct);
+        var it: i32 = -1;
+        if fk == TK_DOUBLE { it = ty_int(64); } else if fk == TK_FLOAT { it = ty_int(32); } else if fk == TK_HALF { it = ty_int(16); }
+        if it < 0 { return false; }
+        return cf_read_data(cf_fold_bitcast_dl(c, it), boff, cur, left, byte_load);
+    }
+    if k == VK_CSTRUCT {
+        var idx = cf_struct_element_containing(ct, boff);
+        var cur_elt_off = dl_struct_offset(ct, idx);
+        boff -= cur_elt_off;
+        while true {
+            let e = op(c, idx);
+            let esz = dl_alloc_size(vals[e].ty);
+            if boff < esz && !cf_read_data(e, boff, cur, left, byte_load) { return false; }
+            idx++;
+            if idx == ty_count(ct) { return true; }
+            let next = dl_struct_offset(ct, idx);
+            if left <= next - cur_elt_off - boff { return true; }
+            cur += next - cur_elt_off - boff;
+            left -= next - cur_elt_off - boff;
+            boff = 0;
+            cur_elt_off = next;
+        }
+    }
+    if k == VK_CARRAY || k == VK_CVECTOR || k == VK_CDARRAY || k == VK_CDVECTOR || k == VK_CINT || k == VK_CFP {
+        var n: i64 = 0;
+        var esz: i64 = 0;
+        if ty_kind(ct) == TK_ARRAY {
+            n = ty_count(ct);
+            esz = dl_alloc_size(ty_elem(ct));
+        } else {
+            if ty_kind(ct) != TK_FVEC { return false; }
+            n = ty_count(ct);
+            let et = ty_elem(ct);
+            if dl_size_bits(et) != dl_store_size(et) * 8 { return false; }
+            esz = dl_store_size(et);
+        }
+        var index = boff / esz;
+        var o = boff - index * esz;
+        while index != n {
+            let e = agg_elem(c, index);
+            if e < 0 { return false; }
+            if !cf_read_data(e, o, cur, left, byte_load) { return false; }
+            let written = esz - o;
+            if written >= left { return true; }
+            o = 0;
+            left -= written;
+            cur += written;
+            index++;
+        }
+        return true;
+    }
+    if is_cexpr(c) && cexpr_op(c) == OP_INTTOPTR && vals[op(c, 0)].ty == int_ptr_type_of(ct) {
+        if byte_load { return false; }
+        return cf_read_data(op(c, 0), boff, cur, left, byte_load);
+    }
+    return false;
+}
+
+// FoldReinterpretLoadFromConst(C, LoadTy, OrigLoadTy, Offset)
+recursive fn cf_fold_reinterpret_load(c: i32, lty: i32, orig: i32, off0: i64) -> i32 {
+    if ty_kind(lty) == TK_SVEC { return -1; }
+    if !ty_is_int(lty) {
+        if !ty_is_fp(lty) && ty_kind(lty) != TK_PTR && ty_kind(lty) != TK_BYTE && !ty_is_vector(lty) { return -1; }
+        let mt = ty_int(dl_size_bits(lty));
+        var r = cf_fold_reinterpret_load(c, mt, orig, off0);
+        if r < 0 { return -1; }
+        if is_null_value(r) && !ty_is_x86_amx(lty) { return c_null(lty); }
+        let cast_ty = if cf_ty_is_ptr_or_ptr_vec(lty) { int_ptr_type_of(lty) } else { lty };
+        r = cf_fold_bitcast_dl(r, cast_ty);
+        if cf_ty_is_ptr_or_ptr_vec(lty) {
+            if is_null_value(r) && !ty_is_x86_amx(lty) { return c_null(lty); }
+            if must_not_introduce_inttoptr(lty) { return -1; }
+            r = ce_cast(OP_INTTOPTR, r, lty);
+        }
+        return r;
+    }
+    var off = off0;
+    let bw = ty_bits(lty);
+    let nb = (bw + 7) / 8;
+    if nb > 128 || nb == 0 { return -1; }
+    if nb > 32 && ty_is_int(orig) { return -1; }
+    if off <= -nb { return c_poison(lty); }
+    if ty_kind(vals[c].ty) == TK_SVEC { return -1; }
+    if off >= dl_alloc_size(vals[c].ty) { return c_poison(lty); }
+    let mark = cf_raw.len;
+    for i in nb { cf_raw.push(0); }
+    var cur = mark;
+    var left = nb;
+    if off < 0 { cur += -off; left += off; off = 0; }
+    let ok = cf_read_data(c, off, cur, left, cf_ty_is_byte_or_byte_vec(orig));
+    if !ok { cf_raw.resize(mark); return -1; }
+    // assemble the little/big-endian value into 64-bit words
+    let nw = (bw + 63) / 64;
+    var ws: u64[>..] = [];
+    for k in nw { ws.push(0); }
+    for i in nb {
+        let b = if dl_big_endian { cf_raw[mark + nb - 1 - i] } else { cf_raw[mark + i] };
+        ws[i / 8] |= (b as u64) << ((i % 8) * 8);
+    }
+    cf_raw.resize(mark);
+    if bw <= 128 { return c_int_words(lty, ws[0], if nw > 1 { ws[1] } else { 0 }); }
+    return c_int_wide(lty, ws);
 }
 
 // SymbolicallyEvaluateGEP (+ CastGEPIndices): gep constant expression or instruction with constant operands

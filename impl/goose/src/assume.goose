@@ -137,7 +137,7 @@ fn ac_build(fv: i32) {
             let n = cb_bundle_count(a, k);
             if tag == "separate_storage" {
                 for j in 2 {
-                    let u = get_underlying_object(op(a, b + j), 6);
+                    let u = get_underlying_object(op(a, b + j), 10);
                     if is_arg(u) || is_global(u) || is_inst(u) { ac_push(u, a, k); }
                 }
             } else if n > 0 && tag != "ignore" {

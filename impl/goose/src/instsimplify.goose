@@ -3035,7 +3035,7 @@ recursive fn simplify_gep(srcty: i32, ptr: i32, mark: i64, n: i64, flags: u8, q:
                     if p < 0 || b != base { return -1; }
                     return p;
                 }
-                fn can_simplify(p: i32, gepty: i32, ptr: i32) -> bool { vals[p].ty == gepty && get_underlying_object(p, 6) == get_underlying_object(ptr, 6) }
+                fn can_simplify(p: i32, gepty: i32, ptr: i32) -> bool { vals[p].ty == gepty && get_underlying_object(p, 10) == get_underlying_object(ptr, 10) }
                 if tas == 1 {
                     let p = sub_ptr_diff(ix0, ptr);
                     if p >= 0 && can_simplify(p, gepty, ptr) { return p; }
@@ -4198,7 +4198,7 @@ recursive fn simplify_freeze(v: i32, q: SQ) -> i32 {
 recursive fn simplify_load(li: i32, ptr: i32, q: SQ) -> i32 {
     if inst_is_volatile(li) { return -1; }
     if is_constant(ptr) { return cf_fold_load_from_const_ptr(ptr, vals[li].ty, 0, false); }
-    let gv = get_underlying_object(ptr, 6);
+    let gv = get_underlying_object(ptr, 10);
     if !is_gvar(gv) { return -1; }
     let g = globs[glob_of(gv)];
     if g.is_const == 0 || !gv_has_definitive_initializer(gv) { return -1; }
