@@ -79,16 +79,14 @@
   printers, stderr (sorted for demanded-bits):
   `grep ::roundtrip impl/jai/passing.txt | sed 's/::roundtrip//' | grep imported | xargs -P8 -I{} cmp.sh "-passes=adce" {}`
   where cmp.sh runs both tools into a temp dir and prints OK/DIFF/JAI-FAIL. Do this for every new pass.
-- **known_bits.jai is a partial computeKnownBits**: no assumptions/dominating conditions, no isKnownNonZero, no
-  mul/div/rem/intrinsics/abs/min/max, no getKnownBitsFromAndXorOr idioms, no adjustKnownBitsForSelectArm, no
-  computeKnownBitsAddSub dom-condition refinement. print<demanded-bits> matches LLVM (unordered) on 6538 of 6635
-  files; the rest are these gaps or intrinsic-name upgrades. Note that missing known bits is *not* always
-  conservative for BDCE: an operand with fewer known bits can look dead (`and 0, %phi`). Replace the file with the
-  full ValueTracking port when InstSimplify/InstCombine need it.
+- known_bits.jai was replaced by the full ValueTracking port (value_tracking.jai, see "InstSimplify" below).
 - TLI: only what DCE/ADCE need (MemoryBuiltins' new/delete/strdup tables, allockind, isMathLibCallNoop with host
   libm + fenv via `#foreign`, "no-builtins"/"no-builtin-<f>"). Its `getLibFunc` prototype checks are simplified.
-- Debug info: salvageDebugInfo/dbg-record dropping are no-ops; the parser now creates debug records
-  (`Inst_Row.records`, see "Debug records" above), so passes that delete or move instructions must handle them.
+- Debug info: dce/adce/bdce still don't salvage. instsimplify RAUWs with `rauw_with_metadata`, erases with
+  `erase_inst_with_metadata` (debug users of a deleted value become poison = setKillLocation) and fails loudly where
+  LLVM's salvageDebugInfo would rewrite the DIExpression (casts, GEPs, integer binops, icmps): 11 sweep files.
+  Porting salvageDebugInfoImpl needs DIExpression::appendOpsToArg/appendOffset/getExtOps and
+  DIExpressionOptimizer (foldConstantMath); put it in a shared file, every deleting pass needs it.
 - Perf (x64 build, sqlite3.ll, `-disable-output`): parse 1.01 s (LLVM 0.28 s); dce +0.0 s (LLVM +0.0), adce +0.23 s
   (LLVM +0.01), bdce +0.31 s (LLVM +0.03), require<domtree>,require<postdomtree> +0.01 s. ADCE/BDCE cost is in
   `Table` lookups and temp APInt allocation (every APInt op allocates); no `@perf` benchmark times these passes, so
@@ -199,3 +197,42 @@
   quirk (knowledge/llvm/alias-analysis-and-memoryssa.md).
 - Jai trap: `print`/`tprint` treat every `%` as a placeholder (even `"%/"`); write a literal percent sign as
   `"\x1f"` (Basic's formatter prints byte 31 as `%`), see `aa_eval_report`.
+
+## InstSimplify, ValueTracking, constant folding (L1.instsimplify 238/249)
+
+Reusable analysis modules (all take a `Simplify_Query {dt, ac, cxt, use_instr_info, can_use_undef,
+allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef` like SimplifyQuery's helpers):
+- `apint.jai`: APInt with an inline u64 for <= 64 bits (no allocation on the common path), `w` words above.
+  `knownbits.jai`: KnownBits.cpp. `constant_range.jai`: ConstantRange.cpp (`cr_*`). `cmp_pred.jai`: CmpInst
+  predicate algebra, isImpliedByMatchingCmp. `pattern.jai`: PatternMatch (`pm_*`) + `APFloat` value struct.
+- `value_tracking.jai` / `value_tracking2.jai`: computeKnownBits (`known_bits`, `known_bits_de`), isKnownNonZero,
+  isKnownToBeAPowerOfTwo, ComputeNumSignBits, isKnownNonEqual, matchSelectPattern (integer part), isImpliedCondition,
+  isImpliedByDomCondition, computeConstantRange, computeOverflowFor*, canCreate(Undef)OrPoison, impliesPoison,
+  isGuaranteedNotToBe(Undef)OrPoison, getUnderlyingObject, strip*/accumulate offsets.
+- `fpclass.jai`: KnownFPClass (`kfpc_*`), computeKnownFPClass (`compute_known_fp_class[_de][_fmf]`),
+  fcmpImpliesClass / fcmpToClassTest, ConstantFPRange (`cfr_*`), FPClassTest helpers.
+- `analysis_base.jai`: Simplify_Query, AssumptionCache (`ac_*`, kept current by `replace_all_uses_with` via
+  `ac_note_rauw`), dominance helpers on instructions/edges/uses, isGuaranteedToTransferExecution.
+- `const_folding.jai` (ConstantFolding.cpp: `cfo_*`, loads, GEP, casts, compares, FP denormal flushing),
+  `const_folding_calls.jai` (canConstantFoldCallTo / ConstantFoldCall: every non-target intrinsic plus the x86 SSE/AVX512
+  conversions, libm calls evaluated with the host libm under fenv/errno checks like LLVM, and the TLI subset it needs:
+  names, prototypes with LDbl = any fp type, `*_finite` only on linux-gnu, no-builtin attributes,
+  `-disable-simplify-libcalls`), `apfloat_ops.jai` (APFloat with rounding modes: fma, roundToIntegral, next,
+  remainder, scalbn/ilogb/frexp, convertToInteger, min/max family; everything is computed exactly and rounded once).
+- `inst_simplify.jai`: InstructionSimplify.cpp, entry points `simplify_instruction(i, q)`,
+  `simplify_instruction_with_operands`, `simplify_with_op_replaced`, the `simplify_*_inst` functions (binops, cmps,
+  select, GEP, casts, shuffles, FP ops incl. constrained, calls/intrinsics, loads, freeze, phi).
+- Sweep (every round-tripping imported file, instsimplify, canonicalized vs LLVM): 6976/6994 identical, 18 fail
+  loudly (11 salvageDebugInfo, 2 ppc_fp128 arithmetic, 2 computeConstantRange of frexp, x86 hadd known bits, capture
+  tracking through bundles, funclets). The 11 unit failures need instcombine (5), early-cse (3, with
+  -earlycse-debug-hash), loop-unroll, jump-threading, always-inline.
+- Perf (x64 build, `-disable-output`, tests/perf/scaling): linear in size; straightline n64000 0.52 s (no-op pipeline
+  0.32 s, LLVM instsimplify 0.10 s), diamonds n8000 0.51 s (0.36 / 0.11). Pass cost ~2x LLVM's whole run; parsing
+  dominates. No `@perf` benchmark runs instsimplify alone.
+- Representation facts that matter (all verified against the oracle, see knowledge/llvm/instsimplify-jai-sweep.md):
+  fixed-length int splats are ConstantDataVector (a vector-typed C_INT only with
+  `-use-constant-int-for-fixed-length-splat`), `ConstantInt::get(vec, 0)` is zeroinitializer, FP vector nulls and
+  splats are vector-typed ConstantFP (`dyn_cast<ConstantFP>` succeeds on them), scalable int splats are kept as
+  vector-typed C_INT (LLVM builds a shufflevector expression; prints the same, `get_splat_value` sees through both).
+- Not ported (answers "don't know", or fails loudly where an answer would be wrong): DomConditionCache /
+  CondContext (InstSimplify passes neither), the FP half of matchSelectPattern, ppc_fp128 arithmetic.

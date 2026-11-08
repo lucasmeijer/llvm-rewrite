@@ -21,11 +21,20 @@ src/
   ir_edit.jai     mutation/CFG API for passes: iterators, successors/predecessors, phi edits, builders, split block
   inst_props.jai  mayHaveSideEffects, willReturn, wouldInstructionBeTriviallyDead, the TLI subset
   domtree.jai     DominatorTree/PostDominatorTree (SemiNCA, incremental updates, IDF calculator, printer)
-  known_bits.jai  computeKnownBits (partial port of ValueTracking)
+  knownbits.jai   KnownBits.cpp (kb_*); apint.jai is APInt with an inline 64-bit word (ap_*)
+  constant_range.jai  ConstantRange (cr_*); cmp_pred.jai CmpInst predicate algebra; intrinsic_ids.jai IID_* constants
+  analysis_base.jai   SimplifyQuery (passed by value), AssumptionCache (ac_*), instruction/edge dominance helpers
+  pattern.jai     PatternMatch (pm_*: BinaryOp_match only matches instructions, as in LLVM 23) and the APFloat struct
+  value_tracking.jai / value_tracking2.jai   ValueTracking (known bits, non-zero, power of two, sign bits, implied
+                  conditions, constant ranges, overflow, poison/undef reasoning, underlying objects)
+  fpclass.jai     KnownFPClass, computeKnownFPClass, fcmpImpliesClass/fcmpToClassTest, ConstantFPRange
+  const_folding.jai   ConstantFolding.cpp (cfo_*: DataLayout-aware folding, loads, GEPs); const_folding_calls.jai
+                  ConstantFoldCall + the TLI math subset; apfloat_ops.jai rounding-mode APFloat operations
+  inst_simplify.jai   InstructionSimplify.cpp (simplify_instruction(i, q) and the simplify_*_inst entry points)
   demanded_bits.jai  DemandedBits analysis and print<demanded-bits>
   print_util.jai  printAsOperand / Instruction::print for analysis printers
   passes.jai      pass registry, pipeline parser, pass and analysis managers, opt's command line (opt_main)
-  pass_<name>.jai one file per ported pass (dce + break-crit-edges, adce, bdce, mem2reg, sroa, ...)
+  pass_<name>.jai one file per ported pass (dce + break-crit-edges, adce, bdce, mem2reg, sroa, instsimplify, ...)
   ir_builder.jai  IRBuilder<ConstantFolder>: insertion point, debug location, name prefix (Irb, irb_*)
   dbg_records.jai debug-record utilities (owners, findDbgUsers, ValueAsMetadata RAUW/deletion, DIExpression,
                   merged DILocations, dbg.declare -> dbg.value conversion)

@@ -838,21 +838,11 @@ fpc_is_absolute_value_ule_one :: (v: Value_Id) -> bool {
     f := op(v, 1);
     return call_iid(f) == IID_FLOOR && op(f, 0) == x;
 }
-// m_c_MaxOrMin(m_BitCast(m_Value(A)), m_BitCast(m_Value(B))): smax/smin/umax/umin intrinsics or select patterns
+// m_c_MaxOrMin(m_BitCast(m_Value(A)), m_BitCast(m_Value(B))): in LLVM 23 m_SMax & co. match only the intrinsics
 fpc_max_or_min_of_bitcasts :: (v: Value_Id) -> (bool, Value_Id, Value_Id) {
-    l, r: Value_Id = NONE, NONE;
     id := call_iid(v);
-    if id == IID_SMAX || id == IID_SMIN || id == IID_UMAX || id == IID_UMIN { l = op(v, 0); r = op(v, 1); }
-    else {
-        oks, c, t, f := pm_select(v);
-        if !oks return false, NONE, NONE;
-        oki, pred, sb, cl, cr := pm_icmp(c);
-        if !oki return false, NONE, NONE;
-        if (cl == t && cr == f) || (cl == f && cr == t) {
-            if pred == ICMP_EQ || pred == ICMP_NE return false, NONE, NONE;
-            l = t; r = f;
-        } else return false, NONE, NONE;
-    }
+    if !(id == IID_SMAX || id == IID_SMIN || id == IID_UMAX || id == IID_UMIN) return false, NONE, NONE;
+    l := op(v, 0); r := op(v, 1);
     bc :: (x: Value_Id) -> (bool, Value_Id) { if opr_code(x) != .BITCAST return false, NONE; return true, op(x, 0); }
     ok1, a := bc(l); ok2, b := bc(r);
     if ok1 && ok2 return true, a, b;
