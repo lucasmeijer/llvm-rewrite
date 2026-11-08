@@ -2484,6 +2484,12 @@ fn minmax_saturation(id: i32, w: i64) -> u64 {
     if id == IID_smax { return sbit64(w) - 1; }
     return sbit64(w);
 }
+fn minmax_saturation_ap(id: i32, w: i64) -> AP {
+    if id == IID_umax { return ap_ones(w); }
+    if id == IID_umin { return ap_zero(w); }
+    if id == IID_smax { return ap_smax_val(w); }
+    return ap_smin_val(w);
+}
 fn minmax_pred(id: i32) -> i64 { if id == IID_umax { P_UGT } else if id == IID_umin { P_ULT } else if id == IID_smax { P_SGT } else { P_SLT } }
 fn inverse_minmax_iid(id: i32) -> i32 {
     if id == IID_umax { return IID_umin; }

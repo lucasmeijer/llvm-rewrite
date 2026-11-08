@@ -13,6 +13,7 @@ import constfold;
 import intrinsics;
 import apfloat;
 import fpu;
+import apint;
 
 fn pm_wide() { fatal("pattern match: an integer constant wider than 64 bits is not supported yet"); }
 
@@ -36,14 +37,19 @@ fn ci_val(c: i32) -> u64 {
 fn ci_w(c: i32) -> i64 { ty_scalar_bits(vals[c].ty) }
 fn ci_sval(c: i32) -> i64 { sext64(ci_val(c), ci_w(c)) }
 
-// ConstantInt::get(Ty, V): a scalar ConstantInt, or a splat of one for a vector type.
+// The APInt of an integer ConstantInt (scalar or vector-typed splat ConstantInt), any width.
+fn ci_ap(c: i32) -> AP { ap_from_cint(c) }
+// ConstantInt::get(Ty, V): a scalar ConstantInt, or a splat of one for a vector type. x is zero-extended
+// (c_int_ty_s: sign-extended) to the element width; c_int_ap takes an APInt of the element width.
 fn c_int_ty(ty: i32, x: u64) -> i32 {
     let st = ty_scalar(ty);
-    if ty_bits(st) > 64 { pm_wide(); }
+    if ty_bits(st) > 64 { return ap_to_cint(ty, ap_u64(x, ty_bits(st))); }
     let e = c_int_words(st, x, 0);
     if ty_is_vector(ty) { return c_splat(ty, e); }
     return e;
 }
+fn c_int_ty_s(ty: i32, x: i64) -> i32 { ap_to_cint(ty, ap_i64(x, ty_bits(ty_scalar(ty)))) }
+fn c_int_ap(ty: i32, a: AP) -> i32 { ap_to_cint(ty, a) }
 fn c_bool_ty(ty: i32, b: bool) -> i32 { c_int_ty(ty, if b { 1 } else { 0 }) }
 fn get_true(ty: i32) -> i32 { c_int_ty(ty, 1) }
 fn get_false(ty: i32) -> i32 { c_int_ty(ty, 0) }

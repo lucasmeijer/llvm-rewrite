@@ -158,7 +158,7 @@ fn rg_from_kb(z: u64, o: u64, w: i64, signed: bool) -> CRange { rg_from_kba(KBA 
 fn rg_from_cr(c: CR) -> CRange { CRange { lo: ap_u64(c.lo, c.w as i64), hi: ap_u64(c.hi, c.w as i64) } }
 fn rg_to_cr(c: CRange) -> CR {
     if rg_w(c) > 64 { fatal("ConstantRange: conversion of a range wider than 64 bits to CR"); }
-    return cr_new(c.lo.v[0], c.hi.v[0], rg_w(c));
+    return cr_new(ap_lo64(c.lo), ap_lo64(c.hi), rg_w(c));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -607,7 +607,6 @@ fn rg_multiply(a: CRange, b: CRange, nwk: i64) -> CRange {
         if ap_is_one(b.lo) { return a; }
         if ap_is_all_ones(b.lo) { return rg_sub(rg_single(ap_zero(w)), a); }
     }
-    if 2 * w > AP_MAXW { fatal("ConstantRange: multiply of ranges wider than 128 bits is not supported yet"); }
     var ur = rg_empty(w);
     if (nwk & NW_NUW) != 0 {
         let minmul, minov = ap_umul_ov(rg_umin(a), rg_umin(b));
@@ -834,7 +833,7 @@ fn rg_shl(a: CRange, b: CRange) -> CRange {
         if ap_uge_u64(rhs, w as u64) { return rg_empty(w); }
         let eq = ap_countl_zero(ap_xor(mn, mx));
         if ap_ule_u64(rhs, eq as u64) { return rg_nonempty(ap_shl_ap(mn, rhs), ap_inc(ap_shl_ap(mx, rhs))); }
-        return rg_nonempty(ap_zero(w), ap_inc(ap_bits_from(w, rhs.v[0] as i64)));
+        return rg_nonempty(ap_zero(w), ap_inc(ap_bits_from(w, ap_lo64(rhs) as i64)));
     }
     let omax = rg_umax(b);
     if rg_is_all_negative(a) && ap_ule_u64(omax, ap_countl_one(mn) as u64) {

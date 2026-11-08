@@ -26,6 +26,7 @@ import loopsimplify;
 import lcssa;
 import aaeval;
 import memoryssa;
+import apint;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -512,6 +513,8 @@ recursive fn run_function_node(n: i32, fv: i32) {
     if !pnodes[n].required && aset_has(alist_fn(globs[glob_of(fv)].attrs), AK_OptimizeNone) { return; }
     let pa = run_function_pass(n, fv);
     invalidate_function(fv, pa);
+    // APInt words of the pass are dead now (apint.goose: no AP outlives its pass)
+    ap_pool_reset();
 }
 
 recursive fn run_module_node(n: i32, m: i32) {
@@ -537,6 +540,7 @@ recursive fn run_module_node(n: i32, m: i32) {
     let p = pnodes[n].pass as i64;
     if !should_run(n, "module") { return; }
     if p == P_VERIFY_MODULE || p == P_NOOP_MODULE { return; }
+    // module passes: call ap_pool_reset() after each one (apint.goose: no AP outlives its pass)
     fatal("internal: unknown module pass id");
 }
 

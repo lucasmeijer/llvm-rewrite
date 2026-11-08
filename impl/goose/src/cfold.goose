@@ -18,6 +18,7 @@ import datalayout;
 import apfloat;
 import fpu;
 import constfold;
+import apint;
 import knownbits;
 import pm;
 import vt;
@@ -922,17 +923,6 @@ fn const_int_or_undef(v: i32) -> i64 {
     return -1;
 }
 
-fn bswap_w(x: u64, w: i64) -> u64 {
-    var r: u64 = 0;
-    for b in w / 8 { r |= ((x >> (8 * b)) & 0xFF) << (8 * (w / 8 - 1 - b)); }
-    return r;
-}
-fn bitrev_w(x: u64, w: i64) -> u64 {
-    var r: u64 = 0;
-    for b in w { if ((x >> b) & 1) != 0 { r |= (1 as u64) << (w - 1 - b); } }
-    return r;
-}
-
 recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) -> i32 {
     if id != 0 && intrinsic_propagates_poison(id) {
         for k in n { if is_poison(is_ops[mark + k]) { return c_poison(ty); } }
@@ -955,11 +945,10 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
             return cf_fold_fp_unary_intrinsic(id, ty, a);
         }
         if vals[a].kind == VK_CINT && !ty_is_vector(vals[a].ty) {
-            let w = ci_w(a);
-            let x = ci_val(a);
-            if id == IID_bswap { return c_int_ty(ty, bswap_w(x, w)); }
-            if id == IID_ctpop { return c_int_ty(ty, popcount(x) as u64); }
-            if id == IID_bitreverse { return c_int_ty(ty, bitrev_w(x, w)); }
+            let x = ci_ap(a);
+            if id == IID_bswap { return c_int_ap(ty, ap_byte_swap(x)); }
+            if id == IID_ctpop { return c_int_ty(ty, ap_popcount(x) as u64); }
+            if id == IID_bitreverse { return c_int_ap(ty, ap_reverse_bits(x)); }
             return -1;
         }
         if ty_is_vector(vals[a].ty) {
@@ -998,19 +987,17 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
             let k1 = const_int_or_undef(b);
             if k0 < 0 || k1 < 0 { return -1; }
             let w = ci_w_or(a);
-            let x0 = if k0 == 1 { ci_val(a) } else { 0 };
-            let x1 = if k1 == 1 { ci_val(b) } else { 0 };
+            let x0 = if k0 == 1 { ci_ap(a) } else { ap_zero(w) };
+            let x1 = if k1 == 1 { ci_ap(b) } else { ap_zero(ci_w_or(b)) };
             let both = k0 == 1 && k1 == 1;
             if id == IID_smax || id == IID_smin || id == IID_umax || id == IID_umin {
-                if !both { return c_int_ty(ty, minmax_saturation(id, w)); }
-                return c_int_ty(ty, if icmp_compare(x0, x1, minmax_pred(id), w) { x0 } else { x1 });
+                if !both { return c_int_ap(ty, minmax_saturation_ap(id, w)); }
+                return c_int_ap(ty, if ap_icmp(x0, x1, minmax_pred(id)) { x0 } else { x1 });
             }
             if id == IID_scmp || id == IID_ucmp {
                 if !both { return c_int_ty(ty, 0); }
-                var r: i64 = 0;
-                if id == IID_scmp { r = if sext64(x0, w) > sext64(x1, w) { 1 } else if sext64(x0, w) < sext64(x1, w) { -1 } else { 0 }; }
-                else { r = if x0 > x1 { 1 } else if x0 < x1 { -1 } else { 0 }; }
-                return c_int_ty(ty, r as! u64);
+                let r = if id == IID_scmp { ap_scmp(x0, x1) } else { ap_ucmp(x0, x1) };
+                return c_int_ty_s(ty, r);
             }
             if id == IID_usub_with_overflow || id == IID_ssub_with_overflow || id == IID_uadd_with_overflow ||
                id == IID_sadd_with_overflow || id == IID_smul_with_overflow || id == IID_umul_with_overflow {
@@ -1023,9 +1010,10 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
                     is_ops.resize(m);
                     return r;
                 }
-                let res, ov = overflow_op(id, x0, x1, w);
+                let res, ov = overflow_op(id, x0, x1);
+                let rc = ap_to_cint(ty_field(ty, 0), res);
                 let m = is_ops.len;
-                is_ops.push(c_int_words(ty_field(ty, 0), res, 0));
+                is_ops.push(rc);
                 is_ops.push(c_int_words(T_I1, if ov { 1 } else { 0 }, 0));
                 let r = c_aggregate(ty, is_ops[m..]);
                 is_ops.resize(m);
@@ -1033,29 +1021,28 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
             }
             if id == IID_uadd_sat || id == IID_sadd_sat {
                 if !both { return c_all_ones(ty); }
-                if id == IID_uadd_sat { return c_int_ty(ty, uadd_sat_w(x0, x1, w)); }
-                return c_int_ty(ty, sadd_sat_w(x0, x1, w));
+                if id == IID_uadd_sat { return c_int_ap(ty, ap_uadd_sat(x0, x1)); }
+                return c_int_ap(ty, ap_sadd_sat(x0, x1));
             }
             if id == IID_usub_sat || id == IID_ssub_sat {
                 if !both { return c_null(ty); }
-                if id == IID_usub_sat { return c_int_ty(ty, usub_sat_w(x0, x1)); }
-                return c_int_ty(ty, ssub_sat_w(x0, x1, w));
+                if id == IID_usub_sat { return c_int_ap(ty, ap_usub_sat(x0, x1)); }
+                return c_int_ap(ty, ap_ssub_sat(x0, x1));
             }
             if id == IID_cttz || id == IID_ctlz {
-                if x1 == 1 && (k0 == 0 || x0 == 0) { return c_poison(ty); }
+                if ap_is_one(x1) && (k0 == 0 || ap_is_zero(x0)) { return c_poison(ty); }
                 if k0 == 0 { return c_null(ty); }
-                if id == IID_cttz { return c_int_ty(ty, ctz_w(x0, w) as u64); }
-                return c_int_ty(ty, clz_w(x0, w) as u64);
+                if id == IID_cttz { return c_int_ty(ty, ap_countr_zero(x0) as u64); }
+                return c_int_ty(ty, ap_countl_zero(x0) as u64);
             }
             if id == IID_abs {
-                if x1 == 1 && (k0 == 0 || x0 == sbit64(w)) { return c_poison(ty); }
+                if ap_is_one(x1) && (k0 == 0 || ap_is_min_signed(x0)) { return c_poison(ty); }
                 if k0 == 0 { return c_null(ty); }
-                let s = sext64(x0, w);
-                return c_int_ty(ty, (if s < 0 { (0 as u64) - x0 } else { x0 }) & wmask64(w));
+                return c_int_ap(ty, ap_abs(x0));
             }
             if id == IID_clmul {
                 if !both { return c_null(ty); }
-                return c_int_ty(ty, clmul_w(x0, x1, w));
+                return c_int_ap(ty, ap_clmul(x0, x1));
             }
             if id == IID_pdep || id == IID_pext { cfa_not_ported("pdep/pext folding"); }
             return -1;
@@ -1085,13 +1072,14 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
             if k2 == 0 { return if right { b } else { a }; }
             if k0 == 0 && k1 == 0 { return c_undef(ty); }
             let w = ci_w(s);
-            let sh = (ci_val(s) % (w as u64)) as i64;
+            let sv = ci_ap(s);
+            let sh = ap_rot_amount(ap_zero(w), sv);
             if sh == 0 { return if right { b } else { a }; }
             let lshr_amt = if right { sh } else { w - sh };
             let shl_amt = if !right { sh } else { w - sh };
-            if k0 == 0 { return c_int_ty(ty, ci_val(b) >> lshr_amt); }
-            if k1 == 0 { return c_int_ty(ty, (ci_val(a) << shl_amt) & wmask64(w)); }
-            return c_int_ty(ty, ((ci_val(a) << shl_amt) & wmask64(w)) | (ci_val(b) >> lshr_amt));
+            if k0 == 0 { return c_int_ap(ty, ap_lshr(ci_ap(b), lshr_amt)); }
+            if k1 == 0 { return c_int_ap(ty, ap_shl(ci_ap(a), shl_amt)); }
+            return c_int_ap(ty, ap_or(ap_shl(ci_ap(a), shl_amt), ap_lshr(ci_ap(b), lshr_amt)));
         }
         let a = is_ops[mark];
         if is_fp_or_fp_vec(vals[a].ty) && (vals[a].kind == VK_CFP || is_undef_val(a)) {
@@ -1149,55 +1137,14 @@ fn is_minmax_fp_iid(id: i32) -> bool {
     return id == IID_maxnum || id == IID_minnum || id == IID_maximum || id == IID_minimum || id == IID_maximumnum || id == IID_minimumnum;
 }
 
-fn overflow_op(id: i32, a: u64, b: u64, w: i64) -> u64, bool {
-    let m = wmask64(w);
-    if id == IID_uadd_with_overflow { let r = (a + b) & m; return r, r < a; }
-    if id == IID_usub_with_overflow { return (a - b) & m, a < b; }
-    if id == IID_sadd_with_overflow {
-        let r = (a + b) & m;
-        let sa = sext64(a, w);
-        let sb = sext64(b, w);
-        let sr = sext64(r, w);
-        return r, (sa >= 0 && sb >= 0 && sr < 0) || (sa < 0 && sb < 0 && sr >= 0);
-    }
-    if id == IID_ssub_with_overflow {
-        let r = (a - b) & m;
-        let sa = sext64(a, w);
-        let sb = sext64(b, w);
-        let sr = sext64(r, w);
-        return r, (sa >= 0 && sb < 0 && sr < 0) || (sa < 0 && sb >= 0 && sr >= 0);
-    }
-    if id == IID_umul_with_overflow {
-        let lo, hi = cf_mul64(a, b);
-        let r = lo & m;
-        let ov = if w == 64 { hi != 0 } else { hi != 0 || (lo >> w) != 0 };
-        return r, ov;
-    }
-    // smul
-    let sa = sext64(a, w);
-    let sb = sext64(b, w);
-    let r = (a * b) & m;
-    if w < 32 {
-        let p = sa * sb;
-        return r, p != sext64(r, w);
-    }
-    // exact signed product via magnitudes
-    let ua = if sa < 0 { (0 as u64) - (sa as! u64) } else { sa as! u64 };
-    let ub = if sb < 0 { (0 as u64) - (sb as! u64) } else { sb as! u64 };
-    let lo, hi = cf_mul64(ua, ub);
-    let neg = (sa < 0) != (sb < 0);
-    // the magnitude must fit in w-1 bits (or equal 2^(w-1) when negative)
-    var ov = false;
-    if w == 64 {
-        if hi != 0 { ov = true; }
-        else if neg { ov = lo > sbit64(64); }
-        else { ov = lo >= sbit64(64); }
-    } else {
-        if hi != 0 || (lo >> w) != 0 { ov = true; }
-        else if neg { ov = lo > sbit64(w); }
-        else { ov = lo >= sbit64(w); }
-    }
-    return r, ov;
+fn overflow_op(id: i32, a: AP, b: AP) -> AP, bool {
+    if id == IID_uadd_with_overflow { let r, o = ap_uadd_ov(a, b); return r, o; }
+    if id == IID_usub_with_overflow { let r, o = ap_usub_ov(a, b); return r, o; }
+    if id == IID_sadd_with_overflow { let r, o = ap_sadd_ov(a, b); return r, o; }
+    if id == IID_ssub_with_overflow { let r, o = ap_ssub_ov(a, b); return r, o; }
+    if id == IID_umul_with_overflow { let r, o = ap_umul_ov(a, b); return r, o; }
+    let r, o = ap_smul_ov(a, b);
+    return r, o;
 }
 
 // Constant::containsPoisonElement
@@ -1224,26 +1171,24 @@ fn cf_vector_reduce(id: i32, v: i32) -> i32 {
         }
     }
     if ty_kind(ty) != TK_FVEC { return -1; }
-    let w = ty_bits(et);
-    if w > 64 { pm_wide(); }
     let e0 = agg_elem(v, 0);
     if e0 < 0 || vals[e0].kind != VK_CINT { return -1; }
-    var acc = ci_val(e0);
+    var acc = ci_ap(e0);
     for i in 1..ty_count(ty) {
         let e = agg_elem(v, i);
         if e < 0 || vals[e].kind != VK_CINT { return -1; }
-        let x = ci_val(e);
-        if id == IID_vector_reduce_add { acc = (acc + x) & wmask64(w); }
-        else if id == IID_vector_reduce_mul { acc = (acc * x) & wmask64(w); }
-        else if id == IID_vector_reduce_and { acc &= x; }
-        else if id == IID_vector_reduce_or { acc |= x; }
-        else if id == IID_vector_reduce_xor { acc ^= x; }
-        else if id == IID_vector_reduce_smin { if sext64(x, w) < sext64(acc, w) { acc = x; } }
-        else if id == IID_vector_reduce_smax { if sext64(x, w) > sext64(acc, w) { acc = x; } }
-        else if id == IID_vector_reduce_umin { if x < acc { acc = x; } }
-        else if id == IID_vector_reduce_umax { if x > acc { acc = x; } }
+        let x = ci_ap(e);
+        if id == IID_vector_reduce_add { acc = ap_add(acc, x); }
+        else if id == IID_vector_reduce_mul { acc = ap_mul(acc, x); }
+        else if id == IID_vector_reduce_and { acc = ap_and(acc, x); }
+        else if id == IID_vector_reduce_or { acc = ap_or(acc, x); }
+        else if id == IID_vector_reduce_xor { acc = ap_xor(acc, x); }
+        else if id == IID_vector_reduce_smin { acc = ap_smin(acc, x); }
+        else if id == IID_vector_reduce_smax { acc = ap_smax(acc, x); }
+        else if id == IID_vector_reduce_umin { acc = ap_umin(acc, x); }
+        else if id == IID_vector_reduce_umax { acc = ap_umax(acc, x); }
     }
-    return c_int_words(et, acc, 0);
+    return ap_to_cint(et, acc);
 }
 
 // ConstantFoldScalarCall1 for a ConstantFP operand (only the bit-exact operations are ported)

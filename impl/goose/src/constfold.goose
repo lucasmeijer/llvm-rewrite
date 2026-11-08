@@ -6,143 +6,13 @@
 // getAggregateElement, ConstantVector::getSplat).
 //
 // cf_* return -1 when LLVM's fold returns nullptr; ce_* always return a constant (folded or a new
-// ConstantExpr), like ConstantExpr::get*. Integers wider than 128 bits fail loudly.
+// ConstantExpr), like ConstantExpr::get*. Integers of any width (apint.goose).
 import std;
 import ir;
 import apfloat;
 import bignum;
 import fpu;
-
-// ---------------------------------------------------------------------------------------------
-// APInt subset (bit width <= 128): value in (lo, hi), always truncated to w bits.
-
-struct AI { lo: u64, hi: u64, w: i64 }
-
-fn ai_trunc(a: AI) -> AI {
-    var r = a;
-    if r.w < 64 { r.lo = r.lo & ((1 << r.w) - 1); r.hi = 0; }
-    else if r.w == 64 { r.hi = 0; }
-    else if r.w < 128 { r.hi = r.hi & ((1 << (r.w - 64)) - 1); }
-    return r;
-}
-fn ai_new(lo: u64, hi: u64, w: i64) -> AI { ai_trunc(AI { lo: lo, hi: hi, w: w }) }
-fn ai_of(v: i32) -> AI {
-    let w = ty_bits(ty_scalar(vals[v].ty));
-    if w > 128 { fatal("constant folding of integers wider than 128 bits is not supported yet"); }
-    return AI { lo: cint_lo(v), hi: cint_hi(v), w: w };
-}
-fn ai_const(ty: i32, a: AI) -> i32 {
-    let st = ty_scalar(ty);
-    let c = c_int_words(st, a.lo, a.hi);
-    if ty_is_vector(ty) { return c_splat(ty, c); }
-    return c;
-}
-fn ai_is_zero(a: AI) -> bool { a.lo == 0 && a.hi == 0 }
-fn ai_bit(a: AI, k: i64) -> bool { if k < 64 { ((a.lo >> k) & 1) != 0 } else { ((a.hi >> (k - 64)) & 1) != 0 } }
-fn ai_neg_bit(a: AI) -> bool { ai_bit(a, a.w - 1) }
-fn ai_all_ones(w: i64) -> AI { ai_new(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, w) }
-fn ai_is_all_ones(a: AI) -> bool { let m = ai_all_ones(a.w); a.lo == m.lo && a.hi == m.hi }
-fn ai_is_min_signed(a: AI) -> bool {
-    let k = a.w - 1;
-    if k < 64 { return a.lo == ((1 as u64) << k) && a.hi == 0; }
-    return a.lo == 0 && a.hi == ((1 as u64) << (k - 64));
-}
-fn ai_eq(a: AI, b: AI) -> bool { a.lo == b.lo && a.hi == b.hi }
-fn ai_ult(a: AI, b: AI) -> bool { if a.hi != b.hi { a.hi < b.hi } else { a.lo < b.lo } }
-fn ai_slt(a: AI, b: AI) -> bool {
-    let na = ai_neg_bit(a);
-    let nb = ai_neg_bit(b);
-    if na != nb { return na; }
-    return ai_ult(a, b);
-}
-fn ai_add(a: AI, b: AI) -> AI {
-    let lo = a.lo + b.lo;
-    let c: u64 = if lo < a.lo { 1 } else { 0 };
-    return ai_new(lo, a.hi + b.hi + c, a.w);
-}
-fn ai_not(a: AI) -> AI { ai_new(~a.lo, ~a.hi, a.w) }
-fn ai_neg(a: AI) -> AI { ai_add(ai_not(a), ai_new(1, 0, a.w)) }
-fn ai_sub(a: AI, b: AI) -> AI { ai_add(a, ai_neg(b)) }
-fn cf_mul64(a: u64, b: u64) -> u64, u64 {
-    let a0 = a & 0xFFFFFFFF;
-    let a1 = a >> 32;
-    let b0 = b & 0xFFFFFFFF;
-    let b1 = b >> 32;
-    let p00 = a0 * b0;
-    let p01 = a0 * b1;
-    let p10 = a1 * b0;
-    let p11 = a1 * b1;
-    let mid = (p00 >> 32) + (p01 & 0xFFFFFFFF) + (p10 & 0xFFFFFFFF);
-    let lo = (p00 & 0xFFFFFFFF) | (mid << 32);
-    let hi = p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32);
-    return lo, hi;
-}
-fn ai_mul(a: AI, b: AI) -> AI {
-    let lo, h = cf_mul64(a.lo, b.lo);
-    let x, xh = cf_mul64(a.lo, b.hi);
-    let y, yh = cf_mul64(a.hi, b.lo);
-    return ai_new(lo, h + x + y, a.w);
-}
-fn ai_shl(a: AI, k: i64) -> AI {
-    if k == 0 { return a; }
-    if k >= 128 { return ai_new(0, 0, a.w); }
-    if k >= 64 { return ai_new(0, a.lo << (k - 64), a.w); }
-    return ai_new(a.lo << k, (a.hi << k) | (a.lo >> (64 - k)), a.w);
-}
-fn ai_lshr(a: AI, k: i64) -> AI {
-    if k == 0 { return a; }
-    if k >= 128 { return ai_new(0, 0, a.w); }
-    if k >= 64 { return ai_new(a.hi >> (k - 64), 0, a.w); }
-    return ai_new((a.lo >> k) | (a.hi << (64 - k)), a.hi >> k, a.w);
-}
-fn ai_ashr(a: AI, k: i64) -> AI {
-    var r = ai_lshr(a, k);
-    if ai_neg_bit(a) && k > 0 {
-        // set the top k bits
-        let ones = ai_all_ones(a.w);
-        let keep = ai_lshr(ones, k);
-        r = ai_new(r.lo | (ones.lo & ~keep.lo), r.hi | (ones.hi & ~keep.hi), a.w);
-    }
-    return r;
-}
-fn ai_and(a: AI, b: AI) -> AI { ai_new(a.lo & b.lo, a.hi & b.hi, a.w) }
-fn ai_or(a: AI, b: AI) -> AI { ai_new(a.lo | b.lo, a.hi | b.hi, a.w) }
-fn ai_xor(a: AI, b: AI) -> AI { ai_new(a.lo ^ b.lo, a.hi ^ b.hi, a.w) }
-fn ai_zext(a: AI, w: i64) -> AI { ai_new(a.lo, a.hi, w) }
-fn ai_sext(a: AI, w: i64) -> AI {
-    if !ai_neg_bit(a) || w <= a.w { return ai_new(a.lo, a.hi, w); }
-    let ones = ai_all_ones(w);
-    let low = ai_all_ones(a.w);
-    return ai_new(a.lo | (ones.lo & ~low.lo), a.hi | (ones.hi & ~low.hi), w);
-}
-// unsigned divide/remainder (shift-subtract)
-fn ai_udivrem(a: AI, b: AI) -> AI, AI {
-    var q = ai_new(0, 0, a.w);
-    var r = AI { lo: 0, hi: 0, w: 128 };
-    let bb = AI { lo: b.lo, hi: b.hi, w: 128 };
-    var k = a.w - 1;
-    while k >= 0 {
-        r = ai_shl(r, 1);
-        if ai_bit(a, k) { r.lo = r.lo | 1; }
-        if !ai_ult(r, bb) {
-            r = ai_sub(r, bb);
-            if k < 64 { q.lo = q.lo | ((1 as u64) << k); } else { q.hi = q.hi | ((1 as u64) << (k - 64)); }
-        }
-        k--;
-    }
-    return q, ai_new(r.lo, r.hi, a.w);
-}
-fn ai_sdivrem(a: AI, b: AI) -> AI, AI {
-    let na = ai_neg_bit(a);
-    let nb = ai_neg_bit(b);
-    let ua = if na { ai_neg(a) } else { a };
-    let ub = if nb { ai_neg(b) } else { b };
-    let q, r = ai_udivrem(ua, ub);
-    let qq = if na != nb { ai_neg(q) } else { q };
-    let rr = if na { ai_neg(r) } else { r };
-    return qq, rr;
-}
-fn ai_shift_amount(b: AI) -> i64 { if b.hi != 0 || b.lo > 1000000 { 1000000 } else { b.lo as! i64 } }
+import apint;
 
 // ---------------------------------------------------------------------------------------------
 // Constant helpers
@@ -159,7 +29,7 @@ fn cexpr_op(v: i32) -> i64 { csts[vals[v].sub].op as i64 }
 recursive fn c_all_ones(ty: i32) -> i32 {
     let st = ty_scalar(ty);
     var e: i32 = -1;
-    if ty_is_int(st) { e = c_int_words(st, 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF); if ty_bits(st) > 128 { fatal("all-ones constant wider than 128 bits"); } }
+    if ty_is_int(st) { e = ap_to_cint(st, ap_ones(ty_bits(st))); }
     else if ty_is_fp(st) {
         let f = fp_fmt(types[st].kind as i64);
         if f.total <= 64 { e = c_fp(st, if f.total == 64 { 0xFFFFFFFFFFFFFFFF } else { ((1 as u64) << f.total) - 1 }, 0); }
@@ -173,7 +43,7 @@ recursive fn c_all_ones(ty: i32) -> i32 {
 // Constant::isAllOnesValue
 recursive fn is_all_ones_value(v: i32) -> bool {
     let k = vals[v].kind;
-    if k == VK_CINT { return ai_is_all_ones(ai_of(v)); }
+    if k == VK_CINT { return ap_is_all_ones(ap_from_cint(v)); }
     if k == VK_CFP {
         let st = ty_scalar(vals[v].ty);
         let f = fp_fmt(types[st].kind as i64);
@@ -198,7 +68,7 @@ fn c_splat_value(v: i32) -> i32 {
     if k == VK_POISON { return c_poison(et); }
     if k == VK_AGGZERO { return c_null(et); }
     if k == VK_CNULL { return c_null(et); }
-    if k == VK_CINT && ty_is_vector(ty) { return c_int_words(et, cint_lo(v), cint_hi(v)); }
+    if k == VK_CINT && ty_is_vector(ty) { return ap_to_cint(et, ap_from_cint(v)); }
     if k == VK_CFP && ty_is_vector(ty) { return c_fp(et, cint_lo(v), cint_hi(v)); }
     if k == VK_CDVECTOR || k == VK_CVECTOR {
         let n = vals[v].nops as i64;
@@ -358,7 +228,7 @@ recursive fn fold_bitcast(v: i32, dty: i32) -> i32 {
         if ty_is_vector(dty) { return ce_cast(OP_BITCAST, c_splat(ty_vector(sty, 1, false), v), dty); }
         if types[sty].kind == TK_PPC_FP128 { return -1; }
         if ty_is_int(ty_scalar(dty)) && cf_scalar_size(dty) == cf_scalar_size(sty) {
-            return ai_const(dty, AI { lo: cint_lo(v), hi: cint_hi(v), w: cf_scalar_size(dty) });
+            return ap_to_cint(dty, ap_from_words(cf_scalar_size(dty), [cint_lo(v), cint_hi(v)]));
         }
         return -1;
     }
@@ -413,22 +283,23 @@ recursive fn cf_cast(opc: i64, v: i32, dty: i32) -> i32 {
     }
     if opc == OP_UITOFP || opc == OP_SITOFP {
         if k == VK_CINT {
-            let a = ai_of(v);
-            let neg = opc == OP_SITOFP && ai_neg_bit(a);
-            let m = if neg { ai_neg(a) } else { a };
+            let a = ap_from_cint(v);
+            let neg = opc == OP_SITOFP && ap_is_neg(a);
+            let m = if neg { ap_neg(a) } else { a };
             var num: u32[>..<] = [];
             var den: u32[>..<] = [];
-            bn_from_words(num, [m.lo, m.hi]);
-            if neg && ai_is_min_signed(a) { bn_from_words(num, [a.lo, a.hi]); }
+            var mw: u64[>..] = [];
+            for k in ap_nwords(m) { mw.push(ap_word(m, k)); }
+            bn_from_words(num, mw);
             bn_set_u64(den, 1);
             let lo, hi = fp_round_rational(types[dst].kind as i64, neg, num, den);
             return c_fp(dty, lo, hi);
         }
         return -1;
     }
-    if opc == OP_ZEXT { if k == VK_CINT { return ai_const(dty, ai_zext(ai_of(v), ty_bits(dst))); } return -1; }
-    if opc == OP_SEXT { if k == VK_CINT { return ai_const(dty, ai_sext(ai_of(v), ty_bits(dst))); } return -1; }
-    if opc == OP_TRUNC { if k == VK_CINT { let a = ai_of(v); return ai_const(dty, ai_new(a.lo, a.hi, ty_bits(dst))); } return -1; }
+    if opc == OP_ZEXT { if k == VK_CINT { return ap_to_cint(dty, ap_zext(ap_from_cint(v), ty_bits(dst))); } return -1; }
+    if opc == OP_SEXT { if k == VK_CINT { return ap_to_cint(dty, ap_sext(ap_from_cint(v), ty_bits(dst))); } return -1; }
+    if opc == OP_TRUNC { if k == VK_CINT { return ap_to_cint(dty, ap_trunc(ap_from_cint(v), ty_bits(dst))); } return -1; }
     if opc == OP_BITCAST { return fold_bitcast(v, dty); }
     return -1;
 }
@@ -437,41 +308,36 @@ recursive fn cf_cast(opc: i64, v: i32, dty: i32) -> i32 {
 fn fold_fp_to_int(v: i32, dty: i32, signed: bool) -> i32 {
     let st = ty_scalar(vals[v].ty);
     let w = ty_bits(ty_scalar(dty));
-    if w > 128 { fatal("fptoi folding wider than 128 bits"); }
     let kind = types[st].kind as i64;
     let f = fp_fmt(kind);
     let p = fp_decompose(kind, cint_lo(v), cint_hi(v));
     if p.cat == FC_NAN || p.cat == FC_INF { return c_poison(dty); }
     if p.cat == FC_ZERO { return c_null(dty); }
     // integer part = sig * 2^(exponent - (p-1)), truncated
-    var sig = AI { lo: p.sig0, hi: p.sig1, w: 128 };
-    if f.explicit_int { sig.lo = p.sig0; }
+    // the magnitude is computed in w + 130 bits: a significand has at most 113 bits, and any shift that
+    // would push it past w + 1 bits overflows anyway
+    let mw = w + 130;
+    let sig = ap_from_words(mw, [p.sig0, p.sig1]);
     let sh = p.exponent - (f.p - 1);
-    var mag = AI { lo: 0, hi: 0, w: 128 };
+    var mag = ap_zero(mw);
     if sh >= 0 {
-        if sh + (f.p) > 130 { return c_poison(dty); }
-        mag = ai_shl(sig, sh);
+        if sh + (f.p) > w + 1 { return c_poison(dty); }
+        mag = ap_shl(sig, sh);
     } else {
-        mag = ai_lshr(sig, -sh);
+        mag = ap_lshr(sig, -sh);
     }
     // range check
     let maxbits = if signed { w - 1 } else { w };
-    var abits: i64 = 0;
-    for b in 128 { if ai_bit(mag, b) { abits = b + 1; } }
-    if p.neg && !ai_is_zero(mag) {
+    let abits = ap_active_bits(mag);
+    if p.neg && !ap_is_zero(mag) {
         if !signed { return c_poison(dty); }
         // allow -2^(w-1)
         if abits > maxbits + 1 { return c_poison(dty); }
-        if abits == maxbits + 1 {
-            var only_top = true;
-            for b in abits - 1 { if ai_bit(mag, b) { only_top = false; } }
-            if !only_top { return c_poison(dty); }
-        }
-        let r = ai_neg(ai_new(mag.lo, mag.hi, w));
-        return ai_const(dty, r);
+        if abits == maxbits + 1 && ap_countr_zero(mag) != abits - 1 { return c_poison(dty); }
+        return ap_to_cint(dty, ap_neg(ap_trunc(mag, w)));
     }
     if abits > maxbits { return c_poison(dty); }
-    return ai_const(dty, ai_new(mag.lo, mag.hi, w));
+    return ap_to_cint(dty, ap_trunc(mag, w));
 }
 
 // ConstantExpr::getCast
@@ -497,14 +363,14 @@ fn cf_int_divrem(o: i64) -> bool { o == OP_UDIV || o == OP_SDIV || o == OP_UREM 
 // ConstantExpr::getBinOpIdentity (NSZ = false); -1 = none
 recursive fn binop_identity(o: i64, ty: i32, allow_rhs: bool) -> i32 {
     if o == OP_ADD || o == OP_OR || o == OP_XOR { return c_null(ty); }
-    if o == OP_MUL { return ai_const(ty, ai_new(1, 0, ty_bits(ty_scalar(ty)))); }
+    if o == OP_MUL { return ap_to_cint(ty, ap_u64(1, ty_bits(ty_scalar(ty)))); }
     if o == OP_AND { return c_all_ones(ty); }
     if o == OP_FADD { return c_fp_neg_zero_ty(ty); }
     if o == OP_FMUL { return c_fp_one_ty(ty); }
     if !allow_rhs { return -1; }
     if o == OP_SUB || o == OP_SHL || o == OP_LSHR || o == OP_ASHR { return c_null(ty); }
     if o == OP_FSUB { return c_null(ty); }
-    if o == OP_SDIV || o == OP_UDIV { return ai_const(ty, ai_new(1, 0, ty_bits(ty_scalar(ty)))); }
+    if o == OP_SDIV || o == OP_UDIV { return ap_to_cint(ty, ap_u64(1, ty_bits(ty_scalar(ty)))); }
     if o == OP_FDIV { return c_fp_one_ty(ty); }
     return -1;
 }
@@ -566,8 +432,7 @@ recursive fn cf_binop(o: i64, c1: i32, c2: i32) -> i32 {
         if ab >= 0 && c2 == ab { return c2; }
         if o == OP_UDIV || o == OP_SDIV { if cint_is_zero(c2) { return c_poison(vals[c2].ty); } }
         if o == OP_UREM || o == OP_SREM {
-            let a2 = ai_of(c2);
-            if a2.lo == 1 && a2.hi == 0 { return c_null(vals[c2].ty); }
+            if ap_is_one(ap_from_cint(c2)) { return c_null(vals[c2].ty); }
             if cint_is_zero(c2) { return c_poison(vals[c2].ty); }
         }
         if o == OP_AND && cf_is_cexpr(c1) && (cexpr_op(c1) == OP_PTRTOINT || cexpr_op(c1) == OP_PTRTOADDR) && is_global(op(c1, 0)) {
@@ -578,22 +443,24 @@ recursive fn cf_binop(o: i64, c1: i32, c2: i32) -> i32 {
     }
     if cf_is_cint(c1) {
         if cf_is_cint(c2) {
-            let a = ai_of(c1);
-            let b = ai_of(c2);
-            if o == OP_ADD { return ai_const(ty, ai_add(a, b)); }
-            if o == OP_SUB { return ai_const(ty, ai_sub(a, b)); }
-            if o == OP_MUL { return ai_const(ty, ai_mul(a, b)); }
-            if o == OP_UDIV { let q, r = ai_udivrem(a, b); return ai_const(ty, q); }
-            if o == OP_SDIV { if ai_is_all_ones(b) && ai_is_min_signed(a) { return c_poison(ty); } let q, r = ai_sdivrem(a, b); return ai_const(ty, q); }
-            if o == OP_UREM { let q, r = ai_udivrem(a, b); return ai_const(ty, r); }
-            if o == OP_SREM { if ai_is_all_ones(b) && ai_is_min_signed(a) { return c_poison(ty); } let q, r = ai_sdivrem(a, b); return ai_const(ty, r); }
-            if o == OP_AND { return ai_const(ty, ai_and(a, b)); }
-            if o == OP_OR { return ai_const(ty, ai_or(a, b)); }
-            if o == OP_XOR { return ai_const(ty, ai_xor(a, b)); }
-            let sh = ai_shift_amount(b);
-            if o == OP_SHL { if sh < a.w { return ai_const(ty, ai_shl(a, sh)); } return c_poison(ty); }
-            if o == OP_LSHR { if sh < a.w { return ai_const(ty, ai_lshr(a, sh)); } return c_poison(ty); }
-            if o == OP_ASHR { if sh < a.w { return ai_const(ty, ai_ashr(a, sh)); } return c_poison(ty); }
+            let a = ap_from_cint(c1);
+            let b = ap_from_cint(c2);
+            if o == OP_ADD { return ap_to_cint(ty, ap_add(a, b)); }
+            if o == OP_SUB { return ap_to_cint(ty, ap_sub(a, b)); }
+            if o == OP_MUL { return ap_to_cint(ty, ap_mul(a, b)); }
+            if o == OP_UDIV { return ap_to_cint(ty, ap_udiv(a, b)); }
+            if o == OP_SDIV { if ap_is_all_ones(b) && ap_is_min_signed(a) { return c_poison(ty); } return ap_to_cint(ty, ap_sdiv(a, b)); }
+            if o == OP_UREM { return ap_to_cint(ty, ap_urem(a, b)); }
+            if o == OP_SREM { if ap_is_all_ones(b) && ap_is_min_signed(a) { return c_poison(ty); } return ap_to_cint(ty, ap_srem(a, b)); }
+            if o == OP_AND { return ap_to_cint(ty, ap_and(a, b)); }
+            if o == OP_OR { return ap_to_cint(ty, ap_or(a, b)); }
+            if o == OP_XOR { return ap_to_cint(ty, ap_xor(a, b)); }
+            let w = a.w as i64;
+            if (o == OP_SHL || o == OP_LSHR || o == OP_ASHR) && ap_uge_u64(b, w as u64) { return c_poison(ty); }
+            let sh = ap_lo64(b) as i64;
+            if o == OP_SHL { return ap_to_cint(ty, ap_shl(a, sh)); }
+            if o == OP_LSHR { return ap_to_cint(ty, ap_lshr(a, sh)); }
+            if o == OP_ASHR { return ap_to_cint(ty, ap_ashr(a, sh)); }
         }
         let ab = binop_absorber(o, ty, true);
         if ab >= 0 && c1 == ab { return c1; }
@@ -681,9 +548,9 @@ recursive fn cf_extractelement(v: i32, idx: i32) -> i32 {
     if cf_is_poison(v) || cf_is_undef(idx) { return c_poison(et); }
     if vals[v].kind == VK_UNDEF { return c_undef(et); }
     if !cf_is_cint(idx) { return -1; }
-    let ia = ai_of(idx);
+    let ia = ap_from_cint(idx);
     if types[vty].kind == TK_FVEC {
-        if ia.hi != 0 || ia.lo >= types[vty].cnt as! u64 { return c_poison(et); }
+        if ap_uge_u64(ia, types[vty].cnt as! u64) { return c_poison(et); }
     }
     if cf_is_cexpr(v) {
         let o = cexpr_op(v);
@@ -704,15 +571,15 @@ recursive fn cf_extractelement(v: i32, idx: i32) -> i32 {
         if o == OP_INSERTELEMENT {
             let ii = op(v, 2);
             if cf_is_cint(ii) {
-                let ib = ai_of(ii);
-                if ib.lo == ia.lo && ib.hi == ia.hi { return op(v, 1); }
+                let ib = ap_from_cint(ii);
+                if ap_same_value_u(ib, ia) { return op(v, 1); }
                 return ce_extractelement(op(v, 0), idx);
             }
         }
     }
-    let e = c_aggregate_element(v, ia.lo as! i64);
+    let e = if ap_ult_u64(ia, 0x7FFFFFFF) { c_aggregate_element(v, ap_lo64(ia) as! i64) } else { -1 };
     if e >= 0 { return e; }
-    if ia.hi == 0 && ia.lo < types[vty].cnt as! u64 {
+    if ap_ult_u64(ia, types[vty].cnt as! u64) {
         let s = c_splat_value(v);
         if s >= 0 { return s; }
     }
@@ -738,9 +605,9 @@ recursive fn cf_insertelement(v: i32, elt: i32, idx: i32) -> i32 {
     if !cf_is_cint(idx) { return -1; }
     if types[vty].kind == TK_SVEC { return -1; }
     let n = types[vty].cnt;
-    let ia = ai_of(idx);
-    if ia.hi != 0 || ia.lo >= n as! u64 { return c_poison(vty); }
-    let iv = ia.lo as! i64;
+    let ia = ap_from_cint(idx);
+    if ap_uge_u64(ia, n as! u64) { return c_poison(vty); }
+    let iv = ap_lo64(ia) as! i64;
     let mark = cf_stack.len;
     for i in n {
         if i == iv { cf_stack.push(elt); continue; }
@@ -1138,10 +1005,10 @@ recursive fn evaluate_icmp_relation(v1: i32, v2: i32) -> i64 {
     return -1;
 }
 
-fn cf_icmp_ai(p: i64, a: AI, b: AI) -> bool {
+fn cf_icmp_ap(p: i64, a: AP, b: AP) -> bool {
     return match p {
-        32 => ai_eq(a, b), 33 => !ai_eq(a, b), 34 => ai_ult(b, a), 35 => !ai_ult(a, b), 36 => ai_ult(a, b), 37 => !ai_ult(b, a),
-        38 => ai_slt(b, a), 39 => !ai_slt(a, b), 40 => ai_slt(a, b), _ => !ai_slt(b, a),
+        32 => ap_eq(a, b), 33 => !ap_eq(a, b), 34 => ap_ult(b, a), 35 => !ap_ult(a, b), 36 => ap_ult(a, b), 37 => !ap_ult(b, a),
+        38 => ap_slt(b, a), 39 => !ap_slt(a, b), 40 => ap_slt(a, b), _ => !ap_slt(b, a),
     };
 }
 fn cf_true_when_equal(p: i64) -> bool { p == 32 || p == 35 || p == 37 || p == 39 || p == 41 || p == 15 || p == 9 || p == 11 || p == 13 }
@@ -1174,9 +1041,9 @@ recursive fn cf_compare(p0: i64, c10: i32, c20: i32) -> i32 {
         }
         if p == 33 { return ce_binop(OP_XOR, c1, c2, 0); }
     }
-    if cf_is_cint(c1) && cf_is_cint(c2) { return cf_bool(rt, cf_icmp_ai(p, ai_of(c1), ai_of(c2))); }
+    if cf_is_cint(c1) && cf_is_cint(c2) { return cf_bool(rt, cf_icmp_ap(p, ap_from_cint(c1), ap_from_cint(c2))); }
     if vals[c1].kind == VK_CINT && vals[c2].kind == VK_CINT && ty_is_vector(t1) {
-        return c_splat(rt, cf_bool(T_I1, cf_icmp_ai(p, ai_of(c1), ai_of(c2))));
+        return c_splat(rt, cf_bool(T_I1, cf_icmp_ap(p, ap_from_cint(c1), ap_from_cint(c2))));
     }
     if cf_is_cfp(c1) && cf_is_cfp(c2) {
         return cf_bool(rt, fp_fcmp(types[st].kind as i64, p, cint_lo(c1), cint_hi(c1), cint_lo(c2), cint_hi(c2)));
@@ -1231,7 +1098,7 @@ fn cf_bool(rt: i32, b: bool) -> i32 { if b { c_all_ones(rt) } else { c_null(rt) 
 fn c_splat_value_any(v: i32) -> i32 {
     let k = vals[v].kind;
     let ty = vals[v].ty;
-    if k == VK_CINT && ty_is_vector(ty) { return c_int_words(ty_scalar(ty), cint_lo(v), cint_hi(v)); }
+    if k == VK_CINT && ty_is_vector(ty) { return ap_to_cint(ty_scalar(ty), ap_from_cint(v)); }
     if k == VK_CFP && ty_is_vector(ty) { return c_fp(ty_scalar(ty), cint_lo(v), cint_hi(v)); }
     return c_splat_value(v);
 }
