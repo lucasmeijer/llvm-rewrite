@@ -228,6 +228,15 @@ ids), 4 slots each, with an epoch stamp per entry so clearing is O(1). Owners: `
 `VM_PASS0/VM_PASS1` belong to the running transform pass (ADCE: live set, dead-terminator set, block numbers);
 `VS_ANA0/VS_ANA1/VM_ANA0` belong to DemandedBits (Visited, DeadUses, AliveBits), which also borrows `VS_PASS1`
 for its worklist while it runs. A pass that calls an analysis must not hold data in the slots the analysis uses.
+`promote_mem_to_reg` (mem2reg.goose, also called by SROA) uses VM_PASS0 (AllocaLookup, PhiToAllocaMap), VM_PASS1
+(LargeBlockInfo), VS_PASS0 (new PHIs) and VS_PASS1 (values mentioned by debug records); poison.goose's
+programUndefinedIfUndefOrPoison uses VS_ANA1. A pass with more state keeps its own stamped table (SROA's `sr_*`,
+20 slots keyed by value or use id).
+
+Block numbers (`BasicBlock::getNumber`) are tracked in ir.goose (`block_set_parent`, `block_number`,
+`func_max_block_number`): assigned from a per-function counter when a block's parent changes. Every place that
+links a block into a function goes through `block_set_parent`. Debug records carry their owning instruction
+(`DbgRec.owner`), so `dbg_erase_record` doesn't search.
 
 ### 8.5 Analyses
 **Dominator trees** (domtree.goose) port `GenericDomTreeConstruction.h` whole: construction (`SemiNCAInfo`) and

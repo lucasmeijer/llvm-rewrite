@@ -18,6 +18,10 @@
 
 ## Status
 
+- L1.mem2reg 59/60 (the one left runs `instcombine`). L1.sroa 119/122 (left: 2 tests run `debugify`, 1 runs
+  `gvn,instcombine,simplifycfg`). Both give output identical to LLVM's on all tests/e2e O0 and pipeline inputs
+  and on the four tests/perf/compile programs, and run 1.3-2.5x faster than LLVM there; linear on
+  scaling/allocas (k 1.04 mem2reg, 1.07 sroa; LLVM 1.19, 1.25).
 - L1.analysis.domtree and L1.analysis.demanded-bits complete. L1.analysis.loops 22/26: LoopInfo and CycleInfo
   complete, the 4 left are `print<loopnest>` (a loop pass: needs the loop pass manager, LoopSimplify+LCSSA
   canonicalization in the adaptor, and ScalarEvolution for `Loop::getBounds`). L1.loop-canonical: loop-simplify and
@@ -162,3 +166,38 @@
 - `print<demanded-bits>` prints in instruction order; LLVM's order is a DenseMap's, the test compares sorted lines.
 - L1.dce can't be COMPLETE on its own: its exit selector includes tests whose pipelines need simplifycfg, sroa, gvn,
   licm, instcombine, debugify, redundant-dbg-inst-elim, and `--preserve-ll-uselistorder`, plus debug-info parsing.
+
+## mem2reg / SROA (mem2reg.goose, sroa.goose)
+
+- mem2reg ports `NewPhiNodes` (a `DenseMap<pair<unsigned,unsigned>, PHINode*>`) bit for bit (`m2r_pm_*`: LLVM 23's
+  linear-probing, tombstone-free DenseMap with the splitmix `mix` hash and rehash after `remove_if`), because PHI
+  simplification and the poison-filling loop walk it in bucket order. Keys use `BasicBlock::getNumber`, which is
+  now tracked (`block_set_parent` / `block_number` in ir.goose: numbers are assigned from a per-function counter
+  when a block's parent changes, exactly like `BasicBlock::setParent`). Any code that moves a block into a
+  function must go through `block_set_parent`.
+- Debug records know their instruction (`DbgRec.owner`, kept by `inst_add_dbg`/`dbg_records_to_next`), so
+  `dbg_erase_record` is O(record list). mem2reg/SROA keep a per-run list of the function's records and the set of
+  values they mention (VS_PASS1), which makes `ValueAsMetadata::handleRAUW`/`handleDeletion` (`m2r_dbg_rauw`,
+  `m2r_erase`: RAUW follows into debug locations, erased values become poison) cost nothing for unmentioned
+  values. `inst_erase_from_parent` still fails loudly when a record uses the erased value (it would need
+  salvageDebugInfo); mem2reg/SROA use `m2r_erase` because LLVM does not salvage there.
+- `m2r_insert_before_adopting` is `Instruction::insertBefore` without the head bit: the new instruction takes over
+  the debug records attached to the position. IRBuilder insertions do this; `BB->begin()` insertions (PHIs) don't.
+- SROA's IRBuilder (`irb_*`): insertion point, current debug location (set from the insertion instruction, as
+  `SetInsertPoint(Instruction*)` does), name prefix (`IRBuilderPrefixedInserter`; a `StringRef` name that is empty
+  still gets the prefix, a literal `""` does not: pass `named = false` for the latter), ConstantFolder semantics
+  through constfold.goose. Different LLVM builders (rewriter, runOnAlloca's, presplit, `IRBuilder<>`) are the one
+  global builder with the prefix reset at each switch; forgetting a reset shows up as `%a.sroa.3.4.` name prefixes.
+- SROA scratch: its own 20-slot stamped sets/maps over value and use ids (`sr_*`, slots `S_*` listed in
+  sroa.goose). It calls `promote_mem_to_reg`, which uses VM_PASS0/1, VS_PASS0/1, so SROA doesn't use those.
+- Partitions are materialized up front (`compute_partitions`) with the partition_iterator's exact advance/end
+  logic; the slices don't change while one partition walk runs.
+- isSafeToLoadUnconditionally / isDereferenceableAndAlignedPointer are partial ports inside sroa.goose (allocas,
+  arguments with dereferenceable, globals, GEP/bitcast/select/addrspacecast recursion, the block scan); calls,
+  !dereferenceable loads, byval/sret arguments fail loudly.
+- Not ported (fail loudly): assignment tracking (dbg_assign/DIAssignID) in both passes, migrating dbg_value records
+  of split allocas, DIArgList locations in SROA debug migration, DW_OP_LLVM_extract_bits fragments.
+- Goose trap: two files defining the same function name (`cint_sext`, `cint_is_zero`) is an "ambiguous call" error
+  at every caller in *other* files. Prefix pass-private helpers (`sr_`, `m2r_`).
+- Process trap: another agent's commit (77b3349) silently deleted sroa.goose and reverted several files while
+  resolving a merge; check `git show --stat` of upstream commits that touch your files after a rebase.
