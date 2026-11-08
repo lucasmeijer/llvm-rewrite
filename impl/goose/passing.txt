@@ -4819,6 +4819,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/calls.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/cast-vector.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/cast-vector.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/cast.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/convert-from-fp16.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/convert-from-fp16.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/copysign.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/cttz-elts.ll::roundtrip
@@ -7470,6 +7471,7 @@ tests/imported/llvm/Transforms/SROA/alloca-address-space.ll::opt
 tests/imported/llvm/Transforms/SROA/alloca-address-space.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/assume.ll::opt
 tests/imported/llvm/Transforms/SROA/assume.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/basictest.ll::opt
 tests/imported/llvm/Transforms/SROA/basictest.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/big-endian.ll::opt
 tests/imported/llvm/Transforms/SROA/big-endian.ll::roundtrip
@@ -7497,6 +7499,7 @@ tests/imported/llvm/Transforms/SROA/non-capturing-call-readonly.ll::opt
 tests/imported/llvm/Transforms/SROA/non-capturing-call-readonly.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/non-integral-pointers.ll::opt
 tests/imported/llvm/Transforms/SROA/non-integral-pointers.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/phi-and-select.ll::opt
 tests/imported/llvm/Transforms/SROA/phi-and-select.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/phi-gep.ll::opt
 tests/imported/llvm/Transforms/SROA/phi-gep.ll::roundtrip
@@ -7525,7 +7528,9 @@ tests/imported/llvm/Transforms/SROA/scalable-vector-struct.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/scalable-vectors-with-known-vscale.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/scalable-vectors.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/select-gep.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/select-load.ll::opt
 tests/imported/llvm/Transforms/SROA/select-load.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/select-store.ll::opt
 tests/imported/llvm/Transforms/SROA/select-store.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/slice-order-independence.ll::opt
 tests/imported/llvm/Transforms/SROA/slice-order-independence.ll::roundtrip
