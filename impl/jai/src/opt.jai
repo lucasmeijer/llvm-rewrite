@@ -40,6 +40,9 @@
 #load "dbg_records.jai";
 #load "pass_mem2reg.jai";
 #load "pass_instsimplify.jai";
+#load "ir_builder.jai";
+#load "value_utils.jai";
+#load "pass_sroa.jai";
 
 main :: () { opt_main(); }
 

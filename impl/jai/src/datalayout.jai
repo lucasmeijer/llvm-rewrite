@@ -2,7 +2,7 @@
 // ABI/preferred alignment, struct layout.
 
 Prim_Spec :: struct { bits: u32; abi: u64; pref: u64; }
-Ptr_Spec  :: struct { as: u32; bits: u32; abi: u64; pref: u64; idx_bits: u32; }
+Ptr_Spec  :: struct { as: u32; bits: u32; abi: u64; pref: u64; idx_bits: u32; unstable: bool; }
 
 Data_Layout :: struct {
     big_endian: bool;
@@ -16,6 +16,7 @@ Data_Layout :: struct {
     program_as:  u32;
     globals_as:  u32;
     stack_natural: u64;
+    legal_ints:  [..] u32;   // "n" (DataLayout::LegalIntWidths)
 }
 
 dl: Data_Layout;
@@ -31,7 +32,7 @@ dl_set_ptr :: (as: u32, bits: u32, abi: u64, pref: u64, idx: u32) {
     for * dl.ptr_specs if it.as == as { it.bits = bits; it.abi = abi; it.pref = pref; it.idx_bits = idx; return; }
     i := 0;
     while i < dl.ptr_specs.count && dl.ptr_specs[i].as < as i += 1;
-    array_insert_at(*dl.ptr_specs, .{as, bits, abi, pref, idx}, i);
+    array_insert_at(*dl.ptr_specs, .{as, bits, abi, pref, idx, false}, i);
 }
 
 dl_init :: (s: string) {
@@ -47,8 +48,19 @@ dl_init :: (s: string) {
     dl_set_ptr(0, 64, 8, 8, 64);
     if s.count == 0 return;
     parts := split(s, "-",, allocator = temp);
+    non_integral: [..] u32; non_integral.allocator = temp;
+    defer for as: non_integral {
+        // "ni:<as>...": the address space gets its own spec (a copy of AS0's if it has none), marked unstable
+        ps := dl_ptr_spec(as);
+        dl_set_ptr(as, ps.bits, ps.abi, ps.pref, ps.idx_bits);
+        for * dl.ptr_specs if it.as == as it.unstable = true;
+    }
     for part: parts {
         if part.count == 0 continue;
+        if begins_with(part, "ni:") {
+            for x: split(slice(part, 3, part.count - 3), ":",, allocator = temp) { v, ok := string_to_int(x, 10, u32); array_add(*non_integral, v); }
+            continue;
+        }
         c := part[0];
         rest := slice(part, 1, part.count - 1);
         nums := split(rest, ":",, allocator = temp);
@@ -75,6 +87,8 @@ dl_init :: (s: string) {
             case #char "a";
                 if nums.count > 1 { dl.struct_abi = max(num(nums[1]) / 8, 1); }
                 if nums.count > 2 dl.struct_pref = num(nums[2]) / 8;
+            case #char "n";
+                for nums array_add(*dl.legal_ints, cast(u32) num(it));
             case #char "A"; dl.alloca_as = cast(u32) num(rest);
             case #char "P"; dl.program_as = cast(u32) num(rest);
             case #char "G"; dl.globals_as = cast(u32) num(rest);
@@ -87,6 +101,17 @@ dl_ptr_spec :: (as: u32) -> Ptr_Spec {
     for dl.ptr_specs if it.as == as return it;
     return dl.ptr_specs[0];
 }
+
+// DataLayout::isLegalInteger
+dl_is_legal_integer :: (bits: u64) -> bool { for dl.legal_ints if it == bits return true; return false; }
+// DataLayout::isNonIntegralAddressSpace
+dl_ni_as :: (as: u32) -> bool { ps := dl_ptr_spec(as); return ps.bits != ps.idx_bits || ps.unstable; }
+dl_ni_ptr_type :: (t: Type_Id) -> bool { return type_kind(t) == .PTR && dl_ni_as(cast(u32) ir.types[t].a); }
+// DataLayout::getIndexSizeInBits / getIndexTypeSizeInBits
+dl_index_size_bits :: (as: u32) -> u32 { return dl_ptr_spec(as).idx_bits; }
+dl_index_type_size_bits :: (t: Type_Id) -> u32 { return dl_index_size_bits(cast(u32) ir.types[scalar_type(t)].a); }
+// DataLayout::typeSizeEqualsStoreSize
+dl_size_eq_store_size :: (t: Type_Id) -> bool { return dl_type_size_bits(t) == dl_type_store_size(t) * 8; }
 
 power_of_2_ceil :: (x: u64) -> u64 { r: u64 = 1; while r < x r <<= 1; return r; }
 align_to :: inline (x: u64, a: u64) -> u64 { return (x + a - 1) / a * a; }

@@ -25,7 +25,7 @@ mem2reg_run :: (f: Value_Id) -> Preserved {
             i = inst(i).next;
         }
         if allocas.count == 0 break;
-        promote_mem_to_reg(allocas, dt);
+        promote_mem_to_reg(allocas, dt, get_assumption_cache(f));
         changed = true;
     }
     if !changed return PRESERVE_ALL;
@@ -235,32 +235,18 @@ lbi_delete :: (m: *M2r, i: Value_Id) { table_remove(*m.lbi, i); }
 
 // ---------------------------------------------------------------- helpers from ValueTracking / InstructionSimplify
 
-// isGuaranteedNotToBePoison(V) without context. TODO: use value_tracking2.jai's port once it lands.
-m2r_not_poison :: (v: Value_Id) -> bool {
-    k := vkind(v);
-    if k == .MD_VALUE return false;
-    if k == .ARGUMENT {
-        f := arg_parent(v);
-        idx := v - glob(f).arg_start;
-        s := attr_list_param(glob(f).attrs, idx);
-        if attr_set_has(s, .NoUndef) || attr_set_has(s, .Dereferenceable) || attr_set_has(s, .DereferenceableOrNull) return true;
-        fatal("mem2reg: isGuaranteedNotToBePoison of an argument without noundef needs ValueTracking (programUndefinedIfUndefOrPoison), not ported yet");
-    }
-    if k == .C_POISON return false;
-    if k == .C_UNDEF return true;
-    if k == .C_INT || k == .C_FP || k == .GLOBAL_VAR || k == .FUNCTION return true;
-    if k == .C_NULL && is_ptr_type(vtype(v)) return true;
-    fatal("mem2reg: isGuaranteedNotToBePoison of this value needs ValueTracking, not ported yet");
-    return false;
-}
+// The DominatorTree and AssumptionCache of the PromoteMem2Reg run (SimplifyQuery SQ)
+m2r_cur_dt: *Dom_Tree;
+m2r_cur_ac: *Assumption_Cache;
 
-// isKnownNonZero(V, SimplifyQuery(DL, DT, AC, CtxI)). TODO: use value_tracking.jai's port once it lands.
+// isGuaranteedNotToBePoison(V)
+m2r_not_poison :: (v: Value_Id) -> bool { return is_guaranteed_not_to_be_poison(v); }
+
+// isKnownNonZero(V, SimplifyQuery(DL, DT, AC, CtxI))
 m2r_known_non_zero :: (v: Value_Id, ctx: Value_Id) -> bool {
-    k := vkind(v);
-    if k == .C_NULL return false;
-    if k == .C_UNDEF || k == .C_POISON return false;
-    fatal("mem2reg: isKnownNonZero needs ValueTracking, not ported yet");
-    return false;
+    q: Simplify_Query;
+    q.dt = m2r_cur_dt; q.ac = m2r_cur_ac; q.cxt = ctx;
+    return is_known_non_zero(v, q);
 }
 
 // DominatorTree::dominates(const Instruction *Def, const Instruction *User)
@@ -274,7 +260,7 @@ m2r_dominates_inst :: (dt: *Dom_Tree, def: Value_Id, user: Value_Id) -> bool {
     if dop == .INVOKE || dop == .CALLBR || inst_op(user) == .PHI {
         // dominates(Def, UseBB)
         if db == ub return false;
-        if dop == .INVOKE return dt_dominates_edge(dt, db, get_successor(def, 0), ub);
+        if dop == .INVOKE return m2r_dominates_edge(dt, db, get_successor(def, 0), ub);
         return dt_dominates(dt, db, ub);
     }
     if db != ub return dt_dominates(dt, db, ub);
@@ -284,7 +270,7 @@ m2r_dominates_inst :: (dt: *Dom_Tree, def: Value_Id, user: Value_Id) -> bool {
 }
 
 // DominatorTree::dominates(const BasicBlockEdge &BBE, const BasicBlock *UseBB)
-dt_dominates_edge :: (dt: *Dom_Tree, start: Value_Id, end: Value_Id, use_bb: Value_Id) -> bool {
+m2r_dominates_edge :: (dt: *Dom_Tree, start: Value_Id, end: Value_Id, use_bb: Value_Id) -> bool {
     if !dt_dominates(dt, end, use_bb) return false;
     if block_single_predecessor(end) != NONE return true;
     preds: [..] Value_Id; preds.allocator = temp;
@@ -301,27 +287,11 @@ dt_dominates_edge :: (dt: *Dom_Tree, start: Value_Id, end: Value_Id, use_bb: Val
     return true;
 }
 
-// simplifyInstruction(PN, SQ) for a PHI (InstructionSimplify.cpp simplifyPHINode + the "simplifies to itself"
-// check of simplifyInstruction). NONE = no simplification.
+// simplifyInstruction(PN, SQ); NONE = no simplification
 m2r_simplify_phi :: (dt: *Dom_Tree, pn: Value_Id) -> Value_Id {
-    common: Value_Id = NONE;
-    has_poison := false;
-    has_undef := false;
-    n := nops(pn);
-    if n > 0 for k: 0..n-1 {
-        inc := op(pn, k);
-        if inc == pn continue;
-        if vkind(inc) == .C_POISON { has_poison = true; continue; }
-        if vkind(inc) == .C_UNDEF { has_undef = true; continue; }
-        if common != NONE && inc != common return NONE;
-        common = inc;
-    }
-    if common == NONE return ifx has_undef then const_undef(vtype(pn)) else const_poison(vtype(pn));
-    if has_poison || has_undef {
-        if is_inst(common) && !m2r_dominates_inst(dt, common, pn) return NONE;
-        if has_undef && !m2r_not_poison(common) return NONE;
-    }
-    return common;
+    q: Simplify_Query;
+    q.dt = dt; q.ac = m2r_cur_ac;
+    return simplify_instruction(pn, q);
 }
 
 // ---------------------------------------------------------------- convertMetadataToAssumes etc.
@@ -337,6 +307,8 @@ add_assume_non_null :: (li: Value_Id) {
     inst(ci).ty2 = fty;
     set_op(ci, 0, c); set_op(ci, 1, assume);
     inst_insert_after(ci, c);
+    // AC->registerAssumption
+    if m2r_cur_ac { array_add(*m2r_cur_ac.assumes, ci); ac_update_affected_values(m2r_cur_ac, ci); }
 }
 
 convert_metadata_to_assumes :: (li: Value_Id, val: Value_Id) {
@@ -543,8 +515,9 @@ remove_from_allocas :: (m: *M2r, idx: *s64) {
     idx.* -= 1;
 }
 
-promote_mem_to_reg :: (allocas: [] Value_Id, dt: *Dom_Tree) {
+promote_mem_to_reg :: (allocas: [] Value_Id, dt: *Dom_Tree, ac: *Assumption_Cache) {
     if allocas.count == 0 return;
+    m2r_cur_dt = dt; m2r_cur_ac = ac;
     m: M2r;
     m.allocas.allocator = temp; m.dp_users.allocator = temp; m.value_types.allocator = temp;
     m.worklist.allocator = temp;

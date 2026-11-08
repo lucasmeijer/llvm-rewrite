@@ -84,6 +84,7 @@ parse_module :: (src: string, file: string) {
             next(); expect(.EQUAL, "'='"); ir.source_filename = parse_string(); saw_source_filename = true;
         } else break;
     }
+    if cl_data_layout.count ir.datalayout = cl_data_layout;   // opt's DataLayoutCallback: the command line wins
     if ir.datalayout.count == 0 && ir.triple.count {
         d, ok := compute_default_datalayout(ir.triple);
         if !ok fatal("%: no default data layout for target triple '%' (only x86 is supported)", file, ir.triple);
@@ -105,7 +106,7 @@ parse_top_level :: () {
                 next();
                 if t.text == "target" {
                     if eat_kw("triple") { expect(.EQUAL, "'='"); ir.triple = parse_string(); }
-                    else if eat_kw("datalayout") { expect(.EQUAL, "'='"); ir.datalayout = parse_string(); dl_init(ir.datalayout); }
+                    else if eat_kw("datalayout") { expect(.EQUAL, "'='"); s := parse_string(); if !cl_data_layout.count { ir.datalayout = s; dl_init(ir.datalayout); } }
                 } else { expect(.EQUAL, "'='"); ir.source_filename = parse_string(); saw_source_filename = true; }
                 return;
             }

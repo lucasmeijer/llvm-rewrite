@@ -139,7 +139,7 @@ Pass_Kind :: enum u8 {
     // analysis utilities (required: they run on optnone functions and don't count for -opt-bisect-limit)
     REQUIRE; INVALIDATE; PRINT_DOMTREE; PRINT_POSTDOMTREE; PRINT_DEMANDED_BITS; NO_OP_FUNCTION; NO_OP_MODULE;
     // transforms
-    DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG; INSTSIMPLIFY;
+    DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG; INSTSIMPLIFY; SROA;
 }
 
 Pass_Info :: struct {
@@ -159,6 +159,14 @@ PASS_TABLE :: Pass_Info.[
     .{"bdce", .FUNCTION, .BDCE, false, .DOMTREE},
     .{"break-crit-edges", .FUNCTION, .BREAK_CRIT_EDGES, false, .DOMTREE},
     .{"mem2reg", .FUNCTION, .MEM2REG, false, .DOMTREE},
+    .{"sroa", .FUNCTION, .SROA, false, .DOMTREE},
+    .{"sroa<preserve-cfg>", .FUNCTION, .SROA, false, .DOMTREE},
+    .{"sroa<modify-cfg>", .FUNCTION, .SROA, false, .DOMTREE},
+    .{"sroa<aggregate-to-vector>", .FUNCTION, .SROA, false, .DOMTREE},
+    .{"sroa<preserve-cfg;aggregate-to-vector>", .FUNCTION, .SROA, false, .DOMTREE},
+    .{"sroa<modify-cfg;aggregate-to-vector>", .FUNCTION, .SROA, false, .DOMTREE},
+    .{"sroa<aggregate-to-vector;preserve-cfg>", .FUNCTION, .SROA, false, .DOMTREE},
+    .{"sroa<aggregate-to-vector;modify-cfg>", .FUNCTION, .SROA, false, .DOMTREE},
     .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
     .{"require<assumptions>", .FUNCTION, .REQUIRE, true, .ASSUMPTIONS},
@@ -372,15 +380,18 @@ opts: struct {
     adce_remove_loops := false;          // ADCE.cpp -adce-remove-loops
     opt_bisect_limit: s64 = -1;          // OptBisect.cpp -opt-bisect-limit
     verify_dom_info := false;            // -verify-dom-info (only checks; output unaffected)
+    sroa_skip_mem2reg := false;          // SROA.cpp -sroa-skip-mem2reg
 };
+cl_data_layout: string;                  // opt -data-layout (overrides the module's datalayout)
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(4, Cl_Opt,, allocator = temp);
+    list := NewArray(5, Cl_Opt,, allocator = temp);
     list[0] = .{"adce-remove-control-flow", .BOOL, *opts.adce_remove_control_flow, null};
     list[1] = .{"adce-remove-loops", .BOOL, *opts.adce_remove_loops, null};
     list[2] = .{"opt-bisect-limit", .INT, null, *opts.opt_bisect_limit};
     list[3] = .{"verify-dom-info", .BOOL, *opts.verify_dom_info, null};
+    list[4] = .{"sroa-skip-mem2reg", .BOOL, *opts.sroa_skip_mem2reg, null};
     return list;
 }
 
@@ -499,6 +510,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .BREAK_CRIT_EDGES; return break_crit_edges_run(f);
         case .MEM2REG; return mem2reg_run(f);
         case .INSTSIMPLIFY; return instsimplify_run(f);
+        case .SROA; return sroa_run(f, node.name);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;
@@ -528,6 +540,10 @@ opt_main :: () {
             continue;
         }
         if a == "-passes" || a == "--passes" { if i >= args.count fatal("-passes needs a value"); passes = args[i]; i += 1; have_passes = true; continue; }
+        if begins_with(a, "-data-layout=") || begins_with(a, "--data-layout=") {
+            cl_data_layout = slice(a, find_index_from_left(a, #char "=") + 1, a.count - find_index_from_left(a, #char "=") - 1);
+            continue;
+        }
         if a == "-O0" || a == "-O1" || a == "-O2" || a == "-O3" || a == "-Os" || a == "-Oz"
             fatal("'%' pipelines are not implemented yet (only -passes=<pipeline> with the passes in impl/jai/src/passes.jai)", a);
         if begins_with(a, "-") && a != "-" {
