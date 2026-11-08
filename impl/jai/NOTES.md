@@ -277,3 +277,40 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   domtree.jai doesn't have yet; it changes DT child order, so `loop-mssa(loop-rotate)` can't reuse the plain
   `dt_apply_updates`. Test with `print<memoryssa>` after `loop-mssa(loop-rotate)` (Analysis/MemorySSA/
   loop-rotate-update.ll) and a sweep of that pipeline (`tools/sweep.py ... --analysis`).
+
+## InstCombine (L1.instcombine.arith 48/115 ::opt; DESIGN.md §11)
+
+- Ported completely, in LLVM's order: the driver (InstructionCombining.cpp `prepareWorklist`/`run`/sinking/
+  fixpoint verification), the shared binop folds, InstCombineAddSub.cpp (incl. FAddCombine and the FP visitors),
+  InstCombineNegator.cpp, InstCombineMulDivRem.cpp (int and FP), the integer half of
+  InstCombineSimplifyDemanded.cpp, `convertOrOfShiftsToFunnelShift`, `mergeStoreIntoSuccessor`.
+- **Partial visitors** (ic_misc.jai: their comments say where they stop): icmp (up to canonicalizeICmpPredicate),
+  fcmp, select, and/or/xor (up to SimplifyDemandedInstructionBits), shifts (start of commonShiftTransforms +
+  setShiftFlags), casts (commonCastTransforms; zext/sext/trunc/[su]itofp flag folds), call (InstSimplify +
+  nounwind inference), phi, gep, load, freeze, extractvalue, vector ops (InstSimplify only), terminators (ret,
+  unreachable, br, condbr complete; switch not at all). A fold missing from these silently does not fire, so most
+  arith tests that still fail do so because of folds in those files (select/icmp/and/shift canonicalizations).
+- Fail loudly (grep `not supported yet` in ic_*.jai): SimplifyDemandedFPClass (nofpclass returns; 28 InstCombine
+  tests), SimplifyDemandedVectorElts, foldVectorBinop's unshuffleConstant/vector.insert/reverse/splice cases,
+  LowerDbgDeclare (any `#dbg_declare`), sinking or salvaging instructions with debug users, visitFree,
+  simplifyNonNullOperand, sin/cos -> tan, convertFSqrtDivIntoFMul, mergeStoreIntoSuccessor with AA metadata,
+  `!annotation` metadata, dropping UB-implying call attributes. `SimplifyDemandedInstructionFPClass` at the end of
+  visitFMul is skipped silently (it is reached for every fmul; a design debt).
+- Remaining arith failures that are not about other visitors: `sdiv-1` (cgscc inline), `storemerge-dbg`
+  (debugify), `fptoui-of-fdiv` (ppc_fp128 folding), `sub-gep` (scalable GEP strides), `simplify-demanded-fpclass-fdiv`,
+  `remquo*` (LibCallSimplifier), `fsqrtdiv-transform`, `fdiv-sin-cos`/`fdiv-cos-sin` (tan libcall emission).
+- `instcombine` runs a second iteration and fails like LLVM (`did not reach a fixpoint`) if it changes anything;
+  with this partial port that usually means a missing fold that would have revisited an instruction in iteration 1
+  (fold-vector-zero.ll: the unported `icmp slt (add X, C), C2` fold is what makes LLVM revisit and infer `nsw`).
+- The Negator records its instructions through `negator` (global pointer) in `icb_insert`; anything that builds
+  while it runs must go through `icb_*`.
+- Shared changes: Simplify_Query has `dc: *Dom_Cond_Cache` (analysis_base.jai), used by computeKnownBitsFromContext,
+  isKnownToBeAPowerOfTwo, isKnownNonEqualFromContext and computeKnownFPClassFromContext like LLVM; InstSimplify does
+  not set it. `cl::opt`s: `-instcombine-code-sinking`, `-instcombine-lower-dbg-declare`,
+  `-instcombine-max-sink-users`, `-instcombine-maxarray-size`, `-instcombine-negator-enabled`; `-mtriple X` (space
+  form) is accepted.
+- Perf (x64 build, tests/perf/scaling/straightline): `opt -passes=instcombine` is ~21x LLVM's CPU time (parse
+  alone 4.4x), scaling exponent 1.05 (LLVM 1.09): linear. The time is ValueTracking (computeKnownBits /
+  ComputeNumSignBits with temp-allocating APInt ops, ~60% inclusive), not the combiner.
+- Jai traps: `xx` is the auto-cast operator, not an identifier; `for < k: 0..n-1` iterates n-1 down to 0 (the
+  reverse of what the range text suggests if you write `n-1..0`, which silently runs zero times).

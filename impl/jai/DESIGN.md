@@ -378,3 +378,56 @@ recomputing gives a different child order.
   are absorbed); `insert_at_position(i, bb, pt, head)` is `insertBefore(It)`. `records_take/prepend/append`
   manipulate the per-instruction lists; erasing a terminator with records needs `records_take` first (there is no
   "trailing records" state in this implementation).
+
+## 11. InstCombine (instcombine.jai and ic_*.jai)
+
+Port of `llvm/lib/Transforms/InstCombine/`. `instcombine.jai` `#load`s the files; add new `ic_*.jai` files there
+(not in opt.jai).
+
+| File | LLVM source |
+| --- | --- |
+| `ic_core.jai` | InstructionCombining.cpp driver (`prepareWorklist`, `run`, sinking, `combineInstructionsOverFunction`, `InstCombinePass::run` + `instcombine<...>` params), InstructionWorklist.h, the InstCombiner.h helpers (`replaceInstUsesWith`, `eraseInstFromFunction`, `replaceOperand`, `InsertNewInstBefore/With`, `getComplexity`, `AddOne/SubOne`), IRBuilder<TargetFolder, IRBuilderInstCombineInserter> (`icb_*`), the unlinked `BinaryOperator::Create*` family (`create_*`) |
+| `ic_binop.jai` | InstructionCombining.cpp folds shared by binops: `SimplifyAssociativeOrCommutative`, distributive laws, `FoldOpIntoSelect`, `foldOpIntoPhi`, `foldBinopWithPhiOperands`, `foldVectorBinop`, `narrowMathIfNoOverflow`, `getFreelyInvertedImpl`, `dyn_castNegVal`, ... and the `willNotOverflow*` / `computeKnownBits` wrappers of InstCombineInternal.h |
+| `ic_pattern.jai` | PatternMatch matchers not in pattern.jai (instruction-only casts `pmi_cast`, `pm_ob` = OverflowingBinaryOp_match, `pm_disjoint_or`, ...) |
+| `ic_addsub.jai`, `ic_fp_addsub.jai`, `ic_negator.jai` | InstCombineAddSub.cpp (incl. FAddCombine), InstCombineNegator.cpp |
+| `ic_muldivrem.jai`, `ic_fp_muldivrem.jai` | InstCombineMulDivRem.cpp |
+| `ic_demanded.jai` | InstCombineSimplifyDemanded.cpp, integer half (`SimplifyDemandedUseBits`, `SimplifyMultipleUseDemandedBits`, ...) |
+| `ic_misc.jai` | `ic_visit` (the opcode switch = InstVisitor) and the *partial* visitors of files not ported yet (icmp, select, casts, shifts, and/or/xor, calls, phi, gep, terminators, mergeStoreIntoSuccessor) |
+
+**State.** One global `ic: Ic_State` (= one `InstCombinerImpl`), reset per iteration like LLVM's per-iteration
+object: worklist, DomConditionCache (`ic.dc`, also reachable through `ic.sq.dc` so every ValueTracking query made
+with `ic_q(i)` = `SQ.getWithInstruction(I)` sees the registered branches), dead edges, back edges, the Builder
+(`ic.b` insertion point + `ic.b_fmf` default fast-math flags).
+
+**Visitor contract** (exactly LLVM's `Instruction *visitX`): return `NONE` = no change; the instruction itself =
+changed in place, or its uses were replaced (`ic_replace_inst_uses_with` returns it); any other value = a new
+**unlinked** instruction that replaces it. The driver (`ic_run_worklist`) inserts the new instruction at the old
+one's position, copies the debug location, RAUWs, moves the name (`ic_take_name`, LLVM's `takeName` semantics:
+the target loses its own name even when the source has none) and erases the old one.
+
+**Creating instructions.** Use `icb_*` for `Builder.CreateX(...)`: it constant-folds like TargetFolder, inserts at
+`ic.b`, names after insertion (so uniquing sees the function's symbol table, as IRBuilder does) and adds the
+instruction to the worklist (deferred). Use `create_*` (`create_binop`, `create_binop_flags`, `create_cast`,
+`create_icmp`, `create_select`, `create_fop`, ...) for `BinaryOperator::Create(...)` & co. that a visitor returns
+or inserts with `ic_insert_new_inst_before/with`. A name given to an unlinked instruction is only stored; the
+symbol table sees it when the instruction is linked (`ic_reinsert_name`, ValueSymbolTable::reinsertValue).
+`ic_create_select_unknown_profile` = `createSelectInstWithUnknownProfile`. Save/restore the builder around
+`IRBuilderBase::InsertPointGuard` regions with `saved := ic.b; defer ic.b = saved;`.
+
+**Matching.** LLVM's `match(V, m_X(...))` becomes a `pm_*`/`pmi_*` call returning `(ok, captures...)`; commuted
+matchers (`m_c_*`) are explicit `for side: 0..1` loops in LLVM's operand order (first the written order, then the
+swapped one). Keep LLVM's instruction-vs-operator distinction (pattern.jai header). `m_OneUse` is `has_one_use`.
+`m_Deferred` is an equality test on an earlier capture.
+
+**How to add a fold** (for the bitwise/cmp/select/cast/memory sub-units):
+1. Find the LLVM visitor (`grep -n "visitX" InstCombine*.cpp`). If `ic_misc.jai` has a partial visitor for it,
+   move it into a new `ic_<file>.jai` named after the LLVM file and add the file to `instcombine.jai`.
+2. Port the visitor top to bottom *in LLVM's order* — the first fold that fires wins, so order is behaviour. Each
+   helper keeps its LLVM name in snake case with the `ic_` prefix (`foldICmpWithConstant` -> `ic_fold_icmp_with_constant`).
+3. Every query uses the same SimplifyQuery as LLVM: `ic_q(i)` for `SQ.getWithInstruction(&I)`, `ic.sq` for plain
+   `SQ`, `ic_q_no_dc` / `num_sign_bits_ctx` where LLVM calls the `DL, AC, CxtI, DT` overloads (no DomConditionCache).
+4. Something you can't port yet: `fatal("instcombine: <what> is not supported yet")` at the point where LLVM would
+   act, guarded by the pattern's own preconditions so unrelated code is unaffected.
+5. Check `./harness/run check --impl jai --unit L1.instcombine.<x>`, then the whole InstCombine directory
+   (`'tests/imported/llvm/Transforms/InstCombine/*'`): a new fold can expose fixpoint differences elsewhere
+   (`did not reach a fixpoint` = our iteration 2 changed something LLVM's iteration 1 already did).
