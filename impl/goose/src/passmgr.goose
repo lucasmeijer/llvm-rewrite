@@ -16,6 +16,10 @@ import adce;
 import bdce;
 import mem2reg;
 import demandedbits;
+import analyses;
+import loopinfo;
+import cycleinfo;
+import breakcrit;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -37,6 +41,12 @@ let P_INVALIDATE = 107;     // invalidate<analysis>
 let P_NOOP_FUNCTION = 108;
 let P_VERIFY_FUNCTION = 109;
 let P_MEM2REG = 130;
+let P_BREAK_CRIT_EDGES = 110;
+let P_PRINT_LOOPS = 111;
+let P_PRINT_CYCLES = 112;
+let P_VERIFY_CYCLES = 113;
+let P_VERIFY_DOMTREE = 114;
+let P_VERIFY_LOOPS = 115;
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
 // (PassInfoMixin::isRequired: printers, verifier, require/invalidate, adaptors).
@@ -52,6 +62,12 @@ let PASS_TABLE: const u8[:][] = [
     "f:no-op-function:108:0",
     "f:verify:109:1",
     "f:mem2reg:130:0",
+    "f:break-crit-edges:110:0",
+    "f:print<loops>:111:1",
+    "f:print<cycles>:112:1",
+    "f:verify<cycles>:113:1",
+    "f:verify<domtree>:114:1",
+    "f:verify<loops>:115:1",
 ];
 
 // LLVM pass class names, for -opt-bisect-limit messages.
@@ -61,26 +77,22 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_ADCE => "ADCEPass",
         P_BDCE => "BDCEPass",
         P_MEM2REG => "PromotePass",
+        P_BREAK_CRIT_EDGES => "BreakCriticalEdgesPass",
         P_NOOP_MODULE => "NoOpModulePass",
         P_NOOP_FUNCTION => "NoOpFunctionPass",
         _ => "Pass",
     }
 }
 
-// Analyses (bit i of a preserved set). CFG analyses are those LLVM marks preserved by preserveSet<CFGAnalyses>.
-let A_DOMTREE = 0;
-let A_POSTDOMTREE = 1;
-let A_DEMANDED_BITS = 2;     // computed per query; listed so require<>/invalidate<> parse
-let A_VERIFY = 20;          // VerifierAnalysis: require<verify> is accepted; no verifier yet (the harness verifies our output)
-let PA_ALL: u32 = 0xFFFFFFFF;
-let PA_NONE: u32 = 0;
-let PA_CFG: u32 = 3;          // domtree | postdomtree
+// Analyses: ids and preserved sets are in analyses.goose.
 
 fn analysis_id(name: const u8[:]) -> i64 {
     if name == "domtree" { return A_DOMTREE; }
     if name == "postdomtree" { return A_POSTDOMTREE; }
     if name == "demanded-bits" { return A_DEMANDED_BITS; }
     if name == "verify" { return A_VERIFY; }
+    if name == "loops" { return A_LOOPS; }
+    if name == "cycles" { return A_CYCLES; }
     return -1;
 }
 
@@ -386,11 +398,15 @@ fn invalidate_function(fv: i32, preserved: u32) {
     slots_invalidate();
     if (preserved & (1 << A_DOMTREE)) == 0 { dt_invalidate(fv, DT_DOM); }
     if (preserved & (1 << A_POSTDOMTREE)) == 0 { dt_invalidate(fv, DT_POST); }
+    if (preserved & (1 << A_LOOPS)) == 0 { li_invalidate(fv); }
+    if (preserved & (1 << A_CYCLES)) == 0 { ci_invalidate(fv); }
 }
 
 fn require_analysis(fv: i32, a: i64) {
     if a == A_DOMTREE { dt_get(fv, DT_DOM); }
     else if a == A_POSTDOMTREE { dt_get(fv, DT_POST); }
+    else if a == A_LOOPS { li_get(fv); }
+    else if a == A_CYCLES { ci_get(fv); }
 }
 
 fn run_function_pass(n: i32, fv: i32) -> u32 {
@@ -406,6 +422,12 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_REQUIRE => { require_analysis(fv, pnodes[n].arg as i64); return PA_ALL; },
         P_INVALIDATE => { return PA_ALL & ~((1 as u32) << pnodes[n].arg); },
         P_NOOP_FUNCTION, P_VERIFY_FUNCTION => { return PA_ALL; },
+        P_BREAK_CRIT_EDGES => { return break_crit_edges_run(fv); },
+        P_PRINT_LOOPS => { print_loops(fv); return PA_ALL; },
+        P_PRINT_CYCLES => { print_cycles(fv); return PA_ALL; },
+        P_VERIFY_CYCLES => { ci_get(fv); return PA_ALL; },
+        P_VERIFY_DOMTREE => { dt_get(fv, DT_DOM); return PA_ALL; },
+        P_VERIFY_LOOPS => { li_get(fv); return PA_ALL; },
         _ => { fatal("internal: unknown function pass id"); return PA_ALL; },
     }
 }

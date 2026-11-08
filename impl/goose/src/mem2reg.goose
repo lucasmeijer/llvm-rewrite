@@ -14,6 +14,7 @@
 import std;
 import ir;
 import irutil;
+import analyses;
 import calls;
 import instinfo;
 import local;
@@ -1389,5 +1390,5 @@ fn mem2reg_run(fv: i32) -> u32 {
         changed = true;
     }
     if !changed { return 0xFFFFFFFF; }
-    return 3;     // CFGAnalyses (PA_CFG)
+    return PA_CFG;     // CFGAnalyses
 }

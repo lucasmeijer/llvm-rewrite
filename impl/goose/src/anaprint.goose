@@ -13,7 +13,11 @@ fn print_domtree(fv: i32, t: i64) {
     dt_get(fv, t);
     errs("=============================--------------------------------\n");
     errs(if t == DT_DOM { "Inorder Dominator Tree: " } else { "Inorder PostDominator Tree: " });
-    errs("DFSNumbers invalid: 0 slow queries.");
+    if !dt_dfs_valid(fv, t) {
+        errs("DFSNumbers invalid: ");
+        errs_int(dt_slow_queries(fv, t));
+        errs(" slow queries.");
+    }
     errs("\n");
     let root = dt_root(fv, t);
     if root != -1 {
@@ -30,7 +34,11 @@ fn print_domtree(fv: i32, t: i64) {
             errs_int(lev as i64);
             errs("] ");
             if n == DT_VROOT { errs(" <<exit node>>"); } else { errs_operand(n, fv, false); }
-            errs(" {4294967295,4294967295} [");
+            errs(" {");
+            errs_int(dt_dfs_in(fv, t, n) as i64);
+            errs(",");
+            errs_int(dt_dfs_out(fv, t, n) as i64);
+            errs("} [");
             errs_int(if n == DT_VROOT { 0 } else { dt_level(t, n) as i64 });
             errs("]\n");
             let mark = sn.len;

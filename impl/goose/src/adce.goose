@@ -1,17 +1,19 @@
 // ADCE: port of llvm/lib/Transforms/Scalar/ADCE.cpp (AggressiveDeadCodeElimination), with
 // FindFunctionBackedges (llvm/lib/Analysis/CFG.cpp) and ReverseIDFCalculator
 // (llvm/include/llvm/Support/GenericIteratedDominanceFrontier.h).
-// Not ported: debug-info scope liveness (we have no DILocation/debug records yet) and the incremental
-// (post)dominator tree update after removing edges (we invalidate both trees instead; DESIGN.md §8.5).
+// The deleted CFG edges are applied to the cached dominator tree and the post-dominator tree through an
+// eager DomTreeUpdater (dtu.goose), and both trees are preserved, as in LLVM.
 import std;
 import ir;
 import irutil;
+import analyses;
 import calls;
 import instinfo;
 import local;
 import tli;
 import flags;
 import domtree;
+import dtu;
 import dinfo;
 
 fn adce_run(fv: i32) -> u32 {
@@ -191,6 +193,7 @@ fn adce_run(fv: i32) -> u32 {
     // ReverseIDFCalculator over the post-dominator tree: defining blocks = NewLiveBlocks, live-in = BWDT.
     fn mark_live_branches_from_control_dependences() {
         if bwdt_count == 0 { return; }
+        dt_update_dfs_numbers(fv, DT_POST);     // IDFCalculatorBase::calculate
         var idf: i32[>..<] = [];
         var vis_pq: bool[>..<] = [];
         var vis_wl: bool[>..<] = [];
@@ -281,6 +284,7 @@ fn adce_run(fv: i32) -> u32 {
             }
         }
     }
+    var deleted_edges: DTUpdate[>..<] = [];
     for bb in bwdt {
         if !vs_has(VS_PASS1, bb) { continue; }
         let t = block_last(bb);
@@ -313,6 +317,12 @@ fn adce_run(fv: i32) -> u32 {
         if tdl >= 0 { inst_set_md(br, 0, tdl); }
         inst_erase_from_parent(t);
         changed_cf = true;
+        for s in removed { if s != pref { deleted_edges.push(DTUpdate { kind: DT_DELETE, from: bb, to: s }); } }
+    }
+    if deleted_edges.len > 0 {
+        dtu_begin(fv, true, true, false);
+        dtu_apply_updates(deleted_edges);
+        dtu_end();
     }
 
     // Erase everything not live, in reverse instruction order.
@@ -344,8 +354,8 @@ fn adce_run(fv: i32) -> u32 {
     for i in dead { drop_all_refs(i); }
     for i in dead { inst_erase_from_parent(i); }
     if !changed_cf && dead.len == 0 { return 0xFFFFFFFF; }
-    if !changed_cf { return 3; }
-    return 0;
+    if !changed_cf { return PA_CFG; }
+    return ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_POSTDOMTREE);
 }
 
 // depth_first over a post-dominator subtree (pre-order).

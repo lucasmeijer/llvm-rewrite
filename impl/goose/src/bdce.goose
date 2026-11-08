@@ -2,6 +2,7 @@
 import std;
 import ir;
 import irutil;
+import analyses;
 import instinfo;
 import local;
 import demandedbits;
@@ -98,5 +99,5 @@ fn bdce_run(fv: i32) -> u32 {
     for i in wl { inst_erase_from_parent(i); }
     db_invalidate();
     if !changed { return 0xFFFFFFFF; }
-    return 3;
+    return PA_CFG;
 }

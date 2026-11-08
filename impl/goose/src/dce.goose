@@ -2,6 +2,7 @@
 import std;
 import ir;
 import irutil;
+import analyses;
 import instinfo;
 import local;
 import tli;
@@ -38,5 +39,5 @@ fn dce_run(fv: i32) -> u32 {
         if dce_instruction(i, wl) { changed = true; }
     }
     if !changed { return 0xFFFFFFFF; }
-    return 3;    // preserveSet<CFGAnalyses>
+    return PA_CFG;    // preserveSet<CFGAnalyses>
 }
