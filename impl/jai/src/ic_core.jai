@@ -531,14 +531,31 @@ copy_prof_unpredictable :: (dst: Value_Id, src: Value_Id) {
     if prof != NONE set_metadata(dst, md_kind_id("prof"), prof);
     if unpred != NONE set_metadata(dst, md_kind_id("unpredictable"), unpred);
 }
-// setExplicitlyUnknownBranchWeightsIfProfiled: only matters for functions with an entry count
-ic_check_no_profile :: () {
-    if get_metadata(ic.f, md_kind_id("prof")) != NONE fatal("instcombine: selects in functions with profile data (unknown branch weights) are not supported yet");
+// Function::getEntryCount: !prof !{!"function_entry_count" | !"synthetic_function_entry_count", i64 N}
+fn_entry_count :: (f: Value_Id) -> (bool, u64) {
+    m := get_metadata(f, md_kind_id("prof"));
+    if m == NONE || ir.mds[m].kind != .TUPLE || ir.mds[m].nops < 2 return false, 0;
+    tag := md_op(m, 0);
+    if tag == NONE || ir.mds[tag].kind != .STRING return false, 0;
+    t := ir.mds[tag].str;
+    if t != "function_entry_count" && t != "synthetic_function_entry_count" return false, 0;
+    vm := md_op(m, 1);
+    if vm == NONE || ir.mds[vm].kind != .VALUE || vkind(ir.mds[vm].value) != .C_INT return false, 0;
+    return true, const_int_zext(ir.mds[vm].value);
+}
+// setExplicitlyUnknownBranchWeightsIfProfiled(I, "instcombine")
+ic_set_unknown_profile_if_profiled :: (i: Value_Id) {
+    ok, ec := fn_entry_count(ic.f);
+    if !ok || ec == 0 return;
+    ops: [2] Md_Id;
+    ops[0] = md_string("unknown"); ops[1] = md_string("instcombine");
+    set_metadata(i, md_kind_id("prof"), md_tuple(ops, false));
 }
 // createSelectInstWithUnknownProfile (an unlinked select)
 ic_create_select_unknown_profile :: (c: Value_Id, t: Value_Id, f: Value_Id) -> Value_Id {
-    ic_check_no_profile();
-    return create_select(c, t, f);
+    s := create_select(c, t, f);
+    ic_set_unknown_profile_if_profiled(s);
+    return s;
 }
 
 // CreateIntrinsic(RetTy or overload types, ID, Args) / CreateBinaryIntrinsic / CreateUnaryIntrinsic
@@ -751,7 +768,7 @@ ic_sink_block :: (i: Value_Id) -> Value_Id {
         if is_droppable_user(user) {
             if !is_intrinsic_call(user, IID_ASSUME) || !call_has_bundle(user, "dereferenceable") continue;
         }
-        if num_users > 32 return NONE;   // -instcombine-max-sink-users
+        if num_users > opts.instcombine_max_sink_users return NONE;
         user_bb := inst_block(user);
         if inst_op(user) == .PHI user_bb = ir.u_aux[u];
         if user_parent != NONE && user_parent != user_bb return NONE;
@@ -786,7 +803,8 @@ ic_run_worklist :: () -> bool {
         if vkind(i) == .DEAD continue;
         if is_instruction_trivially_dead(i) { ic_erase_inst(i); continue; }
 
-        sink_bb := ic_sink_block(i);
+        sink_bb: Value_Id = NONE;
+        if opts.instcombine_code_sinking sink_bb = ic_sink_block(i);
         if sink_bb != NONE {
             if ic_try_to_sink(i, sink_bb) {
                 ic.made_ir_change = true;
@@ -1007,15 +1025,15 @@ switch_find_case_dest :: (sw: Value_Id, c: Value_Id) -> Value_Id {
 }
 
 // combineInstructionsOverFunction
-ic_combine_function :: (f: Value_Id, opts: Ic_Options) -> bool {
-    verify := opts.verify_fixpoint && !fn_has_str_attr(f, "instcombine-no-verify-fixpoint");
+ic_combine_function :: (f: Value_Id, icopts: Ic_Options) -> bool {
+    verify := icopts.verify_fixpoint && !fn_has_str_attr(f, "instcombine-no-verify-fixpoint");
     rpo: [..] Value_Id; rpo.allocator = temp;
     po: [..] Value_Id; po.allocator = temp;
     cfg_post_order(fn_entry(f), *po);
     for < k: 0..po.count-1 array_add(*rpo, po[k]);
     made := false;
-    // LowerDbgDeclare
-    for b: fn_blocks(f) for i: block_insts(b) {
+    // LowerDbgDeclare (-instcombine-lower-dbg-declare)
+    if opts.instcombine_lower_dbg_declare for b: fn_blocks(f) for i: block_insts(b) {
         r := inst(i).records;
         while r { if dbgr(r).kind == .DECLARE fatal("instcombine: LowerDbgDeclare (#dbg_declare) is not supported yet"); r = dbgr(r).next; }
     }
@@ -1023,7 +1041,7 @@ ic_combine_function :: (f: Value_Id, opts: Ic_Options) -> bool {
     dt := get_domtree(f);
     ac := get_assumption_cache(f);
     while true {
-        if iteration >= opts.max_iterations && !verify break;
+        if iteration >= icopts.max_iterations && !verify break;
         iteration += 1;
         // a fresh InstCombinerImpl per iteration
         ic = .{};
@@ -1033,36 +1051,37 @@ ic_combine_function :: (f: Value_Id, opts: Ic_Options) -> bool {
         ic.dead_edges.allocator = temp; ic.back_edges.allocator = temp; ic.pred_order.allocator = temp;
         ic.rpot = rpo;
         ic.min_size = fn_has_fn_attr(f, .MinSize);
+        ic.max_array_size = cast(u64) opts.instcombine_maxarray_size;
         ic.sq.dt = dt; ic.sq.ac = ac; ic.sq.dc = *ic.dc;
         changed := ic_prepare_worklist();
         changed |= ic_run_worklist();
         if !changed break;
         made = true;
-        if iteration > opts.max_iterations
-            fatal("Instruction Combining on % did not reach a fixpoint after % iterations. Use 'instcombine<no-verify-fixpoint>' or function attribute 'instcombine-no-verify-fixpoint' to suppress this error.", vname(f), opts.max_iterations);
+        if iteration > icopts.max_iterations
+            fatal("Instruction Combining on % did not reach a fixpoint after % iterations. Use 'instcombine<no-verify-fixpoint>' or function attribute 'instcombine-no-verify-fixpoint' to suppress this error.", vname(f), icopts.max_iterations);
     }
     return made;
 }
 
 // InstCombinePass::run with the parameters of `instcombine<...>` (PassBuilder parseInstCombineOptions)
 instcombine_run :: (f: Value_Id, name: string) -> Preserved {
-    opts: Ic_Options;
+    icopts: Ic_Options;
     if name != "instcombine" {
         if !begins_with(name, "instcombine<") || name[name.count - 1] != #char ">" fatal("invalid pass name '%'", name);
         params := slice(name, 12, name.count - 13);
         for p: split(params, ";") {
             if p == "" continue;
-            if p == "verify-fixpoint" { opts.verify_fixpoint = true; continue; }
-            if p == "no-verify-fixpoint" { opts.verify_fixpoint = false; continue; }
+            if p == "verify-fixpoint" { icopts.verify_fixpoint = true; continue; }
+            if p == "no-verify-fixpoint" { icopts.verify_fixpoint = false; continue; }
             if begins_with(p, "max-iterations=") {
                 v, ok := string_to_int(slice(p, 15, p.count - 15));
                 if !ok fatal("invalid argument to InstCombine pass max-iterations parameter: '%'", p);
-                opts.max_iterations = cast(u32) v;
+                icopts.max_iterations = cast(u32) v;
                 continue;
             }
             fatal("invalid InstCombine pass parameter '%'", p);
         }
     }
-    if !ic_combine_function(f, opts) return PRESERVE_ALL;
+    if !ic_combine_function(f, icopts) return PRESERVE_ALL;
     return preserved_cfg();
 }

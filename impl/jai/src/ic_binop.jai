@@ -35,7 +35,8 @@ ic_will_not_overflow :: (opc: Opcode, l: Value_Id, r: Value_Id, cxt: Value_Id, i
 // InstCombiner wrappers around ValueTracking with SQ.getWithInstruction(CxtI)
 ic_known_bits :: (v: Value_Id, cxt: Value_Id, depth: u32 = 0) -> Known_Bits { return known_bits(v, ic_q(cxt), depth); }
 ic_masked_value_is_zero :: (v: Value_Id, mask: APInt, cxt: Value_Id, depth: u32 = 0) -> bool { return masked_value_is_zero(v, mask, ic_q(cxt), depth); }
-ic_num_sign_bits :: (v: Value_Id, cxt: Value_Id, depth: u32 = 0) -> u32 { return num_sign_bits(v, ic_q(cxt), depth); }
+// InstCombiner::ComputeNumSignBits: llvm::ComputeNumSignBits(Op, DL, &AC, CxtI, &DT): no DomConditionCache, safeCxtI
+ic_num_sign_bits :: (v: Value_Id, cxt: Value_Id, depth: u32 = 0) -> u32 { return num_sign_bits_ctx(v, cxt, ic.dt, ic.ac, depth); }
 ic_is_known_non_negative :: (v: Value_Id, cxt: Value_Id) -> bool { return is_known_non_negative(v, ic_q(cxt)); }
 ic_is_known_to_be_power_of_two :: (v: Value_Id, or_zero: bool, cxt: Value_Id) -> bool { return is_known_to_be_a_power_of_two(v, or_zero, ic_q(cxt)); }
 

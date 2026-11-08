@@ -511,6 +511,11 @@ opts: struct {
     use_constant_int_for_scalable_splat := false;       // Constants.cpp
     disable_simplify_libcalls := false;  // opt -disable-simplify-libcalls (TLII.disableAllFunctions)
     mtriple: string;                     // opt -mtriple
+    instcombine_code_sinking := true;    // InstructionCombining.cpp -instcombine-code-sinking
+    instcombine_lower_dbg_declare := true;   // -instcombine-lower-dbg-declare
+    instcombine_max_sink_users: s64 = 32;    // -instcombine-max-sink-users
+    instcombine_maxarray_size: s64 = 1024;   // -instcombine-maxarray-size
+    instcombine_negator_enabled := true;     // InstCombineNegator.cpp -instcombine-negator-enabled
 };
 cl_data_layout: string;                  // opt -data-layout (overrides the module's datalayout)
 
@@ -701,6 +706,7 @@ opt_main :: () {
         i += 1;
         if a == "-S" continue;
         if a == "-o" { if i >= args.count fatal("-o needs a file"); output = args[i]; i += 1; continue; }
+        if a == "-mtriple" || a == "--mtriple" { if i >= args.count fatal("-mtriple needs a value"); opts.mtriple = args[i]; i += 1; continue; }
         if a == "-disable-output" || a == "--disable-output" { disable_output = true; continue; }
         if begins_with(a, "-passes=") || begins_with(a, "--passes=") {
             eq := find_index_from_left(a, #char "=");

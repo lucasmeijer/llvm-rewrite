@@ -59,14 +59,7 @@
 #load "mssa_updater.jai";
 #load "pass_loop_simplify.jai";
 #load "pass_lcssa.jai";
-#load "ic_core.jai";
-#load "ic_pattern.jai";
-#load "ic_binop.jai";
-#load "ic_misc.jai";
-#load "ic_addsub.jai";
-#load "ic_fp_addsub.jai";
-#load "ic_negator.jai";
-#load "ic_muldivrem.jai";
+#load "instcombine.jai";
 #load "loop_pm.jai";
 #load "pass_loop_rotate.jai";
 

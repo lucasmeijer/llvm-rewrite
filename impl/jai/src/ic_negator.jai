@@ -222,6 +222,7 @@ neg_negate :: (n: *Negator, v: Value_Id, is_nsw: bool, depth: u32) -> Value_Id {
 
 // Negator::Negate
 negator_negate :: (lhs_is_zero: bool, is_nsw: bool, root: Value_Id) -> Value_Id {
+    if !opts.instcombine_negator_enabled return NONE;
     n: Negator;
     n.is_truly_negation = lhs_is_zero;
     n.new_insts.allocator = temp;
