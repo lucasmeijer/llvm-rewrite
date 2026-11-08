@@ -110,7 +110,7 @@ parse_top_level :: () {
                 return;
             }
             if t.text == "attributes" { next(); parse_attr_group(); return; }
-            if t.text == "uselistorder" || t.text == "uselistorder_bb" perr("uselistorder directives are not supported");
+            if t.text == "uselistorder" { parse_use_list_order(); return; }
             perr("expected top-level entity");
         case .LOCAL_VAR; parse_named_type(); return;
         case .LOCAL_ID; parse_unnamed_type(); return;
@@ -140,6 +140,48 @@ parse_module_asm :: () {
         last := *ir.module_asm[ir.module_asm.count - 1];
         last.* = intern_str(tprint("%1%2", last.*, s));
     } else array_add(*ir.module_asm, intern_str(s));
+}
+
+// LLParser::parseUseListOrder + parseUseListOrderIndexes + sortUseListOrder (Value::sortUseList is a stable sort
+// of the use list by the index given to each use, in current use-list order)
+parse_use_list_order :: () {
+    next();
+    v := parse_type_and_value();
+    expect(.COMMA, "comma in uselistorder directive");
+    expect(.LBRACE, "'{' here");
+    if P.tok.kind == .RBRACE perr("expected non-empty list of uselistorder indexes");
+    idx: [..] u32; idx.allocator = temp;
+    offset: s64 = 0; mx: u32 = 0; ordered := true;
+    while true {
+        i := cast(u32) parse_uint();
+        offset += cast(s64) i - idx.count;
+        mx = max(mx, i);
+        if i != cast(u32) idx.count ordered = false;
+        array_add(*idx, i);
+        if !eat(.COMMA) break;
+    }
+    expect(.RBRACE, "'}' here");
+    if idx.count < 2 perr("expected >= 2 uselistorder indexes");
+    if offset != 0 || mx >= cast(u32) idx.count perr("expected distinct uselistorder indexes in range [0, size)");
+    if ordered perr("expected uselistorder indexes to change the order");
+    k := vkind(v);
+    // ConstantData has no use list
+    if k == .C_INT || k == .C_FP || k == .C_NULL || k == .C_ZERO || k == .C_UNDEF || k == .C_POISON || k == .C_DATA || k == .C_TOKEN_NONE || k == .C_TARGET_NONE return;
+    uses: [..] Use_Id; uses.allocator = temp;
+    u := ir.v_first_use[v];
+    while u != NONE { array_add(*uses, u); u = ir.u_next[u]; }
+    if uses.count == 0 perr("value has no uses");
+    if uses.count < 2 perr("value only has one use");
+    if uses.count != idx.count perr("wrong number of indexes, expected %", uses.count);
+    sorted := NewArray(uses.count, Use_Id,, allocator = temp);
+    for uses sorted[idx[it_index]] = it;
+    prev: Use_Id = NONE;
+    for sorted {
+        ir.u_prev[it] = prev;
+        if prev == NONE ir.v_first_use[v] = it; else ir.u_next[prev] = it;
+        prev = it;
+    }
+    ir.u_next[prev] = NONE;
 }
 
 get_named_type :: (name: string) -> Type_Id {
@@ -836,7 +878,7 @@ parse_function_body :: (f: Value_Id) {
     resolve_fwd_blockaddresses(f);
     if P.tok.kind == .RBRACE perr("function body requires at least one basic block");
     while P.tok.kind != .RBRACE {
-        if is_kw("uselistorder") perr("uselistorder directives are not supported");
+        if is_kw("uselistorder") { parse_use_list_order(); continue; }
         parse_basic_block();
     }
     next();
