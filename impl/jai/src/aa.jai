@@ -616,6 +616,8 @@ inst_is_atomic :: (i: Value_Id) -> bool {
     return false;
 }
 ORD_MONOTONIC :: 2;
+ORD_ACQUIRE :: 4;
+ORD_RELEASE :: 5;
 is_stronger_than_monotonic :: inline (o: u8) -> bool { return o > ORD_MONOTONIC; }
 is_stronger_than_unordered :: inline (o: u8) -> bool { return o > ORD_UNORDERED; }
 

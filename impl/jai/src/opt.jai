@@ -58,6 +58,9 @@
 #load "scoped_noalias_aa.jai";
 #load "memoryssa.jai";
 #load "phi_trans_addr.jai";
+#load "memdep.jai";
+#load "vn_coercion.jai";
+#load "pass_gvn.jai";
 #load "globals_aa.jai";
 #load "loop_info.jai";
 #load "cycle_info.jai";

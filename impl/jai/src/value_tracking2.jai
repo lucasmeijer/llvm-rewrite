@@ -1705,6 +1705,7 @@ type_is_scalable :: (t: Type_Id) -> bool {
     k := type_kind(t);
     if k == .SVECTOR return true;
     if k == .STRUCT || k == .ARRAY { n := type_nsub(t); for i: 0..cast(s64) n - 1 if type_is_scalable(type_sub(t, cast(u32) i)) return true; }
+    if k == .TARGET_EXT return type_is_scalable(target_ext_layout_type(t));   // TargetExtType: its layout type
     return false;
 }
 // Value::stripAndAccumulateConstantOffsets (ExternalAnalysis = null)

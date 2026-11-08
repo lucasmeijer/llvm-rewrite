@@ -455,6 +455,12 @@ phi_identical_when_defined :: (a: Value_Id, b: Value_Id) -> bool {
 }
 eliminate_duplicate_phi_nodes :: (bb: Value_Id) -> bool {
     to_remove: [..] Value_Id; to_remove.allocator = temp;
+    changed := eliminate_duplicate_phi_nodes_collect(bb, *to_remove);
+    for to_remove erase_inst_with_metadata(it);
+    return changed;
+}
+// EliminateDuplicatePHINodes(BB, ToRemove): the duplicates are RAUW'd and collected, not erased
+eliminate_duplicate_phi_nodes_collect :: (bb: Value_Id, to_remove: *[..] Value_Id) -> bool {
     changed := false;
     nphis := 0;
     for block_insts(bb) { if inst_op(it) != .PHI break; nphis += 1; }
@@ -465,24 +471,23 @@ eliminate_duplicate_phi_nodes :: (bb: Value_Id) -> bool {
     while i != NONE && inst_op(i) == .PHI {
         pn := i;
         i = inst_next(i);
-        if set_based && block_set_contains(to_remove, pn) continue;
+        if set_based && block_set_contains(to_remove.*, pn) continue;
         j := i;
         restarted := false;
         while j != NONE && inst_op(j) == .PHI {
             dup := j;
             j = inst_next(j);
-            if block_set_contains(to_remove, dup) continue;
+            if block_set_contains(to_remove.*, dup) continue;
             same := ifx set_based then is_identical_to(dup, pn) else phi_identical_when_defined(dup, pn);
             if !same continue;
             rauw_with_metadata(dup, pn);
-            array_add(*to_remove, dup);
+            array_add(to_remove, dup);
             changed = true;
             restarted = true;
             break;
         }
         if restarted i = block_first(bb);
     }
-    for to_remove erase_inst_with_metadata(it);
     return changed;
 }
 

@@ -271,8 +271,21 @@ has_loop_or_entry_convergence_token :: (bb: Value_Id) -> bool {
     for i: block_insts(bb) if call_iid(i) == IID_EXPERIMENTAL_CONVERGENCE_LOOP || call_iid(i) == IID_EXPERIMENTAL_CONVERGENCE_ENTRY return true;
     return false;
 }
-// MergeBlockIntoPredecessor(BB, DTU (eager), LI, MSSAU, MemDep = null, PredecessorWithTwoSuccessors)
-merge_block_into_predecessor :: (bb: Value_Id, dt: *Dom_Tree, li: *Loop_Info, mssau: *Mssa_Updater, pred_with_two_succs := false) -> bool {
+// MergeBlockIntoPredecessor(BB, DTU (eager, or lazy when `lazy` is given), LI, MSSAU, MemDep = null,
+// PredecessorWithTwoSuccessors). A lazy DomTreeUpdater queues the updates and the deleted block in `lazy`
+// (lazy_dtu_flush applies them). MemDep is not a parameter: its only caller (GVN) passes a MemDep with empty caches,
+// for which removeInstruction / invalidateCachedPredecessors do nothing.
+Lazy_Dtu :: struct { dt: *Dom_Tree; pending: [..] Dom_Update; deleted: [..] Value_Id; }
+lazy_dtu_flush :: (l: *Lazy_Dtu) {
+    if l.dt && l.pending.count dt_apply_updates(l.dt, l.pending);
+    l.pending.count = 0;
+    for l.deleted {
+        if l.dt && dt_node(l.dt, it) >= 0 dt_erase_node(l.dt, it);
+        erase_block(it);
+    }
+    l.deleted.count = 0;
+}
+merge_block_into_predecessor :: (bb: Value_Id, dt: *Dom_Tree, li: *Loop_Info, mssau: *Mssa_Updater, pred_with_two_succs := false, lazy: *Lazy_Dtu = null) -> bool {
     if block_has_address_taken(bb) return false;
     pred := block_unique_predecessor(bb);
     if pred == NONE return false;
@@ -375,6 +388,11 @@ merge_block_into_predecessor :: (bb: Value_Id, dt: *Dom_Tree, li: *Loop_Info, ms
     }
     if vname(pred).count == 0 && vname(bb).count take_name(pred, bb);
     if li li_remove_block(li, bb);
+    if lazy {
+        for updates if it.from != it.to array_add(*lazy.pending, it);
+        array_add(*lazy.deleted, bb);   // DTU->deleteBB (lazy): the block keeps only its `unreachable` until flushed
+        return true;
+    }
     if dt && updates.count dt_apply_updates(dt, updates);
     // DeleteDeadBlock(BB, DTU): detachDeadBlocks (no successors left), DTU->deleteBB
     if dt && dt_node(dt, bb) >= 0 dt_erase_node(dt, bb);

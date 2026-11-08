@@ -201,6 +201,8 @@ Pass_Kind :: enum u8 {
     INFERATTRS;
     // Debugify (pass_debugify.jai)
     DEBUGIFY; CHECK_DEBUGIFY; REDUNDANT_DBG_INST_ELIM;
+    // GVN (pass_gvn.jai)
+    GVN;
 }
 
 Pass_Info :: struct {
@@ -233,6 +235,7 @@ PASS_TABLE :: Pass_Info.[
     .{"redundant-dbg-inst-elim", .FUNCTION, .REDUNDANT_DBG_INST_ELIM, false, .DOMTREE},
     .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
+    .{"gvn", .FUNCTION, .GVN, false, .DOMTREE},   // also gvn<...> (lookup_pass)
     .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},
     .{"simplifycfg", .FUNCTION, .SIMPLIFYCFG, false, .DOMTREE},   // also simplifycfg<...> (lookup_pass)   // also instcombine<...> (lookup_pass)
     .{"verify", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},   // VerifierPass (module & function): nothing to report on valid IR
@@ -293,6 +296,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if pass_table.count == 0 for PASS_TABLE array_add(*pass_table, it);
     for * pass_table if it.name == name return it;
     if begins_with(name, "instcombine<") return lookup_pass("instcombine");
+    if begins_with(name, "gvn<") && name[name.count - 1] == #char ">" return lookup_pass("gvn");
     if begins_with(name, "simplifycfg<") && name[name.count - 1] == #char ">" return lookup_pass("simplifycfg");
     // passes whose parameters are parsed by the pass itself (LOOP_PASS_WITH_PARAMS)
     if begins_with(name, "loop-rotate<") && name[name.count - 1] == #char ">" return lookup_pass("loop-rotate");
@@ -573,7 +577,8 @@ cl_data_layout: string;                  // opt -data-layout (overrides the modu
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT + GVN_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    add_gvn_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT);
     add_dbgify_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT);
     add_licm_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT);
     add_tti_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT);
@@ -727,6 +732,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .MEM2REG; return mem2reg_run(f);
         case .INSTSIMPLIFY; return instsimplify_run(f);
         case .SROA; return sroa_run(f, node.name);
+        case .GVN; return gvn_run(f, node.name);
         case .INSTCOMBINE; return instcombine_run(f, node.name);
         case .REDUNDANT_DBG_INST_ELIM; return redundant_dbg_inst_elim_run(f);
         case .SIMPLIFYCFG; return simplifycfg_run(node, f);
