@@ -1143,6 +1143,7 @@ tests/imported/llvm/Analysis/GlobalsModRef/noescape-nocapture-nocallback.ll::rou
 tests/imported/llvm/Analysis/GlobalsModRef/nonescaping-noalias.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/pr12351.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/pr25309.ll::roundtrip
+tests/imported/llvm/Analysis/GlobalsModRef/pr35899-dbg-value.ll::opt
 tests/imported/llvm/Analysis/GlobalsModRef/pr35899-dbg-value.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/purecse.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/self-addresstaken.ll::analysis
@@ -2396,6 +2397,7 @@ tests/imported/llvm/Transforms/CorrelatedValuePropagation/vectors.ll::roundtrip
 tests/imported/llvm/Transforms/CorrelatedValuePropagation/zext.ll::roundtrip
 tests/imported/llvm/Transforms/DCE/basic-preservation.ll::opt
 tests/imported/llvm/Transforms/DCE/basic-preservation.ll::roundtrip
+tests/imported/llvm/Transforms/DCE/basic.ll::opt
 tests/imported/llvm/Transforms/DCE/basic.ll::roundtrip
 tests/imported/llvm/Transforms/DCE/calls-errno.ll::opt
 tests/imported/llvm/Transforms/DCE/calls-errno.ll::roundtrip
@@ -6912,6 +6914,7 @@ tests/imported/llvm/Transforms/LCSSA/2007-07-12-LICM-3.ll::roundtrip
 tests/imported/llvm/Transforms/LCSSA/2007-07-12-LICM.ll::roundtrip
 tests/imported/llvm/Transforms/LCSSA/DontInsertDebugValuesForPHIs.ll::opt
 tests/imported/llvm/Transforms/LCSSA/DontInsertDebugValuesForPHIs.ll::roundtrip
+tests/imported/llvm/Transforms/LCSSA/basictest.ll::opt
 tests/imported/llvm/Transforms/LCSSA/basictest.ll::roundtrip
 tests/imported/llvm/Transforms/LCSSA/indirectbr.ll::opt
 tests/imported/llvm/Transforms/LCSSA/indirectbr.ll::roundtrip
@@ -8522,6 +8525,7 @@ tests/imported/llvm/Transforms/SCCP/lifetime.ll::opt
 tests/imported/llvm/Transforms/SCCP/lifetime.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/load-store-range.ll::opt
 tests/imported/llvm/Transforms/SCCP/load-store-range.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/loadtest.ll::opt
 tests/imported/llvm/Transforms/SCCP/loadtest.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/loadtest2.ll::opt
 tests/imported/llvm/Transforms/SCCP/loadtest2.ll::roundtrip
@@ -9565,6 +9569,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/PHINode.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/PHINode.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/PR25267.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/PR25267.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/PR27615-simplify-cond-br.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/PR27615-simplify-cond-br.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/PR9946.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/PR9946.ll::roundtrip
@@ -9617,6 +9622,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/X86/empty-cleanuppad.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/hoist-loads-stores-with-cf.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cleanuppads.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cleanuppads.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad-debuginfo.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad-debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad.ll::roundtrip
@@ -9718,6 +9724,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/dbginfo.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/dbginfo.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/dce-cond-after-folding-terminator.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/dce-cond-after-folding-terminator.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/debug-info-thread-phi.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/debug-info-thread-phi.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/div-rem-pairs.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/div-rem-pairs.ll::roundtrip
@@ -9917,6 +9924,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/profile-update-unreachable.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/profile-update-unreachable.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/rangereduce.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/rangereduce.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/return-merge.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/return-merge.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/safe-abs.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/safe-abs.ll::roundtrip
