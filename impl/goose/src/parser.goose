@@ -3248,6 +3248,32 @@ recursive fn parse_di_node(distinct: bool) -> i32 {
         if mstack[mark + ui] >= 0 && mstack[mark + di_field_index(kind, "value")] < 0 { mstack[mark + di_field_index(kind, "value")] = md_int(0); }
     }
     if kind == DIK_ASSIGNID && !distinct { perr("missing 'distinct', required for !DIAssignID()"); }
+    if kind == DIK_COMPOSITETYPE {
+        // opt enables ODR uniquing of debug types (DICompositeType::buildODRType)
+        let ident = mstack[mark + di_field_index(kind, "identifier")];
+        if ident >= 0 {
+            var ct: i32 = -1;
+            var k = 0;
+            while k < odr_types.len { if odr_types[k] == ident { ct = odr_types[k + 1]; } k += 2; }
+            if ct < 0 {
+                let r = md_get(MK_DI, kind as i32, mstack[mark..], true);
+                odr_types.push(ident);
+                odr_types.push(r);
+                mstack.resize(mark);
+                return r;
+            }
+            let ti = di_field_index(kind, "tag");
+            if md_op(ct, ti) == mstack[mark + ti] {
+                let fi = di_field_index(kind, "flags");
+                let old_fl = di_int(ct, "flags");
+                let new_fl = if mstack[mark + fi] >= 0 { md_int_val(mstack[mark + fi]) } else { 0 };
+                if (old_fl & 4) == 0 || (new_fl & 4) != 0 { mstack.resize(mark); return ct; }
+                for j in nf { md_ops[mds[ct].ops + j] = mstack[mark + j]; }
+                mstack.resize(mark);
+                return ct;
+            }
+        }
+    }
     let r = md_get(MK_DI, kind as i32, mstack[mark..], distinct);
     mstack.resize(mark);
     return r;
@@ -3328,6 +3354,7 @@ fn md_merge_uniqued() {
 // Debug records (LLParser::parseDebugRecord) and LocalAsMetadata of forward-referenced values.
 
 var pending_dbg: i32[>..<];
+var odr_types: i32[>..];      // pairs (identifier MDString, DICompositeType) for ODR uniquing
 var fwd_md_vals: i32[>..<];   // pairs (md id, placeholder value)
 
 fn md_value_fwd(v: i32) -> i32 {
