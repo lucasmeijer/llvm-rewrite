@@ -27,9 +27,9 @@ ic_visit :: (i: Value_Id) -> Value_Id {
         case .AND; #through;
         case .OR; #through;
         case .XOR; return ic_visit_bitwise(i);
-        case .SHL; #through;
-        case .LSHR; #through;
-        case .ASHR; return ic_visit_shift(i);
+        case .SHL; return ic_visit_shl(i);
+        case .LSHR; return ic_visit_lshr(i);
+        case .ASHR; return ic_visit_ashr(i);
         case .ICMP; return ic_visit_icmp(i);
         case .FCMP; return ic_visit_fcmp(i);
         case .SELECT; return ic_visit_select(i);
@@ -131,52 +131,6 @@ ic_visit_bitwise :: (i: Value_Id) -> Value_Id {
     r = ic_fold_binop_with_phi_operands(i); if r != NONE return r;
     if inst_op(i) != .XOR && ic_simplify_demanded_instruction_bits(i) return i;
     return NONE;
-}
-
-// visitShl / visitLShr / visitAShr: InstSimplify, foldVectorBinop, the start of commonShiftTransforms
-// (foldBinopWithPhiOperands, sext shift amount, SimplifyDemandedInstructionBits). Not ported: the rest.
-ic_visit_shift :: (i: Value_Id) -> Value_Id {
-    v := simplify_instruction(i, ic_q(i));
-    if v != NONE return ic_replace_inst_uses_with(i, v);
-    r := ic_fold_vector_binop(i); if r != NONE return r;
-    r = ic_fold_binop_with_phi_operands(i); if r != NONE return r;
-    op1 := op(i, 1);
-    oks, y := pmi_cast(op1, .SEXT);
-    if oks && has_one_use(op1) {
-        ne := icb_zext(y, vtype(i), name_ref(vname(op1)));
-        return create_binop(inst_op(i), op(i, 0), ne);
-    }
-    if ic_simplify_demanded_instruction_bits(i) return i;
-    if ic_set_shift_flags(i, ic_q(i)) return i;
-    return NONE;
-}
-
-// setShiftFlags (InstCombineShifts.cpp)
-ic_set_shift_flags :: (i: Value_Id, q: Simplify_Query) -> bool {
-    if inst_op(i) == .SHL {
-        if has_nuw(i) && has_nsw(i) return false;
-    } else {
-        if is_exact(i) return false;
-        oks, x, y := pm_binop(op(i, 0), .SHL);
-        if oks && y == op(i, 1) { set_exact(i); return true; }
-        okc, cx, cz := pm_intrinsic2(op(i, 1), IID_CTTZ);
-        if okc && cx == op(i, 0) { set_exact(i); return true; }
-    }
-    kc := known_bits(op(i, 1), q);
-    bw := kb_bits(kc);
-    max_cnt := ap_limited(kb_max_value(kc), bw - 1);
-    ka := known_bits(op(i, 0), q);
-    changed := false;
-    if inst_op(i) == .SHL {
-        if !has_nuw(i) && max_cnt <= kb_count_min_leading_zeros(ka) { set_nuw(i); changed = true; }
-        if !has_nsw(i) {
-            if max_cnt < kb_count_min_sign_bits(ka) || max_cnt < num_sign_bits_ctx(op(i, 0), q.cxt, q.dt, q.ac) { set_nsw(i); changed = true; }
-        }
-        return changed;
-    }
-    changed = max_cnt <= kb_count_min_trailing_zeros(ka);
-    set_exact(i, changed);
-    return changed;
 }
 
 // getFlippedStrictnessPredicateAndConstant (ValueTracking.cpp)

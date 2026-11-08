@@ -10,3 +10,4 @@
 #load "ic_fp_muldivrem.jai";
 #load "ic_demanded.jai";
 #load "ic_compares.jai";
+#load "ic_shifts.jai";
