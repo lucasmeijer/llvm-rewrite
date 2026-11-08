@@ -42,11 +42,12 @@ fn adce_run(fv: i32) -> u32 {
     new_live_mark.resize(nb, false);
 
     fn is_live(i: i32) -> bool { vs_has(VS_PASS0, i) }
+    // SetVector::remove keeps the order of the others: membership is the set, the array is filtered on use.
+    var bwdt_count: i64 = 0;
     fn bwdt_remove(bv: i32) {
         if !vs_has(VS_PASS1, bv) { return; }
         vs_del(VS_PASS1, bv);
-        let p = position(bwdt, bv);
-        if p >= 0 { remove_at(bwdt, p); }
+        bwdt_count--;
     }
     fn add_new_live(k: i64) { if !new_live_mark[k] { new_live_mark[k] = true; new_live.push(blk[k]); } }
     // markLive(UncondBr terminator of a block that is already live)
@@ -173,7 +174,7 @@ fn adce_run(fv: i32) -> u32 {
         let entry = func_entry(fv);
         live_b[bnum(entry)] = true;
         if iop(block_last(entry)) == OP_BR { mark_inst(block_last(entry)); }
-        for x in blk { if !is_live(block_last(x)) { if vs_add(VS_PASS1, x) { bwdt.push(x); } } }
+        for x in blk { if !is_live(block_last(x)) { if vs_add(VS_PASS1, x) { bwdt.push(x); bwdt_count++; } } }
     }
 
     // markLiveInstructions()
@@ -189,21 +190,20 @@ fn adce_run(fv: i32) -> u32 {
     }
     // ReverseIDFCalculator over the post-dominator tree: defining blocks = NewLiveBlocks, live-in = BWDT.
     fn mark_live_branches_from_control_dependences() {
-        if bwdt.len == 0 { return; }
+        if bwdt_count == 0 { return; }
         var idf: i32[>..<] = [];
         var vis_pq: bool[>..<] = [];
         var vis_wl: bool[>..<] = [];
         var is_def: bool[>..<] = [];
         vis_pq.resize(nb, false); vis_wl.resize(nb, false); is_def.resize(nb, false);
-        var pq: i32[>..<] = [];
-        for x in new_live { is_def[bnum(x)] = true; pq.push(x); vis_wl[bnum(x)] = true; }
+        // priority queue on dominator-tree level, deepest first (the set computed doesn't depend on tie order)
+        var pq: i64[>..<] = [];
+        fn pq_push(x: i32) { heap_push(pq, ((1000000000 - dt_level(DT_POST, x) as i64) << 32) | bnum(x)); }
+        for x in new_live { is_def[bnum(x)] = true; pq_push(x); vis_wl[bnum(x)] = true; }
         var wl2: i32[>..<] = [];
         while pq.len > 0 {
-            // pop the deepest node (highest level)
-            var best: i64 = 0;
-            for j in pq.len { if dt_level(DT_POST, pq[j]) > dt_level(DT_POST, pq[best]) { best = j; } }
-            let root = pq[best];
-            remove_at(pq, best);
+            let top = heap_pop(pq);
+            let root = blk[top & 0xFFFFFFFF];
             let rl = dt_level(DT_POST, root);
             wl2.push(root);
             while wl2.len > 0 {
@@ -214,7 +214,7 @@ fn adce_run(fv: i32) -> u32 {
                         vis_pq[sk] = true;
                         if vs_has(VS_PASS1, s) {
                             idf.push(s);
-                            if !is_def[sk] { pq.push(s); }
+                            if !is_def[sk] { pq_push(s); }
                         }
                     }
                 };
@@ -282,6 +282,7 @@ fn adce_run(fv: i32) -> u32 {
         }
     }
     for bb in bwdt {
+        if !vs_has(VS_PASS1, bb) { continue; }
         let t = block_last(bb);
         if iop(t) == OP_BR { vs_add(VS_PASS0, t); continue; }
         if !have_po { compute_reverse_post_order(); have_po = true; }

@@ -18,6 +18,11 @@
 
 ## Status
 
+- L1.analysis.demanded-bits complete; L1.analysis.domtree 36/38 (the 2 left need break-crit-edges with incremental
+  dominator-tree updates); L1.dce 99/112 (the 13 left need other passes, `--preserve-ll-uselistorder`,
+  `--enable-knowledge-retention` or salvageDebugInfo). dce/adce/bdce run 2-4x faster than LLVM's on
+  tests/perf/compile and scale linearly on tests/perf/scaling (measured by hand: no `@perf` line times them).
+  bdce on sqlite3.ll stops at a loud "isKnownNonZero not ported".
 - L0.design, L0.print-basic, L0.print-clang complete. About 6700 of 7800 files round-trip (all hand-written and
   clang tests, most imported ones). Parse+print is ~3x faster than LLVM's opt and scales linearly (`perf`).
 
@@ -97,8 +102,10 @@
 - `pad` is a keyword (also as a local name).
 - TLI supports Linux and generic (no OS) triples; Darwin/Windows/BSD/GPU triples fail loudly in `tli_init`.
 - computeKnownBits is a partial port that fails loudly (`not ported`): PHIs, select arms refined by the
-  condition, assumptions, pointers, division, abs/saturating/reduction intrinsics, freeze, and dominating-condition
-  reasoning are missing. Integers > 64 bits fail loudly in KnownBits and DemandedBits.
+  condition, assumptions, pointers, division, abs/saturating/reduction intrinsics, freeze, isKnownNonZero are
+  missing. isImpliedCondition (implied.goose) is ported except its constant-range path (fails loudly).
+- ADCE perf trap: LLVM's `SetVector::remove` and the IDF priority queue were first ported as linear scans, which
+  made ADCE quadratic on `scaling/switch`; membership is now the scratch set and the queue a heap. Integers > 64 bits fail loudly in KnownBits and DemandedBits.
 - Not ported in ADCE/BDCE/DCE: debug-info liveness/salvaging (no debug records yet), `--enable-knowledge-retention`
   (salvageKnowledge), incremental (post)dominator updates (trees are recomputed; ADCE also calls
   `updateDFSNumbers` on the PDT, which only shows if a later printer prints DFS numbers).
