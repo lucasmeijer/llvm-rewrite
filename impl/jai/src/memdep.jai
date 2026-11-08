@@ -11,8 +11,8 @@
 // per-pointer infos (NonLocalPointerDeps) and per-call infos (NonLocalDepsMap) live in arrays indexed through a
 // table so that rows stay addressable while the tables grow (LLVM re-fetches its pointers for the same reason).
 // NonLocalDepEntry orders by BasicBlock pointer; we order by block id (creation order), which is what malloc
-// gives for blocks created in sequence (see knowledge/llvm/gvn.md). EarliestEscapeAnalysis' cache is per BatchAA
-// here (LLVM keeps one EEA for the analysis' lifetime; only staleness could tell them apart).
+// gives for blocks created in sequence (see knowledge/llvm/gvn.md). The EarliestEscapeAnalysis cache lives as long
+// as the analysis (its staleness is visible: see knowledge/llvm/gvn.md).
 
 Mdep_Kind :: enum u8 { INVALID; CLOBBER; DEF; NONLOCAL; NONFUNCLOCAL; SELECT; UNKNOWN; }
 
@@ -77,6 +77,7 @@ Mem_Dep_Results :: struct {
     pred_cache: Table(Value_Id, [] Value_Id);
     clobber_offsets: Table(Value_Id, s32);
     block_scan_limit: s64;
+    ee: *Aa_Query;   // EarliestEscapeAnalysis EEA(DT): one cache for the analysis' lifetime, shared by every BatchAA
 }
 
 md_opts: struct {
@@ -96,6 +97,7 @@ md_new :: (f: Value_Id, aar: Aa_Results, ac: *Assumption_Cache, dt: *Dom_Tree) -
     md.nl_deps_index.allocator = temp; md.nl_per_inst.allocator = temp; md.rev_local_deps.allocator = temp;
     md.rev_nl_deps.allocator = temp; md.visited.allocator = temp; md.pred_cache.allocator = temp;
     md.clobber_offsets.allocator = temp;
+    md.ee = aa_query_new_earliest_escape(*md.aar, dt);
     return md;
 }
 
@@ -218,7 +220,7 @@ md_pointer_dependency_from :: (md: *Mem_Dep_Results, loc: Mem_Loc, is_load: bool
 // getPointerDependencyFrom without a BatchAA: a new one with the EarliestEscapeAnalysis
 md_pointer_dependency_from_new_batch :: (md: *Mem_Dep_Results, loc: Mem_Loc, is_load: bool, scan_pos: Value_Id, bb: Value_Id,
                                          query: Value_Id, limit: *s64) -> Mem_Dep {
-    q := aa_query_new_earliest_escape(*md.aar, md.dt);
+    q := aa_query_new_sharing_ee(*md.aar, md.ee);
     return md_pointer_dependency_from(md, loc, is_load, scan_pos, bb, query, limit, q);
 }
 
@@ -627,7 +629,7 @@ md_non_local_pointer_dep_from_bb :: (md: *Mem_Dep_Results, query: Value_Id, poin
     pred_list: [..] Pred_Entry; pred_list.allocator = temp;
     num_sorted := md.nlp[row].deps.count;
     worklist_entries := md_opts.block_number_limit;
-    q := aa_query_new_earliest_escape(*md.aar, md.dt);
+    q := aa_query_new_sharing_ee(*md.aar, md.ee);
 
     while worklist.count {
         bb := pop(*worklist);
@@ -814,7 +816,7 @@ md_get_clobber_offset :: (md: *Mem_Dep_Results, li: Value_Id) -> (bool, s32) {
 
 // removeInstruction(RemInst)
 md_remove_instruction :: (md: *Mem_Dep_Results, rem: Value_Id) {
-    // EEA.removeInstruction: the EarliestEscapeAnalysis caches are per query here
+    aa_query_remove_instruction(md.ee, rem);   // EEA.removeInstruction
     {
         found, idx := table_find(*md.nl_deps_index, rem);
         if found {

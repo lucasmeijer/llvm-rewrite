@@ -285,6 +285,8 @@ PASS_TABLE :: Pass_Info.[
     // OptimizationRemarkEmitterAnalysis: computes BlockFrequencyInfo only when remarks are enabled
     .{"require<opt-remark-emit>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<target-lib-info>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
+    // PhiValuesAnalysis: no pass or analysis we have consumes it (BasicAA and MemDep stopped using it)
+    .{"require<phi-values>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"verify<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
     .{"print<scalar-evolution>", .FUNCTION, .PRINT_SCEV, true, .SCEV},
     .{"print<loopnest>", .LOOP, .PRINT_LOOPNEST, true, .SCEV},

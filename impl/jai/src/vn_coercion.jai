@@ -52,7 +52,7 @@ vnc_coerce_available_value_to_load_type :: (stored_val_in: Value_Id, loaded_ty: 
     if is_const(stored_val) stored_val = cfo_constant(stored_val);
     stored_ty := vtype(stored_val);
     if type_kind(stored_ty) == .SVECTOR && type_kind(loaded_ty) == .VECTOR
-        fatal("gvn: forwarding a scalable vector to a fixed-length load (llvm.vector.extract) is not supported yet");
+        return irb_intrinsic(b, "llvm.vector.extract", .[loaded_ty, stored_ty], .[stored_val, const_int(ir.t_i64, 0)]);
     stored_size := dl_type_size_bits(stored_ty);
     loaded_size := dl_type_size_bits(loaded_ty);
     if stored_size == loaded_size && type_is_scalable(stored_ty) == type_is_scalable(loaded_ty) {

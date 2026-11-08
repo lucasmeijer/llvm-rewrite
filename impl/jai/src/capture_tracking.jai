@@ -7,7 +7,7 @@
 // Address = 3, ReadProvenance = 4, Provenance = 12, All = 15. A tracker is a plain struct with a kind tag; the
 // virtual `captured` callback of LLVM is a switch on that tag.
 
-CAPTURE_TRACKING_MAX_USES :: 100;   // -capture-tracking-max-uses-to-explore
+capture_tracking_max_uses: s64 = 100;   // -capture-tracking-max-uses-to-explore (getDefaultMaxUsesToExploreForCaptureTracking)
 CFG_MAX_BBS_TO_EXPLORE :: 32;       // DefaultMaxBBsToExplore (CFG.cpp)
 
 cc_captures_full_provenance :: inline (cc: u8) -> bool { return (cc & CC_PROVENANCE) == CC_PROVENANCE; }
@@ -227,7 +227,8 @@ ct_use_capture_kind :: (u: Use_Id, base: Value_Id) -> (use_cc: u8, result_cc: u8
 }
 
 // PointerMayBeCaptured(V, Tracker, MaxUsesToExplore)
-ct_run :: (v: Value_Id, t: *Capture_Tracker, max_uses: s64 = CAPTURE_TRACKING_MAX_USES) {
+ct_run :: (v: Value_Id, t: *Capture_Tracker, max_uses_in: s64 = -1) {
+    max_uses := ifx max_uses_in < 0 then capture_tracking_max_uses else max_uses_in;
     worklist: [..] Use_Id; worklist.allocator = temp;
     visited: Table(Use_Id, bool); visited.allocator = temp;
     add_uses :: (x: Value_Id, worklist: *[..] Use_Id, visited: *Table(Use_Id, bool), t: *Capture_Tracker, max_uses: s64) -> bool {

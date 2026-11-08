@@ -73,7 +73,11 @@ value_can_be_freed :: (v: Value_Id) -> bool {
     if is_inst(v) f = value_function(v);
     if f == NONE return true;
     if glob(f).gc.count == 0 return true;
-    fatal("Value::canBeFreed with a garbage collector is not supported yet");
+    if glob(f).gc == "statepoint-example" {
+        if ir.types[vtype(v)].a != 1 return true;
+        for ir.m_functions if begins_with(vname(it), "llvm.experimental.gc.statepoint") return true;
+        return false;
+    }
     return true;
 }
 // Function::doesNotFreeMemory: onlyReadsMemory() || hasFnAttribute(NoFree)

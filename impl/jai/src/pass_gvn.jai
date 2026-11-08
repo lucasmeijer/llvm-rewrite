@@ -34,7 +34,7 @@ gvn_opts: struct {
     max_num_visited_insts: s64 = 100;    // -gvn-max-num-visited-insts
     max_num_insns_per_block: s64 = 100;  // -gvn-max-num-insns
 };
-GVN_CL_OPT_COUNT :: 17;
+GVN_CL_OPT_COUNT :: 18;
 add_gvn_cl_opts :: (list: [] Cl_Opt, start: s64) {
     o := *gvn_opts;
     list[start + 0] = .{"enable-scalar-pre", .BOOL, *o.enable_scalar_pre, null, null};
@@ -56,6 +56,7 @@ add_gvn_cl_opts :: (list: [] Cl_Opt, start: s64) {
     // ignores it); -verify-analysis-invalidation only checks
     list[start + 15] = .{"disable-basic-aa", .IGNORED, null, null, null};
     list[start + 16] = .{"verify-analysis-invalidation", .IGNORED, null, null, null};
+    list[start + 17] = .{"capture-tracking-max-uses-to-explore", .INT, null, *capture_tracking_max_uses, null};
 }
 
 // ---------------------------------------------------------------- Expression / ValueTable
@@ -242,8 +243,14 @@ gvn_create_expr :: (g: *Gvn, i: Value_Id) -> Gvn_Expr {
     e := gvn_expr_new();
     e.ty = vtype(i);
     e.opcode = cast(u32) inst_op(i);
-    if call_iid(i) == IID_GC_RELOCATE fatal("gvn: gc.relocate is not supported yet");
-    for k: 0..cast(s64) nops(i) - 1 array_add(*e.varargs, gvn_lookup_or_add(g, op(i, cast(u32) k)));
+    if call_iid(i) == IID_GC_RELOCATE {
+        // gc.relocate: the statepoint token, then the base and derived pointers it refers to
+        array_add(*e.varargs, gvn_lookup_or_add(g, op(i, 0)));
+        array_add(*e.varargs, gvn_lookup_or_add(g, gc_relocate_ptr(i, 1)));
+        array_add(*e.varargs, gvn_lookup_or_add(g, gc_relocate_ptr(i, 2)));
+    } else {
+        for k: 0..cast(s64) nops(i) - 1 array_add(*e.varargs, gvn_lookup_or_add(g, op(i, cast(u32) k)));
+    }
     if inst_is_commutative(i) {
         if e.varargs[0] > e.varargs[1] { t := e.varargs[0]; e.varargs[0] = e.varargs[1]; e.varargs[1] = t; }
         e.commutative = true;
@@ -266,6 +273,7 @@ gvn_create_expr :: (g: *Gvn, i: Value_Id) -> Gvn_Expr {
     }
     return e;
 }
+// gc_relocate_ptr (GCRelocateInst::getBasePtr / getDerivedPtr) is in printer.jai
 // createCmpExpr
 gvn_create_cmp_expr :: (g: *Gvn, opc: Opcode, pred_in: u8, lhs: Value_Id, rhs: Value_Id) -> Gvn_Expr {
     e := gvn_expr_new();
@@ -1002,7 +1010,7 @@ gvn_eliminate_partially_redundant_load :: (g: *Gvn, load: Value_Id, vpb: *[..] G
     v := gvn_construct_ssa_for_load_set(g, load, vpb);
     gvn_icf_remove_users_of(g, load);
     rauw_with_metadata(load, v);
-    if is_inst(v) && inst_op(v) == .PHI take_name(v, load);
+    if is_inst(v) && inst_op(v) == .PHI ic_take_name(v, load);
     if is_inst(v) set_metadata(v, 0, get_metadata(load, 0));
     if g.md && is_ptr_or_ptr_vector(vtype(v)) md_invalidate_cached_pointer_info(g.md, v);
     gvn_salvage_and_remove_instruction(g, load);
@@ -1179,7 +1187,7 @@ gvn_process_non_local_load :: (g: *Gvn, load: Value_Id, deps: [] Gvn_Mem_Val) ->
         v := gvn_construct_ssa_for_load_set(g, load, *vpb);
         gvn_icf_remove_users_of(g, load);
         rauw_with_metadata(load, v);
-        if is_inst(v) && inst_op(v) == .PHI take_name(v, load);
+        if is_inst(v) && inst_op(v) == .PHI ic_take_name(v, load);
         if is_inst(v) && get_metadata(load, 0) != NONE && inst_block(load) == inst_block(v) set_metadata(v, 0, get_metadata(load, 0));
         if g.md && is_ptr_or_ptr_vector(vtype(v)) md_invalidate_cached_pointer_info(g.md, v);
         gvn_salvage_and_remove_instruction(g, load);
