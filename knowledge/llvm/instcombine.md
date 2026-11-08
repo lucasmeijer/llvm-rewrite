@@ -63,3 +63,14 @@ noted, and by diffing `opt -passes=instcombine` output on the imported tests).
 - `m_SpecificInt_ICMP` (and every `cst_pred_ty` matcher) allows poison vector lanes (at least one lane must be a
   real constant).
 - `m_LogicalAnd/Or` match `and/or i1` and `select C, X, false` / `select C, true, X` with C of the select's type.
+- **`new ICmpInst(Pred, ...)` drops samesign**: the constructor takes a plain `Predicate`; only folds that call
+  `setSameSign` keep it (foldGEPICmp's nusw case, foldICmpUsingKnownBits' signed→unsigned conversion).
+- **`getComplexity`**: constants 0/1 (undef 0), casts and `neg`/`not`/`fneg` patterns 2, everything else 3, so
+  `icmp ult (xor X, -1), Y` is swapped to `icmp ugt Y, (xor X, -1)` (InstCombiner.h:166).
+- **`ICmpInst::isCommutative()` is `isEquality()`** (used by visitICmpInst's matchSymmetricPair step), while
+  `Instruction::isCommutative()` (e.g. OptimizeOverflowCheck's operand swap) never includes compares.
+- **`SelectInst::Create(..., MDFrom)` copies all metadata of MDFrom**, `IRBuilder::CreateSelect(..., MDFrom)` only
+  `!prof` and `!unpredictable` (foldSelectICmp and the two-selects fold in visitICmpInst use the former).
+- **foldICmpUsingKnownBits runs SimplifyDemandedBits without the DomConditionCache**
+  (`SQ.getWithoutDomCondCache()`); foldICmpWithDominatingICmp is the place that uses dominating branches.
+- **rewriteGEPAsOffset uses a local `IRBuilder<>`**: the offset arithmetic it creates is not added to the worklist.

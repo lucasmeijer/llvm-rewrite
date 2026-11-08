@@ -284,8 +284,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   fixpoint verification), the shared binop folds, InstCombineAddSub.cpp (incl. FAddCombine and the FP visitors),
   InstCombineNegator.cpp, InstCombineMulDivRem.cpp (int and FP), the integer half of
   InstCombineSimplifyDemanded.cpp, `convertOrOfShiftsToFunnelShift`, `mergeStoreIntoSuccessor`.
-- **Partial visitors** (ic_misc.jai: their comments say where they stop): icmp (up to canonicalizeICmpPredicate),
-  fcmp, select, and/or/xor (up to SimplifyDemandedInstructionBits), shifts (start of commonShiftTransforms +
+- **Partial visitors** (ic_misc.jai: their comments say where they stop): select, and/or/xor (up to SimplifyDemandedInstructionBits), shifts (start of commonShiftTransforms +
   setShiftFlags), casts (commonCastTransforms; zext/sext/trunc/[su]itofp flag folds), call (InstSimplify +
   nounwind inference), phi, gep, load, freeze, extractvalue, vector ops (InstSimplify only), terminators (ret,
   unreachable, br, condbr complete; switch not at all). A fold missing from these silently does not fire, so most
@@ -314,3 +313,21 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   ComputeNumSignBits with temp-allocating APInt ops, ~60% inclusive), not the combiner.
 - Jai traps: `xx` is the auto-cast operator, not an identifier; `for < k: 0..n-1` iterates n-1 down to 0 (the
   reverse of what the range text suggests if you write `n-1..0`, which silently runs zero times).
+
+## InstCombine compares (L1.instcombine.cmp 114/154: roundtrip 77/77, opt 37/77)
+
+- `ic_compares.jai` ports InstCombineCompares.cpp completely (icmp and fcmp, every helper, LLVM's order). The
+  remaining cmp/arith failures were triaged function by function: they need other visitors (select, and/or/xor,
+  shifts, casts, calls incl. assume/copysign/fabs, phi, freeze, gep, shufflevector), e.g. `icmp-logical.ll` is
+  and/or-of-icmps, `fcmp-*select*` is the select visitor. Only `icmp-gep.ll` fails loudly (emitGEPOffset with
+  scalable strides).
+- Differential fuzzing (not in the repo; generator idea): random functions of add/sub/mul/div/rem with flags feeding
+  one icmp (i8..i32), and fadd/fmul/fdiv/fneg/fabs/fpext feeding one fcmp, compared with LLVM per function: all
+  remaining differences were traced to unported visitors (shl canonicalization, `not` → sub, select of
+  `sdiv 1, x`, fmul flag inference). Avoid power-of-two constants and `x op x` to keep the noise down.
+- Shared changes: `Capture_Tracker` has an `ALLOCA_CMP` kind (foldAllocaCmp's CmpCaptureTracker);
+  `const_integer_value` handles pointer types (inttoptr, folded); `fp_convert` reports overflow to infinity and
+  underflow to zero as inexact (it said exact; LLParser and fcmp-of-fpext folds depend on it).
+- Traps: the ICMP_*/FCMP_* constants are untyped, so `ifx c then ICMP_EQ else ICMP_NE` is s64 and does not convert
+  to `u8` (write `cast(u8)` on the first branch). LLVM's `isSignTest(Pred&, C)` updates the predicate even when the
+  caller's other condition then fails; foldICmpMulConstant keeps using the updated predicate.

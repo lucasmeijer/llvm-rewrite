@@ -516,7 +516,7 @@ ic_fold_gep_icmp :: (gep_lhs: Value_Id, rhs_in: Value_Id, cond: u8, i: Value_Id)
        !null_pointer_is_defined(inst_fn(i), type_addrspace(vtype(rhs))) {
         b := op(gep_lhs, 0);
         if is_vector_type(vtype(gep_lhs)) && is_ptr_type(vtype(b)) {
-            b = icb_vector_splat(type_count(vtype(gep_lhs)), b);
+            b = icb_vector_splat(type_count(vtype(gep_lhs)), type_kind(vtype(gep_lhs)) == .SVECTOR, b);
         }
         return create_icmp(cond, b, ce_pointer_bitcast_or_addrspacecast(rhs, vtype(b)));
     } else if is_gep_operator(rhs) {
@@ -594,8 +594,8 @@ ce_pointer_bitcast_or_addrspacecast :: (c: Value_Id, t: Type_Id) -> Value_Id {
     return cfo_constant(ce_cast(.BITCAST, c, t));
 }
 // CreateVectorSplat on the combiner's builder
-icb_vector_splat :: (n: u64, v: Value_Id, name: string = "") -> Value_Id {
-    vt := type_vector(n, vtype(v), false);
+icb_vector_splat :: (n: u64, scalable: bool, v: Value_Id, name: string = "") -> Value_Id {
+    vt := type_vector(n, vtype(v), scalable);
     if is_const(v) return cf_get_splat(vt, v);
     poison := const_poison(vt);
     ins := icb_insert_element(poison, v, const_int_of(ir.t_i64, 0), tprint("%.splatinsert", name));
