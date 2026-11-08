@@ -1241,9 +1241,13 @@ tests/imported/llvm/Analysis/LoopInfo/annotated-parallel-complex.ll::analysis
 tests/imported/llvm/Analysis/LoopInfo/annotated-parallel-complex.ll::roundtrip
 tests/imported/llvm/Analysis/LoopInfo/annotated-parallel-simple.ll::analysis
 tests/imported/llvm/Analysis/LoopInfo/annotated-parallel-simple.ll::roundtrip
+tests/imported/llvm/Analysis/LoopNestAnalysis/duplicate-successors.ll::analysis
 tests/imported/llvm/Analysis/LoopNestAnalysis/duplicate-successors.ll::roundtrip
+tests/imported/llvm/Analysis/LoopNestAnalysis/imperfectnest.ll::analysis
 tests/imported/llvm/Analysis/LoopNestAnalysis/imperfectnest.ll::roundtrip
+tests/imported/llvm/Analysis/LoopNestAnalysis/infinite.ll::analysis
 tests/imported/llvm/Analysis/LoopNestAnalysis/infinite.ll::roundtrip
+tests/imported/llvm/Analysis/LoopNestAnalysis/perfectnest.ll::analysis
 tests/imported/llvm/Analysis/LoopNestAnalysis/perfectnest.ll::roundtrip
 tests/imported/llvm/Analysis/MemoryDependenceAnalysis/InvariantLoad.ll::roundtrip
 tests/imported/llvm/Analysis/MemoryDependenceAnalysis/invariant.group-bug.ll::roundtrip

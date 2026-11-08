@@ -184,7 +184,7 @@ Pass_Kind :: enum u8 {
     // loop passes (loop_pm.jai)
     NO_OP_LOOP; LOOP_ROTATE;
     // ScalarEvolution (scev_print.jai)
-    PRINT_SCEV; VERIFY_SCEV;
+    PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST;
 }
 
 Pass_Info :: struct {
@@ -252,6 +252,7 @@ PASS_TABLE :: Pass_Info.[
     .{"require<target-lib-info>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"verify<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
     .{"print<scalar-evolution>", .FUNCTION, .PRINT_SCEV, true, .SCEV},
+    .{"print<loopnest>", .LOOP, .PRINT_LOOPNEST, true, .SCEV},
     .{"verify<scalar-evolution>", .FUNCTION, .VERIFY_SCEV, true, .SCEV},
     .{"require<scalar-evolution>", .FUNCTION, .REQUIRE, true, .SCEV},
     .{"invalidate<scalar-evolution>", .FUNCTION, .INVALIDATE, true, .SCEV},

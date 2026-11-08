@@ -191,6 +191,7 @@ run_loop_pass :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater)
         case .LOOP_PM; return run_loop_pm(idx, l, lar, u);
         case .NO_OP_LOOP; return PRESERVE_ALL;
         case .LOOP_ROTATE; return loop_rotate_run(node, l, lar, u);
+        case .PRINT_LOOPNEST; return loop_nest_printer_run(l, lar);
     }
     fatal("internal: '%' is not a loop pass", node.name);
     return PRESERVE_NONE;

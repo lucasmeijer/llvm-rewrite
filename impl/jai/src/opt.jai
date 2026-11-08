@@ -71,6 +71,7 @@
 #load "scev_pred.jai";
 #load "scev_print.jai";
 #load "scev_update.jai";
+#load "loop_nest.jai";
 
 main :: () { opt_main(); }
 
