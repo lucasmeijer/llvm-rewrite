@@ -102,6 +102,15 @@
   `print<memoryssa>` after LICM. Speed: `perf` (scaling/loops-many): 0.6-0.9x LLVM's time, k 1.01 (LLVM 1.39);
   by hand the pass itself (minus parsing) costs 0.31 s on SPASS and 0.20 s on oggenc vs LLVM's 0.14/0.10 s (lua,
   sqlite3: 0.07/0.15 s vs 0.09/0.11 s): ~2x on big functions, not profiled yet.
+- L1.loop-canonical 151/184 (all 92 roundtrip, 59/92 opt) with LoopRotate (looprotate.goose): 21/34 LoopRotate
+  tests; the 13 left have debug records (LoopRotate fails loudly in functions with records: cloneDebugInfoFrom,
+  RemapDbgRecordRange, the duplicate-record hashes, findDbgValues rewriting and insertDebugValuesForPHIs are not
+  ported), noalias scope declarations in the header, or run unported passes (loop-deletion, indvars, loop-reduce).
+  Sweeps `loop-rotate`, `loop-rotate<header-duplication;check-exit-count>`, `loop-mssa(loop-rotate,licm)` (whole
+  file and per function) and `loop-mssa(loop-rotate),print<memoryssa>` / `loop(loop-rotate),print<scalar-evolution>`
+  --analysis: 0 differs. ScalarEvolution::forgetTopmostLoop/forgetValue aren't ported: a rotation drops the whole
+  ScalarEvolution (a superset; the print<scalar-evolution> sweep after it is identical). Speed (`perf`
+  loops-many): 0.5-0.9x LLVM's time, k (0.84) vs LLVM (1.14).
 - L1.analysis.domtree and L1.analysis.demanded-bits complete. L1.loop-canonical: loop-simplify and
   lcssa pass 31 of their 58 `::opt` tests; every other one stops loudly (other passes in the pipeline: licm,
   loop-mssa, instcombine, debugify, verify<scalar-evolution>, -keep-loops; and LoopSimplify's exit merging,
@@ -158,6 +167,7 @@
 | `src/memoryssa.goose`, `src/phitrans.goose` | MemorySSA (build, walker, OptimizeUses, printers); PHITransAddr |
 | `src/aaeval.goose` | the aa-eval pass |
 | `src/mssaupdater.goose` | MemorySSAUpdater (insert/move/remove/CFG updates/cloning into a predecessor), MemorySSA's mutation API, verifyMemorySSA |
+| `src/looprotate.goose` | LoopRotate (LoopRotation.cpp, LoopRotationUtils.cpp), CodeMetrics for the header, MergeBlockIntoPredecessor with LoopInfo/MemorySSA/two successors |
 | `src/licm.goose`, `src/mustexec.goose`, `src/ast.goose` | LICM / LNICM (with LoadAndStorePromoter); ICFLoopSafetyInfo, InstructionPrecedenceTracking, colorEHFunclets; AliasSetTracker |
 | `src/earlycse.goose` | EarlyCSE (early-cse, early-cse<memssa>): scoped hash tables, combineMetadataForCSE, replaceDominatedUsesWith |
 | `src/instident.goose` | isIdenticalToWhenDefined, hasSameSpecialState, attribute intersection, andIRFlags |
@@ -741,6 +751,13 @@ What they were:
   really ask for a cost.
 - Not ported (fail loudly): sinking calls into funclets or calls with funclet bundles, mergeDIAssignID of promoted
   stores with DIAssignID attachments; optimization remarks are never printed (no `-pass-remarks`).
+- LoopRotate uses VM_PASS0 (ValueMap) and VM_PASS1 (ValueMapMSSA, handed to msu_update_for_cloned_block_into_pred),
+  VS_PASS2/VS_PASS3 (ephemeral values / visited). SplitCriticalEdge (breakcrit.goose) now takes `mssau` and
+  `preserve_lcssa` (createPHIsForSplitLoopExit).
+- Trap found by the `loop-mssa(licm),print<scalar-evolution>` sweep: SCEV's pointer range asked isKnownNonZero
+  with whatever `kb_cxt`/`sq_no_*` the last pass left (LICM left a context, so a dominating null check made a
+  `malloc` result non-null). LLVM's query there is `isKnownNonZero(V, DL)`: no context, DT, AC or TLI. Any
+  analysis that calls ValueTracking with a fixed query must set and restore those globals itself.
 
 ## Debug records (central: dinfo.goose, dbgutil.goose, ir.goose/irutil.goose insertion API)
 

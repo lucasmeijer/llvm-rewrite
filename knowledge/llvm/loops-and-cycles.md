@@ -175,3 +175,7 @@ Verified with the jai port (impl/jai/src/pass_licm.jai) on Transforms/LICM and s
 - In a module pipeline (`debugify,loop-idiom`), each loop pass gets its own
   `ModuleToFunctionPassAdaptor(FunctionToLoopPassAdaptor(pass, /*UseMemorySSA=*/false))` (PassBuilder
   parseModulePass, LOOP_PASS).
+- ScalarEvolution's range of a pointer SCEVUnknown with dereferenceable(_or_null) bytes uses
+  `isKnownNonZero(V, DL)` (DataLayout only: no context instruction, DT or AC) to raise the minimum to the alignment
+  (ScalarEvolution::getRangeRef); a dominating `icmp eq %p, null` branch doesn't count
+  (`tests/e2e/O2/test-suite/SingleSource/Benchmarks/CoyoteBench/lpbench.ll`, `loop-mssa(licm),print<scalar-evolution>`).

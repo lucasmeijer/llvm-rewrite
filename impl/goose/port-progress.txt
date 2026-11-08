@@ -76,7 +76,7 @@ lib/Transforms/InstCombine/InstCombineNegator.cpp 0.75
 lib/Transforms/Scalar/ADCE.cpp 0.85
 lib/Transforms/Utils/SSAUpdater.cpp 0.9  # + LoadAndStorePromoter::run (licm.goose)
 lib/Analysis/MemoryLocation.cpp 1
-lib/Transforms/Utils/BreakCriticalEdges.cpp 0.4
+lib/Transforms/Utils/BreakCriticalEdges.cpp 0.5  # + MemorySSAUpdater, PreserveLCSSA
 lib/Transforms/Utils/LCSSA.cpp 0.7
 lib/Analysis/LoopNestAnalysis.cpp 0.65
 lib/Analysis/CaptureTracking.cpp 0.95
@@ -127,3 +127,6 @@ lib/IR/DebugProgramInstruction.cpp 0.35
 lib/IR/DebugInfo.cpp 0.1
 lib/IR/BasicBlock.cpp 0.3
 lib/TargetParser/Triple.cpp 0.3  # manual: Triple(Str) parsing, normalize, OS/environment versions, isMacOSXVersionLT, pointer widths, default wchar size, the Triple.h predicates; not the arch-variant/sub-arch/name helpers (heuristic 0.29)
+lib/Transforms/Scalar/LoopRotation.cpp 1
+lib/Transforms/Utils/LoopRotationUtils.cpp 0.75  # no debug records (cloneDebugInfoFrom & co.), noalias scope cloning, atoms
+lib/Analysis/CodeMetrics.cpp 0.5  # collectEphemeralValues(Loop), analyzeBasicBlock's notDuplicatable/convergence/NumInsts/inline candidates
