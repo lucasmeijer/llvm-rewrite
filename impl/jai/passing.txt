@@ -4184,6 +4184,7 @@ tests/imported/llvm/Transforms/InstCombine/alloca-poison-size.ll::opt
 tests/imported/llvm/Transforms/InstCombine/alloca-poison-size.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/alloca.ll::opt
 tests/imported/llvm/Transforms/InstCombine/alloca.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/allocsite-removable-few-users.ll::opt
 tests/imported/llvm/Transforms/InstCombine/allocsite-removable-few-users.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/allocsize-32.ll::opt
 tests/imported/llvm/Transforms/InstCombine/allocsize-32.ll::roundtrip
@@ -4347,6 +4348,7 @@ tests/imported/llvm/Transforms/InstCombine/bitcast-bfloat-half-mixing.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bitcast-bfloat-half-mixing.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitcast-bitcast.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bitcast-bitcast.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/bitcast-function.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bitcast-function.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitcast-inselt-bitcast.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bitcast-inselt-bitcast.ll::roundtrip
@@ -4410,6 +4412,7 @@ tests/imported/llvm/Transforms/InstCombine/call-callconv-mismatch.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call-callconv-mismatch.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/call-callconv.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call-callconv.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/call-cast-attrs.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call-cast-attrs.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/call-guard.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call-guard.ll::roundtrip
@@ -4419,6 +4422,7 @@ tests/imported/llvm/Transforms/InstCombine/call-returned.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call-returned.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/call-undef.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call-undef.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/call.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/call2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call2.ll::roundtrip
@@ -4500,6 +4504,7 @@ tests/imported/llvm/Transforms/InstCombine/canonicalize.ll::opt
 tests/imported/llvm/Transforms/InstCombine/canonicalize.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/canonicalize_branch.ll::opt
 tests/imported/llvm/Transforms/InstCombine/canonicalize_branch.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/cast-byval.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cast-byval.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cast-call-combine-prof.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cast-call-combine-prof.ll::roundtrip
@@ -4666,6 +4671,7 @@ tests/imported/llvm/Transforms/InstCombine/dependent-ivs.ll::opt
 tests/imported/llvm/Transforms/InstCombine/dependent-ivs.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/deref-alloc-fns.ll::opt
 tests/imported/llvm/Transforms/InstCombine/deref-alloc-fns.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/disable-builtin.ll::opt
 tests/imported/llvm/Transforms/InstCombine/disable-builtin.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/disable-simplify-libcalls.ll::opt
 tests/imported/llvm/Transforms/InstCombine/disable-simplify-libcalls.ll::roundtrip
@@ -5789,6 +5795,7 @@ tests/imported/llvm/Transforms/InstCombine/pr39908.ll::opt
 tests/imported/llvm/Transforms/InstCombine/pr39908.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr41164.ll::opt
 tests/imported/llvm/Transforms/InstCombine/pr41164.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/pr43081.ll::opt
 tests/imported/llvm/Transforms/InstCombine/pr43081.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr43376-getFlippedStrictnessPredicateAndConstant-assert.ll::opt
 tests/imported/llvm/Transforms/InstCombine/pr43376-getFlippedStrictnessPredicateAndConstant-assert.ll::roundtrip
@@ -6334,6 +6341,7 @@ tests/imported/llvm/Transforms/InstCombine/sink_to_unreachable.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sink_to_unreachable.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sitofp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sitofp.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/skip-opt-void-to-non-void-conversion.ll::opt
 tests/imported/llvm/Transforms/InstCombine/skip-opt-void-to-non-void-conversion.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/smax-icmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/smax-icmp.ll::roundtrip
