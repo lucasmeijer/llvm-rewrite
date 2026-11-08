@@ -11,8 +11,9 @@ has_same_special_state :: (a: Value_Id, b: Value_Id, ignore_alignment: bool, int
     ra := inst(a); rb := inst(b);
     attrs_same :: (a: Value_Id, b: Value_Id, intersect: bool) -> bool {
         if inst(a).attrs == inst(b).attrs return true;
-        if intersect scfg_np("intersecting the attributes of two calls (AttributeList::intersectWith)");
-        return false;
+        if !intersect return false;
+        ok, _ := attr_list_intersect(inst(a).attrs, inst(b).attrs);
+        return ok;
     }
     al := ignore_alignment || ra.align == rb.align;
     vol :: (r: *Inst_Row) -> bool { return (r.flags & F_VOLATILE) != 0; }
@@ -96,15 +97,14 @@ inst_is_commutative :: (i: Value_Id) -> bool {
 }
 // CallBase::tryIntersectAttributes
 try_intersect_attributes :: (a: Value_Id, b: Value_Id) {
-    if inst(a).attrs != inst(b).attrs scfg_np("intersecting the attributes of two calls (tryIntersectAttributes)");
+    ok, l := attr_list_intersect(inst(a).attrs, inst(b).attrs);
+    if ok inst(a).attrs = l;
 }
 // MMRAMetadata(I1) != MMRAMetadata(I2)
 mmra_differ :: (a: Value_Id, b: Value_Id) -> bool {
     k := md_kind("mmra");
     ma := get_metadata(a, k); mb := get_metadata(b, k);
-    if ma == mb return false;
-    if ma != NONE || mb != NONE scfg_np("comparing !mmra metadata");
-    return false;
+    return !mmra_equal(ma, mb);
 }
 // Instruction::applyMergedLocation(A, B)
 apply_merged_location :: (i: Value_Id, a: Md_Id, b: Md_Id) { set_metadata(i, 0, merged_location(a, b)); }
@@ -674,7 +674,7 @@ is_safe_to_speculate_store :: (i: Value_Id, br_bb: Value_Id, store_bb: Value_Id,
                 writable, explicitly_deref_only := is_writable_object(obj);
                 if writable {
                     wo, _ := pointer_may_be_captured(obj, CC_PROVENANCE, .ANYTHING);
-                    if wo == CC_NONE && (!explicitly_deref_only || scfg_np_bool("isDereferenceablePointer for a writable dereferenceable argument")) return cur;
+                    if wo == CC_NONE && (!explicitly_deref_only || is_dereferenceable_pointer_ty(ptr, sty, Simplify_Query.{have_tli = false}, true)) return cur;
                 }
             }
         }
@@ -1203,7 +1203,7 @@ create_logical_op :: (b: *Irb, opc: Opcode, lhs: Value_Id, rhs: Value_Id, name: 
 copy_annotation_from :: (i: Value_Id, from: Value_Id) {
     if !is_inst(i) || from == NONE return;
     a := get_metadata(from, MD_ANNOTATION_KIND);
-    if a != NONE scfg_np("copying !annotation metadata onto new instructions");
+    if a != NONE set_metadata(i, MD_ANNOTATION_KIND, a);   // Instruction::copyMetadata(Src, {MD_annotation})
 }
 
 // shouldFoldCondBranchesToCommonDestination: (ok, CommonSucc, Opc, InvertPredCond)

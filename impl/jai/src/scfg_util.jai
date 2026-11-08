@@ -336,3 +336,133 @@ U64_MAX : u64 : 0xFFFF_FFFF_FFFF_FFFF;
 
 // DataLayout::hasUnstableRepresentation (getIntPtrType: dl_int_ptr_type, const_folding.jai)
 dl_unstable_repr :: (t: Type_Id) -> bool { return dl_ptr_spec(ptr_addrspace(t)).unstable; }
+
+// ---------------------------------------------------------------- Attributes.cpp intersection
+
+// Attribute::operator==
+attr_equal :: (a: *Attr, b: *Attr) -> bool {
+    if a.kind != b.kind || a.ival != b.ival || a.ty != b.ty || a.key != b.key || a.val != b.val return false;
+    if a.lo.count != b.lo.count || a.hi.count != b.hi.count return false;
+    for a.lo if it != b.lo[it_index] return false;
+    for a.hi if it != b.hi[it_index] return false;
+    return true;
+}
+// AttributeSet::intersectWith: false when the sets cannot be intersected
+attr_set_intersect :: (s0: u32, s1: u32) -> (bool, u32) {
+    if s0 == s1 return true, s0;
+    a := attr_set_items(s0); b := attr_set_items(s1);
+    out: [..] Attr; out.allocator = temp;
+    i := 0; j := 0;
+    while i < a.count || j < b.count {
+        x: *Attr; y: *Attr;
+        if j == b.count { x = *a[i]; i += 1; }
+        else if i == a.count { x = *b[j]; j += 1; }
+        else {
+            // cmpKind: enum kinds by value, string attributes after them by key
+            pa := *a[i]; pb := *b[j];
+            c: int;
+            if pa.kind == .STRING_ATTR && pb.kind == .STRING_ATTR c = compare(pa.key, pb.key);
+            else c = cast(int) pa.kind - cast(int) pb.kind;
+            if c == 0 { x = pa; y = pb; i += 1; j += 1; }
+            else if c < 0 { x = pa; i += 1; }
+            else { x = pb; j += 1; }
+        }
+        if x.kind == .STRING_ATTR {
+            if !y || !attr_equal(x, y) return false, 0;
+            array_add(*out, x.*);
+            continue;
+        }
+        prop := attr_intersect_property(x.kind);
+        if !y {
+            if prop == .PRESERVE return false, 0;
+            continue;
+        }
+        if prop == .AND { r: Attr; r.kind = x.kind; r.ty = NONE; array_add(*out, r); continue; }
+        if prop == .MIN { r := x.*; r.ival = min(x.ival, y.ival); array_add(*out, r); continue; }
+        if prop == .CUSTOM {
+            r := x.*;
+            if x.kind == {
+                case .Alignment; r.ival = min(max(x.ival, 1), max(y.ival, 1));
+                case .Memory; r.ival = x.ival | y.ival;
+                case .Captures; r.ival = x.ival | y.ival;
+                case .NoFPClass; r.ival = x.ival & y.ival;
+                case .Range;
+                    nr := cr_union(attr_range(x), attr_range(y));
+                    if cr_is_full_set(nr) continue;
+                    lw := ap_words(nr.lo); hw := ap_words(nr.hi);
+                    r.ival = nr.lo.bits;
+                    r.lo = NewArray(lw.count, u64,, temp); for lw r.lo[it_index] = it;
+                    r.hi = NewArray(hw.count, u64,, temp); for hw r.hi[it_index] = it;
+                case; fatal("attr_set_intersect: unknown custom intersection rule");
+            }
+            array_add(*out, r);
+            continue;
+        }
+        if !attr_equal(x, y) return false, 0;
+        array_add(*out, x.*);
+        if x.kind == .ByVal {
+            al0 := attr_set_find(s0, .Alignment); al1 := attr_set_find(s1, .Alignment);
+            if (al0 == null) != (al1 == null) || (al0 && al0.ival != al1.ival) return false, 0;
+        }
+    }
+    return true, attr_set_get(out);
+}
+// AttributeList::intersectWith
+attr_list_intersect :: (l0: u32, l1: u32) -> (bool, u32) {
+    if l0 == l1 return true, l0;
+    ok, fn := attr_set_intersect(attr_list_fn(l0), attr_list_fn(l1));
+    if !ok return false, 0;
+    ok2, ret := attr_set_intersect(attr_list_ret(l0), attr_list_ret(l1));
+    if !ok2 return false, 0;
+    n := 0;
+    if l0 n = max(n, ir.attr_lists[l0].params.count);
+    if l1 n = max(n, ir.attr_lists[l1].params.count);
+    ps: [..] u32; ps.allocator = temp;
+    for k: 0..n-1 {
+        ok3, p := attr_set_intersect(attr_list_param(l0, cast(u32) k), attr_list_param(l1, cast(u32) k));
+        if !ok3 return false, 0;
+        array_add(*ps, p);
+    }
+    return true, attr_list_get(fn, ret, ps);
+}
+
+// ---------------------------------------------------------------- MemoryModelRelaxationAnnotations.cpp
+
+Mmra_Tag :: struct { prefix: string; suffix: string; }
+// MMRAMetadata(MDNode*): a single tag tuple !{!"p", !"s"} or a tuple of them; duplicates collapse (a set)
+mmra_parse :: (m: Md_Id) -> [..] Mmra_Tag {
+    r: [..] Mmra_Tag; r.allocator = temp;
+    if m == NONE return r;
+    is_tag :: (t: Md_Id) -> bool {
+        return ir.mds[t].kind == .TUPLE && md_nops(t) == 2 && ir.mds[md_op(t, 0)].kind == .STRING && ir.mds[md_op(t, 1)].kind == .STRING;
+    }
+    add :: (r: *[..] Mmra_Tag, t: Md_Id) {
+        tag := Mmra_Tag.{md_str_of(md_op(t, 0)), md_str_of(md_op(t, 1))};
+        for r.* if it.prefix == tag.prefix && it.suffix == tag.suffix return;
+        array_add(r, tag);
+    }
+    if is_tag(m) { add(*r, m); return r; }
+    for k: 0..cast(s64) md_nops(m) - 1 add(*r, md_op(m, cast(u32) k));
+    return r;
+}
+mmra_has_prefix :: (t: [] Mmra_Tag, p: string) -> bool { for t if it.prefix == p return true; return false; }
+mmra_has_tag :: (t: [] Mmra_Tag, x: Mmra_Tag) -> bool { for t if it.prefix == x.prefix && it.suffix == x.suffix return true; return false; }
+// MMRAMetadata::operator== (set equality)
+mmra_equal :: (a: Md_Id, b: Md_Id) -> bool {
+    if a == b return true;
+    ta := mmra_parse(a); tb := mmra_parse(b);
+    if ta.count != tb.count return false;
+    for ta if !mmra_has_tag(tb, it) return false;
+    return true;
+}
+// MMRAMetadata::combine(Ctx, A, B)
+mmra_combine :: (a: Md_Id, b: Md_Id) -> Md_Id {
+    ta := mmra_parse(a); tb := mmra_parse(b);
+    // the tags of each side are visited in DenseSet (hash) order
+    if ta.count > 1 || tb.count > 1 fatal("MMRAMetadata::combine with more than one tag on a side (DenseSet iteration order) is not supported yet");
+    res: [..] Md_Id; res.allocator = temp;
+    tag_md :: (t: Mmra_Tag) -> Md_Id { ops := Md_Id.[md_string(t.prefix), md_string(t.suffix)]; return md_tuple(ops, false); }
+    for ta if mmra_has_prefix(tb, it.prefix) array_add(*res, tag_md(it));
+    for tb if mmra_has_prefix(ta, it.prefix) array_add(*res, tag_md(it));
+    return md_tuple(res, false);
+}

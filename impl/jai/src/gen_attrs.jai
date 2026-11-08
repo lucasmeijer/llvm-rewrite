@@ -223,3 +223,43 @@ ATTR_NAMES :: Attr_Name.[
 ];
 
 Attr_Name :: struct { kind: Attr_Kind; name: string; }
+
+Attr_Intersect :: enum u8 { PRESERVE; AND; MIN; CUSTOM; }
+attr_intersect_property :: (k: Attr_Kind) -> Attr_Intersect {
+    if k == {
+        case .AllocAlign; return .AND;
+        case .AllocatedPointer; return .AND;
+        case .Cold; return .AND;
+        case .DeadOnUnwind; return .AND;
+        case .Hot; return .AND;
+        case .InlineHint; return .AND;
+        case .MustProgress; return .AND;
+        case .NoAlias; return .AND;
+        case .NoCallback; return .AND;
+        case .NoCreateUndefOrPoison; return .AND;
+        case .NoDivergenceSource; return .AND;
+        case .NoFree; return .AND;
+        case .NoRecurse; return .AND;
+        case .NoReturn; return .AND;
+        case .NoSync; return .AND;
+        case .NoUndef; return .AND;
+        case .NoUnwind; return .AND;
+        case .NonNull; return .AND;
+        case .ReadNone; return .AND;
+        case .ReadOnly; return .AND;
+        case .Returned; return .AND;
+        case .Speculatable; return .AND;
+        case .WillReturn; return .AND;
+        case .Writable; return .AND;
+        case .WriteOnly; return .AND;
+        case .Alignment; return .CUSTOM;
+        case .Captures; return .CUSTOM;
+        case .DeadOnReturn; return .MIN;
+        case .Dereferenceable; return .MIN;
+        case .DereferenceableOrNull; return .MIN;
+        case .Memory; return .CUSTOM;
+        case .NoFPClass; return .CUSTOM;
+        case .Range; return .CUSTOM;
+    }
+    return .PRESERVE;
+}

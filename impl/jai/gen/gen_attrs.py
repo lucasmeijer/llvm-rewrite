@@ -26,4 +26,13 @@ out.append('ATTR_NAMES :: Attr_Name.[\n')
 for rec, name in names:
     out.append('    .{.%s, "%s"},\n' % (rec, name))
 out.append('];\n\nAttr_Name :: struct { kind: Attr_Kind; name: string; }\n')
+# intersection property per kind (AttributeProperty IntersectPreserve/And/Min/Custom) for AttributeSet::intersectWith
+props = dict(re.findall(r'^def\s+([A-Za-z0-9_]+)\s*:\s*(?:EnumAttr|TypeAttr|IntAttr|ConstantRangeAttr|ConstantRangeListAttr)<"[^"]+",\s*(Intersect[A-Za-z]+)', src, re.M))
+out.append('\nAttr_Intersect :: enum u8 { PRESERVE; AND; MIN; CUSTOM; }\n')
+out.append('attr_intersect_property :: (k: Attr_Kind) -> Attr_Intersect {\n    if k == {\n')
+for rec, name in names:
+    p = props[rec]
+    if p != 'IntersectPreserve':
+        out.append('        case .%s; return .%s;\n' % (rec, {'IntersectAnd':'AND','IntersectMin':'MIN','IntersectCustom':'CUSTOM'}[p]))
+out.append('    }\n    return .PRESERVE;\n}\n')
 sys.stdout.write(''.join(out))

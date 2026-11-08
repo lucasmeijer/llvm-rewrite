@@ -950,7 +950,7 @@ combine_metadata_for_cse :: (k: Value_Id, j: Value_Id, does_k_move: bool) {
             case "mem.cache_hint"; if kmd != jmd set_metadata(k, kind, NONE);
             case "noalias.addrspace"; if does_k_move set_metadata(k, kind, md_most_generic_noalias_addrspace(jmd, kmd));
             case "nosanitize"; set_metadata(k, kind, jmd);
-            case "captures"; if kmd != jmd fatal("combineMetadata: !captures merging is not supported yet");
+            case "captures"; set_metadata(k, kind, md_from_capture_components(md_to_capture_components(jmd) | md_to_capture_components(kmd)));
             case "alloc_token"; if kmd != jmd set_metadata(k, kind, NONE);
             case; set_metadata(k, kind, NONE);
         }
@@ -959,7 +959,7 @@ combine_metadata_for_cse :: (k: Value_Id, j: Value_Id, does_k_move: bool) {
         id := kid("mmra");
         if id != NONE {
             a := get_metadata(j, id); b := get_metadata(k, id);
-            if (a != NONE || b != NONE) && a != b fatal("combineMetadata: merging !mmra is not supported yet");
+            if a != NONE || b != NONE set_metadata(k, id, mmra_combine(a, b));
         }
     }
     // getMergedMemProfMetadata / getMergedCallsiteMetadata: keep K's, else J's
@@ -1201,5 +1201,17 @@ md_most_generic_noalias_addrspace :: (a: Md_Id, b: Md_Id) -> Md_Id {
         array_add(*ops, md_value(const_int_words(t, ap_words(it.lo))));
         array_add(*ops, md_value(const_int_words(t, ap_words(it.hi))));
     }
+    return md_tuple(ops, false);
+}
+
+// MDNode::toCaptureComponents / fromCaptureComponents (CaptureComponents bits: AddressIsNull 1, Address 3,
+// ReadProvenance 4, Provenance 12, All 15)
+md_from_capture_components :: (cc: u8) -> Md_Id {
+    if cc == 15 return NONE;
+    ops: [..] Md_Id; ops.allocator = temp;
+    if (cc & 3) == 1 array_add(*ops, md_string("address_is_null"));
+    else if (cc & 3) == 3 array_add(*ops, md_string("address"));
+    if (cc & 12) == 4 array_add(*ops, md_string("read_provenance"));
+    else if (cc & 12) == 12 array_add(*ops, md_string("provenance"));
     return md_tuple(ops, false);
 }
