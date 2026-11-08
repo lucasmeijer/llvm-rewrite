@@ -30,6 +30,7 @@ import aaeval;
 import memoryssa;
 import aa;
 import mssaupdater;
+import licm;
 import apint;
 import sccp;
 import build_libcalls;
@@ -94,6 +95,7 @@ let P_NOOP_LOOP = 201;
 let P_PRINT_LOOP = 202;
 let P_LREQUIRE = 203;      // require<analysis> in a loop pipeline (arg = analysis id; none are cached)
 let P_LINVALIDATE = 204;
+let P_LICM = 205;          // arg: bit 0 = AllowSpeculation, bit 1 = lnicm (a loop-nest pass)
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
 // (PassInfoMixin::isRequired: printers, verifier, require/invalidate, adaptors).
@@ -170,6 +172,8 @@ fn analysis_id(name: const u8[:]) -> i64 {
     if name == "memoryssa" { return A_MEMORYSSA; }
     if name == "aa" { return A_AA; }
     if name == "scalar-evolution" { return A_SCEV; }
+    if name == "target-ir" { return A_TARGET_IR; }
+    if name == "opt-remark-emit" { return A_ORE; }
     return -1;
 }
 
@@ -512,8 +516,16 @@ fn new_loop_adaptor(mssa: bool, name: i32) -> i32 {
     return new_pnode(PK_LOOP, ls, if mssa { 1 } else { 0 }, true, name);
 }
 
-// Loop-nest mode (only loop-nest passes) isn't ported: no loop-nest pass is.
-fn check_loop_nest_mode(ad: i32) { }
+// A loop-nest pass (LOOPNEST_PASS: lnicm)
+fn is_nest_pass_node(c: i32) -> bool { pnodes[c].kind == PK_PASS as u8 && pnodes[c].pass == P_LICM as i32 && (pnodes[c].arg & 2) != 0 }
+// createFunctionToLoopPassAdaptor(LPM): loop-nest mode if the LoopPassManager has no loop passes (a nested
+// loop(...) manager counts as a loop pass). Kept in the adaptor's arg bit 1.
+fn check_loop_nest_mode(ad: i32) {
+    var c = pnodes[ad].first;
+    var any_loop = false;
+    while c >= 0 { if !is_nest_pass_node(c) { any_loop = true; } c = pnodes[c].next; }
+    if !any_loop && pnodes[ad].first >= 0 { pnodes[ad].arg |= 2; }
+}
 
 // parseLoopPass
 recursive fn parse_loop_elem(e: i32) -> i32 {
@@ -529,6 +541,28 @@ recursive fn parse_loop_elem(e: i32) -> i32 {
     if starts_with(name, "require<") || starts_with(name, "invalidate<") {
         if llvm_knows(name, 'l') { not_implemented(name); }
         perr_pipeline(str("unknown loop pass '", name, "'"));
+    }
+    if is_param_name(name, "licm") || is_param_name(name, "lnicm") {
+        // parseLICMOptions
+        let nest = is_param_name(name, "lnicm");
+        var arg: i32 = 1;
+        let lt = find(name, "<");
+        if lt >= 0 {
+            let params = name[(lt as i64) + 1..name.len - 1];
+            var start: i64 = 0;
+            while start <= params.len {
+                var end = start;
+                while end < params.len && params[end] != ';' { end++; }
+                var pn = params[start..end];
+                var en = true;
+                if starts_with(pn, "no-") { en = false; pn = pn[3..]; }
+                if pn == "allowspeculation" { if en { arg |= 1; } else { arg &= ~1; } }
+                else { perr_pipeline(str("invalid LICM pass parameter '", pn, "'")); }
+                start = end + 1;
+            }
+        }
+        if nest { arg |= 2; }
+        return new_pnode(PK_PASS, P_LICM as i32, arg, false, pelems[e].name);
     }
     let r = pass_row(name, 'l');
     if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
@@ -627,7 +661,7 @@ fn parse_pass_pipeline(text: const u8[:]) -> i32 {
             pelems.push(PElem { name: intern("function"), first: first, next: -1 });
             top = w;
         } else if is_loop_pass_name(fname) {
-            let mssa = is_param_name(fname, "licm");
+            let mssa = is_param_name(fname, "licm") || is_param_name(fname, "lnicm");
             let lp = pelems.len as i32;
             pelems.push(PElem { name: intern(if mssa { "loop-mssa" } else { "loop" }), first: first, next: -1 });
             let w = pelems.len as i32;
@@ -692,7 +726,7 @@ fn pass_creates_subtarget(n: i32) -> bool {
     let p = pnodes[n].pass as i64;
     if p == P_REQUIRE {
         let a = pnodes[n].arg as i64;
-        return a == A_MEMORYSSA || a == A_AA || a == A_SCEV;
+        return a == A_MEMORYSSA || a == A_AA || a == A_SCEV || a == A_TARGET_IR;
     }
     return p == P_BDCE || p == P_MEM2REG || p == P_SROA || p == P_INSTSIMPLIFY || p == P_SIMPLIFYCFG ||
         p == P_INSTCOMBINE || p == P_PRINT_DEMANDED_BITS || p == P_LOOP_SIMPLIFY || p == P_AA_EVAL ||
@@ -739,11 +773,24 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
 }
 
 // A loop pass on loop l (PassModel::run); returns the preserved set.
+var lpm_use_mssa: bool = false;   // the running adaptor's UseMemorySSA
+
 fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
     let p = pnodes[n].pass as i64;
     match p {
         P_PRINT_LOOPNEST => { print_loopnest(l); return PA_ALL; },
         P_NOOP_LOOP => { return PA_ALL; },
+        P_LICM => {
+            let a = pnodes[n].arg;
+            let nest = (a & 2) != 0;
+            if !lpm_use_mssa {
+                write_stderr(if nest { "LLVM ERROR: LNICM requires MemorySSA (loop-mssa)\n" } else { "LLVM ERROR: LICM requires MemorySSA (loop-mssa)\n" });
+                exit(1);
+            }
+            let pa = licm_pass_run(l, (a & 1) != 0, nest);
+            ap_pool_reset();
+            return pa;
+        },
         _ => { fatal("internal: unknown loop pass id"); return PA_ALL; },
     }
 }
@@ -759,7 +806,10 @@ fn loop_single_pass(n: i32, l: i32, fv: i32) -> u32, bool {
 recursive fn run_loop_list(n: i32, l: i32, fv: i32) -> u32 {
     var pa = PA_ALL;
     var c = pnodes[n].first;
+    // LoopPassManager::run: loop-nest passes run only when the current loop is a top-level one
+    let outermost = loop_is_outermost(l);
     while c >= 0 {
+        if is_nest_pass_node(c) && !outermost { c = pnodes[c].next; continue; }
         var ppa = PA_ALL;
         var ran = true;
         if pnodes[c].kind == PK_LPM { ppa = run_loop_list(c, l, fv); }
@@ -791,14 +841,16 @@ fn run_loop_adaptor(n: i32, fv: i32) {
     if li_ntop(fv) == 0 { invalidate_function(fv, pa); return; }
     // MSSA = UseMemorySSA ? &AM.getResult<MemorySSAAnalysis>(F) : nullptr; LoopStandardAnalysisResults: AA, AC,
     // DT, LI, SE, TLI, TTI
-    let use_mssa = pnodes[n].arg != 0;
+    let use_mssa = (pnodes[n].arg & 1) != 0;
+    lpm_use_mssa = use_mssa;
     if use_mssa { mssa_get(fv); msu_reset(); }
     aa_begin(fv);
     dt_get(fv, DT_DOM);
     scev_get(fv);
     tli_cur_fn = fv;
-    lpm_nest_mode = false;
-    lpm_append_function_loops(fv);
+    lpm_nest_mode = (pnodes[n].arg & 2) != 0;
+    if !lpm_nest_mode { lpm_append_function_loops(fv); }
+    else { for k in li_ntop(fv) { lpm_wl_insert(li_top(fv, k)); } }
     loop {
         let l = lpm_wl_pop();
         lpm_cur = l;

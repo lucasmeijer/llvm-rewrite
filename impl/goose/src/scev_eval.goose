@@ -598,6 +598,17 @@ recursive fn sc_how_far_to_non_zero(v: i32, l: i32) -> EL {
 // ---------------------------------------------------------------------------------------------
 // Dispositions (stored with the SCEV's generation: forgetMemoizedResults erases them)
 
+// ScalarEvolution::forgetLoopDispositions
+fn sc_forget_loop_dispositions() { if sc_valid { hm_clear(sc_ldisp); } }
+// ScalarEvolution::forgetBlockAndLoopDispositions(V). LLVM erases the dispositions of V's SCEV and, recursively, of
+// its users; this clears both caches when V has a SCEV (a superset: entries of unrelated SCEVs are recomputed).
+fn sc_forget_block_and_loop_dispositions(v: i32) {
+    if !sc_valid || !sc_is_scevable(vals[v].ty) { return; }
+    if sc_get_existing(v) < 0 { return; }
+    hm_clear(sc_ldisp);
+    hm_clear(sc_bdisp);
+}
+
 recursive fn sc_get_loop_disposition(s: i32, l: i32) -> i64 {
     let key = sc_atscope_key(s, l);
     let g = sc_gen(s) as i64;

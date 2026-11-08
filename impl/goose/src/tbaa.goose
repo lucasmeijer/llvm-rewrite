@@ -308,3 +308,53 @@ fn sna_call_call_mod_ref(c1: i32, c2: i32) -> i64 {
     if !sna_may_alias_in_scopes(inst_get_md(c2, MDK_ALIAS_SCOPE), inst_get_md(c1, MDK_NOALIAS)) { return MR_NO; }
     return MR_MODREF;
 }
+
+// createAccessTag(AccessType)
+fn tb_create_access_tag(t: i32) -> i32 {
+    if t < 0 || tb_nops(t) < 2 { return -1; }
+    let off = md_value(c_int(T_I64, 0));
+    if tb_is_new_format_type(t) {
+        let sz = md_value(c_int(T_I64, -1));
+        return md_get(MK_TUPLE, -1, [t, t, off, sz], false);
+    }
+    return md_get(MK_TUPLE, -1, [t, t, off], false);
+}
+
+// mayBeAccessToSubobjectOf with the GenericTag output: (matched, MayAlias, GenericTag)
+fn tb_may_be_access_to_subobject_of_g(base_tag: i32, sub_tag: i32, common: i32) -> bool, bool, i32 {
+    if tb_tag_access(base_tag) == tb_tag_base(base_tag) && tb_tag_access(base_tag) == common {
+        return true, true, tb_create_access_tag(common);
+    }
+    let nf = tb_tag_is_new_format(base_tag);
+    var bt = tb_tag_base(base_tag);
+    var off = tb_tag_offset(base_tag);
+    loop {
+        if bt < 0 { break; }
+        if bt == tb_tag_base(sub_tag) {
+            let may = off == tb_tag_offset(sub_tag) || bt == tb_tag_access(base_tag) || tb_tag_base(sub_tag) == tb_tag_access(sub_tag);
+            return true, may, if may { sub_tag } else { tb_create_access_tag(common) };
+        }
+        if nf && bt == tb_tag_access(base_tag) { break; }
+        let nb, noff = tb_st_get_field(bt, off);
+        bt = nb;
+        off = noff;
+    }
+    if nf {
+        let ft = tb_tag_base(sub_tag);
+        if bt >= 0 && tb_has_field(bt, ft) { return true, true, tb_create_access_tag(common); }
+    }
+    return false, false, -1;
+}
+
+// MDNode::getMostGenericTBAA(A, B) (matchAccessTags with GenericTag)
+fn tb_most_generic_tbaa(a: i32, b: i32) -> i32 {
+    if a == b { return a; }
+    if a < 0 || b < 0 { return -1; }
+    let common = tb_least_common_type(tb_tag_access(a), tb_tag_access(b));
+    if common < 0 { return -1; }
+    let m1, may1, g1 = tb_may_be_access_to_subobject_of_g(a, b, common);
+    if m1 { return g1; }
+    let m2, may2, g2 = tb_may_be_access_to_subobject_of_g(b, a, common);
+    if m2 { return g2; }
+    return tb_create_access_tag(common);
+}

@@ -40,7 +40,10 @@ let KNOWN_FLAGS: const u8[:][] = [
     "basic-aa-recphi", "basic-aa-separate-storage", "enable-tbaa", "enable-scoped-noalias",
     "capture-tracking-max-uses-to-explore",
     "memssa-check-limit",                                // read by MemorySSA
-    "verify-memoryssa",                                  // no-op: extra verification only
+    "verify-memoryssa",                                  // MemorySSA verification (fails loudly; never changes output)
+    "disable-licm-promotion", "licm-control-flow-hoisting", "licm-force-thread-model-single",   // read by licm
+    "licm-max-num-uses-traversed", "licm-max-num-fp-reassociations", "licm-max-num-int-reassociations",
+    "licm-mssa-optimization-cap", "licm-mssa-max-acc-promotion", "alias-set-saturation-threshold",
     "use-constant-int-for-fixed-length-splat", "use-constant-fp-for-fixed-length-splat",   // only =false (the default)
     "use-constant-int-for-scalable-splat", "use-constant-fp-for-scalable-splat",           // is supported
     "scalar-evolution-max-iterations", "scalar-evolution-classify-expressions",      // read by ScalarEvolution

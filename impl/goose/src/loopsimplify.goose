@@ -124,11 +124,27 @@ fn has_reachable_loop_entry_to_header(l: i32) -> bool {
 
 // MemorySSAUpdater *MSSAU != nullptr (the cached MemorySSA of the function is kept up to date)
 var ls_mssau: bool = false;
+// SplitBlockPredecessors gets a (lazy) DomTreeUpdater instead of the DominatorTree (LICM's sinking)
+var ls_split_dtu: bool = false;
 
 // UpdateAnalysisInformation (DT form); returns HasLoopExit.
 fn update_analysis_information(old: i32, nb: i32, preds: const i32[:], use_dt: bool, use_li: bool, preserve_lcssa: bool) -> bool {
     let fv = block_func(old);
-    if use_dt {
+    if use_dt && ls_split_dtu {
+        // a lazy DomTreeUpdater, flushed right away by DTU->getDomTree() (LoopInfo is updated below)
+        if func_entry(fv) == nb { fatal("SplitBlockPredecessors of the entry block with a DomTreeUpdater is not ported yet"); }
+        var ups: DTUpdate[>..<] = [];
+        var uniq: i32[>..<] = [];
+        ups.push(DTUpdate { kind: DT_INSERT, from: nb, to: old });
+        for p in preds {
+            if position(uniq, p) < 0 {
+                uniq.push(p);
+                ups.push(DTUpdate { kind: DT_INSERT, from: p, to: nb });
+                ups.push(DTUpdate { kind: DT_DELETE, from: p, to: old });
+            }
+        }
+        dt_apply_updates(fv, DT_DOM, ups);
+    } else if use_dt {
         if old == dt_root(fv, DT_DOM) { fatal("SplitBlockPredecessors of the entry block (DominatorTree::setNewRoot) is not ported yet"); }
         dt_split_block(fv, DT_DOM, nb);
     }

@@ -18,6 +18,7 @@ import apint;
 import pm;
 import vt;
 import assume;
+import memorybuiltins;
 
 fn spec_not_ported(what: const u8[:]) { fatal(str("isSafeToSpeculativelyExecute: ", what, " is not ported yet")); }
 
@@ -128,6 +129,9 @@ recursive fn ty_is_sized_spec(t: i32) -> bool {
 // The context of the current query (SimplifyQuery.CxtI and whether SQ.AC is set).
 var spec_cxt: i32 = -1;
 var spec_use_ac: bool = false;
+var spec_use_dt: bool = false;     // SQ.DT (the function's dominator tree) is set
+var spec_use_tli: bool = false;    // SQ.TLI is set
+var spec_ignore_free: bool = false; // IgnoreFree
 var spec_visited: i32[>..<];
 
 fn spec_known_nonzero(v: i32) -> bool {
@@ -136,9 +140,9 @@ fn spec_known_nonzero(v: i32) -> bool {
     let save_ac = sq_no_ac;
     let save_tli = sq_no_tli;
     kb_cxt = spec_cxt;
-    sq_no_dt = true;
+    sq_no_dt = !spec_use_dt;
     sq_no_ac = !spec_use_ac;
-    sq_no_tli = true;
+    sq_no_tli = !spec_use_tli;
     let r = is_known_non_zero(v, 0);
     kb_cxt = save_cxt;
     sq_no_dt = save_dt;
@@ -149,7 +153,7 @@ fn spec_known_nonzero(v: i32) -> bool {
 
 fn spec_valid_assume_for_context(i: i32, cx: i32) -> bool {
     let save_dt = sq_no_dt;
-    sq_no_dt = true;
+    sq_no_dt = !spec_use_dt;
     let r = valid_assume_for_context(i, cx);
     sq_no_dt = save_dt;
     return r;
@@ -288,7 +292,7 @@ recursive fn spec_deref_aligned(v: i32, align: i64, size: AP, depth: i64) -> boo
     if known && cbn && !spec_known_nonzero(v) { known = false; }
     // CheckForFreed (use-dereferenceable-at-point-semantics): the object must not be freed between its
     // definition and the context
-    if known && bytes != 0 && !is_inst_op(v, OP_ALLOCA) && vals[v].kind != VK_GVAR && spec_can_be_freed(v) {
+    if known && !spec_ignore_free && bytes != 0 && !is_inst_op(v, OP_ALLOCA) && vals[v].kind != VK_GVAR && spec_can_be_freed(v) {
         var defi: i32 = -1;
         if is_inst(v) {
             if iop(v) == OP_INVOKE { defi = block_first(invoke_normal_dest(v)); }
@@ -306,9 +310,17 @@ recursive fn spec_deref_aligned(v: i32, align: i64, size: AP, depth: i64) -> boo
     if is_callbase(v) {
         let rp = arg_aliasing_returned_ptr(v, true);
         if rp >= 0 { return spec_deref_aligned(rp, align, size, depth - 1); }
-        // getObjectSize with TLI = null: only allocsize-attributed calls have a size.
         let f = called_function(v);
-        if aset_has(alist_fn(insts[inst_of(v)].attrs), AK_AllocSize) || (f >= 0 && func_has_fn_attr(f, AK_AllocSize)) {
+        if spec_use_tli {
+            // getObjectSize(V, ObjSize, DL, TLI, {RoundToAlign = false, NullIsUnknownSize = true})
+            let ok, osz = mb_get_object_size(v, OSM_EXACT_SIZE_FROM_OFFSET, false, true, false);
+            if ok {
+                if osz != 0 && !ap_ugt_u64(size, osz) && spec_known_nonzero(v) && !spec_can_be_freed(v) {
+                    return pointer_alignment(v) >= align;
+                }
+            }
+        } else if aset_has(alist_fn(insts[inst_of(v)].attrs), AK_AllocSize) || (f >= 0 && func_has_fn_attr(f, AK_AllocSize)) {
+            // getObjectSize with TLI = null: only allocsize-attributed calls have a size.
             spec_not_ported("getObjectSize of allocsize calls");
         }
     }
@@ -339,6 +351,37 @@ fn ldst_align(i: i32) -> i64 { let a = insts[inst_of(i)].align; return if a == 0
 // isSafeToSpeculativelyExecute(Inst, CtxI, AC, DT = null, TLI = null, UseVariableInfo = true,
 // IgnoreUBImplyingAttrs = true). use_ac says whether the caller passes an AssumptionCache.
 fn spec_safe(i: i32, cxt: i32, use_ac: bool) -> bool { spec_safe_opc(iop(i), i, cxt, use_ac, true) }
+
+// isDereferenceableAndAlignedPointer(V, Ty, Alignment, SimplifyQuery(DL, TLI, DT, AC, CxtI))
+fn spec_deref_aligned_ty_sq(v: i32, ty: i32, align: i64, cxt: i32) -> bool {
+    spec_use_dt = true;
+    spec_use_tli = true;
+    spec_use_ac = true;
+    spec_cxt = cxt;
+    let r = spec_deref_aligned_ty(v, ty, align);
+    spec_use_dt = false;
+    spec_use_tli = false;
+    spec_use_ac = false;
+    spec_cxt = -1;
+    return r;
+}
+// isDereferenceablePointer(V, Ty, SimplifyQuery(DL), IgnoreFree = true)
+fn spec_deref_pointer_ignore_free(v: i32, ty: i32) -> bool {
+    spec_ignore_free = true;
+    let r = spec_deref_aligned_ty(v, ty, 1);
+    spec_ignore_free = false;
+    return r;
+}
+
+// isSafeToSpeculativelyExecute(Inst, CtxI, AC, DT, TLI) with the function's DT and TLI (LICM)
+fn spec_safe_dt_tli(i: i32, cxt: i32, use_ac: bool) -> bool {
+    spec_use_dt = true;
+    spec_use_tli = true;
+    let r = spec_safe_opc(iop(i), i, cxt, use_ac, true);
+    spec_use_dt = false;
+    spec_use_tli = false;
+    return r;
+}
 
 fn spec_safe_opc(o: i64, i: i32, cxt: i32, use_ac: bool, ignore_ub_attrs: bool) -> bool {
     if o == OP_UDIV || o == OP_UREM {
