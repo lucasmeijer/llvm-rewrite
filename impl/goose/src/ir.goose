@@ -1155,7 +1155,7 @@ var attrs: Attr[>..];
 var attr_tab: i32[>..<];
 
 // Attribute sets: runs of attribute ids in attr_runs, sorted by AttributeImpl::cmp. Set 0 = empty.
-struct ASet { at: i32, n: i32, hash: u32 }
+struct ASet { at: i32, n: i32, hash: u32, bits0: u64, bits1: u64 }   // bits: enum kinds present (kind < 128)
 var asets: ASet[>..];
 var aset_tab: i32[>..<];
 var attr_runs: i32[>..];
@@ -1245,7 +1245,7 @@ fn attr_cmp(x: i32, y: i32) -> i64 {
 }
 
 fn init_attrs() {
-    asets.push(ASet { at: 0, n: 0, hash: 0 });
+    asets.push(ASet { at: 0, n: 0, hash: 0, bits0: 0, bits1: 0 });
     alists.push(AList { at: 0, n: 0, hash: 0 });
 }
 
@@ -1302,8 +1302,14 @@ fn aset_get(xs0: const i32[:]) -> i32 {
     }
     let id = asets.len as i32;
     let at = attr_runs.len as i32;
-    for x in xs { attr_runs.push(x); }
-    asets.push(ASet { at: at, n: xs.len as i32, hash: h });
+    var b0: u64 = 0;
+    var b1: u64 = 0;
+    for x in xs {
+        attr_runs.push(x);
+        let k = attrs[x].kind as i64;
+        if k > 0 && k < 64 { b0 |= (1 as u64) << (k as u64); } else if k >= 64 && k < 128 { b1 |= (1 as u64) << ((k - 64) as u64); }
+    }
+    asets.push(ASet { at: at, n: xs.len as i32, hash: h, bits0: b0, bits1: b1 });
     aset_tab[j] = id;
     return id;
 }
@@ -1311,6 +1317,8 @@ fn aset_get(xs0: const i32[:]) -> i32 {
 fn aset_n(s: i32) -> i64 { asets[s].n as i64 }
 fn aset_attr(s: i32, k: i64) -> i32 { attr_runs[asets[s].at + k] }
 fn aset_find(s: i32, kind: i64) -> i32 {
+    if kind > 0 && kind < 64 { if (asets[s].bits0 & ((1 as u64) << (kind as u64))) == 0 { return -1; } }
+    else if kind >= 64 && kind < 128 { if (asets[s].bits1 & ((1 as u64) << ((kind - 64) as u64))) == 0 { return -1; } }
     for k in asets[s].n { let a = attr_runs[asets[s].at + k]; if attrs[a].kind as i64 == kind { return a; } }
     return -1;
 }
