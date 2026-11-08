@@ -43,6 +43,13 @@ description: Port an LLVM optimization pass (or analysis) into your implementati
 
 ## Finish
 
+Sweep the pass over the whole corpus: `./harness/run sweep --impl <lang> --passes '<pass>'` (with `--analysis` for
+an analysis printer; see "Sweeps" in `docs/testing.md`). This is expected before a pass unit is finished: the exit
+tests miss many bugs that a sweep over ~7800 files finds. Every `differs`/`bad-ir` file is a silent wrong output:
+fix it, or, if it comes from someone else's code, make it fail loudly or write it down in `NOTES.md`. Note the sweep
+result (identical / failed counts, main failure groups) in `NOTES.md`. Also sweep the pipelines from your unit's RUN
+lines that combine your pass with others, if the others already work.
+
 Look at compile time: `./harness/run perf --impl <lang> 'tests/perf/scaling/*'` (and `tests/perf/compile/*` once
 `-O2` works). If a shape that runs your pass scales worse than LLVM (exponent k clearly higher), you probably used a
 simpler data structure than LLVM does; fix it or note it in `NOTES.md`. If no shape exercises your pass, add one to

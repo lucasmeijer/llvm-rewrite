@@ -8,7 +8,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import checks, config, corpus, gen, perf, perfgen, proc, roadmap
+from . import checks, config, corpus, gen, perf, perfgen, proc, roadmap, sweep
 
 TTY = sys.stdout.isatty()
 
@@ -323,6 +323,23 @@ def main(argv=None):
     s.add_argument("test")
     s.add_argument("--index", type=int, default=0, help="which @opt line")
     s.set_defaults(fn=cmd_bisect)
+
+    s = sub.add_parser("sweep", help="run one pipeline over every round-tripping corpus file, LLVM vs impl (report only)",
+                       description="Run `opt -passes=<pipeline> -S` (or, with --analysis, `-disable-output`) with LLVM and the "
+                       "implementation on every selected corpus file and compare like ::opt (or ::analysis). Default files: "
+                       "every ::roundtrip in impl/<lang>/passing.txt, without tests/perf. Never touches passing.txt.")
+    common(s)
+    s.add_argument("globs", nargs="*", help="restrict to these path globs, e.g. 'tests/imported/*' (also selects tests/perf files)")
+    s.add_argument("--passes", help="the pipeline, as for opt -passes=, e.g. 'sroa' or 'function(loop-mssa(licm))'")
+    s.add_argument("--extra", default="", help="more opt arguments as one string; write it with '=': --extra='-aa-pipeline=basic-aa -O2'")
+    s.add_argument("--analysis", action="store_true", help="analysis-printer mode: -disable-output, compare exit status, stdout and stderr")
+    s.add_argument("--unordered", action="store_true", help="with --analysis: compare lines as sorted multisets (like @analysis-unordered)")
+    s.add_argument("--all-files", action="store_true", help="every corpus file, not just the ones the impl round-trips")
+    s.add_argument("--timeout", type=float, default=60, help="seconds per run of the implementation's opt (default 60)")
+    s.add_argument("-j", "--jobs", type=int, default=os.cpu_count())
+    s.add_argument("-v", "--verbose", action="store_true", help="print the diff of every silent mismatch shown")
+    s.add_argument("--max-shown", type=int, default=25)
+    s.set_defaults(fn=sweep.cmd_sweep)
 
     s = sub.add_parser("from-c", help="generate e2e/function tests from C sources (with UB validation)")
     s.add_argument("sources", nargs="+", help="tests/e2e/src/<area>/x.c or tests/function/src/<area>/x.c")

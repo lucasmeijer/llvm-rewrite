@@ -81,6 +81,7 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/`, `imported/` and `perf/` are genera
 ./harness/run show tests/e2e/O0/calls/varargs.ll --impl rust     # one file (or one ::check), full details
 ./harness/run bisect tests/e2e/pipeline/misc/sieve.ll --impl rust  # first pass where an @opt pipeline diverges
 ./harness/run status                                     # unit x implementation scoreboard (runs nothing)
+./harness/run sweep --impl rust --passes sroa            # one pipeline over the whole corpus, vs LLVM (see Sweeps)
 ./harness/run check --impl llvm                          # self-test: LLVM against itself; finds invalid tests
 
 ./harness/run from-c tests/e2e/src/<area>/x.c            # C -> three .ll tests, with UB validation
@@ -101,6 +102,45 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/`, `imported/` and `perf/` are genera
 
 `from-c` rejects programs that are nondeterministic, time out (10 s), or behave differently between clang `-O0`,
 `-O2` and `-O1 -fsanitize=address,undefined`, because that indicates UB and the test would be meaningless.
+
+## Sweeps (one pipeline over the whole corpus; report only)
+
+A unit's exit tests are a few hundred files written for that pass. Running the pass over *every* file the
+implementation can parse and print and comparing with LLVM finds many bugs they miss (wrong results on IR the pass's
+own tests never contain, shared ValueTracking/printer bugs). `sweep` does that:
+
+```bash
+./harness/run sweep --impl rust --passes sroa                          # IR mode: like ::opt
+./harness/run sweep --impl rust --passes 'function(loop-mssa(licm))' 'tests/imported/*'   # only some files
+./harness/run sweep --impl rust --passes 'print<scalar-evolution>' --analysis           # like ::analysis
+./harness/run sweep --impl rust --passes 'print<demanded-bits>' --unordered             # like @analysis-unordered
+./harness/run sweep --impl rust --passes aa-eval --analysis --extra='-aa-pipeline=basic-aa -print-all-alias-modref-info'
+./harness/run sweep --impl rust --extra=-O2                             # no --passes: any opt arguments
+./harness/run sweep --impl llvm --passes sroa                          # self-test: everything identical
+```
+
+Files: by default every file whose `::roundtrip` is in `impl/<lang>/passing.txt` (for `--impl llvm`, and with
+`--all-files`, every corpus file), except the big `tests/perf/` files; globs restrict the set (and can select
+`tests/perf/` files). For each file it runs `opt <args> -S` (IR mode) or `opt <args> -disable-output`
+(`--analysis`) with LLVM (cached in the oracle cache) and with the implementation, in parallel (`-j`), and compares
+exactly like the `::opt` check (both canonicalized through `llvm-as | llvm-dis`, ours must pass the verifier) or the
+`::analysis` check (exit status, stdout and stderr byte-identical; sorted lines with `--unordered`). Outcomes:
+
+| Outcome | Meaning |
+| --- | --- |
+| `identical` | same output |
+| `differs` | **silent mismatch**: our opt exited 0 with different output. The worst kind; listed first, fix these first |
+| `bad-ir` | also silent: our opt exited 0 but its output fails `llvm-as` (parser or verifier) |
+| `failed` | loud: nonzero exit, crash or timeout (`--timeout`, default 60 s). Grouped by the first error line (file name and line numbers taken out), most frequent first |
+| `llvm-failed` | LLVM's opt itself fails on the file with these arguments (or, in analysis mode, prints different output on two runs): skipped |
+
+Artifacts go to `.harness-out/sweep/<impl>/<args>/` (replaced on every run of the same arguments): `results.tsv`
+(status, file, error group for every file), `summary.json` (counts, silent mismatches, failure groups with all their
+files), and `<test path>/` for every non-identical file with `message.txt` and the same files `check` writes
+(`expected.ll`, `actual.ll`, `diff.txt`, `stderr.txt`, `expected.stderr`, …). `-v` prints the diff of each silent
+mismatch. `sweep` never touches `passing.txt` and exits 0; it is a report. A full sweep of ~7800 files takes well
+under a minute on 16 cores once LLVM's outputs are cached. Expected before finishing a pass unit (see the `port-pass`
+skill): no silent mismatches, or ones that are understood and written down in `NOTES.md`.
 
 ## Performance (compile time; report only)
 
