@@ -787,6 +787,17 @@ hoist_all_instructions_into :: (dom: Value_Id, insert_pt: Value_Id, bb: Value_Id
         i = nx;
     }
     t := block_terminator(bb);
+    // BasicBlock::splice at InsertPt->getIterator() (no head bit): the records attached to InsertPt end up in
+    // front of the spliced instructions
+    if block_first(bb) != t && inst(insert_pt).records != 0 {
+        recs := inst(insert_pt).records;
+        inst(insert_pt).records = 0;
+        first := block_first(bb);
+        old := inst(first).records;
+        inst(first).records = 0;
+        attach_records_before(first, recs);
+        attach_records_before(first, old);
+    }
     while block_first(bb) != t {
         x := block_first(bb);
         inst_unlink(x);
