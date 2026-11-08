@@ -307,6 +307,40 @@ fn create_inst(opc: i64, ty: i32, opsv: const i32[:]) -> i32 {
     return v;
 }
 
+// Instruction::clone(): same opcode, type, operands (new uses, in operand order), flags, attributes and metadata
+// attachments; unnamed, not inserted, no debug records. PHI incoming blocks are copied too.
+fn inst_clone(iv: i32) -> i32 {
+    let n = nops(iv);
+    let ii = inst_of(iv);
+    let nv = new_inst(insts[ii].op as i64, vals[iv].ty, n);
+    let ni = inst_of(nv);
+    let src = insts[ii];
+    insts[ni].flags = src.flags;
+    insts[ni].fmf = src.fmf;
+    insts[ni].pred = src.pred;
+    insts[ni].align = src.align;
+    insts[ni].ord = src.ord;
+    insts[ni].ord2 = src.ord2;
+    insts[ni].bits = src.bits;
+    insts[ni].ty2 = src.ty2;
+    insts[ni].attrs = src.attrs;
+    insts[ni].cc = src.cc;
+    insts[ni].aux = src.aux;
+    insts[ni].naux = src.naux;
+    insts[ni].ss = src.ss;
+    insts[ni].as_ = src.as_;
+    vals[nv].flags = vals[iv].flags;
+    for k in n {
+        set_op(nv, k, op(iv, k));
+        use_aux[vals[nv].ops + k] = use_aux[vals[iv].ops + k];
+    }
+    let at = md_att.len as i32;
+    for k in src.nmd { let a = md_att[src.md + 2 * k]; let b = md_att[src.md + 2 * k + 1]; md_att.push(a); md_att.push(b); }
+    insts[ni].md = at;
+    insts[ni].nmd = src.nmd;
+    return nv;
+}
+
 // IRBuilder-style creation: insert before `before` and name it.
 fn build_before(opc: i64, ty: i32, opsv: const i32[:], name: const u8[:], before: i32) -> i32 {
     let v = create_inst(opc, ty, opsv);

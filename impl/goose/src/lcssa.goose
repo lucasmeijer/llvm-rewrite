@@ -1,8 +1,7 @@
 // LCSSA: loop-closed SSA form (the lcssa pass and formLCSSA* for other passes).
 // Port of llvm/lib/Transforms/Utils/LCSSA.cpp (formLCSSAForInstructions, computeBlocksDominatingExits,
-// formLCSSA, formLCSSARecursively, LCSSAPass::run). Not ported (fail loudly): rewriting a use through the
-// SSAUpdater (needed only when more than one exit PHI is inserted and the use is not in an exit block),
-// debug records using a value that gets an exit PHI, invoke results, ScalarEvolution updates.
+// formLCSSA, formLCSSARecursively, LCSSAPass::run), with the SSAUpdater (ssaupdater.goose). Not ported (fail
+// loudly): ScalarEvolution updates.
 import std;
 import ir;
 import irutil;
@@ -10,11 +9,41 @@ import instinfo;
 import analyses;
 import domtree;
 import loopinfo;
+import ssaupdater;
+import dinfo;
 
 fn lcssa_new_phi(ty: i32, reserve: i64) -> i32 {
     let pn = new_inst(OP_PHI, ty, reserve);
     vals[pn].nops = 0;
     return pn;
+}
+
+// The findDbgValues(I) loop of formLCSSAForInstructions: #dbg_value/#dbg_assign records outside the loop that
+// use I get the value available in their block (DbgVariableRecord::replaceVariableLocationOp).
+fn lcssa_rewrite_dbg_values(iv: i32, ibb: i32, l: i32, added: const i32[:]) {
+    for r in dbgrecs.len {
+        let kind = dbgrecs[r].kind as i64;
+        if kind != DR_VALUE && kind != DR_ASSIGN { continue; }
+        let loc = dbgrecs[r].loc;
+        if !md_mentions_value(loc, iv) { continue; }
+        let owner = dbgrecs[r].owner;
+        if owner < 0 { fatal("LCSSA: a debug record without a marker uses a rewritten value"); }
+        let ubb = inst_parent(owner);
+        if ibb == ubb || loop_contains(l, ubb) { continue; }
+        let v = if added.len == 1 { added[0] } else { ssa_find_value_for_block(ubb) };
+        if v < 0 { continue; }
+        if mds[loc].kind == MK_VALUE { dbgrecs[r].loc = md_value(v); continue; }
+        if mds[loc].kind == MK_DIARGLIST {
+            var ops: i32[>..<] = [];
+            for k in mds[loc].nops as i64 {
+                let o = md_op(loc, k);
+                ops.push(if o >= 0 && mds[o].kind == MK_VALUE && mds[o].extra == iv { md_value(v) } else { o });
+            }
+            dbgrecs[r].loc = md_get(MK_DIARGLIST, mds[loc].extra, ops, false);
+            continue;
+        }
+        fatal("LCSSA: unexpected debug record location");
+    }
 }
 
 // formLCSSAForInstructions(Worklist, DT, LI, SE = null, PHIsToRemove = null, InsertedPHIs = null)
@@ -24,7 +53,6 @@ fn form_lcssa_for_instructions(worklist: i32[>..<]&) -> bool {
     var exits: i32[>..<] = [];
     var added: i32[>..<] = [];
     var post: i32[>..<] = [];
-    var avail_b: i32[>..<] = [];        // SSAUpdater available values (block, value)
     var to_remove: i32[>..<] = [];      // LocalPHIsToRemove (SetVector)
     var preds: i32[>..<] = [];
     while worklist.len > 0 {
@@ -51,15 +79,16 @@ fn form_lcssa_for_instructions(worklist: i32[>..<]&) -> bool {
             u = nu;
         }
         if to_rewrite.len == 0 { continue; }
-        if iop(iv) == OP_INVOKE { fatal("LCSSA for invoke results is not ported yet"); }
-        let domn = if dt_has_node(DT_DOM, ibb) { ibb } else { -1 };
+        // the value of an invoke is only available in its normal destination
+        let dombb = if iop(iv) == OP_INVOKE { term_succ(iv, 0) } else { ibb };
+        let domn = if dt_has_node(DT_DOM, dombb) { dombb } else { -1 };
         added.clear();
         post.clear();
-        avail_b.clear();
+        ssa_init(vals[iv].ty, val_name(iv));
         for eb in exits {
             let en = if dt_has_node(DT_DOM, eb) { eb } else { -1 };
             if !dt_dominates_nodes(fv, DT_DOM, domn, en) { continue; }
-            if position(avail_b, eb) >= 0 { continue; }
+            if ssa_has_value_for_block(eb) { continue; }
             preds.clear();
             each_pred(eb) { p => preds.push(p); };
             let pn = lcssa_new_phi(vals[iv].ty, preds.len);
@@ -77,7 +106,7 @@ fn form_lcssa_for_instructions(worklist: i32[>..<]&) -> bool {
                 if !loop_contains(l, p) { to_rewrite.push(vals[pn].ops + k as i32); }
             }
             added.push(pn);
-            avail_b.push(eb);
+            ssa_add_available_value(eb, pn);
             let ol = li_loop_for(eb);
             if ol >= 0 && !loop_contains_loop(l, ol) { post.push(pn); }
         }
@@ -88,9 +117,13 @@ fn form_lcssa_for_instructions(worklist: i32[>..<]&) -> bool {
             let f = block_first(ubb);
             if f >= 0 && iop(f) == OP_PHI && position(exits, ubb) >= 0 { use_set(u2, f); continue; }
             if added.len == 1 { use_set(u2, added[0]); continue; }
-            fatal("LCSSA: SSAUpdater::RewriteUse is not ported yet");
+            ssa_rewrite_use(u2);
         }
-        if dbgrecs.len > 0 && dbg_records_use_value(iv) { fatal("LCSSA: rewriting debug records is not ported yet"); }
+        if dbgrecs.len > 0 { lcssa_rewrite_dbg_values(iv, ibb, l, added); }
+        for pn in ssa_inserted {
+            let ol = li_loop_for(inst_parent(pn));
+            if ol >= 0 && !loop_contains_loop(l, ol) { post.push(pn); }
+        }
         for pn in post { if vals[pn].first_use >= 0 { worklist.push(pn); } }
         for pn in added { if vals[pn].first_use < 0 && position(to_remove, pn) < 0 { to_remove.push(pn); } }
         changed = true;

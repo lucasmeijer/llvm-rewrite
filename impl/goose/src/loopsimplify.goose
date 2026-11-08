@@ -8,7 +8,7 @@
 //   llvm/lib/Transforms/Utils/LoopUtils.cpp  formDedicatedExitBlocks
 //   llvm/lib/Transforms/Utils/Local.cpp  changeToUnreachable (without DTU)
 //   llvm/lib/Analysis/LoopInfo.cpp  Loop::makeLoopInvariant, Loop::getStartLoc
-//   llvm/lib/Analysis/InstructionSimplify.cpp  simplifyPHINode (the only simplifyInstruction LoopSimplify needs)
+// simplifyInstruction on PHIs is simplifyPHINode, in ssaupdater.goose.
 // Not ported (fail loudly): landing-pad predecessors (SplitLandingPadPredecessors), LoopInfo::erase,
 // MemorySSA/ScalarEvolution updates, and the exit-merging foldBranchToCommonDest transformation (its
 // "nothing to do" checks are ported, so it only fails when LLVM would actually fold).
@@ -20,6 +20,7 @@ import calls;
 import analyses;
 import domtree;
 import loopinfo;
+import ssaupdater;
 
 // ---------------------------------------------------------------------------------------------
 // Block list helpers
@@ -205,7 +206,12 @@ fn update_phi_nodes(orig: i32, nb: i32, preds: const i32[:], bi: i32, has_loop_e
 fn split_block_predecessors(bb: i32, preds: const i32[:], suffix: const u8[:], use_dt: bool, use_li: bool, preserve_lcssa: bool) -> i32 {
     // canSplitPredecessors / isLandingPad
     let fnp = first_non_phi(bb);
-    if fnp >= 0 && iop(fnp) == OP_LANDINGPAD { fatal("SplitLandingPadPredecessors is not ported yet"); }
+    if fnp >= 0 && iop(fnp) == OP_LANDINGPAD {
+        var s2: u8[>..] = [];
+        s2.append(suffix);
+        s2.append(".split-lp");
+        return split_landing_pad_predecessors(bb, preds, suffix, s2, use_dt, use_li, preserve_lcssa);
+    }
     if fnp >= 0 && inst_is_eh_pad(fnp) { return -1; }
     let fv = block_func(bb);
     let nm = block_name_plus(bb, suffix);
@@ -240,6 +246,66 @@ fn split_block_predecessors(bb: i32, preds: const i32[:], suffix: const u8[:], u
         }
     }
     return nb;
+}
+
+// SplitLandingPadPredecessorsImpl: returns NewBBs[0].
+fn split_landing_pad_predecessors(orig: i32, preds: const i32[:], suffix1: const u8[:], suffix2: const u8[:], use_dt: bool, use_li: bool, preserve_lcssa: bool) -> i32 {
+    let fv = block_func(orig);
+    let nm1 = block_name_plus(orig, suffix1);
+    let nb1 = create_block_before(fv, orig, nm1);
+    let bi1 = create_inst(OP_BR, T_VOID, [orig]);
+    block_append_inst(nb1, bi1);
+    let dl = inst_get_md(first_non_phi(orig), 0);
+    if dl >= 0 { inst_set_md(bi1, 0, dl); }
+    for p in preds { term_replace_uses_of_with(block_terminator(p), orig, nb1); }
+    var hle = update_analysis_information(orig, nb1, preds, use_dt, use_li, preserve_lcssa);
+    update_phi_nodes(orig, nb1, preds, bi1, hle);
+    var preds2: i32[>..<] = [];
+    each_pred(orig) { p => if p != nb1 { preds2.push(p); } };
+    var nb2: i32 = -1;
+    if preds2.len > 0 {
+        let nm2 = block_name_plus(orig, suffix2);
+        nb2 = create_block_before(fv, orig, nm2);
+        let bi2 = create_inst(OP_BR, T_VOID, [orig]);
+        block_append_inst(nb2, bi2);
+        if dl >= 0 { inst_set_md(bi2, 0, dl); }
+        for p in preds2 { term_replace_uses_of_with(block_terminator(p), orig, nb2); }
+        hle = update_analysis_information(orig, nb2, preds2, use_dt, use_li, preserve_lcssa);
+        update_phi_nodes(orig, nb2, preds2, bi2, hle);
+    }
+    let lpad = first_non_phi(orig);
+    let c1 = inst_clone(lpad);
+    inst_insert_before(c1, first_non_phi(nb1));
+    var n1: u8[>..] = [];
+    n1.append("lpad");
+    n1.append(suffix1);
+    set_name(c1, n1);
+    if nb2 >= 0 {
+        let c2 = inst_clone(lpad);
+        inst_insert_before(c2, first_non_phi(nb2));
+        var n2: u8[>..] = [];
+        n2.append("lpad");
+        n2.append(suffix2);
+        set_name(c2, n2);
+        if vals[lpad].first_use >= 0 {
+            let pn = new_phi(vals[lpad].ty, 2);
+            inst_insert_before(pn, lpad);
+            set_name(pn, "lpad.phi");
+            phi_add_incoming(pn, c1, nb1);
+            phi_add_incoming(pn, c2, nb2);
+            rauw(lpad, pn);
+        }
+        inst_erase_from_parent(lpad);
+    } else {
+        rauw(lpad, c1);
+        inst_erase_from_parent(lpad);
+    }
+    return nb1;
+}
+
+// User::replaceUsesOfWith on a terminator: every operand equal to old.
+fn term_replace_uses_of_with(t: i32, old: i32, nw: i32) {
+    for k in nops(t) { if op(t, k) == old { set_op(t, k, nw); } }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -320,43 +386,6 @@ fn insert_preheader_for_loop(l: i32, preserve_lcssa: bool) -> i32 {
 }
 
 // ---------------------------------------------------------------------------------------------
-// simplifyPHINode (InstructionSimplify.cpp), as simplifyInstruction(PN, {DL, nullptr, DT, AC}) runs it.
-
-// isGuaranteedNotToBePoison: only the cases that need no analysis; anything else fails loudly.
-fn lsimp_not_poison(v: i32) -> bool {
-    let k = vals[v].kind;
-    if k == VK_CINT || k == VK_CFP || k == VK_CNULL { return true; }
-    fatal("LoopSimplify: isGuaranteedNotToBePoison is not ported for this value (simplifyPHINode with undef inputs)");
-    return false;
-}
-
-fn simplify_phi_node(pn: i32) -> i32 {
-    var common: i32 = -1;
-    var has_poison = false;
-    var has_undef = false;
-    for k in phi_nincoming(pn) {
-        let x = phi_value(pn, k);
-        if x == pn { continue; }
-        if vals[x].kind == VK_POISON { has_poison = true; continue; }
-        if vals[x].kind == VK_UNDEF { has_undef = true; continue; }
-        if common >= 0 && x != common { return -1; }
-        common = x;
-    }
-    if common < 0 { return if has_undef { c_undef(vals[pn].ty) } else { c_poison(vals[pn].ty) }; }
-    if has_poison || has_undef {
-        if is_inst(common) && !dt_value_dominates_inst(common, pn) { return -1; }
-        if has_undef && !lsimp_not_poison(common) { return -1; }
-    }
-    return common;
-}
-// simplifyInstruction(PN): a value equal to the PHI itself (unreachable code) becomes poison.
-fn simplify_phi(pn: i32) -> i32 {
-    let r = simplify_phi_node(pn);
-    if r == pn { return c_poison(vals[pn].ty); }
-    return r;
-}
-
-// ---------------------------------------------------------------------------------------------
 // separateNestedLoop
 
 // findPHIToPartitionLoops
@@ -365,7 +394,7 @@ fn find_phi_to_partition_loops(l: i32) -> i32 {
     while i >= 0 && iop(i) == OP_PHI {
         let pn = i;
         i = inst_next(i);
-        let v = simplify_phi(pn);
+        let v = simplify_phi(pn, true);
         if v >= 0 {
             rauw(pn, v);
             inst_erase_from_parent(pn);
@@ -571,9 +600,8 @@ fn safe_to_speculate(iv: i32) -> bool {
     if o == OP_LOAD { return false; }
     if o == OP_CALL {
         let cf = called_function(iv);
-        if cf < 0 || !func_has_fn_attr(cf, AK_Speculatable) { return false; }
-        fatal("isSafeToSpeculativelyExecute: speculatable calls (hasUBImplyingAttrs) are not ported");
-        return false;
+        // Loop::makeLoopInvariant passes IgnoreUBImplyingAttrs = true
+        return cf >= 0 && func_has_fn_attr(cf, AK_Speculatable);
     }
     if o == OP_VAARG || o == OP_ALLOCA || o == OP_INVOKE || o == OP_CALLBR || o == OP_PHI || o == OP_STORE ||
        is_terminator_op(o) || o == OP_FENCE || o == OP_ATOMICRMW || o == OP_CMPXCHG || o == OP_LANDINGPAD ||
@@ -595,7 +623,18 @@ fn drop_unknown_metadata(iv: i32, keep_prof: bool) {
         }
     }
     insts[ii].nmd = w;
-    if is_callbase(iv) { fatal("dropUBImplyingAttrs for calls is not ported yet"); }
+    if !is_callbase(iv) { return; }
+    // remove AttributeFuncs::getUBImplyingAttributes() from the return and every parameter
+    let al = insts[ii].attrs;
+    if al == 0 { return; }
+    let kinds: i64[3] = [AK_NoUndef, AK_Dereferenceable, AK_DereferenceableOrNull];
+    var sets: i32[>..<] = [];
+    let n = alists[al].n as i64;
+    for k in n {
+        let st = alist_runs[alists[al].at + k];
+        sets.push(if k == 0 { st } else { aset_without(st, kinds) });
+    }
+    insts[ii].attrs = alist_get(sets);
 }
 
 recursive fn make_loop_invariant(l: i32, v: i32, ins_pt: i32, changed: bool&) -> bool {
@@ -723,7 +762,7 @@ fn simplify_one_loop(l: i32, worklist: i32[>..<]&, preserve_lcssa: bool) -> bool
         while i >= 0 && iop(i) == OP_PHI {
             let pn = i;
             i = inst_next(i);
-            let v = simplify_phi(pn);
+            let v = simplify_phi(pn, true);
             if v >= 0 {
                 if preserve_lcssa { fatal("LoopSimplify with PreserveLCSSA (replacementPreservesLCSSAForm) is not ported yet"); }
                 rauw(pn, v);

@@ -63,6 +63,34 @@ def gen(rng):
     for i, ss in enumerate(succs):
         for s in ss:
             preds[s].append(i)
+    # dominators (iterative), to place uses of %v<i> only where its block dominates
+    reach = {0}
+    stack = [0]
+    while stack:
+        x = stack.pop()
+        for y in succs[x]:
+            if y not in reach:
+                reach.add(y)
+                stack.append(y)
+    dom = {i: set(reach) for i in reach}
+    dom[0] = {0}
+    changed = True
+    while changed:
+        changed = False
+        for i in reach:
+            if i == 0:
+                continue
+            ps = [p for p in preds[i] if p in reach]
+            nd = set.intersection(*[dom[p] for p in ps]) | {i} if ps else {i}
+            if nd != dom[i]:
+                dom[i] = nd
+                changed = True
+    uses_in = [[] for _ in range(n)]
+    for i in reach:
+        if rng.random() < 0.5:
+            cands = [j for j in reach if i in dom[j]]
+            for _ in range(rng.randint(1, 3)):
+                uses_in[rng.choice(cands)].append(i)
     out = ["declare void @g(i32)", ""]
     args = ", ".join("i1 %%c%d" % k for k in range(nargs))
     out.append("define void @f(%s, i32 %%x) {" % args)
@@ -75,9 +103,13 @@ def gen(rng):
                 out.append("  call void @g(i32 %%p%d)" % i)
         elif rng.random() < 0.3:
             out.append("  call void @g(i32 %d)" % i)
-        if i > 0 and rng.random() < 0.12:
+        if i > 0 and rng.random() < 0.03:
             # a use of some PHI defined elsewhere (dropped by the LLVM validity check when it doesn't dominate)
             out.append("  call void @g(i32 %%p%d)" % rng.randrange(1, n))
+        if any(i in uses_in[j] for j in range(n)):
+            out.append("  %%v%d = add i32 %%x, %d" % (i, i))
+        for d in uses_in[i]:
+            out.append("  call void @g(i32 %%v%d)" % d)
         t = terms[i]
         if t[0] == "ret":
             out.append("  ret void")
