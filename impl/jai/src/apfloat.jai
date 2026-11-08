@@ -672,3 +672,27 @@ fp_to_string_e6 :: (k: Type_Kind, w: [] u64) -> string {
     append_u64(*sb, cast(u64) exp);
     return builder_to_string(*sb,, allocator = temp);
 }
+
+// ---------------------------------------------------------------- ppc_fp128 (double-double)
+// A ppc_fp128 is a pair of doubles (words [hi, lo]); value = hi + lo. Only values whose decimal text is exactly a
+// double (lo = +0) are converted from decimal; others fail loudly (DoubleAPFloat::convertFromString would need the
+// 106-bit legacy semantics).
+
+// exactness check: the decimal string and the double denote the same real number (compared at fp128 precision)
+ppc_decimal_is_double :: (s: string, hi: u64) -> bool {
+    q, ok, of, zr := fp_from_string(.FP128, s);
+    if !ok return false;
+    hw := NewArray(1, u64,, allocator = temp); hw[0] = hi;
+    q2, exact := fp_convert(.DOUBLE, .FP128, hw);
+    return q[0] == q2[0] && q[1] == q2[1];
+}
+
+ppc_from_decimal :: (s: string) -> (w: [] u64, ok: bool, overflow: bool) {
+    d, ok, of, zr := fp_from_string(.DOUBLE, s);
+    w := NewArray(2, u64,, allocator = temp);
+    if !ok return w, false, false;
+    w[0] = d[0]; w[1] = 0;
+    if of return w, true, true;
+    if !ppc_decimal_is_double(s, d[0]) fatal("ppc_fp128 decimal literal '%' is not exactly a double (not supported yet)", s);
+    return w, true, false;
+}

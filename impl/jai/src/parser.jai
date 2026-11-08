@@ -100,7 +100,7 @@ parse_top_level :: () {
         case .KW;
             if t.text == "declare" { next(); parse_declare(); return; }
             if t.text == "define" { next(); parse_define(); return; }
-            if t.text == "module" { next(); expect_kw("asm"); array_add(*ir.module_asm, parse_string()); return; }
+            if t.text == "module" { parse_module_asm(); return; }
             if t.text == "target" || t.text == "source_filename" {
                 next();
                 if t.text == "target" {
@@ -125,6 +125,22 @@ parse_top_level :: () {
 }
 
 // ---------------------------------------------------------------- types
+
+// LLParser::parseModuleAsm + Module::appendModuleInlineAsm (fragments with the same properties merge)
+parse_module_asm :: () {
+    next(); expect_kw("asm");
+    if P.tok.kind == .LPAREN perr("module asm properties are not supported yet");
+    sb: String_Builder; sb.allocator = temp;
+    while true {
+        append(*sb, parse_string()); append(*sb, "\n");
+        if P.tok.kind != .STRING break;
+    }
+    s := builder_to_string(*sb,, allocator = temp);
+    if ir.module_asm.count {
+        last := *ir.module_asm[ir.module_asm.count - 1];
+        last.* = intern_str(tprint("%1%2", last.*, s));
+    } else array_add(*ir.module_asm, intern_str(s));
+}
 
 get_named_type :: (name: string) -> Type_Id {
     found, t := table_find(*ir.named_types, name);
@@ -336,8 +352,8 @@ intern_target_ext :: (name: string, tys: [] Type_Id, ints: [] u32) -> Type_Id {
     return id;
 }
 
-parse_optional_addrspace :: () -> u32 {
-    if !is_kw("addrspace") return 0;
+parse_optional_addrspace :: (default: u32 = 0) -> u32 {
+    if !is_kw("addrspace") return default;
     next();
     expect(.LPAREN, "'('");
     as: u32 = 0;
@@ -695,7 +711,7 @@ parse_function_header :: (is_define: bool) -> Value_Id {
     }
     expect(.RPAREN, "')'");
     ua := parse_optional_unnamed_addr();
-    as := parse_optional_addrspace();
+    as := parse_optional_addrspace(dl.program_as);
     fnattrs: [..] Attr; fnattrs.allocator = temp;
     groups: [..] u32;
     parse_fn_attribute_value_pairs(*fnattrs, *groups, false);
@@ -981,7 +997,9 @@ parse_inline_asm :: (ty: Type_Id) -> Value_Id {
     s := parse_string();
     expect(.COMMA, "','");
     c := parse_string();
-    // the function type is set by the call (P.callee_fty)
+    // the function type is set by the call (P.callee_fty); InlineAsm's type is always `ptr` (addrspace 0),
+    // whatever pointer type the call expected (convertValIDToValue does not check it)
+    ty = type_ptr(0);
     k := const_key_begin(.INLINE_ASM, ty);
     key_str(k, s); key_str(k, c); key_u32(k, flags); key_u32(k, P.callee_fty);
     found, v := table_find(*ir.const_map, key_view(k));
@@ -1057,6 +1075,12 @@ parse_fp_literal :: (ty: Type_Id) -> Value_Id {
     k := type_kind(ty);
     if !is_fp_kind(k) perr("floating point constant invalid for type");
     next();
+    if t.kind == .FLOAT_LIT && k == .PPC_FP128 {
+        w, ok, overflow := ppc_from_decimal(t.text);
+        if !ok perr("invalid floating-point literal");
+        if overflow perr("floating-point constant overflowed type");
+        return const_fp_words(ty, w);
+    }
     if t.kind == .FLOAT_LIT {
         w, ok, overflow, zero := fp_from_string(k, t.text);
         if !ok perr("invalid floating-point literal");
@@ -2605,7 +2629,7 @@ parse_call :: (tck: u32) -> Value_Id {
     cc := parse_optional_cc();
     ret_attrs: [..] Attr; ret_attrs.allocator = temp;
     parse_optional_param_or_return_attrs(*ret_attrs, false);
-    as := parse_optional_addrspace();
+    as := parse_optional_addrspace(dl.program_as);
     rt := parse_type(true);
     callee_tok := P.tok;
     callee_lx := P.lx.pos;
@@ -2672,7 +2696,7 @@ parse_invoke :: () -> Value_Id {
     cc := parse_optional_cc();
     ret_attrs: [..] Attr; ret_attrs.allocator = temp;
     parse_optional_param_or_return_attrs(*ret_attrs, false);
-    as := parse_optional_addrspace();
+    as := parse_optional_addrspace(dl.program_as);
     rt := parse_type(true);
     callee_tok := P.tok;
     callee_lx := P.lx.pos;

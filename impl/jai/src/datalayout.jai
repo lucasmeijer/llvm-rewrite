@@ -111,6 +111,7 @@ dl_type_size_bits :: (t: Type_Id) -> u64 {
         case .PPC_FP128; return 128; case .FP128; return 128; case .X86_AMX; return 8192; case .X86_FP80; return 80;
         case .VECTOR; #through;
         case .SVECTOR; return r.a * dl_type_size_bits(type_elem(t));
+        case .TARGET_EXT; l := target_ext_layout_type(t); if type_kind(l) == .VOID return 0; return dl_type_size_bits(l);
     }
     return 0;
 }
@@ -145,6 +146,7 @@ dl_alignment :: (t: Type_Id, abi: bool) -> u64 {
             for dl.vec_specs if it.bits == bits return ifx abi then it.abi else it.pref;
             return power_of_2_ceil(dl_type_store_size(t));
         case .X86_AMX; return 64;
+        case .TARGET_EXT; l := target_ext_layout_type(t); if type_kind(l) == .VOID return 1; return dl_alignment(l, abi);
     }
     return 1;
 }
@@ -217,4 +219,31 @@ compute_default_datalayout :: (triple: string) -> string, bool {
     if is64 append(*sb, "-n8:16:32:64"); else append(*sb, "-n8:16:32");
     if (!is64 && windows) || iamcu append(*sb, "-a:0:32-S32"); else append(*sb, "-S128");
     return builder_to_string(*sb), true;
+}
+
+// TargetExtType::getLayoutType (llvm/lib/IR/Type.cpp getTargetTypeInfo)
+target_ext_layout_type :: (t: Type_Id) -> Type_Id {
+    r := ir.types[t];
+    name := r.name;
+    ip :: (r: Type_Row, i: u32) -> u64 { return ir.type_list[r.ints + i]; }
+    if name == "spirv.Image" || name == "spirv.SignedImage" return type_ptr(0);
+    if name == "spirv.Type" {
+        size := ip(r, 1); al := ip(r, 2);
+        if size > 0 && al > 0 return type_array(size * 8 / al, type_int(al));
+        return ir.t_i32;
+    }
+    if name == "spirv.IntegralConstant" || name == "spirv.Literal" return ir.t_void;
+    if name == "spirv.Padding" return type_array(ip(r, 0), ir.t_i8);
+    if begins_with(name, "spirv.") return type_ptr(0);
+    if name == "aarch64.svcount" return type_vector(16, ir.t_i1, true);
+    if name == "riscv.vector.tuple" {
+        n := max(type_count(type_sub(t, 0)), 8) * ip(r, 0);
+        return type_vector(n, ir.t_i8, true);
+    }
+    if name == "dx.Padding" return type_array(ip(r, 0), ir.t_i8);
+    if begins_with(name, "dx.") return type_ptr(0);
+    if name == "amdgcn.named.barrier" return type_vector(4, ir.t_i32, false);
+    if name == "llvm.test.vectorelement" return ir.t_i32;
+    if name == "wasm.funcref" || name == "wasm.externref" return type_ptr(0);
+    return ir.t_void;
 }

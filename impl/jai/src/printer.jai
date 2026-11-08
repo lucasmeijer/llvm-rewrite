@@ -412,6 +412,19 @@ write_operand :: (v: Value_Id, with_type: bool) {
 }
 
 write_ap_float :: (k: Type_Kind, w: [] u64) {
+    if k == .PPC_FP128 {
+        // ForceBitwiseOutput unless the second double is +0.0; otherwise it prints like its first double, but
+        // the decimal form only when it denotes exactly that double
+        if w[1] == 0 {
+            hw := NewArray(1, u64,, allocator = temp); hw[0] = w[0];
+            hd := fp_decode(.DOUBLE, hw);
+            if hd.cat == .INF || hd.cat == .NAN { write_ap_float(.DOUBLE, hw); return; }
+            s := fp_to_string_e6(.DOUBLE, hw);
+            if ppc_decimal_is_double(s, w[0]) { out(s); return; }
+        }
+        out("f"); write_full_hex(w, 128);
+        return;
+    }
     d := fp_decode(k, w);
     if k != .PPC_FP128 {
         if d.cat == .INF { outc(ifx d.neg then cast(u8) #char "-" else #char "+"); out("inf"); return; }
