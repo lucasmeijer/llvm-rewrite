@@ -51,7 +51,7 @@ fn fold_fp_sign_bit_ops(i: i32) -> i32 {
 // createPowiExpr of foldPowiReassoc
 fn create_powi_expr(i: i32, x: i32, y: i32, z: i32) -> i32 {
     let yz = icb_add_nw(y, z, "", false, true);
-    return icb_intrinsic_fmf(IID_powi, [vals[x].ty, vals[yz].ty], [x, yz], fmf_of(i), "");
+    return icb_intrinsic_fmf(IID_powi, [vals[x].ty as i32, vals[yz].ty], [x, yz], fmf_of(i), "");
 }
 fn is_reassoc_powi(v: i32) -> bool { is_intr(v, IID_powi) && allow_reassoc(v) }
 // Instruction::isOnlyUserOfAnyOperand
@@ -429,7 +429,7 @@ fn visit_fmul(i: i32) -> i32 {
             let l = op(i, 1 - k);
             if allow_reassoc(l) && one_use(l) && is_intr(l, IID_ldexp) && m_fp_one(op(l, 0)) {
                 let x = op(i, k); let y = op(l, 1);
-                return ic_replace_inst_uses_with(i, icb_intrinsic_fmf(IID_ldexp, [vals[x].ty, vals[y].ty], [x, y], fmf_of(i), ""));
+                return ic_replace_inst_uses_with(i, icb_intrinsic_fmf(IID_ldexp, [vals[x].ty as i32, vals[y].ty], [x, y], fmf_of(i), ""));
             }
         }
     }
@@ -463,7 +463,7 @@ fn fold_fdiv_constant_divisor(i: i32) -> i32 {
     if has_nnan(i) && (m_pos_zero_fp(c) || (has_nsz(i) && m_any_zero_fp(c))) {
         let inf = c_fp_inf_ty(vals[i].ty, false);
         var cs: i32 = -1;
-        let call = ic_new_intrinsic(IID_copysign, [vals[c].ty], [inf, op(i, 0)]);
+        let call = ic_new_intrinsic(IID_copysign, [vals[c].ty as i32], [inf, op(i, 0)]);
         set_fmf(call, fmf_of(i));
         cs = irb_insert_before(call, i);
         ic_take_name(cs, i);
@@ -511,19 +511,19 @@ fn fold_fdiv_pow_divisor(i: i32) -> i32 {
     if id == IID_pow {
         a0 = op(ii, 0);
         a1 = icb_fneg_fmf(op(ii, 1), fmf_of(i), "");
-        let pw = icb_intrinsic_fmf(id, [vals[i].ty], [a0, a1], fmf_of(i), "");
+        let pw = icb_intrinsic_fmf(id, [vals[i].ty as i32], [a0, a1], fmf_of(i), "");
         return ic_new_fbinop_fmf(OP_FMUL, op0, pw, fmf_of(i));
     }
     if id == IID_powi {
         if !has_ninf(i) { return -1; }
         a0 = op(ii, 0);
         a1 = icb_neg(op(ii, 1), "", false);
-        let pw = icb_intrinsic_fmf(id, [vals[i].ty, vals[op(ii, 1)].ty], [a0, a1], fmf_of(i), "");
+        let pw = icb_intrinsic_fmf(id, [vals[i].ty as i32, vals[op(ii, 1)].ty], [a0, a1], fmf_of(i), "");
         return ic_new_fbinop_fmf(OP_FMUL, op0, pw, fmf_of(i));
     }
     if id == IID_exp || id == IID_exp2 {
         a0 = icb_fneg_fmf(op(ii, 0), fmf_of(i), "");
-        let pw = icb_intrinsic_fmf(id, [vals[i].ty], [a0], fmf_of(i), "");
+        let pw = icb_intrinsic_fmf(id, [vals[i].ty as i32], [a0], fmf_of(i), "");
         return ic_new_fbinop_fmf(OP_FMUL, op0, pw, fmf_of(i));
     }
     return -1;

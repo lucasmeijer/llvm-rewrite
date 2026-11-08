@@ -87,13 +87,13 @@ fn icx_call_fmf(f: i32, argsv: const i32[:], fmf: u8, name: const u8[:]) -> i32 
 
 // CreateUnaryIntrinsic / CreateBinaryIntrinsic with an FMFSource: the declaration is inserted before folding
 fn icx_unary_intrinsic_f(id: i64, a: i32, fmf: u8, name: const u8[:]) -> i32 {
-    let f = icx_decl(id, [vals[a].ty]);
+    let f = icx_decl(id, [vals[a].ty as i32]);
     let r = tf_intrinsic(id, [a], ty_fn_ret(globs[glob_of(f)].vty));
     if r >= 0 { return r; }
     return icx_call_fmf(f, [a], fmf, name);
 }
 fn icx_binary_intrinsic_f(id: i64, a: i32, b: i32, fmf: u8, name: const u8[:]) -> i32 {
-    let f = icx_decl(id, [vals[a].ty]);
+    let f = icx_decl(id, [vals[a].ty as i32]);
     let r = tf_intrinsic(id, [a, b], ty_fn_ret(globs[glob_of(f)].vty));
     if r >= 0 { return r; }
     return icx_call_fmf(f, [a, b], fmf, name);
@@ -159,7 +159,7 @@ fn icx_fbinop(o: i64, a: i32, b: i32, fmf: u8, name: const u8[:]) -> i32 {
 fn icx_fabs(v: i32, fmf: u8) -> i32 { icx_unary_intrinsic_f(IID_fabs, v, fmf, "") }
 fn icx_copysign(a: i32, b: i32, fmf: u8) -> i32 { icx_binary_intrinsic_f(IID_copysign, a, b, fmf, "") }
 // IRBuilder::CreateLdexp(Src, Exp, FMFSource, Name): CreateIntrinsic(ldexp, {Src->getType(), Exp->getType()}, ...)
-fn icx_ldexp(src: i32, e: i32, fmf: u8, name: const u8[:]) -> i32 { icx_intrinsic_f(IID_ldexp, [vals[src].ty, vals[e].ty], [src, e], fmf, name) }
+fn icx_ldexp(src: i32, e: i32, fmf: u8, name: const u8[:]) -> i32 { icx_intrinsic_f(IID_ldexp, [vals[src].ty as i32, vals[e].ty], [src, e], fmf, name) }
 fn icx_fmf(i: i32) -> u8 { insts[inst_of(i)].fmf }
 
 // IRBuilder::CreateSelectWithUnknownProfile(C, T, F, PassName)
@@ -178,7 +178,7 @@ fn icx_vector_reverse(v: i32, name: const u8[:]) -> i32 {
         for k in n { mask.push((n - 1 - k) as i32); }
         return icb_shuffle1(v, mask, name);
     }
-    return icb_intrinsic(IID_vector_reverse, [ty], [v], name);
+    return icb_intrinsic(IID_vector_reverse, [ty as i32], [v], name);
 }
 
 // Instruction::addRetAttr / CallBase::addRetAttr / removeRetAttr on a call site
@@ -225,7 +225,7 @@ fn fold_cttz_ctlz(ii: i32) -> i32 {
     let op1 = cb_arg(ii, 1);
     let ty = vals[ii].ty;
     if m_intrinsic(op0, IID_bitreverse) {
-        let f = icx_decl(if is_tz { IID_ctlz } else { IID_cttz }, [ty]);
+        let f = icx_decl(if is_tz { IID_ctlz } else { IID_cttz }, [ty as i32]);
         return icx_new_call(f, [op(op0, 0), op1]);
     }
     if is_int_ty1(ty) {
@@ -286,7 +286,7 @@ fn fold_cttz_ctlz(ii: i32) -> i32 {
             if x >= 0 {
                 let bw = ty_scalar_bits(ty);
                 let fz = c_false();
-                let cz = icb_intrinsic(IID_cttz, [ty], [x, fz], "");
+                let cz = icb_intrinsic(IID_cttz, [ty as i32], [x, fz], "");
                 let r = icb_sub(c_int_ty(ty, bw as u64), cz, "");
                 return ic_replace_inst_uses_with(ii, r);
             }
@@ -345,14 +345,14 @@ fn fold_ctpop(ii: i32) -> i32 {
             let n = m_neg(op(op0, 1 - k));
             if n >= 0 && n == x {
                 let fz = c_false();
-                let cz = icb_intrinsic(IID_cttz, [ty], [x, fz], "");
+                let cz = icb_intrinsic(IID_cttz, [ty as i32], [x, fz], "");
                 let r = icb_sub(c_int_ty(ty, bw as u64), cz, "");
                 return ic_replace_inst_uses_with(ii, r);
             }
         }
     }
     let x = icx_match_not_and_dec(op0);
-    if x >= 0 { return icx_new_call(icx_decl(IID_cttz, [ty]), [x, get_false(T_I1)]); }
+    if x >= 0 { return icx_new_call(icx_decl(IID_cttz, [ty as i32]), [x, get_false(T_I1)]); }
     if one_use(op0) && is_inst_op(op0, OP_ZEXT) {
         let np = icx_unary_intrinsic(IID_ctpop, op(op0, 0), "");
         return ic_new_cast(OP_ZEXT, np, ty);
@@ -817,7 +817,7 @@ fn reassociate_min_max_with_constant_in_operand(ii: i32) -> i32 {
     if inner < 0 { return -1; }
     let id = call_iid(ii);
     if inst_iid(inner) != id || is_imm_c(x) || is_imm_c(y) { return -1; }
-    let mm = icx_decl(id, [vals[ii].ty]);
+    let mm = icx_decl(id, [vals[ii].ty as i32]);
     let ni = icx_binary_intrinsic(id, x, y, "");
     ic_take_name(ni, inner);
     return icx_new_call(mm, [ni, c]);
@@ -843,7 +843,7 @@ fn factorize_min_max_tree(ii: i32) -> i32 {
         else if c == a || c == b { mmop = lhs; third = d; }
     }
     if mmop < 0 || third < 0 { return -1; }
-    return icx_new_call(icx_decl(id, [vals[ii].ty]), [mmop, third]);
+    return icx_new_call(icx_decl(id, [vals[ii].ty as i32]), [mmop, third]);
 }
 
 // isVectorIntrinsicWithScalarOpAtArg(ID, ScalarOpdIdx, TTI = nullptr) (VectorUtils.cpp)
@@ -1208,7 +1208,7 @@ fn visit_intrinsic(ci: i32) -> i32 {
             let src = strip_ptr_casts(cb_arg(ii, 1));
             if vals[src].kind == VK_GVAR && globs[glob_of(src)].is_const != 0 {
                 let mid = if mi_is_atomic(iid) { IID_memcpy_element_unordered_atomic } else { IID_memcpy };
-                let f = icx_decl(mid, [vals[cb_arg(ii, 0)].ty, vals[cb_arg(ii, 1)].ty, vals[cb_arg(ii, 2)].ty]);
+                let f = icx_decl(mid, [vals[cb_arg(ii, 0)].ty as i32, vals[cb_arg(ii, 1)].ty, vals[cb_arg(ii, 2)].ty]);
                 icx_set_called_function(ci, f);
                 return ii;
             }
@@ -1948,13 +1948,13 @@ fn visit_funnel_shift(ii: i32, iid: i32) -> i32 {
             kb_cxt = ii;
             if !is_known_non_zero(shc, 0) { return -1; }
             let lsc = ce_binop(OP_SUB, widthc, shc, 0);
-            let fshl = icx_decl(IID_fshl, [ty]);
+            let fshl = icx_decl(IID_fshl, [ty as i32]);
             return icx_new_call(fshl, [op0, op1, lsc]);
         }
         if m_zero_int(op1) || m_undef(op1) { return ic_new_binop(OP_SHL, op0, shc); }
         if m_zero_int(op0) || m_undef(op0) { return ic_new_binop(OP_LSHR, op1, ce_binop(OP_SUB, widthc, shc, 0)); }
         if op0 == op1 && bw == 16 && m_specific_int(shc, 8) {
-            return icx_new_call(icx_decl(IID_bswap, [ty]), [op0]);
+            return icx_new_call(icx_decl(IID_bswap, [ty as i32]), [op0]);
         }
         let b = match_bswap_or_bitreverse(ii, true, true);
         if b >= 0 { return b; }
@@ -1970,7 +1970,7 @@ fn visit_funnel_shift(ii: i32, iid: i32) -> i32 {
     if op0 == op1 && ispow2 {
         let y = m_neg(cb_arg(ii, 2));
         if y >= 0 {
-            let opp = icx_decl(if iid == IID_fshl { IID_fshr } else { IID_fshl }, [ty]);
+            let opp = icx_decl(if iid == IID_fshl { IID_fshr } else { IID_fshl }, [ty as i32]);
             return icx_new_call(opp, [op0, op1, y]);
         }
     }
@@ -2168,9 +2168,9 @@ fn visit_fma(ii: i32, iid: i32) -> i32 {
     let fmf = icx_fmf(ii);
     let x = m_fneg(s0);
     let y = m_fneg(s1);
-    if x >= 0 && y >= 0 { return ic_replace_inst_uses_with(ii, icx_intrinsic_f(iid, [vals[ii].ty], [x, y, s2], fmf, "")); }
+    if x >= 0 && y >= 0 { return ic_replace_inst_uses_with(ii, icx_intrinsic_f(iid, [vals[ii].ty as i32], [x, y, s2], fmf, "")); }
     let ax = m_fabs_x(s0);
-    if ax >= 0 && m_fabs_x(s1) == ax { return ic_replace_inst_uses_with(ii, icx_intrinsic_f(iid, [vals[ii].ty], [ax, ax, s2], fmf, "")); }
+    if ax >= 0 && m_fabs_x(s1) == ax { return ic_replace_inst_uses_with(ii, icx_intrinsic_f(iid, [vals[ii].ty as i32], [ax, ax, s2], fmf, "")); }
     let v = simplify_fma_fmul_inst(s0, s1, fmf, ii);
     if v >= 0 { return icx_new_fbinop(OP_FADD, v, s2, fmf); }
     if m_neg_zero_fp(s2) || (m_pos_zero_fp(s2) && (fmf & FMF_NSZ) != 0) { return icx_new_fbinop(OP_FMUL, s0, s1, fmf); }
@@ -2458,7 +2458,7 @@ fn vscale_range_min(fv: i32) -> i64 {
 }
 
 // IRBuilder::CreateAndReduce / CreateOrReduce / CreateAddReduce
-fn icx_reduce(id: i64, src: i32) -> i32 { icb_intrinsic(id, [vals[src].ty], [src], "") }
+fn icx_reduce(id: i64, src: i32) -> i32 { icb_intrinsic(id, [vals[src].ty as i32], [src], "") }
 
 // m_ZExtOrSExtOrSelf(m_Value(Vect))
 fn m_zext_or_sext_or_self(v: i32) -> i32 { let x = m_zext_or_sext(v); if x >= 0 { x } else { v } }
@@ -3055,7 +3055,7 @@ fn simplify_invariant_group_intrinsic(ii: i32) -> i32 {
     }
     if stripped == sig { return -1; }
     let id = call_iid(ii);
-    var r = icx_call(icx_decl(id, [vals[sig].ty]), [sig], "");
+    var r = icx_call(icx_decl(id, [vals[sig].ty as i32]), [sig], "");
     if ptr_as(vals[r].ty) != ptr_as(vals[ii].ty) { r = icb_addrspacecast(r, vals[ii].ty, ""); }
     return r;
 }

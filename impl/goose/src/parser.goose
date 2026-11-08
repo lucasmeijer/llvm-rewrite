@@ -2439,7 +2439,7 @@ fn parse_inst_body(bb: i32) -> i32 {
         var b: i32 = -1;
         if is_ins { expect_punct(',', "','"); b = parse_type_and_value(); }
         let at = ints.len as i32;
-        var t = vals[a].ty;
+        var t: i32 = vals[a].ty;
         var n = 0;
         while tok_punct(',') {
             let sts = ts;

@@ -242,7 +242,7 @@ fn fold_select_op_op(si: i32, ti: i32, fi: i32) -> i32 {
                 let mop, ot, of, iz = sl_get_common_op(ti, fi, true, false);
                 if mop >= 0 {
                     let ns = icb_select(cond, ot, of, "minmaxop", si);
-                    return ic_new_intrinsic(tid, [vals[ti].ty], [ns, mop]);
+                    return ic_new_intrinsic(tid, [vals[ti].ty as i32], [ns, mop]);
                 }
             }
             if tid == IID_ldexp {
@@ -257,7 +257,7 @@ fn fold_select_op_op(si: i32, ti: i32, fi: i32) -> i32 {
                     let se = icb_select(cond, e0, e1, "", -1);
                     let saved = icb_fmf;
                     icb_fmf = fmf;
-                    let nl = icb_intrinsic(IID_ldexp, [vals[ti].ty, vals[se].ty], [sv, se], "");
+                    let nl = icb_intrinsic(IID_ldexp, [vals[ti].ty as i32, vals[se].ty as i32], [sv, se], "");
                     icb_fmf = saved;
                     return ic_replace_inst_uses_with(si, nl);
                 }
@@ -858,7 +858,7 @@ fn fold_select_ctlz_to_cttz(ici: i32, tv0: i32, fv0: i32) -> i32 {
     if !bo(a, OP_AND) { return -1; }
     if !((op(a, 0) == x && m_neg(op(a, 1)) == x) || (op(a, 1) == x && m_neg(op(a, 0)) == x)) { return -1; }
     let fls = c_bool_ty(T_I1, false);
-    let cty = vals[ctlz].ty;
+    let cty: i32 = vals[ctlz].ty;
     return ic_new_intrinsic(IID_cttz, [cty], [x, fls]);
 }
 
@@ -1501,7 +1501,7 @@ fn fold_overflowing_add_sub_select(si: i32) -> i32 {
     else if id == IID_sadd_with_overflow && sl_is_signed_saturate_limit(tv, true, x, y) { nid = IID_sadd_sat; }
     else if id == IID_ssub_with_overflow && sl_is_signed_saturate_limit(tv, false, x, y) { nid = IID_ssub_sat; }
     else { return -1; }
-    return ic_new_intrinsic(nid, [vals[si].ty], [x, y]);
+    return ic_new_intrinsic(nid, [vals[si].ty as i32], [x, y]);
 }
 // the IsSignedSaturateLimit lambda
 fn sl_is_signed_saturate_limit(limit: i32, is_add: bool, x: i32, y: i32) -> bool {
@@ -1686,7 +1686,7 @@ fn fold_select_funnel_shift(sel: i32) -> i32 {
         else if !is_fshl && !is_guaranteed_not_to_be_poison(sv0, -1, 0) { sv0 = icb_freeze(sv0, ""); }
     }
     let id = if is_fshl { IID_fshl } else { IID_fshr };
-    let sty = vals[sel].ty;
+    let sty: i32 = vals[sel].ty;
     let sh = icb_zext(shamt, sty, "");
     return ic_new_intrinsic(id, [sty], [sv0, sv1, sh]);
 }
@@ -1696,7 +1696,7 @@ fn fold_select_to_copysign(sel: i32) -> i32 {
     let cond = op(sel, 0);
     let tv = op(sel, 1);
     let fv = op(sel, 2);
-    let selty = vals[sel].ty;
+    let selty: i32 = vals[sel].ty;
     let tc = m_apfloat_ap(tv, true);
     let fc = m_apfloat_ap(fv, true);
     if tc < 0 || fc < 0 { return -1; }
@@ -1777,7 +1777,7 @@ fn fold_vector_select(sel: i32) -> i32 {
 fn sl_create_sel_reverse(sel: i32, c: i32, x: i32, y: i32) -> i32 {
     let v = icb_select(c, x, y, sl_name(sel, ""), sel);
     if is_inst(v) { copy_ir_flags(v, sel); }
-    return ic_new_intrinsic(IID_vector_reverse, [vals[v].ty], [v]);
+    return ic_new_intrinsic(IID_vector_reverse, [vals[v].ty as i32], [v]);
 }
 // !is_contained(Mask, PoisonMaskElem) && ShuffleVectorInst::isSelect()
 fn sl_shuffle_is_select_no_poison(s: i32) -> bool {
@@ -2564,7 +2564,7 @@ fn fold_select_to_cmp(si: i32) -> i32 {
     }
     let id = if signed { IID_scmp } else { IID_ucmp };
     if replace {
-        let sty = vals[si].ty;
+        let sty: i32 = vals[si].ty;
         let lty = vals[l].ty;
         return ic_replace_inst_uses_with(si, icb_intrinsic(id, [sty, lty], [l, r], ""));
     }
@@ -3252,7 +3252,7 @@ fn visit_select(si: i32) -> i32 {
         if (p == P_SLT && m_one(cr) && ashr_sign(tv, cl, bw) && m_one(fv)) ||
            (p == P_SGT && m_zero(cr) && m_one(tv) && ashr_sign(fv, cl, bw)) {
             let z = c_int_ty(selty, 0);
-            return ic_new_intrinsic(IID_scmp, [selty, selty], [cl, z]);
+            return ic_new_intrinsic(IID_scmp, [selty as i32, selty as i32], [cl, z]);
         }
     }
     return -1;

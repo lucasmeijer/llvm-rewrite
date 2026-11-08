@@ -1019,7 +1019,7 @@ fn fold_logic_of_fcmps(lhs: i32, rhs: i32, is_and: bool, is_logical_select: bool
             if cvl == cvr {
                 let cm = if is_and { cml & cmr } else { cml | cmr };
                 let cmc = c_int(T_I32, cm as i64);
-                let cty = vals[cvl].ty;
+                let cty: i32 = vals[cvl].ty;
                 return icb_intrinsic(IID_is_fpclass, [cty], [cvl, cmc], "");
             }
         }
@@ -1087,7 +1087,7 @@ fn ao_fold_logic_of_is_fpclass(bop: i32, op0: i32, op1: i32) -> i32 {
         return ic_replace_inst_uses_with(bop, op1);
     }
     let nmc = c_int(T_I32, nm as i64);
-    let cty = vals[cv0].ty;
+    let cty: i32 = vals[cv0].ty;
     let nc = icb_intrinsic(IID_is_fpclass, [cty], [cv0, nmc], "");
     return ic_replace_inst_uses_with(bop, nc);
 }
@@ -1581,7 +1581,7 @@ fn ao_fold_bitwise_logic_with_intrinsics(i: i32) -> i32 {
     if y >= 0 && (!has_one_use(y) || inst_iid(x) != inst_iid(y)) { return -1; }
     let iid = inst_iid(x);
     if y < 0 && (!(iid == IID_bswap || iid == IID_bitreverse) || !has_apint(op(i, 1))) { return -1; }
-    let ty = vals[i].ty;
+    let ty: i32 = vals[i].ty;
     if iid == IID_fshl || iid == IID_fshr {
         if op(x, 2) != op(y, 2) { return -1; }
         let n0 = icb_binop(iop(i), op(x, 0), op(y, 0), "");
@@ -1844,7 +1844,7 @@ fn recognize_bswap_or_bitreverse_idiom(i: i32, mb: bool, mr: bool) -> bool {
     let r = bp_collect(i, mb, mr, 0);
     if !bp_ents[r].ok { return false; }
     var n = bp_ents[r].w as i64;
-    var dty = ity;
+    var dty: i32 = ity;
     if bp_get(r, n - 1) == -1 {
         while n > 0 && bp_get(r, n - 1) == -1 { n -= 1; }
         if n == 0 { return false; }
@@ -2030,14 +2030,14 @@ fn convert_or_of_shifts_to_funnel_shift(orv: i32) -> bool, i64, i32, i32, i32 {
 fn ao_match_funnel_shift(orv: i32) -> i32 {
     let ok, iid, a0, a1, a2 = convert_or_of_shifts_to_funnel_shift(orv);
     if !ok { return -1; }
-    return ic_new_intrinsic(iid, [vals[orv].ty], [a0, a1, a2]);
+    return ic_new_intrinsic(iid, [vals[orv].ty as i32], [a0, a1, a2]);
 }
 
 // matchOrConcat(Or, Builder)
 fn ao_match_or_concat(orv: i32) -> i32 {
     var op0 = op(orv, 0);
     var op1 = op(orv, 1);
-    let ty = vals[orv].ty;
+    let ty: i32 = vals[orv].ty;
     let w = ty_sbits(orv);
     if (w & 1) != 0 { return -1; }
     let hw = w / 2;
@@ -2142,7 +2142,7 @@ fn ao_match_select_from_and_or(a0: i32, b: i32, c0: i32, d0: i32, invert_false_v
     let c = ao_peek_through_bitcast(c0, true);
     let cond = ao_get_select_condition(a, c, invert_false_val);
     if cond < 0 { return -1; }
-    var selty = vals[a].ty;
+    var selty: i32 = vals[a].ty;
     let cty = vals[cond].ty;
     if ty_is_vector(cty) {
         let elts = ty_count(cty);
@@ -3757,7 +3757,7 @@ fn visit_or(i: i32) -> i32 {
     if v >= 0 { return ic_replace_inst_uses_with(i, v); }
     var op0 = op(i, 0);
     var op1 = op(i, 1);
-    let ty = vals[i].ty;
+    let ty: i32 = vals[i].ty;
     if is_int_ty1(ty) {
         if is_select_inst(op0) {
             r = fold_and_or_of_select_using_implied_cond(op1, op0, false);
@@ -4116,7 +4116,7 @@ fn visit_xor(i: i32) -> i32 {
     if r >= 0 { return r; }
     let op0 = op(i, 0);
     let op1 = op(i, 1);
-    let ty = vals[i].ty;
+    let ty: i32 = vals[i].ty;
     // (X | Y) ^ M -> (X ^ M) ^ Y
     for k in 2 {
         let o = op(i, k);

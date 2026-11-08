@@ -1237,7 +1237,7 @@ fn try_fold_inst_with_ctpop_with_not(i: i32) -> i32 {
     let x = op(pop, 0);
     let c = op(i, ci);
     if !is_imm_c(c) { return -1; }
-    let ty = vals[x].ty;
+    let ty: i32 = vals[x].ty;
     let bwc = c_int_ty(ty, ty_scalar_bits(ty) as u64);
     if o == OP_ICMP && !icmp_is_equality(inst_pred(i)) {
         let cmp = cf_fold_cmp_operands(34, c, bwc, -1);

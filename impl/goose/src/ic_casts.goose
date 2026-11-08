@@ -460,7 +460,7 @@ fn visit_trunc(tr: i32) -> i32 {
     let r = common_cast_transforms(tr);
     if r >= 0 { return r; }
     let src = op(tr, 0);
-    let dt = vals[tr].ty;
+    let dt: i32 = vals[tr].ty;
     let st = vals[src].ty;
     let dw = ty_scalar_bits(dt);
     let sw = ty_scalar_bits(st);
@@ -889,7 +889,7 @@ fn visit_sext(sx: i32) -> i32 {
     }
     if inst_iid(src) == IID_vscale { ic_not_ported("sext of vscale"); }
     if (inst_iid(src) == IID_scmp || inst_iid(src) == IID_ucmp) && has_one_use(src) {
-        return ic_replace_inst_uses_with(sx, icb_intrinsic(inst_iid(src), [dt, vals[op(src, 0)].ty], [op(src, 0), op(src, 1)], ""));
+        return ic_replace_inst_uses_with(sx, icb_intrinsic(inst_iid(src), [dt as i32, vals[op(src, 0)].ty as i32], [op(src, 0), op(src, 1)], ""));
     }
     if one_use(src) && is_binop_inst(src) && is_logic_op(iop(src)) {
         for k in 2 {

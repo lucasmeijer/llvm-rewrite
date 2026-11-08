@@ -516,7 +516,7 @@ fn upgrade_intrinsic_call(ci: i32, nf: i32) {
             p = strip_pointer_casts(p);
             if vals[p].kind == VK_INST && iop(p) == OP_ALLOCA {
                 let lid = au_intr_id(iname);
-                let d = au_get_declaration(lid, [vals[p].ty]);
+                let d = au_get_declaration(lid, [vals[p].ty as i32]);
                 let nc = au_create_call(ci, d, [p]);
                 au_replace_call(ci, nc);
                 return;

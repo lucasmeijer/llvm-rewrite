@@ -122,6 +122,11 @@ let TF_HASBODY: u8 = 16;
 struct Ty { kind: u8, flags: u8, n: i32, a: i32, cnt: i64, name: i32, hash: u32 }
 
 var types: Ty[>..];
+// A type id stored in a value (Val.ty) is an index type of `types`, so `types[vals[v].ty]` needs no bounds check
+// (DESIGN.md §2.4). It is 16 bits wide so that it converts implicitly to i32, the type every other type id in
+// the program has; types.len is capped to fit (ty_check_room fails loudly beyond it).
+type TyId = u16 in types;
+fn ty_check_room() { if types.len >= 65536 { fatal("more than 65536 distinct types are not supported (TyId is u16)"); } }
 var type_tab: i32[>..<];
 var named_types: i32[>..];      // identified structs, creation order
 
@@ -176,6 +181,7 @@ fn ty_get(t0: Ty) -> i32 {
         j = (j + 1) & mask;
     }
     let id = types.len as i32;
+    ty_check_room();
     types.push(t);
     type_tab[j] = id;
     return id;
@@ -212,6 +218,7 @@ fn ty_target_int(t: i32, k: i64) -> i64 { ints[types[t].a + 1 + ty_target_ntypes
 
 fn ty_named_struct(name: i32) -> i32 {
     let id = types.len as i32;
+    ty_check_room();
     types.push(Ty { kind: TK_STRUCT, flags: TF_NAMED | TF_OPAQUE, n: 0, a: 0, cnt: 0, name: name, hash: 0 });
     named_types.push(id);
     return id;
@@ -250,27 +257,27 @@ fn init_types() {
     T_DOUBLE = ty_simple(TK_DOUBLE);
 }
 
-fn ty_kind(t: i32) -> u8 { types[t].kind }
-fn ty_is_int(t: i32) -> bool { types[t].kind == TK_INT }
-fn ty_is_fp(t: i32) -> bool { let k = types[t].kind; k >= TK_HALF && k <= TK_PPC_FP128 }
-fn ty_is_vector(t: i32) -> bool { let k = types[t].kind; k == TK_FVEC || k == TK_SVEC }
-fn ty_is_struct(t: i32) -> bool { types[t].kind == TK_STRUCT }
-fn ty_is_array(t: i32) -> bool { types[t].kind == TK_ARRAY }
-fn ty_is_aggregate(t: i32) -> bool { let k = types[t].kind; k == TK_STRUCT || k == TK_ARRAY }
-fn ty_bits(t: i32) -> i64 { types[t].n as i64 }
-fn ty_elem(t: i32) -> i32 { types[t].a }
-fn ty_count(t: i32) -> i64 { types[t].cnt }
-fn ty_scalar(t: i32) -> i32 { if ty_is_vector(t) { types[t].a } else { t } }
+fn ty_kind<T>(t: T) -> u8 { types[t].kind }
+fn ty_is_int<T>(t: T) -> bool { types[t].kind == TK_INT }
+fn ty_is_fp<T>(t: T) -> bool { let k = types[t].kind; k >= TK_HALF && k <= TK_PPC_FP128 }
+fn ty_is_vector<T>(t: T) -> bool { let k = types[t].kind; k == TK_FVEC || k == TK_SVEC }
+fn ty_is_struct<T>(t: T) -> bool { types[t].kind == TK_STRUCT }
+fn ty_is_array<T>(t: T) -> bool { types[t].kind == TK_ARRAY }
+fn ty_is_aggregate<T>(t: T) -> bool { let k = types[t].kind; k == TK_STRUCT || k == TK_ARRAY }
+fn ty_bits<T>(t: T) -> i64 { types[t].n as i64 }
+fn ty_elem<T>(t: T) -> i32 { types[t].a }
+fn ty_count<T>(t: T) -> i64 { types[t].cnt }
+fn ty_scalar<T>(t: T) -> i32 { if ty_is_vector(t) { types[t].a } else { t as i32 } }
 // The k-th element of a struct, or the parameter k-1 / return (k = 0) of a function.
-fn ty_field(t: i32, k: i64) -> i32 { ints[types[t].a + k] }
-fn ty_fn_ret(t: i32) -> i32 { ints[types[t].a] }
-fn ty_fn_nparams(t: i32) -> i64 { types[t].cnt - 1 }
-fn ty_fn_param(t: i32, k: i64) -> i32 { ints[types[t].a + 1 + k] }
-fn ty_fn_vararg(t: i32) -> bool { (types[t].flags & TF_VARARG) != 0 }
-fn ty_is_first_class(t: i32) -> bool { let k = types[t].kind; k != TK_VOID && k != TK_FUNC }
+fn ty_field<T>(t: T, k: i64) -> i32 { ints[types[t].a + k] }
+fn ty_fn_ret<T>(t: T) -> i32 { ints[types[t].a] }
+fn ty_fn_nparams<T>(t: T) -> i64 { types[t].cnt - 1 }
+fn ty_fn_param<T>(t: T, k: i64) -> i32 { ints[types[t].a + 1 + k] }
+fn ty_fn_vararg<T>(t: T) -> bool { (types[t].flags & TF_VARARG) != 0 }
+fn ty_is_first_class<T>(t: T) -> bool { let k = types[t].kind; k != TK_VOID && k != TK_FUNC }
 
 // Element type at index k of an aggregate or vector.
-fn ty_index(t: i32, k: i64) -> i32 {
+fn ty_index<T>(t: T, k: i64) -> i32 {
     if types[t].kind == TK_STRUCT { return ints[types[t].a + k]; }
     return types[t].a;
 }
@@ -309,7 +316,7 @@ let VK_INST = 26;
 let VK_FWD = 27;       // forward-reference placeholder in the parser
 let VK_DEAD = 28;
 
-struct Val { kind: u8, flags: u8, ty: i32, sub: i32, name: i32, first_use: i32, ops: i32, nops: i32, cap: i32 }
+struct Val { kind: u8, flags: u8, ty: TyId, sub: i32, name: i32, first_use: i32, ops: i32, nops: i32, cap: i32 }
 
 var vals: Val[>..];
 
@@ -317,13 +324,13 @@ fn is_constant(v: i32) -> bool { vals[v].kind <= VK_CTOKENNONE }
 fn is_constant_data(v: i32) -> bool { let k = vals[v].kind; k >= VK_UNDEF && k <= VK_CTOKENNONE }
 fn is_global(v: i32) -> bool { vals[v].kind <= VK_GVAR }
 fn has_use_list(v: i32) -> bool { !is_constant_data(v) }
-fn vty(v: i32) -> i32 { vals[v].ty }
+fn vty(v: i32) -> TyId { vals[v].ty }
 fn vkind(v: i32) -> u8 { vals[v].kind }
 
 fn new_val(kind: i64, ty: i32, sub: i32, nops: i64) -> i32 {
     let id = vals.len as i32;
     let at = alloc_uses(id, nops);
-    vals.push(Val { kind: kind as u8, flags: 0, ty: ty, sub: sub, name: -1, first_use: -1, ops: at, nops: nops as i32, cap: nops as i32 });
+    vals.push(Val { kind: kind as u8, flags: 0, ty: ty as TyId, sub: sub, name: -1, first_use: -1, ops: at, nops: nops as i32, cap: nops as i32 });
     return id;
 }
 

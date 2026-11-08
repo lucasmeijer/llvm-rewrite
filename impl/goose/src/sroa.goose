@@ -341,7 +341,7 @@ fn irb_gep(srcty: i32, p: i32, idxs: const i32[:], flags: u8, name: const u8[:],
     var opsv: i32[>..<] = [];
     opsv.push(p);
     for x in idxs { opsv.push(x); }
-    var rt = vals[p].ty;
+    var rt: i32 = vals[p].ty;
     for x in idxs { if ty_is_vector(vals[x].ty) { rt = ty_vector(vals[p].ty, types[vals[x].ty].cnt, types[vals[x].ty].kind == TK_SVEC); } }
     if ty_is_vector(vals[p].ty) { rt = vals[p].ty; }
     let iv = create_inst(OP_GEP, rt, opsv);
@@ -391,7 +391,7 @@ fn irb_select(c: i32, a: i32, b: i32, name: const u8[:], mdfrom: i32) -> i32 {
 }
 fn irb_extractvalue(agg: i32, idxs: const i32[:], name: const u8[:]) -> i32 {
     if is_constant(agg) { let r = cf_extractvalue(agg, idxs); if r >= 0 { return r; } }
-    var t = vals[agg].ty;
+    var t: i32 = vals[agg].ty;
     for x in idxs { t = ty_index(t, x as i64); }
     let iv = create_inst(OP_EXTRACTVALUE, t, [agg]);
     let at = ints.len as i32;
@@ -484,7 +484,7 @@ fn align_attr_set(a: i64) -> i32 { if a <= 0 { 0 } else { aset_get([attr_int(AK_
 fn irb_memset(p: i32, v: i32, size: i32, align: i64, vol: bool) -> i32 {
     let vc = if vol { c_true() } else { c_false() };
     let aset = align_attr_set(align);
-    let t1 = vals[p].ty;
+    let t1: i32 = vals[p].ty;
     let t2 = vals[size].ty;
     return irb_intrinsic_call(IID_memset, [t1, t2], [p, v, size, vc], [aset]);
 }
@@ -493,13 +493,13 @@ fn irb_memcpy(d: i32, dalign: i64, s: i32, salign: i64, size: i32, vol: bool) ->
     let vc = if vol { c_true() } else { c_false() };
     let a1 = align_attr_set(dalign);
     let a2 = align_attr_set(salign);
-    let t1 = vals[d].ty;
+    let t1: i32 = vals[d].ty;
     let t2 = vals[s].ty;
     let t3 = vals[size].ty;
     return irb_intrinsic_call(IID_memcpy, [t1, t2, t3], [d, s, size, vc], [a1, a2]);
 }
 fn irb_lifetime(start: bool, p: i32) -> i32 {
-    return irb_intrinsic_call(if start { IID_lifetime_start } else { IID_lifetime_end }, [vals[p].ty], [p], []);
+    return irb_intrinsic_call(if start { IID_lifetime_start } else { IID_lifetime_end }, [vals[p].ty as i32], [p], []);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1026,13 +1026,13 @@ fn vec_viable_for_slice(pi: i64, k: i64, vty: i32, esize: i64) -> bool {
         if !inst_is_lifetime_start_or_end(u) && !sr_is_droppable_inst(u) { return false; }
     } else if iop(u) == OP_LOAD {
         if inst_is_volatile(u) { return false; }
-        var lt = vals[u].ty;
+        var lt: i32 = vals[u].ty;
         if ty_is_struct(lt) { return false; }
         if p.b > s.b || p.e < s.e { lt = split_int; }
         if !can_convert_value_vs(slice_ty, lt, rw_fn_vscale) { return false; }
     } else if iop(u) == OP_STORE {
         if inst_is_volatile(u) { return false; }
-        var st = vals[op(u, 0)].ty;
+        var st: i32 = vals[op(u, 0)].ty;
         if ty_is_struct(st) { return false; }
         if p.b > s.b || p.e < s.e { st = split_int; }
         if !can_convert_value_vs(st, slice_ty, rw_fn_vscale) { return false; }

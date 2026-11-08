@@ -239,7 +239,7 @@ fn fold_splice_binop(inst: i32, id: i32) -> i32 {
         let v = fvb_binop(iop(inst), x, y, inst, nm);
         let pz = c_poison(vals[v].ty);
         let vt = vals[v].ty;
-        return ic_new_intrinsic(id as i64, [vt], [v, pz, off]);
+        return ic_new_intrinsic(id as i64, [vt as i32], [v, pz, off]);
     }
     if inst_iid(lhs) == id && is_poison(cb_arg(lhs, 1)) {
         let v1 = cb_arg(lhs, 0);
@@ -273,7 +273,7 @@ fn fold_vector_binop_impl(inst: i32) -> i32 {
         let nsv = constant_fold_binop_with_splat(o, sv, sp, splat_lhs);
         let nd = constant_fold_binop_with_splat(o, dest, sp, splat_lhs);
         if nsv < 0 || nd < 0 { return -1; }
-        let iv = icb_intrinsic(IID_vector_insert, [vals[nd].ty, vals[nsv].ty], [nd, nsv, cb_arg(sub, 2)], "");
+        let iv = icb_intrinsic(IID_vector_insert, [vals[nd].ty as i32, vals[nsv].ty], [nd, nsv, cb_arg(sub, 2)], "");
         return ic_replace_inst_uses_with(inst, iv);
     }
     let f1 = through_insert_splat(lhs, rhs, false);
@@ -293,7 +293,7 @@ fn fold_vector_binop_impl(inst: i32) -> i32 {
         var nm: u8[>..] = [];
         nm.append(val_name(inst));
         let v = fvb_binop(o, x, y, inst, nm);
-        return ic_new_intrinsic(IID_vector_reverse, [vals[v].ty], [v]);
+        return ic_new_intrinsic(IID_vector_reverse, [vals[v].ty as i32], [v]);
     }
     if inst_iid(lhs) == IID_vector_reverse {
         let v1 = cb_arg(lhs, 0);
@@ -311,7 +311,7 @@ fn fold_vector_binop_impl(inst: i32) -> i32 {
         let vt = vals[v].ty;
         let mt = ty_vector(T_I1, ty_count(vt), ty_kind(vt) == TK_SVEC);
         let all_true = icb_vector_splat(mt, c_true(), "");
-        return ic_new_intrinsic(IID_experimental_vp_reverse, [vt], [v, all_true, evl]);
+        return ic_new_intrinsic(IID_experimental_vp_reverse, [vt as i32], [v, all_true, evl]);
     }
     if inst_iid(lhs) == IID_experimental_vp_reverse && m_all_ones(cb_arg(lhs, 1)) {
         let v1 = cb_arg(lhs, 0);

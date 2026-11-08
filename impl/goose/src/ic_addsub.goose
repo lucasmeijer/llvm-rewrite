@@ -391,7 +391,7 @@ fn ic_set_pending_name(r: i32, i: i32) { }
 
 // foldToUnsignedSaturatedAdd(I)
 fn fold_to_unsigned_saturated_add(i: i32) -> i32 {
-    let ty = vals[i].ty;
+    let ty: i32 = vals[i].ty;
     for k in 2 {
         let mn = op(i, k);
         let y = op(i, 1 - k);
@@ -635,7 +635,7 @@ fn visit_add(i: i32) -> i32 {
     if r >= 0 { return r; }
     r = fold_add_like_commutative(rhs, lhs, op_nsw(i), op_nuw(i));
     if r >= 0 { return r; }
-    let ty = vals[i].ty;
+    let ty: i32 = vals[i].ty;
     if is_int_ty1(ty) { return ic_new_binop(OP_XOR, lhs, rhs); }
     // X + X --> X << 1
     if lhs == rhs {
@@ -1006,7 +1006,7 @@ fn m_c_minmax_both(v: i32, id: i32, a: i32, b: i32) -> bool { inst_iid(v) == id 
 fn fold_sub_of_min_max(i: i32) -> i32 {
     let op0 = op(i, 0);
     let op1 = op(i, 1);
-    let ty = vals[i].ty;
+    let ty: i32 = vals[i].ty;
     let id = inst_iid(op1);
     if !is_minmax_iid(id) { return -1; }
     let x = op(op1, 0);
@@ -1083,7 +1083,7 @@ fn visit_sub(i: i32) -> i32 {
     if ph >= 0 { return ph; }
     let op0 = op(i, 0);
     let op1 = op(i, 1);
-    let ty = vals[i].ty;
+    let ty: i32 = vals[i].ty;
     // B = x-(-A) --> x+A
     let nv = dyn_cast_neg_val(op1);
     if nv >= 0 {
@@ -1204,7 +1204,7 @@ fn visit_sub(i: i32) -> i32 {
     if one_use(op0) && inst_iid(op0) == IID_vector_reduce_add && one_use(op1) && inst_iid(op1) == IID_vector_reduce_add &&
        vals[op(op0, 0)].ty == vals[op(op1, 0)].ty {
         let s = icb_sub(op(op0, 0), op(op1, 0), "");
-        return ic_replace_inst_uses_with(i, icb_intrinsic(IID_vector_reduce_add, [vals[s].ty], [s], ""));
+        return ic_replace_inst_uses_with(i, icb_intrinsic(IID_vector_reduce_add, [vals[s].ty as i32], [s], ""));
     }
     if is_constant(op0) {
         let c = op0;

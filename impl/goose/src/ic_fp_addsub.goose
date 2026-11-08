@@ -610,7 +610,7 @@ fn visit_fadd(i: i32) -> i32 {
             if one_use(rd) && is_intr(rd, IID_vector_reduce_fadd) && m_any_zero_fp(op(rd, 0)) {
                 let x = op(rd, 1);
                 let y = op(i, 1 - k);
-                return ic_replace_inst_uses_with(i, icb_intrinsic_fmf(IID_vector_reduce_fadd, [vals[x].ty], [y, x], fmf_of(i), ""));
+                return ic_replace_inst_uses_with(i, icb_intrinsic_fmf(IID_vector_reduce_fadd, [vals[x].ty as i32], [y, x], fmf_of(i), ""));
             }
         }
         // fadd (rdx StartC, X), C --> rdx (C + StartC), X
@@ -620,7 +620,7 @@ fn visit_fadd(i: i32) -> i32 {
             let x = op(lhs, 1);
             let lo, hi = fp_arith(cfp_kind(c), FOP_ADD, cint_lo(c), cint_hi(c), cint_lo(sc), cint_hi(sc));
             let nsc = c_fp_bits_ty(vals[i].ty, lo, hi);
-            return ic_replace_inst_uses_with(i, icb_intrinsic_fmf(IID_vector_reduce_fadd, [vals[x].ty], [nsc, x], fmf_of(i), ""));
+            return ic_replace_inst_uses_with(i, icb_intrinsic_fmf(IID_vector_reduce_fadd, [vals[x].ty as i32], [nsc, x], fmf_of(i), ""));
         }
         // (X * MulC) + X --> X * (MulC + 1.0)
         for k in 2 {
@@ -717,7 +717,7 @@ fn hoist_fneg_above_fmul_fdiv(fo: i32, src: i32) -> i32 {
     if is_intr(fo, IID_ldexp) {
         let fm = f | fmf_of(fo);
         let na = icb_fneg_fmf(op(fo, 0), fm, "");
-        let c = ic_new_intrinsic(IID_ldexp, [vals[op(fo, 0)].ty, vals[op(fo, 1)].ty], [na, op(fo, 1)]);
+        let c = ic_new_intrinsic(IID_ldexp, [vals[op(fo, 0)].ty as i32, vals[op(fo, 1)].ty], [na, op(fo, 1)]);
         icb_insert(c, "");
         set_fmf(c, fmf_of(c) | fm);
         ic_copy_all_md(c, fo);
@@ -807,7 +807,7 @@ fn fneg_propagate_select_fmf(s: i32, i: i32, old: i32, common: bool) {
 // IRBuilder::CreateVectorReverse(V)
 fn icb_vector_reverse(v: i32) -> i32 {
     let ty = vals[v].ty;
-    if ty_kind(ty) == TK_SVEC { return icb_intrinsic(IID_vector_reverse, [ty], [v], ""); }
+    if ty_kind(ty) == TK_SVEC { return icb_intrinsic(IID_vector_reverse, [ty as i32], [v], ""); }
     let n = ty_count(ty);
     var mask: i32[>..<] = [];
     for k in n { mask.push((n - 1 - k) as i32); }
@@ -931,7 +931,7 @@ fn visit_fsub(i: i32) -> i32 {
         if one_use(op0) && is_intr(op0, IID_vector_reduce_fadd) && one_use(op1) && is_intr(op1, IID_vector_reduce_fadd) &&
            vals[op(op0, 1)].ty == vals[op(op1, 1)].ty {
             let s = icb_fbinop_fmf(OP_FSUB, op(op0, 1), op(op1, 1), fmf_of(i), "");
-            let rdx = icb_intrinsic_fmf(IID_vector_reduce_fadd, [vals[s].ty], [op(op0, 0), s], fmf_of(i), "");
+            let rdx = icb_intrinsic_fmf(IID_vector_reduce_fadd, [vals[s].ty as i32], [op(op0, 0), s], fmf_of(i), "");
             return ic_new_fbinop_fmf(OP_FSUB, rdx, op(op1, 0), fmf_of(i));
         }
         let f = factorize_fadd_fsub(i);

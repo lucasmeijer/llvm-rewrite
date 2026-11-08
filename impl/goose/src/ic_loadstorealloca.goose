@@ -552,7 +552,7 @@ fn icb_mem_transfer(id: i64, d: i32, dal: i64, s: i32, sal: i64, size: i32, vol:
     let dt = vals[d].ty;
     let stt = vals[s].ty;
     let szt = vals[size].ty;
-    let c = ic_new_intrinsic(id, [dt, stt, szt], [d, s, size, vb]);
+    let c = ic_new_intrinsic(id, [dt as i32, stt as i32, szt as i32], [d, s, size, vb]);
     if dal > 0 { ic_call_add_param_attr(c, 0, attr_int(AK_Alignment, dal as u64)); }
     if sal > 0 { ic_call_add_param_attr(c, 1, attr_int(AK_Alignment, sal as u64)); }
     return icb_insert(c, "");
@@ -562,7 +562,7 @@ fn icb_memset(p: i32, v: i32, size: i32, al: i64) -> i32 {
     let f = c_false();
     let pt = vals[p].ty;
     let st = vals[size].ty;
-    let c = ic_new_intrinsic(IID_memset, [pt, st], [p, v, size, f]);
+    let c = ic_new_intrinsic(IID_memset, [pt as i32, st as i32], [p, v, size, f]);
     if al > 0 { ic_call_add_param_attr(c, 0, attr_int(AK_Alignment, al as u64)); }
     return icb_insert(c, "");
 }

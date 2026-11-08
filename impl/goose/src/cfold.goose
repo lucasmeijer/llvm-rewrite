@@ -355,7 +355,7 @@ recursive fn cf_constant_at_offset(base: i32, off0: i64) -> i32 {
     let k = vals[base].kind;
     if !(k == VK_CARRAY || k == VK_CSTRUCT || k == VK_CVECTOR || k == VK_CDARRAY || k == VK_CDVECTOR) { return -1; }
     // DL.getGEPIndicesForOffset(ElemTy, Offset)
-    var et = vals[base].ty;
+    var et: i32 = vals[base].ty;
     var off = off0;
     let first = cf_element_index(dl_alloc_size(et), off);
     off = cf_ei_off;

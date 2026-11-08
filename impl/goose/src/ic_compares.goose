@@ -675,7 +675,7 @@ fn icc_is_ieee_like(t: i32) -> bool {
 // IRBuilder::createIsFPClass(V, Test)
 fn icb_is_fpclass(v: i32, test: u64) -> i32 {
     let t = c_int(T_I32, test as i64);
-    let ty = vals[v].ty;
+    let ty: i32 = vals[v].ty;
     return icb_intrinsic(IID_is_fpclass, [ty], [v, t], "");
 }
 
@@ -1853,7 +1853,7 @@ fn fold_icmp_intrinsic_with_intrinsic(cmp: i32) -> i32 {
         let ones = icc_bool(has_one_use(o0)) + icc_bool(has_one_use(o1));
         if ones == 2 || (ones == 1 && m_imm_constant(op(o0, 2)) && m_imm_constant(op(o1, 2))) {
             let sub = icb_sub(op(o0, 2), op(o1, 2), "");
-            let rot = icb_intrinsic(id, [vals[o0].ty], [op(o0, 0), op(o0, 0), sub], "");
+            let rot = icb_intrinsic(id, [vals[o0].ty as i32], [op(o0, 0), op(o0, 0), sub], "");
             return ic_new_icmp(p, op(o1, 0), rot);
         }
     }
@@ -2323,7 +2323,7 @@ fn fold_multiplication_overflow_check(i: i32) -> i32 {
     let spos = icb_pos; let sbb = icb_bb; let sdl = icb_dl;
     let mul_other = mul >= 0 && !has_one_use(mul);
     if mul_other { icb_set_insert_point(mul); }
-    let call = icb_intrinsic(if iop(dv) == OP_UDIV { IID_umul_with_overflow } else { IID_smul_with_overflow }, [vals[x].ty], [x, y], "mul");
+    let call = icb_intrinsic(if iop(dv) == OP_UDIV { IID_umul_with_overflow } else { IID_smul_with_overflow }, [vals[x].ty as i32], [x, y], "mul");
     if mul_other { ic_replace_inst_uses_with(mul, icb_extractvalue(call, 0, "mul.val")); }
     var res = icb_extractvalue(call, 1, "mul.ov");
     if neg { res = icb_not(res, "mul.not.ov"); }
@@ -3064,7 +3064,7 @@ fn fold_icmp_equality(i: i32) -> i32 {
         let f = op(i, 1 - k);
         if one_use(f) && inst_iid(f) == IID_fshr && op(f, 0) == a && op(f, 1) == a {
             let b = op(f, 2);
-            return ic_new_icmp(p, a, icb_intrinsic(IID_fshl, [vals[o0].ty], [a, a, b], ""));
+            return ic_new_icmp(p, a, icb_intrinsic(IID_fshl, [vals[o0].ty as i32], [a, a, b], ""));
         }
     }
     for k in 2 {
@@ -3322,7 +3322,7 @@ fn process_umul_zext_idiom(i: i32, mv: i32, other: AP) -> i32 {
     let wa = ty_bits(ta);
     let wb = ty_bits(tb);
     var mw = wa;
-    var mty = ta;
+    var mty: i32 = ta;
     if wb > wa { mw = wb; mty = tb; }
     if has_n_uses_or_more(mv, 2) {
         var u = vals[mv].first_use;
@@ -3792,7 +3792,7 @@ fn icc_create_cmp_reverse(cmp: i32, p: i64, x: i32, y: i32) -> i32 {
     nm.append(val_name(cmp));
     let v = icb_cmp(p, x, y, nm);
     if is_inst(v) { copy_ir_flags(v, cmp); }
-    return ic_new_intrinsic(IID_vector_reverse, [vals[v].ty], [v]);
+    return ic_new_intrinsic(IID_vector_reverse, [vals[v].ty as i32], [v]);
 }
 
 // foldICmpOfUAddOv(I)

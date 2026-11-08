@@ -122,7 +122,7 @@ fn sd_check_funnel_user(i: i32) -> bool {
 // SimplifyDemandedUseBits(I, DemandedMask, Known, Q, Depth)
 recursive fn sd_use_bits(i: i32, demanded: AP, depth: i64) -> i32, KB {
     let w = demanded.w as i64;
-    let vty = vals[i].ty;
+    let vty: i32 = vals[i].ty;
     var lk = kb_unknown(w);
     var rk = kb_unknown(w);
     var known = kb_unknown(w);

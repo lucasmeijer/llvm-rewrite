@@ -296,8 +296,8 @@ fn icb_intrinsic(id: i64, ov: const i32[:], argsv: const i32[:], name: const u8[
     return icb_insert(c, name);
 }
 // CreateBinaryIntrinsic(ID, LHS, RHS, FMFSource, Name): overloaded on the operand type
-fn icb_binary_intrinsic(id: i64, a: i32, b: i32, name: const u8[:]) -> i32 { icb_intrinsic(id, [vals[a].ty], [a, b], name) }
-fn icb_unary_intrinsic(id: i64, a: i32, name: const u8[:]) -> i32 { icb_intrinsic(id, [vals[a].ty], [a], name) }
+fn icb_binary_intrinsic(id: i64, a: i32, b: i32, name: const u8[:]) -> i32 { icb_intrinsic(id, [vals[a].ty as i32], [a, b], name) }
+fn icb_unary_intrinsic(id: i64, a: i32, name: const u8[:]) -> i32 { icb_intrinsic(id, [vals[a].ty as i32], [a], name) }
 
 // ---------------------------------------------------------------------------------------------
 // Memory, aggregate and vector instructions (IRBuilder::CreateLoad/Store/Alloca/ExtractValue/InsertValue/
@@ -495,8 +495,8 @@ fn icb_intrinsic_fmf(id: i64, ov: const i32[:], argsv: const i32[:], fmf: u8, na
     icb_fmf = saved;
     return r;
 }
-fn icb_unary_intrinsic_fmf(id: i64, a: i32, fmf: u8, name: const u8[:]) -> i32 { icb_intrinsic_fmf(id, [vals[a].ty], [a], fmf, name) }
-fn icb_binary_intrinsic_fmf(id: i64, a: i32, b: i32, fmf: u8, name: const u8[:]) -> i32 { icb_intrinsic_fmf(id, [vals[a].ty], [a, b], fmf, name) }
+fn icb_unary_intrinsic_fmf(id: i64, a: i32, fmf: u8, name: const u8[:]) -> i32 { icb_intrinsic_fmf(id, [vals[a].ty as i32], [a], fmf, name) }
+fn icb_binary_intrinsic_fmf(id: i64, a: i32, b: i32, fmf: u8, name: const u8[:]) -> i32 { icb_intrinsic_fmf(id, [vals[a].ty as i32], [a, b], fmf, name) }
 // CreateFCmpFMF(P, L, R, FMFSource, Name)
 fn icb_fcmp_fmf(p: i64, a: i32, b: i32, fmf: u8, name: const u8[:]) -> i32 {
     if is_constant(a) && is_constant(b) {

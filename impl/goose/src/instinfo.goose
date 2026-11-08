@@ -223,7 +223,7 @@ fn is_fp_math_operator(iv: i32) -> bool {
     if o == OP_FNEG || o == OP_FADD || o == OP_FSUB || o == OP_FMUL || o == OP_FDIV || o == OP_FREM || o == OP_FCMP { return true; }
     if o == OP_FPTRUNC || o == OP_FPEXT || o == OP_UITOFP || o == OP_SITOFP { return true; }
     if o == OP_PHI || o == OP_SELECT || o == OP_CALL {
-        var t = vals[iv].ty;
+        var t: i32 = vals[iv].ty;
         while ty_is_array(t) { t = ty_elem(t); }
         if ty_is_struct(t) {
             // homogeneous struct of FP (or FP vector) types

@@ -1493,7 +1493,7 @@ fn fold_shuffle_of_unary_ops(s: i32) -> i32 {
     let ns = icb_shuffle(x, y, mask, "");
     var nf: i32 = -1;
     if is_fneg { nf = create_inst(OP_FNEG, vals[ns].ty, [ns]); }
-    else { nf = ic_new_intrinsic(IID_fabs, [vals[s].ty], [ns]); }
+    else { nf = ic_new_intrinsic(IID_fabs, [vals[s].ty as i32], [ns]); }
     copy_ir_flags(nf, s0);
     ii_and_ir_flags(nf, s1);
     return nf;

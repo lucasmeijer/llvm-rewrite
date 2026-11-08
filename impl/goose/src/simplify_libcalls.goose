@@ -708,7 +708,7 @@ fn optimize_ffs(ci: i32) -> i32 {
     let o = cb_arg(ci, 0);
     let at = vals[o].ty;
     let t = c_true();
-    var v = icb_intrinsic(IID_cttz, [at], [o, t], "cttz");
+    var v = icb_intrinsic(IID_cttz, [at as i32], [o, t], "cttz");
     v = icb_add(v, c_int_ty(vals[v].ty, 1), "");
     v = icb_int_cast(v, rt, false, "");
     let cond = icb_icmp(P_NE, o, c_null(at), "");
@@ -718,7 +718,7 @@ fn optimize_fls(ci: i32) -> i32 {
     let o = cb_arg(ci, 0);
     let at = vals[o].ty;
     let f = c_false();
-    var v = icb_intrinsic(IID_ctlz, [at], [o, f], "ctlz");
+    var v = icb_intrinsic(IID_ctlz, [at as i32], [o, f], "ctlz");
     v = icb_sub(c_int_ty(vals[v].ty, ty_bits(at) as u64), v, "");
     return icb_int_cast(v, vals[ci].ty, false, "");
 }

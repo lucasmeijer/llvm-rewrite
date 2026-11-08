@@ -450,10 +450,10 @@ fn xb_i32(k: i64) -> i32 { c_int(T_I32, k) }
 
 fn upgrade_x86_call(name: const u8[:], ci: i32) -> i32 {
     let a0 = op(ci, 0);
-    let ty = vals[ci].ty;
+    let ty: i32 = vals[ci].ty;
     if name == "sse.sqrt.ss" || name == "sse2.sqrt.sd" {
         let e0 = xb_extractelement(ci, a0, c_int(T_I64, 0));
-        let s = xb_intrinsic(ci, "llvm.sqrt", [vals[e0].ty], [e0]);
+        let s = xb_intrinsic(ci, "llvm.sqrt", [vals[e0].ty as i32], [e0]);
         return xb_insertelement(ci, a0, s, c_int(T_I64, 0));
     }
     if starts_with(name, "avx.sqrt.p") || starts_with(name, "sse2.sqrt.p") || starts_with(name, "sse.sqrt.p") {

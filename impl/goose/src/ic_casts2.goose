@@ -206,7 +206,7 @@ fn visit_fptrunc(fpt: i32) -> i32 {
             if id != IID_fabs { ok = is_inst_op(src, OP_FPEXT) && vals[op(src, 0)].ty == ty; }
             if ok {
                 let it = icx_fptrunc(src, ty, icb_fmf, "");
-                let ov = icx_decl(id, [ty]);
+                let ov = icx_decl(id, [ty as i32]);
                 if cb_nbundles(ii) > 0 { ic_not_ported("visitFPTrunc of an intrinsic with operand bundles"); }
                 let nc = icx_new_call(ov, [it]);
                 var nm: u8[>..] = [];
@@ -495,7 +495,7 @@ fn visit_addrspacecast(ci: i32) -> i32 { common_cast_transforms(ci) }
 // optimizeVectorResizeWithIntegerBitCasts(InVal, DestTy, IC)
 fn optimize_vector_resize_with_integer_bitcasts(inval0: i32, dt: i32) -> i32 {
     var inval = inval0;
-    var st = vals[inval].ty;
+    var st: i32 = vals[inval].ty;
     if ty_scalar(st) != ty_scalar(dt) {
         if ty_prim_bits_any(ty_scalar(st)) != ty_prim_bits_any(ty_scalar(dt)) { return -1; }
         st = ty_vector(ty_scalar(dt), ty_count(st), false);
@@ -899,7 +899,7 @@ fn visit_bitcast(ci: i32) -> i32 {
             if dl_is_legal_integer(ty_scalar_bits(dt)) && ty_scalar_bits(st) == 8 { iid = IID_bswap; }
             else if ty_scalar_bits(st) == 1 { iid = IID_bitreverse; }
             if iid != 0 {
-                let f = icx_decl(iid, [dt]);
+                let f = icx_decl(iid, [dt as i32]);
                 let sx = icb_bitcast(s0, dt, "");
                 return icx_new_call(f, [sx]);
             }

@@ -4066,7 +4066,7 @@ fn simplify_switch_of_powers_of_two(si: i32) -> bool {
     if !is_switch_dense_n(vs.len as u64, ctz(vs[vs.len - 1]) - ctz(vs[0]) + 1, fn_has_opt_size(inst_func(si))) { return false; }
     // Builder.SetInsertPoint(SI): new instructions take the switch's location
     let loc = inst_get_md(si, MDK_DBG_SC);
-    let cty = vals[cond].ty;
+    let cty: i32 = vals[cond].ty;
     if !cu_default_dest_unreachable(si) {
         let popc = scf_new_intrinsic(IID_ctpop, [cty], [cond]);
         inst_insert_before(popc, si);
@@ -4147,7 +4147,7 @@ fn reduce_switch_range(si: i32) -> bool {
     if shift >= 0 { base = 0; }
     else if base != 0 { shift = dense_range_reduction_shift(xs, base, optsize); }
     if shift < 0 { return false; }
-    let ty = vals[cond].ty;
+    let ty: i32 = vals[cond].ty;
     sb_at(si);
     var sub = cond;
     if base != 0 { sub = sb_binop(OP_SUB, sub, c_int_ap(ty, ap_i64(base, w)), ""); }

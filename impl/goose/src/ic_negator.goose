@@ -137,7 +137,7 @@ recursive fn ng_visit_inner(i: i32, nsw0: bool, depth: i64, bw: i64) -> i32 {
     } else if o == OP_CALL {
         let id = inst_iid(i);
         if (id == IID_scmp || id == IID_ucmp) && has_one_use(i) {
-            return icb_intrinsic(id, [vals[i].ty, vals[op(i, 1)].ty], [op(i, 1), op(i, 0)], "");
+            return icb_intrinsic(id, [vals[i].ty as i32, vals[op(i, 1)].ty as i32], [op(i, 1), op(i, 0)], "");
         }
     }
     if o == OP_SUB && (has_one_use(i) || is_imm_c(op(i, 0))) {

@@ -2966,7 +2966,7 @@ recursive fn simplify_gep(srcty: i32, ptr: i32, mark: i64, n: i64, flags: u8, q:
     if n == 0 { return ptr; }
     let is_ops_mark = mark - 1;   // is_ops[mark-1] is the pointer slot in the caller's run (not used)
     let last_type = gep_indexed_type_idx(srcty, mark, n);
-    var gepty = vals[ptr].ty;
+    var gepty: i32 = vals[ptr].ty;
     if !ty_is_vector(gepty) {
         for k in n {
             let it = vals[is_ops[mark + k]].ty;
