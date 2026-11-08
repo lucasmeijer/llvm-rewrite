@@ -2772,14 +2772,14 @@ migrate_one :: (pass: *Sroa, ai: Value_Id, r: u32, frags: [] Sroa_Fragment) {
         if var_size == 0 continue;
         okp, mem_off := pointer_offset_from(ai, dbg_ptr);
         if !okp continue;
-        mem_start := mem_off * 8 + cast(s64) fr.offset - (cur_off * 8 + extract_off);
+        mem_start := mem_off * 8 + cast,no_check(s64) fr.offset - (cur_off * 8 + extract_off);
         off_from_loc := -mem_start;
         new_has: bool; new_off, new_size: u64;
         mem_end := mem_start + cast(s64) fr.size;
         if mem_end < 0 { new_has = true; new_off = 0; new_size = 0; }
         else {
-            mstart := mem_start + cast(s64) var_off;
-            mend := mstart + cast(s64) fr.size;
+            mstart := mem_start + cast,no_check(s64) var_off;
+            mend := mstart + cast,no_check(s64) fr.size;
             fstart := max(0, mstart);
             fsize := max(0, mend - fstart);
             // FragmentInfo::intersect
@@ -3190,7 +3190,7 @@ split_block_and_insert_if_then_else :: (cond: Value_Id, split_before: Value_Id, 
     if weights != NONE set_metadata(nt, md_kind_id("prof"), weights);
     // ReplaceInstWithInst
     if get_metadata(nt, 0) == NONE { d := get_metadata(old, 0); if d != NONE set_metadata(nt, 0, d); }
-    inst_insert_before(nt, old);
+    insert_at_position(nt, head, old, false);   // insertInto(BB, BI): adopts the old terminator's records
     drop_all_references(old);
     erase_inst(old);
     ups := *sroa_pending_dt_updates;

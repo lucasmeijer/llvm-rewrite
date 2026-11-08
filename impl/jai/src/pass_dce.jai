@@ -1,6 +1,5 @@
 // DCE: port of llvm/lib/Transforms/Scalar/DCE.cpp (DCEPass: eliminateDeadCode / DCEInstruction).
-// salvageDebugInfo and salvageKnowledge have nothing to do: debug records aren't parsed yet and
-// --enable-knowledge-retention is off.
+// salvageKnowledge has nothing to do: --enable-knowledge-retention is off.
 
 Small_Set_Vector :: struct {
     items: [..] Value_Id;
@@ -22,6 +21,7 @@ ssv_pop :: (s: *Small_Set_Vector) -> Value_Id {
 
 dce_instruction :: (i: Value_Id, wl: *Small_Set_Vector) -> bool {
     if !is_instruction_trivially_dead(i) return false;
+    salvage_debug_info(i);
     n := nops(i);
     if n > 0 for k: 0..n-1 {
         opv := op(i, k);
@@ -29,7 +29,7 @@ dce_instruction :: (i: Value_Id, wl: *Small_Set_Vector) -> bool {
         if opv == NONE || has_uses(opv) || opv == i continue;
         if is_inst(opv) && is_instruction_trivially_dead(opv) ssv_insert(wl, opv);
     }
-    erase_inst(i);
+    erase_inst_with_metadata(i);
     return true;
 }
 

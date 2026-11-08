@@ -1615,7 +1615,7 @@ ic_visit_intrinsic_switch :: (ii: Value_Id, iid: Intrinsic_Id) -> Ic_Switch_Resu
                 mv := inst(ii).next;
                 while mv != next_inst {
                     t := mv; mv = inst(mv).next;
-                    inst_move_before(t, ii);
+                    inst_move_before_dbg(t, ii);   // Temp->moveBefore(II->getIterator())
                 }
                 ic_replace_operand(ii, 0, icb_and(curr, next_cond));
             }

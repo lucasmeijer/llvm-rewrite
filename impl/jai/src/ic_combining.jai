@@ -261,7 +261,7 @@ ic_fold_gep_of_phi :: (g: Value_Id, pn: Value_Id) -> Value_Id {
     }
     bb := inst_block(g);
     pos := block_first_insertion_pt(bb);
-    if pos == NONE ic_link_at_end(ng, bb); else ic_link_before(ng, pos);
+    if pos == NONE ic_link_at_end(ng, bb); else ic_link_before(ng, pos, true);
     return ng;
 }
 
@@ -1216,8 +1216,8 @@ ic_visit_landing_pad :: (li: Value_Id) -> Value_Id {
 // Instruction::getInsertionPointAfterDef (NONE = no insertion point); `head` = the iterator's head bit
 inst_insertion_point_after_def :: (i: Value_Id) -> (Value_Id, bb: Value_Id, head: bool) {
     o := inst_op(i);
-    if o == .PHI { b := inst_block(i); return block_first_insertion_pt(b), b, false; }
-    if o == .INVOKE { b := op(i, nops(i) - 3); return block_first_insertion_pt(b), b, false; }
+    if o == .PHI { b := inst_block(i); return block_first_insertion_pt(b), b, true; }
+    if o == .INVOKE { b := op(i, nops(i) - 3); return block_first_insertion_pt(b), b, true; }
     if o == .CALLBR return NONE, NONE, false;
     return inst(i).next, inst_block(i), true;
 }

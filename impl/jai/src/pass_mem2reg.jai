@@ -319,7 +319,7 @@ convert_metadata_to_assumes :: (li: Value_Id, val: Value_Id) {
         inst(s).align = 1;
         set_op(s, 0, const_int(ir.t_i1, 1));
         set_op(s, 1, const_poison(ir.t_ptr));
-        inst_insert_before(s, li);
+        insert_at_position(s, inst(li).parent, li, false);   // new StoreInst(..., LI->getIterator()): adopts LI's records
         return;
     }
     if get_metadata(li, md_kind_id("nonnull")) != NONE && has_noundef && !m2r_known_non_zero(val, li)

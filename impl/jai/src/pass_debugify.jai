@@ -1,4 +1,4 @@
-// The `debugify` and `check-debugify` module passes (synthetic mode), opt's -enable-debugify and -strip-debug.
+// The `debugify` and `check-debugify` module passes (synthetic mode), opt's -enable-debugify (-strip-debug is in pass_simplifycfg.jai).
 // Ported from llvm/lib/Transforms/Utils/Debugify.cpp (applyDebugifyMetadata, checkDebugifyMetadata,
 // diagnoseMisSizedDbgValue, stripDebugifyMetadata, NewPMDebugifyPass::run, NewPMCheckDebugifyPass::run) with the
 // DIBuilder calls it makes (llvm/lib/IR/DIBuilder.cpp: createFile, createCompileUnit, createSubroutineType,
@@ -13,18 +13,16 @@ dbgify_opts: struct {
     quiet := false;                  // -debugify-quiet
     atoms := false;                  // -debugify-atoms
     enable := false;                 // opt -enable-debugify
-    strip_debug := false;            // opt -strip-debug
     level_text: string;
 };
-DBGIFY_CL_OPT_COUNT :: 6;
+DBGIFY_CL_OPT_COUNT :: 5;
 add_dbgify_cl_opts :: (list: [] Cl_Opt, start: s64) {
     o := *dbgify_opts;
     list[start + 0] = .{"debugify-quiet", .BOOL, *o.quiet, null, null};
     list[start + 1] = .{"debugify-atoms", .BOOL, *o.atoms, null, null};
     list[start + 2] = .{"enable-debugify", .BOOL, *o.enable, null, null};
-    list[start + 3] = .{"strip-debug", .BOOL, *o.strip_debug, null, null};
-    list[start + 4] = .{"debugify-level", .STRING, null, null, *o.level_text};
-    list[start + 5] = .{"instcombine-lower-dbg-declare", .BOOL, *opts.instcombine_lower_dbg_declare, null, null};
+    list[start + 3] = .{"debugify-level", .STRING, null, null, *o.level_text};
+    list[start + 4] = .{"instcombine-lower-dbg-declare", .BOOL, *opts.instcombine_lower_dbg_declare, null, null};
 }
 dbgify_check_level :: () {
     t := dbgify_opts.level_text;

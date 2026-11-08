@@ -292,7 +292,7 @@ ic_can_rewrite_gep_as_offset :: (start: Value_Id, base: Value_Id, nw: *u32, expl
 ic_set_insertion_point :: (b: *Irb, v: Value_Id, before := true) {
     if is_inst(v) && inst_op(v) == .PHI {
         bb := inst_block(v);
-        irb_set_at(b, bb, block_first_insertion_pt(bb), false);
+        irb_set_at(b, bb, block_first_insertion_pt(bb), true);
         return;
     }
     if is_inst(v) {
@@ -307,7 +307,7 @@ ic_set_insertion_point :: (b: *Irb, v: Value_Id, before := true) {
     }
     if vkind(v) == .ARGUMENT {
         entry := fn_entry(arg_parent(v));
-        irb_set_at(b, entry, block_first_insertion_pt(entry), false);
+        irb_set_at(b, entry, block_first_insertion_pt(entry), true);
         return;
     }
 }

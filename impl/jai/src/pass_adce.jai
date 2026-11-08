@@ -1,6 +1,5 @@
 // ADCE: port of llvm/lib/Transforms/Scalar/ADCE.cpp (AggressiveDeadCodeElimination).
-// Debug-info parts (AliveScopes, dbg records, salvageDebugInfo) have nothing to act on until debug records are
-// parsed; the !dbg scopes of live instructions only matter for dropping dbg records.
+// Debug records: AliveScopes (collectLiveScopes) and salvageDebugInfo of the removed instructions are ported.
 
 Adce_Block :: struct {
     live: bool;
@@ -22,6 +21,24 @@ Adce :: struct {
     // SmallPtrSet<BasicBlock*> NewLiveBlocks (only iterated through the IDF calculator, as a set)
     new_live: [..] Value_Id;
     new_live_set: Table(Value_Id, bool);
+    alive_scopes: Table(Md_Id, bool);   // AliveScopes: live DILocalScopes and DILocations
+}
+
+// collectLiveScopes(const DILocation &)
+adce_collect_live_scopes_loc :: (a: *Adce, dl: Md_Id) {
+    l := dl;
+    while l != NONE {
+        if table_contains(*a.alive_scopes, l) return;
+        table_set(*a.alive_scopes, l, true);
+        s := diloc_scope(l);
+        // collectLiveScopes(const DILocalScope &): up the scope chain to the subprogram
+        while s != NONE && !table_contains(*a.alive_scopes, s) {
+            table_set(*a.alive_scopes, s, true);
+            if is_di(s, .SUBPROGRAM) break;
+            s = discope_parent(s);
+        }
+        l = diloc_inlined_at(l);
+    }
 }
 
 adce_binfo :: (a: *Adce, b: Value_Id) -> *Adce_Block {
@@ -80,6 +97,8 @@ adce_mark_live :: (a: *Adce, i: Value_Id) {
     if table_contains(*a.live, i) return;
     table_set(*a.live, i, true);
     array_add(*a.worklist, i);
+    dl := get_metadata(i, 0);
+    if dl != NONE adce_collect_live_scopes_loc(a, dl);
     b := inst_block(i);
     if i == block(b).last {
         adce_dead_term_remove(a, b);
@@ -214,13 +233,15 @@ adce_compute_reverse_post_order :: (a: *Adce) {
 
 adce_make_unconditional :: (a: *Adce, bb: Value_Id, target: Value_Id) {
     term := block_terminator(bb);
+    dl := get_metadata(term, 0);
+    if dl != NONE adce_collect_live_scopes_loc(a, dl);
     if inst_op(term) == .BR {
         set_successor(term, 0, target);
         table_set(*a.live, term, true);
         return;
     }
     nt := create_br(target);
-    inst_insert_before(nt, term);
+    insert_at_position(nt, bb, term, false);   // IRBuilder(PredTerm): the new branch adopts PredTerm's records
     table_set(*a.live, nt, true);
     copy_debug_loc(nt, term);
     drop_all_references(term);
@@ -272,12 +293,21 @@ adce_remove_dead_instructions :: (a: *Adce) -> Adce_Changed {
     ch.control_flow = adce_update_dead_regions(a);
     a.worklist.count = 0;
     for :reverse_early_inc fn_insts(a.f) {
+        // drop debug records whose scope isn't alive
+        r := inst(it).records;
+        while r != 0 {
+            nr := dbgr(r).next;
+            if dbgr(r).kind == .ASSIGN fatal("adce: #dbg_assign records are not supported yet");
+            if !table_contains(*a.alive_scopes, diloc_scope(dbgr(r).dbg)) dbgr_erase(r);
+            r = nr;
+        }
         if adce_is_live(a, it) continue;
         ch.non_debug = true;
         array_add(*a.worklist, it);
+        salvage_debug_info(it);
     }
     for a.worklist drop_all_references(it);
-    for a.worklist erase_inst(it);
+    for a.worklist erase_inst_with_metadata(it);
     ch.anything = ch.control_flow || a.worklist.count > 0;
     return ch;
 }
@@ -287,7 +317,7 @@ adce_run :: (f: Value_Id) -> Preserved {
     a.f = f;
     a.info.allocator = temp; a.live.allocator = temp; a.worklist.allocator = temp;
     a.dead_term_blocks.allocator = temp; a.dead_term_set.allocator = temp;
-    a.new_live.allocator = temp; a.new_live_set.allocator = temp;
+    a.new_live.allocator = temp; a.new_live_set.allocator = temp; a.alive_scopes.allocator = temp;
     a.dt = cached_domtree(f);
     a.pdt = get_postdomtree(f);
     adce_initialize(*a);

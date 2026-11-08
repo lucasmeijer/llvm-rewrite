@@ -248,6 +248,18 @@ type_finder_run :: () {
                 if r.op == .CALL || r.op == .INVOKE || r.op == .CALLBR tf_incorporate_attrs(r.attrs);
                 get_all_metadata(i, *mds);
                 for mds if it.kind != 0 tf_incorporate_md(it.md);
+                // types hiding in variable-location information
+                x := r.records;
+                while x != 0 {
+                    rec := ir.dbg_records[x - 1];
+                    if rec.kind != .LABEL {
+                        vals: [..] Value_Id; vals.allocator = temp;
+                        dbgr_values_of_loc(rec.loc, *vals);
+                        if rec.kind == .ASSIGN && rec.addr != NONE && ir.mds[rec.addr].kind == .VALUE array_add(*vals, ir.mds[rec.addr].value);
+                        for vals tf_incorporate_value(it);
+                    }
+                    x = rec.next;
+                }
                 i = r.next;
             }
             b = block(b).next;

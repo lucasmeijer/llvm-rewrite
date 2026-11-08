@@ -108,7 +108,17 @@ find_dbg_users :: (f: Value_Id, v: Value_Id, out: *[..] u32, values_and_assigns_
         }
     }
     sort_desc(*direct);
-    sort_desc(*via_list);
+    // arg-list users: the lists in reverse order of tracking, each list's records in reverse order of tracking
+    for i: 1..via_list.count-1 {
+        x := via_list[i]; ax := arglist_stamp(dbgr(x).loc); sx := dbgr_stamp(x);
+        j := i - 1;
+        while j >= 0 {
+            aj := arglist_stamp(dbgr(via_list[j]).loc);
+            if !(aj < ax || (aj == ax && dbgr_stamp(via_list[j]) < sx)) break;
+            via_list[j + 1] = via_list[j]; j -= 1;
+        }
+        via_list[j + 1] = x;
+    }
     for direct array_add(out, it);
     for via_list array_add(out, it);
 }
@@ -126,13 +136,18 @@ md_value_replace :: (old: Value_Id, new: Value_Id) {
     if !table_contains(*ir.md_map, key_view(k)) return;
     key_reset(k); key_u8(k, 1); key_u32(k, new);
     retrack := is_constant_kind(vkind(new)) || table_contains(*ir.md_map, key_view(k));
-    md_value_rauw(old, new);
-    if dbg_index.fn == NONE return;
-    l := table_find_pointer(*dbg_index.users, old);
-    if !l return;
+    // the index may hold stale entries (records whose location was changed since): keep the real users only
     moved: [..] u32; moved.allocator = temp;
-    for l.* array_add(*moved, it);
-    table_remove(*dbg_index.users, old);
+    have_index := dbg_index.fn != NONE;
+    if have_index {
+        l := table_find_pointer(*dbg_index.users, old);
+        if l {
+            for l.* if dbgr(it).owner != NONE && dbgr_refers_to(it, old, false) array_add(*moved, it);
+            table_remove(*dbg_index.users, old);
+        }
+    }
+    md_value_rauw(old, new);
+    if !have_index return;
     if retrack {
         for i: 1..moved.count-1 {
             x := moved[i]; sx := dbgr_stamp(x);
@@ -140,7 +155,10 @@ md_value_replace :: (old: Value_Id, new: Value_Id) {
             while j >= 0 && dbgr_stamp(moved[j]) > sx { moved[j + 1] = moved[j]; j -= 1; }
             moved[j + 1] = x;
         }
-        for moved if dbgr(it).owner != NONE dbgr_restamp(it);
+        for moved {
+            dbgr_restamp(it);
+            if is_di(dbgr(it).loc, .ARG_LIST) arglist_restamp(dbgr(it).loc);   // DIArgList::handleChangedOperand re-tracks
+        }
     }
     for moved dbgr_index_add(new, it);
 }

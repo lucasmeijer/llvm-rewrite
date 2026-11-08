@@ -798,8 +798,7 @@ opt_main :: () {
     tti_create_target_machine();
     opt_set_function_attributes();
     if ir.source_filename.count == 0 && !saw_source_filename ir.source_filename = input;
-    // optdriver.cpp: -strip-debug runs StripDebugInfo before the verifier; -enable-debugify wraps the pipeline
-    if dbgify_opts.strip_debug strip_debug_info();
+    // NewPMDriver.cpp: -enable-debugify wraps the pipeline in debugify / check-debugify
     dbgify_check_level();
     if dbgify_opts.enable run_debugify_pass();
     if root >= 0 run_module_pm(root);

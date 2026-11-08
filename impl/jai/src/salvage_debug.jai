@@ -282,6 +282,21 @@ diexpr_fold_constant_math :: (expr: Md_Id) -> Md_Id {
 
 // dbgr_location_ops (DbgVariableRecord::location_ops) is in pass_loop_rotate.jai
 
+// DIArgList::get: a new list is tracked by its arguments now (arglist_stamp orders findDbgUsers' arg-list users)
+arglist_stamps: Table(Md_Id, u64);
+di_arg_list_get :: (mds: [] Md_Id) -> Md_Id {
+    n := ir.mds.count;
+    m := di_get(.ARG_LIST, false, mds, .[]);
+    if ir.mds.count != n { table_set(*arglist_stamps, m, dbg_stamp_next); dbg_stamp_next += 1; }
+    return m;
+}
+arglist_stamp :: (m: Md_Id) -> u64 {
+    found, s := table_find(*arglist_stamps, m);
+    if found return s;
+    return cast(u64) m;   // parsed lists: creation order
+}
+arglist_restamp :: (m: Md_Id) { table_set(*arglist_stamps, m, dbg_stamp_next); dbg_stamp_next += 1; }
+
 // setRawLocation: the record is re-tracked (MetadataTracking gives it a new use-map index)
 dbgr_set_raw_location :: (r: u32, loc: Md_Id) {
     dbgr(r).loc = loc;
@@ -304,7 +319,7 @@ dbgr_replace_variable_location_op :: (r: u32, old: Value_Id, new: Value_Id, allo
     if !is_di(loc, .ARG_LIST) { dbgr_set_raw_location(r, nm); return; }
     mds: [..] Md_Id; mds.allocator = temp;
     for vals array_add(*mds, ifx it == old then nm else md_op(loc, cast(u32) it_index));
-    dbgr_set_raw_location(r, di_get(.ARG_LIST, false, mds, .[]));
+    dbgr_set_raw_location(r, di_arg_list_get(mds));
 }
 
 // DbgVariableRecord::addVariableLocationOps
@@ -315,7 +330,7 @@ dbgr_add_variable_location_ops :: (r: u32, new_values: [] Value_Id, new_expr: Md
     mds: [..] Md_Id; mds.allocator = temp;
     for vals array_add(*mds, md_value(it));
     for new_values array_add(*mds, md_value(it));
-    dbgr_set_raw_location(r, di_get(.ARG_LIST, false, mds, .[]));
+    dbgr_set_raw_location(r, di_arg_list_get(mds));
 }
 
 // DbgVariableRecord::setKillLocation
@@ -387,7 +402,7 @@ salvage_ops_for_gep :: (g: Value_Id, cur_loc_ops_in: u64, ops: *[..] u64, additi
     if !ok return NONE;
     if vars.count && !cur_loc_ops {
         // Opcodes.insert(begin, {DW_OP_LLVM_arg, 0})
-        array_insert_at(ops, 0, DW_OP_LLVM_ARG); array_insert_at(ops, 1, 0);
+        array_insert_at(ops, DW_OP_LLVM_ARG, 0); array_insert_at(ops, 0, 1);
         cur_loc_ops = 1;
     }
     for vars {

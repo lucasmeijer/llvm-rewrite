@@ -1334,7 +1334,7 @@ ic_fold_shifted_shift :: (inner: Value_Id, outer_sh_amt: u32, is_outer_shl: bool
         mask := ifx is_inner_shl then ap_low_bits_set(tw, tw - outer_sh_amt) else ap_high_bits_set(tw, tw - outer_sh_amt);
         a := icb_and(op(inner, 0), const_int_ap(sht, mask));
         if is_inst(a) {
-            inst_move_before(a, inner);
+            inst_move_before_dbg(a, inner);   // moveBefore: the records stay behind
             ic_take_name(a, inner);
         }
         return a;

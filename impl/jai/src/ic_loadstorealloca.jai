@@ -537,7 +537,7 @@ ic_combine_load_to_operation_type :: (load: Value_Id) -> Value_Id {
             if cast_is_noop(u) && is_ptr_or_ptr_vector(lt) == is_ptr_or_ptr_vector(dt) &&
                (inst(load).ord1 == 0 || is_supported_atomic_type(dt)) {
                 nl := ic_combine_load_to_new_type(load, dt);
-                replace_all_uses_with(u, nl);   // CastUser->replaceAllUsesWith (no worklist bookkeeping)
+                rauw_with_metadata(u, nl);   // CastUser->replaceAllUsesWith (no worklist bookkeeping)
                 ic_erase_inst(u);
                 return load;
             }
@@ -1054,7 +1054,7 @@ ic_merge_store_into_successor :: (si: Value_Id) -> bool {
         phi_add_incoming(pn, op(si, 0), inst_block(si));
         icb_set_insert_point(other);
         phi_add_incoming(pn, icb_bit_or_pointer_cast(merged_val, vtype(pn)), other_bb);
-        merged_val = ic_insert_new_inst_before(pn, block_first(dest));
+        merged_val = ic_insert_new_inst_before(pn, block_first(dest), true);   // BasicBlock::begin() has the head bit
         set_metadata(pn, 0, merged_loc);
     }
     pos := block_first_insertion_pt(dest);
@@ -1062,7 +1062,7 @@ ic_merge_store_into_successor :: (si: Value_Id) -> bool {
     set_op(nsi, 0, merged_val); set_op(nsi, 1, op(si, 1));
     copy_load_store_properties(nsi, si);
     if pos == NONE { ic_link_at_end(nsi, dest); wl_add(nsi); }
-    else ic_insert_new_inst_before(nsi, pos);
+    else ic_insert_new_inst_before(nsi, pos, true);
     set_metadata(nsi, 0, merged_loc);
     tags := get_aa_metadata(si);
     if aa_any(tags) set_aa_metadata(nsi, aa_merge(tags, get_aa_metadata(other)));

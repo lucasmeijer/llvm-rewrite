@@ -58,10 +58,11 @@ bdce_run :: (f: Value_Id) -> Preserved {
                 } else {
                     if is_constant_kind(vkind(src)) fatal("bdce: constant-folding a zext of a non-integer constant is not supported yet");
                     z = create_cast(.ZEXT, src, dst_ty);
-                    insert_before_named(z, i, vname(i));
+                    insert_at_position(z, inst_block(i), i, false);   // IRBuilder<> Builder(SE)
+                    if vname(i).count set_name(z, vname(i));
                     copy_debug_loc(z, i);
                 }
-                replace_all_uses_with(i, z);
+                rauw_with_metadata(i, z);
                 array_add(*wl, i);
                 changed = true;
                 continue;
@@ -78,7 +79,7 @@ bdce_run :: (f: Value_Id) -> Preserved {
                     else if o == .AND can = ap_is_subset_of(demanded, mask);
                     if can && i != op(i, 0) {
                         bdce_clear_assumptions_of_users(i, db);
-                        replace_all_uses_with(i, op(i, 0));
+                        rauw_with_metadata(i, op(i, 0));
                         array_add(*wl, i);
                         changed = true;
                         continue;
@@ -99,8 +100,8 @@ bdce_run :: (f: Value_Id) -> Preserved {
         }
     }
     k := wl.count;
-    while k > 0 { k -= 1; drop_all_references(wl[k]); }
-    for wl erase_inst(it);
+    while k > 0 { k -= 1; salvage_debug_info(wl[k]); drop_all_references(wl[k]); }
+    for wl erase_inst_with_metadata(it);
     if !changed return PRESERVE_ALL;
     return preserved_cfg();
 }

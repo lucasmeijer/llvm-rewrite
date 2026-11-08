@@ -319,14 +319,14 @@ ic_replace_use :: (u: Use_Id, v: Value_Id) {
     wl_handle_use_count_decrement(old);
 }
 // InsertNewInstBefore / InsertNewInstWith (the latter also copies the debug location of `pos`)
-ic_insert_new_inst_before :: (new: Value_Id, pos: Value_Id) -> Value_Id {
-    ic_link_before(new, pos);
+ic_insert_new_inst_before :: (new: Value_Id, pos: Value_Id, head := false) -> Value_Id {
+    ic_link_before(new, pos, head);
     wl_add(new);
     return new;
 }
-ic_insert_new_inst_with :: (new: Value_Id, pos: Value_Id) -> Value_Id {
+ic_insert_new_inst_with :: (new: Value_Id, pos: Value_Id, head := false) -> Value_Id {
     copy_debug_loc_or_clear(new, pos);
-    return ic_insert_new_inst_before(new, pos);
+    return ic_insert_new_inst_before(new, pos, head);
 }
 copy_debug_loc_or_clear :: (to: Value_Id, from: Value_Id) { set_metadata(to, 0, get_metadata(from, 0)); }
 
@@ -967,12 +967,14 @@ ic_run_worklist :: () -> bool {
             ic_take_name(result, i);
             parent := inst_block(i);
             pos := i;
+            head := false;   // getFirstInsertionPt / getFirstNonPHIIt return iterators with the head bit set
             if (inst_op(result) == .PHI) != (inst_op(i) == .PHI) {
                 if inst_op(i) == .PHI pos = block_first_insertion_pt(parent);
                 else pos = block_first_non_phi(parent);
+                head = true;
             }
             if pos == NONE ic_link_at_end(result, parent);
-            else ic_link_before(result, pos);
+            else ic_link_before(result, pos, head);
             if is_intrinsic_call(result, IID_ASSUME) ic_register_assumption(result);
             wl_push_users(result);
             wl_push(result);

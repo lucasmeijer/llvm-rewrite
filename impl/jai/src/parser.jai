@@ -611,14 +611,27 @@ add_numbered_global :: (id: u32, v: Value_Id) {
 
 // ValueAsMetadata::handleRAUW for parser placeholders: the ValueAsMetadata of `old` now wraps `new` (if `new`
 // already has one, both rows denote it; nodes are not re-uniqued)
+// ValueAsMetadata::handleRAUW. When `new` already has a ValueAsMetadata, LLVM moves the old one's users to it;
+// here the old row stays (records and DIArgLists keep their Md_Id) and becomes an alias of the new value's row,
+// so that a later RAUW or deletion of `new` updates it too (vam_aliases).
+vam_aliases: Table(Value_Id, [..] Md_Id);
 md_value_rauw :: (old: Value_Id, new: Value_Id) {
     k := *md_key; key_reset(k); key_u8(k, 1); key_u32(k, old);
     found, m := table_find(*ir.md_map, key_view(k));
     if !found return;
     table_remove(*ir.md_map, key_view(k));
     ir.mds[m].value = new;
+    moved: [..] Md_Id; moved.allocator = temp;
+    al := table_find_pointer(*vam_aliases, old);
+    if al { for al.* { ir.mds[it].value = new; array_add(*moved, it); } table_remove(*vam_aliases, old); }
     key_reset(k); key_u8(k, 1); key_u32(k, new);
     if !table_contains(*ir.md_map, key_view(k)) table_add(*ir.md_map, key_copy(k), m);
+    else array_add(*moved, m);
+    if moved.count {
+        nl := table_find_pointer(*vam_aliases, new);
+        if !nl { e: [..] Md_Id; nl = table_add(*vam_aliases, new, e); }
+        for moved array_add(nl, it);
+    }
 }
 
 resolve_fwd_global :: (fw: Value_Id, real: Value_Id) {

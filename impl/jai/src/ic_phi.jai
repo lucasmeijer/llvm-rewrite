@@ -149,11 +149,12 @@ ic_fold_integer_typed_phi :: (pn: Value_Id) -> bool {
             set_name(ci, tprint("%.ptr", vname(iv)));
             if is_inst(iv) {
                 pos := inst(iv).next;
-                if is_phi(iv) pos = block_first_insertion_pt(inst_block(iv));
-                ic_insert_new_inst_before(ci, pos);
+                head := false;
+                if is_phi(iv) { pos = block_first_insertion_pt(inst_block(iv)); head = true; }
+                ic_insert_new_inst_before(ci, pos, head);
             } else {
                 entry := fn_entry(inst_fn(pn));
-                ic_insert_new_inst_before(ci, block_first_insertion_pt(entry));
+                ic_insert_new_inst_before(ci, block_first_insertion_pt(entry), true);
             }
             array_add(*casts, iv); array_add(*casts, ci);
         }
@@ -719,7 +720,7 @@ ic_simplify_using_control_flow :: (pn: Value_Id) -> Value_Id {
     if invert == 0 return cond;
     ip := block_first_insertion_pt(bb);
     if ip != NONE {
-        irb_set_at(*ic.b, bb, ip, false);
+        irb_set_at(*ic.b, bb, ip, true);
         return icb_not(cond);
     }
     return NONE;
@@ -749,7 +750,7 @@ ic_fold_dependent_ivs :: (pn: Value_Id) -> Value_Id {
     is_bo := ic_is_any_binop(iv_next);
     identity := ifx is_bo then cf_binop_identity(inst_op(iv_next), vtype(iv2_start), false) else const_null_value(vtype(iv2_start));
     if iv2_start != identity return NONE;
-    irb_set_at(*ic.b, bb, block_first_insertion_pt(bb), false);
+    irb_set_at(*ic.b, bb, block_first_insertion_pt(bb), true);
     if !is_bo {
         flags := inst(iv_next).flags & cast(u32) (F_INBOUNDS | F_NUSW | F_GEP_NUW);
         if is_const(start) && is_const(iv2) fatal("internal: foldDependentIVs constant GEP");

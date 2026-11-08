@@ -115,7 +115,7 @@ ic_scalarize_phi :: (ei: Value_Id, pn: Value_Id) -> Value_Id {
             } else {
                 pos := block_first_insertion_pt(in_bb);
                 if pos == NONE fatal("internal: scalarizePHI: no insertion point");
-                scalar = ic_insert_new_inst_with(nei, pos);
+                scalar = ic_insert_new_inst_with(nei, pos, true);
             }
         }
         array_add(*seen_bb, in_bb); array_add(*seen_val, scalar);
@@ -350,7 +350,7 @@ ic_visit_extract_element :: (ei: Value_Id) -> Value_Id {
                     r := ic_simplify_demanded_vector_elts(src, de, *poison, 0, true);
                     if r != NONE && r != src {
                         wl_add_value(src);
-                        replace_all_uses_with(src, r);
+                        rauw_with_metadata(src, r);
                         return ei;
                     }
                 }
@@ -414,7 +414,7 @@ replace_extract_elements :: (ins: Value_Id, ext: Value_Id) -> bool {
         ic_reinsert_name(wide);
     } else {
         pos := block_first_insertion_pt(inst_block(ext));
-        ic_insert_new_inst_with(wide, pos);
+        ic_insert_new_inst_with(wide, pos, true);
     }
     if ext_inst != NONE set_metadata(wide, 0, get_metadata(ext_inst, 0));
     else set_metadata(wide, 0, NONE);   // DebugLoc::getCompilerGenerated()
@@ -575,7 +575,7 @@ ic_fold_aggregate_construction_into_aggregate_reuse :: (orig: Value_Id) -> Value
     }
     saved := ic.b;
     defer ic.b = saved;
-    irb_set_at(*ic.b, use_bb, block_first_non_phi(use_bb), false);
+    irb_set_at(*ic.b, use_bb, block_first_non_phi(use_bb), true);
     pn := icb_phi(agg_ty, cast(u32) preds.count, tprint("%.merged", vname(orig)));
     for p: preds {
         v: Value_Id = NONE;

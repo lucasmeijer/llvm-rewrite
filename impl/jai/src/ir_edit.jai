@@ -405,11 +405,18 @@ create_block :: (f: Value_Id, name: string, before: Value_Id = NONE) -> Value_Id
 }
 
 // BasicBlock::splitBasicBlock(I, Name): instructions from `at` to the end move to a new block placed after `old`,
-// `old` gets an unconditional branch to it, successor phis are rewired.
-split_basic_block :: (old: Value_Id, at: Value_Id, name: string) -> Value_Id {
+// `old` gets an unconditional branch to it, successor phis are rewired. Without the iterator's head bit (an
+// Instruction* split point) the debug records in front of `at` stay in `old` (spliceDebugInfo leaves them
+// trailing; the new branch picks them up).
+split_basic_block :: (old: Value_Id, at: Value_Id, name: string, head := false) -> Value_Id {
     f := block(old).parent;
     nb := create_block(f, name, block(old).next);
     loc := get_metadata(at, 0);
+    left: u32 = 0;
+    if !head && inst(at).records {
+        left = inst(at).records;
+        inst(at).records = 0;
+    }
     // splice [at, end) into nb
     i := at;
     while i != NONE {
@@ -420,6 +427,7 @@ split_basic_block :: (old: Value_Id, at: Value_Id, name: string) -> Value_Id {
     }
     br := create_br(nb);
     block_append_inst(old, br);
+    if left attach_records_before(br, left);
     if loc != NONE set_metadata(br, 0, loc);
     block_replace_successors_phi_uses_with(nb, old, nb);
     return nb;

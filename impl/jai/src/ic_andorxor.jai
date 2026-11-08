@@ -3594,13 +3594,13 @@ ic_set_insert_point_after_def :: (i: Value_Id) {
         b := inst(i).parent;
         pt := block_first_insertion_pt(b);
         if pt == NONE fatal("internal: getInsertionPointAfterDef: no insertion point");
-        icb_set_insert_point(pt);
+        irb_set_at(*ic.b, b, pt, true);
         return;
     }
     if o == .INVOKE || o == .CALLBR fatal("instcombine: getInsertionPointAfterDef of an invoke/callbr is not supported yet");
     nx := inst(i).next;
     if nx == NONE fatal("internal: getInsertionPointAfterDef: no insertion point");
-    icb_set_insert_point(nx);
+    irb_set_at(*ic.b, inst(i).parent, nx, true);   // the iterator after the def has the head bit set
 }
 
 // freelyInvert
