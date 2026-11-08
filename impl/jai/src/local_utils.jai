@@ -523,10 +523,12 @@ create_call_matching_invoke :: (ii: Value_Id) -> Value_Id {
     m := prof_md(c);
     if m != NONE && md_is_node(m) && md_nops(m) >= 2 {
         s := md_op(m, 0);
-        if s != NONE && ir.mds[s].kind == .STRING && (ir.mds[s].str == "branch_weights" || ir.mds[s].str == "VP") {
-            if ir.mds[s].str == "VP" fatal("changeToCall with value-profile metadata is not supported yet");
+        is_bw := s != NONE && ir.mds[s].kind == .STRING && ir.mds[s].str == "branch_weights";
+        is_vp := s != NONE && ir.mds[s].kind == .STRING && ir.mds[s].str == "VP" && md_nops(m) > 3;
+        if is_bw || is_vp {
             total: u64 = 0;
-            for prof_weights_of_md(m) total += it;
+            if is_vp total = ap_zext_value(const_ap(md_const_int_op(m, 2)));
+            else for prof_weights_of_md(m) total += it;
             if total != (total & 0xFFFF_FFFF) set_metadata(c, md_kind(MD_PROF_NAME), NONE);
             else { w := u32.[cast(u32) total]; prof_set_branch_weights(c, w, false, false); }
         }
