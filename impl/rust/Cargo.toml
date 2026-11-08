@@ -1,0 +1,19 @@
+[package]
+name = "llvm-rewrite"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "opt"
+path = "src/bin/opt.rs"
+
+[[bin]]
+name = "llc"
+path = "src/bin/llc.rs"
+
+[[bin]]
+name = "llvm-link"
+path = "src/bin/llvm-link.rs"
+
+[profile.release]
+debug = 1

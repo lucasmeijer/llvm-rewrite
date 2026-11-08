@@ -1,0 +1,954 @@
+# Skipped while importing llvm/test/Transforms/LoopVectorize (llvmorg-23.1.5)
+
+468 of 1355 files imported. Regenerate with `./harness/run import-llvm Transforms/LoopVectorize`.
+
+- `aarch64-predication.ll`: in a AArch64 target directory
+- `aarch64-unroll.ll`: in a AArch64 target directory
+- `aggressive-interleaving.ll`: in a AArch64 target directory
+- `alias-mask-uniforms.ll`: in a AArch64 target directory
+- `alias-mask.ll`: in a AArch64 target directory
+- `arbitrary-induction-step.ll`: in a AArch64 target directory
+- `arith-costs.ll`: in a AArch64 target directory
+- `arith-fp-frem-costs.ll`: in a AArch64 target directory
+- `arm64-unroll.ll`: in a AArch64 target directory
+- `backedge-overflow.ll`: in a AArch64 target directory
+- `blend-costs.ll`: in a AArch64 target directory
+- `bounded-load.ll`: in a AArch64 target directory
+- `bug165359.ll`: in a AArch64 target directory
+- `call-costs.ll`: in a AArch64 target directory
+- `check-prof-info.ll`: in a AArch64 target directory
+- `clamped-trip-count.ll`: in a AArch64 target directory
+- `clmul.ll`: in a AArch64 target directory
+- `cmp_cost.ll`: in a AArch64 target directory
+- `conditional-branches-cost.ll`: in a AArch64 target directory
+- `conditional-scalar-assignment-fold-tail.ll`: in a AArch64 target directory
+- `conditional-scalar-assignment.ll`: in a AArch64 target directory
+- `cost-no-valid-vplans-built.ll`: in a AArch64 target directory
+- `deterministic-type-shrinkage.ll`: in a AArch64 target directory
+- `discarded-interleave-group.ll`: in a AArch64 target directory
+- `divs-with-scalable-vfs.ll`: in a AArch64 target directory
+- `drop-poison-generating-flags.ll`: in a AArch64 target directory
+- `early_exit_cost.ll`: in a AArch64 target directory
+- `early_exit_costs.ll`: in a AArch64 target directory
+- `early_exit_with_stores.ll`: in a AArch64 target directory
+- `eliminate-tail-predication.ll`: in a AArch64 target directory
+- `epilog-iv-live-outs.ll`: in a AArch64 target directory
+- `epilog-iv-select-cmp.ll`: in a AArch64 target directory
+- `epilog-vectorization-factors.ll`: in a AArch64 target directory
+- `epilog-vectorization-widen-inductions.ll`: in a AArch64 target directory
+- `epilogue-vectorization-fix-scalar-resume-values.ll`: in a AArch64 target directory
+- `expensive-alias-masking.ll`: in a AArch64 target directory
+- `extend-vectorization-factor-for-unprofitable-memops.ll`: in a AArch64 target directory
+- `extractvalue-no-scalarization-required.ll`: in a AArch64 target directory
+- `f128-fmuladd-reduction.ll`: in a AArch64 target directory
+- `find-last-iv-sinkable-expr-epilogue.ll`: in a AArch64 target directory
+- `findlast-epilogue-loop.ll`: in a AArch64 target directory
+- `first-order-recurrence-fold-tail.ll`: in a AArch64 target directory
+- `first-order-recurrence.ll`: in a AArch64 target directory
+- `fixed-order-recurrence.ll`: in a AArch64 target directory
+- `fixed-wide-lane-mask.ll`: in a AArch64 target directory
+- `fmax-without-fast-math-flags.ll`: in a AArch64 target directory
+- `fmin-without-fast-math-flags.ll`: in a AArch64 target directory
+- `fminimumnum.ll`: in a AArch64 target directory
+- `fold-tail-low-trip-count.ll`: in a AArch64 target directory
+- `force-scalable-vectorization-always.ll`: in a AArch64 target directory
+- `force-target-instruction-cost.ll`: in a AArch64 target directory
+- `fully-unrolled-cost.ll`: in a AArch64 target directory
+- `gather-cost.ll`: in a AArch64 target directory
+- `gather-do-not-vectorize-addressing.ll`: in a AArch64 target directory
+- `hoist-predicated-loads-scalable.ll`: in a AArch64 target directory
+- `i1-reg-usage.ll`: in a AArch64 target directory
+- `induction-costs-sve.ll`: in a AArch64 target directory
+- `induction-costs.ll`: in a AArch64 target directory
+- `induction-trunc.ll`: in a AArch64 target directory
+- `indvar-overflow-check-scalable-tc.ll`: in a AArch64 target directory
+- `interleave-allocsize-not-equal-typesize.ll`: in a AArch64 target directory
+- `interleave-with-gaps.ll`: in a AArch64 target directory
+- `interleave-with-runtime-checks.ll`: in a AArch64 target directory
+- `interleave_count_for_estimated_tc.ll`: in a AArch64 target directory
+- `interleave_count_for_known_tc.ll`: in a AArch64 target directory
+- `interleaved-store-of-first-order-recurrence.ll`: in a AArch64 target directory
+- `interleaved-vs-scalar.ll`: in a AArch64 target directory
+- `interleaved_cost.ll`: in a AArch64 target directory
+- `interleaving-load-store.ll`: in a AArch64 target directory
+- `interleaving-reduction.ll`: in a AArch64 target directory
+- `intrinsiccost.ll`: in a AArch64 target directory
+- `invalid-costs.ll`: in a AArch64 target directory
+- `invariant-replicate-region.ll`: in a AArch64 target directory
+- `licm-calls.ll`: in a AArch64 target directory
+- `load-cast-context.ll`: in a AArch64 target directory
+- `loop-vectorization-factors.ll`: in a AArch64 target directory
+- `loopvectorize_pr33804_double.ll`: in a AArch64 target directory
+- `low_trip_count_predicates.ll`: in a AArch64 target directory
+- `low_trip_memcheck_cost.ll`: in a AArch64 target directory
+- `masked-call-scalarize.ll`: in a AArch64 target directory
+- `masked-call.ll`: in a AArch64 target directory
+- `masked-op-cost.ll`: in a AArch64 target directory
+- `masked-store-with-profile-info.ll`: in a AArch64 target directory
+- `masked_ldst_sme.ll`: in a AArch64 target directory
+- `max-vf-for-interleaved.ll`: in a AArch64 target directory
+- `maxbandwidth-regpressure.ll`: in a AArch64 target directory
+- `maximize-bandwidth-invalidate.ll`: in a AArch64 target directory
+- `mul-simplification.ll`: in a AArch64 target directory
+- `multiple-result-intrinsics.ll`: in a AArch64 target directory
+- `neon-gather-cost.ll`: in a AArch64 target directory
+- `neon-inloop-reductions.ll`: in a AArch64 target directory
+- `neoverse-epilogue-vect.ll`: in a AArch64 target directory
+- `no_vector_instructions.ll`: in a AArch64 target directory
+- `nontemporal-load-store.ll`: in a AArch64 target directory
+- `optsize_minsize.ll`: in a AArch64 target directory
+- `ordered-reduction-with-invariant-stores.ll`: in a AArch64 target directory
+- `outer_loop_prefer_scalable.ll`: in a AArch64 target directory
+- `outer_loop_test1_no_explicit_vect_width.ll`: in a AArch64 target directory
+- `partial-reduce-add-sdot-i16-i32.ll`: in a AArch64 target directory
+- `partial-reduce-add-sdot-i8-i16.ll`: in a AArch64 target directory
+- `partial-reduce-chained.ll`: in a AArch64 target directory
+- `partial-reduce-constant-ops.ll`: in a AArch64 target directory
+- `partial-reduce-costs.ll`: in a AArch64 target directory
+- `partial-reduce-dot-product-epilogue.ll`: in a AArch64 target directory
+- `partial-reduce-dot-product-mixed.ll`: in a AArch64 target directory
+- `partial-reduce-dot-product-neon.ll`: in a AArch64 target directory
+- `partial-reduce-dot-product.ll`: in a AArch64 target directory
+- `partial-reduce-extends-shared-with-reduce.ll`: in a AArch64 target directory
+- `partial-reduce-fdot-product.ll`: in a AArch64 target directory
+- `partial-reduce-incomplete-chains.ll`: in a AArch64 target directory
+- `partial-reduce-interleave.ll`: in a AArch64 target directory
+- `partial-reduce-no-dotprod.ll`: in a AArch64 target directory
+- `partial-reduce-replicate-extends.ll`: in a AArch64 target directory
+- `partial-reduce-sub-epilogue-vec.ll`: in a AArch64 target directory
+- `partial-reduce-sub-sdot.ll`: in a AArch64 target directory
+- `partial-reduce-sub.ll`: in a AArch64 target directory
+- `partial-reduce-usabs.ll`: in a AArch64 target directory
+- `partial-reduce-with-invariant-stores.ll`: in a AArch64 target directory
+- `partial-reduce-with-predicate-epilogue.ll`: in a AArch64 target directory
+- `partial-reduce-with-predicate.ll`: in a AArch64 target directory
+- `partial-reduce.ll`: in a AArch64 target directory
+- `pr151664-cost-hoisted-vector-scalable.ll`: in a AArch64 target directory
+- `pr162009.ll`: in a AArch64 target directory
+- `pr31900.ll`: in a AArch64 target directory
+- `pr33053.ll`: in a AArch64 target directory
+- `pr36032.ll`: in a AArch64 target directory
+- `pr56627.ll`: in a AArch64 target directory
+- `pr60831-sve-inv-store-crash.ll`: in a AArch64 target directory
+- `pr73894.ll`: in a AArch64 target directory
+- `predicated-costs.ll`: in a AArch64 target directory
+- `predication_costs.ll`: in a AArch64 target directory
+- `prefer-fixed-if-equal-to-scalable.ll`: in a AArch64 target directory
+- `reduction-cost.ll`: in a AArch64 target directory
+- `reduction-recurrence-costs-sve.ll`: in a AArch64 target directory
+- `reduction-small-size.ll`: in a AArch64 target directory
+- `reg-usage.ll`: in a AArch64 target directory
+- `replicating-load-store-costs-apple.ll`: in a AArch64 target directory
+- `replicating-load-store-costs.ll`: in a AArch64 target directory
+- `reverse-load-scatter.ll`: in a AArch64 target directory
+- `runtime-check-size-based-threshold.ll`: in a AArch64 target directory
+- `runtime-check-trip-count-decisions.ll`: in a AArch64 target directory
+- `scalable-alloca.ll`: in a AArch64 target directory
+- `scalable-avoid-scalarization.ll`: in a AArch64 target directory
+- `scalable-call.ll`: in a AArch64 target directory
+- `scalable-fp-ext-trunc-illegal-type.ll`: in a AArch64 target directory
+- `scalable-predicate-instruction.ll`: in a AArch64 target directory
+- `scalable-reduction-inloop-cond.ll`: in a AArch64 target directory
+- `scalable-reductions-tf.ll`: in a AArch64 target directory
+- `scalable-reductions.ll`: in a AArch64 target directory
+- `scalable-strict-fadd.ll`: in a AArch64 target directory
+- `scalable-struct-return.ll`: in a AArch64 target directory
+- `scalable-vectorization-cost-tuning.ll`: in a AArch64 target directory
+- `scalable-vectorization.ll`: in a AArch64 target directory
+- `scalable-vf-hint.ll`: in a AArch64 target directory
+- `scalar-steps-cost.ll`: in a AArch64 target directory
+- `scalar_interleave.ll`: in a AArch64 target directory
+- `scalarize-store-with-predication.ll`: in a AArch64 target directory
+- `sdiv-pow2.ll`: in a AArch64 target directory
+- `select-best-vf-tripcount.ll`: in a AArch64 target directory
+- `select-costs.ll`: in a AArch64 target directory
+- `select-index.ll`: in a AArch64 target directory
+- `simple_early_exit.ll`: in a AArch64 target directory
+- `single-early-exit-interleave.ll`: in a AArch64 target directory
+- `smallest-and-widest-types.ll`: in a AArch64 target directory
+- `sme-vectorize.ll`: in a AArch64 target directory
+- `splice-cost.ll`: in a AArch64 target directory
+- `store-costs-sve.ll`: in a AArch64 target directory
+- `streaming-compatible-sve-no-maximize-bandwidth.ll`: in a AArch64 target directory
+- `streaming-vectorization.ll`: in a AArch64 target directory
+- `strict-fadd-cost.ll`: in a AArch64 target directory
+- `strict-fadd-vf1.ll`: in a AArch64 target directory
+- `strict-fadd.ll`: in a AArch64 target directory
+- `struct-return-cost.ll`: in a AArch64 target directory
+- `sve-basic-vec.ll`: in a AArch64 target directory
+- `sve-cond-inv-loads.ll`: in a AArch64 target directory
+- `sve-epilog-vect-inloop-reductions.ll`: in a AArch64 target directory
+- `sve-epilog-vect-reductions.ll`: in a AArch64 target directory
+- `sve-epilog-vect-strict-reductions.ll`: in a AArch64 target directory
+- `sve-epilog-vect-vscale-tune.ll`: in a AArch64 target directory
+- `sve-epilog-vect.ll`: in a AArch64 target directory
+- `sve-epilog-vscale-fixed.ll`: in a AArch64 target directory
+- `sve-extract-last-veclane.ll`: in a AArch64 target directory
+- `sve-fixed-width-inorder-core.ll`: in a AArch64 target directory
+- `sve-fneg.ll`: in a AArch64 target directory
+- `sve-gather-scatter-cost.ll`: in a AArch64 target directory
+- `sve-gather-scatter.ll`: in a AArch64 target directory
+- `sve-illegal-type.ll`: in a AArch64 target directory
+- `sve-inductions-unusual-types.ll`: in a AArch64 target directory
+- `sve-inductions.ll`: in a AArch64 target directory
+- `sve-interleave-low-vf-cost.ll`: in a AArch64 target directory
+- `sve-interleaved-access-low-vf.ll`: in a AArch64 target directory
+- `sve-interleaved-accesses-cost.ll`: in a AArch64 target directory
+- `sve-interleaved-accesses.ll`: in a AArch64 target directory
+- `sve-interleaved-masked-accesses.ll`: in a AArch64 target directory
+- `sve-inv-loads.ll`: in a AArch64 target directory
+- `sve-inv-store.ll`: in a AArch64 target directory
+- `sve-invalid-costs.ll`: in a AArch64 target directory
+- `sve-large-strides.ll`: in a AArch64 target directory
+- `sve-live-out-pointer-induction.ll`: in a AArch64 target directory
+- `sve-low-trip-count.ll`: in a AArch64 target directory
+- `sve-masked-loadstore.ll`: in a AArch64 target directory
+- `sve-multiexit.ll`: in a AArch64 target directory
+- `sve-predicated-costs.ll`: in a AArch64 target directory
+- `sve-runtime-check-size-based-threshold.ll`: in a AArch64 target directory
+- `sve-scalable-load-in-loop.ll`: in a AArch64 target directory
+- `sve-select-cmp.ll`: in a AArch64 target directory
+- `sve-strict-fadd-cost.ll`: in a AArch64 target directory
+- `sve-tail-folding-cost.ll`: in a AArch64 target directory
+- `sve-tail-folding-option.ll`: in a AArch64 target directory
+- `sve-tail-folding-optsize.ll`: in a AArch64 target directory
+- `sve-tail-folding-overflow-checks.ll`: in a AArch64 target directory
+- `sve-tail-folding-reductions.ll`: in a AArch64 target directory
+- `sve-tail-folding-unroll.ll`: in a AArch64 target directory
+- `sve-tail-folding.ll`: in a AArch64 target directory
+- `sve-type-conv.ll`: in a AArch64 target directory
+- `sve-vector-reverse-mask4.ll`: in a AArch64 target directory
+- `sve-vector-reverse.ll`: in a AArch64 target directory
+- `sve-vfabi.ll`: in a AArch64 target directory
+- `sve-vscale-based-trip-counts.ll`: in a AArch64 target directory
+- `sve-wide-lane-mask.ll`: in a AArch64 target directory
+- `sve-widen-extractvalue.ll`: in a AArch64 target directory
+- `sve-widen-gep.ll`: in a AArch64 target directory
+- `sve-widen-phi.ll`: in a AArch64 target directory
+- `sve2-histcnt-epilogue.ll`: in a AArch64 target directory
+- `sve2-histcnt-no-scalar-interleave.ll`: in a AArch64 target directory
+- `sve2-histcnt-outerloop-scevaddrec.ll`: in a AArch64 target directory
+- `sve2-histcnt-too-many-deps.ll`: in a AArch64 target directory
+- `sve2-histcnt.ll`: in a AArch64 target directory
+- `synthesize-mask-for-call.ll`: in a AArch64 target directory
+- `tail-fold-uniform-memops.ll`: in a AArch64 target directory
+- `tail-folding-counting-down.ll`: in a AArch64 target directory
+- `tail-folding-styles.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-fold-tail.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-group-requires-scalar-epilogue.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-constant-ops.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-cost.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-derived-ivs.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-epilogue-vec.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-metadata.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-multi-block.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-remove-loop-region.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-scalable.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-unroll.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-with-live-outs.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-with-wide-ops-and-casts.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-with-wide-ops-chained.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory-with-wide-ops.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-to-widen-memory.ll`: in a AArch64 target directory
+- `transform-narrow-interleave-vscale-x-UF-step.ll`: in a AArch64 target directory
+- `type-shrinkage-insertelt.ll`: in a AArch64 target directory
+- `type-shrinkage-zext-costs.ll`: in a AArch64 target directory
+- `uniform-args-call-variants.ll`: in a AArch64 target directory
+- `unsafe-vf-hint-remark.ll`: in a AArch64 target directory
+- `veclib-calls-libsystem-darwin.ll`: in a AArch64 target directory
+- `veclib-function-calls.ll`: in a AArch64 target directory
+- `veclib-intrinsic-calls.ll`: in a AArch64 target directory
+- `vector-call-linear-args-no-wide-iv.ll`: in a AArch64 target directory
+- `vector-call-linear-args.ll`: in a AArch64 target directory
+- `vector-loop-backedge-elimination-epilogue.ll`: in a AArch64 target directory
+- `vector-reverse-mask4.ll`: in a AArch64 target directory
+- `vector-reverse.ll`: in a AArch64 target directory
+- `vplan-native-outer-loop-wide-type.ll`: in a AArch64 target directory
+- `widen-call-attrs-masked.ll`: in a AArch64 target directory
+- `widen-gep-all-indices-invariant.ll`: in a AArch64 target directory
+- `wider-VF-for-callinst.ll`: in a AArch64 target directory
+- `buffer-fat-pointer.ll`: in a AMDGPU target directory
+- `divergent-runtime-check.ll`: in a AMDGPU target directory
+- `packed-fp32.ll`: in a AMDGPU target directory
+- `packed-fp64.ll`: in a AMDGPU target directory
+- `packed-math.ll`: in a AMDGPU target directory
+- `unroll-in-loop-vectorizer.ll`: in a AMDGPU target directory
+- `active-lane-mask.ll`: in a ARM target directory
+- `arm-ieee-vectorize.ll`: in a ARM target directory
+- `arm-unroll.ll`: in a ARM target directory
+- `gather-cost.ll`: in a ARM target directory
+- `gcc-examples.ll`: in a ARM target directory
+- `interleaved_cost.ll`: in a ARM target directory
+- `mve-gather-scatter-tailpred.ll`: in a ARM target directory
+- `mve-hoist-runtime-checks.ll`: in a ARM target directory
+- `mve-icmpcost.ll`: in a ARM target directory
+- `mve-interleaved-cost.ll`: in a ARM target directory
+- `mve-known-trip-count.ll`: in a ARM target directory
+- `mve-maskedldst.ll`: in a ARM target directory
+- `mve-multiexit.ll`: in a ARM target directory
+- `mve-predstorecost.ll`: in a ARM target directory
+- `mve-qabs.ll`: in a ARM target directory
+- `mve-recurrence.ll`: in a ARM target directory
+- `mve-reduction-predselect.ll`: in a ARM target directory
+- `mve-reduction-types.ll`: in a ARM target directory
+- `mve-reductions-interleave.ll`: in a ARM target directory
+- `mve-reductions.ll`: in a ARM target directory
+- `mve-reg-pressure-spills.ll`: in a ARM target directory
+- `mve-reg-pressure-vmla.ll`: in a ARM target directory
+- `mve-saddsatcost.ll`: in a ARM target directory
+- `mve-selectandorcost.ll`: in a ARM target directory
+- `mve-shiftcost.ll`: in a ARM target directory
+- `mve-vldn.ll`: in a ARM target directory
+- `optsize_minsize.ll`: in a ARM target directory
+- `pointer_iv.ll`: in a ARM target directory
+- `prefer-tail-loop-folding.ll`: in a ARM target directory
+- `replicating-load-store-costs.ll`: in a ARM target directory
+- `scalar-block-cost.ll`: in a ARM target directory
+- `sphinx.ll`: in a ARM target directory
+- `tail-fold-multiple-icmps.ll`: in a ARM target directory
+- `tail-folding-allowed.ll`: in a ARM target directory
+- `tail-folding-counting-down.ll`: in a ARM target directory
+- `tail-folding-loop-hint.ll`: in a ARM target directory
+- `tail-folding-not-allowed.ll`: in a ARM target directory
+- `tail-folding-prefer-flag.ll`: in a ARM target directory
+- `tail-folding-reduces-vf.ll`: in a ARM target directory
+- `tail-folding-reductions-allowed.ll`: in a ARM target directory
+- `tail-folding-scalar-epilogue-fallback.ll`: in a ARM target directory
+- `vector_cast.ll`: in a ARM target directory
+- `width-detect.ll`: in a ARM target directory
+- `invalidate-cm-after-invalidating-interleavegroups.ll`: in a Hexagon target directory
+- `maximum-vf-crash.ll`: in a Hexagon target directory
+- `minimum-vf.ll`: in a Hexagon target directory
+- `defaults.ll`: in a LoongArch target directory
+- `loongarch-interleaved.ll`: in a LoongArch target directory
+- `reg-usage.ll`: in a LoongArch target directory
+- `exit-branch-cost.ll`: in a PowerPC target directory
+- `interleave_IC.ll`: in a PowerPC target directory
+- `interleaved-pointer-runtime-check-unprofitable.ll`: in a PowerPC target directory
+- `large-loop-rdx.ll`: in a PowerPC target directory
+- `massv-altivec.ll`: in a PowerPC target directory
+- `massv-calls.ll`: in a PowerPC target directory
+- `massv-nobuiltin.ll`: in a PowerPC target directory
+- `massv-unsupported.ll`: in a PowerPC target directory
+- `optimal-epilog-vectorization-profitability.ll`: in a PowerPC target directory
+- `optimal-epilog-vectorization.ll`: in a PowerPC target directory
+- `pr30990.ll`: in a PowerPC target directory
+- `pr41179.ll`: in a PowerPC target directory
+- `predcost.ll`: in a PowerPC target directory
+- `reg-usage.ll`: in a PowerPC target directory
+- `small-loop-rdx.ll`: in a PowerPC target directory
+- `stride-vectorization.ll`: in a PowerPC target directory
+- `vectorize-bswap.ll`: in a PowerPC target directory
+- `vectorize-force-tail-with-evl.ll`: in a PowerPC target directory
+- `vectorize-only-for-real.ll`: in a PowerPC target directory
+- `vplan-scalarivsext-crash.ll`: in a PowerPC target directory
+- `vsx-tsvc-s173.ll`: in a PowerPC target directory
+- `widened-massv-call.ll`: in a PowerPC target directory
+- `widened-massv-vfabi-attr.ll`: in a PowerPC target directory
+- `alias-mask-force-evl.ll`: in a RISCV target directory
+- `bf16.ll`: in a RISCV target directory
+- `blend-any-of-reduction-cost.ll`: in a RISCV target directory
+- `blocks-with-dead-instructions.ll`: in a RISCV target directory
+- `bounded-load.ll`: in a RISCV target directory
+- `clmul.ll`: in a RISCV target directory
+- `conditional-scalar-assignment-fold-tail.ll`: in a RISCV target directory
+- `conditional-scalar-assignment.ll`: in a RISCV target directory
+- `cse.ll`: in a RISCV target directory
+- `dbg-tail-folding-by-evl.ll`: in a RISCV target directory
+- `dead-ops-cost.ll`: in a RISCV target directory
+- `defaults.ll`: in a RISCV target directory
+- `divrem.ll`: in a RISCV target directory
+- `early-exit-live-out.ll`: in a RISCV target directory
+- `early_exit_with_stores.ll`: in a RISCV target directory
+- `evl-compatible-loops.ll`: in a RISCV target directory
+- `f16.ll`: in a RISCV target directory
+- `first-order-recurrence-scalable-vf1.ll`: in a RISCV target directory
+- `fminimumnum.ll`: in a RISCV target directory
+- `fold-tail-low-trip-count.ll`: in a RISCV target directory
+- `force-vect-msg.ll`: in a RISCV target directory
+- `gather-scatter-cost.ll`: in a RISCV target directory
+- `i128-trip-count-evl.ll`: in a RISCV target directory
+- `illegal-type.ll`: in a RISCV target directory
+- `induction-costs.ll`: in a RISCV target directory
+- `indvar-overflow-check-scalable-tc.ll`: in a RISCV target directory
+- `inloop-reduction.ll`: in a RISCV target directory
+- `interleaved-accesses-i64-rv32.ll`: in a RISCV target directory
+- `interleaved-accesses-zve32x.ll`: in a RISCV target directory
+- `interleaved-accesses.ll`: in a RISCV target directory
+- `interleaved-cost.ll`: in a RISCV target directory
+- `interleaved-masked-access.ll`: in a RISCV target directory
+- `interleaved-store-with-gap.ll`: in a RISCV target directory
+- `iv-select-cmp.ll`: in a RISCV target directory
+- `live-out.ll`: in a RISCV target directory
+- `lmul.ll`: in a RISCV target directory
+- `low-trip-count.ll`: in a RISCV target directory
+- `mask-index-type.ll`: in a RISCV target directory
+- `masked_gather_scatter.ll`: in a RISCV target directory
+- `only-compute-cost-for-vplan-vfs.ll`: in a RISCV target directory
+- `ordered-reduction.ll`: in a RISCV target directory
+- `partial-reduce-dot-product.ll`: in a RISCV target directory
+- `pointer-induction-rv32.ll`: in a RISCV target directory
+- `pointer-induction.ll`: in a RISCV target directory
+- `pr154103.ll`: in a RISCV target directory
+- `pr87378-vpinstruction-or-drop-poison-generating-flags.ll`: in a RISCV target directory
+- `pr88802.ll`: in a RISCV target directory
+- `predicated-costs.ll`: in a RISCV target directory
+- `predicated-reverse-store.ll`: in a RISCV target directory
+- `preserve-dbg-loc.ll`: in a RISCV target directory
+- `reductions.ll`: in a RISCV target directory
+- `reg-usage-bf16.ll`: in a RISCV target directory
+- `reg-usage-f16.ll`: in a RISCV target directory
+- `reg-usage-maxbandwidth.ll`: in a RISCV target directory
+- `reg-usage-prune-vf.ll`: in a RISCV target directory
+- `reg-usage.ll`: in a RISCV target directory
+- `remark-reductions.ll`: in a RISCV target directory
+- `reverse-load-scatter.ll`: in a RISCV target directory
+- `riscv-interleaved.ll`: in a RISCV target directory
+- `riscv-unroll.ll`: in a RISCV target directory
+- `riscv-vector-reverse.ll`: in a RISCV target directory
+- `runtime-check-dependent-on-stride.ll`: in a RISCV target directory
+- `safe-dep-distance.ll`: in a RISCV target directory
+- `scalable-basics.ll`: in a RISCV target directory
+- `scalable-tailfold.ll`: in a RISCV target directory
+- `scalable-vf-hint.ll`: in a RISCV target directory
+- `select-cmp-reduction.ll`: in a RISCV target directory
+- `select-invariant-cond-cost.ll`: in a RISCV target directory
+- `short-trip-count.ll`: in a RISCV target directory
+- `sink-to-early-exit.ll`: in a RISCV target directory
+- `stepvector-cost.ll`: in a RISCV target directory
+- `strided-access-wide-stride.ll`: in a RISCV target directory
+- `strided-accesses-i64-rv32.ll`: in a RISCV target directory
+- `strided-accesses-narrow-iv.ll`: in a RISCV target directory
+- `strided-accesses-unroll.ll`: in a RISCV target directory
+- `strided-accesses.ll`: in a RISCV target directory
+- `tail-folding-bin-unary-ops-args.ll`: in a RISCV target directory
+- `tail-folding-call-intrinsics.ll`: in a RISCV target directory
+- `tail-folding-cast-intrinsics.ll`: in a RISCV target directory
+- `tail-folding-complex-mask.ll`: in a RISCV target directory
+- `tail-folding-cond-reduction.ll`: in a RISCV target directory
+- `tail-folding-cost.ll`: in a RISCV target directory
+- `tail-folding-div.ll`: in a RISCV target directory
+- `tail-folding-fixed-order-recurrence.ll`: in a RISCV target directory
+- `tail-folding-gather-scatter.ll`: in a RISCV target directory
+- `tail-folding-inloop-reduction.ll`: in a RISCV target directory
+- `tail-folding-interleave.ll`: in a RISCV target directory
+- `tail-folding-intermediate-store.ll`: in a RISCV target directory
+- `tail-folding-iv-outside-user.ll`: in a RISCV target directory
+- `tail-folding-iv32.ll`: in a RISCV target directory
+- `tail-folding-known-no-overflow.ll`: in a RISCV target directory
+- `tail-folding-masked-loadstore.ll`: in a RISCV target directory
+- `tail-folding-no-masking.ll`: in a RISCV target directory
+- `tail-folding-ordered-reduction.ll`: in a RISCV target directory
+- `tail-folding-reduction-cost.ll`: in a RISCV target directory
+- `tail-folding-reduction.ll`: in a RISCV target directory
+- `tail-folding-reverse-load-store.ll`: in a RISCV target directory
+- `tail-folding-safe-dep-distance.ll`: in a RISCV target directory
+- `tail-folding-uniform-store.ll`: in a RISCV target directory
+- `transform-narrow-interleave-to-widen-memory.ll`: in a RISCV target directory
+- `truncate-to-minimal-bitwidth-cost.ll`: in a RISCV target directory
+- `truncate-to-minimal-bitwidth-evl-crash.ll`: in a RISCV target directory
+- `type-info-cache-evl-crash.ll`: in a RISCV target directory
+- `uniform-load-store.ll`: in a RISCV target directory
+- `unroll-in-loop-vectorizer.ll`: in a RISCV target directory
+- `veclib-function-calls.ll`: in a RISCV target directory
+- `vector-loop-backedge-elimination-with-evl.ll`: in a RISCV target directory
+- `vectorize-vp-intrinsics.ll`: in a RISCV target directory
+- `vf-will-not-generate-any-vector-insts.ll`: in a RISCV target directory
+- `zvl1024b-crash.ll`: in a RISCV target directory
+- `zvl32b.ll`: in a RISCV target directory
+- `no-vectorize.ll`: in a Sparc target directory
+- `addressing.ll`: in a SystemZ target directory
+- `branch-for-predicated-block.ll`: in a SystemZ target directory
+- `force-target-instruction-cost.ll`: in a SystemZ target directory
+- `load-scalarization-cost-0.ll`: in a SystemZ target directory
+- `load-scalarization-cost-1.ll`: in a SystemZ target directory
+- `load-store-scalarization-cost.ll`: in a SystemZ target directory
+- `mem-interleaving-costs-02.ll`: in a SystemZ target directory
+- `mem-interleaving-costs-03.ll`: in a SystemZ target directory
+- `mem-interleaving-costs.ll`: in a SystemZ target directory
+- `pr38110.ll`: in a SystemZ target directory
+- `pr47665.ll`: in a SystemZ target directory
+- `predicated-first-order-recurrence.ll`: in a SystemZ target directory
+- `scalar-steps-with-users-demanding-all-lanes-and-first-lane-only.ll`: in a SystemZ target directory
+- `vectorized-epilogue-loop.ll`: in a SystemZ target directory
+- `zero_unroll.ll`: in a SystemZ target directory
+- `disable_lv.ll`: in a VE target directory
+- `call-decisions.ll`: in a AArch64 target directory
+- `partial-reduce-usabs.ll`: in a AArch64 target directory
+- `single-scalar-cast.ll`: in a AArch64 target directory
+- `sve-tail-folding-forced.ll`: in a AArch64 target directory
+- `sve2-histcnt-vplan.ll`: in a AArch64 target directory
+- `vplan-memory-op-decisions.ll`: in a AArch64 target directory
+- `vplan-printing-alias-mask.ll`: in a AArch64 target directory
+- `vplan-printing.ll`: in a AArch64 target directory
+- `widen-call-with-intrinsic-or-libfunc.ll`: in a AArch64 target directory
+- `vplan-force-tail-with-evl.ll`: in a PowerPC target directory
+- `expand-scev.ll`: in a RISCV target directory
+- `vplan-riscv-vector-reverse.ll`: in a RISCV target directory
+- `vplan-vp-intrinsics-fixed-order-recurrence.ll`: in a RISCV target directory
+- `vplan-vp-intrinsics-reduction.ll`: in a RISCV target directory
+- `vplan-vp-intrinsics.ll`: in a RISCV target directory
+- `scalarize-wide-load-for-address-use.ll` RUN `opt -passes=loop-vectorize -disable-output -vplan-print-after=makeMemOpWideningDecisions -force-vector-width=4 -mtriple=x86_64-unknown-linux-gnu -mcpu=haswell %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-vp-intrinsics.ll` RUN `opt -passes=loop-vectorize -vplan-print-after=printOptimizedVPlan -force-vector-width=4 -force-tail-folding-style=data-with-evl -tail-folding-policy=must-fold-tail -mtriple=x86_64 -mattr=+avx512f -disable-output < %s 2>&1 | FileCheck --check-prefix=IF-EVL %s`: redirects or chains commands
+- `vplan-vp-intrinsics.ll` RUN `opt -passes=loop-vectorize -vplan-print-after=printOptimizedVPlan -force-vector-width=4 -force-tail-folding-style=none -tail-folding-policy=prefer-fold-tail -mtriple=x86_64 -mattr=+avx512f -disable-output < %s 2>&1 | FileCheck --check-prefix=NO-VP %s`: redirects or chains commands
+- `buildvector-first-lane-only.ll` RUN `opt < %s -p loop-vectorize -force-vector-width=4 -tail-folding-policy=must-fold-tail -force-tail-folding-style=data -vplan-print-after=printFinalVPlan -disable-output 2>&1 | FileCheck %s`: redirects or chains commands
+- `conditional-scalar-assignment-vplan.ll` RUN `opt -passes=loop-vectorize -vplan-print-after=printOptimizedVPlan -force-vector-width=4 -disable-output 2>&1 < %s | FileCheck %s`: redirects or chains commands
+- `conditional-scalar-assignment-vplan.ll` RUN `opt -passes=loop-vectorize -vplan-print-after=printOptimizedVPlan -force-vector-width=4 -force-target-supports-masked-memory-ops -tail-folding-policy=must-fold-tail -disable-output 2>&1 < %s | FileCheck %s --check-prefix=CHECK-TF`: redirects or chains commands
+- `constant-fold.ll`: REQUIRES asserts
+- `dissolve-replicate-regions.ll` RUN `opt -passes=loop-vectorize -force-vector-interleave=2 -force-vector-width=1 -vplan-print-after="VPlanTransforms::replicateByVF$" -disable-output %s 2>&1 | FileCheck --check-prefix=SCALAR %s`: redirects or chains commands
+- `dissolve-replicate-regions.ll` RUN `opt -passes=loop-vectorize -force-vector-interleave=2 -force-vector-width=2 -vplan-print-after="VPlanTransforms::replicateByVF$" -disable-output %s 2>&1 | FileCheck --check-prefix=VECTOR %s`: redirects or chains commands
+- `early_exit_with_stores_vplan.ll`: REQUIRES asserts
+- `expand-scev.ll` RUN `opt -passes=loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -force-target-supports-scalable-vectors -disable-output -vplan-print-after="printFinalVPlan$" %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `find-last.ll` RUN `opt -disable-output %s -p loop-vectorize -force-vector-width=4 -vplan-print-after=optimizeFindIVReductions 2>&1 | FileCheck %s`: redirects or chains commands
+- `first-order-recurrence-chains-vplan.ll` RUN `opt -passes=loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -vplan-print-after=printOptimizedVPlan -disable-output -S %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `first-order-recurrence-sink-replicate-region.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=2 -force-vector-interleave=1 -force-widen-divrem-via-masked-intrinsic=0 -disable-output -vplan-print-after=printOptimizedVPlan 2>&1 | FileCheck %s`: redirects or chains commands
+- `for-phi-ordering.ll` RUN `opt %s -passes=loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -vplan-print-after=printOptimizedVPlan -disable-output 2>&1 | FileCheck %s`: redirects or chains commands
+- `icmp-uniforms.ll` RUN `opt < %s -passes=loop-vectorize,instcombine -force-vector-width=4 -force-vector-interleave=1 -vplan-print-after=printOptimizedVPlan -disable-output -print-after=instcombine 2>&1 | FileCheck %s`: diagnostic output flag -print-after=instcombine
+- `interleave-and-scalarize-only.ll` RUN `opt -passes=loop-vectorize -force-vector-width=1 -force-vector-interleave=2 -vplan-print-after=printOptimizedVPlan -disable-output %s 2>&1 | FileCheck --check-prefix=DBG %s`: redirects or chains commands
+- `interleave-conditional-scalar-assignment-vplan.ll` RUN `opt -passes=loop-vectorize -vplan-print-after="printFinalVPlan$" -force-vector-width=4 -force-vector-interleave=2 -force-target-supports-masked-memory-ops -disable-output 2>&1 < %s | FileCheck %s --check-prefix=IC2`: redirects or chains commands
+- `interleave-conditional-scalar-assignment-vplan.ll` RUN `opt -passes=loop-vectorize -vplan-print-after="printFinalVPlan$" -force-vector-width=4 -force-vector-interleave=2 -force-target-supports-masked-memory-ops -tail-folding-policy=must-fold-tail -disable-output 2>&1 < %s | FileCheck %s --check-prefix=IC2-TF`: redirects or chains commands
+- `phi-with-fastflags-vplan.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -vplan-print-after=printOptimizedVPlan -disable-output -S %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `predicator.ll` RUN `opt -disable-output < %s -p loop-vectorize -vplan-print-after=introduceMasksAndLinearize -vplan-print-vector-region-scope 2>&1 | FileCheck %s`: redirects or chains commands
+- `print-attributes.ll`: target triple arm64-apple-macosx
+- `scalarize-irregular-type-memops.ll` RUN `opt < %s -p loop-vectorize -force-vector-width=4 -disable-output -vplan-print-vector-region-scope -vplan-print-after=scalarizeMemOpsWithIrregularTypes 2>&1 | FileCheck %s`: redirects or chains commands
+- `scalarize-irregular-type-memops.ll` RUN `opt < %s -p loop-vectorize -force-vector-width=4 -disable-output -vplan-print-vector-region-scope -vplan-print-after=makeMemOpWideningDecisions 2>&1 | FileCheck %s --check-prefix ALL-MEMOP-WIDEN`: redirects or chains commands
+- `scalarize-irregular-type-memops.ll` RUN `opt < %s -p loop-vectorize -force-vector-width=4 -disable-output -force-target-supports-gather-scatter-ops -vplan-print-vector-region-scope -vplan-print-after=scalarizeMemOpsWithIrregularTypes 2>&1 | FileCheck %s`: redirects or chains commands
+- `scalarize-irregular-type-memops.ll` RUN `opt < %s -p loop-vectorize -force-vector-width=4 -disable-output -force-target-supports-gather-scatter-ops -vplan-print-vector-region-scope -vplan-print-after=makeMemOpWideningDecisions 2>&1 | FileCheck %s --check-prefix ALL-MEMOP-WIDEN`: redirects or chains commands
+- `simplify-reverse-reverse.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -disable-output -vplan-print-after=simplifyReverses %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `tail-folding.ll` RUN `opt < %s -p loop-vectorize -force-vector-width=4 -tail-folding-policy=prefer-fold-tail -S -vplan-print-after=foldTailByMasking -disable-output 2>&1 | FileCheck %s`: redirects or chains commands
+- `uncountable-early-exit-vplan.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -disable-output -vplan-print-after=printOptimizedVPlan %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-dot-printing.ll` RUN `opt -passes=loop-vectorize -debug-only=loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -vplan-print-in-dot-format -disable-output %s 2>&1 | FileCheck %s`: diagnostic output flag -debug-only=loop-vectorize
+- `vplan-force-tail-with-evl.ll` RUN `opt -passes=loop-vectorize -debug-only=loop-vectorize -force-tail-folding-style=data-with-evl -force-vector-width=4 -force-target-supports-scalable-vectors -scalable-vectorization=on -disable-output < %s 2>&1 | FileCheck --check-prefixes=NO-VP %s`: diagnostic output flag -debug-only=loop-vectorize
+- `vplan-force-tail-with-evl.ll` RUN `opt -passes=loop-vectorize -debug-only=loop-vectorize -force-tail-folding-style=none -tail-folding-policy=must-fold-tail -force-target-supports-scalable-vectors -scalable-vectorization=on -disable-output < %s 2>&1 | FileCheck --check-prefixes=NO-VP %s`: diagnostic output flag -debug-only=loop-vectorize
+- `vplan-iv-transforms.ll` RUN `opt -passes=loop-vectorize -force-vector-interleave=1 -force-vector-width=8 -disable-output -vplan-print-after=printOptimizedVPlan %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-narrow-iv-users.ll` RUN `opt -passes=loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -disable-output -vplan-print-after=legalizeAndOptimizeInductions %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-predicate-switch.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -force-vector-interleave=1 -vplan-print-after="printFinalVPlan$" -disable-output %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-print-before-after-all.ll` RUN `opt -passes=loop-vectorize -disable-output -vplan-print-before-all -force-vector-width=4 -vplan-verify-each < %s 2>&1 | FileCheck %s -check-prefixes=CHECK,CHECK-BEFORE -DBEFORE_OR_AFTER=before --implicit-check-not "VPlan for loop in 'foo' before"`: redirects or chains commands
+- `vplan-print-before-after-all.ll` RUN `opt -passes=loop-vectorize -disable-output -vplan-print-before-all -force-vector-width=4 -vplan-verify-each < %s 2>&1 | FileCheck %s -DBEFORE_OR_AFTER=before --check-prefix CHECK-DUMP`: redirects or chains commands
+- `vplan-print-before-after-all.ll` RUN `opt -passes=loop-vectorize -disable-output -vplan-print-after-all -force-vector-width=4 -vplan-verify-each < %s 2>&1 | FileCheck %s -check-prefixes=CHECK,CHECK-AFTER -DBEFORE_OR_AFTER=after --implicit-check-not "VPlan for loop in 'foo' after"`: redirects or chains commands
+- `vplan-print-before-after-all.ll` RUN `opt -passes=loop-vectorize -disable-output -vplan-print-after-all -force-vector-width=4 -vplan-verify-each < %s 2>&1 | FileCheck %s -DBEFORE_OR_AFTER=after --check-prefix CHECK-DUMP`: redirects or chains commands
+- `vplan-printing-alias-mask.ll` RUN `opt -passes=loop-vectorize -force-vector-width=4 -force-partial-aliasing-vectorization -force-target-supports-masked-memory-ops -tail-folding-policy=must-fold-tail -disable-output -vplan-print-after="attachAliasMaskToHeaderMask$" -S %s 2>&1 | FileCheck --check-prefix=INITIAL %s`: redirects or chains commands
+- `vplan-printing-alias-mask.ll` RUN `opt -passes=loop-vectorize -force-vector-width=4 -force-partial-aliasing-vectorization -force-target-supports-masked-memory-ops -tail-folding-policy=must-fold-tail -disable-output -vplan-print-after="printFinalVPlan$" -S %s 2>&1 | FileCheck --check-prefix=FINAL %s`: redirects or chains commands
+- `vplan-printing-before-execute.ll` RUN `opt -passes=loop-vectorize -force-vector-width=8 -force-vector-interleave=2 -disable-output -vplan-print-after=printOptimizedVPlan -S %s 2>&1 | FileCheck --check-prefixes=OPTIMIZE %s`: redirects or chains commands
+- `vplan-printing-before-execute.ll` RUN `opt -passes=loop-vectorize -force-vector-width=8 -force-vector-interleave=2 -disable-output -vplan-print-after="printFinalVPlan$" -S %s 2>&1 | FileCheck --check-prefixes=FINAL %s`: redirects or chains commands
+- `vplan-printing-branch-weights.ll` RUN `opt -passes=loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -vplan-print-after=printAfterInitialConstruction -disable-output %s 2>&1 | FileCheck --strict-whitespace %s`: redirects or chains commands
+- `vplan-printing-flags.ll` RUN `opt -passes=loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -vplan-print-after=printAfterInitialConstruction -disable-output %s 2>&1 | FileCheck --strict-whitespace %s`: redirects or chains commands
+- `vplan-printing-metadata.ll` RUN `opt -passes=loop-vectorize -vplan-print-after=printOptimizedVPlan -force-vector-interleave=1 -force-vector-width=4 -disable-output %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-printing-outer-loop.ll` RUN `opt -passes=loop-vectorize -pass-remarks=loop-vectorize -enable-vplan-native-path -debug -disable-output %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=loop-vectorize
+- `vplan-printing-reductions-tail-folded.ll` RUN `opt -passes=loop-vectorize -force-target-supports-masked-memory-ops -tail-folding-policy=must-fold-tail -vplan-print-after=printOptimizedVPlan -force-vector-interleave=1 -force-vector-width=4 -prefer-inloop-reductions -disable-output %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-printing-reductions.ll` RUN `opt -passes=loop-vectorize -vplan-print-after=printOptimizedVPlan -force-vector-interleave=1 -force-vector-width=4 -prefer-inloop-reductions -disable-output %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-printing.ll` RUN `opt -passes=loop-vectorize -vplan-print-after=printOptimizedVPlan -force-vector-interleave=1 -force-vector-width=4 -enable-interleaved-mem-accesses=true -enable-masked-interleaved-mem-accesses -force-widen-divrem-via-masked-intrinsic=0 -disable-output %s 2>&1 | FileCheck --strict-whitespace %s`: redirects or chains commands
+- `vplan-sink-scalars-and-merge-vf1.ll` RUN `opt -passes=loop-vectorize -force-vector-interleave=2 -force-vector-width=1 -vplan-print-after=printOptimizedVPlan -disable-output %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-sink-scalars-and-merge.ll` RUN `opt -passes=loop-vectorize -force-vector-interleave=1 -force-vector-width=2 -force-widen-divrem-via-masked-intrinsic=0 -vplan-print-after=printOptimizedVPlan -disable-output %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-stress-test-no-explict-vf.ll` RUN `opt < %s  -S -passes=loop-vectorize -enable-vplan-native-path -vplan-build-outerloop-stress-test -debug-only=loop-vectorize -disable-output 2>&1  | FileCheck %s`: diagnostic output flag -debug-only=loop-vectorize
+- `vplan-unused-interleave-group.ll` RUN `opt -passes=loop-vectorize -S -force-vector-width=4 -enable-interleaved-mem-accesses=true -debug-only=loop-vectorize --disable-output < %s 2>&1 | FileCheck %s`: diagnostic output flag -debug-only=loop-vectorize
+- `vplan-widen-struct-return.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=2 -force-vector-interleave=1 -debug-only=loop-vectorize -disable-output -S 2>&1 | FileCheck %s`: diagnostic output flag -debug-only=loop-vectorize
+- `vplan_hcfg_stress_test.ll` RUN `opt < %s -passes=loop-vectorize -enable-vplan-native-path -vplan-build-outerloop-stress-test -debug-only=vplan -disable-output 2>&1 | FileCheck %s`: diagnostic output flag -debug-only=vplan
+- `widen-canonical-iv-register-pressure.ll` RUN `opt -passes=loop-vectorize -vplan-print-after="printFinalVPlan$" -force-vector-width=4 -force-vector-interleave=1 -force-target-supports-masked-memory-ops -tail-folding-policy=must-fold-tail -disable-output 2>&1 < %s | FileCheck %s --check-prefix=UF1`: redirects or chains commands
+- `widen-canonical-iv-register-pressure.ll` RUN `opt -passes=loop-vectorize -vplan-print-after="printFinalVPlan$" -force-vector-width=4 -force-vector-interleave=4 -force-target-supports-masked-memory-ops -tail-folding-policy=must-fold-tail -disable-output 2>&1 < %s | FileCheck %s --check-prefix=UF4`: redirects or chains commands
+- `widen_mem_idioms.ll` RUN `opt < %s -p loop-vectorize -force-vector-width=4 -disable-output -enable-histogram-loop-vectorization -vplan-print-after=lowerMemoryIdioms 2>&1 | FileCheck %s`: redirects or chains commands
+- `induction-branch-cost.ll`: in a WebAssembly target directory
+- `int-mac-reduction-costs.ll`: in a WebAssembly target directory
+- `memory-interleave.ll`: in a WebAssembly target directory
+- `partial-reduce-accumulate.ll`: in a WebAssembly target directory
+- `gather-i16-with-i8-index.ll`: REQUIRES asserts
+- `gather-i32-with-i8-index.ll`: REQUIRES asserts
+- `gather-i64-with-i8-index.ll`: REQUIRES asserts
+- `gather-i8-with-i8-index.ll`: REQUIRES asserts
+- `handle-iptr-with-data-layout-to-not-assert.ll`: REQUIRES asserts
+- `interleaved-load-f32-stride-2.ll`: REQUIRES asserts
+- `interleaved-load-f32-stride-3.ll`: REQUIRES asserts
+- `interleaved-load-f32-stride-4.ll`: REQUIRES asserts
+- `interleaved-load-f32-stride-5.ll`: REQUIRES asserts
+- `interleaved-load-f32-stride-6.ll`: REQUIRES asserts
+- `interleaved-load-f32-stride-7.ll`: REQUIRES asserts
+- `interleaved-load-f32-stride-8.ll`: REQUIRES asserts
+- `interleaved-load-f64-stride-2.ll`: REQUIRES asserts
+- `interleaved-load-f64-stride-3.ll`: REQUIRES asserts
+- `interleaved-load-f64-stride-4.ll`: REQUIRES asserts
+- `interleaved-load-f64-stride-5.ll`: REQUIRES asserts
+- `interleaved-load-f64-stride-6.ll`: REQUIRES asserts
+- `interleaved-load-f64-stride-7.ll`: REQUIRES asserts
+- `interleaved-load-f64-stride-8.ll`: REQUIRES asserts
+- `interleaved-load-half.ll`: REQUIRES asserts
+- `interleaved-load-i16-stride-2.ll`: REQUIRES asserts
+- `interleaved-load-i16-stride-3.ll`: REQUIRES asserts
+- `interleaved-load-i16-stride-4.ll`: REQUIRES asserts
+- `interleaved-load-i16-stride-5.ll`: REQUIRES asserts
+- `interleaved-load-i16-stride-6.ll`: REQUIRES asserts
+- `interleaved-load-i16-stride-7.ll`: REQUIRES asserts
+- `interleaved-load-i16-stride-8.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-2-indices-0u.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-2.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-3-indices-01u.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-3-indices-0uu.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-3.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-4-indices-012u.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-4-indices-01uu.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-4-indices-0uuu.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-4.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-5.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-6.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-7.ll`: REQUIRES asserts
+- `interleaved-load-i32-stride-8.ll`: REQUIRES asserts
+- `interleaved-load-i64-stride-2.ll`: REQUIRES asserts
+- `interleaved-load-i64-stride-3.ll`: REQUIRES asserts
+- `interleaved-load-i64-stride-4.ll`: REQUIRES asserts
+- `interleaved-load-i64-stride-5.ll`: REQUIRES asserts
+- `interleaved-load-i64-stride-6.ll`: REQUIRES asserts
+- `interleaved-load-i64-stride-7.ll`: REQUIRES asserts
+- `interleaved-load-i64-stride-8.ll`: REQUIRES asserts
+- `interleaved-load-i8-stride-2.ll`: REQUIRES asserts
+- `interleaved-load-i8-stride-3.ll`: REQUIRES asserts
+- `interleaved-load-i8-stride-4.ll`: REQUIRES asserts
+- `interleaved-load-i8-stride-5.ll`: REQUIRES asserts
+- `interleaved-load-i8-stride-6.ll`: REQUIRES asserts
+- `interleaved-load-i8-stride-7.ll`: REQUIRES asserts
+- `interleaved-load-i8-stride-8.ll`: REQUIRES asserts
+- `interleaved-store-f32-stride-2.ll`: REQUIRES asserts
+- `interleaved-store-f32-stride-3.ll`: REQUIRES asserts
+- `interleaved-store-f32-stride-4.ll`: REQUIRES asserts
+- `interleaved-store-f32-stride-5.ll`: REQUIRES asserts
+- `interleaved-store-f32-stride-6.ll`: REQUIRES asserts
+- `interleaved-store-f32-stride-7.ll`: REQUIRES asserts
+- `interleaved-store-f32-stride-8.ll`: REQUIRES asserts
+- `interleaved-store-f64-stride-2.ll`: REQUIRES asserts
+- `interleaved-store-f64-stride-3.ll`: REQUIRES asserts
+- `interleaved-store-f64-stride-4.ll`: REQUIRES asserts
+- `interleaved-store-f64-stride-5.ll`: REQUIRES asserts
+- `interleaved-store-f64-stride-6.ll`: REQUIRES asserts
+- `interleaved-store-f64-stride-7.ll`: REQUIRES asserts
+- `interleaved-store-f64-stride-8.ll`: REQUIRES asserts
+- `interleaved-store-i16-stride-2.ll`: REQUIRES asserts
+- `interleaved-store-i16-stride-3.ll`: REQUIRES asserts
+- `interleaved-store-i16-stride-4.ll`: REQUIRES asserts
+- `interleaved-store-i16-stride-5.ll`: REQUIRES asserts
+- `interleaved-store-i16-stride-6.ll`: REQUIRES asserts
+- `interleaved-store-i16-stride-7.ll`: REQUIRES asserts
+- `interleaved-store-i16-stride-8.ll`: REQUIRES asserts
+- `interleaved-store-i32-stride-2.ll`: REQUIRES asserts
+- `interleaved-store-i32-stride-3.ll`: REQUIRES asserts
+- `interleaved-store-i32-stride-4.ll`: REQUIRES asserts
+- `interleaved-store-i32-stride-5.ll`: REQUIRES asserts
+- `interleaved-store-i32-stride-6.ll`: REQUIRES asserts
+- `interleaved-store-i32-stride-7.ll`: REQUIRES asserts
+- `interleaved-store-i32-stride-8.ll`: REQUIRES asserts
+- `interleaved-store-i64-stride-2.ll`: REQUIRES asserts
+- `interleaved-store-i64-stride-3.ll`: REQUIRES asserts
+- `interleaved-store-i64-stride-4.ll`: REQUIRES asserts
+- `interleaved-store-i64-stride-5.ll`: REQUIRES asserts
+- `interleaved-store-i64-stride-6.ll`: REQUIRES asserts
+- `interleaved-store-i64-stride-7.ll`: REQUIRES asserts
+- `interleaved-store-i64-stride-8.ll`: REQUIRES asserts
+- `interleaved-store-i8-stride-2.ll`: REQUIRES asserts
+- `interleaved-store-i8-stride-3.ll`: REQUIRES asserts
+- `interleaved-store-i8-stride-4.ll`: REQUIRES asserts
+- `interleaved-store-i8-stride-5.ll`: REQUIRES asserts
+- `interleaved-store-i8-stride-6.ll`: REQUIRES asserts
+- `interleaved-store-i8-stride-7.ll`: REQUIRES asserts
+- `interleaved-store-i8-stride-8.ll`: REQUIRES asserts
+- `masked-gather-i32-with-i8-index.ll`: REQUIRES asserts
+- `masked-gather-i64-with-i8-index.ll`: REQUIRES asserts
+- `masked-interleaved-load-i16.ll`: REQUIRES asserts
+- `masked-interleaved-store-i16.ll`: REQUIRES asserts
+- `masked-load-i16.ll`: REQUIRES asserts
+- `masked-load-i32.ll`: REQUIRES asserts
+- `masked-load-i64.ll`: REQUIRES asserts
+- `masked-load-i8.ll`: REQUIRES asserts
+- `masked-scatter-i32-with-i8-index.ll`: REQUIRES asserts
+- `masked-scatter-i64-with-i8-index.ll`: REQUIRES asserts
+- `masked-store-i16.ll`: REQUIRES asserts
+- `masked-store-i32.ll`: REQUIRES asserts
+- `masked-store-i64.ll`: REQUIRES asserts
+- `masked-store-i8.ll`: REQUIRES asserts
+- `scatter-i16-with-i8-index.ll`: REQUIRES asserts
+- `scatter-i32-with-i8-index.ll`: REQUIRES asserts
+- `scatter-i64-with-i8-index.ll`: REQUIRES asserts
+- `scatter-i8-with-i8-index.ll`: REQUIRES asserts
+- `strided-load-i16.ll`: REQUIRES asserts
+- `strided-load-i32.ll`: REQUIRES asserts
+- `strided-load-i64.ll`: REQUIRES asserts
+- `strided-load-i8.ll`: REQUIRES asserts
+- `vpinstruction-cost.ll`: REQUIRES asserts
+- `already-vectorized.ll`: REQUIRES asserts
+- `cleanup-runtime-checks.ll` RUN `opt -p loop-vectorize -S %s | FileCheck %s`: no -passes / -O pipeline
+- `conditional-scalar-assignment.ll` RUN `opt -passes=loop-vectorize -S < %s 2>&1 | FileCheck %s --check-prefix=X86`: redirects or chains commands
+- `conditional-scalar-assignment.ll` RUN `opt -passes=loop-vectorize -mattr=+avx512f -S < %s 2>&1 | FileCheck %s --check-prefix=AVX512`: redirects or chains commands
+- `consecutive-ptr-uniforms.ll`: REQUIRES asserts
+- `cost-constant-known-via-scev.ll` RUN `opt -p loop-vectorize -S %s | FileCheck %s`: no -passes / -O pipeline
+- `cost-model-i386.ll`: target triple i386-unknow-linux
+- `divs-with-tail-folding.ll` RUN `opt -p loop-vectorize -mtriple x86_64 -tail-folding-policy=must-fold-tail -mcpu=skylake-avx512 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `end-pointer-signed.ll`: target triple i386-unknown-linux-gnu
+- `ephemeral-recipes.ll` RUN `opt -p loop-vectorize -S %s | FileCheck %s`: no -passes / -O pipeline
+- `epilog-vectorization-ordered-reduction.ll` RUN `opt -p loop-vectorize -force-ordered-reductions -mcpu=tigerlake -S %s | FileCheck %s`: no -passes / -O pipeline
+- `fneg-cost.ll`: REQUIRES asserts
+- `fold-tail-low-trip-count.ll` RUN `opt -p loop-vectorize -S %s | FileCheck %s`: no -passes / -O pipeline
+- `fp_to_sint8-cost-model.ll`: REQUIRES asserts
+- `funclet.ll`: target triple i686-pc-windows-msvc18.0.0
+- `gep-use-outside-loop.ll` RUN `opt -p loop-vectorize -mtriple=x86_64-apple-macosx -mcpu=skylake-avx512 -force-vector-width=4 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `i1-reg-usage.ll`: REQUIRES asserts
+- `induction-costs.ll` RUN `opt -p loop-vectorize -mtriple=x86_64-apple-macosx -S %s | FileCheck %s`: no -passes / -O pipeline
+- `interleave-cost.ll` RUN `opt -p loop-vectorize -S %s | FileCheck %s`: no -passes / -O pipeline
+- `interleave-ptradd-with-replicated-operand.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `interleaved-accesses-use-after-free.ll`: REQUIRES asserts
+- `interleaved-accesses-waw-dependency.ll`: REQUIRES asserts
+- `intrinsiccost.ll`: REQUIRES asserts
+- `iv-live-outs.ll` RUN `opt -p loop-vectorize -S %s | FileCheck %s`: no -passes / -O pipeline
+- `masked-store-cost.ll` RUN `opt -p loop-vectorize -mtriple=x86_64-apple-macosx -S %s | FileCheck %s`: no -passes / -O pipeline
+- `mul_slm_16bit.ll`: REQUIRES asserts
+- `multi-exit-cost.ll` RUN `opt -p loop-vectorize -mtriple=x86_64-apple-macosx -mcpu=penryn -S %s | FileCheck %s`: no -passes / -O pipeline
+- `narrow-to-single-scalar.ll` RUN `opt -p loop-vectorize -mcpu=skylake -S %s | FileCheck %s`: no -passes / -O pipeline
+- `no-vector.ll` RUN `opt -S -mtriple=i386-unknown-freebsd -mcpu=i486 -passes=loop-vectorize < %s`: non-x86_64 target i386-unknown-freebsd
+- `no_fpmath.ll` RUN `opt < %s -passes=loop-vectorize -mtriple=x86_64-unknown-linux -S -pass-remarks='loop-vectorize' -pass-remarks-missed='loop-vectorize' -pass-remarks-analysis='loop-vectorize' 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=loop-vectorize
+- `no_fpmath_with_hotness.ll` RUN `opt < %s -passes=loop-vectorize -mtriple=x86_64-unknown-linux -S -pass-remarks=loop-vectorize -pass-remarks-missed=loop-vectorize -pass-remarks-analysis=loop-vectorize -pass-remarks-with-hotness 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=loop-vectorize
+- `pointer-runtime-checks-unprofitable.ll`: REQUIRES asserts
+- `pr109581-unused-blend.ll` RUN `opt -p loop-vectorize -S %s | FileCheck %s`: no -passes / -O pipeline
+- `pr131359-dead-for-splice.ll` RUN `opt -p loop-vectorize -S %s | FileCheck %s`: no -passes / -O pipeline
+- `pr39160.ll` RUN `opt -passes=loop-vectorize -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `predicate-switch.ll` RUN `opt -p loop-vectorize -mtriple=x86_64-apple-macosx -mcpu=skylake-avx512 -force-vector-interleave=1 -S %s | FileCheck --check-prefixes=COST %s`: no -passes / -O pipeline
+- `predicate-switch.ll` RUN `opt -p loop-vectorize -mtriple=x86_64-apple-macosx -mcpu=skylake-avx512 -force-vector-width=4 -force-vector-interleave=2 -S %s | FileCheck --check-prefixes=FORCED %s`: no -passes / -O pipeline
+- `predicated-instruction-cost.ll` RUN `opt -p loop-vectorize -S %s | FileCheck %s`: no -passes / -O pipeline
+- `predicated-replicate-feeding-cast.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `predicated-udiv.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `reduction-crash.ll`: target triple i386-apple-darwin
+- `reduction-small-size.ll`: REQUIRES asserts
+- `redundant-vf2-cost.ll`: REQUIRES asserts
+- `reg-usage-debug.ll`: REQUIRES asserts
+- `reg-usage.ll`: REQUIRES asserts
+- `replicate-recipe-with-only-first-lane-used.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `replicate-uniform-call.ll` RUN `opt -p loop-vectorize -S %s | FileCheck %s`: no -passes / -O pipeline
+- `replicating-load-store-costs-max-bandwidth.ll` RUN `opt -p loop-vectorize -mtriple=x86_64-apple-macosx -vectorizer-maximize-bandwidth -S %s | FileCheck %s`: no -passes / -O pipeline
+- `replicating-load-store-costs.ll` RUN `opt -p loop-vectorize -mtriple=x86_64-linux-gnu -S %s | FileCheck --check-prefix=I64 %s`: no -passes / -O pipeline
+- `replicating-load-store-costs.ll` RUN `opt -p loop-vectorize -mtriple=i386-pc-linux-gnu -S %s | FileCheck --check-prefix=I32 %s`: non-x86_64 target i386-pc-linux-gnu
+- `runtime-limit.ll` RUN `opt < %s -passes=loop-vectorize -pass-remarks=loop-vectorize -pass-remarks-analysis=loop-vectorize -pass-remarks-missed=loop-vectorize -S 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=loop-vectorize
+- `scev-checks-unprofitable.ll` RUN `opt -p loop-vectorize -vectorizer-min-trip-count=8  -mcpu=skylake-avx512 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `transform-narrow-interleave-to-widen-memory-epilogue-vec.ll` RUN `opt -p loop-vectorize -mcpu=skylake -S %s | FileCheck %s`: no -passes / -O pipeline
+- `transform-narrow-interleave-to-widen-memory-gaps.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -mtriple=x86_64-apple-macosx -mcpu=skylake-avx512 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `transform-narrow-interleave-to-widen-memory-live-outs.ll` RUN `opt -p loop-vectorize -mcpu=skylake -S %s | FileCheck %s`: no -passes / -O pipeline
+- `transform-narrow-interleave-to-widen-memory.ll` RUN `opt -p loop-vectorize -mcpu=skylake -S %s | FileCheck %s`: no -passes / -O pipeline
+- `tripcount.ll`: target triple i386-unknown-freebsd11.0
+- `uint64_to_fp64-cost-model.ll`: REQUIRES asserts
+- `uniform-phi.ll`: REQUIRES asserts
+- `uniformshift.ll`: REQUIRES asserts
+- `vect.omp.force.ll`: REQUIRES asserts
+- `vector-scalar-select-cost.ll`: REQUIRES asserts
+- `vector_max_bandwidth.ll`: REQUIRES asserts
+- `vector_ptr_load_store.ll`: REQUIRES asserts
+- `vectorization-remarks-loopid-dbg.ll` RUN `opt < %s -passes=loop-vectorize -mtriple=x86_64-unknown-linux -S -pass-remarks='loop-vectorize' 2>&1 | FileCheck -check-prefix=VECTORIZED %s`: diagnostic output flag -pass-remarks=loop-vectorize
+- `vectorization-remarks-loopid-dbg.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=1 -force-vector-interleave=4 -mtriple=x86_64-unknown-linux -S -pass-remarks='loop-vectorize' 2>&1 | FileCheck -check-prefix=UNROLLED %s`: diagnostic output flag -pass-remarks=loop-vectorize
+- `vectorization-remarks-loopid-dbg.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=1 -force-vector-interleave=1 -mtriple=x86_64-unknown-linux -S -pass-remarks-analysis='loop-vectorize' 2>&1 | FileCheck -check-prefix=NONE %s`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `vectorization-remarks-missed.ll` RUN `opt < %s -passes=loop-vectorize,transform-warning -S -pass-remarks-missed='loop-vectorize' -pass-remarks-analysis='loop-vectorize' -vectorize-memory-check-threshold=1 -mtriple=x86_64-apple-macosx 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `vectorization-remarks-missed.ll` RUN `opt < %s -passes=loop-vectorize,transform-warning -o /dev/null -pass-remarks-output=%t.yaml -vectorize-memory-check-threshold=1 -mtriple=x86_64-apple-macosx`: writes to a file
+- `vectorization-remarks-missed.ll` RUN `cat %t.yaml | FileCheck -check-prefix=YAML %s`: not an opt invocation
+- `vectorization-remarks-profitable.ll` RUN `opt < %s -passes=loop-vectorize -pass-remarks-missed='loop-vectorize' -mtriple=x86_64-unknown-linux -S 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `vectorization-remarks.ll` RUN `opt < %s -passes=loop-vectorize -mtriple=x86_64-unknown-linux -S -pass-remarks='loop-vectorize' 2>&1 | FileCheck -check-prefix=VECTORIZED %s`: diagnostic output flag -pass-remarks=loop-vectorize
+- `vectorization-remarks.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=1 -force-vector-interleave=4 -mtriple=x86_64-unknown-linux -S -pass-remarks='loop-vectorize' 2>&1 | FileCheck -check-prefix=UNROLLED %s`: diagnostic output flag -pass-remarks=loop-vectorize
+- `vectorization-remarks.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=1 -force-vector-interleave=1 -mtriple=x86_64-unknown-linux -S -pass-remarks-analysis='loop-vectorize' 2>&1 | FileCheck -check-prefix=NONE %s`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `vectorize-force-tail-with-evl.ll` RUN `opt -passes=loop-vectorize -force-tail-folding-style=data-with-evl -tail-folding-policy=must-fold-tail -mtriple=x86_64 -mattr=+avx512f -S < %s 2>&1 | FileCheck --check-prefix=IF-EVL %s`: redirects or chains commands
+- `vectorize-force-tail-with-evl.ll` RUN `opt -passes=loop-vectorize -force-tail-folding-style=none -tail-folding-policy=prefer-fold-tail -mtriple=x86_64 -mattr=+avx512f -S < %s 2>&1 | FileCheck --check-prefix=NO-VP %s`: redirects or chains commands
+- `vplan-native-inner-loop-only.ll` RUN `opt -p loop-vectorize -enable-vplan-native-path -force-vector-width=4 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `vplan-native-inner-loop-only.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `vplan-single-bit-ind-var-width-4.ll` RUN `opt -passes=loop-vectorize -force-vector-width=4 -S %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-single-bit-ind-var.ll` RUN `opt -passes=loop-vectorize -force-vector-width=2 -S %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `x86-interleaved-accesses-masked-group.ll`: target triple i386-unknown-linux-gnu
+- `x86_fp80-vector-store.ll` RUN `opt -p loop-vectorize -S %s | FileCheck --check-prefixes=COST %s`: no -passes / -O pipeline
+- `x86_fp80-vector-store.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -force-vector-interleave=1 -S %s | FileCheck --check-prefixes=FORCED %s`: no -passes / -O pipeline
+- `no-vector-registers.ll`: in a XCore target directory
+- `allowExtraAnalysis-invalid-cfg.ll` RUN `opt -S -passes=loop-vectorize -pass-remarks-output=%t.yaml < %s`: uses lit substitution -pass-remarks-output=%t.yaml
+- `allowExtraAnalysis-invalid-cfg.ll` RUN `FileCheck --input-file=%t.yaml --check-prefix=REMARKS %s`: not an opt invocation
+- `blend-in-header.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `cast-costs.ll`: REQUIRES asserts
+- `check-no-vectorize.ll`: REQUIRES asserts
+- `check-prof-info.ll` RUN `opt -passes="print<block-freq>,loop-vectorize" -force-vector-width=4 -force-vector-interleave=1 -S < %s |  FileCheck %s`: analysis printer (stderr output) not supported yet
+- `check-prof-info.ll` RUN `opt -passes="print<block-freq>,loop-vectorize" -force-vector-width=4 -force-vector-interleave=4 -S < %s |  FileCheck %s -check-prefix=CHECK-MASKED`: analysis printer (stderr output) not supported yet
+- `check-prof-info.ll` RUN `opt -passes="print<block-freq>,loop-vectorize" -force-vector-width=4 -force-vector-interleave=1 -scalable-vectorization=on -force-target-supports-scalable-vectors -S < %s |  FileCheck %s -check-prefix=CHECK-SCALABLE`: analysis printer (stderr output) not supported yet
+- `conditional-assignment.ll` RUN `opt < %s -passes=loop-vectorize -S -pass-remarks-missed='loop-vectorize' -pass-remarks-analysis='loop-vectorize' 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `conditional-scalar-assignment-interleave-only.ll`: target triple aarch64-linux-gnu
+- `control-flow.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=4 -S -pass-remarks-missed='loop-vectorize' -pass-remarks-analysis=loop-vectorize 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `cse-casts.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `cse-replicate-regions.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -force-widen-divrem-via-masked-intrinsic=false -S %s | FileCheck %s`: no -passes / -O pipeline
+- `dereferenceable-info-from-assumption-constant-size-needs-loop-guards.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `dereferenceable-info-from-assumption-constant-size.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `dereferenceable-info-from-assumption-variable-size.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `diag-disabled-vectorization-msgs.ll`: REQUIRES asserts
+- `diag-missing-instr-debug-loc.ll` RUN `opt -passes=loop-vectorize -pass-remarks-analysis=loop-vectorize < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `diag-with-hotness-info-2.ll` RUN `opt -S -passes=loop-vectorize -pass-remarks-analysis=loop-vectorize -pass-remarks-with-hotness < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `diag-with-hotness-info.ll` RUN `opt -S -passes=loop-vectorize -pass-remarks-missed=loop-vectorize -pass-remarks-with-hotness < %s 2>&1 | FileCheck -check-prefix=HOTNESS -check-prefix=BOTH %s`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `diag-with-hotness-info.ll` RUN `opt -S -passes=loop-vectorize -pass-remarks-missed=loop-vectorize < %s 2>&1 | FileCheck -check-prefix=NO_HOTNESS -check-prefix=BOTH %s`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `diag-with-hotness-info.ll` RUN `opt -S -passes=loop-vectorize -pass-remarks-missed=loop-vectorize -pass-remarks-with-hotness < %s 2>&1 | FileCheck -check-prefix=HOTNESS -check-prefix=BOTH %s`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `diag-with-hotness-info.ll` RUN `opt -S -passes=loop-vectorize -pass-remarks-missed=loop-vectorize < %s 2>&1 | FileCheck -check-prefix=NO_HOTNESS -check-prefix=BOTH %s`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `discriminator.ll` @opt `-passes=loop-vectorize,loop-unroll -force-vector-width=4 -force-vector-interleave=4 - -unroll-count=2`: oracle fails
+- `div-exact.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 | FileCheck %s`: no -passes / -O pipeline
+- `early-exit-load-live-out.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `early_exit_combined_exits.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 -force-target-supports-masked-memory-ops -enable-early-exit-vectorization-with-side-effects | FileCheck %s`: no -passes / -O pipeline
+- `early_exit_legality.ll`: REQUIRES asserts
+- `early_exit_store_legality.ll`: REQUIRES asserts
+- `early_exit_with_outer_loop.ll` RUN `opt -S < %s -passes='loop-vectorize,verify<loops>,print<loops>' -disable-output 2>&1 | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `early_exit_with_stores.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 -force-target-supports-masked-memory-ops -enable-early-exit-vectorization-with-side-effects | FileCheck %s`: no -passes / -O pipeline
+- `epilog-vectorization-any-of-reductions.ll` RUN `opt -p loop-vectorize -force-vector-width=8 -enable-epilogue-vectorization -epilogue-vectorization-force-VF=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `epilog-vectorization-dead-epilogue.ll`: REQUIRES asserts
+- `epilog-vectorization-scev-expansion.ll` RUN `opt -p loop-vectorize -force-vector-width=8 -enable-epilogue-vectorization -epilogue-vectorization-force-VF=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `epilog-vectorization-trunc-induction-steps.ll` RUN `opt -p loop-vectorize -force-vector-width=8 -enable-epilogue-vectorization -epilogue-vectorization-force-VF=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `epilog-vectorization-vector-trip-count-zero.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -epilogue-vectorization-force-VF=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `expand-ptrtoaddr.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `expand-scev-after-invoke.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `explicit_outer_detection.ll`: REQUIRES asserts
+- `explicit_outer_nonuniform_inner.ll`: REQUIRES asserts
+- `explicit_outer_uniform_diverg_branch.ll`: REQUIRES asserts
+- `extract-from-end-vector-constant.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `extract-last-veclane.ll` RUN `opt -passes=loop-vectorize,instcombine -S -force-vector-width=4 < %s 2>%t | FileCheck %s`: uses lit substitution 2>%t
+- `extract-value-widen.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=2 -force-vector-interleave=1 -S 2>%t | FileCheck %s`: uses lit substitution 2>%t
+- `fcmp-uno-fold-interleave.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=3 -S %s | FileCheck --check-prefix=IC3 %s`: no -passes / -O pipeline
+- `fcmp-uno-fold-interleave.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=4 -S %s | FileCheck --check-prefix=IC4 %s`: no -passes / -O pipeline
+- `fcmp-uno-fold-interleave.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=5 -S %s | FileCheck --check-prefix=IC5 %s`: no -passes / -O pipeline
+- `first-order-recurrence-interleave-only.ll` RUN `opt -p loop-vectorize -force-vector-width=1 -force-vector-interleave=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `first-order-recurrence-scalable-vf1.ll` RUN `opt -p loop-vectorize -force-vector-width="vscale x 1" -S %s | FileCheck %s`: no -passes / -O pipeline
+- `fmax-without-fast-math-flags-interleave.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `fmax-without-fast-math-flags.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `fmin-without-fast-math-flags.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `fold-epilogue-tail.ll`: REQUIRES asserts
+- `forked-pointers.ll` RUN `opt -passes=loop-vectorize,instcombine -force-vector-width=4 -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `induction-cost.ll`: REQUIRES asserts
+- `induction-wrapflags.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `interleave-when-forced-opt.ll`: REQUIRES asserts
+- `interleave-with-i65-induction.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `interleave_uncountable_exits.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 -force-vector-interleave=2 -force-target-max-vector-interleave=2 -force-target-supports-masked-memory-ops -enable-early-exit-vectorization-with-side-effects | FileCheck %s`: no -passes / -O pipeline
+- `interleaved-accesses-dead-member.ll` RUN `opt < %s -S -p loop-vectorize -force-vector-width=4 -enable-interleaved-mem-accesses=true | FileCheck %s`: no -passes / -O pipeline
+- `interleaved-accesses-different-insert-position.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -enable-interleaved-mem-accesses=true -S %s | FileCheck %s`: no -passes / -O pipeline
+- `interleaved-accesses-masked-group.ll`: REQUIRES asserts
+- `invalid-costs.ll` RUN `opt -passes="loop-vectorize" -pass-remarks-output=%t.yaml -S %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t.yaml
+- `invalid-costs.ll` RUN `FileCheck --input-file=%t.yaml --check-prefix=REMARKS %s`: not an opt invocation
+- `invalidate-scev-at-scope-after-vectorization.ll` RUN `opt -passes='print<scalar-evolution>,loop-vectorize' -force-vector-width=4 -scalar-evolution-classify-expressions=false -S %s | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `iv-select-cmp-fold-tail.ll` RUN `opt -p loop-vectorize -tail-folding-policy=must-fold-tail -force-vector-width=4 -force-target-supports-masked-memory-ops -S %s | FileCheck %s`: no -passes / -O pipeline
+- `libcall-remark.ll` RUN `opt -S -passes=loop-vectorize < %s 2>&1 -pass-remarks-analysis=.* | FileCheck %s`: redirects or chains commands
+- `load-deref-pred-poison-ub-ops-feeding-pointer.ll` RUN `opt -p loop-vectorize -force-widen-divrem-via-masked-intrinsic=false -force-vector-width=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `loop-legality-checks-remarks.ll`: REQUIRES asserts
+- `loop-legality-checks.ll`: REQUIRES asserts
+- `loop-vect-memdep.ll`: REQUIRES asserts
+- `loop-vect-option.ll` RUN `opt < %s -S -passes='loop-vectorize<interleave-forced-only;vectorize-forced-only>' 2>&1  | FileCheck %s`: redirects or chains commands
+- `loop-vect-option.ll` RUN `opt < %s -S -passes='loop-vectorize<no-interleave-forced-only;no-vectorize-forced-only>' 2>&1 | FileCheck %s`: redirects or chains commands
+- `make-scalarization-decisions.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 | FileCheck %s`: no -passes / -O pipeline
+- `max-interleave-factor-debug.ll`: REQUIRES asserts
+- `memory-dep-remarks.ll` RUN `opt -passes='function(loop-vectorize,require<access-info>)' -disable-output -pass-remarks-analysis=loop-vectorize < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `memory-dep-remarks.ll` RUN `opt < %s -passes='function(require<access-info>,loop-vectorize)' -disable-output -pass-remarks-output=%t.yaml`: uses lit substitution -pass-remarks-output=%t.yaml
+- `memory-dep-remarks.ll` RUN `cat %t.yaml | FileCheck -check-prefix=YAML %s`: not an opt invocation
+- `min-trip-count-known-via-scev.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `minmax-extra-outside-users.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `mixed-precision-remarks.ll` RUN `opt -force-vector-interleave=2 -force-vector-width=4 -passes=loop-vectorize -pass-remarks-analysis=loop-vectorize -disable-output < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `multi_early_exit.ll` RUN `opt -S < %s -p loop-vectorize | FileCheck %s`: no -passes / -O pipeline
+- `multi_early_exit_live_outs.ll` RUN `opt -S < %s -p loop-vectorize | FileCheck %s`: no -passes / -O pipeline
+- `multiple-early-exits.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 | FileCheck %s`: no -passes / -O pipeline
+- `narrow-to-single-scalar-widen-gep-scalable.ll` RUN `opt -p loop-vectorize -force-vector-width="vscale x 2" -S %s | FileCheck %s`: no -passes / -O pipeline
+- `narrow-to-single-scalar.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S %s | FileCheck --check-prefix=VF4IC1 %s`: no -passes / -O pipeline
+- `narrow-to-single-scalar.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -force-vector-interleave=2 -S %s | FileCheck --check-prefix=VF2IC2 %s`: no -passes / -O pipeline
+- `no_array_bounds.ll` RUN `opt < %s -passes=loop-vectorize,transform-warning -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `no_array_bounds_scalable.ll` RUN `opt < %s -passes=loop-vectorize,transform-warning -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `no_outside_user.ll` RUN `opt -S -passes=loop-vectorize -force-vector-interleave=1 -force-vector-width=2 < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `no_switch.ll` RUN `opt < %s -passes=loop-vectorize,transform-warning -force-vector-width=4 -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `no_switch.ll` RUN `opt < %s -passes=loop-vectorize,transform-warning -force-vector-width=1 -S 2>&1 | FileCheck %s -check-prefix=NOANALYSIS`: redirects or chains commands
+- `no_switch.ll` RUN `opt < %s -passes=loop-vectorize,transform-warning -force-vector-width=4 -pass-remarks-missed='loop-vectorize' -S 2>&1 | FileCheck %s -check-prefix=MOREINFO`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `no_switch_disable_vectorization.ll` RUN `opt < %s -passes=loop-vectorize,transform-warning -force-vector-width=4 -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `no_switch_disable_vectorization.ll` RUN `opt < %s -passes=loop-vectorize,transform-warning -force-vector-width=1 -S 2>&1 | FileCheck %s -check-prefix=NOANALYSIS`: redirects or chains commands
+- `no_switch_disable_vectorization.ll` RUN `opt < %s -passes=loop-vectorize,transform-warning -force-vector-width=4 -pass-remarks-missed='loop-vectorize' -S 2>&1 | FileCheck %s -check-prefix=MOREINFO`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `nofloat-report.ll`: REQUIRES asserts
+- `non-vectorizable-call-remark.ll` RUN `opt < %s -passes=loop-vectorize -disable-output -pass-remarks-output=- 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-output=-
+- `nounroll.ll`: REQUIRES asserts
+- `novect-lcssa-cfg-invalidation.ll` RUN `opt -S -passes="loop-vectorize,jump-threading" -debug-pass-manager < %s 2>&1 | FileCheck %s`: diagnostic output flag -debug-pass-manager
+- `operand-bundles.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `optimal-epilog-vectorization-scalable.ll`: REQUIRES asserts
+- `outer_loop_early_exit.ll`: REQUIRES asserts
+- `outer_loop_scalable.ll` RUN `opt -S -pass-remarks=loop-vectorize -passes=loop-vectorize -enable-vplan-native-path -force-target-supports-scalable-vectors < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=loop-vectorize
+- `outer_loop_scalable.ll` RUN `opt -S -pass-remarks-analysis=loop-vectorize -passes=loop-vectorize -enable-vplan-native-path < %s 2>&1 | FileCheck %s -check-prefix=NO_SCALABLE_VECS`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `phi-cost.ll`: REQUIRES asserts
+- `phi-with-fastflags.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `pointer-induction-index-width-smaller-than-iv-width.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `pr154045-dont-fold-extractelement-livein.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -force-widen-divrem-via-masked-intrinsic=false -S %s | FileCheck %s`: no -passes / -O pipeline
+- `pr25281.ll` RUN `opt < %s  -aa-pipeline=scev-aa -passes='loop-vectorize,print<alias-sets>' -S  -o - 2>&1 | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `pr28541.ll` RUN `opt -passes=loop-vectorize -pass-remarks=loop-vectorize -S < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=loop-vectorize
+- `pr30654-phiscev-sext-trunc.ll` RUN `opt -S -passes=loop-vectorize -force-vector-width=4 -force-vector-interleave=1 < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `pr30806.ll` RUN `opt -passes=loop-vectorize -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `pr31098.ll`: REQUIRES asserts
+- `pr35773.ll` RUN `opt -S -passes=loop-vectorize -force-vector-width=4 -force-vector-interleave=1 < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `pr37515.ll` RUN `opt -passes='loop-vectorize' -S -pass-remarks-missed=loop-vectorize < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `pr38697.ll` RUN `opt -passes=loop-vectorize -force-vector-width=2 -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `pr38697.ll` RUN `opt -passes=indvars -S < %s 2>&1 | FileCheck %s -check-prefix=INDVARCHECK`: redirects or chains commands
+- `pr38800.ll` RUN `opt -passes=loop-vectorize -force-vector-width=2 -pass-remarks-analysis='loop-vectorize' -S < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `pr39099.ll`: REQUIRES asserts
+- `pr66616.ll` RUN `opt -passes="print<scalar-evolution>,loop-vectorize" --verify-scev -S < %s -force-vector-width=4 2>/dev/null | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `predicate-switch.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -force-vector-interleave=1 -S %s | FileCheck --check-prefixes=IC1 %s`: no -passes / -O pipeline
+- `predicate-switch.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -force-vector-interleave=2 -S %s | FileCheck --check-prefixes=IC2 %s`: no -passes / -O pipeline
+- `predicated-early-exits-interleave.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `predicated-multiple-exits.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 | FileCheck %s`: no -passes / -O pipeline
+- `predicated-single-exit.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 | FileCheck %s`: no -passes / -O pipeline
+- `predicator.ll` RUN `opt < %s -S -p loop-vectorize -force-vector-width=4 -force-target-supports-masked-memory-ops | FileCheck %s`: no -passes / -O pipeline
+- `preserve-dbg-loc-and-loop-metadata.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=4 -force-widen-divrem-via-masked-intrinsic=0 -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `preserve-or-disjoint.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `reduction-minmax-users-and-predicated.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `reduction-order.ll` RUN `opt -passes='loop-vectorize' -force-vector-width=4 -force-vector-interleave=1 -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `remarks-multi-exit-loops.ll` RUN `opt -disable-output -passes=loop-vectorize -pass-remarks-analysis='.*' -force-vector-width=2 2>&1 %s | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=.*
+- `remarks-reduction-inloop.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -prefer-inloop-reductions -pass-remarks-analysis=loop-vectorize -S | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `replicate-region-cost-probability.ll`: REQUIRES asserts
+- `reuse-lcssa-phi-scev-expansion.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `runtime-check-address-space.ll` RUN `opt -S -mtriple=r600 -mcpu=cayman -passes=loop-vectorize -force-vector-interleave=1 -force-vector-width=4 < %s | FileCheck %s`: non-x86_64 target r600
+- `runtime-check-known-true.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `runtime-check-pointer-element-type.ll`: REQUIRES asserts
+- `runtime-check-readonly-address-space.ll` RUN `opt -S -mtriple=r600 -mcpu=cayman -passes=loop-vectorize -force-vector-interleave=1 -force-vector-width=4 < %s | FileCheck %s`: non-x86_64 target r600
+- `runtime-check-threshold-with-force-metadata.ll` RUN `opt -p loop-vectorize -vectorize-memory-check-threshold=0 -S %s | FileCheck --check-prefix=LIMIT0 %s`: no -passes / -O pipeline
+- `runtime-check-threshold-with-force-metadata.ll` RUN `opt -p loop-vectorize -vectorize-memory-check-threshold=1 -S %s | FileCheck --check-prefix=LIMIT1 %s`: no -passes / -O pipeline
+- `runtime-check.ll` RUN `opt < %s -aa-pipeline= -passes=loop-vectorize -S -pass-remarks-analysis='loop-vectorize' 2>&1 | FileCheck %s -check-prefix=FORCED_OPTSIZE`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `runtime-checks-hoist.ll`: REQUIRES asserts
+- `scalable-vf-hint.ll`: REQUIRES asserts
+- `scalarize-masked-call.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-interleave=1 -force-vector-width=2 -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `scalarized-bitcast.ll`: REQUIRES asserts
+- `scalarized_conditional_ops_uncountable_exits.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 -enable-early-exit-vectorization-with-side-effects - | FileCheck %s`: no -passes / -O pipeline
+- `scev-invalidation.ll` RUN `opt < %s -passes="require<scalar-evolution>,print<scalar-evolution>,loop-vectorize" --verify-scev -force-vector-interleave=2 -force-vector-width=8 -S | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `select-index-remarks.ll` RUN `opt -passes=loop-vectorize -force-vector-width=4 -pass-remarks-output=%t.yaml -S %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t.yaml
+- `select-index-remarks.ll` RUN `FileCheck --input-file=%t.yaml --check-prefix=REMARKS %s`: not an opt invocation
+- `select-neg-cond.ll` RUN `opt -p loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `simplify-reverse-reverse.ll` RUN `opt -p loop-vectorize -force-vector-width=4 < %s -S | FileCheck %s`: no -passes / -O pipeline
+- `single-early-exit-cond-poison.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=2 -S %s | FileCheck --check-prefix=VF4IC2 %s`: no -passes / -O pipeline
+- `single-early-exit-cond-poison.ll` RUN `opt -p loop-vectorize -force-vector-width=8 -force-vector-interleave=1 -S %s | FileCheck --check-prefix=VF8IC1 %s`: no -passes / -O pipeline
+- `single-early-exit-deref-assumptions.ll` RUN `opt -S < %s -p loop-vectorize -enable-early-exit-vectorization -force-vector-width=4 | FileCheck %s`: no -passes / -O pipeline
+- `single-early-exit-interleave-hint.ll` RUN `opt -p loop-vectorize -enable-early-exit-vectorization -force-vector-width=4 -S %s | FileCheck --check-prefix=VF4IC4 %s`: no -passes / -O pipeline
+- `single-early-exit-interleave-only.ll` RUN `opt -p loop-vectorize -force-vector-width=1 -force-vector-interleave=2 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `single-early-exit-interleave.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=4 -S %s | FileCheck --check-prefix=VF4IC4 %s`: no -passes / -O pipeline
+- `single_early_exit.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 | FileCheck %s`: no -passes / -O pipeline
+- `single_early_exit_live_outs.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 | FileCheck %s`: no -passes / -O pipeline
+- `single_early_exit_unsafe_ptrs.ll` RUN `opt -S < %s -p loop-vectorize | FileCheck %s`: no -passes / -O pipeline
+- `single_early_exit_zext_trip_count.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 | FileCheck %s`: no -passes / -O pipeline
+- `sink-to-early-exit.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 | FileCheck %s`: no -passes / -O pipeline
+- `store-reduction-results-in-tail-folded-loop.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `struct-return.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=2 -force-vector-interleave=1 -S -pass-remarks=loop-vectorize -pass-remarks-analysis=loop-vectorize 2>%t | FileCheck %s`: diagnostic output flag -pass-remarks=loop-vectorize
+- `struct-return.ll` RUN `cat %t | FileCheck --check-prefix=CHECK-REMARKS %s`: not an opt invocation
+- `tail-folding-iv-outside-user.ll` RUN `opt < %s -S -p loop-vectorize -force-vector-width=4 -tail-folding-policy=prefer-fold-tail | FileCheck %s`: no -passes / -O pipeline
+- `tail-folding-masked-mem-opts.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -force-target-supports-masked-memory-ops=true -tail-folding-policy=must-fold-tail -S %s | FileCheck %s --check-prefixes=CHECK,CHECK-MASKED`: no -passes / -O pipeline
+- `tail-folding-masked-mem-opts.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -force-target-supports-masked-memory-ops=false -tail-folding-policy=must-fold-tail -S %s | FileCheck %s --check-prefixes=CHECK,CHECK-PREDICATE`: no -passes / -O pipeline
+- `tail-folding-optimize-vector-induction-width.ll` RUN `opt -p loop-vectorize -force-vector-width=2 -tail-folding-policy=must-fold-tail -S %s | FileCheck %s`: no -passes / -O pipeline
+- `tail-folding-switch.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -tail-folding-policy=must-fold-tail -S %s | FileCheck %s`: no -passes / -O pipeline
+- `tail-folding-vectorization-factor-1.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-interleave=4 -tail-folding-policy=prefer-fold-tail -pass-remarks='loop-vectorize' -disable-output -S 2>&1 | FileCheck %s --check-prefix=CHECK-REMARKS`: diagnostic output flag -pass-remarks=loop-vectorize
+- `tail_fold_uncountable_exits.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 -force-target-supports-masked-memory-ops -enable-early-exit-vectorization-with-side-effects -tail-folding-policy=must-fold-tail -force-tail-folding-style=data - | FileCheck %s`: no -passes / -O pipeline
+- `tail_fold_uncountable_exits.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 -force-target-supports-masked-memory-ops -enable-early-exit-vectorization-with-side-effects -tail-folding-policy=must-fold-tail -force-tail-folding-style=data-without-lane-mask - | FileCheck %s`: no -passes / -O pipeline
+- `tail_fold_uncountable_exits.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 -force-target-supports-masked-memory-ops -enable-early-exit-vectorization-with-side-effects -tail-folding-policy=must-fold-tail -force-tail-folding-style=data-and-control - | FileCheck %s`: no -passes / -O pipeline
+- `tail_fold_uncountable_exits.ll` RUN `opt -S < %s -p loop-vectorize -force-vector-width=4 -force-target-supports-masked-memory-ops -enable-early-exit-vectorization-with-side-effects -tail-folding-policy=must-fold-tail -force-tail-folding-style=data-with-evl - | FileCheck %s`: no -passes / -O pipeline
+- `test-remarks-leak.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=4 -S -pass-remarks-missed='loop-vectorize' 2>&1 | FileCheck %s -check-prefix=CHECK-MISSED-OPT-REMARK`: diagnostic output flag -pass-remarks-missed=loop-vectorize
+- `test-remarks-leak.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-width=4 -S -pass-remarks='loop-vectorize' 2>&1 | FileCheck %s -check-prefix=CHECK-REMARK`: diagnostic output flag -pass-remarks=loop-vectorize
+- `trip-count-expansion-may-introduce-ub.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `trunc-extended-icmps.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `trunc-loads-p16.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `uncountable-single-exit-loops.ll`: REQUIRES asserts
+- `unsafe-dep-remark.ll` RUN `opt -passes=loop-vectorize -force-vector-width=2 -pass-remarks-analysis=loop-vectorize < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `unsafe-ic-hint-remark.ll` RUN `opt -passes=loop-vectorize -pass-remarks-analysis=loop-vectorize -S < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `unsafe-vf-hint-remark.ll`: REQUIRES asserts
+- `unsupported_early_exit.ll` RUN `opt -S < %s -p loop-vectorize  -force-vector-width=4 | FileCheck %s`: no -passes / -O pipeline
+- `unused-blend-mask-for-first-operand.ll` RUN `opt -p loop-vectorize -force-vector-width=4 -force-vector-interleave=1 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `vect.omp.persistence.ll`: REQUIRES asserts
+- `vect.stats.ll`: REQUIRES asserts
+- `vector-loop-backedge-elimination-branch-weights.ll` RUN `opt -p loop-vectorize -force-vector-width=8 -force-vector-interleave=1 -S %s | FileCheck --check-prefixes=VF8UF1 %s`: no -passes / -O pipeline
+- `vector-loop-backedge-elimination-branch-weights.ll` RUN `opt -p loop-vectorize -force-vector-width=8 -force-vector-interleave=2 -S %s | FileCheck --check-prefixes=VF8UF2 %s`: no -passes / -O pipeline
+- `vector-loop-backedge-elimination-branch-weights.ll` RUN `opt -p loop-vectorize -force-vector-width=16 -force-vector-interleave=1 -S %s | FileCheck --check-prefixes=VF16UF1 %s`: no -passes / -O pipeline
+- `vector-loop-backedge-elimination-predicated-early-exit.ll` RUN `opt -p loop-vectorize -S %s | FileCheck %s`: no -passes / -O pipeline
+- `vectorize-loop-kind-metadata.ll` RUN `opt < %s -passes=loop-vectorize -force-vector-interleave=1 -force-vector-width=4 -pass-remarks-analysis=loop-vectorize -S | FileCheck %s --check-prefix=REMARKS`: diagnostic output flag -pass-remarks-analysis=loop-vectorize
+- `vectorizeVFone.ll` RUN `opt < %s -passes=loop-vectorize -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `vplan-native-path-inner-loop-with-runtime-checks.ll` RUN `opt -p loop-vectorize -enable-vplan-native-path -force-vector-width=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `vplan-print-before-after.ll`: REQUIRES asserts
+- `vscale-cost.ll`: REQUIRES asserts

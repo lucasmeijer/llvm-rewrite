@@ -1,0 +1,79 @@
+# Skipped while importing llvm/test/Transforms/PhaseOrdering (llvmorg-23.1.5)
+
+144 of 195 files imported. Regenerate with `./harness/run import-llvm Transforms/PhaseOrdering`.
+
+- `Oz-and-forced-vectorize.ll`: in a AArch64 target directory
+- `block_scaling_decompr_8bit.ll`: in a AArch64 target directory
+- `constraint-elimination-placement.ll`: in a AArch64 target directory
+- `countable-and-uncountable-exits-combined.ll`: in a AArch64 target directory
+- `extra-unroll-simplifications.ll`: in a AArch64 target directory
+- `globals-aa-required-for-vectorization.ll`: in a AArch64 target directory
+- `hoist-load-from-vector-loop.ll`: in a AArch64 target directory
+- `hoist-runtime-checks.ll`: in a AArch64 target directory
+- `hoisting-sinking-required-for-vectorization.ll`: in a AArch64 target directory
+- `indvars-vectorization.ll`: in a AArch64 target directory
+- `infer-align-from-assumption.ll`: in a AArch64 target directory
+- `interleave_vec.ll`: in a AArch64 target directory
+- `interleavevectorization.ll`: in a AArch64 target directory
+- `loop-rotate-to-enable-unrolling-and-vectorization.ll`: in a AArch64 target directory
+- `loopflatten.ll`: in a AArch64 target directory
+- `matrix-extract-insert.ll`: in a AArch64 target directory
+- `memcpy-constant-size.ll`: in a AArch64 target directory
+- `mul-ov.ll`: in a AArch64 target directory
+- `peel-multiple-unreachable-exits-for-vectorization.ll`: in a AArch64 target directory
+- `predicated-reduction.ll`: in a AArch64 target directory
+- `quant_4x4.ll`: in a AArch64 target directory
+- `reduce_muladd.ll`: in a AArch64 target directory
+- `reduce_submuladd.ll`: in a AArch64 target directory
+- `scalarize-load-ext-extract.ll`: in a AArch64 target directory
+- `sinking-vs-if-conversion.ll`: in a AArch64 target directory
+- `slpordering.ll`: in a AArch64 target directory
+- `std-find.ll`: in a AArch64 target directory
+- `sve-interleave-vectorization.ll`: in a AArch64 target directory
+- `trunc-intrinsics.ll`: in a AArch64 target directory
+- `udotabd.ll`: in a AArch64 target directory
+- `vscale.ll`: in a AArch64 target directory
+- `infer-address-space.ll`: in a AMDGPU target directory
+- `arm_add_q7.ll`: in a ARM target directory
+- `arm_fill_q7.ll`: in a ARM target directory
+- `arm_mean_q7.ll`: in a ARM target directory
+- `arm_mult_q15.ll`: in a ARM target directory
+- `arm_var_q31.ll`: in a ARM target directory
+- `mve-floatreduce.ll`: in a ARM target directory
+- `PR6627.ll`: XFAIL in LLVM
+- `any-of-vectorization.ll`: in a RISCV target directory
+- `sub-xor.ll`: in a SystemZ target directory
+- `horizontal-reduce-add.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64    | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-add.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v2 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-add.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v3 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-add.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v4 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-fadd.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64    | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-fadd.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v2 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-fadd.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v3 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-fadd.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v4 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-smax.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64    | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-smax.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v2 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-smax.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v3 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-smax.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v4 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-smin.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64    | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-smin.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v2 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-smin.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v3 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-smin.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v4 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-umax.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64    | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-umax.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v2 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-umax.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v3 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-umax.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v4 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-umin.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64    | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-umin.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v2 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-umin.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v3 | FileCheck %s`: non-x86_64 target i686--
+- `horizontal-reduce-umin.ll` RUN `opt < %s -passes="default<O2>" -S -mtriple=i686--   -mcpu=x86-64-v4 | FileCheck %s`: non-x86_64 target i686--
+- `nancvt.ll`: target triple i686-apple-darwin8
+- `always-inline-alloca-promotion.ll`: uses non-x86 target intrinsic @llvm.aarch64.
+- `globalaa-retained.ll`: target triple aarch64
+- `loop-vectorize-bfi.ll`: REQUIRES riscv-registered-target
+- `openmp-opt-module.ll` RUN `opt -passes='default<O2>' -pass-remarks-missed=openmp-opt < %s 2>&1 | FileCheck %s --check-prefix=MODULE`: diagnostic output flag -pass-remarks-missed=openmp-opt
+- `reassociate-after-unroll.ll`: REQUIRES powerpc-registered-target
+- `scev-custom-dl.ll` RUN `opt -passes='default<O3>,print<scalar-evolution>' -disable-output -S < %s 2>&1 | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `scev.ll` RUN `opt -passes='default<O3>,print<scalar-evolution>' -S < %s 2>&1 | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `speculative-devirt-then-inliner.ll` RUN `opt -S -passes="default<O3>" -enable-devirtualize-speculatively %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `varargs.ll`: REQUIRES amdgpu-registered-target

@@ -1,0 +1,57 @@
+# Skipped while importing llvm/test/Transforms/SimplifyCFG (llvmorg-23.1.5)
+
+289 of 340 files imported. Regenerate with `./harness/run import-llvm Transforms/SimplifyCFG`.
+
+- `2006-08-03-Crash.ll`: target triple powerpc-unknown-linux-gnu
+- `2006-12-08-Ptr-ICmp-Branch.ll`: target triple i686-pc-linux-gnu
+- `2008-01-02-hoist-fp-add.ll`: target triple i686-apple-darwin8
+- `2008-07-13-InfLoopMiscompile.ll`: target triple i386-pc-linux-gnu
+- `2008-12-16-DCECond.ll`: target triple i686-pc-linux-gnu
+- `2009-05-12-externweak.ll`: target triple i386-apple-darwin10.0
+- `cttz-ctlz.ll`: in a AArch64 target directory
+- `prefer-fma.ll`: in a AArch64 target directory
+- `switch-to-lookup-table-vector-constants.ll`: in a AArch64 target directory
+- `two-entry-phi-fold-unpredictable.ll`: in a AArch64 target directory
+- `cttz-ctlz.ll`: in a AMDGPU target directory
+- `branch-fold-threshold.ll`: in a ARM target directory
+- `cttz-ctlz.ll`: in a ARM target directory
+- `phi-eliminate.ll`: in a ARM target directory
+- `select-costs.ll`: in a ARM target directory
+- `select-trunc-i64.ll`: in a ARM target directory
+- `speculate-math.ll`: in a ARM target directory
+- `speculate-vector-ops-inseltpoison.ll`: in a ARM target directory
+- `speculate-vector-ops.ll`: in a ARM target directory
+- `switch-to-lookup-table-constant-expr.ll`: in a ARM target directory
+- `switch-to-lookup-table.ll`: in a ARM target directory
+- `no-phi-dxgetpointer.ll`: in a DirectX target directory
+- `no-sink-dxgetpointer.ll`: in a DirectX target directory
+- `disable-lookup-table.ll`: in a Hexagon target directory
+- `switch-to-lookup-table.ll`: in a Hexagon target directory
+- `InfLoop.ll`: target triple thumbv7-apple-ios9.0.0
+- `cttz-ctlz.ll`: in a Mips target directory
+- `cttz-ctlz-spec.ll`: in a PowerPC target directory
+- `prefer-fma.ll`: in a PowerPC target directory
+- `prefer-load-i32.ll`: in a PowerPC target directory
+- `select-trunc-i64.ll`: in a RISCV target directory
+- `switch-of-powers-of-two.ll`: in a RISCV target directory
+- `switch_to_lookup_table-rv32.ll`: in a RISCV target directory
+- `switch_to_lookup_table-rv64.ll`: in a RISCV target directory
+- `umul-extract-pattern.ll`: in a RISCV target directory
+- `switch_to_lookup_table.ll` RUN `opt < %s -passes=simplifycfg -simplifycfg-require-and-preserve-domtree=1 -S -mtriple=sparc-unknown-unknown | FileCheck %s`: non-x86_64 target sparc-unknown-unknown
+- `no-sink-spvgetpointer.ll`: in a SPIRV target directory
+- `critedge-assume.ll` RUN `opt -o %t %s -passes=instcombine,simplifycfg -simplifycfg-require-and-preserve-domtree=1 -thinlto-bc -verify-assumption-cache`: writes to a file
+- `critedge-assume.ll` RUN `llvm-dis -o - %t | FileCheck %s`: not an opt invocation
+- `debugloc-invoke-to-call-br.ll` RUN `opt < %s -p=simplifycfg -S | FileCheck %s`: no -passes / -O pipeline
+- `fake-use-considered-when-sinking.ll` RUN `opt -p="simplifycfg<sink-common-insts>" -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `invalidate-dom.ll`: REQUIRES asserts
+- `switch_to_lookup_table_big.ll`: target triple i386-pc-linux-gnu
+- `cleanup-phis.ll`: target triple wasm32-unknown-unknown
+- `dbgloc-merge-invoke.ll` RUN `opt < %s -p="simplifycfg<sink-common-insts>" -S | FileCheck %s`: no -passes / -O pipeline
+- `gepcost.ll`: target triple thumbv7m-none--eabi
+- `hoisting-metadata.ll` RUN `opt -p simplifycfg -S %s | FileCheck %s`: no -passes / -O pipeline
+- `merge-cond-stores-2.ll`: target triple armv7--linux-gnueabihf
+- `switch-transformations-no-lut.ll` RUN `%if amdgpu-registered-target %{ opt -mtriple=amdgpu--amdpal -S -passes='simplifycfg<switch-to-lookup>' < %s | FileCheck %s --check-prefix=TTINOLUT %}`: not an opt invocation
+- `token_like_type.ll`: uses non-x86 target intrinsic @llvm.dx.
+- `trapping-load-unreachable.ll`: target triple i386-pc-linux-gnu
+- `two-entry-phi-fold-crash.ll` RUN `opt < %s -S -passes=simplifycfg -simplifycfg-require-and-preserve-domtree=1 2>&1 | FileCheck %s`: redirects or chains commands
+- `unreachable-cleanuppad.ll`: target triple i686-pc-win32

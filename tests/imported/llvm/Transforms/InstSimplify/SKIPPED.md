@@ -1,0 +1,45 @@
+# Skipped while importing llvm/test/Transforms/InstSimplify (llvmorg-23.1.5)
+
+249 of 289 files imported. Regenerate with `./harness/run import-llvm Transforms/InstSimplify`.
+
+- `aarch64-sve-reductions.ll`: in a AArch64 target directory
+- `aarch64-sve-convert-from-svbool.ll`: in a AArch64 target directory
+- `cos.ll`: in a AMDGPU target directory
+- `cubeid.ll`: in a AMDGPU target directory
+- `cubema.ll`: in a AMDGPU target directory
+- `cubesc.ll`: in a AMDGPU target directory
+- `cubetc.ll`: in a AMDGPU target directory
+- `fma_legacy.ll`: in a AMDGPU target directory
+- `fmul_legacy.ll`: in a AMDGPU target directory
+- `fract.ll`: in a AMDGPU target directory
+- `perm.ll`: in a AMDGPU target directory
+- `sin.ll`: in a AMDGPU target directory
+- `wave.reduce.ll`: in a AMDGPU target directory
+- `mve-vctp.ll`: in a ARM target directory
+- `any_all_true.ll`: in a WebAssembly target directory
+- `dot.ll`: in a WebAssembly target directory
+- `trunc.ll`: in a WebAssembly target directory
+- `allones.ll`: target triple armv7-unknown-linux-gnueabi
+- `constant-expr.ll` RUN `llvm-as < %s | llvm-dis | FileCheck %s`: not an opt invocation
+- `gep-constanfolding-error.ll`: target triple armv7-none-eabi
+- `gep.ll` @opt `-passes=instcombine`: oracle fails
+- `gep.ll`: no working RUN lines
+- `logf128.ll`: REQUIRES has_logf128
+- `timeout.ll`: target triple armv8-none-eabi
+- `vscale-getelementptr.ll`: target triple aarch64
+- `vscale-shufflevector-inseltpoison.ll`: target triple aarch64
+- `vscale-shufflevector.ll`: target triple aarch64
+- `const-fold-nvvm-add.ll`: uses non-x86 target intrinsic @llvm.nvvm.
+- `const-fold-nvvm-div.ll`: uses non-x86 target intrinsic @llvm.nvvm.
+- `const-fold-nvvm-f2i-d2i.ll`: uses non-x86 target intrinsic @llvm.nvvm.
+- `const-fold-nvvm-f2ll-d2ll.ll`: uses non-x86 target intrinsic @llvm.nvvm.
+- `const-fold-nvvm-fma.ll`: uses non-x86 target intrinsic @llvm.nvvm.
+- `const-fold-nvvm-fmin-fmax.ll`: uses non-x86 target intrinsic @llvm.nvvm.
+- `const-fold-nvvm-mul.ll`: uses non-x86 target intrinsic @llvm.nvvm.
+- `const-fold-nvvm-unary-arithmetic.ll`: uses non-x86 target intrinsic @llvm.nvvm.
+- `constant-fold-inttoptr-add.ll` RUN `opt -p instsimplify -S %s | FileCheck %s`: no -passes / -O pipeline
+- `disable_folding.ll`: uses non-x86 target intrinsic @llvm.nvvm.
+- `load-relative-32.ll`: target triple i386-unknown-linux-gnu
+- `po2-shift-add-and-to-zero.ll`: uses non-x86 target intrinsic @llvm.aarch64.
+- `shift-128-kb.ll`: target triple powerpc64-unknown-linux-gnu
+- `vector-splice.ll` RUN `opt < %s -p instsimplify -S | FileCheck %s`: no -passes / -O pipeline

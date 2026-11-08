@@ -1,0 +1,129 @@
+<div id="lplan-r2" class="ic-stack">
+<style>
+  #lplan-r2 section { border-top: 1px solid var(--ic-border); padding-top: .75rem; }
+  #lplan-r2 section:first-child { border-top: none; padding-top: 0; }
+  #lplan-r2 h3 { margin: 0 0 .35rem; }
+  #lplan-r2 h3 .n { color: var(--ic-accent); margin-right: .35rem; }
+  #lplan-r2 p { margin: .35rem 0; }
+  #lplan-r2 ol[type="A"] li { margin: .25rem 0; }
+  #lplan-r2 pre { margin: .4rem 0; overflow-x: auto; }
+</style>
+
+<section>
+  <h3><span class="n">1</span>Several attempts in one repo, sharing one harness and one test corpus</h3>
+  <p>Layout: <code>harness/</code>, <code>tests/</code>, <code>knowledge/</code> and the skills are shared. Each attempt is a self-contained <code>impl/&lt;lang&gt;/</code> with its own build script. Each one produces three binaries, <code>impl/&lt;lang&gt;/bin/{opt,llc,llvm-link}</code>, with the command line agreed in decision 5. The harness takes <code>--impl &lt;lang&gt;</code>. A test written while working on one attempt is immediately available to all the others. The first three attempts are <strong>C (C11)</strong>, <strong>Rust</strong> and <strong>Zig</strong>. They start in parallel once the harness and layer 0's test corpus exist.</p>
+  <details class="ic-quiet">
+    <summary>Why these three languages, and why one repo?</summary>
+    <p>All three can be written in a data-oriented style, and they cover the range of how much the language helps: C gives nothing and takes nothing away; Rust gives memory safety but pushes back on index-heavy mutable designs, so it's interesting to see whether that helps or hurts; Zig has data-oriented idioms built in (MultiArrayList, allocators passed explicitly, comptime) and its own compiler is a well-known example of the style. One repo means one test corpus and one scoreboard, so <code>harness status --all</code> compares the attempts directly. It also means a fact one attempt learns about LLVM benefits the others.</p>
+    <p>Starting only after the harness exists means no attempt invents its own testing setup.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>Odin instead of Zig: designed explicitly for data-oriented programming (SoA built into the language), but agents have less training data for it.</li>
+      <li>Jai as one of the attempts, if your compiler beta can be installed in the workspaces.</li>
+      <li>One repo per attempt, with the harness and tests as a git submodule: the attempts are better isolated, but sharing tests and knowledge gets awkward.</li>
+      <li>Start with one attempt through layer 1, then fork the others: the harness gets more shakedown first, at the cost of slower comparison between attempts.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">2</span>Data-oriented rules, the same for every attempt</h3>
+  <p><code>docs/data-oriented-design.md</code> is binding for every attempt:</p>
+  <ul>
+    <li>No classes, inheritance, virtual dispatch, trait objects or visitor patterns. Plain structs and free functions, and passes are functions over the module's tables.</li>
+    <li>Entities (values, instructions, blocks, functions, types, uses) are rows in arrays, referenced by 32-bit indices, never by pointers. Instruction kind is an enum tag, dispatched with a <code>switch</code>.</li>
+    <li>Hot data goes in structure-of-arrays form; variable-length operands live in shared side arrays, addressed by (start, count).</li>
+    <li>Allocation happens in arenas per module and per pass, with no allocation per node. Types and constants are interned once.</li>
+  </ul>
+  <p>Each attempt chooses its own concrete layout and documents it in <code>impl/&lt;lang&gt;/DESIGN.md</code>.</p>
+  <details class="ic-quiet">
+    <summary>How do we copy LLVM's behaviour exactly without copying its object structure?</summary>
+    <p>LLVM's output depends on things that look like implementation details. Use-lists are ordered (a new use is pushed onto the front of the list). InstCombine visits its worklist in a particular order, and so do RAUW and value-name uniquing (<code>%x.1</code>). The order in which IR folds constants also shows in the output. An IR that's identical on every pass has to reproduce those observable orders, so each attempt's design doc must state how its tables preserve them. This is the most likely place where data-oriented design and exact output collide, and the design docs are where the attempts will differ most.</p>
+    <p>Each attempt choosing its own layout is what makes several attempts worth having. The shared rules keep them all honestly data-oriented.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>One shared reference layout (an exact table schema) that every attempt implements: easier to compare, less to explore.</li>
+      <li>Rules only, with no per-attempt DESIGN.md.</li>
+      <li>Stricter rules: no methods at all (Rust <code>impl</code> blocks only for trivial accessors), and every hot table must be SoA.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">3</span>IR must match exactly all the way up to instruction selection</h3>
+  <p>Exact matching of IR covers everything up to the input of instruction selection, not just <code>opt</code>. At -O2, llc also runs IR→IR passes before isel (loop-strength-reduce, codegenprepare, expand-memcmp, atomic-expand, partially-inline-libcalls…). Those get pass tests too, run with <code>-mtriple=x86_64-unknown-linux-gnu</code>. Our llc must accept <code>-print-before=x86-isel</code> (or an equivalent dump), and the harness compares that IR against LLVM's for every e2e test. Only what happens after that point is judged by running the program.</p>
+  <details class="ic-quiet">
+    <summary>Why draw the line at isel and not at the end of opt?</summary>
+    <p>If the boundary were the end of <code>opt</code>, llc's IR passes would sit in a blind spot: their bugs would only show up as wrong program output, deep inside a backend we're allowed to do differently. Moving the line to isel makes "everything we compare exactly is IR" literally true. It also gives each e2e test a second, stronger check: the IR entering isel must match, and the program must behave the same. The exact flag for capturing pre-isel IR from LLVM 23's x86 backend gets confirmed during bootstrap.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>Boundary at the end of <code>opt</code>, with llc's IR passes treated as part of the backend.</li>
+      <li>Also require exact matches for the generic machine IR (MIR) after IRTranslator: stricter, but it locks us into LLVM's isel structure.</li>
+      <li>Only compare the pre-isel IR when a test asks for it, not for every e2e test.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">4</span>Python harness, live oracle with a cache, and a passing list per attempt</h3>
+  <p><code>harness/</code> is plain Python 3 (standard library only), driving binaries as subprocesses. Following your choice of 6A, LLVM's outputs are computed live and cached in <code>.cache/oracle/</code>, keyed by a hash of (input, command, LLVM version). Since status now depends on the attempt, the in-file <code>STATUS:</code> is dropped. Instead each attempt has <code>impl/&lt;lang&gt;/passing.txt</code> (sorted). <code>harness check --impl X</code> fails if a listed test fails, and <code>--update</code> adds tests that have started passing. Pending = in the corpus but not in the list.</p>
+  <details class="ic-quiet">
+    <summary>Why Python and not one of the attempt languages?</summary>
+    <p>The harness has to be neutral between attempts and readable by every agent, and all it does is orchestrate subprocesses. Python needs no build and is already installed. A standard-library-only rule means there's nothing to set up. With the cache, a re-run only invokes LLVM for tests that are new or have changed, so the pre-push check stays fast. Sorted lists in separate files per attempt mean agents on different attempts never touch the same file. Two agents on the same attempt usually add lines in different places, which git merges cleanly, and the rule on conflicts is "take the union, re-run".</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>Write the harness in Rust: faster and typed, but it then leans toward one of the attempts and needs a build.</li>
+      <li>A single <code>status.tsv</code> file with a column per attempt: one table, but every agent edits the same file.</li>
+      <li>No cache: simpler, but every check re-runs LLVM on every test.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">5</span>Push straight to main, enforced by a local pre-push hook</h3>
+  <p>An agent pushes to <code>origin main</code> (<code>lucasmeijer/llvm-rewrite</code>, using it only as a git remote) when a unit of work is complete. The protocol: commit, <code>git pull --rebase</code>, run <code>harness check</code> on the rebased tree for every attempt the commit touches, then push. If someone else pushed in the meantime, repeat. A versioned <code>.githooks/pre-push</code> hook runs the same check. <code>scripts/setup.sh</code> sets <code>core.hooksPath</code>, so the ratchet holds even without CI. Who does which unit is up to the loop you're designing. <code>docs/roadmap.md</code> lists the units for each layer, and an agent ticks one off in the same commit that completes it.</p>
+  <details class="ic-quiet">
+    <summary>Why a hook, and why should shared changes check every attempt?</summary>
+    <p>Without CI, the only thing between a regression and main is the agent's own discipline. A hook turns that into a mechanism. A commit that changes only <code>impl/zig/</code> needs only the Zig check. A commit to <code>harness/</code> or <code>tests/</code> can break other attempts' ratchets (for example a new test whose oracle input crashes the harness), so those commits run every attempt's check.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>A bare repo in <code>/persistent</code> as the shared remote, so nothing touches GitHub at all.</li>
+      <li>No hook, just the instruction in AGENTS.md.</li>
+      <li>Shared-file commits check only the current attempt; other attempts repair their own ratchet when they next pull.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">6</span>Three places for notes: knowledge about LLVM, notes per attempt, and challenge reports for you</h3>
+<pre><code>knowledge/llvm/&lt;area&gt;.md          facts about LLVM behaviour, shared by all attempts
+impl/&lt;lang&gt;/NOTES.md              findings specific to one attempt or language
+reports/challenges/&lt;date&gt;-&lt;lang&gt;-&lt;slug&gt;.md   one file per challenge, for you</code></pre>
+  <p><strong>knowledge/</strong> is organised by topic (<code>instcombine.md</code>, <code>use-list-order.md</code>, <code>sysv-abi.md</code>…). It holds things like "opt infers <code>nofree</code> here because…", and agents read the relevant file before they start work in that area. <strong>reports/challenges/</strong> is about the process, not the compiler: unclear instructions, a harness that was slow or misleading, a unit that was too big, where the agent got stuck or had to guess. Each file has fixed fields: <em>what happened · time/effort lost · what would have helped</em>. Before an agent pushes a unit, it writes a challenge report if anything got in its way.</p>
+  <details class="ic-quiet">
+    <summary>Why one file per challenge but one file per topic for knowledge?</summary>
+    <p>Many agents write challenge reports at the same time, and appending to a single shared file conflicts on every rebase. One file per report never conflicts, and you can sort and grep them by date and attempt when you tune the loop. Knowledge is meant to be curated, not appended: an agent edits the topic file and corrects stale claims. Topics rarely collide, and grouping by topic is what makes it findable. When a knowledge topic settles, it can be promoted into a skill.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>One file per finding for knowledge too (no conflicts, but a pile of files nobody reads).</li>
+      <li>Single append-only <code>FINDINGS.md</code> and <code>CHALLENGES.md</code> at the root.</li>
+      <li>Add a third report type, <code>reports/units/</code>, a short summary of each completed unit (time taken, tests moved), giving your loop a progress log.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">7</span>LLVM 23.1.5 from the official release tarball, fetched by a script</h3>
+  <p>The latest official release is <strong>LLVM 23.1.5</strong> (published four days ago). <code>scripts/fetch-llvm.sh</code> downloads <code>LLVM-23.1.5-Linux-X64.tar.xz</code> from the GitHub release (about 2 GB, signature checked) into gitignored <code>third_party/llvm/</code>, and does a sparse checkout of the source at <code>llvmorg-23.1.5</code> (<code>llvm/lib</code>, <code>llvm/include</code>, <code>llvm/test</code>) for reading. Everything uses that clang (including generating tests) and those tools. The harness refuses to run against any other version. Moving to a newer release is a deliberate, separate unit of work.</p>
+  <details class="ic-quiet">
+    <summary>Why not apt.llvm.org, or a source build?</summary>
+    <p>The official tarball is exactly "the release", needs no root, and works the same in every workspace. apt.llvm.org packages are built from snapshots and get patched by distributions. A source build with assertions on is still a good later addition (alternative 1C from round 1). Bootstrap checks that the tarball contains everything the harness needs (<code>opt</code>, <code>llc</code>, <code>llvm-as</code>, <code>llvm-dis</code>, <code>llvm-link</code>, <code>llvm-reduce</code>).</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>Use the apt.llvm.org <code>llvm-23</code> packages.</li>
+      <li>Build from source with assertions, and keep the result in <code>/persistent</code> so workspaces can share it.</li>
+      <li>Keep the tarball in <code>/persistent</code> too, so new workspaces skip the 2 GB download.</li>
+    </ol>
+  </details>
+</section>
+</div>

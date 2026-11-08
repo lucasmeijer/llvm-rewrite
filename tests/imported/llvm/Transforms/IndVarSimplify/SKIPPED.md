@@ -1,0 +1,53 @@
+# Skipped while importing llvm/test/Transforms/IndVarSimplify (llvmorg-23.1.5)
+
+223 of 271 files imported. Regenerate with `./harness/run import-llvm Transforms/IndVarSimplify`.
+
+- `2006-12-10-BitCast.ll`: target triple i686-apple-darwin8
+- `2007-01-06-TripCount.ll`: target triple i686-apple-darwin8
+- `2009-05-24-useafterfree.ll`: target triple i386-pc-linux-gnu
+- `2011-10-27-lftrnull.ll`: target triple thumbv7-apple-darwin
+- `expand-ptrtoaddr-reuse-ptrtoint.ll`: in a AArch64 target directory
+- `fold-ext-add.ll`: in a AArch64 target directory
+- `loop-guards.ll`: in a AArch64 target directory
+- `widen-loop-comp.ll`: in a AArch64 target directory
+- `addrspace-7-doesnt-crash.ll`: in a AMDGPU target directory
+- `no-widen-to-i64.ll`: in a AMDGPU target directory
+- `code-size.ll`: in a ARM target directory
+- `indvar-cost.ll`: in a ARM target directory
+- `indvar-unroll-imm-cost.ll`: in a ARM target directory
+- `no-widen-expensive.ll`: in a NVPTX target directory
+- `ada-loops.ll`: target triple i686-pc-linux-gnu
+- `add-nsw-zext-fold.ll` RUN `opt -p indvars -S %s | FileCheck %s`: no -passes / -O pipeline
+- `bec-cmp.ll`: target triple powerpc64-unknown-linux-gnu
+- `casted-argument.ll`: target triple i386-pc-linux-gnu
+- `convergent-controlled-loop.ll`: uses non-x86 target intrinsic @llvm.dx.
+- `dangling-use.ll`: target triple powerpc-unknown-linux-gnu
+- `debugloc-rem-subst.ll` RUN `opt < %s -p=indvars -S | FileCheck %s`: no -passes / -O pipeline
+- `deterministic-sign.ll`: target triple aarch64-unknown-linux-gnu
+- `divide-pointer.ll`: target triple i386-apple-darwin10.0
+- `hoist-wide-inc-for-narrow-use-recompute-flags.ll` RUN `opt -p indvars -S %s | FileCheck %s`: no -passes / -O pipeline
+- `interesting-invoke-use.ll`: target triple i386-pc-linux-gnu
+- `iterationCount_zext_or_trunc.ll`: target triple i686-pc-linux-gnu
+- `iv-cmp-sext.ll`: target triple riscv64
+- `loop-guard-order.ll` RUN `opt -p indvars -S %s | FileCheck %s`: no -passes / -O pipeline
+- `loop_evaluate7.ll`: target triple i386-pc-linux-gnu
+- `loop_evaluate8.ll`: target triple i386-pc-linux-gnu
+- `loop_evaluate9.ll`: XFAIL in LLVM
+- `loop_evaluate_5.ll`: target triple i686-pc-linux-gnu
+- `phi-uses-value-multiple-times.ll`: REQUIRES asserts
+- `pointer-loop-guards.ll` RUN `opt -p indvars -S %s | FileCheck %s`: no -passes / -O pipeline
+- `pointer-loop-guards.ll` RUN `opt -p indvars  -data-layout='n32:64' -S %s | FileCheck --check-prefix=N32 %s`: no -passes / -O pipeline
+- `pr24783.ll`: target triple powerpc64-unknown-linux-gnu
+- `pr55689.ll`: REQUIRES asserts
+- `pr63763.ll` RUN `opt -S -passes='print<scalar-evolution>,indvars' < %s 2>/dev/null | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `pr68260.ll` RUN `opt -S -passes='print<scalar-evolution>,loop(loop-unroll-full,indvars)' < %s 2>/dev/null | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `preserve-memoryssa.ll`: REQUIRES asserts
+- `preserve-nsw-during-expansion.ll` RUN `opt -p indvars -S -o - %s | FileCheck %s`: no -passes / -O pipeline
+- `scev-update-loop-opt.ll`: REQUIRES asserts
+- `shrunk-constant.ll` RUN `opt < %s -passes='print<scalar-evolution>' 2>&1 | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `simplify-icmp-operands-order.ll` RUN `opt -p indvars -S %s | FileCheck %s`: no -passes / -O pipeline
+- `single-element-range.ll`: target triple armv6-apple-darwin10
+- `sink-alloca.ll`: target triple i386-apple-darwin10.0
+- `sink-from-preheader.ll`: target triple i386-apple-darwin10.0
+- `skip-predication-convergence.ll`: uses non-x86 target intrinsic @llvm.spv.
+- `skip-predication-nested-convergence.ll`: uses non-x86 target intrinsic @llvm.spv.

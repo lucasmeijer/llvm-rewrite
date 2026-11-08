@@ -1,0 +1,18 @@
+; @origin: llvm/test/Transforms/Mem2Reg/2003-04-24-MultipleIdenticalSuccessors.ll (llvmorg-23.1.5)
+; @opt: -passes=mem2reg
+; Mem2reg used to only add one incoming value to a PHI node, even if it had
+; multiple incoming edges from a block.
+;
+; RUN: opt < %s -passes=mem2reg -disable-output
+
+define i32 @test(i1 %c1, i1 %c2) {
+	%X = alloca i32		; <ptr> [#uses=2]
+	br i1 %c1, label %Exit, label %B2
+B2:		; preds = %0
+	store i32 2, ptr %X
+	br i1 %c2, label %Exit, label %Exit
+Exit:		; preds = %B2, %B2, %0
+	%Y = load i32, ptr %X		; <i32> [#uses=1]
+	ret i32 %Y
+}
+

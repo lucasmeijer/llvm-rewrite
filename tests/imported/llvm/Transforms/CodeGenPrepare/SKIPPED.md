@@ -1,0 +1,94 @@
+# Skipped while importing llvm/test/Transforms/CodeGenPrepare (llvmorg-23.1.5)
+
+46 of 129 files imported. Regenerate with `./harness/run import-llvm Transforms/CodeGenPrepare`.
+
+- `combine-address-mode.ll`: in a AArch64 target directory
+- `dont-sink-scalable-vector-compare.ll`: in a AArch64 target directory
+- `fpclass-test.ll`: in a AArch64 target directory
+- `free-zext.ll`: in a AArch64 target directory
+- `gather-scatter-opt-inseltpoison.ll`: in a AArch64 target directory
+- `gather-scatter-opt.ll`: in a AArch64 target directory
+- `large-offset-gep.ll`: in a AArch64 target directory
+- `overflow-intrinsics.ll`: in a AArch64 target directory
+- `reduce-or-opt.ll`: in a AArch64 target directory
+- `sink-free-instructions-inseltpoison.ll`: in a AArch64 target directory
+- `sink-free-instructions.ll`: in a AArch64 target directory
+- `sink-gather-scatter-addressing.ll`: in a AArch64 target directory
+- `trunc-weird-user.ll`: in a AArch64 target directory
+- `widen_switch.ll`: in a AArch64 target directory
+- `zext-to-shuffle.ll`: in a AArch64 target directory
+- `addressing-modes.ll`: in a AMDGPU target directory
+- `bypass-slow-div-debug-info-inseltpoison.ll`: in a AMDGPU target directory
+- `bypass-slow-div-debug-info.ll`: in a AMDGPU target directory
+- `no-sink-addrspacecast.ll`: in a AMDGPU target directory
+- `sink-addrspacecast.ll`: in a AMDGPU target directory
+- `bitreverse-recognize.ll`: in a ARM target directory
+- `branch-on-zero.ll`: in a ARM target directory
+- `dead-gep.ll`: in a ARM target directory
+- `large-offset-gep.ll`: in a ARM target directory
+- `memory-intrinsics.ll`: in a ARM target directory
+- `overflow-intrinsics.ll`: in a ARM target directory
+- `sink-add-mul-shufflevector-inseltpoison.ll`: in a ARM target directory
+- `sink-add-mul-shufflevector.ll`: in a ARM target directory
+- `sink-addrmode.ll`: in a ARM target directory
+- `sink-free-instructions-inseltpoison.ll`: in a ARM target directory
+- `sink-free-instructions.ll`: in a ARM target directory
+- `sink-negative-scale.ll`: in a ARM target directory
+- `sinkchain-inseltpoison.ll`: in a ARM target directory
+- `sinkchain.ll`: in a ARM target directory
+- `splitgep.ll`: in a ARM target directory
+- `tailcall-dup.ll`: in a ARM target directory
+- `splitgep.ll`: in a LoongArch target directory
+- `pr35209.ll`: in a Mips target directory
+- `bypass-slow-div-constant-numerator.ll`: in a NVPTX target directory
+- `bypass-slow-div-not-exact.ll`: in a NVPTX target directory
+- `bypass-slow-div-special-cases.ll`: in a NVPTX target directory
+- `bypass-slow-div.ll`: in a NVPTX target directory
+- `dont-introduce-addrspacecast.ll`: in a NVPTX target directory
+- `dont-sink-nop-addrspacecast.ll`: in a NVPTX target directory
+- `split-store-alignment.ll`: in a PowerPC target directory
+- `and-mask-sink.ll`: in a RISCV target directory
+- `convert-to-eqz.ll`: in a RISCV target directory
+- `cttz-ctlz.ll`: in a RISCV target directory
+- `fpclass-test.ll`: in a RISCV target directory
+- `noop-copy-sink.ll`: in a RISCV target directory
+- `xqcilo.ll`: in a RISCV target directory
+- `overflow-intrinsics.ll`: target triple sparc64-unknown-linux
+- `2008-11-24-RAUW-Self.ll` RUN `opt < %s -codegenprepare | llvm-dis`: no -passes / -O pipeline
+- `bitreverse-hang.ll` RUN `opt < %s -loop-unroll -codegenprepare -S -mtriple=x86_64 | FileCheck %s`: no -passes / -O pipeline
+- `bitreverse-recognize.ll` RUN `opt < %s -loop-unroll -codegenprepare -S -mtriple=x86_64-- -mattr=+xop | FileCheck %s`: no -passes / -O pipeline
+- `cast-debuginfo-salvage.ll` RUN `opt -S -codegenprepare -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s`: no -passes / -O pipeline
+- `ext-logicop.ll` RUN `opt < %s -codegenprepare -S -mtriple=x86_64-unknown-unknown    | FileCheck %s`: no -passes / -O pipeline
+- `fake-use-split-ret.ll` RUN `opt -mtriple=x86_64-unknown-unknown -S -codegenprepare <%s -o - | FileCheck %s`: no -passes / -O pipeline
+- `fcmp-sinking.ll` RUN `opt %s -codegenprepare -mattr=+soft-float -S | FileCheck %s -check-prefix=CHECK -check-prefix=SOFTFP`: no -passes / -O pipeline
+- `fcmp-sinking.ll` RUN `opt %s -codegenprepare -mattr=-soft-float -S | FileCheck %s -check-prefix=CHECK -check-prefix=HARDFP`: no -passes / -O pipeline
+- `fold-loop-of-urem.ll` RUN `opt < %s -mtriple=x86_64-unknown-unknown --loop-simplify -codegenprepare -S | FileCheck %s`: no -passes / -O pipeline
+- `fpclass-test.ll` RUN `opt -codegenprepare -S -mtriple=x86_64-unknown-unknown < %s | FileCheck %s`: no -passes / -O pipeline
+- `icmp-swap-loop.ll` RUN `opt -S -mtriple=x86_64-- -codegenprepare < %s | FileCheck %s`: no -passes / -O pipeline
+- `memset_chk-simplify-nobuiltin.ll` RUN `opt -S -mtriple=x86_64 -disable-simplify-libcalls -codegenprepare < %s | FileCheck %s`: no -passes / -O pipeline
+- `multi-extension.ll` RUN `opt < %s -codegenprepare -S -mtriple=x86_64-unknown-unknown    | FileCheck %s`: no -passes / -O pipeline
+- `null-psi-no-crash.ll` RUN `not opt -passes=codegenprepare -mtriple=x86_64-linux-gnu -disable-output < %s 2>&1 | FileCheck %s`: not an opt invocation
+- `overflow-intrinsics.ll` RUN `opt -enable-debugify -passes='require<profile-summary>,function(codegenprepare)' -S < %s 2>&1 | FileCheck %s -check-prefix=DEBUG`: redirects or chains commands
+- `promoted-trunc-loc.ll` RUN `opt < %s -codegenprepare -S -mtriple=x86_64-unknown-unknown | FileCheck %s --match-full-lines`: no -passes / -O pipeline
+- `promoted-zext-debugloc.ll` RUN `opt < %s -codegenprepare -S -mtriple=x86_64-unknown-unknown | FileCheck %s --match-full-lines`: no -passes / -O pipeline
+- `section-samplepgo.ll` RUN `opt < %s -codegenprepare -S | FileCheck %s`: no -passes / -O pipeline
+- `section.ll` RUN `opt < %s -codegenprepare -S | FileCheck %s`: no -passes / -O pipeline
+- `section.ll` RUN `llc < %s | FileCheck --check-prefix=ASM1 %s`: not an opt invocation
+- `section.ll` RUN `llc < %s -function-sections | FileCheck --check-prefix=ASM2 %s`: not an opt invocation
+- `sink-addr-recreate.ll` RUN `opt -S -p 'require<profile-summary>,codegenprepare' -cgpp-huge-func=0 < %s | FileCheck %s`: no -passes / -O pipeline
+- `sink-addr-reuse.ll` RUN `opt -S -p 'require<profile-summary>,codegenprepare' -cgpp-huge-func=0 < %s | FileCheck %s`: no -passes / -O pipeline
+- `split-branch-cond-weights.ll` RUN `llc -fast-isel -stop-after=codegenprepare -mtriple=x86_64-unknown-linux-gnu -o - < %s | FileCheck %s`: not an opt invocation
+- `split-store-alignment.ll`: target triple i686-w64-windows-gnu
+- `switch-phi-const.ll` RUN `opt %s -mtriple=x86_64-- -codegenprepare -S | FileCheck %s`: no -passes / -O pipeline
+- `vec-shift-inseltpoison.ll` RUN `opt -passes='require<profile-summary>,function(codegenprepare)' -mtriple=x86_64-- -mattr=+avx -S -enable-debugify < %s 2>&1 | FileCheck %s -check-prefix=DEBUG`: redirects or chains commands
+- `vec-shift.ll` RUN `opt -passes='require<profile-summary>,function(codegenprepare)' -mtriple=x86_64-- -mattr=+avx -S -enable-debugify < %s 2>&1 | FileCheck %s -check-prefix=DEBUG`: redirects or chains commands
+- `widen_switch.ll` RUN `opt < %s -codegenprepare -S -mtriple=x86_64-unknown-unknown    | FileCheck %s --check-prefix=X86`: no -passes / -O pipeline
+- `widen_switch.ll` RUN `opt < %s -debugify -codegenprepare -S -mtriple=x86_64-unknown-unknown | FileCheck %s --check-prefix=DEBUG`: diagnostic output flag -debugify
+- `dead-allocation.ll`: REQUIRES arm-registered-target
+- `debug-info-on-skipped-selects.ll` RUN `llc %s -stop-after=codegenprepare -o - | FileCheck %s`: not an opt invocation
+- `dom-tree.ll`: REQUIRES arm-registered-target
+- `revert-constant-ptr-propagation-on-calls.ll`: REQUIRES aarch64-registered-target
+- `sink-shift-and-trunc.ll`: REQUIRES aarch64-registered-target
+- `skip-merging-case-block.ll`: REQUIRES aarch64-registered-target
+- `unfold-pow2-test-vec.ll`: REQUIRES riscv-registered-target
+- `unfold-pow2-test.ll`: REQUIRES riscv-registered-target

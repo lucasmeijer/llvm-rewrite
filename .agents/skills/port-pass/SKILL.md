@@ -1,0 +1,47 @@
+---
+name: port-pass
+description: Port an LLVM optimization pass (or analysis) into your implementation so its output matches opt exactly. Use when working on an L3/L4 roadmap unit.
+---
+
+# Porting a pass
+
+## Prepare
+
+1. Find the unit in `docs/roadmap.md`. Its exit selector is usually
+   `tests/imported/llvm/Transforms/<Pass>/*::opt`. If the directory isn't imported yet, run
+   `./harness/run import-llvm Transforms/<Pass>`, check `--impl llvm` on it, commit the import on its own first.
+   Read the generated `SKIPPED.md` to see what was left out.
+2. Read `knowledge/llvm/` for the pass and its analyses, and your implementation's `DESIGN.md`.
+3. Read the source: `/opt/llvm-project-23.1.5/llvm/lib/Transforms/<…>/<Pass>.cpp`, its header in `llvm/include`, and
+   the analyses it queries. Note every `cl::opt` the pass reads (its defaults matter), and every place where
+   iteration order shows up in the output: worklists, use-list walks, block order, map iteration.
+4. List the analyses it needs (DominatorTree, LoopInfo, AA, SCEV, TTI, TLI…). Missing analyses are part of this
+   unit. Port them faithfully as well. Target queries come from the x86-64 TTI and TLI for
+   `x86_64-unknown-linux-gnu`.
+
+## Implement
+
+- Register the pass under LLVM's exact pass name and parameter syntax, so `-passes=` strings work unchanged.
+- Port the transforms in the source's own order. Start with the smallest test files: `wc -l` the selected tests and
+  work up.
+- Iterate: `./harness/run check --impl <lang> 'tests/imported/llvm/Transforms/<Pass>/*' -v`, then
+  `./harness/run show <test> --impl <lang>` and the files in `.harness-out/`.
+- If a test exposes an unrelated missing feature (an instruction you don't parse yet, another pass in its RUN line),
+  either implement it or move on. Don't fake it.
+
+## Exactness traps
+
+- Output order: new instructions are inserted at specific points. Names come from `IRBuilder` name arguments
+  (`%x.neg`, `.fr`, `%spec.select`) and get uniquified with numeric suffixes.
+- Metadata and attributes are preserved, dropped or merged by specific helpers (`combineMetadata`,
+  `copyMetadata`, `dropUnknownNonDebugMetadata`). Follow them exactly.
+- Flags (`nsw`, `nuw`, `exact`, `disjoint`, `nneg`, fast-math flags) are often recomputed. Check when they're kept.
+- Pipelines inside `-passes=` (`function(…)`, `loop(…)`, `cgscc(…)`) need LLVM's adaptor semantics, including when
+  analyses are invalidated.
+- When stuck on one test, run `./harness/run bisect` (for multi-pass RUN lines) or reduce the input by hand. Write
+  down what you learn in `knowledge/llvm/<pass>.md`.
+
+## Finish
+
+Follow "Working on a unit" in `AGENTS.md`: unit COMPLETE, full ratchet with `--update`, knowledge notes, challenge
+report if needed, rebase, recheck, push.

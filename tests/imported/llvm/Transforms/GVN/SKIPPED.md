@@ -1,0 +1,42 @@
+# Skipped while importing llvm/test/Transforms/GVN (llvmorg-23.1.5)
+
+202 of 231 files imported. Regenerate with `./harness/run import-llvm Transforms/GVN`.
+
+- `2008-12-09-SelfRemove.ll`: target triple i386-apple-darwin9.5
+- `2008-12-12-RLE-Crash.ll`: target triple i386-apple-darwin7
+- `2008-12-14-rle-reanalyze.ll`: target triple i386-apple-darwin7
+- `2009-01-22-SortInvalidation.ll`: target triple i386-apple-darwin7
+- `2009-03-10-PREOnVoid.ll`: target triple i386-pc-linux-gnu
+- `2009-07-13-MemDepSortFail.ll`: target triple i386-pc-linux-gnu
+- `no-phi-translate.ll`: uses non-x86 target intrinsic @llvm.dx.
+- `no-pre-load-for-token-like.ll`: uses non-x86 target intrinsic @llvm.dx.
+- `basic-stats.ll`: REQUIRES asserts
+- `big-endian.ll`: target triple powerpc64-unknown-linux-gnu
+- `calls-nonlocal.ll`: target triple i386-apple-darwin9
+- `calls-readonly.ll`: target triple i386-apple-darwin7
+- `funclet.ll`: target triple i686-pc-windows-msvc
+- `no-sink-dxgetbasepointer.ll`: uses non-x86 target intrinsic @llvm.dx.
+- `no-sink-dxgetpointer.ll`: uses non-x86 target intrinsic @llvm.dx.
+- `no-sink-spvcounterhandle.ll`: uses non-x86 target intrinsic @llvm.spv.
+- `no-sink-spvgetpointer.ll`: uses non-x86 target intrinsic @llvm.spv.
+- `nonescaping-malloc.ll`: REQUIRES asserts
+- `nonescaping.ll` RUN `opt < %s -S -passes=gvn 2>&1 | FileCheck %s --check-prefixes=CHECK,MDEP`: redirects or chains commands
+- `nonescaping.ll` RUN `opt < %s -S -passes='gvn<memoryssa>' 2>&1 | FileCheck --check-prefixes=CHECK,MSSA %s`: redirects or chains commands
+- `opt-remark-assert-constant-uselistorder.ll` RUN `opt -passes='gvn' -pass-remarks-output=%t.yaml %s`: uses lit substitution -pass-remarks-output=%t.yaml
+- `opt-remark-assert-constant-uselistorder.ll` RUN `FileCheck %s < %t.yaml`: not an opt invocation
+- `opt-remarks-multiple-users.ll` RUN `opt < %s -passes=gvn -o /dev/null  -pass-remarks-output=%t -S`: writes to a file
+- `opt-remarks-multiple-users.ll` RUN `cat %t | FileCheck %s`: not an opt invocation
+- `opt-remarks-non-dominating.ll` RUN `opt < %s -passes=gvn -o /dev/null  -pass-remarks-output=%t -S`: writes to a file
+- `opt-remarks-non-dominating.ll` RUN `cat %t | FileCheck %s`: not an opt invocation
+- `opt-remarks.ll` RUN `opt < %s -passes=gvn -disable-output -pass-remarks=gvn -pass-remarks-missed=gvn 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=gvn
+- `opt-remarks.ll` RUN `opt < %s -passes=gvn -disable-output -pass-remarks-output=%t -S`: uses lit substitution -pass-remarks-output=%t
+- `opt-remarks.ll` RUN `cat %t | FileCheck -check-prefix=YAML %s`: not an opt invocation
+- `opt-remarks.ll` RUN `opt < %s -aa-pipeline=basic-aa -passes=gvn -disable-output -pass-remarks=gvn -pass-remarks-missed=gvn 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=gvn
+- `opt-remarks.ll` RUN `opt < %s -aa-pipeline=basic-aa -passes=gvn -disable-output -pass-remarks-output=%t -S`: uses lit substitution -pass-remarks-output=%t
+- `opt-remarks.ll` RUN `cat %t | FileCheck -check-prefix=YAML %s`: not an opt invocation
+- `pr25440.ll`: target triple thumbv7--linux-gnueabi
+- `preserve-analysis.ll` RUN `opt < %s -debug-pass-manager -passes='require<domtree>,loop(loop-simplifycfg),gvn,loop(indvars)' 2>&1 -S | FileCheck --check-prefix=NEW-PM --check-prefix=IR %s`: diagnostic output flag -debug-pass-manager
+- `preserve-memoryssa.ll`: REQUIRES asserts
+- `remarks-selfdomination.ll` RUN `opt -passes=gvn -pass-remarks-analysis=gvn -S < %s | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=gvn
+- `rle-must-alias.ll`: target triple i386-apple-darwin7
+- `rle-no-phi-translate.ll`: XFAIL in LLVM

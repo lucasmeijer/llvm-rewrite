@@ -1,0 +1,326 @@
+# Skipped while importing llvm/test/Transforms/LoopUnroll (llvmorg-23.1.5)
+
+128 of 239 files imported. Regenerate with `./harness/run import-llvm Transforms/LoopUnroll`.
+
+- `2007-05-05-UnrollMiscomp.ll`: target triple i686-apple-darwin8
+- `apple-unrolling-multi-exit.ll`: in a AArch64 target directory
+- `apple-unrolling.ll`: in a AArch64 target directory
+- `falkor-prefetch.ll`: in a AArch64 target directory
+- `force-unroll-threshold.ll`: in a AArch64 target directory
+- `full-unroll-trip-count-upper-bound.ll`: in a AArch64 target directory
+- `large-vector-ops.ll`: in a AArch64 target directory
+- `partial.ll`: in a AArch64 target directory
+- `runtime-loop.ll`: in a AArch64 target directory
+- `runtime-unroll-generic.ll`: in a AArch64 target directory
+- `scalable-vec-ins-ext.ll`: in a AArch64 target directory
+- `thresholdO3-cost-model.ll`: in a AArch64 target directory
+- `unroll-optsize.ll`: in a AArch64 target directory
+- `unroll-upperbound.ll`: in a AArch64 target directory
+- `unrolling-multi-exit.ll`: in a AArch64 target directory
+- `vector.ll`: in a AArch64 target directory
+- `runtime-unroll.ll`: in a AMDGPU target directory
+- `scev-mul-expansion-cost.ll`: in a AMDGPU target directory
+- `unroll-analyze-small-loops.ll`: in a AMDGPU target directory
+- `unroll-barrier.ll`: in a AMDGPU target directory
+- `unroll-convergent-uniform-tripcount.ll`: in a AMDGPU target directory
+- `unroll-cost-addrspacecast.ll`: in a AMDGPU target directory
+- `unroll-cost-call.ll`: in a AMDGPU target directory
+- `unroll-for-private.ll`: in a AMDGPU target directory
+- `unroll-threshold.ll`: in a AMDGPU target directory
+- `dont-unroll-loopdec.ll`: in a ARM target directory
+- `instr-size-costs.ll`: in a ARM target directory
+- `lob-unroll.ll`: in a ARM target directory
+- `loop-unrolling.ll`: in a ARM target directory
+- `multi-blocks.ll`: in a ARM target directory
+- `mve-nounroll.ll`: in a ARM target directory
+- `mve-upperbound.ll`: in a ARM target directory
+- `unroll-optsize.ll`: in a ARM target directory
+- `upperbound.ll`: in a ARM target directory
+- `v6munroll.ll`: in a ARM target directory
+- `peel-small-loop.ll`: in a Hexagon target directory
+- `reuse-lcssa-phi-scev-expansion.ll`: in a Hexagon target directory
+- `unroll-convergent-uniform-tripcount.ll`: in a NVPTX target directory
+- `a2-high-cost-trip-count-computation.ll`: in a PowerPC target directory
+- `a2-unrolling.ll`: in a PowerPC target directory
+- `p10-respect-unroll-pragma.ll`: in a PowerPC target directory
+- `p7-unrolling.ll`: in a PowerPC target directory
+- `p8-unrolling-legalize-vectors-inseltpoison.ll`: in a PowerPC target directory
+- `p8-unrolling-legalize-vectors.ll`: in a PowerPC target directory
+- `invalid-cost.ll`: in a RISCV target directory
+- `runtime-unroll-max-trip-count.ll`: in a RISCV target directory
+- `unroll-Os.ll`: in a RISCV target directory
+- `unroll.ll`: in a RISCV target directory
+- `vector.ll`: in a RISCV target directory
+- `basic-unrolling.ll`: in a WebAssembly target directory
+- `call-remark.ll` RUN `opt -passes=debugify,loop-unroll -mcpu=znver3 -pass-remarks=loop-unroll -pass-remarks-analysis=loop-unroll < %s -S 2>&1 | FileCheck --check-prefixes=ALL,UNROLL %s`: diagnostic output flag -pass-remarks=loop-unroll
+- `call-remark.ll` RUN `opt -passes=debugify,loop-unroll -mcpu=znver3 -pass-remarks=TTI -pass-remarks-analysis=TTI  < %s -S 2>&1 | FileCheck --check-prefixes=ALL,TTI %s`: diagnostic output flag -pass-remarks=TTI
+- `call-remark.ll` RUN `opt -passes=debugify,loop-unroll -mcpu=znver4 -pass-remarks=loop-unroll -pass-remarks-analysis=loop-unroll < %s -S 2>&1 | FileCheck --check-prefixes=ALL,UNROLL %s`: diagnostic output flag -pass-remarks=loop-unroll
+- `call-remark.ll` RUN `opt -passes=debugify,loop-unroll -mcpu=znver5 -pass-remarks=loop-unroll -pass-remarks-analysis=loop-unroll < %s -S 2>&1 | FileCheck --check-prefixes=ALL,UNROLL %s`: diagnostic output flag -pass-remarks=loop-unroll
+- `high-cost-expansion.ll` RUN `opt -mtriple=x86_64-unknown-linux-gnu -passes='loop-unroll' -unroll-runtime -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `store_cost.ll`: REQUIRES asserts
+- `peel-last-iteration-no-guard.ll` RUN `%{run}`: not an opt invocation
+- `peel-last-iteration-no-guard.ll` RUN `%{run}`: not an opt invocation
+- `peel-last-iteration-no-guard.ll` RUN `%{run}`: not an opt invocation
+- `peel-last-iteration-no-guard.ll` RUN `%{run}`: not an opt invocation
+- `peel-last-iteration.ll`: REQUIRES !profcheck
+- `peel.ll` RUN `opt < %s -S -passes='print<block-freq>' 2>&1 | FileCheck -check-prefix=CHECK %s`: analysis printer (stderr output) not supported yet
+- `peel.ll` RUN `opt < %s -S -passes='loop-unroll,print<block-freq>' -unroll-force-peel-count=2 2>&1 | FileCheck %s -check-prefix=CHECK-UR -implicit-check-not='llvm.loop.estimated_trip_count' -implicit-check-not='!prof' -implicit-check-not='branch_weights' -implicit-check-not='call void @f'`: analysis printer (stderr output) not supported yet
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/1/ -e s/@W@/1/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG1210`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=1 | %{fc} UR1210`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} UR1210`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/1/ -e s/@W@/0/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG1110`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=1 | %{fc} UR1110`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} UR1110`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/2/ -e s/@W@/2/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG2310`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} UR2310`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR2310`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/2/ -e s/@W@/2/ -e s/@MIN@/2/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG2320`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} UR2320`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR2320`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/2/ -e s/@W@/1/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG2210`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} UR2210`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR2210`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/2/ -e s/@W@/1/ -e s/@MIN@/2/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG2220`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} UR2220`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR2220`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/2/ -e s/@W@/0/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG2110`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} UR2110`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR2110`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/2/ -e s/@W@/0/ -e s/@MIN@/2/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG2120`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} UR2120`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR2120`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/3/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG3410`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR3410`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR3410`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/3/ -e s/@MIN@/3/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG3430`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR3430`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR3430`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/3/ -e s/@MIN@/3/ -e s/@I_0@/%x/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG343x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR343x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR343x`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/2/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG3310`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR3310`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR3310`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/2/ -e s/@MIN@/3/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG3330`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR3330`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR3330`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/2/ -e s/@MIN@/3/ -e s/@I_0@/%x/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG333x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR333x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR333x`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/1/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG3210`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR3210`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR3210`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/1/ -e s/@MIN@/3/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG3230`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR3230`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR3230`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/1/ -e s/@MIN@/3/ -e s/@I_0@/%x/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG323x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR323x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR323x`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/0/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG3110`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR3110`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR3110`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/0/ -e s/@MIN@/3/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG3130`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR3130`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR3130`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/3/ -e s/@W@/0/ -e s/@MIN@/3/ -e s/@I_0@/%x/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG313x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} UR313x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR313x`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/4/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG4510`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR4510`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR4510`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/4/ -e s/@MIN@/4/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG4540`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR4540`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR4540`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/4/ -e s/@MIN@/4/ -e s/@I_0@/%x/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG454x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR454x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR454x`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/3/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG4410`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR4410`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR4410`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/3/ -e s/@MIN@/4/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG4440`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR4440`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR4440`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/3/ -e s/@MIN@/4/ -e s/@I_0@/%x/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG444x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR444x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR444x`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/2/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG4310`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR4310`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR4310`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/2/ -e s/@MIN@/4/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG4340`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR4340`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR4340`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/2/ -e s/@MIN@/4/ -e s/@I_0@/%x/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG434x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR434x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR434x`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/1/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG4210`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR4210`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR4210`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/1/ -e s/@MIN@/4/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG4240`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR4240`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR4240`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/1/ -e s/@MIN@/4/ -e s/@I_0@/%x/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG424x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR424x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR424x`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/0/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG4110`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR4110`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR4110`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/0/ -e s/@MIN@/4/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG4140`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR4140`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR4140`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/4/ -e s/@W@/0/ -e s/@MIN@/4/ -e s/@I_0@/%x/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG414x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR414x`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR414x`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/5/ -e s/@W@/4/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG5510`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR5510`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=6 | %{fc} UR5510`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/5/ -e s/@W@/3/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG5410`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR5410`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=6 | %{fc} UR5410`: not an opt invocation
+- `unroll-complete.ll` RUN `sed -e s/@MAX@/5/ -e s/@W@/0/ -e s/@MIN@/1/ -e s/@I_0@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-complete.ll` RUN `%{bf-fc} ORIG5110`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=5 | %{fc} UR5110`: not an opt invocation
+- `unroll-complete.ll` RUN `%{ur-bf} -unroll-count=6 | %{fc} UR5110`: not an opt invocation
+- `unroll-epilog.ll` RUN `opt %s -S -passes='print<block-freq>' 2>&1 | FileCheck %s -check-prefixes ORIG`: analysis printer (stderr output) not supported yet
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} UR2`: not an opt invocation
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=2 -unroll-remainder | %{fc} UR2`: not an opt invocation
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} UR4,UR4-ELP`: not an opt invocation
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=4 -unroll-remainder | %{fc} UR4,UR4-EUR`: not an opt invocation
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=8 | %{fc} UR8,UR8-ELP`: not an opt invocation
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=8 -unroll-remainder | %{fc} UR8,UR8-EUR`: not an opt invocation
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=10 | %{fc} UR10,UR10-ELP`: not an opt invocation
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=10 -unroll-remainder | %{fc} UR10,UR10-EUR`: not an opt invocation
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=11 | %{fc} UR11,UR11-ELP`: not an opt invocation
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=11 -unroll-remainder | %{fc} UR11,UR11-EUR`: not an opt invocation
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=12 | %{fc} UR12,UR12-ELP`: not an opt invocation
+- `unroll-epilog.ll` RUN `%{ur-bf} -unroll-count=12 -unroll-remainder | %{fc} UR12,UR12-EUR`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `sed -e s/@N@/%mul10/ -e s/@W@/9/ %s > %t.ll`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{bf-fc} MULT-ORIG`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{ur-bf} -unroll-count=3 | %{fc} MULT3`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} MULT2`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} MULT4`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{ur-bf} -unroll-count=6 | %{fc} MULT6`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `sed -e s/@N@/%mul10/ -e s/@W@/0/ %s > %t.ll`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{bf-fc} LOW-ORIG`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} LOW2`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} LOW4`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{ur-bf} -unroll-count=6 | %{fc} LOW6`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `sed -e s/@N@/10/g -e s/@W@/9/ %s > %t.ll`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{bf-fc} CONST-ORIG`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{ur-bf} -unroll-count=2 | %{fc} CONST2`: not an opt invocation
+- `unroll-partial-unconditional-latch.ll` RUN `%{ur-bf} -unroll-count=4 | %{fc} CONST4`: not an opt invocation
+- `unroll-partial.ll` RUN `opt < %s -S -passes='print<block-freq>' 2>&1 | FileCheck -check-prefix=CHECK %s`: analysis printer (stderr output) not supported yet
+- `unroll-partial.ll` RUN `opt < %s -S -passes='loop-unroll,print<block-freq>' -unroll-count=4 2>&1 | FileCheck %s -check-prefix=CHECK-UR -implicit-check-not='llvm.loop.estimated_trip_count' -implicit-check-not='!prof' -implicit-check-not='branch_weights' -implicit-check-not='call void @f'`: analysis printer (stderr output) not supported yet
+- `debug-and-remarks.ll`: REQUIRES asserts
+- `followup.ll` RUN `%{unroll} | %{fc} COMMON,COUNT`: not an opt invocation
+- `followup.ll` RUN `%{epilog} | %{fc} COMMON,EPILOG,EPILOG-NO-UNROLL`: not an opt invocation
+- `followup.ll` RUN `%{prolog} | %{fc} COMMON,PROLOG,PROLOG-NO-UNROLL`: not an opt invocation
+- `followup.ll` RUN `%{epilog} -unroll-remainder | %{fc} COMMON,EPILOG,EPILOG-UNROLL`: not an opt invocation
+- `followup.ll` RUN `%{prolog} -unroll-remainder | %{fc} COMMON,PROLOG,PROLOG-UNROLL`: not an opt invocation
+- `full-unroll-avoid-partial.ll`: REQUIRES asserts
+- `full-unroll-crashers.ll` RUN `opt < %s -S -passes=loop-unroll -unroll-max-iteration-count-to-analyze=1000 -unroll-threshold=1 -unroll-max-percent-threshold-boost=200 -o /dev/null`: writes to a file
+- `full-unroll-crashers.ll` RUN `opt < %s -S -passes='require<opt-remark-emit>,loop(loop-unroll-full)' -unroll-max-iteration-count-to-analyze=1000 -unroll-threshold=1 -unroll-max-percent-threshold-boost=200 -o /dev/null`: writes to a file
+- `gh-issue77118-broken-lcssa-form.ll`: REQUIRES asserts
+- `guard-cost-for-unrolling.ll`: REQUIRES asserts
+- `ignore-annotation-intrinsic-cost.ll`: REQUIRES asserts
+- `loop-block-disposition-after-loop-peeling.ll` RUN `opt -S -passes='print<scalar-evolution>,loop(loop-unroll-full)' -verify-scev < %s 2>/dev/null | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `loop-probability-one.ll` RUN `sed -e s/@N@/%n/ %s > %t.ll`: not an opt invocation
+- `loop-probability-one.ll` RUN `%{unroll} | %{fc} PART-ALL-COND`: not an opt invocation
+- `loop-probability-one.ll` RUN `sed -e s/@N@/5/ %s > %t.ll`: not an opt invocation
+- `loop-probability-one.ll` RUN `%{unroll} | %{fc} PART-SOME-COND`: not an opt invocation
+- `loop-probability-one.ll` RUN `sed -e s/@N@/%max3/ %s > %t.ll`: not an opt invocation
+- `loop-probability-one.ll` RUN `%{unroll} | %{fc} COMPLETE-SOME-COND`: not an opt invocation
+- `loop-probability-one.ll` RUN `sed -e s/@N@/3/ %s > %t.ll`: not an opt invocation
+- `loop-probability-one.ll` RUN `%{unroll} | %{fc} COMPLETE-NO-COND`: not an opt invocation
+- `loop-probability-one.ll` RUN `sed -e s/@N@/%n/ %s > %t.ll`: not an opt invocation
+- `loop-probability-one.ll` RUN `%{rt} -unroll-runtime-epilog=true | %{fc} EPILOG`: not an opt invocation
+- `loop-probability-one.ll` RUN `%{rt} -unroll-runtime-epilog=false | %{fc} PROLOG`: not an opt invocation
+- `loop-remarks-with-hotness.ll` RUN `opt < %s -S -passes=loop-unroll -pass-remarks=loop-unroll -pass-remarks-with-hotness -unroll-count=16 2>&1 | FileCheck -check-prefix=COMPLETE-UNROLL %s`: diagnostic output flag -pass-remarks=loop-unroll
+- `loop-remarks-with-hotness.ll` RUN `opt < %s -S -passes=loop-unroll -pass-remarks=loop-unroll -pass-remarks-with-hotness -unroll-count=4 2>&1 | FileCheck -check-prefix=PARTIAL-UNROLL %s`: diagnostic output flag -pass-remarks=loop-unroll
+- `loop-remarks.ll` RUN `opt < %s -S -passes=loop-unroll -pass-remarks=loop-unroll -unroll-count=16 2>&1 | FileCheck -check-prefix=COMPLETE-UNROLL %s`: diagnostic output flag -pass-remarks=loop-unroll
+- `loop-remarks.ll` RUN `opt < %s -S -passes=loop-unroll -pass-remarks=loop-unroll -unroll-count=4 2>&1 | FileCheck -check-prefix=PARTIAL-UNROLL %s`: diagnostic output flag -pass-remarks=loop-unroll
+- `loop-remarks.ll` RUN `opt < %s -S -passes=loop-unroll -pass-remarks=loop-unroll -unroll-count=4 -unroll-runtime=true -unroll-remainder 2>&1 | FileCheck %s --check-prefix=RUNTIME-UNROLL`: diagnostic output flag -pass-remarks=loop-unroll
+- `not-rotated.ll`: REQUIRES asserts
+- `partial-unroll-reductions.ll` RUN `opt -p loop-unroll -unroll-add-parallel-reductions -unroll-allow-partial -unroll-max-count=4 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `peel-branch-weights.ll` RUN `opt < %s -S -passes=loop-unroll -unroll-force-peel-count=2 2>&1 | FileCheck %s`: redirects or chains commands
+- `peel-branch-weights.ll` RUN `opt < %s -S -passes=loop-unroll -unroll-force-peel-count=2 -disable-advanced-peeling 2>&1 | FileCheck %s --check-prefix=DISABLEADV`: redirects or chains commands
+- `peel-last-iteration-debug.ll` RUN `opt -p loop-unroll -unroll-full-max-count=0 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `peel-last-iteration-expansion-cost.ll` RUN `opt -p loop-unroll -scev-cheap-expansion-budget=2 -S %s | FileCheck --check-prefix=BUDGET2 %s`: no -passes / -O pipeline
+- `peel-last-iteration-expansion-cost.ll` RUN `opt -p loop-unroll -scev-cheap-expansion-budget=3 -S %s | FileCheck --check-prefix=BUDGET3 %s`: no -passes / -O pipeline
+- `peel-last-iteration-minmax.ll` RUN `opt -p loop-unroll -unroll-full-max-count=0 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `peel-last-iteration-multi-exit.ll` RUN `opt -p loop-unroll -unroll-full-max-count=0 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `peel-last-iteration-pointer-inductions.ll` RUN `opt -p loop-unroll -unroll-full-max-count=0 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `peel-last-iteration-with-constant-trip-count.ll` RUN `opt -p loop-unroll -unroll-full-max-count=0 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `peel-last-iteration-with-guards.ll` RUN `opt -p loop-unroll -unroll-full-max-count=0 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `peel-last-iteration-with-variable-trip-count.ll` RUN `opt -p loop-unroll -unroll-full-max-count=0 -S %s | FileCheck %s`: no -passes / -O pipeline
+- `peel-loop-and-unroll.ll` RUN `not opt -passes=loop-unroll -unroll-peel-count=2 -unroll-count=2 -S < %s 2>&1 | FileCheck %s`: not an opt invocation
+- `peel-loop-conditions-pgo-1.ll`: REQUIRES asserts
+- `peel-loop-conditions-pgo-2.ll`: REQUIRES asserts
+- `peel-loop-pgo-deopt-idom-2.ll`: REQUIRES asserts
+- `peel-loop-pgo-deopt-idom.ll`: REQUIRES asserts
+- `peel-loop-pgo-deopt.ll`: REQUIRES asserts
+- `peel-loop-pgo.ll`: REQUIRES asserts
+- `peel-loop-phi-analysis-iv.ll` RUN `opt -passes=loop-unroll -enable-peeling-for-iv -disable-output -pass-remarks-output=- %s | FileCheck %s`: diagnostic output flag -pass-remarks-output=-
+- `peel-loop-phi-analysis-iv.ll` RUN `opt -passes=loop-unroll-full -enable-peeling-for-iv -disable-output -pass-remarks-output=- %s | FileCheck %s`: diagnostic output flag -pass-remarks-output=-
+- `peel-loop-scev-invalidate-with-overflow-inst.ll` RUN `opt < %s -S  -passes='print<scalar-evolution>,loop-unroll<peeling;full-unroll-max=0>,print<scalar-evolution>' 2>&1 | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `pr109333.ll` RUN `opt -S -passes="print<scalar-evolution>,loop-unroll" -unroll-runtime < %s 2>/dev/null | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `pr14167.ll`: target triple powerpc64le-unknown-linux
+- `pr27157.ll`: REQUIRES asserts
+- `pr28132.ll`: target triple i686-pc-windows-msvc
+- `revisit.ll` RUN `opt < %s -disable-output -debug-pass-manager 2>&1 -passes='require<opt-remark-emit>,loop(loop-unroll-full)' | FileCheck %s`: diagnostic output flag -debug-pass-manager
+- `runtime-li.ll` RUN `opt -S -passes=loop-unroll -unroll-runtime -unroll-count=2 -verify-loop-info -pass-remarks=loop-unroll < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=loop-unroll
+- `runtime-loop-multiexit-dom-verify.ll`: REQUIRES asserts
+- `runtime-loop-multiple-exits.ll`: REQUIRES asserts
+- `runtime-loop-non-exiting-latch.ll`: REQUIRES asserts
+- `runtime-loop3.ll`: REQUIRES asserts
+- `runtime-unroll-reductions-min-max.ll` RUN `opt -p loop-unroll -unroll-add-parallel-reductions -S %s | FileCheck %s`: no -passes / -O pipeline
+- `runtime-unroll-reductions.ll` RUN `opt -p loop-unroll -unroll-add-parallel-reductions -S %s | FileCheck %s`: no -passes / -O pipeline
+- `scev-invalidation-lcssa.ll` RUN `opt -S -passes='print<scalar-evolution>,loop-unroll' -unroll-runtime < %s 2>/dev/null | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `unroll-and-peel-last-iteration.ll` RUN `opt -p loop-unroll -S %s | FileCheck %s`: no -passes / -O pipeline
+- `unroll-dont-copy-latch-loop-id.ll` RUN `%{unroll} -unroll-count=3 | %{fc} UR3`: not an opt invocation
+- `unroll-dont-copy-latch-loop-id.ll` RUN `%{unroll} -unroll-count=4 | %{fc} UR4`: not an opt invocation
+- `unroll-dont-copy-latch-loop-id.ll` RUN `%{rt} -unroll-runtime-epilog=true | %{fc} EPILOG`: not an opt invocation
+- `unroll-dont-copy-latch-loop-id.ll` RUN `%{rt} -unroll-runtime-epilog=false | %{fc} PROLOG`: not an opt invocation
+- `unroll-loads-cse.ll` RUN `opt -p loop-unroll -S %s | FileCheck %s`: no -passes / -O pipeline
+- `unroll-loop-invalidation.ll` RUN `opt -S -passes='require<access-info>,loop-unroll,print<access-info>' -debug-pass-manager < %s 2>&1 | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `unroll-preserve-scev-lcssa.ll` RUN `opt -loop-reduce -loop-unroll -unroll-runtime -verify-scev -verify-loop-lcssa < %s -S | FileCheck %s`: no -passes / -O pipeline
+- `vectorizer-loop-kind-remarks.ll` RUN `opt < %s -S -passes='loop-vectorize,loop-unroll' -pass-remarks=loop-unroll -force-vector-width=4 -force-vector-interleave=1 -enable-epilogue-vectorization -epilogue-vectorization-force-VF=4 -unroll-count=2 -disable-output 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=loop-unroll
+- `vectorizer-loop-kind-remarks.ll` RUN `opt < %s -S -passes='loop-vectorize,loop-unroll' -pass-remarks=loop-unroll -force-vector-width=4 -force-vector-interleave=1 -enable-epilogue-vectorization -epilogue-vectorization-force-VF=4 -unroll-count=2 -disable-output -pass-remarks-output=%t.yaml 2>&1`: diagnostic output flag -pass-remarks=loop-unroll
+- `vectorizer-loop-kind-remarks.ll` RUN `FileCheck --input-file=%t.yaml %s --check-prefix=YAML`: not an opt invocation
+- `zeroed-branch-weights.ll` RUN `opt < %s -S -unroll-count=2 -passes='loop-unroll' 2>&1 | FileCheck %s`: redirects or chains commands

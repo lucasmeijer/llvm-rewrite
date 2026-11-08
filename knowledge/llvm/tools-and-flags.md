@@ -1,0 +1,22 @@
+# Tools and flags (LLVM 23.1.5)
+
+- **`llc -stop-before=x86-isel` writes MIR**, not plain IR: a YAML document whose first block (`--- |`, indented by two
+  spaces, ending at `...`) is the IR module, followed by per-function MIR stubs. The harness extracts the IR block
+  (`harness/lrh/checks.py:extract_ir`). It works at both -O0 and -O2, because x86 uses `x86-isel` (SelectionDAG/FastISel)
+  at -O0 too, not GlobalISel. Verified by running it on clang -O0 and -O2 IR.
+- **`-opt-bisect-limit=N`** prints one stderr line per bisectable pass:
+  `BISECT: running pass (N) <pass> on <function|[module]>` or `BISECT: NOT running pass …`. With `-O2` on a small
+  module there are about 190 bisectable passes. Required passes (verifier, analyses) aren't counted.
+- **`opt -O2 -print-pipeline-passes`** prints the full textual pipeline, with every pass parameter spelled out
+  (e.g. `simplifycfg<bonus-inst-threshold=1;…>`). That's the ground truth for pipeline order.
+- **ModuleID**: `opt -S file.ll` prints `; ModuleID = 'file.ll'`, using the path exactly as given. `llvm-dis` reading
+  stdin prints `; ModuleID = '<stdin>'`. The harness always passes repo-relative paths with cwd = repo root, and
+  canonicalizes through stdin.
+- **The release tarball** uses a zstd window larger than the default decoder limit. Decompress with
+  `zstd -d --long=31`. It's 12 GB unpacked; the workspace image keeps only the tools in
+  `.agents-in-the-cloud/image/install-toolchains.sh` (1.5 GB).
+- **There's no FileCheck** in the release tarball. We don't use it: imported tests' CHECK lines are ignored, and opt's
+  real output is the oracle.
+- **llc runs its IR passes under the legacy pass manager.** `-debug-pass-manager` prints nothing. Use
+  `llc -debug-pass=Structure -stop-before=x86-isel` to list them. At -O2 the list includes pre-isel-intrinsic-lowering,
+  expand-ir-insts, atomic-expand, x86-lower-amx-*, loop-reduce (LSR) and codegenprepare, among others.

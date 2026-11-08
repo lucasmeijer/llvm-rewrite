@@ -1,0 +1,518 @@
+# Skipped while importing llvm/test/Transforms/SLPVectorizer (llvmorg-23.1.5)
+
+650 of 1053 files imported. Regenerate with `./harness/run import-llvm Transforms/SLPVectorizer`.
+
+- `32-bit.ll`: in a AArch64 target directory
+- `64-bit-vector.ll`: in a AArch64 target directory
+- `InstructionsState-is-invalid-0.ll`: in a AArch64 target directory
+- `PR38339.ll`: in a AArch64 target directory
+- `aarch64-vector-functions.ll`: in a AArch64 target directory
+- `abs-mul-buildvector-in-loop.ll`: in a AArch64 target directory
+- `accelerate-vector-functions-inseltpoison.ll`: in a AArch64 target directory
+- `alternate-vectorization-split-node.ll`: in a AArch64 target directory
+- `buildvector-reduce.ll`: in a AArch64 target directory
+- `buildvector-used-by-insertvalue.ll`: in a AArch64 target directory
+- `buildvector-vectorize.ll`: in a AArch64 target directory
+- `commute.ll`: in a AArch64 target directory
+- `div-like-mixed-with-undefs.ll`: in a AArch64 target directory
+- `div.ll`: in a AArch64 target directory
+- `exp.ll`: in a AArch64 target directory
+- `ext-trunc.ll`: in a AArch64 target directory
+- `external-non-inst-use.ll`: in a AArch64 target directory
+- `external-use-icmp.ll`: in a AArch64 target directory
+- `externally-used-copyables.ll`: in a AArch64 target directory
+- `extract-subvector-long-input.ll`: in a AArch64 target directory
+- `extractelements-to-shuffle.ll`: in a AArch64 target directory
+- `extracts-from-scalarizable-vector.ll`: in a AArch64 target directory
+- `fma-conversion-multi-use-guard.ll`: in a AArch64 target directory
+- `fma-reduce-regression.ll`: in a AArch64 target directory
+- `fminimumnum.ll`: in a AArch64 target directory
+- `fmulladd.ll`: in a AArch64 target directory
+- `fpsat.ll`: in a AArch64 target directory
+- `fround.ll`: in a AArch64 target directory
+- `fshl.ll`: in a AArch64 target directory
+- `gather-buildvector-with-minbitwidth-user.ll`: in a AArch64 target directory
+- `gather-cost.ll`: in a AArch64 target directory
+- `gather-load-128.ll`: in a AArch64 target directory
+- `gather-load-min-required-vf-2.ll`: in a AArch64 target directory
+- `gather-reduce.ll`: in a AArch64 target directory
+- `gather-root.ll`: in a AArch64 target directory
+- `gather-with-minbith-user.ll`: in a AArch64 target directory
+- `gep-user-scalable.ll`: in a AArch64 target directory
+- `getelementptr.ll`: in a AArch64 target directory
+- `getelementptr2.ll`: in a AArch64 target directory
+- `horizontal.ll`: in a AArch64 target directory
+- `icmp-wrong-bitwidth.ll`: in a AArch64 target directory
+- `insertelement-inseltpoison.ll`: in a AArch64 target directory
+- `insertelement.ll`: in a AArch64 target directory
+- `invalid_type.ll`: in a AArch64 target directory
+- `invoke-extract.ll`: in a AArch64 target directory
+- `landing_pad.ll`: in a AArch64 target directory
+- `lcssa-phi-extract-scale.ll`: in a AArch64 target directory
+- `lcssa-phi-inner-loop-scale.ll`: in a AArch64 target directory
+- `load-store-q.ll`: in a AArch64 target directory
+- `loadi8.ll`: in a AArch64 target directory
+- `loadorder.ll`: in a AArch64 target directory
+- `long-non-power-of-2.ll`: in a AArch64 target directory
+- `many-uses-fma-candidate.ll`: in a AArch64 target directory
+- `masked-loads-side-effects-after-vec.ll`: in a AArch64 target directory
+- `matmul.ll`: in a AArch64 target directory
+- `memory-runtime-checks-in-loops.ll`: in a AArch64 target directory
+- `memory-runtime-checks.ll`: in a AArch64 target directory
+- `minbitwidth-cast-node-length.ll`: in a AArch64 target directory
+- `minimum-sizes.ll`: in a AArch64 target directory
+- `mismatched-intrinsics.ll`: in a AArch64 target directory
+- `mul.ll`: in a AArch64 target directory
+- `multiple_reduction.ll`: in a AArch64 target directory
+- `non-inst-abs-sub-copyable-value.ll`: in a AArch64 target directory
+- `non-power-of-2-with-adjusted-gathers.ll`: in a AArch64 target directory
+- `nontemporal.ll`: in a AArch64 target directory
+- `phi-node-bitwidt-op-not.ll`: in a AArch64 target directory
+- `phi-use-order-scalable.ll`: in a AArch64 target directory
+- `recalc-copyable-node.ll`: in a AArch64 target directory
+- `recalc-copyable-operand-deps-direct-use.ll`: in a AArch64 target directory
+- `reduce-add-i64.ll`: in a AArch64 target directory
+- `reduce-fadd.ll`: in a AArch64 target directory
+- `reduce-maximumnum-minimumnum.ll`: in a AArch64 target directory
+- `remarks.ll`: in a AArch64 target directory
+- `reorder-fmuladd-crash.ll`: in a AArch64 target directory
+- `reordered-loads.ll`: in a AArch64 target directory
+- `reused-reduction-revec.ll`: in a AArch64 target directory
+- `reused-scalar-repeated-in-node.ll`: in a AArch64 target directory
+- `revec-non-pow2.ll`: in a AArch64 target directory
+- `revec-reductions.ll`: in a AArch64 target directory
+- `revec-select-scalar-vector-cond.ll`: in a AArch64 target directory
+- `scalable-external-user.ll`: in a AArch64 target directory
+- `scalable-type-revec.ll`: in a AArch64 target directory
+- `scalable-vector.ll`: in a AArch64 target directory
+- `scalarization-overhead.ll`: in a AArch64 target directory
+- `sdiv-pow2.ll`: in a AArch64 target directory
+- `select-zext-analysis.ll`: in a AArch64 target directory
+- `shuffle-vectors-mask-size.ll`: in a AArch64 target directory
+- `slp-abs.ll`: in a AArch64 target directory
+- `slp-and-reduction.ll`: in a AArch64 target directory
+- `slp-extval-struct-operand-no-scalar-reuse.ll`: in a AArch64 target directory
+- `slp-fma-loss.ll`: in a AArch64 target directory
+- `slp-frem.ll`: in a AArch64 target directory
+- `slp-or-reduction.ll`: in a AArch64 target directory
+- `slp-xor-reduction.ll`: in a AArch64 target directory
+- `spillcost-call-between-operands.ll`: in a AArch64 target directory
+- `spillcost-di.ll`: in a AArch64 target directory
+- `spillcost-loop-backedge.ll`: in a AArch64 target directory
+- `spillcost-noreturn-block.ll`: in a AArch64 target directory
+- `spillcost-order.ll`: in a AArch64 target directory
+- `splat-loads.ll`: in a AArch64 target directory
+- `store-ptr.ll`: in a AArch64 target directory
+- `transpose-inseltpoison.ll`: in a AArch64 target directory
+- `transpose-with-constants.ll`: in a AArch64 target directory
+- `transpose.ll`: in a AArch64 target directory
+- `trunc-insertion.ll`: in a AArch64 target directory
+- `tsc-s116.ll`: in a AArch64 target directory
+- `tsc-s352.ll`: in a AArch64 target directory
+- `unique_values.ll`: in a AArch64 target directory
+- `unprofitable-alternate-subtree.ll`: in a AArch64 target directory
+- `unreachable-blocks-with-phis.ll`: in a AArch64 target directory
+- `unsigned-after-sext-node.ll`: in a AArch64 target directory
+- `uselistorder.ll`: in a AArch64 target directory
+- `user-node-not-in-bitwidths.ll`: in a AArch64 target directory
+- `vec-node-dropped-with-gather-user.ll`: in a AArch64 target directory
+- `vec15-base.ll`: in a AArch64 target directory
+- `vec3-base.ll`: in a AArch64 target directory
+- `vec3-calls.ll`: in a AArch64 target directory
+- `vec3-reorder-reshuffle.ll`: in a AArch64 target directory
+- `vecreduceadd.ll`: in a AArch64 target directory
+- `vector-getelementptr.ll`: in a AArch64 target directory
+- `vectorizable-selects-min-max.ll`: in a AArch64 target directory
+- `vectorizable-selects-uniform-cmps.ll`: in a AArch64 target directory
+- `vectorize-free-extracts-inserts.ll`: in a AArch64 target directory
+- `widen.ll`: in a AArch64 target directory
+- `add_sub_sat-inseltpoison.ll`: in a AMDGPU target directory
+- `add_sub_sat.ll`: in a AMDGPU target directory
+- `address-space-ptr-sze-gep-index-assert.ll`: in a AMDGPU target directory
+- `bswap-inseltpoison.ll`: in a AMDGPU target directory
+- `bswap.ll`: in a AMDGPU target directory
+- `crash_extract_subvector_cost.ll`: in a AMDGPU target directory
+- `exp2-vectorize.ll`: in a AMDGPU target directory
+- `external-shuffle.ll`: in a AMDGPU target directory
+- `extract-ordering.ll`: in a AMDGPU target directory
+- `horizontal-store.ll`: in a AMDGPU target directory
+- `inst-count-heuristic.ll`: in a AMDGPU target directory
+- `invariant-load-no-alias-store.ll`: in a AMDGPU target directory
+- `min_max.ll`: in a AMDGPU target directory
+- `notriviallyvectorizableintrinsicoperands.ll`: in a AMDGPU target directory
+- `packed-math.ll`: in a AMDGPU target directory
+- `phi-result-use-order.ll`: in a AMDGPU target directory
+- `reduction.ll`: in a AMDGPU target directory
+- `round-inseltpoison.ll`: in a AMDGPU target directory
+- `round.ll`: in a AMDGPU target directory
+- `slp-v2f16.ll`: in a AMDGPU target directory
+- `slp-v2f32.ll`: in a AMDGPU target directory
+- `slp-v2f64.ll`: in a AMDGPU target directory
+- `slp-v2i64.ll`: in a AMDGPU target directory
+- `transform-node-gather-struct.ll`: in a AMDGPU target directory
+- `vectorize-i8.ll`: in a AMDGPU target directory
+- `zext-duplicate-shift.ll`: in a AMDGPU target directory
+- `extract-cost-scale-nullptr-user.ll`: in a ARM target directory
+- `extract-insert-inseltpoison.ll`: in a ARM target directory
+- `extract-insert.ll`: in a ARM target directory
+- `insert-into-small-vector.ll`: in a ARM target directory
+- `invalid-fp-operations.ll`: in a ARM target directory
+- `main-gep-with-non-matching-reqs.ll`: in a ARM target directory
+- `memory.ll`: in a ARM target directory
+- `sroa.ll`: in a ARM target directory
+- `buildvector-scalarized.ll`: in a NVPTX target directory
+- `v2f16.ll`: in a NVPTX target directory
+- `vectorizable-intrinsic.ll`: in a NVPTX target directory
+- `aggregate.ll`: in a PowerPC target directory
+- `disjoint-or-reductions.ll`: in a PowerPC target directory
+- `insertvalue-with-copyable-args.ll`: in a PowerPC target directory
+- `pr27897.ll`: in a PowerPC target directory
+- `short-to-double.ll`: in a PowerPC target directory
+- `basic-strided-loads.ll`: in a RISCV target directory
+- `basic-strided-stores.ll`: in a RISCV target directory
+- `buildvector-all-external-scalars.ll`: in a RISCV target directory
+- `check-node-without-vector-user.ll`: in a RISCV target directory
+- `combined-loads-stored.ll`: in a RISCV target directory
+- `complex-loads.ll`: in a RISCV target directory
+- `complex-nonvect-struct-returned.ll`: in a RISCV target directory
+- `ctpop.ll`: in a RISCV target directory
+- `floating-point.ll`: in a RISCV target directory
+- `fminimumnum.ll`: in a RISCV target directory
+- `fmuladd_width_prop.ll`: in a RISCV target directory
+- `fround.ll`: in a RISCV target directory
+- `funnel-shift-cost.ll`: in a RISCV target directory
+- `gather-insert-point-restore.ll`: in a RISCV target directory
+- `gather-node-with-no-users.ll`: in a RISCV target directory
+- `gep.ll`: in a RISCV target directory
+- `get-vec-element-size.ll`: in a RISCV target directory
+- `getpointerschaincost.ll`: in a RISCV target directory
+- `horizontal-list.ll`: in a RISCV target directory
+- `init-ext-node-not-truncable.ll`: in a RISCV target directory
+- `interleave-greater-than-slice.ll`: in a RISCV target directory
+- `load-binop-store.ll`: in a RISCV target directory
+- `load-store.ll`: in a RISCV target directory
+- `loads-ordering.ll`: in a RISCV target directory
+- `long-gep-chains.ll`: in a RISCV target directory
+- `long-mask-split.ll`: in a RISCV target directory
+- `math-function.ll`: in a RISCV target directory
+- `minbw-with-and-and-scalar-trunc.ll`: in a RISCV target directory
+- `mixed-extracts-types.ll`: in a RISCV target directory
+- `non-commutative-second-arg-only-copyable.ll`: in a RISCV target directory
+- `ordered-reduction.ll`: in a RISCV target directory
+- `partial-vec-invalid-cost.ll`: in a RISCV target directory
+- `phi-const.ll`: in a RISCV target directory
+- `reduced-copyable-element.ll`: in a RISCV target directory
+- `reduced-value-repeated-and-vectorized.ll`: in a RISCV target directory
+- `reduction-extension-after-bitwidth.ll`: in a RISCV target directory
+- `reductions.ll`: in a RISCV target directory
+- `remark-zext-incoming-for-neg-icmp.ll`: in a RISCV target directory
+- `remarks-insert-into-small-vector.ll`: in a RISCV target directory
+- `remarks_cmp_sel_min_max.ll`: in a RISCV target directory
+- `reordered-buildvector-scalars.ll`: in a RISCV target directory
+- `reordered-interleaved-loads.ll`: in a RISCV target directory
+- `repeated-address-store.ll`: in a RISCV target directory
+- `revec-getGatherCost.ll`: in a RISCV target directory
+- `revec-strided-load.ll`: in a RISCV target directory
+- `revec-strided-store.ll`: in a RISCV target directory
+- `revec.ll`: in a RISCV target directory
+- `reversed-strided-load.ll`: in a RISCV target directory
+- `reversed-strided-node-with-external-ptr.ll`: in a RISCV target directory
+- `rotated-strided-loads.ll`: in a RISCV target directory
+- `runtime-strided-stores.ll`: in a RISCV target directory
+- `rvv-min-vector-size.ll`: in a RISCV target directory
+- `same-node-reused.ll`: in a RISCV target directory
+- `scalable-type-as-input.ll`: in a RISCV target directory
+- `scalable-type-to-vect.ll`: in a RISCV target directory
+- `scatter-vectorize-reversed.ll`: in a RISCV target directory
+- `segmented-loads-simple.ll`: in a RISCV target directory
+- `segmented-loads.ll`: in a RISCV target directory
+- `segmented-stores.ll`: in a RISCV target directory
+- `select-profitability.ll`: in a RISCV target directory
+- `shuffled-gather-casted.ll`: in a RISCV target directory
+- `small-phi-tree.ll`: in a RISCV target directory
+- `small-tree-not-schedulable-bv-node.ll`: in a RISCV target directory
+- `smax-reduction-unsigned-missing-sign.ll`: in a RISCV target directory
+- `smax-unsigned-operand.ll`: in a RISCV target directory
+- `smin-reduction-unsigned-missing-sign.ll`: in a RISCV target directory
+- `smin-signed-zextended.ll`: in a RISCV target directory
+- `spillcost.ll`: in a RISCV target directory
+- `split-vectorize-parent-for-copyables.ll`: in a RISCV target directory
+- `strided-loads-based-reduction.ll`: in a RISCV target directory
+- `strided-loads-vectorized.ll`: in a RISCV target directory
+- `strided-loads-with-external-indices.ll`: in a RISCV target directory
+- `strided-loads-with-external-use-ptr.ll`: in a RISCV target directory
+- `strided-loads.ll`: in a RISCV target directory
+- `strided-stores-vectorized.ll`: in a RISCV target directory
+- `strided-unsupported-type.ll`: in a RISCV target directory
+- `struct-gep.ll`: in a RISCV target directory
+- `test-delete-tree.ll`: in a RISCV target directory
+- `trunc-bv-multi-uses.ll`: in a RISCV target directory
+- `trunc-to-large-than-bw.ll`: in a RISCV target directory
+- `unordered-loads-operands.ll`: in a RISCV target directory
+- `unsigned-icmp-signed-op.ll`: in a RISCV target directory
+- `unsigned-node-trunc-with-signed-users.ll`: in a RISCV target directory
+- `vec15-base.ll`: in a RISCV target directory
+- `vec3-base.ll`: in a RISCV target directory
+- `x264-satd-8x4.ll`: in a RISCV target directory
+- `SLP-cmp-cost-query.ll`: in a SystemZ target directory
+- `cmp-ptr-minmax.ll`: in a SystemZ target directory
+- `ext-alt-node-must-ext.ll`: in a SystemZ target directory
+- `ext-not-resized-op-resized.ll`: in a SystemZ target directory
+- `minbitwidth-root-trunc.ll`: in a SystemZ target directory
+- `minbitwidth-trunc.ll`: in a SystemZ target directory
+- `non-power-2-subvector-extract.ll`: in a SystemZ target directory
+- `pr34619.ll`: in a SystemZ target directory
+- `reductions-fadd.ll`: in a SystemZ target directory
+- `reductions-fmin-fmax.ll`: in a SystemZ target directory
+- `reductions-fmul.ll`: in a SystemZ target directory
+- `reorder-same-node.ll`: in a SystemZ target directory
+- `reuse-non-power-of-2-reorder.ll`: in a SystemZ target directory
+- `revec-fix-109835.ll`: in a SystemZ target directory
+- `revec-fix-117393.ll`: in a SystemZ target directory
+- `revec-fix-128169.ll`: in a SystemZ target directory
+- `vec-elt-insertion.ll`: in a SystemZ target directory
+- `disable_slp.ll`: in a VE target directory
+- `externref-no-vectorize.ll`: in a WebAssembly target directory
+- `no-vectorize-rotate.ll`: in a WebAssembly target directory
+- `or-reduction-zero-test.ll`: in a WebAssembly target directory
+- `simd-splat-shuffle-cost.ll`: in a WebAssembly target directory
+- `PR31847.ll` RUN `opt -passes=slp-vectorizer -S -o - -mtriple=i386 -mcpu=haswell < %s | FileCheck %s`: non-x86_64 target i386
+- `broadcast-load-cost.ll` RUN `opt -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux -mcpu=penryn -slp-threshold=-2 -pass-remarks-output=%t < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `broadcast-load-cost.ll` RUN `FileCheck %s --input-file=%t --check-prefix=YAML`: not an opt invocation
+- `broadcast_long.ll` RUN `opt -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux -mcpu=corei7-avx -pass-remarks-output=%t < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `broadcast_long.ll` RUN `FileCheck %s --input-file=%t --check-prefix=YAML`: not an opt invocation
+- `buildvector-float-and-extract-lane1.ll` RUN `opt -passes=slp-vectorizer -mtriple=-x86_64-grtev4-linux-gnu -S -mcpu=corei7-avx -pass-remarks-output=%t < %s | FileCheck %s`: non-x86_64 target -x86_64-grtev4-linux-gnu
+- `buildvector-float-and-extract-lane1.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `copyable-with-non-scheduled-parent-node.ll` RUN `opt -S --passes=slp-vectorizer -mtriple=i686-unknown-linux-android29 -mattr=+sse2 < %s | FileCheck %s`: non-x86_64 target i686-unknown-linux-android29
+- `crash_clear_undefs.ll` RUN `opt < %s -passes=slp-vectorizer -S -mtriple=x86_64-- -mcpu=corei7 -pass-remarks-output=%t | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `crash_clear_undefs.ll` RUN `FileCheck %s --input-file=%t --check-prefix=YAML`: not an opt invocation
+- `cse.ll`: target triple i386-apple-macosx10.8.0
+- `debug-counter.ll` RUN `opt -S -passes=slp-vectorizer -mtriple=x86_64-unknown-linux -debug-counter=slp-vectorized=0 -slp-threshold=-99999 < %s | FileCheck %s --check-prefix=COUNT0`: diagnostic output flag -debug-counter=slp-vectorized=0
+- `debug-counter.ll` RUN `opt -S -passes=slp-vectorizer -mtriple=x86_64-unknown-linux -debug-counter=slp-vectorized=1 -slp-threshold=-99999 < %s | FileCheck %s --check-prefix=COUNT1`: diagnostic output flag -debug-counter=slp-vectorized=1
+- `debug-counter.ll` RUN `opt -S -passes=slp-vectorizer -mtriple=x86_64-unknown-linux -debug-counter=slp-vectorized=2 -slp-threshold=-99999 < %s | FileCheck %s --check-prefix=COUNT2`: diagnostic output flag -debug-counter=slp-vectorized=2
+- `debug-counter.ll` RUN `opt -S -passes=slp-vectorizer -mtriple=x86_64-unknown-linux -debug-counter=slp-vectorized=0-1 -slp-threshold=-99999 < %s | FileCheck %s --check-prefix=COUNT-1`: diagnostic output flag -debug-counter=slp-vectorized=0-1
+- `expected-prof-consecutive-access.ll` RUN `opt < %s -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux -pass-remarks-output=%t | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `expected-prof-consecutive-access.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `extract_in_tree_user.ll` RUN `opt < %s -passes=slp-vectorizer -S -mtriple=i386-apple-macosx10.9.0 -mcpu=corei7-avx | FileCheck %s`: non-x86_64 target i386-apple-macosx10.9.0
+- `extractelement-multiple-uses.ll` RUN `opt < %s -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux -mattr=+avx2 -pass-remarks-output=%t | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `extractelement-multiple-uses.ll` RUN `FileCheck %s --input-file=%t --check-prefix=YAML`: not an opt invocation
+- `fabs-cost-softfp.ll`: target triple i686-unknown-linux-gnu
+- `float-min-max.ll`: target triple i386-unknown-linux-gnu
+- `funclet.ll`: target triple i686-pc-windows-msvc18.0.0
+- `hoist.ll`: target triple i386-apple-macosx10.9.0
+- `matching-gather-nodes-phi-users.ll` RUN `opt -passes=slp-vectorizer -mtriple=x86_64 -S -mcpu=core-avx2 -pass-remarks-output=%t < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `matching-gather-nodes-phi-users.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `multi-node-reuse-in-bv.ll` RUN `opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu -mattr=+avx2 -pass-remarks-output=%t < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `multi-node-reuse-in-bv.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `operandorder.ll` RUN `opt < %s -passes=slp-vectorizer,dce -slp-threshold=-100 -S -mtriple=i386-apple-macosx10.8.0 -mcpu=corei7-avx | FileCheck %s`: non-x86_64 target i386-apple-macosx10.8.0
+- `operandorder.ll` RUN `opt < %s -passes=slp-vectorizer,dce -slp-threshold=-100 -S -mtriple=i386-apple-macosx10.8.0 -mattr=+sse2 | FileCheck %s --check-prefix=SSE2`: non-x86_64 target i386-apple-macosx10.8.0
+- `ordering-bug.ll` RUN `opt -mtriple=i386-linux-gnu -passes=slp-vectorizer -S %s | FileCheck %s`: non-x86_64 target i386-linux-gnu
+- `parent-node-non-schedulable.ll` RUN `opt -S --passes=slp-vectorizer -S -mtriple=i686-unknown-linux-android29 -mattr=+sse2 < %s | FileCheck %s`: non-x86_64 target i686-unknown-linux-android29
+- `phi-removed-on-operand-vectorization.ll` RUN `opt -S --passes=slp-vectorizer -mtriple=i386-pc-windows-msvc19.34.0 -mcpu=pentium4 < %s | FileCheck %s`: non-x86_64 target i386-pc-windows-msvc19.34.0
+- `phi.ll`: target triple i386-apple-macosx10.9.0
+- `phi_overalignedtype.ll`: target triple i386-apple-macosx10.9.0
+- `phis-different-order.ll` RUN `opt -passes=slp-vectorizer -S < %s -mcpu=pentium4 -mtriple=i386-pc-windows-msvc19.16.0 | FileCheck %s`: non-x86_64 target i386-pc-windows-msvc19.16.0
+- `pr16571.ll`: target triple i686-pc-win32
+- `pr16899.ll`: target triple i386--netbsd
+- `pr18060.ll`: target triple i386-pc-linux
+- `pr54465.ll` RUN `opt < %s -passes=slp-vectorizer -S -mtriple=i686-pc-win32 -mcpu=corei7-avx | FileCheck %s`: non-x86_64 target i686-pc-win32
+- `reduction.ll`: target triple i386-apple-macosx10.8.0
+- `reduction2.ll`: target triple i386-apple-macosx10.8.0
+- `reduction_unrolled.ll`: REQUIRES asserts
+- `remark-masked-loads-consecutive-loads-same-ptr.ll` RUN `opt < %s -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu -mcpu=skylake-avx512 -pass-remarks-output=%t | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `remark-masked-loads-consecutive-loads-same-ptr.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `remark-partial-loads-vectorize.ll` RUN `opt < %s -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu -mcpu=skylake-avx512 -pass-remarks-output=%t | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `remark-partial-loads-vectorize.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `remark_alternate.ll` RUN `opt -S -mtriple=x86_64-pc-linux-gnu -mcpu=generic -passes=slp-vectorizer -pass-remarks-output=%t < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `remark_alternate.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `remark_extract_broadcast.ll` RUN `opt -S -mtriple=x86_64-pc-linux-gnu -mcpu=generic -mattr=sse2 -passes=slp-vectorizer -pass-remarks-output=%t < %s -slp-threshold=-2 | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `remark_extract_broadcast.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `remark_gather-load-redux-cost.ll` RUN `opt -S -mtriple=x86_64 -mcpu=skylake-avx512 -passes=slp-vectorizer -pass-remarks-output=%t < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `remark_gather-load-redux-cost.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `remark_horcost.ll` RUN `opt -S -mtriple=x86_64-pc-linux-gnu -mcpu=generic -passes=slp-vectorizer -pass-remarks-output=%t < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `remark_horcost.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `remark_listcost.ll` RUN `opt -S -mtriple=x86_64-pc-linux-gnu -mcpu=generic -passes=slp-vectorizer -pass-remarks-output=%t < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `remark_listcost.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `remark_not_all_parts.ll` RUN `opt -S -mtriple=x86_64-pc-linux-gnu -mcpu=generic -passes=slp-vectorizer -pass-remarks-output=%t < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `remark_not_all_parts.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `remark_unsupported.ll` RUN `opt -S -mtriple=x86_64-pc-linux-gnu -mcpu=generic -passes=slp-vectorizer --slp-max-reg-size=256 -pass-remarks-output=%t < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `remark_unsupported.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `reused-extractelements.ll` RUN `opt < %s -passes=slp-vectorizer -S -o - -mtriple=x86_64-unknown-linux -mcpu=bdver2 -pass-remarks-output=%t | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `reused-extractelements.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `revec-ExtractSubvector.ll` RUN `opt -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu -slp-revec -pass-remarks-output=%t < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `revec-ExtractSubvector.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `revec-ordered-reductions.ll` RUN `opt -mtriple=x86_64-unknown-linux-gnu -p slp-vectorizer -slp-revec -S < %s | FileCheck %s --check-prefixes=CHECK,POW2`: no -passes / -O pipeline
+- `revec-ordered-reductions.ll` RUN `opt -mtriple=x86_64-unknown-linux-gnu -p slp-vectorizer -slp-revec -slp-vectorize-non-power-of-2 -S < %s | FileCheck %s --check-prefixes=CHECK,NON-POW2`: no -passes / -O pipeline
+- `revectorized_rdx_crash.ll`: REQUIRES asserts
+- `rgb_phi.ll`: target triple i386-apple-macosx10.9.0
+- `scheduling.ll` RUN `opt < %s -passes=slp-vectorizer -S -mtriple=i386-apple-macosx10.8.0 -mcpu=corei7-avx | FileCheck %s`: non-x86_64 target i386-apple-macosx10.8.0
+- `sibling-loops-mismatched-tripcount.ll` RUN `opt -passes=slp-vectorizer -slp-threshold=-500 -mtriple=x86_64-unknown-linux-gnu -pass-remarks-output=%t -S < %s | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `sibling-loops-mismatched-tripcount.ll` RUN `FileCheck --input-file=%t %s --check-prefix=YAML`: not an opt invocation
+- `store-insertelement-minbitwidth.ll` RUN `opt < %s -S -mtriple=x86_64-unknown -passes=slp-vectorizer -mattr=+avx -pass-remarks-output=%t | FileCheck %s`: uses lit substitution -pass-remarks-output=%t
+- `store-insertelement-minbitwidth.ll` RUN `FileCheck --input-file=%t --check-prefix=YAML %s`: not an opt invocation
+- `trunc-store-value-ty-not-power-of-2.ll` RUN `opt -p slp-vectorizer -S %s | FileCheck %s`: no -passes / -O pipeline
+- `no-vector-registers.ll`: in a XCore target directory
+- `addsub.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu | FileCheck %s %}`: not an opt invocation
+- `addsub.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu | FileCheck %s %}`: not an opt invocation
+- `alternate-cmp-swapped-pred-parent.ll` RUN `%if aarch64-registered-target %{ opt < %s -mtriple=aarch64-unknown-linux-gnu -passes=slp-vectorizer -S -slp-threshold=-1000 | FileCheck %s %}`: not an opt invocation
+- `alternate-cmp-swapped-pred-parent.ll` RUN `%if x86-registered-target %{ opt < %s -mtriple=x86_64-unknown -passes=slp-vectorizer -S -slp-threshold=-1000 | FileCheck %s %}`: not an opt invocation
+- `alternate-opcode-sindle-bv.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `alternate-opcode-sindle-bv.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s --check-prefix=AARCH64 %}`: not an opt invocation
+- `arith-div-undef.ll` RUN `%if x86-registered-target %{ opt < %s -mtriple=x86_64-unknown -passes=slp-vectorizer,instcombine -S -slp-threshold=-10000 | FileCheck %s %}`: not an opt invocation
+- `arith-div-undef.ll` RUN `%if aarch64-registered-target %{ opt < %s -mtriple=aarch64-unknown-linux-gnu -passes=slp-vectorizer,instcombine -S -slp-threshold=-10000 | FileCheck %s %}`: not an opt invocation
+- `bool-logical-op-reduction-with-poison.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer < %s -mtriple=x86_64-unknown-linux-gnu | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `bool-logical-op-reduction-with-poison.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer < %s -mtriple=aarch64-unknown-linux-gnu | FileCheck %s --check-prefix=AARCH64 %}`: not an opt invocation
+- `buildvector-insert-mask-size.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=x86_64-unknown-linux < %s -slp-threshold=-1 | FileCheck %s %}`: not an opt invocation
+- `buildvector-insert-mask-size.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=aarch64-unknown-linux < %s -slp-threshold=-1 | FileCheck %s %}`: not an opt invocation
+- `buildvector-nodes-dependency.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=x86_64 < %s | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `buildvector-nodes-dependency.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s --check-prefix=AARCH64 %}`: not an opt invocation
+- `call-arg-reduced-by-minbitwidth.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-pc-windows-msvc19.34.0 < %s | FileCheck %s %}`: not an opt invocation
+- `call-arg-reduced-by-minbitwidth.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `catchswitch.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=x86_64-pc-windows-msvc19.29.30145 < %s | FileCheck %s %}`: not an opt invocation
+- `catchswitch.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `consecutive-access.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=x86_64-apple-macosx10.9.0 | FileCheck %s %}`: not an opt invocation
+- `consecutive-access.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu | FileCheck %s %}`: not an opt invocation
+- `crash_exceed_scheduling.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -slp-min-tree-size=2 -slp-threshold=-1000 -slp-max-look-ahead-depth=1 -slp-schedule-budget=27 -S -mtriple=x86_64-unknown-linux-gnu | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `crash_exceed_scheduling.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -slp-min-tree-size=2 -slp-threshold=-1000 -slp-max-look-ahead-depth=1 -slp-schedule-budget=27 -S -mtriple=aarch64-unknown-linux-gnu | FileCheck %s --check-prefix=AARCH64 %}`: not an opt invocation
+- `diamond_broadcast.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux -slp-threshold=-1 | FileCheck %s %}`: not an opt invocation
+- `diamond_broadcast.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu -slp-threshold=-1 | FileCheck %s %}`: not an opt invocation
+- `ext-int-reduced-not-operand.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu -slp-threshold=-99999 < %s | FileCheck %s %}`: not an opt invocation
+- `ext-int-reduced-not-operand.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu -slp-threshold=-99999 < %s | FileCheck %s %}`: not an opt invocation
+- `extended-vectorized-gathered-inst.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux < %s | FileCheck %s %}`: not an opt invocation
+- `extended-vectorized-gathered-inst.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux < %s | FileCheck %s %}`: not an opt invocation
+- `external-user-instruction-minbitwidth.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `external-user-instruction-minbitwidth.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `extract-many-users-buildvector.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s --check-prefix X86 %}`: not an opt invocation
+- `extract-many-users-buildvector.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s --check-prefix AARCH64 %}`: not an opt invocation
+- `extract-vectorized-operand.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -slp-threshold=-99999 < %s -mtriple=x86_64-unknown-linux-gnu | FileCheck %s %}`: not an opt invocation
+- `extract-vectorized-operand.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -slp-threshold=-99999 < %s -mtriple=aarch64-unknown-linux-gnu | FileCheck %s %}`: not an opt invocation
+- `extract_with_non_const_index.ll` RUN `%if x86-registered-target %{ opt < %s -mtriple=x86_64-unknown -passes=slp-vectorizer -S | FileCheck %s %}`: not an opt invocation
+- `extract_with_non_const_index.ll` RUN `%if aarch64-registered-target %{ opt < %s -mtriple=aarch64-unknown -passes=slp-vectorizer -S | FileCheck %s %}`: not an opt invocation
+- `extractelement-insertpoint.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=x86_64-grtev4-linux-gnu -o - < %s | FileCheck %s %}`: not an opt invocation
+- `extractelement-insertpoint.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu -o - < %s | FileCheck %s %}`: not an opt invocation
+- `extractlements-gathered-first-node.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -slp-threshold=-99999 -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `extractlements-gathered-first-node.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -slp-threshold=-99999 -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `extracts-with-undefs.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `extracts-with-undefs.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu | FileCheck %s --check-prefix=AARCH64 %}`: not an opt invocation
+- `gather_extract_from_vectorbuild.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=x86_64 < %s | FileCheck %s --check-prefixes=CHECK,X86 %}`: not an opt invocation
+- `gather_extract_from_vectorbuild.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=aarch64 < %s | FileCheck %s --check-prefixes=CHECK,AARCH64 %}`: not an opt invocation
+- `gep-with-extractelement-many-users.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu -slp-threshold=-99999 < %s | FileCheck %s %}`: not an opt invocation
+- `gep-with-extractelement-many-users.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu -slp-threshold=-99999 < %s | FileCheck %s %}`: not an opt invocation
+- `insert-crash-index.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu  < %s | FileCheck %s %}`: not an opt invocation
+- `insert-crash-index.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu  < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector-const.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=0 -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector-const.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=0 -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector-inseltpoison.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=-10000 -mtriple=x86_64-unknown-unknown < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector-inseltpoison.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=0 -mtriple=x86_64-unknown-unknown < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector-inseltpoison.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=-10000 -slp-min-tree-size=0 -mtriple=x86_64-unknown-unknown < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector-inseltpoison.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=-10000 -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector-inseltpoison.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=0 -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector-inseltpoison.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=-10000 -slp-min-tree-size=0 -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=-10000 -mtriple=x86_64-unknown-unknown < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=0 -mtriple=x86_64-unknown-unknown < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=-10000 -slp-min-tree-size=0 -mtriple=x86_64-unknown-unknown < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=-10000 -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=0 -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-build-vector.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -slp-threshold=-10000 -slp-min-tree-size=0 -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-multiple-uses.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insert-element-multiple-uses.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insert-shuffle.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -o - -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insert-shuffle.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S -o - -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `insertelement-postpone.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -mtriple x86_64-unknown-linux-gnu < %s | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `insertelement-postpone.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -mtriple aarch64-unknown-linux-gnu < %s | FileCheck %s --check-prefix=AARCH86 %}`: not an opt invocation
+- `insertelement-uses-vectorized-index.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -slp-threshold=-10 < %s -mtriple=x86_64-pc-windows-msvc19.39.33523 | FileCheck %s %}`: not an opt invocation
+- `insertelement-uses-vectorized-index.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -slp-threshold=-10 < %s -mtriple=aarch64-unknown-linux-gnu | FileCheck %s %}`: not an opt invocation
+- `int-bitcast-minbitwidth.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu -slp-threshold=-9 < %s | FileCheck %s %}`: not an opt invocation
+- `int-bitcast-minbitwidth.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu -slp-threshold=-9 < %s | FileCheck %s %}`: not an opt invocation
+- `jumbled_store_crash.ll` RUN `%if x86-registered-target %{ opt --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu -o - -S < %s | FileCheck %s %}`: not an opt invocation
+- `jumbled_store_crash.ll` RUN `%if aarch64-registered-target %{ opt --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu -o - -S < %s | FileCheck %s %}`: not an opt invocation
+- `limit.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu | FileCheck %s %}`: not an opt invocation
+- `limit.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu | FileCheck %s %}`: not an opt invocation
+- `materialize-vector-of-consts.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -mtriple=aarch64 -S %s | FileCheck %s %}`: not an opt invocation
+- `minbitwidth-multiuse-with-insertelement.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -slp-threshold=-10 -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `minbitwidth-multiuse-with-insertelement.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S -slp-threshold=-10 -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `minbitwidth-node-with-multi-users.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `minbitwidth-node-with-multi-users.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `minbitwidth-user-not-min.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `minbitwidth-user-not-min.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `multi-node-vectorized-insts.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `multi-node-vectorized-insts.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `multi-uses-with-deps-in-first.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-pc-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `multi-uses-with-deps-in-first.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `one-element-vector.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `one-element-vector.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `operand-is-reduced-val.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux < %s | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `operand-is-reduced-val.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux < %s | FileCheck %s --check-prefix=AARCH64 %}`: not an opt invocation
+- `peek-through-shuffle.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer < %s -mtriple=x86_64-unknown-linux-gnu -o - | FileCheck %s %}`: not an opt invocation
+- `peek-through-shuffle.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer < %s -mtriple=aarch64-unknown-linux-gnu -o - | FileCheck %s %}`: not an opt invocation
+- `phi-undef-input.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -slp-threshold=-1000 -mtriple=x86_64 -S | FileCheck %s %}`: not an opt invocation
+- `phi-undef-input.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -slp-threshold=-1000 -mtriple=aarch64-unknown-linux-gnu -S | FileCheck %s %}`: not an opt invocation
+- `postponed_gathers.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -slp-threshold=-10 -mtriple=x86_64-unknown-linux-gnu -S | FileCheck %s %}`: not an opt invocation
+- `postponed_gathers.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -slp-threshold=-10 -mtriple=aarch64-unknown-linux-gnu -S | FileCheck %s %}`: not an opt invocation
+- `pr31599-inseltpoison.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `pr31599-inseltpoison.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `pr31599.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `pr31599.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `reduced-gathered-vectorized.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `reduced-gathered-vectorized.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck --check-prefix=AARCH64 %s %}`: not an opt invocation
+- `reduction-gather-non-scheduled-extracts.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-sie-ps5 < %s | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `reduction-gather-non-scheduled-extracts.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s --check-prefix=AARCH64 %}`: not an opt invocation
+- `reduction-min-select.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `reduction-min-select.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `reduction-modified-values.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `reduction-modified-values.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s --check-prefix=AARCH64 %}`: not an opt invocation
+- `reduction-whole-regs-loads.ll`: REQUIRES aarch64-registered-target, riscv-registered-target
+- `reduction_loads.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=x86_64-apple-macosx10.10.0 -mattr=+sse4.2 | FileCheck %s %}`: not an opt invocation
+- `reduction_loads.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu -mattr=+neon | FileCheck %s %}`: not an opt invocation
+- `reductions.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux < %s | FileCheck %s %}`: not an opt invocation
+- `reductions.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux < %s | FileCheck %s %}`: not an opt invocation
+- `reorder-clustered-node.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S < %s -mtriple=x86_64 -slp-threshold=-150 | FileCheck %s --check-prefix X86 %}`: not an opt invocation
+- `reorder-clustered-node.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S < %s -mtriple=aarch64-unknown-linux-gnu -slp-threshold=-150 | FileCheck %s --check-prefix AARCH64 %}`: not an opt invocation
+- `reorder-node.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `reorder-node.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `reordered-top-scalars.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown %s -slp-threshold=-5 | FileCheck %s %}`: not an opt invocation
+- `reordered-top-scalars.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown %s -slp-threshold=-5 | FileCheck %s %}`: not an opt invocation
+- `reordering-single-phi.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux < %s | FileCheck %s %}`: not an opt invocation
+- `reordering-single-phi.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux < %s | FileCheck %s %}`: not an opt invocation
+- `return.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=x86_64--linux-gnu | FileCheck %s %}`: not an opt invocation
+- `return.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu | FileCheck %s %}`: not an opt invocation
+- `reused-buildvector-matching-vectorized-node.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `reused-buildvector-matching-vectorized-node.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `reused-scalar-in-multi-node.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `reused-scalar-in-multi-node.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `revec-reduction-logical.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -slp-revec -mtriple=x86_64 -S | FileCheck %s --check-prefixes=CHECK,X86 %}`: not an opt invocation
+- `revec-reduction-logical.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -slp-revec -mtriple=aarch64-unknown-linux-gnu -S | FileCheck %s --check-prefixes=CHECK,AARCH64 %}`: not an opt invocation
+- `root-trunc-extract-reuse.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -slp-threshold=-100 -mtriple=x86_64 < %s | FileCheck %s %}`: not an opt invocation
+- `root-trunc-extract-reuse.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S -slp-threshold=-100 -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `same-scalar-in-same-phi-extract.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -slp-threshold=-99999 -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `same-scalar-in-same-phi-extract.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -slp-threshold=-99999 -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `same-scalars-reordered-in-reduction.ll` RUN `%if x86-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `same-scalars-reordered-in-reduction.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `scalarazied-result.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu -S < %s | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `scalarazied-result.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu -S < %s | FileCheck %s --check-prefix=AARCH64 %}`: not an opt invocation
+- `scalarization-overhead.ll` RUN `%if x86-registered-target %{ opt -mtriple=x86_64-- -passes=slp-vectorizer -S < %s | FileCheck %s %}`: not an opt invocation
+- `scalarization-overhead.ll` RUN `%if aarch64-registered-target %{ opt -mtriple=aarch64-- -passes=slp-vectorizer -S < %s | FileCheck %s %}`: not an opt invocation
+- `semanticly-same.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu -slp-threshold=-50 < %s | FileCheck %s --check-prefixes=CHECK,X86 %}`: not an opt invocation
+- `semanticly-same.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu -slp-threshold=-50 < %s | FileCheck %s --check-prefixes=CHECK,AARCH64 %}`: not an opt invocation
+- `several_store_chains.ll` RUN `%if x86-registered-target %{ opt < %s -S -mtriple=x86_64-unknown -passes=slp-vectorizer | FileCheck %s %}`: not an opt invocation
+- `several_store_chains.ll` RUN `%if aarch64-registered-target %{ opt < %s -S -mtriple=aarch64-unknown -passes=slp-vectorizer | FileCheck %s %}`: not an opt invocation
+- `shrink_after_reorder2.ll` RUN `%if x86-registered-target %{ opt -S -o - -passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `shrink_after_reorder2.ll` RUN `%if aarch64-registered-target %{ opt -S -o - -passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `shuffle-mask-resized.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux -slp-threshold=-10 < %s | FileCheck %s --check-prefix=X86  %}`: not an opt invocation
+- `shuffle-mask-resized.ll` RUN `%if aaarch64-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux -slp-threshold=-10 < %s | FileCheck %s --check-prefix=AARCH64 %}`: not an opt invocation
+- `shuffle-multivector.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S < %s -mtriple=x86_64-unknown-linux -slp-threshold=-165 | FileCheck %s %}`: not an opt invocation
+- `shuffle-multivector.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S < %s -mtriple=aarch64-unknown-linux -slp-threshold=-165 | FileCheck %s %}`: not an opt invocation
+- `shufflebuilder-bug.ll` RUN `%if x86-registered-target %{ opt -S -p slp-vectorizer -mtriple=x86_64-- %s | FileCheck %s %}`: not an opt invocation
+- `shufflebuilder-bug.ll` RUN `%if aarch64-registered-target %{ opt -S -p slp-vectorizer -mtriple=aarch64-unknown-linux-gnu %s | FileCheck %s %}`: not an opt invocation
+- `splat-buildvector.ll` RUN `%if x86-registered-target %{ opt --passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu %s -o - -slp-threshold=-100 | FileCheck %s %}`: not an opt invocation
+- `splat-buildvector.ll` RUN `%if aarch64-registered-target %{ opt --passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu %s -o - -slp-threshold=-100 | FileCheck %s %}`: not an opt invocation
+- `stores-non-ordered.ll` RUN `%if x86-registered-target %{ opt < %s -S -mtriple=x86_64-unknown -passes=slp-vectorizer -slp-min-reg-size=64 -slp-threshold=-1000 | FileCheck %s %}`: not an opt invocation
+- `stores-non-ordered.ll` RUN `%if aarch64-registered-target %{ opt < %s -S -mtriple=aarch64-unknown -passes=slp-vectorizer -slp-min-reg-size=64 -slp-threshold=-1000 | FileCheck %s %}`: not an opt invocation
+- `unknown-entries.ll` RUN `%if x86-registered-target %{ opt < %s -passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu -S | FileCheck %s %}`: not an opt invocation
+- `unknown-entries.ll` RUN `%if aarch64-registered-target %{ opt < %s -passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu -S | FileCheck %s %}`: not an opt invocation
+- `vectorize-reorder-alt-shuffle.ll` RUN `%if x86-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s --check-prefix=X86 %}`: not an opt invocation
+- `vectorize-reorder-alt-shuffle.ll` RUN `%if aarch64-registered-target %{ opt -passes=slp-vectorizer -S -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s --check-prefix=AARCH64 %}`: not an opt invocation
+- `vectorize-reordered-list.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown %s | FileCheck %s %}`: not an opt invocation
+- `vectorize-reordered-list.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown %s | FileCheck %s %}`: not an opt invocation
+- `zext-incoming-for-neg-icmp.ll` RUN `%if x86-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=x86_64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation
+- `zext-incoming-for-neg-icmp.ll` RUN `%if aarch64-registered-target %{ opt -S --passes=slp-vectorizer -mtriple=aarch64-unknown-linux-gnu < %s | FileCheck %s %}`: not an opt invocation

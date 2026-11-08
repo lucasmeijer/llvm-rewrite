@@ -1,0 +1,210 @@
+# Skipped while importing llvm/test/Transforms/LoopStrengthReduce (llvmorg-23.1.5)
+
+20 of 210 files imported. Regenerate with `./harness/run import-llvm Transforms/LoopStrengthReduce`.
+
+- `2005-08-15-AddRecIV.ll` RUN `opt < %s -loop-reduce -disable-output`: no -passes / -O pipeline
+- `2005-08-17-OutOfLoopVariant.ll` RUN `opt < %s -loop-reduce -disable-output`: no -passes / -O pipeline
+- `2005-09-12-UsesOutOutsideOfLoop.ll` RUN `opt < %s -loop-reduce -disable-output`: no -passes / -O pipeline
+- `2007-04-23-UseIterator.ll`: target triple i686-apple-darwin9
+- `2008-08-13-CmpStride.ll` RUN `opt < %s -loop-reduce -S | grep add | count 2`: no -passes / -O pipeline
+- `2008-09-09-Overflow.ll` RUN `opt < %s -loop-reduce -S | grep phi | count 2`: no -passes / -O pipeline
+- `2009-01-13-nonconstant-stride-outside-loop.ll`: target triple i386-apple-darwin9.5
+- `2009-04-28-no-reduce-mul.ll`: target triple i386-apple-darwin9.6
+- `2011-07-19-CritEdgeBreakCrash.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `2011-10-03-CritEdgeMerge.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `2011-10-06-ReusePhi.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `2011-10-13-SCEVChain.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `2011-10-14-IntPtr.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `2011-12-19-PostincQuadratic.ll`: target triple i386-unknown-freebsd10.0
+- `2012-01-02-nopreheader.ll`: target triple i386-apple-darwin
+- `2012-01-16-nopreheader.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `2012-03-15-nopreheader.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `2012-03-26-constexpr.ll` RUN `opt < %s -loop-reduce -S`: no -passes / -O pipeline
+- `2012-07-13-ExpandUDiv.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `2012-07-18-LimitReassociate.ll`: REQUIRES asserts
+- `2013-01-05-IndBr.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `2013-01-14-ReuseCast.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `lsr-ldp.ll`: in a AArch64 target directory
+- `lsr-memcpy.ll`: in a AArch64 target directory
+- `lsr-memset.ll`: in a AArch64 target directory
+- `lsr-pre-inc-offset-check.ll`: in a AArch64 target directory
+- `lsr-reuse.ll`: in a AArch64 target directory
+- `non-cmp-cond.ll`: in a AArch64 target directory
+- `postidx-load.ll`: in a AArch64 target directory
+- `postinc-with-fixups-with-different-loops.ll`: in a AArch64 target directory
+- `pr47329.ll`: in a AArch64 target directory
+- `pr53625.ll`: in a AArch64 target directory
+- `prefer-all.ll`: in a AArch64 target directory
+- `req-regs.ll`: in a AArch64 target directory
+- `small-constant.ll`: in a AArch64 target directory
+- `use-outside-loop.ll`: in a AArch64 target directory
+- `vscale-factor-out-constant.ll`: in a AArch64 target directory
+- `vscale-fixups.ll`: in a AArch64 target directory
+- `vscale-negative-i32-offset.ll`: in a AArch64 target directory
+- `atomics.ll`: in a AMDGPU target directory
+- `different-addrspace-addressing-mode-loops.ll`: in a AMDGPU target directory
+- `different-addrspace-crash.ll`: in a AMDGPU target directory
+- `lsr-icmpzero-mixed-ptr-width.ll`: in a AMDGPU target directory
+- `lsr-invalid-ptr-extend.ll`: in a AMDGPU target directory
+- `lsr-postinc-pos-addrspace.ll`: in a AMDGPU target directory
+- `lsr-void-inseltpoison.ll`: in a AMDGPU target directory
+- `lsr-void.ll`: in a AMDGPU target directory
+- `preserve-addrspace-assert.ll`: in a AMDGPU target directory
+- `2012-06-15-lsr-noaddrmode.ll`: in a ARM target directory
+- `addrec-is-loop-invariant.ll`: in a ARM target directory
+- `complexity.ll`: in a ARM target directory
+- `illegal-addr-modes.ll`: in a ARM target directory
+- `ivchain-ARM.ll`: in a ARM target directory
+- `vctp-chains-inseltpoison.ll`: in a ARM target directory
+- `vctp-chains.ll`: in a ARM target directory
+- `long-array-initialize.ll`: in a Mips target directory
+- `trunc.ll`: in a NVPTX target directory
+- `incomplete-phi.ll`: target triple powerpc64le-unknown-linux-gnu
+- `memory-intrinsic.ll`: REQUIRES asserts
+- `icmp-zero.ll`: in a RISCV target directory
+- `lsr-cost-compare.ll`: in a RISCV target directory
+- `lsr-drop-solution-dbg-msg.ll`: in a RISCV target directory
+- `lsr-drop-solution.ll`: in a RISCV target directory
+- `many-geps.ll`: in a RISCV target directory
+- `term-fold-crash.ll`: in a RISCV target directory
+- `2008-08-14-ShadowIV.ll` RUN `opt < %s -loop-reduce -S -mtriple=x86_64-unknown-unknown 2>&1 | FileCheck %s`: redirects or chains commands
+- `2009-11-10-LSRCrash.ll` RUN `llc < %s -mtriple=i386-apple-darwin11`: not an opt invocation
+- `2011-07-20-DoubleIV.ll` RUN `opt < %s -loop-reduce -S -mtriple=x86_64-unknown-unknown | FileCheck %s`: no -passes / -O pipeline
+- `2011-11-29-postincphi.ll` RUN `llc < %s | FileCheck %s`: not an opt invocation
+- `2011-12-04-loserreg.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `2012-01-13-phielim.ll` RUN `opt < %s -S -loop-reduce -mtriple=x86_64-- -mcpu=core2 | FileCheck %s`: no -passes / -O pipeline
+- `bin_power.ll` RUN `opt < %s -scalar-evolution-huge-expr-threshold=1000000 -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `canonical-2.ll`: REQUIRES asserts
+- `canonical.ll` RUN `opt -mtriple=x86_64-unknown-linux-gnu -loop-reduce -lsr-insns-cost=false -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `debuginfo-scev-salvage-ptrtoaddr.ll` RUN `opt -S -loop-reduce %s -o - | FileCheck %s`: no -passes / -O pipeline
+- `eh-insertion-point-2.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `eh-insertion-point.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `expander-crashes.ll` RUN `opt -loop-reduce %s -S | FileCheck %s`: no -passes / -O pipeline
+- `expander-reused-value-insert-point.ll` RUN `opt -loop-reduce -S %s | FileCheck %s`: no -passes / -O pipeline
+- `icmp-zero-offset-overflow.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `incorrect-offset-scaling.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `ivchain-X86.ll` RUN `llc < %s -O3 -mtriple=x86_64-unknown-unknown -mcpu=core2 | FileCheck %s -check-prefix=X64`: not an opt invocation
+- `ivchain-X86.ll` RUN `llc < %s -O3 -mtriple=i686-unknown-unknown   -mcpu=core2 | FileCheck %s -check-prefix=X32`: not an opt invocation
+- `ivchain-stress-X86.ll`: REQUIRES asserts
+- `lsr-cond-dbg.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `lsr-expand-quadratic.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `lsr-filtering-scaledreg.ll` RUN `opt < %s -loop-reduce -lsr-filter-same-scaled-reg=true -mtriple=x86_64-unknown-linux-gnu -S | FileCheck %s`: no -passes / -O pipeline
+- `lsr-insns-1.ll` RUN `opt < %s -loop-reduce -mtriple=x86_64  -S | FileCheck %s -check-prefix=INSN`: no -passes / -O pipeline
+- `lsr-insns-1.ll` RUN `opt < %s -loop-reduce -mtriple=x86_64 -lsr-insns-cost=false -S | FileCheck %s -check-prefix=REGS`: no -passes / -O pipeline
+- `lsr-insns-1.ll` RUN `llc < %s -O2 -mtriple=x86_64-unknown-unknown -lsr-insns-cost | FileCheck %s`: not an opt invocation
+- `lsr-insns-2.ll` RUN `opt < %s -loop-reduce -mtriple=x86_64-- -S | FileCheck %s -check-prefix=BOTH -check-prefix=INSN`: no -passes / -O pipeline
+- `lsr-insns-2.ll` RUN `opt < %s -loop-reduce -mtriple=x86_64-- -lsr-insns-cost=false -S | FileCheck %s -check-prefix=BOTH -check-prefix=REGS`: no -passes / -O pipeline
+- `lsr-insns-2.ll` RUN `llc < %s -O2 -mtriple=x86_64-- -lsr-insns-cost -asm-verbose=0 | FileCheck %s`: not an opt invocation
+- `lsr-overflow.ll` RUN `opt -lsr-complexity-limit=50 -loop-reduce -S %s | FileCheck %s`: no -passes / -O pipeline
+- `macro-fuse-cmp.ll` RUN `opt < %s -loop-reduce -mcpu=btver2  -S | FileCheck %s --check-prefix=JAG`: no -passes / -O pipeline
+- `macro-fuse-cmp.ll` RUN `opt < %s -loop-reduce -mcpu=bdver2  -S | FileCheck %s --check-prefix=BUL`: no -passes / -O pipeline
+- `macro-fuse-cmp.ll` RUN `opt < %s -loop-reduce -mcpu=haswell -S | FileCheck %s --check-prefix=HSW`: no -passes / -O pipeline
+- `macro-fuse-cmp.ll` RUN `llc < %s                     | FileCheck %s --check-prefix=BASE`: not an opt invocation
+- `macro-fuse-cmp.ll` RUN `llc < %s -mattr=macrofusion  | FileCheck %s --check-prefix=FUSE`: not an opt invocation
+- `macro-fuse-cmp.ll` RUN `llc < %s -mattr=branchfusion | FileCheck %s --check-prefix=FUSE`: not an opt invocation
+- `missing-phi-operand-update.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `nested-loop.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `nested-ptr-addrec.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `no_superflous_induction_vars.ll` RUN `opt -S -loop-reduce -mcpu=corei7-avx -mtriple=x86_64-apple-macosx < %s | FileCheck %s`: no -passes / -O pipeline
+- `normalization-during-scev-expansion.ll` RUN `opt -loop-reduce -S %s | FileCheck %s`: no -passes / -O pipeline
+- `postinc-iv-used-by-urem-and-udiv.ll` RUN `opt -loop-reduce -S %s | FileCheck %s`: no -passes / -O pipeline
+- `pr17473.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `pr28719.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `pr40514.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `pr46943.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `pr47776-do-not-apply-info-from-guards-to-addrecs.ll` RUN `opt -loop-reduce -S %s | FileCheck %s`: no -passes / -O pipeline
+- `pr62563.ll`: XFAIL in LLVM
+- `pr62660-normalization-failure.ll` RUN `opt -loop-reduce -verify-scev -S %s | FileCheck %s`: no -passes / -O pipeline
+- `sibling-loops.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `use-outside-loop-crash.ll` RUN `opt -mtriple=x86_64 -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `zext-signed-addrec.ll` RUN `opt -loop-reduce -S %s | FileCheck %s`: no -passes / -O pipeline
+- `addrec-gep-address-space.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `addrec-gep.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `callbr-critical-edge-splitting.ll` RUN `opt -loop-reduce %s -o - -S | FileCheck %s --check-prefix=LEGACYPM`: no -passes / -O pipeline
+- `canonical-form.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `count-to-zero.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `dbg-preserve-0.ll` RUN `opt -loop-reduce -S %s | FileCheck %s`: no -passes / -O pipeline
+- `dbg-preserve-1.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `dbg-preserve-2.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `dead-phi.ll` RUN `opt < %s -loop-reduce -S | grep phi | count 1`: no -passes / -O pipeline
+- `debuginfo-scev-salvage-0.ll` RUN `opt -S -loop-reduce %s -o - | FileCheck %s`: no -passes / -O pipeline
+- `debuginfo-scev-salvage-1.ll` RUN `opt -S -loop-reduce %s -o - | FileCheck %s`: no -passes / -O pipeline
+- `debuginfo-scev-salvage-2.ll` RUN `opt -S -loop-reduce %s -o - | FileCheck %s`: no -passes / -O pipeline
+- `debuginfo-scev-salvage-3.ll` RUN `opt -S -loop-reduce %s -o - | FileCheck %s`: no -passes / -O pipeline
+- `debuginfo-scev-salvage-4.ll` RUN `opt -S -loop-reduce %s -o - | FileCheck %s`: no -passes / -O pipeline
+- `debuginfo-scev-salvage-5.ll` RUN `opt -S -loop-reduce %s | FileCheck %s`: no -passes / -O pipeline
+- `debuginfo-scev-salvage-large-width.ll` RUN `opt -S -loop-reduce %s | FileCheck %s`: no -passes / -O pipeline
+- `depth-limit-overrun.ll` RUN `opt -loop-reduce -scalar-evolution-max-arith-depth=2 -S < %s | FileCheck --check-prefixes=LIMIT %s`: no -passes / -O pipeline
+- `different-type-ivs.ll` RUN `opt < %s -loop-reduce -disable-output`: no -passes / -O pipeline
+- `dominate-assert.ll` RUN `opt -loop-reduce < %s`: no -passes / -O pipeline
+- `dont-hoist-simple-loop-constants.ll` RUN `opt < %s -loop-reduce -S | not grep "bitcast i32 1 to i32"`: no -passes / -O pipeline
+- `dont_insert_redundant_ops.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `dont_reduce_bytes.ll` RUN `opt < %s -loop-reduce -disable-output`: no -passes / -O pipeline
+- `dont_reverse.ll` RUN `opt < %s -loop-reduce -S | grep "icmp eq i2 %lsr.iv.next, %xmp4344"`: no -passes / -O pipeline
+- `duplicated-phis.ll` RUN `opt -S -loop-reduce %s | FileCheck %s`: no -passes / -O pipeline
+- `ephemeral.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `exit_compare_live_range.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `funclet.ll`: target triple i686-pc-windows-msvc
+- `gnarly-setupcost.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `hoist-parent-preheader.ll` RUN `opt < %s -loop-reduce -verify`: no -passes / -O pipeline
+- `invariant_value_first.ll` RUN `opt < %s -loop-reduce -S | not grep "getelementptr.*ptr %INDVAR"`: no -passes / -O pipeline
+- `invariant_value_first_arg.ll` RUN `opt < %s -loop-reduce -S | not grep "getelementptr.*ptr %INDVAR"`: no -passes / -O pipeline
+- `ivchain.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `ivincs-hoist.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `lsr-comp-time.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `lsr-comp-time.ll` RUN `opt -loop-reduce -lsr-complexity-limit=2147483647 -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `lsr-overflow.ll` RUN `opt -lsr-complexity-limit=50 -loop-reduce -S %s | FileCheck %s`: no -passes / -O pipeline
+- `lsr-term-fold-negative-testcase.ll`: REQUIRES asserts
+- `multi-edge-latch.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `negative-scale.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `nested-reduce.ll` RUN `opt < %s -loop-reduce -S | not grep mul`: no -passes / -O pipeline
+- `nonintegral.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `nonlinear-postinc.ll` RUN `opt < %s -loop-reduce`: no -passes / -O pipeline
+- `opaque-ptr.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `ops_after_indvar.ll` RUN `opt < %s -loop-reduce -S | not grep INDVAR`: no -passes / -O pipeline
+- `optimizemax_debugloc.ll` RUN `opt < %s -loop-reduce -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `phi_ehpad_ignore_sameval.ll` RUN `opt -loop-reduce -S %s`: no -passes / -O pipeline
+- `phi_node_update_multiple_preds.ll` RUN `opt < %s -loop-reduce -disable-output`: no -passes / -O pipeline
+- `post-inc-icmpzero.ll` RUN `opt -loop-reduce -S < %s | FileCheck %s`: no -passes / -O pipeline
+- `post-inc-optsize.ll`: target triple thumbv7m-arm-none-eabi
+- `post-increment-insertion.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `pr12018.ll` RUN `opt < %s -loop-reduce`: no -passes / -O pipeline
+- `pr12048.ll` RUN `opt < %s -loop-reduce`: no -passes / -O pipeline
+- `pr12691.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `pr18165.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `pr2537.ll` RUN `opt < %s -loop-reduce -disable-output`: no -passes / -O pipeline
+- `pr25541.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `pr2570.ll`: target triple i386-pc-linux-gnu
+- `pr27056.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `pr3086.ll` RUN `opt < %s -loop-reduce`: no -passes / -O pipeline
+- `pr31627.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `pr3399.ll` RUN `opt < %s -loop-reduce | llvm-dis`: no -passes / -O pipeline
+- `pr3571.ll`: target triple i386-pc-mingw32
+- `pr48725.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `pr50765.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `pr50918.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline
+- `pr51329.ll` RUN `opt -S -loop-reduce %s | FileCheck %s`: no -passes / -O pipeline
+- `pr51656.ll` RUN `opt -loop-reduce -S %s | FileCheck %s`: no -passes / -O pipeline
+- `pr52161.ll` RUN `opt -S -loop-reduce %s | FileCheck %s`: no -passes / -O pipeline
+- `pr56160.ll` RUN `opt -S -loop-reduce %s | FileCheck %s`: no -passes / -O pipeline
+- `preserve-gep-loop-variant.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `preserve-lcssa.ll` RUN `opt -S -loop-reduce %s | FileCheck --check-prefixes=LEGACYPM %s`: no -passes / -O pipeline
+- `related_indvars.ll` RUN `opt < %s -loop-reduce -S | grep phi | count 1`: no -passes / -O pipeline
+- `remove_indvar.ll` RUN `opt < %s -loop-reduce -S | not grep INDVAR`: no -passes / -O pipeline
+- `remove_scev_indvars.ll` RUN `opt < %s -S -loop-reduce | FileCheck %s`: no -passes / -O pipeline
+- `scaling-factor-incompat-type.ll`: REQUIRES asserts
+- `scaling_factor_cost_crash.ll`: target triple i686-pc-win32
+- `scev-expander-lcssa.ll` RUN `opt -loop-reduce -S %s | FileCheck %s`: no -passes / -O pipeline
+- `scev-incorrect-nuw-inference.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `scev-insertpt-bug.ll` RUN `opt < %s -loop-reduce -S`: no -passes / -O pipeline
+- `sext-ind-var.ll`: target triple nvptx64-unknown-unknown
+- `share_code_in_preheader.ll` RUN `opt < %s -loop-reduce -S | grep mul | count 1`: no -passes / -O pipeline
+- `share_ivs.ll` RUN `opt < %s -loop-reduce -S | grep phi | count 1`: no -passes / -O pipeline
+- `shl.ll` RUN `opt < %s -loop-reduce -gvn -S | FileCheck %s`: no -passes / -O pipeline
+- `two-combinations-bug.ll` RUN `opt < %s -loop-reduce -lsr-setupcost-depth-limit=1 -S | FileCheck %s`: no -passes / -O pipeline
+- `uglygep-address-space.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `uglygep.ll` RUN `opt < %s -loop-reduce -S | FileCheck %s`: no -passes / -O pipeline
+- `use_postinc_value_outside_loop.ll` RUN `opt < %s -loop-reduce -S | grep "add i32 %indvar630.ui, 1"`: no -passes / -O pipeline
+- `var_stride_used_by_compare.ll`: target triple i686-apple-darwin8
+- `variable_stride.ll` RUN `opt < %s -loop-reduce -S | not grep mul`: no -passes / -O pipeline
+- `wrong-hoisting-iv.ll` RUN `opt -S -loop-reduce < %s | FileCheck %s`: no -passes / -O pipeline

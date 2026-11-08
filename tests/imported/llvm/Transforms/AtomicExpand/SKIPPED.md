@@ -1,0 +1,66 @@
+# Skipped while importing llvm/test/Transforms/AtomicExpand (llvmorg-23.1.5)
+
+1 of 62 files imported. Regenerate with `./harness/run import-llvm Transforms/AtomicExpand`.
+
+- `atomicrmw-fp.ll`: in a AArch64 target directory
+- `expand-atomicrmw-xchg-fp.ll`: in a AArch64 target directory
+- `pcsections.ll`: in a AArch64 target directory
+- `expand-atomic-f32-agent.ll`: in a AMDGPU target directory
+- `expand-atomic-f32-system.ll`: in a AMDGPU target directory
+- `expand-atomic-f64-agent.ll`: in a AMDGPU target directory
+- `expand-atomic-f64-system.ll`: in a AMDGPU target directory
+- `expand-atomic-i16-system.ll`: in a AMDGPU target directory
+- `expand-atomic-i16.ll`: in a AMDGPU target directory
+- `expand-atomic-i32-agent.ll`: in a AMDGPU target directory
+- `expand-atomic-i32-system.ll`: in a AMDGPU target directory
+- `expand-atomic-i64-agent.ll`: in a AMDGPU target directory
+- `expand-atomic-i64-system.ll`: in a AMDGPU target directory
+- `expand-atomic-i8-system.ll`: in a AMDGPU target directory
+- `expand-atomic-i8.ll`: in a AMDGPU target directory
+- `expand-atomic-mmra.ll`: in a AMDGPU target directory
+- `expand-atomic-private-gas.ll`: in a AMDGPU target directory
+- `expand-atomic-rmw-fadd-flat-specialization-preserve-name.ll`: in a AMDGPU target directory
+- `expand-atomic-rmw-fadd-flat-specialization.ll`: in a AMDGPU target directory
+- `expand-atomic-rmw-fadd.ll`: in a AMDGPU target directory
+- `expand-atomic-rmw-fmax.ll`: in a AMDGPU target directory
+- `expand-atomic-rmw-fmin.ll`: in a AMDGPU target directory
+- `expand-atomic-rmw-fsub.ll`: in a AMDGPU target directory
+- `expand-atomic-rmw-nand.ll`: in a AMDGPU target directory
+- `expand-atomic-simplify-cfg-CAS-block.ll`: in a AMDGPU target directory
+- `expand-atomic-v2bf16-agent.ll`: in a AMDGPU target directory
+- `expand-atomic-v2bf16-system.ll`: in a AMDGPU target directory
+- `expand-atomic-v2f16-agent.ll`: in a AMDGPU target directory
+- `expand-atomic-v2f16-system.ll`: in a AMDGPU target directory
+- `expand-atomicrmw-flat-noalias-addrspace.ll`: in a AMDGPU target directory
+- `expand-atomicrmw-fp-vector.ll`: in a AMDGPU target directory
+- `expand-atomicrmw-integer-ops-0-to-add-0.ll`: in a AMDGPU target directory
+- `expand-cmpxchg-flat-maybe-private.ll`: in a AMDGPU target directory
+- `no-expand-atomic-load.ll`: in a AMDGPU target directory
+- `no-expand-atomic-store.ll`: in a AMDGPU target directory
+- `unaligned-atomic.ll`: in a AMDGPU target directory
+- `atomic-expansion-v7.ll`: in a ARM target directory
+- `atomic-expansion-v8.ll`: in a ARM target directory
+- `atomicrmw-fp.ll`: in a ARM target directory
+- `cmpxchg-weak.ll`: in a ARM target directory
+- `atomicrmw-fp.ll`: in a Hexagon target directory
+- `atomicrmw-expand.ll`: in a LoongArch target directory
+- `atomicrmw-fp.ll`: in a LoongArch target directory
+- `load-store-atomic.ll`: in a LoongArch target directory
+- `atomicrmw-fp.ll`: in a Mips target directory
+- `atomicrmw-vector.ll`: in a Mips target directory
+- `atomicrmw-fp.ll`: in a PowerPC target directory
+- `cfence-double.ll`: in a PowerPC target directory
+- `cfence-float.ll`: in a PowerPC target directory
+- `cmpxchg.ll`: in a PowerPC target directory
+- `issue55983.ll`: in a PowerPC target directory
+- `atomicrmw-fp.ll`: in a RISCV target directory
+- `atomicrmw-widen-volatile.ll`: in a RISCV target directory
+- `libcalls.ll`: target triple sparc-unknown-unknown
+- `partword.ll`: target triple sparcv9-unknown-unknown
+- `expand-atomic-libcall.ll` RUN `opt -S -mtriple=i686-linux-gnu -passes='require<libcall-lowering-info>,atomic-expand' %s | FileCheck %s`: non-x86_64 target i686-linux-gnu
+- `expand-atomic-non-integer.ll` RUN `opt -S %s -passes='require<libcall-lowering-info>,atomic-expand' -mtriple=i686-linux-gnu | FileCheck %s --check-prefixes=CHECK,CHECK32`: non-x86_64 target i686-linux-gnu
+- `expand-atomic-rmw-fp.ll` RUN `opt -S -mtriple=i686-linux-gnu -passes='require<libcall-lowering-info>,atomic-expand' %s | FileCheck %s`: non-x86_64 target i686-linux-gnu
+- `expand-atomic-rmw-initial-load.ll` RUN `opt -S %s -passes='require<libcall-lowering-info>,atomic-expand' -mtriple=i686-linux-gnu | FileCheck %s`: non-x86_64 target i686-linux-gnu
+- `expand-atomic-xchg-fp.ll` RUN `opt -S -mtriple=i686-linux-gnu -passes='require<libcall-lowering-info>,atomic-expand' %s | FileCheck %s`: non-x86_64 target i686-linux-gnu
+- `missing-analysis.ll` RUN `not opt -mtriple=x86_64-- -passes=atomic-expand -disable-output %s 2>&1 | FileCheck %s`: not an opt invocation
+- `atomicrmw-expand.ll`: in a Xtensa target directory

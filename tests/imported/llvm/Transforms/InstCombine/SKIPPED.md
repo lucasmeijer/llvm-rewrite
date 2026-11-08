@@ -1,0 +1,261 @@
+# Skipped while importing llvm/test/Transforms/InstCombine (llvmorg-23.1.5)
+
+1635 of 1846 files imported. Regenerate with `./harness/run import-llvm Transforms/InstCombine`.
+
+- `2006-12-08-Phi-ICmp-Op-Fold.ll`: target triple i686-pc-linux-gnu
+- `2006-12-08-Select-ICmp.ll`: target triple i686-pc-linux-gnu
+- `2006-12-15-Range-Test.ll`: target triple i686-pc-linux-gnu
+- `2006-12-23-Select-Cmp-Cmp.ll`: target triple i686-pc-linux-gnu
+- `2007-02-23-PhiFoldInfLoop.ll`: target triple i686-pc-linux-gnu
+- `2007-03-26-BadShiftMask.ll`: target triple i686-pc-linux-gnu
+- `2007-05-14-Crash.ll`: target triple powerpc-unknown-linux-gnu
+- `2007-10-28-stacksave.ll`: target triple i686-apple-darwin8
+- `2007-10-31-StringCrash.ll`: target triple i686-apple-darwin8
+- `2007-11-07-OpaqueAlignCrash.ll`: target triple i686-pc-linux-gnu
+- `2007-12-10-ConstFoldCompare.ll`: target triple i686-pc-linux-gnu
+- `2008-01-06-BitCastAttributes.ll` RUN `opt < %s -passes=instcombine 2> /dev/null -S | FileCheck %s`: redirects or chains commands
+- `2008-04-22-ByValBitcast.ll`: target triple i386-apple-darwin9
+- `2008-04-29-VolatileLoadDontMerge.ll`: target triple i386-apple-darwin8
+- `2008-04-29-VolatileLoadMerge.ll`: target triple i386-apple-darwin8
+- `2008-05-08-LiveStoreDelete.ll`: target triple i386-apple-darwin8
+- `2008-05-08-StrLenSink.ll`: target triple i386-apple-darwin8
+- `2008-05-17-InfLoop.ll`: target triple i686-pc-linux-gnu
+- `2008-05-18-FoldIntToPtr.ll`: target triple i386-pc-linux-gnu
+- `2008-06-24-StackRestore.ll`: target triple i386-pc-linux-gnu
+- `2008-07-08-VolatileLoadMerge.ll`: target triple i386-apple-darwin8
+- `2009-01-08-AlignAlloca.ll`: target triple i386-apple-darwin9.6
+- `2009-01-16-PointerAddrSpace.ll`: target triple i386-apple-darwin9.6
+- `2009-01-19-fmod-constant-float-specials.ll`: target triple i386-apple-darwin9.6
+- `2009-01-19-fmod-constant-float.ll`: target triple i386-apple-darwin9.6
+- `2009-02-20-InstCombine-SROA.ll`: target triple i386-apple-darwin9.6
+- `2009-02-21-LoadCST.ll`: target triple i386-pc-linux-gnu
+- `2009-02-25-CrashZeroSizeArray.ll`: target triple i386-pc-linux-gnu
+- `2010-03-03-ExtElim.ll`: target triple i386-unknown-linux-gnu
+- `2011-06-13-nsw-alloca.ll`: target triple i386-apple-darwin10.0.0
+- `2011-10-07-AlignPromotion.ll`: target triple thumbv7-apple-ios5.0.0
+- `2012-04-23-Neon-Intrinsics.ll`: in a AArch64 target directory
+- `VectorUtils_heuristics.ll`: in a AArch64 target directory
+- `aarch64-sme-in-streaming-mode.ll`: in a AArch64 target directory
+- `aes-intrinsics.ll`: in a AArch64 target directory
+- `demandelts.ll`: in a AArch64 target directory
+- `dmb-intrinsics.ll`: in a AArch64 target directory
+- `neon-min-max-intrinsics.ll`: in a AArch64 target directory
+- `neon-shift-intrinsics.ll`: in a AArch64 target directory
+- `sme-intrinsic-opts-counting-elems.ll`: in a AArch64 target directory
+- `sme-svcount.ll`: in a AArch64 target directory
+- `sve-intrinsic-abs-srshl.ll`: in a AArch64 target directory
+- `sve-intrinsic-comb-all-active-lanes-cvt.ll`: in a AArch64 target directory
+- `sve-intrinsic-comb-no-active-lanes-cmp.ll`: in a AArch64 target directory
+- `sve-intrinsic-comb-no-active-lanes-cvt.ll`: in a AArch64 target directory
+- `sve-intrinsic-comb-no-active-lanes-loads.ll`: in a AArch64 target directory
+- `sve-intrinsic-comb-no-active-lanes-prf.ll`: in a AArch64 target directory
+- `sve-intrinsic-comb-no-active-lanes-stores.ll`: in a AArch64 target directory
+- `sve-intrinsic-comb-no-active-lanes-to-zero.ll`: in a AArch64 target directory
+- `sve-intrinsic-comb-no-active-lanes.ll`: in a AArch64 target directory
+- `sve-intrinsic-dupqlane.ll`: in a AArch64 target directory
+- `sve-intrinsic-fma-binops.ll`: in a AArch64 target directory
+- `sve-intrinsic-gatherscatter.ll`: in a AArch64 target directory
+- `sve-intrinsic-insr.ll`: in a AArch64 target directory
+- `sve-intrinsic-loadstore.ll`: in a AArch64 target directory
+- `sve-intrinsic-mla-one.ll`: in a AArch64 target directory
+- `sve-intrinsic-muladdsub.ll`: in a AArch64 target directory
+- `sve-intrinsic-opts-clast.ll`: in a AArch64 target directory
+- `sve-intrinsic-opts-cmpeq.ll`: in a AArch64 target directory
+- `sve-intrinsic-opts-cmpne.ll`: in a AArch64 target directory
+- `sve-intrinsic-opts-counting-elems.ll`: in a AArch64 target directory
+- `sve-intrinsic-opts-dup.ll`: in a AArch64 target directory
+- `sve-intrinsic-opts-lasta-lastb.ll`: in a AArch64 target directory
+- `sve-intrinsic-opts-reinterpret.ll`: in a AArch64 target directory
+- `sve-intrinsic-opts-unpkhi-unpklo.ll`: in a AArch64 target directory
+- `sve-intrinsic-opts-uzp1.ll`: in a AArch64 target directory
+- `sve-intrinsic-opts-zip.ll`: in a AArch64 target directory
+- `sve-intrinsic-ptrue.ll`: in a AArch64 target directory
+- `sve-intrinsic-sdiv.ll`: in a AArch64 target directory
+- `sve-intrinsic-sel.ll`: in a AArch64 target directory
+- `sve-intrinsic-simplify-binop.ll`: in a AArch64 target directory
+- `sve-intrinsic-simplify-shift.ll`: in a AArch64 target directory
+- `sve-intrinsic-simplify-to-u-form.ll`: in a AArch64 target directory
+- `sve-intrinsic-strictfp.ll`: in a AArch64 target directory
+- `sve-intrinsic-tbl-dupx.ll`: in a AArch64 target directory
+- `sve-intrinsic-to-svbool-binops.ll`: in a AArch64 target directory
+- `sve-intrinsic-uxt.ll`: in a AArch64 target directory
+- `sve-intrinsic-whilelo.ll`: in a AArch64 target directory
+- `sve-intrinsics-ptest.ll`: in a AArch64 target directory
+- `sve-intrinsics-rdffr-predication.ll`: in a AArch64 target directory
+- `sve-pairwise-add-long.ll`: in a AArch64 target directory
+- `tbl.ll`: in a AArch64 target directory
+- `addrspacecast.ll`: in a AMDGPU target directory
+- `amdgcn-demanded-vector-elts-inseltpoison.ll`: in a AMDGPU target directory
+- `amdgcn-demanded-vector-elts.ll`: in a AMDGPU target directory
+- `amdgcn-intrinsics-gfx8.ll`: in a AMDGPU target directory
+- `amdgcn-intrinsics.ll`: in a AMDGPU target directory
+- `amdgcn-simplify-image-buffer-stores.ll`: in a AMDGPU target directory
+- `bitcast-fold-lane-ops.ll`: in a AMDGPU target directory
+- `canonicalize-add-to-gep.ll`: in a AMDGPU target directory
+- `fma_legacy.ll`: in a AMDGPU target directory
+- `fmed3-fpext-fold.ll`: in a AMDGPU target directory
+- `fmed3.ll`: in a AMDGPU target directory
+- `fmul_legacy.ll`: in a AMDGPU target directory
+- `image-d16.ll`: in a AMDGPU target directory
+- `issue68120.ll`: in a AMDGPU target directory
+- `lane-index-simplify-demanded-bits.ll`: in a AMDGPU target directory
+- `llvm.amdgcn.implicitarg.ptr.ll`: in a AMDGPU target directory
+- `llvm.amdgcn.readfirstlane.ll`: in a AMDGPU target directory
+- `llvm.amdgcn.readlane.ll`: in a AMDGPU target directory
+- `llvm.amdgcn.wave.shuffle.ll`: in a AMDGPU target directory
+- `llvm.amdgcn.wavefrontsize.ll`: in a AMDGPU target directory
+- `mbcnt-negative-cases.ll`: in a AMDGPU target directory
+- `mbcnt-wave32-optimizations.ll`: in a AMDGPU target directory
+- `mbcnt-wave64-optimizations.ll`: in a AMDGPU target directory
+- `mbcnt.ll`: in a AMDGPU target directory
+- `memcpy-from-constant.ll`: in a AMDGPU target directory
+- `mfma-scale.ll`: in a AMDGPU target directory
+- `permlane64.ll`: in a AMDGPU target directory
+- `phi-with-incoming-from-load.ll`: in a AMDGPU target directory
+- `ptr-replace-alloca.ll`: in a AMDGPU target directory
+- `rcp-contract-rsq.ll`: in a AMDGPU target directory
+- `select-from-load.ll`: in a AMDGPU target directory
+- `sendmsg-m0-poison.ll`: in a AMDGPU target directory
+- `simplify-amdgcn.cvt.off.f32.i4.ll`: in a AMDGPU target directory
+- `simplify-demanded-vector-elts-lane-intrinsics.ll`: in a AMDGPU target directory
+- `tan.ll`: in a AMDGPU target directory
+- `trivially-uniform.ll`: in a AMDGPU target directory
+- `wave-shuffle-patterns-wave64.ll`: in a AMDGPU target directory
+- `wave-shuffle-patterns.ll`: in a AMDGPU target directory
+- `wmma-f8f6f4.ll`: in a AMDGPU target directory
+- `2012-04-23-Neon-Intrinsics.ll`: in a ARM target directory
+- `aes-intrinsics.ll`: in a ARM target directory
+- `constant-fold-hang.ll`: in a ARM target directory
+- `mve-narrow.ll`: in a ARM target directory
+- `mve-v2i2v.ll`: in a ARM target directory
+- `neon-intrinsics.ll`: in a ARM target directory
+- `strcmp.ll`: in a ARM target directory
+- `strcpy.ll`: in a ARM target directory
+- `tbl.ll`: in a ARM target directory
+- `vld1.ll`: in a ARM target directory
+- `vmldava.ll`: in a ARM target directory
+- `simplify-hvx-qvq.ll`: in a Hexagon target directory
+- `isspacep.ll`: in a NVPTX target directory
+- `nvvm-intrins.ll`: in a NVPTX target directory
+- `aligned-altivec.ll`: in a PowerPC target directory
+- `vsx-unaligned.ll`: in a PowerPC target directory
+- `libcall-arg-exts.ll`: in a RISCV target directory
+- `memcmp.ll`: in a RISCV target directory
+- `riscv-vmv-v-x.ll`: in a RISCV target directory
+- `riscv-vsetvli-knownbits.ll`: in a RISCV target directory
+- `riscv-vsetvlimax-knownbits.ll`: in a RISCV target directory
+- `libcall-arg-exts.ll`: in a SystemZ target directory
+- `printf-opt-alignment.ll`: in a SystemZ target directory
+- `fold-swizzle.ll`: in a WebAssembly target directory
+- `2009-03-23-i80-fp80.ll`: target triple i686-apple-darwin9
+- `shufflemask-undef-inseltpoison.ll`: target triple i386-apple-darwin9
+- `shufflemask-undef.ll`: target triple i386-apple-darwin9
+- `add3.ll`: target triple i686-apple-darwin8
+- `all-bits-shift.ll`: target triple powerpc64-unknown-linux-gnu
+- `apint-call-cast-target.ll`: target triple i686-pc-linux-gnu
+- `assume-align.ll` RUN `opt -S -passes=instcombine,simplifycfg < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `assume-cache-update.ll` RUN `opt -passes='print<assumptions>,instcombine,print<assumptions>' -disable-output %s 2>&1 | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `bitcast-bigendian.ll`: target triple powerpc64-unknown-linux-gnu
+- `call-cast-target-inalloca.ll`: target triple i686-pc-linux-gnu
+- `call-cast-target-preallocated.ll`: target triple i686-pc-win32
+- `call-cast-target.ll`: target triple i686-pc-linux-gnu
+- `call-guard.ll` RUN `opt < %s -passes=instcombine -S -debugify-each | FileCheck %s`: diagnostic output flag -debugify-each
+- `catchswitch-phi.ll`: uses non-x86 target intrinsic @llvm.wasm.
+- `constant-fold-iteration.ll`: REQUIRES asserts
+- `crash.ll`: target triple i386-apple-darwin10.0
+- `debuginfo_add.ll`: target triple thumbv7s-apple-ios5.0.0
+- `disable-builtin.ll` RUN `not opt < %s -passes=instcombine -disable-builtin foobar -S 2>&1 | FileCheck --check-prefix=FOOBAR %s`: not an opt invocation
+- `div-shift-crash.ll`: target triple powerpc64-unknown-linux-gnu
+- `double-float-shrink-1.ll` RUN `opt < %s -passes=instcombine -S -mtriple i386-pc-windows-msvc     | FileCheck %s --check-prefixes=CHECK,ISC99`: non-x86_64 target i386-pc-windows-msvc
+- `double-float-shrink-1.ll` RUN `opt < %s -passes=instcombine -S -mtriple i686-pc-windows-msvc17   | FileCheck %s --check-prefixes=CHECK,MS32,ISC89`: non-x86_64 target i686-pc-windows-msvc17
+- `double-float-shrink-2.ll`: REQUIRES sparc-registered-target
+- `enforce-known-alignment.ll`: target triple i386-apple-darwin9.6
+- `exp2-1.ll` RUN `opt < %s -passes=instcombine -S -mtriple=unknown | FileCheck %s -check-prefixes=LDEXP32`: non-x86_64 target unknown
+- `exp2-1.ll` RUN `opt < %s -passes=instcombine -S -mtriple=msp430 | FileCheck %s -check-prefixes=LDEXP16`: non-x86_64 target msp430
+- `exp2-1.ll` RUN `opt < %s -passes=instcombine -S -mtriple=i386-pc-win32 | FileCheck %s -check-prefixes=NOLDEXPF`: non-x86_64 target i386-pc-win32
+- `exp2-1.ll` RUN `opt < %s -passes=instcombine -S -mtriple=i386-windows-gnu | FileCheck %s -check-prefixes=NOLDEXPF`: non-x86_64 target i386-windows-gnu
+- `exp2-1.ll` RUN `opt < %s -passes=instcombine -S -mtriple=amdgpu-unknown-unknown | FileCheck %s -check-prefixes=NOLDEXP`: non-x86_64 target amdgpu-unknown-unknown
+- `fabs-libcall.ll` RUN `opt -S -mtriple=i686-apple-macosx -passes=instcombine %s | FileCheck %s`: non-x86_64 target i686-apple-macosx
+- `ffs-1.ll` RUN `opt < %s -passes=instcombine -mtriple i386-pc-linux -S             | FileCheck %s --check-prefix=ALL --check-prefix=TARGET`: non-x86_64 target i386-pc-linux
+- `ffs-1.ll` RUN `opt < %s -passes=instcombine -mtriple=arm64-apple-ios9.0 -S        | FileCheck %s --check-prefix=ALL --check-prefix=TARGET`: non-x86_64 target arm64-apple-ios9.0
+- `ffs-1.ll` RUN `opt < %s -passes=instcombine -mtriple=arm64-apple-tvos9.0 -S       | FileCheck %s --check-prefix=ALL --check-prefix=TARGET`: non-x86_64 target arm64-apple-tvos9.0
+- `ffs-1.ll` RUN `opt < %s -passes=instcombine -mtriple=thumbv7k-apple-watchos2.0 -S | FileCheck %s --check-prefix=ALL --check-prefix=TARGET`: non-x86_64 target thumbv7k-apple-watchos2.0
+- `ffs-i16.ll`: REQUIRES avr-registered-target, msp430-registered-target
+- `fls-i16.ll`: REQUIRES avr-registered-target, msp430-registered-target
+- `fold-shuffle-ext.ll` RUN `opt -p instcombine -S %s | FileCheck %s`: no -passes / -O pipeline
+- `fold-zext-of-deinterleave.ll` RUN `opt -S -p instcombine < %s | FileCheck %s`: no -passes / -O pipeline
+- `fprintf-1.ll` RUN `opt < %s -mtriple xcore-xmos-elf -passes=instcombine -S | FileCheck %s -check-prefix=CHECK-IPRINTF`: non-x86_64 target xcore-xmos-elf
+- `icmp-vector-bitwise-reductions.ll` RUN `opt -p instcombine -S %s | FileCheck %s`: no -passes / -O pipeline
+- `infinite-loop-postdom.ll` RUN `opt < %s -passes='print<postdomtree>' 2>&1 | FileCheck --check-prefixes=CHECK-POSTDOM %s`: analysis printer (stderr output) not supported yet
+- `intrinsic-distributive.ll` RUN `opt -S -passes=instcombine < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `isascii-i16.ll`: REQUIRES avr-registered-target, msp430-registered-target
+- `isdigit-i16.ll`: REQUIRES avr-registered-target, msp430-registered-target
+- `load-store-masked-constant-array.ll`: uses non-x86 target intrinsic @llvm.aarch64.
+- `load3.ll`: target triple i386-apple-macosx10.0.0
+- `malloc-free-delete-dbginvar.ll` RUN `opt < %s -passes=instcombine -S > %t.no_dbg.ll`: redirects or chains commands
+- `malloc-free-delete-dbginvar.ll` RUN `opt < %s -debugify-each -passes=instcombine -S > %t.ll`: diagnostic output flag -debugify-each
+- `malloc-free-delete-dbginvar.ll` RUN `diff %t.no_dbg.ll %t.ll`: not an opt invocation
+- `malloc_free_delete_nvptx.ll`: target triple nvptx64
+- `mem-gep-zidx.ll`: target triple powerpc64-unknown-linux-gnu
+- `mul_full_32.ll`: target triple i386-unknown-linux-gnu
+- `musttail-thunk.ll` RUN `opt -debugify-each -passes=instcombine -S < %s | FileCheck %s`: diagnostic output flag -debugify-each
+- `nanless-canonicalize-combine.ll` RUN `opt -S -p=instcombine < %s | FileCheck %s`: no -passes / -O pipeline
+- `no-negzero.ll`: target triple i386-apple-darwin9.8
+- `osx-names.ll`: target triple i386-apple-macosx10.7.2
+- `phi-merge-gep.ll` RUN `opt < %s -S -passes=instcombine > %t`: redirects or chains commands
+- `phi-merge-gep.ll` RUN `grep "= getelementptr" %t | count 20`: not an opt invocation
+- `phi-merge-gep.ll` RUN `grep "= phi" %t | count 13`: not an opt invocation
+- `phi-timeout.ll` RUN `opt < %s -passes=instcombine -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `pow-1.ll` RUN `opt -passes=instcombine -S < %s -mtriple=arm-apple-ios7.0         | FileCheck %s --check-prefixes=CHECK,LIB,ANY,CHECK-EXP10`: non-x86_64 target arm-apple-ios7.0
+- `pow-1.ll` RUN `opt -passes=instcombine -S < %s -mtriple=arm-apple-ios6.0         | FileCheck %s --check-prefixes=CHECK,LIB,ANY,CHECK-NO-EXP10`: non-x86_64 target arm-apple-ios6.0
+- `pow-1.ll` RUN `opt -passes=instcombine -S < %s -mtriple=arm-apple-tvos9.0        | FileCheck %s --check-prefixes=CHECK,LIB,ANY,CHECK-EXP10`: non-x86_64 target arm-apple-tvos9.0
+- `pow-1.ll` RUN `opt -passes=instcombine -S < %s -mtriple=arm-apple-watchos2.0     | FileCheck %s --check-prefixes=CHECK,LIB,ANY,CHECK-EXP10`: non-x86_64 target arm-apple-watchos2.0
+- `pow-1.ll` RUN `opt -passes=instcombine -S < %s -mtriple=i386-pc-windows-msvc18   | FileCheck %s --check-prefixes=CHECK,LIB,CHECK-NO-EXP10,VC32`: non-x86_64 target i386-pc-windows-msvc18
+- `pow-1.ll` RUN `opt -passes=instcombine -S < %s -mtriple=i386-pc-windows-msvc     | FileCheck %s --check-prefixes=CHECK,LIB,CHECK-NO-EXP10,VC19,VC51`: non-x86_64 target i386-pc-windows-msvc
+- `pow-1.ll` RUN `opt -passes=instcombine -S < %s -mtriple=amdgpu--                 | FileCheck %s --check-prefixes=CHECK,CHECK-NO-EXP10,NOLIB`: non-x86_64 target amdgpu--
+- `pow-4.ll` RUN `opt -passes=instcombine -S < %s -mtriple unknown -data-layout=e          | FileCheck %s --check-prefixes=CHECK,CHECKI32,CHECKSQRT`: non-x86_64 target unknown
+- `pow-4.ll` RUN `opt -passes=instcombine -S < %s -mtriple unknown -data-layout=e -disable-builtin sqrt  | FileCheck %s --check-prefixes=CHECK,CHECKI32,CHECKNOSQRT`: non-x86_64 target unknown
+- `pow-4.ll` RUN `opt -passes=instcombine -S < %s -mtriple msp430                        | FileCheck %s --check-prefixes=CHECK,CHECKI16,CHECKSQRT`: non-x86_64 target msp430
+- `pow-4.ll` RUN `opt -passes=instcombine -S < %s -mtriple msp430 -disable-builtin sqrt  | FileCheck %s --check-prefixes=CHECK,CHECKI16,CHECKNOSQRT`: non-x86_64 target msp430
+- `pow_fp_int.ll` RUN `opt -mtriple unknown -passes=instcombine -S < %s | FileCheck %s`: non-x86_64 target unknown
+- `pow_fp_int16.ll` RUN `opt -mtriple msp430 -passes=instcombine -S < %s | FileCheck %s`: non-x86_64 target msp430
+- `pr226504-commuted.ll` RUN `opt < %s -passes=instcombine -debug-counter=instcombine-visit=4 -S | FileCheck %s`: diagnostic output flag -debug-counter=instcombine-visit=4
+- `pr226504.ll` RUN `opt < %s -passes=instcombine -debug-counter=instcombine-visit=4 -S | FileCheck %s`: diagnostic output flag -debug-counter=instcombine-visit=4
+- `pr98435.ll` RUN `opt -S -passes=instcombine < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `preserved-analyses.ll` RUN `opt < %s -disable-output -debug-pass-manager 2>&1 -aa-pipeline=basic-aa,globals-aa -passes='require<globals-aa>,function(require<aa>,instcombine),function(require<aa>)' | FileCheck %s --check-prefix=AA`: diagnostic output flag -debug-pass-manager
+- `preserved-analyses.ll` RUN `opt < %s -disable-output -debug-pass-manager 2>&1 -passes='require<domtree>,instcombine,require<domtree>' | FileCheck %s --check-prefix=DT`: diagnostic output flag -debug-pass-manager
+- `printf-1.ll` RUN `opt < %s -mtriple xcore-xmos-elf -passes=instcombine -S | FileCheck %s -check-prefix=CHECK-IPRINTF`: non-x86_64 target xcore-xmos-elf
+- `printf-i16.ll`: REQUIRES avr-registered-target, msp430-registered-target
+- `ptrtoint-nullgep.ll` RUN `sed -e 's/p:64:64:64:64/p:64:64:64:64-ni:1/g' %s | opt -S -passes=instsimplify | FileCheck %s --check-prefixes=ALL,CHECK,INSTSIMPLIFY`: not an opt invocation
+- `ptrtoint-nullgep.ll` RUN `sed -e 's/p:64:64:64:64/p:64:64:64:64-ni:1/g' %s | opt -S -passes=instcombine | FileCheck %s --check-prefixes=ALL,CHECK,INSTCOMBINE`: not an opt invocation
+- `puts-i16.ll`: REQUIRES avr-registered-target, msp430-registered-target
+- `scalable-trunc.ll`: uses non-x86 target intrinsic @llvm.aarch64.
+- `scalable-vector-struct.ll` RUN `opt -passes=instcombine -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `select-fcmp-fmul-zero-absorbing-value.ll` RUN `opt -S -p=instcombine < %s | FileCheck %s`: no -passes / -O pipeline
+- `shufflevec-constant-inseltpoison.ll`: target triple i386-apple-darwin9
+- `shufflevec-constant.ll`: target triple i386-apple-darwin9
+- `simplify-libcalls-i16.ll` RUN `opt -S < %s -mtriple=unknown -passes=instcombine | FileCheck -check-prefixes=CHECK,CHECK32 %s`: non-x86_64 target unknown
+- `simplify-libcalls-i16.ll` RUN `opt -S < %s -mtriple=msp430 -passes=instcombine | FileCheck -check-prefixes=CHECK,CHECK16 %s`: non-x86_64 target msp430
+- `simplify-libcalls-inreg.ll`: target triple i386-unknown-linux-gnu
+- `simplify-libcalls-new.ll` RUN `not opt < %s -passes=instcombine -optimize-hot-cold-new -cold-new-hint-value=256 -S 2>&1 | FileCheck %s --check-prefix=ERROR`: not an opt invocation
+- `simplify-libcalls-new.ll` RUN `not opt < %s -passes=instcombine -optimize-hot-cold-new -hot-new-hint-value=5000 -S 2>&1 | FileCheck %s --check-prefix=ERROR`: not an opt invocation
+- `simplify-libcalls.ll` RUN `opt -S < %s -mtriple=unknown -passes=instcombine | FileCheck -check-prefixes=CHECK,CHECK32 %s`: non-x86_64 target unknown
+- `simplify-libcalls.ll` RUN `opt -S < %s -mtriple=msp430 -passes=instcombine | FileCheck -check-prefixes=CHECK,CHECK16 %s`: non-x86_64 target msp430
+- `sincospi.ll`: REQUIRES arm-registered-target
+- `sink-alloca.ll`: target triple i686-unknown-linux-gnu
+- `sink-dereferenceable-assume.ll` RUN `opt -p instcombine -S %s | FileCheck %s`: no -passes / -O pipeline
+- `sprintf-1.ll` RUN `opt < %s -mtriple xcore-xmos-elf -passes=instcombine -S | FileCheck %s -check-prefixes=CHECK,WITHSTPCPY,CHECK-IPRINTF`: non-x86_64 target xcore-xmos-elf
+- `sprintf-1.ll` RUN `opt < %s -mtriple=i386-pc-windows-msvc -passes=instcombine -S | FileCheck %s --check-prefixes=CHECK,NOSTPCPY`: non-x86_64 target i386-pc-windows-msvc
+- `sprintf-1.ll` RUN `opt < %s -mtriple=i386-mingw32 -passes=instcombine -S | FileCheck %s --check-prefixes=CHECK,NOSTPCPY`: non-x86_64 target i386-mingw32
+- `sprintf-1.ll` RUN `opt < %s -mtriple=armv7-none-linux-android -passes=instcombine -S | FileCheck %s --check-prefixes=CHECK,WITHSTPCPY`: non-x86_64 target armv7-none-linux-android
+- `store-load-unaliased-gep.ll` RUN `opt -passes=instcombine %s -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `store-load-unaliased-gep.ll` RUN `opt -aa-pipeline=basic-aa -passes=instcombine %s -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `strcmp-1.ll` RUN `opt < %s -passes=instcombine -mtriple=unknown-unknown-linux-gnu -S | FileCheck %s --check-prefix=BCMP`: non-x86_64 target unknown-unknown-linux-gnu
+- `tbaa-store-to-load.ll` RUN `opt -S -passes=instcombine < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `update-bpi.ll` RUN `opt < %s -passes="print<branch-prob>,instcombine,print<branch-prob>" -S 2>&1 | FileCheck %s`: analysis printer (stderr output) not supported yet
+- `usub_sat_to_msb_mask.ll` RUN `opt -passes=instcombine -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `vector-splice.ll` RUN `opt < %s -p instcombine -S | FileCheck %s`: no -passes / -O pipeline
+- `win-fdim.ll` RUN `opt %s -passes=instcombine -S -mtriple=i386-pc-windows-msvc | FileCheck %s --check-prefixes=MSVC19`: non-x86_64 target i386-pc-windows-msvc
+- `win-math.ll` RUN `opt %s -passes=instcombine -S -mtriple=i386-pc-windows-msvc18   | FileCheck %s --check-prefixes=CHECK,MSVCXX,MSVC32`: non-x86_64 target i386-pc-windows-msvc18
+- `win-math.ll` RUN `opt %s -passes=instcombine -S -mtriple=i386-pc-windows-msvc     | FileCheck %s --check-prefixes=CHECK,MSVC19,MSVC51`: non-x86_64 target i386-pc-windows-msvc
+- `win-math.ll` RUN `opt %s -passes=instcombine -S -mtriple=i386-pc-mingw32          | FileCheck %s --check-prefixes=CHECK,MINGW32`: non-x86_64 target i386-pc-mingw32

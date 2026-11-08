@@ -1,0 +1,13 @@
+; @origin: llvm/test/Transforms/InstCombine/2008-11-27-MultiplyIntVec.ll (llvmorg-23.1.5)
+; @opt: -passes=instcombine
+; RUN: opt < %s -passes=instcombine -S | not grep mul
+
+define <2 x i8> @f(<2 x i8> %x) {
+  %A = mul <2 x i8> %x, <i8 1, i8 1>
+  ret <2 x i8> %A
+}
+
+define <2 x i8> @g(<2 x i8> %x) {
+  %A = mul <2 x i8> %x, <i8 -1, i8 -1>
+  ret <2 x i8> %A
+}

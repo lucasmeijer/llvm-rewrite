@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# llvm-rewrite test harness. See docs/testing.md.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m lrh "$@"

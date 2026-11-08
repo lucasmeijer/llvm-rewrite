@@ -1,0 +1,192 @@
+<div id="lplan-r1" class="ic-stack">
+<style>
+  #lplan-r1 section { border-top: 1px solid var(--ic-border); padding-top: .75rem; }
+  #lplan-r1 section:first-child { border-top: none; padding-top: 0; }
+  #lplan-r1 h3 { margin: 0 0 .35rem; }
+  #lplan-r1 h3 .n { color: var(--ic-accent); margin-right: .35rem; }
+  #lplan-r1 p { margin: .35rem 0; }
+  #lplan-r1 ol[type="A"] li { margin: .25rem 0; }
+  #lplan-r1 pre { margin: .4rem 0; overflow-x: auto; }
+</style>
+
+<section>
+  <h3><span class="n">1</span>Port LLVM faithfully, with LLVM 21.1.8 as the fixed oracle</h3>
+  <p>We port LLVM's algorithms one pass at a time from the C++ source, and treat <strong>LLVM 21.1.8</strong> (Ubuntu's <code>llvm-21</code> packages, the same version as the clang already installed here) as the source of truth. A script fetches a sparse checkout of <code>llvm-project</code> at <code>llvmorg-21.1.8</code> into a gitignored <code>third_party/</code> folder, so every agent can read the pass it's porting. Our data structures can differ from LLVM's. What our code does can't.</p>
+  <details class="ic-quiet">
+    <summary>Why not a clean-room design?</summary>
+    <p>Your plan to "test our correctness against a single pass" only works if our pass does what LLVM's pass does, heuristic choices included: which InstCombine rewrite fires first, the inliner's cost thresholds, which leader GVN picks. A clean-room design would produce IR that's different but still valid. Then every IR→IR test would need a semantic equivalence checker instead of a plain diff.</p>
+    <p>Porting also gives agents bounded tasks: "port <code>lib/Transforms/Scalar/EarlyCSE.cpp</code>" comes with an obvious reference. Pinning matters because pass output changes between LLVM releases, so the harness refuses to bless goldens produced by any other version. LLVM's license (Apache-2.0 with the LLVM exception) allows a port as long as we credit it.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>Clean-room redesign, using LLVM only to check behaviour: lots of freedom, but per-pass tests get much weaker (e2e plus semantic equivalence only).</li>
+      <li>Track LLVM <code>main</code> instead of a release: newer, but the goldens would keep changing under us.</li>
+      <li>Build LLVM 21.1.8 from source with assertions on, and use that as the oracle: gives <code>-debug-only=</code> traces and stricter verification for about an hour of build time. Could be added later.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">2</span>Two oracles: run e2e programs and compare behaviour; diff pass output exactly</h3>
+  <p><strong>e2e:</strong> we and LLVM (<code>llc</code>) each compile the IR, clang links both, and both programs run. Stdout and exit code must match. The assembly doesn't have to match. One variant is the <em>function test</em>: we compile a single IR function and link it with a C driver built by clang, which calls it with many inputs. That checks ABI compatibility directly.<br>
+  <strong>pass (IR→IR):</strong> the same input goes through <code>opt -passes=…</code> and through our tool. Both outputs are canonicalized with <code>llvm-as | llvm-dis</code>, and the results must be identical.</p>
+  <details class="ic-quiet">
+    <summary>Why not byte-identical assembly?</summary>
+    <p>To match llc byte for byte, we'd have to copy every quirk of FastISel, RegAllocFast, the scheduler and the asm printer before a single program runs. It would also rule out ever improving on LLVM's codegen. Running the program checks what actually matters and leaves the backend free.</p>
+    <p>For IR passes the trade-off flips. A single pass is small enough to replicate exactly, and an exact diff is the sharpest way to catch edge cases. Canonicalizing through LLVM's own assembler and disassembler means value numbering, attribute groups and metadata order can't cause false failures, so pass work doesn't have to wait for a perfect printer.</p>
+    <p>A UB guard: each e2e program is also built with <code>clang -O0</code> and <code>clang -O2</code>. If those two builds behave differently, the program has undefined behaviour and the test is rejected.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>Require exact asm matches for -O0 codegen (a port of FastISel and RegAllocFast) and compare behaviour only from -O1 up.</li>
+      <li>Check pass tests for semantic equivalence with Alive2: proves our output is a valid refinement and accepts different-but-correct results. It's a heavy dependency (z3 plus LLVM dev headers). Worth adding later for any pass where we diverge on purpose.</li>
+      <li>FileCheck-style CHECK lines like LLVM's own tests: partial matching only. It's weaker, and it's easy for an agent to write checks that pass trivially.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">3</span>Rust, in a cargo workspace whose crates follow LLVM's layers</h3>
+  <p>Crates: <code>ir</code> (types, values, module, <code>.ll</code> parser, printer, verifier), <code>analysis</code> (dominators, loops, alias analysis, SCEV, MemorySSA), <code>transforms</code> (one module per pass, named like LLVM's), <code>codegen</code> (machine IR, register allocation, frame lowering), <code>target-x86</code>, <code>tools</code> (the binaries) and <code>harness</code>. The IR uses arenas with typed IDs (<code>ValueId</code>, <code>InstId</code>, <code>BlockId</code>) and explicit use-lists. We settle that once, at layer 0, in <code>docs/architecture.md</code>.</p>
+  <details class="ic-quiet">
+    <summary>Why not C++, which would make porting easiest?</summary>
+    <p>C++ would allow near line-by-line porting. But an IR that's constantly being mutated is exactly where memory bugs turn into silent miscompiles, and with many agents writing code we want those caught at compile time. Rust 1.98 is already installed, and cargo gives us workspaces, parallel tests and benchmarks for free.</p>
+    <p>The cost is that LLVM's pointer graph doesn't translate directly. We use arenas and indices instead, and port idioms like <code>replaceAllUsesWith</code> and the intrusive instruction lists by hand. That's why this decision belongs in layer 0, before any pass is written.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>C++20: closest to the source, quickest to port, but prone to segfaults and UB.</li>
+      <li>Zig: simple and fast to compile, with less agent training data and a less mature ecosystem.</li>
+      <li>Jai: you've used it before, but agents have very little training data for it and there's no public toolchain for CI.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">4</span>One target: x86-64 SysV Linux, emitting textual assembly</h3>
+  <p>We target <code>x86_64-unknown-linux-gnu</code> and emit AT&amp;T-syntax <code>.s</code>, which system clang assembles and links against glibc. Input is textual <code>.ll</code> only: no bitcode, no object emission, and no other targets until the -O2 pipeline passes.</p>
+  <details class="ic-quiet">
+    <summary>Why not AArch64 too, or emit object files?</summary>
+    <p>This container is x86-64, so tests run natively without qemu. Textual assembly is what you asked for, and it can be debugged just by reading it. The MC layer (assembler, ELF writer) is a big project of its own and adds nothing to codegen correctness. Keeping target-specific code inside <code>target-x86</code> means a second target can be added later without touching the rest.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>Add AArch64 from the start, with tests running under qemu-user.</li>
+      <li>Emit ELF objects directly by porting the MC layer.</li>
+      <li>Also accept bitcode (<code>.bc</code>) input.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">5</span>Same command line as opt, llc and llvm-link</h3>
+  <p>Our tools accept LLVM's flags for whatever subset we implement: <code>ropt -passes='instcombine,gvn' -S in.ll -o out.ll</code>, <code>rllc -O0 in.ll -o out.s</code>, <code>rlink a.ll b.ll -S -o all.ll</code>. <code>ropt -O2 -print-pipeline-passes</code> prints exactly what opt prints. <strong>Whole-program optimization</strong> means linking all modules into one with <code>rlink</code>, then running <code>ropt -passes='lto&lt;O2&gt;'</code>, the same way LLVM's full LTO works.</p>
+  <details class="ic-quiet">
+    <summary>Why copy LLVM's command line?</summary>
+    <p>The harness runs the same command line against both toolchains and only swaps the binary, so test files can quote LLVM's own RUN lines unchanged. Pipelines become data: we can implement the O2 pipeline in exactly LLVM's pass order. When a whole-pipeline test fails, a <code>harness bisect</code> command runs longer and longer prefixes of the pipeline through both tools and reports the first pass where the outputs differ. That turns "-O2 is broken" into "pass 37 (jump-threading) is wrong on this input".</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>Our own CLI and library API, with a harness adapter for each tool.</li>
+      <li>ThinLTO-style, summary-based whole-program optimization instead of full LTO: scales to big programs, but is much more complex.</li>
+      <li>One binary with subcommands (<code>rl opt …</code>), using the same flags. Purely cosmetic.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">6</span>One test per file, checked-in goldens, and a ratchet</h3>
+  <p>A test is a <code>.ll</code> file with a short header, plus a sibling <code>.expected</code> file that <code>harness bless</code> generates from LLVM 21.1.8 and that gets checked in:</p>
+<pre><code>; KIND: pass            (or: e2e, function, roundtrip)
+; RUN: -passes=instcombine
+; STATUS: pending       (or: passing)</code></pre>
+  <p>The harness fails CI if any <code>passing</code> test fails. Agents add new tests as <code>pending</code>. Making progress on a test means getting it to pass and flipping it to <code>passing</code> in the same commit. <code>harness status</code> prints the scoreboard: passing and pending counts per layer and per pass.</p>
+  <details class="ic-quiet">
+    <summary>Why checked-in goldens and a ratchet?</summary>
+    <p>With goldens checked in, each test explains itself: an agent can see exactly what LLVM produces without running anything. Test runs stay fast and parallel, and <code>harness verify-goldens</code> regenerates every golden and diffs it, which catches oracle drift.</p>
+    <p>The ratchet is what lets many agents work at once. Nobody can quietly regress someone else's progress, and the passing count only goes up. Pending tests are a normal part of the suite, so "write a test, then make progress on it" is the default workflow. Keeping status in each test file (not a central list) avoids merge conflicts, because agents usually work on different tests.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>Compute the oracle live at test time, with no goldens: simpler, but slower and sensitive to whatever LLVM version is installed.</li>
+      <li>Use LLVM's lit + FileCheck as the runner: familiar, but it adds little when the oracle is a diff against a golden.</li>
+      <li>One central <code>passing.txt</code> list instead of in-file status: easier to scan, but a constant source of merge conflicts.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">7</span>Tests come from four sources, with LLVM's own test suite as the main source for passes</h3>
+  <ol>
+    <li><strong>Agent-written C snippets</strong>, compiled to IR with <code>clang -O0 -Xclang -disable-O0-optnone -S -emit-llvm</code>, and also at -O1/-O2 because optimized IR uses constructs that unoptimized IR doesn't (phis, selects, vectors). The <code>.c</code> file sits next to the <code>.ll</code> for readability, but the test itself is the IR.</li>
+    <li><strong>LLVM's regression tests</strong> in <code>llvm/test/Transforms/&lt;Pass&gt;/*.ll</code>, imported by a script as pass tests. We take the passes from their RUN line, ignore their CHECK lines, and use opt's output as the golden.</li>
+    <li><strong>llvm-test-suite SingleSource programs</strong>, compiled to IR and used as e2e tests.</li>
+    <li><strong>Later: Csmith/YARPGen</strong> random programs for differential fuzzing. Failures get minimized with <code>llvm-reduce</code> and land as new pending tests.</li>
+  </ol>
+  <details class="ic-quiet">
+    <summary>Why lean on LLVM's own test suite?</summary>
+    <p>For each pass, LLVM's Transforms tests are already the "tests designed to target that layer" you described, chosen by the people who wrote the pass. InstCombine alone has well over a thousand test files. Importing them gives us most of each pass's test set for free, and agents fill the gaps with their own tests.</p>
+    <p>The <code>-disable-O0-optnone</code> flag matters. Without it, clang's -O0 IR is marked <code>optnone</code> and opt skips most passes.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>Hand-written tests only: smaller, every test understood, much less coverage.</li>
+      <li>Fuzz from day one: finds bugs fast, but lots of noise before the basics work.</li>
+      <li>Also import <code>llvm/test/CodeGen/X86</code>: those are asm FileCheck tests that don't fit the run-and-compare oracle, so they're mostly useful as reading material.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">8</span>Build it in six layers</h3>
+  <ol start="0">
+    <li><strong>IR core:</strong> parser, printer, verifier. Test: every <code>.ll</code> in the corpus round-trips identically to <code>llvm-as | llvm-dis</code>.</li>
+    <li><strong>-O0 codegen:</strong> straightforward per-instruction lowering, every value spilled to the stack, a simple local register allocator, the SysV calling convention and frame lowering. Tests: e2e and function tests on -O0 IR.</li>
+    <li><strong>Codegen for optimized IR:</strong> phis, selects, switches, vectors/SSE, common intrinsics. Tests: e2e on -O2 IR produced by clang.</li>
+    <li><strong>Analyses + scalar passes</strong>, in the order the O2 pipeline needs them: sroa/mem2reg, simplifycfg, early-cse, instcombine (split up by instruction family), gvn, licm, loop passes, dse, sccp, jump-threading… Analyses are tested with <code>opt -passes='print&lt;domtree&gt;'</code> and similar, using the same diff oracle.</li>
+    <li><strong>IPO / whole program:</strong> inliner, globalopt, ipsccp, function-attrs, argpromotion, deadargelim, globaldce, internalize, and the full <code>lto&lt;O2&gt;</code> pipeline.</li>
+    <li><strong>Backend optimization:</strong> a real instruction selector, greedy register allocation, scheduling, peepholes. Measured by benchmarks against <code>llc -O2</code>, not by exact matches.</li>
+  </ol>
+  <p>Every new pass gets its imported LLVM tests, its agent-written tests, and a run of the whole e2e suite with the pass turned on. Which instruction-selection design to use is a decision for a later round.</p>
+  <details class="ic-quiet">
+    <summary>Why not optimizations first, or an interpreter first?</summary>
+    <p>Layer 0 underpins everything else. Layer 1 makes e2e tests work early, and from then on every IR pass we add is also checked by running real programs (our pass → our backend → run), not just by IR diffs. Analyses go into layer 3 because almost every pass depends on them, and their print passes give us exact oracles for free.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>Build an IR interpreter (like lli) before codegen: gives a way to execute IR that doesn't depend on our backend, so semantics can be checked after any pass. The cost is a second executor to maintain.</li>
+      <li>All IR passes first, codegen last: pass work starts sooner, but there's no e2e signal for a long time.</li>
+      <li>Structure -O0 codegen like GlobalISel from the start (IRTranslator, Legalizer, RegBankSelect, InstructionSelect), so it grows into layer 5 instead of being rewritten.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">9</span>Agent instructions: a short AGENTS.md plus task skills</h3>
+  <p><code>AGENTS.md</code> (with a <code>CLAUDE.md</code> symlink) covers the goal, the repo layout, the golden rule ("LLVM 21.1.8 is always right"), how to run the harness, and the ratchet rule. Skills live in <code>.agents/skills/</code> next to lplan:</p>
+  <ul>
+    <li><code>write-test</code>: write a C or IR test, bless it, add it as pending.</li>
+    <li><code>port-pass</code>: read the LLVM source, import its Transforms tests, implement, flip tests to passing, run e2e with the pass on.</li>
+    <li><code>debug-mismatch</code>: pipeline bisect, then <code>llvm-reduce</code> with our tool as the interestingness test, then land the reduced case as a new test.</li>
+    <li><code>codegen</code>: backend conventions, SysV ABI checklist, how to compare our asm with llc's.</li>
+  </ul>
+  <p>Plus a single <code>docs/architecture.md</code> on the IR data structures, which agents read before touching <code>ir</code>.</p>
+  <details class="ic-quiet">
+    <summary>Why skills rather than one big document?</summary>
+    <p>Most agents will be doing one of four kinds of task. A skill gives each of them a precise, step-by-step loop without loading the rest into context. AGENTS.md stays short enough that every agent actually reads it. Skills are also the natural place to record lessons learned ("InstCombine tests depend on the order of the worklist; see …").</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>One long AGENTS.md.</li>
+      <li>An AGENTS.md per crate, with local rules next to the code.</li>
+      <li>Skills only, no AGENTS.md.</li>
+    </ol>
+  </details>
+</section>
+
+<section>
+  <h3><span class="n">10</span>Coordinate work with GitHub issues, PRs and CI</h3>
+  <p>Coarse work items ("port EarlyCSE", "L1: calls with struct args") are issues on <code>lucasmeijer/llvm-rewrite</code>, labelled by layer and pass. An agent claims an issue by assigning it, works on a branch, and lands a PR that GitHub Actions must pass (full harness plus ratchet, with LLVM 21 from apt.llvm.org). Finer-grained work items are just the pending tests.</p>
+  <details class="ic-quiet">
+    <summary>Why not an in-repo task board?</summary>
+    <p>An in-repo board makes every claim a commit, so claims race and conflict. Issues give us atomic claiming, a discussion thread, and somewhere to record blocked work. CI on PRs is what enforces the ratchet when many agents land work in parallel. Without it, the ratchet only holds if every agent remembers to run it.</p>
+    <p><strong>Alternatives:</strong></p>
+    <ol type="A">
+      <li>In-repo <code>tasks/*.md</code> with claimed-by fields, everyone pushing straight to main.</li>
+      <li>No explicit coordination: agents pick pending tests, and the scoreboard is the plan.</li>
+      <li>One orchestrator agent assigns work to sub-agents that share a single workspace.</li>
+    </ol>
+  </details>
+</section>
+</div>

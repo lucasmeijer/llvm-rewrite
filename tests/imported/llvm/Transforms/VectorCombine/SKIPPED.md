@@ -1,0 +1,67 @@
+# Skipped while importing llvm/test/Transforms/VectorCombine (llvmorg-23.1.5)
+
+65 of 127 files imported. Regenerate with `./harness/run import-llvm Transforms/VectorCombine`.
+
+- `combine-shuffle-ext.ll`: in a AArch64 target directory
+- `ext-extract.ll`: in a AArch64 target directory
+- `extract-scalable.ll`: in a AArch64 target directory
+- `fold-bitreverse-bswap-fold.ll`: in a AArch64 target directory
+- `fold-equivalent-reduction-cmp.ll`: in a AArch64 target directory
+- `fold-reduce-add-cmp-zero.ll`: in a AArch64 target directory
+- `fold-signbit-reduction-cmp.ll`: in a AArch64 target directory
+- `icmp-vector-reduce.ll`: in a AArch64 target directory
+- `identity-shuffle-sve.ll`: in a AArch64 target directory
+- `load-bitcast-scalarization.ll`: in a AArch64 target directory
+- `load-extract-insert-store-scalarization.ll`: in a AArch64 target directory
+- `load-extractelement-scalarization.ll`: in a AArch64 target directory
+- `narrow-phi-of-shuffles.ll`: in a AArch64 target directory
+- `partial-reduce-crash.ll`: in a AArch64 target directory
+- `scalarize-ext-extract-endian.ll`: in a AArch64 target directory
+- `scalarize-scalable.ll`: in a AArch64 target directory
+- `select-shuffle.ll`: in a AArch64 target directory
+- `shrink-types.ll`: in a AArch64 target directory
+- `shuffle-of-intrinsic-permute.ll`: in a AArch64 target directory
+- `shuffle-of-intrinsics.ll`: in a AArch64 target directory
+- `shuffletoidentity-concat.ll`: in a AArch64 target directory
+- `shuffletoidentity.ll`: in a AArch64 target directory
+- `sve-interleave-splat.ll`: in a AArch64 target directory
+- `vecreduce-shuffle.ll`: in a AArch64 target directory
+- `vscale-bitcast-shuffle-inseltpoison.ll`: in a AArch64 target directory
+- `vscale-bitcast-shuffle.ll`: in a AArch64 target directory
+- `as-transition-inseltpoison.ll`: in a AMDGPU target directory
+- `as-transition.ll`: in a AMDGPU target directory
+- `combine-scalar-selects.ll`: in a AMDGPU target directory
+- `extract-insert-chain-to-shuffles.ll`: in a AMDGPU target directory
+- `extract-insert-i8.ll`: in a AMDGPU target directory
+- `narrow-phi-of-shuffles.ll`: in a AMDGPU target directory
+- `no-scalarize-vector-extract.ll`: in a AMDGPU target directory
+- `shuffles-of-length-changing-shuffles.ll`: in a AMDGPU target directory
+- `fold-binop-of-reductions.ll`: in a ARM target directory
+- `narrow-phi-of-shuffles.ll`: in a ARM target directory
+- `load-inseltpoison.ll`: in a Hexagon target directory
+- `load.ll`: in a Hexagon target directory
+- `narrow-phi-of-shuffles.ll`: in a Hexagon target directory
+- `shuffle-identity-miscompile.ll`: in a LoongArch target directory
+- `scalarize-ext-extract.ll`: in a PowerPC target directory
+- `binop-scalarize.ll`: in a RISCV target directory
+- `fold-equivalent-reduction-cmp.ll`: in a RISCV target directory
+- `fold-reduce-add-cmp-zero.ll`: in a RISCV target directory
+- `fold-signbit-reduction-cmp.ll`: in a RISCV target directory
+- `fold-vp-load.ll`: in a RISCV target directory
+- `icmp-vector-reduce.ll`: in a RISCV target directory
+- `load-widening.ll`: in a RISCV target directory
+- `narrow-phi-of-shuffles.ll`: in a RISCV target directory
+- `shuffle-of-intrinsics.ll`: in a RISCV target directory
+- `vecreduce-of-cast.ll`: in a RISCV target directory
+- `vector-deinterleave2.ll`: in a RISCV target directory
+- `vector-interleave2-splat-e64.ll`: in a RISCV target directory
+- `vector-interleave2-splat.ll`: in a RISCV target directory
+- `vpintrin-scalarization-shufflevector-splat.ll`: in a RISCV target directory
+- `vpintrin-scalarization.ll`: in a RISCV target directory
+- `load-insert-store.ll`: in a SPIRV target directory
+- `binop-shuffle-mask1-cm.ll`: REQUIRES asserts
+- `intrinsic-scalarize.ll` RUN `opt < %s -S -p vector-combine -mtriple=x86_64 -mattr=sse2 | FileCheck %s --check-prefixes=CHECK,SSE2`: no -passes / -O pipeline
+- `intrinsic-scalarize.ll` RUN `opt < %s -S -p vector-combine -mtriple=x86_64 -mattr=avx2 | FileCheck %s --check-prefixes=CHECK,AVX2`: no -passes / -O pipeline
+- `binop-scalarize.ll` RUN `opt < %s -S -p vector-combine | FileCheck %s`: no -passes / -O pipeline
+- `intrinsic-scalarize.ll` RUN `opt < %s -S -p vector-combine | FileCheck %s`: no -passes / -O pipeline
+- `unary-op-scalarize.ll` RUN `opt < %s -S -p vector-combine | FileCheck %s`: no -passes / -O pipeline
