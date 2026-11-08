@@ -867,10 +867,13 @@ tests/imported/llvm/Analysis/BasicAA/invariant_group.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/invariant_load.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/issue103500.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/issue103500.ll::roundtrip
+tests/imported/llvm/Analysis/BasicAA/libfuncs-darwin.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/libfuncs-darwin.ll::roundtrip
+tests/imported/llvm/Analysis/BasicAA/libfuncs.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/libfuncs.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/matrix-intrinsics.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/matrix-intrinsics.ll::roundtrip
+tests/imported/llvm/Analysis/BasicAA/memset-pattern.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/memset-pattern.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/modref.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/must-and-partial.ll::analysis
@@ -3344,13 +3347,21 @@ tests/imported/llvm/Transforms/InferAlignment/undef-and-null.ll::roundtrip
 tests/imported/llvm/Transforms/InferAlignment/vector.ll::roundtrip
 tests/imported/llvm/Transforms/InferAlignment/volatile.ll::roundtrip
 tests/imported/llvm/Transforms/InferAlignment/vscale.ll::roundtrip
+tests/imported/llvm/Transforms/InferFunctionAttrs/annotate-2.ll::opt
 tests/imported/llvm/Transforms/InferFunctionAttrs/annotate-2.ll::roundtrip
+tests/imported/llvm/Transforms/InferFunctionAttrs/annotate.ll::opt
 tests/imported/llvm/Transforms/InferFunctionAttrs/annotate.ll::roundtrip
+tests/imported/llvm/Transforms/InferFunctionAttrs/dereferenceable-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InferFunctionAttrs/dereferenceable-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InferFunctionAttrs/dereferenceable.ll::opt
 tests/imported/llvm/Transforms/InferFunctionAttrs/dereferenceable.ll::roundtrip
+tests/imported/llvm/Transforms/InferFunctionAttrs/no-proto.ll::opt
 tests/imported/llvm/Transforms/InferFunctionAttrs/no-proto.ll::roundtrip
+tests/imported/llvm/Transforms/InferFunctionAttrs/nobuiltin.ll::opt
 tests/imported/llvm/Transforms/InferFunctionAttrs/nobuiltin.ll::roundtrip
+tests/imported/llvm/Transforms/InferFunctionAttrs/pr30455.ll::opt
 tests/imported/llvm/Transforms/InferFunctionAttrs/pr30455.ll::roundtrip
+tests/imported/llvm/Transforms/InferFunctionAttrs/readonly_and_writeonly.ll::opt
 tests/imported/llvm/Transforms/InferFunctionAttrs/readonly_and_writeonly.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/2003-09-14-InlineValue.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/2003-09-22-PHINodeInlineFail.ll::roundtrip
@@ -4467,6 +4478,7 @@ tests/imported/llvm/Transforms/InstCombine/convergent.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/copysign-fneg-fabs.ll::opt
 tests/imported/llvm/Transforms/InstCombine/copysign-fneg-fabs.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/copysign.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/cos-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cos-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cos-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cos-2.ll::roundtrip
@@ -4572,6 +4584,7 @@ tests/imported/llvm/Transforms/InstCombine/err-rep-cold.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/exact.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/exp2-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/exp2-2.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/exp2-to-ldexp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/exp2-to-ldexp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/extract-select-agg.ll::opt
 tests/imported/llvm/Transforms/InstCombine/extract-select-agg.ll::roundtrip
@@ -4613,6 +4626,7 @@ tests/imported/llvm/Transforms/InstCombine/fcmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fcmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fdim.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fdim.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fdiv-cos-sin.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fdiv-cos-sin.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fdiv-sin-cos.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fdiv-sin-cos.ll::roundtrip
@@ -4721,6 +4735,7 @@ tests/imported/llvm/Transforms/InstCombine/fpextend.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fpextend.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fpextend_x86.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fpextend_x86.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fprintf-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fprintf-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fprintf-wrong-sig.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fprintf-wrong-sig.ll::roundtrip
@@ -5703,6 +5718,7 @@ tests/imported/llvm/Transforms/InstCombine/printf-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/printf-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/printf-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/printf-2.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/printf-3.ll::opt
 tests/imported/llvm/Transforms/InstCombine/printf-3.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/printf-puts-not-emittable.ll::opt
 tests/imported/llvm/Transforms/InstCombine/printf-puts-not-emittable.ll::roundtrip
@@ -6107,9 +6123,11 @@ tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-rounding-in
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-shufflevector.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-sqrt.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-intrinsics.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simplify-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-libcalls-erased.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simplify-libcalls-erased.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-libcalls-new.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simplify-libcalls-new.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sink-instruction-introduces-unnecessary-poison-value.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sink-into-catchswitch.ll::opt
@@ -6157,9 +6175,11 @@ tests/imported/llvm/Transforms/InstCombine/snprintf-4.ll::opt
 tests/imported/llvm/Transforms/InstCombine/snprintf-4.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/snprintf.ll::opt
 tests/imported/llvm/Transforms/InstCombine/snprintf.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/sprintf-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sprintf-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sprintf-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sprintf-2.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/sprintf-3.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sprintf-3.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sprintf-void.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sprintf-void.ll::roundtrip
@@ -6247,6 +6267,7 @@ tests/imported/llvm/Transforms/InstCombine/strcpy-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strcpy-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/strcpy-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strcpy-2.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/strcpy-nonzero-as.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strcpy-nonzero-as.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/strcpy_chk-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strcpy_chk-1.ll::roundtrip
@@ -6316,6 +6337,7 @@ tests/imported/llvm/Transforms/InstCombine/strncpy_chk-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strncpy_chk-2.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/strndup.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strndup.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/strnlen-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strnlen-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/strnlen-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strnlen-2.ll::roundtrip
@@ -6343,6 +6365,7 @@ tests/imported/llvm/Transforms/InstCombine/strstr-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strstr-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/strstr-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strstr-2.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/strto-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strto-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/struct-assign-tbaa-2.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/struct-assign-tbaa-new.ll::roundtrip
