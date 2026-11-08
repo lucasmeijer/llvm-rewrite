@@ -1071,13 +1071,25 @@ fn mssa_format(out: u8[>..]&, a: i32, fv: i32) {
     out.push(')');
 }
 
+var mssa_types_scanned: i64 = 0;
+var mssa_numbered_structs: bool = false;
+fn mssa_have_numbered_structs() -> bool {
+    while mssa_types_scanned < types.len {
+        let t = types[mssa_types_scanned];
+        if t.kind == TK_STRUCT && (t.flags & TF_NAMED) != 0 && t.name < 0 { mssa_numbered_structs = true; }
+        mssa_types_scanned++;
+    }
+    return mssa_numbered_structs;
+}
+
 // F->print(OS, &Writer) with the precomputed annotations in pr_annot*
 fn mssa_print_function(fv: i32) {
     slots_begin(fv);
     slots_end();
     let md_mark = md_order.len;
     let as_mark = as_order.len;
-    type_finder(globs[glob_of(fv)].module);     // AssemblyWriter: TypePrinter.incorporateTypes(*M)
+    // AssemblyWriter: TypePrinter.incorporateTypes(*M); only numbered (unnamed identified) structs depend on it
+    if mssa_have_numbered_structs() { type_finder(globs[glob_of(fv)].module); }
     let mark = out.len;
     pr_annot_on = true;
     print_function(fv);
