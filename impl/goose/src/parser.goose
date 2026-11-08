@@ -109,12 +109,16 @@ recursive fn parse_type() -> i32 {
     if tk == T_TYPE {
         t = ttype;
         lex();
-        if t == T_PTR && tok_is("addrspace") {
-            lex();
-            expect_punct('(', "'('");
-            let a = parse_uint();
-            expect_punct(')', "')'");
-            t = ty_ptr(a);
+        if t == T_PTR {
+            if tok_is("addrspace") {
+                lex();
+                expect_punct('(', "'('");
+                let a = parse_uint();
+                expect_punct(')', "')'");
+                t = ty_ptr(a);
+            }
+            if tok_punct('*') { perr("ptr* is invalid - use ptr instead"); }
+            if !tok_punct('(') { return t; }
         }
     } else if tk == T_LVAR {
         t = get_named_type(tstr_id());
@@ -176,7 +180,23 @@ recursive fn parse_type() -> i32 {
             t = ty_func_run(at, n, vararg);
             continue;
         }
-        if tok_punct('*') { perr("ptr* is invalid - use ptr instead"); }
+        // typed pointer syntax T* / T addrspace(N)* (parsed as opaque pointers)
+        if tok_punct('*') {
+            if t == T_LABEL { perr("basic block pointers are invalid"); }
+            if t == T_VOID { perr("pointers to void are invalid - use i8* instead"); }
+            lex();
+            t = ty_ptr(0);
+            continue;
+        }
+        if tok_is("addrspace") {
+            if t == T_LABEL { perr("basic block pointers are invalid"); }
+            if t == T_VOID { perr("pointers to void are invalid; use i8* instead"); }
+            lex();
+            let a = parse_paren_uint();
+            expect_punct('*', "'*' in address space");
+            t = ty_ptr(a);
+            continue;
+        }
         break;
     }
     return t;

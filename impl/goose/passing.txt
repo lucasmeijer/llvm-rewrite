@@ -1774,6 +1774,7 @@ tests/imported/llvm/Transforms/CodeGenPrepare/X86/computedgoto.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/cttz-ctlz.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/delete-assume-dead-code.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/extend-sink-hoist.ll::roundtrip
+tests/imported/llvm/Transforms/CodeGenPrepare/X86/fake-use-phi.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/freeze-brcond.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/gather-scatter-opt-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/gather-scatter-opt.ll::roundtrip
@@ -2197,6 +2198,7 @@ tests/imported/llvm/Transforms/FunctionAttrs/norecurse_libfunc_no_address_taken.
 tests/imported/llvm/Transforms/FunctionAttrs/norecurse_lto.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/norecurse_multi_scc_indirect_recursion.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/norecurse_multi_scc_indirect_recursion1.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/norecurse_multinode_refscc.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/norecurse_self_recursive_callee.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/nosync.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/noundef.ll::roundtrip
@@ -5444,6 +5446,7 @@ tests/imported/llvm/Transforms/LoopSimplifyCFG/lcssa.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplifyCFG/loop-not-in-simplify-form.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplifyCFG/merge-header.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplifyCFG/mssa_term.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplifyCFG/pr56243.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplifyCFG/scev.ll::roundtrip
 tests/imported/llvm/Transforms/LoopStrengthReduce/X86/iv-chain-assume-ephemeral.ll::roundtrip
 tests/imported/llvm/Transforms/LoopStrengthReduce/X86/lcssa-preservation-regression.ll::roundtrip
@@ -5665,6 +5668,7 @@ tests/imported/llvm/Transforms/LoopVectorize/X86/pr47437.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr48340.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr51366-sunk-instruction-used-outside-of-loop.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr54413-select-interleave-count-loop-with-cost-zero.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/X86/pr54634.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr55096-scalarize-add.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr56319-vector-exit-cond-optimization-epilogue-vectorization.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr72969.ll::roundtrip
@@ -6293,6 +6297,7 @@ tests/imported/llvm/Transforms/PhaseOrdering/dce-after-argument-promotion.ll::ro
 tests/imported/llvm/Transforms/PhaseOrdering/deletion-of-loops-that-became-side-effect-free.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/dse-ephemeral-value-captures.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/early-arg-attrs-inference.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/enable-loop-header-duplication-oz.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/expect.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/fast-basictest.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/fast-reassociate-gvn.ll::roundtrip
@@ -7631,6 +7636,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/speculate-vector-ops-inseltpoison.ll:
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-vector-ops.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-with-offset.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/speculatively-execute-block-profmd.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/statepoint-invoke-unwind.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/suppress-zero-branch-weights.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switch-branch-fold-indirectbr-102351.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dead-default-lookup-table.ll::roundtrip
