@@ -851,6 +851,15 @@ const_int_words :: (type: Type_Id, words_in: [] u64) -> Value_Id {
         all_zero := true;
         for words if it != 0 all_zero = false;
         if all_zero return const_zero(type);
+        // fixed-length: ConstantVector::getSplat -> ConstantDataVector (ConstantInt splats only with
+        // -use-constant-int-for-fixed-length-splat). Scalable int splats stay ConstantInt-style (see NOTES.md).
+        if type_kind(type) == .VECTOR && !opts.use_constant_int_for_fixed_length_splat {
+            elt := const_int_words(scalar_type(type), words);
+            n := cast(s64) type_count(type);
+            elts := NewArray(n, Value_Id,, allocator = temp);
+            for * elts it.* = elt;
+            return const_aggregate(.C_VECTOR, type, elts);
+        }
     }
     k := const_key_begin(.C_INT, type);
     for words key_u64(k, it);
