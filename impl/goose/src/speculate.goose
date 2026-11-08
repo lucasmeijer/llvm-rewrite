@@ -155,9 +155,9 @@ fn spec_valid_assume_for_context(i: i32, cx: i32) -> bool {
     return r;
 }
 
-// isDereferenceableAndAlignedPointerViaAssumption: only reachable with an AC; the assume-bundle knowledge
-// (getKnowledgeForValue) isn't ported, so fail loudly when an align/dereferenceable bundle names V.
-fn spec_deref_via_assumption(v: i32) -> bool {
+// isDereferenceableAndAlignedPointerViaAssumption(Ptr, Alignment, SQ, IgnoreFree = false,
+// CheckSize = ArgValue >= Size) over getKnowledgeForValue(Ptr, {Dereferenceable, Alignment}, AC).
+fn spec_deref_via_assumption(v: i32, align: i64, size: AP) -> bool {
     if spec_cxt < 0 { return false; }
     let save_cxt = kb_cxt;
     kb_cxt = spec_cxt;
@@ -167,10 +167,97 @@ fn spec_deref_via_assumption(v: i32) -> bool {
     sq_no_ac = save_ac;
     kb_cxt = save_cxt;
     if !ready { return false; }
+    let can_free = spec_can_be_freed(v);
+    var aligned = pointer_alignment(v) >= align;
+    var derefable = false;
     for k in ac_val.len {
         if ac_val[k] != v || ac_idx[k] < 0 { continue; }
-        let tag = bundle_tag_name(ac_asm[k], ac_idx[k] as i64);
-        if tag == "dereferenceable" || tag == "align" { spec_not_ported("dereferenceability from assume bundles"); }
+        let a = ac_asm[k];
+        if a < 0 || is_dead(a) { continue; }
+        let bi = ac_idx[k] as i64;
+        let tag = bundle_tag_name(a, bi);
+        // getKnowledgeFromBundle: the attribute kind of the tag, WasOn, ArgValue
+        let b0 = cb_bundle_begin(a, bi);
+        let n = cb_bundle_count(a, bi);
+        let is_align = tag == "align";
+        let is_deref = tag == "dereferenceable";
+        if n < 1 || op(a, b0) != v { continue; }
+        if !is_align && !is_deref { continue; }
+        var argv: u64 = 0;   // RetainedKnowledge::ArgValue without an argument
+        if n > 1 {
+            argv = if is_align { 1 } else { 0 };
+            let c = op(a, b0 + 1);
+            argv = if vals[c].kind == VK_CINT { ap_zext64(ci_ap(c)) } else { argv };
+            if is_align && n > 2 {
+                let c2 = op(a, b0 + 2);
+                let off: u64 = if vals[c2].kind == VK_CINT { ap_zext64(ci_ap(c2)) } else { 1 };
+                // MinAlign(ArgValue, offset)
+                let x = argv | off;
+                argv = x & (~x + 1);
+            }
+        }
+        // Filter
+        if !spec_valid_assume_for_context(a, spec_cxt) { continue; }
+        if is_align {
+            if argv >= align as u64 { aligned = true; }
+        } else {
+            if !derefable && (!can_free || spec_will_not_free_between(a, spec_cxt)) && !ap_ugt_u64(size, argv) {
+                derefable = true;
+            }
+        }
+        if aligned && derefable { return true; }
+    }
+    return false;
+}
+
+// Value::canBeFreed for a pointer
+fn spec_can_be_freed(v: i32) -> bool {
+    if is_constant(v) { return false; }
+    if is_inst_op(v, OP_ALLOCA) { return false; }
+    var f: i32 = -1;
+    if is_arg(v) {
+        for kind in [AK_ByVal, AK_StructRet, AK_InAlloca, AK_Preallocated, AK_ByRef] { if ml_arg_has(v, kind) { return false; } }
+        f = args_parent[vals[v].sub];
+        if me_only_reads(aset_memory(alist_fn(func_attrs(f)))) || func_has_fn_attr(f, AK_NoFree) { return false; }
+        if (ml_arg_has(v, AK_NoFree) || ml_arg_has(v, AK_ReadOnly) || ml_arg_has(v, AK_ReadNone)) && ml_arg_has(v, AK_NoAlias) { return false; }
+    }
+    if is_inst_op(v, OP_INTTOPTR) && inst_get_md(v, md_kind_id("nofree")) >= 0 { return false; }
+    if is_inst(v) { f = inst_func(v); }
+    if f < 0 { return true; }
+    if globs[glob_of(f)].gc < 0 { return true; }
+    spec_not_ported("Value::canBeFreed with a garbage collector");
+    return true;
+}
+
+// willNotFreeBetween(Assume, CtxI)
+fn spec_will_not_free_between(asm_: i32, cx: i32) -> bool {
+    var checked: i64 = 0;
+    fn no_free_in(from: i32, to: i32, checked: i64&) -> bool {
+        // [from, to): to = -1 means the end of the block
+        var i = from;
+        while i >= 0 && i != to {
+            if checked > 32 { return false; }
+            checked += 1;
+            if is_callbase(i) {
+                if !call_has_fn_attr(i, AK_NoFree) { return false; }
+            } else if inst_may_synchronize(i) { return false; }
+            i = inst_next(i);
+        }
+        return true;
+    }
+    let cbb = inst_parent(cx);
+    let abb = inst_parent(asm_);
+    if cbb == abb {
+        if asm_ != cx && !comes_before(asm_, cx) { return false; }
+        return no_free_in(asm_, cx, checked);
+    }
+    var cur = cbb;
+    loop {
+        if cur == abb { return no_free_in(asm_, -1, checked); }
+        let pred = single_pred(cur);
+        if pred < 0 { return false; }
+        if !no_free_in(block_first(cur), if cur == cbb { cx } else { -1 }, checked) { return false; }
+        cur = pred;
     }
     return false;
 }
@@ -199,6 +286,19 @@ recursive fn spec_deref_aligned(v: i32, align: i64, size: AP, depth: i64) -> boo
     let bytes, cbn = ptr_deref_bytes(v);
     if ap_ugt_u64(size, bytes) { known = false; }
     if known && cbn && !spec_known_nonzero(v) { known = false; }
+    // CheckForFreed (use-dereferenceable-at-point-semantics): the object must not be freed between its
+    // definition and the context
+    if known && bytes != 0 && !is_inst_op(v, OP_ALLOCA) && vals[v].kind != VK_GVAR && spec_can_be_freed(v) {
+        var defi: i32 = -1;
+        if is_inst(v) {
+            if iop(v) == OP_INVOKE { defi = block_first(invoke_normal_dest(v)); }
+            else if !is_terminator(v) { defi = inst_next(v); }
+            else { defi = v; }
+        } else {
+            defi = block_first(func_entry(args_parent[vals[v].sub]));
+        }
+        if spec_cxt < 0 || !spec_will_not_free_between(defi, spec_cxt) { known = false; }
+    }
     if known && is_inst(v) && iop(v) != OP_ALLOCA {
         known = spec_cxt >= 0 && spec_valid_assume_for_context(v, spec_cxt);
     }
@@ -214,7 +314,7 @@ recursive fn spec_deref_aligned(v: i32, align: i64, size: AP, depth: i64) -> boo
     }
     if inst_iid(v) == IID_experimental_gc_relocate { spec_not_ported("gc.relocate"); }
     if o == OP_ADDRSPACECAST { return spec_deref_aligned(op(v, 0), align, size, depth - 1); }
-    if spec_use_ac { return spec_deref_via_assumption(v); }
+    if spec_use_ac { return spec_deref_via_assumption(v, align, size); }
     return false;
 }
 

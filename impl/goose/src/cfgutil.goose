@@ -31,6 +31,8 @@ import vt;
 import constfold;
 import dinfo;
 import earlycse;
+import instident;
+import fpu;
 
 var cu_dtu: bool = false;
 
@@ -245,11 +247,10 @@ fn cu_same_operation_as(a: i32, b: i32, flags: i64) -> bool {
     return cu_same_special_state(a, b, (flags & CU_IGNORE_ALIGN) != 0, (flags & CU_INTERSECT_ATTRS) != 0);
 }
 
-// AttributeList::intersectWith: not ported beyond equal lists (fails loudly when it would matter).
+// AttributeList::intersectWith (instident.goose)
 fn cu_alist_intersect(a: i32, b: i32) -> i32, bool {
-    if a == b { return a, true; }
-    cu_not_ported("AttributeList::intersectWith of different call attributes");
-    return a, false;
+    let ok, l = ii_alist_intersect(a, b);
+    return l, ok;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1742,8 +1743,12 @@ fn cu_intersect_access_groups(i1: i32, i2: i32) -> i32 {
 fn cu_most_generic_fpmath(a: i32, b: i32) -> i32 {
     if a < 0 || b < 0 { return -1; }
     if a == b { return a; }
-    cu_not_ported("MDNode::getMostGenericFPMath of different nodes");
-    return -1;
+    // the node with the smaller accuracy (APFloat operator<)
+    let ca = mds[md_op(a, 0)].extra;
+    let cb = mds[md_op(b, 0)].extra;
+    let r = fp_compare(cfp_kind(ca), cint_lo(ca), cint_hi(ca), cint_lo(cb), cint_hi(cb));
+    if vals[ca].ty != vals[cb].ty { cu_not_ported("MDNode::getMostGenericFPMath of differently typed accuracies"); }
+    return if r == 0 { a } else { b };
 }
 
 // MDNode::getMostGenericAlignmentOrDereferenceable
@@ -1788,8 +1793,28 @@ fn cu_from_capture_components(cc: i64) -> i32 {
 fn cu_most_generic_noalias_addrspace(a: i32, b: i32) -> i32 {
     if a < 0 || b < 0 { return -1; }
     if a == b { return a; }
-    cu_not_ported("MDNode::getMostGenericNoaliasAddrspace of different nodes");
-    return -1;
+    // ConstantRangeList::intersectWith over the (lo, hi) pairs
+    let na = mds[a].nops as i64 / 2;
+    let nb = mds[b].nops as i64 / 2;
+    var res: i32[>..<] = [];
+    var i: i64 = 0;
+    var j: i64 = 0;
+    while i < na && j < nb {
+        let al = ap_from_cint(mds[md_op(a, 2 * i)].extra);
+        let ah = ap_from_cint(mds[md_op(a, 2 * i + 1)].extra);
+        let bl = ap_from_cint(mds[md_op(b, 2 * j)].extra);
+        let bh = ap_from_cint(mds[md_op(b, 2 * j + 1)].extra);
+        let st = if ap_slt(al, bl) { bl } else { al };
+        let en = if ap_slt(ah, bh) { ah } else { bh };
+        if ap_slt(st, en) {
+            let t = ty_int(st.w as i64);
+            res.push(md_value(ap_to_cint(t, st)));
+            res.push(md_value(ap_to_cint(t, en)));
+        }
+        if ap_slt(ah, bh) { i += 1; } else { j += 1; }
+    }
+    if res.len == 0 { return -1; }
+    return md_get(MK_TUPLE, -1, res, false);
 }
 
 // MDNode::getMergedProfMetadata(A, B, AInstr, BInstr)
@@ -1870,9 +1895,14 @@ fn cu_combine_metadata(k: i32, j: i32, does_k_move: bool, aa_only: bool) {
         if jm != km { cu_not_ported("MMRAMetadata::combine"); }
     }
     let memprof = md_kind_id("memprof");
-    if !aa_only && (inst_get_md(j, memprof) >= 0 || inst_get_md(k, memprof) >= 0) { cu_not_ported("MDNode::getMergedMemProfMetadata"); }
+    // MDNode::getMergedMemProfMetadata / getMergedCallsiteMetadata keep K's node, else J's
+    let jmp = inst_get_md(j, memprof);
+    let kmp = inst_get_md(k, memprof);
+    if !aa_only && (jmp >= 0 || kmp >= 0) { cu_set_md(k, memprof, if kmp >= 0 { kmp } else { jmp }); }
     let callsite = md_kind_id("callsite");
-    if !aa_only && (inst_get_md(j, callsite) >= 0 || inst_get_md(k, callsite) >= 0) { cu_not_ported("MDNode::getMergedCallsiteMetadata"); }
+    let jcs = inst_get_md(j, callsite);
+    let kcs = inst_get_md(k, callsite);
+    if !aa_only && (jcs >= 0 || kcs >= 0) { cu_set_md(k, callsite, if kcs >= 0 { kcs } else { jcs }); }
     let jp = inst_get_md(j, MDK_PROF);
     let kp = inst_get_md(k, MDK_PROF);
     if !aa_only && (jp >= 0 || kp >= 0) { cu_set_md(k, MDK_PROF, cu_merged_prof(kp, jp, k, j)); }

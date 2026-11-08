@@ -706,7 +706,27 @@ recursive fn x86_cmpsel_cost(o: i64, valty: i32, condty: i32, pred0: i64, kind: 
     var extra: i64 = 0;
     if (o == OP_ICMP || o == OP_FCMP) && mvt_is_vec(lt) &&
        !((x86_xop() && (!x86_avx2() || mvt_size_bits(lt) == 128)) || (x86_avx512() && 32 <= mvt_scalar_bits(lt)) || x86_bwi()) {
-        x86_np("getCmpSelInstrCost of vector compares (predicate extra cost)");
+        var pred = pred0;
+        if i >= 0 && pred < 0 && is_inst(i) && (iop(i) == OP_ICMP || iop(i) == OP_FCMP) { pred = insts[inst_of(i)].pred as i64; }
+        var with_const = false;
+        if i >= 0 && is_inst(i) && (iop(i) == OP_ICMP || iop(i) == OP_FCMP) { with_const = is_constant(op(i, 1)); }
+        let sb = mvt_scalar_bits(lt);
+        if pred == 33 || pred == 39 || pred == 41 {          // ne, sge, sle
+            extra = if with_const { 0 } else { 1 };
+        } else if pred == 36 || pred == 34 {                 // ult, ugt
+            extra = if with_const { 1 } else { 2 };
+        } else if pred == 37 || pred == 35 {                 // ule, uge
+            if (x86_sse41() && sb == 32) || (x86_sse2() && sb < 32) { extra = 1; }
+            else { extra = if with_const { 2 } else { 3 }; }
+        } else if pred == 6 || pred == 9 {                   // one, ueq
+            if condty >= 0 && !x86_avx() {
+                return tc_add_x86(tc_add_x86(x86_cmpsel_cost(o, valty, condty, 8, kind, -1),
+                                             x86_cmpsel_cost(o, valty, condty, 1, kind, -1)),
+                                  x86_arith_cost(OP_OR, condty, kind, 0, 0, 0, base_arith_cost(OP_OR, condty, kind)));
+            }
+        } else if pred < 0 {
+            extra = 3;
+        }
     }
     var r: i64 = -1;
     if x86_slm_arith() { r = xc1(XCT_S_SLMCostTbl, isd, lt, kind); if r >= 0 { return ltc * (extra + r); } }
@@ -1045,6 +1065,7 @@ fn x86_vector_inst_cost(o: i64, vt: i32, index0: i64, op0: i32, op1: i32, kind: 
 }
 
 let TTI_INVALID_X86: i64 = 0x4000000000000000;
+fn tc_add_x86(a: i64, b: i64) -> i64 { if a >= TTI_INVALID_X86 || b >= TTI_INVALID_X86 { TTI_INVALID_X86 } else { a + b } }
 
 // ---------------------------------------------------------------- misc queries
 
