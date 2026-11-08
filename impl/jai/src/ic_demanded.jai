@@ -518,6 +518,10 @@ ic_simplify_demanded_use_bits :: (i: Value_Id, demanded: APInt, known: *Known_Bi
             } else if id == IID_UMIN {
                 okc, c := pm_apint(op(i, 1));
                 if okc && ap_ctz(demanded) >= c.bits - ap_clo(c) return op(i, 0);
+            } else if ic_targets_x86() && begins_with(intrinsic_name(id), "llvm.x86.") {
+                // targetSimplifyDemandedUseBitsIntrinsic (X86TTIImpl, ic_x86.jai)
+                v, handled := ic_x86_simplify_demanded_use_bits_intrinsic(i, demanded, known, *kcomputed);
+                if handled return v;
             }
             if !kcomputed known.* = known_bits(i, q, depth);
             computed = true;
@@ -917,8 +921,10 @@ ic_simplify_demanded_vector_elts :: (v: Value_Id, demanded_in: APInt, poison: *A
                 if id == IID_MASKED_GATHER simplify_and_set_op(i, 0, dptrs, *poison2, depth, *made_change);
                 simplify_and_set_op(i, 2, dpass, *poison3, depth, *made_change);
                 poison.* = ap_and(poison2, poison3);
-            } else if begins_with(intrinsic_name(id), "llvm.x86.") {
-                fatal("instcombine: X86 simplifyDemandedVectorEltsIntrinsic is not supported yet");
+            } else if ic_targets_x86() && begins_with(intrinsic_name(id), "llvm.x86.") {
+                // targetSimplifyDemandedVectorEltsIntrinsic (X86TTIImpl, ic_x86.jai)
+                v, handled := ic_x86_simplify_demanded_vector_elts_intrinsic(i, demanded, poison, *poison2, *poison3, depth, *made_change);
+                if handled return v;
             }
     } }
     if ic_is_binop_any(i) && !is_int_div_rem(inst_op(i)) && !is_shift_op(inst_op(i)) {

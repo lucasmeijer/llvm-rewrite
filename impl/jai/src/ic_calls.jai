@@ -2519,12 +2519,6 @@ ic_target_inst_combine_intrinsic :: (ii: Value_Id) -> (Value_Id, bool) {
         fatal("instcombine: TTI::instCombineIntrinsic for % intrinsics is not supported yet", arch);
     return NONE, false;
 }
-// X86TTIImpl::instCombineIntrinsic: X86InstCombineIntrinsic.cpp is not ported yet
-ic_x86_inst_combine_intrinsic :: (ii: Value_Id) -> (Value_Id, bool) {
-    fatal("instcombine: X86 instCombineIntrinsic (%) is not supported yet", intrinsic_name(call_iid(ii)));
-    return NONE, false;
-}
-
 // ---------------------------------------------------------------- visitFenceInst / visitInvokeInst / visitCallBrInst
 
 ic_visit_fence :: (fi: Value_Id) -> Value_Id {

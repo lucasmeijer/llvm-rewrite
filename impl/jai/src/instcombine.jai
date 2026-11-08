@@ -16,6 +16,7 @@
 #load "ic_phi.jai";
 #load "ic_casts.jai";
 #load "ic_calls.jai";
+#load "ic_x86.jai";
 #load "ic_loadstorealloca.jai";
 #load "ic_combining.jai";
 #load "ic_vectorops.jai";
