@@ -182,10 +182,12 @@ def variants(short, qual):
     return out
 
 
-# Legacy-pass-manager wrappers and debug printing: no implementation needs them; left out of both sides.
+# Legacy-pass-manager wrappers, debug printing, and object plumbing the data-oriented designs replace wholesale
+# (constructors/destructors, getImpl uniquing, operator=/new/delete, anchors): left out of both sides.
 NEUTRAL = re.compile(r"^(runOnFunction|runOnModule|runOnLoop|runOnSCC|getAnalysisUsage|create\w*Pass|"
                      r"create\w*LegacyPass|initialize\w*Pass|printPipeline|dump|print|"
-                     r"operator<<|getPassName|releaseMemory|doInitialization|doFinalization)$")
+                     r"operator<<|getPassName|releaseMemory|doInitialization|doFinalization|getImpl|anchor|"
+                     r"operator=|operatornew|operatordelete|deleteValue|deleteConstant|destroyConstantImpl)$")
 MIN_IDS = 15       # ... and when the function calls enough distinct identifiers (not a table)
 BIG = 100          # function lines from which the callee check applies
 CALLEE_FULL = float(__import__("os").environ.get("CALLEE_FULL", "0.35"))  # callee share a complete port reaches (calibrated, see NOTES at the top)
@@ -213,7 +215,7 @@ def impl_tokens(lang):
             for k in (1, 2):
                 if len(parts) > k and all(len(q) <= 4 for q in parts[:k]):
                     rest = "".join(parts[k:]).lower()
-                    if len(rest) >= 8:
+                    if len(rest) >= 4:
                         toks.add(rest)
         # intrinsic names written as strings ("llvm.x86.sse2.psrai.d", "sse2.psrai.d"): match Intrinsic::x86_...
         for x in re.findall(r'"(?:llvm\.)?([a-z0-9_]+(?:\.[a-z0-9_]+)+)', t):
@@ -247,7 +249,8 @@ def audit(lang, files, scope_all, want_missing):
         tot = got = 0
         missing, matched = [], []
         for qual, short, nl, ids in fs:
-            if NEUTRAL.match(short):
+            parts = qual.split("::")
+            if NEUTRAL.match(short) or (len(parts) >= 2 and short.lstrip("~") == parts[-2]):
                 continue
             v = variants(short, qual)
             distinctive = len(short) >= 8 and defcount[short] <= 2
