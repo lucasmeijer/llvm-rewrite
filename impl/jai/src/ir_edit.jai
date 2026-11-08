@@ -123,6 +123,12 @@ succ_operand_index :: (t: Value_Id, i: u32) -> u32 {
         case .SWITCH; return 1 + i;
         case .INDIRECTBR; return 1 + i;
         case .INVOKE; return nops(t) - 3 + i;
+        // CallBrInst: [args, bundle operands, default dest, indirect dests..., callee]
+        case .CALLBR; return nops(t) - 2 - inst(t).addrspace + i;
+        case .CLEANUPRET; return 1 + i;
+        case .CATCHRET; return 1 + i;
+        // CatchSwitchInst::getSuccessor(Idx) = getOperand(Idx + 1): [parent, unwind dest?, handlers...]
+        case .CATCHSWITCH; return 1 + i;
     }
     fatal("successors of '%' are not supported yet", opcode_name(opc));
     return 0;
@@ -139,6 +145,10 @@ num_successors :: (t: Value_Id) -> u32 {
         case .SWITCH; return nops(t) - 1;
         case .INDIRECTBR; return nops(t) - 1;
         case .INVOKE; return 2;
+        case .CALLBR; return inst(t).addrspace + 1;
+        case .CLEANUPRET; return nops(t) - 1;
+        case .CATCHRET; return 1;
+        case .CATCHSWITCH; return nops(t) - 1;
     }
     fatal("successors of '%' are not supported yet", opcode_name(opc));
     return 0;

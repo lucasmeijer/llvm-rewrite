@@ -125,7 +125,7 @@ Pass_Kind :: enum u8 {
     // analysis utilities (required: they run on optnone functions and don't count for -opt-bisect-limit)
     REQUIRE; INVALIDATE; PRINT_DOMTREE; PRINT_POSTDOMTREE; PRINT_DEMANDED_BITS; NO_OP_FUNCTION; NO_OP_MODULE;
     // transforms
-    DCE; ADCE; BDCE; BREAK_CRIT_EDGES;
+    DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG;
 }
 
 Pass_Info :: struct {
@@ -144,6 +144,8 @@ PASS_TABLE :: Pass_Info.[
     .{"adce", .FUNCTION, .ADCE, false, .DOMTREE},
     .{"bdce", .FUNCTION, .BDCE, false, .DOMTREE},
     .{"break-crit-edges", .FUNCTION, .BREAK_CRIT_EDGES, false, .DOMTREE},
+    .{"mem2reg", .FUNCTION, .MEM2REG, false, .DOMTREE},
+    .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
     .{"print<domtree>", .FUNCTION, .PRINT_DOMTREE, true, .DOMTREE},
     .{"print<postdomtree>", .FUNCTION, .PRINT_POSTDOMTREE, true, .DOMTREE},
     .{"print<demanded-bits>", .FUNCTION, .PRINT_DEMANDED_BITS, true, .DOMTREE},
@@ -478,6 +480,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .ADCE; return adce_run(f);
         case .BDCE; return bdce_run(f);
         case .BREAK_CRIT_EDGES; return break_crit_edges_run(f);
+        case .MEM2REG; return mem2reg_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

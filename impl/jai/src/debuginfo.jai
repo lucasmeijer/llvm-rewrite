@@ -543,6 +543,7 @@ Dbg_Record :: struct {
     addr_expr: Md_Id = NONE;
     dbg:       Md_Id = NONE;   // DILocation
     next:      u32;            // 1 + index of the next record before the same instruction, 0 = end
+    owner:     Value_Id = NONE; // the instruction the record is attached to (NONE = erased / not attached)
 }
 
 // LLParser::parseMetadata with a function state: also DIArgList and local ValueAsMetadata
@@ -596,6 +597,8 @@ parse_debug_record :: () -> u32 {
 // BasicBlock::insertDbgRecordBefore: append records (a chain) after the instruction's existing ones
 attach_records_before :: (i: Value_Id, first: u32) {
     if first == 0 return;
+    y := first;
+    while y != 0 { ir.dbg_records[y - 1].owner = i; y = ir.dbg_records[y - 1].next; }
     r := inst(i);
     if r.records == 0 { r.records = first; return; }
     x := r.records;

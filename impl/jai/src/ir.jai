@@ -728,7 +728,8 @@ erase_inst :: (i: Value_Id) {
         if nx == NONE fatal("erasing a terminator that has debug records attached is not supported yet");
         first := inst(i).records;
         x := first;
-        while ir.dbg_records[x - 1].next != 0 x = ir.dbg_records[x - 1].next;
+        ir.dbg_records[x - 1].owner = nx;
+        while ir.dbg_records[x - 1].next != 0 { x = ir.dbg_records[x - 1].next; ir.dbg_records[x - 1].owner = nx; }
         ir.dbg_records[x - 1].next = inst(nx).records;
         inst(nx).records = first;
         inst(i).records = 0;
