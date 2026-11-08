@@ -846,6 +846,12 @@ norm_words :: (type: Type_Id, words: [] u64) -> [] u64 {
 
 const_int_words :: (type: Type_Id, words_in: [] u64) -> Value_Id {
     words := norm_words(type, words_in);
+    // ConstantInt::get(VectorTy, 0) is ConstantVector::getSplat of a null value: zeroinitializer
+    if is_vector_type(type) && type_kind(scalar_type(type)) == .INT {
+        all_zero := true;
+        for words if it != 0 all_zero = false;
+        if all_zero return const_zero(type);
+    }
     k := const_key_begin(.C_INT, type);
     for words key_u64(k, it);
     found, v := table_find(*ir.const_map, key_view(k));

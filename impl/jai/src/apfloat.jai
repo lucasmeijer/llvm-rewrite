@@ -296,6 +296,11 @@ fp_bits_get :: (w: [] u64, i: s64) -> bool { return ((w[i / 64] >> cast(u64)(i %
 
 // Decode the bit pattern of an fp type.
 fp_decode :: (k: Type_Kind, w: [] u64) -> Fp_Decoded {
+    if k == .PPC_FP128 {
+        // DoubleAPFloat: category and sign are the first double's (exact value: only via fp_check_kind'ed ops)
+        hi := NewArray(1, u64,, allocator = temp); hi[0] = w[0];
+        return fp_decode(.DOUBLE, hi);
+    }
     p, emax, emin, bits := fp_semantics(k);
     d: Fp_Decoded;
     d.sig.allocator = temp;
@@ -806,6 +811,11 @@ fp_with_sign :: (k: Type_Kind, w: [] u64, neg: bool) -> [] u64 {
     p, mx, mn, bits := fp_semantics(k);
     r := NewArray(w.count, u64,, allocator = temp);
     for w r[it_index] = it;
+    if k == .PPC_FP128 {
+        // DoubleAPFloat::changeSign flips both doubles; the sign is the first double's
+        if ((r[0] >> 63) != 0) != neg { r[0] ^= 0x8000_0000_0000_0000; r[1] ^= 0x8000_0000_0000_0000; }
+        return r;
+    }
     sb := ifx k == .X86_FP80 then cast(s64) 79 else bits - 1;
     m := (cast(u64) 1) << cast(u64)(sb % 64);
     if neg r[sb / 64] |= m; else r[sb / 64] &= ~m;

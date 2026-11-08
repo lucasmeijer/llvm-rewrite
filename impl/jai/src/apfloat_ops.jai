@@ -160,6 +160,12 @@ fp_ilogb :: (k: Type_Kind, w: [] u64) -> s64 {
 
 // scalbn(IEEEFloat, int, roundingMode)
 fp_scalbn :: (k: Type_Kind, w: [] u64, exp: s64, rm: u8) -> [] u64 {
+    if k == .PPC_FP128 {
+        // DoubleAPFloat scalbn: both doubles
+        r := NewArray(2, u64,, allocator = temp);
+        for i: 0..1 { h := NewArray(1, u64,, allocator = temp); h[0] = w[i]; r[i] = fp_scalbn(.DOUBLE, h, exp, rm)[0]; }
+        return r;
+    }
     d := fp_decode(k, w);
     if d.cat == .NAN return fp_quiet(k, w);
     if d.cat != .NORMAL return w;

@@ -959,7 +959,7 @@ cf_compare :: (pred_in: u8, c1: Value_Id, c2: Value_Id) -> Value_Id {
     if cf_is_poison(c1) || cf_is_poison(c2) return const_poison(rt);
     if cf_is_undef(c1) || cf_is_undef(c2) {
         is_int := is_int_predicate(pred);
-        if is_equality_pred(pred) || (is_int && c1 == c2) return const_undef(rt);
+        if pred == ICMP_EQ || pred == ICMP_NE || (is_int && c1 == c2) return const_undef(rt);   // ICmpInst::isEquality
         if is_int return cf_bool(rt, is_true_when_equal(pred));
         return cf_bool(rt, is_unordered_pred(pred));
     }
