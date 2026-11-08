@@ -609,7 +609,11 @@ recursive fn put_constant(v: i32) {
         putc('>');
         return;
     }
-    if k == VK_CNULL { put("null"); return; }
+    if k == VK_CNULL {
+        if ty_is_vector(ty) { put("splat ("); put_type(types[ty].a); put(" null)"); return; }
+        put("null");
+        return;
+    }
     if k == VK_CTOKENNONE { put("none"); return; }
     if k == VK_POISON { put("poison"); return; }
     if k == VK_UNDEF { put("undef"); return; }
@@ -1607,9 +1611,64 @@ fn print_block(f: i32, b: i32) {
         var r = inst_first_dbg(iv);
         while r >= 0 { put("    "); put_dbgrec(r); putc('\n'); r = dbgrecs[r].next; }
         print_inst(iv);
+        if iop(iv) == OP_CALL && is_gc_relocate(iv) { print_gc_relocate_comment(iv); }
         putc('\n');
         iv = insts[inst_of(iv)].next;
     }
+}
+
+fn is_gc_relocate(iv: i32) -> bool {
+    let c = cb_callee(iv);
+    return vals[c].kind == VK_FUNC && func_iid(c) != 0 && intr_name(func_iid(c)) == "llvm.experimental.gc.relocate";
+}
+
+// GCProjectionInst::getStatepoint; -1 = undef
+fn gc_statepoint_of(iv: i32) -> i32 {
+    let tok = op(iv, 0);
+    let k = vals[tok].kind;
+    if k == VK_UNDEF || k == VK_POISON || k == VK_CTOKENNONE { return -1; }
+    if k == VK_INST && iop(tok) == OP_LANDINGPAD {
+        let bb = insts[inst_of(tok)].parent;
+        var pred: i32 = -1;
+        var u = vals[bb].first_use;
+        while u >= 0 {
+            let user = uses[u].user;
+            if vals[user].kind == VK_INST && is_terminator_op(iop(user)) {
+                let pb = insts[inst_of(user)].parent;
+                if pred >= 0 && pred != pb { return -2; }
+                pred = pb;
+            }
+            u = uses[u].next;
+        }
+        if pred < 0 { return -2; }
+        return block_terminator(pred);
+    }
+    return tok;
+}
+
+fn gc_ptr_operand(iv: i32, argk: i64) -> i32 {
+    let sp = gc_statepoint_of(iv);
+    if sp == -1 { return c_undef(vals[op(iv, 0)].ty); }
+    if sp < 0 { return -1; }
+    let idx = cint_lo(op(iv, argk)) as! i64;
+    for b in cb_nbundles(sp) {
+        if sbytes(cb_bundle_tag(sp, b)) == "gc-live" {
+            if idx > cb_bundle_count(sp, b) { return -1; }
+            return op(sp, cb_bundle_begin(sp, b) + idx);
+        }
+    }
+    if idx > cb_nargs(sp) { return -1; }
+    return op(sp, idx);
+}
+
+fn print_gc_relocate_comment(iv: i32) {
+    put(" ; (");
+    let b = gc_ptr_operand(iv, 1);
+    if b >= 0 { put_operand(b, false); } else { put("invalid"); }
+    put(", ");
+    let d = gc_ptr_operand(iv, 2);
+    if d >= 0 { put_operand(d, false); } else { put("invalid"); }
+    putc(')');
 }
 
 recursive fn put_dbg_md(m: i32) {

@@ -347,13 +347,14 @@ fn lex_0x() {
         tfp_hi = hi;
         tfp_bits = 80;
     } else if kind == 'L' || kind == 'M' {
-        // HexToIntPair: first 16 digits high word, next 16 low word
+        // HexToIntPair: Pair[0] (the low word) = the first 16 digits if there are at least 16, Pair[1] = the rest
         var hi: u64 = 0;
         var lo: u64 = 0;
         var k = 0;
+        let nd = p - start;
         for i in start..p {
             let d = hexdig(src[i]) as u64;
-            if k < 16 { hi = (hi << 4) | d; } else { lo = (lo << 4) | d; }
+            if nd >= 16 && k < 16 { lo = (lo << 4) | d; } else { hi = (hi << 4) | d; }
             k++;
         }
         tfp_lo = lo;

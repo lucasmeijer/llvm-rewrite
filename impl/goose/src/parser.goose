@@ -2854,6 +2854,7 @@ fn parse_module(path: const u8[:]) {
     for k in ba_fwd.len / 4 { if ba_fwd[4 * k] >= 0 { perr_at(src.len, "expected function name in blockaddress"); } }
     // UpgradeCallsToIntrinsic for every function (also sets intrinsic attributes)
     upgrade_module_intrinsics();
+    upgrade_module_flags();
 }
 
 

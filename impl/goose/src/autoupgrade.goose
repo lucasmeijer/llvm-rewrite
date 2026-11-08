@@ -554,3 +554,31 @@ fn upgrade_dbg_intrinsic_to_record(kind: const u8[:], ci: i32) {
 }
 
 fn au_erase_inst(ci: i32) { dbg_records_to_next(ci); inst_erase(ci); }
+
+// UpgradeModuleFlags (the behaviour upgrades; ObjC/Swift/amdgpu flags fail loudly).
+fn upgrade_module_flags() {
+    for &nm in named_mds {
+        if nm.module != cur_module || sbytes(nm.name) != "llvm.module.flags" { continue; }
+        for i in nm.nops {
+            let op = md_ops[nm.ops + i];
+            if op < 0 || mds[op].kind != MK_TUPLE || mds[op].nops != 3 { continue; }
+            let id = md_op(op, 1);
+            if id < 0 || mds[id].kind != MK_STRING { continue; }
+            let s = sbytes(mds[id].extra);
+            let b = md_op(op, 0);
+            var beh: i64 = -1;
+            if b >= 0 && mds[b].kind == MK_VALUE && vals[mds[b].extra].kind == VK_CINT { beh = cint_lo(mds[b].extra) as! i64; }
+            var nb: i64 = -1;
+            if s == "PIC Level" && (beh == 1 || beh == 7) { nb = 8; }
+            if s == "PIE Level" && beh == 1 { nb = 7; }
+            if (s == "branch-target-enforcement" || starts_with(s, "sign-return-address")) && beh == 1 { nb = 8; }
+            if s == "Objective-C Image Info Version" || s == "Objective-C Garbage Collection" || s == "amdgpu_code_object_version" || s == "Objective-C Image Info Section" {
+                fatal(str("module flag upgrade for '", s, "' is not supported yet"));
+            }
+            if nb >= 0 {
+                let nv = md_value(c_int(T_I32, nb));
+                md_ops[nm.ops + i] = md_get(MK_TUPLE, -1, [nv, id, md_op(op, 2)], false);
+            }
+        }
+    }
+}

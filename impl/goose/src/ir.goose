@@ -552,6 +552,8 @@ fn c_null(ty: i32) -> i32 {
     if k >= TK_HALF && k <= TK_PPC_FP128 { return c_fp(ty, 0, 0); }
     if k == TK_TOKEN { return c_simple(VK_CTOKENNONE, ty); }
     if k == TK_TARGETEXT { return c_simple(VK_CTARGETNONE, ty); }
+    // LLVM 23: a null vector of pointers is a vector-typed ConstantPointerNull (printed "splat (ptr null)")
+    if (k == TK_FVEC || k == TK_SVEC) && types[types[ty].a].kind == TK_PTR { return c_simple(VK_CNULL, ty); }
     return c_simple(VK_AGGZERO, ty);
 }
 fn c_undef(ty: i32) -> i32 { c_simple(VK_UNDEF, ty) }
@@ -599,19 +601,25 @@ fn c_aggregate(ty: i32, elems: const i32[:]) -> i32 {
     if elems.len == 0 {
         return c_simple(VK_AGGZERO, ty);
     }
-    // all poison -> poison, all undef (or undef/poison mix) -> undef, all null -> zeroinitializer
+    // ConstantStruct::get / ConstantArray::getImpl / ConstantVector::getImpl: all poison -> poison,
+    // all undef (no poison) -> undef, all null -> zeroinitializer (a vector of null pointers stays a
+    // ConstantPointerNull); arrays and vectors need all elements identical.
     var all_poison = true;
     var all_undef = true;
     var all_null = true;
+    var all_same = true;
     for e in elems {
         let ek = vals[e].kind;
         if ek != VK_POISON { all_poison = false; }
-        if ek != VK_UNDEF && ek != VK_POISON { all_undef = false; }
+        if ek != VK_UNDEF { all_undef = false; }
         if !is_null_value(e) { all_null = false; }
+        if e != elems[0] { all_same = false; }
     }
+    if k != TK_STRUCT && !all_same { all_poison = false; all_undef = false; all_null = false; }
+    if (k == TK_FVEC || k == TK_SVEC) && all_same && vals[elems[0]].kind == VK_CNULL { return c_simple(VK_CNULL, ty); }
+    if all_null { return c_simple(VK_AGGZERO, ty); }
     if all_poison { return c_poison(ty); }
     if all_undef { return c_undef(ty); }
-    if all_null { return c_simple(VK_AGGZERO, ty); }
     if k == TK_STRUCT { return cst_get(VK_CSTRUCT, ty, cst_none(), elems); }
     let et = types[ty].a;
     if is_cds_elem_ty(et) {
