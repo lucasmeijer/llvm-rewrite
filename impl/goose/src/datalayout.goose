@@ -214,7 +214,7 @@ recursive fn dl_align(t: i32, abi: bool) -> i64 {
     return 1;
 }
 
-fn dl_store_size(t: i32) -> i64 { (dl_size_bits(t) + 7) / 8 }
+recursive fn dl_store_size(t: i32) -> i64 { (dl_size_bits(t) + 7) / 8 }
 recursive fn dl_alloc_size(t: i32) -> i64 {
     // DataLayout::getTypeAllocSize: arrays in bytes (no overflow through bits)
     if types[t].kind == TK_ARRAY { return types[t].cnt * dl_alloc_size(types[t].a); }

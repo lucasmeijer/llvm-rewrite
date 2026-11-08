@@ -300,11 +300,12 @@ recursive fn sc_get_unknown(v: i32) -> i32 {
 // ---------------------------------------------------------------------------------------------
 // Side tables indexed by SCEV id (reset with the instance)
 
-struct ScSide { ur_valid: bool, sr_valid: bool, ur: CRange, sr: CRange, mtz: i32, has_rec: i8, users: i32 }
+// Cached ranges are kept as IR constants (lower, upper): wide APInts don't outlive a pass (apint.goose).
+struct ScSide { ur_valid: bool, sr_valid: bool, url: i32, urh: i32, srl: i32, srh: i32, mtz: i32, has_rec: i8, users: i32 }
 var sc_side: ScSide[>..];
 recursive fn sc_side_grow() {
     while sc_side.len < scevs.len {
-        sc_side.push(ScSide { ur_valid: false, sr_valid: false, ur: rg_full(1), sr: rg_full(1), mtz: -1, has_rec: -1, users: -1 });
+        sc_side.push(ScSide { ur_valid: false, sr_valid: false, url: -1, urh: -1, srl: -1, srh: -1, mtz: -1, has_rec: -1, users: -1 });
     }
 }
 
@@ -1204,7 +1205,6 @@ recursive fn sc_strip_factor(m: i32, opidx: i64, depth: i64) -> i32 {
     return sc_mul_n(b, SF_ANY, depth + 1);
 }
 
-recursive fn ap_abs(a: AP) -> AP { if ap_is_neg(a) { ap_neg(a) } else { a } }
 
 recursive fn sc_umul_ov(i: u64, j: u64, ov: bool) -> u64, bool {
     let k = i * j;
@@ -1436,7 +1436,6 @@ recursive fn sc_mul_n(b: i64, orig: u32, depth: i64) -> i32 {
     return sc_get_or_create_comm(SC_MUL, b, sc_strengthen_flags(SC_MUL, b, ss_n(b), orig));
 }
 
-recursive fn ap_log2(a: AP) -> i64 { (a.w as i64) - 1 - ap_countl_zero(a) }
 
 // getURemExpr
 recursive fn sc_get_urem(l: i32, r: i32) -> i32 {
@@ -1453,12 +1452,6 @@ recursive fn sc_get_urem(l: i32, r: i32) -> i32 {
     return sc_get_minus(l, mu, SF_NUW, 0);
 }
 
-recursive fn ap_gcd(a0: AP, b0: AP) -> AP {
-    var a = a0;
-    var b = b0;
-    while !ap_is_zero(b) { let t = ap_urem(a, b); a = b; b = t; }
-    return a;
-}
 recursive fn sc_udiv_find(l: i32, r: i32) -> i32 { let b = ss.len; ss.push(l); ss.push(r); let s = sc_find(SC_UDIV, b, 2, -1, -1, -1); ss.resize(b); return s; }
 recursive fn sc_addrec2(start: i32, step: i32, l: i32, flags: u32) -> i32 {
     let b = ss.len;

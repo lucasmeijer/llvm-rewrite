@@ -28,9 +28,9 @@ import scev_pred;
 let HINT_UNSIGNED = 0;
 let HINT_SIGNED = 1;
 
-struct ScCm { valid: bool, cm: AP }
+struct ScCm { valid: bool, cm: i32 }    // the multiple as an IR constant
 var sc_cm: ScCm[>..];
-recursive fn sc_cm_grow() { while sc_cm.len < scevs.len { sc_cm.push(ScCm { valid: false, cm: ap_zero(1) }); } }
+recursive fn sc_cm_grow() { while sc_cm.len < scevs.len { sc_cm.push(ScCm { valid: false, cm: -1 }); } }
 recursive fn sc_cm_erase(s: i32) { sc_cm_grow(); sc_cm[s].valid = false; }
 
 // ScalarEvolution::setNoWrapFlags(AddRec, Flags)
@@ -44,15 +44,14 @@ recursive fn sc_set_nowrap_flags(ar: i32, f: u32) {
 }
 
 // computeKnownBits(V, DL, AC, CxtI, DT) as APInt known bits
-recursive fn sc_compute_known_bits_cx(v: i32, cx: i32) -> KBA {
+recursive fn sc_compute_known_bits_cx(v: i32, cx: i32) -> KB {
     let save = kb_cxt;
     kb_cxt = cx;
     let k = kb_compute_all(v, 0);
     kb_cxt = save;
-    let w = k.w as i64;
-    return KBA { z: ap_u64(k.z, w), o: ap_u64(k.o, w) };
+    return k;
 }
-recursive fn sc_compute_known_bits_ap(v: i32) -> KBA { sc_compute_known_bits_cx(v, -1) }
+recursive fn sc_compute_known_bits_ap(v: i32) -> KB { sc_compute_known_bits_cx(v, -1) }
 recursive fn sc_num_sign_bits(v: i32) -> i64 {
     let save = kb_cxt;
     kb_cxt = -1;
@@ -113,10 +112,10 @@ recursive fn sc_gcd_multiple(s: i32, cx: i32) -> AP {
 recursive fn sc_get_constant_multiple(s: i32, cx: i32) -> AP {
     if cx >= 0 { return sc_get_constant_multiple_impl(s, cx); }
     sc_cm_grow();
-    if sc_cm[s].valid { return sc_cm[s].cm; }
+    if sc_cm[s].valid { return ap_from_cint(sc_cm[s].cm); }
     let r = sc_get_constant_multiple_impl(s, cx);
     sc_cm_grow();
-    sc_cm[s] = ScCm { valid: true, cm: r };
+    sc_cm[s] = ScCm { valid: true, cm: ap_to_cint(ty_int(r.w as i64), r) };
     return r;
 }
 recursive fn sc_get_non_zero_constant_multiple(s: i32) -> AP {
@@ -150,11 +149,17 @@ recursive fn sc_is_known_non_zero(s: i32) -> bool {
 }
 
 recursive fn sc_range_cached(s: i32, hint: i64) -> bool { if hint == HINT_UNSIGNED { sc_side[s].ur_valid } else { sc_side[s].sr_valid } }
-recursive fn sc_range_get(s: i32, hint: i64) -> CRange { if hint == HINT_UNSIGNED { sc_side[s].ur } else { sc_side[s].sr } }
+recursive fn sc_range_get(s: i32, hint: i64) -> CRange {
+    if hint == HINT_UNSIGNED { return CRange { lo: ap_from_cint(sc_side[s].url), hi: ap_from_cint(sc_side[s].urh) }; }
+    return CRange { lo: ap_from_cint(sc_side[s].srl), hi: ap_from_cint(sc_side[s].srh) };
+}
 // setRange
 recursive fn sc_set_range(s: i32, hint: i64, c: CRange) -> CRange {
-    if hint == HINT_UNSIGNED { sc_side[s].ur = c; sc_side[s].ur_valid = true; }
-    else { sc_side[s].sr = c; sc_side[s].sr_valid = true; }
+    let t = ty_int(c.lo.w as i64);
+    let l = ap_to_cint(t, c.lo);
+    let h = ap_to_cint(t, c.hi);
+    if hint == HINT_UNSIGNED { sc_side[s].url = l; sc_side[s].urh = h; sc_side[s].ur_valid = true; }
+    else { sc_side[s].srl = l; sc_side[s].srh = h; sc_side[s].sr_valid = true; }
     return c;
 }
 
@@ -314,7 +319,7 @@ recursive fn sc_get_range_ref(s: i32, hint: i64, depth: i64) -> CRange {
     let cr = sc_get_range_for_unknown_recurrence(s);
     cons = rg_intersect(cons, cr);
     var known = sc_compute_known_bits_ap(v);
-    if (known.z.w as i64) != bw { known = KBA { z: ap_zext_or_trunc(known.z, bw), o: ap_zext_or_trunc(known.o, bw) }; }
+    if (known.z.w as i64) != bw { known = KB { z: ap_zext_or_trunc(known.z, bw), o: ap_zext_or_trunc(known.o, bw) }; }
     var ns = sc_num_sign_bits(v);
     if sc_is_ptr(s) {
         let psize = dl_ptr(sc_ptr_as(sc_ty(s))).bits;
