@@ -1559,9 +1559,16 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         return kb_and(known, kb_anyext_or_trunc(mk, w));
     }
     if id == IID_vscale { return kb_vscale(inst_func(iv), w); }
-    let nm = intr_name(id as i64);
-    if starts_with(nm, "llvm.x86.") || starts_with(nm, "llvm.riscv.") || starts_with(nm, "llvm.amdgcn.") {
-        not_ported(str("known bits of ", nm));
+    // the target intrinsics computeKnownBitsFromOperator handles; any other intrinsic gives no known bits
+    if id == IID_x86_sse2_pmulh_w || id == IID_x86_avx2_pmulh_w || id == IID_x86_avx512_pmulh_w_512 ||
+       id == IID_x86_sse2_pmulhu_w || id == IID_x86_avx2_pmulhu_w || id == IID_x86_avx512_pmulhu_w_512 ||
+       id == IID_x86_sse42_crc32_64_64 || id == IID_x86_ssse3_phadd_d_128 || id == IID_x86_ssse3_phadd_w_128 ||
+       id == IID_x86_avx2_phadd_d || id == IID_x86_avx2_phadd_w || id == IID_x86_ssse3_phadd_sw_128 ||
+       id == IID_x86_avx2_phadd_sw || id == IID_x86_ssse3_phsub_d_128 || id == IID_x86_ssse3_phsub_w_128 ||
+       id == IID_x86_avx2_phsub_d || id == IID_x86_avx2_phsub_w || id == IID_x86_ssse3_phsub_sw_128 ||
+       id == IID_x86_avx2_phsub_sw || id == IID_riscv_vsetvli || id == IID_riscv_vsetvlimax ||
+       id == IID_amdgcn_mbcnt_hi || id == IID_amdgcn_mbcnt_lo {
+        not_ported(str("known bits of ", intr_name(id as i64)));
     }
     return known;
 }

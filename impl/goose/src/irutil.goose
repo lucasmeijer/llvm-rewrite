@@ -74,13 +74,20 @@ fn term_nsucc(t: i32) -> i64 {
     if o == OP_SWITCH { return n / 2; }
     if o == OP_INDIRECTBR { return n - 1; }
     if o == OP_INVOKE { return 2; }
-    if o == OP_CALLBR { return 1 + ints[insts[inst_of(t)].aux + 1] as i64; }
+    if o == OP_CALLBR { return 1 + iu_callbr_nindirect(t); }
     if o == OP_CATCHRET { return 1; }
     if o == OP_CLEANUPRET { return n - 1; }
     if o == OP_CATCHSWITCH { return n - 1; }
     if o == OP_RET || o == OP_UNREACHABLE || o == OP_RESUME { return 0; }
     fatal(str("successors of this terminator are not supported yet (opcode ", o, ")"));
     return 0;
+}
+
+// CallBrInst::getNumIndirectDests (naux == 0: no bundles and no indirect destinations, see calls.goose)
+fn iu_callbr_nindirect(t: i32) -> i64 {
+    let x = insts[inst_of(t)];
+    if x.naux == 0 { return 0; }
+    return ints[x.aux + 1] as i64;
 }
 
 fn term_succ_opnd(t: i32, k: i64) -> i64 {
@@ -91,7 +98,7 @@ fn term_succ_opnd(t: i32, k: i64) -> i64 {
     if o == OP_SWITCH { return if k == 0 { 1 } else { 1 + 2 * k }; }
     if o == OP_INDIRECTBR { return 1 + k; }
     if o == OP_INVOKE { return n - 3 + k; }
-    if o == OP_CALLBR { return n - 2 - ints[insts[inst_of(t)].aux + 1] as i64 + k; }
+    if o == OP_CALLBR { return n - 2 - iu_callbr_nindirect(t) + k; }
     if o == OP_CATCHRET { return 1; }
     if o == OP_CLEANUPRET { return 1; }
     // catchswitch: successors are the unwind dest (if any) then the handlers (CatchSwitchInst::getSuccessor)

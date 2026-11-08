@@ -1000,10 +1000,55 @@ fn can_constant_fold_call_to(c: i32, f: i32) -> bool {
         nm == "__log_finite" || nm == "__logf_finite" || nm == "__log10_finite" || nm == "__log10f_finite" ||
         nm == "__pow_finite" || nm == "__powf_finite" || nm == "__sinh_finite" || nm == "__sinhf_finite";
 }
+// The x86 scalar conversion intrinsics ConstantFolding folds: 0 = not one of them, 1 = SSE (one operand),
+// 2 = AVX-512 (operand 1 is the rounding mode); with roundTowardZero and IsSigned as LLVM passes them.
+fn x86_cvt_info(id: i32) -> i64, bool, bool {
+    if id == IID_x86_sse_cvtss2si || id == IID_x86_sse_cvtss2si64 || id == IID_x86_sse2_cvtsd2si || id == IID_x86_sse2_cvtsd2si64 { return 1, false, true; }
+    if id == IID_x86_sse_cvttss2si || id == IID_x86_sse_cvttss2si64 || id == IID_x86_sse2_cvttsd2si || id == IID_x86_sse2_cvttsd2si64 { return 1, true, true; }
+    if id == IID_x86_avx512_vcvtss2si32 || id == IID_x86_avx512_vcvtss2si64 || id == IID_x86_avx512_vcvtsd2si32 || id == IID_x86_avx512_vcvtsd2si64 { return 2, false, true; }
+    if id == IID_x86_avx512_vcvtss2usi32 || id == IID_x86_avx512_vcvtss2usi64 || id == IID_x86_avx512_vcvtsd2usi32 || id == IID_x86_avx512_vcvtsd2usi64 { return 2, false, false; }
+    if id == IID_x86_avx512_cvttss2si || id == IID_x86_avx512_cvttss2si64 || id == IID_x86_avx512_cvttsd2si || id == IID_x86_avx512_cvttsd2si64 { return 2, true, true; }
+    if id == IID_x86_avx512_cvttss2usi || id == IID_x86_avx512_cvttss2usi64 || id == IID_x86_avx512_cvttsd2usi || id == IID_x86_avx512_cvttsd2usi64 { return 2, true, false; }
+    return 0, false, false;
+}
 fn is_x86_cvt_iid(id: i32) -> bool {
-    let nm = intr_name(id as i64);
-    return starts_with(nm, "llvm.x86.sse.cvt") || starts_with(nm, "llvm.x86.sse2.cvt") || starts_with(nm, "llvm.x86.avx512.vcvt") ||
-           starts_with(nm, "llvm.x86.avx512.cvtt");
+    let k, rtz, sg = x86_cvt_info(id);
+    return k != 0;
+}
+// ConstantFoldSSEConvertToInt: APFloat::convertToInteger(rmTowardZero or rmNearestTiesToEven); null (-1)
+// unless the status is opOK (or opInexact when rounding toward zero)
+fn cf_sse_convert_to_int(fpv: i32, ty: i32, rtz: bool, signed: bool) -> i32 {
+    let kind = types[vals[fpv].ty].kind as i64;
+    let w = ty_bits(ty);
+    let f = fp_fmt(kind);
+    let p = fp_decompose(kind, cint_lo(fpv), cint_hi(fpv));
+    if p.cat == FC_NAN || p.cat == FC_INF { return -1; }
+    if p.cat == FC_ZERO { return c_null(ty); }
+    let mw = w + 130;
+    let sig = ap_from_words(mw, [p.sig0, p.sig1]);
+    let sh = p.exponent - (f.p - 1);
+    var mag = ap_zero(mw);
+    var inexact = false;
+    if sh >= 0 {
+        if sh + f.p > w + 1 { return -1; }
+        mag = ap_shl(sig, sh);
+    } else if -sh >= mw {
+        inexact = true;
+    } else {
+        mag = ap_lshr(sig, -sh);
+        inexact = !ap_eq(ap_shl(mag, -sh), sig);
+    }
+    if inexact && !rtz { return -1; }
+    let maxbits = if signed { w - 1 } else { w };
+    let abits = ap_active_bits(mag);
+    if p.neg && !ap_is_zero(mag) {
+        if !signed { return -1; }
+        if abits > maxbits + 1 { return -1; }
+        if abits == maxbits + 1 && ap_countr_zero(mag) != abits - 1 { return -1; }
+        return ap_to_cint(ty, ap_neg(ap_trunc(mag, w)));
+    }
+    if abits > maxbits { return -1; }
+    return ap_to_cint(ty, ap_trunc(mag, w));
 }
 fn interleave_factor_cf(id: i32) -> i64 {
     if id == IID_vector_interleave2 { return 2; } if id == IID_vector_interleave3 { return 3; }
@@ -1125,13 +1170,28 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
                id == IID_vector_reduce_smax || id == IID_vector_reduce_umin || id == IID_vector_reduce_umax {
                 return cf_vector_reduce(id, a);
             }
-            if is_x86_cvt_iid(id) { cfa_not_ported("x86 SSE conversion folding"); }
+            let xk, rtz, sg = x86_cvt_info(id);
+            if xk == 1 {
+                let e = c_aggregate_element(a, 0);
+                if e >= 0 && vals[e].kind == VK_CFP { return cf_sse_convert_to_int(e, ty, rtz, sg); }
+                return -1;
+            }
         }
         return -1;
     }
     if n == 2 {
         let a = is_ops[mark];
         let b = is_ops[mark + 1];
+        let xk, rtz, sg = x86_cvt_info(id);
+        if xk == 2 {
+            // ConstantVector / ConstantDataVector operand and the default rounding mode (4)
+            let vk = vals[a].kind;
+            if (vk == VK_CVECTOR || vk == VK_CDVECTOR) && vals[b].kind == VK_CINT && ap_eq(ci_ap(b), ap_u64(4, ty_bits(vals[b].ty))) {
+                let e = c_aggregate_element(a, 0);
+                if e >= 0 && vals[e].kind == VK_CFP { return cf_sse_convert_to_int(e, ty, rtz, sg); }
+            }
+            return -1;
+        }
         if ty_is_fp(ty) && is_minmax_fp_iid(id) {
             if is_undef_val(a) { return b; }
             if is_undef_val(b) { return a; }
@@ -1208,7 +1268,7 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
             if id == IID_pdep || id == IID_pext { cfa_not_ported("pdep/pext folding"); }
             return -1;
         }
-        if is_x86_cvt_iid(id) || id == IID_experimental_cttz_elts || id == IID_get_active_lane_mask { cfa_not_ported(str("constant folding of ", intr_name(id as i64))); }
+        if id == IID_experimental_cttz_elts || id == IID_get_active_lane_mask { cfa_not_ported(str("constant folding of ", intr_name(id as i64))); }
         return -1;
     }
     if n == 3 {
