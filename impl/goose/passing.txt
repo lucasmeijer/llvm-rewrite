@@ -1461,6 +1461,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/backedge-taken-count-guard-info.ll:
 tests/imported/llvm/Analysis/ScalarEvolution/backedge-taken-count-guard-info.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/becount-invalidation.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/becount-invalidation.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/binomial-explision.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/binomial-explision.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/constant_condition.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/constant_condition.ll::roundtrip
@@ -1522,6 +1523,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/huge_expression_limit.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/huge_expression_limit.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/implied-via-addition.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/implied-via-addition.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/implied-via-division.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/implied-via-division.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/incorrect-exit-count.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/incorrect-exit-count.ll::roundtrip
@@ -1541,11 +1543,13 @@ tests/imported/llvm/Analysis/ScalarEvolution/limit-depth.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/limit-depth.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/load-with-range-metadata.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/load-with-range-metadata.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/logical-operations.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/logical-operations.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/lshr-shl-differentconstmask.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/lshr-shl-differentconstmask.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/lt-overflow.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/lt-overflow.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/malloc.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/malloc.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/max-addops-inline.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/max-addops-inline.ll::roundtrip
@@ -1557,6 +1561,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/max-backedge-taken-count-guard-info
 tests/imported/llvm/Analysis/ScalarEvolution/max-backedge-taken-count-guard-info-operand-order.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/max-backedge-taken-count-guard-info-rewrite-expressions.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/max-backedge-taken-count-guard-info-rewrite-expressions.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/max-backedge-taken-count-guard-info.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/max-backedge-taken-count-guard-info.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/max-backedge-taken-count-limit-by-wrapping.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/max-backedge-taken-count-limit-by-wrapping.ll::roundtrip
@@ -1588,9 +1593,11 @@ tests/imported/llvm/Analysis/ScalarEvolution/ne-guard-multiple-trip-count.ll::an
 tests/imported/llvm/Analysis/ScalarEvolution/ne-guard-multiple-trip-count.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/ne-overflow.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/ne-overflow.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/no-wrap-add-exprs.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/no-wrap-add-exprs.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/no-wrap-symbolic-becount.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/no-wrap-symbolic-becount.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/no-wrap-unknown-becount.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/no-wrap-unknown-becount.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/non-IV-phi.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/non-IV-phi.ll::roundtrip
@@ -1607,7 +1614,9 @@ tests/imported/llvm/Analysis/ScalarEvolution/or-exit-cond.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/or-exit-cond.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/outer_phi.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/outer_phi.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/overflow-intrinsics-trip-count.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/overflow-intrinsics-trip-count.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/overflow-intrinsics.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/overflow-intrinsics.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/pointer-rounding.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/pointer-rounding.ll::roundtrip
@@ -1692,6 +1701,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/rounding-demanded-bits.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/rounding-demanded-bits.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/saturating-intrinsics.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/saturating-intrinsics.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/scalable-vector.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/scalable-vector.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/scev-aa.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/scev-canonical-mode.ll::roundtrip
@@ -1726,6 +1736,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/sext-zero.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/sext-zero.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/shift-op.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/shift-op.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/shift-recurrences.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/shift-recurrences.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/shl-lshr-differentconstmask.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/shl-lshr-differentconstmask.ll::roundtrip
@@ -1761,6 +1772,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/trip-count-phi-increment.ll::analys
 tests/imported/llvm/Analysis/ScalarEvolution/trip-count-phi-increment.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/trip-count-pow2.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/trip-count-pow2.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/trip-count-scalable-stride.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/trip-count-scalable-stride.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/trip-count-switch.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/trip-count-switch.ll::roundtrip
@@ -1798,6 +1810,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/trip-count8.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/trip-count8.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/trip-count9.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/trip-count9.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/trip-multiple-guard-info.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/trip-multiple-guard-info.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/trip-multiple.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/trip-multiple.ll::roundtrip
