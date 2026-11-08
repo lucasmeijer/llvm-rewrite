@@ -41,6 +41,7 @@ import ic_muldivrem;
 import ic_shifts;
 import ic_casts;
 import ic_compares;
+import ic_andorxor;
 import ic_demanded;
 import ic_visit_misc;
 
@@ -715,6 +716,9 @@ fn ic_visit(i: i32) -> i32 {
         OP_SHL => { return visit_shl(i); },
         OP_LSHR => { return visit_lshr(i); },
         OP_ASHR => { return visit_ashr(i); },
+        OP_AND => { return visit_and(i); },
+        OP_OR => { return visit_or(i); },
+        OP_XOR => { return visit_xor(i); },
         OP_TRUNC => { return visit_trunc(i); },
         OP_ZEXT => { return visit_zext(i); },
         OP_SEXT => { return visit_sext(i); },

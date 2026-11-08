@@ -985,32 +985,7 @@ fn icb_intrinsic_rt(rty: i32, id: i64, argsv: const i32[:]) -> i32 {
     return -1;
 }
 
-// foldBinOpOfDisplacedShifts(I) (InstCombineAndOrXor.cpp)
-fn fold_binop_of_displaced_shifts(i: i32) -> i32 {
-    let ty = vals[i].ty;
-    let bw = ty_scalar_bits(ty);
-    for k in 2 {
-        let s1 = op(i, k);
-        let s2 = op(i, 1 - k);
-        if !is_inst(s1) || !is_shift_op(iop(s1)) || !is_imm_c(op(s1, 0)) { continue; }
-        let sh = op(s1, 1);
-        if !is_inst(s2) || !is_shift_op(iop(s2)) || !is_imm_c(op(s2, 0)) { continue; }
-        let ad = op(s2, 1);
-        if !m_add_like(ad) || op(ad, 0) != sh || !is_imm_c(op(ad, 1)) { continue; }
-        let addc = op(ad, 1);
-        // m_SpecificInt_ICMP(ICMP_ULT, BitWidth)
-        if !ic_all_elts_ult(addc, bw as u64) { return -1; }
-        let o0i = op(i, 0); let o1i = op(i, 1);
-        if !is_inst(o0i) || !is_inst(o1i) { return -1; }
-        let sho = iop(o0i);
-        if sho != iop(o1i) { return -1; }
-        if iop(i) == OP_ADD && sho != OP_SHL { return -1; }
-        let inner = icb_binop(sho, op(s2, 0), addc, "");
-        let nc = icb_binop(iop(i), op(s1, 0), inner, "");
-        return ic_new_binop(sho, nc, sh);
-    }
-    return -1;
-}
+// foldBinOpOfDisplacedShifts(I) is in ic_andorxor.goose (InstCombineAndOrXor.cpp)
 // m_SpecificInt_ICMP(ICMP_ULT, x): every element (splat or vector) u< x
 fn ic_all_elts_ult(c: i32, x: u64) -> bool { c_all_elts_cmp(c, 36, x) }
 
@@ -1560,9 +1535,20 @@ fn ic_is_not_min_signed_value(c: i32) -> bool {
 // Constant::isElementWiseEqual(Y)
 fn ic_elementwise_equal(a: i32, b: i32) -> bool {
     if a == b { return true; }
-    if !ty_is_vector(vals[a].ty) || ty_kind(vals[a].ty) != TK_FVEC || !ty_is_int(ty_scalar(vals[a].ty)) { return false; }
-    let c = cf_fold_cmp_operands(32, a, b, -1);
-    return c >= 0 && m_all_ones(c);
+    let vty = vals[a].ty;
+    if !ty_is_vector(vty) || !is_constant(b) || vals[b].ty != vty { return false; }
+    let et = ty_scalar(vty);
+    if !ty_is_int(et) && !ty_is_fp(et) { return false; }
+    // bitcast to integer for an exact bitwise comparison
+    var c0 = a;
+    var c1 = b;
+    if ty_is_fp(et) {
+        let ity = ty_vec_integer(vty);
+        c0 = ce_cast(OP_BITCAST, a, ity);
+        c1 = ce_cast(OP_BITCAST, b, ity);
+    }
+    let c = cf_fold_cmp_operands(32, c0, c1, -1);
+    return c >= 0 && (is_poison(c) || m_one(c));
 }
 
 // OptimizePointerDifference(LHS, RHS, Ty, IsNUW)

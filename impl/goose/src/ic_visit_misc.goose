@@ -21,6 +21,8 @@ import instsimplify;
 import ic;
 import ic_builder;
 import ic_common;
+import autoupgrade;
+import apint;
 
 var ic_experiment_lenient: bool = false;
 fn ic_visit_other(i: i32) -> i32 {
@@ -101,10 +103,43 @@ fn aset_add_enum(s: i32, kind: i64) -> i32 {
     return aset_get(xs);
 }
 
+// annotateAnyAllocSite(Call, TLI): the alignment part (getAllocAlignment via allocalign); allocation
+// functions known to the TLI and allocsize (getAllocSize) fail loudly.
+fn ic_annotate_any_alloc_site(ci: i32) -> bool {
+    if ty_kind(vals[ci].ty) != TK_PTR { return false; }
+    if is_alloc_like_fn(ci) || call_has_fn_attr(ci, AK_AllocSize) { ic_not_ported("annotateAnyAllocSite"); }
+    let a = call_arg_with_attr(ci, AK_AllocAlign);
+    if a < 0 || m_constant_int(a) < 0 { return false; }
+    let av = ci_ap(a);
+    if !ap_ult_u64(av, (1 as u64) << 32) { return false; }
+    let al = ap_zext64(av);
+    if al == 0 || (al & (al - 1)) != 0 { return false; }
+    // Call.getRetAlign(): the call site's, else the callee's
+    let l = insts[inst_of(ci)].attrs;
+    var ex = aset_int(alist_ret(l), AK_Alignment);
+    if ex == 0 {
+        let cf = called_function(ci);
+        if cf >= 0 { ex = aset_int(alist_ret(globs[glob_of(cf)].attrs), AK_Alignment); }
+    }
+    if ex == 0 { ex = 1; }
+    if al <= ex { return false; }
+    var sets: i32[>..<] = [];
+    let n = if l == 0 { 0 } else { alists[l].n as i64 };
+    let need: i64 = 2;
+    for j in 0..(if n > need { n } else { need }) {
+        var st: i32 = 0;
+        if j < n { st = alist_runs[alists[l].at + j]; }
+        if j == 1 { st = aset_with(st, attr_int(AK_Alignment, al)); }
+        sets.push(st);
+    }
+    insts[inst_of(ci)].attrs = alist_get(sets);
+    return true;
+}
+
 // visitCallBase(Call) for a call to an ordinary function
 fn visit_call_base(ci: i32) -> i32 {
     var changed = false;
-    if ty_kind(vals[ci].ty) == TK_PTR && is_alloc_like_fn(ci) { ic_not_ported("annotateAnyAllocSite"); }
+    if ic_annotate_any_alloc_site(ci) { changed = true; }
     let nargs = cb_nargs(ci);
     var argnos: i64[>..<] = [];
     for k in nargs {

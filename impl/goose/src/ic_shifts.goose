@@ -19,6 +19,8 @@ import apint;
 import ic;
 import ic_builder;
 import ic_common;
+import ic_andorxor;
+import ic_casts;
 import ic_demanded;
 
 let SS_LOSSY = 0;
@@ -315,13 +317,14 @@ fn common_shift_transforms(i: i32) -> i32 {
         // C1 << (C2 - X) -> (C1 << C2) >> X ; also (X ^ C2)
         var c2: i64 = -1;
         var x: i32 = -1;
-        if bo(op1, OP_SUB) && op_nuw(op1) && m_constant_int(op(op1, 0)) >= 0 && ty_sbits(op(op1, 0)) <= 64 {
-            c2 = cint_lo(op(op1, 0)) as i64; x = op(op1, 1);
-        } else if bo(op1, OP_XOR) && m_constant_int(op(op1, 1)) >= 0 && ty_sbits(op(op1, 1)) <= 64 {
-            let cc = ci_ap(op(op1, 1));
+        // m_ConstantInt(uint64_t &) matches splats too (ap_match, tryZExtValue)
+        if bo(op1, OP_SUB) && op_nuw(op1) && has_apint(op(op1, 0)) && ap_fits_u64(ap_c(op(op1, 0))) {
+            c2 = ap_zext64(ap_c(op(op1, 0))) as i64; x = op(op1, 1);
+        } else if bo(op1, OP_XOR) && has_apint(op(op1, 1)) && ap_fits_u64(ap_c(op(op1, 1))) {
+            let cc = ap_c(op(op1, 1));
             kb_cxt = i;
             let kx = kb_compute_all(op(op1, 0), 0);
-            if ap_is_all_ones(ap_or(cc, kx.z)) { c2 = cint_lo(op(op1, 1)) as i64; x = op(op1, 0); }
+            if ap_is_all_ones(ap_or(cc, kx.z)) { c2 = ap_zext64(cc) as i64; x = op(op1, 0); }
         }
         if c2 >= 0 {
             if o == OP_SHL {
@@ -988,8 +991,21 @@ fn visit_lshr(i: i32) -> i32 {
                 return ic_new_binop_flags(OP_ADD, x, nl, FL_NSW);
             }
         }
+        // Try to narrow bswap.
         if one_use(op0) && inst_iid(op0) == IID_bswap && one_use(op(op0, 0)) && m_zext(op(op0, 0)) >= 0 {
-            ic_not_ported("narrowing bswap in visitLShr");
+            let x = m_zext(op(op0, 0));
+            let sw = ty_sbits(x);
+            let wd = bw - sw;
+            if sw % 16 == 0 {
+                let ns = icb_unary_intrinsic(IID_bswap, x, "");
+                if sac >= wd {
+                    let nsh = icb_lshr(ns, c_int_ty(vals[ns].ty, (sac - wd) as u64), "", false);
+                    return ic_new_cast(OP_ZEXT, nsh, ty);
+                } else {
+                    let nz = icb_zext(ns, ty, "");
+                    return ic_new_binop(OP_SHL, nz, c_int_ty(ty, (wd - sac) as u64));
+                }
+            }
         }
         if sac == 1 && bo(op0, OP_ADD) {
             let x = op(op0, 0);
@@ -1030,17 +1046,44 @@ fn visit_lshr(i: i32) -> i32 {
 // ---------------------------------------------------------------------------------------------
 // visitAShr
 
-// foldVariableSignZeroExtensionOfVariableHighBitExtract(OldAShr): the outer pattern only, then not ported
+// m_ZExtOrSelf(m_Sub(m_Constant(C), m_Value(Y))): ok, C, Y
+fn sh_zext_or_self_sub_const(v: i32) -> bool, i32, i32 {
+    let z = m_zext(v);
+    if z >= 0 && bo(z, OP_SUB) && is_constant(op(z, 0)) { return true, op(z, 0), op(z, 1); }
+    if bo(v, OP_SUB) && is_constant(op(v, 0)) { return true, op(v, 0), op(v, 1); }
+    return false, -1, -1;
+}
+// m_ZExtOrSelf(m_Specific(x))
+fn sh_zext_or_self_is(v: i32, x: i32) -> bool { v == x || (is_inst_op(v, OP_ZEXT) && op(v, 0) == x) }
+// the BitWidthSplat lambda: C is a splat of V's element bit width
+fn sh_bit_width_splat(c: i32, v: i32) -> bool { m_specific_int_ap(c, ty_sbits(v) as u64) }
+
+// foldVariableSignZeroExtensionOfVariableHighBitExtract(OldAShr)
 fn fold_variable_sign_zero_ext_of_high_bit_extract(a: i32) -> i32 {
     let s = op(a, 0);
-    if bo(s, OP_SHL) && is_inst(op(s, 0)) && bo(m_zext_or_self(op(s, 1)), OP_SUB) && bo(m_zext_or_self(op(a, 1)), OP_SUB) {
-        let s1 = m_zext_or_self(op(s, 1));
-        let s2 = m_zext_or_self(op(a, 1));
-        if is_const(op(s1, 0)) && is_const(op(s2, 0)) && m_zext_or_self(op(s1, 1)) == m_zext_or_self(op(s2, 1)) {
-            ic_not_ported("foldVariableSignZeroExtensionOfVariableHighBitExtract");
-        }
-    }
-    return -1;
+    if !bo(s, OP_SHL) || !is_inst(op(s, 0)) { return -1; }
+    let maybe_trunc = op(s, 0);
+    let ok1, c1, in1 = sh_zext_or_self_sub_const(op(s, 1));
+    if !ok1 { return -1; }
+    let nbits = m_zext_or_self(in1);
+    let ok2, c2, in2 = sh_zext_or_self_sub_const(op(a, 1));
+    if !ok2 || !sh_zext_or_self_is(in2, nbits) { return -1; }
+    if !sh_bit_width_splat(c1, a) || !sh_bit_width_splat(c2, a) { return -1; }
+    var hbe = maybe_trunc;
+    if is_inst_op(maybe_trunc, OP_TRUNC) && is_inst(op(maybe_trunc, 0)) { hbe = op(maybe_trunc, 0); }
+    let had_trunc = maybe_trunc != hbe;
+    if !bo(hbe, OP_LSHR) && !bo(hbe, OP_ASHR) { return -1; }
+    let x = op(hbe, 0);
+    let nlb = op(hbe, 1);
+    let ok3, c0, in3 = sh_zext_or_self_sub_const(nlb);
+    if !ok3 || !sh_zext_or_self_is(in3, nbits) || !sh_bit_width_splat(c0, hbe) { return -1; }
+    if iop(hbe) == iop(a) { return ic_replace_inst_uses_with(a, maybe_trunc); }
+    if had_trunc && !(one_use(op(a, 0)) || one_use(op(a, 1))) { return -1; }
+    let na = ic_new_binop(iop(a), x, nlb);
+    copy_ir_flags(na, hbe);
+    if !had_trunc { return na; }
+    icb_insert(na, "");
+    return ic_new_trunc_or_bitcast(na, vals[a].ty);
 }
 
 fn visit_ashr(i: i32) -> i32 {
@@ -1123,7 +1166,8 @@ fn visit_ashr(i: i32) -> i32 {
     // (x << (bw-1)) a>> (bw-1) --> -(x & 1)
     if m_specific_int_allow_poison(op1, (bw - 1) as u64) && one_use(op0) && bo(op0, OP_SHL) && m_specific_int_allow_poison(op(op0, 1), (bw - 1) as u64) {
         var mask = c_int_ty(ty, 1);
-        if ty_is_vector(ty) { ic_not_ported("Constant::mergeUndefsWith"); }
+        // Retain the knowledge about the ignored lanes.
+        mask = ao_merge_undefs_with(ao_merge_undefs_with(mask, op1), op(op0, 1));
         let x = icb_and(op(op0, 0), mask, "");
         return ic_new_neg(x);
     }

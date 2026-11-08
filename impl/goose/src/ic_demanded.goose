@@ -23,6 +23,7 @@ import datalayout;
 import ic;
 import ic_builder;
 import ic_common;
+import ic_andorxor;
 
 var sd_cxt: i32 = -1;
 
@@ -108,17 +109,14 @@ fn sd_disable_wrap(i: i32, nlz: i64) -> i32 {
     return i;
 }
 
-// is the single user an `or` that convertOrOfShiftsToFunnelShift could turn into a rotate?
+// "Do not simplify if shl/lshr is part of funnel-shift pattern": the single user is an `or` that
+// convertOrOfShiftsToFunnelShift turns into a rotate (both funnel-shift arguments equal)
 fn sd_check_funnel_user(i: i32) -> bool {
     if !has_one_use(i) { return false; }
     let u = uses[vals[i].first_use].user;
     if !is_inst_op(u, OP_OR) { return false; }
-    let a = op(u, 0);
-    let b = op(u, 1);
-    let sa = is_inst(a) && (iop(a) == OP_SHL || iop(a) == OP_LSHR);
-    let sb = is_inst(b) && (iop(b) == OP_SHL || iop(b) == OP_LSHR);
-    if sa && sb && iop(a) != iop(b) { ic_not_ported("convertOrOfShiftsToFunnelShift in SimplifyDemandedBits"); }
-    return false;
+    let ok, iid, a0, a1, a2 = convert_or_of_shifts_to_funnel_shift(u);
+    return ok && (iid == IID_fshl || iid == IID_fshr) && a0 == a1;
 }
 
 // SimplifyDemandedUseBits(I, DemandedMask, Known, Q, Depth)
@@ -380,7 +378,11 @@ recursive fn sd_use_bits(i: i32, demanded: AP, depth: i64) -> i32, KB {
                 known = kk;
                 if r >= 0 { return r, known; }
             }
-            if sd_check_funnel_user(i) { }
+            if sd_check_funnel_user(i) {
+                known = sd_kb(i, depth);
+                if ap_is_subset_of(demanded, ap_or(known.z, known.o)) { return c_int_value(vty, known.o), known; }
+                return -1, known;
+            }
             let sha = ap_limited(sa, (w - 1) as u64) as i64;
             if ap_countr_zero(demanded) >= sha {
                 if op_nsw(i) {
@@ -418,7 +420,11 @@ recursive fn sd_use_bits(i: i32, demanded: AP, depth: i64) -> i32, KB {
     } else if o == OP_LSHR {
         if has_apint(op(i, 1)) {
             let sha = ap_limited(ap_c(op(i, 1)), (w - 1) as u64) as i64;
-            if sd_check_funnel_user(i) { }
+            if sd_check_funnel_user(i) {
+                known = sd_kb(i, depth);
+                if ap_is_subset_of(demanded, ap_or(known.z, known.o)) { return c_int_value(vty, known.o), known; }
+                return -1, known;
+            }
             if ap_countl_zero(demanded) >= sha {
                 let nhd = w - ap_countr_zero(demanded);
                 let sb = sd_signbits(op(i, 0), depth + 1);
