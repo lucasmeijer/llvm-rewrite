@@ -806,10 +806,16 @@ ic_fold_binop_with_recurrence :: (bo: Value_Id) -> Value_Id {
     nb := create_binop(opc, np, c);
     if opc == .FADD || opc == .FMUL set_fmf(nb, get_fmf(b0) & get_fmf(b1) & get_fmf(bo));
     else {
-        // OverflowTracking with AllKnownNonNegative = AllKnownNonZero = false: nuw/nsw survive if all three have them
+        // OverflowTracking (AllKnownNonNegative = AllKnownNonZero = false): mergeFlags of the three, applyFlags:
+        // add keeps nuw if all have it and nsw only together with nuw; mul gets no flags; or keeps disjoint
         nuw := has_nuw(b0) && has_nuw(b1) && has_nuw(bo);
         nsw := has_nsw(b0) && has_nsw(b1) && has_nsw(bo);
-        if is_overflowing_binop(nb) { set_nuw(nb, nuw); set_nsw(nb, nsw); }
+        drop_poison_generating_flags(nb);
+        if opc == .ADD { if nuw set_nuw(nb, true); if nsw && nuw set_nsw(nb, true); }
+        if opc == .OR {
+            disj := (inst(b0).flags & F_EXACT) != 0 && (inst(b1).flags & F_EXACT) != 0 && (inst(bo).flags & F_EXACT) != 0;
+            if disj inst(nb).flags |= F_EXACT;   // disjoint
+        }
     }
     ic_take_name(nb, bo);
     for k: 0..phi_num_incoming(pn0)-1 {
