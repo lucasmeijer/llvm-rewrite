@@ -3,6 +3,7 @@
 // UpgradeCallsToIntrinsic) and of LLParser::validateEndOfModule's intrinsic auto-declaration.
 // Unported upgrade families (most llvm.x86.*, arm/aarch64/nvvm/amdgcn) fail loudly.
 import std;
+import os;
 import ir;
 import calls;
 import intrinsics;
@@ -634,8 +635,46 @@ fn upgrade_debug_info() {
             if v >= 0 && mds[v].kind == MK_VALUE && vals[mds[v].extra].kind == VK_CINT { version = cint_lo(mds[v].extra) as! i64; }
         }
     }
-    if version == 3 { return; }
+    if version == 3 {
+        if !debug_info_broken() { return; }
+        write_stderr("warning: ignoring invalid debug info\n");
+    }
     strip_debug_info();
+}
+
+fn has_dbg_att(at: i32, n: i32) -> bool { for k in n { if md_att[at + 2 * k] == 0 { return true; } } return false; }
+
+// The Verifier's debug-info checks that make UpgradeDebugInfo strip debug info (subset: inlinable calls
+// without !dbg in a function with a subprogram).
+fn debug_info_broken() -> bool {
+    var f = modules[cur_module].first_func;
+    while f >= 0 {
+        let g = glob_of(f);
+        if has_dbg_att(globs[g].md, globs[g].nmd) {
+            var b = globs[g].first_block;
+            while b >= 0 {
+                var iv = blocks[block_of(b)].first;
+                while iv >= 0 {
+                    let ii = inst_of(iv);
+                    if is_call_base_op(iop(iv)) {
+                        let c = cb_callee(iv);
+                        if vals[c].kind == VK_FUNC && globs[glob_of(c)].vty == insts[ii].ty2 {
+                            let cg = glob_of(c);
+                            let lk = globs[cg].linkage as i64;
+                            let interposable = lk == LK_WEAK_ANY || lk == LK_LINKONCE_ANY || lk == LK_COMMON || lk == LK_EXTERN_WEAK;
+                            if !interposable && globs[cg].is_decl == 0 && has_dbg_att(globs[cg].md, globs[cg].nmd) && !has_dbg_att(insts[ii].md, insts[ii].nmd) {
+                                return true;
+                            }
+                        }
+                    }
+                    iv = insts[ii].next;
+                }
+                b = blocks[block_of(b)].next;
+            }
+        }
+        f = globs[g].next;
+    }
+    return false;
 }
 
 fn att_remove_kind(at: i32, n: i32, kind: i32) -> i32 {
