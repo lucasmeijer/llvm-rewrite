@@ -4722,26 +4722,6 @@ ic_fold_fcmp_fsub_into_fcmp :: (i: Value_Id, lhsi: Value_Id, rhsc: Value_Id) -> 
     return NONE;
 }
 
-// canBeCastedExactlyIntToFP (InstCombineCasts.cpp)
-ic_can_be_casted_exactly_int_to_fp :: (v: Value_Id, fp_ty: Type_Id, is_signed: bool, cxt: Value_Id) -> bool {
-    src_size := cast(s64) scalar_bits(v) - (ifx is_signed then 1 else 0);
-    dest_sig := ic_fp_mantissa_width(fp_ty);
-    if src_size <= dest_sig return true;
-    if is_inst(v) && (inst_op(v) == .FPTOSI || inst_op(v) == .FPTOUI) {
-        src_sig := ic_fp_mantissa_width(vtype(op(v, 0)));
-        if !is_signed && inst_op(v) == .FPTOSI src_sig += 1;
-        if src_sig > 0 && dest_sig > 0 && src_sig <= dest_sig return true;
-    }
-    k := ic_known_bits(v, cxt);
-    sig := cast(s64) scalar_bits(v) - cast(s64) kb_count_min_leading_zeros(k) - cast(s64) kb_count_min_trailing_zeros(k);
-    if sig <= dest_sig return true;
-    if is_signed {
-        sig = cast(s64) scalar_bits(v) - cast(s64) ic_num_sign_bits(v, cxt);
-        if sig <= dest_sig return true;
-    }
-    return false;
-}
-
 // foldFCmpFAbsFSubIntToFP
 ic_fold_fcmp_fabs_fsub_int_to_fp :: (i: Value_Id) -> Value_Id {
     okf, arg := pm_fabs(op(i, 0));

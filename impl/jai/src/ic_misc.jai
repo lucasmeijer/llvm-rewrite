@@ -54,64 +54,19 @@ ic_visit :: (i: Value_Id) -> Value_Id {
         case .ZEXT; return ic_visit_zext(i);
         case .SEXT; return ic_visit_sext(i);
         case .TRUNC; return ic_visit_trunc(i);
+        case .FPTRUNC; return ic_visit_fptrunc(i);
+        case .FPEXT; return ic_visit_fpext(i);
+        case .FPTOUI; return ic_visit_fptoui(i);
+        case .FPTOSI; return ic_visit_fptosi(i);
+        case .INTTOPTR; return ic_visit_int_to_ptr(i);
+        case .PTRTOINT; return ic_visit_ptr_to_int(i);
+        case .PTRTOADDR; return ic_visit_ptr_to_addr(i);
+        case .BITCAST; return ic_visit_bitcast(i);
+        case .ADDRSPACECAST; return ic_visit_addr_space_cast(i);
     }
-    if is_cast_op(o) return ic_visit_cast(i);
+    if is_cast_op(o) return ic_common_cast_transforms(i);
     return NONE;   // visitInstruction
 }
-
-// visitUIToFP / visitSIToFP (complete, given commonCastTransforms)
-ic_visit_uitofp :: (i: Value_Id) -> Value_Id {
-    r := ic_visit_cast(i); if r != NONE return r;
-    if (inst(i).flags & F_EXACT) == 0 && is_known_non_negative(op(i, 0), ic.sq) { set_flag(i, F_EXACT, true); return i; }
-    return NONE;
-}
-ic_visit_sitofp :: (i: Value_Id) -> Value_Id {
-    r := ic_visit_cast(i); if r != NONE return r;
-    if is_known_non_negative(op(i, 0), ic.sq) return create_cast_flags(.UITOFP, op(i, 0), vtype(i), F_EXACT);
-    return NONE;
-}
-// visitZExt: the trunc-user bailout, commonCastTransforms, zext nneg i1, the nneg inference at the end.
-// Not ported: everything in between (canEvaluateZExtd, transformZExtICmp, ...).
-ic_visit_zext :: (i: Value_Id) -> Value_Id {
-    if has_one_use(i) && inst_op(first_user(i)) == .TRUNC && !is_const(op(i, 0)) return NONE;
-    r := ic_visit_cast(i); if r != NONE return r;
-    src := op(i, 0);
-    st := vtype(src); dt := vtype(i);
-    if is_int_or_int_vector_n(st, 1) && (inst(i).flags & F_EXACT) != 0 return ic_replace_inst_uses_with(i, const_null_value(dt));
-    if (inst(i).flags & F_EXACT) == 0 {
-        if has_one_use(i) && cast(u64) scalar_bits(src) > log2_ceil_u64(cast(u64) type_bits(scalar_type(dt))) {
-            us := first_user(i);
-            if is_inst(us) && is_shift_op(inst_op(us)) && op(us, 1) == i { set_flag(i, F_EXACT, true); return i; }
-        }
-        if is_known_non_negative(src, ic_q(i)) { set_flag(i, F_EXACT, true); return i; }
-    }
-    return NONE;
-}
-log2_ceil_u64 :: (x: u64) -> u64 { if x <= 1 return 0; n: u64 = 0; v := x - 1; while v { n += 1; v >>= 1; } return n; }
-// visitSExt: the trunc-user bailout, commonCastTransforms, sext of a non-negative value. Not ported: the rest.
-ic_visit_sext :: (i: Value_Id) -> Value_Id {
-    if has_one_use(i) && inst_op(first_user(i)) == .TRUNC return NONE;
-    r := ic_visit_cast(i); if r != NONE return r;
-    src := op(i, 0);
-    if is_known_non_negative(src, ic_q(i)) return create_cast_flags(.ZEXT, src, vtype(i), F_EXACT);
-    return NONE;
-}
-// visitTrunc: commonCastTransforms, SimplifyDemandedInstructionBits, the i1-of-nonzero fold and the nuw/nsw
-// inference. Not ported: canEvaluateTruncated, narrowing, and the folds between.
-ic_visit_trunc :: (i: Value_Id) -> Value_Id {
-    r := ic_visit_cast(i); if r != NONE return r;
-    src := op(i, 0);
-    dw := scalar_bits(i); sw := scalar_bits(src);
-    if ic_simplify_demanded_instruction_bits(i) return i;
-    if dw == 1 && (has_nuw(i) || has_nsw(i)) && is_known_non_zero(src, ic_q(i)) return ic_replace_inst_uses_with(i, get_true(vtype(i)));
-    changed := false;
-    if !has_nsw(i) && max_significant_bits(src, ic_q_no_dc(i)) <= dw { set_nsw(i); changed = true; }
-    if !has_nuw(i) && ic_masked_value_is_zero(src, ap_bits_set_from(sw, dw), i) { set_nuw(i); changed = true; }
-    if changed return i;
-    return NONE;
-}
-// llvm::ComputeMaxSignificantBits(Op, DL, &AC, CxtI, &DT): no DomConditionCache, safeCxtI
-ic_q_no_dc :: (i: Value_Id) -> Simplify_Query { q: Simplify_Query; q.dt = ic.dt; q.ac = ic.ac; q.cxt = i; return q; }
 
 // The InstSimplify step every visitor starts with (when nothing else is ported for it).
 ic_visit_simplify_only :: (i: Value_Id) -> Value_Id {
@@ -229,57 +184,6 @@ ic_visit_freeze :: (i: Value_Id) -> Value_Id {
 ic_visit_extract_value :: (i: Value_Id) -> Value_Id {
     if inst(i).nidx == 0 return ic_replace_inst_uses_with(i, op(i, 0));
     return ic_visit_simplify_only(i);
-}
-
-// commonCastTransforms: InstSimplify, cast-of-cast elimination, FoldOpIntoSelect, foldOpIntoPhi.
-// Not ported: the shuffle canonicalization and every visitTrunc/ZExt/... specific fold.
-ic_visit_cast :: (i: Value_Id) -> Value_Id {
-    src := op(i, 0);
-    ty := vtype(i);
-    opc := inst_op(i);
-    v := simplify_cast_inst(opc, src, ty, ic_q(i));
-    if v != NONE return ic_replace_inst_uses_with(i, v);
-    if is_inst(src) && is_cast_op(inst_op(src)) {
-        nopc := ic_is_eliminable_cast_pair(src, i);
-        if nopc != .NONE_OP {
-            if has_one_use(src) {
-                users: [..] u32; users.allocator = temp;
-                find_dbg_users(ic.f, src, *users);
-                if users.count fatal("instcombine: replaceAllDbgUsesWith of an eliminated cast is not supported yet");
-            }
-            return create_cast(nopc, op(src, 0), ty);
-        }
-    }
-    if is_inst(src) && inst_op(src) == .SELECT {
-        cmp := op(src, 0);
-        if !is_cmp_inst(cmp) || vtype(op(cmp, 0)) != vtype(src) || (opc == .TRUNC && ic_should_change_type(vtype(src), ty)) {
-            okb, x := pm_elementwise_bitcast(i);
-            if opc != .BITCAST || okb {
-                nv := ic_fold_op_into_select(i, src);
-                if nv != NONE {
-                    users: [..] u32; users.allocator = temp;
-                    find_dbg_users(ic.f, src, *users);
-                    if users.count fatal("instcombine: replaceAllDbgUsesWith of a select folded into a cast is not supported yet");
-                    return nv;
-                }
-            }
-        }
-    }
-    if is_phi(src) {
-        if !is_int_type(vtype(src)) || !is_int_type(ty) || ic_should_change_type(vtype(src), ty) {
-            nv := ic_fold_op_into_phi(i, src);
-            if nv != NONE return nv;
-        }
-    }
-    return NONE;
-}
-// InstCombinerImpl::isEliminableCastPair
-ic_is_eliminable_cast_pair :: (ci1: Value_Id, ci2: Value_Id) -> Opcode {
-    src := vtype(op(ci1, 0)); mid := vtype(ci1); dst := vtype(ci2);
-    res := is_eliminable_cast_pair_dl(inst_op(ci1), inst_op(ci2), src, mid, dst);
-    if res == .INTTOPTR && (!is_ptr_or_ptr_vector(dst) || src != irb_int_ptr_type(dst)) res = .NONE_OP;
-    if res == .PTRTOINT && (!is_ptr_or_ptr_vector(src) || dst != irb_int_ptr_type(src)) res = .NONE_OP;
-    return res;
 }
 
 // visitCallInst: InstSimplify (calls with uses), the nounwind inference. Not ported: everything after.

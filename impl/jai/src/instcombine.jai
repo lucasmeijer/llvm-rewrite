@@ -14,3 +14,4 @@
 #load "ic_andorxor.jai";
 #load "ic_select.jai";
 #load "ic_phi.jai";
+#load "ic_casts.jai";
