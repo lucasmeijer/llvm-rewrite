@@ -1945,8 +1945,120 @@ fn merge_conditional_store_to_address(ptb: i32, pfb: i32, qtb: i32, qfb: i32, po
         if nb < 0 { return false; }
         post = nb;
     }
-    scf_not_ported("mergeConditionalStoreToAddress (SplitBlockAndInsertIfThen)");
-    return false;
+    let pbr = block_terminator(single_pred(pfb));
+    let qbr = block_terminator(single_pred(qfb));
+    let pcond = br_cond(pbr);
+    let qcond = br_cond(qbr);
+    let pphi = ensure_value_available_in_successor(op(ps, 0), inst_parent(ps), -1);
+    let qphi = ensure_value_available_in_successor(op(qs, 0), inst_parent(qs), pphi);
+    let first = scf_first_insertion_pt(post);
+    sb_bb = post; sb_pos = first; sb_nofold = false; sb_annot = -1;
+    sb_dl = inst_get_md(first, MDK_DBG_SC);
+    let inv_p = inv_p0 != (inst_parent(ps) != ptb);
+    let inv_q = inv_q0 != (inst_parent(qs) != qtb);
+    let ppred = if inv_p { sb_not(pcond, "") } else { pcond };
+    let qpred = if inv_q { sb_not(qcond, "") } else { qcond };
+    let comb = sb_binop(OP_OR, ppred, qpred, "");
+    let ins_pt = sb_pos;
+    let t = split_block_and_insert_if_then(comb, ins_pt, false, -1);
+    if pd_has_branch_weights(pbr) && pd_has_branch_weights(qbr) {
+        var pw: u64[>..<] = [];
+        var qw: u64[>..<] = [];
+        pd_extract(pbr, pw);
+        pd_extract(qbr, qw);
+        if inv_p { let x = pw[0]; pw[0] = pw[1]; pw[1] = x; }
+        if inv_q { let x = qw[0]; qw[0] = qw[1]; qw[1] = x; }
+        let fw = pw[1] * qw[1];
+        let tw = pw[0] * (qw[0] + qw[1]) + pw[1] * qw[0];
+        let w: u64[2] = [tw, fw];
+        pd_set_fitted(block_terminator(post), w, false, true);
+    }
+    sb_set_before(t);
+    let si = create_inst(OP_STORE, T_VOID, [qphi, addr]);
+    insts[inst_of(si)].align = (log2_exact_i(dl_align(vals[qphi].ty, true)) + 1) as u8;
+    sb_insert(si, "");
+    combine_metadata_for_cse(qs, ps, true);
+    // copyMetadata(*QStore): all attachments and the debug location, if QStore has any
+    if insts[inst_of(qs)].nmd > 0 {
+        let qx2 = insts[inst_of(qs)];
+        for k in qx2.nmd { inst_set_md(si, md_att[qx2.md + 2 * k], md_att[qx2.md + 2 * k + 1]); }
+        if inst_get_md(qs, MDK_DBG_SC) < 0 { inst_erase_md(si, MDK_DBG_SC); }
+    }
+    insts[inst_of(si)].align = min(insts[inst_of(ps)].align, insts[inst_of(qs)].align);
+    if insts[inst_of(qs)].ord != 0 { insts[inst_of(si)].ord = insts[inst_of(qs)].ord; insts[inst_of(si)].ss = insts[inst_of(qs)].ss; }
+    scf_erase(qs);
+    scf_erase(ps);
+    return true;
+}
+
+// ensureValueAvailableInSuccessor(V, BB, AlternativeV)
+fn ensure_value_available_in_successor(v: i32, bb: i32, alt: i32) -> i32 {
+    var phi: i32 = -1;
+    let succ = cu_single_succ(bb);
+    var p = block_first(succ);
+    while p >= 0 && iop(p) == OP_PHI {
+        if phi_value_for_block(p, bb) == v {
+            phi = p;
+            if alt < 0 { break; }
+            var ps2: i32[>..<] = [];
+            cu_preds(succ, ps2);
+            let other = if ps2[0] == bb { ps2[1] } else { ps2[0] };
+            if phi_value_for_block(p, other) == alt { break; }
+            phi = -1;
+        }
+        p = inst_next(p);
+    }
+    if phi >= 0 { return phi; }
+    if alt < 0 && (!is_inst(v) || inst_parent(v) != bb) { return v; }
+    let np = new_inst(OP_PHI, vals[v].ty, 2);
+    vals[np].nops = 0;
+    let f = block_first(succ);
+    inst_insert_before(np, f);
+    set_name(np, "simplifycfg.merge");
+    phi_add_incoming(np, v, bb);
+    var ps3: i32[>..<] = [];
+    cu_preds(succ, ps3);
+    for pb in ps3 {
+        if pb != bb { phi_add_incoming(np, if alt >= 0 { alt } else { c_poison(vals[v].ty) }, pb); }
+    }
+    return np;
+}
+
+// SplitBlockAndInsertIfThen(Cond, SplitBefore, Unreachable, BranchWeights, DTU): returns the then-block's terminator
+fn split_block_and_insert_if_then(cond: i32, before: i32, unreachable: bool, weights: i32) -> i32 {
+    var ups: DTUpdate[>..<] = [];
+    var orig: i32[>..<] = [];
+    let head = inst_parent(before);
+    if cu_dtu { var ss: i32[>..<] = []; cu_succs(head, ss); for s in ss { cu_push_unique(orig, s); } }
+    // splitBasicBlock(SplitBefore): unnamed, the branch gets the split point's location without its atom
+    var loc = inst_get_md(before, MDK_DBG_SC);
+    if loc >= 0 && scf_atom_group(loc) != 0 { scf_not_ported("DILocation::getWithoutAtom"); }
+    let tail = split_block(head, before, "");
+    let hbr = block_terminator(head);
+    if loc >= 0 { inst_set_md(hbr, MDK_DBG_SC, loc); }
+    let fv = block_func(head);
+    let then = create_block_before(fv, tail, "");
+    var to_tail = false;
+    if unreachable { block_append_inst(then, create_inst(OP_UNREACHABLE, T_VOID, [])); }
+    else { block_append_inst(then, create_inst(OP_BR, T_VOID, [tail])); to_tail = true; }
+    let tdl = inst_get_md(before, MDK_DBG_SC);
+    if tdl >= 0 { inst_set_md(block_terminator(then), MDK_DBG_SC, tdl); }
+    let nt = create_inst(OP_CONDBR, T_VOID, [cond, then, tail]);
+    if weights >= 0 { inst_set_md(nt, MDK_PROF_SC, weights); }
+    // ReplaceInstWithInst: the old terminator's debug location if the new one has none
+    let odl = inst_get_md(hbr, MDK_DBG_SC);
+    inst_insert_before(nt, hbr);
+    if inst_get_md(nt, MDK_DBG_SC) < 0 && odl >= 0 { inst_set_md(nt, MDK_DBG_SC, odl); }
+    scf_erase(hbr);
+    if cu_dtu {
+        cu_upd(ups, DT_INSERT, head, then);
+        cu_upd(ups, DT_INSERT, head, tail);
+        if to_tail { cu_upd(ups, DT_INSERT, then, tail); }
+        for s in orig { cu_upd(ups, DT_INSERT, tail, s); }
+        for s in orig { cu_upd(ups, DT_DELETE, head, s); }
+        dtu_apply_updates(ups);
+    }
+    return block_terminator(then);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2845,9 +2957,94 @@ fn simplify_single_resume(ri: i32) -> bool {
     return true;
 }
 
+fn cleanupret_unwind_dest(ri: i32) -> i32 { if nops(ri) >= 2 { op(ri, 1) } else { -1 } }
+
+// removeEmptyCleanup
+fn remove_empty_cleanup(ri: i32) -> bool {
+    let bb = inst_parent(ri);
+    let cp = op(ri, 0);
+    if !is_inst(cp) || inst_parent(cp) != bb { return false; }
+    if !has_one_use(cp) { return false; }
+    if !is_cleanup_block_empty(inst_next(cp), ri) { return false; }
+    let ud = cleanupret_unwind_dest(ri);
+    if ud >= 0 {
+        var p = block_first(ud);
+        while p >= 0 && iop(p) == OP_PHI {
+            let dpn = p;
+            p = inst_next(p);
+            let idx = phi_block_index(dpn, bb);
+            let sv = phi_value(dpn, idx);
+            let need = is_inst(sv) && iop(sv) == OP_PHI && inst_parent(sv) == bb;
+            var preds: i32[>..<] = [];
+            cu_preds(bb, preds);
+            for pr in preds {
+                let inc = if need { phi_value_for_block(sv, pr) } else { sv };
+                phi_add_incoming(dpn, inc, pr);
+            }
+        }
+        let ins_pt = first_non_phi(ud);
+        var q = block_first(bb);
+        while q >= 0 && iop(q) == OP_PHI {
+            let pn = q;
+            q = inst_next(q);
+            if vals[pn].first_use < 0 || !scf_is_used_outside_of_block(pn, bb) { continue; }
+            var ups2: i32[>..<] = [];
+            cu_preds(ud, ups2);
+            for pr in ups2 { if pr != bb { phi_add_incoming(pn, pn, pr); } }
+            inst_move_before(pn, ins_pt);
+            phi_add_incoming(pn, c_poison(vals[pn].ty), bb);
+        }
+    }
+    var ups: DTUpdate[>..<] = [];
+    var preds2: i32[>..<] = [];
+    cu_preds(bb, preds2);
+    for pb in preds2 {
+        if ud < 0 {
+            if cu_dtu { dtu_apply_updates(ups); ups.clear(); }
+            cu_remove_unwind_edge(pb);
+        } else {
+            block_remove_predecessor(bb, pb, false);
+            let ti = block_terminator(pb);
+            for k in nops(ti) { if op(ti, k) == bb { set_op(ti, k, ud); } }
+            if cu_dtu { cu_upd(ups, DT_INSERT, pb, ud); cu_upd(ups, DT_DELETE, pb, bb); }
+        }
+    }
+    cu_apply(ups);
+    cu_delete_dead_block(bb);
+    return true;
+}
+
+// Instruction::isUsedOutsideOfBlock
+fn scf_is_used_outside_of_block(i: i32, bb: i32) -> bool {
+    var u = first_use(i);
+    while u >= 0 {
+        let us = uses[u].user;
+        if iop(us) == OP_PHI { if use_aux[u] != bb { return true; } }
+        else if inst_parent(us) != bb { return true; }
+        u = use_next(u);
+    }
+    return false;
+}
+
+// mergeCleanupPad
+fn merge_cleanup_pad(ri: i32) -> bool {
+    let ud = cleanupret_unwind_dest(ri);
+    if ud < 0 { return false; }
+    if single_pred(ud) != inst_parent(ri) { return false; }
+    let scp = block_first(ud);
+    if iop(scp) != OP_CLEANUPPAD { return false; }
+    let pcp = op(ri, 0);
+    rauw(scp, pcp);
+    scf_erase(scp);
+    block_append_inst(inst_parent(ri), create_inst(OP_BR, T_VOID, [ud]));
+    scf_erase(ri);
+    return true;
+}
+
 fn simplify_cleanup_return(ri: i32) -> bool {
     if is_undef_or_poison(op(ri, 0)) { return false; }
-    scf_not_ported("cleanupret simplification (mergeCleanupPad / removeEmptyCleanup)");
+    if merge_cleanup_pad(ri) { return true; }
+    if remove_empty_cleanup(ri) { return true; }
     return false;
 }
 
@@ -2915,7 +3112,41 @@ fn simplify_unreachable(ui: i32) -> bool {
                 changed = true;
             }
         } else if o == OP_CATCHSWITCH {
-            scf_not_ported("simplifyUnreachable with a catchswitch predecessor");
+            let csi = ti;
+            let has_ud = (insts[inst_of(csi)].bits & 1) != 0;
+            if has_ud && op(csi, 1) == bb {
+                if cu_dtu { dtu_apply_updates(ups); ups.clear(); }
+                cu_remove_unwind_edge(pred);
+                changed = true;
+                continue;
+            }
+            let first = if has_ud { 2 } else { 1 };
+            var k = first;
+            while k < nops(csi) {
+                if op(csi, k) == bb { cu_catchswitch_remove_handler(csi, k); changed = true; continue; }
+                k++;
+            }
+            if cu_dtu { cu_upd(ups, DT_DELETE, pred, bb); }
+            if nops(csi) == first {
+                if has_ud {
+                    let cud = op(csi, 1);
+                    if cu_dtu {
+                        var pp: i32[>..<] = [];
+                        cu_preds(pred, pp);
+                        for x in pp { cu_upd(ups, DT_INSERT, x, cud); cu_upd(ups, DT_DELETE, x, pred); }
+                    }
+                    cu_block_rauw(pred, cud);
+                } else {
+                    if cu_dtu { dtu_apply_updates(ups); ups.clear(); }
+                    var ehp: i32[>..<] = [];
+                    cu_preds(pred, ehp);
+                    for x in ehp { cu_remove_unwind_edge(x); }
+                }
+                inst_insert_before(create_inst(OP_UNREACHABLE, T_VOID, []), csi);
+                if vals[csi].first_use >= 0 { scf_not_ported("erasing a catchswitch that still has uses"); }
+                scf_erase(csi);
+                changed = true;
+            }
         } else if o == OP_CLEANUPRET {
             if cu_dtu { cu_upd(ups, DT_DELETE, pred, bb); }
             inst_insert_before(create_inst(OP_UNREACHABLE, T_VOID, []), ti);

@@ -1051,8 +1051,40 @@ fn cu_copy_bundles(c: i32, ii: i32) {
 fn cu_remove_unwind_edge(bb: i32) -> i32 {
     let ti = block_terminator(bb);
     if iop(ti) == OP_INVOKE { return cu_change_to_call(ti); }
-    cu_not_ported("removeUnwindEdge of cleanupret/catchswitch");
-    return -1;
+    var nt: i32 = -1;
+    var ud: i32 = -1;
+    if iop(ti) == OP_CLEANUPRET {
+        nt = create_inst(OP_CLEANUPRET, T_VOID, [op(ti, 0)]);
+        ud = if nops(ti) >= 2 { op(ti, 1) } else { -1 };
+    } else if iop(ti) == OP_CATCHSWITCH {
+        let has_ud = (insts[inst_of(ti)].bits & 1) != 0;
+        let first = if has_ud { 2 } else { 1 };
+        ud = if has_ud { op(ti, 1) } else { -1 };
+        var opsv: i32[>..<] = [];
+        opsv.push(op(ti, 0));
+        for k in first..nops(ti) { opsv.push(op(ti, k)); }
+        nt = create_inst(OP_CATCHSWITCH, vals[ti].ty, opsv);
+    } else {
+        fatal("internal: removeUnwindEdge: could not find unwind successor");
+    }
+    inst_insert_before(nt, ti);
+    cu_take_name(nt, ti);
+    let dl = inst_get_md(ti, MDK_DBG);
+    if dl >= 0 { inst_set_md(nt, MDK_DBG, dl); }
+    block_remove_predecessor(ud, bb, false);
+    if vals[ti].first_use >= 0 { rauw(ti, nt); }
+    inst_erase_from_parent(ti);
+    cu_apply1(DT_DELETE, bb, ud);
+    return nt;
+}
+
+// CatchSwitchInst::removeHandler(HI): later handlers move up one slot
+fn cu_catchswitch_remove_handler(cs: i32, opidx: i64) {
+    let n = nops(cs);
+    var k = opidx;
+    while k < n - 1 { set_op(cs, k, op(cs, k + 1)); k++; }
+    set_op(cs, n - 1, -1);
+    vals[cs].nops = (n - 1) as i32;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1180,7 +1212,36 @@ fn cu_mark_alive_blocks(fv: i32, reach: bool[>..<]&) -> bool {
                 }
             }
         } else if iop(t) == OP_CATCHSWITCH {
-            cu_not_ported("markAliveBlocks on catchswitch");
+            // Remove catchpads which cannot be reached (identical catchpads).
+            let cs = t;
+            let first = if (insts[inst_of(cs)].bits & 1) != 0 { 2 } else { 1 };
+            var seen: i32[>..<] = [];
+            var succ_b: i32[>..<] = [];
+            var succ_n: i64[>..<] = [];
+            var k = first;
+            while k < nops(cs) {
+                let hb = op(cs, k);
+                if cu_dtu {
+                    let j = position(succ_b, hb);
+                    if j < 0 { succ_b.push(hb); succ_n.push(1); } else { succ_n[j] += 1; }
+                }
+                let cp = first_non_phi(hb);
+                var dup = false;
+                for x in seen { if cu_identical(x, cp) { dup = true; } }
+                if dup {
+                    if cu_dtu { let j = position(succ_b, hb); succ_n[j] -= 1; }
+                    cu_catchswitch_remove_handler(cs, k);
+                    changed = true;
+                    continue;
+                }
+                seen.push(cp);
+                k++;
+            }
+            if cu_dtu {
+                var ups: DTUpdate[>..<] = [];
+                for j in succ_b.len { if succ_n[j] == 0 { cu_upd(ups, DT_DELETE, bb, succ_b[j]); } }
+                dtu_apply_updates(ups);
+            }
         }
         if cu_constant_fold_terminator(bb, true) { changed = true; }
         var succs: i32[>..<] = [];

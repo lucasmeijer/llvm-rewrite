@@ -588,7 +588,14 @@ fn is_valid_assume_for_context(inv: i32, cx: i32) -> bool { valid_assume_for_con
 fn guaranteed_to_transfer(i: i32) -> bool {
     let o = iop(i);
     if o == OP_RET || o == OP_UNREACHABLE { return false; }
-    if o == OP_CATCHPAD { vt_not_ported("isGuaranteedToTransferExecutionToSuccessor of catchpad (EH personality)"); }
+    if o == OP_CATCHPAD {
+        // classifyEHPersonality: only CoreCLR's catchpads are a plain type test
+        let fv = inst_func(i);
+        if globs[glob_of(fv)].has_personality == 0 { return false; }
+        var p = op(fv, 0);
+        while vals[p].kind == VK_CEXPR && (csts[vals[p].sub].op as i64 == OP_BITCAST || csts[vals[p].sub].op as i64 == OP_ADDRSPACECAST) { p = op(p, 0); }
+        return is_func(p) && vals[p].name >= 0 && sbytes(vals[p].name) == "ProcessCLRException";
+    }
     return !inst_may_throw(i) && inst_will_return(i);
 }
 
