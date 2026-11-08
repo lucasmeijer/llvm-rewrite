@@ -3649,6 +3649,7 @@ tests/imported/llvm/Transforms/InstCombine/2008-04-28-VolatileStore.ll::roundtri
 tests/imported/llvm/Transforms/InstCombine/2008-05-09-SinkOfInvoke.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2008-05-22-IDivVector.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2008-05-22-IDivVector.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/2008-05-23-CompareFold.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2008-05-23-CompareFold.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2008-05-31-AddBool.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2008-05-31-AddBool.ll::roundtrip
@@ -3684,6 +3685,7 @@ tests/imported/llvm/Transforms/InstCombine/2008-10-23-ConstFoldWithoutMask.ll::o
 tests/imported/llvm/Transforms/InstCombine/2008-10-23-ConstFoldWithoutMask.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2008-11-01-SRemDemandedBits.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2008-11-01-SRemDemandedBits.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/2008-11-08-FCmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2008-11-08-FCmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2008-11-27-IDivVector.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2008-11-27-IDivVector.ll::roundtrip
@@ -3704,6 +3706,7 @@ tests/imported/llvm/Transforms/InstCombine/2009-03-24-InfLoop.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2009-03-24-InfLoop.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2009-04-07-MulPromoteToI96.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2009-04-07-MulPromoteToI96.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/2009-05-23-FCmpToICmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2009-05-23-FCmpToICmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2009-06-11-StoreAddrSpace.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2009-06-11-StoreAddrSpace.ll::roundtrip
@@ -4047,6 +4050,7 @@ tests/imported/llvm/Transforms/InstCombine/canonicalize-constant-low-bit-mask-an
 tests/imported/llvm/Transforms/InstCombine/canonicalize-constant-low-bit-mask-and-icmp-ule-to-icmp-ule.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/canonicalize-constant-low-bit-mask-and-icmp-ult-to-icmp-ugt.ll::opt
 tests/imported/llvm/Transforms/InstCombine/canonicalize-constant-low-bit-mask-and-icmp-ult-to-icmp-ugt.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/canonicalize-fcmp-inf.ll::opt
 tests/imported/llvm/Transforms/InstCombine/canonicalize-fcmp-inf.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/canonicalize-gep-constglob.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/canonicalize-gep-mul.ll::roundtrip
@@ -4080,6 +4084,7 @@ tests/imported/llvm/Transforms/InstCombine/cast-byval.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cast-call-combine-prof.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cast-call-combine-prof.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cast-call-combine.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/cast-int-fcmp-eq-0.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cast-int-fcmp-eq-0.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cast-int-icmp-eq-0.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cast-mul-select.ll::roundtrip
@@ -4226,11 +4231,13 @@ tests/imported/llvm/Transforms/InstCombine/fadd.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fast-basictest.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fast-basictest.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fast-math.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fcmp-denormals-are-zero.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fcmp-denormals-are-zero.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-fadd-select.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-range-check-idiom.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-select-sign.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-select.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fcmp-special.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fcmp-special.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fdim.ll::roundtrip
@@ -4301,6 +4308,7 @@ tests/imported/llvm/Transforms/InstCombine/fold-vector-zero-inseltpoison.ll::rou
 tests/imported/llvm/Transforms/InstCombine/fold-vector-zero.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/force-opaque-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fortify-folding.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fp-floor-ceil.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fp-floor-ceil.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fp-ret-bitcast.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fpcast.ll::roundtrip
@@ -4467,6 +4475,7 @@ tests/imported/llvm/Transforms/InstCombine/icmp-umax-notx.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-umax-notx.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-usub-sat.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-usub-sat.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/icmp-vec-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-vec-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-vec.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-vscale.ll::opt
@@ -5897,6 +5906,7 @@ tests/imported/llvm/Transforms/InstSimplify/log10-pow10-intrinsic.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/log10-pow10-intrinsic.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/log2-pow2-intrinsic.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/log2-pow2-intrinsic.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/logic-of-fcmps.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/logic-of-fcmps.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/maxmin.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/maxmin.ll::roundtrip
