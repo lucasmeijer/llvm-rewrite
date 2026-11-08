@@ -174,7 +174,7 @@ Pass_Kind :: enum u8 {
     // alias analysis (aa.jai)
     AA_EVAL; REQUIRE_GLOBALS_AA; PRINT_MEMORYSSA; PRINT_MEMORYSSA_NO_OPT; PRINT_MEMORYSSA_WALKER;
     // loops (loop_info.jai, cycle_info.jai)
-    PRINT_LOOPS; PRINT_CYCLES;
+    PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
 }
 
 Pass_Info :: struct {
@@ -225,6 +225,8 @@ PASS_TABLE :: Pass_Info.[
     .{"require<memoryssa>", .FUNCTION, .REQUIRE, true, .MEMORYSSA},
     .{"invalidate<memoryssa>", .FUNCTION, .INVALIDATE, true, .MEMORYSSA},
     .{"print<loops>", .FUNCTION, .PRINT_LOOPS, true, .LOOPS},
+    .{"loop-simplify", .FUNCTION, .LOOP_SIMPLIFY, false, .DOMTREE},
+    .{"lcssa", .FUNCTION, .LCSSA, false, .DOMTREE},
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
@@ -434,6 +436,8 @@ opts: struct {
     adce_remove_loops := false;          // ADCE.cpp -adce-remove-loops
     opt_bisect_limit: s64 = -1;          // OptBisect.cpp -opt-bisect-limit
     verify_dom_info := false;            // -verify-dom-info (only checks; output unaffected)
+    verify_loop_info := false;           // -verify-loop-info (LoopInfo::verify: assertions only in a release build)
+    verify_loop_lcssa := false;          // -verify-loop-lcssa (assertions only)
     sroa_skip_mem2reg := false;          // SROA.cpp -sroa-skip-mem2reg
     use_constant_int_for_fixed_length_splat := false;   // Constants.cpp
     use_constant_int_for_scalable_splat := false;       // Constants.cpp
@@ -444,8 +448,10 @@ cl_data_layout: string;                  // opt -data-layout (overrides the modu
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(9 + AA_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
-    add_aa_cl_opts(list, 9);
+    list := NewArray(11 + AA_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    add_aa_cl_opts(list, 11);
+    list[9] = .{"verify-loop-info", .BOOL, *opts.verify_loop_info, null, null};
+    list[10] = .{"verify-loop-lcssa", .BOOL, *opts.verify_loop_lcssa, null, null};
     list[0] = .{"adce-remove-control-flow", .BOOL, *opts.adce_remove_control_flow, null, null};
     list[1] = .{"adce-remove-loops", .BOOL, *opts.adce_remove_loops, null, null};
     list[2] = .{"opt-bisect-limit", .INT, null, *opts.opt_bisect_limit, null};
@@ -595,6 +601,8 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
             ci_print(get_cycle_info(f), *sb);
             write_string(builder_to_string(*sb,, allocator = temp), to_standard_error = true);
             return PRESERVE_ALL;
+        case .LOOP_SIMPLIFY; return loop_simplify_run(f);
+        case .LCSSA; return lcssa_run(f);
         case .PRINT_MEMORYSSA; mssa_printer_run(f, true); return PRESERVE_ALL;
         case .PRINT_MEMORYSSA_NO_OPT; mssa_printer_run(f, false); return PRESERVE_ALL;
         case .PRINT_MEMORYSSA_WALKER; mssa_walker_printer_run(f); return PRESERVE_ALL;

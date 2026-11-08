@@ -57,6 +57,8 @@
 #load "cycle_info.jai";
 #load "bb_utils.jai";
 #load "mssa_updater.jai";
+#load "pass_loop_simplify.jai";
+#load "pass_lcssa.jai";
 
 main :: () { opt_main(); }
 
