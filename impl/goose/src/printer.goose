@@ -422,7 +422,7 @@ recursive fn put_type(t: i32) {
     }
     if k == TK_ARRAY {
         putc('[');
-        format(out, types[t].cnt);
+        put_uint(types[t].cnt as! u64);
         put(" x ");
         put_type(types[t].a);
         putc(']');

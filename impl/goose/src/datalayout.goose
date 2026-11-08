@@ -157,7 +157,12 @@ fn dl_is_nonintegral_as(as_: i64) -> bool {
     let ps = dl_ptr(as_);
     return ps.bits != ps.idx || dl_has_unstable_repr(as_) || dl_has_external_state(as_);
 }
-fn dl_has_unstable_repr(as_: i64) -> bool { for a in dl_unstable { if a == as_ { return true; } } return false; }
+fn dl_has_unstable_repr(as_: i64) -> bool {
+    // "ni" address spaces get HasUnstableRepresentation (DataLayout::parseLayoutString)
+    for a in dl_nonintegral { if a == as_ { return true; } }
+    for a in dl_unstable { if a == as_ { return true; } }
+    return false;
+}
 fn dl_has_external_state(as_: i64) -> bool { for a in dl_extstate { if a == as_ { return true; } } return false; }
 
 fn dl_ptr(as_: i64) -> PtrSpec {

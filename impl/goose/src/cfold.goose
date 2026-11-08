@@ -327,7 +327,7 @@ recursive fn cf_fold_load_from_uniform(c: i32, ty: i32) -> i32 {
     if dl_size_bits(vals[c].ty) != dl_store_size(vals[c].ty) * 8 { return -1; }
     if is_null_value(c) && !ty_is_x86_amx(ty) { return c_null(ty); }
     if is_all_ones_value(c) {
-        if ty_is_int(ty_scalar(ty)) || ty_is_fp(ty_scalar(ty)) { return c_all_ones(ty); }
+        if ty_is_int(ty_scalar(ty)) || ty_is_fp(ty_scalar(ty)) || ty_kind(ty_scalar(ty)) == TK_BYTE { return c_all_ones(ty); }
     }
     return -1;
 }

@@ -560,7 +560,7 @@ fn c_fp(ty: i32, lo: u64, hi: u64) -> i32 {
 fn c_simple(kind: i64, ty: i32) -> i32 { cst_get(kind, ty, cst_none(), []) }
 fn c_null(ty: i32) -> i32 {
     let k = types[ty].kind;
-    if k == TK_INT { return c_int(ty, 0); }
+    if k == TK_INT || k == TK_BYTE { return c_int(ty, 0); }
     if k == TK_PTR { return c_simple(VK_CNULL, ty); }
     if k >= TK_HALF && k <= TK_PPC_FP128 { return c_fp(ty, 0, 0); }
     if k == TK_TOKEN { return c_simple(VK_CTOKENNONE, ty); }

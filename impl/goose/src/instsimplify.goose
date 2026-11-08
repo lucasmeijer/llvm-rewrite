@@ -1422,18 +1422,18 @@ fn have_non_overlapping_storage(a: i32, b: i32) -> bool {
 // Value::getPointerDereferenceableBytes (CanBeNull out); returns bytes, can_be_null
 fn pointer_deref_bytes(v: i32) -> u64, bool {
     if is_arg(v) {
+        // Value::getPointerDereferenceableBytes for an Argument (Value.cpp)
         var b = arg_deref_bytes(v);
         var cbn = false;
         if b == 0 {
-            let at = aset_find(arg_attrs(v), AK_DereferenceableOrNull);
-            if at >= 0 { b = attrs[at].i1; cbn = true; }
+            let mt = ml_arg_mem_type(v);
+            if mt >= 0 && cf_ty_is_sized(mt) { b = dl_store_size(mt) as u64; }
         }
         if b == 0 {
-            if (arg_has_attr(v, AK_ByVal) || arg_has_attr(v, AK_InAlloca) || arg_has_attr(v, AK_Preallocated)) {
-                is_not_ported("dereferenceable bytes of byval arguments");
-            }
+            let at = aset_find(arg_attrs(v), AK_DereferenceableOrNull);
+            if at >= 0 { b = attrs[at].i1; }
+            cbn = true;
         }
-        if b != 0 && null_pointer_is_defined(args_parent[vals[v].sub], ptr_as(vals[v].ty)) { cbn = true; }
         return b, cbn;
     }
     if is_inst_op(v, OP_ALLOCA) {

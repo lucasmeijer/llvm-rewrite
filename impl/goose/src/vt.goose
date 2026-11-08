@@ -1235,7 +1235,17 @@ recursive fn ikne(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
 
 fn num_sign_bits_of(x: AP) -> i64 { ap_num_sign_bits(x) }
 
-recursive fn num_sign_bits(v: i32, depth: i64) -> i64 { ncsb(v, all_elts_of(v), depth) }
+// The public ComputeNumSignBits(Op, DL, AC, CxtI, DT, Depth) builds a SimplifyQuery without a
+// DomConditionCache: a top-level query (depth 0) runs with dc_active off. Recursion from computeKnownBits
+// (which passes its own query, DC included) goes through ncsb.
+recursive fn num_sign_bits(v: i32, depth: i64) -> i64 {
+    if depth != 0 { return ncsb(v, all_elts_of(v), depth); }
+    let sv = dc_active;
+    dc_active = false;
+    let r = ncsb(v, all_elts_of(v), depth);
+    dc_active = sv;
+    return r;
+}
 
 recursive fn ncsb(v: i32, de: u64, depth: i64) -> i64 {
     let tb = int_bit_width(vals[v].ty);

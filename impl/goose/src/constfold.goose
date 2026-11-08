@@ -29,7 +29,7 @@ fn cexpr_op(v: i32) -> i64 { csts[vals[v].sub].op as i64 }
 recursive fn c_all_ones(ty: i32) -> i32 {
     let st = ty_scalar(ty);
     var e: i32 = -1;
-    if ty_is_int(st) { e = ap_to_cint(st, ap_ones(ty_bits(st))); }
+    if ty_is_int(st) || types[st].kind == TK_BYTE { e = ap_to_cint(st, ap_ones(ty_bits(st))); }
     else if ty_is_fp(st) {
         let f = fp_fmt(types[st].kind as i64);
         if f.total <= 64 { e = c_fp(st, if f.total == 64 { 0xFFFFFFFFFFFFFFFF } else { ((1 as u64) << f.total) - 1 }, 0); }

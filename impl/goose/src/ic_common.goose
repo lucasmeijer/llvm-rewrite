@@ -1393,7 +1393,8 @@ fn dl_index_type(pt: i32) -> i32 {
 }
 // IRBuilder::CreateGEP(Ty, Ptr, IdxList, Name, NW)
 fn icb_gep(srcty: i32, p: i32, idxs: const i32[:], name: const u8[:], fl: u8) -> i32 {
-    if is_constant(p) {
+    // TargetFolder::FoldGEP: no constant expression for a scalable source type (isSupportedGetElementPtr)
+    if is_constant(p) && !ty_contains_scalable(srcty) {
         var all = true;
         for x in idxs { if !is_constant(x) { all = false; } }
         if all { return tf_fold(ce_gep(srcty, p, idxs, fl, -1)); }
