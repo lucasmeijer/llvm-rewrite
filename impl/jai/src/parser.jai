@@ -17,9 +17,8 @@ Parser :: struct {
     attr_groups: Table(u32, [..] Attr);
     fwd_attr_refs: [..] Fwd_Attr_Ref;
 
-    md_numbered: Table(u32, Md_Id);        // placeholder per number
-    md_defs:     Table(u32, Md_Def);
-    md_def_order: [..] u32;
+    md_numbered: Table(u32, Md_Id);        // temporary per forward-referenced number
+    md_defined:  Table(u32, Md_Id);        // defined nodes
 
     // per function
     fnv: Value_Id = NONE;
@@ -35,7 +34,6 @@ Parser :: struct {
 }
 
 Fwd_Attr_Ref :: struct { v: Value_Id; groups: [..] u32; is_call: bool; is_gvar: bool; }
-Md_Def :: struct { distinct: bool; ops: [..] Md_Id; }
 Blockaddr_Fwd :: struct { placeholder: Value_Id; fn_name: string; fn_id: u32; by_id: bool; bb_name: string; bb_id: u32; bb_by_id: bool; }
 
 P: Parser;
@@ -85,6 +83,11 @@ parse_module :: (src: string, file: string) {
         } else if is_kw("source_filename") {
             next(); expect(.EQUAL, "'='"); ir.source_filename = parse_string(); saw_source_filename = true;
         } else break;
+    }
+    if ir.datalayout.count == 0 && ir.triple.count {
+        d, ok := compute_default_datalayout(ir.triple);
+        if !ok fatal("%: no default data layout for target triple '%' (only x86 is supported)", file, ir.triple);
+        ir.datalayout = d;
     }
     dl_init(ir.datalayout);
     while P.tok.kind != .EOF parse_top_level();
@@ -1757,16 +1760,110 @@ parse_attr_group :: () {
 
 // ---------------------------------------------------------------- metadata
 
-// A reference !N returns a per-number placeholder; resolved at the end of the module.
+// Numbered metadata follows LLParser + MDNode semantics (llvm/lib/IR/Metadata.cpp): a reference to an undefined
+// !N is a temporary node; when !N is defined the temporary is RAUW'd, and every uniqued user is re-uniqued
+// (MDNode::handleChangedOperand): a node that now references itself becomes distinct, a node that collides with an
+// existing equal node is replaced by it.
 md_ref_numbered :: (n: u32) -> Md_Id {
-    found, m := table_find(*P.md_numbered, n);
+    found, m := table_find(*P.md_defined, n);
+    if found return m;
+    found, m = table_find(*P.md_numbered, n);
     if found return m;
     m = md_temp();
-    ir.mds[m].kind = .DI;   // marks "placeholder"; value = number
+    ir.mds[m].kind = .DI;   // marks a temporary; value = number
     ir.mds[m].value = n;
     ir.mds[m].str = "<fwd>";
     table_add(*P.md_numbered, n, m);
     return m;
+}
+
+is_md_temp :: inline (m: Md_Id) -> bool { return m != NONE && ir.mds[m].kind == .DI && ir.mds[m].str == "<fwd>"; }
+
+Md_Use :: struct { user: Md_Id; idx: u32; }
+md_users: Table(Md_Id, [..] Md_Use);
+md_forward: Table(Md_Id, Md_Id);   // node replaced by an equal node
+
+md_register_uses :: (m: Md_Id) {
+    r := ir.mds[m];
+    if r.kind != .TUPLE return;
+    for i: 0..cast(s64)r.nops-1 {
+        o := ir.md_ops[r.ops + cast(u32) i];
+        if o == NONE continue;
+        ok := ir.mds[o].kind;
+        if ok != .TUPLE && ok != .DI continue;
+        list := table_find_pointer(*md_users, o);
+        if !list { e: [..] Md_Use; list = table_add(*md_users, o, e); }
+        array_add(list, .{m, cast(u32) i});
+    }
+}
+
+md_tuple_key :: (m: Md_Id) -> string {
+    k := *md_key; key_reset(k); key_u8(k, 2);
+    r := ir.mds[m];
+    for i: 0..cast(s64)r.nops-1 key_u32(k, ir.md_ops[r.ops + cast(u32) i]);
+    return key_view(k);
+}
+
+md_rauw :: (old: Md_Id, new: Md_Id) {
+    list := table_find_pointer(*md_users, old);
+    if !list return;
+    uses := list.*;
+    table_remove(*md_users, old);
+    for uses md_handle_changed_operand(it.user, it.idx, old, new);
+}
+
+md_handle_changed_operand :: (m: Md_Id, idx: u32, old: Md_Id, new: Md_Id) {
+    if ir.v_kind.count < 0 return;
+    r := *ir.mds[m];
+    if r.kind != .TUPLE return;
+    if ir.md_ops[r.ops + idx] != old return;   // stale use
+    if r.distinct || table_contains(*md_forward, m) {
+        ir.md_ops[r.ops + idx] = new;
+        md_add_use(new, m, idx);
+        return;
+    }
+    // uniqued: erase from the store, change the operand, re-unique
+    key := md_tuple_key(m);
+    f, cur := table_find(*ir.md_map, key);
+    if f && cur == m table_remove(*ir.md_map, key);
+    ir.md_ops[r.ops + idx] = new;
+    md_add_use(new, m, idx);
+    if new == m { ir.mds[m].distinct = true; return; }
+    key = md_tuple_key(m);
+    f, cur = table_find(*ir.md_map, key);
+    if f && cur != m {
+        table_set(*md_forward, m, cur);
+        md_rauw(m, cur);
+        return;
+    }
+    table_add(*ir.md_map, copy_string(key), m);
+}
+
+md_add_use :: (o: Md_Id, user: Md_Id, idx: u32) {
+    if o == NONE return;
+    ok := ir.mds[o].kind;
+    if ok != .TUPLE && ok != .DI return;
+    list := table_find_pointer(*md_users, o);
+    if !list { e: [..] Md_Use; list = table_add(*md_users, o, e); }
+    array_add(list, .{user, idx});
+}
+
+md_final_of :: (m: Md_Id) -> Md_Id {
+    x := m;
+    while true {
+        if x == NONE return x;
+        if is_md_temp(x) {
+            n := ir.mds[x].value;
+            found, d := table_find(*P.md_defined, n);
+            if !found perr("use of undefined metadata '!%'", n);
+            x = d;
+            continue;
+        }
+        found, f := table_find(*md_forward, x);
+        if !found return x;
+        x = f;
+    }
+    return x;
 }
 
 parse_md_node_ref :: () -> Md_Id {
@@ -1792,7 +1889,9 @@ parse_md_tuple_body :: (distinct: bool) -> Md_Id {
         }
     }
     expect(.RBRACE, "'}'");
-    return md_tuple(ops, distinct);
+    m := md_tuple(ops, distinct);
+    md_register_uses(m);
+    return m;
 }
 
 // Metadata operand: !N, !"str", !{...}, !DIxxx(...), or "type value".
@@ -1847,104 +1946,27 @@ parse_standalone_metadata :: () {
     distinct := eat_kw("distinct");
     if P.tok.kind == .METADATA_VAR perr("specialized metadata (!%) is not supported yet", P.tok.text);
     expect(.EXCLAIM, "'!'");
-    expect(.LBRACE, "'{'");
-    def: Md_Def;
-    def.distinct = distinct;
-    if P.tok.kind != .RBRACE {
-        while true {
-            if is_kw("null") { next(); array_add(*def.ops, NONE); }
-            else array_add(*def.ops, parse_metadata_operand());
-            if !eat(.COMMA) break;
-        }
+    if table_contains(*P.md_defined, n) perr("Metadata id is already used");
+    m := parse_md_tuple_body(distinct);
+    table_add(*P.md_defined, n, m);
+    found, t := table_find(*P.md_numbered, n);
+    if found {
+        table_remove(*P.md_numbered, n);
+        md_rauw(t, m);
     }
-    expect(.RBRACE, "'}'");
-    if table_contains(*P.md_defs, n) perr("Metadata id is already used");
-    table_add(*P.md_defs, n, def);
-    array_add(*P.md_def_order, n);
-    md_ref_numbered(n);
-}
-
-// Resolution of numbered metadata: build final nodes (uniquing non-distinct ones), then rewrite references.
-md_final: Table(Md_Id, Md_Id);     // placeholder -> final
-md_state: Table(u32, u8);          // 1 in progress, 2 done
-
-resolve_md :: (m: Md_Id) -> Md_Id {
-    if m == NONE return NONE;
-    row := ir.mds[m];
-    if row.kind == .DI && row.str == "<fwd>" {
-        found, f := table_find(*md_final, m);
-        if found return f;
-        n := row.value;
-        st_found, st := table_find(*md_state, n);
-        f2, def := table_find(*P.md_defs, n);
-        if !f2 perr("use of undefined metadata '!%'", n);
-        if st_found && st == 1 {
-            // cycle through a uniqued node: give it its own node (not uniqued)
-            r := md_temp();
-            ir.mds[r].distinct = false;
-            table_set(*md_final, m, r);
-            return r;
-        }
-        if def.distinct {
-            r := md_temp();
-            table_set(*md_final, m, r);
-            ops: [..] Md_Id; ops.allocator = temp;
-            for def.ops array_add(*ops, resolve_md(it));
-            ir.mds[r].ops = cast(u32) ir.md_ops.count; ir.mds[r].nops = cast(u32) ops.count;
-            for ops array_add(*ir.md_ops, it);
-            return r;
-        }
-        table_set(*md_state, n, 1);
-        ops: [..] Md_Id; ops.allocator = temp;
-        for def.ops array_add(*ops, resolve_md(it));
-        found2, f3 := table_find(*md_final, m);
-        if found2 {
-            // we became part of a cycle: fill the pre-made node
-            ir.mds[f3].ops = cast(u32) ir.md_ops.count; ir.mds[f3].nops = cast(u32) ops.count;
-            for ops array_add(*ir.md_ops, it);
-            table_set(*md_state, n, 2);
-            return f3;
-        }
-        r := md_tuple(ops, false);
-        table_set(*md_final, m, r);
-        table_set(*md_state, n, 2);
-        return r;
-    }
-    if row.kind == .TUPLE && row.nops > 0 {
-        // inline tuple that may contain placeholders: rebuild if needed
-        found, f := table_find(*md_final, m);
-        if found return f;
-        changed := false;
-        ops: [..] Md_Id; ops.allocator = temp;
-        if row.nops > 0 for i: 0..row.nops-1 {
-            o := ir.md_ops[row.ops + i];
-            r := resolve_md(o);
-            if r != o changed = true;
-            array_add(*ops, r);
-        }
-        res := m;
-        if changed {
-            if row.distinct {
-                for ops ir.md_ops[row.ops + cast(u32) it_index] = it;
-            } else res = md_tuple(ops, false);
-        }
-        table_set(*md_final, m, res);
-        return res;
-    }
-    return m;
 }
 
 resolve_all_metadata :: () {
-    for P.md_def_order {
-        found, ph := table_find(*P.md_numbered, it);
-        resolve_md(ph);
-    }
-    for * a: ir.attaches a.md = resolve_md(a.md);
-    for * nm: ir.named_md for * nm.ops it.* = resolve_md(it.*);
+    for P.md_numbered perr("use of undefined metadata '!%'", it_index);
+    for * a: ir.attaches a.md = md_final_of(a.md);
+    for * nm: ir.named_md for * nm.ops it.* = md_final_of(it.*);
     for i: 0..ir.v_kind.count-1 {
-        if ir.v_kind[i] == .MD_VALUE {
-            ir.v_aux[i] = resolve_md(ir.v_aux[i]);
-        }
+        if ir.v_kind[i] == .MD_VALUE ir.v_aux[i] = md_final_of(ir.v_aux[i]);
+    }
+    // operands of surviving nodes may still name forwarded nodes
+    for i: 0..ir.md_ops.count-1 {
+        o := ir.md_ops[i];
+        if o != NONE && (is_md_temp(o) || table_contains(*md_forward, o)) ir.md_ops[i] = md_final_of(o);
     }
 }
 
@@ -2694,9 +2716,6 @@ validate_end_of_module :: () {
     if P.blockaddr_fwd.count perr("expected function name in blockaddress");
     for ir.named_types {
         // types referenced but never defined stay opaque in LLVM only if defined as opaque; otherwise error
-    }
-    for P.md_numbered {
-        if !table_contains(*P.md_defs, it_index) perr("use of undefined metadata '!%'", it_index);
     }
     // forward-referenced intrinsics are auto-declared; other forward refs are errors
     for P.fwd_global_order {

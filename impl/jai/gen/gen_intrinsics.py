@@ -4,8 +4,9 @@
 LLVM computes these with TableGen from llvm/include/llvm/IR/Intrinsics*.td. We have no TableGen, so:
   * intrinsic names come from the `def int_*` records of Intrinsics.td and IntrinsicsX86.td
     (int_foo_bar -> llvm.foo.bar), used for Intrinsic::lookupIntrinsicID-style longest-prefix lookup;
-  * the attributes come from running the oracle (LLVM 23.1.5 opt) on one declaration per intrinsic, taken from
-    every `declare ... @llvm.*` line in tests/. The attributes LLVM attaches depend only on the intrinsic ID for
+  * the attributes come from running the oracle (LLVM 23.1.5 opt -S) on every test file in tests/ that mentions
+    an intrinsic, and reading the intrinsic declarations it prints (including ones the parser created for
+    undeclared calls). The attributes LLVM attaches depend only on the intrinsic ID for
     everything we have seen (checked: all overloads in the corpus agree; the script warns otherwise).
 Intrinsics that appear in no test have a name but no attribute entry; the implementation then fails loudly.
 
@@ -42,22 +43,21 @@ def lookup(name):
                 best = n
     return best
 
-decls = {}
+files = []
 for path in glob.glob(os.path.join(ROOT, 'tests', '**', '*.ll'), recursive=True):
     try:
-        text = open(path, errors='replace').read()
+        if '@llvm.' in open(path, errors='replace').read():
+            files.append(path)
     except OSError:
-        continue
-    for line in text.splitlines():
-        m = re.match(r'^declare .*@(llvm\.[A-Za-z0-9_.]+)\(', line)
-        if not m:
-            continue
-        base = lookup(m.group(1))
-        if base is None:
-            continue
-        decls.setdefault(base, [])
-        if len(decls[base]) < 4 and line not in decls[base]:
-            decls[base].append(line)
+        pass
+
+def run_file(path):
+    r = subprocess.run([OPT, '-S', path, '-o', '-'], capture_output=True, text=True, cwd=ROOT)
+    return r.stdout if r.returncode == 0 else ''
+
+from concurrent.futures import ThreadPoolExecutor
+with ThreadPoolExecutor(max_workers=os.cpu_count() or 8) as ex:
+    outputs = list(ex.map(run_file, sorted(files)))
 
 def split_params(s):
     out, depth, cur = [], 0, ''
@@ -89,31 +89,23 @@ def param_attrs(p):
         rest = rest[rest.index(')') + 1:].strip()
     return rest
 
-def oracle(line):
-    # strip attribute group refs (#N) so the declaration stands alone
-    clean = re.sub(r'\s#\d+', '', line)
-    with tempfile.NamedTemporaryFile('w', suffix='.ll', delete=False) as f:
-        f.write(clean + '\n')
-        path = f.name
-    try:
-        r = subprocess.run([OPT, '-S', path, '-o', '-'], capture_output=True, text=True)
-    finally:
-        os.unlink(path)
-    if r.returncode != 0:
-        return None
-    ds = [l for l in r.stdout.splitlines() if l.startswith('declare ')]
-    if not ds:
-        return None
-    decl = ds[0]
-    groups = dict(re.findall(r'^attributes #(\d+) = \{ (.*) \}$', r.stdout, re.M))
-    m = re.match(r'^declare (.*?)@[^(]*\((.*)\)( #(\d+))?$', decl)
-    head, params, gid = m.group(1), m.group(2), m.group(4)
-    fn = groups.get(gid, '') if gid else ''
-    # return attributes: everything in head except the return type (last depth-0 word)
-    words = split_ret(head.strip())
-    ret = ' '.join(words[:-1])
-    plist = [param_attrs(p) for p in split_params(params) if p != '...']
-    return fn, ret, plist
+def parse_output(text):
+    groups = dict(re.findall(r'^attributes #(\d+) = \{ (.*) \}$', text, re.M))
+    res = []
+    for decl in text.splitlines():
+        m = re.match(r'^declare (.*?)@(llvm\.[A-Za-z0-9_.]+)\((.*?)\)(?: addrspace\(\d+\))?(?: #(\d+))?$', decl)
+        if not m:
+            continue
+        head, name, params, gid = m.group(1), m.group(2), m.group(3), m.group(4)
+        fn = groups.get(gid, '') if gid else ''
+        words = split_ret(head.strip())
+        skip = {'extern_weak', 'dso_local', 'dso_preemptable', 'hidden', 'protected', 'dllimport', 'external'}
+        words = [w for w in words[:-1] if w not in skip and not re.match(r'^(cc\d+|[a-z_0-9]+cc|ccc)$', w)]
+        # range(iN ...) on the return value follows the return type width: '@' is substituted at run time
+        ret = re.sub(r'range\(i\d+ ', 'range(i@ ', ' '.join(words))
+        plist = [param_attrs(p) for p in split_params(params) if p != '...']
+        res.append((name, (fn, ret, plist)))
+    return res
 
 def split_ret(s):
     out, depth, cur = [], 0, ''
@@ -137,14 +129,20 @@ def split_ret(s):
 def jstr(s):
     return '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
+found = {}
+for text in outputs:
+    for name, attrs in parse_output(text):
+        base = lookup(name)
+        if base is None:
+            continue
+        found.setdefault(base, [])
+        if attrs not in found[base]:
+            found[base].append(attrs)
 entries = []
-for base in sorted(decls):
-    results = [oracle(l) for l in decls[base]]
-    results = [r for r in results if r is not None]
-    if not results:
-        continue
-    if any(r != results[0] for r in results[1:]):
-        sys.stderr.write('warning: %s: overloads disagree: %r\n' % (base, results))
+for base in sorted(found):
+    results = found[base]
+    if len(results) > 1:
+        sys.stderr.write('warning: %s: overloads disagree, using the first: %r\n' % (base, results))
     entries.append((base, results[0]))
 
 print('// GENERATED by impl/jai/gen/gen_intrinsics.py (see the script for how). Do not edit.')

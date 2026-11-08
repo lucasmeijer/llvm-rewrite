@@ -37,7 +37,12 @@ upgrade_intrinsic_function :: (f: Value_Id) {
     for INTRINSIC_ATTRS {
         if it.name != base continue;
         fnset := parse_attr_text(it.fn, true);
-        retset := parse_attr_text(it.ret, false);
+        rtext := it.ret;
+        if contains(rtext, "@") {
+            rt := scalar_type(func_ret(glob(f).value_type));
+            rtext = replace(rtext, "@", tprint("%", type_bits(rt)),, allocator = temp);
+        }
+        retset := parse_attr_text(rtext, false);
         ps: [..] u32; ps.allocator = temp;
         np := func_nparams(glob(f).value_type);
         if np > 0 for i: 0..np-1 array_add(*ps, ifx i < it.params.count then parse_attr_text(it.params[i], false) else 0);

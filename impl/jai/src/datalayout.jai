@@ -181,3 +181,40 @@ dl_struct_offset :: (t: Type_Id, idx: u32) -> u64 {
     }
     return size;
 }
+
+// Triple::computeDataLayout for x86 (llvm/lib/TargetParser/TargetDataLayout.cpp computeX86DataLayout).
+// opt fills in this default when the module has a triple but no datalayout (llvm/tools/opt/optdriver.cpp).
+compute_default_datalayout :: (triple: string) -> string, bool {
+    parts := split(triple, "-",, allocator = temp);
+    arch := parts[0];
+    os := ifx parts.count > 2 then parts[2] else "";
+    env := ifx parts.count > 3 then parts[3] else "";
+    is64 := arch == "x86_64" || arch == "amd64" || arch == "x86_64h";
+    is32 := arch == "i386" || arch == "i486" || arch == "i586" || arch == "i686" || arch == "i786" || arch == "i886" || arch == "i986" || arch == "x86";
+    if !is64 && !is32 return "", false;
+    darwin := begins_with(os, "darwin") || begins_with(os, "macos") || begins_with(os, "ios") || begins_with(os, "tvos") ||
+              begins_with(os, "watchos") || begins_with(os, "driverkit") || begins_with(os, "xros");
+    windows := begins_with(os, "windows") || begins_with(os, "win32");
+    uefi := begins_with(os, "uefi");
+    iamcu := begins_with(os, "elfiamcu");
+    coff := (windows || uefi) && !contains(env, "elf") && !contains(env, "macho");
+    msvc := windows && (begins_with(env, "msvc") || env.count == 0);
+    x32 := begins_with(env, "gnux32") || begins_with(env, "muslx32");
+    sb: String_Builder;
+    append(*sb, "e");
+    if darwin append(*sb, "-m:o");
+    else if coff append(*sb, ifx is32 then "-m:x" else "-m:w");
+    else append(*sb, "-m:e");
+    if !is64 || x32 append(*sb, "-p:32:32");
+    append(*sb, "-p270:32:32-p271:32:32-p272:64:64");
+    if is64 || windows append(*sb, "-i64:64-i128:128");
+    else if iamcu append(*sb, "-i64:32-f64:32");
+    else append(*sb, "-i128:128-f64:32:64");
+    if iamcu {}
+    else if is64 || darwin || msvc append(*sb, "-f80:128");
+    else append(*sb, "-f80:32");
+    if iamcu append(*sb, "-f128:32");
+    if is64 append(*sb, "-n8:16:32:64"); else append(*sb, "-n8:16:32");
+    if (!is64 && windows) || iamcu append(*sb, "-a:0:32-S32"); else append(*sb, "-S128");
+    return builder_to_string(*sb), true;
+}
