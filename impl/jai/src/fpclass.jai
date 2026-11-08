@@ -786,6 +786,7 @@ fpc_elementwise_bitcast_inst :: (v: Value_Id) -> (bool, Value_Id) {
 // computeKnownFPClassFromContext (no CondContext)
 compute_known_fp_class_from_context :: (v: Value_Id, q: Simplify_Query) -> Known_FP_Class {
     known: Known_FP_Class;
+    if q.cc && cc_affects(q.cc, v) compute_known_fp_class_from_cond(v, q.cc.cond, !q.cc.invert, q.cxt, *known);
     if q.cxt == NONE return known;
     if q.dc && q.dt {
         cb := inst_block(q.cxt);
@@ -1194,7 +1195,8 @@ fpc_compute_op :: (v: Value_Id, de: APInt, interested: u32, known: *Known_FP_Cla
                     inc, cxt, phi_out := break_self_recursive_phi(v, i);
                     if inc == v continue;
                     ks: Known_FP_Class;
-                    fpc_compute(inc, de, interested, *ks, sq_with_instruction(q, cxt), phi_limit);
+                    rq := sq_with_instruction(q, cxt); rq.cc = null;
+                    fpc_compute(inc, de, interested, *ks, rq, phi_limit);
                     if first { known.* = ks; first = false; }
                     else known.* = kfpc_or(known.*, ks);
                     if known.known_fp_classes == FC_ALL_FLAGS break;

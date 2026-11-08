@@ -18,6 +18,19 @@ Simplify_Query :: struct {
     allow_ephemerals := false;
     have_tli := true;            // a TargetLibraryInfo is available (instsimplify passes one)
     dc: *Dom_Cond_Cache;         // DomConditionCache (InstCombine); may be null
+    cc: *Cond_Context;           // CondContext (InstCombine's visitSelectInst); may be null
+}
+
+// CondContext (SimplifyQuery.h): an injected condition known to be true (or false with `invert`) for the
+// values in `affected`.
+Cond_Context :: struct {
+    cond: Value_Id;
+    invert: bool;
+    affected: [..] Value_Id;
+}
+cc_affects :: (cc: *Cond_Context, v: Value_Id) -> bool {
+    for cc.affected if it == v return true;
+    return false;
 }
 
 // DomConditionCache (llvm/lib/Analysis/DomConditionCache.cpp): affected value -> conditional branches whose condition

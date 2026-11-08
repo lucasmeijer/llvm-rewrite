@@ -146,7 +146,7 @@ num_sign_bits_impl :: (v: Value_Id, de: APInt, q: Simplify_Query, depth: u32) ->
             case .PHI;
                 n := nops(v);
                 if n > 4 || n == 0 break;
-                rq := q;
+                rq := q; rq.cc = null;
                 t := ty_bits;
                 for i: 0..n-1 {
                     if t == 1 return t;
@@ -313,7 +313,7 @@ is_non_equal_phis :: (pn1: Value_Id, pn2: Value_Id, de: APInt, q: Simplify_Query
         ok1, c1 := pm_apint(iv1); ok2, c2 := pm_apint(iv2);
         if ok1 && ok2 && !ap_eq(c1, c2) continue;
         if used_full return false;
-        rq := q; rq.cxt = block_terminator(bb);
+        rq := q; rq.cc = null; rq.cxt = block_terminator(bb);
         if !is_known_non_equal_de(iv1, iv2, de, rq, depth + 1) return false;
         used_full = true;
     }
@@ -589,15 +589,122 @@ match_min_max :: (pred: u8, cl: Value_Id, cr: Value_Id, tv: Value_Id, fv: Value_
     }
     return spr(.UNKNOWN), lhs, rhs;
 }
-// static matchSelectPattern(Pred, FMF, CmpLHS, CmpRHS, TrueVal, FalseVal, LHS, RHS, Depth). The FP part (fcmp
-// conditions) isn't ported: it returns UNKNOWN, which the integer callers (sign bits, ranges) treat the same as
-// the FP flavors.
-match_select_pattern_impl :: (pred_in: u8, cmp_lhs_in: Value_Id, cmp_rhs_in: Value_Id, tv: Value_Id, fv: Value_Id, depth: u32) -> (Select_Pattern, Value_Id, Value_Id) {
+// isKnownNonNaN (ValueTracking.cpp static helper of matchSelectPattern)
+spf_is_known_non_nan :: (v: Value_Id, fmf: u32) -> bool {
+    if fmf & FMF_NNAN return true;
+    k := vkind(v);
+    if k == .C_FP return !apf_is_nan(apf_from_const(v));
+    if k == .C_DATA && type_kind(vtype(v)) == .VECTOR {
+        if !is_fp_type(type_elem(vtype(v))) return false;
+        n := type_count(vtype(v));
+        for e: 0..cast(s64) n - 1 if apf_is_nan(apf_from_const(cf_elt(v, cast(u64) e))) return false;
+        return true;
+    }
+    if k == .C_ZERO return true;   // ConstantAggregateZero
+    return false;
+}
+// isKnownNonZero (ValueTracking.cpp static helper of matchSelectPattern; FP constants only)
+spf_is_known_non_zero :: (v: Value_Id) -> bool {
+    k := vkind(v);
+    if k == .C_FP return !apf_is_zero(apf_from_const(v));
+    if k == .C_DATA && type_kind(vtype(v)) == .VECTOR {
+        if !is_fp_type(type_elem(vtype(v))) return false;
+        n := type_count(vtype(v));
+        for e: 0..cast(s64) n - 1 if apf_is_zero(apf_from_const(cf_elt(v, cast(u64) e))) return false;
+        return true;
+    }
+    return false;
+}
+// FMaxMin_match<L, R, {o,u}f{max,min}_pred_ty>: "(x pred y) ? x : y" or "(x pred y) ? y : x" with an fcmp
+pm_fmaxmin_select :: (v: Value_Id, is_max: bool, ordered: bool) -> (bool, Value_Id, Value_Id) {
+    if !is_inst(v) || inst_op(v) != .SELECT return false, NONE, NONE;
+    c := op(v, 0);
+    if !is_inst(c) || inst_op(c) != .FCMP return false, NONE, NONE;
+    tv := op(v, 1); fv := op(v, 2);
+    l := op(c, 0); r := op(c, 1);
+    if (tv != l || fv != r) && (tv != r || fv != l) return false, NONE, NONE;
+    pred := ifx l == tv then inst_pred(c) else cmp_inverse(inst_pred(c));
+    ok: bool;
+    if is_max ok = ifx ordered then (pred == FCMP_OGT || pred == FCMP_OGE) else (pred == FCMP_UGT || pred == FCMP_UGE);
+    else ok = ifx ordered then (pred == FCMP_OLT || pred == FCMP_OLE) else (pred == FCMP_ULT || pred == FCMP_ULE);
+    if !ok return false, NONE, NONE;
+    return true, l, r;
+}
+// m_OrdOrUnordFMax / m_OrdOrUnordFMin
+pm_ord_or_unord_fmax :: (v: Value_Id) -> (bool, Value_Id, Value_Id) {
+    ok, l, r := pm_fmaxmin_select(v, true, true); if ok return true, l, r;
+    ok, l, r = pm_fmaxmin_select(v, true, false); return ok, l, r;
+}
+pm_ord_or_unord_fmin :: (v: Value_Id) -> (bool, Value_Id, Value_Id) {
+    ok, l, r := pm_fmaxmin_select(v, false, true); if ok return true, l, r;
+    ok, l, r = pm_fmaxmin_select(v, false, false); return ok, l, r;
+}
+// matchFastFloatClamp
+match_fast_float_clamp :: (pred_in: u8, cl: Value_Id, cr: Value_Id, tv_in: Value_Id, fv_in: Value_Id) -> (Select_Pattern, Value_Id, Value_Id) {
+    pred := pred_in; tv := tv_in; fv := fv_in;
+    if cr == fv { t := tv; tv = fv; fv = t; pred = cmp_inverse(pred); }
+    lhs := tv; rhs := fv;
+    ok1, fc1 := pm_apfloat(cr);
+    if cr != tv || !ok1 || !apf_is_finite(fc1) return spr(.UNKNOWN), lhs, rhs;
+    if pred == {
+        case FCMP_OLT; #through; case FCMP_OLE; #through; case FCMP_ULT; #through; case FCMP_ULE;
+            ok, a, b := pm_ord_or_unord_fmin(fv);
+            if ok && a == cl { okc, fc2 := pm_apfloat(b); if okc && apf_compare(fc1, fc2) == .LESS return spr(.FMAXNUM, .RETURNS_ANY, false), lhs, rhs; }
+            if call_iid(fv) == IID_MINNUM && op(fv, 0) == cl { okc, fc2 := pm_apfloat(op(fv, 1)); if okc && apf_compare(fc1, fc2) == .LESS return spr(.FMAXNUM, .RETURNS_ANY, false), lhs, rhs; }
+        case FCMP_OGT; #through; case FCMP_OGE; #through; case FCMP_UGT; #through; case FCMP_UGE;
+            ok, a, b := pm_ord_or_unord_fmax(fv);
+            if ok && a == cl { okc, fc2 := pm_apfloat(b); if okc && apf_compare(fc1, fc2) == .GREATER return spr(.FMINNUM, .RETURNS_ANY, false), lhs, rhs; }
+            if call_iid(fv) == IID_MAXNUM && op(fv, 0) == cl { okc, fc2 := pm_apfloat(op(fv, 1)); if okc && apf_compare(fc1, fc2) == .GREATER return spr(.FMINNUM, .RETURNS_ANY, false), lhs, rhs; }
+    }
+    return spr(.UNKNOWN), lhs, rhs;
+}
+// static matchSelectPattern(Pred, FMF, CmpLHS, CmpRHS, TrueVal, FalseVal, LHS, RHS, Depth)
+match_select_pattern_impl :: (pred_in: u8, fmf: u32, cmp_lhs_in: Value_Id, cmp_rhs_in: Value_Id, tv: Value_Id, fv: Value_Id, depth: u32) -> (Select_Pattern, Value_Id, Value_Id) {
     pred := pred_in; cl := cmp_lhs_in; cr := cmp_rhs_in;
-    if is_fp_predicate(pred) return spr(.UNKNOWN), cl, cr;
+    has_mismatched_zeros := false;
+    if is_fp_predicate(pred) {
+        out_zero: Value_Id = NONE;
+        if pm_any_zero_fp(tv) && !pm_any_zero_fp(fv) && !contains_undef_or_poison_element(tv) out_zero = tv;
+        else if pm_any_zero_fp(fv) && !pm_any_zero_fp(tv) && !contains_undef_or_poison_element(fv) out_zero = fv;
+        if out_zero != NONE {
+            if pm_any_zero_fp(cl) && cl != out_zero { has_mismatched_zeros = true; cl = out_zero; }
+            if pm_any_zero_fp(cr) && cr != out_zero { has_mismatched_zeros = true; cr = out_zero; }
+        }
+    }
     lhs := cl; rhs := cr;
-    if tv == cr && fv == cl { t := cl; cl = cr; cr = t; pred = cmp_swapped(pred); }
-    if tv == cl && fv == cr return get_select_pattern(pred, .NA, false), lhs, rhs;
+    check_zero := false;
+    if pred == {
+        case FCMP_OGT; #through; case FCMP_OLT; #through; case FCMP_UGT; #through; case FCMP_ULT;
+            check_zero = has_mismatched_zeros;
+        case FCMP_OGE; #through; case FCMP_OLE; #through; case FCMP_UGE; #through; case FCMP_ULE;
+            check_zero = true;
+    }
+    if check_zero && (fmf & FMF_NSZ) == 0 && !spf_is_known_non_zero(cl) && !spf_is_known_non_zero(cr) return spr(.UNKNOWN), lhs, rhs;
+    nan := Select_Nan_Behavior.NA;
+    ordered := false;
+    if is_fp_predicate(pred) {
+        lsafe := spf_is_known_non_nan(cl, fmf);
+        rsafe := spf_is_known_non_nan(cr, fmf);
+        if lsafe && rsafe { nan = .RETURNS_ANY; ordered = cmp_is_ordered(pred); }
+        else if cmp_is_ordered(pred) {
+            ordered = true;
+            if lsafe nan = .RETURNS_NAN;
+            else if rsafe nan = .RETURNS_OTHER;
+            else return spr(.UNKNOWN), lhs, rhs;
+        } else {
+            ordered = false;
+            if lsafe nan = .RETURNS_OTHER;
+            else if rsafe nan = .RETURNS_NAN;
+            else return spr(.UNKNOWN), lhs, rhs;
+        }
+    }
+    if tv == cr && fv == cl {
+        t := cl; cl = cr; cr = t; pred = cmp_swapped(pred);
+        if nan == .RETURNS_NAN nan = .RETURNS_OTHER;
+        else if nan == .RETURNS_OTHER nan = .RETURNS_NAN;
+        ordered = !ordered;
+    }
+    if tv == cl && fv == cr return get_select_pattern(pred, nan, ordered), lhs, rhs;
     if is_known_negation(tv, fv) {
         cmp_lhs_or_sext :: (v: Value_Id, cl: Value_Id) -> bool {
             if v == cl return true;
@@ -626,17 +733,94 @@ match_select_pattern_impl :: (pred_in: u8, cmp_lhs_in: Value_Id, cmp_rhs_in: Val
             if pred == ICMP_SLT && zero_or_one(cr) return spr(.ABS), lhs, rhs;
         }
     }
-    s, l2, r2 := match_min_max(pred, cl, cr, tv, fv, depth);
+    if is_int_predicate(pred) {
+        s, l2, r2 := match_min_max(pred, cl, cr, tv, fv, depth);
+        return s, l2, r2;
+    }
+    if nan != .RETURNS_ANY || ((fmf & FMF_NSZ) == 0 && !spf_is_known_non_zero(cl) && !spf_is_known_non_zero(cr)) return spr(.UNKNOWN), lhs, rhs;
+    s, l2, r2 := match_fast_float_clamp(pred, cl, cr, tv, fv);
     return s, l2, r2;
+}
+// lookThroughCastConst
+look_through_cast_const :: (cmp: Value_Id, src_ty: Type_Id, c: Value_Id, cast_op: Opcode) -> Value_Id {
+    casted_to: Value_Id = NONE;
+    pred := inst_pred(cmp);
+    if cast_op == {
+        case .ZEXT; if cmp_is_unsigned(pred) casted_to = ce_cast(.TRUNC, c, src_ty);
+        case .SEXT; if cmp_is_signed(pred) casted_to = cf_cast(.TRUNC, c, src_ty);
+        case .TRUNC;
+            cc := op(cmp, 1);
+            if is_const(cc) && vtype(cc) == src_ty casted_to = cc;
+            else casted_to = cfo_cast_operand(ifx cmp_is_signed(pred) then Opcode.SEXT else .ZEXT, c, src_ty);
+        case .FPTRUNC; casted_to = cfo_cast_operand(.FPEXT, c, src_ty);
+        case .FPEXT; casted_to = cfo_cast_operand(.FPTRUNC, c, src_ty);
+        case .FPTOUI; casted_to = cfo_cast_operand(.UITOFP, c, src_ty);
+        case .FPTOSI; casted_to = cfo_cast_operand(.SITOFP, c, src_ty);
+        case .UITOFP; casted_to = cfo_cast_operand(.FPTOUI, c, src_ty);
+        case .SITOFP; casted_to = cfo_cast_operand(.FPTOSI, c, src_ty);
+    }
+    if casted_to == NONE return NONE;
+    back := cfo_cast_operand(cast_op, casted_to, vtype(c));
+    if back != NONE && back != c return NONE;
+    return casted_to;
+}
+// lookThroughCast: (new second value, cast opcode)
+look_through_cast :: (cmp: Value_Id, v1: Value_Id, v2: Value_Id) -> (Value_Id, Opcode) {
+    if !is_inst(v1) || !is_cast_op(inst_op(v1)) return NONE, .NONE_OP;
+    cast_op := inst_op(v1);
+    src_ty := vtype(op(v1, 0));
+    if is_inst(v2) && is_cast_op(inst_op(v2)) {
+        if cast_op == inst_op(v2) && src_ty == vtype(op(v2, 0)) return op(v2, 0), cast_op;
+        return NONE, cast_op;
+    }
+    if is_const(v2) return look_through_cast_const(cmp, src_ty, v2, cast_op), cast_op;
+    if cast_op == .TRUNC {
+        ok, x := pmi_zext_or_sext(op(cmp, 1));
+        if ok && x == v2 return op(cmp, 1), cast_op;
+    }
+    return NONE, cast_op;
+}
+// matchDecomposedSelectPattern(CmpI, TrueVal, FalseVal, LHS, RHS, FMF, CastOp, Depth): the last result is the
+// cast opcode (CastOp; only written when `want_cast` and a cast was looked through, else NONE_OP)
+match_decomposed_select_pattern_full :: (cmp: Value_Id, tv: Value_Id, fv: Value_Id, fmf_in: u32, want_cast: bool, depth: u32) -> (Select_Pattern, Value_Id, Value_Id, Opcode) {
+    fmf := fmf_in;
+    pred := inst_pred(cmp);
+    cl := op(cmp, 0); cr := op(cmp, 1);
+    if inst_op(cmp) == .FCMP && (get_fmf(cmp) & FMF_NNAN) != 0 fmf |= FMF_NNAN;
+    cast_op := Opcode.NONE_OP;
+    if cmp_is_equality(pred) return spr(.UNKNOWN), NONE, NONE, cast_op;
+    if want_cast && vtype(cl) != vtype(tv) {
+        c, co := look_through_cast(cmp, tv, fv);
+        if co != .NONE_OP cast_op = co;
+        if c != NONE {
+            if cast_op == .FPTOSI || cast_op == .FPTOUI fmf |= FMF_NSZ;
+            s, l, r := match_select_pattern_impl(pred, fmf, cl, cr, op(tv, 0), c, depth);
+            return s, l, r, cast_op;
+        }
+        c, co = look_through_cast(cmp, fv, tv);
+        if co != .NONE_OP cast_op = co;
+        if c != NONE {
+            if cast_op == .FPTOSI || cast_op == .FPTOUI fmf |= FMF_NSZ;
+            s, l, r := match_select_pattern_impl(pred, fmf, cl, cr, c, op(fv, 0), depth);
+            return s, l, r, cast_op;
+        }
+    }
+    s, l, r := match_select_pattern_impl(pred, fmf, cl, cr, tv, fv, depth);
+    return s, l, r, cast_op;
+}
+// SelectInst::getFastMathFlagsOrNone
+select_fmf_or_none :: (si: Value_Id) -> u32 { if is_fp_math_inst(si) return get_fmf(si); return 0; }
+// matchSelectPattern(V, LHS, RHS, CastOp, Depth)
+match_select_pattern_cast :: (v: Value_Id, want_cast: bool, depth: u32 = 0) -> (Select_Pattern, Value_Id, Value_Id, Opcode) {
+    if depth >= MAX_ANALYSIS_RECURSION_DEPTH return spr(.UNKNOWN), NONE, NONE, .NONE_OP;
+    ok, c, t, f := pm_select(v);
+    if !ok || !is_cmp_inst(c) return spr(.UNKNOWN), NONE, NONE, .NONE_OP;
+    s, l, r, co := match_decomposed_select_pattern_full(c, t, f, select_fmf_or_none(v), want_cast, depth);
+    return s, l, r, co;
 }
 // matchSelectPattern(V, LHS, RHS) (CastOp = nullptr)
 match_select_pattern :: (v: Value_Id, depth: u32 = 0) -> (Select_Pattern, Value_Id, Value_Id) {
-    if depth >= MAX_ANALYSIS_RECURSION_DEPTH return spr(.UNKNOWN), NONE, NONE;
-    ok, c, t, f := pm_select(v);
-    if !ok || !is_cmp_inst(c) return spr(.UNKNOWN), NONE, NONE;
-    pred := inst_pred(c);
-    if cmp_is_equality(pred) return spr(.UNKNOWN), NONE, NONE;
-    s, l, r := match_select_pattern_impl(pred, op(c, 0), op(c, 1), t, f, depth);
+    s, l, r := match_select_pattern_cast(v, false, depth);
     return s, l, r;
 }
 

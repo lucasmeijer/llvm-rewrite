@@ -2514,9 +2514,7 @@ can_replace_pointers_if_equal :: (from: Value_Id, to: Value_Id) -> bool {
 }
 // matchDecomposedSelectPattern(CmpI, TrueVal, FalseVal, LHS, RHS) (FMF none, CastOp null)
 match_decomposed_select_pattern :: (cmp: Value_Id, tv: Value_Id, fv: Value_Id) -> (Select_Pattern, Value_Id, Value_Id) {
-    pred := inst_pred(cmp);
-    if cmp_is_equality(pred) return spr(.UNKNOWN), NONE, NONE;
-    s, l, r := match_select_pattern_impl(pred, op(cmp, 0), op(cmp, 1), tv, fv, 0);
+    s, l, r := match_decomposed_select_pattern_full(cmp, tv, fv, 0, false, 0);
     return s, l, r;
 }
 // getMinMaxLimit

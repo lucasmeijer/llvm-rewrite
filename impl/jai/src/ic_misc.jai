@@ -4,7 +4,7 @@
 // one means porting the rest of its function in order (see DESIGN.md "InstCombine: how to add a fold").
 // Ported from: InstructionCombining.cpp (visitReturnInst, visitUnreachableInst, visitUncondBrInst, visitCondBrInst,
 // handlePotentiallyDeadSuccessors, visitExtractValueInst prologue, visitFreeze prologue, visitGetElementPtrInst
-// prologue), InstCombineSelect.cpp,
+// prologue),
 // InstCombineShifts.cpp, InstCombineAndOrXor.cpp, InstCombineCasts.cpp (commonCastTransforms), InstCombinePHI.cpp,
 // InstCombineCalls.cpp, InstCombineVectorOps.cpp, InstCombineLoadStoreAlloca.cpp (prologues only).
 
@@ -213,14 +213,6 @@ ic_freely_invert_all_users_of :: (v: Value_Id, ignored: Value_Id = NONE) {
     users: [..] u32; users.allocator = temp;
     find_dbg_users(ic.f, v, *users);
     if users.count fatal("instcombine: freelyInvertAllUsersOf with debug users (DW_OP_not) is not supported yet");
-}
-// visitSelectInst: InstSimplify. Not ported: everything after.
-ic_visit_select :: (i: Value_Id) -> Value_Id {
-    fmf: u32 = 0;
-    if is_fp_math_inst(i) fmf = get_fmf(i);
-    v := simplify_select_inst(op(i, 0), op(i, 1), op(i, 2), fmf, ic_q(i));
-    if v != NONE return ic_replace_inst_uses_with(i, v);
-    return NONE;
 }
 // visitPHINode: InstSimplify. Not ported: everything after.
 ic_visit_phi :: (i: Value_Id) -> Value_Id { return ic_visit_simplify_only(i); }

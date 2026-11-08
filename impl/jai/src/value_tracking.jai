@@ -723,7 +723,7 @@ known_bits_phi :: (p: Value_Id, de: APInt, bits: u32, q: Simplify_Query, depth: 
         opc := inst_op(bo);
         if opc == .LSHR || opc == .ASHR || opc == .SHL || opc == .UDIV || opc == .UREM {
             if opc == .UREM || op(bo, 0) == p {
-                rq := q; rq.cxt = p;
+                rq := q; rq.cc = null; rq.cxt = p;
                 k2 := known_bits_de(r, de, rq, depth + 1);
                 if opc == .SHL ap_set_low_bits(*known.zero, kb_count_min_trailing_zeros(k2));
                 else if opc == .ASHR {
@@ -732,7 +732,7 @@ known_bits_phi :: (p: Value_Id, de: APInt, bits: u32, q: Simplify_Query, depth: 
                 } else ap_set_high_bits(*known.zero, kb_count_min_leading_zeros(k2));
             }
         } else if opc == .ADD || opc == .SUB || opc == .AND || opc == .OR || opc == .MUL {
-            rq := q;
+            rq := q; rq.cc = null;
             opnum: u32 = ifx op(p, 0) == r then cast(u32) 0 else 1;
             rinst := block_terminator(phi_block(p, opnum));
             linst := block_terminator(phi_block(p, 1 - opnum));
@@ -765,7 +765,7 @@ known_bits_phi :: (p: Value_Id, de: APInt, bits: u32, q: Simplify_Query, depth: 
         for k: 0..n-1 {
             inc, cxt, cxt_phi := break_self_recursive_phi(p, k);
             if inc == p continue;
-            rq := sq_with_instruction(q, cxt);
+            rq := sq_with_instruction(q, cxt); rq.cc = null;
             k2 := known_bits_de(inc, de, rq, MAX_ANALYSIS_RECURSION_DEPTH - 1);
             if !kb_is_constant(k2) && cxt != NONE && inst_op(cxt) == .CONDBR {
                 c := op(cxt, 0);
@@ -1228,8 +1228,9 @@ known_bits_from_cond :: (v: Value_Id, cond: Value_Id, known: *Known_Bits, q: Sim
     }
 }
 
-// computeKnownBitsFromContext (no CondContext)
+// computeKnownBitsFromContext
 known_bits_from_context :: (v: Value_Id, known: *Known_Bits, q: Simplify_Query, depth: u32) {
+    if q.cc && cc_affects(q.cc, v) known_bits_from_cond(v, q.cc.cond, known, q, q.cc.invert, depth);
     if q.cxt == NONE return;
     if q.dc && q.dt {
         cb := inst_block(q.cxt);
@@ -1408,7 +1409,7 @@ is_known_to_be_a_power_of_two :: (v: Value_Id, or_zero: bool, q: Simplify_Query,
         case .SELECT;
             return is_known_to_be_a_power_of_two(op(i, 1), or_zero, q, depth) && is_known_to_be_a_power_of_two(op(i, 2), or_zero, q, depth);
         case .PHI;
-            rq := q;
+            rq := q; rq.cc = null;
             if is_power_of_two_recurrence(i, or_zero, rq, depth) return true;
             nd := max(depth, MAX_ANALYSIS_RECURSION_DEPTH - 1);
             n := nops(i);
@@ -1708,7 +1709,7 @@ is_known_non_zero_from_operator :: (i: Value_Id, de: APInt, q: Simplify_Query, d
             if arm_non_zero(i, true, de, q, depth) && arm_non_zero(i, false, de, q, depth) return true;
         case .PHI;
             if q.use_instr_info && is_non_zero_recurrence(i) return true;
-            rq := q;
+            rq := q; rq.cc = null;
             nd := max(depth, MAX_ANALYSIS_RECURSION_DEPTH - 1);
             n := nops(i);
             for k: 0..n-1 {
