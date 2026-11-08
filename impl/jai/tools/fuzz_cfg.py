@@ -26,9 +26,12 @@ PIPES = [
     "adce,break-crit-edges,print<postdomtree>,print<domtree>",
     "loop-simplify,print<loops>,print<domtree>",
     "require<loops>,break-crit-edges,print<loops>",
+    "loop(loop-rotate),print<loops>,print<domtree>",
+    "lcssa,print<loops>,print<domtree>",
 ]
 # Pipelines whose IR output (-S) is compared byte for byte (so use-list order shows in `; preds =` comments).
-IR_PIPES = ["loop-simplify", "lcssa", "loop-simplify,lcssa", "break-crit-edges", "adce"]
+IR_PIPES = ["loop-simplify", "lcssa", "loop-simplify,lcssa", "break-crit-edges", "adce", "loop(loop-rotate)",
+            "loop(loop-rotate,loop-rotate)"]
 
 
 def gen(rng):

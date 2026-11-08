@@ -176,7 +176,11 @@ update_phi_nodes :: (orig_bb: Value_Id, new_bb: Value_Id, preds: [] Value_Id, bi
 split_block_predecessors :: (bb: Value_Id, preds: [] Value_Id, suffix: string, dt: *Dom_Tree, li: *Loop_Info,
                               mssau: *Mssa_Updater = null, preserve_lcssa := false) -> Value_Id {
     if !block_can_split_predecessors(bb) return NONE;
-    if block_is_landing_pad(bb) fatal("SplitBlockPredecessors of a landing pad (SplitLandingPadPredecessors) is not implemented yet");
+    if block_is_landing_pad(bb) {
+        nbs: [..] Value_Id; nbs.allocator = temp;
+        split_landing_pad_predecessors(bb, preds, suffix, tprint("%.split-lp", suffix), *nbs, dt, li, mssau, preserve_lcssa);
+        return nbs[0];
+    }
     f := block_fn(bb);
     // BasicBlock::Create(Ctx, Name, Parent, InsertBefore = BB)
     nb := create_block(f, tprint("%1%2", vname(bb), suffix), bb);
@@ -257,4 +261,61 @@ split_block :: (old: Value_Id, split_pt: Value_Id, dt: *Dom_Tree, li: *Loop_Info
     }
     if mssau mssau_move_all_after_splice_blocks(mssau, old, nb, block_first(nb));
     return nb;
+}
+
+// SplitLandingPadPredecessorsImpl (DT path)
+split_landing_pad_predecessors :: (orig: Value_Id, preds: [] Value_Id, suffix1: string, suffix2: string, out: *[..] Value_Id,
+                                   dt: *Dom_Tree, li: *Loop_Info, mssau: *Mssa_Updater, preserve_lcssa: bool) {
+    f := block_fn(orig);
+    nb1 := create_block(f, tprint("%1%2", vname(orig), suffix1), orig);
+    array_add(out, nb1);
+    bi1 := create_br(orig);
+    block_append_inst(nb1, bi1);
+    copy_debug_loc(bi1, block_first_non_phi(orig));
+    for p: preds {
+        t := block_terminator(p);
+        assert(inst_op(t) != .INDIRECTBR, "Cannot split an edge from an IndirectBrInst");
+        replace_uses_of_with(t, orig, nb1);
+    }
+    hle := update_analysis_information(orig, nb1, preds, dt, li, mssau, preserve_lcssa);
+    update_phi_nodes(orig, nb1, preds, bi1, hle);
+    rest: [..] Value_Id; rest.allocator = temp;
+    {
+        all: [..] Value_Id; all.allocator = temp;
+        block_predecessors(orig, *all);
+        for all if it != nb1 array_add(*rest, it);
+    }
+    nb2: Value_Id = NONE;
+    if rest.count {
+        nb2 = create_block(f, tprint("%1%2", vname(orig), suffix2), orig);
+        array_add(out, nb2);
+        bi2 := create_br(orig);
+        block_append_inst(nb2, bi2);
+        copy_debug_loc(bi2, block_first_non_phi(orig));
+        for rest replace_uses_of_with(block_terminator(it), orig, nb2);
+        hle2 := update_analysis_information(orig, nb2, rest, dt, li, mssau, preserve_lcssa);
+        update_phi_nodes(orig, nb2, rest, bi2, hle2);
+    }
+    lpad := block_first_non_phi(orig);
+    c1 := inst_clone(lpad);
+    insert_at_position(c1, nb1, block_first(nb1), true);
+    set_name(c1, tprint("lpad%", suffix1));
+    if nb2 != NONE {
+        c2 := inst_clone(lpad);
+        insert_at_position(c2, nb2, block_first(nb2), true);
+        set_name(c2, tprint("lpad%", suffix2));
+        if has_uses(lpad) {
+            assert(type_kind(vtype(lpad)) != .TOKEN);
+            pn := create_phi(vtype(lpad), 2);
+            insert_at_position(pn, orig, lpad, false);
+            set_name(pn, "lpad.phi");
+            phi_add_incoming(pn, c1, nb1);
+            phi_add_incoming(pn, c2, nb2);
+            rauw_with_metadata(lpad, pn);
+        }
+        erase_inst_with_metadata(lpad);
+    } else {
+        rauw_with_metadata(lpad, c1);
+        erase_inst_with_metadata(lpad);
+    }
 }

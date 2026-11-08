@@ -351,15 +351,51 @@ li_make_loop_invariant :: (li: *Loop_Info, l: Loop_Id, v: Value_Id, changed: *bo
     if mssau fatal("Loop::makeLoopInvariant with MemorySSA (MSSAU->moveToPlace) is not implemented yet");
     keep_prof := original_parent == li_header(li, l);
     drop_ub_implying_attrs_and_unknown_metadata(i, keep_prof);
-    if !keep_prof && inst_op(i) == .SELECT && fn_has_profile_data(block_fn(inst_block(i)))
-        fatal("setExplicitlyUnknownBranchWeightsIfProfiled is not implemented yet");
+    if !keep_prof && inst_op(i) == .SELECT set_explicitly_unknown_branch_weights_if_profiled(i, "LoopInfo");
     changed.* = true;
     return true;
 }
 
-// Function::getEntryCount() exists (profile data)
-fn_has_profile_data :: (f: Value_Id) -> bool {
-    return get_metadata(f, md_kind_id("prof")) != NONE;
+// Function::getEntryCount(): the "function_entry_count" of the function's !prof (-1 = none)
+fn_entry_count :: (f: Value_Id) -> (bool, u64) {
+    md := get_metadata(f, md_kind_id("prof"));
+    if md == NONE || md_nops(md) < 1 return false, 0;
+    s := md_op(md, 0);
+    if s == NONE || ir.mds[s].kind != .STRING || ir.mds[s].str != "function_entry_count" return false, 0;
+    c := md_const_int_op(md, 1);
+    v := const_int_zext(c);
+    if v == 0xFFFF_FFFF_FFFF_FFFF return false, 0;
+    return true, v;
+}
+// setExplicitlyUnknownBranchWeightsIfProfiled (ProfDataUtils.cpp)
+set_explicitly_unknown_branch_weights_if_profiled :: (i: Value_Id, pass_name: string) {
+    ok, ec := fn_entry_count(block_fn(inst_block(i)));
+    if !ok || ec == 0 return;
+    ops: [2] Md_Id;
+    ops[0] = md_string("unknown");
+    ops[1] = md_string(pass_name);
+    set_metadata(i, md_kind_id("prof"), md_tuple(ops, false));
+}
+// extractBranchWeights(I, TrueVal, FalseVal)
+extract_branch_weights_2 :: (i: Value_Id) -> (bool, u64, u64) {
+    md, w := branch_weights_of(i);
+    if md == NONE || w.count > 2 return false, 0, 0;
+    return true, w[0], w[1];
+}
+// setFittedBranchWeights(I, Weights, IsExpected = false, ElideAllZero = true)
+set_fitted_branch_weights :: (i: Value_Id, w: [] u64) {
+    mx: u64 = 0;
+    for w if it > mx mx = it;
+    fit := NewArray(w.count, u32,, allocator = temp);
+    if mx > 0xFFFF_FFFF {
+        lz := 0; x := mx; while (x & 0x8000_0000_0000_0000) == 0 { x <<= 1; lz += 1; }
+        off := 32 - lz;
+        for w fit[it_index] = cast(u32) (it >> cast(u64) off);
+    } else for w fit[it_index] = cast(u32) it;
+    all_zero := true;
+    for fit if it != 0 all_zero = false;
+    if all_zero { set_metadata(i, md_kind_id("prof"), NONE); return; }   // ElideAllZeroBranchWeights
+    set_branch_weights(i, fit);
 }
 
 // Instruction::dropUBImplyingAttrsAndUnknownMetadata(KnownIDs = {prof} if keep_prof)
@@ -622,10 +658,26 @@ perform_branch_to_common_dest_folding :: (bi: Value_Id, pbi: Value_Id, mssau: *M
         phi_add_incoming(pn, phi_incoming_value_for_block(pn, bb), pred);
     }
     if mssau fatal("foldBranchToCommonDest with MemorySSA is not implemented yet");
-    pw := branch_weights_of(pbi);
-    sw := branch_weights_of(bi);
-    if pw != NONE || sw != NONE fatal("foldBranchToCommonDest with branch weights is not implemented yet");
-    set_metadata(pbi, md_kind_id("prof"), NONE);
+    // extractPredSuccWeights
+    md_weights: [2] u64;
+    have_weights := false;
+    {
+        ph, pt, pf := extract_branch_weights_2(pbi);
+        sh, st, sf := extract_branch_weights_2(bi);
+        if ph || sh {
+            if !ph { pt = 1; pf = 1; }
+            if !sh { st = 1; sf = 1; }
+            if get_successor(pbi, 0) == bb {
+                md_weights[0] = pt * st;
+                md_weights[1] = pf * (sf + st) + pt * sf;
+            } else {
+                md_weights[0] = pt * (sf + st) + pf * st;
+                md_weights[1] = pf * sf;
+            }
+            have_weights = true;
+            set_fitted_branch_weights(pbi, md_weights);
+        } else set_metadata(pbi, md_kind_id("prof"), NONE);
+    }
     set_successor(pbi, ifx get_successor(pbi, 0) != bb then cast(u32) 1 else 0, unique_succ);
     loop_md := get_metadata(bi, MD_LOOP_KIND);
     if loop_md != NONE set_metadata(pbi, MD_LOOP_KIND, loop_md);
@@ -677,6 +729,7 @@ perform_branch_to_common_dest_folding :: (bi: Value_Id, pbi: Value_Id, mssau: *M
     else if opc == .AND nc = irb_select(*b, lhs, bic, const_int(vtype(lhs), 0), "or.cond");
     else nc = irb_select(*b, lhs, const_int(vtype(lhs), 1), bic, "or.cond");
     set_op(pbi, 0, nc);
+    if have_weights && is_inst(nc) && inst_op(nc) == .SELECT set_fitted_branch_weights(nc, md_weights);
     return true;
 }
 

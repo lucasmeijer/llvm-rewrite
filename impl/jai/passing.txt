@@ -6086,6 +6086,7 @@ tests/imported/llvm/Transforms/LoopSimplify/2004-04-13-LoopSimplifyUpdateDomFron
 tests/imported/llvm/Transforms/LoopSimplify/2010-07-15-IncorrectDomFrontierUpdate.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/2010-12-26-PHIInfiniteLoop.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/2010-12-26-PHIInfiniteLoop.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/2011-12-14-LandingpadHeader.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/2011-12-14-LandingpadHeader.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/2012-03-20-indirectbr.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/2012-03-20-indirectbr.ll::roundtrip
@@ -6094,6 +6095,7 @@ tests/imported/llvm/Transforms/LoopSimplify/basictest.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/basictest.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/convergent.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/convergent.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/dbg-loc.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/dbg-loc.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/do-preheader-dbg-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/do-preheader-dbg.ll::roundtrip
@@ -6117,8 +6119,10 @@ tests/imported/llvm/Transforms/LoopSimplify/pr33494.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/pr68285.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/preserve-llvm-loop-metadata.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/preserve-llvm-loop-metadata.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/profile-info.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/profile-info.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/single-backedge.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/unreachable-loop-pred.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/unreachable-loop-pred.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/update_latch_md.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/update_latch_md.ll::roundtrip
