@@ -169,7 +169,7 @@ fn target_layout_type(t: i32) -> i32 {
 recursive fn dl_size_bits(t: i32) -> i64 {
     let k = types[t].kind;
     if k == TK_TARGETEXT { return dl_size_bits(target_layout_type(t)); }
-    if k == TK_INT { return types[t].n as i64; }
+    if k == TK_INT || k == TK_BYTE { return types[t].n as i64; }
     if k == TK_PTR { return dl_ptr(types[t].n).bits; }
     if k == TK_LABEL { return dl_ptr(0).bits; }
     if k == TK_HALF || k == TK_BFLOAT { return 16; }
@@ -197,7 +197,7 @@ recursive fn dl_align(t: i32, abi: bool) -> i64 {
         let base = if abi { dl_struct_abi } else { dl_struct_pref };
         return max(base, sa);
     }
-    if k == TK_INT { return dl_int_align(types[t].n, abi); }
+    if k == TK_INT || k == TK_BYTE { return dl_int_align(types[t].n, abi); }
     if k >= TK_HALF && k <= TK_PPC_FP128 {
         let bits = dl_size_bits(t);
         for s in dl_floats { if s.bits == bits { return if abi { s.abi } else { s.pref }; } }

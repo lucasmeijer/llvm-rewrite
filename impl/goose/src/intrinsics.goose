@@ -543,6 +543,7 @@ recursive fn mangled_type(out: u8[>..]&, t: i32) {
     if k == TK_PPC_FP128 { out.append("ppcf128"); return; }
     if k == TK_X86_AMX { out.append("x86amx"); return; }
     if k == TK_INT { out.push('i'); format_u64_dec(out, types[t].n as u64); return; }
+    if k == TK_BYTE { out.push('b'); format_u64_dec(out, types[t].n as u64); return; }
     fatal("unhandled type in intrinsic name mangling");
 }
 
