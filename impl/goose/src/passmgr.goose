@@ -28,6 +28,8 @@ import loopsimplify;
 import lcssa;
 import aaeval;
 import memoryssa;
+import aa;
+import mssaupdater;
 import apint;
 import sccp;
 import build_libcalls;
@@ -666,7 +668,10 @@ fn invalidate_function(fv: i32, preserved: u32) {
     if (preserved & (1 << A_POSTDOMTREE)) == 0 { dt_invalidate(fv, DT_POST); }
     if (preserved & (1 << A_LOOPS)) == 0 { li_invalidate(fv); }
     if (preserved & (1 << A_CYCLES)) == 0 { ci_invalidate(fv); }
-    if (preserved & (1 << A_MEMORYSSA)) == 0 || (preserved & (1 << A_DOMTREE)) == 0 || (preserved & (1 << A_AA)) == 0 { mssa_invalidate(fv); }
+    // MemorySSAAnalysis::Result::invalidate: not preserved, or AAManager / DominatorTree invalidated. AAManager is
+    // stateless (preservedWhenStateless): only invalidate<aa> abandons it (PA_ALL without the A_AA bit).
+    let aa_abandoned = preserved == (PA_ALL & ~((1 as u32) << A_AA));
+    if (preserved & (1 << A_MEMORYSSA)) == 0 || (preserved & (1 << A_DOMTREE)) == 0 || aa_abandoned { mssa_invalidate(fv); }
     // ScalarEvolution::invalidate: also when the domtree or loops go
     if (preserved & (1 << A_SCEV)) == 0 || (preserved & (1 << A_DOMTREE)) == 0 || (preserved & (1 << A_LOOPS)) == 0 { scev_invalidate(fv); }
 }
@@ -724,7 +729,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_AA_EVAL => { aa_eval_run(fv); return PA_ALL; },
         P_PRINT_MEMORYSSA => { mssa_print(fv, pnodes[n].arg == 0); return PA_ALL; },
         P_PRINT_MEMORYSSA_WALKER => { mssa_print_walker(fv); return PA_ALL; },
-        P_VERIFY_MEMORYSSA => { mssa_get(fv); return PA_ALL; },
+        P_VERIFY_MEMORYSSA => { mssa_get(fv); mssa_verify(fv); return PA_ALL; },
         P_SCCP => { return sccp_run(fv); },
         P_EARLY_CSE => { return early_cse_run(fv, pnodes[n].arg != 0); },
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
@@ -784,10 +789,13 @@ fn run_loop_adaptor(n: i32, fv: i32) {
     }
     li_get(fv);
     if li_ntop(fv) == 0 { invalidate_function(fv, pa); return; }
-    // LoopStandardAnalysisResults: AA, AC, DT, LI, SE, TLI, TTI (and MSSA)
+    // MSSA = UseMemorySSA ? &AM.getResult<MemorySSAAnalysis>(F) : nullptr; LoopStandardAnalysisResults: AA, AC,
+    // DT, LI, SE, TLI, TTI
+    let use_mssa = pnodes[n].arg != 0;
+    if use_mssa { mssa_get(fv); msu_reset(); }
+    aa_begin(fv);
     dt_get(fv, DT_DOM);
     scev_get(fv);
-    if pnodes[n].arg != 0 { not_implemented("loop-mssa (MemorySSA)"); }
     tli_cur_fn = fv;
     lpm_nest_mode = false;
     lpm_append_function_loops(fv);
@@ -796,11 +804,17 @@ fn run_loop_adaptor(n: i32, fv: i32) {
         lpm_cur = l;
         lpm_skip = false;
         let ppa = run_loop_list(n, l, fv);
+        if use_mssa && (ppa & ((1 as u32) << A_MEMORYSSA)) == 0 {
+            write_stderr("LLVM ERROR: Loop pass manager using MemorySSA contains a pass that does not preserve MemorySSA\n");
+            exit(1);
+        }
+        if use_mssa && flag_bool("verify-memoryssa", false) { mssa_verify(fv); }
         pa &= ppa;
         if lpm_wl_empty() { break; }
     }
     lpm_cur = -1;
     pa |= ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_LOOPS) | ((1 as u32) << A_SCEV);
+    if use_mssa { pa |= (1 as u32) << A_MEMORYSSA; }
     invalidate_function(fv, pa);
 }
 

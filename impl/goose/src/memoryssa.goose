@@ -35,7 +35,7 @@ let MSSA_INVALID_ID: i32 = -1;
 // goes to the head of the value's list), so iterating the users of an access matches LLVM's order.
 struct MAcc { kind: u8, id: i32, inst: i32, bb: i32, def: i32, opt: i32, opt_id: i32,
               prev: i32, next: i32, dprev: i32, dnext: i32, pat: i32, pn: i32, pcap: i32, num: i32,
-              u0: i32, u1: i32, first_use: i32 }
+              u0: i32, u1: i32, first_use: i32, vh: i32 }
 var macc: MAcc[>..<];
 var mphi_v: i32[>..<];
 var mphi_b: i32[>..<];
@@ -125,7 +125,7 @@ fn ma_new(kind: u8, inst: i32, bb0: i32) -> i32 {
     let a = macc.len as i32;
     macc.push(MAcc { kind: kind, id: 0, inst: inst, bb: bb0, def: -1, opt: -1, opt_id: MSSA_INVALID_ID,
                      prev: -1, next: -1, dprev: -1, dnext: -1, pat: 0, pn: 0, pcap: 0, num: 0,
-                     u0: -1, u1: -1, first_use: -1 });
+                     u0: -1, u1: -1, first_use: -1, vh: -1 });
     if kind != MAK_PHI {
         macc[a].u0 = mu_new(a, 0);
         if kind != MAK_USE { macc[a].u1 = mu_new(a, 1); }
@@ -257,12 +257,22 @@ fn mssa_ignored_intrinsic(i: i32) -> bool {
 }
 
 // createNewAccess (no template)
-fn mssa_create_new_access(i: i32, q: i32) -> i32 {
+fn mssa_create_new_access(i: i32, q: i32) -> i32 { mssa_create_new_access_t(i, q, -1) }
+
+// createNewAccess(I, AA, Template): template_kind = MAK_DEF / MAK_USE of the template access, -1 = none
+fn mssa_create_new_access_t(i: i32, q: i32, template_kind: i64) -> i32 {
     if mssa_ignored_intrinsic(i) { return -1; }
     if !inst_may_read_memory(i) && !inst_may_write_memory(i) { return -1; }
-    let mr = aa_inst_loc_mr(i, ml_none(), q);
-    let is_def = mr_is_mod(mr) || mssa_is_ordered(i);
-    let is_use = mr_is_ref(mr);
+    var is_def = false;
+    var is_use = false;
+    if template_kind >= 0 {
+        is_def = template_kind == (MAK_DEF as i64);
+        is_use = template_kind == (MAK_USE as i64);
+    } else {
+        let mr = aa_inst_loc_mr(i, ml_none(), q);
+        is_def = mr_is_mod(mr) || mssa_is_ordered(i);
+        is_use = mr_is_ref(mr);
+    }
     if !is_def && !is_use { return -1; }
     var a: i32 = -1;
     if is_def {
@@ -287,10 +297,14 @@ fn mssa_create_phi(bv: i32) -> i32 {
 }
 
 // ForwardIDFCalculator::calculate over DefiningBlocks (no live-in pruning); SS_MSSA = defining-blocks set,
-// SS_MSSA2 = VisitedPQ, SS_MSSA3 = VisitedWorklist
-fn mssa_idf(fv: i32, defs: const i32[:], out: i32[>..<]&) {
+// SS_MSSA2 = VisitedPQ, SS_MSSA3 = VisitedWorklist. use_gd: ForwardIDFCalculator(DT, GD) whose children come from
+// GraphDiff instance gd_inst (successors reversed, then the snapshot's deletions/insertions; CFGDiff.h).
+fn mssa_idf(fv: i32, defs: const i32[:], out: i32[>..<]&, use_gd: bool, gd_inst: i64) {
+    ss_clear(SS_MSSA);
+    for d in defs { ss_add(SS_MSSA, d); }
     ss_clear(SS_MSSA2);
     ss_clear(SS_MSSA3);
+    var kids: i32[>..<] = [];
     dt_update_dfs_numbers(fv, DT_DOM);
     var pq: i64[>..<] = [];
     var pqb: i32[>..<] = [];
@@ -313,15 +327,17 @@ fn mssa_idf(fv: i32, defs: const i32[:], out: i32[>..<]&) {
         wl.push(root);
         while wl.len > 0 {
             let n = wl.pop();
-            let t = block_terminator(n);
-            if t >= 0 {
-                for k in term_nsucc(t) {
-                    let s = term_succ(t, k);
-                    if dt_level(DT_DOM, s) > root_level { continue; }
-                    if !ss_add(SS_MSSA2, s) { continue; }
-                    out.push(s);
-                    if !ss_has(SS_MSSA, s) { pq_push(s); }
-                }
+            kids.clear();
+            if use_gd { gd_children(gd_inst, n, false, kids); }
+            else {
+                let t = block_terminator(n);
+                if t >= 0 { for k in term_nsucc(t) { kids.push(term_succ(t, k)); } }
+            }
+            for s in kids {
+                if dt_level(DT_DOM, s) > root_level { continue; }
+                if !ss_add(SS_MSSA2, s) { continue; }
+                out.push(s);
+                if !ss_has(SS_MSSA, s) { pq_push(s); }
             }
             var c = dt_first_child(fv, DT_DOM, n);
             while c >= 0 {
@@ -332,13 +348,13 @@ fn mssa_idf(fv: i32, defs: const i32[:], out: i32[>..<]&) {
     }
 }
 
-// renameBlock
-fn mssa_rename_block(bv: i32, incoming0: i32) -> i32 {
+// renameBlock(BB, IncomingVal, RenameAllUses)
+fn mssa_rename_block(bv: i32, incoming0: i32, rename_all: bool) -> i32 {
     var incoming = incoming0;
     var a = mb_first(bv);
     while a >= 0 {
         if ma_is_use_or_def(a) {
-            if macc[a].def < 0 { ma_set_def(a, incoming); }
+            if macc[a].def < 0 || rename_all { ma_set_def(a, incoming); }
             if macc[a].kind == MAK_DEF { incoming = a; }
         } else {
             incoming = a;
@@ -348,23 +364,30 @@ fn mssa_rename_block(bv: i32, incoming0: i32) -> i32 {
     return incoming;
 }
 
-// renameSuccessorPhis (RenameAllUses = false)
-fn mssa_rename_successor_phis(bv: i32, incoming: i32) {
+// renameSuccessorPhis(BB, IncomingVal, RenameAllUses)
+fn mssa_rename_successor_phis(bv: i32, incoming: i32, rename_all: bool) {
     let t = block_terminator(bv);
     if t < 0 { return; }
     for k in term_nsucc(t) {
         let s = term_succ(t, k);
         let f = mb_first(s);
         if f < 0 || macc[f].kind != MAK_PHI { continue; }
-        mphi_add_incoming(f, incoming, bv);
+        if rename_all {
+            var done = false;
+            for i in mphi_n(f) { if mphi_blk(f, i) == bv { mphi_set_val(f, i, incoming); done = true; } }
+            if !done { fatal("internal: MemorySSA: incomplete phi during partial rename"); }
+        } else {
+            mphi_add_incoming(f, incoming, bv);
+        }
     }
 }
 
-// renamePass(DT root, LiveOnEntry, Visited, SkipVisited = false, RenameAllUses = false); visited = SS_MSSA4
-fn mssa_rename_pass(fv: i32, root: i32, incoming0: i32) {
-    ss_add(SS_MSSA4, root);
-    var incoming = mssa_rename_block(root, incoming0);
-    mssa_rename_successor_phis(root, incoming);
+// renamePass(Root, IncomingVal, Visited, SkipVisited, RenameAllUses); Visited = SS_MSSA4 (the caller clears it)
+fn mssa_rename_pass(fv: i32, root: i32, incoming0: i32, skip_visited: bool, rename_all: bool) {
+    let already = !ss_add(SS_MSSA4, root);
+    if skip_visited && already { return; }
+    var incoming = mssa_rename_block(root, incoming0, rename_all);
+    mssa_rename_successor_phis(root, incoming, rename_all);
     var st_node: i32[>..<] = [];
     var st_child: i32[>..<] = [];
     var st_inc: i32[>..<] = [];
@@ -381,9 +404,14 @@ fn mssa_rename_pass(fv: i32, root: i32, incoming0: i32) {
             st_inc.pop();
         } else {
             st_child[top] = dt_next_sibling(DT_DOM, child);
-            ss_add(SS_MSSA4, child);
-            incoming = mssa_rename_block(child, incoming);
-            mssa_rename_successor_phis(child, incoming);
+            let av = !ss_add(SS_MSSA4, child);
+            if skip_visited && av {
+                let d = mb_dlast(child);
+                if d >= 0 { incoming = d; }
+            } else {
+                incoming = mssa_rename_block(child, incoming, rename_all);
+            }
+            mssa_rename_successor_phis(child, incoming, rename_all);
             st_node.push(child);
             st_child.push(dt_first_child(fv, DT_DOM, child));
             st_inc.push(incoming);
@@ -448,10 +476,10 @@ fn mssa_build(fv: i32) {
         b = block_next(b);
     }
     var idf: i32[>..<] = [];
-    mssa_idf(fv, defblocks, idf);
+    mssa_idf(fv, defblocks, idf, false, 0);
     for x in idf { mssa_create_phi(x); }
     ss_clear(SS_MSSA4);
-    mssa_rename_pass(fv, entry, live);
+    mssa_rename_pass(fv, entry, live, false, false);
     b = func_entry(fv);
     while b >= 0 {
         if !ss_has(SS_MSSA4, b) { mssa_mark_unreachable(b); }

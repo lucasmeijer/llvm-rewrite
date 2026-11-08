@@ -19,6 +19,8 @@ import instinfo;
 import calls;
 import analyses;
 import domtree;
+import memoryssa;
+import mssaupdater;
 import loopinfo;
 import ssaupdater;
 
@@ -120,6 +122,9 @@ fn has_reachable_loop_entry_to_header(l: i32) -> bool {
     return r;
 }
 
+// MemorySSAUpdater *MSSAU != nullptr (the cached MemorySSA of the function is kept up to date)
+var ls_mssau: bool = false;
+
 // UpdateAnalysisInformation (DT form); returns HasLoopExit.
 fn update_analysis_information(old: i32, nb: i32, preds: const i32[:], use_dt: bool, use_li: bool, preserve_lcssa: bool) -> bool {
     let fv = block_func(old);
@@ -127,6 +132,8 @@ fn update_analysis_information(old: i32, nb: i32, preds: const i32[:], use_dt: b
         if old == dt_root(fv, DT_DOM) { fatal("SplitBlockPredecessors of the entry block (DominatorTree::setNewRoot) is not ported yet"); }
         dt_split_block(fv, DT_DOM, nb);
     }
+    // Update MemoryPhis after split if MemorySSA is available
+    if ls_mssau { msu_wire_old_preds_to_new_pred(old, nb, preds, true); }
     var has_loop_exit = false;
     if !use_li { return false; }
     if !use_dt { fatal("internal: SplitBlockPredecessors updates LoopInfo only with a DominatorTree"); }
@@ -542,12 +549,14 @@ fn insert_unique_backedge_block(l: i32, preheader: i32) -> i32 {
     if loop_md >= 0 { inst_set_md(bt, MDK_LOOP, loop_md); }
     loop_add_basic_block_to_loop(l, be);
     dt_split_block(fv, DT_DOM, be);
+    if ls_mssau { msu_update_phis_unique_backedge(header, preheader, be); }
     return be;
 }
 
 // ---------------------------------------------------------------------------------------------
 // changeToUnreachable(I, PreserveLCSSA, DTU = null, MSSAU = null)
 fn change_to_unreachable(iv: i32, preserve_lcssa: bool) {
+    if ls_mssau { msu_change_to_unreachable(iv); }
     let bb = inst_parent(iv);
     let tm = block_terminator(bb);
     if tm >= 0 {
@@ -652,6 +661,10 @@ recursive fn make_loop_invariant(l: i32, v: i32, ins_pt: i32, changed: bool&) ->
     }
     for k in nops(v) { if !make_loop_invariant(l, op(v, k), ip, changed) { return false; } }
     inst_move_before(v, ip);
+    if ls_mssau {
+        let mud = mssa_access_of(v);
+        if mud >= 0 { msu_move_to_place(mud, inst_parent(ip), MSP_BEFORE_TERMINATOR); }
+    }
     drop_unknown_metadata(v, orig == loop_header(l));
     if iop(v) == OP_SELECT && orig != loop_header(l) && inst_get_md(v, 2) >= 0 {
         fatal("setExplicitlyUnknownBranchWeightsIfProfiled is not ported yet");
@@ -831,12 +844,19 @@ fn simplify_loop(l: i32, preserve_lcssa: bool) -> bool {
 fn loop_simplify_run(fv: i32) -> u32 {
     li_get(fv);
     dt_get(fv, DT_DOM);
+    // AM.getCachedResult<MemorySSAAnalysis>(F): keep it up to date with a MemorySSAUpdater
+    let has_mssa = mssa_valid(fv);
+    ls_mssau = has_mssa;
+    if has_mssa { msu_reset(); }
     var changed = false;
     var k: i64 = 0;
     while k < li_ntop(fv) {
         if simplify_loop(li_top(fv, k), false) { changed = true; }
         k++;
     }
+    ls_mssau = false;
     if !changed { return PA_ALL; }
-    return ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_LOOPS) | ((1 as u32) << A_SCEV);
+    var pa = ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_LOOPS) | ((1 as u32) << A_SCEV);
+    if has_mssa { pa |= (1 as u32) << A_MEMORYSSA; }
+    return pa;
 }

@@ -301,30 +301,38 @@ fn t_find_ncd(a: i32, b: i32) -> i32 {
 }
 
 // ---------------------------------------------------------------------------------------------
-// GraphDiff: the CFG snapshot an incremental batch update walks (CFGDiff.h). Only one is alive at a time.
-// Per (block, map, kind) a stack of children: map 0 = Succ, 1 = Pred; kind 0 = DI[0] deleted, 1 = DI[1] inserted.
+// GraphDiff: the CFG snapshot an incremental batch update walks (CFGDiff.h). Three instances can be alive at once:
+// 0 = the PreViewCFG of a DT batch update, 1 = its PostViewCFG (applyUpdates(Updates, PostViewUpdates)), 2 = a
+// GraphDiff of a client (MemorySSAUpdater::applyInsertUpdates). Per (block, instance, map, kind) a stack of
+// children: map 0 = Succ, 1 = Pred; kind 0 = DI[0] deleted, 1 = DI[1] inserted. The item pool is shared (items are
+// immutable; popping moves a head), so "PreViewCFG = *PostViewCFG" is gd_pre_is_post (instance 0 reads instance 1).
 
 struct GDItem { child: i32, prev: i32 }
 var gd_items: GDItem[>..<];
 var gd_head: i32[>..];
 var gd_stamp: i32[>..];
-var gd_epoch: i32 = 0;
-var gd_inv: bool = false;       // InverseGraph (post-dominators)
-var gd_rev: bool = false;       // UpdatedAreReverseApplied
-var gd_upds: DTUpdate[>..<];    // LegalizedUpdates (popped from the back)
+var gd_epochs: i32[3] = [0; 3];
+var gd_next_epoch: i32 = 0;
+var gd_invs: bool[3] = [false; 3];        // InverseGraph (post-dominators)
+var gd_revs: bool[3] = [false; 3];        // UpdatedAreReverseApplied
+var gd_upds: DTUpdate[>..<];    // LegalizedUpdates of instance 0 (popped from the back)
+var gd_upds1: DTUpdate[>..<];   // LegalizedUpdates of instance 1
+var gd_pre_is_post: bool = false;
+var gd_has_post: bool = false;  // BUI->PostViewCFG != nullptr
 
-fn gd_key(n: i32, m: i64, ins: i64) -> i64 { (block_of(n) as i64) * 4 + m * 2 + ins }
-fn gd_top(key: i64) -> i32 { if key < gd_stamp.len && gd_stamp[key] == gd_epoch { gd_head[key] } else { -1 } }
-fn gd_push(key: i64, c: i32) {
+fn gd_real(inst: i64) -> i64 { if inst == 0 && gd_pre_is_post { 1 } else { inst } }
+fn gd_key(inst: i64, n: i32, m: i64, ins: i64) -> i64 { (block_of(n) as i64) * 12 + inst * 4 + m * 2 + ins }
+fn gd_top(inst: i64, key: i64) -> i32 { if key < gd_stamp.len && gd_stamp[key] == gd_epochs[inst] { gd_head[key] } else { -1 } }
+fn gd_push(inst: i64, key: i64, c: i32) {
     while gd_stamp.len <= key { gd_stamp.push(0); gd_head.push(-1); }
-    let top = gd_top(key);
+    let top = gd_top(inst, key);
     let id = gd_items.len as i32;
     gd_items.push(GDItem { child: c, prev: top });
-    gd_stamp[key] = gd_epoch;
+    gd_stamp[key] = gd_epochs[inst];
     gd_head[key] = id;
 }
-fn gd_pop(key: i64) {
-    let top = gd_top(key);
+fn gd_pop(inst: i64, key: i64) {
+    let top = gd_top(inst, key);
     if top < 0 { fatal("internal: GraphDiff pop of an empty list"); }
     gd_head[key] = gd_items[top].prev;
 }
@@ -355,33 +363,39 @@ fn legalize_updates(ups: const DTUpdate[:], inverse: bool, out: DTUpdate[>..<]&)
     for r in res { out.push(DTUpdate { kind: if r.delta > 0 { DT_INSERT } else { DT_DELETE }, from: r.from, to: r.to }); }
 }
 
-// GraphDiff(Updates, ReverseApplyUpdates)
-fn gd_init(ups: const DTUpdate[:], inverse: bool, reverse_apply: bool) {
-    gd_epoch++;
-    gd_items.clear();
-    gd_inv = inverse;
-    gd_rev = reverse_apply;
-    legalize_updates(ups, inverse, gd_upds);
-    for u in gd_upds {
+// GraphDiff(Updates, ReverseApplyUpdates) as instance inst (2 = a client's GraphDiff<BasicBlock *>)
+fn gd_init(inst: i64, ups: const DTUpdate[:], inverse: bool, reverse_apply: bool) {
+    gd_next_epoch++;
+    gd_epochs[inst] = gd_next_epoch;
+    if inst == 0 { gd_pre_is_post = false; }
+    gd_invs[inst] = inverse;
+    gd_revs[inst] = reverse_apply;
+    var lu: DTUpdate[>..<] = [];
+    legalize_updates(ups, inverse, lu);
+    for u in lu {
         let ins: i64 = if (u.kind == DT_INSERT) == !reverse_apply { 1 } else { 0 };
-        gd_push(gd_key(u.from, 0, ins), u.to);
-        gd_push(gd_key(u.to, 1, ins), u.from);
+        gd_push(inst, gd_key(inst, u.from, 0, ins), u.to);
+        gd_push(inst, gd_key(inst, u.to, 1, ins), u.from);
     }
+    if inst == 0 { gd_upds.clear(); for u in lu { gd_upds.push(u); } }
+    else if inst == 1 { gd_upds1.clear(); for u in lu { gd_upds1.push(u); } }
 }
 
-// popUpdateForIncrementalUpdates
+// popUpdateForIncrementalUpdates on the PreViewCFG (instance 0, or 1 when the PreViewCFG is the PostViewCFG)
+fn gd_num_updates() -> i64 { if gd_real(0) == 1 { gd_upds1.len } else { gd_upds.len } }
 fn gd_pop_update() -> DTUpdate {
-    let u = gd_upds.pop();
-    let ins: i64 = if (u.kind == DT_INSERT) == !gd_rev { 1 } else { 0 };
-    gd_pop(gd_key(u.from, 0, ins));
-    gd_pop(gd_key(u.to, 1, ins));
+    let inst = gd_real(0);
+    let u = if inst == 1 { gd_upds1.pop() } else { gd_upds.pop() };
+    let ins: i64 = if (u.kind == DT_INSERT) == !gd_revs[inst] { 1 } else { 0 };
+    gd_pop(inst, gd_key(inst, u.from, 0, ins));
+    gd_pop(inst, gd_key(inst, u.to, 1, ins));
     return u;
 }
 
-// SemiNCAInfo::getChildren<Inversed>(N, BUI): successors (reversed, for a LIFO worklist) or predecessors (in
-// use-list order); with a batch update in progress, the GraphDiff's deleted children are removed and its
-// inserted children appended (GraphDiff::getChildren).
-fn dt_children(n: i32, inverse: bool, bui: bool, out: i32[>..<]&) {
+// GraphDiff::getChildren<InverseEdge>(N) of instance inst: successors reversed or predecessors (use-list order),
+// minus the snapshot's deleted children, plus its inserted ones.
+fn gd_children(inst0: i64, n: i32, inverse: bool, out: i32[>..<]&) {
+    let inst = gd_real(inst0);
     out.clear();
     if !inverse {
         let tm = block_terminator(n);
@@ -392,9 +406,8 @@ fn dt_children(n: i32, inverse: bool, bui: bool, out: i32[>..<]&) {
     } else {
         each_pred(n) { p => out.push(p); };
     }
-    if !bui { return; }
-    let m: i64 = if inverse != gd_inv { 1 } else { 0 };
-    var it = gd_top(gd_key(n, m, 0));
+    let m: i64 = if inverse != gd_invs[inst] { 1 } else { 0 };
+    var it = gd_top(inst, gd_key(inst, n, m, 0));
     while it >= 0 {
         let c = gd_items[it].child;
         var w: i64 = 0;
@@ -403,9 +416,25 @@ fn dt_children(n: i32, inverse: bool, bui: bool, out: i32[>..<]&) {
         it = gd_items[it].prev;
     }
     let mark = out.len;
-    it = gd_top(gd_key(n, m, 1));
+    it = gd_top(inst, gd_key(inst, n, m, 1));
     while it >= 0 { out.push(gd_items[it].child); it = gd_items[it].prev; }
     reverse(out[mark..]);
+}
+
+// SemiNCAInfo::getChildren<Inversed>(N, BUI): successors (reversed, for a LIFO worklist) or predecessors (in
+// use-list order); with a batch update in progress, the PreViewCFG's children.
+fn dt_children(n: i32, inverse: bool, bui: bool, out: i32[>..<]&) {
+    if bui { gd_children(0, n, inverse, out); return; }
+    out.clear();
+    if !inverse {
+        let tm = block_terminator(n);
+        if tm >= 0 {
+            var k = term_nsucc(tm);
+            while k > 0 { k--; out.push(term_succ(tm, k)); }
+        }
+    } else {
+        each_pred(n) { p => out.push(p); };
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -679,11 +708,14 @@ var bui_recalculated: bool = false;
 
 fn calculate_from_scratch(bui: bool) {
     t_reset();
+    // With a PostViewCFG the PreViewCFG becomes it and the walk uses that view; else the real CFG.
+    let pbui = bui && gd_has_post;
+    if pbui { gd_pre_is_post = true; }
     var roots: i32[>..<] = [];
-    find_roots(false, roots);
+    find_roots(pbui, roots);
     t_roots_set(roots);
     // doFullDFSWalk
-    sn_clear(false);
+    sn_clear(pbui);
     if !is_post() {
         sn_run_dfs(roots[0], 0, 0, false, false) { x, y => true };
     } else {
@@ -978,15 +1010,20 @@ fn dt_value_dominates_inst(defv: i32, user: i32) -> bool {
 // findNearestCommonDominator(A, B); both must be in the tree. May return DT_VROOT for post-dominators.
 fn dt_find_ncd(t: i64, a: i32, b: i32) -> i32 { dt_focus(block_func(a), t); return t_find_ncd(a, b); }
 
-// DominatorTreeBase::applyUpdates(Updates): the CFG already reflects the updates.
-fn dt_apply_updates(fv: i32, t: i64, ups: const DTUpdate[:]) {
-    dt_focus(fv, t);
-    gd_init(ups, t == DT_POST, true);
-    let n = gd_upds.len;
+// DomTreeBuilder::ApplyUpdates(DT, PreViewCFG = instance 0, PostViewCFG = instance 1 if gd_has_post)
+fn dt_apply_gd_updates() {
+    let n = gd_num_updates();
     if n == 0 { return; }
     if n == 1 {
         let u = gd_pop_update();
-        if u.kind == DT_INSERT { sn_insert_edge(false, u.from, u.to); } else { sn_delete_edge(false, u.from, u.to); }
+        if !gd_has_post {
+            if u.kind == DT_INSERT { sn_insert_edge(false, u.from, u.to); } else { sn_delete_edge(false, u.from, u.to); }
+        } else {
+            // BatchUpdateInfo BUI(*PostViewCFG, PostViewCFG)
+            gd_pre_is_post = true;
+            bui_recalculated = false;
+            if u.kind == DT_INSERT { sn_insert_edge(true, u.from, u.to); } else { sn_delete_edge(true, u.from, u.to); }
+        }
         return;
     }
     bui_recalculated = false;
@@ -1002,6 +1039,36 @@ fn dt_apply_updates(fv: i32, t: i64, ups: const DTUpdate[:]) {
         if u.kind == DT_INSERT { sn_insert_edge(true, u.from, u.to); } else { sn_delete_edge(true, u.from, u.to); }
         i++;
     }
+}
+
+// DominatorTreeBase::applyUpdates(Updates): the CFG already reflects the updates.
+fn dt_apply_updates(fv: i32, t: i64, ups: const DTUpdate[:]) {
+    dt_focus(fv, t);
+    gd_items.clear();     // no GraphDiff outlives a DT update (a client's instance 2 must be dead by now)
+    gd_has_post = false;
+    gd_init(0, ups, t == DT_POST, true);
+    dt_apply_gd_updates();
+}
+
+// DominatorTreeBase::applyUpdates(Updates, PostViewUpdates): the DT is updated assuming the CFG after the
+// PostViewUpdates is the end state.
+fn dt_apply_updates_post_view(fv: i32, t: i64, ups: const DTUpdate[:], post: const DTUpdate[:]) {
+    dt_focus(fv, t);
+    gd_items.clear();
+    gd_has_post = true;
+    gd_init(1, post, t == DT_POST, false);
+    if ups.len == 0 {
+        gd_pre_is_post = true;
+        gd_upds.clear();
+    } else {
+        var all: DTUpdate[>..<] = [];
+        for u in ups { all.push(u); }
+        for u in post { all.push(u); }
+        gd_init(0, all, t == DT_POST, true);
+    }
+    dt_apply_gd_updates();
+    gd_has_post = false;
+    gd_pre_is_post = false;
 }
 
 // DominatorTreeBase::insertEdge / deleteEdge (DomTreeBuilder::InsertEdge/DeleteEdge swap for post-dominators).
