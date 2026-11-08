@@ -19,6 +19,9 @@ import apfloat;
 import fpu;
 import constfold;
 import apint;
+import hostmath;
+import binary;
+import bignum;
 import knownbits;
 import pm;
 import vt;
@@ -1030,7 +1033,10 @@ recursive fn cf_fold_call(c: i32, f: i32, mark: i64, n: i64, allow_nondet: bool)
     if ty_kind(rty) == TK_FVEC { return cf_fold_fixed_vector_call(c, id, rty, mark, n); }
     if ty_kind(rty) == TK_SVEC { cfa_not_ported("constant folding of scalable vector calls"); }
     if ty_is_struct(rty) {
-        if id == IID_frexp || id == IID_sincos { cfa_not_ported("constant folding of frexp/sincos"); }
+        if id == IID_frexp || id == IID_sincos {
+            if intrinsic_propagates_poison(id) { for k in n { if is_poison(is_ops[mark + k]) { return c_poison(rty); } } }
+            return cf_fold_frexp_sincos(id, rty, is_ops[mark]);
+        }
         if deinterleave_factor_cf(id) != 0 { cfa_not_ported("constant folding of vector.deinterleave"); }
         return cf_fold_scalar_call(c, id, rty, mark, n);
     }
@@ -1082,7 +1088,7 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
     if id != 0 && intrinsic_propagates_poison(id) {
         for k in n { if is_poison(is_ops[mark + k]) { return c_poison(ty); } }
     }
-    if id == 0 { cfa_not_ported(str("constant folding of the library call ", sbytes(vals[called_function(c)].name))); }
+    if id == 0 { return cf_fold_libcall(c, ty, mark, n); }
     if (id == IID_experimental_constrained_fcmp || id == IID_experimental_constrained_fcmps) && n == 2 {
         let a = is_ops[mark];
         let b = is_ops[mark + 1];
@@ -1135,15 +1141,8 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
             let r = cf_fp_binary_intrinsic(id, a, b);
             if r >= 0 { return r; }
         }
-        if ty_is_fp(ty) || is_fp_or_fp_vec(vals[a].ty) {
-            if id == IID_powi || id == IID_ldexp || id == IID_is_fpclass || id == IID_copysign || is_minmax_fp_iid(id) || id == IID_pow || id == IID_atan2 {
-                cfa_not_ported(str("constant folding of ", intr_name(id as i64)));
-            }
-            if vals[a].kind == VK_CFP || vals[b].kind == VK_CFP || is_undef_val(a) || is_undef_val(b) {
-                cfa_not_ported(str("constant folding of ", intr_name(id as i64)));
-            }
-            return -1;
-        }
+        if vals[a].kind == VK_CFP && !ty_is_vector(vals[a].ty) { return cf_fold_fp_binary_rest(id, ty, a, b); }
+        if ty_is_fp(ty) || is_fp_or_fp_vec(vals[a].ty) { return -1; }
         if ty_is_int(vals[a].ty) && ty_is_int(vals[b].ty) {
             let k0 = const_int_or_undef(a);
             let k1 = const_int_or_undef(b);
@@ -1244,6 +1243,7 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
             return c_int_ap(ty, ap_or(ap_shl(ci_ap(a), shl_amt), ap_lshr(ci_ap(b), lshr_amt)));
         }
         let a = is_ops[mark];
+        if (id == IID_fma || id == IID_fmuladd) && !is_constrained_fp_iid(id) { return cf_fold_fma(id, ty, a, is_ops[mark + 1], is_ops[mark + 2]); }
         if is_fp_or_fp_vec(vals[a].ty) && (vals[a].kind == VK_CFP || is_undef_val(a)) {
             cfa_not_ported(str("constant folding of ", intr_name(id as i64)));
         }
@@ -1353,14 +1353,128 @@ fn cf_vector_reduce(id: i32, v: i32) -> i32 {
     return ap_to_cint(et, acc);
 }
 
-// ConstantFoldScalarCall1 for a ConstantFP operand (only the bit-exact operations are ported)
+// ---------------------------------------------------------------------------------------------
+// Floating-point calls (ConstantFoldScalarCall1/2/3, ConstantFoldLibCall2, ConstantFoldStructCall):
+// rounding, scalbn, fma and fptoi.sat are exact (fpu.goose); the transcendental functions call the host
+// libm like LLVM does (hostmath.goose).
+
+fn cf_ty_is_hfd(ty: i32) -> bool { let k = ty_kind(ty); k == TK_HALF || k == TK_FLOAT || k == TK_DOUBLE }
+fn cf_fp_is_finite(c: i32) -> bool { let p = fp_decompose(fp_kind_ty(vals[c].ty), cint_lo(c), cint_hi(c)); p.cat != FC_NAN && p.cat != FC_INF }
+fn cf_fp_parts(c: i32) -> FpParts { fp_decompose(fp_kind_ty(vals[c].ty), cint_lo(c), cint_hi(c)) }
+// APFloat::isExactlyValue(1.0) (U.isOne())
+fn cf_fp_is_one(c: i32) -> bool {
+    let k = fp_kind_ty(vals[c].ty);
+    let olo, ohi = fp_from_f64(k, 1.0);
+    return cint_lo(c) == olo && cint_hi(c) == ohi;
+}
+// convertToDouble (exact for half/float/double)
+fn cf_fp_to_double_bits(c: i32) -> u64 {
+    let k = fp_kind_ty(vals[c].ty);
+    if k == TK_DOUBLE { return cint_lo(c); }
+    let lo, hi = fp_convert(k, TK_DOUBLE, cint_lo(c), cint_hi(c));
+    return lo;
+}
+// GetConstantFoldFPValue(V, Ty)
+fn cf_fp_from_double_bits(ty: i32, d: u64) -> i32 {
+    let k = fp_kind_ty(ty);
+    if k == TK_DOUBLE { return c_fp(ty, d, 0); }
+    let lo, hi = fp_convert(TK_DOUBLE, k, d, 0);
+    return c_fp(ty, lo, hi);
+}
+// ConstantFoldFP(NativeFP, V, Ty) with the IEEE denormal mode
+fn cf_host1(hid: i64, a: i32, ty: i32) -> i32 {
+    let r, ok = hm_call1(hid, cf_fp_to_double_bits(a));
+    if !ok { return -1; }
+    return cf_fp_from_double_bits(ty, r);
+}
+// ConstantFoldBinaryFP(NativeFP, V, W, Ty)
+fn cf_host2_bits(hid: i64, x: u64, y: u64, ty: i32) -> i32 {
+    let r, ok = hm_call2(hid, x, y);
+    if !ok { return -1; }
+    return cf_fp_from_double_bits(ty, r);
+}
+fn cf_host2(hid: i64, a: i32, b: i32, ty: i32) -> i32 { cf_host2_bits(hid, cf_fp_to_double_bits(a), cf_fp_to_double_bits(b), ty) }
+fn cf_round_integral(a: i32, ty: i32, mode: i64) -> i32 {
+    let lo, hi = fp_round_to_integral(fp_kind_ty(vals[a].ty), cint_lo(a), cint_hi(a), mode);
+    return c_fp(ty, lo, hi);
+}
+fn cf_fp_inf(ty: i32, neg: bool) -> i32 { let lo, hi = fp_encode(fp_kind_ty(ty), neg, 0, 0, 0, true); return c_fp(ty, lo, hi); }
+fn cf_fp_zero(ty: i32, neg: bool) -> i32 { let lo, hi = fp_encode(fp_kind_ty(ty), neg, 0, 0, 0, false); return c_fp(ty, lo, hi); }
+// ilogb(APFloat) of a finite non-zero value: the unbiased exponent of the leading bit
+fn cf_fp_ilogb(p: FpParts, kind: i64) -> i64 {
+    let f = fp_fmt(kind);
+    var ab: i64 = 0;
+    if p.sig1 != 0 { ab = 128 - clz(p.sig1); } else { ab = 64 - clz(p.sig0); }
+    return p.exponent - (f.p - 1) + (ab - 1);
+}
+
+// convertToInteger(rmTowardZero) with saturation (fptoui.sat / fptosi.sat): NaN -> 0
+fn cf_fp_to_int_sat(a: i32, ty: i32, signed: bool) -> i32 {
+    let w = ty_bits(ty_scalar(ty));
+    let p = cf_fp_parts(a);
+    if p.cat == FC_NAN { return ap_to_cint(ty, ap_zero(w)); }
+    if p.cat == FC_INF {
+        if signed { return ap_to_cint(ty, if p.neg { ap_smin_val(w) } else { ap_smax_val(w) }); }
+        return ap_to_cint(ty, if p.neg { ap_zero(w) } else { ap_ones(w) });
+    }
+    var mag: u32[>..<] = [];
+    let neg = fp_trunc_magnitude(fp_kind_ty(vals[a].ty), cint_lo(a), cint_hi(a), mag);
+    let ab = bn_active_bits(mag);
+    if !signed {
+        if neg { return ap_to_cint(ty, ap_zero(w)); }
+        if ab > w { return ap_to_cint(ty, ap_ones(w)); }
+    } else {
+        if neg {
+            // -mag >= -2^(w-1)
+            if ab > w || (ab == w && bn_ctz(mag) != w - 1) { return ap_to_cint(ty, ap_smin_val(w)); }
+        } else if ab > w - 1 { return ap_to_cint(ty, ap_smax_val(w)); }
+    }
+    var ws: u64[>..] = [];
+    for k in (ab + 63) / 64 { ws.push(bn_word(mag, k)); }
+    let m = ap_from_words(w, ws);
+    return ap_to_cint(ty, if neg { ap_neg(m) } else { m });
+}
+
+// ConstantFoldScalarCall1 for a ConstantFP operand of an intrinsic
 fn cf_fold_fp_unary_intrinsic(id: i32, ty: i32, a: i32) -> i32 {
-    let k = fp_kind_ty(vals[a].ty);
+    if id == IID_fptoui_sat || id == IID_fptosi_sat { return cf_fp_to_int_sat(a, ty, id == IID_fptosi_sat); }
+    if id == IID_canonicalize { cfa_not_ported("constant folding of llvm.canonicalize"); }
+    if ty_kind(ty) == TK_FP128 && id == IID_log { cfa_not_ported("constant folding of fp128 log (logf128)"); }
+    if !cf_ty_is_hfd(ty) && !ty_is_int(ty) { return -1; }
+    if id == IID_nearbyint || id == IID_rint || id == IID_roundeven { return cf_round_integral(a, ty, FRM_NEAREST_EVEN); }
+    if id == IID_round { return cf_round_integral(a, ty, FRM_NEAREST_AWAY); }
+    if id == IID_ceil { return cf_round_integral(a, ty, FRM_UP); }
+    if id == IID_floor { return cf_round_integral(a, ty, FRM_DOWN); }
+    if id == IID_trunc { return cf_round_integral(a, ty, FRM_ZERO); }
     if id == IID_fabs {
-        let lo, hi = fp_with_sign(k, cint_lo(a), cint_hi(a), false);
+        let lo, hi = fp_with_sign(fp_kind_ty(vals[a].ty), cint_lo(a), cint_hi(a), false);
         return c_fp(ty, lo, hi);
     }
-    cfa_not_ported(str("constant folding of ", intr_name(id as i64)));
+    if is_constrained_fp_iid(id) { cfa_not_ported(str("constant folding of ", intr_name(id as i64))); }
+    let nm = intr_name(id as i64);
+    if starts_with(nm, "llvm.nvvm.") || starts_with(nm, "llvm.amdgcn.") || starts_with(nm, "llvm.wasm.") {
+        cfa_not_ported(str("constant folding of ", nm));
+    }
+    if !cf_fp_is_finite(a) { return -1; }
+    let p = cf_fp_parts(a);
+    if id == IID_log || id == IID_log2 || id == IID_log10 {
+        if p.cat == FC_ZERO { return cf_fp_inf(ty, true); }
+        if p.neg { return c_fp_nan_ty(ty); }
+        if cf_fp_is_one(a) { return cf_fp_zero(ty, false); }
+        return cf_host1(if id == IID_log { HM1_LOG } else if id == IID_log2 { HM1_LOG2 } else { HM1_LOG10 }, a, ty);
+    }
+    if id == IID_exp { return cf_host1(HM1_EXP, a, ty); }
+    if id == IID_exp2 { return cf_host2_bits(HM2_POW, binary::bits_of_f64(2.0), cf_fp_to_double_bits(a), ty); }
+    if id == IID_exp10 { return cf_host2_bits(HM2_POW, binary::bits_of_f64(10.0), cf_fp_to_double_bits(a), ty); }
+    if id == IID_sin { return cf_host1(HM1_SIN, a, ty); }
+    if id == IID_cos { return cf_host1(HM1_COS, a, ty); }
+    if id == IID_sinh { return cf_host1(HM1_SINH, a, ty); }
+    if id == IID_cosh { return cf_host1(HM1_COSH, a, ty); }
+    if id == IID_atan {
+        if p.cat == FC_ZERO { return c_fp(ty, cint_lo(a), cint_hi(a)); }
+        return cf_host1(HM1_ATAN, a, ty);
+    }
+    if id == IID_sqrt { return cf_host1(HM1_SQRT, a, ty); }
     return -1;
 }
 
@@ -1403,4 +1517,216 @@ fn cf_fcmp_pred_name(s: const u8[:]) -> i64 {
     let names: const u8[:][] = ["false", "oeq", "ogt", "oge", "olt", "ole", "one", "ord", "uno", "ueq", "ugt", "uge", "ult", "ule", "une", "true"];
     for x, i in names { if x == s { return i as i64; } }
     return -1;
+}
+// ConstantFoldScalarCall1 / ConstantFoldLibCall2 for library functions (TLI names)
+recursive fn cf_fold_libcall(c: i32, ty: i32, mark: i64, n: i64) -> i32 {
+    let f = called_function(c);
+    if f < 0 || vals[f].name < 0 { return -1; }
+    var nm = sbytes(vals[f].name);
+    if nm.len > 0 && nm[0] == 1 { nm = nm[1..]; }
+    let lf = tli_lookup_name(nm);
+    if lf < 0 { return -1; }
+    if n == 1 {
+        let a = is_ops[mark];
+        if vals[a].kind != VK_CFP || ty_is_vector(vals[a].ty) { return -1; }
+        if ty_kind(ty) == TK_FP128 && lf == LF_logl { cfa_not_ported("constant folding of fp128 logl (logf128)"); }
+        if !cf_ty_is_hfd(ty) && !ty_is_int(ty) { return -1; }
+        if !cf_fp_is_finite(a) { return -1; }
+        let p = cf_fp_parts(a);
+        let has = tli_has(lf);
+        if lf == LF_acos || lf == LF_acosf || lf == LF_acos_finite || lf == LF_acosf_finite { if has { return cf_host1(HM1_ACOS, a, ty); } return -1; }
+        if lf == LF_asin || lf == LF_asinf || lf == LF_asin_finite || lf == LF_asinf_finite { if has { return cf_host1(HM1_ASIN, a, ty); } return -1; }
+        if lf == LF_atan || lf == LF_atanf {
+            if p.cat == FC_ZERO { return c_fp(ty, cint_lo(a), cint_hi(a)); }
+            if has { return cf_host1(HM1_ATAN, a, ty); }
+            return -1;
+        }
+        if lf == LF_ceil || lf == LF_ceilf { if has { return cf_round_integral(a, ty, FRM_UP); } return -1; }
+        if lf == LF_cos || lf == LF_cosf { if has { return cf_host1(HM1_COS, a, ty); } return -1; }
+        if lf == LF_cosh || lf == LF_coshf || lf == LF_cosh_finite || lf == LF_coshf_finite { if has { return cf_host1(HM1_COSH, a, ty); } return -1; }
+        if lf == LF_exp || lf == LF_expf || lf == LF_exp_finite || lf == LF_expf_finite { if has { return cf_host1(HM1_EXP, a, ty); } return -1; }
+        if lf == LF_exp2 || lf == LF_exp2f || lf == LF_exp2_finite || lf == LF_exp2f_finite {
+            if has { return cf_host2_bits(HM2_POW, binary::bits_of_f64(2.0), cf_fp_to_double_bits(a), ty); }
+            return -1;
+        }
+        if lf == LF_fabs || lf == LF_fabsf {
+            if has { let lo, hi = fp_with_sign(fp_kind_ty(vals[a].ty), cint_lo(a), cint_hi(a), false); return c_fp(ty, lo, hi); }
+            return -1;
+        }
+        if lf == LF_floor || lf == LF_floorf { if has { return cf_round_integral(a, ty, FRM_DOWN); } return -1; }
+        let pos = !p.neg && p.cat != FC_ZERO;
+        if lf == LF_log || lf == LF_logf || lf == LF_log_finite || lf == LF_logf_finite { if pos && has { return cf_host1(HM1_LOG, a, ty); } return -1; }
+        if lf == LF_log2 || lf == LF_log2f || lf == LF_log2_finite || lf == LF_log2f_finite { if pos && has { return cf_host1(HM1_LOG2, a, ty); } return -1; }
+        if lf == LF_log10 || lf == LF_log10f || lf == LF_log10_finite || lf == LF_log10f_finite { if pos && has { return cf_host1(HM1_LOG10, a, ty); } return -1; }
+        if lf == LF_ilogb || lf == LF_ilogbf {
+            if p.cat != FC_ZERO && has { return ap_to_cint(ty, ap_i64(cf_fp_ilogb(p, fp_kind_ty(vals[a].ty)), ty_bits(ty))); }
+            return -1;
+        }
+        if lf == LF_logb || lf == LF_logbf { if p.cat != FC_ZERO && has { return cf_host1(HM1_LOGB, a, ty); } return -1; }
+        if lf == LF_log1p || lf == LF_log1pf {
+            if p.cat == FC_ZERO { return c_fp(ty, cint_lo(a), cint_hi(a)); }
+            // APF > -1.0
+            let k = fp_kind_ty(vals[a].ty);
+            let mlo, mhi = fp_from_f64(k, -1.0);
+            if fp_compare(k, cint_lo(a), cint_hi(a), mlo, mhi) == 2 && has { return cf_host1(HM1_LOG1P, a, ty); }
+            return -1;
+        }
+        if lf == LF_logl { return -1; }
+        if lf == LF_erf || lf == LF_erff { if has { return cf_host1(HM1_ERF, a, ty); } return -1; }
+        if lf == LF_nearbyint || lf == LF_nearbyintf || lf == LF_rint || lf == LF_rintf || lf == LF_roundeven || lf == LF_roundevenf {
+            if has { return cf_round_integral(a, ty, FRM_NEAREST_EVEN); }
+            return -1;
+        }
+        if lf == LF_round || lf == LF_roundf { if has { return cf_round_integral(a, ty, FRM_NEAREST_AWAY); } return -1; }
+        if lf == LF_sin || lf == LF_sinf { if has { return cf_host1(HM1_SIN, a, ty); } return -1; }
+        if lf == LF_sinh || lf == LF_sinhf || lf == LF_sinh_finite || lf == LF_sinhf_finite { if has { return cf_host1(HM1_SINH, a, ty); } return -1; }
+        if lf == LF_sqrt || lf == LF_sqrtf { if !p.neg && has { return cf_host1(HM1_SQRT, a, ty); } return -1; }
+        if lf == LF_tan || lf == LF_tanf { if has { return cf_host1(HM1_TAN, a, ty); } return -1; }
+        if lf == LF_tanh || lf == LF_tanhf { if has { return cf_host1(HM1_TANH, a, ty); } return -1; }
+        if lf == LF_trunc || lf == LF_truncf { if has { return cf_round_integral(a, ty, FRM_ZERO); } return -1; }
+        return -1;
+    }
+    if n == 2 {
+        // ConstantFoldLibCall2
+        let a = is_ops[mark];
+        let b = is_ops[mark + 1];
+        if vals[a].kind != VK_CFP || ty_is_vector(vals[a].ty) || vals[b].kind != VK_CFP || ty_is_vector(vals[b].ty) { return -1; }
+        let has = tli_has(lf);
+        if lf == LF_pow || lf == LF_powf || lf == LF_pow_finite || lf == LF_powf_finite { if has { return cf_host2(HM2_POW, a, b, ty); } return -1; }
+        if lf == LF_fmod || lf == LF_fmodf {
+            if !has { return -1; }
+            // APFloat::mod returns opOK except for signaling NaNs, x = inf, y = 0
+            let pa = cf_fp_parts(a);
+            let pb = cf_fp_parts(b);
+            let k = fp_kind_ty(vals[a].ty);
+            if (pa.cat == FC_NAN && cfp_is_signaling(a)) || (pb.cat == FC_NAN && cfp_is_signaling(b)) { return -1; }
+            if pa.cat != FC_NAN && pb.cat != FC_NAN && (pa.cat == FC_INF || pb.cat == FC_ZERO) { return -1; }
+            let lo, hi = fp_arith(k, FOP_MOD, cint_lo(a), cint_hi(a), cint_lo(b), cint_hi(b));
+            return c_fp(ty, lo, hi);
+        }
+        if lf == LF_remainder || lf == LF_remainderf { if has { cfa_not_ported("constant folding of remainder (APFloat::remainder)"); } return -1; }
+        if lf == LF_atan2 || lf == LF_atan2f {
+            if cf_fp_parts(a).cat == FC_ZERO && cf_fp_parts(b).cat == FC_ZERO { return -1; }
+            if has { return cf_host2(HM2_ATAN2, a, b, ty); }
+            return -1;
+        }
+        if lf == LF_atan2_finite || lf == LF_atan2f_finite { if has { return cf_host2(HM2_ATAN2, a, b, ty); } return -1; }
+        if lf == LF_nextafter || lf == LF_nextafterf || lf == LF_nexttoward || lf == LF_nexttowardf {
+            if has { cfa_not_ported("constant folding of nextafter/nexttoward"); }
+            return -1;
+        }
+        return -1;
+    }
+    return -1;
+}
+
+// ConstantFoldIntrinsicCall2 for two ConstantFP operands or (ConstantFP, ConstantInt), after the min/max family
+fn cf_fold_fp_binary_rest(id: i32, ty: i32, a: i32, b: i32) -> i32 {
+    if vals[a].kind != VK_CFP || ty_is_vector(vals[a].ty) { return -1; }
+    if vals[b].kind == VK_CFP && !ty_is_vector(vals[b].ty) {
+        if vals[b].ty != vals[a].ty { return -1; }
+        if is_constrained_fp_iid(id) { cfa_not_ported(str("constant folding of ", intr_name(id as i64))); }
+        let nm = intr_name(id as i64);
+        if starts_with(nm, "llvm.nvvm.") || starts_with(nm, "llvm.amdgcn.") { cfa_not_ported(str("constant folding of ", nm)); }
+        if !cf_ty_is_hfd(ty) { return -1; }
+        if id == IID_pow { return cf_host2(HM2_POW, a, b, ty); }
+        return -1;
+    }
+    if vals[b].kind == VK_CINT && !ty_is_vector(vals[b].ty) {
+        let k = fp_kind_ty(vals[a].ty);
+        if id == IID_ldexp {
+            var e = ci_ap(b);
+            e = if (e.w as i64) < 32 { ap_sext(e, 32) } else { ap_trunc_ssat(e, 32) };
+            let lo, hi = fp_scalbn(k, cint_lo(a), cint_hi(a), ap_sext64(e));
+            return c_fp(ty, lo, hi);
+        }
+        if id == IID_is_fpclass {
+            let mask = ap_zext64(ci_ap(b));
+            let r = (mask & cfp_class(a)) != 0;
+            return c_int_ty(ty, if r { 1 } else { 0 });
+        }
+        if id == IID_powi {
+            // (float)std::pow(Op1V.convertToFloat(), Exp) for half/float, std::pow(double, int) for double
+            let ex = ap_sext64(ap_trunc(ci_ap(b), 32)) as f64;
+            let eb = binary::bits_of_f64(ex);
+            if ty_kind(ty) == TK_HALF || ty_kind(ty) == TK_FLOAT {
+                let r = hm_pow_noexc(cf_fp_to_double_bits(a), eb);
+                let flo, fhi = fp_convert(TK_DOUBLE, TK_FLOAT, r, 0);
+                if ty_kind(ty) == TK_FLOAT { return c_fp(ty, flo, fhi); }
+                let hlo, hhi = fp_convert(TK_FLOAT, TK_HALF, flo, fhi);
+                return c_fp(ty, hlo, hhi);
+            }
+            if ty_kind(ty) == TK_DOUBLE { return c_fp(ty, hm_pow_noexc(cint_lo(a), eb), 0); }
+            return -1;
+        }
+    }
+    return -1;
+}
+
+// ConstantFoldStructCall for frexp and sincos
+fn cf_frexp_scalar(op0: i32, ity: i32) -> i32, i32 {
+    if vals[op0].kind != VK_CFP || ty_is_vector(vals[op0].ty) { return -1, -1; }
+    let t = vals[op0].ty;
+    let k = fp_kind_ty(t);
+    let p = cf_fp_parts(op0);
+    if p.cat == FC_NAN { let lo, hi = fp_make_quiet(k, cint_lo(op0), cint_hi(op0)); return c_fp(t, lo, hi), c_null(ity); }
+    if p.cat == FC_INF { return op0, c_null(ity); }
+    if p.cat == FC_ZERO { return op0, c_null(ity); }
+    let e = cf_fp_ilogb(p, k) + 1;
+    let lo, hi = fp_scalbn(k, cint_lo(op0), cint_hi(op0), -e);
+    return c_fp(t, lo, hi), ap_to_cint(ity, ap_i64(e, ty_bits(ity)));
+}
+// ConstantFoldScalarCall(Name, sin/cos, Ty, {Op}) for one lane
+fn cf_sincos_lane(id: i32, ty: i32, op0: i32) -> i32 {
+    if is_undef_val(op0) { return if id == IID_cos { c_null(ty) } else { -1 }; }
+    if vals[op0].kind != VK_CFP { return -1; }
+    return cf_fold_fp_unary_intrinsic(id, ty, op0);
+}
+fn cf_fold_frexp_sincos(id: i32, sty: i32, op0: i32) -> i32 {
+    let t0 = ty_field(sty, 0);
+    let t1 = ty_field(sty, 1);
+    let mark = is_ops.len;
+    if ty_kind(t0) == TK_FVEC {
+        let ne = ty_count(t0);
+        for i in ne {
+            let lane = agg_elem(op0, i);
+            if lane < 0 { is_ops.resize(mark); return -1; }
+            var r0: i32 = -1;
+            var r1: i32 = -1;
+            if id == IID_frexp { let x, y = cf_frexp_scalar(lane, ty_scalar(t1)); r0 = x; r1 = y; }
+            else { r0 = cf_sincos_lane(IID_sin, ty_scalar(t0), lane); r1 = cf_sincos_lane(IID_cos, ty_scalar(t0), lane); }
+            if r0 < 0 || r1 < 0 { is_ops.resize(mark); return -1; }
+            is_ops.push(r0);
+            is_ops.push(r1);
+        }
+        let m2 = is_ops.len;
+        for i in ne { is_ops.push(is_ops[mark + 2 * i]); }
+        let v0 = c_aggregate(t0, is_ops[m2..m2 + ne]);
+        is_ops.resize(m2);
+        for i in ne { is_ops.push(is_ops[mark + 2 * i + 1]); }
+        let v1 = c_aggregate(t1, is_ops[m2..m2 + ne]);
+        is_ops.resize(mark);
+        let r = c_aggregate(sty, [v0, v1]);
+        return r;
+    }
+    if ty_kind(t0) == TK_SVEC { cfa_not_ported("constant folding of scalable frexp/sincos"); }
+    var r0: i32 = -1;
+    var r1: i32 = -1;
+    if id == IID_frexp { let x, y = cf_frexp_scalar(op0, t1); r0 = x; r1 = y; }
+    else {
+        if !ty_is_fp(t0) { return -1; }
+        r0 = cf_sincos_lane(IID_sin, t0, op0);
+        r1 = cf_sincos_lane(IID_cos, t0, op0);
+    }
+    if r0 < 0 || r1 < 0 { return -1; }
+    return c_aggregate(sty, [r0, r1]);
+}
+
+// fma / fmuladd (ConstantFoldScalarCall3): APFloat::fusedMultiplyAdd, rmNearestTiesToEven
+fn cf_fold_fma(id: i32, ty: i32, a: i32, b: i32, c3: i32) -> i32 {
+    if vals[a].kind != VK_CFP || vals[b].kind != VK_CFP || vals[c3].kind != VK_CFP { return -1; }
+    if ty_is_vector(vals[a].ty) || ty_is_vector(vals[b].ty) || ty_is_vector(vals[c3].ty) { return -1; }
+    let k = fp_kind_ty(vals[a].ty);
+    let lo, hi = fp_fma(k, cint_lo(a), cint_hi(a), cint_lo(b), cint_hi(b), cint_lo(c3), cint_hi(c3));
+    return c_fp(ty, lo, hi);
 }

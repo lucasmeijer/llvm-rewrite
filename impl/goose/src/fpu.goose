@@ -240,3 +240,138 @@ fn fp_is_largest(kind: i64, lo: u64, hi: u64) -> bool {
     let mh: u64 = ((1 as u64) << (f.p - 64)) - 1;
     return p.sig0 == 0xFFFFFFFFFFFFFFFF && p.sig1 == mh;
 }
+
+// ---------------------------------------------------------------------------------------------
+// roundToIntegral, fusedMultiplyAdd, scalbn, convertToInteger (APFloat.cpp), exact via bignums
+
+let FRM_NEAREST_EVEN = 0;
+let FRM_NEAREST_AWAY = 1;
+let FRM_UP = 2;
+let FRM_DOWN = 3;
+let FRM_ZERO = 4;
+
+// IEEEFloat::roundToIntegral(mode): NaNs are quieted, infinities and zeros kept; a zero result keeps the sign
+fn fp_round_to_integral(kind: i64, lo: u64, hi: u64, mode: i64) -> u64, u64 {
+    let f = fp_fmt(kind);
+    let p = fp_decompose(kind, lo, hi);
+    if p.cat == FC_NAN { return fp_make_quiet(kind, lo, hi); }
+    if p.cat != FC_NORMAL { return lo, hi; }
+    var s: u32[>..<] = [];
+    let e2 = fp_sig_bn(p, f, s);
+    if e2 >= 0 { return lo, hi; }
+    // integer part q = floor(s / 2^-e2), and the remainder relative to one half
+    var q: u32[>..<] = [];
+    bn_copy(q, s);
+    bn_shr(q, -e2);
+    var back: u32[>..<] = [];
+    bn_copy(back, q);
+    bn_shl(back, -e2);
+    var rem: u32[>..<] = [];
+    bn_copy(rem, s);
+    bn_sub(rem, back);
+    var half: u32[>..<] = [];
+    bn_set_u64(half, 1);
+    bn_shl(half, -e2 - 1);
+    let exact = bn_is_zero(rem);
+    let c = bn_cmp(rem, half);
+    var up = false;   // round the magnitude up
+    if !exact {
+        if mode == FRM_NEAREST_EVEN { up = c > 0 || (c == 0 && bn_bit(q, 0)); }
+        else if mode == FRM_NEAREST_AWAY { up = c >= 0; }
+        else if mode == FRM_UP { up = !p.neg; }
+        else if mode == FRM_DOWN { up = p.neg; }
+        else { up = false; }
+    }
+    if up { bn_add_small(q, 1); }
+    var one: u32[>..<] = [];
+    bn_set_u64(one, 1);
+    return fp_round_rational(kind, p.neg, q, one);
+}
+
+// IEEEFloat::fusedMultiplyAdd(b, c, rmNearestTiesToEven): a * b + c rounded once
+fn fp_fma(kind: i64, alo: u64, ahi: u64, blo: u64, bhi: u64, clo: u64, chi: u64) -> u64, u64 {
+    let f = fp_fmt(kind);
+    let a = fp_decompose(kind, alo, ahi);
+    let b = fp_decompose(kind, blo, bhi);
+    let c = fp_decompose(kind, clo, chi);
+    // the product's specials follow multiply (NaN propagation from a then b), then the addition with c
+    if a.cat == FC_NAN || b.cat == FC_NAN || ((a.cat == FC_ZERO && b.cat == FC_INF) || (a.cat == FC_INF && b.cat == FC_ZERO)) {
+        let plo, phi = fp_arith(kind, FOP_MUL, alo, ahi, blo, bhi);
+        return fp_arith(kind, FOP_ADD, plo, phi, clo, chi);
+    }
+    let pneg = a.neg != b.neg;
+    if a.cat == FC_INF || b.cat == FC_INF {
+        let ilo, ihi = fp_encode(kind, pneg, 0, 0, 0, true);
+        return fp_arith(kind, FOP_ADD, ilo, ihi, clo, chi);
+    }
+    if c.cat == FC_NAN { return fp_make_quiet(kind, clo, chi); }
+    if c.cat == FC_INF { return clo, chi; }
+    if a.cat == FC_ZERO || b.cat == FC_ZERO {
+        let zlo, zhi = fp_encode(kind, pneg, 0, 0, 0, false);
+        return fp_arith(kind, FOP_ADD, zlo, zhi, clo, chi);
+    }
+    var sa: u32[>..<] = [];
+    var sb: u32[>..<] = [];
+    let ea = fp_sig_bn(a, f, sa);
+    let eb = fp_sig_bn(b, f, sb);
+    var prod: u32[>..<] = [];
+    bn_mul(sa, sb, prod);
+    let ep = ea + eb;
+    if c.cat == FC_ZERO {
+        var den: u32[>..<] = [];
+        bn_set_u64(den, 1);
+        if ep >= 0 { bn_shl(prod, ep); } else { bn_shl(den, -ep); }
+        return fp_round_rational(kind, pneg, prod, den);
+    }
+    var sc: u32[>..<] = [];
+    let ec = fp_sig_bn(c, f, sc);
+    let e = min(ep, ec);
+    bn_shl(prod, ep - e);
+    bn_shl(sc, ec - e);
+    var num: u32[>..<] = [];
+    var neg = false;
+    if pneg == c.neg { bn_copy(num, prod); bn_add_bn(num, sc); neg = pneg; }
+    else {
+        let cm = bn_cmp(prod, sc);
+        if cm == 0 { return fp_encode(kind, false, 0, 0, 0, false); }
+        if cm > 0 { bn_copy(num, prod); bn_sub(num, sc); neg = pneg; }
+        else { bn_copy(num, sc); bn_sub(num, prod); neg = c.neg; }
+    }
+    var den: u32[>..<] = [];
+    bn_set_u64(den, 1);
+    if e >= 0 { bn_shl(num, e); } else { bn_shl(den, -e); }
+    return fp_round_rational(kind, neg, num, den);
+}
+
+// scalbn(X, Exp, rmNearestTiesToEven): the exponent change is clamped like IEEE scalbn; NaNs are quieted
+fn fp_scalbn(kind: i64, lo: u64, hi: u64, exp0: i64) -> u64, u64 {
+    let f = fp_fmt(kind);
+    let p = fp_decompose(kind, lo, hi);
+    if p.cat == FC_NAN { return fp_make_quiet(kind, lo, hi); }
+    if p.cat != FC_NORMAL { return lo, hi; }
+    let max_exp = f.bias;
+    let min_exp = 1 - f.bias;
+    let maxinc = max_exp - (min_exp - (f.p - 1)) + 1;
+    var exp = exp0;
+    if exp < -maxinc - 1 { exp = -maxinc - 1; }
+    if exp > maxinc { exp = maxinc; }
+    var s: u32[>..<] = [];
+    let e2 = fp_sig_bn(p, f, s) + exp;
+    var den: u32[>..<] = [];
+    bn_set_u64(den, 1);
+    if e2 >= 0 { bn_shl(s, e2); } else { bn_shl(den, -e2); }
+    return fp_round_rational(kind, p.neg, s, den);
+}
+
+// The integer part (rmTowardZero) of a finite value as a bignum magnitude: (neg, magnitude); is_zero if |x| < 1
+fn fp_trunc_magnitude(kind: i64, lo: u64, hi: u64, out: u32[>..<]&) -> bool {
+    let f = fp_fmt(kind);
+    let p = fp_decompose(kind, lo, hi);
+    bn_set_u64(out, 0);
+    if p.cat != FC_NORMAL { return p.neg; }
+    var s: u32[>..<] = [];
+    let e2 = fp_sig_bn(p, f, s);
+    bn_copy(out, s);
+    if e2 >= 0 { bn_shl(out, e2); } else { bn_shr(out, -e2); }
+    return p.neg;
+}

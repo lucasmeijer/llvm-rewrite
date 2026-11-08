@@ -881,3 +881,9 @@ fn ap_same_value_u(a: AP, b: AP) -> bool {
     let w = if a.w > b.w { a.w as i64 } else { b.w as i64 };
     return ap_eq(ap_zext(a, w), ap_zext(b, w));
 }
+
+// truncSSat(w): truncate, saturating to the signed range of w bits
+fn ap_trunc_ssat(a: AP, w: i64) -> AP {
+    if ap_sig_bits(a) <= w { return ap_trunc(a, w); }
+    return if ap_is_neg(a) { ap_smin_val(w) } else { ap_smax_val(w) };
+}
