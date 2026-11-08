@@ -13,6 +13,7 @@ import calls;
 import pm;
 import vt;
 import knownbits;
+import assume;
 import datalayout;
 import gen_attrs;
 import gen_iids;
@@ -97,7 +98,10 @@ recursive fn sc_get_constant_multiple_impl(s: i32, cx0: i32) -> AP {
         if vals[v].kind as i64 == VK_ARG { cx = block_first(func_entry(sc_fv)); }
         else if is_inst(v) { cx = v; }
     }
+    let save = vt_allow_ephemerals;
+    vt_allow_ephemerals = true;
     let kn = sc_compute_known_bits_cx(v, cx);
+    vt_allow_ephemerals = save;
     return sc_shifted_by_zeros(bw, ap_countr_one(kn.z));
 }
 

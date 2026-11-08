@@ -408,6 +408,7 @@ recursive fn scev_reset() {
     sc_newops.resize(0);
     sc_cops.resize(0);
     sc_newscales.resize(0);
+    sc_dscales.resize(0);
     sc_seen.resize(0);
     // SCEVCouldNotCompute
     scevs.push(Scev { kind: SC_CNC as u8, flags: 0, size: 0, ty: -1, at: 0, n: 0, v: -1, lp: -1, hash: 0, chain: -2 });
@@ -823,6 +824,7 @@ recursive fn sc_mul(a: i32, c: i32) -> i32 { sc_mul2(a, c, SF_ANY, 0) }
 var sc_newops: i32[>..<];   // general scratch (worklists, LIOps, AddRecOps, DeadIndices)
 var sc_cops: i32[>..<];
 var sc_newscales: AP[>..<];
+var sc_dscales: AP[>..<];
 
 recursive fn sc_cops_find(mark: i64, s: i32) -> i64 {
     var k = mark;
@@ -1016,28 +1018,28 @@ recursive fn sc_add_n(b: i64, orig: u32, depth: i64) -> i32 {
         let mark = sc_cops.len;
         let interesting, acc = sc_collect_add_scales(mark, ap_zero(bw), true, b, ss_n(b), ap_u64(1, bw));
         if interesting {
-            // MulOpLists: distinct scales in ascending unsigned order
+            // MulOpLists: distinct scales in ascending unsigned order (on sc_dscales)
             let sb = sc_newscales.len;
+            let dm = sc_dscales.len;
             for k in mark..sb {
                 let sc = sc_newscales[k];
                 var seen = false;
-                for j in sb..sc_newscales.len { if ap_eq(sc_newscales[j], sc) { seen = true; break; } }
-                if !seen { sc_newscales.push(sc); }
+                for j in dm..sc_dscales.len { if ap_eq(sc_dscales[j], sc) { seen = true; break; } }
+                if !seen { sc_dscales.push(sc); }
             }
-            // insertion sort of the distinct scales
-            var x = sb + 1;
-            while x < sc_newscales.len {
-                let v = sc_newscales[x];
+            var x = dm + 1;
+            while x < sc_dscales.len {
+                let v = sc_dscales[x];
                 var y = x;
-                while y > sb && ap_ult(v, sc_newscales[y - 1]) { sc_newscales[y] = sc_newscales[y - 1]; y--; }
-                sc_newscales[y] = v;
+                while y > dm && ap_ult(v, sc_dscales[y - 1]) { sc_dscales[y] = sc_dscales[y - 1]; y--; }
+                sc_dscales[y] = v;
                 x++;
             }
             ss.resize(b);
             if !ap_is_zero(acc) { ss.push(sc_get_constant(acc)); }
-            var u = sb;
-            while u < sc_newscales.len {
-                let sc = sc_newscales[u];
+            var u = dm;
+            while u < sc_dscales.len {
+                let sc = sc_dscales[u];
                 if !ap_is_zero(sc) {
                     let lb = ss.len;
                     for k in mark..sb { if ap_eq(sc_newscales[k], sc) { ss.push(sc_cops[k]); } }
@@ -1047,6 +1049,7 @@ recursive fn sc_add_n(b: i64, orig: u32, depth: i64) -> i32 {
                 }
                 u++;
             }
+            sc_dscales.resize(dm);
             sc_cops.resize(mark);
             sc_newscales.resize(mark);
             if ss_n(b) == 0 { return ss_ret(b, sc_get_zero(ty)); }

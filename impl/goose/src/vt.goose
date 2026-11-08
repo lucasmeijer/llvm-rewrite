@@ -437,7 +437,10 @@ recursive fn ikz(v: i32, de: u64, depth0: i64) -> bool {
     if ty_kind(ty) == TK_PTR && k == VK_ARG {
         let f = args_parent[vals[v].sub];
         let pass_by_val = arg_has_attr(v, AK_ByVal) || arg_has_attr(v, AK_InAlloca) || arg_has_attr(v, AK_Preallocated);
-        if (pass_by_val && !null_pointer_is_defined(f, ptr_as(ty))) || arg_has_attr(v, AK_NonNull) { return true; }
+        // Argument::hasNonNullAttr(): nonnull, or dereferenceable bytes where null is not defined
+        let deref = aset_find(arg_attrs(v), AK_Dereferenceable);
+        let deref_nn = deref >= 0 && attrs[deref].i1 > 0 && !null_pointer_is_defined(f, ptr_as(ty));
+        if (pass_by_val && !null_pointer_is_defined(f, ptr_as(ty))) || arg_has_attr(v, AK_NonNull) || deref_nn { return true; }
     }
     if k == VK_INST || k == VK_CEXPR {
         if ikz_operator(v, de, depth) { return true; }

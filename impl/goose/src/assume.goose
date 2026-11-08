@@ -201,6 +201,9 @@ fn is_ephemeral_value_of(i: i32, e: i32) -> bool {
 }
 
 // isValidAssumeForContext(Inv, CxtI, DT, AllowEphemerals = false)
+// SimplifyQuery::AllowEphemerals (set around a query by its caller, e.g. ScalarEvolution::getConstantMultiple)
+var vt_allow_ephemerals: bool = false;
+
 fn valid_assume_for_context(inv: i32, cx: i32) -> bool {
     if inst_parent(inv) == inst_parent(cx) {
         if comes_before(inv, cx) { return true; }
@@ -213,7 +216,7 @@ fn valid_assume_for_context(inv: i32, cx: i32) -> bool {
             if !guaranteed_to_transfer(x) { return false; }
             x = inst_next(x);
         }
-        return !is_ephemeral_value_of(inv, cx);
+        return vt_allow_ephemerals || !is_ephemeral_value_of(inv, cx);
     }
     if sq_no_dt {
         // no DT: trivially dominating cases only
