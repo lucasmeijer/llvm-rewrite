@@ -725,3 +725,40 @@ kb_blsmsk :: (k: Known_Bits) -> Known_Bits {
     ap_set_low_bits(*known.one, min(mn + 1, bw));
     return known;
 }
+
+// KnownBits::pext
+kb_pext :: (val: Known_Bits, mask: Known_Bits) -> Known_Bits {
+    bw := val.zero.bits;
+    res: Known_Bits;
+    res.zero = ap_all_ones(bw); res.one = ap_all_ones(bw);   // setAllConflict
+    m0, m1: u32 = 0, 0;
+    for i: 0..bw-1 {
+        if !ap_get_bit(mask.zero, i) {
+            if !ap_get_bit(val.zero, i) ap_clear_bits_range(*res.zero, m0, m1 + 1);
+            if !ap_get_bit(val.one, i) ap_clear_bits_range(*res.one, m0, m1 + 1);
+        }
+        if ap_get_bit(mask.one, i) { m0 += 1; m1 += 1; }
+        else if !ap_get_bit(mask.zero, i) m1 += 1;
+    }
+    ap_clear_bits_range(*res.one, m0, bw);
+    return res;
+}
+
+// KnownBits::pdep
+kb_pdep :: (val: Known_Bits, mask: Known_Bits) -> Known_Bits {
+    bw := val.zero.bits;
+    res: Known_Bits;
+    res.zero = ap_all_ones(bw); res.one = ap_all_ones(bw);
+    m0, m1: u32 = 0, 0;
+    for i: 0..bw-1 {
+        if !ap_get_bit(mask.one, i) ap_clear_bit(*res.one, i);
+        if !ap_get_bit(mask.zero, i) {
+            range := ap_bits_set(bw, m0, m1 + 1);
+            if !ap_is_subset_of(range, val.one) ap_clear_bit(*res.one, i);
+            if !ap_is_subset_of(range, val.zero) ap_clear_bit(*res.zero, i);
+        }
+        if ap_get_bit(mask.one, i) { m0 += 1; m1 += 1; }
+        else if !ap_get_bit(mask.zero, i) m1 += 1;
+    }
+    return res;
+}

@@ -879,6 +879,8 @@ known_bits_call :: (i: Value_Id, de: APInt, known_in: Known_Bits, q: Simplify_Qu
             k2 := known_bits_de(op(i, 0), de, q, depth + 1); k3 := known_bits_de(op(i, 1), de, q, depth + 1);
             known = ifx id == IID_FSHL then kb_fshl(k2, k3, sa) else kb_fshr(k2, k3, sa);
         case IID_CLMUL; known = kb_clmul(known_bits_de(op(i, 0), de, q, depth + 1), known_bits_de(op(i, 1), de, q, depth + 1));
+        case IID_PEXT; known = kb_pext(known_bits_de(op(i, 0), de, q, depth + 1), known_bits_de(op(i, 1), de, q, depth + 1));
+        case IID_PDEP; known = kb_pdep(known_bits_de(op(i, 0), de, q, depth + 1), known_bits_de(op(i, 1), de, q, depth + 1));
         case IID_UADD_SAT; known = kb_uadd_sat(known_bits_de(op(i, 0), de, q, depth + 1), known_bits_de(op(i, 1), de, q, depth + 1));
         case IID_USUB_SAT; known = kb_usub_sat(known_bits_de(op(i, 0), de, q, depth + 1), known_bits_de(op(i, 1), de, q, depth + 1));
         case IID_SADD_SAT; known = kb_sadd_sat(known_bits_de(op(i, 0), de, q, depth + 1), known_bits_de(op(i, 1), de, q, depth + 1));
