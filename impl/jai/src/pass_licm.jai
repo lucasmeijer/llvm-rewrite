@@ -437,7 +437,12 @@ licm_is_not_used_or_foldable_in_loop :: (c: *Licm, i: Value_Id, foldable_in_loop
         ui := ir.u_user[u];
         u = ir.u_next[u];
         if inst_op(ui) == .PHI {
-            if inst_op(block_terminator(inst_block(ui))) == .CATCHSWITCH return false;
+            pb := inst_block(ui);
+            if inst_op(block_terminator(pb)) == .CATCHSWITCH return false;
+            if inst_op(i) == .CALL && lsi_has_colors(c.safety) {
+                cv := table_find_pointer(*c.safety.block_colors, pb);
+                if !cv || cv.count != 1 return false;
+            }
         }
         if licm_contains_inst(c, ui) {
             if is_foldable { foldable_in_loop.* = true; continue; }
@@ -477,8 +482,14 @@ would_be_out_of_loop_use_requiring_lcssa :: (li: *Loop_Info, v: Value_Id, exit_b
 
 // cloneInstructionInExitBlock
 licm_clone_instruction_in_exit_block :: (c: *Licm, i: Value_Id, exit: Value_Id, pn: Value_Id) -> Value_Id {
-    if inst_op(i) == .CALL && call_num_bundles(i) > 0 && call_has_bundle(i, "funclet")
-        fatal("LICM: sinking a call with a funclet bundle is not implemented yet");
+    if inst_op(i) == .CALL {
+        if call_num_bundles(i) > 0 && call_has_bundle(i, "funclet") fatal("LICM: sinking a call with a funclet bundle is not implemented yet");
+        if lsi_has_colors(c.safety) {
+            cv := table_find_pointer(*c.safety.block_colors, exit);
+            assert(cv != null && cv.count == 1, "non-unique color for exit block!");
+            if block_is_eh_pad(cv.*[0]) fatal("LICM: sinking a call into a funclet (adding a funclet bundle) is not implemented yet");
+        }
+    }
     nw := ic_clone_inst(i);   // CallInst::Create(CI, OpBundles) + copyMetadata for calls: the same without funclets
     insert_at_position(nw, exit, block_first_insertion_pt(exit), true);
     if vname(i).count set_name(nw, tprint("%.le", vname(i)));
@@ -504,9 +515,10 @@ licm_clone_instruction_in_exit_block :: (c: *Licm, i: Value_Id, exit: Value_Id, 
 }
 
 // canSplitPredecessors
-licm_can_split_predecessors :: (pn: Value_Id) -> bool {
+licm_can_split_predecessors :: (c: *Licm, pn: Value_Id) -> bool {
     bb := inst_block(pn);
     if !block_can_split_predecessors(bb) return false;
+    if lsi_has_colors(c.safety) && block_is_eh_pad(bb) return false;
     preds: [..] Value_Id; preds.allocator = temp;
     block_predecessors(bb, *preds);
     for preds if inst_op(block_terminator(it)) == .INDIRECTBR return false;
@@ -521,8 +533,10 @@ licm_split_predecessors_of_loop_exit :: (c: *Licm, pn: Value_Id) {
     uniq: [..] Value_Id; uniq.allocator = temp;
     for preds { dup := false; for x: uniq if x == it { dup = true; break; } if !dup array_add(*uniq, it); }
     for pred: uniq {
-        if phi_block_index(pn, pred) >= 0
-            split_block_predecessors(exit_bb, .[pred], ".split.loop.exit", c.dt, c.li, c.mssau, true, use_dtu = true);
+        if phi_block_index(pn, pred) >= 0 {
+            np := split_block_predecessors(exit_bb, .[pred], ".split.loop.exit", c.dt, c.li, c.mssau, true, use_dtu = true);
+            if lsi_has_colors(c.safety) lsi_copy_colors(c.safety, np, pred);
+        }
     }
 }
 
@@ -552,7 +566,7 @@ licm_sink :: (c: *Licm, i: Value_Id) -> bool {
         }
         array_add(*visited, usr);
         if is_trivially_replaceable_phi(usr, i) continue;
-        if !licm_can_split_predecessors(usr) return changed;
+        if !licm_can_split_predecessors(c, usr) return changed;
         licm_split_predecessors_of_loop_exit(c, usr);
         u = ir.v_first_use[i];
     }

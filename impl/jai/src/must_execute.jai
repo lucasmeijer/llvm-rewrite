@@ -8,7 +8,7 @@
 // The cache keeps LLVM's (possibly stale) semantics: an entry is only dropped by insertInstructionTo of a special
 // instruction or removeInstruction of the cached instruction.
 //
-// Funclet colouring (computeBlockColors for scoped EH personalities) is not ported: it fails loudly.
+// computeBlockColors uses colorEHFunclets (llvm/lib/IR/EHPersonalities.cpp) for scoped EH personalities.
 
 IID_EXPERIMENTAL_WIDENABLE_CONDITION :: #run iid_by_name("llvm.experimental.widenable.condition");
 
@@ -65,6 +65,46 @@ Loop_Safety_Info :: struct {
     icf: Instruction_Precedence_Tracking;
     mw: Instruction_Precedence_Tracking;
     li: *Loop_Info;
+    block_colors: Table(Value_Id, [..] Value_Id);   // BlockColors (empty unless the personality is scoped)
+}
+
+// colorEHFunclets
+color_eh_funclets :: (f: Value_Id, colors: *Table(Value_Id, [..] Value_Id)) {
+    Item :: struct { visiting: Value_Id; color: Value_Id; }
+    wl: [..] Item; wl.allocator = temp;
+    entry := fn_entry(f);
+    array_add(*wl, .{entry, entry});
+    succs: [..] Value_Id; succs.allocator = temp;
+    while wl.count {
+        it := pop(*wl);
+        visiting := it.visiting; color := it.color;
+        if block_is_eh_pad(visiting) color = visiting;
+        cv := table_find_pointer(colors, visiting);
+        if !cv { e: [..] Value_Id; e.allocator = temp; table_set(colors, visiting, e); cv = table_find_pointer(colors, visiting); }
+        dup := false;
+        for cv.* if it == color { dup = true; break; }
+        if dup continue;
+        array_add(cv, color);
+        succ_color := color;
+        t := block_terminator(visiting);
+        if inst_op(t) == .CATCHRET {
+            cp := op(t, 0);
+            cs := op(cp, nops(cp) - 1);
+            parent := op(cs, 0);
+            if vkind(parent) == .C_TOKEN_NONE succ_color = entry;
+            else succ_color = inst_block(parent);
+        }
+        block_successors(visiting, *succs);
+        for s: succs array_add(*wl, .{s, succ_color});
+    }
+}
+lsi_has_colors :: (s: *Loop_Safety_Info) -> bool { return s.block_colors.count > 0; }
+// copyColors(New, Old)
+lsi_copy_colors :: (s: *Loop_Safety_Info, new: Value_Id, old: Value_Id) {
+    src := table_find_pointer(*s.block_colors, old);
+    e: [..] Value_Id; e.allocator = temp;
+    if src for src.* array_add(*e, it);
+    table_set(*s.block_colors, new, e);
 }
 
 // computeLoopSafetyInfo
@@ -77,8 +117,8 @@ lsi_compute :: (s: *Loop_Safety_Info, li: *Loop_Info, l: Loop_Id) {
     // computeBlockColors
     f := block_fn(li_header(li, l));
     p := fn_personality(f);
-    if p != NONE && is_scoped_eh_personality(classify_eh_personality(p))
-        fatal("LICM: funclet colouring (colorEHFunclets) for scoped EH personalities is not implemented yet");
+    s.block_colors.allocator = temp;
+    if p != NONE && is_scoped_eh_personality(classify_eh_personality(p)) color_eh_funclets(f, *s.block_colors);
 }
 lsi_block_may_throw :: (s: *Loop_Safety_Info, bb: Value_Id) -> bool { return ipt_has_special(*s.icf, bb); }
 lsi_insert_instruction_to :: (s: *Loop_Safety_Info, i: Value_Id, bb: Value_Id) {
