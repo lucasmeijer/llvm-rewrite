@@ -77,6 +77,10 @@ src/
   pass_dse.jai    DeadStoreElimination (DSEState = `Dse`: MemorySSA walk, OverlapIntervals, calloc folding, initializes)
   pass_memcpyopt.jai  MemCpyOpt (`Mco`: memset merging, call slot / memcpy / memset forwarding, stack move, byval)
   assume_builder.jai  AssumeBundleBuilder salvageKnowledge (-enable-knowledge-retention, AC-less form only)
+  phi_trans_addr.jai  PHITransAddr (pta_*: translateValue incl. select conditions, translateWithInsertion)
+  memdep.jai      MemoryDependenceAnalysis (md_*: local/non-local deps, caches, removeInstruction)
+  vn_coercion.jai VNCoercion (vnc_*)
+  pass_gvn.jai    GVN (gvn_*: ValueTable, LeaderMap, load elimination with MemDep or MemorySSA, load/scalar PRE)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 

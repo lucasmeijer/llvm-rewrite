@@ -297,15 +297,28 @@ legalize_updates :: (all: [] Dom_Update, result: *[..] Dom_Update, inverse_graph
         p := ifx !inverse_graph then Pair.{it.from, it.to} else Pair.{it.to, it.from};
         table_set(*ops, pk(p), it_index);
     }
-    // sort descending by the index of the last update of the edge (keys are unique)
-    key :: (ops: *Table(u64, s64), u: Dom_Update) -> s64 { _, v := table_find(ops, ((cast(u64) u.from) << 32) | (cast(u64) u.to)); return v; }
-    for i: 1..result.count-1 {
-        x := result.*[i];
-        kx := key(*ops, x);
-        j := i - 1;
-        while j >= 0 && key(*ops, result.*[j]) < kx { result.*[j + 1] = result.*[j]; j -= 1; }
-        result.*[j + 1] = x;
+    // sort descending by the index of the last update of the edge (keys are unique, so any sort gives LLVM's order)
+    Keyed :: struct { k: s64; u: Dom_Update; }
+    n := result.count;
+    if n < 2 return;
+    a := NewArray(n, Keyed,, allocator = temp);
+    tmp := NewArray(n, Keyed,, allocator = temp);
+    for result.* { _, v := table_find(*ops, ((cast(u64) it.from) << 32) | (cast(u64) it.to)); a[it_index] = .{v, it}; }
+    width := 1;
+    while width < n {
+        lo := 0;
+        while lo < n {
+            mid := min(lo + width, n); hi := min(lo + 2 * width, n);
+            i, j, k := lo, mid, lo;
+            while i < mid && j < hi { if a[i].k >= a[j].k { tmp[k] = a[i]; i += 1; } else { tmp[k] = a[j]; j += 1; } k += 1; }
+            while i < mid { tmp[k] = a[i]; i += 1; k += 1; }
+            while j < hi { tmp[k] = a[j]; j += 1; k += 1; }
+            lo = hi;
+        }
+        t := a; a = tmp; tmp = t;
+        width *= 2;
     }
+    for a result.*[it_index] = it.u;
 }
 
 gd_list :: (gd: *Graph_Diff, map: *Table(Value_Id, s32), n: Value_Id) -> s32 {

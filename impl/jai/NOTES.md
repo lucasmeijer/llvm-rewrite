@@ -621,3 +621,32 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
 - Traps: LLVM 23's conditional branch is a separate opcode here (`.CONDBR`, not a 3-operand `.BR`); a `defer x = next`
   in a loop also runs on `break` (it moved MemCpyOpt's memset insertion point one instruction too far);
   `Retained_Knowledge` already exists in loads.jai (assume bundles), the builder's is `Ab_Knowledge`.
+## GVN (L1.gvn 397/404: roundtrip 202/202, opt 195/202)
+
+- Files: `pass_gvn.jai` (GVN.cpp: ValueTable, LeaderMap, load elimination with MemDep or MemorySSA, load PRE,
+  scalar PRE, propagateEquality, dead blocks), `memdep.jai` (MemoryDependenceAnalysis.cpp; a `*Mem_Dep_Results`
+  per GVN run, in temp), `vn_coercion.jai` (VNCoercion.cpp), `phi_trans_addr.jai` (PHITransAddr.cpp, moved out of
+  memoryssa.jai; select-condition translation and translateWithInsertion added).
+- `merge_block_into_predecessor` takes an optional `*Lazy_Dtu` (DomTreeUpdater::Lazy: updates and deleted blocks
+  queued, `lazy_dtu_flush`); `eliminate_duplicate_phi_nodes_collect` is EliminateDuplicatePHINodes(BB, ToRemove).
+- MemDep keeps one EarliestEscapeAnalysis query (`md.ee`) for its lifetime and every BatchAA shares it
+  (`aa_query_new_sharing_ee`, from jai_dse): the cache staleness is observable (knowledge/llvm/gvn.md).
+- GVN's MemorySSA path builds `EarliestEscapeAnalysis(DT, LI)` per load; ours has no LoopInfo/CycleInfo there
+  (reachability is slightly less precise). No sweep difference came from it.
+- Shared fixes: `type_is_scalable` handles target extension types (layout type); `value_can_be_freed` handles the
+  `statepoint-example` GC; `-capture-tracking-max-uses-to-explore` is a cl::opt (`capture_tracking_max_uses`);
+  `legalize_updates` sorted with an O(n^2) insertion sort (GVN's lazy merge batch of 6000 updates took 50 s on
+  diamonds/n8000; now a merge sort, same order since keys are unique).
+- `gvn_gep_collect_offset` is a faithful GEPOperator::collectOffset; `gep_collect_offset_map` (simplify_lib_calls.jai)
+  treats splat vector indices as constants and doesn't bail on scalable types (left alone: its callers may rely on it).
+- Remaining unit failures need other passes: mldst-motion (2, + memcpyopt), loop-simplifycfg (2), sccp,
+  jump-threading, `default<O1>`.
+- Sweeps (every round-tripping file): `gvn`, `gvn<memoryssa>`, `require<memoryssa>,gvn -verify-memoryssa`: 7745/7754
+  identical, 0 differs, 9 loud (non-GVN: nextafter folding, frexp ranges, ppc_fp128, x86 hadd known bits, capture
+  tracking through bundles); `gvn --per-function`: 69569/69778 identical, 0 differs, all loud failures non-GVN.
+  `gvn<memoryssa>,print<memoryssa>` (analysis): 2 differences, both printer issues outside GVN (x86_fp80 snan
+  printing in print_util, a debug-info warning's position).
+- Perf (x64 build, `-passes=gvn -disable-output`): sqlite3.ll 5.6 s vs LLVM 0.46 s (parse alone 1.0 s);
+  diamonds n2000/n8000 0.25/0.96 s (LLVM 0.06/0.20, linear); loops-many n2000/n8000 0.23/1.84 s (LLVM 0.05/0.13):
+  k ~1.5 there, from PHITransAddr scanning all users of `%p` (thousands of GEPs) with a dominance query each — LLVM
+  does the same scan but its dominance check is cheaper. No `@perf` benchmark times GVN.

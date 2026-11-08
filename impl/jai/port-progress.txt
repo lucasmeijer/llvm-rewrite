@@ -5,8 +5,8 @@ lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
 lib/Transforms/InstCombine/InstructionCombining.cpp 0.93
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
 lib/Analysis/MemoryBuiltins.cpp 0.9
-lib/Analysis/Loads.cpp 0.55
-lib/Transforms/Utils/Local.cpp 0.55
+lib/Analysis/Loads.cpp 0.6
+lib/Transforms/Utils/Local.cpp 0.57
 lib/Analysis/TargetLibraryInfo.cpp 0.85
 lib/Transforms/Utils/SimplifyLibCalls.cpp 0.97
 lib/TargetParser/Triple.cpp 0.25
@@ -82,7 +82,7 @@ lib/IR/ProfDataUtils.cpp 0.6
 lib/Analysis/LoopNestAnalysis.cpp 0.75
 lib/Analysis/CaptureTracking.cpp 0.95
 lib/Analysis/CFG.cpp 0.65
-lib/Analysis/PHITransAddr.cpp 0.65
+lib/Analysis/PHITransAddr.cpp 0.9  # all but the debug-only dump/verify
 lib/Analysis/AliasAnalysisEvaluator.cpp 0.9  # manual: renamed: aa_eval_run in aa.jai (heuristic 0.02)
 lib/Analysis/AssumptionCache.cpp 0.55
 lib/IR/Operator.cpp 0.85
@@ -125,3 +125,6 @@ lib/Transforms/InstCombine/InstCombineAtomicRMW.cpp 1
 lib/Transforms/Scalar/DeadStoreElimination.cpp 0.97  # all but shortenAssignment's dbg.assign updates (assignment tracking does not parse)
 lib/Transforms/Scalar/MemCpyOptimizer.cpp 0.98  # all but DIAssignID merging/copying (assignment tracking does not parse)
 lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.4  # salvageKnowledge / buildAssumeFromInst without an AssumptionCache; no assume-simplify / assume-builder passes
+lib/Transforms/Scalar/GVN.cpp 0.95  # jai_gvn: all of GVNPass incl. the MemorySSA load analysis; no optimization remarks (findMayClobberedPtrAccess/reportMayClobberedLoad/reportLoadElim), no legacy pass
+lib/Analysis/MemoryDependenceAnalysis.cpp 0.95  # no debug-only verifyRemoved/AssertSorted, no legacy wrapper; invalidate() n/a (per-run result)
+lib/Transforms/Utils/VNCoercion.cpp 0.85  # no getConstantValueForLoad / getConstantMemInstValueForLoad (NewGVN only)
