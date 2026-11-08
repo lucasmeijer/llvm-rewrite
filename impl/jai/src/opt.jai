@@ -81,6 +81,7 @@
 #load "iv_users.jai";
 #load "tti.jai";
 #load "tti_x86.jai";
+#load "tti_x86_vec.jai";
 #load "x86_lowering.jai";
 #load "gen_x86_tti.jai";
 #load "gen_x86_lowering.jai";

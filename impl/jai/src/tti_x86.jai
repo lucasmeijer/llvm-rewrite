@@ -563,8 +563,7 @@ x86_memory_op_cost :: (t: *Tti, opc: Opcode, src: Type_Id, align: u64, addrspace
     c: Cost = 0;
     if opc == .STORE && oi_is_constant(opinfo) c = cost_add(c, x86_memory_op_cost(t, .LOAD, src, dl_abi_align(src), 0, kind, opinfo));
     if type_kind(src) != .VECTOR || !mvt_is_vec(ltm) return cost_add(ifx mvt_is_fp(ltm) && !mvt_is_vec(ltm) then c else 0, ltc);
-    x86_np("getMemoryOpCost of vector types");
-    return 0;
+    return x86_vector_memory_op_cost(t, opc, src, align, addrspace, kind, opinfo, i, c, ltm);
 }
 
 // BasicTTIImplBase::getMemoryOpCost
@@ -588,26 +587,6 @@ bt_memory_op_cost :: (t: *Tti, opc: Opcode, src: Type_Id, align: u64, addrspace:
     return c;
 }
 
-// getScalarizationOverhead(Ty, Insert, Extract, CostKind) (all elements demanded; X86TTIImpl overrides the
-// DemandedElts form)
-bt_scalarization_overhead :: (t: *Tti, ty: Type_Id, insert: bool, extract: bool, kind: s64) -> Cost {
-    if type_kind(ty) == .SVECTOR return COST_INVALID;
-    x86_np("getScalarizationOverhead");
-    return 0;
-}
-bt_scalarization_overhead_args :: (t: *Tti, ty: Type_Id, args: [] Value_Id, tys: [] Type_Id, kind: s64) -> Cost {
-    x86_np("getScalarizationOverhead with operands");
-    return 0;
-}
-
-x86_vector_inst_cost :: (t: *Tti, opc: Opcode, ty: Type_Id, kind: s64, index: u32, i: Value_Id) -> Cost {
-    x86_np("getVectorInstrCost");
-    return 0;
-}
-x86_shuffle_cost :: (t: *Tti, sk: s64, dst: Type_Id, src: Type_Id, mask: [] s32, kind: s64, index: s64, sub_ty: Type_Id, args: [] Value_Id, cxt: Value_Id) -> Cost {
-    x86_np("getShuffleCost");
-    return 0;
-}
 // X86TTIImpl::getIntrinsicInstrCost
 x86_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
     st := *t.xl;

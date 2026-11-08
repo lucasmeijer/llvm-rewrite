@@ -508,6 +508,7 @@ svm_is_identity_no_checks :: (mask: [] s32, n: s64) -> bool {
 svm_is_identity :: (mask: [] s32, n: s64) -> bool { if mask.count != n return false; return svm_is_identity_no_checks(mask, n); }
 svm_is_reverse :: (mask: [] s32, n: s64) -> bool {
     if mask.count != n || !svm_is_single_source(mask, n) return false;
+    if n < 2 return false;
     for mask { if it < 0 continue; if it != n - it_index - 1 && it != n + n - it_index - 1 return false; }
     return true;
 }
@@ -540,15 +541,16 @@ svm_is_splice :: (mask: [] s32, n: s64) -> (bool, s32) {
     for mask {
         if it < 0 continue;
         if start == -1 {
+            if it < it_index || n <= it - it_index return false, 0;
             start = it - it_index;
-            if start <= 0 || start >= n return false, 0;
-        } else if it - it_index != start return false, 0;
+        } else if it != start + it_index return false, 0;
     }
     if start == -1 return false, 0;
     return true, cast(s32) start;
 }
 svm_is_extract_subvector :: (mask: [] s32, n: s64) -> (bool, s32) {
     if !svm_is_single_source(mask, n) return false, 0;
+    if n <= mask.count return false, 0;
     sub_index: s64 = -1;
     for mask {
         if it < 0 continue;
@@ -559,35 +561,35 @@ svm_is_extract_subvector :: (mask: [] s32, n: s64) -> (bool, s32) {
     if 0 <= sub_index && sub_index + mask.count <= n return true, cast(s32) sub_index;
     return false, 0;
 }
+// ShuffleVectorInst::isInsertSubvectorMask(Mask, NumSrcElts): (ok, NumSubElts, Index)
 svm_is_insert_subvector :: (mask: [] s32, n: s64) -> (bool, s32, s32) {
     nmask := mask.count;
-    if nmask < 2 return false, 0, 0;
-    // ShuffleVectorInst::isInsertSubvectorMask
-    src0_lo: s64 = 0; src1_lo: s64 = 0;
-    src0_set := false; src1_set := false;
-    used0: [..] bool; used0.allocator = temp; array_resize(*used0, nmask);
-    used1: [..] bool; used1.allocator = temp; array_resize(*used1, nmask);
-    for mask {
-        if it < 0 continue;
-        if it < n { used0[it_index] = true; } else { used1[it_index] = true; }
+    if nmask < n return false, 0, 0;
+    if svm_is_single_source(mask, n) return false, 0, 0;
+    src0_lo: s64 = -1; src1_lo: s64 = -1; src0_hi: s64 = 0; src1_hi: s64 = 0;
+    id0 := true; id1 := true;
+    for m, i: mask {
+        if m < 0 continue;
+        if m < n {
+            if src0_lo < 0 src0_lo = i;
+            src0_hi = i + 1;
+            id0 &= m == i;
+        } else {
+            if src1_lo < 0 src1_lo = i;
+            src1_hi = i + 1;
+            id1 &= m == i + n;
+        }
     }
-    // the identity elements
-    if nmask != n return false, 0, 0;   // LLVM handles widening here; the callers below only use equal lengths
-    // Determine lane ranges: elements from src0 must be identity, elements from src1 contiguous
-    num1 := 0; first1 := -1; last1 := -1;
-    for mask {
-        if it < 0 continue;
-        if it < n { if it != it_index return false, 0, 0; }
-        else { num1 += 1; if first1 < 0 first1 = it_index; last1 = it_index; }
+    if src0_lo < 0 || src1_lo < 0 return false, 0, 0;
+    if id0 {
+        sub := array_view(mask, src1_lo, src1_hi - src1_lo);
+        if svm_is_identity_no_checks(sub, n) return true, cast(s32) sub.count, cast(s32) src1_lo;
     }
-    if num1 == 0 return false, 0, 0;
-    sub := last1 - first1 + 1;
-    if (sub & (sub - 1)) != 0 return false, 0, 0;
-    base := mask[first1] - n;
-    for i: first1..last1 { if mask[i] >= 0 && mask[i] != n + base + (i - first1) return false, 0, 0; }
-    if base != 0 return false, 0, 0;
-    if (first1 % sub) != 0 return false, 0, 0;
-    return true, cast(s32) sub, cast(s32) first1;
+    if id1 {
+        sub := array_view(mask, src0_lo, src0_hi - src0_lo);
+        if svm_is_identity_no_checks(sub, n) return true, cast(s32) sub.count, cast(s32) src0_lo;
+    }
+    return false, 0, 0;
 }
 
 shuffle_mask_s32 :: (s: Value_Id) -> [] s32 {
@@ -672,8 +674,8 @@ tti_shuffle_cost :: (t: *Tti, sk: s64, dst: Type_Id, src: Type_Id, mask: [] s32,
     if t.kind == .X86 return x86_shuffle_cost(t, sk, dst, src, mask, kind, index, sub_ty, args, cxt);
     return 1;
 }
-tti_replication_shuffle_cost :: (t: *Tti, elt_ty: Type_Id, factor: s64, vf: s64, kind: s64) -> Cost {
-    if t.kind == .X86 fatal("x86 TTI: getReplicationShuffleCost is not ported yet");
+tti_replication_shuffle_cost :: (t: *Tti, elt_ty: Type_Id, factor: s64, vf: s64, dem_dst: [] bool, kind: s64) -> Cost {
+    if t.kind == .X86 return x86_replication_shuffle_cost(t, elt_ty, factor, vf, dem_dst, kind);
     return 1;
 }
 
@@ -899,7 +901,26 @@ tti_shuffle_instruction_cost :: (t: *Tti, u: Value_Id, kind: s64) -> Cost {
         }
         is_ext, sub_index := svm_is_extract_subvector(mask, n);
         if is_ext return tti_shuffle_cost(t, SK_EXTRACT_SUBVECTOR, vec_ty, src_ty, mask, kind, sub_index, vec_ty, ops, u);
-        fatal("TTI: costs of length-changing shufflevectors (insert subvector, replication, widening, narrowing) are not ported yet");
+        is_ins, nsub, ins_index := svm_is_insert_subvector(mask, n);
+        if is_ins return tti_shuffle_cost(t, SK_INSERT_SUBVECTOR, vec_ty, src_ty, mask, kind, ins_index, type_vector(cast(u64) nsub, type_elem(vec_ty), false), ops, u);
+        is_rep, rf := svm_is_replication_vf(mask, n);
+        if is_rep {
+            dem := NewArray(mask.count, bool,, temp);
+            for mask dem[it_index] = it != -1;
+            return tti_replication_shuffle_cost(t, type_elem(src_ty), rf, n, dem, kind);
+        }
+        unary := is_undef_value(op(u, 1));
+        adj: [..] s32; adj.allocator = temp;
+        for mask array_add(*adj, it);
+        if increases {
+            for * adj if it.* >= n it.* = cast(s32) (it.* + (mask.count - n));
+            return tti_shuffle_cost(t, ifx unary then SK_PERMUTE_SINGLE_SRC else SK_PERMUTE_TWO_SRC, vec_ty, vec_ty, adj, kind, 0, NONE, ops, u);
+        }
+        while adj.count < n array_add(*adj, -1);
+        sc := tti_shuffle_cost(t, ifx unary then SK_PERMUTE_SINGLE_SRC else SK_PERMUTE_TWO_SRC, src_ty, src_ty, adj, kind, 0, NONE, ops, u);
+        em := NewArray(mask.count, s32,, temp);
+        for * em it.* = cast(s32) it_index;
+        return cost_add(sc, tti_shuffle_cost(t, SK_EXTRACT_SUBVECTOR, vec_ty, src_ty, em, kind, 0, vec_ty, .[], u));
     }
     if svm_is_identity(mask, n) return TCC_FREE;
     if svm_is_reverse(mask, n) return tti_shuffle_cost(t, SK_REVERSE, vec_ty, src_ty, mask, kind, 0, NONE, ops, u);
