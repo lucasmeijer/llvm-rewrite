@@ -1634,6 +1634,10 @@ fn cu_use_swap(a: i32, b: i32) {
 // CondBrInst::swapSuccessors (+ swapProfMetadata)
 fn cu_swap_successors(bi: i32) {
     cu_use_swap(vals[bi].ops + 1, vals[bi].ops + 2);
+    cu_swap_prof_metadata(bi);
+}
+// Instruction::swapProfMetadata
+fn cu_swap_prof_metadata(bi: i32) {
     let m = pd_prof(bi);
     if pd_is_branch_weight_md(m) && mds[m].nops as i64 == 2 + pd_offset(m) {
         var ops: i32[>..<] = [];

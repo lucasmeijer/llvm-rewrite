@@ -157,6 +157,8 @@ let IP_POWER2_OR_ZERO = 10;
 let IP_MAXSIGNED = 11;
 let IP_NOT_MINSIGNED = 12;
 let IP_NEG_POWER2 = 13;
+let IP_LOWBITMASK_OR_ZERO = 14;
+let IP_NEG_POWER2_OR_ZERO = 15;
 
 fn int_pred(kind: i64, c: i32) -> bool {
     let x = ci_ap(c);
@@ -174,6 +176,8 @@ fn int_pred(kind: i64, c: i32) -> bool {
     if kind == IP_MAXSIGNED { return ap_is_max_signed(x); }
     if kind == IP_NOT_MINSIGNED { return !ap_is_min_signed(x); }
     if kind == IP_NEG_POWER2 { return ap_is_neg_pow2(x); }
+    if kind == IP_LOWBITMASK_OR_ZERO { return ap_is_zero(x) || ap_is_mask(x); }
+    if kind == IP_NEG_POWER2_OR_ZERO { return ap_is_zero(x) || ap_is_neg_pow2(x); }
     fatal("internal: unknown int predicate");
     return false;
 }

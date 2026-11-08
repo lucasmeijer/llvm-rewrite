@@ -25,6 +25,7 @@ import apint;
 import overflow;
 import ic;
 import ic_builder;
+import cfgutil;
 
 // ---------------------------------------------------------------------------------------------
 // Small matchers (PatternMatch.h). BinaryOp_match and CastInst_match match instructions only.
@@ -145,6 +146,8 @@ fn copy_ir_flags(dst: i32, src: i32) {
     if is_overflowing_op(o) && is_overflowing_op(so) { f |= sf & (FL_NUW | FL_NSW); }
     if (o == OP_UDIV || o == OP_SDIV || o == OP_LSHR || o == OP_ASHR) && (so == OP_UDIV || so == OP_SDIV || so == OP_LSHR || so == OP_ASHR) { f |= sf & FL_EXACT; }
     if o == OP_OR && so == OP_OR { f |= sf & FL_DISJOINT; }
+    if (o == OP_ZEXT || o == OP_UITOFP) && (so == OP_ZEXT || so == OP_UITOFP) { f |= sf & FL_NNEG; }
+    if o == OP_ICMP && so == OP_ICMP { f |= sf & FL_SAMESIGN; }
     insts[d].flags = f;
     if is_fp_math_operator(dst) && is_fp_math_operator(src) { insts[d].fmf = insts[inst_of(src)].fmf; }
 }
@@ -1111,6 +1114,28 @@ fn can_freely_invert_all_users_of(v: i32, ignored: i32) -> bool {
         } else { return false; }
     }
     return true;
+}
+
+// freelyInvertAllUsersOf(I, IgnoredUser)
+fn freely_invert_all_users_of(v: i32, ignored: i32) {
+    var u = vals[v].first_use;
+    while u >= 0 {
+        let us = uses[u].user;
+        u = uses[u].next;
+        if us == ignored { continue; }
+        let o = iop(us);
+        if o == OP_SELECT {
+            // SelectInst::swapValues + swapProfMetadata
+            cu_use_swap(vals[us].ops + 1, vals[us].ops + 2);
+            cu_swap_prof_metadata(us);
+        } else if o == OP_CONDBR {
+            cu_swap_successors(us);
+        } else if o == OP_XOR {
+            ic_replace_inst_uses_with(us, v);
+            icw_add(us);
+        } else { fatal("internal: freelyInvertAllUsersOf out of sync with canFreelyInvertAllUsersOf"); }
+    }
+    if dbgrecs.len > 0 && dbg_records_use_value(v) { ic_not_ported("freelyInvertAllUsersOf with debug value users (DW_OP_not)"); }
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -33,12 +33,14 @@ import instsimplify;
 import flags;
 import apint;
 import domcond;
+import cfgutil;
 import ic_builder;
 import ic_common;
 import ic_addsub;
 import ic_muldivrem;
 import ic_shifts;
 import ic_casts;
+import ic_compares;
 import ic_demanded;
 import ic_visit_misc;
 
@@ -716,6 +718,7 @@ fn ic_visit(i: i32) -> i32 {
         OP_TRUNC => { return visit_trunc(i); },
         OP_ZEXT => { return visit_zext(i); },
         OP_SEXT => { return visit_sext(i); },
+        OP_ICMP => { return visit_icmp(i); },
         OP_RET => { return visit_return(i); },
         OP_BR => { return visit_uncond_br(i); },
         OP_CONDBR => { return visit_cond_br(i); },
@@ -948,13 +951,7 @@ fn dom_edge_use(start: i32, end: i32, u: i32) -> bool {
 }
 
 // CondBrInst::swapSuccessors (+ prof metadata swap)
-fn ic_swap_successors(bi: i32) {
-    let a = op(bi, 1);
-    let b = op(bi, 2);
-    set_op(bi, 1, b);
-    set_op(bi, 2, a);
-    if inst_get_md(bi, md_kind_id("prof")) >= 0 { ic_not_ported("swapping branch weights"); }
-}
+fn ic_swap_successors(bi: i32) { cu_swap_successors(bi); }
 
 // InstCombiner::isCanonicalPredicate
 fn is_canonical_predicate(p: i64) -> bool {
