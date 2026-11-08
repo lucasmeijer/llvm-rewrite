@@ -554,9 +554,10 @@ fn clone_insts_into_pred(bb: i32, pred: i32, vmap: i32[>..<]&) {
         cu_drop_ub_implying_attrs_and_metadata(nb);
         inst_insert_before(nb, pti);
         if inst_first_dbg(bonus) >= 0 { scf_not_ported("cloning debug records of bonus instructions"); }
-        // takeName, then the old one gets ".old"
+        // takeName, then the old one gets ".old": unconditionally, so an unnamed bonus instruction is named
+        // ".old" (and bumps the symbol table's unique counter when that collides, as in LLVM).
         cu_take_name(nb, bonus);
-        if vals[nb].name >= 0 {
+        if vals[bonus].ty != T_VOID {
             let nm = name_plus(nb, ".old");
             set_name(bonus, nm);
         }
