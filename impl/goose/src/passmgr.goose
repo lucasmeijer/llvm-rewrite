@@ -73,6 +73,7 @@ let P_PRINT_MEMORYSSA_WALKER = 152;
 let P_VERIFY_MEMORYSSA = 153;
 let P_SCCP = 160;
 let P_PRINT_SCEV = 118;
+let P_VERIFY_SCEV = 119;
 // loop passes
 let P_PRINT_LOOPNEST = 200;
 let P_NOOP_LOOP = 201;
@@ -108,6 +109,7 @@ let PASS_TABLE: const u8[:][] = [
     "f:verify<memoryssa>:153:1",
     "f:sccp:160:0",
     "f:print<scalar-evolution>:118:1",
+    "f:verify<scalar-evolution>:119:1",
     "l:print<loopnest>:200:1",
     "l:no-op-loop:201:0",
 ];
@@ -606,6 +608,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_VERIFY_MEMORYSSA => { mssa_get(fv); return PA_ALL; },
         P_SCCP => { return sccp_run(fv); },
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
+        P_VERIFY_SCEV => { scev_get(fv); return PA_ALL; },     // ScalarEvolution::verify reports only mismatches
         _ => { fatal("internal: unknown function pass id"); return PA_ALL; },
     }
 }
