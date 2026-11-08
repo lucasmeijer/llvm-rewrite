@@ -1515,6 +1515,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/huge_expression_limit.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/implied-via-addition.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/implied-via-addition.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/implied-via-division.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/incorrect-exit-count.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/incorrect-exit-count.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/incorrect-nsw.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/incorrect-nsw.ll::roundtrip
@@ -1639,6 +1640,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/pr51869-scalar-evolution-prove-impl
 tests/imported/llvm/Analysis/ScalarEvolution/pr58402-large-number-of-zext-exprs.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/pr58402-large-number-of-zext-exprs.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/pr62380.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/pr76234.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/pr76234.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/pr87798.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/pr87798.ll::roundtrip
@@ -1657,6 +1659,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/ptrtoaddr-at-scope.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/ptrtoaddr-i32-index-width.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/ptrtoaddr-i32-index-width.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/ptrtoaddr.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/ptrtoint-constantexpr-loop.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/ptrtoint-constantexpr-loop.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/ptrtoint-global.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/ptrtoint-global.ll::roundtrip
@@ -1694,6 +1697,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/sext-add-inreg-loop.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/sext-add-inreg-loop.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/sext-add-inreg-unequal.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/sext-add-inreg-unequal.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/sext-add-inreg.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/sext-add-inreg.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/sext-iv-0.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/sext-iv-0.ll::roundtrip
