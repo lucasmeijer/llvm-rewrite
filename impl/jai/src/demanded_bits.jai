@@ -25,18 +25,11 @@ db_is_always_live :: (i: Value_Id) -> bool {
 }
 
 
-ap_heap_copy :: (a: APInt) -> APInt {
-    r: APInt;
-    r.bits = a.bits;
-    r.w = NewArray(a.w.count, u64,, allocator = context.default_allocator);
-    for a.w r.w[it_index] = it;
-    return r;
-}
 
 db_set_alive :: (db: *Demanded_Bits, i: Value_Id, a: APInt) {
     p := table_find_pointer(*db.alive, i);
     if p {
-        for a.w p.w[it_index] = it;
+        ap_assign(p, a);
         return;
     }
     table_set(*db.alive, i, ap_heap_copy(a));

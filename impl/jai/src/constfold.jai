@@ -16,7 +16,7 @@ cf_is_cexpr  :: inline (c: Value_Id) -> bool { return vkind(c) == .C_EXPR; }
 cf_is_int    :: inline (c: Value_Id) -> bool { return vkind(c) == .C_INT && !is_vector_type(vtype(c)); }  // isa<ConstantInt> (scalar)
 cf_is_fp     :: inline (c: Value_Id) -> bool { return vkind(c) == .C_FP && !is_vector_type(vtype(c)); }
 cf_ap :: (c: Value_Id) -> APInt { return ap_from_words(type_bits(scalar_type(vtype(c))), const_int_value(c)); }
-cf_int :: (t: Type_Id, a: APInt) -> Value_Id { return const_int_words(t, a.w); }   // ConstantInt::get (splat for vectors)
+cf_int :: (t: Type_Id, a: APInt) -> Value_Id { return const_int_words(t, ap_words(a)); }   // ConstantInt::get (splat for vectors)
 cf_bool :: (t: Type_Id, b: bool) -> Value_Id { return const_int(t, ifx b then cast(u64) 1 else 0); }
 
 // Constant::isAllOnesValue
@@ -38,7 +38,7 @@ cf_is_all_ones :: (c: Value_Id) -> bool {
 cf_all_ones :: (t: Type_Id) -> Value_Id {
     st := scalar_type(t);
     if is_int_type(st) return cf_int(t, ap_all_ones(type_int_width(st)));
-    if is_fp_type(st) return const_fp_words(t, ap_all_ones(type_bits(st)).w);
+    if is_fp_type(st) return const_fp_words(t, ap_words(ap_all_ones(type_bits(st))));
     if is_vector_type(t) return cf_get_splat(t, cf_all_ones(st));
     fatal("internal: getAllOnesValue of a non-integer, non-FP type");
     return NONE;
@@ -542,7 +542,7 @@ is_int_div_rem :: (opc: Opcode) -> bool { return opc == .UDIV || opc == .SDIV ||
 fp_const :: (t: Type_Id, v: s64) -> Value_Id {   // ConstantFP::get(Ty, small integer)
     st := scalar_type(t);
     w := ap_from_s64(64, v);
-    return const_fp_words(t, fp_from_integer(type_kind(st), w.w, 64, true));
+    return const_fp_words(t, fp_from_integer(type_kind(st), ap_words(w), 64, true));
 }
 
 // ConstantExpr::getBinOpIdentity (NSZ = false)

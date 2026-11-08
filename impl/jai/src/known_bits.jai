@@ -9,9 +9,6 @@
 
 KB_MAX_DEPTH :: 6;   // MaxAnalysisRecursionDepth
 
-kb_set_all_zero :: (k: *Known_Bits) { k.zero = ap_all_ones(kb_bits(k.*)); k.one = ap_zero(kb_bits(k.*)); }
-kb_set_all_conflict :: (k: *Known_Bits) { k.zero = ap_all_ones(kb_bits(k.*)); k.one = ap_all_ones(kb_bits(k.*)); }
-
 // ConstantRange(Lower, Upper): unsigned min/max (llvm/lib/IR/ConstantRange.cpp)
 cr_is_full :: (lo: APInt, hi: APInt) -> bool { return ap_eq(lo, hi) && ap_is_all_ones(lo); }
 cr_is_empty :: (lo: APInt, hi: APInt) -> bool { return ap_eq(lo, hi) && ap_is_zero(lo); }
@@ -36,110 +33,6 @@ kb_from_range :: (bits: u32, lo: APInt, hi: APInt) -> Known_Bits {
         k.one = ap_and(k.one, ap_not(low));
     }
     return k;
-}
-
-kb_shift_amounts :: (rhs: Known_Bits, bits: u32, sh_amt_non_zero: bool) -> (min: u32, max_value: APInt) {
-    mn := cast(u32) ap_limited(kb_min_value(rhs), bits);
-    if mn == 0 && sh_amt_non_zero mn = 1;
-    return mn, kb_max_value(rhs);
-}
-kb_max_shift_amount :: (max_value: APInt, bits: u32) -> u32 {
-    if (bits & (bits - 1)) == 0 {
-        lg: u32 = 0; while ((cast(u32) 1) << lg) < bits lg += 1;
-        n := min(lg, max_value.bits);
-        return cast(u32)(max_value.w[0] & (((cast(u64) 1) << cast(u64) n) - 1));
-    }
-    return cast(u32) ap_limited(max_value, bits - 1);
-}
-kb_amount_possible :: (rhs: Known_Bits, s: u32) -> bool {
-    zm := cast(u32)(ap_zext_or_trunc(rhs.zero, 32).w[0]);
-    om := cast(u32)(ap_zext_or_trunc(rhs.one, 32).w[0]);
-    return (zm & s) == 0 && (om | s) == s;
-}
-
-// KnownBits::shl
-kb_shl :: (lhs: Known_Bits, rhs: Known_Bits, nuw: bool, nsw: bool, sh_amt_non_zero: bool) -> Known_Bits {
-    bits := kb_bits(lhs);
-    by_const :: (lhs: Known_Bits, s: u32, nuw: bool, nsw: bool) -> Known_Bits {
-        bits := kb_bits(lhs);
-        k: Known_Bits;
-        out_zero := s >= bits || s > ap_clz(lhs.zero);   // APInt::ushl_ov overflow
-        out_one := s >= bits || s > ap_clz(lhs.one);
-        k.zero = ap_shl(lhs.zero, s);
-        ap_set_bits(*k.zero, 0, min(s, bits));
-        k.one = ap_shl(lhs.one, s);
-        if nsw {
-            if nuw && s != 0 out_zero = true;
-            if out_zero kb_make_non_negative(*k);
-            else if out_one kb_make_negative(*k);
-        }
-        return k;
-    }
-    known := kb_new(bits);
-    mn, maxv := kb_shift_amounts(rhs, bits, sh_amt_non_zero);
-    if kb_is_unknown(lhs) {
-        ap_set_bits(*known.zero, 0, min(mn, bits));
-        if nuw && nsw && mn != 0 kb_make_non_negative(*known);
-        return known;
-    }
-    mx := kb_max_shift_amount(maxv, bits);
-    if nuw && nsw mx = min(mx, kb_count_max_leading_zeros(lhs) - 1);
-    if nuw mx = min(mx, kb_count_max_leading_zeros(lhs));
-    if nsw mx = min(mx, max(kb_count_max_leading_zeros(lhs), ap_clo(ap_not(lhs.zero))) - 1);
-    if mn == 0 && mx == bits - 1 && (bits & (bits - 1)) == 0 {
-        ap_set_bits(*known.zero, 0, kb_count_min_trailing_zeros(lhs));
-        if ap_is_all_ones(lhs.one) ap_set_sign_bit(*known.one);
-        if nsw {
-            if kb_is_non_negative(lhs) kb_make_non_negative(*known);
-            if kb_is_negative(lhs) kb_make_negative(*known);
-        }
-        return known;
-    }
-    kb_set_all_conflict(*known);
-    s := mn;
-    while s <= mx && s < 0x8000_0000 {
-        if kb_amount_possible(rhs, s) {
-            known = kb_intersect(known, by_const(lhs, s, nuw, nsw));
-            if kb_is_unknown(known) break;
-        }
-        s += 1;
-    }
-    if kb_has_conflict(known) kb_set_all_zero(*known);
-    return known;
-}
-
-kb_shr :: (lhs: Known_Bits, rhs: Known_Bits, sh_amt_non_zero: bool, exact: bool, arith: bool) -> Known_Bits {
-    bits := kb_bits(lhs);
-    known := kb_new(bits);
-    mn, maxv := kb_shift_amounts(rhs, bits, sh_amt_non_zero);
-    if kb_is_unknown(lhs) {
-        if !arith { ap_set_bits(*known.zero, bits - min(mn, bits), bits); return known; }
-        if mn == bits kb_set_all_zero(*known);
-        return known;
-    }
-    mx := kb_max_shift_amount(maxv, bits);
-    if exact {
-        first_one := kb_count_max_trailing_zeros(lhs);
-        if first_one < mn { kb_set_all_zero(*known); return known; }
-        mx = min(mx, first_one);
-    }
-    kb_set_all_conflict(*known);
-    s := mn;
-    while s <= mx && s < 0x8000_0000 {
-        if kb_amount_possible(rhs, s) {
-            k: Known_Bits;
-            if arith { k.zero = ap_ashr(lhs.zero, s); k.one = ap_ashr(lhs.one, s); }
-            else {
-                k.zero = ap_lshr(lhs.zero, s); k.one = ap_lshr(lhs.one, s);
-                ap_set_bits(*k.zero, bits - min(s, bits), bits);
-            }
-            known = kb_intersect(known, k);
-            if kb_is_unknown(known) break;
-        }
-        s += 1;
-    }
-    if kb_has_conflict(known) kb_set_all_zero(*known);
-    return known;
 }
 
 // Integer bit width of a value's scalar type (pointers: 64 on x86-64)
@@ -229,7 +122,7 @@ kb_from_operator :: (i: Value_Id, bits: u32, depth: u32) -> Known_Bits {
             exact := (r.flags & F_EXACT) != 0;
             k2 := compute_known_bits(op(i, 0), depth + 1);
             amt := compute_known_bits(op(i, 1), depth + 1);
-            known = kb_shr(k2, amt, kb_is_non_zero(amt), exact, r.op == .ASHR);
+            known = kb_shr_impl(k2, amt, kb_is_non_zero(amt), exact, r.op == .ASHR);
             c := op(i, 0);
             if vkind(c) == .C_INT {
                 cv := ap_from_words(bits, const_int_value(c));

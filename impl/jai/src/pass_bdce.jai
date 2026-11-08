@@ -54,7 +54,7 @@ bdce_run :: (f: Value_Id) -> Preserved {
                 z: Value_Id;
                 if vkind(src) == .C_INT {
                     // ConstantFolder::FoldCast
-                    z = const_int_words(dst_ty, ap_zext(ap_from_words(type_int_width(vtype(src)), const_int_value(src)), dst_bits).w);
+                    z = const_int_words(dst_ty, ap_words(ap_zext(ap_from_words(type_int_width(vtype(src)), const_int_value(src)), dst_bits)));
                 } else {
                     if is_constant_kind(vkind(src)) fatal("bdce: constant-folding a zext of a non-integer constant is not supported yet");
                     z = create_cast(.ZEXT, src, dst_ty);

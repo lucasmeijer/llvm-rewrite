@@ -17,6 +17,7 @@
 #load "gen_dwarf.jai";
 
 #load "apint.jai";
+#load "knownbits.jai";
 #load "ir_edit.jai";
 #load "inst_props.jai";
 #load "print_util.jai";
