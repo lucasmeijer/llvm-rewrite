@@ -49,14 +49,17 @@ dce_run :: (f: Value_Id) -> Preserved {
 
 // ---------------------------------------------------------------- break-crit-edges
 // Port of llvm/lib/Transforms/Utils/BreakCriticalEdges.cpp (BreakCriticalEdgesPass, SplitCriticalEdge,
-// SplitKnownCriticalEdge) and SplitAllCriticalEdges (BasicBlockUtils.cpp). LoopInfo isn't ported yet, so a cached
-// LoopInfo would be ignored; none exists.
+// SplitKnownCriticalEdge) and SplitAllCriticalEdges (BasicBlockUtils.cpp), with the LoopInfo/LCSSA updates.
 
 // CriticalEdgeSplittingOptions
 Crit_Edge_Options :: struct {
     dt: *Dom_Tree;
     pdt: *Dom_Tree;
+    li: *Loop_Info;
+    mssau: *Mssa_Updater;
     merge_identical_edges: bool;
+    preserve_lcssa: bool;
+    preserve_loop_simplify: bool;
     keep_one_input_phis: bool;
     ignore_unreachable_dests: bool;
 }
@@ -71,6 +74,26 @@ split_known_critical_edge :: (t: Value_Id, succ: u32, o: *Crit_Edge_Options, nam
     dest := get_successor(t, succ);
     if block_is_eh_pad(dest) || inst_op(t) == .INDIRECTBR return NONE;
     if o.ignore_unreachable_dests fatal("split_known_critical_edge: IgnoreUnreachableDests is not supported yet");
+    li := o.li;
+    loop_preds: [..] Value_Id; loop_preds.allocator = temp;
+    if li {
+        til := li_loop_for(li, tibb);
+        if til != NONE {
+            pl: [..] Value_Id; pl.allocator = temp;
+            block_predecessors(dest, *pl);
+            for p: pl {
+                if p == tibb continue;
+                if li_loop_for(li, p) != til { loop_preds.count = 0; break; }
+                array_add(*loop_preds, p);
+            }
+            any_ibr := false;
+            for loop_preds if inst_op(block_terminator(it)) == .INDIRECTBR any_ibr = true;
+            if any_ibr {
+                if o.preserve_loop_simplify return NONE;
+                loop_preds.count = 0;
+            }
+        }
+    }
     f := block_fn(tibb);
     bbname := name;
     if bbname.count == 0 bbname = tprint("%.%_crit_edge", vname(tibb), vname(dest));
@@ -96,6 +119,7 @@ split_known_critical_edge :: (t: Value_Id, succ: u32, o: *Crit_Edge_Options, nam
             phi_set_block(it, idx, nb);
         }
     }
+    num_split_identical := 1;
     if o.merge_identical_edges {
         n := num_successors(t);
         k := succ + 1;
@@ -103,17 +127,50 @@ split_known_critical_edge :: (t: Value_Id, succ: u32, o: *Crit_Edge_Options, nam
             if get_successor(t, k) == dest {
                 block_remove_predecessor(dest, tibb, o.keep_one_input_phis);
                 set_successor(t, k, nb);
+                num_split_identical += 1;
             }
             k += 1;
         }
     }
-    if !o.dt && !o.pdt return nb;
-    updates: [..] Dom_Update; updates.allocator = temp;
-    array_add(*updates, .{true, tibb, nb});
-    array_add(*updates, .{true, nb, dest});
-    if !succ_contains(tibb, dest) array_add(*updates, .{false, tibb, dest});
-    if o.dt dt_apply_updates(o.dt, updates);
-    if o.pdt dt_apply_updates(o.pdt, updates);
+    if o.mssau {
+        tb := tibb;
+        mssau_wire_old_predecessors_to_new_immediate_predecessor(o.mssau, dest, nb, .[tb], o.merge_identical_edges);
+    }
+    if !o.dt && !o.pdt && !li return nb;
+    if o.dt || o.pdt {
+        updates: [..] Dom_Update; updates.allocator = temp;
+        array_add(*updates, .{true, tibb, nb});
+        array_add(*updates, .{true, nb, dest});
+        if !succ_contains(tibb, dest) array_add(*updates, .{false, tibb, dest});
+        if o.dt dt_apply_updates(o.dt, updates);
+        if o.pdt dt_apply_updates(o.pdt, updates);
+    }
+    if li {
+        til := li_loop_for(li, tibb);
+        if til != NONE {
+            dl := li_loop_for(li, dest);
+            if dl != NONE {
+                if til == dl li_add_basic_block_to_loop(li, dl, nb);
+                else if li_contains_loop(li, til, dl) li_add_basic_block_to_loop(li, til, nb);
+                else if li_contains_loop(li, dl, til) li_add_basic_block_to_loop(li, dl, nb);
+                else {
+                    p := li_parent(li, dl);
+                    if p != NONE li_add_basic_block_to_loop(li, p, nb);
+                }
+            }
+            if !li_contains(li, til, dest) {
+                if o.preserve_lcssa {
+                    ps: [..] Value_Id; ps.allocator = temp;
+                    for 1..num_split_identical array_add(*ps, tibb);
+                    create_phis_for_split_loop_exit(ps, nb, dest);
+                }
+                if loop_preds.count {
+                    neb := split_block_predecessors(dest, loop_preds, "split", o.dt, li, o.mssau, o.preserve_lcssa);
+                    if o.preserve_lcssa create_phis_for_split_loop_exit(loop_preds, neb, dest);
+                }
+            }
+        }
+    }
     return nb;
 }
 
@@ -132,9 +189,11 @@ split_all_critical_edges :: (f: Value_Id, o: *Crit_Edge_Options) -> u32 {
 break_crit_edges_run :: (f: Value_Id) -> Preserved {
     o: Crit_Edge_Options;
     o.dt = cached_domtree(f);
+    o.li = cached_loop_info(f);
     n := split_all_critical_edges(f, *o);
     if n == 0 return PRESERVE_ALL;
     pa: Preserved;
     preserve(*pa, .DOMTREE);
+    preserve(*pa, .LOOPS);
     return pa;
 }

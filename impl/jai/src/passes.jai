@@ -11,8 +11,8 @@
 
 // ---------------------------------------------------------------- analyses
 
-Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; }
-ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa"];
+Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; }
+ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles"];
 
 // PreservedAnalyses. `cfg` = preserveSet<CFGAnalyses>().
 Preserved :: struct {
@@ -29,7 +29,7 @@ is_preserved :: (pa: Preserved, k: Analysis_Kind) -> bool { return pa.all || (pa
 // Whether a cached result survives (Result::invalidate). DominatorTree/PostDominatorTree are CFG analyses.
 analysis_survives :: (k: Analysis_Kind, pa: Preserved) -> bool {
     if is_preserved(pa, k) return true;
-    if k == .DOMTREE || k == .POSTDOMTREE return pa.cfg;
+    if k == .DOMTREE || k == .POSTDOMTREE || k == .LOOPS || k == .CYCLES return pa.cfg;
     return false;
 }
 
@@ -40,6 +40,8 @@ Fn_Analyses :: struct {
     db: *Demanded_Bits;
     ac: *Assumption_Cache;
     mssa: *Memory_SSA;
+    li: *Loop_Info;
+    ci: *Cycle_Info;
 }
 fam: Table(Value_Id, Fn_Analyses);
 
@@ -88,6 +90,27 @@ get_demanded_bits :: (f: Value_Id) -> *Demanded_Bits {
     return e.db;
 }
 
+// AM.getResult<LoopAnalysis>(F): LoopAnalysis::run gets the DominatorTree and analyzes it
+get_loop_info :: (f: Value_Id) -> *Loop_Info {
+    e := fam_entry(f);
+    if !e.li {
+        dt := get_domtree(f);
+        li := li_new(f);
+        li_analyze(li, dt);
+        e = fam_entry(f);
+        e.li = li;
+    }
+    return e.li;
+}
+cached_loop_info :: (f: Value_Id) -> *Loop_Info { e := table_find_pointer(*fam, f); if e return e.li; return null; }
+// AM.getResult<CycleAnalysis>(F)
+get_cycle_info :: (f: Value_Id) -> *Cycle_Info {
+    e := fam_entry(f);
+    if !e.ci e.ci = ci_compute(f);
+    return e.ci;
+}
+cached_cycle_info :: (f: Value_Id) -> *Cycle_Info { e := table_find_pointer(*fam, f); if e return e.ci; return null; }
+
 // AM.getResult<AssumptionAnalysis>(F)
 get_assumption_cache :: (f: Value_Id) -> *Assumption_Cache {
     e := fam_entry(f);
@@ -113,6 +136,8 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     if e.pdt && !analysis_survives(.POSTDOMTREE, pa) { dt_free(e.pdt); e.pdt = null; }
     if e.db && !analysis_survives(.DEMANDED_BITS, pa) { db_free(e.db); e.db = null; }
     if e.ac && !analysis_survives(.ASSUMPTIONS, pa) { ac_free(e.ac); e.ac = null; }
+    if e.li && !analysis_survives(.LOOPS, pa) { li_free(e.li); e.li = null; }
+    if e.ci && !analysis_survives(.CYCLES, pa) { ci_free(e.ci); e.ci = null; }
     // MemorySSAAnalysis::Result::invalidate: preserved, and AAManager and DominatorTreeAnalysis survive
     if e.mssa && (!analysis_survives(.MEMORYSSA, pa) || !e.dt || !e.ac) { mssa_free(e.mssa); e.mssa = null; }
     // a DemandedBits result points at the DominatorTree it was built with
@@ -125,6 +150,8 @@ fam_require :: (f: Value_Id, k: Analysis_Kind) {
         case .DEMANDED_BITS; get_demanded_bits(f);
         case .ASSUMPTIONS; get_assumption_cache(f);
         case .MEMORYSSA; get_memoryssa(f);
+        case .LOOPS; get_loop_info(f);
+        case .CYCLES; get_cycle_info(f);
     }
 }
 fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
@@ -146,6 +173,8 @@ Pass_Kind :: enum u8 {
     DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG; INSTSIMPLIFY; SROA;
     // alias analysis (aa.jai)
     AA_EVAL; REQUIRE_GLOBALS_AA; PRINT_MEMORYSSA; PRINT_MEMORYSSA_NO_OPT; PRINT_MEMORYSSA_WALKER;
+    // loops (loop_info.jai, cycle_info.jai)
+    PRINT_LOOPS; PRINT_CYCLES;
 }
 
 Pass_Info :: struct {
@@ -195,6 +224,15 @@ PASS_TABLE :: Pass_Info.[
     .{"verify<memoryssa>", .FUNCTION, .REQUIRE, true, .MEMORYSSA},   // no verifier yet: computes MemorySSA only
     .{"require<memoryssa>", .FUNCTION, .REQUIRE, true, .MEMORYSSA},
     .{"invalidate<memoryssa>", .FUNCTION, .INVALIDATE, true, .MEMORYSSA},
+    .{"print<loops>", .FUNCTION, .PRINT_LOOPS, true, .LOOPS},
+    .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
+    .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
+    .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
+    .{"invalidate<loops>", .FUNCTION, .INVALIDATE, true, .LOOPS},
+    .{"invalidate<cycles>", .FUNCTION, .INVALIDATE, true, .CYCLES},
+    // LoopVerifierPass / CycleInfoVerifierPass: assertions only in a release build (getResult and nothing else)
+    .{"verify<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
+    .{"verify<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -543,6 +581,18 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .AA_EVAL;
             sb: String_Builder; sb.allocator = temp;
             aa_eval_run(f, aa_eval_counts_for(node), *sb);
+            write_string(builder_to_string(*sb,, allocator = temp), to_standard_error = true);
+            return PRESERVE_ALL;
+        case .PRINT_LOOPS;
+            sb: String_Builder; sb.allocator = temp;
+            print_to_builder(*sb, "Loop info for function '%':\n", vname(f));
+            li_print(get_loop_info(f), *sb);
+            write_string(builder_to_string(*sb,, allocator = temp), to_standard_error = true);
+            return PRESERVE_ALL;
+        case .PRINT_CYCLES;
+            sb: String_Builder; sb.allocator = temp;
+            print_to_builder(*sb, "CycleInfo for function: %\n", vname(f));
+            ci_print(get_cycle_info(f), *sb);
             write_string(builder_to_string(*sb,, allocator = temp), to_standard_error = true);
             return PRESERVE_ALL;
         case .PRINT_MEMORYSSA; mssa_printer_run(f, true); return PRESERVE_ALL;

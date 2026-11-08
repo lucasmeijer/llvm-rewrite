@@ -1107,3 +1107,36 @@ idf_calculate :: (dt: *Dom_Tree, def_blocks: [] Value_Id, def_set: *Table(Value_
         }
     }
 }
+
+// splitBlock(NewBB) = Split<NodeT *>(NewBB) (forward trees; NewBB has a single successor)
+dt_split_block :: (dt: *Dom_Tree, nb: Value_Id) {
+    if dt.post fatal("PostDominatorTree::splitBlock is not implemented yet");
+    t := block_terminator(nb);
+    assert(t != NONE && num_successors(t) == 1, "NewBB should have a single successor!");
+    succ := get_successor(t, 0);
+    preds: [..] Value_Id; preds.allocator = temp;
+    block_predecessors(nb, *preds);
+    sp: [..] Value_Id; sp.allocator = temp;
+    block_predecessors(succ, *sp);
+    dominates_succ := true;
+    for sp {
+        if it != nb && !dt_dominates(dt, succ, it) && dt_is_reachable_from_entry(dt, it) { dominates_succ = false; break; }
+    }
+    idom: Value_Id = NONE;
+    i := 0;
+    while i < preds.count {
+        if dt_is_reachable_from_entry(dt, preds[i]) { idom = preds[i]; break; }
+        i += 1;
+    }
+    if idom == NONE return;
+    i += 1;
+    while i < preds.count {
+        if dt_is_reachable_from_entry(dt, preds[i]) idom = dt_find_nca(dt, idom, preds[i]);
+        i += 1;
+    }
+    nn := dt_add_new_block(dt, nb, idom);
+    if dominates_succ {
+        dt.dfs_valid = false;
+        dt_set_idom(dt, dt_node(dt, succ), nn);
+    }
+}
