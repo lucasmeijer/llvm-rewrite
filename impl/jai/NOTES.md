@@ -273,7 +273,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   `print<memoryssa>,loop-mssa(licm),print<memoryssa>` (-verify-memoryssa) are identical except 3 files whose
   differences are inliner diagnostics that every printer sweep shows.
 
-## LICM (L1.licm 112/134 ::opt, L1.analysis.memoryssa 39/41)
+## LICM (L1.licm 111/134 ::opt, L1.analysis.memoryssa 39/41)
 
 - Files: pass_licm.jai (LICM.cpp incl. LNICM and ControlFlowHoister), must_execute.jai (ICFLoopSafetyInfo,
   InstructionPrecedenceTracking, colorEHFunclets), alias_set_tracker.jai, LoadAndStorePromoter hooks in
