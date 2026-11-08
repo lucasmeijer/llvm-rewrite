@@ -1,6 +1,6 @@
 # goose L0.print-imported: shared working tree, no TableGen binary, and a parse unit that is really "port AutoUpgrade"
 
-- **Date / implementation / unit:** 2026-11-09 / goose / L0.print-imported (5955 -> 6979 of 6994)
+- **Date / implementation / unit:** 2026-11-09 / goose / L0.print-imported (5955 -> 6994 of 6994, COMPLETE)
 - **What happened:**
   - Two (later three) agents edited `impl/goose` in the same checkout `/work`. A plain `git add impl/goose/src`
     committed another agent's half-finished files; later another agent's commit reverted three of my fixes

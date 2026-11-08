@@ -10,6 +10,7 @@ import intrinsics;
 import datalayout;
 import dinfo;
 import constfold;
+import autoupgrade_x86;
 
 // ---------------------------------------------------------------------------------------------
 // Small IR helpers
@@ -250,8 +251,15 @@ fn upgrade_intrinsic_function1(f: i32) -> bool, i32 {
     }
     let id = func_iid(f);
     if c == 'x' && starts_with(name, "x86.") {
-        // upgradeX86IntrinsicFunction is not ported: refuse anything it could touch.
-        if id == 0 || !intr_signature_valid(id, globs[glob_of(f)].vty) {
+        // upgradeX86IntrinsicFunction
+        let xn = name[4..];
+        if x86_should_upgrade(xn) { return true, -1; }
+        if starts_with(xn, "xop.") && np == 2 && (xn == "xop.vfrcz.ss" || xn == "xop.vfrcz.sd") {
+            au_rename_old(f);
+            return true, au_get_declaration(au_intr_id(if xn == "xop.vfrcz.ss" { "llvm.x86.xop.vfrcz.ss" } else { "llvm.x86.xop.vfrcz.sd" }), []);
+        }
+        // the remaining cases of upgradeX86IntrinsicFunction rewrite old signatures of known intrinsics
+        if id != 0 && !intr_signature_valid(id, globs[glob_of(f)].vty) {
             fatal(str("x86 intrinsic auto-upgrade is not supported yet (@", full, ")"));
         }
     }
@@ -383,6 +391,12 @@ fn upgrade_intrinsic_call(ci: i32, nf: i32) {
     if vals[f].kind != VK_FUNC { return; }
     if nf < 0 {
         let name = sbytes(vals[f].name);
+        if starts_with(name, "llvm.x86.") {
+            let rep = upgrade_x86_call(name[9..], ci);
+            if rep >= 0 { rauw(ci, rep); }
+            au_erase_inst(ci);
+            return;
+        }
         if starts_with(name, "llvm.convert.") {
             // upgradeConvertIntrinsicCall (IRBuilder with constant folding)
             let half = ty_simple(TK_HALF);
@@ -412,6 +426,13 @@ fn upgrade_intrinsic_call(ci: i32, nf: i32) {
     let id = func_iid(nf);
     let iname = intr_name(id);
     let nargs = cb_nargs(ci);
+    if iname == "llvm.x86.xop.vfrcz.ss" || iname == "llvm.x86.xop.vfrcz.sd" {
+        if nargs == 2 {
+            let nc = au_create_call(ci, nf, [op(ci, 1)]);
+            au_replace_call(ci, nc);
+            return;
+        }
+    }
     if iname == "llvm.coro.end" {
         var a: i32[>..] = [];
         for k in nargs { a.push(op(ci, k)); }
