@@ -157,7 +157,7 @@ simplify_cond_branch :: (s: *Scfg, bi: Value_Id, b: *Irb) -> bool {
                     }
                     if !can break;
                 }
-                if can && cand.count scfg_np("hoisting conditional loads/stores (conditional faulting)");
+                if can && cand.count { hoist_conditional_loads_stores(bi, cand, -1, NONE); return request_resimplify(s); }
             }
         } else {
             t0 := block_terminator(s0);

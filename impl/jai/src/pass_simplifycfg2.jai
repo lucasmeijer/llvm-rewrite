@@ -851,7 +851,8 @@ speculatively_execute_bb :: (s: *Scfg, bi: Value_Id, then_bb: Value_Id) -> bool 
     }
     // BB->splice(BI, ThenBB, begin, prev(end))
     block_splice(bi, false, then_bb, block_first(then_bb), true, block_terminator(then_bb));
-    if cond_ls.count scfg_np("hoisting conditional loads/stores (conditional faulting)");
+    // cond_ls was collected bottom-up; LLVM's SmallVector is in the same (reverse) order
+    if cond_ls.count hoist_conditional_loads_stores(bi, cond_ls, ifx invert then 1 else 0, sel);
     b: Irb; irb_set_before(*b, bi);
     for pn: block_insts(end_bb) {
         if inst_op(pn) != .PHI break;
@@ -1376,4 +1377,72 @@ fold_branch_to_common_dest :: (s: *Scfg, bi: Value_Id, bonus_inst_threshold: s64
     }
     if num_bonus > bonus_inst_threshold * ifx saw_vector then scfg_cl.branch_fold_to_common_dest_vector_multiplier else 1 return false;
     return perform_branch_to_common_dest_folding_full(s, bi, block_terminator(preds[0]));
+}
+
+// hoistConditionalLoadsStores(BI, SpeculatedConditionalLoadsStores, Invert (-1 = nullopt, 0/1), Sel)
+hoist_conditional_loads_stores :: (bi: Value_Id, lss: [] Value_Id, invert: s64, sel: Value_Id) {
+    vcond_ty := type_vector(1, ir.t_i1, false);
+    cond := op(bi, 0);
+    bb := inst_block(bi);
+    mask: Value_Id = NONE; mask_false: Value_Id = NONE; mask_true: Value_Id = NONE;
+    if invert >= 0 {
+        b: Irb; irb_set_before(*b, ifx sel != NONE then sel else lss[lss.count - 1]);
+        c := ifx invert == 1 then irb_binop(*b, .XOR, cond, const_int(ir.t_i1, 1)) else cond;
+        mask = irb_bitcast(*b, c, vcond_ty);
+    } else {
+        b: Irb; irb_set_before(*b, bi);
+        mask_false = irb_bitcast(*b, irb_binop(*b, .XOR, cond, const_int(ir.t_i1, 1)), vcond_ty);
+        mask_true = irb_bitcast(*b, cond, vcond_ty);
+    }
+    peek :: (v: Value_Id) -> Value_Id {
+        x := v;
+        while is_inst(x) && inst_op(x) == .BITCAST x = op(x, 0);
+        return x;
+    }
+    for i: lss {
+        b: Irb; irb_set_before(*b, ifx invert >= 0 then i else bi);
+        if invert < 0 mask = ifx inst_block(i) == get_successor(bi, 0) then mask_true else mask_false;
+        o0 := op(i, 0);
+        mls: Value_Id;
+        if inst_op(i) == .LOAD {
+            ty := vtype(i);
+            pn: Value_Id = NONE;
+            pass_thru: Value_Id = NONE;
+            if invert >= 0 {
+                u := ir.v_first_use[i];
+                while u != NONE {
+                    usr := ir.u_user[u];
+                    if inst_op(usr) == .PHI {
+                        pn = usr;
+                        pass_thru = irb_bitcast(*b, peek(phi_incoming_value_for_block(pn, bb)), type_vector(1, ty, false));
+                    } else if sel != NONE && inst_block(usr) == bb {
+                        irb_set_before(*b, usr);
+                    }
+                    u = ir.u_next[u];
+                }
+            }
+            vty := type_vector(1, ty, false);
+            if pass_thru == NONE pass_thru = const_poison(vty);
+            mls = irb_intrinsic(*b, "llvm.masked.load", .[vty, vtype(o0)], .[o0, mask, pass_thru]);
+            add_param_align(mls, 0, inst(i).align);
+            nls := irb_bitcast(*b, mls, ty);
+            if pn != NONE phi_set_value(pn, cast(u32) phi_block_index(pn, bb), nls);
+            rauw_with_metadata(i, nls);
+        } else {
+            sv := irb_bitcast(*b, peek(o0), type_vector(1, vtype(o0), false));
+            mls = irb_intrinsic(*b, "llvm.masked.store", .[vtype(sv), vtype(op(i, 1))], .[sv, op(i, 1), mask]);
+            add_param_align(mls, 1, inst(i).align);
+        }
+        rng := get_metadata(i, md_kind("range"));
+        if rng != NONE call_add_range_ret_attr(mls, cr_from_range_md(rng));
+        drop_ub_implying_attrs_and_unknown_metadata(i, false, MD_ANNOTATION_KIND);
+        // at::deleteAssignmentMarkers(I), then drop the DIAssignID attachment
+        aid := get_metadata(i, md_kind_id("DIAssignID"));
+        if aid != NONE {
+            for * rec, ri: ir.dbg_records if rec.kind == .ASSIGN && rec.assign_id == aid && rec.owner != NONE dbgr_erase(cast(u32) (ri + 1));
+            set_metadata(i, md_kind_id("DIAssignID"), NONE);
+        }
+        copy_metadata(mls, i);
+        erase_inst_with_metadata(i);
+    }
 }

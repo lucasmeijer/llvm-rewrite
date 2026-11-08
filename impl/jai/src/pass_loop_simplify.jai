@@ -410,7 +410,7 @@ set_fitted_branch_weights :: (i: Value_Id, w: [] u64) {
 }
 
 // Instruction::dropUBImplyingAttrsAndUnknownMetadata(KnownIDs = {prof} if keep_prof)
-drop_ub_implying_attrs_and_unknown_metadata :: (i: Value_Id, keep_prof: bool) {
+drop_ub_implying_attrs_and_unknown_metadata :: (i: Value_Id, keep_prof: bool, keep_kind: u32 = 0) {
     all: [..] Kind_Md; all.allocator = temp;
     get_all_metadata(i, *all);
     prof := md_kind_id("prof");
@@ -418,6 +418,7 @@ drop_ub_implying_attrs_and_unknown_metadata :: (i: Value_Id, keep_prof: bool) {
     for all {
         if it.kind == 0 || it.kind == assign continue;
         if keep_prof && it.kind == prof continue;
+        if keep_kind != 0 && it.kind == keep_kind continue;
         set_metadata(i, it.kind, NONE);
     }
     if is_call_base(i) && inst(i).attrs != 0 {

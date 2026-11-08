@@ -190,8 +190,9 @@ replace_uses_of_with :: (user: Value_Id, from: Value_Id, to: Value_Id) {
 drop_unknown_non_debug_metadata :: (i: Value_Id, keep: [] u32) {
     all: [..] Kind_Md; all.allocator = temp;
     get_all_metadata(i, *all);
+    assign := md_kind_id("DIAssignID");   // a DIAssignID attachment is debug metadata, never dropped
     for all {
-        if it.kind == 0 continue;
+        if it.kind == 0 || it.kind == assign continue;
         kept := false;
         for k: keep if k == it.kind { kept = true; break; }
         if !kept set_metadata(i, it.kind, NONE);

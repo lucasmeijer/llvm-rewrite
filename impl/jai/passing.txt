@@ -10041,6 +10041,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/X86/disable-lookup-table.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/disable-lookup-table.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/empty-cleanuppad.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/empty-cleanuppad.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/X86/hoist-loads-stores-with-cf.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/hoist-loads-stores-with-cf.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cleanuppads.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cleanuppads.ll::roundtrip
