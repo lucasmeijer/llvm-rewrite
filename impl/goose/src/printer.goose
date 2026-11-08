@@ -10,6 +10,7 @@ import intrinsics;
 import dinfo;
 import gen_dwarf;
 import constfold;
+import gen_cc;
 
 var out: u8[>..];
 
@@ -1271,6 +1272,19 @@ recursive fn put_attr(a: i32, in_group: bool) {
         putc(')');
         return;
     }
+    if k == AK_DenormalFPEnv {
+        put("denormal_fpenv(");
+        let d = (x.i1 & 15) as! i64;
+        let f = ((x.i1 >> 4) & 15) as! i64;
+        if f == d { put_denormal_mode(d); }
+        else {
+            if d != 0 { put_denormal_mode(d); put(", "); }
+            put("float: ");
+            put_denormal_mode(f);
+        }
+        putc(')');
+        return;
+    }
     if k == AK_UWTable { put(if x.i1 == 2 { "uwtable" } else { "uwtable(sync)" }); return; }
     if k == AK_AllocKind {
         put("allockind(\"");
@@ -1496,14 +1510,9 @@ fn print_alias(av: i32, is_alias: bool) {
 }
 
 fn put_cc(cc: i32) {
-    if cc == 8 { put("fastcc"); } else if cc == 9 { put("coldcc"); } else if cc == 10 { put("ghccc"); }
-    else if cc == 13 { put("anyregcc"); } else if cc == 14 { put("preserve_mostcc"); } else if cc == 15 { put("preserve_allcc"); }
-    else if cc == 16 { put("swiftcc"); } else if cc == 17 { put("cxx_fast_tlscc"); } else if cc == 18 { put("tailcc"); }
-    else if cc == 20 { put("swifttailcc"); } else if cc == 21 { put("preserve_nonecc"); }
-    else if cc == 64 { put("x86_stdcallcc"); } else if cc == 65 { put("x86_fastcallcc"); } else if cc == 70 { put("x86_thiscallcc"); }
-    else if cc == 78 { put("x86_64_sysvcc"); } else if cc == 79 { put("win64cc"); } else if cc == 80 { put("x86_vectorcallcc"); }
-    else if cc == 92 { put("x86_regcallcc"); } else if cc == 83 { put("x86_intrcc"); }
-    else { put("cc"); put_int(cc as i64); }
+    for v, i in CC_VALS { if v == cc as i64 { put(CC_NAMES[i]); return; } }
+    put("cc");
+    put_int(cc as i64);
 }
 
 fn print_function(f: i32) {
@@ -2190,4 +2199,12 @@ fn foreign_local_slot(v: i32) -> i32 {
         b = blocks[block_of(b)].next;
     }
     return -1;
+}
+
+fn put_denormal_mode(m: i64) {
+    let names = ["ieee", "preservesign", "positivezero", "dynamic"];
+    let o = m & 3;
+    let i = (m >> 2) & 3;
+    put(names[o]);
+    if i != o { putc('|'); put(names[i]); }
 }

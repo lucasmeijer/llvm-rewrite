@@ -14,6 +14,7 @@ import autoupgrade;
 import dinfo;
 import gen_dwarf;
 import constfold;
+import gen_cc;
 
 // ---------------------------------------------------------------------------------------------
 // Parser state
@@ -764,7 +765,7 @@ recursive fn parse_constant(ty: i32) -> i32 {
             expect_kw("to");
             let dt = parse_type();
             expect_punct(')', "')' at end of constantexpr cast");
-            if dt != ty { perr("constant expression type mismatch"); }
+            if ty >= 0 && dt != ty { perr("constant expression type mismatch"); }
             return ce_cast(cop, v, dt);
         }
         let bop = binop_from_kw(w);
@@ -1393,7 +1394,7 @@ recursive fn parse_one_attr(ctx: i64) -> i32 {
         words[at] = n;
         return attr_int(AK_Initializes, at as u64);
     }
-    if w == "denormal_fpenv" { perr("denormal_fpenv attribute is not supported yet"); }
+    if w == "denormal_fpenv" { return attr_int(AK_DenormalFPEnv, parse_denormal_fpenv()); }
     if w == "argmemonly" { lex(); return attr_get(Attr { kind: -10, i1: 0, i2: 0, ty: -1, skey: -1, sval: -1, hash: 0 }); }
     if w == "inaccessiblememonly" { lex(); return attr_get(Attr { kind: -11, i1: 0, i2: 0, ty: -1, skey: -1, sval: -1, hash: 0 }); }
     if w == "inaccessiblemem_or_argmemonly" { lex(); return attr_get(Attr { kind: -12, i1: 0, i2: 0, ty: -1, skey: -1, sval: -1, hash: 0 }); }
@@ -1663,8 +1664,14 @@ fn parse_global_def(nm: i32, num: i64) {
         lex();
         let vt = parse_type();
         expect_punct(',', "','");
-        let at = parse_type();
-        let aliasee = parse_constant(at);
+        var aliasee: i32 = -1;
+        if tok_is("bitcast") || tok_is("getelementptr") || tok_is("addrspacecast") || tok_is("inttoptr") {
+            // the cast's type is implied (parseValID without a type)
+            aliasee = parse_constant(-1);
+        } else {
+            let at = parse_type();
+            aliasee = parse_constant(at);
+        }
         let pt = ty_ptr(f.addrspace);
         let v = new_glob(if is_alias { VK_ALIAS } else { VK_IFUNC }, pt, -1, 1);
         globs[glob_of(v)].vty = vt;
@@ -1752,16 +1759,16 @@ fn parse_cc() -> i32 {
     if tk != T_KW { return 0; }
     let w = tok_text();
     var c: i64 = -1;
-    if w == "ccc" { c = 0; } else if w == "fastcc" { c = 8; } else if w == "coldcc" { c = 9; }
-    else if w == "ghccc" { c = 10; } else if w == "anyregcc" { c = 13; } else if w == "preserve_mostcc" { c = 14; }
-    else if w == "preserve_allcc" { c = 15; } else if w == "swiftcc" { c = 16; } else if w == "cxx_fast_tlscc" { c = 17; }
-    else if w == "tailcc" { c = 18; } else if w == "swifttailcc" { c = 20; } else if w == "preserve_nonecc" { c = 21; }
-    else if w == "x86_stdcallcc" { c = 64; } else if w == "x86_fastcallcc" { c = 65; } else if w == "x86_thiscallcc" { c = 70; }
-    else if w == "x86_64_sysvcc" { c = 78; } else if w == "win64cc" { c = 79; } else if w == "x86_vectorcallcc" { c = 80; }
-    else if w == "x86_regcallcc" { c = 92; } else if w == "x86_intrcc" { c = 83; }
+    if w == "ccc" { c = 0; }
     else if w == "cc" {
         lex();
         return parse_uint() as i32;
+    } else {
+        for n, i in CC_NAMES {
+            var nn = n;
+            if nn.len > 0 && nn[nn.len - 1] == ' ' { nn = nn[..nn.len - 1]; }
+            if nn == w { c = CC_VALS[i]; }
+        }
     }
     if c < 0 { return 0; }
     lex();
@@ -3317,4 +3324,42 @@ recursive fn parse_debug_record() -> i32 {
     dbgrecs[r].dl = d;
     expect_punct(')', "')' here");
     return r;
+}
+
+// LLParser::parseDenormalFPEnvAttr: DenormalFPEnv::toIntValue = default mode | fmode mode << 4,
+// mode = input << 2 | output (ieee 0, preservesign 1, positivezero 2, dynamic 3).
+fn denormal_kind() -> i64 {
+    if tok_is("ieee") { return 0; } if tok_is("preservesign") { return 1; }
+    if tok_is("positivezero") { return 2; } if tok_is("dynamic") { return 3; }
+    perr("expected denormal behavior kind (ieee, preservesign, positivezero, dynamic)");
+    return 0;
+}
+fn denormal_entry() -> i64 {
+    let o = denormal_kind();
+    lex();
+    var i = o;
+    if eat_punct('|') { i = denormal_kind(); lex(); }
+    return (i << 2) | o;
+}
+fn parse_denormal_fpenv() -> u64 {
+    let saved = ignore_colon;
+    ignore_colon = true;
+    lex();
+    expect_punct('(', "'('");
+    var def: i64 = 0;
+    var fmode: i64 = -1;
+    var has_def = false;
+    if tk != T_TYPE { def = denormal_entry(); has_def = true; }
+    let comma = eat_punct(',');
+    if tk == T_TYPE {
+        if has_def && !comma { perr("expected ',' before float:"); }
+        if ttype != T_FLOAT { perr("expected float:"); }
+        lex();
+        expect_punct(':', "':' before float denormal_fpenv");
+        fmode = denormal_entry();
+    }
+    expect_punct(')', "unterminated denormal_fpenv");
+    ignore_colon = saved;
+    if fmode < 0 { fmode = def; }
+    return ((def | (fmode << 4)) as u64);
 }
