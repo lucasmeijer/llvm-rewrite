@@ -77,6 +77,9 @@ src/
   pass_dse.jai    DeadStoreElimination (DSEState = `Dse`: MemorySSA walk, OverlapIntervals, calloc folding, initializes)
   pass_memcpyopt.jai  MemCpyOpt (`Mco`: memset merging, call slot / memcpy / memset forwarding, stack move, byval)
   assume_builder.jai  AssumeBundleBuilder salvageKnowledge (-enable-knowledge-retention, AC-less form only)
+  value_handles.jai   WeakTrackingVH / TrackingVH (slots updated by replace_all_uses_with / erase_inst)
+  scev_expander.jai   SCEVExpander (`Scev_Expander`, sx_*), its SE/LoopInfo helpers
+  simplify_indvar.jai, pass_indvars.jai   SimplifyIndVar (Siv, Widen_IV), IndVarSimplify (Ivs), rewriteLoopExitValues
   phi_trans_addr.jai  PHITransAddr (pta_*: translateValue incl. select conditions, translateWithInsertion)
   memdep.jai      MemoryDependenceAnalysis (md_*: local/non-local deps, caches, removeInstruction)
   vn_coercion.jai VNCoercion (vnc_*)
@@ -481,6 +484,11 @@ recomputing gives a different child order.
   through `pse_forget_value / _loop / _topmost_loop / _block_and_loop_dispositions`, which act on `scev_pass_se`
   (null when LLVM's pass has no SE: LoopSimplifyPass and LCSSAPass use getCachedResult). A pass that changes IR in a
   function with a cached SE must make every forget call its LLVM counterpart makes.
+- **SCEVExpander** (scev_expander.jai): a `Scev_Expander` struct on the caller's stack holds SCEVExpander's state
+  (temp tables; InsertedExpressions' TrackingVHs are value_handles.jai slots); its IRBuilder is an `Irb` used through
+  `sx_create_*` (InstSimplifyFolder: fold with InstSimplify, else insert and rememberInstruction). SCEVInsertPointGuard
+  is `g := sx_guard_push(x); defer sx_guard_pop(x, g);` (the guard stack lets fixupInsertPoints move saved points).
+  The visitor is the `if sc_kind(s) ==` switch in `sx_visit`. Iterators with LLVM's head bit are `Sx_It`.
 - Printers: print<scalar-evolution> (scev_print.jai), print<loopnest> (loop_nest.jai, a loop pass),
   print<iv-users> (iv_users.jai, a loop pass), `-aa-pipeline=scev-aa` (scev_aa.jai).
 

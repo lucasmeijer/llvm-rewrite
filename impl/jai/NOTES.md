@@ -650,3 +650,55 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   diamonds n2000/n8000 0.25/0.96 s (LLVM 0.06/0.20, linear); loops-many n2000/n8000 0.23/1.84 s (LLVM 0.05/0.13):
   k ~1.5 there, from PHITransAddr scanning all users of `%p` (thousands of GEPs) with a dominance query each — LLVM
   does the same scan but its dominance check is cheaper. No `@perf` benchmark times GVN.
+
+## IndVarSimplify and SCEVExpander (L1.indvars 434/446: roundtrip 223/223, opt 211/223; L1.analysis.scev COMPLETE)
+
+- Files: `scev_expander.jai` (ScalarEvolutionExpander.cpp + the SE queries it needs: canReuseInstruction,
+  getStrengthenedNoWrapFlagsFromBinOp, getWiderType; Loop::getCanonicalInductionVariable,
+  movementPreservesLCSSAForm, normalizeForPostIncUse, X86 getIntImmCostInst for the minsize cost), `simplify_indvar.jai`
+  (SimplifyIndVar.cpp: SimplifyIndvar = `Siv`, WidenIV = `Widen_IV`), `pass_indvars.jai` (IndVarSimplify.cpp,
+  LoopUtils' rewriteLoopExitValues, Local.cpp's RecursivelyDeleteDeadPHINode / DeleteDeadPHIs with TLI and
+  MemorySSAUpdater, mustExecuteUBIfPoisonOnPathTo), `value_handles.jai` (WeakTrackingVH / TrackingVH),
+  getLoopInvariantPredicate / getLoopInvariantExitCondDuringFirstIterations / evaluatePredicateAt at the end of
+  scev_implied.jai.
+- **Reusable SCEVExpander API** (for LSR, LoopUnroll runtime, LoopIdiom, LoopVectorize, LoopPredication):
+  `x: Scev_Expander; sx_init(*x, "name", preserve_lcssa)`; `sx_expand_code_for_at(*x, s, ty, insert_before)`,
+  `sx_expand_code_for(*x, s, ty)` (at the current point), `sx_set_insert_point`, `sx_clear_insert_point`,
+  `sx_is_safe_to_expand(_at)`, `sx_is_high_cost_expansion(*x, exprs, l, budget, tti, at)`
+  (`scev_cheap_expansion_budget` = `-scev-cheap-expansion-budget`), `sx_has_related_existing_expansion`,
+  `sx_replace_congruent_ivs`, `sx_hoist_iv_inc`, `sx_get_iv_inc_operand`, `sx_find_insert_point_after`,
+  `sx_is_inserted_instruction`, `sx_all_inserted_instructions`, `sx_erase_dead_instructions`, `sx_cleanup`
+  (SCEVExpanderCleaner with ResultUsed = false), modes `sx_disable_canonical_mode`, `sx_enable_lsr_mode`,
+  `sx_set_post_inc` / `sx_clear_post_inc`, `sx_set_iv_inc_insert_pos`, `sx_set_chained_phi`, `sx_clear`. The
+  expander works on the global `se` (set it first) and uses se.dt / se.li. Not ported: the SCEVPredicate
+  expansions (`sx_expand_code_for_predicate` fails loudly).
+- Also reusable: `simplify_loop_ivs(l, li, dt, tti, *dead)` (simplifyLoopIVs, for LoopUnroll),
+  `simplify_users_of_iv`, `create_wide_iv`, `rewrite_loop_exit_values`, `is_almost_dead_iv`,
+  `must_execute_ub_if_poison_on_path_to`, `ivs_recursively_delete_trivially_dead(v, mssau)`,
+  `ivs_delete_dead_phis(bb, mssau)`, `li_canonical_induction_variable`, `li_movement_preserves_lcssa_form`,
+  `form_lcssa_for_instructions(..., phis_to_remove, inserted_phis)` (the optional outputs are new).
+- **Value handles**: `vh_new(v) -> Vh`, `vh_get`, `vh_set`, `vh_release_all()` (the pass that creates handles
+  releases them before returning; indvars_run does). replace_all_uses_with / erase_inst call vh_note_rauw /
+  vh_note_erase. Plain WeakVH / AssertingVH need nothing (ids are never reused: check `vkind != .DEAD`).
+- IRBuilder flavours: the expander's own `sx_create_*` (InstSimplifyFolder + remember the instruction);
+  IndVarSimplify's `IRBuilder<>` is `Irb` (ConstantFolder); `irb_trunc_flags` = CreateTrunc with nuw/nsw.
+  `new X(..., InsertBefore)` is `siv_insert_before` (adopts the position's debug records, then names).
+- `-replexitval=unusedindvarinloop` fails loudly (needs InductionDescriptor::isInductionPHI with its ID).
+- Remaining unit failures: loop-deletion (9), simple-loop-unswitch, inline + function-attrs
+  (`-disable-nounwind-inference`).
+- Sweeps (every round-tripping corpus file): `loop(indvars)` 7754/7754 identical; `--per-function` 69776/69778
+  identical (2 loud: ppc_fp128 literal); `sroa,loop(loop-rotate,indvars)` 7747 identical, 0 differs (7 loud, all in
+  SROA / loop-rotate); `sroa,instcombine,loop-mssa(loop-rotate,licm),loop(indvars)`: the 9 differences are the
+  same as without indvars (InstCombine); with a trailing instcombine ~37 more files differ, all identical after
+  indvars, so they are InstCombine bugs on post-indvars IR (lftr-promote.ll, pr28705.ll, LoopVectorize/*: worth a
+  look for L1.instcombine). `print<scalar-evolution>` and `loop(indvars),print<scalar-evolution>` (analysis):
+  3 differences left, none from SCEV/indvars: GlobalsModRef/pr12351.ll (debug-info warning position),
+  InstSimplify/ConstProp/extractelement-vscale.ll (sign bits of an extractelement from a scalable splat: LLVM
+  gives full-set), LoopVectorize/X86/int128_no_gather.ll (`'+mpx' is not a recognized feature` warning printed
+  before instead of after the first printer header). uscmp.ll was fixed (call_range now intersects call site and
+  callee like CallBase::getRange).
+- Perf (x64 build, `-passes=sroa,loop(loop-rotate,indvars)` minus `sroa,loop(loop-rotate)`): loops n2000/n8000
+  +0.25/+5.0 s (LLVM +0.02/+0.24), loops-many n500/n2000 +1.7/+61 s (LLVM +0.07/+4.2). LLVM is superlinear too
+  (k ~1.9 / ~2.8) because computing each sequential loop's trip count walks every dominating loop guard
+  (isBasicBlockEntryGuardedByCond up the predecessor chain); ours is k ~2.2 / ~2.6 with a much larger constant
+  (isImpliedCond and range computations, temp APInt allocation). No `@perf` benchmark times indvars.

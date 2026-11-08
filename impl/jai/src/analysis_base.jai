@@ -469,7 +469,7 @@ call_param_attr :: (c: Value_Id, argno: u32, k: Attr_Kind) -> *Attr {
     return null;
 }
 call_param_has_attr :: (c: Value_Id, argno: u32, k: Attr_Kind) -> bool { return call_param_attr(c, argno, k) != null; }
-// CallBase::getRange
+// CallBase::getRange: the call-site range intersected with the callee's
 call_range :: (c: Value_Id) -> (bool, Const_Range) {
     ca := attr_set_find(attr_list_ret(inst(c).attrs), .Range);
     fa: *Attr;

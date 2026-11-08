@@ -113,3 +113,4 @@ passing 243/247 `print<scalar-evolution>` lines of `tests/analysis/scev` + `Anal
 - SCEVAA recurses on the base values with `LocationSize::beforeOrAfterPointer()` and empty AA tags.
 - LLVM 23's SCEVUse (a SCEV pointer plus use-specific NUW/NSW bits) exists, but nothing in 23.1.5 constructs a use
   with flags (grep `SCEVUse(` in lib/), so every SCEV is its own canonical and operands can be plain pointers.
+- SCEVExpander and IndVarSimplify (the main SCEV clients so far): see indvars-and-scev-expander.md.

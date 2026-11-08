@@ -17,7 +17,7 @@ lib/TargetParser/Triple.cpp 0.25
 # scaled by the share of the identifiers they call that the impl mentions (catches a 1900-line visitCallInst ported
 # in part). Legacy-PM wrappers and print/dump are left out. fraction = matched function lines / all function lines,
 # rounded down to 0.05. "manual" lines were spot-checked by hand where the port does not follow LLVM's structure.
-lib/Analysis/ScalarEvolution.cpp 0.9
+lib/Analysis/ScalarEvolution.cpp 0.93
 lib/AsmParser/LLParser.cpp 0.7  # manual: own parser structure; all IR constructs, no summary-index parsing (~19% of LLParser) (heuristic 0.38)
 lib/Analysis/ValueTracking.cpp 0.9
 lib/Transforms/InstCombine/InstCombineCompares.cpp 0.95
@@ -76,7 +76,7 @@ lib/Transforms/InstCombine/InstCombineNegator.cpp 0.65
 lib/Transforms/Scalar/ADCE.cpp 0.85
 lib/Transforms/Utils/SSAUpdater.cpp 0.75
 lib/Analysis/MemoryLocation.cpp 1
-lib/Transforms/Utils/LCSSA.cpp 0.7
+lib/Transforms/Utils/LCSSA.cpp 0.75
 lib/Transforms/Scalar/SimplifyCFGPass.cpp 1
 lib/IR/ProfDataUtils.cpp 0.6
 lib/Analysis/LoopNestAnalysis.cpp 0.75
@@ -102,7 +102,7 @@ lib/Analysis/DomTreeUpdater.cpp 0.4
 lib/IR/OptBisect.cpp 0.5
 lib/Transforms/Utils/Mem2Reg.cpp 1
 lib/Transforms/Scalar/LoopRotation.cpp 1
-lib/Analysis/ScalarEvolutionNormalization.cpp 0.6
+lib/Analysis/ScalarEvolutionNormalization.cpp 0.8
 lib/Analysis/CycleAnalysis.cpp 0.75
 lib/Transforms/IPO/InferFunctionAttrs.cpp 1
 lib/Analysis/FloatingPointPredicateUtils.cpp 1  # manual: renamed: fcmp_to_class_test & co in fpclass.jai (heuristic 0.00)
@@ -115,7 +115,7 @@ lib/Transforms/Scalar/LICM.cpp 0.97  # all of LICM/LNICM incl. ControlFlowHoiste
 lib/Analysis/MustExecute.cpp 0.35  # LoopSafetyInfo + ICFLoopSafetyInfo only (no SimpleLoopSafetyInfo, printers, MustBeExecutedContextExplorer)
 lib/Analysis/AliasSetTracker.cpp 0.85  # no printers
 lib/Analysis/InstructionPrecedenceTracking.cpp 0.9
-lib/Transforms/Utils/LoopUtils.cpp 0.1  # appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint
+lib/Transforms/Utils/LoopUtils.cpp 0.2  # appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint, isAlmostDeadIV, rewriteLoopExitValues (+ canLoopBeDeleted, hasHardUserWithinLoop; not the UnusedIndVarInLoop mode)
 lib/IR/EHPersonalities.cpp 0.8  # classifyEHPersonality, colorEHFunclets
 lib/CodeGen/TargetLoweringBase.cpp 0.3   # jai_simplifycfg: initActions, computeRegisterProperties, getTypeConversion, isBeneficialToExpandPowI, getBitWidthForCttzElements
 lib/Target/X86/X86ISelLowering.cpp 0.03   # jai_simplifycfg: the X86TargetLowering constructor's operation actions (generated), getPreferredVectorAction, isLegalAddressingMode, isCheapToSpeculateCt*, isNoopAddrSpaceCast
@@ -128,3 +128,6 @@ lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.4  # salvageKnowledge / buildAssu
 lib/Transforms/Scalar/GVN.cpp 0.95  # jai_gvn: all of GVNPass incl. the MemorySSA load analysis; no optimization remarks (findMayClobberedPtrAccess/reportMayClobberedLoad/reportLoadElim), no legacy pass
 lib/Analysis/MemoryDependenceAnalysis.cpp 0.95  # no debug-only verifyRemoved/AssertSorted, no legacy wrapper; invalidate() n/a (per-run result)
 lib/Transforms/Utils/VNCoercion.cpp 0.85  # no getConstantValueForLoad / getConstantMemInstValueForLoad (NewGVN only)
+lib/Transforms/Utils/ScalarEvolutionExpander.cpp 0.88  # manual: all but the SCEVPredicate expansions (expandCodeForPredicate, expandComparePredicate, generateOverflowCheck, expandWrapPredicate, expandUnionPredicate: fail loudly) (heuristic 0.95)
+lib/Transforms/Scalar/IndVarSimplify.cpp 0.98  # all; ShouldRunExtraSimpleLoopUnswitch is not modelled (no loop analyses)
+lib/Transforms/Utils/SimplifyIndVar.cpp 0.99
