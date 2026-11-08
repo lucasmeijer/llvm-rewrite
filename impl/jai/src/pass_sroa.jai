@@ -324,7 +324,7 @@ call_capture_components :: (c: Value_Id, opno: u32) -> u64 {
     n := call_arg_count(c);
     if opno < n {
         r := inst(c);
-        if attr_set_has(attr_list_param(r.attrs, opno), .ByVal) return 0;
+        if call_is_byval_arg(c, opno) return 0;
         cc_of :: (s: u32) -> u64 {
             a := attr_set_find(s, .Captures);
             if !a return 0xF;   // CaptureInfo::all()
@@ -340,12 +340,18 @@ call_capture_components :: (c: Value_Id, opno: u32) -> u64 {
     fatal("SROA: capture info of operand bundle operands is not supported yet");
     return 0xF;
 }
+// CallBase::isByValArgument (paramHasAttr: call site or callee)
+call_is_byval_arg :: (c: Value_Id, k: u32) -> bool {
+    if attr_set_has(attr_list_param(inst(c).attrs, k), .ByVal) return true;
+    f := call_called_function(c);
+    return f != NONE && attr_set_has(attr_list_param(glob(f).attrs, k), .ByVal);
+}
 // CallBase::onlyReadsMemory(OpNo)
 call_param_only_reads :: (c: Value_Id, opno: u32) -> bool {
     n := call_arg_count(c);
     r := inst(c);
     if opno >= n fatal("SROA: memory attributes of operand bundle operands are not supported yet");
-    if attr_set_has(attr_list_param(r.attrs, opno), .ByVal) return true;
+    if call_is_byval_arg(c, opno) return true;
     has :: (c: Value_Id, opno: u32, k: Attr_Kind) -> bool {
         if attr_set_has(attr_list_param(inst(c).attrs, opno), k) return true;
         f := call_called_function(c);
@@ -2851,7 +2857,10 @@ run_on_alloca :: (pass: *Sroa, ai: Value_Id) -> bool {
     as: Sroa_Slices;
     build_alloca_slices(ai, *as);
     if as.escaping != NONE return changed;
-    if as.escaping_ro != NONE fatal("SROA: allocas that escape into read-only calls (propagateStoredValuesToLoads) are not supported yet");
+    if as.escaping_ro != NONE {
+        propagate_stored_values_to_loads(ai, *as);
+        return true;
+    }
     for du: as.dead_users {
         n := nops(du);
         if n > 0 for k: 0..n-1 clobber_use(pass, op_use(du, k));
@@ -2979,4 +2988,52 @@ module_has_flag :: (key: string) -> bool {
         }
     }
     return false;
+}
+
+// SROA::propagateStoredValuesToLoads
+propagate_stored_values_to_loads :: (ai: Value_Id, as: *Sroa_Slices) {
+    all_same := true;
+    pty: Type_Id = NONE;
+    insts: [..] Value_Id; insts.allocator = temp;
+    begin: u64 = 0; end: u64 = 0;
+    flush :: () #expand {
+        if all_same && insts.count {
+            new_phis: [..] Value_Id; new_phis.allocator = temp;
+            ssa: Ssa_Updater;
+            ssa.inserted_phis = *new_phis;
+            array_add(*insts, ai);
+            // LoadAndStorePromoter's constructor: the base name comes from Insts[0]
+            some := ifx inst_op(insts[0]) == .LOAD then insts[0] else op(insts[0], 0);
+            ssa_init(*ssa, vtype(some), vname(some));
+            load_and_store_promote(insts, *ssa, pty);
+        }
+        all_same = true;
+        pty = NONE;
+        insts.count = 0;
+    }
+    for s: as.slices {
+        user := use_user(s.use);
+        if is_assume_like_intrinsic(user) continue;
+        if s.begin >= end {
+            flush();
+            begin = s.begin; end = s.end;
+        } else if s.begin != begin || s.end != end {
+            all_same = false;
+            end = max(end, s.end);
+            continue;
+        }
+        o := inst_op(user);
+        if o == .LOAD {
+            t := vtype(user);
+            if !inst_is_simple(user) || (pty != NONE && t != pty) all_same = false;
+            pty = t;
+            array_add(*insts, user);
+        } else if o == .STORE {
+            t := vtype(op(user, 0));
+            if !inst_is_simple(user) || (pty != NONE && t != pty) all_same = false;
+            pty = t;
+            array_add(*insts, user);
+        } else all_same = false;
+    }
+    flush();
 }

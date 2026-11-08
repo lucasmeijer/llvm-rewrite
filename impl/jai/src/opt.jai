@@ -42,6 +42,7 @@
 #load "pass_instsimplify.jai";
 #load "ir_builder.jai";
 #load "value_utils.jai";
+#load "ssa_updater.jai";
 #load "pass_sroa.jai";
 
 main :: () { opt_main(); }
