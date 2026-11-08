@@ -5,6 +5,7 @@ import os;
 import ir;
 import bignum;
 import apfloat;
+import calls;
 
 var out: u8[>..];
 
@@ -120,7 +121,7 @@ fn process_function(f: i32) {
         while iv >= 0 {
             let ii = inst_of(iv);
             if vals[iv].ty != T_VOID && vals[iv].name < 0 { vslot[iv] = fnext; fnext++; local_slotted.push(iv); }
-            if insts[ii].op as i64 == OP_CALL {
+            if is_call_base_op(insts[ii].op as i64) {
                 let fa = alist_fn(insts[ii].attrs);
                 if fa != 0 { create_as_slot(fa); }
             }
@@ -245,7 +246,7 @@ fn type_finder(m: i32) {
                 }
                 let opc = insts[ii].op as i64;
                 if opc == OP_GEP || opc == OP_ALLOCA { tf_type(insts[ii].ty2); }
-                if opc == OP_CALL { tf_attrs(insts[ii].attrs); }
+                if is_call_base_op(opc) { tf_attrs(insts[ii].attrs); }
                 for k in insts[ii].nmd {
                     if md_att[insts[ii].md + 2 * k] != 0 { tf_md(md_att[insts[ii].md + 2 * k + 1]); }
                 }
@@ -452,6 +453,8 @@ fn opcode_name(o: i64) -> const u8[:] {
     if o == OP_INSERTELEMENT { return "insertelement"; } if o == OP_SHUFFLEVECTOR { return "shufflevector"; }
     if o == OP_EXTRACTVALUE { return "extractvalue"; } if o == OP_INSERTVALUE { return "insertvalue"; }
     if o == OP_LANDINGPAD { return "landingpad"; } if o == OP_FREEZE { return "freeze"; }
+    if o == OP_CLEANUPRET { return "cleanupret"; } if o == OP_CATCHRET { return "catchret"; } if o == OP_CATCHSWITCH { return "catchswitch"; }
+    if o == OP_CALLBR { return "callbr"; } if o == OP_CLEANUPPAD { return "cleanuppad"; } if o == OP_CATCHPAD { return "catchpad"; }
     return "<bad opcode>";
 }
 
@@ -1240,22 +1243,57 @@ fn print_inst(iv: i32) {
         for k in x.naux { put(", "); put_int(ints[x.aux + k] as i64); }
     } else if opc == OP_RET && n == 0 {
         put(" void");
-    } else if opc == OP_CALL {
+    } else if opc == OP_LANDINGPAD {
+        putc(' ');
+        put_type(vals[iv].ty);
+        let cleanup = (x.bits & 1) != 0;
+        if cleanup || n != 0 { putc('\n'); }
+        if cleanup { put("          cleanup"); }
+        for k in n {
+            if k != 0 || cleanup { putc('\n'); }
+            if ty_is_array(vals[op(iv, k)].ty) { put("          filter "); } else { put("          catch "); }
+            put_operand(op(iv, k), true);
+        }
+    } else if opc == OP_CATCHSWITCH {
+        put(" within ");
+        put_operand(op(iv, 0), false);
+        put(" [");
+        let first = if (x.bits & 1) != 0 { 2 } else { 1 };
+        for k in first..n { if k > first { put(", "); } put_operand(op(iv, k), true); }
+        put("] unwind ");
+        if (x.bits & 1) != 0 { put_operand(op(iv, 1), true); } else { put("to caller"); }
+    } else if opc == OP_CATCHPAD || opc == OP_CLEANUPPAD {
+        put(" within ");
+        put_operand(op(iv, n - 1), false);
+        put(" [");
+        for k in n - 1 { if k > 0 { put(", "); } put_operand(op(iv, k), true); }
+        putc(']');
+    } else if opc == OP_CATCHRET {
+        put(" from ");
+        put_operand(op(iv, 0), false);
+        put(" to ");
+        put_operand(op(iv, 1), true);
+    } else if opc == OP_CLEANUPRET {
+        put(" from ");
+        put_operand(op(iv, 0), false);
+        put(" unwind ");
+        if n > 1 { put_operand(op(iv, 1), true); } else { put("to caller"); }
+    } else if is_call_base_op(opc) {
         if x.cc != 0 { putc(' '); put_cc(x.cc); }
-        let callee = op(iv, n - 1);
+        let callee = cb_callee(iv);
         let fty = x.ty2;
         let al = x.attrs;
         let ra = alist_ret(al);
         if ra != 0 { putc(' '); put_attr_set(ra, false); }
         let cas = types[vals[callee].ty].n;
-        if cas != 0 { put(" addrspace("); put_int(cas as i64); putc(')'); }
+        if opc != OP_CALLBR && cas != 0 { put(" addrspace("); put_int(cas as i64); putc(')'); }
         putc(' ');
         put_type(if ty_fn_vararg(fty) { fty } else { ty_fn_ret(fty) });
         putc(' ');
         put_operand(callee, false);
         putc('(');
-        let nargs = n - 1;
-        let fpclass = vals[callee].kind == VK_FUNC && vals[callee].name >= 0 && starts_with(sbytes(vals[callee].name), "llvm.is.fpclass");
+        let nargs = cb_nargs(iv);
+        let fpclass = opc == OP_CALL && vals[callee].kind == VK_FUNC && vals[callee].name >= 0 && starts_with(sbytes(vals[callee].name), "llvm.is.fpclass");
         for k in nargs {
             if k > 0 { put(", "); }
             if fpclass && k == 1 && vals[op(iv, k)].kind == VK_CINT {
@@ -1265,13 +1303,42 @@ fn print_inst(iv: i32) {
             }
             put_param_operand(op(iv, k), alist_param(al, k));
         }
-        if x.pred == 2 {
+        if opc == OP_CALL && x.pred == 2 {
             let pf = blocks[block_of(x.parent)].parent;
             if ty_fn_vararg(globs[glob_of(pf)].vty) { if nargs > 0 { put(", "); } put("..."); }
         }
         putc(')');
         let fa = alist_fn(al);
         if fa != 0 { put(" #"); put_int(asslot[fa] as i64); }
+        let nb = cb_nbundles(iv);
+        if nb > 0 {
+            put(" [ ");
+            for b in nb {
+                if b > 0 { put(", "); }
+                putc('"');
+                put_escaped(sbytes(cb_bundle_tag(iv, b)));
+                put("\"(");
+                let st = cb_bundle_begin(iv, b);
+                for j in cb_bundle_count(iv, b) {
+                    if j > 0 { put(", "); }
+                    put_operand(op(iv, st + j), true);
+                }
+                putc(')');
+            }
+            put(" ]");
+        }
+        if opc == OP_INVOKE {
+            put("\n          to ");
+            put_operand(invoke_normal_dest(iv), true);
+            put(" unwind ");
+            put_operand(invoke_unwind_dest(iv), true);
+        } else if opc == OP_CALLBR {
+            put("\n          to ");
+            put_operand(callbr_default_dest(iv), true);
+            put(" [");
+            for j in cb_nindirect(iv) { if j > 0 { put(", "); } put_operand(callbr_indirect_dest(iv, j), true); }
+            putc(']');
+        }
     } else if opc == OP_ALLOCA {
         putc(' ');
         if (x.bits & 1) != 0 { put("inalloca "); }

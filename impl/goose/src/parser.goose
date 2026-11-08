@@ -8,6 +8,7 @@ import apfloat;
 import lexer;
 import datalayout;
 import printer;
+import calls;
 
 // ---------------------------------------------------------------------------------------------
 // Parser state
@@ -2430,7 +2431,7 @@ fn parse_inst_body(bb: i32) -> i32 {
         return v;
     }
     if w == "invoke" || w == "landingpad" || w == "resume" || w == "callbr" || w == "catchswitch" || w == "catchpad" || w == "cleanuppad" || w == "catchret" || w == "cleanupret" {
-        perr(str("instruction '", w, "' is not supported yet"));
+        return parse_eh_inst(w);
     }
     perr(str("expected instruction opcode, got '", w, "'"));
     return -1;
@@ -2446,21 +2447,23 @@ fn shuffle_mask_elem(m: i32, k: i64) -> i32 {
 }
 
 // call [fmf] [cc] [ret attrs] [addrspace(N)] <ty> <callee>(<args>) [fn attrs] [bundles]
-fn parse_call(tkind: u8) -> i32 {
-    lex();   // 'call'
-    let fm = parse_fmf();
+// invoke [cc] [ret attrs] [addrspace(N)] <ty> <callee>(<args>) [fn attrs] [bundles] to label %n unwind label %u
+// callbr [cc] [ret attrs] <ty> <callee>(<args>) [fn attrs] [bundles] to label %d [label %i, ...]
+// (LLParser::parseCall / parseInvoke / parseCallBr)
+fn parse_call(tkind: u8) -> i32 { return parse_call_like(OP_CALL, tkind); }
+
+fn parse_call_like(opc: i64, tkind: u8) -> i32 {
+    lex();   // 'call' / 'invoke' / 'callbr'
+    var fm: u8 = 0;
+    if opc == OP_CALL { fm = parse_fmf(); }
     let cc = parse_cc();
     let retattrs = parse_param_attrs();
     var cas: i64 = 0;
-    if tok_is("addrspace") { lex(); cas = parse_paren_uint(); }
+    if opc != OP_CALLBR && tok_is("addrspace") { lex(); cas = parse_paren_uint(); }
     let t = parse_type();
-    // callee
-    let mark = vstack.len;      // args
+    let mark = vstack.len;      // args, then bundle operands, then destinations
     let amark = astack.len;     // param attr sets
-    // parse callee value: type is ptr
-    var callee: i32 = -1;
-    let save_ts = ts;
-    callee = parse_value(ty_ptr(cas));
+    let callee = parse_value(ty_ptr(cas));
     expect_punct('(', "'('");
     if !tok_punct(')') {
         loop {
@@ -2481,6 +2484,57 @@ fn parse_call(tkind: u8) -> i32 {
     }
     expect_punct(')', "')'");
     let nargs = vstack.len - mark;
+    let gmark = grp_refs.len;
+    let fnattrs = parse_fn_attrs(GR_CALL, -1);
+    // operand bundles (parseOptionalOperandBundles)
+    let bmark = mstack.len;
+    if tok_punct('[') {
+        lex();
+        while !tok_punct(']') {
+            if mstack.len > bmark { expect_punct(',', "',' in input list"); }
+            if tk != T_STR { perr("expected string constant"); }
+            let tag = tstr_id();
+            lex();
+            expect_punct('(', "'(' in operand bundle");
+            var cnt: i32 = 0;
+            while !tok_punct(')') {
+                if cnt > 0 { expect_punct(',', "',' in input list"); }
+                let it = parse_type();
+                var iv: i32 = -1;
+                if it == T_METADATA { iv = get_md_as_value(parse_metadata_operand()); } else { iv = parse_value(it); }
+                vstack.push(iv);
+                cnt++;
+            }
+            lex();
+            mstack.push(tag);
+            mstack.push(cnt);
+        }
+        if mstack.len == bmark { perr("operand bundle set must not be empty"); }
+        lex();
+    }
+    var nind: i64 = 0;
+    if opc == OP_INVOKE {
+        expect_kw("to");
+        parse_type();
+        vstack.push(parse_value(T_LABEL));
+        expect_kw("unwind");
+        parse_type();
+        vstack.push(parse_value(T_LABEL));
+    } else if opc == OP_CALLBR {
+        expect_kw("to");
+        parse_type();
+        vstack.push(parse_value(T_LABEL));
+        expect_punct('[', "'['");
+        if !tok_punct(']') {
+            loop {
+                parse_type();
+                vstack.push(parse_value(T_LABEL));
+                nind++;
+                if !eat_punct(',') { break; }
+            }
+        }
+        expect_punct(']', "']'");
+    }
     // function type
     var fty = t;
     if types[t].kind != TK_FUNC {
@@ -2489,12 +2543,14 @@ fn parse_call(tkind: u8) -> i32 {
         for k in nargs { ints.push(vals[vstack[mark + k]].ty); }
         fty = ty_func_run(rmark, nargs + 1, false);
     }
-    let v = new_inst(OP_CALL, ty_fn_ret(fty), nargs + 1);
-    for k in nargs { set_op(v, k, vstack[mark + k]); }
-    set_op(v, nargs, callee);
+    let n = vstack.len - mark;
+    let v = new_inst(opc, ty_fn_ret(fty), n + 1);
+    for k in n { set_op(v, k, vstack[mark + k]); }
+    set_op(v, n, callee);
     vstack.resize(mark);
-    let fnattrs = parse_fn_attrs(GR_CALL, v);
-    if tok_punct('[') { perr("operand bundles are not supported yet"); }
+    for k in gmark..grp_refs.len { grp_refs[k].target = v; }
+    cb_set_bundles(v, nargs, mstack[bmark..], nind);
+    mstack.resize(bmark);
     let lmark = astack.len;
     astack.push(fnattrs);
     astack.push(retattrs);
@@ -2508,6 +2564,115 @@ fn parse_call(tkind: u8) -> i32 {
     insts[ii].pred = tkind;
     insts[ii].fmf = fm;
     return v;
+}
+
+// within <pad> (parseValue with token type): none or a local
+fn parse_pad_value() -> i32 {
+    return parse_value(T_TOKEN);
+}
+
+fn parse_eh_inst(w: const u8[:]) -> i32 {
+    if w == "invoke" { return parse_call_like(OP_INVOKE, 0); }
+    if w == "callbr" { return parse_call_like(OP_CALLBR, 0); }
+    if w == "resume" {
+        lex();
+        let a = parse_type_and_value();
+        return mk_inst(OP_RESUME, T_VOID, [a]);
+    }
+    if w == "landingpad" {
+        // LandingPadInst::Create(Ty, 0); addClause grows like growOperands: (max(e, 1) + 1/2) * 2
+        lex();
+        let t = parse_type();
+        let v = new_inst(OP_LANDINGPAD, t, 0);
+        if eat_kw("cleanup") { insts[inst_of(v)].bits = 1; }
+        while tok_is("catch") || tok_is("filter") {
+            let is_filter = tok_is("filter");
+            lex();
+            let c = parse_type_and_value();
+            if is_filter && !ty_is_array(vals[c].ty) { perr("'filter' clause has an invalid type"); }
+            if !is_filter && ty_is_array(vals[c].ty) { perr("'catch' clause has an invalid type"); }
+            let e = nops(v);
+            if vals[v].cap as i64 < e + 1 {
+                let ncap = (max(e, 1) + 0) * 2;
+                grow_ops(v, ncap);
+            }
+            vals[v].nops = (e + 1) as i32;
+            set_op(v, e, c);
+        }
+        return v;
+    }
+    if w == "catchswitch" {
+        lex();
+        expect_kw("within");
+        let parent = parse_pad_value();
+        expect_punct('[', "'['");
+        let mark = vstack.len;
+        loop {
+            parse_type();
+            vstack.push(parse_value(T_LABEL));
+            if !eat_punct(',') { break; }
+        }
+        expect_punct(']', "']'");
+        expect_kw("unwind");
+        var unwind: i32 = -1;
+        if tok_is("to") { lex(); expect_kw("caller"); }
+        else { parse_type(); unwind = parse_value(T_LABEL); }
+        let nh = vstack.len - mark;
+        let extra = if unwind >= 0 { 2 } else { 1 };
+        let v = new_inst(OP_CATCHSWITCH, T_TOKEN, nh + extra);
+        set_op(v, 0, parent);
+        if unwind >= 0 { set_op(v, 1, unwind); insts[inst_of(v)].bits = 1; }
+        for k in nh { set_op(v, extra + k, vstack[mark + k]); }
+        vstack.resize(mark);
+        return v;
+    }
+    if w == "catchpad" || w == "cleanuppad" {
+        let opc = if w == "catchpad" { OP_CATCHPAD } else { OP_CLEANUPPAD };
+        lex();
+        expect_kw("within");
+        let parent = parse_pad_value();
+        expect_punct('[', "'['");
+        let mark = vstack.len;
+        if !tok_punct(']') {
+            loop {
+                let at = parse_type();
+                var av: i32 = -1;
+                if at == T_METADATA { av = get_md_as_value(parse_metadata_operand()); } else { av = parse_value(at); }
+                vstack.push(av);
+                if !eat_punct(',') { break; }
+            }
+        }
+        expect_punct(']', "']'");
+        vstack.push(parent);
+        let v = mk_inst(opc, T_TOKEN, vstack[mark..]);
+        vstack.resize(mark);
+        return v;
+    }
+    if w == "catchret" {
+        lex();
+        expect_kw("from");
+        let fpad = parse_pad_value();
+        expect_kw("to");
+        parse_type();
+        let b = parse_value(T_LABEL);
+        return mk_inst(OP_CATCHRET, T_VOID, [fpad, b]);
+    }
+    if w == "cleanupret" {
+        lex();
+        expect_kw("from");
+        let fpad = parse_pad_value();
+        expect_kw("unwind");
+        if tok_is("to") {
+            lex();
+            expect_kw("caller");
+            return mk_inst(OP_CLEANUPRET, T_VOID, [fpad]);
+        }
+        parse_type();
+        let b = parse_value(T_LABEL);
+        return mk_inst(OP_CLEANUPRET, T_VOID, [fpad, b]);
+    }
+    perr(str("expected instruction opcode, got '", w, "'"));
+    return -1;
 }
 
 // ---------------------------------------------------------------------------------------------
