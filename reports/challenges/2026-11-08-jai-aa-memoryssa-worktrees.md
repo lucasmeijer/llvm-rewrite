@@ -1,6 +1,6 @@
 # Shared refs across git worktrees made `git diff origin/main..HEAD` look like I was deleting another impl's work
 
-- **Date / implementation / unit:** 2026-11-10 / jai / L1.analysis.aa, L1.analysis.memoryssa
+- **Date / implementation / unit:** 2026-11-08 / jai / L1.analysis.aa, L1.analysis.memoryssa
 - **What happened:** Following the instructions, I worked in a git worktree and checked `git diff --stat
   origin/main..HEAD` before pushing. Worktrees share refs, so another agent's `git fetch` in its own worktree moved
   `origin/main` under me between my rebase and the check: the diff suddenly listed ~5000 deleted lines of
