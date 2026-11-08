@@ -237,14 +237,13 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - Not ported (answers "don't know", or fails loudly where an answer would be wrong): DomConditionCache /
   CondContext (InstSimplify passes neither), the FP half of matchSelectPattern, ppc_fp128 arithmetic.
 
-## Loops (L1.analysis.loops 24/28, L1.loop-canonical 58/92 ::opt)
+## Loops (L1.analysis.loops COMPLETE, L1.loop-canonical 58/92 ::opt)
 
-- Files and APIs: see DESIGN.md "Loops". The 4 missing L1.analysis.loops checks are `print<loopnest>` (a loop pass
-  whose IsPerfect test needs ScalarEvolution: `getInductionVariable` / `getBounds`).
+- Files and APIs: see DESIGN.md "Loops". print<loopnest> is loop_nest.jai (needs ScalarEvolution).
 - What fails loudly (and the remaining L1.loop-canonical checks): passes not ported (licm, indvars,
   simple-loop-unswitch, loop-deletion, loop-unroll, loop-idiom, loop-reduce, simplifycfg, debugify,
-  `require<domfrontier>`, SCEV verifiers), the MemorySSAUpdater (every `mssau_*` entry point in mssa_updater.jai:
-  `loop-mssa(loop-rotate)`, LoopSimplify/SplitBlockPredecessors with a cached MemorySSA), LoopRotate's noalias-scope cloning, `<check-exit-count>` (needs SCEV), key-instruction
+  `require<domfrontier>`), the MemorySSAUpdater (every `mssau_*` entry point in mssa_updater.jai:
+  `loop-mssa(loop-rotate)`, LoopSimplify/SplitBlockPredecessors with a cached MemorySSA), LoopRotate's noalias-scope cloning, key-instruction
   atom groups, DIArgList debug locations in remapping, `#dbg_assign`.
 - **x86 code-size costs are bounds, not values** (pass_loop_rotate.jai `tti_code_size_bounds`): calls, CF
   instructions, free intrinsics and the TCC_Basic default are exact; scalar int (<= 64 bits)/ptr/float/double
@@ -331,3 +330,40 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - Traps: the ICMP_*/FCMP_* constants are untyped, so `ifx c then ICMP_EQ else ICMP_NE` is s64 and does not convert
   to `u8` (write `cast(u8)` on the first branch). LLVM's `isSignTest(Pred&, C)` updates the predicate even when the
   caller's other condition then fails; foldICmpMulConstant keeps using the updated predicate.
+
+## ScalarEvolution (L1.analysis.scev 504/505; DESIGN.md "ScalarEvolution")
+
+- Files: scev.jai (nodes, uniquing, folding constructors, printing, std::stable_sort), scev_create.jai (getSCEV /
+  createSCEV, PHIs, selects, GEPs, the rewriters, memoization bookkeeping), scev_range.jai (ranges, constant
+  multiples, no-wrap inference), scev_btc.jai (trip counts, exit limits, values at scopes, constant evolution,
+  quadratic solvers, howFarToZero / howManyLessThans), scev_implied.jai (SimplifyICmpOperands, isKnownPredicate,
+  isImpliedCond and helpers), scev_guards.jai (dispositions, loop finiteness, LoopGuards), scev_pred.jai (SCEV
+  predicates, convertSCEVToAddRecWithPredicates, createAddRecFromPHIWithCasts), scev_update.jai (forget*, value
+  handles), scev_print.jai (analysis result, printer, verify, cl::opts), scev_aa.jai, loop_nest.jai, iv_users.jai.
+- The one missing check is `loop(indvars),print<scalar-evolution>` (IndVarSimplify is not ported).
+- Sweeps (tools/sweep.py --analysis over ~7780 files, all identical except LLVM diagnostics lines and ValueTracking
+  gaps (pdep/pext/ucmp known bits, extractelement of scalable splats)): `print<scalar-evolution>`,
+  `loop(loop-rotate),print<scalar-evolution>`, `print<scalar-evolution>,loop(loop-rotate),print<scalar-evolution>`
+  (checks that the forget* calls leave the cached SE exactly like LLVM's), `...,verify<scalar-evolution>`,
+  `print<loopnest>`, `loop(print<iv-users>)`, `aa-eval -aa-pipeline=scev-aa -print-all-alias-modref-info`.
+  Rerun them after touching any scev file or any pass that runs with a ScalarEvolution.
+- verify<scalar-evolution> checks the bookkeeping invariants only; LLVM's recomputation in a second
+  ScalarEvolution is not ported (it can only abort, which LLVM never does on a valid test).
+- Not ported (fail loudly or unreachable from the printers): ScalarEvolutionExpander, PredicatedScalarEvolution
+  (getAsAddRec, addPredicate), SCEVUnionPredicate, rewriteUsingPredicate, getLoopInvariantPredicate /
+  getLoopInvariantExitCondDuringFirstIterations, isKnownMultipleOf, canReuseInstruction, SCEVUnknown with a null
+  value after deletion is never printed. -scalar-evolution-use-expensive-range-sharpening fails loudly when the
+  constant max trip count is unknown (LLVM reads the type of SCEVCouldNotCompute there).
+- The AssumptionCache: LLVM never invalidates it (AssumptionCache::invalidate returns false), so a surviving SE
+  must not be dropped when fam_invalidate frees and rebuilds our AC; the SE is re-pointed at the new AC instead.
+- Perf (x64 build, print<scalar-evolution>): ~8-10x LLVM on tests/perf/scaling/loops-many (n500 1.0 s vs 0.12 s,
+  n2000 47 s vs 4.8 s), the same super-linear growth as LLVM (loop guards collect every dominating exit condition of
+  the 500 preceding loops into umin chains; GroupByComplexity's grouping is quadratic in LLVM too). The constant
+  factor is the x64 backend plus Table lookups. print<scalar-evolution> on modules with thousands of functions is
+  dominated by the printer re-running process_module per function (print<domtree> has the same cost).
+  loop-rotate now gets a ScalarEvolution from the loop PM: `perf 'tests/perf/scaling/loops-many/*'` k = 1.04
+  (LLVM 1.11). No @perf benchmark times SCEV itself.
+- Traps: `return f()` with several results, `for < i: a..b` order (gnu_merge_adaptive), Table key types, untyped
+  ICMP_* constants in `ifx` (write `cast(u8) ICMP_EQ`), procedure-name collisions (`Select_Pattern`, `is_const_int`,
+  `block_unique_successor`, `icmp_is_lt` existed already). value_tracking2.jai's `block_single_successor` has
+  getUniqueSuccessor semantics; loop_nest.jai has the exact getSingleSuccessor (`block_get_single_successor`).

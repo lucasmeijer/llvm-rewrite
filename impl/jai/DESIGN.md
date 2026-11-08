@@ -368,8 +368,9 @@ recomputing gives a different child order.
   `dt_split_block` (DominatorTree::splitBlock). Pass the trees LLVM's caller has; never recompute them.
 - **Loop passes**: a `Pass_Kind` with `level = .LOOP` in `PASS_TABLE` and a `case` in `run_loop_pass`; signature
   `(node, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater) -> Preserved`. `Loop_Std_Results` has the
-  function, AC, DT, LoopInfo and MemorySSA (null unless `loop-mssa`); there is no ScalarEvolution, AA object, TLI or
-  TTI in it. Return `PRESERVE_ALL` when nothing changed, else `loop_pass_preserved()` (+ `.MEMORYSSA` when
+  function, AC, DT, LoopInfo, ScalarEvolution (`lar.se`, always computed by the adaptor, like LLVM) and MemorySSA
+  (null unless `loop-mssa`); there is no AA object, TLI or TTI in it. While a loop pass runs, `scev_pass_se` is its
+  SE (see "ScalarEvolution" below for keeping it valid). Return `PRESERVE_ALL` when nothing changed, else `loop_pass_preserved()` (+ `.MEMORYSSA` when
   `lar.mssa`). Tell the worklist about structural changes with `lpm_mark_loop_as_deleted`,
   `lpm_add_child_loops`, `lpm_add_sibling_loops`, `lpm_revisit_current_loop`. Pass parameters
   (`loop-rotate<...>`) are parsed by the pass from `node.name` (see `lookup_pass`).
@@ -378,6 +379,47 @@ recomputing gives a different child order.
   are absorbed); `insert_at_position(i, bb, pt, head)` is `insertBefore(It)`. `records_take/prepend/append`
   manipulate the per-instruction lists; erasing a terminator with records needs `records_take` first (there is no
   "trailing records" state in this implementation).
+
+### ScalarEvolution (scev*.jai, loop_nest.jai, iv_users.jai)
+
+- **Nodes**: a SCEV is a `Scev_Id`, a row of `se.nodes` (`Scev_Row{kind, flags, size, nops, ops, type, val, loop}`;
+  id 0 = SCEVCouldNotCompute, `SCEV_NULL` = nullptr where LLVM distinguishes it). Operands are runs in `se.ops`:
+  read them with `sc_op(s, i)` (the pool grows while folding, so never keep a slice across a constructor call) or
+  copy them with `sc_operands(s)`. Uniquing is LLVM's FoldingSet: `sc_find(kind, ops, type, val, loop)` /
+  `sc_insert` hash into `se.unique` with buckets chained through `hnext`; flags live on the node and only grow
+  (`sc_set_no_wrap_flags` = ScalarEvolution::setNoWrapFlags, `sc_row(s).flags |=` = SCEVNAryExpr::setNoWrapFlags).
+  LLVM 23's SCEVUse can carry use flags, but 23.1.5 never creates one, so operands are plain ids.
+- **State**: one `*Scev_State` per function (`Fn_Analyses.se`, `get_scev(f)` = AM.getResult, `cached_scev(f)`);
+  every `sc_*` procedure works on the global `se`, which `get_scev` (and the loop PM / AA entry points) set. All of
+  LLVM's caches are tables of the state with the same keys (ValueExprMap / ExprValueMap, ranges, constant
+  multiples, dispositions, ValuesAtScopes(+Users), BackedgeTakenCounts / Predicated..., BECountUsers, FoldCache(+User),
+  SCEVUsers, LoopUsers, ...), so `sc_forget_memoized_results` reproduces exactly what LLVM forgets (that changes
+  output: e.g. forgetting the symbolic PHI in createAddRecFromPHI, or LoopUsers after a trip count is computed).
+- **Operand lists** are `[..] Scev_Id` in `temp`; constructors that take `SmallVectorImpl &Ops` take `*[..]` and may
+  rewrite it (`sc_get_add(*ops, flags, depth)`); `sc_get_add2/3`, `sc_get_mul2/3`, `sc_list(...)` for small lists.
+- **API map** (LLVM name -> Jai): getSCEV `sc_get_scev`, getExistingSCEV `sc_get_existing`, getAddExpr `sc_get_add`,
+  getMulExpr `sc_get_mul`, getUDivExpr `sc_get_udiv`, getURemExpr `sc_get_urem`, getMinusSCEV `sc_get_minus`,
+  getNegativeSCEV `sc_get_negative`, getNotSCEV `sc_get_not`, get{Truncate,ZeroExtend,SignExtend,AnyExtend}Expr
+  `sc_get_truncate` / `_zero_extend` / `_sign_extend` / `_any_extend` (and the `_or_` variants), getAddRecExpr
+  `sc_get_add_rec(start, step, l, flags)` / `sc_get_add_rec_ops`, getMinMaxExpr `sc_get_min_max`, get{S,U}{Max,Min}Expr
+  `sc_get_smax2` ..., getUMinExpr(Seq) `sc_get_umin`, getGEPExpr `sc_get_gep`, getPtrToIntExpr `sc_get_ptr_to_int`,
+  ranges `sc_unsigned_range` / `sc_signed_range` (+ `_min` / `_max`), isKnown* `sc_is_known_*`,
+  isKnownPredicate(At) `sc_is_known_predicate(_at)`, isLoopEntryGuardedByCond / isLoopBackedgeGuardedByCond
+  `sc_is_loop_*_guarded_by_cond`, getBackedgeTakenCount `sc_get_backedge_taken_count` (constant / symbolic max,
+  predicated variants, `sc_get_exit_count(l, bb, kind)`), getSCEVAtScope `sc_get_scev_at_scope`, isLoopInvariant
+  `sc_is_loop_invariant`, getLoopDisposition, properlyDominates `sc_properly_dominates`, applyLoopGuards
+  `sc_apply_loop_guards` / `sc_loop_guards_collect` + `sc_apply_loop_guards_with`, getSmallConstantTripCount /
+  TripMultiple, getConstantMultiple / getMinTrailingZeros, evaluateAtIteration, SCEVRewriteVisitor `Sc_Rewriter`
+  (a `hook` handles some kinds, the rest get the default rewrite), SCEVTraversal / SCEVExprContains
+  `sc_visit_all` / `sc_expr_contains`. Predicates (SCEVComparePredicate / SCEVWrapPredicate) are u32 rows of
+  `se.preds`.
+- **Keeping a cached SE valid** (scev_update.jai): `erase_inst` and `replace_all_uses_with` call `scev_note_erase` /
+  `scev_note_rauw` (LLVM's SCEVCallbackVH and SCEVUnknown value handles). Passes call the same forget* LLVM calls
+  through `pse_forget_value / _loop / _topmost_loop / _block_and_loop_dispositions`, which act on `scev_pass_se`
+  (null when LLVM's pass has no SE: LoopSimplifyPass and LCSSAPass use getCachedResult). A pass that changes IR in a
+  function with a cached SE must make every forget call its LLVM counterpart makes.
+- Printers: print<scalar-evolution> (scev_print.jai), print<loopnest> (loop_nest.jai, a loop pass),
+  print<iv-users> (iv_users.jai, a loop pass), `-aa-pipeline=scev-aa` (scev_aa.jai).
 
 ## 11. InstCombine (instcombine.jai and ic_*.jai)
 
