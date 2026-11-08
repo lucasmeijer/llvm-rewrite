@@ -240,6 +240,8 @@ parse_type :: (allow_void := false) -> Type_Id {
                 next();
                 as := parse_optional_addrspace();
                 t = type_ptr(as);
+                if P.tok.kind == .STAR perr("ptr* is invalid - use ptr instead");
+                if P.tok.kind != .LPAREN { if !allow_void && t == ir.t_void perr("void type only allowed for function results"); return t; }
             } else if s == "target" {
                 next();
                 t = parse_target_ext_type();
@@ -294,9 +296,17 @@ parse_type :: (allow_void := false) -> Type_Id {
         if P.tok.kind == .LPAREN {
             t = parse_function_type(t);
         } else if P.tok.kind == .STAR {
-            perr("ptr* is invalid - use ptr instead");
+            // typed-pointer syntax: any pointer becomes the opaque `ptr`
+            if t == ir.t_label perr("basic block pointers are invalid");
+            if t == ir.t_void perr("pointers to void are invalid - use i8* instead");
+            t = type_ptr(0);
+            next();
         } else if is_kw("addrspace") {
-            perr("ptr* is invalid - use ptr instead");
+            if t == ir.t_label perr("basic block pointers are invalid");
+            if t == ir.t_void perr("pointers to void are invalid; use i8* instead");
+            as := parse_optional_addrspace();
+            expect(.STAR, "'*' in address space");
+            t = type_ptr(as);
         } else break;
     }
     if !allow_void && t == ir.t_void perr("void type only allowed for function results");
@@ -2544,8 +2554,75 @@ parse_instruction :: () -> Value_Id, bool {
     }
     if s == "invoke" return parse_invoke(), false;
     if s == "callbr" perr("callbr is not supported yet");
-    if s == "cleanupret" || s == "catchret" || s == "catchswitch" || s == "catchpad" || s == "cleanuppad"
-        perr("funclet instructions are not supported yet");
+    // funclet instructions (LLParser::parseCleanupRet / parseCatchRet / parseCatchSwitch / parseCatchPad /
+    // parseCleanupPad); operand layouts as in CleanupReturnInst / CatchReturnInst / CatchSwitchInst / FuncletPadInst
+    if s == "cleanupret" {
+        expect_kw("from");
+        pad := parse_value(ir.t_token);
+        expect_kw("unwind");
+        bb: Value_Id = NONE;
+        if eat_kw("to") expect_kw("caller");
+        else { lt := parse_type(); if lt != ir.t_label perr("expected label"); bb = parse_value(ir.t_label); }
+        i := new_inst(.CLEANUPRET, ir.t_void, ifx bb == NONE then cast(u32) 1 else 2);
+        set_op(i, 0, pad);
+        if bb != NONE set_op(i, 1, bb);
+        return i, false;
+    }
+    if s == "catchret" {
+        expect_kw("from");
+        pad := parse_value(ir.t_token);
+        expect_kw("to");
+        lt := parse_type(); if lt != ir.t_label perr("expected label");
+        bb := parse_value(ir.t_label);
+        i := new_inst(.CATCHRET, ir.t_void, 2);
+        set_op(i, 0, pad); set_op(i, 1, bb);
+        return i, false;
+    }
+    if s == "catchswitch" {
+        expect_kw("within");
+        if !is_kw("none") && P.tok.kind != .LOCAL_VAR && P.tok.kind != .LOCAL_ID perr("expected scope value for catchswitch");
+        parent := parse_value(ir.t_token);
+        expect(.LSQUARE, "'['");
+        table: [..] Value_Id; table.allocator = temp;
+        while true {
+            lt := parse_type(); if lt != ir.t_label perr("expected label");
+            array_add(*table, parse_value(ir.t_label));
+            if !eat(.COMMA) break;
+        }
+        expect(.RSQUARE, "']'");
+        expect_kw("unwind");
+        ub: Value_Id = NONE;
+        if eat_kw("to") expect_kw("caller");
+        else { lt := parse_type(); if lt != ir.t_label perr("expected label"); ub = parse_value(ir.t_label); }
+        // CatchSwitchInst::init: hung-off operands [parent, unwind?, handlers...], reserved exactly
+        nfixed: u32 = ifx ub == NONE then cast(u32) 1 else 2;
+        i := new_inst(.CATCHSWITCH, ir.t_token, nfixed);
+        grow_ops(i, nfixed + cast(u32) table.count);
+        set_op(i, 0, parent);
+        if ub != NONE set_op(i, 1, ub);
+        for table add_op(i, it);
+        if ub != NONE inst(i).flags |= F_HAS_UNWIND;
+        return i, false;
+    }
+    if s == "catchpad" || s == "cleanuppad" {
+        expect_kw("within");
+        if s == "catchpad" { if P.tok.kind != .LOCAL_VAR && P.tok.kind != .LOCAL_ID perr("expected scope value for catchpad"); }
+        else if !is_kw("none") && P.tok.kind != .LOCAL_VAR && P.tok.kind != .LOCAL_ID perr("expected scope value for cleanuppad");
+        parent := parse_value(ir.t_token);
+        expect(.LSQUARE, "'['");
+        args: [..] Value_Id; args.allocator = temp;
+        while P.tok.kind != .RSQUARE {
+            if args.count expect(.COMMA, "','");
+            at := parse_type();
+            if at == ir.t_metadata array_add(*args, parse_metadata_as_value());
+            else array_add(*args, parse_value(at));
+        }
+        next();
+        i := new_inst(ifx s == "catchpad" then Opcode.CATCHPAD else .CLEANUPPAD, ir.t_token, cast(u32)(args.count + 1));
+        for args set_op(i, cast(u32) it_index, it);
+        set_op(i, cast(u32) args.count, parent);
+        return i, false;
+    }
     perr("expected instruction opcode (got '%')", s);
     return NONE, false;
 }

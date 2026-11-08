@@ -114,6 +114,7 @@ F_INRANGE  :: 0x400; // GEP constant expression with inrange(...)
 F_ELEMENTWISE :: 0x800; // atomicrmw elementwise
 F_HAS_ALIGN :: 0x1000;
 F_CLEANUP  :: 0x2000; // landingpad cleanup
+F_HAS_UNWIND :: 0x4000; // catchswitch with an unwind destination
 // tail kind in bits 16..17: 0 none, 1 tail, 2 musttail, 3 notail
 TAIL_SHIFT :: 16;
 // fast-math flags (FastMathFlags order) in bits 24..30

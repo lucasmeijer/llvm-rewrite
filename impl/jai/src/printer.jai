@@ -1272,6 +1272,26 @@ print_instruction :: (i: Value_Id) {
                 if ir.u32_pool[r.idx + k] == 0 out("          catch "); else out("          filter ");
                 write_operand(op(i, k), true);
             }
+        case .CATCHSWITCH;
+            out(" within "); write_operand(op(i, 0), false);
+            out(" [");
+            first: u32 = ifx r.flags & F_HAS_UNWIND then cast(u32) 2 else 1;
+            for k: first..n-1 { if k > first out(", "); write_operand(op(i, k), true); }
+            out("] unwind ");
+            if r.flags & F_HAS_UNWIND write_operand(op(i, 1), true); else out("to caller");
+        case .CATCHPAD; #through;
+        case .CLEANUPPAD;
+            out(" within "); write_operand(op(i, n - 1), false);
+            out(" [");
+            if n > 1 for k: 0..n-2 { if k > 0 out(", "); write_operand(op(i, k), true); }
+            outc(#char "]");
+        case .CATCHRET;
+            out(" from "); write_operand(op(i, 0), false);
+            out(" to "); write_operand(op(i, 1), true);
+        case .CLEANUPRET;
+            out(" from "); write_operand(op(i, 0), false);
+            out(" unwind ");
+            if n > 1 write_operand(op(i, 1), true); else out("to caller");
         case .RET;
             if operand == NONE out(" void");
             else { outc(#char " "); write_operand(operand, true); }
