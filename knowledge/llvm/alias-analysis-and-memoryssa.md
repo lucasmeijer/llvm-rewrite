@@ -22,8 +22,25 @@ diagnostics or struct-type addresses.
   intrinsic_addresstaken.ll`: `Just Ref` for `@llvm.stacksave` vs. a non-address-taken internal global).
 - GlobalsAA's CallGraph SCCs come from `scc_iterator` starting at the external calling node only; internal functions
   not reachable from it get no FunctionInfo.
+- `AnalyzeCallGraph` tests "declaration or optnone" on `SCC[0]`'s function for *every* member of an SCC (it
+  uses `F`, not `SCC[i]`), and copies the SCC's FunctionInfo to the other members (`GlobalsModRef.cpp`).
 
 ## Query details
+
+- **Constant GEP indices are sign-extended (`sextOrTrunc`) to the index width** in `DecomposeGEPExpression`; a
+  zero-extended `i32 -1` gives wrong offsets (`BasicAA/recphi.ll`).
+- **The alias cache is order-dependent**: aliasPHI can record "assumption-based" NoAlias results that are later
+  dropped when the assumption is disproven (`aliasCheck`, `AssumptionBasedResults`, Definitive = -2,
+  AssumptionBased = -1), so a reused BatchAAResults can answer differently from fresh queries. The cache key
+  orders the two locations by pointer value; any total order (e.g. value ids) gives the same answers, since
+  entries are stored swapped and swapped back.
+- **`isMallocOrCallocLikeFn` does not match `malloc`**: the AllocationFnData table only has the `operator new`
+  variants and strdup-likes (`MemoryBuiltins.cpp`; malloc is known through `allockind`).
+- `captures(address, read_provenance)` on a call argument makes BasicAA answer `Just Ref` (not NoModRef) for calls
+  against the object (`BasicAA/captures.ll`); `CallBase::getCaptureInfo` ANDs call-site and callee attributes and
+  `byval` arguments capture nothing.
+- Unnamed (numbered) struct types print as `%"type 0x…"` in aa-eval's pointer lines (`Type::print(.., NoDetails)`
+  without a TypePrinter), so those outputs are nondeterministic; the `*I` instruction lines print `%0`.
 
 - **`getUnderlyingObject`'s default MaxLookup is `MaxLookupSearchDepth` = 10** in LLVM 23 (ValueTracking.h), not 6;
   `DecomposeGEPExpression` uses the same limit (`BasicAA/gep-decomposition-limit.ll`).
@@ -62,3 +79,10 @@ diagnostics or struct-type addresses.
 - `upward_defs` phi-translates the location's pointer into each predecessor (`PHITransAddr`, with
   `MustDominate = true`) and widens the size to `beforeOrAfterPointer` unless the pointer is loop invariant
   (entry-block instruction, non-instruction, alloca, or constant-index GEP of those).
+- If PHITransAddr fails (returns null), the walker keeps the *original* pointer for that predecessor (only the
+  size is widened when the pointer isn't loop invariant).
+- LLVM's `print<memoryssa-walker>` is quadratic on modules with many functions (a module SlotTracker and
+  TypeFinder per function print): ~6 s on `tests/perf/scaling/globals/n8000.ll`.
+- Also verified with the goose port: all 5007 `tests/imported/llvm/Transforms/*/*.ll` (aa-eval default pipeline +
+  `-evaluate-aa-metadata`, both MemorySSA printers, globals-aa on GlobalsModRef/GVN/LICM/DSE) and
+  `print<memoryssa>` on `tests/perf/compile/sqlite3.ll` (byte-identical).

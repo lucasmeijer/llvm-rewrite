@@ -25,5 +25,5 @@ What the `::analysis` check compares (see `docs/testing.md`). Verified with opt 
 - **`print<memoryssa>` / `print<memoryssa-walker>` print the whole function** with `Function::print` and an
   `AssemblyAnnotationWriter`: `; <access>` after a block's label line (MemoryPhi) and before each instruction that
   has an access; the header is `MemorySSA for function: f` / `MemorySSA (walker) for function: f`. The function is
-  printed like the module printer prints it (attribute-group references `#N`, metadata numbering of the module's
-  SlotTracker, numbered struct types). Details: `knowledge/llvm/alias-analysis.md`.
+  printed like the module printer prints it (attribute-group references `#N`; metadata numbered like a single-function print: module-level slots, then this function's;
+  numbered struct types). Details: `knowledge/llvm/alias-analysis-and-memoryssa.md`.
