@@ -201,7 +201,21 @@ drop_ub_implying_attrs_and_metadata :: (i: Value_Id) {
     keep[3] = md_kind_id("align"); keep[4] = md_kind_id("fpmath"); keep[5] = md_kind_id("prof");
     keep[6] = md_kind_id("mem.cache_hint"); keep[7] = md_kind_id("nofpclass");
     drop_unknown_non_debug_metadata(i, keep);
-    if is_call_base(i) && inst(i).attrs != 0 fatal("instcombine: dropping UB-implying call attributes is not supported yet");
+    if is_call_base(i) && inst(i).attrs != 0 {
+        // AttributeFuncs::getUBImplyingAttributes: noundef, dereferenceable, dereferenceable_or_null
+        strip :: (s: u32) -> u32 {
+            r := attr_set_remove(s, .NoUndef);
+            r = attr_set_remove(r, .Dereferenceable);
+            r = attr_set_remove(r, .DereferenceableOrNull);
+            return r;
+        }
+        l := inst(i).attrs;
+        row := ir.attr_lists[l];
+        params := NewArray(row.params.count, u32,, allocator = temp);
+        na := call_arg_count(i);
+        for row.params params[it_index] = ifx cast(u32) it_index < na then strip(it) else it;
+        inst(i).attrs = attr_list_get(row.fn, strip(row.ret), params);
+    }
 }
 
 // isa<FPMathOperator>

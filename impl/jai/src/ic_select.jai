@@ -1905,9 +1905,9 @@ ic_fold_select_with_extreme_eq_cond :: (cl: Value_Id, cr: Value_Id, tv: Value_Id
     if !okt || ta != b return NONE;
     bw := type_bits(scalar_type(ty));
     c: APInt;
-    if pred == ICMP_SLT || pred == ICMP_SLE || pred == ICMP_ULT || pred == ICMP_ULE {
+    if icmp_is_lt(pred) {
         c = ifx icmp_is_signed(pred) then ap_signed_min(bw) else ap_zero(bw);
-    } else if pred == ICMP_SGT || pred == ICMP_SGE || pred == ICMP_UGT || pred == ICMP_UGE {
+    } else if icmp_is_gt(pred) {
         c = ifx icmp_is_signed(pred) then ap_signed_max(bw) else ap_all_ones(bw);
     } else return NONE;
     if !pm_specific_int_ap(cr, c) || !pm_specific_int_ap(trhs, c) return NONE;
@@ -2909,7 +2909,16 @@ ic_visit_select :: (si: Value_Id) -> Value_Id {
         }
     }
     if has_one_use(true_val) && call_iid(true_val) == IID_MASKED_LOAD && op(true_val, 1) == cond_val {
-        if dt_dominates_inst(ic.dt, false_val, true_val) fatal("instcombine: select of a masked load into CreateMaskedLoad is not supported yet");
+        if dt_dominates_inst(ic.dt, false_val, true_val) {
+            icb_set_insert_point(true_val);
+            al := attr_set_find(attr_list_param(inst(true_val).attrs, 0), .Alignment);
+            align: u64 = 1;
+            if al align = al.ival;
+            ptr := op(true_val, 0);
+            ml := icb_intrinsic(IID_MASKED_LOAD, .[vtype(true_val), vtype(ptr)], .[ptr, cond_val, false_val]);
+            add_param_align(ml, 0, align);
+            return ic_replace_inst_uses_with(si, ml);
+        }
     }
     {
         bw := scalar_bits(si);

@@ -74,3 +74,17 @@ noted, and by diffing `opt -passes=instcombine` output on the imported tests).
 - **foldICmpUsingKnownBits runs SimplifyDemandedBits without the DomConditionCache**
   (`SQ.getWithoutDomCondCache()`); foldICmpWithDominatingICmp is the place that uses dominating branches.
 - **rewriteGEPAsOffset uses a local `IRBuilder<>`**: the offset arithmetic it creates is not added to the worklist.
+
+## Select
+
+- `CondContext` (SimplifyQuery.h): visitSelectInst injects the select condition (inverted for the false arm) when
+  computing known bits of the arms; every phi recursion in ValueTracking uses `Q.getWithoutCondContext()`
+  (computeKnownBits, isKnownToBeAPowerOfTwo, isKnownNonZero, ComputeNumSignBits, computeKnownFPClass phis, isKnownNonEqual
+  of phis). Keeping it at phis folds `select c, x, (shl ...)` wrongly (InstCombine/pr100298.ll).
+- `ICmpInst::isLT/isGT` are the *strict* predicates only (foldSelectWithExtremeEqCond, foldSelectToCmp).
+- `Operator::hasPoisonGeneratingFlags` is true for ctlz/cttz/abs with the `i1 true` flag, so foldSelectValueEquivalence
+  (`x == 0 ? 16 : ctlz(x, true)`) clears the flag via DropFlags.
+- `IRBuilder::CreateMaskedLoad` adds a call-site `align` parameter attribute to the pointer (from
+  `getParamAlign(0).valueOrOne()` of the old call).
+- `Constant::isElementWiseEqual(Y)` is false unless Y is a constant of the same *vector* type (scalars only match by
+  identity).

@@ -435,7 +435,8 @@ Port of `llvm/lib/Transforms/InstCombine/`. `instcombine.jai` `#load`s the files
 | `ic_muldivrem.jai`, `ic_fp_muldivrem.jai` | InstCombineMulDivRem.cpp |
 | `ic_demanded.jai` | InstCombineSimplifyDemanded.cpp, integer half (`SimplifyDemandedUseBits`, `SimplifyMultipleUseDemandedBits`, ...) |
 | `ic_compares.jai` | InstCombineCompares.cpp: `visitICmpInst`, `visitFCmpInst` and all their helpers; at its end the helpers it borrows from other files under their LLVM names (`insertRangeTest`, `canEvaluateShifted`/`getShiftedValue`, `reassociateShiftAmtsOfTwoSameDirectionShifts`, `simplifyIntToPtrRoundTripCast`, `canBeCastedExactlyIntToFP`): move them when their file is ported |
-| `ic_misc.jai` | `ic_visit` (the opcode switch = InstVisitor) and the *partial* visitors of files not ported yet (select, casts, shifts, and/or/xor, calls, phi, gep, terminators, mergeStoreIntoSuccessor) |
+| `ic_select.jai` | InstCombineSelect.cpp: `visitSelectInst` and all its helpers, in LLVM's order (SimplifyDemandedVectorElts is in `ic_demanded.jai`) |
+| `ic_misc.jai` | `ic_visit` (the opcode switch = InstVisitor) and the *partial* visitors of files not ported yet (casts, shifts, and/or/xor, calls, phi, gep, terminators, mergeStoreIntoSuccessor) |
 
 **State.** One global `ic: Ic_State` (= one `InstCombinerImpl`), reset per iteration like LLVM's per-iteration
 object: worklist, DomConditionCache (`ic.dc`, also reachable through `ic.sq.dc` so every ValueTracking query made

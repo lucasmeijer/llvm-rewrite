@@ -283,7 +283,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   fixpoint verification), the shared binop folds, InstCombineAddSub.cpp (incl. FAddCombine and the FP visitors),
   InstCombineNegator.cpp, InstCombineMulDivRem.cpp (int and FP), the integer half of
   InstCombineSimplifyDemanded.cpp, `convertOrOfShiftsToFunnelShift`, `mergeStoreIntoSuccessor`.
-- **Partial visitors** (ic_misc.jai: their comments say where they stop): select, and/or/xor (up to SimplifyDemandedInstructionBits), shifts (start of commonShiftTransforms +
+- **Partial visitors** (ic_misc.jai: their comments say where they stop): and/or/xor (up to SimplifyDemandedInstructionBits), shifts (start of commonShiftTransforms +
   setShiftFlags), casts (commonCastTransforms; zext/sext/trunc/[su]itofp flag folds), call (InstSimplify +
   nounwind inference), phi, gep, load, freeze, extractvalue, vector ops (InstSimplify only), terminators (ret,
   unreachable, br, condbr complete; switch not at all). A fold missing from these silently does not fire, so most
@@ -367,3 +367,21 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   ICMP_* constants in `ifx` (write `cast(u8) ICMP_EQ`), procedure-name collisions (`Select_Pattern`, `is_const_int`,
   `block_unique_successor`, `icmp_is_lt` existed already). value_tracking2.jai's `block_single_successor` has
   getUniqueSuccessor semantics; loop_nest.jai has the exact getSingleSuccessor (`block_get_single_successor`).
+
+## InstCombine select (L1.instcombine.select 76/98: roundtrip 49/49, opt 27/49)
+
+- `ic_select.jai` ports InstCombineSelect.cpp completely, in LLVM's order. Helpers from other LLVM files that it
+  needed and that are now shared: SimplifyDemandedVectorElts (`ic_simplify_demanded_vector_elts`, ic_demanded.jai;
+  the X86 target intrinsic hook fails loudly), the FP half of matchSelectPattern + lookThroughCast/CastOp
+  (`match_select_pattern_cast`, `match_decomposed_select_pattern_full`, value_tracking2.jai; plain
+  `match_select_pattern` now also recognizes fcmp min/max), CondContext (`Simplify_Query.cc`, `Cond_Context`;
+  dropped at every phi recursion like `getWithoutCondContext`), canIgnoreSignBitOfNaN.
+- Fixed on the way: `const_is_element_wise_equal` (isElementWiseEqual) accepted non-constant/scalar operands and
+  built constant expressions over instructions (corrupted use lists); hasPoisonGeneratingFlags of ctlz/cttz/abs
+  with `i1 true`; dropUBImplyingAttrsAndMetadata now strips noundef/dereferenceable(_or_null) from calls.
+- Remaining select failures were triaged: they need visitPHINode (phi of i1 constants → branch condition, then
+  foldSelectToPhi), visitCall (min/max canonicalization, ctpop/ctlz range attributes), casts (trunc/zext/sext),
+  GEP canonicalization (`gep i8`), shufflevector/extract/insertelement visitors, and the shift/and folds.
+- Sweep (`sweep --passes instcombine`) vs main before this port: 168 files went differs→identical, 0 new silent
+  mismatches except minmax-fold.ll (failed→differs: now runs, still differs elsewhere); 7 differs→failed (loud: X86
+  SimplifyDemandedVectorElts intrinsics, unshuffleConstant, a fixpoint in assume-icmp-null-select.ll).
