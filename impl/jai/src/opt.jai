@@ -127,6 +127,14 @@
 #load "hash_recognize.jai";
 #load "pass_loop_idiom.jai";
 #load "pass_loop_load_elim.jai";
+#load "value_mapper.jai";
+#load "clone_function.jai";
+#load "loop_utils.jai";
+#load "gen_x86_sched.jai";
+#load "pass_loop_unroll.jai";
+#load "loop_unroll_utils.jai";
+#load "loop_unroll_runtime.jai";
+#load "loop_peel.jai";
 
 main :: () { opt_main(); }
 

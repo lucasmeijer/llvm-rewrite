@@ -299,6 +299,7 @@ x86_subtarget_init :: (st: *X86_Lowering, triple: string, cpu_in: string, tune_i
     st.triple = copy_string(triple);
     cpu := ifx cpu_in.count == 0 then "generic" else cpu_in;
     tune := ifx tune_in.count == 0 then "i586" else tune_in;
+    st.tune_cpu = copy_string(tune);
     is64 := begins_with(triple, "x86_64") || begins_with(triple, "amd64");
     full := ifx is64 then "+64bit-mode,-32bit-mode,-16bit-mode,+sse2" else "-64bit-mode,+32bit-mode,-16bit-mode";
     if fs.count full = tprint("%,%", full, fs);
@@ -793,6 +794,16 @@ inst_access_type :: (u: Value_Id) -> Type_Id {
 
 // TargetTransformInfo::getInstructionCost(U, CostKind) (operands = U's operands)
 tti_instruction_cost :: (t: *Tti, u: Value_Id, kind: s64) -> Cost {
+    // at least 3 entries: callers pass constant expressions too, whose operands the cases below read like op(u, k)
+    n := nops(u);
+    if !is_inst(u) n = max(n, 3);
+    ops := NewArray(n, Value_Id,, allocator = temp);
+    for k: 0..cast(s64) n - 1 ops[k] = op(u, cast(u32) k);
+    return tti_instruction_cost_ops(t, u, ops, kind);
+}
+// TargetTransformInfo::getInstructionCost(U, Operands, CostKind): `ops` replaces U's operands where LLVM reads
+// Operands (GEP, arithmetic, casts, stores, select, compares, insert/extractelement)
+tti_instruction_cost_ops :: (t: *Tti, u: Value_Id, uops: [] Value_Id, kind: s64) -> Cost {
     if is_call_base(u) && call_iid(u) == NOT_INTRINSIC {
         f := call_called_function(u);
         if f != NONE {
@@ -827,27 +838,22 @@ tti_instruction_cost :: (t: *Tti, u: Value_Id, kind: s64) -> Cost {
                 while x != NONE { if ir.u_user[x] != first_user { one = false; break; } x = ir.u_next[x]; }
                 if one access = inst_access_type(first_user);
             }
-            n := nops(u);
-            idx := NewArray(n - 1, Value_Id,, allocator = temp);
-            for k: 1..cast(s64) n - 1 idx[k - 1] = op(u, cast(u32) k);
-            return tti_gep_cost(t, inst(u).ty2, op(u, 0), idx, access, kind);
+            return tti_gep_cost(t, inst(u).ty2, uops[0], array_view(uops, 1), access, kind);
         case .ADD; #through; case .FADD; #through; case .SUB; #through; case .FSUB; #through; case .MUL; #through;
         case .FMUL; #through; case .UDIV; #through; case .SDIV; #through; case .FDIV; #through; case .UREM; #through;
         case .SREM; #through; case .FREM; #through; case .SHL; #through; case .LSHR; #through; case .ASHR; #through;
         case .AND; #through; case .OR; #through; case .XOR; #through; case .FNEG;
-            o1 := tti_operand_info(op(u, 0));
+            o1 := tti_operand_info(uops[0]);
             o2 := OI_ANY;
-            if opc != .FNEG o2 = tti_operand_info(op(u, 1));
-            args: [..] Value_Id; args.allocator = temp;
-            for k: 0..cast(s64) nops(u) - 1 array_add(*args, op(u, cast(u32) k));
-            return tti_arith_cost(t, opc, ty, kind, o1, o2, args, u);
+            if opc != .FNEG o2 = tti_operand_info(uops[1]);
+            return tti_arith_cost(t, opc, ty, kind, o1, o2, uops, u);
         case .INTTOPTR; #through; case .PTRTOADDR; #through; case .PTRTOINT; #through; case .SITOFP; #through;
         case .UITOFP; #through; case .FPTOUI; #through; case .FPTOSI; #through; case .TRUNC; #through;
         case .FPTRUNC; #through; case .BITCAST; #through; case .FPEXT; #through; case .SEXT; #through;
         case .ZEXT; #through; case .ADDRSPACECAST;
-            return tti_cast_cost(t, opc, ty, vtype(op(u, 0)), tti_cast_context_hint(u), kind, u);
+            return tti_cast_cost(t, opc, ty, vtype(uops[0]), tti_cast_context_hint(u), kind, u);
         case .STORE;
-            return tti_memory_op_cost(t, opc, vtype(op(u, 0)), inst(u).align, ptr_addrspace(vtype(op(u, 1))), kind, tti_operand_info(op(u, 0)), u);
+            return tti_memory_op_cost(t, opc, vtype(uops[0]), inst(u).align, ptr_addrspace(vtype(op(u, 1))), kind, tti_operand_info(uops[0]), u);
         case .LOAD;
             lt := ty;
             if kind == TCK_CODE_SIZE && num_uses(u) == 1 && !is_vector_type(lt) {
@@ -864,20 +870,20 @@ tti_instruction_cost :: (t: *Tti, u: Value_Id, kind: s64) -> Cost {
                 args := Value_Id.[x, y];
                 return tti_arith_cost(t, ifx okO then Opcode.OR else .AND, ty, kind, tti_operand_info(x), tti_operand_info(y), args, u);
             }
-            return tti_cmp_sel_cost(t, opc, ty, vtype(op(u, 0)), BAD_ICMP_PREDICATE, kind, tti_operand_info(op(u, 1)), tti_operand_info(op(u, 2)), u);
+            return tti_cmp_sel_cost(t, opc, ty, vtype(uops[0]), BAD_ICMP_PREDICATE, kind, tti_operand_info(uops[1]), tti_operand_info(uops[2]), u);
         case .ICMP; #through;
         case .FCMP;
-            return tti_cmp_sel_cost(t, opc, vtype(op(u, 0)), ty, inst(u).pred, kind, tti_operand_info(op(u, 0)), tti_operand_info(op(u, 1)), u);
+            return tti_cmp_sel_cost(t, opc, vtype(uops[0]), ty, inst(u).pred, kind, tti_operand_info(uops[0]), tti_operand_info(uops[1]), u);
         case .INSERTELEMENT;
             idx: u32 = 0xFFFF_FFFF;
-            c := op(u, 2);
+            c := uops[2];
             if is_const_int(c) && ap_active_bits(cf_ap(c)) <= 32 idx = cast(u32) ap_zext_value(cf_ap(c));
             return tti_vector_inst_cost(t, u, ty, kind, idx);
         case .EXTRACTELEMENT;
             idx: u32 = 0xFFFF_FFFF;
-            c := op(u, 1);
+            c := uops[1];
             if is_const_int(c) && ap_active_bits(cf_ap(c)) <= 32 idx = cast(u32) ap_zext_value(cf_ap(c));
-            return tti_vector_inst_cost(t, u, vtype(op(u, 0)), kind, idx);
+            return tti_vector_inst_cost(t, u, vtype(uops[0]), kind, idx);
         case .SHUFFLEVECTOR;
             return tti_shuffle_instruction_cost(t, u, kind);
     }

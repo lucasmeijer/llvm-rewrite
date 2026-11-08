@@ -198,6 +198,7 @@ run_loop_pass :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater)
         case .LOOP_INSTSIMPLIFY; return loop_instsimplify_run(node, l, lar, u);
         case .LOOP_SIMPLIFYCFG; return loop_simplifycfg_run(node, l, lar, u);
         case .LOOP_IDIOM; return loop_idiom_run(node, l, lar, u);
+        case .LOOP_UNROLL_FULL; return loop_unroll_full_run(node, l, lar, u);
         case .LNICM;
             // a loop-nest pass runs on the LoopNest of the outermost loop containing L
             root := l;

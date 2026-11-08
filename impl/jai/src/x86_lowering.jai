@@ -25,6 +25,7 @@ MVT_SCALABLE :: 1 << 30;
 X86_Lowering :: struct {
     feat: [X86_FEATURE_WORDS] u64;
     triple: string;
+    tune_cpu: string;            // the TuneCPU the scheduling model comes from (MCSubtargetInfo::InitMCProcessorInfo)
     prefer_vector_width: u32 = 0xFFFF_FFFF;
     required_vector_width: u32 = 0xFFFF_FFFF;
     reg_class: [] bool;          // by MVT ordinal: addRegisterClass was called

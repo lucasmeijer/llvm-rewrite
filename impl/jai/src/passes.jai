@@ -272,6 +272,8 @@ Pass_Kind :: enum u8 {
     CONSTRAINT_ELIMINATION;
     // AggressiveInstCombine (pass_aggressive_instcombine.jai, aic_trunc.jai)
     AGGRESSIVE_INSTCOMBINE;
+    // LoopUnroll (pass_loop_unroll.jai)
+    LOOP_UNROLL; LOOP_UNROLL_FULL;
 }
 
 Pass_Info :: struct {
@@ -348,6 +350,8 @@ PASS_TABLE :: Pass_Info.[
     .{"loop-instsimplify", .LOOP, .LOOP_INSTSIMPLIFY, false, .DOMTREE},
     .{"loop-simplifycfg", .LOOP, .LOOP_SIMPLIFYCFG, false, .DOMTREE},
     .{"loop-idiom", .LOOP, .LOOP_IDIOM, false, .DOMTREE},
+    .{"loop-unroll", .FUNCTION, .LOOP_UNROLL, false, .DOMTREE},   // also loop-unroll<...> (lookup_pass)
+    .{"loop-unroll-full", .LOOP, .LOOP_UNROLL_FULL, false, .DOMTREE},
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
@@ -400,6 +404,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "licm<") && name[name.count - 1] == #char ">" return lookup_pass("licm");
     if begins_with(name, "print<access-info><") && name[name.count - 1] == #char ">" return lookup_pass("print<access-info>");
     if begins_with(name, "lnicm<") && name[name.count - 1] == #char ">" return lookup_pass("lnicm");
+    if begins_with(name, "loop-unroll<") && name[name.count - 1] == #char ">" return lookup_pass("loop-unroll");
     return null;
 }
 
@@ -741,6 +746,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if reassociate_parse_cl_opt(name, value, has_value) return true;   // pass_reassociate.jai
     if constraint_elimination_parse_cl_opt(name, value, has_value) return true;   // pass_constraint_elimination.jai
     if aggressive_instcombine_parse_cl_opt(name, value, has_value) return true;   // pass_aggressive_instcombine.jai
+    if unroll_parse_cl_opt(name, value, has_value) return true;   // pass_loop_unroll.jai
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {
@@ -866,6 +872,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .REASSOCIATE; return reassociate_run(f);
         case .CONSTRAINT_ELIMINATION; return constraint_elimination_run(f);
         case .AGGRESSIVE_INSTCOMBINE; return aggressive_instcombine_run(f);
+        case .LOOP_UNROLL; return loop_unroll_run(node, f);
         case .BREAK_CRIT_EDGES; return break_crit_edges_run(f);
         case .MEM2REG; return mem2reg_run(f);
         case .INSTSIMPLIFY; return instsimplify_run(f);
@@ -956,6 +963,10 @@ opt_main :: () {
         if a == "-verify-each" || a == "--verify-each" continue;
         // -run-twice only acts in the legacy PM path of optdriver.cpp; with -passes / -O# (NewPMDriver) it is ignored
         if a == "-run-twice" || a == "--run-twice" continue;
+        // -disable-verify: opt does not verify its input and output; we never verify
+        if a == "-disable-verify" || a == "--disable-verify" continue;
+        // -disable-loop-unrolling sets PipelineTuningOptions::LoopUnrolling, which only -O<n> pipelines read
+        if a == "-disable-loop-unrolling" || a == "--disable-loop-unrolling" || begins_with(a, "-disable-loop-unrolling=") || begins_with(a, "--disable-loop-unrolling=") continue;
         if begins_with(a, "-aa-pipeline=") || begins_with(a, "--aa-pipeline=") {
             aa_parse_pipeline(slice(a, find_index_from_left(a, #char "=") + 1, a.count - find_index_from_left(a, #char "=") - 1));
             continue;

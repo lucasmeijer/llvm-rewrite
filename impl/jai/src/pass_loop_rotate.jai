@@ -285,7 +285,8 @@ lazy_dtu_flush :: (l: *Lazy_Dtu) {
     }
     l.deleted.count = 0;
 }
-merge_block_into_predecessor :: (bb: Value_Id, dt: *Dom_Tree, li: *Loop_Info, mssau: *Mssa_Updater, pred_with_two_succs := false, lazy: *Lazy_Dtu = null) -> bool {
+// `direct_dt` is the DominatorTree parameter (DTU = null): BB's children are moved to PredBB and BB's node erased.
+merge_block_into_predecessor :: (bb: Value_Id, dt: *Dom_Tree, li: *Loop_Info, mssau: *Mssa_Updater, pred_with_two_succs := false, lazy: *Lazy_Dtu = null, direct_dt: *Dom_Tree = null) -> bool {
     if block_has_address_taken(bb) return false;
     pred := block_unique_predecessor(bb);
     if pred == NONE return false;
@@ -314,6 +315,16 @@ merge_block_into_predecessor :: (bb: Value_Id, dt: *Dom_Tree, li: *Loop_Info, ms
     first := block_first(bb);
     if first != NONE && inst_op(first) == .PHI fold_single_entry_phi_nodes(bb);
 
+    if direct_dt {
+        pn := dt_node(direct_dt, pred);
+        if pn >= 0 {
+            bn := dt_node(direct_dt, bb);
+            kids: [..] s32; kids.allocator = temp;
+            c := direct_dt.nodes[bn].first_child;
+            while c >= 0 { array_add(*kids, c); c = direct_dt.nodes[c].sibling; }
+            for kids dt_set_idom(direct_dt, it, pn);
+        }
+    }
     // DTU updates: inserts first, then deletes
     updates: [..] Dom_Update; updates.allocator = temp;
     if dt {
@@ -394,6 +405,8 @@ merge_block_into_predecessor :: (bb: Value_Id, dt: *Dom_Tree, li: *Loop_Info, ms
         return true;
     }
     if dt && updates.count dt_apply_updates(dt, updates);
+    if direct_dt direct_dt.dfs_valid = false;
+    if direct_dt && dt_node(direct_dt, bb) >= 0 dt_erase_node(direct_dt, bb);
     // DeleteDeadBlock(BB, DTU): detachDeadBlocks (no successors left), DTU->deleteBB
     if dt && dt_node(dt, bb) >= 0 dt_erase_node(dt, bb);
     erase_block(bb);
