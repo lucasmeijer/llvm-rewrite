@@ -2918,6 +2918,7 @@ tests/imported/llvm/Transforms/Inline/crash-lifetime-marker.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/crash2.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/debug-info-duplicate-calls.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/debug-invoke.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/delete-function-with-metadata-use.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/delete-unused-function.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/deleted-scc.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/deopt-bundles.ll::roundtrip
@@ -5260,6 +5261,7 @@ tests/imported/llvm/Transforms/LoopIdiom/basic.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/crash.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/cyclic-redundancy-check-dl.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/cyclic-redundancy-check.ll::roundtrip
+tests/imported/llvm/Transforms/LoopIdiom/debug-line.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/disable-options.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/expander-do-not-delete-reused-values.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/int_sideeffect.ll::roundtrip
@@ -5702,6 +5704,7 @@ tests/imported/llvm/Transforms/LoopVectorize/dbg-outer-loop-vect.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/dbg.value.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/dead_instructions.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/debugloc-optimize-vfuf-term.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/debugloc.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/demanded-bits-of-pointer-instruction.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/disable_nonforced.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/disable_nonforced_enable.ll::roundtrip
@@ -7412,6 +7415,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/attr-convergent.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/attr-noduplicate.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/avoid-complex-phi.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/basictest.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/bbi-23595.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/branch-cond-dont-merge.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/branch-cond-merge.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/branch-cond-prop.ll::roundtrip

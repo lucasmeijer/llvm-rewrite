@@ -47,10 +47,21 @@ recursive fn create_md_slot(m: i32) {
     if mdslot[m] >= 0 { return; }
     mdslot[m] = md_order.len as i32;
     md_order.push(m);
-    for k in mds[m].nops {
-        let o = md_ops[mds[m].ops + k];
+    let mark = mdop_stack.len;
+    md_node_operands(m);
+    let end = mdop_stack.len;
+    for k in mark..end {
+        let o = mdop_stack[k];
         if o >= 0 && md_is_node(o) { create_md_slot(o); }
     }
+    mdop_stack.resize(mark);
+}
+
+// MDNode::operands() in LLVM's order (DI nodes store their fields in a different order than printed).
+var mdop_stack: i32[>..<];
+fn md_node_operands(m: i32) {
+    if mds[m].kind == MK_DI { di_operands(m, mdop_stack); return; }
+    for k in mds[m].nops { mdop_stack.push(md_ops[mds[m].ops + k]); }
 }
 
 fn process_attachments(at: i32, n: i32) {
@@ -218,12 +229,16 @@ recursive fn tf_dbg_loc(m: i32) {
 recursive fn tf_md(m: i32) {
     if tf_seen_md[m] { return; }
     tf_seen_md[m] = true;
-    for k in mds[m].nops {
-        let o = md_ops[mds[m].ops + k];
+    let mark = mdop_stack.len;
+    md_node_operands(m);
+    let end = mdop_stack.len;
+    for k in mark..end {
+        let o = mdop_stack[k];
         if o < 0 { continue; }
         if md_is_node(o) { tf_md(o); continue; }
         if mds[o].kind == MK_VALUE && is_constant(mds[o].extra) { tf_value(mds[o].extra); }
     }
+    mdop_stack.resize(mark);
 }
 
 fn tf_attrs(l: i32) {

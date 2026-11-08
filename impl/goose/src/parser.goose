@@ -530,7 +530,16 @@ fn parse_fp_const(ty: i32) -> i32 {
     return -1;
 }
 
-fn get_md_as_value(m: i32) -> i32 {
+// MetadataAsValue::get canonicalizes (canonicalizeMetadataForValue): null and !{null} become !{}, and
+// !{<constant>} becomes the ConstantAsMetadata itself.
+fn get_md_as_value(m0: i32) -> i32 {
+    var m = m0;
+    if m < 0 { m = md_get(MK_TUPLE, -1, [], false); }
+    else if mds[m].kind == MK_TUPLE && mds[m].nops == 1 {
+        let o = md_op(m, 0);
+        if o < 0 { m = md_get(MK_TUPLE, -1, [], false); }
+        else if mds[o].kind == MK_VALUE && is_constant(mds[o].extra) { m = o; }
+    }
     let v = idx_get(md2val, m);
     if v >= 0 { return v; }
     let nv = new_val(VK_MDVAL, T_METADATA, m, 0);

@@ -87,6 +87,49 @@ let DIK_GLOBALVAREXPR = 28;
 let DIK_OBJCPROPERTY = 29;
 let DIK_IMPORTEDENTITY = 30;
 
+// MDNode operand order of each kind (DebugInfoMetadata.cpp getImpl "Ops"), which SlotTracker and
+// TypeFinder walk: the fields that can hold metadata, by name.
+let DIK_OPORDER: const u8[:][] = [
+    "scope,inlinedAt",
+    "",
+    "",
+    "file,scope,name,size,baseType,lowerBound,upperBound,stride,bias",
+    "count,lowerBound,upperBound,stride",
+    "count,lowerBound,upperBound,stride",
+    "name",
+    "file,scope,name,size",
+    "file,scope,name,size",
+    "name,size,stringLength,stringLengthExpression,stringLocationExpression",
+    "file,scope,name,size,offset,baseType,extraData,annotations",
+    "file,scope,name,size,offset,baseType,elements,vtableHolder,templateParams,identifier,discriminator,dataLocation,associated,allocated,rank,annotations,specification,bitStride",
+    "types",
+    "filename,directory,checksum,source",
+    "file,producer,flags,splitDebugFilename,enums,retainedTypes,globals,imports,macros,sysroot,sdk",
+    "file,scope,name,linkageName,type,unit,declaration,retainedNodes,containingType,templateParams,thrownTypes,annotations,targetFuncName",
+    "file,scope",
+    "file,scope",
+    "scope,declaration,name,file",
+    "scope,name",
+    "name,value",
+    "file,nodes",
+    "file,scope,name,configMacros,includePath,apinotes",
+    "name,type",
+    "name,type,value",
+    "scope,name,file,type,linkageName,declaration,templateParams,annotations",
+    "scope,name,file,type,annotations",
+    "scope,name,file",
+    "var,expr",
+    "name,file,getter,setter,type",
+    "scope,entity,name,file,elements"];
+
+// Fills out with the slot values of m in MDNode operand order.
+fn di_operands(m: i32, out: i32[>..<]&) {
+    let kind = di_kind(m);
+    let spec = DIK_OPORDER[kind];
+    if spec.len == 0 { return; }
+    each_split(spec, ',') { out.push(md_op(m, di_field_index(kind, it))); };
+}
+
 // Decoded schemas: per kind, a run [fstart, fstart + fcount) of fields.
 struct DiField { name: i32, ty: u8, has_default: u8, def: i64 }
 var di_fields: DiField[>..];
