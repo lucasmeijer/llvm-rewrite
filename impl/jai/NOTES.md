@@ -136,3 +136,27 @@
 - constfold.jai: the `and (ptrtoint @g), C` alignment fold (needs DataLayout) fails loudly; ppc_fp128 arithmetic
   and conversions of non-double values fail loudly.
 - Erased values keep their rows (`v_kind = DEAD`); nothing is compacted.
+
+## mem2reg and SROA (L1.mem2reg 29/30, L1.sroa 57/61)
+
+- Files: `pass_mem2reg.jai` (PromoteMemToReg; `promote_mem_to_reg(allocas, dt, ac)` is shared with SROA),
+  `pass_sroa.jai` (SROA, PtrUseVisitor, Loads.cpp subset), `ssa_updater.jai` (SSAUpdater + LoadAndStorePromoter),
+  `ir_builder.jai` (`Irb`: IRBuilder<ConstantFolder> with name prefix and debug-record adoption),
+  `value_utils.jai` (`sv_*`: GEP constant offsets, stripInBoundsOffsets, stripAndAccumulateConstantOffsets),
+  `dbg_records.jai` (record owner/erase/insert, findDbgUsers order, RAUW/deletion of ValueAsMetadata,
+  DIExpression queries, DILocation::getMergedLocation, ConvertDebugDeclareToDebugValue).
+- `Dbg_Record.owner` is maintained by `attach_records_before` and `erase_inst`; passes that move records must
+  keep it. Use `rauw_with_metadata` / `erase_inst_with_metadata` (dbg_records.jai) instead of the plain ir.jai
+  calls whenever debug records may refer to the value.
+- Remaining failures: the Mem2Reg test with `instcombine`, SROA tests with `debugify`/`gvn` (unported passes),
+  and SROA with a known vscale (`vscale_range(N,N)` + scalable loads/stores of fixed allocas) which fails loudly.
+  Assignment tracking (`#dbg_assign`, DIAssignID) fails loudly everywhere (3 imported files in the sweep).
+- Sweep (every round-tripping imported file, our output vs LLVM, canonicalized): mem2reg 6994/6994 identical;
+  sroa, sroa<preserve-cfg>, sroa<aggregate-to-vector> 6989/6994 identical, the other 5 fail loudly (dbg_assign,
+  known vscale).
+- Perf (x64 build, tests/perf/scaling/allocas): mem2reg and sroa ~8-9x LLVM's CPU time, scaling exponent 1.12 /
+  1.10 vs LLVM's 1.11 / 1.14. The ratio is the x64 backend plus Table-heavy bookkeeping; no algorithmic issue.
+- Faithfulness traps found while porting: DenseMap bucket order of mem2reg's NewPhiNodes (emulated:
+  `M2r_Phi_Map`), Twine "trivially empty" names (`name_ref` / `NAME_STRINGREF_EMPTY` in ir_builder.jai),
+  `Instruction::insertBefore` adopting debug records (`insert_at_position`), `for < i: a..b` iterates b down
+  to a (write the range ascending).

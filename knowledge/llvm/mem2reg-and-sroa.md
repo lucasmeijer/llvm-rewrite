@@ -47,3 +47,31 @@ PromoteMemoryToRegister.cpp, lib/Transforms/Scalar/SROA.cpp, include/llvm/ADT/De
   the CFG (`.then`/`.else`/`.cont` blocks named after the head block; `swapSuccessors` also swaps branch weights).
 - SROA preserves the dominator tree (DomTreeUpdater, lazy) even when it changes the CFG; the IDF used by its
   mem2reg only depends on the tree's shape, not its child order.
+
+## Debug records and value handles (verified by the Jai port: sweep of `-passes=mem2reg`, `sroa`,
+## `sroa<preserve-cfg>` and `sroa<aggregate-to-vector>` over every round-tripping imported test, all identical)
+- `findDbgUsers(V)` returns the records whose location is `ValueAsMetadata(V)` in *reverse* order of when they
+  started tracking it (`ReplaceableMetadataImpl::getAllDbgVariableRecordUsers` sorts by the UseMap index,
+  descending), then the users of each DIArgList containing V. Parsed records track in parse order; a RAUW that
+  merges into an existing ValueAsMetadata (or turns a local into a constant) re-tracks them with new indices.
+- Erasing a value referenced by a record turns the location into `poison` of its type
+  (`DebugValueUser::handleChangedValue` with null); SROA's `deleteDeadInstructions` RAUWs with `undef` first, so
+  leftover `#dbg_value(ptr %alloca, ...)` become `ptr undef`.
+- `Instruction::insertBefore(It)` without the iterator's head bit *adopts* the debug records attached to the
+  instruction at `It` (they now print before the new instruction); `BB->begin()`, `getFirstNonPHIIt()` and
+  `getFirstInsertionPt()` set the head bit, `I->getIterator()` does not. `IRBuilder::SetInsertPoint(I)` also
+  takes I's debug location; `SetInsertPoint(BB, It)` takes `It`'s.
+- Erasing an instruction moves its records to the front of the next instruction's records.
+- `ConvertDebugDeclareToDebugValue(DVR, StoreInst)` inserts the dbg_value *before* the store (at the end of the
+  store's records); when the stored value doesn't cover the fragment it inserts `poison` instead.
+
+## Analyses mem2reg/SROA consult
+- mem2reg's PHI cleanup is `simplifyInstruction(PN, SQ)` with `CxtI = PN`, DT and AC: phi(x, undef) folds to x
+  only if x dominates the PHI and `isGuaranteedNotToBePoison(x, AC, PN, DT)` (which walks dominating branch
+  conditions). For arguments without noundef that ends in `programUndefinedIfUndefOrPoison` (scan of the entry
+  block for UB-on-poison uses, 32 instructions).
+- SROA's lazy DomTreeUpdater can queue unbalanced updates (the same edge inserted twice across two select
+  splits); `cfg::LegalizeUpdates` only *asserts* balance, release builds (the oracle) treat a positive count as
+  an insertion.
+- `CallBase::isByValArgument` / `paramHasAttr` look at the callee's parameter attributes too: a call to
+  `@f(ptr byval(i32))` written without `byval` at the call site is still byval (readonly, captures nothing).

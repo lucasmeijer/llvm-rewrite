@@ -25,7 +25,12 @@ src/
   demanded_bits.jai  DemandedBits analysis and print<demanded-bits>
   print_util.jai  printAsOperand / Instruction::print for analysis printers
   passes.jai      pass registry, pipeline parser, pass and analysis managers, opt's command line (opt_main)
-  pass_<name>.jai one file per ported pass (dce + break-crit-edges, adce, bdce)
+  pass_<name>.jai one file per ported pass (dce + break-crit-edges, adce, bdce, mem2reg, sroa, ...)
+  ir_builder.jai  IRBuilder<ConstantFolder>: insertion point, debug location, name prefix (Irb, irb_*)
+  dbg_records.jai debug-record utilities (owners, findDbgUsers, ValueAsMetadata RAUW/deletion, DIExpression,
+                  merged DILocations, dbg.declare -> dbg.value conversion)
+  value_utils.jai GEP constant offsets and pointer stripping (sv_*)
+  ssa_updater.jai SSAUpdater + LoadAndStorePromoter
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 
