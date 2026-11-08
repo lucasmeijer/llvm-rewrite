@@ -1482,6 +1482,14 @@ fn parse_fn_attrs(kind: i64, target: i32) -> i32 {
             lex();
             continue;
         }
+        if kind == GR_FN && target >= 0 && tok_is("align") {
+            // "As a hack, we allow function alignment to be initially parsed as an attribute"
+            lex();
+            var a = 0;
+            if tok_punct('(') { a = parse_paren_uint(); } else { a = parse_uint(); }
+            astack.push(attr_int(AK_Alignment, a as u64));
+            continue;
+        }
         if tok_is("align") || tok_is("alignstack") || tok_is("section") || tok_is("partition") || tok_is("gc") || tok_is("prefix") || tok_is("prologue") || tok_is("personality") || tok_is("comdat") {
             if tok_is("alignstack") {
                 lex();
@@ -1843,11 +1851,19 @@ fn parse_function(is_define: bool) {
     let v = new_glob(VK_FUNC, ty_ptr(fas), -1, 0);
     let g = glob_of(v);
     globs[g].vty = fty;
-    let fnattrs = parse_fn_attrs(GR_FN, v);
+    var fnattrs = parse_fn_attrs(GR_FN, v);
+    var attr_align: u8 = 0;
+    let al_attr = aset_find(fnattrs, AK_Alignment);
+    if al_attr >= 0 {
+        attr_align = (log2_exact(attrs[al_attr].i1 as! i64) + 1) as u8;
+        var keep: i32[>..] = [];
+        for k in aset_n(fnattrs) { let x = aset_attr(fnattrs, k); if x != al_attr { keep.push(x); } }
+        fnattrs = aset_get(keep);
+    }
     var section: i32 = -1;
     var partition: i32 = -1;
     var comdat: i32 = -1;
-    var align: u8 = 0;
+    var align: u8 = attr_align;
     var gc: i32 = -1;
     var prefix: i32 = -1;
     var prologue: i32 = -1;
@@ -2815,10 +2831,28 @@ fn parse_module(path: const u8[:]) {
         if tk == T_LVAR || tk == T_LID {
             // %T = type ...
             var t: i32 = -1;
-            if tk == T_LVAR { t = get_named_type(tstr_id()); } else { t = get_numbered_type(tuint); }
+            let is_named = tk == T_LVAR;
+            let tnm = if is_named { tstr_id() } else { -1 };
+            let tno = tuint;
             lex();
             expect_punct('=', "'='");
             expect_kw("type");
+            // LLParser::parseStructDefinition: a non-struct body makes the name an alias of that type
+            var is_struct = tok_is("opaque") || tok_punct('{');
+            if tok_punct('<') { let sv = ts; lex(); is_struct = tok_punct('{'); lpos = sv; lex(); }
+            if !is_struct {
+                let at = parse_type();
+                if is_named {
+                    if idx_get(name2type, tnm) >= 0 { perr("forward references to non-struct type"); }
+                    idx_set(name2type, tnm, at);
+                } else {
+                    while numbered_types.len <= tno { numbered_types.push(-1); }
+                    if numbered_types[tno] >= 0 { perr("forward references to non-struct type"); }
+                    numbered_types[tno] = at;
+                }
+                continue;
+            }
+            if is_named { t = get_named_type(tnm); } else { t = get_numbered_type(tno); }
             parse_named_type_def(t);
             continue;
         }

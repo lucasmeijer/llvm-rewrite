@@ -955,6 +955,7 @@ tests/imported/llvm/Analysis/CostModel/X86/reduce-umin.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/reduce-xor.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/reduction.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/rem.ll::roundtrip
+tests/imported/llvm/Analysis/CostModel/X86/scalarize.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/select.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/shuffle-broadcast-fp16.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/shuffle-broadcast.ll::roundtrip
@@ -1160,6 +1161,7 @@ tests/imported/llvm/Analysis/MemorySSA/basicaa-memcpy.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/call-bitcast.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/call-loop-carried-dependency.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/constant-memory.ll::roundtrip
+tests/imported/llvm/Analysis/MemorySSA/cyclicphi.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/debugvalue2.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/forward-unreachable.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/function-clobber.ll::roundtrip
@@ -1703,6 +1705,7 @@ tests/imported/llvm/Transforms/ArgumentPromotion/noipa.ll::roundtrip
 tests/imported/llvm/Transforms/ArgumentPromotion/opaque-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/ArgumentPromotion/pr27568.ll::roundtrip
 tests/imported/llvm/Transforms/ArgumentPromotion/pr32917.ll::roundtrip
+tests/imported/llvm/Transforms/ArgumentPromotion/pr33641_remove_arg_dbgvalue.ll::roundtrip
 tests/imported/llvm/Transforms/ArgumentPromotion/pr42028-recursion.ll::roundtrip
 tests/imported/llvm/Transforms/ArgumentPromotion/profile.ll::roundtrip
 tests/imported/llvm/Transforms/ArgumentPromotion/propagate-remove-dead-args.ll::roundtrip
@@ -2449,6 +2452,7 @@ tests/imported/llvm/Transforms/GlobalOpt/2008-07-17-addrspace.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2009-01-13-phi-user.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2009-02-15-BitcastAlias.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2009-02-15-ResolveAlias.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalOpt/2009-03-06-Anonymous.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2009-06-01-RecursivePHI.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2009-11-16-BrokenPerformHeapAllocSRoA.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2009-11-16-MallocSingleStoreToGlobalVar.ll::roundtrip
@@ -2460,6 +2464,7 @@ tests/imported/llvm/Transforms/GlobalOpt/2012-05-11-blockaddress.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2021-08-02-CastStoreOnceP2I.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2021-08-03-StoreOnceLoadMultiCasts.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2022-08-23-ScalableVectorArrayCrash.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalOpt/2022-08-23-ScalableVectorCrash.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/GSROA-section.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/MallocSROA-section-no-null-opt.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/MallocSROA-section.ll::roundtrip
@@ -3200,6 +3205,7 @@ tests/imported/llvm/Transforms/InstCombine/2009-01-24-EmptyStruct.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2009-01-31-InfIterate.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2009-02-04-FPBitcast.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2009-02-11-NotInitialized.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/2009-03-18-vector-ashr-crash.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2009-03-24-InfLoop.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2009-04-07-MulPromoteToI96.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2009-05-23-FCmpToICmp.ll::roundtrip
@@ -3251,6 +3257,7 @@ tests/imported/llvm/Transforms/InstCombine/StoreToNull-DbgCheck.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/addcarry.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/blend_x86.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/clmulqdq.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/pr2645-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/simplify-libcalls-memcmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-addsub-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-addsub.ll::roundtrip
@@ -4004,6 +4011,7 @@ tests/imported/llvm/Transforms/InstCombine/narrow.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/neg-alloca.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/negated-bitmask.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/nested-select.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/new-delete-itanium-32.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/new-delete-itanium.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/new-delete-msvc.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/new-inst-dbgloc-overwrite.ll::roundtrip
@@ -4108,6 +4116,8 @@ tests/imported/llvm/Transforms/InstCombine/pr24354.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr24605.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr25342.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr25745.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/pr2645-0-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/pr2645-0.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr26992.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr26993.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr27236.ll::roundtrip
@@ -4122,6 +4132,7 @@ tests/imported/llvm/Transforms/InstCombine/pr30929.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr31990_wrong_memcpy.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr32686.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr33453.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/pr33689_same_bitwidth.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr34349.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr34627.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr35515.ll::roundtrip
@@ -4420,6 +4431,7 @@ tests/imported/llvm/Transforms/InstCombine/sprintf-2.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sprintf-3.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sprintf-void.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sqrt-nofast.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/sqrt.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/srem-canonicalize.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/srem-simplify-bug.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/srem-via-sdiv-mul-sub.ll::roundtrip
@@ -5875,6 +5887,7 @@ tests/imported/llvm/Transforms/LoopVectorize/pr45525.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr45679-fold-tail-by-masking.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr46525-expander-insertpoint.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr47343-expander-lcssa-after-cfg-update.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/pr48832.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr50686.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr51614-fold-tail-by-masking.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr55100-expand-scev-predicate-used.ll::roundtrip
@@ -6094,6 +6107,7 @@ tests/imported/llvm/Transforms/MemCpyOpt/memcpy-byval-forwarding-clobbers.ll::ro
 tests/imported/llvm/Transforms/MemCpyOpt/memcpy-gep-modification.ll::roundtrip
 tests/imported/llvm/Transforms/MemCpyOpt/memcpy-in-loop.ll::roundtrip
 tests/imported/llvm/Transforms/MemCpyOpt/memcpy-invoke-memcpy.ll::roundtrip
+tests/imported/llvm/Transforms/MemCpyOpt/memcpy-memcpy-offset.ll::roundtrip
 tests/imported/llvm/Transforms/MemCpyOpt/memcpy-tbaa.ll::roundtrip
 tests/imported/llvm/Transforms/MemCpyOpt/memcpy-to-memset-with-lifetimes.ll::roundtrip
 tests/imported/llvm/Transforms/MemCpyOpt/memcpy-to-memset.ll::roundtrip
@@ -7240,6 +7254,7 @@ tests/imported/llvm/Transforms/SROA/select-load.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/select-store.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/slice-order-independence.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/slice-width.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/sroa-common-type-fail-promotion.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/std-clamp.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/struct-to-vector-fp-store-only-tail.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/struct-to-vector-subpartition.ll::roundtrip

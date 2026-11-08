@@ -109,6 +109,7 @@ fn au_intr_id(name: const u8[:]) -> i64 {
 }
 
 fn upgrade_intrinsic_function1(f: i32) -> bool, i32 {
+    if vals[f].name < 0 { return false, -1; }
     let full = sbytes(vals[f].name);
     if !starts_with(full, "llvm.") || full.len == 5 { return false, -1; }
     var nmb: u8[>..] = [];
