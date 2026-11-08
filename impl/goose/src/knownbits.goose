@@ -1588,10 +1588,33 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         let mk = kb_compute(op(iv, 1), de, depth + 1);
         return kb_and(known, kb_anyext_or_trunc(mk, w));
     }
-    if id == IID_vscale { not_ported("known bits of llvm.vscale (getVScaleRange)"); }
+    if id == IID_vscale { return kb_vscale(inst_func(iv), w); }
     let nm = intr_name(id as i64);
     if starts_with(nm, "llvm.x86.") || starts_with(nm, "llvm.riscv.") || starts_with(nm, "llvm.amdgcn.") {
         not_ported(str("known bits of ", nm));
     }
     return known;
+}
+
+// getVScaleRange(F, BitWidth).toKnownBits() (ValueTracking.cpp; ConstantRange::toKnownBits)
+fn kb_vscale(fv: i32, w: i64) -> KB {
+    var lo: u64 = 1;
+    var hi_max: u64 = wmask(w);      // unsigned max of the range
+    let a = aset_find(alist_fn(globs[glob_of(fv)].attrs), AK_VScaleRange);
+    if a >= 0 {
+        let mn = attrs[a].i1 >> 32;
+        let mx = attrs[a].i1 & 0xFFFFFFFF;
+        fn bitw(x: u64) -> i64 { if x == 0 { 0 } else { 64 - clz(x) } }
+        if bitw(mn) > w { return kb_unknown(w); }
+        lo = mn;
+        if mx != 0 && bitw(mx) <= w { hi_max = mx; }
+    }
+    var k = kb_const(lo, w);
+    let d = lo ^ hi_max;
+    if d != 0 {
+        let keep = ~low_bits(64 - clz(d));
+        k.z &= keep;
+        k.o &= keep;
+    }
+    return k;
 }

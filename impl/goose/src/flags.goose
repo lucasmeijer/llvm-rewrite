@@ -97,6 +97,7 @@ fn slots_begin(fv: i32) {
     if !slots_module_done {
         mnext = 0;
         process_module(globs[glob_of(fv)].module);
+        type_finder(globs[glob_of(fv)].module);   // TypePrinter.incorporateTypes: numbered struct types
         slots_module_done = true;
     }
     slots_md_mark = md_order.len;
@@ -129,6 +130,7 @@ fn errs_inst(iv: i32, fv: i32) {
     slots_begin(fv);
     let mark = out.len;
     print_inst(iv);
+    if iop(iv) == OP_CALL && is_gc_relocate(iv) { print_gc_relocate_comment(iv); }
     var end = out.len;
     if end > mark && out[end - 1] == '\n' { end--; }
     errbuf.append(out[mark..end]);

@@ -14,6 +14,7 @@ import gen_iids;
 import datalayout;
 import tli;
 import pm;
+import vt;
 
 // ---------------------------------------------------------------------------------------------
 // LocationSize: the raw 64-bit encoding of LLVM (so equality and hashing are identical).
@@ -512,3 +513,77 @@ fn ml_arg_mem_type(a: i32) -> i32 {
 }
 // Argument::onlyReadsMemory
 fn ml_arg_only_reads(a: i32) -> bool { ml_arg_has(a, AK_ReadOnly) || ml_arg_has(a, AK_ReadNone) }
+
+// ---------------------------------------------------------------------------------------------
+// Identified objects (AliasAnalysis.cpp) and stripPointerCastsForAliasAnalysis (Value.cpp)
+
+// Argument::hasNoAliasAttr / hasByValAttr
+fn aa_arg_noalias(a: i32) -> bool { ty_kind(vals[a].ty) == TK_PTR && ml_arg_has(a, AK_NoAlias) }
+fn aa_arg_byval(a: i32) -> bool { ty_kind(vals[a].ty) == TK_PTR && ml_arg_has(a, AK_ByVal) }
+
+fn aa_is_noalias_call(v: i32) -> bool { is_callbase(v) && cb_has_ret_attr(v, AK_NoAlias) }
+fn aa_is_noalias_or_byval_arg(v: i32) -> bool { is_arg(v) && (aa_arg_noalias(v) || aa_arg_byval(v)) }
+
+fn aa_is_identified_object(v: i32) -> bool {
+    if is_inst_op(v, OP_ALLOCA) { return true; }
+    let k = vals[v].kind;
+    if k == VK_FUNC || k == VK_GVAR || k == VK_IFUNC { return true; }
+    if aa_is_noalias_call(v) { return true; }
+    if aa_is_noalias_or_byval_arg(v) { return true; }
+    return false;
+}
+fn aa_is_identified_function_local(v: i32) -> bool {
+    return is_inst_op(v, OP_ALLOCA) || aa_is_noalias_call(v) || aa_is_noalias_or_byval_arg(v);
+}
+// Value::stripPointerCastsForAliasAnalysis
+fn bas_strip(v0: i32) -> i32 {
+    if ty_kind(vals[v0].ty) != TK_PTR { return v0; }
+    var v = v0;
+    var seen: i32[>..<] = [];
+    var iters = 0;
+    loop {
+        iters++;
+        if iters > 100000 { return v; }
+        let o = opcode_of(v);
+        var nv: i32 = -1;
+        if o == OP_GEP {
+            if !bas_gep_all_zero(v) { return v; }
+            nv = op(v, 0);
+        } else if o == OP_BITCAST {
+            let x = op(v, 0);
+            if ty_kind(vals[x].ty) != TK_PTR { return v; }
+            nv = x;
+        } else if o == OP_ADDRSPACECAST {
+            nv = op(v, 0);
+        } else if is_inst_op(v, OP_PHI) && nops(v) == 1 {
+            nv = op(v, 0);
+        } else if is_callbase(v) {
+            let rv = returned_arg_operand(v);
+            if rv >= 0 { nv = rv; }
+            else {
+                let id = call_iid(v);
+                if id == IID_launder_invariant_group || id == IID_strip_invariant_group { nv = cb_arg(v, 0); }
+                else { return v; }
+            }
+        } else {
+            return v;
+        }
+        v = nv;
+        // Visited set (cycles only in unreachable code)
+        if v == v0 { return v; }
+        var dup = false;
+        for s in seen { if s == v { dup = true; } }
+        if dup { return v; }
+        seen.push(v);
+    }
+    return v;
+}
+
+fn bas_gep_all_zero(g: i32) -> bool {
+    for k in 1..nops(g) {
+        let x = op(g, k);
+        if !(is_constant(x) && is_null_value(x)) { return false; }
+    }
+    return true;
+}
+

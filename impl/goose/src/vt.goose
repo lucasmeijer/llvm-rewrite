@@ -1853,8 +1853,20 @@ fn range_for_intrinsic(ii: i32, w: i64) -> CR {
         if m_one(op(ii, 1)) { return cr_nonempty(0, (smax + 1) & m, w); }
         return cr_nonempty(0, (smin + 1) & m, w);
     }
-    if id == IID_vscale { vt_not_ported("getVScaleRange"); }
+    if id == IID_vscale { return vt_vscale_range(inst_func(ii), w); }
     return cr_full(w);
+}
+
+// getVScaleRange(F, BitWidth)
+fn vt_vscale_range(fv: i32, w: i64) -> CR {
+    let a = aset_find(alist_fn(globs[glob_of(fv)].attrs), AK_VScaleRange);
+    if a < 0 { return cr_new(1, 0, w); }
+    let mn = attrs[a].i1 >> 32;
+    let mx = attrs[a].i1 & 0xFFFFFFFF;
+    fn bitw(x: u64) -> i64 { if x == 0 { 0 } else { 64 - clz(x) } }
+    if bitw(mn) > w { return cr_empty(w); }
+    if mx == 0 || bitw(mx) > w { return cr_new(mn, 0, w); }
+    return cr_nonempty(mn, mx + 1, w);
 }
 
 fn range_for_select_pattern(si: i32, w: i64) -> CR {

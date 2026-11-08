@@ -35,6 +35,7 @@ import memloc;
 import aautil;
 import capture;
 import tbaa;
+import globalsaa;
 
 // ---------------------------------------------------------------------------------------------
 // AliasResult
@@ -78,7 +79,6 @@ let AAK_GLOBALS = 3;
 
 var aa_kinds: i32[>..];
 var aa_pipeline_done: bool = false;
-var aa_globals_cached: bool = false;    // GlobalsAA is a module analysis: used only when cached
 var aa_cur_fn: i32 = -1;
 
 fn aa_pipeline_init() {
@@ -111,10 +111,8 @@ fn aa_pipeline_init() {
 }
 
 fn aa_kind_active(k: i64) -> bool {
-    if k == AAK_GLOBALS {
-        if !aa_globals_cached { return false; }
-        fatal("GlobalsAA (globals-aa) is not ported yet");
-    }
+    // GlobalsAA is a module analysis: the AAManager uses it only when it is cached
+    if k == AAK_GLOBALS { return gm_valid; }
     return true;
 }
 
@@ -240,24 +238,6 @@ fn ae_erase_key_of(i: i32) {
 // ---------------------------------------------------------------------------------------------
 // Identified objects (AliasAnalysis.cpp)
 
-// Argument::hasNoAliasAttr / hasByValAttr
-fn aa_arg_noalias(a: i32) -> bool { ty_kind(vals[a].ty) == TK_PTR && ml_arg_has(a, AK_NoAlias) }
-fn aa_arg_byval(a: i32) -> bool { ty_kind(vals[a].ty) == TK_PTR && ml_arg_has(a, AK_ByVal) }
-
-fn aa_is_noalias_call(v: i32) -> bool { is_callbase(v) && cb_has_ret_attr(v, AK_NoAlias) }
-fn aa_is_noalias_or_byval_arg(v: i32) -> bool { is_arg(v) && (aa_arg_noalias(v) || aa_arg_byval(v)) }
-
-fn aa_is_identified_object(v: i32) -> bool {
-    if is_inst_op(v, OP_ALLOCA) { return true; }
-    let k = vals[v].kind;
-    if k == VK_FUNC || k == VK_GVAR || k == VK_IFUNC { return true; }
-    if aa_is_noalias_call(v) { return true; }
-    if aa_is_noalias_or_byval_arg(v) { return true; }
-    return false;
-}
-fn aa_is_identified_function_local(v: i32) -> bool {
-    return is_inst_op(v, OP_ALLOCA) || aa_is_noalias_call(v) || aa_is_noalias_or_byval_arg(v);
-}
 fn aa_is_base_of_object(v: i32) -> bool { is_inst_op(v, OP_ALLOCA) || vals[v].kind == VK_GVAR }
 
 fn aa_is_escape_source(v: i32) -> bool {
@@ -353,6 +333,7 @@ recursive fn aa_alias(a: ML, b: ML, q: i32, cxt: i32) -> AR {
         if k == AAK_BASIC { r = bas_alias_check(a.ptr, a.size, b.ptr, b.size, q, cxt); }
         else if k == AAK_SCOPED { r = if sna_alias_may(a, b) { ar(AR_MAY) } else { ar(AR_NO) }; }
         else if k == AAK_TBAA { r = if tbaa_alias_may(aa_cur_fn, a, b) { ar(AR_MAY) } else { ar(AR_NO) }; }
+        else if k == AAK_GLOBALS { r = if gm_alias_may(a, b, cxt) { ar(AR_MAY) } else { ar(AR_NO) }; }
         if r.k != AR_MAY as u8 { break; }
     }
     aqs[q].depth -= 1;
@@ -410,6 +391,7 @@ fn aa_fn_me(f: i32) -> u64 {
         i++;
         if !aa_kind_active(k) { continue; }
         if k == AAK_BASIC { r &= bas_fn_me(f); }
+        else if k == AAK_GLOBALS { r &= gm_fn_me(f); }
         if r == 0 { return r; }
     }
     return r;
@@ -440,6 +422,7 @@ recursive fn aa_call_loc_mr(c: i32, loc: ML, q: i32) -> i64 {
         if k == AAK_BASIC { r &= bas_call_loc_mr(c, loc, q); }
         else if k == AAK_SCOPED { r &= sna_call_mod_ref(c, loc); }
         else if k == AAK_TBAA { r &= tbaa_call_mod_ref(aa_cur_fn, c, loc); }
+        else if k == AAK_GLOBALS { r &= gm_call_loc_mr(c, loc); }
         if r == MR_NO { return MR_NO; }
     }
     if r != MR_NO { r &= aa_mod_ref_mask(loc, q, false); }
@@ -712,58 +695,6 @@ fn bas_check_separate_storage(fv: i32) {
             }
         }
     };
-}
-
-// Value::stripPointerCastsForAliasAnalysis
-fn bas_strip(v0: i32) -> i32 {
-    if ty_kind(vals[v0].ty) != TK_PTR { return v0; }
-    var v = v0;
-    var seen: i32[>..<] = [];
-    var iters = 0;
-    loop {
-        iters++;
-        if iters > 100000 { return v; }
-        let o = opcode_of(v);
-        var nv: i32 = -1;
-        if o == OP_GEP {
-            if !bas_gep_all_zero(v) { return v; }
-            nv = op(v, 0);
-        } else if o == OP_BITCAST {
-            let x = op(v, 0);
-            if ty_kind(vals[x].ty) != TK_PTR { return v; }
-            nv = x;
-        } else if o == OP_ADDRSPACECAST {
-            nv = op(v, 0);
-        } else if is_inst_op(v, OP_PHI) && nops(v) == 1 {
-            nv = op(v, 0);
-        } else if is_callbase(v) {
-            let rv = returned_arg_operand(v);
-            if rv >= 0 { nv = rv; }
-            else {
-                let id = call_iid(v);
-                if id == IID_launder_invariant_group || id == IID_strip_invariant_group { nv = cb_arg(v, 0); }
-                else { return v; }
-            }
-        } else {
-            return v;
-        }
-        v = nv;
-        // Visited set (cycles only in unreachable code)
-        if v == v0 { return v; }
-        var dup = false;
-        for s in seen { if s == v { dup = true; } }
-        if dup { return v; }
-        seen.push(v);
-    }
-    return v;
-}
-
-fn bas_gep_all_zero(g: i32) -> bool {
-    for k in 1..nops(g) {
-        let x = op(g, k);
-        if !(is_constant(x) && is_null_value(x)) { return false; }
-    }
-    return true;
 }
 
 // ---------------------------------------------------------------------------------------------

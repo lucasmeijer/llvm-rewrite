@@ -929,6 +929,7 @@ tests/imported/llvm/Analysis/BasicAA/tail-byval.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/tail-byval.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/tailcall-modref.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/underlying-value.ll::roundtrip
+tests/imported/llvm/Analysis/BasicAA/vscale.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/vscale.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/zext-nneg.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/zext-nneg.ll::roundtrip
@@ -1117,6 +1118,7 @@ tests/imported/llvm/Analysis/Dominators/basic.ll::roundtrip
 tests/imported/llvm/Analysis/Dominators/invoke.ll::opt
 tests/imported/llvm/Analysis/Dominators/invoke.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/2008-09-03-ReadGlobals.ll::roundtrip
+tests/imported/llvm/Analysis/GlobalsModRef/addrspacecast.ll::analysis
 tests/imported/llvm/Analysis/GlobalsModRef/addrspacecast.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/aliastest.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/atomic-instrs.ll::roundtrip
@@ -1139,6 +1141,7 @@ tests/imported/llvm/Analysis/GlobalsModRef/pr12351.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/pr25309.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/pr35899-dbg-value.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/purecse.ll::roundtrip
+tests/imported/llvm/Analysis/GlobalsModRef/self-addresstaken.ll::analysis
 tests/imported/llvm/Analysis/GlobalsModRef/self-addresstaken.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/volatile-instrs.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/weak-interposition.ll::roundtrip

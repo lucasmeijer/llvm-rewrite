@@ -28,6 +28,7 @@ import aaeval;
 import memoryssa;
 import apint;
 import sccp;
+import globalsaa;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -38,6 +39,8 @@ let P_NONE = 0;
 let P_VERIFY_MODULE = 1;
 let P_NOOP_MODULE = 2;
 let P_IPSCCP = 3;          // arg: 1 = func-spec
+let P_REQUIRE_GLOBALS_AA = 5;
+let P_INVALIDATE_GLOBALS_AA = 6;
 // function passes
 let P_DCE = 100;
 let P_ADCE = 101;
@@ -409,6 +412,8 @@ recursive fn parse_module_elem(e: i32) -> i32 {
     if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
     // module VerifierAnalysis: nothing to compute (no verifier yet; the harness verifies our output)
     if name == "require<verify>" || name == "invalidate<verify>" { return new_pnode(PK_PASS, P_NOOP_MODULE as i32, 0, true, pelems[e].name); }
+    if name == "require<globals-aa>" { return new_pnode(PK_PASS, P_REQUIRE_GLOBALS_AA as i32, 0, true, pelems[e].name); }
+    if name == "invalidate<globals-aa>" { return new_pnode(PK_PASS, P_INVALIDATE_GLOBALS_AA as i32, 0, true, pelems[e].name); }
     if llvm_knows(name, 'm') { not_implemented(name); }
     if llvm_knows(name, 'c') { not_implemented(name); }
     // a function pass in a module pipeline gets its own adaptor (createModuleToFunctionPassAdaptor)
@@ -577,6 +582,8 @@ recursive fn run_module_node(n: i32, m: i32) {
         ap_pool_reset();
         return;
     }
+    if p == P_REQUIRE_GLOBALS_AA { if !gm_valid { gm_compute(m); } return; }
+    if p == P_INVALIDATE_GLOBALS_AA { gm_invalidate(); return; }
     fatal("internal: unknown module pass id");
 }
 

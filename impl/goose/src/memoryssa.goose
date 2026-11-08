@@ -1014,6 +1014,7 @@ fn mssa_print_function(fv: i32) {
     slots_end();
     let md_mark = md_order.len;
     let as_mark = as_order.len;
+    type_finder(globs[glob_of(fv)].module);     // AssemblyWriter: TypePrinter.incorporateTypes(*M)
     let mark = out.len;
     pr_annot_on = true;
     print_function(fv);
