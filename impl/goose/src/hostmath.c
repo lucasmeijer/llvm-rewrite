@@ -48,3 +48,11 @@ uint64_t goose_hm_pow_noexc(uint64_t x, uint64_t y) {
     return hm_b(f(hm_d(x), hm_d(y)));
 }
 // ilogb(APFloat) is LLVM's own; the double ilogb is not needed
+// std::log2(float) (C++ overload: logf-precision log2f), for replacePowWithExp's exp2(log2(n) * x)
+uint32_t goose_hm_log2f(uint32_t x) {
+    float (*volatile f)(float) = log2f;
+    float d; memcpy(&d, &x, 4);
+    float r = f(d);
+    uint32_t b; memcpy(&b, &r, 4);
+    return b;
+}

@@ -35,7 +35,7 @@ fn vt_parse(s: const u8[:]) -> VT {
         if i >= s.len || s[i] < '0' || s[i] > '9' { return VT { 0, 0, 0, 0 }; }
         var v: i64 = 0;
         while i < s.len && s[i] >= '0' && s[i] <= '9' {
-            v = v * 10 + (s[i] - '0') as i64;
+            v = v * 10 + (s[i] - '0');
             if v > 0xFFFFFFFF { return VT { 0, 0, 0, 0 }; }   // parseInt: getAsInteger(10, unsigned) fails
             i++;
         }

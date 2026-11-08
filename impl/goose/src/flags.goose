@@ -58,6 +58,9 @@ let KNOWN_FLAGS: const u8[:][] = [
     "instcombine-negator-max-depth", "instcombine-lower-dbg-declare", "disable-last-run-tracking",
     "debugify-quiet", "debugify-level", "debugify-atoms",   // read by debugify / check-debugify
     "enable-debugify", "debugify-each", "strip-debug",      // opt driver options (debugify.goose)
+    "enable-double-float-shrink", "optimize-hot-cold-new", "optimize-existing-hot-cold-new",   // LibCallSimplifier
+    "optimize-nobuiltin-hot-cold-new-new", "cold-new-hint-value", "notcold-new-hint-value", "hot-new-hint-value",
+    "ambiguous-new-hint-value",
     "goose-ic-lenient",                                  // development only: unported InstCombine visitors do nothing
 ];
 

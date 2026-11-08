@@ -229,7 +229,10 @@ fn icb_cast(o: i64, v: i32, ty: i32, name: const u8[:]) -> i32 {
         let f = cf_fold_cast_operand(o, v, ty);
         if f >= 0 { return f; }
     }
-    return icb_insert(ic_new_cast(o, v, ty), name);
+    let c = ic_new_cast(o, v, ty);
+    // setFPAttrs(Cast, FPMathTag, FMF) for FP-math casts (fptrunc, fpext, uitofp, sitofp)
+    if is_fp_math_operator(c) { insts[inst_of(c)].fmf = icb_fmf; }
+    return icb_insert(c, name);
 }
 fn icb_zext(v: i32, ty: i32, name: const u8[:]) -> i32 { icb_cast(OP_ZEXT, v, ty, name) }
 fn icb_sext(v: i32, ty: i32, name: const u8[:]) -> i32 { icb_cast(OP_SEXT, v, ty, name) }

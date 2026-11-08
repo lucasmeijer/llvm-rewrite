@@ -4,6 +4,10 @@
 // convertFSqrtDivIntoFMul, visitFDiv, visitFRem; the FP half of foldMulSelectToNegate is in ic_muldivrem.goose).
 namespace ic;
 import std;
+import gen_tli;
+import build_libcalls;
+import simplify_libcalls_fp;
+import ic_compares;
 import ir;
 import irutil;
 import calls;
@@ -588,7 +592,17 @@ fn visit_fdiv(i: i32) -> i32 {
         // sin(X) / cos(X) -> tan(X) ; cos(X) / sin(X) -> 1/tan(X)
         let is_tan = is_intr(op0, IID_sin) && is_intr(op1, IID_cos) && op(op1, 0) == op(op0, 0);
         let is_cot = !is_tan && is_intr(op0, IID_cos) && is_intr(op1, IID_sin) && op(op1, 0) == op(op0, 0);
-        if is_tan || is_cot { ic_not_ported("visitFDiv sin/cos -> tan (hasFloatFn / emitUnaryFloatFnCall)"); }
+        if (is_tan || is_cot) && blc_has_float_fn(vals[i].ty, LF_tan, LF_tanf, LF_tanl) {
+            // IRBuilder<> B(&I) with I's FMF: the new instructions are not added to the worklist
+            let sp = icb_pos; let sb = icb_bb; let sd = icb_dl; let sf = icb_fmf;
+            icb_set_insert_point(i);
+            icb_fmf = fmf_of(i);
+            let al = globs[glob_of(called_function(op0))].attrs;
+            var res = icc_plain(emit_unary_float_fn_lf(op(op0, 0), LF_tan, LF_tanf, LF_tanl, al));
+            if is_cot { res = icc_plain(icx_fbinop(OP_FDIV, c_fp_from_f64(vals[i].ty, 1.0), res, icb_fmf, "")); }
+            icb_pos = sp; icb_bb = sb; icb_dl = sd; icb_fmf = sf;
+            return ic_replace_inst_uses_with(i, res);
+        }
     }
     // X / (X * Y) --> 1.0 / Y
     if has_nnan(i) && has_reassoc(i) && is_fmul(op1) {

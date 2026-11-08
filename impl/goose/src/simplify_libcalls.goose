@@ -36,6 +36,8 @@ import speculate;
 import apfloat;
 import fpu;
 import intrinsics;
+import simplify_libcalls_str;
+import simplify_libcalls_fp;
 
 fn lcs_np(what: const u8[:]) { fatal(str("LibCallSimplifier: ", what, " is not ported yet")); }
 
@@ -346,7 +348,7 @@ fn emit_lib_call(lf: i64, rt: i32, pts: const i32[:], argsv: const i32[:], va: b
     insts[inst_of(c)].cc = globs[glob_of(f)].cc;
     return c;
 }
-fn tli_int_ty() -> i32 { ty_int(32) }
+fn tli_int_ty() -> i32 { ty_int(tli_int_bits()) }
 fn tli_sizet_ty() -> i32 { ty_int(tli_sizet_bits()) }
 fn emit_strlen(p: i32) -> i32 { emit_lib_call(LF_strlen, tli_sizet_ty(), [ty_ptr(0)], [p], false) }
 fn emit_memcmp(a: i32, b: i32, len: i32) -> i32 {
@@ -673,8 +675,7 @@ fn optimize_printf(ci: i32) -> i32 {
     let v = optimize_printf_string(ci);
     if v >= 0 { return v; }
     annotate_nonnull_noundef(ci, 0);
-    if blc_is_emittable(LF_iprintf) || blc_is_emittable(LF_small_printf) { lcs_np("printf -> iprintf/__small_printf"); }
-    return -1;
+    return lcs_printf_variants(ci, LF_iprintf, LF_small_printf);
 }
 // optimizePuts(CI, B)
 fn optimize_puts(ci: i32) -> i32 {
@@ -807,14 +808,15 @@ fn optimize_floating_point_libcall(ci: i32, lf: i64, unsafe_shrink: bool) -> i32
     if call_is_strictfp(ci) { return -1; }
     let v = optimize_symmetric(ci, lf);
     if v >= 0 { return v; }
-    if lf_in(lf, [LF_sinpif, LF_sinpi, LF_cospif, LF_cospi]) { lcs_np("optimizeSinCosPi"); }
-    if lf_in(lf, [LF_powf, LF_pow, LF_powl]) { lcs_np("optimizePow"); }
+    if lf == LF_sinpif || lf == LF_sinpi { return optimize_sincospi(ci, true); }
+    if lf == LF_cospif || lf == LF_cospi { return optimize_sincospi(ci, false); }
+    if lf_in(lf, [LF_powf, LF_pow, LF_powl]) { return optimize_pow(ci, unsafe_shrink); }
     if lf_in(lf, [LF_exp2l, LF_exp2, LF_exp2f]) { return optimize_exp2(ci, unsafe_shrink); }
     if lf_in(lf, [LF_fabsf, LF_fabs, LF_fabsl]) { return replace_unary_call(ci, IID_fabs); }
     if lf_in(lf, [LF_sqrtf, LF_sqrt, LF_sqrtl]) { return optimize_sqrt(ci, unsafe_shrink); }
-    if lf_in(lf, [LF_fmod, LF_fmodf, LF_fmodl]) { lcs_np("optimizeFMod"); }
+    if lf_in(lf, [LF_fmod, LF_fmodf, LF_fmodl]) { return optimize_fmod(ci); }
     if lf_in(lf, [LF_logf, LF_log, LF_logl, LF_log10f, LF_log10, LF_log10l, LF_log1pf, LF_log1p, LF_log1pl, LF_log2f,
-                  LF_log2, LF_log2l, LF_logbf, LF_logb, LF_logbl]) { lcs_np("optimizeLog"); }
+                  LF_log2, LF_log2l, LF_logbf, LF_logb, LF_logbl]) { return optimize_log(ci, unsafe_shrink); }
     if lf_in(lf, [LF_tan, LF_tanf, LF_tanl, LF_sinh, LF_sinhf, LF_sinhl, LF_asinh, LF_asinhf, LF_asinhl, LF_cosh,
                   LF_coshf, LF_coshl, LF_atanh, LF_atanhf, LF_atanhl]) { return optimize_trig_inversion_pairs(ci, unsafe_shrink); }
     if lf == LF_ceil { return replace_unary_call(ci, IID_ceil); }
@@ -832,14 +834,14 @@ fn optimize_floating_point_libcall(ci: i32, lf: i64, unsafe_shrink: bool) -> i32
         if lcs_has_float_version(ci) { return optimize_double_fp(ci, true, false); }
         return -1;
     }
-    if lf_in(lf, [LF_fdim, LF_fdimf, LF_fdiml]) { lcs_np("optimizeFdim"); }
+    if lf_in(lf, [LF_fdim, LF_fdimf, LF_fdiml]) { return optimize_fdim(ci); }
     if lf_in(lf, [LF_fminf, LF_fmin, LF_fminl]) { return optimize_fmin_fmax(ci, IID_minnum); }
     if lf_in(lf, [LF_fmaxf, LF_fmax, LF_fmaxl]) { return optimize_fmin_fmax(ci, IID_maxnum); }
     if lf_in(lf, [LF_fminimum_numf, LF_fminimum_num, LF_fminimum_numl]) { return replace_binary_call(ci, IID_minimumnum); }
     if lf_in(lf, [LF_fmaximum_numf, LF_fmaximum_num, LF_fmaximum_numl]) { return replace_binary_call(ci, IID_maximumnum); }
     if lf_in(lf, [LF_cabs, LF_cabsf, LF_cabsl]) { return optimize_cabs(ci); }
-    if lf_in(lf, [LF_remquo, LF_remquof, LF_remquol]) { lcs_np("optimizeRemquo"); }
-    if lf_in(lf, [LF_nan, LF_nanf, LF_nanl]) { lcs_np("optimizeNaN"); }
+    if lf_in(lf, [LF_remquo, LF_remquof, LF_remquol]) { return optimize_remquo(ci); }
+    if lf_in(lf, [LF_nan, LF_nanf, LF_nanl]) { return optimize_nan(ci); }
     return -1;
 }
 // hasFloatVersion(M, FuncName)
@@ -863,33 +865,34 @@ fn optimize_string_memory_libcall(ci: i32, lf: i64) -> i32 {
     if lf == LF_memcpy { return optimize_memcpy(ci); }
     if lf == LF_memmove { return optimize_memmove(ci); }
     if lf == LF_memset { return optimize_memset(ci); }
-    if lf == LF_strcat { lcs_np("optimizeStrCat"); }
-    if lf == LF_strncat { lcs_np("optimizeStrNCat"); }
+    if lf == LF_strcat { return optimize_strcat(ci); }
+    if lf == LF_strncat { return optimize_strncat(ci); }
     if lf == LF_strchr { return optimize_strchr(ci); }
     if lf == LF_strrchr { return optimize_strrchr(ci); }
     if lf == LF_strncmp { return optimize_strncmp(ci); }
-    if lf == LF_strcpy { lcs_np("optimizeStrCpy"); }
-    if lf == LF_stpcpy { lcs_np("optimizeStpCpy"); }
-    if lf == LF_strlcpy { lcs_np("optimizeStrLCpy"); }
-    if lf == LF_stpncpy || lf == LF_strncpy { lcs_np("optimizeStringNCpy"); }
-    if lf == LF_strpbrk { lcs_np("optimizeStrPBrk"); }
-    if lf == LF_strndup { lcs_np("optimizeStrNDup"); }
+    if lf == LF_strcpy { return optimize_strcpy(ci); }
+    if lf == LF_stpcpy { return optimize_stpcpy(ci); }
+    if lf == LF_strlcpy { return optimize_strlcpy(ci); }
+    if lf == LF_stpncpy { return optimize_string_ncpy(ci, true); }
+    if lf == LF_strncpy { return optimize_string_ncpy(ci, false); }
+    if lf == LF_strpbrk { return optimize_strpbrk(ci); }
+    if lf == LF_strndup { return optimize_strndup(ci); }
     if lf_in(lf, [LF_strtol, LF_strtod, LF_strtof, LF_strtoul, LF_strtoll, LF_strtold, LF_strtoull]) {
         // optimizeStrTo: annotate the string argument (and the end pointer's capture is the callee's business)
         let ep = cb_arg(ci, 1);
         if vals[ep].kind == VK_CNULL { cs_add_param_attr(ci, 0, attr_int(AK_Captures, 0)); }
         return -1;
     }
-    if lf == LF_strspn { lcs_np("optimizeStrSpn"); }
-    if lf == LF_strcspn { lcs_np("optimizeStrCSpn"); }
-    if lf == LF_strstr { lcs_np("optimizeStrStr"); }
+    if lf == LF_strspn { return optimize_strspn(ci); }
+    if lf == LF_strcspn { return optimize_strcspn(ci); }
+    if lf == LF_strstr { return optimize_strstr(ci); }
     if lf == LF_memchr { return optimize_memchr(ci); }
     if lf == LF_memrchr { return optimize_memrchr(ci); }
-    if lf == LF_memccpy { lcs_np("optimizeMemCCpy"); }
-    if lf == LF_mempcpy { lcs_np("optimizeMemPCpy"); }
-    if lf == LF_realloc { lcs_np("optimizeRealloc"); }
-    if lf == LF_bcopy { lcs_np("optimizeBCopy"); }
-    // optimizeNew: OptimizeHotColdNew is off by default
+    if lf == LF_memccpy { return optimize_memccpy(ci); }
+    if lf == LF_mempcpy { return optimize_mempcpy(ci); }
+    if lf == LF_realloc { return optimize_realloc(ci); }
+    if lf == LF_bcopy { return optimize_bcopy(ci); }
+    if lf_is_new_without_hint(lf) || lf_is_new_with_hint(lf) { return optimize_new(ci, lf); }
     return -1;
 }
 
@@ -898,7 +901,7 @@ fn ignore_calling_conv(lf: i64) -> bool { lf == LF_abs || lf == LF_labs || lf ==
 
 // LibCallSimplifier::optimizeCall(CI, Builder)
 fn lcs_optimize_call(ci: i32) -> i32 {
-    if call_is_nobuiltin(ci) { return -1; }
+    if call_is_nobuiltin(ci) { return maybe_optimize_nobuiltin_operator_new(ci); }
     let callee = called_function(ci);
     let is_ccc = is_calling_conv_c_compatible(insts[inst_of(ci)].cc as i64, insts[inst_of(ci)].ty2, inst_func(ci));
     let save_ci = lcs_ci;
@@ -914,9 +917,9 @@ fn lcs_optimize_call_impl(ci: i32, callee: i32, is_ccc: bool) -> i32 {
     let id = call_iid(ci);
     if id != 0 {
         if !is_ccc { return -1; }
-        if id == IID_pow { lcs_np("optimizePow (llvm.pow)"); }
+        if id == IID_pow { return optimize_pow(ci, unsafe_shrink); }
         if id == IID_exp2 { return optimize_exp2(ci, unsafe_shrink); }
-        if id == IID_log || id == IID_log2 || id == IID_log10 { lcs_np("optimizeLog (llvm.log*)"); }
+        if id == IID_log || id == IID_log2 || id == IID_log10 { return optimize_log(ci, unsafe_shrink); }
         if id == IID_sqrt { return optimize_sqrt(ci, unsafe_shrink); }
         if id == IID_memset { return optimize_memset(ci); }
         if id == IID_memcpy { return optimize_memcpy(ci); }
@@ -929,7 +932,10 @@ fn lcs_optimize_call_impl(ci: i32, callee: i32, is_ccc: bool) -> i32 {
     }
     // FortifiedLibCallSimplifier::optimizeCall
     let flf = tli_get_libfunc(callee);
-    if flf >= 0 && ends_with(TLI_NAMES[flf], "_chk") { lcs_np("FortifiedLibCallSimplifier"); }
+    if flf >= 0 {
+        let fv = fortified_optimize_call(ci, flf as i64, is_ccc);
+        if fv >= 0 { return fv; }
+    }
     let lf0 = tli_get_libfunc(callee);
     if lf0 < 0 || !blc_is_emittable(lf0 as i64) { return -1; }
     let lf = lf0 as i64;
@@ -948,13 +954,14 @@ fn lcs_optimize_call_impl(ci: i32, callee: i32, is_ccc: bool) -> i32 {
     if lf == LF_strtol || lf == LF_strtoll { return optimize_str_to_int(ci, true); }
     if lf == LF_strtoul || lf == LF_strtoull { return optimize_str_to_int(ci, false); }
     if lf == LF_printf { return optimize_printf(ci); }
-    if lf == LF_sprintf { lcs_np("optimizeSPrintF"); }
-    if lf == LF_snprintf { lcs_np("optimizeSnPrintF"); }
-    if lf == LF_fprintf { lcs_np("optimizeFPrintF"); }
-    if lf == LF_fwrite { lcs_np("optimizeFWrite"); }
-    if lf == LF_fputs { lcs_np("optimizeFPuts"); }
+    if lf == LF_sprintf { return optimize_sprintf(ci); }
+    if lf == LF_snprintf { return optimize_snprintf(ci); }
+    if lf == LF_fprintf { return optimize_fprintf(ci); }
+    if lf == LF_fwrite { return optimize_fwrite(ci); }
+    if lf == LF_fputs { return optimize_fputs(ci); }
     if lf == LF_puts { return optimize_puts(ci); }
-    if lf == LF_perror || lf == LF_vfprintf || lf == LF_fiprintf { lcs_np("optimizeErrorReporting"); }
+    if lf == LF_perror { return optimize_error_reporting(ci, -1); }
+    if lf == LF_vfprintf || lf == LF_fiprintf { return optimize_error_reporting(ci, 0); }
     if lf == LF_exit || lf == LF_Exit { return optimize_exit(ci); }
     return -1;
 }
@@ -1447,7 +1454,7 @@ fn optimize_exp2(ci: i32, unsafe_shrink: bool) -> i32 {
     if !ui && ty_is_vector(ty) { return ret; }
     let o = cb_arg(ci, 0);
     if (is_inst_op(o, OP_SITOFP) || is_inst_op(o, OP_UITOFP)) && (ui || blc_has_float_fn(ty, LF_ldexp, LF_ldexpf, LF_ldexpl)) {
-        let e = get_int_to_fp_val(o, 32);
+        let e = get_int_to_fp_val(o, tli_int_bits());
         if e >= 0 {
             let one = c_fp_from_f64(ty, 1.0);
             if ui { return copy_flags(ci, icx_intrinsic_f(IID_ldexp, [ty, vals[e].ty as i32], [one, e], icx_fmf(ci), "")); }

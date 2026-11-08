@@ -18,9 +18,11 @@ import flags;
 
 // Function::Create(FT, ExternalLinkage, Name, M): appended to the module; the name is uniqued.
 fn au_create_function(name: const u8[:], fty: i32) -> i32 {
-    let f = new_glob(VK_FUNC, T_PTR, -1, 0);
+    // Function::Create(..., M->getDataLayout().getProgramAddressSpace())
+    let f = new_glob(VK_FUNC, ty_ptr(dl_prog_as), -1, 0);
     let g = glob_of(f);
     globs[g].vty = fty;
+    globs[g].addrspace = dl_prog_as as i32;
     globs[g].symtab = new_symtab();
     let np = ty_fn_nparams(fty);
     let at = ints.len as i32;
