@@ -56,11 +56,10 @@ recursive fn symbolic_binop(o: i64, a: i32, b: i32) -> i32 {
         let k0 = kb_compute_all(a, 0);
         let k1 = kb_compute_all(b, 0);
         kb_cxt = save;
-        let m = wmask64(k0.w as i64);
-        if (k1.o | k0.z) == m { return a; }
-        if (k0.o | k1.z) == m { return b; }
+        if ap_is_all_ones(ap_or(k1.o, k0.z)) { return a; }
+        if ap_is_all_ones(ap_or(k0.o, k1.z)) { return b; }
         let k = kb_and(k0, k1);
-        if kb_is_constant(k) { return c_int_ty(vals[a].ty, k.o); }
+        if kb_is_constant(k) { return c_int_ap(vals[a].ty, k.o); }
     }
     if o == OP_SUB {
         let g1 = constant_offset_from_global(a);

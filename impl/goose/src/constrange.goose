@@ -19,6 +19,7 @@ import irutil;
 import apint;
 import constfold;
 import crange;
+import knownbits;
 import gen_attrs;
 import gen_iids;
 import pm;
@@ -117,9 +118,7 @@ fn rg_difference(a: CRange, b: CRange) -> CRange { rg_intersect(a, rg_inverse(b)
 // ---------------------------------------------------------------------------------------------
 // KnownBits at the range's width (only what fromKnownBits/toKnownBits and the bitwise ops need)
 
-struct KBA { z: AP, o: AP }
-
-fn rg_from_kba(k: KBA, signed: bool) -> CRange {
+fn rg_from_kb(k: KB, signed: bool) -> CRange {
     let w = k.z.w as i64;
     if !ap_is_zero(ap_and(k.z, k.o)) { return rg_empty(w); }
     if ap_is_zero(k.z) && ap_is_zero(k.o) { return rg_full(w); }
@@ -132,9 +131,9 @@ fn rg_from_kba(k: KBA, signed: bool) -> CRange {
     let hi = ap_clear_bit(maxv, w - 1);
     return rg_new(lo, ap_inc(hi));
 }
-fn rg_to_kba(c: CRange) -> KBA {
+fn rg_to_kb(c: CRange) -> KB {
     let w = rg_w(c);
-    if rg_is_empty(c) { return KBA { z: ap_zero(w), o: ap_zero(w) }; }
+    if rg_is_empty(c) { return KB { z: ap_zero(w), o: ap_zero(w) }; }
     let mn = rg_umin(c);
     let mx = rg_umax(c);
     var z = ap_not(mn);
@@ -144,17 +143,8 @@ fn rg_to_kba(c: CRange) -> KBA {
         z = ap_clear_low_bits(z, d + 1);
         o = ap_clear_low_bits(o, d + 1);
     }
-    return KBA { z: z, o: o };
+    return KB { z: z, o: o };
 }
-fn kba_and(a: KBA, b: KBA) -> KBA { KBA { z: ap_or(a.z, b.z), o: ap_and(a.o, b.o) } }
-fn kba_or(a: KBA, b: KBA) -> KBA { KBA { z: ap_and(a.z, b.z), o: ap_or(a.o, b.o) } }
-fn kba_xor(a: KBA, b: KBA) -> KBA {
-    return KBA { z: ap_or(ap_and(a.z, b.z), ap_and(a.o, b.o)), o: ap_or(ap_and(a.z, b.o), ap_and(a.o, b.z)) };
-}
-
-// fromKnownBits / toKnownBits for the 64-bit KB type of knownbits.goose
-fn rg_from_kb(z: u64, o: u64, w: i64, signed: bool) -> CRange { rg_from_kba(KBA { z: ap_u64(z, w), o: ap_u64(o, w) }, signed) }
-
 fn rg_from_cr(c: CR) -> CRange { CRange { lo: ap_u64(c.lo, c.w as i64), hi: ap_u64(c.hi, c.w as i64) } }
 fn rg_to_cr(c: CRange) -> CR {
     if rg_w(c) > 64 { fatal("ConstantRange: conversion of a range wider than 64 bits to CR"); }
@@ -795,7 +785,7 @@ fn rg_est_and_lower(l: CRange, r: CRange) -> AP {
 fn rg_and(a: CRange, b: CRange) -> CRange {
     let w = rg_w(a);
     if rg_is_empty(a) || rg_is_empty(b) { return rg_empty(w); }
-    let kr = rg_from_kba(kba_and(rg_to_kba(a), rg_to_kba(b)), false);
+    let kr = rg_from_kb(kb_and(rg_to_kb(a), rg_to_kb(b)), false);
     let lb = rg_est_and_lower(a, b);
     let um = rg_nonempty(lb, ap_inc(ap_umin(rg_umax(b), rg_umax(a))));
     return rg_intersect(kr, um);
@@ -803,7 +793,7 @@ fn rg_and(a: CRange, b: CRange) -> CRange {
 fn rg_or(a: CRange, b: CRange) -> CRange {
     let w = rg_w(a);
     if rg_is_empty(a) || rg_is_empty(b) { return rg_empty(w); }
-    let kr = rg_from_kba(kba_or(rg_to_kba(a), rg_to_kba(b)), false);
+    let kr = rg_from_kb(kb_or(rg_to_kb(a), rg_to_kb(b)), false);
     let ub = ap_neg(rg_est_and_lower(rg_not(a), rg_not(b)));
     let um = rg_nonempty(ap_umax(rg_umin(a), rg_umin(b)), ub);
     return rg_intersect(kr, um);
@@ -814,9 +804,9 @@ fn rg_xor(a: CRange, b: CRange) -> CRange {
     if rg_is_single(a) && rg_is_single(b) { return rg_single(ap_xor(a.lo, b.lo)); }
     if rg_is_single(b) && ap_is_all_ones(b.lo) { return rg_not(a); }
     if rg_is_single(a) && ap_is_all_ones(a.lo) { return rg_not(b); }
-    let lk = rg_to_kba(a);
-    let rk = rg_to_kba(b);
-    var cr = rg_from_kba(kba_xor(lk, rk), false);
+    let lk = rg_to_kb(a);
+    let rk = rg_to_kb(b);
+    var cr = rg_from_kb(kb_xor(lk, rk), false);
     if w == 1 { return cr; }
     if ap_is_subset_of(ap_not(lk.z), rk.o) { cr = rg_intersect_t(cr, rg_sub(b, a), RG_UNSIGNED); }
     else if ap_is_subset_of(ap_not(rk.z), lk.o) { cr = rg_intersect_t(cr, rg_sub(a, b), RG_UNSIGNED); }

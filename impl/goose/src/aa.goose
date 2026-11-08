@@ -1434,7 +1434,7 @@ recursive fn bas_alias_gep_impl(gep1: i32, s1_0: u64, v2: i32, s2_0: u64, u1_0: 
         }
         if i == 0 { gcd = bas_abs_w(sgcd, w); } else { gcd = bas_gcd_u(gcd, bas_abs_w(sgcd, w)); }
         kb_cxt = x.cxt;
-        var cr = compute_constant_range(x.val.v, false, true, 0);
+        var cr = rg_to_cr(compute_constant_range(x.val.v, false, true, 0));
         cr = cr_intersect_t(cr, cr_from_kb(known, true), CR_SIGNED);
         cr = cr_sext_or_trunc(cv_eval_cr(x.val, cr), w);
         if x.nsw { cr = cr_smul_sat(cr, cr_single(scale, w)); } else { cr = cr_smul_fast(cr, cr_single(scale, w)); }

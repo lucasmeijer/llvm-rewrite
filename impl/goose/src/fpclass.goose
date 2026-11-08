@@ -10,6 +10,9 @@
 // Denormal modes come from the function's denormal_fpenv attribute (DenormalMode encoded input << 2 | output).
 // ConstantFPRange is only implemented for IEEE formats of at most 64 bits (fails loudly otherwise).
 import std;
+import constrange;
+import apint;
+import demandedbits;
 import ir;
 import irutil;
 import instinfo;
@@ -313,10 +316,11 @@ fn kfc_canonicalize(src: KFC, mode: i64) -> KFC {
 }
 
 // KnownFPClass::bitcast(FltSemantics, Bits): kind is the FP type kind
-fn kfc_bitcast(kind: i64, b: KB) -> KFC {
+fn kfc_bitcast(kind: i64, b0: KB) -> KFC {
     var k = kfc_unknown();
-    if kb_is_nonneg(b) { k = kfc_sign_bit_must_be_zero(k); }
-    else if kb_is_neg(b) { k = kfc_sign_bit_must_be_one(k); }
+    let b = kb64(b0);
+    if kb_is_nonneg(b0) { k = kfc_sign_bit_must_be_zero(k); }
+    else if kb_is_neg(b0) { k = kfc_sign_bit_must_be_one(k); }
     if kind == TK_HALF || kind == TK_BFLOAT || kind == TK_FLOAT || kind == TK_DOUBLE {
         let w = b.w as i64;
         let m = wmask(w);
@@ -566,23 +570,23 @@ fn kfc_ldexp(src: KFC, emin: i64, emax: i64, kind: i64, mode: i64) -> KFC {
 }
 fn kfc_powi(src: KFC, e: KB) -> KFC {
     var k = kfc_propagate_nan(kfc_unknown(), src, false);
-    let w = e.w as i64;
-    let is_zero = e.z == wmask(w);
+    let w = kb_bw(e);
+    let is_zero = kb_is_zero_known(e);
     if is_zero {
         if kfc_never(src, FCL_SNAN) { return kfc_known_not(k, fcl_not(FCL_POS_NORMAL)); }
         return kfc_known_not(k, fcl_not(FCL_POS_NORMAL | FCL_NAN));
     }
-    let min_exp = sext_w(kb_smin(e), w);
-    let max_exp = sext_w(kb_smax(e), w);
+    let min_exp = ap_sext64_checked(kb_smin(e));
+    let max_exp = ap_sext64_checked(kb_smax(e));
     let may_inf_src = !kfc_never(src, FCL_INF) && max_exp > 0;
     let may_div_by_zero = !kfc_never(src, FCL_ZERO) && min_exp < 0;
     let may_finite = !kfc_never(src, FCL_NORMAL | FCL_SUBNORMAL);
     let may_abs_gt1 = min_exp < -1 || max_exp > 1;
     let may_finite_overflow = may_finite && may_abs_gt1;
-    let may_be_neg_one = e.z == 0;
+    let may_be_neg_one = ap_is_zero(e.z);
     let may_subnorm_inv = !kfc_never(src, FCL_SUBNORMAL) && may_be_neg_one;
     if !may_inf_src && !may_div_by_zero && !may_finite_overflow && !may_subnorm_inv { k = kfc_known_not(k, FCL_INF); }
-    if (e.z & 1) != 0 { return kfc_known_not(k, FCL_NEGATIVE); }
+    if ap_get_bit(e.z, 0) { return kfc_known_not(k, FCL_NEGATIVE); }
     if kfc_never(src, FCL_NEGATIVE) { k = kfc_known_not(k, FCL_NEGATIVE); }
     return k;
 }
@@ -779,19 +783,15 @@ fn fcmp_to_class_test_lt(p: i64, fv: i32, l: i32, c: i32, look_through: bool) ->
 // computeKnownFPClass
 
 // isSignBitCheck(Pred, RHS): (is a sign bit check, TrueIfSigned)
-fn is_sign_bit_check(p: i64, rhs: u64, w: i64) -> bool, bool {
-    let m = wmask(w);
-    let smax = (sbit(w) - 1) & m;
-    let smin = sbit(w);
-    let r = rhs & m;
-    if p == 40 { return r == 0, true; }
-    if p == 41 { return r == m, true; }
-    if p == 38 { return r == m, false; }
-    if p == 39 { return r == 0, false; }
-    if p == 34 { return r == smax, true; }
-    if p == 35 { return r == smin, true; }
-    if p == 36 { return r == smin, false; }
-    if p == 37 { return r == smax, false; }
+fn is_sign_bit_check(p: i64, r: AP) -> bool, bool {
+    if p == 40 { return ap_is_zero(r), true; }
+    if p == 41 { return ap_is_all_ones(r), true; }
+    if p == 38 { return ap_is_all_ones(r), false; }
+    if p == 39 { return ap_is_zero(r), false; }
+    if p == 34 { return ap_is_max_signed(r), true; }
+    if p == 35 { return ap_is_min_signed(r), true; }
+    if p == 36 { return ap_is_min_signed(r), false; }
+    if p == 37 { return ap_is_max_signed(r), false; }
     return false, false;
 }
 
@@ -820,7 +820,7 @@ recursive fn kfc_from_cond(v: i32, cond: i32, cond_true: bool, known0: KFC, dept
     if m_intrinsic(cond, IID_is_fpclass) && op(cond, 0) == v {
         let ci = m_constant_int(op(cond, 1));
         if ci >= 0 {
-            let mask = ci_val(ci) & FCL_ALL;
+            let mask = ap_lo64(ci_ap(ci)) & FCL_ALL;
             known = kfc_known_not(known, if cond_true { fcl_not(mask) } else { mask });
         }
         return known;
@@ -830,9 +830,7 @@ recursive fn kfc_from_cond(v: i32, cond: i32, cond_true: bool, known0: KFC, dept
         if is_op(a, OP_BITCAST) && elementwise_bitcast_v(a) && op(a, 0) == v {
             let rc = m_apint(op(cond, 1));
             if rc >= 0 {
-                let w = ci_w(rc);
-                if w > 64 { pm_wide(); }
-                let ok, tis = is_sign_bit_check(inst_pred(cond), ci_val(rc), w);
+                let ok, tis = is_sign_bit_check(inst_pred(cond), ci_ap(rc));
                 if !ok { return known; }
                 if tis == cond_true { known = kfc_sign_bit_must_be_one(known); }
                 else { known = kfc_sign_bit_must_be_zero(known); }
@@ -1121,7 +1119,7 @@ recursive fn kfc_from_operator(v: i32, de: u64, interested: u64, knot: u64, dept
             else if kb_is_neg(ik) { known = kfc_sign_bit_must_be_one(known); }
         }
         if (interested & FCL_INF) != 0 {
-            var isz = ik.w as i64;
+            var isz = kb_bw(ik);
             if o == OP_UITOFP { isz -= kb_min_lz(ik); } else { isz -= kb_min_sign_bits_k(ik); }
             // ilogb(getLargest(Sem)) == maxExponent == bias
             if fp_fmt(fp_ty_kind(ty)).bias >= isz { known = kfc_known_not(known, FCL_INF); }
@@ -1135,7 +1133,7 @@ recursive fn kfc_from_operator(v: i32, de: u64, interested: u64, knot: u64, dept
             let n = ty_count(vals[vec].ty);
             dv = all_elts(vec);
             let ci = m_constant_int(op(v, 1));
-            if ci >= 0 && ci_val(ci) < n as u64 { dv = (1 as u64) << ci_val(ci); }
+            if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) { dv = (1 as u64) << ap_lo64(ci_ap(ci)); }
         }
         return kfc_compute(vec, dv, interested, depth + 1);
     }
@@ -1147,9 +1145,10 @@ recursive fn kfc_from_operator(v: i32, de: u64, interested: u64, knot: u64, dept
         let n = ty_count(ty);
         var dv = de;
         var needs_elt = true;
-        if ci >= 0 && ci_val(ci) < n as u64 {
-            dv &= ~((1 as u64) << ci_val(ci));
-            needs_elt = ((de >> ci_val(ci)) & 1) != 0;
+        if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) {
+            let ix = ap_lo64(ci_ap(ci));
+            dv &= ~((1 as u64) << ix);
+            needs_elt = ((de >> ix) & 1) != 0;
         }
         if needs_elt {
             known = kfc_compute_all(elt, interested, depth + 1);
@@ -1401,10 +1400,10 @@ recursive fn kfc_call(v: i32, de: u64, interested: u64, knot: u64, depth: i64) -
         let ek = kb_compute(e, if ty_is_vector(et) { de } else { 1 }, depth + 1);
         var isrc: u64 = 0;
         if (interested & FCL_NAN) != 0 { isrc |= FCL_NAN; }
-        let ezero = ek.z == wmask(ek.w as i64);
+        let ezero = kb_is_zero_known(ek);
         if !ezero {
             if (interested & FCL_INF) != 0 { isrc |= FCL_FINITE | FCL_INF; }
-            if (interested & FCL_NEGATIVE) != 0 && (ek.z & 1) == 0 { isrc |= FCL_NEGATIVE; }
+            if (interested & FCL_NEGATIVE) != 0 && !ap_get_bit(ek.z, 0) { isrc |= FCL_NEGATIVE; }
         }
         var ks = kfc_unknown();
         if isrc != 0 { ks = kfc_compute(op(v, 0), de, isrc, depth + 1); }
@@ -1414,10 +1413,10 @@ recursive fn kfc_call(v: i32, de: u64, interested: u64, knot: u64, depth: i64) -
         let ks = kfc_compute(op(v, 0), de, interested, depth + 1);
         let ea = op(v, 1);
         let ew = ty_scalar_bits(vals[ea].ty);
-        var cr = cr_full(ew);
+        var cr = rg_full(ew);
         if (ks.known & (FCL_ZERO | FCL_SUBNORMAL | FCL_INF)) != 0 { cr = compute_constant_range(ea, true, true, depth + 1); }
-        let emin = sext_w(cr_smin(cr), ew);
-        let emax = sext_w(cr_smax(cr), ew);
+        let emin = ap_sext64_checked(rg_smin(cr));
+        let emax = ap_sext64_checked(rg_smax(cr));
         return kfc_ldexp(ks, emin, emax, fp_ty_kind(ty), inst_denormal_mode(v));
     }
     if id == IID_arithmetic_fence {

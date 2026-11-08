@@ -54,7 +54,7 @@ fn q_nonzero(v: i32, q: SQ) -> bool { kb_cxt = q.cxt; return is_known_non_zero(v
 fn q_pow2(v: i32, or_zero: bool, q: SQ) -> bool { kb_cxt = q.cxt; return is_known_pow2(v, or_zero, 0); }
 fn q_nonequal(a: i32, b: i32, q: SQ) -> bool { kb_cxt = q.cxt; return is_known_non_equal(a, b, 0); }
 fn q_signbits(v: i32, q: SQ) -> i64 { kb_cxt = q.cxt; return num_sign_bits(v, 0); }
-fn q_masked_zero(v: i32, m: u64, q: SQ) -> bool { kb_cxt = q.cxt; return masked_value_is_zero(v, m, 0); }
+fn q_masked_zero(v: i32, m: AP, q: SQ) -> bool { kb_cxt = q.cxt; return masked_value_is_zero(v, m, 0); }
 fn q_dom_implied(p: i64, a: i32, b: i32, q: SQ) -> i64 { return implied_by_dom_condition(p, a, b, q.cxt); }
 fn q_fpclass(v: i32, interested: u64, fmf: u8, q: SQ) -> KFC { kb_cxt = q.cxt; return known_fp_class(v, interested, fmf, 0); }
 
@@ -393,8 +393,7 @@ recursive fn simplify_sub(a0: i32, b0: i32, nsw: bool, nuw: bool, q: SQ, mr: i64
     if m_zero(a) {
         if nuw { return c_null(ty); }
         let k = q_kb(b, q);
-        let w = k.w as i64;
-        if k.z == sbit64(w) - 1 {
+        if ap_is_max_signed(k.z) {
             if nsw { return c_null(ty); }
             return b;
         }
@@ -509,28 +508,24 @@ recursive fn is_div_zero(x: i32, y: i32, q: SQ, mr0: i64, signed: bool) -> bool 
     if signed {
         if is_op(x, OP_SREM) && op(x, 1) == y { return true; }
         let c = m_apint(x);
-        if c >= 0 && ci_val(c) != sbit64(ci_w(c)) {
-            let w = ci_w(c);
-            let s = ci_sval(c);
-            let ab = (if s < 0 { (0 as u64) - (s as! u64) } else { s as! u64 }) & wmask64(w);
-            let pos = c_int_ty(ty, ab);
-            let neg = c_int_ty(ty, (0 as u64) - ab);
+        if c >= 0 && !ap_is_min_signed(ci_ap(c)) {
+            let ab = ap_abs(ci_ap(c));
+            let pos = c_int_ap(ty, ab);
+            let neg = c_int_ap(ty, ap_neg(ab));
             if is_icmp_true(P_SLT, y, neg, q, mr) || is_icmp_true(P_SGT, y, pos, q, mr) { return true; }
         }
         let cy = m_apint(y);
         if cy >= 0 {
-            let w = ci_w(cy);
-            if ci_val(cy) == sbit64(w) { return is_icmp_true(P_NE, x, y, q, mr); }
-            let s = ci_sval(cy);
-            let ab = (if s < 0 { (0 as u64) - (s as! u64) } else { s as! u64 }) & wmask64(w);
-            let pos = c_int_ty(ty, ab);
-            let neg = c_int_ty(ty, (0 as u64) - ab);
+            if ap_is_min_signed(ci_ap(cy)) { return is_icmp_true(P_NE, x, y, q, mr); }
+            let ab = ap_abs(ci_ap(cy));
+            let pos = c_int_ap(ty, ab);
+            let neg = c_int_ap(ty, ap_neg(ab));
             if is_icmp_true(P_SGT, x, neg, q, mr) && is_icmp_true(P_SLT, x, pos, q, mr) { return true; }
         }
         return false;
     }
     let c = m_apint(y);
-    if c >= 0 && kb_max(q_kb(x, q)) < ci_val(c) { return true; }
+    if c >= 0 && ap_ult(kb_max(q_kb(x, q)), ci_ap(c)) { return true; }
     return is_icmp_true(P_ULT, x, y, q, mr);
 }
 
@@ -545,8 +540,8 @@ recursive fn simplify_div_rem(o: i64, a: i32, b: i32, q: SQ, mr: i64) -> i32 {
     if m_zero(a) { return c_null(ty); }
     if a == b { return if is_div { c_int_ty(ty, 1) } else { c_null(ty) }; }
     let k = q_kb(b, q);
-    if kb_is_constant(k) && k.o == 0 { return c_poison(ty); }
-    if kb_min_lz(k) == (k.w as i64) - 1 { return if is_div { a } else { c_null(ty) }; }
+    if kb_is_constant(k) && ap_is_zero(k.o) { return c_poison(ty); }
+    if kb_min_lz(k) == kb_bw(k) - 1 { return if is_div { a } else { c_null(ty) }; }
     let x = m_c_binop_with(a, OP_MUL, b);
     if x >= 0 {
         if (signed && op_nsw(a)) || (!signed && op_nuw(a)) || (signed && is_op(x, OP_SDIV) && op(x, 1) == b) ||
@@ -575,13 +570,13 @@ recursive fn simplify_div(o: i64, a0: i32, b0: i32, exact: bool, q: SQ, mr: i64)
     if v >= 0 { return v; }
     let dc = m_apint(b);
     if exact && dc >= 0 {
-        let dv = ci_val(dc);
-        let tz = ctz_w(dv, ci_w(dc));
+        let dv = ci_ap(dc);
+        let tz = ap_countr_zero(dv);
         if tz != 0 {
             let k = q_kb(a, q);
             if kb_max_tz(k) < tz { return c_poison(vals[a].ty); }
         }
-        let pow2 = dv != 0 && (dv & (dv - 1)) == 0;
+        let pow2 = ap_is_pow2(dv);
         if !pow2 {
             if o == OP_UDIV { if is_op(a, OP_MUL) && op_nsw(a) && op(a, 1) == b { return op(a, 0); } }
             else { if is_op(a, OP_MUL) && op_nuw(a) && op(a, 1) == b { return op(a, 0); } }
@@ -609,16 +604,10 @@ recursive fn simplify_rem(o: i64, a0: i32, b0: i32, q: SQ, mr: i64) -> i32 {
     return -1;
 }
 fn rem_zero(c: i32, c0: i32, signed: bool) -> bool {
-    let w = ci_w(c0);
-    if signed {
-        let d = ci_sval(c0);
-        if d == -1 { return true; }
-        if d == 0 { is_not_ported("srem of mul by a constant with a zero divisor"); }
-        return rem_i64(ci_sval(c), d) == 0;
-    }
-    let d = ci_val(c0);
-    if d == 0 { is_not_ported("urem of mul by a constant with a zero divisor"); }
-    return ci_val(c) % d == 0;
+    let d = ci_ap(c0);
+    if ap_is_zero(d) { is_not_ported("srem/urem of mul by a constant with a zero divisor"); }
+    if signed { return ap_is_zero(ap_srem(ci_ap(c), d)); }
+    return ap_is_zero(ap_urem(ci_ap(c), d));
 }
 // m_CheckedInt(pred) (cstval_pred_ty with a checked predicate): scalar, splat, or all fixed-vector elements
 fn checked_int_rem_zero(v: i32, c0: i32, signed: bool) -> bool {
@@ -666,7 +655,7 @@ recursive fn is_poison_shift(amt: i32, q: SQ) -> bool {
     if !is_constant(amt) { return false; }
     if q_undef(q, amt) { return true; }
     let c = m_apint(amt);
-    if c >= 0 && ci_val(c) >= ci_w(c) as u64 { return true; }
+    if c >= 0 && ap_uge_u64(ci_ap(c), ci_w(c) as u64) { return true; }
     let k = vals[amt].kind;
     if k == VK_CVECTOR || k == VK_CDVECTOR {
         for i in ty_count(vals[amt].ty) {
@@ -693,16 +682,16 @@ recursive fn simplify_shift(o: i64, a0: i32, b0: i32, nsw: bool, q: SQ, mr: i64)
         if p >= 0 { return p; }
     }
     let ka = q_kb(b, q);
-    let w = ka.w as i64;
-    if kb_min(ka) >= w as u64 { return c_poison(vals[a].ty); }
+    let w = kb_bw(ka);
+    if ap_uge_u64(kb_min(ka), w as u64) { return c_poison(vals[a].ty); }
     let nvalid = if w <= 1 { 0 } else { 64 - clz((w - 1) as u64) };
     if kb_min_tz(ka) >= nvalid { return a; }
     if nsw {
         let kv = q_kb(a, q);
         var ks = kb_shl(kv, ka, false, false, false);
-        let sb = sbit64(w);
-        if (kv.z & sb) != 0 { ks.z |= sb; }
-        if (kv.o & sb) != 0 { ks.o |= sb; }
+        let aw = kb_bw(kv);
+        if ap_is_neg(kv.z) { ks.z = ap_set_bit(ks.z, aw - 1); }
+        if ap_is_neg(kv.o) { ks.o = ap_set_bit(ks.o, aw - 1); }
         if kb_has_conflict(ks) { return c_poison(vals[a].ty); }
     }
     return -1;
@@ -715,7 +704,7 @@ recursive fn simplify_right_shift(o: i64, a: i32, b: i32, exact: bool, q: SQ, mr
     if q_undef(q, a) { return if exact { a } else { null_of(a) }; }
     if exact {
         let k = q_kb(a, q);
-        if (k.o & 1) != 0 { return a; }
+        if ap_get_bit(k.o, 0) { return a; }
     }
     return -1;
 }
@@ -742,10 +731,10 @@ recursive fn simplify_lshr(a: i32, b: i32, exact: bool, q: SQ, mr: i64) -> i32 {
             let y = op(a, 1 - side);
             if is_op(sh, OP_SHL) && op_nuw(sh) && m_apint(op(sh, 1)) >= 0 {
                 let sl = m_apint(op(sh, 1));
-                if ci_val(sl) == ci_val(sr) {
+                if ap_eq(ci_ap(sl), ci_ap(sr)) {
                     let yk = q_kb(y, q);
-                    let eff = (yk.w as i64) - kb_min_lz(yk);
-                    if ci_val(sr) >= eff as u64 { return op(sh, 0); }
+                    let eff = kb_bw(yk) - kb_min_lz(yk);
+                    if ap_uge_u64(ci_ap(sr), eff as u64) { return op(sh, 0); }
                 }
                 break;
             }
@@ -818,13 +807,12 @@ fn simplify_and_or_of_icmps_with_constants(c0: i32, c1: i32, is_and: bool) -> i3
     let k0 = m_apint(op(c0, 1));
     let k1 = m_apint(op(c1, 1));
     if k0 < 0 || k1 < 0 { return -1; }
-    let w = ci_w(k0);
-    let r0 = cr_exact_icmp(inst_pred(c0), ci_val(k0), w);
-    let r1 = cr_exact_icmp(inst_pred(c1), ci_val(k1), w);
-    if is_and && cr_is_empty(cr_intersect(r0, r1)) { return get_false(vals[c0].ty); }
-    if !is_and && cr_is_full(cr_union(r0, r1)) { return get_true(vals[c0].ty); }
-    if cr_contains(r0, r1) { return if is_and { c1 } else { c0 }; }
-    if cr_contains(r1, r0) { return if is_and { c0 } else { c1 }; }
+    let r0 = rg_exact_icmp(inst_pred(c0), ci_ap(k0));
+    let r1 = rg_exact_icmp(inst_pred(c1), ci_ap(k1));
+    if is_and && rg_is_empty(rg_intersect(r0, r1)) { return get_false(vals[c0].ty); }
+    if !is_and && rg_is_full(rg_union(r0, r1)) { return get_true(vals[c0].ty); }
+    if rg_contains(r0, r1) { return if is_and { c1 } else { c0 }; }
+    if rg_contains(r1, r0) { return if is_and { c0 } else { c1 }; }
     return -1;
 }
 
@@ -840,12 +828,13 @@ fn simplify_and_or_of_icmps_with_add(o0: i32, o1: i32, is_and: bool) -> i32 {
     let ity = vals[o0].ty;
     let nsw = op_nsw(l);
     let nuw = op_nuw(l);
-    let w = ci_w(c0);
-    let delta = (ci_val(c1) - ci_val(c0)) & wmask64(w);
+    let dap = ap_sub(ci_ap(c1), ci_ap(c0));
+    let delta: u64 = if ap_eq_u64(dap, 1) { 1 } else if ap_eq_u64(dap, 2) { 2 } else { 0 };
     let p0 = inst_pred(o0);
     let p1 = inst_pred(o1);
-    let c0v = ci_val(c0);
-    let strictly_pos = c0v != 0 && (c0v & sbit64(w)) == 0;
+    let c0a = ci_ap(c0);
+    let c0nz = !ap_is_zero(c0a);
+    let strictly_pos = ap_is_strictly_pos(c0a);
     if is_and {
         if strictly_pos {
             if delta == 2 {
@@ -857,7 +846,7 @@ fn simplify_and_or_of_icmps_with_add(o0: i32, o1: i32, is_and: bool) -> i32 {
                 if p0 == P_SLE && p1 == P_SGT && nsw { return get_false(ity); }
             }
         }
-        if c0v != 0 && nuw {
+        if c0nz && nuw {
             if delta == 2 { if p0 == P_ULT && p1 == P_UGT { return get_false(ity); } }
             if delta == 1 { if p0 == P_ULE && p1 == P_UGT { return get_false(ity); } }
         }
@@ -872,7 +861,7 @@ fn simplify_and_or_of_icmps_with_add(o0: i32, o1: i32, is_and: bool) -> i32 {
                 if p0 == P_SGT && p1 == P_SLE && nsw { return get_true(ity); }
             }
         }
-        if c0v != 0 && nuw {
+        if c0nz && nuw {
             if delta == 2 { if p0 == P_UGE && p1 == P_ULE { return get_true(ity); } }
             if delta == 1 { if p0 == P_UGT && p1 == P_ULE { return get_true(ity); } }
         }
@@ -886,7 +875,7 @@ fn simplify_and_or_of_icmps_with_ctpop(c0: i32, c1: i32, is_and: bool) -> i32 {
     let c = m_apint(op(c0, 1));
     if c < 0 { return -1; }
     let x = op(l, 0);
-    if op(c1, 0) != x || !m_zero_int(op(c1, 1)) || ci_val(c) == 0 { return -1; }
+    if op(c1, 0) != x || !m_zero_int(op(c1, 1)) || ap_is_zero(ci_ap(c)) { return -1; }
     let p0 = inst_pred(c0);
     let p1 = inst_pred(c1);
     if !is_and && p0 == P_EQ && p1 == P_NE { return c1; }
@@ -1077,7 +1066,7 @@ recursive fn simplify_and_commutative(a: i32, b: i32, q: SQ, mr: i64) -> i32 {
         if is_op(sb, OP_SHL) && op(sb, 0) == x && m_apint(op(sb, 1)) >= 0 {
             let s2 = m_apint(op(sb, 1));
             kb_cxt = q.cxt;
-            if is_known_pow2(x, true, 0) && ci_val(s1) >= ci_val(s2) { return null_of(a); }
+            if is_known_pow2(x, true, 0) && ap_uge(ci_ap(s1), ci_ap(s2)) { return null_of(a); }
         }
     }
     let v = simplify_and_or_with_icmp_eq(OP_AND, a, b, q, mr);
@@ -1102,16 +1091,14 @@ recursive fn simplify_and(a0: i32, b0: i32, q: SQ, mr: i64) -> i32 {
     let mask = m_apint(b);
     let w = ty_scalar_bits(vals[a].ty);
     if mask >= 0 {
-        let mv = ci_val(mask);
+        let mv = ci_ap(mask);
         if is_op(a, OP_SHL) && m_apint(op(a, 1)) >= 0 {
-            let sh = ci_val(m_apint(op(a, 1)));
-            let inv = ~mv & wmask64(w);
-            if sh >= w as u64 || (inv >> sh) == 0 { return a; }
+            let sh = ci_ap(m_apint(op(a, 1)));
+            if ap_is_zero(ap_lshr_ap(ap_not(mv), sh)) { return a; }
         }
         if is_op(a, OP_LSHR) && m_apint(op(a, 1)) >= 0 {
-            let sh = ci_val(m_apint(op(a, 1)));
-            let inv = ~mv & wmask64(w);
-            if sh >= w as u64 || ((inv << sh) & wmask64(w)) == 0 { return a; }
+            let sh = ci_ap(m_apint(op(a, 1)));
+            if ap_is_zero(ap_shl_ap(ap_not(mv), sh)) { return a; }
         }
     }
     let pc = m_apint(b);
@@ -1119,9 +1106,7 @@ recursive fn simplify_and(a0: i32, b0: i32, q: SQ, mr: i64) -> i32 {
         let sh = op(a, 0);
         if q_pow2(sh, false, q) {
             let k = q_kb(sh, q);
-            let ab = 64 - clz(ci_val(pc));
-            let kb_ab = 64 - clz(kb_max(k));
-            if ab >= kb_ab { return null_of(b); }
+            if ap_active_bits(ci_ap(pc)) >= ap_active_bits(kb_max(k)) { return null_of(b); }
         }
     }
     r = simplify_and_or_of_cmps(q, a, b, true);
@@ -1145,23 +1130,22 @@ recursive fn simplify_and(a0: i32, b0: i32, q: SQ, mr: i64) -> i32 {
         if r >= 0 { return r; }
     }
     if mask >= 0 && is_op(a, OP_OR) {
-        let mv = ci_val(mask);
+        let mv = ci_ap(mask);
         for s in 2 {
             let xs = op(a, s);
             let y = op(a, 1 - s);
             if is_op(xs, OP_SHL) && op_nuw(xs) && m_apint(op(xs, 1)) >= 0 {
                 let x = op(xs, 0);
-                let shv = ci_val(m_apint(op(xs, 1)));
-                let shc = if shv > w as u64 { w } else { shv as i64 };
+                let shc = ap_limited(ci_ap(m_apint(op(xs, 1))), w as u64) as i64;
                 let yk = q_kb(y, q);
                 let effy = w - kb_min_lz(yk);
                 if effy <= shc {
                     let xk = q_kb(x, q);
                     let effx = w - kb_min_lz(xk);
-                    let by = wmask64(effy) & wmask64(w);
-                    let bx = if shc >= 64 { 0 } else { (wmask64(effx) << shc) & wmask64(w) };
-                    if (by & ~mv) == 0 && (bx & mv) == 0 { return y; }
-                    if (bx & ~mv) == 0 && (by & mv) == 0 { return xs; }
+                    let by = ap_low_bits(w, effy);
+                    let bx = ap_shl(ap_low_bits(w, effx), shc);
+                    if ap_is_subset_of(by, mv) && !ap_intersects(bx, mv) { return y; }
+                    if ap_is_subset_of(bx, mv) && !ap_intersects(by, mv) { return xs; }
                 }
                 break;
             }
@@ -1180,7 +1164,7 @@ recursive fn simplify_and(a0: i32, b0: i32, q: SQ, mr: i64) -> i32 {
     }
     if is_op(a, OP_XOR) && m_apint(op(a, 1)) >= 0 && is_op(b, OP_XOR) && op(b, 0) == op(a, 0) {
         let c1 = m_apint(op(a, 1));
-        if m_specific_int(op(b, 1), ~ci_val(c1)) { return null_of(a); }
+        if m_specific_int_apv(op(b, 1), ap_not(ci_ap(c1))) { return null_of(a); }
     }
     if is_int_or_int_vec_w(vals[a].ty, 1) {
         let i1 = implied_condition_vals(a, b, true);
@@ -1281,7 +1265,7 @@ recursive fn simplify_or(a0: i32, b0: i32, q: SQ, mr: i64) -> i32 {
         var cc: i32 = -1;
         if is_op(x, OP_SUB) && m_apint(op(x, 0)) >= 0 && op(x, 1) == y { cc = m_apint(op(x, 0)); }
         else if is_op(y, OP_SUB) && m_apint(op(y, 0)) >= 0 && op(y, 1) == x { cc = m_apint(op(y, 0)); }
-        if cc >= 0 && ci_val(cc) <= ty_scalar_bits(vals[x].ty) as u64 { return c_all_ones(vals[x].ty); }
+        if cc >= 0 && ap_ule_u64(ci_ap(cc), ty_scalar_bits(vals[x].ty) as u64) { return c_all_ones(vals[x].ty); }
     }
     if m_intrinsic(a, IID_fshl) && is_op(b, OP_SHL) && op(b, 0) == op(a, 0) && op(b, 1) == op(a, 2) { return a; }
     if m_intrinsic(b, IID_fshl) && is_op(a, OP_SHL) && op(a, 0) == op(b, 0) && op(a, 1) == op(b, 2) { return b; }
@@ -1310,16 +1294,15 @@ recursive fn simplify_or(a0: i32, b0: i32, q: SQ, mr: i64) -> i32 {
     if is_op(a, OP_AND) && m_apint(op(a, 1)) >= 0 && is_op(b, OP_AND) && m_apint(op(b, 1)) >= 0 {
         let aa = op(a, 0);
         let bb = op(b, 0);
-        let c1 = ci_val(m_apint(op(a, 1)));
-        let c2 = ci_val(m_apint(op(b, 1)));
-        let w = ty_scalar_bits(vals[a].ty);
-        if c1 == (~c2 & wmask64(w)) {
+        let c1 = ci_ap(m_apint(op(a, 1)));
+        let c2 = ci_ap(m_apint(op(b, 1)));
+        if ap_eq(c1, ap_not(c2)) {
             let n = m_c_binop_with(aa, OP_ADD, bb);
-            if c2 != 0 && ((c2 + 1) & c2) == 0 && n >= 0 {
+            if ap_is_mask(c2) && n >= 0 {
                 if q_masked_zero(n, c2, q) { return aa; }
             }
             let n2 = m_c_binop_with(bb, OP_ADD, aa);
-            if c1 != 0 && ((c1 + 1) & c1) == 0 && n2 >= 0 {
+            if ap_is_mask(c1) && n2 >= 0 {
                 if q_masked_zero(n2, c1, q) { return bb; }
             }
         }
@@ -1330,7 +1313,7 @@ recursive fn simplify_or(a0: i32, b0: i32, q: SQ, mr: i64) -> i32 {
     }
     if is_op(a, OP_XOR) && m_apint(op(a, 1)) >= 0 && is_op(b, OP_XOR) && op(b, 0) == op(a, 0) {
         let c1 = m_apint(op(a, 1));
-        if m_specific_int(op(b, 1), ~ci_val(c1)) { return c_all_ones(vals[a].ty); }
+        if m_specific_int_apv(op(b, 1), ap_not(ci_ap(c1))) { return c_all_ones(vals[a].ty); }
     }
     if is_int_or_int_vec_w(vals[a].ty, 1) {
         let i1 = implied_condition_vals(a, b, false);
@@ -1596,54 +1579,41 @@ recursive fn simplify_icmp_with_zero(p0: i64, l: i32, r: i32, q: SQ) -> i32 {
 }
 
 // isSignBitCheck(Pred, RHS, TrueIfSigned): 1/0 for TrueIfSigned, -1 if not a sign-bit check
-fn sign_bit_check(p: i64, c: u64, w: i64) -> i64 {
-    if p == P_SLT { return if c == 0 { 1 } else { -1 }; }
-    if p == P_SLE { return if c == wmask64(w) { 1 } else { -1 }; }
-    if p == P_SGT { return if c == wmask64(w) { 0 } else { -1 }; }
-    if p == P_SGE { return if c == 0 { 0 } else { -1 }; }
-    if p == P_UGT { return if c == sbit64(w) - 1 { 1 } else { -1 }; }
-    if p == P_UGE { return if c == sbit64(w) { 1 } else { -1 }; }
-    if p == P_ULT { return if c == sbit64(w) { 0 } else { -1 }; }
-    if p == P_ULE { return if c == sbit64(w) - 1 { 0 } else { -1 }; }
-    return -1;
+fn sign_bit_check(p: i64, c: AP) -> i64 {
+    let ok, tis = is_sign_bit_check(p, c);
+    if !ok { return -1; }
+    return if tis { 1 } else { 0 };
 }
 
 recursive fn simplify_icmp_with_constant(p: i64, l: i32, r: i32, q: SQ) -> i32 {
     let ity = get_compare_ty(r);
     let c = m_apint_ap(r, true);
     if c < 0 { return -1; }
-    let w = ci_w(c);
-    let cv = ci_val(c);
+    let cv = ci_ap(c);
     // m_ElementWiseBitCast(m_UIToFP(m_Value()))
     if is_op(l, OP_BITCAST) && is_op(op(l, 0), OP_UITOFP) && elementwise_bitcast(l) {
-        let t = sign_bit_check(p, cv, w);
+        let t = sign_bit_check(p, cv);
         if t >= 0 { return c_bool_ty(ity, t == 0); }
     }
-    let rcr = cr_exact_icmp(p, cv, w);
-    if cr_is_empty(rcr) { return get_false(ity); }
-    if cr_is_full(rcr) { return get_true(ity); }
+    let rcr = rg_exact_icmp(p, cv);
+    if rg_is_empty(rcr) { return get_false(ity); }
+    if rg_is_full(rcr) { return get_true(ity); }
     let lcr = q_constant_range(l, pred_is_signed(p), q);
-    if !cr_is_full(lcr) {
-        if cr_contains(rcr, lcr) { return get_true(ity); }
-        if cr_contains(cr_inverse(rcr), lcr) { return get_false(ity); }
+    if !rg_is_full(lcr) {
+        if rg_contains(rcr, lcr) { return get_true(ity); }
+        if rg_contains(rg_inverse(rcr), lcr) { return get_false(ity); }
     }
     if pred_is_equality(p) && is_op(l, OP_MUL) {
         let mc = m_apint_ap(op(l, 1), true);
         if mc >= 0 {
-            let mv = ci_val(mc);
-            if (op_nuw(l) && mv != 0 && cv % mv != 0) || (op_nsw(l) && mv != 0 && srem_w(cv, mv, w) != 0) {
+            let mv = ci_ap(mc);
+            if (op_nuw(l) && !ap_is_zero(mv) && !ap_is_zero(ap_urem(cv, mv))) || (op_nsw(l) && !ap_is_zero(mv) && !ap_is_zero(ap_srem(cv, mv))) {
                 return c_bool_ty(ity, p == P_NE);
             }
         }
     }
-    if p == P_UGE && cv == 1 && q_nonzero(l, q) { return get_true(ity); }
+    if p == P_UGE && ap_is_one(cv) && q_nonzero(l, q) { return get_true(ity); }
     return -1;
-}
-fn srem_w(a: u64, b: u64, w: i64) -> u64 {
-    let sa = sext64(a, w);
-    let sb = sext64(b, w);
-    if sb == -1 { return 0; }
-    return (rem_i64(sa, sb) as! u64) & wmask64(w);
 }
 fn elementwise_bitcast(v: i32) -> bool {
     // m_ElementWiseBitCast: bitcast between types with the same element count
@@ -1654,7 +1624,7 @@ fn elementwise_bitcast(v: i32) -> bool {
     return true;
 }
 
-fn q_constant_range(v: i32, signed: bool, q: SQ) -> CR { kb_cxt = q.cxt; return compute_constant_range(v, signed, true, 0); }
+fn q_constant_range(v: i32, signed: bool, q: SQ) -> CRange { kb_cxt = q.cxt; return compute_constant_range(v, signed, true, 0); }
 
 // getUnsignedMonotonicValues (Depth limit 1): values collected into the given array
 recursive fn unsigned_monotonic_values(res: i32[>..<]&, v: i32, greater: bool, q: SQ, depth0: i64) {
@@ -1722,8 +1692,8 @@ recursive fn simplify_icmp_with_binop_on_lhs(p: i64, lbo: i32, r: i32, q: SQ, mr
         if res == 1 { return get_true(ity); }
     }
     var shr_or_div = false;
-    if is_op(lbo, OP_LSHR) && op(lbo, 0) == r { let c = m_apint(op(lbo, 1)); if c >= 0 && ci_val(c) != 0 { shr_or_div = true; } }
-    if !shr_or_div && is_op(lbo, OP_UDIV) && op(lbo, 0) == r { let c = m_apint(op(lbo, 1)); if c >= 0 && ci_val(c) != 1 { shr_or_div = true; } }
+    if is_op(lbo, OP_LSHR) && op(lbo, 0) == r { let c = m_apint(op(lbo, 1)); if c >= 0 && !ap_is_zero(ci_ap(c)) { shr_or_div = true; } }
+    if !shr_or_div && is_op(lbo, OP_UDIV) && op(lbo, 0) == r { let c = m_apint(op(lbo, 1)); if c >= 0 && !ap_is_one(ci_ap(c)) { shr_or_div = true; } }
     if shr_or_div {
         if q_nonzero(r, q) {
             if p == P_EQ || p == P_UGE || p == P_UGT { return get_false(ity); }
@@ -1735,26 +1705,22 @@ recursive fn simplify_icmp_with_binop_on_lhs(p: i64, lbo: i32, r: i32, q: SQ, mr
     if is_op(lbo, OP_UDIV) && is_op(a0, OP_MUL) && op(a0, 0) == r {
         let c1 = m_apint(op(a0, 1));
         let c2 = m_apint(op(lbo, 1));
-        if c1 >= 0 && c2 >= 0 && ci_val(c1) <= ci_val(c2) { mdiv = true; }
+        if c1 >= 0 && c2 >= 0 && ap_ule(ci_ap(c1), ci_ap(c2)) { mdiv = true; }
     }
     if !mdiv && is_op(lbo, OP_LSHR) && is_op(a0, OP_MUL) && op(a0, 0) == r {
         let c1 = m_apint(op(a0, 1));
         let c2 = m_apint(op(lbo, 1));
         if c1 >= 0 && c2 >= 0 {
-            let w = ci_w(c2);
-            let sh = ci_val(c2);
-            let pw = if sh >= w as u64 { 0 } else { ((1 as u64) << sh) & wmask64(w) };
-            if ci_val(c1) <= pw { mdiv = true; }
+            let pw = ap_shl_ap(ap_u64(1, ci_w(c2)), ci_ap(c2));
+            if ap_ule(ci_ap(c1), pw) { mdiv = true; }
         }
     }
     if !mdiv && is_op(lbo, OP_UDIV) && is_op(a0, OP_SHL) && op(a0, 0) == r {
         let c1 = m_apint(op(a0, 1));
         let c2 = m_apint(op(lbo, 1));
         if c1 >= 0 && c2 >= 0 {
-            let w = ci_w(c1);
-            let sh = ci_val(c1);
-            let pw = if sh >= w as u64 { 0 } else { ((1 as u64) << sh) & wmask64(w) };
-            if pw <= ci_val(c2) { mdiv = true; }
+            let pw = ap_shl_ap(ap_u64(1, ci_w(c1)), ci_ap(c1));
+            if ap_ule(pw, ci_ap(c2)) { mdiv = true; }
         }
     }
     if mdiv {
@@ -1763,7 +1729,7 @@ recursive fn simplify_icmp_with_binop_on_lhs(p: i64, lbo: i32, r: i32, q: SQ, mr
     }
     if is_op(lbo, OP_SUB) && op(lbo, 1) == r {
         let c = m_apint_ap(op(lbo, 0), true);
-        if c >= 0 && (ci_val(c) & 1) == 1 && pred_is_equality(p) { return if p == P_EQ { get_false(ity) } else { get_true(ity) }; }
+        if c >= 0 && ap_get_bit(ci_ap(c), 0) && pred_is_equality(p) { return if p == P_EQ { get_false(ity) } else { get_true(ity) }; }
     }
     return -1;
 }
@@ -1782,10 +1748,9 @@ fn try_simplify_icmp_with_adds(p: i64, l0: i32, r0: i32) -> bool {
     if op(r, 0) != x { return false; }
     let c2 = m_apint(op(r, 1));
     if c2 < 0 { return false; }
-    let w = ci_w(c1);
-    let a = sext64(ci_val(c1), w);
-    let b = sext64(ci_val(c2), w);
-    return (a <= b && a >= 0) || (b <= a && a <= 0);
+    let a = ci_ap(c1);
+    let b = ci_ap(c2);
+    return (ap_sle(a, b) && !ap_is_neg(a)) || (ap_sle(b, a) && !ap_is_strictly_pos(a));
 }
 
 recursive fn simplify_icmp_with_binop(p0: i64, l: i32, r: i32, q: SQ, mr: i64) -> i32 {
@@ -1842,14 +1807,13 @@ recursive fn simplify_icmp_with_binop(p0: i64, l: i32, r: i32, q: SQ, mr: i64) -
         if n >= 0 && is_op(n, OP_ZEXT) {
             let c = m_apint(r);
             if c >= 0 {
-                let w = ci_w(c);
-                let cv = ci_val(c);
+                let cv = ci_ap(c);
                 let ty = get_compare_ty(r);
-                if cv != 0 && (cv & sbit64(w)) == 0 {
+                if ap_is_strictly_pos(cv) {
                     if p == P_SLT || p == P_NE { return get_true(ty); }
                     if p == P_SGE || p == P_EQ { return get_false(ty); }
                 }
-                if (cv & sbit64(w)) == 0 {
+                if !ap_is_neg(cv) {
                     if p == P_SLE { return get_true(ty); }
                     if p == P_SGT { return get_false(ty); }
                 }
@@ -1859,10 +1823,10 @@ recursive fn simplify_icmp_with_binop(p0: i64, l: i32, r: i32, q: SQ, mr: i64) -
     if is_op(l, OP_SHL) && m_power2(op(l, 0)) {
         let c = m_apint_ap(r, true);
         if c >= 0 {
-            let cv = ci_val(c);
-            let c_pow2 = cv != 0 && (cv & (cv - 1)) == 0;
+            let cv = ci_ap(c);
+            let c_pow2 = ap_is_pow2(cv);
             if !c_pow2 {
-                if op_nsw(l) || op_nuw(l) || m_one(op(l, 0)) || cv != 0 {
+                if op_nsw(l) || op_nuw(l) || m_one(op(l, 0)) || !ap_is_zero(cv) {
                     if p == P_EQ { return get_false(get_compare_ty(r)); }
                     if p == P_NE { return get_true(get_compare_ty(r)); }
                 }
@@ -1887,14 +1851,13 @@ recursive fn simplify_icmp_with_binop(p0: i64, l: i32, r: i32, q: SQ, mr: i64) -
             var c1 = m_apint(op(l, 1));
             var c2 = m_apint(op(r, 1));
             if pred_relational(p) && c1 >= 0 && c2 >= 0 {
-                fn subset(x: i32, y: i32) -> bool { (ci_val(x) & ~ci_val(y)) == 0 }
+                fn subset(x: i32, y: i32) -> bool { ap_is_subset_of(ci_ap(x), ci_ap(y)) }
                 if !subset(c1, c2) { let t = c1; c1 = c2; c2 = t; p = pred_swapped(p); }
                 if subset(c1, c2) {
                     let ty = get_compare_ty(l);
                     if p == P_ULE { return get_true(ty); }
                     if p == P_UGT { return get_false(ty); }
-                    let w = ci_w(c1);
-                    if ((ci_val(c1) & sbit64(w)) == 0) == ((ci_val(c2) & sbit64(w)) == 0) {
+                    if ap_is_neg(ci_ap(c1)) == ap_is_neg(ci_ap(c2)) {
                         if p == P_SLE { return get_true(ty); }
                         if p == P_SGT { return get_false(ty); }
                     }
@@ -2052,19 +2015,7 @@ fn get_range_of(v: i32) -> bool {
     return false;
 }
 // getConstantRangeFromMetadata
-fn range_md_cr(md: i32) -> CR {
-    let n = mds[md].nops as i64 / 2;
-    let lo0 = mds[md_op(md, 0)].extra;
-    let w = ci_w(lo0);
-    if w > 64 { pm_wide(); }
-    var cr = cr_new(cint_lo(lo0), cint_lo(mds[md_op(md, 1)].extra), w);
-    for i in 1..n {
-        let lo = mds[md_op(md, 2 * i)].extra;
-        let hi = mds[md_op(md, 2 * i + 1)].extra;
-        cr = cr_union(cr, cr_new(cint_lo(lo), cint_lo(hi), w));
-    }
-    return cr;
-}
+fn range_md_cr(md: i32) -> CRange { rg_from_range_md(md) }
 
 // p0 is a CmpPredicate: predicate | samesign << 8 (implied.goose cp()).
 recursive fn simplify_icmp(p0: i64, l0: i32, r0: i32, q: SQ, mr: i64) -> i32 {
@@ -2091,8 +2042,8 @@ recursive fn simplify_icmp(p0: i64, l0: i32, r0: i32, q: SQ, mr: i64) -> i32 {
         let rcr = vt_cr;
         if get_range_of(l) {
             let lcr = vt_cr;
-            if cr_icmp(p, lcr, rcr) { return get_true(ity); }
-            if cr_icmp(pred_inverse(p), lcr, rcr) { return get_false(ity); }
+            if rg_icmp(p, lcr, rcr) { return get_true(ity); }
+            if rg_icmp(pred_inverse(p), lcr, rcr) { return get_false(ity); }
         }
     }
     if is_inst(l) && is_cast_op(iop(l)) && (is_constant(r) || (is_inst(r) && is_cast_op(iop(r)))) {
@@ -2435,8 +2386,8 @@ recursive fn simplify_with_ops_replaced(v: i32, pmk: i64, np: i64, q: SQ, allow_
                 let w = ty_scalar_bits(vals[i].ty);
                 let ident = minmax_identity(id, w);
                 var res: i32 = -1;
-                if m_specific_int(n0, ident) { res = n1; }
-                else if m_specific_int(n1, ident) { res = n0; }
+                if m_specific_int_apv(n0, ident) { res = n1; }
+                else if m_specific_int_apv(n1, ident) { res = n0; }
                 if res >= 0 {
                     if has_poison_generating_annotations(i) { is_ops.resize(mark); return -1; }
                     is_ops.resize(mark);
@@ -2471,19 +2422,13 @@ recursive fn simplify_with_ops_replaced(v: i32, pmk: i64, np: i64, q: SQ, allow_
 }
 
 // MinMaxIntrinsic::getIdentity
-fn minmax_identity(id: i32, w: i64) -> u64 {
-    if id == IID_umax { return 0; }
-    if id == IID_umin { return wmask64(w); }
-    if id == IID_smax { return sbit64(w); }
-    return sbit64(w) - 1;
+fn minmax_identity(id: i32, w: i64) -> AP {
+    if id == IID_umax { return ap_zero(w); }
+    if id == IID_umin { return ap_ones(w); }
+    if id == IID_smax { return ap_smin_val(w); }
+    return ap_smax_val(w);
 }
 // MinMaxIntrinsic::getSaturationPoint
-fn minmax_saturation(id: i32, w: i64) -> u64 {
-    if id == IID_umax { return wmask64(w); }
-    if id == IID_umin { return 0; }
-    if id == IID_smax { return sbit64(w) - 1; }
-    return sbit64(w);
-}
 fn minmax_saturation_ap(id: i32, w: i64) -> AP {
     if id == IID_umax { return ap_ones(w); }
     if id == IID_umin { return ap_zero(w); }
@@ -2508,7 +2453,7 @@ fn inverse_minmax_iid(id: i32) -> i32 {
 // Constant::isNotMinSignedValue
 recursive fn is_not_min_signed_value(c: i32) -> bool {
     let k = vals[c].kind;
-    if k == VK_CINT && !ty_is_vector(vals[c].ty) { return ci_val(c) != sbit64(ci_w(c)); }
+    if k == VK_CINT && !ty_is_vector(vals[c].ty) { return !ap_is_min_signed(ci_ap(c)); }
     if ty_kind(vals[c].ty) == TK_FVEC && (k == VK_CDVECTOR || k == VK_CVECTOR) {
         for i in ty_count(vals[c].ty) {
             let e = agg_elem(c, i);
@@ -2542,27 +2487,26 @@ fn simplify_with_op_replaced_api(v: i32, from: i32, to: i32, cxt: i32, allow_ref
 // ---------------------------------------------------------------------------------------------
 // Select
 
-fn simplify_select_bit_test(t: i32, f: i32, x: i32, yv: u64, yw: i64, true_when_unset: bool) -> i32 {
-    let m = wmask64(yw);
+fn simplify_select_bit_test(t: i32, f: i32, x: i32, y: AP, true_when_unset: bool) -> i32 {
     if f == x && is_op(t, OP_AND) && op(t, 0) == x {
         let c = m_apint(op(t, 1));
-        if c >= 0 && yv == (~ci_val(c) & m) { return if true_when_unset { f } else { t }; }
+        if c >= 0 && ap_eq(y, ap_not(ci_ap(c))) { return if true_when_unset { f } else { t }; }
     }
     if t == x && is_op(f, OP_AND) && op(f, 0) == x {
         let c = m_apint(op(f, 1));
-        if c >= 0 && yv == (~ci_val(c) & m) { return if true_when_unset { f } else { t }; }
+        if c >= 0 && ap_eq(y, ap_not(ci_ap(c))) { return if true_when_unset { f } else { t }; }
     }
-    if yv != 0 && (yv & (yv - 1)) == 0 {
+    if ap_is_pow2(y) {
         if f == x && is_op(t, OP_OR) && op(t, 0) == x {
             let c = m_apint(op(t, 1));
-            if c >= 0 && yv == ci_val(c) {
+            if c >= 0 && ap_eq(y, ci_ap(c)) {
                 if true_when_unset && op_disjoint(t) { return -1; }
                 return if true_when_unset { t } else { f };
             }
         }
         if t == x && is_op(f, OP_OR) && op(f, 0) == x {
             let c = m_apint(op(f, 1));
-            if c >= 0 && yv == ci_val(c) {
+            if c >= 0 && ap_eq(y, ci_ap(c)) {
                 if !true_when_unset && op_disjoint(f) { return -1; }
                 return if true_when_unset { t } else { f };
             }
@@ -2619,8 +2563,7 @@ fn simplify_cmp_sel_of_maxmin(cl0: i32, cr0: i32, p0: i64, tv0: i32, fv0: i32) -
 // decomposeBitTest (CmpInstAnalysis.cpp, LookThroughTrunc = true, AllowNonZeroC = false,
 // DecomposeAnd = false): returns true with dbt_x / dbt_mask / dbt_pred
 var dbt_x: i32 = -1;
-var dbt_mask: u64 = 0;
-var dbt_w: i64 = 0;
+var dbt_mask: AP = AP { lo: 0, w: 1, ix: -1 };
 var dbt_pred: i64 = 0;
 fn decompose_bit_test(cond: i32) -> bool {
     if is_inst_op(cond, OP_ICMP) {
@@ -2637,8 +2580,7 @@ fn decompose_bit_test(cond: i32) -> bool {
         }
         if x >= 0 {
             dbt_x = x;
-            dbt_w = ty_scalar_bits(vals[x].ty);
-            dbt_mask = 1;
+            dbt_mask = ap_u64(1, ty_scalar_bits(vals[x].ty));
             dbt_pred = if is_inst_op(cond, OP_TRUNC) { P_NE } else { P_EQ };
             return true;
         }
@@ -2652,43 +2594,38 @@ fn decompose_bit_test_icmp(lhs: i32, rhs: i32, p0: i64) -> bool {
     let oc = m_apint_ap(rhs, true);
     if oc < 0 { return false; }
     let w = ci_w(oc);
-    let m = wmask64(w);
     var inverted = false;
     if p == P_UGT || p == P_SGT || p == P_UGE || p == P_SGE { inverted = true; p = pred_inverse(p); }
-    var c = ci_val(oc);
+    var c = ci_ap(oc);
     if p == P_ULE || p == P_SLE {
-        if (if pred_is_signed(p) { c == sbit64(w) - 1 } else { c == m }) { return false; }
-        c = (c + 1) & m;
+        if (if pred_is_signed(p) { ap_is_max_signed(c) } else { ap_is_all_ones(c) }) { return false; }
+        c = ap_inc(c);
         p = pred_strict(p);
     }
-    var mask: u64 = 0;
-    var rc: u64 = 0;
+    var mask = ap_zero(w);
+    var rc = ap_zero(w);
     var rp: i64 = 0;
-    fn ispow2(x: u64) -> bool { x != 0 && (x & (x - 1)) == 0 }
     if p == P_SLT {
-        if c == 0 { mask = sbit64(w); rc = 0; rp = P_NE; }
+        if ap_is_zero(c) { mask = ap_smin_val(w); rp = P_NE; }
         else {
-            let fs = c ^ sbit64(w);
-            let negfs = ((0 as u64) - fs) & m;
-            if ispow2(fs) { mask = negfs; rc = sbit64(w); rp = P_EQ; }
-            else if (fs & sbit64(w)) != 0 && ispow2(negfs) { mask = fs; rc = c; rp = P_NE; }
+            let fs = ap_xor(c, ap_smin_val(w));
+            if ap_is_pow2(fs) { mask = ap_neg(fs); rc = ap_smin_val(w); rp = P_EQ; }
+            else if ap_is_neg_pow2(fs) { mask = fs; rc = c; rp = P_NE; }
             else { return false; }
         }
     } else if p == P_ULT {
-        let negc = ((0 as u64) - c) & m;
-        if ispow2(c) { mask = negc; rc = 0; rp = P_EQ; }
-        else if (c & sbit64(w)) != 0 && ispow2(negc) { mask = c; rc = c; rp = P_NE; }
+        if ap_is_pow2(c) { mask = ap_neg(c); rp = P_EQ; }
+        else if ap_is_neg_pow2(c) { mask = c; rc = c; rp = P_NE; }
         else { return false; }
     } else { return false; }
-    if rc != 0 { return false; }
+    if !ap_is_zero(rc) { return false; }
     if inverted { rp = pred_inverse(rp); }
     if is_op(lhs, OP_TRUNC) {
         let x = op(lhs, 0);
         dbt_x = x;
-        dbt_w = ty_scalar_bits(vals[x].ty);
+        mask = ap_zext(mask, ty_scalar_bits(vals[x].ty));
     } else {
         dbt_x = lhs;
-        dbt_w = w;
     }
     dbt_mask = mask;
     dbt_pred = rp;
@@ -2697,7 +2634,7 @@ fn decompose_bit_test_icmp(lhs: i32, rhs: i32, p0: i64) -> bool {
 
 recursive fn simplify_select_with_bit_test(c: i32, t: i32, f: i32) -> i32 {
     if decompose_bit_test(c) {
-        return simplify_select_bit_test(t, f, dbt_x, dbt_mask, dbt_w, dbt_pred == P_EQ);
+        return simplify_select_bit_test(t, f, dbt_x, dbt_mask, dbt_pred == P_EQ);
     }
     return -1;
 }
@@ -2770,7 +2707,7 @@ recursive fn simplify_select_with_icmp_cond(c: i32, t0: i32, f0: i32, q: SQ, mr:
             let y = sp_rhs;
             if spf_is_minmax(spf) && p == spf_minmax_pred(spf) {
                 let lim = spf_limit(spf_inverse(spf), ty_scalar_bits(vals[x].ty));
-                if m_specific_int(y, lim) { return x; }
+                if m_specific_int_apv(y, lim) { return x; }
             }
         }
     }
@@ -2778,7 +2715,7 @@ recursive fn simplify_select_with_icmp_cond(c: i32, t0: i32, f0: i32, q: SQ, mr:
         if is_op(cl, OP_AND) {
             let y = m_apint(op(cl, 1));
             if y >= 0 {
-                v = simplify_select_bit_test(t, f, op(cl, 0), ci_val(y), ci_w(y), true);
+                v = simplify_select_bit_test(t, f, op(cl, 0), ci_ap(y), true);
                 if v >= 0 { return v; }
             }
         }
@@ -3722,7 +3659,7 @@ recursive fn simplify_unary_intrinsic(id: i32, a: i32, fmf: u8, q: SQ) -> i32 {
     if id == IID_ctpop {
         if q_pow2(a, false, q) { return c_int_ty(vals[a].ty, 1); }
         let w = ty_scalar_bits(vals[a].ty);
-        if q_masked_zero(a, high_bits(w, w - 1), q) { return a; }
+        if q_masked_zero(a, highb(w, w - 1), q) { return a; }
         return -1;
     }
     if id == IID_exp { if reassoc && m_intrinsic(a, IID_log) { return op(a, 0); } return -1; }
@@ -3847,8 +3784,8 @@ recursive fn simplify_binary_intrinsic(id: i32, rty: i32, a0: i32, b0: i32, fmf:
         if m_imm_constant(b) {
             let pk = q_kb(a, q);
             let cw = ty_scalar_bits(vals[b].ty);
-            let irr = pk.z & wmask64(cw);
-            let c = cf_fold_binop_operands(OP_OR, b, c_int_ty(vals[b].ty, irr));
+            let irr = ap_zext_or_trunc(pk.z, cw);
+            let c = cf_fold_binop_operands(OP_OR, b, c_int_ap(vals[b].ty, irr));
             if c >= 0 && is_all_ones_value(c) { return a; }
         }
         return -1;
@@ -3856,17 +3793,18 @@ recursive fn simplify_binary_intrinsic(id: i32, rty: i32, a0: i32, b0: i32, fmf:
     if id == IID_smax || id == IID_smin || id == IID_umax || id == IID_umin {
         if a == b { return a; }
         if m_imm_constant(a) { let t = a; a = b; b = t; }
-        if q_undef(q, b) { return c_int_ty(rty, minmax_saturation(id, bw)); }
+        if q_undef(q, b) { return c_int_ap(rty, minmax_saturation_ap(id, bw)); }
         let c = m_apint_ap(b, true);
         if c >= 0 {
-            if ci_val(c) == minmax_saturation(id, bw) { return c_int_ty(rty, ci_val(c)); }
-            if ci_val(c) == minmax_saturation(inverse_minmax_iid(id), bw) { return a; }
+            let cv = ci_ap(c);
+            if ap_eq(cv, minmax_saturation_ap(id, bw)) { return c_int_ap(rty, cv); }
+            if ap_eq(cv, minmax_saturation_ap(inverse_minmax_iid(id), bw)) { return a; }
             if inst_iid(a) == id {
                 let m00 = op(a, 0);
                 let m01 = op(a, 1);
                 var inner = m_apint(m00);
                 if inner < 0 { inner = m_apint(m01); }
-                if inner >= 0 && icmp_compare(ci_val(inner), ci_val(c), pred_nonstrict(minmax_pred(id)), bw) { return a; }
+                if inner >= 0 && ap_icmp(ci_ap(inner), cv, pred_nonstrict(minmax_pred(id))) { return a; }
             }
         }
         var v = fold_minmax_shared_op(id, a, b);
@@ -3883,7 +3821,7 @@ recursive fn simplify_binary_intrinsic(id: i32, rty: i32, a0: i32, b0: i32, fmf:
         let gt = if id == IID_scmp { P_SGT } else { P_UGT };
         if is_icmp_true(gt, a, b, q, RECURSION_LIMIT) { return c_int_ty(rty, 1); }
         let lt = if id == IID_scmp { P_SLT } else { P_ULT };
-        if is_icmp_true(lt, a, b, q, RECURSION_LIMIT) { return c_int_ty(rty, 0xFFFFFFFFFFFFFFFF); }
+        if is_icmp_true(lt, a, b, q, RECURSION_LIMIT) { return c_int_ty_s(rty, -1); }
         return -1;
     }
     if id == IID_usub_with_overflow || id == IID_ssub_with_overflow {
@@ -3927,7 +3865,7 @@ recursive fn simplify_binary_intrinsic(id: i32, rty: i32, a0: i32, b0: i32, fmf:
         let pw = m_constant_int(b);
         if pw >= 0 {
             if cint_is_zero(pw) { return c_fp_from_f64(vals[a].ty, 1.0); }
-            if ci_val(pw) == 1 { return a; }
+            if ap_is_one(ci_ap(pw)) { return a; }
         }
         return -1;
     }
@@ -3938,7 +3876,7 @@ recursive fn simplify_binary_intrinsic(id: i32, rty: i32, a0: i32, b0: i32, fmf:
         return -1;
     }
     if id == IID_is_fpclass {
-        let mask = ci_val(b);
+        let mask = ap_lo64(ci_ap(b));
         if (mask & FCL_ALL) == FCL_ALL { return c_bool_ty(rty, true); }
         if (mask & FCL_ALL) == 0 { return c_bool_ty(rty, false); }
         if q_undef(q, a) { return c_undef(rty); }
@@ -4027,12 +3965,13 @@ recursive fn simplify_intrinsic_args(id: i32, rty: i32, mark: i64, n: i64, fmf: 
         let shc = m_apint(sh);
         if shc >= 0 {
             let w = ci_w(shc);
-            let s = ci_val(shc) % (w as u64);
-            if s == 0 { return if id == IID_fshl { a } else { b }; }
+            let bwa = ap_u64(w as u64, w);
+            let s = ap_urem(ci_ap(shc), bwa);
+            if ap_is_zero(s) { return if id == IID_fshl { a } else { b }; }
             if is_op(a, OP_LSHR) && m_apint(op(a, 1)) >= 0 && is_op(b, OP_SHL) && op(b, 0) == op(a, 0) && m_apint(op(b, 1)) >= 0 {
-                let c1 = ci_val(m_apint(op(a, 1)));
-                let c2 = ci_val(m_apint(op(b, 1)));
-                if ((c1 + c2) & wmask64(w)) == (w as u64) && s == (if id == IID_fshl { c1 } else { c2 }) { return op(a, 0); }
+                let c1 = ci_ap(m_apint(op(a, 1)));
+                let c2 = ci_ap(m_apint(op(b, 1)));
+                if ap_eq(ap_add(c1, c2), bwa) && ap_eq(s, if id == IID_fshl { c1 } else { c2 }) { return op(a, 0); }
             }
         }
         if m_zero(a) && m_zero(b) { return c_null(rty); }
@@ -4049,10 +3988,10 @@ recursive fn simplify_intrinsic_args(id: i32, rty: i32, mark: i64, n: i64, fmf: 
         if m_zero(b) { return c_null(rty); }
         if q_undef(q, b) { return c_null(rty); }
         let w = ty_scalar_bits(rty);
-        let sc = ci_val(c);
+        let sc = ap_zext64(ci_ap(c));
         if sc < w as u64 {
-            let one = (1 as u64) << sc;
-            if (one & sbit64(w)) == 0 && m_specific_int(b, one) { return a; }
+            let one = ap_one_bit(w, sc as i64);
+            if !ap_is_neg(one) && m_specific_int_apv(b, one) { return a; }
         }
         return -1;
     }

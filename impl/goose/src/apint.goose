@@ -145,10 +145,15 @@ fn ap_low_bits(w: i64, n: i64) -> AP {
 fn ap_high_bits(w: i64, n: i64) -> AP { ap_not(ap_low_bits(w, w - n)) }
 // getBitsSetFrom(w, lo): bits [lo, w)
 fn ap_bits_from(w: i64, lo: i64) -> AP { ap_not(ap_low_bits(w, lo)) }
-// getBitsSet(w, lo, hi): bits [lo, hi); wraps (bits [lo, w) and [0, hi)) when lo > hi, like APInt::setBits
+// getBitsSet(w, lo, hi): bits [lo, hi) (no bits when lo >= hi)
 fn ap_bits_set(w: i64, lo: i64, hi: i64) -> AP {
-    if lo > hi { return ap_or(ap_low_bits(w, hi), ap_bits_from(w, lo)); }
+    if lo >= hi { return ap_zero(w); }
     return ap_and(ap_low_bits(w, hi), ap_bits_from(w, lo));
+}
+// getBitsSetWithWrap(w, lo, hi): bits [lo, w) and [0, hi) when lo > hi
+fn ap_bits_set_wrap(w: i64, lo: i64, hi: i64) -> AP {
+    if lo > hi { return ap_or(ap_low_bits(w, hi), ap_bits_from(w, lo)); }
+    return ap_bits_set(w, lo, hi);
 }
 // getSplat(w, v): v repeated to fill w bits
 fn ap_splat(w: i64, v: AP) -> AP {
@@ -173,6 +178,12 @@ fn ap_sext64(a: AP) -> i64 {
     let w = a.w as i64;
     if w >= 64 { return a.lo as! i64; }
     return ((a.lo << (64 - w)) as! i64) >> (64 - w);
+}
+// getSExtValue that fails loudly when the value doesn't fit (LLVM asserts)
+fn ap_sext64_checked(a: AP) -> i64 {
+    if ap_sig_bits(a) > 64 { fatal("APInt::getSExtValue: the value does not fit in 64 bits"); }
+    if (a.w as i64) > 64 { return a.lo as! i64; }
+    return ap_sext64(a);
 }
 // isIntN / isSignedIntN
 fn ap_is_int_n(a: AP, n: i64) -> bool { ap_active_bits(a) <= n }

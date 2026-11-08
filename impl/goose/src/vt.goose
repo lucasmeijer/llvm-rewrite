@@ -20,7 +20,8 @@ import datalayout;
 import domtree;
 import knownbits;
 import implied;
-import crange;
+import constrange;
+import apint;
 import pm;
 import constfold;
 import assume;
@@ -121,17 +122,15 @@ fn arg_attrs(a: i32) -> i32 {
     return alist_param(globs[glob_of(f)].attrs, args_no[vals[a].sub] as i64);
 }
 fn arg_has_attr(a: i32, k: i64) -> bool { aset_has(arg_attrs(a), k) }
-// a range attribute as a CR (only for widths <= 64); returns false if none
-var vt_cr: CR;
+// a range attribute as a ConstantRange (constrange.goose); returns false if none
+var vt_cr: CRange;
 fn range_attr_cr(s: i32) -> bool {
     let at = aset_find(s, AK_Range);
     if at < 0 { return false; }
     let wi = attrs[at].i1 as i64;
-    let bits = words[wi] as i64;
-    if bits > 64 { vt_not_ported("a range attribute wider than 64 bits"); }
     let lo = words[wi + 1] as i32;
     let hi = words[wi + 2] as i32;
-    vt_cr = cr_new(cint_lo(lo), cint_lo(hi), bits);
+    vt_cr = rg_new(ci_ap(lo), ci_ap(hi));
     return true;
 }
 // Argument::getRange
@@ -194,15 +193,14 @@ fn cmp_excludes_zero(p: i64, rhs: i32) -> bool {
     if p == P_NE { return m_zero(rhs); }
     let c = m_apint(rhs);
     if c >= 0 {
-        if ci_w(c) > 64 { pm_wide(); }
-        let tv = cr_exact_icmp(p, ci_val(c), ci_w(c));
-        return !cr_contains_val(tv, 0);
+        let tv = rg_exact_icmp(p, ci_ap(c));
+        return !rg_contains_ap(tv, ap_zero(ci_w(c)));
     }
     if vals[rhs].kind != VK_CDVECTOR { return false; }
     for i in nops(rhs) {
         let e = op(rhs, i);
-        let tv = cr_exact_icmp(p, ci_val(e), ci_w(e));
-        if cr_contains_val(tv, 0) { return false; }
+        let tv = rg_exact_icmp(p, ci_ap(e));
+        if rg_contains_ap(tv, ap_zero(ci_w(e))) { return false; }
     }
     return true;
 }
@@ -426,7 +424,7 @@ recursive fn ikz(v: i32, de: u64, depth0: i64) -> bool {
         if k != VK_CEXPR { return false; }
     }
     if k == VK_ARG && arg_range(v) {
-        if !cr_contains_val(vt_cr, 0) { return true; }
+        if !rg_contains_ap(vt_cr, ap_zero(rg_w(vt_cr))) { return true; }
     }
     if !is_constant(v) && nonzero_from_assume(v) { return true; }
     if depth >= VT_MAX_DEPTH { return false; }
@@ -471,7 +469,7 @@ fn strip_null_test(v: i32) -> i32 {
         if !is_op(a, OP_AND) || op(a, 0) != x { continue; }
         let c2 = m_apint(op(a, 1));
         if c2 < 0 || !m_low_bit_mask(op(a, 1)) { continue; }
-        if popcount(ci_val(c2)) == ci_val(c1) as i64 { return x; }
+        if ap_eq_u64(ci_ap(c1), ap_popcount(ci_ap(c2)) as u64) { return x; }
     }
     return -1;
 }
@@ -600,9 +598,9 @@ recursive fn is_non_zero_add(de: u64, w: i64, x: i32, y: i32, nsw: bool, nuw: bo
         if ikz(y, de, depth) || ikz(x, de, depth) { return true; }
     }
     if kb_is_neg(xk) && kb_is_neg(yk) {
-        let mask = sbit64(w) - 1;
-        if (xk.o & mask) != 0 { return true; }
-        if (yk.o & mask) != 0 { return true; }
+        let mask = ap_smax_val(w);
+        if ap_intersects(xk.o, mask) { return true; }
+        if ap_intersects(yk.o, mask) { return true; }
     }
     if kb_is_nonneg(xk) && is_known_pow2(y, false, depth) { return true; }
     if kb_is_nonneg(yk) && is_known_pow2(x, false, depth) { return true; }
@@ -618,34 +616,32 @@ recursive fn is_non_zero_sub(de: u64, w: i64, x: i32, y: i32, depth: i64) -> boo
 recursive fn is_non_zero_mul(de: u64, w: i64, x: i32, y: i32, nsw: bool, nuw: bool, depth: i64) -> bool {
     if nsw || nuw { return ikz(x, de, depth) && ikz(y, de, depth); }
     let xk = kb_compute(x, de, depth);
-    if (xk.o & 1) != 0 { return ikz(y, de, depth); }
+    if ap_get_bit(xk.o, 0) { return ikz(y, de, depth); }
     let yk = kb_compute(y, de, depth);
-    if (yk.o & 1) != 0 { return kb_is_nonzero(xk) || ikz(x, de, depth); }
+    if ap_get_bit(yk.o, 0) { return kb_is_nonzero(xk) || ikz(x, de, depth); }
     return kb_max_tz(xk) + kb_max_tz(yk) < w;
 }
 
-fn shift_op_val(o: i64, x: u64, s: i64, w: i64) -> u64 {
-    if s >= w { return 0; }
-    if o == OP_SHL { return (x << s) & wmask64(w); }
-    if o == OP_LSHR { return x >> s; }
-    return ((sext64(x, w) >> s) as! u64) & wmask64(w);
+fn shift_op_val(o: i64, x: AP, s: i64) -> AP {
+    if o == OP_SHL { return ap_shl(x, s); }
+    if o == OP_LSHR { return ap_lshr(x, s); }
+    return ap_ashr(x, s);
 }
-fn inv_shift_op_val(o: i64, x: u64, s: i64, w: i64) -> u64 {
-    if s >= w { return 0; }
-    if o == OP_SHL { return x >> s; }
-    return (x << s) & wmask64(w);
+fn inv_shift_op_val(o: i64, x: AP, s: i64) -> AP {
+    if o == OP_SHL { return ap_lshr(x, s); }
+    return ap_shl(x, s);
 }
 
 recursive fn is_non_zero_shift(i: i32, de: u64, kv: KB, depth: i64) -> bool {
     if kb_is_unknown(kv) { return false; }
     let kc = kb_compute(op(i, 1), de, depth);
     let maxs = kb_max(kc);
-    let nb = kv.w as i64;
-    if maxs >= nb as u64 { return false; }
+    let nb = kb_bw(kv);
+    if ap_uge_u64(maxs, nb as u64) { return false; }
     let o = opcode_of(i);
-    let ms = maxs as i64;
-    if shift_op_val(o, kv.o, ms, nb) != 0 { return true; }
-    if inv_shift_op_val(o, kv.z, nb - ms, nb) == inv_shift_op_val(o, wmask64(nb), nb - ms, nb) && ikz(op(i, 0), de, depth) { return true; }
+    let ms = ap_lo64(maxs) as i64;
+    if !ap_is_zero(shift_op_val(o, kv.o, ms)) { return true; }
+    if ap_eq(inv_shift_op_val(o, kv.z, nb - ms), inv_shift_op_val(o, ap_ones(nb), nb - ms)) && ikz(op(i, 0), de, depth) { return true; }
     return false;
 }
 
@@ -686,7 +682,7 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
     } else if o == OP_SHL {
         if op_nuw(i) || op_nsw(i) { return ikz(op(i, 0), de, depth); }
         let kn = kb_compute(op(i, 0), de, depth);
-        if (kn.o & 1) != 0 { return true; }
+        if ap_get_bit(kn.o, 0) { return true; }
         return is_non_zero_shift(i, de, kn, depth);
     } else if o == OP_LSHR || o == OP_ASHR {
         if op_exact(i) { return ikz(op(i, 0), de, depth); }
@@ -694,11 +690,12 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
         if kb_is_neg(kn) { return true; }
         let a0 = op(i, 0);
         let c = m_apint(op(i, 1));
-        if depth + 1 < VT_MAX_DEPTH && is_op(a0, OP_ADD) && op_nuw(a0) && c >= 0 && ci_val(c) < w as u64 {
+        if depth + 1 < VT_MAX_DEPTH && is_op(a0, OP_ADD) && op_nuw(a0) && c >= 0 && ap_ult_u64(ci_ap(c), w as u64) {
+            let sh = ap_lo64(ci_ap(c)) as i64;
             let ka = kb_compute(op(a0, 0), de, depth + 1);
-            if (ka.o >> ci_val(c)) != 0 { return true; }
+            if !ap_is_zero(ap_lshr(ka.o, sh)) { return true; }
             let kb2 = kb_compute(op(a0, 1), de, depth + 1);
-            if (kb2.o >> ci_val(c)) != 0 { return true; }
+            if !ap_is_zero(ap_lshr(kb2.o, sh)) { return true; }
         }
         return is_non_zero_shift(i, de, kn, depth);
     } else if o == OP_UDIV || o == OP_SDIV {
@@ -752,8 +749,8 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
         var dv = de;
         var skip = false;
         let n = ty_count(vals[i].ty);
-        if ci >= 0 && ci_val(ci) < n as u64 {
-            let ix = ci_val(ci) as i64;
+        if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) {
+            let ix = ap_lo64(ci_ap(ci)) as i64;
             dv &= ~((1 as u64) << ix);
             skip = ((de >> ix) & 1) == 0;
         }
@@ -765,7 +762,7 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
             if ty_kind(vals[vec].ty) == TK_FVEC {
                 let n = ty_count(vals[vec].ty);
                 var dv = wmask64(n);
-                if ci >= 0 && ci_val(ci) < n as u64 { dv = (1 as u64) << ci_val(ci); }
+                if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) { dv = (1 as u64) << ap_lo64(ci_ap(ci)); }
                 return ikz(vec, dv, depth);
             }
         }
@@ -784,7 +781,7 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
                (inst_get_md(i, md_kind_id("dereferenceable")) >= 0 && !null_pointer_is_defined(inst_func(i), ptr_as(vals[i].ty))) { return true; }
         } else {
             let rm = inst_get_md(i, md_kind_id("range"));
-            if rm >= 0 { return range_md_excludes(rm, 0); }
+            if rm >= 0 { return range_md_excludes_zero(rm); }
         }
         return false;
     } else if o == OP_EXTRACTVALUE {
@@ -803,8 +800,8 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
             if rp >= 0 { return is_known_non_zero(rp, depth); }
         } else {
             let rm = inst_get_md(i, md_kind_id("range"));
-            if rm >= 0 { return range_md_excludes(rm, 0); }
-            if call_range(i) { if !cr_contains_val(vt_cr, 0) { return true; } }
+            if rm >= 0 { return range_md_excludes_zero(rm); }
+            if call_range(i) { if !rg_contains_ap(vt_cr, ap_zero(rg_w(vt_cr))) { return true; } }
             let rv = returned_arg_operand(i);
             if rv >= 0 && vals[rv].ty == vals[i].ty && is_known_non_zero(rv, depth) { return true; }
         }
@@ -854,7 +851,7 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
                 return ikz(cb_arg(i, 0), de, depth) && ikz(cb_arg(i, 1), de, depth);
             }
             if id == IID_umin { return ikz(cb_arg(i, 0), de, depth) && ikz(cb_arg(i, 1), de, depth); }
-            if id == IID_cttz { return (kb_compute(cb_arg(i, 0), de, depth).z & 1) != 0; }
+            if id == IID_cttz { return ap_get_bit(kb_compute(cb_arg(i, 0), de, depth).z, 0); }
             if id == IID_ctlz { return kb_is_nonneg(kb_compute(cb_arg(i, 0), de, depth)); }
             if id == IID_fshr || id == IID_fshl {
                 if cb_arg(i, 0) == cb_arg(i, 1) { return ikz(cb_arg(i, 0), de, depth); }
@@ -871,38 +868,37 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
 
 recursive fn kb_nonzero_fallback(i: i32, de: u64, depth: i64) -> bool {
     let k = kb_compute(i, de, depth);
-    return k.o != 0;
+    return kb_is_nonzero(k);
 }
 
 // Hook to isGuaranteedNotToBePoison (poison.goose)
 recursive fn guaranteed_not_poison_hook(v: i32, depth: i64) -> bool { is_guaranteed_not_to_be_poison(v, kb_cxt, depth) }
 
-fn range_md_excludes(md: i32, x: u64) -> bool {
+// rangeMetadataExcludesValue(MD, 0)
+fn range_md_excludes_zero(md: i32) -> bool {
     let n = mds[md].nops as i64 / 2;
     for i in n {
         let lo = mds[md_op(md, 2 * i)].extra;
         let hi = mds[md_op(md, 2 * i + 1)].extra;
-        let w = ci_w(lo);
-        if w > 64 { pm_wide(); }
-        let r = cr_new(cint_lo(lo), cint_lo(hi), w);
-        if cr_contains_val(r, x) { return false; }
+        let r = rg_new(ci_ap(lo), ci_ap(hi));
+        if rg_contains_ap(r, ap_zero(ci_w(lo))) { return false; }
     }
     return true;
 }
 
 fn is_non_zero_recurrence() -> bool {
     let sc = m_apint(rec_start);
-    if sc < 0 || ci_val(sc) == 0 { return false; }
+    if sc < 0 || ap_is_zero(ci_ap(sc)) { return false; }
     let bo = rec_bo;
     let o = iop(bo);
     if o == OP_ADD {
         if op_nuw(bo) { return true; }
         let st = m_apint(rec_step);
-        return op_nsw(bo) && st >= 0 && ((ci_val(sc) & sbit64(ci_w(sc))) != 0) == ((ci_val(st) & sbit64(ci_w(st))) != 0);
+        return op_nsw(bo) && st >= 0 && ap_is_neg(ci_ap(sc)) == ap_is_neg(ci_ap(st));
     }
     if o == OP_MUL {
         let st = m_apint(rec_step);
-        return (op_nuw(bo) || op_nsw(bo)) && st >= 0 && ci_val(st) != 0;
+        return (op_nuw(bo) || op_nsw(bo)) && st >= 0 && !ap_is_zero(ci_ap(st));
     }
     if o == OP_SHL { return op_nuw(bo) || op_nsw(bo); }
     if o == OP_ASHR || o == OP_LSHR { return op_exact(bo); }
@@ -979,9 +975,9 @@ recursive fn is_known_pow2(v: i32, or_zero: bool, depth0: i64) -> bool {
             if m_c_binop_with(b, OP_AND, a) >= 0 && is_known_pow2(a, or_zero, depth) { return true; }
             let lk = kb_compute_all(a, depth);
             let rk = kb_compute_all(b, depth);
-            let nz = ~(lk.z & rk.z) & wmask64(lk.w as i64);
-            if nz != 0 && (nz & (nz - 1)) == 0 {
-                if or_zero || rk.o != 0 || lk.o != 0 { return true; }
+            let nz = ap_not(ap_and(lk.z, rk.z));
+            if ap_is_pow2(nz) {
+                if or_zero || kb_is_nonzero(rk) || kb_is_nonzero(lk) { return true; }
             }
         }
         if or_zero || op_nuw(v) {
@@ -1116,12 +1112,12 @@ recursive fn modifying_binop_of_nonzero(v1: i32, v2: i32, de: u64, depth: i64) -
 recursive fn non_equal_mul(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
     if !is_op(v2, OP_MUL) { return false; }
     let c = m_apint(op(v2, 1));
-    return op(v2, 0) == v1 && c >= 0 && (op_nuw(v2) || op_nsw(v2)) && ci_val(c) != 0 && ci_val(c) != 1 && ikz(v1, de, depth + 1);
+    return op(v2, 0) == v1 && c >= 0 && (op_nuw(v2) || op_nsw(v2)) && !ap_is_zero(ci_ap(c)) && !ap_is_one(ci_ap(c)) && ikz(v1, de, depth + 1);
 }
 recursive fn non_equal_shl(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
     if !is_op(v2, OP_SHL) { return false; }
     let c = m_apint(op(v2, 1));
-    return op(v2, 0) == v1 && c >= 0 && (op_nuw(v2) || op_nsw(v2)) && ci_val(c) != 0 && ikz(v1, de, depth + 1);
+    return op(v2, 0) == v1 && c >= 0 && (op_nuw(v2) || op_nsw(v2)) && !ap_is_zero(ci_ap(c)) && ikz(v1, de, depth + 1);
 }
 recursive fn non_equal_phis(p1: i32, p2: i32, de: u64, depth: i64) -> bool {
     if inst_parent(p1) != inst_parent(p2) { return false; }
@@ -1137,7 +1133,7 @@ recursive fn non_equal_phis(p1: i32, p2: i32, de: u64, depth: i64) -> bool {
         let iv2 = op(p2, j2);
         let c1 = m_apint(iv1);
         let c2 = m_apint(iv2);
-        if c1 >= 0 && c2 >= 0 && ci_val(c1) != ci_val(c2) { continue; }
+        if c1 >= 0 && c2 >= 0 && !ap_eq(ci_ap(c1), ci_ap(c2)) { continue; }
         if used_full { kb_cxt = save; return false; }
         kb_cxt = block_terminator(bb);
         if !ikne(iv1, iv2, de, depth + 1) { kb_cxt = save; return false; }
@@ -1191,7 +1187,7 @@ recursive fn ikne(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
         let k1 = kb_compute(v1, de, depth);
         if !kb_is_unknown(k1) {
             let k2 = kb_compute(v2, de, depth);
-            if (k1.z & k2.o) != 0 || (k2.z & k1.o) != 0 { return true; }
+            if ap_intersects(k1.z, k2.o) || ap_intersects(k2.z, k1.o) { return true; }
         }
     }
     if non_equal_select(v1, v2, de, depth) || non_equal_select(v2, v1, de, depth) { return true; }
@@ -1212,10 +1208,7 @@ recursive fn ikne(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
 // ---------------------------------------------------------------------------------------------
 // ComputeNumSignBits
 
-fn num_sign_bits_of(x: u64, w: i64) -> i64 {
-    if (x & sbit64(w)) != 0 { return clo_w(x, w); }
-    return clz_w(x, w);
-}
+fn num_sign_bits_of(x: AP) -> i64 { ap_num_sign_bits(x) }
 
 recursive fn num_sign_bits(v: i32, depth: i64) -> i64 { ncsb(v, all_elts_of(v), depth) }
 
@@ -1241,21 +1234,19 @@ recursive fn ncsb(v: i32, de: u64, depth: i64) -> i64 {
         } else if o == OP_SDIV {
             let d = m_apint(op(v, 1));
             if d >= 0 {
-                let dv = ci_val(d);
-                let dw = ci_w(d);
-                if dv != 0 && (dv & sbit64(dw)) == 0 {
+                let dv = ci_ap(d);
+                if ap_is_strictly_pos(dv) {
                     let nb = ncsb(op(v, 0), de, depth + 1);
-                    return min(tb, nb + (63 - clz(dv)));
+                    return min(tb, nb + ap_log2(dv));
                 }
             }
         } else if o == OP_SREM {
             var t = ncsb(op(v, 0), de, depth + 1);
             let d = m_apint(op(v, 1));
             if d >= 0 {
-                let dv = ci_val(d);
-                let dw = ci_w(d);
-                if dv != 0 && (dv & sbit64(dw)) == 0 {
-                    let cl = if dv == 1 { 0 } else { 64 - clz(dv - 1) };
+                let dv = ci_ap(d);
+                if ap_is_strictly_pos(dv) {
+                    let cl = ap_ceil_log2(dv);
                     t = max(t, tb - cl);
                 }
             }
@@ -1264,16 +1255,16 @@ recursive fn ncsb(v: i32, de: u64, depth: i64) -> i64 {
             var t = ncsb(op(v, 0), de, depth + 1);
             let sh = m_apint(op(v, 1));
             if sh >= 0 {
-                if ci_val(sh) >= tb as u64 { return ncsb_fallback(v, de, depth, first_answer, tb); }
-                t += ci_val(sh) as i64;
+                if ap_uge_u64(ci_ap(sh), tb as u64) { return ncsb_fallback(v, de, depth, first_answer, tb); }
+                t += ap_lo64(ci_ap(sh)) as i64;
                 if t > tb { t = tb; }
             }
             return t;
         } else if o == OP_SHL {
             let sh = m_apint(op(v, 1));
             if sh >= 0 {
-                if ci_val(sh) < tb as u64 {
-                    let s = ci_val(sh) as i64;
+                if ap_ult_u64(ci_ap(sh), tb as u64) {
+                    let s = ap_lo64(ci_ap(sh)) as i64;
                     var t: i64 = 0;
                     let a0 = op(v, 0);
                     if is_op(a0, OP_ZEXT) && s >= tb - ty_scalar_bits(vals[op(a0, 0)].ty) {
@@ -1305,7 +1296,7 @@ recursive fn ncsb(v: i32, de: u64, depth: i64) -> i64 {
                 let r = op(v, 1);
                 if is_constant(r) && is_all_ones_value(r) {
                     let kn = kb_compute(op(v, 0), de, depth + 1);
-                    if (kn.z | 1) == wmask64(tb) { return tb; }
+                    if ap_is_all_ones(ap_set_bit(kn.z, 0)) { return tb; }
                     if kb_is_nonneg(kn) { return t; }
                 }
                 if !done {
@@ -1320,7 +1311,7 @@ recursive fn ncsb(v: i32, de: u64, depth: i64) -> i64 {
                 var negdone = false;
                 if is_constant(l) && is_null_value(l) {
                     let kn = kb_compute(op(v, 1), de, depth + 1);
-                    if (kn.z | 1) == wmask64(tb) { return tb; }
+                    if ap_is_all_ones(ap_set_bit(kn.z, 0)) { return tb; }
                     if kb_is_nonneg(kn) { return t2; }
                 }
                 let t = ncsb(op(v, 0), de, depth + 1);
@@ -1387,7 +1378,7 @@ recursive fn ncsb_fallback(v: i32, de: u64, depth: i64, first_answer: i64, tb: i
             if ((de >> i) & 1) == 0 { continue; }
             let e = agg_elem(v, i);
             if e < 0 || vals[e].kind != VK_CINT { ok = false; break; }
-            minb = min(minb, num_sign_bits_of(ci_val(e), tb));
+            minb = min(minb, num_sign_bits_of(ci_ap(e)));
         }
         if ok && minb != 0 { return minb; }
     }
@@ -1395,12 +1386,7 @@ recursive fn ncsb_fallback(v: i32, de: u64, depth: i64, first_answer: i64, tb: i
     return max(first_answer, kb_min_sign_bits(k));
 }
 
-fn kb_min_sign_bits(k: KB) -> i64 {
-    let w = k.w as i64;
-    if kb_is_nonneg(k) { return kb_min_lz(k); }
-    if kb_is_neg(k) { return kb_min_lo(k); }
-    return 1;
-}
+fn kb_min_sign_bits(k: KB) -> i64 { kb_min_sign_bits_k(k) }
 
 // isSignedMinMaxClamp (select form): select (icmp slt/sgt ...) patterns
 fn is_signed_minmax_clamp_select(v: i32) -> bool {
@@ -1418,9 +1404,9 @@ fn is_signed_minmax_intrinsic_clamp(v: i32) -> bool {
 }
 
 // MaskedValueIsZero(V, Mask)
-fn masked_value_is_zero(v: i32, mask: u64, depth: i64) -> bool {
+fn masked_value_is_zero(v: i32, mask: AP, depth: i64) -> bool {
     let k = kb_compute_all(v, depth);
-    return (mask & k.z) == mask;
+    return ap_is_subset_of(mask, k.z);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1444,11 +1430,11 @@ fn spf_minmax_pred(f: i64) -> i64 {
 }
 fn spf_inverse(f: i64) -> i64 { match f { 1 => SPF_SMAX, 3 => SPF_SMIN, 2 => SPF_UMAX, 4 => SPF_UMIN, 5 => SPF_FMAXNUM, 6 => SPF_FMINNUM, _ => f } }
 // getMinMaxLimit
-fn spf_limit(f: i64, w: i64) -> u64 {
-    if f == SPF_UMAX { return wmask64(w); }
-    if f == SPF_UMIN { return 0; }
-    if f == SPF_SMAX { return sbit64(w) - 1; }
-    return sbit64(w);
+fn spf_limit(f: i64, w: i64) -> AP {
+    if f == SPF_UMAX { return ap_ones(w); }
+    if f == SPF_UMIN { return ap_zero(w); }
+    if f == SPF_SMAX { return ap_smax_val(w); }
+    return ap_smin_val(w);
 }
 
 // matchSelectPattern(V, LHS, RHS, CastOp = nullptr, Depth)
@@ -1511,7 +1497,7 @@ fn not_value_of(v: i32) -> i32 {
     let x = m_not(v);
     if x >= 0 { return x; }
     let c = m_apint(v);
-    if c >= 0 { return c_int_ty(vals[v].ty, ~ci_val(c)); }
+    if c >= 0 { return c_int_ap(vals[v].ty, ap_not(ci_ap(c))); }
     return -1;
 }
 
@@ -1526,21 +1512,20 @@ recursive fn match_minmax_int(p: i64, cl: i32, cr: i32, tv: i32, fv: i32, depth:
         if cr != t { pp = pred_swapped(pp); let x = t; t = f; f = x; }
         let c1 = m_apint(cr);
         if cr == t && c1 >= 0 {
-            let w = ci_w(c1);
-            let v1 = ci_val(c1);
+            let v1 = ci_ap(c1);
             fn mm_c2(f: i32, kind: i64, x: i32) -> i32 {
                 if !m_minmax(f, kind) { return -1; }
                 if mm_a != x { return -1; }
                 return m_apint(mm_b);
             }
             let c2a = mm_c2(f, 1, cl);
-            if c2a >= 0 && sext64(v1, w) < sext64(ci_val(c2a), w) && pp == P_SLT { return SPF_SMAX; }
+            if c2a >= 0 && ap_slt(v1, ci_ap(c2a)) && pp == P_SLT { return SPF_SMAX; }
             let c2b = mm_c2(f, 0, cl);
-            if c2b >= 0 && sext64(v1, w) > sext64(ci_val(c2b), w) && pp == P_SGT { return SPF_SMIN; }
+            if c2b >= 0 && ap_sgt(v1, ci_ap(c2b)) && pp == P_SGT { return SPF_SMIN; }
             let c2c = mm_c2(f, 3, cl);
-            if c2c >= 0 && v1 < ci_val(c2c) && pp == P_ULT { return SPF_UMAX; }
+            if c2c >= 0 && ap_ult(v1, ci_ap(c2c)) && pp == P_ULT { return SPF_UMAX; }
             let c2d = mm_c2(f, 2, cl);
-            if c2d >= 0 && v1 > ci_val(c2d) && pp == P_UGT { return SPF_UMIN; }
+            if c2d >= 0 && ap_ugt(v1, ci_ap(c2d)) && pp == P_UGT { return SPF_UMIN; }
         }
     }
     // matchMinMaxOfMinMax
@@ -1594,9 +1579,10 @@ recursive fn match_minmax_int(p: i64, cl: i32, cr: i32, tv: i32, fv: i32, depth:
     if cl == tv { c2 = m_apint(fv); }
     if c2 < 0 && cl == fv { c2 = m_apint(tv); }
     if c2 >= 0 && (cl == tv || cl == fv) {
-        let w = ci_w(c1);
-        if p == P_SLT && ci_val(c1) == 0 && ci_val(c2) == sbit64(w) - 1 { return if cl == tv { SPF_UMAX } else { SPF_UMIN }; }
-        if p == P_SGT && ci_val(c1) == wmask64(w) && ci_val(c2) == sbit64(w) { return if cl == fv { SPF_UMAX } else { SPF_UMIN }; }
+        let a1 = ci_ap(c1);
+        let a2 = ci_ap(c2);
+        if p == P_SLT && ap_is_zero(a1) && ap_is_max_signed(a2) { return if cl == tv { SPF_UMAX } else { SPF_UMIN }; }
+        if p == P_SGT && ap_is_all_ones(a1) && ap_is_min_signed(a2) { return if cl == fv { SPF_UMAX } else { SPF_UMIN }; }
     }
     return SPF_UNKNOWN;
 }
@@ -1605,331 +1591,294 @@ recursive fn match_minmax_int(p: i64, cl: i32, cr: i32, tv: i32, fv: i32, depth:
 // computeConstantRange
 
 // Constant::toConstantRange
-fn const_to_range(c: i32) -> CR {
-    let w = ty_scalar_bits(vals[c].ty);
-    if w > 64 { vt_not_ported("constant ranges wider than 64 bits"); }
-    if vals[c].kind == VK_CINT { return cr_single(cint_lo(c), w); }
-    if !ty_is_vector(vals[c].ty) { return cr_full(w); }
-    let s = splat_value(c, true);
-    if s >= 0 && vals[s].kind == VK_CINT { return cr_single(cint_lo(s), w); }
-    let k = vals[c].kind;
-    if k == VK_CDVECTOR || k == VK_CVECTOR {
-        var r = cr_empty(w);
-        for i in nops(c) {
-            let e = op(c, i);
-            if vals[e].kind == VK_POISON { continue; }
-            if vals[e].kind != VK_CINT { return cr_full(w); }
-            r = cr_union(r, cr_single(cint_lo(e), w));
-        }
-        return r;
-    }
-    return cr_full(w);
-}
+fn const_to_range(c: i32) -> CRange { rg_of_const(c) }
 
 // setLimitsForBinOp: returns (lower, upper) of a range (getNonEmpty)
-fn limits_for_binop(bo: i32, w: i64, prefer_signed: bool) -> u64, u64 {
-    var lower: u64 = 0;
-    var upper: u64 = 0;
-    let m = wmask64(w);
-    let smin = sbit64(w);
-    let smax = sbit64(w) - 1;
+fn limits_for_binop(bo: i32, w: i64, prefer_signed: bool) -> AP, AP {
+    var lower = ap_zero(w);
+    var upper = ap_zero(w);
+    let smin = ap_smin_val(w);
+    let smax = ap_smax_val(w);
     let o = iop(bo);
     if o == OP_SUB {
         let c = m_apint(op(bo, 0));
         if c >= 0 {
-            let cv = ci_val(c);
+            let cv = ci_ap(c);
             let nsw = op_nsw(bo);
             var nuw = op_nuw(bo);
             if prefer_signed && nsw && nuw { nuw = false; }
-            if nuw { upper = (cv + 1) & m; }
+            if nuw { upper = ap_inc(cv); }
             else if nsw {
-                if (cv & smin) != 0 { lower = smin; upper = (cv - smax) & m; }
-                else { lower = (cv - smax) & m; upper = smin; }
+                if ap_is_neg(cv) { lower = smin; upper = ap_sub(cv, smax); }
+                else { lower = ap_sub(cv, smax); upper = smin; }
             }
         }
     } else if o == OP_ADD {
         let c = m_apint(op(bo, 1));
-        if c >= 0 && ci_val(c) != 0 {
-            let cv = ci_val(c);
+        if c >= 0 && !ap_is_zero(ci_ap(c)) {
+            let cv = ci_ap(c);
             let nsw = op_nsw(bo);
             var nuw = op_nuw(bo);
             if prefer_signed && nsw && nuw { nuw = false; }
             if nuw { lower = cv; }
             else if nsw {
-                if (cv & smin) != 0 { lower = smin; upper = (smax + cv + 1) & m; }
-                else { lower = (smin + cv) & m; upper = (smax + 1) & m; }
+                if ap_is_neg(cv) { lower = smin; upper = ap_inc(ap_add(smax, cv)); }
+                else { lower = ap_add(smin, cv); upper = ap_inc(smax); }
             }
         }
     } else if o == OP_AND {
         let c = m_apint(op(bo, 1));
-        if c >= 0 { upper = (ci_val(c) + 1) & m; }
-        if m_neg(op(bo, 0)) == op(bo, 1) || m_neg(op(bo, 1)) == op(bo, 0) { upper = (smin + 1) & m; }
+        if c >= 0 { upper = ap_inc(ci_ap(c)); }
+        if m_neg(op(bo, 0)) == op(bo, 1) || m_neg(op(bo, 1)) == op(bo, 0) { upper = ap_inc(smin); }
     } else if o == OP_OR {
         let c = m_apint(op(bo, 1));
-        if c >= 0 { lower = ci_val(c); }
+        if c >= 0 { lower = ci_ap(c); }
     } else if o == OP_ASHR {
         let c = m_apint(op(bo, 1));
-        if c >= 0 && ci_val(c) < w as u64 {
-            let s = ci_val(c) as i64;
-            lower = ((sext64(smin, w) >> s) as! u64) & m;
-            upper = ((smax >> s) + 1) & m;
+        if c >= 0 && ap_ult_u64(ci_ap(c), w as u64) {
+            let s = ap_lo64(ci_ap(c)) as i64;
+            lower = ap_ashr(smin, s);
+            upper = ap_inc(ap_ashr(smax, s));
         } else {
             let c0 = m_apint(op(bo, 0));
             if c0 >= 0 {
-                let cv = ci_val(c0);
+                let cv = ci_ap(c0);
                 var sa = w - 1;
-                if cv != 0 && op_exact(bo) { sa = ctz_w(cv, w); }
-                if (cv & smin) != 0 { lower = cv; upper = (((sext64(cv, w) >> sa) as! u64) + 1) & m; }
-                else { lower = ((sext64(cv, w) >> sa) as! u64) & m; upper = (cv + 1) & m; }
+                if !ap_is_zero(cv) && op_exact(bo) { sa = ap_countr_zero(cv); }
+                if ap_is_neg(cv) { lower = cv; upper = ap_inc(ap_ashr(cv, sa)); }
+                else { lower = ap_ashr(cv, sa); upper = ap_inc(cv); }
             }
         }
     } else if o == OP_LSHR {
         let c = m_apint(op(bo, 1));
-        if c >= 0 && ci_val(c) < w as u64 {
-            upper = ((m >> ci_val(c)) + 1) & m;
+        if c >= 0 && ap_ult_u64(ci_ap(c), w as u64) {
+            upper = ap_inc(ap_lshr(ap_ones(w), ap_lo64(ci_ap(c)) as i64));
         } else {
             let c0 = m_apint(op(bo, 0));
             if c0 >= 0 {
-                let cv = ci_val(c0);
+                let cv = ci_ap(c0);
                 var sa = w - 1;
-                if cv != 0 && op_exact(bo) { sa = ctz_w(cv, w); }
-                lower = cv >> sa;
-                upper = (cv + 1) & m;
+                if !ap_is_zero(cv) && op_exact(bo) { sa = ap_countr_zero(cv); }
+                lower = ap_lshr(cv, sa);
+                upper = ap_inc(cv);
             }
         }
     } else if o == OP_SHL {
         let c0 = m_apint(op(bo, 0));
         if c0 >= 0 {
-            let cv = ci_val(c0);
+            let cv = ci_ap(c0);
             if op_nuw(bo) {
                 lower = cv;
-                let lz = clz_w(cv, w);
-                upper = (if lz >= w { 0 } else { (cv << lz) & m }) + 1;
-                upper &= m;
+                upper = ap_inc(ap_shl(cv, ap_countl_zero(cv)));
             } else if op_nsw(bo) {
-                if (cv & smin) != 0 {
-                    let s = clo_w(cv, w) - 1;
-                    lower = (cv << s) & m;
-                    upper = (cv + 1) & m;
+                if ap_is_neg(cv) {
+                    lower = ap_shl(cv, ap_countl_one(cv) - 1);
+                    upper = ap_inc(cv);
                 } else {
-                    let s = clz_w(cv, w) - 1;
                     lower = cv;
-                    upper = (((cv << s) & m) + 1) & m;
+                    upper = ap_inc(ap_shl(cv, ap_countl_zero(cv) - 1));
                 }
             } else {
-                if (cv & 1) != 0 { lower = 1; }
-                upper = (high_bits(w, popcount(cv)) + 1) & m;
+                if ap_get_bit(cv, 0) { lower = ap_u64(1, w); }
+                upper = ap_inc(highb(w, ap_popcount(cv)));
             }
         } else {
             let c = m_apint(op(bo, 1));
-            if c >= 0 && ci_val(c) < w as u64 {
-                upper = ((m & ~low_bits(ci_val(c) as i64)) + 1) & m;
+            if c >= 0 && ap_ult_u64(ci_ap(c), w as u64) {
+                upper = ap_inc(ap_bits_from(w, ap_lo64(ci_ap(c)) as i64));
             }
         }
     } else if o == OP_SDIV {
         let c = m_apint(op(bo, 1));
         if c >= 0 {
-            let cv = ci_val(c);
-            if cv == m {
-                lower = (smin + 1) & m;
-                upper = (smax + 1) & m;
-            } else if clz_w(cv, w) < w - 1 {
-                let d = sext64(cv, w);
-                var l = sdiv_w(smin, cv, w);
-                var u = sdiv_w(smax, cv, w);
-                if sext64(l, w) > sext64(u, w) { let t = l; l = u; u = t; }
+            let cv = ci_ap(c);
+            if ap_is_all_ones(cv) {
+                lower = ap_inc(smin);
+                upper = ap_inc(smax);
+            } else if ap_countl_zero(cv) < w - 1 {
+                var l = ap_sdiv(smin, cv);
+                var u = ap_sdiv(smax, cv);
+                if ap_sgt(l, u) { let t = l; l = u; u = t; }
                 lower = l;
-                upper = (u + 1) & m;
+                upper = ap_inc(u);
             }
         } else {
             let c0 = m_apint(op(bo, 0));
             if c0 >= 0 {
-                let cv = ci_val(c0);
-                if cv == smin { lower = cv; upper = ((cv >> 1) + 1) & m; }
+                let cv = ci_ap(c0);
+                if ap_is_min_signed(cv) { lower = cv; upper = ap_inc(ap_lshr(cv, 1)); }
                 else {
-                    let s = sext64(cv, w);
-                    let ab = (if s < 0 { (0 as u64) - cv } else { cv }) & m;
-                    upper = (ab + 1) & m;
-                    lower = (((0 as u64) - upper) + 1) & m;
+                    upper = ap_inc(ap_abs(cv));
+                    lower = ap_inc(ap_neg(upper));
                 }
             }
         }
     } else if o == OP_UDIV {
         let c = m_apint(op(bo, 1));
-        if c >= 0 && ci_val(c) != 0 { upper = (m / ci_val(c) + 1) & m; }
+        if c >= 0 && !ap_is_zero(ci_ap(c)) { upper = ap_inc(ap_udiv(ap_ones(w), ci_ap(c))); }
         else {
             let c0 = m_apint(op(bo, 0));
-            if c0 >= 0 { upper = (ci_val(c0) + 1) & m; }
+            if c0 >= 0 { upper = ap_inc(ci_ap(c0)); }
         }
     } else if o == OP_SREM {
         let c = m_apint(op(bo, 1));
         if c >= 0 {
-            let cv = ci_val(c);
-            let s = sext64(cv, w);
-            upper = (if s < 0 { (0 as u64) - cv } else { cv }) & m;
-            lower = (((0 as u64) - upper) + 1) & m;
+            upper = ap_abs(ci_ap(c));
+            lower = ap_inc(ap_neg(upper));
         } else {
             let c0 = m_apint(op(bo, 0));
             if c0 >= 0 {
-                let cv = ci_val(c0);
-                if (cv & smin) != 0 { upper = 1; lower = cv; }
-                else { upper = (cv + 1) & m; }
+                let cv = ci_ap(c0);
+                if ap_is_neg(cv) { upper = ap_u64(1, w); lower = cv; }
+                else { upper = ap_inc(cv); }
             }
         }
     } else if o == OP_UREM {
         let c = m_apint(op(bo, 1));
-        if c >= 0 { upper = ci_val(c); }
+        if c >= 0 { upper = ci_ap(c); }
         else {
             let c0 = m_apint(op(bo, 0));
-            if c0 >= 0 { upper = (ci_val(c0) + 1) & m; }
+            if c0 >= 0 { upper = ap_inc(ci_ap(c0)); }
         }
     }
     return lower, upper;
 }
-fn sdiv_w(a: u64, b: u64, w: i64) -> u64 {
-    let sa = sext64(a, w);
-    let sb = sext64(b, w);
-    if sb == -1 { return ((0 as u64) - a) & wmask64(w); }
-    var q = sa / sb;   // truncates
-    return (q as! u64) & wmask64(w);
-}
 
-fn range_for_intrinsic(ii: i32, w: i64) -> CR {
+fn range_for_intrinsic(ii: i32, w: i64) -> CRange {
     let id = inst_iid(ii);
-    let m = wmask64(w);
-    let smin = sbit64(w);
-    let smax = sbit64(w) - 1;
+    let z = ap_zero(w);
+    let smin = ap_smin_val(w);
+    let smax = ap_smax_val(w);
     if id == IID_ctlz || id == IID_cttz {
-        var up = w as u64;
-        if !m_one(op(ii, 1)) { up += 1; }
-        return cr_nonempty(0, up & m, w);
+        var up = ap_u64(w as u64, w);
+        if !m_one(op(ii, 1)) { up = ap_inc(up); }
+        return rg_nonempty(z, up);
     }
-    if id == IID_ctpop { return cr_nonempty(0, ((w + 1) as u64) & m, w); }
+    if id == IID_ctpop { return rg_nonempty(z, ap_inc(ap_u64(w as u64, w))); }
     var c = m_apint(op(ii, 0));
     if id == IID_uadd_sat {
         if c < 0 { c = m_apint(op(ii, 1)); }
-        if c >= 0 { return cr_nonempty(ci_val(c), 0, w); }
-        return cr_full(w);
+        if c >= 0 { return rg_nonempty(ci_ap(c), z); }
+        return rg_full(w);
     }
     if id == IID_sadd_sat {
         if c < 0 { c = m_apint(op(ii, 1)); }
         if c >= 0 {
-            let cv = ci_val(c);
-            if (cv & smin) != 0 { return cr_nonempty(smin, (smax + cv + 1) & m, w); }
-            return cr_nonempty((smin + cv) & m, (smax + 1) & m, w);
+            let cv = ci_ap(c);
+            if ap_is_neg(cv) { return rg_nonempty(smin, ap_inc(ap_add(smax, cv))); }
+            return rg_nonempty(ap_add(smin, cv), ap_inc(smax));
         }
-        return cr_full(w);
+        return rg_full(w);
     }
     if id == IID_usub_sat {
-        if c >= 0 { return cr_nonempty(0, (ci_val(c) + 1) & m, w); }
+        if c >= 0 { return rg_nonempty(z, ap_inc(ci_ap(c))); }
         let c1 = m_apint(op(ii, 1));
-        if c1 >= 0 { return cr_nonempty(0, (m - ci_val(c1) + 1) & m, w); }
-        return cr_full(w);
+        if c1 >= 0 { return rg_nonempty(z, ap_inc(ap_sub(ap_ones(w), ci_ap(c1)))); }
+        return rg_full(w);
     }
     if id == IID_ssub_sat {
         if c >= 0 {
-            let cv = ci_val(c);
-            if (cv & smin) != 0 { return cr_nonempty(smin, (cv - smin + 1) & m, w); }
-            return cr_nonempty((cv - smax) & m, (smax + 1) & m, w);
+            let cv = ci_ap(c);
+            if ap_is_neg(cv) { return rg_nonempty(smin, ap_inc(ap_sub(cv, smin))); }
+            return rg_nonempty(ap_sub(cv, smax), ap_inc(smax));
         }
         let c1 = m_apint(op(ii, 1));
         if c1 >= 0 {
-            let cv = ci_val(c1);
-            if (cv & smin) != 0 { return cr_nonempty((smin - cv) & m, (smax + 1) & m, w); }
-            return cr_nonempty(smin, (smax - cv + 1) & m, w);
+            let cv = ci_ap(c1);
+            if ap_is_neg(cv) { return rg_nonempty(ap_sub(smin, cv), ap_inc(smax)); }
+            return rg_nonempty(smin, ap_inc(ap_sub(smax, cv)));
         }
-        return cr_full(w);
+        return rg_full(w);
     }
     if id == IID_umin || id == IID_umax || id == IID_smin || id == IID_smax {
         if c < 0 { c = m_apint(op(ii, 1)); }
-        if c < 0 { return cr_full(w); }
-        let cv = ci_val(c);
-        if id == IID_umin { return cr_nonempty(0, (cv + 1) & m, w); }
-        if id == IID_umax { return cr_nonempty(cv, 0, w); }
-        if id == IID_smin { return cr_nonempty(smin, (cv + 1) & m, w); }
-        return cr_nonempty(cv, (smax + 1) & m, w);
+        if c < 0 { return rg_full(w); }
+        let cv = ci_ap(c);
+        if id == IID_umin { return rg_nonempty(z, ap_inc(cv)); }
+        if id == IID_umax { return rg_nonempty(cv, z); }
+        if id == IID_smin { return rg_nonempty(smin, ap_inc(cv)); }
+        return rg_nonempty(cv, ap_inc(smax));
     }
     if id == IID_abs {
-        if m_one(op(ii, 1)) { return cr_nonempty(0, (smax + 1) & m, w); }
-        return cr_nonempty(0, (smin + 1) & m, w);
+        if m_one(op(ii, 1)) { return rg_nonempty(z, ap_inc(smax)); }
+        return rg_nonempty(z, ap_inc(smin));
     }
     if id == IID_vscale { return vt_vscale_range(inst_func(ii), w); }
-    return cr_full(w);
+    return rg_full(w);
 }
 
 // getVScaleRange(F, BitWidth)
-fn vt_vscale_range(fv: i32, w: i64) -> CR {
+fn vt_vscale_range(fv: i32, w: i64) -> CRange {
     let a = aset_find(alist_fn(globs[glob_of(fv)].attrs), AK_VScaleRange);
-    if a < 0 { return cr_new(1, 0, w); }
+    if a < 0 { return rg_new(ap_u64(1, w), ap_zero(w)); }
     let mn = attrs[a].i1 >> 32;
     let mx = attrs[a].i1 & 0xFFFFFFFF;
     fn bitw(x: u64) -> i64 { if x == 0 { 0 } else { 64 - clz(x) } }
-    if bitw(mn) > w { return cr_empty(w); }
-    if mx == 0 || bitw(mx) > w { return cr_new(mn, 0, w); }
-    return cr_nonempty(mn, mx + 1, w);
+    if bitw(mn) > w { return rg_empty(w); }
+    if mx == 0 || bitw(mx) > w { return rg_new(ap_u64(mn, w), ap_zero(w)); }
+    return rg_nonempty(ap_u64(mn, w), ap_u64(mx + 1, w));
 }
 
-fn range_for_select_pattern(si: i32, w: i64) -> CR {
-    let m = wmask64(w);
-    let smin = sbit64(w);
-    let smax = sbit64(w) - 1;
+fn range_for_select_pattern(si: i32, w: i64) -> CRange {
+    let z = ap_zero(w);
+    let smin = ap_smin_val(w);
+    let smax = ap_smax_val(w);
     let f = match_select_pattern_v(si, 0);
     let l = sp_lhs;
     let r = sp_rhs;
-    if f == SPF_UNKNOWN { return cr_full(w); }
+    if f == SPF_UNKNOWN { return rg_full(w); }
     if f == SPF_ABS {
-        if m_neg(r) == l && l >= 0 && is_inst(r) && op_nsw(r) { return cr_nonempty(0, (smax + 1) & m, w); }
-        return cr_nonempty(0, (smin + 1) & m, w);
+        if m_neg(r) == l && l >= 0 && is_inst(r) && op_nsw(r) { return rg_nonempty(z, ap_inc(smax)); }
+        return rg_nonempty(z, ap_inc(smin));
     }
-    if f == SPF_NABS { return cr_nonempty(smin, 1, w); }
+    if f == SPF_NABS { return rg_nonempty(smin, ap_u64(1, w)); }
     var c = m_apint(l);
     if c < 0 { c = m_apint(r); }
-    if c < 0 { return cr_full(w); }
-    let cv = ci_val(c);
-    if f == SPF_UMIN { return cr_nonempty(0, (cv + 1) & m, w); }
-    if f == SPF_UMAX { return cr_nonempty(cv, 0, w); }
-    if f == SPF_SMIN { return cr_nonempty(smin, (cv + 1) & m, w); }
-    if f == SPF_SMAX { return cr_nonempty(cv, (smax + 1) & m, w); }
-    return cr_full(w);
+    if c < 0 { return rg_full(w); }
+    let cv = ci_ap(c);
+    if f == SPF_UMIN { return rg_nonempty(z, ap_inc(cv)); }
+    if f == SPF_UMAX { return rg_nonempty(cv, z); }
+    if f == SPF_SMIN { return rg_nonempty(smin, ap_inc(cv)); }
+    if f == SPF_SMAX { return rg_nonempty(cv, ap_inc(smax)); }
+    return rg_full(w);
 }
 
 // computeConstantRange(V, ForSigned, SQ, Depth); UseInstrInfo is always true
-recursive fn compute_constant_range(v: i32, for_signed: bool, use_info: bool, depth: i64) -> CR {
+recursive fn compute_constant_range(v: i32, for_signed: bool, use_info: bool, depth: i64) -> CRange {
     let w = ty_scalar_bits(vals[v].ty);
-    if w > 64 { vt_not_ported("constant ranges wider than 64 bits"); }
-    if depth == VT_MAX_DEPTH { return cr_full(w); }
+    if depth == VT_MAX_DEPTH { return rg_full(w); }
     if is_constant(v) { return const_to_range(v); }
-    var cr = cr_full(w);
+    var cr = rg_full(w);
     if is_inst(v) && is_binary_op(iop(v)) {
         let lo, hi = limits_for_binop(v, w, for_signed);
-        cr = cr_nonempty(lo, hi, w);
+        cr = rg_nonempty(lo, hi);
     } else if inst_iid(v) != 0 {
         cr = range_for_intrinsic(v, w);
     } else if is_inst_op(v, OP_SELECT) {
         let ct = compute_constant_range(op(v, 1), for_signed, use_info, depth + 1);
         let cf = compute_constant_range(op(v, 2), for_signed, use_info, depth + 1);
-        cr = cr_union(ct, cf);
-        cr = cr_intersect(cr, range_for_select_pattern(v, w));
+        cr = rg_union(ct, cf);
+        cr = rg_intersect(cr, range_for_select_pattern(v, w));
     } else if is_inst_op(v, OP_TRUNC) {
         let s = compute_constant_range(op(v, 0), for_signed, use_info, depth + 1);
-        cr = cr_truncate(s, w);
+        cr = rg_truncate(s, w);
     } else if is_inst_op(v, OP_FPTOUI) || is_inst_op(v, OP_FPTOSI) {
         let src_half = types[ty_scalar(vals[op(v, 0)].ty)].kind == TK_HALF;
-        var lo: u64 = 0;
-        var hi: u64 = 0;
+        var lo = ap_zero(w);
+        var hi = ap_zero(w);
         if src_half {
-            if iop(v) == OP_FPTOSI && w >= 17 { lo = ((0 - 65504) as! u64) & wmask64(w); hi = 65505; }
-            if iop(v) == OP_FPTOUI && w >= 16 { hi = 65505; }
+            if iop(v) == OP_FPTOSI && w >= 17 { lo = ap_i64(-65504, w); hi = ap_u64(65505, w); }
+            if iop(v) == OP_FPTOUI && w >= 16 { hi = ap_u64(65505, w); }
         }
-        cr = cr_nonempty(lo, hi, w);
+        cr = rg_nonempty(lo, hi);
     } else if is_arg(v) {
         if arg_range(v) { cr = vt_cr; }
     }
     if is_inst(v) {
         let md = inst_get_md(v, md_kind_id("range"));
-        if md >= 0 { cr = cr_intersect(cr, range_md_to_cr(md)); }
+        if md >= 0 { cr = rg_intersect(cr, rg_from_range_md(md)); }
         if is_callbase(v) {
-            if call_range(v) { cr = cr_intersect(cr, vt_cr); }
+            if call_range(v) { cr = rg_intersect(cr, vt_cr); }
         } else if iop(v) == OP_EXTRACTVALUE && inst_iid(op(v, 0)) == IID_frexp {
             vt_not_ported("computeConstantRange of frexp exponents");
         }
@@ -1937,17 +1886,7 @@ recursive fn compute_constant_range(v: i32, for_signed: bool, use_info: bool, de
     if kb_cxt >= 0 { cr = range_from_assumptions(v, cr, depth); }
     return cr;
 }
-fn range_md_to_cr(md: i32) -> CR {
-    let n = mds[md].nops as i64 / 2;
-    let lo0 = mds[md_op(md, 0)].extra;
-    let w = ci_w(lo0);
-    if w > 64 { pm_wide(); }
-    var cr = cr_new(cint_lo(lo0), cint_lo(mds[md_op(md, 1)].extra), w);
-    for i in 1..n {
-        cr = cr_union(cr, cr_new(cint_lo(mds[md_op(md, 2 * i)].extra), cint_lo(mds[md_op(md, 2 * i + 1)].extra), w));
-    }
-    return cr;
-}
+fn range_md_to_cr(md: i32) -> CRange { rg_from_range_md(md) }
 
 // getUnderlyingObjectAggressive
 fn get_underlying_object_aggressive(v: i32) -> i32 {

@@ -3,6 +3,8 @@
 // ICmpInst::isImpliedByMatchingCmp / CmpPredicate::getMatching (llvm/lib/IR/Instructions.cpp).
 // The fcmp path (isImpliedCondFCmps) lives in fpclass.goose next to ConstantFPRange.
 import std;
+import constrange;
+import apint;
 import ir;
 import irutil;
 import instinfo;
@@ -81,24 +83,18 @@ fn icmp_cp(c: i32) -> i64 { cp(insts[inst_of(c)].pred as i64, (insts[inst_of(c)]
 
 fn apint_of(v: i32) -> bool {
     let k = vals[v].kind;
-    if k == VK_CINT { return ty_bits(vals[v].ty) <= 64; }
+    if k == VK_CINT { return true; }
     if (k == VK_CDVECTOR || k == VK_CVECTOR) && nops(v) > 0 {
         let e = op(v, 0);
         if vals[e].kind != VK_CINT { return false; }
         for i in nops(v) { if op(v, i) != e { return false; } }
-        return ty_bits(vals[e].ty) <= 64;
+        return true;
     }
     return false;
 }
-fn apint_val(v: i32) -> u64 { if vals[v].kind == VK_CINT { cint_lo(v) } else { cint_lo(op(v, 0)) } }
+fn apint_val(v: i32) -> AP { if vals[v].kind == VK_CINT { ci_ap(v) } else { ci_ap(op(v, 0)) } }
 fn apint_w(v: i32) -> i64 { ty_bits(ty_scalar(vals[v].ty)) }
-fn apint_sext(v: i32) -> i64 {
-    let w = apint_w(v);
-    let x = apint_val(v);
-    if w >= 64 { return x as! i64; }
-    return ((x << (64 - w)) as! i64) >> (64 - w);
-}
-fn apint_is_neg(v: i32) -> bool { apint_sext(v) < 0 }
+fn apint_is_neg(v: i32) -> bool { ap_is_neg(apint_val(v)) }
 
 fn binop_is(v: i32, o: i64) -> bool { is_inst(v) && iop(v) == o }
 fn has_nsw(v: i32) -> bool { (insts[inst_of(v)].flags & FL_NSW) != 0 }
@@ -126,7 +122,7 @@ fn is_true_predicate(p: i64, l: i32, r: i32) -> bool {
         if is_minmax_of(r, IID_smax, l) { return true; }
         if is_minmax_of(l, IID_smin, r) { return true; }
         let x = addlike_base(l, true);
-        if x >= 0 && addlike_base(r, true) == x { return apint_sext(op(l, 1)) <= apint_sext(op(r, 1)); }
+        if x >= 0 && addlike_base(r, true) == x { return ap_sle(apint_val(op(l, 1)), apint_val(op(r, 1))); }
         return false;
     }
     if p == P_ULE {
@@ -134,11 +130,11 @@ fn is_true_predicate(p: i64, l: i32, r: i32) -> bool {
         if binop_is(r, OP_OR) && (op(r, 0) == l || op(r, 1) == l) { return true; }
         if is_minmax_of(r, IID_umax, l) { return true; }
         if binop_is(l, OP_LSHR) && op(l, 0) == r { return true; }
-        if binop_is(l, OP_UDIV) && op(l, 0) == r && apint_of(op(l, 1)) && apint_val(op(l, 1)) > 1 { return true; }
+        if binop_is(l, OP_UDIV) && op(l, 0) == r && apint_of(op(l, 1)) && ap_ugt_u64(apint_val(op(l, 1)), 1) { return true; }
         if binop_is(l, OP_AND) && (op(l, 0) == r || op(l, 1) == r) { return true; }
         if is_minmax_of(l, IID_umin, r) { return true; }
         let x = addlike_base(l, false);
-        if x >= 0 && addlike_base(r, false) == x { return apint_val(op(l, 1)) <= apint_val(op(r, 1)); }
+        if x >= 0 && addlike_base(r, false) == x { return ap_ule(apint_val(op(l, 1)), apint_val(op(r, 1))); }
         return false;
     }
     return false;
@@ -156,10 +152,10 @@ fn implied_cond_operands(p: i64, al: i32, ar: i32, bl: i32, br: i32) -> i64 {
 fn is_imm_constant(v: i32) -> bool { m_imm_constant(v) }
 
 // isImpliedCondCommonOperandWithCR
-fn implied_common_operand_with_cr(lp0: i64, lcr: CR, rp0: i64, rcr: CR) -> i64 {
-    fn cr_implies(c: CR, p: i64, rcr: CR) -> i64 {
-        if cr_icmp(p, c, rcr) { return 1; }
-        if cr_icmp(pred_inverse(p), c, rcr) { return 0; }
+fn implied_common_operand_with_cr(lp0: i64, lcr: CRange, rp0: i64, rcr: CRange) -> i64 {
+    fn cr_implies(c: CRange, p: i64, rcr: CRange) -> i64 {
+        if rg_icmp(p, c, rcr) { return 1; }
+        if rg_icmp(pred_inverse(p), c, rcr) { return 0; }
         return -1;
     }
     let r = cr_implies(cr_allowed_icmp_cp(cp_pred(lp0), cp_ss(lp0), lcr), cp_pred(rp0), rcr);
@@ -167,7 +163,7 @@ fn implied_common_operand_with_cr(lp0: i64, lcr: CR, rp0: i64, rcr: CR) -> i64 {
     if cp_ss(lp0) != cp_ss(rp0) {
         let lp = if cp_ss(lp0) { pred_flipped_signedness(cp_pred(lp0)) } else { cp_pred(lp0) };
         let rp = if cp_ss(rp0) { pred_flipped_signedness(cp_pred(rp0)) } else { cp_pred(rp0) };
-        return cr_implies(cr_allowed_icmp(lp, lcr), rp, rcr);
+        return cr_implies(rg_allowed_icmp(lp, lcr), rp, rcr);
     }
     return -1;
 }
@@ -205,16 +201,16 @@ fn implied_cond_icmps(lp0: i64, l00: i32, l10: i32, rp0: i64, r00: i32, r10: i32
     let r0_is_sub = binop_is(r0, OP_SUB) && has_nsw(r0) && op(r0, 0) == l0 && op(r0, 1) == l1;
     if (slp == P_SGT || slp == P_SGE) && r0_is_sub {
         // m_NonPositive: a constant (splat) <= 0
-        if apint_of(r1) && apint_sext(r1) <= 0 && implied_by_matching_cmp(slp, rp) == 0 { return 0; }
+        if apint_of(r1) && !ap_is_strictly_pos(apint_val(r1)) && implied_by_matching_cmp(slp, rp) == 0 { return 0; }
         if !apint_of(r1) && is_constant(r1) { fatal("isImpliedCondition: m_NonPositive of a non-splat constant is not ported"); }
     }
     if (slp == P_SLT || slp == P_SLE) && r0_is_sub {
-        if apint_of(r1) && apint_sext(r1) >= 0 && implied_by_matching_cmp(slp, rp) == 1 { return 1; }
+        if apint_of(r1) && !ap_is_neg(apint_val(r1)) && implied_by_matching_cmp(slp, rp) == 1 { return 1; }
         if !apint_of(r1) && is_constant(r1) { fatal("isImpliedCondition: m_NonNegative of a non-splat constant is not ported"); }
     }
     let lpp = cp_pred(lp);
     let rpp = cp_pred(rp);
-    if lpp == P_EQ && (rpp == P_EQ || rpp == P_NE) && apint_of(l1) && apint_val(l1) != 0 && binop_is(l0, OP_SUB) {
+    if lpp == P_EQ && (rpp == P_EQ || rpp == P_NE) && apint_of(l1) && !ap_is_zero(apint_val(l1)) && binop_is(l0, OP_SUB) {
         let a = op(l0, 0);
         let b = op(l0, 1);
         if (a == r0 && b == r1) || (a == r1 && b == r0) { return if rpp == P_NE { 1 } else { 0 }; }
@@ -232,7 +228,7 @@ fn implied_cond_icmps(lp0: i64, l00: i32, l10: i32, rp0: i64, r00: i32, r10: i32
 fn is_not_of(v: i32) -> i32 {
     // m_Not(X): xor X, -1 (either operand order: m_Not is m_c_Xor(X, AllOnes))
     if !binop_is(v, OP_XOR) { return -1; }
-    fn all_ones(x: i32) -> bool { apint_of(x) && apint_val(x) == (if apint_w(x) >= 64 { 0xFFFFFFFFFFFFFFFF } else { ((1 as u64) << apint_w(x)) - 1 }) }
+    fn all_ones(x: i32) -> bool { apint_of(x) && ap_is_all_ones(apint_val(x)) }
     if all_ones(op(v, 1)) { return op(v, 0); }
     if all_ones(op(v, 0)) { return op(v, 1); }
     return -1;

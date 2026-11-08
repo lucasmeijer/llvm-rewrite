@@ -2,8 +2,8 @@
 // analyses and InstSimplify use. Values are ids; a matcher is a predicate (bool) or returns the matched
 // operand / constant id (-1 = no match).
 //
-// Integer constant values are read as u64 with the scalar bit width (ci_val); a constant wider than 64 bits
-// that a pattern needs to inspect fails loudly (pm_wide).
+// Integer constant values are APInts (ci_ap, any width). ci_val reads a constant as u64 and fails loudly
+// (pm_wide) on a constant wider than 64 bits: use it only where LLVM itself takes getZExtValue().
 import std;
 import ir;
 import irutil;
@@ -159,23 +159,21 @@ let IP_NOT_MINSIGNED = 12;
 let IP_NEG_POWER2 = 13;
 
 fn int_pred(kind: i64, c: i32) -> bool {
-    let w = ci_w(c);
-    let x = ci_val(c);
-    let m = wmask64(w);
-    if kind == IP_ZERO { return x == 0; }
-    if kind == IP_ONE { return x == 1; }
-    if kind == IP_ALLONES { return x == m; }
-    if kind == IP_SIGNMASK { return x == sbit64(w); }
-    if kind == IP_NEGATIVE { return (x & sbit64(w)) != 0; }
-    if kind == IP_NONNEG { return (x & sbit64(w)) == 0; }
-    if kind == IP_POWER2 { return x != 0 && (x & (x - 1)) == 0; }
-    if kind == IP_POWER2_OR_ZERO { return (x & (x - 1)) == 0 || x == 0; }
-    if kind == IP_LOWBITMASK { return x != 0 && ((x + 1) & x) == 0; }
-    if kind == IP_STRICTLYPOS { return x != 0 && (x & sbit64(w)) == 0; }
-    if kind == IP_NONPOS { return x == 0 || (x & sbit64(w)) != 0; }
-    if kind == IP_MAXSIGNED { return x == (sbit64(w) - 1); }
-    if kind == IP_NOT_MINSIGNED { return x != sbit64(w); }
-    if kind == IP_NEG_POWER2 { let n = ((0 as u64) - x) & m; return (x & sbit64(w)) != 0 && (n & (n - 1)) == 0; }
+    let x = ci_ap(c);
+    if kind == IP_ZERO { return ap_is_zero(x); }
+    if kind == IP_ONE { return ap_is_one(x); }
+    if kind == IP_ALLONES { return ap_is_all_ones(x); }
+    if kind == IP_SIGNMASK { return ap_is_min_signed(x); }
+    if kind == IP_NEGATIVE { return ap_is_neg(x); }
+    if kind == IP_NONNEG { return !ap_is_neg(x); }
+    if kind == IP_POWER2 { return ap_is_pow2(x); }
+    if kind == IP_POWER2_OR_ZERO { return ap_is_zero(x) || ap_is_pow2(x); }
+    if kind == IP_LOWBITMASK { return ap_is_mask(x); }
+    if kind == IP_STRICTLYPOS { return ap_is_strictly_pos(x); }
+    if kind == IP_NONPOS { return !ap_is_strictly_pos(x); }
+    if kind == IP_MAXSIGNED { return ap_is_max_signed(x); }
+    if kind == IP_NOT_MINSIGNED { return !ap_is_min_signed(x); }
+    if kind == IP_NEG_POWER2 { return ap_is_neg_pow2(x); }
     fatal("internal: unknown int predicate");
     return false;
 }
@@ -222,13 +220,20 @@ fn m_specific_int(v: i32, x: u64) -> bool {
         // specific_intval also matches non-splat fixed vectors? No: it uses getSplatValue(AllowPoison=false).
         return false;
     }
-    return ci_val(c) == (x & wmask64(ci_w(c)));
+    // specific_intval64: CI->getValue() == Val (APInt == uint64_t: no truncation of Val)
+    return ap_eq_u64(ci_ap(c), x);
 }
 // m_SpecificIntAllowPoison
 fn m_specific_int_ap(v: i32, x: u64) -> bool {
     let c = m_apint_ap(v, true);
     if c < 0 { return false; }
-    return ci_val(c) == (x & wmask64(ci_w(c)));
+    return ap_eq_u64(ci_ap(c), x);
+}
+// m_SpecificInt(const APInt &): specific_intval, APInt::isSameValue
+fn m_specific_int_apv(v: i32, x: AP) -> bool {
+    let c = m_apint(v);
+    if c < 0 { return false; }
+    return ap_same_value_u(ci_ap(c), x);
 }
 
 // m_ConstantInt (scalar ConstantInt only, vector-typed ConstantInt excluded) -> id

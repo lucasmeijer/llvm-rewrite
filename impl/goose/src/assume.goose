@@ -9,6 +9,8 @@
 // in registration order: ac_val[k] is affected by assume ac_asm[k] through operand bundle ac_idx[k]
 // (-1 = the condition, LLVM's ExprResultIdx).
 import std;
+import constrange;
+import apint;
 import ir;
 import irutil;
 import calls;
@@ -225,7 +227,7 @@ fn valid_assume_for_context(inv: i32, cx: i32) -> bool {
 recursive fn kb_from_assumptions(v: i32, known0: KB, depth: i64) -> KB {
     var known = known0;
     if !ac_ready() { return known; }
-    let w = known.w as i64;
+    let w = kb_bw(known);
     let cx = kb_cxt;
     for k in ac_val.len {
         if ac_val[k] != v { continue; }
@@ -243,11 +245,12 @@ recursive fn kb_from_assumptions(v: i32, known0: KB, depth: i64) -> KB {
                     var offc: i32 = -2;
                     if n >= 3 { offc = m_constant_int(op(a, b + 2)); }
                     if ac >= 0 && offc != -1 {
-                        let al = ci_val(ac);
-                        let off = if offc >= 0 { ci_val(offc) } else { 0 };
+                        // the alignment and offset are getZExtValue()s of i64 operands
+                        let al = ap_zext64(ci_ap(ac));
+                        let off = if offc >= 0 { ap_zext64(ci_ap(offc)) } else { 0 };
                         if al != 0 && (al & (al - 1)) == 0 && valid_assume_for_context(a, cx) {
-                            known.z |= (al - 1) & ~off;
-                            known.o |= (al - 1) & off;
+                            known = kb_or_z(known, ap_u64((al - 1) & ~off, w));
+                            known = kb_or_o(known, ap_u64((al - 1) & off, w));
                         }
                     }
                 }
@@ -255,11 +258,11 @@ recursive fn kb_from_assumptions(v: i32, known0: KB, depth: i64) -> KB {
             continue;
         }
         let arg = cb_arg(a, 0);
-        if arg == v && valid_assume_for_context(a, cx) { return kb_const(wmask64(w), w); }
+        if arg == v && valid_assume_for_context(a, cx) { return kb_const_ap(ap_ones(w)); }
         if m_not(arg) == v && valid_assume_for_context(a, cx) { return kb_all_zero(w); }
         if is_inst_op(arg, OP_TRUNC) && op(arg, 0) == v && valid_assume_for_context(a, cx) {
             if op_nuw(arg) { return kb_const(1, w); }
-            known.o |= 1;
+            known.o = ap_set_bit(known.o, 0);
             return known;
         }
         if depth == MAX_ANALYSIS_DEPTH { continue; }
@@ -281,7 +284,7 @@ fn bundle_implies_nonnull(v: i32, fv: i32, a: i32, k: i64) -> bool {
     if tag == "dereferenceable" {
         if n < 2 { return false; }
         let c = m_constant_int(op(a, b + 1));
-        return c >= 0 && ci_val(c) != 0 && !null_pointer_is_defined(fv, ptr_as(vals[v].ty));
+        return c >= 0 && !ap_is_zero(ci_ap(c)) && !null_pointer_is_defined(fv, ptr_as(vals[v].ty));
     }
     return false;
 }
@@ -326,7 +329,7 @@ fn pow2_from_assume(v: i32, or_zero: bool) -> bool {
         let rc = m_apint(op(c, 1));
         if !m_intrinsic(l, IID_ctpop) || op(l, 0) != v || rc < 0 { continue; }
         let p = cmp_pred_of(c);
-        let ok = (or_zero && p == P_ULT && ci_val(rc) == 2) || (p == P_EQ && ci_val(rc) == 1);
+        let ok = (or_zero && p == P_ULT && ap_eq_u64(ci_ap(rc), 2)) || (p == P_EQ && ap_eq_u64(ci_ap(rc), 1));
         if ok && valid_assume_for_context(a, cx) { return true; }
     }
     return false;
@@ -346,7 +349,7 @@ fn nonequal_from_assume(v1: i32, v2: i32, depth: i64) -> bool {
 }
 
 // computeConstantRange: assumptions
-recursive fn range_from_assumptions(v: i32, cr0: CR, depth: i64) -> CR {
+recursive fn range_from_assumptions(v: i32, cr0: CRange, depth: i64) -> CRange {
     var cr = cr0;
     if !ac_ready() { return cr; }
     let cx = kb_cxt;
@@ -361,16 +364,16 @@ recursive fn range_from_assumptions(v: i32, cr0: CR, depth: i64) -> CR {
         kb_cxt = a;
         let rhs = compute_constant_range(op(c, 1), false, true, depth + 1);
         kb_cxt = save;
-        cr = cr_intersect(cr, cr_allowed_icmp_cp(inst_pred(c), has_flag(c, FL_SAMESIGN), rhs));
+        cr = rg_intersect(cr, cr_allowed_icmp_cp(inst_pred(c), has_flag(c, FL_SAMESIGN), rhs));
     }
     return cr;
 }
 // ConstantRange::makeAllowedICmpRegion(CmpPredicate, CR)
-fn cr_allowed_icmp_cp(p: i64, samesign: bool, c: CR) -> CR {
-    let r = cr_allowed_icmp(p, c);
+fn cr_allowed_icmp_cp(p: i64, samesign: bool, c: CRange) -> CRange {
+    let r = rg_allowed_icmp(p, c);
     if !samesign { return r; }
     // getPreferredSignedPredicate: the signed form of the predicate
-    return cr_intersect(r, cr_allowed_icmp(if pred_is_unsigned(p) { p + 4 } else { p }, c));
+    return rg_intersect(r, rg_allowed_icmp(if pred_is_unsigned(p) { p + 4 } else { p }, c));
 }
 
 // simplifyICmpWithDominatingAssume: 1/0 or -1

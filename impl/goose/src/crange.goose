@@ -3,6 +3,7 @@
 import std;
 import ir;
 import knownbits;
+import constrange;
 
 struct CR { lo: u64, hi: u64, w: i32 }
 
@@ -210,32 +211,8 @@ fn cr_is_all_negative(c: CR) -> bool {
 }
 fn cr_is_all_nonneg(c: CR) -> bool { !cr_is_sign_wrapped(c) && (c.lo & cr_sb(c.w as i64)) == 0 }
 
-// fromKnownBits
-fn cr_from_kb(k: KB, signed: bool) -> CR {
-    let w = k.w as i64;
-    if kb_has_conflict(k) { return cr_empty(w); }
-    if kb_is_unknown(k) { return cr_full(w); }
-    if !signed || kb_is_neg(k) || kb_is_nonneg(k) { return cr_new(kb_min(k), kb_max(k) + 1, w); }
-    let lo = kb_min(k) | cr_sb(w);
-    let hi = kb_max(k) & ~cr_sb(w);
-    return cr_new(lo, hi + 1, w);
-}
-// toKnownBits
-fn cr_to_kb(c: CR) -> KB {
-    let w = c.w as i64;
-    if cr_is_empty(c) { return kb_unknown(w); }
-    let mn = cr_umin(c);
-    let mx = cr_umax(c);
-    var k = kb_const(mn, w);
-    let d = mn ^ mx;
-    if d != 0 {
-        let bit = 63 - clz(d);
-        let keep = ~low_bits(bit + 1);
-        k.z &= keep;
-        k.o &= keep;
-    }
-    return k;
-}
+// fromKnownBits (through constrange.goose; fails loudly above 64 bits)
+fn cr_from_kb(k: KB, signed: bool) -> CR { rg_to_cr(rg_from_kb(k, signed)) }
 
 // add / sub (no wrap flags)
 fn cr_add(a: CR, b: CR) -> CR {

@@ -69,7 +69,7 @@ fn bdce_run(fv: i32) -> u32 {
                 if demanded != wmask(w) {
                     let mv = op(i, 1);
                     if match_apint(mv) {
-                        let mask = apint_value(mv);
+                        let mask = ap_lo64(apint_value(mv));
                         var can = false;
                         if o == OP_OR || o == OP_XOR { can = (demanded & mask) == 0; }
                         else if o == OP_AND { can = (demanded & ~mask) == 0; }

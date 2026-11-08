@@ -9,6 +9,7 @@ import calls;
 import instinfo;
 import flags;
 import knownbits;
+import apint;
 import gen_iids;
 
 var db_fn: i32 = -1;          // function the current results are for (-1: none)
@@ -28,9 +29,16 @@ fn shl_w(x: u64, s: i64, w: i64) -> u64 { if s >= w { 0 } else { (x << s) & wmas
 fn lshr_w(x: u64, s: i64, w: i64) -> u64 { if s >= w { 0 } else { (x & wmask(w)) >> s } }
 fn active_bits(x: u64) -> i64 { 64 - clz(x) }
 fn is_mask_w(x: u64) -> bool { x != 0 && (x & (x + 1)) == 0 }
+fn byte_swap_w(x: u64, w: i64) -> u64 { ap_lo64(ap_byte_swap(ap_u64(x, w))) }
+fn reverse_bits_w(x: u64, w: i64) -> u64 { ap_lo64(ap_reverse_bits(ap_u64(x, w))) }
+// the analysis works on u64 masks (widths <= 64): KnownBits words
+struct KB64 { z: u64, o: u64, w: i32 }
+fn kb64(k: KB) -> KB64 { KB64 { z: ap_lo64(k.z), o: ap_lo64(k.o), w: k.z.w } }
 
 // determineLiveOperandBitsAddCarry
-fn live_bits_add_carry(opno: i64, aout: u64, l: KB, r: KB, carry_zero: bool, carry_one: bool) -> u64 {
+fn live_bits_add_carry(opno: i64, aout: u64, l0: KB, r0: KB, carry_zero: bool, carry_one: bool) -> u64 {
+    let l = kb64(l0);
+    let r = kb64(r0);
     let w = l.w as i64;
     let m = wmask(w);
     let bound = (l.z & r.z) | (l.o & r.o);
@@ -96,7 +104,7 @@ fn determine_live_operand_bits(user: i32, val: i32, opno: i64, aout: u64, ab0: u
             } else {
                 let sa = op(user, 2);
                 if match_apint(sa) {
-                    var amt = (apint_value(sa) % (bw as u64)) as i64;
+                    var amt = ap_rot_amount(ap_zero(bw), apint_value(sa));
                     if id == IID_fshr { amt = bw - amt; }
                     if opno == 0 { ab = lshr_w(aout, amt, bw); }
                     else if opno == 1 { ab = shl_w(aout, bw - amt, bw); }
@@ -111,7 +119,7 @@ fn determine_live_operand_bits(user: i32, val: i32, opno: i64, aout: u64, ab0: u
         if is_mask_w(aout) { return aout; }
         compute(op(user, 0), op(user, 1));
         if o == OP_ADD { return live_bits_add_carry(opno, aout, kc.k1, kc.k2, true, false); }
-        let nr = KB { z: kc.k2.o, o: kc.k2.z, w: kc.k2.w };
+        let nr = kb_flip(kc.k2);
         return live_bits_add_carry(opno, aout, kc.k1, nr, false, true);
     }
     if o == OP_MUL { return low_bits(active_bits(aout)); }
@@ -150,9 +158,9 @@ fn determine_live_operand_bits(user: i32, val: i32, opno: i64, aout: u64, ab0: u
         ab = aout;
         compute(op(user, 0), op(user, 1));
         if o == OP_AND {
-            if opno == 0 { ab &= ~kc.k2.z; } else { ab &= ~(kc.k1.z & ~kc.k2.z); }
+            if opno == 0 { ab &= ~ap_lo64(kc.k2.z); } else { ab &= ~(ap_lo64(kc.k1.z) & ~ap_lo64(kc.k2.z)); }
         } else {
-            if opno == 0 { ab &= ~kc.k2.o; } else { ab &= ~(kc.k1.o & ~kc.k2.o); }
+            if opno == 0 { ab &= ~ap_lo64(kc.k2.o); } else { ab &= ~(ap_lo64(kc.k1.o) & ~ap_lo64(kc.k2.o)); }
         }
         return ab & m;
     }

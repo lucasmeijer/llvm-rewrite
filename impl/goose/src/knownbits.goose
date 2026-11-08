@@ -1,11 +1,11 @@
 // KnownBits (llvm/lib/Support/KnownBits.cpp) and computeKnownBits (llvm/lib/Analysis/ValueTracking.cpp),
-// for integers of at most 64 bits and fixed vectors of at most 64 elements.
+// for integers of any width (apint.goose) and fixed vectors of at most 64 elements.
 //
 // Coverage policy: every case of LLVM's computeKnownBits is either ported, or detected and reported with
 // fatal() ("not ported"), so a less precise answer can never silently produce different IR. Cases LLVM
-// itself answers with "unknown" (unlisted opcodes/intrinsics) are unknown here too. Not ported: integers
-// wider than 64 bits, bitcasts between vector shapes, vscale,
-// target intrinsics. Assumptions: assume.goose.
+// itself answers with "unknown" (unlisted opcodes/intrinsics) are unknown here too. Not ported: bitcasts
+// between vector shapes, vscale, target intrinsics, vectors of more than 64 elements (the demanded-elements
+// mask is a u64). Assumptions: assume.goose.
 import std;
 import ir;
 import irutil;
@@ -19,184 +19,176 @@ import datalayout;
 import pm;
 import vt;
 import poison;
-import crange;
+import constrange;
 import constfold;
 import cfold;
 import instsimplify;
 import assume;
 import fpclass;
 import apfloat;
+import apint;
 
 let MAX_ANALYSIS_DEPTH = 6;   // MaxAnalysisRecursionDepth
 
-struct KB { z: u64, o: u64, w: i32 }
+// KnownBits: Zero and One masks of the same width (an AP each: no memory for widths <= 64)
+struct KB { z: AP, o: AP }
 
-fn wmask(w: i64) -> u64 { if w >= 64 { 0xFFFFFFFFFFFFFFFF } else { ((1 as u64) << w) - 1 } }
+fn kb_bw(k: KB) -> i64 { k.z.w as i64 }
 fn sbit(w: i64) -> u64 { (1 as u64) << (w - 1) }
+fn wmask(w: i64) -> u64 { if w >= 64 { 0xFFFFFFFFFFFFFFFF } else { ((1 as u64) << w) - 1 } }
+fn sext_w(x: u64, w: i64) -> i64 { if w >= 64 { x as! i64 } else { ((x << (64 - w)) as! i64) >> (64 - w) } }
+// u64 helpers for quantities that are 64-bit by nature (offsets, demanded-element masks, index widths)
 fn low_bits(n: i64) -> u64 { if n <= 0 { 0 } else { wmask(n) } }
-// bits [lo, hi) set
 fn bits_range(lo: i64, hi: i64) -> u64 { if hi <= lo { 0 } else { low_bits(hi) & ~low_bits(lo) } }
 fn high_bits(w: i64, n: i64) -> u64 { if n <= 0 { 0 } else { bits_range(w - n, w) } }
-
-fn kb_unknown(w: i64) -> KB { KB { z: 0, o: 0, w: w as i32 } }
-fn kb_const(c: u64, w: i64) -> KB { let m = wmask(w); KB { z: ~c & m, o: c & m, w: w as i32 } }
-fn kb_all_zero(w: i64) -> KB { KB { z: wmask(w), o: 0, w: w as i32 } }
-fn kb_all_conflict(w: i64) -> KB { KB { z: wmask(w), o: wmask(w), w: w as i32 } }
-fn kb_is_unknown(k: KB) -> bool { k.z == 0 && k.o == 0 }
-fn kb_has_conflict(k: KB) -> bool { (k.z & k.o) != 0 }
-fn kb_is_constant(k: KB) -> bool { (k.z | k.o) == wmask(k.w as i64) && !kb_has_conflict(k) }
-fn kb_and(a: KB, b: KB) -> KB { KB { z: a.z | b.z, o: a.o & b.o, w: a.w } }
-fn kb_or(a: KB, b: KB) -> KB { KB { z: a.z & b.z, o: a.o | b.o, w: a.w } }
-fn kb_xor(a: KB, b: KB) -> KB { KB { z: (a.z & b.z) | (a.o & b.o), o: (a.z & b.o) | (a.o & b.z), w: a.w } }
-fn kb_intersect(a: KB, b: KB) -> KB { KB { z: a.z & b.z, o: a.o & b.o, w: a.w } }
-fn kb_union(a: KB, b: KB) -> KB { KB { z: a.z | b.z, o: a.o | b.o, w: a.w } }
-fn kb_max(k: KB) -> u64 { ~k.z & wmask(k.w as i64) }
-fn kb_min(k: KB) -> u64 { k.o }
-fn kb_is_nonneg(k: KB) -> bool { (k.z & sbit(k.w as i64)) != 0 }
-fn kb_is_neg(k: KB) -> bool { (k.o & sbit(k.w as i64)) != 0 }
-fn kb_is_nonzero(k: KB) -> bool { k.o != 0 }
-fn kb_make_nonneg(k: KB) -> KB { KB { z: k.z | sbit(k.w as i64), o: k.o, w: k.w } }
-fn kb_make_neg(k: KB) -> KB { KB { z: k.z, o: k.o | sbit(k.w as i64), w: k.w } }
-
-// countr_one / countl_one of a w-bit value
 fn ctz_w(x: u64, w: i64) -> i64 { let c = ctz(x); if c > w { w } else { c } }
 fn clz_w(x: u64, w: i64) -> i64 { let v = x & wmask(w); if v == 0 { w } else { clz(v) - (64 - w) } }
 fn cto_w(x: u64, w: i64) -> i64 { ctz_w(~x, w) }
 fn clo_w(x: u64, w: i64) -> i64 { clz_w(~x & wmask(w), w) }
+// masks of width w: low n bits, high n bits, bits [lo, hi) (APInt::setLowBits/setHighBits/setBits)
+fn lowb(w: i64, n: i64) -> AP { ap_low_bits(w, n) }
+fn highb(w: i64, n: i64) -> AP { if n <= 0 { ap_zero(w) } else { ap_high_bits(w, n) } }
+fn bitsr(w: i64, lo: i64, hi: i64) -> AP { ap_bits_set(w, lo, hi) }
+fn onebit(w: i64, k: i64) -> AP { ap_one_bit(w, k) }
+// Zero |= m / One |= m, and the &= ~m forms
+fn kb_or_z(k: KB, m: AP) -> KB { KB { z: ap_or(k.z, m), o: k.o } }
+fn kb_or_o(k: KB, m: AP) -> KB { KB { z: k.z, o: ap_or(k.o, m) } }
+fn kb_clr_z(k: KB, m: AP) -> KB { KB { z: ap_and(k.z, ap_not(m)), o: k.o } }
+fn kb_clr_o(k: KB, m: AP) -> KB { KB { z: k.z, o: ap_and(k.o, ap_not(m)) } }
 
-fn kb_min_tz(k: KB) -> i64 { cto_w(k.z, k.w as i64) }
-fn kb_max_tz(k: KB) -> i64 { ctz_w(k.o, k.w as i64) }
-fn kb_min_lz(k: KB) -> i64 { clo_w(k.z, k.w as i64) }
-fn kb_max_lz(k: KB) -> i64 { clz_w(k.o, k.w as i64) }
-fn kb_min_lo(k: KB) -> i64 { clo_w(k.o, k.w as i64) }
-fn kb_max_lo(k: KB) -> i64 { clz_w(k.z, k.w as i64) }
-fn kb_max_pop(k: KB) -> i64 { popcount(kb_max(k)) }
+fn kb_unknown(w: i64) -> KB { let z = ap_zero(w); KB { z: z, o: z } }
+fn kb_const_ap(c: AP) -> KB { KB { z: ap_not(c), o: c } }
+fn kb_const(c: u64, w: i64) -> KB { kb_const_ap(ap_u64(c, w)) }
+fn kb_all_zero(w: i64) -> KB { KB { z: ap_ones(w), o: ap_zero(w) } }
+fn kb_all_conflict(w: i64) -> KB { let m = ap_ones(w); KB { z: m, o: m } }
+fn kb_is_unknown(k: KB) -> bool { ap_is_zero(k.z) && ap_is_zero(k.o) }
+fn kb_has_conflict(k: KB) -> bool { ap_intersects(k.z, k.o) }
+fn kb_is_constant(k: KB) -> bool { ap_popcount(k.z) + ap_popcount(k.o) == kb_bw(k) && !kb_has_conflict(k) }
+fn kb_const_val(k: KB) -> AP { k.o }
+fn kb_and(a: KB, b: KB) -> KB { KB { z: ap_or(a.z, b.z), o: ap_and(a.o, b.o) } }
+fn kb_or(a: KB, b: KB) -> KB { KB { z: ap_and(a.z, b.z), o: ap_or(a.o, b.o) } }
+fn kb_xor(a: KB, b: KB) -> KB {
+    KB { z: ap_or(ap_and(a.z, b.z), ap_and(a.o, b.o)), o: ap_or(ap_and(a.z, b.o), ap_and(a.o, b.z)) }
+}
+fn kb_intersect(a: KB, b: KB) -> KB { KB { z: ap_and(a.z, b.z), o: ap_and(a.o, b.o) } }
+fn kb_union(a: KB, b: KB) -> KB { KB { z: ap_or(a.z, b.z), o: ap_or(a.o, b.o) } }
+fn kb_eq_kb(a: KB, b: KB) -> bool { ap_eq(a.z, b.z) && ap_eq(a.o, b.o) }
+fn kb_max(k: KB) -> AP { ap_not(k.z) }
+fn kb_min(k: KB) -> AP { k.o }
+fn kb_is_nonneg(k: KB) -> bool { ap_is_neg(k.z) }
+fn kb_is_neg(k: KB) -> bool { ap_is_neg(k.o) }
+fn kb_is_nonzero(k: KB) -> bool { !ap_is_zero(k.o) }
+fn kb_is_zero_known(k: KB) -> bool { ap_is_all_ones(k.z) }
+fn kb_make_nonneg(k: KB) -> KB { KB { z: ap_set_bit(k.z, kb_bw(k) - 1), o: k.o } }
+fn kb_make_neg(k: KB) -> KB { KB { z: k.z, o: ap_set_bit(k.o, kb_bw(k) - 1) } }
+fn kb_flip(k: KB) -> KB { KB { z: k.o, o: k.z } }
 
-// signed min/max values as w-bit patterns
-fn kb_smin(k: KB) -> u64 { let s = sbit(k.w as i64); if (k.z & s) != 0 { k.o } else { k.o | s } }
-fn kb_smax(k: KB) -> u64 { let s = sbit(k.w as i64); let mx = kb_max(k); if (k.o & s) != 0 { mx } else { mx & ~s } }
-fn sext_w(x: u64, w: i64) -> i64 { if w >= 64 { x as! i64 } else { ((x << (64 - w)) as! i64) >> (64 - w) } }
+fn kb_min_tz(k: KB) -> i64 { ap_countr_one(k.z) }
+fn kb_max_tz(k: KB) -> i64 { ap_countr_zero(k.o) }
+fn kb_min_lz(k: KB) -> i64 { ap_countl_one(k.z) }
+fn kb_max_lz(k: KB) -> i64 { ap_countl_zero(k.o) }
+fn kb_min_lo(k: KB) -> i64 { ap_countl_one(k.o) }
+fn kb_max_lo(k: KB) -> i64 { ap_countl_zero(k.z) }
+fn kb_min_pop(k: KB) -> i64 { ap_popcount(k.o) }
+fn kb_max_pop(k: KB) -> i64 { kb_bw(k) - ap_popcount(k.z) }
+// countMinSignBits
+fn kb_min_sign_bits_k(k: KB) -> i64 {
+    if kb_is_nonneg(k) { return kb_min_lz(k); }
+    if kb_is_neg(k) { return kb_min_lo(k); }
+    return 1;
+}
+// countMaxActiveBits / countMaxSignificantBits
+fn kb_max_active_bits(k: KB) -> i64 { kb_bw(k) - kb_min_lz(k) }
+fn kb_max_sig_bits(k: KB) -> i64 { kb_bw(k) - max(kb_min_lz(k), kb_min_lo(k)) + 1 }
 
-fn kb_trunc(k: KB, w: i64) -> KB { let m = wmask(w); KB { z: k.z & m, o: k.o & m, w: w as i32 } }
-fn kb_zext(k: KB, w: i64) -> KB { KB { z: k.z | bits_range(k.w as i64, w), o: k.o, w: w as i32 } }
-fn kb_anyext(k: KB, w: i64) -> KB { KB { z: k.z, o: k.o, w: w as i32 } }
-fn kb_zext_or_trunc(k: KB, w: i64) -> KB { if w > k.w as i64 { kb_zext(k, w) } else { kb_trunc(k, w) } }
-fn kb_anyext_or_trunc(k: KB, w: i64) -> KB { if w > k.w as i64 { kb_anyext(k, w) } else { kb_trunc(k, w) } }
-fn kb_sext(k: KB, w: i64) -> KB {
-    let ow = k.w as i64;
-    let ext = bits_range(ow, w);
-    var r = KB { z: k.z, o: k.o, w: w as i32 };
-    if (k.z & sbit(ow)) != 0 { r.z |= ext; }
-    if (k.o & sbit(ow)) != 0 { r.o |= ext; }
-    return r;
+// getSignedMinValue / getSignedMaxValue
+fn kb_smin(k: KB) -> AP {
+    let w = kb_bw(k);
+    if ap_is_neg(k.z) { return k.o; }
+    return ap_set_bit(k.o, w - 1);
+}
+fn kb_smax(k: KB) -> AP {
+    let w = kb_bw(k);
+    let mx = kb_max(k);
+    if ap_is_neg(k.o) { return mx; }
+    return ap_clear_bit(mx, w - 1);
 }
 
-fn byte_swap_w(x: u64, w: i64) -> u64 {
-    var r: u64 = 0;
-    for b in w / 8 { r |= ((x >> (8 * b)) & 0xFF) << (8 * (w / 8 - 1 - b)); }
-    return r;
+fn kb_trunc(k: KB, w: i64) -> KB { KB { z: ap_trunc(k.z, w), o: ap_trunc(k.o, w) } }
+fn kb_zext(k: KB, w: i64) -> KB {
+    let ow = kb_bw(k);
+    return KB { z: ap_or(ap_zext(k.z, w), bitsr(w, ow, w)), o: ap_zext(k.o, w) };
 }
-fn reverse_bits_w(x: u64, w: i64) -> u64 {
-    var r: u64 = 0;
-    for b in w { if ((x >> b) & 1) != 0 { r |= (1 as u64) << (w - 1 - b); } }
-    return r;
-}
+fn kb_anyext(k: KB, w: i64) -> KB { KB { z: ap_zext(k.z, w), o: ap_zext(k.o, w) } }
+fn kb_zext_or_trunc(k: KB, w: i64) -> KB { if w > kb_bw(k) { kb_zext(k, w) } else { kb_trunc(k, w) } }
+fn kb_anyext_or_trunc(k: KB, w: i64) -> KB { if w > kb_bw(k) { kb_anyext(k, w) } else { kb_trunc(k, w) } }
+fn kb_sext(k: KB, w: i64) -> KB { KB { z: ap_sext(k.z, w), o: ap_sext(k.o, w) } }
+fn kb_sext_or_trunc(k: KB, w: i64) -> KB { if w > kb_bw(k) { kb_sext(k, w) } else { kb_trunc(k, w) } }
+fn kb_byte_swap(k: KB) -> KB { KB { z: ap_byte_swap(k.z), o: ap_byte_swap(k.o) } }
+fn kb_reverse_bits(k: KB) -> KB { KB { z: ap_reverse_bits(k.z), o: ap_reverse_bits(k.o) } }
+// extractBits(n, lo)
+fn kb_extract_bits(k: KB, n: i64, lo: i64) -> KB { KB { z: ap_extract_bits(k.z, n, lo), o: ap_extract_bits(k.o, n, lo) } }
+// insertBits(sub, lo)
+fn kb_insert_bits(k: KB, sub: KB, lo: i64) -> KB { KB { z: ap_insert_bits(k.z, sub.z, lo), o: ap_insert_bits(k.o, sub.o, lo) } }
 
 // computeForAddCarry
 fn kb_add_carry(l: KB, r: KB, carry_zero: bool, carry_one: bool) -> KB {
-    let w = l.w as i64;
-    let m = wmask(w);
-    let psz = (kb_max(l) + kb_max(r) + (if carry_zero { 0 } else { 1 })) & m;
-    let pso = (kb_min(l) + kb_min(r) + (if carry_one { 1 } else { 0 })) & m;
-    let ckz = ~(psz ^ l.z ^ r.z) & m;
-    let cko = (pso ^ l.o ^ r.o) & m;
-    let known = (l.z | l.o) & (r.z | r.o) & (ckz | cko);
-    return KB { z: ~psz & known & m, o: pso & known, w: l.w };
-}
-
-fn uadd_sat_w(a: u64, b: u64, w: i64) -> u64 { let m = wmask(w); let s = (a + b) & m; if s < a { m } else { s } }
-fn usub_sat_w(a: u64, b: u64) -> u64 { if a < b { 0 } else { a - b } }
-fn sadd_sat_w(a: u64, b: u64, w: i64) -> u64 {
-    let x = sext_w(a, w);
-    let y = sext_w(b, w);
-    let mx = sext_w(sbit(w) - 1, w);
-    let mn = -mx - 1;
-    var s: i64 = 0;
-    if w == 64 {
-        let r = (x as! u64) + (y as! u64);
-        let rs = r as! i64;
-        if x >= 0 && y >= 0 && rs < 0 { return sbit(w) - 1; }
-        if x < 0 && y < 0 && rs >= 0 { return sbit(w); }
-        return r;
-    }
-    s = x + y;
-    if s > mx { s = mx; }
-    if s < mn { s = mn; }
-    return (s as! u64) & wmask(w);
-}
-fn ssub_sat_w(a: u64, b: u64, w: i64) -> u64 {
-    let x = sext_w(a, w);
-    let y = sext_w(b, w);
-    if w == 64 {
-        let r = (x as! u64) - (y as! u64);
-        let rs = r as! i64;
-        if x >= 0 && y < 0 && rs < 0 { return sbit(w) - 1; }
-        if x < 0 && y >= 0 && rs >= 0 { return sbit(w); }
-        return r;
-    }
-    let mx = sext_w(sbit(w) - 1, w);
-    let mn = -mx - 1;
-    var s = x - y;
-    if s > mx { s = mx; }
-    if s < mn { s = mn; }
-    return (s as! u64) & wmask(w);
+    let w = kb_bw(l);
+    var psz = ap_add(kb_max(l), kb_max(r));
+    if !carry_zero { psz = ap_inc(psz); }
+    var pso = ap_add(kb_min(l), kb_min(r));
+    if carry_one { pso = ap_inc(pso); }
+    let ckz = ap_not(ap_xor(ap_xor(psz, l.z), r.z));
+    let cko = ap_xor(ap_xor(pso, l.o), r.o);
+    let known = ap_and(ap_and(ap_or(l.z, l.o), ap_or(r.z, r.o)), ap_or(ckz, cko));
+    return KB { z: ap_and(ap_not(psz), known), o: ap_and(pso, known) };
 }
 
 // KnownBits::computeForAddSub
 fn kb_add_sub(add: bool, nsw: bool, nuw: bool, l: KB, r: KB) -> KB {
-    let w = l.w as i64;
+    let w = kb_bw(l);
     var out = kb_unknown(w);
     if kb_is_unknown(l) && kb_is_unknown(r) { return out; }
     if !kb_is_unknown(l) && !kb_is_unknown(r) {
         if add { out = kb_add_carry(l, r, true, false); }
-        else { out = kb_add_carry(l, KB { z: r.o, o: r.z, w: r.w }, false, true); }
+        else { out = kb_add_carry(l, kb_flip(r), false, true); }
     }
     if nuw {
         if add {
-            let minv = uadd_sat_w(kb_min(l), kb_min(r), w);
+            let minv = ap_uadd_sat(kb_min(l), kb_min(r));
             if nsw {
-                let nb = clo_w(minv & wmask(w - 1), w - 1);
-                out.o |= bits_range(w - 1 - nb, w - 1);
+                let nb = ap_countl_one(ap_trunc(minv, w - 1));
+                out = kb_or_o(out, bitsr(w, w - 1 - nb, w - 1));
             }
-            out.o |= high_bits(w, clo_w(minv, w));
+            out = kb_or_o(out, highb(w, ap_countl_one(minv)));
         } else {
-            let maxv = usub_sat_w(kb_max(l), kb_min(r));
+            let maxv = ap_usub_sat(kb_max(l), kb_min(r));
             if nsw {
-                let nb = clz_w(maxv & wmask(w - 1), w - 1);
-                out.z |= bits_range(w - 1 - nb, w - 1);
+                let nb = ap_countl_zero(ap_trunc(maxv, w - 1));
+                out = kb_or_z(out, bitsr(w, w - 1 - nb, w - 1));
             }
-            out.z |= high_bits(w, clz_w(maxv, w));
+            out = kb_or_z(out, highb(w, ap_countl_zero(maxv)));
         }
     }
     if nsw {
-        var minv: u64 = 0;
-        var maxv: u64 = 0;
+        var minv = ap_zero(w);
+        var maxv = ap_zero(w);
         if add {
-            minv = sadd_sat_w(kb_smin(l), kb_smin(r), w);
-            maxv = sadd_sat_w(kb_smax(l), kb_smax(r), w);
+            minv = ap_sadd_sat(kb_smin(l), kb_smin(r));
+            maxv = ap_sadd_sat(kb_smax(l), kb_smax(r));
         } else {
-            minv = ssub_sat_w(kb_smin(l), kb_smax(r), w);
-            maxv = ssub_sat_w(kb_smax(l), kb_smin(r), w);
+            minv = ap_ssub_sat(kb_smin(l), kb_smax(r));
+            maxv = ap_ssub_sat(kb_smax(l), kb_smin(r));
         }
-        if (minv & sbit(w)) == 0 {
-            let nb = clo_w(minv & wmask(w - 1), w - 1);
-            out.o |= bits_range(w - 1 - nb, w - 1);
-            out.z |= sbit(w);
+        if !ap_is_neg(minv) {
+            let nb = ap_countl_one(ap_trunc(minv, w - 1));
+            out = kb_or_o(out, bitsr(w, w - 1 - nb, w - 1));
+            out = kb_or_z(out, onebit(w, w - 1));
         }
-        if (maxv & sbit(w)) != 0 {
-            let nb = clz_w(maxv & wmask(w - 1), w - 1);
-            out.z |= bits_range(w - 1 - nb, w - 1);
-            out.o |= sbit(w);
+        if ap_is_neg(maxv) {
+            let nb = ap_countl_zero(ap_trunc(maxv, w - 1));
+            out = kb_or_z(out, bitsr(w, w - 1 - nb, w - 1));
+            out = kb_or_o(out, onebit(w, w - 1));
         }
     }
     if kb_has_conflict(out) { out = kb_all_zero(w); }
@@ -205,65 +197,50 @@ fn kb_add_sub(add: bool, nsw: bool, nuw: bool, l: KB, r: KB) -> KB {
 
 // KnownBits::mul
 fn kb_mul(l: KB, r: KB, self_mul: bool) -> KB {
-    let w = l.w as i64;
-    let m = wmask(w);
-    let ul = kb_max(l);
-    let ur = kb_max(r);
-    // umul_ov
-    var ovf = false;
-    var prod: u64 = 0;
-    if ul != 0 && ur != 0 {
-        let hi_bits = (64 - clz(ul)) + (64 - clz(ur));
-        if hi_bits > 65 { ovf = true; }
-        else {
-            prod = ul * ur;
-            if ul != 0 && prod / ul != ur { ovf = true; }
-            if (prod & ~m) != 0 { ovf = true; }
-        }
-    }
-    let lead_z = if ovf { 0 } else { clz_w(prod, w) };
-    let tbl = cto_w(l.z | l.o, w);
-    let tbr = cto_w(r.z | r.o, w);
+    let w = kb_bw(l);
+    let prod, ovf = ap_umul_ov(kb_max(l), kb_max(r));
+    let lead_z = if ovf { 0 } else { ap_countl_zero(prod) };
+    let tbl = ap_countr_one(ap_or(l.z, l.o));
+    let tbr = ap_countr_one(ap_or(r.z, r.o));
     let tzl = kb_min_tz(l);
     let tzr = kb_min_tz(r);
     let tz = tzl + tzr;
     let smallest = min(tbl - tzl, tbr - tzr);
     let rbk = min(smallest + tz, w);
-    let bottom = (l.o * r.o) & m;
+    let bottom = ap_mul(l.o, r.o);
     var res = kb_unknown(w);
-    res.z = high_bits(w, lead_z);
-    res.z |= ~bottom & low_bits(rbk);
-    res.o = bottom & low_bits(rbk);
+    res.z = ap_or(highb(w, lead_z), ap_and(ap_not(bottom), lowb(w, rbk)));
+    res.o = ap_and(bottom, lowb(w, rbk));
     if self_mul {
         let t1 = 2 * tzl + 1;
-        if t1 < w { res.z |= (1 as u64) << t1; }
-        if tzl < w && ((l.o >> tzl) & 1) != 0 {
+        if t1 < w { res.z = ap_set_bit(res.z, t1); }
+        if tzl < w && ap_get_bit(l.o, tzl) {
             let t2 = t1 + 1;
-            if t2 < w { res.z |= (1 as u64) << t2; }
+            if t2 < w { res.z = ap_set_bit(res.z, t2); }
         }
     }
     return res;
 }
 
 fn is_pow2_w(w: i64) -> bool { w > 0 && (w & (w - 1)) == 0 }
-fn limited(v: u64, lim: i64) -> i64 { if v > lim as u64 { lim } else { v as i64 } }
+fn limited(v: AP, lim: i64) -> i64 { ap_limited(v, lim as u64) as i64 }
 
 // getMaxShiftAmount
-fn max_shift_amount(maxv: u64, aw: i64, w: i64) -> i64 {
+fn max_shift_amount(maxv: AP, w: i64) -> i64 {
     if is_pow2_w(w) {
         let lg = ilog2(w);
-        let nb = min(lg, aw);
-        return (maxv & low_bits(nb)) as i64;
+        let nb = min(lg, maxv.w as i64);
+        return ap_lo64(ap_trunc(maxv, nb)) as i64;
     }
     return limited(maxv, w - 1);
 }
 
 fn kb_shl_const(l: KB, sa: i64, nuw: bool, nsw: bool) -> KB {
-    let w = l.w as i64;
-    let m = wmask(w);
-    let zo = if sa == 0 { false } else { (l.z & high_bits(w, sa)) != 0 };
-    let oo = if sa == 0 { false } else { (l.o & high_bits(w, sa)) != 0 };
-    var k = KB { z: ((l.z << sa) & m) | low_bits(sa), o: (l.o << sa) & m, w: l.w };
+    let w = kb_bw(l);
+    let hb = highb(w, sa);
+    let zo = if sa == 0 { false } else { ap_intersects(l.z, hb) };
+    let oo = if sa == 0 { false } else { ap_intersects(l.o, hb) };
+    var k = KB { z: ap_or(ap_shl(l.z, sa), lowb(w, sa)), o: ap_shl(l.o, sa) };
     if nsw {
         var szo = zo;
         if nuw && sa != 0 { szo = true; }
@@ -272,37 +249,42 @@ fn kb_shl_const(l: KB, sa: i64, nuw: bool, nsw: bool) -> KB {
     return k;
 }
 
+// the shift amounts compatible with the shift's known bits (Amt.Zero.zextOrTrunc(32) & ShiftAmt == 0, ...)
+fn shift_amt_ok(r: KB, sa: i64) -> bool {
+    let zm = ap_lo64(ap_zext_or_trunc(r.z, 32));
+    let om = ap_lo64(ap_zext_or_trunc(r.o, 32));
+    let s = sa as u64;
+    return (zm & s) == 0 && (om | s) == s;
+}
+
 // KnownBits::shl
 fn kb_shl(l: KB, r: KB, nuw: bool, nsw: bool, sa_nonzero: bool) -> KB {
-    let w = l.w as i64;
+    let w = kb_bw(l);
     var known = kb_unknown(w);
     var min_sa = limited(kb_min(r), w);
     if min_sa == 0 && sa_nonzero { min_sa = 1; }
     if kb_is_unknown(l) {
-        known.z |= low_bits(min_sa);
+        known = kb_or_z(known, lowb(w, min_sa));
         if nuw && nsw && min_sa != 0 { known = kb_make_nonneg(known); }
         return known;
     }
-    var max_sa = max_shift_amount(kb_max(r), r.w as i64, w);
+    var max_sa = max_shift_amount(kb_max(r), w);
     if nuw && nsw { max_sa = min(max_sa, kb_max_lz(l) - 1); }
     if nuw { max_sa = min(max_sa, kb_max_lz(l)); }
     if nsw { max_sa = min(max_sa, max(kb_max_lz(l), kb_max_lo(l)) - 1); }
     if min_sa == 0 && max_sa == w - 1 && is_pow2_w(w) {
-        known.z |= low_bits(kb_min_tz(l));
-        if kb_is_constant(l) && l.o == wmask(w) { known.o |= sbit(w); }
+        known = kb_or_z(known, lowb(w, kb_min_tz(l)));
+        if kb_is_constant(l) && ap_is_all_ones(l.o) { known = kb_or_o(known, onebit(w, w - 1)); }
         if nsw {
             if kb_is_nonneg(l) { known = kb_make_nonneg(known); }
             if kb_is_neg(l) { known = kb_make_neg(known); }
         }
         return known;
     }
-    let zm = r.z & 0xFFFFFFFF;
-    let om = r.o & 0xFFFFFFFF;
     known = kb_all_conflict(w);
     var sa = min_sa;
     while sa <= max_sa {
-        let s = sa as u64;
-        if (zm & s) == 0 && (om | s) == s {
+        if shift_amt_ok(r, sa) {
             known = kb_intersect(known, kb_shl_const(l, sa, nuw, nsw));
             if kb_is_unknown(known) { break; }
         }
@@ -312,11 +294,9 @@ fn kb_shl(l: KB, r: KB, nuw: bool, nsw: bool, sa_nonzero: bool) -> KB {
     return known;
 }
 
-fn ashr_w(x: u64, sa: i64, w: i64) -> u64 { ((sext_w(x, w) >> sa) as! u64) & wmask(w) }
-
 // KnownBits::lshr / ashr
 fn kb_shr(l: KB, r: KB, sa_nonzero: bool, exact: bool, arith: bool) -> KB {
-    let w = l.w as i64;
+    let w = kb_bw(l);
     var known = kb_unknown(w);
     var min_sa = limited(kb_min(r), w);
     if min_sa == 0 && sa_nonzero { min_sa = 1; }
@@ -325,25 +305,21 @@ fn kb_shr(l: KB, r: KB, sa_nonzero: bool, exact: bool, arith: bool) -> KB {
             if min_sa == w { return kb_all_zero(w); }
             return known;
         }
-        known.z |= high_bits(w, min_sa);
-        return known;
+        return kb_or_z(known, highb(w, min_sa));
     }
-    var max_sa = max_shift_amount(kb_max(r), r.w as i64, w);
+    var max_sa = max_shift_amount(kb_max(r), w);
     if exact {
         let first_one = kb_max_tz(l);
         if first_one < min_sa { return kb_all_zero(w); }
         max_sa = min(max_sa, first_one);
     }
-    let zm = r.z & 0xFFFFFFFF;
-    let om = r.o & 0xFFFFFFFF;
     known = kb_all_conflict(w);
     var sa = min_sa;
     while sa <= max_sa {
-        let s = sa as u64;
-        if (zm & s) == 0 && (om | s) == s {
+        if shift_amt_ok(r, sa) {
             var k = l;
-            if arith { k.z = ashr_w(l.z, sa, w); k.o = ashr_w(l.o, sa, w); }
-            else { k.z = (l.z >> sa) | high_bits(w, sa); k.o = l.o >> sa; }
+            if arith { k = KB { z: ap_ashr(l.z, sa), o: ap_ashr(l.o, sa) }; }
+            else { k = KB { z: ap_or(ap_lshr(l.z, sa), highb(w, sa)), o: ap_lshr(l.o, sa) }; }
             known = kb_intersect(known, k);
             if kb_is_unknown(known) { break; }
         }
@@ -354,110 +330,106 @@ fn kb_shr(l: KB, r: KB, sa_nonzero: bool, exact: bool, arith: bool) -> KB {
 }
 
 // KnownBits::makeGE / umax / umin / smax / smin
-fn kb_make_ge(k: KB, v: u64) -> KB {
-    let w = k.w as i64;
-    let n = clo_w(k.z | v, w);
-    let mv = v & ~low_bits(w - n);
-    return KB { z: k.z, o: k.o | mv, w: k.w };
+fn kb_make_ge(k: KB, v: AP) -> KB {
+    let w = kb_bw(k);
+    let n = ap_countl_one(ap_or(k.z, v));
+    let mv = ap_and(v, ap_not(lowb(w, w - n)));
+    return KB { z: k.z, o: ap_or(k.o, mv) };
 }
 fn kb_umax(l: KB, r: KB) -> KB {
-    if kb_min(l) >= kb_max(r) { return l; }
-    if kb_min(r) >= kb_max(l) { return r; }
+    if ap_uge(kb_min(l), kb_max(r)) { return l; }
+    if ap_uge(kb_min(r), kb_max(l)) { return r; }
     return kb_intersect(kb_make_ge(l, kb_min(r)), kb_make_ge(r, kb_min(l)));
 }
-fn kb_flip(k: KB) -> KB { KB { z: k.o, o: k.z, w: k.w } }
 fn kb_umin(l: KB, r: KB) -> KB { kb_flip(kb_umax(kb_flip(l), kb_flip(r))) }
 fn kb_flip_sign(k: KB) -> KB {
-    let s = sbit(k.w as i64);
-    return KB { z: (k.z & ~s) | (k.o & s), o: (k.o & ~s) | (k.z & s), w: k.w };
+    let w = kb_bw(k);
+    let zs = ap_get_bit(k.z, w - 1);
+    let os = ap_get_bit(k.o, w - 1);
+    return KB { z: ap_set_bit_to(k.z, w - 1, os), o: ap_set_bit_to(k.o, w - 1, zs) };
 }
 fn kb_smax_op(l: KB, r: KB) -> KB { kb_flip_sign(kb_umax(kb_flip_sign(l), kb_flip_sign(r))) }
+// smin: Flip = swap Zero/One except the sign bit
 fn kb_smin_flip(k: KB) -> KB {
-    let s = sbit(k.w as i64);
-    return KB { z: (k.o & ~s) | (k.z & s), o: (k.z & ~s) | (k.o & s), w: k.w };
+    let w = kb_bw(k);
+    let zs = ap_get_bit(k.z, w - 1);
+    let os = ap_get_bit(k.o, w - 1);
+    return KB { z: ap_set_bit_to(k.o, w - 1, zs), o: ap_set_bit_to(k.z, w - 1, os) };
 }
 fn kb_smin_op(l: KB, r: KB) -> KB { kb_smin_flip(kb_umax(kb_smin_flip(l), kb_smin_flip(r))) }
 
-fn rotl_w(x: u64, s: i64, w: i64) -> u64 { if s == 0 { x } else { ((x << s) | (x >> (w - s))) & wmask(w) } }
 // KnownBits::fshl(LHS, RHS, Amt) / fshr: funnel shifts by a constant amount
-fn kb_fsh(l: KB, r: KB, amt: u64, left: bool) -> KB {
-    let w = l.w as i64;
-    var sa = (amt % (w as u64)) as i64;
+fn kb_fsh(l: KB, r: KB, amt: AP, left: bool) -> KB {
+    let w = kb_bw(l);
+    var sa = ap_rot_amount(l.z, amt);
     if !left { sa = (w - sa) % w; }
     if sa == 0 { return l; }
-    let m = wmask(w);
     // fshl(a, b, s) = (a << s) | (b >> (w - s))
-    return KB { z: ((l.z << sa) | (r.z >> (w - sa))) & m, o: ((l.o << sa) | (r.o >> (w - sa))) & m, w: l.w };
+    return KB { z: ap_fshl(l.z, r.z, sa), o: ap_fshl(l.o, r.o, sa) };
 }
 
-fn clmul_w(a: u64, b: u64, w: i64) -> u64 {
-    var r: u64 = 0;
-    for i in w { if ((b >> i) & 1) != 0 { r ^= a << i; } }
-    return r & wmask(w);
-}
-fn clmul_or_w(a: u64, b: u64, w: i64) -> u64 {
-    var r: u64 = 0;
-    let n = min(64 - clz(b), w - ctz_w(a, w));
-    for i in n { if ((b >> i) & 1) != 0 { r |= a << i; } }
-    return r & wmask(w);
+fn clmul_or_ap(a: AP, b: AP) -> AP {
+    let w = a.w as i64;
+    var r = ap_zero(w);
+    let n = min(ap_active_bits(b), w - ap_countr_zero(a));
+    for i in n { if ap_get_bit(b, i) { r = ap_or(r, ap_shl(a, i)); } }
+    return r;
 }
 // KnownBits::clmul
 fn kb_clmul(l: KB, r: KB) -> KB {
-    let w = l.w as i64;
-    let m = wmask(w);
-    var res = kb_const(clmul_w(kb_min(l), kb_min(r), w), w);
-    let known = ~(clmul_or_w(~l.z & ~l.o & m, ~r.z & m, w) | clmul_or_w(~l.z & m, ~r.z & ~r.o & m, w)) & m;
-    res.z &= known;
-    res.o &= known;
+    var res = kb_const_ap(ap_clmul(kb_min(l), kb_min(r)));
+    let lu = ap_not(ap_or(l.z, l.o));
+    let ru = ap_not(ap_or(r.z, r.o));
+    let known = ap_not(ap_or(clmul_or_ap(lu, ap_not(r.z)), clmul_or_ap(ap_not(l.z), ru)));
+    res.z = ap_and(res.z, known);
+    res.o = ap_and(res.o, known);
     return res;
 }
 
 // KnownBits comparisons: 1 true, 0 false, -1 unknown
 fn kb_ugt(l: KB, r: KB) -> i64 {
-    if kb_max(l) <= kb_min(r) { return 0; }
-    if kb_min(l) > kb_max(r) { return 1; }
+    if ap_ule(kb_max(l), kb_min(r)) { return 0; }
+    if ap_ugt(kb_min(l), kb_max(r)) { return 1; }
     return -1;
 }
 fn kb_uge(l: KB, r: KB) -> i64 { let x = kb_ugt(r, l); if x < 0 { -1 } else { 1 - x } }
 fn kb_ult(l: KB, r: KB) -> i64 { kb_ugt(r, l) }
 fn kb_ule(l: KB, r: KB) -> i64 { kb_uge(r, l) }
 fn kb_sgt(l: KB, r: KB) -> i64 {
-    let w = l.w as i64;
-    if sext_w(kb_smax(l), w) <= sext_w(kb_smin(r), w) { return 0; }
-    if sext_w(kb_smin(l), w) > sext_w(kb_smax(r), w) { return 1; }
+    if ap_sle(kb_smax(l), kb_smin(r)) { return 0; }
+    if ap_sgt(kb_smin(l), kb_smax(r)) { return 1; }
     return -1;
 }
 fn kb_sge(l: KB, r: KB) -> i64 { let x = kb_sgt(r, l); if x < 0 { -1 } else { 1 - x } }
 fn kb_slt(l: KB, r: KB) -> i64 { kb_sgt(r, l) }
 fn kb_sle(l: KB, r: KB) -> i64 { kb_sge(r, l) }
 fn kb_eq(l: KB, r: KB) -> i64 {
-    if kb_is_constant(l) && kb_is_constant(r) { return if l.o == r.o { 1 } else { 0 }; }
-    if (l.o & r.z) != 0 || (r.o & l.z) != 0 { return 0; }
+    if kb_is_constant(l) && kb_is_constant(r) { return if ap_eq(l.o, r.o) { 1 } else { 0 }; }
+    if ap_intersects(l.o, r.z) || ap_intersects(r.o, l.z) { return 0; }
     return -1;
 }
-fn kb_min_pop(k: KB) -> i64 { popcount(k.o) }
 // KnownBits::abs
 fn kb_abs(k: KB, int_min_is_poison: bool) -> KB {
-    let w = k.w as i64;
+    let w = kb_bw(k);
     if kb_is_nonneg(k) { return k; }
     var ka = kb_unknown(w);
     if kb_is_neg(k) {
         var t = k;
-        if int_min_is_poison && popcount(k.z) + 2 == w { t.o |= (1 as u64) << kb_min_tz(k); }
+        if int_min_is_poison && ap_popcount(k.z) + 2 == w { t.o = ap_set_bit(t.o, kb_min_tz(k)); }
         ka = kb_add_sub(false, int_min_is_poison, false, kb_const(0, w), t);
         if int_min_is_poison && kb_min_pop(t) == 1 && kb_max_pop(t) != 1 {
-            t.o &= ~sbit(w);
-            t.z |= sbit(w);
-            ka.o |= bits_range(w - kb_min_lz(t), w - 1);
+            t.o = ap_clear_bit(t.o, w - 1);
+            t.z = ap_set_bit(t.z, w - 1);
+            ka = kb_or_o(ka, bitsr(w, w - kb_min_lz(t), w - 1));
         }
     } else {
         let maxtz = kb_max_tz(k);
         let mintz = kb_min_tz(k);
-        ka.z |= low_bits(mintz);
-        if maxtz == mintz && maxtz < w { ka.o |= (1 as u64) << maxtz; }
-        if int_min_is_poison || (k.o != 0 && k.o != sbit(w)) {
-            ka.o &= ~sbit(w);
-            ka.z |= sbit(w);
+        ka = kb_or_z(ka, lowb(w, mintz));
+        if maxtz == mintz && maxtz < w { ka = kb_or_o(ka, onebit(w, maxtz)); }
+        if int_min_is_poison || (!ap_is_zero(k.o) && !ap_is_min_signed(k.o)) {
+            ka.o = ap_clear_bit(ka.o, w - 1);
+            ka.z = ap_set_bit(ka.z, w - 1);
         }
     }
     return ka;
@@ -467,134 +439,119 @@ fn kb_abs(k: KB, int_min_is_poison: bool) -> KB {
 // More KnownBits operations (KnownBits.cpp)
 
 fn kb_blsi(k: KB) -> KB {
-    let w = k.w as i64;
-    var r = KB { z: k.z, o: 0, w: k.w };
+    let w = kb_bw(k);
+    var r = KB { z: k.z, o: ap_zero(w) };
     let mx = kb_max_tz(k);
-    r.z |= wmask(w) & ~low_bits(min(mx + 1, w));
+    r = kb_or_z(r, ap_not(lowb(w, min(mx + 1, w))));
     let mn = kb_min_tz(k);
-    if mx == mn && mx < w { r.o |= (1 as u64) << mx; }
+    if mx == mn && mx < w { r = kb_or_o(r, onebit(w, mx)); }
     return r;
 }
 fn kb_blsmsk(k: KB) -> KB {
-    let w = k.w as i64;
+    let w = kb_bw(k);
     var r = kb_unknown(w);
     let mx = kb_max_tz(k);
-    r.z |= wmask(w) & ~low_bits(min(mx + 1, w));
+    r = kb_or_z(r, ap_not(lowb(w, min(mx + 1, w))));
     let mn = kb_min_tz(k);
-    r.o |= low_bits(min(mn + 1, w));
+    r = kb_or_o(r, lowb(w, min(mn + 1, w)));
     return r;
 }
 fn kb_div_low_bit(k0: KB, l: KB, r: KB, exact: bool) -> KB {
     if !exact { return k0; }
-    let w = k0.w as i64;
+    let w = kb_bw(k0);
     var k = k0;
-    if (l.o & 1) != 0 { k.o |= 1; }
+    if ap_get_bit(l.o, 0) { k.o = ap_set_bit(k.o, 0); }
     let mintz = kb_min_tz(l) - kb_max_tz(r);
     let maxtz = kb_max_tz(l) - kb_min_tz(r);
     if mintz >= 0 {
-        k.z |= low_bits(mintz);
-        if mintz == maxtz { k.o |= if mintz < w { (1 as u64) << mintz } else { 0 }; }
+        k = kb_or_z(k, lowb(w, mintz));
+        if mintz == maxtz && mintz < w { k = kb_or_o(k, onebit(w, mintz)); }
     } else if maxtz < 0 {
         k = kb_all_zero(w);
     }
     if kb_has_conflict(k) { k = kb_all_zero(w); }
     return k;
 }
-fn kb_is_zero_known(k: KB) -> bool { k.z == wmask(k.w as i64) && k.o == 0 }
 fn kb_udiv(l: KB, r: KB, exact: bool) -> KB {
-    let w = l.w as i64;
+    let w = kb_bw(l);
     if kb_is_zero_known(l) || kb_is_zero_known(r) { return kb_all_zero(w); }
     let mind = kb_min(r);
     let maxn = kb_max(l);
-    let maxres = if mind == 0 { maxn } else { maxn / mind };
+    let maxres = if ap_is_zero(mind) { maxn } else { ap_udiv(maxn, mind) };
     var k = kb_unknown(w);
-    k.z |= high_bits(w, clz_w(maxres, w));
+    k = kb_or_z(k, highb(w, ap_countl_zero(maxres)));
     return kb_div_low_bit(k, l, r, exact);
-}
-fn sdiv_val(a: u64, b: u64, w: i64) -> u64 {
-    let sa = sext_w(a, w);
-    let sb = sext_w(b, w);
-    if sb == -1 { return ((0 as u64) - a) & wmask(w); }
-    return ((sa / sb) as! u64) & wmask(w);
 }
 fn kb_sdiv(l: KB, r: KB, exact: bool) -> KB {
     if kb_is_nonneg(l) && kb_is_nonneg(r) { return kb_udiv(l, r, exact); }
-    let w = l.w as i64;
+    let w = kb_bw(l);
     var k = kb_unknown(w);
     if kb_is_zero_known(l) || kb_is_zero_known(r) { return kb_all_zero(w); }
     var have = false;
-    var res: u64 = 0;
-    let m = wmask(w);
+    var res = ap_zero(w);
     if kb_is_neg(l) && kb_is_neg(r) {
         let denom = kb_smax(r);
         let num = kb_smin(l);
-        res = if num == sbit(w) && denom == m { sbit(w) - 1 } else { sdiv_val(num, denom, w) };
+        res = if ap_is_min_signed(num) && ap_is_all_ones(denom) { ap_smax_val(w) } else { ap_sdiv(num, denom) };
         have = true;
     } else if kb_is_neg(l) && kb_is_nonneg(r) {
-        if exact || ((((0 as u64) - kb_smax(l)) & m) >= kb_smax(r)) {
+        if exact || ap_uge(ap_neg(kb_smax(l)), kb_smax(r)) {
             let denom = kb_smin(r);
             let num = kb_smin(l);
-            res = if denom == 0 { num } else { sdiv_val(num, denom, w) };
+            res = if ap_is_zero(denom) { num } else { ap_sdiv(num, denom) };
             have = true;
         }
     } else if kb_is_nonneg(l) && kb_is_nonzero_strict(l) && kb_is_neg(r) {
-        if exact || kb_smin(l) >= (((0 as u64) - kb_smin(r)) & m) {
+        if exact || ap_uge(kb_smin(l), ap_neg(kb_smin(r))) {
             let denom = kb_smax(r);
             let num = kb_smax(l);
-            res = sdiv_val(num, denom, w);
+            res = ap_sdiv(num, denom);
             have = true;
         }
     }
     if have {
-        if (res & sbit(w)) == 0 { k.z |= high_bits(w, clz_w(res, w)); }
-        else { k.o |= high_bits(w, clo_w(res, w)); }
+        if !ap_is_neg(res) { k = kb_or_z(k, highb(w, ap_countl_zero(res))); }
+        else { k = kb_or_o(k, highb(w, ap_countl_one(res))); }
     }
     return kb_div_low_bit(k, l, r, exact);
 }
 // isStrictlyPositive: non-negative and non-zero
-fn kb_is_nonzero_strict(k: KB) -> bool { kb_is_nonneg(k) && k.o != 0 }
+fn kb_is_nonzero_strict(k: KB) -> bool { kb_is_nonneg(k) && !ap_is_zero(k.o) }
 fn kb_rem_low_bits(l: KB, r: KB) -> KB {
-    let w = l.w as i64;
-    if !kb_is_zero_known(r) && (r.z & 1) != 0 {
+    let w = kb_bw(l);
+    if !kb_is_zero_known(r) && ap_get_bit(r.z, 0) {
         let rz = kb_min_tz(r);
-        let mask = low_bits(rz);
-        return KB { z: l.z & mask, o: l.o & mask, w: l.w };
+        let mask = lowb(w, rz);
+        return KB { z: ap_and(l.z, mask), o: ap_and(l.o, mask) };
     }
     return kb_unknown(w);
 }
 fn kb_urem(l: KB, r: KB) -> KB {
-    let w = l.w as i64;
+    let w = kb_bw(l);
     var k = kb_rem_low_bits(l, r);
-    if kb_is_constant(r) && r.o != 0 && (r.o & (r.o - 1)) == 0 {
-        k.z |= ~(r.o - 1) & wmask(w);
+    if kb_is_constant(r) && ap_is_pow2(r.o) {
+        k = kb_or_z(k, ap_not(ap_dec(r.o)));
         return k;
     }
     let leaders = max(kb_min_lz(l), kb_min_lz(r));
-    k.z |= high_bits(w, leaders);
-    return k;
-}
-fn kb_min_sign_bits_k(k: KB) -> i64 {
-    if kb_is_nonneg(k) { return kb_min_lz(k); }
-    if kb_is_neg(k) { return kb_min_lo(k); }
-    return 1;
+    return kb_or_z(k, highb(w, leaders));
 }
 fn kb_srem(l: KB, r: KB) -> KB {
-    let w = l.w as i64;
+    let w = kb_bw(l);
     var k = kb_rem_low_bits(l, r);
-    if kb_is_constant(r) && r.o != 0 && (r.o & (r.o - 1)) == 0 {
-        let lowb = r.o - 1;
-        if kb_is_nonneg(l) || (lowb & ~l.z) == 0 { k.z |= ~lowb & wmask(w); }
-        if kb_is_neg(l) && (lowb & l.o) != 0 { k.o |= ~lowb & wmask(w); }
+    if kb_is_constant(r) && ap_is_pow2(r.o) {
+        let lowb2 = ap_dec(r.o);
+        if kb_is_nonneg(l) || ap_is_subset_of(lowb2, l.z) { k = kb_or_z(k, ap_not(lowb2)); }
+        if kb_is_neg(l) && ap_intersects(lowb2, l.o) { k = kb_or_o(k, ap_not(lowb2)); }
         return k;
     }
-    if kb_is_neg(l) && kb_is_nonzero(k) { k.o |= high_bits(w, max(kb_min_lo(l), kb_min_sign_bits_k(r))); }
-    else if kb_is_nonneg(l) { k.z |= high_bits(w, max(kb_min_lz(l), kb_min_sign_bits_k(r))); }
+    if kb_is_neg(l) && kb_is_nonzero(k) { k = kb_or_o(k, highb(w, max(kb_min_lo(l), kb_min_sign_bits_k(r)))); }
+    else if kb_is_nonneg(l) { k = kb_or_z(k, highb(w, max(kb_min_lz(l), kb_min_sign_bits_k(r)))); }
     return k;
 }
 // computeForSatAddSub
 fn kb_sat_add_sub(add: bool, signed: bool, l: KB, r: KB) -> KB {
-    let w = l.w as i64;
-    let m = wmask(w);
+    let w = kb_bw(l);
     var ovf: i64 = -1;
     var may_neg = true;
     var may_pos = true;
@@ -602,8 +559,8 @@ fn kb_sat_add_sub(add: bool, signed: bool, l: KB, r: KB) -> KB {
         if add && ((kb_is_neg(l) && kb_is_nonneg(r)) || (kb_is_nonneg(l) && kb_is_neg(r))) { ovf = 0; }
         else if !add && ((kb_is_neg(l) && kb_is_neg(r)) || (kb_is_nonneg(l) && kb_is_nonneg(r))) { ovf = 0; }
         else {
-            let ul = KB { z: l.z | sbit(w), o: l.o & ~sbit(w), w: l.w };
-            let ur = KB { z: r.z | sbit(w), o: r.o & ~sbit(w), w: r.w };
+            let ul = KB { z: ap_set_bit(l.z, w - 1), o: ap_clear_bit(l.o, w - 1) };
+            let ur = KB { z: ap_set_bit(r.z, w - 1), o: ap_clear_bit(r.o, w - 1) };
             let res = kb_add_sub(add, false, false, ul, ur);
             if add {
                 if kb_is_neg(res) { may_neg = false; if kb_is_nonneg(l) && kb_is_nonneg(r) { ovf = 1; } }
@@ -619,43 +576,42 @@ fn kb_sat_add_sub(add: bool, signed: bool, l: KB, r: KB) -> KB {
         }
         if !may_neg && !may_pos { ovf = 0; }
     } else if add {
-        let s = kb_max(l) + kb_max(r);
-        let of1 = (s & m) < kb_max(l) || (w < 64 && s > m);
+        let s1, of1 = ap_uadd_ov(kb_max(l), kb_max(r));
         if !of1 { ovf = 0; }
         else {
-            let s2 = kb_min(l) + kb_min(r);
-            if (s2 & m) < kb_min(l) || (w < 64 && s2 > m) { ovf = 1; }
+            let s2, of2 = ap_uadd_ov(kb_min(l), kb_min(r));
+            if of2 { ovf = 1; }
         }
     } else {
-        if kb_min(l) >= kb_max(r) { ovf = 0; }
-        else if kb_max(l) < kb_min(r) { ovf = 1; }
+        if ap_uge(kb_min(l), kb_max(r)) { ovf = 0; }
+        else if ap_ult(kb_max(l), kb_min(r)) { ovf = 1; }
     }
     var res = kb_add_sub(add, signed, !signed, l, r);
     if ovf == 0 { return res; }
     if ovf == 1 {
-        var c: u64 = 0;
-        if signed { c = if kb_is_neg(l) { sbit(w) } else { sbit(w) - 1 }; }
-        else if add { c = m; }
-        else { c = 0; }
-        return kb_const(c, w);
+        var c = ap_zero(w);
+        if signed { c = if kb_is_neg(l) { ap_smin_val(w) } else { ap_smax_val(w) }; }
+        else if add { c = ap_ones(w); }
+        return kb_const_ap(c);
     }
     if signed {
-        if may_pos { res.z &= ~low_bits(w - 1); }
-        if may_neg { res.o &= ~low_bits(w - 1); }
-    } else if add { res.z = 0; }
-    else { res.o = 0; }
+        if may_pos { res = kb_clr_z(res, lowb(w, w - 1)); }
+        if may_neg { res = kb_clr_o(res, lowb(w, w - 1)); }
+    } else if add { res.z = ap_zero(w); }
+    else { res.o = ap_zero(w); }
     return res;
 }
 fn kb_reduce_add(k: KB, n: i64) -> KB {
-    let w = k.w as i64;
+    let w = kb_bw(k);
     if n == 0 { return kb_unknown(w); }
-    if kb_is_constant(k) { return kb_const((n as u64) * k.o, w); }
+    if kb_is_constant(k) { return kb_const_ap(ap_mul(ap_u64(n as u64, w), k.o)); }
     let lost = if n <= 1 { 0 } else { 64 - clz((n - 1) as u64) };
     var r = kb_unknown(w);
-    if kb_is_nonneg(k) { let lz = kb_min_lz(k); r.z |= high_bits(w, if lz > lost { lz - lost } else { 0 }); }
-    else if kb_is_neg(k) { let lo = kb_min_lo(k); r.o |= high_bits(w, if lo > lost { lo - lost } else { 0 }); }
+    if kb_is_nonneg(k) { let lz = kb_min_lz(k); r = kb_or_z(r, highb(w, if lz > lost { lz - lost } else { 0 })); }
+    else if kb_is_neg(k) { let lo = kb_min_lo(k); r = kb_or_o(r, highb(w, if lo > lost { lo - lost } else { 0 })); }
     return r;
 }
+
 
 // ---------------------------------------------------------------------------------------------
 // computeKnownBits (llvm/lib/Analysis/ValueTracking.cpp)
@@ -672,7 +628,6 @@ fn kb_width(v: i32) -> i64 {
     if ty_is_int(t) { w = ty_bits(t); }
     else if ty_kind(t) == TK_PTR { w = dl_ptr(types[t].n as i64).bits; }
     else { fatal("internal: computeKnownBits of a non-integer value"); }
-    if w > 64 { not_ported("an integer wider than 64 bits"); }
     return w;
 }
 fn kb_width_ty(t0: i32) -> i64 {
@@ -686,29 +641,28 @@ fn all_elts(v: i32) -> u64 {
     if ty_kind(t) == TK_FVEC {
         let n = ty_count(t);
         if n > 64 { not_ported("a vector of more than 64 elements"); }
-        return low_bits(n);
+        return wmask(n);
     }
     return 1;
 }
 
 recursive fn kb_compute_all(v: i32, depth: i64) -> KB { kb_compute(v, all_elts(v), depth) }
 
-fn const_int_bits(c: i32) -> u64 { cint_lo(c) }
 
 recursive fn kb_compute(v: i32, de: u64, depth: i64) -> KB {
     let w = kb_width(v);
     if de == 0 { return kb_unknown(w); }
     let k = vals[v].kind;
     let c = m_apint(v);
-    if c >= 0 { return kb_const(ci_val(c), w); }
+    if c >= 0 { return kb_const_ap(ci_ap(c)); }
     if k == VK_CNULL || k == VK_AGGZERO { return kb_all_zero(w); }
     if k == VK_CDVECTOR {
         var r = kb_all_conflict(w);
         for i in nops(v) {
             if ((de >> i) & 1) == 0 { continue; }
-            let x = cint_lo(op(v, i));
-            r.z &= ~x;
-            r.o &= x;
+            let x = ci_ap(op(v, i));
+            r.z = ap_and(r.z, ap_not(x));
+            r.o = ap_and(r.o, x);
         }
         if kb_has_conflict(r) { return kb_unknown(w); }
         return r;
@@ -720,9 +674,9 @@ recursive fn kb_compute(v: i32, de: u64, depth: i64) -> KB {
             let e = op(v, i);
             if vals[e].kind == VK_POISON { continue; }
             if vals[e].kind != VK_CINT { return kb_unknown(w); }
-            let x = cint_lo(e);
-            r.z &= ~x;
-            r.o &= x;
+            let x = ci_ap(e);
+            r.z = ap_and(r.z, ap_not(x));
+            r.o = ap_and(r.o, x);
         }
         if kb_has_conflict(r) { return kb_unknown(w); }
         return r;
@@ -730,7 +684,7 @@ recursive fn kb_compute(v: i32, de: u64, depth: i64) -> KB {
     var known = kb_unknown(w);
     if k == VK_UNDEF || k == VK_POISON { return known; }
     if is_constant_data(v) { fatal("internal: unhandled constant data in computeKnownBits"); }
-    if k == VK_ARG && arg_range(v) { known = cr_to_kb(vt_cr); }
+    if k == VK_ARG && arg_range(v) { known = rg_to_kb(vt_cr); }
     if depth == MAX_ANALYSIS_DEPTH { return known; }
     if k == VK_ALIAS {
         let l = globs[glob_of(v)].linkage as i64;
@@ -745,7 +699,7 @@ recursive fn kb_compute(v: i32, de: u64, depth: i64) -> KB {
     }
     if ty_kind(vals[v].ty) == TK_PTR {
         let al = pointer_alignment(v);
-        known.z |= low_bits(log2_exact(al));
+        known = kb_or_z(known, lowb(w, log2_exact(al)));
     }
     known = kb_from_context(v, known, depth);
     return known;
@@ -792,12 +746,12 @@ fn pointer_alignment(v: i32) -> i64 {
     }
     if is_inst_op(v, OP_LOAD) {
         let md = inst_get_md(v, md_kind_id("align"));
-        if md >= 0 { return ci_val(mds[md_op(md, 0)].extra) as i64; }
+        if md >= 0 { return ap_limited(ci_ap(mds[md_op(md, 0)].extra), 0x7FFFFFFFFFFFFFFF) as i64; }
         return 1;
     }
     if k == VK_CEXPR && csts[vals[v].sub].op as i64 == OP_INTTOPTR && vals[op(v, 0)].kind == VK_CINT {
         let x = op(v, 0);
-        let tz = if cint_is_zero(x) { ty_bits(vals[x].ty) } else { ctz(cint_lo(x)) };
+        let tz = ap_countr_zero(ci_ap(x));
         return if tz < 32 { 1 << tz } else { 1 << 32 };
     }
     return 1;
@@ -827,16 +781,16 @@ fn gv_preferred_align(v: i32) -> i64 {
 
 // m_APInt for known bits (constant scalar or splat)
 fn match_apint(v: i32) -> bool { m_apint(v) >= 0 }
-fn apint_value(v: i32) -> u64 { ci_val(m_apint(v)) }
+fn apint_value(v: i32) -> AP { ci_ap(m_apint(v)) }
 
 // getKnownBitsFromAndXorOr
 recursive fn kb_and_xor_or(iv: i32, de: u64, kl: KB, kr: KB, depth: i64) -> KB {
-    let w = kl.w as i64;
+    let w = kb_bw(kl);
     let o = opcode_of(iv);
     var out = kb_unknown(w);
     let a = op(iv, 0);
     let b = op(iv, 1);
-    let has_one = kl.o != 0 || kr.o != 0;
+    let has_one = !ap_is_zero(kl.o) || !ap_is_zero(kr.o);
     var is_and = false;
     if o == OP_AND {
         out = kb_and(kl, kr);
@@ -856,7 +810,7 @@ recursive fn kb_and_xor_or(iv: i32, de: u64, kl: KB, kr: KB, depth: i64) -> KB {
             if x >= 0 { out = kb_blsmsk(if a == x { kl } else { kr }); }
         }
     }
-    if ((out.z | out.o) & 1) == 0 {
+    if !ap_get_bit(out.z, 0) && !ap_get_bit(out.o, 0) {
         fn pat(x: i32, y: i32) -> i32 {
             if is_op(y, OP_ADD) { if op(y, 0) == x { return op(y, 1); } if op(y, 1) == x { return op(y, 0); } }
             if is_op(y, OP_SUB) { if op(y, 0) == x { return op(y, 1); } if op(y, 1) == x { return op(y, 0); } }
@@ -866,8 +820,8 @@ recursive fn kb_and_xor_or(iv: i32, de: u64, kl: KB, kr: KB, depth: i64) -> KB {
         if other < 0 { other = pat(b, a); }
         if other >= 0 {
             let ky = kb_compute(other, de, depth + 1);
-            if cto_w(ky.o, ky.w as i64) > 0 {
-                if is_and { out.z |= 1; } else { out.o |= 1; }
+            if ap_get_bit(ky.o, 0) {
+                if is_and { out.z = ap_set_bit(out.z, 0); } else { out.o = ap_set_bit(out.o, 0); }
             }
         }
     }
@@ -879,15 +833,14 @@ fn kb_from_range_md(md: i32, w: i64) -> KB {
     var known = kb_all_conflict(w);
     let n = mds[md].nops as i64 / 2;
     for i in n {
-        let lo = cint_lo(mds[md_op(md, 2 * i)].extra);
-        let hi = cint_lo(mds[md_op(md, 2 * i + 1)].extra);
-        let m = wmask(w);
-        let umax = if lo > hi { m } else { (hi - 1) & m };
-        let umin = if lo > hi && hi != 0 { 0 } else { lo };
-        let cp = clz_w(umax ^ umin, w);
-        let mask = high_bits(w, cp);
-        known.o &= umax & mask;
-        known.z &= ~umax & mask;
+        let lo = ci_ap(mds[md_op(md, 2 * i)].extra);
+        let hi = ci_ap(mds[md_op(md, 2 * i + 1)].extra);
+        let umax = if ap_ugt(lo, hi) { ap_ones(w) } else { ap_dec(hi) };
+        let umin = if ap_ugt(lo, hi) && !ap_is_zero(hi) { ap_zero(w) } else { lo };
+        let cp = ap_countl_zero(ap_xor(umax, umin));
+        let mask = highb(w, cp);
+        known.o = ap_and(known.o, ap_and(umax, mask));
+        known.z = ap_and(known.z, ap_and(ap_not(umax), mask));
     }
     return known;
 }
@@ -921,7 +874,7 @@ recursive fn kb_mul_ops(a: i32, b: i32, nsw: bool, nuw: bool, de: u64, depth: i6
             let ng0 = kb_is_neg(k2);
             is_nonneg = (ng1 && ng0) || (nn1 && nn0);
             if !is_nonneg && nuw {
-                let one = kb_const(1, k1.w as i64);
+                let one = kb_const(1, kb_bw(k1));
                 is_nonneg = kb_sgt(k1, one) == 1 || kb_sgt(k2, one) == 1;
             }
             if !is_nonneg { is_negr = (ng1 && nn0 && kb_is_nonzero(k2)) || (ng0 && nn1 && kb_is_nonzero(k1)); }
@@ -934,7 +887,7 @@ recursive fn kb_mul_ops(a: i32, b: i32, nsw: bool, nuw: bool, de: u64, depth: i6
         let sb = ncsb(a, de, depth + 1);
         let tb = ty_bits(ty_scalar(vals[a].ty));
         let ovb = 2 * (tb - sb + 1);
-        if ovb < tb { known.z |= high_bits(tb, tb - ovb + 1); }
+        if ovb < tb { known = kb_or_z(known, highb(tb, tb - ovb + 1)); }
     }
     if is_nonneg && !kb_is_neg(known) { known = kb_make_nonneg(known); }
     else if is_negr && !kb_is_nonneg(known) { known = kb_make_neg(known); }
@@ -981,24 +934,19 @@ recursive fn kb_from_lerp(op0: i32, op1: i32, de: u64, known0: KB, depth: i64) -
     if !kb_is_nonneg(kbb) { return known; }
     let kc = kb_compute(c, de, depth + 1);
     if !kb_is_nonneg(kc) { return known; }
-    if sub_is_xor && (kb_max(kc) & ~kb_min(kbb)) != 0 { return known; }
-    let mad = max(kb_max(ka), kb_max(kd));
+    if sub_is_xor && !ap_is_subset_of(kb_max(kc), kb_min(kbb)) { return known; }
+    let mad = ap_umax(kb_max(ka), kb_max(kd));
     let mb = kb_max(kbb);
-    if mad != 0 && mb != 0 {
-        if (64 - clz(mad)) + (64 - clz(mb)) > 64 { return known; }
-        let p = mad * mb;
-        if p / mad != mb || (p & ~wmask(w)) != 0 { return known; }
-        known.z |= high_bits(w, clz_w(p, w));
-    } else {
-        known.z |= high_bits(w, w);
-    }
+    let p, ov = ap_umul_ov(mad, mb);
+    if ov { return known; }
+    known = kb_or_z(known, highb(w, ap_countl_zero(p)));
     return known;
 }
 
 // computeKnownBitsFromCmp
 recursive fn kb_from_cmp(v: i32, p: i64, l: i32, r: i32, known0: KB) -> KB {
     var known = known0;
-    let w = known.w as i64;
+    let w = kb_bw(known);
     if ty_kind(vals[r].ty) == TK_PTR {
         if l == v && m_zero(r) {
             if p == P_EQ { known = kb_all_zero(w); }
@@ -1013,63 +961,59 @@ recursive fn kb_from_cmp(v: i32, p: i64, l: i32, r: i32, known0: KB) -> KB {
     }
     let cc = m_apint(r);
     if cc < 0 { return known; }
-    let c = ci_val(cc);
-    let m = wmask(w);
+    let c = ci_ap(cc);
     if p == P_EQ {
-        if m_v(l, v) { known = kb_union(known, kb_const(c, w)); }
+        if m_v(l, v) { known = kb_union(known, kb_const_ap(c)); }
         else if is_op(l, OP_AND) && (m_v(op(l, 0), v) || m_v(op(l, 1), v)) {
             let y = if m_v(op(l, 0), v) { op(l, 1) } else { op(l, 0) };
-            known.o |= c;
+            known = kb_or_o(known, c);
             let mk = m_apint(y);
-            if mk >= 0 { known.z |= ~c & ci_val(mk); }
+            if mk >= 0 { known = kb_or_z(known, ap_and(ap_not(c), ci_ap(mk))); }
         } else if is_op(l, OP_OR) && (m_v(op(l, 0), v) || m_v(op(l, 1), v)) {
             let y = if m_v(op(l, 0), v) { op(l, 1) } else { op(l, 0) };
-            known.z |= ~c & m;
+            known = kb_or_z(known, ap_not(c));
             let mk = m_apint(y);
-            if mk >= 0 { known.o |= c & ~ci_val(mk); }
-        } else if is_op(l, OP_SHL) && m_v(op(l, 0), v) && m_constant_int(op(l, 1)) >= 0 && ci_val(op(l, 1)) < w as u64 {
-            let s = ci_val(op(l, 1)) as i64;
-            let rk = kb_const(c, w);
-            known = kb_union(known, KB { z: (rk.z >> s) | 0, o: rk.o >> s, w: rk.w });
+            if mk >= 0 { known = kb_or_o(known, ap_and(c, ap_not(ci_ap(mk)))); }
+        } else if is_op(l, OP_SHL) && m_v(op(l, 0), v) && m_constant_int(op(l, 1)) >= 0 && ap_ult_u64(ci_ap(op(l, 1)), w as u64) {
+            let s = ap_lo64(ci_ap(op(l, 1))) as i64;
+            let rk = kb_const_ap(c);
             // KnownBits >>= sets no new knowledge for the vacated high bits
-        } else if (is_op(l, OP_LSHR) || is_op(l, OP_ASHR)) && m_v(op(l, 0), v) && m_constant_int(op(l, 1)) >= 0 && ci_val(op(l, 1)) < w as u64 {
-            let s = ci_val(op(l, 1)) as i64;
-            let rk = kb_const(c, w);
-            known = kb_union(known, KB { z: (rk.z << s) & m, o: (rk.o << s) & m, w: rk.w });
+            known = kb_union(known, KB { z: ap_lshr(rk.z, s), o: ap_lshr(rk.o, s) });
+        } else if (is_op(l, OP_LSHR) || is_op(l, OP_ASHR)) && m_v(op(l, 0), v) && m_constant_int(op(l, 1)) >= 0 && ap_ult_u64(ci_ap(op(l, 1)), w as u64) {
+            let s = ap_lo64(ci_ap(op(l, 1))) as i64;
+            let rk = kb_const_ap(c);
+            known = kb_union(known, KB { z: ap_shl(rk.z, s), o: ap_shl(rk.o, s) });
         }
         return known;
     }
     if p == P_NE {
-        if c == 0 && is_op(l, OP_AND) && m_v(op(l, 0), v) && m_power2(op(l, 1)) { known.o |= ci_val(m_apint(op(l, 1))); }
+        if ap_is_zero(c) && is_op(l, OP_AND) && m_v(op(l, 0), v) && m_power2(op(l, 1)) { known = kb_or_o(known, ci_ap(m_apint(op(l, 1)))); }
         return known;
     }
-    var off: i64 = -1;
     var matched = false;
+    var has_off = false;
+    var off = ap_zero(w);
     if m_v(l, v) { matched = true; }
     else if (is_op(l, OP_ADD) || (is_op(l, OP_OR) && op_disjoint(l))) && m_v(op(l, 0), v) && m_apint(op(l, 1)) >= 0 {
         matched = true;
-        off = ci_val(m_apint(op(l, 1))) as! i64;
+        has_off = true;
+        off = ci_ap(m_apint(op(l, 1)));
     }
     if matched {
-        var lr = cr_allowed_icmp(p, cr_single(c, w));
-        if off != -1 || (m_v(l, v) == false) {
-            if !m_v(l, v) {
-                let o2 = (off as! u64) & m;
-                lr = cr_sub(lr, cr_single(o2, w));
-            }
-        }
-        known = kb_union(known, cr_to_kb(lr));
+        var lr = rg_allowed_icmp(p, rg_single(c));
+        if has_off { lr = rg_sub(lr, rg_single(off)); }
+        known = kb_union(known, rg_to_kb(lr));
     }
     if p == P_UGT || p == P_UGE {
         if (is_op(l, OP_AND) && (m_v(op(l, 0), v) || m_v(op(l, 1), v))) || (is_op(l, OP_SUB) && op_nuw(l) && m_v(op(l, 0), v)) {
-            let x = (c + (if p == P_UGT { 1 } else { 0 })) & m;
-            known.o |= high_bits(w, clo_w(x, w));
+            let x = if p == P_UGT { ap_inc(c) } else { c };
+            known = kb_or_o(known, highb(w, ap_countl_one(x)));
         }
     }
     if p == P_ULT || p == P_ULE {
         if (is_op(l, OP_OR) && (m_v(op(l, 0), v) || m_v(op(l, 1), v))) || (is_op(l, OP_ADD) && op_nuw(l) && (m_v(op(l, 0), v) || m_v(op(l, 1), v))) {
-            let x = (c - (if p == P_ULT { 1 } else { 0 })) & m;
-            known.z |= high_bits(w, clz_w(x, w));
+            let x = if p == P_ULT { ap_dec(c) } else { c };
+            known = kb_or_z(known, highb(w, ap_countl_zero(x)));
         }
     }
     return known;
@@ -1083,7 +1027,7 @@ recursive fn kb_from_icmp_cond(v: i32, cmp: i32, known: KB, invert: bool) -> KB 
     if is_op(l, OP_TRUNC) && op(l, 0) == v {
         let dw = ty_bits(ty_scalar(vals[l].ty));
         let dk = kb_from_cmp(l, p, l, r, kb_unknown(dw));
-        let kw = known.w as i64;
+        let kw = kb_bw(known);
         if is_inst(l) && op_nuw(l) { return kb_union(known, kb_zext(dk, kw)); }
         return kb_union(known, kb_anyext(dk, kw));
     }
@@ -1092,7 +1036,7 @@ recursive fn kb_from_icmp_cond(v: i32, cmp: i32, known: KB, invert: bool) -> KB 
 
 // computeKnownBitsFromCond
 recursive fn kb_from_cond(v: i32, cond: i32, known: KB, invert: bool, depth: i64) -> KB {
-    let w = known.w as i64;
+    let w = kb_bw(known);
     if depth < MAX_ANALYSIS_DEPTH && (m_logical(cond, true) || m_logical(cond, false)) {
         let is_or = m_logical(cond, false);
         let is_and = m_logical(cond, true);
@@ -1121,7 +1065,7 @@ recursive fn kb_from_cond(v: i32, cond: i32, known: KB, invert: bool, depth: i64
 // adjustKnownBitsForSelectArm
 recursive fn kb_adjust_for_select_arm(known: KB, cond: i32, arm: i32, invert: bool, depth: i64) -> KB {
     if kb_is_constant(known) { return known; }
-    var cr = kb_from_cond(arm, cond, kb_unknown(known.w as i64), invert, depth + 1);
+    var cr = kb_from_cond(arm, cond, kb_unknown(kb_bw(known)), invert, depth + 1);
     if kb_is_unknown(cr) { return known; }
     cr = kb_union(cr, known);
     if kb_has_conflict(cr) { return known; }
@@ -1161,7 +1105,7 @@ fn break_self_recursive_phi(p: i32, k: i64) -> i32, i32, i32 {
 }
 
 recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
-    let w = known0.w as i64;
+    let w = kb_bw(known0);
     var known = known0;
     let o = opcode_of(iv);
     let is_i = vals[iv].kind == VK_INST;
@@ -1215,12 +1159,12 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
                 let fkind = types[ty_scalar(st)].kind as i64;
                 if (cls & FCL_INF) != 0 {
                     let f = fp_fmt(fkind);
-                    let infb: u64 = (((1 as u64) << f.ebits) - 1) << (f.p - 1);
-                    known = kb_intersect(known, kb_const(infb, w));
+                    let infb = ap_shl(ap_low_bits(w, f.ebits), f.p - 1);
+                    known = kb_intersect(known, kb_const_ap(infb));
                 }
                 if (cls & FCL_ZERO) != 0 { known = kb_intersect(known, kb_const(0, w)); }
-                known.z &= ~sbit(w);
-                known.o &= ~sbit(w);
+                known.z = ap_clear_bit(known.z, w - 1);
+                known.o = ap_clear_bit(known.o, w - 1);
             }
             if fk.sign == 1 { known = kb_make_neg(known); }
             else if fk.sign == 0 { known = kb_make_nonneg(known); }
@@ -1239,21 +1183,21 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         let b = op(iv, 1);
         let k2 = kb_compute(a, de, depth + 1);
         let k1 = kb_compute(b, de, depth + 1);
-        let sa_nonzero = kb_is_nonzero(k1) || (kb_max(k1) < (k1.w as u64) && ikz(b, de, depth + 1));
+        let sa_nonzero = kb_is_nonzero(k1) || (ap_ult_u64(kb_max(k1), kb_bw(k1) as u64) && ikz(b, de, depth + 1));
         if o == OP_SHL {
             known = kb_shl(k2, k1, op_nuw(iv), op_nsw(iv), sa_nonzero);
-            if match_apint(a) { known.z |= low_bits(ctz_w(apint_value(a), w)); }
+            if match_apint(a) { known = kb_or_z(known, lowb(w, ap_countr_zero(apint_value(a)))); }
             // shl X, sub(Y, xor(ctlz(X, true), BitWidth-1))
             if is_pow2_w(w) && is_op(b, OP_SUB) && m_apint(op(b, 0)) >= 0 {
                 let xo = op(b, 1);
                 if is_op(xo, OP_XOR) && m_specific_int(op(xo, 1), (w - 1) as u64) {
                     let ct = op(xo, 0);
                     if m_intrinsic(ct, IID_ctlz) && op(ct, 0) == a && m_one(op(ct, 1)) {
-                        let yc = ci_val(m_apint(op(b, 0)));
-                        if yc < (w - 1) as u64 {
-                            let y = yc as i64;
-                            known.o |= (1 as u64) << y;
-                            known.z |= wmask(w) & ~low_bits(y + 1);
+                        let yc = ci_ap(m_apint(op(b, 0)));
+                        if ap_ult_u64(yc, (w - 1) as u64) {
+                            let y = ap_lo64(yc) as i64;
+                            known = kb_or_o(known, onebit(w, y));
+                            known = kb_or_z(known, ap_not(lowb(w, y + 1)));
                         }
                     }
                 }
@@ -1261,7 +1205,7 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
             return known;
         }
         known = kb_shr(k2, k1, sa_nonzero, op_exact(iv), o == OP_ASHR);
-        if o == OP_LSHR && match_apint(a) { known.z |= high_bits(w, clz_w(apint_value(a), w)); }
+        if o == OP_LSHR && match_apint(a) { known = kb_or_z(known, highb(w, ap_countl_zero(apint_value(a)))); }
         return known;
     }
     if o == OP_SUB { return kb_add_sub_ops(false, op(iv, 0), op(iv, 1), op_nsw(iv), op_nuw(iv), de, depth); }
@@ -1278,7 +1222,7 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
     }
     if o == OP_ALLOCA {
         let al = insts[inst_of(iv)].align;
-        known.z |= low_bits(if al == 0 { 0 } else { (al - 1) as i64 });
+        known = kb_or_z(known, lowb(w, if al == 0 { 0 } else { (al - 1) as i64 }));
         return known;
     }
     if o == OP_GEP { return kb_gep(iv, known, depth); }
@@ -1311,8 +1255,8 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         var dv = de;
         var needs = true;
         let ci = m_constant_int(idx);
-        if ci >= 0 && ci_val(ci) < n as u64 {
-            let x = ci_val(ci) as i64;
+        if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) {
+            let x = ap_lo64(ci_ap(ci)) as i64;
             dv &= ~((1 as u64) << x);
             needs = ((de >> x) & 1) != 0;
         }
@@ -1332,9 +1276,9 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         let idx = op(iv, 1);
         if ty_kind(vals[vec].ty) == TK_SVEC { return kb_unknown(w); }
         let n = ty_count(vals[vec].ty);
-        var dv = low_bits(n);
+        var dv = wmask(n);
         let ci = m_constant_int(idx);
-        if ci >= 0 && ci_val(ci) < n as u64 { dv = (1 as u64) << ci_val(ci); }
+        if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) { dv = (1 as u64) << ap_lo64(ci_ap(ci)); }
         return kb_compute(vec, dv, depth + 1);
     }
     if o == OP_EXTRACTVALUE {
@@ -1364,48 +1308,44 @@ fn elementwise_bitcast_v(v: i32) -> bool {
 
 recursive fn kb_gep(iv: i32, known0: KB, depth: i64) -> KB {
     var known = kb_compute_all(op(iv, 0), depth + 1);
-    let w = known.w as i64;
+    let w = kb_bw(known);
     let iw = dl_ptr(ptr_as(vals[iv].ty)).idx;
     if iw != w { not_ported("GEP known bits with an index width different from the pointer width"); }
-    var acc: u64 = 0;
+    var acc = ap_zero(iw);
     var t = gep_src_ty(iv);
     for i in 1..nops(iv) {
         if kb_is_unknown(known) { break; }
         let ix = op(iv, i);
         let is_struct = i > 1 && ty_is_struct(t);
         let cur = t;
-        if i > 1 { t = if ty_is_struct(t) { ty_field(t, ci_val(m_apint(ix)) as i64) } else { types[t].a }; }
+        if i > 1 { t = if ty_is_struct(t) { ty_field(t, ap_lo64(ci_ap(m_apint(ix))) as i64) } else { types[t].a }; }
         if is_constant(ix) && is_null_value(ix) { continue; }
         if is_struct {
-            let fi = ci_val(m_apint(ix)) as i64;
-            acc += dl_struct_offset(cur, fi) as u64;
+            let fi = ap_lo64(ci_ap(m_apint(ix))) as i64;
+            acc = ap_add(acc, ap_u64(dl_struct_offset(cur, fi) as u64, iw));
             continue;
         }
         let it = if i == 1 { cur } else { t };
         if !cf_ty_is_sized(it) { return kb_unknown(w); }
         if ty_kind(it) == TK_SVEC || ty_contains_scalable(it) { not_ported("known bits of GEPs over scalable types"); }
-        let stride = dl_alloc_size(it) as u64;
+        let stride = ap_u64(dl_alloc_size(it) as u64, iw);
         let ci = m_constant_int(ix);
         if ci >= 0 {
-            let ivw = ty_bits(vals[ci].ty);
-            let sx = (sext_w(ci_val(ci), ivw) as! u64) & wmask(iw);
-            acc += sx * stride;
+            acc = ap_add(acc, ap_mul(ap_sext_or_trunc(ci_ap(ci), iw), stride));
             continue;
         }
         var ib = kb_compute_all(ix, depth + 1);
-        let ibw = ib.w as i64;
-        if ibw > iw { ib = kb_trunc(ib, iw); } else if ibw < iw { ib = kb_sext(ib, iw); }
-        let sf = kb_const(stride & wmask(iw), iw);
+        ib = kb_sext_or_trunc(ib, iw);
+        let sf = kb_const_ap(stride);
         known = kb_add_sub(true, false, false, known, kb_mul(ib, sf, false));
     }
-    acc &= wmask(iw);
-    if !kb_is_unknown(known) && acc != 0 { known = kb_add_sub(true, false, false, known, kb_const(acc, iw)); }
+    if !kb_is_unknown(known) && !ap_is_zero(acc) { known = kb_add_sub(true, false, false, known, kb_const_ap(acc)); }
     return known;
 }
 
 recursive fn kb_phi(p: i32, de: u64, known0: KB, depth: i64) -> KB {
     var known = known0;
-    let w = known.w as i64;
+    let w = kb_bw(known);
     let save = kb_cxt;
     if match_simple_recurrence(p) {
         let bo = rec_bo;
@@ -1417,9 +1357,9 @@ recursive fn kb_phi(p: i32, de: u64, known0: KB, depth: i64) -> KB {
             kb_cxt = p;
             let k2 = kb_compute(r, de, depth + 1);
             kb_cxt = save;
-            if o == OP_SHL { known.z |= low_bits(kb_min_tz(k2)); }
-            else if o == OP_LSHR || o == OP_UDIV || o == OP_UREM { known.z |= high_bits(w, kb_min_lz(k2)); }
-            else { known.z |= high_bits(w, kb_min_lz(k2)); known.o |= high_bits(w, kb_min_lo(k2)); }
+            if o == OP_SHL { known = kb_or_z(known, lowb(w, kb_min_tz(k2))); }
+            else if o == OP_LSHR || o == OP_UDIV || o == OP_UREM { known = kb_or_z(known, highb(w, kb_min_lz(k2))); }
+            else { known = kb_or_z(known, highb(w, kb_min_lz(k2))); known = kb_or_o(known, highb(w, kb_min_lo(k2))); }
         } else if o == OP_ADD || o == OP_SUB || o == OP_AND || o == OP_OR || o == OP_MUL {
             let opnum = if op(p, 0) == r { 0 } else { 1 };
             let rinst = block_terminator(phi_block(p, opnum));
@@ -1429,7 +1369,7 @@ recursive fn kb_phi(p: i32, de: u64, known0: KB, depth: i64) -> KB {
             kb_cxt = linst;
             let k3 = kb_compute(l, de, depth + 1);
             kb_cxt = save;
-            known.z |= low_bits(min(kb_min_tz(k2), kb_min_tz(k3)));
+            known = kb_or_z(known, lowb(w, min(kb_min_tz(k2), kb_min_tz(k3))));
             let is_ovf_op = o == OP_ADD || o == OP_SUB || o == OP_MUL;
             if is_ovf_op && op_nsw(bo) {
                 if o == OP_ADD {
@@ -1468,8 +1408,8 @@ recursive fn kb_phi(p: i32, de: u64, known0: KB, depth: i64) -> KB {
                     let pb = inst_parent(cphi);
                     if (ts == pb) != (fs == pb) {
                         if fs == pb { pr = pred_inverse(pr); }
-                        let cr = cr_exact_icmp(pr, ci_val(rc), w);
-                        let ku = kb_union(k2, cr_to_kb(cr));
+                        let cr = rg_exact_icmp(pr, ci_ap(rc));
+                        let ku = kb_union(k2, rg_to_kb(cr));
                         if kb_has_conflict(ku) { known = kb_unknown(w); kb_cxt = save; break; }
                         k2 = ku;
                     }
@@ -1486,10 +1426,10 @@ recursive fn kb_phi(p: i32, de: u64, known0: KB, depth: i64) -> KB {
 
 recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
     var known = known0;
-    let w = known.w as i64;
+    let w = kb_bw(known);
     let rm = inst_get_md(iv, md_kind_id("range"));
     if rm >= 0 { known = kb_from_range_md(rm, w); }
-    if call_range(iv) { known = kb_union(known, cr_to_kb(vt_cr)); }
+    if call_range(iv) { known = kb_union(known, rg_to_kb(vt_cr)); }
     let rv = returned_arg_operand(iv);
     if rv >= 0 && vals[rv].ty == vals[iv].ty {
         let k2 = kb_compute_all(rv, depth + 1);
@@ -1504,32 +1444,30 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
     }
     if id == IID_bitreverse {
         let k2 = kb_compute(op(iv, 0), de, depth + 1);
-        return kb_union(known, KB { z: reverse_bits_w(k2.z, w), o: reverse_bits_w(k2.o, w), w: k2.w });
+        return kb_union(known, kb_reverse_bits(k2));
     }
     if id == IID_bswap {
         let k2 = kb_compute(op(iv, 0), de, depth + 1);
-        return kb_union(known, KB { z: byte_swap_w(k2.z, w), o: byte_swap_w(k2.o, w), w: k2.w });
+        return kb_union(known, kb_byte_swap(k2));
     }
     if id == IID_ctlz || id == IID_cttz {
         let k2 = kb_compute(op(iv, 0), de, depth + 1);
         var p = if id == IID_ctlz { kb_max_lz(k2) } else { kb_max_tz(k2) };
         if op(iv, 1) == c_true() { p = min(p, w - 1); }
         let lb = 64 - clz(p as u64);
-        known.z |= wmask(w) & ~low_bits(lb);
-        return known;
+        return kb_or_z(known, ap_not(lowb(w, lb)));
     }
     if id == IID_ctpop {
         let k2 = kb_compute(op(iv, 0), de, depth + 1);
         let lb = 64 - clz(kb_max_pop(k2) as u64);
-        known.z |= wmask(w) & ~low_bits(lb);
-        return known;
+        return kb_or_z(known, ap_not(lowb(w, lb)));
     }
     if id == IID_fshl || id == IID_fshr {
         let sa = m_apint(op(iv, 2));
         if sa < 0 { return known; }
         let k2 = kb_compute(op(iv, 0), de, depth + 1);
         let k3 = kb_compute(op(iv, 1), de, depth + 1);
-        return kb_fsh(k2, k3, ci_val(sa), id == IID_fshl);
+        return kb_fsh(k2, k3, ci_ap(sa), id == IID_fshl);
     }
     if id == IID_clmul {
         let k1 = kb_compute(op(iv, 0), de, depth + 1);
@@ -1544,7 +1482,7 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
     }
     if id == IID_vector_reverse {
         let n = ty_count(vals[iv].ty);
-        return kb_compute(op(iv, 0), reverse_bits_w(de, n), depth + 1);
+        return kb_compute(op(iv, 0), ap_lo64(ap_reverse_bits(ap_u64(de, n))), depth + 1);
     }
     if id == IID_vector_reduce_and || id == IID_vector_reduce_or || id == IID_vector_reduce_umax || id == IID_vector_reduce_umin ||
        id == IID_vector_reduce_smax || id == IID_vector_reduce_smin {
@@ -1554,8 +1492,8 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         known = kb_compute_all(op(iv, 0), depth + 1);
         let vt0 = vals[op(iv, 0)].ty;
         let even = (ty_count(vt0) % 2) == 0;
-        if even { known.z |= known.o; }
-        if ty_kind(vt0) == TK_SVEC || even { known.o = 0; }
+        if even { known.z = ap_or(known.z, known.o); }
+        if ty_kind(vt0) == TK_SVEC || even { known.o = ap_zero(w); }
         return known;
     }
     if id == IID_vector_reduce_add {
@@ -1574,11 +1512,11 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         let inner = op(iv, 0);
         let inv = if id == IID_smin { IID_smax } else { IID_smin };
         if inst_iid(inner) == inv && m_apint(op(iv, 1)) >= 0 && m_apint(op(inner, 1)) >= 0 {
-            var lo = ci_val(m_apint(op(iv, 1)));
-            var hi = ci_val(m_apint(op(inner, 1)));
+            var lo = ci_ap(m_apint(op(iv, 1)));
+            var hi = ci_ap(m_apint(op(inner, 1)));
             if id == IID_smin { let t = lo; lo = hi; hi = t; }
-            if sext_w(lo, w) <= sext_w(hi, w) {
-                r = kb_union(r, cr_to_kb(cr_nonempty(lo, hi + 1, w)));
+            if ap_sle(lo, hi) {
+                r = kb_union(r, rg_to_kb(rg_nonempty(lo, ap_inc(hi))));
             }
         }
         return r;
@@ -1597,24 +1535,4 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
 }
 
 // getVScaleRange(F, BitWidth).toKnownBits() (ValueTracking.cpp; ConstantRange::toKnownBits)
-fn kb_vscale(fv: i32, w: i64) -> KB {
-    var lo: u64 = 1;
-    var hi_max: u64 = wmask(w);      // unsigned max of the range
-    let a = aset_find(alist_fn(globs[glob_of(fv)].attrs), AK_VScaleRange);
-    if a >= 0 {
-        let mn = attrs[a].i1 >> 32;
-        let mx = attrs[a].i1 & 0xFFFFFFFF;
-        fn bitw(x: u64) -> i64 { if x == 0 { 0 } else { 64 - clz(x) } }
-        if bitw(mn) > w { return kb_unknown(w); }
-        lo = mn;
-        if mx != 0 && bitw(mx) <= w { hi_max = mx; }
-    }
-    var k = kb_const(lo, w);
-    let d = lo ^ hi_max;
-    if d != 0 {
-        let keep = ~low_bits(64 - clz(d));
-        k.z &= keep;
-        k.o &= keep;
-    }
-    return k;
-}
+fn kb_vscale(fv: i32, w: i64) -> KB { rg_to_kb(vt_vscale_range(fv, w)) }
