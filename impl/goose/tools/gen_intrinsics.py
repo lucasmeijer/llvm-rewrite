@@ -25,6 +25,26 @@ for dp, _, fs in os.walk(os.path.join(ROOT, "tests")):
             # A probe attribute: if it survives, LLVM did not replace the attributes (unknown intrinsic or
             # invalid signature) and the declaration keeps what the text says, so it gets no table entry.
             decls[name] = line + ' "goose-probe"'
+# Intrinsics that are called without a declaration (the parser declares them): take opt's declarations.
+undeclared_files = []
+for dp, _, fs in os.walk(os.path.join(ROOT, "tests")):
+    for f in fs:
+        if not f.endswith(".ll"): continue
+        path = os.path.join(dp, f)
+        try: text = open(path, errors="replace").read()
+        except OSError: continue
+        called = set(re.findall(r"@(llvm\.[\w.$-]+)\(", text))
+        declared = set(re.findall(r"^declare [^\n]*?@(llvm\.[\w.$-]+)\(", text, re.M))
+        if called - declared - set(decls): undeclared_files.append(path)
+for path in undeclared_files:
+    r = subprocess.run([OPT, "-S", path, "-o", "-"], capture_output=True, text=True)
+    if r.returncode != 0: continue
+    for m in re.finditer(r"^declare [^\n]*?@(llvm\.[\w.$-]+)\(", r.stdout, re.M):
+        name = m.group(1)
+        if name in decls: continue
+        line = r.stdout[m.start():r.stdout.index("\n", m.start())]
+        if re.search(r"%[\w.]+", line): continue
+        decls[name] = re.sub(r"\s#\d+", "", line).rstrip() + ' "goose-probe"'
 def run(lines):
     with tempfile.NamedTemporaryFile("w", suffix=".ll", delete=False) as t:
         t.write("\n".join(lines) + "\n")

@@ -198,3 +198,53 @@ recursive fn dl_struct_offset(t: i32, idx: i64) -> i64 {
 }
 
 fn log2_exact(a: i64) -> i64 { var k = 0; while (1 << k) < a { k++; } return k; }
+
+// Triple::computeDataLayout for x86 (llvm/lib/TargetParser/TargetDataLayout.cpp: computeX86DataLayout,
+// getManglingComponent). Returns "" for other architectures (callers must fail loudly).
+fn triple_part(t: const u8[:], idx: i64) -> const u8[:] {
+    var f = 0;
+    var start = 0;
+    for i in 0..t.len + 1 {
+        if i == t.len || t[i] == '-' {
+            if f == idx { return t[start..i]; }
+            f++;
+            start = i + 1;
+        }
+    }
+    return "";
+}
+
+fn compute_x86_datalayout(t: const u8[:], out: u8[>..]&) -> bool {
+    let arch = triple_part(t, 0);
+    let is64 = arch == "x86_64" || arch == "amd64";
+    let is32 = arch == "i386" || arch == "i486" || arch == "i586" || arch == "i686" || arch == "i786" || arch == "i886" || arch == "i986" || arch == "x86";
+    if !is64 && !is32 { return false; }
+    // OS / environment are the remaining components (normalization is approximate)
+    let os = triple_part(t, 2);
+    let env = triple_part(t, 3);
+    let darwin = starts_with(os, "darwin") || starts_with(os, "macos") || starts_with(os, "ios") || starts_with(os, "tvos") || starts_with(os, "watchos");
+    let windows = starts_with(os, "windows") || starts_with(os, "win32") || starts_with(os, "mingw") || starts_with(os, "cygwin") || starts_with(os, "uefi");
+    let iamcu = starts_with(os, "elfiamcu");
+    let x32 = starts_with(env, "gnux32");
+    let env_elf = ends_with(env, "elf");
+    let env_macho = ends_with(env, "macho");
+    let msvc = windows && (env.len == 0 || starts_with(env, "msvc")) && !env_elf && !env_macho;
+    let macho = darwin || env_macho;
+    let coff = windows && !env_elf && !env_macho;
+    out.push('e');
+    if macho { out.append("-m:o"); }
+    else if coff { out.append(if is32 { "-m:x" } else { "-m:w" }); }
+    else { out.append("-m:e"); }
+    if !is64 || x32 { out.append("-p:32:32"); }
+    out.append("-p270:32:32-p271:32:32-p272:64:64");
+    if is64 || windows { out.append("-i64:64-i128:128"); }
+    else if iamcu { out.append("-i64:32-f64:32"); }
+    else { out.append("-i128:128-f64:32:64"); }
+    if iamcu { }
+    else if is64 || darwin || msvc { out.append("-f80:128"); }
+    else { out.append("-f80:32"); }
+    if iamcu { out.append("-f128:32"); }
+    out.append(if is64 { "-n8:16:32:64" } else { "-n8:16:32" });
+    if (!is64 && windows) || iamcu { out.append("-a:0:32-S32"); } else { out.append("-S128"); }
+    return true;
+}

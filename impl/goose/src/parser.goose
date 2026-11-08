@@ -30,7 +30,14 @@ var grp_refs: GrpRef[>..];
 
 // Per-function
 var cur_fn: i32 = -1;
-var fn_numbered: i32[>..<];
+var fn_numbered: i32[>..<];     // id -> value (-1 = hole); ids may skip (NumberedValues)
+var fn_next: i64 = 0;
+
+fn fn_num_add(n: i64, v: i32) {
+    while fn_numbered.len <= n { fn_numbered.push(-1); }
+    fn_numbered[n] = v;
+    fn_next = n + 1;
+}
 var fwd_local_st: i32 = -1;
 var fwd_local_num: i32[>..<];
 var fwd_local_count: i64 = 0;
@@ -248,7 +255,7 @@ fn get_local_by_name(nm: i32, ty: i32) -> i32 {
 }
 
 fn get_local_by_id(n: i64, ty: i32) -> i32 {
-    if n < fn_numbered.len {
+    if n < fn_numbered.len && fn_numbered[n] >= 0 {
         let v = fn_numbered[n];
         if vals[v].ty != ty { perr(str("'%", n, "' defined with type '", type_str(vals[v].ty), "' but expected '", type_str(ty), "'")); }
         return v;
@@ -289,8 +296,8 @@ fn define_local(v: i32, name_tok: i64, nm: i32, num: i64) {
     }
     // numbered (explicit or implicit)
     var n = num;
-    if n < 0 { n = fn_numbered.len; }
-    if n != fn_numbered.len { perr(str("instruction expected to be numbered '%", fn_numbered.len, "'")); }
+    if n < 0 { n = fn_next; }
+    if n < fn_next { perr(str("instruction expected to be numbered '%", fn_next, "' or greater")); }
     if n < fwd_local_num.len && fwd_local_num[n] >= 0 {
         let f = fwd_local_num[n];
         fwd_local_num[n] = -1;
@@ -299,7 +306,7 @@ fn define_local(v: i32, name_tok: i64, nm: i32, num: i64) {
         rauw(f, v);
         vals[f].kind = VK_DEAD;
     }
-    fn_numbered.push(v);
+    fn_num_add(n, v);
 }
 
 // Global lookup (getGlobalVal): placeholders are unnamed i8 globals, RAUW'd later.
@@ -523,16 +530,20 @@ fn get_md_as_value(m: i32) -> i32 {
 }
 
 fn get_inline_asm(ty: i32, a: i32, c: i32, side: bool, alignstack: bool, intel: bool, unwind: bool) -> i32 {
-    for v, i in vals {
-        if v.kind == VK_INLINEASM && v.ty == ty {
+    for i in asm_vals {
+        let v = vals[i];
+        if v.ty == ty {
             let x = asms[v.sub];
-            if x.asm_ == a && x.cons == c && (x.side != 0) == side && (x.align != 0) == alignstack && (x.dialect != 0) == intel && (x.unwind != 0) == unwind { return i as i32; }
+            if x.asm_ == a && x.cons == c && (x.side != 0) == side && (x.align != 0) == alignstack && (x.dialect != 0) == intel && (x.unwind != 0) == unwind { return i; }
         }
     }
     let s = asms.len as i32;
     asms.push(Asm { asm_: a, cons: c, side: if side { 1 } else { 0 }, align: if alignstack { 1 } else { 0 }, dialect: if intel { 1 } else { 0 }, unwind: if unwind { 1 } else { 0 } });
-    return new_val(VK_INLINEASM, ty, s, 0);
+    let nv = new_val(VK_INLINEASM, ty, s, 0);
+    asm_vals.push(nv);
+    return nv;
 }
+var asm_vals: i32[>..];
 
 fn binop_from_kw(s: const u8[:]) -> i64 {
     if s == "add" { return OP_ADD; } if s == "fadd" { return OP_FADD; } if s == "sub" { return OP_SUB; }
@@ -930,6 +941,7 @@ fn resolve_blockaddress_fwd(f: i32) {
             var b: i32 = -1;
             if bnm >= 0 { b = symtab_lookup(globs[glob_of(f)].symtab, bnm); }
             else if bnum >= 0 && bnum < fn_numbered.len { b = fn_numbered[bnum]; }
+            if b >= 0 && vals[b].kind == VK_FWD { b = -1; }
             if b < 0 || vals[b].kind != VK_BLOCK { perr("referenced value is not a basic block"); }
             let ba = make_blockaddress(f, b);
             rauw_with_constants(ph, ba);
@@ -1333,6 +1345,9 @@ recursive fn parse_one_attr(ctx: i64) -> i32 {
         return attr_int(AK_Initializes, at as u64);
     }
     if w == "denormal_fpenv" { perr("denormal_fpenv attribute is not supported yet"); }
+    if w == "argmemonly" { lex(); return attr_get(Attr { kind: -10, i1: 0, i2: 0, ty: -1, skey: -1, sval: -1, hash: 0 }); }
+    if w == "inaccessiblememonly" { lex(); return attr_get(Attr { kind: -11, i1: 0, i2: 0, ty: -1, skey: -1, sval: -1, hash: 0 }); }
+    if w == "inaccessiblemem_or_argmemonly" { lex(); return attr_get(Attr { kind: -12, i1: 0, i2: 0, ty: -1, skey: -1, sval: -1, hash: 0 }); }
     let k = attr_kind_by_name(w);
     if k < 0 { return -1; }
     let cls = ATTR_CLASSES[k] as i64;
@@ -1348,43 +1363,39 @@ recursive fn parse_one_attr(ctx: i64) -> i32 {
     return attr_enum(k);
 }
 
-// Upgrade readnone/readonly/writeonly/argmemonly/... on functions to memory(...) (LLParser does this).
+// Upgrade readnone/readonly/writeonly/argmemonly/... on functions to memory(...) (LLParser's upgradeMemoryAttr):
+// ME starts unknown, is intersected with each legacy attribute, and if changed replaces any memory(...).
+fn me_and(a: u64, b: u64) -> u64 {
+    var r: u64 = 0;
+    for l in 6 { r = me_set(r, l, me_get(a, l) & me_get(b, l)); }
+    return r;
+}
+
 fn upgrade_fn_memory_attrs(mark: i64) {
-    var me: u64 = 0xFFFFFFFFFFFFFFFF;  // unset
+    let unknown = me_all(3);
+    var me = unknown;
     var have = false;
-    var i = mark;
     var outn = mark;
     let n = astack.len;
-    var ro = false;
-    var rn = false;
-    var wo = false;
-    while i < n {
+    for i in mark..n {
         let a = astack[i];
         let k = attrs[a].kind as i64;
-        if k == AK_ReadNone { rn = true; have = true; }
-        else if k == AK_ReadOnly { ro = true; have = true; }
-        else if k == AK_WriteOnly { wo = true; have = true; }
+        if k == AK_ReadNone { me = me_and(me, me_all(0)); have = true; }
+        else if k == AK_ReadOnly { me = me_and(me, me_all(1)); have = true; }
+        else if k == AK_WriteOnly { me = me_and(me, me_all(2)); have = true; }
+        else if k == -10 { me = me_and(me, me_set(0, 0, 3)); have = true; }
+        else if k == -11 { me = me_and(me, me_set(0, 1, 3)); have = true; }
+        else if k == -12 { me = me_and(me, me_set(me_set(0, 0, 3), 1, 3)); have = true; }
         else { astack[outn] = a; outn++; }
-        i++;
     }
     astack.resize(outn);
-    if !have { return; }
-    // ME = readnone ? none : readonly ? read : writeonly ? write : all ; intersect if several
-    var mr: i64 = 3;
-    if rn { mr = 0; } else if ro && wo { mr = 0; } else if ro { mr = 1; } else if wo { mr = 2; }
-    var d = me_all(mr);
-    // combine with an explicit memory attribute
-    for j in mark..astack.len {
-        let a = astack[j];
-        if attrs[a].kind as i64 == AK_Memory {
-            let x = attrs[a].i1;
-            var r: u64 = 0;
-            for l in 6 { r = me_set(r, l, me_get(x, l) & me_get(d, l)); }
-            astack[j] = attr_int(AK_Memory, r);
-            return;
-        }
+    if !have || me == unknown { return; }
+    var j = mark;
+    while j < astack.len {
+        if attrs[astack[j]].kind as i64 == AK_Memory { astack[j] = attr_int(AK_Memory, me); return; }
+        j++;
     }
-    astack.push(attr_int(AK_Memory, d));
+    astack.push(attr_int(AK_Memory, me));
 }
 
 // Parameter / return attributes (no groups).
@@ -1473,12 +1484,21 @@ fn alist_with_fn(l: i32, fnset: i32) -> i32 {
 fn resolve_attr_groups() {
     for g in grp_refs {
         let s = idx_get(attr_grps, g.grp);
-        if s < 0 { perr_at(0, str("unresolved attribute group reference #", g.grp)); }
+        if s < 0 { continue; }
         if g.kind == GR_FN {
             let gi = glob_of(g.target);
             let l = globs[gi].attrs;
             let cur = alist_fn(l);
-            globs[gi].attrs = alist_with_fn(l, merge_sets(cur, s));
+            var merged = merge_sets(cur, s);
+            let al = aset_find(merged, AK_Alignment);
+            if al >= 0 {
+                globs[gi].align = (log2_exact(attrs[al].i1 as! i64) + 1) as u8;
+                let mark = astack.len;
+                for k in asets[merged].n { let a = attr_runs[asets[merged].at + k]; if a != al { astack.push(a); } }
+                merged = aset_get(astack[mark..]);
+                astack.resize(mark);
+            }
+            globs[gi].attrs = alist_with_fn(l, merged);
         } else if g.kind == GR_CALL {
             let ii = inst_of(g.target);
             let l = insts[ii].attrs;
@@ -1702,6 +1722,16 @@ fn parse_cc() -> i32 {
 // define/declare
 fn parse_function(is_define: bool) {
     lex();
+    let dmark = astack.len;
+    if !is_define {
+        while tk == T_MDVAR {
+            let k = parse_md_attachment_kind();
+            let n = parse_md_node_ref();
+            astack.push(k);
+            astack.push(n);
+        }
+    }
+    let dat, dcnt = store_attachments(dmark);
     let f = parse_global_prefix();
     let cc = parse_cc();
     let retattrs = parse_param_attrs();
@@ -1774,13 +1804,14 @@ fn parse_function(is_define: bool) {
     }
     // metadata attachments (function-level)
     let mmark = astack.len;
-    while tk == T_MDVAR {
+    while is_define && tk == T_MDVAR {
         let k = parse_md_attachment_kind();
         let n = parse_md_node_ref();
         astack.push(k);
         astack.push(n);
     }
-    let mat, mcnt = store_attachments(mmark);
+    var mat, mcnt = store_attachments(mmark);
+    if !is_define { mat = dat; mcnt = dcnt; }
     // attribute list: [fn, ret, params...]
     let lmark = astack.len;
     astack.push(fnattrs);
@@ -1840,6 +1871,7 @@ fn parse_function(is_define: bool) {
     // function body
     cur_fn = v;
     fn_numbered.clear();
+    fn_next = 0;
     fwd_local_num.clear();
     fwd_local_st = new_symtab();
     fwd_local_count = 0;
@@ -1850,9 +1882,9 @@ fn parse_function(is_define: bool) {
             if symtab_lookup(globs[g].symtab, an) >= 0 { perr(str("redefinition of argument '%", sbytes(an), "'")); }
             symtab_set_name(globs[g].symtab, a, sbytes(an), false);
         } else {
-            let want = if an == -1 { fn_numbered.len } else { (-2 - an) as i64 };
-            if want != fn_numbered.len { perr(str("argument expected to be numbered '%", fn_numbered.len, "'")); }
-            fn_numbered.push(a);
+            let want = if an == -1 { fn_next } else { (-2 - an) as i64 };
+            if want < fn_next { perr(str("argument expected to be numbered '%", fn_next, "' or greater")); }
+            fn_num_add(want, a);
         }
     }
     vstack.resize(nmark);
@@ -1889,8 +1921,8 @@ fn parse_function_body(fv: i32) {
         } else {
             var n: i64 = -1;
             if tk == T_LABELID { n = tuint; lex(); }
-            let want = fn_numbered.len;
-            if n >= 0 && n != want { perr(str("label expected to be numbered '", want, "'")); }
+            if n >= 0 && n < fn_next { perr(str("label expected to be numbered '", fn_next, "' or greater")); }
+            let want = if n >= 0 { n } else { fn_next };
             if want < fwd_local_num.len && fwd_local_num[want] >= 0 {
                 bb = fwd_local_num[want];
                 fwd_local_num[want] = -1;
@@ -1900,7 +1932,7 @@ fn parse_function_body(fv: i32) {
                 bb = new_block(-1);
                 blocks[block_of(bb)].parent = fv;
             }
-            fn_numbered.push(bb);
+            fn_num_add(want, bb);
         }
         func_append_block(fv, bb);
         // instructions until a terminator
@@ -2493,8 +2525,13 @@ fn parse_module(path: const u8[:]) {
     dl_reset();
     lpos = 0;
     lex();
+    var dl_done = false;
     loop {
         if tk == T_EOF { break; }
+        if !dl_done && !tok_is("target") && !tok_is("source_filename") {
+            infer_datalayout();
+            dl_done = true;
+        }
         if tok_is("target") {
             lex();
             if tok_is("datalayout") {
@@ -2616,9 +2653,12 @@ fn parse_module(path: const u8[:]) {
         }
         perr("expected top-level entity");
     }
+    if !dl_done { infer_datalayout(); }
     // validateEndOfModule
     resolve_attr_groups();
+    declare_forward_intrinsics();
     for m in md_slots { if m >= 0 && mds[m].kind == MK_TEMP { perr_at(src.len, "use of undefined metadata"); } }
+    md_mark_cycles();
     if symtabs[gfwd_st].count > 0 { perr_at(src.len, "use of undefined value"); }
     for f in gfwd_num { if f >= 0 { perr_at(src.len, "use of undefined value"); } }
     for k in ba_fwd.len / 4 { if ba_fwd[4 * k] >= 0 { perr_at(src.len, "expected function name in blockaddress"); } }
@@ -2702,5 +2742,78 @@ fn upgrade_intrinsic_attrs() {
             }
         }
         f = globs[g].next;
+    }
+}
+
+// Forward-referenced llvm.* names become declarations with the call's function type (validateEndOfModule),
+// in name order (ForwardRefVals is a std::map), each use set in use-list order.
+fn declare_forward_intrinsics() {
+    var names: i32[>..] = [];
+    let t = symtabs[gfwd_st];
+    for k in t.cap {
+        let e = symslots[t.slots + k];
+        if e >= 0 && starts_with(sbytes(vals[e].name), "llvm.") { names.push(e); }
+    }
+    sort(names) { a, b => bytes_cmp(sbytes(vals[a].name), sbytes(vals[b].name)) < 0 };
+    for ph in names {
+        let nm = vals[ph].name;
+        while vals[ph].first_use >= 0 {
+            let u = vals[ph].first_use;
+            let user = uses[u].user;
+            if vals[user].kind != VK_INST || iop(user) != OP_CALL || u != vals[user].ops + vals[user].nops - 1 {
+                perr_at(src.len, "intrinsic can only be used as callee");
+            }
+            let fty = insts[inst_of(user)].ty2;
+            var f = symtab_lookup(modules[cur_module].symtab, nm);
+            if f < 0 {
+                f = new_glob(VK_FUNC, T_PTR, -1, 0);
+                let g = glob_of(f);
+                globs[g].vty = fty;
+                globs[g].intrinsic = 1;
+                globs[g].symtab = new_symtab();
+                let at = ints.len as i32;
+                for k in ty_fn_nparams(fty) { ints.push(-1); }
+                globs[g].args = at;
+                globs[g].nargs = ty_fn_nparams(fty) as i32;
+                for k in ty_fn_nparams(fty) { ints[at + k] = new_arg(f, ty_fn_param(fty, k), k); }
+                symtab_set_name(modules[cur_module].symtab, f, sbytes(nm), true);
+                module_append_global(f);
+            }
+            use_set(u, f);
+        }
+        symtab_remove(gfwd_st, ph);
+        vals[ph].kind = VK_DEAD;
+    }
+}
+
+// opt's DataLayout callback: no datalayout in the IR but a triple -> Triple::computeDataLayout.
+var cl_mtriple: u8[>..];
+fn infer_datalayout() {
+    if modules[cur_module].datalayout >= 0 && strs[modules[cur_module].datalayout].len > 0 { return; }
+    var t: u8[>..] = [];
+    if cl_mtriple.len > 0 { t.append(cl_mtriple); }
+    else if modules[cur_module].triple >= 0 { t.append(sbytes(modules[cur_module].triple)); }
+    if t.len == 0 { return; }
+    var d: u8[>..] = [];
+    if !compute_x86_datalayout(t, d) { fatal(str("cannot infer a data layout for target triple '", t, "' (only x86 is supported)")); }
+    modules[cur_module].datalayout = intern(d);
+    dl_parse(d);
+}
+
+// Uniqued nodes that are part of a cycle through themselves cannot be uniqued; LLVM prints them distinct.
+recursive fn md_reaches(from: i32, target: i32, depth: i64) -> bool {
+    if depth > 64 { return false; }
+    for k in mds[from].nops {
+        let o = md_ops[mds[from].ops + k];
+        if o < 0 || !md_is_node(o) { continue; }
+        if o == target { return true; }
+        if mds[o].distinct == 0 && md_reaches(o, target, depth + 1) { return true; }
+    }
+    return false;
+}
+
+fn md_mark_cycles() {
+    for m in md_slots {
+        if m >= 0 && mds[m].kind == MK_TUPLE && mds[m].distinct == 0 && md_reaches(m, m, 0) { mds[m].distinct = 1; }
     }
 }
