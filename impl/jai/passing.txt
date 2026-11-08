@@ -9708,6 +9708,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/X86/remove-debug.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/remove-debug.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/safe-low-bit-extract.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/safe-low-bit-extract.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/X86/sink-common-code-into-unreachable.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/sink-common-code-into-unreachable.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/sink-common-code.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/speculate-cttz-ctlz.ll::roundtrip
@@ -9837,6 +9838,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip-pseudoprobe.ll::rou
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue-inlined.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-from-addresstaken-block.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-from-addresstaken-block.ll::roundtrip
@@ -9970,6 +9972,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/preserving-debugloc-br.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/preserving-debugloc-br.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/profile-update-unreachable.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/profile-update-unreachable.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/rangereduce.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/rangereduce.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/return-merge.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/safe-abs.ll::opt
@@ -10018,6 +10021,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/switch-branch-fold-indirectbr-102351.
 tests/imported/llvm/Transforms/SimplifyCFG/switch-branch-fold-indirectbr-102351.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dead-default-lookup-table.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dead-default-lookup-table.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/switch-dead-default.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dead-default.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dedup.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dedup.ll::roundtrip

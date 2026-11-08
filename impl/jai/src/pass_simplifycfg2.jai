@@ -148,11 +148,17 @@ should_hoist_common_instructions :: (s: *Scfg, i1: Value_Id, i2: Value_Id) -> bo
     if is_call_base(i2) && (call_cannot_merge(i2) || call_is_convergent(i2)) return false;
     return true;
 }
-// DbgRecord::isIdenticalToWhenDefined
+// DbgRecord::isIdenticalToWhenDefined (the debug location is not compared)
 dbgr_identical :: (a: u32, b: u32) -> bool {
     ra := dbgr(a); rb := dbgr(b);
-    return ra.kind == rb.kind && ra.loc == rb.loc && ra.var == rb.var && ra.expr == rb.expr && ra.dbg == rb.dbg &&
-           ra.assign_id == rb.assign_id && ra.addr == rb.addr && ra.addr_expr == rb.addr_expr;
+    // ValueAsMetadata is unique per value in LLVM; here two rows can denote the same value after a RAUW
+    same_md :: (x: Md_Id, y: Md_Id) -> bool {
+        if x == y return true;
+        if x == NONE || y == NONE return false;
+        return ir.mds[x].kind == .VALUE && ir.mds[y].kind == .VALUE && ir.mds[x].value == ir.mds[y].value;
+    }
+    return ra.kind == rb.kind && same_md(ra.loc, rb.loc) && ra.var == rb.var && ra.expr == rb.expr &&
+           ra.assign_id == rb.assign_id && same_md(ra.addr, rb.addr) && ra.addr_expr == rb.addr_expr;
 }
 // hoistLockstepIdenticalDbgVariableRecords
 hoist_lockstep_identical_dbg_records :: (ti: Value_Id, i1: Value_Id, others: [] Value_Id) {

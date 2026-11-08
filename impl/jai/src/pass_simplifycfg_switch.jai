@@ -1086,7 +1086,7 @@ is_switch_dense_n :: (num_cases: u64, case_range: u64, opt_size: bool) -> bool {
     return num_cases * 100 >= case_range * min_density;
 }
 is_switch_dense_values :: (vals: [] s64, opt_size: bool) -> bool {
-    diff := cast(u64) vals[vals.count - 1] - cast(u64) vals[0];
+    diff := cast,no_check(u64) vals[vals.count - 1] - cast,no_check(u64) vals[0];
     range := diff + 1;
     if range < diff return false;
     return is_switch_dense_n(cast(u64) vals.count, range, opt_size);
@@ -1096,9 +1096,9 @@ get_dense_switch_range_reduction_shift :: (vals: [] s64, base: s64, opt_size: bo
     for vals if it < base return -1;
     red := NewArray(vals.count, s64,, allocator = temp);
     or: u64 = 0;
-    for vals { r := cast(u64) it - cast(u64) base; or |= r; red[it_index] = cast(s64) r; }
+    for vals { r := cast,no_check(u64) it - cast,no_check(u64) base; or |= r; red[it_index] = cast,no_check(s64) r; }
     shift := 0; while shift < 64 && ((or >> cast(u64) shift) & 1) == 0 shift += 1;
-    if shift > 0 for *red it.* = cast(s64) ((cast(u64) it.*) >> cast(u64) shift);
+    if shift > 0 for *red it.* = cast,no_check(s64) ((cast,no_check(u64) it.*) >> cast(u64) shift);
     if !is_switch_dense_values(red, opt_size) return -1;
     return shift;
 }

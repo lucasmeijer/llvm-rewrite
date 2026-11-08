@@ -33,12 +33,24 @@ copy_metadata_kinds :: (dst: Value_Id, src: Value_Id, kinds: [] u32) {
 MD_ANNOTATION_KIND :: 30;   // FixedMetadataKinds: annotation
 md_kind :: (name: string) -> u32 { return md_kind_id(name); }
 
-// RecursivelyDeleteTriviallyDeadInstructions(V)
+// RecursivelyDeleteTriviallyDeadInstructions(V, TLI = nullptr)
 recursively_delete_trivially_dead_value :: (v: Value_Id) -> bool {
-    if !is_inst(v) || has_uses(v) || !is_instruction_trivially_dead(v) return false;
-    l: [..] Value_Id; l.allocator = temp;
-    array_add(*l, v);
-    recursively_delete_trivially_dead_instructions(l);
+    dead_no_tli :: (i: Value_Id) -> bool { return !has_uses(i) && would_instruction_be_trivially_dead(i, false); }
+    if !is_inst(v) || !dead_no_tli(v) return false;
+    dead: [..] Value_Id; dead.allocator = temp;
+    array_add(*dead, v);
+    while dead.count {
+        i := pop(*dead);
+        if vkind(i) == .DEAD continue;
+        salvage_debug_info(i);
+        n := nops(i);
+        for k: 0..cast(s64) n - 1 {
+            o := op(i, cast(u32) k);
+            set_op(i, cast(u32) k, NONE);
+            if o != NONE && is_inst(o) && dead_no_tli(o) array_add(*dead, o);
+        }
+        erase_inst_with_metadata(i);
+    }
     return true;
 }
 
@@ -389,7 +401,7 @@ try_to_simplify_uncond_branch_from_empty_block :: (bb: Value_Id, dtu: *Dtu) -> b
     }
     if block_single_predecessor(succ) != NONE {
         t := block_terminator(bb);
-        drop_dbg_records(t);   // the terminator's records are trailing records once it's gone; splice moves them
+        trailing := records_take(t);   // the terminator's records become trailing records; splice moves them
         erase_inst_with_metadata(t);
         // Succ->splice(Succ->getFirstNonPHIIt(), BB)
         pos := block_first_non_phi(succ);
@@ -398,6 +410,7 @@ try_to_simplify_uncond_branch_from_empty_block :: (bb: Value_Id, dtu: *Dtu) -> b
             inst_unlink(i);
             if pos == NONE block_append_inst(succ, i); else inst_insert_before(i, pos);
         }
+        if trailing records_prepend(pos, trailing);
     } else {
         while block_first(bb) != NONE && inst_op(block_first(bb)) == .PHI {
             pn := block_first(bb);

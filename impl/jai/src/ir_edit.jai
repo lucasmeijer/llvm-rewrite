@@ -237,8 +237,8 @@ phi_remove_incoming :: (p: Value_Id, idx: u32, delete_if_empty := true) -> Value
     ir.u_aux[op_use(p, last)] = NONE;
     ir.v_nops[p] = last;
     if last == 0 && delete_if_empty {
-        replace_all_uses_with(p, const_poison(vtype(p)));
-        erase_inst(p);
+        rauw_with_metadata(p, const_poison(vtype(p)));
+        erase_inst_with_metadata(p);
     }
     return removed;
 }
@@ -294,8 +294,8 @@ block_remove_predecessor :: (b: Value_Id, pred: Value_Id, keep_one_input_phis :=
         if num_preds == 1 continue;
         c := phi_has_constant_value(it);
         if c != NONE {
-            replace_all_uses_with(it, c);
-            erase_inst(it);
+            rauw_with_metadata(it, c);   // Value::replaceAllUsesWith also updates debug-record users
+            erase_inst_with_metadata(it);
         }
     }
 }
