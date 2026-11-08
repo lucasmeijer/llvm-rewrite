@@ -629,7 +629,8 @@ fp_convert :: (from: Type_Kind, to: Type_Kind, w: [] u64) -> (w: [] u64, exact: 
 fp_convert_exact_check :: (to: Type_Kind, from: Type_Kind, w2: [] u64, orig: [] u64) -> bool {
     // exact iff converting back yields the same value
     d := fp_decode(to, w2);
-    if d.cat != .NORMAL return true;
+    // the source is finite and non-zero here: overflowing to infinity or underflowing to zero loses information
+    if d.cat != .NORMAL return false;
     pt, et, mt, bt := fp_semantics(to);
     w3, of, zr := fp_round(from, d.neg, d.sig, big_from_u64(1), d.exp - (pt - 1));
     for w3 if it != orig[it_index] return false;

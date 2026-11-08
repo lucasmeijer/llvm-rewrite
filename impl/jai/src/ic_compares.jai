@@ -1331,7 +1331,8 @@ ic_fold_icmp_mul_constant :: (cmp: Value_Id, mul: Value_Id, c: APInt) -> Value_I
     }
     okm, mulc := pm_apint(op(mul, 1));
     if !okm return NONE;
-    ok_st, _ := ic_is_sign_test(pred, c);
+    ok_st, st_pred := ic_is_sign_test(pred, c);   // isSignTest updates Pred even when the nsw check below fails
+    pred = st_pred;
     if ok_st && has_nsw(mul) {
         p := pred;
         if ap_sign_bit(mulc) p = icmp_swapped(p);
@@ -4620,12 +4621,590 @@ ic_fold_cmp_select_of_constants :: (i: Value_Id) -> Value_Id {
     return ic_replace_inst_uses_with(i, res);
 }
 
-// ---------------------------------------------------------------- visitFCmpInst (TODO: being ported)
+
+// ================================================================ fcmp
+
+// Type::getFPMantissaWidth (-1 for ppc_fp128)
+ic_fp_mantissa_width :: (t: Type_Id) -> s64 {
+    k := type_kind(scalar_type(t));
+    if k == {
+        case .HALF; return 11; case .BFLOAT; return 8; case .FLOAT; return 24; case .DOUBLE; return 53;
+        case .X86_FP80; return 64; case .FP128; return 113;
+    }
+    return -1;
+}
+apf_make :: (k: Type_Kind, w: [] u64) -> APFloat { return apf_from_words(k, w); }
+apf_cmp :: (a: APFloat, b: APFloat) -> Fp_Cmp { x := a; y := b; return fp_compare(a.k, apf_words(*x), apf_words(*y)); }
+// ConstantFP::get(Ty, APFloat) (splat for vectors)
+ic_const_fp :: (t: Type_Id, f: APFloat) -> Value_Id {
+    g := f;
+    c := const_fp_words(scalar_type(t), apf_words(*g));
+    if is_vector_type(t) return cf_get_splat(t, c);
+    return c;
+}
+// ConstantFP::getZero(Ty)
+ic_fp_zero :: (t: Type_Id) -> Value_Id { return const_null_value(t); }
+
+// isKnownNeverNaN / isKnownNeverInfinity
+ic_is_known_never_nan :: (v: Value_Id, q: Simplify_Query) -> bool { return kfpc_is_known_never_nan(compute_known_fp_class(v, FC_NAN, q)); }
+ic_is_known_never_infinity :: (v: Value_Id, q: Simplify_Query) -> bool { return kfpc_is_known_never_infinity(compute_known_fp_class(v, FC_INF, q)); }
+
+// foldFCmpIntToFPConst: fcmp ([us]itofp x, cst)
+ic_fold_fcmp_int_to_fp_const :: (i: Value_Id, lhsi: Value_Id, rhsc: Value_Id) -> Value_Id {
+    okf, rhs := pm_apfloat(rhsc);
+    if !okf return NONE;
+    mw := ic_fp_mantissa_width(vtype(lhsi));
+    if mw == -1 return NONE;
+    int_ty := vtype(op(lhsi, 0));
+    iw := scalar_bits(op(lhsi, 0));
+    unsigned := inst_op(lhsi) == .UITOFP;
+    rk := rhs.k;
+    rw := rhs; rws := apf_words(*rw);
+    if fcmp_is_equality(inst_pred(i)) {
+        p := inst_pred(i);
+        _, _, exact := fp_to_integer_rm(rk, rws, iw, !unsigned, RM_NEAREST_TIES_TO_EVEN);
+        if !exact {
+            rint, _ := fp_round_to_integral(rk, rws, RM_NEAREST_TIES_TO_EVEN);
+            if fp_compare(rk, rws, rint) != .EQUAL {
+                if p == FCMP_OEQ || p == FCMP_UEQ return ic_replace_inst_uses_with(i, get_false(vtype(i)));
+                return ic_replace_inst_uses_with(i, get_true(vtype(i)));
+            }
+        }
+    }
+    if cast(s64) iw > mw {
+        exp := fp_ilogb(rk, rws);
+        um: s64 = ifx unsigned then 0 else 1;
+        if exp == IEK_INF {
+            max_exp := fp_ilogb(rk, fp_largest(rk, false));
+            if max_exp < cast(s64) iw - um return NONE;
+        } else {
+            if mw <= exp && exp <= cast(s64) iw - um return NONE;
+        }
+    }
+    pred: u8;
+    p := inst_pred(i);
+    if p == {
+        case FCMP_UEQ; #through; case FCMP_OEQ; pred = ICMP_EQ;
+        case FCMP_UGT; #through; case FCMP_OGT; pred = ifx unsigned then cast(u8) ICMP_UGT else ICMP_SGT;
+        case FCMP_UGE; #through; case FCMP_OGE; pred = ifx unsigned then cast(u8) ICMP_UGE else ICMP_SGE;
+        case FCMP_ULT; #through; case FCMP_OLT; pred = ifx unsigned then cast(u8) ICMP_ULT else ICMP_SLT;
+        case FCMP_ULE; #through; case FCMP_OLE; pred = ifx unsigned then cast(u8) ICMP_ULE else ICMP_SLE;
+        case FCMP_UNE; #through; case FCMP_ONE; pred = ICMP_NE;
+        case FCMP_ORD; return ic_replace_inst_uses_with(i, get_true(vtype(i)));
+        case FCMP_UNO; return ic_replace_inst_uses_with(i, get_false(vtype(i)));
+        case; fatal("internal: Unexpected predicate!");
+    }
+    t := get_true(vtype(i)); f := get_false(vtype(i));
+    if !unsigned {
+        smax := fp_from_integer(rk, ap_words(ap_signed_max(iw)), iw, true);
+        if fp_compare(rk, smax, rws) == .LESS {
+            if pred == ICMP_NE || pred == ICMP_SLT || pred == ICMP_SLE return ic_replace_inst_uses_with(i, t);
+            return ic_replace_inst_uses_with(i, f);
+        }
+    } else {
+        umax := fp_from_integer(rk, ap_words(ap_all_ones(iw)), iw, false);
+        if fp_compare(rk, umax, rws) == .LESS {
+            if pred == ICMP_NE || pred == ICMP_ULT || pred == ICMP_ULE return ic_replace_inst_uses_with(i, t);
+            return ic_replace_inst_uses_with(i, f);
+        }
+    }
+    if !unsigned {
+        smin := fp_from_integer(rk, ap_words(ap_signed_min(iw)), iw, true);
+        if fp_compare(rk, smin, rws) == .GREATER {
+            if pred == ICMP_NE || pred == ICMP_SGT || pred == ICMP_SGE return ic_replace_inst_uses_with(i, t);
+            return ic_replace_inst_uses_with(i, f);
+        }
+    } else {
+        umin := fp_from_integer(rk, ap_words(ap_zero(iw)), iw, false);
+        if fp_compare(rk, umin, rws) == .GREATER {
+            if pred == ICMP_NE || pred == ICMP_UGT || pred == ICMP_UGE return ic_replace_inst_uses_with(i, t);
+            return ic_replace_inst_uses_with(i, f);
+        }
+    }
+    iwords, _, exact := fp_to_integer_rm(rk, rws, iw, !unsigned, RM_TOWARD_ZERO);
+    rhs_int := ap_from_words(iw, iwords);
+    if !apf_is_zero(rhs) {
+        if !exact {
+            neg := apf_is_negative(rhs);
+            if pred == {
+                case ICMP_NE; return ic_replace_inst_uses_with(i, t);
+                case ICMP_EQ; return ic_replace_inst_uses_with(i, f);
+                case ICMP_ULE; if neg return ic_replace_inst_uses_with(i, f);
+                case ICMP_SLE; if neg pred = ICMP_SLT;
+                case ICMP_ULT; if neg return ic_replace_inst_uses_with(i, f); pred = ICMP_ULE;
+                case ICMP_SLT; if !neg pred = ICMP_SLE;
+                case ICMP_UGT; if neg return ic_replace_inst_uses_with(i, t);
+                case ICMP_SGT; if neg pred = ICMP_SGE;
+                case ICMP_UGE; if neg return ic_replace_inst_uses_with(i, t); pred = ICMP_UGT;
+                case ICMP_SGE; if !neg pred = ICMP_SGT;
+            }
+        }
+    }
+    return create_icmp(pred, op(lhsi, 0), const_int_ap(int_ty, rhs_int));
+}
+
+// foldFCmpReciprocalAndZero: (C / X) < 0.0 --> X < 0.0
+ic_fold_fcmp_reciprocal_and_zero :: (i: Value_Id, lhsi: Value_Id, rhsc: Value_Id) -> Value_Id {
+    pred := inst_pred(i);
+    if pred != FCMP_OGT && pred != FCMP_OLT && pred != FCMP_OGE && pred != FCMP_OLE return NONE;
+    if !pm_any_zero_fp(rhsc) return NONE;
+    if (get_fmf(lhsi) & FMF_NINF) == 0 || (get_fmf(i) & FMF_NINF) == 0 return NONE;
+    okc, c := pm_apfloat(op(lhsi, 0));
+    if !okc return NONE;
+    if apf_is_zero(c) return NONE;
+    if apf_is_negative(c) pred = cmp_swapped(inst_pred(i));
+    return create_fcmp(pred, op(lhsi, 1), rhsc, get_fmf(i));
+}
+
+// foldFCmpFpTrunc: fptrunc(x) cmp C --> x cmp ext(C)
+ic_fold_fcmp_fp_trunc :: (i: Value_Id, fptrunc: Value_Id, c: Value_Id) -> Value_Id {
+    pred := inst_pred(i);
+    dest_ty := vtype(op(fptrunc, 0));
+    okc, cv := pm_apfloat(c);
+    if !okc return NONE;
+    if pred == FCMP_ORD || pred == FCMP_UNO return create_fcmp(pred, op(fptrunc, 0), ic_fp_zero(dest_ty), get_fmf(i));
+    round_down: bool;
+    if pred == FCMP_OGE || pred == FCMP_UGE || pred == FCMP_OLT || pred == FCMP_ULT round_down = true;
+    else if pred == FCMP_OGT || pred == FCMP_UGT || pred == FCMP_OLE || pred == FCMP_ULE round_down = false;
+    else return NONE;
+    if apf_is_nan(cv) || apf_is_inf(cv) return NONE;
+    sk := cv.k;
+    dk := type_kind(scalar_type(dest_ty));
+    conv :: (src: APFloat, k: Type_Kind) -> APFloat {
+        s := src;
+        w, _ := fp_convert(src.k, k, apf_words(*s));
+        return apf_make(k, w);
+    }
+    next :: (v: APFloat, down: bool) -> APFloat {
+        s := v;
+        w, _ := fp_next(v.k, apf_words(*s), down);
+        return apf_make(v.k, w);
+    }
+    add :: (a: APFloat, b: APFloat) -> APFloat {
+        x := a; y := b;
+        w, _ := fp_add_sub(a.k, apf_words(*x), apf_words(*y), false);
+        return apf_make(a.k, w);
+    }
+    sub :: (a: APFloat, b: APFloat) -> APFloat {
+        x := a; y := b;
+        w, _ := fp_add_sub(a.k, apf_words(*x), apf_words(*y), true);
+        return apf_make(a.k, w);
+    }
+    next_c := next(cv, round_down);
+    ext_c := conv(cv, dk);
+    ext_next_c := conv(next_c, dk);
+    if apf_is_inf(next_c) {
+        prev_c := next(cv, !round_down);
+        bias := conv(sub(cv, prev_c), dk);
+        ext_next_c = add(ext_c, bias);
+    }
+    sm := add(ext_c, ext_next_c);
+    ext_mid := apf_make(dk, fp_scalbn(dk, apf_words(*sm), -1, RM_NEAREST_TIES_TO_EVEN));
+    mid := conv(ext_mid, sk);
+    if apf_cmp(mid, cv) != .EQUAL ext_mid = next(ext_mid, !round_down);
+    if apf_is_inf(next_c) {
+        if apf_is_inf(conv(ext_mid, sk)) return NONE;
+        next_ext_mid := next(ext_mid, round_down);
+        if apf_is_finite(conv(next_ext_mid, sk)) return NONE;
+    }
+    return create_fcmp(pred, op(fptrunc, 0), ic_const_fp(dest_ty, ext_mid), get_fmf(i));
+}
+
+// foldFabsWithFcmpZero
+ic_fold_fabs_with_fcmp_zero :: (i: Value_Id) -> Value_Id {
+    okf, x := pm_fabs(op(i, 0));
+    if !okf return NONE;
+    okc, c := pm_apfloat(op(i, 1));
+    if !okc return NONE;
+    if !apf_is_pos_zero(c) {
+        if !apf_is_smallest_normalized(c) return NONE;
+        _, inm := fn_denormal_mode(inst_fn(i), vtype(op(i, 1)));
+        if inm == DENORMAL_PRESERVE_SIGN || inm == DENORMAL_POSITIVE_ZERO {
+            replace :: (i: Value_Id, p: u8, x: Value_Id) -> Value_Id { return create_fcmp(p, x, ic_fp_zero(vtype(x)), get_fmf(i)); }
+            if inst_pred(i) == {
+                case FCMP_OLT; return replace(i, FCMP_OEQ, x);
+                case FCMP_UGE; return replace(i, FCMP_UNE, x);
+                case FCMP_OGE; return replace(i, FCMP_ONE, x);
+                case FCMP_ULT; return replace(i, FCMP_UEQ, x);
+            }
+        }
+        return NONE;
+    }
+    replace_pred_and_op0 :: (i: Value_Id, p: u8, x: Value_Id) -> Value_Id {
+        inst(i).pred = p;
+        return ic_replace_operand(i, 0, x);
+    }
+    p := inst_pred(i);
+    if p == {
+        case FCMP_UGE; #through;
+        case FCMP_OLT; fatal("internal: fcmp should have simplified");
+        case FCMP_OGT; return replace_pred_and_op0(i, FCMP_ONE, x);
+        case FCMP_UGT; return replace_pred_and_op0(i, FCMP_UNE, x);
+        case FCMP_OLE; return replace_pred_and_op0(i, FCMP_OEQ, x);
+        case FCMP_ULE; return replace_pred_and_op0(i, FCMP_UEQ, x);
+        case FCMP_OGE; return replace_pred_and_op0(i, FCMP_ORD, x);
+        case FCMP_ULT; return replace_pred_and_op0(i, FCMP_UNO, x);
+        case FCMP_OEQ; #through; case FCMP_UEQ; #through; case FCMP_ONE; #through;
+        case FCMP_UNE; #through; case FCMP_ORD; #through; case FCMP_UNO;
+            return replace_pred_and_op0(i, p, x);
+    }
+    return NONE;
+}
+
+// foldSqrtWithFcmpZero
+ic_fold_sqrt_with_fcmp_zero :: (i: Value_Id) -> Value_Id {
+    oks, x := pm_intrinsic1(op(i, 0), IID_SQRT);
+    if !oks return NONE;
+    if !pm_pos_zero_fp(op(i, 1)) return NONE;
+    if (get_fmf(op(i, 0)) & FMF_NINF) == 0 set_fmf(i, get_fmf(i) & ~cast(u32) FMF_NINF);
+    rp :: (i: Value_Id, p: u8, x: Value_Id) -> Value_Id { inst(i).pred = p; return ic_replace_operand(i, 0, x); }
+    p := inst_pred(i);
+    if p == {
+        case FCMP_OLT; #through;
+        case FCMP_UGE; fatal("internal: fcmp should have simplified");
+        case FCMP_ULT; #through; case FCMP_ULE; #through; case FCMP_OGT; #through;
+        case FCMP_OGE; #through; case FCMP_OEQ; #through; case FCMP_UNE;
+            return ic_replace_operand(i, 0, x);
+        case FCMP_OLE; return rp(i, FCMP_OEQ, x);
+        case FCMP_UGT; return rp(i, FCMP_UNE, x);
+        case FCMP_UEQ; return rp(i, FCMP_ULE, x);
+        case FCMP_ONE; return rp(i, FCMP_OGT, x);
+        case FCMP_ORD; return rp(i, FCMP_OGE, x);
+        case FCMP_UNO; return rp(i, FCMP_ULT, x);
+    }
+    fatal("internal: Unexpected predicate!");
+    return NONE;
+}
+
+// foldFCmpFNegCommonOp
+ic_fold_fcmp_fneg_common_op :: (i: Value_Id) -> Value_Id {
+    pred := inst_pred(i);
+    op0 := op(i, 0); op1 := op(i, 1);
+    ok0, _ := pm_fneg(op0); ok1, _ := pm_fneg(op1);
+    if ok0 && !ok1 { t := op0; op0 = op1; op1 = t; pred = cmp_swapped(inst_pred(i)); }
+    okn, nx := pm_fneg(op1);
+    if !okn || nx != op0 return NONE;
+    return create_fcmp(pred, op0, ic_fp_zero(vtype(op0)), get_fmf(i));
+}
+
+// foldFCmpFSubIntoFCmp
+ic_fold_fcmp_fsub_into_fcmp :: (i: Value_Id, lhsi: Value_Id, rhsc: Value_Id) -> Value_Id {
+    pred := inst_pred(i);
+    x := op(lhsi, 0); y := op(lhsi, 1);
+    first_group := pred == FCMP_UGT || pred == FCMP_ULT || pred == FCMP_UNE || pred == FCMP_OEQ || pred == FCMP_OGE || pred == FCMP_OLE;
+    second_group := pred == FCMP_OGT || pred == FCMP_OLT || pred == FCMP_ONE || pred == FCMP_UEQ || pred == FCMP_UGE || pred == FCMP_ULE;
+    if !first_group && !second_group return NONE;
+    lf := get_fmf(lhsi);
+    if first_group {
+        q := ic_q(i);
+        if (lf & FMF_NNAN) == 0 && (lf & FMF_NINF) == 0 && !ic_is_known_never_infinity(y, q) && !ic_is_known_never_infinity(x, q) return NONE;
+    }
+    if pm_any_zero_fp(rhsc) {
+        outm, inm := fn_denormal_mode(inst_fn(i), vtype(lhsi));
+        if outm == DENORMAL_IEEE && inm == DENORMAL_IEEE {
+            ic_replace_operand(i, 0, x);
+            ic_replace_operand(i, 1, y);
+            fm := get_fmf(i);
+            fm = (fm & ~cast(u32) FMF_NINF) | (lf & FMF_NINF);
+            if (lf & FMF_NNAN) != 0 fm |= FMF_NNAN;
+            set_fmf(i, fm);
+            return i;
+        }
+    }
+    okc, c := pm_apfloat(rhsc);
+    if okc && is_inst(lhsi) && inst_op(lhsi) == .FSUB && op(lhsi, 0) == rhsc && is_inst(y) && (inst_op(y) == .UITOFP || inst_op(y) == .SITOFP) &&
+       apf_category(c) == .NORMAL && !apf_is_denormal(c) {
+        mw := ic_fp_mantissa_width(vtype(lhsi));
+        cc := c;
+        if mw != -1 && fp_ilogb(c.k, apf_words(*cc)) < mw {
+            inst(i).pred = cmp_swapped(inst_pred(i));
+            ic_replace_operand(i, 0, y);
+            ic_replace_operand(i, 1, ic_fp_zero(vtype(lhsi)));
+            return i;
+        }
+    }
+    return NONE;
+}
+
+// canBeCastedExactlyIntToFP (InstCombineCasts.cpp)
+ic_can_be_casted_exactly_int_to_fp :: (v: Value_Id, fp_ty: Type_Id, is_signed: bool, cxt: Value_Id) -> bool {
+    src_size := cast(s64) scalar_bits(v) - (ifx is_signed then 1 else 0);
+    dest_sig := ic_fp_mantissa_width(fp_ty);
+    if src_size <= dest_sig return true;
+    if is_inst(v) && (inst_op(v) == .FPTOSI || inst_op(v) == .FPTOUI) {
+        src_sig := ic_fp_mantissa_width(vtype(op(v, 0)));
+        if !is_signed && inst_op(v) == .FPTOSI src_sig += 1;
+        if src_sig > 0 && dest_sig > 0 && src_sig <= dest_sig return true;
+    }
+    k := ic_known_bits(v, cxt);
+    sig := cast(s64) scalar_bits(v) - cast(s64) kb_count_min_leading_zeros(k) - cast(s64) kb_count_min_trailing_zeros(k);
+    if sig <= dest_sig return true;
+    if is_signed {
+        sig = cast(s64) scalar_bits(v) - cast(s64) ic_num_sign_bits(v, cxt);
+        if sig <= dest_sig return true;
+    }
+    return false;
+}
+
+// foldFCmpFAbsFSubIntToFP
+ic_fold_fcmp_fabs_fsub_int_to_fp :: (i: Value_Id) -> Value_Id {
+    okf, arg := pm_fabs(op(i, 0));
+    if !okf return NONE;
+    okc, c := pm_apfloat(op(i, 1));
+    if !okc || !apf_is_finite_non_zero(c) return NONE;
+    pred := inst_pred(i);
+    strict_lt := pred == FCMP_OLT || pred == FCMP_ULT;
+    le := pred == FCMP_OLE || pred == FCMP_ULE;
+    strict_gt := pred == FCMP_OGT || pred == FCMP_UGT;
+    ge := pred == FCMP_OGE || pred == FCMP_UGE;
+    if !strict_lt && !strict_gt && !ge return NONE;
+    one := apf_make(c.k, fp_from_integer(c.k, ap_words(ap_one(2)), 2, false));
+    cmp := apf_cmp(c, one);
+    if strict_lt && cmp == .GREATER return NONE;
+    if ge && cmp == .GREATER return NONE;
+    if le && cmp != .GREATER return NONE;
+    if strict_gt && cmp != .LESS return NONE;
+    if !(is_inst(arg) && inst_op(arg) == .FSUB) return NONE;
+    a := op(arg, 0); b := op(arg, 1);
+    is_signed: bool;
+    if is_inst(a) && inst_op(a) == .UITOFP && is_inst(b) && inst_op(b) == .UITOFP is_signed = false;
+    else if is_inst(a) && inst_op(a) == .SITOFP && is_inst(b) && inst_op(b) == .SITOFP is_signed = true;
+    else return NONE;
+    a = op(a, 0); b = op(b, 0);
+    if vtype(a) != vtype(b) return NONE;
+    fpt := vtype(arg);
+    if !ic_can_be_casted_exactly_int_to_fp(a, fpt, is_signed, i) || !ic_can_be_casted_exactly_int_to_fp(b, fpt, is_signed, i) return NONE;
+    return create_icmp(ifx strict_lt || le then cast(u8) ICMP_EQ else ICMP_NE, a, b);
+}
+
+// foldFCmpWithFloorAndCeil
+ic_fold_fcmp_with_floor_and_ceil :: (i: Value_Id) -> Value_Id {
+    lhs := op(i, 0); rhs := op(i, 1);
+    op_type := vtype(lhs);
+    pred := inst_pred(i);
+    is_of :: (v: Value_Id, id: Intrinsic_Id, x: Value_Id) -> bool { ok, a := pm_intrinsic1(v, id); return ok && a == x; }
+    floor_x := is_of(lhs, IID_FLOOR, rhs);
+    ceil_x := is_of(lhs, IID_CEIL, rhs);
+    if !floor_x && !ceil_x {
+        floor_x = is_of(rhs, IID_FLOOR, lhs);
+        if !floor_x ceil_x = is_of(rhs, IID_CEIL, lhs);
+        if floor_x || ceil_x { t := lhs; lhs = rhs; rhs = t; pred = cmp_swapped(inst_pred(i)); }
+    }
+    if (floor_x || ceil_x) && fcmp_is_commutative(pred) && has_one_use(lhs) {
+        tx := icb_unary_intrinsic(IID_TRUNC, rhs);
+        return create_fcmp(pred, tx, rhs, get_fmf(i));
+    }
+    if pred == {
+        case FCMP_OLE; if floor_x return create_fcmp(FCMP_ORD, rhs, ic_fp_zero(op_type), get_fmf(i));
+        case FCMP_OGT; if floor_x return ic_replace_inst_uses_with(i, get_false(vtype(i)));
+        case FCMP_OGE; if ceil_x return create_fcmp(FCMP_ORD, rhs, ic_fp_zero(op_type), get_fmf(i));
+        case FCMP_OLT; if ceil_x return ic_replace_inst_uses_with(i, get_false(vtype(i)));
+        case FCMP_ULE; if floor_x return ic_replace_inst_uses_with(i, get_true(vtype(i)));
+        case FCMP_UGT; if floor_x return create_fcmp(FCMP_UNO, rhs, ic_fp_zero(op_type), get_fmf(i));
+        case FCMP_UGE; if ceil_x return ic_replace_inst_uses_with(i, get_true(vtype(i)));
+        case FCMP_ULT; if ceil_x return create_fcmp(FCMP_UNO, rhs, ic_fp_zero(op_type), get_fmf(i));
+    }
+    return NONE;
+}
+
+// isMinMaxCmpSelectEliminable
+ic_is_min_max_cmp_select_eliminable :: (flavor: Select_Flavor, a: Value_Id, b: Value_Id) -> bool {
+    okf, apf := pm_apfloat(b);
+    if !okf return false;
+    if !(is_inst(a) && (inst_op(a) == .SITOFP || inst_op(a) == .UITOFP)) return false;
+    unsigned := inst_op(a) == .UITOFP;
+    bw := scalar_bits(op(a, 0));
+    boundary: APInt;
+    if flavor == .FMAXNUM boundary = ifx unsigned then ap_zero(bw) else ap_signed_min(bw);
+    else boundary = ifx unsigned then ap_all_ones(bw) else ap_signed_max(bw);
+    f := apf;
+    w, st, exact := fp_to_integer_rm(apf.k, apf_words(*f), bw, !unsigned, RM_TOWARD_ZERO);
+    return st == 0 && exact && ap_eq(ap_from_words(bw, w), boundary);
+}
+
+// ---------------------------------------------------------------- visitFCmpInst
+
 ic_visit_fcmp :: (i: Value_Id) -> Value_Id {
     changed := false;
     if ic_complexity(op(i, 0)) < ic_complexity(op(i, 1)) { cmp_swap_operands(i); changed = true; }
-    v := simplify_fcmp_inst(inst_pred(i), op(i, 0), op(i, 1), get_fmf(i), ic_q(i));
+    pred := inst_pred(i);
+    op0 := op(i, 0); op1 := op(i, 1);
+    v := simplify_fcmp_inst(pred, op0, op1, get_fmf(i), ic_q(i));
     if v != NONE return ic_replace_inst_uses_with(i, v);
+    op_type := vtype(op0);
+    if op0 == op1 {
+        if pred == FCMP_UNO || pred == FCMP_ULT || pred == FCMP_UGT || pred == FCMP_UNE {
+            inst(i).pred = FCMP_UNO;
+            set_op(i, 1, const_null_value(op_type));
+            return i;
+        }
+        if pred == FCMP_ORD || pred == FCMP_OEQ || pred == FCMP_OGE || pred == FCMP_OLE {
+            inst(i).pred = FCMP_ORD;
+            set_op(i, 1, const_null_value(op_type));
+            return i;
+        }
+    }
+    if fcmp_is_commutative(pred) {
+        ok, a, b := ic_match_symmetric_pair(op(i, 0), op(i, 1));
+        if ok {
+            ic_replace_operand(i, 0, a);
+            ic_replace_operand(i, 1, b);
+            return i;
+        }
+    }
+    if pred == FCMP_ORD || pred == FCMP_UNO {
+        if !pm_pos_zero_fp(op0) && ic_is_known_never_nan(op0, ic_q(i)) return ic_replace_operand(i, 0, ic_fp_zero(op_type));
+        if !pm_pos_zero_fp(op1) && ic_is_known_never_nan(op1, ic_q(i)) return ic_replace_operand(i, 1, ic_fp_zero(op_type));
+    }
+    {
+        okx, x := pm_fneg(op0);
+        oky, y := pm_fneg(op1);
+        if okx && oky return create_fcmp(cmp_swapped(pred), x, y, get_fmf(i));
+    }
+    r := ic_fold_fcmp_fneg_common_op(i); if r != NONE return r;
+    if has_one_use(i) {
+        si := first_user(i);
+        if is_inst(si) && inst_op(si) == .SELECT {
+            spr, a, b := match_select_pattern(si);
+            redundant := (spr.flavor == .FMAXNUM || spr.flavor == .FMINNUM) && ic_is_min_max_cmp_select_eliminable(spr.flavor, a, b);
+            if spr.flavor != .UNKNOWN && !redundant return NONE;
+        }
+    }
+    if pm_any_zero_fp(op1) && !pm_pos_zero_fp(op1) return ic_replace_operand(i, 1, ic_fp_zero(op_type));
+    {
+        okc, c := pm_apfloat(op1);
+        if okc && apf_is_inf(c) {
+            p := ifx apf_is_negative(c) then cmp_swapped(pred) else pred;
+            if p == {
+                case FCMP_ORD; #through; case FCMP_UNO; #through; case FCMP_TRUE; #through;
+                case FCMP_FALSE; #through; case FCMP_OGT; #through; case FCMP_ULE;
+                    fatal("internal: Should be simplified by InstSimplify");
+                case FCMP_OLT; return create_fcmp(FCMP_ONE, op0, op1, get_fmf(i));
+                case FCMP_OLE; return create_fcmp(FCMP_ORD, op0, ic_fp_zero(op_type), get_fmf(i));
+                case FCMP_OGE; return create_fcmp(FCMP_OEQ, op0, op1, get_fmf(i));
+                case FCMP_ULT; return create_fcmp(FCMP_UNE, op0, op1, get_fmf(i));
+                case FCMP_UGT; return create_fcmp(FCMP_UNO, op0, ic_fp_zero(op_type), get_fmf(i));
+                case FCMP_UGE; return create_fcmp(FCMP_UEQ, op0, op1, get_fmf(i));
+            }
+        }
+    }
+    if pm_pos_zero_fp(op1) && has_one_use(op0) {
+        okb, x := pm_elementwise_bitcast(op0);
+        _, inm := fn_denormal_mode(inst_fn(i), vtype(op1));
+        if okb && is_int_or_int_vector(vtype(x)) && inm == DENORMAL_IEEE {
+            int_pred: u8 = BAD_ICMP_PREDICATE;
+            if pred == FCMP_OEQ int_pred = ICMP_EQ;
+            else if pred == FCMP_UNE int_pred = ICMP_NE;
+            if int_pred != BAD_ICMP_PREDICATE {
+                it := vtype(x);
+                sign_mask := ap_not(ap_signed_min(scalar_bits(x)));
+                mask_x := icb_and(x, const_int_ap(it, sign_mask));
+                return create_icmp(int_pred, mask_x, const_null_value(it));
+            }
+        }
+    }
+    if is_inst(op0) && is_const(op1) {
+        lhsi := op0; rhsc := op1;
+        o := inst_op(lhsi);
+        if o == {
+            case .SELECT;
+                if fcmp_is_equality(pred) && pm_any_zero_fp(rhsc) {
+                    for side: 0..1 {
+                        okn, x := pm_fneg(op(lhsi, cast(u32) (1 + side)));
+                        if okn && op(lhsi, cast(u32) (2 - side)) == x return ic_replace_operand(i, 0, x);
+                    }
+                }
+                r = ic_fold_op_into_select(i, lhsi); if r != NONE return r;
+            case .FSUB;
+                if has_one_use(lhsi) { r = ic_fold_fcmp_fsub_into_fcmp(i, lhsi, rhsc); if r != NONE return r; }
+            case .PHI;
+                r = ic_fold_op_into_phi(i, lhsi); if r != NONE return r;
+            case .SITOFP; #through;
+            case .UITOFP;
+                r = ic_fold_fcmp_int_to_fp_const(i, lhsi, rhsc); if r != NONE return r;
+            case .FDIV;
+                r = ic_fold_fcmp_reciprocal_and_zero(i, lhsi, rhsc); if r != NONE return r;
+            case .LOAD;
+                g := op(lhsi, 0);
+                if is_inst(g) && inst_op(g) == .GEP { r = ic_fold_cmp_load_from_indexed_global(lhsi, g, i, NONE); if r != NONE return r; }
+            case .FPTRUNC;
+                r = ic_fold_fcmp_fp_trunc(i, lhsi, rhsc); if r != NONE return r;
+        }
+    }
+    r = ic_fold_fabs_with_fcmp_zero(i); if r != NONE return r;
+    r = ic_fold_fcmp_fabs_fsub_int_to_fp(i); if r != NONE return r;
+    r = ic_fold_sqrt_with_fcmp_zero(i); if r != NONE return r;
+    r = ic_fold_fcmp_with_floor_and_ceil(i); if r != NONE return r;
+    r = ic_fold_cmp_select_of_constants(i); if r != NONE return r;
+    {
+        okx, x := pm_fneg(op0);
+        if okx && is_const(op1) {
+            neg_c := cfo_unary_op_operand(.FNEG, op1);
+            if neg_c != NONE return create_fcmp(cmp_swapped(pred), x, neg_c, get_fmf(i));
+        }
+    }
+    if ic_is_binop(op0, .FADD) && pm_any_zero_fp(op(op0, 1)) return create_fcmp(pred, op(op0, 0), op1, get_fmf(i));
+    if ic_is_binop(op1, .FADD) && pm_any_zero_fp(op(op1, 1)) return create_fcmp(pred, op0, op(op1, 0), get_fmf(i));
+    if pred == FCMP_ORD || pred == FCMP_UNO {
+        okx, x := pmi_cast(op0, .FPTRUNC);
+        oky, y := pmi_cast(op1, .FPTRUNC);
+        if okx && oky && vtype(x) == vtype(y) return create_fcmp(pred, x, y, get_fmf(i));
+    }
+    okx, x := pmi_cast(op0, .FPEXT);
+    if okx {
+        oky, y := pmi_cast(op1, .FPEXT);
+        if oky && vtype(x) == vtype(y) return create_fcmp(pred, x, y, get_fmf(i));
+        okc, c := pm_apfloat(op1);
+        if okc {
+            xk := type_kind(scalar_type(vtype(x)));
+            cc := c;
+            tw, exact := fp_convert(c.k, xk, apf_words(*cc));
+            lossy := !exact;
+            trunc_c := apf_make(xk, tw);
+            if lossy {
+                if pred == {
+                    case FCMP_OEQ; return ic_replace_inst_uses_with(i, get_false(vtype(i)));
+                    case FCMP_ONE; return create_fcmp(FCMP_ORD, x, ic_fp_zero(vtype(x)));
+                    case FCMP_UEQ; return create_fcmp(FCMP_UNO, x, ic_fp_zero(vtype(x)));
+                    case FCMP_UNE; return ic_replace_inst_uses_with(i, get_true(vtype(i)));
+                }
+            }
+            fabs := trunc_c;
+            fabs = apf_make(xk, fp_with_sign(xk, apf_words(*fabs), false));
+            if !lossy && (apf_is_zero(fabs) || !apf_lt(fabs, apf_smallest_normalized(xk))) {
+                return create_fcmp(pred, x, ic_const_fp(vtype(x), trunc_c), get_fmf(i));
+            }
+        }
+    }
+    {
+        okcs, cv, x := pm_intrinsic2(op0, IID_COPYSIGN);
+        okc, c := pm_apfloat(cv);
+        if okcs && okc && has_one_use(op0) && pm_any_zero_fp(op1) && !apf_is_zero(c) && !apf_is_nan(c) {
+            int_ty := type_int(scalar_bits(x));
+            if is_vector_type(op_type) int_ty = vector_with_elt(op_type, int_ty);
+            if pred == FCMP_OLT {
+                ix := icb_cast(.BITCAST, x, int_ty);
+                return create_icmp(ICMP_SLT, ix, const_null_value(int_ty));
+            }
+        }
+    }
+    {
+        okl, canon_lhs := pm_intrinsic1(op0, IID_CANONICALIZE);
+        if !okl canon_lhs = NONE;
+        if canon_lhs != NONE && canon_lhs == op1 return create_fcmp(pred, op1, op1, get_fmf(i));
+        okr, canon_rhs := pm_intrinsic1(op1, IID_CANONICALIZE);
+        if !okr canon_rhs = NONE;
+        if canon_rhs != NONE && canon_rhs == op0 return create_fcmp(pred, op0, op0, get_fmf(i));
+        if canon_lhs != NONE && canon_rhs != NONE return create_fcmp(pred, canon_lhs, canon_rhs, get_fmf(i));
+    }
+    if is_vector_type(vtype(i)) { r = ic_fold_vector_cmp(i); if r != NONE return r; }
     if changed return i;
     return NONE;
+}
+// APFloat::getSmallestNormalized(Sem)
+apf_smallest_normalized :: (k: Type_Kind) -> APFloat {
+    p, emax, emin, bits := fp_semantics(k);
+    // smallest normal = 2^emin
+    one := fp_from_integer(k, ap_words(ap_one(2)), 2, false);
+    return apf_make(k, fp_scalbn(k, one, emin, RM_NEAREST_TIES_TO_EVEN));
 }
