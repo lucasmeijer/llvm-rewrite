@@ -74,6 +74,9 @@ src/
   must_execute.jai ICFLoopSafetyInfo (MustExecute.cpp) + InstructionPrecedenceTracking, colorEHFunclets
   alias_set_tracker.jai  AliasSetTracker
   pass_licm.jai   LICM / LNICM (incl. ControlFlowHoister, LoopPromoter, hoistArithmetics)
+  pass_dse.jai    DeadStoreElimination (DSEState = `Dse`: MemorySSA walk, OverlapIntervals, calloc folding, initializes)
+  pass_memcpyopt.jai  MemCpyOpt (`Mco`: memset merging, call slot / memcpy / memset forwarding, stack move, byval)
+  assume_builder.jai  AssumeBundleBuilder salvageKnowledge (-enable-knowledge-retention, AC-less form only)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 
@@ -351,7 +354,8 @@ recomputing gives a different child order.
   on accesses are rows of `mssa.vh` (`vh_new/vh_get`, followed by `ma_rauw`, nulled when an access is destroyed);
   every public `mssau_*` brackets itself with `mssau_enter/leave` and the handles are released when the outermost call
   returns. Deleted accesses keep their row (`dead`).
-  of accesses yet: passes that update MemorySSA must add them (see NOTES.md).
+- **EarliestEscapeAnalysis**: `aa_query_new_earliest_escape(aar, dt)` (+ `q.ee_ci` for the CycleInfo form DSE uses);
+  `aa_query_new_sharing_ee(aar, ee)` = another BatchAAResults on the same EEA (MemCpyOpt).
 - Printers with annotations use the `print_annot_block` / `print_annot_inst` hooks of printer.jai (LLVM's
   AssemblyAnnotationWriter) around `print_function`.
 

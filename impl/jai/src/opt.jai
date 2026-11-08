@@ -74,6 +74,7 @@
 #load "must_execute.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";
+#load "assume_builder.jai";
 #load "pass_dse.jai";
 #load "pass_memcpyopt.jai";
 #load "scev.jai";

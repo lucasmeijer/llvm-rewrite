@@ -122,3 +122,6 @@ lib/Target/X86/X86ISelLowering.cpp 0.03   # jai_simplifycfg: the X86TargetLoweri
 lib/IR/Attributes.cpp 0.5
 lib/IR/MemoryModelRelaxationAnnotations.cpp 0.5
 lib/Transforms/InstCombine/InstCombineAtomicRMW.cpp 1
+lib/Transforms/Scalar/DeadStoreElimination.cpp 0.97  # all but shortenAssignment's dbg.assign updates (assignment tracking does not parse)
+lib/Transforms/Scalar/MemCpyOptimizer.cpp 0.98  # all but DIAssignID merging/copying (assignment tracking does not parse)
+lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.4  # salvageKnowledge / buildAssumeFromInst without an AssumptionCache; no assume-simplify / assume-builder passes

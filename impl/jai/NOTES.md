@@ -595,3 +595,29 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   ldexp(intmin) metadata; loud: gc.statepoint, ptrauth, trampolines, nextafter folding, `!annotation`.
 - `pm_specific_int_ap` allows poison lanes although LLVM's m_SpecificInt(APInt) doesn't: two callers depend on that
   (and-or-icmp-const-icmp, unsigned-add-lack-of-overflow-check) and should use an allow-poison matcher instead.
+
+## DSE and MemCpyOpt (L1.dse COMPLETE 83/83, L1.memcpyopt COMPLETE 56/56)
+
+- Files: `pass_dse.jai` (DeadStoreElimination.cpp, DSEState as `Dse`), `pass_memcpyopt.jai` (MemCpyOptimizer.cpp,
+  `Mco`), `assume_builder.jai` (salvageKnowledge for `-enable-knowledge-retention`; only the AC = DT = null form DSE
+  uses; every other pass fails loudly with that flag, see `knowledge_retention_check`).
+- Shared pieces added: EarliestEscapeAnalysis with CycleInfo (`Aa_Query.ee_ci`; DSE builds `EA(DT, nullptr, &CI)`, so
+  capture-before queries use CFG.cpp's cycle-aware reachability: `is_potentially_reachable_*_ci`), one EEA cache shared
+  by several BatchAAs (`aa_query_new_sharing_ee`; MemCpyOpt's EEA_ lives for the whole run while every
+  `BatchAAResults BAA(*AA, EEA)` has its own alias cache), `aa_is_must_alias_values` (isMustAlias(V1, V2) queries
+  *precise(1)* locations, not beforeOrAfter: getting this wrong turns BasicAA's identical-GEP MustAlias into MayAlias),
+  `is_bytewise_value`, `value_pointer_offset_from` (Value::getPointerOffsetFrom), `combine_aa_metadata`,
+  `ci_exit_blocks` / `ci_top_level_parent`, `mi_dest` / `mi_source` (getDest/getSource strip pointer casts, incl.
+  all-zero GEPs; getRawDest does not), `call_param_only_reads` now honours operand bundles instead of failing.
+- Fixed on the way: `dt_find_nearest_common_dominator_inst` (FindEarliestCapture) asserted on unreachable blocks; LLVM
+  returns the other instruction first.
+- Sweeps (whole-file and `--per-function`, ~7750 files / ~69800 functions): `dse`, `memcpyopt`, `memcpyopt,dse`,
+  `dse -enable-knowledge-retention`: 0 differs, 0 bad-ir (per-function: 2 loud ppc_fp128 parser failures);
+  `dse,print<memoryssa>` and `memcpyopt,print<memoryssa>` (MemorySSA updates): identical except
+  GlobalsModRef/pr12351.ll, which differs with plain `print<memoryssa>` too (debug-info version warning).
+- Perf (no @perf benchmark times these passes; x64 build, `-disable-output`): sqlite3.ll dse 3.4 s (parse 0.97 s;
+  LLVM 0.45 / 0.28 s), memcpyopt 1.5 s (LLVM 0.35 s); tests/perf/scaling/allocas n2000 -> n8000 dse 0.33 -> 0.99 s,
+  memcpyopt 0.16 -> 0.60 s: linear, like LLVM. The DSE pass itself is ~15x LLVM's, mostly BasicAA queries.
+- Traps: LLVM 23's conditional branch is a separate opcode here (`.CONDBR`, not a 3-operand `.BR`); a `defer x = next`
+  in a loop also runs on `break` (it moved MemCpyOpt's memset insertion point one instruction too far);
+  `Retained_Knowledge` already exists in loads.jai (assume bundles), the builder's is `Ab_Knowledge`.

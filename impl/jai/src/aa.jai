@@ -555,6 +555,10 @@ aa_alias :: (q: *Aa_Query, a: Mem_Loc, b: Mem_Loc, ctx: Value_Id = NONE) -> Alia
     q.depth -= 1;
     return result;
 }
+// AAResults / BatchAAResults::isMustAlias(const Value *V1, const Value *V2): locations of precise size 1
+aa_is_must_alias_values :: (q: *Aa_Query, a: Value_Id, b: Value_Id) -> bool {
+    return aa_alias(q, mloc(a, ls_precise(1)), mloc(b, ls_precise(1))).kind == AR_MUST;
+}
 // AAResults::alias(LocA, LocB) with a SimpleAAQueryInfo
 aa_alias_once :: (aar: *Aa_Results, a: Mem_Loc, b: Mem_Loc) -> Alias_Result { return aa_alias(aa_query_new(aar), a, b); }
 

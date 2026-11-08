@@ -8,7 +8,7 @@
 // apply). InstOverlapIntervalsTy (MapVector<Instruction *, std::map<int64_t, int64_t>>) is an insertion-ordered
 // array of entries, each with its interval map as an array sorted by the interval end.
 // Not ported (fail loudly): assignment tracking (shortenAssignment's dbg.assign updates; #dbg_assign does not parse),
-// salvageKnowledge (-enable-knowledge-retention is not an accepted flag), -debug-counter.
+// -debug-counter.
 
 dse_opts: struct {
     enable_partial_overwrite_tracking := true;   // -enable-dse-partial-overwrite-tracking
@@ -24,7 +24,7 @@ dse_opts: struct {
     enable_initializes_improvement := true;      // -enable-dse-initializes-attr-improvement
     max_depth_recursion: s64 = 1024;             // -dse-max-dom-cond-depth
 };
-DSE_CL_OPT_COUNT :: 12;
+DSE_CL_OPT_COUNT :: 13;
 add_dse_cl_opts :: (list: [] Cl_Opt, start: s64) {
     list[start + 0] = .{"enable-dse-partial-overwrite-tracking", .BOOL, *dse_opts.enable_partial_overwrite_tracking, null, null};
     list[start + 1] = .{"enable-dse-partial-store-merging", .BOOL, *dse_opts.enable_partial_store_merging, null, null};
@@ -38,6 +38,7 @@ add_dse_cl_opts :: (list: [] Cl_Opt, start: s64) {
     list[start + 9] = .{"dse-optimize-memoryssa", .BOOL, *dse_opts.optimize_memoryssa, null, null};
     list[start + 10] = .{"enable-dse-initializes-attr-improvement", .BOOL, *dse_opts.enable_initializes_improvement, null, null};
     list[start + 11] = .{"dse-max-dom-cond-depth", .INT, null, *dse_opts.max_depth_recursion, null};
+    list[start + 12] = .{"enable-knowledge-retention", .BOOL, *knowledge_retention.enabled, null, null};   // assume_builder.jai
 }
 
 IID_VP_STORE :: #run iid_by_name("llvm.vp.store");
@@ -111,7 +112,7 @@ dse_is_masked_store_overwrite :: (killing_i: Value_Id, dead_i: Value_Id, q: *Aa_
     if dl_type_size_bits(kty) != dl_type_size_bits(dty) || type_is_scalable(kty) != type_is_scalable(dty) return .UNKNOWN;
     if type_count(kty) != type_count(dty) || (type_kind(kty) == .SVECTOR) != (type_kind(dty) == .SVECTOR) return .UNKNOWN;
     kp := call_arg(killing_i, 1); dp := call_arg(dead_i, 1);
-    if kp != dp && aa_alias(q, mloc_before_or_after(kp), mloc_before_or_after(dp)).kind != AR_MUST return .UNKNOWN;
+    if kp != dp && !aa_is_must_alias_values(q, kp, dp) return .UNKNOWN;
     if call_arg(killing_i, 2) != call_arg(dead_i, 2) return .UNKNOWN;
     if kid == IID_VP_STORE && call_arg(killing_i, 3) != call_arg(dead_i, 3) return .UNKNOWN;
     return .COMPLETE;
@@ -643,7 +644,7 @@ dse_is_mem_terminator :: (s: *Dse, loc: Mem_Loc, access_i: Value_Id, maybe_term:
     if get_underlying_object(loc.ptr) != get_underlying_object(term_loc.ptr) return false;
     if is_free {
         loc_uo := get_underlying_object(loc.ptr);
-        return aa_alias(s.q, mloc_before_or_after(term_loc.ptr), mloc_before_or_after(loc_uo)).kind == AR_MUST;
+        return aa_is_must_alias_values(s.q, term_loc.ptr, loc_uo);
     }
     r := dse_is_overwrite(s, maybe_term, access_i, term_loc, loc);
     return r == .COMPLETE;
@@ -826,6 +827,7 @@ dse_delete_dead_instruction :: (s: *Dse, si: Value_Id, deleted: *Table(s32, bool
     while now_dead.count {
         dead := pop(*now_dead);
         salvage_debug_info(dead);
+        salvage_knowledge(dead);
         a := mssa_access_of(s.m, dead);
         is_mem_def := a >= 0 && ma_is_def(s.m, a);
         if a >= 0 {
@@ -1297,7 +1299,7 @@ dse_eliminate_dead_defs :: (s: *Dse, locs: [] Dse_Loc) -> bool {
     return made_change;
 }
 
-// DSEPass::run
+// DSEPass::run + eliminateDeadStores
 dse_run :: (f: Value_Id) -> Preserved {
     s: Dse;
     dse_init(*s, f);

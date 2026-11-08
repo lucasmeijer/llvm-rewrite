@@ -672,6 +672,7 @@ run_module_pm :: (n: s32) {
     c := pipeline.nodes[n].first_child;
     while c >= 0 {
         node := *pipeline.nodes[c];
+        knowledge_retention_check(node.kind, node.name);
         if node.kind == {
             case .MODULE_PM; run_module_pm(c);
             case .FUNCTION_ADAPTOR; run_function_adaptor(c);
@@ -710,6 +711,7 @@ run_function_adaptor :: (n: s32) {
 stderr_builder: String_Builder;
 
 run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
+    knowledge_retention_check(node.kind, node.name);
     if node.kind == {
         case .NO_OP_FUNCTION; return PRESERVE_ALL;
         case .REQUIRE; fam_require(f, node.info.analysis); return PRESERVE_ALL;

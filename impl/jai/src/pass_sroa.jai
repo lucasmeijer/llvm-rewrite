@@ -370,10 +370,10 @@ call_param_only_reads :: (c: Value_Id, opno: u32) -> bool {
         f := call_called_function(c);
         if f == NONE return false;
         if !attr_set_has(attr_list_param(glob(f).attrs, opno), k) return false;
-        if call_num_bundles(c) > 0 fatal("SROA: parameter attributes with operand bundles are not supported yet");
         return true;
     }
-    return has(c, opno, .ReadOnly) || has(c, opno, .ReadNone);
+    // paramHasAttr(ReadOnly / ReadNone) accounts for the mod/ref of operand bundles
+    return call_param_has_mem_attr(c, opno, .ReadOnly) || call_param_has_mem_attr(c, opno, .ReadNone);
 }
 
 sb_visit_call_base :: (b: *Sroa_Builder, c: Value_Id) {

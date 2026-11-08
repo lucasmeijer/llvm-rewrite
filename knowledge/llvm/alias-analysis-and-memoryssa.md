@@ -109,3 +109,28 @@ Verified with the jai port (impl/jai/src/mssa_updater.jai): `loop-mssa(loop-rota
   never change opt's output.
 - `MemorySSA::dominates(MA, const Use &)` for a phi use in the same block calls `locallyDominates(MA, cast(Use))`,
   and casting a Use yields its *value* (MA itself), so it is always true.
+
+## DSE / MemCpyOpt facts
+
+Verified with the jai port (`sweep --passes dse|memcpyopt`, whole-file and per-function: identical to opt).
+
+- **`isMustAlias(const Value *, const Value *)` queries `LocationSize::precise(1)`** on both sides (AliasAnalysis.h,
+  AAResults and BatchAAResults), not `beforeOrAfter`. With two unknown sizes BasicAA's aliasGEP returns MayAlias early,
+  so `%g1 = gep %p, 16` vs an identical `%g2` is MustAlias only with the precise(1) form
+  (`MemCpyOpt/memset-memcpy-redundant-memset.ll`, `pr102994.ll`).
+- DSE's EarliestEscapeAnalysis is `EA(DT, /*LI=*/nullptr, &CI)`: "captured before" uses CycleInfo-based
+  `isPotentiallyReachable` (same-block: reachable iff the block is in a cycle; cycles are skipped to their exit
+  blocks) and `isNotInCycle` = `!CI->getCycle(BB)`. MemCpyOpt's EEA has neither (plain CFG walk) and lives for the
+  whole pass run while each `BatchAAResults` is fresh.
+- `DominatorTree::findNearestCommonDominator(Instruction *, Instruction *)` returns the other instruction when one
+  block is unreachable (FindEarliestCapture reaches it with captures in unreachable code,
+  `DeadStoreElimination/captures-before-load.ll`).
+- `MemIntrinsic::getDest()` / `getSource()` strip pointer casts (including all-zero-index GEPs and addrspacecasts);
+  MemCpyOpt builds its new memcpy/memmove from those, so `memmove(gep %b, 0, 0)` becomes `memmove(%b)`
+  (`SROA/alignment.ll`), while `getRawDest()` is used for memsets created from memcpys.
+- DSE calls `salvageKnowledge(I)` with no AssumptionCache: with `-enable-knowledge-retention` every deleted store/load
+  leaves an `llvm.assume` with dereferenceable/nonnull/align bundles. `isKnowledgeWorthPreserving` calls
+  `wouldInstructionBeTriviallyDead(Inst)` with TLI = null, so a `new`-like call without allockind attributes is not
+  dead and its knowledge is kept (`BasicAA/2008-11-23-NoaliasRet.ll`).
+- `CallBase::getParamAttr(ArgNo, Kind)` falls back to the callee's attributes: DSE's `initializes` handling sees
+  attributes written only on the declaration.
