@@ -5516,6 +5516,7 @@ tests/imported/llvm/Transforms/InstCombine/zeroext-and-reduce.ll::opt
 tests/imported/llvm/Transforms/InstCombine/zeroext-and-reduce.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/zext-bool-add-sub.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/zext-ctlz-trunc-to-ctlz-add.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/zext-fold.ll::opt
 tests/imported/llvm/Transforms/InstCombine/zext-fold.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/zext-or-icmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/zext-phi.ll::roundtrip
