@@ -639,7 +639,9 @@ ic_visit_alloc_site :: (mi: Value_Id) -> Value_Id {
         if i == NONE || vkind(i) == .DEAD { it.* = NONE; continue; }
         id := call_iid(i);
         if id == IID_OBJECTSIZE {
-            result := lower_object_size_call(i, ic_aa(), true);
+            inserted: [..] Value_Id; inserted.allocator = temp;
+            result := lower_object_size_call(i, ic_aa(), true, *inserted);
+            for inserted wl_add(it);
             ic_replace_inst_uses_with(i, result);
             ic_erase_inst(i);
             it.* = NONE;

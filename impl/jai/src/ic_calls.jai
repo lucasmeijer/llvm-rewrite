@@ -1314,10 +1314,12 @@ ic_visit_intrinsic_switch :: (ii: Value_Id, iid: Intrinsic_Id) -> Ic_Switch_Resu
     ty := vtype(ii);
     if iid == {
     case IID_OBJECTSIZE;
-        // objectsize dynamic: ObjectSizeOffsetEvaluator is not ported (memory unit); left alone like before
-        if !is_null_value(call_arg(ii, 3)) return done(NONE);
-        v := lower_object_size_call(ii, ic_aa(), false);
-        if v != NONE return done(ic_replace_inst_uses_with(ci, v));
+        inserted: [..] Value_Id; inserted.allocator = temp;
+        v := lower_object_size_call(ii, ic_aa(), false, *inserted);
+        if v != NONE {
+            for inserted wl_add(it);
+            return done(ic_replace_inst_uses_with(ci, v));
+        }
         return done(NONE);
     case IID_ABS;
         opnd := call_arg(ii, 0);

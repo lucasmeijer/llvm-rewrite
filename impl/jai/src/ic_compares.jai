@@ -313,12 +313,12 @@ ic_set_insertion_point :: (b: *Irb, v: Value_Id, before := true) {
 }
 
 // llvm::emitGEPOffset with a plain IRBuilder<> (rewriteGEPAsOffset's local builder: nothing goes on the worklist)
-ic_emit_gep_offset_irb :: (b: *Irb, g: Value_Id) -> Value_Id {
+ic_emit_gep_offset_irb :: (b: *Irb, g: Value_Id, no_assumptions := false) -> Value_Id {
     idx_ty := dl_index_type(vtype(g));
     result: Value_Id = NONE;
     nw := gep_nw_bits(g);
-    nsw := (nw & F_NUSW) != 0;
-    nuw := (nw & F_GEP_NUW) != 0;
+    nsw := (nw & F_NUSW) != 0 && !no_assumptions;
+    nuw := (nw & F_GEP_NUW) != 0 && !no_assumptions;
     flags := (ifx nuw then cast(u32) F_NUW else 0) | (ifx nsw then cast(u32) F_NSW else 0);
     cur := opr_gep_source_type(g);
     n := nops(g);
@@ -339,13 +339,13 @@ ic_emit_gep_offset_irb :: (b: *Irb, g: Value_Id) -> Value_Id {
                 continue;
             }
         }
-        if is_vector_type(idx_ty) && !is_vector_type(vtype(o)) fatal("instcombine: emitGEPOffset of a vector GEP with scalar indices is not supported yet");
+        if is_vector_type(idx_ty) && !is_vector_type(vtype(o)) o = irb_vector_splat(b, type_count(idx_ty), o, "");
         if vtype(o) != idx_ty o = irb_int_cast(b, o, idx_ty, true, tprint("%.c", vname(o)));
-        if type_is_scalable(indexed) fatal("instcombine: emitGEPOffset with scalable strides is not supported yet");
         stride := gep_seq_stride(cur, k, indexed);
-        if stride != 1 {
-            scale := const_int_of(scalar_type(idx_ty), stride);
-            if is_vector_type(idx_ty) scale = cf_get_splat(idx_ty, scale);
+        scalable := type_is_scalable(indexed) && stride != 0;
+        if stride != 1 || scalable {
+            scale := irb_type_size(b, scalar_type(idx_ty), stride, scalable);
+            if is_vector_type(idx_ty) scale = irb_vector_splat(b, type_count(idx_ty), scale, "");
             o = irb_binop(b, .MUL, o, scale, tprint("%.idx", vname(g)), flags);
         }
         if result != NONE result = irb_binop(b, .ADD, result, o, tprint("%.offs", vname(g)), flags); else result = o;

@@ -4,8 +4,9 @@
 // in all four evaluation modes, incl. load tracking through AA) and lowerObjectSizeCall.
 // The older entry points (is_alloc_like_fn, get_freed_operand in inst_props.jai, get_alloc_size and
 // get_base_object_size in basic_aa.jai) use the tables here.
-// Not ported: ObjectSizeOffsetEvaluator (the dynamic, instruction-emitting variant used by llvm.objectsize with
-// `dynamic` = true): fails loudly where LLVM would emit code; GetStringLength for strdup-like sizes.
+// ObjectSizeOffsetEvaluator (llvm.objectsize with `dynamic` = true) builds its code with a plain IRBuilder (no
+// worklist); the instructions it inserted are found by value id (everything it creates is new).
+// Not ported: GetStringLength for strdup-like sizes (fails loudly).
 
 AT_OPNEW :: 1; AT_MALLOC :: 2; AT_STRDUP :: 4;
 AT_MALLOC_OR_OPNEW :: AT_MALLOC | AT_OPNEW;
@@ -562,7 +563,7 @@ get_object_size :: (ptr: Value_Id, opts: Os_Opts) -> (bool, u64) {
 }
 
 // lowerObjectSizeCall(ObjectSize, DL, TLI, AA, MustSucceed, InsertedInstructions)
-lower_object_size_call :: (os: Value_Id, aar: *Aa_Results, must_succeed: bool) -> Value_Id {
+lower_object_size_call :: (os: Value_Id, aar: *Aa_Results, must_succeed: bool, inserted: *[..] Value_Id = null) -> Value_Id {
     max_val := is_null_value(call_arg(os, 1));
     opts: Os_Opts;
     opts.aar = aar;
@@ -576,8 +577,165 @@ lower_object_size_call :: (os: Value_Id, aar: *Aa_Results, must_succeed: bool) -
         ok, size := get_object_size(call_arg(os, 0), opts);
         if ok && (rbits >= 64 || (size >> rbits) == 0) return const_int(rt, size);
     } else {
-        fatal("MemoryBuiltins: lowerObjectSizeCall with dynamic sizes (ObjectSizeOffsetEvaluator) is not supported yet");
+        ev: Os_Evaluator;
+        ev.opts = opts;
+        ev.cache.allocator = temp; ev.seen.allocator = temp;
+        ok, size, offset := ose_compute(*ev, call_arg(os, 0));
+        if ok {
+            b: Irb;
+            irb_set_before(*b, os);
+            first_new := cast(Value_Id) ir.v_kind.count;
+            rs := irb_binop(*b, .SUB, size, offset);
+            use_zero := irb_icmp(*b, ICMP_ULT, size, offset);
+            rs = irb_zext_or_trunc(*b, rs, rt);
+            ret := irb_select(*b, use_zero, const_int(rt, 0), rs);
+            if !is_const(size) || !is_const(offset) {
+                c := irb_icmp(*b, ICMP_NE, ret, const_all_ones_of(rt));
+                irb_intrinsic(*b, "llvm.assume", .[], .[c]);
+            }
+            if inserted ose_collect_inserted(first_new, inserted);
+            return ret;
+        }
     }
     if !must_succeed return NONE;
     return ifx max_val then const_all_ones_of(rt) else const_null_value(rt);
+}
+
+// ---------------------------------------------------------------- ObjectSizeOffsetEvaluator
+
+Os_Size_Offset :: struct { size: Value_Id = NONE; offset: Value_Id = NONE; }
+ose_both_known :: (s: Os_Size_Offset) -> bool { return s.size != NONE && s.offset != NONE; }
+ose_any_known :: (s: Os_Size_Offset) -> bool { return s.size != NONE || s.offset != NONE; }
+Os_Evaluator :: struct {
+    opts: Os_Opts;
+    int_ty: Type_Id;
+    zero: Value_Id;
+    b: Irb;
+    cache: Table(Value_Id, Os_Size_Offset);
+    seen: [..] Value_Id;
+    first_new: Value_Id;
+}
+// instructions created since `first` that are still in the function (InsertedInstructions)
+ose_collect_inserted :: (first: Value_Id, out: *[..] Value_Id) {
+    for v: cast(s64) first..ir.v_kind.count-1 {
+        x := cast(Value_Id) v;
+        if vkind(x) == .INST && inst(x).parent != NONE array_add(out, x);
+    }
+}
+
+// ObjectSizeOffsetEvaluator::compute
+ose_compute :: (ev: *Os_Evaluator, v: Value_Id) -> (bool, Value_Id, Value_Id) {
+    ev.int_ty = dl_index_type(vtype(v));
+    ev.zero = const_int(ev.int_ty, 0);
+    ev.first_new = cast(Value_Id) ir.v_kind.count;
+    r := ose_compute_(ev, v);
+    if !ose_both_known(r) {
+        for ev.seen {
+            found, c := table_find(*ev.cache, it);
+            if found && ose_any_known(c) table_remove(*ev.cache, it);
+        }
+        ins: [..] Value_Id; ins.allocator = temp;
+        ose_collect_inserted(ev.first_new, *ins);
+        for ins { replace_all_uses_with(it, const_poison(vtype(it))); erase_inst(it); }
+    }
+    ev.seen.count = 0;
+    return ose_both_known(r), r.size, r.offset;
+}
+
+ose_compute_ :: (ev: *Os_Evaluator, v_in: Value_Id) -> Os_Size_Offset {
+    vopts := ev.opts;
+    vopts.mode = .EXACT_UNDERLYING_SIZE_AND_OFFSET;
+    ok, size, offset := os_compute(vopts, v_in);
+    if ok return .{const_int_ap(type_int(size.bits), size), const_int_ap(type_int(offset.bits), offset)};
+    v := strip_pointer_casts(v_in);
+    found, c := table_find(*ev.cache, v);
+    if found return c;
+    saved := ev.b;
+    defer ev.b = saved;
+    if is_inst(v) irb_set_before(*ev.b, v);
+    result: Os_Size_Offset;
+    seen := false;
+    for ev.seen if it == v { seen = true; break; }
+    if seen result = .{};
+    else {
+        array_add(*ev.seen, v);
+        if opr_code(v) == .GEP result = ose_visit_gep(ev, v);
+        else if is_inst(v) result = ose_visit_inst(ev, v);
+        else result = .{};
+    }
+    table_set(*ev.cache, v, result);
+    return result;
+}
+
+ose_visit_gep :: (ev: *Os_Evaluator, g: Value_Id) -> Os_Size_Offset {
+    pd := ose_compute_(ev, op(g, 0));
+    if !ose_both_known(pd) return .{};
+    off := ic_emit_gep_offset_irb(*ev.b, g, true);
+    off = irb_binop(*ev.b, .ADD, pd.offset, off);
+    return .{pd.size, off};
+}
+
+ose_visit_inst :: (ev: *Os_Evaluator, i: Value_Id) -> Os_Size_Offset {
+    o := inst_op(i);
+    if o == .ALLOCA {
+        if !type_is_sized(inst(i).ty2) return .{};
+        it := dl_index_type(type_ptr(dl.alloca_as));
+        // CreateAllocationSize(IndexTy, &I)
+        sz := irb_type_size(*ev.b, it, dl_type_alloc_size(inst(i).ty2), type_is_scalable(inst(i).ty2));
+        n := op(i, 0);
+        if !(is_scalar_const_int(n) && ap_is_one(const_ap(n)))
+            sz = irb_binop(*ev.b, .MUL, irb_zext_or_trunc(*ev.b, n, it), sz);
+        return .{sz, ev.zero};
+    }
+    if is_call_base(i) {
+        okd, d := mb_allocation_size_data(i);
+        if !okd return .{};
+        if d.ty == AT_STRDUP return .{};
+        first := irb_zext_or_trunc(*ev.b, call_arg(i, cast(u32) d.fst), ev.int_ty);
+        if d.snd < 0 return .{first, ev.zero};
+        second := irb_zext_or_trunc(*ev.b, call_arg(i, cast(u32) d.snd), ev.int_ty);
+        return .{irb_binop(*ev.b, .MUL, first, second), ev.zero};
+    }
+    if o == .PHI {
+        n := nops(i);
+        size_phi := irb_phi(*ev.b, ev.int_ty, n);
+        off_phi := irb_phi(*ev.b, ev.int_ty, n);
+        table_set(*ev.cache, i, Os_Size_Offset.{size_phi, off_phi});
+        for k: 0..cast(s64) n - 1 {
+            ib := phi_block(i, cast(u32) k);
+            irb_set_at(*ev.b, ib, block_first_insertion_pt(ib), false);
+            ed := ose_compute_(ev, op(i, cast(u32) k));
+            if !ose_both_known(ed) {
+                replace_all_uses_with(off_phi, const_poison(ev.int_ty)); erase_inst(off_phi);
+                replace_all_uses_with(size_phi, const_poison(ev.int_ty)); erase_inst(size_phi);
+                return .{};
+            }
+            phi_add_incoming(size_phi, ed.size, ib);
+            phi_add_incoming(off_phi, ed.offset, ib);
+        }
+        size := size_phi; offset := off_phi;
+        t := phi_has_constant_value(size_phi);
+        if t != NONE { size = t; replace_all_uses_with(size_phi, t); erase_inst(size_phi); }
+        t = phi_has_constant_value(off_phi);
+        if t != NONE { offset = t; replace_all_uses_with(off_phi, t); erase_inst(off_phi); }
+        return .{size, offset};
+    }
+    if o == .SELECT {
+        ts := ose_compute_(ev, op(i, 1));
+        fs := ose_compute_(ev, op(i, 2));
+        if !ose_both_known(ts) || !ose_both_known(fs) return .{};
+        if ts.size == fs.size && ts.offset == fs.offset return ts;
+        size := irb_select(*ev.b, op(i, 0), ts.size, fs.size);
+        offset := irb_select(*ev.b, op(i, 0), ts.offset, fs.offset);
+        return .{size, offset};
+    }
+    return .{};   // extractelement, extractvalue, inttoptr, load, everything else
+}
+
+// IRBuilder::CreateTypeSize on a plain builder
+irb_type_size :: (b: *Irb, ty: Type_Id, size: u64, scalable: bool) -> Value_Id {
+    if !scalable || size == 0 return const_int(ty, size);
+    vs := irb_intrinsic(b, "llvm.vscale", .[ty], .[]);
+    if size == 1 return vs;
+    return irb_binop(b, .MUL, vs, const_int(ty, size), "", F_NUW);
 }
