@@ -711,8 +711,9 @@ fn simplify_shift_selecting_packed_element(i: i32, demanded: AP, depth: i64) -> 
     var shl_amt: u64 = 0;
     for k in 2 {
         let s = op(s0, k);
-        if upper < 0 && one_use(s) && bo(s, OP_SHL) && m_constant_int(op(s, 1)) >= 0 && ty_sbits(op(s, 1)) <= 64 {
-            upper = op(s, 0); lower = op(s0, 1 - k); shl_amt = cint_lo(op(s, 1));
+        if upper < 0 && one_use(s) && bo(s, OP_SHL) && has_apint(op(s, 1)) && ap_fits_u64(ap_c(op(s, 1))) {
+            // m_ConstantInt(uint64_t &) matches splats too
+            upper = op(s, 0); lower = op(s0, 1 - k); shl_amt = ap_zext64(ap_c(op(s, 1)));
         }
     }
     if upper < 0 { return -1; }

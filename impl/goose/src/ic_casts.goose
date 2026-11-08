@@ -276,8 +276,9 @@ recursive fn can_evaluate_zextd(v: i32, ty: i32, cx: i32) -> bool, i64 {
         return false, btc;
     }
     if o == OP_SHL {
-        if m_constant_int(op(v, 1)) >= 0 && ty_sbits(op(v, 1)) <= 64 {
-            let sa = cint_lo(op(v, 1)) as i64;
+        if has_apint(op(v, 1)) && ap_fits_u64(ap_c(op(v, 1))) {
+            // m_ConstantInt(uint64_t &) matches splats too
+            let sa = ap_zext64(ap_c(op(v, 1))) as i64;
             let ok, btc = can_evaluate_zextd(op(v, 0), ty, cx);
             if !ok { return false, btc; }
             return true, if (sa as u64) < (btc as u64) { btc - sa } else { 0 };
@@ -285,8 +286,9 @@ recursive fn can_evaluate_zextd(v: i32, ty: i32, cx: i32) -> bool, i64 {
         return false, 0;
     }
     if o == OP_LSHR {
-        if m_constant_int(op(v, 1)) >= 0 && ty_sbits(op(v, 1)) <= 64 {
-            let sa = cint_lo(op(v, 1)) as i64;
+        if has_apint(op(v, 1)) && ap_fits_u64(ap_c(op(v, 1))) {
+            // m_ConstantInt(uint64_t &) matches splats too
+            let sa = ap_zext64(ap_c(op(v, 1))) as i64;
             let ok, btc0 = can_evaluate_zextd(op(v, 0), ty, cx);
             if !ok { return false, btc0; }
             var btc = btc0 + sa;

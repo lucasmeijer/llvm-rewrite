@@ -35,14 +35,16 @@
   alloc-size attributes, shifts and nofpclass, not compares. `sweep --passes instcombine`: 0 differs.
   Left (fail loudly): APFloat::next for x86_fp80/ppc_fp128 (foldFCmpFpTrunc), replaceUsesOutsideBlock with a
   constant user.
-- L1.instcombine.arith 126/230 (all 115 roundtrip, 11/115 opt); 120 of the 1635 InstCombine `::opt` tests
-  pass. The framework is complete (DESIGN.md §12); ported visitors: add, sub, mul, udiv/sdiv/urem/srem, shl/lshr/ashr,
-  trunc/zext/sext, ret, br, unreachable, calls to ordinary functions, llvm.assume (no bundles). Every other
-  visitor fails loudly ("the InstCombine visitor for 'icmp' is not ported yet"), and so do unported sub-folds of
-  the ported visitors. What blocks the remaining arith tests (first blocker per test, `tools/ic_failures.py
-  'add*' 'sub*' 'mul*' '*div*' '*rem*'`): icmp 34, and 16, select 12, or 8, xor 6, then insertelement, libcalls,
-  min/max intrinsics, GEP, load, fdiv, other passes (cgscc/inline, debugify). With `-goose-ic-lenient` (unported
-  visitors do nothing) 25 arith tests already match, so most remaining work is the other visitors, not arith.
+- L1.instcombine.bitwise 109/172 (all 86 roundtrip, 23/86 opt) and L1.instcombine.arith 143/230 (28/115 opt) after
+  the and/or/xor port (InstCombineAndOrXor.cpp whole, ic_andorxor.goose; InstCombineShifts.cpp complete). Every
+  remaining bitwise test stops loudly in another visitor (select 19, store 10, shufflevector 7, phi, insertelement,
+  load, bitcast, intrinsics). Silent mismatches: the `instcombine` sweep has 0 `differs`; the per-function sweep
+  (`tools/ic_func_sweep.py`, below) compares 10482 functions of the InstCombine tests identically and finds 3
+  differences outside this unit (icmp of `mul nsw` by a constant: icmp.ll @icmp_mul_nsw_neg, known-bits.ll
+  @mul_nuw_nsw_nonneg_const_missing_nuw, reported to the cmp porter; exact.ll @mul_of_sdiv_non_splat in
+  MulDivRem). `tools/fuzz_ic.py` (random and/or/xor/shift/icmp/ext programs, scalar and `--vec`) ran ~17000
+  programs clean apart from that same icmp-of-mul bug. Speed: `-passes=instcombine` on scaling/straightline is
+  ~2.3x LLVM's CPU time, linear (k 1.09 vs 1.11).
 - L1.early-cse 93/96 (all 48 roundtrip, 45/48 opt). Left: `math-2.ll` (ConstantFolding of `remainder`),
   `masked-intrinsics.ll` (ValueTracking demanded elements of a `<128 x i8>`), `reuse-preserved-memoryssa.ll`
   (runs `gvn`). early-cse, early-cse<memssa> (both also with `--enable-knowledge-retention`), instsimplify and dce
@@ -437,6 +439,34 @@
   but it stops at the unported `xor` visitor). Known linear scans to revisit when it matters: removing an
   entry from the deferred worklist, DeadEdges, DomConditionCache dedupe per value, the cast TypeEvaluationHelper
   visited map, the Negator cache (all small in practice).
+
+- and/or/xor (ic_andorxor.goose): a port of the whole of InstCombineAndOrXor.cpp in file order, plus
+  recognizeBSwapOrBitReverseIdiom/collectBitParts (Local.cpp; the BitPart map is a linear table `bp_ents`, entries
+  created before recursing as in the std::map), decomposeBitTest (the ICmp part is ic_compares'
+  icc_decompose_bit_test_icmp), isKnownInversion, matchSimpleRecurrence, foldAndOrOfSelectUsingImpliedCond
+  (InstCombineSelect.cpp), Constant::mergeUndefsWith (`ao_merge_undefs_with`). Exported for other visitors:
+  `fold_and_or_of_icmps`, `fold_boolean_and_or`, `fold_logic_of_fcmps`, `fold_xor_of_icmps`, `fold_not`,
+  `sink_not_into_logical_op`, `sink_not_into_other_hand_of_logical_op`, `match_bswap_or_bitreverse`,
+  `convert_or_of_shifts_to_funnel_shift` (also used by SimplifyDemandedBits now), `fold_disjoint_or`,
+  `fold_casted_bitwise_logic`, `insert_range_test`, `fold_binop_of_displaced_shifts` (moved here from ic_addsub).
+  getMaskedTypeForICmpPair's outputs are the globals `mk_*`: copy them before calling it again.
+  Still loud: setExplicitlyUnknownBranchWeightsIfProfiled in reassociateBooleanAndOr (profiled functions),
+  shufflevector of constants in foldIntegerPackFromVector, APFloat negation of ppc_fp128.
+- Matcher traps found by the per-function sweep (also in knowledge/llvm/instcombine.md): `m_ConstantInt(uint64_t&)`
+  matches splat vectors (fixed in ic_shifts, ic_casts canEvaluateZExtd, ic_demanded's packed-element select);
+  `m_Power2/m_NegatedPower2/m_LowBitMask(const APInt*&)` allow poison lanes; fcmpToClassTest's LookThroughSrc
+  defaults to true (fpclass.goose `fcmp_to_class_test` now passes true; it takes the scalar APFloat constant, the
+  `Value*` overload is `ao_fcmp_to_class_test_v`); Constant::isElementWiseEqual accepts a poison compare.
+- Loose end from earlier agents: many `is_op(...)` call sites in instsimplify.goose/vt.goose may still let
+  BinaryOp/Cast matchers match constant expressions (LLVM 23 matchers match instructions only). ic_andorxor uses
+  `bo`/`is_inst_op` throughout; the instsimplify sweep is clean, so no case is known to be wrong yet.
+- Testing tools: `tools/ic_func_sweep.py [globs] [--passes P]` splits every test file into one-function modules
+  (llvm-extract) and compares each with LLVM, so files that stop loudly in one function still test the others
+  (~2 min for all InstCombine tests); `tools/fuzz_ic.py [count] [seed] [--vec] [--intr]` is a random differential
+  fuzzer for integer/bitwise IR. Run both after touching ic_*.goose.
+- annotateAnyAllocSite (ic_visit_misc.goose): the allocalign part is ported (LLVM runs it on every call, not only
+  on allocation functions); TLI allocation functions and allocsize still fail loudly. Calls with a
+  `"modular-format"` attribute fail loudly (optimizeModularFormat was silently skipped).
 
 ## EarlyCSE (earlycse.goose, mssaupdater.goose, instident.goose, salvage.goose, knowledge.goose)
 

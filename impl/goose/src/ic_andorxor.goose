@@ -70,10 +70,11 @@ fn ao_trunc_or_self(v: i32) -> i32 { let s = m_trunc(v); if s >= 0 { s } else { 
 // m_LogicalShift: shl or lshr instruction
 fn ao_logical_shift(v: i32) -> bool { bo(v, OP_SHL) || bo(v, OP_LSHR) }
 fn ao_is_shift(v: i32) -> bool { bo(v, OP_SHL) || bo(v, OP_LSHR) || bo(v, OP_ASHR) }
-// m_Power2(const APInt *&) / m_NegatedPower2 / m_LowBitMask (api_pred_ty: scalar or splat, no poison)
-fn ao_api_pow2(v: i32) -> bool { has_apint(v) && ap_is_pow2(ap_c(v)) }
-fn ao_api_neg_pow2(v: i32) -> bool { has_apint(v) && ap_is_neg_pow2(ap_c(v)) }
-fn ao_api_low_bit_mask(v: i32) -> bool { has_apint(v) && ap_is_mask(ap_c(v)) }
+// m_Power2(const APInt *&) / m_NegatedPower2 / m_LowBitMask
+// (api_pred_ty: scalar or splat with poison lanes allowed; the value is ap_cp)
+fn ao_api_pow2(v: i32) -> bool { has_apint_poison(v) && ap_is_pow2(ap_cp(v)) }
+fn ao_api_neg_pow2(v: i32) -> bool { has_apint_poison(v) && ap_is_neg_pow2(ap_cp(v)) }
+fn ao_api_low_bit_mask(v: i32) -> bool { has_apint_poison(v) && ap_is_mask(ap_cp(v)) }
 // FMFSource::intersect(A, B)
 fn ao_fmf_intersect(a: i32, b: i32) -> u8 { inst_fmf(a) & inst_fmf(b) }
 // IRBuilder::CreateFCmpFMF(P, LHS, RHS, FMFSource)
@@ -596,8 +597,8 @@ fn ao_try_signed_truncation_check(icmp: i32) -> bool, i32, AP {
     if inst_pred(icmp) != P_ULT { return false, -1, z; }
     let ad = op(icmp, 0);
     if !bo(ad, OP_ADD) || !ao_api_pow2(op(ad, 1)) || !ao_api_pow2(op(icmp, 1)) { return false, -1, z; }
-    let i01 = ap_c(op(ad, 1));
-    let i1 = ap_c(op(icmp, 1));
+    let i01 = ap_cp(op(ad, 1));
+    let i1 = ap_cp(op(icmp, 1));
     if !(ap_ugt(i1, i01) && ap_eq(ap_shl(i01, 1), i1)) { return false, -1, z; }
     return true, op(ad, 0), i01;
 }
@@ -811,7 +812,7 @@ fn ao_get_match_part(cmpv: i32, opno: i64, p: i64) -> bool, IntPart {
     } else if p == P_NE && cp0 == P_UGT {
         if !ao_api_low_bit_mask(op(cmpv, 1)) || !bo(op(cmpv, 0), OP_XOR) { return false, ao_no_part(); }
     } else { return false, ao_no_part(); }
-    let c = ap_c(op(cmpv, 1));
+    let c = ap_cp(op(cmpv, 1));
     from = if p == P_NE { ap_popcount(c) } else { ap_countr_zero(c) };
     let i = op(cmpv, 0);
     return true, IntPart { from: op(i, opno), start: from, num: c.w as i64 - from };
@@ -879,7 +880,7 @@ fn ao_match_exact_range_check(icmp: i32) -> bool, i32, CRange {
     let lhs = op(icmp, 0);
     let p = inst_pred(icmp);
     if icmp_is_equality(p) && one_use(lhs) && bo(lhs, OP_AND) && ao_api_neg_pow2(op(lhs, 1)) {
-        let mask = ap_c(op(lhs, 1));
+        let mask = ap_cp(op(lhs, 1));
         if ap_countr_zero(c) >= ap_countr_zero(mask) {
             var cr = rg_new(c, ap_sub(c, mask));
             if p == P_NE { cr = rg_inverse(cr); }
@@ -932,6 +933,15 @@ fn ao_strip_sign_only_fp_ops(v0: i32) -> i32 {
     if m_intrinsic(v, IID_fabs) { v = op(v, 0); }
     if m_intrinsic(v, IID_copysign) { v = op(v, 0); }
     return v;
+}
+
+// fcmpToClassTest(Pred, F, LHS, Value *RHS): matchConstantFloat (m_APFloatAllowPoison), and LookThroughSrc is
+// always true (the header's `LookThroughSrc = true` argument)
+fn ao_fcmp_to_class_test_v(p: i64, fv: i32, l: i32, r: i32) -> i32, u64 {
+    let c = m_apfloat_ap(r, true);
+    if c < 0 { return -1, FCL_ALL; }
+    let a, b = fcmp_to_class_test_lt(p, fv, l, c, true);
+    return a, b;
 }
 
 // matchIsFiniteTest(Builder, LHS, RHS)
@@ -1003,9 +1013,9 @@ fn fold_logic_of_fcmps(lhs: i32, rhs: i32, is_and: bool, is_logical_select: bool
         if right >= 0 { return right; }
     }
     if has_one_use(lhs) && has_one_use(rhs) {
-        let cvr, cmr = fcmp_to_class_test(pr, inst_func(rhs), r0, r1);
+        let cvr, cmr = ao_fcmp_to_class_test_v(pr, inst_func(rhs), r0, r1);
         if cvr >= 0 {
-            let cvl, cml = fcmp_to_class_test(pl, inst_func(lhs), l0, l1);
+            let cvl, cml = ao_fcmp_to_class_test_v(pl, inst_func(lhs), l0, l1);
             if cvl == cvr {
                 let cm = if is_and { cml & cmr } else { cml | cmr };
                 let cmc = c_int(T_I32, cm as i64);
@@ -1036,7 +1046,7 @@ fn fold_logic_of_fcmps(lhs: i32, rhs: i32, is_and: bool, is_logical_select: bool
 // matchIsFPClassLikeFCmp(Op, ClassVal, ClassMask): ok, ClassVal, ClassMask
 fn ao_match_is_fpclass_like_fcmp(v: i32) -> bool, i32, u64 {
     if !ao_fcmp_inst(v) || !has_one_use(v) { return false, -1, 0; }
-    let cv, cm = fcmp_to_class_test(inst_pred(v), inst_func(v), op(v, 0), op(v, 1));
+    let cv, cm = ao_fcmp_to_class_test_v(inst_pred(v), inst_func(v), op(v, 0), op(v, 1));
     return cv >= 0, cv, cm;
 }
 
@@ -3313,7 +3323,7 @@ fn ao_visit_and_apint(i: i32, op0: i32, op1: i32) -> i32 {
         }
     }
     if ap_is_pow2(c) && one_use(op0) && ao_logical_shift(op0) && ao_api_pow2(op(op0, 0)) {
-        let shc = ap_c(op(op0, 0));
+        let shc = ap_cp(op(op0, 0));
         let x = op(op0, 1);
         let l2s = ap_exact_log2(shc);
         let l2c = ap_exact_log2(c);

@@ -769,8 +769,9 @@ fn fcmp_implies_class(p: i64, fv: i32, l: i32, c: i32, look_through: bool) -> i3
     return fcmp_implies_class_mask(p, fv, l, cfp_class(c), look_through);
 }
 
-// fcmpToClassTest(Pred, F, LHS, ConstRHS, LookThroughSrc = false): (class value or -1, test mask)
-fn fcmp_to_class_test(p: i64, fv: i32, l: i32, c: i32) -> i32, u64 { let a, b = fcmp_to_class_test_lt(p, fv, l, c, false); return a, b; }
+// fcmpToClassTest(Pred, F, LHS, ConstRHS, LookThroughSrc = true) (FloatingPointPredicateUtils.h: the default is
+// true): (class value or -1, test mask)
+fn fcmp_to_class_test(p: i64, fv: i32, l: i32, c: i32) -> i32, u64 { let a, b = fcmp_to_class_test_lt(p, fv, l, c, true); return a, b; }
 fn fcmp_to_class_test_lt(p: i64, fv: i32, l: i32, c: i32, look_through: bool) -> i32, u64 {
     let src, t, f = fcmp_implies_class(p, fv, l, c, look_through);
     if src >= 0 && t == fcl_not(f) { return src, t; }

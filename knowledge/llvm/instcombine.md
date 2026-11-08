@@ -154,3 +154,26 @@ icmp*/fcmp* tests.
   constant in SimplifyDemandedUseBits (it does in the multiple-use path: `inttoptr` of the constant).
 - The "used only by a min/max select" bail-outs call matchSelectPattern on the user select; for an fcmp
   condition that is the FP flavour logic (signed-zero and NaN checks, matchFastFloatClamp), not "unknown".
+
+## And/Or/Xor and matcher facts (verified by the goose port's per-function sweep)
+
+- **`m_ConstantInt(uint64_t &V)` matches splat vectors** (bind_const_intval_ty uses `ap_match`, then
+  `tryZExtValue`), unlike `m_ConstantInt(ConstantInt *&)` and `m_ConstantInt()`, which are scalar-only. Example:
+  `shl <2 x i8> splat (i8 3), (sub nuw splat (i8 4), %x)` becomes `lshr exact splat (i8 48), %x`
+  (shift-sub.ll @shl_sub_vec_splat; PatternMatch.h bind_const_intval_ty).
+- **`m_Power2(const APInt *&)`, `m_NegatedPower2`, `m_LowBitMask` (api_pred_ty) accept splats with poison lanes**
+  (`getSplatValue(/*AllowPoison=*/true)`), while `m_APInt` does not (signed-truncation-check.ll
+  @positive_vec_poison1).
+- **`fcmpToClassTest` looks through fabs by default**: both overloads default `LookThroughSrc = true`, and the
+  `Value *RHS` one even forces it (FloatingPointPredicateUtils.h:43-46); the `Value *` overload matches the RHS
+  with `m_APFloatAllowPoison`.
+- **`Constant::mergeUndefsWith(C, Other)` inserts `undef`, never poison**, in the lanes where Other is undef or
+  poison (xor-of-or.ll @t8: `and <2 x i4> %x, <i4 3, i4 undef>`).
+- **`Constant::isElementWiseEqual` is true when the elementwise `icmp eq` folds to poison** (and-sub-combine.ll
+  @and_sub_vec_posion folds to `ret poison`).
+- **`annotateAnyAllocSite` runs for every call** with a pointer result: an `allocalign` constant argument raises the
+  call's return `align` even for functions that are not allocation functions (InferAlignAttribute.ll).
+- matchBSwapOrBitReverse: recognizeBSwapOrBitReverseIdiom inserts `trunc`/`rev`/`mask`/`zext` (named so, uniqued
+  while I still exists) before I; the last one is removed from the block and returned, so it takes I's name.
+- foldAndOrOfICmpsWithPow2AndWithZero calls the `isKnownToBeAPowerOfTwo(V, DL, ...)` overload, which has no
+  DomConditionCache; the other isKnownToBeAPowerOfTwo calls of the file use the SimplifyQuery (with it).

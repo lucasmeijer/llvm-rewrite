@@ -140,6 +140,7 @@ fn ic_annotate_any_alloc_site(ci: i32) -> bool {
 fn visit_call_base(ci: i32) -> i32 {
     var changed = false;
     if ic_annotate_any_alloc_site(ci) { changed = true; }
+    if call_has_fn_str_attr(ci, "modular-format") { ic_not_ported("optimizeModularFormat (modular-format calls)"); }
     let nargs = cb_nargs(ci);
     var argnos: i64[>..<] = [];
     for k in nargs {

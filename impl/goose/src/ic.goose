@@ -842,9 +842,18 @@ fn visit_return(ri: i32) -> i32 {
 }
 
 // AttributeFuncs::isNoFPClassCompatibleType
+// (FPMathOperator::isSupportedFloatingPointType: FP or FP vector, or composed of homogeneous FP types: a literal
+// struct whose elements are all one FP/FP-vector type, or nested arrays of one)
 fn nofpclass_compatible_type(t0: i32) -> bool {
     var t = t0;
-    while ty_kind(t) == TK_ARRAY { t = ty_elem(t); }
+    if ty_kind(t) == TK_STRUCT {
+        if types[t].name >= 0 || ty_count(t) == 0 { return false; }
+        let f0 = ty_field(t, 0);
+        for k in ty_count(t) { if ty_field(t, k) != f0 { return false; } }
+        t = f0;
+    } else {
+        while ty_kind(t) == TK_ARRAY { t = ty_elem(t); }
+    }
     return ty_is_fp(ty_scalar(t));
 }
 

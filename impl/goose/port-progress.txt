@@ -19,5 +19,5 @@ lib/Target/X86/X86Subtarget.cpp 0.2
 lib/Target/X86/X86TargetMachine.cpp 0.2
 lib/CodeGen/TargetLoweringBase.cpp 0.1
 lib/Transforms/InstCombine/InstCombineCompares.cpp 0.98
-lib/Transforms/InstCombine/InstCombineAndOrXor.cpp 0.01
+lib/Transforms/InstCombine/InstCombineAndOrXor.cpp 0.98
 lib/Analysis/CmpInstAnalysis.cpp 0.35
