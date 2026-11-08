@@ -10,6 +10,8 @@ print_state: struct {
     all_md: bool;
     fn: Value_Id = NONE;
     dirty: bool = true;
+    module_md_count: s64;   // W.md_order / W.as_order after process_module: the per-function slots come after
+    module_as_count: s64;
 };
 
 printer_note_ir_changed :: () { print_state.dirty = true; }
@@ -23,8 +25,11 @@ printer_reset :: () {
 // Each LLVM print call builds a fresh SlotTracker, so metadata numbering restarts per printed function: we reset the
 // AsmWriter state when the function changes (or the IR changed). `all_md` = ShouldInitializeAllMetadata (an
 // instruction that references an MDNode through an intrinsic operand): every function's metadata is numbered first.
+// Switching to another function of an unchanged module keeps the module part (TypeFinder, module slots, module
+// metadata and attribute groups) and drops only the previous function's slots, which gives the same numbering as a
+// fresh SlotTracker without redoing the module-wide work per printed function.
 printer_begin_function :: (f: Value_Id, all_md := false) {
-    if print_state.dirty || print_state.fn != f || all_md != print_state.all_md {
+    if print_state.dirty || all_md != print_state.all_md || (print_state.fn != f && all_md) {
         printer_reset();
         print_state.dirty = false;
         print_state.all_md = all_md;
@@ -34,8 +39,14 @@ printer_begin_function :: (f: Value_Id, all_md := false) {
         process_module();
         if all_md for g: ir.m_functions process_function(g);
         print_state.module_ready = true;
+        print_state.module_md_count = W.md_order.count;
+        print_state.module_as_count = W.as_order.count;
     }
     if print_state.fn != f {
+        for k: print_state.module_md_count..W.md_order.count-1 table_remove(*W.md_slot, W.md_order[k]);
+        W.md_order.count = print_state.module_md_count;
+        for k: print_state.module_as_count..W.as_order.count-1 table_remove(*W.as_slot, W.as_order[k]);
+        W.as_order.count = print_state.module_as_count;
         process_function(f);
         print_state.fn = f;
     }

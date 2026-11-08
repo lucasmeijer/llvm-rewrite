@@ -190,9 +190,9 @@
 - Shared fixes made here: `get_underlying_object`'s default MaxLookup is 10 (was 6); `gv_is_interposable` now
   includes `noipa` definitions and the SemanticInterposition module flag.
 - Perf (x64 build): building MemorySSA on lua.ll +0.08 s, sqlite3.ll +0.19 s over parsing (LLVM: +0.02 s each).
-  `print<memoryssa>`/`print<domtree>` on those files are slow (lua 8.7 s vs LLVM 0.9 s) because every per-function
-  print re-initialises the module printer state (`printer_begin_function` → `process_module`), not because of the
-  analyses; worth fixing when a perf benchmark covers printers.
+  `printer_begin_function` used to re-run TypeFinder and process_module for every printed function (lua
+  print<memoryssa> 8.7 s vs LLVM 0.9 s); it now keeps the module part and only drops the previous function's
+  metadata / attribute-group slots (print<domtree> on tests/perf/scaling/globals/n8000.ll: 100 s -> 0.5 s).
 - GlobalsAA: `UnknownFunctionsWithLocalLinkage` is forced false after computing, matching LLVM's move-constructor
   quirk (knowledge/llvm/alias-analysis-and-memoryssa.md).
 - Jai trap: `print`/`tprint` treat every `%` as a placeholder (even `"%/"`); write a literal percent sign as
@@ -359,8 +359,8 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - Perf (x64 build, print<scalar-evolution>): ~8-10x LLVM on tests/perf/scaling/loops-many (n500 1.0 s vs 0.12 s,
   n2000 47 s vs 4.8 s), the same super-linear growth as LLVM (loop guards collect every dominating exit condition of
   the 500 preceding loops into umin chains; GroupByComplexity's grouping is quadratic in LLVM too). The constant
-  factor is the x64 backend plus Table lookups. print<scalar-evolution> on modules with thousands of functions is
-  dominated by the printer re-running process_module per function (print<domtree> has the same cost).
+  factor is the x64 backend plus Table lookups. (Modules with thousands of functions were dominated by the printer
+  re-running process_module per function; fixed in print_util.jai, see "Alias analysis and MemorySSA".)
   loop-rotate now gets a ScalarEvolution from the loop PM: `perf 'tests/perf/scaling/loops-many/*'` k = 1.04
   (LLVM 1.11). No @perf benchmark times SCEV itself.
 - Traps: `return f()` with several results, `for < i: a..b` order (gnu_merge_adaptive), Table key types, untyped
