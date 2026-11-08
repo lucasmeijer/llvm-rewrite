@@ -778,3 +778,31 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   and `debugify,…`: 0 differs.
 - Perf (x64 build, `-disable-output`, no @perf benchmark): straightline n16000/n64000 +0.01/+0.1 s over parsing,
   sqlite3.ll +0.23 s (LLVM +0.02): linear.
+
+## L1.loop-misc: LoopDeletion, LoopInstSimplify, LoopSimplifyCFG, LoopIdiomRecognize (+ LastRunTracking)
+
+- Files: `pass_loop_deletion.jai` (LoopDeletion.cpp, LoopUtils' deleteDeadLoop / breakLoopBackedge,
+  containsIrreducibleCFG on a LoopBlocksRPO), `pass_loop_instsimplify.jai` (+ the WeakTrackingVH-list form of
+  RecursivelyDeleteTriviallyDeadInstructions with MSSAU: `recursively_delete_trivially_dead_list`),
+  `pass_loop_simplifycfg.jai` (ConstantTerminatorFoldingImpl = `Ctf`), `pass_loop_idiom.jai` (`Lir`),
+  `hash_recognize.jai` (HashRecognize: CRC detection + Sarwate table), `loop_access.jai` (the start of the LAA port:
+  getPointersDiff, isConsecutiveAccess). `require<iv-users>` computes IVUsers every time (LLVM caches it per loop;
+  recomputing only repeats memoized getSCEV calls).
+- **LastRunTrackingAnalysis** (passes.jai `Fn_Analyses.lrt_instcombine`, Analysis_Kind `.LAST_RUN_TRACKING`):
+  InstCombine is skipped when it already ran on the function and every pass since preserved everything. This was
+  the cause of the ~37 extra differences of `...,loop(indvars),instcombine`: LLVM's indvars can change flags and
+  still return PreservedAnalyses::all (knowledge/llvm/indvars-and-scev-expander.md). `-disable-last-run-tracking`.
+  Any pass that wrongly returns PRESERVE_ALL after changing IR (or the reverse) now changes InstCombine's output.
+- Loop passes in a module pipeline (`debugify,loop-idiom`) get their own function+loop adaptor (parse_module_pass).
+- Unported corners, all loud: SplitEdge through splitBlockBefore in breakLoopBackedge (never hit in the corpus),
+  LoopIdiom chains of more than 8 adjacent stores (SmallPtrSet iteration order); LoopSimplifyCFG with more than two
+  dead successors uses insertion order where LLVM uses pointer order (DT child order only; sweeps identical).
+- Sweeps (all identical except pre-existing loud failures and the pr12351.ll diagnostic): `loop(loop-deletion)`,
+  `loop-mssa(loop-deletion),print<memoryssa>` (-verify-memoryssa), `loop(loop-instsimplify)`,
+  `loop-mssa(loop-instsimplify)`, `loop(loop-simplifycfg)`, `loop-mssa(loop-simplifycfg)`, `loop(loop-idiom)`
+  (also `-mcpu=corei7`, `-mtriple=x86_64 -mcpu=corei7 --per-function`, and `debugify,function(loop(loop-idiom),
+  loop-mssa(loop-idiom))`), `sroa,loop(loop-rotate,indvars,loop-idiom,loop-deletion)`,
+  `sroa,instcombine,loop-mssa(loop-instsimplify,loop-simplifycfg,licm),loop(loop-deletion)` (+ --per-function),
+  `instcombine` whole-file and `--per-function`: 0 differs.
+- Shared fixes on the way: li_make_loop_invariant moves with LLVM's moveBefore (debug records stay), opt no longer
+  adds `"target-cpu"` for `-mcpu` on a triple-less module, dl_type_alloc_size computes arrays in bytes.

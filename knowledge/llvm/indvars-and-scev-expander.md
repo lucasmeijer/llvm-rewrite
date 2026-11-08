@@ -57,3 +57,11 @@ function-attrs), and `loop(indvars)` identical to opt 23.1.5 on every round-trip
   (CorrelatedValuePropagation/uscmp.ll).
 - `DominatorTree::dominates(const Instruction *Def, const BasicBlock *UseBB)` special-cases only invoke; a callbr
   result is treated like any instruction (IndVarSimplify/callbr.ll).
+
+## IndVarSimplify and LastRunTracking
+
+- IndVarSimplify can strengthen `nuw`/`nsw` on an IV increment and still return `PreservedAnalyses::all()` (the
+  flag change is not counted in `IndVarSimplify::run`'s Changed). The LastRunTrackingAnalysis of the function
+  then survives, and a following `instcombine` is skipped entirely: `sroa,instcombine,loop-mssa(loop-rotate,licm),
+  loop(indvars),instcombine` on Analysis/ScalarEvolution/avoid-smax-0.ll keeps `sext i32 %i.0` although
+  instcombine alone on the same IR turns it into `zext nneg` (verified with `-disable-last-run-tracking`).

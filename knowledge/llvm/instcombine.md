@@ -325,3 +325,13 @@ Verified by the goose port (per-function sweep of the imported InstCombine tests
 - X86 intrinsics reach X86TTIImpl only with an x86 module triple; without a triple (NoTTIImpl) nothing happens.
   SimplifyDemandedVectorElts' x86 hook (scalar ss/sd ops, pack, pmadd, pshufb/vpermilvar operand 1, sse4a) covers far
   more sweep functions than instCombineIntrinsic itself.
+- `IRBuilder::CreateUnaryIntrinsic` / `CreateBinaryIntrinsic` call `getOrInsertDeclaration` *before* trying to
+  fold, so a folded call still leaves the declaration (`declare i32 @llvm.sadd.sat.i32` in
+  InstCombine/ldexp.ll); `CreateIntrinsic` folds first and declares only if it emits a call.
+- `MemIntrinsicBase::getDest()` strips pointer casts (including `addrspacecast`): memset->store stores through
+  the stripped pointer (`store i64 0, ptr addrspace(1) @g8`), while memcpy->load/store uses the raw operands.
+- `m_SplatMask` is `all_equal(Mask)`: a mask with poison elements (`<poison, 1, 1>`) is not a splat for
+  shrinkSplatShuffle (InstCombine/trunc.ll wide_splat3). `AttributeSet::getVScaleRangeMin()` is 1 without a
+  `vscale_range` attribute. `APFloat::hasSignBitInMSB` is true for ppc_fp128 too.
+- `DataLayout::getTypeAllocSize` of an array is `N * getTypeAllocSize(elt)` in bytes; computing it through bits
+  wraps for `[2^63 x i8]` (LowerConstantIntrinsics/objectsize_basic.ll large_alloca).

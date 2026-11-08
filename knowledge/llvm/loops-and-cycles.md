@@ -144,3 +144,34 @@ Verified with the jai port (impl/jai/src/pass_licm.jai) on Transforms/LICM and s
 - ICFLoopSafetyInfo's per-block first-special-instruction caches are filled lazily and only reset by
   insertInstructionTo of a special instruction or removeInstruction of the cached one (InstructionPrecedenceTracking);
   a port must reproduce the staleness, not recompute.
+
+## Loop deletion, loop-simplifycfg, loop-instsimplify, loop-idiom (verified by the Jai port, L1.loop-misc)
+
+- `Loop::makeLoopInvariant` hoists with `I->moveBefore(InsertPt->getIterator())` (not moveBeforePreserving): the
+  hoisted instruction's debug records stay behind on the next instruction, and it is inserted after the records
+  attached to the preheader terminator (`debugify,function(loop-simplify)` on LICM/hoist-metadata.ll).
+- `deleteDeadLoop` (LoopUtils.cpp): the preheader first gets `br i1 false, header, exit` (DT insert edge), then
+  `br exit` (DT delete edge to the header); exit phis keep only entry 0, renamed to the preheader; uses outside the
+  loop become poison; one debug record per DebugVariable moves to the exit's first insertion point, in original
+  order before that instruction's records; the loop and all its subloops are destroyed (no relinking). A deleted
+  block whose address is taken leaves `inttoptr (i32 1 to ptr)` behind (LoopDeletion/blockaddress.ll).
+- `breakLoopBackedge`: an exiting conditional latch becomes `br exit` after `Header->removePredecessor(Latch,
+  /*KeepOneInputPHIs=*/true)`; other latches are split (SplitEdge) and the new block made unreachable; then
+  `LI.erase(L)` and LCSSA is rebuilt for the outermost loop if L was nested.
+- LoopSimplifyCFG's foldTerminators collects dead successors in a `SmallPtrSet<BasicBlock *, 2>` and pushes one DT
+  delete update per entry: with more than two dead successors the order is pointer order (not reproducible). The
+  resulting tree is the same; only child order could differ. The current loop is never deleted (it gives up).
+- LoopInstSimplify replaces uses with `Use::set` (no RAUW): debug records keep pointing at the old instruction and
+  are salvaged when it is deleted by RecursivelyDeleteTriviallyDeadInstructions.
+- LoopIdiomRecognize: once SCEVExpander has expanded the base pointer, the pass reports a change even when the
+  idiom is then rejected and the expansion is cleaned up (SCEVExpanderCleaner). `optimizeCRCLoop`'s result is
+  ignored: a loop where only the CRC table rewrite happened still returns PreservedAnalyses::all().
+  HashRecognize runs on every countable loop (unless optimizing for size), so its getSCEV /
+  getSmallConstantTripCount calls happen even when nothing is rewritten.
+- `getAtomicMemIntrinsicMaxElementSize` is 16 for X86 and 0 without a target (unordered atomic memcpy idiom only
+  with a triple); `getPopcntSupport(32)` is FastHardware only with the POPCNT feature (`-mcpu=corei7`).
+- opt clears `-mcpu`/`-mattr` when the module triple has no known architecture: no `"target-cpu"` attribute is
+  added to functions of a triple-less module (optdriver.cpp).
+- In a module pipeline (`debugify,loop-idiom`), each loop pass gets its own
+  `ModuleToFunctionPassAdaptor(FunctionToLoopPassAdaptor(pass, /*UseMemorySSA=*/false))` (PassBuilder
+  parseModulePass, LOOP_PASS).

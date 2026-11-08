@@ -115,7 +115,7 @@ lib/Transforms/Scalar/LICM.cpp 0.97  # all of LICM/LNICM incl. ControlFlowHoiste
 lib/Analysis/MustExecute.cpp 0.35  # LoopSafetyInfo + ICFLoopSafetyInfo only (no SimpleLoopSafetyInfo, printers, MustBeExecutedContextExplorer)
 lib/Analysis/AliasSetTracker.cpp 0.85  # no printers
 lib/Analysis/InstructionPrecedenceTracking.cpp 0.9
-lib/Transforms/Utils/LoopUtils.cpp 0.2  # appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint, isAlmostDeadIV, rewriteLoopExitValues (+ canLoopBeDeleted, hasHardUserWithinLoop; not the UnusedIndVarInLoop mode)
+lib/Transforms/Utils/LoopUtils.cpp 0.3  # appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint, isAlmostDeadIV, rewriteLoopExitValues (+ canLoopBeDeleted, hasHardUserWithinLoop; not the UnusedIndVarInLoop mode), deleteDeadLoop, breakLoopBackedge, hasMustProgress
 lib/IR/EHPersonalities.cpp 0.8  # classifyEHPersonality, colorEHFunclets
 lib/CodeGen/TargetLoweringBase.cpp 0.3   # jai_simplifycfg: initActions, computeRegisterProperties, getTypeConversion, isBeneficialToExpandPowI, getBitWidthForCttzElements
 lib/Target/X86/X86ISelLowering.cpp 0.03   # jai_simplifycfg: the X86TargetLowering constructor's operation actions (generated), getPreferredVectorAction, isLegalAddressingMode, isCheapToSpeculateCt*, isNoopAddrSpaceCast
@@ -142,3 +142,5 @@ lib/Analysis/BlockFrequencyInfo.cpp 0.4  # calculate/getBlockFreq/setBlockFreq/p
 lib/Support/ScaledNumber.cpp 0.85  # toStringAPFloat (tiny numbers) fails loudly
 lib/Transforms/Scalar/ConstraintElimination.cpp 0.92  # all but generateReproducer (-constraint-elimination-dump-reproducers) and debug dumps
 lib/Transforms/AggressiveInstCombine/AggressiveInstCombine.cpp 0.98  # all but mergeDIAssignID (fails loudly)
+lib/Analysis/LoopAccessAnalysis.cpp 0.03  # getPointersDiff, isConsecutiveAccess only (loop_access.jai)
+lib/Analysis/HashRecognize.cpp 0.85  # no print<hash-recognize> printer
