@@ -14,6 +14,7 @@ import anaprint;
 import dce;
 import adce;
 import bdce;
+import demandedbits;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or

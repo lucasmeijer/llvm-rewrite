@@ -36,9 +36,13 @@ fn call_alloc_kind(iv: i32) -> u64 {
 }
 
 // isAllocLikeFn(CB, TLI): known malloc/calloc/strdup-like library function, or allockind("alloc").
+// Whether the current caller passed a TargetLibraryInfo (BDCE calls wouldInstructionBeTriviallyDead
+// without one: no library-function knowledge, only allockind attributes).
+var local_have_tli: bool = true;
+
 fn is_alloc_like_fn(iv: i32) -> bool {
     let f = mb_called_function(iv);
-    if f >= 0 && tli_alloc_like(f) { return true; }
+    if f >= 0 && local_have_tli && tli_alloc_like(f) { return true; }
     return (call_alloc_kind(iv) & AFK_ALLOC) != 0;
 }
 
@@ -59,7 +63,7 @@ fn call_arg_with_attr(iv: i32, kind: i64) -> i32 {
 // getFreedOperand
 fn get_freed_operand(iv: i32) -> i32 {
     let f = mb_called_function(iv);
-    if f >= 0 && tli_is_free_fn(f) { return cb_arg(iv, 0); }
+    if f >= 0 && local_have_tli && tli_is_free_fn(f) { return cb_arg(iv, 0); }
     if (call_alloc_kind(iv) & AFK_FREE) != 0 { return call_arg_with_attr(iv, AK_AllocatedPointer); }
     return -1;
 }
@@ -111,7 +115,7 @@ fn would_be_trivially_dead(iv: i32) -> bool {
     if is_callbase(iv) {
         let fo = get_freed_operand(iv);
         if fo >= 0 && is_constant_value(fo) { return is_null_value(fo) || is_undef_or_poison(fo); }
-        if is_math_libcall_noop(iv) { return true; }
+        if local_have_tli && is_math_libcall_noop(iv) { return true; }
     }
     if iop(iv) == OP_LOAD {
         let p = strip_ptr_casts(op(iv, 0));
