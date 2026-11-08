@@ -264,7 +264,7 @@ fn inst_erase_from_parent(iv: i32) {
     }
     inst_remove_from_parent(iv);
     drop_all_refs(iv);
-    vals[iv].kind = VK_DEAD;
+    val_set_dead(iv);
 }
 
 // Is v a location operand of any debug record? (ValueAsMetadata, or inside a DIArgList.) Linear in the number

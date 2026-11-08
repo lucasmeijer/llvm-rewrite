@@ -492,7 +492,7 @@ fn ph_copy_metadata(dst: i32, src: i32) {
 // `delete NewPN` of an unattached phi: drop its operands so the values lose those uses
 fn ph_delete_unattached_phi(p: i32) {
     drop_all_refs(p);
-    vals[p].kind = VK_DEAD;
+    val_set_dead(p);
 }
 
 // InstCombinerImpl::foldPHIArgZextsIntoPHI(Phi)

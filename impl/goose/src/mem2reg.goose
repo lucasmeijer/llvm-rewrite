@@ -415,7 +415,7 @@ fn m2r_erase(iv: i32) {
     }
     inst_remove_from_parent(iv);
     drop_all_refs(iv);
-    vals[iv].kind = VK_DEAD;
+    val_set_dead(iv);
 }
 
 // DILocalScope::getSubprogram

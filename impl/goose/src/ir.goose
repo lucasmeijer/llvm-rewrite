@@ -341,18 +341,52 @@ struct Use { val: i32, user: i32, next: i32, prev: i32 }
 
 var uses: Use[>..];
 var use_aux: i32[>..];             // parallel: PHI incoming block (value id) etc.
-var free_runs: i32[32];            // free operand runs by log2 capacity; linked through uses[].next
+// Free operand runs by exact capacity (1..31), linked through uses[start].next; -1 = empty. A run is freed when
+// it is replaced by a bigger one (grow_ops) or its user dies (val_set_dead), and reused by the next allocation of
+// the same capacity, so phi/switch growth and erased instructions don't grow `uses` without bound (DESIGN.md
+// §2.2). Larger runs are left behind (rare: wide phis and switches).
+var free_runs: i32[32];
 
 fn log2_ceil(n: i64) -> i64 { var k = 0; while (1 << k) < n { k++; } return k; }
 
 fn alloc_uses(user: i32, n: i64) -> i32 {
     if n == 0 { return uses.len as i32; }
+    if n < 32 && free_runs[n] >= 0 {
+        let at = free_runs[n];
+        free_runs[n] = uses[at].next;
+        for k in n {
+            uses[at + k] = Use { val: -1, user: user, next: -1, prev: -1 };
+            use_aux[at + k] = -1;
+        }
+        return at;
+    }
     let at = uses.len as i32;
     for k in n {
         uses.push(Use { val: -1, user: user, next: -1, prev: -1 });
         use_aux.push(-1);
     }
     return at;
+}
+
+// Returns a run whose uses are all unlinked (val = -1) to its free list.
+fn free_uses(at: i32, cap: i64) {
+    if cap <= 0 || cap >= 32 || at < 0 { return; }
+    uses[at].next = free_runs[cap];
+    free_runs[cap] = at;
+}
+
+// A value is erased: it becomes a VK_DEAD tombstone (its id is never reused, §2.3) and its operand run, whose
+// uses must already be dropped, goes back to the pool. ops = -1, so a stale op() of the dead value fails loudly
+// instead of reading the run's next owner.
+fn val_set_dead(v: i32) {
+    let at = vals[v].ops;
+    let cap = vals[v].cap as i64;
+    for k in vals[v].nops { if uses[at + k].val >= 0 { fatal("internal: erasing a value whose operands are still set"); } }
+    vals[v].kind = VK_DEAD;
+    vals[v].ops = -1;
+    vals[v].nops = 0;
+    vals[v].cap = 0;
+    free_uses(at, cap);
 }
 
 fn op(user: i32, k: i64) -> i32 { uses[vals[user].ops + k].val }
@@ -389,11 +423,8 @@ fn set_op(user: i32, k: i64, v: i32) { use_set(vals[user].ops + k as i32, v); }
 fn grow_ops(user: i32, ncap: i64) {
     let n = vals[user].nops as i64;
     let old = vals[user].ops;
-    let at = uses.len as i32;
-    for k in ncap {
-        uses.push(Use { val: -1, user: user, next: -1, prev: -1 });
-        use_aux.push(-1);
-    }
+    let ocap = vals[user].cap as i64;
+    let at = alloc_uses(user, ncap);
     for k in n {
         use_set(at + k as i32, uses[old + k].val);
         use_aux[at + k] = use_aux[old + k];
@@ -402,6 +433,7 @@ fn grow_ops(user: i32, ncap: i64) {
     while k > 0 { k--; use_unlink(old + k as i32); uses[old + k].val = -1; }
     vals[user].ops = at;
     vals[user].cap = ncap as i32;
+    free_uses(old, ocap);
 }
 
 // Appends one operand slot. Growth policy of PHINode::growOperands (n + n/2, at least 2); SwitchInst and
@@ -1027,7 +1059,7 @@ fn inst_remove(iv: i32) {
 fn inst_erase(iv: i32) {
     inst_remove(iv);
     drop_all_refs(iv);
-    vals[iv].kind = VK_DEAD;
+    val_set_dead(iv);
 }
 
 fn block_terminator(bv: i32) -> i32 {
