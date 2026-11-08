@@ -7382,6 +7382,7 @@ tests/imported/llvm/Transforms/LICM/sink-with-coroutine.ll::opt
 tests/imported/llvm/Transforms/LICM/sink-with-coroutine.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/sinking-debugify.ll::opt
 tests/imported/llvm/Transforms/LICM/sinking-debugify.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/sinking.ll::opt
 tests/imported/llvm/Transforms/LICM/sinking.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/speculate-div.ll::opt
 tests/imported/llvm/Transforms/LICM/speculate-div.ll::roundtrip
