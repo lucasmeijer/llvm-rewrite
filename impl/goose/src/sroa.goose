@@ -2927,19 +2927,27 @@ fn split_alloca(ai: i32) -> bool {
     if !sorted { slices_stable_sort(); }
     compute_partitions();
     var frag_ai: i32[>..<] = [];
+    var frag_off: i64[>..<] = [];
+    var frag_size: i64[>..<] = [];
     for pi in parts.len {
         let nai, bits = rewrite_partition(ai, pi);
         if nai >= 0 {
             changed = true;
-            if nai != ai { frag_ai.push(nai); }
+            if nai != ai {
+                frag_ai.push(nai);
+                frag_off.push(parts[pi].b * 8);
+                frag_size.push(min(bits, (parts[pi].e - parts[pi].b) * 8));
+            }
         }
     }
-    // Debug-info migration (findDVRDeclares / findDVRValues / getDVRAssignmentMarkers of AI)
     if dbgrecs.len > 0 {
+        if inst_get_md(ai, md_kind_id("DIAssignID")) >= 0 { sr_not_ported("assignment tracking (DIAssignID) in SROA"); }
         var recs: i32[>..<] = [];
         m2r_find_dbg_users(ai, recs);
-        if recs.len > 0 && frag_ai.len > 0 { sr_not_ported("debug-info migration for split allocas"); }
-        if inst_get_md(ai, md_kind_id("DIAssignID")) >= 0 { sr_not_ported("assignment tracking (DIAssignID) in SROA"); }
+        // findDVRDeclares, then findDVRValues
+        for r in recs { if dbgrecs[r].kind as i64 == DR_DECLARE { sr_migrate_one(ai, r, frag_ai, frag_off, frag_size); } }
+        for r in recs { if dbgrecs[r].kind as i64 == DR_VALUE { sr_migrate_one(ai, r, frag_ai, frag_off, frag_size); } }
+        for r in recs { if dbgrecs[r].kind as i64 == DR_ASSIGN { sr_not_ported("assignment tracking (dbg_assign) in SROA"); } }
     }
     return changed;
 }
@@ -3998,4 +4006,164 @@ fn sr_range_md_contains_zero(m: i32) -> bool {
         k += 2;
     }
     return false;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Debug-info migration for split allocas (splitAlloca's MigrateOne, insertNewDbgInst,
+// createOrReplaceFragment; DIExpression::calculateFragmentIntersect / extractLeadingOffset)
+
+// DIExpression::getFragmentInfo: (has, offset, size)
+fn diexpr_fragment(e: i32) -> bool, i64, i64 {
+    let n = diexpr_nelems(e);
+    var k: i64 = 0;
+    while k < n {
+        let o = diexpr_elem(e, k);
+        if o == DW_OP_LLVM_fragment { return true, diexpr_elem(e, k + 1), diexpr_elem(e, k + 2); }
+        k += diexpr_op_size(o);
+    }
+    return false, 0, 0;
+}
+
+fn sr_md_ints(xs: const i64[:]) -> i32 {
+    var ops: i32[>..<] = [];
+    for x in xs { ops.push(md_int(x)); }
+    return md_get(MK_DIEXPR, -1, ops, false);
+}
+
+// isKillLocation for a declare
+fn sr_is_kill_location(r: i32) -> bool {
+    let l = dbgrecs[r].loc;
+    if l < 0 { return true; }
+    if mds[l].kind == MK_VALUE { let v = mds[l].extra; return v < 0 || vals[v].kind == VK_UNDEF || vals[v].kind == VK_POISON; }
+    if mds[l].kind == MK_DIARGLIST { sr_not_ported("DIArgList locations in SROA debug migration"); }
+    return true;
+}
+
+fn sr_migrate_one(ai: i32, r: i32, frag_ai: const i32[:], frag_off: const i64[:], frag_size: const i64[:]) {
+    if sr_is_kill_location(r) { return; }
+    let l = dbgrecs[r].loc;
+    let dbg_ptr = mds[l].extra;
+    let e = dbgrecs[r].expr;
+    // getFragmentOrEntireVariable
+    let hf, fo, fsz = diexpr_fragment(e);
+    var var_off: i64 = 0;
+    var var_size: i64 = 0;
+    if hf { var_off = fo; var_size = fsz; }
+    else { let vs = divar_size_bits(dbgrecs[r].dvar); if vs >= 0 { var_size = vs; } }
+    // extractLeadingOffset on the single-location elements
+    let n = diexpr_nelems(e);
+    var k: i64 = 0;
+    if n >= 2 && diexpr_elem(e, 0) == DW_OP_LLVM_arg {
+        if diexpr_elem(e, 1) != 0 { return; }
+        k = 2;
+        var j = k;
+        while j < n { if diexpr_elem(e, j) == DW_OP_LLVM_arg { return; } j += diexpr_op_size(diexpr_elem(e, j)); }
+    }
+    var cur_off: i64 = 0;
+    loop {
+        if k >= n { break; }
+        let o = diexpr_elem(e, k);
+        if o == DW_OP_deref || o == 0x94 || o == 0xa6 || o == DW_OP_LLVM_fragment || o == DW_OP_LLVM_extract_bits_zext || o == DW_OP_LLVM_extract_bits_sext { break; }
+        if o == 0x23 { cur_off += diexpr_elem(e, k + 1); k += 2; continue; }          // DW_OP_plus_uconst
+        if o == 0x10 {                                                                  // DW_OP_constu
+            let v = diexpr_elem(e, k + 1);
+            k += 2;
+            if k >= n { return; }
+            let o2 = diexpr_elem(e, k);
+            if o2 == 0x22 { cur_off += v; } else if o2 == 0x1c { cur_off -= v; } else { return; }
+            k += 1;
+            continue;
+        }
+        return;
+    }
+    var post: i64[>..<] = [];
+    for j in k..n { post.push(diexpr_elem(e, j)); }
+    var extract_off: i64 = 0;
+    var j: i64 = 0;
+    while j < n {
+        let o = diexpr_elem(e, j);
+        if o == DW_OP_LLVM_extract_bits_zext || o == DW_OP_LLVM_extract_bits_sext { extract_off = diexpr_elem(e, j + 1); break; }
+        j += diexpr_op_size(o);
+    }
+    for fi in frag_ai.len {
+        // calculateFragmentIntersect
+        if var_size == 0 { continue; }
+        if dbg_ptr != ai { sr_not_ported("getPointerOffsetFrom in SROA debug migration"); }
+        var mem_start = 0 * 8 + frag_off[fi] - (cur_off * 8 + extract_off);
+        let off_from_loc = -mem_start;
+        var nf_has = true;
+        var nf_off: i64 = 0;
+        var nf_size: i64 = 0;
+        if mem_start + frag_size[fi] < 0 {
+            nf_off = 0; nf_size = 0;
+        } else {
+            let ms = mem_start + var_off;
+            let me = ms + frag_size[fi];
+            let mfs = max(0, ms);
+            let mfz = max(0, me - mfs);
+            // intersect(SliceOfVariable(mfz, mfs), VarFrag)
+            let st = max(mfs, var_off);
+            let en = min(mfs + mfz, var_off + var_size);
+            var ts: i64 = 0; var to: i64 = 0;
+            if en > st { ts = en - st; to = st; }
+            if ts == var_size && to == var_off { nf_has = false; } else { nf_off = to; nf_size = ts; }
+        }
+        if nf_has && nf_size == 0 { continue; }
+        if !nf_has { if hf { nf_has = true; nf_off = fo; nf_size = fsz; } }
+        var off_new = off_from_loc - extract_off;
+        let bit_extract_off = min(0, off_new);
+        off_new = max(0, off_new);
+        var ne: i64[>..<] = [];
+        if off_new > 0 {
+            // DIExpression::prepend(Expr, 0, OffsetInBytes): DW_OP_plus_uconst in front (appendOffset)
+            let ob = (off_new + 7) / 8;
+            if ob > 0 { ne.push(0x23); ne.push(ob); }
+        }
+        for x in post { ne.push(x); }
+        // remove existing records on the new alloca for the same variable fragment
+        var olds: i32[>..<] = [];
+        m2r_find_dbg_users(frag_ai[fi], olds);
+        for o in olds {
+            let ok = dbgrecs[o].kind as i64;
+            if ok != DR_DECLARE && ok != DR_VALUE { continue; }
+            if dbgrecs[o].dvar == dbgrecs[r].dvar && di_slot(dbgrecs[o].dl, "inlinedAt") == di_slot(dbgrecs[r].dl, "inlinedAt") {
+                dbg_erase_record(o);
+            }
+        }
+        // insertNewDbgInst: createOrReplaceFragment(NewAddrExpr, NewFragment, BitExtractOffset)
+        var fe: i64[>..<] = [];
+        if nf_has {
+            var has_frag = false;
+            var has_bx = false;
+            var q: i64 = 0;
+            while q < ne.len {
+                let o = ne[q];
+                let sz = diexpr_op_size(o);
+                if o == DW_OP_LLVM_fragment { has_frag = true; q += sz; continue; }
+                if o == DW_OP_LLVM_extract_bits_zext || o == DW_OP_LLVM_extract_bits_sext {
+                    sr_not_ported("DW_OP_LLVM_extract_bits in SROA debug migration");
+                }
+                for t in sz { fe.push(ne[q + t]); }
+                q += sz;
+            }
+            if has_frag && has_bx { continue; }
+            fe.push(DW_OP_LLVM_fragment); fe.push(nf_off); fe.push(nf_size);
+            let _ = bit_extract_off;
+        } else {
+            for x in ne { fe.push(x); }
+        }
+        let nexpr = sr_md_ints(fe);
+        if dbgrecs[r].kind as i64 == DR_DECLARE {
+            let nr = new_dbgrec(DR_DECLARE);
+            dbgrecs[nr].loc = md_value(frag_ai[fi]);
+            dbgrecs[nr].dvar = dbgrecs[r].dvar;
+            dbgrecs[nr].expr = nexpr;
+            dbgrecs[nr].dl = dbgrecs[r].dl;
+            inst_add_dbg(ai, nr);
+            m2r_recs.push(nr);
+            vs_add(VS_PASS1, frag_ai[fi]);
+        } else {
+            sr_not_ported("migrating dbg_value records of split allocas");
+        }
+    }
 }
