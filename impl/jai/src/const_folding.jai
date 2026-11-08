@@ -927,7 +927,7 @@ apf_is_denormal :: (f: APFloat) -> bool {
     d := fp_decode(g.k, apf_words(*g));
     if d.cat != .NORMAL return false;
     p, emax, emin, b := fp_semantics(g.k);
-    return d.exp < emin;
+    return big_bitlen(d.sig) < p;   // fp_decode gives denormals exponent emin and a significand narrower than p
 }
 // flushDenormalConstant
 flush_denormal_constant :: (t: Type_Id, f: APFloat, mode: u8) -> Value_Id {
