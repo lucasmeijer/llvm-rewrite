@@ -1017,7 +1017,9 @@ tests/imported/llvm/Analysis/DemandedBits/lshr.ll::analysis
 tests/imported/llvm/Analysis/DemandedBits/lshr.ll::roundtrip
 tests/imported/llvm/Analysis/DemandedBits/shl.ll::analysis
 tests/imported/llvm/Analysis/DemandedBits/shl.ll::roundtrip
+tests/imported/llvm/Analysis/DemandedBits/vectors-inseltpoison.ll::analysis
 tests/imported/llvm/Analysis/DemandedBits/vectors-inseltpoison.ll::roundtrip
+tests/imported/llvm/Analysis/DemandedBits/vectors.ll::analysis
 tests/imported/llvm/Analysis/DemandedBits/vectors.ll::roundtrip
 tests/imported/llvm/Analysis/Dominators/2006-10-02-BreakCritEdges.ll::analysis
 tests/imported/llvm/Analysis/Dominators/2006-10-02-BreakCritEdges.ll::roundtrip

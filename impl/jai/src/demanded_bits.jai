@@ -24,7 +24,6 @@ db_is_always_live :: (i: Value_Id) -> bool {
     return is_terminator(inst_op(i)) || is_eh_pad(i) || may_have_side_effects(i);
 }
 
-is_int_or_int_vector :: (t: Type_Id) -> bool { return type_kind(scalar_type(t)) == .INT; }
 
 ap_heap_copy :: (a: APInt) -> APInt {
     r: APInt;

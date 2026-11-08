@@ -9,9 +9,8 @@
 // ---------------------------------------------------------------- calls
 
 is_call_base :: inline (i: Value_Id) -> bool { op := inst_op(i); return op == .CALL || op == .INVOKE || op == .CALLBR; }
-call_callee :: inline (i: Value_Id) -> Value_Id { return op(i, nops(i) - 1); }
 call_num_args :: (i: Value_Id) -> u32 { return call_arg_count(i); }
-call_arg :: inline (i: Value_Id, k: u32) -> Value_Id { return op(i, k); }
+// call_arg / call_callee / strip_pointer_casts are in autoupgrade.jai
 // dyn_cast<Function>(getCalledOperand())
 call_called_operand_fn :: (i: Value_Id) -> Value_Id {
     c := call_callee(i);
@@ -478,22 +477,6 @@ host_fold_fp :: (fn: Host_Fp_Fn, x: float64, y: float64) -> bool {
 }
 
 // ---------------------------------------------------------------- triviality of death (Local.cpp)
-
-// stripPointerCasts: bitcast/addrspacecast and all-zero-index GEP constant expressions
-strip_pointer_casts :: (v: Value_Id) -> Value_Id {
-    while v != NONE && vkind(v) == .C_EXPR {
-        e := cexpr(v);
-        if e.op == .BITCAST || e.op == .ADDRSPACECAST { v = op(v, 0); continue; }
-        if e.op == .GEP {
-            all_zero := true;
-            n := nops(v);
-            if n > 1 for k: 1..n-1 if !is_null_value(op(v, k)) { all_zero = false; break; }
-            if all_zero { v = op(v, 0); continue; }
-        }
-        break;
-    }
-    return v;
-}
 
 is_lifetime_intrinsic :: (id: string) -> bool { return id == "llvm.lifetime.start" || id == "llvm.lifetime.end"; }
 
