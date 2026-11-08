@@ -1,2 +1,3 @@
 # Fractions for LLVM files named in src/ headers but only partly ported (see scripts/port-progress.py).
 # Format: lib/<path>.cpp <fraction 0.0-1.0>
+lib/Transforms/InstCombine/InstCombineCalls.cpp 0.85

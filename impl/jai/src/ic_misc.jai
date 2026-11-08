@@ -5,8 +5,8 @@
 // Ported from: InstructionCombining.cpp (visitReturnInst, visitUnreachableInst, visitUncondBrInst, visitCondBrInst,
 // handlePotentiallyDeadSuccessors, visitExtractValueInst prologue, visitFreeze prologue, visitGetElementPtrInst
 // prologue),
-// InstCombineShifts.cpp, InstCombineAndOrXor.cpp, InstCombineCasts.cpp (commonCastTransforms),
-// InstCombineCalls.cpp, InstCombineVectorOps.cpp, InstCombineLoadStoreAlloca.cpp (prologues only).
+// InstCombineLoadStoreAlloca.cpp (mergeStoreIntoSuccessor). The cast visitors are in ic_casts.jai, the call
+// visitors in ic_calls.jai.
 
 ic_visit :: (i: Value_Id) -> Value_Id {
     o := inst_op(i);

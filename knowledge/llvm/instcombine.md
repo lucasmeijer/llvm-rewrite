@@ -110,3 +110,22 @@ noted, and by diffing `opt -passes=instcombine` output on the imported tests).
   `getParamAlign(0).valueOrOne()` of the old call).
 - `Constant::isElementWiseEqual(Y)` is false unless Y is a constant of the same *vector* type (scalars only match by
   identity).
+
+## Casts and calls
+
+- **InstVisitor sends `llvm.va_end` to `visitVAEndInst`, not `visitCallInst`** (InstVisitor::visitCall delegates by
+  intrinsic id; InstCombine only overrides visitVAEndInst), so a va_end never gets the nounwind inference or
+  visitCallBase. Every other intrinsic reaches visitCallInst.
+- **Target intrinsic folds depend on the module triple**: `TTI.instCombineIntrinsic`, `simplifyDemandedUseBits-
+  Intrinsic` and `simplifyDemandedVectorEltsIntrinsic` are X86TTIImpl's only when the triple is x86; without a
+  triple an `llvm.x86.*` call is left alone (InstCombine/X86 tests all set `target triple`).
+- **`m_UMin/m_SMin/m_SMax` in visitTrunc match the select form too**, binding the select's true value to the first
+  sub-pattern (MaxMin_match), so `trunc (select (icmp ult (add zext, zext), 255), add, 255)` becomes uadd.sat.
+- **TypeEvaluationHelper (canEvaluateTruncated/SExtd) accepts multi-use values** if every user of each multi-use value
+  was visited by the same query (the Pending list); a select *condition* use of a multi-use value rejects it.
+  canEvaluateZExtd keeps the one-use rule.
+- **`CallInst::Create(II->getCalledFunction(), Args)` drops call-site attributes, metadata and flags**: e.g.
+  `ctlz(x, false)` → `ctlz(x, true)` loses a `range` return attribute and fast-math flags; foldCttzCtlz then adds a
+  fresh `range` attribute on the next visit.
+- **foldCtpop/foldCttzCtlz add a `range(iN lo, hi)` return attribute** computed from known bits (and isKnownNonZero
+  for ctpop), so many ctpop/cttz/ctlz calls in `-passes=instcombine` output carry `range` attributes.

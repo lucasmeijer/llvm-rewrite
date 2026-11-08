@@ -404,3 +404,29 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   SliceUpIllegalIntegerPHI sorts its records stably (LLVM's array_pod_sort = qsort; glibc sorts small arrays by
   insertion sort). Sweep after the phi port: no file regressed from identical; 5 more fail loudly (2 fixpoint
   differences that need other visitors, !annotation, !mmra, !llvm.access.group).
+
+## InstCombine casts, calls, X86 intrinsics (L1.instcombine.cast 29/40 ::opt; DESIGN.md §11)
+
+- `ic_casts.jai` ports InstCombineCasts.cpp completely (LLVM's order); `ic_calls.jai` ports InstCombineCalls.cpp
+  except the parts listed below; `ic_x86.jai` ports X86InstCombineIntrinsic.cpp completely (the 256-case
+  ternary-logic table was generated from the C++ switch by a throwaway Python script: rerun the idea, don't hand-edit).
+  Effect on the unit counts (::opt): cast 15→29/40, select 27→44/49, cmp 59→72/77, arith 78→96/115,
+  bitwise 53→69/86; InstCombine directory 745→1290/1635, InstCombine/X86 1→51/55.
+- Sweep `--passes instcombine` vs main before this work: identical 3603→6332 (also includes the memory unit's
+  work landing meanwhile), no identical→differs; 20 identical→failed are loud X86-target or other fail-loud paths
+  that the new code now reaches (gc.statepoint, ptrauth callee folds).
+- Not ported in InstCombineCalls.cpp (fail loudly where they would act, except the first): `tryOptimizeCall` =
+  LibCallSimplifier (library calls are silently left alone: ~150 of the ~210 remaining silent InstCombine diffs are
+  libcall folds; SimplifyLibCalls.cpp + BuildLibCalls.cpp + a TargetLibraryInfo getLibFunc/prototype table are the
+  next unit of work), `optimizeModularFormat`, the transform half of `transformConstExprCastCall` (the bail-outs
+  are ported, so calls to declarations with a different prototype are fine), `transformCallThroughTrampoline`,
+  ptrauth folds, `gc.statepoint`, `experimental.vp.reverse`, the ARM/AArch64/Hexagon intrinsic cases and every
+  non-x86 TTI::instCombineIntrinsic (fails loudly only when the module triple selects that target),
+  objectsize with `dynamic=true` (left alone: ObjectSizeOffsetEvaluator is not ported), AAMDNodes::adjustForAccess
+  of `!tbaa`/`!tbaa.struct` in SimplifyAnyMemTransfer, DIAssignID updates.
+- Shared changes: the `ptrmask` case of SimplifyDemandedUseBits (ic_demanded.jai) and the x86 target hooks there;
+  visitReturnInst uses `ic_simplify_non_null_operand`; `intrinsic_ids.jai` gained stacksave/va_*/matrix/trampoline/
+  ptrauth ids; canBeCastedExactlyIntToFP moved from ic_compares.jai to ic_casts.jai.
+- Traps: Jai `for k: 0..n-1` with an unsigned `n == 0` runs 2^32 times — cast loop bounds to s64; `ifx` cannot
+  pick between two multi-value calls; several helpers already existed under the same name in other agents' files
+  (icb_fabs, pm_extract_value_idx, call_param_align, icb_vector_splat, ...): grep `^name ::` before adding one.
