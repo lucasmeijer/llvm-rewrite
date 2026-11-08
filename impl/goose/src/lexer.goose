@@ -25,7 +25,8 @@ let T_TYPE = 16;      // primitive type (ttype)
 let T_KW = 17;        // keyword (src[ts..te])
 let T_PUNCT = 18;     // single char (tch)
 let T_DOTS = 19;      // ...
-let T_CARET = 20;     // ^N
+let T_CARET = 20;
+let T_DBGREC = 21;    // #dbg_<kind>: tstr = kind (value, declare, assign, label, declare_value)     // ^N
 
 var src: u8[>..];
 var src_name: u8[>..];
@@ -390,6 +391,18 @@ fn lex() {
         if c == '%' { lex_var(T_LVAR, T_LID); te = lpos; return; }
         if c == '$' { lex_var(T_COMDATVAR, -1); te = lpos; return; }
         if c == '#' {
+            if is_alpha(ch(lpos)) {
+                var e = lpos;
+                while is_alnum(ch(e)) || ch(e) == '_' { e++; }
+                let w = src[lpos..e];
+                if !starts_with(w, "dbg_") { perr("expected debug record type here"); }
+                tstr.clear();
+                tstr.append(w[4..]);
+                lpos = e;
+                tk = T_DBGREC;
+                te = lpos;
+                return;
+            }
             if !is_digit(ch(lpos)) { perr("expected attribute group id"); }
             var v = 0;
             while is_digit(ch(lpos)) { v = v * 10 + (ch(lpos) - '0') as i64; lpos++; }

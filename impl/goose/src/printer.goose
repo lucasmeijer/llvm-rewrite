@@ -103,6 +103,22 @@ fn process_function(f: i32) {
         var iv = blocks[block_of(b)].first;
         while iv >= 0 {
             let ii = inst_of(iv);
+            var r = inst_first_dbg(iv);
+            while r >= 0 {
+                let x = dbgrecs[r];
+                if x.kind as i64 != DR_LABEL {
+                    if x.loc >= 0 && md_is_node(x.loc) { create_md_slot(x.loc); }
+                    if x.dvar >= 0 { create_md_slot(x.dvar); }
+                    if x.kind as i64 == DR_ASSIGN {
+                        if x.aid >= 0 { create_md_slot(x.aid); }
+                        if x.addr >= 0 && md_is_node(x.addr) { create_md_slot(x.addr); }
+                    }
+                } else {
+                    create_md_slot(x.dvar);
+                }
+                if x.dl >= 0 { create_md_slot(x.dl); }
+                r = x.next;
+            }
             if insts[ii].op as i64 == OP_CALL && is_intrinsic_call(iv) {
                 for k in nops(iv) {
                     let o = op(iv, k);
@@ -188,6 +204,15 @@ recursive fn tf_value(v: i32) {
     for j in vals[v].nops { tf_value(uses[vals[v].ops + j].val); }
 }
 
+// DbgVariableRecord::location_ops: the values of a ValueAsMetadata or DIArgList location
+recursive fn tf_dbg_loc(m: i32) {
+    if m < 0 { return; }
+    if mds[m].kind == MK_VALUE { tf_value(mds[m].extra); return; }
+    if mds[m].kind == MK_DIARGLIST {
+        for k in mds[m].nops { let o = md_op(m, k); if o >= 0 && mds[o].kind == MK_VALUE { tf_value(mds[o].extra); } }
+    }
+}
+
 recursive fn tf_md(m: i32) {
     if tf_seen_md[m] { return; }
     tf_seen_md[m] = true;
@@ -253,6 +278,15 @@ fn type_finder(m: i32) {
                 if is_call_base_op(opc) { tf_attrs(insts[ii].attrs); }
                 for k in insts[ii].nmd {
                     if md_att[insts[ii].md + 2 * k] != 0 { tf_md(md_att[insts[ii].md + 2 * k + 1]); }
+                }
+                var r = inst_first_dbg(iv);
+                while r >= 0 {
+                    let x = dbgrecs[r];
+                    if x.kind as i64 != DR_LABEL {
+                        tf_dbg_loc(x.loc);
+                        if x.kind as i64 == DR_ASSIGN { tf_dbg_loc(x.addr); }
+                    }
+                    r = x.next;
                 }
                 iv = insts[ii].next;
             }
@@ -1570,10 +1604,49 @@ fn print_block(f: i32, b: i32) {
     putc('\n');
     var iv = blocks[block_of(b)].first;
     while iv >= 0 {
+        var r = inst_first_dbg(iv);
+        while r >= 0 { put("    "); put_dbgrec(r); putc('\n'); r = dbgrecs[r].next; }
         print_inst(iv);
         putc('\n');
         iv = insts[inst_of(iv)].next;
     }
+}
+
+recursive fn put_dbg_md(m: i32) {
+    if m < 0 { put("(null)"); return; }
+    put_md_operand(m, true);
+}
+
+fn put_dbgrec(r: i32) {
+    let x = dbgrecs[r];
+    let k = x.kind as i64;
+    if k == DR_LABEL {
+        put("#dbg_label(");
+        put_dbg_md(x.dvar);
+        put(", ");
+        put_dbg_md(x.dl);
+        putc(')');
+        return;
+    }
+    put("#dbg_");
+    put(if k == DR_VALUE { "value" } else if k == DR_DECLARE { "declare" } else if k == DR_ASSIGN { "assign" } else { "declare_value" });
+    putc('(');
+    put_dbg_md(x.loc);
+    put(", ");
+    put_dbg_md(x.dvar);
+    put(", ");
+    put_dbg_md(x.expr);
+    put(", ");
+    if k == DR_ASSIGN {
+        put_dbg_md(x.aid);
+        put(", ");
+        put_dbg_md(x.addr);
+        put(", ");
+        put_dbg_md(x.aexpr);
+        put(", ");
+    }
+    put_dbg_md(x.dl);
+    putc(')');
 }
 
 fn ordering_name(o: u8) -> const u8[:] {

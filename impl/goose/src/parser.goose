@@ -293,6 +293,7 @@ fn define_local(v: i32, name_tok: i64, nm: i32, num: i64) {
             symtab_remove(fwd_local_st, f);
             fwd_local_count -= 1;
             rauw(f, v);
+            md_value_resolve(f, v);
             vals[f].kind = VK_DEAD;
         }
         if symtab_lookup(st, nm) >= 0 { perr(str("multiple definition of local value named '", sbytes(nm), "'")); }
@@ -309,6 +310,7 @@ fn define_local(v: i32, name_tok: i64, nm: i32, num: i64) {
         fwd_local_count -= 1;
         if vals[f].ty != vals[v].ty { perr("instruction forward referenced with type mismatch"); }
         rauw(f, v);
+        md_value_resolve(f, v);
         vals[f].kind = VK_DEAD;
     }
     fn_num_add(n, v);
@@ -991,7 +993,7 @@ recursive fn parse_metadata_operand() -> i32 {
     let t = parse_type();
     if t == T_METADATA { return parse_metadata_operand(); }
     let v = parse_value(t);
-    return md_value(v);
+    return md_value_fwd(v);
 }
 
 // after '!' with current token '{'
@@ -1956,7 +1958,11 @@ fn parse_function_body(fv: i32) {
         func_append_block(fv, bb);
         // instructions until a terminator
         loop {
+            let pmark = pending_dbg.len;
+            while tk == T_DBGREC { let r = parse_debug_record(); pending_dbg.push(r); }
             let iv = parse_instruction(bb);
+            for k in pmark..pending_dbg.len { inst_add_dbg(iv, pending_dbg[k]); }
+            pending_dbg.resize(pmark);
             if is_terminator_op(iop(iv)) { break; }
         }
     }
@@ -3008,7 +3014,7 @@ recursive fn parse_di_arglist() -> i32 {
         loop {
             let t = parse_type();
             let v = parse_value(t);
-            mstack.push(md_value(v));
+            mstack.push(md_value_fwd(v));
             if !eat_punct(',') { break; }
         }
     }
@@ -3178,7 +3184,7 @@ fn md_merge_uniqued() {
             let m = i as i32;
             if md_canon[m] != m || mds[m].distinct != 0 { continue; }
             let k = mds[m].kind;
-            if k != MK_TUPLE && k != MK_DI && k != MK_DIEXPR && k != MK_DIARGLIST { continue; }
+            if k != MK_TUPLE && k != MK_DI && k != MK_DIEXPR && k != MK_DIARGLIST && k != MK_VALUE { continue; }
             var j = (md_key_hash(m) as i64) & mask;
             loop {
                 let e = md_ktab[j];
@@ -3211,4 +3217,76 @@ fn md_merge_uniqued() {
         if mds[i].kind != MK_TEMP { mds[i].hash = md_hash(mds[i].kind as i64, mds[i].extra, md_ops[mds[i].ops..mds[i].ops + mds[i].nops]); }
     }
     md_rebuild_tab();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Debug records (LLParser::parseDebugRecord) and LocalAsMetadata of forward-referenced values.
+
+var pending_dbg: i32[>..<];
+var fwd_md_vals: i32[>..<];   // pairs (md id, placeholder value)
+
+fn md_value_fwd(v: i32) -> i32 {
+    let m = md_value(v);
+    if vals[v].kind == VK_FWD { fwd_md_vals.push(m); fwd_md_vals.push(v); }
+    return m;
+}
+
+// ValueAsMetadata::handleRAUW for parser placeholders.
+fn md_value_resolve(f: i32, v: i32) {
+    var any = false;
+    var k = 0;
+    while k < fwd_md_vals.len {
+        if fwd_md_vals[k + 1] == f {
+            let m = fwd_md_vals[k];
+            mds[m].extra = v;
+            mds[m].hash = md_hash(MK_VALUE, v, []);
+            any = true;
+        }
+        k += 2;
+    }
+    if any { md_rebuild_tab(); }
+}
+
+recursive fn parse_debug_record() -> i32 {
+    var kind: i64 = -1;
+    if tstr == "value" { kind = DR_VALUE; } else if tstr == "declare" { kind = DR_DECLARE; }
+    else if tstr == "assign" { kind = DR_ASSIGN; } else if tstr == "label" { kind = DR_LABEL; }
+    else if tstr == "declare_value" { kind = DR_DECLARE_VALUE; }
+    else { perr("expected debug record type here"); }
+    lex();
+    expect_punct('(', "'(' here");
+    let r = new_dbgrec(kind);
+    if kind == DR_LABEL {
+        let l = parse_md_node_ref();
+        dbgrecs[r].dvar = l;
+        expect_punct(',', "',' here");
+        let d = parse_md_node_ref();
+        dbgrecs[r].dl = d;
+        expect_punct(')', "')' here");
+        return r;
+    }
+    let loc = parse_metadata_operand();
+    dbgrecs[r].loc = loc;
+    expect_punct(',', "',' here");
+    let var_ = parse_md_node_ref();
+    dbgrecs[r].dvar = var_;
+    expect_punct(',', "',' here");
+    let ex = parse_md_node_ref();
+    dbgrecs[r].expr = ex;
+    expect_punct(',', "',' here");
+    if kind == DR_ASSIGN {
+        let aid = parse_md_node_ref();
+        dbgrecs[r].aid = aid;
+        expect_punct(',', "',' here");
+        let ad = parse_metadata_operand();
+        dbgrecs[r].addr = ad;
+        expect_punct(',', "',' here");
+        let ae = parse_md_node_ref();
+        dbgrecs[r].aexpr = ae;
+        expect_punct(',', "',' here");
+    }
+    let d = parse_md_node_ref();
+    dbgrecs[r].dl = d;
+    expect_punct(')', "')' here");
+    return r;
 }

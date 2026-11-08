@@ -229,3 +229,19 @@ fn new_dbgrec(kind: i64) -> i32 {
     dbgrecs.push(DbgRec { kind: kind as u8, loc: -1, dvar: -1, expr: -1, aid: -1, addr: -1, aexpr: -1, dl: -1, next: -1 });
     return r;
 }
+
+// DbgMarker::removeMarker: when an instruction is erased, its records move to the head of the next
+// instruction's records. Call before inst_erase.
+fn dbg_records_to_next(iv: i32) {
+    let i = inst_of(iv);
+    if i >= inst_dbg.len || inst_dbg[i] < 0 { return; }
+    let nx = insts[i].next;
+    if nx < 0 { inst_dbg[i] = -1; return; }
+    let ni = inst_of(nx);
+    while inst_dbg.len <= ni { inst_dbg.push(-1); }
+    var last = inst_dbg[i];
+    while dbgrecs[last].next >= 0 { last = dbgrecs[last].next; }
+    dbgrecs[last].next = inst_dbg[ni];
+    inst_dbg[ni] = inst_dbg[i];
+    inst_dbg[i] = -1;
+}

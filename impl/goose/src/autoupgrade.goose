@@ -7,6 +7,7 @@ import ir;
 import calls;
 import intrinsics;
 import datalayout;
+import dinfo;
 
 // ---------------------------------------------------------------------------------------------
 // Small IR helpers
@@ -127,7 +128,8 @@ fn upgrade_intrinsic_function1(f: i32) -> bool, i32 {
         }
     }
     if c == 'd' && starts_with(name, "dbg.") {
-        fatal("debug intrinsic upgrade (llvm.dbg.*) is not supported yet");
+        let r = name[4..];
+        if r == "addr" || r == "value" || r == "assign" || r == "declare" || r == "label" { return true, -1; }
     }
     if c == 'e' && starts_with(name, "experimental.vector.") {
         let rest = name[20..];
@@ -339,7 +341,7 @@ fn au_replace_call(ci: i32, nc: i32) {
         symtab_insert_raw(st, nc);
     }
     rauw(ci, nc);
-    inst_erase(ci);
+        au_erase_inst(ci);
 }
 
 fn cint_zext(v: i32) -> u64 { cint_lo(v) }
@@ -349,8 +351,13 @@ fn upgrade_intrinsic_call(ci: i32, nf: i32) {
     if vals[f].kind != VK_FUNC { return; }
     if nf < 0 {
         let name = sbytes(vals[f].name);
+        if starts_with(name, "llvm.dbg.") {
+            upgrade_dbg_intrinsic_to_record(name[9..], ci);
+                        au_erase_inst(ci);
+            return;
+        }
         if name == "llvm.stackprotectorcheck" || name == "llvm.lifetime.start.i64" || name == "llvm.lifetime.end.i64" {
-            inst_erase(ci);
+            au_erase_inst(ci);
             return;
         }
         fatal(str("intrinsic call upgrade for @", name, " is not supported yet"));
@@ -437,7 +444,7 @@ fn upgrade_intrinsic_call(ci: i32, nf: i32) {
                 au_replace_call(ci, nc);
                 return;
             }
-            inst_erase(ci);
+            au_erase_inst(ci);
             return;
         }
     }
@@ -489,3 +496,61 @@ fn upgrade_module_intrinsics() {
         f = next;
     }
 }
+
+// unwrapMAVMetadataOp / unwrapMAVOp
+fn mav_md(ci: i32, k: i64) -> i32 {
+    if k >= cb_nargs(ci) { return -1; }
+    let a = op(ci, k);
+    if vals[a].kind != VK_MDVAL { return -1; }
+    return vals[a].sub;
+}
+fn mav_node(ci: i32, k: i64) -> i32 {
+    let m = mav_md(ci, k);
+    if m >= 0 && md_is_node(m) { return m; }
+    return -1;
+}
+
+// upgradeDbgIntrinsicToDbgRecord
+fn upgrade_dbg_intrinsic_to_record(kind: const u8[:], ci: i32) {
+    var r: i32 = -1;
+    if kind == "label" {
+        r = new_dbgrec(DR_LABEL);
+        dbgrecs[r].dvar = mav_node(ci, 0);
+    } else if kind == "assign" {
+        r = new_dbgrec(DR_ASSIGN);
+        dbgrecs[r].loc = mav_md(ci, 0);
+        dbgrecs[r].dvar = mav_node(ci, 1);
+        dbgrecs[r].expr = mav_node(ci, 2);
+        dbgrecs[r].aid = mav_node(ci, 3);
+        dbgrecs[r].addr = mav_md(ci, 4);
+        dbgrecs[r].aexpr = mav_node(ci, 5);
+    } else if kind == "declare" {
+        r = new_dbgrec(DR_DECLARE);
+        dbgrecs[r].loc = mav_md(ci, 0);
+        dbgrecs[r].dvar = mav_node(ci, 1);
+        dbgrecs[r].expr = mav_node(ci, 2);
+    } else if kind == "addr" {
+        fatal("llvm.dbg.addr upgrade is not supported yet");
+    } else if kind == "value" {
+        var vo: i64 = 1;
+        var eo: i64 = 2;
+        if cb_nargs(ci) == 4 {
+            let off = op(ci, 1);
+            if !(is_constant(off) && is_null_value(off)) { return; }
+            vo = 2;
+            eo = 3;
+        }
+        r = new_dbgrec(DR_VALUE);
+        dbgrecs[r].loc = mav_md(ci, 0);
+        dbgrecs[r].dvar = mav_node(ci, vo);
+        dbgrecs[r].expr = mav_node(ci, eo);
+    } else {
+        return;
+    }
+    // DebugLoc from the call's !dbg
+    let ii = inst_of(ci);
+    for k in insts[ii].nmd { if md_att[insts[ii].md + 2 * k] == 0 { dbgrecs[r].dl = md_att[insts[ii].md + 2 * k + 1]; } }
+    inst_add_dbg(ci, r);
+}
+
+fn au_erase_inst(ci: i32) { dbg_records_to_next(ci); inst_erase(ci); }
