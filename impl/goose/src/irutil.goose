@@ -323,7 +323,7 @@ fn create_block_after(fv: i32, after: i32, name: const u8[:]) -> i32 {
     let bv = new_block(-1);
     let b = block_of(bv);
     let g = glob_of(fv);
-    blocks[b].parent = fv;
+    block_set_parent(bv, fv);
     if after < 0 {
         func_append_block(fv, bv);
     } else {

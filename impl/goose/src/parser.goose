@@ -250,7 +250,7 @@ fn get_local_by_name(nm: i32, ty: i32) -> i32 {
     if ty == T_LABEL {
         // BasicBlock::Create(Context, Name, &F): named block, in the symbol table right away
         let b = new_block(-1);
-        blocks[block_of(b)].parent = cur_fn;
+        block_set_parent(b, cur_fn);
         symtab_set_name(st, b, sbytes(nm), false);
         return b;
     }
@@ -276,7 +276,7 @@ fn get_local_by_id(n: i64, ty: i32) -> i32 {
     var ph: i32 = -1;
     if ty == T_LABEL {
         ph = new_block(-1);
-        blocks[block_of(ph)].parent = cur_fn;
+        block_set_parent(ph, cur_fn);
     } else {
         ph = make_fwd(ty);
     }
@@ -1998,7 +1998,7 @@ fn parse_function_body(fv: i32) {
                 if blocks[block_of(bb)].prev >= 0 || globs[glob_of(fv)].first_block == bb { perr(str("redefinition of label '", sbytes(nm), "'")); }
             } else {
                 bb = new_block(-1);
-                blocks[block_of(bb)].parent = fv;
+                block_set_parent(bb, fv);
                 symtab_set_name(st, bb, sbytes(nm), false);
             }
         } else {
@@ -2013,7 +2013,7 @@ fn parse_function_body(fv: i32) {
                 if vals[bb].kind != VK_BLOCK { perr("label forward referenced as a value"); }
             } else {
                 bb = new_block(-1);
-                blocks[block_of(bb)].parent = fv;
+                block_set_parent(bb, fv);
             }
             fn_num_add(want, bb);
         }

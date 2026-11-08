@@ -877,15 +877,34 @@ fn new_block(name: i32) -> i32 {
     let v = new_val(VK_BLOCK, T_LABEL, b, 0);
     vals[v].name = name;
     blocks.push(Block { val: v, parent: -1, prev: -1, next: -1, first: -1, last: -1 });
+    block_nums.push(-1);
     return v;
 }
+
+// BasicBlock::getNumber: assigned from the function's NextBlockNum when the block's parent changes
+// (BasicBlock::setParent), so it is the creation order within the function; -1 when not in a function.
+var block_nums: i32[>..];       // block index -> number
+var fn_next_bnum: i32[>..];     // glob index -> Function::NextBlockNum
+fn block_set_parent(bv: i32, fv: i32) {
+    let b = block_of(bv);
+    if blocks[b].parent == fv { return; }
+    blocks[b].parent = fv;
+    if fv < 0 { block_nums[b] = -1; return; }
+    let g = glob_of(fv) as i64;
+    while fn_next_bnum.len <= g { fn_next_bnum.push(0); }
+    block_nums[b] = fn_next_bnum[g];
+    fn_next_bnum[g] += 1;
+}
+fn block_number(bv: i32) -> i32 { block_nums[block_of(bv)] }
+// Function::getMaxBlockNumber
+fn func_max_block_number(fv: i32) -> i32 { let g = glob_of(fv) as i64; if g < fn_next_bnum.len { fn_next_bnum[g] } else { 0 } }
 
 // Insert block bv at the end of function fv.
 fn func_append_block(fv: i32, bv: i32) {
     let g = glob_of(fv);
     let b = block_of(bv);
     let last = globs[g].last_block;
-    blocks[b].parent = fv;
+    block_set_parent(bv, fv);
     blocks[b].prev = last;
     blocks[b].next = -1;
     if last >= 0 { blocks[block_of(last)].next = bv; } else { globs[g].first_block = bv; }
@@ -902,7 +921,7 @@ fn func_remove_block(bv: i32) {
     if n >= 0 { blocks[block_of(n)].prev = p; } else { globs[g].last_block = p; }
     blocks[b].prev = -1;
     blocks[b].next = -1;
-    blocks[b].parent = -1;
+    block_set_parent(bv, -1);
 }
 
 fn new_inst(opc: i64, ty: i32, nopnds: i64) -> i32 {

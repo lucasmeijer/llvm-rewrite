@@ -14,6 +14,7 @@ import anaprint;
 import dce;
 import adce;
 import bdce;
+import mem2reg;
 import demandedbits;
 
 // ---------------------------------------------------------------------------------------------
@@ -35,6 +36,7 @@ let P_REQUIRE = 106;        // require<analysis>: params = analysis id
 let P_INVALIDATE = 107;     // invalidate<analysis>
 let P_NOOP_FUNCTION = 108;
 let P_VERIFY_FUNCTION = 109;
+let P_MEM2REG = 130;
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
 // (PassInfoMixin::isRequired: printers, verifier, require/invalidate, adaptors).
@@ -49,6 +51,7 @@ let PASS_TABLE: const u8[:][] = [
     "f:print<demanded-bits>:105:1",
     "f:no-op-function:108:0",
     "f:verify:109:1",
+    "f:mem2reg:130:0",
 ];
 
 // LLVM pass class names, for -opt-bisect-limit messages.
@@ -57,6 +60,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_DCE => "DCEPass",
         P_ADCE => "ADCEPass",
         P_BDCE => "BDCEPass",
+        P_MEM2REG => "PromotePass",
         P_NOOP_MODULE => "NoOpModulePass",
         P_NOOP_FUNCTION => "NoOpFunctionPass",
         _ => "Pass",
@@ -67,6 +71,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
 let A_DOMTREE = 0;
 let A_POSTDOMTREE = 1;
 let A_DEMANDED_BITS = 2;     // computed per query; listed so require<>/invalidate<> parse
+let A_VERIFY = 20;          // VerifierAnalysis: require<verify> is accepted; no verifier yet (the harness verifies our output)
 let PA_ALL: u32 = 0xFFFFFFFF;
 let PA_NONE: u32 = 0;
 let PA_CFG: u32 = 3;          // domtree | postdomtree
@@ -75,6 +80,7 @@ fn analysis_id(name: const u8[:]) -> i64 {
     if name == "domtree" { return A_DOMTREE; }
     if name == "postdomtree" { return A_POSTDOMTREE; }
     if name == "demanded-bits" { return A_DEMANDED_BITS; }
+    if name == "verify" { return A_VERIFY; }
     return -1;
 }
 
@@ -308,6 +314,8 @@ recursive fn parse_module_elem(e: i32) -> i32 {
     }
     let r = pass_row(name, 'm');
     if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
+    // module VerifierAnalysis: nothing to compute (no verifier yet; the harness verifies our output)
+    if name == "require<verify>" || name == "invalidate<verify>" { return new_pnode(PK_PASS, P_NOOP_MODULE as i32, 0, true, pelems[e].name); }
     if llvm_knows(name, 'm') { not_implemented(name); }
     if llvm_knows(name, 'c') { not_implemented(name); }
     // a function pass in a module pipeline gets its own adaptor (createModuleToFunctionPassAdaptor)
@@ -391,6 +399,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_DCE => { return dce_run(fv); },
         P_ADCE => { return adce_run(fv); },
         P_BDCE => { return bdce_run(fv); },
+        P_MEM2REG => { return mem2reg_run(fv); },
         P_PRINT_DOMTREE => { print_domtree(fv, DT_DOM); return PA_ALL; },
         P_PRINT_POSTDOMTREE => { print_domtree(fv, DT_POST); return PA_ALL; },
         P_PRINT_DEMANDED_BITS => { print_demanded_bits(fv); return PA_ALL; },
@@ -409,6 +418,8 @@ recursive fn run_function_node(n: i32, fv: i32) {
         return;
     }
     if !should_run(n, str("function (", val_name(fv), ")")) { return; }
+    // OptNoneInstrumentation::shouldRun (after OptBisect has counted the pass, as both callbacks run)
+    if !pnodes[n].required && aset_has(alist_fn(globs[glob_of(fv)].attrs), AK_OptimizeNone) { return; }
     let pa = run_function_pass(n, fv);
     invalidate_function(fv, pa);
 }

@@ -246,7 +246,8 @@ let DR_LABEL = 3;
 let DR_DECLARE_VALUE = 4;
 
 // loc/addr: metadata (ValueAsMetadata, DIArgList or MDNode), var (or label), expr, aid, aexpr, dl: md ids.
-struct DbgRec { kind: u8, loc: i32, dvar: i32, expr: i32, aid: i32, addr: i32, aexpr: i32, dl: i32, next: i32 }
+// owner: the instruction whose marker holds the record (-1 = none), kept by inst_add_dbg / dbg_records_to_next.
+struct DbgRec { kind: u8, loc: i32, dvar: i32, expr: i32, aid: i32, addr: i32, aexpr: i32, dl: i32, next: i32, owner: i32 }
 var dbgrecs: DbgRec[>..];
 var inst_dbg: i32[>..];        // inst sub -> first record (-1)
 
@@ -261,6 +262,7 @@ fn inst_add_dbg(iv: i32, r: i32) {
     let i = inst_of(iv);
     while inst_dbg.len <= i { inst_dbg.push(-1); }
     dbgrecs[r].next = -1;
+    dbgrecs[r].owner = iv;
     if inst_dbg[i] < 0 { inst_dbg[i] = r; return; }
     var p = inst_dbg[i];
     while dbgrecs[p].next >= 0 { p = dbgrecs[p].next; }
@@ -269,7 +271,7 @@ fn inst_add_dbg(iv: i32, r: i32) {
 
 fn new_dbgrec(kind: i64) -> i32 {
     let r = dbgrecs.len as i32;
-    dbgrecs.push(DbgRec { kind: kind as u8, loc: -1, dvar: -1, expr: -1, aid: -1, addr: -1, aexpr: -1, dl: -1, next: -1 });
+    dbgrecs.push(DbgRec { kind: kind as u8, loc: -1, dvar: -1, expr: -1, aid: -1, addr: -1, aexpr: -1, dl: -1, next: -1, owner: -1 });
     return r;
 }
 
@@ -279,12 +281,34 @@ fn dbg_records_to_next(iv: i32) {
     let i = inst_of(iv);
     if i >= inst_dbg.len || inst_dbg[i] < 0 { return; }
     let nx = insts[i].next;
-    if nx < 0 { inst_dbg[i] = -1; return; }
+    if nx < 0 {
+        var r = inst_dbg[i];
+        while r >= 0 { dbgrecs[r].owner = -1; r = dbgrecs[r].next; }
+        inst_dbg[i] = -1;
+        return;
+    }
     let ni = inst_of(nx);
     while inst_dbg.len <= ni { inst_dbg.push(-1); }
     var last = inst_dbg[i];
-    while dbgrecs[last].next >= 0 { last = dbgrecs[last].next; }
+    dbgrecs[last].owner = nx;
+    while dbgrecs[last].next >= 0 { last = dbgrecs[last].next; dbgrecs[last].owner = nx; }
     dbgrecs[last].next = inst_dbg[ni];
     inst_dbg[ni] = inst_dbg[i];
     inst_dbg[i] = -1;
+}
+
+// DbgRecord::eraseFromParent: unlink the record from its instruction's marker.
+fn dbg_erase_record(r: i32) {
+    let o = dbgrecs[r].owner;
+    if o < 0 { return; }
+    let i = inst_of(o);
+    if inst_dbg[i] == r { inst_dbg[i] = dbgrecs[r].next; }
+    else {
+        var p = inst_dbg[i];
+        while p >= 0 && dbgrecs[p].next != r { p = dbgrecs[p].next; }
+        if p < 0 { fatal("internal: debug record is not in its owner's marker"); }
+        dbgrecs[p].next = dbgrecs[r].next;
+    }
+    dbgrecs[r].next = -1;
+    dbgrecs[r].owner = -1;
 }
