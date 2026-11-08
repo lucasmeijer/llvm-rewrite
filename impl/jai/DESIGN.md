@@ -84,6 +84,13 @@ src/
   memdep.jai      MemoryDependenceAnalysis (md_*: local/non-local deps, caches, removeInstruction)
   vn_coercion.jai VNCoercion (vnc_*)
   pass_gvn.jai    GVN (gvn_*: ValueTable, LeaderMap, load elimination with MemDep or MemorySSA, load/scalar PRE)
+  value_lattice.jai   ValueLatticeElement (`Vle`, vle_*)
+  lazy_value_info.jai LazyValueInfo (`*Lvi`, lvi_*: block-value cache, solver, edge values, query API, printer)
+  pass_cvp.jai    CorrelatedValuePropagation (cvp_*)
+  pass_jump_threading.jai  JumpThreading (`Jt`, jt_*), MergeBasicBlockIntoOnlyPred, SimplifyInstructionsInBlock,
+                  DuplicateInstructionsInSplitBetween, findAvailablePtrLoadStore, noalias-scope cloning
+  branch_prob.jai BranchProbabilityInfo (`*Bpi`, bpi_*; BranchProbability helpers bp_*, CFG scc_iterator)
+  block_freq.jai  BlockFrequencyInfo (`*Bfi`, bfi_*; ScaledNumber `Scaled64` sn_*, BlockMass bm_*)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 
@@ -557,3 +564,21 @@ swapped one). Keep LLVM's instruction-vs-operator distinction (pattern.jai heade
 5. Check `./harness/run check --impl jai --unit L1.instcombine.<x>`, then the whole InstCombine directory
    (`'tests/imported/llvm/Transforms/InstCombine/*'`): a new fold can expose fixpoint differences elsewhere
    (`did not reach a fixpoint` = our iteration 2 changed something LLVM's iteration 1 already did).
+
+### LazyValueInfo, CVP, JumpThreading, BPI/BFI
+
+- **LazyValueInfo** = `*Lvi` (heap, `Fn_Analyses.lvi`, `get_lvi(f)`; survives only when preserved). The cache is a
+  `Table(block, *Lvi_Block_Entry)` (lattice values, overdefined set, non-null pointers) instead of LLVM's
+  block-number-indexed vector (block ids are never reused, so it is equivalent). LVIValueHandle = the global
+  `lvi_value_handles` (value -> owning Lvi); `erase_inst` / `replace_all_uses_with` call `lvi_note_erase` /
+  `lvi_note_rauw`. `has_impl` models the lazily created PImpl (the printer prints nothing without it). Lattice values
+  (`Vle`) stored in the cache are heap copies (`vle_heap_copy`); everything else is temp.
+- **DomTreeUpdater**: `Dtu` (scfg_util.jai) has a Lazy mode (`lazy`, `pending`, `deleted` + `deleted_set`):
+  `dtu_apply` / `dtu_apply_permissive` queue, `dtu_flush` / `dtu_get_dom_tree` apply one batch and then erase the
+  pending blocks, `dtu_delete_bb` defers, `dtu_recalculate` recalculates. Eager callers are unchanged.
+- **BranchProbabilityInfo** = `*Bpi` (probabilities per source block, `get_bpi(f)`), **BlockFrequencyInfo** =
+  `*Bfi` (integer and scaled frequencies per block, `get_bfi(f)`); both survive `preserved_cfg()`. The BFI
+  construction state (`Bfi_Impl`: RPOT, Working, LoopData rows with an explicit list order for std::list inserts,
+  IrreducibleGraph) is temp and discarded, like LLVM's `cleanup`.
+- JumpThreading keeps `bpi`/`bfi` in `Jt` (getBPI/getBFI = own or cached result, getOrCreate* through
+  `jt_run_external_analysis`).

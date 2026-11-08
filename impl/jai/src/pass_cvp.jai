@@ -166,7 +166,7 @@ cvp_process_cmp :: (cmp: Value_Id, lvi: *Lvi) -> bool {
 // processSwitch
 cvp_process_switch :: (sw: Value_Id, lvi: *Lvi, dt: *Dom_Tree) -> bool {
     dtu: Dtu; dtu.dt = dt; dtu.lazy = true;
-    dtu.pending.allocator = temp; dtu.deleted.allocator = temp;
+    dtu.pending.allocator = temp; dtu.deleted.allocator = temp; dtu.deleted_set.allocator = temp;
     cond := sw_cond(sw);
     bb := inst_block(sw);
     changed := false;

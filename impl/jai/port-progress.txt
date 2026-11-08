@@ -131,3 +131,12 @@ lib/Transforms/Utils/VNCoercion.cpp 0.85  # no getConstantValueForLoad / getCons
 lib/Transforms/Utils/ScalarEvolutionExpander.cpp 0.88  # manual: all but the SCEVPredicate expansions (expandCodeForPredicate, expandComparePredicate, generateOverflowCheck, expandWrapPredicate, expandUnionPredicate: fail loudly) (heuristic 0.95)
 lib/Transforms/Scalar/IndVarSimplify.cpp 0.98  # all; ShouldRunExtraSimpleLoopUnswitch is not modelled (no loop analyses)
 lib/Transforms/Utils/SimplifyIndVar.cpp 0.99
+# LazyValueInfo / CVP / JumpThreading / BPI / BFI (jai_cvp_jt): heuristic from port-audit.py, then rounded by hand
+lib/Analysis/LazyValueInfo.cpp 0.95  # no -lvi-per-pred-ranges, no legacy wrapper pass
+lib/Transforms/Scalar/CorrelatedValuePropagation.cpp 0.98  # statistics counters not kept
+lib/Transforms/Scalar/JumpThreading.cpp 0.96  # SplitEdge via splitBlockBefore, #dbg_assign remapping, key-instruction atoms fail loudly
+lib/Analysis/BranchProbabilityInfo.cpp 0.9  # no legacy wrapper, -print-bpi
+lib/Support/BranchProbability.cpp 0.9
+lib/Analysis/BlockFrequencyInfoImpl.cpp 0.85  # no iterative inference (-use-iterative-bfi-inference)
+lib/Analysis/BlockFrequencyInfo.cpp 0.4  # calculate/getBlockFreq/setBlockFreq/print; no views, profile-count queries, legacy pass
+lib/Support/ScaledNumber.cpp 0.85  # toStringAPFloat (tiny numbers) fails loudly

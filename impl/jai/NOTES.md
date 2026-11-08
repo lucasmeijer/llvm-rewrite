@@ -702,3 +702,34 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   (k ~1.9 / ~2.8) because computing each sequential loop's trip count walks every dominating loop guard
   (isBasicBlockEntryGuardedByCond up the predecessor chain); ours is k ~2.2 / ~2.6 with a much larger constant
   (isImpliedCond and range computations, temp APInt allocation). No `@perf` benchmark times indvars.
+
+## LazyValueInfo, CVP, JumpThreading, BPI/BFI (L1.cvp, L1.jump-threading, L1.analysis.lvi, L1.analysis.bfi: COMPLETE)
+
+- Files: `value_lattice.jai`, `lazy_value_info.jai`, `pass_cvp.jai`, `pass_jump_threading.jai`, `branch_prob.jai`,
+  `block_freq.jai` (DESIGN.md "LazyValueInfo, CVP, JumpThreading, BPI/BFI"). Unit counts: cvp 104/104,
+  jump-threading 194/194, analysis.lvi 6/6, analysis.bfi 64/64 (roundtrip + opt/analysis).
+- Sweeps (every round-tripping file; LLVM vs us): `correlated-propagation` and `jump-threading` whole-file and
+  `--per-function`: 0 differs, only loud failures from the ppc_fp128 parser gap; `jump-threading,print<lazy-value-info>`,
+  `print<branch-prob>`, `print<block-freq>` (--analysis): identical except GlobalsModRef/pr12351.ll (the debug-info
+  version warning every printer sweep shows). Rerun after touching LVI, CVP, JT, BPI/BFI, the lazy DTU, or the
+  AssumptionCache invalidation rule.
+- Shared changes: `Dtu` got a Lazy mode (scfg_util.jai, see DESIGN.md); `call_range` intersects call-site and callee
+  `range` (CallBase::getRange); `contains_undef_element` no longer counts poison; `block_terminating_deoptimize_call`
+  matches LLVM (no extra "returns the call" check); fam_invalidate keeps the AssumptionCache while a surviving LVI
+  holds it (LLVM never invalidates the AC; see knowledge/llvm/lazy-value-info-and-jump-threading.md);
+  `-verify-each` (no-op) and `-aa-pipeline X` (space form) are accepted.
+- Fail loudly: `-lvi-per-pred-ranges` (unknown flag), JumpThreading's SplitEdge through splitBlockBefore, `#dbg_assign`
+  remapping, key-instruction atom groups, trailing debug records after duplicating a block into its predecessor,
+  ScaledNumber printing of numbers below 2^-120 (toStringAPFloat), `-use-iterative-bfi-inference` (unknown flag).
+- Value::print in annotation writers: `value_print_isolated` / `printer_isolated_inst_to_string` (value_lattice.jai)
+  save and restore the AsmWriter state (`W`, `print_state`, the annotation hooks) around a print with a fresh
+  SlotTracker; reuse them for any printer that prints values from inside `print_function`.
+- Perf (x64 build, `-disable-output`, no @perf benchmark times these passes): diamonds n2000/n8000 jump-threading
+  0.20/0.86 s (LLVM 0.11/0.30; parse alone 0.23/0.82), CVP 0.36/0.98 s (LLVM 0.13/0.20); sqlite3.ll JT 2.3 s,
+  CVP 1.3 s (LLVM 0.59/0.32, parse 1.7 s). Linear; a linear `isBBPendingDeletion` scan made JT quadratic on
+  diamonds before `Dtu.deleted_set`.
+- Jai traps met here: `cast(u64) x << 32` is `cast(u64) (x << 32)` (the cast swallows the whole binary expression:
+  write `(cast(u64) x) << 32`) — it silently collapsed LVI's (block, value) stack keys; `0xFFFF_FFFF_FFFF_FFFF >> 4`
+  on an untyped literal shifts a negative s64 (cast to u64 first); `return f()` with several results, `remove` is a
+  reserved word, `for < k: a..b` order, names that already existed elsewhere (`clz64`, `ctz64`, `fn_entry_count`,
+  `block_terminating_deoptimize_call`).

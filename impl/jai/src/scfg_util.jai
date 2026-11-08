@@ -227,7 +227,8 @@ Dtu :: struct {
     dt: *Dom_Tree;
     lazy: bool;
     pending: [..] Dom_Update;   // PendUpdates[PendDTUpdateIndex..] (applied ones are dropped right away)
-    deleted: [..] Value_Id;     // DeletedBBs
+    deleted: [..] Value_Id;     // DeletedBBs (in insertion order)
+    deleted_set: Table(Value_Id, bool);   // membership of `deleted`
 }
 dtu_apply :: (dtu: *Dtu, updates: [] Dom_Update) {
     if !dtu || !dtu.dt || updates.count == 0 return;
@@ -261,9 +262,8 @@ dtu_has_pending_updates :: (dtu: *Dtu) -> bool { return dtu && dtu.pending.count
 dtu_has_pending_deleted_bb :: (dtu: *Dtu) -> bool { return dtu && dtu.deleted.count > 0; }
 // isBBPendingDeletion
 dtu_is_bb_pending_deletion :: (dtu: *Dtu, bb: Value_Id) -> bool {
-    if !dtu || !dtu.lazy return false;
-    for dtu.deleted if it == bb return true;
-    return false;
+    if !dtu || !dtu.lazy || dtu.deleted.count == 0 return false;
+    return table_contains(*dtu.deleted_set, bb);
 }
 // forceFlushDeletedBB
 dtu_force_flush_deleted_bb :: (dtu: *Dtu, recalculating := false) {
@@ -272,6 +272,7 @@ dtu_force_flush_deleted_bb :: (dtu: *Dtu, recalculating := false) {
         block_erase_from_parent(it);
     }
     dtu.deleted.count = 0;
+    table_reset(*dtu.deleted_set);
 }
 // applyDomTreeUpdates + dropOutOfDateUpdates (tryFlushDeletedBB)
 dtu_flush :: (dtu: *Dtu) {
@@ -301,7 +302,8 @@ dtu_apply1 :: (dtu: *Dtu, insert: bool, from: Value_Id, to: Value_Id) {
 dtu_delete_bb :: (dtu: *Dtu, bb: Value_Id) {
     validate_delete_bb(bb);
     if dtu && dtu.lazy {
-        for dtu.deleted if it == bb return;
+        if table_contains(*dtu.deleted_set, bb) return;
+        table_set(*dtu.deleted_set, bb, true);
         array_add(*dtu.deleted, bb);
         return;
     }

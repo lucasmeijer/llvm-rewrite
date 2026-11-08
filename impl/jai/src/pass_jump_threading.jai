@@ -416,7 +416,7 @@ jump_threading_run :: (f: Value_Id) -> Preserved {
     dt := get_domtree(f);
     j.f = f;
     j.dtu.dt = dt; j.dtu.lazy = true;
-    j.dtu.pending.allocator = temp; j.dtu.deleted.allocator = temp;
+    j.dtu.pending.allocator = temp; j.dtu.deleted.allocator = temp; j.dtu.deleted_set.allocator = temp;
     j.unreachable.allocator = temp;
     j.loop_headers.allocator = temp;
     changed := jt_run_impl(*j);
