@@ -7698,10 +7698,15 @@ tests/imported/llvm/Transforms/LICM/read-only-calls.ll::opt
 tests/imported/llvm/Transforms/LICM/read-only-calls.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/read-volatile-register.ll::opt
 tests/imported/llvm/Transforms/LICM/read-volatile-register.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/salvage-hoisted-add.ll::opt
 tests/imported/llvm/Transforms/LICM/salvage-hoisted-add.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/salvage-hoisted-binop.ll::opt
 tests/imported/llvm/Transforms/LICM/salvage-hoisted-binop.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/salvage-hoisted-gep.ll::opt
 tests/imported/llvm/Transforms/LICM/salvage-hoisted-gep.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/salvage-hoisted-minmax.ll::opt
 tests/imported/llvm/Transforms/LICM/salvage-hoisted-minmax.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/salvage-hoisted-sub.ll::opt
 tests/imported/llvm/Transforms/LICM/salvage-hoisted-sub.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/scalar-promote-memmodel.ll::opt
 tests/imported/llvm/Transforms/LICM/scalar-promote-memmodel.ll::roundtrip
@@ -7717,7 +7722,9 @@ tests/imported/llvm/Transforms/LICM/sink-promote.ll::opt
 tests/imported/llvm/Transforms/LICM/sink-promote.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/sink-with-coroutine.ll::opt
 tests/imported/llvm/Transforms/LICM/sink-with-coroutine.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/sinking-debugify.ll::opt
 tests/imported/llvm/Transforms/LICM/sinking-debugify.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/sinking.ll::opt
 tests/imported/llvm/Transforms/LICM/sinking.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/speculate-div.ll::opt
 tests/imported/llvm/Transforms/LICM/speculate-div.ll::roundtrip
