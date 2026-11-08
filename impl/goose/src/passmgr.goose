@@ -588,6 +588,7 @@ recursive fn run_module_node(n: i32, m: i32) {
 }
 
 fn run_pipeline(root: i32, m: i32) {
+    flags_check_unsupported();
     run_module_node(root, m);
     aa_eval_finish();
     slots_end();

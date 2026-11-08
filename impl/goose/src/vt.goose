@@ -325,7 +325,7 @@ fn gep_accumulate_constant_offset(g: i32) -> bool, i64 {
             let c = m_apint(ix);
             if c < 0 { if is_constant(ix) && is_null_value(ix) { t = et; continue; } return false, 0; }
             if ty_kind(t) == TK_SVEC { return false, 0; }
-            off += ci_sval(c) * dl_alloc_size(et);
+            off += ci_sval(c) * dl_gep_stride(t, et);
             t = et;
         }
     }

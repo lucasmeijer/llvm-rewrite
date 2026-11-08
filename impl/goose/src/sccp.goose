@@ -269,8 +269,9 @@ fn sc_is_overdefined_lv(l: VL) -> bool { !vl_is_unknown_or_undef(l) && !sc_is_co
 fn sc_get_constant_or_null(v: i32) -> i32 {
     let ty = vals[v].ty;
     if sc_is_struct(v) {
-        if !sc_has_svs(v) { fatal("internal: SCCP: struct value not in valuemap"); }
         let n = ty_count(ty);
+        if n == 0 { return c_aggregate(ty, []); }
+        if !sc_has_svs(v) { fatal("internal: SCCP: struct value not in valuemap"); }
         for i in n { if sc_is_overdefined_lv(sc_vls[sc_recs[v].sst + (i as i32)]) { return -1; } }
         var elems: i32[>..<] = [];
         for i in n {
@@ -793,13 +794,15 @@ fn sc_value_from_metadata(i: i32) -> VL {
     let t = vals[i].ty;
     if is_callbase(i) {
         if is_int_or_int_vec(t) {
+            // CallBase::getRange: the call-site range intersected with the called function's
             let ok, r = rg_from_range_attr(alist_ret(insts[inst_of(i)].attrs));
+            let f = called_function(i);
+            var ok2 = false;
+            var r2 = rg_empty(1);
+            if f >= 0 { let o2, x2 = rg_from_range_attr(alist_ret(globs[glob_of(f)].attrs)); ok2 = o2; r2 = x2; }
+            if ok && ok2 { return vl_get_range(rg_intersect(r, r2), false); }
             if ok { return vl_get_range(r, false); }
-            let f = cb_callee(i);
-            if is_func(f) {
-                let ok2, r2 = rg_from_range_attr(alist_ret(globs[glob_of(f)].attrs));
-                if ok2 { return vl_get_range(r2, false); }
-            }
+            if ok2 { return vl_get_range(r2, false); }
         }
         if ty_kind(t) == TK_PTR && call_return_nonnull(i) { return vl_get_not(c_null(t)); }
     }
@@ -1193,7 +1196,7 @@ fn sc_take_name(dst: i32, src: i32) {
 
 fn sc_is_low_bit_mask(c: i32) -> i32 {
     // m_LowBitMask: a ConstantInt (or splat) of the form 0..01..1 (non-zero)
-    let s = m_apint(c);
+    let s = m_apint_ap(c, true);
     if s < 0 { return -1; }
     let a = ap_from_cint(s);
     if ap_is_zero(a) { return -1; }
@@ -1260,7 +1263,7 @@ fn sc_simplify_instruction(i: i32) -> i32 {
             have = true;
         } else if pred == P_EQ || pred == P_NE {
             if sc_one_use(lhs) && is_op(lhs, OP_AND) {
-                let mk = m_apint(op(lhs, 1));
+                let mk = m_apint_ap(op(lhs, 1), true);
                 if mk >= 0 {
                     let mask = ap_from_cint(mk);
                     // m_NegatedPower2: -Mask is a power of two
@@ -1329,12 +1332,33 @@ fn sc_simplify_insts_in_block(bb: i32) -> bool {
     }
     return changed;
 }
+// propagateImplicitRefFromCall: the callee's !implicit.ref attachments are added to the caller
+// (GlobalObject::addMetadata appends; attachments stay ordered by kind, stable)
 fn sc_check_implicit_ref(cb: i32) {
     let f = called_function(cb);
     if f < 0 { return; }
     let k = md_kind_id("implicit.ref");
     let g = glob_of(f);
-    for j in globs[g].nmd { if md_att[globs[g].md + 2 * j] == k { sc_not_ported("!implicit.ref propagation"); } }
+    var refs: i32[>..<] = [];
+    for j in globs[g].nmd { if md_att[globs[g].md + 2 * j] == k { refs.push(md_att[globs[g].md + 2 * j + 1]); } }
+    if refs.len == 0 { return; }
+    let caller = inst_func(cb);
+    let cg = glob_of(caller);
+    for r in refs {
+        let at = md_att.len as i32;
+        let n = globs[cg].nmd;
+        var placed = false;
+        for j in n {
+            let kk = md_att[globs[cg].md + 2 * j];
+            if !placed && kk > k { md_att.push(k); md_att.push(r); placed = true; }
+            let a = md_att[globs[cg].md + 2 * j];
+            let b = md_att[globs[cg].md + 2 * j + 1];
+            md_att.push(a); md_att.push(b);
+        }
+        if !placed { md_att.push(k); md_att.push(r); }
+        globs[cg].md = at;
+        globs[cg].nmd = n + 1;
+    }
 }
 
 // Does a BlockAddress refer to this block?
@@ -1364,6 +1388,15 @@ fn sc_change_to_unreachable(iv: i32) -> i64 {
     while i >= 0 {
         let nx = inst_next(i);
         if vals[i].first_use >= 0 { sc_rauw(i, c_poison(vals[i].ty)); }
+        if nx < 0 {
+            // the records would fall off the end of the block; BB->flushTerminatorDbgRecords() gives them
+            // to the new terminator
+            var r = inst_first_dbg(i);
+            if r >= 0 {
+                inst_dbg[inst_of(i)] = -1;
+                while r >= 0 { let rn = dbgrecs[r].next; inst_add_dbg(ui, r); r = rn; }
+            }
+        }
         sc_erase(i);
         n += 1;
         i = nx;
@@ -1790,7 +1823,16 @@ fn sc_check_func_spec(m: i32) {
            !func_has_fn_attr(f, AK_AlwaysInline) {
             var n: i64 = 0;
             each_inst(f) { i => n++; };
-            if n >= 100 { sc_not_ported("function specialization (a candidate function with 100 or more instructions)"); }
+            // without a direct call site findSpecializations finds nothing, and the only side effect
+            // (promoteConstantStackValues) needs a recursive function, which has one
+            var called = false;
+            var u = first_use(f);
+            while u >= 0 {
+                let us = uses[u].user;
+                if is_inst(us) && (iop(us) == OP_CALL || iop(us) == OP_INVOKE) && called_function(us) == f { called = true; }
+                u = use_next(u);
+            }
+            if n >= 100 && called { sc_not_ported("function specialization (a called candidate function with 100 or more instructions)"); }
         }
         f = globs[g].next;
     }
@@ -1939,11 +1981,7 @@ fn ipsccp_run(m: i32, func_spec: bool) -> bool {
             sc_erase(us);
             u = first_use(gvv);
         }
-        if globs[glob_of(gvv)].nmd > 0 {
-            let dbgk = md_kind_id("dbg");
-            let g = glob_of(gvv);
-            for j in globs[g].nmd { if md_att[globs[g].md + 2 * j] == dbgk { sc_not_ported("debug info of a deleted constant global (getExpressionForConstant)"); } }
-        }
+        sc_update_gv_debug_expr(gvv);
         changed = true;
         sc_erase_global(gvv);
     }
@@ -1966,4 +2004,48 @@ fn sc_erase_global(gv: i32) {
     module_remove_global(gv);
     drop_all_refs(gv);
     vals[gv].kind = VK_DEAD;
+}
+
+// GV->getDebugInfo(GVEs); if exactly one, replace its expression with getExpressionForConstant(init)
+// (MDNode::replaceOperandWith: the uniqued node is changed in place)
+fn sc_update_gv_debug_expr(gv: i32) {
+    let g = glob_of(gv);
+    var gve: i32 = -1;
+    var n = 0;
+    for j in globs[g].nmd { if md_att[globs[g].md + 2 * j] == 0 { gve = md_att[globs[g].md + 2 * j + 1]; n++; } }
+    if n != 1 { return; }
+    let e = sc_expression_for_constant(op(gv, 0), globs[g].vty);
+    if e < 0 { return; }
+    let k = di_field_index(di_kind(gve), "expr");
+    md_ops[mds[gve].ops + k] = e;
+}
+fn sc_const_value_expr(v: u64) -> i32 {
+    return md_get(MK_DIEXPR, -1, [md_int(16), md_int(v as! i64), md_int(159)], false);
+}
+// getExpressionForConstant(DIB, C, Ty)
+fn sc_expression_for_constant(c: i32, ty: i32) -> i32 {
+    if vals[c].kind == VK_CINT && !ty_is_vector(vals[c].ty) { return sc_int_expr(c); }
+    if vals[c].kind == VK_CFP && !ty_is_vector(vals[c].ty) && ty_is_fp(ty) && ty_bits_fp(ty) <= 64 {
+        return sc_const_value_expr(cint_lo(c));
+    }
+    if ty_kind(ty) != TK_PTR { return -1; }
+    if vals[c].kind == VK_CNULL { return sc_const_value_expr(0); }
+    if vals[c].kind == VK_CEXPR && cexpr_op(c) == OP_INTTOPTR {
+        let v = op(c, 0);
+        if vals[v].kind == VK_CINT { return sc_int_expr(v); }
+    }
+    return -1;
+}
+fn sc_int_expr(c: i32) -> i32 {
+    let a = ap_from_cint(c);
+    if a.w == 1 { return sc_const_value_expr(ap_lo64(a)); }
+    if ap_sig_bits(a) > 64 { return -1; }
+    return sc_const_value_expr(ap_sext64(a) as! u64);
+}
+fn ty_bits_fp(t: i32) -> i64 {
+    let k = ty_kind(t);
+    if k == TK_HALF || k == TK_BFLOAT { return 16; }
+    if k == TK_FLOAT { return 32; }
+    if k == TK_DOUBLE { return 64; }
+    return 128;
 }

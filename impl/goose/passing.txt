@@ -6980,6 +6980,7 @@ tests/imported/llvm/Transforms/SCCP/global-alias-constprop.ll::opt
 tests/imported/llvm/Transforms/SCCP/global-alias-constprop.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/global.ll::opt
 tests/imported/llvm/Transforms/SCCP/global.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/implicit-ref-propagation.ll::opt
 tests/imported/llvm/Transforms/SCCP/implicit-ref-propagation.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/indirectbr.ll::opt
 tests/imported/llvm/Transforms/SCCP/indirectbr.ll::roundtrip
@@ -7005,6 +7006,7 @@ tests/imported/llvm/Transforms/SCCP/ip-ranges-sext.ll::opt
 tests/imported/llvm/Transforms/SCCP/ip-ranges-sext.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/ipsccp-addr-taken.ll::opt
 tests/imported/llvm/Transforms/SCCP/ipsccp-addr-taken.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/ipsccp-basic.ll::opt
 tests/imported/llvm/Transforms/SCCP/ipsccp-basic.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/ipsccp-branch-unresolved-undef.ll::opt
 tests/imported/llvm/Transforms/SCCP/ipsccp-branch-unresolved-undef.ll::roundtrip
@@ -7032,6 +7034,7 @@ tests/imported/llvm/Transforms/SCCP/issue59602-assume-like-call-users.ll::opt
 tests/imported/llvm/Transforms/SCCP/issue59602-assume-like-call-users.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/issue59661-missing-predicate-info-for-ssa-copy.ll::opt
 tests/imported/llvm/Transforms/SCCP/issue59661-missing-predicate-info-for-ssa-copy.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/landingpad.ll::opt
 tests/imported/llvm/Transforms/SCCP/landingpad.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/latticeval-invalidate.ll::opt
 tests/imported/llvm/Transforms/SCCP/latticeval-invalidate.ll::roundtrip
@@ -7073,7 +7076,9 @@ tests/imported/llvm/Transforms/SCCP/pr35357.ll::opt
 tests/imported/llvm/Transforms/SCCP/pr35357.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/pr45185-range-predinfo.ll::opt
 tests/imported/llvm/Transforms/SCCP/pr45185-range-predinfo.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/pr49582-iterator-invalidation.ll::opt
 tests/imported/llvm/Transforms/SCCP/pr49582-iterator-invalidation.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/pr50901.ll::opt
 tests/imported/llvm/Transforms/SCCP/pr50901.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/pr52253.ll::opt
 tests/imported/llvm/Transforms/SCCP/pr52253.ll::roundtrip
@@ -7155,6 +7160,7 @@ tests/imported/llvm/Transforms/SCCP/user-with-multiple-uses.ll::opt
 tests/imported/llvm/Transforms/SCCP/user-with-multiple-uses.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/vector-bitcast.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/vector-refinement.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/vscale-gep.ll::opt
 tests/imported/llvm/Transforms/SCCP/vscale-gep.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/vscale-intrinsic.ll::opt
 tests/imported/llvm/Transforms/SCCP/vscale-intrinsic.ll::roundtrip

@@ -302,3 +302,10 @@ fn compute_x86_datalayout(t: const u8[:], out: u8[>..]&) -> bool {
     if (!is64 && windows) || iamcu { out.append("-a:0:32-S32"); } else { out.append("-S128"); }
     return true;
 }
+
+// gep_type_iterator::getSequentialElementStride: the store size of a vector element, else the alloc size
+fn dl_gep_stride(container: i32, et: i32) -> i64 {
+    let k = types[container].kind;
+    if k == TK_FVEC || k == TK_SVEC { return dl_store_size(et); }
+    return dl_alloc_size(et);
+}

@@ -569,7 +569,7 @@ recursive fn symbolic_gep(srcty: i32, rty: i32, flags0: u8, inr: i32, mark: i64,
             cur = ty_field(cur, fi);
         } else {
             let et = types[cur].a;
-            offset += ci_sval(x) * dl_alloc_size(et);
+            offset += ci_sval(x) * dl_gep_stride(cur, et);
             cur = et;
         }
     }
@@ -590,7 +590,7 @@ recursive fn symbolic_gep(srcty: i32, rty: i32, flags0: u8, inr: i32, mark: i64,
             let x = op(ptr, k);
             if k == 1 { o2 += ci_sval(x) * dl_alloc_size(c2); continue; }
             if ty_is_struct(c2) { let fi = ci_val(x) as i64; o2 += dl_struct_offset(c2, fi); c2 = ty_field(c2, fi); }
-            else { let et = types[c2].a; o2 += ci_sval(x) * dl_alloc_size(et); c2 = et; }
+            else { let et = types[c2].a; o2 += ci_sval(x) * dl_gep_stride(c2, et); c2 = et; }
         }
         o2 = sext64((o2 as! u64) & wmask64(bw), bw);
         let sum = offset + o2;
@@ -764,6 +764,16 @@ fn cf_flush_fp_dynamic_ok(c: i32) -> bool {
     return false;
 }
 
+// Type::isScalableTy (scalable vectors, also inside structs and arrays)
+recursive fn cf_ty_is_scalable(t: i32) -> bool {
+    let k = ty_kind(t);
+    if k == TK_SVEC { return true; }
+    if k == TK_ARRAY { return cf_ty_is_scalable(ty_elem(t)); }
+    if k == TK_STRUCT { for i in ty_count(t) { if cf_ty_is_scalable(ty_field(t, i)) { return true; } } }
+    if k == TK_TARGETEXT { return false; }
+    return false;
+}
+
 // ConstantFoldInstOperands(I, Ops) with the operands on is_ops
 recursive fn cf_fold_inst_operands(i: i32, mark: i64, n: i64, allow_nondet: bool) -> i32 {
     let o = iop(i);
@@ -777,7 +787,8 @@ recursive fn cf_fold_inst_operands(i: i32, mark: i64, n: i64, allow_nondet: bool
     if is_cast_op(o) { return cf_fold_cast_operand(o, is_ops[mark], vals[i].ty); }
     let x = insts[inst_of(i)];
     if o == OP_GEP {
-        if !ty_is_sized_cf(x.ty2) && false { return -1; }
+        // ConstantExpr::isSupportedGetElementPtr: not for scalable source element types
+        if cf_ty_is_scalable(x.ty2) { return -1; }
         let r = symbolic_gep(x.ty2, vals[i].ty, x.flags, -1, mark, n);
         if r >= 0 { return r; }
         return ce_gep(x.ty2, is_ops[mark], is_ops[mark + 1..mark + n], x.flags, -1);

@@ -28,7 +28,18 @@ let KNOWN_FLAGS: const u8[:][] = [
     "capture-tracking-max-uses-to-explore",
     "memssa-check-limit",                                // read by MemorySSA
     "verify-memoryssa",                                  // no-op: extra verification only
+    "use-constant-int-for-fixed-length-splat", "use-constant-fp-for-fixed-length-splat",   // only =false (the default)
+    "use-constant-int-for-scalable-splat", "use-constant-fp-for-scalable-splat",           // is supported
 ];
+
+// Flags whose non-default value is not supported (checked before the pipeline runs).
+fn flags_check_unsupported() {
+    let names: const u8[:][] = ["use-constant-int-for-fixed-length-splat", "use-constant-fp-for-fixed-length-splat",
+                                "use-constant-int-for-scalable-splat", "use-constant-fp-for-scalable-splat"];
+    for n in names {
+        if flag_bool(n, false) { fatal(str("opt: -", n, "=true is not supported yet in the Goose opt")); }
+    }
+}
 
 fn flag_known(name: const u8[:]) -> bool {
     for k in KNOWN_FLAGS { if k == name { return true; } }
