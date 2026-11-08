@@ -1412,7 +1412,13 @@ fn copy_metadata_for_load(dst: i32, src: i32) {
         }
         if nm == "range" {
             if nt == vals[src].ty { inst_set_md(dst, kind, node); }
-            else if sr_ty_is_ptr(nt) { sr_not_ported("copyRangeMetadata to a pointer load"); }
+            else if sr_ty_is_ptr(nt) {
+                // copyRangeMetadata: !nonnull if the range excludes 0 and the widths match
+                let bw = dl_ptr(sr_ptr_as_of(nt)).bits;
+                if bw == ty_bits(ty_scalar(vals[src].ty)) && !sr_range_md_contains_zero(node) {
+                    inst_set_md(dst, md_kind_id("nonnull"), md_get(MK_TUPLE, -1, [], false));
+                }
+            }
             continue;
         }
         if nm == "nofpclass" {
@@ -2275,9 +2281,18 @@ fn sr_ptr_alignment(v: i32) -> i64 {
         return 1;
     }
     if vals[v].kind == VK_GVAR {
-        let al = globs[glob_of(v)].align;
-        if al != 0 { return 1 << ((al as i64) - 1); }
-        sr_not_ported("getPointerAlignment of a global without explicit alignment");
+        let g = globs[glob_of(v)];
+        if g.align != 0 { return 1 << ((g.align as i64) - 1); }
+        let l = g.linkage as i64;
+        let weak = l == LK_WEAK_ANY || l == LK_WEAK_ODR || l == LK_LINKONCE_ANY || l == LK_LINKONCE_ODR || l == LK_COMMON || l == LK_EXTERN_WEAK;
+        let decl = g.is_decl != 0 || l == LK_AVAILABLE_EXTERNALLY;
+        if !decl && !weak {
+            // DataLayout::getPreferredAlign(GV) without explicit alignment
+            var a = dl_align(g.vty, false);
+            if dl_alloc_size(g.vty) * 8 > 128 && a < 16 { a = 16; }
+            return a;
+        }
+        return dl_align(g.vty, true);
     }
     sr_not_ported("getPointerAlignment of this value");
     return 1;
@@ -2302,7 +2317,9 @@ fn sr_ptr_deref_bytes(v: i32) -> i64, bool {
         return 0, false;
     }
     if vals[v].kind == VK_GVAR {
-        sr_not_ported("dereferenceability of globals");
+        let g = globs[glob_of(v)];
+        if g.linkage as i64 != LK_EXTERN_WEAK { return dl_store_size(g.vty), false; }
+        return 0, false;
     }
     if is_inst(v) {
         let o = iop(v);
@@ -2314,9 +2331,6 @@ fn sr_ptr_deref_bytes(v: i32) -> i64, bool {
         }
         if is_callbase(v) { sr_not_ported("calls in isDereferenceableAndAlignedPointer"); }
         return 0, false;
-    }
-    if is_constant(v) && vals[v].kind != VK_CNULL && vals[v].kind != VK_UNDEF && vals[v].kind != VK_POISON {
-        sr_not_ported("constants in isDereferenceableAndAlignedPointer");
     }
     return 0, false;
 }
@@ -3146,7 +3160,16 @@ fn sr_select_unknown_profile(s: i32) {
     let f = inst_func(s);
     let pk = md_kind_id("prof");
     let p = sr_func_get_md(f, pk);
-    if p >= 0 { sr_not_ported("!prof unknown branch weights on SROA selects in profiled functions"); }
+    if p < 0 || mds[p].nops < 2 { return; }
+    let o0 = md_op(p, 0);
+    if o0 < 0 || mds[o0].kind != MK_STRING { return; }
+    let nm = sbytes(mds[o0].extra);
+    if nm != "function_entry_count" && nm != "synthetic_function_entry_count" { return; }
+    let c = sr_mdconst_int(md_op(p, 1));
+    if c < 0 || sr_cint_u64(c) == 0 { return; }
+    let s1 = md_get(MK_STRING, intern("unknown"), [], false);
+    let s2 = md_get(MK_STRING, intern("sroa"), [], false);
+    inst_set_md(s, pk, md_get(MK_TUPLE, -1, [s1, s2], false));
 }
 fn sr_func_get_md(f: i32, kind: i32) -> i32 {
     let g = glob_of(f);
@@ -3958,4 +3981,21 @@ fn rewrite_mem_op_of_select(si: i32, i: i32, spec: i32) {
         if n2.len > 0 { set_name(pn, n2); }
         sr_rauw(i, pn);
     }
+}
+
+// getConstantRangeFromMetadata(N).contains(0)
+fn sr_range_md_contains_zero(m: i32) -> bool {
+    var k: i64 = 0;
+    while k + 1 < mds[m].nops as i64 {
+        let lo = sr_mdconst_int(md_op(m, k));
+        let hi = sr_mdconst_int(md_op(m, k + 1));
+        if lo < 0 || hi < 0 || ty_bits(vals[lo].ty) > 64 { sr_not_ported("wide !range metadata"); }
+        let l = sr_cint_u64(lo);
+        let h = sr_cint_u64(hi);
+        if l == h { return true; }
+        if l < h { if l == 0 { return true; } }
+        else if h > 0 { return true; }      // wrapped [l, h): contains 0 iff 0 < h
+        k += 2;
+    }
+    return false;
 }
