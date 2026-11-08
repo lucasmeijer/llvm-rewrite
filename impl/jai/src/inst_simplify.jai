@@ -3781,7 +3781,12 @@ simplify_intrinsic_call :: (call: Value_Id, args: [] Value_Id, q: Simplify_Query
     id := fn_iid(f);
     ret_ty := func_ret(glob(f).value_type);
     if id == IID_EXPERIMENTAL_GC_RELOCATE {
-        fatal("simplifying gc.relocate is not supported yet");
+        derived := gc_relocate_ptr(call, 2);
+        base := gc_relocate_ptr(call, 1);
+        if derived == NONE || base == NONE return NONE;
+        if pm_undef_value(derived) || pm_undef_value(base) return const_undef(ret_ty);
+        if type_kind(ret_ty) == .PTR && vkind(derived) == .C_NULL return const_null(ret_ty);
+        return NONE;
     }
     eb: u8 = EB_IGNORE; rm: u8 = RM_NEAREST_TIES_TO_EVEN;
     if is_constrained_fp_intrinsic(id) { eb, rm = constrained_eb_rm(call, id); }
@@ -3905,3 +3910,4 @@ simplify_instruction :: (i: Value_Id, q: Simplify_Query) -> Value_Id {
     if res == i return const_poison(vtype(i));
     return res;
 }
+
