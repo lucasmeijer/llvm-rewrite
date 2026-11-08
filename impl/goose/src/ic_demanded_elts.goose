@@ -22,6 +22,7 @@ import ic;
 import ic_builder;
 import ic_common;
 import ic_andorxor;
+import ic_x86;
 
 let SDVE_DEPTH_LIMIT: i64 = 10;
 var sde_changed: bool = false;
@@ -327,8 +328,11 @@ recursive fn sde_rec(v: i32, demanded0: AP, poison_in: AP, depth: i64, allow_mul
             if id == IID_masked_gather { poison2 = sde_set_op(i, 0, dptrs, poison2, depth); }
             poison3 = sde_set_op(i, 2, dpass, poison3, depth);
             poison = ap_and(poison2, poison3);
-        } else if id != 0 && starts_with(intr_name(id as i64), "llvm.x86.") {
-            ic_not_ported("simplifyDemandedVectorEltsIntrinsic (X86)");
+        } else if id != 0 && intr_is_target_specific(id) {
+            // targetSimplifyDemandedVectorEltsIntrinsic (X86TTIImpl, ic_x86.goose)
+            let handled, rv, p1 = x86_sdve_intrinsic(i, demanded, poison, depth);
+            poison = p1;
+            if handled { return rv, poison; }
         }
     }
     if is_binop_inst(i) && !sl_is_int_div_rem(o) && !is_shift_op(o) {

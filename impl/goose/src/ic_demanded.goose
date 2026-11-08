@@ -24,6 +24,7 @@ import ic;
 import ic_builder;
 import ic_common;
 import ic_andorxor;
+import ic_x86;
 
 var sd_cxt: i32 = -1;
 
@@ -618,7 +619,10 @@ recursive fn sd_use_bits(i: i32, demanded: AP, depth: i64) -> i32, KB {
                 if ctz >= (c.w as i64) - ap_countl_one(c) { return op(i, 0), known; }
             }
         } else if id != 0 && intr_is_target_specific(id) {
-            ic_not_ported("targetSimplifyDemandedUseBitsIntrinsic");
+            // targetSimplifyDemandedUseBitsIntrinsic (X86TTIImpl, ic_x86.goose)
+            let handled, rv, kb, kc = x86_sdub_intrinsic(i, demanded, known);
+            if kc { known = kb; computed = true; }
+            if handled { return rv, known; }
         }
         if !computed { known = sd_kb(i, depth); }
         done = true;
