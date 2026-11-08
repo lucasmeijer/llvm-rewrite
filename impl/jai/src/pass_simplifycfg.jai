@@ -195,7 +195,13 @@ unique_successors :: (b: Value_Id) -> [..] Value_Id {
     succs: [..] Value_Id; succs.allocator = temp;
     block_successors(b, *succs);
     u: [..] Value_Id; u.allocator = temp;
-    for succs if !block_set_contains(u, it) array_add(*u, it);
+    if succs.count <= 16 {
+        for succs if !block_set_contains(u, it) array_add(*u, it);
+        return u;
+    }
+    // SmallSetVector: linear membership would make big switches quadratic
+    seen: Table(Value_Id, bool); seen.allocator = temp;
+    for succs if !table_contains(*seen, it) { table_add(*seen, it, true); array_add(*u, it); }
     return u;
 }
 is_pseudo_probe :: (i: Value_Id) -> bool { return call_iid(i) == IID_PSEUDOPROBE; }
