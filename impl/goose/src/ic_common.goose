@@ -911,9 +911,14 @@ fn fold_binop_into_select_or_phi(i: i32) -> i32 {
 }
 
 // foldVectorBinop(Inst)
+// Every fold in foldVectorBinop needs an operand that is a shufflevector or an intrinsic call (vector.insert,
+// vector.reverse, vp.reverse, vector.splice): without one it returns nullptr. Those folds are not ported.
 fn fold_vector_binop(i: i32) -> i32 {
     if !ty_is_vector(vals[i].ty) { return -1; }
-    ic_not_ported("foldVectorBinop (vector binary operators)");
+    for k in 2 {
+        let x = op(i, k);
+        if is_inst_op(x, OP_SHUFFLEVECTOR) || inst_iid(x) != 0 { ic_not_ported("foldVectorBinop with shuffle or intrinsic operands"); }
+    }
     return -1;
 }
 

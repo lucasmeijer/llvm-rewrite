@@ -37,6 +37,7 @@ import ic_builder;
 import ic_common;
 import ic_addsub;
 import ic_muldivrem;
+import ic_shifts;
 import ic_demanded;
 import ic_visit_misc;
 
@@ -708,6 +709,9 @@ fn ic_visit(i: i32) -> i32 {
         OP_SDIV => { return visit_sdiv(i); },
         OP_UREM => { return visit_urem(i); },
         OP_SREM => { return visit_srem(i); },
+        OP_SHL => { return visit_shl(i); },
+        OP_LSHR => { return visit_lshr(i); },
+        OP_ASHR => { return visit_ashr(i); },
         OP_RET => { return visit_return(i); },
         OP_BR => { return visit_uncond_br(i); },
         OP_CONDBR => { return visit_cond_br(i); },
@@ -737,6 +741,7 @@ fn instcombine_run(fv: i32, verify_fixpoint: bool, max_iter: i64) -> u32 {
     vt_invalidate_assumes();
     ac_invalidate();
     ic_fn = fv;
+    ic_experiment_lenient = flag_bool("goose-ic-lenient", false);
     let vf = verify_fixpoint && aset_find_str(alist_fn(func_attrs(fv)), "instcombine-no-verify-fixpoint") < 0;
     if flag_bool("instcombine-lower-dbg-declare", true) {
         // LowerDbgDeclare: no dbg.declare records are lowered (not ported)

@@ -20,9 +20,11 @@ import ic;
 import ic_builder;
 import ic_common;
 
+var ic_experiment_lenient: bool = false;
 fn ic_visit_other(i: i32) -> i32 {
     let o = iop(i);
     if o == OP_CALL { return visit_call(i); }
+    if ic_experiment_lenient { errs(str("LENIENT ", opcode_name(o), "\n")); return -1; }
     var nm: u8[>..] = [];
     nm.append("the InstCombine visitor for '");
     nm.append(opcode_name(o));
@@ -69,6 +71,7 @@ fn visit_call(ci: i32) -> i32 {
         return ci;
     }
     if call_iid(ci) == 0 { return visit_call_base(ci); }
+    if ic_experiment_lenient { errs(str("LENIENT ", intr_name(call_iid(ci) as i64), "\n")); return -1; }
     var nm: u8[>..] = [];
     nm.append("the InstCombine visitor for the intrinsic ");
     nm.append(intr_name(call_iid(ci) as i64));

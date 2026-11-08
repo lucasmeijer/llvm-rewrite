@@ -39,6 +39,7 @@ let KNOWN_FLAGS: const u8[:][] = [
     "verify-scev",                                       // no-op: extra verification only
     "instcombine-code-sinking", "instcombine-max-sink-users", "instcombine-negator-enabled",   // read by instcombine
     "instcombine-negator-max-depth", "instcombine-lower-dbg-declare", "disable-last-run-tracking",
+    "goose-ic-lenient",                                  // development only: unported InstCombine visitors do nothing
 ];
 
 // Flags whose non-default value is not supported (checked before the pipeline runs).
