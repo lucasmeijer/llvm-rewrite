@@ -78,3 +78,33 @@ Verified against LLVM 23.1.5 source and the imported InstSimplify tests.
   host libm (the oracle links the system libm.so.6), rejected on errno ERANGE/EDOM or any fenv exception but
   FE_INEXACT.
 - **`findScalarElement(V, unsigned)`** gets `getZExtValue()` truncated to 32 bits.
+
+## Constant folding of FP calls (ConstantFolding.cpp)
+
+- **Transcendental folds use the host's *double* libm, for every type.** `ConstantFoldFP(sin, V, Ty)` converts a
+  half/float argument to double, calls `sin` (not `sinf`), and rounds the double result to the type
+  (`GetConstantFoldFPValue`). `exp2`/`exp10` are folded as `pow(2, x)` / `pow(10, x)`. A fold is dropped when the
+  call sets errno to EDOM/ERANGE or raises any FP exception except inexact (`llvm_fenv_testexcept`), e.g. an
+  underflowing `sin` of a subnormal. LLVM's opt links glibc's libm, so calling the same libm reproduces it
+  bit for bit (verified on random sin/cos/exp/log/pow/... folds in half/float/double: identical output).
+- Only **half, float and double** results are folded in ConstantFoldScalarCall1, *including* floor/ceil/round/
+  rint/trunc/fabs: the type check comes before them (bfloat, x86_fp80, fp128 are left alone, except fp128 `log`
+  when LLVM was built with logf128). Math functions additionally require a finite argument.
+- `powi` folds as `(float)pow((double)x, (double)n)` for half/float (C++ `std::pow(float, int)` promotes) with no
+  fenv check; `ldexp` uses `scalbn` with the exponent `sext`ed or `truncSSat`ed to 32 bits.
+- `frexp` of inf/NaN gives exponent 0 (and a quieted NaN); `sincos` folds iff both sin and cos fold.
+
+## Other ValueTracking facts found while making the analyses arbitrary-width
+
+- **computeKnownBitsFromContext resets conflicting known bits whenever the query has an AssumptionCache**, even
+  when there are no assumptions: `call range(i32 0, 32) ... !range !{i32 32, i32 64}` has conflicting bits, and
+  InstSimplify (which has an AC) does not fold `shl %a, %b` to poison (InstSimplify/shift-knownbits.ll).
+- **`CallBase::getRange()` intersects** the call-site and the callee's `range` return attributes.
+- **`m_SpecificInt(uint64_t)` compares `APInt == uint64_t`**: no truncation of the constant to the type
+  (`m_SpecificInt(-1)` never matches an i8 255). `m_SpecificInt(const APInt &)` uses `APInt::isSameValue`
+  (zero-extends the narrower one); so does ConstantFoldExtractElement's insertelement index comparison.
+- **`m_FNeg(X)` matches `fneg X` and `fsub -0.0, X`** (`fsub nsz` with any zero). Not to be confused with
+  `m_FNegNSZ`, which matches only the fsub form.
+- `computeKnownFPClass` takes `nofpclass` from the return attributes of any CallBase, invokes included.
+- KnownFPClass::bitcast uses NaN/inf/zero bit patterns only for IEEE-like types (half, bfloat, float, double,
+  fp128); for x86_fp80 and ppc_fp128 it transfers only the sign bit.

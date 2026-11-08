@@ -368,3 +368,40 @@ To add a function pass `foo`:
 5. Printers write to `errs(...)` (flags.goose); `errs_operand`/`errs_inst` print values exactly as the IR printer
    does (they number the function with the printer's SlotTracker).
 Module passes: an `m:` row and a case in `run_module_node`.
+
+## 10. Arbitrary-width integers (apint.goose)
+
+LLVM's `APInt` has any width up to 2^23 bits, and the analyses (KnownBits, ConstantRange, constant folding,
+PatternMatch) are written over it, so ours are too: `struct AP { lo: u64, w: i32, ix: i32 }`, 16 bytes, passed by
+value.
+
+- **w <= 64**: the value is `lo` (always truncated to `w` bits), `ix = -1`. Every operation tests `a.ix < 0` first
+  and then works on `lo` directly, so i1..i64 code (almost all real code) never touches memory and costs about
+  what the earlier raw-`u64` code did (instsimplify on the tests/perf/compile programs stayed 2x faster than LLVM's).
+- **w > 64**: the `ceil(w/64)` little-endian words live in a global bump pool `apw: u64[>..<]` at
+  `[ix, ix + nw)`; the top word is kept truncated and `lo` caches word 0. An operation allocates its result's words
+  and never writes into an existing value's words, so copying an `AP` (sharing `ix`) is safe and values are
+  immutable.
+- **Lifetime**: the pass manager calls `ap_pool_reset()` after every pass (`run_function_node`; module passes must
+  do the same). So *no AP may outlive the pass that made it*: anything kept across passes is stored as an IR
+  constant (`ap_to_cint`). `ap_mark()/ap_release(m)` free a bounded computation's temporaries early (used by
+  `ap_format`).
+- Alternatives rejected: a fixed-capacity word array (i4097 = 65 words would make every KnownBits value ~1 KB
+  and every copy expensive, and still fail above the cap); a free-list allocator (needs ownership, which `AP` as a
+  plain value doesn't have; a per-pass arena gives the same memory bound with no bookkeeping).
+- Division is shift-subtract on scratch words in the pool (the quotient/remainder are unique, so the algorithm
+  needn't match LLVM's Knuth D); everything else follows APInt.cpp. `tools/aptest.py` is a differential test
+  against Python integers (widths 1..4097, all operations; `tools/gb.sh src/aptest.goose bin/aptest` first).
+- Users: `KB { z: AP, o: AP }` (knownbits.goose, width = `kb_bw`), `CRange { lo: AP, hi: AP }`
+  (constrange.goose), constant folding (`ap_from_cint`/`ap_to_cint`, `ci_ap`/`c_int_ap` in pm.goose). The 64-bit
+  `CR` of crange.goose remains only for BasicAA's index-width arithmetic (aa.goose) and fails loudly above 64 bits;
+  DemandedBits is still u64-based and fails loudly above 64 bits.
+
+## 11. Calling C: the host libm (hostmath.goose, hostmath.c, opt.build)
+
+LLVM folds `sin`, `exp`, `pow`, ... by calling the host's double-precision libm and discarding the fold when
+errno or an FP exception other than inexact is raised. Goose calls C through `extern fn`; the C side
+(`src/hostmath.c`, compiled through the root sidecar `src/opt.build`) does the call with the same errno/fenv test,
+through a volatile function pointer so the C compiler can't reorder it around `fetestexcept`. LLVM's opt links the
+same glibc libm, so the results are bit-identical. Only `opt` links it; a new root file that imports cfold.goose
+needs the same `.build` sidecar.
