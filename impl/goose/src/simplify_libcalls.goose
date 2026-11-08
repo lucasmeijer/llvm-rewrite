@@ -818,7 +818,7 @@ fn optimize_floating_point_libcall(ci: i32, lf: i64, unsafe_shrink: bool) -> i32
     if lf_in(lf, [LF_logf, LF_log, LF_logl, LF_log10f, LF_log10, LF_log10l, LF_log1pf, LF_log1p, LF_log1pl, LF_log2f,
                   LF_log2, LF_log2l, LF_logbf, LF_logb, LF_logbl]) { lcs_np("optimizeLog"); }
     if lf_in(lf, [LF_tan, LF_tanf, LF_tanl, LF_sinh, LF_sinhf, LF_sinhl, LF_asinh, LF_asinhf, LF_asinhl, LF_cosh,
-                  LF_coshf, LF_coshl, LF_atanh, LF_atanhf, LF_atanhl]) { lcs_np("optimizeTrigInversionPairs"); }
+                  LF_coshf, LF_coshl, LF_atanh, LF_atanhf, LF_atanhl]) { return optimize_trig_inversion_pairs(ci, unsafe_shrink); }
     if lf == LF_ceil { return replace_unary_call(ci, IID_ceil); }
     if lf == LF_floor { return replace_unary_call(ci, IID_floor); }
     if lf == LF_round { return replace_unary_call(ci, IID_round); }
@@ -886,7 +886,7 @@ fn optimize_string_memory_libcall(ci: i32, lf: i64) -> i32 {
     if lf == LF_strcspn { lcs_np("optimizeStrCSpn"); }
     if lf == LF_strstr { lcs_np("optimizeStrStr"); }
     if lf == LF_memchr { return optimize_memchr(ci); }
-    if lf == LF_memrchr { lcs_np("optimizeMemRChr"); }
+    if lf == LF_memrchr { return optimize_memrchr(ci); }
     if lf == LF_memccpy { lcs_np("optimizeMemCCpy"); }
     if lf == LF_mempcpy { lcs_np("optimizeMemPCpy"); }
     if lf == LF_realloc { lcs_np("optimizeRealloc"); }
@@ -946,8 +946,9 @@ fn lcs_optimize_call_impl(ci: i32, callee: i32, is_ccc: bool) -> i32 {
     if lf == LF_isdigit { return optimize_isdigit(ci); }
     if lf == LF_isascii { return optimize_isascii(ci); }
     if lf == LF_toascii { return optimize_toascii(ci); }
-    if lf == LF_atoi || lf == LF_atol || lf == LF_atoll { lcs_np("optimizeAtoi"); }
-    if lf == LF_strtol || lf == LF_strtoll || lf == LF_strtoul || lf == LF_strtoull { lcs_np("optimizeStrToInt"); }
+    if lf == LF_atoi || lf == LF_atol || lf == LF_atoll { return optimize_atoi(ci); }
+    if lf == LF_strtol || lf == LF_strtoll { return optimize_str_to_int(ci, true); }
+    if lf == LF_strtoul || lf == LF_strtoull { return optimize_str_to_int(ci, false); }
     if lf == LF_printf { return optimize_printf(ci); }
     if lf == LF_sprintf { lcs_np("optimizeSPrintF"); }
     if lf == LF_snprintf { lcs_np("optimizeSnPrintF"); }
@@ -1472,4 +1473,163 @@ fn optimize_exp2(ci: i32, unsafe_shrink: bool) -> i32 {
 fn optimize_fmin_fmax(ci: i32, id: i64) -> i32 {
     let fmf = icx_fmf(ci) | FMF_NSZ;
     return copy_flags(ci, icx_binary_intrinsic_f(id, cb_arg(ci, 0), cb_arg(ci, 1), fmf, ""));
+}
+
+// optimizeMemRChr(CI, B)
+fn optimize_memrchr(ci: i32) -> i32 {
+    let src = cb_arg(ci, 0);
+    let size = cb_arg(ci, 2);
+    annotate_nonnull_and_dereferenceable(ci, 0, -1, size);
+    var cv = cb_arg(ci, 1);
+    let lc = if vals[size].kind == VK_CINT && !ty_is_vector(vals[size].ty) { size } else { -1 };
+    let np = c_null(vals[ci].ty);
+    if lc >= 0 {
+        if ap_is_zero(ci_ap(lc)) { return np; }
+        if ap_is_one(ci_ap(lc)) {
+            let v = icb_load(T_I8, src, "memrchr.char0");
+            cv = icb_trunc(cv, T_I8, "");
+            let cmp = icb_icmp(P_EQ, v, cv, "memrchr.char0cmp");
+            return icb_select(cmp, src, np, "memrchr.sel", -1);
+        }
+    }
+    if !get_constant_string_info(src, false) { return -1; }
+    var str: u8[>..<] = [];
+    for c in lcs_str { str.push(c); }
+    if str.len == 0 { return np; }
+    var endoff: u64 = 0xFFFFFFFFFFFFFFFF;
+    if lc >= 0 {
+        endoff = ap_zext64(ci_ap(lc));
+        if (str.len as u64) < endoff { return -1; }
+    }
+    if vals[cv].kind == VK_CINT && !ty_is_vector(vals[cv].ty) {
+        let ch = ap_zext64(ci_ap(cv)) as u8;
+        var i: i64 = if endoff < str.len as u64 { endoff as i64 } else { str.len };
+        var pos: i64 = -1;
+        while i != 0 { i--; if str[i] == ch { pos = i; break; } }
+        if pos < 0 { return np; }
+        if lc >= 0 { return icb_inbounds_gep_i8(src, c_int(T_I64, pos), ""); }
+        if lcs_find(str[..], str[pos], 0) == pos {
+            let cmp = icb_icmp(P_ULE, size, c_int_ty(vals[size].ty, pos as u64), "memrchr.cmp");
+            let sp = icb_inbounds_gep_i8(src, c_int(T_I64, pos), "memrchr.ptr_plus");
+            return icb_select(cmp, np, sp, "memrchr.sel", -1);
+        }
+    }
+    if endoff < str.len as u64 { str.resize(endoff as i64); }
+    if lcs_find_not(str[..], str[0], 0) >= 0 { return -1; }
+    let szt = vals[size].ty;
+    let nnez = icb_icmp(P_NE, size, c_int_ty(szt, 0), "");
+    cv = icb_trunc(cv, T_I8, "");
+    let ceq = icb_icmp(P_EQ, c_int(T_I8, str[0] as i64), cv, "");
+    let a = icb_logical_and(nnez, ceq, "");
+    let sm1 = icb_sub(size, c_int_ty(szt, 1), "");
+    let sp = icb_inbounds_gep_i8(src, sm1, "memrchr.ptr_plus");
+    return icb_select(a, sp, np, "memrchr.sel", -1);
+}
+
+// optimizeTrigInversionPairs(CI, B)
+fn optimize_trig_inversion_pairs(ci: i32, unsafe_shrink: bool) -> i32 {
+    let cf = called_function(ci);
+    var ret: i32 = -1;
+    let nm = val_name(cf);
+    if unsafe_shrink && (nm == "tan" || nm == "atanh" || nm == "sinh" || nm == "cosh" || nm == "asinh") && lcs_has_float_version(ci) {
+        ret = optimize_double_fp(ci, false, true);
+    }
+    let opc = cb_arg(ci, 0);
+    if !is_inst_op(opc, OP_CALL) { return ret; }
+    if (icx_fmf(ci) & FMF_FAST) != FMF_FAST || !is_fp_math_operator(opc) || (icx_fmf(opc) & FMF_FAST) != FMF_FAST { return ret; }
+    let f = called_function(opc);
+    if f < 0 { return ret; }
+    let flf = tli_lookup_name(val_name(f));
+    if flf < 0 || !blc_is_emittable(flf as i64) { return ret; }
+    let names: const u8[:][] = ["tan", "atanh", "sinh", "cosh", "tanf", "atanhf", "sinhf", "coshf", "tanl", "atanhl", "sinhl",
+                                "coshl", "asinh", "asinhf", "asinhl"];
+    let invs: const u8[:][] = ["atan", "tanh", "asinh", "acosh", "atanf", "tanhf", "asinhf", "acoshf", "atanl", "tanhl",
+                               "asinhl", "acoshl", "sinh", "sinhf", "sinhl"];
+    var inv: i64 = -1;
+    for k in names.len { if names[k] == val_name(cf) { inv = tli_lookup_name(invs[k]) as i64; } }
+    if flf as i64 == inv { ret = cb_arg(opc, 0); }
+    return ret;
+}
+
+// convertStrToInt(CI, Str, EndPtr, Base, AsSigned, B); the string is in lcs_str
+fn convert_str_to_int(ci: i32, endptr: i32, base0: i64, signed: bool) -> i32 {
+    var base = base0;
+    if base < 2 || base > 36 { if base != 0 { return -1; } }
+    var str: u8[>..<] = [];
+    for c in lcs_str { str.push(c); }
+    var off: i64 = 0;
+    var start: i64 = 0;
+    fn is_space(c: u8) -> bool { c == ' ' || c == 9 || c == 10 || c == 11 || c == 12 || c == 13 }
+    while off != str.len {
+        if !is_space(str[off]) { start = off; break; }
+        off++;
+    }
+    if off == str.len { return -1; }
+    var s = start;
+    let neg = str[s] == '-';
+    if str[s] == '-' || str[s] == '+' {
+        s++;
+        if s == str.len { return -1; }
+        off++;
+    }
+    let rty = vals[ci].ty;
+    let nb = ty_bits(rty);
+    var mx: u64 = if signed && neg { 1 } else { 0 };
+    if signed { mx += ((1 as u64) << (nb - 1) as u64) - 1; } else { mx += if nb >= 64 { 0xFFFFFFFFFFFFFFFF } else { ((1 as u64) << nb as u64) - 1 }; }
+    let len = str.len - s;
+    if len > 1 {
+        if str[s] == '0' {
+            let c1 = str[s + 1];
+            if c1 == 'x' || c1 == 'X' {
+                if len == 2 || (base != 0 && base != 16) { return -1; }
+                s += 2;
+                off += 2;
+                base = 16;
+            } else if base == 0 { base = 8; }
+        } else if base == 0 { base = 10; }
+    } else if base == 0 { base = 10; }
+    var result: u64 = 0;
+    for i in s..str.len {
+        var d = str[i] as u64;
+        if d >= '0' as u64 && d <= '9' as u64 { d = d - '0' as u64; }
+        else {
+            if d >= 'a' as u64 && d <= 'z' as u64 { d = d - 32; }
+            if d >= 'A' as u64 && d <= 'Z' as u64 { d = d - 'A' as u64 + 10; } else { return -1; }
+        }
+        if d >= base as u64 { return -1; }
+        // SaturatingMultiplyAdd(Result, Base, DigVal, &Overflow)
+        let lo, hi = ap_mul64(result, base as u64);
+        if hi != 0 { return -1; }
+        let r2 = lo + d;
+        if r2 < lo { return -1; }
+        result = r2;
+        if result > mx { return -1; }
+    }
+    if endptr >= 0 {
+        let o = c_int(T_I64, (off + (str.len - s)) as i64);
+        let se = icb_inbounds_gep_i8(cb_arg(ci, 0), o, "endptr");
+        icb_aligned_store(se, endptr, dl_align(vals[se].ty, true));
+    }
+    if neg {
+        result = ~result + 1;
+        if !signed && nb < 64 { result &= ((1 as u64) << nb as u64) - 1; }
+    }
+    return c_int_ty(rty, result);
+}
+// optimizeAtoi(CI, B)
+fn optimize_atoi(ci: i32) -> i32 {
+    if !get_constant_string_info(cb_arg(ci, 0), true) { return -1; }
+    return convert_str_to_int(ci, -1, 10, true);
+}
+// optimizeStrToInt(CI, B, AsSigned)
+fn optimize_str_to_int(ci: i32, signed: bool) -> i32 {
+    var ep = cb_arg(ci, 1);
+    if vals[ep].kind == VK_CNULL {
+        cs_add_param_attr(ci, 0, attr_int(AK_Captures, 0));
+        ep = -1;
+    } else if !known_non_zero_dl(ep) { return -1; }
+    if !get_constant_string_info(cb_arg(ci, 0), true) { return -1; }
+    let b = cb_arg(ci, 2);
+    if vals[b].kind == VK_CINT && !ty_is_vector(vals[b].ty) { return convert_str_to_int(ci, ep, ap_sext64(ci_ap(b)), signed); }
+    return -1;
 }
