@@ -1742,7 +1742,9 @@ fn parse_global_def(nm: i32, num: i64) {
             let at = parse_type();
             aliasee = parse_constant(at);
         }
-        let pt = ty_ptr(f.addrspace);
+        // GlobalAlias::create(Ty, AddrSpace of the aliasee's pointer type, ...)
+        let aty = vals[aliasee].ty;
+        let pt = if types[aty].kind == TK_PTR { aty } else { ty_ptr(f.addrspace) };
         let v = new_glob(if is_alias { VK_ALIAS } else { VK_IFUNC }, pt, -1, 1);
         globs[glob_of(v)].vty = vt;
         apply_glob_flags(v, f);
