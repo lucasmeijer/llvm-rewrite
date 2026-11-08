@@ -7532,7 +7532,9 @@ tests/imported/llvm/Transforms/SROA/basictest.ll::opt
 tests/imported/llvm/Transforms/SROA/basictest.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/big-endian.ll::opt
 tests/imported/llvm/Transforms/SROA/big-endian.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/dbg-inline.ll::opt
 tests/imported/llvm/Transforms/SROA/dbg-inline.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/dbg-single-piece.ll::opt
 tests/imported/llvm/Transforms/SROA/dbg-single-piece.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/fake-use-escape.ll::opt
 tests/imported/llvm/Transforms/SROA/fake-use-escape.ll::roundtrip
