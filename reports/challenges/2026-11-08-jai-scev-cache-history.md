@@ -1,6 +1,6 @@
 # ScalarEvolution: unit tests only check fresh analyses; the cache-history bugs needed a hand-made sweep
 
-- **Date / implementation / unit:** 2026-11-10 / jai / L1.analysis.scev (+ the 4 print<loopnest> checks of
+- **Date / implementation / unit:** 2026-11-08 / jai / L1.analysis.scev (+ the 4 print<loopnest> checks of
   L1.analysis.loops)
 - **What happened:** the port of ScalarEvolution.cpp (~16k lines of C++, ~9k lines of Jai) passed 233/239 of the
   unit's analysis checks on the first full build, and a sweep of `print<scalar-evolution>` over all ~7780
