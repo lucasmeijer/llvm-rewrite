@@ -2428,6 +2428,8 @@ tests/imported/llvm/Transforms/GVN/setjmp.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/simplify-icf-cache-invalidation.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/stale-loop-info.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/storeinvgroup.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/svcount-access.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/target-type.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/tbaa.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/trunc-nuw-equality.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/unreachable-predecessor.ll::roundtrip
@@ -7296,6 +7298,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/struct-return-revec.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/test_intermediate_dual_use.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/vectorizable-functions-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/vectorizable-functions.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/aarch64-sme-svcount.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/address-spaces.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/addrspacecast.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/alignment.ll::roundtrip
@@ -7338,6 +7341,7 @@ tests/imported/llvm/Transforms/SROA/select-store.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/slice-order-independence.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/slice-width.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/sroa-common-type-fail-promotion.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/sroa-target.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/std-clamp.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/struct-to-vector-fp-store-only-tail.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/struct-to-vector-subpartition.ll::roundtrip

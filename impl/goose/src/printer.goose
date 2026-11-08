@@ -381,6 +381,15 @@ recursive fn put_type(t: i32) {
     if k == TK_FP128 { put("fp128"); return; }
     if k == TK_PPC_FP128 { put("ppc_fp128"); return; }
     if k == TK_LABEL { put("label"); return; }
+    if k == TK_TARGETEXT {
+        put("target(\"");
+        put_escaped(sbytes(types[t].name));
+        putc('"');
+        for j in ty_target_ntypes(t) { put(", "); put_type(ty_target_type(t, j)); }
+        for j in ty_target_nints(t) { put(", "); put_int(ty_target_int(t, j)); }
+        putc(')');
+        return;
+    }
     if k == TK_METADATA { put("metadata"); return; }
     if k == TK_X86_AMX { put("x86_amx"); return; }
     if k == TK_TOKEN { put("token"); return; }

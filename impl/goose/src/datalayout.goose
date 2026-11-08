@@ -118,8 +118,28 @@ fn dl_int_align(bits: i64, abi: bool) -> i64 {
     return if abi { s.abi } else { s.pref };
 }
 
+// Type.cpp getTargetTypeInfo: the layout type of a target extension type
+fn target_layout_type(t: i32) -> i32 {
+    let nm = sbytes(types[t].name);
+    if nm == "spirv.Image" || nm == "spirv.SignedImage" { return T_PTR; }
+    if nm == "spirv.Type" {
+        let size = ty_target_int(t, 1);
+        let al = ty_target_int(t, 2);
+        if size > 0 && al > 0 { return ty_array(ty_int(al), size * 8 / al); }
+        return T_I32;
+    }
+    if nm == "spirv.Padding" || nm == "dx.Padding" { return ty_array(T_I8, ty_target_int(t, 0)); }
+    if starts_with(nm, "spirv.") || starts_with(nm, "dx.") || nm == "wasm.funcref" || nm == "wasm.externref" { return T_PTR; }
+    if nm == "aarch64.svcount" { return ty_vector(T_I1, 16, true); }
+    if nm == "amdgcn.named.barrier" { return ty_vector(T_I32, 4, false); }
+    if nm == "llvm.test.vectorelement" { return T_I32; }
+    fatal(str("layout of target extension type \"", nm, "\" is not supported"));
+    return -1;
+}
+
 recursive fn dl_size_bits(t: i32) -> i64 {
     let k = types[t].kind;
+    if k == TK_TARGETEXT { return dl_size_bits(target_layout_type(t)); }
     if k == TK_INT { return types[t].n as i64; }
     if k == TK_PTR { return dl_ptr(types[t].n).bits; }
     if k == TK_LABEL { return dl_ptr(0).bits; }
@@ -138,6 +158,7 @@ recursive fn dl_size_bits(t: i32) -> i64 {
 
 recursive fn dl_align(t: i32, abi: bool) -> i64 {
     let k = types[t].kind;
+    if k == TK_TARGETEXT { return dl_align(target_layout_type(t), abi); }
     if k == TK_PTR { let p = dl_ptr(types[t].n); return if abi { p.abi } else { p.pref }; }
     if k == TK_LABEL { let p = dl_ptr(0); return if abi { p.abi } else { p.pref }; }
     if k == TK_ARRAY { return dl_align(types[t].a, abi); }

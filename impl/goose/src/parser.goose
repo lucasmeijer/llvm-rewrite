@@ -152,7 +152,31 @@ recursive fn parse_type() -> i32 {
             t = ty_vector(et, n, scalable);
         }
     } else if tok_is("target") {
-        perr("target extension types are not supported yet");
+        // LLParser::parseTargetExtType
+        lex();
+        expect_punct('(', "'(' in target extension type");
+        if tk != T_STR { perr("expected string constant"); }
+        let nm = tstr_id();
+        lex();
+        let mark = tstack.len;
+        let imark = vstack.len;
+        while eat_punct(',') {
+            if tk == T_INT { vstack.push(parse_uint() as i32); }
+            else {
+                if vstack.len > imark { perr("expected uint32 param"); }
+                let pt = parse_type();
+                tstack.push(pt);
+            }
+        }
+        expect_punct(')', "')' in target extension type");
+        let at = ints.len as i32;
+        ints.push((tstack.len - mark) as i32);
+        for k in mark..tstack.len { ints.push(tstack[k]); }
+        for k in imark..vstack.len { ints.push(vstack[k]); }
+        let n = (tstack.len - mark) + (vstack.len - imark) + 1;
+        tstack.resize(mark);
+        vstack.resize(imark);
+        t = ty_target_ext(nm, at, n);
     } else {
         perr("expected type");
     }

@@ -127,8 +127,9 @@ fn ty_hash(t: Ty) -> u32 {
     var h: u32 = (t.kind as u32) * 31 + (t.flags as u32) * 7919;
     h = (h ^ (t.n as! u32)) * 16777619;
     h = (h ^ (t.cnt as! u32)) * 16777619;
-    if t.kind == TK_FUNC || t.kind == TK_STRUCT {
+    if t.kind == TK_FUNC || t.kind == TK_STRUCT || t.kind == TK_TARGETEXT {
         for k in t.cnt { h = (h ^ (ints[t.a + k] as! u32)) * 16777619; }
+        if t.kind == TK_TARGETEXT { h = (h ^ (t.name as! u32)) * 16777619; }
     } else {
         h = (h ^ (t.a as! u32)) * 16777619;
     }
@@ -137,7 +138,8 @@ fn ty_hash(t: Ty) -> u32 {
 
 fn ty_eq(x: Ty, y: Ty) -> bool {
     if x.kind != y.kind || x.flags != y.flags || x.n != y.n || x.cnt != y.cnt { return false; }
-    if x.kind == TK_FUNC || x.kind == TK_STRUCT {
+    if x.kind == TK_FUNC || x.kind == TK_STRUCT || x.kind == TK_TARGETEXT {
+        if x.kind == TK_TARGETEXT && x.name != y.name { return false; }
         for k in x.cnt { if ints[x.a + k] != ints[y.a + k] { return false; } }
         return true;
     }
@@ -196,6 +198,15 @@ fn ty_func_run(at: i32, n: i64, vararg: bool) -> i32 {
     let fl = if vararg { TF_VARARG } else { 0 as u8 };
     return ty_get(Ty { kind: TK_FUNC, flags: fl, n: 0, a: at, cnt: n, name: -1, hash: 0 });
 }
+// TargetExtType: name string id; ints run at `at`: [ntypes, type params..., int params...], n = run length.
+fn ty_target_ext(name: i32, at: i32, n: i64) -> i32 {
+    return ty_get(Ty { kind: TK_TARGETEXT, flags: 0, n: 0, a: at, cnt: n, name: name, hash: 0 });
+}
+fn ty_target_ntypes(t: i32) -> i64 { ints[types[t].a] as i64 }
+fn ty_target_type(t: i32, k: i64) -> i32 { ints[types[t].a + 1 + k] }
+fn ty_target_nints(t: i32) -> i64 { types[t].cnt - 1 - ty_target_ntypes(t) }
+fn ty_target_int(t: i32, k: i64) -> i64 { ints[types[t].a + 1 + ty_target_ntypes(t) + k] as i64 }
+
 fn ty_named_struct(name: i32) -> i32 {
     let id = types.len as i32;
     types.push(Ty { kind: TK_STRUCT, flags: TF_NAMED | TF_OPAQUE, n: 0, a: 0, cnt: 0, name: name, hash: 0 });
