@@ -193,6 +193,8 @@ Pass_Kind :: enum u8 {
     PRINT_COST_MODEL;
     // SimplifyCFG (pass_simplifycfg*.jai)
     SIMPLIFYCFG;
+    // InferFunctionAttrs (pass_inferattrs.jai)
+    INFERATTRS;
 }
 
 Pass_Info :: struct {
@@ -239,6 +241,7 @@ PASS_TABLE :: Pass_Info.[
     .{"invalidate<demanded-bits>", .FUNCTION, .INVALIDATE, true, .DEMANDED_BITS},
     .{"aa-eval", .FUNCTION, .AA_EVAL, false, .DOMTREE},
     .{"require<globals-aa>", .MODULE, .REQUIRE_GLOBALS_AA, true, .DOMTREE},
+    .{"inferattrs", .MODULE, .INFERATTRS, false, .DOMTREE},
     .{"print<memoryssa>", .FUNCTION, .PRINT_MEMORYSSA, true, .DOMTREE},
     .{"print<memoryssa><no-ensure-optimized-uses>", .FUNCTION, .PRINT_MEMORYSSA_NO_OPT, true, .DOMTREE},
     .{"print<memoryssa-walker>", .FUNCTION, .PRINT_MEMORYSSA_WALKER, true, .DOMTREE},
@@ -575,6 +578,7 @@ parse_cl_opt :: (arg: string) -> bool {
     name := a; value := ""; has_value := false;
     eq := find_index_from_left(a, #char "=");
     if eq >= 0 { name = slice(a, 0, eq); value = slice(a, eq + 1, a.count - eq - 1); has_value = true; }
+    if tli_parse_cl_opt(name, value, has_value) return true;   // tli.jai: -disable-builtin, libcall simplifier options
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {
@@ -635,6 +639,7 @@ run_module_pm :: (n: s32) {
             case .FUNCTION_ADAPTOR; run_function_adaptor(c);
             case .NO_OP_MODULE; should_run_pass(node, NONE);
             case .REQUIRE_GLOBALS_AA; should_run_pass(node, NONE); if !globals_aa globals_aa = globals_aa_compute();
+            case .INFERATTRS; if should_run_pass(node, NONE) inferattrs_run_module();
             case; fatal("internal: '%' is not a module pass", node.name);
         }
         c = pipeline.nodes[c].next;

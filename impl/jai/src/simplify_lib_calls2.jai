@@ -18,10 +18,16 @@ lcs_intrinsic :: (id: Intrinsic_Id, otys: [] Type_Id, args: [] Value_Id, fmf: u3
     }
     return icb_intrinsic_fmf(id, otys, args, fmf, name);
 }
-// CreateUnaryIntrinsic(ID, V, FMFSource, Name)
-lcs_unary_intrinsic :: (id: Intrinsic_Id, v: Value_Id, fmf: u32, name: string = "") -> Value_Id { return lcs_intrinsic(id, .[vtype(v)], .[v], fmf, name); }
-// CreateBinaryIntrinsic(ID, L, R, FMFSource, Name)
-lcs_binary_intrinsic :: (id: Intrinsic_Id, l: Value_Id, r: Value_Id, fmf: u32, name: string = "") -> Value_Id { return lcs_intrinsic(id, .[vtype(l)], .[l, r], fmf, name); }
+// CreateUnaryIntrinsic(ID, V, FMFSource, Name) / CreateBinaryIntrinsic: unlike CreateIntrinsic these insert the
+// declaration before trying to fold (a folded call still leaves the declaration in the module)
+lcs_unary_intrinsic :: (id: Intrinsic_Id, v: Value_Id, fmf: u32, name: string = "") -> Value_Id {
+    get_or_insert_intrinsic_declaration(id, .[vtype(v)]);
+    return lcs_intrinsic(id, .[vtype(v)], .[v], fmf, name);
+}
+lcs_binary_intrinsic :: (id: Intrinsic_Id, l: Value_Id, r: Value_Id, fmf: u32, name: string = "") -> Value_Id {
+    get_or_insert_intrinsic_declaration(id, .[vtype(l)]);
+    return lcs_intrinsic(id, .[vtype(l)], .[l, r], fmf, name);
+}
 
 // APFloat::isInteger: finite and equal to itself rounded toward zero
 apf_is_integer :: (f: APFloat) -> bool {
@@ -1200,8 +1206,7 @@ lcs_optimize_call :: (ci: Value_Id) -> Value_Id {
     if call_is_no_builtin(ci) return lcs_maybe_optimize_no_builtin_operator_new(ci);
     callee := call_called_function(ci);
     is_calling_conv_c := tli_is_calling_conv_c_compatible_call(ci);
-    // IRBuilderBase::OperandBundlesGuard + setDefaultOperandBundles(CI's bundles): calls created below would carry
-    // them; that is not ported, so calls with bundles fail loudly once a simplification creates an instruction.
+    // IRBuilderBase::OperandBundlesGuard + setDefaultOperandBundles(CI's bundles): calls created below carry them
     bundles_saved := ic.default_bundles_src; defer ic.default_bundles_src = bundles_saved;
     ic.default_bundles_src = ifx call_num_bundles(ci) > 0 then ci else NONE;
     if lcs_enable_unsafe_fp_shrink_opt > 0 lcs.unsafe_fp_shrink = lcs_enable_unsafe_fp_shrink_opt == 2;

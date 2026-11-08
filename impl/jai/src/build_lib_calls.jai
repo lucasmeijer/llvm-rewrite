@@ -629,7 +629,7 @@ mark_register_parameter_attributes :: (f: Value_Id) {
 module_get_or_insert_function :: (name: string, ft: Type_Id, attrs: u32 = 0) -> Value_Id {
     f := lookup_global(name);
     if f != NONE return f;
-    f = new_function(ft, name, 0);
+    f = new_function(ft, name, dl.program_as);   // Function::Create: the DataLayout program address space
     array_add(*ir.m_functions, f);
     id := function_intrinsic_id(f);
     if id != NOT_INTRINSIC set_intrinsic_attributes(f, id);

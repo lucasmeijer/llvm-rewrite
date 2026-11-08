@@ -114,7 +114,7 @@ Ic_State :: struct {
     computed_back_edges: bool;
     rpot: [..] Value_Id;
     annotation_src: Value_Id = NONE;
-    default_bundles_src: Value_Id = NONE;   // IRBuilder default operand bundles (LibCallSimplifier): not ported
+    default_bundles_src: Value_Id = NONE;   // IRBuilder::setDefaultOperandBundles: the call whose bundles new calls get
     max_array_size: u64 = 1024;   // -instcombine-maxarray-size
     min_size: bool;
     pred_order: Table(Value_Id, [..] Value_Id);
@@ -407,12 +407,12 @@ ic_is_back_edge :: (from: Value_Id, to: Value_Id) -> bool {
 // ---------------------------------------------------------------- Builder (IRBuilder<TargetFolder, IRBuilderInstCombineInserter>)
 
 // IRBuilderInstCombineInserter::InsertHelper + IRBuilder::Insert
-icb_insert :: (i: Value_Id, name: string = "") -> Value_Id {
+icb_insert :: (i_in: Value_Id, name: string = "") -> Value_Id {
+    i := i_in;
+    if ic.default_bundles_src != NONE && inst_op(i) == .CALL && inst(i).nidx == 0 i = call_with_default_bundles(i, ic.default_bundles_src);
     irb_insert(*ic.b, i, name);
     if negator { array_add(*negator.new_insts, i); return i; }   // the Negator's IRBuilderCallbackInserter
     wl_add(i);
-    if ic.default_bundles_src != NONE && inst_op(i) == .CALL
-        fatal("instcombine: LibCallSimplifier creating a call while the simplified call has operand bundles (IRBuilder default operand bundles) is not supported yet");
     if is_intrinsic_call(i, IID_ASSUME) ic_register_assumption(i);
     if ic.annotation_src != NONE {
         k := md_kind_id("annotation");
@@ -420,6 +420,30 @@ icb_insert :: (i: Value_Id, name: string = "") -> Value_Id {
         if a != NONE fatal("instcombine: !annotation metadata is not supported yet");
     }
     return i;
+}
+// CallInst::Create(..., DefaultOperandBundles): a copy of the unlinked call `i` with the operand bundles of `src`
+// (operands: args, bundle operands, callee)
+call_with_default_bundles :: (i: Value_Id, src: Value_Id) -> Value_Id {
+    na := nops(i) - 1;
+    sr := inst(src);
+    sa := call_arg_count(src);
+    nbo := nops(src) - 1 - sa;
+    c := new_inst(.CALL, vtype(i), na + nbo + 1);
+    keep := inst(i).*;
+    r := inst(c);
+    r.* = keep;
+    r.parent = NONE; r.prev = NONE; r.next = NONE; r.records = 0;
+    for k: 0..cast(s64) na - 1 set_op(c, cast(u32) k, op(i, cast(u32) k));
+    for k: 0..cast(s64) nbo - 1 set_op(c, na + cast(u32) k, op(src, sa + cast(u32) k));
+    set_op(c, na + nbo, op(i, na));
+    r = inst(c);
+    r.idx = cast(u32) ir.u32_pool.count; r.nidx = sr.nidx;
+    for x: 0..cast(s64) sr.nidx - 1 {
+        t := ir.u32_pool[sr.idx + 3 * cast(u32) x]; b := ir.u32_pool[sr.idx + 3 * cast(u32) x + 1]; e := ir.u32_pool[sr.idx + 3 * cast(u32) x + 2];
+        array_add(*ir.u32_pool, t); array_add(*ir.u32_pool, b - sa + na); array_add(*ir.u32_pool, e - sa + na);
+    }
+    erase_unlinked_inst(i);
+    return c;
 }
 ic_register_assumption :: (i: Value_Id) {
     if !ic.ac return;

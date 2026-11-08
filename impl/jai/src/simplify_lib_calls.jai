@@ -102,13 +102,13 @@ icb_global_string :: (s: string, name: string, add_null := true) -> Value_Id {
     return gv;
 }
 
-// IRBuilder::CreatePtrDiff(ElemTy = i8, LHS, RHS, Name): (ptrtoint LHS - ptrtoint RHS) exact sdiv 1 folds away
+// IRBuilder::CreatePtrDiff(LHS, RHS, Name): sub (ptrtoaddr LHS), (ptrtoaddr RHS); CreatePtrToAddr casts to
+// DL.getAddressType(ptr), an integer of the address width (= the index width here)
 icb_ptr_diff :: (l: Value_Id, r: Value_Id, name: string = "") -> Value_Id {
-    it := type_int(dl_index_type_size_bits(vtype(l)));
-    lp := icb_cast(.PTRTOINT, l, it);
-    rp := icb_cast(.PTRTOINT, r, it);
-    diff := icb_sub(lp, rp);
-    return icb_sdiv(diff, const_int(it, 1), name, true);
+    at := type_int(dl_index_type_size_bits(vtype(l)));
+    lp := icb_cast(.PTRTOADDR, l, at);
+    rp := icb_cast(.PTRTOADDR, r, at);
+    return icb_sub(lp, rp, name);
 }
 
 // ignoreCallingConv
@@ -710,7 +710,7 @@ lcs_optimize_string_length :: (ci: Value_Id, char_size: u32, bound: Value_Id = N
     len := get_string_length(src, char_size);
     if len {
         len_c := const_int(vtype(ci), len - 1);
-        if bound != NONE return icb_binary_intrinsic(IID_UMIN, len_c, bound);
+        if bound != NONE return lcs_binary_intrinsic(IID_UMIN, len_c, bound, ic.b_fmf);
         return len_c;
     }
     if bound != NONE return NONE;
@@ -1026,12 +1026,12 @@ icb_or_list :: (ops: [] Value_Id) -> Value_Id {
     for i: 1..ops.count-1 accum = icb_or(accum, ops[i]);
     return accum;
 }
-// shouldOptimizeForSize(BB, PSI, BFI, PGSOQueryType::IRPass): InstCombine has no ProfileSummaryInfo unless it
-// was computed (not ported: a module with a profile summary fails loudly)
+// shouldOptimizeForSize(BB, PSI, BFI, PGSOQueryType::IRPass)
 lcs_should_optimize_for_size :: (bb: Value_Id) -> bool {
     f := block_fn(bb);
     if fn_has_opt_size(f) return true;
-    if module_get_flag("ProfileSummary") != NONE fatal("LibCallSimplifier: shouldOptimizeForSize with a profile summary (PGSO) is not supported yet");
+    // PSI is MAM.getCachedResult<ProfileSummaryAnalysis>: only present after require<profile-summary>, which the
+    // pass registry rejects, so shouldOptimizeForSizeImpl is always false here
     return false;
 }
 

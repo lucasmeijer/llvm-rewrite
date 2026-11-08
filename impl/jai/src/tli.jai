@@ -521,6 +521,11 @@ tli_get_baseline :: () -> *Tli_Impl {
     impl.triple = triple_parse(copy_string(ir.triple));
     tli_initialize(impl, *impl.triple);
     if opts.disable_simplify_libcalls tli_disable_all_functions(impl);
+    else {
+        // opt's -disable-builtin / -enable-builtin (all disables first, then all enables, like optdriver.cpp)
+        for tli_cl_disable_builtins { ok, lf := tli_lookup_name(it); tli_set_unavailable(impl, lf); }
+        for tli_cl_enable_builtins { ok, lf := tli_lookup_name(it); tli_set_available(impl, lf); }
+    }
     tli_baseline = impl;
     return impl;
 }
@@ -794,5 +799,43 @@ tli_has_optimized_code_gen :: (t: *Tli, f: Lib_Func) -> bool {
         case .tanhf; #through; case .tanhl;
             return true;
     }
+    return false;
+}
+
+// ---------------------------------------------------------------- command line (optdriver.cpp, SimplifyLibCalls.cpp)
+
+tli_cl_disable_builtins: [..] string;
+tli_cl_enable_builtins: [..] string;
+
+// -disable-builtin=<f>, -enable-builtin=<f> (cl::list), -enable-double-float-shrink, -optimize-hot-cold-new,
+// -optimize-existing-hot-cold-new, -optimize-nobuiltin-hot-cold-new-new, -{cold,notcold,hot,ambiguous}-new-hint-value
+tli_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
+    flag :: (value: string, has_value: bool, name: string) -> bool {
+        if !has_value || value == "true" || value == "1" || value == "TRUE" || value == "True" return true;
+        if value == "false" || value == "0" || value == "FALSE" || value == "False" return false;
+        fatal("invalid boolean value '%' for option -%", value, name);
+        return false;
+    }
+    hint :: (value: string, name: string) -> u64 {
+        v, ok := string_to_int(value);
+        if !ok || v < 0 fatal("'%' value invalid for uint argument!", value);
+        if v > 255 fatal("'%' value must be in the range [0, 255]!", value);
+        return cast(u64) v;
+    }
+    if name == "disable-builtin" || name == "enable-builtin" {
+        if !has_value fatal("option -% needs a value", name);
+        ok, lf := tli_lookup_name(value);
+        if !ok fatal("cannot % nonexistent builtin function %", ifx name == "disable-builtin" then "disable" else "enable", value);
+        array_add(ifx name == "disable-builtin" then *tli_cl_disable_builtins else *tli_cl_enable_builtins, copy_string(value));
+        return true;
+    }
+    if name == "enable-double-float-shrink" { lcs_enable_unsafe_fp_shrink_opt = ifx flag(value, has_value, name) then cast(u8) 2 else 1; return true; }
+    if name == "optimize-hot-cold-new" { lcs_optimize_hot_cold_new = flag(value, has_value, name); return true; }
+    if name == "optimize-existing-hot-cold-new" { lcs_optimize_existing_hot_cold_new = flag(value, has_value, name); return true; }
+    if name == "optimize-nobuiltin-hot-cold-new-new" { lcs_optimize_nobuiltin_hot_cold_new = flag(value, has_value, name); return true; }
+    if name == "cold-new-hint-value" { lcs_cold_new_hint_value = hint(value, name); return true; }
+    if name == "notcold-new-hint-value" { lcs_notcold_new_hint_value = hint(value, name); return true; }
+    if name == "hot-new-hint-value" { lcs_hot_new_hint_value = hint(value, name); return true; }
+    if name == "ambiguous-new-hint-value" { lcs_ambiguous_new_hint_value = hint(value, name); return true; }
     return false;
 }

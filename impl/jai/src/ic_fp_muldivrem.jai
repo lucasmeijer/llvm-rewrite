@@ -276,10 +276,11 @@ ic_visit_fdiv :: (i: Value_Id) -> Value_Id {
                 // IRBuilder<> B(&I) (ConstantFolder, nothing goes to the worklist), FMF = I's;
                 // emitUnaryFloatFnCall(X, TLI, tan, tanf, tanl, B, sin/cos's function attributes)
                 name, lf := get_float_fn(t, ty, .tan, .tanf, .tanl);
-                f := get_or_insert_lib_func(t, lf, type_func(vtype(x), .[vtype(x)], false));
-                c := new_inst(.CALL, vtype(x), 2);
+                xv := ifx is_tan then x else x2;
+                f := get_or_insert_lib_func(t, lf, type_func(vtype(xv), .[vtype(xv)], false));
+                c := new_inst(.CALL, vtype(xv), 2);
                 inst(c).ty2 = glob(f).value_type;
-                set_op(c, 0, ifx is_tan then x else x2); set_op(c, 1, f);
+                set_op(c, 0, xv); set_op(c, 1, f);
                 set_fmf(c, get_fmf(i));
                 inst(c).attrs = attr_list_without_fn_attr(glob(call_called_function(op0)).attrs, .Speculatable);
                 inst(c).cc = glob(f).cc;

@@ -262,6 +262,14 @@ mloc_for_argument :: (call: Value_Id, idx: u32, use_tli: bool) -> Mem_Loc {
                     size = ifx idx == 0 then ls_precise(v) else ls_upper_bound(v);
                 }
                 return mloc(arg, size, tags);
+            case "memset_pattern16"; #through; case "memset_pattern4"; #through; case "memset_pattern8";
+                if idx == 1 {
+                    sz: u64 = ifx lf == "memset_pattern4" then cast(u64) 4 else ifx lf == "memset_pattern8" then cast(u64) 8 else 16;
+                    return mloc(arg, ls_precise(sz), tags);
+                }
+                len := call_arg(call, 2);
+                if vkind(len) == .C_INT return mloc(arg, ls_precise(ap_limited(const_ap(len))), tags);
+                return mloc_after(arg, tags);
             case "bcmp"; #through; case "memcmp"; #through; case "memchr";
                 len := call_arg(call, 2);
                 if vkind(len) == .C_INT return mloc(arg, ls_precise(ap_limited(const_ap(len))), tags);
