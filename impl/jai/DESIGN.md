@@ -358,7 +358,7 @@ recomputing gives a different child order.
   Updates mirror LoopBase/LoopInfoBase: `li_add_basic_block_to_loop`, `li_add_block_entry`, `li_change_loop_for`,
   `li_remove_block_from_loop`, `li_remove_block`, `li_move_to_header`, `li_add_child_loop`,
   `li_remove_child_loop`, `li_replace_child_loop_with`, `li_add_top_level_loop`, `li_change_top_level_loop`,
-  `li_alloc_loop`, `li_erase` (only for top-level loops so far: UnloopUpdater fails loudly), `li_set_loop_id`.
+  `li_alloc_loop`, `li_erase` (LoopInfo::erase with UnloopUpdater), `li_set_loop_id`.
 - **CycleInfo** = `*Cycle_Info` (`get_cycle_info(f)`): `Cycle_Row{parent, top, depth, entries, blocks, children}`.
 - **CFG surgery that keeps analyses up to date** (bb_utils.jai, pass_loop_rotate.jai, pass_dce.jai):
   `split_block_predecessors(bb, preds, suffix, dt, li, mssau, preserve_lcssa)`,

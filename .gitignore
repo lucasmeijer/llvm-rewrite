@@ -7,3 +7,4 @@ impl/zig/.zig-cache/
 impl/zig/zig-out/
 impl/jai/src/.build/
 impl/jai/bin/.build/
+impl/jai/.build/

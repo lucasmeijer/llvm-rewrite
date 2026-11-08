@@ -244,8 +244,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - What fails loudly (and the remaining L1.loop-canonical checks): passes not ported (licm, indvars,
   simple-loop-unswitch, loop-deletion, loop-unroll, loop-idiom, loop-reduce, simplifycfg, debugify,
   `require<domfrontier>`, SCEV verifiers), the MemorySSAUpdater (every `mssau_*` entry point in mssa_updater.jai:
-  `loop-mssa(loop-rotate)`, LoopSimplify/SplitBlockPredecessors with a cached MemorySSA), `LoopInfo::erase` of a
-  nested loop (UnloopUpdater), LoopRotate's noalias-scope cloning, `<check-exit-count>` (needs SCEV), key-instruction
+  `loop-mssa(loop-rotate)`, LoopSimplify/SplitBlockPredecessors with a cached MemorySSA), LoopRotate's noalias-scope cloning, `<check-exit-count>` (needs SCEV), key-instruction
   atom groups, DIArgList debug locations in remapping, `#dbg_assign`.
 - **x86 code-size costs are bounds, not values** (pass_loop_rotate.jai `tti_code_size_bounds`): calls, CF
   instructions, free intrinsics and the TCC_Basic default are exact; scalar int (<= 64 bits)/ptr/float/double
@@ -264,7 +263,17 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   these files: `python3 impl/jai/tools/sweep.py 'loop(loop-rotate)'`, `python3 impl/jai/tools/fuzz_cfg.py 2000 7`.
 - Perf (x64 build, tests/perf/scaling/loops-many): `-passes=loop-rotate` 3.2x (n2000) to 5.5x (n8000) LLVM's CPU
   time, mostly parse/print; scaling exponent 1.06 vs LLVM's 1.11.
+- `li_erase` of a nested loop (UnloopUpdater port) is untested: no test or fuzz case reaches it yet
+  (SplitBlockPredecessors erases a loop only when a split makes it irreducible).
 - Traps: `for < k: a..b` iterates b down to a, so reversing over an index range is `for < k: 0..n-1`; Jai's
   formatter needs `\x1f` for a literal `%` (`loop %header` in OptBisect names); procedure names collide across
   agents' files (`block_unique_predecessor`, `drop_ub_implying_attrs_and_metadata`, `ic_clone_inst` live in
   ic_core.jai and are reused here).
+- **Porting MemorySSAUpdater (next step for loop-mssa / LICM):** MemorySSA needs use lists of accesses first
+  (operand rows with LLVM's push-front order: a Def has 2 operands, defining and optimized; a Use 1; a Phi its
+  incoming values), then the MemorySSA mutation API (createDefinedAccess, insertIntoListsForBlock, removeFromLists,
+  moveTo, renamePass with RenameAllUses). Note that `MSSAU->applyUpdates(Updates, DT, UpdateDT=true)` (LoopRotate)
+  updates the DominatorTree with `DT.applyUpdates(Updates, PostViewUpdates)`, the pre/post-view variant that
+  domtree.jai doesn't have yet; it changes DT child order, so `loop-mssa(loop-rotate)` can't reuse the plain
+  `dt_apply_updates`. Test with `print<memoryssa>` after `loop-mssa(loop-rotate)` (Analysis/MemorySSA/
+  loop-rotate-update.ll) and a sweep of that pipeline (`tools/sweep.py ... --analysis`).

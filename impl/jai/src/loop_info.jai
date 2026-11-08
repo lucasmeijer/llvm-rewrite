@@ -538,7 +538,135 @@ li_erase :: (li: *Loop_Info, unloop: Loop_Id) {
         li_destroy(li, unloop);
         return;
     }
-    fatal("LoopInfo::erase of a nested loop (UnloopUpdater) is not implemented yet");
+    // UnloopUpdater
+    uu: Unloop_Updater;
+    uu.li = li; uu.unloop = unloop;
+    uu.subloop_parents.allocator = temp;
+    uu.post.allocator = temp;
+    uu_update_block_parents(*uu);
+    uu_remove_blocks_from_ancestors(*uu);
+    // updateSubloopParents
+    while li.loops[unloop].subloops.count {
+        sl := li.loops[unloop].subloops;
+        sub := sl[sl.count - 1];
+        li_remove_child_loop(li, unloop, sub);
+        found, p := table_find(*uu.subloop_parents, sub);
+        assert(found, "DFS failed to visit subloop");
+        if p != NONE li_add_child_loop(li, p, sub);
+        else li_add_top_level_loop(li, sub);
+    }
+    li_remove_child_loop(li, li_parent(li, unloop), unloop);
+    li_destroy(li, unloop);
+}
+
+Unloop_Updater :: struct {
+    li: *Loop_Info;
+    unloop: Loop_Id;
+    post: [..] Value_Id;                        // LoopBlocksDFS postorder
+    subloop_parents: Table(Loop_Id, Loop_Id);
+    found_ib: bool;
+}
+
+// UnloopUpdater::getNearestLoop
+uu_get_nearest_loop :: (u: *Unloop_Updater, b: Value_Id, bb_loop: Loop_Id) -> Loop_Id {
+    li := u.li;
+    un := u.unloop;
+    near := bb_loop;
+    sub: Loop_Id = NONE;
+    if near != un && near != NONE && li_contains_loop(li, un, near) {
+        sub = near;
+        while li_parent(li, sub) != un sub = li_parent(li, sub);
+        found, v := table_find(*u.subloop_parents, sub);
+        if !found { table_set(*u.subloop_parents, sub, un); v = un; }
+        near = v;
+    }
+    if block_num_successors(b) == 0 near = NONE;
+    succs: [..] Value_Id; succs.allocator = temp;
+    block_successors(b, *succs);
+    for s: succs {
+        if s == b continue;
+        l := li_loop_for(li, s);
+        if l == un u.found_ib = true;
+        if l != un && l != NONE && li_contains_loop(li, un, l) {
+            if sub != NONE continue;
+            _, v := table_find(*u.subloop_parents, l);
+            l = v;
+        }
+        if l == un continue;
+        if l != NONE && !li_contains_loop(li, l, un) l = li_parent(li, l);
+        if near == un || near == NONE || li_contains_loop(li, near, l) near = l;
+    }
+    if sub != NONE {
+        table_set(*u.subloop_parents, sub, near);
+        return bb_loop;
+    }
+    return near;
+}
+
+// UnloopUpdater::updateBlockParents (LoopBlocksTraversal: post-order from the header over blocks whose loop is
+// inside Unloop)
+uu_update_block_parents :: (u: *Unloop_Updater) {
+    li := u.li;
+    un := u.unloop;
+    if li_num_blocks(li, un) {
+        Frame :: struct { b: Value_Id; next: u32; n: u32; }
+        seen: Table(Value_Id, bool); seen.allocator = temp;
+        stack: [..] Frame; stack.allocator = temp;
+        h := li_header(li, un);
+        visit :: (u: *Unloop_Updater, seen: *Table(Value_Id, bool), b: Value_Id) -> bool {
+            if !li_contains_loop(u.li, u.unloop, li_loop_for(u.li, b)) return false;
+            if table_contains(seen, b) return false;
+            table_set(seen, b, true);
+            return true;
+        }
+        if visit(u, *seen, h) array_add(*stack, .{h, 0, block_num_successors(h)});
+        while stack.count {
+            top := *stack[stack.count - 1];
+            if top.next < top.n {
+                sb := get_successor(block_terminator(top.b), top.next);
+                top.next += 1;
+                if visit(u, *seen, sb) array_add(*stack, .{sb, 0, block_num_successors(sb)});
+                continue;
+            }
+            b := top.b;
+            stack.count -= 1;
+            array_add(*u.post, b);
+            l := li_loop_for(li, b);
+            nl := uu_get_nearest_loop(u, b, l);
+            if nl != l li_change_loop_for(li, b, nl);
+        }
+    }
+    changed := u.found_ib;
+    while changed {
+        changed = false;
+        for b: u.post {
+            l := li_loop_for(li, b);
+            nl := uu_get_nearest_loop(u, b, l);
+            if nl != l { li_change_loop_for(li, b, nl); changed = true; }
+        }
+    }
+}
+
+// UnloopUpdater::removeBlocksFromAncestors
+uu_remove_blocks_from_ancestors :: (u: *Unloop_Updater) {
+    li := u.li;
+    un := u.unloop;
+    blocks: [..] Value_Id; blocks.allocator = temp;
+    for li.loops[un].blocks array_add(*blocks, it);
+    for b: blocks {
+        outer := li_loop_for(li, b);
+        if outer != NONE && li_contains_loop(li, un, outer) {
+            while li_parent(li, outer) != un outer = li_parent(li, outer);
+            _, v := table_find(*u.subloop_parents, outer);
+            outer = v;
+        }
+        old := li_parent(li, un);
+        while old != outer {
+            assert(old != NONE, "new loop is not an ancestor of the original");
+            li_remove_block_from_loop(li, old, b);
+            old = li_parent(li, old);
+        }
+    }
 }
 
 // ---------------------------------------------------------------- loop metadata (LoopInfo.cpp)
