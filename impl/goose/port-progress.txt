@@ -6,7 +6,7 @@ lib/Transforms/Utils/BasicBlockUtils.cpp 0.25
 lib/Transforms/Utils/Local.cpp 0.4
 lib/Analysis/TargetTransformInfo.cpp 0.15
 lib/Analysis/CFG.cpp 0.2
-lib/Analysis/Loads.cpp 0.3
+lib/Analysis/Loads.cpp 0.33
 lib/Analysis/ValueTracking.cpp 0.6
 lib/IR/Value.cpp 0.3
 lib/IR/Instruction.cpp 0.4
@@ -18,3 +18,6 @@ lib/Target/X86/X86ISelLowering.cpp 0.01
 lib/Target/X86/X86Subtarget.cpp 0.2
 lib/Target/X86/X86TargetMachine.cpp 0.2
 lib/CodeGen/TargetLoweringBase.cpp 0.1
+lib/Transforms/InstCombine/InstCombineCompares.cpp 0.98
+lib/Transforms/InstCombine/InstCombineAndOrXor.cpp 0.01
+lib/Analysis/CmpInstAnalysis.cpp 0.35

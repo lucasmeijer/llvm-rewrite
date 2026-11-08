@@ -985,7 +985,9 @@ fn fold_icmp_mul_constant(cmp: i32, mul: i32, c: AP) -> i32 {
     }
     if !has_apint(op(mul, 1)) { return -1; }
     let mc = ap_c(op(mul, 1));
-    let st, unused = is_sign_test(p, c);
+    // isSignTest updates Pred (also when the multiply has no nsw)
+    let st, sp = is_sign_test(p, c);
+    if st { p = sp; }
     if st && op_nsw(mul) {
         if ap_is_neg(mc) { p = pred_swapped(p); }
         return ic_new_icmp(p, x, c_null(mty));

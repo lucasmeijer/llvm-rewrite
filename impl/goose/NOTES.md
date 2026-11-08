@@ -25,6 +25,16 @@
   load/store hoisting (`+cf`), isSafeToSpeculateStore from a preceding load (isWritableObject), X86
   getShuffleCost. Speed (`perf`): diamonds k 1.01 (LLVM 1.19); switch k 1.57 vs LLVM 1.15: n32000 is 1.8x
   LLVM's time, something per-case is linear in the case count (debt, not yet looked at).
+- L1.instcombine.cmp 99/154 (all 77 roundtrip, 22/77 opt); L1.instcombine.arith now 143/230 (28/115 opt).
+  InstCombineCompares.cpp is ported whole (ic_compares.goose: visitICmpInst, visitFCmpInst, every helper in
+  file order, incl. GEP/load-from-global/alloca compares). The remaining cmp tests stop at other visitors
+  (first blockers: select 17, store 4, phi 4, getelementptr 3, ...; `tools/ic_failures.py 'icmp*' 'fcmp*'`),
+  not at compares. Per-function differential check (llvm-extract each function, compare `instcombine` output
+  with LLVM wherever our opt exits 0; /tmp script, worth a harness command): 1537 icmp*/fcmp* functions
+  identical, 0 differ; over all InstCombine tests 4526 identical, the remaining 14 diffs are in calls,
+  alloc-size attributes, shifts and nofpclass, not compares. `sweep --passes instcombine`: 0 differs.
+  Left (fail loudly): APFloat::next for x86_fp80/ppc_fp128 (foldFCmpFpTrunc), replaceUsesOutsideBlock with a
+  constant user.
 - L1.instcombine.arith 126/230 (all 115 roundtrip, 11/115 opt); 120 of the 1635 InstCombine `::opt` tests
   pass. The framework is complete (DESIGN.md §12); ported visitors: add, sub, mul, udiv/sdiv/urem/srem, shl/lshr/ashr,
   trunc/zext/sext, ret, br, unreachable, calls to ordinary functions, llvm.assume (no bundles). Every other

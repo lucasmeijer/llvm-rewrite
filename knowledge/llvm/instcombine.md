@@ -129,3 +129,28 @@ noted, and by diffing `opt -passes=instcombine` output on the imported tests).
   fresh `range` attribute on the next visit.
 - **foldCtpop/foldCttzCtlz add a `range(iN lo, hi)` return attribute** computed from known bits (and isKnownNonZero
   for ctpop), so many ctpop/cttz/ctlz calls in `-passes=instcombine` output carry `range` attributes.
+
+## Compares (InstCombineCompares.cpp)
+
+Verified by porting the file and diffing `opt -passes=instcombine` per function (llvm-extract) on the imported
+icmp*/fcmp* tests.
+
+- `new ICmpInst(CmpPredicate, ...)` keeps only the predicate: samesign is dropped (the constructor takes a
+  `Predicate`). `new FCmpInst(P, L, R, "", &I)` copies `I`'s fast-math flags; the 3-argument form has none.
+- `ICmpInst::swapOperands` (operand-complexity canonicalization at the top of visitICmp/visitFCmp) is
+  `Op<0>().swap(Op<1>())`, i.e. `Use::swap`: the two uses trade values *and use-list positions*. Re-setting the
+  operands instead pushes both uses to the heads of their lists and changes later user-iteration order.
+- `isSignTest(Pred, C)` takes `Pred` by reference and rewrites `slt 1` → `sle`, `sgt -1` → `sge` whenever it
+  returns true, even if the caller's other condition then fails: in foldICmpMulConstant
+  `isSignTest(Pred, C) && Mul->hasNoSignedWrap()` leaves the updated predicate for the folds below
+  (icmp.ll `@icmp_mul_nsw_neg`: `mul nsw x, -12 sge 0` → `x slt 1`).
+- Queries made *without* the DomConditionCache: foldICmpUsingKnownBits' SimplifyDemandedBits
+  (`SQ.getWithoutDomCondCache()`), foldCtpopPow2Test's computeKnownBits(Op, DL, AC, CxtI, DT), and isMaskOrZero's
+  isKnownToBeAPowerOfTwo(V, DL, ...). Everything else uses the InstCombiner's query, which has the cache.
+- Several simplifyICmpInst calls use the InstCombiner's `SQ` without a context instruction (foldSelectICmp, the
+  `icmp (select C, A, B), (select C, C', D)` fold); the top-level one uses `SQ.getWithInstruction(&I)`.
+- SimplifyDemandedBits on a pointer-typed operand (foldICmpUsingKnownBits with pointer icmps) works on
+  pointer-size bits, adds the pointer's known alignment as low zero bits, and never replaces a pointer by a
+  constant in SimplifyDemandedUseBits (it does in the multiple-use path: `inttoptr` of the constant).
+- The "used only by a min/max select" bail-outs call matchSelectPattern on the user select; for an fcmp
+  condition that is the FP flavour logic (signed-zero and NaN checks, matchFastFloatClamp), not "unknown".

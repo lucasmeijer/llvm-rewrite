@@ -473,7 +473,9 @@ max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
 | `ic_common.goose` | the binop helpers of InstructionCombining.cpp (reassociation, distributive laws, folding into selects/phis, getFreelyInverted, ...) and small PatternMatch-style matchers (`bo`, `m_zext`, `m_add_like`, ...) |
 | `ic_addsub.goose`, `ic_muldivrem.goose`, `ic_shifts.goose`, `ic_casts.goose` | InstCombineAddSub / MulDivRem / Shifts / Casts (integer parts) |
 | `ic_negator.goose` | InstCombineNegator.cpp |
-| `ic_demanded.goose` | SimplifyDemandedBits (integer part of InstCombineSimplifyDemanded.cpp) |
+| `ic_demanded.goose` | SimplifyDemandedBits (integer and pointer part of InstCombineSimplifyDemanded.cpp) |
+| `ic_compares.goose` | InstCombineCompares.cpp, whole: `visit_icmp`/`visit_fcmp` and every helper in file order (GEP compares, load-from-constant-global compares, alloca compares, the APFloat helpers the fcmp folds need); also decomposeBitTestICmp (CmpInstAnalysis.cpp) and decomposeLinearExpression (Loads.cpp) |
+| `ic_andorxor.goose` | InstCombineAndOrXor.cpp (insertRangeTest so far) |
 | `ic_visit_misc.goose` | calls (`visitCallInst`/`visitCallBase` for ordinary functions, `llvm.assume`), and the fail-loudly fallback for every visitor that isn't ported |
 | `domcond.goose` (global) | DomConditionCache; ValueTracking consults it (knownbits, pow2, non-equal, fpclass) while `dc_active` |
 | `overflow.goose` (global) | computeOverflowFor*, haveNoCommonBitsSet |
