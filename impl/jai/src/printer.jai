@@ -1128,6 +1128,11 @@ print_function :: (f: Value_Id) {
     current_function = NONE;
 }
 
+// AssemblyAnnotationWriter hooks used by Function::print(OS, AAW) (emitBasicBlockStartAnnot, emitInstructionAnnot);
+// null = no annotation writer. Set them around a print_function call (memoryssa.jai).
+print_annot_block: (b: Value_Id) = null;
+print_annot_inst: (i: Value_Id) = null;
+
 print_basic_block :: (b: Value_Id, is_entry: bool) {
     if vname(b).count {
         outc(#char "\n");
@@ -1156,9 +1161,11 @@ print_basic_block :: (b: Value_Id, is_entry: bool) {
         if first out(" No predecessors!");
     }
     outc(#char "\n");
+    if print_annot_block print_annot_block(b);
     i := block(b).first;
     while i != NONE {
         if inst(i).records print_records_of(i);
+        if print_annot_inst print_annot_inst(i);
         print_instruction(i);
         outc(#char "\n");
         i = inst(i).next;

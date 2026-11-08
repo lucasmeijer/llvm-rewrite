@@ -1062,7 +1062,7 @@ aa_eval_print_reports :: () {
 }
 
 // cl::opts of aa-eval, BasicAA, TBAA, ScopedNoAliasAA (see passes.jai cl_opts)
-AA_CL_OPT_COUNT :: 15;
+AA_CL_OPT_COUNT :: 17;
 add_aa_cl_opts :: (list: [] Cl_Opt, start: s64) {
     o := *aa_eval_opts;
     entries := Cl_Opt.[
@@ -1081,13 +1081,15 @@ add_aa_cl_opts :: (list: [] Cl_Opt, start: s64) {
         .{"enable-tbaa", .BOOL, null, null, null},
         .{"enable-scoped-noalias", .BOOL, null, null, null},
         .{"use-dereferenceable-at-point-semantics", .BOOL, null, null, null},
+        .{"verify-memoryssa", .BOOL, null, null, null},
     ];
     ptrs := (*bool).[*o.print_all, *o.print_no_alias, *o.print_may_alias, *o.print_partial_alias, *o.print_must_alias,
                      *o.print_no_mod_ref, *o.print_ref, *o.print_mod, *o.print_mod_ref, *o.evaluate_aa_metadata,
                      *basic_aa_opts.rec_phi, *basic_aa_opts.separate_storage, *tbaa_opts.enable, *scoped_noalias_opts.enable,
-                     *use_deref_at_point_semantics];
+                     *use_deref_at_point_semantics, *mssa_opts.verify];
     for entries {
         list[start + it_index] = it;
         list[start + it_index].b = ptrs[it_index];
     }
+    list[start + entries.count] = .{"memssa-check-limit", .INT, null, *mssa_opts.max_check_limit, null};
 }

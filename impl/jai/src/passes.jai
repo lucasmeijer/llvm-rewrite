@@ -11,8 +11,8 @@
 
 // ---------------------------------------------------------------- analyses
 
-Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; }
-ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions"];
+Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; }
+ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa"];
 
 // PreservedAnalyses. `cfg` = preserveSet<CFGAnalyses>().
 Preserved :: struct {
@@ -39,6 +39,7 @@ Fn_Analyses :: struct {
     pdt: *Dom_Tree;
     db: *Demanded_Bits;
     ac: *Assumption_Cache;
+    mssa: *Memory_SSA;
 }
 fam: Table(Value_Id, Fn_Analyses);
 
@@ -112,6 +113,8 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     if e.pdt && !analysis_survives(.POSTDOMTREE, pa) { dt_free(e.pdt); e.pdt = null; }
     if e.db && !analysis_survives(.DEMANDED_BITS, pa) { db_free(e.db); e.db = null; }
     if e.ac && !analysis_survives(.ASSUMPTIONS, pa) { ac_free(e.ac); e.ac = null; }
+    // MemorySSAAnalysis::Result::invalidate: preserved, and AAManager and DominatorTreeAnalysis survive
+    if e.mssa && (!analysis_survives(.MEMORYSSA, pa) || !e.dt || !e.ac) { mssa_free(e.mssa); e.mssa = null; }
     // a DemandedBits result points at the DominatorTree it was built with
     if e.db && !e.dt { db_free(e.db); e.db = null; }
 }
@@ -121,6 +124,7 @@ fam_require :: (f: Value_Id, k: Analysis_Kind) {
         case .POSTDOMTREE; get_postdomtree(f);
         case .DEMANDED_BITS; get_demanded_bits(f);
         case .ASSUMPTIONS; get_assumption_cache(f);
+        case .MEMORYSSA; get_memoryssa(f);
     }
 }
 fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
@@ -141,7 +145,7 @@ Pass_Kind :: enum u8 {
     // transforms
     DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG; INSTSIMPLIFY; SROA;
     // alias analysis (aa.jai)
-    AA_EVAL;
+    AA_EVAL; PRINT_MEMORYSSA; PRINT_MEMORYSSA_NO_OPT; PRINT_MEMORYSSA_WALKER;
 }
 
 Pass_Info :: struct {
@@ -184,6 +188,12 @@ PASS_TABLE :: Pass_Info.[
     .{"invalidate<postdomtree>", .FUNCTION, .INVALIDATE, true, .POSTDOMTREE},
     .{"invalidate<demanded-bits>", .FUNCTION, .INVALIDATE, true, .DEMANDED_BITS},
     .{"aa-eval", .FUNCTION, .AA_EVAL, false, .DOMTREE},
+    .{"print<memoryssa>", .FUNCTION, .PRINT_MEMORYSSA, true, .DOMTREE},
+    .{"print<memoryssa><no-ensure-optimized-uses>", .FUNCTION, .PRINT_MEMORYSSA_NO_OPT, true, .DOMTREE},
+    .{"print<memoryssa-walker>", .FUNCTION, .PRINT_MEMORYSSA_WALKER, true, .DOMTREE},
+    .{"verify<memoryssa>", .FUNCTION, .REQUIRE, true, .MEMORYSSA},   // no verifier yet: computes MemorySSA only
+    .{"require<memoryssa>", .FUNCTION, .REQUIRE, true, .MEMORYSSA},
+    .{"invalidate<memoryssa>", .FUNCTION, .INVALIDATE, true, .MEMORYSSA},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -533,6 +543,9 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
             aa_eval_run(f, aa_eval_counts_for(node), *sb);
             write_string(builder_to_string(*sb,, allocator = temp), to_standard_error = true);
             return PRESERVE_ALL;
+        case .PRINT_MEMORYSSA; mssa_printer_run(f, true); return PRESERVE_ALL;
+        case .PRINT_MEMORYSSA_NO_OPT; mssa_printer_run(f, false); return PRESERVE_ALL;
+        case .PRINT_MEMORYSSA_WALKER; mssa_walker_printer_run(f); return PRESERVE_ALL;
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;
