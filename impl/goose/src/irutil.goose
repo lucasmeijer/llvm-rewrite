@@ -415,15 +415,15 @@ fn block_erase(bv: i32) {
 
 // ---------------------------------------------------------------------------------------------
 // Scratch sets and maps over value ids with O(1) clear (an epoch stamp per entry), so per-function work never
-// pays for the size of the whole module. 4 set slots and 4 map slots; who owns which slot is listed in
+// pays for the size of the whole module. 6 set slots and 6 map slots; who owns which slot is listed in
 // DESIGN.md §8.4. Entries are created lazily up to vals.len.
 
-let NSLOTS = 4;
+let NSLOTS = 6;
 var vs_stamp: i32[>..];        // (value id * NSLOTS + slot) -> epoch when added
-var vs_epoch: i32[4] = [1, 1, 1, 1];
+var vs_epoch: i32[6] = [1, 1, 1, 1, 1, 1];
 var vm_stamp: i32[>..];
 var vm_data: i64[>..];
-var vm_epoch: i32[4] = [1, 1, 1, 1];
+var vm_epoch: i32[6] = [1, 1, 1, 1, 1, 1];
 
 fn vs_grow(n: i64) { while vs_stamp.len < n * NSLOTS { vs_stamp.push(0); } }
 fn vm_grow(n: i64) { while vm_stamp.len < n * NSLOTS { vm_stamp.push(0); vm_data.push(0); } }
@@ -472,6 +472,8 @@ let VS_PASS0 = 0;      // transform passes: scratch
 let VS_PASS1 = 1;
 let VS_ANA0 = 2;       // analyses alive during a pass (DemandedBits: Visited)
 let VS_ANA1 = 3;       // DemandedBits: DeadUses (keyed by use id, not value id)
+let VS_PASS2 = 4;      // InstSimplifyPass: ToSimplify / Next (VS_PASS1 holds the debug-record values)
+let VS_PASS3 = 5;
 let VM_PASS0 = 0;
 let VM_PASS1 = 1;
 let VM_ANA0 = 2;       // DemandedBits: AliveBits

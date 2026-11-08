@@ -6,11 +6,14 @@ import analyses;
 import instinfo;
 import local;
 import tli;
+import mem2reg;
+import salvage;
 
 // SmallSetVector<Instruction *, 16> WorkList: vector + membership in scratch set VS_PASS0.
 fn dce_instruction(iv: i32, wl: i32[>..<]&) -> bool {
     if !is_instruction_trivially_dead(iv) { return false; }
-    // salvageDebugInfo / salvageKnowledge: no debug records or knowledge retention in our IR yet.
+    // salvageKnowledge: only with --enable-knowledge-retention (not accepted by our opt)
+    salvage_debug_info(iv);
     for k in nops(iv) {
         let opv = op(iv, k);
         set_op(iv, k, -1);
@@ -19,12 +22,13 @@ fn dce_instruction(iv: i32, wl: i32[>..<]&) -> bool {
             if vs_add(VS_PASS0, opv) { wl.push(opv); }
         }
     }
-    inst_erase_from_parent(iv);
+    m2r_erase(iv);
     return true;
 }
 
 fn dce_run(fv: i32) -> u32 {
     tli_cur_fn = fv;
+    m2r_collect_records(fv);     // VS_PASS1: values debug records mention
     vs_clear(VS_PASS0);
     var wl: i32[>..<] = [];
     var changed = false;

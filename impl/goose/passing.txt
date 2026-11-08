@@ -2526,7 +2526,9 @@ tests/imported/llvm/Transforms/EarlyCSE/conditional.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/conditional.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/const-speculation.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/const-speculation.ll::roundtrip
+tests/imported/llvm/Transforms/EarlyCSE/debug-info-undef.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/debug-info-undef.ll::roundtrip
+tests/imported/llvm/Transforms/EarlyCSE/debuginfo-dce.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/debuginfo-dce.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/defaultfp-strictfp.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/defaultfp-strictfp.ll::roundtrip
@@ -2540,6 +2542,7 @@ tests/imported/llvm/Transforms/EarlyCSE/flags.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/flags.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/floatingpoint.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/floatingpoint.ll::roundtrip
+tests/imported/llvm/Transforms/EarlyCSE/gc_relocate.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/gc_relocate.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/gep.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/gep.ll::roundtrip
@@ -5571,6 +5574,7 @@ tests/imported/llvm/Transforms/InstSimplify/freeze-noundef.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/freeze-noundef.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/freeze.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/freeze.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/gc_relocate.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/gc_relocate.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/gep.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/get_active_lane_mask.ll::roundtrip

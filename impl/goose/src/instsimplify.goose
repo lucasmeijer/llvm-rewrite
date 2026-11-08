@@ -25,6 +25,7 @@ import knownbits;
 import implied;
 import crange;
 import pm;
+import printer;
 import vt;
 import poison;
 import constfold;
@@ -33,6 +34,8 @@ import fpclass;
 import local;
 import tli;
 import assume;
+import mem2reg;
+import salvage;
 
 let RECURSION_LIMIT = 3;
 
@@ -4100,7 +4103,12 @@ recursive fn simplify_intrinsic_call(c: i32, mark: i64, n: i64, q: SQ) -> i32 {
     let id = func_iid(f) as i32;
     let rty = ty_fn_ret(globs[glob_of(f)].vty);
     if id == IID_experimental_gc_relocate {
-        is_not_ported("gc.relocate simplification");
+        // GCRelocateInst::getDerivedPtr / getBasePtr (gc_ptr_operand, printer.goose; -1 = nullptr)
+        let dp = gc_ptr_operand(c, 2);
+        let bp = gc_ptr_operand(c, 1);
+        if (dp >= 0 && is_undef_val(dp)) || (bp >= 0 && is_undef_val(bp)) { return c_undef(vals[c].ty); }
+        if ty_kind(vals[c].ty) == TK_PTR && dp >= 0 && vals[dp].kind == VK_CNULL { return c_null(vals[c].ty); }
+        return -1;
     }
     var eb = EB_IGNORE;
     var rm = RM_NEAREST;
@@ -4258,9 +4266,11 @@ fn instsimplify_run(fv: i32) -> u32 {
     vt_invalidate_assumes();
     ac_invalidate();
     var changed = false;
-    // ToSimplify / Next: scratch sets VS_PASS0 / VS_PASS1 (swapped by index)
-    var cur_set = VS_PASS0;
-    var next_set = VS_PASS1;
+    // debug records (VS_PASS1: values they mention) for RAUW and salvageDebugInfo
+    m2r_collect_records(fv);
+    // ToSimplify / Next: scratch sets VS_PASS2 / VS_PASS3 (swapped by index)
+    var cur_set = VS_PASS2;
+    var next_set = VS_PASS3;
     vs_clear(cur_set);
     vs_clear(next_set);
     var cur_empty = true;
@@ -4289,6 +4299,7 @@ fn instsimplify_run(fv: i32) -> u32 {
                         }
                         ac_rauw(i, v);
                         rauw(i, v);
+                        if dbgrecs.len > 0 { m2r_dbg_rauw(i, v); }
                         changed = true;
                         if is_trivially_dead_without_tli(i) { dead.push(i); }
                     }
@@ -4318,14 +4329,14 @@ fn recursively_delete_trivially_dead(dead: i32[>..<]&) {
     while wl.len > 0 {
         let i = wl.pop();
         if is_dead(i) { continue; }
-        // salvageDebugInfo / salvageKnowledge are not ported: fail loudly when debug records use I
-        if dbg_records_use_value(i) { fatal("instsimplify: salvageDebugInfo is not ported yet"); }
+        // salvageKnowledge: only with --enable-knowledge-retention (not accepted by our opt)
+        salvage_debug_info(i);
         for k in nops(i) {
             let opv = op(i, k);
             set_op(i, k, -1);
             if opv < 0 || !has_use_list(opv) || vals[opv].first_use >= 0 { continue; }
             if is_inst(opv) && is_instruction_trivially_dead(opv) { wl.push(opv); }
         }
-        inst_erase_from_parent(i);
+        m2r_erase(i);
     }
 }

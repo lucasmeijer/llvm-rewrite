@@ -43,6 +43,7 @@ import constrange;
 import dinfo;
 import implied;
 import loopinfo;
+import salvage;
 
 let ET_VALUES = 0;
 let ET_LOADS = 1;
@@ -928,9 +929,7 @@ fn ec_overriding_stores(e: PMI, l: PMI) -> bool {
 // processNode
 
 // salvageKnowledge: only with --enable-knowledge-retention (not accepted by our opt)
-fn ec_salvage_debug_info(iv: i32) {
-    if dbgrecs.len > 0 && vs_has(VS_PASS1, iv) { fatal("EarlyCSE: salvageDebugInfo is not ported yet (a debug record uses a dead instruction)"); }
-}
+fn ec_salvage_debug_info(iv: i32) { salvage_debug_info(iv); }
 
 fn ec_handle_branch_condition(cond: i32, bi: i32, bb: i32, pred: i32) -> bool {
     let is_true = term_succ(bi, 0) == bb;
