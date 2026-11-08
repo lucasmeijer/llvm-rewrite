@@ -4094,21 +4094,3 @@ ic_visit_xor :: (i: Value_Id) -> Value_Id {
     r = ic_fold_masked_add_xor_pattern(i); if r != NONE return r;
     return NONE;
 }
-
-// ---------------------------------------------------------------- TEMPORARY (InstCombineSelect.cpp, owned by ic_select.jai)
-// Ported here only until ic_select.jai lands on main; whoever rebases second deletes this block.
-
-// simplifyNestedSelectsUsingImpliedCond
-ic_simplify_nested_selects_using_implied_cond :: (si: Value_Id, cond_val: Value_Id, cond_is_true: bool) -> Value_Id {
-    implied := is_implied_condition(cond_val, op(si, 0), cond_is_true);
-    if implied < 0 return NONE;
-    return ifx implied == 1 then op(si, 1) else op(si, 2);
-}
-// foldAndOrOfSelectUsingImpliedCond
-ic_fold_and_or_of_select_using_implied_cond :: (opv: Value_Id, si: Value_Id, is_and: bool) -> Value_Id {
-    if vtype(op(si, 0)) != vtype(opv) return NONE;
-    v := ic_simplify_nested_selects_using_implied_cond(si, opv, is_and);
-    if v == NONE return NONE;
-    t := vtype(opv);
-    return ic_create_select_unknown_profile(opv, ifx is_and then v else get_true(t), ifx is_and then get_false(t) else v);
-}

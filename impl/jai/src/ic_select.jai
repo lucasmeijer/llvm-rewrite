@@ -1063,13 +1063,6 @@ ic_fold_add_sub_select :: (si: Value_Id) -> Value_Id {
 
 // ---------------------------------------------------------------- foldOverflowingAddSubSelect
 
-// m_ExtractValue<Ind>(m_Value(Agg)) (instructions)
-pm_extract_value_idx :: (v: Value_Id, idx: u32) -> (bool, Value_Id) {
-    if !is_inst(v) || inst_op(v) != .EXTRACTVALUE return false, NONE;
-    ix := inst_indices(v);
-    if ix.count != 1 || ix[0] != idx return false, NONE;
-    return true, op(v, 0);
-}
 is_with_overflow_iid :: (id: Intrinsic_Id) -> bool {
     return id == IID_UADD_WITH_OVERFLOW || id == IID_SADD_WITH_OVERFLOW || id == IID_USUB_WITH_OVERFLOW ||
            id == IID_SSUB_WITH_OVERFLOW || id == IID_UMUL_WITH_OVERFLOW || id == IID_SMUL_WITH_OVERFLOW;
@@ -1535,12 +1528,6 @@ can_ignore_sign_bit_of_nan :: (u: Use_Id) -> bool {
 }
 // IRBuilder::CreateFAbs(V, FMFSource)
 icb_fabs :: (v: Value_Id, fmf_src: Value_Id) -> Value_Id { return icb_unary_intrinsic(IID_FABS, v, "", fmf_src); }
-icb_fabs_fmf :: (v: Value_Id, fmf: u32) -> Value_Id {
-    saved := ic.b_fmf; ic.b_fmf = fmf;
-    r := icb_unary_intrinsic(IID_FABS, v);
-    ic.b_fmf = saved;
-    return r;
-}
 
 ic_fold_select_with_fcmp_to_fabs :: (si: Value_Id) -> Value_Id {
     cond := ic_sel_cond(si);
@@ -2078,12 +2065,6 @@ icb_select_unknown_profile :: (c: Value_Id, t: Value_Id, f: Value_Id, name: stri
     r := icb_select(c, t, f, name);
     if is_select_inst(r) ic_set_unknown_profile_if_profiled(r);
     return r;
-}
-// SelectInst::Create(C, T, F, "", nullptr, MDFrom): all metadata of MDFrom
-ic_create_select_md_from :: (c: Value_Id, t: Value_Id, f: Value_Id, md_from: Value_Id) -> Value_Id {
-    s := create_select(c, t, f);
-    if md_from != NONE copy_metadata(s, md_from);
-    return s;
 }
 
 ic_fold_select_of_bools :: (si: Value_Id) -> Value_Id {
@@ -2945,8 +2926,3 @@ ic_visit_select :: (si: Value_Id) -> Value_Id {
     return NONE;
 }
 
-// ---------------------------------------------------------------- temporary stubs (InstCombineAndOrXor.cpp, being ported by jai_ic_bitwise into
-// ic_andorxor.jai under these names; delete this block when that file lands)
-ic_fold_boolean_and_or :: (lhs: Value_Id, rhs: Value_Id, i: Value_Id, is_and: bool, is_logical: bool) -> Value_Id { return NONE; }
-ic_fold_or_of_logical_ands :: (op0: Value_Id, op1: Value_Id) -> Value_Id { return NONE; }
-ic_sink_not_into_other_hand_of_logical_op :: (i: Value_Id) -> bool { return false; }
