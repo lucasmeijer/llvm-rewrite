@@ -30,11 +30,53 @@ let MAK_USE: u8 = 2;
 let MAK_PHI: u8 = 3;
 let MSSA_INVALID_ID: i32 = -1;
 
+// def/opt cache the values of operand 0 (defining access) and operand 1 (MemoryDef's optimized access); the
+// operands themselves are uses (u0, u1) in muses with intrusive use lists exactly like IR Use::set (a new use
+// goes to the head of the value's list), so iterating the users of an access matches LLVM's order.
 struct MAcc { kind: u8, id: i32, inst: i32, bb: i32, def: i32, opt: i32, opt_id: i32,
-              prev: i32, next: i32, dprev: i32, dnext: i32, pat: i32, pn: i32, pcap: i32, num: i32 }
+              prev: i32, next: i32, dprev: i32, dnext: i32, pat: i32, pn: i32, pcap: i32, num: i32,
+              u0: i32, u1: i32, first_use: i32 }
 var macc: MAcc[>..<];
 var mphi_v: i32[>..<];
 var mphi_b: i32[>..<];
+var mphi_u: i32[>..<];
+
+// Uses of memory accesses: slot 0/1 = operand 0/1 of a MemoryUse/Def, k >= 0 for a MemoryPhi's operand k (-1 = none)
+struct MUse { val: i32, user: i32, next: i32, prev: i32, slot: i32 }
+var muses: MUse[>..<];
+
+fn mu_new(user: i32, slot: i32) -> i32 {
+    let u = muses.len as i32;
+    muses.push(MUse { val: -1, user: user, next: -1, prev: -1, slot: slot });
+    return u;
+}
+fn mu_unlink(u: i32) {
+    let v = muses[u].val;
+    if v < 0 { return; }
+    let p = muses[u].prev;
+    let n = muses[u].next;
+    if p >= 0 { muses[p].next = n; } else { macc[v].first_use = n; }
+    if n >= 0 { muses[n].prev = p; }
+    muses[u].val = -1;
+    muses[u].next = -1;
+    muses[u].prev = -1;
+}
+// Use::set
+fn mu_set(u: i32, v: i32) {
+    mu_unlink(u);
+    muses[u].val = v;
+    if v < 0 { return; }
+    let h = macc[v].first_use;
+    muses[u].next = h;
+    muses[u].prev = -1;
+    if h >= 0 { muses[h].prev = u; }
+    macc[v].first_use = u;
+}
+// users of an access, in use-list order
+fn mssa_first_use(a: i32) -> i32 { macc[a].first_use }
+fn mssa_use_next(u: i32) -> i32 { muses[u].next }
+fn mssa_use_user(u: i32) -> i32 { muses[u].user }
+fn mssa_use_slot(u: i32) -> i32 { muses[u].slot }
 
 struct MBlk { first: i32, last: i32, dfirst: i32, dlast: i32, numvalid: bool }
 var mb_stamp: i32[>..];
@@ -82,7 +124,12 @@ fn mv_set(v: i32, a: i32) {
 fn ma_new(kind: u8, inst: i32, bb0: i32) -> i32 {
     let a = macc.len as i32;
     macc.push(MAcc { kind: kind, id: 0, inst: inst, bb: bb0, def: -1, opt: -1, opt_id: MSSA_INVALID_ID,
-                     prev: -1, next: -1, dprev: -1, dnext: -1, pat: 0, pn: 0, pcap: 0, num: 0 });
+                     prev: -1, next: -1, dprev: -1, dnext: -1, pat: 0, pn: 0, pcap: 0, num: 0,
+                     u0: -1, u1: -1, first_use: -1 });
+    if kind != MAK_PHI {
+        macc[a].u0 = mu_new(a, 0);
+        if kind != MAK_USE { macc[a].u1 = mu_new(a, 1); }
+    }
     return a;
 }
 
@@ -94,11 +141,11 @@ fn mssa_is_live(a: i32) -> bool { a == 0 }
 // MemoryUseOrDef::getDefiningAccess
 fn ma_def(a: i32) -> i32 { macc[a].def }
 // setDefiningAccess(DMA, Optimized = false)
-fn ma_set_def(a: i32, d: i32) { macc[a].def = d; }
+fn ma_set_def(a: i32, d: i32) { macc[a].def = d; mu_set(macc[a].u0, d); }
 // setOptimized
 fn ma_set_optimized(a: i32, d: i32) {
-    if macc[a].kind == MAK_USE { macc[a].opt_id = macc[d].id; macc[a].def = d; }
-    else { macc[a].opt = d; macc[a].opt_id = macc[d].id; }
+    if macc[a].kind == MAK_USE { macc[a].opt_id = macc[d].id; macc[a].def = d; mu_set(macc[a].u0, d); }
+    else { macc[a].opt = d; mu_set(macc[a].u1, d); macc[a].opt_id = macc[d].id; }
 }
 fn ma_is_optimized(a: i32) -> bool {
     if macc[a].kind == MAK_USE { let d = macc[a].def; return d >= 0 && macc[a].opt_id == macc[d].id; }
@@ -108,26 +155,40 @@ fn ma_is_optimized(a: i32) -> bool {
 fn ma_get_optimized(a: i32) -> i32 { if macc[a].kind == MAK_USE { macc[a].def } else { macc[a].opt } }
 fn ma_reset_optimized(a: i32) {
     macc[a].opt_id = MSSA_INVALID_ID;
-    if macc[a].kind != MAK_USE { macc[a].opt = -1; }
+    if macc[a].kind != MAK_USE { macc[a].opt = -1; mu_set(macc[a].u1, -1); }
 }
 
 // MemoryPhi operands
 fn mphi_n(p: i32) -> i64 { macc[p].pn as i64 }
 fn mphi_val(p: i32, k: i64) -> i32 { mphi_v[(macc[p].pat as i64) + k] }
 fn mphi_blk(p: i32, k: i64) -> i32 { mphi_b[(macc[p].pat as i64) + k] }
+// MemoryPhi::setIncomingValue / setIncomingBlock
+fn mphi_set_val(p: i32, k: i64, v: i32) { let at = (macc[p].pat as i64) + k; mphi_v[at] = v; mu_set(mphi_u[at], v); }
+fn mphi_set_blk(p: i32, k: i64, b: i32) { mphi_b[(macc[p].pat as i64) + k] = b; }
 fn mphi_add_incoming(p: i32, v: i32, b: i32) {
     let n = macc[p].pn as i64;
     if n == (macc[p].pcap as i64) {
         let ncap = max(n + n / 2, 2);
+        // growHungoffUses: the new uses are set in operand order (pushed at the heads), then the old ones zapped
+        let oat = macc[p].pat as i64;
         let nat = mphi_v.len;
-        for k in n { mphi_v.push(mphi_val(p, k)); mphi_b.push(mphi_blk(p, k)); }
-        for k in ncap - n { mphi_v.push(-1); mphi_b.push(-1); }
+        for k in n {
+            let nu = mu_new(p, k as i32);
+            mphi_v.push(mphi_v[oat + k]);
+            mphi_b.push(mphi_b[oat + k]);
+            mphi_u.push(nu);
+            mu_set(nu, mphi_v[oat + k]);
+        }
+        for k in ncap - n { mphi_v.push(-1); mphi_b.push(-1); mphi_u.push(mu_new(p, (n + k) as i32)); }
+        var k = n;
+        while k > 0 { k--; mu_unlink(mphi_u[oat + k]); }
         macc[p].pat = nat as i32;
         macc[p].pcap = ncap as i32;
     }
     let at = (macc[p].pat as i64) + n;
     mphi_v[at] = v;
     mphi_b[at] = b;
+    mu_set(mphi_u[at], v);
     macc[p].pn += 1;
 }
 
@@ -361,6 +422,8 @@ fn mssa_build(fv: i32) {
     macc.clear();
     mphi_v.clear();
     mphi_b.clear();
+    mphi_u.clear();
+    muses.clear();
     mssa_next_id = 0;
     let entry = func_entry(fv);
     let live = ma_new(MAK_LIVE, -1, entry);
