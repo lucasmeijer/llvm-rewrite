@@ -2014,3 +2014,60 @@ is_guaranteed_not_to_be_poison :: (v: Value_Id, ac: *Assumption_Cache = null, cx
 is_guaranteed_not_to_be_undef :: (v: Value_Id, ac: *Assumption_Cache = null, cxt: Value_Id = NONE, dt: *Dom_Tree = null, depth: u32 = 0) -> bool {
     return is_guaranteed_not_to_be_undef_or_poison_kind(v, ac, cxt, dt, depth, .UNDEF_ONLY);
 }
+
+// isBytewiseValue(V, DL): the i8 value every byte of V equals (undef i8 = "don't care"), or NONE
+is_bytewise_value :: (v: Value_Id) -> Value_Id {
+    ty := vtype(v);
+    if is_int_type(ty) && type_bits(ty) == 8 return v;
+    undef_i8 := const_undef(ir.t_i8);
+    k := vkind(v);
+    if k == .C_UNDEF || k == .C_POISON return undef_i8;
+    if type_is_sized(ty) && !type_is_scalable(ty) && dl_type_store_size(ty) == 0 return const_poison(ir.t_i8);
+    if !is_constant_kind(k) return NONE;
+    if is_null_value(v) return const_null_value(ir.t_i8);
+    if k == .C_FP {
+        st := scalar_type(ty);
+        tk := type_kind(st);
+        if tk == .HALF || tk == .FLOAT || tk == .DOUBLE
+            return is_bytewise_value(const_int_words(type_int(type_bits(st)), const_fp_value(v)));
+        return NONE;
+    }
+    if k == .C_INT {
+        a := const_ap(v);
+        if a.bits % 8 == 0 {
+            if !ap_is_splat(a, 8) return NONE;
+            return const_int(ir.t_i8, ap_zext_value(ap_trunc(a, 8)));
+        }
+    }
+    if k == .C_EXPR && cexpr(v).op == .INTTOPTR && is_ptr_type(ty) {
+        bw := cast(u32) dl_pointer_type_size_bits(ty);
+        o := cfo_integer_cast(op(v, 0), type_int(bw), false);
+        if o != NONE return is_bytewise_value(o);
+    }
+    merge :: (l: Value_Id, r: Value_Id, undef_i8: Value_Id) -> Value_Id {
+        if l == r return l;
+        if l == NONE || r == NONE return NONE;
+        if l == undef_i8 return r;
+        if r == undef_i8 return l;
+        return NONE;
+    }
+    if k == .C_DATA {
+        val := undef_i8;
+        n := const_data_count(v);
+        for e: 0..cast(s64) n - 1 {
+            val = merge(val, is_bytewise_value(cf_elt(v, cast(u64) e)), undef_i8);
+            if val == NONE return NONE;
+        }
+        return val;
+    }
+    if k == .C_ARRAY || k == .C_STRUCT || k == .C_VECTOR {
+        val := undef_i8;
+        n := nops(v);
+        for e: 0..cast(s64) n - 1 {
+            val = merge(val, is_bytewise_value(op(v, cast(u32) e)), undef_i8);
+            if val == NONE return NONE;
+        }
+        return val;
+    }
+    return NONE;
+}

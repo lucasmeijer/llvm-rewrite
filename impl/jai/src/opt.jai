@@ -74,6 +74,8 @@
 #load "must_execute.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";
+#load "pass_dse.jai";
+#load "pass_memcpyopt.jai";
 #load "scev.jai";
 #load "scev_create.jai";
 #load "scev_range.jai";

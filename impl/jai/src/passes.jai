@@ -203,6 +203,8 @@ Pass_Kind :: enum u8 {
     DEBUGIFY; CHECK_DEBUGIFY; REDUNDANT_DBG_INST_ELIM;
     // GVN (pass_gvn.jai)
     GVN;
+    // DeadStoreElimination (pass_dse.jai), MemCpyOpt (pass_memcpyopt.jai)
+    DSE; MEMCPYOPT;
 }
 
 Pass_Info :: struct {
@@ -236,6 +238,8 @@ PASS_TABLE :: Pass_Info.[
     .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
     .{"gvn", .FUNCTION, .GVN, false, .DOMTREE},   // also gvn<...> (lookup_pass)
+    .{"dse", .FUNCTION, .DSE, false, .DOMTREE},
+    .{"memcpyopt", .FUNCTION, .MEMCPYOPT, false, .DOMTREE},
     .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},
     .{"simplifycfg", .FUNCTION, .SIMPLIFYCFG, false, .DOMTREE},   // also simplifycfg<...> (lookup_pass)   // also instcombine<...> (lookup_pass)
     .{"verify", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},   // VerifierPass (module & function): nothing to report on valid IR
@@ -573,14 +577,17 @@ opts: struct {
     instcombine_maxarray_size: s64 = 1024;   // -instcombine-maxarray-size
     instcombine_negator_enabled := true;     // InstCombineNegator.cpp -instcombine-negator-enabled
 };
+opt_march: string;                       // opt -march
 cl_data_layout: string;                  // opt -data-layout (overrides the module's datalayout)
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT + GVN_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT + GVN_CL_OPT_COUNT + DSE_CL_OPT_COUNT + MCO_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
     add_gvn_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT);
     add_dbgify_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT);
     add_licm_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT);
+    add_dse_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT + GVN_CL_OPT_COUNT);
+    add_mco_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT + GVN_CL_OPT_COUNT + DSE_CL_OPT_COUNT);
     add_tti_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT);
     add_scfg_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT);
     add_aa_cl_opts(list, 14);
@@ -731,6 +738,8 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .BREAK_CRIT_EDGES; return break_crit_edges_run(f);
         case .MEM2REG; return mem2reg_run(f);
         case .INSTSIMPLIFY; return instsimplify_run(f);
+        case .DSE; return dse_run(f);
+        case .MEMCPYOPT; return memcpyopt_run(f);
         case .SROA; return sroa_run(f, node.name);
         case .GVN; return gvn_run(f, node.name);
         case .INSTCOMBINE; return instcombine_run(f, node.name);
@@ -799,6 +808,8 @@ opt_main :: () {
             continue;
         }
         if a == "-passes" || a == "--passes" { if i >= args.count fatal("-passes needs a value"); passes = args[i]; i += 1; have_passes = true; continue; }
+        if a == "-data-layout" || a == "--data-layout" { if i >= args.count fatal("-data-layout needs a value"); cl_data_layout = args[i]; i += 1; continue; }
+        if begins_with(a, "-march=") || begins_with(a, "--march=") { opt_march = slice(a, find_index_from_left(a, #char "=") + 1, a.count - find_index_from_left(a, #char "=") - 1); continue; }
         if begins_with(a, "-data-layout=") || begins_with(a, "--data-layout=") {
             cl_data_layout = slice(a, find_index_from_left(a, #char "=") + 1, a.count - find_index_from_left(a, #char "=") - 1);
             continue;
@@ -825,6 +836,8 @@ opt_main :: () {
     ir.module_id = input;
     parse_module(src, input);
     if opts.mtriple.count ir.triple = normalize_triple(opts.mtriple);
+    // -march only selects the target of the TargetMachine, which opt creates only for a module with a target triple
+    if opt_march.count && ir.triple.count fatal("unsupported option '-march=%' (with a target triple)", opt_march);
     if opt_strip_debug strip_debug_info();   // "Strip debug info before running the verifier"
     tti_create_target_machine();
     opt_set_function_attributes();

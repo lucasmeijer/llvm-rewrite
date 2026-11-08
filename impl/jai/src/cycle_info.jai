@@ -196,3 +196,25 @@ ci_print :: (ci: *Cycle_Info, sb: *String_Builder) {
     }
     for ci.top_level rec(ci, it, sb);
 }
+
+// getTopLevelParentCycle(Block)
+ci_top_level_parent :: (ci: *Cycle_Info, b: Value_Id) -> Cycle_Id {
+    c := ci_cycle_for(ci, b);
+    if c == NONE return NONE;
+    return ci.cycles[c].top;
+}
+// GenericCycle::getExitBlocks: successors outside the cycle, first-seen order over blocks() and their successors
+ci_exit_blocks :: (ci: *Cycle_Info, c: Cycle_Id, out: *[..] Value_Id) {
+    succs: [..] Value_Id; succs.allocator = temp;
+    exits: [..] Value_Id; exits.allocator = temp;
+    for b: ci.cycles[c].blocks {
+        block_successors(b, *succs);
+        for s: succs {
+            if ci_contains(ci, c, s) continue;
+            dup := false;
+            for exits if it == s { dup = true; break; }
+            if !dup array_add(*exits, s);
+        }
+    }
+    for exits array_add(out, it);
+}

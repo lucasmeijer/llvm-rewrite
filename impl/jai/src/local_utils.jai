@@ -845,3 +845,39 @@ destroy_constant :: (c: Value_Id) {
 inst_insert_before_adopt :: (i: Value_Id, pos: Value_Id) {
     insert_at_position(i, inst_block(pos), pos, false);
 }
+
+// combineAAMetadata(K, J) = combineMetadata(K, J, DoesKMove = true, AAOnly = true) (Local.cpp)
+combine_aa_metadata :: (k: Value_Id, j: Value_Id) {
+    all: [..] Kind_Md; all.allocator = temp;
+    get_all_metadata(k, *all);
+    for all {
+        kind := it.kind; kmd := it.md;
+        if kind == 0 continue;
+        jmd := get_metadata(j, kind);
+        name := ir.md_kind_names[kind];
+        if name == {
+            case "DIAssignID"; #through;
+            case "range"; #through; case "nofpclass"; #through; case "fpmath"; #through; case "nonnull"; #through;
+            case "prof"; #through; case "mmra"; #through; case "memprof"; #through; case "callsite"; #through;
+            case "callee_type"; #through; case "align"; #through; case "dereferenceable"; #through;
+            case "dereferenceable_or_null"; #through; case "llvm.preserve.access.index"; #through; case "noundef"; #through;
+            case "nontemporal"; #through; case "mem.cache_hint";
+                // AAOnly: kept as they are
+            case "tbaa"; set_metadata(k, kind, tbaa_most_generic(jmd, kmd));
+            case "alias.scope"; set_metadata(k, kind, md_most_generic_alias_scope(jmd, kmd));
+            case "noalias"; #through; case "llvm.mem.parallel_loop_access"; set_metadata(k, kind, md_intersect(jmd, kmd));
+            case "llvm.access.group"; set_metadata(k, kind, intersect_access_groups(k, j));
+            case "invariant.load"; #through; case "invariant.group"; set_metadata(k, kind, jmd);
+            case "noalias.addrspace"; set_metadata(k, kind, md_most_generic_noalias_addrspace(jmd, kmd));
+            case "nosanitize"; set_metadata(k, kind, jmd);
+            case "captures"; set_metadata(k, kind, md_from_capture_components(md_to_capture_components(jmd) | md_to_capture_components(kmd)));
+            case "alloc_token"; if kmd != jmd set_metadata(k, kind, NONE);
+            case; set_metadata(k, kind, NONE);
+        }
+    }
+    found, id := table_find(*ir.md_kind_map, "mmra");
+    if found {
+        a := get_metadata(j, id); b := get_metadata(k, id);
+        if a != NONE || b != NONE set_metadata(k, id, mmra_combine(a, b));
+    }
+}

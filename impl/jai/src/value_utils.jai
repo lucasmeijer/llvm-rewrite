@@ -199,3 +199,45 @@ sv_indexed_offset_in_type :: (elem_ty: Type_Id, idxs: [] Value_Id) -> s64 {
     }
     return result;
 }
+
+// getOffsetFromIndex (Value.cpp): the constant offset implied by GEP operands Idx.. (false = not constant)
+value_gep_offset_from_index :: (g: Value_Id, idx: u32) -> (bool, s64) {
+    n := nops(g);
+    t := opr_gep_source_type(g);
+    prev: Type_Id = NONE;
+    off: s64 = 0;
+    for i: 1..cast(s64) n - 1 {
+        c := op(g, cast(u32) i);
+        if i > 1 { prev = t; t = gep_indexed_type(prev, i, c); }
+        if i < idx continue;
+        if !is_scalar_const_int(c) return false, 0;
+        if ap_is_zero(const_ap(c)) continue;
+        if i > 1 && type_kind(prev) == .STRUCT {
+            off += cast(s64) dl_struct_offset(prev, cast(u32) ap_zext_value(const_ap(c)));
+            continue;
+        }
+        if type_is_scalable(t) return false, 0;
+        stride := gep_seq_stride(ifx i > 1 then prev else NONE, i, t);
+        off += cast,no_check(s64) stride * ap_sext_value(const_ap(c));
+    }
+    return true, off;
+}
+// Value::getPointerOffsetFrom(Other, DL): this - other
+value_pointer_offset_from :: (this: Value_Id, other: Value_Id) -> (bool, s64) {
+    o1 := ap_zero(dl_index_type_size_bits(vtype(other)));
+    o2 := ap_zero(dl_index_type_size_bits(vtype(this)));
+    p1, a1 := strip_and_accumulate_constant_offsets(other, o1, true);
+    p2, a2 := strip_and_accumulate_constant_offsets(this, o2, true);
+    if p1 == p2 return true, ap_sext_value(a2) - ap_sext_value(a1);
+    if opr_code(p1) != .GEP || opr_code(p2) != .GEP || op(p1, 0) != op(p2, 0) ||
+       opr_gep_source_type(p1) != opr_gep_source_type(p2) return false, 0;
+    idx: u32 = 1;
+    while idx != nops(p1) && idx != nops(p2) {
+        if op(p1, idx) != op(p2, idx) break;
+        idx += 1;
+    }
+    ok1, i1 := value_gep_offset_from_index(p1, idx);
+    ok2, i2 := value_gep_offset_from_index(p2, idx);
+    if !ok1 || !ok2 return false, 0;
+    return true, i2 - i1 + ap_sext_value(a2) - ap_sext_value(a1);
+}

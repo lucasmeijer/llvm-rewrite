@@ -452,6 +452,8 @@ Aa_Query :: struct {
     // capture analysis: SimpleCaptureAnalysis unless `earliest_escape` (EarliestEscapeAnalysis with ee_dt)
     earliest_escape: bool;
     ee_dt: *Dom_Tree;
+    ee_ci: *Cycle_Info;      // EarliestEscapeAnalysis(DT, LI = null, CI)
+    ee: *Aa_Query;           // the query whose `captured` table is the (shared) EEA cache; null = this one
     captured: Table(Value_Id, Ee_Entry);
     // BasicAA scratch (Visited in getModRefInfoMask)
 }
@@ -473,9 +475,20 @@ aa_query_new_earliest_escape :: (aar: *Aa_Results, dt: *Dom_Tree) -> *Aa_Query {
     return q;
 }
 
+// a BatchAAResults(AA, &EEA) whose EarliestEscapeAnalysis cache lives in `shared` (an earliest-escape query that
+// owns the EEA for a whole pass run, like MemCpyOpt's EEA_)
+aa_query_new_sharing_ee :: (aar: *Aa_Results, shared: *Aa_Query) -> *Aa_Query {
+    q := aa_query_new(aar);
+    q.earliest_escape = true;
+    q.ee_dt = shared.ee_dt; q.ee_ci = shared.ee_ci;
+    q.ee = shared;
+    return q;
+}
+
 // CaptureAnalysis::getCapturesBefore
-aa_captures_before :: (q: *Aa_Query, obj: Value_Id, i: Value_Id, or_at: bool, return_captures: bool) -> u8 {
+aa_captures_before :: (q_in: *Aa_Query, obj: Value_Id, i: Value_Id, or_at: bool, return_captures: bool) -> u8 {
     if !is_identified_function_local(obj) return CC_PROVENANCE;
+    q := ifx q_in.ee then q_in.ee else q_in;
     e := table_find_pointer(*q.captured, obj);
     if !q.earliest_escape {
         if !e {
@@ -493,21 +506,23 @@ aa_captures_before :: (q: *Aa_Query, obj: Value_Id, i: Value_Id, or_at: bool, re
         e = table_find_pointer(*q.captured, obj);
     }
     if return_captures return e.with_ret;
-    not_captured_before :: (e: *Ee_Entry, i: Value_Id, or_at: bool, dt: *Dom_Tree) -> bool {
+    not_captured_before :: (e: *Ee_Entry, i: Value_Id, or_at: bool, dt: *Dom_Tree, ci: *Cycle_Info) -> bool {
         if e.inst == NONE return true;
         if i == NONE return false;
         if i == e.inst {
             if or_at return false;
-            // isNotInCycle(I, DT, LI = null, CI = null)
+            // isNotInCycle(I, DT, LI = null, CI)
+            if ci return ci_cycle_for(ci, inst_block(i)) == NONE;
             return aa_is_not_in_cycle(i, dt);
         }
-        return !is_potentially_reachable_inst(e.inst, i, dt);
+        return !is_potentially_reachable_inst_ci(e.inst, i, dt, ci);
     }
-    if not_captured_before(e, i, or_at, q.ee_dt) return CC_NONE;
+    if not_captured_before(e, i, or_at, q.ee_dt, q.ee_ci) return CC_NONE;
     return e.without_ret;
 }
 // EarliestEscapeAnalysis::removeInstruction: forget objects whose earliest capture was I
-aa_query_remove_instruction :: (q: *Aa_Query, i: Value_Id) {
+aa_query_remove_instruction :: (q_in: *Aa_Query, i: Value_Id) {
+    q := ifx q_in.ee then q_in.ee else q_in;
     if !q.earliest_escape return;
     dead: [..] Value_Id; dead.allocator = temp;
     for q.captured if it.inst == i array_add(*dead, it_index);

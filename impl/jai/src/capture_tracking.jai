@@ -103,8 +103,10 @@ ct_captured :: (t: *Capture_Tracker, u: Use_Id, use_cc: u8) -> Ct_Action {
 // DominatorTree::findNearestCommonDominator(Instruction *, Instruction *)
 dt_find_nearest_common_dominator_inst :: (dt: *Dom_Tree, i1: Value_Id, i2: Value_Id) -> Value_Id {
     b1 := inst_block(i1); b2 := inst_block(i2);
+    if b1 == b2 return ifx comes_before(i1, i2) then i1 else i2;
+    if !dt_is_reachable_from_entry(dt, b2) return i1;
+    if !dt_is_reachable_from_entry(dt, b1) return i2;
     dom := dt_find_nca(dt, b1, b2);
-    if dom == b1 && dom == b2 return ifx comes_before(i1, i2) then i1 else i2;
     if dom == b1 return i1;
     if dom == b2 return i2;
     return block_terminator(dom);
@@ -333,4 +335,57 @@ is_potentially_reachable_inst :: (a: Value_Id, b: Value_Id, dt: *Dom_Tree) -> bo
         return is_potentially_reachable_from_many(succs, ba, dt);
     }
     return is_potentially_reachable_block(ba, inst_block(b), dt);
+}
+
+// ---------------------------------------------------------------- CFG.cpp reachability with CycleInfo (LI = null)
+
+// isPotentiallyReachableFromMany(Worklist, StopBB, ExclusionSet = null, DT, LI = null, CI)
+is_potentially_reachable_from_many_ci :: (worklist_in: [] Value_Id, stop_bb: Value_Id, dt_in: *Dom_Tree, ci: *Cycle_Info) -> bool {
+    if !ci return is_potentially_reachable_from_many(worklist_in, stop_bb, dt_in);
+    dt := dt_in;
+    if dt && !dt_is_reachable_from_entry(dt, stop_bb) dt = null;
+    stop_cycle := ci_top_level_parent(ci, stop_bb);
+    worklist: [..] Value_Id; worklist.allocator = temp;
+    array_add_array(*worklist, worklist_in);
+    visited: Table(Value_Id, bool); visited.allocator = temp;
+    succs: [..] Value_Id; succs.allocator = temp;
+    limit := CFG_MAX_BBS_TO_EXPLORE;
+    while worklist.count {
+        bb := pop(*worklist);
+        if table_find_pointer(*visited, bb) continue;
+        table_set(*visited, bb, true);
+        if bb == stop_bb return true;
+        if dt && dt_dominates(dt, bb, stop_bb) return true;
+        outer := ci_top_level_parent(ci, bb);
+        if outer != NONE {
+            if outer == stop_cycle return true;
+        } else {
+            if dt && dt_is_reachable_from_entry(dt, bb) && dt_dominates(dt, stop_bb, bb) continue;
+        }
+        limit -= 1;
+        if limit == 0 return true;
+        if outer != NONE ci_exit_blocks(ci, outer, *worklist);
+        else { block_successors(bb, *succs); array_add_array(*worklist, succs); }
+    }
+    return false;
+}
+// isPotentiallyReachable(BasicBlock *A, BasicBlock *B, null, DT, null, CI)
+is_potentially_reachable_block_ci :: (a: Value_Id, b: Value_Id, dt: *Dom_Tree, ci: *Cycle_Info) -> bool {
+    if dt {
+        if dt_is_reachable_from_entry(dt, a) && !dt_is_reachable_from_entry(dt, b) return false;
+        f := block_fn(a);
+        if a == fn_entry(f) && dt_is_reachable_from_entry(dt, b) return true;
+        if b == fn_entry(f) && dt_is_reachable_from_entry(dt, a) return false;
+    }
+    return is_potentially_reachable_from_many_ci(.[a], b, dt, ci);
+}
+// isPotentiallyReachable(Instruction *A, Instruction *B, null, DT, null, CI)
+is_potentially_reachable_inst_ci :: (a: Value_Id, b: Value_Id, dt: *Dom_Tree, ci: *Cycle_Info) -> bool {
+    if !ci return is_potentially_reachable_inst(a, b, dt);
+    ba := inst_block(a);
+    if ba == inst_block(b) {
+        if a == b || comes_before(a, b) return true;
+        return ci_cycle_for(ci, ba) != NONE;
+    }
+    return is_potentially_reachable_block_ci(ba, inst_block(b), dt, ci);
 }
