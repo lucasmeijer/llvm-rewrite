@@ -1,6 +1,6 @@
 # SimplifyCFG's X86 tests quietly require a large slice of the X86 backend (TTI + type legalization)
 
-- **Date / implementation / unit:** 2026-11-12 / goose / L1.simplifycfg
+- **Date / implementation / unit:** 2026-11-08 / goose / L1.simplifycfg
 - **What happened:** ~25 of the 289 SimplifyCFG opt tests run with `-mtriple=x86_64` (plus `-mcpu`/`-mattr`).
   Their results depend on X86TTIImpl costs, which depend on the X86 subtarget feature model (X86.td
   implications, CPU lists, per-function attributes), on TargetLoweringBase type legalization, and on ~2300
