@@ -506,6 +506,8 @@ set_intrinsic_attributes :: (f: Value_Id, id: Intrinsic_Id) {
         glob(f).attrs = attr_list_get(fnset, retset, ps);
         return;
     }
+    // llvm.dbg.* declarations are always upgraded away (calls become debug records), so the oracle never shows them
+    if begins_with(base, "llvm.dbg.") return;
     fatal("intrinsic '%' has no entry in the generated attribute table (impl/jai/gen/gen_intrinsics.py: add a test that declares it)", base);
 }
 

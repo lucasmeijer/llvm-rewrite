@@ -3048,6 +3048,7 @@ tests/imported/llvm/Transforms/Inline/last-callsite.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/launder.invariant.group.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/lifetime-no-datalayout.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/lifetime.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/local-as-metadata-undominated-use.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/module-inliner-basic.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/module-inliner-cba-crash.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/module-inliner-cycle.ll::roundtrip
@@ -5305,6 +5306,7 @@ tests/imported/llvm/Transforms/LoopIdiom/basic.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/crash.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/cyclic-redundancy-check-dl.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/cyclic-redundancy-check.ll::roundtrip
+tests/imported/llvm/Transforms/LoopIdiom/debug-line.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/disable-options.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/expander-do-not-delete-reused-values.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/int_sideeffect.ll::roundtrip
@@ -5746,11 +5748,15 @@ tests/imported/llvm/Transforms/LoopVectorize/constantfolder.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/cpp-new-array.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/create-induction-resume.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/cse-gep-source-element-type.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/dbg-outer-loop-vect.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/dbg.value.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/dead_instructions.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/debugloc-optimize-vfuf-term.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/debugloc.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/demanded-bits-of-pointer-instruction.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/disable_nonforced.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/disable_nonforced_enable.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/discriminator.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/dont-fold-tail-for-const-TC.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/dont-fold-tail-for-divisible-TC.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/early-exit-calls.ll::roundtrip
@@ -7435,6 +7441,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/X86/combine-parallel-mem-md.ll::round
 tests/imported/llvm/Transforms/SimplifyCFG/X86/debugloc-switch-powers-of-two.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/disable-lookup-table.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/empty-cleanuppad.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/X86/hoist-loads-stores-with-cf.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cleanuppads.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad-debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad.ll::roundtrip
@@ -7466,6 +7473,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/bbi-23595.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/branch-cond-dont-merge.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/branch-cond-merge.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/branch-cond-prop.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/branch-fold-dbg.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/branch-fold-multiple.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/branch-fold-test.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/branch-fold-three.ll::roundtrip

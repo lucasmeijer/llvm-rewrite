@@ -562,9 +562,22 @@ add_numbered_global :: (id: u32, v: Value_Id) {
     if id + 1 > P.next_global_id P.next_global_id = id + 1;
 }
 
+// ValueAsMetadata::handleRAUW for parser placeholders: the ValueAsMetadata of `old` now wraps `new` (if `new`
+// already has one, both rows denote it; nodes are not re-uniqued)
+md_value_rauw :: (old: Value_Id, new: Value_Id) {
+    k := *md_key; key_reset(k); key_u8(k, 1); key_u32(k, old);
+    found, m := table_find(*ir.md_map, key_view(k));
+    if !found return;
+    table_remove(*ir.md_map, key_view(k));
+    ir.mds[m].value = new;
+    key_reset(k); key_u8(k, 1); key_u32(k, new);
+    if !table_contains(*ir.md_map, key_view(k)) table_add(*ir.md_map, key_copy(k), m);
+}
+
 resolve_fwd_global :: (fw: Value_Id, real: Value_Id) {
     if fw == NONE return;
     replace_all_uses_with(fw, real);
+    md_value_rauw(fw, real);
     erase_global(fw);
 }
 
@@ -909,6 +922,8 @@ set_inst_name :: (i: Value_Id, name: string, id_in: u32, has_name: bool) {
         if found {
             if vtype(ph) != vtype(i) perr("instruction forward referenced with type '%'", type_to_string(vtype(ph)));
             replace_all_uses_with(ph, i);
+        md_value_rauw(ph, i);
+            md_value_rauw(ph, i);
             ir.v_kind[ph] = .DEAD;
             table_remove(*P.fwd_local_ids, id);
         }
@@ -920,6 +935,7 @@ set_inst_name :: (i: Value_Id, name: string, id_in: u32, has_name: bool) {
     if found {
         if vtype(ph) != vtype(i) perr("instruction forward referenced with type '%'", type_to_string(vtype(ph)));
         replace_all_uses_with(ph, i);
+        md_value_rauw(ph, i);
         ir.v_kind[ph] = .DEAD;
         table_remove(*P.fwd_locals, name);
     }
@@ -1006,8 +1022,19 @@ parse_type_and_value :: () -> Value_Id {
     return parse_value(ty);
 }
 
+// canonicalizeMetadataForValue (lib/IR/Metadata.cpp): !{null} -> !{}, !{<constant>} -> the constant
+canonical_md_for_value :: (m: Md_Id) -> Md_Id {
+    if m == NONE return md_tuple(.[], false);
+    if ir.mds[m].kind != .TUPLE || ir.mds[m].nops != 1 return m;
+    o := md_op(m, 0);
+    if o == NONE return md_tuple(.[], false);
+    if ir.mds[o].kind == .VALUE && is_constant_kind(vkind(ir.mds[o].value)) return o;
+    return m;
+}
+
 parse_metadata_as_value :: () -> Value_Id {
     m := parse_metadata_operand();
+    if !is_md_temp(m) m = canonical_md_for_value(m);
     k := const_key_begin(.MD_VALUE, ir.t_metadata); key_u32(k, m);
     v := const_lookup_or_create(k, .MD_VALUE, ir.t_metadata, .[], m);
     return v;
@@ -2047,7 +2074,7 @@ resolve_all_metadata :: () {
     for * a: ir.attaches a.md = md_final_of(a.md);
     for * nm: ir.named_md for * nm.ops it.* = md_final_of(it.*);
     for i: 0..ir.v_kind.count-1 {
-        if ir.v_kind[i] == .MD_VALUE ir.v_aux[i] = md_final_of(ir.v_aux[i]);
+        if ir.v_kind[i] == .MD_VALUE ir.v_aux[i] = canonical_md_for_value(md_final_of(ir.v_aux[i]));
     }
     // operands of surviving nodes may still name forwarded nodes
     for i: 0..ir.md_ops.count-1 {
