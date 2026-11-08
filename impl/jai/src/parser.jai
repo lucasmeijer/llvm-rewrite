@@ -3136,15 +3136,5 @@ auto_declare_intrinsic :: (name: string, fw: Value_Id) {
 #import "Sort";
 saw_source_filename := false;
 
-// Triple::normalize (only the padding of missing/empty components with "unknown")
-normalize_triple :: (t: string) -> string {
-    parts := split(t, "-",, allocator = temp);
-    sb: String_Builder; sb.allocator = temp;
-    n := max(parts.count, 3);
-    for i: 0..n-1 {
-        if i > 0 append(*sb, "-");
-        p := ifx i < parts.count then parts[i] else "";
-        append(*sb, ifx p.count then p else "unknown");
-    }
-    return builder_to_string(*sb);
-}
+// Triple::normalize: tli.jai triple_normalize
+normalize_triple :: (t: string) -> string { return triple_normalize(t); }

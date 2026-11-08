@@ -839,3 +839,104 @@ tli_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
     if name == "ambiguous-new-hint-value" { lcs_ambiguous_new_hint_value = hint(value, name); return true; }
     return false;
 }
+
+// Triple::normalize(Str, CanonicalForm::ANY) (TargetParser/Triple.cpp): permute the components into
+// arch-vendor-os-environment positions; empty ones become "unknown". (The DXIL shader-model rewrite and the
+// Apple firmware check fail loudly.)
+triple_normalize :: (s: string) -> string {
+    comps: [..] string; comps.allocator = temp;
+    for split(s, "-",, allocator = temp) array_add(*comps, it);
+    is_mingw := false; is_cygwin := false;
+    arch: Triple_Arch; vendor: Triple_Vendor; os: Triple_OS; env: Triple_Env; objf: Triple_Object_Format;
+    if comps.count > 0 arch = triple_parse_arch(comps[0]);
+    if comps.count > 1 vendor = triple_parse_vendor(comps[1]);
+    if comps.count > 2 {
+        os = triple_parse_os(comps[2]);
+        is_cygwin = begins_with(comps[2], "cygwin") || begins_with(comps[2], "msys");
+        is_mingw = begins_with(comps[2], "mingw");
+    }
+    if comps.count > 3 env = triple_parse_env(comps[3]);
+    if comps.count > 4 objf = triple_parse_format(comps[4]);
+    found: [4] bool;
+    found[0] = arch != .UnknownArch; found[1] = vendor != .UnknownVendor; found[2] = os != .UnknownOS;
+    found[3] = env != .UnknownEnvironment;
+    for pos: 0..3 {
+        if found[pos] continue;
+        idx := 0;
+        while idx < comps.count {
+            defer idx += 1;
+            if idx < 4 && found[idx] continue;
+            valid := false;
+            comp := comps[idx];
+            if pos == {
+                case 0; arch = triple_parse_arch(comp); valid = arch != .UnknownArch;
+                case 1; vendor = triple_parse_vendor(comp); valid = vendor != .UnknownVendor;
+                case 2;
+                    os = triple_parse_os(comp);
+                    is_cygwin = begins_with(comp, "cygwin") || begins_with(comp, "msys");
+                    is_mingw = begins_with(comp, "mingw");
+                    valid = os != .UnknownOS || is_cygwin || is_mingw;
+                case 3;
+                    env = triple_parse_env(comp);
+                    valid = env != .UnknownEnvironment;
+                    if !valid { objf = triple_parse_format(comp); valid = objf != .UnknownObjectFormat; }
+            }
+            if !valid continue;
+            if pos < idx {
+                cur := "";
+                tmp := comps[idx]; comps[idx] = cur; cur = tmp;
+                i := pos;
+                while cur.count {
+                    while i < 4 && found[i] i += 1;
+                    if i >= comps.count array_add(*comps, "");
+                    t2 := comps[i]; comps[i] = cur; cur = t2;
+                    i += 1;
+                }
+            } else if pos > idx {
+                while true {
+                    cur := "";
+                    i := idx;
+                    while i < comps.count {
+                        t2 := comps[i]; comps[i] = cur; cur = t2;
+                        if cur.count == 0 break;
+                        i += 1;
+                        while i < 4 && found[i] i += 1;
+                    }
+                    if cur.count array_add(*comps, cur);
+                    idx += 1;
+                    while idx < 4 && found[idx] idx += 1;
+                    if idx >= pos break;
+                }
+            }
+            found[pos] = true;
+            break;
+        }
+    }
+    if found[0] && !found[1] && !found[2] && found[3] && comps.count > 2 && comps[1] == "none" && comps[2].count == 0 {
+        t2 := comps[1]; comps[1] = comps[2]; comps[2] = t2;
+    }
+    for * comps if it.count == 0 it.* = "unknown";
+    if env == .Android && comps.count > 3 && begins_with(comps[3], "androideabi") {
+        v := slice(comps[3], 11, comps[3].count - 11);
+        comps[3] = ifx v.count == 0 then "android" else tprint("android%", v);
+    }
+    if vendor == .SUSE && env == .GNUEABI comps[3] = "gnueabihf";
+    fmt_names :: string.["", "coff", "dxcontainer", "elf", "goff", "macho", "spirv", "wasm", "xcoff"];
+    resize :: (c: *[..] string, n: s64) { while c.count < n array_add(c, "unknown"); c.count = n; }
+    if os == .Win32 {
+        resize(*comps, 4);
+        comps[2] = "windows";
+        if env == .UnknownEnvironment {
+            comps[3] = ifx objf == .UnknownObjectFormat || objf == .COFF then "msvc" else fmt_names[cast(int) objf];
+        }
+    } else if is_mingw { resize(*comps, 4); comps[2] = "windows"; comps[3] = "gnu"; }
+    else if is_cygwin { resize(*comps, 4); comps[2] = "windows"; comps[3] = "cygnus"; }
+    if is_mingw || is_cygwin || (os == .Win32 && env != .UnknownEnvironment) {
+        if objf != .UnknownObjectFormat && objf != .COFF { resize(*comps, 5); comps[4] = fmt_names[cast(int) objf]; }
+    }
+    if comps[0] == "dxil" fatal("Triple::normalize of a DXIL triple is not supported yet");
+    if comps.count > 2 && comps[2] == "firmware" && comps[1] != "apple" fatal("the firmware target os is only supported for the apple vendor");
+    sb: String_Builder; sb.allocator = temp;
+    for comps { if it_index > 0 append(*sb, "-"); append(*sb, it); }
+    return builder_to_string(*sb);
+}

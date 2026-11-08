@@ -4565,6 +4565,7 @@ tests/imported/llvm/Transforms/InstCombine/divceil.ll::opt
 tests/imported/llvm/Transforms/InstCombine/divceil.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/dont-distribute-phi.ll::opt
 tests/imported/llvm/Transforms/InstCombine/dont-distribute-phi.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/double-float-shrink-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/double-float-shrink-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/drop-callee-type-metadata.ll::opt
 tests/imported/llvm/Transforms/InstCombine/drop-callee-type-metadata.ll::roundtrip
@@ -4634,6 +4635,7 @@ tests/imported/llvm/Transforms/InstCombine/fdiv-sqrt.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fdiv-sqrt.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fdiv.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fdiv.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/ffs-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/ffs-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/float-shrink-compare.ll::opt
 tests/imported/llvm/Transforms/InstCombine/float-shrink-compare.ll::roundtrip
@@ -5535,6 +5537,7 @@ tests/imported/llvm/Transforms/InstCombine/phi.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pow-0.ll::opt
 tests/imported/llvm/Transforms/InstCombine/pow-0.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/pow-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/pow-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pow-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/pow-2.ll::roundtrip
@@ -6675,6 +6678,7 @@ tests/imported/llvm/Transforms/InstCombine/weak-symbols.ll::opt
 tests/imported/llvm/Transforms/InstCombine/weak-symbols.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/widenable-conditions.ll::opt
 tests/imported/llvm/Transforms/InstCombine/widenable-conditions.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/win-math.ll::opt
 tests/imported/llvm/Transforms/InstCombine/win-math.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/with_overflow.ll::opt
 tests/imported/llvm/Transforms/InstCombine/with_overflow.ll::roundtrip
