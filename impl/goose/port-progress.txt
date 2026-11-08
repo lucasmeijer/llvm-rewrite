@@ -1,2 +1,20 @@
 # Fractions for LLVM files named in src/ headers but only partly ported (see scripts/port-progress.py).
 # Format: lib/<path>.cpp <fraction 0.0-1.0>
+lib/Transforms/Utils/SimplifyCFG.cpp 0.9
+lib/Transforms/Scalar/SimplifyCFGPass.cpp 0.95
+lib/Transforms/Utils/BasicBlockUtils.cpp 0.25
+lib/Transforms/Utils/Local.cpp 0.4
+lib/Analysis/TargetTransformInfo.cpp 0.15
+lib/Analysis/CFG.cpp 0.2
+lib/Analysis/Loads.cpp 0.3
+lib/Analysis/ValueTracking.cpp 0.6
+lib/IR/Value.cpp 0.3
+lib/IR/Instruction.cpp 0.4
+lib/IR/Instructions.cpp 0.05
+lib/IR/ProfDataUtils.cpp 0.4
+lib/IR/MDBuilder.cpp 0.1
+lib/Target/X86/X86TargetTransformInfo.cpp 0.3
+lib/Target/X86/X86ISelLowering.cpp 0.01
+lib/Target/X86/X86Subtarget.cpp 0.2
+lib/Target/X86/X86TargetMachine.cpp 0.2
+lib/CodeGen/TargetLoweringBase.cpp 0.1
