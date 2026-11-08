@@ -10,6 +10,7 @@ import intrinsics;
 import dinfo;
 import gen_dwarf;
 import constfold;
+import datalayout;
 import gen_cc;
 
 var out: u8[>..];
@@ -1962,7 +1963,7 @@ fn print_inst(iv: i32) {
         let ra = alist_ret(al);
         if ra != 0 { putc(' '); put_attr_set(ra, false); }
         let cas = types[vals[callee].ty].n;
-        if opc != OP_CALLBR && cas != 0 { put(" addrspace("); put_int(cas as i64); putc(')'); }
+        if opc != OP_CALLBR && (cas != 0 || dl_prog_as != 0) { put(" addrspace("); put_int(cas as i64); putc(')'); }
         putc(' ');
         put_type(if ty_fn_vararg(fty) { fty } else { ty_fn_ret(fty) });
         putc(' ');

@@ -13,6 +13,7 @@ var dl_struct_abi: i64 = 1;
 var dl_struct_pref: i64 = 8;
 var dl_stack_align: i64 = 0;
 var dl_vec_elem_aligned: bool = false;
+var dl_prog_as: i64 = 0;      // P<n>: program address space (functions, calls)
 
 fn dl_set_spec(xs: PrimSpec[>..<]&, bits: i64, abi: i64, pref: i64) {
     for &s in xs { if s.bits == bits { s.abi = abi; s.pref = pref; return; } }
@@ -43,6 +44,7 @@ fn dl_reset() {
     dl_ptrs.push(PtrSpec { as_: 0, bits: 64, abi: 8, pref: 8, idx: 64 });
     dl_struct_abi = 1;
     dl_struct_pref = 8;
+    dl_prog_as = 0;
 }
 
 fn parse_num(s: const u8[:]) -> i64 {
@@ -98,6 +100,8 @@ fn dl_parse(s: const u8[:]) {
             var found = false;
             for &p in dl_ptrs { if p.as_ == as_ { p.bits = bits; p.abi = abi; p.pref = pref; p.idx = idx; found = true; } }
             if !found { dl_ptrs.push(PtrSpec { as_: as_, bits: bits, abi: abi, pref: pref, idx: idx }); }
+        } else if c == 'P' {
+            dl_prog_as = parse_num(part[1..]);
         } else if c == 'S' {
             dl_stack_align = parse_num(part[1..]) / 8;
         }

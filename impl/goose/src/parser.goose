@@ -811,7 +811,7 @@ recursive fn parse_constant(ty: i32) -> i32 {
             if tk != T_STR { perr("expected constraint string"); }
             let c = tstr_id();
             lex();
-            return get_inline_asm(ty, a, c, side, als, intel, unw);
+            return get_inline_asm(T_PTR, a, c, side, als, intel, unw);   // InlineAsm values have type ptr (addrspace 0)
         }
         // constant expressions (LLParser::parseValID): created through ConstantExpr::get*, which fold
         let cop = cast_from_kw(w);
@@ -1895,7 +1895,7 @@ fn parse_function(is_define: bool) {
     // unnamed_addr, addrspace, fn attrs, section, comdat, align, gc, prefix, prologue, personality
     var unnamed: i64 = 0;
     if tok_is("unnamed_addr") { unnamed = 2; lex(); } else if tok_is("local_unnamed_addr") { unnamed = 1; lex(); }
-    var fas: i64 = 0;
+    var fas: i64 = dl_prog_as;
     if tok_is("addrspace") { lex(); fas = parse_paren_uint(); }
     // create the function now (attribute group refs need its id)
     let v = new_glob(VK_FUNC, ty_ptr(fas), -1, 0);
@@ -2595,7 +2595,7 @@ fn parse_call_like(opc: i64, tkind: u8) -> i32 {
     if opc == OP_CALL { fm = parse_fmf(); }
     let cc = parse_cc();
     let retattrs = parse_param_attrs();
-    var cas: i64 = 0;
+    var cas: i64 = dl_prog_as;
     if opc != OP_CALLBR && tok_is("addrspace") { lex(); cas = parse_paren_uint(); }
     let t = parse_type();
     let mark = vstack.len;      // args, then bundle operands, then destinations
