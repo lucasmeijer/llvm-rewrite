@@ -283,9 +283,9 @@ fn tf_intrinsic(id: i64, argsv: const i32[:], rty: i32) -> i32 {
     var cx = icb_pos;
     if cx < 0 { cx = block_last(icb_bb); }
     var r: i32 = -1;
-    if ty_kind(rty) == TK_FVEC { r = cf_fold_fixed_vector_call(cx, id as i32, rty, mark, argsv.len); }
-    else if ty_kind(rty) == TK_SVEC { ic_not_ported("folding a scalable vector intrinsic in the builder"); }
-    else { r = cf_fold_scalar_call(cx, id as i32, rty, mark, argsv.len); }
+    // TargetFolder::FoldIntrinsic = ConstantFoldIntrinsic = ConstantFoldScalarCall only (vector-typed calls are
+    // not folded by the builder; InstCombine folds the created call when it visits it)
+    r = cf_fold_scalar_call(cx, id as i32, rty, mark, argsv.len);
     is_ops.resize(mark);
     return r;
 }

@@ -1,5 +1,5 @@
 // InstCombine x86 target intrinsics: port of llvm/lib/Target/X86/X86InstCombineIntrinsic.cpp
-// (X86TTIImpl::instCombineIntrinsic, simplifyDemandedUseBitsIntrinsic, simplifyDemandedVectorEltsIntrinsic).
+// (simplifyDemandedUseBitsIntrinsic, simplifyDemandedVectorEltsIntrinsic; instCombineIntrinsic is ic_x86_intr.goose).
 namespace ic;
 import std;
 import ir;
@@ -16,12 +16,10 @@ import ic_common;
 import ic_demanded_elts;
 import ic_calls;
 import tti;
+import ic_x86_intr;
 
 // X86TTIImpl::instCombineIntrinsic(IC, II): (result, handled)
-fn x86_inst_combine_intrinsic(ii: i32) -> i32, bool {
-    ic_not_ported(str("X86TTIImpl::instCombineIntrinsic (", intr_name(call_iid(ii) as i64), ")"));
-    return -1, false;
-}
+fn x86_inst_combine_intrinsic(ii: i32) -> i32, bool { let r, h = x86_inst_combine_intrinsic_impl(ii); return r, h; }
 
 // The function's module has an x86 triple (TTIForTargetIntrinsicsOnly is X86TTIImpl); a non-x86 target triple
 // fails loudly, no triple is the NoTTIImpl (no target folds).
