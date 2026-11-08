@@ -6579,6 +6579,7 @@ tests/imported/llvm/Transforms/LoopRotate/preserve-loop-simplify.ll::roundtrip
 tests/imported/llvm/Transforms/LoopRotate/preserve-mssa.ll::opt
 tests/imported/llvm/Transforms/LoopRotate/preserve-mssa.ll::roundtrip
 tests/imported/llvm/Transforms/LoopRotate/preserve-scev.ll::roundtrip
+tests/imported/llvm/Transforms/LoopRotate/rotate-exitcount.ll::opt
 tests/imported/llvm/Transforms/LoopRotate/rotate-exitcount.ll::roundtrip
 tests/imported/llvm/Transforms/LoopRotate/scev-block-and-loop-disposition-cache-invalidation.ll::roundtrip
 tests/imported/llvm/Transforms/LoopRotate/simplifylatch.ll::roundtrip

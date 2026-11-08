@@ -70,6 +70,7 @@
 #load "scev_guards.jai";
 #load "scev_pred.jai";
 #load "scev_print.jai";
+#load "scev_update.jai";
 
 main :: () { opt_main(); }
 

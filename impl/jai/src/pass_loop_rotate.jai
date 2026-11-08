@@ -607,6 +607,7 @@ rewrite_uses_of_cloned_instructions :: (orig_header: Value_Id, orig_ph: Value_Id
         found, pre := table_find(vm, v);
         if !found pre = NONE;
         ssa_init(*ssa, vtype(v), vname(v));
+        pse_forget_value(v);   // if (SE) SE->forgetValue(OrigHeaderVal)
         ssa_add_available(*ssa, orig_header, v);
         ssa_add_available(*ssa, orig_ph, pre);
         u := ir.v_first_use[v];
@@ -650,7 +651,11 @@ profitable_to_rotate_loop_exiting_latch :: (li: *Loop_Info, l: Loop_Id, check_ex
         if other continue;
         return true;
     }
-    if check_exit_count fatal("loop-rotate<check-exit-count> needs ScalarEvolution (getExitCount), which is not implemented yet");
+    // if (SE && isa<SCEVCouldNotCompute>(SE->getExitCount(L, Latch)) && !isa<...>(SE->getExitCount(L, Header)))
+    if check_exit_count && scev_pass_se {
+        se = scev_pass_se;
+        if sc_get_exit_count(l, li_loop_latch(li, l)) == SCEV_CNC && sc_get_exit_count(l, header) != SCEV_CNC return true;
+    }
     return false;
 }
 
@@ -772,6 +777,8 @@ lr_rotate_loop :: (lr: *Loop_Rotate, l: Loop_Id, simplified_latch: bool) -> bool
     }
     orig_ph := li_loop_preheader(li, l);
     if orig_ph == NONE || !li_has_dedicated_exits(li, l) return false;
+    pse_forget_topmost_loop(l);                  // if (SE) { SE->forgetTopmostLoop(L);
+    pse_forget_block_and_loop_dispositions();    //           SE->forgetBlockAndLoopDispositions(); }
 
     exit := get_successor(bi, 0);
     new_header := get_successor(bi, 1);
@@ -977,6 +984,7 @@ lr_simplify_loop_latch :: (lr: *Loop_Rotate, l: Loop_Id) -> bool {
     if lo != .BR && lo != .CONDBR return false;
     if !should_speculate_instrs(li, l, block_first(latch), jmp) return false;
     merge_block_into_predecessor(latch, lr.dt, li, lr.mssau, true);
+    pse_forget_block_and_loop_dispositions();   // if (SE) SE->forgetBlockAndLoopDispositions()
     return true;
 }
 

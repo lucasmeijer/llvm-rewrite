@@ -324,6 +324,7 @@ sc_get_range_ref :: (s: Scev_Id, signed: bool, depth: u32 = 0) -> Const_Range {
                         // SCEVAddRecExpr::setNoWrapFlags (the caches are not cleared)
                         f := flags;
                         if f & (SF_NUW | SF_NSW) f |= SF_NW;
+                        if SCEV_DEBUG && (sc_row(add_rec).flags | f) != sc_row(add_rec).flags print("range flags % += %\n", sc_to_string(add_rec), f);
                         sc_row(add_rec).flags |= f;
                         range_from_factoring := sc_get_range_via_factoring(sc_start(add_rec), sc_step_recurrence(add_rec), max_be_count);
                         conservative = cr_intersect(conservative, range_from_factoring, range_type);

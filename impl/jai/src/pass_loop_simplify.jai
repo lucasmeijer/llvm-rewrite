@@ -97,6 +97,7 @@ separate_nested_loop :: (li: *Loop_Info, l: Loop_Id, preheader: Value_Id, dt: *D
             array_add(*outer_preds, phi_block(pn, k));
         }
     }
+    pse_forget_loop(l);   // if (SE) SE->forgetLoop(L)
     nb := split_block_predecessors(header, outer_preds, ".outer", dt, li, mssau, preserve_lcssa);
     place_split_block_carefully(li, nb, outer_preds, l);
 
@@ -352,6 +353,7 @@ li_make_loop_invariant :: (li: *Loop_Info, l: Loop_Id, v: Value_Id, changed: *bo
     keep_prof := original_parent == li_header(li, l);
     drop_ub_implying_attrs_and_unknown_metadata(i, keep_prof);
     if !keep_prof && inst_op(i) == .SELECT set_explicitly_unknown_branch_weights_if_profiled(i, "LoopInfo");
+    pse_forget_block_and_loop_dispositions(i);   // if (SE) SE->forgetBlockAndLoopDispositions(I)
     changed.* = true;
     return true;
 }
@@ -503,6 +505,7 @@ simplify_one_loop :: (li: *Loop_Info, l: Loop_Id, worklist: *[..] Loop_Id, dt: *
             i = inst_next(i);
             v := ls_simplify_phi(pn, dt, ac);
             if v != NONE {
+                pse_forget_value(pn);   // if (SE) SE->forgetValue(PN)
                 if !preserve_lcssa || li_replacement_preserves_lcssa_form(li, pn, v) {
                     rauw_with_metadata(pn, v);
                     erase_inst_with_metadata(pn);
@@ -761,6 +764,7 @@ simplify_loop :: (li: *Loop_Info, l: Loop_Id, dt: *Dom_Tree, ac: *Assumption_Cac
         x := pop(*worklist);
         changed |= simplify_one_loop(li, x, *worklist, dt, ac, mssau, preserve_lcssa);
     }
+    if changed pse_forget_topmost_loop(l);   // if (Changed && SE) SE->forgetTopmostLoop(L)
     return changed;
 }
 
@@ -768,6 +772,9 @@ simplify_loop :: (li: *Loop_Info, l: Loop_Id, dt: *Dom_Tree, ac: *Assumption_Cac
 loop_simplify_run :: (f: Value_Id) -> Preserved {
     li := get_loop_info(f);
     dt := get_domtree(f);
+    saved_se := scev_pass_se;
+    scev_pass_se = cached_scev(f);   // AM.getCachedResult<ScalarEvolutionAnalysis>(F)
+    defer scev_pass_se = saved_se;
     ac := get_assumption_cache(f);
     mssa := cached_memoryssa(f);
     mssau_storage: Mssa_Updater;
@@ -781,6 +788,7 @@ loop_simplify_run :: (f: Value_Id) -> Preserved {
     pa: Preserved;
     preserve(*pa, .DOMTREE);
     preserve(*pa, .LOOPS);
+    preserve(*pa, .SCEV);
     if mssa preserve(*pa, .MEMORYSSA);
     return pa;
 }

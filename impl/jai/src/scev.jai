@@ -99,6 +99,7 @@ Pred_Rewrite :: struct { s: Scev_Id; preds: [..] u32; }
 Loop_Properties :: struct { has_no_abnormal_exits: bool; has_no_side_effects: bool; }
 
 se: *Scev_State;
+SCEV_DEBUG := false;
 
 // cl::opts (ScalarEvolution.cpp), see passes.jai cl_opts()
 scev_opts: struct {
@@ -120,6 +121,7 @@ scev_opts: struct {
     use_expensive_range_sharpening: bool;          // scalar-evolution-use-expensive-range-sharpening
     max_phi_scc_analysis_size: u64 = 8;            // scalar-evolution-max-scc-analysis-depth
     use_context_for_no_wrap_flag_inference: bool = true;  // scalar-evolution-use-context-for-no-wrap-flag-inference
+    debug_flags: bool;                             // -scev-debug-flags (ours, for debugging)
 };
 
 // ---------------------------------------------------------------- state
@@ -1808,6 +1810,7 @@ get_or_create_mul :: (ops: [] Scev_Id, flags: u8) -> Scev_Id {
 sc_set_no_wrap_flags :: (ar: Scev_Id, flags_in: u8) {
     flags := flags_in;
     if sc_flags(ar, flags) != flags {
+        if SCEV_DEBUG print("setNoWrapFlags % += %\n", sc_to_string(ar), flags);
         if flags & (SF_NUW | SF_NSW) flags |= SF_NW;
         sc_row(ar).flags |= flags;
         table_remove(*se.unsigned_ranges, ar);

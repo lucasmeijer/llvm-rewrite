@@ -9,8 +9,8 @@
 // one LoopPassManager) and LOOP_PM (a nested `loop(...)` inside a loop pipeline). A loop pass is a Pass_Kind with
 // level LOOP and a `case` in run_loop_pass. There are no loop-level analyses yet, so LAM invalidation is empty.
 //
-// LoopStandardAnalysisResults has no ScalarEvolution here (none is ported); loop passes that would query SCEV
-// must fail loudly.
+// LoopStandardAnalysisResults carries the function's ScalarEvolution (lar.se, AM.getResult in the adaptor);
+// run_loop_pass also makes it `scev_pass_se`, the SE that the shared utilities (LoopSimplify, LCSSA) update.
 
 // SmallPriorityWorklist<Loop *, 4>: a vector with NONE holes plus a map from loop to its index
 Loop_Worklist :: struct {
@@ -117,6 +117,7 @@ Loop_Std_Results :: struct {
     ac: *Assumption_Cache;
     dt: *Dom_Tree;
     li: *Loop_Info;
+    se: *Scev_State;   // ScalarEvolution
     mssa: *Memory_SSA;
 }
 
@@ -125,6 +126,7 @@ loop_pass_preserved :: () -> Preserved {
     pa: Preserved;
     preserve(*pa, .DOMTREE);
     preserve(*pa, .LOOPS);
+    preserve(*pa, .SCEV);
     return pa;
 }
 
@@ -181,6 +183,10 @@ run_loop_pm :: (n: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater) -> 
 
 run_loop_pass :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater) -> Preserved {
     node := *pipeline.nodes[idx];
+    saved_se := scev_pass_se;
+    scev_pass_se = lar.se;
+    se = lar.se;
+    defer scev_pass_se = saved_se;
     if node.kind == {
         case .LOOP_PM; return run_loop_pm(idx, l, lar, u);
         case .NO_OP_LOOP; return PRESERVE_ALL;
@@ -214,6 +220,7 @@ run_loop_adaptor :: (n: s32, f: Value_Id) -> Preserved {
     lar.ac = get_assumption_cache(f);
     lar.dt = get_domtree(f);
     lar.li = get_loop_info(f);
+    lar.se = get_scev(f);
 
     w: Loop_Worklist;
     lwl_init(*w);
@@ -231,6 +238,7 @@ run_loop_adaptor :: (n: s32, f: Value_Id) -> Preserved {
     }
     preserve(*pa, .DOMTREE);
     preserve(*pa, .LOOPS);
+    preserve(*pa, .SCEV);
     if use_mssa preserve(*pa, .MEMORYSSA);
     return pa;
 }

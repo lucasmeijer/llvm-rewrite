@@ -143,8 +143,10 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     if e.mssa && (!analysis_survives(.MEMORYSSA, pa) || !e.dt || !e.ac) { mssa_free(e.mssa); e.mssa = null; }
     // a DemandedBits result points at the DominatorTree it was built with
     if e.db && !e.dt { db_free(e.db); e.db = null; }
-    // ScalarEvolution::invalidate: not preserved, or AssumptionCache / DominatorTree / LoopInfo invalidated
-    if e.se && (!analysis_survives(.SCEV, pa) || !e.ac || !e.dt || !e.li) { scev_free(e.se); e.se = null; }
+    // ScalarEvolution::invalidate: not preserved, or DominatorTree / LoopInfo invalidated. (The AssumptionCache
+    // never invalidates itself in LLVM; here it is rebuilt, so a surviving ScalarEvolution gets the new one.)
+    if e.se && (!analysis_survives(.SCEV, pa) || !e.dt || !e.li) { scev_free(e.se); e.se = null; }
+    if e.se && !e.ac { e.ac = ac_build(f); e.se.ac = e.ac; }
 }
 fam_require :: (f: Value_Id, k: Analysis_Kind) {
     if k == {

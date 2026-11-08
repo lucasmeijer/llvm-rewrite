@@ -209,6 +209,7 @@ scev_print_function :: (f: Value_Id, sb: *String_Builder) {
 
 // ScalarEvolutionPrinterPass::run
 scev_printer_run :: (f: Value_Id) {
+    SCEV_DEBUG = scev_opts.debug_flags;
     sb: String_Builder; sb.allocator = temp;
     print_to_builder(*sb, "Printing analysis 'Scalar Evolution Analysis' for function '%':\n", vname(f));
     get_scev(f);
@@ -229,7 +230,7 @@ scev_verify :: () {
     fatal("ScalarEvolution::verify (verify<scalar-evolution>, -verify-scev) is not implemented yet");
 }
 
-SCEV_CL_OPT_COUNT :: 17;
+SCEV_CL_OPT_COUNT :: 18;
 add_scev_cl_opts :: (list: [] Cl_Opt, start: s64) {
     o := *scev_opts;
     entries := Cl_Opt.[
@@ -269,4 +270,5 @@ add_scev_cl_opts :: (list: [] Cl_Opt, start: s64) {
     list[start + 14].b = *o.classify_expressions;
     list[start + 15].b = *o.use_expensive_range_sharpening;
     list[start + 16].b = *o.use_context_for_no_wrap_flag_inference;
+    list[start + 17] = .{"scev-debug-flags", .BOOL, *o.debug_flags, null, null};   // not an LLVM option: traces flag changes
 }

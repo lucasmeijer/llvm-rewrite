@@ -575,6 +575,7 @@ drop_all_references :: (user: Value_Id) {
 // Constant users are re-uniqued like Constant::handleOperandChange.
 replace_all_uses_with :: (old: Value_Id, new: Value_Id) {
     ac_note_rauw(old, new);   // AssumptionCache's AffectedValueCallbackVH::allUsesReplacedWith
+    scev_note_rauw(old, new); // ScalarEvolution's SCEVCallbackVH / SCEVUnknown::allUsesReplacedWith (scev_update.jai)
     while ir.v_first_use[old] != NONE {
         u := ir.v_first_use[old];
         user := ir.u_user[u];
@@ -722,6 +723,7 @@ inst_unlink :: (i: Value_Id) {
 
 erase_inst :: (i: Value_Id) {
     assert(!has_uses(i), "erasing an instruction that still has uses");
+    scev_note_erase(i);   // ScalarEvolution's value handles (scev_update.jai)
     // Instruction::handleMarkerRemoval / DbgMarker::removeMarker: debug records move to the front of the next
     // instruction's records
     if inst(i).records {

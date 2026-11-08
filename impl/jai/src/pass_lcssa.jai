@@ -80,6 +80,8 @@ form_lcssa_for_instructions :: (worklist: *[..] Value_Id, dt: *Dom_Tree, li: *Lo
         ssa: Ssa_Updater;
         ssa_init(*ssa, vtype(i), vname(i));
         ssa.inserted_phis = *local_inserted;
+        has_scev := false;
+        if scev_pass_se { se = scev_pass_se; has_scev = sc_is_scevable(vtype(i)) && sc_get_existing(i) != SCEV_CNC; }
 
         for exit_bb: exits {
             if !dt_dominates_nodes(dt, dom_node, dt_node(dt, exit_bb)) continue;
@@ -97,6 +99,7 @@ form_lcssa_for_instructions :: (worklist: *[..] Value_Id, dt: *Dom_Tree, li: *Lo
             ssa_add_available(*ssa, exit_bb, pn);
             ol := li_loop_for(li, exit_bb);
             if ol != NONE && !li_contains_loop(li, l, ol) array_add(*post_process, pn);
+            if has_scev { se = scev_pass_se; sc_get_scev(pn); }   // if (HasSCEV) SE->getSCEV(PN)
         }
 
         for use: uses_to_rewrite {
@@ -212,6 +215,9 @@ form_lcssa_recursively :: (li: *Loop_Info, l: Loop_Id, dt: *Dom_Tree) -> bool {
 lcssa_run :: (f: Value_Id) -> Preserved {
     li := get_loop_info(f);
     dt := get_domtree(f);
+    saved_se := scev_pass_se;
+    scev_pass_se = cached_scev(f);   // AM.getCachedResult<ScalarEvolutionAnalysis>(F)
+    defer scev_pass_se = saved_se;
     changed := false;
     k := 0;
     while k < li.top_level.count {
@@ -221,5 +227,6 @@ lcssa_run :: (f: Value_Id) -> Preserved {
     if !changed return PRESERVE_ALL;
     pa := preserved_cfg();
     preserve(*pa, .MEMORYSSA);
+    preserve(*pa, .SCEV);
     return pa;
 }
