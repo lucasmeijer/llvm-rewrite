@@ -1038,6 +1038,23 @@ fn x86_cvt_info(id: i32) -> i64, bool, bool {
     if id == IID_x86_avx512_cvttss2usi || id == IID_x86_avx512_cvttss2usi64 || id == IID_x86_avx512_cvttsd2usi || id == IID_x86_avx512_cvttsd2usi64 { return 2, true, false; }
     return 0, false, false;
 }
+// isa<ConstantFP> on a vector operand: LLVM 23 makes FP splats (and the FP null vector) vector-typed
+// ConstantFPs; here they are CDVECTOR/CVECTOR with equal elements, or AGGZERO.
+fn cf_is_vector_constant_fp(v: i32) -> bool {
+    let t = vals[v].ty;
+    if !ty_is_vector(t) || !ty_is_fp(ty_scalar(t)) { return false; }
+    let k = vals[v].kind;
+    if k == VK_CFP || k == VK_AGGZERO { return true; }
+    if k == VK_CDVECTOR || k == VK_CVECTOR {
+        let n = vals[v].nops as i64;
+        if n == 0 { return false; }
+        let first = op(v, 0);
+        if vals[first].kind != VK_CFP { return false; }
+        for i in 1..n { if op(v, i) != first { return false; } }
+        return true;
+    }
+    return false;
+}
 fn is_x86_cvt_iid(id: i32) -> bool {
     let k, rtz, sg = x86_cvt_info(id);
     return k != 0;
@@ -1199,6 +1216,8 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
             }
             let xk, rtz, sg = x86_cvt_info(id);
             if xk == 1 {
+                // a vector ConstantFP goes through ConstantFoldScalarCall1's ConstantFP case (no x86 folds)
+                if cf_is_vector_constant_fp(a) { return -1; }
                 let e = c_aggregate_element(a, 0);
                 if e >= 0 && vals[e].kind == VK_CFP { return cf_sse_convert_to_int(e, ty, rtz, sg); }
                 return -1;
@@ -1213,7 +1232,7 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
         if xk == 2 {
             // ConstantVector / ConstantDataVector operand and the default rounding mode (4)
             let vk = vals[a].kind;
-            if (vk == VK_CVECTOR || vk == VK_CDVECTOR) && vals[b].kind == VK_CINT && ap_eq(ci_ap(b), ap_u64(4, ty_bits(vals[b].ty))) {
+            if (vk == VK_CVECTOR || vk == VK_CDVECTOR) && !cf_is_vector_constant_fp(a) && vals[b].kind == VK_CINT && ap_eq(ci_ap(b), ap_u64(4, ty_bits(vals[b].ty))) {
                 let e = c_aggregate_element(a, 0);
                 if e >= 0 && vals[e].kind == VK_CFP { return cf_sse_convert_to_int(e, ty, rtz, sg); }
             }
