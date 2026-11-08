@@ -502,6 +502,8 @@ Sc_Visitor_Kind :: enum u8 {
     POISON_COLLECTOR;        // SCEVPoisonCollector                            (scev_implied.jai)
     USED_LOOPS;              // getUsedLoops's FindUsedLoops                   (scev_implied.jai)
     INVALIDATION_ROOTS;      // forgetLcssaPhiWithNewPredecessor's InvalidationRootCollector (scev_update.jai)
+    CONTAINS_UNSAFE_UDIV_FOR_HOIST;  // SCEVExpander::expand's SafeToHoist predicate         (scev_expander.jai)
+    FIND_UNSAFE_EXPAND;      // SCEVExpander's SCEVFindUnsafe                  (scev_expander.jai)
 }
 Sc_Visitor :: struct {
     kind: Sc_Visitor_Kind;
@@ -513,6 +515,7 @@ Sc_Visitor :: struct {
     loops: *[..] Loop_Id;         // USED_LOOPS
     l: Loop_Id = NONE;            // INVALIDATION_ROOTS
     roots: *[..] Scev_Id;         // INVALIDATION_ROOTS
+    canonical_mode: bool;         // FIND_UNSAFE_EXPAND (found = IsUnsafe)
 }
 // follow()
 sc_visitor_follow :: (v: *Sc_Visitor, s: Scev_Id) -> bool {
@@ -533,6 +536,10 @@ sc_visitor_follow :: (v: *Sc_Visitor, s: Scev_Id) -> bool {
         case .POISON_COLLECTOR;       return sc_vis_poison_collector_follow(v, s);
         case .USED_LOOPS;             return sc_vis_used_loops_follow(v, s);
         case .INVALIDATION_ROOTS;     return sc_vis_invalidation_roots_follow(v, s);
+        case .CONTAINS_UNSAFE_UDIV_FOR_HOIST;
+            if !v.found v.found = sx_vis_unsafe_udiv_follow(s);
+            return !v.found;
+        case .FIND_UNSAFE_EXPAND;     return sx_vis_find_unsafe_follow(v, s);
     }
     return false;
 }
@@ -543,6 +550,8 @@ sc_visitor_is_done :: (v: *Sc_Visitor) -> bool {
         case .CONTAINS_UB_UDIV; #through;
         case .CONTAINS_OPERAND; #through;
         case .MIN_MAX_CONTAINS; #through;
+        case .CONTAINS_UNSAFE_UDIV_FOR_HOIST; #through;
+        case .FIND_UNSAFE_EXPAND; #through;
         case .CONST_IN_ADD_MUL_CHAIN; return v.found;
         case .POISON_COLLECTOR; #through;
         case .USED_LOOPS; #through;

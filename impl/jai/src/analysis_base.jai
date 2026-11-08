@@ -173,7 +173,6 @@ dt_dominates_inst_block :: (dt: *Dom_Tree, def: Value_Id, use_bb: Value_Id) -> b
     if !dt_is_reachable_from_entry(dt, def_bb) return false;
     if def_bb == use_bb return false;
     if inst_op(def) == .INVOKE return dt_dominates_edge_block(dt, def_bb, get_successor(def, 0), use_bb);
-    if inst_op(def) == .CALLBR fatal("dominance queries on callbr results are not supported yet");
     return dt_dominates(dt, def_bb, use_bb);
 }
 // DominatorTree::dominates(const BasicBlockEdge &BBE, const BasicBlock *UseBB)

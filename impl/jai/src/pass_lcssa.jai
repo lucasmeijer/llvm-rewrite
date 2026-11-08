@@ -30,8 +30,9 @@ ssa_rewrite_use :: (s: *Ssa_Updater, u: Use_Id) {
 
 // dbgr_replace_variable_location_op (DbgVariableRecord::replaceVariableLocationOp) is in salvage_debug.jai
 
-// formLCSSAForInstructionsImpl (PHIsToRemove = InsertedPHIs = nullptr)
-form_lcssa_for_instructions :: (worklist: *[..] Value_Id, dt: *Dom_Tree, li: *Loop_Info, cache: *Lcssa_Exit_Cache) -> bool {
+// formLCSSAForInstructionsImpl (PHIsToRemove / InsertedPHIs may be null)
+form_lcssa_for_instructions :: (worklist: *[..] Value_Id, dt: *Dom_Tree, li: *Loop_Info, cache: *Lcssa_Exit_Cache,
+                                phis_to_remove: *[..] Value_Id = null, inserted_phis: *[..] Value_Id = null) -> bool {
     uses_to_rewrite: [..] Use_Id; uses_to_rewrite.allocator = temp;
     local_phis_to_remove: [..] Value_Id; local_phis_to_remove.allocator = temp;   // SmallSetVector
     changed := false;
@@ -80,6 +81,7 @@ form_lcssa_for_instructions :: (worklist: *[..] Value_Id, dt: *Dom_Tree, li: *Lo
             pn := create_phi(vtype(i), cast(u32) preds.count);
             insert_at_position(pn, exit_bb, block_first(exit_bb), true);
             set_name(pn, tprint("%.lcssa", vname(i)));
+            if inserted_phis array_add(inserted_phis, pn);
             copy_debug_loc(pn, i);
             for p: preds {
                 phi_add_incoming(pn, i, p);
@@ -124,6 +126,7 @@ form_lcssa_for_instructions :: (worklist: *[..] Value_Id, dt: *Dom_Tree, li: *Lo
         for ip: local_inserted {
             ol := li_loop_for(li, inst_block(ip));
             if ol != NONE && !li_contains_loop(li, l, ol) array_add(*post_process, ip);
+            if inserted_phis array_add(inserted_phis, ip);
         }
         for post_process if has_uses(it) array_add(worklist, it);
         for pn: added_phis {
@@ -134,7 +137,8 @@ form_lcssa_for_instructions :: (worklist: *[..] Value_Id, dt: *Dom_Tree, li: *Lo
         }
         changed = true;
     }
-    for local_phis_to_remove if !has_uses(it) erase_inst_with_metadata(it);
+    if phis_to_remove { for local_phis_to_remove array_add(phis_to_remove, it); }
+    else for local_phis_to_remove if !has_uses(it) erase_inst_with_metadata(it);
     return changed;
 }
 

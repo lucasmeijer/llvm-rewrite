@@ -190,7 +190,7 @@ Pass_Kind :: enum u8 {
     // loops (loop_info.jai, cycle_info.jai)
     PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
     // loop passes (loop_pm.jai)
-    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM;
+    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS;
     // ScalarEvolution (scev_print.jai)
     PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS;
     // TargetTransformInfo (tti.jai)
@@ -271,6 +271,7 @@ PASS_TABLE :: Pass_Info.[
     .{"loop-rotate", .LOOP, .LOOP_ROTATE, false, .DOMTREE},
     .{"licm", .LOOP, .LICM, false, .DOMTREE},
     .{"lnicm", .LOOP, .LNICM, false, .DOMTREE},   // a LoopNest pass
+    .{"indvars", .LOOP, .INDVARS, false, .DOMTREE},
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
@@ -584,7 +585,8 @@ cl_data_layout: string;                  // opt -data-layout (overrides the modu
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT + GVN_CL_OPT_COUNT + DSE_CL_OPT_COUNT + MCO_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT + GVN_CL_OPT_COUNT + DSE_CL_OPT_COUNT + MCO_CL_OPT_COUNT + INDVARS_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    add_indvars_cl_opts(list, list.count - INDVARS_CL_OPT_COUNT);
     add_gvn_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT);
     add_dbgify_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT);
     add_licm_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT);
@@ -619,6 +621,7 @@ parse_cl_opt :: (arg: string) -> bool {
     eq := find_index_from_left(a, #char "=");
     if eq >= 0 { name = slice(a, 0, eq); value = slice(a, eq + 1, a.count - eq - 1); has_value = true; }
     if tli_parse_cl_opt(name, value, has_value) return true;   // tli.jai: -disable-builtin, libcall simplifier options
+    if parse_replexitval(name, value, has_value) return true;   // pass_indvars.jai
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {

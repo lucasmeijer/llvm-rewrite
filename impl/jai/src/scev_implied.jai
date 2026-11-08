@@ -972,3 +972,94 @@ sc_is_implied_cond_operands_via_ranges :: (pred: u8, lhs: Scev_Id, rhs: Scev_Id,
     const_rhs := sc_ap(rhs);
     return cr_icmp(lhs_range, pred, cr_single(const_rhs));
 }
+
+// ---------------------------------------------------------------- loop-invariant predicates (IndVarSimplify)
+
+// evaluatePredicateAt: (known, value)
+sc_evaluate_predicate_at :: (pred: u8, lhs: Scev_Id, rhs: Scev_Id, cxt: Value_Id) -> (bool, bool) {
+    known, v := sc_evaluate_predicate(pred, lhs, rhs);
+    if known return true, v;
+    if sc_is_basic_block_entry_guarded_by_cond(inst_block(cxt), pred, lhs, rhs) return true, true;
+    if sc_is_basic_block_entry_guarded_by_cond(inst_block(cxt), icmp_inverse(pred), lhs, rhs) return true, false;
+    return false, false;
+}
+
+Monotonic_Kind :: enum u8 { NONE; INCREASING; DECREASING; }
+// getMonotonicPredicateType(Impl)
+sc_get_monotonic_predicate_type :: (lhs: Scev_Id, pred: u8) -> Monotonic_Kind {
+    if !icmp_is_relational(pred) return .NONE;
+    is_greater := icmp_is_ge(pred) || icmp_is_gt(pred);
+    if icmp_is_unsigned(pred) {
+        if !sc_has_nuw(lhs) return .NONE;
+        return ifx is_greater then Monotonic_Kind.INCREASING else .DECREASING;
+    }
+    if !sc_has_nsw(lhs) return .NONE;
+    step := sc_step_recurrence(lhs);
+    if sc_is_known_non_negative(step) return ifx is_greater then Monotonic_Kind.INCREASING else .DECREASING;
+    if sc_is_known_non_positive(step) return ifx !is_greater then Monotonic_Kind.INCREASING else .DECREASING;
+    return .NONE;
+}
+
+// LoopInvariantPredicate
+Loop_Inv_Pred :: struct { ok: bool; pred: u8; lhs: Scev_Id; rhs: Scev_Id; }
+
+// getLoopInvariantPredicate
+sc_get_loop_invariant_predicate :: (pred_in: u8, lhs_in: Scev_Id, rhs_in: Scev_Id, l: Loop_Id, cxt: Value_Id) -> Loop_Inv_Pred {
+    pred := pred_in; lhs := lhs_in; rhs := rhs_in;
+    if !sc_is_loop_invariant(rhs, l) {
+        if !sc_is_loop_invariant(lhs, l) return .{};
+        lhs, rhs = rhs, lhs;
+        pred = icmp_swapped(pred);
+    }
+    if !sc_is_addrec(lhs) || sc_loop(lhs) != l return .{};
+    mono := sc_get_monotonic_predicate_type(lhs, pred);
+    if mono == .NONE return .{};
+    p := ifx mono == .INCREASING then pred else icmp_inverse(pred);
+    if sc_is_loop_backedge_guarded_by_cond(l, p, lhs, rhs) return .{true, pred, sc_start(lhs), rhs};
+    if cxt == NONE return .{};
+    if pred == ICMP_ULE || pred == ICMP_ULT {
+        sign_flipped := icmp_flipped_signedness(pred);
+        if sc_has_nsw(lhs) && sc_is_affine(lhs) && sc_is_known_positive(sc_step_recurrence(lhs)) &&
+           sc_is_known_non_negative(rhs) && sc_is_known_predicate_at(sign_flipped, lhs, rhs, cxt)
+            return .{true, pred, sc_start(lhs), rhs};
+    }
+    return .{};
+}
+
+// getLoopInvariantExitCondDuringFirstIterations
+sc_get_loop_invariant_exit_cond_during_first_iterations :: (pred: u8, lhs: Scev_Id, rhs: Scev_Id, l: Loop_Id, cxt: Value_Id, max_iter: Scev_Id) -> Loop_Inv_Pred {
+    r := sc_get_loop_invariant_exit_cond_during_first_iterations_impl(pred, lhs, rhs, l, cxt, max_iter);
+    if r.ok return r;
+    if sc_kind(max_iter) == .UMIN {
+        ops := sc_operands(max_iter);
+        for o: ops {
+            r = sc_get_loop_invariant_exit_cond_during_first_iterations_impl(pred, lhs, rhs, l, cxt, o);
+            if r.ok return r;
+        }
+    }
+    return .{};
+}
+sc_get_loop_invariant_exit_cond_during_first_iterations_impl :: (pred_in: u8, lhs_in: Scev_Id, rhs_in: Scev_Id, l: Loop_Id, cxt: Value_Id, max_iter: Scev_Id) -> Loop_Inv_Pred {
+    pred := pred_in; lhs := lhs_in; rhs := rhs_in;
+    if !sc_is_loop_invariant(rhs, l) {
+        if !sc_is_loop_invariant(lhs, l) return .{};
+        lhs, rhs = rhs, lhs;
+        pred = icmp_swapped(pred);
+    }
+    if !sc_is_addrec(lhs) || sc_loop(lhs) != l return .{};
+    ar := lhs;
+    // Pred.dropSameSign(): predicates here carry no samesign bit
+    if !icmp_is_relational(pred) return .{};
+    step := sc_step_recurrence(ar);
+    one := sc_get_one(sc_type(step));
+    minus_one := sc_get_negative(one);
+    if step != one && step != minus_one return .{};
+    if sc_type(ar) != sc_type(max_iter) return .{};
+    last := evaluate_at_iteration(ar, max_iter);
+    if !sc_is_loop_backedge_guarded_by_cond(l, pred, last, rhs) return .{};
+    no_overflow: u8 = ifx icmp_is_signed(pred) then cast(u8) ICMP_SLE else ICMP_ULE;
+    if step == minus_one no_overflow = icmp_swapped(no_overflow);
+    start := sc_start(ar);
+    if !sc_is_known_predicate_at(no_overflow, start, last, cxt) return .{};
+    return .{true, pred, start, rhs};
+}

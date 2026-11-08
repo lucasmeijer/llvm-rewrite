@@ -193,6 +193,7 @@ run_loop_pass :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater)
         case .NO_OP_LOOP; return PRESERVE_ALL;
         case .LOOP_ROTATE; return loop_rotate_run(node, l, lar, u);
         case .LICM; return licm_run(node, l, lar, u);
+        case .INDVARS; return indvars_run(node, l, lar, u);
         case .LNICM;
             // a loop-nest pass runs on the LoopNest of the outermost loop containing L
             root := l;
