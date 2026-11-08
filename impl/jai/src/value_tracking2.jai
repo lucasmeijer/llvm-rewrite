@@ -1267,14 +1267,14 @@ has_poison_generating_annotations :: (v: Value_Id) -> bool {
     if has_poison_generating_flags(v) return true;
     if !is_inst(v) return false;
     if is_call_base(v) {
-        // CallBase::hasPoisonGeneratingReturnAttributes
-        r := attr_list_ret(inst(v).attrs);
-        f := call_called_function(v);
-        fr: u32 = 0;
-        if f != NONE fr = attr_list_ret(glob(f).attrs);
-        for k: Attr_Kind.[.Range, .Alignment, .NonNull] if attr_set_has(r, k) || attr_set_has(fr, k) return true;
+        // Instruction::hasPoisonGeneratingAttributes: the call site's return and parameter attributes only
+        has :: (s: u32) -> bool { for k: Attr_Kind.[.Range, .Alignment, .NonNull, .NoFPClass] if attr_set_has(s, k) return true; return false; }
+        if has(attr_list_ret(inst(v).attrs)) return true;
+        n := call_num_args(v);
+        if n > 0 for a: 0..n-1 if has(attr_list_param(inst(v).attrs, a)) return true;
     }
-    return inst_md(v, "range") != NONE || inst_md(v, "nonnull") != NONE || inst_md(v, "align") != NONE;
+    // Metadata::PoisonGeneratingIDs
+    return inst_md(v, "range") != NONE || inst_md(v, "nonnull") != NONE || inst_md(v, "align") != NONE || inst_md(v, "nofpclass") != NONE;
 }
 // Operator::hasPoisonGeneratingFlags
 has_poison_generating_flags :: (v: Value_Id) -> bool {
