@@ -746,3 +746,18 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   and `reassociate,reassociate -reassociate-use-cse-local=false`: 0 differs.
 - Perf (x64 build, `-disable-output`, no @perf benchmark times it): straightline n16000/n64000 0.23/0.87 s (LLVM
   0.035/0.16; parse+print alone 0.07/0.33): linear, the pass itself ~7x LLVM. sqlite3.ll +0.1 s over parsing.
+
+## ConstraintElimination (L1.constraint-elimination COMPLETE 208/208)
+
+- `pass_constraint_elimination.jai` ports ConstraintElimination.cpp except the reproducer
+  (`-constraint-elimination-dump-reproducers` fails loudly) and remarks; `constraint_system.jai` ports
+  ConstraintSystem.cpp (int64 checked arithmetic: `add_ov_s64`/`sub_ov_s64`/`mul_ov_s64`, reusable). The solver
+  copies the system for every query; `cs_is_condition_implied` releases those temp allocations with a
+  temporary-storage mark, so a function with thousands of checks doesn't keep every copy alive.
+- `gep_operator_collect_offset` is GEPOperator::collectOffset for instructions *and* constant expressions
+  (gvn_gep_collect_offset only handles instructions).
+- Sweeps: `constraint-elimination` whole-file 7753/7754 and `--per-function` 69774/69778 (loud: x86 hadd known bits,
+  ppc_fp128 parser), `debugify,…`, `sroa,…`, `-constraint-elimination-max-rows=3`: 0 differs;
+  `constraint-elimination,print<scalar-evolution>` only shows the two known printer differences.
+- Perf (x64 build, `-disable-output`, no @perf benchmark): diamonds n500/n2000/n8000 0.05/0.15/0.64 s (parse alone
+  0.04/0.10/0.35; LLVM 0.03/0.04/0.12): linear. sqlite3.ll +0.3 s over parsing (LLVM +0.04 s).

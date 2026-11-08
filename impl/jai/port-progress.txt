@@ -140,3 +140,4 @@ lib/Support/BranchProbability.cpp 0.9
 lib/Analysis/BlockFrequencyInfoImpl.cpp 0.85  # no iterative inference (-use-iterative-bfi-inference)
 lib/Analysis/BlockFrequencyInfo.cpp 0.4  # calculate/getBlockFreq/setBlockFreq/print; no views, profile-count queries, legacy pass
 lib/Support/ScaledNumber.cpp 0.85  # toStringAPFloat (tiny numbers) fails loudly
+lib/Transforms/Scalar/ConstraintElimination.cpp 0.92  # all but generateReproducer (-constraint-elimination-dump-reproducers) and debug dumps

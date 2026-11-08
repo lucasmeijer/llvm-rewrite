@@ -268,6 +268,8 @@ Pass_Kind :: enum u8 {
     PRINT_BPI; PRINT_BFI;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
+    // ConstraintElimination (pass_constraint_elimination.jai)
+    CONSTRAINT_ELIMINATION;
 }
 
 Pass_Info :: struct {
@@ -286,6 +288,7 @@ PASS_TABLE :: Pass_Info.[
     .{"adce", .FUNCTION, .ADCE, false, .DOMTREE},
     .{"bdce", .FUNCTION, .BDCE, false, .DOMTREE},
     .{"reassociate", .FUNCTION, .REASSOCIATE, false, .DOMTREE},
+    .{"constraint-elimination", .FUNCTION, .CONSTRAINT_ELIMINATION, false, .DOMTREE},
     .{"break-crit-edges", .FUNCTION, .BREAK_CRIT_EDGES, false, .DOMTREE},
     .{"mem2reg", .FUNCTION, .MEM2REG, false, .DOMTREE},
     .{"sroa", .FUNCTION, .SROA, false, .DOMTREE},
@@ -715,6 +718,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if tli_parse_cl_opt(name, value, has_value) return true;   // tli.jai: -disable-builtin, libcall simplifier options
     if parse_replexitval(name, value, has_value) return true;   // pass_indvars.jai
     if reassociate_parse_cl_opt(name, value, has_value) return true;   // pass_reassociate.jai
+    if constraint_elimination_parse_cl_opt(name, value, has_value) return true;   // pass_constraint_elimination.jai
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {
@@ -836,6 +840,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .ADCE; return adce_run(f);
         case .BDCE; return bdce_run(f);
         case .REASSOCIATE; return reassociate_run(f);
+        case .CONSTRAINT_ELIMINATION; return constraint_elimination_run(f);
         case .BREAK_CRIT_EDGES; return break_crit_edges_run(f);
         case .MEM2REG; return mem2reg_run(f);
         case .INSTSIMPLIFY; return instsimplify_run(f);

@@ -43,6 +43,8 @@
 #load "pass_adce.jai";
 #load "pass_bdce.jai";
 #load "pass_reassociate.jai";
+#load "constraint_system.jai";
+#load "pass_constraint_elimination.jai";
 #load "dbg_records.jai";
 #load "pass_mem2reg.jai";
 #load "pass_instsimplify.jai";
