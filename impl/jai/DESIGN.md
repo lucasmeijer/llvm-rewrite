@@ -67,7 +67,10 @@ src/
                   foldBranchToCommonDest for exit merging), LCSSA (formLCSSA*, SSAUpdater::RewriteUse)
   loop_pm.jai     loop(...) / loop-mssa(...): FunctionToLoopPassAdaptor, LoopPassManager, LPMUpdater
   pass_loop_rotate.jai  LoopRotate, MergeBlockIntoPredecessor, CodeMetrics, x86 code-size cost bounds
-  mssa_updater.jai MemorySSAUpdater (entry points only; they fail loudly)
+  mssa_updater.jai MemorySSAUpdater (insertDef/insertUse, removeMemoryAccess, moveTo*, applyUpdates, removeBlocks, ...)
+  must_execute.jai ICFLoopSafetyInfo (MustExecute.cpp) + InstructionPrecedenceTracking, colorEHFunclets
+  alias_set_tracker.jai  AliasSetTracker
+  pass_licm.jai   LICM / LNICM (incl. ControlFlowHoister, LoopPromoter, hoistArithmetics)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 
@@ -335,7 +338,16 @@ recomputing gives a different child order.
 - **MemorySSA** = `*Memory_SSA` (heap, cached as `Fn_Analyses.mssa`, `get_memoryssa(f)`): a table of `Mem_Access`
   rows (index 0 = liveOnEntry; DEF/USE/PHI tag; operands are row indices), per-block access/def lists as intrusive
   links through the rows, `of_value` = getMemoryAccess(I or BB). Walker: `mssa_get_clobbering_access(m, a, q)`,
-  `..._for_loc`, `..._skip_self`, `mssa_ensure_optimized_uses`, `mssa_dominates`. No MemorySSAUpdater and no use lists
+  `..._for_loc`, `..._skip_self`, `mssa_ensure_optimized_uses`, `mssa_dominates`, `mssa_verify` (verifyMemorySSA: LLVM's release build checks nothing; ours
+  fails loudly on a broken invariant). Operands are `Mssa_Use` rows with push-front use lists (`ma_defining`, `ma_op`,
+  `mphi_value/_block/_add_incoming`, `ma_rauw`, `ma_users`); a MemoryPhi's operand list grows like a hung-off list
+  (`mphi_grow`), so use-list order (which decides RAUW and phi-simplification order in the updater) matches LLVM.
+  Mutation API: `mssa_create_defined_access`, `mssa_create_phi`, `mssa_insert_into_lists_for_block / _before`,
+  `mssa_move_to_before / _place`, `mssa_remove_from_lookups / _lists`, `mssa_rename_pass_from_block`.
+- **MemorySSAUpdater** = `Mssa_Updater{mssa}` on the stack (`mssau_*`, LLVM's method names). LLVM's TrackingVH / WeakVH
+  on accesses are rows of `mssa.vh` (`vh_new/vh_get`, followed by `ma_rauw`, nulled when an access is destroyed);
+  every public `mssau_*` brackets itself with `mssau_enter/leave` and the handles are released when the outermost call
+  returns. Deleted accesses keep their row (`dead`).
   of accesses yet: passes that update MemorySSA must add them (see NOTES.md).
 - Printers with annotations use the `print_annot_block` / `print_annot_inst` hooks of printer.jai (LLVM's
   AssemblyAnnotationWriter) around `print_function`.

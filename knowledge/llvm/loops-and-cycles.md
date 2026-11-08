@@ -112,3 +112,24 @@ round-tripping file (identical output on all ~7750 files that don't hit an unpor
   into the predecessor (taking the name, the original becomes `<name>.old` before the block is deleted), the
   conditions are joined with `or`/`and` when `impliesPoison(BICond, PBICond)`, else with a `select` named
   `or.cond`; branch weights are combined as in SimplifyCFG and set with `ElideAllZero`.
+
+## LICM
+
+Verified with the jai port (impl/jai/src/pass_licm.jai) on Transforms/LICM and sweeps of `licm`, `loop-mssa(lnicm)`,
+`licm -licm-control-flow-hoisting=1` over the corpus (identical output).
+
+- Order: sinkRegion over `collectChildrenInLoop` (DT breadth-first list of in-loop blocks) in reverse, instructions
+  bottom-up; then hoistRegion over LoopBlocksRPO, instructions top-down with early increment; then promotion repeated
+  until nothing is promoted, then `formLCSSARecursively`. Subloop blocks are skipped except in LNICM.
+- hoistArithmetics and promotion re-read `getLoopPreheader()` (the ControlFlowHoister may have made a new one);
+  hoistRegion's speculation context is the preheader terminator from when hoistRegion started.
+- Sinking splits exit predecessors with a *lazy* DomTreeUpdater; `SplitBlockPredecessors` flushes it inside
+  UpdateAnalysisInformation (`DTU->getDomTree()`), so the tree gets `{Insert New->BB, Insert P->New, Delete P->BB}`
+  through applyUpdates, not `DT->splitBlock`.
+- Promotion stores go at each exit's first insertion point captured *before* any promotion (head bit: before the
+  block's debug records); later promotions' stores come after earlier ones. The preheader load is named
+  `<ptr>.promoted` and loses its debug location; stores get the merged location of all promoted accesses.
+- `-use-dereferenceable-at-point-semantics` only affects getPointerDereferenceableBytes' CanBeFreed out-parameter,
+  which only Loads.cpp and LoopAccessAnalysis request (BasicAA passes nullptr).
+- With only loop-nest passes (`loop-mssa(lnicm)`), the adaptor visits just the top-level loops; `lnicm` in a mixed
+  pipeline runs on the outermost loop of every visited loop.

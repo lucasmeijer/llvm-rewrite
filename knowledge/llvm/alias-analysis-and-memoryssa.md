@@ -86,3 +86,26 @@ diagnostics or struct-type addresses.
 - Also verified with the goose port: all 5007 `tests/imported/llvm/Transforms/*/*.ll` (aa-eval default pipeline +
   `-evaluate-aa-metadata`, both MemorySSA printers, globals-aa on GlobalsModRef/GVN/LICM/DSE) and
   `print<memoryssa>` on `tests/perf/compile/sqlite3.ll` (byte-identical).
+
+## MemorySSA updates (MemorySSAUpdater)
+
+Verified with the jai port (impl/jai/src/mssa_updater.jai): `loop-mssa(loop-rotate)` and `loop-mssa(licm)` followed by
+`print<memoryssa>` / `print<memoryssa-walker>` identical to opt on every round-tripping corpus file.
+
+- **Use-list order of accesses is observable.** RAUW and removeMemoryAccess re-point uses head first (push-front
+  lists, like IR values), and `tryRemoveTrivialPhi` recurses over `users()` in that order, which decides which phis
+  disappear and so the printed ids. A MemoryDef has two operands (defining, optimized), a MemoryUse one; a MemoryPhi is
+  created with no reserved operands and grows like a hung-off list (`max(n + n/2, 2)`), each growth moving the copied
+  uses to the front of their values' lists.
+- **Value handles matter**: getPreviousDefRecursive's cache and phi operand vectors are TrackingVH (follow RAUW),
+  InsertedPHIs / fixup lists are WeakVH (nulled on deletion, do not follow RAUW).
+- `MemoryDef::resetOptimized` clears operand 1 (unlinking the use); `MemoryUse::resetOptimized` only forgets the id.
+  `removeFromLookups` drops the defining operand and then (walker invalidateInfo) resets the def's optimized operand.
+- `applyUpdates` with deletes and inserts updates the DominatorTree with `DT.applyUpdates(Updates, RevDeleteUpdates)`
+  (pre/post-view GraphDiffs) before the MemorySSA insert updates, then applies the deletes again.
+- `applyInsertUpdates` computes IDFs through a GraphDiff, whose forward children are the successors in **reverse**
+  order (also for an empty GraphDiff), unlike insertDef's plain IDF (successors in order).
+- `verifyMemorySSA` is compiled out of release builds (`#ifndef NDEBUG`): `-verify-memoryssa` and `verify<memoryssa>`
+  never change opt's output.
+- `MemorySSA::dominates(MA, const Use &)` for a phi use in the same block calls `locallyDominates(MA, cast(Use))`,
+  and casting a Use yields its *value* (MA itself), so it is always true.

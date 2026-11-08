@@ -41,7 +41,7 @@ lib/Support/APInt.cpp 0.5
 lib/IR/DebugInfoMetadata.cpp 0.4
 lib/Transforms/Utils/BuildLibCalls.cpp 0.95
 lib/IR/DebugInfo.cpp 0.1
-lib/Analysis/MemorySSA.cpp 0.6
+lib/Analysis/MemorySSA.cpp 0.9  # no loop-scoped MemorySSA(Loop&), dot printer, legacy pass
 lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95
 lib/IR/ConstantRange.cpp 0.8
 lib/IR/Metadata.cpp 0.5
@@ -58,7 +58,7 @@ lib/Analysis/IVDescriptors.cpp 0.05
 lib/Transforms/InstCombine/InstCombinePHI.cpp 0.95
 lib/IR/ConstantFold.cpp 0.9
 lib/IR/Value.cpp 0.6
-lib/Analysis/MemorySSAUpdater.cpp 0.2
+lib/Analysis/MemorySSAUpdater.cpp 0.8  # no updateForClonedLoop / updateExitBlocksForClonedLoop
 lib/Support/KnownBits.cpp 0.85
 lib/Analysis/LoopInfo.cpp 0.6
 lib/IR/DataLayout.cpp 0.3
@@ -74,7 +74,7 @@ lib/Analysis/TypeBasedAliasAnalysis.cpp 0.8
 lib/Analysis/DemandedBits.cpp 0.95
 lib/Transforms/InstCombine/InstCombineNegator.cpp 0.65
 lib/Transforms/Scalar/ADCE.cpp 0.85
-lib/Transforms/Utils/SSAUpdater.cpp 0.7
+lib/Transforms/Utils/SSAUpdater.cpp 0.75
 lib/Analysis/MemoryLocation.cpp 1
 lib/Transforms/Utils/LCSSA.cpp 0.7
 lib/Transforms/Scalar/SimplifyCFGPass.cpp 1
@@ -111,3 +111,9 @@ lib/Analysis/DomConditionCache.cpp 1
 lib/IR/DIBuilder.cpp 0.15
 lib/Transforms/Utils/Debugify.cpp 0.4
 lib/IR/DIExpressionOptimizer.cpp 0.7
+lib/Transforms/Scalar/LICM.cpp 0.97  # all of LICM/LNICM incl. ControlFlowHoister; no optimization remarks, no funclet-bundle call sinking
+lib/Analysis/MustExecute.cpp 0.35  # LoopSafetyInfo + ICFLoopSafetyInfo only (no SimpleLoopSafetyInfo, printers, MustBeExecutedContextExplorer)
+lib/Analysis/AliasSetTracker.cpp 0.85  # no printers
+lib/Analysis/InstructionPrecedenceTracking.cpp 0.9
+lib/Transforms/Utils/LoopUtils.cpp 0.1  # appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint
+lib/IR/EHPersonalities.cpp 0.8  # classifyEHPersonality, colorEHFunclets

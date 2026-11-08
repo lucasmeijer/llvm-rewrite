@@ -181,9 +181,9 @@
     older `determine_use_capture_kind` in inst_simplify.jai fails loudly on those. `pointer_may_be_captured_before`
     has no LoopInfo/CycleInfo parameter yet (LLVM's callers that pass LI get more precise reachability).
   - MemorySSA: `get_memoryssa(f)` builds and caches it (heap). It survives a pass only if the pass preserves
-    `.MEMORYSSA` and the DominatorTree survives. There is no MemorySSAUpdater, no `users()` of accesses and no
-    loop-scoped MemorySSA: LICM/GVN/DSE ports need to add them (MemorySSAUpdater.cpp) before they can preserve it.
-    `verify<memoryssa>` and `-verify-memoryssa` are accepted and verify nothing.
+    `.MEMORYSSA` and the DominatorTree survives (the AssumptionCache its BasicAA uses is rebuilt and re-pointed when
+    freed, see fam_invalidate). Update it with the MemorySSAUpdater (mssa_updater.jai, LLVM's method names with
+    `mssau_`); `verify<memoryssa>` / `-verify-memoryssa` run `mssa_verify`. No loop-scoped MemorySSA.
   - `mssa_clobbers_query` = instructionClobbersQuery, `mssa_def_clobbers_use_or_def` = MemorySSAUtil::
     defClobbersUseOrDef, `phi_translate_value` = PHITransAddr::translateValue (no select-condition variant yet; GVN's
     MemoryDependence needs that one).
@@ -240,10 +240,8 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 ## Loops (L1.analysis.loops COMPLETE, L1.loop-canonical 58/92 ::opt)
 
 - Files and APIs: see DESIGN.md "Loops". print<loopnest> is loop_nest.jai (needs ScalarEvolution).
-- What fails loudly (and the remaining L1.loop-canonical checks): passes not ported (licm, indvars,
-  simple-loop-unswitch, loop-deletion, loop-unroll, loop-idiom, loop-reduce, simplifycfg, debugify,
-  `require<domfrontier>`), the MemorySSAUpdater (every `mssau_*` entry point in mssa_updater.jai:
-  `loop-mssa(loop-rotate)`, LoopSimplify/SplitBlockPredecessors with a cached MemorySSA), LoopRotate's noalias-scope cloning, key-instruction
+- What fails loudly (and the remaining L1.loop-canonical checks): passes not ported (indvars,
+  simple-loop-unswitch, loop-deletion, loop-unroll, loop-idiom, loop-reduce, `require<domfrontier>`), LoopRotate's noalias-scope cloning, key-instruction
   atom groups, DIArgList debug locations in remapping, `#dbg_assign`.
 - **x86 code-size costs are bounds, not values** (pass_loop_rotate.jai `tti_code_size_bounds`): calls, CF
   instructions, free intrinsics and the TCC_Basic default are exact; scalar int (<= 64 bits)/ptr/float/double
@@ -268,14 +266,33 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   formatter needs `\x1f` for a literal `%` (`loop %header` in OptBisect names); procedure names collide across
   agents' files (`block_unique_predecessor`, `drop_ub_implying_attrs_and_metadata`, `ic_clone_inst` live in
   ic_core.jai and are reused here).
-- **Porting MemorySSAUpdater (next step for loop-mssa / LICM):** MemorySSA needs use lists of accesses first
-  (operand rows with LLVM's push-front order: a Def has 2 operands, defining and optimized; a Use 1; a Phi its
-  incoming values), then the MemorySSA mutation API (createDefinedAccess, insertIntoListsForBlock, removeFromLists,
-  moveTo, renamePass with RenameAllUses). Note that `MSSAU->applyUpdates(Updates, DT, UpdateDT=true)` (LoopRotate)
-  updates the DominatorTree with `DT.applyUpdates(Updates, PostViewUpdates)`, the pre/post-view variant that
-  domtree.jai doesn't have yet; it changes DT child order, so `loop-mssa(loop-rotate)` can't reuse the plain
-  `dt_apply_updates`. Test with `print<memoryssa>` after `loop-mssa(loop-rotate)` (Analysis/MemorySSA/
-  loop-rotate-update.ll) and a sweep of that pipeline (`tools/sweep.py ... --analysis`).
+- MemorySSAUpdater (all but updateForClonedLoop / updateExitBlocksForClonedLoop) is ported; `loop-mssa(loop-rotate)`
+  uses `dt_apply_updates_post_view` (DT.applyUpdates(Updates, PostViewUpdates)) through `mssau_apply_updates`, and
+  `idf_calculate(..., gd)` for the GraphDiff IDF of applyInsertUpdates (forward children come in *reverse* successor
+  order through a GraphDiff, even an empty one). Sweeps `loop-mssa(loop-rotate),print<memoryssa>` and
+  `print<memoryssa>,loop-mssa(licm),print<memoryssa>` (-verify-memoryssa) are identical except 3 files whose
+  differences are inliner diagnostics that every printer sweep shows.
+
+## LICM (L1.licm 112/134 ::opt, L1.analysis.memoryssa 39/41)
+
+- Files: pass_licm.jai (LICM.cpp incl. LNICM and ControlFlowHoister), must_execute.jai (ICFLoopSafetyInfo,
+  InstructionPrecedenceTracking, colorEHFunclets), alias_set_tracker.jai, LoadAndStorePromoter hooks in
+  ssa_updater.jai (`Lsp_Hooks`, kind SROA_BASIC / LICM), `split_block_predecessors(..., use_dtu = true)` (the
+  DomTreeUpdater path of UpdateAnalysisInformation: Insert/Delete updates instead of DT->splitBlock).
+- LNICM: a loop pipeline with only `lnicm` runs the adaptor in LoopNestMode (top-level loops only); `lnicm` in a mixed
+  pipeline runs on the outermost loop of the current one (LoopPassManager::runWithLoopNestPasses).
+- Remaining unit failures need other passes (gvn, loop-deletion, loop-unroll, simple-loop-unswitch, reassociate,
+  loop-simplifycfg, early-cse<memssa>, make-guards-explicit, loop-sink (needs BlockFrequencyInfo)), plus
+  `--enable-knowledge-retention` (salvageKnowledge / AssumeBundleBuilder, not ported).
+- Fail loudly: sinking a call that has a funclet bundle or into a funclet (needs a funclet bundle added).
+- Sweeps (every round-tripping file): `licm`, `loop-mssa(licm)`, `loop-mssa(lnicm)`, `licm -licm-control-flow-hoisting=1`,
+  `loop-mssa(loop-rotate,licm)` all identical (2 loop-rotate loud failures). Rerun after touching LICM, MemorySSA or
+  the updater, also with `print<memoryssa>` after it (`--analysis --extra=-verify-memoryssa`).
+- Trap: LICM re-reads `L->getLoopPreheader()` in hoistArithmetics and promotion (ControlFlowHoister replaces the
+  preheader); only the runOnLoop guard uses the original one.
+- Perf (x64, tests/perf/scaling/loops-many, `opt -passes=licm`): 5.8x LLVM CPU at n8000 (parse/print dominate),
+  fitted k 1.42 vs LLVM 1.18 (both in the "too little work" range). Value-handle RAUW/deletion scans every live handle
+  of the current updater call; fine for loop bodies, a candidate if a huge function shows up.
 
 ## InstCombine (L1.instcombine.arith 68/115, bitwise 40/86 ::opt; DESIGN.md §11)
 
