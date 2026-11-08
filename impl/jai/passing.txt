@@ -2153,6 +2153,7 @@ tests/imported/llvm/Transforms/ADCE/2016-09-06.ll::opt
 tests/imported/llvm/Transforms/ADCE/2016-09-06.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/2017-08-21-DomTree-deletions.ll::opt
 tests/imported/llvm/Transforms/ADCE/2017-08-21-DomTree-deletions.ll::roundtrip
+tests/imported/llvm/Transforms/ADCE/adce-salvage-dbg-value.ll::opt
 tests/imported/llvm/Transforms/ADCE/adce-salvage-dbg-value.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/basictest.ll::opt
 tests/imported/llvm/Transforms/ADCE/basictest.ll::roundtrip
@@ -2168,6 +2169,7 @@ tests/imported/llvm/Transforms/ADCE/dce_pure_call.ll::opt
 tests/imported/llvm/Transforms/ADCE/dce_pure_call.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/dce_pure_invoke.ll::opt
 tests/imported/llvm/Transforms/ADCE/dce_pure_invoke.ll::roundtrip
+tests/imported/llvm/Transforms/ADCE/debug-info-intrinsic.ll::opt
 tests/imported/llvm/Transforms/ADCE/debug-info-intrinsic.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/delete-profiling-calls-to-constant.ll::opt
 tests/imported/llvm/Transforms/ADCE/delete-profiling-calls-to-constant.ll::roundtrip
@@ -2298,6 +2300,7 @@ tests/imported/llvm/Transforms/BDCE/order.ll::opt
 tests/imported/llvm/Transforms/BDCE/order.ll::roundtrip
 tests/imported/llvm/Transforms/BDCE/pr26587.ll::opt
 tests/imported/llvm/Transforms/BDCE/pr26587.ll::roundtrip
+tests/imported/llvm/Transforms/BDCE/pr41925.ll::opt
 tests/imported/llvm/Transforms/BDCE/pr41925.ll::roundtrip
 tests/imported/llvm/Transforms/BDCE/sext_multi_uses.ll::opt
 tests/imported/llvm/Transforms/BDCE/sext_multi_uses.ll::roundtrip
@@ -2529,6 +2532,7 @@ tests/imported/llvm/Transforms/CorrelatedValuePropagation/uscmp.ll::roundtrip
 tests/imported/llvm/Transforms/CorrelatedValuePropagation/vectors.ll::roundtrip
 tests/imported/llvm/Transforms/CorrelatedValuePropagation/zext.ll::roundtrip
 tests/imported/llvm/Transforms/DCE/basic-preservation.ll::roundtrip
+tests/imported/llvm/Transforms/DCE/basic.ll::opt
 tests/imported/llvm/Transforms/DCE/basic.ll::roundtrip
 tests/imported/llvm/Transforms/DCE/calls-errno.ll::opt
 tests/imported/llvm/Transforms/DCE/calls-errno.ll::roundtrip
@@ -4151,6 +4155,7 @@ tests/imported/llvm/Transforms/InstCombine/alloc-realloc-free.ll::opt
 tests/imported/llvm/Transforms/InstCombine/alloc-realloc-free.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/alloca-big.ll::opt
 tests/imported/llvm/Transforms/InstCombine/alloca-big.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/alloca-cast-debuginfo.ll::opt
 tests/imported/llvm/Transforms/InstCombine/alloca-cast-debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/alloca-in-non-alloca-as.ll::opt
 tests/imported/llvm/Transforms/InstCombine/alloca-in-non-alloca-as.ll::roundtrip
@@ -4480,9 +4485,11 @@ tests/imported/llvm/Transforms/InstCombine/cast-int-fcmp-eq-0.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cast-int-fcmp-eq-0.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cast-int-icmp-eq-0.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cast-int-icmp-eq-0.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/cast-mul-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cast-mul-select.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cast-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cast-select.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/cast-set-preserve-signed-dbg-val.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cast-set-preserve-signed-dbg-val.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cast-set.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cast-set.ll::roundtrip
@@ -4599,15 +4606,19 @@ tests/imported/llvm/Transforms/InstCombine/deadcode.ll::opt
 tests/imported/llvm/Transforms/InstCombine/deadcode.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debug-line.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debug-line.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/debuginfo-dce.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-dce.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo-dce2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-dce2.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/debuginfo-invert.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-invert.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo-invoke.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-invoke.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo-scalable-typesize.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/debuginfo-sink.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-sink.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo-skip.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/debuginfo-variables.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-variables.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debugloc-bswap.ll::opt
@@ -6214,6 +6225,7 @@ tests/imported/llvm/Transforms/InstCombine/simplify-libcalls-erased.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simplify-libcalls-erased.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-libcalls-new.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simplify-libcalls-new.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/sink-instruction-introduces-unnecessary-poison-value.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sink-instruction-introduces-unnecessary-poison-value.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sink-into-catchswitch.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sink-into-catchswitch.ll::roundtrip
@@ -6299,6 +6311,7 @@ tests/imported/llvm/Transforms/InstCombine/stdiocall-bad-sig.ll::opt
 tests/imported/llvm/Transforms/InstCombine/stdiocall-bad-sig.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/store.ll::opt
 tests/imported/llvm/Transforms/InstCombine/store.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/storemerge-dbg.ll::opt
 tests/imported/llvm/Transforms/InstCombine/storemerge-dbg.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stpcpy-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/stpcpy-1.ll::roundtrip
@@ -6581,6 +6594,7 @@ tests/imported/llvm/Transforms/InstCombine/umulo-square.ll::opt
 tests/imported/llvm/Transforms/InstCombine/umulo-square.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/umulo.ll::opt
 tests/imported/llvm/Transforms/InstCombine/umulo.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/unavailable-debug.ll::opt
 tests/imported/llvm/Transforms/InstCombine/unavailable-debug.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/unfold-masked-merge-with-const-mask-scalar.ll::opt
 tests/imported/llvm/Transforms/InstCombine/unfold-masked-merge-with-const-mask-scalar.ll::roundtrip
@@ -7411,6 +7425,7 @@ tests/imported/llvm/Transforms/LCSSA/2007-07-12-LICM-3.ll::roundtrip
 tests/imported/llvm/Transforms/LCSSA/2007-07-12-LICM.ll::roundtrip
 tests/imported/llvm/Transforms/LCSSA/DontInsertDebugValuesForPHIs.ll::opt
 tests/imported/llvm/Transforms/LCSSA/DontInsertDebugValuesForPHIs.ll::roundtrip
+tests/imported/llvm/Transforms/LCSSA/basictest.ll::opt
 tests/imported/llvm/Transforms/LCSSA/basictest.ll::roundtrip
 tests/imported/llvm/Transforms/LCSSA/indirectbr.ll::opt
 tests/imported/llvm/Transforms/LCSSA/indirectbr.ll::roundtrip
@@ -9674,6 +9689,7 @@ tests/imported/llvm/Transforms/SROA/address-spaces.ll::opt
 tests/imported/llvm/Transforms/SROA/address-spaces.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/addrspacecast.ll::opt
 tests/imported/llvm/Transforms/SROA/addrspacecast.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/alignment.ll::opt
 tests/imported/llvm/Transforms/SROA/alignment.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/alloca-address-space.ll::opt
 tests/imported/llvm/Transforms/SROA/alloca-address-space.ll::roundtrip
@@ -9777,6 +9793,7 @@ tests/imported/llvm/Transforms/SROA/vector-promotion-rmw-tree-merge.ll::opt
 tests/imported/llvm/Transforms/SROA/vector-promotion-rmw-tree-merge.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/vector-promotion-via-tree-structure-merge.ll::opt
 tests/imported/llvm/Transforms/SROA/vector-promotion-via-tree-structure-merge.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/vector-promotion.ll::opt
 tests/imported/llvm/Transforms/SROA/vector-promotion.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/vectors-of-pointers.ll::opt
 tests/imported/llvm/Transforms/SROA/vectors-of-pointers.ll::roundtrip
@@ -9982,6 +9999,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/X86/empty-cleanuppad.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/hoist-loads-stores-with-cf.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cleanuppads.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cleanuppads.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad-debuginfo.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad-debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cond-stores-cost.ll::opt
@@ -10084,6 +10102,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/dbginfo.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/dbginfo.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/dce-cond-after-folding-terminator.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/dce-cond-after-folding-terminator.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/debug-info-thread-phi.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/debug-info-thread-phi.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/div-rem-pairs.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/div-rem-pairs.ll::roundtrip
@@ -10285,6 +10304,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/profile-update-unreachable.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/profile-update-unreachable.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/rangereduce.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/rangereduce.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/return-merge.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/return-merge.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/safe-abs.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/safe-abs.ll::roundtrip
