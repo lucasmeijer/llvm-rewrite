@@ -267,7 +267,7 @@ recursive fn sc_gcd_u(a: i64, b: i64) -> i64 { var x = a; var y = b; while y != 
 recursive fn sc_get_small_constant_trip_multiple(l: i32) -> i64 {
     var res: i64 = -1;
     let em = sc_tmp.len;
-    loop_exiting_blocks(l, sc_tmp);
+    sc_push_exiting_blocks(l);
     let ee = sc_tmp.len;
     for k in em..ee {
         let bb = sc_tmp[k];
@@ -294,7 +294,7 @@ recursive fn sc_trip_multiple_of_exit_count(l: i32, ec: i32) -> i64 {
 
 recursive fn sc_compute_backedge_taken_count(l: i32, allow_preds: bool) -> BTI {
     let xm = sc_tmp.len;
-    loop_exiting_blocks(l, sc_tmp);
+    sc_push_exiting_blocks(l);
     let xe = sc_tmp.len;
     // results go to a scratch run of ENTs (copied into sc_ents at the end)
     let em = sc_ent_tmp.len;
@@ -343,6 +343,13 @@ recursive fn sc_compute_backedge_taken_count(l: i32, allow_preds: bool) -> BTI {
 }
 var sc_ent_tmp: ENT[>..<];
 var sc_tmp: i32[>..<];          // scratch lists (mark-based)
+// getExitingBlocks, appended to sc_tmp
+recursive fn sc_push_exiting_blocks(l: i32) {
+    for i in loop_nblocks(l) {
+        let bb = loop_block(l, i);
+        if loop_is_exiting(l, bb) { sc_tmp.push(bb); }
+    }
+}
 
 // computeExitLimit
 recursive fn sc_compute_exit_limit(l: i32, bb: i32, only: bool, allow_preds: bool) -> EL {

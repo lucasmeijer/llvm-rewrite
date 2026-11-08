@@ -401,6 +401,13 @@ recursive fn scev_reset() {
     sc_first_unknown = -1;
     scev_reset_create();
     scev_reset_btc();
+    sc_cm.resize(0);
+    hm_clear(sc_incoming_guards);
+    sc_tmp.resize(0);
+    sc_newops.resize(0);
+    sc_cops.resize(0);
+    sc_newscales.resize(0);
+    sc_seen.resize(0);
     // SCEVCouldNotCompute
     scevs.push(Scev { kind: SC_CNC as u8, flags: 0, size: 0, ty: -1, at: 0, n: 0, v: -1, lp: -1, hash: 0, chain: -2 });
     sc_side_grow();
@@ -812,12 +819,13 @@ recursive fn sc_add(a: i32, c: i32) -> i32 { sc_add2(a, c, SF_ANY, 0) }
 recursive fn sc_mul(a: i32, c: i32) -> i32 { sc_mul2(a, c, SF_ANY, 0) }
 
 // Scratch for CollectAddOperandsWithScales (NewOps and their scales; marks per call)
-var sc_newops: i32[>..<];
+var sc_newops: i32[>..<];   // general scratch (worklists, LIOps, AddRecOps, DeadIndices)
+var sc_cops: i32[>..<];
 var sc_newscales: AP[>..<];
 
-recursive fn sc_newops_find(mark: i64, s: i32) -> i64 {
+recursive fn sc_cops_find(mark: i64, s: i32) -> i64 {
     var k = mark;
-    while k < sc_newops.len { if sc_newops[k] == s { return k; } k++; }
+    while k < sc_cops.len { if sc_cops[k] == s { return k; } k++; }
     return -1;
 }
 
@@ -848,13 +856,13 @@ recursive fn sc_collect_add_scales(mark: i64, acc0: AP, from_ss: bool, at: i64, 
                 let b = ss.len;
                 for k in 1..sc_nops(o) { ss.push(sc_op(o, k)); }
                 let key = sc_mul_n(b, SF_ANY, 0);
-                let f = sc_newops_find(mark, key);
-                if f < 0 { sc_newops.push(key); sc_newscales.push(ns); }
+                let f = sc_cops_find(mark, key);
+                if f < 0 { sc_cops.push(key); sc_newscales.push(ns); }
                 else { sc_newscales[f] = ap_add(sc_newscales[f], ns); interesting = true; }
             }
         } else {
-            let f = sc_newops_find(mark, o);
-            if f < 0 { sc_newops.push(o); sc_newscales.push(scale); }
+            let f = sc_cops_find(mark, o);
+            if f < 0 { sc_cops.push(o); sc_newscales.push(scale); }
             else { sc_newscales[f] = ap_add(sc_newscales[f], scale); interesting = true; }
         }
         i++;
@@ -1004,7 +1012,7 @@ recursive fn sc_add_n(b: i64, orig: u32, depth: i64) -> i32 {
     while idx < ss_n(b) && sc_kind(ss[b + idx]) < SC_MUL { idx++; }
     if idx < ss_n(b) && sc_kind(ss[b + idx]) == SC_MUL {
         let bw = sc_type_bits(ty);
-        let mark = sc_newops.len;
+        let mark = sc_cops.len;
         let interesting, acc = sc_collect_add_scales(mark, ap_zero(bw), true, b, ss_n(b), ap_u64(1, bw));
         if interesting {
             // MulOpLists: distinct scales in ascending unsigned order
@@ -1031,20 +1039,20 @@ recursive fn sc_add_n(b: i64, orig: u32, depth: i64) -> i32 {
                 let sc = sc_newscales[u];
                 if !ap_is_zero(sc) {
                     let lb = ss.len;
-                    for k in mark..sb { if ap_eq(sc_newscales[k], sc) { ss.push(sc_newops[k]); } }
+                    for k in mark..sb { if ap_eq(sc_newscales[k], sc) { ss.push(sc_cops[k]); } }
                     let sum = sc_add_n(lb, SF_ANY, depth + 1);
                     if ap_is_one(sc) { ss.push(sum); }
                     else { let m = sc_mul2(sc_get_constant(sc), sum, SF_ANY, depth + 1); ss.push(m); }
                 }
                 u++;
             }
-            sc_newops.resize(mark);
+            sc_cops.resize(mark);
             sc_newscales.resize(mark);
             if ss_n(b) == 0 { return ss_ret(b, sc_get_zero(ty)); }
             if ss_n(b) == 1 { return ss_ret(b, ss[b]); }
             return sc_add_n(b, SF_ANY, depth + 1);
         }
-        sc_newops.resize(mark);
+        sc_cops.resize(mark);
         sc_newscales.resize(mark);
     }
 

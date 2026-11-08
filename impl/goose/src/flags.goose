@@ -30,6 +30,11 @@ let KNOWN_FLAGS: const u8[:][] = [
     "verify-memoryssa",                                  // no-op: extra verification only
     "use-constant-int-for-fixed-length-splat", "use-constant-fp-for-fixed-length-splat",   // only =false (the default)
     "use-constant-int-for-scalable-splat", "use-constant-fp-for-scalable-splat",           // is supported
+    "scalar-evolution-max-iterations", "scalar-evolution-classify-expressions",      // read by ScalarEvolution
+    "scalar-evolution-max-arith-depth", "scalar-evolution-max-cast-depth", "scalar-evolution-max-add-rec-size",
+    "scalar-evolution-huge-expr-threshold", "scev-addops-inline-threshold", "scev-mulops-inline-threshold",
+    "scev-range-iter-threshold", "scalar-evolution-use-expensive-range-sharpening",
+    "verify-scev",                                       // no-op: extra verification only
 ];
 
 // Flags whose non-default value is not supported (checked before the pipeline runs).
