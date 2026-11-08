@@ -1205,12 +1205,21 @@ copy_metadata_for_load :: (dst: Value_Id, src: Value_Id) {
             set_metadata(dst, it.kind, it.md);
         } else if name == "nonnull" {
             if is_ptr_type(nt) set_metadata(dst, it.kind, it.md);
-            else if is_int_type(nt) fatal("SROA: !nonnull to !range conversion is not supported yet");
+            else if is_int_type(nt) {
+                // copyNonnullMetadata: !range [ptrtoint(null) + 1, ptrtoint(null))
+                null_int := ce_cast(.PTRTOINT, const_null_value(vtype(op(src, 0))), nt);
+                nonnull := ce_binop(.ADD, null_int, const_int(nt, 1), 0);
+                set_metadata(dst, md_kind_id("range"), md_tuple(.[md_value(nonnull), md_value(null_int)], false));
+            }
         } else if name == "align" || name == "dereferenceable" || name == "dereferenceable_or_null" {
             if is_ptr_type(nt) set_metadata(dst, it.kind, it.md);
         } else if name == "range" {
             if nt == vtype(src) set_metadata(dst, it.kind, it.md);
-            else if is_ptr_type(nt) fatal("SROA: !range to !nonnull conversion is not supported yet");
+            else if is_ptr_type(nt) {
+                // copyRangeMetadata: !nonnull when the range excludes 0
+                if dl_type_size_bits(nt) == type_int_width(scalar_type(vtype(src))) && !md_range_contains_zero(it.md)
+                    set_metadata(dst, md_kind_id("nonnull"), md_tuple(.[], false));
+            }
         } else if name == "nofpclass" {
             if scalar_type(nt) == scalar_type(vtype(src)) set_metadata(dst, it.kind, it.md);
         }
@@ -1302,18 +1311,20 @@ speculate_select_inst_loads :: (b: *Irb, si: Value_Id, li: Value_Id) {
 
 // rewriteSelectInstMemOps
 rewrite_select_inst_mem_ops :: (b: *Irb, si: Value_Id, ops: [] Sroa_Mem_Op, preserve_cfg: bool) -> bool {
+    cfg_changed := false;
     for o: ops {
         if !o.is_store && o.spec == SPEC_TRUE | SPEC_FALSE {
             speculate_select_inst_loads(b, si, o.i);
         } else {
-            fatal("SROA: rewriting memory operations of a select with new control flow (modify-cfg) is not supported yet");
+            rewrite_mem_op_of_select(si, o.i, o.spec);
+            cfg_changed = true;
         }
         erase_inst_with_metadata(o.i);
     }
     u := ir.v_first_use[si];
     while u != NONE { nu := ir.u_next[u]; erase_inst_with_metadata(ir.u_user[u]); u = nu; }
     erase_inst_with_metadata(si);
-    return false;
+    return cfg_changed;
 }
 
 // getAdjustedPtr
@@ -1340,6 +1351,15 @@ Sroa :: struct {
     dead_insts: [..] Value_Id;
     spec_phis: Set_Vec;
     selects: [..] Sroa_Select_Rw;   // SmallMapVector<SelectInst*, RewriteableMemOps>
+    cfg_changed: bool;
+}
+
+// DomTreeUpdater (lazy): updates queued by SplitBlockAndInsertIfThen(Else), applied on getDomTree() / at the end
+sroa_pending_dt_updates: [..] Dom_Update;
+sroa_flush_dt :: (dt: *Dom_Tree) {
+    if sroa_pending_dt_updates.count == 0 return;
+    dt_apply_updates(dt, sroa_pending_dt_updates);
+    sroa_pending_dt_updates.count = 0;
 }
 
 // ---------------------------------------------------------------- AllocaSliceRewriter
@@ -1971,6 +1991,7 @@ Op_Splitter :: struct {
     is_store: bool;
     tags: AA_Tags;
     agg_store: Value_Id;
+    components: [..] Value_Id;
 }
 
 splitter_init :: (s: *Op_Splitter, b: *Irb, at: Value_Id, ptr: Value_Id, base_ty: Type_Id, base_align: u64) {
@@ -1995,6 +2016,7 @@ emit_split_ops :: (s: *Op_Splitter, ty: Type_Id, agg: *Value_Id, name: string) {
             gep := irb_gep(s.irb, s.base_ty, s.ptr, s.gep_indices, tprint("%.gep", name), F_INBOUNDS);
             ld := irb_load(s.irb, ty, gep, al, false, tprint("%.load", name));
             if aa_any(s.tags) set_aa_metadata(ld, aa_adjust_for_access_ty(s.tags, off, vtype(ld)));
+            array_add(*s.components, ld);
             agg.* = irb_insert_value(s.irb, agg.*, ld, s.indices, tprint("%.insert", name));
         }
         return;
@@ -2016,14 +2038,22 @@ emit_split_ops :: (s: *Op_Splitter, ty: Type_Id, agg: *Value_Id, name: string) {
 
 agg_visit_load :: (a: *Agg_Rw, li: Value_Id) -> bool {
     if !inst_is_simple(li) || is_single_value_type(vtype(li)) return false;
-    // recordFakeUses
-    u := ir.v_first_use[li];
-    while u != NONE { if call_intrinsic(ir.u_user[u]) == "llvm.fake.use" fatal("SROA: fake uses of split aggregate loads are not supported yet"); u = ir.u_next[u]; }
     s: Op_Splitter;
     splitter_init(*s, a.irb, li, use_value(a.u), vtype(li), common_alignment(load_store_align(li), 0));
     s.tags = get_aa_metadata(li);
+    s.components.allocator = temp;
+    // recordFakeUses
+    fake: [..] Value_Id; fake.allocator = temp;
+    u := ir.v_first_use[li];
+    while u != NONE { if call_intrinsic(ir.u_user[u]) == "llvm.fake.use" array_add(*fake, ir.u_user[u]); u = ir.u_next[u]; }
     v := const_poison(vtype(li));
     emit_split_ops(*s, vtype(li), *v, tprint("%.fca", vname(li)));
+    // emitFakeUses
+    for fu: fake {
+        irb_set_before(a.irb, fu);
+        for c: s.components irb_intrinsic(a.irb, "llvm.fake.use", .[], .[c]);
+        erase_inst_with_metadata(fu);
+    }
     table_remove(*a.visited, li);
     rauw_with_metadata(li, v);
     erase_inst_with_metadata(li);
@@ -2093,8 +2123,12 @@ agg_unfold_gep_select :: (a: *Agg_Rw, g: Value_Id) -> bool {
     nsel: Value_Id;
     if md_from != NONE nsel = irb_select(a.irb, cond, nt, nf, tprint("%.sroa.sel", vname(sel)), md_from);
     else {
-        // CreateSelectWithUnknownProfile: !prof "unknown" metadata
-        fatal("SROA: unfolding a gep of a zext i1 (select with unknown profile) is not supported yet");
+        // CreateSelectWithUnknownProfile(Cond, T, F, DEBUG_TYPE, Name)
+        nsel = irb_select(a.irb, cond, nt, nf, tprint("%.sroa.sel", vname(sel)));
+        if is_inst(nsel) && inst_op(nsel) == .SELECT {
+            ec_ok, ec := function_entry_count(block_fn(inst(nsel).parent));
+            if ec_ok && ec > 0 set_metadata(nsel, md_kind_id("prof"), md_tuple(.[md_string("unknown"), md_string("sroa")], false));
+        }
     }
     table_remove(*a.visited, g);
     rauw_with_metadata(g, nsel);
@@ -2877,7 +2911,7 @@ run_on_alloca :: (pass: *Sroa, ai: Value_Id) -> bool {
     pass.selects = empty;
     while remaining.count {
         kv := pop(*remaining);
-        rewrite_select_inst_mem_ops(*b, kv.sel, kv.ops, pass.preserve_cfg);
+        if rewrite_select_inst_mem_ops(*b, kv.sel, kv.ops, pass.preserve_cfg) pass.cfg_changed = true;
     }
     return changed;
 }
@@ -2916,6 +2950,7 @@ promote_allocas :: (pass: *Sroa) -> bool {
     if !opts.sroa_skip_mem2reg {
         list: [..] Value_Id; list.allocator = temp;
         for pass.promotable.items array_add(*list, it);
+        sroa_flush_dt(pass.dt);
         promote_mem_to_reg(list, pass.dt, get_assumption_cache(pass.f));
     }
     svec_clear(*pass.promotable);
@@ -2941,6 +2976,8 @@ sroa_run :: (f: Value_Id, name: string) -> Preserved {
     svec_init(*pass.worklist); svec_init(*pass.post_promotion); svec_init(*pass.promotable); svec_init(*pass.spec_phis);
     pass.dead_insts.allocator = temp; pass.selects.allocator = temp;
     dbgr_index_reset();
+    sroa_pending_dt_updates.allocator = temp;
+    sroa_pending_dt_updates.count = 0;
     for b: fn_blocks(f) for i: block_insts(b) {
         x := inst(i).records;
         while x != 0 { if dbgr(x).kind == .ASSIGN fatal("SROA: assignment tracking (dbg_assign) is not supported yet"); x = dbgr(x).next; }
@@ -2971,9 +3008,11 @@ sroa_run :: (f: Value_Id, name: string) -> Preserved {
         svec_clear(*pass.post_promotion);
         if pass.worklist.items.count == 0 break;
     }
+    sroa_flush_dt(pass.dt);
     if !changed return PRESERVE_ALL;
     if module_has_flag("debug-info-assignment-tracking") fatal("SROA: assignment tracking (RemoveRedundantDbgInstrs) is not supported yet");
-    pa := preserved_cfg();
+    pa: Preserved;
+    if !pass.cfg_changed pa = preserved_cfg();
     preserve(*pa, .DOMTREE);
     return pa;
 }
@@ -3036,4 +3075,180 @@ propagate_stored_values_to_loads :: (ai: Value_Id, as: *Sroa_Slices) {
         } else all_same = false;
     }
     flush();
+}
+
+// Use::swap: the two uses exchange values and positions in their use lists
+use_swap :: (a: Use_Id, b: Use_Id) {
+    if ir.u_val[a] == ir.u_val[b] return;
+    // relink by hand: detach both, then insert each where the other was
+    va := ir.u_val[a]; vb := ir.u_val[b];
+    pa := ir.u_prev[a]; na := ir.u_next[a];
+    pb := ir.u_prev[b]; nb := ir.u_next[b];
+    ir.u_val[a] = vb; ir.u_val[b] = va;
+    ir.u_prev[a] = pb; ir.u_next[a] = nb;
+    ir.u_prev[b] = pa; ir.u_next[b] = na;
+    // a took b's place in vb's list
+    if pb == NONE ir.v_first_use[vb] = a; else ir.u_next[pb] = a;
+    if nb != NONE ir.u_prev[nb] = a;
+    if pa == NONE ir.v_first_use[va] = b; else ir.u_next[pa] = b;
+    if na != NONE ir.u_prev[na] = b;
+}
+
+// CondBrInst::swapSuccessors
+condbr_swap_successors :: (br: Value_Id) {
+    use_swap(op_use(br, 1), op_use(br, 2));
+    // Instruction::swapProfMetadata
+    k := md_kind_id("prof");
+    m := get_metadata(br, k);
+    if m == NONE || ir.mds[m].kind != .TUPLE || ir.mds[m].nops == 0 return;
+    o0 := md_op(m, 0);
+    if o0 == NONE || ir.mds[o0].kind != .STRING || ir.mds[o0].str != "branch_weights" return;
+    first: u32 = 1;
+    if ir.mds[m].nops > 1 { o1 := md_op(m, 1); if o1 != NONE && ir.mds[o1].kind == .STRING && ir.mds[o1].str == "expected" first = 2; }
+    if ir.mds[m].nops != 2 + first return;
+    ops: [..] Md_Id; ops.allocator = temp;
+    for x: 0..first-1 array_add(*ops, md_op(m, x));
+    array_add(*ops, md_op(m, first + 1));
+    array_add(*ops, md_op(m, first));
+    set_metadata(br, k, md_tuple(ops, false));
+}
+
+// Instruction::clone for a load or store (no name, no parent, same metadata)
+clone_load_store :: (i: Value_Id) -> Value_Id {
+    n := nops(i);
+    c := new_inst(inst_op(i), vtype(i), n);
+    r := inst(i).*;
+    r.parent = NONE; r.prev = NONE; r.next = NONE; r.records = 0;
+    inst(c).* = r;
+    for k: 0..n-1 set_op(c, k, op(i, k));
+    all: [..] Kind_Md; all.allocator = temp;
+    get_all_metadata(i, *all);
+    for all set_metadata(c, it.kind, it.md);
+    return c;
+}
+
+// Instruction::dropUBImplyingAttrsAndMetadata (loads and stores: drop unknown non-debug metadata)
+drop_ub_implying_metadata :: (i: Value_Id) {
+    keep := string.["annotation", "range", "nonnull", "align", "fpmath", "prof", "mem.cache_hint", "nofpclass"];
+    all: [..] Kind_Md; all.allocator = temp;
+    get_all_metadata(i, *all);
+    for all {
+        if it.kind == 0 continue;
+        name := ir.md_kind_names[it.kind];
+        kept := false;
+        for keep if it == name { kept = true; break; }
+        if !kept set_metadata(i, it.kind, NONE);
+    }
+}
+
+// SplitBlockAndInsertIfThenElse(Cond, SplitBefore, ThenBlock?, ElseBlock?) with a lazy DomTreeUpdater
+split_block_and_insert_if_then_else :: (cond: Value_Id, split_before: Value_Id, want_then: bool, want_else: bool, weights: Md_Id) -> (Value_Id, Value_Id) {
+    head := inst(split_before).parent;
+    orig_succs: [..] Value_Id; orig_succs.allocator = temp;
+    {
+        tmp: [..] Value_Id; tmp.allocator = temp;
+        block_successors(head, *tmp);
+        for tmp { dup := false; for x: orig_succs if x == it dup = true; if !dup array_add(*orig_succs, it); }
+    }
+    f := block_fn(head);
+    tail := split_basic_block(head, split_before, "");
+    tb := tail; fb := tail;
+    then_edge := false; else_edge := false;
+    dl := get_metadata(split_before, 0);
+    mk :: (f: Value_Id, tail: Value_Id, dl: Md_Id) -> Value_Id {
+        bb := create_block(f, "", tail);
+        br := create_br(tail);
+        block_append_inst(bb, br);
+        if dl != NONE set_metadata(br, 0, dl);
+        return bb;
+    }
+    if want_then { tb = mk(f, tail, dl); then_edge = true; }
+    if want_else { fb = mk(f, tail, dl); else_edge = true; }
+    old := block_terminator(head);
+    nt := create_cond_br(cond, tb, fb);
+    if weights != NONE set_metadata(nt, md_kind_id("prof"), weights);
+    // ReplaceInstWithInst
+    if get_metadata(nt, 0) == NONE { d := get_metadata(old, 0); if d != NONE set_metadata(nt, 0, d); }
+    inst_insert_before(nt, old);
+    drop_all_references(old);
+    erase_inst(old);
+    ups := *sroa_pending_dt_updates;
+    array_add(ups, .{true, head, tb});
+    array_add(ups, .{true, head, fb});
+    if then_edge array_add(ups, .{true, tb, tail});
+    if else_edge array_add(ups, .{true, fb, tail});
+    for orig_succs array_add(ups, .{true, tail, it});
+    for orig_succs array_add(ups, .{false, head, it});
+    return tb, fb;
+}
+
+// rewriteMemOpOfSelect
+rewrite_mem_op_of_select :: (sel: Value_Id, i: Value_Id, spec: u8) {
+    head := inst(i).parent;
+    prof := get_metadata(sel, md_kind_id("prof"));
+    if spec == 0 {
+        split_block_and_insert_if_then_else(op(sel, 0), i, true, true, prof);
+    } else {
+        split_block_and_insert_if_then_else(op(sel, 0), i, true, false, prof);
+        if spec & SPEC_TRUE condbr_swap_successors(block_terminator(head));
+    }
+    head_br := block_terminator(head);
+    tail := inst(i).parent;
+    set_name(tail, tprint("%.cont", vname(head)));
+    is_load := inst_op(i) == .LOAD;
+    pn: Value_Id = NONE;
+    if is_load {
+        pn = create_phi(vtype(i), 2);
+        insert_at_position(pn, tail, i, false);
+    }
+    succs: [..] Value_Id; succs.allocator = temp;
+    block_successors(head, *succs);
+    for sb: succs {
+        is_then := sb == get_successor(head_br, 0);
+        idx: u32 = ifx is_then then cast(u32) 0 else 1;
+        nbb := ifx sb == tail then head else sb;
+        c := clone_load_store(i);
+        if nbb != head set_name(nbb, tprint("%.%", vname(head), ifx is_then then "then" else "else"));
+        else drop_ub_implying_metadata(c);
+        insert_at_position(c, nbb, block_terminator(nbb), false);
+        ptr := op(sel, 1 + idx);
+        set_op(c, ifx is_load then cast(u32) 0 else 1, ptr);
+        if is_load {
+            set_name(c, tprint("%.%.val", vname(i), ifx is_then then "then" else "else"));
+            phi_add_incoming(pn, c, nbb);
+        }
+    }
+    if is_load {
+        nm := vname(i);
+        set_name(i, "");
+        set_name(pn, nm);
+        rauw_with_metadata(i, pn);
+    }
+}
+
+// Function::getEntryCount
+function_entry_count :: (f: Value_Id) -> (bool, u64) {
+    m := get_metadata(f, md_kind_id("prof"));
+    if m == NONE || ir.mds[m].kind != .TUPLE || ir.mds[m].nops < 2 return false, 0;
+    o0 := md_op(m, 0);
+    if o0 == NONE || ir.mds[o0].kind != .STRING || ir.mds[o0].str != "function_entry_count" return false, 0;
+    c := md_const_u64(md_op(m, 1));
+    if c == 0xFFFF_FFFF_FFFF_FFFF return false, 0;
+    return true, c;
+}
+
+// getConstantRangeFromMetadata(N).contains(0)
+md_range_contains_zero :: (m: Md_Id) -> bool {
+    n := ir.mds[m].nops;
+    i: u32 = 0;
+    while i + 1 < n {
+        lo := ir.mds[md_op(m, i)].value; hi := ir.mds[md_op(m, i + 1)].value;
+        if type_int_width(vtype(lo)) > 64 fatal("SROA: wide !range metadata is not supported yet");
+        l := const_int_zext(lo); h := const_int_zext(hi);
+        if l == h return true;              // full set
+        if l < h { if l == 0 return true; }  // [l, h) contains 0 only if l == 0
+        else return true;                    // wrapped: contains 0
+        i += 2;
+    }
+    return false;
 }

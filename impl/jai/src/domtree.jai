@@ -289,7 +289,7 @@ legalize_updates :: (all: [] Dom_Update, result: *[..] Dom_Update, inverse_graph
     result.count = 0;
     for p: order {
         _, n := table_find(*ops, pk(p));
-        assert(n >= -1 && n <= 1, "Unbalanced operations!");
+        // LLVM asserts n in [-1, 1]; release builds (the oracle) accept unbalanced updates (lazy DomTreeUpdater queues)
         if n == 0 continue;
         array_add(result, .{n > 0, p.a, p.b});
     }
