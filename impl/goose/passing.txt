@@ -4866,6 +4866,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/freeze.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/freeze.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/funnel-shift.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/funnel-shift.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/gep-alias-gep-load.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/gep-alias-gep-load.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/gep-alias.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/gep-zeroinit-vector.ll::opt
@@ -5055,6 +5056,7 @@ tests/imported/llvm/Transforms/InstSimplify/insertelement.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/insertvalue.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/insertvalue.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/invalid-load-operand-infinite-loop.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/invariant.group-load.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/invariant.group-load.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/is_fpclass.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/known-never-infinity.ll::roundtrip
