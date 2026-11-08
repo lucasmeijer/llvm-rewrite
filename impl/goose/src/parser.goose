@@ -13,6 +13,7 @@ import intrinsics;
 import autoupgrade;
 import dinfo;
 import gen_dwarf;
+import constfold;
 
 // ---------------------------------------------------------------------------------------------
 // Parser state
@@ -723,7 +724,8 @@ recursive fn parse_constant(ty: i32) -> i32 {
             let et = parse_type();
             let v = parse_value(et);
             expect_punct(')', "')'");
-            return make_splat(ty, v);
+            if !ty_is_vector(ty) { perr("constant expression type mismatch: splat requires vector type"); }
+            return c_splat(ty, v);
         }
         if w == "blockaddress" { return parse_blockaddress(ty); }
         if w == "dso_local_equivalent" || w == "no_cfi" {
@@ -751,67 +753,92 @@ recursive fn parse_constant(ty: i32) -> i32 {
             lex();
             return get_inline_asm(ty, a, c, side, als, intel, unw);
         }
-        // constant expressions
+        // constant expressions (LLParser::parseValID): created through ConstantExpr::get*, which fold
         let cop = cast_from_kw(w);
         if cop >= 0 {
+            if !is_desirable_cast_op(cop) { perr(str(w, " constexprs are no longer supported")); }
             lex();
-            var fl: u8 = 0;
-            expect_punct('(', "'('");
+            expect_punct('(', "'(' after constantexpr cast");
             let st = parse_type();
             let v = parse_value(st);
             expect_kw("to");
             let dt = parse_type();
-            expect_punct(')', "')'");
+            expect_punct(')', "')' at end of constantexpr cast");
             if dt != ty { perr("constant expression type mismatch"); }
-            let mark = vstack.len;
-            vstack.push(v);
-            let r = c_expr(cop, dt, vstack[mark..], fl, 0, -1, -1);
-            vstack.resize(mark);
-            return r;
+            return ce_cast(cop, v, dt);
         }
         let bop = binop_from_kw(w);
         if bop >= 0 {
+            if bop != OP_ADD && bop != OP_SUB && bop != OP_XOR { perr(str(w, " constexprs are no longer supported")); }
             lex();
-            let fl = parse_wrap_flags(bop);
-            expect_punct('(', "'('");
+            var fl: u8 = 0;
+            if bop != OP_XOR {
+                if eat_kw("nuw") { fl |= FL_NUW; }
+                if eat_kw("nsw") { fl |= FL_NSW; if eat_kw("nuw") { fl |= FL_NUW; } }
+            }
+            expect_punct('(', "'(' in binary constantexpr");
             let t1 = parse_type();
             let a = parse_value(t1);
-            expect_punct(',', "','");
+            expect_punct(',', "comma in binary constantexpr");
             let t2 = parse_type();
             let b = parse_value(t2);
-            expect_punct(')', "')'");
-            let mark = vstack.len;
-            vstack.push(a);
-            vstack.push(b);
-            let r = c_expr(bop, t1, vstack[mark..], fl, 0, -1, -1);
-            vstack.resize(mark);
-            return r;
+            expect_punct(')', "')' in binary constantexpr");
+            if t1 != t2 { perr("operands of constexpr must have same type"); }
+            return ce_binop(bop, a, b, fl);
         }
-        if w == "getelementptr" {
+        if w == "getelementptr" || w == "extractelement" || w == "insertelement" || w == "shufflevector" {
+            let is_gep = w == "getelementptr";
+            let wsave = intern(w);
             lex();
-            var fl = parse_gep_flags();
+            var fl: u8 = 0;
             var inr: i32 = -1;
-            if tok_is("inrange") { perr("inrange is not supported yet"); }
-            expect_punct('(', "'('");
-            let sty = parse_type();
-            expect_punct(',', "','");
-            let mark = vstack.len;
-            let bt = parse_type();
-            let base = parse_value(bt);
-            vstack.push(base);
-            while eat_punct(',') {
-                let it = parse_type();
-                let iv = parse_value(it);
-                vstack.push(iv);
+            if is_gep {
+                fl = parse_gep_flags();
+                if eat_kw("inrange") {
+                    expect_punct('(', "'('");
+                    let a = parse_sint();
+                    expect_punct(',', "','");
+                    let b = parse_sint();
+                    expect_punct(')', "')'");
+                    if a >= b { perr("expected end to be larger than start"); }
+                    inr = inrange_id(a, b);
+                }
             }
-            expect_punct(')', "')'");
-            let rt = gep_result_type(bt, mark + 1);
-            let r = c_expr(OP_GEP, rt, vstack[mark..], fl, 0, sty, inr);
+            expect_punct('(', "'(' in constantexpr");
+            var sty: i32 = -1;
+            if is_gep { sty = parse_type(); expect_punct(',', "comma after getelementptr's type"); }
+            let mark = vstack.len;
+            if !tok_punct(')') {
+                loop {
+                    let et = parse_type();
+                    let v = parse_value(et);
+                    vstack.push(v);
+                    if !eat_punct(',') { break; }
+                }
+            }
+            expect_punct(')', "')' in constantexpr");
+            let n = vstack.len - mark;
+            var r: i32 = -1;
+            let wn = sbytes(wsave);
+            if is_gep {
+                if n == 0 { perr("base of getelementptr must be a pointer"); }
+                r = ce_gep(sty, vstack[mark], vstack[mark + 1..], fl, inr);
+            } else if wn == "shufflevector" {
+                if n != 3 { perr("expected three operands to shufflevector"); }
+                let m = vstack[mark + 2];
+                let mt = vals[m].ty;
+                let mm = vstack.len;
+                for k in types[mt].cnt { vstack.push(shuffle_mask_elem(m, k)); }
+                r = ce_shufflevector(vstack[mark], vstack[mark + 1], vstack[mm..]);
+            } else if wn == "extractelement" {
+                if n != 2 { perr("expected two operands to extractelement"); }
+                r = ce_extractelement(vstack[mark], vstack[mark + 1]);
+            } else {
+                if n != 3 { perr("expected three operands to insertelement"); }
+                r = ce_insertelement(vstack[mark], vstack[mark + 1], vstack[mark + 2]);
+            }
             vstack.resize(mark);
             return r;
-        }
-        if w == "extractelement" || w == "insertelement" || w == "shufflevector" {
-            perr("vector constant expressions are not supported yet");
         }
         perr(str("expected value token, got '", w, "'"));
     }

@@ -9,6 +9,7 @@ import calls;
 import intrinsics;
 import dinfo;
 import gen_dwarf;
+import constfold;
 
 var out: u8[>..];
 
@@ -620,12 +621,29 @@ recursive fn put_constant(v: i32) {
     if k == VK_CEXPR {
         let c = csts[vals[v].sub];
         let opc = c.op as i64;
+        if opc == OP_SHUFFLEVECTOR {
+            let sv = c_splat_value(v);
+            if sv >= 0 && (vals[sv].kind == VK_CINT || vals[sv].kind == VK_CFP) {
+                put("splat (");
+                put_operand(sv, true);
+                putc(')');
+                return;
+            }
+        }
         put(opcode_name(opc));
         put_opt_flags(opc, c.flags);
+        if opc == OP_GEP && c.inr >= 0 {
+            put(" inrange(");
+            put_int(gep_inranges[2 * c.inr]);
+            put(", ");
+            put_int(gep_inranges[2 * c.inr + 1]);
+            putc(')');
+        }
         put(" (");
         if opc == OP_GEP { put_type(c.ty2); put(", "); }
         for i in vals[v].nops { if i > 0 { put(", "); } put_operand(op(v, i), true); }
         if is_cast_op(opc) { put(" to "); put_type(ty); }
+        if opc == OP_SHUFFLEVECTOR { put_shuffle_mask(ty, c.aux, c.naux); }
         putc(')');
         return;
     }
