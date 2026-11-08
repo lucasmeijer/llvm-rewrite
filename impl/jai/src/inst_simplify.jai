@@ -2919,7 +2919,7 @@ simplify_extract_element_inst :: (vec: Value_Id, idx: Value_Id, q: Simplify_Quer
             s := vt_get_splat_value(vec);
             if s != NONE return s;
         }
-        e := find_scalar_element(vec, cast(u32) ap_zext_value(ci));
+        e := find_scalar_element(vec, cast,trunc(u32) ap_zext_value(ci));   // unsigned EltNo (truncating getZExtValue)
         if e != NONE return e;
     } else {
         if is_inst(vec) && inst_op(vec) == .INSERTELEMENT && op(vec, 2) == idx return op(vec, 1);
@@ -3222,7 +3222,7 @@ simplify_fdiv_inst :: (op0_in: Value_Id, op1_in: Value_Id, fmf: u32, q: Simplify
 // m_FNegNSZ(m_Specific(X)): fneg X, or fsub -0.0, X, or fsub nsz 0.0, X (FNeg_match) or fsub nsz +0.0, X
 // m_FNegNSZ(m_Specific(X)) = m_FSub(m_AnyZeroFP(), m_Specific(X))
 pm_fneg_nsz_of :: (v: Value_Id, x: Value_Id) -> bool {
-    return opr_code(v) == .FSUB && op(v, 1) == x && pm_any_zero_fp(op(v, 0));
+    return is_inst(v) && inst_op(v) == .FSUB && op(v, 1) == x && pm_any_zero_fp(op(v, 0));
 }
 simplify_frem_inst :: (op0_in: Value_Id, op1_in: Value_Id, fmf: u32, q: Simplify_Query, max_recurse: u32 = RECURSION_LIMIT, eb: u8 = EB_IGNORE, rm: u8 = RM_NEAREST_TIES_TO_EVEN) -> Value_Id {
     op0 := op0_in; op1 := op1_in;

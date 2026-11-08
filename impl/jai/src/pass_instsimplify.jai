@@ -24,7 +24,7 @@ instsimplify_run :: (f: Value_Id) -> Preserved {
                     if v != NONE {
                         u := ir.v_first_use[i];
                         while u != NONE { table_set(*next, ir.u_user[u], true); u = ir.u_next[u]; }
-                        replace_all_uses_with(i, v);
+                        rauw_with_metadata(i, v);
                         changed = true;
                         if !has_uses(i) && would_instruction_be_trivially_dead(i, false) array_add(*dead, i);
                     }
@@ -59,7 +59,24 @@ recursively_delete_trivially_dead_instructions :: (dead_in: [..] Value_Id) {
             set_op(i, cast(u32) k, NONE);
             if o != NONE && is_inst(o) && !has_uses(o) && is_instruction_trivially_dead(o) array_add(*dead, o);
         }
-        erase_inst(i);
+        erase_inst_with_metadata(i);
     }
 }
-salvage_debug_info :: (i: Value_Id) { }   // debug records aren't supported by the parser (DESIGN.md)
+// salvageDebugInfo (llvm/lib/Transforms/Utils/Local.cpp). Instructions salvageDebugInfoImpl can't describe (calls,
+// loads, phis, ...) get their debug users' locations killed (poison), which erase_inst_with_metadata does.
+// Rewriting the DIExpression for casts / GEPs / binary operators / icmps (appendOpsToArg, foldConstantMath) is
+// not ported: fail loudly when one of those has debug users.
+salvage_debug_info :: (i: Value_Id) {
+    users: [..] u32; users.allocator = temp;
+    find_dbg_users(inst_fn(i), i, *users);
+    if users.count == 0 return;
+    o := inst_op(i);
+    salvageable := is_cast_op(o) || o == .GEP || o == .ICMP ||
+                   o == .ADD || o == .SUB || o == .MUL || o == .SDIV || o == .SREM || o == .OR || o == .AND || o == .XOR ||
+                   o == .SHL || o == .LSHR || o == .ASHR;
+    if salvageable fatal("salvageDebugInfo for a deleted '%' with debug users is not supported yet", opcode_name(o));
+    for users {
+        r := dbgr(it);
+        if r.loc != NONE && ir.mds[r.loc].kind != .VALUE fatal("killing a DIArgList debug location (salvageDebugInfo) is not supported yet");
+    }
+}

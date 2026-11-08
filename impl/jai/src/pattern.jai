@@ -264,7 +264,17 @@ pm_inf :: (v: Value_Id) -> bool { return pm_fp_pred(v, apf_is_inf); }
 pm_non_inf :: (v: Value_Id) -> bool { return pm_fp_pred(v, (f: APFloat) -> bool { return !apf_is_inf(f); }); }
 pm_finite :: (v: Value_Id) -> bool { return pm_fp_pred(v, apf_is_finite); }
 pm_finite_non_zero :: (v: Value_Id) -> bool { return pm_fp_pred(v, apf_is_finite_non_zero); }
-pm_fp_one :: (v: Value_Id) -> bool { return pm_fp_pred(v, apf_is_exactly_one); }
+// m_FPOne = m_SpecificFP(1.0): a ConstantFP, or a vector constant whose getSplatValue() (no poison) is one
+pm_fp_one :: (v: Value_Id) -> bool {
+    if v == NONE return false;
+    k := vkind(v);
+    if k == .C_FP return apf_is_exactly_one(apf_from_const(v));
+    if is_vector_type(vtype(v)) && is_constant_kind(k) {
+        s := get_splat_value(v, false);
+        return s != NONE && vkind(s) == .C_FP && apf_is_exactly_one(apf_from_const(s));
+    }
+    return false;
+}
 apf_is_exactly_one :: (f: APFloat) -> bool {
     g := f;
     one := fp_from_integer(g.k, .[1], 64, false);
@@ -274,14 +284,15 @@ apf_is_exactly_one :: (f: APFloat) -> bool {
 
 // ---------------------------------------------------------------- operators
 
-// m_BinOp<Opc>(m_Value(A), m_Value(B)) over instructions and constant expressions
+// m_BinOp<Opc>(m_Value(A), m_Value(B)). LLVM 23's BinaryOp_match / BinOpPred_match / AnyBinaryOp_match only match
+// instructions (not constant expressions); OverflowingBinaryOp_match (m_NSWAdd, m_NSWNeg, ...) still does.
 pm_binop :: (v: Value_Id, opc: Opcode) -> (bool, Value_Id, Value_Id) {
-    if opr_code(v) != opc return false, NONE, NONE;
+    if !is_inst(v) || inst_op(v) != opc return false, NONE, NONE;
     return true, op(v, 0), op(v, 1);
 }
 // m_c_<op>(m_Specific(X), m_Value(Y)): the other operand when one operand is x
 pm_c_binop_with :: (v: Value_Id, opc: Opcode, x: Value_Id) -> (bool, Value_Id) {
-    if opr_code(v) != opc return false, NONE;
+    if !is_inst(v) || inst_op(v) != opc return false, NONE;
     a := op(v, 0); b := op(v, 1);
     if a == x return true, b;
     if b == x return true, a;
@@ -291,14 +302,14 @@ pm_c_binop_with :: (v: Value_Id, opc: Opcode, x: Value_Id) -> (bool, Value_Id) {
 is_binary_operator :: (v: Value_Id) -> bool { return is_inst(v) && is_binary_op(inst_op(v)); }
 // m_Not(m_Value(X)): xor X, -1 / xor -1, X
 pm_not :: (v: Value_Id) -> (bool, Value_Id) {
-    if opr_code(v) != .XOR return false, NONE;
+    if !is_inst(v) || inst_op(v) != .XOR return false, NONE;
     a := op(v, 0); b := op(v, 1);
     if pm_all_ones(a) return true, b;
     if pm_all_ones(b) return true, a;
     return false, NONE;
 }
 pm_not_forbid_poison :: (v: Value_Id) -> (bool, Value_Id) {
-    if opr_code(v) != .XOR return false, NONE;
+    if !is_inst(v) || inst_op(v) != .XOR return false, NONE;
     a := op(v, 0); b := op(v, 1);
     if pm_all_ones_forbid_poison(a) return true, b;
     if pm_all_ones_forbid_poison(b) return true, a;
@@ -306,13 +317,13 @@ pm_not_forbid_poison :: (v: Value_Id) -> (bool, Value_Id) {
 }
 // m_Neg(m_Value(X)): sub 0, X
 pm_neg :: (v: Value_Id) -> (bool, Value_Id) {
-    if opr_code(v) != .SUB return false, NONE;
+    if !is_inst(v) || inst_op(v) != .SUB return false, NONE;
     if !pm_zero_int(op(v, 0)) return false, NONE;
     return true, op(v, 1);
 }
-pm_nsw_neg :: (v: Value_Id) -> (bool, Value_Id) {
-    ok, x := pm_neg(v);
-    if ok && (opr_flags(v) & F_NSW) != 0 return true, x;
+pm_nsw_neg :: (v: Value_Id) -> (bool, Value_Id) {   // OverflowingBinaryOp_match: constant expressions too
+    if opr_code(v) != .SUB || !pm_zero_int(op(v, 0)) return false, NONE;
+    if (opr_flags(v) & F_NSW) != 0 return true, op(v, 1);
     return false, NONE;
 }
 // m_FNeg(m_Value(X)): fneg X, or fsub -0.0, X (fsub nsz 0.0, X)
@@ -328,7 +339,8 @@ pm_fneg :: (v: Value_Id) -> (bool, Value_Id) {
 }
 // m_AddLike(X, Y): add, or `or disjoint`
 pm_add_like :: (v: Value_Id) -> (bool, Value_Id, Value_Id) {
-    o := opr_code(v);
+    if !is_inst(v) return false, NONE, NONE;
+    o := inst_op(v);
     if o == .ADD return true, op(v, 0), op(v, 1);
     if o == .OR && (opr_flags(v) & F_EXACT) != 0 return true, op(v, 0), op(v, 1);
     return false, NONE, NONE;

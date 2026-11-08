@@ -1071,6 +1071,12 @@ assume_bundle_implies_non_null :: (v: Value_Id, f: Value_Id, assume: Value_Id, k
     end := ir.u32_pool[inst(assume).idx + 3 * k + 2];
     if end == begin || op(assume, begin) != v return false;
     if tag == "nonnull" return true;
+    if tag == "align" {
+        // Ptr == Val && Alignment && Offset && isPowerOf2(Alignment) && Offset % Alignment != 0
+        ok, p, al, off := assume_align_info(assume, k);
+        if !ok return false;
+        return al != 0 && (al & (al - 1)) == 0 && off % al != 0;
+    }
     if tag == "dereferenceable" {
         if end - begin < 2 return false;
         okn, n := pm_apint(op(assume, begin + 1));
@@ -1810,6 +1816,7 @@ is_known_non_zero_from_operator :: (i: Value_Id, de: APInt, q: Simplify_Query, d
                     case IID_FSHR; #through; case IID_FSHL;
                         if a0 == op(i, 1) return is_known_non_zero_de(a0, de, q, depth);
                     case IID_VSCALE; return true;
+                    case IID_EXPERIMENTAL_GET_VECTOR_LENGTH; return is_known_non_zero(a0, q, depth);
                 }
                 return is_known_non_zero_fallback(i, de, q, depth);
             }
