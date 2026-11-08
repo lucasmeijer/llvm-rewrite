@@ -363,37 +363,34 @@ fn use_set(u: i32, v: i32) {
 
 fn set_op(user: i32, k: i64, v: i32) { use_set(vals[user].ops + k as i32, v); }
 
-// Appends one operand slot, growing the run (copy to a fresh run of double capacity) if needed.
+// User::growHungoffUses: copy the run to a new one of capacity ncap. Each copied use is `set` (pushed at the
+// head of its value's use list) in operand order, then the old uses are destroyed (unlinked) last to first.
+fn grow_ops(user: i32, ncap: i64) {
+    let n = vals[user].nops as i64;
+    let old = vals[user].ops;
+    let at = uses.len as i32;
+    for k in ncap {
+        uses.push(Use { val: -1, user: user, next: -1, prev: -1 });
+        use_aux.push(-1);
+    }
+    for k in n {
+        use_set(at + k as i32, uses[old + k].val);
+        use_aux[at + k] = use_aux[old + k];
+    }
+    var k = n;
+    while k > 0 { k--; use_unlink(old + k as i32); uses[old + k].val = -1; }
+    vals[user].ops = at;
+    vals[user].cap = ncap as i32;
+}
+
+// Appends one operand slot. Growth policy of PHINode::growOperands (n + n/2, at least 2); SwitchInst and
+// IndirectBrInst callers grow with grow_ops themselves (3n / 2n) before calling this.
 fn add_op_slot(user: i32) -> i64 {
     let n = vals[user].nops as i64;
     if n == vals[user].cap as i64 {
-        let ncap = if n < 2 { 2 } else { n * 2 };
-        let old = vals[user].ops;
-        let at = uses.len as i32;
-        for k in ncap {
-            uses.push(Use { val: -1, user: user, next: -1, prev: -1 });
-            use_aux.push(-1);
-        }
-        for k in n {
-            let ou = old + k as i32;
-            let nu = at + k as i32;
-            let v = uses[ou].val;
-            use_aux[nu] = use_aux[ou];
-            uses[nu].val = v;
-            if v >= 0 && has_use_list(v) {
-                let p = uses[ou].prev;
-                let nx = uses[ou].next;
-                uses[nu].prev = p;
-                uses[nu].next = nx;
-                if p >= 0 { uses[p].next = nu; } else { vals[v].first_use = nu; }
-                if nx >= 0 { uses[nx].prev = nu; }
-            }
-            uses[ou].val = -1;
-            uses[ou].next = -1;
-            uses[ou].prev = -1;
-        }
-        vals[user].ops = at;
-        vals[user].cap = ncap as i32;
+        var ncap = n + n / 2;
+        if ncap < 2 { ncap = 2; }
+        grow_ops(user, ncap);
     }
     vals[user].nops = (n + 1) as i32;
     return n;

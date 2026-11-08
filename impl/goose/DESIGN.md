@@ -70,11 +70,10 @@ A *user* (instruction or constant) owns a run `[ops_start, ops_start + ops_len)`
 - **ConstantData has no use list** in LLVM 23 (`Value::hasUseList()` is `!isa<ConstantData>`): ints, FP, null,
   undef, poison, zeroinitializer, data arrays/vectors. Uses of them are not linked (`next = prev = -1`); `users()` on
   them is an error, as it is in LLVM.
-- Growing a run (`phi.addIncoming`, `switch.addCase`) copies it to a bigger run at the end of the pool. Today
-  (`add_op_slot`) the neighbours' links are re-pointed in place; LLVM's `growHungoffUses` instead re-`set`s each
-  copied use (pushing it at the head of its value's list) and then destroys the old ones, with capacity `n + n/2`
-  for PHIs and `3n` for switches. That has to be ported before passes depend on use-list order after PHI growth.
-  Old runs are leaked for now (a per-capacity free list is planned). Removing an
+- Growing a run (`phi.addIncoming`, `switch.addCase`) copies it to a bigger run at the end of the pool exactly like
+  LLVM's `growHungoffUses` (`grow_ops`): each copied use is re-`set` (pushed at the head of its value's list) in
+  operand order, then the old uses are destroyed; capacity `n + n/2` for PHIs, `3n` for switches. Old runs are
+  leaked for now (a per-capacity free list is planned). Removing an
   operand (`phi.removeIncoming`) shifts the tail down *in LLVM's way* (it swaps/moves exactly like the C++ so that
   operand order matches).
 - PHI incoming blocks are **not** operands in LLVM (no uses on the block); they sit in `use_aux` beside the value's

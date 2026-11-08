@@ -61,8 +61,9 @@
   operand API; `set_op` is `Use::set` (pushes at the head of the new value's use list). `rauw` is LLVM's loop.
   The parser uses `rauw_with_constants`, which re-uniques constant users (`handleOperandChange`).
 - **Erase** (`inst_erase`) marks the value `VK_DEAD`; ids are not reused yet (the design allows a free list).
-- **Operand growth** (`add_op_slot`) relinks uses in place. That is *not* LLVM's `growHungoffUses` order (see
-  `knowledge/llvm/textual-ir.md`): port that before PHI-heavy passes rely on use-list order.
+- **Operand growth**: `add_op_slot` grows like `PHINode::growOperands` via `grow_ops`, which reproduces
+  `growHungoffUses`' use-list effect. Switch (`3n`) and indirectbr (`2n`) growth must call `grow_ops` with their
+  own capacity first.
 - **Constants are not folded on creation.** LLVM folds constant expressions in `ConstantExpr::get*`
   (`ConstantFold.cpp`); we only canonicalize aggregates (all-zero → zeroinitializer, all-undef → undef, data
   arrays). Imported tests show the difference (`gep (..., i32 0, i64 0)` → base pointer).
