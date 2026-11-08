@@ -7521,6 +7521,7 @@ tests/imported/llvm/Transforms/SROA/aarch64-sme-svcount.ll::opt
 tests/imported/llvm/Transforms/SROA/aarch64-sme-svcount.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/address-spaces.ll::opt
 tests/imported/llvm/Transforms/SROA/address-spaces.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/addrspacecast.ll::opt
 tests/imported/llvm/Transforms/SROA/addrspacecast.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/alignment.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/alloca-address-space.ll::opt
@@ -7561,6 +7562,7 @@ tests/imported/llvm/Transforms/SROA/phi-gep.ll::opt
 tests/imported/llvm/Transforms/SROA/phi-gep.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/phi-speculate-different-load-types.ll::opt
 tests/imported/llvm/Transforms/SROA/phi-speculate-different-load-types.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/phi-with-duplicate-pred.ll::opt
 tests/imported/llvm/Transforms/SROA/phi-with-duplicate-pred.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/pointer-offset-size.ll::opt
 tests/imported/llvm/Transforms/SROA/pointer-offset-size.ll::roundtrip
@@ -7572,6 +7574,7 @@ tests/imported/llvm/Transforms/SROA/pr64081.ll::opt
 tests/imported/llvm/Transforms/SROA/pr64081.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/prefer-integer-partition.ll::opt
 tests/imported/llvm/Transforms/SROA/prefer-integer-partition.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/preserve-metadata.ll::opt
 tests/imported/llvm/Transforms/SROA/preserve-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/propagate-fast-math-flags-on-phi.ll::opt
 tests/imported/llvm/Transforms/SROA/propagate-fast-math-flags-on-phi.ll::roundtrip
@@ -7583,6 +7586,7 @@ tests/imported/llvm/Transforms/SROA/scalable-vector-struct.ll::opt
 tests/imported/llvm/Transforms/SROA/scalable-vector-struct.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/scalable-vectors-with-known-vscale.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/scalable-vectors.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/select-gep.ll::opt
 tests/imported/llvm/Transforms/SROA/select-gep.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/select-load.ll::opt
 tests/imported/llvm/Transforms/SROA/select-load.ll::roundtrip
