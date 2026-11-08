@@ -619,23 +619,37 @@ fn replace_uses_of_with(i: i32, from: i32, to: i32) {
 }
 
 // Instruction::dropUBImplyingAttrsAndMetadata
+// Instruction::dropUBImplyingAttrsAndMetadata(): keeps !annotation, !range, !nonnull, !align, !fpmath, !prof,
+// !DIAssignID and the debug location; on a call also drops noundef / dereferenceable / dereferenceable_or_null from
+// the return and every argument (AttributeFuncs::getUBImplyingAttributes).
 fn drop_ub_implying_attrs_and_md(i: i32) {
-    // Instruction::dropUBImplyingAttrsAndMetadata keeps !annotation, !range, !nonnull, !align, !fpmath, !prof (and
-    // the debug location); dropping any other attachment is not ported
     let ii = inst_of(i);
     var keep: i32[>..<] = [];
     keep.push(md_kind_id("annotation")); keep.push(md_kind_id("range")); keep.push(md_kind_id("nonnull"));
     keep.push(md_kind_id("align")); keep.push(md_kind_id("fpmath")); keep.push(md_kind_id("prof"));
-    var any = false;
+    keep.push(md_kind_id("DIAssignID"));
+    var drop: i32[>..<] = [];
     for k in insts[ii].nmd {
         let kind = md_att[insts[ii].md + 2 * k];
         if kind == 0 { continue; }
         var kept = false;
         for kk in keep { if kk == kind { kept = true; } }
-        if !kept { any = true; }
+        if !kept { drop.push(kind); }
     }
-    if any { ic_not_ported("dropUBImplyingAttrsAndMetadata with metadata"); }
-    if is_callbase(i) && insts[ii].attrs != 0 { ic_not_ported("dropUBImplyingAttrsAndMetadata on a call"); }
+    for kind in drop { inst_erase_md(i, kind); }
+    if !is_callbase(i) { return; }
+    let l = insts[ii].attrs;
+    if l == 0 { return; }
+    let ub: i64[3] = [AK_NoUndef, AK_Dereferenceable, AK_DereferenceableOrNull];
+    var xs: i32[>..<] = [];
+    xs.push(alist_fn(l));
+    xs.push(aset_without(alist_ret(l), ub));
+    let na = cb_nargs(i);
+    let np = max(alists[l].n as i64 - 2, na);
+    for k in np {
+        if k < na { xs.push(aset_without(alist_param(l, k), ub)); } else { xs.push(alist_param(l, k)); }
+    }
+    insts[ii].attrs = alist_get(xs);
 }
 
 // foldOperationIntoSelectOperand(I, SI, NewOp, IC)
@@ -1046,7 +1060,8 @@ recursive fn gfi_impl(v: i32, will_invert_all: bool, build: bool, depth0: i64) -
     if is_cmp_inst(v) {
         if build {
             if iop(v) == OP_ICMP { return icb_icmp(icmp_inverse_pred(inst_pred(v)), op(v, 0), op(v, 1), ""); }
-            ic_not_ported("getFreelyInverted of an fcmp");
+            // CreateCmp(I->getInversePredicate(), ...): FCmpInst inverse predicate is 15 - P
+            return icb_fcmp_fmf(15 - inst_pred(v), op(v, 0), op(v, 1), icb_fmf, "");
         }
         return GFI_NONNULL;
     }

@@ -930,7 +930,19 @@ recursive fn kfc_compute(v: i32, de: u64, interested0: u64, depth: i64) -> KFC {
         return KFC { known: known, sign: if all_one != all_zero { if all_one { 1 } else { 0 } } else { -1 } };
     }
     if k == VK_CDVECTOR || k == VK_CDARRAY || k == VK_CARRAY || k == VK_CSTRUCT {
-        fp_not_ported("known FP class of a constant aggregate");
+        // ConstantDataSequential / ConstantAggregate: the union of the element classes (sign unknown); an element
+        // that is not a ConstantFP makes it unknown
+        var known: u64 = 0;
+        let n = ty_count(ty);
+        for i in n {
+            let e = agg_elem(v, i);
+            if e < 0 || vals[e].kind != VK_CFP {
+                if k == VK_CDARRAY || k == VK_CDVECTOR { fp_not_ported("known FP class of a non-FP ConstantDataSequential"); }
+                return kfc_unknown();
+            }
+            known |= cfp_class(e);
+        }
+        return KFC { known: known, sign: -1 };
     }
     var knot: u64 = 0;
     if k == VK_INST && is_callbase(v) {

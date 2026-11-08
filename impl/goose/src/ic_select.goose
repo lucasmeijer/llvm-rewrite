@@ -2807,10 +2807,11 @@ fn sl_ord_or_unord_fminmax(si: i32, is_max: bool) -> i32, i32 {
     let l = op(c, 0);
     let r = op(c, 1);
     if (t != l || f != r) && (t != r || f != l) { return -1, -1; }
-    let p = if t == l { inst_pred(c) } else { vt_fpred_swapped(inst_pred(c)) };
+    // FMaxMin_match: LHS == TrueVal ? the predicate : the inverse predicate; binds the compare's operands
+    let p = if l == t { inst_pred(c) } else { 15 - inst_pred(c) };
     let ok = if is_max { p == P_OGT || p == P_OGE || p == P_FUGT || p == P_FUGE } else { p == P_OLT || p == P_OLE || p == P_FULT || p == P_FULE };
     if !ok { return -1, -1; }
-    return t, f;
+    return l, r;
 }
 // Type::isIEEELikeFPTy
 fn sl_is_ieee_like(t: i32) -> bool {
