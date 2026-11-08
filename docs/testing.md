@@ -9,6 +9,8 @@ A test is any `.ll` file under `tests/`. Directives in its leading comment block
 
 ```llvm
 ; @opt: -passes=instcombine     IR->IR check (repeatable for imported tests: all must match)
+; @analysis: -passes='print<domtree>'               analysis-printer check (repeatable: all must match)
+; @analysis-unordered: -passes='print<demanded-bits>'   the same, comparing lines as a sorted multiset
 ; @llc: -O0                     enables ::isel-ir and ::run
 ; @driver: tests/function/src/abi/x.driver.c    C file linked in for ::run (function tests)
 ; @source: tests/e2e/src/arith/x.c              the C the IR came from (informational)
@@ -21,10 +23,33 @@ A test ID is `<repo-relative path>::<check>`, e.g. `tests/e2e/O0/calls/varargs.l
 | --- | --- | --- |
 | `roundtrip` | yes | `opt -S in.ll` with no passes: our printed text is **byte-identical** to LLVM's. Tests the parser and printer. |
 | `opt` | if `@opt` | `opt <args> -S`: both outputs canonicalized via `llvm-as \| llvm-dis` (so value numbering etc. can't cause false failures), then identical. Our output must also pass LLVM's verifier. |
+| `analysis` | if `@analysis` | `opt <args> -disable-output in.ll`: exit status 0, and stdout and stderr **byte-identical** to LLVM's (see below). |
 | `isel-ir` | if `@llc` | The IR that reaches instruction selection, `llc <args> -stop-before=x86-isel`. Input is LLVM's opt output, so this is isolated from `opt`. Canonicalized and identical. |
 | `run` | if `@llc` | Full pipeline with *our* tools (our opt if `@opt`, then our llc), linked by clang with `-no-pie`, executed: stdout and exit code identical to the LLVM-built program. |
 
 Outcomes: `pass`, `fail`, or `invalid`. `invalid` means LLVM itself fails on the test, so the test is broken.
+
+### Analysis printers (`::analysis`)
+
+An analysis is checked through LLVM's printer pass for it: `print<domtree>`, `print<postdomtree>`, `print<loops>`,
+`print<cycles>`, `print<scalar-evolution>`, `print<memoryssa>`, `print<demanded-bits>`, `print<lazy-value-info>`,
+`print<branch-prob>`, `print<block-freq>`, `print<access-info>`, `print<cost-model>`, `aa-eval`, … Printers write to
+stderr. The `<args>` of an `@analysis` line are ordinary opt arguments and may contain transforms before the printer
+(`-passes='require<domtree>,break-crit-edges,print<domtree>'`) and the flags that control what a printer prints
+(`-aa-pipeline=basic-aa -passes=aa-eval -print-all-alias-modref-info`). The harness appends `-disable-output`, so no
+IR is written and the transforms in the line are checked only through what the printers show.
+
+Canonicalization: none. Printer output shows names the way the IR printer does (`%5`, `%entry`), so it already depends
+on the implementation getting the IR exactly right. The one exception is `@analysis-unordered`, for printers that
+iterate a map keyed by pointers (`print<demanded-bits>`; LLVM's own tests use `CHECK-DAG` for them): both outputs are
+compared after sorting their lines. Per-function headers are sorted along with everything else there, so keep such
+tests to lines that are unique on their own.
+
+Determinism: LLVM's output is computed twice (once, then cached); if the runs differ, the test is `invalid`, with a
+hint to use `@analysis-unordered` when only the order changed. Two runs can agree by chance, so when you write an
+analysis test for a new printer, run LLVM's opt on it a few times yourself. `import-llvm` runs each printer line six
+times and picks `@analysis`, `@analysis-unordered` or (when the content itself changes, e.g. printed addresses as in
+`print<alias-sets>` or `print-callgraph`) skips it.
 
 ## Corpus layout
 
@@ -35,7 +60,9 @@ tests/e2e/O0/<area>/*.ll             clang -O0 -Xclang -disable-O0-optnone; @llc
 tests/e2e/O2/<area>/*.ll             clang -O2;                              @llc -O2
 tests/e2e/pipeline/<area>/*.ll       clang -O2 -Xclang -disable-llvm-passes; @opt -O2, @llc -O2
 tests/function/src/<area>/x.c + x.driver.c    same three configurations, with @driver
+tests/analysis/<printer>/*.ll        hand-written IR for analysis printers; @analysis
 tests/imported/llvm/Transforms/<Pass>/*.ll    LLVM's regression tests, original paths kept; SKIPPED.md per dir
+tests/imported/llvm/Analysis/<Dir>/*.ll       LLVM's analysis tests: @analysis for printer RUN lines, @opt for the rest
 tests/perf/compile/<program>.ll      whole llvm-test-suite programs, one linked module each; @opt -O2, @perf
 tests/perf/scaling/<shape>/n<N>.ll   synthetic IR of one shape at three sizes; @opt per pass, @perf, @perf-size
 ```
@@ -58,6 +85,7 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/`, `imported/` and `perf/` are genera
 
 ./harness/run from-c tests/e2e/src/<area>/x.c            # C -> three .ll tests, with UB validation
 ./harness/run import-llvm Transforms/LICM                # import LLVM's tests for a pass
+./harness/run import-llvm Analysis/ScalarEvolution       # or for an analysis (printer RUN lines become @analysis)
 ./harness/run import-test-suite SingleSource/UnitTests   # import llvm-test-suite programs
 
 ./harness/run perf --impl rust                           # compile-time report vs LLVM, ~25 s (see Performance)
@@ -68,7 +96,8 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/`, `imported/` and `perf/` are genera
 
 `check` runs `impl/<lang>/build.sh` first (skip with `--no-build`). For every failing check it writes artifacts to
 `.harness-out/<impl>/<test path>/<check>/`: `message.txt`, `expected.ll` and `actual.ll` (canonicalized), `diff.txt`,
-`input.ll`, `out.s`, `expected.stdout` and `actual.stdout`, `stderr.txt`.
+`input.ll`, `out.s`, `expected.stdout` and `actual.stdout`, `stderr.txt`; for `::analysis`, `args.txt`,
+`expected.stderr`, `actual.stderr`, `diff.stderr.txt` (and the same for stdout if it differs).
 
 `from-c` rejects programs that are nondeterministic, time out (10 s), or behave differently between clang `-O0`,
 `-O2` and `-O1 -fsanitize=address,undefined`, because that indicates UB and the test would be meaningless.
@@ -120,9 +149,10 @@ opt <args> -S <in.ll> -o <out.ll>               # <args> empty = parse and print
 llc <args> -stop-before=x86-isel <in.ll> -o <out>   # write the module as textual IR (LLVM writes MIR; either is accepted)
 llc <args> <in.ll> -o <out.s>                   # AT&T assembly for x86_64-unknown-linux-gnu
 opt <args> -opt-bisect-limit=<N> -S <in> -o <out>   # used by `bisect`; count passes exactly like LLVM
+opt <args> -disable-output <in.ll>              # ::analysis: printers write to stderr; no IR is written
 ```
 
-`<args>` come from `@opt` and `@llc` lines and from LLVM's own RUN lines: `-passes=<pipeline>`, `-O0`…`-O3`,
+`<args>` come from `@opt`, `@analysis` and `@llc` lines and from LLVM's own RUN lines: `-passes=<pipeline>`, `-O0`…`-O3`,
 `-mtriple=…`, `-mattr=…`, and occasionally pass-specific `cl::opt` flags. An implementation that doesn't support a
 flag must exit nonzero with a clear message. The working directory is the repository root, and `<in.ll>` is a
 repo-relative path (it shows up in `; ModuleID = '…'`).

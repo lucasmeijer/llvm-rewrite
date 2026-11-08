@@ -15,7 +15,7 @@ Background and the decisions behind all this: [docs/plan.md](docs/plan.md).
 | Path | What |
 | --- | --- |
 | `docs/roadmap.md` | Units of work; each has an exit selector of tests that must pass |
-| `docs/testing.md` | Test format, the four checks, harness commands, the CLI contract our tools must follow |
+| `docs/testing.md` | Test format, the five checks, harness commands, the CLI contract our tools must follow |
 | `harness/run` | The harness (Python, standard library only) |
 | `tests/` | Shared corpus. `e2e/`, `function/`, `roundtrip/`, `imported/llvm/…` (LLVM's own tests) |
 | `impl/<lang>/` | One implementation: `build.sh`, `DESIGN.md`, `NOTES.md`, `passing.txt`, sources |

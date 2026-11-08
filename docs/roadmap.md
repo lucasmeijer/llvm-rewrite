@@ -61,9 +61,60 @@ Analyses (dominator tree, loop info, alias analysis, ScalarEvolution, MemorySSA,
 The last two units are llc's IR-level passes (everything before instruction selection): IR in, IR out, matched
 exactly, so they belong here and not with the backend.
 
-### L1.harness-analysis — Support analysis-printer tests (`opt -passes='print<domtree>'`, stderr output)
-- deps: none
+### L1.harness-analysis — Every hand-written analysis-printer test in `tests/analysis` (the harness support is done)
+- deps: L1.analysis.domtree, L1.analysis.loops, L1.analysis.scev, L1.analysis.aa, L1.analysis.memoryssa, L1.analysis.demanded-bits, L1.analysis.lvi, L1.analysis.bfi, L1.analysis.laa, L1.analysis.cost-model
 - exit: tests/analysis/*::analysis
+
+Analysis units check an analysis directly through its printer (`::analysis`, see `docs/testing.md`), on hand-written
+tests in `tests/analysis/<printer>/` and LLVM's own tests in `tests/imported/llvm/Analysis/<Dir>/`. A pass needs the
+analysis's results, not its printer, so pass units don't depend on these; but when a pass diverges, the printer of the
+analysis it uses is the quickest way to tell whether the analysis or the pass is wrong. The `::opt` checks in
+`tests/imported/llvm/Analysis/` (mostly GVN, DSE and LICM run over interesting alias or MemorySSA cases) belong to no
+unit yet.
+
+### L1.analysis.domtree — DominatorTree and PostDominatorTree (`print<domtree>`, `print<postdomtree>`)
+- deps: L0.print-clang
+- exit: tests/analysis/domtree/*::roundtrip, tests/analysis/domtree/*::analysis, tests/analysis/postdomtree/*::roundtrip, tests/analysis/postdomtree/*::analysis, tests/imported/llvm/Analysis/Dominators/*::roundtrip, tests/imported/llvm/Analysis/Dominators/*::analysis, tests/imported/llvm/Analysis/PostDominators/*::roundtrip, tests/imported/llvm/Analysis/PostDominators/*::analysis
+
+### L1.analysis.loops — LoopInfo, CycleInfo, LoopNest (`print<loops>`, `print<cycles>`, `print<loopnest>`)
+- deps: L1.analysis.domtree
+- exit: tests/analysis/loops/*::roundtrip, tests/analysis/loops/*::analysis, tests/analysis/cycles/*::roundtrip, tests/analysis/cycles/*::analysis, tests/imported/llvm/Analysis/LoopInfo/*::roundtrip, tests/imported/llvm/Analysis/LoopInfo/*::analysis, tests/imported/llvm/Analysis/CycleInfo/*::roundtrip, tests/imported/llvm/Analysis/CycleInfo/*::analysis, tests/imported/llvm/Analysis/LoopNestAnalysis/*::roundtrip, tests/imported/llvm/Analysis/LoopNestAnalysis/*::analysis
+
+### L1.analysis.scev — ScalarEvolution (`print<scalar-evolution>`)
+- deps: L1.analysis.loops
+- exit: tests/analysis/scev/*::roundtrip, tests/analysis/scev/*::analysis, tests/imported/llvm/Analysis/ScalarEvolution/*::roundtrip, tests/imported/llvm/Analysis/ScalarEvolution/*::analysis
+
+### L1.analysis.aa — Alias analysis: BasicAA, TBAA, ScopedNoAliasAA, GlobalsModRef (`aa-eval -print-all-alias-modref-info`)
+- deps: L1.analysis.domtree
+- exit: tests/analysis/aa/*::roundtrip, tests/analysis/aa/*::analysis, tests/imported/llvm/Analysis/BasicAA/*::roundtrip, tests/imported/llvm/Analysis/BasicAA/*::analysis, tests/imported/llvm/Analysis/TypeBasedAliasAnalysis/*::roundtrip, tests/imported/llvm/Analysis/TypeBasedAliasAnalysis/*::analysis, tests/imported/llvm/Analysis/ScopedNoAliasAA/*::roundtrip, tests/imported/llvm/Analysis/ScopedNoAliasAA/*::analysis, tests/imported/llvm/Analysis/GlobalsModRef/*::roundtrip, tests/imported/llvm/Analysis/GlobalsModRef/*::analysis
+
+### L1.analysis.memoryssa — MemorySSA (`print<memoryssa>`, `print<memoryssa-walker>`)
+- deps: L1.analysis.aa
+- exit: tests/analysis/memoryssa/*::roundtrip, tests/analysis/memoryssa/*::analysis, tests/imported/llvm/Analysis/MemorySSA/*::roundtrip, tests/imported/llvm/Analysis/MemorySSA/*::analysis
+
+### L1.analysis.demanded-bits — DemandedBits (`print<demanded-bits>`, compared unordered)
+- deps: L0.print-clang
+- exit: tests/analysis/demanded-bits/*::roundtrip, tests/analysis/demanded-bits/*::analysis, tests/imported/llvm/Analysis/DemandedBits/*::roundtrip, tests/imported/llvm/Analysis/DemandedBits/*::analysis
+
+### L1.analysis.lvi — LazyValueInfo (`print<lazy-value-info>` after jump-threading's queries)
+- deps: L1.analysis.domtree, L1.jump-threading
+- exit: tests/analysis/lvi/*::roundtrip, tests/analysis/lvi/*::analysis, tests/imported/llvm/Analysis/LazyValueAnalysis/*::roundtrip, tests/imported/llvm/Analysis/LazyValueAnalysis/*::analysis
+
+### L1.analysis.bfi — BranchProbabilityInfo and BlockFrequencyInfo (`print<branch-prob>`, `print<block-freq>`)
+- deps: L1.analysis.loops
+- exit: tests/analysis/branch-prob/*::roundtrip, tests/analysis/branch-prob/*::analysis, tests/analysis/block-freq/*::roundtrip, tests/analysis/block-freq/*::analysis, tests/imported/llvm/Analysis/BranchProbabilityInfo/*::roundtrip, tests/imported/llvm/Analysis/BranchProbabilityInfo/*::analysis, tests/imported/llvm/Analysis/BlockFrequencyInfo/*::roundtrip, tests/imported/llvm/Analysis/BlockFrequencyInfo/*::analysis
+
+### L1.analysis.laa — LoopAccessAnalysis (`print<access-info>`)
+- deps: L1.analysis.scev, L1.analysis.aa
+- exit: tests/analysis/access-info/*::roundtrip, tests/analysis/access-info/*::analysis, tests/imported/llvm/Analysis/LoopAccessAnalysis/*::roundtrip, tests/imported/llvm/Analysis/LoopAccessAnalysis/*::analysis
+
+### L1.analysis.cost-model — The x86 TargetTransformInfo cost model (`print<cost-model>`)
+- deps: L0.print-clang
+- exit: tests/analysis/cost-model/*::roundtrip, tests/analysis/cost-model/*::analysis, tests/imported/llvm/Analysis/CostModel/*::roundtrip, tests/imported/llvm/Analysis/CostModel/*::analysis
+
+### L1.analysis.misc — PhiValues, MustExecute, AssumptionCache, ValueTracking, IVUsers, LazyCallGraph, CallGraph printers
+- deps: L1.analysis.scev
+- exit: tests/imported/llvm/Analysis/PhiValues/*::roundtrip, tests/imported/llvm/Analysis/PhiValues/*::analysis, tests/imported/llvm/Analysis/MustExecute/*::roundtrip, tests/imported/llvm/Analysis/MustExecute/*::analysis, tests/imported/llvm/Analysis/AssumptionCache/*::roundtrip, tests/imported/llvm/Analysis/AssumptionCache/*::analysis, tests/imported/llvm/Analysis/ValueTracking/*::roundtrip, tests/imported/llvm/Analysis/ValueTracking/*::analysis, tests/imported/llvm/Analysis/IVUsers/*::roundtrip, tests/imported/llvm/Analysis/IVUsers/*::analysis, tests/imported/llvm/Analysis/LazyCallGraph/*::roundtrip, tests/imported/llvm/Analysis/LazyCallGraph/*::analysis, tests/imported/llvm/Analysis/CallGraph/*::roundtrip, tests/imported/llvm/Analysis/CallGraph/*::analysis
 
 ### L1.instsimplify — InstSimplify
 - deps: L0.print-clang

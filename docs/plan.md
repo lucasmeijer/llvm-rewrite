@@ -16,7 +16,10 @@ different languages, all data-oriented, so they can be compared.
 2. **Two kinds of correctness.** Everything up to the input of instruction selection must produce *identical IR*,
    including the IR passes llc runs before isel. Checks: `roundtrip`, `opt`, `isel-ir`. The backend after that is
    judged by *behaviour*: the program built by our tools must print and exit exactly like the one LLVM builds
-   (`run`). Assembly may differ.
+   (`run`). Assembly may differ. Analyses are also checked on their own, through LLVM's printer passes
+   (`print<domtree>`, `print<scalar-evolution>`, …): the stderr of `opt -disable-output` must be identical (`analysis`;
+   decided in `L1.harness-analysis`, with no canonicalization except sorting lines for printers that iterate in pointer
+   order).
 3. **Several implementations, one harness.** `impl/c`, `impl/rust`, `impl/zig`, `impl/goose`, `impl/jai` share the harness, the corpus, the
    roadmap and `knowledge/`. Each produces `bin/{opt,llc,llvm-link}` with LLVM's command-line conventions.
 4. **Data-oriented design, no OOP.** Each implementation uses whatever data-oriented features its language offers,
@@ -57,8 +60,8 @@ different languages, all data-oriented, so they can be compared.
 ## Not decided yet (later lplan rounds)
 
 - Instruction-selection architecture for L3–L5 (SelectionDAG-like, GlobalISel-like, or our own).
-- Harness support for analysis-printer tests (`L1.harness-analysis`), multi-module LTO tests (`L2.lto`) and
-  measuring the speed of generated programs (`L5.harness-perf`).
+- Harness support for multi-module LTO tests (`L2.lto`) and measuring the speed of generated programs
+  (`L5.harness-perf`).
 - Whether compile-time performance should ever block a push (a ratchet on instruction counts is possible).
 - Fuzzing and automatic reduction (`llvm-reduce` with our tools as the interestingness test).
 - Alive2-based refinement checking for passes where we deliberately diverge.
