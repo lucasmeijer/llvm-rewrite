@@ -8,12 +8,13 @@ import local;
 import tli;
 import mem2reg;
 import salvage;
+import knowledge;
 
 // SmallSetVector<Instruction *, 16> WorkList: vector + membership in scratch set VS_PASS0.
 fn dce_instruction(iv: i32, wl: i32[>..<]&) -> bool {
     if !is_instruction_trivially_dead(iv) { return false; }
-    // salvageKnowledge: only with --enable-knowledge-retention (not accepted by our opt)
     salvage_debug_info(iv);
+    salvage_knowledge(iv, false);
     for k in nops(iv) {
         let opv = op(iv, k);
         set_op(iv, k, -1);

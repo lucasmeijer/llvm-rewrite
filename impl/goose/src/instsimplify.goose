@@ -4329,7 +4329,6 @@ fn recursively_delete_trivially_dead(dead: i32[>..<]&) {
     while wl.len > 0 {
         let i = wl.pop();
         if is_dead(i) { continue; }
-        // salvageKnowledge: only with --enable-knowledge-retention (not accepted by our opt)
         salvage_debug_info(i);
         for k in nops(i) {
             let opv = op(i, k);

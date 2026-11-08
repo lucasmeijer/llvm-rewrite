@@ -47,6 +47,7 @@ let KNOWN_FLAGS: const u8[:][] = [
     "scalar-evolution-max-arith-depth", "scalar-evolution-max-cast-depth", "scalar-evolution-max-add-rec-size",
     "scalar-evolution-huge-expr-threshold", "scev-addops-inline-threshold", "scev-mulops-inline-threshold",
     "scev-range-iter-threshold", "scalar-evolution-use-expensive-range-sharpening",
+    "enable-knowledge-retention",                        // salvageKnowledge (knowledge.goose): dce, early-cse
     "earlycse-debug-hash",                               // no-op in release builds (see earlycse.goose)
     "earlycse-mssa-optimization-cap",                    // read by early-cse<memssa>
     "verify-scev",                                       // no-op: extra verification only

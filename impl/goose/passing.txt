@@ -2376,6 +2376,7 @@ tests/imported/llvm/Transforms/CorrelatedValuePropagation/urem.ll::roundtrip
 tests/imported/llvm/Transforms/CorrelatedValuePropagation/uscmp.ll::roundtrip
 tests/imported/llvm/Transforms/CorrelatedValuePropagation/vectors.ll::roundtrip
 tests/imported/llvm/Transforms/CorrelatedValuePropagation/zext.ll::roundtrip
+tests/imported/llvm/Transforms/DCE/basic-preservation.ll::opt
 tests/imported/llvm/Transforms/DCE/basic-preservation.ll::roundtrip
 tests/imported/llvm/Transforms/DCE/basic.ll::roundtrip
 tests/imported/llvm/Transforms/DCE/calls-errno.ll::opt
@@ -2550,12 +2551,15 @@ tests/imported/llvm/Transforms/EarlyCSE/getmatchingvalue-crash.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/getmatchingvalue-crash.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/globalsaa-memoryssa.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/globalsaa-memoryssa.ll::roundtrip
+tests/imported/llvm/Transforms/EarlyCSE/guards.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/guards.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/instsimplify-dom.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/instsimplify-dom.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/int_sideeffect.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/int_sideeffect.ll::roundtrip
+tests/imported/llvm/Transforms/EarlyCSE/invariant-loads.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/invariant-loads.ll::roundtrip
+tests/imported/llvm/Transforms/EarlyCSE/invariant.start.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/invariant.start.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/masked-intrinsics-unequal-masks.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/masked-intrinsics-unequal-masks.ll::roundtrip

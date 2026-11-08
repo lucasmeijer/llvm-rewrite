@@ -44,6 +44,7 @@ import dinfo;
 import implied;
 import loopinfo;
 import salvage;
+import knowledge;
 
 let ET_VALUES = 0;
 let ET_LOADS = 1;
@@ -928,7 +929,6 @@ fn ec_overriding_stores(e: PMI, l: PMI) -> bool {
 // ---------------------------------------------------------------------------------------------
 // processNode
 
-// salvageKnowledge: only with --enable-knowledge-retention (not accepted by our opt)
 fn ec_salvage_debug_info(iv: i32) { salvage_debug_info(iv); }
 
 fn ec_handle_branch_condition(cond: i32, bi: i32, bb: i32, pred: i32) -> bool {
@@ -975,6 +975,7 @@ fn ec_process_node(bb: i32) -> bool {
         let i = it;
         it = inst_next(it);
         if is_instruction_trivially_dead(i) {
+            salvage_knowledge(i, true);
             ec_salvage_debug_info(i);
             ec_remove_mssa(i);
             ec_erase(i);
@@ -1002,6 +1003,7 @@ fn ec_process_node(bb: i32) -> bool {
                 if r >= 0 && ec_vals[r].v >= 0 {
                     let known = ec_vals[r].v;
                     if vals[known].kind == VK_CINT && is_one_value(known) {
+                        salvage_knowledge(i, true);
                         ec_remove_mssa(i);
                         ec_erase(i);
                         changed = true;
@@ -1019,6 +1021,7 @@ fn ec_process_node(bb: i32) -> bool {
             var killed = false;
             if vals[i].first_use >= 0 { ec_rauw(i, v); changed = true; }
             if is_instruction_trivially_dead(i) {
+                salvage_knowledge(i, true);
                 ec_remove_mssa(i);
                 ec_erase(i);
                 changed = true;
@@ -1033,6 +1036,7 @@ fn ec_process_node(bb: i32) -> bool {
                 let av = ec_vals[r].v;
                 ec_combine_ir_flags(i, av);
                 ec_rauw(i, av);
+                salvage_knowledge(i, true);
                 ec_remove_mssa(i);
                 ec_erase(i);
                 changed = true;
@@ -1054,6 +1058,7 @@ fn ec_process_node(bb: i32) -> bool {
             if opv >= 0 {
                 if ec_vals[r].isload && is_inst(opv) { ec_combine_metadata_for_cse(opv, i); }
                 if vals[i].first_use >= 0 { ec_rauw(i, opv); }
+                salvage_knowledge(i, true);
                 ec_remove_mssa(i);
                 ec_erase(i);
                 changed = true;
@@ -1071,6 +1076,7 @@ fn ec_process_node(bb: i32) -> bool {
                 if ec_same_mem_generation(ec_vals[r].gen, ec_gen, first, i) && inst_may_read_memory(first) == inst_may_read_memory(i) {
                     ec_combine_ir_flags(i, first);
                     if vals[i].first_use >= 0 { ec_rauw(i, first); }
+                    salvage_knowledge(i, true);
                     ec_remove_mssa(i);
                     ec_erase(i);
                     changed = true;
@@ -1091,6 +1097,7 @@ fn ec_process_node(bb: i32) -> bool {
                 let gv = ec_vals[r].v;
                 ec_combine_ir_flags(i, gv);
                 ec_rauw(i, gv);
+                salvage_knowledge(i, true);
                 ec_remove_mssa(i);
                 ec_erase(i);
                 changed = true;
@@ -1103,6 +1110,7 @@ fn ec_process_node(bb: i32) -> bool {
         if pm_valid(m) && pm_is_store(m) {
             let r = ec_lookup(ET_LOADS, ec_key(pm_ptr(m)));
             if r >= 0 && ec_vals[r].v >= 0 && ec_vals[r].v == ec_get_matching_value(r, m, ec_gen) {
+                salvage_knowledge(i, true);
                 ec_remove_mssa(i);
                 ec_erase(i);
                 changed = true;
@@ -1114,6 +1122,7 @@ fn ec_process_node(bb: i32) -> bool {
             if pm_valid(m) && pm_is_store(m) {
                 if last_store >= 0 {
                     if ec_overriding_stores(ec_parse_mem(last_store), m) {
+                        salvage_knowledge(i, true);      // sic: LLVM salvages the later store's knowledge
                         ec_remove_mssa(last_store);
                         ec_erase(last_store);
                         changed = true;
