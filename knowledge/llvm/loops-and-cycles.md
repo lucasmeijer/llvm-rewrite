@@ -133,3 +133,14 @@ Verified with the jai port (impl/jai/src/pass_licm.jai) on Transforms/LICM and s
   which only Loads.cpp and LoopAccessAnalysis request (BasicAA passes nullptr).
 - With only loop-nest passes (`loop-mssa(lnicm)`), the adaptor visits just the top-level loops; `lnicm` in a mixed
   pipeline runs on the outermost loop of every visited loop.
+- LICM's only TTI query is isFoldableInLoop's `getInstructionCost(GEP, TCK_SizeAndLatency)` (sinking); a port can
+  set the TTI up lazily. Its isSafeToSpeculativelyExecute gets DT *and* TLI, so allocation calls count as
+  dereferenceable through getObjectSize with TLI (verified with the goose port, `sweep --passes licm`).
+- Loop-nest mode: an adaptor whose LoopPassManager has only loop-nest passes (`loop-mssa(lnicm)`) puts just the
+  top-level loops (LoopInfo order) into the worklist; in a mixed manager a loop-nest pass runs only when the
+  current loop is top-level (`LoopPassManager::run`). A bare `lnicm`/`licm` in a function pipeline gets an adaptor
+  without MemorySSA and stops with `LLVM ERROR: L(N)ICM requires MemorySSA (loop-mssa)`; at the top level of
+  `-passes=` both are wrapped in `function(loop-mssa(...))`.
+- ICFLoopSafetyInfo's per-block first-special-instruction caches are filled lazily and only reset by
+  insertInstructionTo of a special instruction or removeInstruction of the cached one (InstructionPrecedenceTracking);
+  a port must reproduce the staleness, not recompute.

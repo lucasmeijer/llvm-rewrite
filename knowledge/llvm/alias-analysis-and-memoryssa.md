@@ -107,6 +107,14 @@ Verified with the jai port (impl/jai/src/mssa_updater.jai): `loop-mssa(loop-rota
   order (also for an empty GraphDiff), unlike insertDef's plain IDF (successors in order).
 - `verifyMemorySSA` is compiled out of release builds (`#ifndef NDEBUG`): `-verify-memoryssa` and `verify<memoryssa>`
   never change opt's output.
+- **MemorySSA survives every function pass that preserves it and the DominatorTree**: its `invalidate` also asks
+  AAManager, but AAResults are "preserved when stateless", i.e. only an explicit `invalidate<aa>` abandons them.
+  So `early-cse<memssa>` hands its updated MemorySSA to a following `loop-mssa(...)`, LCSSAPass preserves it
+  (`PA.preserve<MemorySSAAnalysis>()`), and LoopSimplifyPass updates a *cached* one through a MemorySSAUpdater
+  (SplitBlockPredecessors' wireOldPredecessorsToNewImmediatePredecessor, updatePhisWhenInsertingUniqueBackedgeBlock,
+  changeToUnreachable, makeLoopInvariant's moveToPlace) and preserves it. Access ids printed by a later
+  `print<memoryssa>` show the difference (verified with the goose port: `LICM/*` tests and
+  `sweep --passes 'loop-mssa(licm),print<memoryssa>' --analysis`, 0 differences).
 - `MemorySSA::dominates(MA, const Use &)` for a phi use in the same block calls `locallyDominates(MA, cast(Use))`,
   and casting a Use yields its *value* (MA itself), so it is always true.
 

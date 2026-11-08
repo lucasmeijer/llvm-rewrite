@@ -72,8 +72,8 @@
 - L1.analysis.aa 79/84 analysis (+153 roundtrip). Left: `128-bit-ptr.ll` and `pr35843.ll` need APInt offsets
   wider than 64 bits in BasicAA (fails loudly); `libfuncs.ll`, `libfuncs-darwin.ll`, `memset-pattern.ll` run
   `-mtriple=… -passes=inferattrs,…` (opt's `-mtriple`, the InferFunctionAttrs pass with BuildLibCalls' attribute
-  table, and a Darwin TLI are not ported). L1.analysis.memoryssa 34/41: the 7 left run loop passes
-  (`loop-mssa(licm|loop-rotate|simple-loop-unswitch)`). aa-eval and both MemorySSA printers agree with LLVM on
+  table, and a Darwin TLI are not ported). L1.analysis.memoryssa 84/86: the 2 left run
+  `simple-loop-unswitch` (and loop-rotate). aa-eval and both MemorySSA printers agree with LLVM on
   every one of the 5007 `tests/imported/llvm/Transforms/*/*.ll` files except a few parser/printer issues
   (below) and give byte-identical `print<memoryssa>` on sqlite3.ll. Speed (by hand; no `@perf` line times
   them): building MemorySSA is faster than LLVM (sqlite3 +0.03 s vs +0.05 s) and linear on tests/perf/scaling;
@@ -91,6 +91,17 @@
   `-mattr` warnings on stderr). Speed: like LLVM's or faster on tests/perf/scaling (both are superlinear on
   `loops-many`: n500 0.16 s / 0.11 s, n2000 5.1 s / 5.0 s, LLVM vs Goose); no `@perf` line times it.
 - L1.analysis.loops complete (print<loopnest> through the loop pass manager).
+- L1.licm 243/268 (all 134 roundtrip, 109/134 opt). Every test left runs another unported pass (loop-rotate,
+  simple-loop-unswitch, loop-sink, loop-deletion, loop-unroll, loop-idiom, gvn, reassociate, loop-simplifycfg,
+  make-guards-explicit) except `vector-intrinsics.ll` (LoopSimplify's exit merging, loud). Sweeps (every
+  round-tripping corpus file, whole-file and `--per-function`): `licm`, `loop-mssa(licm)` with
+  `print<memoryssa>` after it (`-verify-memoryssa`), `loop-mssa(lnicm)`, `licm<no-allowspeculation>`,
+  `licm -licm-control-flow-hoisting=1`: 0 differs; the loud ones are LoopSimplify exit merging, X86 CPUs the TTI
+  doesn't know (isFoldableInLoop's GEP cost), Darwin's shouldAssumeDSOLocal, simplifyPHINode with undef inputs
+  (ssaupdater.goose's partial port). Byte-identical on the four tests/perf/compile programs, including
+  `print<memoryssa>` after LICM. Speed: `perf` (scaling/loops-many): 0.6-0.9x LLVM's time, k 1.01 (LLVM 1.39);
+  by hand the pass itself (minus parsing) costs 0.31 s on SPASS and 0.20 s on oggenc vs LLVM's 0.14/0.10 s (lua,
+  sqlite3: 0.07/0.15 s vs 0.09/0.11 s): ~2x on big functions, not profiled yet.
 - L1.analysis.domtree and L1.analysis.demanded-bits complete. L1.loop-canonical: loop-simplify and
   lcssa pass 31 of their 58 `::opt` tests; every other one stops loudly (other passes in the pipeline: licm,
   loop-mssa, instcombine, debugify, verify<scalar-evolution>, -keep-loops; and LoopSimplify's exit merging,
@@ -146,7 +157,8 @@
 | `src/capture.goose`, `src/aautil.goose` | CaptureTracking (3 trackers); private stamp sets (`ss_*`) and CFG reachability (`cfr_*`) |
 | `src/memoryssa.goose`, `src/phitrans.goose` | MemorySSA (build, walker, OptimizeUses, printers); PHITransAddr |
 | `src/aaeval.goose` | the aa-eval pass |
-| `src/mssaupdater.goose` | MemorySSAUpdater (removal: removeMemoryAccess, tryRemoveTrivialPhi) |
+| `src/mssaupdater.goose` | MemorySSAUpdater (insert/move/remove/CFG updates/cloning into a predecessor), MemorySSA's mutation API, verifyMemorySSA |
+| `src/licm.goose`, `src/mustexec.goose`, `src/ast.goose` | LICM / LNICM (with LoadAndStorePromoter); ICFLoopSafetyInfo, InstructionPrecedenceTracking, colorEHFunclets; AliasSetTracker |
 | `src/earlycse.goose` | EarlyCSE (early-cse, early-cse<memssa>): scoped hash tables, combineMetadataForCSE, replaceDominatedUsesWith |
 | `src/instident.goose` | isIdenticalToWhenDefined, hasSameSpecialState, attribute intersection, andIRFlags |
 | `src/salvage.goose` | salvageDebugInfo and the DIExpression helpers it needs (foldConstantMath, appendOpsToArg, ...) |
@@ -270,8 +282,8 @@
   user's operand list grows (`grow_ops`): don't hold use ids across adding operands to their user.
 - `inst_clone` (irutil.goose) is Instruction::clone: operands, flags, attributes, metadata; no name, no debug
   records, not inserted.
-- The loop pass manager is in passmgr.goose/lpm.goose (DESIGN.md §9); `loop-mssa` fails loudly until MemorySSA
-  is wired into it, loop-nest passes are not ported.
+- The loop pass manager is in passmgr.goose/lpm.goose (DESIGN.md §9), with `loop-mssa` (MemorySSA from the
+  adaptor, kept up to date by the loop passes) and loop-nest mode (`lnicm`).
 - `print<demanded-bits>` prints in instruction order; LLVM's order is a DenseMap's, the test compares sorted lines.
 - L1.dce can't be COMPLETE on its own: its exit selector includes tests whose pipelines need simplifycfg, sroa, gvn,
   licm, instcombine, debugify, redundant-dbg-inst-elim, and `--preserve-ll-uselistorder`, plus debug-info parsing.
@@ -381,11 +393,11 @@
 - AA files keep private stamp sets (`aautil.goose` `SS_*`) so they never touch the pass scratch slots of
   irutil.goose; a pass may hold any VS_/VM_ slot across AA queries.
 - MemorySSA: one instance (`mssa_fn`); `mssa_get(fv)` builds; invalidated by `invalidate_function` unless the
-  pass preserves `A_MEMORYSSA`, `A_DOMTREE` and `A_AA`. A pass that keeps it must update it through
-  mssaupdater.goose (DESIGN.md §8.6): only removal is ported (EarlyCSE); LICM, MemCpyOpt, DSE and loop-mssa need
-  the insertion/move parts, to be added there using the use lists (`mssa_first_use`…) and `msu_use_set`. GVN needs MemoryDependenceAnalysis (not ported).
+  pass preserves `A_MEMORYSSA` and `A_DOMTREE` (AAManager is stateless: only `invalidate<aa>` abandons it, which
+  is the preserved set `PA_ALL & ~A_AA`). A pass that keeps it updates it through mssaupdater.goose (DESIGN.md
+  §8.6: the whole MemorySSAUpdater except updateForClonedLoop). GVN needs MemoryDependenceAnalysis (not ported).
 - Not ported (fail loudly or absent): separate_storage assumptions in BasicAA, APInt widths over 64 bits,
-  `!callback` metadata in the CallGraph, MemorySSA's loop constructor and verifier, the
+  `!callback` metadata in the CallGraph, MemorySSA's loop constructor, the
   `scev-aa`, `objc-arc-aa`. EarliestEscapeAnalysis and the CFG reachability with LoopInfo/CycleInfo are ported
   but no printer exercises them (first checked by DSE/MemCpyOpt).
 - Printer issues seen in the sweeps (not AA bugs): `errs_inst` numbers metadata like a function-local SlotTracker;
@@ -658,3 +670,30 @@ What they were:
 - Sweep (`sweep --impl goose --passes instcombine --per-function`): 28401 identical / 1 differs before this work,
   66689 identical / 0 differs after (2026-11-11). Biggest loud groups left in this area: optimizePow/optimizeLog,
   FortifiedLibCallSimplifier, stpncpy/strncpy, memccpy, sprintf/snprintf/fprintf, strcat, strstr.
+
+## LICM and the MemorySSA updater (licm, mustexec, ast, mssaupdater)
+
+- LICM state is global (`lc_*`, one run at a time); ControlFlowHoister's two DenseMaps are vectors (`cfh_dest`,
+  `cfh_br`; LLVM only iterates them order-independently). The IRBuilder<> (ConstantFolder) is `lb_*`; its insert
+  point adopts the debug records there (an iterator without the head bit), like `new X(..., I->getIterator())`.
+  Where LLVM inserts at `getFirstInsertionPt()`/`begin()`/`getFirstNonPHIIt()` (head bit) it must not adopt.
+- `Instruction::moveBefore` (not Preserving) is `lc_move_before`: the moved instruction's own records move to its
+  next instruction, and without the head bit it absorbs the destination's records.
+- LICM keeps debug records consistent through mem2reg's helpers (`m2r_collect_records` at the start of every
+  run, `m2r_dbg_rauw`, `m2r_erase`); `salvage_debug_info` and `salvage_knowledge(i, false)` before erasing dead
+  instructions, as LLVM does.
+- Sinking splits exit predecessors with loopsimplify.goose's `split_block_predecessors` in DomTreeUpdater mode
+  (`ls_split_dtu`: the lazy DTU is flushed at once, so the DT gets {Insert New->BB, Insert P->New, Delete P->BB}
+  through applyUpdates) with `ls_mssau` (MemorySSAUpdater::wireOldPredecessorsToNewImmediatePredecessor).
+  `ls_mssau` is also set by loop-simplify when MemorySSA is cached (LoopSimplifyPass then preserves it).
+- ICFLoopSafetyInfo's FirstSpecialInsts caches are lazy and can be stale exactly where LLVM's are (mustexec.goose);
+  BlockColors (funclets) are computed for scoped EH personalities; sinking a call into a funclet fails loudly.
+- MemorySSAUpdater value handles: `vh_new(a, tracking)`; they live until the outermost `msu_enter`/`msu_leave`
+  pair returns. Every public updater function brackets itself. Never keep a handle id across updater calls.
+- ScalarEvolution: `sc_forget_loop_dispositions` is exact; `sc_forget_block_and_loop_dispositions(v)` clears both
+  disposition caches when v has a SCEV (LLVM erases only v's SCEV and its users'): a superset that can only
+  differ from LLVM where LLVM keeps a stale disposition.
+- TTI is set up lazily (only isFoldableInLoop's GEP cost needs it), so a TTI gap fails loudly only when LLVM would
+  really ask for a cost.
+- Not ported (fail loudly): sinking calls into funclets or calls with funclet bundles, mergeDIAssignID of promoted
+  stores with DIAssignID attachments; optimization remarks are never printed (no `-pass-remarks`).

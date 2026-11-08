@@ -260,7 +260,11 @@ list in LLVM's order (`addChild` appends, `removeChild` unlinks), the virtual ro
 `dt_insert_edge/dt_delete_edge`, `dt_add_new_block`, `dt_change_idom`, `dt_erase_node`, `dt_split_block`,
 `dt_recalculate`. `DT_VROOT` is the post-dominator tree's virtual exit. The SemiNCA state (one instance at a time,
 O(1) clear) and the GraphDiff (one at a time) are module globals, so updates don't nest (they never do in LLVM).
-Not ported: the two-argument `applyUpdates(Updates, PostViewUpdates)` and `CalculateWithUpdates`.
+`dt_apply_updates_post_view(fv, t, ups, post)` is `applyUpdates(Updates, PostViewUpdates)`. GraphDiff has three
+instances that can be alive together (0 = the PreViewCFG, 1 = the PostViewCFG, 2 = a client's, e.g.
+MemorySSAUpdater::applyInsertUpdates; `gd_init(inst, ...)`, `gd_children(inst, n, inverse, out)`); their items share
+one immutable pool, so `PreViewCFG = *PostViewCFG` is a redirect (`gd_pre_is_post`). Not ported:
+`CalculateWithUpdates`.
 
 **DomTreeUpdater** (dtu.goose): one active updater (`dtu_begin(fv, use_dt, use_pdt, lazy)` … `dtu_end()`, the
 destructor, which flushes), `dtu_apply_updates`, `dtu_apply_updates_permissive`, `dtu_split_critical_edge`,
@@ -343,16 +347,22 @@ Ports of `MemoryLocation.cpp`, `AliasAnalysis.cpp`, `BasicAliasAnalysis.cpp`, `T
   `mssa_get_clobbering(ma, q)` (CachingWalker, MaxCheckLimit), `mssa_get_clobbering_loc(ma, loc, q)`,
   `mssa_clobbering_access(ma, q, skip_self, use_invariant_group)` with `cw_limit` as the UpwardWalkLimit;
   `mssa_ensure_optimized()`, `mssa_dominates`, `mssa_locally_dominates`, `mssa_def_clobbers`
-  (instructionClobbersQuery). Not ported: the loop (`MemorySSA(Loop&)`) constructor, the verifier
-  (`verify<memoryssa>` only builds), DOT output.
-- **MemorySSAUpdater** (mssaupdater.goose): only the removal part so far: `msu_remove_memory_access(ma,
-  optimize_phis)` / `msu_remove_inst_access(i, optimize_phis)` (removeMemoryAccess with tryRemoveTrivialPhi /
-  recursePhi), `msu_rauw`, `mssa_remove_from_lookups` / `mssa_remove_from_lists`. A removed access gets kind
-  `MAK_DEAD` (WeakVH lists test `msu_is_dead`); `msu_repl` records RAUWs for TrackingVH-style lists
-  (`msu_track`). Every operand change of an access must go through `msu_use_set`, which keeps the cached
-  `def`/`opt`/phi-incoming values in sync with the use. `msu_reset()` when a pass starts using the updater.
-  Insertion (createMemoryAccess*, insertUse/insertDef with phi placement), moves and block removal are for LICM,
-  DSE, MemCpyOpt and the loop passes to add here.
+  (instructionClobbersQuery). Not ported: the loop (`MemorySSA(Loop&)`) constructor, DOT output.
+- **MemorySSAUpdater** (mssaupdater.goose): the whole of MemorySSAUpdater.cpp except updateForClonedLoop /
+  updateExitBlocksForClonedLoop: `msu_insert_use/def`, `msu_remove_memory_access` / `msu_remove_inst_access`,
+  `msu_move_before/after/to_place`, `msu_move_all_after_splice_blocks/merge_blocks`, `msu_wire_old_preds_to_new_pred`,
+  `msu_update_phis_unique_backedge`, `msu_apply_updates` / `msu_apply_insert_updates`, `msu_remove_edge`,
+  `msu_remove_blocks`, `msu_change_to_unreachable`, `msu_create_access_in_bb/before/after`,
+  `msu_update_for_cloned_block_into_pred` (VMap = a vm_* slot). MemorySSA's mutation API is there too
+  (`mssa_create_defined_access`, `mssa_insert_into_lists_for_block/before`, `mssa_move_to_before/place`,
+  `mssa_remove_from_lookups/lists`, `mphi_unordered_delete_incoming*`) and `mssa_verify` (verifyMemorySSA, Fast
+  level, fails loudly; it never touches state that output depends on). A removed access gets kind `MAK_DEAD`.
+  Value handles: TrackingVH / WeakVH records with an intrusive list per access (`MAcc.vh`), created with
+  `vh_new(a, tracking)`; RAUW moves tracking handles, deletion nulls all; every public entry brackets itself with
+  `msu_enter/msu_leave` and the outermost leave releases every handle. Every operand change of an access goes
+  through `msu_use_set` (keeps the cached `def`/`opt`/phi-incoming values in sync with the use). `msu_reset()`
+  when a pass starts using the updater. The recursive part (getPreviousDefRecursive, tryRemoveTrivialPhi,
+  removeMemoryAccess, recursePhi) keeps its vectors as runs on global stacks.
 - **Printing with annotations** (`F->print(OS, &AnnotationWriter)`): `pr_annot_set(v, text)` registers a line for
   a block (printed after its label) or an instruction (printed before it), `pr_annot_on` while `print_function`
   runs (printer.goose); the annotation texts are computed first in printing order.
@@ -415,9 +425,12 @@ Module passes: an `m:` row and a case in `run_module_node`.
 become a `PK_LOOP` node (FunctionToLoopPassAdaptor) whose `pass` field links its two canonicalization nodes
 (loop-simplify, lcssa: run like a function pass manager, counted by bisect); a nested `loop(...)` is a `PK_LPM`
 node. `run_loop_adaptor` runs the canonicalization, gets LoopInfo (no loops: done), builds the
-LoopStandardAnalysisResults (DT, SCEV, TLI; MSSA fails loudly for now), fills the worklist with
-`appendLoopsToWorklist(LI)` and pops loops LIFO; each loop runs the children (`run_loop_list`, stopping when
-`lpm_skip`). The adaptor's preserved set is the intersection of every pass's plus DT, LoopInfo and SCEV. A loop pass
+LoopStandardAnalysisResults (MSSA for `loop-mssa` (bit 0 of the adaptor's arg), DT, SCEV, TLI), fills the
+worklist with `appendLoopsToWorklist(LI)` (in loop-nest mode, bit 1 of the arg, only the top-level loops) and pops
+loops LIFO; each loop runs the children (`run_loop_list`, stopping when `lpm_skip`; loop-nest passes such as
+`lnicm` only on top-level loops). With MemorySSA a loop pass that doesn't preserve it is the fatal usage error
+LLVM reports. The adaptor's preserved set is the intersection of every pass's plus DT, LoopInfo, SCEV (and
+MemorySSA). A loop pass
 `foo` is an `l:` row, a case in `run_loop_pass(n, l, fv)`, and uses the LPMUpdater API in lpm.goose
 (`lpm_cur`, `lpm_mark_loop_as_deleted`, `lpm_add_child_loops`, `lpm_add_sibling_loops`, `lpm_revisit_current_loop`).
 Loop-nest passes are not ported. Bisect prints the pipeline name of the pass (`loop-simplify`, not the class name)

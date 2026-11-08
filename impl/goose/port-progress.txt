@@ -45,10 +45,10 @@ lib/Transforms/InstCombine/InstCombineCasts.cpp 0.85  # manual: all visitors; le
 lib/Support/APInt.cpp 0.5
 lib/IR/DebugInfoMetadata.cpp 0.3
 lib/IR/Attributes.cpp 0.2
-lib/Analysis/MemorySSA.cpp 0.6
+lib/Analysis/MemorySSA.cpp 0.75  # + the mutation API and verifier; no loop constructor, DOT output
 lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95  # manual: all but visitFDiv's sin/cos -> tan (emitUnaryFloatFnCall, loud)
 lib/Transforms/Utils/SCCPSolver.cpp 0.7
-lib/Transforms/Utils/LoopUtils.cpp 0.05
+lib/Transforms/Utils/LoopUtils.cpp 0.08
 lib/IR/ConstantRange.cpp 0.7
 lib/IR/Metadata.cpp 0.45
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
@@ -60,7 +60,7 @@ lib/IR/IRBuilder.cpp 0.15
 lib/AsmParser/LLLexer.cpp 0.7  # manual: own lexer structure, lexes all IR tokens (heuristic 0.19)
 lib/Analysis/IVDescriptors.cpp 0.05
 lib/IR/ConstantFold.cpp 0.8
-lib/Analysis/MemorySSAUpdater.cpp 0.25
+lib/Analysis/MemorySSAUpdater.cpp 0.9  # manual: all but updateForClonedLoop / updateExitBlocksForClonedLoop (heuristic 0.99)
 lib/Support/KnownBits.cpp 0.7
 lib/Analysis/LoopInfo.cpp 0.45
 lib/IR/DataLayout.cpp 0.2
@@ -69,12 +69,12 @@ lib/Analysis/AliasAnalysis.cpp 0.9
 lib/Transforms/Utils/PredicateInfo.cpp 0.6
 lib/IR/ConstantFPRange.cpp 0.35
 lib/Transforms/Utils/LoopSimplify.cpp 0.85
-lib/Analysis/TypeBasedAliasAnalysis.cpp 0.75
+lib/Analysis/TypeBasedAliasAnalysis.cpp 0.85
 lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.5
 lib/Analysis/DemandedBits.cpp 0.95
 lib/Transforms/InstCombine/InstCombineNegator.cpp 0.75
 lib/Transforms/Scalar/ADCE.cpp 0.85
-lib/Transforms/Utils/SSAUpdater.cpp 0.8
+lib/Transforms/Utils/SSAUpdater.cpp 0.9  # + LoadAndStorePromoter::run (licm.goose)
 lib/Analysis/MemoryLocation.cpp 1
 lib/Transforms/Utils/BreakCriticalEdges.cpp 0.4
 lib/Transforms/Utils/LCSSA.cpp 0.7
@@ -109,9 +109,16 @@ lib/Analysis/VectorUtils.cpp 0.15
 lib/Analysis/MemoryBuiltins.cpp 0.55
 lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
-lib/IR/EHPersonalities.cpp 0.5
+lib/IR/EHPersonalities.cpp 0.6  # + colorEHFunclets (mustexec.goose)
 lib/Transforms/Utils/Debugify.cpp 0.45  # manual: synthetic mode whole (debugify, check-debugify, -enable-debugify); no original-debuginfo mode, -debugify-each, stats export
 lib/Target/X86/X86InstCombineIntrinsic.cpp 0.1  # manual: simplifyDemandedUseBits/VectorEltsIntrinsic only; instCombineIntrinsic fails loudly (heuristic 0.25)
 lib/Transforms/Utils/SimplifyLibCalls.cpp 0.35  # manual: optimizeCall dispatch, str/mem len/cmp/chr, printf/puts, sqrt/exp2/fmin/fmax/cabs/double->float, int calls; the rest fails loudly per LibFunc (heuristic 0.75 counts the fail-loud names)
 lib/Transforms/Utils/BuildLibCalls.cpp 0.6  # manual: inferNonMandatoryLibFuncAttrs whole (generated), getOrInsertLibFunc, isLibFuncEmittable, hasFloatFn, a third of the emit* helpers (heuristic 0.47)
 lib/Transforms/IPO/InferFunctionAttrs.cpp 1
+
+# --- L1.licm (2026-11)
+lib/Transforms/Scalar/LICM.cpp 0.97  # manual: all but optimization remarks and sinking calls into funclets (heuristic 1.00)
+lib/Analysis/MustExecute.cpp 0.4  # ICFLoopSafetyInfo only; no SimpleLoopSafetyInfo printer, MustBeExecutedContextExplorer
+lib/Analysis/AliasSetTracker.cpp 0.9  # no add() of memset/memtransfer/va_arg/argmemonly calls (LICM adds loads/stores), print
+lib/Analysis/InstructionPrecedenceTracking.cpp 0.6  # no validate()
+lib/IR/DebugLoc.cpp 0.1  # getMergedLocations

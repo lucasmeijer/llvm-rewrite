@@ -920,6 +920,7 @@ fn lc_not_used_or_foldable(i: i32, l: i32, nest: bool) -> bool, bool {
         if iop(ui) == OP_PHI {
             let bb = inst_parent(ui);
             if iop(block_terminator(bb)) == OP_CATCHSWITCH { return false, foldable_in_loop; }
+            if iop(i) == OP_CALL && lsi_colors_on && lsi_ncolors(bb) != 1 { return false, foldable_in_loop; }
             if nest {
                 while iop(ui) == OP_PHI && lc_has_one_user(ui) && nops(ui) == 1 {
                     if !lc_contains_inst(l, ui) { break; }
@@ -954,7 +955,9 @@ fn lc_trivially_replaceable_phi(pn: i32, i: i32) -> bool {
 fn lc_can_split_predecessors(pn: i32) -> bool {
     let bb = inst_parent(pn);
     let fnp = first_non_phi(bb);
+    // BasicBlock::canSplitPredecessors
     if !(fnp >= 0 && iop(fnp) == OP_LANDINGPAD) && fnp >= 0 && inst_is_eh_pad(fnp) { return false; }
+    if lsi_colors_on && fnp >= 0 && inst_is_eh_pad(fnp) { return false; }
     var ok = true;
     each_pred(bb) { p => if iop(block_terminator(p)) == OP_INDIRECTBR { ok = false; } };
     return ok;
@@ -970,7 +973,8 @@ fn lc_split_predecessors_of_loop_exit(pn: i32) {
         if phi_block_index(pn, p) >= 0 {
             ls_mssau = true;
             ls_split_dtu = true;
-            split_block_predecessors(exit, [p], ".split.loop.exit", true, true, true);
+            let np = split_block_predecessors(exit, [p], ".split.loop.exit", true, true, true);
+            if lsi_colors_on { lsi_copy_colors(np, p); }
             ls_mssau = false;
             ls_split_dtu = false;
         }
@@ -979,8 +983,14 @@ fn lc_split_predecessors_of_loop_exit(pn: i32) {
 
 // cloneInstructionInExitBlock(I, ExitBlock, PN, LI, SafetyInfo, MSSAU)
 fn lc_clone_in_exit_block(i: i32, exit: i32, pn: i32) -> i32 {
-    if is_callbase(i) {
+    if iop(i) == OP_CALL {
+        // CallInst::Create(CI, OpBundles): the funclet bundle is dropped and, in a funclet, the exit block's one added
         for k in cb_nbundles(i) { if sbytes(cb_bundle_tag(i, k)) == "funclet" { lc_not_ported("sinking calls with funclet bundles"); } }
+        if lsi_colors_on {
+            let c = lsi_first_color(exit);
+            let ehp = if c >= 0 { first_non_phi(c) } else { -1 };
+            if ehp >= 0 && inst_is_eh_pad(ehp) { lc_not_ported("sinking calls into a funclet"); }
+        }
     }
     let nw = inst_clone(i);
     let ip = lc_first_insertion_pt(exit);
