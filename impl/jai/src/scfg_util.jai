@@ -266,9 +266,9 @@ dtu_is_bb_pending_deletion :: (dtu: *Dtu, bb: Value_Id) -> bool {
     return false;
 }
 // forceFlushDeletedBB
-dtu_force_flush_deleted_bb :: (dtu: *Dtu) {
+dtu_force_flush_deleted_bb :: (dtu: *Dtu, recalculating := false) {
     for dtu.deleted {
-        if dtu.dt && dt_node(dtu.dt, it) >= 0 dt_erase_node(dtu.dt, it);
+        if dtu.dt && !recalculating && dt_node(dtu.dt, it) >= 0 dt_erase_node(dtu.dt, it);
         block_erase_from_parent(it);
     }
     dtu.deleted.count = 0;
@@ -288,7 +288,7 @@ dtu_get_dom_tree :: (dtu: *Dtu) -> *Dom_Tree { dtu_flush(dtu); return dtu.dt; }
 // recalculate(F) (Lazy: flush deleted blocks, recalculate, drop the pending updates)
 dtu_recalculate :: (dtu: *Dtu, f: Value_Id) {
     if !dtu.lazy { if dtu.dt dt_recalculate(dtu.dt, f); return; }
-    dtu_force_flush_deleted_bb(dtu);
+    dtu_force_flush_deleted_bb(dtu, true);
     if dtu.dt dt_recalculate(dtu.dt, f);
     dtu.pending.count = 0;
 }

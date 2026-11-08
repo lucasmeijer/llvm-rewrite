@@ -317,6 +317,7 @@ PASS_TABLE :: Pass_Info.[
     .{"require<lazy-value-info>", .FUNCTION, .REQUIRE, true, .LVI},
     .{"invalidate<lazy-value-info>", .FUNCTION, .INVALIDATE, true, .LVI},
     .{"correlated-propagation", .FUNCTION, .CVP, false, .DOMTREE},
+    .{"jump-threading", .FUNCTION, .JUMP_THREADING, false, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -607,8 +608,9 @@ cl_data_layout: string;                  // opt -data-layout (overrides the modu
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT + GVN_CL_OPT_COUNT + DSE_CL_OPT_COUNT + MCO_CL_OPT_COUNT + INDVARS_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
-    add_indvars_cl_opts(list, list.count - INDVARS_CL_OPT_COUNT);
+    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT + GVN_CL_OPT_COUNT + DSE_CL_OPT_COUNT + MCO_CL_OPT_COUNT + INDVARS_CL_OPT_COUNT + JT_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    add_indvars_cl_opts(list, list.count - INDVARS_CL_OPT_COUNT - JT_CL_OPT_COUNT);
+    add_jt_cl_opts(list, list.count - JT_CL_OPT_COUNT);
     add_gvn_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT);
     add_dbgify_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT);
     add_licm_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT);
@@ -846,6 +848,10 @@ opt_main :: () {
             cl_data_layout = slice(a, find_index_from_left(a, #char "=") + 1, a.count - find_index_from_left(a, #char "=") - 1);
             continue;
         }
+        if a == "-aa-pipeline" || a == "--aa-pipeline" { if i >= args.count fatal("-aa-pipeline needs a value"); aa_parse_pipeline(args[i]); i += 1; continue; }
+        // -verify-each runs the verifier after every pass; on the valid IR our passes must produce it reports nothing
+        // (the harness verifies our output separately)
+        if a == "-verify-each" || a == "--verify-each" continue;
         if begins_with(a, "-aa-pipeline=") || begins_with(a, "--aa-pipeline=") {
             aa_parse_pipeline(slice(a, find_index_from_left(a, #char "=") + 1, a.count - find_index_from_left(a, #char "=") - 1));
             continue;

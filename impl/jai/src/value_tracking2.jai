@@ -1899,9 +1899,10 @@ block_single_successor :: (b: Value_Id) -> Value_Id {
 program_undefined_if_poison :: (i: Value_Id) -> bool { return program_undefined_if_undef_or_poison(i, true); }
 
 // Constant::containsUndefElement / containsPoisonElement / containsUndefOrPoisonElement
+// Constant::containsUndefElement: undef but not poison elements
 contains_undef_element :: (c: Value_Id) -> bool {
-    if pm_undef_value(c) return true;
-    if vkind(c) == .C_VECTOR { n := nops(c); for i: 0..cast(s64) n - 1 if pm_undef_value(op(c, cast(u32) i)) return true; }
+    if vkind(c) == .C_UNDEF return true;
+    if vkind(c) == .C_VECTOR { n := nops(c); for i: 0..cast(s64) n - 1 if vkind(op(c, cast(u32) i)) == .C_UNDEF return true; }
     return false;
 }
 contains_poison_element :: (c: Value_Id) -> bool {
