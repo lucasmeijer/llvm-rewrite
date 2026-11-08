@@ -5,9 +5,8 @@
 // GEPOperator::collectOffset (llvm/lib/IR/Operator.cpp) and the DbgVariableRecord location setters
 // (replaceVariableLocationOp, addVariableLocationOps, setKillLocation).
 //
-// Debug users are found through mem2reg.goose's per-pass record list: call m2r_collect_records(fv) at the start
-// of the pass (it fills VS_PASS1 with the values debug records mention). dbg_assign address salvaging is not
-// ported (fails loudly).
+// Debug users come from the central metadata tracking (dinfo.goose find_dbg_users). dbg_assign address
+// salvaging is not ported (fails loudly).
 import std;
 import ir;
 import irutil;
@@ -278,7 +277,7 @@ fn sv_is_noop_cast(i: i32) -> bool {
     let st = vals[op(i, 0)].ty;
     let dt = vals[i].ty;
     if o == OP_PTRTOINT { return dl_ptr(types[ty_scalar(st)].n as i64).bits == ty_scalar_bits(dt); }
-    if o == OP_PTRTOADDR { return dl_ptr(types[ty_scalar(st)].n as i64).idx == ty_scalar_bits(dt); }
+    if o == OP_PTRTOADDR { return dl_ptr(types[ty_scalar(st)].n as i64).bits == ty_scalar_bits(dt); }
     if o == OP_INTTOPTR { return dl_ptr(types[ty_scalar(dt)].n as i64).bits == ty_scalar_bits(st); }
     return false;
 }
@@ -465,11 +464,9 @@ fn sv_location_ops(r: i32, out: i32[>..<]&) {
         for k in mds[l].nops { let o = md_op(l, k); if o >= 0 && mds[o].kind == MK_VALUE { out.push(mds[o].extra); } }
     }
 }
-fn sv_note_value(v: i32) { if v >= 0 && !is_constant(v) { vs_add(VS_PASS1, v); } }
 // replaceVariableLocationOp(Old, New)
 fn sv_replace_location_op(r: i32, old: i32, nw: i32) {
-    dbgrecs[r].loc = m2r_md_replace_value(dbgrecs[r].loc, old, nw);
-    sv_note_value(nw);
+    dbg_set_loc(r, m2r_md_replace_value(dbgrecs[r].loc, old, nw));
 }
 // setKillLocation
 fn sv_set_kill_location(r: i32) {
@@ -481,7 +478,7 @@ fn sv_set_kill_location(r: i32) {
         for d in done { if d == v { seen = true; } }
         if seen { continue; }
         done.push(v);
-        dbgrecs[r].loc = m2r_md_replace_value(dbgrecs[r].loc, v, c_poison(vals[v].ty));
+        dbg_set_loc(r, m2r_md_replace_value(dbgrecs[r].loc, v, c_poison(vals[v].ty)));
     }
 }
 // addVariableLocationOps(NewValues, NewExpr)
@@ -490,9 +487,9 @@ fn sv_add_location_ops(r: i32, addl: const i32[:], e: i32) {
     sv_location_ops(r, ls);
     var mdsv: i32[>..<] = [];
     for v in ls { mdsv.push(md_value(v)); }
-    for v in addl { mdsv.push(md_value(v)); sv_note_value(v); }
-    dbgrecs[r].loc = md_get(MK_DIARGLIST, -1, mdsv, false);
+    for v in addl { mdsv.push(md_value(v)); }
     dbgrecs[r].expr = e;
+    dbg_set_loc(r, md_get(MK_DIARGLIST, -1, mdsv, false));
 }
 
 // salvageDebugInfoForDbgValues(I, DPUsers)

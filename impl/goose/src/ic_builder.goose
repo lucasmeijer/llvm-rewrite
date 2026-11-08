@@ -26,21 +26,24 @@ import ic_negator;
 
 var icb_pos: i32 = -1;     // insert before this instruction; -1 = at the end of icb_bb
 var icb_bb: i32 = -1;
+var icb_head = false;     // the insertion iterator's head bit (begin()/getFirstInsertionPt(): before the records)
 var icb_dl: i32 = -1;      // current debug location (!dbg md id)
 var icb_fmf: u8 = 0;       // the builder's FastMathFlags
 var ic_annot_src: i32 = -1;   // AnnotationMetadataSource
 
 // Builder.SetInsertPoint(I) + SetCurrentDebugLocation(I->getDebugLoc())
-fn icb_set_insert_point(i: i32) { icb_bb = inst_parent(i); icb_pos = i; icb_dl = inst_get_md(i, 0); }
+fn icb_set_insert_point(i: i32) { icb_bb = inst_parent(i); icb_pos = i; icb_head = false; icb_dl = inst_get_md(i, 0); }
+// SetInsertPoint(BB, It) for an iterator with the head bit (getFirstInsertionPt, getInsertionPointAfterDef)
+fn icb_set_insert_point_head(i: i32) { icb_set_insert_point(i); icb_head = true; }
 // SetInsertPoint(I) only (IRBuilder::SetInsertPoint(Instruction*) also sets the debug location)
 fn icb_set_insert_before(i: i32) { icb_set_insert_point(i); }
-fn icb_set_insert_end(bb: i32) { icb_bb = bb; icb_pos = -1; }
+fn icb_set_insert_end(bb: i32) { icb_bb = bb; icb_pos = -1; icb_head = false; }
 
 fn aset_int(s: i32, kind: i64) -> u64 { let a = aset_find(s, kind); if a < 0 { 0 } else { attrs[a].i1 } }
 
 // IRBuilderBase::Insert(I, Name)
 fn icb_insert(iv: i32, name: const u8[:]) -> i32 {
-    if icb_pos >= 0 { m2r_insert_before_adopting(iv, icb_pos); } else { block_append_inst(icb_bb, iv); }
+    if icb_pos >= 0 { inst_insert_at(iv, icb_bb, icb_pos, icb_head); } else { block_append_inst(icb_bb, iv); }
     ic_register_name(iv);
     if name.len > 0 && vals[iv].ty != T_VOID { set_name(iv, name); }
     if ng_active {
@@ -83,12 +86,24 @@ fn ic_new_icmp(p: i64, a: i32, b: i32) -> i32 {
     return i;
 }
 fn ic_new_select(c: i32, t: i32, f: i32) -> i32 { create_inst(OP_SELECT, vals[t].ty, [c, t, f]) }
-// SelectInst::Create(C, S1, S2, Name, InsertBefore, MDFrom): copies !prof and !unpredictable from MDFrom
+// SelectInst::Create(C, S1, S2, Name, InsertBefore, MDFrom): Sel->copyMetadata(*MDFrom), every kind including !dbg
 fn ic_new_select_md(c: i32, t: i32, f: i32, mdfrom: i32) -> i32 {
     let s = ic_new_select(c, t, f);
-    if mdfrom >= 0 { icb_copy_select_md(s, mdfrom); }
+    if mdfrom >= 0 { inst_copy_metadata(s, mdfrom); }
     return s;
 }
+// Instruction::copyMetadata(SrcInst) with no kind list: !dbg (SrcInst's, else the current one), then every other
+// attachment of SrcInst.
+fn inst_copy_metadata(dst: i32, src: i32) {
+    let dl = inst_get_md(src, 0);
+    if dl >= 0 { inst_set_md(dst, 0, dl); }
+    let si = inst_of(src);
+    var kinds: i32[>..<] = [];
+    var nodes: i32[>..<] = [];
+    for k in insts[si].nmd { kinds.push(md_att[insts[si].md + 2 * k]); nodes.push(md_att[insts[si].md + 2 * k + 1]); }
+    for k in kinds.len { if kinds[k] != 0 { inst_set_md(dst, kinds[k], nodes[k]); } }
+}
+// IRBuilder::CreateSelect(..., MDFrom): only !prof and !unpredictable
 fn icb_copy_select_md(s: i32, from: i32) {
     let kp = md_kind_id("prof");
     let ku = md_kind_id("unpredictable");

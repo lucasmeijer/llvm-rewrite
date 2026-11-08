@@ -179,6 +179,7 @@ fn dbgify_insert_dbg_val(tmpl: i32, before: i32, sp: i32, file: i32) {
     dbgrecs[r].dvar = var_;
     dbgrecs[r].expr = md_get(MK_DIEXPR, -1, [], false);
     dbgrecs[r].dl = loc;
+    dbg_track_new(r);
     inst_add_dbg(before, r);
 }
 

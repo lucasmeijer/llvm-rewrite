@@ -299,7 +299,7 @@ fn irb_set_prefix(p: const u8[:]) { irb_prefix.clear(); irb_prefix.append(p); }
 // named = false for a trivially empty Twine (no prefix either).
 fn irb_insert(iv: i32, name: const u8[:], named: bool) -> i32 {
     if irb_pos >= 0 {
-        if irb_head { inst_insert_before(iv, irb_pos); } else { m2r_insert_before_adopting(iv, irb_pos); }
+        if irb_head { inst_insert_before_head(iv, irb_pos); } else { inst_insert_before(iv, irb_pos); }
     } else {
         block_append_inst(irb_bb, iv);
     }
@@ -2672,16 +2672,8 @@ fn rewrite_partition(ai: i32, pi: i64) -> i32, i64 {
         insts[nii].ty2 = pty;
         insts[nii].as_ = insts[inst_of(ai)].as_;
         sr_set_inst_align(na, if unconstrained { dl_align(pty, false) } else { al });
-        inst_insert_before(na, ai);
         // new AllocaInst(..., InsertBefore = AI->getIterator()): not at the head, so AI's debug records move
-        let ai_i = inst_of(ai);
-        if ai_i < inst_dbg.len && inst_dbg[ai_i] >= 0 {
-            while inst_dbg.len <= nii { inst_dbg.push(-1); }
-            inst_dbg[nii] = inst_dbg[ai_i];
-            inst_dbg[ai_i] = -1;
-            var r = inst_dbg[nii];
-            while r >= 0 { dbgrecs[r].owner = na; r = dbgrecs[r].next; }
-        }
+        inst_insert_before(na, ai);
         var nm: u8[>..] = [];
         nm.append(val_name(ai)); nm.append(".sroa."); nm.append(str(p.si));
         set_name(na, nm);
@@ -3409,7 +3401,7 @@ fn delete_dead_instructions(deleted: i32[>..<]&) -> bool {
             deleted.push(i);
             var recs: i32[>..<] = [];
             m2r_find_dbg_users(i, recs);
-            for r in recs { if dbgrecs[r].kind as i64 == DR_DECLARE { dbg_erase_record(r); } }
+            for r in recs { if dbgrecs[r].kind as i64 == DR_DECLARE { dbg_delete_record(r); } }
         }
         if inst_get_md(i, md_kind_id("DIAssignID")) >= 0 { sr_not_ported("assignment tracking (DIAssignID) in SROA"); }
         sr_rauw(i, c_undef(vals[i].ty));
@@ -3542,7 +3534,7 @@ fn su_preds(bb: i32, out: i32[>..<]&) {
 fn su_create_phi(bb: i32, np: i64) -> i32 {
     let pn = new_inst(OP_PHI, su_ty, np);
     vals[pn].nops = 0;
-    inst_insert_before(pn, block_first(bb));
+    inst_insert_before_head(pn, block_first(bb));
     if su_name.len > 0 { set_name(pn, su_name); }
     return pn;
 }
@@ -3797,7 +3789,7 @@ fn su_get_value_in_middle(bb: i32) -> i32 {
     }
     let ph = new_inst(OP_PHI, su_ty, pb.len);
     vals[ph].nops = 0;
-    inst_insert_before(ph, block_first(bb));
+    inst_insert_before_head(ph, block_first(bb));
     if su_name.len > 0 { set_name(ph, su_name); }
     for k in pb.len { phi_add_incoming(ph, pv[k], pb[k]); }
     let sv = simplify_instruction(ph);
@@ -4060,7 +4052,7 @@ fn rewrite_mem_op_of_select(si: i32, i: i32, spec: i32) {
         } else {
             sr_drop_ub_md(c);
         }
-        m2r_insert_before_adopting(c, block_terminator(nmb));
+        inst_insert_before(c, block_terminator(nmb));
         let ptr = op(si, 1 + idx);
         set_op(c, if is_load { 0 } else { 1 }, ptr);
         if is_load {
@@ -4215,7 +4207,7 @@ fn sr_migrate_one(ai: i32, r: i32, frag_ai: const i32[:], frag_off: const i64[:]
             let ok = dbgrecs[o].kind as i64;
             if ok != DR_DECLARE && ok != DR_VALUE { continue; }
             if dbgrecs[o].dvar == dbgrecs[r].dvar && di_slot(dbgrecs[o].dl, "inlinedAt") == di_slot(dbgrecs[r].dl, "inlinedAt") {
-                dbg_erase_record(o);
+                dbg_delete_record(o);
             }
         }
         // insertNewDbgInst: createOrReplaceFragment(NewAddrExpr, NewFragment, BitExtractOffset)
@@ -4247,9 +4239,9 @@ fn sr_migrate_one(ai: i32, r: i32, frag_ai: const i32[:], frag_off: const i64[:]
             dbgrecs[nr].dvar = dbgrecs[r].dvar;
             dbgrecs[nr].expr = nexpr;
             dbgrecs[nr].dl = dbgrecs[r].dl;
+            dbg_track_new(nr);
             inst_add_dbg(ai, nr);
             m2r_recs.push(nr);
-            vs_add(VS_PASS1, frag_ai[fi]);
         } else {
             sr_not_ported("migrating dbg_value records of split allocas");
         }

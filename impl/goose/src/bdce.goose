@@ -2,6 +2,7 @@
 import std;
 import ir;
 import irutil;
+import salvage;
 import analyses;
 import instinfo;
 import local;
@@ -57,6 +58,9 @@ fn bdce_run(fv: i32) -> u32 {
                     let z = create_inst(OP_ZEXT, dt, [src]);
                     inst_insert_before(z, i);
                     set_name_from(z, i);
+                    // IRBuilder<> Builder(SE): the builder's debug location is SE's
+                    let dl = inst_get_md(i, 0);
+                    if dl >= 0 { inst_set_md(z, 0, dl); }
                     rauw(i, z);
                     wl.push(i);
                     changed = true;
@@ -95,7 +99,7 @@ fn bdce_run(fv: i32) -> u32 {
         }
     };
     var k = wl.len;
-    while k > 0 { k--; drop_all_refs(wl[k]); }
+    while k > 0 { k--; salvage_debug_info(wl[k]); drop_all_refs(wl[k]); }
     for i in wl { inst_erase_from_parent(i); }
     db_invalidate();
     if !changed { return 0xFFFFFFFF; }

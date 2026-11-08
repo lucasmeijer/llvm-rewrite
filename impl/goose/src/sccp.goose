@@ -1131,7 +1131,7 @@ fn sc_try_to_replace_with_constant(v: i32) -> bool {
 // IRBuilder/CastInst::Create insertion before `pos` (takes over the debug records at that position)
 fn sc_insert_new(opc: i64, ty: i32, opsv: const i32[:], pos: i32) -> i32 {
     let v = create_inst(opc, ty, opsv);
-    m2r_insert_before_adopting(v, pos);
+    inst_insert_before(v, pos);
     return v;
 }
 fn sc_copy_dbg_loc(dst: i32, src: i32) { let dl = inst_get_md(src, 0); if dl >= 0 { inst_set_md(dst, 0, dl); } }
@@ -1400,7 +1400,7 @@ fn sc_change_to_unreachable(iv: i32) -> i64 {
         }
     }
     let ui = create_inst(OP_UNREACHABLE, T_VOID, []);
-    m2r_insert_before_adopting(ui, iv);
+    inst_insert_before(ui, iv);
     sc_copy_dbg_loc(ui, iv);
     var n: i64 = 0;
     var i = iv;

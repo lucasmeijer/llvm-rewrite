@@ -6,6 +6,7 @@
 import std;
 import ir;
 import irutil;
+import salvage;
 import analyses;
 import calls;
 import instinfo;
@@ -332,21 +333,16 @@ fn adce_run(fv: i32) -> u32 {
         var i = block_last(bb);
         while i >= 0 {
             // drop debug records whose scope isn't alive
-            var prev_r: i32 = -1;
             var r = inst_first_dbg(i);
             while r >= 0 {
                 let nr = dbgrecs[r].next;
                 if dbgrecs[r].kind as i64 == DR_ASSIGN { fatal("ADCE: dbg_assign records (assignment tracking) are not ported yet"); }
                 let dl = dbgrecs[r].dl;
                 let sc = if dl >= 0 { di_slot(dl, "scope") } else { -1 };
-                if sc >= 0 && vm_has(VM_PASS1, sc) {
-                    prev_r = r;
-                } else {
-                    if prev_r < 0 { inst_dbg[inst_of(i)] = nr; } else { dbgrecs[prev_r].next = nr; }
-                }
+                if !(sc >= 0 && vm_has(VM_PASS1, sc)) { dbg_delete_record(r); }
                 r = nr;
             }
-            if !is_live(i) { dead.push(i); }
+            if !is_live(i) { dead.push(i); salvage_debug_info(i); }
             i = inst_prev(i);
         }
         bb = block_prev(bb);

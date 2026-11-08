@@ -245,8 +245,10 @@ fn set_name_from(v: i32, src: i32) {
     set_name(v, buf);
 }
 
-// Instruction::removeFromParent: unlink and drop the name from the function's symbol table.
+// Instruction::removeFromParent: its debug records stay behind (handleMarkerRemoval: they go to the next
+// instruction or become trailing), unlink, and drop the name from the function's symbol table.
 fn inst_remove_from_parent(iv: i32) {
+    if dbgrecs.len > 0 { dbg_records_to_next(iv); }
     if vals[iv].name >= 0 {
         let st = symtab_for(iv);
         if st >= 0 { symtab_remove(st, iv); }
@@ -258,10 +260,9 @@ fn inst_remove_from_parent(iv: i32) {
 // destroyed!"); its id is never reused, the record becomes VK_DEAD (see DESIGN.md §8.2).
 fn inst_erase_from_parent(iv: i32) {
     if vals[iv].first_use >= 0 { fatal("internal: erasing an instruction that still has uses"); }
-    if dbgrecs.len > 0 {
-        if dbg_records_use_value(iv) { fatal("salvageDebugInfo is not ported yet (a debug record uses an erased value)"); }
-        dbg_records_to_next(iv);
-    }
+    // ~Value: ValueAsMetadata::handleDeletion (debug records using it get poison; passes salvage before erasing,
+    // as LLVM's do)
+    if iv < val_vam.len && val_vam[iv] >= 0 { vam_handle_deletion(iv); }
     inst_remove_from_parent(iv);
     drop_all_refs(iv);
     val_set_dead(iv);
@@ -280,32 +281,46 @@ fn md_mentions_value(m: i32, v: i32) -> bool {
     return false;
 }
 fn dbg_records_use_value(v: i32) -> bool {
-    for r in dbgrecs {
-        if md_mentions_value(r.loc, v) || md_mentions_value(r.addr, v) { return true; }
-    }
-    return false;
+    if !val_used_by_md(v) { return false; }
+    var recs: i32[>..<] = [];
+    find_dbg_users(v, recs);
+    return recs.len > 0;
 }
 
 // Insert an unlinked instruction. Names: set them after insertion (IRBuilder::Insert then setName), so the
 // function's symbol table uniques them.
-fn inst_insert_after(iv: i32, pos: i32) {
-    let n = inst_next(pos);
-    if n >= 0 { inst_insert_before(iv, n); } else { block_append_inst(inst_parent(pos), iv); }
-}
+// Instruction::insertAfter(Instruction *Pos): a plain list insertion, so the records attached to the next
+// instruction stay there (after the new instruction).
+fn inst_insert_after(iv: i32, pos: i32) { inst_link(iv, inst_parent(pos), inst_next(pos)); }
 
-// Instruction::moveBefore (same function: the name stays in the same symbol table).
-fn inst_move_before(iv: i32, pos: i32) {
+// Instruction::moveBeforeImpl(BB, It = (pos, head), Preserve) (Instruction.cpp); pos = -1 is end(). Without
+// Preserve the moved instruction leaves its records behind (unless it isn't moving) and, without the head bit,
+// adopts the records at the destination. With Preserve its records travel with it.
+fn inst_move_impl(iv: i32, bv: i32, pos: i32, head: bool, preserve: bool) {
+    if !preserve && inst_first_dbg(iv) >= 0 && (pos != iv || head) { dbg_records_to_next(iv); }
+    if pos == iv { return; }
     inst_remove(iv);
-    inst_insert_before(iv, pos);
+    inst_link(iv, bv, pos);
+    if !preserve && !head {
+        let nx = inst_next(iv);
+        let src = marker_take(bv, nx);
+        // adoptDbgRecords(BB, It, InsertAtHead = false): after any records the instruction already has
+        if src >= 0 { marker_absorb(bv, iv, src, false); }
+    }
+    if is_terminator_op(iop(iv)) { block_flush_terminator_records(bv); }
 }
-fn inst_move_after(iv: i32, pos: i32) {
-    inst_remove(iv);
-    inst_insert_after(iv, pos);
-}
-fn inst_move_to_end(iv: i32, bv: i32) {
-    inst_remove(iv);
-    block_append_inst(bv, iv);
-}
+// Instruction::moveBefore(Instruction *Pos) (same function: the name stays in the same symbol table).
+fn inst_move_before(iv: i32, pos: i32) { inst_move_impl(iv, inst_parent(pos), pos, false, false); }
+// moveBefore(It) with the head bit set.
+fn inst_move_before_head(iv: i32, pos: i32) { inst_move_impl(iv, inst_parent(pos), pos, true, false); }
+// moveBeforePreserving(Instruction *Pos)
+fn inst_move_before_preserving(iv: i32, pos: i32) { inst_move_impl(iv, inst_parent(pos), pos, false, true); }
+// Instruction::moveAfter(Instruction *Pos): before std::next(Pos) with the head bit.
+fn inst_move_after(iv: i32, pos: i32) { inst_move_impl(iv, inst_parent(pos), inst_next(pos), true, false); }
+// moveAfterPreserving(Instruction *Pos)
+fn inst_move_after_preserving(iv: i32, pos: i32) { inst_move_impl(iv, inst_parent(pos), inst_next(pos), true, true); }
+// moveBefore(BB, BB->end())
+fn inst_move_to_end(iv: i32, bv: i32) { inst_move_impl(iv, bv, -1, false, false); }
 
 // Create an instruction with the given operands (not inserted).
 fn create_inst(opc: i64, ty: i32, opsv: const i32[:]) -> i32 {
@@ -383,12 +398,9 @@ fn create_block_after(fv: i32, after: i32, name: const u8[:]) -> i32 {
 fn split_block(bv: i32, at: i32, name: const u8[:]) -> i32 {
     let fv = block_func(bv);
     let nb = create_block_after(fv, bv, name);
-    var i = at;
-    while i >= 0 {
-        let ni = inst_next(i);
-        inst_move_to_end(i, nb);
-        i = ni;
-    }
+    // New->splice(New->end(), this, I, end()) with I = I->getIterator() (no head bit): I's records stay
+    // here and end up in front of the new branch
+    block_splice(nb, -1, false, bv, at, false, -1, false);
     let br = create_inst(OP_BR, T_VOID, [nb]);
     block_append_inst(bv, br);
     block_replace_successors_phi_uses_with(nb, bv, nb);
@@ -514,3 +526,53 @@ let VM_PASS0 = 0;
 let VM_PASS1 = 1;
 let VM_ANA0 = 2;       // DemandedBits: AliveBits
 let VM_ANA1 = 3;
+
+// ---------------------------------------------------------------------------------------------
+// BasicBlock::splice(Dest, Src, First, Last) with its debug-record handling (BasicBlock.cpp spliceDebugInfo,
+// spliceDebugInfoImpl, spliceDebugInfoEmptyBlock). Iterators are (instruction or -1 = end(), bit): the head bit
+// of Dest and First, the tail bit of Last (set = don't take the records in front of Last).
+fn block_splice(dbv: i32, dpos: i32, dhead: bool, sbv: i32, first: i32, fhead0: bool, last: i32, ltail: bool) {
+    if first == last {
+        // spliceDebugInfoEmptyBlock
+        if block_first(sbv) < 0 {
+            if !block_has_trailing(sbv) { return; }
+            marker_absorb(dbv, dpos, marker_take(sbv, -1), dhead);
+            return;
+        }
+        if first != block_first(sbv) || !fhead0 { return; }
+        if inst_first_dbg(first) < 0 { return; }
+        marker_absorb(dbv, dpos, marker_take(sbv, first), dhead);
+        return;
+    }
+    var fhead = fhead0;
+    // spliceDebugInfo: normalise trailing records at the destination end()
+    var more_dangling: i32 = -1;
+    if dpos < 0 && !dhead && block_has_trailing(dbv) {
+        if !fhead && inst_first_dbg(first) >= 0 { more_dangling = marker_take(sbv, first); }
+        marker_absorb(sbv, first, marker_take(dbv, -1), true);
+        fhead = true;
+    }
+    // spliceDebugInfoImpl
+    let read_from_tail = !ltail;
+    let dest_marker = marker_take(dbv, dpos);
+    if read_from_tail && marker_first(sbv, last) >= 0 {
+        marker_absorb(dbv, dpos, marker_take(sbv, last), true);
+    }
+    if !fhead && inst_first_dbg(first) >= 0 {
+        marker_absorb(sbv, last, marker_take(sbv, first), true);
+    }
+    if dest_marker >= 0 {
+        if dhead { marker_absorb(dbv, dpos, dest_marker, false); }
+        else { marker_absorb(sbv, first, dest_marker, true); }
+    }
+    // move the instructions (their records travel with them)
+    var i = first;
+    while i >= 0 && i != last {
+        let ni = inst_next(i);
+        inst_remove(i);
+        inst_link(i, dbv, dpos);
+        i = ni;
+    }
+    if more_dangling >= 0 { marker_absorb(sbv, last, more_dangling, true); }
+    block_flush_terminator_records(dbv);
+}

@@ -254,8 +254,7 @@
   slot, `MK_DIARGLIST` is not a node. Forward references are temporaries overwritten in place; `md_merge_uniqued`
   (end of parse) merges uniqued nodes that became equal, like re-uniquing after RAUW. SlotTracker/TypeFinder walk DI
   operands in LLVM's MDNode operand order (`DIK_OPORDER`), not field order.
-- **Debug records** (`dinfo.goose`): `inst_first_dbg(iv)`/`dbgrecs[r].next`. Call `dbg_records_to_next(iv)` before
-  erasing an instruction (DbgMarker::removeMarker moves them to the next instruction).
+- **Debug records** (`dinfo.goose`): `inst_first_dbg(iv)`/`dbgrecs[r].next`. See "Debug records (central)" below.
 - **Intrinsics**: all ~16400 intrinsics are known (`func_iid`), with exact attributes and signatures. Re-run
   `tools/build_min_tblgen.sh && python3 tools/gen_intrinsics.py` only when LLVM changes; then rerun
   `tools/gen_iids.py` (IID_* constants are derived from the names table). Big generated tables are hex strings:
@@ -285,7 +284,8 @@
   file header). isImpliedCondition (implied.goose) is fully ported, including fcmps (fpclass.goose).
 - ADCE perf trap: LLVM's `SetVector::remove` and the IDF priority queue were first ported as linear scans, which
   made ADCE quadratic on `scaling/switch`; membership is now the scratch set and the queue a heap. Integers > 64 bits fail loudly in DemandedBits (KnownBits is any width).
-- Not ported in ADCE/BDCE/DCE: debug-info salvaging, `--enable-knowledge-retention` (salvageKnowledge). ADCE
+- ADCE/BDCE/DCE salvage debug info like LLVM (ADCE: every dead instruction in reverse order before
+  dropAllReferences; BDCE: reverse worklist). Not ported in ADCE/BDCE: `--enable-knowledge-retention`. ADCE
   applies its deleted edges to DT/PDT with an eager DomTreeUpdater and preserves both, as LLVM does.
 
 ## CFG analyses and loop canonicalization (domtree, dtu, loopinfo, cycleinfo, breakcrit, loopsimplify, lcssa)
@@ -327,14 +327,9 @@
   now tracked (`block_set_parent` / `block_number` in ir.goose: numbers are assigned from a per-function counter
   when a block's parent changes, exactly like `BasicBlock::setParent`). Any code that moves a block into a
   function must go through `block_set_parent`.
-- Debug records know their instruction (`DbgRec.owner`, kept by `inst_add_dbg`/`dbg_records_to_next`), so
-  `dbg_erase_record` is O(record list). mem2reg/SROA keep a per-run list of the function's records and the set of
-  values they mention (VS_PASS1), which makes `ValueAsMetadata::handleRAUW`/`handleDeletion` (`m2r_dbg_rauw`,
-  `m2r_erase`: RAUW follows into debug locations, erased values become poison) cost nothing for unmentioned
-  values. `inst_erase_from_parent` still fails loudly when a record uses the erased value (it would need
-  salvageDebugInfo); mem2reg/SROA use `m2r_erase` because LLVM does not salvage there.
-- `m2r_insert_before_adopting` is `Instruction::insertBefore` without the head bit: the new instruction takes over
-  the debug records attached to the position. IRBuilder insertions do this; `BB->begin()` insertions (PHIs) don't.
+- mem2reg/SROA erase without salvaging (`m2r_erase` = `inst_erase_from_parent`), as LLVM does: records of an
+  erased value become poison through the central handleDeletion. `m2r_recs` (from `m2r_collect_records`) is only
+  "the records of this function" now; `m2r_dbg_rauw` is a no-op kept for old call sites (rauw does it).
 - SROA's IRBuilder (`irb_*`): insertion point, current debug location (set from the insertion instruction, as
   `SetInsertPoint(Instruction*)` does), name prefix (`IRBuilderPrefixedInserter`; a `StringRef` name that is empty
   still gets the prefix, a literal `""` does not: pass `named = false` for the latter), ConstantFolder semantics
@@ -363,8 +358,7 @@
 - One solver at a time: `sc_init()` bumps the epoch of the per-value `ScRec` table. Lattice elements live in
   `sc_vls` and are addressed by index; the Goose trap "`a[f()]` where f grows a" bites here, so read them via
   `sc_gv(v)` / `sc_vsv(v)` / `sc_gsv(v, i)` (index computed first), never `sc_vls[sc_gvs(v)]`.
-- Debug records: the transform phase RAUWs with `sc_rauw` (rauw + `m2r_dbg_rauw`) and erases with
-  `m2r_erase`; call `m2r_collect_records(fv)` before transforming a function.
+- Debug records: rauw and erasing keep them up to date centrally (see "Debug records (central)").
 - Function specialization (FunctionSpecialization.cpp, with CodeMetrics and the TTI code-size model) is not
   ported. `ipsccp` enables it by default; we fail loudly only when a function passes `isCandidateFunction`,
   has an executable direct call site that passes a candidate constant to an interesting argument (or is
@@ -624,14 +618,10 @@
   getIntrinsicInstrCost.
 - opt applies -mcpu/-mattr to every function as "target-cpu"/"target-features" attributes (opt.goose
   `set_function_attributes`, codegen::setFunctionAttributes) — this shows up in the printed IR.
-- Debug records: Goose attaches records to the instruction after them, like LLVM's DbgMarker, but
-  `inst_insert_before` does not adopt the records at the insertion point the way Instruction::insertBefore does
-  without the head bit. SimplifyCFG compensates locally (`scf_adopt_records` in sb_insert and the hoisting
-  moves, `cu_splice_before_dbg`, `cu_prepend_records` in MergeBlockIntoPredecessor). A pass that inserts before
-  an instruction carrying records must decide which LLVM iterator (head bit or not) it is porting.
-- simplifycfg collects the debug records at pass start (`m2r_collect_records`, slot VS_PASS1) so `scf_rauw` and
-  `scf_erase` keep records up to date (ValueAsMetadata RAUW / deletion -> poison). cfgutil's own RAUWs don't;
-  they fail loudly at the erase instead.
+- Debug records: insertion, moves and splices go through the central head-bit API (see "Debug records
+  (central)"); the old local compensation (`scf_adopt_records`, `cu_splice_before_dbg`, `cu_prepend_records`) is
+  gone. Record cloning (bonus instructions + RemapDbgRecordRange, the folded branch, threading's SrcDbgCursor),
+  simplifyUnreachable's flush/drop and salvaging in RecursivelyDeleteTriviallyDeadInstructions are ported.
 
 ## Sweeps (`./harness/run sweep`, 2026-11-08: every round-tripping corpus file, ~7750)
 
@@ -710,9 +700,8 @@ What they were:
   Where LLVM inserts at `getFirstInsertionPt()`/`begin()`/`getFirstNonPHIIt()` (head bit) it must not adopt.
 - `Instruction::moveBefore` (not Preserving) is `lc_move_before`: the moved instruction's own records move to its
   next instruction, and without the head bit it absorbs the destination's records.
-- LICM keeps debug records consistent through mem2reg's helpers (`m2r_collect_records` at the start of every
-  run, `m2r_dbg_rauw`, `m2r_erase`); `salvage_debug_info` and `salvage_knowledge(i, false)` before erasing dead
-  instructions, as LLVM does.
+- LICM: `salvage_debug_info` and `salvage_knowledge(i, false)` before erasing dead instructions, as LLVM does;
+  RAUW/erase keep records up to date centrally.
 - Sinking splits exit predecessors with loopsimplify.goose's `split_block_predecessors` in DomTreeUpdater mode
   (`ls_split_dtu`: the lazy DTU is flushed at once, so the DT gets {Insert New->BB, Insert P->New, Delete P->BB}
   through applyUpdates) with `ls_mssau` (MemorySSAUpdater::wireOldPredecessorsToNewImmediatePredecessor).
@@ -728,3 +717,55 @@ What they were:
   really ask for a cost.
 - Not ported (fail loudly): sinking calls into funclets or calls with funclet bundles, mergeDIAssignID of promoted
   stores with DIAssignID attachments; optimization remarks are never printed (no `-pass-remarks`).
+
+## Debug records (central: dinfo.goose, dbgutil.goose, ir.goose/irutil.goose insertion API)
+
+- **Tracking.** Every record location/address that is a ValueAsMetadata or DIArgList is tracked like LLVM's
+  ReplaceableMetadataImpl (dinfo.goose `trk_*`): per md a user list with LLVM's tracking indices, `val_vam[v]` = the
+  value's VAM (IsUsedByMD). `rauw` calls `vam_handle_rauw`, `inst_erase`/`inst_erase_from_parent` call
+  `vam_handle_deletion` (records get poison). `find_dbg_users`/`find_dbg_values` return LLVM's order. Tracking
+  starts at the end of parse_module (`dbg_track_module`, program order); after that **never assign
+  `dbgrecs[r].loc/.addr` directly**: use `dbg_set_loc`/`dbg_set_addr`, `dbg_track_new(r)` for a new record,
+  `dbg_delete_record(r)` to delete one (`dbg_erase_record` only unlinks it from its marker), `dbg_clone_record`.
+  DIArgList identity: LLVM mutates a DIArgList in place; ours are hash-consed, so an in-place change moves the users
+  to the new md id (`md_al_fwd` forwards stale owners). Function-local metadata as call operands
+  (MetadataAsValue) is not tracked.
+- **Insertion API = LLVM iterators.** `inst_insert_before(iv, pos)` is `insertBefore(Instruction*)`: the new
+  instruction **adopts** the records at pos. `inst_insert_before_head(iv, pos)` is an iterator with the head bit
+  (`begin()`, `getFirstNonPHIIt()`, `getFirstInsertionPt()`, `getInsertionPointAfterDef()`): it goes in front of
+  them; PHIs must always use it. `inst_insert_at(iv, bb, pos, head)` is the general form (pos -1 = end()).
+  `block_append_inst` adopts trailing records; inserting a terminator flushes them. `inst_insert_after` is a plain
+  list insertion (Instruction::insertAfter). Moves: `inst_move_before` / `_head` / `_preserving`,
+  `inst_move_after(_preserving)`, `inst_move_to_end`, all `inst_move_impl` (moveBeforeImpl). Splices:
+  `block_splice(dest_bb, dest_pos, dest_head, src_bb, first, first_head, last, last_tail)` (spliceDebugInfo);
+  `split_block` uses it. Erasing/removing moves an instruction's records to the next instruction or to the block's
+  trailing marker (`block_trail`, owner = -2 - block). InstCombine's builder carries the head bit (`icb_head`,
+  `icb_set_insert_point_head`); restore sites reset it to false.
+- When porting an insertion, look at the LLVM iterator: `X->getIterator()`/`Instruction*` adopts, the four
+  functions above don't (but freezeOtherUses clears the bit again; getFirstNonPHIOrDbgOrAlloca clears it).
+- dbgutil.goose: `replace_all_dbg_uses_with` (replaceAllDbgUsesWith), `lower_dbg_declare` (LowerDbgDeclare, run by
+  instcombine unless `-instcombine-lower-dbg-declare=0`), `remove_redundant_dbg_instrs` and the
+  `redundant-dbg-inst-elim` pass. salvage.goose: salvageDebugInfo / salvageDebugInfoForDbgValues.
+- Not ported (fail loudly): dbg_assign (assignment tracking) everywhere, SROA's migration of dbg_value records of
+  split allocas, debugify's size of scalable types.
+
+### Sweeps after the debug-record infrastructure (2026-11-13; silent = differs + bad-ir, loud failures in brackets)
+
+| Pipeline | before | after |
+| --- | --- | --- |
+| `simplifycfg` | 10 (`.old` naming of unnamed bonus instructions, dbgvalue.ll trailing records) [93] | 0 [87] |
+| `debugify,simplifycfg` | 42 [1211] | 0 [88] |
+| `debugify,adce` | 23 [1351] | 0 [6] |
+| `debugify,bdce` | 0 [1592] | 0 [225] |
+| `debugify,dce` | 0 [5] | 0 [4] |
+| `debugify,sroa` | 5 [168] | 0 [168, SROA dbg_value migration of split allocas] |
+| `debugify,mem2reg` | 1 [0] | 0 [0] |
+| `debugify,instsimplify` | 1 [77] | 0 [76] |
+| `debugify,licm` | - | 0 [0] |
+| `debugify,instcombine` --per-function | 17 [47850] | 2 [2793] |
+| `instcombine` --per-function | 8 | 0 |
+| `instsimplify`, `early-cse`, `sccp`, `sroa`, `mem2reg`, `dce`, `adce`, `bdce`, `licm` | 0 | 0 |
+
+Left in `debugify,instcombine`: frexp.ll `frexp_poison_scaleable_vector` (debugify names the variable type of a
+scalable struct `ty0`, we say `ty128`) and predicatedinst-loop-invariant.ll `loop_invariant_srem` (a loop phi's
+records end up `i8 0` instead of `poison`: InstCombine reaches the same IR through a different fold order).

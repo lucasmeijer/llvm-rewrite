@@ -2328,7 +2328,7 @@ fn fold_multiplication_overflow_check(i: i32) -> i32 {
     var res = icb_extractvalue(call, 1, "mul.ov");
     if neg { res = icb_not(res, "mul.not.ov"); }
     if mul_other { ic_erase(mul); }
-    icb_pos = spos; icb_bb = sbb; icb_dl = sdl;
+    icb_pos = spos; icb_bb = sbb; icb_dl = sdl; icb_head = false;
     return res;
 }
 
@@ -4447,14 +4447,14 @@ fn can_rewrite_gep_as_offset(start: i32, base: i32, nw0: u8) -> bool, u8 {
 }
 // setInsertionPoint(Builder, V, Before)
 fn icc_set_insertion_point(v: i32, before: bool) {
-    if is_phi_inst(v) { icb_set_insert_point(first_insertion_pt(inst_parent(v))); return; }
+    if is_phi_inst(v) { icb_set_insert_point_head(first_insertion_pt(inst_parent(v))); return; }
     if is_inst(v) {
         if before { icb_set_insert_point(v); } else { icb_set_insert_point(inst_next(v)); }
         return;
     }
     if is_arg(v) {
         let e = func_entry(args_parent[vals[v].sub]);
-        icb_set_insert_point(first_insertion_pt(e));
+        icb_set_insert_point_head(first_insertion_pt(e));
     }
 }
 // rewriteGEPAsOffset(Start, Base, NW, DL, Explored, IC)
@@ -4472,7 +4472,7 @@ fn rewrite_gep_as_offset(start: i32, base: i32, nw: u8) -> i32 {
         if is_phi_inst(v) {
             let np = new_inst(OP_PHI, ity, nops(v));
             vals[np].nops = 0;
-            inst_insert_before(np, v);
+            inst_insert_before_head(np, v);
             var nm: u8[>..] = [];
             nm.append(val_name(v)); nm.append(".idx");
             ic_register_name(np);
@@ -4519,7 +4519,7 @@ fn rewrite_gep_as_offset(start: i32, base: i32, nw: u8) -> i32 {
         ic_replace_inst_uses_with(v, ng);
         icw_add(v);
     }
-    icb_pos = spos; icb_bb = sbb; icb_dl = sdl;
+    icb_pos = spos; icb_bb = sbb; icb_dl = sdl; icb_head = false;
     return nv[idx_of(start)];
 }
 // instructions made by the plain IRBuilder<> of rewriteGEPAsOffset are not added to the worklist

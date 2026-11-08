@@ -30,6 +30,7 @@ import pm;
 import vt;
 import constfold;
 import dinfo;
+import salvage;
 import earlycse;
 import instident;
 import fpu;
@@ -279,6 +280,8 @@ fn cu_recursively_delete_dead_list(dead: i32[>..<]&) {
     while dead.len > 0 {
         let i = dead.pop();
         if i < 0 || is_dead(i) { continue; }
+        // Don't lose the debug info while deleting the instructions.
+        salvage_debug_info(i);
         for k in nops(i) {
             let ov = op(i, k);
             set_op(i, k, -1);
@@ -373,25 +376,6 @@ fn cu_fold_single_entry_phis(bb: i32) -> bool {
     return true;
 }
 
-// Move instructions [from, upto) of src before pos (BasicBlock::splice); upto = -1 means to the end.
-fn cu_splice_before(pos: i32, from: i32, upto: i32) {
-    var i = from;
-    while i >= 0 && i != upto {
-        let ni = inst_next(i);
-        inst_move_before(i, pos);
-        i = ni;
-    }
-}
-// Move instructions [from, upto) to the end of bb.
-fn cu_splice_to_end(bb: i32, from: i32, upto: i32) {
-    var i = from;
-    while i >= 0 && i != upto {
-        let ni = inst_next(i);
-        inst_move_to_end(i, bb);
-        i = ni;
-    }
-}
-
 // HasLoopOrEntryConvergenceToken
 fn cu_has_loop_or_entry_convergence_token(bb: i32) -> bool {
     var i = block_first(bb);
@@ -433,13 +417,13 @@ fn cu_merge_block_into_predecessor(bb: i32) -> bool {
     }
     let sti = block_terminator(bb);
     // Move all definitions in the successor to the predecessor
-    cu_splice_before_dbg(pti, block_first(bb), sti);
+    // PredBB->splice(PTI->getIterator(), BB, BB->begin(), STI->getIterator())
+    block_splice(pred, pti, false, bb, block_first(bb), true, sti, false);
     cu_block_rauw(bb, pred);
-    // Delete the unconditional branch from the predecessor; its remaining records trail and are flushed onto
-    // the moved terminator.
-    cu_prepend_records(pti, sti);
+    // Delete the unconditional branch from the predecessor (its records trail), move the terminator
+    // (moveBeforePreserving(*PredBB, PredBB->end()): the trailing records are flushed onto it).
     inst_erase_from_parent(pti);
-    inst_move_to_end(sti, pred);
+    inst_move_impl(sti, pred, -1, false, true);
     block_append_inst(bb, create_inst(OP_UNREACHABLE, T_VOID, []));
     if vals[pred].name < 0 && vals[bb].name >= 0 { cu_take_name(pred, bb); }
     cu_apply(ups);
@@ -482,13 +466,8 @@ fn cu_merge_basic_block_into_only_pred(dest: i32) {
     if cu_has_address_taken(dest) { cu_not_ported("MergeBasicBlockIntoOnlyPred of an address-taken block"); }
     cu_block_rauw(pred, dest);
     inst_erase_from_parent(block_terminator(pred));
-    let first = block_first(dest);
-    if first >= 0 {
-        var i = block_first(pred);
-        while i >= 0 { let ni = inst_next(i); inst_move_before(i, first); i = ni; }
-    } else {
-        cu_splice_to_end(dest, block_first(pred), -1);
-    }
+    // DestBB->splice(DestBB->begin(), PredBB)
+    block_splice(dest, block_first(dest), true, pred, block_first(pred), true, -1, false);
     block_append_inst(pred, create_inst(OP_UNREACHABLE, T_VOID, []));
     if replace_entry { block_move_after(dest, pred); }
     if cu_dtu {
@@ -518,7 +497,7 @@ fn mdk_make_implicit() -> i32 { md_kind_id("make.implicit") }
 // IRBuilder<> Builder(T) + CreateBr(Dest): an unconditional branch before t with t's debug location
 fn cu_create_br_before(dest: i32, t: i32) -> i32 {
     let br = create_inst(OP_BR, T_VOID, [dest]);
-    m2r_insert_before_adopting(br, t);   // BranchInst::Create(Dest, T->getIterator()): adopts T's records
+    inst_insert_before(br, t);   // BranchInst::Create(Dest, T->getIterator()): adopts T's records
     let dl = inst_get_md(t, MDK_DBG);
     if dl >= 0 { inst_set_md(br, MDK_DBG, dl); }
     return br;
@@ -937,8 +916,8 @@ fn cu_try_simplify_uncond_branch_from_empty_block(bb: i32) -> bool {
     }
     if single_pred(succ) >= 0 {
         inst_erase_from_parent(block_terminator(bb));
-        let pos = first_non_phi(succ);
-        cu_splice_before(pos, block_first(bb), -1);
+        // Succ->splice(Succ->getFirstNonPHIIt(), BB)
+        block_splice(succ, first_non_phi(succ), true, bb, block_first(bb), true, -1, false);
     } else {
         loop {
             let pn = block_first(bb);
@@ -1397,45 +1376,19 @@ fn cu_hoist_all_instructions_into(dom: i32, ins_pt: i32, bb: i32) {
     }
     let t = block_terminator(bb);
     if dbgrecs.len > 0 { cu_drop_debug_users(t); cu_drop_dbg_records(t); }
-    cu_splice_before_dbg(ins_pt, block_first(bb), t);
+    block_splice(inst_parent(ins_pt), ins_pt, false, bb, block_first(bb), true, t, false);
 }
 
 // Instruction::dropDbgRecords
 fn cu_drop_dbg_records(i: i32) {
     var r = inst_first_dbg(i);
-    while r >= 0 { let nx = dbgrecs[r].next; dbg_erase_record(r); r = nx; }
+    while r >= 0 { let nx = dbgrecs[r].next; dbg_delete_record(r); r = nx; }
 }
 // dropDebugUsers(I): erase every debug record that uses I
 fn cu_drop_debug_users(v: i32) {
-    if dbgrecs.len == 0 { return; }
-    for r in dbgrecs.len {
-        let x = dbgrecs[r];
-        if x.owner < 0 || x.kind as i64 == DR_LABEL { continue; }
-        if md_mentions_value(x.loc, v) || md_mentions_value(x.addr, v) { dbg_erase_record(r as i32); }
-    }
-}
-// Move all records of `from` in front of the records of `to`.
-fn cu_prepend_records(from: i32, to: i32) {
-    if dbgrecs.len == 0 { return; }
-    let fi = inst_of(from);
-    if fi >= inst_dbg.len || inst_dbg[fi] < 0 { return; }
-    let ti = inst_of(to);
-    while inst_dbg.len <= ti { inst_dbg.push(-1); }
-    var last = inst_dbg[fi];
-    dbgrecs[last].owner = to;
-    while dbgrecs[last].next >= 0 { last = dbgrecs[last].next; dbgrecs[last].owner = to; }
-    dbgrecs[last].next = inst_dbg[ti];
-    inst_dbg[ti] = inst_dbg[fi];
-    inst_dbg[fi] = -1;
-}
-
-// BasicBlock::splice(Dest = pos, Src, begin(), terminator) when the moved range carries no debug records of
-// its own: the records attached to pos come before the spliced instructions (spliceDebugInfo, Dest without
-// head bit).
-fn cu_splice_before_dbg(pos: i32, from: i32, upto: i32) {
-    if from == upto { return; }
-    cu_splice_before(pos, from, upto);
-    cu_prepend_records(pos, from);
+    var recs: i32[>..<] = [];
+    find_dbg_users(v, recs);
+    for r in recs { dbg_delete_record(r); }
 }
 
 fn cu_used_by_debug_record(i: i32) -> bool { dbgrecs.len > 0 && dbg_records_use_value(i) }

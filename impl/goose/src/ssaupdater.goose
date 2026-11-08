@@ -44,7 +44,7 @@ fn ssa_new_phi(reserve: i64, bb: i32) -> i32 {
     let pn = new_inst(OP_PHI, ssa_ty, reserve);
     vals[pn].nops = 0;
     let f = block_first(bb);
-    if f >= 0 { inst_insert_before(pn, f); } else { block_append_inst(bb, pn); }
+    if f >= 0 { inst_insert_before_head(pn, f); } else { block_append_inst(bb, pn); }
     if ssa_name.len > 0 { set_name(pn, ssa_name); }
     return pn;
 }

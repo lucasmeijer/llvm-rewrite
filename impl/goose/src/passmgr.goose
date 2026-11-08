@@ -42,6 +42,7 @@ import loopnest;
 import simplifycfg;
 import subtarget;
 import debugify;
+import dbgutil;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -59,6 +60,7 @@ let P_CHECK_DEBUGIFY = 8;
 let P_INFERATTRS = 9;
 // function passes
 let P_DCE = 100;
+let P_REDUNDANT_DBG_INST_ELIM = 120;
 let P_ADCE = 101;
 let P_BDCE = 102;
 let P_PRINT_DOMTREE = 103;
@@ -106,6 +108,7 @@ let PASS_TABLE: const u8[:][] = [
     "m:check-debugify:8:0",
     "m:inferattrs:9:0",
     "f:dce:100:0",
+    "f:redundant-dbg-inst-elim:120:0",
     "f:adce:101:0",
     "f:bdce:102:0",
     "f:print<domtree>:103:1",
@@ -137,6 +140,7 @@ let PASS_TABLE: const u8[:][] = [
 fn pass_class_name(p: i64) -> const u8[:] {
     match p {
         P_DCE => "DCEPass",
+        P_REDUNDANT_DBG_INST_ELIM => "RedundantDbgInstEliminationPass",
         P_ADCE => "ADCEPass",
         P_BDCE => "BDCEPass",
         P_MEM2REG => "PromotePass",
@@ -739,6 +743,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
     if pass_creates_subtarget(n) { st_touch(fv); }
     match p {
         P_DCE => { return dce_run(fv); },
+        P_REDUNDANT_DBG_INST_ELIM => { return redundant_dbg_inst_elim_run(fv); },
         P_ADCE => { return adce_run(fv); },
         P_BDCE => { return bdce_run(fv); },
         P_MEM2REG => { return mem2reg_run(fv); },

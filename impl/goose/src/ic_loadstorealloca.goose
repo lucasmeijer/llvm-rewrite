@@ -1235,12 +1235,12 @@ fn ic_merge_store_into_successor(si: i32) -> bool {
         phi_add_incoming(pn, op(si, 0), inst_parent(si));
         icb_set_insert_point(other_store);
         phi_add_incoming(pn, icb_bit_or_pointer_cast(merged, vals[pn].ty, ""), other_bb);
-        merged = ic_insert_new_before(pn, block_first(dest_bb));
+        merged = ic_insert_new_before_head(pn, block_first(dest_bb));   // DestBB->begin()
         if merged_loc >= 0 { inst_set_md(pn, 0, merged_loc); } else { inst_erase_md(pn, 0); }
     }
     let pos = first_insertion_pt(dest_bb);
     let nsi = ic_new_store_like(merged, op(si, 1), si);
-    ic_insert_new_before(nsi, pos);
+    ic_insert_new_before_head(nsi, pos);
     if merged_loc >= 0 { inst_set_md(nsi, 0, merged_loc); } else { inst_erase_md(nsi, 0); }
     let dia = md_kind_id("DIAssignID");
     if inst_get_md(si, dia) >= 0 || inst_get_md(other_store, dia) >= 0 { ic_not_ported("mergeDIAssignID in mergeStoreIntoSuccessor"); }

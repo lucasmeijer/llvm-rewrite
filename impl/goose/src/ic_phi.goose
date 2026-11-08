@@ -192,12 +192,11 @@ fn fold_integer_typed_phi(pn: i32) -> bool {
             ci = ic_new_cast(o, iv, pty);
             set_name(ci, ph_name(iv, ".ptr"));
             if is_inst(iv) {
-                var pos = inst_next(iv);
-                if is_phi_inst(iv) { pos = first_insertion_pt(inst_parent(iv)); }
-                ic_insert_new_before(ci, pos);
+                if is_phi_inst(iv) { ic_insert_new_before_head(ci, first_insertion_pt(inst_parent(iv))); }
+                else { ic_insert_new_before(ci, inst_next(iv)); }
             } else {
                 let entry = func_entry(inst_func(pn));
-                ic_insert_new_before(ci, first_insertion_pt(entry));
+                ic_insert_new_before_head(ci, first_insertion_pt(entry));
             }
             cast_from.push(iv);
             cast_to.push(ci);
@@ -791,7 +790,7 @@ fn simplify_using_control_flow(pn: i32) -> i32 {
     if invert == 0 { return cond; }
     let ip = first_insertion_pt(bb);
     if ip >= 0 {
-        icb_set_insert_point(ip);
+        icb_set_insert_point_head(ip);
         return icb_not(cond, "");
     }
     return -1;
@@ -833,7 +832,7 @@ fn fold_dependent_ivs(pn: i32) -> i32 {
     let isbo = is_binop_inst(ivnext);
     let ident = if isbo { binop_identity(iop(ivnext), vals[iv2start].ty, false) } else { c_null(vals[iv2start].ty) };
     if iv2start != ident { return -1; }
-    icb_set_insert_point(first_insertion_pt(bb));
+    icb_set_insert_point_head(first_insertion_pt(bb));
     if !isbo {
         return icb_gep(gep_src_ty(ivnext), start, [iv2], "", gep_flags(ivnext));
     }

@@ -460,7 +460,9 @@ fn drop_all_refs(user: i32) {
 }
 
 // Value::doRAUW: repeatedly take the head use and point it at `nv` (which reverses the order).
+// Value::replaceAllUsesWith: also ValueAsMetadata::handleRAUW when the value is used by debug records.
 fn rauw(old: i32, nv: i32) {
+    if old < val_vam.len && val_vam[old] >= 0 { vam_handle_rauw(old, nv); }
     while vals[old].first_use >= 0 {
         let u = vals[old].first_use;
         use_set(u, nv);
@@ -1016,32 +1018,53 @@ fn new_inst(opc: i64, ty: i32, nopnds: i64) -> i32 {
 // The opcode lives in the value record (Val.op), so iop is one load and one bounds check (DESIGN.md §2.1).
 fn iop(v: i32) -> i64 { vals[v].op as i64 }
 
-fn block_append_inst(bv: i32, iv: i32) {
+// Link an unlinked instruction into bv before pos (-1 = at the end); no debug-record handling.
+fn inst_link(iv: i32, bv: i32, pos: i32) {
+    let i = inst_of(iv);
     let b = block_of(bv);
-    let i = inst_of(iv);
-    let last = blocks[b].last;
     insts[i].parent = bv;
-    insts[i].prev = last;
-    insts[i].next = -1;
-    if last >= 0 { insts[inst_of(last)].next = iv; } else { blocks[b].first = iv; }
-    blocks[b].last = iv;
-    // Instruction::insertBefore(BB, end()) without the head bit adopts the block's trailing debug records
-    // (BasicBlock::getTrailingDbgRecords; a terminator flushes them the same way)
-    if b < block_trail.len && block_trail[b] >= 0 { dbg_adopt_trailing(bv, iv); }
-}
-
-fn inst_insert_before(iv: i32, pos: i32) {
-    let i = inst_of(iv);
+    if pos < 0 {
+        let last = blocks[b].last;
+        insts[i].prev = last;
+        insts[i].next = -1;
+        if last >= 0 { insts[inst_of(last)].next = iv; } else { blocks[b].first = iv; }
+        blocks[b].last = iv;
+        return;
+    }
     let pi = inst_of(pos);
-    let bv = insts[pi].parent;
-    let b = block_of(bv);
     let p = insts[pi].prev;
-    insts[i].parent = bv;
     insts[i].prev = p;
     insts[i].next = pos;
     insts[pi].prev = iv;
     if p >= 0 { insts[inst_of(p)].next = iv; } else { blocks[b].first = iv; }
 }
+
+// Instruction::insertBefore(BB, It) (Instruction.cpp): It is (pos, head bit), pos = -1 for end(). Without the
+// head bit the new instruction adopts the debug records attached to the position (they now come before it);
+// with it (iterators from begin(), getFirstNonPHIIt(), getFirstInsertionPt()) it goes in front of them.
+// Inserting a terminator flushes the block's trailing records onto it (flushTerminatorDbgRecords).
+fn inst_insert_at(iv: i32, bv: i32, pos: i32, head: bool) {
+    inst_link(iv, bv, pos);
+    if !head {
+        let src = marker_take(bv, pos);
+        if src >= 0 { marker_absorb(bv, iv, src, true); }
+    }
+    if is_terminator_op(iop(iv)) { block_flush_terminator_records(bv); }
+}
+// BasicBlock::flushTerminatorDbgRecords
+fn block_flush_terminator_records(bv: i32) {
+    if !block_has_trailing(bv) { return; }
+    let t = block_terminator(bv);
+    if t < 0 { return; }
+    marker_absorb(bv, t, marker_take(bv, -1), false);
+}
+
+// Instruction::insertInto(BB, BB->end()) / IRBuilder at the end of a block: adopts the trailing records.
+fn block_append_inst(bv: i32, iv: i32) { inst_insert_at(iv, bv, -1, false); }
+// Instruction::insertBefore(Instruction *Pos) / insertBefore(Pos->getIterator()): adopts Pos's records.
+fn inst_insert_before(iv: i32, pos: i32) { inst_insert_at(iv, insts[inst_of(pos)].parent, pos, false); }
+// insertBefore(It) with the head bit set (It from begin(), getFirstNonPHIIt(), getFirstInsertionPt()...).
+fn inst_insert_before_head(iv: i32, pos: i32) { inst_insert_at(iv, insts[inst_of(pos)].parent, pos, true); }
 
 fn inst_remove(iv: i32) {
     let i = inst_of(iv);
@@ -1057,6 +1080,7 @@ fn inst_remove(iv: i32) {
 }
 
 fn inst_erase(iv: i32) {
+    if iv < val_vam.len && val_vam[iv] >= 0 { vam_handle_deletion(iv); }
     inst_remove(iv);
     drop_all_refs(iv);
     val_set_dead(iv);

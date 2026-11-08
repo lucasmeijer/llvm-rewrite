@@ -34,6 +34,8 @@ import flags;
 import apint;
 import domcond;
 import cfgutil;
+import salvage;
+import dbgutil;
 import ic_builder;
 import ic_common;
 import ic_addsub;
@@ -193,7 +195,7 @@ fn ic_set_name(iv: i32, name: const u8[:]) {
 
 // Instruction::insertBefore(It) for a new instruction: it adopts the debug records at the position.
 fn ic_insert_before_pos(iv: i32, pos: i32) {
-    m2r_insert_before_adopting(iv, pos);
+    inst_insert_before(iv, pos);
     ic_register_name(iv);
 }
 // InsertNewInstBefore(New, Old)
@@ -201,6 +203,19 @@ fn ic_insert_new_before(nw: i32, old: i32) -> i32 {
     ic_insert_before_pos(nw, old);
     icw_add(nw);
     return nw;
+}
+// InsertNewInstBefore(New, It) for an iterator with the head bit (getFirstInsertionPt, getFirstNonPHIIt,
+// getInsertionPointAfterDef): New goes in front of the records there.
+fn ic_insert_new_before_head(nw: i32, old: i32) -> i32 {
+    inst_insert_before_head(nw, old);
+    ic_register_name(nw);
+    icw_add(nw);
+    return nw;
+}
+fn ic_insert_new_with_head(nw: i32, old: i32) -> i32 {
+    let dl = inst_get_md(old, 0);
+    if dl >= 0 { inst_set_md(nw, 0, dl); } else { inst_erase_md(nw, 0); }
+    return ic_insert_new_before_head(nw, old);
 }
 // InsertNewInstWith(New, Old): also takes Old's debug location
 fn ic_insert_new_with(nw: i32, old: i32) -> i32 {
@@ -254,11 +269,10 @@ fn ic_erase(i: i32) -> i32 {
 }
 var ic_ops_tmp: i32[>..<];
 
-// salvageDebugInfo(I) + eraseFromParent: not ported; erasing a value that a debug record uses fails loudly.
-fn ic_erase_with_debug(i: i32) { inst_erase_from_parent(i); }
-fn dbg_rauw_values(old: i32, nv: i32) {
-    if dbgrecs.len > 0 && dbg_records_use_value(old) { ic_not_ported("RAUW of a value used by debug records"); }
-}
+// eraseInstFromFunction: salvageDebugInfo(I), then eraseFromParent.
+fn ic_erase_with_debug(i: i32) { salvage_debug_info(i); inst_erase_from_parent(i); }
+// ValueAsMetadata::handleRAUW is part of rauw itself.
+fn dbg_rauw_values(old: i32, nv: i32) { }
 
 // CreateNonTerminatorUnreachable: store i1 true, ptr poison
 fn ic_create_non_terminator_unreachable(at: i32) {
@@ -309,7 +323,7 @@ fn ic_add_dead_edge(from: i32, to: i32, wl: i32[>..<]&) {
 // handleUnreachableTerminator(I, PoisonedValues)
 fn ic_handle_unreachable_terminator(t: i32, poisoned: i32[>..<]&) -> bool {
     var changed = false;
-    if dbgrecs.len > 0 && inst_first_dbg(t) >= 0 { ic_not_ported("dropDbgRecords on a terminator"); }
+    if dbgrecs.len > 0 { dbg_drop_records(t); }
     for k in nops(t) {
         let o = op(t, k);
         if is_inst(o) && ty_kind(vals[o].ty) != TK_TOKEN {
@@ -337,7 +351,7 @@ fn ic_handle_unreachable_from(first: i32, wl: i32[>..<]&) {
             ic_made_change = true;
         }
         if inst_is_eh_pad(inst) || ty_kind(vals[inst].ty) == TK_TOKEN { continue; }
-        if dbgrecs.len > 0 && inst_first_dbg(inst) >= 0 { ic_not_ported("dropDbgRecords in handleUnreachableFrom"); }
+        if dbgrecs.len > 0 { dbg_drop_records(inst); }
         ic_erase(inst);
         ic_made_change = true;
     }
@@ -455,11 +469,89 @@ fn ic_try_to_sink(i: i32, dest: i32) -> bool {
         if is_droppable_user(us) && inst_parent(us) != dest { ic_not_ported("dropDroppableUses when sinking"); }
     }
     let pos = first_insertion_pt(dest);
-    // moveBefore(*DestBlock, InsertPos)
-    inst_remove(i);
-    if pos >= 0 { m2r_insert_before_adopting(i, pos); } else { block_append_inst(dest, i); }
-    if dbgrecs.len > 0 && dbg_records_use_value(i) { ic_not_ported("sinking an instruction with debug users"); }
+    // moveBefore(*DestBlock, InsertPos): getFirstInsertionPt has the head bit
+    inst_move_impl(i, dest, pos, true, false);
+    // Also sink all related debug uses from the source basic block.
+    var recs: i32[>..<] = [];
+    find_dbg_users(i, recs);
+    if recs.len > 0 { ic_sink_dbg_records(i, dest, pos, src, recs); }
     return true;
+}
+
+fn ic_rec_block(r: i32) -> i32 {
+    let o = dbgrecs[r].owner;
+    if o >= 0 { return inst_parent(o); }
+    if o <= -2 { return -2 - o; }
+    return -1;
+}
+// (instruction, DebugVariable(variable, fragment, inlinedAt)) equality for two records
+fn ic_same_debug_variable(a: i32, b: i32) -> bool {
+    if dbgrecs[a].dvar != dbgrecs[b].dvar { return false; }
+    let ia = du_rec_inlined_at(a);
+    let ib = du_rec_inlined_at(b);
+    if ia != ib { return false; }
+    let ha, oa, sa = du_fragment(dbgrecs[a].expr);
+    let hb, ob, sb = du_fragment(dbgrecs[b].expr);
+    if ha != hb { return false; }
+    return !ha || (oa == ob && sa == sb);
+}
+
+// tryToSinkInstructionDbgVariableRecords(I, InsertPos, SrcBlock, DestBlock, DbgVariableRecords)
+fn ic_sink_dbg_records(i: i32, dest: i32, pos: i32, src: i32, recs: const i32[:]) {
+    var to_salvage: i32[>..<] = [];
+    for r in recs { if ic_rec_block(r) != dest { to_salvage.push(r); } }
+    var to_sink: i32[>..<] = [];
+    for r in to_salvage { if ic_rec_block(r) == src { to_sink.push(r); } }
+    // stable sort: later instructions first
+    var n = to_sink.len;
+    var ord: i64[>..<] = [];     // position of each record's instruction in the block
+    for r in to_sink {
+        var k: i64 = 0;
+        var x = block_first(src);
+        while x >= 0 && x != dbgrecs[r].owner { k++; x = inst_next(x); }
+        ord.push(k);
+    }
+    var a: i64 = 1;
+    while a < n {
+        let r = to_sink[a];
+        let o = ord[a];
+        var b = a - 1;
+        while b >= 0 && ord[b] < o { to_sink[b + 1] = to_sink[b]; ord[b + 1] = ord[b]; b--; }
+        to_sink[b + 1] = r;
+        ord[b + 1] = o;
+        a++;
+    }
+    // records assigning the same variable twice at one instruction: only the last one there counts
+    var filter_last: i32[>..<] = [];    // per record of to_sink: the record that wins for its (inst, var), or -1
+    for r in to_sink {
+        var cnt: i64 = 0;
+        for q in to_sink { if dbgrecs[q].owner == dbgrecs[r].owner && ic_same_debug_variable(q, r) { cnt++; } }
+        var win: i32 = -1;
+        if to_sink.len > 1 && cnt > 1 {
+            var x = inst_first_dbg(dbgrecs[r].owner);
+            while x >= 0 {
+                if dbgrecs[x].kind as i64 != DR_LABEL && ic_same_debug_variable(x, r) { win = x; }
+                x = dbgrecs[x].next;
+            }
+        }
+        filter_last.push(win);
+    }
+    var clones: i32[>..<] = [];
+    var sunk: i32[>..<] = [];
+    for k in to_sink.len {
+        let r = to_sink[k];
+        if dbgrecs[r].kind as i64 == DR_DECLARE { continue; }
+        if filter_last[k] >= 0 && filter_last[k] != r { continue; }
+        var seen = false;
+        for s in sunk { if ic_same_debug_variable(s, r) { seen = true; } }
+        if seen { continue; }
+        sunk.push(r);
+        if dbgrecs[r].kind as i64 == DR_ASSIGN { continue; }
+        clones.push(dbg_clone_record(r));
+    }
+    if clones.len == 0 { return; }
+    salvage_debug_info_for(i, to_salvage);
+    for c in clones { marker_absorb(dest, pos, c, true); }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -582,6 +674,7 @@ fn ic_prepare_worklist(fv: i32) -> bool {
         let inst = insts_for_wl[k];
         k--;
         if is_instruction_trivially_dead(inst) {
+            salvage_debug_info(inst);
             inst_erase_from_parent(inst);
             ic_made_change = true;
             continue;
@@ -612,7 +705,7 @@ fn remove_all_non_terminator_and_eh_pad(bb: i32) -> i64 {
         let inst = inst_prev(end_inst);
         if !use_empty(inst) && ty_kind(vals[inst].ty) != TK_TOKEN { ic_rauw(inst, c_poison(vals[inst].ty)); }
         if inst_is_eh_pad(inst) || ty_kind(vals[inst].ty) == TK_TOKEN {
-            if dbgrecs.len > 0 && inst_first_dbg(inst) >= 0 { ic_not_ported("dropDbgRecords on an EH pad"); }
+            if dbgrecs.len > 0 { dbg_drop_records(inst); }
             end_inst = inst;
             continue;
         }
@@ -686,10 +779,12 @@ fn ic_run() -> bool {
             ic_take_name(res, i);
             let parent = inst_parent(i);
             var pos = i;
+            var head = false;    // getFirstInsertionPt / getFirstNonPHIIt carry the head bit
             if (iop(res) == OP_PHI) != (iop(i) == OP_PHI) {
                 if iop(i) == OP_PHI { pos = first_insertion_pt(parent); } else { pos = first_non_phi(parent); }
+                head = true;
             }
-            if pos >= 0 { ic_insert_before_pos(res, pos); } else { block_append_inst(parent, res); ic_register_name(res); }
+            if pos >= 0 { inst_insert_at(res, parent, pos, head); ic_register_name(res); } else { block_append_inst(parent, res); ic_register_name(res); }
             if inst_iid(res) == IID_assume { ic_register_assumption(res); }
             icw_push_users(res);
             icw_push(res);
@@ -803,12 +898,10 @@ fn instcombine_run(fv: i32, verify_fixpoint: bool, max_iter: i64) -> u32 {
     ic_aa_fn = -1;
     ic_experiment_lenient = flag_bool("goose-ic-lenient", false);
     let vf = verify_fixpoint && aset_find_str(alist_fn(func_attrs(fv)), "instcombine-no-verify-fixpoint") < 0;
-    if flag_bool("instcombine-lower-dbg-declare", true) {
-        // LowerDbgDeclare: no dbg.declare records are lowered (not ported)
-        ic_lower_dbg_declare_check(fv);
-    }
-    ic_compute_rpo(fv);
+    // Lower dbg.declare records, otherwise their value may be clobbered by instcombine.
     var made = false;
+    if flag_bool("instcombine-lower-dbg-declare", true) { made = lower_dbg_declare(fv); }
+    ic_compute_rpo(fv);
     var iter: i64 = 0;
     loop {
         if iter >= max_iter && !vf { break; }
@@ -835,13 +928,6 @@ fn instcombine_run(fv: i32, verify_fixpoint: bool, max_iter: i64) -> u32 {
     return PA_CFG | ((1 as u32) << A_LRT);
 }
 
-fn ic_lower_dbg_declare_check(fv: i32) {
-    for r in dbgrecs {
-        if r.kind == DR_DECLARE && r.owner >= 0 && !is_dead(r.owner) && inst_func(r.owner) == fv {
-            ic_not_ported("LowerDbgDeclare (#dbg_declare records)");
-        }
-    }
-}
 
 // computeBackEdges(): BackEdges set over the RPOT
 var ic_backedges_valid: bool = false;
@@ -1042,6 +1128,6 @@ fn dbg_drop_records(i: i32) {
     loop {
         let r = inst_first_dbg(i);
         if r < 0 { break; }
-        dbg_erase_record(r);
+        dbg_delete_record(r);
     }
 }

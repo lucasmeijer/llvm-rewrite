@@ -322,7 +322,7 @@ fn salvage_knowledge(i: i32, use_ac: bool) -> bool {
     let a = kn_build();
     kn_inst = -1;
     if a < 0 { return false; }
-    m2r_insert_before_adopting(a, i);
+    inst_insert_before(a, i);
     if use_ac { ac_register_assumption(a); }
     return true;
 }

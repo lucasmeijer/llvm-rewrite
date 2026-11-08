@@ -5,6 +5,10 @@
 namespace ic;
 import std;
 import ir;
+import dinfo;
+import mem2reg;
+import salvage;
+import dbgutil;
 import irutil;
 import instinfo;
 import gen_iids;
@@ -69,7 +73,8 @@ fn common_cast_transforms(ci: i32) -> i32 {
         let no = ic_eliminable_cast_pair(src, ci);
         if no != 0 {
             let res = ic_new_cast(no, op(src, 0), ty);
-            if has_one_use(src) && dbgrecs.len > 0 && dbg_records_use_value(src) { ic_not_ported("replaceAllDbgUsesWith (cast of cast)"); }
+            // Point debug users of the dying cast to the new one.
+            if has_one_use(src) { replace_all_dbg_uses_with(src, res, ci); }
             return res;
         }
     }
@@ -80,7 +85,7 @@ fn common_cast_transforms(ci: i32) -> i32 {
             if o != OP_BITCAST || ic_elementwise_bitcast(ci) {
                 let nv = fold_op_into_select(ci, src, false, false);
                 if nv >= 0 {
-                    if dbgrecs.len > 0 && dbg_records_use_value(src) { ic_not_ported("replaceAllDbgUsesWith (cast of select)"); }
+                    replace_all_dbg_uses_with(src, nv, ci);
                     return nv;
                 }
             }
@@ -733,7 +738,8 @@ fn visit_zext(zx: i32) -> i32 {
         let ok, btc = can_evaluate_zextd(src, dt, zx);
         if ok {
             let res = evaluate_in_different_type(src, dt, false);
-            if is_inst(src) && has_one_use(src) && dbgrecs.len > 0 && dbg_records_use_value(src) { ic_not_ported("replaceAllDbgUsesWith in visitZExt"); }
+            // Preserve debug values referring to Src if the zext is its last use.
+            if is_inst(src) && has_one_use(src) { replace_all_dbg_uses_with(src, res, zx); }
             let kept = ty_scalar_bits(st) - btc;
             let dbs = ty_scalar_bits(dt);
             kb_cxt = zx;

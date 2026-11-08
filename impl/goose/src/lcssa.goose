@@ -21,28 +21,18 @@ fn lcssa_new_phi(ty: i32, reserve: i64) -> i32 {
 // The findDbgValues(I) loop of formLCSSAForInstructions: #dbg_value/#dbg_assign records outside the loop that
 // use I get the value available in their block (DbgVariableRecord::replaceVariableLocationOp).
 fn lcssa_rewrite_dbg_values(iv: i32, ibb: i32, l: i32, added: const i32[:]) {
-    for r in dbgrecs.len {
-        let kind = dbgrecs[r].kind as i64;
-        if kind != DR_VALUE && kind != DR_ASSIGN { continue; }
-        let loc = dbgrecs[r].loc;
-        if !md_mentions_value(loc, iv) { continue; }
+    var recs: i32[>..<] = [];
+    find_dbg_values(iv, recs);
+    for r in recs {
         let owner = dbgrecs[r].owner;
         if owner < 0 { fatal("LCSSA: a debug record without a marker uses a rewritten value"); }
         let ubb = inst_parent(owner);
         if ibb == ubb || loop_contains(l, ubb) { continue; }
         let v = if added.len == 1 { added[0] } else { ssa_find_value_for_block(ubb) };
         if v < 0 { continue; }
-        if mds[loc].kind == MK_VALUE { dbgrecs[r].loc = md_value(v); continue; }
-        if mds[loc].kind == MK_DIARGLIST {
-            var ops: i32[>..<] = [];
-            for k in mds[loc].nops as i64 {
-                let o = md_op(loc, k);
-                ops.push(if o >= 0 && mds[o].kind == MK_VALUE && mds[o].extra == iv { md_value(v) } else { o });
-            }
-            dbgrecs[r].loc = md_get(MK_DIARGLIST, mds[loc].extra, ops, false);
-            continue;
-        }
-        fatal("LCSSA: unexpected debug record location");
+        let loc = dbgrecs[r].loc;
+        if mds[loc].kind != MK_VALUE && mds[loc].kind != MK_DIARGLIST { fatal("LCSSA: unexpected debug record location"); }
+        dbg_set_loc(r, m2r_md_replace_value(loc, iv, v));
     }
 }
 
@@ -93,7 +83,7 @@ fn form_lcssa_for_instructions(worklist: i32[>..<]&) -> bool {
             each_pred(eb) { p => preds.push(p); };
             let pn = lcssa_new_phi(vals[iv].ty, preds.len);
             let f = block_first(eb);
-            if f >= 0 { inst_insert_before(pn, f); } else { block_append_inst(eb, pn); }
+            if f >= 0 { inst_insert_before_head(pn, f); } else { block_append_inst(eb, pn); }
             var nm: u8[>..] = [];
             nm.append(val_name(iv));
             nm.append(".lcssa");

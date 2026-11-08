@@ -8,6 +8,10 @@
 namespace ic;
 import std;
 import ir;
+import dinfo;
+import mem2reg;
+import salvage;
+import dbgutil;
 import irutil;
 import calls;
 import instinfo;
@@ -99,7 +103,7 @@ recursive fn sd_bits(i: i32, k: i64, demanded: AP, depth: i64) -> bool, KB {
         nv = a; known = b;
     }
     if nv < 0 { return false, known; }
-    if is_inst(uses[u].val) && dbgrecs.len > 0 && dbg_records_use_value(uses[u].val) { ic_not_ported("salvageDebugInfo in SimplifyDemandedBits"); }
+    if is_inst(uses[u].val) { salvage_debug_info(uses[u].val); }
     ic_replace_use(u, nv);
     return true, known;
 }

@@ -318,7 +318,7 @@ fn negator_negate(lhs_is_zero: bool, nsw: bool, root: i32, cur: i32) -> i32 {
     ng_cache_v.resize(0);
     let sp = icb_pos; let sb = icb_bb; let sd = icb_dl;
     let r = ng_negate(root, nsw, 0);
-    icb_pos = sp; icb_bb = sb; icb_dl = sd;
+    icb_pos = sp; icb_bb = sb; icb_dl = sd; icb_head = false;
     ng_active = false;
     if r < 0 {
         var k = ng_new.len - 1;

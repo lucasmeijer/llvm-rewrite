@@ -2,14 +2,14 @@
 # Format: lib/<path>.cpp <fraction 0.0-1.0>
 lib/Transforms/Utils/SimplifyCFG.cpp 0.9
 lib/Transforms/Scalar/SimplifyCFGPass.cpp 0.95
-lib/Transforms/Utils/BasicBlockUtils.cpp 0.25
-lib/Transforms/Utils/Local.cpp 0.4
+lib/Transforms/Utils/BasicBlockUtils.cpp 0.3
+lib/Transforms/Utils/Local.cpp 0.5
 lib/Analysis/TargetTransformInfo.cpp 0.15
 lib/Analysis/CFG.cpp 0.2
 lib/Analysis/Loads.cpp 0.6
 lib/Analysis/ValueTracking.cpp 0.6
 lib/IR/Value.cpp 0.3
-lib/IR/Instruction.cpp 0.4
+lib/IR/Instruction.cpp 0.5
 lib/IR/Instructions.cpp 0.08
 lib/IR/ProfDataUtils.cpp 0.4
 lib/IR/MDBuilder.cpp 0.1
@@ -50,7 +50,7 @@ lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95  # manual: all but visi
 lib/Transforms/Utils/SCCPSolver.cpp 0.7
 lib/Transforms/Utils/LoopUtils.cpp 0.08
 lib/IR/ConstantRange.cpp 0.7
-lib/IR/Metadata.cpp 0.45
+lib/IR/Metadata.cpp 0.5
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.85
 lib/Transforms/Scalar/EarlyCSE.cpp 0.95
@@ -92,7 +92,7 @@ lib/Analysis/AssumeBundleQueries.cpp 0.55
 lib/Transforms/Scalar/BDCE.cpp 0.9
 lib/Analysis/ScopedNoAliasAA.cpp 0.85
 lib/Transforms/Scalar/InstSimplifyPass.cpp 1
-lib/Transforms/Scalar/DCE.cpp 0.65
+lib/Transforms/Scalar/DCE.cpp 0.9
 lib/Transforms/Scalar/SCCP.cpp 1
 lib/Analysis/DomTreeUpdater.cpp 1
 lib/IR/OptBisect.cpp 0.5
@@ -122,3 +122,7 @@ lib/Analysis/MustExecute.cpp 0.4  # ICFLoopSafetyInfo only; no SimpleLoopSafetyI
 lib/Analysis/AliasSetTracker.cpp 0.9  # no add() of memset/memtransfer/va_arg/argmemonly calls (LICM adds loads/stores), print
 lib/Analysis/InstructionPrecedenceTracking.cpp 0.6  # no validate()
 lib/IR/DebugLoc.cpp 0.1  # getMergedLocations
+# debug-record infrastructure (dinfo.goose, dbgutil.goose, ir/irutil insertion API)
+lib/IR/DebugProgramInstruction.cpp 0.35
+lib/IR/DebugInfo.cpp 0.1
+lib/IR/BasicBlock.cpp 0.3

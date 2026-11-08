@@ -1,4 +1,11 @@
 // Debug-info metadata (llvm/IR/DebugInfoMetadata.h) and debug records (llvm/IR/DebugProgramInstruction.h).
+// Debug-record bookkeeping ported from llvm/lib/IR/DebugProgramInstruction.cpp (DbgMarker: removeMarker,
+// absorbDebugValues, cloneDebugInfoFrom; DbgRecord clone/erase), llvm/lib/IR/Metadata.cpp (ReplaceableMetadataImpl
+// tracking, ValueAsMetadata::handleRAUW/handleDeletion, getAllDbgVariableRecordUsers/getAllArgListUsers),
+// llvm/lib/IR/DebugInfoMetadata.cpp (DIArgList::handleChangedOperand/track) and llvm/lib/IR/DebugInfo.cpp
+// (findDbgUsers, findDbgValues). Block insertion/splicing of records (llvm/lib/IR/BasicBlock.cpp spliceDebugInfo,
+// flushTerminatorDbgRecords; llvm/lib/IR/Instruction.cpp insertBefore/moveBeforeImpl/adoptDbgRecords) is in
+// ir.goose / irutil.goose on top of the marker helpers at the end of this file.
 //
 // A specialized node !DIxxx(...) is an Md of kind MK_DI: extra = DIK_* kind, ops = one slot per field of the
 // kind's schema below (LLParser's field order). Slots hold md ids; integer-like fields hold MK_INTLIT ids;
@@ -247,7 +254,7 @@ let DR_DECLARE_VALUE = 4;
 
 // loc/addr: metadata (ValueAsMetadata, DIArgList or MDNode), var (or label), expr, aid, aexpr, dl: md ids.
 // owner: the instruction whose marker holds the record (-1 = none), kept by inst_add_dbg / dbg_records_to_next.
-struct DbgRec { kind: u8, loc: i32, dvar: i32, expr: i32, aid: i32, addr: i32, aexpr: i32, dl: i32, next: i32, owner: i32 }
+struct DbgRec { kind: u8, dead: u8, loc: i32, dvar: i32, expr: i32, aid: i32, addr: i32, aexpr: i32, dl: i32, next: i32, owner: i32 }
 var dbgrecs: DbgRec[>..];
 var inst_dbg: i32[>..];        // inst sub -> first record (-1)
 
@@ -271,7 +278,7 @@ fn inst_add_dbg(iv: i32, r: i32) {
 
 fn new_dbgrec(kind: i64) -> i32 {
     let r = dbgrecs.len as i32;
-    dbgrecs.push(DbgRec { kind: kind as u8, loc: -1, dvar: -1, expr: -1, aid: -1, addr: -1, aexpr: -1, dl: -1, next: -1, owner: -1 });
+    dbgrecs.push(DbgRec { kind: kind as u8, dead: 0, loc: -1, dvar: -1, expr: -1, aid: -1, addr: -1, aexpr: -1, dl: -1, next: -1, owner: -1 });
     return r;
 }
 
@@ -301,8 +308,8 @@ fn dbg_records_to_next(iv: i32) {
     if nx < 0 {
         var r = inst_dbg[i];
         var last = -1;
-        while r >= 0 { dbgrecs[r].owner = -1; last = r; r = dbgrecs[r].next; }
         let bv = insts[i].parent;
+        while r >= 0 { dbgrecs[r].owner = -2 - bv; last = r; r = dbgrecs[r].next; }
         if bv >= 0 {
             let b = block_of(bv);
             while block_trail.len <= b { block_trail.push(-1); }
@@ -329,6 +336,20 @@ fn dbg_records_to_next(iv: i32) {
 // DbgRecord::eraseFromParent: unlink the record from its instruction's marker.
 fn dbg_erase_record(r: i32) {
     let o = dbgrecs[r].owner;
+    if o <= -2 {
+        // a trailing record of block -2 - o
+        let b = block_of(-2 - o);
+        if block_trail[b] == r { block_trail[b] = dbgrecs[r].next; }
+        else {
+            var p = block_trail[b];
+            while p >= 0 && dbgrecs[p].next != r { p = dbgrecs[p].next; }
+            if p < 0 { fatal("internal: trailing debug record is not in its block's marker"); }
+            dbgrecs[p].next = dbgrecs[r].next;
+        }
+        dbgrecs[r].next = -1;
+        dbgrecs[r].owner = -1;
+        return;
+    }
     if o < 0 { return; }
     let i = inst_of(o);
     if inst_dbg[i] == r { inst_dbg[i] = dbgrecs[r].next; }
@@ -340,4 +361,494 @@ fn dbg_erase_record(r: i32) {
     }
     dbgrecs[r].next = -1;
     dbgrecs[r].owner = -1;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Metadata tracking of debug-record locations (llvm/lib/IR/Metadata.cpp ReplaceableMetadataImpl, ValueAsMetadata::
+// handleRAUW/handleDeletion, DIArgList::handleChangedOperand/track, DebugValueUser in DebugProgramInstruction.cpp,
+// findDbgUsers in DebugInfo.cpp).
+//
+// Every ValueAsMetadata (MK_VALUE md) and live DIArgList (MK_DIARGLIST md) is a ReplaceableMetadataImpl: a set of
+// tracking references, each with the owner (a debug record's location/address slot, or a DIArgList's argument) and
+// the RMI's NextIndex at the time it was added. The order of users that LLVM's algorithms see (findDbgUsers,
+// replaceAllUsesWith) is by that index, so we keep it. A value is "used by metadata" when val_vam[v] >= 0.
+// Records are tracked from the end of parsing (dbg_track_module, in program order, as LLParser creates them).
+// Function-local metadata as call operands (MetadataAsValue) is not tracked.
+
+let TRK_REC = 0;      // owner = record id, slot = 0 location / 1 address
+let TRK_AL = 1;       // owner = DIArgList md id, slot = argument index
+struct Trk { md: i32, owner: i32, okind: u8, live: u8, slot: i32, idx: i64, next: i32, prev: i32 }
+var trks: Trk[>..];
+var trk_free: i32 = -1;
+var md_trk_head: i32[>..];     // md id -> first tracking reference (-1)
+var md_trk_nidx: i64[>..];     // md id -> NextIndex
+var md_al_live: u8[>..];       // DIArgList md id -> in LLVMContext's DIArgLists store (args tracked)
+var md_al_trk: i32[>..];       // DIArgList md id -> start of its args' tracking ids in al_trk_pool
+var md_al_fwd: i32[>..];       // DIArgList md id -> the md id the same LLVM object has after an in-place change
+var al_trk_pool: i32[>..];
+var rec_trk: i32[>..];         // record * 2 + slot -> tracking id (-1)
+var val_vam: i32[>..];         // value id -> its ValueAsMetadata in the store (-1: not used by metadata)
+var dbg_tracking_on = false;
+
+fn md_trk_grow(m: i32) {
+    while md_trk_head.len <= m { md_trk_head.push(-1); md_trk_nidx.push(0); md_al_live.push(0); md_al_trk.push(-1); md_al_fwd.push(-1); }
+}
+fn val_vam_of(v: i32) -> i32 { if v >= 0 && v < val_vam.len { val_vam[v] } else { -1 } }
+fn val_used_by_md(v: i32) -> bool { val_vam_of(v) >= 0 }
+fn set_val_vam(v: i32, m: i32) { while val_vam.len <= v { val_vam.push(-1); } val_vam[v] = m; }
+
+// ReplaceableMetadataImpl::getOrCreate: VAMs and DIArgLists track; MDNodes (resolved) don't.
+fn md_is_trackable(m: i32) -> bool { m >= 0 && (mds[m].kind == MK_VALUE || mds[m].kind == MK_DIARGLIST) }
+
+// ReplaceableMetadataImpl::addRef
+fn trk_add(m: i32, owner: i32, okind: i64, slot: i64) -> i32 {
+    md_trk_grow(m);
+    if mds[m].kind == MK_DIARGLIST && md_al_live[m] == 0 { al_track(m); }
+    return trk_add_raw(m, owner, okind, slot);
+}
+fn trk_add_raw(m: i32, owner: i32, okind: i64, slot: i64) -> i32 {
+    md_trk_grow(m);
+    var t = trk_free;
+    let e = Trk { md: m, owner: owner, okind: okind as u8, live: 1, slot: slot as i32, idx: md_trk_nidx[m], next: md_trk_head[m], prev: -1 };
+    if t >= 0 { trk_free = trks[t].next; trks[t] = e; } else { t = trks.len as i32; trks.push(e); }
+    md_trk_nidx[m] = md_trk_nidx[m] + 1;
+    if md_trk_head[m] >= 0 { trks[md_trk_head[m]].prev = t; }
+    md_trk_head[m] = t;
+    if mds[m].kind == MK_VALUE { let v = mds[m].extra; if val_vam_of(v) != m { set_val_vam(v, m); } }
+    return t;
+}
+// ReplaceableMetadataImpl::dropRef
+fn trk_drop(t: i32) {
+    if t < 0 || trks[t].live == 0 { return; }
+    let m = trks[t].md;
+    let p = trks[t].prev;
+    let n = trks[t].next;
+    if p >= 0 { trks[p].next = n; } else { md_trk_head[m] = n; }
+    if n >= 0 { trks[n].prev = p; }
+    trks[t].live = 0;
+    trks[t].next = trk_free;
+    trk_free = t;
+}
+
+// DIArgList::get(...) for a list not in the store yet / DIArgList::track(): its arguments track their VAMs.
+fn al_track(m: i32) {
+    md_trk_grow(m);
+    md_al_live[m] = 1;
+    md_al_fwd[m] = -1;
+    let at = al_trk_pool.len as i32;
+    md_al_trk[m] = at;
+    let n = mds[m].nops as i64;
+    for k in n { al_trk_pool.push(-1); }
+    for k in n {
+        let a = md_op(m, k);
+        if md_is_trackable(a) { let t = trk_add_raw(a, m, TRK_AL, k); al_trk_pool[at + k] = t; }
+    }
+}
+// DIArgList::untrack()
+fn al_untrack(m: i32) {
+    if m >= md_al_live.len || md_al_live[m] == 0 { return; }
+    let at = md_al_trk[m];
+    for k in mds[m].nops as i64 { let t = al_trk_pool[at + k]; trk_drop(t); al_trk_pool[at + k] = -1; }
+}
+
+// DebugValueUser::trackDebugValue / untrackDebugValue for record slot 0 (location) or 1 (address).
+fn rec_untrack(r: i32, slot: i64) {
+    let k = (r as i64) * 2 + slot;
+    if k < rec_trk.len { trk_drop(rec_trk[k]); rec_trk[k] = -1; }
+}
+fn rec_track(r: i32, slot: i64) {
+    let k = (r as i64) * 2 + slot;
+    while rec_trk.len <= k { rec_trk.push(-1); }
+    if rec_trk[k] >= 0 { trk_drop(rec_trk[k]); rec_trk[k] = -1; }
+    let m = if slot == 0 { dbgrecs[r].loc } else { dbgrecs[r].addr };
+    if md_is_trackable(m) { rec_trk[k] = trk_add(m, r, TRK_REC, slot); }
+}
+// DebugValueUser::resetDebugValue(Idx, New) (DbgVariableRecord::setRawLocation / setRawAddress).
+fn dbg_set_slot(r: i32, slot: i64, m: i32) {
+    if dbg_tracking_on { rec_untrack(r, slot); }
+    if slot == 0 { dbgrecs[r].loc = m; } else { dbgrecs[r].addr = m; }
+    if dbg_tracking_on { rec_track(r, slot); }
+}
+fn dbg_set_loc(r: i32, m: i32) { dbg_set_slot(r, 0, m); }
+fn dbg_set_addr(r: i32, m: i32) { dbg_set_slot(r, 1, m); }
+// A record created with its fields set directly: DbgVariableRecord's constructor tracks location then address.
+fn dbg_track_new(r: i32) {
+    if !dbg_tracking_on { return; }
+    rec_track(r, 0);
+    rec_track(r, 1);
+}
+
+// The tracking references of md m (a snapshot), ascending by index (ReplaceableMetadataImpl::replaceAllUsesWith).
+fn trk_snapshot(m: i32, out: i32[>..<]&) {
+    if m < 0 || m >= md_trk_head.len { return; }
+    var t = md_trk_head[m];
+    while t >= 0 { out.push(t); t = trks[t].next; }
+    // insertion sort by idx ascending (lists are short)
+    var i: i64 = 1;
+    while i < out.len {
+        let x = out[i];
+        var j = i - 1;
+        while j >= 0 && trks[out[j]].idx > trks[x].idx { out[j + 1] = out[j]; j--; }
+        out[j + 1] = x;
+        i++;
+    }
+}
+
+// Is (owner, kind, slot) still tracking m? (the "UseMap.count(Ref)" check in replaceAllUsesWith)
+fn trk_still(m: i32, owner: i32, okind: i64, slot: i64) -> bool {
+    if okind == TRK_REC {
+        let k = (owner as i64) * 2 + slot;
+        if k >= rec_trk.len || rec_trk[k] < 0 { return false; }
+        return trks[rec_trk[k]].md == m;
+    }
+    var o = owner;
+    while o < md_al_fwd.len && md_al_fwd[o] >= 0 { o = md_al_fwd[o]; }
+    if o >= md_al_live.len || md_al_live[o] == 0 { return false; }
+    let t = al_trk_pool[md_al_trk[o] + slot];
+    return t >= 0 && trks[t].md == m;
+}
+
+// The type of the value a VAM wraps (for the poison replacement).
+fn vam_poison(m: i32) -> i32 { md_value(c_poison(vals[mds[m].extra].ty)) }
+
+// ReplaceableMetadataImpl::replaceAllUsesWith(nw) for m (a VAM or a DIArgList); nw = -1 is nullptr.
+fn rmi_replace_all_uses_with(m: i32, nw: i32) {
+    var snap: i32[>..<] = [];
+    trk_snapshot(m, snap);
+    var owners: i32[>..<] = [];
+    var kinds: i32[>..<] = [];
+    var slots: i32[>..<] = [];
+    for t in snap { owners.push(trks[t].owner); kinds.push(trks[t].okind as i32); slots.push(trks[t].slot); }
+    for k in snap.len {
+        let owner = owners[k];
+        let ok = kinds[k] as i64;
+        let slot = slots[k] as i64;
+        if !trk_still(m, owner, ok, slot) { continue; }
+        var cur_owner = owner;
+        while ok == TRK_AL && cur_owner < md_al_fwd.len && md_al_fwd[cur_owner] >= 0 { cur_owner = md_al_fwd[cur_owner]; }
+        if ok == TRK_REC {
+            // DebugValueUser::handleChangedValue: a VAM replaced by nullptr becomes poison
+            var x = nw;
+            if x < 0 && mds[m].kind == MK_VALUE { x = vam_poison(m); }
+            dbg_set_slot(owner, slot, x);
+        } else {
+            al_handle_changed_operand(cur_owner, slot, nw);
+        }
+    }
+}
+// The same for a DIArgList, whose users are records only.
+fn rmi_replace_record_users(m: i32, nw: i32) {
+    var snap: i32[>..<] = [];
+    trk_snapshot(m, snap);
+    var owners: i32[>..<] = [];
+    var slots: i32[>..<] = [];
+    for t in snap { owners.push(trks[t].owner); slots.push(trks[t].slot); }
+    for k in snap.len {
+        if !trk_still(m, owners[k], TRK_REC, slots[k] as i64) { continue; }
+        dbg_set_slot(owners[k], slots[k] as i64, nw);
+    }
+}
+
+// DIArgList::handleChangedOperand(Ref = argument k, New)
+fn al_handle_changed_operand(al: i32, k: i64, nw: i32) {
+    al_untrack(al);
+    md_al_live[al] = 0;
+    var ops: i32[>..<] = [];
+    for j in mds[al].nops as i64 {
+        let o = md_op(al, j);
+        if j == k { ops.push(if nw >= 0 { nw } else { vam_poison(o) }); } else { ops.push(o); }
+    }
+    let nal = md_get(MK_DIARGLIST, -1, ops, false);
+    md_trk_grow(nal);
+    if nal != al && md_al_live[nal] != 0 {
+        // an equal list exists: RAUW onto it (users re-track there, in index order)
+        rmi_replace_record_users(al, nal);
+        return;
+    }
+    // the list changed in place: its users keep their indices
+    if nal != al {
+        md_al_fwd[al] = nal;
+        md_al_fwd[nal] = -1;
+        var t = md_trk_head[al];
+        md_trk_head[al] = -1;
+        var last: i32 = -1;
+        var x = t;
+        while x >= 0 { trks[x].md = nal; last = x; x = trks[x].next; }
+        if last >= 0 {
+            trks[last].next = md_trk_head[nal];
+            if md_trk_head[nal] >= 0 { trks[md_trk_head[nal]].prev = last; }
+            md_trk_head[nal] = t;
+        }
+        if md_trk_nidx[nal] < md_trk_nidx[al] { md_trk_nidx[nal] = md_trk_nidx[al]; }
+        // records whose location was al now hold nal
+        x = md_trk_head[nal];
+        while x >= 0 {
+            if trks[x].okind as i64 == TRK_REC {
+                let r = trks[x].owner;
+                if trks[x].slot == 0 { dbgrecs[r].loc = nal; } else { dbgrecs[r].addr = nal; }
+            }
+            x = trks[x].next;
+        }
+    }
+    al_track(nal);
+}
+
+fn dinfo_value_func(v: i32) -> i32 {
+    let k = vals[v].kind;
+    if k == VK_ARG { return args_parent[vals[v].sub]; }
+    if k == VK_INST { let bv = insts[inst_of(v)].parent; if bv >= 0 { return blocks[block_of(bv)].parent; } }
+    return -1;
+}
+fn dinfo_func_subprogram(fv: i32) -> i32 {
+    if fv < 0 { return -1; }
+    let g = globs[glob_of(fv)];
+    for k in g.nmd { if md_att[g.md + 2 * k] == 0 { return md_att[g.md + 2 * k + 1]; } }
+    return -1;
+}
+
+// ValueAsMetadata::handleRAUW(From, To): called by rauw (Value::replaceAllUsesWith) when From is used by metadata.
+fn vam_handle_rauw(from: i32, to: i32) {
+    let m = val_vam_of(from);
+    if m < 0 || from == to { return; }
+    val_vam[from] = -1;
+    if !is_constant(from) {
+        if is_constant(to) { rmi_replace_all_uses_with(m, md_value(to)); return; }
+        let sf = dinfo_func_subprogram(dinfo_value_func(from));
+        let st = dinfo_func_subprogram(dinfo_value_func(to));
+        if sf >= 0 && st >= 0 && sf != st { rmi_replace_all_uses_with(m, -1); return; }
+    } else if !is_constant(to) {
+        rmi_replace_all_uses_with(m, -1);
+        return;
+    }
+    let e = val_vam_of(to);
+    if e >= 0 { rmi_replace_all_uses_with(m, e); return; }
+    // update the VAM in place: its users keep their indices, now under md_value(to)
+    let nm = md_value(to);
+    md_trk_grow(m);
+    md_trk_grow(nm);
+    var t = md_trk_head[m];
+    md_trk_head[m] = -1;
+    var users: i32[>..<] = [];
+    var x = t;
+    var last: i32 = -1;
+    while x >= 0 { trks[x].md = nm; users.push(x); last = x; x = trks[x].next; }
+    if last >= 0 {
+        trks[last].next = md_trk_head[nm];
+        if md_trk_head[nm] >= 0 { trks[md_trk_head[nm]].prev = last; }
+        md_trk_head[nm] = t;
+    }
+    if md_trk_nidx[nm] < md_trk_nidx[m] { md_trk_nidx[nm] = md_trk_nidx[m]; }
+    set_val_vam(to, nm);
+    // the owners now refer to nm: records directly, DIArgLists through a changed argument list
+    var als: i32[>..<] = [];
+    for u in users {
+        if trks[u].okind as i64 == TRK_REC {
+            let r = trks[u].owner;
+            if trks[u].slot == 0 { dbgrecs[r].loc = nm; } else { dbgrecs[r].addr = nm; }
+        } else { als.push(u); }
+    }
+    for u in als { al_retarget_in_place(trks[u].owner, trks[u].slot as i64, nm); }
+}
+
+// A DIArgList whose argument k's VAM was updated in place to wrap another value: LLVM's DIArgList object is
+// unchanged (same identity, same users), only the uniquing key changed. Here that is a different md id.
+fn al_retarget_in_place(al: i32, k: i64, nm: i32) {
+    if md_al_live[al] == 0 { return; }
+    var ops: i32[>..<] = [];
+    for j in mds[al].nops as i64 { ops.push(if j == k { nm } else { md_op(al, j) }); }
+    let nal = md_get(MK_DIARGLIST, -1, ops, false);
+    if nal == al { return; }
+    md_trk_grow(nal);
+    // move the argument tracking ids and the users over
+    md_al_live[nal] = 1;
+    md_al_trk[nal] = md_al_trk[al];
+    md_al_live[al] = 0;
+    md_al_fwd[al] = nal;
+    md_al_fwd[nal] = -1;
+    let at = md_al_trk[nal];
+    for j in mds[nal].nops as i64 { let tj = al_trk_pool[at + j]; if tj >= 0 { trks[tj].owner = nal; } }
+    var t = md_trk_head[al];
+    md_trk_head[al] = -1;
+    var last: i32 = -1;
+    var x = t;
+    while x >= 0 {
+        trks[x].md = nal;
+        if trks[x].okind as i64 == TRK_REC {
+            let r = trks[x].owner;
+            if trks[x].slot == 0 { dbgrecs[r].loc = nal; } else { dbgrecs[r].addr = nal; }
+        }
+        last = x;
+        x = trks[x].next;
+    }
+    if last >= 0 {
+        trks[last].next = md_trk_head[nal];
+        if md_trk_head[nal] >= 0 { trks[md_trk_head[nal]].prev = last; }
+        md_trk_head[nal] = t;
+    }
+    if md_trk_nidx[nal] < md_trk_nidx[al] { md_trk_nidx[nal] = md_trk_nidx[al]; }
+}
+
+// ValueAsMetadata::handleDeletion(V): its users get nullptr (records: poison; DIArgList arguments: poison).
+fn vam_handle_deletion(v: i32) {
+    let m = val_vam_of(v);
+    if m < 0 { return; }
+    val_vam[v] = -1;
+    rmi_replace_all_uses_with(m, -1);
+}
+
+// The records tracking md m, by descending index (getAllDbgVariableRecordUsers), appended to out unless present.
+fn rmi_record_users(m: i32, out: i32[>..<]&) {
+    var snap: i32[>..<] = [];
+    trk_snapshot(m, snap);
+    var k = snap.len - 1;
+    while k >= 0 {
+        let t = snap[k];
+        k--;
+        if trks[t].okind as i64 != TRK_REC { continue; }
+        let r = trks[t].owner;
+        var seen = false;
+        for x in out { if x == r { seen = true; break; } }
+        if !seen { out.push(r); }
+    }
+}
+// findDbgUsers(V): the records using V directly, then those using a DIArgList containing V (lists in ascending
+// index order).
+fn find_dbg_users(v: i32, out: i32[>..<]&) {
+    let m = val_vam_of(v);
+    if m < 0 { return; }
+    rmi_record_users(m, out);
+    var snap: i32[>..<] = [];
+    trk_snapshot(m, snap);
+    for t in snap {
+        if trks[t].okind as i64 != TRK_AL { continue; }
+        rmi_record_users(trks[t].owner, out);
+    }
+}
+// findDbgValues(V): only dbg_value (and dbg_assign) records.
+fn find_dbg_values(v: i32, out: i32[>..<]&) {
+    var all: i32[>..<] = [];
+    find_dbg_users(v, all);
+    for r in all { let k = dbgrecs[r].kind as i64; if k == DR_VALUE || k == DR_ASSIGN { out.push(r); } }
+}
+
+// Start tracking the records of module mod, in program order (end of parsing).
+fn dbg_track_module(module: i32) {
+    dbg_tracking_on = true;
+    if dbgrecs.len == 0 { return; }
+    var f = modules[module].first_func;
+    while f >= 0 {
+        var b = globs[glob_of(f)].first_block;
+        while b >= 0 {
+            var i = blocks[block_of(b)].first;
+            while i >= 0 {
+                var r = inst_first_dbg(i);
+                while r >= 0 { dbg_track_new(r); r = dbgrecs[r].next; }
+                i = insts[inst_of(i)].next;
+            }
+            b = blocks[block_of(b)].next;
+        }
+        f = globs[glob_of(f)].next;
+    }
+}
+
+// DbgRecord::eraseFromParent / deleteRecord: unlink and stop tracking.
+fn dbg_delete_record(r: i32) {
+    dbg_erase_record(r);
+    if dbg_tracking_on { rec_untrack(r, 0); rec_untrack(r, 1); }
+    dbgrecs[r].dead = 1;
+}
+
+// ---------------------------------------------------------------------------------------------
+// DbgMarkers (llvm/lib/IR/DebugProgramInstruction.cpp DbgMarker, BasicBlock::getMarker/createMarker/
+// getTrailingDbgRecords). A marker is identified by (block, position): position = an instruction, or -1 for
+// end() (the block's trailing records). Records hold their owner: the instruction, or -2 - block for trailing.
+
+fn marker_first(bv: i32, pos: i32) -> i32 {
+    if pos >= 0 { return inst_first_dbg(pos); }
+    let b = block_of(bv);
+    return if b < block_trail.len { block_trail[b] } else { -1 };
+}
+fn marker_set_first(bv: i32, pos: i32, r: i32) {
+    if pos >= 0 {
+        let i = inst_of(pos);
+        while inst_dbg.len <= i { inst_dbg.push(-1); }
+        inst_dbg[i] = r;
+    } else {
+        let b = block_of(bv);
+        while block_trail.len <= b { block_trail.push(-1); }
+        block_trail[b] = r;
+    }
+}
+// Detach the records of a marker (DbgMarker::removeFromParent + taking its list).
+fn marker_take(bv: i32, pos: i32) -> i32 {
+    let r = marker_first(bv, pos);
+    if r >= 0 { marker_set_first(bv, pos, -1); }
+    return r;
+}
+// DbgMarker::absorbDebugValues(Src = a detached list, InsertAtHead)
+fn marker_absorb(bv: i32, pos: i32, list: i32, at_head: bool) {
+    if list < 0 { return; }
+    let owner = if pos >= 0 { pos } else { -2 - bv };
+    var last: i32 = list;
+    dbgrecs[last].owner = owner;
+    while dbgrecs[last].next >= 0 { last = dbgrecs[last].next; dbgrecs[last].owner = owner; }
+    let cur = marker_first(bv, pos);
+    if cur < 0 { marker_set_first(bv, pos, list); return; }
+    if at_head {
+        dbgrecs[last].next = cur;
+        marker_set_first(bv, pos, list);
+    } else {
+        var t = cur;
+        while dbgrecs[t].next >= 0 { t = dbgrecs[t].next; }
+        dbgrecs[t].next = list;
+    }
+}
+fn block_has_trailing(bv: i32) -> bool { let b = block_of(bv); b < block_trail.len && block_trail[b] >= 0 }
+
+// DbgRecord::clone(): same fields, not in any marker, tracked.
+fn dbg_clone_record(r: i32) -> i32 {
+    let x = dbgrecs[r];
+    let nr = new_dbgrec(x.kind as i64);
+    dbgrecs[nr].loc = x.loc;
+    dbgrecs[nr].dvar = x.dvar;
+    dbgrecs[nr].expr = x.expr;
+    dbgrecs[nr].aid = x.aid;
+    dbgrecs[nr].addr = x.addr;
+    dbgrecs[nr].aexpr = x.aexpr;
+    dbgrecs[nr].dl = x.dl;
+    dbg_track_new(nr);
+    return nr;
+}
+
+// Instruction::cloneDebugInfoFrom(From, FromHere, InsertAtHead) (DbgMarker::cloneDebugInfoFrom): clones of
+// From's records (from record `from_here` on; -1 = all) go to the head or the end of `to`'s records. The new
+// records are appended to `out`, in order.
+fn inst_clone_debug_info_from(to: i32, from: i32, from_here: i32, at_head: bool, out: i32[>..<]&) {
+    var r = if from_here >= 0 { from_here } else { inst_first_dbg(from) };
+    if r < 0 { return; }
+    let mark = out.len;
+    while r >= 0 { out.push(dbg_clone_record(r)); r = dbgrecs[r].next; }
+    // chain the clones and attach them
+    var k = mark;
+    while k + 1 < out.len { dbgrecs[out[k]].next = out[k + 1]; k++; }
+    dbgrecs[out[out.len - 1]].next = -1;
+    marker_absorb(insts[inst_of(to)].parent, to, out[mark], at_head);
+}
+
+// The location operands of a record (DbgVariableRecord::location_ops).
+fn dbg_location_ops(r: i32, out: i32[>..<]&) {
+    let l = dbgrecs[r].loc;
+    if l < 0 { return; }
+    if mds[l].kind == MK_VALUE { out.push(mds[l].extra); return; }
+    if mds[l].kind == MK_DIARGLIST {
+        for k in mds[l].nops as i64 { let o = md_op(l, k); if o >= 0 && mds[o].kind == MK_VALUE { out.push(mds[o].extra); } }
+    }
+}
+// DbgVariableRecord::replaceVariableLocationOp(OpIdx, NewValue)
+fn dbg_replace_location_op_idx(r: i32, idx: i64, nv: i32) {
+    let l = dbgrecs[r].loc;
+    if mds[l].kind != MK_DIARGLIST { dbg_set_loc(r, md_value(nv)); return; }
+    var ops: i32[>..<] = [];
+    for k in mds[l].nops as i64 { ops.push(if k == idx { md_value(nv) } else { md_op(l, k) }); }
+    dbg_set_loc(r, md_get(MK_DIARGLIST, -1, ops, false));
 }

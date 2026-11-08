@@ -177,7 +177,7 @@ fn convert_fsqrt_div_into_fmul(ci: i32, x: i32) -> i32 {
     }
     if is_inst(fdiv) { inst_set_md(fdiv, fpk, r1md); set_fmf(fdiv, r1fmf); }
     let fsqrt = inst_clone(ci);
-    m2r_insert_before_adopting(fsqrt, ci);
+    inst_insert_before(fsqrt, ci);
     var r2md = inst_get_md(r2[0], fpk);
     var r2fmf = fmf_of(r2[0]);
     for r in r2 {
@@ -446,7 +446,7 @@ fn visit_fmul(i: i32) -> i32 {
 
 // IRBuilder<> B(&I) (ConstantFolder, default inserter: not added to the worklist)
 fn irb_insert_before(iv: i32, pos: i32) -> i32 {
-    m2r_insert_before_adopting(iv, pos);
+    inst_insert_before(iv, pos);
     ic_register_name(iv);
     let d = inst_get_md(pos, 0);
     if d >= 0 { inst_set_md(iv, 0, d); }

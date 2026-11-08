@@ -853,7 +853,7 @@ fn strip_debug_info() -> bool {
                     w2++;
                 }
                 insts[ii].nmd = w2 as i32;
-                if ii < inst_dbg.len { inst_dbg[ii] = -1; }
+                if ii < inst_dbg.len { while inst_dbg[ii] >= 0 { dbg_delete_record(inst_dbg[ii]); } }
                 iv = insts[ii].next;
             }
             b = blocks[block_of(b)].next;

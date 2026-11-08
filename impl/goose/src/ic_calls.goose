@@ -3630,7 +3630,7 @@ fn transform_const_expr_cast_call(ci: i32) -> bool {
         // getInsertionPointAfterDef
         var pos: i32 = -1;
         if iop(nc) == OP_INVOKE { pos = first_insertion_pt(invoke_normal_dest(nc)); } else { pos = inst_next(nc); }
-        ic_insert_new_before(cst, pos);
+        ic_insert_new_before_head(cst, pos);   // getInsertionPointAfterDef: head bit
         icw_push_users(ci);
         nv = cst;
     }

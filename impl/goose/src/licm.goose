@@ -91,7 +91,7 @@ var lb_pos: i32 = -1;
 var lb_dl: i32 = -1;
 fn lb_set(i: i32) { lb_pos = i; lb_dl = inst_get_md(i, MDK_DBG_SC); }
 fn lb_insert(iv: i32, name: const u8[:]) -> i32 {
-    m2r_insert_before_adopting(iv, lb_pos);
+    inst_insert_before(iv, lb_pos);
     if name.len > 0 && vals[iv].ty != T_VOID { set_name(iv, name); }
     if lb_dl >= 0 { inst_set_md(iv, MDK_DBG_SC, lb_dl); }
     return iv;
@@ -193,9 +193,7 @@ fn lc_drop_location(i: i32) {
 // Instruction::moveBefore(BB, It) (Preserve = false): the instruction's own records stay behind (they move to the
 // next instruction); without the head bit it absorbs the records attached at the destination.
 fn lc_move_before(i: i32, pos: i32, head: bool) {
-    if dbgrecs.len > 0 { dbg_records_to_next(i); }
-    inst_remove(i);
-    if head { inst_insert_before(i, pos); } else { m2r_insert_before_adopting(i, pos); }
+    inst_move_impl(i, inst_parent(pos), pos, head, false);
 }
 
 // BasicBlock::getFirstNonPHIIt
@@ -595,7 +593,7 @@ recursive fn cfh_get_or_create_hoisted_block(bb: i32, l: i32) -> i32 {
     }
     let old_t = block_terminator(hoist_target);
     let nbi = create_inst(OP_CONDBR, T_VOID, [op(bi, 0), htd, hfd]);
-    m2r_insert_before_adopting(nbi, old_t);
+    inst_insert_before(nbi, old_t);
     lc_erase_terminator(old_t);
     let prof = inst_get_md(bi, MDK_PROF);
     if prof >= 0 { inst_set_md(nbi, MDK_PROF, prof); }
@@ -700,7 +698,7 @@ fn lc_hoist_one(i: i32, bb: i32, l: i32, preheader: i32, hoisted: i32[>..<]&) ->
         let rd = create_inst(OP_FDIV, vals[divisor].ty, [one, divisor]);
         insts[inst_of(rd)].fmf = fmf;
         lsi_insert_instruction_to(rd, inst_parent(i));
-        m2r_insert_before_adopting(rd, i);
+        inst_insert_before(rd, i);
         if dl >= 0 { inst_set_md(rd, MDK_DBG_SC, dl); }
         let prod = create_inst(OP_FMUL, vals[i].ty, [op(i, 0), rd]);
         insts[inst_of(prod)].fmf = fmf;
@@ -994,7 +992,7 @@ fn lc_clone_in_exit_block(i: i32, exit: i32, pn: i32) -> i32 {
     }
     let nw = inst_clone(i);
     let ip = lc_first_insertion_pt(exit);
-    if ip >= 0 { inst_insert_before(nw, ip); } else { block_append_inst(exit, nw); }
+    if ip >= 0 { inst_insert_before_head(nw, ip); } else { block_append_inst(exit, nw); }
     if vals[i].name >= 0 {
         var nm: u8[>..] = [];
         nm.append(val_name(i));
@@ -1012,7 +1010,7 @@ fn lc_clone_in_exit_block(i: i32, exit: i32, pn: i32) -> i32 {
         if lc_would_need_lcssa(o, inst_parent(pn)) {
             let np = new_phi(vals[o].ty, phi_nincoming(pn));
             let fi = block_first(exit);
-            inst_insert_before(np, fi);
+            inst_insert_before_head(np, fi);
             var nm: u8[>..] = [];
             nm.append(val_name(o));
             nm.append(".lcssa");
@@ -1249,7 +1247,7 @@ fn lc_maybe_insert_lcssa_phi(v: i32, bb: i32) -> i32 {
     var preds: i32[>..<] = [];
     each_pred(bb) { p => preds.push(p); };
     let pn = new_phi(vals[v].ty, preds.len);
-    inst_insert_before(pn, block_first(bb));
+    inst_insert_before_head(pn, block_first(bb));
     var nm: u8[>..] = [];
     nm.append(val_name(v));
     nm.append(".lcssa");
@@ -1362,7 +1360,7 @@ fn lc_promote(ptrs: const i32[:], exits: const i32[:], ins_pts: const i32[:], ms
     var ph_load: i32 = -1;
     if found_load || !store_guaranteed {
         let ld = create_inst(OP_LOAD, access_ty, [some_ptr]);
-        m2r_insert_before_adopting(ld, block_terminator(preheader));
+        inst_insert_before(ld, block_terminator(preheader));
         var nm: u8[>..] = [];
         nm.append(val_name(some_ptr));
         nm.append(".promoted");
@@ -1474,7 +1472,7 @@ fn lc_insert_stores_in_exits(uses_: const i32[:], some_ptr: i32, exits: const i3
         let p = lc_maybe_insert_lcssa_phi(some_ptr, exit);
         let si = create_inst(OP_STORE, T_VOID, [live, p]);
         let pos = ins_pts[i];
-        if pos >= 0 { inst_insert_before(si, pos); } else { block_append_inst(exit, si); }
+        if pos >= 0 { inst_insert_before_head(si, pos); } else { block_append_inst(exit, si); }
         if unordered_atomic { insts[inst_of(si)].ord = 1; }
         lc_set_align(si, alignment);
         if dl >= 0 { inst_set_md(si, MDK_DBG_SC, dl); }
@@ -1783,7 +1781,7 @@ fn lc_hoist_mul_add(i: i32, l: i32) -> bool {
         let lhs = if k == 0 { mul } else { op(ins, 0) };
         let rhs = if k == 1 { mul } else { op(ins, 1) };
         let nbo = create_inst(iop(ins), vals[ins].ty, [lhs, rhs]);
-        m2r_insert_before_adopting(nbo, ins);
+        inst_insert_before(nbo, ins);
         var nm: u8[>..] = [];
         nm.append(val_name(ins));
         nm.append(".reass");
@@ -1844,7 +1842,7 @@ fn lc_hoist_bo_association(i: i32, l: i32) -> bool {
     lb_set(block_terminator(preheader));
     let inv = lb_binop_plain(opc, c1, c2, "invariant.op");
     let nbo = create_inst(opc, vals[bo].ty, [lv, inv]);
-    m2r_insert_before_adopting(nbo, bo);
+    inst_insert_before(nbo, bo);
     var nm: u8[>..] = [];
     nm.append(val_name(bo));
     nm.append(".reass");
@@ -1936,7 +1934,7 @@ fn lc_hoist_sub_add_association(i: i32, l: i32) -> bool {
     lb_set(block_terminator(preheader));
     let inv = lb_binop_plain(inv_op, c1, c2, "invariant.op");
     let nbo = create_inst(res_op, vals[i].ty, [lv, inv]);
-    m2r_insert_before_adopting(nbo, i);
+    inst_insert_before(nbo, i);
     var nm: u8[>..] = [];
     nm.append(val_name(i));
     nm.append(".reass");

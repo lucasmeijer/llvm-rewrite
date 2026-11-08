@@ -263,16 +263,29 @@ fn m2r_debug_value_loc(r: i32) -> i32 {
     return md_get(MK_DI, DIK_LOCATION as i32, slots, false);
 }
 
-// new DbgVariableRecord(ValueAsMetadata::get(V), Var, Expr, Loc), appended to `before`'s records.
+// new DbgVariableRecord(ValueAsMetadata::get(V), Var, Expr, Loc), inserted with
+// BasicBlock::insertDbgRecordBefore(DR, Where = (bv, pos)): at the head of the marker if Where has the head bit.
+fn m2r_insert_dbg_value_at(v: i32, var_: i32, expr: i32, loc: i32, bv: i32, pos: i32, head: bool) -> i32 {
+    let r = new_dbgrec(DR_VALUE);
+    dbgrecs[r].loc = md_value(v);
+    dbgrecs[r].dvar = var_;
+    dbgrecs[r].expr = expr;
+    dbgrecs[r].dl = loc;
+    dbg_track_new(r);
+    marker_absorb(bv, pos, r, head);
+    m2r_recs.push(r);
+    return r;
+}
+// ... appended to `before`'s records (insertDbgRecordBefore(DR, I->getIterator())).
 fn m2r_insert_dbg_value(v: i32, var_: i32, expr: i32, loc: i32, before: i32) -> i32 {
     let r = new_dbgrec(DR_VALUE);
     dbgrecs[r].loc = md_value(v);
     dbgrecs[r].dvar = var_;
     dbgrecs[r].expr = expr;
     dbgrecs[r].dl = loc;
+    dbg_track_new(r);
     inst_add_dbg(before, r);
     m2r_recs.push(r);
-    if !is_constant(v) { vs_add(VS_PASS1, v); }
     return r;
 }
 
@@ -308,45 +321,29 @@ fn m2r_convert_declare_at_phi(r: i32, p: i32) {
     let dvar = dbgrecs[r].dvar;
     let expr = dbgrecs[r].expr;
     // PhiHasDebugValue
-    var k: i64 = 0;
-    while k < m2r_phi_dbg.len {
-        if m2r_phi_dbg[k] == p {
-            let x = m2r_phi_dbg[k + 1];
-            if dbgrecs[x].dvar == dvar && dbgrecs[x].expr == expr { return; }
-        }
-        k += 2;
-    }
+    var pv: i32[>..<] = [];
+    find_dbg_values(p, pv);
+    for x in pv { if dbgrecs[x].dvar == dvar && dbgrecs[x].expr == expr { return; } }
     if !m2r_value_covers_entire_fragment(vals[p].ty, r) { return; }
     let bb = inst_parent(p);
-    // getFirstInsertionPt: first non-PHI, skipping EH pads
-    let ip = first_non_phi(bb);
+    // getFirstInsertionPt: first non-PHI, after an EH pad; end() (a catchswitch block) has no insertion point
+    var ip = first_non_phi(bb);
     if ip < 0 { return; }
-    if inst_is_eh_pad(ip) {
-        if iop(ip) == OP_CATCHSWITCH { return; }
-        m2r_not_ported("debug value insertion after an EH pad");
-    }
+    if inst_is_eh_pad(ip) { ip = inst_next(ip); }
+    if ip < 0 { return; }
     let nl = m2r_debug_value_loc(r);
-    let nr = m2r_insert_dbg_value(p, dvar, expr, nl, ip);
+    let nr = m2r_insert_dbg_value_at(p, dvar, expr, nl, bb, ip, true);   // getFirstInsertionPt: head bit
     m2r_phi_dbg.push(p);
     m2r_phi_dbg.push(nr);
 }
 
-// Debug records of the function being processed (collected once per mem2reg run, plus the ones we create),
-// and VS_PASS1 = the values some record's location mentions. LLVM keeps these links in ValueAsMetadata;
-// here they make findDbgUsers, ValueAsMetadata::handleRAUW and handleDeletion cost nothing for values no
-// record mentions.
+// Debug records of the function being processed (collected once per run, plus the ones we create). Finding
+// users, handleRAUW and handleDeletion are central now (dinfo.goose tracking; rauw and erasing call them), so
+// this list only answers "does the function have records".
 var m2r_recs: i32[>..<];
 
-fn m2r_md_note_values(m: i32) {
-    if m < 0 { return; }
-    if mds[m].kind == MK_VALUE { vs_add(VS_PASS1, mds[m].extra); return; }
-    if mds[m].kind == MK_DIARGLIST {
-        for k in mds[m].nops { let o = md_op(m, k); if o >= 0 && mds[o].kind == MK_VALUE { vs_add(VS_PASS1, mds[o].extra); } }
-    }
-}
 fn m2r_collect_records(fv: i32) {
     m2r_recs.clear();
-    vs_clear(VS_PASS1);
     if dbgrecs.len == 0 { return; }
     var b = func_first_block(fv);
     while b >= 0 {
@@ -354,11 +351,7 @@ fn m2r_collect_records(fv: i32) {
         while i >= 0 {
             var r = inst_first_dbg(i);
             while r >= 0 {
-                if dbgrecs[r].kind as i64 != DR_LABEL {
-                    m2r_recs.push(r);
-                    m2r_md_note_values(dbgrecs[r].loc);
-                    m2r_md_note_values(dbgrecs[r].addr);
-                }
+                if dbgrecs[r].kind as i64 != DR_LABEL { m2r_recs.push(r); }
                 r = dbgrecs[r].next;
             }
             i = inst_next(i);
@@ -367,13 +360,8 @@ fn m2r_collect_records(fv: i32) {
     }
 }
 
-// findDbgUsers(V): records whose location mentions V, in instruction order.
-fn m2r_find_dbg_users(v: i32, out: i32[>..<]&) {
-    if !vs_has(VS_PASS1, v) { return; }
-    for r in m2r_recs {
-        if dbgrecs[r].owner >= 0 && (md_mentions_value(dbgrecs[r].loc, v) || md_mentions_value(dbgrecs[r].addr, v)) { out.push(r); }
-    }
-}
+// findDbgUsers(V)
+fn m2r_find_dbg_users(v: i32, out: i32[>..<]&) { find_dbg_users(v, out); }
 
 // The location metadata m with every mention of `old` replaced by `nw`.
 fn m2r_md_replace_value(m: i32, old: i32, nw: i32) -> i32 {
@@ -393,29 +381,13 @@ fn m2r_md_replace_value(m: i32, old: i32, nw: i32) -> i32 {
     return m;
 }
 
-// ValueAsMetadata::handleRAUW(old, nw) for debug-record locations.
-fn m2r_dbg_rauw(old: i32, nw: i32) {
-    if !vs_has(VS_PASS1, old) { return; }
-    for r in m2r_recs {
-        if dbgrecs[r].owner < 0 { continue; }
-        dbgrecs[r].loc = m2r_md_replace_value(dbgrecs[r].loc, old, nw);
-        dbgrecs[r].addr = m2r_md_replace_value(dbgrecs[r].addr, old, nw);
-    }
-    vs_del(VS_PASS1, old);
-    if !is_constant(nw) { vs_add(VS_PASS1, nw); }
-}
+// ValueAsMetadata::handleRAUW: done by rauw itself now.
+fn m2r_dbg_rauw(old: i32, nw: i32) { }
 
-// Instruction::eraseFromParent: the value's ValueAsMetadata is deleted, and debug records that used it get
-// poison (ValueAsMetadata::handleDeletion, DebugValueUser::handleChangedValue). No salvaging here.
+// Instruction::eraseFromParent (ValueAsMetadata::handleDeletion gives the records poison). No salvaging here.
 fn m2r_erase(iv: i32) {
     if vals[iv].first_use >= 0 { fatal("internal: mem2reg: erasing an instruction that still has uses"); }
-    if dbgrecs.len > 0 {
-        m2r_dbg_rauw(iv, c_poison(vals[iv].ty));
-        dbg_records_to_next(iv);
-    }
-    inst_remove_from_parent(iv);
-    drop_all_refs(iv);
-    val_set_dead(iv);
+    inst_erase_from_parent(iv);
 }
 
 // DILocalScope::getSubprogram
@@ -618,7 +590,7 @@ fn m2r_convert_metadata_to_assumes(li: i32, v: i32) {
         // store i1 true, ptr poison (a non-terminator unreachable), before LI
         let st = create_inst(OP_STORE, T_VOID, [c_true(), c_poison(ty_ptr(0))]);
         insts[inst_of(st)].align = 1;
-        m2r_insert_before_adopting(st, li);
+        inst_insert_before(st, li);
         return;
     }
     if inst_get_md(li, md_kind_id("nonnull")) >= 0 && inst_get_md(li, k_noundef) >= 0 && !m2r_known_non_zero(v, li) {
@@ -626,31 +598,11 @@ fn m2r_convert_metadata_to_assumes(li: i32, v: i32) {
         let assume = au_get_declaration(IID_assume, []);
         let cmp = create_inst(OP_ICMP, T_I1, [li, c_null(vals[li].ty)]);
         insts[inst_of(cmp)].pred = 33;
-        m2r_insert_after(cmp, li);
+        inst_insert_after(cmp, li);
         let ci = create_inst(OP_CALL, T_VOID, [cmp, assume]);
         insts[inst_of(ci)].ty2 = globs[glob_of(assume)].vty;
-        m2r_insert_after(ci, cmp);
+        inst_insert_after(ci, cmp);
     }
-}
-
-// Instruction::insertBefore(BB, It) with It not at the head: the new instruction adopts the debug records
-// that were attached to the position.
-fn m2r_insert_before_adopting(iv: i32, pos: i32) {
-    inst_insert_before(iv, pos);
-    let pi = inst_of(pos);
-    if pi < inst_dbg.len && inst_dbg[pi] >= 0 {
-        let ni = inst_of(iv);
-        while inst_dbg.len <= ni { inst_dbg.push(-1); }
-        inst_dbg[ni] = inst_dbg[pi];
-        inst_dbg[pi] = -1;
-        var r = inst_dbg[ni];
-        while r >= 0 { dbgrecs[r].owner = iv; r = dbgrecs[r].next; }
-    }
-}
-// Instruction::insertAfter(It): inserted before std::next(It) (not at the head of its records).
-fn m2r_insert_after(iv: i32, pos: i32) {
-    let n = inst_next(pos);
-    if n >= 0 { m2r_insert_before_adopting(iv, n); } else { block_append_inst(inst_parent(pos), iv); }
 }
 
 // LargeBlockInfo::isInterestingInstruction
@@ -680,7 +632,7 @@ fn m2r_replace_load(li: i32, v: i32) {
     m2r_erase(li);
 }
 
-fn m2r_erase_record(r: i32) { dbg_erase_record(r); }
+fn m2r_erase_record(r: i32) { dbg_delete_record(r); }
 
 // PromoteMemToReg(Allocas, DT, AC)
 fn promote_mem_to_reg(fv: i32, allocas: i32[>..<]&) {
@@ -953,7 +905,7 @@ fn promote_mem_to_reg(fv: i32, allocas: i32[>..<]&) {
         let pn = new_inst(OP_PHI, avals[ano], reserve);
         vals[pn].nops = 0;
         let f = block_first(bb);
-        inst_insert_before(pn, f);
+        inst_insert_before_head(pn, f);
         var nm: u8[>..] = [];
         nm.append(val_name(allocas[ano]));
         nm.append(".");

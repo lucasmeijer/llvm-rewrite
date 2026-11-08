@@ -298,14 +298,14 @@ fn split_landing_pad_predecessors(orig: i32, preds: const i32[:], suffix1: const
     }
     let lpad = first_non_phi(orig);
     let c1 = inst_clone(lpad);
-    inst_insert_before(c1, first_non_phi(nb1));
+    inst_insert_before_head(c1, first_non_phi(nb1));
     var n1: u8[>..] = [];
     n1.append("lpad");
     n1.append(suffix1);
     set_name(c1, n1);
     if nb2 >= 0 {
         let c2 = inst_clone(lpad);
-        inst_insert_before(c2, first_non_phi(nb2));
+        inst_insert_before_head(c2, first_non_phi(nb2));
         var n2: u8[>..] = [];
         n2.append("lpad");
         n2.append(suffix2);

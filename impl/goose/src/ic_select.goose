@@ -1835,7 +1835,7 @@ fn fold_select_to_phi_impl(sel: i32, bb: i32) -> i32 {
         if is_inst(v) && !dt_value_dominates_inst(v, block_terminator(p)) { return -1; }
         inputs.push(v);
     }
-    icb_set_insert_point(block_first(bb));
+    icb_set_insert_point_head(block_first(bb));   // SetInsertPoint(BB, BB->begin())
     let pn = new_inst(OP_PHI, vals[sel].ty, inputs.len);
     vals[pn].nops = 0;
     icb_insert(pn, "");

@@ -113,7 +113,7 @@ fn sb_set_end(bb: i32) { sb_bb = bb; sb_pos = -1; }
 
 fn sb_insert(iv: i32, name: const u8[:]) -> i32 {
     // IRBuilder::SetInsertPoint(I) keeps no head bit: the new instruction adopts I's debug records
-    if sb_pos >= 0 { inst_insert_before(iv, sb_pos); scf_adopt_records(iv, sb_pos); } else { block_append_inst(sb_bb, iv); }
+    if sb_pos >= 0 { inst_insert_before(iv, sb_pos); } else { block_append_inst(sb_bb, iv); }
     if name.len > 0 && vals[iv].ty != T_VOID { set_name(iv, name); }
     if sb_annot >= 0 { inst_set_md(iv, mdk_annotation(), sb_annot); }
     if sb_dl >= 0 { inst_set_md(iv, MDK_DBG_SC, sb_dl); }
@@ -553,7 +553,10 @@ fn clone_insts_into_pred(bb: i32, pred: i32, vmap: i32[>..<]&) {
         scf_remap_instruction(nb, vmap);
         cu_drop_ub_implying_attrs_and_metadata(nb);
         inst_insert_before(nb, pti);
-        if inst_first_dbg(bonus) >= 0 { scf_not_ported("cloning debug records of bonus instructions"); }
+        // cloneDebugInfoFrom(&BonusInst) + RemapDbgRecordRange
+        var nrecs: i32[>..<] = [];
+        inst_clone_debug_info_from(nb, bonus, -1, false, nrecs);
+        for r in nrecs { scf_remap_dbg_record(r, vmap); }
         // takeName, then the old one gets ".old": unconditionally, so an unnamed bonus instruction is named
         // ".old" (and bumps the symbol table's unique counter when that collides, as in LLVM).
         cu_take_name(nb, bonus);
@@ -599,6 +602,20 @@ fn scf_remap_instruction(i: i32, vmap: i32[>..<]&) {
         }
     }
     scf_remap_md_operands(i, vmap);
+}
+// RemapDbgRecord(M, DR, VMap, RF_NoModuleLevelChanges | RF_IgnoreMissingLocals): location operands found in
+// the map are replaced one by one (replaceVariableLocationOp(I, New)); others stay.
+fn scf_remap_dbg_record(r: i32, vmap: i32[>..<]&) {
+    let k = dbgrecs[r].kind as i64;
+    if k == DR_LABEL { return; }
+    if k == DR_ASSIGN { scf_not_ported("remapping dbg_assign records"); }
+    var ls: i32[>..<] = [];
+    dbg_location_ops(r, ls);
+    var nv: i32[>..<] = [];
+    var changed = false;
+    for v in ls { let j = vmap_find(vmap, v); nv.push(j); if j >= 0 && j != v { changed = true; } }
+    if !changed { return; }
+    for i in ls.len { if nv[i] >= 0 { dbg_replace_location_op_idx(r, i, nv[i]); } }
 }
 fn vmap_find(vmap: i32[>..<]&, v: i32) -> i32 {
     var k = vmap.len - 2;
@@ -953,24 +970,10 @@ fn hoist_lockstep_dbg_records(ti: i32, i1: i32, others: const i32[:]) {
             let r = cur[k];
             cur[k] = dbgrecs[r].next;
             if hoist {
-                dbg_erase_record(r);
+                dbg_delete_record(r);
                 scf_dbg_append(r, ti);
             }
         }
-    }
-}
-
-// Instruction::insertBefore(BB, It) without the head bit: the inserted instruction takes over the records that
-// were attached to the instruction at the insertion point.
-fn scf_adopt_records(iv: i32, pos: i32) {
-    let pi = inst_of(pos);
-    if pi >= inst_dbg.len || inst_dbg[pi] < 0 { return; }
-    var r = inst_dbg[pi];
-    inst_dbg[pi] = -1;
-    while r >= 0 {
-        let nx = dbgrecs[r].next;
-        scf_dbg_append(r, iv);
-        r = nx;
     }
 }
 
@@ -1114,9 +1117,7 @@ fn hoist_common_code_from_successors(ti: i32, all_eq_only: bool) -> bool {
             it[0] = inst_next(it[0]);
             hoist_lockstep_dbg_records(ti, i1, others);
             // moveBefore (not Preserving): I1's remaining records stay behind, I1 adopts TI's records
-            if inst_first_dbg(i1) >= 0 { dbg_records_to_next(i1); }
             inst_move_before(i1, ti);
-            scf_adopt_records(i1, ti);
             for k in 1..it.len {
                 let i2 = it[k];
                 it[k] = inst_next(i2);
@@ -1171,7 +1172,6 @@ fn hoist_succ_identical_terminator(ti: i32, i1: i32, others: const i32[:], usucc
     hoist_lockstep_dbg_records(ti, i1, others);
     let nt = inst_clone(i1);
     inst_insert_before(nt, ti);
-    scf_adopt_records(nt, ti);
     if vals[nt].ty != T_VOID {
         scf_rauw(i1, nt);
         for o in others { scf_rauw(o, nt); }
@@ -1394,12 +1394,13 @@ fn speculatively_execute_bb(bi: i32, thenbb: i32) -> bool {
         while r >= 0 {
             let nr = dbgrecs[r].next;
             if dbgrecs[r].kind as i64 == DR_ASSIGN { scf_not_ported("speculating instructions with dbg.assign records"); }
-            dbg_erase_record(r);
+            dbg_delete_record(r);
             r = nr;
         }
         x = inst_next(x);
     }
-    cu_splice_before_dbg(bi, block_first(thenbb), block_terminator(thenbb));
+    // BB->splice(BI->getIterator(), ThenBB, ThenBB->begin(), std::prev(ThenBB->end()))
+    block_splice(inst_parent(bi), bi, false, thenbb, block_first(thenbb), true, block_terminator(thenbb), false);
     if cond_ldst.len > 0 { scf_not_ported("hoisting conditional loads/stores (conditional faulting)"); }
     sb_at_nofold(bi);
     var p = block_first(endbb);
@@ -1544,6 +1545,8 @@ fn fold_cond_branch_known_in_pred_impl(bi: i32) -> i64 {
         tmap.push(cond);
         tmap.push(cb);
         var bbi = block_first(bb);
+        var cursor = block_first(bb);    // SrcDbgCursor
+        var nrecs: i32[>..<] = [];
         while bbi != bi {
             let cur = bbi;
             bbi = inst_next(bbi);
@@ -1553,7 +1556,7 @@ fn fold_cond_branch_known_in_pred_impl(bi: i32) -> i64 {
                 continue;
             }
             var n = inst_clone(cur);
-            inst_insert_before(n, ins_pt);
+            inst_insert_before_head(n, ins_pt);   // insertInto(EdgeBB, getFirstInsertionPt())
             if vals[cur].name >= 0 {
                 let cn = name_plus(cur, ".c");
                 set_name(n, cn);
@@ -1568,10 +1571,16 @@ fn fold_cond_branch_known_in_pred_impl(bi: i32) -> i64 {
             } else {
                 if vals[cur].first_use >= 0 { tmap.push(cur); tmap.push(n); }
             }
-            if n >= 0 && inst_first_dbg(cur) >= 0 { scf_not_ported("cloning debug records while threading"); }
+            if n >= 0 {
+                // copy the records of the instructions folded away since the last clone, then this one's
+                while cursor != cur { inst_clone_debug_info_from(n, cursor, -1, false, nrecs); cursor = inst_next(cursor); }
+                cursor = inst_next(cur);
+                inst_clone_debug_info_from(n, cur, -1, false, nrecs);
+            }
         }
-        var y = block_first(bb);
-        while y >= 0 { if inst_first_dbg(y) >= 0 { scf_not_ported("cloning debug records while threading"); } y = inst_next(y); }
+        let eterm = block_terminator(edge);
+        while cursor != bi { inst_clone_debug_info_from(eterm, cursor, -1, false, nrecs); cursor = inst_next(cursor); }
+        inst_clone_debug_info_from(eterm, bi, -1, false, nrecs);
         block_remove_predecessor(bb, edge, false);
         let ebi = block_terminator(edge);
         set_op(ebi, 0, real);
@@ -1823,7 +1832,13 @@ fn perform_branch_to_common_dest_folding(bi: i32, pbi: i32, have_tti: bool) -> b
     if lmd >= 0 { inst_set_md(pbi, 18, lmd); }
     var vmap: i32[>..<] = [];
     clone_insts_into_pred(bb, pred, vmap);
-    if inst_first_dbg(block_terminator(bb)) >= 0 { scf_not_ported("cloning debug records of the folded branch"); }
+    // PredBlock->getTerminator()->cloneDebugInfoFrom(BB->getTerminator()) + RemapDbgRecord of its records
+    if inst_first_dbg(block_terminator(bb)) >= 0 {
+        var nr: i32[>..<] = [];
+        inst_clone_debug_info_from(block_terminator(pred), block_terminator(bb), -1, false, nr);
+        var r = inst_first_dbg(block_terminator(pred));
+        while r >= 0 { scf_remap_dbg_record(r, vmap); r = dbgrecs[r].next; }
+    }
     var bicond = vmap_find(vmap, br_cond(bi));
     if bicond < 0 { bicond = br_cond(bi); }
     let nc = create_logical_op(opc, br_cond(pbi), bicond, "or.cond");
@@ -2079,7 +2094,7 @@ fn ensure_value_available_in_successor(v: i32, bb: i32, alt: i32) -> i32 {
     let np = new_inst(OP_PHI, vals[v].ty, 2);
     vals[np].nops = 0;
     let f = block_first(succ);
-    inst_insert_before(np, f);
+    inst_insert_before_head(np, f);
     set_name(np, "simplifycfg.merge");
     phi_add_incoming(np, v, bb);
     var ps3: i32[>..<] = [];
@@ -3089,7 +3104,7 @@ fn remove_empty_cleanup(ri: i32) -> bool {
             var ups2: i32[>..<] = [];
             cu_preds(ud, ups2);
             for pr in ups2 { if pr != bb { phi_add_incoming(pn, pn, pr); } }
-            inst_move_before(pn, ins_pt);
+            inst_move_before_head(pn, ins_pt);
             phi_add_incoming(pn, c_poison(vals[pn].ty), bb);
         }
     }
@@ -3149,12 +3164,14 @@ fn simplify_cleanup_return(ri: i32) -> bool {
 fn simplify_unreachable(ui: i32) -> bool {
     let bb = inst_parent(ui);
     var changed = false;
-    if inst_first_dbg(ui) >= 0 { scf_not_ported("debug records on unreachable"); }
+    // records that used to come after the unreachable move in front of it; those on it are deleted
+    block_flush_terminator_records(bb);
+    cu_drop_dbg_records(ui);
     loop {
         let prev = inst_prev(ui);
         if prev < 0 { break; }
         if !guaranteed_to_transfer(prev) { break; }
-        if inst_first_dbg(prev) >= 0 { scf_not_ported("dropping debug records before unreachable"); }
+        cu_drop_dbg_records(prev);
         scf_rauw(prev, c_poison(vals[prev].ty));
         scf_erase(prev);
         changed = true;
@@ -4998,7 +5015,7 @@ fn sink_last_instruction(bbs: const i32[:]) {
         let pn = new_inst(OP_PHI, vals[o].ty, xs.len);
         vals[pn].nops = 0;
         let f = block_first(bbend);
-        if f >= 0 { inst_insert_before(pn, f); } else { block_append_inst(bbend, pn); }
+        if f >= 0 { inst_insert_before_head(pn, f); } else { block_append_inst(bbend, pn); }
         let nm = name_plus(o, ".sink");
         set_name(pn, nm);
         for i in xs { phi_add_incoming(pn, op(i, k), inst_parent(i)); }
@@ -5006,7 +5023,7 @@ fn sink_last_instruction(bbs: const i32[:]) {
     }
     for k in nops(i0) { set_op(i0, k, newops[k]); }
     if inst_first_dbg(i0) >= 0 { scf_not_ported("sinking instructions with debug records"); }
-    inst_move_before(i0, scf_first_insertion_pt(bbend));
+    inst_move_impl(i0, bbend, scf_first_insertion_pt(bbend), true, false);
     for i in xs {
         if i == i0 { continue; }
         apply_merged_location(i0, inst_get_md(i0, MDK_DBG_SC), inst_get_md(i, MDK_DBG_SC));

@@ -11,6 +11,10 @@
 namespace ic;
 import std;
 import ir;
+import dinfo;
+import mem2reg;
+import salvage;
+import dbgutil;
 import irutil;
 import calls;
 import instinfo;
@@ -859,7 +863,7 @@ recursive fn sd_fp_class(i: i32, opno: i64, demanded: u64, cx: i32, depth: i64) 
         nv = r; known = k;
     }
     if nv < 0 { return false, known; }
-    if dbgrecs.len > 0 && dbg_records_use_value(v) { ic_not_ported("salvageDebugInfo in SimplifyDemandedFPClass"); }
+    if is_inst(v) { salvage_debug_info(v); }
     ic_replace_use(uses_index_of(i, opno), nv);
     return true, known;
 }

@@ -101,3 +101,8 @@ Facts verified while porting `llvm/lib/Transforms/Utils/SimplifyCFG.cpp` (LLVM 2
 - opt prints `warning: ignoring debug info with an invalid version (N) in <file>` when UpgradeDebugInfo strips
   debug info from a module without `"Debug Info Version" 3`; the verifier's "inlinable function call ... must have
   a !dbg location" message is followed by the offending call on its own line.
+- FoldBranchToCommonDest renames every bonus instruction it clones: the clone takes the name, the original gets
+  `NewBonusInst->getName() + ".old"` unconditionally (SimplifyCFG.cpp:1210), so an *unnamed* bonus instruction is
+  named `.old`, `.old1`, ... Each collision bumps the function symbol table's LastUnique counter (ValueSymbolTable
+  makeUniqueName), which is why a later `%or.cond` can come out as `%or.cond3` in unnamed (-O0, clang) IR. Verified
+  on tests/e2e/O0/test-suite/SingleSource/Regression/C/PR640.ll with `-passes=simplifycfg`.

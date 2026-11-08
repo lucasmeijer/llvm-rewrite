@@ -264,7 +264,8 @@ so the callback may erase `i`. PHIs: `phi_value/phi_block/phi_block_index`. Inst
 Calls: `cb_*` accessors in calls.goose (operand layout `args…, bundle operands…, [dests…], callee`).
 
 ### 8.2 Mutation
-`create_inst` (unlinked) + `inst_insert_before/after`, `block_append_inst`; `build_before(op, ty, ops, name, pos)`
+`create_inst` (unlinked) + `inst_insert_before` (adopts the records there) / `inst_insert_before_head` (head-bit
+iterator) / `inst_insert_after`, `block_append_inst`, `block_splice` (§8.4.1); `build_before(op, ty, ops, name, pos)`
 and `build_br` are the IRBuilder equivalents. **Names are set after insertion** (`set_name`, `set_name_from`)
 so the function's `ValueSymbolTable` uniques them exactly like LLVM (`x` taken → `x1`, per-table counter).
 `inst_erase_from_parent` (fatal if uses remain, as LLVM asserts), `inst_remove_from_parent`, `inst_move_before`,
@@ -295,15 +296,23 @@ programUndefinedIfUndefOrPoison, vt.goose's getUnderlyingObjects and SCEV's Know
 20 slots keyed by value or use id, the same kind of hash table). SCCP (sccp.goose) keeps one stamped record per value id (`ScRec`: lattice
 index, struct-lattice base, additional-users list, tracked return/global, bit flags for executable/visited/
 in-worklist/argument-tracked blocks and functions) and PredicateInfo (predinfo.goose) another (`PiRec`); its
-transform phase uses VS_PASS1 through `m2r_collect_records` (debug-record RAUW). `m2r_collect_records(fv)` +
-VS_PASS1 is the general "values that debug records mention" set: InstSimplifyPass, DCE and EarlyCSE use it for
-RAUW (`m2r_dbg_rauw`), `salvage_debug_info` and `m2r_erase`; InstSimplifyPass keeps its ToSimplify/Next sets in
-VS_PASS2/VS_PASS3 for that reason.
+transform phase needs nothing for debug records: ValueAsMetadata tracking is central (§8.4.1). InstSimplifyPass
+keeps its ToSimplify/Next sets in VS_PASS2/VS_PASS3 (VS_PASS1 used to hold the debug-record values).
 
 Block numbers (`BasicBlock::getNumber`) are tracked in ir.goose (`block_set_parent`, `block_number`,
 `func_max_block_number`): assigned from a per-function counter when a block's parent changes. Every place that
 links a block into a function goes through `block_set_parent`. Debug records carry their owning instruction
 (`DbgRec.owner`), so `dbg_erase_record` doesn't search.
+
+### 8.4.1 Debug records
+A record (`DbgRec` in dinfo.goose) sits in the marker of the instruction after it (`inst_dbg[inst]` list, or the
+block's trailing list `block_trail[block]` when its instruction was erased at the end of a block); `owner` is the
+instruction (or -2 - block). Locations are tracked the way LLVM's ReplaceableMetadataImpl does it: a global table of
+tracking references (`trks`, one intrusive list per VAM/DIArgList md id, with LLVM's per-RMI NextIndex) and
+`val_vam[value]`. `rauw` and the erase functions apply ValueAsMetadata::handleRAUW/handleDeletion; findDbgUsers
+reads the lists in LLVM's order. Insertion and movement mirror LLVM's iterator head bit explicitly (`_head`
+variants, `inst_insert_at(.., head)`, `inst_move_impl(.., head, preserve)`, `block_splice` with the head/tail bits
+of BasicBlock::splice). NOTES.md "Debug records (central)" has the rules for pass authors.
 
 ### 8.5 Analyses
 **Dominator trees** (domtree.goose) port `GenericDomTreeConstruction.h` whole: construction (`SemiNCAInfo`) and
@@ -633,7 +642,7 @@ max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
   SimplifyCFG hoisting/sinking need exactly these.
 - **salvage.goose** (shared): `salvage_debug_info(i)` (salvageDebugInfo: casts, GEPs via collectOffset, binops,
   icmps; DIExpression appendOpsToArg/prependOpcodes/appendOffset, foldConstantMath, DIArgList growth, kill
-  locations). Needs `m2r_collect_records(fv)` at the start of the pass. dbg_assign address salvaging fails loudly.
+  locations). Debug users come from the central tracking (§8.4.1). dbg_assign address salvaging fails loudly.
 - **knowledge.goose** (shared): `salvage_knowledge(i, use_ac)` for `--enable-knowledge-retention`
   (AssumeBuilderState: attribute and access knowledge, canonicalization, tryToPreserveWithoutAddingAssume through
   the AssumptionCache, the new `llvm.assume` with operand bundles). Callers in LLVM: DCE, EarlyCSE (ported), DSE,

@@ -290,9 +290,8 @@ fn scalarize_phi(ei: i32, pn: i32) -> i32 {
             sval = ic_insert_new_with(nb, b0);
         } else {
             let nei = ic_new_extract_element(inv, elt);
-            var pos: i32 = -1;
-            if is_inst(inv) && !is_phi_inst(inv) { pos = inst_next(inv); } else { pos = first_insertion_pt(inbb); }
-            sval = ic_insert_new_with(nei, pos);
+            if is_inst(inv) && !is_phi_inst(inv) { sval = ic_insert_new_with(nei, inst_next(inv)); }
+            else { sval = ic_insert_new_with_head(nei, first_insertion_pt(inbb)); }
         }
         seen_bb.push(inbb);
         seen_v.push(sval);
@@ -615,7 +614,7 @@ fn replace_extract_elements(ins: i32, ext: i32) -> bool {
         inst_insert_after(wv, evi);
         ic_register_name(wv);
     } else {
-        ic_insert_new_with(wv, first_insertion_pt(inst_parent(ext)));
+        ic_insert_new_with_head(wv, first_insertion_pt(inst_parent(ext)));
     }
     if evi >= 0 {
         let dl = inst_get_md(evi, 0);
@@ -796,7 +795,7 @@ fn fold_aggregate_construction_into_aggregate_reuse(orig: i32) -> i32 {
         map_v[k] = v;
     }
     let sp = icb_pos; let sb = icb_bb; let sd = icb_dl;
-    icb_set_insert_point(first_non_phi(use_bb));
+    icb_set_insert_point_head(first_non_phi(use_bb));
     var nm: u8[>..] = [];
     nm.append(val_name(orig));
     nm.append(".merged");

@@ -2843,7 +2843,7 @@ fn fold_xor_of_icmps(lhs: i32, rhs: i32, i: i32) -> i32 {
                     let noty = icb_not(y, nm);
                     icw_push_users(y);
                     ao_replace_uses_except_user(y, noty);
-                    icb_pos = sp; icb_bb = sb; icb_dl = sd;
+                    icb_pos = sp; icb_bb = sb; icb_dl = sd; icb_head = false;
                 }
                 return icb_and(lhs, rhs, "");
             }
@@ -2937,7 +2937,7 @@ fn ao_insertion_point_after_def(i: i32) -> i32 {
 }
 // freelyInvert(IC, Op, IgnoredUser)
 fn ao_freely_invert(v: i32, ignored: i32) -> i32 {
-    icb_set_insert_point(ao_insertion_point_after_def(v));
+    icb_set_insert_point_head(ao_insertion_point_after_def(v));
     var nm: u8[>..] = [];
     ao_name_suffix(nm, v, ".not");
     let n = icb_not(v, nm);
@@ -2960,7 +2960,7 @@ fn sink_not_into_logical_op(i: i32) -> bool {
     if !ao_can_freely_invert(op0, i) || !ao_can_freely_invert(op1, i) { return false; }
     op0 = ao_freely_invert(op0, i);
     op1 = ao_freely_invert(op1, i);
-    icb_set_insert_point(ao_insertion_point_after_def(i));
+    icb_set_insert_point_head(ao_insertion_point_after_def(i));
     var nm: u8[>..] = [];
     ao_name_suffix(nm, i, ".not");
     var nl: i32 = -1;
@@ -3002,7 +3002,7 @@ fn sink_not_into_other_hand_of_logical_op(i: i32) -> bool {
     if !can_freely_invert_all_users_of(i, -1) { return false; }
     let inv = ao_freely_invert(to_inv, i);
     if inv_first { op0 = inv; } else { op1 = inv; }
-    icb_set_insert_point(ao_insertion_point_after_def(i));
+    icb_set_insert_point_head(ao_insertion_point_after_def(i));
     var nm: u8[>..] = [];
     ao_name_suffix(nm, i, ".not");
     var nb: i32 = -1;

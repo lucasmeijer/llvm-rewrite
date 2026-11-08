@@ -9,6 +9,10 @@
 namespace ic;
 import std;
 import ir;
+import dinfo;
+import mem2reg;
+import salvage;
+import dbgutil;
 import irutil;
 import calls;
 import instinfo;
@@ -828,7 +832,7 @@ fn fold_op_into_phi(i: i32, pn: i32, allow_multi: bool) -> i32 {
         for x in torep { ic_replace_inst_uses_with(x, npn); ic_erase(x); }
         one = true;
     }
-    if one && dbgrecs.len > 0 && dbg_records_use_value(pn) { ic_not_ported("replaceAllDbgUsesWith in foldOpIntoPhi"); }
+    if one { replace_all_dbg_uses_with(pn, npn, pn); }
     return ic_replace_inst_uses_with(i, npn);
 }
 
@@ -1128,7 +1132,7 @@ recursive fn gfi_impl(v: i32, will_invert_all: bool, build: bool, depth0: i64) -
             icb_insert(np, "");
             var k = mark;
             while k < gfi_vals.len { phi_add_incoming(np, gfi_vals[k], gfi_vals[k + 1]); k += 2; }
-            icb_pos = sp; icb_bb = sb; icb_dl = sd;
+            icb_pos = sp; icb_bb = sb; icb_dl = sd; icb_head = false;
             gfi_vals.resize(mark);
             return np;
         }
@@ -1218,7 +1222,16 @@ fn freely_invert_all_users_of(v: i32, ignored: i32) {
             icw_add(us);
         } else { fatal("internal: freelyInvertAllUsersOf out of sync with canFreelyInvertAllUsersOf"); }
     }
-    if dbgrecs.len > 0 && dbg_records_use_value(v) { ic_not_ported("freelyInvertAllUsersOf with debug value users (DW_OP_not)"); }
+    // Update pre-existing debug value uses.
+    var recs: i32[>..<] = [];
+    find_dbg_values(v, recs);
+    for r in recs {
+        if dbgrecs[r].kind as i64 == DR_ASSIGN { ic_not_ported("freelyInvertAllUsersOf with dbg_assign users"); }
+        var ls: i32[>..<] = [];
+        dbg_location_ops(r, ls);
+        let not_op: i64[1] = [0x20];     // DW_OP_not
+        for idx in ls.len { if ls[idx] == v { dbgrecs[r].expr = sv_append_ops_to_arg(dbgrecs[r].expr, not_op, idx, false); } }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1524,7 +1537,7 @@ fn emit_gep_offset(g: i32, rewrite: bool) -> i32 {
         ic_replace_inst_uses_with(g, ng);
         ic_erase(g);
     }
-    icb_pos = spos; icb_bb = sbb; icb_dl = sdl;
+    icb_pos = spos; icb_bb = sbb; icb_dl = sdl; icb_head = false;
     return off;
 }
 
@@ -1550,7 +1563,7 @@ fn emit_gep_offsets(geps: const i32[:], nw: u8, idxty: i32, rewrite: bool) -> i3
             ou_sum = if ou_sum >= 0 { icb_add_nw(ou_sum, off, "", nuw, inb) } else { off };
             ou_flags = gep_nw_intersect_for_offset_add(ou_flags, gep_flags(g));
             if ou_base < 0 { ou_base = op(g, 0); }
-            icb_pos = spos; icb_bb = sbb; icb_dl = sdl;
+            icb_pos = spos; icb_bb = sbb; icb_dl = sdl; icb_head = false;
             continue;
         }
         if ou_sum >= 0 { off = icb_add_nw(ou_sum, off, "", nuw, inb); }
@@ -1560,7 +1573,7 @@ fn emit_gep_offsets(geps: const i32[:], nw: u8, idxty: i32, rewrite: bool) -> i3
             ic_replace_inst_uses_with(g, np);
             ic_erase(g);
         }
-        icb_pos = spos; icb_bb = sbb; icb_dl = sdl;
+        icb_pos = spos; icb_bb = sbb; icb_dl = sdl; icb_head = false;
         sum = if sum >= 0 { icb_add_nw(sum, off, "", nuw, inb) } else { off };
         ou_sum = -1;
         ou_base = -1;

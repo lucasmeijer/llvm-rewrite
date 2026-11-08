@@ -11,6 +11,10 @@
 namespace ic;
 import std;
 import ir;
+import dinfo;
+import mem2reg;
+import salvage;
+import dbgutil;
 import irutil;
 import calls;
 import instinfo;
@@ -608,11 +612,12 @@ fn fold_gep_of_phi(g: i32, pn: i32) -> i32 {
         let sp = icb_pos; let sb = icb_bb; let sd = icb_dl;
         icb_set_insert_point(pn);
         let npn = icb_phi(vals[op(op1, di)].ty, "");
-        icb_pos = sp; icb_bb = sb; icb_dl = sd;
+        icb_pos = sp; icb_bb = sb; icb_dl = sd; icb_head = false;
         for k in nops(pn) { phi_add_incoming(npn, op(op(pn, k), di), phi_block(pn, k)); }
         set_op(ng, di, npn);
     }
-    ic_insert_before_pos(ng, first_insertion_pt(inst_parent(g)));
+    inst_insert_before_head(ng, first_insertion_pt(inst_parent(g)));
+    ic_register_name(ng);
     return ng;
 }
 
@@ -1027,10 +1032,9 @@ fn visit_alloc_site(mi: i32) -> i32 {
     if func_has_fn_attr(f, AK_SanitizeMemory) || func_has_fn_attr(f, AK_SanitizeAddress) { know_undef = false; }
     let removable = is_alloc_site_removable(mi, know_zero || know_undef);
     if removable < 0 { return -1; }
-    if is_alloca && dbgrecs.len > 0 && dbg_records_use_value(mi) {
-        // findDbgUsers + ConvertDebugDeclareToDebugValue / erasing the records
-        ic_not_ported("visitAllocSite of a removable alloca that debug records describe");
-    }
+    // If we are removing an alloca with a dbg.declare, insert dbg.value records before each store.
+    var dvrs: i32[>..<] = [];
+    if is_alloca { find_dbg_users(mi, dvrs); }
     var users: i32[>..<] = [];
     for x in as_users { users.push(x); }
     for k in users.len {
@@ -1053,7 +1057,7 @@ fn visit_alloc_site(mi: i32) -> i32 {
                 icb_set_insert_point(i);
                 let m = icb_memset(cb_arg(i, 0), c_int(T_I8, 0), cb_arg(i, 2), lsa_param_align(i, 0));
                 inst_copy_all_md(m, i);
-                icb_pos = sp; icb_bb = sb; icb_dl = sd;
+                icb_pos = sp; icb_bb = sb; icb_dl = sd; icb_head = false;
             }
         }
     }
@@ -1063,7 +1067,7 @@ fn visit_alloc_site(mi: i32) -> i32 {
         if iop(i) == OP_ICMP {
             ic_replace_inst_uses_with(i, c_int_ty(vals[i].ty, if inst_pred(i) as i64 == 33 { 1 } else { 0 }));
         } else if iop(i) == OP_STORE {
-            // ConvertDebugDeclareToDebugValue for each dbg.declare of the alloca: none (checked above)
+            for r in dvrs { if dbgrecs[r].kind as i64 == DR_DECLARE { m2r_convert_declare_at_store(r, i); } }
         } else {
             var rep: i32 = -1;
             if iop(i) == OP_LOAD { rep = if know_undef { c_undef(vals[i].ty) } else { c_null(vals[i].ty) }; }
@@ -1080,6 +1084,11 @@ fn visit_alloc_site(mi: i32) -> i32 {
         block_append_inst(inst_parent(mi), ni);
         let dl = inst_get_md(mi, 0);
         if dl >= 0 { inst_set_md(ni, 0, dl); }
+    }
+    // Remove the records describing the alloca's contents: dbg.declare, and dbg.value(<alloca>, DW_OP_deref)
+    for r in dvrs {
+        if dbgrecs[r].dead != 0 { continue; }
+        if dbgrecs[r].kind as i64 == DR_DECLARE || diexpr_starts_with_deref(dbgrecs[r].expr) { dbg_delete_record(r); }
     }
     return ic_erase(mi);
 }
@@ -1120,7 +1129,7 @@ fn try_to_move_free_before_null_test(fi: i32) -> i32 {
     i = block_first(fbb);
     while i >= 0 && i != term {
         let nx = inst_next(i);
-        inst_move_before(i, ti);
+        inst_move_before_preserving(i, ti);
         i = nx;
     }
     // remove nonnull, dereferenceable(N) -> dereferenceable_or_null(N) on the argument
@@ -1762,6 +1771,7 @@ fn freeze_other_uses(fi: i32) -> bool {
         move_before = insertion_point_after_def(opv);
         if move_before < 0 { return false; }
     }
+    // MoveBefore.setHeadBit(false): after any debug records there
     var changed = false;
     if fi != move_before {
         inst_move_before(fi, move_before);

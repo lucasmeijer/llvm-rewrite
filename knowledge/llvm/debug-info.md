@@ -48,15 +48,53 @@ the oracle unless noted).
   First.HeadBit = false); they end up before the new unconditional branch.
 - `IRBuilder::Insert(I)` with no name calls `I->setName("")`: a name set on an unlinked instruction before
   `Builder.Insert(I)` is dropped (Negator's select swap `.neg`, foldSignExtendingValue's `.sext`).
-- findDbgUsers order (Metadata.cpp getAllDbgVariableRecordUsers): direct ValueAsMetadata users by descending
-  tracking index, then for each DIArgList containing the value (descending index in the value's use map) its
-  users. A record changing location re-tracks (new index); handleRAUW onto a value that already has a
-  ValueAsMetadata moves the users over with new indices in their old order.
+- findDbgUsers order (DebugInfo.cpp findDbgIntrinsics, Metadata.cpp getAllDbgVariableRecordUsers /
+  getAllArgListUsers): direct ValueAsMetadata users by **descending** tracking index, then the DIArgLists containing
+  the value in **ascending** index order (`getAllArgListUsers` sorts `<`), each with its record users by descending
+  index; a record is listed once. Every ReplaceableMetadataImpl (a VAM, a DIArgList) has its own NextIndex. A record
+  changing location re-tracks (new index); handleRAUW onto a value that already has a ValueAsMetadata moves the
+  users over with new indices in their old (ascending) order; RAUW onto a value without one updates the VAM in
+  place (users keep their indices). Local -> constant RAUW gives the records the ConstantAsMetadata; a deleted
+  value (`~Value`, handleDeletion) gives records `poison` of its type (DebugValueUser::handleChangedValue) and
+  DIArgList arguments poison (DIArgList::handleChangedOperand). DIArgList::handleChangedOperand mutates the list in
+  place (same object, users keep indices, args re-tracked) unless an equal list already exists, then RAUWs onto it.
+  `Value::replaceAllUsesWith` does all this itself (`isUsedByMetadata`); goose: `rauw` and the erase functions call
+  dinfo.goose's `vam_handle_rauw` / `vam_handle_deletion`, so passes need no per-pass record lists.
+- Insertion iterators (head bit): `getFirstInsertionPt()` always sets it, also after skipping an EH pad
+  (BasicBlock.cpp:366, set after `++`); `getFirstNonPHIIt()` and `begin()` set it; `getFirstNonPHIOrDbgOrAlloca()`
+  clears it (BasicBlock.cpp:392); `getInsertionPointAfterDef()` sets it (also for `std::next(this)`);
+  InstCombine's freezeOtherUses then clears it again (`MoveBefore.setHeadBit(false)`, InstructionCombining.cpp:5384):
+  the moved freeze ends up after the records. `Instruction::insertAfter` is a plain list insertion (no adoption):
+  the records at the next instruction stay there, after the new one. `moveAfter` uses `std::next` with the head
+  bit. `BasicBlock::insertDbgRecordBefore(DR, It)` inserts at the head of the marker iff It has the head bit (so
+  ConvertDebugDeclareToDebugValue at a PHI's getFirstInsertionPt goes in front of existing records);
+  `insertDbgRecordAfter(DR, I)` at the head of the next position's marker.
+- `BasicBlock::splice` moves records per spliceDebugInfo (BasicBlock.cpp:737-960): MergeBlockIntoPredecessor's
+  `splice(PTI, BB, begin(), STI)` puts STI's records at PTI (they end up on the moved terminator via the trailing
+  marker and flushTerminatorDbgRecords); MergeBasicBlockIntoOnlyPred's `splice(begin(), PredBB)` puts PredBB's
+  trailing records (of its erased terminator) at the head of DestBB's first instruction, before its own.
+- Inserting a terminator flushes the block's trailing records onto it, after its own (flushTerminatorDbgRecords).
+- SimplifyCFG: FoldBranchToCommonDest clones each bonus instruction's records and remaps their locations through
+  the clone map (RemapDbgRecordRange, RF_IgnoreMissingLocals: unmapped locals stay), and the branch's records onto
+  the predecessor's terminator; FoldCondBranchOnValueKnownInPredecessor clones records of cloned and folded-away
+  instructions (SrcDbgCursor) **without** remapping. simplifyUnreachable flushes trailing records, drops the
+  unreachable's own records and those of every instruction it deletes before it.
+- `SelectInst::Create(..., MDFrom)` copies every attachment of MDFrom including `!dbg` (copyMetadata); IRBuilder's
+  `CreateSelect(..., MDFrom)` copies only `!prof` and `!unpredictable`. Visible only with debug info: a fold that
+  returns `SelectInst::Create(C, A, B, "", nullptr, SI)` keeps SI's location (InstCombineLoadStoreAlloca.cpp:1169).
+- InstCombine lowers `#dbg_declare` by default (`-instcombine-lower-dbg-declare` is `cl::init(true)`): LowerDbgDeclare
+  (Local.cpp) for scalar, constant-size allocas without volatile accesses, then RemoveRedundantDbgInstrs on every block.
 - `#dbg_value` on a phi is invalid IR (`PHI Node must not have any attached DbgRecords`): an LLVM phi inserted
   before a block's records always uses a head-bit iterator.
 
 ## Salvaging (lib/Transforms/Utils/Local.cpp, lib/IR/DIExpressionOptimizer.cpp)
 
+- Who salvages: ADCE (every dead instruction, reverse order, before dropAllReferences), BDCE (reverse worklist),
+  DCE, EarlyCSE, RecursivelyDeleteTriviallyDeadInstructions (so SimplifyCFG's dead conditions and InstSimplify),
+  InstCombine's eraseInstFromFunction and its prepareWorklist DCE, SimplifyDemandedBits/FPClass (the replaced
+  operand). Not: mem2reg, SROA, InstCombine's constant-folding in prepareWorklist, plain `eraseFromParent`.
+- `CastInst::isNoopCast` for ptrtoaddr compares the *pointer* size (getIntPtrType), like ptrtoint, not the index
+  size (Instructions.cpp:2860), so a ptrtoaddr to the address size of a `pe1:64:64:64:32` pointer is not salvaged.
 - salvageDebugInfoForDbgValues `break`s out of the loop over users at the first user it can't salvage; only if
   nothing was salvaged are all users killed (poison). Casts other than trunc/zext/sext/inttoptr/ptrtoint (and
   no-op casts, which salvage to the operand) are not salvaged; loads never are.
@@ -66,4 +104,7 @@ the oracle unless noted).
   constant pairs and commutative chains, and turns `constu 0` into `lit0` and `constu C, plus` back into
   `plus_uconst C`.
 - RemoveRedundantDbgInstrs' backward scan resets its seen-set at every instruction (records attached to one
-  instruction are one "sequence"); the forward scan keys on (variable, inlinedAt) without fragment.
+  instruction are one "sequence") and keys on (variable, fragment, inlinedAt), declares included; the forward scan
+  skips declares and keys on (variable, inlinedAt) without fragment, comparing the list of location values (a
+  one-element DIArgList equals the plain value) and the expression. `redundant-dbg-inst-elim` (DCE.cpp) runs it on
+  every block and preserves the CFG.

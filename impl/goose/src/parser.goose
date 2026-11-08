@@ -3019,6 +3019,7 @@ fn parse_module(path: const u8[:]) {
     upgrade_module_intrinsics();
     upgrade_debug_info();
     upgrade_module_flags();
+    dbg_track_module(cur_module);
 }
 
 
