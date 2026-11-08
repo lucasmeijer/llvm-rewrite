@@ -415,7 +415,11 @@ upgrade_intrinsic_call :: (ci: Value_Id, new_fn: Value_Id) {
     if new_fn == NONE {
         name := vname(f);
         consume_front(*name, "llvm.");
-        if begins_with(name, "x86.") fatal("auto-upgrade of x86 intrinsic call '%' is not supported yet", vname(f));
+        if consume_front(*name, "x86.") {
+            rep := upgrade_x86_intrinsic_call(name, ci, *b);
+            replace_and_erase(ci, rep);
+            return;
+        }
         if consume_front(*name, "dbg.") {
             upgrade_dbg_intrinsic_to_record(name, ci);
             erase_inst(ci);
@@ -1058,4 +1062,179 @@ upgrade_module_flags :: () {
         array_add(*nm.ops, md_tuple(.[md_value(const_int(ir.t_i32, MOD_OVERRIDE)), md_string("Objective-C Class Properties"),
                                      md_value(const_int(ir.t_i32, 0))], false));
     }
+}
+
+// ---------------------------------------------------------------- IRBuilder with ConstantFolder (for x86 upgrades)
+
+builder_set_fmf :: (b: *Builder, i: Value_Id) {
+    if is_fp_math_type(vtype(i)) inst(i).flags = (inst(i).flags & ~(cast(u32) FMF_ALL << FMF_SHIFT)) | b.fmf;
+}
+
+builder_binop :: (b: *Builder, opc: Opcode, l: Value_Id, r: Value_Id, name := "") -> Value_Id {
+    if is_constant_kind(vkind(l)) && is_constant_kind(vkind(r)) {
+        f: Value_Id;
+        if is_desirable_bin_op(opc) f = ce_binop(opc, l, r, 0); else f = cf_binary(opc, l, r);
+        if f != NONE return f;
+    }
+    i := new_inst(opc, vtype(l), 2);
+    set_op(i, 0, l); set_op(i, 1, r);
+    builder_insert(b, i);
+    if opc == .FADD || opc == .FSUB || opc == .FMUL || opc == .FDIV || opc == .FREM builder_set_fmf(b, i);
+    if name.count set_name(i, name);
+    return i;
+}
+
+builder_extract_element :: (b: *Builder, v: Value_Id, idx: Value_Id) -> Value_Id {
+    if is_constant_kind(vkind(v)) && is_constant_kind(vkind(idx)) {
+        f := cf_extract_element(v, idx);
+        if f != NONE return f;
+    }
+    i := new_inst(.EXTRACTELEMENT, type_elem(vtype(v)), 2);
+    set_op(i, 0, v); set_op(i, 1, idx);
+    builder_insert(b, i);
+    return i;
+}
+
+builder_insert_element :: (b: *Builder, v: Value_Id, e: Value_Id, idx: Value_Id) -> Value_Id {
+    if is_constant_kind(vkind(v)) && is_constant_kind(vkind(e)) && is_constant_kind(vkind(idx)) {
+        f := cf_insert_element(v, e, idx);
+        if f != NONE return f;
+    }
+    i := new_inst(.INSERTELEMENT, vtype(v), 3);
+    set_op(i, 0, v); set_op(i, 1, e); set_op(i, 2, idx);
+    builder_insert(b, i);
+    return i;
+}
+
+builder_shuffle :: (b: *Builder, v1: Value_Id, v2: Value_Id, mask: [] u32) -> Value_Id {
+    if is_constant_kind(vkind(v1)) && is_constant_kind(vkind(v2)) {
+        f := cf_shuffle_vector(v1, v2, mask);
+        if f != NONE return f;
+    }
+    vt := vtype(v1);
+    rt := type_vector(cast(u64) mask.count, type_elem(vt), type_kind(vt) == .SVECTOR);
+    i := new_inst(.SHUFFLEVECTOR, rt, 2);
+    set_op(i, 0, v1); set_op(i, 1, v2);
+    r := inst(i);
+    r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) mask.count;
+    for mask array_add(*ir.u32_pool, it);
+    builder_insert(b, i);
+    return i;
+}
+
+builder_icmp :: (b: *Builder, pred: u8, l: Value_Id, r: Value_Id) -> Value_Id {
+    if is_constant_kind(vkind(l)) && is_constant_kind(vkind(r)) {
+        f := cf_compare(pred, l, r);
+        if f != NONE return f;
+    }
+    t := vtype(l);
+    rt := ifx is_vector_type(t) then vector_with_elt(t, ir.t_i1) else ir.t_i1;
+    i := new_inst(.ICMP, rt, 2);
+    inst(i).pred = pred;
+    set_op(i, 0, l); set_op(i, 1, r);
+    builder_insert(b, i);
+    return i;
+}
+
+// IRBuilder::CreateIntrinsic(ID, OverloadTys, Args)
+builder_intrinsic :: (b: *Builder, name: string, otys: [] Type_Id, args: [] Value_Id) -> Value_Id {
+    return builder_call(b, decl(name, otys), args);
+}
+
+// ---------------------------------------------------------------- upgradeX86IntrinsicCall (subset)
+
+// Returns the replacement value (NONE = none); fails loudly for unported x86 upgrades.
+upgrade_x86_intrinsic_call :: (name_in: string, ci: Value_Id, b: *Builder) -> Value_Id {
+    name := name_in;
+    na := call_nargs(ci);
+    a :: (i: u32) -> Value_Id #expand { return call_arg(`ci, i); }
+    if name == "sse.sqrt.ss" || name == "sse2.sqrt.sd" {
+        vec := a(0);
+        e0 := builder_extract_element(b, vec, const_int(ir.t_i64, 0));
+        e0 = builder_intrinsic(b, "llvm.sqrt", .[vtype(e0)], .[e0]);
+        return builder_insert_element(b, vec, e0, const_int(ir.t_i64, 0));
+    }
+    if name == "sse.add.ss" || name == "sse2.add.sd" || name == "sse.sub.ss" || name == "sse2.sub.sd" ||
+       name == "sse.mul.ss" || name == "sse2.mul.sd" || name == "sse.div.ss" || name == "sse2.div.sd" {
+        z := const_int(ir.t_i32, 0);
+        e0 := builder_extract_element(b, a(0), z);
+        e1 := builder_extract_element(b, a(1), z);
+        opc: Opcode;
+        if contains(name, ".add.") opc = .FADD;
+        else if contains(name, ".sub.") opc = .FSUB;
+        else if contains(name, ".mul.") opc = .FMUL;
+        else opc = .FDIV;
+        r := builder_binop(b, opc, e0, e1);
+        return builder_insert_element(b, a(0), r, z);
+    }
+    if name == "sse2.pmulu.dq" || name == "avx2.pmulu.dq" || name == "avx512.pmulu.dq.512" ||
+       name == "sse41.pmuldq" || name == "avx2.pmul.dq" || name == "avx512.pmul.dq.512" {
+        // upgradePMULDQ
+        signed := !contains(name, "pmulu");
+        ty := vtype(ci);
+        lhs := builder_cast(b, .BITCAST, a(0), ty);
+        rhs := builder_cast(b, .BITCAST, a(1), ty);
+        if signed {
+            sh := const_int(ty, 32);
+            lhs = builder_binop(b, .SHL, lhs, sh); lhs = builder_binop(b, .ASHR, lhs, sh);
+            rhs = builder_binop(b, .SHL, rhs, sh); rhs = builder_binop(b, .ASHR, rhs, sh);
+        } else {
+            m := const_int(ty, 0xffffffff);
+            lhs = builder_binop(b, .AND, lhs, m);
+            rhs = builder_binop(b, .AND, rhs, m);
+        }
+        if na == 4 fatal("auto-upgrade of masked x86 intrinsic '%' is not supported yet", name);
+        return builder_binop(b, .MUL, lhs, rhs);
+    }
+    if begins_with(name, "vcvtph2ps.") {
+        dt := vtype(ci);
+        rep := a(0);
+        st := vtype(rep);
+        n := type_count(dt);
+        if n != type_count(st) rep = builder_shuffle(b, rep, rep, .[0, 1, 2, 3]);
+        rep = builder_cast(b, .BITCAST, rep, type_vector(n, type_simple(.HALF), false));
+        rep = builder_cast(b, .FPEXT, rep, dt, "cvtph2ps");
+        if vkind(rep) == .INST builder_set_fmf(b, rep);
+        if na >= 3 fatal("auto-upgrade of masked x86 intrinsic '%' is not supported yet", name);
+        return rep;
+    }
+    if begins_with(name, "xop.vpcom") {
+        signed: bool;
+        if ends_with(name, "ub") || ends_with(name, "uw") || ends_with(name, "ud") || ends_with(name, "uq") signed = false;
+        else if ends_with(name, "b") || ends_with(name, "w") || ends_with(name, "d") || ends_with(name, "q") signed = true;
+        else fatal("Intrinsic has unknown suffix");
+        imm: u64;
+        if na == 3 imm = const_int_zext(a(2));
+        else {
+            s := slice(name, 9, name.count - 9);
+            if begins_with(s, "lt") imm = 0; else if begins_with(s, "le") imm = 1;
+            else if begins_with(s, "gt") imm = 2; else if begins_with(s, "ge") imm = 3;
+            else if begins_with(s, "eq") imm = 4; else if begins_with(s, "ne") imm = 5;
+            else if begins_with(s, "false") imm = 6; else if begins_with(s, "true") imm = 7;
+            else fatal("Unknown condition");
+        }
+        // upgradeX86vpcom
+        ty := vtype(ci);
+        pred: u8;
+        if imm == {
+            case 0; pred = ifx signed then cast(u8) ICMP_SLT else ICMP_ULT;
+            case 1; pred = ifx signed then cast(u8) ICMP_SLE else ICMP_ULE;
+            case 2; pred = ifx signed then cast(u8) ICMP_SGT else ICMP_UGT;
+            case 3; pred = ifx signed then cast(u8) ICMP_SGE else ICMP_UGE;
+            case 4; pred = ICMP_EQ;
+            case 5; pred = ICMP_NE;
+            case 6; return const_null_value(ty);
+            case 7; return cf_all_ones(ty);
+            case; fatal("Unknown XOP vpcom/vpcomu predicate");
+        }
+        c := builder_icmp(b, pred, a(0), a(1));
+        return builder_cast(b, .SEXT, c, ty);
+    }
+    if begins_with(name, "bmi.pdep.") || begins_with(name, "bmi.pext.") {
+        iid := ifx begins_with(name, "bmi.pdep.") then "llvm.pdep" else "llvm.pext";
+        if na == 4 fatal("auto-upgrade of masked x86 intrinsic '%' is not supported yet", name);
+        return builder_intrinsic(b, iid, .[vtype(ci)], .[a(0), a(1)]);
+    }
+    fatal("auto-upgrade of x86 intrinsic call 'llvm.x86.%' is not supported yet", name);
+    return NONE;
 }
