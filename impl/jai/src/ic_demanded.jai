@@ -518,7 +518,7 @@ ic_simplify_demanded_use_bits :: (i: Value_Id, demanded: APInt, known: *Known_Bi
             } else if id == IID_UMIN {
                 okc, c := pm_apint(op(i, 1));
                 if okc && ap_ctz(demanded) >= c.bits - ap_clo(c) return op(i, 0);
-            } else if ic_targets_x86() && begins_with(intrinsic_name(id), "llvm.x86.") {
+            } else if id != NOT_INTRINSIC && ic_targets_x86() && begins_with(intrinsic_name(id), "llvm.x86.") {
                 // targetSimplifyDemandedUseBitsIntrinsic (X86TTIImpl, ic_x86.jai)
                 v, handled := ic_x86_simplify_demanded_use_bits_intrinsic(i, demanded, known, *kcomputed);
                 if handled return v;
