@@ -1,6 +1,6 @@
 ---
 name: codegen
-description: Conventions and checklists for backend work (instruction selection, register allocation, frame lowering, x86-64 SysV ABI, assembly emission). Use for L1, L2 and L5 units.
+description: Conventions and checklists for backend work (instruction selection, register allocation, frame lowering, x86-64 SysV ABI, assembly emission). Use for L3, L4 and L5 units.
 ---
 
 # Backend work
@@ -36,10 +36,10 @@ quality only in L5, where it's measured.
 
 ## Lowering scope by layer
 
-- **L1 (-O0 input):** allocas, loads/stores, integer and FP arithmetic of every width (legalize i1/i8/i16/i128,
+- **L3 (-O0 input):** allocas, loads/stores, integer and FP arithmetic of every width (legalize i1/i8/i16/i128,
   x86_fp80), compares, branches, switch, calls (direct, indirect, varargs), GEP, casts, intrinsics clang emits at -O0
   (memcpy/memset/memmove, va_*, stacksave/restore, bit ops, overflow ops, fabs and friends), globals and constant
   expressions, TLS, atomics, indirectbr, setjmp/longjmp (returns_twice).
-- **L2 (-O2 input):** phis (and critical edges), select, vectors and shuffles (SSE2 baseline), more intrinsics (ctlz
+- **L4 (-O2 input):** phis (and critical edges), select, vectors and shuffles (SSE2 baseline), more intrinsics (ctlz
   with zero-undef flags, umin/smax, fshl, vector reductions), tail calls, `switch` lowering to jump tables or trees.
 - Unsupported constructs: exit nonzero with "unsupported: <what>". Never emit something that might be wrong.

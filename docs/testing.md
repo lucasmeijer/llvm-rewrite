@@ -44,7 +44,7 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/` and `imported/` are generated. Rege
 
 ```bash
 ./harness/run check --impl rust                          # everything; enforces the ratchet
-./harness/run check --impl rust --unit L1.calls          # a unit's exit tests; reports COMPLETE or not
+./harness/run check --impl rust --unit L1.sroa           # a unit's exit tests; reports COMPLETE or not
 ./harness/run check --impl rust 'tests/e2e/O0/calls/*'   # by glob (path or test ID; * matches /)
 ./harness/run check --impl rust --ratchet-only           # only tests already in passing.txt (fast)
 ./harness/run check --impl rust --update                 # record newly passing tests in passing.txt

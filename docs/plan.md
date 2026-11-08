@@ -34,9 +34,12 @@ different languages, all data-oriented, so they can be compared.
 8. **Corpus sources.** Agent-written C compiled to IR in three configurations (O0, O2, pre-pipeline), LLVM's own
    `llvm/test/Transforms` tests imported per pass, llvm-test-suite programs, and later fuzzing (Csmith/YARPGen) with
    reduction. C sources pass a UB guard before becoming tests.
-9. **Layers.** L0 IR core → L1 -O0 codegen → L2 codegen for optimized IR → L3 analyses and scalar/loop/vector passes
-   → L4 IPO, the full O2 pipeline, LTO → L5 backend optimization (measured against llc, not matched). Units with test
-   exit selectors are in `docs/roadmap.md`.
+9. **Layers, middle end first.** L0 IR core → L1 analyses and scalar/loop/vector passes, one pass at a time (plus
+   llc's IR-level passes) → L2 IPO, the full O2 pipeline, LTO (exact IR) → L3 -O0 codegen → L4 codegen for optimized
+   IR, then end-to-end runs of our opt + our llc → L5 backend optimization (measured against llc, not matched). The
+   IR → asm backend was moved after the optimizer (it was originally L1/L2) so that early work concentrates on
+   porting passes, which only need the IR core and exact-IR checks. Units with test exit selectors are in
+   `docs/roadmap.md`.
 10. **Coordination without GitHub features.** No PRs, issues or CI. Agents push to `main` when a unit of work is
     complete and locally verified (full ratchet green on the rebased tree). The loop that assigns work to agents is
     designed separately. The repo gives it `docs/roadmap.md` plus `./harness/run status` and `check --unit`.
@@ -48,8 +51,8 @@ different languages, all data-oriented, so they can be compared.
 
 ## Not decided yet (later lplan rounds)
 
-- Instruction-selection architecture for L2/L5 (SelectionDAG-like, GlobalISel-like, or our own).
-- Harness support for analysis-printer tests (`L3.harness-analysis`), multi-module LTO tests (`L4.lto`) and
+- Instruction-selection architecture for L3–L5 (SelectionDAG-like, GlobalISel-like, or our own).
+- Harness support for analysis-printer tests (`L1.harness-analysis`), multi-module LTO tests (`L2.lto`) and
   performance measurement (`L5.harness-perf`).
 - Fuzzing and automatic reduction (`llvm-reduce` with our tools as the interestingness test).
 - Alive2-based refinement checking for passes where we deliberately diverge.

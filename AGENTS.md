@@ -65,7 +65,7 @@ long as the full ratchet passes for your implementation. Never push a regression
 - **Fail loudly.** Unsupported IR or flags must produce a clear error and a nonzero exit, never wrong output.
 - **No new dependencies** without a note in the impl's `NOTES.md` explaining why. Never hand-edit generated
   files (`tests/**/O0|O2|pipeline/*.ll`, `tests/imported/**`); regenerate them with the harness instead.
-- Commit messages start with the area: `rust: L1.calls: …`, `zig: …`, `harness: …`, `tests: …`, `docs: …`.
+- Commit messages start with the area: `rust: L1.sroa: …`, `zig: …`, `harness: …`, `tests: …`, `docs: …`.
 
 ## Notes for later: three places
 
