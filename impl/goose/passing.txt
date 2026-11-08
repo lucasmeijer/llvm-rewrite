@@ -6889,12 +6889,15 @@ tests/imported/llvm/Transforms/SCCP/apint-basictest2.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-basictest2.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/apint-basictest3.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-basictest3.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/apint-basictest4.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-basictest4.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/apint-bigarray.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-bigarray.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/apint-bigint.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-bigint.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/apint-bigint2.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-bigint2.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/apint-ipsccp1.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-ipsccp1.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/apint-ipsccp2.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-ipsccp2.ll::roundtrip
@@ -6902,8 +6905,11 @@ tests/imported/llvm/Transforms/SCCP/apint-ipsccp3.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-ipsccp3.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/apint-ipsccp4.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-ipsccp4.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/apint-load.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-load.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/apint-phi.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-phi.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/apint-select.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-select.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/apint-xor.ll::opt
 tests/imported/llvm/Transforms/SCCP/apint-xor.ll::roundtrip
@@ -7024,6 +7030,7 @@ tests/imported/llvm/Transforms/SCCP/issue59602-assume-like-call-users.ll::roundt
 tests/imported/llvm/Transforms/SCCP/issue59661-missing-predicate-info-for-ssa-copy.ll::opt
 tests/imported/llvm/Transforms/SCCP/issue59661-missing-predicate-info-for-ssa-copy.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/landingpad.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/latticeval-invalidate.ll::opt
 tests/imported/llvm/Transforms/SCCP/latticeval-invalidate.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/lifetime.ll::opt
 tests/imported/llvm/Transforms/SCCP/lifetime.ll::roundtrip
@@ -7133,6 +7140,7 @@ tests/imported/llvm/Transforms/SCCP/thread_local_acs.ll::opt
 tests/imported/llvm/Transforms/SCCP/thread_local_acs.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/trunc-nuw-nsw-flags.ll::opt
 tests/imported/llvm/Transforms/SCCP/trunc-nuw-nsw-flags.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/ub-shift.ll::opt
 tests/imported/llvm/Transforms/SCCP/ub-shift.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/ubsan_overflow.ll::opt
 tests/imported/llvm/Transforms/SCCP/ubsan_overflow.ll::roundtrip
