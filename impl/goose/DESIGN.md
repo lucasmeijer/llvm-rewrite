@@ -46,12 +46,13 @@ Every LLVM `Value` (constant, global variable, function, alias, argument, basic 
 metadata-as-value) has an id in **`vals: Val[>..]`**:
 
 ```goose
-struct Val { kind: u8, ty: i32, sub: i32, name: i32, first_use: i32 }
+struct Val { kind: u8, flags: u8, ty: i32, sub: i32, name: i32, first_use: i32, ops: i32, nops: i32, cap: i32 }
 ```
 
 `kind` is the LLVM subclass (`ValueID` order), `ty` a type id, `sub` an index into the kind's own table
 (`insts`, `blocks`, `args`, `globals`, `consts`), `name` a string id (-1 = unnamed) and `first_use` the head of its
-use list. A single id space is what makes use lists, RAUW and per-value side tables uniform: any analysis can keep
+use list. `ops/nops/cap` is the value's operand run (every user kind: instructions, constants, globals with
+initializers/aliasees, functions with personality/prefix/prologue). A single id space is what makes use lists, RAUW and per-value side tables uniform: any analysis can keep
 `xs: T[>..]` indexed by value id.
 
 ### 2.2 Uses and operands: runs in one pool, intrusive use lists
@@ -69,9 +70,11 @@ A *user* (instruction or constant) owns a run `[ops_start, ops_start + ops_len)`
 - **ConstantData has no use list** in LLVM 23 (`Value::hasUseList()` is `!isa<ConstantData>`): ints, FP, null,
   undef, poison, zeroinitializer, data arrays/vectors. Uses of them are not linked (`next = prev = -1`); `users()` on
   them is an error, as it is in LLVM.
-- Growing a run (`phi.addIncoming`, `switch.addCase`) doubles the capacity: the run is copied to the end of the pool
-  and the neighbours' links (and `first_use` heads) are re-pointed at the moved `Use`s. The old run goes on a free
-  list per power-of-two capacity, so a pass that grows many phis does not grow the pool without bound. Removing an
+- Growing a run (`phi.addIncoming`, `switch.addCase`) copies it to a bigger run at the end of the pool. Today
+  (`add_op_slot`) the neighbours' links are re-pointed in place; LLVM's `growHungoffUses` instead re-`set`s each
+  copied use (pushing it at the head of its value's list) and then destroys the old ones, with capacity `n + n/2`
+  for PHIs and `3n` for switches. That has to be ported before passes depend on use-list order after PHI growth.
+  Old runs are leaked for now (a per-capacity free list is planned). Removing an
   operand (`phi.removeIncoming`) shifts the tail down *in LLVM's way* (it swaps/moves exactly like the C++ so that
   operand order matches).
 - PHI incoming blocks are **not** operands in LLVM (no uses on the block); they sit in `use_aux` beside the value's
@@ -81,22 +84,27 @@ A *user* (instruction or constant) owns a run `[ops_start, ops_start + ops_len)`
 ### 2.3 Instructions, blocks, functions: intrusive lists
 
 ```goose
-struct Inst  { op: u8, flags: u8, fmf: u8, sub8: u8, sub32: u32, val: i32, parent: i32,
-               prev: i32, next: i32, ops_start: i32, ops_len: i32, ops_cap: i32, extra: i32, md: i32 }
+struct Inst  { op: u8, flags: u8, fmf: u8, pred: u8, align: u8, ord: u8, ord2: u8, bits: u8,
+               val: i32, parent: i32, prev: i32, next: i32, ty2: i32, attrs: i32, cc: i32,
+               aux: i32, naux: i32, md: i32, nmd: i32, ss: i32, as_: i32 }
 struct Block { val: i32, parent: i32, prev: i32, next: i32, first: i32, last: i32 }
-struct Func  { val: i32, first_block: i32, last_block: i32, args_start: i32, nargs: i32, attrs: i32, ... }
+struct Glob  { val: i32, module: i32, prev: i32, next: i32, linkage: u8, ..., vty: i32, attrs: i32,
+               first_block: i32, last_block: i32, args: i32, nargs: i32, md: i32, nmd: i32, symtab: i32, ... }
 ```
+
+(One `Glob` record serves functions, variables, aliases and ifuncs; the instruction record is one flat struct with
+opcode-specific meanings for `pred`, `bits`, `ty2`, `aux` rather than a separate cold table.)
 
 Instructions are in a doubly linked list per block, blocks in a doubly linked list per function, globals and
 functions in per-module lists. Insertion, erase, splitting a block and moving instructions are O(1) relinks, so every
 LLVM mutation API (`insertBefore`, `moveBefore`, `splitBasicBlock`, `eraseFromParent`, `splice`) ports one to one
-and keeps LLVM's order. `extra` points at an opcode-specific cold record (GEP source type, alloca type, call function
-type + calling convention + attribute list + bundles, load/store alignment and atomic ordering, …). `flags` is the
-poison-generating flag byte (`nuw nsw exact disjoint nneg samesign inbounds…`), `fmf` the fast-math byte, `sub8` /
-`sub32` hold predicates, alignment exponents, tail-call kinds and similar "subclass data".
+and keeps LLVM's order. Opcode-specific fields: `ty2` is the GEP source type / alloca type / call function type, `aux/naux` a run in
+`ints` (extractvalue indices, shuffle mask), `pred` the cmp predicate / atomicrmw op / tail-call kind, `align`
+log2+1, `ord`/`ord2` atomic orderings, `bits` volatile/weak/inalloca. `flags` is the poison-generating flag byte
+(`nuw nsw exact disjoint nneg samesign`, or GEP `inbounds nusw nuw`), `fmf` the fast-math byte.
 
-**Erasing** unlinks the record, drops its operands (unlinking each `Use`), marks `vals[v].kind = DEAD`, and pushes the
-id on a free list that `new_inst` reuses. Ids are therefore *not* stable across an erase: a pass that wants to
+**Erasing** unlinks the record, drops its operands (unlinking each `Use`) and marks `vals[v].kind = DEAD`. Ids are
+not reused yet; when a free list is added, ids will *not* be stable across an erase: a pass that wants to
 remember an erased instruction must not keep its id (LLVM's `WeakVH` semantics, see §5).
 
 ### 2.4 Types, constants, strings, metadata, attributes: interned, append-only

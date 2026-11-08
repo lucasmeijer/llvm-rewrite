@@ -69,3 +69,38 @@ Facts needed to make a parse+print round trip byte-identical. Sources: `llvm/lib
   string half-up, so it is not `printf("%.6e")`; port `AdjustToPrecision` both steps.
 - Decimal literals are converted directly to the target type (one rounding); old-style `0x` hex literals are a
   double bit pattern that is converted to `half`/`bfloat`/`float` and must be exact.
+
+## More parser/printer facts (verified in impl/goose)
+
+- **Numbered values may skip numbers.** `NumberedValues` only requires each new `%N` / `N:` / `@N` to be >= the next
+  free number (`LLParser::checkValueID`: "expected to be numbered '%N' or greater"); `%0, %1, %3` is valid and the
+  printer renumbers densely. tests/imported/llvm/Analysis/LoopAccessAnalysis/evaluate-at-symbolic-max-backedge-taken-count-may-wrap.ll.
+- **Unknown attribute groups are ignored**: a `#N` with no `attributes #N = {...}` merges nothing
+  (`validateEndOfModule` looks it up with `find`). An `align=N` inside a function's group becomes the function's
+  alignment (`align N` after the signature), not an attribute.
+- **`declare` takes its metadata attachments right after the keyword** (`declare !dbg !1 void @f()`), `define` after
+  the signature; the printer mirrors this.
+- **Undeclared `llvm.*` callees** are declared at the end of parsing in *name order* (`ForwardRefVals` is a
+  `std::map`), appended to the function list, each use re-pointed in use-list order.
+- **opt infers the data layout from the triple** when the IR has none (`optdriver.cpp` `SetDataLayout` →
+  `Triple::computeDataLayout`, `lib/TargetParser/TargetDataLayout.cpp`): `target triple = "x86_64-unknown-linux-gnu"`
+  alone prints `target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"`,
+  macOS gets `-m:o`, `i386` linux `e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-i128:128-f64:32:64-f80:32-n8:16:32-S128`.
+  It also changes default alignments of `load`/`store`/`alloca` without `align`.
+- **A uniqued node that refers to itself** (`!1 = !{!1, !2}`) cannot be uniqued and prints as `distinct !{...}`
+  (tests/imported/llvm/Analysis/ScopedNoAliasAA/basic-domains.ll).
+- **C comments**: the printer writes `/* (nan) */` before the class-mask argument of `llvm.is.fpclass` calls
+  (`Intrinsic::printImmArg`, the only x86-relevant `ArgInfo<..., [ImmArgPrinter]>` in `Intrinsics.td`), so the lexer
+  must skip `/* ... */`. tests/e2e/O0/float/float_compare.ll.
+- **Operand order** (it decides use-list order): `CondBr` = [cond, true dest, false dest] (LLVM 23 splits `br` into
+  `UncondBr`/`CondBr` opcodes 2 and 3); `switch` = [cond, default, (value, dest)*]; `call` = [args..., bundle
+  inputs..., callee]; PHI incoming blocks are *not* operands (no block uses), so `; preds` never counts PHIs.
+- **ConstantData has no use list** in LLVM 23 (`Value::hasUseList()` is `!isa<ConstantData>`): ints, FP, null,
+  undef/poison, zeroinitializer, data arrays/vectors never record users.
+- **Growing a PHI or switch** (`User::growHungoffUses`) copies each `Use` with `Use::operator=`, i.e. `set()`, which
+  pushes the new use at the head of its value's list in operand order, then destroys the old ones. Capacity grows
+  to `n + n/2` (min 2) for PHIs and `n * 3` for switches. Only matters to passes (the parser reserves exactly).
+- **Not yet handled anywhere we know of, seen in imported tests**: constant expressions are folded when created
+  (`getelementptr inbounds ([16 x i32], ptr @a, i32 0, i64 0)` prints as `@a`; `ConstantFold.cpp`); the
+  `"PIC Level"` module flag's behavior is upgraded from 7 to 8; `llvm.lifetime.start/end` calls lose their size
+  argument (AutoUpgrade).
