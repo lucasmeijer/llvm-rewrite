@@ -447,3 +447,69 @@ errno or an FP exception other than inexact is raised. Goose calls C through `ex
 through a volatile function pointer so the C compiler can't reorder it around `fetestexcept`. LLVM's opt links the
 same glibc libm, so the results are bit-identical. Only `opt` links it; a new root file that imports cfold.goose
 needs the same `.build` sidecar.
+
+## 12. InstCombine (ic*.goose)
+
+A port of `lib/Transforms/InstCombine`. All files are in `namespace ic;` (so helper names like `has_nsw` or
+`opcode_name` can't collide with the global ones); the pass manager calls `ic::instcombine_run(fv, verify_fixpoint,
+max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
+
+| File | Port of |
+| --- | --- |
+| `ic.goose` | InstructionCombining.cpp: `InstructionWorklist` (`icw_*`), `run()`, `prepareWorklist`, `combineInstructionsOverFunction` + `InstCombinePass::run` (fixpoint loop, verify-fixpoint error, LastRunTracking `ic_lrt_*`), the InstCombiner helpers (`ic_replace_inst_uses_with`, `ic_replace_operand`, `ic_replace_use`, `ic_erase`, `ic_insert_new_before/with`, `ic_take_name`), dead blocks/edges, sinking, the opcode dispatch `ic_visit`, the terminator visitors |
+| `ic_builder.goose` | `IRBuilder<TargetFolder, IRBuilderInstCombineInserter>`: `icb_*` create-or-fold functions; `ic_new_*` create unattached instructions (BinaryOperator::Create & co.) |
+| `ic_common.goose` | the binop helpers of InstructionCombining.cpp (reassociation, distributive laws, folding into selects/phis, getFreelyInverted, ...) and small PatternMatch-style matchers (`bo`, `m_zext`, `m_add_like`, ...) |
+| `ic_addsub.goose`, `ic_muldivrem.goose`, `ic_shifts.goose`, `ic_casts.goose` | InstCombineAddSub / MulDivRem / Shifts / Casts (integer parts) |
+| `ic_negator.goose` | InstCombineNegator.cpp |
+| `ic_demanded.goose` | SimplifyDemandedBits (integer part of InstCombineSimplifyDemanded.cpp) |
+| `ic_visit_misc.goose` | calls (`visitCallInst`/`visitCallBase` for ordinary functions, `llvm.assume`), and the fail-loudly fallback for every visitor that isn't ported |
+| `domcond.goose` (global) | DomConditionCache; ValueTracking consults it (knownbits, pow2, non-equal, fpclass) while `dc_active` |
+| `overflow.goose` (global) | computeOverflowFor*, haveNoCommonBitsSet |
+
+### 12.1 Conventions
+
+- **A visitor returns an instruction id**: `-1` = nullptr (no change), the visited instruction itself = "modified
+  in place" (run() re-queues it and its users), or a *new unattached* instruction that replaces it (run() does
+  RAUW, `takeName`, inserts it at the old position and erases the old one). `ic_replace_inst_uses_with(i, v)`
+  returns `i` (as LLVM's `replaceInstUsesWith` returns `&I`), `ic_erase` returns -1.
+- **Names.** An unattached instruction may carry a name (`set_name` on it just stores the string); it is
+  registered and uniqued in the function's symbol table when it is inserted (`ic_register_name`). `icb_*(..., name)`
+  inserts first and names after (IRBuilder semantics: `x` taken -> `x1`). `ic_take_name(dst, src)` is
+  `Value::takeName`. Copy names into a local buffer before passing them on (`val_name` is a slice of the
+  string pool that `set_name` may grow).
+- **Builder state** is global: `icb_pos/icb_bb/icb_dl/icb_fmf`. run() sets it to the visited instruction
+  (`icb_set_insert_point`). An `IRBuilderBase::InsertPointGuard` is a save/restore of those three globals.
+  `icb_insert` adds new instructions to the *deferred* worklist (`IRBuilderInstCombineInserter`), except while
+  the Negator runs (`ng_active`: they are recorded and added after a successful negation).
+- **TargetFolder**: `tf_binop` = `ConstantExpr::get` + `ConstantFoldConstant` for add/sub/xor, else
+  `ConstantFoldBinaryOpOperands`; casts through `cf_fold_cast_operand`; intrinsics through `tf_intrinsic`.
+- **The SimplifyQuery** is `sq_at(i)` for InstSimplify calls and `kb_cxt = i` for ValueTracking calls (set it
+  right before every `kb_compute_all` / `is_known_*` / `num_sign_bits` / `masked_value_is_zero` call: other
+  calls overwrite it). InstCombine's SimplifyQuery has a DomConditionCache: `dc_active` is set for the
+  duration of one InstCombinerImpl (one iteration); `visit_cond_br` registers branches (`dc_register_branch`),
+  `ic_erase` calls `dc_remove_value`. Code that asks for `getWithoutDomCondCache()` saves/clears `dc_active`.
+- **Matching.** `BinaryOp_match`/`CastInst_match` (m_Add, m_ZExt, ...) match *instructions only* in LLVM 23;
+  `m_PtrToInt`, `m_BitCast`, `m_IntToPtr` also match constant expressions (`is_op`). `m_OneUse` is `one_use(v)`
+  (false for ConstantData). Commutative patterns are a `for k in 2` over the operand order LLVM tries first.
+  Partial matches bind values in LLVM (`m_Value(X)` inside a failing pattern still assigns X): where a later
+  check depends on that, the port says so.
+- **Recursive helpers** (getFreelyInverted, Negator, takeLog2, SimplifyDemandedBits, canEvaluateShifted,
+  EvaluateInDifferentType) are `recursive fn` with fixed-size locals only; their output parameters are extra
+  return values (`-> i32, KB`) or globals saved/restored around the recursive call (`gfi_consume`).
+
+### 12.2 How to add a fold or a visitor
+
+1. Find the LLVM function (e.g. `InstCombinerImpl::visitAnd` in InstCombineAndOrXor.cpp) and port it top to bottom
+   into the matching `ic_*.goose` file (`fn visit_and(i: i32) -> i32`), keeping LLVM's order of folds: the first
+   fold that fires wins, so order is behaviour.
+2. Register a new visitor in the `match` of `ic_visit` (ic.goose) and remove its opcode from the fail-loudly
+   fallback (it is the `_` arm, `ic_visit_other`).
+3. A sub-fold you don't port must not silently do nothing: test its distinctive precondition and call
+   `ic_not_ported("<LLVM function name>")` (see `fold_vector_binop`, `narrow_binop`
+   `canonicalize_cond_signext_of_high_bit_extract`). Keep the guard as narrow as the pattern, or it blocks unrelated tests.
+4. Create IR with `icb_*` (inserted, folded, named) or `ic_new_*` (unattached, for a visitor's return value);
+   set flags with `set_nsw/set_nuw/set_exact/set_disjoint/set_nneg`. Use `ic_replace_operand` / `ic_replace_use`
+   (not `set_op`) where LLVM uses replaceOperand/replaceUse, so the worklist sees the use-count change.
+5. Run `tools/ic_failures.py [globs]` after a `check` to see the first blocker of every failing test, and
+   `opt -goose-ic-lenient` (development only: unported visitors do nothing instead of failing) to see which tests
+   would pass if only the unported visitors were missing.

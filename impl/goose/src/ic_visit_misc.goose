@@ -14,6 +14,8 @@ import intrinsics;
 import pm;
 import vt;
 import tli;
+import gen_tli;
+import datalayout;
 import local;
 import instsimplify;
 import ic;
@@ -131,9 +133,17 @@ fn visit_call_base(ci: i32) -> i32 {
     if cf >= 0 {
         if call_has_fn_attr(ci, AK_Convergent) { ic_not_ported("convergent calls"); }
         if insts[inst_of(ci)].cc != globs[glob_of(cf)].cc { ic_not_ported("calls with a mismatched calling convention"); }
-        if tli_get_libfunc(cf) >= 0 { ic_not_ported("LibCallSimplifier (tryOptimizeCall)"); }
+        if ic_maybe_libcall(cf) { ic_not_ported("LibCallSimplifier (tryOptimizeCall)"); }
+    }
+    if vals[callee].kind == VK_INLINEASM && !call_has_fn_attr(ci, AK_NoUnwind) {
+        // InlineAsm::canThrow: the 'unwind' flag
+        if asms[vals[callee].sub].unwind == 0 { ic_call_set_does_not_throw(ci); changed = true; }
     }
     if !use_empty(ci) && returned_arg_operand(ci) >= 0 { ic_not_ported("calls with a 'returned' argument"); }
+    // drop !callee_type from calls that are direct (CallBase::isIndirectCall)
+    let indirect = !is_constant(callee) && vals[callee].kind != VK_INLINEASM;
+    let kct = md_kind_id("callee_type");
+    if inst_get_md(ci, kct) >= 0 && !indirect { inst_erase_md(ci, kct); changed = true; }
     if cb_nbundles(ci) > 0 { ic_not_ported("calls with operand bundles in visitCallBase"); }
     return if changed { ci } else { -1 };
 }
@@ -218,4 +228,18 @@ fn visit_assume(ii: i32) -> i32 {
 fn icb_assumption(c: i32) -> i32 {
     let call = ic_new_intrinsic(IID_assume, [], [c]);
     return icb_insert(call, "");
+}
+
+// Could LibCallSimplifier::optimizeCall recognize this callee? TLI->getLibFunc (tli_get_libfunc), or a TLI name
+// whose prototype tli.goose can't check (the manually checked prototypes such as cabs are reported as not
+// matching there).
+fn ic_maybe_libcall(f: i32) -> bool {
+    if tli_get_libfunc(f) >= 0 { return true; }
+    if globs[glob_of(f)].intrinsic != 0 || vals[f].name < 0 { return false; }
+    var nm = sbytes(vals[f].name);
+    if nm.len > 0 && nm[0] == 1 { nm = nm[1..]; }
+    if nm.len == 0 { return false; }
+    let lf = tli_lookup_name(nm);
+    if lf < 0 { return false; }
+    return TLI_SIGS[lf][0] == '?' || starts_with(nm, "__size_returning_new");
 }

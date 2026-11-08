@@ -53,17 +53,25 @@ fn can_try_to_constant_add_two_shift_amounts(sh0: i32, a0: i32, sh1: i32, a1: i3
     return ap_uge_u64(ap_ones(rw), maxtot as u64);
 }
 
-// m_SpecificInt_ICMP(Pred, APInt(W, x)) over a constant (scalar, splat or fixed vector, poison elements fail)
+// m_SpecificInt_ICMP(Pred, APInt(W, x)): cst_pred_ty with AllowPoison (scalar, splat, or a fixed vector whose
+// non-poison elements all satisfy it; at least one)
 fn c_all_elts_cmp(c: i32, p: i64, x: u64) -> bool {
     let w = ty_sbits(c);
     let xv = ap_u64(x, w);
-    if has_apint(c) { return ic_icmp_ap(p, ap_c(c), xv); }
+    if vals[c].kind == VK_CINT { return ic_icmp_ap(p, ap_c(c), xv); }
+    if !ty_is_vector(vals[c].ty) || !is_constant(c) { return false; }
+    let s = splat_value(c, false);
+    if s >= 0 && vals[s].kind == VK_CINT { return ic_icmp_ap(p, ci_ap(s), xv); }
     if ty_kind(vals[c].ty) != TK_FVEC { return false; }
+    var has = false;
     for k in ty_count(vals[c].ty) {
         let e = agg_elem(c, k);
-        if e < 0 || vals[e].kind != VK_CINT || !ic_icmp_ap(p, ci_ap(e), xv) { return false; }
+        if e < 0 { return false; }
+        if vals[e].kind == VK_POISON { continue; }
+        if vals[e].kind != VK_CINT || !ic_icmp_ap(p, ci_ap(e), xv) { return false; }
+        has = true;
     }
-    return true;
+    return has;
 }
 fn ic_icmp_ap(p: i64, a: AP, b: AP) -> bool {
     match p {

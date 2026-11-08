@@ -23,6 +23,7 @@ import ic_builder;
 import ic_common;
 import ic_negator;
 import ic_demanded;
+import ic_shifts;
 
 // ---------------------------------------------------------------------------------------------
 // visitAdd helpers
@@ -1011,15 +1012,7 @@ fn fold_binop_of_displaced_shifts(i: i32) -> i32 {
     return -1;
 }
 // m_SpecificInt_ICMP(ICMP_ULT, x): every element (splat or vector) u< x
-fn ic_all_elts_ult(c: i32, x: u64) -> bool {
-    if has_apint(c) { return ap_ult_u64(ap_c(c), x); }
-    if !ty_is_vector(vals[c].ty) || ty_kind(vals[c].ty) != TK_FVEC { return false; }
-    for k in ty_count(vals[c].ty) {
-        let e = agg_elem(c, k);
-        if e < 0 || vals[e].kind != VK_CINT || !ap_ult_u64(ci_ap(e), x) { return false; }
-    }
-    return true;
-}
+fn ic_all_elts_ult(c: i32, x: u64) -> bool { c_all_elts_cmp(c, 36, x) }
 
 // ---------------------------------------------------------------------------------------------
 // visitSub

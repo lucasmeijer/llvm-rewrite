@@ -6,6 +6,7 @@ import std;
 import binary;
 import math;
 import ir;
+import datalayout;
 import irutil;
 import calls;
 import gen_tli;
@@ -101,6 +102,8 @@ fn tli_lookup_name(name: const u8[:]) -> i32 {
 
 let TLI_INT_BITS = 32;
 let TLI_SIZET_BITS = 64;
+// TargetLibraryInfoImpl::getSizeTSize(M): the index size of address space 0
+fn tli_sizet_bits() -> i64 { dl_ptr(0).idx }
 
 fn tli_match_type(c: u8, t: i32) -> bool {
     let k = ty_kind(t);
@@ -115,7 +118,7 @@ fn tli_match_type(c: u8, t: i32) -> bool {
         'I', 'l' => isint && bits >= TLI_INT_BITS,
         'x' => isint,
         'q', 'L' => isint && bits == 64,
-        'z', 'Z' => isint && bits == TLI_SIZET_BITS,
+        'z', 'Z' => isint && bits == tli_sizet_bits(),
         'f' => k == TK_FLOAT,
         'd' => k == TK_DOUBLE,
         'D', 'F' => ty_is_fp(t),

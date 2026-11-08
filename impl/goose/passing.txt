@@ -3643,6 +3643,7 @@ tests/imported/llvm/Transforms/InstCombine/2007-10-31-RangeCrash.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2007-11-15-CompareMiscomp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2007-11-25-CompatibleAttributes.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2007-12-12-GEPScale.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/2007-12-16-AsmNoUnwind.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2007-12-16-AsmNoUnwind.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2007-12-18-AddSelCmpSub.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2007-12-28-IcmpSub2.ll::opt
@@ -4118,6 +4119,7 @@ tests/imported/llvm/Transforms/InstCombine/div.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/divceil.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/dont-distribute-phi.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/double-float-shrink-1.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/drop-callee-type-metadata.ll::opt
 tests/imported/llvm/Transforms/InstCombine/drop-callee-type-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/early_constfold_changes_IR.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/early_dce_clobbers_callgraph.ll::roundtrip
@@ -4897,7 +4899,9 @@ tests/imported/llvm/Transforms/InstCombine/shift-add.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/shift-amount-reassociation-in-bittest-with-truncation-lshr.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/shift-amount-reassociation-in-bittest-with-truncation-shl.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/shift-amount-reassociation-in-bittest.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/shift-amount-reassociation-with-truncation-ashr.ll::opt
 tests/imported/llvm/Transforms/InstCombine/shift-amount-reassociation-with-truncation-ashr.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/shift-amount-reassociation-with-truncation-lshr.ll::opt
 tests/imported/llvm/Transforms/InstCombine/shift-amount-reassociation-with-truncation-lshr.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/shift-amount-reassociation-with-truncation-shl.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/shift-amount-reassociation.ll::roundtrip
