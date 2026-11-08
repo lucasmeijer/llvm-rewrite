@@ -534,9 +534,80 @@ recursive fn sd_use_bits(i: i32, demanded: AP, depth: i64) -> i32, KB {
                 return ic_insert_new_with(nv, i), known;
             }
         } else if id == IID_ptrmask {
-            ic_not_ported("SimplifyDemandedBits of llvm.ptrmask");
+            let mw = ty_scalar_bits(vals[op(i, 1)].ty);
+            let c0, lk = sd_bits(i, 0, demanded, depth + 1);
+            if c0 { return i, known; }
+            let c1, rk0 = sd_bits(i, 1, ap_zext_or_trunc(ap_and(demanded, ap_not(lk.z)), mw), depth + 1);
+            if c1 { return i, known; }
+            let rk = kb_anyext_or_trunc(rk0, w);
+            known = kb_and(lk, rk);
+            computed = true;
+            if ap_is_subset_of(demanded, known.z) && !m_zero(op(i, 1)) {
+                ic_replace_operand(i, 1, c_null(vals[op(i, 1)].ty));
+                return i, known;
+            }
+            if ap_is_subset_of(demanded, ap_or(rk.o, lk.z)) { return op(i, 0), known; }
+            if shrink_demanded_constant(i, 1, ap_zext_or_trunc(ap_and(demanded, ap_not(lk.z)), mw)) { return i, known; }
+            // (ptrmask (getelementptr i8, ptr p, imm i), imm mask)
+            let g = op(i, 0);
+            let gm = op(i, 1);
+            if sd_is_ptr_add(g) && m_constant_int(op(g, 1)) >= 0 && ty_bits(vals[op(g, 1)].ty) <= 64 &&
+               m_constant_int(gm) >= 0 && ty_bits(vals[gm].ty) <= 64 {
+                let inner = op(g, 0);
+                let gidx = ap_zext64(ci_ap(op(g, 1)));
+                let pmi = ap_zext64(ci_ap(gm));
+                kb_cxt = i;
+                let lk2 = kb_compute_all(inner, depth + 1);
+                if !kb_is_zero_known(lk2) {
+                    let tz = kb_min_tz(lk2);
+                    let pab: u64 = if tz >= 64 { 0xFFFFFFFFFFFFFFFF } else { ((1 as u64) << tz as u64) - 1 };
+                    let hb = gidx & ~pab;
+                    let ml = gidx & pab & pmi;
+                    let mg = hb | ml;
+                    if mg != gidx {
+                        icb_set_insert_point(i);
+                        let ity = dl_index_type(vals[inner].ty);
+                        var gnm: u8[>..] = [];
+                        gnm.append(val_name(g));
+                        let ng = icb_gep(gep_src_ty(g), inner, [c_int_ty(ity, mg)], gnm, if (op_flags(g) & GEP_INBOUNDS) != 0 { GEP_INBOUNDS | GEP_NUSW } else { 0 });
+                        ic_replace_operand(i, 0, ng);
+                        return i, known;
+                    }
+                }
+            }
         } else if id == IID_fshl || id == IID_fshr {
-            if has_apint(op(i, 2)) { ic_not_ported("SimplifyDemandedBits of funnel shifts"); }
+            if has_apint(op(i, 2)) {
+                var sh = ap_zext64(ap_urem(ap_c(op(i, 2)), ap_u64(w as u64, ap_c(op(i, 2)).w as i64))) as i64;
+                if id == IID_fshr { sh = w - sh; }
+                let dl = ap_lshr(demanded, sh);
+                let dr = ap_shl(demanded, w - sh);
+                var lk = kb_unknown(w);
+                var rk = kb_unknown(w);
+                if op(i, 0) != op(i, 1) {
+                    let c0, k0 = sd_bits(i, 0, dl, depth + 1);
+                    if c0 { drop_poison_generating_annotations(i); return i, known; }
+                    let c1, k1 = sd_bits(i, 1, dr, depth + 1);
+                    if c1 { drop_poison_generating_annotations(i); return i, known; }
+                    lk = k0; rk = k1;
+                } else {
+                    kb_cxt = i;
+                    lk = kb_compute_all(op(i, 0), depth + 1);
+                    if ap_is_subset_of(dl, ap_or(lk.z, lk.o)) && !m_specific_int_apv(op(i, 0), lk.o) {
+                        ic_replace_operand(i, 0, c_int_value(vty, lk.o));
+                        return i, known;
+                    }
+                    kb_cxt = i;
+                    rk = kb_compute_all(op(i, 1), depth + 1);
+                    if ap_is_subset_of(dr, ap_or(rk.z, rk.o)) && !m_specific_int_apv(op(i, 1), rk.o) {
+                        ic_replace_operand(i, 1, c_int_value(vty, rk.o));
+                        return i, known;
+                    }
+                }
+                lk = KB { z: ap_shl(lk.z, sh), o: ap_shl(lk.o, sh) };
+                rk = KB { z: ap_lshr(rk.z, w - sh), o: ap_lshr(rk.o, w - sh) };
+                known = kb_union(lk, rk);
+                computed = true;
+            }
         } else if id == IID_umax {
             let ctz = ap_countr_zero(demanded);
             if has_apint(op(i, 1)) && ctz >= ap_active_bits(ap_c(op(i, 1))) { return op(i, 0), known; }
@@ -737,4 +808,12 @@ fn simplify_shift_selecting_packed_element(i: i32, demanded: AP, depth: i64) -> 
     icb_pos = sp; icb_bb = sb; icb_dl = sd;
     ic_take_name(sel, i);
     return sel;
+}
+
+// m_PtrAdd: a GEP (instruction or constant expression) with source element type i8 and one index
+fn sd_is_ptr_add(g: i32) -> bool {
+    if !(is_inst_op(g, OP_GEP) || (vals[g].kind == VK_CEXPR && csts[vals[g].sub].op as i64 == OP_GEP)) { return false; }
+    if nops(g) != 2 { return false; }
+    let st = gep_src_ty(g);
+    return ty_is_int(st) && ty_bits(st) == 8;
 }

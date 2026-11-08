@@ -47,6 +47,9 @@ import ic_compares;
 import ic_andorxor;
 import ic_demanded;
 import ic_visit_misc;
+import ic_calls;
+import ic_casts2;
+import ic_x86;
 import ic_select;
 import ic_phi;
 import ic_loadstorealloca;
@@ -756,6 +759,21 @@ fn ic_visit(i: i32) -> i32 {
         OP_INSERTELEMENT => { return visit_insert_element(i); },
         OP_SHUFFLEVECTOR => { return visit_shuffle_vector(i); },
         OP_UNREACHABLE => { ic_remove_insts_before_unreachable(i); return -1; },
+        OP_CALL => { if call_iid(i) == IID_va_end { return visit_va_end(i); } return visit_call(i); },
+        OP_INVOKE => { return visit_invoke(i); },
+        OP_CALLBR => { return visit_callbr(i); },
+        OP_FENCE => { return visit_fence(i); },
+        OP_FPTRUNC => { return visit_fptrunc(i); },
+        OP_FPEXT => { return visit_fpext(i); },
+        OP_FPTOUI => { return visit_fptoui(i); },
+        OP_FPTOSI => { return visit_fptosi(i); },
+        OP_UITOFP => { return visit_uitofp(i); },
+        OP_SITOFP => { return visit_sitofp(i); },
+        OP_INTTOPTR => { return visit_inttoptr(i); },
+        OP_PTRTOINT => { return visit_ptrtoint(i); },
+        OP_PTRTOADDR => { return visit_ptrtoaddr(i); },
+        OP_BITCAST => { return visit_bitcast(i); },
+        OP_ADDRSPACECAST => { return visit_addrspacecast(i); },
         _ => { return ic_visit_other(i); },
     }
 }

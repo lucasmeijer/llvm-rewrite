@@ -547,8 +547,10 @@ fn visit_trunc(tr: i32) -> i32 {
     }
     var rr = narrow_binop(tr);
     if rr >= 0 { return rr; }
-    if one_use(src) && is_inst_op(src, OP_SHUFFLEVECTOR) { ic_not_ported("shrinkSplatShuffle"); }
-    if one_use(src) && is_inst_op(src, OP_INSERTELEMENT) && is_poison(op(src, 0)) { ic_not_ported("shrinkInsertElt"); }
+    let ss = shrink_splat_shuffle(tr);
+    if ss >= 0 { return ss; }
+    let se = shrink_insert_elt(tr);
+    if se >= 0 { return se; }
     if one_use(src) && (ty_is_vector(st) || should_change_type(st, dt)) {
         if bo(src, OP_SHL) && is_const(op(src, 1)) && !(is_shr_inst(op(src, 0)) && is_const(op(op(src, 0), 1))) {
             let a = op(src, 0);
@@ -927,4 +929,33 @@ fn can_be_casted_exactly_int_to_fp(v: i32, fpty: i32, signed: bool, cx: i32) -> 
         if s2 <= dsig { return true; }
     }
     return false;
+}
+
+// shrinkSplatShuffle(Trunc, Builder)
+fn shrink_splat_shuffle(tr: i32) -> i32 {
+    let sh = op(tr, 0);
+    if !(one_use(sh) && is_inst_op(sh, OP_SHUFFLEVECTOR) && is_poison(op(sh, 1))) { return -1; }
+    let n = insts[inst_of(sh)].naux as i64;
+    let mb = insts[inst_of(sh)].aux as i64;
+    for k in n { if ints[mb + k] != ints[mb] { return -1; } }
+    let sv = op(sh, 0);
+    let st = vals[sh].ty;
+    let vt = vals[sv].ty;
+    // ElementCount::isKnownGE
+    let ss = ty_kind(st) == TK_SVEC;
+    let vs = ty_kind(vt) == TK_SVEC;
+    if !(ty_count(st) >= ty_count(vt) && (ss || !vs)) { return -1; }
+    let ntt = ty_with_elem(vt, ty_scalar(vals[tr].ty));
+    let no = icb_trunc(sv, ntt, "");
+    var mask: i32[>..<] = [];
+    for k in n { mask.push(ints[mb + k]); }
+    return ic_new_shuffle1(no, mask);
+}
+// shrinkInsertElt(Trunc, Builder) (trunc and fptrunc)
+fn shrink_insert_elt(tr: i32) -> i32 {
+    let ie = op(tr, 0);
+    if !(one_use(ie) && is_inst_op(ie, OP_INSERTELEMENT) && is_poison(op(ie, 0))) { return -1; }
+    let ty = vals[tr].ty;
+    let no = icb_cast(iop(tr), op(ie, 1), ty_scalar(ty), "");
+    return create_inst(OP_INSERTELEMENT, ty, [c_poison(ty), no, op(ie, 2)]);
 }
