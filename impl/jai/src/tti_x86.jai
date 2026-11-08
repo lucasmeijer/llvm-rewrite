@@ -608,7 +608,144 @@ x86_shuffle_cost :: (t: *Tti, sk: s64, dst: Type_Id, src: Type_Id, mask: [] s32,
     x86_np("getShuffleCost");
     return 0;
 }
+// X86TTIImpl::getIntrinsicInstrCost
 x86_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
-    x86_np("getIntrinsicInstrCost");
+    st := *t.xl;
+    ret := ica.ret;
+    opty := ret;
+    id := ica.id;
+    isd: u32 = 0;
+    n := ifx id != NOT_INTRINSIC then iid_name(id) else "";
+    type_based := ica.type_based_only;
+    if n == {
+        case "llvm.abs"; isd = ISD_ABS;
+        case "llvm.bitreverse"; isd = ISD_BITREVERSE;
+        case "llvm.bswap"; isd = ISD_BSWAP;
+        case "llvm.ctlz"; isd = ISD_CTLZ;
+        case "llvm.ctpop"; isd = ISD_CTPOP;
+        case "llvm.cttz"; isd = ISD_CTTZ;
+        case "llvm.fshl"; #through;
+        case "llvm.fshr";
+            isd = ISD_FSHL;
+            if !type_based && ica.args[0] == ica.args[1] {
+                isd = ifx n == "llvm.fshl" then ISD_ROTL else ISD_ROTR;
+                ok, _ := pm_apint(ica.args[2], true);
+                if ok isd = ISD_X86_VROTLI;
+            }
+        case "llvm.lrint"; #through;
+        case "llvm.llrint";
+            return x86_cast_cost(t, .FPTOSI, ret, ica.tys[0], CCH_NONE, kind);
+        case "llvm.maxnum"; #through;
+        case "llvm.minnum"; isd = ISD_FMAXNUM;
+        case "llvm.sadd.sat"; isd = ISD_SADDSAT;
+        case "llvm.smax"; isd = ISD_SMAX;
+        case "llvm.smin"; isd = ISD_SMIN;
+        case "llvm.ssub.sat"; isd = ISD_SSUBSAT;
+        case "llvm.uadd.sat"; isd = ISD_UADDSAT;
+        case "llvm.umax"; isd = ISD_UMAX;
+        case "llvm.umin"; isd = ISD_UMIN;
+        case "llvm.usub.sat"; isd = ISD_USUBSAT;
+        case "llvm.sqrt"; isd = ISD_FSQRT;
+        case "llvm.sadd.with.overflow"; #through;
+        case "llvm.ssub.with.overflow"; isd = ISD_SADDO; opty = type_sub(ret, 0);
+        case "llvm.uadd.with.overflow"; #through;
+        case "llvm.usub.with.overflow"; isd = ISD_UADDO; opty = type_sub(ret, 0);
+        case "llvm.smul.with.overflow"; isd = ISD_SMULO; opty = type_sub(ret, 0);
+        case "llvm.umul.with.overflow"; isd = ISD_UMULO; opty = type_sub(ret, 0);
+    }
+    if isd != 0 {
+        ltc, mty := bt_type_legalization_cost(st, opty);
+        adjust :: (st: *X86_Lowering, ica: *Ica, e_isd: u32, c: Cost, ltc: Cost, mty: u32) -> Cost {
+            if e_isd == ISD_FMAXNUM || e_isd == ISD_FMINNUM {
+                if (ica.fmf & FMF_NNAN) != 0 return ltc;
+            }
+            if mvt_is_int(mty) && !mvt_is_vec(mty) {
+                if e_isd == ISD_BSWAP && st_hasMOVBE(st) && xs_has(st, X86FLD_HasFastMOVBE) {
+                    ii := ica.inst;
+                    if ii != NONE {
+                        if num_uses(ii) == 1 && inst_op(ir.u_user[ir.v_first_use[ii]]) == .STORE return TCC_FREE;
+                        l := op(ii, 0);
+                        if is_inst(l) && inst_op(l) == .LOAD && num_uses(l) == 1 return TCC_FREE;
+                    }
+                }
+            }
+            return cost_mul(ltc, c);
+        }
+        if ((isd == ISD_CTTZ && !st_hasBMI(st)) || (isd == ISD_CTLZ && !st_hasLZCNT(st))) && !mvt_is_vec(mty) && !type_based {
+            a1 := ica.args[1];
+            if is_const_int(a1) && cf_is_all_ones(a1) isd = ifx isd == ISD_CTTZ then ISD_CTTZ_ZERO_POISON else ISD_CTLZ_ZERO_POISON;
+        }
+        if isd == ISD_FSQRT && kind == TCK_CODE_SIZE return ltc;
+        look :: (tbl: [] XCost_Entry, isd: u32, m: u32, kind: s64) -> (bool, Cost, u32) {
+            for tbl if it.isd == isd && it.dst == m {
+                c := it.c[kind];
+                if c < 0 return false, 0, 0;
+                return true, c, it.isd;
+            }
+            return false, 0, 0;
+        }
+        #insert -> string {
+            rows :: string.["st_useGLMDivSqrtCosts(st)", "GLMCostTbl", "st_useSLMArithCosts(st)", "SLMCostTbl",
+                "st_hasVBMI2(st)", "AVX512VBMI2CostTbl", "st_hasBITALG(st)", "AVX512BITALGCostTbl",
+                "st_hasVPOPCNTDQ(st)", "AVX512VPOPCNTDQCostTbl", "st_hasGFNI(st)", "GFNICostTbl",
+                "st_hasCDI(st)", "AVX512CDCostTbl", "st_hasBWI(st)", "AVX512BWCostTbl", "st_hasAVX512(st)", "AVX512CostTbl",
+                "st_hasXOP(st)", "XOPCostTbl", "st_hasAVX2(st)", "AVX2CostTbl", "st_hasAVX(st)", "AVX1CostTbl",
+                "st_hasSSE42(st)", "SSE42CostTbl", "st_hasSSE41(st)", "SSE41CostTbl", "st_hasSSSE3(st)", "SSSE3CostTbl",
+                "st_hasSSE2(st)", "SSE2CostTbl", "st_hasSSE1(st)", "SSE1CostTbl",
+                "st_hasBMI(st) && st_is64Bit(st)", "BMI64CostTbl", "st_hasBMI(st)", "BMI32CostTbl",
+                "st_hasLZCNT(st) && st_is64Bit(st)", "LZCNT64CostTbl", "st_hasLZCNT(st)", "LZCNT32CostTbl",
+                "st_hasPOPCNT(st) && st_is64Bit(st)", "POPCNT64CostTbl", "st_hasPOPCNT(st)", "POPCNT32CostTbl",
+                "st_is64Bit(st)", "X64CostTbl", "true", "X86CostTbl"];
+            sb: String_Builder;
+            i := 0;
+            while i < rows.count {
+                print_to_builder(*sb, "if % { ok, c, ei := look(XT_getIntrinsicInstrCost_%, isd, mty, kind); if ok return adjust(st, ica, ei, c, ltc, mty); }\n", rows[i], rows[i + 1]);
+                i += 2;
+            }
+            return builder_to_string(*sb);
+        }
+        if type_based && (n == "llvm.fshl" || n == "llvm.fshr") {
+            cond_ty := type_with_new_bit_width(ret, 1);
+            c: Cost = 0;
+            for o: Opcode.[.OR, .SUB, .SHL, .LSHR, .AND] c = cost_add(c, x86_arith_cost(t, o, ret, kind, OI_ANY, OI_ANY));
+            c = cost_add(c, x86_cmp_sel_cost(t, .ICMP, ret, cond_ty, ICMP_EQ, kind));
+            c = cost_add(c, x86_cmp_sel_cost(t, .SELECT, ret, cond_ty, ICMP_EQ, kind));
+            return c;
+        }
+    }
+    return bt_intrinsic_cost(t, ica, kind);
+}
+
+// BasicTTIImplBase::getIntrinsicInstrCost (the scalar, non-VP paths; the rest fails loudly)
+bt_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
+    st := *t.xl;
+    if base_intrinsic_cost(ica) == 0 return 0;
+    n := iid_name(ica.id);
+    if begins_with(n, "llvm.x86.") return TCC_BASIC;   // Intrinsic::isTargetIntrinsic
+    if begins_with(n, "llvm.vp.") || begins_with(n, "llvm.experimental.vp.") x86_np("getIntrinsicInstrCost of VP intrinsics");
+    if ica.type_based_only return bt_type_based_intrinsic_cost(t, ica, kind);
+    ret := ica.ret;
+    scalar_ret := !is_vector_type(ret);
+    if n == {
+        case "llvm.powi";
+            if is_const_int(ica.args[1]) x86_np("getIntrinsicInstrCost of powi with a constant exponent");
+        case "llvm.cttz";
+            if scalar_ret && (st_hasBMI(st) || st_canUseCMOV(st) || st_is64Bit(st) || (!is_vector_type(ret) && type_bits(scalar_type(ret)) < ifx st_is64Bit(st) then cast(u32) 64 else 32)) return TCC_BASIC;
+        case "llvm.ctlz";
+            if scalar_ret && (st_hasLZCNT(st) || st_canUseCMOV(st) || st_is64Bit(st)) return TCC_BASIC;
+        case "llvm.memcpy"; return TCC_EXPENSIVE;   // getMemcpyCost (TargetTransformInfoImplBase)
+    }
+    if begins_with(n, "llvm.masked.") || begins_with(n, "llvm.vector.") || begins_with(n, "llvm.experimental.") ||
+       n == "llvm.fshl" || n == "llvm.fshr" || n == "llvm.stepvector" || n == "llvm.get.active.lane.mask" ||
+       n == "llvm.modf" || n == "llvm.sincos" || n == "llvm.sincospi" || begins_with(n, "llvm.loop.dependence")
+        x86_np(tprint("getIntrinsicInstrCost of %", n));
+    if is_vector_type(ret) x86_np("getIntrinsicInstrCost scalarization overhead");
+    a := ica.*;
+    a.args = .[];
+    a.scalar_cost = COST_INVALID;
+    return bt_type_based_intrinsic_cost(t, *a, kind);
+}
+bt_type_based_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
+    x86_np(tprint("getTypeBasedIntrinsicInstrCost of %", iid_name(ica.id)));
     return 0;
 }

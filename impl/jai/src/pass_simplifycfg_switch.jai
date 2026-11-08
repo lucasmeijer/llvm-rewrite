@@ -1,7 +1,5 @@
 // SimplifyCFG.cpp, fourth part: switches, icmp chains, conditional branch pairs, stores, invokes, EH, unreachable.
 
-simplify_cond_branch_to_cond_branch :: (s: *Scfg, pbi: Value_Id, bi: Value_Id) -> bool { return false; }
-merge_conditional_stores :: (s: *Scfg, pbi: Value_Id, qbi: Value_Id) -> bool { return false; }
 merge_compatible_invokes :: (s: *Scfg, bb: Value_Id) -> bool { return false; }
 
 // ---------------------------------------------------------------- EH: resume, cleanupret
@@ -623,7 +621,7 @@ eliminate_dead_switch_cases :: (s: *Scfg, si: Value_Id) -> bool {
 // DataLayout::fitsInLegalInteger: dl_fits_in_legal_integer (ic_compares.jai)
 // APInt::getLimitedValue()
 ap_limited_value :: (a: APInt) -> u64 {
-    if ap_active_bits(a) > 64 return 0xFFFF_FFFF_FFFF_FFFF;
+    if ap_active_bits(a) > 64 return U64_MAX;
     return ap_zext_value(a);
 }
 
@@ -1084,7 +1082,7 @@ sr_replace_switch :: (s: *Scfg, r: *Switch_Replacement, index_in: Value_Id, b: *
 }
 is_switch_dense_n :: (num_cases: u64, case_range: u64, opt_size: bool) -> bool {
     min_density: u64 = ifx opt_size then cast(u64) 40 else 10;
-    if case_range >= 0xFFFF_FFFF_FFFF_FFFF / 100 return false;
+    if case_range >= U64_MAX / 100 return false;
     return num_cases * 100 >= case_range * min_density;
 }
 is_switch_dense_values :: (vals: [] s64, opt_size: bool) -> bool {
@@ -1118,7 +1116,7 @@ should_build_lookup_table :: (s: *Scfg, si: Value_Id, table_size: u64, rtys: [] 
 }
 should_use_switch_condition_as_table_index :: (mn: Value_Id, mx: Value_Id, has_default: bool, rtys: [] Type_Id) -> bool {
     if is_null_value(mn) return true;
-    if ap_is_negative(cf_ap(mn)) || ap_limited_value(cf_ap(mx)) == 0xFFFF_FFFF_FFFF_FFFF || !has_default return false;
+    if ap_is_negative(cf_ap(mn)) || ap_limited_value(cf_ap(mx)) == U64_MAX || !has_default return false;
     for rtys if !would_fit_in_register(ap_limited_value(cf_ap(mx)) + 1, it) return false;
     return true;
 }
@@ -1231,7 +1229,7 @@ simplify_switch_lookup :: (s: *Scfg, si: Value_Id, b: *Irb, convert_to_lookup: b
     }
     updates: [..] Dom_Update; updates.allocator = temp;
     case_size := type_int_width(vtype(mn));
-    max_table: u64 = ifx case_size > 63 then 0xFFFF_FFFF_FFFF_FFFF else (cast(u64) 1) << cast(u64) case_size;
+    max_table: u64 = ifx case_size > 63 then U64_MAX else (cast(u64) 1) << cast(u64) case_size;
     lookup_bb := create_block(block_fn(common), "switch.lookup", common);
     rcb: Value_Id = NONE;
     cond_branch: Value_Id = NONE;
@@ -1694,7 +1692,7 @@ simplify_branch_on_icmp_chain :: (s: *Scfg, bi: Value_Id, b: *Irb) -> bool {
         bb = nbb;
     }
     irb_set_before(b, bi);
-    if type_kind(vtype(comp)) == .PTR comp = irb_cast(b, .PTRTOINT, comp, type_int(cast(u64) dl_type_size_bits(vtype(comp))), "magicptr");
+    if type_kind(vtype(comp)) == .PTR comp = irb_cast(b, .PTRTOINT, comp, dl_int_ptr_type(vtype(comp)), "magicptr");
     front := cf_ap(vals[0]); back := cf_ap(vals[vals.count - 1]);
     if ap_eq(ap_sub(front, back), ap_from_u64(front.bits, cast(u64) (vals.count - 1))) {
         range := cr_non_empty(back, ap_add(front, ap_from_u64(front.bits, 1)));
@@ -1727,5 +1725,292 @@ simplify_branch_on_icmp_chain :: (s: *Scfg, bi: Value_Id, b: *Irb) -> bool {
 irb_freeze :: (b: *Irb, v: Value_Id, name: string = "") -> Value_Id {
     i := new_inst(.FREEZE, vtype(v), 1);
     set_op(i, 0, v);
-    return irb_insert(b, i, ifx name.count then name else tprint("%.fr", vname(v)));
+    return irb_insert(b, i, name);
+}
+
+// ---------------------------------------------------------------- conditional stores
+
+find_unique_store_in_blocks :: (bb1: Value_Id, bb2: Value_Id) -> Value_Id {
+    st: Value_Id = NONE;
+    for bb: Value_Id.[bb1, bb2] {
+        if bb == NONE continue;
+        for i: block_insts(bb) if inst_op(i) == .STORE {
+            if st != NONE return NONE;
+            st = i;
+        }
+    }
+    return st;
+}
+ensure_value_available_in_successor :: (v: Value_Id, bb: Value_Id, alt: Value_Id = NONE) -> Value_Id {
+    phi: Value_Id = NONE;
+    succ := block_single_successor_of(bb);
+    for i: block_insts(succ) {
+        if inst_op(i) != .PHI break;
+        if phi_incoming_value_for_block(i, bb) != v continue;
+        phi = i;
+        if alt == NONE break;
+        preds: [..] Value_Id; preds.allocator = temp;
+        block_predecessors(succ, *preds);
+        other := ifx preds[0] == bb then preds[1] else preds[0];
+        if phi_incoming_value_for_block(phi, other) == alt break;
+        phi = NONE;
+    }
+    if phi != NONE return phi;
+    if alt == NONE && (!is_inst(v) || inst_block(v) != bb) return v;
+    phi = create_phi(vtype(v), 2);
+    insert_at_position(phi, succ, block_first(succ), true);
+    set_name(phi, "simplifycfg.merge");
+    phi_add_incoming(phi, v, bb);
+    preds: [..] Value_Id; preds.allocator = temp;
+    block_predecessors(succ, *preds);
+    for p: preds if p != bb phi_add_incoming(phi, ifx alt != NONE then alt else const_poison(vtype(v)), p);
+    return phi;
+}
+// SplitBlockAndInsertIfThen(Cond, SplitBefore, Unreachable = false, BranchWeights = null, DTU): the new terminator
+split_block_and_insert_if_then :: (s: *Scfg, cond: Value_Id, split_before: Value_Id) -> Value_Id {
+    head := inst_block(split_before);
+    orig := unique_successors(head);
+    f := block_fn(head);
+    tail := split_basic_block(head, split_before, "");
+    bb := create_block(f, "", tail);
+    br := create_br(tail);
+    block_append_inst(bb, br);
+    copy_debug_loc_or_clear(br, split_before);
+    old := block_terminator(head);
+    nt := create_cond_br(cond, bb, tail);
+    if get_metadata(nt, 0) == NONE copy_debug_loc(nt, old);
+    insert_at_position(nt, head, old, false);
+    erase_terminator(old);
+    if s.dtu {
+        ups: [..] Dom_Update; ups.allocator = temp;
+        array_add(*ups, .{true, head, bb});
+        array_add(*ups, .{true, head, tail});
+        array_add(*ups, .{true, bb, tail});
+        for orig array_add(*ups, .{true, tail, it});
+        for orig array_add(*ups, .{false, head, it});
+        dtu_apply(s.dtu, ups);
+    }
+    return br;
+}
+// mergeConditionalStoreToAddress
+merge_conditional_store_to_address :: (s: *Scfg, ptb: Value_Id, pfb: Value_Id, qtb: Value_Id, qfb: Value_Id, post_in: Value_Id, address: Value_Id, inv_p_in: bool, inv_q_in: bool) -> bool {
+    post := post_in;
+    ps := find_unique_store_in_blocks(ptb, pfb);
+    qs := find_unique_store_in_blocks(qtb, qfb);
+    if ps == NONE || qs == NONE return false;
+    if !is_unordered(qs) || !is_unordered(ps) || inst(ps).ord1 != inst(qs).ord1 || inst(ps).sync != inst(qs).sync ||
+       vtype(op(ps, 0)) != vtype(op(qs, 0)) return false;
+    for i: block_insts(block_single_predecessor(qfb)) if may_read_or_write_memory(i) return false;
+    for i: block_insts(qfb) if i != qs && may_read_or_write_memory(i) return false;
+    if qtb != NONE for i: block_insts(qtb) if i != qs && may_read_or_write_memory(i) return false;
+    x := ps;
+    while x != NONE { if x != ps && may_read_or_write_memory(x) return false; x = inst_next(x); }
+    worthwhile :: (s: *Scfg, bb: Value_Id, ps: Value_Id, qs: Value_Id) -> bool {
+        if bb == NONE return true;
+        cost: Cost = 0;
+        budget := scfg_cl.phi_node_folding_threshold * TCC_BASIC;
+        for i: block_insts(bb) {
+            if is_terminator(inst_op(i)) continue;
+            if inst_op(i) == .STORE && (i == ps || i == qs) continue;
+            if !is_binary_op(inst_op(i)) && inst_op(i) != .GEP return false;
+            cost = cost_add(cost, tti_instruction_cost(s.tti, i, TCK_SIZE_AND_LATENCY));
+            if cost > budget return false;
+        }
+        return true;
+    }
+    if !scfg_cl.merge_cond_stores_aggressively &&
+       (!worthwhile(s, ptb, ps, qs) || !worthwhile(s, pfb, ps, qs) || !worthwhile(s, qtb, ps, qs) || !worthwhile(s, qfb, ps, qs)) return false;
+    if block_num_preds(post) != 2 {
+        true_pred := ifx qtb != NONE then qtb else block_single_predecessor(qfb);
+        sp := Value_Id.[qfb, true_pred];
+        nbb := scfg_split_block_predecessors(s, post, sp, "condstore.split");
+        if nbb == NONE return false;
+        post = nbb;
+    }
+    pbr := block_terminator(block_single_predecessor(pfb));
+    qbr := block_terminator(block_single_predecessor(qfb));
+    pc := op(pbr, 0); qc := op(qbr, 0);
+    pphi := ensure_value_available_in_successor(op(ps, 0), inst_block(ps));
+    qphi := ensure_value_available_in_successor(op(qs, 0), inst_block(qs), pphi);
+    first := block_first_insertion_pt(post);
+    b: Irb; irb_set_at(*b, post, first, false);
+    b.dbg = get_metadata(first, 0);   // getStableDebugLoc
+    inv_p := inv_p_in != (inst_block(ps) != ptb);
+    inv_q := inv_q_in != (inst_block(qs) != qtb);
+    ppred := ifx inv_p then irb_not(*b, pc) else pc;
+    qpred := ifx inv_q then irb_not(*b, qc) else qc;
+    combined := irb_binop(*b, .OR, ppred, qpred);
+    t := split_block_and_insert_if_then(s, combined, ifx b.pt != NONE then b.pt else block_first_insertion_pt(post));
+    if prof_has_branch_weight_md(pbr) && prof_has_branch_weight_md(qbr) {
+        _, pw := prof_extract_branch_weights(pbr);
+        _, qw := prof_extract_branch_weights(qbr);
+        p0, p1 := pw[0], pw[1]; q0, q1 := qw[0], qw[1];
+        if inv_p { x := p0; p0 = p1; p1 = x; }
+        if inv_q { x := q0; q0 = q1; q1 = x; }
+        fw := (p1 & 0xFFFF_FFFF) * (q1 & 0xFFFF_FFFF);
+        tw := p0 * (q0 + q1) + p1 * q0;
+        w := u64.[tw, fw];
+        prof_set_fitted_branch_weights(block_terminator(post), w, false, true);
+    }
+    irb_set_before(*b, t);
+    si := irb_store(*b, qphi, address, min(inst(ps).align, inst(qs).align));
+    combine_metadata_for_cse(qs, ps, true);
+    copy_metadata(si, qs);
+    inst(si).align = min(inst(ps).align, inst(qs).align);
+    if inst(qs).ord1 != 0 { inst(si).ord1 = inst(qs).ord1; inst(si).sync = inst(qs).sync; }
+    erase_inst_with_metadata(qs);
+    erase_inst_with_metadata(ps);
+    return true;
+}
+
+// mergeConditionalStores
+merge_conditional_stores :: (s: *Scfg, pbi: Value_Id, qbi: Value_Id) -> bool {
+    ptb := get_successor(pbi, 0); pfb := get_successor(pbi, 1);
+    qtb := get_successor(qbi, 0); qfb := get_successor(qbi, 1);
+    post := block_single_successor_of(qfb);
+    if block_single_successor_of(qtb) == qfb post = qfb;
+    if post == NONE return false;
+    inv_p := false; inv_q := false;
+    if pfb == inst_block(qbi) { x := pfb; pfb = ptb; ptb = x; inv_p = true; }
+    if qfb == post { x := qfb; qfb = qtb; qtb = x; inv_q = true; }
+    if ptb == inst_block(qbi) ptb = NONE;
+    if qtb == post qtb = NONE;
+    one_pred_succ :: (bb: Value_Id, p: Value_Id, sc: Value_Id) -> bool { return block_single_predecessor(bb) == p && block_single_successor_of(bb) == sc; }
+    if !one_pred_succ(pfb, inst_block(pbi), inst_block(qbi)) || !one_pred_succ(qfb, inst_block(qbi), post) return false;
+    if (ptb != NONE && !one_pred_succ(ptb, inst_block(pbi), inst_block(qbi))) || (qtb != NONE && !one_pred_succ(qtb, inst_block(qbi), post)) return false;
+    if num_uses(inst_block(qbi)) != 2 return false;
+    pa: [..] Value_Id; pa.allocator = temp;
+    qa: [..] Value_Id; qa.allocator = temp;
+    for bb: Value_Id.[ptb, pfb] { if bb == NONE continue; for i: block_insts(bb) if inst_op(i) == .STORE && !block_set_contains(pa, op(i, 1)) array_add(*pa, op(i, 1)); }
+    for bb: Value_Id.[qtb, qfb] { if bb == NONE continue; for i: block_insts(bb) if inst_op(i) == .STORE && !block_set_contains(qa, op(i, 1)) array_add(*qa, op(i, 1)); }
+    if pa.count > 4 scfg_np("mergeConditionalStores with more than 4 store addresses (SmallPtrSet iteration order)");
+    // set_intersect -> SmallPtrSet::remove_if (small mode: the last element moves into the hole)
+    k := 0;
+    e := pa.count;
+    while k < e {
+        if !block_set_contains(qa, pa[k]) { e -= 1; pa[k] = pa[e]; }
+        else k += 1;
+    }
+    pa.count = e;
+    changed := false;
+    for a: pa changed |= merge_conditional_store_to_address(s, ptb, pfb, qtb, qfb, post, a, inv_p, inv_q);
+    return changed;
+}
+
+// ---------------------------------------------------------------- conditional branch to conditional branch
+
+is_widenable_branch :: (u: Value_Id) -> bool {
+    if inst_op(u) != .CONDBR return false;
+    c := op(u, 0);
+    if num_uses(c) != 1 return false;
+    is_wc :: (v: Value_Id) -> bool { id := call_iid(v); return id != NOT_INTRINSIC && iid_name(id) == "llvm.experimental.widenable.condition"; }
+    if is_wc(c) return true;
+    if !is_inst(c) || inst_op(c) != .AND return false;
+    a := op(c, 0); b := op(c, 1);
+    if is_wc(a) && num_uses(a) == 1 return true;
+    if is_wc(b) && num_uses(b) == 1 return true;
+    return false;
+}
+try_widen_cond_branch_to_cond_branch :: (s: *Scfg, pbi: Value_Id, bi: Value_Id) -> bool {
+    if_true := get_successor(pbi, 0); if_false := get_successor(pbi, 1);
+    if !is_widenable_branch(pbi) || if_true != inst_block(bi) || block_single_predecessor(inst_block(bi)) == NONE return false;
+    if block_has_phis(if_false) return false;
+    if block_num_successors(if_false) != 0 return false;
+    no_side_effects :: (bb: Value_Id) -> bool { for i: block_insts(bb) if may_write_to_memory(i) || may_have_side_effects(i) return false; return true; }
+    for k: u32.[1, 0] {
+        succ := get_successor(bi, k);
+        if succ != if_false && block_terminating_deoptimize_call(succ) != NONE && no_side_effects(inst_block(bi)) {
+            block_remove_predecessor(succ, inst_block(bi));
+            set_successor(bi, k, if_false);
+            if s.dtu { ups := Dom_Update.[.{true, inst_block(bi), if_false}, .{false, inst_block(bi), succ}]; dtu_apply(s.dtu, ups); }
+            return true;
+        }
+    }
+    return false;
+}
+irb_binop_nofold :: (b: *Irb, opc: Opcode, l: Value_Id, r: Value_Id, name: string = "") -> Value_Id {
+    i := new_inst(opc, vtype(l), 2);
+    set_op(i, 0, l); set_op(i, 1, r);
+    return irb_insert(b, i, name);
+}
+// SimplifyCondBranchToCondBranch
+simplify_cond_branch_to_cond_branch :: (s: *Scfg, pbi: Value_Id, bi: Value_Id) -> bool {
+    bb := inst_block(bi);
+    if op(pbi, 0) == op(bi, 0) && get_successor(pbi, 0) != get_successor(pbi, 1) {
+        if block_single_predecessor(bb) != NONE {
+            set_op(bi, 0, const_int(ir.t_i1, ifx get_successor(pbi, 0) == bb then cast(u64) 1 else 0));
+            return true;
+        }
+    }
+    if try_widen_cond_branch_to_cond_branch(s, pbi, bi) return true;
+    if scfg_cl.merge_cond_stores && merge_conditional_stores(s, pbi, bi) return true;
+    if block_first(bb) != bi return false;
+    pop_, bop: u32;
+    if get_successor(pbi, 0) == get_successor(bi, 0) { pop_ = 0; bop = 0; }
+    else if get_successor(pbi, 0) == get_successor(bi, 1) { pop_ = 0; bop = 1; }
+    else if get_successor(pbi, 1) == get_successor(bi, 0) { pop_ = 1; bop = 0; }
+    else if get_successor(pbi, 1) == get_successor(bi, 1) { pop_ = 1; bop = 1; }
+    else return false;
+    if get_successor(pbi, pop_) == bb return false;
+    if get_metadata(pbi, md_kind("unpredictable")) == NONE {
+        ok, pw := prof_extract_branch_weights(pbi);
+        if ok && pw[0] + pw[1] != 0 {
+            if bp_get(pw[pop_], pw[0] + pw[1]) >= tti_likely(s) return false;
+        }
+    }
+    common := get_successor(pbi, pop_);
+    removed := get_successor(pbi, pop_ ^ 1);
+    nphis := 0;
+    for block_insts(common) { if inst_op(it) != .PHI break; if nphis > 2 return false; nphis += 1; }
+    other := get_successor(bi, bop ^ 1);
+    updates: [..] Dom_Update; updates.allocator = temp;
+    if other == bb {
+        inf := create_block(block_fn(bb), "infloop");
+        block_append_inst(inf, create_br(inf));
+        if s.dtu array_add(*updates, .{true, inf, inf});
+        other = inf;
+    }
+    pc := op(pbi, 0);
+    b: Irb; irb_set_before(*b, pbi);
+    if pop_ pc = irb_binop_nofold(*b, .XOR, pc, cf_all_ones(vtype(pc)), tprint("%.not", vname(pc)));
+    bc := op(bi, 0);
+    if bop bc = irb_binop_nofold(*b, .XOR, bc, cf_all_ones(vtype(bc)), tprint("%.not", vname(bc)));
+    cond: Value_Id;
+    if implies_poison(bc, pc) cond = irb_binop_nofold(*b, .OR, pc, bc, "brmerge");
+    else cond = irb_select_fmf_nofold(*b, pc, const_int(vtype(pc), 1), bc, NONE, "brmerge", NONE);
+    set_op(pbi, 0, cond);
+    set_successor(pbi, 0, common);
+    set_successor(pbi, 1, other);
+    if s.dtu {
+        array_add(*updates, .{true, inst_block(pbi), other});
+        array_add(*updates, .{false, inst_block(pbi), removed});
+        dtu_apply(s.dtu, updates);
+    }
+    ph, pt, pf := prof_extract_branch_weights_2(pbi);
+    sh, st, sf := prof_extract_branch_weights_2(bi);
+    hw := ph || sh;
+    if hw {
+        if !ph { pt = 1; pf = 1; }
+        if !sh { st = 1; sf = 1; }
+        pcw := ifx pop_ then pf else pt;
+        pow := ifx pop_ then pt else pf;
+        scw := ifx bop then sf else st;
+        sow := ifx bop then st else sf;
+        nw := u64.[pcw * (scw + sow) + pow * scw, pow * sow];
+        prof_set_fitted_branch_weights(pbi, nw, false, true);
+        if inst_op(cond) == .SELECT { w2 := u64.[pcw, pow]; prof_set_fitted_branch_weights(cond, w2, false, true); }
+    }
+    add_predecessor_to_block(other, inst_block(pbi), bb);
+    for pn: block_insts(common) {
+        if inst_op(pn) != .PHI break;
+        biv := phi_incoming_value_for_block(pn, bb);
+        idx := cast(u32) phi_block_index(pn, inst_block(pbi));
+        pbiv := phi_value(pn, idx);
+        if biv != pbiv {
+            nv := irb_select_fmf_nofold(*b, pc, pbiv, biv, NONE, tprint("%.mux", vname(pbiv)), NONE);
+            phi_set_value(pn, idx, nv);
+            if hw { tw := ifx pop_ then pf else pt; fw := ifx pop_ then pt else pf; w := u64.[tw, fw]; prof_set_fitted_branch_weights(nv, w, false, true); }
+        }
+    }
+    return true;
 }

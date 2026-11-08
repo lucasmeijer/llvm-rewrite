@@ -92,7 +92,7 @@ constant_fold_terminator :: (bb: Value_Id, delete_dead_conditions: bool, dtu: *D
                     w := prof_weights_of_md(md);
                     wl: [..] u64; wl.allocator = temp;
                     for w array_add(*wl, it);
-                    if wl[0] > 0xFFFF_FFFF_FFFF_FFFF - wl[k + 1] {
+                    if wl[0] > U64_MAX - wl[k + 1] {
                         f := prof_fit_weights(wl);
                         for f wl[it_index] = it;
                     }
@@ -167,7 +167,7 @@ constant_fold_terminator :: (bb: Value_Id, delete_dead_conditions: bool, dtu: *D
             addr := op(t, 0);
             erase_terminator(t);
             if delete_dead_conditions recursively_delete_trivially_dead_value(addr);
-            // BA->destroyConstant() when unused: our constants live for the run (no visible effect)
+            if !has_uses(ba) destroy_constant(ba);
             if keep != NONE {
                 bt := block_terminator(bb);
                 erase_terminator(bt);
@@ -762,4 +762,15 @@ hoist_all_instructions_into :: (dom: Value_Id, insert_pt: Value_Id, bb: Value_Id
         inst_unlink(x);
         inst_insert_before(x, insert_pt);
     }
+}
+
+// Constant::destroyConstant: drop it from the uniquing map and its operand uses
+destroy_constant :: (c: Value_Id) {
+    found, key := table_find(*const_keys, c);
+    if found {
+        f2, cur := table_find(*ir.const_map, key);
+        if f2 && cur == c table_remove(*ir.const_map, key);
+    }
+    drop_all_references(c);
+    ir.v_kind[c] = .DEAD;
 }

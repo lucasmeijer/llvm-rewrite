@@ -66,7 +66,7 @@ prof_fit_weights :: (w: [] u64) -> [] u32 {
     return out;
 }
 // setBranchWeights(I, Weights, IsExpected, ElideAllZero = true)
-prof_set_branch_weights :: (i: Value_Id, w: [] u32, is_expected: bool, elide_all_zero := true) {
+prof_set_branch_weights :: (i: Value_Id, w: [] u32, is_expected: bool, elide_all_zero := false) {
     if elide_all_zero {
         all0 := true;
         for w if it != 0 all0 = false;
@@ -85,7 +85,7 @@ prof_set_branch_weights_u64 :: (i: Value_Id, w: [] u64, is_expected: bool) {
     prof_set_branch_weights(i, w32, is_expected);
 }
 // setFittedBranchWeights
-prof_set_fitted_branch_weights :: (i: Value_Id, w: [] u64, is_expected := false, elide_all_zero := true) {
+prof_set_fitted_branch_weights :: (i: Value_Id, w: [] u64, is_expected := false, elide_all_zero := false) {
     prof_set_branch_weights(i, prof_fit_weights(w), is_expected, elide_all_zero);
 }
 // hasExplicitlyUnknownBranchWeights
@@ -332,3 +332,7 @@ delete_dead_block :: (bb: Value_Id, dtu: *Dtu, keep_one_input_phis := false) {
     a := Value_Id.[bb];
     delete_dead_blocks(a, dtu, keep_one_input_phis);
 }
+U64_MAX : u64 : 0xFFFF_FFFF_FFFF_FFFF;
+
+// DataLayout::hasUnstableRepresentation (getIntPtrType: dl_int_ptr_type, const_folding.jai)
+dl_unstable_repr :: (t: Type_Id) -> bool { return dl_ptr_spec(ptr_addrspace(t)).unstable; }

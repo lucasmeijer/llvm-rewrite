@@ -290,15 +290,15 @@ dominates_merge_point :: (s: *Scfg, v: Value_Id, bb: Value_Id, insert_pt: Value_
 scfg_get_constant_int :: (v: Value_Id) -> Value_Id {
     if is_const_int(v) return v;
     if !is_constant_kind(vkind(v)) || type_kind(vtype(v)) != .PTR return NONE;
-    if dl_ni_ptr_type(vtype(v)) return NONE;
-    ip := type_int(cast(u64) dl_type_size_bits(vtype(v)));
+    if dl_unstable_repr(vtype(v)) return NONE;
+    ip := dl_int_ptr_type(vtype(v));
     if vkind(v) == .C_NULL return const_int(ip, 0);
     if vkind(v) == .C_EXPR && cexpr(v).op == .INTTOPTR {
         c := op(v, 0);
         if is_const_int(c) {
             if vtype(c) == ip return c;
             // ConstantFoldIntegerCast(CI, IntPtrTy, /*isSigned=*/false)
-            return ce_cast(ifx type_int_width(vtype(c)) > type_int_width(ip) then Opcode.TRUNC else .ZEXT, c, ip);
+            return cfo_integer_cast(c, ip, false);
         }
     }
     return NONE;
@@ -462,8 +462,8 @@ is_value_equality_comparison :: (ti: Value_Id) -> Value_Id {
     }
     if cv != NONE && is_inst(cv) && inst_op(cv) == .PTRTOINT {
         p := op(cv, 0);
-        if dl_ni_ptr_type(vtype(p)) return cv;
-        if vtype(cv) == type_int(cast(u64) dl_type_size_bits(vtype(p))) cv = p;
+        if dl_unstable_repr(vtype(p)) return cv;
+        if vtype(cv) == dl_int_ptr_type(vtype(p)) cv = p;
     }
     return cv;
 }
@@ -704,7 +704,7 @@ perform_value_comparison_into_predecessor_folding :: (s: *Scfg, ti: Value_Id, cv
     irb_set_before(b, pti);
     cv := cv_io.*;
     if type_kind(vtype(cv)) == .PTR {
-        cv = irb_cast(b, .PTRTOINT, cv, type_int(cast(u64) dl_type_size_bits(vtype(cv))), "magicptr");
+        cv = irb_cast(b, .PTRTOINT, cv, dl_int_ptr_type(vtype(cv)), "magicptr");
         cv_io.* = cv;
     }
     nsi := create_switch(cv, pred_default, cast(u32) pred_cases.count);
