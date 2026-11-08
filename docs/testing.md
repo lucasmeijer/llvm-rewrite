@@ -117,6 +117,7 @@ own tests never contain, shared ValueTracking/printer bugs). `sweep` does that:
 ./harness/run sweep --impl rust --passes aa-eval --analysis --extra='-aa-pipeline=basic-aa -print-all-alias-modref-info'
 ./harness/run sweep --impl rust --extra=-O2                             # no --passes: any opt arguments
 ./harness/run sweep --impl llvm --passes sroa                          # self-test: everything identical
+./harness/run sweep --impl rust --passes instcombine --per-function    # one module per defined function (below)
 ```
 
 Files: by default every file whose `::roundtrip` is in `impl/<lang>/passing.txt` (for `--impl llvm`, and with
@@ -141,6 +142,39 @@ files), and `<test path>/` for every non-identical file with `message.txt` and t
 mismatch. `sweep` never touches `passing.txt` and exits 0; it is a report. A full sweep of ~7800 files takes well
 under a minute on 16 cores once LLVM's outputs are cached. Expected before finishing a pass unit (see the `port-pass`
 skill): no silent mismatches, or ones that are understood and written down in `NOTES.md`.
+
+### `--per-function`
+
+A file is one comparison, and an implementation stops at the first construct it hasn't ported, so a whole-file sweep
+compares only the files whose *every* function is supported. `--per-function` cuts each selected file into one module
+per defined function and compares every piece on its own, so the supported functions of a file still get compared
+(InstCombine on the corpus: ~7700 files become ~70000 functions). Everything else is as above (same file selection,
+IR or `--analysis` mode, outcomes, failure groups), counted per function:
+
+- **Splitting**: `llvm-extract --keep-const-init --func=<name>` on the file. The piece keeps the function, declarations
+  of what it calls (other functions become declarations; calls between functions are fine), the globals it
+  references (initializers only of constants), the metadata it uses, attributes, datalayout and triple. Unnamed
+  functions (`@0`) cannot be named for llvm-extract, so for those the file first goes through
+  `opt -passes=name-anon-globals` (the piece then calls them `@anon.<hash>.<n>`).
+- **Each piece is a new input, not a slice of the old output.** llvm-extract changes linkage (internal/private become
+  external `hidden`, linkonce becomes weak), drops module inline asm, unreferenced globals and non-constant
+  initializers. LLVM and the implementation both run on the same piece, so the comparison stays exact, but the
+  result is not the function's part of the whole-file output: anything that depends on other function bodies or on
+  linkage (inlining, IPSCCP, globalopt, function-attrs of callers, dead-function removal) sees a different module.
+  For module and CGSCC passes a per-function sweep is still a valid comparison, just on less interesting inputs.
+- The piece is run as `input.ll` in a temporary directory with the cwd there, so outputs don't contain paths.
+- `llvm-failed` also covers pieces llvm-extract can't make valid (aliases whose type no longer fits, `llvm.localrecover`
+  of a function that became a declaration; a handful in the corpus) and files LLVM can't parse.
+- Splitting and LLVM's results on every piece are cached in the oracle cache. The first InstCombine sweep over the
+  corpus takes ~10 minutes on 16 cores; after that ~1 minute plus the implementation's own time (worker processes,
+  `-j`).
+
+Artifacts go to `.harness-out/sweep/<impl>/per-function_<args>/`: `results.tsv` has four columns (status, file,
+function as `@name`, error group), `summary.json` lists silent mismatches and failure groups as `<file> @<function>`,
+and every non-identical function has `<test path>/<n>-<function>/` (`n` = its position among the file's
+definitions) with `input.ll` (the piece; reproduce with `opt <args> -S input.ll` in that directory), `message.txt`
+and the usual `expected.ll`, `actual.ll`, `diff.txt`, `stderr.txt`. A whole-file and a per-function sweep of the same
+arguments don't overwrite each other.
 
 ## Performance (compile time; report only)
 

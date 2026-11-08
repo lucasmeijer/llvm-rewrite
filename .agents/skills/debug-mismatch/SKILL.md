@@ -23,6 +23,9 @@ and order, metadata numbering and order, comments (`; Function Attrs:`, `; preds
    automate this with an interestingness script that returns 0 while the outputs still differ:
    `llvm-reduce --test=./interesting.sh in.ll`.
 3. Compare *why* LLVM did what it did: read the pass source around the transform that differs.
+   A per-function sweep (`./harness/run sweep --impl <lang> --passes <pass> --per-function '<test path>'`) does the
+   first cut for you: every differing function gets its own `input.ll` (one function plus what it references),
+   `expected.ll` and `actual.ll` under `.harness-out/sweep/<lang>/per-function_<args>/<test path>/<n>-<function>/`.
 4. Land the reduced case as a new test (skill `write-test`) when it isolates something the existing tests don't.
 
 ## isel-ir fails

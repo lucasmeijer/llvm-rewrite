@@ -335,6 +335,8 @@ def main(argv=None):
     s.add_argument("--analysis", action="store_true", help="analysis-printer mode: -disable-output, compare exit status, stdout and stderr")
     s.add_argument("--unordered", action="store_true", help="with --analysis: compare lines as sorted multisets (like @analysis-unordered)")
     s.add_argument("--all-files", action="store_true", help="every corpus file, not just the ones the impl round-trips")
+    s.add_argument("--per-function", action="store_true", help="split every file into one module per defined function "
+                   "(llvm-extract) and compare each piece separately")
     s.add_argument("--timeout", type=float, default=60, help="seconds per run of the implementation's opt (default 60)")
     s.add_argument("-j", "--jobs", type=int, default=os.cpu_count())
     s.add_argument("-v", "--verbose", action="store_true", help="print the diff of every silent mismatch shown")

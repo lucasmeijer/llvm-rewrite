@@ -47,7 +47,9 @@ Sweep the pass over the whole corpus: `./harness/run sweep --impl <lang> --passe
 an analysis printer; see "Sweeps" in `docs/testing.md`). This is expected before a pass unit is finished: the exit
 tests miss many bugs that a sweep over ~7800 files finds. Every `differs`/`bad-ir` file is a silent wrong output:
 fix it, or, if it comes from someone else's code, make it fail loudly or write it down in `NOTES.md`. Note the sweep
-result (identical / failed counts, main failure groups) in `NOTES.md`. Also sweep the pipelines from your unit's RUN
+result (identical / failed counts, main failure groups) in `NOTES.md`. While many files still fail loudly on some
+unported construct, add `--per-function`: it splits every file into one module per function, so the functions you do
+support get compared too (often several times as many comparisons; see "--per-function" in `docs/testing.md`). Also sweep the pipelines from your unit's RUN
 lines that combine your pass with others, if the others already work.
 
 Look at compile time: `./harness/run perf --impl <lang> 'tests/perf/scaling/*'` (and `tests/perf/compile/*` once

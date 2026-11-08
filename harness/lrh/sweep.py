@@ -15,15 +15,19 @@ Per file the outcome is one of
   bad-ir       our opt exited 0 but its output does not assemble / verify: also silent
   failed       our opt exited nonzero (or timed out / crashed): a loud failure, grouped by its first error line
   llvm-failed  LLVM's opt fails on this file with these args (or is nondeterministic): skipped
+
+--per-function: every defined function is cut into its own module (llvm-extract) and compared separately; the
+outcomes above are then per function. See the section below and "--per-function" in docs/testing.md.
 """
 
 import hashlib
 import json
+import os
 import re
 import shlex
 import shutil
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 from . import checks, config, corpus, proc
@@ -55,41 +59,31 @@ def error_key(stderr: str, path: str, rc: int, timed_out: bool, timeout: float) 
     return sig + (first or f"[exit {rc}, no stderr]")
 
 
-def run_impl(impl: str, args: str, path: str, wd: Path, analysis: bool, timeout: float) -> proc.Res:
+def run_impl(impl: str, args: str, in_arg: str, cwd, wd: Path, analysis: bool, timeout: float) -> proc.Res:
     opt = config.impl_bin(impl, "opt")
     if analysis:
-        cmd = [opt, *shlex.split(args), "-disable-output", path]
+        cmd = [opt, *shlex.split(args), "-disable-output", in_arg]
     else:
-        cmd = [opt, *shlex.split(args), "-S", path, "-o", str(wd / "out.ll")]
-    return proc.run(cmd, cwd=config.REPO, timeout=timeout)
+        cmd = [opt, *shlex.split(args), "-S", in_arg, "-o", str(wd / "out.ll")]
+    return proc.run(cmd, cwd=cwd, timeout=timeout)
 
 
-def sweep_one(impl: str, path: str, args: str, analysis: bool, unordered: bool, timeout: float) -> dict:
-    """-> {path, status, key (for failed), message, artifacts}"""
-    t = corpus.TestFile(path)
-    res = {"path": path, "status": IDENTICAL, "key": "", "message": "", "artifacts": {}}
-    if analysis:
-        exp = checks.oracle_analysis(t, args, unordered)
-    else:
-        exp = checks.oracle_opt(t, args)
-        if exp["ok"]:
-            ok, exp_c = checks.canon(exp["text"])
-            if not ok:
-                exp = {"ok": False, "text": "LLVM's output does not re-assemble:\n" + exp_c}
-    if not exp["ok"]:
-        res.update(status=LLVM_FAILED, message=exp["text"])
-        return res
+def compare(impl: str, args: str, analysis: bool, unordered: bool, timeout: float, exp: dict,
+            in_arg: str, cwd, res: dict) -> dict:
+    """Run the implementation on `in_arg` (relative to `cwd`) and compare with LLVM's result `exp` (from the oracle,
+    already canonicalized in IR mode). Fills in res: status, key, message, artifacts."""
     with proc.Workdir() as wd:
-        r = run_impl(impl, args, path, wd, analysis, timeout)
+        r = run_impl(impl, args, in_arg, cwd, wd, analysis, timeout)
         err = r.err.decode(errors="replace")
         if not r.ok:
-            res.update(status=FAILED, key=error_key(err, path, r.rc, r.timed_out, timeout),
-                       message=f"opt exited with {r.rc}:\n{r.err_tail()}", artifacts={"stderr.txt": r.err_tail(20000)})
+            res.update(status=FAILED, key=error_key(err, in_arg, r.rc, r.timed_out, timeout),
+                       message=f"opt exited with {r.rc}:\n{r.err_tail()}", artifacts={**res["artifacts"], "stderr.txt": r.err_tail(20000)})
             return res
         if not analysis:
             act = (wd / "out.ll").read_text(errors="replace") if (wd / "out.ll").exists() else ""
+    arts = dict(res["artifacts"])
     if analysis:
-        problems, arts = [], {}
+        problems = []
         for stream, e, a in (("stderr", exp["stderr"], checks.analysis_canon(err, unordered)),
                              ("stdout", exp["stdout"], checks.analysis_canon(r.out.decode(errors="replace"), unordered))):
             if e != a:
@@ -101,11 +95,164 @@ def sweep_one(impl: str, path: str, args: str, analysis: bool, unordered: bool, 
     ok, act_c = checks.canon(act)
     if not ok:
         res.update(status=BAD_IR, message="output is not valid IR according to llvm-as (assembler/verifier):\n" + act_c,
-                   artifacts={"actual.ll": act, "llvm-as.txt": act_c, "stderr.txt": err})
-    elif act_c != exp_c:
-        res.update(status=DIFFERS, message="canonicalized IR differs:\n" + checks.diff(exp_c, act_c),
-                   artifacts={"expected.ll": exp_c, "actual.ll": act_c, "diff.txt": checks.full_diff(exp_c, act_c)})
+                   artifacts={**arts, "actual.ll": act, "llvm-as.txt": act_c, "stderr.txt": err})
+    elif act_c != exp["canon"]:
+        res.update(status=DIFFERS, message="canonicalized IR differs:\n" + checks.diff(exp["canon"], act_c),
+                   artifacts={**arts, "expected.ll": exp["canon"], "actual.ll": act_c, "diff.txt": checks.full_diff(exp["canon"], act_c)})
     return res
+
+
+def canon_expected(exp: dict) -> dict:
+    """IR mode: canonicalize LLVM's output (adds "canon"); not ok if it does not re-assemble."""
+    if exp["ok"]:
+        ok, exp_c = checks.canon(exp["text"])
+        if not ok:
+            return {"ok": False, "text": "LLVM's output does not re-assemble:\n" + exp_c}
+        return {**exp, "canon": exp_c}
+    return exp
+
+
+def new_res(path: str, **extra) -> dict:
+    return {"path": path, "status": IDENTICAL, "key": "", "message": "", "artifacts": {}, **extra}
+
+
+def sweep_one(impl: str, path: str, args: str, analysis: bool, unordered: bool, timeout: float) -> dict:
+    """-> {path, status, key (for failed), message, artifacts}"""
+    t = corpus.TestFile(path)
+    res = new_res(path)
+    exp = checks.oracle_analysis(t, args, unordered) if analysis else canon_expected(checks.oracle_opt(t, args))
+    if not exp["ok"]:
+        res.update(status=LLVM_FAILED, message=exp["text"])
+        return res
+    return compare(impl, args, analysis, unordered, timeout, exp, path, config.REPO, res)
+
+
+# ---------------------------------------------------------------- --per-function: one module per defined function
+#
+# Every defined function is cut out of its file with `llvm-extract --keep-const-init --func=<name>` (other functions
+# become declarations; unreferenced globals are dropped, referenced ones keep their initializer only if constant;
+# local linkage becomes external hidden, linkonce becomes weak). Unnamed functions (@0) cannot be named on the
+# llvm-extract command line, so for those the file first goes through `opt -passes=name-anon-globals`. Each piece is
+# then an ordinary input: LLVM and the implementation both run on the same piece (written as input.ll in a temporary
+# directory, so outputs do not depend on paths), compared as in whole-file mode. Splitting and LLVM's results are
+# cached in the oracle cache.
+
+DEFINE = re.compile(r'^define\b[^@\n]*@("[^"]*"|[-a-zA-Z$._0-9]+)\(', re.M)
+PIECE = "input.ll"
+
+
+def unescape_name(tok: str) -> str:
+    """An LLVM global name token (without @) -> the raw name; quoted names use \\XX hex escapes."""
+    if not tok.startswith('"'):
+        return tok
+    body, out, i = tok[1:-1].encode(), bytearray(), 0
+    while i < len(body):
+        if body[i] == 0x5C and i + 1 < len(body) and body[i + 1] == 0x5C:
+            out.append(0x5C)
+            i += 2
+        elif body[i] == 0x5C and i + 2 < len(body):
+            out.append(int(body[i + 1:i + 3], 16))
+            i += 3
+        else:
+            out.append(body[i])
+            i += 1
+    return os.fsdecode(bytes(out))
+
+
+def list_functions(path: str) -> tuple[bool, list[str] | str]:
+    """The defined functions of a file in order, as LLVM prints their names (`foo`, `"a b"`, `0` for unnamed),
+    or (False, error) if LLVM cannot parse the file."""
+    ok, text = checks.canon(checks.read(path))
+    if not ok:
+        return False, text
+    return True, DEFINE.findall(text)
+
+
+def extract_piece(path: str, idx: int, tok: str) -> dict:
+    """{ok, text} : the module holding just the idx-th defined function of `path` (token `tok`)."""
+    src = checks.read(path)
+
+    def compute():
+        text, name = src, tok
+        if tok.isdigit():  # unnamed: name everything anonymous first, then find the idx-th define again
+            r = proc.run([config.llvm("opt"), "-passes=name-anon-globals", "-S", "-", "-o", "-"], stdin=src.encode())
+            if not r.ok:
+                return {"ok": False, "text": "opt -passes=name-anon-globals failed:\n" + r.err_tail()}
+            text = r.out.decode(errors="replace")
+            toks = DEFINE.findall(text)
+            if idx >= len(toks) or toks[idx].isdigit():
+                return {"ok": False, "text": f"could not name unnamed function @{tok}"}
+            name = toks[idx]
+        r = proc.run([config.llvm("llvm-extract"), "-S", "--keep-const-init", f"--func={unescape_name(name)}", "-", "-o", "-"],
+                     stdin=text.encode())
+        if not r.ok:
+            return {"ok": False, "text": "llvm-extract failed:\n" + r.err_tail()}
+        return {"ok": True, "text": r.out.decode(errors="replace")}
+
+    piece = proc.cached(["extract-function", src, idx, tok], compute)
+    if piece["ok"]:
+        ok, err = checks.canon(piece["text"])
+        if not ok:  # e.g. an alias whose type no longer fits, llvm.localrecover of a function that became a declaration
+            return {"ok": False, "text": "llvm-extract produced a module that does not verify (a limit of per-function mode):\n" + err}
+    return piece
+
+
+def oracle_piece(text: str, args: str, analysis: bool, unordered: bool) -> dict:
+    """LLVM's result on a piece, like checks.oracle_opt / oracle_analysis but on text (run as input.ll)."""
+
+    def compute():
+        with proc.Workdir() as wd:
+            (wd / PIECE).write_text(text)
+            if not analysis:
+                r = checks.tool_opt(config.llvm("opt"), args, Path(PIECE), wd / "out.ll", wd)
+                if not r.ok:
+                    return {"ok": False, "text": r.err_tail()}
+                return {"ok": True, "text": (wd / "out.ll").read_text(errors="replace")}
+            runs = [checks.tool_analysis(config.llvm("opt"), args, Path(PIECE), wd) for _ in range(2)]
+        if not runs[0].ok:
+            return {"ok": False, "text": runs[0].err_tail()}
+        outs = [(checks.analysis_canon(x.out.decode(errors="replace"), unordered),
+                 checks.analysis_canon(x.err.decode(errors="replace"), unordered)) for x in runs]
+        if outs[0] != outs[1]:
+            return {"ok": False, "text": "output is nondeterministic (differs between two runs of LLVM's opt):\n"
+                    + checks.diff(outs[0][1], outs[1][1], 20)}
+        return {"ok": True, "stdout": outs[0][0], "stderr": outs[0][1]}
+
+    exp = proc.cached(["piece-analysis" if analysis else "piece-opt", text, args, analysis and unordered], compute)
+    return exp if analysis else canon_expected(exp)
+
+
+def sweep_function(impl: str, path: str, idx: int, tok: str, args: str, analysis: bool, unordered: bool, timeout: float) -> dict:
+    res = new_res(path, func="@" + tok, idx=idx)
+    piece = extract_piece(path, idx, tok)
+    if not piece["ok"]:
+        res.update(status=LLVM_FAILED, message=piece["text"])
+        return res
+    res["artifacts"] = {PIECE: piece["text"]}
+    exp = oracle_piece(piece["text"], args, analysis, unordered)
+    if not exp["ok"]:
+        res.update(status=LLVM_FAILED, message=exp["text"])
+        return res
+    with proc.Workdir() as wd:
+        (wd / PIECE).write_text(piece["text"])
+        compare(impl, args, analysis, unordered, timeout, exp, PIECE, wd, res)
+    if res["status"] != IDENTICAL:
+        res["message"] = (f"function @{tok} of {path}; reproduce in this directory with "
+                          f"`opt {args} {'-disable-output' if analysis else '-S'} {PIECE}`\n" + res["message"])
+    return res
+
+
+def function_job(job) -> dict:
+    (path, i, tok), (impl, args, analysis, unordered, timeout) = job
+    try:
+        return sweep_function(impl, path, i, tok, args, analysis, unordered, timeout)
+    except Exception as e:  # a harness bug; surface it loudly but keep going
+        return new_res(path, func="@" + tok, idx=i, status=FAILED, key=f"[harness exception] {type(e).__name__}: {e}",
+                       message=f"[harness exception] {type(e).__name__}: {e}")
+
+
+def label(r: dict) -> str:
+    return f"{r['path']} {r['func']}" if r.get("func") else r["path"]
 
 
 def select_files(a, tests, passing) -> tuple[list[str], int]:
@@ -147,46 +294,75 @@ def cmd_sweep(a):
         print(c(YELLOW, "no files selected" + ("" if a.all_files else " (default: files listed as ::roundtrip in passing.txt; --all-files for every file)")))
         return
 
-    def one(path):
+    def guard(fn, path, **extra):
         try:
-            return sweep_one(a.impl, path, args, a.analysis, a.unordered, a.timeout)
+            return fn()
         except Exception as e:  # a harness bug; surface it loudly but keep going
-            return {"path": path, "status": FAILED, "key": f"[harness exception] {type(e).__name__}: {e}",
-                    "message": f"[harness exception] {type(e).__name__}: {e}", "artifacts": {}}
+            return new_res(path, status=FAILED, key=f"[harness exception] {type(e).__name__}: {e}",
+                           message=f"[harness exception] {type(e).__name__}: {e}", **extra)
+
+    def progress(i, n):
+        if TTY:
+            print(f"\r{c(DIM, f'{i}/{n}')}", end="", flush=True)
 
     results = []
     with ThreadPoolExecutor(max_workers=a.jobs) as ex:
-        for i, r in enumerate(ex.map(one, files), 1):
-            results.append(r)
-            if TTY:
-                print(f"\r{c(DIM, f'{i}/{len(files)}')}", end="", flush=True)
+        if not a.per_function:
+            for i, r in enumerate(ex.map(lambda p: guard(lambda: sweep_one(a.impl, p, args, a.analysis, a.unordered, a.timeout), p), files), 1):
+                results.append(r)
+                progress(i, len(files))
+        else:
+            jobs, no_defs = [], 0
+            for path, (ok, toks) in zip(files, ex.map(list_functions, files)):
+                if not ok:
+                    results.append(new_res(path, func="", idx=-1, status=LLVM_FAILED, message="LLVM cannot parse the file:\n" + toks))
+                elif not toks:
+                    no_defs += 1
+                jobs += [(path, i, tok) for i, tok in enumerate(toks if ok else [])]
+            print(c(DIM, f"  per function: {len(jobs)} defined functions"
+                    + (f" ({no_defs} files without any)" if no_defs else "")))
+
+            # Many small jobs, each mostly process spawns and cache reads: threads serialize on the GIL there, so
+            # use worker processes.
+            with ProcessPoolExecutor(max_workers=a.jobs) as pex:
+                fixed = (a.impl, args, a.analysis, a.unordered, a.timeout)
+                for i, r in enumerate(pex.map(function_job, [(j, fixed) for j in jobs], chunksize=8), 1):
+                    results.append(r)
+                    progress(i, len(jobs))
     if TTY:
         print("\r" + " " * 20 + "\r", end="")
 
-    # Artifacts: .harness-out/sweep/<impl>/<args slug>/<test path>/, plus results.tsv and summary.json.
-    out = config.OUT / "sweep" / a.impl / slug(("analysis " if a.analysis else "") + args)
+    # Artifacts: .harness-out/sweep/<impl>/<args slug>/<test path>/[<index>-<function>/], plus results.tsv and summary.json.
+    out = config.OUT / "sweep" / a.impl / slug(("per-function " if a.per_function else "") + ("analysis " if a.analysis else "") + args)
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "args.txt").write_text(args + ("\n(analysis" + (", unordered" if a.unordered else "") + ")" if a.analysis else "") + "\n")
+    (out / "args.txt").write_text(args + ("\n(analysis" + (", unordered" if a.unordered else "") + ")" if a.analysis else "")
+                                  + ("\n(per function)" if a.per_function else "") + "\n")
     for r in results:
         if r["status"] == IDENTICAL:
             continue
         d = out / r["path"]
+        if r.get("func"):
+            r["dir"] = f"{r['idx']:04d}-" + re.sub(r"[^A-Za-z0-9_.$-]+", "_", r["func"][1:].strip('"'))[:60]
+            d = d / r["dir"]
         d.mkdir(parents=True, exist_ok=True)
         (d / "message.txt").write_text(r["message"] + "\n")
         for name, text in r["artifacts"].items():
             (d / name).write_text(text)
-    (out / "results.tsv").write_text("".join(f"{r['status']}\t{r['path']}\t{r['key']}\n" for r in results))
+    if a.per_function:
+        (out / "results.tsv").write_text("".join(f"{r['status']}\t{r['path']}\t{r['func']}\t{r['key']}\n" for r in results))
+    else:
+        (out / "results.tsv").write_text("".join(f"{r['status']}\t{r['path']}\t{r['key']}\n" for r in results))
 
     by = {s: [r for r in results if r["status"] == s] for s in ORDER}
     groups = {}
     for r in by[FAILED]:
-        groups.setdefault(r["key"], []).append(r["path"])
+        groups.setdefault(r["key"], []).append(label(r))
     groups = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     (out / "summary.json").write_text(json.dumps({
-        "impl": a.impl, "args": args, "analysis": a.analysis, "unordered": a.unordered,
+        "impl": a.impl, "args": args, "analysis": a.analysis, "unordered": a.unordered, "per_function": a.per_function,
         "counts": {s: len(by[s]) for s in ORDER},
-        "silent": [r["path"] for r in by[DIFFERS] + by[BAD_IR]],
+        "silent": [label(r) for r in by[DIFFERS] + by[BAD_IR]],
         "failed_groups": [{"error": k, "count": len(v), "files": v} for k, v in groups],
     }, indent=1) + "\n")
 
@@ -203,7 +379,7 @@ def cmd_sweep(a):
     if silent:
         print(c(RED + ";1", f"\nSILENT MISMATCHES ({len(silent)}): fix these first"))
         for r in silent[: a.max_shown]:
-            print(f"  {c(RED, r['status'].ljust(7))} {r['path']}")
+            print(f"  {c(RED, r['status'].ljust(7))} {label(r)}" + (c(DIM, f"  ({r['dir']})") if r.get("dir") else ""))
             if a.verbose:
                 print(first_lines(r["message"], 30))
         if len(silent) > a.max_shown:
@@ -217,6 +393,7 @@ def cmd_sweep(a):
     if a.verbose and by[LLVM_FAILED]:
         print(c(DIM, f"\nllvm-failed ({len(by[LLVM_FAILED])}):"))
         for r in by[LLVM_FAILED][: a.max_shown]:
-            print(f"  {r['path']}: {(r['message'].strip().splitlines() or [''])[0][:150]}")
-    print(c(DIM, f"\nartifacts: {out.relative_to(config.REPO)}/  (results.tsv, summary.json, <test path>/ for every non-identical file)"))
+            print(f"  {label(r)}: {(r['message'].strip().splitlines() or [''])[0][:150]}")
+    what = "<test path>/<n>-<function>/ for every non-identical function" if a.per_function else "<test path>/ for every non-identical file"
+    print(c(DIM, f"\nartifacts: {out.relative_to(config.REPO)}/  (results.tsv, summary.json, {what})"))
     sys.exit(0)
