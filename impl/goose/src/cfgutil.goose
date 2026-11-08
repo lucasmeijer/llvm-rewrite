@@ -433,9 +433,11 @@ fn cu_merge_block_into_predecessor(bb: i32) -> bool {
     }
     let sti = block_terminator(bb);
     // Move all definitions in the successor to the predecessor
-    cu_splice_before(pti, block_first(bb), sti);
+    cu_splice_before_dbg(pti, block_first(bb), sti);
     cu_block_rauw(bb, pred);
-    // Delete the unconditional branch from the predecessor; move the terminator.
+    // Delete the unconditional branch from the predecessor; its remaining records trail and are flushed onto
+    // the moved terminator.
+    cu_prepend_records(pti, sti);
     inst_erase_from_parent(pti);
     inst_move_to_end(sti, pred);
     block_append_inst(bb, create_inst(OP_UNREACHABLE, T_VOID, []));
@@ -1383,14 +1385,57 @@ fn cu_hoist_all_instructions_into(dom: i32, ins_pt: i32, bb: i32) {
     while i >= 0 {
         let ni = inst_next(i);
         cu_drop_ub_implying_attrs_and_metadata(i);
-        if inst_first_dbg(i) >= 0 || cu_used_by_debug_record(i) { cu_not_ported("hoistAllInstructionsInto with debug records"); }
+        if dbgrecs.len > 0 {
+            // dropDebugUsers(I), I->dropDbgRecords()
+            cu_drop_debug_users(i);
+            cu_drop_dbg_records(i);
+        }
         if cu_is_debug_or_pseudo(i) { inst_erase_from_parent(i); i = ni; continue; }
         let dl = inst_get_md(ins_pt, MDK_DBG);
         if dl >= 0 { inst_set_md(i, MDK_DBG, dl); } else { inst_erase_md(i, MDK_DBG); }
         i = ni;
     }
     let t = block_terminator(bb);
-    cu_splice_before(ins_pt, block_first(bb), t);
+    if dbgrecs.len > 0 { cu_drop_debug_users(t); cu_drop_dbg_records(t); }
+    cu_splice_before_dbg(ins_pt, block_first(bb), t);
+}
+
+// Instruction::dropDbgRecords
+fn cu_drop_dbg_records(i: i32) {
+    var r = inst_first_dbg(i);
+    while r >= 0 { let nx = dbgrecs[r].next; dbg_erase_record(r); r = nx; }
+}
+// dropDebugUsers(I): erase every debug record that uses I
+fn cu_drop_debug_users(v: i32) {
+    if dbgrecs.len == 0 { return; }
+    for r in dbgrecs.len {
+        let x = dbgrecs[r];
+        if x.owner < 0 || x.kind as i64 == DR_LABEL { continue; }
+        if md_mentions_value(x.loc, v) || md_mentions_value(x.addr, v) { dbg_erase_record(r as i32); }
+    }
+}
+// Move all records of `from` in front of the records of `to`.
+fn cu_prepend_records(from: i32, to: i32) {
+    if dbgrecs.len == 0 { return; }
+    let fi = inst_of(from);
+    if fi >= inst_dbg.len || inst_dbg[fi] < 0 { return; }
+    let ti = inst_of(to);
+    while inst_dbg.len <= ti { inst_dbg.push(-1); }
+    var last = inst_dbg[fi];
+    dbgrecs[last].owner = to;
+    while dbgrecs[last].next >= 0 { last = dbgrecs[last].next; dbgrecs[last].owner = to; }
+    dbgrecs[last].next = inst_dbg[ti];
+    inst_dbg[ti] = inst_dbg[fi];
+    inst_dbg[fi] = -1;
+}
+
+// BasicBlock::splice(Dest = pos, Src, begin(), terminator) when the moved range carries no debug records of
+// its own: the records attached to pos come before the spliced instructions (spliceDebugInfo, Dest without
+// head bit).
+fn cu_splice_before_dbg(pos: i32, from: i32, upto: i32) {
+    if from == upto { return; }
+    cu_splice_before(pos, from, upto);
+    cu_prepend_records(pos, from);
 }
 
 fn cu_used_by_debug_record(i: i32) -> bool { dbgrecs.len > 0 && dbg_records_use_value(i) }

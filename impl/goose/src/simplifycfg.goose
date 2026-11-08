@@ -112,7 +112,8 @@ fn sb_set_before(i: i32) { sb_bb = inst_parent(i); sb_pos = i; sb_dl = inst_get_
 fn sb_set_end(bb: i32) { sb_bb = bb; sb_pos = -1; }
 
 fn sb_insert(iv: i32, name: const u8[:]) -> i32 {
-    if sb_pos >= 0 { inst_insert_before(iv, sb_pos); } else { block_append_inst(sb_bb, iv); }
+    // IRBuilder::SetInsertPoint(I) keeps no head bit: the new instruction adopts I's debug records
+    if sb_pos >= 0 { inst_insert_before(iv, sb_pos); scf_adopt_records(iv, sb_pos); } else { block_append_inst(sb_bb, iv); }
     if name.len > 0 && vals[iv].ty != T_VOID { set_name(iv, name); }
     if sb_annot >= 0 { inst_set_md(iv, mdk_annotation(), sb_annot); }
     if sb_dl >= 0 { inst_set_md(iv, MDK_DBG_SC, sb_dl); }
@@ -247,7 +248,12 @@ fn name_plus(v: i32, s: const u8[:]) -> u8[>..] {
 }
 
 // erase + the debug-info consequences (the instruction must have no uses)
-fn scf_erase(i: i32) { inst_erase_from_parent(i); }
+fn scf_erase(i: i32) { if dbgrecs.len > 0 { m2r_erase(i); } else { inst_erase_from_parent(i); } }
+// Value::replaceAllUsesWith, including the debug records' ValueAsMetadata (m2r record list)
+fn scf_rauw(old: i32, nv: i32) {
+    rauw(old, nv);
+    if dbgrecs.len > 0 { m2r_dbg_rauw(old, nv); }
+}
 
 // cost kind of the function (hasMinSize -> CodeSize)
 fn scf_cost_kind(bb: i32) -> i64 {
@@ -927,7 +933,56 @@ fn merged_location(a: i32, b: i32) -> i32 {
 fn hoist_lockstep_dbg_records(ti: i32, i1: i32, others: const i32[:]) {
     if inst_first_dbg(i1) < 0 { return; }
     for o in others { if inst_first_dbg(o) < 0 { return; } }
-    scf_not_ported("hoisting debug records");
+    var cur: i32[>..<] = [];
+    cur.push(inst_first_dbg(i1));
+    for o in others { cur.push(inst_first_dbg(o)); }
+    // DbgRecord::isIdenticalToWhenDefined (no DebugLoc)
+    fn same(a: i32, b: i32) -> bool {
+        let x = dbgrecs[a];
+        let y = dbgrecs[b];
+        if x.kind != y.kind || x.dvar != y.dvar { return false; }
+        if x.kind as i64 == DR_LABEL { return true; }
+        return x.loc == y.loc && x.addr == y.addr && x.expr == y.expr && x.aexpr == y.aexpr;
+    }
+    loop {
+        for c in cur { if c < 0 { return; } }
+        var hoist = true;
+        for k in 1..cur.len { if !same(cur[0], cur[k]) { hoist = false; } }
+        for k in cur.len {
+            let r = cur[k];
+            cur[k] = dbgrecs[r].next;
+            if hoist {
+                dbg_erase_record(r);
+                scf_dbg_append(r, ti);
+            }
+        }
+    }
+}
+
+// Instruction::insertBefore(BB, It) without the head bit: the inserted instruction takes over the records that
+// were attached to the instruction at the insertion point.
+fn scf_adopt_records(iv: i32, pos: i32) {
+    let pi = inst_of(pos);
+    if pi >= inst_dbg.len || inst_dbg[pi] < 0 { return; }
+    var r = inst_dbg[pi];
+    inst_dbg[pi] = -1;
+    while r >= 0 {
+        let nx = dbgrecs[r].next;
+        scf_dbg_append(r, iv);
+        r = nx;
+    }
+}
+
+// insertDbgRecordBefore(DR, TI): at the end of TI's marker
+fn scf_dbg_append(r: i32, iv: i32) {
+    let i = inst_of(iv);
+    while inst_dbg.len <= i { inst_dbg.push(-1); }
+    dbgrecs[r].owner = iv;
+    dbgrecs[r].next = -1;
+    if inst_dbg[i] < 0 { inst_dbg[i] = r; return; }
+    var l = inst_dbg[i];
+    while dbgrecs[l].next >= 0 { l = dbgrecs[l].next; }
+    dbgrecs[l].next = r;
 }
 
 // CallBase::tryIntersectAttributes
@@ -1057,12 +1112,14 @@ fn hoist_common_code_from_successors(ti: i32, all_eq_only: bool) -> bool {
         if all_identical {
             it[0] = inst_next(it[0]);
             hoist_lockstep_dbg_records(ti, i1, others);
-            if inst_first_dbg(i1) >= 0 { scf_not_ported("hoisting instructions with debug records"); }
+            // moveBefore (not Preserving): I1's remaining records stay behind, I1 adopts TI's records
+            if inst_first_dbg(i1) >= 0 { dbg_records_to_next(i1); }
             inst_move_before(i1, ti);
+            scf_adopt_records(i1, ti);
             for k in 1..it.len {
                 let i2 = it[k];
                 it[k] = inst_next(i2);
-                if vals[i2].first_use >= 0 { rauw(i2, i1); }
+                scf_rauw(i2, i1);
                 and_ir_flags(i1, i2);
                 if is_callbase(i1) { try_intersect_attributes(i1, i2); }
                 combine_metadata_for_cse(i1, i2, true);
@@ -1113,9 +1170,10 @@ fn hoist_succ_identical_terminator(ti: i32, i1: i32, others: const i32[:], usucc
     hoist_lockstep_dbg_records(ti, i1, others);
     let nt = inst_clone(i1);
     inst_insert_before(nt, ti);
+    scf_adopt_records(nt, ti);
     if vals[nt].ty != T_VOID {
-        rauw(i1, nt);
-        for o in others { rauw(o, nt); }
+        scf_rauw(i1, nt);
+        for o in others { scf_rauw(o, nt); }
         cu_take_name(nt, i1);
     }
     // getMergedLocations(I1 and the others)
@@ -1323,17 +1381,24 @@ fn speculatively_execute_bb(bi: i32, thenbb: i32) -> bool {
         if spec_store_val < 0 || x != spec_store { scf_drop_location(x); }
         cu_drop_ub_implying_attrs_and_metadata(x);
         if position(eph_set, x) >= 0 {
-            rauw(x, c_poison(vals[x].ty));
+            scf_rauw(x, c_poison(vals[x].ty));
             scf_erase(x);
         }
         x = nx;
     }
+    // drop the records of ThenBB (all but dbg.assign)
     x = block_first(thenbb);
     while x >= 0 {
-        if inst_first_dbg(x) >= 0 { scf_not_ported("dropping debug records of speculated instructions"); }
+        var r = inst_first_dbg(x);
+        while r >= 0 {
+            let nr = dbgrecs[r].next;
+            if dbgrecs[r].kind as i64 == DR_ASSIGN { scf_not_ported("speculating instructions with dbg.assign records"); }
+            dbg_erase_record(r);
+            r = nr;
+        }
         x = inst_next(x);
     }
-    cu_splice_before(bi, block_first(thenbb), block_terminator(thenbb));
+    cu_splice_before_dbg(bi, block_first(thenbb), block_terminator(thenbb));
     if cond_ldst.len > 0 { scf_not_ported("hoisting conditional loads/stores (conditional faulting)"); }
     sb_at_nofold(bi);
     var p = block_first(endbb);
@@ -1629,7 +1694,7 @@ fn fold_two_entry_phi_node(pn0: i32) -> bool {
         ii = inst_next(ii);
         let v = scf_simplify_plain(pn);
         if v >= 0 {
-            rauw(pn, v);
+            scf_rauw(pn, v);
             scf_erase(pn);
             changed = true;
             continue;
@@ -1658,7 +1723,7 @@ fn fold_two_entry_phi_node(pn0: i32) -> bool {
         let tv = phi_value_for_block(p, iftrue);
         let fv = phi_value_for_block(p, iffalse);
         let sel = sb_select_fmf(ifcond, tv, fv, if is_fp_math_operator(p) { p } else { -1 }, "", dombi);
-        rauw(p, sel);
+        scf_rauw(p, sel);
         cu_take_name(sel, p);
         scf_erase(p);
     }
@@ -2529,14 +2594,14 @@ fn try_simplify_uncond_with_icmp_select(ici: i32, sel: i32) -> bool {
         set_op(ici, 0, vv);
         let v = scf_simplify_plain(ici);
         if v >= 0 {
-            rauw(ici, v);
+            scf_rauw(ici, v);
             scf_erase(ici);
         }
         return scf_request_resimplify();
     }
     if sw_find_case_value(si, ncv) >= 0 {
         let v = if p == P_EQ { scf_false() } else { scf_true() };
-        rauw(ici, v);
+        scf_rauw(ici, v);
         scf_erase(ici);
         return scf_request_resimplify();
     }
@@ -2548,10 +2613,10 @@ fn try_simplify_uncond_with_icmp_select(ici: i32, sel: i32) -> bool {
     var newc = st;
     if p == P_NE { let t = defc; defc = newc; newc = t; }
     if sel >= 0 {
-        rauw(sel, defc);
+        scf_rauw(sel, defc);
         scf_erase(sel);
     } else {
-        rauw(ici, defc);
+        scf_rauw(ici, defc);
     }
     scf_erase(ici);
     var ups: DTUpdate[>..<] = [];
@@ -3066,7 +3131,7 @@ fn merge_cleanup_pad(ri: i32) -> bool {
     let scp = block_first(ud);
     if iop(scp) != OP_CLEANUPPAD { return false; }
     let pcp = op(ri, 0);
-    rauw(scp, pcp);
+    scf_rauw(scp, pcp);
     scf_erase(scp);
     block_append_inst(inst_parent(ri), create_inst(OP_BR, T_VOID, [ud]));
     scf_erase(ri);
@@ -3089,7 +3154,7 @@ fn simplify_unreachable(ui: i32) -> bool {
         if prev < 0 { break; }
         if !guaranteed_to_transfer(prev) { break; }
         if inst_first_dbg(prev) >= 0 { scf_not_ported("dropping debug records before unreachable"); }
-        rauw(prev, c_poison(vals[prev].ty));
+        scf_rauw(prev, c_poison(vals[prev].ty));
         scf_erase(prev);
         changed = true;
     }
@@ -4541,12 +4606,12 @@ fn reuse_table_compare(user: i32, phibb: i32, rcb: i32, defv: i32, rval: const i
     each_pred(phibb) { p => if p != brb && cu_unique_pred(p) != brb { ok = false; } };
     if !ok { return; }
     if dc == fc {
-        rauw(user, rc);
+        scf_rauw(user, rc);
     } else {
         let x = create_inst(OP_XOR, vals[rc].ty, [rc, c_int(vals[rc].ty, 1)]);
         inst_insert_before(x, rcb);
         set_name(x, "inverted.cmp");
-        rauw(user, x);
+        scf_rauw(user, x);
     }
 }
 // ConstantFoldCompareInstOperands
@@ -4953,13 +5018,13 @@ fn sink_last_instruction(bbs: const i32[:]) {
     while u >= 0 {
         let nu = use_next(u);
         let pn = uses[u].user;
-        rauw(pn, i0);
+        scf_rauw(pn, i0);
         scf_erase(pn);
         u = nu;
     }
     for i in xs {
         if i == i0 { continue; }
-        rauw(i, i0);
+        scf_rauw(i, i0);
         if inst_first_dbg(i) >= 0 { scf_not_ported("sinking instructions with debug records"); }
         scf_erase(i);
     }
@@ -5173,7 +5238,7 @@ fn merge_compatible_invokes_impl(invs: const i32[:]) {
         block_append_inst(pb, br);
         if dl >= 0 { inst_set_md(br, MDK_DBG_SC, dl); }
         try_intersect_attributes(mi, ii);
-        rauw(ii, mi);
+        scf_rauw(ii, mi);
         scf_erase(ii);
     }
     if mdl >= 0 { inst_set_md(mi, MDK_DBG_SC, mdl); } else { inst_erase_md(mi, MDK_DBG_SC); }
@@ -5416,6 +5481,7 @@ fn simplifycfg_run(fv: i32, opts: SCOpts) -> u32 {
     scf_fn = fv;
     tli_cur_fn_sc(fv);
     tti_init_function(fv, globs[glob_of(fv)].module);
+    m2r_collect_records(fv);
     let save_tli = local_have_tli;
     local_have_tli = false;
     let require_dt = flag_bool("simplifycfg-require-and-preserve-domtree", false);
