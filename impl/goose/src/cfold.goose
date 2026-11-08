@@ -149,10 +149,37 @@ fn int_ptr_type_of(t: i32) -> i32 {
     return it;
 }
 
+// CastInst::isEliminableCastPair(..., &DL): the DataLayout-dependent cases 7 (ptrtoint, inttoptr) and 11
+// (inttoptr, ptrtoint/ptrtoaddr); the rest is eliminable_cast_pair (constfold.goose)
+fn eliminable_cast_pair_dl(first: i64, second: i64, src: i32, mid: i32, dst: i32) -> i64 {
+    let fb = first == OP_BITCAST;
+    let sb = second == OP_BITCAST;
+    if (fb && ty_is_vector(src) != ty_is_vector(mid)) || (sb && ty_is_vector(mid) != ty_is_vector(dst)) {
+        if !(fb && sb) { return 0; }
+    }
+    let c = CAST_RESULTS[(first - OP_TRUNC) * 14 + (second - OP_TRUNC)] as i64;
+    if c == 7 {
+        if src != dst { return 0; }
+        if cf_scalar_size(mid) < dl_ptr(types[ty_scalar(src)].n as i64).bits { return 0; }
+        return OP_BITCAST;
+    }
+    if c == 11 {
+        let ps = dl_ptr(types[ty_scalar(mid)].n as i64);
+        let ms = if second == OP_PTRTOADDR { ps.idx } else { ps.bits };
+        let ss = cf_scalar_size(src);
+        let ds = cf_scalar_size(dst);
+        if ms < ss && ms < ds { return 0; }
+        if ds < ss { return OP_TRUNC; }
+        if ds > ss { return OP_ZEXT; }
+        return OP_BITCAST;
+    }
+    return eliminable_cast_pair(first, second, src, mid, dst);
+}
+
 // ConstantFoldCastOperand
 recursive fn cf_fold_cast_operand(o: i64, c: i32, ty: i32) -> i32 {
     if is_cexpr(c) && is_cast_op(cexpr_op(c)) {
-        let nop = eliminable_cast_pair(cexpr_op(c), o, vals[op(c, 0)].ty, vals[c].ty, ty);
+        let nop = eliminable_cast_pair_dl(cexpr_op(c), o, vals[op(c, 0)].ty, vals[c].ty, ty);
         if nop != 0 { return cf_fold_cast_operand(nop, op(c, 0), ty); }
     }
     if o == OP_PTRTOADDR || o == OP_PTRTOINT {

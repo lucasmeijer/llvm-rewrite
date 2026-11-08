@@ -333,7 +333,8 @@ fn m_fneg(v: i32) -> i32 {
 fn m_any_zero_fp(v: i32) -> bool { m_cfp_pred(v, FPP_ANYZERO) }
 fn m_nan(v: i32) -> bool { m_cfp_pred(v, FPP_NAN) }
 fn m_inf(v: i32) -> bool { m_cfp_pred(v, FPP_INF) }
-fn m_fp_one(v: i32) -> bool { m_cfp_pred(v, FPP_ONE) }
+// m_FPOne() = m_SpecificFP(1.0) (specific_fpval: a scalar, or a splat without poison elements)
+fn m_fp_one(v: i32) -> bool { m_specific_fp(v, 1.0) }
 // m_SpecificFP(d): m_APFloat-free comparison against a splat/scalar ConstantFP equal to d
 fn m_specific_fp(v: i32, d: f64) -> bool {
     let c = m_apfloat(v);
@@ -370,24 +371,27 @@ fn inst_fmf(v: i32) -> u8 { if is_inst(v) { insts[inst_of(v)].fmf } else { 0 } }
 fn inst_pred(v: i32) -> i64 { insts[inst_of(v)].pred as i64 }
 
 // m_Not(X): xor X, -1 (m_c_Xor(m_AllOnes(), X)); returns X or -1.
+// BinaryOp_match (m_Add, m_Sub, m_Xor, m_c_Xor, ...) matches BinaryOperator instructions only in LLVM 23,
+// not ConstantExprs: use is_binop_match, not is_op, for those matchers.
+fn is_binop_match(v: i32, o: i64) -> bool { is_inst_op(v, o) }
 fn m_not(v: i32) -> i32 {
-    if !is_op(v, OP_XOR) { return -1; }
+    if !is_binop_match(v, OP_XOR) { return -1; }
     if m_all_ones(op(v, 0)) { return op(v, 1); }
     if m_all_ones(op(v, 1)) { return op(v, 0); }
     return -1;
 }
 fn m_not_of(v: i32, x: i32) -> bool { m_not(v) == x && x >= 0 }
 // m_Neg(X): sub 0, X (m_ZeroInt allowing poison); returns X or -1.
-fn m_neg(v: i32) -> i32 { if is_op(v, OP_SUB) && m_zero_int(op(v, 0)) { op(v, 1) } else { -1 } }
+fn m_neg(v: i32) -> i32 { if is_binop_match(v, OP_SUB) && m_zero_int(op(v, 0)) { op(v, 1) } else { -1 } }
 // m_c_BinOp(m_Specific(a), m_Value()) -> the other operand or -1
 fn m_c_binop_with(v: i32, o: i64, a: i32) -> i32 {
-    if !is_op(v, o) { return -1; }
+    if !is_binop_match(v, o) { return -1; }
     if op(v, 0) == a { return op(v, 1); }
     if op(v, 1) == a { return op(v, 0); }
     return -1;
 }
 fn m_c_binop_both(v: i32, o: i64, a: i32, b: i32) -> bool {
-    if !is_op(v, o) { return false; }
+    if !is_binop_match(v, o) { return false; }
     return (op(v, 0) == a && op(v, 1) == b) || (op(v, 0) == b && op(v, 1) == a);
 }
 // m_Intrinsic<ID>

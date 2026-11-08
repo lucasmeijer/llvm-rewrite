@@ -1910,6 +1910,7 @@ tests/imported/llvm/Analysis/ValueTracking/known-non-equal.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/known-non-zero-shr-add.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/known-non-zero-shr-add.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/known-non-zero.ll::roundtrip
+tests/imported/llvm/Analysis/ValueTracking/known-nonnull-at.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/known-nonnull-at.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/known-power-of-two-urem.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/known-power-of-two.ll::roundtrip

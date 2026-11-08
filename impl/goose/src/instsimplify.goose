@@ -3009,7 +3009,7 @@ recursive fn simplify_gep(srcty: i32, ptr: i32, mark: i64, n: i64, flags: u8, q:
                     let ci = c_int_words(ty_int(iw), (boff as! u64) & wmask64(iw), 0);
                     return ce_cast(OP_INTTOPTR, ci, gepty);
                 }
-                if is_op(lastix, OP_XOR) && is_op(op(lastix, 0), OP_PTRTOINT) && op(op(lastix, 0), 0) == sb && m_all_ones(op(lastix, 1)) && boff != 1 {
+                if is_binop_match(lastix, OP_XOR) && is_op(op(lastix, 0), OP_PTRTOINT) && op(op(lastix, 0), 0) == sb && m_all_ones(op(lastix, 1)) && boff != 1 {
                     let ci = c_int_words(ty_int(iw), ((boff - 1) as! u64) & wmask64(iw), 0);
                     return ce_cast(OP_INTTOPTR, ci, gepty);
                 }
@@ -3115,19 +3115,21 @@ recursive fn simplify_extractvalue(iv: i32, agg: i32, q: SQ) -> i32 {
 }
 
 // findScalarElement (VectorUtils.cpp)
+// llvm::findScalarElement (VectorUtils.cpp)
 recursive fn find_scalar_element(v: i32, en: i64) -> i32 {
     let vt = vals[v].ty;
-    if ty_kind(vt) == TK_FVEC && en >= ty_count(vt) { return c_undef(types[vt].a); }
+    if ty_kind(vt) == TK_FVEC && en >= ty_count(vt) { return c_poison(types[vt].a); }
     if is_constant(v) { return agg_elem(v, en); }
     if is_inst_op(v, OP_INSERTELEMENT) {
+        // m_ConstantInt(uint64_t&)
         let ci = m_constant_int(op(v, 2));
-        if ci < 0 { return -1; }
-        let ie = ap_zext64(ci_ap(ci)) as i64;
-        if ie == en { return op(v, 1); }
-        if en < ty_count(vt) && ie < ty_count(vt) { return find_scalar_element(op(v, 0), en); }
-        return -1;
+        if ci < 0 || ap_active_bits(ci_ap(ci)) > 64 { return -1; }
+        let ie = ap_lo64(ci_ap(ci));
+        if (en as u64) == ie { return op(v, 1); }
+        if op(v, 0) == v { return -1; }
+        return find_scalar_element(op(v, 0), en);
     }
-    if is_inst_op(v, OP_SHUFFLEVECTOR) && ty_kind(vals[op(v, 0)].ty) == TK_FVEC {
+    if is_inst_op(v, OP_SHUFFLEVECTOR) && ty_kind(vt) == TK_FVEC {
         let lw = ty_count(vals[op(v, 0)].ty);
         let x = insts[inst_of(v)];
         let iel = ints[x.aux + en] as i64;
@@ -3135,9 +3137,14 @@ recursive fn find_scalar_element(v: i32, en: i64) -> i32 {
         if iel < lw { return find_scalar_element(op(v, 0), iel); }
         return find_scalar_element(op(v, 1), iel - lw);
     }
-    // binop with a constant splat: m_Add(m_Value(Val), m_Zero()) etc.
-    if is_inst(v) && is_binary_op(iop(v)) && is_constant(op(v, 1)) && is_null_value(op(v, 1)) && iop(v) == OP_ADD {
-        return find_scalar_element(op(v, 0), en);
+    // m_Add(m_Value(Val), m_Constant(C)) with C's element EltNo null
+    if is_binop_match(v, OP_ADD) && is_constant(op(v, 1)) {
+        let e = agg_elem(op(v, 1), en);
+        if e >= 0 && is_null_value(e) { return find_scalar_element(op(v, 0), en); }
+    }
+    if ty_kind(vt) == TK_SVEC {
+        let sp = get_splat_value_v(v);
+        if sp >= 0 && en < ty_count(vt) { return sp; }
     }
     return -1;
 }
@@ -3204,7 +3211,7 @@ recursive fn simplify_cast(o: i64, v: i32, ty: i32, q: SQ, mr: i64) -> i32 {
         let st = vals[src].ty;
         let mt = vals[v].ty;
         if st == ty {
-            if eliminable_cast_pair(iop(v), o, st, mt, ty) == OP_BITCAST { return src; }
+            if eliminable_cast_pair_dl(iop(v), o, st, mt, ty) == OP_BITCAST { return src; }
         }
     }
     if o == OP_BITCAST && vals[v].ty == ty { return v; }
@@ -4235,6 +4242,15 @@ fn simplify_instruction(iv: i32) -> i32 {
 // ---------------------------------------------------------------------------------------------
 // The instsimplify pass (InstSimplifyPass.cpp runImpl)
 
+// isInstructionTriviallyDead(&I) without a TargetLibraryInfo (InstSimplifyPass passes none there; the
+// RecursivelyDeleteTriviallyDeadInstructions call gets SQ.TLI)
+fn is_trivially_dead_without_tli(i: i32) -> bool {
+    local_have_tli = false;
+    let r = is_instruction_trivially_dead(i);
+    local_have_tli = true;
+    return r;
+}
+
 fn instsimplify_run(fv: i32) -> u32 {
     tli_cur_fn = fv;
     local_have_tli = true;
@@ -4259,7 +4275,7 @@ fn instsimplify_run(fv: i32) -> u32 {
                 let i = it;
                 it = inst_next(it);
                 if !cur_empty && !vs_has(cur_set, i) { continue; }
-                if is_instruction_trivially_dead(i) {
+                if is_trivially_dead_without_tli(i) {
                     dead.push(i);
                     changed = true;
                 } else if vals[i].first_use >= 0 {
@@ -4274,7 +4290,7 @@ fn instsimplify_run(fv: i32) -> u32 {
                         ac_rauw(i, v);
                         rauw(i, v);
                         changed = true;
-                        if is_instruction_trivially_dead(i) { dead.push(i); }
+                        if is_trivially_dead_without_tli(i) { dead.push(i); }
                     }
                 }
             }

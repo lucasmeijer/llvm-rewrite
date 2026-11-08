@@ -526,7 +526,10 @@ recursive fn nonnull_from_dominating_condition(v: i32) -> bool {
         let nxt = uses[u].next;
         if !is_inst(ui) { u = nxt; continue; }
         if is_ptr && is_callbase(ui) {
-            if uno < cb_nargs(ui) && call_param_has_attr(ui, uno, AK_NonNull) && call_param_has_attr(ui, uno, AK_NoUndef) && dom_inst(ui, cx) { return true; }
+            // CallBase::paramHasNonNullAttr(ArgNo, AllowUndefOrPoison = false)
+            if uno < cb_nargs(ui) && ((call_param_has_attr(ui, uno, AK_NonNull) && call_param_has_attr(ui, uno, AK_NoUndef)) ||
+                                      (call_param_has_attr(ui, uno, AK_Dereferenceable) &&
+                                       !null_pointer_is_defined(inst_func(ui), ptr_as(vals[v].ty)))) && dom_inst(ui, cx) { return true; }
         }
         let uo = iop(ui);
         if (uo == OP_LOAD && op(ui, 0) == v) || (uo == OP_STORE && op(ui, 1) == v) {

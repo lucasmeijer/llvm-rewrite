@@ -104,7 +104,7 @@ fn would_be_trivially_dead(iv: i32) -> bool {
             }
             return true;
         }
-        if id == IID_assume && cb_nbundles(iv) == 0 {
+        if id == IID_assume && assume_with_empty_bundle(iv) {
             let c = cb_arg(iv, 0);
             if is_cint(c) { return !cint_is_zero(c); }
             return false;
@@ -123,6 +123,12 @@ fn would_be_trivially_dead(iv: i32) -> bool {
         if is_gvar(p) && (insts[inst_of(iv)].bits & 1) == 0 && globs[glob_of(p)].is_const != 0 { return true; }
     }
     return false;
+}
+
+// isAssumeWithEmptyBundle: every operand bundle is an "ignore" bundle
+fn assume_with_empty_bundle(iv: i32) -> bool {
+    for k in cb_nbundles(iv) { if sbytes(cb_bundle_tag(iv, k)) != "ignore" { return false; } }
+    return true;
 }
 
 fn is_instruction_trivially_dead(iv: i32) -> bool {
