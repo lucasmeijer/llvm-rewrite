@@ -22,6 +22,8 @@ import dtu;
 import analyses;
 import local;
 import loopsimplify;
+import memoryssa;
+import mssaupdater;
 import apint;
 import pm;
 import vt;
@@ -307,7 +309,14 @@ fn add_predecessor_to_block(succ: i32, newp: i32, existp: i32) {
         phi_add_incoming(i, phi_value_for_block(i, existp), newp);
         i = ni;
     }
+    if scf_mssau {
+        let mp = mssa_access_of(succ);
+        if mp >= 0 { mphi_add_incoming(mp, mphi_value_for_block(mp, existp), newp); }
+    }
 }
+// foldBranchToCommonDest's MemorySSAUpdater (LoopSimplify passes one when MemorySSA is cached) and AC = null
+var scf_mssau: bool = false;
+var scf_fbcd_no_ac: bool = false;
 
 // ---------------------------------------------------------------------------------------------
 // dominatesMergePoint
@@ -1899,7 +1908,7 @@ fn fold_branch_to_common_dest(bi: i32, have_tti: bool, bonus_threshold: i64) -> 
         if cur == c { continue; }
         if iop(cur) == OP_BR || iop(cur) == OP_CONDBR { continue; }
         if inst_iid(cur) == IID_pseudoprobe { continue; }
-        if !spec_safe(cur, cxt, true) { return false; }
+        if !spec_safe(cur, cxt, !scf_fbcd_no_ac) { return false; }
         if is_vector_op(cur) { saw_vec = true; }
         if !have_tti || tti_instruction_cost(cur, ck) != TCC_FREE {
             nbonus += pc;

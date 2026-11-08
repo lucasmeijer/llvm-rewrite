@@ -14,6 +14,8 @@
 // "nothing to do" checks are ported, so it only fails when LLVM would actually fold).
 import std;
 import ir;
+import dinfo;
+import apint;
 import irutil;
 import instinfo;
 import calls;
@@ -102,7 +104,7 @@ fn loop_start_loc(l: i32) -> i32 {
     if lid >= 0 {
         for k in 1..mds[lid].nops as i64 {
             let m = md_op(lid, k);
-            if m >= 0 && mds[m].kind == MK_DILOCATION { return m; }
+            if m >= 0 && mds[m].kind == MK_DI && di_kind(m) == DIK_LOCATION { return m; }
         }
     }
     let ph = loop_preheader(l);
@@ -682,197 +684,34 @@ recursive fn make_loop_invariant(l: i32, v: i32, ins_pt: i32, changed: bool&) ->
         if mud >= 0 { msu_move_to_place(mud, inst_parent(ip), MSP_BEFORE_TERMINATOR); }
     }
     drop_unknown_metadata(v, orig == loop_header(l));
-    if iop(v) == OP_SELECT && orig != loop_header(l) && inst_get_md(v, 2) >= 0 {
-        fatal("setExplicitlyUnknownBranchWeightsIfProfiled is not ported yet");
+    // setExplicitlyUnknownBranchWeightsIfProfiled(*I, "LoopInfo") when no !prof was kept
+    if iop(v) == OP_SELECT && orig != loop_header(l) && ls_fn_entry_count(inst_func(v)) > 0 {
+        let ops: i32[2] = [md_string("unknown"), md_string("LoopInfo")];
+        inst_set_md(v, md_kind_id("prof"), md_get(MK_TUPLE, -1, ops, false));
     }
     changed = true;
     return true;
 }
 
-// The checks of foldBranchToCommonDest (SimplifyCFG.cpp) before it transforms anything, with TTI = null.
-fn fold_branch_to_common_dest_would_fold(bi: i32) -> bool {
-    let bb = inst_parent(bi);
-    let c = op(bi, 0);
-    if !is_inst(c) { return false; }
-    let o = iop(c);
-    if !(o == OP_ICMP || o == OP_FCMP || is_binary_op(o) || o == OP_SELECT || o == OP_TRUNC) { return false; }
-    if inst_parent(c) != bb { return false; }
-    let fu = vals[c].first_use;
-    if fu < 0 || uses[fu].next >= 0 { return false; }
-    for k in 2 { if term_succ(bi, k) == bb { return false; } }
-    var any = false;
-    each_pred(bb) { pb =>
-        let pbi = block_terminator(pb);
-        if !any && pbi >= 0 && iop(pbi) == OP_CONDBR && pbi != bi {
-            // safeToMergeTerminators(BI, PBI)
-            var safe = true;
-            for k in 2 {
-                let s = term_succ(pbi, k);
-                if term_succ(bi, 0) != s && term_succ(bi, 1) != s { continue; }
-                var p = block_first(s);
-                while p >= 0 && iop(p) == OP_PHI {
-                    if phi_value_for_block(p, bb) != phi_value_for_block(p, pb) { safe = false; }
-                    p = inst_next(p);
-                }
-            }
-            // shouldFoldCondBranchesToCommonDestination
-            let common = term_succ(pbi, 0) == term_succ(bi, 0) || term_succ(pbi, 1) == term_succ(bi, 1) ||
-                         term_succ(pbi, 0) == term_succ(bi, 1) || term_succ(pbi, 1) == term_succ(bi, 0);
-            if safe && common { any = true; }
-        }
-    };
-    if !any { return false; }
-    // Bonus instructions: every instruction except the condition and the branch must be speculatable, and with
-    // TTI = null each costs one per predecessor (threshold 1).
-    var i = block_first(bb);
-    while i >= 0 {
-        if i != c && iop(i) != OP_BR && iop(i) != OP_CONDBR {
-            fatal("LoopSimplify: foldBranchToCommonDest with bonus instructions is not ported yet");
-        }
-        i = inst_next(i);
+// Function::getEntryCount()->getCount() (0 when absent)
+fn ls_fn_entry_count(fv: i32) -> u64 {
+    let g = glob_of(fv);
+    let k = md_kind_id("prof");
+    for j in globs[g].nmd {
+        if md_att[globs[g].md + 2 * j] != k { continue; }
+        let m = md_att[globs[g].md + 2 * j + 1];
+        if mds[m].nops < 2 { return 0; }
+        let s = md_op(m, 0);
+        if s < 0 || mds[s].kind != MK_STRING { return 0; }
+        let nm = sbytes(mds[s].extra);
+        if nm != "function_entry_count" { return 0; }
+        let o = md_op(m, 1);
+        if o < 0 || mds[o].kind != MK_VALUE { return 0; }
+        let c = mds[o].extra;
+        if vals[c].kind != VK_CINT { return 0; }
+        let n = ap_zext64(ci_ap(c));
+        if n == 0xFFFFFFFFFFFFFFFF { return 0; }
+        return n;
     }
-    return true;
-}
-
-// ---------------------------------------------------------------------------------------------
-// simplifyOneLoop / simplifyLoop
-
-fn simplify_one_loop(l: i32, worklist: i32[>..<]&, preserve_lcssa: bool) -> bool {
-    var changed = false;
-    loop {
-        // Delete edges from predecessors outside the loop to non-header blocks (they are unreachable).
-        var bad: i32[>..<] = [];
-        var bi: i64 = 0;
-        while bi < loop_nblocks(l) {
-            let bb = loop_block(l, bi);
-            bi++;
-            if bb == loop_header(l) { continue; }
-            bad.clear();
-            each_pred(bb) { p => if !loop_contains(l, p) && position(bad, p) < 0 { bad.push(p); } };
-            for p in bad {
-                change_to_unreachable(block_terminator(p), preserve_lcssa);
-                changed = true;
-            }
-        }
-        var exiting: i32[>..<] = [];
-        loop_exiting_blocks(l, exiting);
-        for eb in exiting {
-            let t = block_terminator(eb);
-            if iop(t) == OP_CONDBR {
-                let c = op(t, 0);
-                if vals[c].kind == VK_UNDEF || vals[c].kind == VK_POISON {
-                    let v: i64 = if loop_contains(l, term_succ(t, 0)) { 0 } else { 1 };
-                    set_op(t, 0, c_int(vals[c].ty, v));
-                    changed = true;
-                }
-            }
-        }
-        var preheader = loop_preheader(l);
-        if preheader < 0 {
-            preheader = insert_preheader_for_loop(l, preserve_lcssa);
-            if preheader >= 0 { changed = true; }
-        }
-        if form_dedicated_exit_blocks(l, preserve_lcssa) { changed = true; }
-        var latch = loop_latch(l);
-        if latch < 0 {
-            if loop_num_back_edges(l) < 8 {
-                let outer = separate_nested_loop(l, preheader, preserve_lcssa);
-                if outer >= 0 {
-                    worklist.push(outer);
-                    changed = true;
-                    continue;       // goto ReprocessLoop
-                }
-            }
-            latch = insert_unique_backedge_block(l, preheader);
-            if latch >= 0 { changed = true; }
-        }
-        // Simplify the header PHIs.
-        var i = block_first(loop_header(l));
-        while i >= 0 && iop(i) == OP_PHI {
-            let pn = i;
-            i = inst_next(i);
-            let v = simplify_phi(pn, true);
-            if v >= 0 {
-                if preserve_lcssa { fatal("LoopSimplify with PreserveLCSSA (replacementPreservesLCSSAForm) is not ported yet"); }
-                rauw(pn, v);
-                inst_erase_from_parent(pn);
-                changed = true;
-            }
-        }
-        // Merge exits through foldBranchToCommonDest when every exit goes to one block.
-        var unique_exit: i32 = -1;
-        var has_unique = true;
-        for eb in exiting {
-            let t = block_terminator(eb);
-            for k in term_nsucc(t) {
-                let s = term_succ(t, k);
-                if loop_contains(l, s) { continue; }
-                if unique_exit < 0 { unique_exit = s; } else if unique_exit != s { has_unique = false; }
-            }
-        }
-        if has_unique {
-            for eb in exiting {
-                if single_pred(eb) < 0 { continue; }
-                let t = block_terminator(eb);
-                if iop(t) != OP_CONDBR { continue; }
-                let ci = op(t, 0);
-                if !is_inst(ci) || (iop(ci) != OP_ICMP && iop(ci) != OP_FCMP) || inst_parent(ci) != eb { continue; }
-                var all_inv = true;
-                var any_inv = false;
-                var j = block_first(eb);
-                while j >= 0 && j != t {
-                    let nj = inst_next(j);
-                    if j != ci {
-                        let ip = if preheader >= 0 { block_terminator(preheader) } else { -1 };
-                        if !make_loop_invariant(l, j, ip, any_inv) { all_inv = false; break; }
-                    }
-                    j = nj;
-                }
-                if any_inv { changed = true; }
-                if !all_inv { continue; }
-                if !fold_branch_to_common_dest_would_fold(t) { continue; }
-                fatal("LoopSimplify: merging exits with foldBranchToCommonDest is not ported yet");
-            }
-        }
-        break;
-    }
-    return changed;
-}
-
-fn simplify_loop(l: i32, preserve_lcssa: bool) -> bool {
-    var changed = false;
-    var worklist: i32[>..<] = [];
-    worklist.push(l);
-    var idx: i64 = 0;
-    while idx < worklist.len {
-        let l2 = worklist[idx];
-        for k in loop_nsubs(l2) { worklist.push(loop_sub(l2, k)); }
-        idx++;
-    }
-    while worklist.len > 0 {
-        let x = worklist.pop();
-        if simplify_one_loop(x, worklist, preserve_lcssa) { changed = true; }
-    }
-    return changed;
-}
-
-// LoopSimplifyPass::run
-fn loop_simplify_run(fv: i32) -> u32 {
-    li_get(fv);
-    dt_get(fv, DT_DOM);
-    // AM.getCachedResult<MemorySSAAnalysis>(F): keep it up to date with a MemorySSAUpdater
-    let has_mssa = mssa_valid(fv);
-    ls_mssau = has_mssa;
-    if has_mssa { msu_reset(); }
-    var changed = false;
-    var k: i64 = 0;
-    while k < li_ntop(fv) {
-        if simplify_loop(li_top(fv, k), false) { changed = true; }
-        k++;
-    }
-    ls_mssau = false;
-    if !changed { return PA_ALL; }
-    var pa = ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_LOOPS) | ((1 as u32) << A_SCEV);
-    if has_mssa { pa |= (1 as u32) << A_MEMORYSSA; }
-    return pa;
+    return 0;
 }

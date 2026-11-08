@@ -96,7 +96,7 @@
   make-guards-explicit) except `vector-intrinsics.ll` (LoopSimplify's exit merging, loud). Sweeps (every
   round-tripping corpus file, whole-file and `--per-function`): `licm`, `loop-mssa(licm)` with
   `print<memoryssa>` after it (`-verify-memoryssa`), `loop-mssa(lnicm)`, `licm<no-allowspeculation>`,
-  `licm -licm-control-flow-hoisting=1`: 0 differs; the loud ones are LoopSimplify exit merging, X86 CPUs the TTI
+  `licm -licm-control-flow-hoisting=1`: 0 differs; the loud ones are X86 CPUs the TTI
   doesn't know (isFoldableInLoop's GEP cost), Darwin's shouldAssumeDSOLocal, simplifyPHINode with undef inputs
   (ssaupdater.goose's partial port). Byte-identical on the four tests/perf/compile programs, including
   `print<memoryssa>` after LICM. Speed: `perf` (scaling/loops-many): 0.6-0.9x LLVM's time, k 1.01 (LLVM 1.39);
@@ -167,6 +167,7 @@
 | `src/memoryssa.goose`, `src/phitrans.goose` | MemorySSA (build, walker, OptimizeUses, printers); PHITransAddr |
 | `src/aaeval.goose` | the aa-eval pass |
 | `src/mssaupdater.goose` | MemorySSAUpdater (insert/move/remove/CFG updates/cloning into a predecessor), MemorySSA's mutation API, verifyMemorySSA |
+| `src/loopsimplify_pass.goose` | LoopSimplify's driver (simplifyOneLoop, simplifyLoop, LoopSimplifyPass::run), split off so its exit merging can call simplifycfg.goose's foldBranchToCommonDest |
 | `src/looprotate.goose` | LoopRotate (LoopRotation.cpp, LoopRotationUtils.cpp), CodeMetrics for the header, MergeBlockIntoPredecessor with LoopInfo/MemorySSA/two successors |
 | `src/licm.goose`, `src/mustexec.goose`, `src/ast.goose` | LICM / LNICM (with LoadAndStorePromoter); ICFLoopSafetyInfo, InstructionPrecedenceTracking, colorEHFunclets; AliasSetTracker |
 | `src/earlycse.goose` | EarlyCSE (early-cse, early-cse<memssa>): scoped hash tables, combineMetadataForCSE, replaceDominatedUsesWith |
@@ -754,6 +755,17 @@ What they were:
 - LoopRotate uses VM_PASS0 (ValueMap) and VM_PASS1 (ValueMapMSSA, handed to msu_update_for_cloned_block_into_pred),
   VS_PASS2/VS_PASS3 (ephemeral values / visited). SplitCriticalEdge (breakcrit.goose) now takes `mssau` and
   `preserve_lcssa` (createPHIsForSplitLoopExit).
+- LoopSimplify's exit merging now runs SimplifyCFG's foldBranchToCommonDest (no DTU, TTI or AC: `scf_fbcd_no_ac`;
+  the cached MemorySSA through `scf_mssau`, addPredecessorToBlock's MemoryPhi update) and deletes the exiting block
+  as LLVM does (LoopInfo, DT children re-parented, MSSAU removeBlocks). `sweep --passes loop-simplify --per-function`
+  0 differs. Fixed on the way: Loop::getStartLoc never found the loop ID's DILocation (it tested a metadata kind
+  DILocations don't have), and makeLoopInvariant now sets `!prof !{"unknown", "LoopInfo"}` on hoisted selects in
+  profiled functions (setExplicitlyUnknownBranchWeightsIfProfiled).
+- `slots_invalidate` (after any changing pass) forgets the module's slot numbers too: a pass can add declarations
+  (LICM's `llvm.umin` for hoistMinMax) whose attribute groups a later per-function print must number, as LLVM's
+  fresh SlotTracker does (`loop-mssa(licm),print<memoryssa>` on ScalarEvolution/lt-overflow.ll).
+- Seen in sweeps, not ours to fix here: `early-cse<memssa>` leaves `bitcast (i8 42 to b8)` unfolded (byte types;
+  InstSimplify/load.ll, ConstProp/loads.ll; invisible after llvm-as canonicalization, visible in printers).
 - Trap found by the `loop-mssa(licm),print<scalar-evolution>` sweep: SCEV's pointer range asked isKnownNonZero
   with whatever `kb_cxt`/`sq_no_*` the last pass left (LICM left a context, so a dominating null check made a
   `malloc` result non-null). LLVM's query there is `isKnownNonZero(V, DL)`: no context, DT, AC or TLI. Any

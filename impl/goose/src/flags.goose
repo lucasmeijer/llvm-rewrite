@@ -172,8 +172,9 @@ fn slots_end() {
     slots_fn = -1;
 }
 
-// The IR changed: slot numbers must be recomputed before the next printout.
-fn slots_invalidate() { slots_end(); }
+// The IR changed: slot numbers must be recomputed before the next printout, the module's included (a pass can add
+// declarations or attribute sets; LLVM numbers the module afresh for every print).
+fn slots_invalidate() { slots_reset_all(); }
 
 fn errs_operand(v: i32, fv: i32, with_type: bool) {
     slots_begin(fv);

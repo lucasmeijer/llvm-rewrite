@@ -7558,6 +7558,7 @@ tests/imported/llvm/Transforms/LICM/update-scev.ll::opt
 tests/imported/llvm/Transforms/LICM/update-scev.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/variant-aainfo.ll::opt
 tests/imported/llvm/Transforms/LICM/variant-aainfo.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/vector-intrinsics.ll::opt
 tests/imported/llvm/Transforms/LICM/vector-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/volatile-alias.ll::opt
 tests/imported/llvm/Transforms/LICM/volatile-alias.ll::roundtrip
@@ -7772,6 +7773,7 @@ tests/imported/llvm/Transforms/LoopSimplify/2004-02-05-DominatorInfoCorruption.l
 tests/imported/llvm/Transforms/LoopSimplify/2004-02-05-DominatorInfoCorruption.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/2004-03-15-IncorrectDomUpdate.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/2004-03-15-IncorrectDomUpdate.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/2004-04-01-IncorrectDomUpdate.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/2004-04-01-IncorrectDomUpdate.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/2004-04-12-LoopSimplify-SwitchBackedges.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/2004-04-12-LoopSimplify-SwitchBackedges.ll::roundtrip
@@ -7790,7 +7792,9 @@ tests/imported/llvm/Transforms/LoopSimplify/convergent.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/convergent.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/dbg-loc.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/dbg-loc.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/do-preheader-dbg-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/do-preheader-dbg-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/do-preheader-dbg.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/do-preheader-dbg.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/drop-ub-attributes.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/drop-ub-attributes.ll::roundtrip
@@ -7812,7 +7816,9 @@ tests/imported/llvm/Transforms/LoopSimplify/pr30454.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/pr30454.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/pr33494.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/pr68285.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/preserve-llvm-loop-metadata.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/preserve-llvm-loop-metadata.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/profile-info.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/profile-info.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/single-backedge.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/unreachable-loop-pred.ll::opt

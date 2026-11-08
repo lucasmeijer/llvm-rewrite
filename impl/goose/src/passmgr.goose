@@ -25,6 +25,7 @@ import loopinfo;
 import cycleinfo;
 import breakcrit;
 import loopsimplify;
+import loopsimplify_pass;
 import lcssa;
 import aaeval;
 import memoryssa;
