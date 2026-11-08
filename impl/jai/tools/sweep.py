@@ -73,11 +73,13 @@ def main():
     res = collections.Counter()
     fails = collections.Counter()
     diffs = []
+    failed = []
     with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as ex:
         for path, st, msg in ex.map(one, [(f, pipe, analysis, extra) for f in files]):
             res[st] += 1
             if st == "JAI-FAIL":
                 fails[msg[:140]] += 1
+                failed.append((path, msg[:140]))
             if st == "DIFF":
                 diffs.append(path)
     print(dict(res))
@@ -85,6 +87,9 @@ def main():
         print("DIFF", d)
     for m, c in fails.most_common(show):
         print("%5d  %s" % (c, m))
+    if os.environ.get("SWEEP_FAILS"):
+        for p, m in failed:
+            print("FAIL", p, m)
 
 
 if __name__ == "__main__":

@@ -11,8 +11,8 @@
 
 // ---------------------------------------------------------------- analyses
 
-Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; }
-ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles"];
+Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; SCEV; }
+ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles", "scalar-evolution"];
 
 // PreservedAnalyses. `cfg` = preserveSet<CFGAnalyses>().
 Preserved :: struct {
@@ -42,6 +42,7 @@ Fn_Analyses :: struct {
     mssa: *Memory_SSA;
     li: *Loop_Info;
     ci: *Cycle_Info;
+    se: *Scev_State;   // ScalarEvolution (scev_print.jai get_scev)
 }
 fam: Table(Value_Id, Fn_Analyses);
 
@@ -142,6 +143,8 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     if e.mssa && (!analysis_survives(.MEMORYSSA, pa) || !e.dt || !e.ac) { mssa_free(e.mssa); e.mssa = null; }
     // a DemandedBits result points at the DominatorTree it was built with
     if e.db && !e.dt { db_free(e.db); e.db = null; }
+    // ScalarEvolution::invalidate: not preserved, or AssumptionCache / DominatorTree / LoopInfo invalidated
+    if e.se && (!analysis_survives(.SCEV, pa) || !e.ac || !e.dt || !e.li) { scev_free(e.se); e.se = null; }
 }
 fam_require :: (f: Value_Id, k: Analysis_Kind) {
     if k == {
@@ -152,6 +155,7 @@ fam_require :: (f: Value_Id, k: Analysis_Kind) {
         case .MEMORYSSA; get_memoryssa(f);
         case .LOOPS; get_loop_info(f);
         case .CYCLES; get_cycle_info(f);
+        case .SCEV; get_scev(f);
     }
 }
 fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
@@ -177,6 +181,8 @@ Pass_Kind :: enum u8 {
     PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
     // loop passes (loop_pm.jai)
     NO_OP_LOOP; LOOP_ROTATE;
+    // ScalarEvolution (scev_print.jai)
+    PRINT_SCEV; VERIFY_SCEV;
 }
 
 Pass_Info :: struct {
@@ -243,6 +249,10 @@ PASS_TABLE :: Pass_Info.[
     .{"require<target-ir>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<target-lib-info>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"verify<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
+    .{"print<scalar-evolution>", .FUNCTION, .PRINT_SCEV, true, .SCEV},
+    .{"verify<scalar-evolution>", .FUNCTION, .VERIFY_SCEV, true, .SCEV},
+    .{"require<scalar-evolution>", .FUNCTION, .REQUIRE, true, .SCEV},
+    .{"invalidate<scalar-evolution>", .FUNCTION, .INVALIDATE, true, .SCEV},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -521,8 +531,9 @@ cl_data_layout: string;                  // opt -data-layout (overrides the modu
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(14 + AA_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
     add_aa_cl_opts(list, 14);
+    add_scev_cl_opts(list, 14 + AA_CL_OPT_COUNT);
     list[11] = .{"rotation-max-header-size", .INT, null, *lr_opts.rotation_max_header_size, null};
     list[12] = .{"rotation-prepare-for-lto", .BOOL, *lr_opts.rotation_prepare_for_lto, null, null};
     list[13] = .{"enable-loop-header-duplication-at-minsize", .BOOL, *lr_opts.enable_header_dup_at_minsize, null, null};
@@ -668,6 +679,8 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
             aa_eval_run(f, aa_eval_counts_for(node), *sb);
             write_string(builder_to_string(*sb,, allocator = temp), to_standard_error = true);
             return PRESERVE_ALL;
+        case .PRINT_SCEV; scev_printer_run(f); return PRESERVE_ALL;
+        case .VERIFY_SCEV; scev_verifier_run(f); return PRESERVE_ALL;
         case .PRINT_LOOPS;
             sb: String_Builder; sb.allocator = temp;
             print_to_builder(*sb, "Loop info for function '%':\n", vname(f));

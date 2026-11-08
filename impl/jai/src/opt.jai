@@ -62,6 +62,14 @@
 #load "instcombine.jai";
 #load "loop_pm.jai";
 #load "pass_loop_rotate.jai";
+#load "scev.jai";
+#load "scev_create.jai";
+#load "scev_range.jai";
+#load "scev_btc.jai";
+#load "scev_implied.jai";
+#load "scev_guards.jai";
+#load "scev_pred.jai";
+#load "scev_print.jai";
 
 main :: () { opt_main(); }
 
