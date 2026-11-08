@@ -24,10 +24,12 @@ import instsimplify;
 import apint;
 import overflow;
 import ic;
+import ic_combining;
 import ic_builder;
 import ic_andorxor;
 import cfgutil;
 import datalayout;
+import memloc;
 
 // ---------------------------------------------------------------------------------------------
 // Small matchers (PatternMatch.h). BinaryOp_match and CastInst_match match instructions only.
@@ -921,17 +923,8 @@ fn fold_binop_into_select_or_phi(i: i32) -> i32 {
     return -1;
 }
 
-// foldVectorBinop(Inst)
-// Every fold in foldVectorBinop needs an operand that is a shufflevector or an intrinsic call (vector.insert,
-// vector.reverse, vp.reverse, vector.splice): without one it returns nullptr. Those folds are not ported.
-fn fold_vector_binop(i: i32) -> i32 {
-    if !ty_is_vector(vals[i].ty) { return -1; }
-    for k in 2 {
-        let x = op(i, k);
-        if is_inst_op(x, OP_SHUFFLEVECTOR) || inst_iid(x) != 0 { ic_not_ported("foldVectorBinop with shuffle or intrinsic operands"); }
-    }
-    return -1;
-}
+// foldVectorBinop(Inst): ported in ic_combining.goose
+fn fold_vector_binop(i: i32) -> i32 { fold_vector_binop_impl(i) }
 
 // getLosslessInvCast(C, InvCastTo, CastOp, DL): narrowed constant that extends back to C, or -1
 fn get_lossless_inv_cast(c: i32, to_ty: i32, cast_op: i64) -> i32 {
@@ -1383,9 +1376,10 @@ fn emit_gep_offset_raw(g: i32) -> i32 {
         let o = op(g, k);
         var stride: i64 = 0;
         var is_struct = false;
-        if k == 1 { stride = dl_alloc_size(t); }
+        var scalable = false;
+        if k == 1 { stride = dl_alloc_size(t); scalable = ty_size_scalable(t); }
         else if ty_is_struct(t) { is_struct = true; }
-        else { let et = ty_elem(t); stride = dl_gep_stride(t, et); }
+        else { let et = ty_elem(t); stride = dl_gep_stride(t, et); scalable = ty_size_scalable(et); }
         if is_constant(o) {
             if is_null_value(o) {
                 if k > 1 { if is_struct { t = ty_field(t, 0); } else { t = ty_elem(t); } }
@@ -1402,19 +1396,15 @@ fn emit_gep_offset_raw(g: i32) -> i32 {
         }
         if k > 1 { t = ty_elem(t); }
         var x = o;
-        if ty_is_vector(iit) && !ty_is_vector(vals[x].ty) {
-            var nm: u8[>..] = [];
-            nm.append(val_name(x));
-            x = icb_vector_splat(iit, x, nm);
-        }
+        if ty_is_vector(iit) && !ty_is_vector(vals[x].ty) { x = icb_vector_splat(iit, x, ""); }
         if vals[x].ty != iit {
             var nm: u8[>..] = [];
             nm.append(val_name(x)); nm.append(".c");
             x = icb_int_cast_c(x, iit, true, nm);
         }
-        if stride != 1 {
-            var sc = c_int_ty(ty_scalar(iit), stride as u64);
-            if ty_is_vector(iit) { sc = c_splat(iit, sc); }
+        if stride != 1 || scalable {
+            var sc = icb_type_size(ty_scalar(iit), stride as u64, scalable);
+            if ty_is_vector(iit) { sc = icb_vector_splat(iit, sc, ""); }
             var nm: u8[>..] = [];
             nm.append(gname); nm.append(".idx");
             x = icb_mul_nw(x, sc, nm, nuw, nsw);

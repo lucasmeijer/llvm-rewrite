@@ -39,5 +39,17 @@ out.append("// (LibFunc, AllocType bits: 1 OpNewLike 2 MallocLike 4 StrDupLike, 
 out.append("let TLI_ALLOC_DATA: i32[] = [" + ", ".join(f"{idx[a[0]]}, {ty[a[1]]}, {a[2]}, {a[3]}, {a[4]}, {a[5]}" for a in alloc) + "];")
 out.append("// (LibFunc, NumParams)")
 out.append("let TLI_FREE_DATA: i32[] = [" + ", ".join(f"{idx[f[0]]}, {f[1]}" for f in free) + "];")
+# MallocFamily of each AllocationFnData / FreeFnData entry (same order as the tables above); names are
+# mangledNameForMallocFamily
+fams = re.findall(r"^\s*(\w+),", re.search(r"enum class MallocFamily \{(.*?)\};", mb, re.S).group(1), re.M)
+famname = dict(re.findall(r"case MallocFamily::(\w+):\s*return \"([^\"]*)\";", mb))
+afam = re.findall(r"\{LibFunc_\w+,\s*\{\w+,\s*\d+,\s*-?\d+,\s*-?\d+,\s*-?\d+,\s*MallocFamily::(\w+)\}", mb)
+ffam = re.findall(r"\{LibFunc_\w+,\s*\{\d+,\s*MallocFamily::(\w+)\}", mb)
+assert len(afam) == len(alloc) and len(ffam) == len(free)
+out.append("// MallocFamily names (mangledNameForMallocFamily), in enum order")
+out.append("let TLI_FAMILY_NAMES: const u8[:][] = [" + ", ".join('"' + famname[f] + '"' for f in fams) + "];")
+out.append("// MallocFamily index of each TLI_ALLOC_DATA entry and of each TLI_FREE_DATA entry")
+out.append("let TLI_ALLOC_FAMILY: i32[] = [" + ", ".join(str(fams.index(f)) for f in afam) + "];")
+out.append("let TLI_FREE_FAMILY: i32[] = [" + ", ".join(str(fams.index(f)) for f in ffam) + "];")
 open(sys.argv[1] if len(sys.argv) > 1 else "src/gen_tli.goose", "w").write("\n".join(out) + "\n")
 print(len(defs), "lib funcs,", len(alloc), "alloc,", len(free), "free")

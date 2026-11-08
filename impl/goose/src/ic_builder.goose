@@ -19,6 +19,7 @@ import autoupgrade;
 import constfold;
 import cfold;
 import pm;
+import datalayout;
 import instsimplify;
 import ic;
 import ic_negator;
@@ -297,3 +298,160 @@ fn icb_intrinsic(id: i64, ov: const i32[:], argsv: const i32[:], name: const u8[
 // CreateBinaryIntrinsic(ID, LHS, RHS, FMFSource, Name): overloaded on the operand type
 fn icb_binary_intrinsic(id: i64, a: i32, b: i32, name: const u8[:]) -> i32 { icb_intrinsic(id, [vals[a].ty], [a, b], name) }
 fn icb_unary_intrinsic(id: i64, a: i32, name: const u8[:]) -> i32 { icb_intrinsic(id, [vals[a].ty], [a], name) }
+
+// ---------------------------------------------------------------------------------------------
+// Memory, aggregate and vector instructions (IRBuilder::CreateLoad/Store/Alloca/ExtractValue/InsertValue/
+// ExtractElement/InsertElement/ShuffleVector/PHI/AddrSpaceCast/BitOrPointerCast), added for the ports of
+// InstCombineLoadStoreAlloca.cpp, InstCombineVectorOps.cpp and InstructionCombining.cpp.
+
+// log2(align)+1 encoding of Inst.align
+fn icb_align_code(al: i64) -> u8 { if al <= 0 { 0 } else { (log2_exact(al) + 1) as u8 } }
+fn icb_inst_align(i: i32) -> i64 { let a = insts[inst_of(i)].align; return if a == 0 { 1 } else { 1 << (a - 1) as i64 }; }
+// copy LoadInst/StoreInst::getProperties() (alignment, volatile, ordering, syncscope) from `from`
+fn icb_copy_mem_props(dst: i32, from: i32) {
+    let d = inst_of(dst);
+    let s = inst_of(from);
+    insts[d].align = insts[s].align;
+    insts[d].bits = insts[s].bits & 1;
+    insts[d].ord = insts[s].ord;
+    insts[d].ss = insts[s].ss;
+}
+// new LoadInst(Ty, Ptr, Name, Props) (unattached)
+fn ic_new_load_like(ty: i32, p: i32, from: i32) -> i32 {
+    let li = create_inst(OP_LOAD, ty, [p]);
+    icb_copy_mem_props(li, from);
+    return li;
+}
+// CreateLoad(Ty, Ptr, Props, Name)
+fn icb_load_like(ty: i32, p: i32, from: i32, name: const u8[:]) -> i32 { icb_insert(ic_new_load_like(ty, p, from), name) }
+// CreateAlignedLoad(Ty, Ptr, Align, Name)
+fn icb_aligned_load(ty: i32, p: i32, al: i64, name: const u8[:]) -> i32 {
+    let li = create_inst(OP_LOAD, ty, [p]);
+    insts[inst_of(li)].align = icb_align_code(al);
+    return icb_insert(li, name);
+}
+// CreateLoad(Ty, Ptr): the ABI alignment of Ty
+fn icb_load(ty: i32, p: i32, name: const u8[:]) -> i32 { icb_aligned_load(ty, p, dl_align(ty, true), name) }
+// new StoreInst(V, Ptr, Props) (unattached)
+fn ic_new_store_like(v: i32, p: i32, from: i32) -> i32 {
+    let si = create_inst(OP_STORE, T_VOID, [v, p]);
+    icb_copy_mem_props(si, from);
+    return si;
+}
+fn icb_store_like(v: i32, p: i32, from: i32) -> i32 { icb_insert(ic_new_store_like(v, p, from), "") }
+// CreateAlignedStore(Val, Ptr, Align)
+fn icb_aligned_store(v: i32, p: i32, al: i64) -> i32 {
+    let si = create_inst(OP_STORE, T_VOID, [v, p]);
+    insts[inst_of(si)].align = icb_align_code(al);
+    return icb_insert(si, "");
+}
+// CreateAlloca(Ty, AddrSpace, ArraySize = null, Name): ArraySize i32 1, the preferred alignment of Ty
+fn icb_alloca(ty: i32, as_: i64, name: const u8[:]) -> i32 {
+    let ai = create_inst(OP_ALLOCA, ty_ptr(as_), [c_int(T_I32, 1)]);
+    insts[inst_of(ai)].ty2 = ty;
+    insts[inst_of(ai)].as_ = as_ as i32;
+    insts[inst_of(ai)].align = icb_align_code(dl_align(ty, false));
+    return icb_insert(ai, name);
+}
+// ExtractValueInst::getIndexedType
+fn icb_agg_indexed_type(t0: i32, idxs: const i32[:]) -> i32 {
+    var t = t0;
+    for x in idxs { if ty_is_struct(t) { t = ty_field(t, x as i64); } else { t = ty_elem(t); } }
+    return t;
+}
+// ExtractValueInst::Create(Agg, Idxs) (unattached)
+fn ic_new_extract_value(agg: i32, idxs: const i32[:]) -> i32 {
+    let e = create_inst(OP_EXTRACTVALUE, icb_agg_indexed_type(vals[agg].ty, idxs), [agg]);
+    let at = ints.len as i32;
+    for x in idxs { ints.push(x); }
+    insts[inst_of(e)].aux = at;
+    insts[inst_of(e)].naux = idxs.len as i32;
+    return e;
+}
+// InsertValueInst::Create(Agg, Val, Idxs) (unattached)
+fn ic_new_insert_value(agg: i32, v: i32, idxs: const i32[:]) -> i32 {
+    let e = create_inst(OP_INSERTVALUE, vals[agg].ty, [agg, v]);
+    let at = ints.len as i32;
+    for x in idxs { ints.push(x); }
+    insts[inst_of(e)].aux = at;
+    insts[inst_of(e)].naux = idxs.len as i32;
+    return e;
+}
+// CreateExtractValue(Agg, Idxs, Name)
+fn icb_extract_value(agg: i32, idxs: const i32[:], name: const u8[:]) -> i32 {
+    if is_constant(agg) {
+        let f = cf_extractvalue(agg, idxs);
+        if f >= 0 { return f; }
+    }
+    return icb_insert(ic_new_extract_value(agg, idxs), name);
+}
+// CreateInsertValue(Agg, Val, Idxs, Name)
+fn icb_insert_value(agg: i32, v: i32, idxs: const i32[:], name: const u8[:]) -> i32 {
+    if is_constant(agg) && is_constant(v) {
+        let f = cf_insertvalue(agg, v, idxs);
+        if f >= 0 { return f; }
+    }
+    return icb_insert(ic_new_insert_value(agg, v, idxs), name);
+}
+// ExtractElementInst::Create(Vec, Idx) (unattached)
+fn ic_new_extract_element(vec: i32, idx: i32) -> i32 { create_inst(OP_EXTRACTELEMENT, ty_elem(vals[vec].ty), [vec, idx]) }
+// InsertElementInst::Create(Vec, Elt, Idx) (unattached)
+fn ic_new_insert_element(vec: i32, elt: i32, idx: i32) -> i32 { create_inst(OP_INSERTELEMENT, vals[vec].ty, [vec, elt, idx]) }
+// CreateExtractElement(Vec, Idx, Name)
+fn icb_extract_element(vec: i32, idx: i32, name: const u8[:]) -> i32 {
+    if is_constant(vec) && is_constant(idx) { return tf_fold(ce_extractelement(vec, idx)); }
+    return icb_insert(ic_new_extract_element(vec, idx), name);
+}
+fn icb_extract_element_k(vec: i32, k: u64, name: const u8[:]) -> i32 { icb_extract_element(vec, c_int(T_I64, k as i64), name) }
+// CreateInsertElement(Vec, NewElt, Idx, Name)
+fn icb_insert_element(vec: i32, elt: i32, idx: i32, name: const u8[:]) -> i32 {
+    if is_constant(vec) && is_constant(elt) && is_constant(idx) { return tf_fold(ce_insertelement(vec, elt, idx)); }
+    return icb_insert(ic_new_insert_element(vec, elt, idx), name);
+}
+fn icb_insert_element_k(vec: i32, elt: i32, k: u64, name: const u8[:]) -> i32 { icb_insert_element(vec, elt, c_int(T_I64, k as i64), name) }
+// new ShuffleVectorInst(V1, V2, Mask) (unattached); the mask is copied into the pool
+fn ic_new_shuffle(v1: i32, v2: i32, mask: const i32[:]) -> i32 {
+    let t1 = vals[v1].ty;
+    let rt = ty_vector(ty_elem(t1), mask.len, ty_kind(t1) == TK_SVEC);
+    let s = create_inst(OP_SHUFFLEVECTOR, rt, [v1, v2]);
+    var tmp: i32[>..<] = [];
+    for m in mask { tmp.push(m); }
+    let at = ints.len as i32;
+    for m in tmp { ints.push(m); }
+    insts[inst_of(s)].aux = at;
+    insts[inst_of(s)].naux = mask.len as i32;
+    return s;
+}
+// new ShuffleVectorInst(V, Mask): the second operand is poison
+fn ic_new_shuffle1(v: i32, mask: const i32[:]) -> i32 { ic_new_shuffle(v, c_poison(vals[v].ty), mask) }
+// CreateShuffleVector(V1, V2, Mask, Name)
+fn icb_shuffle(v1: i32, v2: i32, mask: const i32[:], name: const u8[:]) -> i32 {
+    if is_constant(v1) && is_constant(v2) {
+        var tmp: i32[>..<] = [];
+        for m in mask { tmp.push(m); }
+        return tf_fold(ce_shufflevector(v1, v2, tmp));
+    }
+    return icb_insert(ic_new_shuffle(v1, v2, mask), name);
+}
+fn icb_shuffle1(v: i32, mask: const i32[:], name: const u8[:]) -> i32 { icb_shuffle(v, c_poison(vals[v].ty), mask, name) }
+// CreatePHI(Ty, NumReservedValues, Name)
+fn icb_phi(ty: i32, name: const u8[:]) -> i32 { icb_insert(create_inst(OP_PHI, ty, []), name) }
+// CreateAddrSpaceCast(V, DestTy, Name)
+fn icb_addrspacecast(v: i32, ty: i32, name: const u8[:]) -> i32 { icb_cast(OP_ADDRSPACECAST, v, ty, name) }
+fn icb_bitcast(v: i32, ty: i32, name: const u8[:]) -> i32 { icb_cast(OP_BITCAST, v, ty, name) }
+// CreateBitOrPointerCast(V, DestTy, Name)
+fn icb_bit_or_pointer_cast(v: i32, ty: i32, name: const u8[:]) -> i32 {
+    if vals[v].ty == ty { return v; }
+    let st = vals[v].ty;
+    if ty_kind(ty_scalar(st)) == TK_PTR && ty_kind(ty_scalar(ty)) == TK_INT { return icb_cast(OP_PTRTOINT, v, ty, name); }
+    if ty_kind(ty_scalar(st)) == TK_INT && ty_kind(ty_scalar(ty)) == TK_PTR { return icb_cast(OP_INTTOPTR, v, ty, name); }
+    return icb_cast(OP_BITCAST, v, ty, name);
+}
+
+// CreateTypeSize(Ty, Size): vscale * min for a scalable size (CreateVScaleMultiple: CreateNUWMul)
+fn icb_type_size(ty: i32, min: u64, scalable: bool) -> i32 {
+    if !scalable || min == 0 { return c_int_ty(ty, min); }
+    let vs = icb_intrinsic(IID_vscale, [ty], [], "");
+    if min == 1 { return vs; }
+    return icb_binop_fl(OP_MUL, vs, c_int_ty(ty, min), "", FL_NUW);
+}

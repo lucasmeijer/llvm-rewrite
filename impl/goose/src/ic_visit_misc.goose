@@ -23,6 +23,9 @@ import ic_builder;
 import ic_common;
 import autoupgrade;
 import apint;
+import memorybuiltins;
+import ic_combining;
+import ic_loadstorealloca;
 
 var ic_experiment_lenient: bool = false;
 fn ic_visit_other(i: i32) -> i32 {
@@ -68,7 +71,8 @@ fn visit_call(ci: i32) -> i32 {
         is_ops.resize(mark);
         if v >= 0 { return ic_replace_inst_uses_with(ci, v); }
     }
-    if get_freed_operand(ci) >= 0 { ic_not_ported("visitFree"); }
+    let freed = get_freed_operand(ci);
+    if freed >= 0 { return visit_free(ci, freed); }
     let fv = inst_func(ci);
     if func_has_fn_attr(fv, AK_NoUnwind) && !call_has_fn_attr(ci, AK_NoUnwind) {
         ic_call_set_does_not_throw(ci);
@@ -103,17 +107,32 @@ fn aset_add_enum(s: i32, kind: i64) -> i32 {
     return aset_get(xs);
 }
 
-// annotateAnyAllocSite(Call, TLI): the alignment part (getAllocAlignment via allocalign); allocation
-// functions known to the TLI and allocsize (getAllocSize) fail loudly.
+// annotateAnyAllocSite(Call, TLI)
 fn ic_annotate_any_alloc_site(ci: i32) -> bool {
+    var changed = false;
     if ty_kind(vals[ci].ty) != TK_PTR { return false; }
-    if is_alloc_like_fn(ci) || call_has_fn_attr(ci, AK_AllocSize) { ic_not_ported("annotateAnyAllocSite"); }
-    let a = call_arg_with_attr(ci, AK_AllocAlign);
-    if a < 0 || m_constant_int(a) < 0 { return false; }
+    let ok, size = mb_get_alloc_size(ci, false);
+    if ok && !ap_is_zero(size) {
+        let bytes = ap_limited(size, 0xFFFFFFFFFFFFFFFF);
+        if cb_has_ret_attr(ci, AK_NonNull) {
+            changed = !cb_has_ret_attr(ci, AK_Dereferenceable);
+            ic_call_add_ret_attr(ci, attr_int(AK_Dereferenceable, bytes));
+        } else {
+            changed = !cb_has_ret_attr(ci, AK_DereferenceableOrNull);
+            ic_call_add_ret_attr(ci, attr_int(AK_DereferenceableOrNull, bytes));
+        }
+    }
+    // getAllocAlignment(Call, TLI)
+    var a: i32 = -1;
+    let k = mb_alloc_data(ci, MB_ANY);
+    if k >= 0 && TLI_ALLOC_DATA[k + 5] >= 0 { a = op(ci, TLI_ALLOC_DATA[k + 5] as i64); }
+    else { a = call_arg_with_attr(ci, AK_AllocAlign); }
+    if a < 0 { return changed; }
+    if m_constant_int(a) < 0 { return changed; }
     let av = ci_ap(a);
-    if !ap_ult_u64(av, (1 as u64) << 32) { return false; }
+    if !ap_ult_u64(av, (1 as u64) << 32) { return changed; }
     let al = ap_zext64(av);
-    if al == 0 || (al & (al - 1)) != 0 { return false; }
+    if al == 0 || (al & (al - 1)) != 0 { return changed; }
     // Call.getRetAlign(): the call site's, else the callee's
     let l = insts[inst_of(ci)].attrs;
     var ex = aset_int(alist_ret(l), AK_Alignment);
@@ -122,18 +141,22 @@ fn ic_annotate_any_alloc_site(ci: i32) -> bool {
         if cf >= 0 { ex = aset_int(alist_ret(globs[glob_of(cf)].attrs), AK_Alignment); }
     }
     if ex == 0 { ex = 1; }
-    if al <= ex { return false; }
+    if al <= ex { return changed; }
+    ic_call_add_ret_attr(ci, attr_int(AK_Alignment, al));
+    return true;
+}
+// CallBase::addRetAttr(Attr): replaces an attribute of the same kind
+fn ic_call_add_ret_attr(ci: i32, at: i32) {
+    let l = insts[inst_of(ci)].attrs;
     var sets: i32[>..<] = [];
     let n = if l == 0 { 0 } else { alists[l].n as i64 };
-    let need: i64 = 2;
-    for j in 0..(if n > need { n } else { need }) {
+    for j in 0..(if n > 2 { n } else { 2 }) {
         var st: i32 = 0;
         if j < n { st = alist_runs[alists[l].at + j]; }
-        if j == 1 { st = aset_with(st, attr_int(AK_Alignment, al)); }
+        if j == 1 { st = aset_with(st, at); }
         sets.push(st);
     }
     insts[inst_of(ci)].attrs = alist_get(sets);
-    return true;
 }
 
 // visitCallBase(Call) for a call to an ordinary function
@@ -181,29 +204,12 @@ fn visit_call_base(ci: i32) -> i32 {
     let kct = md_kind_id("callee_type");
     if inst_get_md(ci, kct) >= 0 && !indirect { inst_erase_md(ci, kct); changed = true; }
     if cb_nbundles(ci) > 0 { ic_not_ported("calls with operand bundles in visitCallBase"); }
+    if is_removable_alloc(ci) { return visit_alloc_site(ci); }
     return if changed { ci } else { -1 };
 }
 
 // ---------------------------------------------------------------------------------------------
 // Loads and stores
-
-// simplifyNonNullOperand(V, HasDereferenceable, Depth)
-fn ic_simplify_non_null_operand(v: i32, deref: bool, depth: i64) -> i32 {
-    if is_select_inst(v) {
-        if vals[op(v, 1)].kind == VK_CNULL { return op(v, 2); }
-        if vals[op(v, 2)].kind == VK_CNULL { return op(v, 1); }
-    }
-    if !one_use(v) { return -1; }
-    if depth == 3 { return -1; }
-    if is_inst_op(v, OP_GEP) || is_phi_inst(v) { ic_not_ported("simplifyNonNullOperand through GEPs/PHIs"); }
-    return -1;
-}
-
-// mergeStoreIntoSuccessor(SI)
-fn ic_merge_store_into_successor(si: i32) -> bool {
-    ic_not_ported("mergeStoreIntoSuccessor");
-    return false;
-}
 
 // AttributeList::addParamAttribute(Ctx, ArgNo, Attr) on a call site
 fn ic_call_add_param_attr(ci: i32, k: i64, a: i32) {

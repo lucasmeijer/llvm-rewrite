@@ -4440,15 +4440,9 @@ fn can_rewrite_gep_as_offset(start: i32, base: i32, nw0: u8) -> bool, u8 {
             for k in nops(pn) { if !icc_explored_has(op(pn, k)) { wl.push(op(pn, k)); } }
         }
     }
-    for val in icc_explored {
-        var u = vals[val].first_use;
-        while u >= 0 {
-            let us = uses[u].user;
-            u = uses[u].next;
-            if !is_inst(val) || val == base || val == us || !is_phi_inst(us) || !icc_explored_has(us) { continue; }
-            if inst_parent(us) == inst_parent(val) { return false, nw; }
-        }
-    }
+    // The final "PHI node users" check never rejects anything in LLVM 23: it iterates Val->uses() and
+    // dyn_casts each Use, whose implicit conversion yields Val itself (not the user), so PHI is either null
+    // or equal to Inst and every iteration `continue`s (InstCombineCompares.cpp canRewriteGEPAsOffset).
     return true, nw;
 }
 // setInsertionPoint(Builder, V, Before)

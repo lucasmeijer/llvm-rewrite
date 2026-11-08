@@ -46,6 +46,9 @@ import ic_demanded;
 import ic_visit_misc;
 import ic_select;
 import ic_phi;
+import ic_loadstorealloca;
+import ic_combining;
+import ic_vectorops;
 
 fn ic_not_ported(what: const u8[:]) { fatal(str("InstCombine: ", what, " is not ported yet")); }
 
@@ -318,7 +321,7 @@ fn ic_handle_unreachable_from(first: i32, wl: i32[>..<]&) {
     let term = block_terminator(bb);
     // reverse order from before the terminator down to `first`
     var it = inst_prev(term);
-    var stop = false;
+    var stop = first == term;
     while it >= 0 && !stop {
         let inst = it;
         it = inst_prev(it);
@@ -731,6 +734,18 @@ fn ic_visit(i: i32) -> i32 {
         OP_RET => { return visit_return(i); },
         OP_BR => { return visit_uncond_br(i); },
         OP_CONDBR => { return visit_cond_br(i); },
+        OP_ALLOCA => { return visit_alloca(i); },
+        OP_LOAD => { return visit_load(i); },
+        OP_STORE => { return visit_store(i); },
+        OP_GEP => { return visit_gep(i); },
+        OP_SWITCH => { return visit_switch(i); },
+        OP_EXTRACTVALUE => { return visit_extract_value(i); },
+        OP_INSERTVALUE => { return visit_insert_value(i); },
+        OP_LANDINGPAD => { return visit_landingpad(i); },
+        OP_FREEZE => { return visit_freeze(i); },
+        OP_EXTRACTELEMENT => { return visit_extract_element(i); },
+        OP_INSERTELEMENT => { return visit_insert_element(i); },
+        OP_SHUFFLEVECTOR => { return visit_shuffle_vector(i); },
         OP_UNREACHABLE => { ic_remove_insts_before_unreachable(i); return -1; },
         _ => { return ic_visit_other(i); },
     }
@@ -757,6 +772,7 @@ fn instcombine_run(fv: i32, verify_fixpoint: bool, max_iter: i64) -> u32 {
     vt_invalidate_assumes();
     ac_invalidate();
     ic_fn = fv;
+    ic_aa_fn = -1;
     ic_experiment_lenient = flag_bool("goose-ic-lenient", false);
     let vf = verify_fixpoint && aset_find_str(alist_fn(func_attrs(fv)), "instcombine-no-verify-fixpoint") < 0;
     if flag_bool("instcombine-lower-dbg-declare", true) {

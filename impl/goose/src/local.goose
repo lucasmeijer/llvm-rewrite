@@ -140,22 +140,32 @@ fn is_instruction_trivially_dead(iv: i32) -> bool {
 // aliases are not looked through.
 fn strip_ptr_casts(v0: i32) -> i32 {
     var v = v0;
+    if ty_kind(vals[v].ty) != TK_PTR { return v; }
+    var steps: i64 = 0;
     loop {
+        steps++;
+        if steps > 100000 { return v; }   // a cycle in unreachable code (LLVM's Visited set)
         let k = vals[v].kind;
-        if k == VK_INST {
-            let o = iop(v);
-            if o == OP_BITCAST || o == OP_ADDRSPACECAST { v = op(v, 0); continue; }
-            if o == OP_GEP && gep_all_zero(v) { v = op(v, 0); continue; }
-            return v;
+        var o: i64 = -1;
+        if k == VK_INST { o = iop(v); } else if k == VK_CEXPR { o = csts[vals[v].sub].op as i64; }
+        if o == OP_GEP {
+            if !gep_all_zero(v) { return v; }
+            v = op(v, 0);
+            continue;
         }
-        if k == VK_CEXPR {
-            let o = csts[vals[v].sub].op as i64;
-            if o == OP_BITCAST || o == OP_ADDRSPACECAST { v = op(v, 0); continue; }
-            if o == OP_GEP && gep_all_zero(v) { v = op(v, 0); continue; }
-            return v;
+        if o == OP_BITCAST {
+            if ty_kind(vals[op(v, 0)].ty) != TK_PTR { return v; }
+            v = op(v, 0);
+            continue;
+        }
+        if o == OP_ADDRSPACECAST { v = op(v, 0); continue; }
+        if k == VK_INST && is_callbase(v) {
+            let rv = returned_arg_operand(v);
+            if rv >= 0 { v = rv; continue; }
         }
         return v;
     }
+    return v;
 }
 fn gep_all_zero(v: i32) -> bool {
     for k in 1..nops(v) { let x = op(v, k); if !(is_constant(x) && is_null_value(x)) { return false; } }

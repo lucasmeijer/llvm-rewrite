@@ -451,7 +451,7 @@ recursive fn cf_fold_load_through_bitcast(c0: i32, dty: i32) -> i32 {
         if ssz < dsz { return -1; }
         let u = cf_fold_load_from_uniform(c, dty);
         if u >= 0 { return u; }
-        if ssz == dsz {
+        if ssz == dsz && cf_is_nonintegral_ptr_ty(st) == cf_is_nonintegral_ptr_ty(dty) {
             var o = OP_BITCAST;
             if ty_is_int(st) && ty_kind(dty) == TK_PTR { o = OP_INTTOPTR; }
             else if ty_kind(st) == TK_PTR && ty_is_int(dty) { o = OP_PTRTOINT; }
@@ -717,7 +717,7 @@ recursive fn symbolic_gep(srcty: i32, rty: i32, flags0: u8, inr: i32, mark: i64,
         let b = op(ptr, 0);
         if vals[b].kind == VK_CINT && !ty_is_vector(vals[b].ty) { base_int = ap_lo64(ap_zext_or_trunc(ci_ap(b), pbits)); }
     }
-    if (is_null_value(ptr) || base_int != 0) && !must_not_introduce_inttoptr(vals[ptr].ty) {
+    if (is_null_value(ptr) || base_int != 0) && !cf_must_not_introduce_inttoptr_dl(vals[ptr].ty) {
         let low = ((base_int & wmask64(bw)) + (offset as! u64)) & wmask64(bw);
         let v = (base_int & ~wmask64(bw)) | low;
         let ci = c_int_words(ty_int(pbits), v, 0);
@@ -732,11 +732,18 @@ recursive fn symbolic_gep(srcty: i32, rty: i32, flags0: u8, inr: i32, mark: i64,
     let oc = c_int_words(ty_int(bw), (offset as! u64) & wmask64(bw), 0);
     return ce_gep(T_I8, ptr, [oc], nw, -1);
 }
-fn must_not_introduce_inttoptr(t: i32) -> bool {
-    // non-integral pointer address spaces (ni:) are not modelled by datalayout.goose
-    let d = modules[cur_module].datalayout;
-    if d >= 0 && (find(sbytes(d), "ni:") >= 0 || find(sbytes(d), "pu") >= 0 || find(sbytes(d), "pe") >= 0) { cfa_not_ported("non-integral / unstable / external-state address spaces"); }
-    return false;
+// DL.isNonIntegralPointerType(LoadTy->getScalarType()) (FoldReinterpretLoadFromConst)
+fn must_not_introduce_inttoptr(t: i32) -> bool { cf_is_nonintegral_ptr_ty(t) }
+// DataLayout::mustNotIntroduceIntToPtr(Ty)
+fn cf_must_not_introduce_inttoptr_dl(t: i32) -> bool {
+    let s = ty_scalar(t);
+    if ty_kind(s) != TK_PTR { return false; }
+    let a = types[s].n as i64;
+    return dl_has_unstable_repr(a) || dl_has_external_state(a);
+}
+fn cf_is_nonintegral_ptr_ty(t: i32) -> bool {
+    let s = ty_scalar(t);
+    return ty_kind(s) == TK_PTR && dl_is_nonintegral_as(types[s].n as i64);
 }
 recursive fn ty_is_sized_cf(t: i32) -> bool { cf_ty_is_sized(t) }
 
