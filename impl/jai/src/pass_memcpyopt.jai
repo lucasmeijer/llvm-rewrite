@@ -723,7 +723,7 @@ mco_perform_stack_move_optzn :: (s: *Mco, load: Value_Id, store: Value_Id, dest_
                                       aa_md_set: *Table(Value_Id, bool), dest_mod_ref: u8) -> bool {
         worklist: [..] Value_Id; worklist.allocator = temp;
         array_add(*worklist, ai);
-        max_uses := CAPTURE_TRACKING_MAX_USES;
+        max_uses := capture_tracking_max_uses;
         visited: Table(Use_Id, bool); visited.allocator = temp;
         while worklist.count {
             i := pop(*worklist);

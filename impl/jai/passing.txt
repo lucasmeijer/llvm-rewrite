@@ -3045,6 +3045,7 @@ tests/imported/llvm/Transforms/GVN/PRE/phi-translate-add.ll::opt
 tests/imported/llvm/Transforms/GVN/PRE/phi-translate-add.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/phi-translate.ll::opt
 tests/imported/llvm/Transforms/GVN/PRE/phi-translate.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/PRE/pre-after-rle.ll::opt
 tests/imported/llvm/Transforms/GVN/PRE/pre-after-rle.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/pre-aliasning-path.ll::opt
 tests/imported/llvm/Transforms/GVN/PRE/pre-aliasning-path.ll::roundtrip
@@ -3069,6 +3070,7 @@ tests/imported/llvm/Transforms/GVN/PRE/pre-load.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/pre-loop-load-new-pm.ll::opt
 tests/imported/llvm/Transforms/GVN/PRE/pre-loop-load-new-pm.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/pre-loop-load-through-select.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/PRE/pre-loop-load.ll::opt
 tests/imported/llvm/Transforms/GVN/PRE/pre-loop-load.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/pre-no-cost-phi.ll::opt
 tests/imported/llvm/Transforms/GVN/PRE/pre-no-cost-phi.ll::roundtrip
@@ -3108,6 +3110,7 @@ tests/imported/llvm/Transforms/GVN/callbr-scalarpre-critedge.ll::opt
 tests/imported/llvm/Transforms/GVN/callbr-scalarpre-critedge.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/calloc-load-removal.ll::opt
 tests/imported/llvm/Transforms/GVN/calloc-load-removal.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/capture-tracking-limit.ll::opt
 tests/imported/llvm/Transforms/GVN/capture-tracking-limit.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/captured-before.ll::opt
 tests/imported/llvm/Transforms/GVN/captured-before.ll::roundtrip
@@ -3161,6 +3164,7 @@ tests/imported/llvm/Transforms/GVN/fpmath.ll::opt
 tests/imported/llvm/Transforms/GVN/fpmath.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/freeze.ll::opt
 tests/imported/llvm/Transforms/GVN/freeze.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/gc_relocate.ll::opt
 tests/imported/llvm/Transforms/GVN/gc_relocate.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/gvn-loop-load-pre-order.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/int_sideeffect.ll::opt
@@ -3332,6 +3336,7 @@ tests/imported/llvm/Transforms/GVN/volatile-nonvolatile.ll::opt
 tests/imported/llvm/Transforms/GVN/volatile-nonvolatile.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/vp_gather_scatter.ll::opt
 tests/imported/llvm/Transforms/GVN/vp_gather_scatter.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/vscale.ll::opt
 tests/imported/llvm/Transforms/GVN/vscale.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/2002-07-17-CastRef.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/2002-07-17-ConstantRef.ll::roundtrip
