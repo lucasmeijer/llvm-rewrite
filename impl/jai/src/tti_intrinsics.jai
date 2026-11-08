@@ -167,7 +167,29 @@ bt_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
             m.align = max(call_param_align(i, 0), 1); m.inst = i;
             return x86_mem_intrinsic_cost(t, *m, kind);
     }
-    if n == "llvm.experimental.cttz.elts" || n == "llvm.modf" || n == "llvm.sincos" ||
+    if n == "llvm.experimental.cttz.elts" {
+        at := ica.tys[0];
+        if type_kind(at) == .SVECTOR x86_np("getIntrinsicInstrCost of llvm.experimental.cttz.elts on a scalable vector");
+        // shouldExpandCttzElements is true on X86; getBitWidthForCttzElements
+        zero_is_poison := !is_null_value(args[1]);
+        v := cast(u64) type_count(at);
+        if zero_is_poison v -= 1;
+        active: u32 = 0; x := v; while x != 0 { active += 1; x >>= 1; }
+        ew := min(cast(u32) ic_primitive_size_bits(scalar_type(ret)), active);
+        p2: u32 = 1; while p2 < ew p2 *= 2;
+        ew = max(p2, 8);
+        net := type_int(ew);
+        nvt := xvec(net, cast(s64) type_count(at));
+        sa := ica_types(iidn("llvm.stepvector"), nvt, .[], ica.fmf);
+        c := x86_intrinsic_cost(t, *sa, kind);
+        c = cost_add(c, x86_arith_cost(t, .SUB, nvt, kind, OI_ANY, OI_ANY));
+        c = cost_add(c, x86_cast_cost(t, .SEXT, nvt, vtype(args[0]), CCH_NONE, kind));
+        c = cost_add(c, x86_arith_cost(t, .AND, nvt, kind, OI_ANY, OI_ANY));
+        ra := ica_types(IID_VECTOR_REDUCE_UMAX, net, .[nvt], ica.fmf, i, 1);
+        c = cost_add(c, bt_type_based_intrinsic_cost(t, *ra, kind));
+        return cost_add(c, x86_arith_cost(t, .SUB, net, kind, OI_ANY, OI_ANY));
+    }
+    if n == "llvm.modf" || n == "llvm.sincos" ||
        n == "llvm.sincospi" || begins_with(n, "llvm.loop.dependence")
         x86_np(tprint("getIntrinsicInstrCost of %", n));
     scal := COST_INVALID;

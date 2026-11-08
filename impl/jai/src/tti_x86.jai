@@ -67,20 +67,82 @@ x86_reg_usage_for_type :: (st: *X86_Lowering, ty: Type_Id) -> s64 {
     return 0;
 }
 
-// X86TargetLowering::isLegalAddressingMode (static relocation model, small code model)
+// X86II::MO_* operand flags that classifyGlobalReference can produce
+MO_NO_FLAG :: 0; MO_GOT :: 1; MO_GOTOFF :: 2; MO_GOTPCREL :: 3; MO_PIC_BASE_OFFSET :: 4; MO_DLLIMPORT :: 5;
+MO_DARWIN_NONLAZY :: 6; MO_DARWIN_NONLAZY_PIC_BASE :: 7; MO_COFFSTUB :: 8; MO_ABS8 :: 9;
+
+st_is_coff :: (st: *X86_Lowering) -> bool { return st_isOSWindows(st) && !ends_with(st.triple, "-elf") && !ends_with(st.triple, "-macho"); }
+st_is_macho :: (st: *X86_Lowering) -> bool { return st_isTargetDarwin(st) || (st_isOSWindows(st) && ends_with(st.triple, "-macho")); }
+// getEffectiveRelocModel (no -relocation-model): Darwin 64-bit PIC, Darwin 32-bit DynamicNoPIC, Win64 PIC, else static
+RELOC_STATIC :: 0; RELOC_PIC :: 1; RELOC_DYNAMIC_NO_PIC :: 2;
+x86_reloc_model :: (st: *X86_Lowering) -> s64 {
+    if st_isTargetDarwin(st) return ifx st_is64Bit(st) then RELOC_PIC else RELOC_DYNAMIC_NO_PIC;
+    if st_isOSWindows(st) && st_is64Bit(st) return RELOC_PIC;
+    return RELOC_STATIC;
+}
+// TargetMachine::isPositionIndependent
+x86_is_pic :: (st: *X86_Lowering) -> bool { return x86_reloc_model(st) == RELOC_PIC; }
+// TargetMachine::shouldAssumeDSOLocal
+x86_should_assume_dso_local :: (st: *X86_Lowering, gv: Value_Id) -> bool {
+    g := glob(gv);
+    if g.dso_local return true;
+    if st_is_coff(st) {
+        if g.dll == 1 return false;
+        if st_isTargetCygMing(st) && (is_declaration(gv) || g.linkage == .AVAILABLE_EXTERNALLY) && vkind(gv) == .GLOBAL_VAR return false;
+        if g.linkage == .EXTERN_WEAK return false;
+        return true;
+    }
+    if st_is_macho(st) {
+        if x86_reloc_model(st) == RELOC_STATIC return true;
+        return gv_is_strong_definition_for_linker(gv);
+    }
+    return false;
+}
+// X86Subtarget::classifyLocalReference (small code model, no tagged globals)
+x86_classify_local_reference :: (st: *X86_Lowering, gv: Value_Id) -> s64 {
+    if !x86_is_pic(st) return MO_NO_FLAG;
+    if st_is64Bit(st) return MO_NO_FLAG;   // ELF small code model: RIP-relative; others: RIP-rel / movabsq
+    if st_is_coff(st) return MO_NO_FLAG;
+    if st_isTargetDarwin(st) {
+        l := glob(gv).linkage;
+        if is_declaration(gv) || l == .AVAILABLE_EXTERNALLY || l == .COMMON return MO_DARWIN_NONLAZY_PIC_BASE;
+        return MO_PIC_BASE_OFFSET;
+    }
+    return MO_GOTOFF;
+}
+// X86Subtarget::classifyGlobalReference (small code model)
+x86_classify_global_reference :: (st: *X86_Lowering, gv: Value_Id) -> s64 {
+    abs := get_metadata(gv, md_kind_id("absolute_symbol"));
+    if abs != NONE {
+        // getAbsoluteSymbolRange: [lo, hi) from the node; only a full set means "no range"
+        lo := md_const_int_op(abs, 0); hi := md_const_int_op(abs, 1);
+        r := cr_new(const_ap(lo), const_ap(hi));
+        if !cr_is_full_set(r) {
+            if ap_ult(cr_umax(r), ap_from_u64(r.lo.bits, 128)) return MO_ABS8;
+            return MO_NO_FLAG;
+        }
+    }
+    if x86_should_assume_dso_local(st, gv) return x86_classify_local_reference(st, gv);
+    if st_is_coff(st) { if glob(gv).dll == 1 return MO_DLLIMPORT; return MO_COFFSTUB; }
+    if st_isOSWindows(st) return MO_NO_FLAG;
+    if st_is64Bit(st) return MO_GOTPCREL;
+    if st_isTargetDarwin(st) return ifx x86_is_pic(st) then MO_DARWIN_NONLAZY_PIC_BASE else MO_DARWIN_NONLAZY;
+    if x86_reloc_model(st) == RELOC_STATIC return MO_NO_FLAG;
+    return MO_GOT;
+}
+
+// X86TargetLowering::isLegalAddressingMode (small code model)
 x86_is_legal_addressing_mode :: (st: *X86_Lowering, ty: Type_Id, base_gv: Value_Id, offset: s64, has_base_reg: bool, scale: s64, addrspace: u32) -> bool {
     // isOffsetSuitableForCodeModel(BaseOffs, Small, BaseGV != null)
     if offset < -0x8000_0000 || offset > 0x7FFF_FFFF return false;
     if base_gv != NONE && offset >= 16 * 1024 * 1024 return false;
     if base_gv != NONE {
-        if !st_isTargetELF(st) x86_np("isLegalAddressingMode with a global base on a non-ELF target");
-        if get_metadata(base_gv, md_kind_id("absolute_symbol")) != NONE x86_np("isLegalAddressingMode with an absolute symbol");
-        // classifyGlobalReference: not dso_local on ELF -> GOT (a stub reference: not foldable)
-        if !glob(base_gv).dso_local {
-            if st_is64Bit(st) return false;
-            x86_np("isLegalAddressingMode with a global base in 32-bit mode");
-        }
-        if !st_is64Bit(st) x86_np("isLegalAddressingMode with a global base in 32-bit mode");
+        f := x86_classify_global_reference(st, base_gv);
+        // isGlobalStubReference
+        if f == MO_DLLIMPORT || f == MO_GOTPCREL || f == MO_GOT || f == MO_DARWIN_NONLAZY_PIC_BASE || f == MO_DARWIN_NONLAZY || f == MO_COFFSTUB return false;
+        // isGlobalRelativeToPICBase
+        if has_base_reg && (f == MO_GOTOFF || f == MO_GOT || f == MO_PIC_BASE_OFFSET || f == MO_DARWIN_NONLAZY_PIC_BASE) return false;
+        if x86_is_pic(st) && st_is64Bit(st) && (offset != 0 || scale > 1) return false;
     }
     if scale == 0 || scale == 1 || scale == 2 || scale == 4 || scale == 8 return true;
     if scale == 3 || scale == 5 || scale == 9 return !has_base_reg;
@@ -431,7 +493,8 @@ bt_cast_cost :: (t: *Tti, opc: Opcode, dst: Type_Id, src: Type_Id, cch: u8, kind
             }
         case .ADDRSPACECAST;
             sa := ptr_addrspace(src); da := ptr_addrspace(dst);
-            if dl_ptr_spec(sa).bits == dl_ptr_spec(da).bits && sa < 256 && da < 256 return 0;
+            // X86TargetLowering::isNoopAddrSpaceCast: TM.getPointerSize uses the target's own DataLayout
+            if x86_tm_pointer_bits(st, sa) == x86_tm_pointer_bits(st, da) && sa < 256 && da < 256 return 0;
     }
     sv := is_vector_type(src); dv := is_vector_type(dst);
     if s_c == d_c && is_op_legal_or_promote(st, isd, d_m) return s_c;
@@ -695,3 +758,10 @@ x86_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
     return bt_intrinsic_cost(t, ica, kind);
 }
 
+
+// pointer size in the X86 TargetMachine's DataLayout (computeX86DataLayout: p270/p271 32-bit, p272 64-bit)
+x86_tm_pointer_bits :: (st: *X86_Lowering, as: u32) -> u32 {
+    if as == 270 || as == 271 return 32;
+    if as == 272 return 64;
+    return st_ptr_bits(st);
+}

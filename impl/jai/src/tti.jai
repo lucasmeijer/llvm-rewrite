@@ -895,10 +895,9 @@ tti_shuffle_instruction_cost :: (t: *Tti, u: Value_Id, kind: s64) -> Cost {
     if mask.count != n {
         increases := mask.count > n;
         if increases {
-            // isIdentityWithPadding
-            ok := true;
-            for k: 0..n-1 { m := mask[k]; if m >= 0 && m != k { ok = false; break; } }
-            if ok for k: n..mask.count-1 if mask[k] >= 0 { ok = false; break; }
+            // isIdentityWithPadding: isIdentityMaskImpl over the whole mask, then only undef padding
+            ok := svm_is_identity_no_checks(mask, n);
+            if ok for k: n..mask.count-1 if mask[k] != -1 { ok = false; break; }
             if ok return TCC_FREE;
         }
         is_ext, sub_index := svm_is_extract_subvector(mask, n);

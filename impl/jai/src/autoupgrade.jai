@@ -386,7 +386,11 @@ const_false :: () -> Value_Id { return const_int(ir.t_i1, 0); }
 
 strip_pointer_casts :: (v_in: Value_Id) -> Value_Id {
     v := v_in;
+    // stripPointerCastsAndOffsets stops when it revisits a value (cycles in unreachable code)
+    visited: [..] Value_Id; visited.allocator = temp;
     while true {
+        for visited if it == v return v;
+        array_add(*visited, v);
         k := vkind(v);
         if k == .INST {
             o := inst_op(v);

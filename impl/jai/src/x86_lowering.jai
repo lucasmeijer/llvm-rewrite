@@ -293,8 +293,8 @@ x86_preferred_vector_action :: (st: *X86_Lowering, vt: u32) -> s64 {
     n := mvt_n(vt);
     if !mvt_is_scalable(vt) && n != 1 && n <= 4 && !st_hasF16C(st) && mvt_elt_code(vt) == MVE_F16 return TA_SPLIT_VECTOR;
     if !mvt_is_scalable(vt) && n != 1 && mvt_elt_code(vt) != MVE_I1 return TA_WIDEN_VECTOR;
-    // TargetLoweringBase::getPreferredVectorAction
-    if n == 1 return TA_SCALARIZE_VECTOR;
+    // TargetLoweringBase::getPreferredVectorAction (ElementCount::isScalar: one element, not scalable)
+    if n == 1 && !mvt_is_scalable(vt) return TA_SCALARIZE_VECTOR;
     if (n & (n - 1)) != 0 return TA_WIDEN_VECTOR;
     return TA_PROMOTE_INTEGER;
 }
