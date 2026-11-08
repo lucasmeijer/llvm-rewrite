@@ -155,3 +155,41 @@ Facts needed to make a parse+print round trip byte-identical. Sources: `llvm/lib
   `spirv.*` -> ptr, `aarch64.svcount` -> `<vscale x 16 x i1>`, ...), visible in default `align` of loads/allocas.
 - **`gc.relocate` calls get a comment** `; (%base, %derived)` (AssemblyWriter::printGCRelocateComment).
 
+
+## More parse-time facts (verified in impl/goose, L0.print-imported)
+
+- **Intrinsic tables come straight from TableGen**: `llvm-min-tblgen -gen-intrinsic-impl` builds from
+  `/opt/llvm-project-23.1.5/llvm` without CMake (impl/goose/tools/build_min_tblgen.sh: compile lib/Support,
+  lib/TableGen, lib/Demangle, utils/TableGen/Basic with hand-made Config headers and stubs for the missing
+  `third-party/siphash` and libc `shared/math.h`). Its IntrinsicImpl.inc holds the name table, IIT signature
+  encodings, overload bits and attribute sets that Intrinsics.cpp uses (impl/goose/tools/gen_intrinsics.py).
+- **`0xL` (fp128) and `0xM` (ppc_fp128) literals**: the first 16 hex digits are the *low* 64-bit word of the APInt
+  (LLLexer::HexToIntPair; for ppc_fp128 that is the first double). `f0x` output prints the high word first.
+- **A uniqued node whose operand resolves to itself becomes distinct** (`!0 = !{!0}` prints `distinct !{!0}`), but
+  longer uniqued cycles stay uniqued (`!0 = !{!1}`, `!1 = !{!0}` print as written).
+- **Uniqued nodes that become equal once forward references resolve are merged** (re-uniquing on operand change):
+  `!7 = !{!"foo", !0}` and `!9 = !{!"foo", !0}` are one node.
+- **Global objects keep several attachments of one kind** (`!type !0, !type !1`; GlobalObject::addMetadata),
+  stable-sorted by kind; instructions keep only the last (setMetadata).
+- **Old scalar TBAA tags are upgraded** (UpgradeTBAANode): `!tbaa !N` with `!N = !{!"int", !root}` becomes
+  `!{!N, !N, i64 0}` (a 3-operand scalar tag `!{name, parent, i64 const}` becomes `!{!S, !S, i64 0, const}`).
+- **Module flag behaviours are upgraded**: "PIC Level" Error(1)/Max(7) -> Min(8), "PIE Level" Error -> Max,
+  "branch-target-enforcement"/"sign-return-address*" Error -> Min (UpgradeModuleFlags).
+- **`%T = type <non-struct>`** makes `%T` an alias of that type (never printed); only struct bodies define types.
+- **Function `align N` may appear among the function attributes** (even after `#0`); it becomes the function's
+  alignment, not an attribute.
+- **Aggregate canonicalization**: a struct of all-`undef` becomes `undef` only if no element is `poison`
+  (`{ i32 undef, i32 poison }` stays); arrays/vectors fold to undef/poison/zeroinitializer only when all elements
+  are the *same* constant.
+- **`denormal_fpenv`** is an int attribute: `default | f32 << 4`, mode = `input << 2 | output` with ieee=0,
+  preservesign=1, positivezero=2, dynamic=3; printed `denormal_fpenv(out[|in])`, with `float: m` (and the default
+  mode only when it is not ieee) when the f32 mode differs.
+- **Typed pointer syntax is still accepted**: `T*` and `T addrspace(N)*` parse as `ptr`/`ptr addrspace(N)`; only
+  `ptr*` is an error.
+- **Aliases take their address space from the aliasee's pointer type** (GlobalAlias::create).
+- **Calling convention keywords**: the printer's names (printCallingConv) are also the parser's; `avr_intrcc` and
+  `avr_signalcc` print with a trailing space.
+- **A float/half/bfloat hex literal holding a signaling NaN stays signaling** (LLParser re-creates the sNaN after
+  the double -> float conversion, which would quiet it); constant-folded conversions quiet NaNs.
+- **MetadataAsValue of a forward-referenced local** (`metadata i32 %5` before `%5` is defined) is fixed up when the
+  local is defined (ValueAsMetadata::handleRAUW).
