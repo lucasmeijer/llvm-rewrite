@@ -264,3 +264,7 @@ IID_EXPERIMENTAL_MEMSET_PATTERN :: #run iid_by_name("llvm.experimental.memset.pa
 IID_MATRIX_COLUMN_MAJOR_LOAD :: #run iid_by_name("llvm.matrix.column.major.load");
 IID_MATRIX_COLUMN_MAJOR_STORE :: #run iid_by_name("llvm.matrix.column.major.store");
 IID_STACKRESTORE :: #run iid_by_name("llvm.stackrestore");
+IID_EXPERIMENTAL_CONSTRAINED_LOG :: #run iid_by_name("llvm.experimental.constrained.log");
+IID_EXPERIMENTAL_CONSTRAINED_LOG10 :: #run iid_by_name("llvm.experimental.constrained.log10");
+IID_EXPERIMENTAL_CONSTRAINED_LOG2 :: #run iid_by_name("llvm.experimental.constrained.log2");
+IID_FPTRUNC_ROUND :: #run iid_by_name("llvm.fptrunc.round");
