@@ -1,40 +1,65 @@
-# InstCombine: facts that matter for exact output
+# InstCombine: behaviour an implementation must reproduce
 
-Verified against LLVM 23.1.5 source (file:function named) and the imported InstCombine tests.
+Facts verified against LLVM 23.1.5 (source: `llvm/lib/Transforms/InstCombine/InstructionCombining.cpp` unless
+noted, and by diffing `opt -passes=instcombine` output on the imported tests).
 
-- **`-passes=instcombine` verifies the fixpoint.** PassBuilder's `parseInstCombineOptions` starts with
-  `setVerifyFixpoint(true)`, MaxIterations is 1: iteration 1 does the work, iteration 2 must change nothing or opt
-  dies with "Instruction Combining on F did not reach a fixpoint after 1 iterations". `instcombine<no-verify-fixpoint>`
-  (or the `instcombine-no-verify-fixpoint` function attribute) runs exactly one iteration.
-- **Worklist order** (InstructionWorklist.h): prepareWorklist walks reachable blocks in RPO, constant-folds
-  instructions whose first operand is constant (`ConstantFoldInstruction`), folds ConstantExpr/ConstantVector
-  operands with ConstantFoldConstant, then pushes the survivors in *reverse*, so they pop in program order. New
-  instructions from the Builder go on the *deferred* list (`add`), which is flushed in reverse before each pop (so
-  they are visited in creation order, before older work). Users of a changed instruction are `push`ed (LIFO).
-- **Names.** `Value::takeName(V)` first drops the destination's own name even if V has none, so a replacement
-  returned by a visitor always ends up with exactly the old instruction's name. A name set on an unlinked
-  instruction (`BinaryOperator::Create(..., "x")`) is only uniqued when the instruction is inserted.
-  `canonicalizeICmpPredicate` renames the compare to `getName() + ".not"`, which is `.not` for an unnamed one.
-- **SimplifyQuery.** InstCombine's SQ has DT, AC, TLI and the DomConditionCache, so `computeKnownBits` etc. see
-  dominating branch conditions — but only of branches already visited (`visitCondBrInst` ends with
-  `DC.registerBranch`), which makes results visit-order dependent. `InstCombiner::ComputeNumSignBits` and
-  `ComputeMaxSignificantBits` call the `(DL, AC, CxtI, DT)` overloads: no DomConditionCache, and `safeCxtI`.
-- **Builders that are not the combiner's.** `foldFDivConstantDivisor` (nnan `X / +0.0` -> copysign) uses a local
-  `IRBuilder<> B(&I)`: the new call is not added to the worklist. The Negator's builder inserts each negated
-  instruction right before the instruction it negates (with that instruction's debug location), and on success
-  the new instructions are handed to the worklist in creation order; on failure they are erased in reverse.
-- **`Instruction::isAssociative`**: `fmul` needs only `reassoc`; `fadd` needs `reassoc` and `nsz`
-  (Instruction.cpp:1390). So `SimplifyAssociativeOrCommutative` folds `(X * C1) * C2` with just `reassoc`
-  (fdiv.ll `div_constant_dividend3`).
-- **Unknown profiles.** `createSelectInstWithUnknownProfile` and friends add `!prof !{!"unknown", !"instcombine"}`
-  only when the function has an entry count > 0 (`setExplicitlyUnknownBranchWeightsIfProfiled`); IRBuilder's
-  plain `CreateSelect` without MDFrom adds nothing.
-- **Negator** (`InstCombineNegator.cpp`): `NegatorMaxDepth` defaults to `~0U`, so the depth limit never triggers;
-  results (including failures) are cached per value for one negation attempt. A phi is not negated if its block
-  dominates the incoming *edge's* block (`DT.dominates(BB, Use)`: for a phi use, the incoming block), which is how
-  induction variables are excluded.
-- **Pattern details that change results**: `m_ZExt`/`m_SExt`/`m_Trunc`/fp casts are `CastInst_match`
-  (instructions only), `m_PtrToInt`/`m_BitCast`/`m_IntToPtr` match constant expressions too; `m_NUWAdd` etc.
-  (OverflowingBinaryOp_match) match constant expressions, `m_DisjointOr` only instructions. Two `const APInt *`
-  captures compared with `==` (e.g. `C2 == C3` in foldAddWithConstant) compare uniqued constants, i.e. equal
-  values of the same type.
+## Pass driver
+
+- `-passes=instcombine` turns **verify-fixpoint on** (`parseInstCombineOptions` in PassBuilder.cpp); the
+  `InstCombineOptions` default (used by `-O2` pipelines) is off. `MaxIterations` defaults to 1. With verification
+  on, the iteration loop still runs until an iteration makes no change, and fails with "Instruction Combining on
+  F did not reach a fixpoint after 1 iterations..." if iteration 2 changed anything. The function attribute
+  `"instcombine-no-verify-fixpoint"` and `instcombine<no-verify-fixpoint>` turn it off.
+- **LastRunTrackingAnalysis**: InstCombinePass::run returns early (no change, PreservedAnalyses::all) when the
+  function's LRT says InstCombine already ran and nothing invalidated the analysis since. InstCombine's options
+  are *not* compared (`shouldSkip(&ID)` without a compatibility callback). A changing InstCombine preserves LRT
+  and CFG analyses only; any other pass that doesn't preserve LRT invalidates it (source:
+  `InstCombinePass::run`, `LastRunTrackingInfo::updateImpl`).
+- Each iteration builds a fresh InstCombinerImpl: fresh DeadEdges, fresh DomConditionCache, fresh BackEdges.
+  The RPOT is computed once for the whole run (before the first iteration).
+- `prepareWorklist`: walk blocks in RPO; a non-entry block all of whose predecessors are dead edges or
+  dominated by the block itself is dead (its successors' phi inputs from it become poison). For each live block:
+  constant-fold instructions that have uses and whose first operand is a constant (or no operands)
+  (`ConstantFoldInstruction`; erase if trivially dead), fold `ConstantVector`/`ConstantExpr` operands with
+  `ConstantFoldConstant`, collect non-debug instructions; a `br`/`switch` on a constant marks only the taken
+  successor live. Then every non-live block is emptied (`removeAllNonTerminatorAndEHPadInstructions`, which also
+  poisons the terminator's instruction operands). Finally the collected instructions are pushed **in reverse**
+  (DCE'ing trivially dead ones on the way), so the first instruction is popped first.
+
+## Worklist and visiting
+
+- `InstructionWorklist`: `push` is a stack with a set (no duplicates); `add` goes to `Deferred` (a SetVector).
+  Before every pop, all deferred instructions are moved to the stack in reverse order of addition (each DCE'd
+  if trivially dead), so they are visited in the order they were added. Builder-created instructions are
+  `add`ed (IRBuilderInstCombineInserter); `replaceOperand`/`eraseInstFromFunction` call
+  `handleUseCountDecrement` on old operands (`add` the operand, and its sole user if it now has one use).
+- After a visitor returns a new instruction R for I: R gets I's debug location if it has none, `I` is RAUW'd
+  with R, **R takes I's name** (so a name passed to `BinaryOperator::Create` for a returned instruction never
+  matters), R is inserted at I's position (first insertion point/first non-PHI when PHI-ness differs), R's users
+  and R are pushed, I is erased. If the visitor returned I (modified in place): erase if trivially dead, else
+  push its users and I.
+- Before visiting, an instruction whose users are all in one other block, which is a successor with a unique
+  predecessor (or ends without successors), is **sunk** to that block's first insertion point
+  (`tryToSinkInstruction`), and its operands are pushed.
+- Instructions created through the Builder are named on insertion and the function's symbol table uniques the
+  name: `udiv %X, 4096` named `%Y` becomes `%Y1 = lshr %X, 12` because `Builder.CreateLShr(..., I.getName())`
+  runs while `%Y` still exists. The Negator names values `I.getName() + ".neg"` (an unnamed I gives `%.neg`).
+
+## Analyses inside InstCombine
+
+- InstCombine's SimplifyQuery has a **DomConditionCache**: `visitCondBrInst` registers the branch (after its own
+  folds) and later queries in the same iteration use it in computeKnownBits (`computeKnownBitsFromContext`),
+  isKnownToBeAPowerOfTwo, isKnownNonEqual and computeKnownFPClass. InstSimplify's pass has no DC, so the same
+  ValueTracking query can answer differently in the two passes. `getWithoutDomCondCache()` is used by visitSub's
+  `C - X` → `xor` fold.
+- `TargetLibraryInfo`'s size_t width is the DataLayout index size of address space 0
+  (`TargetLibraryInfoImpl::getSizeTSize`), so `-data-layout=p:32:32` makes `bcopy(ptr, ptr, i32)` a valid
+  libfunc prototype.
+
+## PatternMatch details that change results
+
+- `m_Add`/`m_Sub`/… (`BinaryOp_match`) and `m_ZExt`/`m_SExt`/`m_Trunc` (`CastInst_match`) match instructions
+  only; `m_PtrToInt`, `m_IntToPtr`, `m_BitCast` (`CastOperator_match`) also match constant expressions.
+- `m_SpecificInt_ICMP` (and every `cst_pred_ty` matcher) allows poison vector lanes (at least one lane must be a
+  real constant).
+- `m_LogicalAnd/Or` match `and/or i1` and `select C, X, false` / `select C, true, X` with C of the select's type.

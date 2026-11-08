@@ -18,6 +18,14 @@
 
 ## Status
 
+- L1.instcombine.arith 126/230 (all 115 roundtrip, 11/115 opt); 120 of the 1635 InstCombine `::opt` tests
+  pass. The framework is complete (DESIGN.md §12); ported visitors: add, sub, mul, udiv/sdiv/urem/srem, shl/lshr/ashr,
+  trunc/zext/sext, ret, br, unreachable, calls to ordinary functions, llvm.assume (no bundles). Every other
+  visitor fails loudly ("the InstCombine visitor for 'icmp' is not ported yet"), and so do unported sub-folds of
+  the ported visitors. What blocks the remaining arith tests (first blocker per test, `tools/ic_failures.py
+  'add*' 'sub*' 'mul*' '*div*' '*rem*'`): icmp 34, and 16, select 12, or 8, xor 6, then insertelement, libcalls,
+  min/max intrinsics, GEP, load, fdiv, other passes (cgscc/inline, debugify). With `-goose-ic-lenient` (unported
+  visitors do nothing) 25 arith tests already match, so most remaining work is the other visitors, not arith.
 - L1.sccp 331/340 (all 170 roundtrip, 161/170 opt). Left: 7 tests run other passes (simplifycfg ×2,
   loop-deletion, internalize, deadargelim, instcombine, debugify); `overdefined-ext.ll` passes its
   `-use-constant-int-for-fixed-length-splat=false` line but not the `=true` line (vector-typed ConstantInt
@@ -366,3 +374,26 @@
   a clash before adding one.
 - `tools`: /tmp scripts were used to sweep `print<scalar-evolution>` over the corpus in parallel (compare stdout+
   stderr with LLVM's for every file); worth turning into a harness command.
+
+## InstCombine (ic*.goose)
+
+- Layout, conventions and how to add a fold: DESIGN.md §12. Everything is in `namespace ic;` because common
+  helper names (`has_nsw`, `opcode_name`, `minmax_pred`) collide with global functions of other files.
+- Development tools: `tools/ic_failures.py [globs]` summarizes the first error of each failing InstCombine test
+  from `.harness-out` (run a `check` first); `opt -goose-ic-lenient` makes unported visitors no-ops (never use
+  it for real output: it can be wrong) to find tests that only need already-ported folds.
+- The DomConditionCache (domcond.goose) hooks into knownbits/vt/fpclass behind `dc_active`; other passes
+  never set it. Keep `kb_cxt` set right before each ValueTracking call: InstSimplify and other helpers overwrite it.
+- Names: set them on unattached instructions freely (stored, registered at insertion by `ic_register_name`);
+  never pass a `val_name(...)` slice to `set_name` directly when the target may grow the string pool (copy it).
+- Fixed in shared code on the way: TLI size_t is now the DataLayout index size of AS 0 (`tli_sizet_bits`,
+  was a constant 64); `ac_register_assumption` / `ac_update_affected` (assume.goose) for assumes created or
+  changed by a pass.
+- Not ported / known gaps (fail loudly): SimplifyDemandedVectorElts, SimplifyDemandedFPClass, foldVectorBinop
+  with shuffle/intrinsic operands, OptimizePointerDifference, LibCallSimplifier, alloc-site handling, salvaging
+  debug info (erasing an instruction used by a debug record), dropDroppableUses when sinking, AliasScopeTracker,
+  LowerDbgDeclare, the !annotation copy, branch-weight updates, foldBinopWithRecurrence, symmetric PHI pairs.
+- Perf: not measurable yet (`tests/perf/scaling/straightline/*` has an `@perf: opt -passes=instcombine` line,
+  but it stops at the unported `xor` visitor). Known linear scans to revisit when it matters: removing an
+  entry from the deferred worklist, DeadEdges, DomConditionCache dedupe per value, the cast TypeEvaluationHelper
+  visited map, the Negator cache (all small in practice).
