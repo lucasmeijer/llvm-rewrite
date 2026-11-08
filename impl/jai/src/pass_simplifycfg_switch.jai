@@ -1959,6 +1959,9 @@ merge_conditional_store_to_address :: (s: *Scfg, ptb: Value_Id, pfb: Value_Id, q
     si := irb_store(*b, qphi, address, min(inst(ps).align, inst(qs).align));
     combine_metadata_for_cse(qs, ps, true);
     copy_metadata(si, qs);
+    // the dbg_assign records of SI's DIAssignID now track the merged value
+    dbg_assign_replace_location(si, op(ps, 0), qphi);
+    dbg_assign_replace_location(si, op(qs, 0), qphi);
     inst(si).align = min(inst(ps).align, inst(qs).align);
     if inst(qs).ord1 != 0 { inst(si).ord1 = inst(qs).ord1; inst(si).sync = inst(qs).sync; }
     erase_inst_with_metadata(qs);
@@ -2116,4 +2119,17 @@ simplify_cond_branch_to_cond_branch :: (s: *Scfg, pbi: Value_Id, bi: Value_Id) -
         }
     }
     return true;
+}
+
+// for (DVR : at::getDVRAssignmentMarkers(I)) if (is_contained(DVR->location_ops(), Old)) DVR->replaceVariableLocationOp(Old, New)
+dbg_assign_replace_location :: (i: Value_Id, old: Value_Id, new: Value_Id) {
+    aid := get_metadata(i, md_kind_id("DIAssignID"));
+    if aid == NONE return;
+    ops: [..] Value_Id; ops.allocator = temp;
+    for * rec, ri: ir.dbg_records {
+        if rec.kind != .ASSIGN || rec.assign_id != aid || rec.owner == NONE continue;
+        r := cast(u32) (ri + 1);
+        dbgr_location_ops(r, *ops);
+        if block_set_contains(ops, old) dbgr_replace_variable_location_op(r, old, new);
+    }
 }

@@ -924,7 +924,7 @@ combine_metadata_for_cse :: (k: Value_Id, j: Value_Id, does_k_move: bool) {
         jmd := get_metadata(j, kind);
         name := ir.md_kind_names[kind];
         if name == {
-            case "DIAssignID"; fatal("combineMetadata: DIAssignID merging is not supported yet");
+            case "DIAssignID"; inst_merge_di_assign_id(k, j);
             case "tbaa"; if does_k_move set_metadata(k, kind, tbaa_most_generic(jmd, kmd));
             case "alias.scope"; if does_k_move set_metadata(k, kind, md_most_generic_alias_scope(jmd, kmd));
             case "noalias"; #through; case "llvm.mem.parallel_loop_access";
@@ -1214,4 +1214,23 @@ md_from_capture_components :: (cc: u8) -> Md_Id {
     if (cc & 12) == 4 array_add(*ops, md_string("read_provenance"));
     else if (cc & 12) == 12 array_add(*ops, md_string("provenance"));
     return md_tuple(ops, false);
+}
+
+// Instruction::mergeDIAssignID({J}) with at::RAUW: one DIAssignID replaces the others on attachments and dbg_assign
+// records
+inst_merge_di_assign_id :: (k: Value_Id, j: Value_Id) {
+    kind := md_kind_id("DIAssignID");
+    ids: [..] Md_Id; ids.allocator = temp;
+    a := get_metadata(j, kind); if a != NONE array_add(*ids, a);
+    b := get_metadata(k, kind); if b != NONE array_add(*ids, b);
+    if ids.count == 0 return;
+    merge := ids[0];
+    for ids {
+        if it_index == 0 || it == merge continue;
+        old := it;
+        f := inst_fn(k);
+        for bb: fn_blocks(f) for x: block_insts(bb) if get_metadata(x, kind) == old set_metadata(x, kind, merge);
+        for * r: ir.dbg_records if r.assign_id == old r.assign_id = merge;
+    }
+    set_metadata(k, kind, merge);
 }

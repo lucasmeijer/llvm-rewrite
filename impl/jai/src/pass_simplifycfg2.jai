@@ -828,8 +828,10 @@ speculatively_execute_bb :: (s: *Scfg, bi: Value_Id, then_bb: Value_Id) -> bool 
         fv := spec_store_val;
         if invert { t := tv; tv = fv; fv = t; }
         sel = irb_select_fmf_nofold(*b, br_cond, tv, fv, NONE, "spec.store.select", bi);
+        orig_v := op(spec_store, 0);
         set_op(spec_store, 0, sel);
         apply_merged_location(spec_store, get_metadata(bi, 0), get_metadata(spec_store, 0));
+        dbg_assign_replace_location(spec_store, orig_v, sel);
     }
     for :early_inc x: block_insts(then_bb) {
         if spec_store_val == NONE || x != spec_store drop_location(x);
@@ -848,12 +850,7 @@ speculatively_execute_bb :: (s: *Scfg, bi: Value_Id, then_bb: Value_Id) -> bool 
         }
     }
     // BB->splice(BI, ThenBB, begin, prev(end))
-    t := block_terminator(then_bb);
-    while block_first(then_bb) != t {
-        x := block_first(then_bb);
-        inst_unlink(x);
-        inst_insert_before(x, bi);
-    }
+    block_splice(bi, false, then_bb, block_first(then_bb), true, block_terminator(then_bb));
     if cond_ls.count scfg_np("hoisting conditional loads/stores (conditional faulting)");
     b: Irb; irb_set_before(*b, bi);
     for pn: block_insts(end_bb) {

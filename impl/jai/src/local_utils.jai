@@ -786,22 +786,38 @@ hoist_all_instructions_into :: (dom: Value_Id, insert_pt: Value_Id, bb: Value_Id
         copy_debug_loc_or_clear(i, insert_pt);
         i = nx;
     }
-    t := block_terminator(bb);
-    // BasicBlock::splice at InsertPt->getIterator() (no head bit): the records attached to InsertPt end up in
-    // front of the spliced instructions
-    if block_first(bb) != t && inst(insert_pt).records != 0 {
-        recs := inst(insert_pt).records;
-        inst(insert_pt).records = 0;
-        first := block_first(bb);
-        old := inst(first).records;
-        inst(first).records = 0;
-        attach_records_before(first, recs);
-        attach_records_before(first, old);
+    // DomBlock->splice(InsertPt->getIterator(), BB, BB->begin(), BB->getTerminator()->getIterator())
+    block_splice(insert_pt, false, bb, block_first(bb), true, block_terminator(bb));
+}
+
+// BasicBlock::splice(Dest, Src, First, Last) with the debug-record rules of spliceDebugInfo / spliceDebugInfoImpl /
+// spliceDebugInfoEmptyBlock. `dest_head` / `first_head` are the iterators' head bits (begin() and
+// getFirstInsertionPt() set it, I->getIterator() does not); Last's tail bit is always clear here. Dest and Last
+// must be instructions (trailing records at a block end are not modelled).
+block_splice :: (dest: Value_Id, dest_head: bool, src: Value_Id, first: Value_Id, first_head: bool, last: Value_Id) {
+    assert(dest != NONE && last != NONE, "block_splice: splicing at or up to end() is not supported");
+    if first == last {
+        if first != block_first(src) || !first_head return;
+        recs := records_take(first);
+        if recs == 0 return;
+        if dest_head records_prepend(dest, recs); else attach_records_before(dest, recs);
+        return;
     }
-    while block_first(bb) != t {
-        x := block_first(bb);
+    dest_recs := records_take(dest);
+    // ReadFromTail: Last's records go onto Dest
+    attach_records_before(dest, records_take(last));
+    // the "+" records stay behind on Last when not reading from First's head
+    if !first_head { plus := records_take(first); records_prepend(last, plus); }
+    x := first;
+    while x != last {
+        nx := inst_next(x);
         inst_unlink(x);
-        inst_insert_before(x, insert_pt);
+        inst_insert_before(x, dest);
+        x = nx;
+    }
+    if dest_recs {
+        if dest_head attach_records_before(dest, dest_recs);
+        else records_prepend(first, dest_recs);
     }
 }
 

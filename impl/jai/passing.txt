@@ -10102,6 +10102,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-memprof-right.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-memprof-right.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-memprof.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-memprof.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/merge-cond-stores-debuginfo.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-cond-stores-debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/merge-cond-stores.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-cond-stores.ll::roundtrip
@@ -10216,6 +10217,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/sink-cb-diff-attrs.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/sink-cb-diff-attrs.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/sink-inf-loop.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/sink-inf-loop.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/skip-merging-duplicate-convergence-instrinsics.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/skip-merging-duplicate-convergence-instrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-blocks.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-blocks.ll::roundtrip

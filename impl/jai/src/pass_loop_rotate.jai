@@ -266,6 +266,11 @@ erase_block :: (b: Value_Id) {
     ir.v_kind[b] = .DEAD;
 }
 
+// HasLoopOrEntryConvergenceToken (BasicBlockUtils.cpp)
+has_loop_or_entry_convergence_token :: (bb: Value_Id) -> bool {
+    for i: block_insts(bb) if call_iid(i) == IID_EXPERIMENTAL_CONVERGENCE_LOOP || call_iid(i) == IID_EXPERIMENTAL_CONVERGENCE_ENTRY return true;
+    return false;
+}
 // MergeBlockIntoPredecessor(BB, DTU (eager), LI, MSSAU, MemDep = null, PredecessorWithTwoSuccessors)
 merge_block_into_predecessor :: (bb: Value_Id, dt: *Dom_Tree, li: *Loop_Info, mssau: *Mssa_Updater, pred_with_two_succs := false) -> bool {
     if block_has_address_taken(bb) return false;
@@ -291,9 +296,7 @@ merge_block_into_predecessor :: (bb: Value_Id, dt: *Dom_Tree, li: *Loop_Info, ms
         n := nops(pn);
         for k: 0..n-1 if phi_value(pn, k) == pn return false;
     }
-    // HasLoopOrEntryConvergenceToken
-    for i: block_insts(bb) if call_iid(i) == IID_EXPERIMENTAL_CONVERGENCE_LOOP || call_iid(i) == IID_EXPERIMENTAL_CONVERGENCE_ENTRY
-        fatal("MergeBlockIntoPredecessor with convergence tokens is not implemented yet");
+    if has_loop_or_entry_convergence_token(bb) && has_loop_or_entry_convergence_token(pred) return false;
 
     first := block_first(bb);
     if first != NONE && inst_op(first) == .PHI fold_single_entry_phi_nodes(bb);
