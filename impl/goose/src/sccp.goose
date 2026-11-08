@@ -1811,9 +1811,44 @@ fn sc_terminating_musttail_call(b: i32) -> i32 {
     return -1;
 }
 
-// FunctionSpecializer::run with its default options: candidates are functions with arguments whose code
-// size (TTI cost) reaches funcspec-min-function-size (500). The cost model is not ported, so fail loudly
-// when a candidate might reach it (every instruction costs at most a few units).
+// FunctionSpecializer::run with its default options (FunctionSpecialization.cpp is not ported). A function is
+// specialized only if (1) isCandidateFunction holds, (2) its code size (CodeMetrics over TTI TCK_CodeSize
+// costs) reaches funcspec-min-function-size = 500, and (3) findSpecializations finds an executable direct
+// call site passing a candidate constant (getCandidateConstant) for an interesting argument
+// (isArgumentInteresting), or promoteConstantStackValues applies (recursive functions). We fail loudly when
+// (1) and (3) hold and a generous upper bound of the code size reaches 500.
+fn sc_spec_size_bound(f: i32) -> i64 {
+    var n: i64 = 0;
+    each_inst(f) { i =>
+        if is_callbase(i) { n += 4 + 2 * cb_nargs(i); }
+        else if ty_is_vector(vals[i].ty) || (nops(i) > 0 && op(i, 0) >= 0 && ty_is_vector(vals[op(i, 0)].ty)) { n += 64; }
+        else { n += 4; }
+    };
+    return n;
+}
+fn sc_arg_interesting(a: i32) -> bool {
+    if first_use(a) < 0 { return false; }
+    let t = vals[a].ty;
+    let k = ty_kind(t);
+    if k != TK_PTR && k != TK_INT && !ty_is_fp(t) && k != TK_STRUCT { return false; }
+    let f = args_parent[vals[a].sub];
+    if arg_has_attr(a, AK_ByVal) && !me_only_reads(aset_memory(alist_fn(globs[glob_of(f)].attrs))) { return false; }
+    if !sc_bit(f, SB_ARGTRACK) { return true; }
+    if sc_is_struct(a) {
+        for e in ty_count(t) { if sc_is_overdefined_lv(sc_gsv(a, e)) { return true; } }
+        return false;
+    }
+    return sc_is_overdefined_lv(sc_lattice(a));
+}
+fn sc_candidate_constant(v: i32) -> i32 {
+    if vals[v].kind == VK_POISON { return -1; }
+    var c = if is_constant(v) { v } else { sc_get_constant_or_null(v) };
+    if c >= 0 && ty_kind(vals[c].ty) == TK_PTR && !is_null_value(c) {
+        let u = get_underlying_object(c, 6);
+        if is_gvar(u) && globs[glob_of(u)].is_const == 0 { return -1; }
+    }
+    return c;
+}
 fn sc_check_func_spec(m: i32) {
     var f = modules[m].first_func;
     while f >= 0 {
@@ -1821,18 +1856,22 @@ fn sc_check_func_spec(m: i32) {
         if !func_is_decl(f) && globs[g].nargs > 0 && !sc_is_interposable(f) && !func_has_fn_attr(f, AK_NoDuplicate) &&
            !func_has_fn_attr(f, AK_OptimizeForSize) && !func_has_fn_attr(f, AK_MinSize) && sc_bit(func_entry(f), SB_EXEC) &&
            !func_has_fn_attr(f, AK_AlwaysInline) {
-            var n: i64 = 0;
-            each_inst(f) { i => n++; };
-            // without a direct call site findSpecializations finds nothing, and the only side effect
-            // (promoteConstantStackValues) needs a recursive function, which has one
-            var called = false;
+            var hit = false;
+            var recursive_ptr = false;
             var u = first_use(f);
             while u >= 0 {
-                let us = uses[u].user;
-                if is_inst(us) && (iop(us) == OP_CALL || iop(us) == OP_INVOKE) && called_function(us) == f { called = true; }
+                let cs = uses[u].user;
+                if is_inst(cs) && (iop(cs) == OP_CALL || iop(cs) == OP_INVOKE) && called_function(cs) == f && sc_bit(inst_parent(cs), SB_EXEC) {
+                    for k in func_nargs(f) {
+                        if sc_arg_interesting(func_arg(f, k)) && sc_candidate_constant(cb_arg(cs, k)) >= 0 { hit = true; }
+                        if inst_func(cs) == f && ty_kind(vals[cb_arg(cs, k)].ty) == TK_PTR { recursive_ptr = true; }
+                    }
+                }
                 u = use_next(u);
             }
-            if n >= 100 && called { sc_not_ported("function specialization (a called candidate function with 100 or more instructions)"); }
+            if (hit || recursive_ptr) && sc_spec_size_bound(f) >= 500 {
+                sc_not_ported(str("function specialization (", val_name(f), " may be a specialization candidate)"));
+            }
         }
         f = globs[g].next;
     }
