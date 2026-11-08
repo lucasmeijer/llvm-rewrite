@@ -263,6 +263,33 @@ fn adjust_digits(buf: u8[>..<]&, exp: i64&, prec: i64) {
 
 // writeAPFloatInternal
 fn write_apfloat(out: u8[>..]&, kind: i64, lo: u64, hi: u64) {
+    if kind == TK_PPC_FP128 { write_ppc_fp128(out, lo, hi); return; }
+    write_apfloat_ieee(out, kind, lo, hi);
+}
+
+fn write_ppc_fp128(out: u8[>..]&, lo: u64, hi: u64) {
+    if true {
+        // double-double: lo = first (high) double, hi = second. writeAPFloatInternal forces bitwise output when
+        // the second double is nonzero; otherwise the value is the first double, and the decimal string must
+        // round-trip in the 106-bit legacy semantics (checked here with fp128's 113 bits).
+        if hi == 0 {
+            let p = fp_decompose(TK_DOUBLE, lo, 0);
+            if p.cat == FC_INF || p.cat == FC_NAN || p.cat == FC_ZERO { write_apfloat_ieee(out, TK_DOUBLE, lo, 0); return; }
+            var tmp: u8[>..] = [];
+            write_apfloat_ieee(tmp, TK_DOUBLE, lo, 0);
+            if tmp[0] != 'f' {
+                let ql, qh, ok = fp_parse_decimal(TK_FP128, tmp);
+                let el, eh = fp_convert(TK_DOUBLE, TK_FP128, lo, 0);
+                if ok && ql == el && qh == eh { out.append(tmp); return; }
+            }
+        }
+        out.append("f0x");
+        write_hex_fixed(out, [lo, hi], 128);
+        return;
+    }
+}
+
+fn write_apfloat_ieee(out: u8[>..]&, kind: i64, lo: u64, hi: u64) {
     let f = fp_fmt(kind);
     let p = fp_decompose(kind, lo, hi);
     if p.cat == FC_INF {

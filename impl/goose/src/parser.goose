@@ -476,6 +476,7 @@ fn fp_kind_of(ty: i32) -> i64 { types[ty].kind as i64 }
 fn parse_fp_const(ty: i32) -> i32 {
     if !ty_is_fp(ty) { perr("floating point constant invalid for type"); }
     let k = fp_kind_of(ty);
+    if k == TK_PPC_FP128 { return parse_ppc_fp128_const(ty); }
     if tk == T_FPLIT {
         var s: u8[>..] = [];
         s.append(tstr);
@@ -1987,6 +1988,7 @@ fn parse_function_body(fv: i32) {
     let st = globs[glob_of(fv)].symtab;
     if tok_punct('}') { perr("function body requires at least one basic block"); }
     while !tok_punct('}') {
+        if tok_is("uselistorder") { parse_uselistorder(); continue; }
         // basic block label
         var bb: i32 = -1;
         if tk == T_LABELSTR {
@@ -2827,7 +2829,7 @@ fn parse_module(path: const u8[:]) {
         if tok_is("define") { parse_function(true); continue; }
         if tok_is("declare") { parse_function(false); continue; }
         if tok_is("attributes") { parse_attr_group_def(); continue; }
-        if tok_is("uselistorder") || tok_is("uselistorder_bb") { perr("uselistorder directives are not supported yet"); }
+        if tok_is("uselistorder") { parse_uselistorder(); continue; }
         if tk == T_LVAR || tk == T_LID {
             // %T = type ...
             var t: i32 = -1;
@@ -3409,4 +3411,78 @@ fn parse_denormal_fpenv() -> u64 {
     ignore_colon = saved;
     if fmode < 0 { fmode = def; }
     return ((def | (fmode << 4)) as u64);
+}
+
+// LLParser::parseUseListOrder / sortUseListOrder: the k-th use (in use-list order) gets Indexes[k]; the use
+// list is then sorted by those indexes.
+fn parse_uselistorder() {
+    let loc = ts;
+    lex();
+    let v = parse_type_and_value();
+    expect_punct(',', "comma in uselistorder directive");
+    expect_punct('{', "'{' here");
+    var idx: i64[>..] = [];
+    loop {
+        idx.push(parse_uint());
+        if !eat_punct(',') { break; }
+    }
+    expect_punct('}', "'}' here");
+    if idx.len < 2 { perr_at(loc, "expected >= 2 uselistorder indexes"); }
+    if !has_use_list(v) { return; }
+    var us: i32[>..] = [];
+    var u = vals[v].first_use;
+    while u >= 0 { us.push(u); u = uses[u].next; }
+    if us.len == 0 { perr_at(loc, "value has no uses"); }
+    if us.len < 2 { perr_at(loc, "value only has one use"); }
+    if us.len != idx.len { perr_at(loc, str("wrong number of indexes, expected ", us.len)); }
+    var sorted: i32[>..] = [];
+    for k in us.len { sorted.push(-1); }
+    for k in us.len { sorted[idx[k]] = us[k]; }
+    var prev: i32 = -1;
+    for k in sorted.len {
+        let x = sorted[k];
+        uses[x].prev = prev;
+        uses[x].next = -1;
+        if prev >= 0 { uses[prev].next = x; } else { vals[v].first_use = x; }
+        prev = x;
+    }
+}
+
+// ppc_fp128 constants (double-double; lo = first double, hi = second). Values that need a nonzero second
+// double from a decimal literal are not supported.
+fn parse_ppc_fp128_const(ty: i32) -> i32 {
+    if tk == T_FPBITS {
+        if tfp_bits != 128 { perr("float hex literal has incorrect number of bits"); }
+        let lo = tfp_lo;
+        let hi = tfp_hi;
+        lex();
+        return c_fp(ty, lo, hi);
+    }
+    if tk == T_FPHEXD {
+        let bits = tfp_lo;
+        lex();
+        return c_fp(ty, bits, 0);
+    }
+    if tk == T_FPLIT {
+        var lit: u8[>..] = [];
+        lit.append(tstr);
+        lex();
+        let body: const u8[:] = if lit.len > 0 && (lit[0] == '+' || lit[0] == '-') { lit[1..] } else { lit };
+        let neg = lit.len > 0 && lit[0] == '-';
+        if body == "inf" {
+            let lo, hi = fp_encode(TK_DOUBLE, neg, 0, 0, 0, true);
+            return c_fp(ty, lo, 0);
+        }
+        let d, dh, ok = fp_parse_decimal(TK_DOUBLE, lit);
+        if !ok { perr("ppc_fp128 literal is not supported"); }
+        let p = fp_decompose(TK_DOUBLE, d, 0);
+        if p.cat == FC_NORMAL {
+            let ql, qh, ok2 = fp_parse_decimal(TK_FP128, lit);
+            let el, eh = fp_convert(TK_DOUBLE, TK_FP128, d, 0);
+            if !ok2 || ql != el || qh != eh { perr("ppc_fp128 decimal literal that is not a double is not supported"); }
+        }
+        return c_fp(ty, d, 0);
+    }
+    perr("expected floating point constant");
+    return -1;
 }
