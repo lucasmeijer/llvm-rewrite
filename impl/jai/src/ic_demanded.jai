@@ -449,7 +449,40 @@ ic_simplify_demanded_use_bits :: (i: Value_Id, demanded: APInt, known: *Known_Bi
                     return ic_insert_new_inst_with(nv, i);
                 }
             } else if id == IID_PTRMASK {
-                fatal("instcombine: SimplifyDemandedBits of llvm.ptrmask is not supported yet");
+                // (ported from InstCombineSimplifyDemanded.cpp, case Intrinsic::ptrmask)
+                mw := scalar_bits(op(i, 1));
+                lk = kb_new(bw);
+                pk := kb_new(mw);
+                if ic_simplify_demanded_bits(i, 0, demanded, *lk, q, depth + 1) ||
+                   ic_simplify_demanded_bits(i, 1, ap_zext_or_trunc(ap_and(demanded, ap_not(lk.zero)), mw), *pk, q, depth + 1) return i;
+                pk = kb_anyext_or_trunc(pk, bw);
+                known.* = kb_and(lk, pk);
+                kcomputed = true;
+                if ap_is_subset_of(demanded, known.zero) && !pm_zero(op(i, 1))
+                    return ic_replace_operand(i, 1, const_null_value(vtype(op(i, 1))));
+                if ap_is_subset_of(demanded, ap_or(pk.one, lk.zero)) return op(i, 0);
+                if ic_shrink_demanded_constant(i, 1, ap_zext_or_trunc(ap_and(demanded, ap_not(lk.zero)), mw)) return i;
+                g := op(i, 0);
+                if is_gep_operator(g) && opr_gep_source_type(g) == ir.t_i8 && nops(g) == 2 {
+                    okg, gidx := pm_constant_int_u64(op(g, 1));
+                    okm, pmi := pm_constant_int_u64(op(i, 1));
+                    if okg && okm && vkind(op(g, 1)) == .C_INT && vkind(op(i, 1)) == .C_INT {
+                        inner := op(g, 0);
+                        lk2 := ic_known_bits(inner, i, depth + 1);
+                        if !kb_is_zero(lk2) {
+                            tz := kb_count_min_trailing_zeros(lk2);
+                            pab: u64 = ifx tz >= 64 then 0xFFFF_FFFF_FFFF_FFFF else ((cast(u64) 1) << tz) - 1;
+                            mgi := (gidx & ~pab) | (gidx & pab & pmi);
+                            if mgi != gidx {
+                                icb_set_insert_point(i);
+                                git := dl_index_type(vtype(inner));
+                                mg := icb_gep(opr_gep_source_type(g), inner, .[const_int_of(git, mgi)], vname(g), ifx (gep_nw_bits(g) & F_INBOUNDS) != 0 then cast(u32) F_INBOUNDS else 0);
+                                ic_replace_operand(i, 0, mg);
+                                return i;
+                            }
+                        }
+                    }
+                }
             } else if id == IID_FSHL || id == IID_FSHR {
                 oksa, sa := pm_apint(op(i, 2));
                 if oksa {

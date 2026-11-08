@@ -1309,6 +1309,8 @@ ic_visit_intrinsic_switch :: (ii: Value_Id, iid: Intrinsic_Id) -> Ic_Switch_Resu
     ty := vtype(ii);
     if iid == {
     case IID_OBJECTSIZE;
+        // objectsize dynamic: ObjectSizeOffsetEvaluator is not ported (memory unit); left alone like before
+        if !is_null_value(call_arg(ii, 3)) return done(NONE);
         v := lower_object_size_call(ii, ic_aa(), false);
         if v != NONE return done(ic_replace_inst_uses_with(ci, v));
         return done(NONE);
@@ -1594,7 +1596,25 @@ ic_visit_intrinsic_switch :: (ii: Value_Id, iid: Intrinsic_Id) -> Ic_Switch_Resu
     case IID_ASSUME;
         return ic_visit_assume(ii);
     case IID_EXPERIMENTAL_GUARD;
-        fatal("instcombine: llvm.experimental.guard is not supported yet");
+        next_inst := inst(ii).next;
+        for 0..GUARD_WIDENING_WINDOW-1 {
+            if !is_safe_to_speculatively_execute(next_inst) break;
+            next_inst = inst(next_inst).next;
+        }
+        if call_iid(next_inst) == IID_EXPERIMENTAL_GUARD {
+            next_cond := call_arg(next_inst, 0);
+            curr := call_arg(ii, 0);
+            if curr != next_cond {
+                mv := inst(ii).next;
+                while mv != next_inst {
+                    t := mv; mv = inst(mv).next;
+                    inst_move_before(t, ii);
+                }
+                ic_replace_operand(ii, 0, icb_and(curr, next_cond));
+            }
+            ic_erase_inst(next_inst);
+            return done(ii);
+        }
     case IID_VECTOR_INSERT;
         return ic_visit_vector_insert(ii);
     case IID_VECTOR_EXTRACT;
@@ -2213,7 +2233,10 @@ ic_visit_assume :: (ii: Value_Id) -> Ic_Switch_Result {
                 has_offset := offset_ptr == NONE || cf_is_int(offset_ptr);
                 offset: u64 = ifx offset_ptr != NONE && cf_is_int(offset_ptr) then const_int_zext(offset_ptr) else 0;
                 if alignment == 1 || !ic_is_pow2(alignment) return remove_bundle(ii, idx);
-                if is_gep_operator(ptr) fatal("instcombine: assume align of a GEP (getMaxPreservedAlignment) is not supported yet");
+                if is_gep_operator(ptr) && ic_gep_max_preserved_alignment(ptr) >= alignment {
+                    icb_alignment_assumption(op(ptr, 0), alignment, offset_ptr);
+                    return remove_bundle(ii, idx);
+                }
                 if !has_offset continue;
                 uo := get_underlying_object(ptr);
                 if uo == NONE || is_argument(uo) continue;
@@ -2603,8 +2626,17 @@ ic_visit_call_base :: (call: Value_Id) -> Value_Id {
             call_remove_fn_attr(call, .Convergent);
             return call;
         }
-        if glob(callee_f).cc != inst(call).cc && !is_declaration(callee_f)
-            fatal("instcombine: calls with mismatched calling conventions (isCallingConvCCompatible) are not supported yet");
+        if (glob(callee_f).cc != inst(call).cc &&
+            !(glob(callee_f).cc == CC_C && ic_is_calling_conv_c_compatible(inst(call).cc, inst(call).ty2)) &&
+            !(inst(call).cc == CC_C && ic_is_calling_conv_c_compatible(glob(callee_f).cc, glob(callee_f).value_type))) &&
+           !is_declaration(callee_f) {
+            ic_create_non_terminator_unreachable(call);
+            if vtype(call) != ir.t_void ic_replace_inst_uses_with(call, const_poison(vtype(call)));
+            if inst_op(call) == .CALL return ic_erase_inst(call);
+            set_op(call, nops(call) - 1, const_null_value(vtype(callee_f)));
+            inst(call).ty2 = glob(callee_f).value_type;
+            return NONE;
+        }
     }
     if (vkind(callee) == .C_NULL && !null_pointer_is_defined(inst_fn(call))) || pm_undef_value(callee) {
         if vtype(call) != ir.t_void ic_replace_inst_uses_with(call, const_poison(vtype(call)));
@@ -2692,4 +2724,40 @@ ic_is_bit_or_noop_pointer_castable :: (src: Type_Id, dst: Type_Id) -> bool {
     }
     if type_kind(src) == .VOID || type_kind(dst) == .VOID return false;
     return ic_prim_bits(src) == ic_prim_bits(dst) && ic_prim_bits(src) != 0;
+}
+
+GUARD_WIDENING_WINDOW :: 3;   // -instcombine-guard-widening-window
+CC_C :: 0; CC_ARM_APCS :: 66; CC_ARM_AAPCS :: 67; CC_ARM_AAPCS_VFP :: 68;
+// isCallingConvCCompatible(CC, TT, FuncTy) (TargetLibraryInfo.cpp)
+ic_is_calling_conv_c_compatible :: (cc: u32, fty: Type_Id) -> bool {
+    if cc == CC_C return true;
+    if cc == CC_ARM_APCS || cc == CC_ARM_AAPCS || cc == CC_ARM_AAPCS_VFP {
+        if contains(ir.triple, "ios") return false;
+        r := func_ret(fty);
+        if !is_ptr_type(r) && !is_int_type(r) && type_kind(r) != .VOID return false;
+        for k: 0..cast(s64) func_nparams(fty) - 1 { p := func_param(fty, cast(u32) k); if !is_ptr_type(p) && !is_int_type(p) return false; }
+        return true;
+    }
+    return false;
+}
+// GEPOperator::getMaxPreservedAlignment
+ic_gep_max_preserved_alignment :: (g: Value_Id) -> u64 {
+    result: u64 = (cast(u64) 1) << 32;
+    min_align :: (a: u64, b: u64) -> u64 { x := a | b; return x & (~x + 1); }
+    cur := opr_gep_source_type(g);
+    for k: 1..cast(s64) nops(g) - 1 {
+        o := op(g, cast(u32) k);
+        is_struct := k > 1 && type_kind(cur) == .STRUCT;
+        indexed := gep_indexed_type(cur, k, o);
+        defer cur = indexed;
+        offset: u64;
+        if is_struct {
+            offset = dl_struct_offset(cur, cast(u32) (const_int_zext(o) & 0xFFFF_FFFF));
+        } else {
+            cnt: u64 = ifx cf_is_int(o) then ap_limited(const_ap(o)) else 1;
+            offset = gep_seq_stride(cur, k, indexed) * cnt;
+        }
+        result = min_align(offset, result);
+    }
+    return result;
 }
