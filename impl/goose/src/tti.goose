@@ -2,8 +2,8 @@
 // llvm/include/llvm/Analysis/TargetTransformInfoImpl.h (TargetTransformInfoImplBase = NoTTIImpl, used by opt
 // when the module has no target triple, and TargetTransformInfoImplCRTPBase::getInstructionCost) and
 // llvm/lib/Analysis/TargetTransformInfo.cpp (getOperandInfo, getPredictableBranchThreshold).
-// The x86 target (X86TTIImpl over BasicTTIImplBase) is selected by tti_init for x86 triples; its queries fail
-// loudly until they are ported (see tti_x86_not_ported).
+// The x86 target (X86TTIImpl over BasicTTIImplBase, tti_x86.goose) is selected by tti_init_function for x86
+// triples; the queries not ported there fail loudly.
 //
 // Costs are InstructionCost values: an i64, with TTI_INVALID (and anything above it) as the invalid state,
 // which compares greater than every valid cost exactly like InstructionCost::operator<.
@@ -17,6 +17,7 @@ import datalayout;
 import apint;
 import pm;
 import vt;
+import tti_x86;
 
 let TCK_RECIP_THROUGHPUT = 0;
 let TCK_LATENCY = 1;
@@ -41,7 +42,10 @@ var tti_module: i32 = -1;
 
 // TargetIRAnalysis for the module: opt creates a TargetMachine from the module triple when the target is
 // registered (an empty triple gives NoTTIImpl).
-fn tti_init(m: i32) {
+fn tti_init(m: i32) { tti_init_function(-1, m); }
+
+// TargetIRAnalysis::run(F): the subtarget of an x86 target depends on the function's attributes.
+fn tti_init_function(fv: i32, m: i32) {
     tti_module = m;
     let t = modules[m].triple;
     if t < 0 || sbytes(t).len == 0 { tti_kind = TTI_NONE; return; }
@@ -49,6 +53,7 @@ fn tti_init(m: i32) {
     if starts_with(s, "x86_64") || starts_with(s, "i386") || starts_with(s, "i686") || starts_with(s, "i586") ||
        starts_with(s, "i486") || starts_with(s, "x86") {
         tti_kind = TTI_X86;
+        x86_subtarget_init(s, fv);
         return;
     }
     fatal(str("TargetTransformInfo for target triple '", s, "' is not supported"));
@@ -86,39 +91,37 @@ fn bp_get(n0: u64, d0: u64) -> u32 {
 fn bp_compl(p: u32) -> u32 { (BP_D as u32) - p }
 
 fn tti_branch_mispredict_penalty() -> i64 {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getBranchMispredictPenalty"); }
+    if tti_kind == TTI_X86 { return 14; }
     return 0;
 }
 
 fn tti_is_profitable_to_hoist(i: i32) -> bool { true }
 
 fn tti_has_conditional_load_store_for_type(t: i32, is_store: bool) -> bool {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("hasConditionalLoadStoreForType"); }
+    if tti_kind == TTI_X86 { return x86_has_conditional_load_store_for_type(t); }
     return false;
 }
 
 fn tti_should_build_lookup_tables() -> bool {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("shouldBuildLookupTables"); }
-    return true;
+    return true;  // x86: BRIND is Legal (BasicTTIImplBase::shouldBuildLookupTables)
 }
 fn tti_should_build_lookup_tables_for_constant(c: i32) -> bool {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("shouldBuildLookupTablesForConstant"); }
     return true;
 }
 fn tti_should_build_rel_lookup_tables() -> bool {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("shouldBuildRelLookupTables"); }
+    // BasicTTIImplBase: PIC, not the medium/large code model, a 64-bit arch
+    if tti_kind == TTI_X86 { return x86_pic && x86_is64; }
     return false;
 }
 fn tti_is_type_legal(t: i32) -> bool {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("isTypeLegal"); }
+    if tti_kind == TTI_X86 { return x86_is_type_legal(t); }
     return false;
 }
 fn tti_minimum_lookup_table_entry_bits() -> i64 {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getMinimumLookupTableEntryBitWidth"); }
     return 8;
 }
 fn tti_reg_usage_for_type(t: i32) -> i64 {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getRegUsageForType"); }
+    if tti_kind == TTI_X86 { return x86_reg_usage(t); }
     return 1;
 }
 
@@ -149,7 +152,16 @@ let OK_NONUNIFORM_CONST = 3;
 
 // getArithmeticInstrCost (TargetTransformInfoImplBase)
 fn tti_arith_cost(o: i64, ty: i32, kind: i64, args: const i32[:]) -> i64 {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getArithmeticInstrCost"); }
+    let base = tti_base_arith_cost(o, ty, kind, args);
+    if tti_kind == TTI_X86 {
+        let o1 = if args.len > 0 { tti_operand_info(args[0]) } else { 0 };
+        let o2 = if args.len > 1 { tti_operand_info(args[1]) } else { 0 };
+        return x86_arith_cost(o, ty, kind, o1, o2, args.len, base);
+    }
+    return base;
+}
+
+fn tti_base_arith_cost(o: i64, ty: i32, kind: i64, args: const i32[:]) -> i64 {
     if o == OP_FDIV || o == OP_FREM || o == OP_SDIV || o == OP_SREM || o == OP_UDIV || o == OP_UREM { return TCC_EXPENSIVE; }
     if o == OP_AND || o == OP_OR {
         for a in args { if a >= 0 && inst_iid(a) == IID_experimental_widenable_condition { return TCC_FREE; } }
@@ -158,9 +170,17 @@ fn tti_arith_cost(o: i64, ty: i32, kind: i64, args: const i32[:]) -> i64 {
     return 1;
 }
 
+fn tti_cast_cost(o: i64, dst: i32, src: i32, kind: i64) -> i64 { tti_cast_cost_i(o, dst, src, kind, -1) }
+
+// getCastInstrCost(Opcode, Dst, Src, getCastContextHint(I), CostKind, I); i is the instruction or -1
+fn tti_cast_cost_i(o: i64, dst: i32, src: i32, kind: i64, i: i32) -> i64 {
+    let base = tti_base_cast_cost(o, dst, src);
+    if tti_kind == TTI_X86 { return x86_cast_cost(o, dst, src, x86_cast_context(i), kind, i, base); }
+    return base;
+}
+
 // getCastInstrCost (TargetTransformInfoImplBase)
-fn tti_cast_cost(o: i64, dst: i32, src: i32, kind: i64) -> i64 {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getCastInstrCost"); }
+fn tti_base_cast_cost(o: i64, dst: i32, src: i32) -> i64 {
     if o == OP_INTTOPTR {
         let s = ty_bits(ty_scalar(src));
         if dl_is_legal_integer(s) && s <= dl_size_bits(ty_scalar(dst)) { return 0; }
@@ -178,24 +198,42 @@ fn tti_cast_cost(o: i64, dst: i32, src: i32, kind: i64) -> i64 {
 }
 
 fn tti_cf_cost(o: i64, kind: i64) -> i64 {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getCFInstrCost"); }
+    if tti_kind == TTI_X86 && kind == TCK_RECIP_THROUGHPUT { return TCC_FREE; }
     if o == OP_PHI && kind != TCK_RECIP_THROUGHPUT { return 0; }
     return 1;
 }
 
 // getCmpSelInstrCost(Opcode, ValTy, CondTy, VecPred, CostKind, ...)
 fn tti_cmpsel_cost(o: i64, valty: i32, condty: i32, pred: i64, kind: i64) -> i64 {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getCmpSelInstrCost"); }
+    return tti_cmpsel_cost_i(o, valty, condty, pred, kind, -1);
+}
+fn tti_cmpsel_cost_i(o: i64, valty: i32, condty: i32, pred: i64, kind: i64, i: i32) -> i64 {
+    if tti_kind == TTI_X86 { return x86_cmpsel_cost(o, valty, condty, pred, kind, i); }
     return 1;
 }
 
 fn tti_memory_op_cost(o: i64, ty: i32, align: i64, as_: i64, kind: i64) -> i64 {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getMemoryOpCost"); }
+    return tti_memory_op_cost_i(o, ty, align, as_, kind, -1);
+}
+fn tti_memory_op_cost_i(o: i64, ty: i32, align: i64, as_: i64, kind: i64, i: i32) -> i64 {
+    if tti_kind == TTI_X86 { return x86_memory_op_cost(o, ty, i, kind); }
     return 1;
 }
 
+// getVectorInstrCost(I, Ty, CostKind, Index) for an insertelement / extractelement instruction
 fn tti_vector_inst_cost(i: i32, kind: i64) -> i64 {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getVectorInstrCost"); }
+    if tti_kind == TTI_X86 {
+        let o = iop(i);
+        let vt = if o == OP_INSERTELEMENT { vals[i].ty } else { vals[op(i, 0)].ty };
+        let ix = op(i, if o == OP_INSERTELEMENT { 2 } else { 1 });
+        var idx: i64 = -1;
+        if vals[ix].kind == VK_CINT && !ty_is_vector(vals[ix].ty) && ap_active_bits(ci_ap(ix)) <= 32 {
+            idx = ap_zext64(ci_ap(ix)) as i64;
+        }
+        let o0 = if o == OP_INSERTELEMENT { op(i, 0) } else { -1 };
+        let o1 = if o == OP_INSERTELEMENT { op(i, 1) } else { -1 };
+        return x86_vector_inst_cost(o, vt, idx, o0, o1, kind);
+    }
     return 1;
 }
 
@@ -212,7 +250,24 @@ fn tti_insert_extract_value_cost(o: i64, kind: i64) -> i64 {
 
 // getIntrinsicInstrCost (TargetTransformInfoImplBase) for an intrinsic call
 fn tti_intrinsic_cost(c: i32, id: i32, kind: i64) -> i64 {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getIntrinsicInstrCost"); }
+    let base = tti_base_intrinsic_cost(id, vals[c].ty);
+    if tti_kind == TTI_X86 {
+        var args: i32[>..<] = [];
+        for k in cb_nargs(c) { args.push(cb_arg(c, k)); }
+        return x86_intrinsic_cost(id, vals[c].ty, args, inst_fmf(c), kind, base);
+    }
+    return base;
+}
+
+// getIntrinsicInstrCost(IntrinsicCostAttributes(id, ret, args)) without an instruction
+fn tti_intrinsic_cost_args(id: i32, rt: i32, args: const i32[:], kind: i64) -> i64 {
+    let base = tti_base_intrinsic_cost(id, rt);
+    if tti_kind == TTI_X86 { return x86_intrinsic_cost(id, rt, args, 0, kind, base); }
+    return base;
+}
+
+// getIntrinsicInstrCost (TargetTransformInfoImplBase)
+fn tti_base_intrinsic_cost(id: i32, rt: i32) -> i64 {
     let zero: const i32[] = [IID_allow_runtime_check, IID_allow_ubsan_check, IID_annotation, IID_assume,
         IID_sideeffect, IID_pseudoprobe, IID_arithmetic_fence, IID_dbg_assign, IID_dbg_declare, IID_dbg_value,
         IID_dbg_label, IID_invariant_start, IID_invariant_end, IID_launder_invariant_group,
@@ -225,7 +280,6 @@ fn tti_intrinsic_cost(c: i32, id: i32, kind: i64) -> i64 {
         IID_experimental_widenable_condition, IID_ssa_copy];
     for z in zero { if z == id { return 0; } }
     if id == IID_bswap {
-        let rt = vals[c].ty;
         if !ty_is_vector(rt) {
             let b = dl_size_bits(rt);
             if b <= 0 || (b & (b - 1)) != 0 { return TTI_INVALID; }
@@ -246,7 +300,7 @@ fn tti_access_type(u: i32) -> i32 {
 
 // isLegalAddressingMode (TargetTransformInfoImplBase)
 fn tti_legal_addressing_mode(ty: i32, base_gv: i32, off: i64, has_base: bool, scale: i64, as_: i64) -> bool {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("isLegalAddressingMode"); }
+    if tti_kind == TTI_X86 { return x86_legal_addressing_mode(base_gv, off, has_base, scale); }
     return base_gv < 0 && off == 0 && (scale == 0 || scale == 1);
 }
 
@@ -348,7 +402,6 @@ fn tti_is_static_alloca(a: i32) -> bool {
 fn tti_instruction_cost(u: i32, kind: i64) -> i64 {
     let is_i = is_inst(u);
     if is_i && is_callbase(u) && inst_iid(u) == 0 {
-        if tti_kind == TTI_X86 { tti_x86_not_ported("getInstructionCost of calls"); }
         let f = called_function(u);
         if f >= 0 {
             if !tti_is_lowered_to_call(f) { return TCC_BASIC; }
@@ -369,7 +422,6 @@ fn tti_instruction_cost(u: i32, kind: i64) -> i64 {
         return TCC_BASIC;
     }
     if o == OP_GEP {
-        if tti_kind == TTI_X86 { tti_x86_not_ported("getGEPCost"); }
         var at: i32 = -1;
         if is_i {
             // GEP->hasOneUser(): all uses by one user
@@ -390,11 +442,11 @@ fn tti_instruction_cost(u: i32, kind: i64) -> i64 {
         return tti_arith_cost(o, ty, kind, [op(u, 0), op(u, 1)]);
     }
     if is_cast_op(o) || o == OP_PTRTOADDR {
-        return tti_cast_cost(o, ty, vals[op(u, 0)].ty, kind);
+        return tti_cast_cost_i(o, ty, vals[op(u, 0)].ty, kind, if is_i { u } else { -1 });
     }
     if o == OP_STORE {
         let a = insts[inst_of(u)].align;
-        return tti_memory_op_cost(o, vals[op(u, 0)].ty, if a == 0 { 1 } else { 1 << (a - 1) as i64 }, ptr_as(vals[op(u, 1)].ty), kind);
+        return tti_memory_op_cost_i(o, vals[op(u, 0)].ty, if a == 0 { 1 } else { 1 << (a - 1) as i64 }, ptr_as(vals[op(u, 1)].ty), kind, u);
     }
     if o == OP_LOAD {
         var lt = ty;
@@ -403,7 +455,7 @@ fn tti_instruction_cost(u: i32, kind: i64) -> i64 {
             if fu >= 0 && uses[fu].next < 0 && is_inst_op(uses[fu].user, OP_TRUNC) { lt = vals[uses[fu].user].ty; }
         }
         let a = insts[inst_of(u)].align;
-        return tti_memory_op_cost(o, lt, if a == 0 { 1 } else { 1 << (a - 1) as i64 }, ptr_as(vals[op(u, 0)].ty), kind);
+        return tti_memory_op_cost_i(o, lt, if a == 0 { 1 } else { 1 << (a - 1) as i64 }, ptr_as(vals[op(u, 0)].ty), kind, u);
     }
     if o == OP_SELECT {
         if is_i && (m_logical(u, true) || m_logical(u, false)) {
@@ -412,10 +464,10 @@ fn tti_instruction_cost(u: i32, kind: i64) -> i64 {
             let b = lg_b;
             return tti_arith_cost(if isor { OP_OR } else { OP_AND }, ty, kind, [a, b]);
         }
-        return tti_cmpsel_cost(o, ty, vals[op(u, 0)].ty, -1, kind);
+        return tti_cmpsel_cost_i(o, ty, vals[op(u, 0)].ty, -1, kind, if is_i { u } else { -1 });
     }
     if o == OP_ICMP || o == OP_FCMP {
-        return tti_cmpsel_cost(o, vals[op(u, 0)].ty, ty, if is_i { inst_pred(u) } else { -1 }, kind);
+        return tti_cmpsel_cost_i(o, vals[op(u, 0)].ty, ty, if is_i { inst_pred(u) } else { -1 }, kind, if is_i { u } else { -1 });
     }
     if o == OP_INSERTELEMENT || o == OP_EXTRACTELEMENT {
         if !is_i { return TCC_BASIC; }
@@ -472,4 +524,92 @@ fn shuffle_is_free_identity(u: i32) -> bool {
         return use0 || use1;
     }
     return false;
+}
+
+// TargetTransformInfo::getOperandInfo as kind * 4 + properties: kind OK_* above, properties 0 None,
+// 1 PowerOf2, 2 NegatedPowerOf2.
+fn tti_operand_info(v: i32) -> i64 {
+    if v < 0 { return 0; }
+    let k = vals[v].kind;
+    if k == VK_UNDEF || k == VK_POISON { return 0; }
+    if k == VK_CINT {
+        // a vector-typed ConstantInt is a splat ConstantInt
+        let a = ci_ap(v);
+        if ap_is_pow2(a) { return OK_UNIFORM_CONST * 4 + 1; }
+        if ap_is_neg_pow2(a) { return OK_UNIFORM_CONST * 4 + 2; }
+        return OK_UNIFORM_CONST * 4;
+    }
+    if k == VK_CFP { return OK_UNIFORM_CONST * 4; }
+    var info = OK_ANY;
+    var props = 0;
+    if is_inst_op(v, OP_SHUFFLEVECTOR) && shuffle_is_zero_elt_splat_tti(v) { info = OK_UNIFORM; }
+    let sp = tti_get_splat_value(v);
+    if sp >= 0 {
+        if is_arg(sp) || is_global(sp) { info = OK_UNIFORM; }
+        else if is_constant(sp) {
+            info = OK_UNIFORM_CONST;
+            if vals[sp].kind == VK_CINT {
+                let a = ci_ap(sp);
+                if ap_is_pow2(a) { props = 1; } else if ap_is_neg_pow2(a) { props = 2; }
+            }
+        }
+    } else if k == VK_CDVECTOR || k == VK_CDARRAY {
+        info = OK_NONUNIFORM_CONST;
+        var all_p = true;
+        var all_n = true;
+        let n = ty_count(vals[v].ty);
+        for e in n {
+            let c = agg_elem(v, e);
+            if c >= 0 && vals[c].kind == VK_CINT {
+                let a = ci_ap(c);
+                all_p = all_p && ap_is_pow2(a);
+                all_n = all_n && ap_is_neg_pow2(a);
+                if all_p || all_n { continue; }
+            }
+            all_p = false;
+            all_n = false;
+            break;
+        }
+        if all_p { props = 1; }
+        if all_n { props = 2; }
+    } else if k == VK_CVECTOR {
+        info = OK_NONUNIFORM_CONST;
+    }
+    return info * 4 + props;
+}
+
+// ShuffleVectorInst::isZeroEltSplat: every mask element 0 or poison, not all poison, one fixed-length source.
+fn shuffle_is_zero_elt_splat_tti(u: i32) -> bool {
+    let ii = inst_of(u);
+    if ty_kind(vals[op(u, 0)].ty) == TK_SVEC { return false; }
+    if insts[ii].naux as i64 != ty_count(vals[op(u, 0)].ty) { return false; }
+    var any = false;
+    for k in insts[ii].naux {
+        let m = ints[insts[ii].aux + k];
+        if m < 0 { continue; }
+        if m != 0 { return false; }
+        any = true;
+    }
+    return any;
+}
+
+// llvm::getSplatValue (VectorUtils): a constant's splat value, or the scalar of
+// shufflevector (insertelement poison/undef, X, 0), poison, zeroinitializer.
+fn tti_get_splat_value(v: i32) -> i32 {
+    if is_constant(v) { return splat_value(v, false); }
+    if is_inst_op(v, OP_SHUFFLEVECTOR) && shuffle_is_zero_mask_tti(v) {
+        let ie = op(v, 0);
+        if is_inst_op(ie, OP_INSERTELEMENT) {
+            let ix = op(ie, 2);
+            if vals[ix].kind == VK_CINT && ap_is_zero(ci_ap(ix)) { return op(ie, 1); }
+        }
+    }
+    return -1;
+}
+
+// m_ZeroMask: every mask element 0 or poison
+fn shuffle_is_zero_mask_tti(u: i32) -> bool {
+    let ii = inst_of(u);
+    for k in insts[ii].naux { let m = ints[insts[ii].aux + k]; if m != 0 && m != -1 { return false; } }
+    return true;
 }

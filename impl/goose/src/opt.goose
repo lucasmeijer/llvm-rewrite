@@ -48,7 +48,19 @@ fn main() {
         }
         else if starts_with(a, "-data-layout=") { cl_datalayout.append(a[13..]); }
         else if starts_with(a, "-mtriple=") { triple_normalize(a[9..], cl_mtriple); }
-        else if starts_with(a, "-mattr=") { cl_mattr.append(a[7..]); }
+        else if starts_with(a, "-mattr=") {
+            // cl::list, CommaSeparated; SubtargetFeatures::AddFeature lowercases and adds a missing '+'
+            var st: i64 = 7;
+            for j in 7..a.len + 1 {
+                if j < a.len && a[j] != ',' { continue; }
+                let f = a[st..j];
+                st = j + 1;
+                if f.len == 0 { continue; }
+                if cl_mattr.len > 0 { cl_mattr.push(','); }
+                if f[0] != '+' && f[0] != '-' { cl_mattr.push('+'); }
+                for c in f { cl_mattr.push(if c >= 'A' && c <= 'Z' { c + 32 } else { c }); }
+            }
+        }
         else if starts_with(a, "-mcpu=") { cl_mcpu.append(a[6..]); }
         else if starts_with(a, "-opt-bisect-limit=") {
             let v, ok = parse_int(a[18..]);
@@ -74,6 +86,7 @@ fn main() {
     parse_module(input);
     // -mtriple overrides the module's triple (M->setTargetTriple(Triple::normalize(TargetTriple)))
     if cl_mtriple.len > 0 { modules[cur_module].triple = intern(cl_mtriple); }
+    set_function_attributes(cur_module);
     if have_pipeline {
         let root = parse_pass_pipeline(pipeline);
         run_pipeline(root, cur_module);
@@ -83,4 +96,43 @@ fn main() {
     print_module(cur_module);
     if output.len == 0 || output == "-" { write_stdout(out); }
     else if !write_file(output, out) { write_stderr("opt: cannot write output\n"); exit(1); }
+}
+
+// codegen::setFunctionAttributes(M, CPU, Features, TuneCPU) as opt does it after parsing: only when the module
+// triple names an architecture. -mcpu becomes "target-cpu" (unless present); -mattr is appended to
+// "target-features".
+fn set_function_attributes(m: i32) {
+    if cl_mcpu.len == 0 && cl_mattr.len == 0 { return; }
+    let t = modules[m].triple;
+    if t < 0 { return; }
+    let ts = sbytes(t);
+    var e = find(ts, "-");
+    let arch = if e < 0 { ts } else { ts[..e] };
+    if arch.len == 0 || arch == "unknown" { return; }
+    var f = modules[m].first_func;
+    while f >= 0 {
+        let g = glob_of(f);
+        let l = globs[g].attrs;
+        let s = alist_fn(l);
+        var xs: i32[>..] = [];
+        for k in aset_n(s) { xs.push(aset_attr(s, k)); }
+        if cl_mcpu.len > 0 && aset_find_str_opt(s, "target-cpu") < 0 { xs.push(attr_str("target-cpu", cl_mcpu, true)); }
+        if cl_mattr.len > 0 {
+            let old = aset_find_str_opt(s, "target-features");
+            var nf: u8[>..] = [];
+            if old >= 0 && attrs[old].sval >= 0 && sbytes(attrs[old].sval).len > 0 { nf.append(sbytes(attrs[old].sval)); nf.push(','); }
+            nf.append(cl_mattr);
+            xs.push(attr_str("target-features", nf, true));
+        }
+        globs[g].attrs = alist_with_fn(l, aset_get(xs));
+        f = globs[g].next;
+    }
+}
+
+fn aset_find_str_opt(s: i32, key: const u8[:]) -> i32 {
+    for k in aset_n(s) {
+        let a = aset_attr(s, k);
+        if attrs[a].kind == 0 && sbytes(attrs[a].skey) == key { return a; }
+    }
+    return -1;
 }

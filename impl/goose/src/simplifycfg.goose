@@ -3955,8 +3955,9 @@ fn simplify_switch_of_powers_of_two(si: i32) -> bool {
     let cond = op(si, 0);
     let w = ty_bits(vals[cond].ty);
     if w > 64 || !dl_fits_in_legal_integer(w) { return false; }
-    // getIntrinsicInstrCost(cttz) > 2 * TCC_Basic
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getIntrinsicInstrCost(cttz)"); }
+    // getIntrinsicInstrCost(IntrinsicCostAttributes(cttz, CondTy, {Condition, true})) > 2 * TCC_Basic
+    let tru0 = c_true();
+    if tti_intrinsic_cost_args(IID_cttz, vals[cond].ty, [cond, tru0], TCK_SIZE_AND_LATENCY) > 2 { return false; }
     if sw_ncases(si) < 4 { return false; }
     var vs: u64[>..<] = [];
     for k in sw_ncases(si) {
@@ -3966,8 +3967,72 @@ fn simplify_switch_of_powers_of_two(si: i32) -> bool {
     sort(vs) { a, b => a < b };
     fn ctz(x: u64) -> u64 { var n: u64 = 0; var y = x; while (y & 1) == 0 { y = y >> 1; n++; } return n; }
     if !is_switch_dense_n(vs.len as u64, ctz(vs[vs.len - 1]) - ctz(vs[0]) + 1, fn_has_opt_size(inst_func(si))) { return false; }
-    scf_not_ported("simplifySwitchOfPowersOfTwo");
-    return false;
+    // Builder.SetInsertPoint(SI): new instructions take the switch's location
+    let loc = inst_get_md(si, MDK_DBG_SC);
+    let cty = vals[cond].ty;
+    if !cu_default_dest_unreachable(si) {
+        let popc = scf_new_intrinsic(IID_ctpop, [cty], [cond]);
+        inst_insert_before(popc, si);
+        if loc >= 0 { inst_set_md(popc, MDK_DBG_SC, loc); }
+        let ispow2 = cu_build_icmp_before(P_EQ, popc, c_int_ty(cty, 1), "", si);
+        let orig = inst_parent(si);
+        let dflt = sw_default(si);
+        let split = scf_split_block(orig, si, "");
+        let old_term = block_terminator(orig);
+        var ws: u64[>..<] = [];
+        let has_w = pd_extract(si, ws);
+        let bi = create_inst(OP_CONDBR, T_VOID, [ispow2, split, dflt]);
+        inst_insert_before(bi, old_term);
+        var any_nz = false;
+        for x in ws { if x != 0 { any_nz = true; } }
+        if has_w && any_nz {
+            var den: u64 = 0;
+            for x in ws { den += x; }
+            let nw1 = ws[0] / 2;
+            let nw0 = den - nw1;
+            pd_set_fitted(bi, [nw0, nw1], false, false);
+            ws[0] = nw1;
+            let cden = den - ws[0];
+            for k in 1..ws.len {
+                // W = NewWeights[0] * static_cast<double>(W) / CasesDenominator, stored into a uint32_t
+                let d = (nw0 as f64) * (ws[k] as u32 as f64) / (cden as f64);
+                ws[k] = (d as u64) & 0xffffffff;
+            }
+            var w32: u64[>..<] = [];
+            for x in ws { w32.push(x & 0xffffffff); }
+            pd_set(si, w32, false, false);
+        }
+        if loc >= 0 { inst_set_md(bi, MDK_DBG_SC, loc); } else { inst_erase_md(bi, MDK_DBG_SC); }
+        scf_erase(old_term);
+        add_predecessor_to_block(dflt, orig, split);
+        if cu_dtu {
+            var ups: DTUpdate[>..<] = [];
+            cu_upd(ups, DT_INSERT, orig, dflt);
+            dtu_apply_updates(ups);
+        }
+    }
+    for k in sw_ncases(si) {
+        let cv = sw_case_val(si, k);
+        set_op(si, 2 + 2 * k, c_int_ty(cty, ap_countr_zero(ci_ap(cv)) as u64));
+    }
+    let tru = c_true();
+    let tz = scf_new_intrinsic(IID_cttz, [cty], [cond, tru]);
+    inst_insert_before(tz, si);
+    if loc >= 0 { inst_set_md(tz, MDK_DBG_SC, loc); }
+    set_op(si, 0, tz);
+    return true;
+}
+
+// CallInst::Create(Intrinsic::getOrInsertDeclaration(M, ID, Types), Args), unattached and unnamed
+fn scf_new_intrinsic(id: i64, ov: const i32[:], argsv: const i32[:]) -> i32 {
+    let f = au_get_declaration(id, ov);
+    let fty = globs[glob_of(f)].vty;
+    var opsv: i32[>..<] = [];
+    for a in argsv { opsv.push(a); }
+    opsv.push(f);
+    let iv = create_inst(OP_CALL, ty_fn_ret(fty), opsv);
+    insts[inst_of(iv)].ty2 = fty;
+    return iv;
 }
 
 fn reduce_switch_range(si: i32) -> bool {
@@ -5223,7 +5288,7 @@ fn simplifycfg_run(fv: i32, opts: SCOpts) -> u32 {
     scf_read_flags();
     scf_fn = fv;
     tli_cur_fn_sc(fv);
-    tti_init(globs[glob_of(fv)].module);
+    tti_init_function(fv, globs[glob_of(fv)].module);
     let save_tli = local_have_tli;
     local_have_tli = false;
     let require_dt = flag_bool("simplifycfg-require-and-preserve-domtree", false);
