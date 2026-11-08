@@ -3906,6 +3906,7 @@ tests/imported/llvm/Transforms/InstCombine/StoreToNull-DbgCheck.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/addcarry.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/blend_x86.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/clmulqdq.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/pr2645-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/pr2645-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/simplify-libcalls-memcmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/simplify-libcalls-memcmp.ll::roundtrip
@@ -3921,7 +3922,9 @@ tests/imported/llvm/Transforms/InstCombine/X86/x86-avx512-inseltpoison.ll::round
 tests/imported/llvm/Transforms/InstCombine/X86/x86-avx512.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-bmi-tbm.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-crc32-demanded.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-f16c-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-f16c-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-f16c.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-f16c.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-fma.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-fma.ll::roundtrip
@@ -3930,7 +3933,9 @@ tests/imported/llvm/Transforms/InstCombine/X86/x86-insertps.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-masked-memops.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-maxmin.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-movmsk.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-muldq-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-muldq-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-muldq.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-muldq.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pack-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pack.ll::roundtrip
@@ -4025,7 +4030,9 @@ tests/imported/llvm/Transforms/InstCombine/alloca-poison-size.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/alloca.ll::opt
 tests/imported/llvm/Transforms/InstCombine/alloca.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/allocsite-removable-few-users.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/allocsize-32.ll::opt
 tests/imported/llvm/Transforms/InstCombine/allocsize-32.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/allocsize.ll::opt
 tests/imported/llvm/Transforms/InstCombine/allocsize.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/allow-checks.ll::opt
 tests/imported/llvm/Transforms/InstCombine/allow-checks.ll::roundtrip
@@ -4127,6 +4134,7 @@ tests/imported/llvm/Transforms/InstCombine/assume-i32.ll::opt
 tests/imported/llvm/Transforms/InstCombine/assume-i32.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/assume-icmp-null-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/assume-icmp-null-select.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/assume-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/assume-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/assume-loop-align.ll::opt
 tests/imported/llvm/Transforms/InstCombine/assume-loop-align.ll::roundtrip
@@ -4137,6 +4145,7 @@ tests/imported/llvm/Transforms/InstCombine/assume-separate_storage.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/assume.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/assume2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/assume2.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/assume_inevitable.ll::opt
 tests/imported/llvm/Transforms/InstCombine/assume_inevitable.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/atomic.ll::opt
 tests/imported/llvm/Transforms/InstCombine/atomic.ll::roundtrip
@@ -4154,6 +4163,7 @@ tests/imported/llvm/Transforms/InstCombine/binop-and-shifts.ll::opt
 tests/imported/llvm/Transforms/InstCombine/binop-and-shifts.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/binop-cast.ll::opt
 tests/imported/llvm/Transforms/InstCombine/binop-cast.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/binop-itofp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/binop-itofp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/binop-of-displaced-shifts.ll::opt
 tests/imported/llvm/Transforms/InstCombine/binop-of-displaced-shifts.ll::roundtrip
@@ -4177,6 +4187,7 @@ tests/imported/llvm/Transforms/InstCombine/bitcast-function.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bitcast-function.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitcast-inselt-bitcast.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitcast-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/bitcast-known-bits.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bitcast-known-bits.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitcast-phi-uselistorder.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bitcast-phi-uselistorder.ll::roundtrip
@@ -4193,6 +4204,7 @@ tests/imported/llvm/Transforms/InstCombine/bitcast.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitreverse-hang.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitreverse-known-bits.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bitreverse-known-bits.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/bitreverse.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bitreverse.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bittest.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bittest.ll::roundtrip
@@ -4204,19 +4216,24 @@ tests/imported/llvm/Transforms/InstCombine/broadcast-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/broadcast.ll::opt
 tests/imported/llvm/Transforms/InstCombine/broadcast.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bswap-fold.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/bswap-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bswap-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bswap-known-bits.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bswap-known-bits.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/bswap.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bswap.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/builtin-dynamic-object-size.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/builtin-object-size-custom-dl.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/builtin-object-size-offset.ll::opt
 tests/imported/llvm/Transforms/InstCombine/builtin-object-size-offset.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/builtin-object-size-ptr.ll::opt
 tests/imported/llvm/Transforms/InstCombine/builtin-object-size-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/builtin-object-size-strdup-family.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/byval.ll::opt
 tests/imported/llvm/Transforms/InstCombine/byval.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/cabs-array.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cabs-array.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/cabs-discrete.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cabs-discrete.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/call-callconv-mismatch.ll::opt
 tests/imported/llvm/Transforms/InstCombine/call-callconv-mismatch.ll::roundtrip
@@ -4520,6 +4537,7 @@ tests/imported/llvm/Transforms/InstCombine/fadd.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fadd.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fast-basictest.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fast-basictest.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fast-math.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fast-math.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-denormals-are-zero.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fcmp-denormals-are-zero.ll::roundtrip
@@ -4537,23 +4555,27 @@ tests/imported/llvm/Transforms/InstCombine/fcmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fdim.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fdiv-cos-sin.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fdiv-sin-cos.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fdiv-sqrt.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fdiv-sqrt.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fdiv.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ffs-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/float-shrink-compare.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fls.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fma.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fma.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fmod.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fmul-bool.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fmul-bool.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fmul-exp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fmul-exp.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fmul-exp2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fmul-exp2.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fmul-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fmul-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fmul-maximum-minimum.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fmul-maximum-minimum.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fmul-pow.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fmul-sqrt.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fmul-sqrt.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fmul-tan-cos.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fmul-tan-cos.ll::roundtrip
@@ -4737,7 +4759,9 @@ tests/imported/llvm/Transforms/InstCombine/icmp-and-lowbit-mask.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-and-lowbit-mask.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-and-shift.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-and-shift.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/icmp-bc-vec-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-bc-vec-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/icmp-bc-vec.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-bc-vec.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-binop.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-binop.ll::roundtrip
@@ -4888,6 +4912,7 @@ tests/imported/llvm/Transforms/InstCombine/insert-ext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/insert-ext.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/insert-extract-shuffle-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/insert-extract-shuffle-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/insert-extract-shuffle.ll::opt
 tests/imported/llvm/Transforms/InstCombine/insert-extract-shuffle.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/insert-trunc.ll::opt
 tests/imported/llvm/Transforms/InstCombine/insert-trunc.ll::roundtrip
@@ -4940,6 +4965,7 @@ tests/imported/llvm/Transforms/InstCombine/invert-variable-mask-in-masked-merge-
 tests/imported/llvm/Transforms/InstCombine/invert-variable-mask-in-masked-merge-scalar.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/invert-variable-mask-in-masked-merge-vector.ll::opt
 tests/imported/llvm/Transforms/InstCombine/invert-variable-mask-in-masked-merge-vector.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/invoke.ll::opt
 tests/imported/llvm/Transforms/InstCombine/invoke.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/is_fpclass.ll::opt
 tests/imported/llvm/Transforms/InstCombine/is_fpclass.ll::roundtrip
@@ -4960,6 +4986,7 @@ tests/imported/llvm/Transforms/InstCombine/known-bits-lerp-pattern.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/known-bits.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/known-fpclass-reduce-signbit.ll::opt
 tests/imported/llvm/Transforms/InstCombine/known-fpclass-reduce-signbit.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/known-never-nan.ll::opt
 tests/imported/llvm/Transforms/InstCombine/known-never-nan.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/known-non-zero.ll::opt
 tests/imported/llvm/Transforms/InstCombine/known-non-zero.ll::roundtrip
@@ -5023,7 +5050,9 @@ tests/imported/llvm/Transforms/InstCombine/log-pow.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/log-to-intrinsic.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/log1p.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/logb.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/logical-select-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/logical-select-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/logical-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/logical-select.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/low-bit-splat.ll::opt
 tests/imported/llvm/Transforms/InstCombine/low-bit-splat.ll::roundtrip
@@ -5180,6 +5209,7 @@ tests/imported/llvm/Transforms/InstCombine/minimum.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/minimumnum.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/minmax-demandbits.ll::opt
 tests/imported/llvm/Transforms/InstCombine/minmax-demandbits.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/minmax-fold.ll::opt
 tests/imported/llvm/Transforms/InstCombine/minmax-fold.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/minmax-fp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/minmax-fp.ll::roundtrip
@@ -5260,7 +5290,9 @@ tests/imported/llvm/Transforms/InstCombine/nsw-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/nsw.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/obfuscated_splat.ll::opt
 tests/imported/llvm/Transforms/InstCombine/obfuscated_splat.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/object-size-opaque.ll::opt
 tests/imported/llvm/Transforms/InstCombine/object-size-opaque.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/objsize-64.ll::opt
 tests/imported/llvm/Transforms/InstCombine/objsize-64.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/objsize-address-space.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/objsize.ll::roundtrip
@@ -5285,6 +5317,7 @@ tests/imported/llvm/Transforms/InstCombine/or-fcmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/or-fcmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/or-or-combine.ll::opt
 tests/imported/llvm/Transforms/InstCombine/or-or-combine.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/or-packed-int-vecs.ll::opt
 tests/imported/llvm/Transforms/InstCombine/or-packed-int-vecs.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/or-select-zero-icmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/or-select-zero-icmp.ll::roundtrip
@@ -5642,6 +5675,7 @@ tests/imported/llvm/Transforms/InstCombine/sadd_sat.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/saddo.ll::opt
 tests/imported/llvm/Transforms/InstCombine/saddo.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/salvage-dbg-declare.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/saturating-add-sub.ll::opt
 tests/imported/llvm/Transforms/InstCombine/saturating-add-sub.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/scalable-bitcast-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/scalable-bitcast-inseltpoison.ll::roundtrip
@@ -5772,6 +5806,7 @@ tests/imported/llvm/Transforms/InstCombine/select_arithmetic.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select_arithmetic.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select_frexp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select_frexp.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/select_meta.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select_meta.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select_with_identical_phi.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select_with_identical_phi.ll::roundtrip
@@ -5846,6 +5881,7 @@ tests/imported/llvm/Transforms/InstCombine/should-change-type.ll::opt
 tests/imported/llvm/Transforms/InstCombine/should-change-type.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/shuffle-binop.ll::opt
 tests/imported/llvm/Transforms/InstCombine/shuffle-binop.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/shuffle-cast-dist.ll::opt
 tests/imported/llvm/Transforms/InstCombine/shuffle-cast-dist.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/shuffle-cast-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/shuffle-cast.ll::roundtrip
@@ -5855,7 +5891,9 @@ tests/imported/llvm/Transforms/InstCombine/shuffle-select-narrow.ll::opt
 tests/imported/llvm/Transforms/InstCombine/shuffle-select-narrow.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/shuffle_select-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/shuffle_select.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/shufflevec-bitcast-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/shufflevec-bitcast-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/shufflevec-bitcast.ll::opt
 tests/imported/llvm/Transforms/InstCombine/shufflevec-bitcast.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/shufflevector-div-rem-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/shufflevector-div-rem-inseltpoison.ll::roundtrip
@@ -5890,6 +5928,7 @@ tests/imported/llvm/Transforms/InstCombine/simplify-demanded-bits-pointer.ll::ro
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-aggregates.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-aggregates.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-canonicalize.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-exp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-exp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-extractelement.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-extractelement.ll::roundtrip
@@ -5934,6 +5973,7 @@ tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-rounding-in
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-rounding-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-shufflevector.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-shufflevector.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-sqrt.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-sqrt.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-intrinsics.ll::roundtrip
@@ -5983,7 +6023,9 @@ tests/imported/llvm/Transforms/InstCombine/sprintf-2.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sprintf-3.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sprintf-void.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sprintf-void.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/sqrt-nofast.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sqrt-nofast.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/sqrt.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sqrt.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/srem-canonicalize.ll::opt
 tests/imported/llvm/Transforms/InstCombine/srem-canonicalize.ll::roundtrip
@@ -6198,6 +6240,7 @@ tests/imported/llvm/Transforms/InstCombine/token.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trig.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trivial-dse-calls.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trivial-dse-calls.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/trunc-abs-intrinsics.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-abs-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-binop-ext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-binop-ext.ll::roundtrip
@@ -6205,12 +6248,14 @@ tests/imported/llvm/Transforms/InstCombine/trunc-demand.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-demand.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-extractelement-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-extractelement.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/trunc-fp-to-int.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-fp-to-int.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-load.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-load.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-lshr.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-lshr.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/trunc-minmax-intrinsics.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-minmax-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-sext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-sext.ll::roundtrip
@@ -6219,7 +6264,9 @@ tests/imported/llvm/Transforms/InstCombine/trunc-shl-zext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-shl-zext.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/truncating-saturate.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/type_pun-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/type_pun-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/type_pun.ll::opt
 tests/imported/llvm/Transforms/InstCombine/type_pun.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/uadd-with-overflow.ll::opt
 tests/imported/llvm/Transforms/InstCombine/uadd-with-overflow.ll::roundtrip
@@ -6327,7 +6374,9 @@ tests/imported/llvm/Transforms/InstCombine/vec_gep_scalar_arg-inseltpoison.ll::o
 tests/imported/llvm/Transforms/InstCombine/vec_gep_scalar_arg-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vec_gep_scalar_arg.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_gep_scalar_arg.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vec_phi_extract-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_phi_extract-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vec_phi_extract.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_phi_extract.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vec_sext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_sext.ll::roundtrip
@@ -6341,6 +6390,7 @@ tests/imported/llvm/Transforms/InstCombine/vec_udiv_to_shift.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_udiv_to_shift.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vector-casts-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vector-casts-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vector-casts.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vector-casts.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vector-concat-binop-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vector-concat-binop-inseltpoison.ll::roundtrip
