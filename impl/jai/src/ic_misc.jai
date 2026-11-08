@@ -36,6 +36,9 @@ ic_visit :: (i: Value_Id) -> Value_Id {
         case .PHI; return ic_visit_phi(i);
         case .GEP; return ic_visit_gep(i);
         case .CALL; return ic_visit_call(i);
+        case .INVOKE; return ic_visit_invoke(i);
+        case .CALLBR; return ic_visit_callbr(i);
+        case .FENCE; return ic_visit_fence(i);
         case .RET; return ic_visit_return(i);
         case .UNREACHABLE; return ic_visit_unreachable(i);
         case .BR; return ic_visit_uncond_br(i);
@@ -188,7 +191,7 @@ call_add_fn_attr :: (i: Value_Id, k: Attr_Kind) {
 
 // ---------------------------------------------------------------- terminators (InstructionCombining.cpp)
 
-// visitReturnInst. Not ported: simplifyNonNullOperand and SimplifyDemandedFPClass (fail loudly when they apply).
+// visitReturnInst. Not ported: SimplifyDemandedFPClass (fails loudly when it applies).
 ic_visit_return :: (i: Value_Id) -> Value_Id {
     if nops(i) == 0 return NONE;
     rv := op(i, 0);
@@ -198,7 +201,10 @@ ic_visit_return :: (i: Value_Id) -> Value_Id {
     if is_ptr_type(rt) {
         has_deref := attr_set_has(ret_attrs, .Dereferenceable);
         if attr_set_has(ret_attrs, .NonNull) || (has_deref && !null_pointer_is_defined(f, ir.types[rt].a))
-            if !is_const(rv) && !is_argument(rv) fatal("instcombine: simplifyNonNullOperand (nonnull return) is not supported yet");
+        {
+            v := ic_simplify_non_null_operand(rv, has_deref);
+            if v != NONE return ic_replace_operand(i, 0, v);
+        }
     }
     if attr_set_has(ret_attrs, .NoFPClass) fatal("instcombine: SimplifyDemandedFPClass (nofpclass return) is not supported yet");
     return NONE;
