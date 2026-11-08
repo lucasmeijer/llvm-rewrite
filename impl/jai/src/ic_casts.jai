@@ -1009,16 +1009,7 @@ ic_visit_zext :: (zext: Value_Id) -> Value_Id {
 }
 log2_ceil_u64 :: (x: u64) -> u64 { if x <= 1 return 0; n: u64 = 0; v := x - 1; while v { n += 1; v >>= 1; } return n; }
 // foldExtractionOfVectorDeinterleave (InstCombineVectorOps.cpp) is not ported here: fail loudly where it could apply
-ic_fold_extraction_of_vector_deinterleave_hook :: (i: Value_Id) -> Value_Id {
-    src := op(i, 0);
-    if is_inst(src) && inst_op(src) == .EXTRACTVALUE {
-        d := op(src, 0);
-        id := call_iid(d);
-        if id != NOT_INTRINSIC && begins_with(intrinsic_name(id), "llvm.vector.deinterleave")
-            fatal("instcombine: foldExtractionOfVectorDeinterleave is not supported yet");
-    }
-    return NONE;
-}
+ic_fold_extraction_of_vector_deinterleave_hook :: (i: Value_Id) -> Value_Id { return ic_fold_extraction_of_vector_deinterleave(i); }
 
 // ---------------------------------------------------------------- sext
 
@@ -1842,7 +1833,10 @@ ic_optimize_bitcast_from_phi :: (ci: Value_Id, pn: Value_Id) -> Value_Id {
             nv: Value_Id = NONE;
             if is_const(v) nv = ce_cast(.BITCAST, v, dest_ty);
             else if inst_op(v) == .LOAD {
-                fatal("instcombine: optimizeBitCastFromPhi through a load (combineLoadToNewType) is not supported yet");
+                icb_set_insert_point(v);
+                nv = ic_combine_load_to_new_type(v, dest_ty);
+                ic_replace_inst_uses_with(v, const_poison(vtype(v)));
+                ic_erase_inst(v);
             } else if inst_op(v) == .BITCAST nv = op(v, 0);
             else if is_phi(v) { _, nv = table_find(*new_pn, v); }
             phi_add_incoming(np, nv, phi_block(opn, cast(u32) j));

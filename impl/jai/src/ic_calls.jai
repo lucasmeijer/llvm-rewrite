@@ -86,20 +86,20 @@ type_ptr_as :: (as: u32) -> Type_Id { return intern_type(.PTR, 0, cast(u64) as, 
 icb_load_raw :: (ty: Type_Id, ptr: Value_Id, align: u64, name: string = "") -> Value_Id {
     l := new_inst(.LOAD, ty, 1);
     set_op(l, 0, ptr);
-    inst(l).align = cast(u32) align;
+    inst(l).align = align;
     return icb_insert(l, name);
 }
 icb_store_raw :: (v: Value_Id, ptr: Value_Id, align: u64, volatile := false) -> Value_Id {
     s := new_inst(.STORE, ir.t_void, 2);
     set_op(s, 0, v); set_op(s, 1, ptr);
-    inst(s).align = cast(u32) align;
+    inst(s).align = align;
     if volatile inst(s).flags |= F_VOLATILE;
     return icb_insert(s);
 }
 create_store_raw :: (v: Value_Id, ptr: Value_Id, align: u64) -> Value_Id {
     s := new_inst(.STORE, ir.t_void, 2);
     set_op(s, 0, v); set_op(s, 1, ptr);
-    inst(s).align = cast(u32) align;
+    inst(s).align = align;
     return s;
 }
 
@@ -951,7 +951,12 @@ ic_fold_shuffled_intrinsic_operands :: (ii: Value_Id) -> Value_Id {
         if is_vector_intrinsic_with_scalar_op_at_arg(id, cast(u32) k) { array_add(*args, a); continue; }
         oks, sx, sp, sm := pm_shuffle(a);
         if oks && pm_poison(sp) && masks_equal(sm, mask) && vtype(sx) == src_ty { array_add(*args, sx); continue; }
-        if pm_imm_constant(a) fatal("instcombine: foldShuffledIntrinsicOperands with a constant operand (unshuffleConstant) is not supported yet");
+        if pm_imm_constant(a) {
+            sm := NewArray(mask.count, s32,, allocator = temp);
+            for mask sm[it_index] = ifx it == 0xFFFF_FFFF then -1 else cast(s32) it;
+            sc := ic_unshuffle_constant(sm, a, src_ty);
+            if sc != NONE { array_add(*args, sc); continue; }
+        }
         return NONE;
     }
     fpi := ifx is_fp_math_inst(ii) then ii else NONE;
