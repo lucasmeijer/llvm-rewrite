@@ -27,7 +27,7 @@ PIPES = [
     "loop-simplify,print<loops>,print<domtree>",
     "require<loops>,break-crit-edges,print<loops>",
 ]
-# Pipelines whose IR output (-S) is compared, after canonicalizing ours through LLVM's opt -S.
+# Pipelines whose IR output (-S) is compared byte for byte (so use-list order shows in `; preds =` comments).
 IR_PIPES = ["loop-simplify", "lcssa", "loop-simplify,lcssa", "break-crit-edges", "adce"]
 
 
@@ -133,10 +133,7 @@ def run(opt, pipe, path):
 
 def run_ir(opt, pipe, path):
     p = subprocess.run([opt, "-passes=" + pipe, "-S", path], capture_output=True, text=True, timeout=20)
-    if p.returncode != 0:
-        return p.returncode, p.stderr
-    q = subprocess.run([LLVM_OPT, "-S", "-"], input=p.stdout, capture_output=True, text=True, timeout=20)
-    return q.returncode, q.stdout + q.stderr
+    return p.returncode, p.stdout + p.stderr
 
 
 def main():

@@ -22,11 +22,14 @@
   `gvn,instcombine,simplifycfg`). Both give output identical to LLVM's on all tests/e2e O0 and pipeline inputs
   and on the four tests/perf/compile programs, and run 1.3-2.5x faster than LLVM there; linear on
   scaling/allocas (k 1.04 mem2reg, 1.07 sroa; LLVM 1.19, 1.25).
-- L1.analysis.domtree and L1.analysis.demanded-bits complete. L1.analysis.loops 22/26: LoopInfo and CycleInfo
+- L1.analysis.domtree and L1.analysis.demanded-bits complete. L1.analysis.loops 24/28: LoopInfo and CycleInfo
   complete, the 4 left are `print<loopnest>` (a loop pass: needs the loop pass manager, LoopSimplify+LCSSA
   canonicalization in the adaptor, and ScalarEvolution for `Loop::getBounds`). L1.loop-canonical: loop-simplify and
-  lcssa pass 21 of their 58 `::opt` tests; every other one stops loudly (other passes in the pipeline, the
-  SSAUpdater, landing pads, debug records, speculatable calls; see below). L1.dce 99/112 (the 13 left need other passes, `--preserve-ll-uselistorder`,
+  lcssa pass 31 of their 58 `::opt` tests; every other one stops loudly (other passes in the pipeline: licm,
+  loop-mssa, instcombine, debugify, verify<scalar-evolution>, -keep-loops; and LoopSimplify's exit merging,
+  which needs SimplifyCFG's foldBranchToCommonDest). loop-simplify, lcssa, break-crit-edges and adce give
+  byte-identical `-S` output (use-list order included) on all four tests/perf/compile programs and run faster
+  than LLVM's there and on tests/perf/scaling (no `@perf` line times them; measured by hand). L1.dce 99/112 (the 13 left need other passes, `--preserve-ll-uselistorder`,
   `--enable-knowledge-retention` or salvageDebugInfo). dce/adce/bdce run 2-4x faster than LLVM's on
   tests/perf/compile and scale linearly on tests/perf/scaling (measured by hand: no `@perf` line times them).
   bdce on sqlite3.ll stops at a loud "isKnownNonZero not ported".
@@ -156,11 +159,17 @@
   LLVM through the dominator/post-dominator/loop/cycle printers before and after break-crit-edges, adce and
   loop-simplify, and the `-S` output of loop-simplify, lcssa, break-crit-edges and adce. Run it after touching
   any of these files; 4000 programs ran clean when this was written.
-- LoopSimplify/LCSSA fail loudly on: SplitLandingPadPredecessors, LoopInfo::erase, the SSAUpdater (LCSSA with more
-  than one exit PHI for a value whose use isn't in an exit block), debug records on a value that gets an LCSSA PHI,
-  speculatable calls in makeLoopInvariant, the exit-merging foldBranchToCommonDest (only when it would fold),
-  PreserveLCSSA paths, isGuaranteedNotToBePoison beyond constants (simplifyPHINode with undef inputs).
-  simplifyPHINode is a local port in loopsimplify.goose; switch to InstSimplify's when it lands.
+- LoopSimplify/LCSSA fail loudly on: LoopInfo::erase, the exit-merging foldBranchToCommonDest (only when it would
+  fold, or when the exiting block has bonus instructions), PreserveLCSSA paths, isGuaranteedNotToBePoison beyond
+  constants (simplifyPHINode with undef inputs), setExplicitlyUnknownBranchWeightsIfProfiled.
+  simplifyPHINode (ssaupdater.goose) and isSafeToSpeculativelyExecute (loopsimplify.goose) are local partial
+  ports; switch to InstSimplify's / ValueTracking's when they land.
+- SSAUpdater (ssaupdater.goose): one updater at a time (`ssa_init(ty, name)`, `ssa_add_available_value`,
+  `ssa_get_value_in_middle_of_block`, `ssa_get_value_at_end_of_block`, `ssa_rewrite_use(use id)`,
+  `ssa_rewrite_use_after_insertions`); inserted PHIs are in `ssa_inserted`. Uses are use ids, which change when a
+  user's operand list grows (`grow_ops`): don't hold use ids across adding operands to their user.
+- `inst_clone` (irutil.goose) is Instruction::clone: operands, flags, attributes, metadata; no name, no debug
+  records, not inserted.
 - Not ported: the loop pass manager (`loop(...)`, `loop-mssa(...)`), so loop passes and `print<loopnest>` fail as
   "not implemented yet".
 - `print<demanded-bits>` prints in instruction order; LLVM's order is a DenseMap's, the test compares sorted lines.
