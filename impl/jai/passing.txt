@@ -780,6 +780,7 @@ tests/imported/llvm/Analysis/BasicAA/cas.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/constant-memory.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/constant-over-index.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/dag.ll::roundtrip
+tests/imported/llvm/Analysis/BasicAA/deoptimize.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/dereferenceable.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/empty.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/escape-source-aggregate.ll::roundtrip
@@ -862,6 +863,7 @@ tests/imported/llvm/Analysis/BlockFrequencyInfo/precision.ll::roundtrip
 tests/imported/llvm/Analysis/BlockFrequencyInfo/redundant_edges.ll::roundtrip
 tests/imported/llvm/Analysis/BranchProbabilityInfo/anonymous-bb.ll::roundtrip
 tests/imported/llvm/Analysis/BranchProbabilityInfo/basic.ll::roundtrip
+tests/imported/llvm/Analysis/BranchProbabilityInfo/deopt-intrinsic.ll::roundtrip
 tests/imported/llvm/Analysis/BranchProbabilityInfo/deopt-invoke.ll::roundtrip
 tests/imported/llvm/Analysis/BranchProbabilityInfo/fcmp.ll::roundtrip
 tests/imported/llvm/Analysis/BranchProbabilityInfo/hoist.ll::roundtrip
@@ -1511,6 +1513,7 @@ tests/imported/llvm/Analysis/ValueTracking/knownbits-trunc-with-min-max-clamp.ll
 tests/imported/llvm/Analysis/ValueTracking/knownbits-x86-hadd-hsub.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/knownzero-addrspacecast.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/knownzero-shift.ll::roundtrip
+tests/imported/llvm/Analysis/ValueTracking/memory-dereferenceable.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/monotonic-phi.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/non-negative-phi-bits.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/numsignbits-from-assume.ll::roundtrip
@@ -1549,6 +1552,7 @@ tests/imported/llvm/Transforms/ADCE/2017-08-21-DomTree-deletions.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/basictest.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/basictest1.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/basictest2.ll::roundtrip
+tests/imported/llvm/Transforms/ADCE/blocks-with-dead-term-nondeterministic.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/broken-loop-info.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/convergence.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/dce_pure_call.ll::roundtrip
@@ -1707,6 +1711,7 @@ tests/imported/llvm/Transforms/CodeGenPrepare/X86/sink-addrmode.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/sink-addrspacecast.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/split-indirect-loop.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/split-indirectbr-duplicate-pred.ll::roundtrip
+tests/imported/llvm/Transforms/CodeGenPrepare/X86/statepoint-relocate.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/tailcall-assume-xbb.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/vec-shift-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/vec-shift.ll::roundtrip
@@ -1717,6 +1722,7 @@ tests/imported/llvm/Transforms/CodeGenPrepare/X86/x86-shuffle-sink.ll::roundtrip
 tests/imported/llvm/Transforms/ConstantMerge/2003-10-28-MergeExternalConstants.ll::roundtrip
 tests/imported/llvm/Transforms/ConstantMerge/2011-01-15-EitherOrder.ll::roundtrip
 tests/imported/llvm/Transforms/ConstantMerge/align.ll::roundtrip
+tests/imported/llvm/Transforms/ConstantMerge/dont-merge.ll::roundtrip
 tests/imported/llvm/Transforms/ConstantMerge/merge-both.ll::roundtrip
 tests/imported/llvm/Transforms/ConstantMerge/merge-comdat.ll::roundtrip
 tests/imported/llvm/Transforms/ConstantMerge/unnamed-addr.ll::roundtrip
@@ -2003,6 +2009,7 @@ tests/imported/llvm/Transforms/EarlyCSE/edge.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/fence.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/flags.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/floatingpoint.ll::roundtrip
+tests/imported/llvm/Transforms/EarlyCSE/gc_relocate.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/gep.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/getmatchingvalue-crash.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/globalsaa-memoryssa.ll::roundtrip
@@ -2030,6 +2037,7 @@ tests/imported/llvm/Transforms/EarlyCSE/pr119893.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/pr33406.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/replace-calls-def-attrs.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/reuse-preserved-memoryssa.ll::roundtrip
+tests/imported/llvm/Transforms/EarlyCSE/round-dyn-strictfp.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/target-memory.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/tfpropagation.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/writeonly.ll::roundtrip
@@ -2080,6 +2088,7 @@ tests/imported/llvm/Transforms/FunctionAttrs/norecurse_self_recursive_callee.ll:
 tests/imported/llvm/Transforms/FunctionAttrs/noreturn.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/nosync.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/noundef.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/operand-bundles-scc.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/optnone-simple.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/optnone.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/out-of-bounds-iterator-bug.ll::roundtrip
@@ -2113,6 +2122,7 @@ tests/imported/llvm/Transforms/GVN/2010-03-31-RedundantPHIs.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2010-05-08-OneBit.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2010-11-13-Simplify.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2011-04-27-phioperands.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/2011-09-07-TypeIdFor.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2012-05-22-PreCrash.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2016-08-30-MaskedScatterGather-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2016-08-30-MaskedScatterGather.ll::roundtrip
@@ -2190,6 +2200,7 @@ tests/imported/llvm/Transforms/GVN/flags.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/fold-const-expr.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/fpmath.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/freeze.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/gc_relocate.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/gvn-loop-load-pre-order.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/int_sideeffect.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/intersect-empty-attr.ll::roundtrip
@@ -2267,6 +2278,7 @@ tests/imported/llvm/Transforms/GVN/setjmp.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/simplify-icf-cache-invalidation.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/stale-loop-info.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/storeinvgroup.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/tbaa.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/trunc-nuw-equality.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/unreachable-predecessor.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/unreachable_block_infinite_loop.ll::roundtrip
@@ -2283,6 +2295,7 @@ tests/imported/llvm/Transforms/GlobalDCE/2003-10-09-PreserveWeakGlobals.ll::roun
 tests/imported/llvm/Transforms/GlobalDCE/2009-02-17-AliasUsesAliasee.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/basicvariabletest.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/call-with-ptrtoint.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/comdats.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/complex-constantexpr.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/crash-assertingvh.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/deadblockaddr.ll::roundtrip
@@ -2290,11 +2303,20 @@ tests/imported/llvm/Transforms/GlobalDCE/externally_available.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/global-ifunc.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/global_ctors_integration.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/indirectbr.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-base-call.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-base-pointer-call.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-derived-call.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-derived-pointer-call.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-nonptr.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-novfe.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-null.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-relative-pointers-bad.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-relative-pointers-gep.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-relative-pointers.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-visibility-post-lto.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-visibility-pre-lto.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/virtual-functions.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/vtable-rtti.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2004-10-10-CastStoreOnce.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2005-06-15-LocalizeConstExprCrash.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/2005-09-27-Crash.ll::roundtrip
@@ -2734,6 +2756,7 @@ tests/imported/llvm/Transforms/Inline/alloca-bonus.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/alloca_test.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/always-inline-attr.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/always-inline-bfi.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/always-inline.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/arg-attr-propagation.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/array-alloca.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/assumptions-from-callsite-attrs.ll::roundtrip
@@ -2757,12 +2780,15 @@ tests/imported/llvm/Transforms/Inline/comdat-ipo.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/convergence-inline.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/crash-lifetime-marker.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/crash2.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/delete-unused-function.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/deleted-scc.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/deopt-bundles.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/deoptimize-intrinsic-attrs.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/deoptimize-intrinsic-cconv.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/deoptimize-intrinsic.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/devirtualize-2.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/devirtualize-3.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/devirtualize-4.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/devirtualize-5.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/devirtualize-6.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/devirtualize.ll::roundtrip
@@ -2811,6 +2837,7 @@ tests/imported/llvm/Transforms/Inline/inline-ptrtoint-different-sizes.ll::roundt
 tests/imported/llvm/Transforms/Inline/inline-recur-stacksize.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-recursive-fn.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-ref-metadata.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-remark.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-retainRV-call.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-scalable.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-semantic-interposition.ll::roundtrip
@@ -3233,6 +3260,7 @@ tests/imported/llvm/Transforms/InstCombine/bitcast-sext-vector.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitcast-store.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitcast-vec-canon-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitcast-vec-canon.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/bitreverse-hang.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitreverse-known-bits.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bitreverse.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bittest.ll::roundtrip
@@ -3486,6 +3514,8 @@ tests/imported/llvm/Transforms/InstCombine/fsqrtdiv-transform.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fsub.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/funnel.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fwrite-1.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/gc.relocate-verify.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/gc.relocate.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/gep-addrspace.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/gep-can-replace-gep-idx-with-zero-typesize.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/gep-canonicalize-constant-indices.ll::roundtrip
@@ -4205,8 +4235,12 @@ tests/imported/llvm/Transforms/InstCombine/ssub-with-overflow.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ssubo.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stack-overalign.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stacksaverestore.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/statepoint-cleanup.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/statepoint-iter.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/statepoint.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stdio-custom-dl.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stdiocall-bad-sig.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/store.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/storemerge-dbg.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stpcpy-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stpcpy-2.ll::roundtrip
@@ -4318,6 +4352,7 @@ tests/imported/llvm/Transforms/InstCombine/threadlocal_address.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/tmp-alloca-bypass.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/toascii-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trig.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/trivial-dse-calls.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-abs-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-binop-ext.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-demand.ll::roundtrip
@@ -4591,6 +4626,7 @@ tests/imported/llvm/Transforms/InstSimplify/fptoi-range.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fptoi-sat.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/freeze-noundef.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/freeze.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/gc_relocate.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/gep.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/get_active_lane_mask.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/gv-alloca-cmp.ll::roundtrip
@@ -4686,12 +4722,14 @@ tests/imported/llvm/Transforms/InstSimplify/vector_ptr_bitcast.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/vp-reverse.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/xor.ll::roundtrip
 tests/imported/llvm/Transforms/Internalize/2009-01-05-InternalizeAliases.ll::roundtrip
+tests/imported/llvm/Transforms/Internalize/comdat.ll::roundtrip
 tests/imported/llvm/Transforms/Internalize/externally-initialized.ll::roundtrip
 tests/imported/llvm/Transforms/Internalize/globs.ll::roundtrip
 tests/imported/llvm/Transforms/Internalize/lists.ll::roundtrip
 tests/imported/llvm/Transforms/Internalize/local-visibility.ll::roundtrip
 tests/imported/llvm/Transforms/Internalize/stackguard.ll::roundtrip
 tests/imported/llvm/Transforms/Internalize/used.ll::roundtrip
+tests/imported/llvm/Transforms/Internalize/vcall-visibility.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/2008-11-27-EntryMunge.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/2010-08-26-and.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/2011-04-02-SimplifyDeadBlock.ll::roundtrip
@@ -4841,6 +4879,7 @@ tests/imported/llvm/Transforms/LICM/expr-reassociate.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/extra-copies.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/fence.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/freeze.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/gc-relocate.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/gep-reassociate.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/hoist-add-sub.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/hoist-alloc.ll::roundtrip
@@ -5496,6 +5535,7 @@ tests/imported/llvm/Transforms/LoopVectorize/memdep-fold-tail.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/memdep.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/metadata-unroll.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/metadata-width.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/metadata.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/minimumnum-maximumnum-reductions.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/miniters.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/minmax-reduction-unknown-prof.ll::roundtrip
@@ -5749,6 +5789,7 @@ tests/imported/llvm/Transforms/Mem2Reg/preserve-nonnull-load-metadata.ll::roundt
 tests/imported/llvm/Transforms/Mem2Reg/single-store.ll::roundtrip
 tests/imported/llvm/Transforms/Mem2Reg/undef-order.ll::roundtrip
 tests/imported/llvm/Transforms/MemCpyOpt/2008-03-13-ReturnSlotBitcast.ll::roundtrip
+tests/imported/llvm/Transforms/MemCpyOpt/aggregate-type-crash.ll::roundtrip
 tests/imported/llvm/Transforms/MemCpyOpt/align.ll::roundtrip
 tests/imported/llvm/Transforms/MemCpyOpt/atomic.ll::roundtrip
 tests/imported/llvm/Transforms/MemCpyOpt/byval-readnone.ll::roundtrip
@@ -5801,6 +5842,7 @@ tests/imported/llvm/Transforms/MemCpyOpt/variable-sized-memset-memcpy.ll::roundt
 tests/imported/llvm/Transforms/MemCpyOpt/vscale-crashes.ll::roundtrip
 tests/imported/llvm/Transforms/MemCpyOpt/vscale-memset.ll::roundtrip
 tests/imported/llvm/Transforms/MergedLoadStoreMotion/exceptions.ll::roundtrip
+tests/imported/llvm/Transforms/MergedLoadStoreMotion/preserve-store-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/MergedLoadStoreMotion/st_sink_barrier_call.ll::roundtrip
 tests/imported/llvm/Transforms/MergedLoadStoreMotion/st_sink_bugfix_22613.ll::roundtrip
 tests/imported/llvm/Transforms/MergedLoadStoreMotion/st_sink_check_debug.ll::roundtrip
@@ -5818,6 +5860,7 @@ tests/imported/llvm/Transforms/PartiallyInlineLibCalls/bad-prototype.ll::roundtr
 tests/imported/llvm/Transforms/PartiallyInlineLibCalls/nobuiltin.ll::roundtrip
 tests/imported/llvm/Transforms/PartiallyInlineLibCalls/strictfp.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/2010-03-22-empty-baseclass.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/X86/SROA-after-final-loop-unrolling-2.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/SROA-after-final-loop-unrolling.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/SROA-after-loop-unrolling.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/addsub-inseltpoison.ll::roundtrip
@@ -5877,6 +5920,8 @@ tests/imported/llvm/Transforms/PhaseOrdering/X86/spurious-peeling.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/store-constant-merge.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/unroll-vectorizer.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/unsigned-multiply-overflow-check.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/X86/vdiv-nounroll.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/X86/vdiv.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vec-load-combine.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vec-shift.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-math.ll::roundtrip
@@ -5884,6 +5929,7 @@ tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reduction-known-first-va
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions-expanded.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions-logical.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/assume-explosion.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/basic.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/bitcast-store-branch.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/bitfield-bittests.ll::roundtrip
@@ -6492,6 +6538,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/matched-nodes-updated.ll::round
 tests/imported/llvm/Transforms/SLPVectorizer/X86/matched-shuffled-entries.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/matching-insert-point-for-nodes.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/memory-runtime-checks.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/metadata.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/minbitwidth-cast.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/minbitwidth-drop-wrapping-flags.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/minbitwidth-icmp-to-trunc.ll::roundtrip
@@ -6889,6 +6936,7 @@ tests/imported/llvm/Transforms/SROA/std-clamp.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/struct-to-vector-fp-store-only-tail.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/struct-to-vector-subpartition.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/struct-to-vector.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/tbaa-struct2.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/tbaa-subload.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/vector-conversion.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/vector-lifetime-intrinsic.ll::roundtrip
@@ -7139,6 +7187,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/pr46638.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/pr48641.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/pr48778-sdiv-speculation.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/pr50060-constantfold-loopid.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/pr52290.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/preserve-branchweights-partial.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/preserve-branchweights-switch-create.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/preserve-branchweights.ll::roundtrip
@@ -7211,6 +7260,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/unreachable-selfloop.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/unreachable_assume.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/unsigned-multiplication-will-overflow.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/volatile-phioper.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/wc-widen-block.ll::roundtrip
 tests/imported/llvm/Transforms/Sink/badloadsink.ll::roundtrip
 tests/imported/llvm/Transforms/Sink/basic.ll::roundtrip
 tests/imported/llvm/Transforms/Sink/call.ll::roundtrip
@@ -7301,6 +7351,7 @@ tests/imported/llvm/Transforms/VectorCombine/X86/shuffle-of-selects.ll::roundtri
 tests/imported/llvm/Transforms/VectorCombine/X86/shuffle-of-shuffles.ll::roundtrip
 tests/imported/llvm/Transforms/VectorCombine/X86/shuffle.ll::roundtrip
 tests/imported/llvm/Transforms/VectorCombine/X86/shuffletoidentity-bitcast.ll::roundtrip
+tests/imported/llvm/Transforms/VectorCombine/alias.ll::roundtrip
 tests/imported/llvm/Transforms/VectorCombine/arbitrary-precision-int.ll::roundtrip
 tests/imported/llvm/Transforms/VectorCombine/fold-binop-of-reductions.ll::roundtrip
 tests/imported/llvm/Transforms/VectorCombine/fold-shuffle-chains-to-reduce.ll::roundtrip

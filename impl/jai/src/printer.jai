@@ -566,8 +566,8 @@ write_constant :: (v: Value_Id) {
             out(opcode_name(e.op));
             write_optimization_info(e.op, e.flags, true);
             if e.op == .GEP && (e.flags & F_INRANGE) {
-                lo := cast(s64)((cast(u64) ir.u32_pool[e.idx]) | ((cast(u64) ir.u32_pool[e.idx + 1]) << 32));
-                hi := cast(s64)((cast(u64) ir.u32_pool[e.idx + 2]) | ((cast(u64) ir.u32_pool[e.idx + 3]) << 32));
+                lo := cast,no_check(s64)((cast(u64) ir.u32_pool[e.idx]) | ((cast(u64) ir.u32_pool[e.idx + 1]) << 32));
+                hi := cast,no_check(s64)((cast(u64) ir.u32_pool[e.idx + 2]) | ((cast(u64) ir.u32_pool[e.idx + 3]) << 32));
                 out(" inrange("); out_s64(lo); out(", "); out_s64(hi); outc(#char ")");
             }
             out(" (");
@@ -1152,7 +1152,7 @@ write_operand_bundles :: (i: Value_Id) {
         b1 := ir.u32_pool[r.idx + bi * 3 + 2];
         outc(#char "\""); print_escaped_string(bundle_tags[tag]); outc(#char "\"");
         outc(#char "(");
-        for k: b0..b1-1 { if k > b0 out(", "); write_operand(op(i, k), true); }
+        if b1 > b0 for k: b0..b1-1 { if k > b0 out(", "); write_operand(op(i, k), true); }
         outc(#char ")");
     }
     out(" ]");
@@ -1346,6 +1346,60 @@ print_instruction :: (i: Value_Id) {
     mds: [..] Kind_Md; mds.allocator = temp;
     get_all_metadata(i, *mds);
     print_metadata_attachments(mds, ", ");
+    // printInfoComment: printGCRelocateComment
+    if r.op == .CALL {
+        cf := op(i, nops(i) - 1);
+        if vkind(cf) == .FUNCTION && intrinsic_lookup(vname(cf)) == "llvm.experimental.gc.relocate" print_gc_relocate_comment(i);
+    }
+}
+
+// GCRelocateInst::getBasePtr/getDerivedPtr (llvm/lib/IR/IntrinsicInst.cpp); NONE = "invalid"
+gc_relocate_ptr :: (i: Value_Id, which: u32) -> Value_Id {
+    tok := op(i, 0);
+    k := vkind(tok);
+    if k == .C_UNDEF || k == .C_POISON || k == .C_TOKEN_NONE return const_undef(vtype(tok));
+    sp := tok;
+    if k == .INST && inst_op(tok) == .LANDINGPAD {
+        // the invoke that ends the landing pad's unique predecessor
+        b := inst(tok).parent;
+        pred: Value_Id = NONE;
+        u := ir.v_first_use[b];
+        while u != NONE {
+            us := ir.u_user[u];
+            if vkind(us) == .INST && is_terminator(inst_op(us)) {
+                pb := inst(us).parent;
+                if pred == NONE pred = pb; else if pred != pb return NONE;
+            }
+            u = ir.u_next[u];
+        }
+        if pred == NONE return NONE;
+        sp = block(pred).last;
+    }
+    if vkind(sp) != .INST return NONE;
+    ix := op(i, which);
+    if vkind(ix) != .C_INT return NONE;
+    idx := const_int_zext(ix);
+    r := inst(sp);
+    if r.nidx > 0 for bi: 0..r.nidx-1 {
+        tag := ir.u32_pool[r.idx + bi * 3];
+        if bundle_tags[tag] != "gc-live" continue;
+        b0 := ir.u32_pool[r.idx + bi * 3 + 1];
+        b1 := ir.u32_pool[r.idx + bi * 3 + 2];
+        if idx > cast(u64)(b1 - b0) return NONE;
+        return op(sp, b0 + cast(u32) idx);
+    }
+    if idx > cast(u64) call_arg_count(sp) return NONE;
+    return op(sp, cast(u32) idx);
+}
+
+print_gc_relocate_comment :: (i: Value_Id) {
+    out(" ; (");
+    b := gc_relocate_ptr(i, 1);
+    if b != NONE write_operand(b, false); else out("invalid");
+    out(", ");
+    d := gc_relocate_ptr(i, 2);
+    if d != NONE write_operand(d, false); else out("invalid");
+    out(")");
 }
 
 print_module :: () -> string {
@@ -1386,6 +1440,7 @@ print_module :: () -> string {
         KINDS :: string.["any", "exactmatch", "largest", "nodeduplicate", "samesize"];
         out(KINDS[c.kind]);
         outc(#char "\n");
+        if it_index != used.count - 1 outc(#char "\n");
     }
     if ir.m_globals.count outc(#char "\n");
     for ir.m_globals { print_global(it); outc(#char "\n"); }

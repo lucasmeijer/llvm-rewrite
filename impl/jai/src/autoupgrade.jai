@@ -135,157 +135,158 @@ upgrade_intrinsic_function1 :: (f: Value_Id) -> Upgrade_Result {
     ft := glob(f).value_type;
     nargs := fn_nargs(f);
 
-    if name[0] == {
-      case #char "c";
-        if nargs == 1 {
-            if begins_with(name, "convert.") {
-                rest := slice(name, 8, name.count - 8);
-                if convert_intrinsic_valid_type(rest, ft) { res.upgraded = true; return res; }
-            }
-            iid := "";
-            if begins_with(name, "ctlz.") iid = "llvm.ctlz";
-            else if begins_with(name, "cttz.") iid = "llvm.cttz";
-            if iid.count {
-                rename_old(f);
-                return found(decl(iid, .[fn_param_type(f, 0)]));
-            }
-        }
-        if nargs == 2 && name == "coro.end" {
-            rename_old(f);
-            return found(decl("llvm.coro.end"));
-        }
-      case #char "d";
-        if consume_front(*name, "dbg.") {
-            if name == "addr" || name == "value" || name == "assign" || name == "declare" || name == "label" {
-                // CanUpgradeDebugIntrinsicsToRecords: calls become debug records
-                res.upgraded = true; return res;
-            }
-        }
-      case #char "e";
-        if consume_front(*name, "experimental.vector.") {
-            iid := "";
-            if begins_with(name, "extract.last.active.") iid = "";
-            else if begins_with(name, "extract.") iid = "llvm.vector.extract";
-            else if begins_with(name, "insert.") iid = "llvm.vector.insert";
-            else if begins_with(name, "reverse.") iid = "llvm.vector.reverse";
-            else if begins_with(name, "interleave2.") iid = "llvm.vector.interleave2";
-            else if begins_with(name, "deinterleave2.") iid = "llvm.vector.deinterleave2";
-            else if begins_with(name, "partial.reduce.add") iid = "llvm.vector.partial.reduce.add";
-            if iid.count {
-                tys: [..] Type_Id; tys.allocator = temp;
-                if iid == "llvm.vector.extract" || iid == "llvm.vector.interleave2" array_add(*tys, func_ret(ft));
-                if iid != "llvm.vector.interleave2" array_add(*tys, func_param(ft, 0));
-                if iid == "llvm.vector.insert" || iid == "llvm.vector.partial.reduce.add" array_add(*tys, func_param(ft, 1));
-                rename_old(f);
-                return found(decl(iid, tys));
-            }
-            if consume_front(*name, "reduce.") {
-                // ^([a-z]+)\.[a-z][0-9]+   and   ^v2\.([a-z]+)\.[fi][0-9]+
-                word, ok := match_reduce_name(name, false);
-                iid = "";
-                if ok {
-                    for string.["add", "mul", "and", "or", "xor", "smax", "smin", "umax", "umin", "fmax", "fmin"]
-                        if word == it iid = tprint("llvm.vector.reduce.%", it);
+    for 0..0 {   // `break` = LLVM's `break` out of the switch
+        if name[0] == {
+          case #char "c";
+            if nargs == 1 {
+                if begins_with(name, "convert.") {
+                    rest := slice(name, 8, name.count - 8);
+                    if convert_intrinsic_valid_type(rest, ft) { res.upgraded = true; return res; }
                 }
-                v2 := false;
-                if iid.count == 0 {
-                    v2 = true;
-                    if begins_with(name, "v2.") {
-                        word, ok = match_reduce_name(slice(name, 3, name.count - 3), true);
-                        if ok && (word == "fadd" || word == "fmul") iid = tprint("llvm.vector.reduce.%", word);
-                    }
-                }
+                iid := "";
+                if begins_with(name, "ctlz.") iid = "llvm.ctlz";
+                else if begins_with(name, "cttz.") iid = "llvm.cttz";
                 if iid.count {
                     rename_old(f);
-                    return found(decl(iid, .[func_param(ft, ifx v2 then cast(u32) 1 else 0)]));
+                    return found(decl(iid, .[fn_param_type(f, 0)]));
                 }
-                return res;
             }
-            if begins_with(name, "splice") { res.upgraded = true; return res; }
-            return res;
-        }
-        if begins_with(name, "experimental.stepvector.") {
-            rename_old(f);
-            return found(decl("llvm.stepvector", .[func_ret(ft)]));
-        }
-        return res;
-      case #char "f";
-        if begins_with(name, "flt.rounds") { rename_old(f); return found(decl("llvm.get.rounding")); }
-      case #char "i";
-        if begins_with(name, "invariant.group.barrier") {
-            p := func_param(ft, 0);
-            rename_old(f);
-            return found(decl("llvm.launder.invariant.group", .[p]));
-        }
-      case #char "l";
-        is_start := consume_front(*name, "lifetime.start");
-        is_end := !is_start && consume_front(*name, "lifetime.end");
-        if is_start || is_end {
-            if nargs == 2 {
+            if nargs == 2 && name == "coro.end" {
                 rename_old(f);
-                return found(decl(ifx is_start then "llvm.lifetime.start" else "llvm.lifetime.end", .[func_param(ft, 1)]));
-            } else if nargs == 1 && name == ".i64" {
-                res.upgraded = true; return res;
+                return found(decl("llvm.coro.end"));
             }
-        }
-      case #char "m";
-        iid := "";
-        if begins_with(name, "memcpy.") iid = "llvm.memcpy";
-        else if begins_with(name, "memmove.") iid = "llvm.memmove";
-        if iid.count && nargs == 5 {
-            rename_old(f);
-            return found(decl(iid, .[func_param(ft, 0), func_param(ft, 1), func_param(ft, 2)]));
-        }
-        if begins_with(name, "memset.") && nargs == 5 {
-            rename_old(f);
-            return found(decl("llvm.memset", .[func_param(ft, 0), func_param(ft, 2)]));
-        }
-        masked := "";
-        if begins_with(name, "masked.load") masked = "llvm.masked.load";
-        else if begins_with(name, "masked.gather") masked = "llvm.masked.gather";
-        else if begins_with(name, "masked.store") masked = "llvm.masked.store";
-        else if begins_with(name, "masked.scatter") masked = "llvm.masked.scatter";
-        if masked.count && nargs == 4 {
-            rename_old(f);
-            if masked == "llvm.masked.load" || masked == "llvm.masked.gather"
-                return found(decl(masked, .[func_ret(ft), func_param(ft, 0)]));
-            return found(decl(masked, .[func_param(ft, 0), func_param(ft, 1)]));
-        }
-      case #char "o";
-        if begins_with(name, "objectsize.") {
-            if nargs == 2 || nargs == 3 {
-                tys := Type_Id.[func_ret(ft), func_param(ft, 0)];
+          case #char "d";
+            if consume_front(*name, "dbg.") {
+                if name == "addr" || name == "value" || name == "assign" || name == "declare" || name == "label" {
+                    // CanUpgradeDebugIntrinsicsToRecords: calls become debug records
+                    res.upgraded = true; return res;
+                }
+            }
+          case #char "e";
+            if consume_front(*name, "experimental.vector.") {
+                iid := "";
+                if begins_with(name, "extract.last.active.") iid = "";
+                else if begins_with(name, "extract.") iid = "llvm.vector.extract";
+                else if begins_with(name, "insert.") iid = "llvm.vector.insert";
+                else if begins_with(name, "reverse.") iid = "llvm.vector.reverse";
+                else if begins_with(name, "interleave2.") iid = "llvm.vector.interleave2";
+                else if begins_with(name, "deinterleave2.") iid = "llvm.vector.deinterleave2";
+                else if begins_with(name, "partial.reduce.add") iid = "llvm.vector.partial.reduce.add";
+                if iid.count {
+                    tys: [..] Type_Id; tys.allocator = temp;
+                    if iid == "llvm.vector.extract" || iid == "llvm.vector.interleave2" array_add(*tys, func_ret(ft));
+                    if iid != "llvm.vector.interleave2" array_add(*tys, func_param(ft, 0));
+                    if iid == "llvm.vector.insert" || iid == "llvm.vector.partial.reduce.add" array_add(*tys, func_param(ft, 1));
+                    rename_old(f);
+                    return found(decl(iid, tys));
+                }
+                if consume_front(*name, "reduce.") {
+                    // ^([a-z]+)\.[a-z][0-9]+   and   ^v2\.([a-z]+)\.[fi][0-9]+
+                    word, ok := match_reduce_name(name, false);
+                    iid = "";
+                    if ok {
+                        for string.["add", "mul", "and", "or", "xor", "smax", "smin", "umax", "umin", "fmax", "fmin"]
+                            if word == it iid = tprint("llvm.vector.reduce.%", it);
+                    }
+                    v2 := false;
+                    if iid.count == 0 {
+                        v2 = true;
+                        if begins_with(name, "v2.") {
+                            word, ok = match_reduce_name(slice(name, 3, name.count - 3), true);
+                            if ok && (word == "fadd" || word == "fmul") iid = tprint("llvm.vector.reduce.%", word);
+                        }
+                    }
+                    if iid.count {
+                        rename_old(f);
+                        return found(decl(iid, .[func_param(ft, ifx v2 then cast(u32) 1 else 0)]));
+                    }
+                    break;
+                }
+                if begins_with(name, "splice") { res.upgraded = true; return res; }
+                break;
+            }
+            if begins_with(name, "experimental.stepvector.") {
                 rename_old(f);
-                return found(decl("llvm.objectsize", tys));
+                return found(decl("llvm.stepvector", .[func_ret(ft)]));
             }
+          case #char "f";
+            if begins_with(name, "flt.rounds") { rename_old(f); return found(decl("llvm.get.rounding")); }
+          case #char "i";
+            if begins_with(name, "invariant.group.barrier") {
+                p := func_param(ft, 0);
+                rename_old(f);
+                return found(decl("llvm.launder.invariant.group", .[p]));
+            }
+          case #char "l";
+            is_start := consume_front(*name, "lifetime.start");
+            is_end := !is_start && consume_front(*name, "lifetime.end");
+            if is_start || is_end {
+                if nargs == 2 {
+                    rename_old(f);
+                    return found(decl(ifx is_start then "llvm.lifetime.start" else "llvm.lifetime.end", .[func_param(ft, 1)]));
+                } else if nargs == 1 && name == ".i64" {
+                    res.upgraded = true; return res;
+                }
+            }
+          case #char "m";
+            iid := "";
+            if begins_with(name, "memcpy.") iid = "llvm.memcpy";
+            else if begins_with(name, "memmove.") iid = "llvm.memmove";
+            if iid.count && nargs == 5 {
+                rename_old(f);
+                return found(decl(iid, .[func_param(ft, 0), func_param(ft, 1), func_param(ft, 2)]));
+            }
+            if begins_with(name, "memset.") && nargs == 5 {
+                rename_old(f);
+                return found(decl("llvm.memset", .[func_param(ft, 0), func_param(ft, 2)]));
+            }
+            masked := "";
+            if begins_with(name, "masked.load") masked = "llvm.masked.load";
+            else if begins_with(name, "masked.gather") masked = "llvm.masked.gather";
+            else if begins_with(name, "masked.store") masked = "llvm.masked.store";
+            else if begins_with(name, "masked.scatter") masked = "llvm.masked.scatter";
+            if masked.count && nargs == 4 {
+                rename_old(f);
+                if masked == "llvm.masked.load" || masked == "llvm.masked.gather"
+                    return found(decl(masked, .[func_ret(ft), func_param(ft, 0)]));
+                return found(decl(masked, .[func_param(ft, 0), func_param(ft, 1)]));
+            }
+          case #char "o";
+            if begins_with(name, "objectsize.") {
+                if nargs == 2 || nargs == 3 {
+                    tys := Type_Id.[func_ret(ft), func_param(ft, 0)];
+                    rename_old(f);
+                    return found(decl("llvm.objectsize", tys));
+                }
+            }
+          case #char "p";
+            if begins_with(name, "ptr.annotation.") && nargs == 4 {
+                tys := Type_Id.[func_param(ft, 0), func_param(ft, 1)];
+                rename_old(f);
+                return found(decl("llvm.ptr.annotation", tys));
+            }
+          case #char "s";
+            if name == "stackprotectorcheck" { res.upgraded = true; return res; }
+          case #char "t";
+            if name == "thread.pointer" return found(decl("llvm.thread.pointer", .[func_ret(ft)]));
+          case #char "v";
+            if name == "var.annotation" && nargs == 4 {
+                tys := Type_Id.[func_param(ft, 0), func_param(ft, 1)];
+                rename_old(f);
+                return found(decl("llvm.var.annotation", tys));
+            }
+            if consume_front(*name, "vector.splice") {
+                if !(begins_with(name, ".left") || begins_with(name, ".right")) { res.upgraded = true; return res; }
+            }
+          case #char "x";
+            r := upgrade_x86_intrinsic_function(f, name);
+            if r.upgraded return r;
+          case #char "a"; #through;
+          case #char "n"; #through;
+          case #char "r"; #through;
+          case #char "w";
+            // arm/aarch64/amdgcn/nvvm/riscv/wasm upgrades: not ported (those intrinsics are unknown here)
         }
-      case #char "p";
-        if begins_with(name, "ptr.annotation.") && nargs == 4 {
-            tys := Type_Id.[func_param(ft, 0), func_param(ft, 1)];
-            rename_old(f);
-            return found(decl("llvm.ptr.annotation", tys));
-        }
-      case #char "s";
-        if name == "stackprotectorcheck" { res.upgraded = true; return res; }
-      case #char "t";
-        if name == "thread.pointer" return found(decl("llvm.thread.pointer", .[func_ret(ft)]));
-      case #char "v";
-        if name == "var.annotation" && nargs == 4 {
-            tys := Type_Id.[func_param(ft, 0), func_param(ft, 1)];
-            rename_old(f);
-            return found(decl("llvm.var.annotation", tys));
-        }
-        if consume_front(*name, "vector.splice") {
-            if !(begins_with(name, ".left") || begins_with(name, ".right")) { res.upgraded = true; return res; }
-        }
-      case #char "x";
-        r := upgrade_x86_intrinsic_function(f, name);
-        if r.upgraded return r;
-      case #char "a"; #through;
-      case #char "n"; #through;
-      case #char "r"; #through;
-      case #char "w";
-        // arm/aarch64/amdgcn/nvvm/riscv/wasm upgrades: not ported (those intrinsics are unknown here)
     }
 
     // Named or packed struct return types become literal non-packed structs.
@@ -953,4 +954,103 @@ should_upgrade_x86_intrinsic :: (f: Value_Id, name_in: string) -> bool {
           name == "subborrow.u32" ||       // Added in 8.0
           name == "subborrow.u64" ||       // Added in 8.0
           begins_with(name, "vcvtph2ps.")); // Added in 11.0
+}
+
+// ---------------------------------------------------------------- metadata upgrades
+
+md_const_int_value :: (m: Md_Id) -> (ok: bool, v: u64) {
+    if m == NONE || ir.mds[m].kind != .VALUE return false, 0;
+    v := ir.mds[m].value;
+    if vkind(v) != .C_INT return false, 0;
+    return true, const_int_zext(v);
+}
+
+// llvm::UpgradeTBAANode
+upgrade_tbaa_node :: (m: Md_Id) -> Md_Id {
+    r := ir.mds[m];
+    if r.kind != .TUPLE return m;
+    n := r.nops;
+    if n == 0 return m;
+    o0 := md_op(m, 0);
+    if o0 != NONE && (ir.mds[o0].kind == .TUPLE || ir.mds[o0].kind == .DI) && n >= 3 return m;
+    zero := md_value(const_int(ir.t_i64, 0));
+    if n == 3 {
+        scalar := md_tuple(.[md_op(m, 0), md_op(m, 1)], false);
+        return md_tuple(.[scalar, scalar, zero, md_op(m, 2)], false);
+    }
+    return md_tuple(.[m, m, zero], false);
+}
+
+upgrade_tbaa_tags :: () {
+    tbaa := md_kind_id("tbaa");
+    for f: ir.m_functions {
+        b := glob(f).first_block;
+        while b != NONE {
+            i := block(b).first;
+            while i != NONE {
+                m := get_metadata(i, tbaa);
+                if m != NONE {
+                    nm := upgrade_tbaa_node(m);
+                    if nm != m set_metadata(i, tbaa, nm);
+                }
+                i = inst(i).next;
+            }
+            b = block(b).next;
+        }
+    }
+}
+
+MOD_ERROR :: 1; MOD_OVERRIDE :: 4; MOD_MAX :: 7; MOD_MIN :: 8;
+
+// llvm::UpgradeModuleFlags (upgradePtrauthInitFiniArrays is not ported: arm64e only)
+upgrade_module_flags :: () {
+    nm: *Named_Md = null;
+    for * ir.named_md if it.name == "llvm.module.flags" { nm = it; break; }
+    if !nm return;
+    has_objc := false; has_class_props := false;
+    for i: 0..nm.ops.count-1 {
+        op := nm.ops[i];
+        if op == NONE || ir.mds[op].kind != .TUPLE || ir.mds[op].nops != 3 continue;
+        idm := md_op(op, 1);
+        if idm == NONE || ir.mds[idm].kind != .STRING continue;
+        id := ir.mds[idm].str;
+        set_behavior :: (nm: *Named_Md, i: s64, b: u64, idm: Md_Id, val: Md_Id) {
+            nm.ops[i] = md_tuple(.[md_value(const_int(ir.t_i32, b)), idm, val], false);
+        }
+        if id == "Objective-C Image Info Version" has_objc = true;
+        if id == "Objective-C Class Properties" has_class_props = true;
+        if id == "PIC Level" {
+            ok, v := md_const_int_value(md_op(op, 0));
+            if ok && (v == MOD_ERROR || v == MOD_MAX) set_behavior(nm, i, MOD_MIN, idm, md_op(op, 2));
+        }
+        if id == "PIE Level" {
+            ok, v := md_const_int_value(md_op(op, 0));
+            if ok && v == MOD_ERROR set_behavior(nm, i, MOD_MAX, idm, md_op(op, 2));
+        }
+        if id == "branch-target-enforcement" || begins_with(id, "sign-return-address") {
+            ok, v := md_const_int_value(md_op(op, 0));
+            if ok && v == MOD_ERROR set_behavior(nm, i, MOD_MIN, idm, md_op(op, 2));
+        }
+        if id == "Objective-C Image Info Section" {
+            vm := md_op(op, 2);
+            if vm != NONE && ir.mds[vm].kind == .STRING && contains(ir.mds[vm].str, " ") {
+                nv := replace(ir.mds[vm].str, " ", "",, allocator = temp);
+                nm.ops[i] = md_tuple(.[md_op(op, 0), idm, md_string(nv)], false);
+            }
+        }
+        if id == "Objective-C Garbage Collection" {
+            vm := md_op(op, 2);
+            if vm != NONE && ir.mds[vm].kind == .VALUE {
+                v := ir.mds[vm].value;
+                if vtype(v) == ir.t_i8 continue;
+                fatal("auto-upgrade of the i32 \"Objective-C Garbage Collection\" module flag is not supported yet");
+            }
+        }
+        if id == "amdgpu_code_object_version"
+            nm.ops[i] = md_tuple(.[md_op(op, 0), md_string("amdhsa_code_object_version"), md_op(op, 2)], false);
+    }
+    if has_objc && !has_class_props {
+        array_add(*nm.ops, md_tuple(.[md_value(const_int(ir.t_i32, MOD_OVERRIDE)), md_string("Objective-C Class Properties"),
+                                     md_value(const_int(ir.t_i32, 0))], false));
+    }
 }

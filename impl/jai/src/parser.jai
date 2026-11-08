@@ -2780,6 +2780,7 @@ validate_end_of_module :: () {
     }
     for P.fwd_global_ids perr("use of undefined value '@%'", it_index);
     resolve_all_metadata();
+    upgrade_tbaa_tags();
     // UpgradeCallsToIntrinsic for every function (make_early_inc_range: functions appended meanwhile are visited)
     i := 0;
     while i < ir.m_functions.count {
@@ -2787,6 +2788,7 @@ validate_end_of_module :: () {
         upgrade_calls_to_intrinsic(f);
         if i < ir.m_functions.count && ir.m_functions[i] == f i += 1;
     }
+    upgrade_module_flags();
 }
 
 auto_declare_intrinsic :: (name: string, fw: Value_Id) {
