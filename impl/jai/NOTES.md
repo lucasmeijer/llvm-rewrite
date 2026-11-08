@@ -431,6 +431,38 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   pick between two multi-value calls; several helpers already existed under the same name in other agents' files
   (icb_fabs, pm_extract_value_idx, call_param_align, icb_vector_splat, ...): grep `^name ::` before adding one.
 
+## InstCombine memory, GEPs, vector ops (L1.instcombine.memory 102/102 roundtrip, 56/102 ::opt; DESIGN.md §11)
+
+- Ported completely, in LLVM's order: InstCombineLoadStoreAlloca.cpp (ic_loadstorealloca.jai),
+  InstCombineVectorOps.cpp (ic_vectorops.jai), and the remaining InstructionCombining.cpp visitors (ic_combining.jai:
+  GEP, alloc sites, free, switch, extractvalue, landingpad, freeze; foldVectorBinop with unshuffleConstant, reverse,
+  vp.reverse, splice and vector.insert in ic_binop.jai). Shared analyses added for them: loads.jai (Loads.cpp:
+  isDereferenceableAndAlignedPointer incl. assume bundles, isSafeToLoadUnconditionally, FindAvailableLoadedValue with
+  BatchAA; Value::canBeFreed, willNotFreeBetween, isBitOrNoopPointerCastable, isIdenticalToWhenDefined) and
+  memory_builtins.jai (MemoryBuiltins.cpp: allocation tables with families, getAllocSize with the visitor's Mapper,
+  ObjectSizeOffsetVisitor in all 4 modes incl. load tracking through AA, ObjectSizeOffsetEvaluator for dynamic
+  `llvm.objectsize`, lowerObjectSizeCall; ValueTracking's getConstantDataArrayInfo/GetStringLength).
+  The older tables in inst_props.jai/basic_aa.jai/aa.jai now use these.
+- The 46 failing memory tests are almost all calls: LibCallSimplifier (mem*/str* families, `__*_chk`), nonnull/
+  dereferenceable call-argument inference in visitCallBase, memcpy/memset folds that need AAMDNodes::adjustForAccess;
+  plus `debugify` (storemerge-dbg), `-instcombine-lower-dbg-declare=0` (alloca-cast-debuginfo) and InstSimplify's
+  "load folding through scalable types" (load-store-forward).
+- Sweep `--passes instcombine` vs main before this work (a0f750d): identical 3716→6744, no identical→differs,
+  1 identical→failed (gc.statepoint, a calls path). Remaining loud failures in these areas: LowerDbgDeclare
+  (27 files, needs Local.cpp LowerDbgDeclare + RemoveRedundantDbgInstrs), the ptrauth `llvm.protected.field.ptr`
+  load/store folds, DIAssignID merging in mergeStoreIntoSuccessor, TargetExtType vector elements.
+- Fixed on the way (shared code): `create_shuffle`, `create_extract_value`, `icb_insert_value` copy their index
+  arrays first (`shuffle_mask(sv)`/`inst_indices(i)` are views into `ir.u32_pool`; appending to the pool while
+  reading such a view produced garbage masks); `ic_take_name` is a no-op on constants (LLVM's getSymTab fails, the
+  source keeps its name — a folded OptimizeOverflowCheck result got named `%x`); constant-folding GEPs with a
+  scalable source type is refused (isSupportedGetElementPtr); emitGEPOffset handles splatted scalar indices and
+  scalable strides (CreateTypeSize: vscale * min, nuw); CommonPointerBase's no-wrap flags default to all();
+  has_poison_generating_flags no longer reads `inst()` of a constant expression.
+- Tools: `/tmp`-style per-function comparison as in ic_funcdiff.py with PORTED extended to memory/vector/cast
+  opcodes found the u32_pool bug (masks like `<3, 31721, 2, 0>`) — extend the tool's PORTED set when visitors land.
+- Traps: `type_info` is a reserved identifier; `xx` likewise; `for e: 0..n-1` with `n: u32 == 0` (empty structs)
+  loops forever; Jai `cast(u32)` of a -1 mask element fails the bounds check — use `cast,no_check`.
+
 ## Procedure-typed parameters that remain (audited for the "no hand-rolled vtables" rule)
 
 No struct has a procedure-pointer field and there are no procedure-pointer tables (the SCEV `Sc_Rewriter.hook` and

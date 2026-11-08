@@ -177,3 +177,33 @@ icmp*/fcmp* tests.
   while I still exists) before I; the last one is removed from the block and returned, so it takes I's name.
 - foldAndOrOfICmpsWithPow2AndWithZero calls the `isKnownToBeAPowerOfTwo(V, DL, ...)` overload, which has no
   DomConditionCache; the other isKnownToBeAPowerOfTwo calls of the file use the SimplifyQuery (with it).
+
+## Memory, GEPs, vector ops
+
+- **LLVM 23's AllocationFnData has no malloc/calloc/realloc/aligned_alloc**: only operator new/new[] (Itanium and
+  MSVC) and strdup/strndup. malloc-like functions are recognized only through `allockind(...)`/`allocsize`
+  attributes (and `"alloc-family"` for getAllocationFamily); a bare `declare ptr @malloc(i64)` is not an allocation
+  function for isAllocSiteRemovable (MemoryBuiltins.cpp AllocationFnData).
+- `free` is still a TLI LibFunc: getFreedOperand returns its argument 0 when the declaration has `allockind("free")`
+  even without `allocptr` (isLibFreeFunction falls back to checkFnAllocKind on the Function).
+- TLI prototypes use size_t = DataLayout index width of address space 0: with `p:32:32:32`, `aligned_alloc(i32,
+  i32)` is the libfunc and visitAllocSite keeps `icmp ne (aligned_alloc 3, 32), null` (invalid alignment) unfolded
+  (InstCombine/malloc-free.ll).
+- `Value::takeName` on a Constant does nothing (getSymTab fails) and the source keeps its name
+  (OptimizeOverflowCheck's `Result->takeName(&OrigI)` when Result constant-folded; InstCombine/with_overflow.ll).
+- `CommonPointerBase::LHSNW/RHSNW` start as `GEPNoWrapFlags::all()`: `p - gep inbounds p, A` becomes
+  `sub nsw 0, A` (InstCombine/sub-gep.ll test24a).
+- `Instruction::isAssociative()`: FMul needs only `reassoc`, FAdd needs `reassoc nsz` (foldVectorBinop's splat
+  reassociation, InstCombine/vec_shuffle.ll splat_assoc_fmul).
+- `m_ZeroMask` accepts poison lanes, including an all-poison mask (VectorUtils getSplatValue, simplifyBinOpSplats).
+- `lowerObjectSizeCall`: only the instructions created by its own final builder (sub, icmp ult, zext/trunc,
+  select, icmp ne + assume) are added to the worklist by visitCallInst/visitAllocSite; ObjectSizeOffsetEvaluator's
+  own instructions are not (InstCombine/builtin-dynamic-object-size.ll phis_are_neat needs the former to reach a
+  fixpoint).
+- `Value::getPointerDereferenceableBytes` reports CanBeFreed only when `-use-dereferenceable-at-point-semantics`
+  (default true in 23.1.5) and the value is not an alloca/global; isDereferenceableAndAlignedPointer then needs
+  willNotFreeBetween(def, CxtI) (max 32 instructions, through single-predecessor chains).
+- visitAllocSite of an `invoke` allocation creates `invoke void @llvm.donothing()` to the same destinations at the
+  end of the block before erasing the original (InstCombine/invoke.ll).
+- `combineLoadToOperationType` uses `CastUser->replaceAllUsesWith(NewLoad)` (no worklist push of the users), then
+  erases the cast and returns the old load (which then dies as trivially dead).
