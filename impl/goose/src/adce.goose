@@ -12,6 +12,7 @@ import local;
 import tli;
 import flags;
 import domtree;
+import dinfo;
 
 fn adce_run(fv: i32) -> u32 {
     tli_cur_fn = fv;
@@ -52,6 +53,8 @@ fn adce_run(fv: i32) -> u32 {
     fn mark_uncond_term(i: i32) {
         if !vs_add(VS_PASS0, i) { return; }
         worklist.push(i);
+        let dl = inst_get_md(i, 0);
+        if dl >= 0 { collect_live_scopes_dl(dl); }
         bwdt_remove(inst_parent(i));
     }
     // markLive(BasicBlock *)
@@ -63,10 +66,33 @@ fn adce_run(fv: i32) -> u32 {
         let t = block_last(bv);
         if iop(t) == OP_BR { mark_uncond_term(t); }
     }
+    // AliveScopes (keyed by md id in VM_PASS1)
+    vm_clear(VM_PASS1);
+    fn collect_live_scopes_ls(ls0: i32) {
+        var ls = ls0;
+        while ls >= 0 {
+            if vm_has(VM_PASS1, ls) { return; }
+            vm_set(VM_PASS1, ls, 1);
+            if mds[ls].kind != MK_DI || di_kind(ls) == DIK_SUBPROGRAM { return; }
+            ls = di_slot(ls, "scope");
+        }
+    }
+    fn collect_live_scopes_dl(dl0: i32) {
+        var dl = dl0;
+        while dl >= 0 {
+            if vm_has(VM_PASS1, dl) { return; }
+            vm_set(VM_PASS1, dl, 1);
+            collect_live_scopes_ls(di_slot(dl, "scope"));
+            dl = di_slot(dl, "inlinedAt");
+        }
+    }
+    fn inst_dl(i: i32) -> i32 { inst_get_md(i, 0) }
     // markLive(Instruction *)
     fn mark_inst(i: i32) {
         if !vs_add(VS_PASS0, i) { return; }
         worklist.push(i);
+        let dl = inst_dl(i);
+        if dl >= 0 { collect_live_scopes_dl(dl); }
         let bv = inst_parent(i);
         if i == block_last(bv) {
             bwdt_remove(bv);
@@ -279,8 +305,11 @@ fn adce_run(fv: i32) -> u32 {
             } else { first = false; }
         }
         // makeUnconditional(BB, PreferredSucc)
+        let tdl = inst_dl(t);
+        if tdl >= 0 { collect_live_scopes_dl(tdl); }
         let br = build_br(pref, t);
         vs_add(VS_PASS0, br);
+        if tdl >= 0 { inst_set_md(br, 0, tdl); }
         inst_erase_from_parent(t);
         changed_cf = true;
     }
@@ -291,6 +320,21 @@ fn adce_run(fv: i32) -> u32 {
     while bb >= 0 {
         var i = block_last(bb);
         while i >= 0 {
+            // drop debug records whose scope isn't alive
+            var prev_r: i32 = -1;
+            var r = inst_first_dbg(i);
+            while r >= 0 {
+                let nr = dbgrecs[r].next;
+                if dbgrecs[r].kind as i64 == DR_ASSIGN { fatal("ADCE: dbg_assign records (assignment tracking) are not ported yet"); }
+                let dl = dbgrecs[r].dl;
+                let sc = if dl >= 0 { di_slot(dl, "scope") } else { -1 };
+                if sc >= 0 && vm_has(VM_PASS1, sc) {
+                    prev_r = r;
+                } else {
+                    if prev_r < 0 { inst_dbg[inst_of(i)] = nr; } else { dbgrecs[prev_r].next = nr; }
+                }
+                r = nr;
+            }
             if !is_live(i) { dead.push(i); }
             i = inst_prev(i);
         }

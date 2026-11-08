@@ -102,9 +102,11 @@ and keeps LLVM's order. Opcode-specific fields: `ty2` is the GEP source type / a
 log2+1, `ord`/`ord2` atomic orderings, `bits` volatile/weak/inalloca. `flags` is the poison-generating flag byte
 (`nuw nsw exact disjoint nneg samesign`, or GEP `inbounds nusw nuw`), `fmf` the fast-math byte.
 
-**Erasing** unlinks the record, drops its operands (unlinking each `Use`) and marks `vals[v].kind = DEAD`. Ids are
-not reused yet; when a free list is added, ids will *not* be stable across an erase: a pass that wants to
-remember an erased instruction must not keep its id (LLVM's `WeakVH` semantics, see §5).
+**Erasing** (`inst_erase_from_parent`, irutil.goose) removes the name from the function's symbol table, unlinks the
+record, drops its operands (unlinking each `Use`) and marks `vals[v].kind = VK_DEAD`. **Value ids are never
+reused** (decided with the pass infrastructure, §8.2): a dead id stays a tombstone, so a stale id is detectable
+(`is_dead(v)`) instead of silently naming a different value, and side tables indexed by value id never need
+clearing on erase. The cost is a few dozen bytes per erased value until exit.
 
 ### 2.4 Types, constants, strings, metadata, attributes: interned, append-only
 
@@ -134,12 +136,13 @@ compaction pass can rebuild them between passes with an id remap.
 
 ## 3. How passes use it
 
-- A pass is a plain function over ids: `fn instsimplify(f: i32) -> bool`. The pass manager is an `enum Pass`
-  and a `match` (no function pointers), parsed from `-passes=` text, with LLVM's nesting
-  (module → CGSCC → function → loop adaptors) and the same order of running and of `-opt-bisect-limit` counting.
-- Per-pass state lives in **locals of the pass's (non-recursive) entry function**: side tables indexed by value id
-  (`var seen: bool[>..]`, sized to `vals.len`), worklists (`i32[>..<]`), and maps. They're freed when the pass
-  returns. Helpers that need them take them by reference or are nested functions of the entry.
+- A pass is a plain function over ids returning the analyses it preserved: `fn dce_run(fv: i32) -> u32`. The pass
+  manager (§9) dispatches on a pass id with a `match` (no function pointers), parsed from `-passes=` text, with
+  LLVM's nesting and the same order of running and of `-opt-bisect-limit` counting.
+- Per-pass state lives in **locals of the pass's (non-recursive) entry function** and its nested functions:
+  worklists (`i32[>..<]`), per-block arrays indexed by a local block number. Sets/maps over value ids use the
+  O(1)-clear scratch slots of §8.4, never a `vals.len`-sized local (that would make a per-function pass quadratic
+  in the number of functions).
 - Recursive algorithms are written with an explicit stack (`[>..<]`) when the LLVM code uses one, and as
   `recursive fn` over global tables otherwise, following the LLVM code's visiting order exactly.
 - LLVM containers are ported by behaviour, not by type: `SmallVector` → local `[>..<]`; `SetVector` → array + seen
@@ -186,7 +189,80 @@ with data plus a `match`.
 
 ## 7. Known costs and debts
 
-- Ids are recycled after erase: never keep an id of something that may be erased (use a handle).
+- Ids are never reused; erased values are `VK_DEAD` tombstones (§8.2). Operand runs of erased values are leaked.
+- Dominator trees are recomputed after a CFG change instead of updated incrementally (§8.5): child order can then
+  differ from LLVM's for passes that preserve the tree through `DomTreeUpdater`.
 - Append-only pools leak dead operand runs, types and constants until exit (see §2.4).
 - A single global state means one module "context" per process. `llvm-link` has to load all inputs into it, which
   matches LLVM (all modules share one `LLVMContext`).
+
+## 8. Pass-facing IR conventions (irutil.goose, instinfo.goose)
+
+### 8.1 Queries
+CFG: `term_nsucc/term_succ/term_set_succ`, `block_nsucc/block_succ`, `each_pred(bv) { p => … }` (users of the
+block that are terminators, in use-list order, one per edge: LLVM's `predecessors()`), `single_pred`,
+`first_non_phi`. Iteration: `each_inst(fv) { i => … }` reads the next instruction first (`make_early_inc_range`),
+so the callback may erase `i`. PHIs: `phi_value/phi_block/phi_block_index`. Instruction properties are ports of the
+`Instruction`/`CallBase` methods in instinfo.goose: `inst_may_have_side_effects`, `inst_may_read/write_memory`,
+`inst_may_throw`, `inst_will_return`, `inst_is_eh_pad`, `call_has_fn_attr`, `call_memory_effects`,
+`called_function`, `call_iid` (intrinsic id, `IID_*` constants from gen_iids.goose = LLVM's `Intrinsic::ID`).
+Calls: `cb_*` accessors in calls.goose (operand layout `args…, bundle operands…, [dests…], callee`).
+
+### 8.2 Mutation
+`create_inst` (unlinked) + `inst_insert_before/after`, `block_append_inst`; `build_before(op, ty, ops, name, pos)`
+and `build_br` are the IRBuilder equivalents. **Names are set after insertion** (`set_name`, `set_name_from`)
+so the function's `ValueSymbolTable` uniques them exactly like LLVM (`x` taken → `x1`, per-table counter).
+`inst_erase_from_parent` (fatal if uses remain, as LLVM asserts), `inst_remove_from_parent`, `inst_move_before`,
+`rauw` (LLVM's head-first loop), `set_op` (`Use::set`), `drop_all_refs`. Blocks: `create_block_after`,
+`split_block` (`splitBasicBlock`), `block_erase`, `block_remove_predecessor` (`removePredecessor`, including its
+PHI folding), `block_replace_phi_uses_with`. PHIs: `phi_add_incoming`, `phi_remove_incoming` (LLVM 23 swaps the
+last entry into the hole), `phi_has_constant_value`. Flags: `drop_poison_generating_flags/annotations`.
+Ids are never reused (§2.3).
+
+### 8.3 Value handles and worklists
+No handle table yet: passes keep ids and check `is_dead(v)` where LLVM would use a `WeakVH`. Worklists follow the
+LLVM container: `SmallVector` = `i32[>..<]` with `push`/`pop`; `SetVector` = array + scratch set membership
+(DCE: insert if `vs_add` returned true, `vs_del` on pop).
+
+### 8.4 Scratch sets and maps (O(1) clear)
+`vs_clear/vs_add/vs_has/vs_del` (sets) and `vm_clear/vm_set/vm_get/vm_has` (maps to `i64`) over value ids (or use
+ids), 4 slots each, with an epoch stamp per entry so clearing is O(1). Owners: `VS_PASS0/VS_PASS1`,
+`VM_PASS0/VM_PASS1` belong to the running transform pass (ADCE: live set, dead-terminator set, block numbers);
+`VS_ANA0/VS_ANA1/VM_ANA0` belong to DemandedBits (Visited, DeadUses, AliveBits), which also borrows `VS_PASS1`
+for its worklist while it runs. A pass that calls an analysis must not hold data in the slots the analysis uses.
+
+### 8.5 Analyses
+Dominator trees (domtree.goose, a port of `SemiNCAInfo`: `runDFS`, `runSemiNCA`, `FindRoots` with
+`RemoveRedundantRoots`, `attachNewSubtree`) live in global per-(block, kind) node records with an epoch per tree,
+so recomputing never clears memory. `dt_get(fv, DT_DOM|DT_POST)` computes if invalid; queries: `dt_idom`,
+`dt_dominates_block`, `dt_first_child/dt_next_sibling` (LLVM's child order), `dt_level`, `dt_root`, roots.
+`DT_VROOT` is the post-dominator tree's virtual exit. **Incremental updates are not ported**: a pass that changes
+the CFG returns a preserved set without the trees and they are recomputed on the next `dt_get`. DemandedBits
+(demandedbits.goose) is computed per query (`db_analyze`, cached for the current function, `db_invalidate()` at the
+start and end of a pass that uses it). computeKnownBits (knownbits.goose) fails loudly on every case LLVM handles
+that isn't ported (see the file header), so imprecision can't silently change output. TargetLibraryInfo (tli.goose)
+must know the current function: set `tli_cur_fn = fv` at the start of a pass.
+
+## 9. The pass manager and how to add a pass (passmgr.goose)
+
+`-passes=` text is parsed like `PassBuilder::parsePipelineText` into a tree of `PNode`s (module / function
+adaptors, passes). The implicit outer level is chosen from the first name like `parsePassPipeline` (a function pass
+first ⇒ the whole list is wrapped in one `function(...)`; a function pass inside a module list gets its own
+adaptor). Names are checked against `LLVM_PASS_NAMES` (gen_passes.goose, from `PassRegistry.def`): a name LLVM
+doesn't know fails with "unknown pass", one LLVM knows but we don't fails with "not implemented yet". The module
+→ function adaptor runs every child on each function definition in module order. `-opt-bisect-limit` counts every
+non-required pass run and prints LLVM's `BISECT:` lines. After each function pass, `invalidate_function` drops the
+analyses not in the returned preserved mask (`PA_ALL`, `PA_CFG`, `PA_NONE`, or bits `1 << A_*`).
+
+To add a function pass `foo`:
+1. Port it in `src/foo.goose` (header comment: the LLVM file), entry `fn foo_run(fv: i32) -> u32` returning the
+   preserved analyses exactly as LLVM's `run` does (`PA_ALL` if nothing changed).
+2. In passmgr.goose: a `P_FOO` id, a `PASS_TABLE` row `"f:foo:<id>:0"` (`:1` for required passes such as
+   printers), a case in `run_function_pass`, its class name in `pass_class_name` (for bisect), and `import foo;`.
+   Pass parameters (`foo<a;b>`) arrive as the full element name: parse them in `parse_function_elem`.
+3. cl::opt flags it reads: add the name to `KNOWN_FLAGS` (flags.goose) and read with `flag_bool/flag_int`.
+4. New analysis: an `A_*` bit, `analysis_id` (for `require<>`/`invalidate<>`), invalidation in
+   `invalidate_function`, and decide whether it's in `PA_CFG` (LLVM's `CFGAnalyses` set).
+5. Printers write to `errs(...)` (flags.goose); `errs_operand`/`errs_inst` print values exactly as the IR printer
+   does (they number the function with the printer's SlotTracker).
+Module passes: an `m:` row and a case in `run_module_node`.

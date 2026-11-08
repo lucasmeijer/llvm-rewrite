@@ -1612,6 +1612,7 @@ tests/imported/llvm/Transforms/ADCE/dce_pure_call.ll::opt
 tests/imported/llvm/Transforms/ADCE/dce_pure_call.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/dce_pure_invoke.ll::opt
 tests/imported/llvm/Transforms/ADCE/dce_pure_invoke.ll::roundtrip
+tests/imported/llvm/Transforms/ADCE/debug-info-intrinsic.ll::opt
 tests/imported/llvm/Transforms/ADCE/debug-info-intrinsic.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/delete-profiling-calls-to-constant.ll::opt
 tests/imported/llvm/Transforms/ADCE/delete-profiling-calls-to-constant.ll::roundtrip

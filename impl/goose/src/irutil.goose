@@ -3,6 +3,7 @@
 // llvm/include/llvm/IR/CFG.h. See DESIGN.md §8 for the conventions.
 import std;
 import ir;
+import dinfo;
 
 // ---------------------------------------------------------------------------------------------
 // Small accessors
@@ -250,9 +251,32 @@ fn inst_remove_from_parent(iv: i32) {
 // destroyed!"); its id is never reused, the record becomes VK_DEAD (see DESIGN.md §8.2).
 fn inst_erase_from_parent(iv: i32) {
     if vals[iv].first_use >= 0 { fatal("internal: erasing an instruction that still has uses"); }
+    if dbgrecs.len > 0 {
+        if dbg_records_use_value(iv) { fatal("salvageDebugInfo is not ported yet (a debug record uses an erased value)"); }
+        dbg_records_to_next(iv);
+    }
     inst_remove_from_parent(iv);
     drop_all_refs(iv);
     vals[iv].kind = VK_DEAD;
+}
+
+// Is v a location operand of any debug record? (ValueAsMetadata, or inside a DIArgList.) Linear in the number
+// of records; only used to fail loudly where LLVM would salvage or kill debug locations.
+fn md_mentions_value(m: i32, v: i32) -> bool {
+    if m < 0 { return false; }
+    if mds[m].kind == MK_VALUE { return mds[m].extra == v; }
+    if mds[m].kind == MK_STRING { return false; }
+    for k in mds[m].nops {
+        let o = md_ops[mds[m].ops + k];
+        if o >= 0 && mds[o].kind == MK_VALUE && mds[o].extra == v { return true; }
+    }
+    return false;
+}
+fn dbg_records_use_value(v: i32) -> bool {
+    for r in dbgrecs {
+        if md_mentions_value(r.loc, v) || md_mentions_value(r.addr, v) { return true; }
+    }
+    return false;
 }
 
 // Insert an unlinked instruction. Names: set them after insertion (IRBuilder::Insert then setName), so the

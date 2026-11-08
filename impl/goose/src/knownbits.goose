@@ -13,6 +13,7 @@ import instinfo;
 import gen_attrs;
 import gen_iids;
 import intrinsics;
+import implied;
 
 let MAX_ANALYSIS_DEPTH = 6;   // MaxAnalysisRecursionDepth
 
@@ -405,18 +406,6 @@ fn kb_clmul(l: KB, r: KB) -> KB {
 // SimplifyQuery::CxtI: the context instruction (DemandedBits passes the user of the operand).
 var kb_cxt: i32 = -1;
 
-// getDomPredecessorCondition(CxtI) != null: a single predecessor ending in a conditional branch
-// (with distinct successors). isImpliedCondition is not ported, so such a context is refused.
-fn kb_has_dom_pred_condition() -> bool {
-    if kb_cxt < 0 { return false; }
-    let bb = inst_parent(kb_cxt);
-    if bb < 0 { return false; }
-    let p = single_pred(bb);
-    if p < 0 { return false; }
-    let t = block_terminator(p);
-    return iop(t) == OP_CONDBR && op(t, 1) != op(t, 2);
-}
-
 fn not_ported(what: const u8[:]) { fatal(str("computeKnownBits: ", what, " is not ported yet")); }
 
 // The bit width of a value's scalar type (pointers: not supported).
@@ -687,9 +676,9 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         let kl = kb_compute(a, de, depth + 1);
         var out = kb_add_sub(add, nsw, nuw, kl, kr);
         if !add && nsw && !kb_is_nonneg(out) {
-            if kb_has_dom_pred_condition() { not_ported("sub nsw sign from dominating conditions (isImpliedByDomCondition)"); }
-            // m_c_SMin(m_Specific(Op0), m_Value())
-            if inst_iid(b) == IID_smin && (op(b, 0) == a || op(b, 1) == a) { out = kb_make_nonneg(out); }
+            if implied_by_dom_condition(P_SLE, b, a, kb_cxt) == 1 || (inst_iid(b) == IID_smin && (op(b, 0) == a || op(b, 1) == a)) {
+                out = kb_make_nonneg(out);
+            }
         }
         if add { kb_check_lerp(a, b); }
         return out;

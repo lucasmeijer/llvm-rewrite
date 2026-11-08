@@ -12,8 +12,9 @@
 - `build.sh` runs `goose build --cc /opt/llvm-23.1.5/bin/clang -o bin/<tool> src/<tool>.goose`. Build products live
   under `~/.goose` (`GOOSE_HOME`). `goose build --debug` turns on overflow, range and tag checks. Use it when
   chasing a crash.
-- `llc` and `llvm-link` are still placeholders that exit with "not implemented yet". `opt` parses and prints; any
-  `-passes=`/`-O<n>` exits 1.
+- `llc` and `llvm-link` are still placeholders that exit with "not implemented yet". `opt` runs `-passes=`
+  pipelines (DESIGN.md §9) with dce, adce, bdce and the domtree/postdomtree/demanded-bits printers; `-O<n>` and
+  unported passes exit 1 with "not implemented yet".
 
 ## Status
 
@@ -60,7 +61,8 @@
   table (`insts`, `blocks`, `globs`, `csts`, `args_parent`). `op(v, k)` / `set_op(v, k, x)` / `push_op` are the
   operand API; `set_op` is `Use::set` (pushes at the head of the new value's use list). `rauw` is LLVM's loop.
   The parser uses `rauw_with_constants`, which re-uniques constant users (`handleOperandChange`).
-- **Erase** (`inst_erase`) marks the value `VK_DEAD`; ids are not reused yet (the design allows a free list).
+- **Erase**: passes use `inst_erase_from_parent` (irutil.goose), which also removes the name from the symbol
+  table (the raw `inst_erase` doesn't). Ids are never reused (DESIGN.md §2.3, §8).
 - **Operand growth**: `add_op_slot` grows like `PHINode::growOperands` via `grow_ops`, which reproduces
   `growHungoffUses`' use-list effect. Switch (`3n`) and indirectbr (`2n`) growth must call `grow_ops` with their
   own capacity first.
@@ -78,3 +80,28 @@
   importing tests. `; Unknown intrinsic` comments aren't printed yet.
 - **DataLayout inference** only knows x86 triples; other triples fail loudly.
 - No verifier yet.
+
+## Pass infrastructure (L1.dce)
+
+- Files: `passmgr.goose` (pipeline + dispatch), `flags.goose` (cl::opt, errs, value printing for printers),
+  `irutil.goose` (CFG, mutation, scratch sets), `instinfo.goose` (instruction/call properties), `domtree.goose`,
+  `anaprint.goose`, `tli.goose` + `gen_tli.goose` (`tools/gen_tli.py`), `local.goose` (Local.cpp dead predicates),
+  `knownbits.goose`, `demandedbits.goose`, `dce.goose`, `adce.goose`, `bdce.goose`, `gen_passes.goose`
+  (`tools/gen_passes.py`), `gen_iids.goose` (`tools/gen_iids.py`, reads `gen_intrinsics.goose`: rerun it when that
+  file is regenerated).
+- Goose trap: `a[f()]` where `f` grows `a` reads `a`'s bounds before `f` runs ("index out of bounds (length 0)").
+  Compute the index into a local first. domtree.goose grows its tables in `dt_compute` only for this reason.
+- Goose trap: mutually recursive functions all need `recursive fn`, including the entry of the cycle as seen from
+  outside (parse_module_list, not only parse_module_elem).
+- Goose trap: a `const u8[:][]` parameter can't take a literal list; declare it `const u8[:][:]`.
+- `pad` is a keyword (also as a local name).
+- TLI supports Linux and generic (no OS) triples; Darwin/Windows/BSD/GPU triples fail loudly in `tli_init`.
+- computeKnownBits is a partial port that fails loudly (`not ported`): PHIs, select arms refined by the
+  condition, assumptions, pointers, division, abs/saturating/reduction intrinsics, freeze, and dominating-condition
+  reasoning are missing. Integers > 64 bits fail loudly in KnownBits and DemandedBits.
+- Not ported in ADCE/BDCE/DCE: debug-info liveness/salvaging (no debug records yet), `--enable-knowledge-retention`
+  (salvageKnowledge), incremental (post)dominator updates (trees are recomputed; ADCE also calls
+  `updateDFSNumbers` on the PDT, which only shows if a later printer prints DFS numbers).
+- `print<demanded-bits>` prints in instruction order; LLVM's order is a DenseMap's, the test compares sorted lines.
+- L1.dce can't be COMPLETE on its own: its exit selector includes tests whose pipelines need simplifycfg, sroa, gvn,
+  licm, instcombine, debugify, redundant-dbg-inst-elim, and `--preserve-ll-uselistorder`, plus debug-info parsing.

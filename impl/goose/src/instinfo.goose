@@ -312,3 +312,22 @@ fn drop_poison_generating_annotations(iv: i32) {
     for nm in names { inst_erase_md(iv, md_kind_id(nm)); }
     drop_poison_generating_attributes(iv);
 }
+
+// Instruction::setMetadata(KindID, Node): attachments stay sorted by kind; a new run is appended to md_att.
+fn inst_set_md(iv: i32, kind: i32, node: i32) {
+    let ii = inst_of(iv);
+    let at = insts[ii].md;
+    let n = insts[ii].nmd;
+    for k in n { if md_att[at + 2 * k] == kind { md_att[at + 2 * k + 1] = node; return; } }
+    let nat = md_att.len as i32;
+    var placed = false;
+    for k in n {
+        let kk = md_att[at + 2 * k];
+        if !placed && kk > kind { md_att.push(kind); md_att.push(node); placed = true; }
+        md_att.push(kk);
+        md_att.push(md_att[at + 2 * k + 1]);
+    }
+    if !placed { md_att.push(kind); md_att.push(node); }
+    insts[ii].md = nat;
+    insts[ii].nmd = n + 1;
+}
