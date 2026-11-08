@@ -1695,6 +1695,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/range-signedness.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/range-signedness.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/range_nw_flag.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/range_nw_flag.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/ranges.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/ranges.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/returned.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/returned.ll::roundtrip
@@ -1704,6 +1705,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/saturating-intrinsics.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/saturating-intrinsics.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/scalable-vector.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/scalable-vector.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/scev-aa.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/scev-aa.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/scev-canonical-mode.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/scev-dispositions.ll::analysis
@@ -1813,6 +1815,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/trip-count9.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/trip-count9.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/trip-multiple-guard-info.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/trip-multiple-guard-info.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/trip-multiple.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/trip-multiple.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/tripmultiple_calculation.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/tripmultiple_calculation.ll::roundtrip

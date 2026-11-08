@@ -392,7 +392,7 @@ is_writable_object :: (obj: Value_Id) -> (bool, bool) {
 
 // ---------------------------------------------------------------- AAResults and AAQueryInfo
 
-Aa_Kind :: enum u8 { BASIC; SCOPED_NOALIAS; TBAA; GLOBALS; }
+Aa_Kind :: enum u8 { BASIC; SCOPED_NOALIAS; TBAA; GLOBALS; SCEV; }
 
 // -aa-pipeline (opt's NewPMDriver; "default" = buildDefaultAAPipeline)
 aa_pipeline: struct {
@@ -412,7 +412,8 @@ aa_parse_pipeline :: (text: string) {
         else if name == "scoped-noalias-aa" array_add(*aa_pipeline.kinds, .SCOPED_NOALIAS);
         else if name == "tbaa" array_add(*aa_pipeline.kinds, .TBAA);
         else if name == "globals-aa" array_add(*aa_pipeline.kinds, .GLOBALS);
-        else if name == "scev-aa" || name == "objc-arc-aa" fatal("-aa-pipeline: % is not implemented yet", name);
+        else if name == "scev-aa" array_add(*aa_pipeline.kinds, .SCEV);
+        else if name == "objc-arc-aa" fatal("-aa-pipeline: % is not implemented yet", name);
         else fatal("unknown alias analysis name '%'", name);
     }
 }
@@ -420,8 +421,9 @@ aa_parse_pipeline :: (text: string) {
 // AAResults for one function (AAManager::run): the registered analyses, plus BasicAA's inputs.
 Aa_Results :: struct {
     f: Value_Id;
-    kinds: [4] Aa_Kind;
+    kinds: [5] Aa_Kind;
     nkinds: s32;
+    se: *Scev_State;          // SCEVAA's ScalarEvolution (scev_aa.jai)
     dt: *Dom_Tree;            // BasicAA's DominatorTree (BasicAA::run always requests it)
     ac: *Assumption_Cache;
     tbaa_enabled: bool;       // EnableTBAA && !sanitize_type
@@ -439,9 +441,12 @@ aa_results_for :: (f: Value_Id) -> Aa_Results {
     } else {
         for aa_pipeline.kinds if it != .GLOBALS || globals_aa != null add(*r, it);
     }
-    for k: 0..r.nkinds-1 if r.kinds[k] == .BASIC {
-        r.ac = get_assumption_cache(f);
-        r.dt = get_domtree(f);
+    for k: 0..r.nkinds-1 {
+        if r.kinds[k] == .BASIC {
+            r.ac = get_assumption_cache(f);
+            r.dt = get_domtree(f);
+        }
+        if r.kinds[k] == .SCEV r.se = get_scev(f);   // SCEVAA::run: AM.getResult<ScalarEvolutionAnalysis>(F)
     }
     r.tbaa_enabled = !fn_has_fn_attr(f, .SanitizeType);
     if !use_deref_at_point_semantics fatal("-use-dereferenceable-at-point-semantics=false is not supported");
@@ -564,6 +569,7 @@ aa_alias :: (q: *Aa_Query, a: Mem_Loc, b: Mem_Loc, ctx: Value_Id = NONE) -> Alia
             case .SCOPED_NOALIAS; result = scoped_noalias_alias(a, b);
             case .TBAA; result = tbaa_alias(q.aar, a, b);
             case .GLOBALS; result = globals_aa_alias(q, a, b, ctx);
+            case .SCEV; result = scev_aa_alias(q, a, b);
         }
         if result.kind != AR_MAY break;
     }

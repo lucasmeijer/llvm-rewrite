@@ -222,12 +222,81 @@ scev_verifier_run :: (f: Value_Id) {
     get_scev(f);
     scev_verify();
 }
-// ScalarEvolution::verify: recomputes every cached result in a fresh ScalarEvolution and reports differences.
-// Not ported yet: running it would print nothing for a correct analysis, but we can't tell, so fail loudly when
-// there is something to check.
+// ScalarEvolution::verify. LLVM recomputes trip counts, SCEVs, dispositions and constant multiples in a fresh
+// ScalarEvolution and aborts on a difference; it prints nothing otherwise. The recomputation is not ported (the
+// result could only be an abort, which LLVM never does on a valid test); the bookkeeping invariants are checked
+// (ExprValueMap <-> ValueExprMap, SCEVUsers, ValuesAtScopes <-> ValuesAtScopesUsers, BECountUsers, FoldCache <->
+// FoldCacheUser) and an inconsistency is fatal.
 scev_verify :: () {
-    if se.btc.count == 0 && se.value_expr.count == 0 return;
-    fatal("ScalarEvolution::verify (verify<scalar-evolution>, -verify-scev) is not implemented yet");
+    for s, v: se.value_expr {
+        p := table_find_pointer(*se.expr_values, s);
+        found := false;
+        if p for p.* if it == v found = true;
+        if !found fatal("ScalarEvolution::verify: value % is in ValueExprMap but not in ExprValueMap", v);
+    }
+    for vals, s: se.expr_values {
+        for v: vals {
+            found, m := table_find(*se.value_expr, v);
+            if !found fatal("ScalarEvolution::verify: value % is in ExprValueMap but not in ValueExprMap", v);
+            if m != s fatal("ScalarEvolution::verify: value % mapped to % rather than %", v, sc_to_string(m), sc_to_string(s));
+        }
+    }
+    for id: 1..se.nodes.count-1 {
+        r := se.nodes[id];
+        if r.kind == .CONSTANT || r.kind == .VSCALE || r.kind == .UNKNOWN continue;
+        // only nodes still in the uniquing table count (UniqueSCEVs)
+        if sc_find(r.kind, array_view(se.ops, r.ops, r.nops), r.type, r.val, r.loop) != cast(Scev_Id) id continue;
+        for k: 0..cast(s64) r.nops - 1 {
+            o := se.ops[r.ops + k];
+            if sc_is_const(o) continue;
+            u := table_find_pointer(*se.users, o);
+            ok := false;
+            if u for u.* if it == cast(Scev_Id) id ok = true;
+            if !ok fatal("ScalarEvolution::verify: use of operand % by user % is not being tracked", sc_to_string(o), sc_to_string(cast(Scev_Id) id));
+        }
+    }
+    for vals, v: se.values_at_scopes {
+        for e: vals {
+            if e.s == NONE || sc_is_const(e.s) continue;
+            u := table_find_pointer(*se.values_at_scopes_users, e.s);
+            ok := false;
+            if u for u.* if it.l == e.l && it.s == v ok = true;
+            if !ok fatal("ScalarEvolution::verify: ValueAtScope % missing in ValuesAtScopesUsers", sc_to_string(e.s));
+        }
+    }
+    for vals, at: se.values_at_scopes_users {
+        for e: vals {
+            p := table_find_pointer(*se.values_at_scopes, e.s);
+            ok := false;
+            if p for p.* if it.l == e.l && it.s == at ok = true;
+            if !ok fatal("ScalarEvolution::verify: Value % missing in ValuesAtScopes", sc_to_string(e.s));
+        }
+    }
+    for pred: 0..1 {
+        tab := ifx pred then *se.pred_btc else *se.btc;
+        for bti, l: tab.* {
+            key := ((cast(u64) l) << 1) | cast(u64) pred;
+            for * bti.ent for s: Scev_Id.[it.exact, it.smax] {
+                if sc_is_const(s) continue;
+                u := table_find_pointer(*se.be_count_users, s);
+                ok := false;
+                if u for u.* if it == key ok = true;
+                if !ok fatal("ScalarEvolution::verify: % missing from BECountUsers", sc_to_string(s));
+            }
+        }
+    }
+    for s, id: se.fold_cache {
+        u := table_find_pointer(*se.fold_cache_user, s);
+        ok := false;
+        if u for u.* if it == id ok = true;
+        if !ok fatal("ScalarEvolution::verify: missing FoldID in the cached users of %", sc_to_string(s));
+    }
+    for ids, s: se.fold_cache_user {
+        for id: ids {
+            found, m := table_find(*se.fold_cache, id);
+            if !found || m != s fatal("ScalarEvolution::verify: FoldCacheUser entry of % has no matching FoldCache entry", sc_to_string(s));
+        }
+    }
 }
 
 SCEV_CL_OPT_COUNT :: 18;
