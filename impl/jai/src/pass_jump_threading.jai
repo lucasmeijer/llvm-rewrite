@@ -5,7 +5,8 @@
 // scan position, findAvailablePtrLoadStore) and Constant::removeDeadConstantUsers.
 //
 // The DomTreeUpdater is the lazy one (scfg_util.jai `Dtu` with `lazy`). BlockFrequencyInfo / BranchProbabilityInfo
-// are not ported: threading a block whose terminator has branch weights (where LLVM computes them) fails loudly.
+// (block_freq.jai, branch_prob.jai) are created and kept up to date exactly where LLVM does (getOrCreateBFI /
+// runExternalAnalysis).
 
 jt_cl: struct {
     bb_duplicate_threshold: s64 = -1;     // -jump-threading-threshold (-1 = not given; LLVM's default 6)
@@ -36,6 +37,9 @@ Jt :: struct {
     loop_headers: Table(Value_Id, bool);
     has_guards: bool;
     bb_dup_threshold: u32;
+    bpi: *Bpi;
+    bfi: *Bfi;
+    changed_since_last_analysis_update: bool;
 }
 
 // ---------------------------------------------------------------- small helpers
@@ -445,13 +449,13 @@ jt_run_impl :: (j: *Jt) -> bool {
         while bb != NONE {
             defer bb = block(bb).next;
             if table_contains(*j.unreachable, bb) continue;
-            while jt_process_block(j, bb) changed = true;
+            while jt_process_block(j, bb) { changed = true; j.changed_since_last_analysis_update = true; }
             if bb == fn_entry(f) || dtu_is_bb_pending_deletion(*j.dtu, bb) continue;
             if jt_preds(bb).count == 0 {
                 table_remove(*j.loop_headers, bb);
                 lvi_erase_block(j.lvi, bb);
                 delete_dead_block(bb, *j.dtu);
-                changed = true;
+                changed = true; j.changed_since_last_analysis_update = true;
                 continue;
             }
             t := block_terminator(bb);
@@ -461,7 +465,7 @@ jt_run_impl :: (j: *Jt) -> bool {
                 if fi != NONE && is_terminator(inst_op(fi)) && !table_contains(*j.loop_headers, bb) && !table_contains(*j.loop_headers, succ) &&
                    try_to_simplify_uncond_branch_from_empty_block(bb, *j.dtu) {
                     lvi_erase_block(j.lvi, bb);
-                    changed = true;
+                    changed = true; j.changed_since_last_analysis_update = true;
                 }
             }
         }
@@ -534,6 +538,7 @@ jt_process_block :: (j: *Jt, bb: Value_Id) -> bool {
 
     if jt_get_known_constant(condition, pref) != NONE {
         constant_fold_terminator(bb, true, *j.dtu);
+        bpi := jt_get_bpi(j); if bpi bpi_erase_block(bpi, bb);
         return true;
     }
 
@@ -646,6 +651,7 @@ jt_process_implied_condition :: (j: *Jt, bb: Value_Id) -> bool {
             jt_erase_terminator(bi);
             if fi_cond != NONE erase_inst_with_metadata(fi_cond);
             dtu_apply_permissive(*j.dtu, .[.{false, bb, remove_succ}]);
+            bpi := jt_get_bpi(j); if bpi bpi_erase_block(bpi, bb);
             return true;
         }
         current_bb = current_pred;
@@ -933,6 +939,7 @@ jt_process_threadable_edges :: (j: *Jt, cond: Value_Id, bb: Value_Id, pref: Jt_P
             jt_br_before(only_dest, t);
             jt_erase_terminator(t);
             dtu_apply_permissive(*j.dtu, updates);
+            bpi := jt_get_bpi(j); if bpi bpi_erase_block(bpi, bb);
             if is_inst(cond) {
                 if !has_uses(cond) && !may_have_side_effects(cond) erase_inst_with_metadata(cond);
                 else if only_val != NONE && only_val != MULTIPLE jt_replace_foldable_uses(cond, only_val, bb);
@@ -1353,22 +1360,81 @@ jt_does_block_have_profile_data :: (bb: Value_Id) -> bool {
     if t == NONE || num_successors(t) < 2 return false;
     return prof_valid_branch_weight_md(t) != NONE;
 }
-// getOrCreateBFI(HasProfile) / getOrCreateBPI: BlockFrequencyInfo is not ported
-jt_check_no_bfi :: (bb: Value_Id) {
-    if jt_does_block_have_profile_data(bb)
-        fatal("jump-threading: threading a block with branch weights needs BlockFrequencyInfo/BranchProbabilityInfo, which are not implemented yet");
+// getBPI / getBFI: the pass's own or the cached results
+jt_get_bpi :: (j: *Jt) -> *Bpi { if !j.bpi j.bpi = cached_bpi(j.f); return j.bpi; }
+jt_get_bfi :: (j: *Jt) -> *Bfi { if !j.bfi j.bfi = cached_bfi(j.f); return j.bfi; }
+// runExternalAnalysis<AnalysisT>: invalidate what the pass does not keep up to date, flush the DomTreeUpdater, then
+// compute the analysis (and re-fetch AA, TTI, TLI)
+jt_run_external_analysis :: (j: *Jt, want_bfi: bool) {
+    if j.changed_since_last_analysis_update {
+        j.changed_since_last_analysis_update = false;
+        pa: Preserved;
+        preserve(*pa, .LVI); preserve(*pa, .DOMTREE); preserve(*pa, .BPI); preserve(*pa, .BFI);
+        preserve(*pa, .ASSUMPTIONS);   // AssumptionCache::invalidate never invalidates
+        fam_invalidate(j.f, pa);
+        dtu_flush(*j.dtu);
+    }
+    if want_bfi j.bfi = get_bfi(j.f); else j.bpi = get_bpi(j.f);
+    j.aar = aa_results_for(j.f);
+}
+// getOrCreateBPI(Force) / getOrCreateBFI(Force)
+jt_get_or_create_bpi :: (j: *Jt, force: bool) -> *Bpi {
+    r := jt_get_bpi(j);
+    if r return r;
+    if force jt_run_external_analysis(j, false);
+    return j.bpi;
+}
+jt_get_or_create_bfi :: (j: *Jt, force: bool) -> *Bfi {
+    r := jt_get_bfi(j);
+    if r return r;
+    if force jt_run_external_analysis(j, true);
+    return j.bfi;
+}
+
+// updateBlockFreqAndEdgeWeight
+jt_update_block_freq_and_edge_weight :: (j: *Jt, pred_bb: Value_Id, bb: Value_Id, new_bb: Value_Id, succ_bb: Value_Id, bfi: *Bfi, bpi: *Bpi, has_profile: bool) {
+    if !bfi return;
+    bb_orig_freq := bfi_get_block_freq(bfi, bb);
+    new_bb_freq := bfi_get_block_freq(bfi, new_bb);
+    bfi_set_block_freq(bfi, bb, bf_sub(bb_orig_freq, new_bb_freq));
+    succ_freq: [..] u64; succ_freq.allocator = temp;
+    succs: [..] Value_Id; succs.allocator = temp;
+    block_successors(bb, *succs);
+    for s: succs {
+        bb2succ := bf_mul_prob(bb_orig_freq, bpi_edge_probability_idx(bpi, bb, cast(u32) it_index));
+        f := ifx s == succ_bb then bf_sub(bb2succ, new_bb_freq) else bb2succ;
+        array_add(*succ_freq, f);
+    }
+    mx: u64 = 0;
+    for succ_freq if it > mx mx = it;
+    probs: [..] u32; probs.allocator = temp;
+    if mx == 0 {
+        for succ_freq array_add(*probs, bp_make(1, cast(u64) succ_freq.count));
+    } else {
+        for succ_freq array_add(*probs, bp_get(it, mx));
+        bp_normalize(probs);
+    }
+    bpi_set_edge_probability(bpi, bb, probs);
+    if probs.count >= 2 && has_profile {
+        t := block_terminator(bb);
+        prof_set_branch_weights(t, probs, prof_has_branch_weight_origin(prof_md(t)));
+    }
 }
 
 // threadThroughTwoBasicBlocks
 jt_thread_through_two_basic_blocks :: (j: *Jt, pred_pred_bb: Value_Id, pred_bb: Value_Id, bb: Value_Id, succ_bb: Value_Id) {
-    jt_check_no_bfi(bb);
+    has_profile := jt_does_block_have_profile_data(bb);
+    bfi := jt_get_or_create_bfi(j, has_profile);
+    bpi := jt_get_or_create_bpi(j, bfi != null);
     cond_br := block_terminator(bb);
     pred_bb_branch := block_terminator(pred_bb);
     f := block_fn(pred_bb);
     new_bb := create_block(f, tprint("%.thread", vname(pred_bb)), pred_bb);
     jt_move_block_after(new_bb, pred_bb);
+    if bfi bfi_set_block_freq(bfi, new_bb, bf_mul_prob(bfi_get_block_freq(bfi, pred_pred_bb), bpi_edge_probability(bpi, pred_pred_bb, pred_bb)));
     vm: Table(Value_Id, Value_Id); vm.allocator = temp;
     jt_clone_instructions(*vm, block_first(pred_bb), NONE, new_bb, pred_pred_bb);
+    if bpi bpi_copy_edge_probabilities(bpi, pred_bb, new_bb);
     pred_pred_term := block_terminator(pred_pred_bb);
     n := num_successors(pred_pred_term);
     for k: 0..cast(s64) n - 1 if get_successor(pred_pred_term, cast(u32) k) == pred_bb {
@@ -1399,7 +1465,9 @@ jt_try_thread_edge :: (j: *Jt, bb: Value_Id, pred_bbs: [] Value_Id, succ_bb: Val
 
 // threadEdge
 jt_thread_edge :: (j: *Jt, bb: Value_Id, pred_bbs: [] Value_Id, succ_bb: Value_Id) {
-    jt_check_no_bfi(bb);
+    has_profile := jt_does_block_have_profile_data(bb);
+    bfi := jt_get_or_create_bfi(j, has_profile);
+    bpi := jt_get_or_create_bpi(j, bfi != null);
     pred_bb: Value_Id;
     if pred_bbs.count == 1 pred_bb = pred_bbs[0];
     else pred_bb = jt_split_block_preds(j, bb, pred_bbs, ".thr_comm");
@@ -1407,6 +1475,7 @@ jt_thread_edge :: (j: *Jt, bb: Value_Id, pred_bbs: [] Value_Id, succ_bb: Value_I
     f := block_fn(bb);
     new_bb := create_block(f, tprint("%.thread", vname(bb)), bb);
     jt_move_block_after(new_bb, pred_bb);
+    if bfi bfi_set_block_freq(bfi, new_bb, bf_mul_prob(bfi_get_block_freq(bfi, pred_bb), bpi_edge_probability(bpi, pred_bb, bb)));
     vm: Table(Value_Id, Value_Id); vm.allocator = temp;
     jt_clone_instructions(*vm, block_first(bb), block_terminator(bb), new_bb, pred_bb);
     new_bi := create_br(succ_bb);
@@ -1424,11 +1493,18 @@ jt_thread_edge :: (j: *Jt, bb: Value_Id, pred_bbs: [] Value_Id, succ_bb: Value_I
     dtu_apply_permissive(*j.dtu, ups);
     jt_update_ssa(bb, new_bb, *vm);
     simplify_instructions_in_block(new_bb);
+    jt_update_block_freq_and_edge_weight(j, pred_bb, bb, new_bb, succ_bb, bfi, bpi, has_profile);
 }
 
 // splitBlockPreds
 jt_split_block_preds :: (j: *Jt, bb: Value_Id, preds: [] Value_Id, suffix: string) -> Value_Id {
     new_bbs: [..] Value_Id; new_bbs.allocator = temp;
+    freq_map: Table(Value_Id, u64); freq_map.allocator = temp;
+    bfi := jt_get_bfi(j);
+    if bfi {
+        bpi := jt_get_or_create_bpi(j, true);
+        for p: preds if !table_contains(*freq_map, p) table_set(*freq_map, p, bf_mul_prob(bfi_get_block_freq(bfi, p), bpi_edge_probability(bpi, p, bb)));
+    }
     if block_is_landing_pad(bb) {
         split_landing_pad_predecessors(bb, preds, suffix, tprint("%.split-lp", suffix), *new_bbs, null, null, null, false);
     } else {
@@ -1436,11 +1512,14 @@ jt_split_block_preds :: (j: *Jt, bb: Value_Id, preds: [] Value_Id, suffix: strin
     }
     updates: [..] Dom_Update; updates.allocator = temp;
     for nb: new_bbs {
+        new_bb_freq: u64 = 0;
         array_add(*updates, .{true, nb, bb});
         for p: jt_preds(nb) {
             array_add(*updates, .{false, p, bb});
             array_add(*updates, .{true, p, nb});
+            if bfi { _, pf := table_find(*freq_map, p); new_bb_freq = bf_add(new_bb_freq, pf); }
         }
+        if bfi bfi_set_block_freq(bfi, nb, new_bb_freq);
     }
     dtu_apply_permissive(*j.dtu, updates);
     return new_bbs[0];
@@ -1538,6 +1617,7 @@ jt_duplicate_cond_branch_on_phi_into_pred :: (j: *Jt, bb: Value_Id, pred_bbs: []
     // the cloned terminator is the last clone; the old branch's remaining records stay on it as trailing records
     // of PredBB, which the cloned terminator (inserted before it) absorbed already
     jt_erase_terminator_keep_records(old_pred_branch);
+    bpi := jt_get_bpi(j); if bpi bpi_copy_edge_probabilities(bpi, bb, pred_bb);
     dtu_apply_permissive(*j.dtu, updates);
     return true;
 }
@@ -1662,6 +1742,18 @@ jt_unfold_select_instr :: (j: *Jt, pred: Value_Id, bb: Value_Id, si: Value_Id, s
     if prof != NONE set_metadata(bi, md_kind_id("prof"), prof);
     phi_set_value(si_use, idx, op(si, 2));
     phi_add_incoming(si_use, op(si, 1), new_bb);
+    tw: u64 = 1; fw: u64 = 1;
+    okw, etw, efw := prof_extract_branch_weights_2(si);
+    if okw { tw = etw; fw = efw; }
+    if okw && tw + fw != 0 {
+        bpi := jt_get_bpi(j);
+        if bpi bpi_set_edge_probability(bpi, pred, .[bp_get(tw, tw + fw), bp_get(fw, tw + fw)]);
+    }
+    bfi := jt_get_bfi(j);
+    if bfi {
+        if tw + fw == 0 { tw = 1; fw = 1; }
+        bfi_set_block_freq(bfi, new_bb, bf_mul_prob(bfi_get_block_freq(bfi, pred), bp_get(tw, tw + fw)));
+    }
     erase_inst_with_metadata(si);
     dtu_apply_permissive(*j.dtu, .[.{true, new_bb, bb}, .{true, pred, new_bb}]);
     for phi: block_insts(bb) {
@@ -1752,7 +1844,6 @@ jt_try_to_unfold_select_in_curr_bb :: (j: *Jt, bb: Value_Id) -> bool {
         }
         branch_weights := prof_md(si);
         if branch_weights != NONE && !prof_is_branch_weight_md(branch_weights) branch_weights = NONE;   // getBranchWeightMDNode
-        if branch_weights != NONE && jt_bfi_or_bpi_cached() fatal("jump-threading: updating BlockFrequencyInfo is not implemented yet");
         term := jt_split_block_and_insert_if_then(cond, si, branch_weights);
         split_bb := inst_block(si);
         new_bb := inst_block(term);
@@ -1762,6 +1853,21 @@ jt_try_to_unfold_select_in_curr_bb :: (j: *Jt, bb: Value_Id) -> bool {
         phi_add_incoming(new_pn, op(si, 2), bb);
         set_metadata(new_pn, 0, get_metadata(si, 0));
         rauw_with_metadata(si, new_pn);
+        bpi := jt_get_bpi(j);
+        bfi := jt_get_bfi(j);
+        if branch_weights != NONE {   // !ProfcheckDisableMetadataFixes
+            bw := prof_weights_of_md(branch_weights);
+            denom: u64 = 0;
+            for bw denom += cast(u64) cast,no_check(u32) it;
+            true_prob := bp_get(cast(u64) cast,no_check(u32) bw[0], denom);
+            false_prob := bp_get(cast(u64) cast,no_check(u32) bw[1], denom);
+            if bpi bpi_set_edge_probability(bpi, bb, .[true_prob, false_prob]);
+            if bfi {
+                bb_orig := bfi_get_block_freq(bfi, bb);
+                bfi_set_block_freq(bfi, new_bb, bf_mul_prob(bb_orig, true_prob));
+                bfi_set_block_freq(bfi, split_bb, bb_orig);
+            }
+        }
         erase_inst_with_metadata(si);
         updates: [..] Dom_Update; updates.allocator = temp;
         array_add(*updates, .{true, bb, split_bb});
@@ -1778,7 +1884,6 @@ jt_try_to_unfold_select_in_curr_bb :: (j: *Jt, bb: Value_Id) -> bool {
     }
     return false;
 }
-jt_bfi_or_bpi_cached :: () -> bool { return false; }   // no BranchProbabilityInfo / BlockFrequencyInfo results exist here
 
 // SplitBlockAndInsertIfThen(Cond, SplitBefore, Unreachable = false, BranchWeights, DTU = nullptr): the new
 // block's terminator

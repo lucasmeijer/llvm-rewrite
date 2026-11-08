@@ -11,8 +11,8 @@
 
 // ---------------------------------------------------------------- analyses
 
-Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; SCEV; LVI; }
-ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles", "scalar-evolution", "lazy-value-info"];
+Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; SCEV; LVI; BPI; BFI; }
+ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles", "scalar-evolution", "lazy-value-info", "branch-prob", "block-freq"];
 
 // PreservedAnalyses. `cfg` = preserveSet<CFGAnalyses>().
 Preserved :: struct {
@@ -29,7 +29,7 @@ is_preserved :: (pa: Preserved, k: Analysis_Kind) -> bool { return pa.all || (pa
 // Whether a cached result survives (Result::invalidate). DominatorTree/PostDominatorTree are CFG analyses.
 analysis_survives :: (k: Analysis_Kind, pa: Preserved) -> bool {
     if is_preserved(pa, k) return true;
-    if k == .DOMTREE || k == .POSTDOMTREE || k == .LOOPS || k == .CYCLES return pa.cfg;
+    if k == .DOMTREE || k == .POSTDOMTREE || k == .LOOPS || k == .CYCLES || k == .BPI || k == .BFI return pa.cfg;
     return false;
 }
 
@@ -44,6 +44,8 @@ Fn_Analyses :: struct {
     ci: *Cycle_Info;
     se: *Scev_State;   // ScalarEvolution (scev_print.jai get_scev)
     lvi: *Lvi;         // LazyValueInfo (lazy_value_info.jai)
+    bpi: *Bpi;         // BranchProbabilityInfo (branch_prob.jai)
+    bfi: *Bfi;         // BlockFrequencyInfo (block_freq.jai)
 }
 fam: Table(Value_Id, Fn_Analyses);
 
@@ -133,6 +135,33 @@ get_lvi :: (f: Value_Id) -> *Lvi {
     }
     return e.lvi;
 }
+// AM.getResult<BranchProbabilityAnalysis>(F): LoopAnalysis, TargetLibraryAnalysis, DominatorTree, PostDominatorTree
+get_bpi :: (f: Value_Id) -> *Bpi {
+    e := fam_entry(f);
+    if !e.bpi {
+        li := get_loop_info(f);
+        dt := get_domtree(f);
+        pdt := get_postdomtree(f);
+        b := bpi_calculate(f, li, dt, pdt);
+        e = fam_entry(f);
+        e.bpi = b;
+    }
+    return e.bpi;
+}
+cached_bpi :: (f: Value_Id) -> *Bpi { e := table_find_pointer(*fam, f); if e return e.bpi; return null; }
+// AM.getResult<BlockFrequencyAnalysis>(F): BranchProbabilityAnalysis, LoopAnalysis
+get_bfi :: (f: Value_Id) -> *Bfi {
+    e := fam_entry(f);
+    if !e.bfi {
+        bpi := get_bpi(f);
+        li := get_loop_info(f);
+        b := bfi_calculate(f, bpi, li);
+        e = fam_entry(f);
+        e.bfi = b;
+    }
+    return e.bfi;
+}
+cached_bfi :: (f: Value_Id) -> *Bfi { e := table_find_pointer(*fam, f); if e return e.bfi; return null; }
 cached_lvi :: (f: Value_Id) -> *Lvi { e := table_find_pointer(*fam, f); if e return e.lvi; return null; }
 cached_assumption_cache :: (f: Value_Id) -> *Assumption_Cache { e := table_find_pointer(*fam, f); if e return e.ac; return null; }
 
@@ -152,7 +181,9 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     if e.dt && !analysis_survives(.DOMTREE, pa) { dt_free(e.dt); e.dt = null; }
     if e.pdt && !analysis_survives(.POSTDOMTREE, pa) { dt_free(e.pdt); e.pdt = null; }
     if e.db && !analysis_survives(.DEMANDED_BITS, pa) { db_free(e.db); e.db = null; }
-    if e.ac && !analysis_survives(.ASSUMPTIONS, pa) { ac_free(e.ac); e.ac = null; }
+    // AssumptionCache::invalidate never invalidates in LLVM; here it is rebuilt, except while a surviving LazyValueInfo
+    // holds it (LVI keeps using the same, possibly stale, cache: its affected-value lists are not rescanned)
+    if e.ac && !analysis_survives(.ASSUMPTIONS, pa) && !(e.lvi && analysis_survives(.LVI, pa)) { ac_free(e.ac); e.ac = null; }
     if e.li && !analysis_survives(.LOOPS, pa) { li_free(e.li); e.li = null; }
     if e.ci && !analysis_survives(.CYCLES, pa) { ci_free(e.ci); e.ci = null; }
     // a DemandedBits result points at the DominatorTree it was built with
@@ -164,6 +195,8 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     // LazyValueInfo::invalidate: only when not preserved (it holds the never-invalidated AssumptionCache)
     if e.lvi && !analysis_survives(.LVI, pa) { lvi_free(e.lvi); e.lvi = null; }
     if e.lvi && !e.ac { e.ac = ac_build(f); e.lvi.ac = e.ac; }
+    if e.bpi && !analysis_survives(.BPI, pa) { bpi_free(e.bpi); e.bpi = null; }
+    if e.bfi && !analysis_survives(.BFI, pa) { bfi_free(e.bfi); e.bfi = null; }
     // MemorySSAAnalysis::Result::invalidate: preserved, and AAManager and DominatorTreeAnalysis survive. AAManager
     // depends on BasicAA's AssumptionCache (never invalidated in LLVM: rebuilt here and re-pointed) and DT, and on
     // SCEVAA's ScalarEvolution.
@@ -182,6 +215,8 @@ fam_require :: (f: Value_Id, k: Analysis_Kind) {
         case .CYCLES; get_cycle_info(f);
         case .SCEV; get_scev(f);
         case .LVI; get_lvi(f);
+        case .BPI; get_bpi(f);
+        case .BFI; get_bfi(f);
     }
 }
 fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
@@ -223,6 +258,8 @@ Pass_Kind :: enum u8 {
     DSE; MEMCPYOPT;
     // LazyValueInfo (lazy_value_info.jai), CorrelatedValuePropagation (pass_cvp.jai), JumpThreading (pass_jump_threading.jai)
     PRINT_LVI; CVP; JUMP_THREADING;
+    // BranchProbabilityInfo (branch_prob.jai), BlockFrequencyInfo (block_freq.jai)
+    PRINT_BPI; PRINT_BFI;
 }
 
 Pass_Info :: struct {
@@ -318,6 +355,12 @@ PASS_TABLE :: Pass_Info.[
     .{"invalidate<lazy-value-info>", .FUNCTION, .INVALIDATE, true, .LVI},
     .{"correlated-propagation", .FUNCTION, .CVP, false, .DOMTREE},
     .{"jump-threading", .FUNCTION, .JUMP_THREADING, false, .DOMTREE},
+    .{"print<branch-prob>", .FUNCTION, .PRINT_BPI, true, .BPI},
+    .{"require<branch-prob>", .FUNCTION, .REQUIRE, true, .BPI},
+    .{"invalidate<branch-prob>", .FUNCTION, .INVALIDATE, true, .BPI},
+    .{"print<block-freq>", .FUNCTION, .PRINT_BFI, true, .BFI},
+    .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
+    .{"invalidate<block-freq>", .FUNCTION, .INVALIDATE, true, .BFI},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -805,6 +848,8 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .PRINT_LVI; return print_lazy_value_info_run(f);
         case .CVP; return cvp_run(f);
         case .JUMP_THREADING; return jump_threading_run(f);
+        case .PRINT_BPI; return print_branch_prob_run(f);
+        case .PRINT_BFI; return print_block_freq_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

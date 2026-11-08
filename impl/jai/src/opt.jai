@@ -81,6 +81,8 @@
 #load "lazy_value_info.jai";
 #load "pass_cvp.jai";
 #load "pass_jump_threading.jai";
+#load "branch_prob.jai";
+#load "block_freq.jai";
 #load "scev.jai";
 #load "scev_create.jai";
 #load "scev_range.jai";

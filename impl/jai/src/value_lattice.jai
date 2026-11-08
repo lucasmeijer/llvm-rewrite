@@ -222,11 +222,46 @@ vle_to_string :: (v: Vle) -> string {
         case .UNKNOWN; return "unknown";
         case .UNDEF; return "undef";
         case .OVERDEFINED; return "overdefined";
-        case .NOTCONSTANT; return tprint("notconstant<%>", value_as_operand_typed(v.c));
+        case .NOTCONSTANT; return tprint("notconstant<%>", value_print_isolated(v.c));
         case .CONSTANTRANGE_INCLUDING_UNDEF;
             return tprint("constantrange incl. undef <%, %>", ap_to_string_signed(v.r.lo), ap_to_string_signed(v.r.hi));
         case .CONSTANTRANGE;
             return tprint("constantrange<%, %>", ap_to_string_signed(v.r.lo), ap_to_string_signed(v.r.hi));
     }
-    return tprint("constant<%>", value_as_operand_typed(v.c));
+    return tprint("constant<%>", value_print_isolated(v.c));
+}
+
+// `OS << *V` (Value::print) with its own SlotTracker, also while another print is in progress (an annotation
+// writer): global variables and functions print their definition, other constants as typed operands. The AsmWriter
+// state is saved and restored around it.
+value_print_isolated :: (v: Value_Id) -> string {
+    k := vkind(v);
+    if k != .GLOBAL_VAR && k != .FUNCTION {
+        if is_inst(v) return printer_isolated_inst_to_string(v);
+        return value_as_operand_typed(v);
+    }
+    saved_w := W; saved_ps := print_state; saved_cf := current_function;
+    saved_ab := print_annot_block; saved_ai := print_annot_inst;
+    print_annot_block = null; print_annot_inst = null;
+    W = .{};
+    print_state = .{};
+    type_printing_init();
+    process_module();
+    print_state.module_ready = true;
+    print_state.dirty = false;
+    start := W.buf.count;
+    if k == .GLOBAL_VAR print_global(v); else print_function(v);
+    s := copy_string(slice_of_buf(start),, allocator = temp);
+    W = saved_w; print_state = saved_ps; current_function = saved_cf;
+    print_annot_block = saved_ab; print_annot_inst = saved_ai;
+    return s;
+}
+// `OS << *I` with its own SlotTracker while another print is in progress
+printer_isolated_inst_to_string :: (i: Value_Id) -> string {
+    saved_w := W; saved_ps := print_state; saved_cf := current_function;
+    W = .{};
+    print_state = .{};
+    s := inst_to_string(i);
+    W = saved_w; print_state = saved_ps; current_function = saved_cf;
+    return s;
 }

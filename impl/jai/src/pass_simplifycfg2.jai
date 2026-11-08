@@ -504,8 +504,7 @@ block_terminating_deoptimize_call :: (bb: Value_Id) -> Value_Id {
     t := block_terminator(bb);
     if t == NONE || inst_op(t) != .RET return NONE;
     p := inst_prev(t);
-    if p == NONE || call_iid(p) == NOT_INTRINSIC || iid_name(call_iid(p)) != "llvm.experimental.deoptimize" return NONE;
-    if nops(t) > 0 && op(t, 0) != p return NONE;
+    if p == NONE || inst_op(p) != .CALL || call_iid(p) != IID_EXPERIMENTAL_DEOPTIMIZE return NONE;
     return p;
 }
 

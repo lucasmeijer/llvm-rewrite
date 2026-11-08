@@ -1105,7 +1105,10 @@ lvi_annot_inst :: (i: Value_Id) {
         for printed.* if it == bb return;
         array_add(printed, bb);
         r := lvi_get_value_in_block(l, i, bb);
-        out("; LatticeVal for: '"); print_instruction(i); out("' in BB: '"); write_operand(bb, false);
+        out("; LatticeVal for: '");
+        if is_referencing_md_node(i) out(printer_isolated_inst_to_string(i));   // a fresh SlotTracker numbering all metadata
+        else print_instruction(i);
+        out("' in BB: '"); write_operand(bb, false);
         out("' is: "); out(vle_to_string(r)); out("\n");
     }
     print_result(l, i, parent, *printed);
