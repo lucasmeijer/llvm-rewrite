@@ -147,7 +147,27 @@ bt_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
         case "llvm.masked.urem"; #through; case "llvm.masked.srem";
             return bt_type_based_intrinsic_cost(t, ica, kind);
     }
-    if begins_with(n, "llvm.masked.") || n == "llvm.experimental.cttz.elts" || n == "llvm.modf" || n == "llvm.sincos" ||
+    if n == {
+        case "llvm.masked.scatter";
+            m: Mica; m.id = ica.id; m.data_ty = ica.tys[0]; m.ptr = args[1]; m.variable_mask = !is_constant_kind(vkind(args[2]));
+            m.align = max(call_param_align(i, 1), 1); m.inst = i;
+            m.addrspace = ptr_addrspace(vtype(args[1]));
+            return x86_mem_intrinsic_cost(t, *m, kind);
+        case "llvm.masked.gather";
+            m: Mica; m.id = ica.id; m.data_ty = ret; m.ptr = args[0]; m.variable_mask = !is_constant_kind(vkind(args[1]));
+            m.align = max(call_param_align(i, 0), 1); m.inst = i;
+            m.addrspace = ptr_addrspace(vtype(args[0]));
+            return x86_mem_intrinsic_cost(t, *m, kind);
+        case "llvm.masked.compressstore";
+            m: Mica; m.id = ica.id; m.data_ty = vtype(args[0]); m.variable_mask = !is_constant_kind(vkind(args[2]));
+            m.align = max(call_param_align(i, 1), 1); m.inst = i;
+            return x86_mem_intrinsic_cost(t, *m, kind);
+        case "llvm.masked.expandload";
+            m: Mica; m.id = ica.id; m.data_ty = ret; m.variable_mask = !is_constant_kind(vkind(args[1]));
+            m.align = max(call_param_align(i, 0), 1); m.inst = i;
+            return x86_mem_intrinsic_cost(t, *m, kind);
+    }
+    if n == "llvm.experimental.cttz.elts" || n == "llvm.modf" || n == "llvm.sincos" ||
        n == "llvm.sincospi" || begins_with(n, "llvm.loop.dependence")
         x86_np(tprint("getIntrinsicInstrCost of %", n));
     scal := COST_INVALID;
@@ -246,7 +266,12 @@ bt_type_based_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
         case "llvm.experimental.constrained.fmuladd"; isd = ISD_STRICT_FMA;
         case "llvm.lifetime.start"; #through; case "llvm.lifetime.end"; #through; case "llvm.sideeffect"; #through;
         case "llvm.pseudoprobe"; #through; case "llvm.arithmetic.fence"; return 0;
-        case "llvm.masked.store"; #through; case "llvm.masked.load"; #through;
+        case "llvm.masked.store";
+            m: Mica; m.id = ica.id; m.data_ty = tys[0]; m.align = dl_abi_align(tys[0]);
+            return x86_mem_intrinsic_cost(t, *m, kind);
+        case "llvm.masked.load";
+            m: Mica; m.id = ica.id; m.data_ty = ret; m.align = dl_abi_align(ret);
+            return x86_mem_intrinsic_cost(t, *m, kind);
         case "llvm.experimental.vp.strided.store"; #through; case "llvm.experimental.vp.strided.load";
             x86_np(tprint("getMemIntrinsicInstrCost of %", n));
         case "llvm.vector.reduce.add"; return x86_arithmetic_reduction_cost(t, .ADD, vec_op, false, 0, kind);

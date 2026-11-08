@@ -1052,6 +1052,7 @@ tests/imported/llvm/Analysis/CostModel/X86/insert-extract-at-zero-inseltpoison.l
 tests/imported/llvm/Analysis/CostModel/X86/insert-extract-at-zero-inseltpoison.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/insert-extract-at-zero.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/insert-extract-at-zero.ll::roundtrip
+tests/imported/llvm/Analysis/CostModel/X86/intrinsic-cost-kinds.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/intrinsic-cost-kinds.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/intrinsic-cost.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/intrinsic-cost.ll::roundtrip
@@ -1069,7 +1070,9 @@ tests/imported/llvm/Analysis/CostModel/X86/loop_v2-inseltpoison.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/loop_v2-inseltpoison.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/loop_v2.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/loop_v2.ll::roundtrip
+tests/imported/llvm/Analysis/CostModel/X86/masked-intrinsic-cost-inseltpoison.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/masked-intrinsic-cost-inseltpoison.ll::roundtrip
+tests/imported/llvm/Analysis/CostModel/X86/masked-intrinsic-cost.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/masked-intrinsic-cost.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/memset-pattern.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/memset-pattern.ll::roundtrip
@@ -1189,7 +1192,9 @@ tests/imported/llvm/Analysis/CostModel/X86/vector-insert-value.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/vector-insert-value.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/vector-insert.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/vector-insert.ll::roundtrip
+tests/imported/llvm/Analysis/CostModel/X86/vector_gep-inseltpoison.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/vector_gep-inseltpoison.ll::roundtrip
+tests/imported/llvm/Analysis/CostModel/X86/vector_gep.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/vector_gep.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/vectorized-loop.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/vectorized-loop.ll::roundtrip

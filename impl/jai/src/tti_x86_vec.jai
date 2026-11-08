@@ -720,3 +720,217 @@ x86_vector_memory_op_cost :: (t: *Tti, opc: Opcode, src: Type_Id, align_in: u64,
     }
     return c;
 }
+
+// ---------------------------------------------------------------- legality queries (X86TTIImpl::isLegal*)
+
+// X86TTIImpl::hasConditionalLoadStoreForType (ty NONE = nullptr)
+x86_has_conditional_load_store_for_type :: (st: *X86_Lowering, ty: Type_Id) -> bool {
+    if !st_hasCF(st) return false;
+    if ty == NONE return true;
+    if !is_int_type(ty) && !(type_kind(ty) == .VECTOR && type_count(ty) == 1) return false;
+    s := scalar_type(ty);
+    if !is_int_type(s) return false;
+    w := type_int_width(s);
+    return w == 16 || w == 32 || w == 64;
+}
+// isLegalMaskedLoadStore (static helper)
+x86_is_legal_masked_load_store_scalar :: (st: *X86_Lowering, s: Type_Id) -> bool {
+    if !st_hasAVX(st) return false;
+    if is_ptr_type(s) return true;
+    k := type_kind(s);
+    if k == .FLOAT || k == .DOUBLE return true;
+    if k == .HALF && st_hasBWI(st) return true;
+    if k == .BFLOAT && st_hasBF16(st) return true;
+    if !is_int_type(s) return false;
+    w := type_int_width(s);
+    return w == 32 || w == 64 || ((w == 8 || w == 16) && st_hasBWI(st));
+}
+x86_is_legal_masked_load :: (st: *X86_Lowering, ty: Type_Id) -> bool {
+    s := scalar_type(ty);
+    if is_vector_type(ty) && type_count(ty) == 1 return st_hasCF(st) && x86_has_conditional_load_store_for_type(st, s);
+    return x86_is_legal_masked_load_store_scalar(st, s);
+}
+x86_is_legal_masked_store :: (st: *X86_Lowering, ty: Type_Id) -> bool { return x86_is_legal_masked_load(st, ty); }
+x86_is_legal_nt_load :: (st: *X86_Lowering, ty: Type_Id, align: u64) -> bool {
+    size := dl_type_store_size(ty);
+    if align >= size && (size == 16 || size == 32) return ifx size == 16 then st_hasSSE1(st) else st_hasAVX2(st);
+    return false;
+}
+x86_is_legal_nt_store :: (st: *X86_Lowering, ty: Type_Id, align: u64) -> bool {
+    size := dl_type_store_size(ty);
+    if st_hasSSE4A(st) && (type_kind(ty) == .FLOAT || type_kind(ty) == .DOUBLE) return true;
+    if align < size || size < 4 || size > 32 || (size & (size - 1)) != 0 return false;
+    if size == 32 return st_hasAVX(st);
+    if size == 16 return st_hasSSE1(st);
+    return true;
+}
+x86_is_legal_broadcast_load :: (st: *X86_Lowering, elt: Type_Id, n: u64, scalable: bool) -> bool {
+    return st_hasSSE3(st) && !scalable && n == 2 && type_kind(elt) == .DOUBLE;
+}
+x86_is_legal_masked_expand_load :: (st: *X86_Lowering, ty: Type_Id) -> bool {
+    if !is_vector_type(ty) || !st_hasAVX512(st) return false;
+    if type_count(ty) == 1 return false;
+    s := type_elem(ty);
+    if type_kind(s) == .FLOAT || type_kind(s) == .DOUBLE return true;
+    if !is_int_type(s) return false;
+    w := type_int_width(s);
+    return w == 32 || w == 64 || ((w == 8 || w == 16) && st_hasVBMI2(st));
+}
+x86_is_legal_masked_compress_store :: (st: *X86_Lowering, ty: Type_Id) -> bool { return x86_is_legal_masked_expand_load(st, ty); }
+x86_supports_gather :: (st: *X86_Lowering) -> bool { return st_hasAVX512(st) || (xs_has(st, X86FLD_HasFastGather) && st_hasAVX2(st)); }
+x86_force_scalarize_masked_gather :: (st: *X86_Lowering, ty: Type_Id) -> bool {
+    n := type_count(ty);
+    return n == 1 || (st_hasAVX512(st) && (n == 2 || (n == 4 && !st_hasVLX(st))));
+}
+x86_force_scalarize_masked_scatter :: (st: *X86_Lowering, ty: Type_Id) -> bool { return x86_force_scalarize_masked_gather(st, ty); }
+x86_is_legal_masked_gather_scatter :: (ty: Type_Id) -> bool {
+    s := scalar_type(ty);
+    if is_ptr_type(s) return true;
+    if type_kind(s) == .FLOAT || type_kind(s) == .DOUBLE return true;
+    if !is_int_type(s) return false;
+    w := type_int_width(s);
+    return w == 32 || w == 64;
+}
+// X86Subtarget::preferGather / preferScatter: cleared by the prefer-no-gather / prefer-no-scatter tunings
+x86_is_legal_masked_gather :: (st: *X86_Lowering, ty: Type_Id) -> bool {
+    if !x86_supports_gather(st) || xs_has(st, X86F_TuningPreferNoGather) return false;
+    return x86_is_legal_masked_gather_scatter(ty);
+}
+x86_is_legal_masked_scatter :: (st: *X86_Lowering, ty: Type_Id) -> bool {
+    if !st_hasAVX512(st) || xs_has(st, X86F_TuningPreferNoScatter) return false;
+    return x86_is_legal_masked_gather_scatter(ty);
+}
+x86_gather_overhead :: (st: *X86_Lowering) -> Cost { if st_hasAVX512(st) || (st_hasAVX2(st) && xs_has(st, X86FLD_HasFastGather)) return 2; return 1024; }
+x86_scatter_overhead :: (st: *X86_Lowering) -> Cost { if st_hasAVX512(st) return 2; return 1024; }
+
+// ---------------------------------------------------------------- getMemIntrinsicInstrCost
+
+// MemIntrinsicCostAttributes
+Mica :: struct {
+    id: Intrinsic_Id;
+    data_ty: Type_Id;
+    ptr: Value_Id = NONE;
+    variable_mask: bool;
+    align: u64 = 1;
+    addrspace: u32;
+    inst: Value_Id = NONE;
+}
+
+// BasicTTIImplBase::getCommonMaskedMemoryOpCost
+bt_common_masked_memory_op_cost :: (t: *Tti, opc: Opcode, ty: Type_Id, align: u64, variable_mask: bool, gather_scatter: bool, kind: s64, addrspace: u32 = 0) -> Cost {
+    if type_kind(ty) == .SVECTOR return COST_INVALID;
+    vf := xvec_n(ty);
+    addr: Cost = 0;
+    if gather_scatter addr = bt_scalarization_overhead(t, xvec(type_ptr(0), vf), false, true, kind);
+    mem := cost_mul(vf, x86_memory_op_cost(t, opc, type_elem(ty), align, addrspace, kind));
+    pack := bt_scalarization_overhead(t, ty, opc != .STORE, opc == .STORE, kind);
+    cond: Cost = 0;
+    if variable_mask {
+        cond = bt_scalarization_overhead(t, xvec(type_int(1), vf), false, true, kind);
+        cond = cost_add(cond, cost_mul(vf, cost_add(tti_cf_cost(t, .CONDBR, kind), tti_cf_cost(t, .PHI, kind))));
+    }
+    return cost_add(cost_add(addr, mem), cost_add(pack, cond));
+}
+// BasicTTIImplBase::getMemIntrinsicInstrCost
+bt_mem_intrinsic_cost :: (t: *Tti, m: *Mica, kind: s64) -> Cost {
+    n := iid_name(m.id);
+    if n == {
+        case "llvm.experimental.vp.strided.load"; return bt_common_masked_memory_op_cost(t, .LOAD, m.data_ty, m.align, m.variable_mask, true, kind);
+        case "llvm.experimental.vp.strided.store"; return bt_common_masked_memory_op_cost(t, .STORE, m.data_ty, m.align, m.variable_mask, true, kind);
+        case "llvm.masked.gather"; #through; case "llvm.vp.gather";
+            return bt_common_masked_memory_op_cost(t, .LOAD, m.data_ty, m.align, m.variable_mask, true, kind);
+        case "llvm.masked.scatter"; #through; case "llvm.vp.scatter";
+            return bt_common_masked_memory_op_cost(t, .STORE, m.data_ty, m.align, m.variable_mask, true, kind);
+        case "llvm.vp.load"; #through; case "llvm.vp.store"; #through; case "llvm.vp.load.ff"; return COST_INVALID;
+        case "llvm.masked.load"; return bt_common_masked_memory_op_cost(t, .LOAD, m.data_ty, m.align, true, false, kind);
+        case "llvm.masked.store"; return bt_common_masked_memory_op_cost(t, .STORE, m.data_ty, m.align, true, false, kind);
+        case "llvm.masked.expandload"; return bt_common_masked_memory_op_cost(t, .LOAD, m.data_ty, m.align, m.variable_mask, true, kind);
+        case "llvm.masked.compressstore"; return bt_common_masked_memory_op_cost(t, .STORE, m.data_ty, m.align, m.variable_mask, true, kind);
+    }
+    fatal("getMemIntrinsicInstrCost: unexpected intrinsic %", n);
+    return 0;
+}
+// X86TTIImpl::getMemIntrinsicInstrCost
+x86_mem_intrinsic_cost :: (t: *Tti, m: *Mica, kind: s64) -> Cost {
+    n := iid_name(m.id);
+    if n == "llvm.masked.scatter" || n == "llvm.masked.gather" return x86_gather_scatter_op_cost(t, m, kind);
+    if n == "llvm.masked.load" || n == "llvm.masked.store" return x86_masked_memory_op_cost(t, m, kind);
+    return bt_mem_intrinsic_cost(t, m, kind);
+}
+// X86TTIImpl::getMaskedMemoryOpCost
+x86_masked_memory_op_cost :: (t: *Tti, m: *Mica, kind: s64) -> Cost {
+    st := *t.xl;
+    is_load := iid_name(m.id) == "llvm.masked.load";
+    opc := ifx is_load then Opcode.LOAD else .STORE;
+    src := m.data_ty;
+    if type_kind(src) != .VECTOR return x86_memory_op_cost(t, opc, src, m.align, m.addrspace, kind);
+    ne := xvec_n(src);
+    mask_ty := xvec(type_int(8), ne);
+    legal := ifx is_load then x86_is_legal_masked_load(st, src) else x86_is_legal_masked_store(st, src);
+    if !legal {
+        dem := all_true(ne);
+        split := x86_scalarization_overhead_dem(t, mask_ty, dem, false, true, kind);
+        scmp := x86_cmp_sel_cost(t, .ICMP, type_int(8), NONE, BAD_ICMP_PREDICATE, kind);
+        br := tti_cf_cost(t, .CONDBR, kind);
+        mcmp := cost_mul(ne, cost_add(br, scmp));
+        vsplit := x86_scalarization_overhead_dem(t, src, dem, is_load, !is_load, kind);
+        mem := cost_mul(ne, bt_memory_op_cost(t, opc, type_elem(src), m.align, m.addrspace, kind, OI_ANY, NONE));
+        return cost_add(cost_add(mem, vsplit), cost_add(split, mcmp));
+    }
+    ltc, lty := bt_type_legalization_cost(st, src);
+    vt := x86_evt(st, src);
+    c: Cost = 0;
+    if lty == MVT_i16 || lty == MVT_i32 || lty == MVT_i64 return cost_add(c, ltc);
+    if evt_is_simple(vt) && lty != vt.m && cast(s64) mvt_n(lty) == ne {
+        c = cost_add(c, cost_add(x86_shuffle_cost(t, SK_PERMUTE_TWO_SRC, src, src, .[], kind, 0, NONE, .[], NONE),
+                                 x86_shuffle_cost(t, SK_PERMUTE_TWO_SRC, mask_ty, mask_ty, .[], kind, 0, NONE, .[], NONE)));
+    } else if ltc * cast(s64) mvt_n(lty) > ne {
+        nm := xvec(type_int(8), ltc * cast(s64) mvt_n(lty));
+        c = cost_add(c, x86_shuffle_cost(t, SK_INSERT_SUBVECTOR, nm, nm, .[], kind, 0, mask_ty, .[], NONE));
+    }
+    if !st_hasAVX512(st) return cost_add(c, cost_mul(ltc, ifx is_load then cast(Cost) 2 else 8));
+    return cost_add(c, ltc);
+}
+// X86TTIImpl::getGSVectorCost
+x86_gs_vector_cost :: (t: *Tti, opc: Opcode, kind: s64, src: Type_Id, ptr: Value_Id, align: u64, addrspace: u32) -> Cost {
+    st := *t.xl;
+    vf := xvec_n(src);
+    ptr_bits := cast(u32) dl_pointer_type_size_bits(type_ptr(0));
+    index_size_bits :: (ptr: Value_Id, ptr_bits: u32) -> u32 {
+        if ptr_bits < 64 || ptr == NONE || !is_inst(ptr) || inst_op(ptr) != .GEP return ptr_bits;
+        nvar := 0;
+        base := op(ptr, 0);
+        if is_vector_type(vtype(base)) && vu_get_splat_value(base) == NONE return ptr_bits;
+        for k: 1..cast(s64) nops(ptr) - 1 {
+            o := op(ptr, cast(u32) k);
+            if is_constant_kind(vkind(o)) continue;
+            ity := scalar_type(vtype(o));
+            if ic_primitive_size_bits(ity) == 64 && !(is_inst(o) && inst_op(o) == .SEXT) return ptr_bits;
+            nvar += 1;
+            if nvar > 1 return ptr_bits;
+        }
+        return 32;
+    }
+    isz := ifx st_hasAVX512(st) && vf >= 16 then index_size_bits(ptr, ptr_bits) else ptr_bits;
+    ivt := xvec(type_int(isz), vf);
+    ic, _ := bt_type_legalization_cost(st, ivt);
+    sc, _ := bt_type_legalization_cost(st, src);
+    split := max(ic, sc);
+    if split > 1 {
+        sst := xvec(type_elem(src), vf / split);
+        return cost_mul(split, x86_gs_vector_cost(t, opc, kind, sst, ptr, align, addrspace));
+    }
+    if kind == TCK_CODE_SIZE return 1;
+    ov := ifx opc == .LOAD then x86_gather_overhead(st) else x86_scatter_overhead(st);
+    return cost_add(ov, cost_mul(vf, x86_memory_op_cost(t, opc, type_elem(src), align, addrspace, kind)));
+}
+// X86TTIImpl::getGatherScatterOpCost
+x86_gather_scatter_op_cost :: (t: *Tti, m: *Mica, kind: s64) -> Cost {
+    st := *t.xl;
+    is_load := iid_name(m.id) == "llvm.masked.gather" || iid_name(m.id) == "llvm.vp.gather";
+    src := m.data_ty;
+    if (is_load && (!x86_is_legal_masked_gather(st, src) || x86_force_scalarize_masked_gather(st, src))) ||
+       (!is_load && (!x86_is_legal_masked_scatter(st, src) || x86_force_scalarize_masked_scatter(st, src)))
+        return bt_mem_intrinsic_cost(t, m, kind);
+    return x86_gs_vector_cost(t, ifx is_load then Opcode.LOAD else .STORE, kind, src, m.ptr, m.align, m.addrspace);
+}

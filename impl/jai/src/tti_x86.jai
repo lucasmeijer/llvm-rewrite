@@ -532,7 +532,7 @@ bt_cmp_sel_cost :: (t: *Tti, opc: Opcode, val_ty: Type_Id, cond_ty: Type_Id, vec
     isd := isd_of_opcode(opc);
     known, e := x86_value_type(st, val_ty, true);
     if !known return 1;   // MVT::Other: TargetTransformInfoImplBase
-    if isd == ISD_SELECT && is_vector_type(cond_ty) isd = ISD_VSELECT;
+    if isd == ISD_SELECT && cond_ty != NONE && is_vector_type(cond_ty) isd = ISD_VSELECT;
     ltc, ltm := bt_type_legalization_cost(st, val_ty);
     if !(is_vector_type(val_ty) && !mvt_is_vec(ltm)) && !is_op_expand(st, isd, ltm) return ltc;
     if is_vector_type(val_ty) {
