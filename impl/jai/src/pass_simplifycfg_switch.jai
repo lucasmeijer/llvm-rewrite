@@ -1,6 +1,109 @@
 // SimplifyCFG.cpp, fourth part: switches, icmp chains, conditional branch pairs, stores, invokes, EH, unreachable.
 
-merge_compatible_invokes :: (s: *Scfg, bb: Value_Id) -> bool { return false; }
+// ---------------------------------------------------------------- mergeCompatibleInvokes
+
+// CompatibleSets::shouldBelongToSameSet({a, b})
+invokes_should_belong_to_same_set :: (a: Value_Id, b: Value_Id) -> bool {
+    illegal :: (ii: Value_Id) -> bool { return call_cannot_merge(ii) || call_is_inline_asm(ii); }
+    if illegal(a) || illegal(b) return false;
+    ia := call_is_indirect(a); ib := call_is_indirect(b);
+    if ia || ib {
+        if !(ia && ib) return false;
+    } else if call_callee(a) != call_callee(b) return false;
+    has_normal :: (ii: Value_Id) -> bool { return inst_op(block_first_non_phi_or_dbg(invoke_normal_dest(ii))) != .UNREACHABLE; }
+    if has_normal(a) || has_normal(b) {
+        if !(has_normal(a) && has_normal(b)) return false;
+        if invoke_normal_dest(a) != invoke_normal_dest(b) return false;
+        if !incoming_values_are_compatible(invoke_normal_dest(a), inst_block(a), inst_block(b), .[a, b]) return false;
+    }
+    if !incoming_values_are_compatible(invoke_unwind_dest(a), inst_block(a), inst_block(b)) return false;
+    if !is_same_operation_as(b, a, intersect_attrs = true) return false;
+    // data operands: arguments and bundle operands (everything before normal dest, unwind dest, callee)
+    nd := nops(a) - 3;
+    for k: 0..cast(s64) nd - 1 {
+        if op(a, cast(u32) k) == op(b, cast(u32) k) continue;
+        if !can_replace_operand_with_variable(a, cast(u32) k) return false;
+    }
+    return true;
+}
+
+// mergeCompatibleInvokesImpl
+merge_compatible_invokes_impl :: (s: *Scfg, invokes: [] Value_Id) {
+    ups: [..] Dom_Update; ups.allocator = temp;
+    ii0 := invokes[0];
+    has_normal := inst_op(block_first_non_phi_or_dbg(invoke_normal_dest(ii0))) != .UNREACHABLE;
+    ii0bb := inst_block(ii0);
+    f := block_fn(ii0bb);
+    insert_before := block(ii0bb).next;
+    merged_bb := create_block(f, tprint("%.invoke", vname(ii0bb)), insert_before);
+    merged := ic_clone_inst(ii0);
+    block_append_inst(merged_bb, merged);
+    if !has_normal {
+        nd := create_block(f, tprint("%.cont", vname(ii0bb)), insert_before);
+        block_append_inst(nd, new_inst(.UNREACHABLE, ir.t_void, 0));
+        set_successor(merged, 0, nd);
+    }
+    if s.dtu {
+        for invokes array_add(*ups, .{true, inst_block(it), merged_bb});
+        for k: 0..1 array_add(*ups, .{true, merged_bb, get_successor(merged, cast(u32) k)});
+        for ii: invokes for k: 0..1 array_add(*ups, .{false, inst_block(ii), get_successor(ii, cast(u32) k)});
+    }
+    indirect := call_is_indirect(ii0);
+    n := nops(merged);
+    for k: 0..cast(s64) n - 1 {
+        idx := cast(u32) k;
+        if idx == n - 1 { if !indirect continue; }
+        else if idx >= n - 3 continue;
+        cur := op(merged, idx);
+        need := false;
+        for invokes if op(it, idx) != cur need = true;
+        if !need continue;
+        pn := create_phi(vtype(cur), cast(u32) invokes.count);
+        inst_insert_before(pn, merged);
+        for invokes phi_add_incoming(pn, op(it, idx), inst_block(it));
+        set_op(merged, idx, pn);
+    }
+    for k: 0..1 add_predecessor_to_block(get_successor(merged, cast(u32) k), merged_bb, inst_block(ii0));
+    merged_loc: Md_Id = NONE;
+    first := true;
+    for ii: invokes {
+        loc := get_metadata(ii, 0);
+        if first { merged_loc = loc; first = false; }
+        else merged_loc = merged_location(merged_loc, loc);
+        pbb := inst_block(ii);
+        for k: 0..1 block_remove_predecessor(get_successor(ii, cast(u32) k), pbb);
+        br := create_br(merged_bb);
+        block_append_inst(pbb, br);
+        copy_debug_loc(br, ii);
+        try_intersect_attributes(merged, ii);
+        replace_all_uses_with(ii, merged);
+        erase_inst_with_metadata(ii);
+    }
+    set_metadata(merged, 0, merged_loc);
+    if s.dtu dtu_apply(s.dtu, ups);
+}
+
+// mergeCompatibleInvokes
+merge_compatible_invokes :: (s: *Scfg, bb: Value_Id) -> bool {
+    if !scfg_cl.enable_merge_compatible_invokes return false;
+    if !block_is_landing_pad(bb) return false;
+    sets: [..] [..] Value_Id; sets.allocator = temp;
+    preds: [..] Value_Id; preds.allocator = temp;
+    block_predecessors(bb, *preds);
+    for p: preds {
+        ii := block_terminator(p);
+        placed := false;
+        for * set: sets if invokes_should_belong_to_same_set(set.*[0], ii) { array_add(set, ii); placed = true; break; }
+        if !placed { ns: [..] Value_Id; ns.allocator = temp; array_add(*ns, ii); array_add(*sets, ns); }
+    }
+    changed := false;
+    for sets {
+        if it.count < 2 continue;
+        changed = true;
+        merge_compatible_invokes_impl(s, it);
+    }
+    return changed;
+}
 
 // ---------------------------------------------------------------- EH: resume, cleanupret
 
