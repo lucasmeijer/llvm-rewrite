@@ -21,3 +21,85 @@ lib/CodeGen/TargetLoweringBase.cpp 0.1
 lib/Transforms/InstCombine/InstCombineCompares.cpp 0.98
 lib/Transforms/InstCombine/InstCombineAndOrXor.cpp 0.98
 lib/Analysis/CmpInstAnalysis.cpp 0.35
+
+# --- Audit 2026-11 (scripts/port-audit.py), for files that had no line above. Method: list the function definitions
+# of the LLVM file; a function counts as ported when its name (normalised, a few naming variants) occurs in the impl
+# files whose header names the LLVM file (or anywhere in src/ for distinctive names); functions of 100+ lines are
+# scaled by the share of the identifiers they call that the impl mentions (catches a 1900-line visitCallInst ported
+# in part). Legacy-PM wrappers and print/dump are left out. fraction = matched function lines / all function lines,
+# rounded down to 0.05. "manual" lines were spot-checked by hand where the port does not follow LLVM's structure.
+lib/Analysis/ScalarEvolution.cpp 0.85
+lib/AsmParser/LLParser.cpp 0.7  # manual: own parser structure; all IR constructs, no summary-index parsing (~19% of LLParser) (heuristic 0.18)
+lib/IR/AutoUpgrade.cpp 0.25
+lib/Analysis/InstructionSimplify.cpp 0.9
+lib/IR/AsmWriter.cpp 0.75  # manual: own printer structure, table-driven DI nodes; no summary-index printing or use-list-order prediction (~17%) (heuristic 0.17)
+lib/Transforms/InstCombine/InstructionCombining.cpp 0.55
+lib/Support/APFloat.cpp 0.25
+lib/Transforms/Scalar/SROA.cpp 0.85
+lib/Transforms/InstCombine/InstCombineCalls.cpp 0.1
+lib/Analysis/ConstantFolding.cpp 0.8
+lib/IR/Constants.cpp 0.55
+lib/Transforms/InstCombine/InstCombineSimplifyDemanded.cpp 0.35
+lib/Transforms/InstCombine/InstCombineAddSub.cpp 0.7
+lib/Transforms/InstCombine/InstCombineCasts.cpp 0.45
+lib/Support/APInt.cpp 0.5
+lib/IR/DebugInfoMetadata.cpp 0.3
+lib/IR/Attributes.cpp 0.2
+lib/Analysis/MemorySSA.cpp 0.6
+lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.65
+lib/Transforms/Utils/SCCPSolver.cpp 0.7
+lib/Transforms/Utils/LoopUtils.cpp 0.05
+lib/IR/ConstantRange.cpp 0.7
+lib/IR/Metadata.cpp 0.45
+lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
+lib/Analysis/BasicAliasAnalysis.cpp 0.85
+lib/Transforms/Scalar/EarlyCSE.cpp 0.95
+lib/Analysis/TargetLibraryInfo.cpp 0.25
+lib/IR/Intrinsics.cpp 0.7
+lib/IR/IRBuilder.cpp 0.15
+lib/AsmParser/LLLexer.cpp 0.7  # manual: own lexer structure, lexes all IR tokens (heuristic 0.19)
+lib/Analysis/IVDescriptors.cpp 0.05
+lib/IR/ConstantFold.cpp 0.8
+lib/Analysis/MemorySSAUpdater.cpp 0.25
+lib/Support/KnownBits.cpp 0.7
+lib/Analysis/LoopInfo.cpp 0.45
+lib/IR/DataLayout.cpp 0.2
+lib/Analysis/GlobalsModRef.cpp 0.85
+lib/Analysis/AliasAnalysis.cpp 0.9
+lib/Transforms/Utils/PredicateInfo.cpp 0.6
+lib/IR/ConstantFPRange.cpp 0.35
+lib/Transforms/Utils/LoopSimplify.cpp 0.85
+lib/Analysis/TypeBasedAliasAnalysis.cpp 0.75
+lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.5
+lib/Analysis/DemandedBits.cpp 0.95
+lib/Transforms/InstCombine/InstCombineNegator.cpp 0.75
+lib/Transforms/Scalar/ADCE.cpp 0.85
+lib/Transforms/Utils/SSAUpdater.cpp 0.8
+lib/Analysis/MemoryLocation.cpp 1
+lib/Transforms/Utils/BreakCriticalEdges.cpp 0.4
+lib/Transforms/Utils/LCSSA.cpp 0.7
+lib/Analysis/LoopNestAnalysis.cpp 0.65
+lib/Analysis/CaptureTracking.cpp 0.95
+lib/Analysis/PHITransAddr.cpp 0.4
+lib/Analysis/AliasAnalysisEvaluator.cpp 0.5
+lib/Transforms/IPO/SCCP.cpp 1
+lib/IR/DIExpressionOptimizer.cpp 0.85
+lib/Analysis/AssumptionCache.cpp 0.4
+lib/IR/Operator.cpp 0.8
+lib/IR/Dominators.cpp 0.75
+lib/Analysis/CallGraph.cpp 0.4
+lib/Analysis/AssumeBundleQueries.cpp 0.55
+lib/Transforms/Scalar/BDCE.cpp 0.9
+lib/Analysis/ScopedNoAliasAA.cpp 0.85
+lib/Transforms/Scalar/InstSimplifyPass.cpp 1
+lib/Transforms/Scalar/DCE.cpp 0.65
+lib/Transforms/Scalar/SCCP.cpp 1
+lib/Analysis/DomTreeUpdater.cpp 1
+lib/IR/OptBisect.cpp 0.5
+lib/Analysis/ValueLattice.cpp 1
+lib/Transforms/Utils/Mem2Reg.cpp 1
+lib/Analysis/PostDominators.cpp 0.15  # manual: only the printer pass (heuristic 0.00)
+lib/Analysis/CycleAnalysis.cpp 1
+lib/Analysis/PtrUseVisitor.cpp 1
+lib/Analysis/ValueLatticeUtils.cpp 1  # manual: renamed: sc_can_track_* in sccp.goose (heuristic 0.00)
+lib/Analysis/DomConditionCache.cpp 1
