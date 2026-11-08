@@ -13,6 +13,8 @@ tests/analysis/domtree/after_transform.ll::analysis
 tests/analysis/domtree/after_transform.ll::roundtrip
 tests/analysis/domtree/dfs_numbers_after_loops.ll::analysis
 tests/analysis/domtree/dfs_numbers_after_loops.ll::roundtrip
+tests/analysis/domtree/dfs_numbers_after_mem2reg.ll::analysis
+tests/analysis/domtree/dfs_numbers_after_mem2reg.ll::roundtrip
 tests/analysis/domtree/irreducible.ll::analysis
 tests/analysis/domtree/irreducible.ll::roundtrip
 tests/analysis/domtree/loop_nest.ll::analysis
