@@ -251,3 +251,16 @@ IID_EXPERIMENTAL_GET_VECTOR_LENGTH :: #run iid_by_name("llvm.experimental.get.ve
 IID_EXPERIMENTAL_CONSTRAINED_LDEXP :: #run iid_by_name("llvm.experimental.constrained.ldexp");
 IID_PDEP :: #run iid_by_name("llvm.pdep");
 IID_PEXT :: #run iid_by_name("llvm.pext");
+// alias analysis (aa.jai, basic_aa.jai)
+IID_MEMSET :: #run iid_by_name("llvm.memset");
+IID_MEMCPY :: #run iid_by_name("llvm.memcpy");
+IID_MEMCPY_INLINE :: #run iid_by_name("llvm.memcpy.inline");
+IID_MEMMOVE :: #run iid_by_name("llvm.memmove");
+IID_MEMSET_INLINE :: #run iid_by_name("llvm.memset.inline");
+IID_MEMCPY_ELEMENT_UNORDERED_ATOMIC :: #run iid_by_name("llvm.memcpy.element.unordered.atomic");
+IID_MEMMOVE_ELEMENT_UNORDERED_ATOMIC :: #run iid_by_name("llvm.memmove.element.unordered.atomic");
+IID_MEMSET_ELEMENT_UNORDERED_ATOMIC :: #run iid_by_name("llvm.memset.element.unordered.atomic");
+IID_EXPERIMENTAL_MEMSET_PATTERN :: #run iid_by_name("llvm.experimental.memset.pattern");
+IID_MATRIX_COLUMN_MAJOR_LOAD :: #run iid_by_name("llvm.matrix.column.major.load");
+IID_MATRIX_COLUMN_MAJOR_STORE :: #run iid_by_name("llvm.matrix.column.major.store");
+IID_STACKRESTORE :: #run iid_by_name("llvm.stackrestore");

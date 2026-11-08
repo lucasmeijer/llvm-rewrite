@@ -140,6 +140,8 @@ Pass_Kind :: enum u8 {
     REQUIRE; INVALIDATE; PRINT_DOMTREE; PRINT_POSTDOMTREE; PRINT_DEMANDED_BITS; NO_OP_FUNCTION; NO_OP_MODULE;
     // transforms
     DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG; INSTSIMPLIFY; SROA;
+    // alias analysis (aa.jai)
+    AA_EVAL;
 }
 
 Pass_Info :: struct {
@@ -181,6 +183,7 @@ PASS_TABLE :: Pass_Info.[
     .{"invalidate<domtree>", .FUNCTION, .INVALIDATE, true, .DOMTREE},
     .{"invalidate<postdomtree>", .FUNCTION, .INVALIDATE, true, .POSTDOMTREE},
     .{"invalidate<demanded-bits>", .FUNCTION, .INVALIDATE, true, .DEMANDED_BITS},
+    .{"aa-eval", .FUNCTION, .AA_EVAL, false, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -392,7 +395,8 @@ cl_data_layout: string;                  // opt -data-layout (overrides the modu
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(9, Cl_Opt,, allocator = temp);
+    list := NewArray(9 + AA_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    add_aa_cl_opts(list, 9);
     list[0] = .{"adce-remove-control-flow", .BOOL, *opts.adce_remove_control_flow, null, null};
     list[1] = .{"adce-remove-loops", .BOOL, *opts.adce_remove_loops, null, null};
     list[2] = .{"opt-bisect-limit", .INT, null, *opts.opt_bisect_limit, null};
@@ -524,6 +528,11 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .MEM2REG; return mem2reg_run(f);
         case .INSTSIMPLIFY; return instsimplify_run(f);
         case .SROA; return sroa_run(f, node.name);
+        case .AA_EVAL;
+            sb: String_Builder; sb.allocator = temp;
+            aa_eval_run(f, aa_eval_counts_for(node), *sb);
+            write_string(builder_to_string(*sb,, allocator = temp), to_standard_error = true);
+            return PRESERVE_ALL;
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;
@@ -557,6 +566,10 @@ opt_main :: () {
             cl_data_layout = slice(a, find_index_from_left(a, #char "=") + 1, a.count - find_index_from_left(a, #char "=") - 1);
             continue;
         }
+        if begins_with(a, "-aa-pipeline=") || begins_with(a, "--aa-pipeline=") {
+            aa_parse_pipeline(slice(a, find_index_from_left(a, #char "=") + 1, a.count - find_index_from_left(a, #char "=") - 1));
+            continue;
+        }
         if a == "-O0" || a == "-O1" || a == "-O2" || a == "-O3" || a == "-Os" || a == "-Oz"
             fatal("'%' pipelines are not implemented yet (only -passes=<pipeline> with the passes in impl/jai/src/passes.jai)", a);
         if begins_with(a, "-") && a != "-" {
@@ -577,6 +590,7 @@ opt_main :: () {
     if opts.mtriple.count ir.triple = normalize_triple(opts.mtriple);
     if ir.source_filename.count == 0 && !saw_source_filename ir.source_filename = input;
     if root >= 0 run_module_pm(root);
+    defer aa_eval_print_reports();
     if disable_output return;
     text := print_module_fresh();
     if output == "-" write_string(text);

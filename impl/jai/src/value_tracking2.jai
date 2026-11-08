@@ -1564,8 +1564,8 @@ argument_aliasing_to_returned_pointer :: (c: Value_Id, must_preserve_offset: boo
     }
     return NONE;
 }
-// getUnderlyingObject(V, MaxLookup = 6)
-get_underlying_object :: (v_in: Value_Id, max_lookup: u32 = 6) -> Value_Id {
+// getUnderlyingObject(V, MaxLookup = MaxLookupSearchDepth = 10)
+get_underlying_object :: (v_in: Value_Id, max_lookup: u32 = 10) -> Value_Id {
     v := v_in;
     count: u32 = 0;
     while max_lookup == 0 || count < max_lookup {

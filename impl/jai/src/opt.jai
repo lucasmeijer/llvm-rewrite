@@ -46,6 +46,11 @@
 #load "value_utils.jai";
 #load "ssa_updater.jai";
 #load "pass_sroa.jai";
+#load "capture_tracking.jai";
+#load "aa.jai";
+#load "basic_aa.jai";
+#load "tbaa.jai";
+#load "scoped_noalias_aa.jai";
 
 main :: () { opt_main(); }
 
