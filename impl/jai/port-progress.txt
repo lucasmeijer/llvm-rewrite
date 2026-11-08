@@ -108,3 +108,6 @@ lib/Transforms/IPO/InferFunctionAttrs.cpp 1
 lib/Analysis/FloatingPointPredicateUtils.cpp 1  # manual: renamed: fcmp_to_class_test & co in fpclass.jai (heuristic 0.00)
 lib/Analysis/PtrUseVisitor.cpp 1
 lib/Analysis/DomConditionCache.cpp 1
+lib/IR/DIBuilder.cpp 0.15
+lib/Transforms/Utils/Debugify.cpp 0.4
+lib/IR/DIExpressionOptimizer.cpp 0.7
