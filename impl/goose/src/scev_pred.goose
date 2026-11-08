@@ -52,7 +52,16 @@ recursive fn sc_init_has_guards(fv: i32) {
         f = globs[glob_of(f)].next;
     }
 }
-recursive fn sc_has_assumptions() -> bool { vt_fn_has_assumes(sc_fv) }
+recursive // Intrinsic::getDeclarationIfExists(M, experimental_guard)
+fn sc_guard_decl() -> i32 {
+    var f = modules[globs[glob_of(sc_fv)].module].first_func;
+    while f >= 0 {
+        if func_iid(f) == IID_experimental_guard { return f; }
+        f = globs[glob_of(f)].next;
+    }
+    return -1;
+}
+fn sc_has_assumptions() -> bool { vt_fn_has_assumes(sc_fv) }
 
 // AC.assumptions(): llvm.assume calls of the function in instruction order
 fn sc_collect_assumes(out: i32[>..<]&) {
@@ -481,7 +490,19 @@ recursive fn sc_is_bb_entry_guarded_by_cond(bb: i32, pred: i64, lhs: i32, rhs: i
             if prove_via_cond(cb_arg(ci, 0), false) { return true; }
         }
     }
-    if sc_has_guards { fatal("ScalarEvolution: experimental.guard users in isBasicBlockEntryGuardedByCond are not ported"); }
+    // the users of llvm.experimental.guard (use-list order) in this function that dominate BB
+    let gd = sc_guard_decl();
+    if gd >= 0 {
+        var u = vals[gd].first_use;
+        while u >= 0 {
+            let g = uses[u].user;
+            let nu = uses[u].next;
+            if is_inst(g) && inst_iid(g) == IID_experimental_guard && inst_func(g) == sc_fv && dt_inst_dominates_block(g, bb) {
+                if prove_via_cond(cb_arg(g, 0), false) { return true; }
+            }
+            u = nu;
+        }
+    }
     return false;
 }
 

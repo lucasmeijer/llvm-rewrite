@@ -207,7 +207,7 @@ var vt_allow_ephemerals: bool = false;
 fn valid_assume_for_context(inv: i32, cx: i32) -> bool {
     if inst_parent(inv) == inst_parent(cx) {
         if comes_before(inv, cx) { return true; }
-        if inv == cx { return false; }
+        if !vt_allow_ephemerals && inv == cx { return false; }
         var x = cx;
         var limit = 15;
         while x >= 0 && x != inv {

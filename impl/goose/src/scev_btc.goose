@@ -458,7 +458,15 @@ recursive fn sc_exit_limit_from_cond_impl(mark: i64, l: i32, cond: i32, exit_if_
         let x = insts[inst_of(cond)];
         let wo = op(cond, 0);
         if x.naux == 1 && ints[x.aux] == 1 && sc_with_overflow_binop(wo) >= 0 && vals[cb_arg(wo, 1)].kind as i64 == VK_CINT {
-            fatal("ScalarEvolution: exit conditions on with.overflow intrinsics are not ported");
+            let id = inst_iid(wo);
+            let signed = id == IID_sadd_with_overflow || id == IID_ssub_with_overflow || id == IID_smul_with_overflow;
+            let nwr = rg_exact_no_wrap(sc_with_overflow_binop(wo), ap_from_cint(cb_arg(wo, 1)), if signed { NW_NSW } else { NW_NUW });
+            var p, nrhs, off = rg_equivalent_icmp_off(nwr);
+            if !exit_if_true { p = sc_inverse_pred(p); }
+            var lhs = sc_get_scev(cb_arg(wo, 0));
+            if !ap_is_zero(off) { lhs = sc_add(lhs, sc_get_constant(off)); }
+            let e = sc_exit_limit_from_icmp(l, p, false, lhs, sc_get_constant(nrhs), only, allow_preds);
+            if el_has_any_info(e) { return e; }
         }
     }
     return el_one(sc_compute_exit_count_exhaustively(l, cond, exit_if_true));

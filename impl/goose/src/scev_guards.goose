@@ -164,7 +164,20 @@ recursive fn sc_collect_from_block(g: i32, blk: i32, pred: i32, vm: i64, depth: 
             sc_gterms.push(1);
         }
     }
-    if sc_has_guards { fatal("ScalarEvolution: experimental.guard in loop guards is not ported"); }
+    {
+        let gd = sc_guard_decl();
+        if gd >= 0 {
+            var u = vals[gd].first_use;
+            while u >= 0 {
+                let gi = uses[u].user;
+                if is_inst(gi) && inst_iid(gi) == IID_experimental_guard && inst_func(gi) == sc_fv && dt_inst_dominates_block(gi, blk) {
+                    sc_gterms.push(cb_arg(gi, 0));
+                    sc_gterms.push(1);
+                }
+                u = uses[u].next;
+            }
+        }
+    }
     var ncc: i64 = 0;
     sc_visited_insert(vm, blk);
     var p1 = pred;

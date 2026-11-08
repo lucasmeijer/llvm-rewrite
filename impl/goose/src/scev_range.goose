@@ -374,8 +374,15 @@ recursive fn sc_vscale_range(bw: i64) -> CRange {
     let fa = alist_fn(globs[glob_of(sc_fv)].attrs);
     let k = aset_find(fa, AK_VScaleRange);
     if k < 0 { return rg_new(ap_u64(1, bw), ap_zero(bw)); }
-    fatal("ScalarEvolution: vscale_range attribute ranges are not ported");
-    return rg_full(bw);
+    let packed = attrs[k].i1;
+    let amin = (packed >> 32) as i64;
+    let amax = (packed & 0xFFFFFFFF) as i64;
+    let bwmin = if amin == 0 { 0 } else { 64 - clz64(amin as u64) };
+    if bwmin > bw { return rg_empty(bw); }
+    let mn = ap_u64(amin as u64, bw);
+    let bwmax = if amax == 0 { 0 } else { 64 - clz64(amax as u64) };
+    if amax == 0 || bwmax > bw { return rg_new(mn, ap_zero(bw)); }
+    return rg_new(mn, ap_inc(ap_u64(amax as u64, bw)));
 }
 
 // GetRangeFromMetadata
@@ -417,14 +424,16 @@ recursive fn sc_pointer_dereferenceable_bytes(v: i32) -> i64 {
     if k == VK_INST {
         let o = iop(v);
         if is_callbase(v) {
-            if sc_aset_int(alist_ret(insts[inst_of(v)].attrs), AK_Dereferenceable) != 0 || sc_aset_int(alist_ret(insts[inst_of(v)].attrs), AK_DereferenceableOrNull) != 0 {
-                fatal("ScalarEvolution: dereferenceable return attributes are not ported");
+            // CallBase::getRetDereferenceableBytes / getRetDereferenceableOrNullBytes: max of call site and callee
+            fn ret_bytes(k: i64) -> i64 {
+                var b = sc_aset_int(alist_ret(insts[inst_of(v)].attrs), k);
+                let cf = called_function(v);
+                if cf >= 0 { let fb = sc_aset_int(alist_ret(globs[glob_of(cf)].attrs), k); if fb > b { b = fb; } }
+                return b;
             }
-            let cf = called_function(v);
-            if cf >= 0 && (sc_aset_int(alist_ret(globs[glob_of(cf)].attrs), AK_Dereferenceable) != 0 || sc_aset_int(alist_ret(globs[glob_of(cf)].attrs), AK_DereferenceableOrNull) != 0) {
-                fatal("ScalarEvolution: dereferenceable return attributes are not ported");
-            }
-            return 0;
+            var d = ret_bytes(AK_Dereferenceable);
+            if d == 0 { d = ret_bytes(AK_DereferenceableOrNull); }
+            return d;
         }
         if o == OP_LOAD || o == OP_INTTOPTR {
             if inst_get_md(v, md_kind_id("dereferenceable")) >= 0 || inst_get_md(v, md_kind_id("dereferenceable_or_null")) >= 0 {
@@ -475,7 +484,19 @@ recursive fn sc_get_range_for_unknown_recurrence(u: i32) -> CRange {
     let tcap = ap_u64((tc - 1) as u64, bw);
     let ts, ov = ap_umul_ov(msa, tcap);
     if ov { return full; }
-    fatal("ScalarEvolution: getRangeForUnknownRecurrence's KnownBits shifts are not ported");
+    let tsk = kb_const_ap(ts);
+    if o == OP_ASHR {
+        let ke = kb_shr(ks, tsk, false, false, true);
+        if kb_is_nonneg(ks) { return rg_nonempty(kb_min(ke), ap_inc(kb_max(ks))); }
+        if kb_is_neg(ks) { return rg_nonempty(kb_min(ks), ap_inc(kb_max(ke))); }
+        return full;
+    }
+    if o == OP_LSHR {
+        let ke = kb_shr(ks, tsk, false, false, false);
+        return rg_nonempty(kb_min(ke), ap_inc(kb_max(ks)));
+    }
+    let ke = kb_shl(ks, tsk, false, false, false);
+    if ap_ult_u64(ts, kb_min_lz(ks) as u64) && ap_fits_u64(ts) { return rg_new(kb_min(ks), ap_inc(kb_max(ke))); }
     return full;
 }
 
@@ -600,3 +621,5 @@ recursive fn sc_is_known_to_be_power_of_two(s: i32, or_zero: bool, or_neg: bool)
 }
 
 recursive fn sc_aset_int(s: i32, k: i64) -> i64 { let a = aset_find(s, k); if a < 0 { return 0; } return attrs[a].i1 as i64; }
+
+fn clz64(x: u64) -> i64 { var n: i64 = 0; var y = x; if y == 0 { return 64; } while (y & 0x8000000000000000) == 0 { y = y << 1; n++; } return n; }

@@ -1755,14 +1755,14 @@ recursive fn sc_minmax_n(kind: i64, b: i64) -> i32 {
 var sc_seen: i32[>..<];
 let SC_NONE: i32 = -2;      // std::nullopt
 
-recursive fn sc_dedup_visit_one(root: i64, s: i32) -> i32 {
-    for k in sc_seen.len { if sc_seen[k] == s { return SC_NONE; } }
+recursive fn sc_dedup_visit_one(root: i64, s: i32, sm: i64) -> i32 {
+    for k in sm..sc_seen.len { if sc_seen[k] == s { return SC_NONE; } }
     sc_seen.push(s);
     let k = sc_kind(s);
     if !(sc_is_minmax_kind(k) || k == SC_SEQUMIN) { return s; }
     if !(k == root || k == SC_UMIN) { return s; }
     let nb = ss.len;
-    let changed = sc_dedup_visit_ops(root, false, scevs[s].at as i64, sc_nops(s));
+    let changed = sc_dedup_visit_ops(root, false, scevs[s].at as i64, sc_nops(s), sm);
     if !changed { ss.resize(nb); return s; }
     if ss_n(nb) == 0 { ss.resize(nb); return SC_NONE; }
     if k == SC_SEQUMIN { return sc_seq_minmax_n(k, nb); }
@@ -1770,12 +1770,12 @@ recursive fn sc_dedup_visit_one(root: i64, s: i32) -> i32 {
 }
 
 // visit(Kind, OrigOps, NewOps): pushes the new operands on ss; returns Changed. OrigOps from ss or sc_ops.
-recursive fn sc_dedup_visit_ops(root: i64, from_ss: bool, at: i64, n: i64) -> bool {
+recursive fn sc_dedup_visit_ops(root: i64, from_ss: bool, at: i64, n: i64, sm: i64) -> bool {
     var changed = false;
     let nb = ss.len;
     for i in n {
         let o = if from_ss { ss[at + i] } else { sc_ops[at + i] };
-        let no = sc_dedup_visit_one(root, o);
+        let no = sc_dedup_visit_one(root, o, sm);
         if no != o { changed = true; }
         if no != SC_NONE { ss.push(no); }
     }
@@ -1825,7 +1825,7 @@ recursive fn sc_seq_minmax_n(kind: i64, b: i64) -> i32 {
     {
         let sm = sc_seen.len;
         let nb = ss.len;
-        let changed = sc_dedup_visit_ops(kind, true, b, nb - b);
+        let changed = sc_dedup_visit_ops(kind, true, b, nb - b, sm);
         sc_seen.resize(sm);
         if changed {
             let m = ss.len - nb;
@@ -1848,6 +1848,7 @@ recursive fn sc_seq_minmax_n(kind: i64, b: i64) -> i32 {
         }
         if deleted { return sc_seq_minmax_n(kind, b); }
     }
+    if ss_n(b) == 0 { fatal("internal: empty sequential min/max"); }
     let sat = sc_get_zero(sc_ty(ss[b]));
     let pred = P_ULE;
     var i: i64 = 1;
@@ -1908,7 +1909,12 @@ recursive fn sc_is_guaranteed_not_to_be_poison(s: i32) -> bool {
 // Sizes and GEPs
 
 recursive fn sc_get_size_of(int_ty: i32, t: i32) -> i32 {
-    if sc_type_has_scalable(t) { fatal("ScalarEvolution: sizeof of a scalable type is not ported"); }
+    if ty_kind(t) == TK_SVEC {
+        // getSizeOfExpr(IntTy, TypeSize): known minimum * vscale
+        let r = sc_get_constant_ty(int_ty, dl_alloc_size(t) as u64, false);
+        return sc_mul(r, sc_get_vscale(int_ty));
+    }
+    if sc_type_has_scalable(t) { fatal("ScalarEvolution: sizeof of an aggregate with scalable vectors is not ported"); }
     return sc_get_constant_ty(int_ty, dl_alloc_size(t) as u64, false);
 }
 recursive fn sc_get_store_size_of(int_ty: i32, t: i32) -> i32 {
