@@ -1176,10 +1176,7 @@ ic_combine_function :: (f: Value_Id, icopts: Ic_Options) -> bool {
     for < k: 0..po.count-1 array_add(*rpo, po[k]);
     made := false;
     // LowerDbgDeclare (-instcombine-lower-dbg-declare)
-    if opts.instcombine_lower_dbg_declare for b: fn_blocks(f) for i: block_insts(b) {
-        r := inst(i).records;
-        while r { if dbgr(r).kind == .DECLARE fatal("instcombine: LowerDbgDeclare (#dbg_declare) is not supported yet"); r = dbgr(r).next; }
-    }
+    if opts.instcombine_lower_dbg_declare made = lower_dbg_declare(f);
     iteration: u32 = 0;
     dt := get_domtree(f);
     ac := get_assumption_cache(f);

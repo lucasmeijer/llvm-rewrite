@@ -200,7 +200,7 @@ Pass_Kind :: enum u8 {
     // InferFunctionAttrs (pass_inferattrs.jai)
     INFERATTRS;
     // Debugify (pass_debugify.jai)
-    DEBUGIFY; CHECK_DEBUGIFY;
+    DEBUGIFY; CHECK_DEBUGIFY; REDUNDANT_DBG_INST_ELIM;
 }
 
 Pass_Info :: struct {
@@ -230,6 +230,7 @@ PASS_TABLE :: Pass_Info.[
     .{"sroa<aggregate-to-vector;modify-cfg>", .FUNCTION, .SROA, false, .DOMTREE},
     .{"debugify", .MODULE, .DEBUGIFY, false, .DOMTREE},
     .{"check-debugify", .MODULE, .CHECK_DEBUGIFY, false, .DOMTREE},
+    .{"redundant-dbg-inst-elim", .FUNCTION, .REDUNDANT_DBG_INST_ELIM, false, .DOMTREE},
     .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
     .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},
@@ -711,6 +712,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .INSTSIMPLIFY; return instsimplify_run(f);
         case .SROA; return sroa_run(f, node.name);
         case .INSTCOMBINE; return instcombine_run(f, node.name);
+        case .REDUNDANT_DBG_INST_ELIM; return redundant_dbg_inst_elim_run(f);
         case .SIMPLIFYCFG; return simplifycfg_run(node, f);
         case .LOOP_ADAPTOR; return run_loop_adaptor(cast(s32) (node - pipeline.nodes.data), f);
         case .AA_EVAL;

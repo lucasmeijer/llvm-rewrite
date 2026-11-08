@@ -661,3 +661,236 @@ md_value_exists :: (v: Value_Id) -> bool {
     k := *md_key; key_reset(k); key_u8(k, 1); key_u32(k, v);
     return table_contains(*ir.md_map, key_view(k));
 }
+
+// ---------------------------------------------------------------- LowerDbgDeclare (Local.cpp)
+
+// ConvertDebugDeclareToDebugValue(DVR, LoadInst *LI, DIB): the new record goes after the load
+convert_debug_declare_to_debug_value_load :: (r: u32, li: Value_Id) {
+    if !value_covers_entire_fragment(vtype(li), r) return;
+    rec := dbgr(r);
+    nr: Dbg_Record;
+    nr.kind = .VALUE;
+    nr.loc = md_value(li);
+    nr.var = rec.var; nr.expr = rec.expr; nr.dbg = debug_value_loc(r);
+    array_add(*ir.dbg_records, nr);
+    id := cast(u32) ir.dbg_records.count;
+    dbgr_restamp(id);
+    // insertDbgRecordAfter(DV, LI): at the head of the next instruction's records
+    nx := inst(li).next;
+    assert(nx != NONE, "a load is never a terminator");
+    dbgr(id).owner = nx;
+    dbgr(id).next = inst(nx).records;
+    inst(nx).records = id;
+    if dbg_index.fn != NONE dbgr_index_record(id);
+}
+
+// isCompositeType: the variable's type, through modifiers, is not a DIBasicType (pointers count as scalars)
+dbg_var_is_composite_type :: (r: u32) -> bool {
+    t := di_op(dbgr(r).var, 3);
+    if t == NONE return true;
+    while is_di(t, .DERIVED_TYPE) {
+        tag := di_int(t, 0);
+        if tag == 0x0f || tag == 0x10 || tag == 0x42 || tag == 0x1f || tag == DW_TAG_LLVM_PTRAUTH_TYPE return false;
+        // typedef, const, volatile, restrict, atomic, immutable
+        if tag == 0x16 || tag == 0x26 || tag == 0x35 || tag == 0x37 || tag == 0x47 || tag == 0x4b { t = di_op(t, 5); continue; }
+        break;
+    }
+    return !is_di(t, .BASIC_TYPE);
+}
+
+// llvm::LowerDbgDeclare
+lower_dbg_declare :: (f: Value_Id) -> bool {
+    changed := false;
+    dvrs: [..] u32; dvrs.allocator = temp;
+    for b: fn_blocks(f) for i: block_insts(b) {
+        r := inst(i).records;
+        while r { if dbgr(r).kind == .DECLARE array_add(*dvrs, r); r = dbgr(r).next; }
+    }
+    if dvrs.count == 0 return false;
+    for ddi: dvrs {
+        loc := dbgr(ddi).loc;
+        ai: Value_Id = NONE;
+        if loc != NONE && ir.mds[loc].kind == .VALUE { v := ir.mds[loc].value; if is_inst(v) && inst_op(v) == .ALLOCA ai = v; }
+        if ai == NONE || !is_constant_kind(vkind(op(ai, 0))) || dbg_var_is_composite_type(ddi) continue;
+        volatile_use := false;
+        u := ir.v_first_use[ai];
+        while u != NONE {
+            us := ir.u_user[u];
+            if (inst_op(us) == .LOAD || inst_op(us) == .STORE) && is_volatile(us) { volatile_use = true; break; }
+            u = ir.u_next[u];
+        }
+        if volatile_use continue;
+        wl: [..] Value_Id; wl.allocator = temp;
+        array_add(*wl, ai);
+        while wl.count {
+            v := pop(*wl);
+            u := ir.v_first_use[v];
+            while u != NONE {
+                us := ir.u_user[u];
+                o := inst_op(us);
+                if o == .STORE {
+                    if u == op_use(us, 1) convert_debug_declare_to_debug_value_store(ddi, us);
+                } else if o == .LOAD {
+                    convert_debug_declare_to_debug_value_load(ddi, us);
+                } else if o == .CALL {
+                    if !is_intrinsic_call(us, IID_LIFETIME_START) && !is_intrinsic_call(us, IID_LIFETIME_END) {
+                        deref := u64.[DW_OP_DEREF_];
+                        e := diexpr_append(dbgr(ddi).expr, deref);
+                        dbgr_insert_value_before(ai, dbgr(ddi).var, e, debug_value_loc(ddi), us);
+                    }
+                } else if o == .BITCAST {
+                    if type_kind(vtype(us)) == .PTR array_add(*wl, us);
+                }
+                u = ir.u_next[u];
+            }
+        }
+        dbgr_erase(ddi);
+        changed = true;
+    }
+    if changed for b: fn_blocks(f) remove_redundant_dbg_instrs(b);
+    return changed;
+}
+
+// ---------------------------------------------------------------- RemoveRedundantDbgInstrs (BasicBlockUtils.cpp)
+
+// DebugVariable(Var, fragment of Expr, InlinedAt)
+Debug_Variable :: struct { var: Md_Id; has_frag: bool; foff: u64; fsize: u64; inlined: Md_Id; }
+debug_variable_of :: (r: u32, with_fragment: bool) -> Debug_Variable {
+    k: Debug_Variable;
+    k.var = dbgr(r).var;
+    if with_fragment {
+        k.has_frag, k.foff, k.fsize = diexpr_fragment(dbgr(r).expr);
+        if !k.has_frag { k.foff = 0; k.fsize = 0; }
+    }
+    k.inlined = diloc_inlined_at(dbgr(r).dbg);
+    return k;
+}
+debug_variable_eq :: (a: Debug_Variable, b: Debug_Variable) -> bool {
+    return a.var == b.var && a.has_frag == b.has_frag && a.foff == b.foff && a.fsize == b.fsize && a.inlined == b.inlined;
+}
+
+// at::getAssignmentInsts(DVR) is non-empty: an instruction of the function carries the record's DIAssignID
+dbg_assign_has_linked_insts :: (r: u32) -> bool {
+    id := dbgr(r).assign_id;
+    if id == NONE return false;
+    k := md_kind_id("DIAssignID");
+    o := dbgr(r).owner;
+    if o == NONE return false;
+    for b: fn_blocks(inst_fn(o)) for i: block_insts(b) if get_metadata(i, k) == id return true;
+    return false;
+}
+
+// removeRedundantDbgInstrsUsingBackwardScan
+remove_redundant_dbg_backward :: (bb: Value_Id) -> bool {
+    to_remove: [..] u32; to_remove.allocator = temp;
+    i := block(bb).last;
+    while i != NONE {
+        seen: [..] Debug_Variable; seen.allocator = temp;
+        recs: [..] u32; recs.allocator = temp;
+        r := inst(i).records;
+        while r { if dbgr(r).kind != .LABEL array_add(*recs, r); r = dbgr(r).next; }
+        for < recs {
+            key := debug_variable_of(it, true);
+            dup := false;
+            for s: seen if debug_variable_eq(s, key) { dup = true; break; }
+            if !dup { array_add(*seen, key); continue; }
+            if dbgr(it).kind == .ASSIGN && dbg_assign_has_linked_insts(it) continue;
+            array_add(*to_remove, it);
+        }
+        i = inst(i).prev;
+    }
+    for to_remove dbgr_erase(it);
+    return to_remove.count > 0;
+}
+
+// removeRedundantDbgInstrsUsingForwardScan
+remove_redundant_dbg_forward :: (bb: Value_Id) -> bool {
+    removed := false;
+    Entry :: struct { key: Debug_Variable; vals: [..] Value_Id; expr: Md_Id; }
+    map: [..] Entry; map.allocator = temp;
+    for i: block_insts(bb) {
+        r := inst(i).records;
+        while r {
+            nr := dbgr(r).next;
+            defer r = nr;
+            if dbgr(r).kind == .LABEL || dbgr(r).kind == .DECLARE continue;
+            key := debug_variable_of(r, false);
+            slot := -1;
+            for map if debug_variable_eq(it.key, key) { slot = it_index; break; }
+            inserted := slot < 0;
+            if inserted { e: Entry; e.key = key; e.vals.allocator = temp; array_add(*map, e); slot = map.count - 1; }
+            is_value_kind := dbgr(r).kind != .ASSIGN || !dbg_assign_has_linked_insts(r);
+            vals: [..] Value_Id; vals.allocator = temp;
+            dbgr_location_ops(r, *vals);
+            e := *map[slot];
+            same := !inserted && e.vals.count == vals.count && e.expr == dbgr(r).expr;
+            if same for vals if e.vals[it_index] != it { same = false; break; }
+            if !same {
+                e.vals.count = 0;
+                for vals array_add(*e.vals, it);
+                e.expr = ifx is_value_kind then dbgr(r).expr else NONE;
+                continue;
+            }
+            if !is_value_kind continue;
+            dbgr_erase(r);
+            removed = true;
+        }
+    }
+    return removed;
+}
+
+// removeUndefDbgAssignsFromEntryBlock
+remove_undef_dbg_assigns_from_entry_block :: (bb: Value_Id) -> bool {
+    removed := false;
+    Agg :: struct { var: Md_Id; inlined: Md_Id; }
+    seen: [..] Agg; seen.allocator = temp;
+    for i: block_insts(bb) {
+        r := inst(i).records;
+        while r {
+            nr := dbgr(r).next;
+            defer r = nr;
+            k := dbgr(r).kind;
+            if k != .VALUE && k != .ASSIGN continue;
+            is_value_kind := k == .VALUE || !dbg_assign_has_linked_insts(r);
+            a := Agg.{dbgr(r).var, diloc_inlined_at(dbgr(r).dbg)};
+            found := false;
+            for seen if it.var == a.var && it.inlined == a.inlined { found = true; break; }
+            if found continue;
+            is_kill := dbgr_is_kill_location(r) && is_value_kind;
+            if !is_kill array_add(*seen, a);
+            else if k == .ASSIGN { dbgr_erase(r); removed = true; }
+        }
+    }
+    return removed;
+}
+
+// isAssignmentTrackingEnabled: the "debug-info-assignment-tracking" module flag is set
+assignment_tracking_enabled :: () -> bool {
+    for nm: ir.named_md {
+        if nm.name != "llvm.module.flags" continue;
+        for fl: nm.ops {
+            if fl == NONE || ir.mds[fl].kind != .TUPLE || ir.mds[fl].nops < 3 continue;
+            k := md_op(fl, 1);
+            if k == NONE || ir.mds[k].kind != .STRING || ir.mds[k].str != "debug-info-assignment-tracking" continue;
+            v := md_op(fl, 2);
+            return v != NONE && ir.mds[v].kind == .VALUE && vkind(ir.mds[v].value) == .C_INT && const_int_zext(ir.mds[v].value) != 0;
+        }
+    }
+    return false;
+}
+
+// llvm::RemoveRedundantDbgInstrs
+remove_redundant_dbg_instrs :: (bb: Value_Id) -> bool {
+    changed := remove_redundant_dbg_backward(bb);
+    if bb == fn_entry(block_fn(bb)) && assignment_tracking_enabled() changed |= remove_undef_dbg_assigns_from_entry_block(bb);
+    changed |= remove_redundant_dbg_forward(bb);
+    return changed;
+}
+
+// RedundantDbgInstEliminationPass::run
+redundant_dbg_inst_elim_run :: (f: Value_Id) -> Preserved {
+    changed := false;
+    for b: fn_blocks(f) changed |= remove_redundant_dbg_instrs(b);
+    if !changed return PRESERVE_ALL;
+    return preserved_cfg();
+}

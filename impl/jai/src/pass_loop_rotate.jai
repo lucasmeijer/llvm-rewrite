@@ -391,62 +391,7 @@ dbg_variable_key :: (r: u32, with_fragment: bool) -> string {
     return tprint("%:%:%:%:%", rec.var, has, off, size, ia);
 }
 
-// RemoveRedundantDbgInstrs(BB) (assignment tracking: fails loudly)
-remove_redundant_dbg_instrs :: (b: Value_Id) -> bool {
-    changed := false;
-    // removeRedundantDbgInstrsUsingBackwardScan (the variable set is per instruction)
-    to_remove: [..] u32; to_remove.allocator = temp;
-    recs: [..] u32; recs.allocator = temp;
-    i := block_last(b);
-    while i != NONE {
-        recs.count = 0;
-        x := inst(i).records;
-        while x != 0 { array_add(*recs, x); x = dbgr(x).next; }
-        seen: Table(string, bool); seen.allocator = temp;
-        for < r: recs {
-            if dbgr(r).kind == .LABEL continue;
-            if dbgr(r).kind == .ASSIGN fatal("RemoveRedundantDbgInstrs with #dbg_assign is not implemented yet");
-            key := dbg_variable_key(r, true);
-            if !table_contains(*seen, key) { table_set(*seen, key, true); continue; }
-            array_add(*to_remove, r);
-        }
-        i = inst_prev(i);
-    }
-    for to_remove dbgr_erase(it);
-    changed |= to_remove.count > 0;
-    // removeRedundantDbgInstrsUsingForwardScan
-    Vm :: struct { vals: [..] Value_Id; expr: Md_Id; }
-    vmap: Table(string, Vm); vmap.allocator = temp;
-    vals: [..] Value_Id; vals.allocator = temp;
-    for i2: block_insts(b) {
-        x := inst(i2).records;
-        while x != 0 {
-            nx := dbgr(x).next;
-            rec := dbgr(x);
-            if rec.kind != .LABEL && rec.kind != .DECLARE {
-                key := dbg_variable_key(x, false);
-                dbgr_location_ops(x, *vals);
-                e := table_find_pointer(*vmap, key);
-                same := false;
-                if e && e.expr == rec.expr && e.vals.count == vals.count {
-                    same = true;
-                    for vals if e.vals[it_index] != it { same = false; break; }
-                }
-                if !same {
-                    nv: Vm; nv.vals.allocator = temp;
-                    for vals array_add(*nv.vals, it);
-                    nv.expr = rec.expr;
-                    table_set(*vmap, key, nv);
-                } else {
-                    dbgr_erase(x);
-                    changed = true;
-                }
-            }
-            x = nx;
-        }
-    }
-    return changed;
-}
+// remove_redundant_dbg_instrs (RemoveRedundantDbgInstrs) is in salvage_debug.jai
 
 // Loop::setLoopID
 li_set_loop_id :: (li: *Loop_Info, l: Loop_Id, id: Md_Id) {
