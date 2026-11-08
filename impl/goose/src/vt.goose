@@ -2088,3 +2088,7 @@ fn get_underlying_object_aggressive(v: i32) -> i32 {
     }
     return if obj >= 0 { obj } else { first_obj };
 }
+
+// ::ComputeNumSignBits(V, SQ) inside ValueTracking (computeOverflowForSigned*): the caller's query,
+// DomConditionCache included
+recursive fn ncsb_q(v: i32, depth: i64) -> i64 { ncsb(v, all_elts_of(v), depth) }

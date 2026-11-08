@@ -919,7 +919,7 @@ fn global_unsafe_for_equality(g: i32) -> bool {
     let x = globs[glob_of(g)];
     let l = x.linkage as i64;
     if l == LK_LINKONCE_ANY || l == LK_WEAK_ANY || l == LK_COMMON || l == LK_EXTERN_WEAK { return true; }
-    if x.unnamed == 1 { return true; }
+    if x.unnamed == 2 { return true; }
     if vals[g].kind == VK_GVAR {
         let t = x.vty;
         if !cf_ty_is_sized(t) { return true; }

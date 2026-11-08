@@ -366,7 +366,7 @@ fn fold_vector_binop_impl(inst: i32) -> i32 {
             break;
         }
     }
-    if is_associative_op(o) && is_commutative_op(o) {
+    if ic_inst_is_associative(inst) && is_commutative_op(o) {
         if is_inst_op(rhs, OP_SHUFFLEVECTOR) { let t = lhs; lhs = rhs; rhs = t; }
         if !(is_inst_op(lhs, OP_SHUFFLEVECTOR) && has_one_use(lhs) && m_undef(op(lhs, 1))) { return -1; }
         let x = op(lhs, 0);

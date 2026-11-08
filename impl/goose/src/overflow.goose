@@ -86,9 +86,9 @@ fn ovf_unsigned_mul(l: i32, r: i32, cx: i32, nsw: bool) -> i64 {
 fn ovf_signed_mul(l: i32, r: i32, cx: i32) -> i64 {
     let w = ty_scalar_bits(vals[l].ty);
     kb_cxt = cx;
-    let s1 = num_sign_bits(l, 0);
+    let s1 = ncsb_q(l, 0);
     kb_cxt = cx;
-    let s2 = num_sign_bits(r, 0);
+    let s2 = ncsb_q(r, 0);
     let sb = s1 + s2;
     if sb > w + 1 { return OF_NEVER; }
     if sb == w + 1 {
@@ -111,10 +111,10 @@ fn ovf_unsigned_add(l: i32, r: i32, cx: i32) -> i64 {
 fn ovf_signed_add_op(l: i32, r: i32, add: i32, cx: i32) -> i64 {
     if add >= 0 && op_nsw(add) { return OF_NEVER; }
     kb_cxt = cx;
-    let s1 = num_sign_bits(l, 0);
+    let s1 = ncsb_q(l, 0);
     if s1 > 1 {
         kb_cxt = cx;
-        if num_sign_bits(r, 0) > 1 { return OF_NEVER; }
+        if ncsb_q(r, 0) > 1 { return OF_NEVER; }
     }
     kb_cxt = cx;
     let lr = cr_including_known_bits(l, true);
@@ -151,10 +151,10 @@ fn ovf_signed_sub(l: i32, r: i32, cx: i32) -> i64 {
         if is_guaranteed_not_to_be_undef(l, cx, 0) { return OF_NEVER; }
     }
     kb_cxt = cx;
-    let s1 = num_sign_bits(l, 0);
+    let s1 = ncsb_q(l, 0);
     if s1 > 1 {
         kb_cxt = cx;
-        if num_sign_bits(r, 0) > 1 { return OF_NEVER; }
+        if ncsb_q(r, 0) > 1 { return OF_NEVER; }
     }
     kb_cxt = cx;
     let lr = cr_including_known_bits(l, true);

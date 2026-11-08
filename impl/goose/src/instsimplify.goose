@@ -1402,14 +1402,14 @@ fn is_static_alloca(v: i32) -> bool {
     if !is_inst_op(v, OP_ALLOCA) { return false; }
     if !is_constant(op(v, 0)) || vals[op(v, 0)].kind != VK_CINT { return false; }
     let f = inst_func(v);
-    return inst_parent(v) == func_entry(f) && (insts[inst_of(v)].bits & 4) == 0;
+    return inst_parent(v) == func_entry(f) && (insts[inst_of(v)].bits & 1) == 0;
 }
 fn is_alloc_disjoint(v: i32) -> bool {
     if is_inst_op(v, OP_ALLOCA) { return is_static_alloca(v); }
     if is_global(v) && vals[v].kind != VK_IFUNC {
         let g = globs[glob_of(v)];
         let l = g.linkage as i64;
-        return (l == LK_INTERNAL || l == LK_PRIVATE || g.vis == 1 || g.vis == 2 || g.unnamed == 1) && g.tls == 0;
+        return (l == LK_INTERNAL || l == LK_PRIVATE || g.vis == 1 || g.vis == 2 || g.unnamed == 2) && g.tls == 0;
     }
     return is_byval_arg(v);
 }
