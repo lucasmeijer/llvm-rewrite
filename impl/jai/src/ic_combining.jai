@@ -615,7 +615,7 @@ is_alloc_site_removable :: (ai: Value_Id, users: *[..] Value_Id, know_init: bool
 is_aligned_alloc_proto :: (f: Value_Id) -> bool {
     ft := glob(f).value_type;
     return func_nparams(ft) == 2 && is_ptr_type(func_ret(ft)) && is_int_type(func_param(ft, 0)) &&
-           type_int_width(func_param(ft, 0)) == 64 && func_param(ft, 0) == func_param(ft, 1);
+           type_int_width(func_param(ft, 0)) == dl_index_size_bits(0) && func_param(ft, 0) == func_param(ft, 1);   // size_t: the index width of address space 0
 }
 
 // visitAllocSite

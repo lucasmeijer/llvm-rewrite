@@ -6,7 +6,7 @@
 // get_base_object_size in basic_aa.jai) use the tables here.
 // ObjectSizeOffsetEvaluator (llvm.objectsize with `dynamic` = true) builds its code with a plain IRBuilder (no
 // worklist); the instructions it inserted are found by value id (everything it creates is new).
-// Not ported: GetStringLength for strdup-like sizes (fails loudly).
+// Also ValueTracking's getConstantDataArrayInfo / GetStringLength (strdup-like sizes).
 
 AT_OPNEW :: 1; AT_MALLOC :: 2; AT_STRDUP :: 4;
 AT_MALLOC_OR_OPNEW :: AT_MALLOC | AT_OPNEW;
@@ -184,7 +184,19 @@ mb_get_alloc_size :: (cb: Value_Id, use_mapper := false, mode := Os_Mode.EXACT_S
         okp, p := os_aggregate_possible_constant_values(v, mode, scalar_bits(v));
         return okp, p;
     }
-    if d.ty == AT_STRDUP fatal("MemoryBuiltins: getAllocSize of strdup-like calls (GetStringLength) is not supported yet");
+    if d.ty == AT_STRDUP {
+        // Mapper(CB->getArgOperand(0)) is the identity for pointers
+        size := ap_from_u64(bits, get_string_length(call_arg(cb, 0)));
+        if ap_is_zero(size) return false, .{};
+        if d.fst > 0 {
+            arg := call_arg(cb, cast(u32) d.fst);
+            oka, a := mapped(arg, use_mapper, mode);
+            if !oka || !is_int_type(vtype(arg)) return false, .{};
+            max_size := ap_zext(a, bits);
+            if ap_ugt(size, max_size) size = ap_add(max_size, ap_one(bits));
+        }
+        return true, size;
+    }
     oka, size := mapped(call_arg(cb, cast(u32) d.fst), use_mapper, mode);
     if !oka return false, .{};
     if !mb_checked_zext_or_trunc(*size, bits) return false, .{};
@@ -546,7 +558,7 @@ os_find_load_offset_range :: (vis: *Os_Visitor, load: Value_Id, bb: Value_Id, fr
 is_posix_memalign_proto :: (f: Value_Id) -> bool {
     ft := glob(f).value_type;
     return func_nparams(ft) == 3 && is_int_type(func_ret(ft)) && type_int_width(func_ret(ft)) == 32 &&
-           is_ptr_type(func_param(ft, 0)) && is_int_type(func_param(ft, 1)) && type_int_width(func_param(ft, 1)) == 64 &&
+           is_ptr_type(func_param(ft, 0)) && is_int_type(func_param(ft, 1)) && type_int_width(func_param(ft, 1)) == dl_index_size_bits(0) &&
            func_param(ft, 1) == func_param(ft, 2);
 }
 
@@ -738,4 +750,101 @@ irb_type_size :: (b: *Irb, ty: Type_Id, size: u64, scalable: bool) -> Value_Id {
     vs := irb_intrinsic(b, "llvm.vscale", .[ty], .[]);
     if size == 1 return vs;
     return irb_binop(b, .MUL, vs, const_int(ty, size), "", F_NUW);
+}
+
+// ---------------------------------------------------------------- ValueTracking.cpp: getConstantDataArrayInfo / GetStringLength
+
+// ConstantDataArraySlice: Array == null (zero initializer) or the element values
+Cda_Slice :: struct { has_array: bool; elts: [..] u64; offset: u64; length: u64; }
+
+// getConstantDataArrayInfo(V, Slice, ElementSize, Offset)
+get_constant_data_array_info :: (v: Value_Id, element_size: u32, offset_in: u64 = 0) -> (bool, Cda_Slice) {
+    sl: Cda_Slice; sl.elts.allocator = temp;
+    esb := cast(u64) element_size / 8;
+    gv := get_underlying_object(v);
+    if vkind(gv) != .GLOBAL_VAR || !glob(gv).is_const || !gv_has_definitive_initializer(gv) return false, sl;
+    base, off := strip_and_accumulate_constant_offsets(v, ap_zero(dl_index_type_size_bits(vtype(v))), true);
+    if base != gv return false, sl;
+    start := ap_limited(off);
+    if start == 0xFFFF_FFFF_FFFF_FFFF return false, sl;
+    if start % esb != 0 return false, sl;
+    offset := offset_in + start / esb;
+    init := gv_initializer(gv);
+    if is_null_value(init) {
+        len := dl_type_store_size(glob(gv).value_type) / esb;
+        sl.has_array = false; sl.offset = 0;
+        sl.length = ifx len < offset then 0 else len - offset;
+        return true, sl;
+    }
+    got := false;
+    n: u64;
+    if vkind(init) == .C_DATA && type_kind(vtype(init)) == .ARRAY {
+        et := type_elem(vtype(init));
+        if is_int_type(et) && type_int_width(et) == element_size {
+            n = const_data_count(init);
+            for i: 0..cast(s64) n - 1 array_add(*sl.elts, const_data_elt(init, cast(u64) i));
+            got = true;
+        }
+    }
+    if !got {
+        if element_size != 8 return false, sl;
+        // ReadByteArrayFromGlobal(GV, Offset)
+        init_size := dl_type_alloc_size(vtype(init));
+        if init_size < offset return false, sl;
+        nbytes := init_size - offset;
+        if nbytes > 0xFFFF return false, sl;
+        raw := NewArray(cast(s64) nbytes, u8,, allocator = temp);
+        if !read_data_from_global(init, offset, raw, cast(u32) nbytes) return false, sl;
+        for raw array_add(*sl.elts, cast(u64) it);
+        offset = 0;
+        n = nbytes;
+    }
+    if offset > n return false, sl;
+    sl.has_array = true; sl.offset = offset; sl.length = n - offset;
+    return true, sl;
+}
+
+// GetStringLengthH
+get_string_length_h :: (v_in: Value_Id, phis: *[..] Value_Id, char_size: u32) -> u64 {
+    ALL :: 0xFFFF_FFFF_FFFF_FFFF;
+    v := strip_pointer_casts(v_in);
+    if is_phi(v) {
+        for phis.* if it == v return ALL;
+        array_add(phis, v);
+        so_far: u64 = ALL;
+        for k: 0..cast(s64) nops(v) - 1 {
+            len := get_string_length_h(op(v, cast(u32) k), phis, char_size);
+            if len == 0 return 0;
+            if len == ALL continue;
+            if len != so_far && so_far != ALL return 0;
+            so_far = len;
+        }
+        return so_far;
+    }
+    if is_inst(v) && inst_op(v) == .SELECT {
+        l1 := get_string_length_h(op(v, 1), phis, char_size);
+        if l1 == 0 return 0;
+        l2 := get_string_length_h(op(v, 2), phis, char_size);
+        if l2 == 0 return 0;
+        if l1 == ALL return l2;
+        if l2 == ALL return l1;
+        if l1 != l2 return 0;
+        return l1;
+    }
+    ok, sl := get_constant_data_array_info(v, char_size);
+    if !ok return 0;
+    if !sl.has_array return 1;
+    null_index: u64 = 0;
+    while null_index < sl.length {
+        if sl.elts[sl.offset + null_index] == 0 break;
+        null_index += 1;
+    }
+    return null_index + 1;
+}
+// GetStringLength(V, CharSize = 8): 0 = unknown
+get_string_length :: (v: Value_Id, char_size: u32 = 8) -> u64 {
+    if !is_ptr_type(vtype(v)) return 0;
+    phis: [..] Value_Id; phis.allocator = temp;
+    len := get_string_length_h(v, *phis, char_size);
+    return ifx len == 0xFFFF_FFFF_FFFF_FFFF then cast(u64) 1 else len;
 }
