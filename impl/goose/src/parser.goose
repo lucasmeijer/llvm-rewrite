@@ -3069,7 +3069,13 @@ fn declare_forward_intrinsics() {
 
 // opt's DataLayout callback: no datalayout in the IR but a triple -> Triple::computeDataLayout.
 var cl_mtriple: u8[>..];
+var cl_datalayout: u8[>..];     // -data-layout: overrides the module's (highest priority in opt's callback)
 fn infer_datalayout() {
+    if cl_datalayout.len > 0 {
+        modules[cur_module].datalayout = intern(cl_datalayout);
+        dl_parse(cl_datalayout);
+        return;
+    }
     if modules[cur_module].datalayout >= 0 && strs[modules[cur_module].datalayout].len > 0 { return; }
     var t: u8[>..] = [];
     if cl_mtriple.len > 0 { t.append(cl_mtriple); }

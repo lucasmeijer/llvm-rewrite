@@ -26,6 +26,7 @@ import autoupgrade;
 import intrinsics;
 import constfold;
 import mem2reg;
+import instsimplify;
 import analyses;
 
 fn sr_not_ported(what: const u8[:]) { fatal(str("SROA: ", what, " is not ported yet")); }
@@ -33,10 +34,10 @@ fn sr_not_ported(what: const u8[:]) { fatal(str("SROA: ", what, " is not ported 
 // ---------------------------------------------------------------------------------------------
 // Scratch sets and maps keyed by value or use ids (epoch-stamped, O(1) clear), private to SROA.
 
-let SR_NS = 16;
+let SR_NS = 20;
 var sr_stamp: i32[>..];
 var sr_data: i64[>..];
-var sr_epoch: i32[16] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+var sr_epoch: i32[20] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
 let S_VUSES = 0;       // PtrUseVisitor VisitedUses (use ids)
 let S_VDEAD = 1;       // SliceBuilder VisitedDeadInsts
 let S_MTMAP = 2;       // SliceBuilder MemTransferSliceMap (inst -> slice index)
@@ -53,6 +54,10 @@ let S_AGGV = 12;       // AggLoadStoreRewriter Visited (users)
 let S_SPLIT = 13;      // presplit: SplitOffsetsMap (inst -> record index)
 let S_UNSPL = 14;      // presplit: UnsplittableLoads
 let S_DEL = 15;        // deleteDeadInstructions DeletedAllocas / misc
+let S_AVAIL = 16;      // SSAUpdater AvailableVals (block -> value)
+let S_BBMAP = 17;      // SSAUpdaterImpl BBMap (block -> info index)
+let S_REPL = 18;       // LoadAndStorePromoter ReplacedLoads
+let S_UBB = 19;        // LoadAndStorePromoter UsesByBlock (block -> count, -1 = processed)
 
 fn sr_clear(s: i64) { sr_epoch[s] += 1; }
 fn sr_has(s: i64, id: i32) -> bool {
@@ -3243,8 +3248,8 @@ fn run_on_alloca(ai: i32) -> bool, bool {
     build_slices(ai);
     if as_escaped >= 0 { return changed, cfg_changed; }
     if as_escaped_ro >= 0 {
-        sr_not_ported("propagateStoredValuesToLoads (an alloca escaping read-only; needs SSAUpdater)");
-        return changed, cfg_changed;
+        propagate_stored_values_to_loads(ai);
+        return true, cfg_changed;
     }
     for du in as_dead_users {
         for k in nops(du) { clobber_use(vals[du].ops + k as i32); }
@@ -3378,3 +3383,435 @@ fn sroa_run(fv: i32, preserve_cfg: bool, agg_to_vec: bool) -> u32 {
 
 // isAssignmentTrackingEnabled(M): the "debug-info-assignment-tracking" module flag
 fn func_assignment_tracking(fv: i32) -> bool { return false; }
+
+// ---------------------------------------------------------------------------------------------
+// SSAUpdater + SSAUpdaterImpl (llvm/lib/Transforms/Utils/SSAUpdater.cpp,
+// llvm/include/llvm/Transforms/Utils/SSAUpdaterImpl.h) and LoadAndStorePromoter::run, as used by
+// SROA::propagateStoredValuesToLoads (BasicLoadAndStorePromoter).
+
+var su_ty: i32 = -1;
+var su_name: u8[>..];
+// BBInfo records
+var bi_bb: i32[>..<];
+var bi_aval: i32[>..<];
+var bi_def: i32[>..<];
+var bi_num: i32[>..<];
+var bi_idom: i32[>..<];
+var bi_pat: i32[>..<];
+var bi_np: i32[>..<];
+var bi_tag: i32[>..<];
+var bi_preds: i32[>..<];
+
+fn su_avail(bb: i32) -> i32 { return sr_get(S_AVAIL, bb, -1) as i32; }
+fn su_set_avail(bb: i32, v: i32) { sr_set(S_AVAIL, bb, v); }
+fn su_new_info(bb: i32, v: i32) -> i32 {
+    let id = bi_bb.len as i32;
+    bi_bb.push(bb); bi_aval.push(v); bi_def.push(if v >= 0 { id } else { -1 }); bi_num.push(0);
+    bi_idom.push(-1); bi_pat.push(0); bi_np.push(0); bi_tag.push(-1);
+    return id;
+}
+fn su_map(bb: i32) -> i32 { return sr_get(S_BBMAP, bb, -1) as i32; }
+
+// FindPredecessorBlocks
+fn su_preds(bb: i32, out: i32[>..<]&) {
+    out.clear();
+    let f = block_first(bb);
+    if f >= 0 && iop(f) == OP_PHI { for k in nops(f) { out.push(phi_block(f, k)); } }
+    else { each_pred(bb) { p => out.push(p); }; }
+}
+
+fn su_create_phi(bb: i32, np: i64) -> i32 {
+    let pn = new_inst(OP_PHI, su_ty, np);
+    vals[pn].nops = 0;
+    inst_insert_before(pn, block_first(bb));
+    if su_name.len > 0 { set_name(pn, su_name); }
+    return pn;
+}
+
+// SSAUpdaterImpl::GetValue
+fn su_get_value_impl(bb: i32) -> i32 {
+    bi_bb.clear(); bi_aval.clear(); bi_def.clear(); bi_num.clear(); bi_idom.clear();
+    bi_pat.clear(); bi_np.clear(); bi_tag.clear(); bi_preds.clear();
+    sr_clear(S_BBMAP);
+    var block_list: i32[>..<] = [];
+    // BuildBlockList
+    var roots: i32[>..<] = [];
+    var wl: i32[>..<] = [];
+    var info = su_new_info(bb, -1);
+    sr_set(S_BBMAP, bb, info);
+    wl.push(info);
+    var preds: i32[>..<] = [];
+    while wl.len > 0 {
+        info = wl.pop();
+        su_preds(bi_bb[info], preds);
+        bi_np[info] = preds.len as i32;
+        bi_pat[info] = bi_preds.len as i32;
+        for k in preds.len { bi_preds.push(-1); }
+        for k in preds.len {
+            let pred = preds[k];
+            let m = su_map(pred);
+            if m >= 0 { bi_preds[bi_pat[info] + k] = m; continue; }
+            let pv = su_avail(pred);
+            let pi = su_new_info(pred, pv);
+            sr_set(S_BBMAP, pred, pi);
+            bi_preds[bi_pat[info] + k] = pi;
+            if pv >= 0 { roots.push(pi); continue; }
+            wl.push(pi);
+        }
+    }
+    let pseudo = su_new_info(-1, -1);
+    var num: i32 = 1;
+    while roots.len > 0 {
+        info = roots.pop();
+        bi_idom[info] = pseudo;
+        bi_num[info] = -1;
+        wl.push(info);
+    }
+    while wl.len > 0 {
+        info = wl[wl.len - 1];
+        if bi_num[info] == -2 {
+            bi_num[info] = num; num++;
+            if bi_aval[info] < 0 { block_list.push(info); }
+            wl.pop();
+            continue;
+        }
+        bi_num[info] = -2;
+        let t = block_terminator(bi_bb[info]);
+        if t >= 0 {
+            for k in term_nsucc(t) {
+                let si = su_map(term_succ(t, k));
+                if si < 0 || bi_num[si] != 0 { continue; }
+                bi_num[si] = -1;
+                wl.push(si);
+            }
+        }
+    }
+    bi_num[pseudo] = num;
+    if block_list.len == 0 {
+        let v = c_poison(su_ty);
+        su_set_avail(bb, v);
+        return v;
+    }
+    // FindDominators
+    fn intersect(a0: i32, b0: i32) -> i32 {
+        var a = a0; var b = b0;
+        while a != b {
+            while bi_num[a] < bi_num[b] { a = bi_idom[a]; if a < 0 { return b; } }
+            while bi_num[b] < bi_num[a] { b = bi_idom[b]; if b < 0 { return a; } }
+        }
+        return a;
+    }
+    var changed = true;
+    while changed {
+        changed = false;
+        var i = block_list.len;
+        while i > 0 {
+            i--;
+            let inf = block_list[i];
+            var nid: i32 = -1;
+            for p in bi_np[inf] {
+                let pr = bi_preds[bi_pat[inf] + p];
+                if bi_num[pr] == 0 {
+                    bi_aval[pr] = c_poison(su_ty);
+                    su_set_avail(bi_bb[pr], bi_aval[pr]);
+                    bi_def[pr] = pr;
+                    bi_num[pr] = bi_num[pseudo];
+                    bi_num[pseudo] += 1;
+                }
+                if nid < 0 { nid = pr; } else { nid = intersect(nid, pr); }
+            }
+            if nid >= 0 && nid != bi_idom[inf] { bi_idom[inf] = nid; changed = true; }
+        }
+    }
+    // FindPHIPlacement
+    fn def_in_frontier(p0: i32, idom: i32) -> bool {
+        var p = p0;
+        while p != idom { if bi_def[p] == p { return true; } p = bi_idom[p]; }
+        return false;
+    }
+    changed = true;
+    while changed {
+        changed = false;
+        var i = block_list.len;
+        while i > 0 {
+            i--;
+            let inf = block_list[i];
+            if bi_def[inf] == inf { continue; }
+            var nd = bi_def[bi_idom[inf]];
+            for p in bi_np[inf] { if def_in_frontier(bi_preds[bi_pat[inf] + p], bi_idom[inf]) { nd = inf; break; } }
+            if nd != bi_def[inf] { bi_def[inf] = nd; changed = true; }
+        }
+    }
+    // FindAvailableVals
+    for inf in block_list {
+        if bi_def[inf] != inf { continue; }
+        // FindSingularVal
+        if bi_np[inf] > 0 {
+            let sv = bi_aval[bi_def[bi_preds[bi_pat[inf]]]];
+            var ok = sv >= 0;
+            if ok { for p in 1..bi_np[inf] { let pv = bi_aval[bi_def[bi_preds[bi_pat[inf] + p]]]; if pv < 0 || pv != sv { ok = false; } } }
+            if ok {
+                su_set_avail(bi_bb[inf], sv);
+                bi_aval[inf] = sv;
+                bi_def[inf] = bi_def[bi_preds[bi_pat[inf]]];
+                continue;
+            }
+        }
+        su_find_existing_phi(bi_bb[inf]);
+        if bi_aval[inf] >= 0 { continue; }
+        let ph = su_create_phi(bi_bb[inf], bi_np[inf]);
+        bi_aval[inf] = ph;
+        su_set_avail(bi_bb[inf], ph);
+    }
+    var i = block_list.len;
+    while i > 0 {
+        i--;
+        let inf = block_list[i];
+        if bi_def[inf] != inf { su_set_avail(bi_bb[inf], bi_aval[bi_def[inf]]); continue; }
+        let ph = bi_aval[inf];
+        if !(is_inst(ph) && iop(ph) == OP_PHI && nops(ph) == 0) { continue; }
+        for p in bi_np[inf] {
+            var pi = bi_preds[bi_pat[inf] + p];
+            let pred = bi_bb[pi];
+            if bi_def[pi] != pi { pi = bi_def[pi]; }
+            phi_add_incoming(ph, bi_aval[pi], pred);
+        }
+    }
+    return bi_aval[bi_def[su_map(bb)]];
+}
+
+fn su_find_existing_phi(bb: i32) {
+    var count = 0;
+    var x = block_first(bb);
+    var tagged: i32[>..<] = [];
+    while x >= 0 && iop(x) == OP_PHI {
+        count++;
+        if count > 80 { break; }
+        if su_phi_matches(x, tagged) {
+            for b in tagged {
+                let ph = bi_tag[b];
+                let pbb = inst_parent(ph);
+                su_set_avail(pbb, ph);
+                bi_aval[su_map(pbb)] = ph;
+            }
+            break;
+        }
+        x = inst_next(x);
+    }
+}
+
+fn su_phi_matches(phi0: i32, tagged: i32[>..<]&) -> bool {
+    tagged.clear();
+    var wl: i32[>..<] = [];
+    wl.push(phi0);
+    let pb = su_map(inst_parent(phi0));
+    bi_tag[pb] = phi0;
+    tagged.push(pb);
+    var ok = true;
+    while ok && wl.len > 0 {
+        let phi = wl.pop();
+        for k in nops(phi) {
+            let iv = op(phi, k);
+            var pi = su_map(phi_block(phi, k));
+            if pi < 0 { ok = false; break; }
+            if bi_def[pi] != pi { pi = bi_def[pi]; }
+            if bi_aval[pi] >= 0 {
+                if iv == bi_aval[pi] { continue; }
+                ok = false; break;
+            }
+            if !(is_inst(iv) && iop(iv) == OP_PHI) || inst_parent(iv) != bi_bb[pi] { ok = false; break; }
+            if bi_tag[pi] >= 0 {
+                if iv == bi_tag[pi] { continue; }
+                ok = false; break;
+            }
+            bi_tag[pi] = iv;
+            tagged.push(pi);
+            wl.push(iv);
+        }
+    }
+    if !ok {
+        for b in tagged { bi_tag[b] = -1; }
+        tagged.clear();
+    }
+    return ok;
+}
+
+fn su_get_value_at_end(bb: i32) -> i32 {
+    let v = su_avail(bb);
+    if v >= 0 { return v; }
+    return su_get_value_impl(bb);
+}
+
+// SSAUpdater::GetValueInMiddleOfBlock
+fn su_get_value_in_middle(bb: i32) -> i32 {
+    if !sr_has(S_AVAIL, bb) { return su_get_value_at_end(bb); }
+    var pb: i32[>..<] = [];
+    var pv: i32[>..<] = [];
+    var singular: i32 = -1;
+    let f = block_first(bb);
+    var preds: i32[>..<] = [];
+    su_preds(bb, preds);
+    for k in preds.len {
+        let v = su_get_value_at_end(preds[k]);
+        pb.push(preds[k]); pv.push(v);
+        if k == 0 { singular = v; } else if v != singular { singular = -1; }
+    }
+    if pb.len == 0 { return c_poison(su_ty); }
+    if singular >= 0 { return singular; }
+    if f >= 0 && iop(f) == OP_PHI {
+        var x = f;
+        while x >= 0 && iop(x) == OP_PHI {
+            // IsEquivalentPHI (ValueMapping keeps the last value per block)
+            var nuniq: i64 = 0;
+            for k in pb.len { var dup = false; for j in k { if pb[j] == pb[k] { dup = true; } } if !dup { nuniq++; } }
+            if nops(x) == nuniq {
+                var eq = true;
+                for k in nops(x) {
+                    var mv: i32 = -1;
+                    for j in pb.len { if pb[j] == phi_block(x, k) { mv = pv[j]; } }
+                    if mv != op(x, k) { eq = false; }
+                }
+                if eq { return x; }
+            }
+            x = inst_next(x);
+        }
+    }
+    let ph = new_inst(OP_PHI, su_ty, pb.len);
+    vals[ph].nops = 0;
+    inst_insert_before(ph, block_first(bb));
+    if su_name.len > 0 { set_name(ph, su_name); }
+    for k in pb.len { phi_add_incoming(ph, pv[k], pb[k]); }
+    let sv = simplify_instruction(ph);
+    if sv >= 0 { sr_erase(ph); return sv; }
+    let fnp = first_non_phi(bb);
+    if fnp >= 0 { let dl = inst_get_md(fnp, 0); if dl >= 0 { inst_set_md(ph, 0, dl); } }
+    return ph;
+}
+
+// LoadAndStorePromoter(Insts, SSA, BaseName = "") + run(Insts) with BasicLoadAndStorePromoter's hooks.
+fn load_store_promote(insts: const i32[:], zero_ty: i32) {
+    let first = insts[0];
+    let some = if iop(first) == OP_LOAD { first } else { op(first, 0) };
+    su_ty = vals[some].ty;
+    su_name.clear();
+    su_name.append(val_name(some));
+    sr_clear(S_AVAIL);
+    sr_clear(S_REPL);
+    sr_clear(S_UBB);
+    for u in insts { let b = inst_parent(u); sr_set(S_UBB, b, sr_get(S_UBB, b, 0) + 1); }
+    var live_in: i32[>..<] = [];
+    for u in insts {
+        let bb = inst_parent(u);
+        let cnt = sr_get(S_UBB, bb, 0);
+        if cnt <= 0 { continue; }
+        if cnt == 1 {
+            if iop(u) == OP_STORE { su_set_avail(bb, op(u, 0)); }
+            else if iop(u) == OP_ALLOCA { su_set_avail(bb, c_undef(zero_ty)); }
+            else { live_in.push(u); }
+            sr_set(S_UBB, bb, -1);
+            continue;
+        }
+        var block_uses: i32[>..<] = [];
+        for x in insts { if inst_parent(x) == bb { block_uses.push(x); } }
+        var has_store = false;
+        for x in block_uses { if iop(x) == OP_STORE || iop(x) == OP_ALLOCA { has_store = true; } }
+        if !has_store {
+            for x in block_uses { live_in.push(x); }
+            sr_set(S_UBB, bb, -1);
+            continue;
+        }
+        // sort by block order
+        var pos: i64[>..<] = [];
+        for x in block_uses { var n: i64 = 0; var y = block_first(bb); while y >= 0 && y != x { n++; y = inst_next(y); } pos.push(n); }
+        var ord: i64[>..<] = [];
+        for k in block_uses.len { ord.push(k); }
+        sort(ord) { a, b => pos[a] < pos[b] };
+        var stored: i32 = -1;
+        for k in ord {
+            let x = block_uses[k];
+            if iop(x) == OP_LOAD {
+                if stored >= 0 { sr_rauw(x, stored); sr_set(S_REPL, x, stored); }
+                else { live_in.push(x); }
+                continue;
+            }
+            if iop(x) == OP_STORE { stored = op(x, 0); }
+            else if iop(x) == OP_ALLOCA { stored = c_undef(zero_ty); }
+        }
+        su_set_avail(bb, stored);
+        sr_set(S_UBB, bb, -1);
+    }
+    for ld in live_in {
+        var nv = su_get_value_in_middle(inst_parent(ld));
+        if nv == ld { nv = c_poison(vals[nv].ty); }
+        sr_rauw(ld, nv);
+        sr_set(S_REPL, ld, nv);
+    }
+    for u in insts {
+        if iop(u) == OP_STORE || iop(u) == OP_ALLOCA { continue; }
+        if has_uses(u) {
+            var nv = sr_get(S_REPL, u, -1) as i32;
+            while sr_has(S_REPL, nv) { nv = sr_get(S_REPL, nv, -1) as i32; }
+            sr_rauw(u, nv);
+        }
+        sr_erase(u);
+    }
+}
+
+// SROA::propagateStoredValuesToLoads
+fn propagate_stored_values_to_loads(ai: i32) {
+    var all_same = true;
+    var pty: i32 = -1;
+    var insts: i32[>..<] = [];
+    var bo: i64 = 0;
+    var eo: i64 = 0;
+    fn flush() {
+        if all_same && insts.len > 0 {
+            insts.push(ai);
+            load_store_promote(insts, pty);
+        }
+        all_same = true;
+        pty = -1;
+        insts.clear();
+    }
+    for k in sl.len {
+        let s = sl[k];
+        let u = uses[s.u].user;
+        if sr_is_assume_like(u) { continue; }
+        if s.b >= eo {
+            flush();
+            bo = s.b; eo = s.e;
+        } else if s.b != bo || s.e != eo {
+            all_same = false;
+            eo = max(eo, s.e);
+            continue;
+        }
+        if iop(u) == OP_LOAD {
+            let t = vals[u].ty;
+            if !sr_ldst_is_simple(u) || (pty >= 0 && t != pty) { all_same = false; }
+            pty = t;
+            insts.push(u);
+        } else if iop(u) == OP_STORE {
+            let t = vals[op(u, 0)].ty;
+            if !sr_ldst_is_simple(u) || (pty >= 0 && t != pty) { all_same = false; }
+            pty = t;
+            insts.push(u);
+        } else {
+            all_same = false;
+        }
+    }
+    flush();
+}
+
+// isAssumeLikeIntrinsic
+fn sr_is_assume_like(i: i32) -> bool {
+    if !is_inst(i) || iop(i) != OP_CALL { return false; }
+    let id = call_iid(i);
+    if id == 0 { return false; }
+    let names: const u8[:][] = ["llvm.assume", "llvm.sideeffect", "llvm.pseudoprobe", "llvm.dbg.assign", "llvm.dbg.declare",
+        "llvm.dbg.value", "llvm.dbg.label", "llvm.invariant.start", "llvm.invariant.end", "llvm.lifetime.start",
+        "llvm.lifetime.end", "llvm.experimental.noalias.scope.decl", "llvm.objectsize", "llvm.ptr.annotation",
+        "llvm.var.annotation"];
+    let nm = intr_name(id as i64);
+    for n in names { if starts_with(nm, n) && (nm.len == n.len || nm[n.len] == '.') { return true; } }
+    return false;
+}

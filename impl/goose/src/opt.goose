@@ -33,6 +33,7 @@ fn main() {
             write_stderr(str("opt: optimization pipelines are not implemented yet (", a, ")\n"));
             exit(1);
         }
+        else if starts_with(a, "-data-layout=") { cl_datalayout.append(a[13..]); }
         else if starts_with(a, "-opt-bisect-limit=") {
             let v, ok = parse_int(a[18..]);
             if !ok { write_stderr("opt: invalid -opt-bisect-limit\n"); exit(1); }
