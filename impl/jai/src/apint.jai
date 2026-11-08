@@ -442,3 +442,38 @@ kb_compute_for_add_sub :: (add: bool, nsw: bool, nuw: bool, lhs: Known_Bits, rhs
 }
 
 #import "Basic";
+
+// ---------------------------------------------------------------- division (APInt::udiv/sdiv/urem/srem)
+// Shift-subtract long division; the divisor must be nonzero.
+ap_udivrem :: (a: APInt, b: APInt) -> (q: APInt, r: APInt) {
+    assert(a.bits == b.bits);
+    assert(!ap_is_zero(b), "APInt division by zero");
+    q := ap_alloc(a.bits);
+    r := ap_alloc(a.bits);
+    i := cast(s64) a.bits - 1;
+    while i >= 0 {
+        // r = (r << 1) | bit i of a; r is < b <= 2^bits, so one extra bit is enough
+        top := ap_get_bit(r, a.bits - 1);
+        r = ap_shl(r, 1);
+        if ap_get_bit(a, cast(u32) i) ap_set_bit(*r, 0);
+        if top || !ap_ult(r, b) { r = ap_sub(r, b); ap_set_bit(*q, cast(u32) i); }
+        i -= 1;
+    }
+    return q, r;
+}
+ap_udiv :: (a: APInt, b: APInt) -> APInt { q, r := ap_udivrem(a, b); return q; }
+ap_urem :: (a: APInt, b: APInt) -> APInt { q, r := ap_udivrem(a, b); return r; }
+// APInt::sdiv: truncates toward zero
+ap_sdiv :: (a: APInt, b: APInt) -> APInt {
+    na := ap_is_negative(a); nb := ap_is_negative(b);
+    q := ap_udiv(ifx na then ap_neg(a) else a, ifx nb then ap_neg(b) else b);
+    if na != nb return ap_neg(q);
+    return q;
+}
+// APInt::srem: the result has the sign of the dividend
+ap_srem :: (a: APInt, b: APInt) -> APInt {
+    na := ap_is_negative(a); nb := ap_is_negative(b);
+    r := ap_urem(ifx na then ap_neg(a) else a, ifx nb then ap_neg(b) else b);
+    if na return ap_neg(r);
+    return r;
+}

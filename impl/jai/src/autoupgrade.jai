@@ -55,7 +55,7 @@ builder_call :: (b: *Builder, callee: Value_Id, args: [] Value_Id) -> Value_Id {
 // IRBuilder::CreateCast without constant folding of non-constants; constants fold like ConstantExpr::getCast
 builder_cast :: (b: *Builder, op: Opcode, v: Value_Id, dt: Type_Id, name := "") -> Value_Id {
     if vtype(v) == dt return v;
-    if is_constant_kind(vkind(v)) return const_cast(op, v, dt);
+    if is_constant_kind(vkind(v)) { f := fold_maybe_undesirable_cast(op, v, dt); if f != NONE return f; }
     i := new_inst(op, dt, 1);
     set_op(i, 0, v);
     builder_insert(b, i);

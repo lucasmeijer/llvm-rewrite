@@ -636,9 +636,15 @@ parse_alias_or_ifunc :: (name: string, id_in: u32, li: Linkage_Info, tls: u8, ua
     next();
     ty := parse_type();
     expect(.COMMA, "','");
-    // aliasee: typed constant
-    aty := parse_type();
-    aliasee := parse_constant(aty);
+    // aliasee: a typed constant, or a bitcast/getelementptr/addrspacecast/inttoptr expression without a type
+    aliasee: Value_Id;
+    if is_kw("bitcast") || is_kw("getelementptr") || is_kw("addrspacecast") || is_kw("inttoptr") {
+        aliasee = parse_constant(ir.t_ptr);
+    } else {
+        aty := parse_type();
+        aliasee = parse_constant(aty);
+    }
+    if !is_ptr_type(vtype(aliasee)) perr("An alias or ifunc must have pointer type");
     fw := take_fwd_global(name, *id);
     kind := ifx is_alias then Value_Kind.ALIAS else .IFUNC;
     as := ir.types[vtype(aliasee)].a;
@@ -1270,7 +1276,7 @@ parse_constant_keyword :: (ty: Type_Id) -> Value_Id {
         expect(.RPAREN, "')'");
         if !is_vector_type(ty) perr("vector constant must have vector type");
         if type_elem(ty) != vtype(c) perr("constant expression type mismatch");
-        return const_splat(ty, c);
+        return cf_get_splat(ty, c);
     }
     if s == "blockaddress" {
         next();
@@ -1299,7 +1305,7 @@ parse_constant_keyword :: (ty: Type_Id) -> Value_Id {
         expect_kw("to");
         dt := parse_type();
         expect(.RPAREN, "')'");
-        return const_cast(op, src, dt);
+        return ce_cast(op, src, dt);
     }
     if s == "add" || s == "sub" || s == "xor" {
         bop := ifx s == "add" then Opcode.ADD else ifx s == "sub" then Opcode.SUB else .XOR;
@@ -1315,7 +1321,7 @@ parse_constant_keyword :: (ty: Type_Id) -> Value_Id {
         b := parse_global_type_and_value();
         expect(.RPAREN, "')'");
         if vtype(a) != vtype(b) perr("operands of constexpr must have same type");
-        return const_binop(bop, a, b, flags);
+        return ce_binop(bop, a, b, flags);
     }
     if s == "getelementptr" {
         next();
@@ -1345,10 +1351,30 @@ parse_constant_keyword :: (ty: Type_Id) -> Value_Id {
         parse_global_value_vector(*elts);
         expect(.RPAREN, "')'");
         if elts.count == 0 perr("base of getelementptr must be a pointer");
-        return const_gep(srcty, elts, flags, extra);
+        idxs: [] Value_Id; idxs.data = elts.data + 1; idxs.count = elts.count - 1;
+        return ce_gep(srcty, elts[0], idxs, flags, extra);
     }
     if s == "extractelement" || s == "insertelement" || s == "shufflevector" {
-        perr("% constant expressions are not supported yet", s);
+        next();
+        expect(.LPAREN, "'('");
+        elts: [..] Value_Id; elts.allocator = temp;
+        parse_global_value_vector(*elts);
+        expect(.RPAREN, "')'");
+        if s == "extractelement" {
+            if elts.count != 2 perr("expected two operands to extractelement");
+            if !is_vector_type(vtype(elts[0])) || !is_int_type(vtype(elts[1])) perr("invalid extractelement operands");
+            return ce_extract_element(elts[0], elts[1]);
+        }
+        if s == "insertelement" {
+            if elts.count != 3 perr("expected three operands to insertelement");
+            if !is_vector_type(vtype(elts[0])) || vtype(elts[1]) != type_elem(vtype(elts[0])) || !is_int_type(vtype(elts[2]))
+                perr("invalid insertelement operands");
+            return ce_insert_element(elts[0], elts[1], elts[2]);
+        }
+        if elts.count != 3 perr("expected three operands to shufflevector");
+        if !is_vector_type(vtype(elts[0])) || vtype(elts[0]) != vtype(elts[1]) || !is_vector_type(vtype(elts[2]))
+            perr("invalid operands to shufflevector");
+        return ce_shuffle_vector(elts[0], elts[1], shuffle_mask_of(elts[2]));
     }
     if s == "ptrauth" perr("ptrauth constants are not supported yet");
     perr("expected value token (got '%')", s);
@@ -1362,56 +1388,7 @@ make_const_data :: (ty: Type_Id, elts: [] u64) -> Value_Id {
     return const_data(ty, elts);
 }
 
-// ConstantVector::getSplat
-const_splat :: (ty: Type_Id, c: Value_Id) -> Value_Id {
-    if type_kind(ty) == .SVECTOR {
-        if is_null_value(c) return const_zero(ty);
-        k := vkind(c);
-        if k == .C_INT return const_int_words(ty, const_int_value(c));
-        if k == .C_FP return const_fp_words(ty, const_fp_value(c));
-        perr("unsupported scalable splat");
-    }
-    n := type_count(ty);
-    elts := NewArray(cast(s64) n, Value_Id,, allocator = temp);
-    if n > 0 for i: 0..n-1 elts[i] = c;
-    return const_aggregate(.C_VECTOR, ty, elts);
-}
-
-const_cast :: (op: Opcode, src: Value_Id, dt: Type_Id) -> Value_Id {
-    // minimal constant folding (ConstantFoldCastInstruction): casts of poison/undef, null ptrtoint
-    k := vkind(src);
-    if k == .C_POISON return const_poison(dt);
-    if op == .BITCAST && vtype(src) == dt return src;
-    if k == .C_UNDEF && (op != .ZEXT && op != .SEXT) return const_undef(dt);
-    if k == .C_NULL && (op == .PTRTOINT || op == .PTRTOADDR) && is_int_type(dt) return const_int(dt, 0);
-    if k == .C_INT && op == .INTTOPTR && const_int_zext(src) == 0 && words_all_zero(const_int_value(src)) return const_null(dt);
-    return const_expr(op, dt, 0, NONE, .[src]);
-}
 words_all_zero :: (w: [] u64) -> bool { for w if it != 0 return false; return true; }
-
-const_binop :: (op: Opcode, a: Value_Id, b: Value_Id, flags: u32) -> Value_Id {
-    return const_expr(op, vtype(a), flags, NONE, .[a, b]);
-}
-
-const_gep :: (srcty: Type_Id, elts: [] Value_Id, flags: u32, extra: [] u32) -> Value_Id {
-    base := elts[0];
-    bt := vtype(base);
-    // result type: ptr (or vector of ptr if any operand is a vector)
-    rt := bt;
-    for elts if is_vector_type(vtype(it)) && !is_vector_type(rt) rt = type_vector(type_count(vtype(it)), bt, type_kind(vtype(it)) == .SVECTOR);
-    // ConstantFoldGetElementPtr: no-op GEPs (all indices zero/undef, no inrange) fold to the base
-    if elts.count == 1 return base;
-    if vkind(base) == .C_POISON return const_poison(rt);
-    if (flags & F_INRANGE) == 0 {
-        noop := true;
-        for i: 1..elts.count-1 {
-            ix := elts[i];
-            if !(is_null_value(ix) || vkind(ix) == .C_UNDEF || vkind(ix) == .C_POISON) noop = false;
-        }
-        if noop && rt == bt return base;
-    }
-    return const_expr(.GEP, rt, flags, srcty, elts, extra);
-}
 
 parse_blockaddress :: (ty: Type_Id, fn_tok: Token, bb_tok: Token) -> Value_Id {
     fnv: Value_Id = NONE;
@@ -2639,6 +2616,16 @@ parse_instruction_metadata_after_comma :: (i: Value_Id) {
         next();
         if P.tok.kind != .METADATA_VAR perr("expected metadata after comma");
     }
+}
+
+// ShuffleVectorInst::getShuffleMask(Constant) into temporary storage
+shuffle_mask_of :: (m: Value_Id) -> [] u32 {
+    start := ir.u32_pool.count;
+    get_shuffle_mask(m, type_count(vtype(m)));
+    r := NewArray(ir.u32_pool.count - start, u32,, allocator = temp);
+    for * r it.* = ir.u32_pool[start + it_index];
+    ir.u32_pool.count = start;
+    return r;
 }
 
 get_shuffle_mask :: (m: Value_Id, n: u64) {

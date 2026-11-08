@@ -12,6 +12,7 @@
 #load "intrinsics.jai";
 #load "gen_iit.jai";
 #load "autoupgrade.jai";
+#load "constfold.jai";
 
 #load "apint.jai";
 #load "ir_edit.jai";

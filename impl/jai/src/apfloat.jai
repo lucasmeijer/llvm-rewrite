@@ -696,3 +696,232 @@ ppc_from_decimal :: (s: string) -> (w: [] u64, ok: bool, overflow: bool) {
     if !ppc_decimal_is_double(s, d[0]) fatal("ppc_fp128 decimal literal '%' is not exactly a double (not supported yet)", s);
     return w, true, false;
 }
+
+// ---------------------------------------------------------------- IEEEFloat arithmetic (nearest-even)
+// Ported from llvm/lib/Support/APFloat.cpp (IEEEFloat::add/subtract/multiply/divide/mod, the *Specials tables,
+// makeNaN/makeQuiet, compare, convertToInteger (rmTowardZero), convertFromAPInt). Values are exact rationals
+// sig * 2^(exp - (p-1)) rounded once with fp_round, which is what IEEE round-to-nearest-even requires.
+// ppc_fp128 (double-double) arithmetic is not supported and fails loudly.
+
+Fp_Status :: enum_flags u8 { INVALID; DIV_BY_ZERO; OVERFLOW; UNDERFLOW; INEXACT; }
+
+big_add :: (a: Big, b: Big) -> Big {
+    r: Big; r.allocator = temp;
+    carry: u64 = 0;
+    n := max(a.count, b.count);
+    for i: 0..n-1 {
+        s := carry;
+        if i < a.count s += a[i];
+        if i < b.count s += b[i];
+        array_add(*r, cast,trunc(u32) s);
+        carry = s >> 32;
+    }
+    if carry array_add(*r, cast(u32) carry);
+    big_trim(*r);
+    return r;
+}
+
+fp_check_kind :: (k: Type_Kind) {
+    if k == .PPC_FP128 fatal("ppc_fp128 arithmetic constant folding is not supported yet");
+}
+
+fp_frac_bits :: (k: Type_Kind) -> s64 { p, mx, mn, b := fp_semantics(k); return ifx k == .X86_FP80 then 63 else p - 1; }
+
+fp_is_signaling :: (k: Type_Kind, d: Fp_Decoded) -> bool {
+    if d.cat != .NAN return false;
+    return !big_bit(d.sig, fp_frac_bits(k) - 1);
+}
+
+// makeQuiet on a NaN bit pattern
+fp_quiet :: (k: Type_Kind, w: [] u64) -> [] u64 {
+    r := NewArray(w.count, u64,, allocator = temp);
+    for w r[it_index] = it;
+    qb := fp_frac_bits(k) - 1;
+    r[qb / 64] |= (cast(u64) 1) << cast(u64)(qb % 64);
+    return r;
+}
+
+// makeNaN(): positive quiet NaN, zero payload
+fp_default_nan :: (k: Type_Kind) -> [] u64 {
+    s: Big; s.allocator = temp;
+    s = big_shl(big_from_u64(1), fp_frac_bits(k) - 1);
+    if k == .X86_FP80 s = big_add(s, big_shl(big_from_u64(1), 63));
+    return fp_encode(k, false, .NAN, 0, s);
+}
+
+fp_inf :: (k: Type_Kind, neg: bool) -> [] u64 { z: Big; z.allocator = temp; return fp_encode(k, neg, .INF, 0, z); }
+fp_zero :: (k: Type_Kind, neg: bool) -> [] u64 { z: Big; z.allocator = temp; return fp_encode(k, neg, .ZERO, 0, z); }
+
+fp_with_sign :: (k: Type_Kind, w: [] u64, neg: bool) -> [] u64 {
+    p, mx, mn, bits := fp_semantics(k);
+    r := NewArray(w.count, u64,, allocator = temp);
+    for w r[it_index] = it;
+    sb := ifx k == .X86_FP80 then cast(s64) 79 else bits - 1;
+    m := (cast(u64) 1) << cast(u64)(sb % 64);
+    if neg r[sb / 64] |= m; else r[sb / 64] &= ~m;
+    return r;
+}
+fp_neg :: (k: Type_Kind, w: [] u64) -> [] u64 { d := fp_decode(k, w); return fp_with_sign(k, w, !d.neg); }
+
+// the NaN operand handling shared by the *Specials tables: result is the NaN (lhs first), quieted
+fp_nan_result :: (k: Type_Kind, a: [] u64, da: Fp_Decoded, b: [] u64, db: Fp_Decoded) -> [] u64, Fp_Status {
+    st: Fp_Status;
+    src := ifx da.cat == .NAN then a else b;
+    sd := ifx da.cat == .NAN then da else db;
+    if fp_is_signaling(k, da) || fp_is_signaling(k, db) st |= .INVALID;
+    if fp_is_signaling(k, sd) return fp_quiet(k, src), st;
+    return src, st;
+}
+
+fp_round_status :: (k: Type_Kind, neg: bool, num: Big, den: Big, e2: s64) -> [] u64, Fp_Status {
+    w, of, zr := fp_round(k, neg, num, den, e2);
+    st: Fp_Status;
+    if of st |= .OVERFLOW | .INEXACT;
+    return w, st;
+}
+
+// IEEEFloat::addOrSubtract
+fp_add_sub :: (k: Type_Kind, a: [] u64, b: [] u64, subtract: bool) -> [] u64, Fp_Status {
+    fp_check_kind(k);
+    da := fp_decode(k, a); db := fp_decode(k, b);
+    if da.cat == .NAN || db.cat == .NAN { rr_, ss_ := fp_nan_result(k, a, da, b, db); return rr_, ss_; }
+    bneg := db.neg != subtract;
+    if da.cat == .INF && db.cat == .INF {
+        if da.neg != bneg return fp_default_nan(k), .INVALID;
+        return a, 0;
+    }
+    if da.cat == .INF return a, 0;
+    if db.cat == .INF return fp_inf(k, bneg), 0;
+    if da.cat == .ZERO && db.cat == .ZERO return fp_zero(k, da.neg && bneg), 0;
+    if da.cat == .ZERO return fp_with_sign(k, b, bneg), 0;
+    if db.cat == .ZERO return a, 0;
+    p, mx, mn, bits := fp_semantics(k);
+    ea := da.exp - (p - 1); eb := db.exp - (p - 1);
+    e := min(ea, eb);
+    sa := big_shl(da.sig, ea - e); sb := big_shl(db.sig, eb - e);
+    if da.neg == bneg { rr_, ss_ := fp_round_status(k, da.neg, big_add(sa, sb), big_from_u64(1), e); return rr_, ss_; }
+    c := big_cmp(sa, sb);
+    if c == 0 return fp_zero(k, false), 0;   // exact zero: +0 in round-to-nearest
+    if c > 0 { r := big_copy(sa); big_sub(*r, sb); { rr_, ss_ := fp_round_status(k, da.neg, r, big_from_u64(1), e); return rr_, ss_; } }
+    r := big_copy(sb); big_sub(*r, sa);
+    { rr_, ss_ := fp_round_status(k, bneg, r, big_from_u64(1), e); return rr_, ss_; }
+}
+
+// IEEEFloat::multiply
+fp_mul :: (k: Type_Kind, a: [] u64, b: [] u64) -> [] u64, Fp_Status {
+    fp_check_kind(k);
+    da := fp_decode(k, a); db := fp_decode(k, b);
+    if da.cat == .NAN || db.cat == .NAN { rr_, ss_ := fp_nan_result(k, a, da, b, db); return rr_, ss_; }
+    neg := da.neg != db.neg;
+    if (da.cat == .ZERO && db.cat == .INF) || (da.cat == .INF && db.cat == .ZERO) return fp_default_nan(k), .INVALID;
+    if da.cat == .INF || db.cat == .INF return fp_inf(k, neg), 0;
+    if da.cat == .ZERO || db.cat == .ZERO return fp_zero(k, neg), 0;
+    p, mx, mn, bits := fp_semantics(k);
+    { rr_, ss_ := fp_round_status(k, neg, big_mul(da.sig, db.sig), big_from_u64(1), da.exp + db.exp - 2 * (p - 1)); return rr_, ss_; }
+}
+
+// IEEEFloat::divide
+fp_div :: (k: Type_Kind, a: [] u64, b: [] u64) -> [] u64, Fp_Status {
+    fp_check_kind(k);
+    da := fp_decode(k, a); db := fp_decode(k, b);
+    if da.cat == .NAN || db.cat == .NAN { rr_, ss_ := fp_nan_result(k, a, da, b, db); return rr_, ss_; }
+    neg := da.neg != db.neg;
+    if (da.cat == .INF && db.cat == .INF) || (da.cat == .ZERO && db.cat == .ZERO) return fp_default_nan(k), .INVALID;
+    if da.cat == .INF return fp_inf(k, neg), 0;
+    if da.cat == .ZERO return fp_zero(k, neg), 0;
+    if db.cat == .INF return fp_zero(k, neg), 0;
+    if db.cat == .ZERO return fp_inf(k, neg), .DIV_BY_ZERO;
+    { rr_, ss_ := fp_round_status(k, neg, da.sig, db.sig, da.exp - db.exp); return rr_, ss_; }
+}
+
+// IEEEFloat::mod (fmod: a - trunc(a/b)*b, exact, sign of a)
+fp_mod :: (k: Type_Kind, a: [] u64, b: [] u64) -> [] u64, Fp_Status {
+    fp_check_kind(k);
+    da := fp_decode(k, a); db := fp_decode(k, b);
+    if da.cat == .NAN || db.cat == .NAN { rr_, ss_ := fp_nan_result(k, a, da, b, db); return rr_, ss_; }
+    if db.cat == .ZERO || da.cat == .INF return fp_default_nan(k), .INVALID;
+    if da.cat == .ZERO || db.cat == .INF return a, 0;
+    p, mx, mn, bits := fp_semantics(k);
+    ea := da.exp - (p - 1); eb := db.exp - (p - 1);
+    e := min(ea, eb);
+    sa := big_shl(da.sig, ea - e); sb := big_shl(db.sig, eb - e);
+    q, r := big_divmod(sa, sb);
+    if big_is_zero(r) return fp_zero(k, da.neg), 0;
+    { rr_, ss_ := fp_round_status(k, da.neg, r, big_from_u64(1), e); return rr_, ss_; }
+}
+
+Fp_Cmp :: enum u8 { LESS; EQUAL; GREATER; UNORDERED; }
+
+// IEEEFloat::compare
+fp_compare :: (k: Type_Kind, a: [] u64, b: [] u64) -> Fp_Cmp {
+    fp_check_kind(k);
+    da := fp_decode(k, a); db := fp_decode(k, b);
+    if da.cat == .NAN || db.cat == .NAN return .UNORDERED;
+    if da.cat == .ZERO && db.cat == .ZERO return .EQUAL;
+    // signed magnitude comparison of exact values
+    sgn :: (d: Fp_Decoded) -> int { if d.cat == .ZERO return 0; return ifx d.neg then -1 else 1; }
+    s1 := sgn(da); s2 := sgn(db);
+    if s1 != s2 return ifx s1 < s2 then .LESS else .GREATER;
+    // same sign, both nonzero
+    mag: int;
+    if da.cat == .INF && db.cat == .INF mag = 0;
+    else if da.cat == .INF mag = 1;
+    else if db.cat == .INF mag = -1;
+    else {
+        p, mx, mn, bits := fp_semantics(k);
+        ea := da.exp; eb := db.exp;
+        e := min(ea, eb);
+        mag = big_cmp(big_shl(da.sig, ea - e), big_shl(db.sig, eb - e));
+    }
+    if mag == 0 return .EQUAL;
+    if s1 < 0 mag = -mag;
+    return ifx mag < 0 then .LESS else .GREATER;
+}
+
+// IEEEFloat::convertToInteger(rmTowardZero): ok = false for opInvalidOp (NaN, inf, out of range)
+fp_to_integer :: (k: Type_Kind, w: [] u64, bits: u32, is_signed: bool) -> (words: [] u64, ok: bool) {
+    fp_check_kind(k);
+    d := fp_decode(k, w);
+    res := NewArray(words_for_bits(bits), u64,, allocator = temp);
+    if d.cat == .NAN || d.cat == .INF return res, false;
+    if d.cat == .ZERO return res, true;
+    p, mx, mn, nb := fp_semantics(k);
+    sh := d.exp - (p - 1);
+    mag: Big;
+    if sh >= 0 mag = big_shl(d.sig, sh); else mag = big_shr(d.sig, -sh);
+    // range check
+    lim := cast(s64) bits;
+    if is_signed lim -= 1;
+    bl := big_bitlen(mag);
+    if d.neg && !is_signed { if !big_is_zero(mag) return res, false; return res, true; }
+    if bl > lim {
+        // -2^(bits-1) is representable for signed
+        if !(is_signed && d.neg && bl == lim + 1 && !big_any_below(mag, lim)) return res, false;
+    }
+    mw := big_to_words(mag, cast(u32) res.count);
+    for mw res[it_index] = it;
+    if d.neg {
+        // two's complement negate
+        carry: u64 = 1;
+        for i: 0..res.count-1 { x := ~res[i]; s := x + carry; carry = ifx s < x then cast(u64) 1 else 0; res[i] = s; }
+        mask_words(res, bits);
+    }
+    return res, true;
+}
+
+// IEEEFloat::convertFromAPInt (nearest-even)
+fp_from_integer :: (k: Type_Kind, words: [] u64, bits: u32, is_signed: bool) -> [] u64 {
+    fp_check_kind(k);
+    w := NewArray(words.count, u64,, allocator = temp);
+    for words w[it_index] = it;
+    neg := is_signed && bits > 0 && ((w[(bits - 1) / 64] >> cast(u64)((bits - 1) % 64)) & 1) != 0;
+    if neg {
+        carry: u64 = 1;
+        for i: 0..w.count-1 { x := ~w[i]; s := x + carry; carry = ifx s < x then cast(u64) 1 else 0; w[i] = s; }
+        mask_words(w, bits);
+    }
+    mag := big_from_words(w);
+    if big_is_zero(mag) return fp_zero(k, false);
+    r, of, zr := fp_round(k, neg, mag, big_from_u64(1), 0);
+    return r;
+}

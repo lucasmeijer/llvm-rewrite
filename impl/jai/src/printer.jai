@@ -576,6 +576,13 @@ write_constant :: (v: Value_Id) {
         case .C_UNDEF; out("undef");
         case .C_EXPR;
             e := cexpr(v);
+            if e.op == .SHUFFLEVECTOR {
+                sv := cf_shuffle_splat_value(v);
+                if sv != NONE && (vkind(sv) == .C_INT || vkind(sv) == .C_FP) {
+                    out("splat ("); write_operand(sv, true); outc(#char ")");
+                    return;
+                }
+            }
             out(opcode_name(e.op));
             write_optimization_info(e.op, e.flags, true);
             if e.op == .GEP && (e.flags & F_INRANGE) {
@@ -587,6 +594,7 @@ write_constant :: (v: Value_Id) {
             if e.op == .GEP { print_type(e.ty2); out(", "); }
             if nops(v) > 0 for i: 0..nops(v)-1 { if i > 0 out(", "); write_operand(op(v, i), true); }
             if is_cast_op(e.op) { out(" to "); print_type(t); }
+            if e.op == .SHUFFLEVECTOR print_shuffle_mask_row(t, e.*);
             outc(#char ")");
         case;
             out("<placeholder or erroneous Constant>");
@@ -1182,8 +1190,8 @@ call_arg_count :: (i: Value_Id) -> u32 {
     return total - trailing - nb;
 }
 
-print_shuffle_mask :: (t: Type_Id, i: Value_Id) {
-    r := inst(i);
+print_shuffle_mask :: (t: Type_Id, i: Value_Id) { print_shuffle_mask_row(t, inst(i).*); }
+print_shuffle_mask_row :: (t: Type_Id, r: Inst_Row) {
     out(", <");
     if type_kind(t) == .SVECTOR out("vscale x ");
     out_u64(r.nidx); out(" x i32> ");
