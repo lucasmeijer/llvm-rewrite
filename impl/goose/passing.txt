@@ -4861,6 +4861,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/float-to-ptr-cast.ll::roun
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/fma.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/fneg.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/fneg.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/fp-undef.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/fp-undef.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/freeze.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/freeze.ll::roundtrip
@@ -4881,6 +4882,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/libfunc.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/loads.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/logicaltest.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/logicaltest.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/min-max.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/min-max.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/overflow-ops.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/overflow-ops.ll::roundtrip
