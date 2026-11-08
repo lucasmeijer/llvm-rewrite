@@ -2536,6 +2536,7 @@ tests/imported/llvm/Transforms/DCE/basic.ll::opt
 tests/imported/llvm/Transforms/DCE/basic.ll::roundtrip
 tests/imported/llvm/Transforms/DCE/calls-errno.ll::opt
 tests/imported/llvm/Transforms/DCE/calls-errno.ll::roundtrip
+tests/imported/llvm/Transforms/DCE/dbg-value-removal.ll::opt
 tests/imported/llvm/Transforms/DCE/dbg-value-removal.ll::roundtrip
 tests/imported/llvm/Transforms/DCE/guards.ll::opt
 tests/imported/llvm/Transforms/DCE/guards.ll::roundtrip
@@ -4596,7 +4597,9 @@ tests/imported/llvm/Transforms/InstCombine/cttz-shift-exact.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cttz-shift-exact.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cttz.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cttz.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/dbg-scalable-store-fixed-frag.ll::opt
 tests/imported/llvm/Transforms/InstCombine/dbg-scalable-store-fixed-frag.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/dbg-simplify-alloca-size.ll::opt
 tests/imported/llvm/Transforms/InstCombine/dbg-simplify-alloca-size.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/dce-iterate.ll::opt
 tests/imported/llvm/Transforms/InstCombine/dce-iterate.ll::roundtrip
@@ -4614,12 +4617,15 @@ tests/imported/llvm/Transforms/InstCombine/debuginfo-invert.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-invert.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo-invoke.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-invoke.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/debuginfo-scalable-typesize.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-scalable-typesize.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo-sink.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-sink.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/debuginfo-skip.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-skip.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debuginfo-variables.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo-variables.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/debuginfo.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/debugloc-bswap.ll::opt
 tests/imported/llvm/Transforms/InstCombine/debugloc-bswap.ll::roundtrip
@@ -5198,9 +5204,11 @@ tests/imported/llvm/Transforms/InstCombine/ldexp-ext.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ldexp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/lib-call-exit.ll::opt
 tests/imported/llvm/Transforms/InstCombine/lib-call-exit.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/lifetime-no-null-opt.ll::opt
 tests/imported/llvm/Transforms/InstCombine/lifetime-no-null-opt.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/lifetime-sanitizer.ll::opt
 tests/imported/llvm/Transforms/InstCombine/lifetime-sanitizer.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/lifetime.ll::opt
 tests/imported/llvm/Transforms/InstCombine/lifetime.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/load-addrspacecast-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/load-addrspacecast-select.ll::roundtrip
@@ -5255,6 +5263,7 @@ tests/imported/llvm/Transforms/InstCombine/logical-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/logical-select.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/low-bit-splat.ll::opt
 tests/imported/llvm/Transforms/InstCombine/low-bit-splat.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/lower-dbg-declare.ll::opt
 tests/imported/llvm/Transforms/InstCombine/lower-dbg-declare.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/lshr-and-negC-icmpeq-zero.ll::opt
 tests/imported/llvm/Transforms/InstCombine/lshr-and-negC-icmpeq-zero.ll::roundtrip
@@ -5936,6 +5945,7 @@ tests/imported/llvm/Transforms/InstCombine/sadd_sat.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sadd_sat.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/saddo.ll::opt
 tests/imported/llvm/Transforms/InstCombine/saddo.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/salvage-dbg-declare.ll::opt
 tests/imported/llvm/Transforms/InstCombine/salvage-dbg-declare.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/saturating-add-sub.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/scalable-bitcast-inseltpoison.ll::opt
