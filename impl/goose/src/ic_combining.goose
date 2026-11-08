@@ -1788,9 +1788,15 @@ fn freeze_other_uses(fi: i32) -> bool {
 }
 // BasicBlock::getFirstNonPHIOrDbgOrAlloca
 fn first_non_phi_or_dbg_or_alloca(bb: i32) -> i32 {
-    var i = block_first(bb);
-    while i >= 0 && (iop(i) == OP_PHI || ld_is_debug_or_pseudo(i) || iop(i) == OP_ALLOCA) { i = inst_next(i); }
-    // the iterator skips past "static" alloca runs only; LLVM: if an alloca is not static... (see BasicBlock.cpp)
+    var i = first_insertion_pt(bb);
+    if i < 0 { return -1; }
+    if inst_is_eh_pad(i) { i = inst_next(i); }
+    if bb == func_entry(block_func(bb)) {
+        while i >= 0 && (iop(i) == OP_ALLOCA || ld_is_debug_or_pseudo(i)) {
+            if iop(i) == OP_ALLOCA && !ml_is_static_alloca(i) { break; }
+            i = inst_next(i);
+        }
+    }
     return i;
 }
 // Instruction::getInsertionPointAfterDef: -1 = none
@@ -1798,12 +1804,8 @@ fn insertion_point_after_def(i: i32) -> i32 {
     let o = iop(i);
     if o == OP_PHI { return first_insertion_pt(inst_parent(i)); }
     if o == OP_INVOKE { return first_insertion_pt(invoke_normal_dest(i)); }
-    if o == OP_CALLBR { return first_insertion_pt(callbr_default_dest(i)); }
-    if is_terminator(i) { return -1; }
-    let nx = inst_next(i);
-    if nx < 0 { return -1; }
-    // a catchswitch/EH pad? the next instruction after a non-terminator is the insertion point
-    return nx;
+    if o == OP_CALLBR { return -1; }
+    return inst_next(i);
 }
 // DominatorTree::dominates(Def, Use)
 fn dt_dominates_use(fv: i32, def: i32, u: i32) -> bool {

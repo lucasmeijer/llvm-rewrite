@@ -104,7 +104,7 @@ fn agg_elem(v: i32, k: i64) -> i32 {
     let ty = vals[v].ty;
     let kind = vals[v].kind;
     if ty_is_vector(ty) && (kind == VK_CINT || kind == VK_CFP) {
-        if ty_kind(ty) == TK_SVEC { return -1; }
+        // Constant::getAggregateElement: Elt < the (known minimum) element count, scalable vectors too
         if k >= ty_count(ty) { return -1; }
         return splat_value(v, false);
     }

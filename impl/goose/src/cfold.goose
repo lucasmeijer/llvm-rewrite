@@ -473,7 +473,13 @@ recursive fn cf_fold_load_through_bitcast(c0: i32, dty: i32) -> i32 {
             c = ec;
         } else {
             if ty_is_vector(st) && dl_size_bits(ty_elem(st)) != dl_store_size(ty_elem(st)) * 8 { return -1; }
-            c = agg_elem(c, 0);
+            // LLVM 23 scalable FP/byte splats are ConstantFP/ConstantByte (getAggregateElement gives the splat
+            // value); ours are shufflevector constant expressions
+            if ty_kind(st) == TK_SVEC && (ty_is_fp(ty_elem(st)) || ty_kind(ty_elem(st)) == TK_BYTE) && vals[c].kind == VK_CEXPR {
+                c = c_splat_value(c);
+            } else {
+                c = agg_elem(c, 0);
+            }
         }
     }
     return -1;
