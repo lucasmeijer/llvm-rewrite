@@ -3946,6 +3946,7 @@ tests/imported/llvm/Transforms/InstCombine/align-attr.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/align-external.ll::opt
 tests/imported/llvm/Transforms/InstCombine/align-external.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/alloc-realloc-free.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/alloca-big.ll::opt
 tests/imported/llvm/Transforms/InstCombine/alloca-big.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/alloca-cast-debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/alloca-in-non-alloca-as.ll::roundtrip
@@ -6211,6 +6212,7 @@ tests/imported/llvm/Transforms/InstSimplify/known-non-zero.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/known-non-zero.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ldexp.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/load-relative.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/load.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/load.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/log-exp-intrinsic.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/log-exp-intrinsic.ll::roundtrip
