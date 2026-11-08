@@ -2553,7 +2553,7 @@ parse_instruction :: () -> Value_Id, bool {
         return parse_call(tck), false;
     }
     if s == "invoke" return parse_invoke(), false;
-    if s == "callbr" perr("callbr is not supported yet");
+    if s == "callbr" return parse_callbr(), false;
     // funclet instructions (LLParser::parseCleanupRet / parseCatchRet / parseCatchSwitch / parseCatchPad /
     // parseCleanupPad); operand layouts as in CleanupReturnInst / CatchReturnInst / CatchSwitchInst / FuncletPadInst
     if s == "cleanupret" {
@@ -2711,13 +2711,7 @@ parse_call :: (tck: u32) -> Value_Id {
     callee_tok := P.tok;
     callee_lx := P.lx.pos;
     // skip the callee token for now; we need the argument list to resolve the function type
-    callee_is_asm := is_kw("asm");
-    if callee_is_asm {
-        // asm "..." , "..."
-        next();
-        while is_kw("sideeffect") || is_kw("alignstack") || is_kw("inteldialect") || is_kw("unwind") next();
-        parse_string(); expect(.COMMA, "','"); parse_string();
-    } else next();
+    skip_callee_tokens();
     args: [..] Param_Info; args.allocator = temp;
     parse_param_list(*args);
     fnattrs: [..] Attr; fnattrs.allocator = temp;
@@ -2760,11 +2754,11 @@ parse_call :: (tck: u32) -> Value_Id {
             array_add(*ir.u32_pool, pos);
         }
     }
-    // CallInst::init: arguments, then bundle operands, then the callee
+    // CallInst::init: arguments, then the callee, then bundle operands (populateBundleOperandInfos)
     for args set_op(i, cast(u32) it_index, it.v);
+    set_op(i, cast(u32)(nargs + nb), callee);
     k: u32 = cast(u32) nargs;
     for b: bundles for b.inputs { set_op(i, k, it); k += 1; }
-    set_op(i, k, callee);
     array_add(*P.fwd_attr_refs, .{i, groups, true, false});
     return i;
 }
@@ -2777,8 +2771,7 @@ parse_invoke :: () -> Value_Id {
     rt := parse_type(true);
     callee_tok := P.tok;
     callee_lx := P.lx.pos;
-    if is_kw("asm") perr("inline asm invoke is not supported yet");
-    next();
+    skip_callee_tokens();
     args: [..] Param_Info; args.allocator = temp;
     parse_param_list(*args);
     fnattrs: [..] Attr; fnattrs.allocator = temp;
@@ -2822,11 +2815,93 @@ parse_invoke :: () -> Value_Id {
             array_add(*ir.u32_pool, pos);
         }
     }
-    // InvokeInst::init: args, bundles, normal dest, unwind dest, callee
+    // InvokeInst::init: args, normal dest, unwind dest, callee, then bundle operands
     for args set_op(i, cast(u32) it_index, it.v);
+    kd := cast(u32)(nargs + nb);
+    set_op(i, kd, normal); set_op(i, kd + 1, unwind); set_op(i, kd + 2, callee);
     k: u32 = cast(u32) nargs;
     for b: bundles for b.inputs { set_op(i, k, it); k += 1; }
-    set_op(i, k, normal); set_op(i, k + 1, unwind); set_op(i, k + 2, callee);
+    array_add(*P.fwd_attr_refs, .{i, groups, true, false});
+    return i;
+}
+
+// skip the callee (a value token, or `asm ... "..." , "..."`); it is parsed later once the function type is known
+skip_callee_tokens :: () {
+    if is_kw("asm") {
+        next();
+        while is_kw("sideeffect") || is_kw("alignstack") || is_kw("inteldialect") || is_kw("unwind") next();
+        parse_string(); expect(.COMMA, "','"); parse_string();
+    } else next();
+}
+
+// LLParser::parseCallBr; CallBrInst::init operand order: args, default dest, indirect dests, callee, bundles.
+// The number of indirect destinations is kept in Inst_Row.addrspace.
+parse_callbr :: () -> Value_Id {
+    cc := parse_optional_cc();
+    ret_attrs: [..] Attr; ret_attrs.allocator = temp;
+    parse_optional_param_or_return_attrs(*ret_attrs, false);
+    rt := parse_type(true);
+    callee_tok := P.tok;
+    callee_lx := P.lx.pos;
+    skip_callee_tokens();
+    args: [..] Param_Info; args.allocator = temp;
+    parse_param_list(*args);
+    fnattrs: [..] Attr; fnattrs.allocator = temp;
+    groups: [..] u32;
+    parse_fn_attribute_value_pairs(*fnattrs, *groups, false);
+    bundles: [..] Bundle; bundles.allocator = temp;
+    parse_optional_bundles(*bundles);
+    expect_kw("to");
+    nt := parse_type(); if nt != ir.t_label perr("expected label");
+    default := parse_value(ir.t_label);
+    expect(.LSQUARE, "'[' in callbr");
+    dests: [..] Value_Id; dests.allocator = temp;
+    if P.tok.kind != .RSQUARE {
+        while true {
+            lt := parse_type(); if lt != ir.t_label perr("expected label");
+            array_add(*dests, parse_value(ir.t_label));
+            if !eat(.COMMA) break;
+        }
+    }
+    expect(.RSQUARE, "']' at end of block list");
+    fty := rt;
+    if type_kind(rt) != .FUNC {
+        pts: [..] Type_Id; pts.allocator = temp;
+        for args array_add(*pts, vtype(it.v));
+        fty = type_func(rt, pts, false);
+    }
+    save_tok := P.tok; save_pos := P.lx.pos;
+    P.tok = callee_tok; P.lx.pos = callee_lx;
+    P.callee_fty = fty;
+    callee := parse_value(type_ptr(0));
+    P.tok = save_tok; P.lx.pos = save_pos;
+    nb := 0;
+    for bundles nb += it.inputs.count;
+    nargs := args.count;
+    i := new_inst(.CALLBR, func_ret(fty), cast(u32)(nargs + nb + 2 + dests.count));
+    psets: [..] u32; psets.allocator = temp;
+    for args array_add(*psets, it.attrs);
+    r := inst(i);
+    r.ty2 = fty; r.cc = cc;
+    r.addrspace = cast(u32) dests.count;
+    r.attrs = attr_list_get(attr_set_get(fnattrs), attr_set_get(ret_attrs), psets);
+    if bundles.count {
+        r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) bundles.count;
+        pos := cast(u32) nargs;
+        for bundles {
+            array_add(*ir.u32_pool, bundle_tag_id(it.tag));
+            array_add(*ir.u32_pool, pos);
+            pos += cast(u32) it.inputs.count;
+            array_add(*ir.u32_pool, pos);
+        }
+    }
+    for args set_op(i, cast(u32) it_index, it.v);
+    kd := cast(u32)(nargs + nb);
+    set_op(i, kd, default);
+    for dests set_op(i, kd + 1 + cast(u32) it_index, it);
+    set_op(i, kd + 1 + cast(u32) dests.count, callee);
+    k: u32 = cast(u32) nargs;
+    for b: bundles for b.inputs { set_op(i, k, it); k += 1; }
     array_add(*P.fwd_attr_refs, .{i, groups, true, false});
     return i;
 }

@@ -1176,7 +1176,7 @@ call_arg_count :: (i: Value_Id) -> u32 {
     n := func_nparams(r.ty2);
     // varargs: all operands before bundles and the trailing callee/dests
     total := nops(i);
-    trailing: u32 = ifx r.op == .INVOKE then cast(u32) 3 else 1;
+    trailing: u32 = ifx r.op == .INVOKE then cast(u32) 3 else ifx r.op == .CALLBR then 2 + r.addrspace else 1;
     nb: u32 = 0;
     if r.nidx { last := r.nidx - 1; nb = ir.u32_pool[r.idx + last * 3 + 2] - ir.u32_pool[r.idx + 1]; }
     return total - trailing - nb;
@@ -1296,6 +1296,7 @@ print_instruction :: (i: Value_Id) {
             if operand == NONE out(" void");
             else { outc(#char " "); write_operand(operand, true); }
         case .CALL; #through;
+        case .CALLBR; #through;
         case .INVOKE;
             if r.cc != 0 { outc(#char " "); print_calling_conv(r.cc); }
             callee := callee_operand(i);
@@ -1303,7 +1304,7 @@ print_instruction :: (i: Value_Id) {
             ret := attr_list_ret(r.attrs);
             if ret != 0 { outc(#char " "); write_attribute_set(ret); }
             cas := ir.types[vtype(callee)].a;
-            if cas != 0 || dl.program_as != 0 { out(" addrspace("); out_u64(cas); outc(#char ")"); }
+            if r.op != .CALLBR && (cas != 0 || dl.program_as != 0) { out(" addrspace("); out_u64(cas); outc(#char ")"); }
             outc(#char " ");
             print_type(ifx func_vararg(fty) then fty else func_ret(fty));
             outc(#char " ");
@@ -1328,6 +1329,13 @@ print_instruction :: (i: Value_Id) {
             if r.op == .INVOKE {
                 out("\n          to "); write_operand(op(i, n - 3), true);
                 out(" unwind "); write_operand(op(i, n - 2), true);
+            }
+            if r.op == .CALLBR {
+                nd := r.addrspace;
+                out("\n          to "); write_operand(op(i, n - 2 - nd), true);
+                out(" [");
+                if nd > 0 for k: 0..nd-1 { if k > 0 out(", "); write_operand(op(i, n - 1 - nd + k), true); }
+                outc(#char "]");
             }
         case .ALLOCA;
             outc(#char " ");
