@@ -15,3 +15,4 @@
 #load "ic_select.jai";
 #load "ic_phi.jai";
 #load "ic_casts.jai";
+#load "ic_calls.jai";

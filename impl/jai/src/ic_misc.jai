@@ -186,22 +186,6 @@ ic_visit_extract_value :: (i: Value_Id) -> Value_Id {
     return ic_visit_simplify_only(i);
 }
 
-// visitCallInst: InstSimplify (calls with uses), the nounwind inference. Not ported: everything after.
-ic_visit_call :: (i: Value_Id) -> Value_Id {
-    if has_uses(i) {
-        args: [..] Value_Id; args.allocator = temp;
-        n := call_num_args(i);
-        if n > 0 for k: 0..n-1 array_add(*args, op(i, k));
-        v := simplify_call(i, call_callee(i), args, ic_q(i));
-        if v != NONE return ic_replace_inst_uses_with(i, v);
-    }
-    if get_freed_operand(i) != NONE fatal("instcombine: visitFree is not supported yet");
-    if fn_has_fn_attr(ic.f, .NoUnwind) && !call_has_fn_attr(i, .NoUnwind) {
-        call_add_fn_attr(i, .NoUnwind);
-        return i;
-    }
-    return NONE;
-}
 // CallBase::addFnAttr(Kind)
 call_add_fn_attr :: (i: Value_Id, k: Attr_Kind) {
     l := inst(i).attrs;
