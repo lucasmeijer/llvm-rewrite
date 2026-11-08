@@ -6,7 +6,13 @@
 
 // Constant::getIntegerValue for integer (vector) types
 const_integer_value :: (t: Type_Id, a: APInt) -> Value_Id {
-    if is_ptr_or_ptr_vector(t) fatal("instcombine: Constant::getIntegerValue of a pointer type is not supported yet");
+    if is_ptr_or_ptr_vector(t) {
+        // ConstantInt::get(Ctx, V), then ConstantExpr::getIntToPtr (folded), then the splat
+        st := scalar_type(t);
+        c := cfo_constant(ce_cast(.INTTOPTR, const_int_ap(type_int(a.bits), a), st));
+        if is_vector_type(t) c = cf_get_splat(t, c);
+        return c;
+    }
     return const_int_ap(t, a);
 }
 

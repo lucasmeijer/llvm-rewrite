@@ -22,7 +22,7 @@ ct_should_stop :: (s: Ct_Stop, cc: u8) -> bool {
     return false;
 }
 
-Ct_Kind :: enum u8 { SIMPLE; BEFORE; EARLIEST; }
+Ct_Kind :: enum u8 { SIMPLE; BEFORE; EARLIEST; ALLOCA_CMP; }
 Ct_Action :: enum u8 { STOP; CONTINUE; CONTINUE_IGNORING_RETURN; }
 
 Capture_Tracker :: struct {
@@ -39,6 +39,11 @@ Capture_Tracker :: struct {
     // EarliestCaptures
     f: Value_Id = NONE;
     earliest: Value_Id = NONE;
+    // InstCombinerImpl::foldAllocaCmp's CmpCaptureTracker: equality icmps of the alloca (a SmallMapVector)
+    alloca: Value_Id = NONE;
+    captured: bool;
+    icmps: [..] Value_Id;
+    icmp_masks: [..] u32;
 }
 
 ct_too_many_uses :: (t: *Capture_Tracker) {
@@ -48,6 +53,7 @@ ct_too_many_uses :: (t: *Capture_Tracker) {
         case .EARLIEST;
             t.cc = t.mask; t.cc_with_ret = t.mask;
             t.earliest = block(fn_entry(t.f)).first;
+        case .ALLOCA_CMP; t.captured = true;
     }
 }
 
@@ -80,6 +86,16 @@ ct_captured :: (t: *Capture_Tracker, u: Use_Id, use_cc: u8) -> Ct_Action {
                 }
             }
             return .CONTINUE;
+        case .ALLOCA_CMP;
+            if is_inst(user) && inst_op(user) == .ICMP && icmp_is_equality(inst_pred(user)) && get_underlying_object(ir.u_val[u]) == t.alloca {
+                opno := u - ir.v_ops[user];
+                for t.icmps if it == user { t.icmp_masks[it_index] |= (cast(u32) 1) << opno; return .CONTINUE; }
+                array_add(*t.icmps, user);
+                array_add(*t.icmp_masks, (cast(u32) 1) << opno);
+                return .CONTINUE;
+            }
+            t.captured = true;
+            return .STOP;
     }
     return .CONTINUE;
 }
