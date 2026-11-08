@@ -80,8 +80,8 @@
   `grep ::roundtrip impl/jai/passing.txt | sed 's/::roundtrip//' | grep imported | xargs -P8 -I{} cmp.sh "-passes=adce" {}`
   where cmp.sh runs both tools into a temp dir and prints OK/DIFF/JAI-FAIL. Do this for every new pass.
 - known_bits.jai was replaced by the full ValueTracking port (value_tracking.jai, see "InstSimplify" below).
-- TLI: only what DCE/ADCE need (MemoryBuiltins' new/delete/strdup tables, allockind, isMathLibCallNoop with host
-  libm + fenv via `#foreign`, "no-builtins"/"no-builtin-<f>"). Its `getLibFunc` prototype checks are simplified.
+- TLI: the full TargetLibraryInfo is in tli.jai (see "Library calls"); the MemoryBuiltins tables, isMathLibCallNoop
+  (host libm + fenv via `#foreign`) and constant folding of libm calls consult it.
 - Debug info: dce/adce/bdce still don't salvage. instsimplify RAUWs with `rauw_with_metadata`, erases with
   `erase_inst_with_metadata` (debug users of a deleted value become poison = setKillLocation) and fails loudly where
   LLVM's salvageDebugInfo would rewrite the DIExpression (casts, GEPs, integer binops, icmps): 11 sweep files.
@@ -308,7 +308,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   visitFMul is skipped silently (it is reached for every fmul; a design debt).
 - Remaining arith failures that are not about other visitors: `sdiv-1` (cgscc inline), `storemerge-dbg`
   (debugify), `fptoui-of-fdiv` (ppc_fp128 folding), `sub-gep` (scalable GEP strides), `simplify-demanded-fpclass-fdiv`,
-  `remquo*` (LibCallSimplifier), `fsqrtdiv-transform`, `fdiv-sin-cos`/`fdiv-cos-sin` (tan libcall emission).
+  `fsqrtdiv-transform`.
 - `instcombine` runs a second iteration and fails like LLVM (`did not reach a fixpoint`) if it changes anything;
   with this partial port that usually means a missing fold that would have revisited an instruction in iteration 1
   (fold-vector-zero.ll: the unported `icmp slt (add X, C), C2` fold is what makes LLVM revisit and infer `nsw`).
@@ -415,10 +415,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - Sweep `--passes instcombine` vs main before this work: identical 3603→6332 (also includes the memory unit's
   work landing meanwhile), no identical→differs; 20 identical→failed are loud X86-target or other fail-loud paths
   that the new code now reaches (gc.statepoint, ptrauth callee folds).
-- Not ported in InstCombineCalls.cpp (fail loudly where they would act, except the first): `tryOptimizeCall` =
-  LibCallSimplifier (library calls are silently left alone: ~150 of the ~210 remaining silent InstCombine diffs are
-  libcall folds; SimplifyLibCalls.cpp + BuildLibCalls.cpp + a TargetLibraryInfo getLibFunc/prototype table are the
-  next unit of work), `optimizeModularFormat`, the transform half of `transformConstExprCastCall` (the bail-outs
+- Not ported in InstCombineCalls.cpp (fail loudly where they would act): `optimizeModularFormat`, the transform half of `transformConstExprCastCall` (the bail-outs
   are ported, so calls to declarations with a different prototype are fine), `transformCallThroughTrampoline`,
   ptrauth folds, `gc.statepoint`, `experimental.vp.reverse`, the ARM/AArch64/Hexagon intrinsic cases and every
   non-x86 TTI::instCombineIntrinsic (fails loudly only when the module triple selects that target),
@@ -462,6 +459,41 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   found the u32_pool bug (masks like `<3, 31721, 2, 0>`); 53 function diffs remain in InstCombine, none in these files.
 - Traps: `type_info` is a reserved identifier; `xx` likewise; `for e: 0..n-1` with `n: u32 == 0` (empty structs)
   loops forever; Jai `cast(u32)` of a -1 mask element fails the bounds check — use `cast,no_check`.
+
+## Library calls: TargetLibraryInfo, BuildLibCalls, LibCallSimplifier, inferattrs (DESIGN.md §11)
+
+- `tli.jai` ports TargetLibraryInfo.cpp/.h (everything but the vector-library tables) and the Triple.cpp pieces it
+  needs (parse, normalize, OS/environment versions, the is*() predicates). The LibFunc enum, names and signatures
+  are generated: `python3 impl/jai/gen/gen_tli.py > impl/jai/src/gen_tli.jai` (from TargetLibraryInfo.td), the
+  Triple OS/environment/vendor tables by `gen/gen_triple.py` (TripleName.def). Rerun both after an LLVM bump.
+  `tli_for(f)` is the per-function result (no-builtins / no-builtin-<f>, cached for the run like LLVM, which never
+  invalidates it); the baseline is built once from `ir.triple` plus `-disable-simplify-libcalls`,
+  `-disable-builtin=`, `-enable-builtin=`. The old ad-hoc TLI helpers (`tli_available`, `tli_has`,
+  `tli_valid_proto`, `mb_tli_knows`, `tli_lib_func_of_call`, `math_libfunc`) now delegate to it.
+- `-vector-library=` is not ported (unknown flag, fails loudly); nothing in InstCombine asks for mappings.
+- `build_lib_calls.jai` = BuildLibCalls.cpp (complete); `simplify_lib_calls.jai` + `simplify_lib_calls2.jai` =
+  SimplifyLibCalls.cpp (LibCallSimplifier + FortifiedLibCallSimplifier, complete except: the iprintf /
+  __small_printf `CI->clone()` rewrites (XCore/TCE/Emscripten triples only) and `nan()` of ppc_fp128 fail loudly;
+  optimization remarks are dropped). `value_tracking_strings.jai`: getConstantDataArrayInfo, getConstantStringInfo,
+  GetStringLength, isOnlyUsedInZero(Equality)Comparison (the single copy: memory_builtins.jai had a second one).
+  Wired in as `ic_try_optimize_call` (ic_calls.jai, tryOptimizeCall). `optimizeModularFormat` fails loudly.
+- The simplifier builds with InstCombine's builder (`icb_*`). Differences from icb_* that matter: LLVM's
+  CreateIntrinsic constant-folds all-constant calls without inserting a declaration, CreateUnary/BinaryIntrinsic
+  insert the declaration first and then fold (`lcs_intrinsic`, `lcs_unary_intrinsic`, `lcs_binary_intrinsic`;
+  the shared `icb_intrinsic` doesn't fold at all, `icb_unary/binary_intrinsic` fold without declaring — a debt of
+  ic_core.jai left alone). Default operand bundles: while a call is simplified `ic.default_bundles_src` is set and
+  `icb_insert` rebuilds every new call with that call's bundles (`call_with_default_bundles`).
+- `inferattrs` (pass_inferattrs.jai, a module pass) = InferFunctionAttrs.cpp + Local.cpp inferAttributesFromOthers;
+  L1.analysis.aa is COMPLETE with it.
+- `normalize_triple` (parser.jai, `-mtriple`) is now the real Triple::normalize: `x86_64-linux-gnu` becomes
+  `x86_64-unknown-linux-gnu`, `x86_64` stays `x86_64`.
+- New functions (getOrInsertFunction, intrinsic declarations) are created in the DataLayout program address space.
+- Sweep `--passes instcombine` vs main before this work: identical 6724 -> 7470, differs 804 -> 81, no
+  identical->differs. Every remaining silent InstCombine-directory diff is outside the libcall code (fmul/fpext
+  flag inference = SimplifyDemandedInstructionFPClass, is.fpclass canonicalization, vector folds, ...). Libcall
+  tests that still fail loudly: nanl-ppc-fp128, remquol-ppc-fp128 (ppc_fp128 folding), modular-format,
+  fputs-opt-size (`require<profile-summary>`), constant-fold-next* (isMathLibCallNoop of nextafter).
+- Perf: no benchmark has library calls; straightline instcombine unchanged.
 
 ## Procedure-typed parameters that remain (audited for the "no hand-rolled vtables" rule)
 

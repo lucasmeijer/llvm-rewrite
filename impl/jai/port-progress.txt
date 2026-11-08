@@ -1,9 +1,12 @@
 # Fractions for LLVM files named in src/ headers but only partly ported (see scripts/port-progress.py).
 # Format: lib/<path>.cpp <fraction 0.0-1.0>
-lib/Transforms/InstCombine/InstCombineCalls.cpp 0.85
+lib/Transforms/InstCombine/InstCombineCalls.cpp 0.87
 lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
 lib/Transforms/InstCombine/InstructionCombining.cpp 0.93
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
 lib/Analysis/MemoryBuiltins.cpp 0.9
 lib/Analysis/Loads.cpp 0.55
 lib/Transforms/Utils/Local.cpp 0.3
+lib/Analysis/TargetLibraryInfo.cpp 0.85
+lib/Transforms/Utils/SimplifyLibCalls.cpp 0.97
+lib/TargetParser/Triple.cpp 0.25

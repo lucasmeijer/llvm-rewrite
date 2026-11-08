@@ -27,7 +27,12 @@ src/
   debuginfo.jai   DI* nodes, DIArgList, debug records, debug-intrinsic upgrade, StripDebugInfo
   apint.jai       APInt (arbitrary width, words in temp) and KnownBits arithmetic
   ir_edit.jai     mutation/CFG API for passes: iterators, successors/predecessors, phi edits, builders, split block
-  inst_props.jai  mayHaveSideEffects, willReturn, wouldInstructionBeTriviallyDead, the TLI subset
+  inst_props.jai  mayHaveSideEffects, willReturn, wouldInstructionBeTriviallyDead
+  tli.jai         TargetLibraryInfo (tli_for(f), tli_lookup_*, tli_func_has; gen_tli.jai from TargetLibraryInfo.td)
+                  and the Triple parser/normalizer it needs (gen_triple.jai from TripleName.def)
+  build_lib_calls.jai, simplify_lib_calls.jai, simplify_lib_calls2.jai   BuildLibCalls.cpp, SimplifyLibCalls.cpp
+                  (LibCallSimplifier, used by InstCombine's tryOptimizeCall); value_tracking_strings.jai
+                  (getConstantStringInfo, GetStringLength); pass_inferattrs.jai (InferFunctionAttrs)
   domtree.jai     DominatorTree/PostDominatorTree (SemiNCA, incremental updates, IDF calculator, printer)
   knownbits.jai   KnownBits.cpp (kb_*); apint.jai is APInt with an inline 64-bit word (ap_*)
   constant_range.jai  ConstantRange (cr_*); cmp_pred.jai CmpInst predicate algebra; intrinsic_ids.jai IID_* constants
@@ -464,6 +469,7 @@ Port of `llvm/lib/Transforms/InstCombine/`. `instcombine.jai` `#load`s the files
 | `ic_combining.jai` | InstructionCombining.cpp visitors that are not driver or binop code: `visitGetElementPtrInst` (+ visitGEPOfGEP, foldGEPOfPhi, ...), `visitAllocSite`/`isAllocSiteRemovable`, `visitFree`, `visitSwitchInst`, `visitExtractValueInst` (+ foldExtractOfOverflowIntrinsic), `visitLandingPadInst`, `visitFreeze` (+ freezeOtherUses, foldFreezeIntoRecurrence) |
 | `ic_vectorops.jai` | InstCombineVectorOps.cpp, complete: `visitExtractElementInst`, `visitInsertElementInst`, `visitInsertValueInst` (+ foldAggregateConstructionIntoAggregateReuse), `visitShuffleVectorInst` and every helper, `foldExtractionOfVectorDeinterleave`; shuffle masks are copied into `[..] s32` (`shuf_mask`, -1 = poison) because `shuffle_mask()` is a view into `ir.u32_pool` |
 | `ic_misc.jai` | `ic_visit` (the opcode switch = InstVisitor) and the terminators |
+| `simplify_lib_calls*.jai` | SimplifyLibCalls.cpp, reached through `ic_try_optimize_call` (ic_calls.jai). One `lcs: Lcs_State` per simplified call (the TLI of the function, UnsafeFPShrink); builds with `icb_*`; Replacer/Eraser are `ic_replace_inst_uses_with` / `ic_erase_inst`; `ic.default_bundles_src` gives new calls the call's operand bundles |
 
 **State.** One global `ic: Ic_State` (= one `InstCombinerImpl`), reset per iteration like LLVM's per-iteration
 object: worklist, DomConditionCache (`ic.dc`, also reachable through `ic.sq.dc` so every ValueTracking query made
