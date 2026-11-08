@@ -1081,62 +1081,152 @@ masks_equal :: (a: [] u32, b: [] u32) -> bool {
     for a if it != b[it_index] return false;
     return true;
 }
-// ShuffleVectorInst::isConcat
-shuffle_is_concat :: (sv: Value_Id) -> bool {
-    m := shuffle_mask(sv);
-    st := vtype(op(sv, 0));
-    if type_kind(st) == .SVECTOR || pm_undef_value(op(sv, 0)) || pm_undef_value(op(sv, 1)) return false;
-    n := cast(s64) type_count(st);
-    if m.count != 2 * n return false;
-    for m if it != 0xFFFF_FFFF && it != cast(u32) it_index return false;
-    return true;
+// unshuffleConstant
+ic_unshuffle_constant :: (sh_mask: [] s32, c: Value_Id, new_ty: Type_Id) -> Value_Id {
+    if type_kind(new_ty) == .SVECTOR {
+        splat := get_splat_value(c);
+        if splat == NONE return NONE;
+        return cf_get_splat(new_ty, splat);
+    }
+    if vec_count(new_ty) > vec_count(vtype(c)) return NONE;
+    nn := cast(s64) vec_count(new_ty);
+    ps := const_poison(scalar_type(vtype(c)));
+    nv := NewArray(nn, Value_Id,, allocator = temp);
+    for * nv it.* = ps;
+    n := cast(s64) vec_count(vtype(c));
+    for i: 0..n-1 {
+        celt := cf_elt(c, cast(u64) i);
+        if sh_mask[i] >= 0 {
+            me := cast(s64) sh_mask[i];
+            if me >= nn continue;
+            ne := nv[me];
+            if celt == NONE || (vkind(ne) != .C_POISON && ne != celt) || i >= nn return NONE;
+            nv[me] = celt;
+        }
+    }
+    return const_vector_of(nv);
 }
+
+// constantFoldBinOpWithSplat
+constant_fold_binop_with_splat :: (opc: Opcode, vec: Value_Id, splat: Value_Id, splat_lhs: bool) -> Value_Id {
+    l := cf_get_splat(vtype(vec), splat);
+    r := vec;
+    if !splat_lhs { t := l; l = r; r = t; }
+    return cfo_binary_op_operands(opc, l, r);
+}
+
+// foldSpliceBinOp<SpliceID>
+fold_splice_binop :: (i: Value_Id, splice_id: Intrinsic_Id) -> Value_Id {
+    lhs := op(i, 0); rhs := op(i, 1);
+    create_binop_splice :: (i: Value_Id, x: Value_Id, y: Value_Id, offset: Value_Id, splice_id: Intrinsic_Id) -> Value_Id {
+        v := icb_binop(inst_op(i), x, y, name_ref(vname(i)));
+        if is_binary_operator(v) copy_ir_flags(v, i);
+        return create_intrinsic_call(splice_id, .[vtype(v)], .[v, const_poison(vtype(v)), offset]);
+    }
+    if call_iid(lhs) == splice_id && pm_poison(call_arg(lhs, 1)) {
+        v1 := call_arg(lhs, 0); offset := call_arg(lhs, 2);
+        if call_iid(rhs) == splice_id && pm_poison(call_arg(rhs, 1)) && call_arg(rhs, 2) == offset &&
+           (has_one_use(lhs) || has_one_use(rhs) || (lhs == rhs && has_n_uses(lhs, 2)))
+            return create_binop_splice(i, v1, call_arg(rhs, 0), offset, splice_id);
+        if has_one_use(lhs) && is_splat_value(rhs) return create_binop_splice(i, v1, rhs, offset, splice_id);
+    } else if is_splat_value(lhs) && call_iid(rhs) == splice_id && pm_poison(call_arg(rhs, 1)) && has_one_use(rhs)
+        return create_binop_splice(i, lhs, call_arg(rhs, 0), call_arg(rhs, 2), splice_id);
+    return NONE;
+}
+
+// foldVectorBinop
 ic_fold_vector_binop :: (i: Value_Id) -> Value_Id {
     t := vtype(i);
     if !is_vector_type(t) return NONE;
     opc := inst_op(i);
     lhs := op(i, 0); rhs := op(i, 1);
-    if call_iid(lhs) == IID_VECTOR_INSERT || call_iid(rhs) == IID_VECTOR_INSERT {
-        if is_const(op(lhs, 0)) || is_const(op(rhs, 0)) fatal("instcombine: foldVectorBinop through llvm.vector.insert is not supported yet");
+    through_insert_splat :: (i: Value_Id, opc: Opcode, maybe_sub: Value_Id, maybe_splat: Value_Id, splat_lhs: bool) -> Value_Id {
+        if !is_const(maybe_splat) return NONE;
+        splat := get_splat_value(maybe_splat);
+        if splat == NONE return NONE;
+        if call_iid(maybe_sub) != IID_VECTOR_INSERT return NONE;
+        dest := call_arg(maybe_sub, 0); sub := call_arg(maybe_sub, 1); idx := call_arg(maybe_sub, 2);
+        if !is_const(dest) || !is_const(sub) return NONE;
+        sub = constant_fold_binop_with_splat(opc, sub, splat, splat_lhs);
+        dest = constant_fold_binop_with_splat(opc, dest, splat, splat_lhs);
+        if sub == NONE || dest == NONE return NONE;
+        iv := icb_intrinsic(IID_VECTOR_INSERT, .[vtype(dest), vtype(sub)], .[dest, sub, idx]);
+        return ic_replace_inst_uses_with(i, iv);
     }
+    r := through_insert_splat(i, opc, lhs, rhs, false); if r != NONE return r;
+    r = through_insert_splat(i, opc, rhs, lhs, true); if r != NONE return r;
     okl, l0, l1, lm := pm_shuffle(lhs);
     okr, r0, r1, rm := pm_shuffle(rhs);
-    if okl && okr && masks_equal(lm, rm) && has_one_use(lhs) && has_one_use(rhs) && shuffle_is_concat(lhs) && shuffle_is_concat(rhs) {
+    if okl && okr && masks_equal(lm, rm) && has_one_use(lhs) && has_one_use(rhs) && sv_is_concat(lhs) && sv_is_concat(rhs) {
+        m := shuf_mask(lhs);
         n0 := icb_binop(opc, l0, r0); if is_binary_operator(n0) copy_ir_flags(n0, i);
         n1 := icb_binop(opc, l1, r1); if is_binary_operator(n1) copy_ir_flags(n1, i);
-        return create_shuffle(n0, n1, lm);
+        return create_shuffle_s32(n0, n1, m);
     }
-    if call_iid(lhs) == IID_VECTOR_REVERSE || call_iid(rhs) == IID_VECTOR_REVERSE fatal("instcombine: foldVectorBinop of llvm.vector.reverse is not supported yet");
-    if call_iid(lhs) == IID_EXPERIMENTAL_VP_REVERSE || call_iid(rhs) == IID_EXPERIMENTAL_VP_REVERSE fatal("instcombine: foldVectorBinop of llvm.experimental.vp.reverse is not supported yet");
-    if call_iid(lhs) == IID_VECTOR_SPLICE_LEFT || call_iid(rhs) == IID_VECTOR_SPLICE_LEFT || call_iid(lhs) == IID_VECTOR_SPLICE_RIGHT || call_iid(rhs) == IID_VECTOR_SPLICE_RIGHT
-        fatal("instcombine: foldVectorBinop of llvm.vector.splice is not supported yet");
+    create_binop_reverse :: (i: Value_Id, x: Value_Id, y: Value_Id) -> Value_Id {
+        v := icb_binop(inst_op(i), x, y, name_ref(vname(i)));
+        if is_binary_operator(v) copy_ir_flags(v, i);
+        return create_intrinsic_call(IID_VECTOR_REVERSE, .[vtype(v)], .[v]);
+    }
+    if call_iid(lhs) == IID_VECTOR_REVERSE {
+        v1 := call_arg(lhs, 0);
+        if call_iid(rhs) == IID_VECTOR_REVERSE && (has_one_use(lhs) || has_one_use(rhs) || (lhs == rhs && has_n_uses(lhs, 2)))
+            return create_binop_reverse(i, v1, call_arg(rhs, 0));
+        if has_one_use(lhs) && is_splat_value(rhs) return create_binop_reverse(i, v1, rhs);
+    } else if is_splat_value(lhs) && call_iid(rhs) == IID_VECTOR_REVERSE && has_one_use(rhs)
+        return create_binop_reverse(i, lhs, call_arg(rhs, 0));
+    create_binop_vp_reverse :: (i: Value_Id, x: Value_Id, y: Value_Id, evl: Value_Id) -> Value_Id {
+        v := icb_binop(inst_op(i), x, y, name_ref(vname(i)));
+        if is_binary_operator(v) copy_ir_flags(v, i);
+        vt := vtype(v);
+        all_true := icb_vector_splat(vec_count(vt), type_kind(vt) == .SVECTOR, const_int(ir.t_i1, 1));
+        return create_intrinsic_call(IID_EXPERIMENTAL_VP_REVERSE, .[vt], .[v, all_true, evl]);
+    }
+    if call_iid(lhs) == IID_EXPERIMENTAL_VP_REVERSE && pm_all_ones(call_arg(lhs, 1)) {
+        v1 := call_arg(lhs, 0); evl := call_arg(lhs, 2);
+        if call_iid(rhs) == IID_EXPERIMENTAL_VP_REVERSE && pm_all_ones(call_arg(rhs, 1)) && call_arg(rhs, 2) == evl &&
+           (has_one_use(lhs) || has_one_use(rhs) || (lhs == rhs && has_n_uses(lhs, 2)))
+            return create_binop_vp_reverse(i, v1, call_arg(rhs, 0), evl);
+        if has_one_use(lhs) && is_splat_value(rhs) return create_binop_vp_reverse(i, v1, rhs, evl);
+    } else if is_splat_value(lhs) && call_iid(rhs) == IID_EXPERIMENTAL_VP_REVERSE && pm_all_ones(call_arg(rhs, 1))
+        return create_binop_vp_reverse(i, lhs, call_arg(rhs, 0), call_arg(rhs, 2));
+    r = fold_splice_binop(i, IID_VECTOR_SPLICE_LEFT); if r != NONE return r;
+    r = fold_splice_binop(i, IID_VECTOR_SPLICE_RIGHT); if r != NONE return r;
     if !is_safe_to_speculate_binop_variable_replaced(i) return NONE;
-    create_binop_shuffle :: (opc: Opcode, x: Value_Id, y: Value_Id, m: [] u32, i: Value_Id) -> Value_Id {
-        xy := icb_binop(opc, x, y);
+    create_binop_shuffle :: (i: Value_Id, x: Value_Id, y: Value_Id, m: [] s32) -> Value_Id {
+        xy := icb_binop(inst_op(i), x, y);
         if is_binary_operator(xy) copy_ir_flags(xy, i);
-        return create_shuffle(xy, NONE, m);
+        return create_shuffle_s32(xy, NONE, m);
     }
     if okl && okr && pm_poison(l1) && pm_poison(r1) && masks_equal(lm, rm) && vtype(l0) == vtype(r0) &&
        (has_one_use(lhs) || has_one_use(rhs) || lhs == rhs)
-        return create_binop_shuffle(opc, l0, r0, lm, i);
+        return create_binop_shuffle(i, l0, r0, shuf_mask(lhs));
     if is_commutative_op(opc) && okl && okr && r0 == l1 && r1 == l0 && masks_equal(lm, rm) {
         no_poison := true;
         for lm if it == 0xFFFF_FFFF no_poison = false;
         for rm if it == 0xFFFF_FFFF no_poison = false;
-        if shuffle_is_select(lhs) && shuffle_is_select(rhs) && no_poison {
+        if sv_is_select(lhs) && sv_is_select(rhs) && no_poison {
             nb := create_binop(opc, l0, l1);
             copy_ir_flags(nb, i);
             return nb;
         }
     }
-    // Op(shuffle(V1, Mask), C) / Op(C, shuffle(V1, Mask))
+    // m_c_BinOp(m_OneUse(m_Shuffle(m_Value(V1), m_Poison(), m_Mask(Mask))), m_ImmConstant(C))
     for side: 0..1 {
         sh := op(i, cast(u32) side);
         cc := op(i, cast(u32) (1 - side));
-        oks, v1, v2, m := pm_shuffle(sh);
-        if oks && has_one_use(sh) && pm_poison(v2) && pm_imm_constant(cc) {
-            fatal("instcombine: foldVectorBinop with a shuffle and a constant (unshuffleConstant) is not supported yet");
+        oks, v1, v2, _ := pm_shuffle(sh);
+        if !(oks && has_one_use(sh) && pm_poison(v2) && pm_imm_constant(cc)) continue;
+        const_op1 := is_const(rhs);
+        m := shuf_mask(sh);
+        new_c := ic_unshuffle_constant(m, cc, vtype(v1));
+        if new_c != NONE {
+            if type_kind(vtype(v1)) == .VECTOR && is_int_div_rem(opc) new_c = ic_get_safe_vector_constant_for_binop(opc, new_c, const_op1);
+            nl := ifx const_op1 then v1 else new_c;
+            nr := ifx const_op1 then new_c else v1;
+            return create_binop_shuffle(i, nl, nr, m);
         }
+        break;
     }
     if is_associative_op(opc) && is_commutative_op(opc) {
         l := lhs; r := rhs;

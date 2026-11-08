@@ -18,3 +18,4 @@
 #load "ic_calls.jai";
 #load "ic_loadstorealloca.jai";
 #load "ic_combining.jai";
+#load "ic_vectorops.jai";

@@ -50,10 +50,10 @@ ic_visit :: (i: Value_Id) -> Value_Id {
         case .ALLOCA; return ic_visit_alloca(i);
         case .SWITCH; return ic_visit_switch(i);
         case .LANDINGPAD; return ic_visit_landing_pad(i);
-        case .EXTRACTELEMENT; #through;
-        case .INSERTELEMENT; #through;
-        case .INSERTVALUE; #through;
-        case .SHUFFLEVECTOR; return ic_visit_simplify_only(i);
+        case .EXTRACTELEMENT; return ic_visit_extract_element(i);
+        case .INSERTELEMENT; return ic_visit_insert_element(i);
+        case .INSERTVALUE; return ic_visit_insert_value(i);
+        case .SHUFFLEVECTOR; return ic_visit_shuffle_vector(i);
     }
     if o == {
         case .UITOFP; return ic_visit_uitofp(i);
