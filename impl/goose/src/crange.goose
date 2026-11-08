@@ -295,3 +295,108 @@ fn cr_truncate(c: CR, dw: i64) -> CR {
     }
     return cr_full(dw);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Added for BasicAA (L1.analysis.aa): extensions, sextOrTrunc, smul_fast, smul_sat.
+
+fn cr_sx(x: u64, w: i64) -> i64 { if w >= 64 { x as! i64 } else { ((x << (64 - w)) as! i64) >> (64 - w) } }
+
+// ConstantRange::zeroExtend
+fn cr_zext(c: CR, dw: i64) -> CR {
+    let sw = c.w as i64;
+    if cr_is_empty(c) { return cr_empty(dw); }
+    if dw == sw { return c; }
+    if dw > 64 { fatal("ConstantRange: widths over 64 bits are not supported"); }
+    if cr_is_full(c) || cr_is_upper_wrapped(c) {
+        var lo: u64 = 0;
+        if c.hi == 0 { lo = c.lo; }
+        return cr_new(lo, (1 as u64) << sw, dw);
+    }
+    return cr_new(c.lo, c.hi, dw);
+}
+
+// ConstantRange::signExtend
+fn cr_sext(c: CR, dw: i64) -> CR {
+    let sw = c.w as i64;
+    if cr_is_empty(c) { return cr_empty(dw); }
+    if dw == sw { return c; }
+    if dw > 64 { fatal("ConstantRange: widths over 64 bits are not supported"); }
+    let dm = cr_m(dw);
+    if c.hi == cr_sb(sw) { return cr_new((cr_sx(c.lo, sw) as! u64) & dm, c.hi, dw); }
+    if cr_is_full(c) || cr_is_sign_wrapped(c) {
+        let lo = dm & ~cr_m(sw - 1);
+        let hi = cr_m(sw - 1) + 1;
+        return cr_new(lo, hi, dw);
+    }
+    return cr_new((cr_sx(c.lo, sw) as! u64) & dm, (cr_sx(c.hi, sw) as! u64) & dm, dw);
+}
+
+// ConstantRange::sextOrTrunc
+fn cr_sext_or_trunc(c: CR, dw: i64) -> CR {
+    let sw = c.w as i64;
+    if sw > dw { return cr_truncate(c, dw); }
+    if sw < dw { return cr_sext(c, dw); }
+    return c;
+}
+
+// APInt::smul_ov at width w (values as w-bit patterns): (result, overflow)
+fn cr_smul_ov(a: u64, b: u64, w: i64) -> u64, bool {
+    let m = cr_m(w);
+    let res = (a * b) & m;
+    if (b & m) == 0 { return res, false; }
+    let rs = cr_sx(res, w);
+    let bs = cr_sx(b, w);
+    let a_min = (a & m) == cr_sb(w);
+    let b_all_ones = (b & m) == m;
+    // Res.sdiv(RHS) != *this || (isMinSignedValue() && RHS.isAllOnes())
+    var qbits: u64 = 0;
+    if bs == -1 { qbits = ((0 as u64) - res) & m; } else { qbits = ((rs / bs) as! u64) & m; }
+    return res, qbits != (a & m) || (a_min && b_all_ones);
+}
+
+// APInt::smul_sat
+fn cr_smul_sat_val(a: u64, b: u64, w: i64) -> u64 {
+    let r, ov = cr_smul_ov(a, b, w);
+    if !ov { return r; }
+    let neg = ((a & cr_sb(w)) != 0) != ((b & cr_sb(w)) != 0);
+    return if neg { cr_sb(w) } else { cr_sb(w) - 1 };
+}
+
+fn cr_min_max4(x0: u64, x1: u64, x2: u64, x3: u64, w: i64) -> u64, u64 {
+    var mn = x0;
+    var mx = x0;
+    for x in [x1, x2, x3] {
+        if cr_slt(x, mn, w) { mn = x; }
+        if cr_slt(mx, x, w) { mx = x; }
+    }
+    return mn, mx;
+}
+
+// ConstantRange::smul_fast
+fn cr_smul_fast(a: CR, b: CR) -> CR {
+    let w = a.w as i64;
+    if cr_is_empty(a) || cr_is_empty(b) { return cr_empty(w); }
+    let mn = cr_smin(a);
+    let mx = cr_smax(a);
+    let omn = cr_smin(b);
+    let omx = cr_smax(b);
+    let r1, o1 = cr_smul_ov(mn, omn, w);
+    let r2, o2 = cr_smul_ov(mn, omx, w);
+    let r3, o3 = cr_smul_ov(mx, omn, w);
+    let r4, o4 = cr_smul_ov(mx, omx, w);
+    if o1 || o2 || o3 || o4 { return cr_full(w); }
+    let lo, hi = cr_min_max4(r1, r2, r3, r4, w);
+    return cr_nonempty(lo, hi + 1, w);
+}
+
+// ConstantRange::smul_sat
+fn cr_smul_sat(a: CR, b: CR) -> CR {
+    let w = a.w as i64;
+    if cr_is_empty(a) || cr_is_empty(b) { return cr_empty(w); }
+    let mn = cr_smin(a);
+    let mx = cr_smax(a);
+    let omn = cr_smin(b);
+    let omx = cr_smax(b);
+    let lo, hi = cr_min_max4(cr_smul_sat_val(mn, omn, w), cr_smul_sat_val(mn, omx, w), cr_smul_sat_val(mx, omn, w), cr_smul_sat_val(mx, omx, w), w);
+    return cr_nonempty(lo, hi + 1, w);
+}

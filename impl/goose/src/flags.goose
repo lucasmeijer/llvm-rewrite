@@ -19,6 +19,13 @@ let KNOWN_FLAGS: const u8[:][] = [
     "verify-loop-info", "verify-loop-lcssa",             // no-op: extra verification only
     "simplifycfg-require-and-preserve-domtree",          // read by simplifycfg
     "sroa-skip-mem2reg",                                 // read by sroa
+    "aa-pipeline",                                       // the AAManager pipeline (aa.goose)
+    "print-all-alias-modref-info", "print-no-aliases", "print-may-aliases", "print-partial-aliases",
+    "print-must-aliases", "print-no-modref", "print-ref", "print-mod", "print-modref",
+    "evaluate-aa-metadata",                              // read by aa-eval
+    "use-dereferenceable-at-point-semantics",            // no-op for BasicAA (only affects canBeFreed queries)
+    "basic-aa-recphi", "basic-aa-separate-storage", "enable-tbaa", "enable-scoped-noalias",
+    "capture-tracking-max-uses-to-explore",
 ];
 
 fn flag_known(name: const u8[:]) -> bool {
