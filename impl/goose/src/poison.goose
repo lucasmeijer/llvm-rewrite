@@ -209,13 +209,14 @@ fn vec_contains_kind(c: i32, kind: i64) -> bool {
     return false;
 }
 fn contains_undef_element(c: i32) -> bool {
-    // Constant::containsUndefElement: an UndefValue element (poison included)
+    // Constant::containsUndefElement: an UndefValue element that is not poison (Constants.cpp)
     let t = vals[c].ty;
     if ty_kind(t) != TK_FVEC { return false; }
-    if vals[c].kind == VK_UNDEF || vals[c].kind == VK_POISON { return true; }
+    if vals[c].kind == VK_UNDEF { return true; }
+    if vals[c].kind == VK_POISON { return false; }
     for i in ty_count(t) {
         let e = agg_elem(c, i);
-        if e >= 0 && (vals[e].kind == VK_UNDEF || vals[e].kind == VK_POISON) { return true; }
+        if e >= 0 && vals[e].kind == VK_UNDEF { return true; }
     }
     return false;
 }

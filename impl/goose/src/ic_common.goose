@@ -25,6 +25,7 @@ import apint;
 import overflow;
 import ic;
 import ic_builder;
+import ic_andorxor;
 import cfgutil;
 import datalayout;
 
@@ -186,11 +187,7 @@ var sp_b: i32 = -1;
 fn match_symmetric_pair(l: i32, r: i32) -> bool {
     if !is_inst(l) || !is_inst(r) || iop(l) != iop(r) { return false; }
     let o = iop(l);
-    if o == OP_PHI {
-        if inst_parent(l) != inst_parent(r) { return false; }
-        ic_match_symmetric_phis(l, r);
-        return false;
-    }
+    if o == OP_PHI { return ic_match_symmetric_phis(l, r); }
     if o == OP_SELECT {
         let c = op(l, 0);
         let t = op(l, 1);
@@ -210,14 +207,24 @@ fn match_symmetric_pair(l: i32, r: i32) -> bool {
     }
     return false;
 }
-// matchSymmetricPhiNodesPair
-fn ic_match_symmetric_phis(l: i32, r: i32) {
-    if nops(l) != 2 || nops(r) != 2 { return; }
-    let bb0 = phi_block(l, 0);
-    let bb1 = phi_block(l, 1);
-    if !(phi_block(r, 0) == bb0 && phi_block(r, 1) == bb1) { return; }
-    let l0 = op(l, 0); let l1 = op(l, 1); let r0 = op(r, 0); let r1 = op(r, 1);
-    if l0 == r1 && l1 == r0 { ic_not_ported("matchSymmetricPhiNodesPair"); }
+// matchSymmetricPhiNodesPair(LHS, RHS): sets sp_a/sp_b
+fn ic_match_symmetric_phis(l: i32, r: i32) -> bool {
+    if inst_parent(l) != inst_parent(r) { return false; }
+    let n = nops(l);
+    if n < 2 { return false; }
+    if nops(r) != n { return false; }
+    for k in n { if phi_block(l, k) != phi_block(r, k) { return false; } }
+    let l0 = op(l, 0);
+    let r0 = op(r, 0);
+    for k in 1..n {
+        let l1 = op(l, k);
+        let r1 = op(r, k);
+        if (l0 == l1 && r0 == r1) || (l0 == r1 && r0 == l1) { continue; }
+        return false;
+    }
+    sp_a = l0;
+    sp_b = r0;
+    return true;
 }
 
 fn simplify_assoc_or_comm(i: i32) -> bool {
@@ -1258,15 +1265,16 @@ fn fold_binop_of_select_and_cast_of_select_cond(i: i32) -> i32 {
     let tv = op(selop, 1);
     let fv = op(selop, 2);
     let cast_rhs = castop == rhs;
+    // NewFoldedConst(IsTrueArm, V) uses CastFalseVal for IsTrueArm, CastTrueVal otherwise
     if cond == a {
-        let ntv = fbsc_const(o, cast_rhs, cf, tv);
-        let nfv = fbsc_const(o, cast_rhs, ct, fv);
-        return ic_new_select_md(cond, ntv, nfv, selop);
-    }
-    if m_not_of(a, cond) {
         let ntv = fbsc_const(o, cast_rhs, ct, tv);
         let nfv = fbsc_const(o, cast_rhs, cf, fv);
-        return ic_new_select_md(cond, ntv, nfv, selop);
+        return ic_new_select_md_all(cond, ntv, nfv, selop);
+    }
+    if m_not_of(a, cond) {
+        let ntv = fbsc_const(o, cast_rhs, cf, tv);
+        let nfv = fbsc_const(o, cast_rhs, ct, fv);
+        return ic_new_select_md_all(cond, ntv, nfv, selop);
     }
     return -1;
 }

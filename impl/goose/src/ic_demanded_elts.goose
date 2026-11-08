@@ -394,3 +394,12 @@ fn sde_find_shuf_bo(bo: i32, shuf_as_op0: bool) -> i32 {
     }
     return -1;
 }
+
+// InstCombinerImpl::SimplifyDemandedVectorElts(V, DemandedElts, PoisonElts, Depth, AllowMultipleUsers):
+// (replacement, the visited instruction itself when modified in place, or -1; PoisonElts)
+fn ic_simplify_demanded_vector_elts(v: i32, demanded: AP, depth: i64, allow_multi: bool) -> i32, AP {
+    let saved = sde_changed;
+    let r, pe = sde_rec(v, demanded, ap_zero(demanded.w as i64), depth, allow_multi);
+    sde_changed = saved;
+    return r, pe;
+}

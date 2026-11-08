@@ -45,6 +45,7 @@ import ic_andorxor;
 import ic_demanded;
 import ic_visit_misc;
 import ic_select;
+import ic_phi;
 
 fn ic_not_ported(what: const u8[:]) { fatal(str("InstCombine: ", what, " is not ported yet")); }
 
@@ -726,6 +727,7 @@ fn ic_visit(i: i32) -> i32 {
         OP_ICMP => { return visit_icmp(i); },
         OP_FCMP => { return visit_fcmp(i); },
         OP_SELECT => { return visit_select(i); },
+        OP_PHI => { return visit_phi(i); },
         OP_RET => { return visit_return(i); },
         OP_BR => { return visit_uncond_br(i); },
         OP_CONDBR => { return visit_cond_br(i); },
@@ -771,6 +773,7 @@ fn instcombine_run(fv: i32, verify_fixpoint: bool, max_iter: i64) -> u32 {
         ic_dead_to.resize(0);
         dc_begin(fv);
         ic_backedges_valid = false;
+        ic_phi_reset_pred_order();
         var ch = ic_prepare_worklist(fv);
         if ic_run() { ch = true; }
         dc_end();

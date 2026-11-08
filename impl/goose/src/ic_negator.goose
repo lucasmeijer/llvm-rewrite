@@ -20,6 +20,7 @@ import flags;
 import domtree;
 import ic;
 import ic_builder;
+import cfgutil;
 import ic_common;
 
 var ng_active: bool = false;
@@ -204,10 +205,9 @@ recursive fn ng_visit_inner(i: i32, nsw0: bool, depth: i64, bw: i64) -> i32 {
     if o == OP_SELECT {
         if is_known_negation(op(i, 1), op(i, 2), false, false) {
             let ns = inst_clone(i);
-            let a = op(ns, 1);
-            let b = op(ns, 2);
-            set_op(ns, 1, b);
-            set_op(ns, 2, a);
+            // swapValues (Use::swap); setName(I.getName() + ".neg") is undone by Builder.Insert(NewSelect),
+            // which names the instruction "" on insertion, so the select stays unnamed
+            cu_use_swap(vals[ns].ops + 1, vals[ns].ops + 2);
             let tv = op(ns, 1);
             let fv = op(ns, 2);
             if m_neg(tv) == fv && is_inst(tv) { drop_poison_generating_flags(tv); }
@@ -217,7 +217,7 @@ recursive fn ng_visit_inner(i: i32, nsw0: bool, depth: i64, bw: i64) -> i32 {
                 if is_inst(fv) { drop_poison_generating_flags(fv); }
             }
             icb_insert(ns, "");
-            return ng_nm(ns, i);
+            return ns;
         }
         let n1 = ng_negate(op(i, 1), nsw, depth + 1);
         if n1 < 0 { return -1; }

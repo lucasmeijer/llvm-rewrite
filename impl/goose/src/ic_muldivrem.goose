@@ -351,14 +351,36 @@ fn visit_mul(i: i32) -> i32 {
         if n0 >= 0 { return ic_new_binop(OP_MUL, n0, ny1); }
     }
     // (mul (div exact X, C0), C1) -> (div exact X, C0 / C1)
-    if one_use(op0) && has_apint(op1) && (bo(op0, OP_UDIV) || bo(op0, OP_SDIV)) && op_exact(op0) && has_apint(op(op0, 1)) {
+    if one_use(op0) && has_apint(op1) && (bo(op0, OP_UDIV) || bo(op0, OP_SDIV)) && op_exact(op0) {
         let c1 = ap_c(op1);
-        let c = ap_c(op(op0, 1));
-        var ok = false;
-        if iop(op0) == OP_UDIV { ok = !ap_is_zero(c1) && ap_is_zero(ap_urem(c, c1)); }
-        else if !ap_is_zero(c1) {
+        // m_CheckedInt (cst_pred_ty): every non-poison element of C0 satisfies the check
+        fn div_check(c: AP, c1: AP, udiv: bool) -> bool {
+            if ap_is_zero(c1) { fatal("InstCombine: division by zero constant in the (mul (div exact X, C0), C1) check"); }
+            if udiv { return ap_is_zero(ap_urem(c, c1)); }
             let q, rm = ap_sdivrem(c, c1);
-            ok = ap_is_zero(rm) && !ap_is_all_ones(q);
+            return ap_is_zero(rm) && !ap_is_all_ones(q);
+        }
+        let c0 = op(op0, 1);
+        let udiv = iop(op0) == OP_UDIV;
+        var ok = false;
+        if !ap_is_zero(c1) && is_constant(c0) && is_int_or_int_vec(vals[c0].ty) {
+            if vals[c0].kind == VK_CINT { ok = div_check(ci_ap(if ty_is_vector(vals[c0].ty) { splat_value(c0, false) } else { c0 }), c1, udiv); }
+            else if ty_is_vector(vals[c0].ty) {
+                let s = splat_value(c0, false);
+                if s >= 0 && vals[s].kind == VK_CINT { ok = div_check(ci_ap(s), c1, udiv); }
+                else if ty_kind(vals[c0].ty) == TK_FVEC {
+                    var has = false;
+                    var all = true;
+                    for k in ty_count(vals[c0].ty) {
+                        let e = agg_elem(c0, k);
+                        if e < 0 { all = false; break; }
+                        if vals[e].kind == VK_POISON { continue; }
+                        if vals[e].kind != VK_CINT || !div_check(ci_ap(e), c1, udiv) { all = false; break; }
+                        has = true;
+                    }
+                    ok = all && has;
+                }
+            }
         }
         if ok {
             let bopc = iop(op0);
