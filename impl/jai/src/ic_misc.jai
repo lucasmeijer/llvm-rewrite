@@ -39,6 +39,7 @@ ic_visit :: (i: Value_Id) -> Value_Id {
         case .INVOKE; return ic_visit_invoke(i);
         case .CALLBR; return ic_visit_callbr(i);
         case .FENCE; return ic_visit_fence(i);
+        case .ATOMICRMW; return ic_visit_atomicrmw(i);
         case .RET; return ic_visit_return(i);
         case .UNREACHABLE; return ic_visit_unreachable(i);
         case .BR; return ic_visit_uncond_br(i);

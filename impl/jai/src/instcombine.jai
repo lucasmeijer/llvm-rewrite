@@ -25,3 +25,4 @@
 #load "simplify_lib_calls.jai";
 #load "simplify_lib_calls2.jai";
 #load "ic_demanded_fp.jai";
+#load "ic_atomicrmw.jai";

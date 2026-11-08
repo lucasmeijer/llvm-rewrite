@@ -685,8 +685,8 @@ ic_fpclass_test_is_fcmp0 :: (mask: u32, f: Value_Id, t: Type_Id) -> u8 {
     else if m == FC_NEG_SUBNORMAL | FC_NEG_NORMAL | FC_NEG_INF { if ic_input_denormal_is_ieee(f, t) return FCMP_OLT; }
     else if m == FC_POS_NORMAL | FC_POS_INF { if ic_input_denormal_is_daz(f, t) return FCMP_OGT; }
     else if m == FC_NEG_NORMAL | FC_NEG_INF { if ic_input_denormal_is_daz(f, t) return FCMP_OLT; }
-    else if m == (FC_ALL_FLAGS & ~cast(u32) FC_ZERO & ~cast(u32) FC_NAN) { if ic_input_denormal_is_ieee(f, t) return FCMP_ONE; }
-    else if m == (FC_ALL_FLAGS & ~cast(u32) (FC_ZERO | FC_SUBNORMAL) & ~cast(u32) FC_NAN) { if ic_input_denormal_is_daz(f, t) return FCMP_ONE; }
+    else if m == (FC_ALL_FLAGS & fc_not(FC_ZERO) & fc_not(FC_NAN)) { if ic_input_denormal_is_ieee(f, t) return FCMP_ONE; }
+    else if m == (FC_ALL_FLAGS & fc_not(FC_ZERO | FC_SUBNORMAL) & fc_not(FC_NAN)) { if ic_input_denormal_is_daz(f, t) return FCMP_ONE; }
     return BAD_FCMP_PREDICATE;
 }
 ic_fp_inf_const :: (t: Type_Id, neg := false) -> Value_Id { return const_fp_words(t, fp_inf(type_kind(scalar_type(t)), neg)); }
@@ -697,7 +697,7 @@ ic_fold_intrinsic_is_fpclass :: (ii: Value_Id) -> Value_Id {
     is_unordered := (mask & FC_NAN) == FC_NAN;
     is_ordered := (mask & FC_NAN) == 0;
     ordered_mask := mask & ~cast(u32) FC_NAN;
-    ordered_inv := ~ordered_mask & ~cast(u32) FC_NAN & FC_ALL_FLAGS;
+    ordered_inv := fc_not(ordered_mask) & fc_not(FC_NAN);
     is_strict := fn_has_fn_attr(inst_fn(ii), .StrictFP);
     f := call_called_function(ii);
     okn, fneg_src := pm_fneg(src0);
@@ -722,7 +722,7 @@ ic_fold_intrinsic_is_fpclass :: (ii: Value_Id) -> Value_Id {
         return take(icb_cmp(ifx is_unordered then FCMP_UNE else cast(u8) FCMP_ONE, src0, inf), ii);
     }
     if mask == FC_NAN && !is_strict return take(icb_cmp(FCMP_UNO, src0, fp_zero_of(t)), ii);
-    if mask == (~cast(u32) FC_NAN & FC_ALL_FLAGS) && !is_strict return take(icb_cmp(FCMP_ORD, src0, fp_zero_of(t)), ii);
+    if mask == fc_not(FC_NAN) && !is_strict return take(icb_cmp(FCMP_ORD, src0, fp_zero_of(t)), ii);
     if !is_strict && (is_ordered || is_unordered) {
         pt := ic_fpclass_test_is_fcmp0(ordered_mask, inst_fn(ii), t);
         if pt != BAD_FCMP_PREDICATE {
