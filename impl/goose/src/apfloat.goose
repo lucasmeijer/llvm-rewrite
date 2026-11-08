@@ -185,7 +185,19 @@ fn fp_parse_decimal(kind: i64, s: const u8[:]) -> u64, u64, bool {
 }
 
 // Convert bits of one format to another (round to nearest even), like APFloat::convert.
-fn fp_convert(from: i64, to: i64, lo: u64, hi: u64) -> u64, u64 {
+recursive fn fp_convert(from: i64, to: i64, lo: u64, hi: u64) -> u64, u64 {
+    // ppc_fp128 (double-double): only values that are a single double are supported
+    if to == TK_PPC_FP128 {
+        if from == TK_PPC_FP128 { return lo, hi; }
+        let ff = fp_fmt(from);
+        if ff.p > 53 && from != TK_DOUBLE { fatal("conversion to ppc_fp128 from a wider format is not supported"); }
+        let dl, dh = fp_convert(from, TK_DOUBLE, lo, hi);
+        return dl, 0;
+    }
+    if from == TK_PPC_FP128 {
+        if hi != 0 { fatal("conversion from a ppc_fp128 that is not a double is not supported"); }
+        return fp_convert(TK_DOUBLE, to, lo, 0);
+    }
     let p = fp_decompose(from, lo, hi);
     let ff = fp_fmt(from);
     if p.cat == FC_ZERO { return fp_encode(to, p.neg, 0, 0, 0, false); }
@@ -199,7 +211,11 @@ fn fp_convert(from: i64, to: i64, lo: u64, hi: u64) -> u64, u64 {
         bn_from_words(num, [p.sig0, p.sig1]);
         if ff.explicit_int { bn_from_words(num, [p.sig0 & 0x7FFFFFFFFFFFFFFF]); }
         if fbt >= fbf { bn_shl(num, fbt - fbf); } else { bn_shr(num, fbf - fbt); }
-        if bn_is_zero(num) { bn_set_u64(num, 1); bn_shl(num, fbt - 1); }
+        // the result is always quiet (IEEEFloat::convert makes a signaling NaN quiet)
+        var q: u32[>..<] = [];
+        bn_set_u64(q, 1);
+        bn_shl(q, fbt - 1);
+        for kk in q.len { while num.len <= kk { num.push(0); } num[kk] = num[kk] | q[kk]; }
         let emask: u64 = (1 << tf.ebits) - 1;
         let s: u64 = if p.neg { 1 } else { 0 };
         if tf.total <= 64 { return (s << (tf.total - 1)) | (emask << fbt) | bn_word(num, 0), 0; }

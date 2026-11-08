@@ -9,6 +9,7 @@ import calls;
 import intrinsics;
 import datalayout;
 import dinfo;
+import constfold;
 
 // ---------------------------------------------------------------------------------------------
 // Small IR helpers
@@ -119,7 +120,14 @@ fn upgrade_intrinsic_function1(f: i32) -> bool, i32 {
     let np = au_nparams(f);
     let c = name[0];
     if c == 'c' && np == 1 {
-        if starts_with(name, "convert.") { fatal("llvm.convert.* upgrade is not supported yet"); }
+        if starts_with(name, "convert.") {
+            // convertIntrinsicValidType: to.fp16 (fptrunc + bitcast) / from.fp16 (bitcast + fpext)
+            let pt = au_param_type(f, 0);
+            let r = au_ret_type(f);
+            let hb = ty_bits(ty_scalar(r));
+            if starts_with(name[8..], "to.fp16") && ty_is_fp(pt) && !ty_is_vector(pt) && ty_is_int(r) && ty_bits(r) == 16 { return true, -1; }
+            if starts_with(name[8..], "from.fp16") && ty_is_int(pt) && ty_bits(pt) == 16 && ty_is_fp(r) && !ty_is_vector(r) && types[r].kind != TK_HALF { return true, -1; }
+        }
         var id: i64 = 0;
         if starts_with(name, "ctlz.") { id = au_intr_id("llvm.ctlz"); }
         else if starts_with(name, "cttz.") { id = au_intr_id("llvm.cttz"); }
@@ -375,6 +383,21 @@ fn upgrade_intrinsic_call(ci: i32, nf: i32) {
     if vals[f].kind != VK_FUNC { return; }
     if nf < 0 {
         let name = sbytes(vals[f].name);
+        if starts_with(name, "llvm.convert.") {
+            // upgradeConvertIntrinsicCall (IRBuilder with constant folding)
+            let half = ty_simple(TK_HALF);
+            var rep: i32 = -1;
+            if starts_with(name[13..], "to.fp16") {
+                let c = au_build_cast(ci, OP_FPTRUNC, op(ci, 0), half);
+                rep = au_build_cast(ci, OP_BITCAST, c, vals[ci].ty);
+            } else {
+                let c = au_build_cast(ci, OP_BITCAST, op(ci, 0), half);
+                rep = au_build_cast(ci, OP_FPEXT, c, vals[ci].ty);
+            }
+            rauw(ci, rep);
+            au_erase_inst(ci);
+            return;
+        }
         if starts_with(name, "llvm.dbg.") {
             upgrade_dbg_intrinsic_to_record(name[9..], ci);
                         au_erase_inst(ci);
@@ -829,4 +852,28 @@ fn au_create_aggop(ci: i32, opc: i64, ty: i32, agg: i32, val: i32, idx: i64) -> 
     }
     inst_insert_before(v, ci);
     return v;
+}
+
+// IRBuilder::CreateCast with the default ConstantFolder; otherwise a new cast before ci (with ci's !dbg)
+fn au_build_cast(ci: i32, opc: i64, v: i32, ty: i32) -> i32 {
+    if vals[v].ty == ty { return v; }
+    if is_constant(v) {
+        let f = if is_desirable_cast_op(opc) { ce_cast(opc, v, ty) } else { cf_cast(opc, v, ty) };
+        if f >= 0 { return f; }
+    }
+    let n = new_inst(opc, ty, 1);
+    set_op(n, 0, v);
+    let oi = inst_of(ci);
+    let ii = inst_of(n);
+    for k in insts[oi].nmd {
+        if md_att[insts[oi].md + 2 * k] == 0 {
+            let at = md_att.len as i32;
+            md_att.push(0);
+            md_att.push(md_att[insts[oi].md + 2 * k + 1]);
+            insts[ii].md = at;
+            insts[ii].nmd = 1;
+        }
+    }
+    inst_insert_before(n, ci);
+    return n;
 }

@@ -558,7 +558,18 @@ fn parse_fp_const(ty: i32) -> i32 {
         lex();
         if k == TK_DOUBLE { return c_fp(ty, bits, 0); }
         if k == TK_HALF || k == TK_BFLOAT || k == TK_FLOAT {
-            let lo, hi = fp_convert(TK_DOUBLE, k, bits, 0);
+            var lo, hi = fp_convert(TK_DOUBLE, k, bits, 0);
+            // convertValIDToValue: the conversion quiets an sNaN, so manufacture another sNaN from the payload
+            let dp = fp_decompose(TK_DOUBLE, bits, 0);
+            if dp.cat == FC_NAN && ((bits >> 51) & 1) == 0 {
+                let f = fp_fmt(k);
+                let fb = f.p - 1;
+                var frac = lo & (((1 as u64) << fb) - 1) & ~((1 as u64) << (fb - 1));
+                if frac == 0 { frac = (1 as u64) << (fb - 2); }
+                let emask: u64 = ((1 as u64) << f.ebits) - 1;
+                let sgn: u64 = if dp.neg { 1 } else { 0 };
+                lo = (sgn << (f.total - 1)) | (emask << fb) | frac;
+            }
             return c_fp(ty, lo, hi);
         }
         perr("floating point constant invalid for type");
