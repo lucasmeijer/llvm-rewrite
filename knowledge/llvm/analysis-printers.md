@@ -22,3 +22,8 @@ What the `::analysis` check compares (see `docs/testing.md`). Verified with opt 
   the header. LLVM's tests run it after `jump-threading`, so those tests also check jump-threading's queries.
 - **`aa-eval`** prints only the summary unless `-print-all-alias-modref-info` (or `-print-no-aliases`, …) is given; the
   pairs come in instruction order of the pointer operands, deterministic.
+- **`print<memoryssa>` / `print<memoryssa-walker>` print the whole function** with `Function::print` and an
+  `AssemblyAnnotationWriter`: `; <access>` after a block's label line (MemoryPhi) and before each instruction that
+  has an access; the header is `MemorySSA for function: f` / `MemorySSA (walker) for function: f`. The function is
+  printed like the module printer prints it (attribute-group references `#N`, metadata numbering of the module's
+  SlotTracker, numbered struct types). Details: `knowledge/llvm/alias-analysis.md`.

@@ -18,6 +18,17 @@
 
 ## Status
 
+- L1.analysis.aa 79/84 analysis (+153 roundtrip). Left: `128-bit-ptr.ll` and `pr35843.ll` need APInt offsets
+  wider than 64 bits in BasicAA (fails loudly); `libfuncs.ll`, `libfuncs-darwin.ll`, `memset-pattern.ll` run
+  `-mtriple=… -passes=inferattrs,…` (opt's `-mtriple`, the InferFunctionAttrs pass with BuildLibCalls' attribute
+  table, and a Darwin TLI are not ported). L1.analysis.memoryssa 34/41: the 7 left run loop passes
+  (`loop-mssa(licm|loop-rotate|simple-loop-unswitch)`). aa-eval and both MemorySSA printers agree with LLVM on
+  every one of the 5007 `tests/imported/llvm/Transforms/*/*.ll` files except a few parser/printer issues
+  (below) and give byte-identical `print<memoryssa>` on sqlite3.ll. Speed (by hand; no `@perf` line times
+  them): building MemorySSA is faster than LLVM (sqlite3 +0.03 s vs +0.05 s) and linear on tests/perf/scaling;
+  aa-eval is ~2.5x slower than LLVM's on sqlite3 (2.8 s vs 1.1 s; per-query attribute/TLI lookups), same
+  O(pointers²) shape.
+
 - L1.mem2reg 59/60 (the one left runs `instcombine`). L1.sroa 119/122 (left: 2 tests run `debugify`, 1 runs
   `gvn,instcombine,simplifycfg`). Both give output identical to LLVM's on all tests/e2e O0 and pipeline inputs
   and on the four tests/perf/compile programs, and run 1.3-2.5x faster than LLVM there; linear on
@@ -61,6 +72,12 @@
 | `src/loopinfo.goose`, `src/cycleinfo.goose` | LoopInfo (+ update API, loop metadata), CycleInfo |
 | `src/breakcrit.goose`, `src/loopsimplify.goose`, `src/lcssa.goose` | SplitCriticalEdge/break-crit-edges, SplitBlockPredecessors + LoopSimplify, LCSSA |
 | `src/analyses.goose` | Analysis ids, preserved sets |
+| `src/memloc.goose` | MemoryLocation/LocationSize, ModRef, MemoryEffects, CaptureInfo, CallBase operand attribute queries, identified objects, stripPointerCastsForAliasAnalysis |
+| `src/aa.goose` | AAResults aggregation, AAQueryInfo (cache, assumptions, capture analyses), BasicAA, getBaseObjectSize |
+| `src/tbaa.goose`, `src/globalsaa.goose` | TypeBasedAA + ScopedNoAliasAA; GlobalsAA with CallGraph and Tarjan SCCs |
+| `src/capture.goose`, `src/aautil.goose` | CaptureTracking (3 trackers); private stamp sets (`ss_*`) and CFG reachability (`cfr_*`) |
+| `src/memoryssa.goose`, `src/phitrans.goose` | MemorySSA (build, walker, OptimizeUses, printers); PHITransAddr |
+| `src/aaeval.goose` | the aa-eval pass |
 | `tools/gb.sh` | `tools/gb.sh src/opt.goose bin/opt` builds with warnings hidden (Goose has no `-w`) |
 
 ## Goose traps (cost me time)
@@ -237,3 +254,30 @@
   (not `{ f() }`); name clashes across modules (apfloat's FC_NAN vs FPClassTest → `FCL_*`).
 - Perf: no `@opt -passes=instsimplify` perf benchmark exists. Timed by hand: straightline n4000/n16000/n64000 took
   0.026/0.037/0.062 s (LLVM 0.031/0.045/0.099 s), so it scales linearly.
+
+## Memory analyses (aa, memoryssa)
+
+- API and data layout: DESIGN.md §8.6. Call `aa_begin(fv)` before any AA query (it also sets `tli_cur_fn` and
+  computes the DT). Every query takes an AAQueryInfo `q` (`aq_push`/`aq_pop`, stack order); use one `q` for what
+  LLVM does with one BatchAAResults, a fresh one per query where LLVM uses `AAResults::alias(...)` directly
+  (`aa_*_simple`). Results depend on this (assumption-based PHI caching).
+- `get_underlying_object` must be called with 10 (MaxLookupSearchDepth); vt.goose/instsimplify still pass 6 in a
+  few places (reported to the instsimplify owner).
+- AA files keep private stamp sets (`aautil.goose` `SS_*`) so they never touch the pass scratch slots of
+  irutil.goose; a pass may hold any VS_/VM_ slot across AA queries.
+- MemorySSA: one instance (`mssa_fn`); `mssa_get(fv)` builds; invalidated by `invalidate_function` unless the
+  pass preserves `A_MEMORYSSA`, `A_DOMTREE` and `A_AA`. A pass that keeps it must update it — there is no
+  MemorySSAUpdater yet (needed by LICM, MemCpyOpt, DSE, loop-mssa): port it next to memoryssa.goose, using the
+  use lists (`mssa_first_use`…) and the list helpers there. GVN needs MemoryDependenceAnalysis (not ported).
+- Not ported (fail loudly or absent): separate_storage assumptions in BasicAA, APInt widths over 64 bits,
+  `!callback` metadata in the CallGraph, MemorySSA's loop constructor and verifier, the
+  `EarliestEscapeAnalysis` with LoopInfo/CycleInfo (DT only), `scev-aa`, `objc-arc-aa`.
+- Printer issues seen in the sweeps (not AA bugs): `errs_inst` numbers metadata like a function-local SlotTracker;
+  LLVM uses a module-wide one (`ShouldInitializeAllMetadata`) when the instruction has an MDNode operand
+  (`llvm.read_register(metadata !1)` prints `!1` in LLVM, `!0` here); the parser doesn't print LLVM's "warning:
+  ignoring debug info with an invalid version" / "inlinable function call ... must have a !dbg location".
+- Goose: `block` is a keyword (MemoryAccess's field is `bb`); helper names collide across modules, so every AA
+  helper has a prefix (`aa_ bas_ ml_ ct_ cfr_ ss_ tb_ sna_ gm_ cg_ mssa_ ma_ mphi_ cw_ mo_ pta_`).
+- DataLayout now caches StructLayout per type (dl_struct_layout; cleared by dl_reset/dl_set_spec), and attribute
+  sets carry a bitmap of their enum kinds (aset_find of an absent kind is O(1)); both were the top of the aa-eval
+  profile.

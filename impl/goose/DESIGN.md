@@ -284,6 +284,62 @@ Analysis ids and preserved sets are in analyses.goose (`A_*`, `PA_ALL`, `PA_NONE
 and updates some trees returns exactly those bits (ADCE: domtree | postdomtree; break-crit-edges and
 loop-simplify: domtree | loops).
 
+### 8.6 Memory analyses (memloc, aa, tbaa, globalsaa, capture, aautil, memoryssa, phitrans)
+
+Ports of `MemoryLocation.cpp`, `AliasAnalysis.cpp`, `BasicAliasAnalysis.cpp`, `TypeBasedAliasAnalysis.cpp`,
+`ScopedNoAliasAA.cpp`, `GlobalsModRef.cpp` (+ `CallGraph.cpp`, `SCCIterator.h`), `CaptureTracking.cpp`,
+`CFG.cpp` (reachability), `MemorySSA.cpp` and `PHITransAddr.cpp`. Data, not objects:
+
+- **MemoryLocation** is the fixed-size struct `ML { ptr, size, tbaa, tbaa_struct, scope, noalias, noalias_as }`;
+  `size` is LLVM's raw 64-bit `LocationSize` encoding (`ls_precise/ls_upper_bound/LS_AFTER/LS_BEFORE_OR_AFTER`,
+  `ls_has_value/ls_value/ls_is_precise/ls_is_scalable`), so equality and hashing are LLVM's. `ptr == ML_NULL` is
+  `MemoryLocation()` (Ptr = null), `ptr == ML_NONE` is `std::nullopt`. `ml_get(i)`, `ml_get_or_none(i)`,
+  `ml_for_argument(call, k, use_tli)`, `ml_for_source/dest`, `ml_aa_tags(i)`.
+- **ModRefInfo** is an `i64` (`MR_NO/REF/MOD/MODREF`), **MemoryEffects** a `u64` (2 bits per location, `me_*`),
+  **CaptureComponents/CaptureInfo** `i64`s (`CC_*`, `ci_other/ci_ret`; the parser stores `captures(...)` as
+  `other | ret << 8`, `aset_capture_info` converts). CallBase per-operand queries: `cb_param_has_attr`,
+  `cb_arg_only_reads/writes`, `cb_arg_no_memory`, `cb_capture_info` (memloc.goose).
+- **AliasResult** is `AR { k, has_off, off }` (`AR_NO/MAY/PARTIAL/MUST`, `ar_swap`, `ar_format`).
+- **The AA pipeline** (`-aa-pipeline`, default `basic-aa,scoped-noalias-aa,tbaa` + `globals-aa` when cached) is the
+  list `aa_kinds`; the aggregation functions loop over it with a `match` on the kind (no virtual dispatch).
+  Call `aa_begin(fv)` first (= `AM.getResult<AAManager>(F)`: sets the function and TLI, computes the DT, which
+  BasicAA requires).
+- **AAQueryInfo / BatchAAResults**: `q = aq_push(CA_SIMPLE | CA_EARLIEST)` ... `aq_pop(q)` (stack discipline). A
+  query info owns an alias cache region in one chained hash table (`aent/abuck`, entries after `ent_mark`), the
+  assumption-based results (`aq_abr`), `cross` (MayBeCrossIteration; `BatchAACrossIterationScope` = save/restore
+  `aqs[q].cross`), `use_dt`, and the capture-analysis cache (SimpleCaptureAnalysis or EarliestEscapeAnalysis;
+  `aq_remove_instruction(q, i)` is `EarliestEscapeAnalysis::removeInstruction`). Results depend on the cache
+  exactly as in LLVM (assumption-based PHI results), so reuse one `q` where LLVM reuses a BatchAAResults and make
+  a fresh one where LLVM makes a SimpleAAQueryInfo (`aa_*_simple` helpers).
+- **Entry points**: `aa_alias(a, b, q, cxt)`, `aa_inst_loc_mr(i, loc, q)` (getModRefInfo(I, OptLoc)),
+  `aa_inst_call_mr`, `aa_inst_inst_mr`, `aa_call_loc_mr`, `aa_call_call_mr`, `aa_call_me` / `aa_fn_me`
+  (getMemoryEffects), `aa_mod_ref_mask` / `aa_points_to_constant_memory`, `aa_arg_mod_ref`,
+  `aa_call_captures_before`, `aa_is_identified_object` & co., `aa_is_not_visible_on_unwind`,
+  `aa_is_writable_object`. Capture tracking: `ct_pointer_may_be_captured`, `ct_may_be_captured_before`,
+  `ct_find_earliest_capture`. Reachability: `cfr_inst_reachable`, `cfr_block_reachable`, `cfr_from_many`.
+- **Recursion**: the aggregator and BasicAA are mutually recursive (`AAQI.AAR.alias`), so they live in one file
+  (aa.goose) and keep no growable locals: decomposed GEP indices are runs on `bas_vars`, aliasPHI's sources on
+  `bas_srcs`, truncated to a mark before returning.
+- **APInt widths**: BasicAA's offsets/scales are `u64` at the index width; index widths or GEP index types wider
+  than 64 bits fail loudly.
+- **GlobalsAA** (`require<globals-aa>` module pass, `gm_compute`/`gm_invalidate`): per-function FunctionInfo by
+  value id with the per-global map as runs; the CallGraph is node/edge lists, SCCs by the ported Tarjan iterator
+  (SCC order and SCC[0] matter). No deletion callbacks: valid while no tracked global/function is erased.
+- **MemorySSA** (`mssa_get(fv)`; one instance, for `mssa_fn`; invalidated unless the pass preserves `A_MEMORYSSA`,
+  the DT and `A_AA`): accesses are ids into `macc` (0 = liveOnEntry; `MAK_DEF/USE/PHI/LIVE`, printed `id`),
+  per-block access and defs lists are intrusive (`mb_first/mb_last`, `next/prev`, `dnext/dprev`), block and
+  instruction -> access maps are value-id arrays stamped with a build epoch (`mssa_access_of(v)`). Operands are
+  uses with LLVM's use-list order (`mssa_first_use/mssa_use_next/mssa_use_user/mssa_use_slot`); MemoryPhi operands
+  are runs (`mphi_n/mphi_val/mphi_blk`, `mphi_add_incoming` grows like `growHungoffUses`). Walker:
+  `mssa_get_clobbering(ma, q)` (CachingWalker, MaxCheckLimit), `mssa_get_clobbering_loc(ma, loc, q)`,
+  `mssa_clobbering_access(ma, q, skip_self, use_invariant_group)` with `cw_limit` as the UpwardWalkLimit;
+  `mssa_ensure_optimized()`, `mssa_dominates`, `mssa_locally_dominates`, `mssa_def_clobbers`
+  (instructionClobbersQuery). Not ported: MemorySSAUpdater, the loop (`MemorySSA(Loop&)`) constructor, the
+  verifier (`verify<memoryssa>` only builds), DOT output.
+- **Printing with annotations** (`F->print(OS, &AnnotationWriter)`): `pr_annot_set(v, text)` registers a line for
+  a block (printed after its label) or an instruction (printed before it), `pr_annot_on` while `print_function`
+  runs (printer.goose); the annotation texts are computed first in printing order.
+
 ## 9. The pass manager and how to add a pass (passmgr.goose)
 
 `-passes=` text is parsed like `PassBuilder::parsePipelineText` into a tree of `PNode`s (module / function
