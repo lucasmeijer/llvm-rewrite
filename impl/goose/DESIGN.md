@@ -271,8 +271,12 @@ does). Update API for transforms: `loop_add_basic_block_to_loop`, `li_change_loo
 
 DemandedBits
 (demandedbits.goose) is computed per query (`db_analyze`, cached for the current function, `db_invalidate()` at the
-start and end of a pass that uses it). computeKnownBits (knownbits.goose) fails loudly on every case LLVM handles
-that isn't ported (see the file header), so imprecision can't silently change output. TargetLibraryInfo (tli.goose)
+start and end of a pass that uses it). computeKnownBits (knownbits.goose), computeKnownFPClass (fpclass.goose)
+and the rest of ValueTracking (vt.goose, poison.goose, implied.goose, assume.goose) fail loudly on every case LLVM
+handles that isn't ported (see the file headers), so imprecision can't silently change output. They are free
+functions over the global IR tables; the SimplifyQuery context instruction is the global `kb_cxt` and the
+query's missing members are the `sq_no_dt/sq_no_ac/sq_no_tli` switches. InstSimplify (instsimplify.goose) keeps
+the operands of recursive simplification on the global `is_ops` stack. TargetLibraryInfo (tli.goose)
 must know the current function: set `tli_cur_fn = fv` at the start of a pass.
 
 Analysis ids and preserved sets are in analyses.goose (`A_*`, `PA_ALL`, `PA_NONE`, `PA_CFG`). `PA_CFG` is

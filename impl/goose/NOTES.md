@@ -137,9 +137,8 @@
 - Goose trap: a `const u8[:][]` parameter can't take a literal list; declare it `const u8[:][:]`.
 - `pad` is a keyword (also as a local name).
 - TLI supports Linux and generic (no OS) triples; Darwin/Windows/BSD/GPU triples fail loudly in `tli_init`.
-- computeKnownBits is a partial port that fails loudly (`not ported`): PHIs, select arms refined by the
-  condition, assumptions, pointers, division, abs/saturating/reduction intrinsics, freeze, isKnownNonZero are
-  missing. isImpliedCondition (implied.goose) is ported except its constant-range path (fails loudly).
+- computeKnownBits (knownbits.goose) is a full port for integers <= 64 bits; what remains fails loudly (see the
+  file header). isImpliedCondition (implied.goose) is fully ported, including fcmps (fpclass.goose).
 - ADCE perf trap: LLVM's `SetVector::remove` and the IDF priority queue were first ported as linear scans, which
   made ADCE quadratic on `scaling/switch`; membership is now the scratch set and the queue a heap. Integers > 64 bits fail loudly in KnownBits and DemandedBits.
 - Not ported in ADCE/BDCE/DCE: debug-info salvaging, `--enable-knowledge-retention` (salvageKnowledge). ADCE
@@ -210,3 +209,31 @@
   at every caller in *other* files. Prefix pass-private helpers (`sr_`, `m2r_`).
 - Process trap: another agent's commit (77b3349) silently deleted sroa.goose and reverted several files while
   resolving a merge; check `git show --stat` of upstream commits that touch your files after a rebase.
+
+## InstSimplify and the value-tracking analyses (L1.instsimplify)
+
+- Files and entry points, all usable by later passes (instcombine, early-cse, gvn, sccp, simplifycfg):
+  - `instsimplify.goose`: `simplify_instruction(iv)`, `simplify_inst_with_ops`, `simplify_binop`, `simplify_cmp`,
+    `simplify_with_op_replaced`, `instsimplify_run`. Query = `SQ { cxt, undef }`; recursion operands live on the
+    global `is_ops` stack (mark/resize), because Goose can't keep growable locals across recursive calls.
+  - `pm.goose` (PatternMatch: `m_apint`, `m_not`, `m_minmax` → `mm_a/mm_b`, `m_logical` → `lg_a/lg_b`; copy the
+    globals before recursing), `vt.goose` (isKnownNonZero, isKnownToBeAPowerOfTwo, isKnownNonEqual,
+    ComputeNumSignBits, dominance helpers, getUnderlyingObject(s), stripAndAccumulateConstantOffsets → `vt_off`,
+    matchSelectPattern, computeConstantRange), `poison.goose`, `knownbits.goose`, `fpclass.goose`
+    (computeKnownFPClass: `known_fp_class(v, interested, fmf, depth)`, `known_fp_class_de`,
+    `cannot_be_negative_zero`, `is_known_never_nan/_infinity/_inf_or_nan`, fcmpImpliesClass/fcmpToClassTest,
+    ConstantFPRange subset `fpr_*`), `assume.goose` (AssumptionCache), `implied.goose`
+    (`implied_condition`, `implied_condition_v`, `implied_by_dom_condition`), `crange.goose` (64-bit ConstantRange),
+    `cfold.goose` (Analysis/ConstantFolding with a DataLayout), `fpu.goose` (exact IEEE arithmetic).
+  - Context: analyses read the context instruction from the global `kb_cxt`; DT from `dt_get(fv, DT_DOM)`.
+    `sq_no_dt` / `sq_no_ac` / `sq_no_tli` (vt.goose) model a SimplifyQuery without DT/AC/TLI (SCCP uses them).
+  - Denormal modes come from `denormal_fpenv` (`fn_denormal_mode`); constant folding still fails loudly on it.
+- Not ported (fail loudly): integers wider than 64 bits in PatternMatch/KnownBits/ConstantRange and wider than
+  128 bits in constant folding (the biggest remaining category, ~20 tests: needs an arbitrary-width APInt through
+  every analysis); FP libcalls and transcendental intrinsics (sin, sqrt, ldexp, pow, …: need exact host-libm
+  equivalent results); scalable-vector call folding; non-integral address spaces; vscale_range; gc.relocate,
+  load.relative, capture tracking; ConstantFPRange for x86_fp80/fp128/ppc_fp128.
+- Goose traps met here: `self` is a keyword; a `fn` returning two values must `let a, b = f(); return a, b;`
+  (not `{ f() }`); name clashes across modules (apfloat's FC_NAN vs FPClassTest → `FCL_*`).
+- Perf: no `@opt -passes=instsimplify` perf benchmark exists. Timed by hand: straightline n4000/n16000/n64000 took
+  0.026/0.037/0.062 s (LLVM 0.031/0.045/0.099 s), so it scales linearly.
