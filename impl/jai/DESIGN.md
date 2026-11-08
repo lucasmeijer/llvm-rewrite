@@ -47,6 +47,14 @@ src/
   basic_aa.jai    BasicAA (DecomposeGEP, aliasGEP/PHI/Select, call mod/ref), getBaseObjectSize/getAllocSize
   tbaa.jai, scoped_noalias_aa.jai, globals_aa.jai (+ CallGraph and its SCCs)
   memoryssa.jai   MemorySSA (construction, OptimizeUses, ClobberWalker, PHITransAddr, printers)
+  loop_info.jai   LoopInfo (analyze, queries, update API, loop metadata, print<loops>)
+  cycle_info.jai  CycleInfo (print<cycles>)
+  bb_utils.jai    SplitBlockPredecessors (+ landing pads), SplitBlock, DT/LoopInfo update helpers
+  pass_loop_simplify.jai, pass_lcssa.jai   LoopSimplify (+ formDedicatedExitBlocks, makeLoopInvariant,
+                  foldBranchToCommonDest for exit merging), LCSSA (formLCSSA*, SSAUpdater::RewriteUse)
+  loop_pm.jai     loop(...) / loop-mssa(...): FunctionToLoopPassAdaptor, LoopPassManager, LPMUpdater
+  pass_loop_rotate.jai  LoopRotate, MergeBlockIntoPredecessor, CodeMetrics, x86 code-size cost bounds
+  mssa_updater.jai MemorySSAUpdater (entry points only; they fail loudly)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 
@@ -245,8 +253,9 @@ Ported from `llvm/lib/Passes/PassBuilder.cpp`, `llvm/include/llvm/IR/PassManager
 - **Pipeline**: `parse_pipeline_text` splits the text on `,()` into `Pipeline_Element` rows (tree via
   first_child/next), `parse_pass_pipeline` turns that into `Pass_Node` rows: `MODULE_PM`, `FUNCTION_ADAPTOR` and
   pass nodes, with LLVM's wrapping rules (first element not a module pass: the whole list goes into one
-  `function(...)`; a function pass inside a module list gets its own adaptor). `loop`/`loop-mssa`/`cgscc` and
-  unknown names fail loudly. `-O<n>` fails loudly in `opt_main`.
+  `function(...)`; a function pass inside a module list gets its own adaptor). `loop(...)`/`loop-mssa(...)` become
+  `LOOP_ADAPTOR` nodes whose children are loop passes (`LOOP_PM` for a nested `loop(...)`); see "Loops" below.
+  `cgscc` and unknown names fail loudly. `-O<n>` fails loudly in `opt_main`.
 - **Running**: `run_module_pm` → `run_function_adaptor` (every defined function in module order) →
   `should_run_pass` (OptNone, then OptBisect: prints `BISECT: ...` lines like LLVM) → `run_function_pass`, a
   `switch` on `Pass_Kind` that returns a `Preserved`. After each pass: `fam_invalidate(f, preserved)` and
@@ -333,3 +342,39 @@ recomputing gives a different child order.
    `analysis_survives`/`fam_invalidate`, `require<x>`/`invalidate<x>`/`print<x>` rows.
 6. New `cl::opt`: a field in `opts` and an entry in `cl_opts()` (default = LLVM's default).
 7. Anything LLVM does that you don't port must `fatal(...)` when reached, never silently do something else.
+
+### Loops (loop_info.jai, cycle_info.jai, bb_utils.jai, pass_loop_simplify.jai, pass_lcssa.jai, loop_pm.jai, pass_loop_rotate.jai)
+
+- **LoopInfo** = `*Loop_Info` (heap, `Fn_Analyses.li`, `get_loop_info(f)` / `cached_loop_info(f)`; survives
+  `preserve(.LOOPS)` or `preserved_cfg()`). A loop is a `Loop_Id` row of `li.loops`: `parent`, `blocks`
+  (Blocks: `[0]` is the header), `subloops`, `dead`. `top_level` is TopLevelLoops (reverse program order),
+  `loop_of` the BBMap (innermost loop), `member` every loop's DenseBlockSet as one table keyed `(loop << 32) |
+  block`. Ids are never reused, so a destroyed loop (`li_erase`) keeps its row with `dead = true`.
+  Queries mirror LoopBase: `li_header`, `li_loop_for`, `li_contains` (block), `li_contains_loop`, `li_depth`,
+  `li_loop_preheader`, `li_loop_predecessor`, `li_loop_latch`, `li_loop_latches`, `li_exiting_blocks`,
+  `li_exit_blocks`, `li_unique_exit_blocks`, `li_exit_block`, `li_unique_exit_block`, `li_is_loop_exiting`,
+  `li_is_loop_latch`, `li_has_dedicated_exits`, `li_is_loop_simplify_form`, `li_is_lcssa_form`,
+  `li_loops_in_preorder`, `li_loop_id`, `li_is_annotated_parallel`, `li_is_loop_invariant` (pass_loop_simplify).
+  Updates mirror LoopBase/LoopInfoBase: `li_add_basic_block_to_loop`, `li_add_block_entry`, `li_change_loop_for`,
+  `li_remove_block_from_loop`, `li_remove_block`, `li_move_to_header`, `li_add_child_loop`,
+  `li_remove_child_loop`, `li_replace_child_loop_with`, `li_add_top_level_loop`, `li_change_top_level_loop`,
+  `li_alloc_loop`, `li_erase` (only for top-level loops so far: UnloopUpdater fails loudly), `li_set_loop_id`.
+- **CycleInfo** = `*Cycle_Info` (`get_cycle_info(f)`): `Cycle_Row{parent, top, depth, entries, blocks, children}`.
+- **CFG surgery that keeps analyses up to date** (bb_utils.jai, pass_loop_rotate.jai, pass_dce.jai):
+  `split_block_predecessors(bb, preds, suffix, dt, li, mssau, preserve_lcssa)`,
+  `split_landing_pad_predecessors`, `split_block`, `split_critical_edge` with `Crit_Edge_Options.li /
+  preserve_lcssa / preserve_loop_simplify`, `merge_block_into_predecessor(bb, dt, li, mssau, two_succs)` (eager
+  DomTreeUpdater semantics), `change_to_unreachable`, `fold_single_entry_phi_nodes`, `erase_block`,
+  `dt_split_block` (DominatorTree::splitBlock). Pass the trees LLVM's caller has; never recompute them.
+- **Loop passes**: a `Pass_Kind` with `level = .LOOP` in `PASS_TABLE` and a `case` in `run_loop_pass`; signature
+  `(node, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater) -> Preserved`. `Loop_Std_Results` has the
+  function, AC, DT, LoopInfo and MemorySSA (null unless `loop-mssa`); there is no ScalarEvolution, AA object, TLI or
+  TTI in it. Return `PRESERVE_ALL` when nothing changed, else `loop_pass_preserved()` (+ `.MEMORYSSA` when
+  `lar.mssa`). Tell the worklist about structural changes with `lpm_mark_loop_as_deleted`,
+  `lpm_add_child_loops`, `lpm_add_sibling_loops`, `lpm_revisit_current_loop`. Pass parameters
+  (`loop-rotate<...>`) are parsed by the pass from `node.name` (see `lookup_pass`).
+- **Debug records when moving instructions**: `inst_move_before` keeps an instruction's records with it
+  (moveBeforePreserving); `inst_move_before_dbg` is LLVM's `moveBefore` (records stay, the destination's records
+  are absorbed); `insert_at_position(i, bb, pt, head)` is `insertBefore(It)`. `records_take/prepend/append`
+  manipulate the per-instruction lists; erasing a terminator with records needs `records_take` first (there is no
+  "trailing records" state in this implementation).

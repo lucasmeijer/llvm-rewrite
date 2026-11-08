@@ -53,3 +53,62 @@ need nothing else, plus random CFGs (`impl/goose/tools/fuzz_cfg.py`).
   predecessor, in use-list order), rewrites outside uses to the PHI of their exit block or to the single new PHI,
   and needs the SSAUpdater only when several exit PHIs exist and the use is elsewhere; unused new PHIs are erased.
   The pass preserves CFGAnalyses.
+
+## Loop pass manager (`loop(...)`, `loop-mssa(...)`)
+
+Verified with the Jai port (`impl/jai/src/loop_pm.jai`) against `-opt-bisect-limit` output and the LoopRotate tests.
+
+- `FunctionToLoopPassAdaptor::run` first runs its LoopCanonicalizationFPM (`loop-simplify`, then `lcssa`) as
+  ordinary function passes: both are counted by `-opt-bisect-limit` and skipped on `optnone`, and each one's
+  PreservedAnalyses invalidates the function analyses before the next. The adaptor itself and a `LoopPassManager`
+  are "required" (not counted). If the function has no loops after canonicalization, the adaptor returns the
+  canonicalization's PreservedAnalyses unchanged (no extra DT/LoopInfo preservation).
+- OptBisect describes a loop as `loop %<header name> in function <f>` (`<unnamed loop>` for an unnamed header):
+  `BISECT: running pass (4) loop-rotate on loop %outer in function f`.
+- Worklist order: `appendLoopsToWorklist(LI)` walks the top-level loops in LoopInfo's stored order (= reverse program
+  order), builds each nest's preorder with a LIFO walk (subloops pushed in order, so the *last* subloop is visited
+  first) and inserts the sequence into a SmallPriorityWorklist that is popped from the back. Net effect for
+  `f` with nest outer{inner} followed by a sibling `second`: inner, outer, second.
+- A bare loop pass in a function pipeline (`-passes=dce,loop-rotate`) gets its own adaptor with UseMemorySSA =
+  false; a pipeline whose first element is a loop pass becomes `function(loop(...))` (`loop-mssa` for `licm`).
+- With `loop-mssa`, MemorySSA is computed by the adaptor (getResult) and every loop pass must preserve it, else
+  `LLVM ERROR: Loop pass manager using MemorySSA contains a pass that does not preserve MemorySSA`.
+- LoopStandardAnalysisResults includes ScalarEvolution (always computed by the adaptor); nothing observable
+  depends on that unless a pass queries it (LoopRotate only with `<check-exit-count>`).
+
+## LoopRotate
+
+Verified with `tests/imported/llvm/Transforms/LoopRotate` and a sweep of `loop(loop-rotate)` over every
+round-tripping file (identical output on all ~7750 files that don't hit an unported path).
+
+- The header-size check is `CodeMetrics::analyzeBasicBlock` = sum of `TTI.getInstructionCost(I, TCK_CodeSize)`
+  over non-ephemeral instructions, compared with `-rotation-max-header-size` (16). On x86: PHIs and free intrinsics
+  (lifetime, assume, noalias.scope.decl, ...) cost 0, branches/returns/switches 1, a direct call to a non-intrinsic
+  `numParams + 1` (1 for libm-like names that are not "lowered to calls"), scalar arithmetic/compares/casts/loads
+  1 (or 2 for custom-lowered operations). Threshold 0 (`<no-header-duplication>`, or `minsize` functions) never
+  rotates, because the header's conditional branch alone costs 1.
+- `simplifyLoopLatch` runs first (folds a latch that only holds one "increment" plus casts into its single
+  exiting predecessor via `MergeBlockIntoPredecessor(..., PredecessorWithTwoSuccessors=true)`), then
+  `rotateLoop`. Hoisting vs cloning of header instructions: hoisted if the operands are loop invariant and it
+  neither reads nor writes memory, isn't a terminator or alloca; clones are `simplifyInstruction`ed with
+  `SimplifyQuery{DL, TLI, DT, AC}` (no context instruction) and keep the original's name (so get a numeric suffix).
+- Debug records: `Instruction::moveBefore` (not `moveBeforePreserving`) leaves the moved instruction's records
+  behind (they fall onto the next instruction) and the moved instruction absorbs the records at the insertion
+  point; `insertBefore(It)` without the head bit does the same absorption. The preheader branch's records end up
+  appended to the cloned terminator (erase + `flushTerminatorDbgRecords`). `cloneDebugInfoFrom` only clones the
+  records an instruction had originally (records that "fell down" from hoisted instructions are skipped), and after
+  the first cloned instruction no later cloned instruction gets its records cloned until a hoist resets the range.
+- `MergeBlockIntoPredecessor`'s splice: the predecessor terminator's records move to the front of the first moved
+  instruction's records, the merged block's terminator records move onto the predecessor terminator; an empty
+  block (only a terminator) appends its terminator's records to the predecessor terminator's.
+
+## LoopSimplify details
+
+- `isSafeToSpeculativelyExecute`'s `IgnoreUBImplyingAttrs` defaults to true, so `makeLoopInvariant` hoists a
+  speculatable call with `dereferenceable`/`noundef` arguments and then strips those attributes
+  (`dropUBImplyingAttrsAndUnknownMetadata`, keeping `!prof` only when hoisting from the header);
+  `tests/imported/llvm/Transforms/LoopSimplify/drop-ub-attributes.ll`.
+- Exit merging calls SimplifyCFG's `foldBranchToCommonDest` with no TTI: the exiting block's compare is *cloned*
+  into the predecessor (taking the name, the original becomes `<name>.old` before the block is deleted), the
+  conditions are joined with `or`/`and` when `impliesPoison(BICond, PBICond)`, else with a `select` named
+  `or.cond`; branch weights are combined as in SimplifyCFG and set with `ElideAllZero`.

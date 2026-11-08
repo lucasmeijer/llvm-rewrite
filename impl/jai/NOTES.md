@@ -236,3 +236,35 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   vector-typed C_INT (LLVM builds a shufflevector expression; prints the same, `get_splat_value` sees through both).
 - Not ported (answers "don't know", or fails loudly where an answer would be wrong): DomConditionCache /
   CondContext (InstSimplify passes neither), the FP half of matchSelectPattern, ppc_fp128 arithmetic.
+
+## Loops (L1.analysis.loops 24/28, L1.loop-canonical 58/92 ::opt)
+
+- Files and APIs: see DESIGN.md "Loops". The 4 missing L1.analysis.loops checks are `print<loopnest>` (a loop pass
+  whose IsPerfect test needs ScalarEvolution: `getInductionVariable` / `getBounds`).
+- What fails loudly (and the remaining L1.loop-canonical checks): passes not ported (licm, indvars,
+  simple-loop-unswitch, loop-deletion, loop-unroll, loop-idiom, loop-reduce, simplifycfg, debugify,
+  `require<domfrontier>`, SCEV verifiers), the MemorySSAUpdater (every `mssau_*` entry point in mssa_updater.jai:
+  `loop-mssa(loop-rotate)`, LoopSimplify/SplitBlockPredecessors with a cached MemorySSA), `LoopInfo::erase` of a
+  nested loop (UnloopUpdater), LoopRotate's noalias-scope cloning, `<check-exit-count>` (needs SCEV), key-instruction
+  atom groups, DIArgList debug locations in remapping, `#dbg_assign`.
+- **x86 code-size costs are bounds, not values** (pass_loop_rotate.jai `tti_code_size_bounds`): calls, CF
+  instructions, free intrinsics and the TCC_Basic default are exact; scalar int (<= 64 bits)/ptr/float/double
+  arithmetic, compares, casts, selects, GEPs, loads and stores are assumed to cost 0..2 (read from X86TTIImpl /
+  BasicTTIImpl: legal = LT.first, custom = 2, code-size table entries 1); everything else is unbounded. LoopRotate
+  fails loudly when the bounds straddle `-rotation-max-header-size`. Replace this with the real cost model when
+  L1.analysis.cost-model is ported (the bound for the "simple" group is an assumption, not a port).
+- `isSafeToSpeculativelyExecute` (pass_loop_simplify.jai) has no load support (isDereferenceableAndAlignedPointer)
+  and no context instruction; its callers here never need either (makeLoopInvariant rejects loads anyway,
+  shouldSpeculateInstrs only accepts a fixed opcode list). Use ValueTracking's when it lands.
+- Sweeps (tools/sweep.py, every round-tripping file + e2e/function, ~7780 files): `loop-simplify`, `lcssa`,
+  `loop(loop-rotate)` IR identical to LLVM wherever we don't fail loudly (loop-simplify: all; loop-rotate: 35 fail
+  loudly, mostly cost bounds); `loop-simplify,lcssa,print<loops>` and `print<cycles>` identical except files where
+  LLVM prints diagnostics. `tools/fuzz_cfg.py` (random CFGs; adapted from impl/goose) ran 2000+3000 programs clean
+  over loops/cycles/domtree printers and loop-simplify, lcssa, loop-rotate IR. Run both after touching any of
+  these files: `python3 impl/jai/tools/sweep.py 'loop(loop-rotate)'`, `python3 impl/jai/tools/fuzz_cfg.py 2000 7`.
+- Perf (x64 build, tests/perf/scaling/loops-many): `-passes=loop-rotate` 3.2x (n2000) to 5.5x (n8000) LLVM's CPU
+  time, mostly parse/print; scaling exponent 1.06 vs LLVM's 1.11.
+- Traps: `for < k: a..b` iterates b down to a, so reversing over an index range is `for < k: 0..n-1`; Jai's
+  formatter needs `\x1f` for a literal `%` (`loop %header` in OptBisect names); procedure names collide across
+  agents' files (`block_unique_predecessor`, `drop_ub_implying_attrs_and_metadata`, `ic_clone_inst` live in
+  ic_core.jai and are reused here).
