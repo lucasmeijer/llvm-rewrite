@@ -395,6 +395,7 @@ recursive fn put_type(t: i32) {
     if k == TK_X86_AMX { put("x86_amx"); return; }
     if k == TK_TOKEN { put("token"); return; }
     if k == TK_INT { putc('i'); put_int(types[t].n as i64); return; }
+    if k == TK_BYTE { putc('b'); put_int(types[t].n as i64); return; }
     if k == TK_FUNC {
         put_type(ints[types[t].a]);
         put(" (");

@@ -739,7 +739,7 @@ recursive fn parse_constant(ty: i32) -> i32 {
     if tk == T_GVAR { let nm = tstr_id(); lex(); return get_global_by_name(nm, ty); }
     if tk == T_GID { let n = tuint; lex(); return get_global_by_id(n, ty); }
     if tk == T_INT {
-        if !ty_is_int(ty) { perr("integer constant must have integer type"); }
+        if !ty_is_int(ty) && types[ty].kind != TK_BYTE { perr("integer constant must have integer type"); }
         let c = tnum_to_int_const(ty);
         lex();
         return c;
