@@ -1,7 +1,10 @@
-"""The four checks. Each compares an implementation against LLVM (the oracle).
+"""The five checks. Each compares an implementation against LLVM (the oracle).
 
   roundtrip  `opt -S in.ll` with no passes; the printed text must be byte-identical (printer fidelity).
   opt        `opt <args> -S`; both outputs are canonicalized via `llvm-as | llvm-dis` and must be identical.
+  analysis   `opt <args> -disable-output` (analysis printers such as `print<domtree>`); exit status, stdout and
+             stderr must be identical (for @analysis-unordered: identical after sorting their lines). LLVM is run
+             twice; output that differs between the two runs (after sorting, if unordered) is `invalid`.
   isel-ir    the IR that reaches instruction selection: `llc <args> -stop-before=x86-isel`. The input is
              LLVM's opt output (if the test has @opt), so this check is isolated from the opt check.
              Canonicalized and compared exactly.
@@ -77,6 +80,10 @@ def tool_opt(opt_bin: str, args: str, in_path: Path, out_path: Path, cwd) -> pro
     return proc.run([opt_bin, *shlex.split(args), "-S", str(in_path), "-o", str(out_path)], cwd=cwd)
 
 
+def tool_analysis(opt_bin: str, args: str, in_path: Path, cwd) -> proc.Res:
+    return proc.run([opt_bin, *shlex.split(args), "-disable-output", str(in_path)], cwd=cwd)
+
+
 def tool_isel(llc_bin: str, args: str, in_path: Path, out_path: Path) -> proc.Res:
     return proc.run([llc_bin, *shlex.split(args), f"-stop-before={config.ISEL_PASS}", str(in_path), "-o", str(out_path)])
 
@@ -113,6 +120,36 @@ def oracle_opt(t: TestFile, args: str) -> dict:
             return {"ok": True, "text": (wd / "out.ll").read_text(errors="replace")}
 
     return proc.cached(["opt", t.path, read(t.path), args], compute)
+
+
+def sort_lines(text: str) -> str:
+    return "".join(sorted(text.splitlines(keepends=True)))
+
+
+def analysis_canon(text: str, unordered: bool) -> str:
+    """The only canonicalization of printer output: line order, and only for @analysis-unordered."""
+    if not unordered:
+        return text
+    return sort_lines(text if text.endswith("\n") or not text else text + "\n")
+
+
+def oracle_analysis(t: TestFile, args: str, unordered: bool) -> dict:
+    """LLVM's analysis-printer output, canonicalized. Runs twice to catch printers that iterate in pointer order."""
+
+    def compute():
+        runs = [tool_analysis(config.llvm("opt"), args, Path(t.path), config.REPO) for _ in range(2)]
+        r = runs[0]
+        if not r.ok:
+            return {"ok": False, "text": r.err_tail()}
+        outs = [(analysis_canon(x.out.decode(errors="replace"), unordered), analysis_canon(x.err.decode(errors="replace"), unordered))
+                for x in runs]
+        if outs[0] != outs[1]:
+            return {"ok": False, "text": "output is nondeterministic (differs between two runs of LLVM's opt"
+                    + (")" if unordered else "; if only the line order changes, use @analysis-unordered)")
+                    + ":\n" + diff(outs[0][1], outs[1][1], 20)}
+        return {"ok": True, "stdout": outs[0][0], "stderr": outs[0][1]}
+
+    return proc.cached(["analysis", t.path, read(t.path), args, unordered], compute)
 
 
 def oracle_isel(input_text: str, llc_args: str) -> dict:
@@ -181,6 +218,29 @@ def check_opt(impl: str, t: TestFile) -> Outcome:
     return Outcome(tid, PASS)
 
 
+def check_analysis(impl: str, t: TestFile) -> Outcome:
+    tid = f"{t.path}::analysis"
+    for args, unordered in t.analysis:
+        exp = oracle_analysis(t, args, unordered)
+        if not exp["ok"]:
+            return Outcome(tid, INVALID, f"llvm opt {args} -disable-output fails:\n" + exp["text"])
+        if impl == config.REFERENCE_IMPL:
+            continue
+        r = tool_analysis(config.impl_bin(impl, "opt"), args, Path(t.path), config.REPO)
+        act_out = analysis_canon(r.out.decode(errors="replace"), unordered)
+        act_err = analysis_canon(r.err.decode(errors="replace"), unordered)
+        if not r.ok:
+            return Outcome(tid, FAIL, f"[{args}] opt exited with {r.rc}:\n{r.err_tail()}", {"args.txt": args, "stderr.txt": r.err_tail(20000)})
+        problems, arts = [], {"args.txt": args + (" (unordered: lines sorted)" if unordered else "")}
+        for stream, e, a in (("stderr", exp["stderr"], act_err), ("stdout", exp["stdout"], act_out)):
+            if e != a:
+                problems.append(f"[{args}] {stream} differs:\n" + diff(e, a))
+                arts.update({f"expected.{stream}": e, f"actual.{stream}": a, f"diff.{stream}.txt": full_diff(e, a)})
+        if problems:
+            return Outcome(tid, FAIL, "\n".join(problems), arts)
+    return Outcome(tid, PASS)
+
+
 def check_isel_ir(impl: str, t: TestFile) -> Outcome:
     tid = f"{t.path}::isel-ir"
     if t.opt:
@@ -237,4 +297,4 @@ def check_run(impl: str, t: TestFile) -> Outcome:
                     "exit-codes.txt": f"expected {exp['rc']}\nactual {act['rc']}\n"})
 
 
-CHECK_FNS = {"roundtrip": check_roundtrip, "opt": check_opt, "isel-ir": check_isel_ir, "run": check_run}
+CHECK_FNS = {"roundtrip": check_roundtrip, "opt": check_opt, "analysis": check_analysis, "isel-ir": check_isel_ir, "run": check_run}

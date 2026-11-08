@@ -3,6 +3,10 @@
 Directives are comment lines `; @key: value` in the file's leading comment block:
 
   @opt: <opt args>      IR->IR check `::opt` (repeatable; all must match). With @llc, at most one.
+  @analysis: <opt args> analysis-printer check `::analysis` (repeatable; all must match): `opt <args> -disable-output`,
+                        stdout and stderr compared
+  @analysis-unordered: <opt args>   the same, but lines are compared as sorted multisets: for printers that iterate
+                        in pointer order (e.g. print<demanded-bits>; LLVM's own tests use CHECK-DAG for them)
   @llc: <llc args>      enables `::isel-ir` and `::run`
   @driver: <path.c>     C driver linked with the compiled IR for `::run` (function tests)
   @source: <path.c>     C file the IR was generated from (informational, used for UB validation)
@@ -21,13 +25,14 @@ from pathlib import Path
 from . import config
 
 DIRECTIVE = re.compile(r"^;\s*@([a-z][a-z-]*):\s*(.*?)\s*$")
-CHECKS = ("roundtrip", "opt", "isel-ir", "run")
+CHECKS = ("roundtrip", "opt", "analysis", "isel-ir", "run")
 
 
 @dataclass
 class TestFile:
     path: str  # repo-relative
     opt: list[str] = field(default_factory=list)
+    analysis: list[tuple[str, bool]] = field(default_factory=list)  # (opt args, unordered)
     llc: str | None = None
     driver: str | None = None
     source: str | None = None
@@ -38,6 +43,8 @@ class TestFile:
         out = ["roundtrip"]
         if self.opt:
             out.append("opt")
+        if self.analysis:
+            out.append("analysis")
         if self.llc is not None:
             out += ["isel-ir", "run"]
         return out
@@ -60,6 +67,8 @@ def parse(path: Path) -> TestFile:
             key, val = m.groups()
             if key == "opt":
                 t.opt.append(val)
+            elif key in ("analysis", "analysis-unordered"):
+                t.analysis.append((val, key == "analysis-unordered"))
             elif key == "llc":
                 t.llc = val
             elif key == "driver":

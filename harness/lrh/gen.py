@@ -159,15 +159,31 @@ def run_lines(text: str) -> list[str]:
     return runs
 
 
-def convert_run(run: str) -> tuple[str | None, str]:
-    """Returns (opt args, '') or (None, reason)."""
+# A pass in -passes=… that prints an analysis (to stderr): print<domtree>, print-alias-sets, aa-eval, …
+PRINTER_PASS = re.compile(r"(^|[=,(\"'])(print[<-]|print$|print[,)]|aa-eval)")
+# cl::opt flags that only control what an analysis printer prints (aa-eval's report); allowed in @analysis lines.
+PRINTER_FLAG = re.compile(r"^--?print-(all-alias-modref-info|no-aliases|may-aliases|partial-aliases|must-aliases|"
+                          r"no-modref|ref|mod|modref|must|mustref|mustmod|mustmodref)$")
+
+
+def convert_run(run: str) -> tuple[str | None, str, str]:
+    """Returns (kind, opt args, '') with kind "opt" or "analysis", or (None, '', reason).
+
+    "analysis" (an @analysis line): the pipeline contains an analysis printer, or the RUN line has both
+    -disable-output and 2>&1 (so FileCheck reads stderr). Everything else is an @opt line, which may not redirect.
+    """
     first = run.split("|", 1)[0].strip()
     try:
         toks = shlex.split(first)
     except ValueError as e:
-        return None, f"cannot tokenize: {e}"
+        return None, "", f"cannot tokenize: {e}"
     if not toks or toks[0] != "opt":
-        return None, "not an opt invocation"
+        return None, "", "not an opt invocation"
+    passes = [t.split("=", 1)[1] for t in toks if t.startswith(("-passes=", "--passes="))]
+    if any(re.search(r"(^|[,(])(dot|view)-", p) for p in passes) or any(t.startswith(("-dot-", "--dot-")) for t in toks):
+        return None, "", "writes .dot files"
+    disable_output = any(t in ("-disable-output", "--disable-output") for t in toks)
+    analysis = any(PRINTER_PASS.search(p) for p in passes) or (disable_output and "2>&1" in toks)
     out, i = [], 1
     while i < len(toks):
         t = toks[i]
@@ -175,28 +191,33 @@ def convert_run(run: str) -> tuple[str | None, str]:
         if t in ("<", "-o") and nxt in ("%s", "-"):
             i += 2
             continue
-        if t in ("%s", "<%s", "-S", "-disable-output", "--disable-output"):
+        if analysis and t == "-o" and nxt == "/dev/null":
+            i += 2
+            continue
+        if t in ("%s", "<%s", "-S", "-disable-output", "--disable-output") or (analysis and t == "2>&1"):
             i += 1
             continue
         if t == "-o":
-            return None, "writes to a file"
+            return None, "", "writes to a file"
         if "%" in t:
-            return None, f"uses lit substitution {t}"
+            return None, "", f"uses lit substitution {t}"
         if t.startswith((">", "2>")) or t in ("&&", ";"):
-            return None, "redirects or chains commands"
+            return None, "", "redirects or chains commands"
         if t.startswith(("-mtriple", "--mtriple")):
             triple = t.split("=", 1)[1] if "=" in t else (nxt or "")
             if not triple.startswith("x86_64"):
-                return None, f"non-x86_64 target {triple}"
+                return None, "", f"non-x86_64 target {triple}"
+        if analysis and PRINTER_FLAG.match(t):
+            out.append(t)
+            i += 1
+            continue
         if t.startswith(("-debug", "--debug", "-stats", "-print", "--print", "-time-passes", "-pass-remarks", "-view-")):
-            return None, f"diagnostic output flag {t}"
-        if t.startswith(("-passes=", "--passes=")) and "print" in t:
-            return None, "analysis printer (stderr output) not supported yet"
+            return None, "", f"diagnostic output flag {t}"
         out.append(t)
         i += 1
     if not any(t.startswith(("-passes", "--passes", "-O")) for t in out):
-        return None, "no -passes / -O pipeline"
-    return shlex.join(out), ""
+        return None, "", "no -passes / -O pipeline"
+    return ("analysis" if analysis else "opt"), shlex.join(out), ""
 
 
 def file_skip_reason(text: str) -> str | None:
@@ -220,6 +241,23 @@ def file_skip_reason(text: str) -> str | None:
     return None
 
 
+DETERMINISM_RUNS = 6
+
+
+def printer_order(t: corpus.TestFile, args: str) -> str | None:
+    """'ordered', 'unordered' (only the line order varies between runs: a printer iterating in pointer order), or
+    None (the content varies, e.g. printed addresses). The check itself only compares two runs, which can agree by
+    chance, so the importer looks harder."""
+    outs = set()
+    for _ in range(DETERMINISM_RUNS):
+        r = checks.tool_analysis(config.llvm("opt"), args, Path(t.path), config.REPO)
+        outs.add((r.rc, r.out, r.err))
+    if len(outs) == 1:
+        return "ordered"
+    texts = {(rc, checks.sort_lines(o.decode(errors="replace")), checks.sort_lines(e.decode(errors="replace"))) for rc, o, e in outs}
+    return "unordered" if len(texts) == 1 else None
+
+
 def import_one(src: Path, dst: Path) -> list[str]:
     """Writes dst if anything is importable. Returns skip notes."""
     name = src.name
@@ -230,39 +268,51 @@ def import_one(src: Path, dst: Path) -> list[str]:
     reason = file_skip_reason(text)
     if reason:
         return [f"- `{name}`: {reason}"]
-    notes, args_list = [], []
+    notes, lines = [], {"opt": [], "analysis": []}
     for run in run_lines(text):
-        args, why = convert_run(run)
-        if args is None:
+        kind, args, why = convert_run(run)
+        if kind is None:
             notes.append(f"- `{name}` RUN `{run}`: {why}")
-        elif args not in args_list:
-            args_list.append(args)
-    if not args_list:
+        elif args not in lines[kind]:
+            lines[kind].append(args)
+    if not lines["opt"] and not lines["analysis"]:
         return notes or [f"- `{name}`: no RUN lines"]
     origin = src.relative_to(config.LLVM_SRC)
     dst.parent.mkdir(parents=True, exist_ok=True)
 
-    def write(al):
-        head = [f"; @origin: {origin} (llvmorg-{config.LLVM_VERSION})"] + [f"; @opt: {x}" for x in al]
+    def write(ls):
+        head = ([f"; @origin: {origin} (llvmorg-{config.LLVM_VERSION})"] + [f"; @opt: {x}" for x in ls["opt"]]
+                + [f"; @analysis: {x}" for x in ls["analysis"]] + [f"; @analysis-unordered: {x}" for x in ls["analysis-unordered"]])
         dst.write_text("\n".join(head) + "\n" + text)
 
-    write(args_list)
+    lines["analysis-unordered"] = []
+    write(lines)
     t = corpus.parse(dst)
     rt = checks.check_roundtrip(config.REFERENCE_IMPL, t)
     if rt.status != checks.PASS:
         dst.unlink()
         return notes + [f"- `{name}`: llvm opt rejects the file"]
-    good = []
-    for x in args_list:
-        t.opt = [x]
+    good = {"opt": [], "analysis": [], "analysis-unordered": []}
+    for x in lines["opt"]:
+        t.opt, t.analysis = [x], []
         if checks.check_opt(config.REFERENCE_IMPL, t).status == checks.PASS:
-            good.append(x)
+            good["opt"].append(x)
         else:
             notes.append(f"- `{name}` @opt `{x}`: oracle fails")
-    if not good:
+    for x in lines["analysis"]:
+        order = printer_order(t, x)
+        if order is None:
+            notes.append(f"- `{name}` @analysis `{x}`: nondeterministic output")
+            continue
+        t.opt, t.analysis = [], [(x, order == "unordered")]
+        if checks.check_analysis(config.REFERENCE_IMPL, t).status == checks.PASS:
+            good["analysis" if order == "ordered" else "analysis-unordered"].append(x)
+        else:
+            notes.append(f"- `{name}` @analysis `{x}`: oracle fails")
+    if not any(good.values()):
         dst.unlink()
         return notes + [f"- `{name}`: no working RUN lines"]
-    if good != args_list:
+    if good != lines:
         write(good)
     return notes
 

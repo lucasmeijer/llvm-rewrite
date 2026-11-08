@@ -329,7 +329,7 @@ def main(argv=None):
     s.add_argument("--force", action="store_true", help="overwrite existing .ll files")
     s.set_defaults(fn=gen.cmd_from_c)
 
-    s = sub.add_parser("import-llvm", help="import LLVM regression tests as @opt tests")
+    s = sub.add_parser("import-llvm", help="import LLVM regression tests as @opt and @analysis tests")
     s.add_argument("dirs", nargs="+", help="directories relative to llvm/test, e.g. Transforms/Mem2Reg")
     s.set_defaults(fn=gen.cmd_import_llvm)
 
