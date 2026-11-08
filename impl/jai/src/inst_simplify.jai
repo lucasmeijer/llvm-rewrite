@@ -3220,11 +3220,9 @@ simplify_fdiv_inst :: (op0_in: Value_Id, op1_in: Value_Id, fmf: u32, q: Simplify
     return NONE;
 }
 // m_FNegNSZ(m_Specific(X)): fneg X, or fsub -0.0, X, or fsub nsz 0.0, X (FNeg_match) or fsub nsz +0.0, X
+// m_FNegNSZ(m_Specific(X)) = m_FSub(m_AnyZeroFP(), m_Specific(X))
 pm_fneg_nsz_of :: (v: Value_Id, x: Value_Id) -> bool {
-    ok, y := pm_fneg(v);
-    if ok && y == x return true;
-    if opr_code(v) == .FSUB && op(v, 1) == x && is_inst(v) && (inst_fmf(v) & FMF_NSZ) != 0 && pm_any_zero_fp(op(v, 0)) return true;
-    return false;
+    return opr_code(v) == .FSUB && op(v, 1) == x && pm_any_zero_fp(op(v, 0));
 }
 simplify_frem_inst :: (op0_in: Value_Id, op1_in: Value_Id, fmf: u32, q: Simplify_Query, max_recurse: u32 = RECURSION_LIMIT, eb: u8 = EB_IGNORE, rm: u8 = RM_NEAREST_TIES_TO_EVEN) -> Value_Id {
     op0 := op0_in; op1 := op1_in;

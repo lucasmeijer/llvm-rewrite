@@ -804,8 +804,16 @@ fp_default_nan :: (k: Type_Kind) -> [] u64 {
     return fp_encode(k, false, .NAN, 0, s);
 }
 
-fp_inf :: (k: Type_Kind, neg: bool) -> [] u64 { z: Big; z.allocator = temp; return fp_encode(k, neg, .INF, 0, z); }
-fp_zero :: (k: Type_Kind, neg: bool) -> [] u64 { z: Big; z.allocator = temp; return fp_encode(k, neg, .ZERO, 0, z); }
+fp_inf :: (k: Type_Kind, neg: bool) -> [] u64 {
+    z: Big; z.allocator = temp;
+    if k == .PPC_FP128 { r := NewArray(2, u64,, allocator = temp); r[0] = fp_encode(.DOUBLE, neg, .INF, 0, z)[0]; return r; }   // (inf, +0)
+    return fp_encode(k, neg, .INF, 0, z);
+}
+fp_zero :: (k: Type_Kind, neg: bool) -> [] u64 {
+    z: Big; z.allocator = temp;
+    if k == .PPC_FP128 { r := NewArray(2, u64,, allocator = temp); if neg r[0] = 0x8000_0000_0000_0000; return r; }   // (+-0, +0)
+    return fp_encode(k, neg, .ZERO, 0, z);
+}
 
 fp_with_sign :: (k: Type_Kind, w: [] u64, neg: bool) -> [] u64 {
     p, mx, mn, bits := fp_semantics(k);
