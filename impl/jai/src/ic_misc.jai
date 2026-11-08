@@ -5,7 +5,7 @@
 // Ported from: InstructionCombining.cpp (visitReturnInst, visitUnreachableInst, visitUncondBrInst, visitCondBrInst,
 // handlePotentiallyDeadSuccessors, visitExtractValueInst prologue, visitFreeze prologue, visitGetElementPtrInst
 // prologue),
-// InstCombineShifts.cpp, InstCombineAndOrXor.cpp, InstCombineCasts.cpp (commonCastTransforms), InstCombinePHI.cpp,
+// InstCombineShifts.cpp, InstCombineAndOrXor.cpp, InstCombineCasts.cpp (commonCastTransforms),
 // InstCombineCalls.cpp, InstCombineVectorOps.cpp, InstCombineLoadStoreAlloca.cpp (prologues only).
 
 ic_visit :: (i: Value_Id) -> Value_Id {
@@ -214,8 +214,6 @@ ic_freely_invert_all_users_of :: (v: Value_Id, ignored: Value_Id = NONE) {
     find_dbg_users(ic.f, v, *users);
     if users.count fatal("instcombine: freelyInvertAllUsersOf with debug users (DW_OP_not) is not supported yet");
 }
-// visitPHINode: InstSimplify. Not ported: everything after.
-ic_visit_phi :: (i: Value_Id) -> Value_Id { return ic_visit_simplify_only(i); }
 // visitGetElementPtrInst: InstSimplify. Not ported: everything after.
 ic_visit_gep :: (i: Value_Id) -> Value_Id { return ic_visit_simplify_only(i); }
 // visitLoadInst: InstSimplify. Not ported: everything after.

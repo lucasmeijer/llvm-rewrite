@@ -13,3 +13,4 @@
 #load "ic_shifts.jai";
 #load "ic_andorxor.jai";
 #load "ic_select.jai";
+#load "ic_phi.jai";
