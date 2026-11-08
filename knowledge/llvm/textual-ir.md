@@ -100,7 +100,58 @@ Facts needed to make a parse+print round trip byte-identical. Sources: `llvm/lib
 - **Growing a PHI or switch** (`User::growHungoffUses`) copies each `Use` with `Use::operator=`, i.e. `set()`, which
   pushes the new use at the head of its value's list in operand order, then destroys the old ones. Capacity grows
   to `n + n/2` (min 2) for PHIs and `n * 3` for switches. Only matters to passes (the parser reserves exactly).
-- **Not yet handled anywhere we know of, seen in imported tests**: constant expressions are folded when created
-  (`getelementptr inbounds ([16 x i32], ptr @a, i32 0, i64 0)` prints as `@a`; `ConstantFold.cpp`); the
-  `"PIC Level"` module flag's behavior is upgraded from 7 to 8; `llvm.lifetime.start/end` calls lose their size
-  argument (AutoUpgrade).
+- Constant expressions are folded when created (`getelementptr inbounds ([16 x i32], ptr @a, i32 0, i64 0)` prints
+  as `@a`; `ConstantFold.cpp` via `ConstantExpr::get*`), the `"PIC Level"` module flag's behavior is upgraded from
+  7 (Max) or 1 (Error) to 8 (Min), and `llvm.lifetime.start/end` calls lose their size argument (AutoUpgrade).
+  All three are handled in impl/jai (constfold.jai, autoupgrade.jai).
+
+## AutoUpgrade, constant folding and debug info at parse time (verified in impl/jai, L0.print-imported COMPLETE)
+
+- **End-of-module order** (LLParser::validateEndOfModule): attribute groups, auto-declared intrinsics (name order;
+  a use whose call type is a valid signature gets `Intrinsic::getOrInsertDeclaration` with the *mangled* name, e.g.
+  `@llvm.smin(i32 ...)` -> `@llvm.smin.i32`; otherwise a temporary function goes through
+  UpgradeIntrinsicFunction/UpgradeIntrinsicCall), metadata cycles, DISubprogram::cleanupRetainedNodes, TBAA tag
+  upgrade, UpgradeCallsToIntrinsic for every function (`make_early_inc_range`: functions appended meanwhile are
+  visited), UpgradeDebugInfo, UpgradeModuleFlags.
+- **Intrinsic attributes are set only when the signature is valid** (`UpgradeIntrinsicFunction` checks
+  `Intrinsic::isSignatureValid`); a declaration with an invalid signature keeps its written attributes.
+  Declarations are remangled (`remangleIntrinsicFunction`) when the name's suffix doesn't match the types
+  (`@llvm.masked.compressstore.v16f32` -> `.v16f32.p0`, `@llvm.scmp.v16i8.16i8` -> `.v16i8.v16i8`).
+- **Call operands are *set* in the order args, [dests], callee, bundle inputs** (CallInst/InvokeInst/CallBrInst::init
+  then populateBundleOperandInfos) even though bundle inputs sit before the dests/callee; it decides use-list
+  order when a value is both an argument and a bundle input.
+- **Debug intrinsics become debug records**: calls to `llvm.dbg.value/declare/assign/label` are replaced by
+  `#dbg_*` records before the call (upgradeDbgIntrinsicToDbgRecord) and the declarations are erased. An erased
+  instruction's records move to the front of the next instruction's records (DbgMarker::removeMarker).
+- **Debug info is stripped without `"Debug Info Version"` 3** (UpgradeDebugInfo -> StripDebugInfo: `llvm.dbg.*`
+  named metadata, function/global/instruction `!dbg`, records, `heapallocsite`/`DIAssignID`, DILocations in loop
+  IDs). With version 3 the Verifier runs and *broken* debug info is stripped too, with
+  `warning: ignoring invalid debug info in <file>` on stderr; e.g. a call to a defined, non-interposable function
+  with a subprogram, inside a function with a subprogram, without `!dbg`
+  (tests/imported/llvm/Transforms/Inline/memprof_inline2.ll).
+- **opt enables ODR uniquing of debug types** (tools/opt/optdriver.cpp `Context.enableDebugTypeODRUniquing()`):
+  a `!DICompositeType` with an `identifier:` is created distinct and later ones with the same identifier and tag
+  return it (DICompositeType::buildODRType), so uniqued input nodes print as `distinct`
+  (tests/imported/llvm/Transforms/SROA/dbg-single-piece.ll).
+- **Metadata numbering of debug records**: per instruction, its records first (location if it is an MDNode, the
+  variable, for `#dbg_assign` the DIAssignID and an MDNode address, then the DILocation), then the instruction's
+  intrinsic metadata operands and attachments (SlotTracker::processFunctionMetadata). `!DIExpression` never gets a
+  slot and always prints inline; `!DIArgList` is not an MDNode (inline only, values only).
+- **DI node operand order is not the printed field order**: e.g. DISubprogram operands are [file, scope, name,
+  linkageName, type, unit, declaration, retainedNodes, containingType, templateParams, thrownTypes, annotations,
+  targetFuncName] (DebugInfoMetadata.cpp getImpl); depth-first numbering follows the operands.
+- **MetadataAsValue canonicalizes** (canonicalizeMetadataForValue): `metadata !{null}` becomes `!{}` and
+  `metadata !{i32 0}` becomes `i32 0` (tests/imported/llvm/Transforms/LoopIdiom/debug-line.ll).
+- **`uselistorder <ty> <v>, {i...}`** stable-sorts v's use list so that the use currently at position k moves to
+  position i[k]; it is applied immediately (not printed back by `opt -S`).
+- **`alloca` without `addrspace(N)` is in address space 0**, not the DataLayout's `A` (LLParser::parseAlloc).
+- **Consecutive `module asm` lines merge** into one fragment (Module::appendModuleInlineAsm), printed as one
+  `module asm` followed by one indented string per line; comdats are separated by blank lines.
+- **ppc_fp128 constants** print bitwise (`f0x` + 32 hex digits, second double first) unless the second double is
+  +0.0; then they print like that double, but decimal only if the 6-digit string denotes exactly that double.
+- **Inline asm callees always have type `ptr`** (addrspace 0), so `call addrspace(0)` is printed in modules whose
+  program address space is not 0; functions and calls default to the DataLayout's program address space `P`.
+- **Target extension types take size/alignment from their layout type** (Type.cpp getTargetTypeInfo:
+  `spirv.*` -> ptr, `aarch64.svcount` -> `<vscale x 16 x i1>`, ...), visible in default `align` of loads/allocas.
+- **`gc.relocate` calls get a comment** `; (%base, %derived)` (AssemblyWriter::printGCRelocateComment).
+

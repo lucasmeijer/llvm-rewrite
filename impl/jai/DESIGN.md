@@ -13,7 +13,10 @@ src/
   parser.jai      LLParser port (builds the tables; reproduces LLParser's creation order and placeholders)
   printer.jai     AsmWriter + SlotTracker + TypeFinder port
   apfloat.jai     the bits of APFloat/APInt the printer and constant folder need (exact decimal printing)
-  intrinsics.jai  intrinsic-ID table and the attributes Intrinsic::getAttributes attaches to declarations
+  intrinsics.jai  intrinsic IDs (gen_iit.jai), signature matching, name mangling, getOrInsertDeclaration, attributes
+  autoupgrade.jai AutoUpgrade (intrinsics, TBAA, module flags) and a constant-folding IRBuilder subset
+  constfold.jai   ConstantFold.cpp port (cf_* fold or NONE, ce_* = ConstantExpr::get*)
+  debuginfo.jai   DI* nodes, DIArgList, debug records, debug-intrinsic upgrade, StripDebugInfo
   apint.jai       APInt (arbitrary width, words in temp) and KnownBits arithmetic
   ir_edit.jai     mutation/CFG API for passes: iterators, successors/predecessors, phi edits, builders, split block
   inst_props.jai  mayHaveSideEffects, willReturn, wouldInstructionBeTriviallyDead, the TLI subset
@@ -109,12 +112,14 @@ equal ids, which is what attribute-group numbering needs.
 
 ### Metadata (`Md_Id`)
 
-`m_kind` (STRING, VALUE (ValueAsMetadata; constant or local), TUPLE (generic `!{…}`), specialized DI* nodes later),
+`m_kind` (STRING, VALUE (ValueAsMetadata; constant or local), TUPLE (generic `!{…}`), SPECIAL (a DI* node:
+`sub` = DI_Kind, operands in LLVM's operand order, integer fields in `ir.md_ints`), DI (parser temporary)),
 `m_distinct`, `m_ops`/`m_nops` into an `md_ops` pool (`Md_Id`, NONE = null operand), `m_str`. Uniqued nodes are
 interned by content in a `Table`; distinct nodes never are. Instruction/global attachments are rows
 `(kind_id, Md_Id, next)` in an `attach` table. Kind ids: the fixed kinds of `FixedMetadataKinds.def` (dbg = 0,
 tbaa = 1, …) pre-registered, custom kinds registered in order of first appearance, exactly like `LLVMContext`.
-Named metadata is an ordered array of `(name, [Md_Id])` on the module.
+Named metadata is an ordered array of `(name, [Md_Id])` on the module. Debug records (`#dbg_value(...)`) are rows
+of `ir.dbg_records`, chained per instruction from `Inst_Row.records` (the records printed before it).
 
 The parser hands out one placeholder node per `!N` reference and resolves them all at the end of the module
 (distinct nodes first get their row so self-references work; uniqued nodes are interned after their operands are
