@@ -39,14 +39,14 @@ lib/Transforms/Scalar/SROA.cpp 0.85
 lib/Transforms/InstCombine/InstCombineCalls.cpp 0.1
 lib/Analysis/ConstantFolding.cpp 0.8
 lib/IR/Constants.cpp 0.55
-lib/Transforms/InstCombine/InstCombineSimplifyDemanded.cpp 0.5
-lib/Transforms/InstCombine/InstCombineAddSub.cpp 0.7
+lib/Transforms/InstCombine/InstCombineSimplifyDemanded.cpp 0.95
+lib/Transforms/InstCombine/InstCombineAddSub.cpp 0.95
 lib/Transforms/InstCombine/InstCombineCasts.cpp 0.45
 lib/Support/APInt.cpp 0.5
 lib/IR/DebugInfoMetadata.cpp 0.3
 lib/IR/Attributes.cpp 0.2
 lib/Analysis/MemorySSA.cpp 0.6
-lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.65
+lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95  # manual: all but visitFDiv's sin/cos -> tan (emitUnaryFloatFnCall, loud)
 lib/Transforms/Utils/SCCPSolver.cpp 0.7
 lib/Transforms/Utils/LoopUtils.cpp 0.05
 lib/IR/ConstantRange.cpp 0.7
@@ -110,3 +110,4 @@ lib/Analysis/MemoryBuiltins.cpp 0.55
 lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
 lib/IR/EHPersonalities.cpp 0.5
+lib/Transforms/Utils/Debugify.cpp 0.45  # manual: synthetic mode whole (debugify, check-debugify, -enable-debugify); no original-debuginfo mode, -debugify-each, stats export

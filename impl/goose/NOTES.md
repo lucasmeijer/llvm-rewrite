@@ -431,9 +431,27 @@
 - Fixed in shared code on the way: TLI size_t is now the DataLayout index size of AS 0 (`tli_sizet_bits`,
   was a constant 64); `ac_register_assumption` / `ac_update_affected` (assume.goose) for assumes created or
   changed by a pass.
-- Not ported / known gaps (fail loudly): SimplifyDemandedFPClass, OptimizePointerDifference, LibCallSimplifier, salvaging
+- Not ported / known gaps (fail loudly): OptimizePointerDifference, LibCallSimplifier, salvaging
   debug info (erasing an instruction used by a debug record), dropDroppableUses when sinking, AliasScopeTracker,
-  LowerDbgDeclare, the !annotation copy, branch-weight updates, foldBinopWithRecurrence.
+  LowerDbgDeclare, the !annotation copy, branch-weight updates, visitFDiv's sin/cos -> tan (needs BuildLibCalls'
+  hasFloatFn/emitUnaryFloatFnCall), MDNode::getMostGenericFPMath of two different nodes, convertFSqrtDivIntoFMul
+  with more than two R1/R2 instructions (SmallPtrSet big-mode order).
+- FP visitors (ic_fp_addsub.goose, ic_fp_muldivrem.goose, ic_demanded_fp.goose): visitFNeg/FAdd/FSub with
+  FAddCombine (FAddendCoef as a small value struct, addend tables in globals), visitFMul/FDiv/FRem with every helper,
+  foldFBinOpOfIntCasts, SimplifyDemandedFPClass whole (`sd_fp_class(i, opno, demanded, cx, depth) -> bool, KFC`;
+  the SimplifyQuery context is the `cx` parameter, set into kb_cxt before each ValueTracking call; Builder
+  InsertPointGuard = sdf_guard_begin/end). FP builders in ic_builder.goose: `icb_fbinop_fmf`, `icb_fneg_fmf`,
+  `ic_new_fbinop_fmf`, `ic_new_fneg_fmf`, `icb_*intrinsic_fmf`, `icb_fcmp_fmf` (pass `fmf_of(src)` for an
+  FMFSource). `is_fp_math_operator` includes fptrunc/fpext/uitofp/sitofp (LLVM 23 FPMathOperator).
+  `tools/fuzz_ic_fp.py [count] [seed] [--vec]` is a differential fuzzer for FP binops/fneg/fcmp/select with random
+  FMF and nofpclass returns (6000 scalar + 2000 vector programs clean when written). Per-function instcombine sweep:
+  28401 -> 60593 identical over this work (with the memory/calls agents), no identical -> differs; the
+  simplify-demanded-fpclass*/nofpclass tests: 2444/2569 functions identical, the rest stop at LibCallSimplifier
+  and canonicalize folding.
+- Traps found on the way: `IRBuilder<> B(&I)` (foldFDivConstantDivisor's copysign) uses a ConstantFolder, which
+  never folds intrinsics, and its instruction is not added to the worklist (`irb_insert_before`);
+  FMaxMin_match binds the *fcmp's* operands and uses the inverse (not swapped) predicate when the select arms are
+  reversed (ic_select's sl_ord_or_unord_fminmax had both wrong: minnum operand order differed).
 - Perf: not measurable yet (`tests/perf/scaling/straightline/*` has an `@perf: opt -passes=instcombine` line,
   but it stops at the unported `xor` visitor). Known linear scans to revisit when it matters: removing an
   entry from the deferred worklist, DeadEdges, DomConditionCache dedupe per value, the cast TypeEvaluationHelper
@@ -513,6 +531,20 @@
 - annotateAnyAllocSite (ic_visit_misc.goose): the allocalign part is ported (LLVM runs it on every call, not only
   on allocation functions); TLI allocation functions and allocsize still fail loudly. Calls with a
   `"modular-format"` attribute fail loudly (optimizeModularFormat was silently skipped).
+
+## Debugify (debugify.goose)
+
+- `debugify`, `check-debugify` (module passes), opt's `-enable-debugify`, `-strip-debug`, `-debugify-quiet`,
+  `-debugify-level`, `-debugify-atoms`. DI nodes are built slot by slot like the parser stores them (defaults left
+  unset so uniquing matches). `-debugify-each` and the original-debuginfo mode fail loudly.
+- Sweeps: `debugify` and `debugify,check-debugify --analysis` identical on all 7595 files;
+  `debugify,{sroa,dce,early-cse},check-debugify` 0 differs. `debugify,simplifycfg` still has 42 silent differs:
+  SimplifyCFG drops or misplaces debug records in several folds (e.g. records of erased instructions,
+  speculation order) — a SimplifyCFG debug-record task, not debugify.
+- Debug records now have block trailing records (dinfo.goose `block_trail`, LLVM's DbgMarker at end()): erasing a
+  block's last instruction keeps its records, and the next instruction appended to the block (block_append_inst)
+  adopts them. ConstantFoldTerminator's new branch adopts the old terminator's records (cfgutil
+  cu_create_br_before). Together these fixed 57 of the 99 `debugify,simplifycfg` differs.
 
 ## EarlyCSE (earlycse.goose, mssaupdater.goose, instident.goose, salvage.goose, knowledge.goose)
 

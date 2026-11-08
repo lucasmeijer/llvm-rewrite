@@ -21,6 +21,13 @@ the oracle unless noted).
   subprogram's `retainedNodes` (DIBuilder::finalizeSubprogram, creation order).
 - `!llvm.debugify = !{!{i32 <lines>}, !{i32 <vars>}}`, and `!{i32 2, !"Debug Info Version", i32 3}` is appended to
   `!llvm.module.flags` if missing. `check-debugify` only prints (stderr) unless Strip.
+- "Exact definition" also excludes `noipa` functions (GlobalValue::isInterposable(CheckNoIPA = true), Globals.cpp)
+  and, with the `SemanticInterposition` module flag, non-dso_local ones (*/noipa.ll in the sweep).
+- With `-debugify-level=locations` (or a function without records) the subprogram's retainedNodes stays the
+  temporary `!{}` from createFunction, which the printer omits: no `retainedNodes:` field.
+- `-enable-debugify` adds NewPMDebugifyPass before and NewPMCheckDebugifyPass after the `-passes` pipeline
+  (NewPMDriver.cpp); `-strip-debug` runs StripDebugInfo right after parsing (optdriver.cpp).
+  Verified: goose `sweep --passes debugify` and `debugify,check-debugify --analysis` identical on 7595 files.
 
 ## Debug records
 
@@ -33,6 +40,10 @@ the oracle unless noted).
   place (they go to the next instruction) and absorbs the records at the destination unless the head bit is set
   (Instruction::moveBeforeImpl). InstCombine's `foldShiftedShift` relies on it: `and` is created at the outer shift
   and moved before the inner one.
+- **Trailing records.** Erasing the last instruction of a block (usually the terminator) moves its records to the
+  block's trailing marker (DbgMarker::removeMarker, DebugProgramInstruction.cpp:646); the next instruction inserted
+  at end() adopts them, and inserting a terminator flushes them onto it (flushTerminatorDbgRecords). So
+  "erase the terminator, then create a new branch" keeps the records (simplifycfg with debugify).
 - `BasicBlock::splitBasicBlock(I)` with an `Instruction*` leaves I's records in the old block (spliceDebugInfo with
   First.HeadBit = false); they end up before the new unconditional branch.
 - `IRBuilder::Insert(I)` with no name calls `I->setName("")`: a name set on an unlinked instruction before

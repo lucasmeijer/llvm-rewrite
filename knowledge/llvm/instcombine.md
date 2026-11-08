@@ -279,3 +279,28 @@ icmp*/fcmp* tests.
 - SimplifyDemandedFPClass runs from visitReturnInst (functions with a `nofpclass` return) and at the very end of
   visitFMul (SimplifyDemandedInstructionFPClass on every fmul): it infers `nnan`/`ninf` and folds fmuls whose
   operand classes are known.
+
+## Floating point (InstCombineAddSub/MulDivRem FP halves, SimplifyDemandedFPClass)
+
+Verified by the goose port (per-function sweep of the imported InstCombine tests and tools/fuzz_ic_fp.py).
+
+- **visitFMul ends with `SimplifyDemandedInstructionFPClass(I)`** (all classes demanded), so every fmul that no
+  other fold changed goes through SimplifyDemandedUseFPClass; the only other caller is visitReturnInst with
+  `~nofpclass(...)` of the return. Results there can change fast-math flags (`inferFastMathValueFlags` adds
+  nnan/ninf when the operands' known classes allow).
+- `Instruction::isAssociative()` is FMF-dependent: fmul needs `reassoc`, fadd `reassoc nsz`; this gates
+  SimplifyAssociativeOrCommutative's reassociation and foldBinopWithRecurrence for FP ops.
+- `m_FNeg` matches `fneg X`, `fsub -0.0, X`, and `fsub nsz 0.0, X` (any zero with nsz); getComplexity uses it.
+- `IRBuilder<> B(&I)` inside foldFDivConstantDivisor (nnan `X / 0.0` -> `copysign(inf, X)`) has a ConstantFolder,
+  which never folds intrinsics, and its new call is not put on the worklist.
+- FMaxMin_match (m_OrdOrUnordFMax/Min, select -> maxnum/minnum) binds the fcmp's operands (not the select arms)
+  and, when the arms are reversed, tests the *inverse* predicate: `select (fcmp ole a, c), c, a` -> `maxnum(a, c)`
+  (InstCombine/unordered-fcmp-select.ll, minmax-fp.ll).
+- `Instruction::dropUBImplyingAttrsAndMetadata` keeps !annotation, !range, !nonnull, !align, !fpmath, !prof,
+  !DIAssignID and the debug location; on calls it drops noundef/dereferenceable/dereferenceable_or_null from the
+  return and every argument.
+- computeKnownFPClass of a ConstantDataSequential / ConstantArray / ConstantStruct (not a vector) is the union of
+  the element classes with unknown sign; any non-ConstantFP element makes it unknown (nofpclass returns of
+  `{float, float}` constants, simplify-demanded-fpclass-aggregates.ll).
+- FAddCombine (`reassoc nsz` fadd/fsub, scalars only) gives the instructions it creates the original instruction's
+  fast-math flags and debug location after the Builder created them with its own (empty) flags.

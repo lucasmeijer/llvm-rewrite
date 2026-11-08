@@ -480,6 +480,9 @@ max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
 | `ic_select.goose` | InstCombineSelect.cpp, whole: `visit_select` and every helper in file order (matchSelectPattern with casts locally) |
 | `ic_phi.goose` | InstCombinePHI.cpp, whole: `visit_phi`, the foldPHIArg* folds, SliceUpIllegalIntegerPHI, PredOrder (reset per iteration) |
 | `ic_demanded_elts.goose` | SimplifyDemandedVectorElts (InstCombineSimplifyDemanded.cpp) |
+| `ic_fp_addsub.goose` | the FP half of InstCombineAddSub.cpp (FAddCombine, visitFAdd/FSub/FNeg), foldFBinOpOfIntCasts, FMF helpers |
+| `ic_fp_muldivrem.goose` | the FP half of InstCombineMulDivRem.cpp (visitFMul/FDiv/FRem and their helpers) |
+| `ic_demanded_fp.goose` | SimplifyDemandedFPClass (the FP half of InstCombineSimplifyDemanded.cpp) |
 | `ic_loadstorealloca.goose` | InstCombineLoadStoreAlloca.cpp, whole (alloca/load/store visitors, PointerReplacer, mergeStoreIntoSuccessor), copyMetadataForLoad, getOrEnforceKnownAlignment |
 | `ic_combining.goose` | the rest of InstructionCombining.cpp's visitors: GEP (+ visitGEPOfGEP, foldGEPOfPhi), visitAllocSite/visitFree, switch, extractvalue, landingpad, freeze, foldVectorBinop |
 | `ic_vectorops.goose` | InstCombineVectorOps.cpp, whole (extractelement, insertelement, insertvalue, shufflevector), the ShuffleVectorInst mask predicates |
