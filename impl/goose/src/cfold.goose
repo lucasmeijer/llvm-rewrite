@@ -193,7 +193,25 @@ recursive fn cf_fold_bitcast_dl(c: i32, ty: i32) -> i32 {
     if u >= 0 { return u; }
     let st = vals[c].ty;
     if ty_is_vector(st) && (ty_is_int(ty) || ty_is_fp(ty)) {
-        cfa_not_ported("bitcast of a vector constant to a scalar");
+        // vector -> scalar integer/fp (foldConstVectorToAPInt)
+        if ty_kind(st) == TK_SVEC { cfa_not_ported("bitcast of a scalable vector constant to a scalar"); }
+        let nse = ty_count(st);
+        let set0 = ty_elem(st);
+        if ty_kind(set0) == TK_BYTE { cfa_not_ported("bitcast of a byte vector constant"); }
+        var cv = c;
+        if ty_is_fp(set0) { cv = ce_cast(OP_BITCAST, c, ty_vector(ty_int(dl_size_bits(set0)), nse, false)); }
+        let rw = dl_size_bits(ty);
+        var res = ap_zero(rw);
+        let bshift = dl_size_bits(set0);
+        for i in nse {
+            let e = agg_elem(cv, if dl_big_endian { i } else { nse - i - 1 });
+            if e >= 0 && is_undef_val(e) { res = ap_shl(res, bshift); continue; }
+            if e < 0 || vals[e].kind != VK_CINT { return ce_cast(OP_BITCAST, cv, ty); }
+            res = ap_shl(res, bshift);
+            res = ap_or(res, ap_zext(ap_from_cint(e), rw));
+        }
+        if ty_is_int(ty) { return ap_to_cint(ty, res); }
+        return c_fp(ty, ap_word(res, 0), if rw > 64 { ap_word(res, 1) } else { 0 });
     }
     if !ty_is_vector(ty) { return ce_cast(OP_BITCAST, c, ty); }
     let k = vals[c].kind;
@@ -204,8 +222,62 @@ recursive fn cf_fold_bitcast_dl(c: i32, ty: i32) -> i32 {
     if ty_kind(st) != TK_FVEC { return ce_cast(OP_BITCAST, c, ty); }
     if k != VK_CDVECTOR && k != VK_CVECTOR && k != VK_CINT && k != VK_CFP { return ce_cast(OP_BITCAST, c, ty); }
     if ty_count(ty) == ty_count(st) { return ce_cast(OP_BITCAST, c, ty); }
-    cfa_not_ported("bitcast of a vector constant that changes the element count");
-    return -1;
+    let ndst = ty_count(ty);
+    let nsrc = ty_count(st);
+    let set = ty_elem(st);
+    let det = ty_elem(ty);
+    if ty_kind(set) == TK_BYTE || ty_kind(det) == TK_BYTE { cfa_not_ported("bitcast of a byte vector constant"); }
+    if ty_is_fp(det) {
+        let divt = ty_vector(ty_int(dl_size_bits(det)), ndst, false);
+        let ci = cf_fold_bitcast_dl(c, divt);
+        return ce_cast(OP_BITCAST, ci, ty);
+    }
+    var cv = c;
+    if ty_is_fp(set) { cv = ce_cast(OP_BITCAST, c, ty_vector(ty_int(dl_size_bits(set)), nsrc, false)); }
+    let little = !dl_big_endian;
+    let sbits = dl_size_bits(set);
+    let dbits = dl_size_bits(det);
+    let bw = 2 * (if sbits > dbits { sbits } else { dbits });
+    var buf = ap_zero(bw);
+    var umask = ap_zero(bw);
+    var pmask = ap_zero(bw);
+    var bbits: i64 = 0;
+    var se: i64 = 0;
+    var res: i32[>..<] = [];
+    while res.len != ndst {
+        while bbits < dbits {
+            let e = agg_elem(cv, se);
+            se++;
+            if e < 0 { return ce_cast(OP_BITCAST, cv, ty); }
+            if !little { buf = ap_shl(buf, sbits); umask = ap_shl(umask, sbits); pmask = ap_shl(pmask, sbits); }
+            let pos = if little { bbits } else { 0 };
+            var sv = ap_zero(sbits);
+            if is_undef_val(e) {
+                umask = ap_or(umask, ap_shl(ap_low_bits(bw, sbits), pos));
+                if vals[e].kind == VK_POISON { pmask = ap_or(pmask, ap_shl(ap_low_bits(bw, sbits), pos)); }
+            } else {
+                if vals[e].kind != VK_CINT { return ce_cast(OP_BITCAST, cv, ty); }
+                sv = ap_from_cint(e);
+            }
+            // insertBits(SrcValue, pos)
+            buf = ap_and(buf, ap_not(ap_shl(ap_low_bits(bw, sbits), pos)));
+            buf = ap_or(buf, ap_shl(ap_zext(sv, bw), pos));
+            bbits += sbits;
+        }
+        while bbits >= dbits {
+            let sh = if little { 0 } else { bbits - dbits };
+            let um = ap_trunc(ap_lshr(umask, sh), dbits);
+            if ap_is_all_ones(um) {
+                let pm = ap_trunc(ap_lshr(pmask, sh), dbits);
+                if !ap_is_zero(pm) { res.push(c_poison(det)); } else { res.push(c_undef(det)); }
+            } else {
+                res.push(ap_to_cint(det, ap_trunc(ap_lshr(buf, sh), dbits)));
+            }
+            if little { buf = ap_lshr(buf, dbits); umask = ap_lshr(umask, dbits); pmask = ap_lshr(pmask, dbits); }
+            bbits -= dbits;
+        }
+    }
+    return c_aggregate(ty, res);
 }
 
 // ConstantFoldLoadFromUniformValue
@@ -214,6 +286,8 @@ recursive fn cf_fold_load_from_uniform(c: i32, ty: i32) -> i32 {
         if vals[c].kind == VK_POISON { return c_poison(ty); }
         return c_undef(ty);
     }
+    // padding when storing C to memory: not uniform (DL.typeSizeEqualsStoreSize)
+    if dl_size_bits(vals[c].ty) != dl_store_size(vals[c].ty) * 8 { return -1; }
     if is_null_value(c) && !ty_is_x86_amx(ty) { return c_null(ty); }
     if is_all_ones_value(c) {
         if ty_is_int(ty_scalar(ty)) || ty_is_fp(ty_scalar(ty)) { return c_all_ones(ty); }

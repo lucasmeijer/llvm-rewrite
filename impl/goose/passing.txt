@@ -5161,6 +5161,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/abs.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/active-lane-mask.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/atan-intrinsic.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/avx512.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/basictest.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/basictest.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/binop-identity-undef.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/binop-identity-undef.ll::roundtrip
@@ -5232,6 +5233,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/smul-fix-sat.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/smul-fix.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/sse.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/trunc.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/trunc_vec.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/trunc_vec.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vecreduce.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-calls.ll::roundtrip
@@ -5536,6 +5538,7 @@ tests/imported/llvm/Transforms/InstSimplify/vector-interleave-deinterleave.ll::o
 tests/imported/llvm/Transforms/InstSimplify/vector-interleave-deinterleave.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/vector_gep.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/vector_gep.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/vector_ptr_bitcast.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/vector_ptr_bitcast.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/vp-reverse.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/vp-reverse.ll::roundtrip
@@ -7157,6 +7160,7 @@ tests/imported/llvm/Transforms/SCCP/binaryops-constexprs.ll::opt
 tests/imported/llvm/Transforms/SCCP/binaryops-constexprs.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/binaryops-range-special-cases.ll::opt
 tests/imported/llvm/Transforms/SCCP/binaryops-range-special-cases.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/bitcast.ll::opt
 tests/imported/llvm/Transforms/SCCP/bitcast.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/calltest.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/clang-arc-rv.ll::opt
@@ -7381,7 +7385,9 @@ tests/imported/llvm/Transforms/SCCP/uscmp.ll::opt
 tests/imported/llvm/Transforms/SCCP/uscmp.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/user-with-multiple-uses.ll::opt
 tests/imported/llvm/Transforms/SCCP/user-with-multiple-uses.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/vector-bitcast.ll::opt
 tests/imported/llvm/Transforms/SCCP/vector-bitcast.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/vector-refinement.ll::opt
 tests/imported/llvm/Transforms/SCCP/vector-refinement.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/vscale-gep.ll::opt
 tests/imported/llvm/Transforms/SCCP/vscale-gep.ll::roundtrip
