@@ -368,6 +368,22 @@ recomputing gives a different child order.
 6. New `cl::opt`: a field in `opts` and an entry in `cl_opts()` (default = LLVM's default).
 7. Anything LLVM does that you don't port must `fatal(...)` when reached, never silently do something else.
 
+### Target cost model (tti*.jai, x86_lowering.jai, gen_x86_*.jai)
+
+- `Tti :: struct { kind: Tti_Kind; xl: X86_Lowering; }`: `.NONE` is NoTTIImpl (no target machine: module without
+  an x86 triple), `.X86` is X86TTIImpl + BasicTTIImplBase. There is no virtual dispatch: `tti_*` entry points switch
+  on `kind`, and inside the X86 code "thisT()->" calls are direct calls to the `x86_*` procedures (`bt_*` are the
+  BasicTTIImplBase bodies, `base_*` TargetTransformInfoImplBase's).
+- `tti_get(f)` caches one `X86_Lowering` per distinct (cpu, tune-cpu, features, prefer/min vector width,
+  soft-float) tuple: the X86Subtarget (feature bits with implications), TargetLoweringBase tables
+  (`op_actions`, `type_action`, `transform_to`, `num_registers`, load-ext/trunc-store actions) computed once by
+  `x86_lowering_init` from the generated constructor actions.
+- Types are mapped with `x86_value_type` to `Evt` (simple `MVT` code or an extended (elt, n, scalable) triple);
+  `bt_type_legalization_cost` walks `xl_type_conversion` exactly like getTypeLegalizationCost.
+- Cost tables are `[] XCost_Entry { isd, dst, src, c: [4] s32 }` (one column per cost kind, -1 = no cost for
+  that kind; CostTblEntry tables keep their single cost in `c[0]`), looked up first-match like CostTableLookup.
+- Demanded-element sets are `[] bool`; shuffle masks `[] s32` with -1 for poison.
+
 ### Loops (loop_info.jai, cycle_info.jai, bb_utils.jai, pass_loop_simplify.jai, pass_lcssa.jai, loop_pm.jai, pass_loop_rotate.jai)
 
 - **LoopInfo** = `*Loop_Info` (heap, `Fn_Analyses.li`, `get_loop_info(f)` / `cached_loop_info(f)`; survives

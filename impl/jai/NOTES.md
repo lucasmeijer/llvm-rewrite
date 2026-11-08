@@ -243,12 +243,8 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - What fails loudly (and the remaining L1.loop-canonical checks): passes not ported (indvars,
   simple-loop-unswitch, loop-deletion, loop-unroll, loop-idiom, loop-reduce, `require<domfrontier>`), LoopRotate's noalias-scope cloning, key-instruction
   atom groups, DIArgList debug locations in remapping, `#dbg_assign`.
-- **x86 code-size costs are bounds, not values** (pass_loop_rotate.jai `tti_code_size_bounds`): calls, CF
-  instructions, free intrinsics and the TCC_Basic default are exact; scalar int (<= 64 bits)/ptr/float/double
-  arithmetic, compares, casts, selects, GEPs, loads and stores are assumed to cost 0..2 (read from X86TTIImpl /
-  BasicTTIImpl: legal = LT.first, custom = 2, code-size table entries 1); everything else is unbounded. LoopRotate
-  fails loudly when the bounds straddle `-rotation-max-header-size`. Replace this with the real cost model when
-  L1.analysis.cost-model is ported (the bound for the "simple" group is an assumption, not a port).
+- LoopRotate's header-size check uses the real cost model: CodeMetrics `num_insts` from
+  `tti_instruction_cost(TCK_CODE_SIZE)` (tti.jai); the old 0..2 cost bounds are gone.
 - `isSafeToSpeculativelyExecute` (pass_loop_simplify.jai) has no load support (isDereferenceableAndAlignedPointer)
   and no context instruction; its callers here never need either (makeLoopInvariant rejects loads anyway,
   shouldSpeculateInstrs only accepts a fixed opcode list). Use ValueTracking's when it lands.
@@ -521,3 +517,43 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
 `pm_int_pred_arg`, `const_fp_all`), `phi_remove_incoming_if` (removeIncomingValueIf), `ic_remove_trivially_empty_range`,
 `handle_guaranteed_{well_defined,non_poison}_ops` (function_ref Handle), `mvt_list`, the `gnu_stable_sort` comparator
 (std::stable_sort's Compare) and `Host_Fn1/2` (ConstantFoldFP's `double (*NativeFP)(double)`).
+
+## X86 TTI and print<cost-model> (L1.analysis.cost-model COMPLETE; DESIGN.md "Target cost model")
+
+- Files: `tti.jai` (TargetTransformInfo / CostModel.cpp: `Tti`, `tti_get(f)` per-function subtarget cache,
+  `tti_instruction_cost`, shuffle-mask predicates `svm_*`, cl::opts `-mcpu -mattr -cost-kind
+  -intrinsic-cost-strategy -predictable-branch-threshold -costmodel-reduxcost`, opt's `-mcpu/-mattr` function
+  attributes), `tti_x86.jai` (arith/cast/cmp-select/scalar memory/intrinsic tables, addressing modes),
+  `tti_x86_vec.jai` (shuffles, insert/extract, scalarization overhead, replication, vector memory ops, masked and
+  gather/scatter memory intrinsics, isLegal* queries), `tti_intrinsics.jai` (BasicTTI getIntrinsicInstrCost /
+  getTypeBasedIntrinsicInstrCost, reductions), `x86_lowering.jai` + generated `gen_x86_lowering.jai`
+  (TargetLoweringBase type legalization and operation actions), generated `gen_x86_tti.jai` (all cost tables,
+  CPUs and feature implications). Regenerate with `python3 impl/jai/gen/gen_x86_tti.py > ...` /
+  `gen_x86_lowering.py`; never hand-edit the gen files.
+- Cost is `s64` with `COST_INVALID`; always combine with `cost_add`/`cost_mul` (raw `*` on an Invalid cost
+  overflows silently).
+- Still failing loudly: VP intrinsics, strided/histogram/vector.match/active.lane.mask costs, cttz.elts on
+  scalable vectors, multiple-result vector libcalls (modf/sincos), MMRA combine with >1 tag per side,
+  getInterleavedMemoryOpCost / getIntImmCost* / getAddressComputationCost (no pass needs them yet).
+- Sweep `--passes 'print<cost-model>' --analysis`: 7750/7753 identical; the 3 left were stderr ordering/IR-reader
+  issues, fixed after the sweep (UpgradeDebugInfo warning, verifier message, metadata renumbering after stripping).
+
+## SimplifyCFG (L1.simplifycfg 288/289 ::opt, roundtrip 289/289)
+
+- Files: `pass_simplifycfg.jai` (options, cl::opts, value-equality folding), `pass_simplifycfg2.jai` (hoist,
+  sink, speculate, threading, two-entry phis, FoldBranchToCommonDest, conditional faulting),
+  `pass_simplifycfg3.jai` (simplifyOnce driver, tail merging, `simplifycfg_run`), `pass_simplifycfg_switch.jai`
+  (switch transforms, lookup tables, invokes, EH, stores), `scfg_util.jai` (ProfDataUtils, switch API, eager DTU,
+  attribute intersection, MMRA), `local_utils.jai` (Local.cpp helpers: ConstantFoldTerminator,
+  removeUnreachableBlocks, changeToCall, hoistAllInstructionsInto, `block_splice` with LLVM's debug-record splice
+  rules, `inst_insert_before_adopt`).
+- The only failing test is nomerge.ll (`-O1` pipeline). unreachable_assume.ll passes now that LibCallSimplifier
+  folds `abs`.
+- Sweeps: `--passes simplifycfg` 7753/7754 identical (1 loud: gc.relocate dereferenceability);
+  `--passes 'debugify,simplifycfg'` 0 differs / 0 bad-ir (2 loud).
+- Perf (tests/perf/scaling, `-passes=simplifycfg`): 3.3x-5x LLVM's time; growth k=1.35 (diamonds) / 1.24
+  (switch) vs LLVM's ~1.1. The quadratic `unique_successors` on big switches is fixed; what remains is spread over
+  hashing (md_kind_id string lookups, set_name uniquing, md_value_deleted on every erase), no single hotspot.
+- Debug-record rule to remember: an instruction inserted at `I->getIterator()` adopts `I`'s records
+  (`insert_at_position(.., head=false)`); `getFirstInsertionPt()`/`begin()` carry the head bit and insert in
+  front of them. Most simplifycfg debug-info mismatches were a wrong head bit.
