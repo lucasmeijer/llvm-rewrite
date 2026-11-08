@@ -247,7 +247,7 @@ Pass_Kind :: enum u8 {
     // loops (loop_info.jai, cycle_info.jai)
     PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
     // loop passes (loop_pm.jai)
-    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS;
+    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS; LOOP_DELETION;
     // ScalarEvolution (scev_print.jai)
     PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS;
     // TargetTransformInfo (tti.jai)
@@ -335,6 +335,7 @@ PASS_TABLE :: Pass_Info.[
     .{"licm", .LOOP, .LICM, false, .DOMTREE},
     .{"lnicm", .LOOP, .LNICM, false, .DOMTREE},   // a LoopNest pass
     .{"indvars", .LOOP, .INDVARS, false, .DOMTREE},
+    .{"loop-deletion", .LOOP, .LOOP_DELETION, false, .DOMTREE},
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
@@ -691,9 +692,10 @@ cl_opts :: () -> [] Cl_Opt {
 }
 
 // LastRunTracking and the L1.loop-misc passes (LoopDeletion, LoopIdiom, LoopLoadElim, LoopDistribute, ...)
-LM_CL_OPT_COUNT :: 1;
+LM_CL_OPT_COUNT :: 2;
 add_lm_cl_opts :: (list: [] Cl_Opt, base: s64) {
     list[base + 0] = .{"disable-last-run-tracking", .BOOL, *opts.disable_last_run_tracking, null, null};
+    list[base + 1] = .{"loop-deletion-enable-symbolic-execution", .BOOL, *ld_opts.enable_symbolic_execution, null, null};
 }
 
 // Parse `-name`, `--name`, `-name=value`. Returns false if the option isn't known.

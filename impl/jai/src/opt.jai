@@ -115,6 +115,7 @@
 #load "scev_expander.jai";
 #load "simplify_indvar.jai";
 #load "pass_indvars.jai";
+#load "pass_loop_deletion.jai";
 
 main :: () { opt_main(); }
 
