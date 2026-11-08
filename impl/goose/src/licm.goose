@@ -70,6 +70,7 @@ var lc_noacc_cap: i64 = 250;
 var lc_opt_counter: i64 = 0;
 var lc_too_many_acc: bool = false;
 var lc_is_sink: bool = true;
+var lc_tti_ready: bool = false;   // the TTI is set up on its first query (isFoldableInLoop of a GEP)
 
 fn lc_not_ported(what: const u8[:]) { fatal(str("LICM: ", what, " is not ported yet")); }
 
@@ -309,7 +310,7 @@ fn licm_pass_run(l: i32, allow_spec: bool, nest: bool) -> u32 {
     lc_fv = block_func(loop_header(l));
     lc_allow_spec = allow_spec;
     tli_cur_fn = lc_fv;
-    tti_init_function(lc_fv, globs[glob_of(lc_fv)].module);
+    lc_tti_ready = false;
     m2r_collect_records(lc_fv);
     let changed = licm_run_on_loop(l, nest);
     if !changed { return PA_ALL; }
@@ -886,6 +887,7 @@ fn lc_pointer_invalidated_by_block(bb: i32, mu: i32) -> bool {
 // isFoldableInLoop(I, CurLoop, TTI)
 fn lc_foldable_in_loop(i: i32, l: i32) -> bool {
     if iop(i) != OP_GEP { return false; }
+    if !lc_tti_ready { tti_init_function(lc_fv, globs[glob_of(lc_fv)].module); lc_tti_ready = true; }
     if tti_instruction_cost(i, TCK_SIZE_AND_LATENCY) != TCC_FREE { return false; }
     let bb = inst_parent(i);
     var u = vals[i].first_use;
