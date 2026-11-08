@@ -264,7 +264,7 @@ m2r_known_non_zero :: (v: Value_Id, ctx: Value_Id) -> bool {
 }
 
 // DominatorTree::dominates(const Instruction *Def, const Instruction *User)
-dt_dominates_inst :: (dt: *Dom_Tree, def: Value_Id, user: Value_Id) -> bool {
+m2r_dominates_inst :: (dt: *Dom_Tree, def: Value_Id, user: Value_Id) -> bool {
     ub := inst(user).parent;
     db := inst(def).parent;
     if !dt_is_reachable_from_entry(dt, ub) return true;
@@ -318,7 +318,7 @@ m2r_simplify_phi :: (dt: *Dom_Tree, pn: Value_Id) -> Value_Id {
     }
     if common == NONE return ifx has_undef then const_undef(vtype(pn)) else const_poison(vtype(pn));
     if has_poison || has_undef {
-        if is_inst(common) && !dt_dominates_inst(dt, common, pn) return NONE;
+        if is_inst(common) && !m2r_dominates_inst(dt, common, pn) return NONE;
         if has_undef && !m2r_not_poison(common) return NONE;
     }
     return common;

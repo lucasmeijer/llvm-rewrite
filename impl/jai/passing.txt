@@ -4834,6 +4834,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/cast-vector.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/cast-vector.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/cast.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/cast.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/convert-from-fp16.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/convert-from-fp16.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/copysign.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/cttz-elts.ll::roundtrip
