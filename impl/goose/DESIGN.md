@@ -487,7 +487,11 @@ max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
 | `ic_combining.goose` | the rest of InstructionCombining.cpp's visitors: GEP (+ visitGEPOfGEP, foldGEPOfPhi), visitAllocSite/visitFree, switch, extractvalue, landingpad, freeze, foldVectorBinop |
 | `ic_vectorops.goose` | InstCombineVectorOps.cpp, whole (extractelement, insertelement, insertvalue, shufflevector), the ShuffleVectorInst mask predicates |
 | `loads.goose`, `memorybuiltins.goose` (global) | Loads.cpp (isSafeToLoadUnconditionally, FindAvailableLoadedValue), MemoryBuiltins.cpp (allocation data/families, getAllocSize, ObjectSizeOffsetVisitor, lowerObjectSizeCall) |
-| `ic_visit_misc.goose` | calls (`visitCallInst`/`visitCallBase` for ordinary functions, `llvm.assume`), and the fail-loudly fallback for every visitor that isn't ported |
+| `ic_calls.goose` | InstCombineCalls.cpp: visitCallInst (all intrinsics), visitCallBase, fence/invoke/callbr/va_end |
+| `ic_casts2.goose` | InstCombineCasts.cpp second half: FP casts, pointer casts, bitcast, addrspacecast |
+| `ic_x86.goose` | X86InstCombineIntrinsic.cpp (the SimplifyDemanded hooks) |
+| `simplify_libcalls.goose`, `build_libcalls.goose` (global) | LibCallSimplifier; BuildLibCalls + the inferattrs pass |
+| `ic_visit_misc.goose` | small call helpers (setDoesNotThrow, param attributes, CreateAssumption) and the fail-loudly fallback for every visitor that isn't ported |
 | `domcond.goose` (global) | DomConditionCache; ValueTracking consults it (knownbits, pow2, non-equal, fpclass) while `dc_active` |
 | `overflow.goose` (global) | computeOverflowFor*, haveNoCommonBitsSet |
 

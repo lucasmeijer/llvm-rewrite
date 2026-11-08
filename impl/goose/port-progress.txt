@@ -36,12 +36,12 @@ lib/IR/AsmWriter.cpp 0.75  # manual: own printer structure, table-driven DI node
 lib/Transforms/InstCombine/InstructionCombining.cpp 0.85
 lib/Support/APFloat.cpp 0.25
 lib/Transforms/Scalar/SROA.cpp 0.85
-lib/Transforms/InstCombine/InstCombineCalls.cpp 0.1
+lib/Transforms/InstCombine/InstCombineCalls.cpp 0.9  # manual: all of visitCallInst/visitCallBase; left: ptrauth callee folds, trampolines, gc.statepoint relocates, optimizeModularFormat, Hexagon vandvrt, dynamic objectsize (heuristic 0.98)
 lib/Analysis/ConstantFolding.cpp 0.8
 lib/IR/Constants.cpp 0.55
 lib/Transforms/InstCombine/InstCombineSimplifyDemanded.cpp 0.95
 lib/Transforms/InstCombine/InstCombineAddSub.cpp 0.95
-lib/Transforms/InstCombine/InstCombineCasts.cpp 0.45
+lib/Transforms/InstCombine/InstCombineCasts.cpp 0.85  # manual: all visitors; left foldVec(Ext)TruncToExtElt, mergeUndefsWith cases, trunc of clamp selects (heuristic 0.9)
 lib/Support/APInt.cpp 0.5
 lib/IR/DebugInfoMetadata.cpp 0.3
 lib/IR/Attributes.cpp 0.2
@@ -54,7 +54,7 @@ lib/IR/Metadata.cpp 0.45
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.85
 lib/Transforms/Scalar/EarlyCSE.cpp 0.95
-lib/Analysis/TargetLibraryInfo.cpp 0.25
+lib/Analysis/TargetLibraryInfo.cpp 0.3  # manual: Linux/generic availability, getLibFunc, isValidProtoForLibFunc incl. the manual prototypes; no Darwin/Windows/other OS tables, no vector libraries
 lib/IR/Intrinsics.cpp 0.7
 lib/IR/IRBuilder.cpp 0.15
 lib/AsmParser/LLLexer.cpp 0.7  # manual: own lexer structure, lexes all IR tokens (heuristic 0.19)
@@ -111,3 +111,7 @@ lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
 lib/IR/EHPersonalities.cpp 0.5
 lib/Transforms/Utils/Debugify.cpp 0.45  # manual: synthetic mode whole (debugify, check-debugify, -enable-debugify); no original-debuginfo mode, -debugify-each, stats export
+lib/Target/X86/X86InstCombineIntrinsic.cpp 0.1  # manual: simplifyDemandedUseBits/VectorEltsIntrinsic only; instCombineIntrinsic fails loudly (heuristic 0.25)
+lib/Transforms/Utils/SimplifyLibCalls.cpp 0.35  # manual: optimizeCall dispatch, str/mem len/cmp/chr, printf/puts, sqrt/exp2/fmin/fmax/cabs/double->float, int calls; the rest fails loudly per LibFunc (heuristic 0.75 counts the fail-loud names)
+lib/Transforms/Utils/BuildLibCalls.cpp 0.6  # manual: inferNonMandatoryLibFuncAttrs whole (generated), getOrInsertLibFunc, isLibFuncEmittable, hasFloatFn, a third of the emit* helpers (heuristic 0.47)
+lib/Transforms/IPO/InferFunctionAttrs.cpp 1

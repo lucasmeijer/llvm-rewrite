@@ -627,3 +627,34 @@ What they were:
 - bdce (freeze-signedness-missed.ll) was the same DeadUses clobbering.
 - After rebasing onto salvageDebugInfo (salvage.goose), `instsimplify` showed 1 new `differs`: zext salvaging
   wrote `DW_ATE_unsigned_char` (8) for `DW_ATE_unsigned` (7). Fixed.
+
+## InstCombine calls, casts, libcalls (ic_calls, ic_casts2, ic_x86, simplify_libcalls, build_libcalls)
+
+- ic_calls.goose: visitCallInst (generic prologue, mem intrinsics, the whole intrinsic switch, the post-switch
+  select/phi/shuffle/reverse/recurrence folds), visitCallBase (alloc-site annotation, nonnull args,
+  transformConstExprCastCall, convergent, mismatched calling conventions, null/undef callees, inline asm,
+  returned args, callee_type/kcfi, alloc sites), visitFence/Invoke/CallBr/VAEnd. Builder helpers with an FMFSource are
+  `icx_*` (CreateUnary/BinaryIntrinsic declare the intrinsic *before* folding; CreateIntrinsic does not).
+  Still loud: ptrauth callee folds, trampolines, gc.statepoint relocate folding, optimizeModularFormat, Hexagon.
+- ic_casts2.goose: FP casts, inttoptr/ptrtoint/ptrtoaddr, bitcast, addrspacecast (second half of InstCombineCasts.cpp).
+  goose keeps FP splats as data vectors: LLVM's `dyn_cast<ConstantFP>` of a vector splat is `icx_cfp_scalar`.
+- ic_x86.goose: only X86TTIImpl::simplifyDemandedUseBitsIntrinsic / simplifyDemandedVectorEltsIntrinsic;
+  X86TTIImpl::instCombineIntrinsic fails loudly (only ~7 sweep functions reach it once SDVE is done).
+- simplify_libcalls.goose: LibCallSimplifier::optimizeCall with both dispatchers in LLVM order; unported
+  optimizers fail loudly per LibFunc (`lcs_np`), so any libcall without an optimizer in the switch simply returns
+  nullptr as in LLVM. Ported: strlen/strnlen/wcslen, strchr/strrchr/strcmp/strncmp, memchr, memcmp/bcmp,
+  memcpy/memmove/memset (calls and intrinsics), printf, puts, exit, abs/ffs/fls/isdigit/isascii/toascii, sqrt,
+  exp2, fmin/fmax, cabs, the symmetric trig calls, double->float shrinking, strto* annotation. Also ValueTracking's
+  getConstantDataArrayInfo / getConstantStringInfo / GetStringLength (`get_string_length`, used by memorybuiltins).
+  The builder's default operand bundles are the simplified call's (`lcs_ci`).
+- build_libcalls.goose: inferNonMandatoryLibFuncAttrs is the statement program of gen_libfunc_attrs.goose
+  (`tools/gen_libfunc_attrs.py` parses BuildLibCalls.cpp's switch: fallthroughs, `return Changed`, ternary
+  families); getOrInsertLibFunc, isLibFuncEmittable, hasFloatFn, emitLibCall + the emit helpers the ported
+  optimizers need; the `inferattrs` module pass (InferFunctionAttrs.cpp) + inferAttributesFromOthers.
+- TLI: still only Linux/generic triples (Darwin/Windows/... fail loudly in tli_init); isValidProtoForLibFunc's
+  manual prototypes (cabs, sincospi_stret, __size_returning_new) are ported. LLVM 23's FreeFnData has no plain
+  `free`: isLibFreeFunction falls back to the callee's allockind("free") (`blc_is_lib_free_function`,
+  used by getFreedOperand in local.goose).
+- Sweep (`sweep --impl goose --passes instcombine --per-function`): 28401 identical / 1 differs before this work,
+  65738 identical / 0 differs after. Biggest loud groups left in this area: optimizePow/optimizeLog,
+  FortifiedLibCallSimplifier, memrchr, strtol/atoi, trig inversion pairs.

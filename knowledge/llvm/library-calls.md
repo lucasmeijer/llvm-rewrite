@@ -61,3 +61,18 @@ on the imported tests named).
 - `inferattrs` visits every declaration without `optnone`; `inferNonMandatoryLibFuncAttrs` unless the function is
   `nobuiltin`, then always `inferAttributesFromOthers` (readnone+!convergent -> nosync, readonly -> nofree,
   willreturn -> mustprogress). Any change returns PreservedAnalyses::none() (annotate.ll, BasicAA/libfuncs.ll).
+
+## Facts found porting LibCallSimplifier/BuildLibCalls for goose (verified with opt 23.1.5)
+
+- **Plain `free` is not a free function to TLI-based code**: LLVM 23's FreeFnData lists only operator delete
+  variants, so isLibFreeFunction falls back to the callee's `allockind("free")`. `call void @free(ptr null)`
+  survives `instcombine` unless the declaration has `allockind("free")` (then visitFree erases it); without it the
+  call goes through visitCallBase and gets `nonnull` arguments.
+- getConstantDataArrayInfo needs GlobalVariable::hasDefinitiveInitializer: `weak_odr`/`linkonce_odr` constants
+  *are* definitive (only weak/linkonce/common/extern_weak and the SemanticInterposition module flag on non-dso_local
+  globals are interposable) — `strcmp(@weak_odr_str, "y")` folds (InstCombine/weak-symbols.ll).
+- inferNonMandatoryLibFuncAttrs ends with `setDoesNotFreeMemory` unless isLibFreeFunction or the declaration's
+  allockind has Realloc; `inferattrs` then adds nosync (readnone & !convergent), nofree (readonly), mustprogress
+  (willreturn) to every declaration (inferAttributesFromOthers), also non-libfuncs.
+- canTransformToMemCmp: strcmp builds a full SimplifyQuery (DT, AC, CxtI) for isDereferenceablePointer, strncmp only
+  `SimplifyQuery(DL)` (no context, no assumptions); strncmp/memchr's isKnownNonZero(Size, DL) has no context either.

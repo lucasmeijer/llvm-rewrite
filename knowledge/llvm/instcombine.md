@@ -304,3 +304,13 @@ Verified by the goose port (per-function sweep of the imported InstCombine tests
   `{float, float}` constants, simplify-demanded-fpclass-aggregates.ll).
 - FAddCombine (`reassoc nsz` fadd/fsub, scalars only) gives the instructions it creates the original instruction's
   fast-math flags and debug location after the Builder created them with its own (empty) flags.
+- **visitCallInst order**: simplifyCall (only if used) → getFreedOperand/visitFree (returns its result, never
+  reaches visitCallBase) → caller-nounwind inference (returns) → non-intrinsics go to visitCallBase; intrinsics:
+  mem-intrinsic prologue, fixed-vector SimplifyDemandedVectorElts, commutative symmetric pairs /
+  canonicalizeConstantArg0ToArg1, the switch, then fold into select/phi, shuffled/reversed operands, idempotent
+  recurrences, and finally visitCallBase too.
+- `IRBuilder::CreateUnaryIntrinsic/CreateBinaryIntrinsic` call getOrInsertDeclaration before trying to fold, so a
+  folded call still leaves its `declare` behind; `CreateIntrinsic(ID, Types, ...)`/`(RetTy, ID, ...)` fold first.
+- X86 intrinsics reach X86TTIImpl only with an x86 module triple; without a triple (NoTTIImpl) nothing happens.
+  SimplifyDemandedVectorElts' x86 hook (scalar ss/sd ops, pack, pmadd, pshufb/vpermilvar operand 1, sse4a) covers far
+  more sweep functions than instCombineIntrinsic itself.
