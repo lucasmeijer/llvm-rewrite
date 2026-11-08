@@ -234,7 +234,7 @@ ic_simplify_alloca_array_size :: (ai: Value_Id) -> Value_Id {
         new := icb_alloca(nt, inst(ai).addrspace, name_ref(vname(ai)));
         inst(new).align = inst(ai).align;
         inst(new).flags = (inst(new).flags & ~cast(u32) F_INALLOCA) | (inst(ai).flags & cast(u32) F_INALLOCA);
-        // replaceAllDbgUsesWith(AI, *New, *New, DT): same type, every debug use is dominated by New
+        ic_replace_all_dbg_uses_with(ai, new, new);
         return ic_replace_inst_uses_with(ai, new);
     }
     if vkind(n) == .C_UNDEF || vkind(n) == .C_POISON return ic_replace_inst_uses_with(ai, const_poison(vtype(ai)));

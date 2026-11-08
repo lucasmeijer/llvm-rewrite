@@ -759,12 +759,92 @@ ic_try_to_sink :: (i: Value_Id, dest: Value_Id) -> bool {
         }
         u = nu;
     }
-    users: [..] u32; users.allocator = temp;
-    find_dbg_users(ic.f, i, *users);
-    if users.count fatal("instcombine: sinking an instruction with debug users is not supported yet");
     pos := block_first_insertion_pt(dest);
     ic_move_inst(i, dest, pos, true);
+    users: [..] u32; users.allocator = temp;
+    find_dbg_users(ic.f, i, *users);
+    if users.count ic_try_to_sink_inst_dbg_variable_records(i, pos, src_block, dest, users);
     return true;
+}
+
+// tryToSinkInstructionDbgVariableRecords
+ic_try_to_sink_inst_dbg_variable_records :: (i: Value_Id, pos: Value_Id, src_block: Value_Id, dest: Value_Id, users: [] u32) {
+    to_salvage: [..] u32; to_salvage.allocator = temp;
+    for users if inst_block(dbgr(it).owner) != dest array_add(*to_salvage, it);
+    to_sink: [..] u32; to_sink.allocator = temp;
+    for to_salvage if inst_block(dbgr(it).owner) == src_block array_add(*to_sink, it);
+    // stable_sort by Order(A, B) = B's instruction comes before A's (later instructions first)
+    for k: 1..to_sink.count-1 {
+        x := to_sink[k];
+        j := k - 1;
+        while j >= 0 && dbgr(to_sink[j]).owner != dbgr(x).owner && comes_before(dbgr(to_sink[j]).owner, dbgr(x).owner) {
+            to_sink[j + 1] = to_sink[j]; j -= 1;
+        }
+        to_sink[j + 1] = x;
+    }
+    // DebugVariable(Var, fragment of Expr, InlinedAt)
+    Dbg_Var_Key :: struct { var: Md_Id; has_frag: bool; foff: u64; fsize: u64; inlined: Md_Id; }
+    key_of :: (r: u32) -> Dbg_Var_Key {
+        k: Dbg_Var_Key;
+        k.var = dbgr(r).var;
+        k.has_frag, k.foff, k.fsize = diexpr_fragment(dbgr(r).expr);
+        if !k.has_frag { k.foff = 0; k.fsize = 0; }
+        k.inlined = diloc_inlined_at(dbgr(r).dbg);
+        return k;
+    }
+    same :: (a: Dbg_Var_Key, b: Dbg_Var_Key) -> bool {
+        return a.var == b.var && a.has_frag == b.has_frag && a.foff == b.foff && a.fsize == b.fsize && a.inlined == b.inlined;
+    }
+    // FilterOutMap: (instruction, variable) pairs with several assignments -> the last one on that instruction
+    Filter :: struct { owner: Value_Id; key: Dbg_Var_Key; last: u32; }
+    filters: [..] Filter; filters.allocator = temp;
+    if to_sink.count > 1 {
+        for a, ai: to_sink {
+            ka := key_of(a);
+            count := 0;
+            for b: to_sink if dbgr(b).owner == dbgr(a).owner && same(key_of(b), ka) count += 1;
+            if count <= 1 continue;
+            dup := false;
+            for filters if it.owner == dbgr(a).owner && same(it.key, ka) { dup = true; break; }
+            if dup continue;
+            // the last record of that variable attached to the instruction (all records, reverse order)
+            last: u32 = 0;
+            x := inst(dbgr(a).owner).records;
+            while x != 0 {
+                if dbgr(x).kind != .LABEL && same(key_of(x), ka) last = x;
+                x = dbgr(x).next;
+            }
+            array_add(*filters, .{dbgr(a).owner, ka, last});
+        }
+    }
+    clones: [..] u32; clones.allocator = temp;
+    sunk: [..] Dbg_Var_Key; sunk.allocator = temp;
+    for r: to_sink {
+        if dbgr(r).kind == .DECLARE continue;
+        k := key_of(r);
+        filtered := false;
+        for filters if it.owner == dbgr(r).owner && same(it.key, k) && it.last != r { filtered = true; break; }
+        if filtered continue;
+        seen := false;
+        for sunk if same(it, k) { seen = true; break; }
+        if seen continue;
+        array_add(*sunk, k);
+        if dbgr(r).kind == .ASSIGN continue;
+        c := dbgr(r).*;
+        c.next = 0; c.owner = NONE;
+        array_add(*ir.dbg_records, c);
+        array_add(*clones, cast(u32) ir.dbg_records.count);
+    }
+    if clones.count == 0 return;
+    salvage_debug_info_for_dbg_values(i, to_salvage);
+    if pos == NONE fatal("instcombine: sinking debug records to the end of a block is not supported yet");
+    for c: clones {
+        dbgr(c).owner = pos;
+        dbgr(c).next = inst(pos).records;
+        inst(pos).records = c;
+        dbgr_restamp(c);
+        if dbg_index.fn != NONE dbgr_index_record(c);
+    }
 }
 // Instruction::moveBefore(BB, It): the moved instruction's debug records stay behind (on the next instruction)
 ic_move_inst :: (i: Value_Id, bb: Value_Id, pos: Value_Id, head: bool) {

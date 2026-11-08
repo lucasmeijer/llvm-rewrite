@@ -62,21 +62,4 @@ recursively_delete_trivially_dead_instructions :: (dead_in: [..] Value_Id) {
         erase_inst_with_metadata(i);
     }
 }
-// salvageDebugInfo (llvm/lib/Transforms/Utils/Local.cpp). Instructions salvageDebugInfoImpl can't describe (calls,
-// loads, phis, ...) get their debug users' locations killed (poison), which erase_inst_with_metadata does.
-// Rewriting the DIExpression for casts / GEPs / binary operators / icmps (appendOpsToArg, foldConstantMath) is
-// not ported: fail loudly when one of those has debug users.
-salvage_debug_info :: (i: Value_Id) {
-    users: [..] u32; users.allocator = temp;
-    find_dbg_users(inst_fn(i), i, *users);
-    if users.count == 0 return;
-    o := inst_op(i);
-    salvageable := is_cast_op(o) || o == .GEP || o == .ICMP ||
-                   o == .ADD || o == .SUB || o == .MUL || o == .SDIV || o == .SREM || o == .OR || o == .AND || o == .XOR ||
-                   o == .SHL || o == .LSHR || o == .ASHR;
-    if salvageable fatal("salvageDebugInfo for a deleted '%' with debug users is not supported yet", opcode_name(o));
-    for users {
-        r := dbgr(it);
-        if r.loc != NONE && ir.mds[r.loc].kind != .VALUE fatal("killing a DIArgList debug location (salvageDebugInfo) is not supported yet");
-    }
-}
+// salvage_debug_info (salvageDebugInfo) is in salvage_debug.jai

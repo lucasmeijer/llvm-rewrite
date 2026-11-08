@@ -94,6 +94,7 @@
 #load "pass_simplifycfg3.jai";
 #load "pass_simplifycfg_switch.jai";
 #load "pass_debugify.jai";
+#load "salvage_debug.jai";
 
 main :: () { opt_main(); }
 

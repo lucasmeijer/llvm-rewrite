@@ -757,9 +757,7 @@ ic_fold_op_into_phi :: (i: Value_Id, pn: Value_Id, allow_multiple_uses := false)
         one_use = true;
     }
     if one_use {
-        users: [..] u32; users.allocator = temp;
-        find_dbg_users(ic.f, pn, *users);
-        if users.count fatal("instcombine: replaceAllDbgUsesWith in foldOpIntoPhi is not supported yet");
+        ic_replace_all_dbg_uses_with(pn, np, pn);
     }
     return ic_replace_inst_uses_with(i, np);
 }

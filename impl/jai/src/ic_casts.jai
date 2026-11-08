@@ -83,12 +83,10 @@ ic_vscale_range_max :: (f: Value_Id) -> (bool, u64) {
     if mx == 0 return false, 0;
     return true, mx;
 }
-// replaceAllDbgUsesWith(From, To, DomPoint, DT): only the no-debug-users case is supported
-ic_replace_all_dbg_uses_with :: (from: Value_Id, what: string) {
+// replaceAllDbgUsesWith(From, To, DomPoint, DT) with InstCombine's DominatorTree
+ic_replace_all_dbg_uses_with :: (from: Value_Id, to: Value_Id, dom_point: Value_Id) {
     if !is_inst(from) return;
-    users: [..] u32; users.allocator = temp;
-    find_dbg_users(ic.f, from, *users);
-    if users.count fatal("instcombine: replaceAllDbgUsesWith (%) is not supported yet", what);
+    replace_all_dbg_uses_with(from, to, dom_point, ic.dt);
 }
 
 // ---------------------------------------------------------------- EvaluateInDifferentType
@@ -183,7 +181,7 @@ ic_common_cast_transforms :: (i: Value_Id) -> Value_Id {
         nopc := ic_is_eliminable_cast_pair(src, i);
         if nopc != .NONE_OP {
             res := create_cast(nopc, op(src, 0), ty);
-            if has_one_use(src) ic_replace_all_dbg_uses_with(src, "an eliminated cast");
+            if has_one_use(src) ic_replace_all_dbg_uses_with(src, res, i);
             return res;
         }
     }
@@ -194,7 +192,7 @@ ic_common_cast_transforms :: (i: Value_Id) -> Value_Id {
             if opc != .BITCAST || okb {
                 nv := ic_fold_op_into_select(i, src);
                 if nv != NONE {
-                    ic_replace_all_dbg_uses_with(src, "a select folded into a cast");
+                    ic_replace_all_dbg_uses_with(src, nv, i);
                     return nv;
                 }
             }
@@ -930,7 +928,7 @@ ic_visit_zext :: (zext: Value_Id) -> Value_Id {
     if ic_should_change_type(src_ty, dest_ty) &&
        ic_can_evaluate_zextd(src, dest_ty, *bits_to_clear, zext) {
         res := ic_evaluate_in_different_type(src, dest_ty, false);
-        if is_inst(src) && has_one_use(src) ic_replace_all_dbg_uses_with(src, "zext promotion");
+        if is_inst(src) && has_one_use(src) ic_replace_all_dbg_uses_with(src, res, zext);
         src_bits_kept := type_bits(scalar_type(src_ty)) - bits_to_clear;
         dest_bit_size := type_bits(scalar_type(dest_ty));
         if ic_masked_value_is_zero(res, ap_high_bits_set(dest_bit_size, dest_bit_size - src_bits_kept), zext)

@@ -28,17 +28,7 @@ ssa_rewrite_use :: (s: *Ssa_Updater, u: Use_Id) {
     use_set(u, v);
 }
 
-// DbgVariableRecord::replaceVariableLocationOp(OldValue, NewValue)
-dbgr_replace_variable_location_op :: (r: u32, old: Value_Id, new: Value_Id) {
-    rec := dbgr(r);
-    if rec.loc != NONE && ir.mds[rec.loc].kind == .VALUE {
-        if ir.mds[rec.loc].value != old return;
-        rec.loc = md_value(new);
-        if dbg_index.fn != NONE dbgr_index_add(new, r);
-        return;
-    }
-    fatal("replaceVariableLocationOp on a DIArgList location is not implemented yet");
-}
+// dbgr_replace_variable_location_op (DbgVariableRecord::replaceVariableLocationOp) is in salvage_debug.jai
 
 // formLCSSAForInstructionsImpl (PHIsToRemove = InsertedPHIs = nullptr)
 form_lcssa_for_instructions :: (worklist: *[..] Value_Id, dt: *Dom_Tree, li: *Loop_Info, cache: *Lcssa_Exit_Cache) -> bool {

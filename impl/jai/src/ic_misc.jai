@@ -172,9 +172,15 @@ ic_freely_invert_all_users_of :: (v: Value_Id, ignored: Value_Id = NONE) {
         }
         u = nu;
     }
+    // update pre-existing debug value uses (findDbgValues)
     users: [..] u32; users.allocator = temp;
-    find_dbg_users(ic.f, v, *users);
-    if users.count fatal("instcombine: freelyInvertAllUsersOf with debug users (DW_OP_not) is not supported yet");
+    find_dbg_users(ic.f, v, *users, values_and_assigns_only = true);
+    for r: users {
+        locs: [..] Value_Id; locs.allocator = temp;
+        dbgr_location_ops(r, *locs);
+        DW_OP_NOT :: u64.[0x20];
+        for locs if it == v dbgr(r).expr = diexpr_append_ops_to_arg(dbgr(r).expr, DW_OP_NOT, cast(u64) it_index, false);
+    }
 }
 
 // CallBase::addFnAttr(Kind)
