@@ -4258,6 +4258,7 @@ tests/imported/llvm/Transforms/InstCombine/bswap-known-bits.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bswap-known-bits.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/bswap.ll::opt
 tests/imported/llvm/Transforms/InstCombine/bswap.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/builtin-dynamic-object-size.ll::opt
 tests/imported/llvm/Transforms/InstCombine/builtin-dynamic-object-size.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/builtin-object-size-custom-dl.ll::opt
 tests/imported/llvm/Transforms/InstCombine/builtin-object-size-custom-dl.ll::roundtrip
