@@ -2,6 +2,7 @@
 // (isInstructionTriviallyDead, wouldInstructionBeTriviallyDead[OnUnusedPaths]) and the MemoryBuiltins.cpp /
 // ConstantFolding.cpp helpers they use (isRemovableAlloc, getFreedOperand, isMathLibCallNoop).
 import std;
+import vt;
 import ir;
 import irutil;
 import calls;
@@ -42,7 +43,7 @@ var local_have_tli: bool = true;
 
 fn is_alloc_like_fn(iv: i32) -> bool {
     let f = mb_called_function(iv);
-    if f >= 0 && local_have_tli && tli_alloc_like(f) { return true; }
+    if f >= 0 && local_have_tli && !sq_no_tli && tli_alloc_like(f) { return true; }
     return (call_alloc_kind(iv) & AFK_ALLOC) != 0;
 }
 

@@ -141,6 +141,10 @@ recursive fn handle_other_cmp_sel(tcmp: i32, fcmp: i32, cond: i32, q: SQ, mr: i6
 
 fn value_dominates_phi(v: i32, p: i32) -> bool {
     if !is_inst(v) { return true; }
+    if sq_no_dt {
+        let b = inst_parent(v);
+        return b == func_entry(inst_func(v)) && iop(v) != OP_INVOKE && iop(v) != OP_CALLBR;
+    }
     return dom_inst(v, p);
 }
 

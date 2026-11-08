@@ -56,6 +56,12 @@ fn vt_check_assumes(v: i32) {
 // ---------------------------------------------------------------------------------------------
 // Dominance of instructions (DominatorTree::dominates overloads)
 
+// SimplifyQuery members that may be null in LLVM (Q.DT / Q.AC / Q.TLI). Callers that build a query without them
+// (e.g. SCCP: SimplifyQuery(DL, &I)) set these around the call; every place LLVM tests the member honors them.
+var sq_no_dt: bool = false;
+var sq_no_ac: bool = false;
+var sq_no_tli: bool = false;
+
 fn vt_fn_dt(fv: i32) { dt_get(fv, DT_DOM); }
 fn block_reachable(bv: i32) -> bool { vt_fn_dt(block_func(bv)); return dt_has_node(DT_DOM, bv); }
 fn dom_block(a: i32, b: i32) -> bool { vt_fn_dt(block_func(a)); return dt_dominates_block(DT_DOM, a, b); }
@@ -500,7 +506,7 @@ recursive fn ikz_gep(g: i32, depth0: i64) -> bool {
 // isKnownNonNullFromDominatingCondition
 recursive fn nonnull_from_dominating_condition(v: i32) -> bool {
     let cx = kb_cxt;
-    if cx < 0 { return false; }
+    if cx < 0 || sq_no_dt { return false; }
     if !has_use_list(v) { return false; }
     let is_ptr = ty_kind(vals[v].ty) == TK_PTR;
     var nexp = 0;

@@ -614,7 +614,7 @@ recursive fn cf_fold_call(c: i32, f: i32, mark: i64, n: i64, allow_nondet: bool)
     if vals[f].name < 0 { return -1; }
     let id = func_iid(f) as i32;
     if id == 0 {
-        if tli_get_libfunc(f) < 0 { return -1; }
+        if sq_no_tli || tli_get_libfunc(f) < 0 { return -1; }
     }
     let rty = ty_fn_ret(globs[glob_of(f)].vty);
     if !allow_nondet && is_fp_or_fp_vec(rty) { return -1; }

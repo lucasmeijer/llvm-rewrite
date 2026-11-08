@@ -167,7 +167,7 @@ fn ac_rauw(old: i32, nv: i32) {
 
 // The current function's assumption cache (context function), -1 when there is no context
 fn ac_ready() -> bool {
-    if kb_cxt < 0 { return false; }
+    if kb_cxt < 0 || sq_no_ac { return false; }
     ac_build(inst_func(kb_cxt));
     return ac_has_any;
 }
@@ -212,6 +212,11 @@ fn valid_assume_for_context(inv: i32, cx: i32) -> bool {
             x = inst_next(x);
         }
         return !is_ephemeral_value_of(inv, cx);
+    }
+    if sq_no_dt {
+        // no DT: trivially dominating cases only
+        let ib = inst_parent(inv);
+        return ib == single_pred(inst_parent(cx)) || ib == func_entry(inst_func(inv));
     }
     return dom_inst(inv, cx);
 }

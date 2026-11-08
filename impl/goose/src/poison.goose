@@ -301,7 +301,7 @@ recursive fn guaranteed_not_undef_or_poison(v: i32, cxt: i32, depth: i64, kind: 
            inst_get_md(v, md_kind_id("dereferenceable_or_null")) >= 0 { return true; }
     }
     if program_undefined_if_undef_or_poison(v, !inc_undef) { return true; }
-    if cxt < 0 { return false; }
+    if cxt < 0 || sq_no_dt { return false; }
     let cbb = inst_parent(cxt);
     if cbb < 0 { return false; }
     if !block_reachable(cbb) { return false; }
