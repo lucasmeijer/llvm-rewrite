@@ -85,15 +85,31 @@ li_has_reachable_loop_entry_to_header :: (li: *Loop_Info, l: Loop_Id, dt: *Dom_T
     return false;
 }
 
-// UpdateAnalysisInformation (the DT path; no DomTreeUpdater). Returns HasLoopExit.
+// UpdateAnalysisInformation. Returns HasLoopExit. use_dtu: the caller passed a DomTreeUpdater for `dt` instead of
+// the tree (the Insert/Delete updates are applied; a lazy updater is flushed by the getDomTree() below, before any
+// use of the tree), else DT->splitBlock.
 update_analysis_information :: (old_bb: Value_Id, new_bb: Value_Id, preds: [] Value_Id, dt: *Dom_Tree, li: *Loop_Info,
-                                 mssau: *Mssa_Updater, preserve_lcssa: bool) -> bool {
+                                 mssau: *Mssa_Updater, preserve_lcssa: bool, use_dtu := false) -> bool {
     has_loop_exit := false;
-    if dt {
+    pending: [..] Dom_Update; pending.allocator = temp;
+    if dt && use_dtu {
+        if new_bb == fn_entry(block_fn(new_bb)) fatal("SplitBlockPredecessors of the entry block (DTU->recalculate) is not implemented yet");
+        array_add(*pending, .{true, new_bb, old_bb});
+        uniq: [..] Value_Id; uniq.allocator = temp;
+        for p: preds {
+            dup := false;
+            for uniq if it == p { dup = true; break; }
+            if dup continue;
+            array_add(*uniq, p);
+            array_add(*pending, .{true, p, new_bb});
+            array_add(*pending, .{false, p, old_bb});
+        }
+    } else if dt {
         if old_bb == dt.nodes[dt.root_node].block fatal("SplitBlockPredecessors of the entry block (DT->setNewRoot) is not implemented yet");
         dt_split_block(dt, new_bb);
     }
     if mssau mssau_wire_old_predecessors_to_new_immediate_predecessor(mssau, old_bb, new_bb, preds);
+    if pending.count dt_apply_updates(dt, pending);   // DTU->getDomTree() (eager or lazy: applied here)
     if !li return has_loop_exit;
     assert(dt != null, "DT should be available to update LoopInfo!");
     l := li_loop_for(li, old_bb);
@@ -174,9 +190,10 @@ update_phi_nodes :: (orig_bb: Value_Id, new_bb: Value_Id, preds: [] Value_Id, bi
 
 // SplitBlockPredecessors(BB, Preds, Suffix, DT, LI, MSSAU, PreserveLCSSA)
 split_block_predecessors :: (bb: Value_Id, preds: [] Value_Id, suffix: string, dt: *Dom_Tree, li: *Loop_Info,
-                              mssau: *Mssa_Updater = null, preserve_lcssa := false) -> Value_Id {
+                              mssau: *Mssa_Updater = null, preserve_lcssa := false, use_dtu := false) -> Value_Id {
     if !block_can_split_predecessors(bb) return NONE;
     if block_is_landing_pad(bb) {
+        if use_dtu fatal("SplitLandingPadPredecessors with a DomTreeUpdater is not implemented yet");
         nbs: [..] Value_Id; nbs.allocator = temp;
         split_landing_pad_predecessors(bb, preds, suffix, tprint("%.split-lp", suffix), *nbs, dt, li, mssau, preserve_lcssa);
         return nbs[0];
@@ -208,7 +225,7 @@ split_block_predecessors :: (bb: Value_Id, preds: [] Value_Id, suffix: string, d
             phi_add_incoming(it, const_poison(vtype(it)), nb);
         }
     }
-    has_loop_exit := update_analysis_information(bb, nb, preds, dt, li, mssau, preserve_lcssa);
+    has_loop_exit := update_analysis_information(bb, nb, preds, dt, li, mssau, preserve_lcssa, use_dtu);
     if preds.count update_phi_nodes(bb, nb, preds, bi, has_loop_exit);
     if old_latch != NONE {
         new_latch := li_loop_latch(li, l);

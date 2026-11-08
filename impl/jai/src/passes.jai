@@ -190,7 +190,7 @@ Pass_Kind :: enum u8 {
     // loops (loop_info.jai, cycle_info.jai)
     PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
     // loop passes (loop_pm.jai)
-    NO_OP_LOOP; LOOP_ROTATE;
+    NO_OP_LOOP; LOOP_ROTATE; LICM;
     // ScalarEvolution (scev_print.jai)
     PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS;
     // TargetTransformInfo (tti.jai)
@@ -262,6 +262,7 @@ PASS_TABLE :: Pass_Info.[
     .{"lcssa", .FUNCTION, .LCSSA, false, .DOMTREE},
     .{"no-op-loop", .LOOP, .NO_OP_LOOP, false, .DOMTREE},
     .{"loop-rotate", .LOOP, .LOOP_ROTATE, false, .DOMTREE},
+    .{"licm", .LOOP, .LICM, false, .DOMTREE},
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
@@ -271,6 +272,10 @@ PASS_TABLE :: Pass_Info.[
     .{"verify<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     // TargetIRAnalysis / TargetLibraryAnalysis: no cached state here
     .{"require<target-ir>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
+    // AAManager: BasicAA requests the AssumptionCache, DominatorTree and TLI (no other state)
+    .{"require<aa>", .FUNCTION, .REQUIRE, true, .DOMTREE},
+    // OptimizationRemarkEmitterAnalysis: computes BlockFrequencyInfo only when remarks are enabled
+    .{"require<opt-remark-emit>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<target-lib-info>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"verify<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
     .{"print<scalar-evolution>", .FUNCTION, .PRINT_SCEV, true, .SCEV},
@@ -290,6 +295,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "simplifycfg<") && name[name.count - 1] == #char ">" return lookup_pass("simplifycfg");
     // passes whose parameters are parsed by the pass itself (LOOP_PASS_WITH_PARAMS)
     if begins_with(name, "loop-rotate<") && name[name.count - 1] == #char ">" return lookup_pass("loop-rotate");
+    if begins_with(name, "licm<") && name[name.count - 1] == #char ">" return lookup_pass("licm");
     return null;
 }
 
@@ -558,8 +564,9 @@ cl_data_layout: string;                  // opt -data-layout (overrides the modu
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
     add_dbgify_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT);
+    add_licm_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT);
     add_tti_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT);
     add_scfg_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT);
     add_aa_cl_opts(list, 14);

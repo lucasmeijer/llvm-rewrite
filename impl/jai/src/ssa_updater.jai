@@ -334,9 +334,23 @@ ssa_equivalent_phi :: (phi: Value_Id, pvs: [] $T) -> bool {
     return true;
 }
 
-// LoadAndStorePromoter::run for SROA's BasicLoadAndStorePromoter (stores and the alloca are kept; the alloca acts
-// as a store of undef of `zero_ty`)
-load_and_store_promote :: (insts: [] Value_Id, s: *Ssa_Updater, zero_ty: Type_Id) {
+// The LoadAndStorePromoter subclasses: SROA's BasicLoadAndStorePromoter (stores and the alloca are kept; the alloca
+// acts as a store of undef of `zero_ty`) and LICM's LoopPromoter (pass_licm.jai: stores are deleted when it can insert
+// stores in the exit blocks, which it does in doExtraRewritesBeforeFinalDeletion; instructionDeleted updates
+// MemorySSA and the loop safety info).
+Lsp_Kind :: enum u8 { SROA_BASIC; LICM; }
+Lsp_Hooks :: struct { kind: Lsp_Kind; licm: *Licm_Promoter; }
+
+lsp_should_delete :: (h: Lsp_Hooks, i: Value_Id) -> bool {
+    if #complete h.kind == {
+        case .SROA_BASIC; o := inst_op(i); return o != .STORE && o != .ALLOCA;
+        case .LICM; return licm_promoter_should_delete(h.licm, i);
+    }
+    return true;
+}
+
+// LoadAndStorePromoter::run
+load_and_store_promote :: (insts: [] Value_Id, s: *Ssa_Updater, zero_ty: Type_Id, hooks := Lsp_Hooks.{}) {
     by_block: Table(Value_Id, [..] Value_Id); by_block.allocator = temp;
     for u: insts {
         bb := inst(u).parent;
@@ -393,9 +407,10 @@ load_and_store_promote :: (insts: [] Value_Id, s: *Ssa_Updater, zero_ty: Type_Id
         rauw_with_metadata(ld, nv);
         table_set(*replaced, ld, nv);
     }
+    // doExtraRewritesBeforeFinalDeletion
+    if hooks.kind == .LICM licm_promoter_extra_rewrites(hooks.licm);
     for u: insts {
-        o := inst_op(u);
-        if o == .STORE || o == .ALLOCA continue;   // shouldDelete
+        if !lsp_should_delete(hooks, u) continue;
         if has_uses(u) {
             found, nv := table_find(*replaced, u);
             assert(found, "not a replaced load?");
@@ -406,6 +421,7 @@ load_and_store_promote :: (insts: [] Value_Id, s: *Ssa_Updater, zero_ty: Type_Id
             }
             rauw_with_metadata(u, nv);
         }
+        if hooks.kind == .LICM licm_promoter_instruction_deleted(hooks.licm, u);   // instructionDeleted
         erase_inst_with_metadata(u);
     }
 }

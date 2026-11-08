@@ -67,6 +67,9 @@
 #load "instcombine.jai";
 #load "loop_pm.jai";
 #load "pass_loop_rotate.jai";
+#load "must_execute.jai";
+#load "alias_set_tracker.jai";
+#load "pass_licm.jai";
 #load "scev.jai";
 #load "scev_create.jai";
 #load "scev_range.jai";
