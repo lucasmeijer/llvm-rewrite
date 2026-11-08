@@ -3336,6 +3336,7 @@ tests/imported/llvm/Transforms/InstCombine/2006-05-04-DemandedBitCrash.ll::round
 tests/imported/llvm/Transforms/InstCombine/2006-09-15-CastToBool.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2006-10-19-SignedToUnsignedCastAndConst-2.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2006-10-20-mask.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/2006-10-26-VectorReassoc.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2006-10-26-VectorReassoc.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2006-11-10-ashr-miscompile.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2006-11-10-ashr-miscompile.ll::roundtrip
@@ -3946,9 +3947,12 @@ tests/imported/llvm/Transforms/InstCombine/fabs-copysign.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fabs-copysign.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fabs-fneg-fold.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fabs.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fadd-fsub-factor.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fadd-fsub-factor.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fadd-maximum-minimum.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fadd-maximum-minimum.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fadd.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fast-basictest.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fast-basictest.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fast-math.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-denormals-are-zero.ll::roundtrip
@@ -5134,7 +5138,9 @@ tests/imported/llvm/Transforms/InstCombine/vec_udiv_to_shift.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_udiv_to_shift.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vector-casts-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vector-casts.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vector-concat-binop-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vector-concat-binop-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vector-concat-binop.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vector-concat-binop.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vector-logical-reductions.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vector-mul.ll::opt

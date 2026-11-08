@@ -336,7 +336,13 @@ ic_visit_fsub :: (i: Value_Id) -> Value_Id {
             }
         }
         r = ic_factorize_fadd_fsub(i); if r != NONE return r;
-        fatal("instcombine: FAddCombine (reassoc nsz fadd/fsub) is not supported yet");
+        v = fadd_combine_simplify(i);
+        if v != NONE return ic_replace_inst_uses_with(i, v);
+        oks, x, y := pm_fbin(op0, .FSUB);
+        if oks && has_one_use(op0) {
+            fa := icb_fadd_fmf(y, op1, i);
+            return create_fop(.FSUB, x, fa, i);
+        }
     }
     return NONE;
 }
@@ -476,7 +482,8 @@ ic_visit_fadd :: (i: Value_Id) -> Value_Id {
             oka, z := pm_c_binop_with(a, .FADD, x);
             if oka return create_fop(.FSUB, z, y, i);
         }
-        fatal("instcombine: FAddCombine (reassoc nsz fadd/fsub) is not supported yet");
+        v = fadd_combine_simplify(i);
+        if v != NONE return ic_replace_inst_uses_with(i, v);
     }
     for side: 0..1 {
         mx := op(i, cast(u32) side); mn := op(i, cast(u32) (1 - side));
@@ -489,4 +496,211 @@ ic_visit_fadd :: (i: Value_Id) -> Value_Id {
         }
     }
     return NONE;
+}
+
+// ---------------------------------------------------------------- FAddCombine (InstCombineAddSub.cpp)
+
+FAdd_Coef :: struct {
+    is_fp: bool;
+    ival: s32;
+    f: APFloat;
+}
+FAddend :: struct {
+    val: Value_Id = NONE;   // NONE = constant addend
+    coef: FAdd_Coef;
+}
+fac_is_zero :: (c: FAdd_Coef) -> bool { if !c.is_fp return c.ival == 0; return apf_is_zero(c.f); }
+fac_is_int :: (c: FAdd_Coef, v: s32) -> bool { return !c.is_fp && c.ival == v; }
+fac_from_int :: (k: Type_Kind, v: s32) -> APFloat {
+    r: APFloat; r.k = k;
+    mag := ifx v < 0 then -v else v;
+    w := fp_from_integer(k, .[cast(u64) mag], 64, false);
+    if v < 0 w = fp_neg(k, w);
+    for w if it_index < 2 r.w[it_index] = it;
+    return r;
+}
+apf_set_words :: (f: *APFloat, w: [] u64) { f.w[0] = 0; f.w[1] = 0; for w if it_index < 2 f.w[it_index] = it; }
+fac_to_fp :: (c: *FAdd_Coef, k: Type_Kind) {
+    if c.is_fp return;
+    c.f = fac_from_int(k, c.ival);
+    c.is_fp = true;
+}
+fac_add :: (a: *FAdd_Coef, b: FAdd_Coef) {
+    if a.is_fp == b.is_fp {
+        if !a.is_fp { a.ival += b.ival; return; }
+        bb := b.f;
+        r, st := fp_add_sub(a.f.k, apf_words(*a.f), apf_words(*bb), false);
+        apf_set_words(*a.f, r);
+        return;
+    }
+    if !a.is_fp {
+        fac_to_fp(a, b.f.k);
+        bb := b.f;
+        r, st := fp_add_sub(a.f.k, apf_words(*a.f), apf_words(*bb), false);
+        apf_set_words(*a.f, r);
+        return;
+    }
+    t := fac_from_int(a.f.k, b.ival);
+    r, st := fp_add_sub(a.f.k, apf_words(*a.f), apf_words(*t), false);
+    apf_set_words(*a.f, r);
+}
+fac_negate :: (c: *FAdd_Coef) {
+    if !c.is_fp { c.ival = -c.ival; return; }
+    apf_set_words(*c.f, fp_neg(c.f.k, apf_words(*c.f)));
+}
+fac_mul :: (a: *FAdd_Coef, b: FAdd_Coef) {
+    if fac_is_int(b, 1) return;
+    if fac_is_int(b, -1) { fac_negate(a); return; }
+    if !a.is_fp && !b.is_fp { a.ival *= b.ival; return; }
+    k := ifx a.is_fp then a.f.k else b.f.k;
+    if !a.is_fp fac_to_fp(a, k);
+    other: APFloat;
+    if !b.is_fp other = fac_from_int(k, b.ival); else other = b.f;
+    r, st := fp_mul(k, apf_words(*a.f), apf_words(*other));
+    apf_set_words(*a.f, r);
+}
+fac_value :: (c: FAdd_Coef, t: Type_Id) -> Value_Id {
+    if !c.is_fp return fp_const(t, c.ival);
+    g := c.f;
+    return const_fp_words(t, apf_words(*g));
+}
+fadd_set_const :: (a: *FAddend, c: Value_Id, v: Value_Id) {
+    a.coef.is_fp = true; a.coef.f = apf_from_const(c); a.val = v;
+}
+fadd_set_int :: (a: *FAddend, coef: s32, v: Value_Id) { a.coef.is_fp = false; a.coef.ival = coef; a.val = v; }
+// dyn_cast<ConstantFP>
+is_constant_fp :: (v: Value_Id) -> bool { return v != NONE && vkind(v) == .C_FP; }
+
+// FAddend::drillValueDownOneStep
+fadd_drill_value :: (v: Value_Id, a0: *FAddend, a1: *FAddend) -> u32 {
+    if v == NONE || !is_inst(v) return 0;
+    o := inst_op(v);
+    if o == .FADD || o == .FSUB {
+        o0 := op(v, 0); o1 := op(v, 1);
+        c0 := ifx is_constant_fp(o0) then o0 else NONE;
+        c1 := ifx is_constant_fp(o1) then o1 else NONE;
+        if c0 != NONE && apf_is_zero(apf_from_const(c0)) o0 = NONE;
+        if c1 != NONE && apf_is_zero(apf_from_const(c1)) o1 = NONE;
+        if o0 != NONE {
+            if c0 == NONE fadd_set_int(a0, 1, o0); else fadd_set_const(a0, c0, NONE);
+        }
+        if o1 != NONE {
+            a := ifx o0 != NONE then a1 else a0;
+            if c1 == NONE fadd_set_int(a, 1, o1); else fadd_set_const(a, c1, NONE);
+            if o == .FSUB fac_negate(*a.coef);
+        }
+        if o0 != NONE || o1 != NONE return ifx o0 != NONE && o1 != NONE then cast(u32) 2 else 1;
+        z: APFloat; z.k = type_kind(scalar_type(vtype(c0)));
+        a0.coef.is_fp = true; a0.coef.f = z; a0.val = NONE;
+        return 1;
+    }
+    if o == .FMUL {
+        v0 := op(v, 0); v1 := op(v, 1);
+        if is_constant_fp(v0) { fadd_set_const(a0, v0, v1); return 1; }
+        if is_constant_fp(v1) { fadd_set_const(a0, v1, v0); return 1; }
+    }
+    return 0;
+}
+// FAddend::drillAddendDownOneStep
+fadd_drill_addend :: (a: FAddend, a0: *FAddend, a1: *FAddend) -> u32 {
+    if a.val == NONE return 0;
+    n := fadd_drill_value(a.val, a0, a1);
+    if n == 0 || fac_is_int(a.coef, 1) return n;
+    fac_mul(*a0.coef, a.coef);
+    if n == 2 fac_mul(*a1.coef, a.coef);
+    return n;
+}
+
+// FAddCombine::simplify
+fadd_combine_simplify :: (i: Value_Id) -> Value_Id {
+    if is_vector_type(vtype(i)) return NONE;
+    o0, o1, o00, o01, o10, o11: FAddend;
+    num := fadd_drill_value(i, *o0, *o1);
+    e0: u32 = 0; e1: u32 = 0;
+    if o0.val != NONE e0 = fadd_drill_addend(o0, *o00, *o01);
+    if num == 2 && o1.val != NONE e1 = fadd_drill_addend(o1, *o10, *o11);
+    if e0 != 0 && e1 != 0 {
+        all: [..] *FAddend; all.allocator = temp;
+        array_add(*all, *o00); array_add(*all, *o10);
+        if e0 == 2 array_add(*all, *o01);
+        if e1 == 2 array_add(*all, *o11);
+        v0 := op(i, 0); v1 := op(i, 1);
+        quota: u32 = ifx (!is_const(v0) && has_one_use(v0)) && (!is_const(v1) && has_one_use(v1)) then cast(u32) 2 else 1;
+        r := fadd_simplify_addends(i, all, quota);
+        if r != NONE return r;
+    }
+    if num != 2 return ifx fac_is_int(o0.coef, 1) then o0.val else NONE;
+    if e1 != 0 {
+        all: [..] *FAddend; all.allocator = temp;
+        array_add(*all, *o0); array_add(*all, *o10);
+        if e1 == 2 array_add(*all, *o11);
+        r := fadd_simplify_addends(i, all, 1);
+        if r != NONE return r;
+    }
+    if e0 != 0 {
+        all: [..] *FAddend; all.allocator = temp;
+        array_add(*all, *o1); array_add(*all, *o00);
+        if e0 == 2 array_add(*all, *o01);
+        r := fadd_simplify_addends(i, all, 1);
+        if r != NONE return r;
+    }
+    return NONE;
+}
+// FAddCombine::simplifyFAdd
+fadd_simplify_addends :: (instr: Value_Id, addends: [..] *FAddend, quota: u32) -> Value_Id {
+    n := addends.count;
+    tmp: [3] FAddend;
+    next_tmp := 0;
+    simp: [..] *FAddend; simp.allocator = temp;
+    for sym: 0..n-1 {
+        this := addends[sym];
+        if this == null continue;
+        val := this.val;
+        start := simp.count;
+        array_add(*simp, this);
+        for same: sym+1..n-1 {
+            t := addends[same];
+            if t != null && t.val == val { addends[same] = null; array_add(*simp, t); }
+        }
+        if start + 1 != simp.count {
+            r := *tmp[next_tmp]; next_tmp += 1;
+            r.* = simp[start].*;
+            for k: start+1..simp.count-1 fac_add(*r.coef, simp[k].coef);
+            simp.count = start;
+            if !fac_is_zero(r.coef) array_add(*simp, r);
+        }
+    }
+    if simp.count return fadd_create_nary(instr, simp, quota);
+    return fp_const(vtype(instr), 0);
+}
+// calcInstrNumber / createNaryFAdd / createAddendVal and the create* helpers
+fadd_create_nary :: (instr: Value_Id, opnds: [..] *FAddend, quota: u32) -> Value_Id {
+    needed: u32 = cast(u32) opnds.count - 1;
+    for opnds {
+        if it.val == NONE continue;
+        if pm_undef_value(it.val) continue;
+        if !fac_is_int(it.coef, -1) && !fac_is_int(it.coef, 1) needed += 1;
+    }
+    if needed > quota return NONE;
+    post :: (v: Value_Id, instr: Value_Id) -> Value_Id {
+        if is_inst(v) { set_metadata(v, 0, get_metadata(instr, 0)); set_fmf(v, get_fmf(instr)); }
+        return v;
+    }
+    last: Value_Id = NONE;
+    last_neg := false;
+    for opnd: opnds {
+        need_neg := false;
+        v: Value_Id;
+        if opnd.val == NONE { v = fac_value(opnd.coef, vtype(instr)); }
+        else if fac_is_int(opnd.coef, -1) || fac_is_int(opnd.coef, 1) { need_neg = fac_is_int(opnd.coef, -1); v = opnd.val; }
+        else if fac_is_int(opnd.coef, 2) || fac_is_int(opnd.coef, -2) { need_neg = fac_is_int(opnd.coef, -2); v = post(icb_binop(.FADD, opnd.val, opnd.val), instr); }
+        else v = post(icb_binop(.FMUL, opnd.val, fac_value(opnd.coef, vtype(instr))), instr);
+        if last == NONE { last = v; last_neg = need_neg; continue; }
+        if last_neg == need_neg { last = post(icb_binop(.FADD, last, v), instr); continue; }
+        if last_neg last = post(icb_binop(.FSUB, v, last), instr);
+        else last = post(icb_binop(.FSUB, last, v), instr);
+        last_neg = false;
+    }
+    if last_neg last = post(icb_fneg(last), instr);
+    return last;
 }
