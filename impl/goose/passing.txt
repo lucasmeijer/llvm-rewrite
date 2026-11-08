@@ -1724,6 +1724,7 @@ tests/imported/llvm/Transforms/BDCE/dead-void-ro.ll::opt
 tests/imported/llvm/Transforms/BDCE/dead-void-ro.ll::roundtrip
 tests/imported/llvm/Transforms/BDCE/intrinsics.ll::opt
 tests/imported/llvm/Transforms/BDCE/intrinsics.ll::roundtrip
+tests/imported/llvm/Transforms/BDCE/invalidate-assumptions.ll::opt
 tests/imported/llvm/Transforms/BDCE/invalidate-assumptions.ll::roundtrip
 tests/imported/llvm/Transforms/BDCE/order.ll::opt
 tests/imported/llvm/Transforms/BDCE/order.ll::roundtrip
