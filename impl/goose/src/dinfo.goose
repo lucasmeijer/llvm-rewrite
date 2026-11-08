@@ -275,15 +275,44 @@ fn new_dbgrec(kind: i64) -> i32 {
     return r;
 }
 
+// BasicBlock trailing records (DbgMarker at end()): the records of an erased last instruction, by block sub; they
+// are adopted by the next instruction appended to the block (Instruction::insertBefore, flushTerminatorDbgRecords).
+var block_trail: i32[>..];
+fn dbg_adopt_trailing(bv: i32, iv: i32) {
+    let b = block_of(bv);
+    let head = block_trail[b];
+    block_trail[b] = -1;
+    let i = inst_of(iv);
+    while inst_dbg.len <= i { inst_dbg.push(-1); }
+    // the new instruction has no records of its own (a detached instruction has no marker)
+    var r = head;
+    var last = -1;
+    while r >= 0 { dbgrecs[r].owner = iv; last = r; r = dbgrecs[r].next; }
+    if inst_dbg[i] >= 0 { dbgrecs[last].next = inst_dbg[i]; }
+    inst_dbg[i] = head;
+}
+
 // DbgMarker::removeMarker: when an instruction is erased, its records move to the head of the next
-// instruction's records. Call before inst_erase.
+// instruction's records (or become the block's trailing records). Call before inst_erase.
 fn dbg_records_to_next(iv: i32) {
     let i = inst_of(iv);
     if i >= inst_dbg.len || inst_dbg[i] < 0 { return; }
     let nx = insts[i].next;
     if nx < 0 {
         var r = inst_dbg[i];
-        while r >= 0 { dbgrecs[r].owner = -1; r = dbgrecs[r].next; }
+        var last = -1;
+        while r >= 0 { dbgrecs[r].owner = -1; last = r; r = dbgrecs[r].next; }
+        let bv = insts[i].parent;
+        if bv >= 0 {
+            let b = block_of(bv);
+            while block_trail.len <= b { block_trail.push(-1); }
+            // a trailing marker that already exists absorbs them at its end
+            if block_trail[b] >= 0 {
+                var t = block_trail[b];
+                while dbgrecs[t].next >= 0 { t = dbgrecs[t].next; }
+                dbgrecs[t].next = inst_dbg[i];
+            } else { block_trail[b] = inst_dbg[i]; }
+        }
         inst_dbg[i] = -1;
         return;
     }

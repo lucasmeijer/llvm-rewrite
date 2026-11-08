@@ -3,6 +3,7 @@
 import std;
 import os;
 import gen_attrs;
+import dinfo;
 
 // ---------------------------------------------------------------------------------------------
 // Errors
@@ -983,6 +984,9 @@ fn block_append_inst(bv: i32, iv: i32) {
     insts[i].next = -1;
     if last >= 0 { insts[inst_of(last)].next = iv; } else { blocks[b].first = iv; }
     blocks[b].last = iv;
+    // Instruction::insertBefore(BB, end()) without the head bit adopts the block's trailing debug records
+    // (BasicBlock::getTrailingDbgRecords; a terminator flushes them the same way)
+    if b < block_trail.len && block_trail[b] >= 0 { dbg_adopt_trailing(bv, iv); }
 }
 
 fn inst_insert_before(iv: i32, pos: i32) {

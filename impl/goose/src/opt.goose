@@ -84,6 +84,8 @@ fn main() {
     if input.len == 0 { write_stderr("opt: no input file\n"); exit(1); }
     init_ir();
     parse_module(input);
+    // optdriver.cpp: -strip-debug runs StripDebugInfo right after parsing
+    if flag_bool("strip-debug", false) { strip_debug_info(); }
     // -mtriple overrides the module's triple (M->setTargetTriple(Triple::normalize(TargetTriple)))
     if cl_mtriple.len > 0 { modules[cur_module].triple = intern(cl_mtriple); }
     set_function_attributes(cur_module);

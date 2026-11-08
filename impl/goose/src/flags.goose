@@ -53,6 +53,8 @@ let KNOWN_FLAGS: const u8[:][] = [
     "verify-scev",                                       // no-op: extra verification only
     "instcombine-code-sinking", "instcombine-max-sink-users", "instcombine-negator-enabled",   // read by instcombine
     "instcombine-negator-max-depth", "instcombine-lower-dbg-declare", "disable-last-run-tracking",
+    "debugify-quiet", "debugify-level", "debugify-atoms",   // read by debugify / check-debugify
+    "enable-debugify", "debugify-each", "strip-debug",      // opt driver options (debugify.goose)
     "goose-ic-lenient",                                  // development only: unported InstCombine visitors do nothing
 ];
 
@@ -85,6 +87,14 @@ fn flag_bool(name: const u8[:], dflt: bool) -> bool {
         else { fatal(str("opt: for the --", name, " option: '", v, "' is invalid value for boolean argument!")); }
     }
     return r;
+}
+
+// cl::opt<std::string>: the last value given, "" when absent
+fn flag_str(name: const u8[:]) -> const u8[:] {
+    var r: i32 = -1;
+    for f in cl_flags { if sbytes(f.name) == name { r = f.value; } }
+    if r < 0 { return ""; }
+    return sbytes(r);
 }
 
 // cl::opt::getNumOccurrences() > 0

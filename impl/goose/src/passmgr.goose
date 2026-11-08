@@ -37,6 +37,7 @@ import scev;
 import loopnest;
 import simplifycfg;
 import subtarget;
+import debugify;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -49,6 +50,8 @@ let P_NOOP_MODULE = 2;
 let P_IPSCCP = 3;          // arg: 1 = func-spec
 let P_REQUIRE_GLOBALS_AA = 5;
 let P_INVALIDATE_GLOBALS_AA = 6;
+let P_DEBUGIFY = 7;
+let P_CHECK_DEBUGIFY = 8;
 // function passes
 let P_DCE = 100;
 let P_ADCE = 101;
@@ -93,6 +96,8 @@ let P_LINVALIDATE = 204;
 let PASS_TABLE: const u8[:][] = [
     "m:verify:1:1",
     "m:no-op-module:2:0",
+    "m:debugify:7:0",
+    "m:check-debugify:8:0",
     "f:dce:100:0",
     "f:adce:101:0",
     "f:bdce:102:0",
@@ -139,6 +144,8 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_SCCP => "SCCPPass",
         P_EARLY_CSE => "EarlyCSEPass",
         P_IPSCCP => "IPSCCPPass",
+        P_DEBUGIFY => "NewPMDebugifyPass",
+        P_CHECK_DEBUGIFY => "NewPMCheckDebugifyPass",
         P_NOOP_MODULE => "NoOpModulePass",
         P_NOOP_FUNCTION => "NoOpFunctionPass",
         _ => "Pass",
@@ -849,14 +856,30 @@ recursive fn run_module_node(n: i32, m: i32) {
         return;
     }
     if p == P_REQUIRE_GLOBALS_AA { if !gm_valid { gm_compute(m); } return; }
+    if p == P_DEBUGIFY { debugify_run(m); invalidate_module_functions(m, PA_CFG); return; }
+    if p == P_CHECK_DEBUGIFY { check_debugify_run(m); return; }
     if p == P_INVALIDATE_GLOBALS_AA { gm_invalidate(); return; }
     fatal("internal: unknown module pass id");
+}
+
+// invalidate the function analyses of every definition not in the preserved set (a module pass's result)
+fn invalidate_module_functions(m: i32, pa: u32) {
+    var f = modules[m].first_func;
+    while f >= 0 {
+        if !func_is_decl(f) { invalidate_function(f, pa); }
+        f = globs[glob_of(f)].next;
+    }
 }
 
 fn run_pipeline(root: i32, m: i32) {
     flags_check_unsupported();
     st_init_target_machine(m);
+    // NewPMDriver: -enable-debugify wraps the pipeline in NewPMDebugifyPass / NewPMCheckDebugifyPass
+    let enable_debugify = flag_bool("enable-debugify", false);
+    if flag_bool("debugify-each", false) { fatal("opt: -debugify-each is not supported yet in the Goose opt"); }
+    if enable_debugify { debugify_run(m); invalidate_module_functions(m, PA_CFG); }
     run_module_node(root, m);
+    if enable_debugify { check_debugify_run(m); }
     aa_eval_finish();
     slots_end();
 }

@@ -518,7 +518,7 @@ fn mdk_make_implicit() -> i32 { md_kind_id("make.implicit") }
 // IRBuilder<> Builder(T) + CreateBr(Dest): an unconditional branch before t with t's debug location
 fn cu_create_br_before(dest: i32, t: i32) -> i32 {
     let br = create_inst(OP_BR, T_VOID, [dest]);
-    inst_insert_before(br, t);
+    m2r_insert_before_adopting(br, t);   // BranchInst::Create(Dest, T->getIterator()): adopts T's records
     let dl = inst_get_md(t, MDK_DBG);
     if dl >= 0 { inst_set_md(br, MDK_DBG, dl); }
     return br;
