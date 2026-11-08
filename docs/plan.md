@@ -17,7 +17,7 @@ different languages, all data-oriented, so they can be compared.
    including the IR passes llc runs before isel. Checks: `roundtrip`, `opt`, `isel-ir`. The backend after that is
    judged by *behaviour*: the program built by our tools must print and exit exactly like the one LLVM builds
    (`run`). Assembly may differ.
-3. **Several implementations, one harness.** `impl/c`, `impl/rust`, `impl/zig` share the harness, the corpus, the
+3. **Several implementations, one harness.** `impl/c`, `impl/rust`, `impl/zig`, `impl/goose`, `impl/jai` share the harness, the corpus, the
    roadmap and `knowledge/`. Each produces `bin/{opt,llc,llvm-link}` with LLVM's command-line conventions.
 4. **Data-oriented design, no OOP.** Each implementation uses whatever data-oriented features its language offers,
    and documents its own design in `impl/<lang>/DESIGN.md` (that's unit `L0.design`). There's no shared layout and
@@ -43,7 +43,8 @@ different languages, all data-oriented, so they can be compared.
 11. **Notes.** `knowledge/llvm/<topic>.md` (shared, curated LLVM facts), `impl/<lang>/NOTES.md` (findings for one
     implementation), `reports/challenges/` (one file per process-friction report, for the human designing the loop).
 12. **Workspace image.** `.agents-in-the-cloud/Dockerfile` bakes in LLVM 23.1.5 (pruned to the tools we use), its
-    source, llvm-test-suite and Zig, so every workspace starts ready.
+    source, llvm-test-suite, Zig and Goose, so every workspace starts ready. Jai's download URL is private, so
+    `scripts/ensure-jai.sh` installs Jai at runtime from `$JAI_COMPILER_URL` into `/persistent`, once per template.
 
 ## Not decided yet (later lplan rounds)
 

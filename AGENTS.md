@@ -2,7 +2,7 @@
 
 We are rewriting LLVM's middle and back end: textual LLVM IR in, x86-64 assembly out, including the full optimization
 pipeline and whole-program (LTO) optimization. No frontend. Several independent implementations, one per language,
-live side by side in `impl/<lang>/` (`c`, `rust`, `zig`) and share one test harness and one test corpus.
+live side by side in `impl/<lang>/` (`c`, `rust`, `zig`, `goose`, `jai`) and share one test harness and one test corpus.
 
 **The golden rule: LLVM 23.1.5 is always right.** Every check compares an implementation against the real LLVM tools
 in `/opt/llvm-23.1.5`. Up to the input of instruction selection, our IR must be *identical* to LLVM's. After that
@@ -24,7 +24,9 @@ Background and the decisions behind all this: [docs/plan.md](docs/plan.md).
 | `.agents/skills/` | Task skills: `write-test`, `port-pass`, `debug-mismatch`, `codegen`, `lplan` |
 
 Workspace facts: LLVM binaries `/opt/llvm-23.1.5/bin`, LLVM source (llvm/ only) `/opt/llvm-project-23.1.5/llvm`,
-llvm-test-suite `/opt/llvm-test-suite-23.1.5`, Zig `/opt/zig-0.17.1` (on PATH), Rust via `~/.cargo/bin`. The shared
+llvm-test-suite `/opt/llvm-test-suite-23.1.5`, Zig `/opt/zig-0.17.1` and Goose `/opt/goose-v2026.4` (both on PATH),
+Rust via `~/.cargo/bin`, Jai via `scripts/ensure-jai.sh` (installs into `/persistent/toolchains/jai` from the
+`JAI_COMPILER_URL` environment variable; that URL is private, so never write it anywhere in the repo). The shared
 oracle cache is `/persistent/llvm-rewrite/oracle-cache` (safe to delete; it refills).
 
 ## Working on a unit

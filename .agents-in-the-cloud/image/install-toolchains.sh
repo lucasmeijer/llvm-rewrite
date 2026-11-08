@@ -7,6 +7,8 @@ LLVM_VERSION=23.1.5
 LLVM_SHA256=c3107384835f788768f614db610e87fba7077f125ca950eb02a78bab0a308065
 ZIG_VERSION=0.17.1
 ZIG_SHA256=3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a
+GOOSE_VERSION=v2026.4
+GOOSE_SHA256=559ad7572df89fcd1273512d8679528bcdf876c252ec1f31608d3808b24125b3
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -48,5 +50,13 @@ rm -rf "/opt/zig-${ZIG_VERSION}" && mkdir -p "/opt/zig-${ZIG_VERSION}"
 tar -xJf "$tmp/zig.tar.xz" -C "/opt/zig-${ZIG_VERSION}" --strip-components=1
 ln -sf "/opt/zig-${ZIG_VERSION}/zig" /usr/local/bin/zig
 
-chmod -R a+rX "$dest" "$src" "$ts" "/opt/zig-${ZIG_VERSION}"
+# --- Goose (https://github.com/aardappel/goose): prebuilt compiler + stdlib + TinyCC runtime + docs.
+curl -fsSL -o "$tmp/goose.tar.gz" \
+  "https://github.com/aardappel/goose/releases/download/${GOOSE_VERSION}/goose-${GOOSE_VERSION}-linux-x64.tar.gz"
+echo "${GOOSE_SHA256}  $tmp/goose.tar.gz" | sha256sum -c -
+rm -rf "/opt/goose-${GOOSE_VERSION}" && mkdir -p "/opt/goose-${GOOSE_VERSION}"
+tar -xzf "$tmp/goose.tar.gz" -C "/opt/goose-${GOOSE_VERSION}" --strip-components=1
+ln -sf "/opt/goose-${GOOSE_VERSION}/goose" /usr/local/bin/goose
+
+chmod -R a+rX "$dest" "$src" "$ts" "/opt/zig-${ZIG_VERSION}" "/opt/goose-${GOOSE_VERSION}"
 echo "toolchains installed"
