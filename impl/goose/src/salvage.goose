@@ -48,7 +48,7 @@ let SV_OP_LLVM_FRAGMENT: i64 = 0x1000;
 let SV_OP_LLVM_CONVERT: i64 = 0x1001;
 let SV_OP_LLVM_ARG: i64 = 0x1005;
 let SV_ATE_SIGNED: i64 = 5;
-let SV_ATE_UNSIGNED: i64 = 8;
+let SV_ATE_UNSIGNED: i64 = 7;     // DW_ATE_unsigned (Dwarf.def 0x07)
 
 let SV_MAX_DEBUG_ARGS: i64 = 16;
 let SV_MAX_EXPRESSION_SIZE: i64 = 128;

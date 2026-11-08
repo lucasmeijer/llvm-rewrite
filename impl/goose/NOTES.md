@@ -466,3 +466,5 @@ What they were:
   `c_null`/`c_splat` (LLVM's getNullValue/getSplat: a ConstantFP) is now a VK_AGGZERO with `flags = 1`, distinct
   from the ConstantAggregateZero that `c_aggregate` makes of all-zero elements (`c_is_vector_cfp`).
 - bdce (freeze-signedness-missed.ll) was the same DeadUses clobbering.
+- After rebasing onto salvageDebugInfo (salvage.goose), `instsimplify` showed 1 new `differs`: zext salvaging
+  wrote `DW_ATE_unsigned_char` (8) for `DW_ATE_unsigned` (7). Fixed.
