@@ -254,7 +254,25 @@ fn upgrade_intrinsic_function1(f: i32) -> bool, i32 {
     // named or packed struct return -> literal struct
     let rt = au_ret_type(f);
     if types[rt].kind == TK_STRUCT && ((types[rt].flags & TF_NAMED) != 0 || (types[rt].flags & TF_PACKED) != 0) && id != 0 {
-        if intr_has_struct_return(id) { fatal("struct-return intrinsic upgrade is not supported yet"); }
+        if intr_has_struct_return(id) {
+            // replace the return type with the literal non-packed struct of the same elements
+            let fty = globs[glob_of(f)].vty;
+            let at = ints.len as i32;
+            for k in types[rt].cnt { ints.push(ty_field(rt, k)); }
+            let nst = ty_struct_run(at, types[rt].cnt, false);
+            let fat = ints.len as i32;
+            ints.push(nst);
+            for k in ty_fn_nparams(fty) { ints.push(ty_fn_param(fty, k)); }
+            let nft = ty_func_run(fat, ty_fn_nparams(fty) + 1, ty_fn_vararg(fty));
+            var nm: u8[>..] = [];
+            nm.append(sbytes(vals[f].name));
+            au_rename_old(f);
+            var nf = au_create_function(nm, nft);
+            globs[glob_of(nf)].linkage = globs[glob_of(f)].linkage;
+            let r = au_remangle(nf);
+            if r >= 0 { nf = r; }
+            return true, nf;
+        }
     }
     let r = au_remangle(f);
     if r >= 0 { return true, r; }
@@ -465,6 +483,22 @@ fn upgrade_intrinsic_call(ci: i32, nf: i32) {
     // DefaultCase
     if f == nf { return; }
     if insts[inst_of(ci)].ty2 == globs[glob_of(nf)].vty { au_set_callee(ci, nf); return; }
+    let ost = vals[ci].ty;
+    if types[ost].kind == TK_STRUCT {
+        // upgrade from a named to a literal struct return
+        var a: i32[>..] = [];
+        for k in nargs { a.push(op(ci, k)); }
+        let nc = au_create_call(ci, nf, a);
+        insts[inst_of(nc)].attrs = insts[inst_of(ci)].attrs;
+        var res = c_poison(ost);
+        for k in types[ost].cnt {
+            let e = au_create_aggop(ci, OP_EXTRACTVALUE, ty_field(vals[nc].ty, k), nc, -1, k);
+            res = au_create_aggop(ci, OP_INSERTVALUE, ost, res, e, k);
+        }
+        rauw(ci, res);
+        au_erase_inst(ci);
+        return;
+    }
     fatal(str("intrinsic call upgrade to @", sbytes(vals[nf].name), " with a different type is not supported yet"));
 }
 
@@ -771,4 +805,28 @@ fn strip_debug_info() {
         globs[g].nmd = att_remove_kind(globs[g].md, globs[g].nmd, 0);
         gv = globs[g].next;
     }
+}
+
+// IRBuilder::CreateExtractValue / CreateInsertValue at ci (one index; inherits ci's !dbg)
+fn au_create_aggop(ci: i32, opc: i64, ty: i32, agg: i32, val: i32, idx: i64) -> i32 {
+    let n = if opc == OP_INSERTVALUE { 2 } else { 1 };
+    let v = new_inst(opc, ty, n);
+    set_op(v, 0, agg);
+    if opc == OP_INSERTVALUE { set_op(v, 1, val); }
+    let ii = inst_of(v);
+    insts[ii].aux = ints.len as i32;
+    insts[ii].naux = 1;
+    ints.push(idx as i32);
+    let oi = inst_of(ci);
+    for k in insts[oi].nmd {
+        if md_att[insts[oi].md + 2 * k] == 0 {
+            let at = md_att.len as i32;
+            md_att.push(0);
+            md_att.push(md_att[insts[oi].md + 2 * k + 1]);
+            insts[ii].md = at;
+            insts[ii].nmd = 1;
+        }
+    }
+    inst_insert_before(v, ci);
+    return v;
 }
