@@ -14,7 +14,7 @@ import instinfo;
 import domtree;
 
 struct LRun { at: i32, n: i32, cap: i32 }
-struct Loop { header: i32, parent: i32, fv: i32, blocks: LRun, subs: LRun }
+struct Loop { parent: i32, fv: i32, blocks: LRun, subs: LRun }     // header = blocks[0], as in LLVM
 struct LIHead { valid: bool, epoch: i32, top: LRun }
 
 var loops: Loop[>..];
@@ -72,7 +72,7 @@ fn li_change_loop_for(bv: i32, l: i32) {
 fn li_ntop(fv: i32) -> i64 { li_heads[glob_of(fv)].top.n as i64 }
 fn li_top(fv: i32, k: i64) -> i32 { lrun_get(li_heads[glob_of(fv)].top, k) }
 
-fn loop_header(l: i32) -> i32 { loops[l].header }
+fn loop_header(l: i32) -> i32 { lrun_get(loops[l].blocks, 0) }
 fn loop_parent(l: i32) -> i32 { loops[l].parent }
 fn loop_nblocks(l: i32) -> i64 { loops[l].blocks.n as i64 }
 fn loop_block(l: i32, k: i64) -> i32 { lrun_get(loops[l].blocks, k) }
@@ -94,7 +94,7 @@ fn loop_contains(l: i32, bv: i32) -> bool { loop_contains_loop(l, li_loop_for(bv
 // isLoopLatch(BB): BB is a predecessor of the header (BB must be in the loop).
 fn loop_is_latch(l: i32, bv: i32) -> bool {
     var r = false;
-    each_pred(loops[l].header) { p => if p == bv { r = true; } };
+    each_pred(loop_header(l)) { p => if p == bv { r = true; } };
     return r;
 }
 // isLoopExiting(BB): some successor is outside the loop.
@@ -108,7 +108,7 @@ fn loop_is_exiting(l: i32, bv: i32) -> bool {
 fn loop_latch(l: i32) -> i32 {
     var latch: i32 = -1;
     var many = false;
-    each_pred(loops[l].header) { p =>
+    each_pred(loop_header(l)) { p =>
         if loop_contains(l, p) { if latch >= 0 { many = true; } latch = p; }
     };
     return if many { -1 } else { latch };
@@ -116,13 +116,13 @@ fn loop_latch(l: i32) -> i32 {
 // getLoopLatches
 fn loop_latches(l: i32, out: i32[>..<]&) {
     out.clear();
-    each_pred(loops[l].header) { p => if loop_contains(l, p) { out.push(p); } };
+    each_pred(loop_header(l)) { p => if loop_contains(l, p) { out.push(p); } };
 }
 // getLoopPredecessor: the unique out-of-loop predecessor of the header (counting each block once), or -1.
 fn loop_predecessor(l: i32) -> i32 {
     var out: i32 = -1;
     var bad = false;
-    each_pred(loops[l].header) { p =>
+    each_pred(loop_header(l)) { p =>
         if !loop_contains(l, p) { if out >= 0 && out != p { bad = true; } out = p; }
     };
     return if bad { -1 } else { out };
@@ -152,10 +152,98 @@ fn loop_add_basic_block_to_loop(l: i32, bv: i32) {
 }
 fn loop_alloc(fv: i32, header: i32) -> i32 {
     let id = loops.len as i32;
-    loops.push(Loop { header: header, parent: -1, fv: fv, blocks: lrun_empty(), subs: lrun_empty() });
-    loops[id].blocks = lrun_push(loops[id].blocks, header);
+    loops.push(Loop { parent: -1, fv: fv, blocks: lrun_empty(), subs: lrun_empty() });
+    if header >= 0 { loops[id].blocks = lrun_push(loops[id].blocks, header); }
     return id;
 }
+
+// getExitingBlocks: blocks of the loop with a successor outside it (each once, in block order).
+fn loop_exiting_blocks(l: i32, out: i32[>..<]&) {
+    out.clear();
+    for i in loop_nblocks(l) {
+        let bb = loop_block(l, i);
+        if loop_is_exiting(l, bb) { out.push(bb); }
+    }
+}
+// getExitBlocks: successors outside the loop, with repeats, in block then successor order.
+fn loop_exit_blocks(l: i32, out: i32[>..<]&) {
+    out.clear();
+    for i in loop_nblocks(l) {
+        let tm = block_terminator(loop_block(l, i));
+        if tm < 0 { continue; }
+        for k in term_nsucc(tm) { let s = term_succ(tm, k); if !loop_contains(l, s) { out.push(s); } }
+    }
+}
+// getNumBackEdges
+fn loop_num_back_edges(l: i32) -> i64 { var n = 0; each_pred(loop_header(l)) { p => if loop_contains(l, p) { n++; } }; return n; }
+// LoopInfo::isLoopHeader
+fn li_is_loop_header(bv: i32) -> bool { let l = li_loop_for(bv); return l >= 0 && loop_header(l) == bv; }
+// hasDedicatedExits: every predecessor of every exit block is in the loop.
+fn loop_has_dedicated_exits(l: i32) -> bool {
+    var ex: i32[>..<] = [];
+    loop_exit_blocks(l, ex);
+    for e in ex {
+        var ok = true;
+        each_pred(e) { p => if !loop_contains(l, p) { ok = false; } };
+        if !ok { return false; }
+    }
+    return true;
+}
+
+// addChildLoop
+fn loop_add_child(p: i32, c: i32) { loops[c].parent = p; loops[p].subs = lrun_push(loops[p].subs, c); }
+// removeChildLoop(Child): erase, keeping the order of the others
+fn loop_remove_child(p: i32, c: i32) {
+    let r = loops[p].subs;
+    var w: i64 = 0;
+    for k in r.n { let x = lrun_get(r, k); if x != c { li_pool[r.at + w] = x; w++; } }
+    loops[p].subs.n = w as i32;
+    loops[c].parent = -1;
+}
+// replaceChildLoopWith(OldChild, NewChild)
+fn loop_replace_child_with(p: i32, old: i32, nw: i32) {
+    let r = loops[p].subs;
+    for k in r.n { if lrun_get(r, k) == old { li_pool[r.at + k] = nw; } }
+    loops[old].parent = -1;
+    loops[nw].parent = p;
+}
+// LoopInfo::changeTopLevelLoop
+fn li_change_top_level_loop(fv: i32, old: i32, nw: i32) {
+    let r = li_heads[glob_of(fv)].top;
+    for k in r.n { if lrun_get(r, k) == old { li_pool[r.at + k] = nw; } }
+}
+// LoopInfo::addTopLevelLoop
+fn li_add_top_level_loop(fv: i32, l: i32) { let g = glob_of(fv); li_heads[g].top = lrun_push(li_heads[g].top, l); }
+// removeBlockFromLoop(BB): erase from the block vector (keeps order)
+fn loop_remove_block_from_loop(l: i32, bv: i32) {
+    let r = loops[l].blocks;
+    var w: i64 = 0;
+    var gone = false;
+    for k in r.n {
+        let x = lrun_get(r, k);
+        if x == bv && !gone { gone = true; continue; }
+        li_pool[r.at + w] = x;
+        w++;
+    }
+    loops[l].blocks.n = w as i32;
+}
+// moveToHeader(BB)
+fn loop_move_to_header(l: i32, bv: i32) {
+    let r = loops[l].blocks;
+    if lrun_get(r, 0) == bv { return; }
+    for k in r.n {
+        if lrun_get(r, k) == bv { li_pool[r.at + k] = li_pool[r.at]; li_pool[r.at] = bv; return; }
+    }
+    fatal("internal: moveToHeader of a block not in the loop");
+}
+// LoopInfo::removeBlock(BB)
+fn li_remove_block(bv: i32) {
+    var l = li_loop_for(bv);
+    while l >= 0 { loop_remove_block_from_loop(l, bv); l = loops[l].parent; }
+    li_change_loop_for(bv, -1);
+}
+// LoopInfo::AllocateLoop()
+fn li_allocate_loop(fv: i32) -> i32 { loop_alloc(fv, -1) }
 
 // ---------------------------------------------------------------------------------------------
 // LoopInfoBase::analyze(DomTree)
@@ -208,7 +296,7 @@ fn li_compute(fv: i32) {
                 sub = loop_outermost(sub);
                 if sub == l { continue; }
                 loops[sub].parent = l;
-                pred = loops[sub].header;
+                pred = loop_header(sub);
                 each_pred(pred) { p => if li_loop_for(p) != sub { wl.push(p); } };
             }
         }
@@ -237,7 +325,7 @@ fn li_compute(fv: i32) {
         sk.pop();
         // insertIntoLoop(n)
         var sub = li_loop_for(n);
-        if sub >= 0 && n == loops[sub].header {
+        if sub >= 0 && n == loop_header(sub) {
             let par = loops[sub].parent;
             if par >= 0 { loops[par].subs = lrun_push(loops[par].subs, sub); }
             else { li_heads[g].top = lrun_push(li_heads[g].top, sub); }
@@ -329,7 +417,7 @@ recursive fn loop_print(l: i32, depth: i64) {
     errs("Loop at depth ");
     errs_int(loop_depth(l));
     errs(" containing: ");
-    let h = loops[l].header;
+    let h = loop_header(l);
     for i in loop_nblocks(l) {
         let bb = loop_block(l, i);
         if i > 0 { errs(","); }

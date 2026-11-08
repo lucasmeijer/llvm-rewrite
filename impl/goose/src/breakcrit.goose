@@ -10,6 +10,7 @@ import instinfo;
 import analyses;
 import domtree;
 import loopinfo;
+import loopsimplify;
 
 // CriticalEdgeSplittingOptions
 struct CESOpts { dt: bool, pdt: bool, li: bool, merge_identical: bool, keep_one_input_phis: bool, preserve_lcssa: bool,
@@ -137,7 +138,9 @@ fn split_known_critical_edge(ti: i32, k: i64, o: CESOpts, name: const u8[:]) -> 
             }
             if !loop_contains(til, dest) {
                 if o.preserve_lcssa { fatal("SplitCriticalEdge with PreserveLCSSA (createPHIsForSplitLoopExit) is not ported yet"); }
-                if loop_preds.len > 0 { fatal("SplitCriticalEdge: SplitBlockPredecessors to keep loop-simplify form is not ported yet"); }
+                if loop_preds.len > 0 {
+                    split_block_predecessors(dest, loop_preds, "split", o.dt, o.li, o.preserve_lcssa);
+                }
             }
         }
     }

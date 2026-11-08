@@ -16,6 +16,7 @@ var cl_flags: Flag[>..];
 let KNOWN_FLAGS: const u8[:][] = [
     "adce-remove-loops", "adce-remove-control-flow",
     "verify-dom-info",                                   // no-op: extra verification only
+    "verify-loop-info", "verify-loop-lcssa",             // no-op: extra verification only
     "simplifycfg-require-and-preserve-domtree",          // read by simplifycfg
 ];
 

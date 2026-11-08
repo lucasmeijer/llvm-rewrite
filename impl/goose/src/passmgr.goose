@@ -21,6 +21,8 @@ import analyses;
 import loopinfo;
 import cycleinfo;
 import breakcrit;
+import loopsimplify;
+import lcssa;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -49,6 +51,8 @@ let P_PRINT_CYCLES = 112;
 let P_VERIFY_CYCLES = 113;
 let P_VERIFY_DOMTREE = 114;
 let P_VERIFY_LOOPS = 115;
+let P_LOOP_SIMPLIFY = 116;
+let P_LCSSA = 117;
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
 // (PassInfoMixin::isRequired: printers, verifier, require/invalidate, adaptors).
@@ -71,6 +75,8 @@ let PASS_TABLE: const u8[:][] = [
     "f:verify<cycles>:113:1",
     "f:verify<domtree>:114:1",
     "f:verify<loops>:115:1",
+    "f:loop-simplify:116:0",
+    "f:lcssa:117:0",
 ];
 
 // LLVM pass class names, for -opt-bisect-limit messages.
@@ -82,6 +88,8 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_MEM2REG => "PromotePass",
         P_INSTSIMPLIFY => "InstSimplifyPass",
         P_BREAK_CRIT_EDGES => "BreakCriticalEdgesPass",
+        P_LOOP_SIMPLIFY => "LoopSimplifyPass",
+        P_LCSSA => "LCSSAPass",
         P_NOOP_MODULE => "NoOpModulePass",
         P_NOOP_FUNCTION => "NoOpFunctionPass",
         _ => "Pass",
@@ -433,6 +441,8 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_VERIFY_CYCLES => { ci_get(fv); return PA_ALL; },
         P_VERIFY_DOMTREE => { dt_get(fv, DT_DOM); return PA_ALL; },
         P_VERIFY_LOOPS => { li_get(fv); return PA_ALL; },
+        P_LOOP_SIMPLIFY => { return loop_simplify_run(fv); },
+        P_LCSSA => { return lcssa_run(fv); },
         _ => { fatal("internal: unknown function pass id"); return PA_ALL; },
     }
 }

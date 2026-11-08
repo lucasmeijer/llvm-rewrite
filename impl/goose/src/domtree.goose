@@ -949,6 +949,32 @@ fn dt_properly_dominates_block(t: i64, a: i32, b: i32) -> bool {
 }
 // dominates(DomTreeNode *A, DomTreeNode *B) on node handles: a block in the tree, DT_VROOT, or -1 (null).
 fn dt_dominates_nodes(fv: i32, t: i64, a: i32, b: i32) -> bool { dt_focus(fv, t); return t_dominates_nodes(a, b); }
+// DominatorTree::dominates(const Instruction *Def, const BasicBlock *UseBB)
+fn dt_inst_dominates_block(def: i32, ubb: i32) -> bool {
+    let dbb = inst_parent(def);
+    if !dt_has_node(DT_DOM, ubb) { return true; }
+    if !dt_has_node(DT_DOM, dbb) { return false; }
+    if dbb == ubb { return false; }
+    let o = iop(def);
+    if o == OP_INVOKE || o == OP_CALLBR { fatal("DominatorTree::dominates for invoke/callbr definitions is not ported yet"); }
+    return dt_dominates_block(DT_DOM, dbb, ubb);
+}
+// DominatorTree::dominates(const Value *Def, const Instruction *User)
+fn dt_value_dominates_inst(defv: i32, user: i32) -> bool {
+    if !is_inst(defv) { return true; }
+    let ubb = inst_parent(user);
+    let dbb = inst_parent(defv);
+    if !dt_has_node(DT_DOM, ubb) { return true; }
+    if !dt_has_node(DT_DOM, dbb) { return false; }
+    if defv == user { return false; }
+    let o = iop(defv);
+    if o == OP_INVOKE || o == OP_CALLBR || iop(user) == OP_PHI { return dt_inst_dominates_block(defv, ubb); }
+    if dbb != ubb { return dt_dominates_block(DT_DOM, dbb, ubb); }
+    // Def->comesBefore(User)
+    var i = inst_next(defv);
+    while i >= 0 { if i == user { return true; } i = inst_next(i); }
+    return false;
+}
 // findNearestCommonDominator(A, B); both must be in the tree. May return DT_VROOT for post-dominators.
 fn dt_find_ncd(t: i64, a: i32, b: i32) -> i32 { dt_focus(block_func(a), t); return t_find_ncd(a, b); }
 

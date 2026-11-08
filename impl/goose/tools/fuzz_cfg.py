@@ -24,7 +24,11 @@ PIPES = [
     "adce,print<postdomtree>",
     "require<domtree>,adce,print<domtree>,print<postdomtree>,print<loops>",
     "adce,break-crit-edges,print<postdomtree>,print<domtree>",
+    "loop-simplify,print<loops>,print<domtree>",
+    "require<loops>,break-crit-edges,print<loops>",
 ]
+# Pipelines whose IR output (-S) is compared, after canonicalizing ours through LLVM's opt -S.
+IR_PIPES = ["loop-simplify", "lcssa", "loop-simplify,lcssa", "break-crit-edges", "adce"]
 
 
 def gen(rng):
@@ -71,6 +75,9 @@ def gen(rng):
                 out.append("  call void @g(i32 %%p%d)" % i)
         elif rng.random() < 0.3:
             out.append("  call void @g(i32 %d)" % i)
+        if i > 0 and rng.random() < 0.12:
+            # a use of some PHI defined elsewhere (dropped by the LLVM validity check when it doesn't dominate)
+            out.append("  call void @g(i32 %%p%d)" % rng.randrange(1, n))
         t = terms[i]
         if t[0] == "ret":
             out.append("  ret void")
@@ -90,6 +97,14 @@ def gen(rng):
 def run(opt, pipe, path):
     p = subprocess.run([opt, "-passes=" + pipe, "-disable-output", path], capture_output=True, text=True, timeout=20)
     return p.returncode, p.stdout + p.stderr
+
+
+def run_ir(opt, pipe, path):
+    p = subprocess.run([opt, "-passes=" + pipe, "-S", path], capture_output=True, text=True, timeout=20)
+    if p.returncode != 0:
+        return p.returncode, p.stderr
+    q = subprocess.run([LLVM_OPT, "-S", "-"], input=p.stdout, capture_output=True, text=True, timeout=20)
+    return q.returncode, q.stdout + q.stderr
 
 
 def main():
@@ -119,6 +134,24 @@ def main():
             keep = "/tmp/fuzz_cfg/fail_%d_%d.ll" % (seed, it)
             with open(keep, "w") as f:
                 f.write("; @analysis: -passes='%s'\n" % pipe + src)
+            print("DIFF %s  %s" % (keep, pipe))
+            break
+        for pipe in IR_PIPES:
+            lc, lo = run_ir(LLVM_OPT, pipe, path)
+            if lc != 0:
+                stats["invalid"] += 1
+                continue
+            oc, oo = run_ir(OUR_OPT, pipe, path)
+            if oc != 0 and "not ported" in oo:
+                stats["unsupported"] += 1
+                continue
+            if oc == lc and oo == lo:
+                stats["same"] += 1
+                continue
+            stats["diff"] += 1
+            keep = "/tmp/fuzz_cfg/fail_ir_%d_%d.ll" % (seed, it)
+            with open(keep, "w") as f:
+                f.write("; @opt: -passes=%s\n" % pipe + src)
             print("DIFF %s  %s" % (keep, pipe))
             break
     print(stats)

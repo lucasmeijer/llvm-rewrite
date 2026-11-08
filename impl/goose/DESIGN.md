@@ -190,8 +190,6 @@ with data plus a `match`.
 ## 7. Known costs and debts
 
 - Ids are never reused; erased values are `VK_DEAD` tombstones (§8.2). Operand runs of erased values are leaked.
-- Dominator trees are recomputed after a CFG change instead of updated incrementally (§8.5): child order can then
-  differ from LLVM's for passes that preserve the tree through `DomTreeUpdater`.
 - Append-only pools leak dead operand runs, types and constants until exit (see §2.4).
 - A single global state means one module "context" per process. `llvm-link` has to load all inputs into it, which
   matches LLVM (all modules share one `LLVMContext`).
@@ -232,16 +230,46 @@ ids), 4 slots each, with an epoch stamp per entry so clearing is O(1). Owners: `
 for its worklist while it runs. A pass that calls an analysis must not hold data in the slots the analysis uses.
 
 ### 8.5 Analyses
-Dominator trees (domtree.goose, a port of `SemiNCAInfo`: `runDFS`, `runSemiNCA`, `FindRoots` with
-`RemoveRedundantRoots`, `attachNewSubtree`) live in global per-(block, kind) node records with an epoch per tree,
-so recomputing never clears memory. `dt_get(fv, DT_DOM|DT_POST)` computes if invalid; queries: `dt_idom`,
-`dt_dominates_block`, `dt_first_child/dt_next_sibling` (LLVM's child order), `dt_level`, `dt_root`, roots.
-`DT_VROOT` is the post-dominator tree's virtual exit. **Incremental updates are not ported**: a pass that changes
-the CFG returns a preserved set without the trees and they are recomputed on the next `dt_get`. DemandedBits
+**Dominator trees** (domtree.goose) port `GenericDomTreeConstruction.h` whole: construction (`SemiNCAInfo`) and
+the incremental updates (`InsertEdge`/`DeleteEdge`/`ApplyUpdates` over a `GraphDiff` snapshot, with
+`LegalizeUpdates`, the recalculation thresholds and the post-dominator root updates). Nodes are global
+per-(block, kind) records with an epoch per tree, so recomputing never clears memory; children are an intrusive
+list in LLVM's order (`addChild` appends, `removeChild` unlinks), the virtual root lives in the head record.
+`DFSInfoValid`, `SlowQueries` and the DFS numbers are kept like LLVM's and printed by `print<domtree>`:
+`dt_dominates_block` counts slow queries and switches to DFS numbers after 32, `dt_update_dfs_numbers` is what
+`updateDFSNumbers` is (LoopInfo and IDF computations call it). API: `dt_get(fv, DT_DOM|DT_POST)`, queries
+`dt_idom`, `dt_has_node`, `dt_dominates_block`, `dt_properly_dominates_block`, `dt_dominates_nodes`,
+`dt_value_dominates_inst`, `dt_inst_dominates_block`, `dt_find_ncd`, `dt_first_child/dt_next_sibling`, `dt_level`,
+`dt_root`, roots; updates `dt_apply_updates(fv, t, DTUpdate[])` (after the CFG change, like LLVM),
+`dt_insert_edge/dt_delete_edge`, `dt_add_new_block`, `dt_change_idom`, `dt_erase_node`, `dt_split_block`,
+`dt_recalculate`. `DT_VROOT` is the post-dominator tree's virtual exit. The SemiNCA state (one instance at a time,
+O(1) clear) and the GraphDiff (one at a time) are module globals, so updates don't nest (they never do in LLVM).
+Not ported: the two-argument `applyUpdates(Updates, PostViewUpdates)` and `CalculateWithUpdates`.
+
+**DomTreeUpdater** (dtu.goose): one active updater (`dtu_begin(fv, use_dt, use_pdt, lazy)` … `dtu_end()`, the
+destructor, which flushes), `dtu_apply_updates`, `dtu_apply_updates_permissive`, `dtu_split_critical_edge`,
+`dtu_delete_bb`, `dtu_flush`, `dtu_get_dt/pdt`, `dtu_recalculate`. A tree that isn't cached is treated as absent
+(LLVM's null pointer), so a pass passes `true` for every tree it would hand to the updater.
+
+**LoopInfo** (loopinfo.goose) and **CycleInfo** (cycleinfo.goose): loops and cycles are ids into global tables
+(never reused); their block lists, subloop lists and the top-level list are runs in a pool (copied to a bigger run
+when they grow), kept in LLVM's order (a loop's header is `blocks[0]`). The block → innermost loop/cycle map is
+stamped with a per-function epoch. `loop_contains(l, bb)` walks the parents of the block's innermost loop (LLVM's
+`DenseBlockSet`; equivalent while the map and the block vectors are kept consistent, which every LLVM updater
+does). Update API for transforms: `loop_add_basic_block_to_loop`, `li_change_loop_for`, `loop_add_child`,
+`loop_remove_child`, `loop_replace_child_with`, `li_change_top_level_loop`, `loop_remove_block_from_loop`,
+`loop_move_to_header`, `li_remove_block`, `li_allocate_loop`; `ci_split_critical_edge`, `ci_add_block_to_cycle`.
+
+DemandedBits
 (demandedbits.goose) is computed per query (`db_analyze`, cached for the current function, `db_invalidate()` at the
 start and end of a pass that uses it). computeKnownBits (knownbits.goose) fails loudly on every case LLVM handles
 that isn't ported (see the file header), so imprecision can't silently change output. TargetLibraryInfo (tli.goose)
 must know the current function: set `tli_cur_fn = fv` at the start of a pass.
+
+Analysis ids and preserved sets are in analyses.goose (`A_*`, `PA_ALL`, `PA_NONE`, `PA_CFG`). `PA_CFG` is
+`preserveSet<CFGAnalyses>`: every CFG-only analysis (dominator trees, loops, cycles). A pass that changes the CFG
+and updates some trees returns exactly those bits (ADCE: domtree | postdomtree; break-crit-edges and
+loop-simplify: domtree | loops).
 
 ## 9. The pass manager and how to add a pass (passmgr.goose)
 
@@ -261,7 +289,7 @@ To add a function pass `foo`:
    printers), a case in `run_function_pass`, its class name in `pass_class_name` (for bisect), and `import foo;`.
    Pass parameters (`foo<a;b>`) arrive as the full element name: parse them in `parse_function_elem`.
 3. cl::opt flags it reads: add the name to `KNOWN_FLAGS` (flags.goose) and read with `flag_bool/flag_int`.
-4. New analysis: an `A_*` bit, `analysis_id` (for `require<>`/`invalidate<>`), invalidation in
+4. New analysis: an `A_*` bit in analyses.goose, `analysis_id` (for `require<>`/`invalidate<>`), invalidation in
    `invalidate_function`, and decide whether it's in `PA_CFG` (LLVM's `CFGAnalyses` set).
 5. Printers write to `errs(...)` (flags.goose); `errs_operand`/`errs_inst` print values exactly as the IR printer
    does (they number the function with the printer's SlotTracker).

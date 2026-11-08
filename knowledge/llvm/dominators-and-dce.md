@@ -19,12 +19,44 @@ Verified against opt 23.1.5 with the Goose port (`impl/goose/src/domtree.goose`,
   discarded and a reverse DFS from that root follows. If any non-trivial root was added, `RemoveRedundantRoots`
   drops roots forward-reachable from another root (swap with last, pop). The virtual root `<<exit node>>` gets the
   roots as children in DFS order.
-- `print<domtree>` always shows `DFSNumbers invalid` and `{4294967295,4294967295}` right after a fresh computation.
-  `IDFCalculator::calculate` calls `updateDFSNumbers()`, so a tree that ADCE used and preserved would print real
-  DFS numbers (no test shows it yet).
-- After `break-crit-edges`, the cached tree is updated with `applyUpdates` (incremental, `InsertEdge`/`DeleteEdge`
-  on a `GraphDiff` view), which can give a different child order than recomputing. Implementations that recompute
-  fail `tests/analysis/domtree/after_transform.ll`.
+- `print<domtree>` prints `DFSNumbers invalid: <SlowQueries> slow queries.` and `{4294967295,4294967295}` only
+  while `DFSInfoValid` is false. `updateDFSNumbers()` makes them valid (pre-order numbering, `{in,out}` with out =
+  the next number after the subtree) and resets SlowQueries; LoopAnalysis (`LoopInfoBase::analyze`) and every IDF
+  computation (`IDFCalculatorBase::calculate`: mem2reg, ADCE on the PDT) call it, so `print<loops>,print<domtree>`
+  or `mem2reg,print<domtree>` show real numbers (`tests/analysis/domtree/dfs_numbers_after_loops.ll`). Any
+  incremental update (InsertEdge, a DeleteEdge that changes something, addNewBlock, changeImmediateDominator,
+  eraseNode) sets DFSInfoValid = false but leaves the old numbers in the nodes, so a preserved tree can print stale
+  numbers with "invalid" (`tests/analysis/postdomtree/after_adce.ll`). `dominates(A, B)` counts a slow query when it
+  needs a tree walk; the 33rd slow query calls updateDFSNumbers.
+
+## Incremental updates (`applyUpdates`, `GraphDiff`, `DomTreeUpdater`)
+
+Verified with impl/goose (domtree.goose, dtu.goose) against random CFGs (`impl/goose/tools/fuzz_cfg.py`) and the
+break-crit-edges/adce/loop-simplify tests.
+
+- Child lists are intrusive in LLVM 23 (`FirstChild`/`Sibling`): `addChild` appends, `setIDom` unlinks from the old
+  parent and appends to the new one, `eraseNode` unlinks. (Older LLVMs used a vector with swap-remove; not 23.)
+- `applyUpdates(Updates)` builds a `GraphDiff` with `LegalizeUpdates`: per edge (swapped for post-dominators) the
+  insertions minus deletions; edges netting 0 vanish; the rest are ordered by the index of each edge's *last*
+  update, descending, and popped from the back, so they apply in the order of their last occurrence. One legalized
+  update takes a fast path without the snapshot. With more, the tree is recalculated first when
+  `NumLegalized > DomTreeNodes.size()` (trees of at most 100 nodes) or `> size/40`; `DomTreeNodes.size()` is
+  indexed by block number + 1 and grows to `max(Function::getMaxBlockNumber(), Idx + 1)`, so it counts blocks ever
+  numbered, not live nodes.
+- During a batch, the DFS sees the CFG *before* the not-yet-applied updates: successors reversed (LIFO), the
+  snapshot's deleted children removed (all copies), its inserted children appended in insertion order.
+- `InsertReachable`'s bucket queue is a `std::priority_queue` on node level (libstdc++ binary heap); ties pop in
+  heap order, and the order of `Affected` decides the new child order. Port push/pop_heap exactly.
+- break-crit-edges (`SplitKnownCriticalEdge`) creates the branch before inserting the block (its use of the
+  destination goes to the head of the use list), names the block `<pred>.<succ>_crit_edge`, and applies
+  `{Insert pred→new, Insert new→succ, Delete pred→succ (if no edge left)}` to the cached DT only (the new-PM pass
+  never has a PDT); it preserves DT and LoopInfo, not CFGAnalyses.
+- ADCE deletes the edges of dead branches with an eager DomTreeUpdater on the cached DT and the PDT (edges in
+  per-block insertion order of a `SmallPtrSet`; LLVM's order is only deterministic for <= 4 removed successors per
+  block) and preserves both trees even when the CFG changed (LoopInfo is invalidated).
+- `DomTreeUpdater` (lazy) applies pending updates in runs: plain updates as one `applyUpdates` batch, critical-edge
+  splits through `splitDTCriticalEdges` (addNewBlock + changeImmediateDominator) for the DT and as updates for the
+  PDT; deleted blocks are erased only once no updates are pending.
 
 ## DCE / ADCE / BDCE
 
