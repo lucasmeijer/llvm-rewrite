@@ -101,16 +101,18 @@ tti_opts: struct {
     cost_kind: s64 = -1;           // CostModel.cpp -cost-kind: -1 = throughput (default), 0..3, 4 = all
     intrinsic_cost_strategy: s64;  // -intrinsic-cost-strategy: 0 instruction-cost, 1 intrinsic-cost, 2 type-based
     predictable_branch_threshold: s64 = -1;   // -predictable-branch-threshold (getNumOccurrences > 0 when >= 0)
+    redux_cost: bool;              // -costmodel-reduxcost (declared in TargetTransformInfo.cpp, read nowhere)
 };
 
 tti_cl: struct { cost_kind: string; intrinsic_cost_strategy: string; }
-TTI_CL_OPT_COUNT :: 5;
+TTI_CL_OPT_COUNT :: 6;
 add_tti_cl_opts :: (list: [] Cl_Opt, start: s64) {
     list[start + 0] = .{"mcpu", .STRING, null, null, *tti_opts.mcpu};
     list[start + 1] = .{"mattr", .STRING, null, null, *tti_opts.mattr};
     list[start + 2] = .{"cost-kind", .STRING, null, null, *tti_cl.cost_kind};
     list[start + 3] = .{"intrinsic-cost-strategy", .STRING, null, null, *tti_cl.intrinsic_cost_strategy};
     list[start + 4] = .{"predictable-branch-threshold", .INT, null, *tti_opts.predictable_branch_threshold, null};
+    list[start + 5] = .{"costmodel-reduxcost", .BOOL, *tti_opts.redux_cost, null, null};
 }
 // the enum-valued options, decoded where they are used
 tti_decode_cl :: () {

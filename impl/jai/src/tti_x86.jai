@@ -695,36 +695,3 @@ x86_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
     return bt_intrinsic_cost(t, ica, kind);
 }
 
-// BasicTTIImplBase::getIntrinsicInstrCost (the scalar, non-VP paths; the rest fails loudly)
-bt_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
-    st := *t.xl;
-    if base_intrinsic_cost(ica) == 0 return 0;
-    n := iid_name(ica.id);
-    if begins_with(n, "llvm.x86.") return TCC_BASIC;   // Intrinsic::isTargetIntrinsic
-    if begins_with(n, "llvm.vp.") || begins_with(n, "llvm.experimental.vp.") x86_np("getIntrinsicInstrCost of VP intrinsics");
-    if ica.type_based_only return bt_type_based_intrinsic_cost(t, ica, kind);
-    ret := ica.ret;
-    scalar_ret := !is_vector_type(ret);
-    if n == {
-        case "llvm.powi";
-            if is_const_int(ica.args[1]) x86_np("getIntrinsicInstrCost of powi with a constant exponent");
-        case "llvm.cttz";
-            if scalar_ret && (st_hasBMI(st) || st_canUseCMOV(st) || st_is64Bit(st) || (!is_vector_type(ret) && type_bits(scalar_type(ret)) < ifx st_is64Bit(st) then cast(u32) 64 else 32)) return TCC_BASIC;
-        case "llvm.ctlz";
-            if scalar_ret && (st_hasLZCNT(st) || st_canUseCMOV(st) || st_is64Bit(st)) return TCC_BASIC;
-        case "llvm.memcpy"; return TCC_EXPENSIVE;   // getMemcpyCost (TargetTransformInfoImplBase)
-    }
-    if begins_with(n, "llvm.masked.") || begins_with(n, "llvm.vector.") || begins_with(n, "llvm.experimental.") ||
-       n == "llvm.fshl" || n == "llvm.fshr" || n == "llvm.stepvector" || n == "llvm.get.active.lane.mask" ||
-       n == "llvm.modf" || n == "llvm.sincos" || n == "llvm.sincospi" || begins_with(n, "llvm.loop.dependence")
-        x86_np(tprint("getIntrinsicInstrCost of %", n));
-    if is_vector_type(ret) x86_np("getIntrinsicInstrCost scalarization overhead");
-    a := ica.*;
-    a.args = .[];
-    a.scalar_cost = COST_INVALID;
-    return bt_type_based_intrinsic_cost(t, *a, kind);
-}
-bt_type_based_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
-    x86_np(tprint("getTypeBasedIntrinsicInstrCost of %", iid_name(ica.id)));
-    return 0;
-}
