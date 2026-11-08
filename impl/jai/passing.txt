@@ -1968,6 +1968,7 @@ tests/imported/llvm/Analysis/ValueTracking/powi-nneg.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/pr23011.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/pr75505.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/pr75505.ll::roundtrip
+tests/imported/llvm/Analysis/ValueTracking/recurrence-knownbits.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/recurrence-knownbits.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/select-known-non-zero-const.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/select-known-non-zero-const.ll::roundtrip
@@ -3755,6 +3756,7 @@ tests/imported/llvm/Transforms/InstCombine/2012-01-11-OpaqueBitcastCrash.ll::rou
 tests/imported/llvm/Transforms/InstCombine/2012-02-13-FCmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2012-02-28-ICmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2012-02-28-ICmp.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/2012-03-10-InstCombine.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2012-03-10-InstCombine.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2012-04-24-vselect.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2012-04-24-vselect.ll::roundtrip
@@ -4019,6 +4021,7 @@ tests/imported/llvm/Transforms/InstCombine/binop-cast.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/binop-itofp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/binop-of-displaced-shifts.ll::opt
 tests/imported/llvm/Transforms/InstCombine/binop-of-displaced-shifts.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/binop-phi-operands.ll::opt
 tests/imported/llvm/Transforms/InstCombine/binop-phi-operands.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/binop-recurrence.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/binop-select-cast-of-select-cond.ll::roundtrip
@@ -4373,6 +4376,7 @@ tests/imported/llvm/Transforms/InstCombine/fold-fadd-with-zero-gh154238.ll::roun
 tests/imported/llvm/Transforms/InstCombine/fold-fcmp-trunc.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fold-fops-into-selects.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fold-fops-into-selects.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fold-icmp-without-constant-into-phi.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fold-icmp-without-constant-into-phi.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fold-inc-of-add-of-not-x-and-y-to-sub-x-from-y.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fold-inc-of-add-of-not-x-and-y-to-sub-x-from-y.ll::roundtrip
@@ -4492,6 +4496,7 @@ tests/imported/llvm/Transforms/InstCombine/icmp-bitcast-glob.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-bitcast-glob.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-clamp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-clamp.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/icmp-constant-phi.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-constant-phi.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-custom-dl.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-div-constant.ll::opt
@@ -4506,6 +4511,7 @@ tests/imported/llvm/Transforms/InstCombine/icmp-equality-xor.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-equality-xor.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-ext-ext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-ext-ext.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/icmp-fold-into-phi.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-fold-into-phi.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-fsh.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-fsh.ll::roundtrip
@@ -4658,6 +4664,7 @@ tests/imported/llvm/Transforms/InstCombine/is_fpclass.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/isascii-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/isdigit-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ispow2.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/issue173148-sext-phi-select-infloop.ll::opt
 tests/imported/llvm/Transforms/InstCombine/issue173148-sext-phi-select-infloop.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/issue64967-reassoc-fmul.ll::opt
 tests/imported/llvm/Transforms/InstCombine/issue64967-reassoc-fmul.ll::roundtrip
@@ -4944,6 +4951,7 @@ tests/imported/llvm/Transforms/InstCombine/partally-redundant-left-shift-input-m
 tests/imported/llvm/Transforms/InstCombine/pdep.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pext.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/phi-aware-aggregate-reconstruction.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/phi-cse.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-cse.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/phi-equal-incoming-pointers.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/phi-extractvalue.ll::roundtrip
@@ -4954,13 +4962,21 @@ tests/imported/llvm/Transforms/InstCombine/phi-int2ptr-different-addrspace.ll::r
 tests/imported/llvm/Transforms/InstCombine/phi-int2ptr-fold.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/phi-known-bits-operand-order.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-known-bits-operand-order.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/phi-load-metadata-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-load-metadata-2.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/phi-load-metadata-3.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-load-metadata-3.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/phi-load-metadata-4.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-load-metadata-4.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/phi-load-metadata-dominance.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-load-metadata-dominance.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/phi-load-metadata.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-load-metadata.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/phi-of-insertvalues.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-of-insertvalues.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/phi-pointercasts.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-pointercasts.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/phi-preserve-ir-flags.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-preserve-ir-flags.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/phi-select-constant.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-select-constant.ll::roundtrip
@@ -5073,6 +5089,7 @@ tests/imported/llvm/Transforms/InstCombine/pr44245.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr44541.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr44552.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr44835.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/pr46680.ll::opt
 tests/imported/llvm/Transforms/InstCombine/pr46680.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/pr49688.ll::opt
 tests/imported/llvm/Transforms/InstCombine/pr49688.ll::roundtrip
@@ -5405,6 +5422,7 @@ tests/imported/llvm/Transforms/InstCombine/signext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/signext.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/signmask-of-sext-vs-of-shl-of-zext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/signmask-of-sext-vs-of-shl-of-zext.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simple_phi_condition.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simple_phi_condition.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-bits-pointer.ll::opt
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-bits-pointer.ll::roundtrip
@@ -5829,6 +5847,7 @@ tests/imported/llvm/Transforms/InstCombine/zext-fold.ll::opt
 tests/imported/llvm/Transforms/InstCombine/zext-fold.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/zext-or-icmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/zext-or-icmp.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/zext-phi.ll::opt
 tests/imported/llvm/Transforms/InstCombine/zext-phi.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/zext-sub-trunc.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/zext.ll::roundtrip
