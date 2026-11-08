@@ -291,8 +291,9 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   that comes from these files. The remaining bitwise failures need the cast visitors (`zext (trunc X)` -> `and`,
   `trunc (lshr X, C) to i1` -> bit test, canEvaluateTruncated), the call visitor (fshl/fshr amount folding,
   `range` on ctpop/cttz, umin/umax, is.fpclass -> fcmp), vector ops (shufflevector/extractelement/bitcast) and
-  foldVectorBinop's unshuffleConstant. The fuzzer is a 60-line throwaway (random chains of binops on 3 args,
-  `llvm-extract`-free: compare canonicalized outputs per function); rebuild it when touching these files.
+  foldVectorBinop's unshuffleConstant. Tools: `python3 impl/jai/tools/ic_funcdiff.py <files>` (per-function
+  LLVM-vs-us comparison of the functions whose bodies only use ported opcodes; edit its `PORTED` set as visitors
+  land) and `python3 impl/jai/tools/fuzz_bitwise.py SEED COUNT`; rerun both after touching these files.
   Fail loudly: getInsertionPointAfterDef of invoke/callbr (freelyInvert),
   replaceUsesWithIf with a constant user.
 - **Partial visitors** (ic_misc.jai: their comments say where they stop): casts (commonCastTransforms; zext/sext/trunc/[su]itofp flag folds), call (InstSimplify +
