@@ -19,6 +19,7 @@ var dl_nonintegral: i64[>..<];     // "ni" address spaces
 var dl_big_endian: bool = false;
 
 fn dl_set_spec(xs: PrimSpec[>..<]&, bits: i64, abi: i64, pref: i64) {
+    dl_cache_clear();
     for &s in xs { if s.bits == bits { s.abi = abi; s.pref = pref; return; } }
     xs.push(PrimSpec { bits: bits, abi: abi, pref: pref });
     // keep sorted by bits
@@ -32,6 +33,7 @@ fn dl_set_spec(xs: PrimSpec[>..<]&, bits: i64, abi: i64, pref: i64) {
 }
 
 fn dl_reset() {
+    dl_cache_clear();
     dl_ints.clear();
     dl_floats.clear();
     dl_vecs.clear();
@@ -221,8 +223,21 @@ recursive fn dl_alloc_size(t: i32) -> i64 {
     return align_to(dl_store_size(t), dl_align(t, true));
 }
 
+// StructLayout cache by type id (LLVM caches StructLayouts in the DataLayout too); cleared by dl_reset.
+var dl_sl_size: i64[>..];
+var dl_sl_align: i64[>..];
+fn dl_cache_clear() { dl_sl_size.clear(); dl_sl_align.clear(); }
+
 // StructLayout: (size, alignment)
 recursive fn dl_struct_layout(t: i32) -> i64, i64 {
+    if (t as i64) < dl_sl_size.len && dl_sl_size[t] >= 0 { return dl_sl_size[t], dl_sl_align[t]; }
+    let s, a = dl_struct_layout_compute(t);
+    while dl_sl_size.len <= (t as i64) { dl_sl_size.push(-1); dl_sl_align.push(-1); }
+    dl_sl_size[t] = s;
+    dl_sl_align[t] = a;
+    return s, a;
+}
+recursive fn dl_struct_layout_compute(t: i32) -> i64, i64 {
     var size = 0;
     var al = 1;
     let packed = (types[t].flags & TF_PACKED) != 0;
