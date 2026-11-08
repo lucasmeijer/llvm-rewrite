@@ -30,6 +30,7 @@ import pm;
 import vt;
 import constfold;
 import dinfo;
+import earlycse;
 
 var cu_dtu: bool = false;
 
@@ -1584,3 +1585,230 @@ fn cu_swap_successors(bi: i32) {
 }
 
 fn cu_is_dilocation(m: i32) -> bool { m >= 0 && mds[m].kind == MK_DI && di_kind(m) == DIK_LOCATION }
+
+// ---------------------------------------------------------------------------------------------
+// combineMetadata(K, J, DoesKMove, AAOnly) (Local.cpp) and the MDNode merge helpers (Metadata.cpp)
+
+fn cu_md_cint(m: i32, k: i64) -> i32 {
+    let o = md_op(m, k);
+    if o < 0 || mds[o].kind != MK_VALUE { fatal("internal: expected a ConstantAsMetadata operand"); }
+    return mds[o].extra;
+}
+
+// getOrSelfReference(Ctx, Ops)
+fn cu_get_or_self_reference(ops: const i32[:]) -> i32 {
+    if ops.len > 0 {
+        let n = ops[0];
+        if n >= 0 && md_is_node(n) && mds[n].nops as i64 == ops.len && md_op(n, 0) == n {
+            for k in 1..ops.len { if ops[k] != md_op(n, k) { return md_get(MK_TUPLE, -1, ops, false); } }
+            return n;
+        }
+    }
+    return md_get(MK_TUPLE, -1, ops, false);
+}
+
+// MDNode::intersect(A, B)
+fn cu_md_intersect(a: i32, b: i32) -> i32 {
+    if a < 0 || b < 0 { return -1; }
+    var xs: i32[>..<] = [];
+    for k in mds[a].nops {
+        let o = md_op(a, k);
+        if position(xs, o) >= 0 { continue; }
+        var inb = false;
+        for j in mds[b].nops { if md_op(b, j) == o { inb = true; } }
+        if inb { xs.push(o); }
+    }
+    return cu_get_or_self_reference(xs);
+}
+
+// MDNode::getMostGenericAliasScope(A, B)
+fn cu_scope_domain(n: i32) -> i32 { if mds[n].nops < 2 { -1 } else { md_op(n, 1) } }
+fn cu_most_generic_alias_scope(a: i32, b: i32) -> i32 {
+    if a < 0 || b < 0 { return -1; }
+    var adom: i32[>..<] = [];
+    var idom: i32[>..<] = [];
+    var xs: i32[>..<] = [];
+    for k in mds[a].nops {
+        let o = md_op(a, k);
+        if o >= 0 && md_is_node(o) { let d = cu_scope_domain(o); if d >= 0 { cu_push_unique(adom, d); } }
+    }
+    for k in mds[b].nops {
+        let o = md_op(b, k);
+        if o >= 0 && md_is_node(o) {
+            let d = cu_scope_domain(o);
+            if d >= 0 && position(adom, d) >= 0 { cu_push_unique(idom, d); cu_push_unique(xs, o); }
+        }
+    }
+    for k in mds[a].nops {
+        let o = md_op(a, k);
+        if o >= 0 && md_is_node(o) {
+            let d = cu_scope_domain(o);
+            if d >= 0 && position(idom, d) >= 0 { cu_push_unique(xs, o); }
+        }
+    }
+    if xs.len == 0 { return -1; }
+    return cu_get_or_self_reference(xs);
+}
+
+// intersectAccessGroups(Inst1, Inst2)
+fn cu_intersect_access_groups(i1: i32, i2: i32) -> i32 {
+    let kind = md_kind_id("llvm.access.group");
+    let m1a = inst_may_read_or_write_memory(i1);
+    let m2a = inst_may_read_or_write_memory(i2);
+    if !m1a && !m2a { return -1; }
+    if !m1a { return inst_get_md(i2, kind); }
+    if !m2a { return inst_get_md(i1, kind); }
+    let m1 = inst_get_md(i1, kind);
+    let m2 = inst_get_md(i2, kind);
+    if m1 < 0 || m2 < 0 { return -1; }
+    if m1 == m2 { return m1; }
+    // the access groups: a node with no operands is one group, else a list of groups
+    var s2: i32[>..<] = [];
+    if mds[m2].nops == 0 { s2.push(m2); } else { for k in mds[m2].nops { s2.push(md_op(m2, k)); } }
+    var inter: i32[>..<] = [];
+    if mds[m1].nops == 0 { if position(s2, m1) >= 0 { inter.push(m1); } }
+    else { for k in mds[m1].nops { let g = md_op(m1, k); if position(s2, g) >= 0 { inter.push(g); } } }
+    if inter.len == 0 { return -1; }
+    if inter.len == 1 { return inter[0]; }
+    return md_get(MK_TUPLE, -1, inter, false);
+}
+
+// MDNode::getMostGenericFPMath
+fn cu_most_generic_fpmath(a: i32, b: i32) -> i32 {
+    if a < 0 || b < 0 { return -1; }
+    if a == b { return a; }
+    cu_not_ported("MDNode::getMostGenericFPMath of different nodes");
+    return -1;
+}
+
+// MDNode::getMostGenericAlignmentOrDereferenceable
+fn cu_most_generic_align_deref(a: i32, b: i32) -> i32 {
+    if a < 0 || b < 0 { return -1; }
+    if cint_lo(cu_md_cint(a, 0)) < cint_lo(cu_md_cint(b, 0)) { return a; }
+    return b;
+}
+
+// MDNode::getMergedCalleeTypeMetadata
+fn cu_merged_callee_type(a: i32, b: i32) -> i32 {
+    if a < 0 || b < 0 { return -1; }
+    var xs: i32[>..<] = [];
+    for k in mds[a].nops { cu_push_unique(xs, md_op(a, k)); }
+    for k in mds[b].nops { cu_push_unique(xs, md_op(b, k)); }
+    return md_get(MK_TUPLE, -1, xs, false);
+}
+
+// MDNode::toCaptureComponents / fromCaptureComponents
+fn cu_to_capture_components(m: i32) -> i64 {
+    if m < 0 { return CC_ALL_CU; }
+    var cc: i64 = 0;
+    for k in mds[m].nops {
+        let s = sbytes(mds[md_op(m, k)].extra);
+        if s == "address" { cc |= 3; } else if s == "address_is_null" { cc |= 1; }
+        else if s == "provenance" { cc |= 12; } else if s == "read_provenance" { cc |= 4; }
+    }
+    return cc;
+}
+let CC_ALL_CU: i64 = 15;
+fn cu_from_capture_components(cc: i64) -> i32 {
+    if cc == CC_ALL_CU { return -1; }
+    var xs: i32[>..<] = [];
+    if (cc & 3) == 1 { xs.push(md_string("address_is_null")); }
+    else if (cc & 3) == 3 { xs.push(md_string("address")); }
+    if (cc & 12) == 4 { xs.push(md_string("read_provenance")); }
+    else if (cc & 12) == 12 { xs.push(md_string("provenance")); }
+    return md_get(MK_TUPLE, -1, xs, false);
+}
+
+// MDNode::getMostGenericNoaliasAddrspace: ConstantRangeList intersection
+fn cu_most_generic_noalias_addrspace(a: i32, b: i32) -> i32 {
+    if a < 0 || b < 0 { return -1; }
+    if a == b { return a; }
+    cu_not_ported("MDNode::getMostGenericNoaliasAddrspace of different nodes");
+    return -1;
+}
+
+// MDNode::getMergedProfMetadata(A, B, AInstr, BInstr)
+fn cu_merged_prof(a: i32, b: i32, ai: i32, bi: i32) -> i32 {
+    fn legal(i: i32) -> bool {
+        let o = iop(i);
+        return o == OP_INVOKE || o == OP_CONDBR || o == OP_SWITCH || o == OP_CALL || o == OP_INDIRECTBR || o == OP_SELECT || o == OP_CALLBR;
+    }
+    if !legal(ai) || !legal(bi) { return -1; }
+    if a < 0 || b < 0 { return if a >= 0 { a } else { b }; }
+    if iop(ai) == OP_CALL && iop(bi) == OP_CALL && called_function(ai) >= 0 && called_function(bi) >= 0 {
+        // mergeDirectCallProfMetadata
+        if pd_md_string_is(md_op(a, 0), "branch_weights") && pd_md_string_is(md_op(b, 0), "branch_weights") {
+            let wa = pd_md_weight(a, pd_offset(a));
+            let wb = pd_md_weight(b, pd_offset(b));
+            var s = wa + wb;
+            if s < wa { s = 0xFFFFFFFFFFFFFFFF; }
+            let ops: i32[2] = [md_string("branch_weights"), md_value(c_int(T_I64, s as! i64))];
+            return md_get(MK_TUPLE, -1, ops, false);
+        }
+        return -1;
+    }
+    if a == b { return a; }
+    return -1;
+}
+
+fn cu_set_md(i: i32, kind: i32, node: i32) { if node >= 0 { inst_set_md(i, kind, node); } else { inst_erase_md(i, kind); } }
+
+fn cu_combine_metadata(k: i32, j: i32, does_k_move: bool, aa_only: bool) {
+    var kinds: i32[>..<] = [];
+    var nodes: i32[>..<] = [];
+    let ki = inst_of(k);
+    for x in insts[ki].nmd {
+        let kind = md_att[insts[ki].md + 2 * x];
+        if kind == 0 { continue; }
+        kinds.push(kind);
+        nodes.push(md_att[insts[ki].md + 2 * x + 1]);
+    }
+    let noundef_k = md_kind_id("noundef");
+    for x in kinds.len {
+        let kind = kinds[x];
+        let kmd = nodes[x];
+        let jmd = inst_get_md(j, kind);
+        let nm = sbytes(md_kind_names[kind]);
+        let has_noundef = inst_get_md(k, noundef_k) >= 0;
+        if nm == "DIAssignID" { if !aa_only && jmd != kmd { cu_not_ported("mergeDIAssignID"); } }
+        else if nm == "tbaa" {
+            if does_k_move && jmd != kmd {
+                if jmd < 0 { cu_set_md(k, kind, -1); } else { cu_not_ported("MDNode::getMostGenericTBAA of different tags"); }
+            }
+        }
+        else if nm == "alias.scope" { if does_k_move { cu_set_md(k, kind, cu_most_generic_alias_scope(jmd, kmd)); } }
+        else if nm == "noalias" || nm == "llvm.mem.parallel_loop_access" { if does_k_move { cu_set_md(k, kind, cu_md_intersect(jmd, kmd)); } }
+        else if nm == "llvm.access.group" { if does_k_move { cu_set_md(k, kind, cu_intersect_access_groups(k, j)); } }
+        else if nm == "range" { if !aa_only && (does_k_move || !has_noundef) { cu_set_md(k, kind, ec_most_generic_range(jmd, kmd)); } }
+        else if nm == "nofpclass" { if !aa_only && (does_k_move || !has_noundef) { cu_set_md(k, kind, ec_most_generic_nofpclass(jmd, kmd)); } }
+        else if nm == "fpmath" { if !aa_only { cu_set_md(k, kind, cu_most_generic_fpmath(jmd, kmd)); } }
+        else if nm == "invariant.load" || nm == "invariant.group" { if does_k_move { cu_set_md(k, kind, jmd); } }
+        else if nm == "nonnull" { if !aa_only && (does_k_move || !has_noundef) { cu_set_md(k, kind, jmd); } }
+        else if nm == "prof" || nm == "mmra" || nm == "memprof" || nm == "callsite" { }
+        else if nm == "callee_type" { if !aa_only { cu_set_md(k, kind, cu_merged_callee_type(kmd, jmd)); } }
+        else if nm == "align" { if !aa_only && (does_k_move || !has_noundef) { cu_set_md(k, kind, cu_most_generic_align_deref(jmd, kmd)); } }
+        else if nm == "dereferenceable" || nm == "dereferenceable_or_null" { if !aa_only && does_k_move { cu_set_md(k, kind, cu_most_generic_align_deref(jmd, kmd)); } }
+        else if nm == "llvm.preserve.access.index" { }
+        else if nm == "noundef" { if !aa_only && does_k_move { cu_set_md(k, kind, jmd); } }
+        else if nm == "nontemporal" { if !aa_only { cu_set_md(k, kind, jmd); } }
+        else if nm == "mem.cache_hint" { if !aa_only && kmd != jmd { cu_set_md(k, kind, -1); } }
+        else if nm == "noalias.addrspace" { if does_k_move { cu_set_md(k, kind, cu_most_generic_noalias_addrspace(jmd, kmd)); } }
+        else if nm == "nosanitize" { cu_set_md(k, kind, jmd); }
+        else if nm == "captures" { cu_set_md(k, kind, cu_from_capture_components(cu_to_capture_components(jmd) | cu_to_capture_components(kmd))); }
+        else if nm == "alloc_token" { if kmd != jmd { cu_set_md(k, kind, -1); } }
+        else { cu_set_md(k, kind, -1); }
+    }
+    let mmra = md_kind_id("mmra");
+    let jm = inst_get_md(j, mmra);
+    let km = inst_get_md(k, mmra);
+    if jm >= 0 || km >= 0 {
+        if jm != km { cu_not_ported("MMRAMetadata::combine"); }
+    }
+    let memprof = md_kind_id("memprof");
+    if !aa_only && (inst_get_md(j, memprof) >= 0 || inst_get_md(k, memprof) >= 0) { cu_not_ported("MDNode::getMergedMemProfMetadata"); }
+    let callsite = md_kind_id("callsite");
+    if !aa_only && (inst_get_md(j, callsite) >= 0 || inst_get_md(k, callsite) >= 0) { cu_not_ported("MDNode::getMergedCallsiteMetadata"); }
+    let jp = inst_get_md(j, MDK_PROF);
+    let kp = inst_get_md(k, MDK_PROF);
+    if !aa_only && (jp >= 0 || kp >= 0) { cu_set_md(k, MDK_PROF, cu_merged_prof(kp, jp, k, j)); }
+}

@@ -911,26 +911,7 @@ fn and_ir_flags(a: i32, b: i32) {
 }
 
 // combineMetadataForCSE(K, J, DoesKMove)
-fn combine_metadata_for_cse(k: i32, j: i32, moves: bool) {
-    let a = insts[inst_of(k)];
-    let b = insts[inst_of(j)];
-    // Only the trivial case (same attachments) is ported.
-    var same = a.nmd == b.nmd;
-    if same {
-        for x in a.nmd {
-            let kind = md_att[a.md + 2 * x];
-            if kind == MDK_DBG_SC { continue; }
-            if md_att[a.md + 2 * x] != md_att[b.md + 2 * x] || md_att[a.md + 2 * x + 1] != md_att[b.md + 2 * x + 1] { same = false; }
-        }
-    }
-    var nondbg_a = 0;
-    for x in a.nmd { if md_att[a.md + 2 * x] != MDK_DBG_SC { nondbg_a++; } }
-    var nondbg_b = 0;
-    for x in b.nmd { if md_att[b.md + 2 * x] != MDK_DBG_SC { nondbg_b++; } }
-    if nondbg_a == 0 && nondbg_b == 0 { return; }
-    if same { return; }
-    scf_not_ported("combineMetadata of instructions with different metadata");
-}
+fn combine_metadata_for_cse(k: i32, j: i32, moves: bool) { cu_combine_metadata(k, j, moves, false); }
 
 // Instruction::applyMergedLocation(A, B)
 fn apply_merged_location(i: i32, a: i32, b: i32) {
@@ -939,10 +920,7 @@ fn apply_merged_location(i: i32, a: i32, b: i32) {
 }
 // DILocation::getMergedLocation(A, B)
 fn merged_location(a: i32, b: i32) -> i32 {
-    if a < 0 || b < 0 { return -1; }
-    if a == b { return a; }
-    scf_not_ported("DILocation::getMergedLocation of different locations");
-    return -1;
+    return m2r_merged_location(a, b);
 }
 
 // hoistLockstepIdenticalDbgVariableRecords
@@ -965,48 +943,39 @@ var lri_blocks: i32[>..<];
 var lri_cur: i32[>..<];
 var lri_valid: bool = false;
 
-fn lri_skip_back(i0: i32) -> i32 {
-    var i = i0;
-    while i >= 0 && cu_is_debug_or_pseudo(i) { i = inst_prev(i); }
-    return i;
-}
-fn lri_skip_fwd(i0: i32) -> i32 {
-    var i = i0;
-    while i >= 0 && cu_is_debug_or_pseudo(i) { i = inst_next(i); }
-    return i;
-}
 fn lri_reset() {
     lri_cur.clear();
     lri_valid = true;
     for b in lri_blocks {
         let t = block_terminator(b);
-        let p = lri_skip_back(inst_prev(t));
-        if p < 0 { lri_valid = false; }
+        let p = inst_prev(t);
+        if p < 0 { lri_valid = false; return; }
         lri_cur.push(p);
     }
+    if lri_cur.len == 0 { lri_valid = false; }
 }
 fn lri_init(bbs: const i32[:]) {
     lri_blocks.clear();
     for b in bbs { lri_blocks.push(b); }
     lri_reset();
 }
-// operator-- : move to the previous instruction in every block
+// operator--: the previous instruction in every block
 fn lri_dec() {
     if !lri_valid { return; }
     for k in lri_cur.len {
-        let p = lri_skip_back(inst_prev(lri_cur[k]));
+        let p = inst_prev(lri_cur[k]);
         if p < 0 { lri_valid = false; return; }
-        lri_cur[k] = p;
     }
+    for k in lri_cur.len { lri_cur[k] = inst_prev(lri_cur[k]); }
 }
-// operator++ : move to the next instruction (towards the terminator)
+// operator++: the next instruction in every block
 fn lri_inc() {
     if !lri_valid { return; }
     for k in lri_cur.len {
-        let n = lri_skip_fwd(inst_next(lri_cur[k]));
-        if n < 0 || is_terminator(n) { lri_valid = false; return; }
-        lri_cur[k] = n;
+        let n = inst_next(lri_cur[k]);
+        if n < 0 { lri_valid = false; return; }
     }
+    for k in lri_cur.len { lri_cur[k] = inst_next(lri_cur[k]); }
 }
 
 // hoistCommonCodeFromSuccessors(TI, AllInstsEqOnly)
@@ -1270,10 +1239,10 @@ var eph_set: i32[>..<];
 fn eph_track(i: i32) -> bool {
     var eph = inst_iid(i) == IID_assume;
     if !eph {
-        // all users are ephemeral and I has no side effects / isn't a terminator
+        // all users are ephemeral (vacuously true without users) and I has no side effects / isn't a terminator
         if !inst_may_have_side_effects(i) && !is_terminator(i) {
             var u = first_use(i);
-            var all = u >= 0;
+            var all = true;
             while u >= 0 { if position(eph_set, uses[u].user) < 0 { all = false; } u = use_next(u); }
             eph = all;
         }
@@ -3984,20 +3953,378 @@ fn simplify_indirect_br(ibi: i32) -> bool {
 // ---------------------------------------------------------------------------------------------
 // Sinking (sinkCommonCodeFromPredecessors) and invoke merging: not ported
 
+// PHIOperands: DenseMap<const Use*, SmallVector<Value*>> as (use id, run start, run length)
+var po_use: i32[>..<];
+var po_at: i64[>..<];
+var po_n: i64[>..<];
+var po_pool: i32[>..<];
+fn po_find(u: i32) -> i64 { for k in po_use.len { if po_use[k] == u { return k; } } return -1; }
+fn po_value(k: i64, j: i64) -> i32 { po_pool[po_at[k] + j] }
+
+// replacingOperandWithVariableIsCheap
+fn replacing_operand_with_variable_is_cheap(i: i32, k: i64) -> bool {
+    let o = iop(i);
+    if o == OP_UDIV || o == OP_SDIV || o == OP_UREM || o == OP_SREM { return k != 1; }
+    return inst_iid(i) == 0;
+}
+
+// CallBase::isIndirectCall
+fn cb_is_indirect_call(c: i32) -> bool {
+    let v = cb_callee(c);
+    if is_func(v) { return false; }
+    if vals[v].kind == VK_INLINEASM { return false; }
+    return true;
+}
+
+// canSinkInstructions(Insts, PHIOperands)
+fn can_sink_instructions(xs: const i32[:]) -> bool {
+    var nuses: i64 = -1;
+    for i in xs {
+        let o = iop(i);
+        if o == OP_PHI || inst_is_eh_pad(i) || o == OP_ALLOCA || ty_kind(vals[i].ty) == TK_TOKEN { return false; }
+        let p = inst_parent(i);
+        if cu_single_succ(p) == p { return false; }
+        if is_callbase(i) && (vals[cb_callee(i)].kind == VK_INLINEASM || cb_cannot_merge(i) || cb_is_convergent(i)) { return false; }
+        let n = num_uses(i);
+        if nuses < 0 { nuses = n; } else if nuses != n { return false; }
+    }
+    let i0 = xs[0];
+    let m0 = mmra_md(i0);
+    for i in xs {
+        if !cu_same_operation_as(i, i0, CU_INTERSECT_ATTRS) { return false; }
+        if mmra_md(i) != m0 { return false; }
+    }
+    var u = first_use(i0);
+    while u >= 0 {
+        let k = po_find(u);
+        if k < 0 { return false; }
+        if po_n[k] != xs.len { return false; }
+        for j in xs.len { if po_value(k, j) != xs[j] { return false; } }
+        u = use_next(u);
+    }
+    if is_callbase(i0) {
+        var have_ind = false;
+        var all_ind = true;
+        for i in xs { if cb_is_indirect_call(i) { have_ind = true; } else { all_ind = false; } }
+        if have_ind {
+            if !all_ind { return false; }
+        } else {
+            let c0 = cb_callee(xs[0]);
+            for i in xs { if cb_callee(i) != c0 { return false; } }
+        }
+    }
+    for k in nops(i0) {
+        let opv = op(i0, k);
+        var same = true;
+        for i in xs { if op(i, k) != opv { same = false; } }
+        if !same {
+            if (is_constant(opv) && !replacing_operand_with_variable_is_cheap(i0, k)) || !cu_can_replace_operand_with_variable(i0, k) { return false; }
+            let ui = vals[i0].ops + k as i32;
+            var e = po_find(ui);
+            if e < 0 { po_use.push(ui); po_at.push(po_pool.len); po_n.push(0); e = po_use.len - 1; }
+            if po_n[e] != 0 && po_at[e] + po_n[e] != po_pool.len {
+                // re-append the run at the end so it stays contiguous
+                let old = po_at[e];
+                let n = po_n[e];
+                po_at[e] = po_pool.len;
+                for j in n { po_pool.push(po_pool[old + j]); }
+            }
+            for i in xs { po_pool.push(op(i, k)); po_n[e] += 1; }
+        }
+    }
+    return true;
+}
+
+// sinkLastInstruction(Blocks)
+fn sink_last_instruction(bbs: const i32[:]) {
+    let bbend = term_succ(block_terminator(bbs[0]), 0);
+    var xs: i32[>..<] = [];
+    for b in bbs { xs.push(inst_prev(block_terminator(b))); }
+    let i0 = xs[0];
+    var newops: i32[>..<] = [];
+    for k in nops(i0) {
+        var need = false;
+        for i in xs { if op(i, k) != op(i0, k) { need = true; } }
+        if !need { newops.push(op(i0, k)); continue; }
+        let o = op(i0, k);
+        let pn = new_inst(OP_PHI, vals[o].ty, xs.len);
+        vals[pn].nops = 0;
+        let f = block_first(bbend);
+        if f >= 0 { inst_insert_before(pn, f); } else { block_append_inst(bbend, pn); }
+        let nm = name_plus(o, ".sink");
+        set_name(pn, nm);
+        for i in xs { phi_add_incoming(pn, op(i, k), inst_parent(i)); }
+        newops.push(pn);
+    }
+    for k in nops(i0) { set_op(i0, k, newops[k]); }
+    if inst_first_dbg(i0) >= 0 { scf_not_ported("sinking instructions with debug records"); }
+    inst_move_before(i0, scf_first_insertion_pt(bbend));
+    for i in xs {
+        if i == i0 { continue; }
+        apply_merged_location(i0, inst_get_md(i0, MDK_DBG_SC), inst_get_md(i, MDK_DBG_SC));
+        combine_metadata_for_cse(i0, i, true);
+        and_ir_flags(i0, i);
+        if is_callbase(i0) { try_intersect_attributes(i0, i); }
+    }
+    // make_early_inc_range(I0->users()): the next use is read before the PHI is replaced
+    var u = first_use(i0);
+    while u >= 0 {
+        let nu = use_next(u);
+        let pn = uses[u].user;
+        rauw(pn, i0);
+        scf_erase(pn);
+        u = nu;
+    }
+    for i in xs {
+        if i == i0 { continue; }
+        rauw(i, i0);
+        if inst_first_dbg(i) >= 0 { scf_not_ported("sinking instructions with debug records"); }
+        scf_erase(i);
+    }
+}
+
+// BasicBlock::getFirstInsertionPt
+fn scf_first_insertion_pt(bb: i32) -> i32 {
+    var i = first_non_phi(bb);
+    if i >= 0 && (iop(i) == OP_LANDINGPAD || iop(i) == OP_CLEANUPPAD || iop(i) == OP_CATCHPAD || iop(i) == OP_CATCHSWITCH) { i = inst_next(i); }
+    return i;
+}
+
+fn is_gep_operator(v: i32) -> bool { opcode_of(v) == OP_GEP }
+
 fn sink_common_code_from_predecessors(bb: i32) -> bool {
-    var n = 0;
-    each_pred(bb) { p => if iop(block_terminator(p)) == OP_BR { n++; } };
-    if n < 2 { return false; }
-    scf_not_ported("sinkCommonCodeFromPredecessors");
-    return false;
+    var upreds: i32[>..<] = [];
+    var have_non_uncond = false;
+    var preds: i32[>..<] = [];
+    cu_preds(bb, preds);
+    for p in preds {
+        if iop(block_terminator(p)) == OP_BR { upreds.push(p); } else { have_non_uncond = true; }
+    }
+    if upreds.len < 2 { return false; }
+    po_use.clear(); po_at.clear(); po_n.clear(); po_pool.clear();
+    var p = block_first(bb);
+    while p >= 0 && iop(p) == OP_PHI {
+        // IncomingVals: first use per incoming block
+        var key_use: i32 = -1;
+        for k in nops(p) { if phi_block(p, k) == upreds[0] { key_use = vals[p].ops + k as i32; break; } }
+        var e = po_find(key_use);
+        if e < 0 { po_use.push(key_use); po_at.push(po_pool.len); po_n.push(0); e = po_use.len - 1; }
+        for pb in upreds {
+            var v: i32 = -1;
+            for k in nops(p) { if phi_block(p, k) == pb { v = phi_value(p, k); break; } }
+            po_pool.push(v);
+            po_n[e] += 1;
+        }
+        p = inst_next(p);
+    }
+    var scan_idx: i64 = 0;
+    var to_sink: i32[>..<] = [];
+    lri_init(upreds);
+    while lri_valid {
+        var cur: i32[>..<] = [];
+        for x in lri_cur { cur.push(x); }
+        if !can_sink_instructions(cur) { break; }
+        for x in cur { cu_push_unique(to_sink, x); }
+        scan_idx++;
+        lri_dec();
+    }
+    if scan_idx == 0 { return false; }
+    let followed = cu_followed_by_deopt_or_unreachable(bb);
+    if !followed {
+        fn profitable() -> bool {
+            var nphi = 0;
+            let i0 = lri_cur[0];
+            for k in nops(i0) {
+                let u = vals[i0].ops + k as i32;
+                let e = po_find(u);
+                if e < 0 { continue; }
+                var all = true;
+                for j in po_n[e] { if position(to_sink, po_value(e, j)) < 0 { all = false; } }
+                if all { continue; }
+                nphi++;
+                let o = iop(i0);
+                let is_mem = (o == OP_LOAD && k == 0) || (o == OP_STORE && k == 1);
+                if is_mem {
+                    for j in po_n[e] { if is_gep_operator(po_value(e, j)) { return false; } }
+                }
+            }
+            return nphi <= 1;
+        }
+        lri_reset();
+        var idx: i64 = 0;
+        var prof_set: i32[>..<] = [];
+        while idx < scan_idx {
+            if !profitable() { break; }
+            for x in lri_cur { cu_push_unique(prof_set, x); }
+            lri_dec();
+            idx++;
+        }
+        if idx == 0 { return false; }
+        if idx < scan_idx {
+            scan_idx = idx;
+            to_sink.clear();
+            for x in prof_set { to_sink.push(x); }
+            lri_inc();
+            idx--;
+            while idx >= 0 {
+                for x in lri_cur { let j = position(prof_set, x); if j >= 0 { prof_set.remove_at(j); } }
+                if !profitable() {
+                    scan_idx = idx;
+                    to_sink.clear();
+                    for x in prof_set { to_sink.push(x); }
+                }
+                lri_inc();
+                idx--;
+            }
+        }
+        if scan_idx == 0 { return false; }
+    }
+    var changed = false;
+    if have_non_uncond {
+        if !followed {
+            lri_reset();
+            var idx: i64 = 0;
+            var profitable_any = false;
+            while idx < scan_idx {
+                if !spec_safe(lri_cur[0], -1, false) { profitable_any = true; break; }
+                lri_dec();
+                idx++;
+            }
+            if !profitable_any { return false; }
+        }
+        if cu_split_block_predecessors(bb, upreds, ".sink.split") < 0 { return false; }
+        changed = true;
+    }
+    var sink_idx: i64 = 0;
+    while sink_idx != scan_idx {
+        sink_last_instruction(upreds);
+        changed = true;
+        sink_idx++;
+    }
+    return changed;
+}
+
+fn invoke_has_normal_dest(ii: i32) -> bool { iop(first_non_phi(invoke_normal_dest(ii))) != OP_UNREACHABLE }
+fn invoke_data_ops(ii: i32) -> i64 { cb_nargs(ii) + cb_bundle_ops_cu(ii) }
+
+// CompatibleSets::shouldBelongToSameSet({a, b})
+fn invokes_should_belong_to_same_set(a: i32, b: i32) -> bool {
+    let two: i32[2] = [a, b];
+    for ii in two { if cb_cannot_merge(ii) || vals[cb_callee(ii)].kind == VK_INLINEASM { return false; } }
+    let ia = cb_is_indirect_call(a);
+    let ib = cb_is_indirect_call(b);
+    if ia || ib {
+        if !(ia && ib) { return false; }
+    } else if cb_callee(a) != cb_callee(b) { return false; }
+    let ha = invoke_has_normal_dest(a);
+    let hb = invoke_has_normal_dest(b);
+    if ha || hb {
+        if !(ha && hb) { return false; }
+        if invoke_normal_dest(a) != invoke_normal_dest(b) { return false; }
+        if !incoming_values_compatible(invoke_normal_dest(a), inst_parent(a), inst_parent(b), two, true) { return false; }
+    }
+    let none: i32[0] = [];
+    if !incoming_values_compatible(invoke_unwind_dest(a), inst_parent(a), inst_parent(b), none, false) { return false; }
+    if !cu_same_operation_as(b, a, CU_INTERSECT_ATTRS) { return false; }
+    for k in invoke_data_ops(a) {
+        if op(a, k) == op(b, k) { continue; }
+        if !cu_can_replace_operand_with_variable(a, k) { return false; }
+    }
+    return true;
+}
+
+fn merge_compatible_invokes_impl(invs: const i32[:]) {
+    var ups: DTUpdate[>..<] = [];
+    let has_nd = invoke_has_normal_dest(invs[0]);
+    let ii0 = invs[0];
+    let bb0 = inst_parent(ii0);
+    let fv = block_func(bb0);
+    let before = block_next(bb0);
+    let nm = name_plus(bb0, ".invoke");
+    let mbb = create_block_before(fv, before, nm);
+    let mi = inst_clone(ii0);
+    block_append_inst(mbb, mi);
+    if !has_nd {
+        let nm2 = name_plus(bb0, ".cont");
+        let nd = create_block_before(fv, before, nm2);
+        block_append_inst(nd, create_inst(OP_UNREACHABLE, T_VOID, []));
+        set_op(mi, nops(mi) - 3, nd);
+    }
+    if cu_dtu {
+        for ii in invs { cu_upd(ups, DT_INSERT, inst_parent(ii), mbb); }
+        var ms: i32[>..<] = [];
+        cu_succs(mbb, ms);
+        for s in ms { cu_upd(ups, DT_INSERT, mbb, s); }
+        for ii in invs {
+            var ss: i32[>..<] = [];
+            cu_succs(inst_parent(ii), ss);
+            for s in ss { cu_upd(ups, DT_DELETE, inst_parent(ii), s); }
+        }
+    }
+    let indirect = cb_is_indirect_call(invs[0]);
+    for k in nops(mi) {
+        let is_callee = k == nops(mi) - 1;
+        if is_callee { if !indirect { continue; } }
+        else if k >= invoke_data_ops(mi) { continue; }
+        var need = false;
+        for ii in invs { if op(ii, k) != op(mi, k) { need = true; } }
+        if !need { continue; }
+        let pn = new_inst(OP_PHI, vals[op(mi, k)].ty, invs.len);
+        vals[pn].nops = 0;
+        inst_insert_before(pn, mi);
+        for ii in invs { phi_add_incoming(pn, op(ii, k), inst_parent(ii)); }
+        set_op(mi, k, pn);
+    }
+    var ms2: i32[>..<] = [];
+    cu_succs(mbb, ms2);
+    for s in ms2 { add_predecessor_to_block(s, mbb, inst_parent(invs[0])); }
+    var mdl: i32 = -1;
+    var first = true;
+    for ii in invs {
+        let dl = inst_get_md(ii, MDK_DBG_SC);
+        if first || mdl < 0 { mdl = dl; first = false; } else { mdl = merged_location(mdl, dl); }
+        let pb = inst_parent(ii);
+        var ss: i32[>..<] = [];
+        cu_succs(pb, ss);
+        for s in ss { block_remove_predecessor(s, pb, false); }
+        let br = create_inst(OP_BR, T_VOID, [mbb]);
+        block_append_inst(pb, br);
+        if dl >= 0 { inst_set_md(br, MDK_DBG_SC, dl); }
+        try_intersect_attributes(mi, ii);
+        rauw(ii, mi);
+        scf_erase(ii);
+    }
+    if mdl >= 0 { inst_set_md(mi, MDK_DBG_SC, mdl); } else { inst_erase_md(mi, MDK_DBG_SC); }
+    cu_apply(ups);
 }
 
 fn merge_compatible_invokes(bb: i32) -> bool {
     if !cl_merge_invokes { return false; }
-    var any = false;
-    each_pred(bb) { p => let t = block_terminator(p); if iop(t) == OP_INVOKE && invoke_normal_dest(t) == bb { any = true; } };
-    if any { scf_not_ported("mergeCompatibleInvokes"); }
-    return false;
+    let lp = first_non_phi(bb);
+    if lp < 0 || iop(lp) != OP_LANDINGPAD { return false; }
+    // CompatibleSets: sets as runs (set index per invoke, in insertion order)
+    var invs: i32[>..<] = [];
+    var setof: i64[>..<] = [];
+    var heads: i32[>..<] = [];
+    var preds: i32[>..<] = [];
+    cu_preds(bb, preds);
+    for p in preds {
+        let ii = block_terminator(p);
+        var found: i64 = -1;
+        for k in heads.len { if invokes_should_belong_to_same_set(heads[k], ii) { found = k; break; } }
+        if found < 0 { heads.push(ii); found = heads.len - 1; }
+        invs.push(ii);
+        setof.push(found);
+    }
+    var changed = false;
+    for k in heads.len {
+        var set: i32[>..<] = [];
+        for j in invs.len { if setof[j] == k { set.push(invs[j]); } }
+        if set.len < 2 { continue; }
+        changed = true;
+        merge_compatible_invokes_impl(set);
+    }
+    return changed;
 }
 
 // ---------------------------------------------------------------------------------------------

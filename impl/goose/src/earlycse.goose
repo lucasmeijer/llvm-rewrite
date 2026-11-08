@@ -695,7 +695,7 @@ fn ec_most_generic_range(a: i32, b: i32) -> i32 {
     }
     var ops: i32[>..<] = [];
     for x in eps { ops.push(md_value(x)); }
-    return md_get(MK_TUPLE, 0, ops, false);
+    return md_get(MK_TUPLE, -1, ops, false);
 }
 // MDNode::getMostGenericNoFPClass(A, B)
 fn ec_most_generic_nofpclass(a: i32, b: i32) -> i32 {
@@ -705,7 +705,7 @@ fn ec_most_generic_nofpclass(a: i32, b: i32) -> i32 {
     let bv = ec_md_cint(b, 0);
     let x = cint_lo(av) & cint_lo(bv);
     if x == 0 { return -1; }
-    return md_get(MK_TUPLE, 0, [md_value(c_int(vals[av].ty, x as! i64))], false);
+    return md_get(MK_TUPLE, -1, [md_value(c_int(vals[av].ty, x as! i64))], false);
 }
 // MDNode::getMostGenericAlignmentOrDereferenceable(A, B)
 fn ec_most_generic_align(a: i32, b: i32) -> i32 {
