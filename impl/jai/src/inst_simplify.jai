@@ -3055,7 +3055,6 @@ simplify_fneg_inst :: (o: Value_Id, fmf: u32, q: Simplify_Query, max_recurse: u3
 
 // fp::ExceptionBehavior and RoundingMode (llvm/ADT/FloatingPointMode.h)
 EB_IGNORE :: 0; EB_MAY_TRAP :: 1; EB_STRICT :: 2;
-RM_TOWARD_ZERO :: 0; RM_NEAREST_TIES_TO_EVEN :: 1; RM_TOWARD_POSITIVE :: 2; RM_TOWARD_NEGATIVE :: 3; RM_NEAREST_TIES_TO_AWAY :: 4; RM_DYNAMIC :: 7;
 is_default_fp_environment :: (eb: u8, rm: u8) -> bool { return eb == EB_IGNORE && rm == RM_NEAREST_TIES_TO_EVEN; }
 can_rounding_mode_be :: (rm: u8, qrm: u8) -> bool { return rm == qrm || rm == RM_DYNAMIC; }
 can_ignore_snan :: (eb: u8, fmf: u32) -> bool { return eb == EB_IGNORE || (fmf & FMF_NNAN) != 0; }

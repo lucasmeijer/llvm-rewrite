@@ -396,14 +396,23 @@ fp_encode :: (k: Type_Kind, neg: bool, cat: Fp_Category, exp: s64, sig: Big) -> 
 // Round value = num/den * 2^e2 (num, den > 0) to the format, nearest-even.
 // Returns words and status flags (overflow / inexact / underflow-to-zero).
 fp_round :: (k: Type_Kind, neg: bool, num: Big, den: Big, e2: s64) -> (w: [] u64, overflow: bool, zero: bool) {
+    w, st, z := fp_round_rm(k, neg, num, den, e2, RM_NEAREST_TIES_TO_EVEN);
+    return w, (st & .OVERFLOW) != 0, z;
+}
+
+// RoundingMode (llvm/ADT/FloatingPointMode.h)
+RM_TOWARD_ZERO :: 0; RM_NEAREST_TIES_TO_EVEN :: 1; RM_TOWARD_POSITIVE :: 2; RM_TOWARD_NEGATIVE :: 3; RM_NEAREST_TIES_TO_AWAY :: 4; RM_DYNAMIC :: 7;
+
+// IEEEFloat::normalize + roundAwayFromZero + handleOverflow for the exact value num/den * 2^e2 (num, den > 0).
+// Correctly rounded in mode `rm`; status as APFloat reports it (underflow only for inexact tiny results;
+// overflow to the largest finite value reports only inexact).
+fp_round_rm :: (k: Type_Kind, neg: bool, num: Big, den: Big, e2: s64, rm: u8) -> (w: [] u64, st: Fp_Status, zero: bool) {
     p, emax, emin, bits := fp_semantics(k);
-    // scale so that the quotient has at least p+3 bits
     kshift := cast(s64)(p + 3) + max(0, big_bitlen(den) - big_bitlen(num));
     q, r := big_divmod(big_shl(num, kshift), den);
     sticky := !big_is_zero(r);
-    // value = q * 2^(e2 - kshift)
     msb := big_bitlen(q) - 1;
-    exp := msb + e2 - kshift;    // exponent of leading bit
+    exp := msb + e2 - kshift;
     lsb_exp := max(exp, cast(s64) emin) - (p - 1);
     sh := lsb_exp - (e2 - kshift);
     mant: Big;
@@ -415,24 +424,49 @@ fp_round :: (k: Type_Kind, neg: bool, num: Big, den: Big, e2: s64) -> (w: [] u64
     } else {
         mant = big_shl(q, -sh);
     }
-    if roundbit && (sticky || big_bit(mant, 0)) {
-        big_add_small(*mant, 1);
+    inexact := roundbit || sticky;
+    st: Fp_Status;
+    e := lsb_exp + (p - 1);
+    overflow_result :: (k: Type_Kind, neg: bool, rm: u8) -> [] u64, Fp_Status {
+        if rm == RM_NEAREST_TIES_TO_EVEN || rm == RM_NEAREST_TIES_TO_AWAY || (rm == RM_TOWARD_POSITIVE && !neg) || (rm == RM_TOWARD_NEGATIVE && neg)
+            return fp_inf(k, neg), .OVERFLOW | .INEXACT;
+        return fp_largest(k, neg), .INEXACT;
     }
-    // renormalize
-    e := lsb_exp + (p - 1);   // exponent if mant has exactly p bits
-    if big_bitlen(mant) > p {
-        mant = big_shr(mant, 1);
-        e += 1;
+    // pre-rounding overflow (exponent of the leading bit above emax)
+    if exp > emax { w, s2 := overflow_result(k, neg, rm); return w, s2, false; }
+    if inexact {
+        up := false;
+        if rm == {
+            case RM_NEAREST_TIES_TO_AWAY; up = roundbit;
+            case RM_NEAREST_TIES_TO_EVEN; up = roundbit && (sticky || big_bit(mant, 0));
+            case RM_TOWARD_ZERO; up = false;
+            case RM_TOWARD_POSITIVE; up = !neg;
+            case RM_TOWARD_NEGATIVE; up = neg;
+            case; fatal("internal: invalid rounding mode %", rm);
+        }
+        if up big_add_small(*mant, 1);
+        if big_bitlen(mant) > p {
+            mant = big_shr(mant, 1);
+            e += 1;
+            if e > emax { z: Big; z.allocator = temp; return fp_inf(k, neg), .OVERFLOW | .INEXACT, false; }
+        }
+        st |= .INEXACT;
     }
     if big_is_zero(mant) {
-        return fp_encode(k, neg, .ZERO, 0, mant), false, true;
+        if inexact st |= .UNDERFLOW;
+        return fp_encode(k, neg, .ZERO, 0, mant), st, true;
     }
-    if big_bitlen(mant) == p {
-        if e > emax return fp_encode(k, neg, .INF, 0, mant), true, false;
-        return fp_encode(k, neg, .NORMAL, e, mant), false, false;
-    }
-    // denormal
-    return fp_encode(k, neg, .NORMAL, emin, mant), false, false;
+    if big_bitlen(mant) == p return fp_encode(k, neg, .NORMAL, e, mant), st, false;
+    if inexact st |= .UNDERFLOW;
+    return fp_encode(k, neg, .NORMAL, emin, mant), st, false;
+}
+
+// APFloat::getLargest
+fp_largest :: (k: Type_Kind, neg: bool) -> [] u64 {
+    p, emax, emin, bits := fp_semantics(k);
+    sig: Big; sig.allocator = temp;
+    for i: 0..p-1 { big_mul_small(*sig, 2); big_add_small(*sig, 1); }
+    return fp_encode(k, neg, .NORMAL, emax, sig);
 }
 
 // APFloat::convertFromString for decimal and hexadecimal (0x...p...) literals and inf/nan forms.
@@ -789,15 +823,13 @@ fp_nan_result :: (k: Type_Kind, a: [] u64, da: Fp_Decoded, b: [] u64, db: Fp_Dec
     return src, st;
 }
 
-fp_round_status :: (k: Type_Kind, neg: bool, num: Big, den: Big, e2: s64) -> [] u64, Fp_Status {
-    w, of, zr := fp_round(k, neg, num, den, e2);
-    st: Fp_Status;
-    if of st |= .OVERFLOW | .INEXACT;
+fp_round_status :: (k: Type_Kind, neg: bool, num: Big, den: Big, e2: s64, rm: u8 = RM_NEAREST_TIES_TO_EVEN) -> [] u64, Fp_Status {
+    w, st, zr := fp_round_rm(k, neg, num, den, e2, rm);
     return w, st;
 }
 
 // IEEEFloat::addOrSubtract
-fp_add_sub :: (k: Type_Kind, a: [] u64, b: [] u64, subtract: bool) -> [] u64, Fp_Status {
+fp_add_sub :: (k: Type_Kind, a: [] u64, b: [] u64, subtract: bool, rm: u8 = RM_NEAREST_TIES_TO_EVEN) -> [] u64, Fp_Status {
     fp_check_kind(k);
     da := fp_decode(k, a); db := fp_decode(k, b);
     if da.cat == .NAN || db.cat == .NAN { rr_, ss_ := fp_nan_result(k, a, da, b, db); return rr_, ss_; }
@@ -808,23 +840,23 @@ fp_add_sub :: (k: Type_Kind, a: [] u64, b: [] u64, subtract: bool) -> [] u64, Fp
     }
     if da.cat == .INF return a, 0;
     if db.cat == .INF return fp_inf(k, bneg), 0;
-    if da.cat == .ZERO && db.cat == .ZERO return fp_zero(k, da.neg && bneg), 0;
+    if da.cat == .ZERO && db.cat == .ZERO return fp_zero(k, ifx da.neg == bneg then da.neg else rm == RM_TOWARD_NEGATIVE), 0;
     if da.cat == .ZERO return fp_with_sign(k, b, bneg), 0;
     if db.cat == .ZERO return a, 0;
     p, mx, mn, bits := fp_semantics(k);
     ea := da.exp - (p - 1); eb := db.exp - (p - 1);
     e := min(ea, eb);
     sa := big_shl(da.sig, ea - e); sb := big_shl(db.sig, eb - e);
-    if da.neg == bneg { rr_, ss_ := fp_round_status(k, da.neg, big_add(sa, sb), big_from_u64(1), e); return rr_, ss_; }
+    if da.neg == bneg { rr_, ss_ := fp_round_status(k, da.neg, big_add(sa, sb), big_from_u64(1), e, rm); return rr_, ss_; }
     c := big_cmp(sa, sb);
-    if c == 0 return fp_zero(k, false), 0;   // exact zero: +0 in round-to-nearest
-    if c > 0 { r := big_copy(sa); big_sub(*r, sb); { rr_, ss_ := fp_round_status(k, da.neg, r, big_from_u64(1), e); return rr_, ss_; } }
+    if c == 0 return fp_zero(k, rm == RM_TOWARD_NEGATIVE), 0;   // exact zero: +0 unless rounding toward -inf
+    if c > 0 { r := big_copy(sa); big_sub(*r, sb); { rr_, ss_ := fp_round_status(k, da.neg, r, big_from_u64(1), e, rm); return rr_, ss_; } }
     r := big_copy(sb); big_sub(*r, sa);
-    { rr_, ss_ := fp_round_status(k, bneg, r, big_from_u64(1), e); return rr_, ss_; }
+    { rr_, ss_ := fp_round_status(k, bneg, r, big_from_u64(1), e, rm); return rr_, ss_; }
 }
 
 // IEEEFloat::multiply
-fp_mul :: (k: Type_Kind, a: [] u64, b: [] u64) -> [] u64, Fp_Status {
+fp_mul :: (k: Type_Kind, a: [] u64, b: [] u64, rm: u8 = RM_NEAREST_TIES_TO_EVEN) -> [] u64, Fp_Status {
     fp_check_kind(k);
     da := fp_decode(k, a); db := fp_decode(k, b);
     if da.cat == .NAN || db.cat == .NAN { rr_, ss_ := fp_nan_result(k, a, da, b, db); return rr_, ss_; }
@@ -833,11 +865,11 @@ fp_mul :: (k: Type_Kind, a: [] u64, b: [] u64) -> [] u64, Fp_Status {
     if da.cat == .INF || db.cat == .INF return fp_inf(k, neg), 0;
     if da.cat == .ZERO || db.cat == .ZERO return fp_zero(k, neg), 0;
     p, mx, mn, bits := fp_semantics(k);
-    { rr_, ss_ := fp_round_status(k, neg, big_mul(da.sig, db.sig), big_from_u64(1), da.exp + db.exp - 2 * (p - 1)); return rr_, ss_; }
+    { rr_, ss_ := fp_round_status(k, neg, big_mul(da.sig, db.sig), big_from_u64(1), da.exp + db.exp - 2 * (p - 1), rm); return rr_, ss_; }
 }
 
 // IEEEFloat::divide
-fp_div :: (k: Type_Kind, a: [] u64, b: [] u64) -> [] u64, Fp_Status {
+fp_div :: (k: Type_Kind, a: [] u64, b: [] u64, rm: u8 = RM_NEAREST_TIES_TO_EVEN) -> [] u64, Fp_Status {
     fp_check_kind(k);
     da := fp_decode(k, a); db := fp_decode(k, b);
     if da.cat == .NAN || db.cat == .NAN { rr_, ss_ := fp_nan_result(k, a, da, b, db); return rr_, ss_; }
@@ -847,7 +879,7 @@ fp_div :: (k: Type_Kind, a: [] u64, b: [] u64) -> [] u64, Fp_Status {
     if da.cat == .ZERO return fp_zero(k, neg), 0;
     if db.cat == .INF return fp_zero(k, neg), 0;
     if db.cat == .ZERO return fp_inf(k, neg), .DIV_BY_ZERO;
-    { rr_, ss_ := fp_round_status(k, neg, da.sig, db.sig, da.exp - db.exp); return rr_, ss_; }
+    { rr_, ss_ := fp_round_status(k, neg, da.sig, db.sig, da.exp - db.exp, rm); return rr_, ss_; }
 }
 
 // IEEEFloat::mod (fmod: a - trunc(a/b)*b, exact, sign of a)

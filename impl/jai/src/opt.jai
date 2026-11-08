@@ -31,6 +31,8 @@
 #load "value_tracking2.jai";
 #load "fpclass.jai";
 #load "const_folding.jai";
+#load "apfloat_ops.jai";
+#load "const_folding_calls.jai";
 #load "inst_simplify.jai";
 #load "demanded_bits.jai";
 #load "passes.jai";

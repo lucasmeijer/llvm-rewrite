@@ -60,15 +60,3 @@ cfr_contains_range :: (a: Const_FP_Range, b: Const_FP_Range) -> bool { return fa
 cfr_intersect :: (a: Const_FP_Range, b: Const_FP_Range) -> Const_FP_Range { return a; }
 cfr_is_empty_set :: (a: Const_FP_Range) -> bool { return false; }
 
-// APFloat::getLargest
-fp_largest :: (k: Type_Kind, neg: bool) -> [] u64 {
-    p, emax, emin, bits := fp_semantics(k);
-    sig: Big; sig.allocator = temp;
-    // all-ones significand of `p` bits
-    for i: 0..p-1 { big_mul_small(*sig, 2); big_add_small(*sig, 1); }
-    return fp_encode(k, neg, .NORMAL, emax, sig);
-}
-
-// const_folding_calls.jai placeholders
-can_constant_fold_call_to :: (call: Value_Id, f: Value_Id) -> bool { return false; }
-cfo_call :: (call: Value_Id, f: Value_Id, args: [] Value_Id, allow_non_deterministic := true) -> Value_Id { return NONE; }

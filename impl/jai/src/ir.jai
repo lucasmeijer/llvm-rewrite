@@ -1047,7 +1047,9 @@ const_expr :: (op: Opcode, type: Type_Id, flags: u32, ty2: Type_Id, ops: [] Valu
     row: Inst_Row;
     row.op = op; row.flags = flags; row.ty2 = ty2;
     row.idx = cast(u32) ir.u32_pool.count; row.nidx = cast(u32) extra.count;
-    for extra array_add(*ir.u32_pool, it);
+    // `extra` may be a view into u32_pool itself (e.g. an instruction's shuffle mask): copy before growing the pool
+    ex := array_copy(extra,, allocator = temp);
+    for ex array_add(*ir.u32_pool, it);
     aux := cast(u32) ir.cexpr.count;
     array_add(*ir.cexpr, row);
     v = const_lookup_or_create(k, .C_EXPR, type, ops, aux);

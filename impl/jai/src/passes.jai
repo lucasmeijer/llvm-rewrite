@@ -169,6 +169,7 @@ PASS_TABLE :: Pass_Info.[
     .{"sroa<aggregate-to-vector;modify-cfg>", .FUNCTION, .SROA, false, .DOMTREE},
     .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
+    .{"verify", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},   // VerifierPass (module & function): nothing to report on valid IR
     .{"require<assumptions>", .FUNCTION, .REQUIRE, true, .ASSUMPTIONS},
     .{"invalidate<assumptions>", .FUNCTION, .INVALIDATE, true, .ASSUMPTIONS},
     .{"print<domtree>", .FUNCTION, .PRINT_DOMTREE, true, .DOMTREE},
