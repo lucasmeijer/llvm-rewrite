@@ -644,7 +644,7 @@ What they were:
   optimizers fail loudly per LibFunc (`lcs_np`), so any libcall without an optimizer in the switch simply returns
   nullptr as in LLVM. Ported: strlen/strnlen/wcslen, strchr/strrchr/strcmp/strncmp, memchr, memcmp/bcmp,
   memcpy/memmove/memset (calls and intrinsics), printf, puts, exit, abs/ffs/fls/isdigit/isascii/toascii, sqrt,
-  exp2, fmin/fmax, cabs, the symmetric trig calls, double->float shrinking, strto* annotation. Also ValueTracking's
+  exp2, fmin/fmax, cabs, the symmetric trig calls, trig inversion pairs, memrchr, atoi/strtol, double->float shrinking. Also ValueTracking's
   getConstantDataArrayInfo / getConstantStringInfo / GetStringLength (`get_string_length`, used by memorybuiltins).
   The builder's default operand bundles are the simplified call's (`lcs_ci`).
 - build_libcalls.goose: inferNonMandatoryLibFuncAttrs is the statement program of gen_libfunc_attrs.goose
@@ -656,5 +656,5 @@ What they were:
   `free`: isLibFreeFunction falls back to the callee's allockind("free") (`blc_is_lib_free_function`,
   used by getFreedOperand in local.goose).
 - Sweep (`sweep --impl goose --passes instcombine --per-function`): 28401 identical / 1 differs before this work,
-  65738 identical / 0 differs after. Biggest loud groups left in this area: optimizePow/optimizeLog,
-  FortifiedLibCallSimplifier, memrchr, strtol/atoi, trig inversion pairs.
+  66689 identical / 0 differs after (2026-11-11). Biggest loud groups left in this area: optimizePow/optimizeLog,
+  FortifiedLibCallSimplifier, stpncpy/strncpy, memccpy, sprintf/snprintf/fprintf, strcat, strstr.
