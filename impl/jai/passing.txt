@@ -1418,6 +1418,7 @@ tests/imported/llvm/Analysis/MemorySSA/loop-invariant.ll::analysis
 tests/imported/llvm/Analysis/MemorySSA/loop-invariant.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/loop-rotate-disablebasicaa.ll::analysis
 tests/imported/llvm/Analysis/MemorySSA/loop-rotate-disablebasicaa.ll::roundtrip
+tests/imported/llvm/Analysis/MemorySSA/loop-rotate-update.ll::analysis
 tests/imported/llvm/Analysis/MemorySSA/loop-rotate-update.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/many-dom-backedge.ll::analysis
 tests/imported/llvm/Analysis/MemorySSA/many-dom-backedge.ll::roundtrip
@@ -7716,6 +7717,7 @@ tests/imported/llvm/Transforms/LoopRotate/PhiSelfReference-1.ll::opt
 tests/imported/llvm/Transforms/LoopRotate/PhiSelfReference-1.ll::roundtrip
 tests/imported/llvm/Transforms/LoopRotate/alloca.ll::opt
 tests/imported/llvm/Transforms/LoopRotate/alloca.ll::roundtrip
+tests/imported/llvm/Transforms/LoopRotate/basic.ll::opt
 tests/imported/llvm/Transforms/LoopRotate/basic.ll::roundtrip
 tests/imported/llvm/Transforms/LoopRotate/call-prepare-for-lto.ll::opt
 tests/imported/llvm/Transforms/LoopRotate/call-prepare-for-lto.ll::roundtrip

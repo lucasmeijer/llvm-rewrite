@@ -348,9 +348,10 @@ gd_pop_update :: (gd: *Graph_Diff) -> Dom_Update {
 
 // ---------------------------------------------------------------- children (SemiNCAInfo::getChildren)
 
-// Batch_Update_Info: BatchUpdateInfo (we never have a PostViewCFG: applyUpdates(Updates) only)
+// Batch_Update_Info: BatchUpdateInfo (PreViewCFG, and PostViewCFG for applyUpdates(Updates, PostViewUpdates))
 Batch_Update_Info :: struct {
     pre_view: *Graph_Diff;
+    post_view: *Graph_Diff;
     is_recalculated: bool;
     num_legalized: s64;
 }
@@ -371,6 +372,28 @@ dt_children :: (dt: *Dom_Tree, n: Value_Id, inversed: bool, bui: *Batch_Update_I
     if bui == null return;
     gd := bui.pre_view;
     map := ifx inversed != dt.post then *gd.pred else *gd.succ;
+    found, li := table_find(map, n);
+    if !found return;
+    for c: gd.lists[li][0] {
+        k := 0;
+        for out.* if it != c { out.*[k] = it; k += 1; }
+        out.count = k;
+    }
+    for gd.lists[li][1] array_add(out, it);
+}
+
+// GraphDiff<BasicBlock *>::getChildren<InverseEdge>(N) of a non-inverted GraphDiff: successors in reverse order
+// (InverseEdge = false) or predecessors in order (true), minus the deleted children, plus the inserted ones
+gd_children :: (gd: *Graph_Diff, n: Value_Id, inverse_edge: bool, out: *[..] Value_Id) {
+    out.count = 0;
+    if !inverse_edge {
+        t := block_terminator(n);
+        if t != NONE {
+            k := num_successors(t);
+            while k > 0 { k -= 1; array_add(out, get_successor(t, k)); }
+        }
+    } else block_predecessors(n, out);
+    map := ifx inverse_edge then *gd.pred else *gd.succ;
     found, li := table_find(map, n);
     if !found return;
     for c: gd.lists[li][0] {
@@ -712,8 +735,11 @@ calculate_from_scratch :: (dt: *Dom_Tree, bui: *Batch_Update_Info) {
     f := dt.fn;
     dt_reset(dt);
     dt.fn = f;
-    s := snca_make(dt, null);   // no PostViewCFG: the current CFG
-    find_roots(dt, null, *dt.roots);
+    // with a PostViewCFG, PreViewCFG = *PostViewCFG and the post view is used; otherwise the current CFG
+    post_bui: *Batch_Update_Info = null;
+    if bui && bui.post_view { bui.pre_view = bui.post_view; post_bui = bui; }
+    s := snca_make(dt, post_bui);
+    find_roots(dt, post_bui, *dt.roots);
     always: Descend;
     snca_full_dfs(*s, dt, *always);
     snca_run(*s);
@@ -973,6 +999,46 @@ dt_apply_updates :: (dt: *Dom_Tree, updates: [] Dom_Update) {
         i += 1;
     }
 }
+// DominatorTreeBase::applyUpdates(Updates, PostViewUpdates) -> DomTreeBuilder::ApplyUpdates(DT, PreViewCFG, &PostViewCFG)
+dt_apply_updates_post_view :: (dt: *Dom_Tree, updates: [] Dom_Update, post_view_updates: [] Dom_Update) {
+    pre_storage: Graph_Diff;
+    post: Graph_Diff;
+    gd_init(*post, post_view_updates, dt.post, false);
+    pre := *post;   // Updates empty: ApplyUpdates(*this, PostViewCFG, &PostViewCFG), one object
+    if updates.count {
+        all: [..] Dom_Update; all.allocator = temp;
+        for updates array_add(*all, it);
+        for post_view_updates array_add(*all, it);
+        gd_init(*pre_storage, all, dt.post, true);
+        pre = *pre_storage;
+    }
+    n := pre.legalized.count;
+    if n == 0 return;
+    if n == 1 {
+        u := gd_pop_update(pre);
+        bui1: Batch_Update_Info;
+        bui1.pre_view = *post; bui1.post_view = *post;
+        bui1.num_legalized = post.legalized.count;
+        if u.insert insert_edge(dt, *bui1, u.from, u.to);
+        else delete_edge(dt, *bui1, u.from, u.to);
+        return;
+    }
+    bui: Batch_Update_Info;
+    bui.pre_view = pre;
+    bui.post_view = *post;
+    bui.num_legalized = n;
+    size := dt.vec_size;
+    if size <= 100 {
+        if bui.num_legalized > size calculate_from_scratch(dt, *bui);
+    } else if bui.num_legalized > size / 40 calculate_from_scratch(dt, *bui);
+    i := 0;
+    while i < bui.num_legalized && !bui.is_recalculated {
+        u := gd_pop_update(bui.pre_view);
+        if u.insert insert_edge(dt, *bui, u.from, u.to);
+        else delete_edge(dt, *bui, u.from, u.to);
+        i += 1;
+    }
+}
 dt_insert_edge :: (dt: *Dom_Tree, from: Value_Id, to: Value_Id) { insert_edge(dt, null, from, to); }
 dt_delete_edge :: (dt: *Dom_Tree, from: Value_Id, to: Value_Id) { delete_edge(dt, null, from, to); }
 
@@ -1027,8 +1093,10 @@ dt_print :: (dt: *Dom_Tree, sb: *String_Builder) {
 // calculate(IDFBlocks) for the forward (post = false: successors) or reverse (post = true: predecessors) graph,
 // with optional live-in filtering. def_blocks / live_in are sets (membership only; order of def_blocks matters for
 // the priority queue only through (level, DFSIn), which are unique).
+// gd: the GraphDiff of IDFCalculator(DT, GD) (children = GD->getChildren<IsPostDom>(N): forward successors in
+// reverse order, then the diff applied); null = the current CFG (children<OrderedNodeTy>: successors in order).
 idf_calculate :: (dt: *Dom_Tree, def_blocks: [] Value_Id, def_set: *Table(Value_Id, bool),
-                  live_in: *Table(Value_Id, bool), out: *[..] Value_Id) {
+                  live_in: *Table(Value_Id, bool), out: *[..] Value_Id, gd: *Graph_Diff = null) {
     Pq_Item :: struct { n: s32; level: u32; dfs_in: u32; }
     less :: (a: Pq_Item, b: Pq_Item) -> bool {   // less_second on (level, DFSIn)
         if a.level != b.level return a.level < b.level;
@@ -1082,7 +1150,8 @@ idf_calculate :: (dt: *Dom_Tree, def_blocks: [] Value_Id, def_set: *Table(Value_
             node := pop(*worklist);
             bb := dt.nodes[node].block;
             // ChildrenGetter: children<OrderedNodeTy>: successors (forward) or predecessors (post)
-            if dt.post block_predecessors(bb, *succs);
+            if gd gd_children(gd, bb, dt.post, *succs);
+            else if dt.post block_predecessors(bb, *succs);
             else {
                 succs.count = 0;
                 t := block_terminator(bb);

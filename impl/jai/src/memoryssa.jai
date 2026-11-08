@@ -1,24 +1,31 @@
 // MemorySSA: a port of llvm/lib/Analysis/MemorySSA.cpp (construction: createNewAccess, placePHINodes, renamePass,
-// markUnreachableAsLiveOnEntry; OptimizeUses (ensureOptimizedUses); the ClobberWalker with phi optimization and the
-// CachingWalker / SkipSelfWalker entry points; dominance between accesses; the print<memoryssa> and
-// print<memoryssa-walker> annotated printers), of upward_defs_iterator / def_chain from
-// llvm/include/llvm/Analysis/MemorySSA.h and of llvm/lib/Analysis/PHITransAddr.cpp (translateValue).
+// markUnreachableAsLiveOnEntry; the mutation API used by MemorySSAUpdater: createDefinedAccess, createMemoryPhi,
+// insertIntoListsForBlock / insertIntoListsBefore, moveTo, removeFromLookups / removeFromLists; verifyMemorySSA;
+// OptimizeUses (ensureOptimizedUses); the ClobberWalker with phi optimization and the CachingWalker / SkipSelfWalker
+// entry points; dominance between accesses; the print<memoryssa> and print<memoryssa-walker> annotated printers),
+// of the MemoryAccess / MemoryUseOrDef / MemoryDef / MemoryPhi classes and upward_defs_iterator / def_chain from
+// llvm/include/llvm/Analysis/MemorySSA.h, of llvm/lib/Analysis/PHITransAddr.cpp (translateValue), and of the parts
+// of llvm/lib/IR/Value.cpp / User.cpp / Use.cpp that decide the order of MemoryAccess use lists (Use::set,
+// doRAUW, replaceUsesWithIf, growHungoffUses) and llvm/include/llvm/IR/ValueHandle.h (WeakVH, TrackingVH).
 //
 // Data-oriented: a MemorySSA is a table of Mem_Access rows (index 0 = liveOnEntry); a row's kind (DEF / USE / PHI) is
-// a tag, operands are row indices (`defining` = operand 0, `optimized` = MemoryDef's operand 1, phi incoming values in
-// `phi_vals` / `phi_blocks`). Per-block access and def lists are intrusive doubly linked lists through the rows
-// (prev/next and dprev/dnext), with heads in `blocks`. The result lives on the heap (cached in the function analysis
-// manager); AA query state (BatchAAResults) lives in temp for one construction / walk / printer run.
+// a tag. Operands are Mssa_Use rows (m.uses), contiguous per access (`ops`, `nops`; a DEF has 2: defining access and
+// optimized access, a USE 1, a PHI its incoming values with the incoming block in `blk`, grown like a hung-off
+// operand list). Every access has a use list (`first_use`, uses linked through next/prev, push-front like
+// Use::addToList), so users() / uses() / RAUW visit uses in LLVM's order. Per-block access and def lists are intrusive
+// doubly linked lists through the rows (prev/next and dprev/dnext), with heads in `blocks`. Deleted accesses keep
+// their row with `dead` set; ids are never reused. Value handles (WeakVH / TrackingVH on MemoryAccesses, used by the
+// updater) are rows of `vh`, allocated stack-like by the updater. The result lives on the heap (cached in the
+// function analysis manager); AA query state (BatchAAResults) lives in temp for one construction / walk / printer run.
 //
-// Not ported yet: MemorySSAUpdater, the use lists of accesses (users()), loop-scoped MemorySSA (MemorySSA(Loop&)),
-// verifyMemorySSA (verify<memoryssa> and -verify-memoryssa are accepted and check nothing), -dot-cfg-mssa.
+// Not ported: loop-scoped MemorySSA (MemorySSA(Loop&), only used by LoopSink's legacy path), -dot-cfg-mssa.
 
 MSSA_LIVE_ON_ENTRY :: cast(s32) 0;
 MSSA_INVALID_ID :: 0xFFFF_FFFF;
 
 mssa_opts: struct {
     max_check_limit: s64 = 100;     // -memssa-check-limit
-    verify := false;                // -verify-memoryssa (no verifier yet: accepted, checks nothing)
+    verify := false;                // -verify-memoryssa (VerifyMemorySSA)
 };
 
 Ma_Kind :: enum u8 { DEF; USE; PHI; }
@@ -28,15 +35,28 @@ Mem_Access :: struct {
     id: u32;                        // DEF / PHI (liveOnEntry = 0); uses have no id
     inst: Value_Id = NONE;          // DEF / USE
     block: Value_Id = NONE;
-    defining: s32 = -1;             // operand 0 of a DEF / USE
-    optimized: s32 = -1;            // operand 1 of a DEF
+    ops: s32 = -1;                  // first operand (row of m.uses)
+    nops: u32;                      // DEF 2, USE 1, PHI number of incoming values
+    cap: u32;                       // PHI ReservedSpace
+    first_use: s32 = -1;            // head of this access's use list
     optimized_id: u32 = MSSA_INVALID_ID;
-    phi_vals: [..] s32;             // PHI incoming values and blocks, operand order
-    phi_blocks: [..] Value_Id;
     prev: s32 = -1; next: s32 = -1;     // the block's access list
     dprev: s32 = -1; dnext: s32 = -1;   // the block's defs list (DEFs and PHIs)
     in_lists: bool;
+    dead: bool;
 }
+
+// one operand slot (llvm::Use of a MemoryAccess user)
+Mssa_Use :: struct {
+    val: s32 = -1;          // the used access (-1 = nullptr)
+    user: s32 = -1;
+    next: s32 = -1;
+    prev: s32 = -1;
+    blk: Value_Id = NONE;   // MemoryPhi incoming block of this operand
+}
+
+// a WeakVH (tracking = false: nulled on deletion) or TrackingVH (also follows RAUW)
+Mssa_Vh :: struct { a: s32; tracking: bool; }
 
 Mssa_Block :: struct { first: s32 = -1; last: s32 = -1; dfirst: s32 = -1; dlast: s32 = -1; }
 
@@ -45,6 +65,8 @@ Memory_SSA :: struct {
     dt: *Dom_Tree;
     aar: Aa_Results;
     acc: [..] Mem_Access;
+    uses: [..] Mssa_Use;
+    vh: [..] Mssa_Vh;
     next_id: u32;
     of_value: Table(Value_Id, s32);      // ValueToMemoryAccess (instructions; blocks -> their MemoryPhi)
     blocks: Table(Value_Id, Mssa_Block); // PerBlockAccesses / PerBlockDefs
@@ -54,8 +76,7 @@ Memory_SSA :: struct {
 }
 
 mssa_free :: (m: *Memory_SSA) {
-    for * m.acc { array_free(it.phi_vals); array_free(it.phi_blocks); }
-    array_free(m.acc);
+    array_free(m.acc); array_free(m.uses); array_free(m.vh);
     deinit(*m.of_value); deinit(*m.blocks); deinit(*m.numbering); deinit(*m.numbered);
     free(m);
 }
@@ -78,84 +99,240 @@ is_live_on_entry :: inline (a: s32) -> bool { return a == MSSA_LIVE_ON_ENTRY; }
 ma_is_use :: inline (m: *Memory_SSA, a: s32) -> bool { return m.acc[a].kind == .USE; }
 ma_is_def :: inline (m: *Memory_SSA, a: s32) -> bool { return m.acc[a].kind == .DEF; }
 ma_is_phi :: inline (m: *Memory_SSA, a: s32) -> bool { return m.acc[a].kind == .PHI; }
+ma_block :: inline (m: *Memory_SSA, a: s32) -> Value_Id { return m.acc[a].block; }
+ma_inst :: inline (m: *Memory_SSA, a: s32) -> Value_Id { return m.acc[a].inst; }
+
+// ---------------------------------------------------------------- operands, use lists, value handles
+
+ma_op :: inline (m: *Memory_SSA, a: s32, k: u32) -> s32 { return m.uses[m.acc[a].ops + cast(s32) k].val; }
+ma_op_use :: inline (m: *Memory_SSA, a: s32, k: u32) -> s32 { return m.acc[a].ops + cast(s32) k; }
+ma_nops :: inline (m: *Memory_SSA, a: s32) -> u32 { return m.acc[a].nops; }
+
+mu_unlink :: (m: *Memory_SSA, u: s32) {
+    r := *m.uses[u];
+    if r.prev >= 0 m.uses[r.prev].next = r.next;
+    else m.acc[r.val].first_use = r.next;
+    if r.next >= 0 m.uses[r.next].prev = r.prev;
+    r.next = -1; r.prev = -1;
+}
+// Use::set(V): unlink from the old value's list, push at the front of V's
+mu_set :: (m: *Memory_SSA, u: s32, v: s32) {
+    if m.uses[u].val >= 0 mu_unlink(m, u);
+    r := *m.uses[u];
+    r.val = v;
+    if v >= 0 {
+        h := m.acc[v].first_use;
+        r.next = h; r.prev = -1;
+        if h >= 0 m.uses[h].prev = u;
+        m.acc[v].first_use = u;
+    }
+}
+ma_set_op :: inline (m: *Memory_SSA, a: s32, k: u32, v: s32) { mu_set(m, ma_op_use(m, a, k), v); }
+
+ma_has_uses :: inline (m: *Memory_SSA, a: s32) -> bool { return m.acc[a].first_use >= 0; }
+// users() of an access in use-list order (one entry per use)
+ma_users :: (m: *Memory_SSA, a: s32, out: *[..] s32) {
+    out.count = 0;
+    u := m.acc[a].first_use;
+    while u >= 0 { array_add(out, m.uses[u].user); u = m.uses[u].next; }
+}
+ma_uses :: (m: *Memory_SSA, a: s32, out: *[..] s32) {
+    out.count = 0;
+    u := m.acc[a].first_use;
+    while u >= 0 { array_add(out, u); u = m.uses[u].next; }
+}
+
+vh_new :: (m: *Memory_SSA, a: s32, tracking: bool) -> s32 {
+    array_add(*m.vh, .{a, tracking});
+    return cast(s32)(m.vh.count - 1);
+}
+vh_get :: inline (m: *Memory_SSA, h: s32) -> s32 { return m.vh[h].a; }
+vh_set :: inline (m: *Memory_SSA, h: s32, a: s32) { m.vh[h].a = a; }
+// ValueHandleBase::ValueIsRAUWd
+vh_rauw :: (m: *Memory_SSA, old: s32, new: s32) {
+    for * m.vh if it.a == old && it.tracking it.a = new;
+}
+// ValueHandleBase::ValueIsDeleted
+vh_deleted :: (m: *Memory_SSA, a: s32) {
+    for * m.vh if it.a == a it.a = -1;
+}
+
+// MemoryAccess::replaceAllUsesWith (Value::doRAUW)
+ma_rauw :: (m: *Memory_SSA, old: s32, new: s32) {
+    vh_rauw(m, old, new);
+    while m.acc[old].first_use >= 0 mu_set(m, m.acc[old].first_use, new);
+}
+
+// MemoryPhi accessors
+mphi_value :: inline (m: *Memory_SSA, p: s32, k: u32) -> s32 { return ma_op(m, p, k); }
+mphi_block :: inline (m: *Memory_SSA, p: s32, k: u32) -> Value_Id { return m.uses[ma_op_use(m, p, k)].blk; }
+mphi_set_value :: inline (m: *Memory_SSA, p: s32, k: u32, v: s32) { ma_set_op(m, p, k, v); }
+mphi_set_block :: inline (m: *Memory_SSA, p: s32, k: u32, b: Value_Id) { m.uses[ma_op_use(m, p, k)].blk = b; }
+// getBasicBlockIndex
+mphi_block_index :: (m: *Memory_SSA, p: s32, b: Value_Id) -> s64 {
+    n := ma_nops(m, p);
+    for k: 0..cast(s64) n - 1 if mphi_block(m, p, cast(u32) k) == b return k;
+    return -1;
+}
+// getIncomingValueForBlock
+mphi_value_for_block :: (m: *Memory_SSA, p: s32, b: Value_Id) -> s32 {
+    k := mphi_block_index(m, p, b);
+    assert(k >= 0, "MemoryPhi: invalid basic block argument");
+    return mphi_value(m, p, cast(u32) k);
+}
+// growOperands + User::growHungoffUses: a new operand range; copying moves each use to the front of its value's list
+mphi_grow :: (m: *Memory_SSA, p: s32) {
+    r := ma(m, p);
+    e := r.nops;
+    new_cap := max(e + e / 2, cast(u32) 2);
+    start := cast(s32) m.uses.count;
+    for 0..new_cap - 1 { blank: Mssa_Use; blank.user = p; array_add(*m.uses, blank); }
+    old := r.ops;
+    for k: 0..cast(s64) e - 1 {
+        ou := old + cast(s32) k;
+        nu := start + cast(s32) k;
+        m.uses[nu].blk = m.uses[ou].blk;
+        mu_set(m, nu, m.uses[ou].val);
+    }
+    for k: 0..cast(s64) e - 1 { ou := old + cast(s32) k; if m.uses[ou].val >= 0 mu_unlink(m, ou); m.uses[ou].val = -1; }
+    r = ma(m, p);
+    r.ops = start;
+    r.cap = new_cap;
+}
+// addIncoming
+mphi_add_incoming :: (m: *Memory_SSA, p: s32, v: s32, b: Value_Id) {
+    if m.acc[p].nops == m.acc[p].cap mphi_grow(m, p);
+    r := ma(m, p);
+    k := r.nops;
+    r.nops += 1;
+    mphi_set_value(m, p, k, v);
+    mphi_set_block(m, p, k, b);
+}
+// unorderedDeleteIncoming
+mphi_unordered_delete_incoming :: (m: *Memory_SSA, p: s32, i: u32) {
+    e := m.acc[p].nops;
+    assert(i < e && e >= 2, "MemoryPhi: cannot remove this incoming value");
+    mphi_set_value(m, p, i, mphi_value(m, p, e - 1));
+    mphi_set_block(m, p, i, mphi_block(m, p, e - 1));
+    ma_set_op(m, p, e - 1, -1);
+    mphi_set_block(m, p, e - 1, NONE);
+    m.acc[p].nops -= 1;
+}
+// unorderedDeleteIncomingBlock
+mphi_unordered_delete_incoming_block :: (m: *Memory_SSA, p: s32, b: Value_Id) {
+    i: s64 = 0;
+    while i < m.acc[p].nops {
+        if mphi_block(m, p, cast(u32) i) == b { mphi_unordered_delete_incoming(m, p, cast(u32) i); continue; }
+        i += 1;
+    }
+    assert(m.acc[p].nops >= 1, "Cannot remove all incoming blocks in a MemoryPhi.");
+}
+
+// MemoryUseOrDef::getDefiningAccess
+ma_defining :: inline (m: *Memory_SSA, a: s32) -> s32 { return ma_op(m, a, 0); }
+// MemoryDef::getOptimized operand
+ma_optimized_op :: inline (m: *Memory_SSA, a: s32) -> s32 { return ma_op(m, a, 1); }
 
 // MemoryUseOrDef::isOptimized / getOptimized / setOptimized / resetOptimized
 ma_is_optimized :: (m: *Memory_SSA, a: s32) -> bool {
     r := ma(m, a);
-    if r.kind == .DEF return r.optimized >= 0 && r.optimized_id == m.acc[r.optimized].id;
-    return r.defining >= 0 && r.optimized_id == m.acc[r.defining].id;
+    if r.kind == .DEF { o := ma_optimized_op(m, a); return o >= 0 && r.optimized_id == m.acc[o].id; }
+    d := ma_defining(m, a);
+    return d >= 0 && r.optimized_id == m.acc[d].id;
 }
 ma_get_optimized :: (m: *Memory_SSA, a: s32) -> s32 {
-    r := ma(m, a);
-    if r.kind == .DEF return r.optimized;
-    return r.defining;
+    if m.acc[a].kind == .DEF return ma_optimized_op(m, a);
+    return ma_defining(m, a);
 }
 ma_set_optimized :: (m: *Memory_SSA, a: s32, to: s32) {
-    r := ma(m, a);
-    if r.kind == .DEF r.optimized = to; else r.defining = to;
-    r.optimized_id = m.acc[to].id;
+    if m.acc[a].kind == .DEF { ma_set_op(m, a, 1, to); m.acc[a].optimized_id = m.acc[to].id; }
+    else { m.acc[a].optimized_id = m.acc[to].id; ma_set_op(m, a, 0, to); }
 }
 ma_reset_optimized :: (m: *Memory_SSA, a: s32) {
-    r := ma(m, a);
-    r.optimized_id = MSSA_INVALID_ID;
-    if r.kind == .DEF r.optimized = -1;
+    m.acc[a].optimized_id = MSSA_INVALID_ID;
+    if m.acc[a].kind == .DEF ma_set_op(m, a, 1, -1);
 }
 // setDefiningAccess(DMA, Optimized)
 ma_set_defining :: (m: *Memory_SSA, a: s32, d: s32, optimized := false) {
     if optimized { ma_set_optimized(m, a, d); return; }
-    m.acc[a].defining = d;
+    ma_set_op(m, a, 0, d);
+}
+// dropAllReferences
+ma_drop_all_references :: (m: *Memory_SSA, a: s32) {
+    for k: 0..cast(s64) m.acc[a].nops - 1 ma_set_op(m, a, cast(u32) k, -1);
 }
 
 new_access :: (m: *Memory_SSA, kind: Ma_Kind, i: Value_Id, b: Value_Id) -> s32 {
     r: Mem_Access; r.kind = kind; r.inst = i; r.block = b;
     if kind != .USE { r.id = m.next_id; m.next_id += 1; }
+    a := cast(s32) m.acc.count;
+    n: u32 = ifx kind == .DEF then cast(u32) 2 else ifx kind == .USE then cast(u32) 1 else cast(u32) 0;
+    if n {
+        r.ops = cast(s32) m.uses.count;
+        r.nops = n; r.cap = n;
+        for 0..n-1 { u: Mssa_Use; u.user = a; array_add(*m.uses, u); }
+    }
     array_add(*m.acc, r);
-    return cast(s32)(m.acc.count - 1);
+    return a;
+}
+// the access is destroyed (deleteValue): drop its operands, null its value handles
+ma_destroy :: (m: *Memory_SSA, a: s32) {
+    assert(!ma_has_uses(m, a), "MemorySSA: deleting an access that still has uses");
+    for k: 0..cast(s64) m.acc[a].nops - 1 { u := ma_op_use(m, a, cast(u32) k); if m.uses[u].val >= 0 mu_unlink(m, u); m.uses[u].val = -1; }
+    vh_deleted(m, a);
+    m.acc[a].dead = true;
 }
 
 // ---------------------------------------------------------------- lists
 
-list_push_back :: (m: *Memory_SSA, b: Value_Id, a: s32) {
+Mssa_Insertion_Place :: enum u8 { BEGINNING; END; BEFORE_TERMINATOR; }
+
+list_insert_before :: (m: *Memory_SSA, b: Value_Id, a: s32, before: s32) {   // before = -1: push_back
     l := mssa_block_or_create(m, b);
     r := ma(m, a);
-    r.prev = l.last; r.next = -1; r.in_lists = true;
-    if l.last >= 0 m.acc[l.last].next = a; else l.first = a;
-    l.last = a;
+    r.in_lists = true;
+    if before < 0 {
+        r.prev = l.last; r.next = -1;
+        if l.last >= 0 m.acc[l.last].next = a; else l.first = a;
+        l.last = a;
+        return;
+    }
+    p := m.acc[before].prev;
+    r.prev = p; r.next = before;
+    m.acc[before].prev = a;
+    if p >= 0 m.acc[p].next = a; else l.first = a;
 }
-list_push_front :: (m: *Memory_SSA, b: Value_Id, a: s32) {
+defs_insert_before :: (m: *Memory_SSA, b: Value_Id, a: s32, before: s32) {
     l := mssa_block_or_create(m, b);
     r := ma(m, a);
-    r.next = l.first; r.prev = -1; r.in_lists = true;
-    if l.first >= 0 m.acc[l.first].prev = a; else l.last = a;
-    l.first = a;
+    if before < 0 {
+        r.dprev = l.dlast; r.dnext = -1;
+        if l.dlast >= 0 m.acc[l.dlast].dnext = a; else l.dfirst = a;
+        l.dlast = a;
+        return;
+    }
+    p := m.acc[before].dprev;
+    r.dprev = p; r.dnext = before;
+    m.acc[before].dprev = a;
+    if p >= 0 m.acc[p].dnext = a; else l.dfirst = a;
 }
-defs_push_back :: (m: *Memory_SSA, b: Value_Id, a: s32) {
-    l := mssa_block_or_create(m, b);
-    r := ma(m, a);
-    r.dprev = l.dlast; r.dnext = -1;
-    if l.dlast >= 0 m.acc[l.dlast].dnext = a; else l.dfirst = a;
-    l.dlast = a;
-}
-defs_push_front :: (m: *Memory_SSA, b: Value_Id, a: s32) {
-    l := mssa_block_or_create(m, b);
-    r := ma(m, a);
-    r.dnext = l.dfirst; r.dprev = -1;
-    if l.dfirst >= 0 m.acc[l.dfirst].dprev = a; else l.dlast = a;
-    l.dfirst = a;
-}
-// erase from the access list (and defs list) of its block
+list_push_back :: (m: *Memory_SSA, b: Value_Id, a: s32) { list_insert_before(m, b, a, -1); }
+defs_push_back :: (m: *Memory_SSA, b: Value_Id, a: s32) { defs_insert_before(m, b, a, -1); }
+list_push_front :: (m: *Memory_SSA, b: Value_Id, a: s32) { l := mssa_block_or_create(m, b); list_insert_before(m, b, a, l.first); }
+defs_push_front :: (m: *Memory_SSA, b: Value_Id, a: s32) { l := mssa_block_or_create(m, b); defs_insert_before(m, b, a, l.dfirst); }
+
+// erase from the access list (and defs list) of its block (removeFromLists without deletion)
 list_erase :: (m: *Memory_SSA, a: s32) {
     r := ma(m, a);
     l := mssa_block(m, r.block);
-    if r.prev >= 0 m.acc[r.prev].next = r.next; else l.first = r.next;
-    if r.next >= 0 m.acc[r.next].prev = r.prev; else l.last = r.prev;
     if r.kind != .USE {
         if r.dprev >= 0 m.acc[r.dprev].dnext = r.dnext; else l.dfirst = r.dnext;
         if r.dnext >= 0 m.acc[r.dnext].dprev = r.dprev; else l.dlast = r.dprev;
     }
+    if r.prev >= 0 m.acc[r.prev].next = r.next; else l.first = r.next;
+    if r.next >= 0 m.acc[r.next].prev = r.prev; else l.last = r.prev;
     r.prev = -1; r.next = -1; r.dprev = -1; r.dnext = -1; r.in_lists = false;
-    if l.first < 0 table_remove(*m.blocks, r.block);
-    table_remove(*m.numbered, r.block);
+    if l.first < 0 { table_remove(*m.blocks, r.block); table_remove(*m.numbered, r.block); }
 }
 // getBlockDefs(BB)->rbegin(): the last def or phi of a block, -1 if none
 mssa_last_block_def :: (m: *Memory_SSA, b: Value_Id) -> s32 {
@@ -163,14 +340,108 @@ mssa_last_block_def :: (m: *Memory_SSA, b: Value_Id) -> s32 {
     if !l return -1;
     return l.dlast;
 }
+// getBlockDefs(BB)->begin()
+mssa_first_block_def :: (m: *Memory_SSA, b: Value_Id) -> s32 {
+    l := mssa_block(m, b);
+    if !l return -1;
+    return l.dfirst;
+}
 // getBlockAccesses(BB)->front()
 mssa_first_access :: (m: *Memory_SSA, b: Value_Id) -> s32 {
     l := mssa_block(m, b);
     if !l return -1;
     return l.first;
 }
+mssa_last_access :: (m: *Memory_SSA, b: Value_Id) -> s32 {
+    l := mssa_block(m, b);
+    if !l return -1;
+    return l.last;
+}
+mssa_num_block_accesses :: (m: *Memory_SSA, b: Value_Id) -> s64 {
+    n := 0;
+    a := mssa_first_access(m, b);
+    while a >= 0 { n += 1; a = m.acc[a].next; }
+    return n;
+}
 
-// ---------------------------------------------------------------- construction
+// insertIntoListsForBlock
+mssa_insert_into_lists_for_block :: (m: *Memory_SSA, a: s32, b: Value_Id, point: Mssa_Insertion_Place) {
+    mssa_block_or_create(m, b);
+    if point == .BEGINNING {
+        if ma_is_phi(m, a) {
+            list_push_front(m, b, a);
+            defs_push_front(m, b, a);
+        } else {
+            ai := mssa_first_access(m, b);
+            while ai >= 0 && ma_is_phi(m, ai) ai = m.acc[ai].next;
+            list_insert_before(m, b, a, ai);
+            if !ma_is_use(m, a) {
+                di := mssa_first_block_def(m, b);
+                while di >= 0 && ma_is_phi(m, di) di = m.acc[di].dnext;
+                defs_insert_before(m, b, a, di);
+            }
+        }
+    } else {
+        list_push_back(m, b, a);
+        if !ma_is_use(m, a) defs_push_back(m, b, a);
+    }
+    table_remove(*m.numbered, b);
+}
+// insertIntoListsBefore(What, BB, InsertPt): insert_pt = -1 is end()
+mssa_insert_into_lists_before :: (m: *Memory_SSA, a: s32, b: Value_Id, insert_pt_in: s32) {
+    insert_pt := insert_pt_in;
+    was_end := insert_pt < 0;
+    list_insert_before(m, b, a, insert_pt);
+    if !ma_is_use(m, a) {
+        if was_end defs_push_back(m, b, a);
+        else if ma_is_def(m, insert_pt) defs_insert_before(m, b, a, insert_pt);
+        else {
+            while insert_pt >= 0 && !ma_is_def(m, insert_pt) insert_pt = m.acc[insert_pt].next;
+            if insert_pt < 0 defs_push_back(m, b, a);
+            else defs_insert_before(m, b, a, insert_pt);
+        }
+    }
+    table_remove(*m.numbered, b);
+}
+// prepareForMoveTo
+mssa_prepare_for_move_to :: (m: *Memory_SSA, a: s32, b: Value_Id) {
+    list_erase(m, a);
+    if ma_is_def(m, a) ma_reset_optimized(m, a);
+    m.acc[a].block = b;
+}
+// moveTo(MemoryUseOrDef *What, BB, AccessList::iterator Where)
+mssa_move_to_before :: (m: *Memory_SSA, a: s32, b: Value_Id, where: s32) {
+    mssa_prepare_for_move_to(m, a, b);
+    mssa_insert_into_lists_before(m, a, b, where);
+}
+// moveTo(MemoryAccess *What, BB, InsertionPlace Point)
+mssa_move_to_place :: (m: *Memory_SSA, a: s32, b: Value_Id, point: Mssa_Insertion_Place) {
+    if ma_is_phi(m, a) {
+        assert(point == .BEGINNING, "Can only move a Phi at the beginning of the block");
+        table_remove(*m.of_value, m.acc[a].block);
+        assert(!table_contains(*m.of_value, b), "Cannot move a Phi to a block that already has one");
+        table_set(*m.of_value, b, a);
+    }
+    mssa_prepare_for_move_to(m, a, b);
+    mssa_insert_into_lists_for_block(m, a, b, point);
+}
+
+// removeFromLookups
+mssa_remove_from_lookups :: (m: *Memory_SSA, a: s32) {
+    assert(!ma_has_uses(m, a), "Trying to remove memory access that still has uses");
+    table_remove(*m.numbering, a);
+    if !ma_is_phi(m, a) ma_set_defining(m, a, -1);
+    // getWalker()->invalidateInfo(MA): resetOptimized for a MemoryDef
+    if ma_is_def(m, a) ma_reset_optimized(m, a);
+    key := ifx ma_is_phi(m, a) then m.acc[a].block else m.acc[a].inst;
+    found, cur := table_find(*m.of_value, key);
+    if found && cur == a table_remove(*m.of_value, key);
+}
+// removeFromLists(MA, ShouldDelete)
+mssa_remove_from_lists :: (m: *Memory_SSA, a: s32, should_delete := true) {
+    list_erase(m, a);
+    if should_delete ma_destroy(m, a);
+}
 
 // isOrdered
 inst_is_ordered :: (i: Value_Id) -> bool {
@@ -186,15 +457,21 @@ is_use_trivially_optimizable_to_live_on_entry :: (q: *Aa_Query, i: Value_Id) -> 
     return false;
 }
 
-// MemorySSA::createNewAccess (no Template)
-mssa_create_new_access :: (m: *Memory_SSA, i: Value_Id, q: *Aa_Query) -> s32 {
+// MemorySSA::createNewAccess(I, AA, Template); template_kind: -1 = no template, else the template's Ma_Kind
+mssa_create_new_access :: (m: *Memory_SSA, i: Value_Id, q: *Aa_Query, template_kind: s32 = -1) -> s32 {
     id := call_iid(i);
     if id == IID_ALLOW_RUNTIME_CHECK || id == IID_ALLOW_UBSAN_CHECK || id == IID_ASSUME ||
        id == IID_EXPERIMENTAL_NOALIAS_SCOPE_DECL || id == IID_PSEUDOPROBE return -1;
     if !may_read_from_memory(i) && !may_write_to_memory(i) return -1;
-    mr := aa_mod_ref_inst_opt_loc(q, i, false, .{});
-    def := (mr & MR_MOD) != 0 || inst_is_ordered(i);
-    use := (mr & MR_REF) != 0;
+    def, use: bool;
+    if template_kind >= 0 {
+        def = template_kind == cast(s32) Ma_Kind.DEF;
+        use = template_kind == cast(s32) Ma_Kind.USE;
+    } else {
+        mr := aa_mod_ref_inst_opt_loc(q, i, false, .{});
+        def = (mr & MR_MOD) != 0 || inst_is_ordered(i);
+        use = (mr & MR_REF) != 0;
+    }
     if !def && !use return -1;
     a: s32;
     if def a = new_access(m, .DEF, i, inst_block(i));
@@ -206,18 +483,25 @@ mssa_create_new_access :: (m: *Memory_SSA, i: Value_Id, q: *Aa_Query) -> s32 {
     return a;
 }
 
-// MemorySSA::createMemoryPhi (insertIntoListsForBlock(Phi, BB, Beginning))
-mssa_create_phi :: (m: *Memory_SSA, b: Value_Id) -> s32 {
-    a := new_access(m, .PHI, NONE, b);
-    list_push_front(m, b, a);
-    defs_push_front(m, b, a);
-    table_remove(*m.numbered, b);
-    table_set(*m.of_value, b, a);
+// createDefinedAccess(I, Definition, Template, CreationMustSucceed)
+mssa_create_defined_access :: (m: *Memory_SSA, i: Value_Id, definition: s32, template_kind: s32 = -1, must_succeed := true) -> s32 {
+    q := aa_query_new(*m.aar);   // AA, not a batch: a fresh AAQueryInfo per query
+    a := mssa_create_new_access(m, i, q, template_kind);
+    if must_succeed assert(a >= 0, "Tried to create a memory access for a non-memory touching instruction");
+    if a >= 0 {
+        assert(definition < 0 || !ma_is_use(m, definition), "A use cannot be a defining access");
+        ma_set_defining(m, a, definition);
+    }
     return a;
 }
-phi_add_incoming :: (m: *Memory_SSA, p: s32, v: s32, b: Value_Id) {
-    array_add(*m.acc[p].phi_vals, v);
-    array_add(*m.acc[p].phi_blocks, b);
+
+// MemorySSA::createMemoryPhi
+mssa_create_phi :: (m: *Memory_SSA, b: Value_Id) -> s32 {
+    assert(mssa_access_of(m, b) < 0, "MemoryPhi already exists for this BB");
+    a := new_access(m, .PHI, NONE, b);
+    mssa_insert_into_lists_for_block(m, a, b, .BEGINNING);
+    table_set(*m.of_value, b, a);
+    return a;
 }
 
 // renameBlock
@@ -229,10 +513,10 @@ mssa_rename_block :: (m: *Memory_SSA, b: Value_Id, incoming_in: s32, rename_all_
     while a >= 0 {
         r := ma(m, a);
         if r.kind != .PHI {
-            if r.defining < 0 || rename_all_uses ma_set_defining(m, a, incoming);
+            if ma_defining(m, a) < 0 || rename_all_uses ma_set_defining(m, a, incoming);
             if r.kind == .DEF incoming = a;
         } else incoming = a;
-        a = r.next;
+        a = m.acc[a].next;
     }
     return incoming;
 }
@@ -244,9 +528,10 @@ mssa_rename_successor_phis :: (m: *Memory_SSA, b: Value_Id, incoming: s32, renam
         f := mssa_first_access(m, s);
         if f < 0 || !ma_is_phi(m, f) continue;
         if rename_all_uses {
-            r := ma(m, f);
-            for k: 0..r.phi_vals.count-1 if r.phi_blocks[k] == b r.phi_vals[k] = incoming;
-        } else phi_add_incoming(m, f, incoming, b);
+            done := false;
+            for k: 0..cast(s64) ma_nops(m, f) - 1 if mphi_block(m, f, cast(u32) k) == b { mphi_set_value(m, f, cast(u32) k, incoming); done = true; }
+            assert(done, "Incomplete phi during partial rename");
+        } else mphi_add_incoming(m, f, incoming, b);
     }
 }
 // renamePass(Root, IncomingVal, Visited, SkipVisited = false, RenameAllUses = false)
@@ -278,6 +563,12 @@ mssa_rename_pass :: (m: *Memory_SSA, root: s32, incoming_in: s32, visited: *Tabl
         array_add(*stack, .{child, dt.nodes[child].first_child, incoming});
     }
 }
+// renamePass(BasicBlock *BB, MemoryAccess *IncomingVal, Visited) (the updater's entry point)
+mssa_rename_pass_from_block :: (m: *Memory_SSA, b: Value_Id, incoming: s32, visited: *Table(Value_Id, bool)) {
+    n := dt_node(m.dt, b);
+    assert(n >= 0, "Trying to rename accesses in an unreachable block");
+    mssa_rename_pass(m, n, incoming, visited, true, true);
+}
 
 // markUnreachableAsLiveOnEntry
 mssa_mark_unreachable_as_live_on_entry :: (m: *Memory_SSA, b: Value_Id) {
@@ -287,7 +578,7 @@ mssa_mark_unreachable_as_live_on_entry :: (m: *Memory_SSA, b: Value_Id) {
         if !dt_is_reachable_from_entry(m.dt, s) continue;
         f := mssa_first_access(m, s);
         if f < 0 || !ma_is_phi(m, f) continue;
-        phi_add_incoming(m, f, MSSA_LIVE_ON_ENTRY, b);
+        mphi_add_incoming(m, f, MSSA_LIVE_ON_ENTRY, b);
     }
     l := mssa_block(m, b);
     if !l return;
@@ -295,12 +586,7 @@ mssa_mark_unreachable_as_live_on_entry :: (m: *Memory_SSA, b: Value_Id) {
     while a >= 0 {
         nx := m.acc[a].next;
         if m.acc[a].kind != .PHI ma_set_defining(m, a, MSSA_LIVE_ON_ENTRY);
-        else {
-            list_erase(m, a);
-            if table_find_pointer(*m.of_value, b) table_remove(*m.of_value, b);
-            l = mssa_block(m, b);
-            if !l return;
-        }
+        else fatal("MemorySSA: a MemoryPhi in an unreachable block (Accesses->erase leaves dangling entries in LLVM)");
         a = nx;
     }
 }
@@ -363,7 +649,94 @@ mssa_dominates :: (m: *Memory_SSA, dominator: s32, dominatee: s32) -> bool {
     if b1 != b2 return dt_dominates(m.dt, b1, b2);
     return mssa_locally_dominates(m, dominator, dominatee);
 }
+// MemorySSA::dominates(MemoryAccess, const Use &)
+mssa_dominates_use :: (m: *Memory_SSA, dominator: s32, u: s32) -> bool {
+    usr := m.uses[u].user;
+    if ma_is_phi(m, usr) {
+        use_bb := m.uses[u].blk;
+        if use_bb != m.acc[dominator].block return dt_dominates(m.dt, m.acc[dominator].block, use_bb);
+        // locallyDominates(Dominator, cast<MemoryAccess>(Dominatee)): casting the Use yields its value, the dominator
+        return mssa_locally_dominates(m, dominator, m.uses[u].val);
+    }
+    return mssa_dominates(m, dominator, usr);
+}
 
+// ---------------------------------------------------------------- verifyMemorySSA
+
+// verifyMemorySSA(VerificationLevel::Fast): verifyOrderingDominationAndDefUses + verifyDominationNumbers. LLVM's
+// release builds compile the checks out; this port runs them (they never change state that is observable).
+mssa_verify :: (m: *Memory_SSA, full := false) {
+    fail :: (what: string) { fatal(tprint("MemorySSA verification failed: %", what)); }
+    actual_accesses: [..] s32; actual_accesses.allocator = temp;
+    actual_defs: [..] s32; actual_defs.allocator = temp;
+    preds: [..] Value_Id; preds.allocator = temp;
+    for b: fn_blocks(m.f) {
+        l := mssa_block(m, b);
+        phi := mssa_access_of(m, b);
+        actual_accesses.count = 0; actual_defs.count = 0;
+        if phi >= 0 {
+            if m.acc[phi].dead || !ma_is_phi(m, phi) || m.acc[phi].block != b fail("bad MemoryPhi lookup");
+            array_add(*actual_accesses, phi);
+            array_add(*actual_defs, phi);
+            u := m.acc[phi].first_use;
+            while u >= 0 { if !mssa_dominates_use(m, phi, u) fail("Memory PHI does not dominate it's uses"); u = m.uses[u].next; }
+            if full {
+                block_predecessors(b, *preds);
+                if ma_nops(m, phi) != cast(u32) preds.count fail("Incomplete MemoryPhi Node");
+            }
+        }
+        for i: block_insts(b) {
+            a := mssa_access_of(m, i);
+            if a < 0 continue;
+            if !l || (!ma_is_use(m, a) && l.dfirst < 0) fail("memory affecting instructions not in the access or defs list");
+            if m.acc[a].dead || m.acc[a].inst != i || m.acc[a].block != b fail("bad MemoryUseOrDef lookup");
+            array_add(*actual_accesses, a);
+            if ma_is_def(m, a) {
+                array_add(*actual_defs, a);
+                u := m.acc[a].first_use;
+                while u >= 0 { if !mssa_dominates_use(m, a, u) fail(tprint("Memory Def % does not dominate it's use by %", m.acc[a].id, mssa_access_to_string(m, m.uses[u].user))); u = m.uses[u].next; }
+            }
+        }
+        if !l { if actual_accesses.count fail("accesses without an access list"); continue; }
+        k := 0;
+        x := l.first;
+        while x >= 0 {
+            if k >= actual_accesses.count || actual_accesses[k] != x fail("Not the same accesses in the same order");
+            k += 1; x = m.acc[x].next;
+        }
+        if k != actual_accesses.count fail("We don't have the same number of accesses in the block as on the access list");
+        k = 0;
+        x = l.dfirst;
+        while x >= 0 {
+            if k >= actual_defs.count || actual_defs[k] != x fail("Not the same defs in the same order");
+            k += 1; x = m.acc[x].dnext;
+        }
+        if k != actual_defs.count fail("We don't have the same number of defs in the block as on the def list");
+    }
+    // verifyDominationNumbers
+    for v, b: m.numbered {
+        l := mssa_block(m, b);
+        if !l continue;
+        last: u32 = 0;
+        x := l.first;
+        while x >= 0 {
+            found, n := table_find(*m.numbering, x);
+            if !found fail("MemoryAccess has no domination number in a valid block!");
+            if n <= last fail("Domination numbers should be strictly increasing!");
+            last = n; x = m.acc[x].next;
+        }
+    }
+    // use-list consistency (implied by LLVM's data structure)
+    for r, a: m.acc {
+        if r.dead continue;
+        for k: 0..cast(s64) r.nops - 1 {
+            u := r.ops + cast(s32) k;
+            v := m.uses[u].val;
+            if v < 0 continue;
+            if m.acc[v].dead fail("an operand refers to a deleted access");
+        }
+    }
+}
 // ---------------------------------------------------------------- clobber queries
 
 // MemoryLocOrCall
@@ -581,14 +954,14 @@ mssa_upward_defs :: (m: *Memory_SSA, e: Upward_Defs_Elem, out: *[..] Upward_Defs
     out.count = 0;
     r := ma(m, e.ma);
     if r.kind != .PHI {
-        x: Upward_Defs_Elem; x.ma = r.defining; x.loc = e.loc; x.mbci = e.mbci;
+        x: Upward_Defs_Elem; x.ma = ma_defining(m, e.ma); x.loc = e.loc; x.mbci = e.mbci;
         array_add(out, x);
         return;
     }
-    for k: 0..r.phi_vals.count-1 {
-        x: Upward_Defs_Elem; x.ma = r.phi_vals[k]; x.loc = e.loc; x.mbci = e.mbci;
+    for k: 0..cast(s64) ma_nops(m, e.ma) - 1 {
+        x: Upward_Defs_Elem; x.ma = mphi_value(m, e.ma, cast(u32) k); x.loc = e.loc; x.mbci = e.mbci;
         if e.loc.ptr != NONE {
-            addr := phi_translate_value(e.loc.ptr, r.block, r.phi_blocks[k], m.dt, true);
+            addr := phi_translate_value(e.loc.ptr, r.block, mphi_block(m, e.ma, cast(u32) k), m.dt, true);
             if addr != NONE && addr != x.loc.ptr x.loc.ptr = addr;
             if !is_guaranteed_loop_invariant(x.loc.ptr) x.loc.size = LS_BEFORE_OR_AFTER;
         } else x.mbci = true;
@@ -670,7 +1043,7 @@ cw_walk_to_phi_or_clobber :: (w: *Clobber_Walker, desc_index: s64, stop_at: s32 
             if clob return cur, true;
         }
         if r.kind == .PHI break;
-        cur = r.defining;
+        cur = ma_defining(m, cur);
     }
     if limit_already_reached w.limit.* = 0;
     return w.paths[desc_index].last, false;
@@ -761,7 +1134,7 @@ cw_try_optimize_phi :: (w: *Clobber_Walker, phi: s32, start: s32, loc: Mem_Loc) 
                     def_chain_end = x;
                     r := ma(m, x);
                     if r.kind == .PHI break;
-                    x = r.defining;
+                    x = ma_defining(m, x);
                 }
             }
             chain_bb := m.acc[def_chain_end].block;
@@ -789,7 +1162,7 @@ cw_find_clobber :: (m: *Memory_SSA, aa: *Aa_Query, start: s32, q: *Upwards_Query
     w.paths.allocator = temp; w.visited_phis.allocator = temp;
     if limit.* == 0 limit.* += 1;
     current := start;
-    if ma_is_use(m, start) current = m.acc[start].defining;
+    if ma_is_use(m, start) current = ma_defining(m, start);
     first: Def_Path; first.loc = q.starting_loc; first.first = current; first.last = current; first.mbci = false; first.previous = -1;
     array_add(*w.paths, first);
     res, known := cw_walk_to_phi_or_clobber(*w, 0);
@@ -826,7 +1199,7 @@ mssa_clobbering_access_base :: (m: *Memory_SSA, a: s32, aa: *Aa_Query, limit: *u
         ci := invariant_group_clobbering_instruction(m.acc[a].inst, m.dt);
         if ci != NONE {
             cma := mssa_access_of(m, ci);
-            if ma_is_use(m, cma) return m.acc[cma].defining;
+            if ma_is_use(m, cma) return ma_defining(m, cma);
             return cma;
         }
     }
@@ -844,7 +1217,7 @@ mssa_clobbering_access_base :: (m: *Memory_SSA, a: s32, aa: *Aa_Query, limit: *u
     }
     optimized: s32;
     if !is_opt {
-        defining := m.acc[a].defining;
+        defining := ma_defining(m, a);
         if is_live_on_entry(defining) {
             ma_set_optimized(m, a, defining);
             return defining;
@@ -1018,21 +1391,21 @@ mssa_access_to_string :: (m: *Memory_SSA, a: s32) -> string {
     r := ma(m, a);
     if r.kind == {
         case .DEF;
-            s := tprint("% = MemoryDef(%)", r.id, mssa_id_string(m, r.defining));
-            if ma_is_optimized(m, a) s = tprint("%->%", s, mssa_id_string(m, r.optimized));
+            s := tprint("% = MemoryDef(%)", r.id, mssa_id_string(m, ma_defining(m, a)));
+            if ma_is_optimized(m, a) s = tprint("%->%", s, mssa_id_string(m, ma_optimized_op(m, a)));
             return s;
         case .USE;
-            return tprint("MemoryUse(%)", mssa_id_string(m, r.defining));
+            return tprint("MemoryUse(%)", mssa_id_string(m, ma_defining(m, a)));
     }
     sb: String_Builder; sb.allocator = temp;
     print_to_builder(*sb, "% = MemoryPhi(", r.id);
-    for k: 0..r.phi_vals.count-1 {
+    for k: 0..cast(s64) r.nops - 1 {
         if k > 0 append(*sb, ",");
-        b := r.phi_blocks[k];
+        b := mphi_block(m, a, cast(u32) k);
         append(*sb, "{");
         if vname(b).count append(*sb, vname(b)); else append(*sb, value_as_operand(b));
         append(*sb, ",");
-        append(*sb, mssa_id_string(m, r.phi_vals[k]));
+        append(*sb, mssa_id_string(m, mphi_value(m, a, cast(u32) k)));
         append(*sb, "}");
     }
     append(*sb, ")");
@@ -1105,4 +1478,9 @@ mssa_walker_printer_run :: (f: Value_Id) {
     m := get_memoryssa(f);
     s := tprint("MemorySSA (walker) for function: %\n%", vname(f), mssa_print_function(m, true));
     write_string(s, to_standard_error = true);
+}
+// verify<memoryssa> (MemorySSAVerifierPass)
+mssa_verifier_run :: (f: Value_Id) {
+    m := get_memoryssa(f);
+    mssa_verify(m);
 }

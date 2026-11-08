@@ -143,14 +143,18 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     if e.ac && !analysis_survives(.ASSUMPTIONS, pa) { ac_free(e.ac); e.ac = null; }
     if e.li && !analysis_survives(.LOOPS, pa) { li_free(e.li); e.li = null; }
     if e.ci && !analysis_survives(.CYCLES, pa) { ci_free(e.ci); e.ci = null; }
-    // MemorySSAAnalysis::Result::invalidate: preserved, and AAManager and DominatorTreeAnalysis survive
-    if e.mssa && (!analysis_survives(.MEMORYSSA, pa) || !e.dt || !e.ac) { mssa_free(e.mssa); e.mssa = null; }
     // a DemandedBits result points at the DominatorTree it was built with
     if e.db && !e.dt { db_free(e.db); e.db = null; }
     // ScalarEvolution::invalidate: not preserved, or DominatorTree / LoopInfo invalidated. (The AssumptionCache
     // never invalidates itself in LLVM; here it is rebuilt, so a surviving ScalarEvolution gets the new one.)
     if e.se && (!analysis_survives(.SCEV, pa) || !e.dt || !e.li) { scev_free(e.se); e.se = null; }
     if e.se && !e.ac { e.ac = ac_build(f); e.se.ac = e.ac; }
+    // MemorySSAAnalysis::Result::invalidate: preserved, and AAManager and DominatorTreeAnalysis survive. AAManager
+    // depends on BasicAA's AssumptionCache (never invalidated in LLVM: rebuilt here and re-pointed) and DT, and on
+    // SCEVAA's ScalarEvolution.
+    if e.mssa && (!analysis_survives(.MEMORYSSA, pa) || !e.dt || (e.mssa.aar.se && !e.se)) { mssa_free(e.mssa); e.mssa = null; }
+    if e.mssa && e.mssa.aar.ac && !e.ac { e.ac = ac_build(f); }
+    if e.mssa && e.mssa.aar.ac e.mssa.aar.ac = e.ac;
 }
 fam_require :: (f: Value_Id, k: Analysis_Kind) {
     if k == {
@@ -182,7 +186,7 @@ Pass_Kind :: enum u8 {
     // transforms
     DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG; INSTSIMPLIFY; SROA; INSTCOMBINE;
     // alias analysis (aa.jai)
-    AA_EVAL; REQUIRE_GLOBALS_AA; PRINT_MEMORYSSA; PRINT_MEMORYSSA_NO_OPT; PRINT_MEMORYSSA_WALKER;
+    AA_EVAL; REQUIRE_GLOBALS_AA; PRINT_MEMORYSSA; PRINT_MEMORYSSA_NO_OPT; PRINT_MEMORYSSA_WALKER; VERIFY_MEMORYSSA;
     // loops (loop_info.jai, cycle_info.jai)
     PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
     // loop passes (loop_pm.jai)
@@ -245,7 +249,7 @@ PASS_TABLE :: Pass_Info.[
     .{"print<memoryssa>", .FUNCTION, .PRINT_MEMORYSSA, true, .DOMTREE},
     .{"print<memoryssa><no-ensure-optimized-uses>", .FUNCTION, .PRINT_MEMORYSSA_NO_OPT, true, .DOMTREE},
     .{"print<memoryssa-walker>", .FUNCTION, .PRINT_MEMORYSSA_WALKER, true, .DOMTREE},
-    .{"verify<memoryssa>", .FUNCTION, .REQUIRE, true, .MEMORYSSA},   // no verifier yet: computes MemorySSA only
+    .{"verify<memoryssa>", .FUNCTION, .VERIFY_MEMORYSSA, true, .MEMORYSSA},
     .{"require<memoryssa>", .FUNCTION, .REQUIRE, true, .MEMORYSSA},
     .{"invalidate<memoryssa>", .FUNCTION, .INVALIDATE, true, .MEMORYSSA},
     .{"print<loops>", .FUNCTION, .PRINT_LOOPS, true, .LOOPS},
@@ -726,6 +730,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .PRINT_MEMORYSSA; mssa_printer_run(f, true); return PRESERVE_ALL;
         case .PRINT_MEMORYSSA_NO_OPT; mssa_printer_run(f, false); return PRESERVE_ALL;
         case .PRINT_MEMORYSSA_WALKER; mssa_walker_printer_run(f); return PRESERVE_ALL;
+        case .VERIFY_MEMORYSSA; mssa_verifier_run(f); return PRESERVE_ALL;
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;
