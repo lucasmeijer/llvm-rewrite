@@ -308,18 +308,30 @@ cfo_load_through_bitcast :: (c_in: Value_Id, dt: Type_Id) -> Value_Id {
     return NONE;
 }
 // CastInst::castIsValid (the cases load folding produces)
+// CastInst::castIsValid (the casts constant folding of loads creates)
 cast_is_valid :: (opc: Opcode, st: Type_Id, dt: Type_Id) -> bool {
-    if is_vector_type(st) != is_vector_type(dt) return false;
-    if is_vector_type(st) && type_count(st) != type_count(dt) return false;
+    if !is_first_class(st) || !is_first_class(dt) || type_kind(st) == .STRUCT || type_kind(dt) == .STRUCT ||
+       type_kind(st) == .ARRAY || type_kind(dt) == .ARRAY return false;
+    sv := is_vector_type(st); dv := is_vector_type(dt);
     s := scalar_type(st); d := scalar_type(dt);
     if opc == {
-        case .INTTOPTR; return is_int_type(s) && is_ptr_type(d);
-        case .PTRTOINT; return is_ptr_type(s) && is_int_type(d);
+        case .INTTOPTR; #through;
+        case .PTRTOINT;
+            if sv != dv return false;
+            if sv && (type_count(st) != type_count(dt) || type_kind(st) != type_kind(dt)) return false;
+            if opc == .INTTOPTR return is_int_type(s) && is_ptr_type(d);
+            return is_ptr_type(s) && is_int_type(d);
         case .BITCAST;
-            if is_ptr_type(s) != is_ptr_type(d) return false;
-            if is_ptr_type(s) return ir.types[s].a == ir.types[d].a;
-            if type_kind(st) == .STRUCT || type_kind(dt) == .STRUCT || type_kind(st) == .ARRAY || type_kind(dt) == .ARRAY return false;
-            return dl_type_size_bits(st) == dl_type_size_bits(dt) && is_first_class(st) && is_first_class(dt);
+            sp := is_ptr_type(s); dp := is_ptr_type(d);
+            if (sp && type_kind(d) == .BYTE) || (type_kind(s) == .BYTE && dp) return true;
+            if sp != dp return false;
+            if !sp return type_kind(st) != .SVECTOR && type_kind(dt) != .SVECTOR && dl_type_size_bits(st) == dl_type_size_bits(dt) ||
+                          (type_kind(st) == .SVECTOR && type_kind(dt) == .SVECTOR && dl_type_size_bits(st) == dl_type_size_bits(dt));
+            if ir.types[s].a != ir.types[d].a return false;
+            if sv && dv return type_count(st) == type_count(dt) && type_kind(st) == type_kind(dt);
+            if sv return type_kind(st) == .VECTOR && type_count(st) == 1;
+            if dv return type_kind(dt) == .VECTOR && type_count(dt) == 1;
+            return true;
     }
     return false;
 }
