@@ -7,19 +7,8 @@ import printer;
 import flags;
 import passmgr;
 import layoutstats;
-
-// Triple::normalize for the triples the tests use: empty components become "unknown".
-fn triple_normalize(t: const u8[:], out: u8[>..]&) {
-    var st: i64 = 0;
-    var first = true;
-    for j in 0..t.len + 1 {
-        if j < t.len && t[j] != '-' { continue; }
-        if !first { out.push('-'); }
-        first = false;
-        if j == st { out.append("unknown"); } else { out.append(t[st..j]); }
-        st = j + 1;
-    }
-}
+import tli;
+import triple;
 
 fn main() {
     let av = args();
@@ -51,6 +40,13 @@ fn main() {
         }
         else if starts_with(a, "-data-layout=") { cl_datalayout.append(a[13..]); }
         else if starts_with(a, "-mtriple=") { triple_normalize(a[9..], cl_mtriple); }
+        else if a == "-mtriple" { i++; if i < av.len { triple_normalize(av[i], cl_mtriple); } }
+        // TargetLibraryInfo options (optdriver.cpp): cl::list, "-x=v" or "-x v"
+        else if a == "-disable-simplify-libcalls" { tli_cl_disable_all = true; }
+        else if starts_with(a, "-disable-builtin=") { tli_cl_disable.append(a[17..]); tli_cl_disable.push('\n'); }
+        else if a == "-disable-builtin" { i++; if i < av.len { tli_cl_disable.append(av[i]); tli_cl_disable.push('\n'); } }
+        else if starts_with(a, "-enable-builtin=") { tli_cl_enable.append(a[16..]); tli_cl_enable.push('\n'); }
+        else if a == "-enable-builtin" { i++; if i < av.len { tli_cl_enable.append(av[i]); tli_cl_enable.push('\n'); } }
         else if starts_with(a, "-mattr=") {
             // cl::list, CommaSeparated; SubtargetFeatures::AddFeature lowercases and adds a missing '+'
             var st: i64 = 7;
@@ -92,6 +88,9 @@ fn main() {
     // -mtriple overrides the module's triple (M->setTargetTriple(Triple::normalize(TargetTriple)))
     if cl_mtriple.len > 0 { modules[cur_module].triple = intern(cl_mtriple); }
     set_function_attributes(cur_module);
+    var tli_err: u8[>..] = [];
+    tli_check_cl_builtins(tli_err);
+    if tli_err.len > 0 { write_stderr(str("opt: ", tli_err, "\n")); exit(1); }
     if have_pipeline {
         let root = parse_pass_pipeline(pipeline);
         run_pipeline(root, cur_module);

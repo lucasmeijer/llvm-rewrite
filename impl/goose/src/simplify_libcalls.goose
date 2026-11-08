@@ -340,7 +340,7 @@ fn emit_lib_call(lf: i64, rt: i32, pts: const i32[:], argsv: const i32[:], va: b
     let fty = ty_func_of(rt, pts, va);
     let f = blc_get_or_insert(lf, fty, 0);
     var nm: u8[>..] = [];
-    nm.append(TLI_NAMES[lf]);
+    nm.append(tli_name(lf));
     blc_infer_by_name(nm);
     let c = lcs_create_call(f, argsv, nm);
     insts[inst_of(c)].cc = globs[glob_of(f)].cc;
@@ -480,9 +480,7 @@ fn optimize_strnlen(ci: i32) -> i32 {
     return -1;
 }
 fn optimize_wcslen(ci: i32) -> i32 {
-    var ws = module_flag_int(globs[glob_of(inst_func(ci))].module, "wchar_size");
-    if ws < 0 { ws = 4; }
-    let wcs = ws * 8;
+    let wcs = tli_wchar_size(globs[glob_of(inst_func(ci))].module) * 8;
     if wcs == 0 { return -1; }
     return optimize_string_length(ci, wcs, -1);
 }
@@ -1457,7 +1455,7 @@ fn optimize_exp2(ci: i32, unsafe_shrink: bool) -> i32 {
             icb_fmf = icx_fmf(ci);
             let lf = blc_get_float_fn(ty, LF_ldexp, LF_ldexpf, LF_ldexpl);
             var nm: u8[>..] = [];
-            nm.append(TLI_NAMES[lf]);
+            nm.append(tli_name(lf));
             let f = blc_get_or_insert(lf, ty_func_of(ty, [ty, vals[e].ty as i32], false), 0);
             blc_infer_by_name(nm);
             let c = lcs_create_call(f, [one, e], nm);

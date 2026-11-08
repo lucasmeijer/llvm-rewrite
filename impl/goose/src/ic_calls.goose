@@ -8,6 +8,7 @@
 // The memory-intrinsic and visitCallBase parts are in ic_visit_misc.goose / here (see visit_call_base).
 namespace ic;
 import std;
+import tli;
 import ir;
 import irutil;
 import calls;
@@ -3260,22 +3261,7 @@ fn visit_invoke(ii: i32) -> i32 { visit_call_base(ii) }
 fn visit_callbr(ii: i32) -> i32 { visit_call_base(ii) }
 
 // TargetLibraryInfoImpl::isCallingConvCCompatible(CC, TT, FuncTy)
-fn is_calling_conv_c_compatible(cc: i64, fty: i32, fv: i32) -> bool {
-    if cc == 0 { return true; }
-    if cc == 66 || cc == 67 || cc == 68 {
-        let m = globs[glob_of(fv)].module;
-        let t = modules[m].triple;
-        if t >= 0 && (contains(sbytes(t), "-ios") || contains(sbytes(t), "-unknown-ios")) { ic_not_ported("isCallingConvCCompatible on iOS triples"); }
-        let rt = ty_fn_ret(fty);
-        if ty_kind(rt) != TK_PTR && !ty_is_int(rt) && rt != T_VOID { return false; }
-        for k in ty_fn_nparams(fty) {
-            let p = ty_fn_param(fty, k);
-            if ty_kind(p) != TK_PTR && !ty_is_int(p) { return false; }
-        }
-        return true;
-    }
-    return false;
-}
+fn is_calling_conv_c_compatible(cc: i64, fty: i32, fv: i32) -> bool { tli_is_cc_c_compatible(cc, fty, globs[glob_of(fv)].module) }
 
 // visitCallBase(Call)
 fn visit_call_base(ci: i32) -> i32 {

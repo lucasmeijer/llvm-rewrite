@@ -8,6 +8,7 @@
 // and getOrEnforceKnownAlignment / tryEnforceAlignment (llvm/lib/Transforms/Utils/Local.cpp).
 namespace ic;
 import std;
+import triple;
 import ir;
 import irutil;
 import calls;
@@ -141,16 +142,10 @@ fn lsa_can_increase_alignment(v: i32) -> bool {
     if lsa_triple_is_elf(g.module) && g.dso_local == 0 { return false; }
     return true;
 }
-// Triple::isOSBinFormatELF: not Darwin/MachO, not Windows (COFF), not XCOFF/wasm/...
+// Triple::isOSBinFormatELF
 fn lsa_triple_is_elf(m: i32) -> bool {
     let t = modules[m].triple;
-    if t < 0 { return true; }
-    let s = sbytes(t);
-    if s.len == 0 { return true; }
-    if contains(s, "-darwin") || contains(s, "-macos") || contains(s, "-ios") || contains(s, "-apple") || contains(s, "macho") { return false; }
-    if contains(s, "-windows") || contains(s, "-win32") || contains(s, "-mingw") || contains(s, "-cygwin") || contains(s, "coff") { return contains(s, "-elf"); }
-    if contains(s, "wasm") || contains(s, "xcoff") || contains(s, "-aix") || contains(s, "spirv") || contains(s, "dxil") || contains(s, "goff") || contains(s, "-zos") { return false; }
-    return true;
+    return tt_is_elf(triple_parse(if t < 0 { "" } else { sbytes(t) }));
 }
 fn contains(s: const u8[:], sub: const u8[:]) -> bool {
     if sub.len > s.len { return false; }

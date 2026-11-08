@@ -1708,7 +1708,7 @@ recursive fn bas_alias_check_recursive(v1: i32, s1: u64, v2: i32, s2: u64, q: i3
 
 // BasicAAResult::aliasErrno: true = MayAlias
 fn bas_alias_errno_may(loc: ML) -> bool {
-    if ls_has_value(loc.size) && ls_value(loc.size) * 8 > (TLI_INT_BITS as u64) { return false; }
+    if ls_has_value(loc.size) && ls_value(loc.size) * 8 > (tli_int_bits() as u64) { return false; }
     if aa_is_identified_function_local(get_underlying_object(loc.ptr, BAS_MAX_LOOKUP)) { return false; }
     return true;
 }

@@ -239,21 +239,7 @@ fn blc_set_args_noundef(fv: i32) -> bool {
 // Module::getRtLibUseGOT: the "RtLibUseGOT" module flag
 fn module_rtlib_use_got(m: i32) -> bool { module_flag_int(m, "RtLibUseGOT") > 0 }
 // a module flag's integer value (-1 = absent)
-fn module_flag_int(m: i32, key: const u8[:]) -> i64 {
-    for &nm in named_mds {
-        if nm.module != m || sbytes(nm.name) != "llvm.module.flags" { continue; }
-        for i in nm.nops {
-            let e = md_ops[nm.ops + i];
-            if e < 0 || mds[e].kind != MK_TUPLE || mds[e].nops < 3 { continue; }
-            let kk = md_op(e, 1);
-            if kk < 0 || mds[kk].kind != MK_STRING || sbytes(mds[kk].extra) != key { continue; }
-            let v = md_op(e, 2);
-            if v >= 0 && mds[v].kind == MK_VALUE && vals[mds[v].extra].kind == VK_CINT { return cint_lo(mds[v].extra) as! i64; }
-            return 0;
-        }
-    }
-    return -1;
-}
+fn module_flag_int(m: i32, key: const u8[:]) -> i64 { tli_module_flag_int(m, key) }
 
 // inferNonMandatoryLibFuncAttrs(M, Name, TLI)
 fn blc_infer_by_name(name: const u8[:]) -> bool {
@@ -268,7 +254,7 @@ fn blc_infer_by_name(name: const u8[:]) -> bool {
 // isLibFuncEmittable(M, TLI, LibFunc)
 fn blc_is_emittable(lf: i64) -> bool {
     if !tli_has(lf as i32) { return false; }
-    let gv = symtab_lookup(modules[cur_module].symtab, intern(TLI_NAMES[lf]));
+    let gv = symtab_lookup(modules[cur_module].symtab, intern(tli_name(lf)));
     if gv >= 0 {
         if vals[gv].kind == VK_FUNC { return tli_valid_proto(globs[glob_of(gv)].vty, lf as i32); }
         return false;
@@ -295,8 +281,11 @@ fn module_get_or_insert_function(name: const u8[:], fty: i32, al: i32) -> i32 {
 
 // getOrInsertLibFunc(M, TLI, TheLibFunc, T, AttributeList)
 fn blc_get_or_insert(lf: i64, fty: i32, al: i32) -> i32 {
-    let f = module_get_or_insert_function(TLI_NAMES[lf], fty, al);
-    // setArgExtAttr / setRetExtAttr: no extension attributes on the targets we support (x86-64)
+    var nm: u8[>..] = [];
+    nm.append(tli_name(lf));
+    let f = module_get_or_insert_function(nm, fty, al);
+    // setArgExtAttr / setRetExtAttr (only targets that extend i32 arguments/returns need them)
+    if tli_needs_ext { blc_not_ported("getOrInsertLibFunc's signext/zeroext attributes (PPC64/SystemZ/Sparc64/MIPS/RISCV64/LoongArch)"); }
     // markRegisterParameterAttributes
     if ty_fn_nparams(fty) > 0 && !ty_fn_vararg(fty) {
         let cc = globs[glob_of(f)].cc as i64;
