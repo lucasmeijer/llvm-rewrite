@@ -8700,7 +8700,9 @@ tests/imported/llvm/Transforms/LoopIdiom/unsafe.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/unwind.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/wcslen16.ll::roundtrip
 tests/imported/llvm/Transforms/LoopIdiom/wcslen32.ll::roundtrip
+tests/imported/llvm/Transforms/LoopInstSimplify/basic.ll::opt
 tests/imported/llvm/Transforms/LoopInstSimplify/basic.ll::roundtrip
+tests/imported/llvm/Transforms/LoopInstSimplify/pr55072.ll::opt
 tests/imported/llvm/Transforms/LoopInstSimplify/pr55072.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/backward.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/cond-load.ll::roundtrip

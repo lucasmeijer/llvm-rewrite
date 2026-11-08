@@ -247,7 +247,7 @@ Pass_Kind :: enum u8 {
     // loops (loop_info.jai, cycle_info.jai)
     PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
     // loop passes (loop_pm.jai)
-    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS; LOOP_DELETION;
+    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS; LOOP_DELETION; LOOP_INSTSIMPLIFY;
     // ScalarEvolution (scev_print.jai)
     PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS;
     // TargetTransformInfo (tti.jai)
@@ -336,6 +336,7 @@ PASS_TABLE :: Pass_Info.[
     .{"lnicm", .LOOP, .LNICM, false, .DOMTREE},   // a LoopNest pass
     .{"indvars", .LOOP, .INDVARS, false, .DOMTREE},
     .{"loop-deletion", .LOOP, .LOOP_DELETION, false, .DOMTREE},
+    .{"loop-instsimplify", .LOOP, .LOOP_INSTSIMPLIFY, false, .DOMTREE},
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
