@@ -42,6 +42,8 @@ oracle cache is `/persistent/llvm-rewrite/oracle-cache` (safe to delete; it refi
    - `./harness/run check --impl <lang> --update`: the full ratchet must pass, and newly passing tests get recorded
      in `impl/<lang>/passing.txt`.
    - Update `knowledge/` and `NOTES.md` with what you learned that someone will need later.
+   - For a pass unit, run `./harness/run perf --impl <lang>` on the benchmarks that time your pass (report only).
+     Note a scaling exponent well above LLVM's, or a large slowdown, in `NOTES.md`.
    - If anything got in your way, write a challenge report (see below).
    - Commit, then `git pull --rebase`, then rerun the check on the rebased tree, then `git push origin main`. If the
      push is rejected, repeat. On a conflict in `passing.txt`, take the union of both sides and rerun the check.

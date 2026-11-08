@@ -36,9 +36,11 @@ tests/e2e/O2/<area>/*.ll             clang -O2;                              @ll
 tests/e2e/pipeline/<area>/*.ll       clang -O2 -Xclang -disable-llvm-passes; @opt -O2, @llc -O2
 tests/function/src/<area>/x.c + x.driver.c    same three configurations, with @driver
 tests/imported/llvm/Transforms/<Pass>/*.ll    LLVM's regression tests, original paths kept; SKIPPED.md per dir
+tests/perf/compile/<program>.ll      whole llvm-test-suite programs, one linked module each; @opt -O2, @perf
+tests/perf/scaling/<shape>/n<N>.ll   synthetic IR of one shape at three sizes; @opt per pass, @perf, @perf-size
 ```
 
-The `.ll` files in `O0/`, `O2/`, `pipeline/` and `imported/` are generated. Regenerate them, never edit them by hand.
+The `.ll` files in `O0/`, `O2/`, `pipeline/`, `imported/` and `perf/` are generated (`perf/` by `gen-perf`). Regenerate them, never edit them by hand.
 
 ## Commands
 
@@ -57,6 +59,10 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/` and `imported/` are generated. Rege
 ./harness/run from-c tests/e2e/src/<area>/x.c            # C -> three .ll tests, with UB validation
 ./harness/run import-llvm Transforms/LICM                # import LLVM's tests for a pass
 ./harness/run import-test-suite SingleSource/UnitTests   # import llvm-test-suite programs
+
+./harness/run perf --impl rust                           # compile-time report vs LLVM (see Performance)
+./harness/run perf --impl rust,zig 'tests/perf/scaling/allocas/*'   # several impls side by side, some benchmarks
+./harness/run gen-perf                                   # regenerate tests/perf
 ```
 
 `check` runs `impl/<lang>/build.sh` first (skip with `--no-build`). For every failing check it writes artifacts to
@@ -65,6 +71,32 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/` and `imported/` are generated. Rege
 
 `from-c` rejects programs that are nondeterministic, time out (10 s), or behave differently between clang `-O0`,
 `-O2` and `-O1 -fsanitize=address,undefined`, because that indicates UB and the test would be meaningless.
+
+## Performance (compile time; report only)
+
+`./harness/run perf --impl <lang>[,<lang>…]` measures how fast our tools are compared with LLVM's. It never fails and
+doesn't touch `passing.txt`; correctness is still `check`'s job. Every `; @perf: <tool> <args>` line in `tests/perf/`
+is one benchmark: `opt` alone is parse + print, `opt -O2` or `opt -passes=…` times a pipeline, `llc -O2` times the
+backend on LLVM's `opt` output for the file's first `@opt`.
+
+| Column | Meaning |
+| --- | --- |
+| `llvm Minstr`, `llvm s` | LLVM's millions of executed instructions, and its median wall time |
+| `instr` | our executed instructions ÷ LLVM's. Counted with `valgrind --tool=cachegrind` (the VM exposes no hardware counters): exact and repeatable, so this is the number to watch. Cached by (binary, args, input) |
+| `wall` | our median wall time ÷ LLVM's (`--reps`, default 3, tools interleaved). Noisy on a shared machine: even identical binaries can come out at 0.6×–1.5× with one rep |
+| `rss` | our peak memory ÷ LLVM's |
+| `Δprev` | change in our instruction count since the previous `perf` run of this implementation (from the history) |
+| `ok` | whether we pass the correctness check for that output (`::roundtrip` or `::opt`, from `passing.txt`); `-` if none |
+
+Below the table: the geometric mean of the ratios, and for `tests/perf/scaling/` a fitted exponent k (cost ~ n^k,
+over three sizes, after subtracting the cost of the same command on an empty module). A k well above LLVM's means an
+algorithm with worse complexity than LLVM's, even when the absolute numbers are still small. LLVM's own k isn't
+always 1 (e.g. `-O2` on many sequential loops is about 2).
+
+The first run of the whole corpus takes about 4 minutes on 16 cores (valgrind slows programs down about 40 times);
+LLVM's counts are cached in the oracle cache after that, and so are ours for an unchanged binary. `--no-instr` skips
+valgrind. Results: `.harness-out/perf/<impl>.json`; every run is appended to
+`/persistent/llvm-rewrite/perf-history/<impl>.jsonl` (with commit and dirty flag) unless `--no-history`.
 
 ## The CLI contract for our tools
 

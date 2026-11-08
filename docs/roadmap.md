@@ -33,6 +33,9 @@ interprocedural optimization and the full `opt -O2` pipeline (L2). Everything th
 `opt`, so it needs no backend. Code generation (L3, L4) and backend optimization (L5) come later. Don't start an L3+
 unit until the human running the agents says so.
 
+Compile-time performance (`./harness/run perf`, see `docs/testing.md`) is reported, not gated: no unit requires a
+speed. Look at it after porting a pass, and write down bad scaling in `NOTES.md`.
+
 ## Layer 0: IR core (parse, print, verify)
 
 ### L0.design — Write the implementation's data-oriented design doc
@@ -220,6 +223,10 @@ exactly, so they belong here and not with the backend.
 - deps: L2.pipeline-O2
 - exit: tests/lto/*::opt
 
+### L2.perf-corpus — Correct output on the compile-time performance corpus (real programs, scaling shapes)
+- deps: L2.pipeline-O2
+- exit: tests/perf/*::roundtrip, tests/perf/*::opt
+
 ## Layer 3: -O0 code generation (x86-64 SysV, AT&T assembly)
 
 Tests in this layer use `llc -O0`. `::run` checks compile, link and run. (The IR that llc's own IR-level passes hand
@@ -300,6 +307,6 @@ backend may lower however it likes. llc -O2's IR passes are matched exactly in L
 
 ## Layer 5: backend optimization (measured, not matched)
 
-### L5.harness-perf — Add a benchmark mode to the harness (runtime vs `llc -O2`), and a unit per optimization
+### L5.harness-perf — Extend `harness/run perf` to the speed of generated programs (runtime vs `llc -O2`), and a unit per optimization
 - deps: L4.all
-- exit: tests/perf/*::perf
+- exit: tests/perf/runtime/*::perf

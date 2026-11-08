@@ -8,7 +8,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import checks, config, corpus, gen, proc, roadmap
+from . import checks, config, corpus, gen, perf, perfgen, proc, roadmap
 
 TTY = sys.stdout.isatty()
 
@@ -336,6 +336,20 @@ def main(argv=None):
     s = sub.add_parser("import-test-suite", help="import llvm-test-suite SingleSource C programs as e2e tests")
     s.add_argument("dirs", nargs="+", help="directories relative to llvm-test-suite, e.g. SingleSource/UnitTests")
     s.set_defaults(fn=gen.cmd_import_test_suite)
+
+    s = sub.add_parser("perf", help="compile-time benchmarks: our tools vs LLVM on tests/perf (report only)")
+    s.add_argument("--impl", required=True, help="one implementation, or several separated by commas (e.g. goose,jai)")
+    s.add_argument("--no-build", action="store_true", help="skip impl/<lang>/build.sh")
+    s.add_argument("globs", nargs="*", help="path globs, default all of tests/perf (e.g. 'tests/perf/scaling/allocas/*')")
+    s.add_argument("--no-instr", action="store_true", help="skip instruction counting (valgrind); wall time and memory only")
+    s.add_argument("--reps", type=int, default=3, help="timed runs per tool and benchmark; the median is reported")
+    s.add_argument("-j", "--jobs", type=int, default=os.cpu_count(), help="parallel valgrind runs")
+    s.add_argument("--no-history", action="store_true", help="don't append this run to the history")
+    s.set_defaults(fn=perf.cmd_perf)
+
+    s = sub.add_parser("gen-perf", help="regenerate tests/perf (llvm-test-suite programs and synthetic scaling shapes)")
+    s.add_argument("--clean", action="store_true", help="delete tests/perf first")
+    s.set_defaults(fn=perfgen.cmd_gen_perf)
 
     a = p.parse_args(argv)
     a.fn(a)

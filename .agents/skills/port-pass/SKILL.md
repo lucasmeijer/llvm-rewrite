@@ -43,5 +43,11 @@ description: Port an LLVM optimization pass (or analysis) into your implementati
 
 ## Finish
 
+Look at compile time: `./harness/run perf --impl <lang> 'tests/perf/scaling/*'` (and `tests/perf/compile/*` once
+`-O2` works). If a shape that runs your pass scales worse than LLVM (exponent k clearly higher), you probably used a
+simpler data structure than LLVM does; fix it or note it in `NOTES.md`. If no shape exercises your pass, add one to
+`harness/lrh/perfgen.py` and rerun `gen-perf`.
+
+
 Follow "Working on a unit" in `AGENTS.md`: unit COMPLETE, full ratchet with `--update`, knowledge notes, challenge
 report if needed, rebase, recheck, push.

@@ -6,6 +6,8 @@ Directives are comment lines `; @key: value` in the file's leading comment block
   @llc: <llc args>      enables `::isel-ir` and `::run`
   @driver: <path.c>     C driver linked with the compiled IR for `::run` (function tests)
   @source: <path.c>     C file the IR was generated from (informational, used for UB validation)
+  @perf: <tool> <args>  compile-time benchmark for `harness/run perf` (repeatable; tool is opt or llc). Not a check.
+  @perf-size: <n>       problem size of a tests/perf/scaling/ file, for fitting how cost grows with n
   @origin / @generated  provenance (informational)
 
 Every file also has `::roundtrip`. A test ID is `<repo-relative path>::<check>`.
@@ -29,6 +31,8 @@ class TestFile:
     llc: str | None = None
     driver: str | None = None
     source: str | None = None
+    perf: list[str] = field(default_factory=list)
+    perf_size: int | None = None
 
     def checks(self) -> list[str]:
         out = ["roundtrip"]
@@ -62,6 +66,10 @@ def parse(path: Path) -> TestFile:
                 t.driver = val
             elif key == "source":
                 t.source = val
+            elif key == "perf":
+                t.perf.append(val)
+            elif key == "perf-size":
+                t.perf_size = int(val)
     if t.llc is not None and len(t.opt) > 1:
         raise ValueError(f"{rel}: a test with @llc may have at most one @opt")
     return t

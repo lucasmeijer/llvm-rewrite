@@ -46,13 +46,19 @@ different languages, all data-oriented, so they can be compared.
 11. **Notes.** `knowledge/llvm/<topic>.md` (shared, curated LLVM facts), `impl/<lang>/NOTES.md` (findings for one
     implementation), `reports/challenges/` (one file per process-friction report, for the human designing the loop).
 12. **Workspace image.** `.agents-in-the-cloud/Dockerfile` bakes in LLVM 23.1.5 (pruned to the tools we use), its
-    source, llvm-test-suite, Zig and Goose, so every workspace starts ready. Jai's download URL is private, so
+    source, llvm-test-suite, Zig, Goose and valgrind, so every workspace starts ready. Jai's download URL is private, so
     `scripts/ensure-jai.sh` installs Jai at runtime from `$JAI_COMPILER_URL` into `/persistent`, once per template.
+13. **Compile-time performance is measured and reported, not gated.** `./harness/run perf` compares our tools'
+    executed instructions (valgrind cachegrind: exact, since the VM has no hardware counters), wall time and peak
+    memory against LLVM's on `tests/perf/`: whole llvm-test-suite programs plus synthetic inputs at three sizes,
+    whose fitted growth exponent exposes worse algorithms early. No ceiling and no ratchet; a history in
+    `/persistent` shows trends. The speed of the *generated code* is a later unit (L5).
 
 ## Not decided yet (later lplan rounds)
 
 - Instruction-selection architecture for L3–L5 (SelectionDAG-like, GlobalISel-like, or our own).
 - Harness support for analysis-printer tests (`L1.harness-analysis`), multi-module LTO tests (`L2.lto`) and
-  performance measurement (`L5.harness-perf`).
+  measuring the speed of generated programs (`L5.harness-perf`).
+- Whether compile-time performance should ever block a push (a ratchet on instruction counts is possible).
 - Fuzzing and automatic reduction (`llvm-reduce` with our tools as the interestingness test).
 - Alive2-based refinement checking for passes where we deliberately diverge.
