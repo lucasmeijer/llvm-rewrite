@@ -418,53 +418,89 @@ fn block_erase(bv: i32) {
 // pays for the size of the whole module. 6 set slots and 6 map slots; who owns which slot is listed in
 // DESIGN.md §8.4. Entries are created lazily up to vals.len.
 
-let NSLOTS = 6;
-var vs_stamp: i32[>..];        // (value id * NSLOTS + slot) -> epoch when added
-var vs_epoch: i32[6] = [1, 1, 1, 1, 1, 1];
-var vm_stamp: i32[>..];
-var vm_data: i64[>..];
-var vm_epoch: i32[6] = [1, 1, 1, 1, 1, 1];
+let NSLOTS = 6;            // set slots and map slots each
+// Sets (vs_*) and maps (vm_*) share one open-addressing hash table keyed by (value id, slot), slots 0..5 for sets
+// and 6..11 for maps: memory proportional to the entries a pass touches. (An id-indexed table cost 96 bytes per
+// value id ever created, 3.4x the value record itself.) An entry is live while its stamp equals its slot's
+// epoch; clearing bumps the epoch, stale entries are dropped when the table is rebuilt. Nothing iterates it.
+struct VsEnt { key: i64, stamp: i32, data: i64 }
+var vs_tab: VsEnt[>..<];
+var vs_used: i64 = 0;
+var vs_shift: u64 = 64;
+var vs_epoch: i32[12] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
 
-fn vs_grow(n: i64) { while vs_stamp.len < n * NSLOTS { vs_stamp.push(0); } }
-fn vm_grow(n: i64) { while vm_stamp.len < n * NSLOTS { vm_stamp.push(0); vm_data.push(0); } }
+fn vs_key(s: i64, v: i32) -> i64 { (v as i64) * 16 + s }
+fn vs_find(key: i64) -> i64 {
+    if vs_tab.len == 0 { return -1; }
+    let mask = vs_tab.len - 1;
+    var j = (((key as u64) * 0x9E3779B97F4A7C15) >> vs_shift) as i64;
+    loop {
+        let k = vs_tab[j].key;
+        if k == key || k < 0 { return j; }
+        j = (j + 1) & mask;
+    }
+}
+fn vs_live(j: i64, s: i64) -> bool { j >= 0 && vs_tab[j].key >= 0 && vs_tab[j].stamp == vs_epoch[s] }
+fn vs_rehash() {
+    var old: VsEnt[>..<] = [];
+    var live: i64 = 0;
+    for e in vs_tab {
+        if e.key >= 0 && e.stamp == vs_epoch[e.key & 15] { old.push(e); live++; }
+    }
+    var n: i64 = if vs_tab.len == 0 { 1024 } else { vs_tab.len };
+    while live * 4 > n { n *= 2; }
+    var lg: u64 = 0;
+    while ((1 as i64) << lg) < n { lg++; }
+    vs_shift = 64 - lg;
+    vs_tab.clear();
+    vs_tab.resize(n, VsEnt { key: -1, stamp: 0, data: 0 });
+    vs_used = 0;
+    for e in old {
+        let j = vs_find(e.key);
+        vs_tab[j] = e;
+        vs_used++;
+    }
+}
+fn vs_slot(s: i64, v: i32) -> i64 {
+    let key = vs_key(s, v);
+    var j = vs_find(key);
+    if j >= 0 && vs_tab[j].key == key { return j; }
+    if (vs_used + 1) * 2 > vs_tab.len { vs_rehash(); j = vs_find(key); }
+    vs_tab[j].key = key;
+    vs_tab[j].stamp = 0;
+    vs_used++;
+    return j;
+}
 
 fn vs_clear(s: i64) { vs_epoch[s] += 1; }
-fn vs_has(s: i64, v: i32) -> bool {
-    let k = (v as i64) * NSLOTS + s;
-    return k < vs_stamp.len && vs_stamp[k] == vs_epoch[s];
-}
+fn vs_has(s: i64, v: i32) -> bool { vs_live(vs_find(vs_key(s, v)), s) }
 // Returns true if newly inserted.
 fn vs_add(s: i64, v: i32) -> bool {
-    let k = (v as i64) * NSLOTS + s;
-    if k >= vs_stamp.len { vs_grow(max(vals.len, (v as i64) + 1)); }
-    if vs_stamp[k] == vs_epoch[s] { return false; }
-    vs_stamp[k] = vs_epoch[s];
+    let j = vs_slot(s, v);
+    if vs_tab[j].stamp == vs_epoch[s] { return false; }
+    vs_tab[j].stamp = vs_epoch[s];
     return true;
 }
 fn vs_del(s: i64, v: i32) {
-    let k = (v as i64) * NSLOTS + s;
-    if k < vs_stamp.len && vs_stamp[k] == vs_epoch[s] { vs_stamp[k] = 0; }
+    let j = vs_find(vs_key(s, v));
+    if vs_live(j, s) { vs_tab[j].stamp = 0; }
 }
 
-fn vm_clear(s: i64) { vm_epoch[s] += 1; }
-fn vm_has(s: i64, v: i32) -> bool {
-    let k = (v as i64) * NSLOTS + s;
-    return k < vm_stamp.len && vm_stamp[k] == vm_epoch[s];
-}
+fn vm_clear(s: i64) { vs_epoch[6 + s] += 1; }
+fn vm_has(s: i64, v: i32) -> bool { vs_live(vs_find(vs_key(6 + s, v)), 6 + s) }
 fn vm_get(s: i64, v: i32, dflt: i64) -> i64 {
-    let k = (v as i64) * NSLOTS + s;
-    if k < vm_stamp.len && vm_stamp[k] == vm_epoch[s] { return vm_data[k]; }
+    let j = vs_find(vs_key(6 + s, v));
+    if vs_live(j, 6 + s) { return vs_tab[j].data; }
     return dflt;
 }
 fn vm_set(s: i64, v: i32, x: i64) {
-    let k = (v as i64) * NSLOTS + s;
-    if k >= vm_stamp.len { vm_grow(max(vals.len, (v as i64) + 1)); }
-    vm_stamp[k] = vm_epoch[s];
-    vm_data[k] = x;
+    let j = vs_slot(6 + s, v);
+    vs_tab[j].stamp = vs_epoch[6 + s];
+    vs_tab[j].data = x;
 }
 fn vm_del(s: i64, v: i32) {
-    let k = (v as i64) * NSLOTS + s;
-    if k < vm_stamp.len && vm_stamp[k] == vm_epoch[s] { vm_stamp[k] = 0; }
+    let j = vs_find(vs_key(6 + s, v));
+    if vs_live(j, 6 + s) { vs_tab[j].stamp = 0; }
 }
 
 // Slot owners (keep in sync with DESIGN.md §8.4).
