@@ -618,3 +618,106 @@ fn upgrade_tbaa() {
         f = globs[glob_of(f)].next;
     }
 }
+
+// UpgradeDebugInfo: without "Debug Info Version" 3 in llvm.module.flags, StripDebugInfo (DebugInfo.cpp).
+// (LLVM also strips debug info that fails the verifier; that part is not ported.)
+fn upgrade_debug_info() {
+    var version: i64 = 0;
+    for nm in named_mds {
+        if nm.module != cur_module || sbytes(nm.name) != "llvm.module.flags" { continue; }
+        for i in nm.nops {
+            let op = md_ops[nm.ops + i];
+            if op < 0 || mds[op].kind != MK_TUPLE || mds[op].nops < 3 { continue; }
+            let id = md_op(op, 1);
+            if id < 0 || mds[id].kind != MK_STRING || sbytes(mds[id].extra) != "Debug Info Version" { continue; }
+            let v = md_op(op, 2);
+            if v >= 0 && mds[v].kind == MK_VALUE && vals[mds[v].extra].kind == VK_CINT { version = cint_lo(mds[v].extra) as! i64; }
+        }
+    }
+    if version == 3 { return; }
+    strip_debug_info();
+}
+
+fn att_remove_kind(at: i32, n: i32, kind: i32) -> i32 {
+    // compacts the run in place; returns the new count
+    var w = 0;
+    for k in n {
+        if md_att[at + 2 * k] == kind { continue; }
+        md_att[at + 2 * w] = md_att[at + 2 * k];
+        md_att[at + 2 * w + 1] = md_att[at + 2 * k + 1];
+        w++;
+    }
+    return w as i32;
+}
+
+fn is_dilocation(m: i32) -> bool { m >= 0 && mds[m].kind == MK_DI && di_kind(m) == DIK_LOCATION }
+
+// stripDebugLocFromLoopID (direct DILocation operands only)
+fn strip_loop_id_locs(n: i32) -> i32 {
+    if n < 0 || mds[n].kind != MK_TUPLE || mds[n].nops == 0 { return n; }
+    var any = false;
+    var all = true;
+    for k in 1..mds[n].nops { if is_dilocation(md_op(n, k)) { any = true; } else { all = false; } }
+    if !any { return n; }
+    if all { return -1; }
+    var opsv: i32[>..] = [];
+    opsv.push(-1);
+    for k in 1..mds[n].nops { let o = md_op(n, k); if !is_dilocation(o) { opsv.push(o); } }
+    let r = md_get(MK_TUPLE, -1, opsv, true);
+    md_ops[mds[r].ops] = r;
+    return r;
+}
+
+fn strip_debug_info() {
+    // named metadata llvm.dbg.* and llvm.gcov
+    var w = 0;
+    for k in named_mds.len {
+        let nm = named_mds[k];
+        let s = sbytes(nm.name);
+        if nm.module == cur_module && (starts_with(s, "llvm.dbg.") || s == "llvm.gcov") { continue; }
+        named_mds[w] = nm;
+        w++;
+    }
+    named_mds.resize(w);
+    let k_heap = md_kind_id("heapallocsite");
+    let k_assign = md_kind_id("DIAssignID");
+    let k_loop = md_kind_id("llvm.loop");
+    var f = modules[cur_module].first_func;
+    while f >= 0 {
+        let g = glob_of(f);
+        globs[g].nmd = att_remove_kind(globs[g].md, globs[g].nmd, 0);
+        var b = globs[g].first_block;
+        while b >= 0 {
+            var iv = blocks[block_of(b)].first;
+            while iv >= 0 {
+                let ii = inst_of(iv);
+                var n = att_remove_kind(insts[ii].md, insts[ii].nmd, 0);
+                n = att_remove_kind(insts[ii].md, n, k_heap);
+                n = att_remove_kind(insts[ii].md, n, k_assign);
+                for k in n {
+                    let at = insts[ii].md + 2 * k;
+                    if md_att[at] == k_loop { md_att[at + 1] = strip_loop_id_locs(md_att[at + 1]); }
+                }
+                // a loop ID reduced to nothing is removed
+                var w2 = 0;
+                for k in n {
+                    if md_att[insts[ii].md + 2 * k + 1] < 0 { continue; }
+                    md_att[insts[ii].md + 2 * w2] = md_att[insts[ii].md + 2 * k];
+                    md_att[insts[ii].md + 2 * w2 + 1] = md_att[insts[ii].md + 2 * k + 1];
+                    w2++;
+                }
+                insts[ii].nmd = w2 as i32;
+                if ii < inst_dbg.len { inst_dbg[ii] = -1; }
+                iv = insts[ii].next;
+            }
+            b = blocks[block_of(b)].next;
+        }
+        f = globs[g].next;
+    }
+    var gv = modules[cur_module].first_gvar;
+    while gv >= 0 {
+        let g = glob_of(gv);
+        globs[g].nmd = att_remove_kind(globs[g].md, globs[g].nmd, 0);
+        gv = globs[g].next;
+    }
+}

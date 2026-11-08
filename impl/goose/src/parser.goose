@@ -2957,6 +2957,7 @@ fn parse_module(path: const u8[:]) {
     upgrade_tbaa();
     // UpgradeCallsToIntrinsic for every function (also sets intrinsic attributes)
     upgrade_module_intrinsics();
+    upgrade_debug_info();
     upgrade_module_flags();
 }
 

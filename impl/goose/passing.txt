@@ -1051,6 +1051,7 @@ tests/imported/llvm/Analysis/GlobalsModRef/modreftest.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/no-escape.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/noescape-nocapture-nocallback.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/nonescaping-noalias.ll::roundtrip
+tests/imported/llvm/Analysis/GlobalsModRef/pr12351.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/pr25309.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/pr35899-dbg-value.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/purecse.ll::roundtrip
@@ -2069,6 +2070,7 @@ tests/imported/llvm/Transforms/DeadStoreElimination/memset-and-memcpy.ll::roundt
 tests/imported/llvm/Transforms/DeadStoreElimination/memset-missing-debugloc.ll::roundtrip
 tests/imported/llvm/Transforms/DeadStoreElimination/memset-unknown-sizes.ll::roundtrip
 tests/imported/llvm/Transforms/DeadStoreElimination/merge-stores-big-endian.ll::roundtrip
+tests/imported/llvm/Transforms/DeadStoreElimination/merge-stores.ll::roundtrip
 tests/imported/llvm/Transforms/DeadStoreElimination/multiblock-captures.ll::roundtrip
 tests/imported/llvm/Transforms/DeadStoreElimination/multiblock-exceptions.ll::roundtrip
 tests/imported/llvm/Transforms/DeadStoreElimination/multiblock-loop-carried-dependence.ll::roundtrip
