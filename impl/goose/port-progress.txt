@@ -103,3 +103,5 @@ lib/Analysis/CycleAnalysis.cpp 1
 lib/Analysis/PtrUseVisitor.cpp 1
 lib/Analysis/ValueLatticeUtils.cpp 1  # manual: renamed: sc_can_track_* in sccp.goose (heuristic 0.00)
 lib/Analysis/DomConditionCache.cpp 1
+lib/Transforms/InstCombine/InstCombineSelect.cpp 0.95
+lib/Transforms/InstCombine/InstCombinePHI.cpp 0.9
