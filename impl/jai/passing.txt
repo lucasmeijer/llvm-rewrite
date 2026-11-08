@@ -2243,6 +2243,7 @@ tests/imported/llvm/Transforms/GVN/2010-03-31-RedundantPHIs.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2010-05-08-OneBit.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2010-11-13-Simplify.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2011-04-27-phioperands.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/2011-07-07-MatchIntrinsicExtract.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2011-09-07-TypeIdFor.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2012-05-22-PreCrash.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2016-08-30-MaskedScatterGather-inseltpoison.ll::roundtrip
@@ -4229,6 +4230,7 @@ tests/imported/llvm/Transforms/InstCombine/printf-puts-not-emittable.ll::roundtr
 tests/imported/llvm/Transforms/InstCombine/protected-field-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptr-int-cast.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptr-int-ptr-icmp.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/ptr-replace-alloca.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptrauth-intrinsics-call.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptrmask.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptrtoaddr.ll::roundtrip
@@ -4784,6 +4786,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/calls-math-finite.ll::roun
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/calls.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/cast-vector.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/cast.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/convert-from-fp16.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/copysign.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/cttz-elts.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/div-zero.ll::roundtrip
@@ -7285,6 +7288,7 @@ tests/imported/llvm/Transforms/SROA/assume.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/basictest.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/big-endian.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/dbg-inline.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/dbg-single-piece.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/fake-use-escape.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/fake-use-sroa.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/fca.ll::roundtrip

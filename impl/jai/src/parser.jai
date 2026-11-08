@@ -2457,7 +2457,7 @@ parse_instruction :: () -> Value_Id, bool {
         if eat_kw("swifterror") r.flags |= F_SWIFTERR;
         ty := parse_type();
         size: Value_Id = NONE;
-        as: u32 = dl.alloca_as;
+        as: u32 = 0;   // LLParser::parseAlloc: addrspace 0 unless given (not the datalayout's A)
         md_follows := false;
         while eat(.COMMA) {
             if is_kw("align") { next(); inst(i).align = parse_uint(); }

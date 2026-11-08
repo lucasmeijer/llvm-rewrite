@@ -430,10 +430,30 @@ parse_di_node :: (k: DI_Kind, distinct: bool) -> Md_Id {
             .{"specification", .MD, false, 0, U64MAX}, .{"bitStride", .MD, false, 0, U64MAX}]);
         rank: Md_Id = NONE;
         if v[20].seen { if v[20].is_md rank = v[20].md; else rank = md_i64(v[20].u); }
-        return di_get(k, distinct,
-            .[v[2].md, v[4].md, v[1].md, or_md_value(v[6]), or_md_value(v[8]), v[5].md, v[10].md, v[13].md, v[14].md,
-              v[15].md, v[16].md, v[17].md, v[18].md, v[19].md, rank, v[21].md, v[23].md, v[24].md],
-            .[v[0].u, v[3].u, v[11].u, v[7].u, v[22].u, v[12].u, v[9].u]);
+        ops := Md_Id.[v[2].md, v[4].md, v[1].md, or_md_value(v[6]), or_md_value(v[8]), v[5].md, v[10].md, v[13].md, v[14].md,
+              v[15].md, v[16].md, v[17].md, v[18].md, v[19].md, rank, v[21].md, v[23].md, v[24].md];
+        ints := u64.[v[0].u, v[3].u, v[11].u, v[7].u, v[22].u, v[12].u, v[9].u];
+        if v[15].md != NONE {
+            // DICompositeType::buildODRType: opt enables ODR uniquing of debug types (LLVMContext DITypeMap)
+            found, ct := table_find(*odr_types, v[15].str);
+            if !found {
+                ct = di_get(k, true, ops, ints);
+                table_add(*odr_types, copy_string(v[15].str), ct);
+                return ct;
+            }
+            if di_int(ct, 0) == v[0].u {
+                FLAG_FWD_DECL :: 4;
+                if !(di_int(ct, 6) & FLAG_FWD_DECL) || (v[9].u & FLAG_FWD_DECL) return ct;
+                // mutate the forward declaration in place
+                for ints ir.md_ints[ir.mds[ct].ints + cast(u32) it_index] = it;
+                for o, oi: ops {
+                    ir.md_ops[ir.mds[ct].ops + cast(u32) oi] = o;
+                    md_add_use(o, ct, cast(u32) oi);
+                }
+                return ct;
+            }
+        }
+        return di_get(k, distinct, ops, ints);
       case .LOCAL_VARIABLE;
         v := parse_di_fields(.[.{"scope", .MD_NONNULL, true, 0, U64MAX}, .{"name", .STR, false, 0, U64MAX}, .{"arg", .UINT, false, 0, 0xffff},
             .{"file", .MD, false, 0, U64MAX}, .{"line", .UINT, false, 0, U32}, .{"type", .MD, false, 0, U64MAX},
@@ -490,6 +510,7 @@ DW_TAG_LLVM_PTRAUTH_TYPE :: 0x4300;
 SPFLAG_LOCAL_TO_UNIT :: 4; SPFLAG_DEFINITION :: 8; SPFLAG_OPTIMIZED :: 16;
 
 new_distinct_sps: [..] Md_Id;
+odr_types: Table(string, Md_Id);
 
 // LLParser::parseDIArgList (inside a function): !DIArgList(i32 7, i64 %0)
 parse_di_arg_list :: () -> Md_Id {

@@ -534,6 +534,22 @@ fp_from_string :: (k: Type_Kind, s_in: string) -> (w: [] u64, ok: bool, overflow
 
 // APFloat::convert between formats (round to nearest even). Returns words and whether it was exact.
 fp_convert :: (from: Type_Kind, to: Type_Kind, w: [] u64) -> (w: [] u64, exact: bool) {
+    // ppc_fp128 (double-double): only values that are exactly a double (second double +0) are handled
+    if to == .PPC_FP128 {
+        if from == .PPC_FP128 return w, true;
+        if from != .HALF && from != .BFLOAT && from != .FLOAT && from != .DOUBLE
+            fatal("conversion to ppc_fp128 from this type is not supported yet");
+        dw, ex := fp_convert(from, .DOUBLE, w);
+        r := NewArray(2, u64,, allocator = temp);
+        r[0] = dw[0];
+        return r, true;
+    }
+    if from == .PPC_FP128 {
+        if w[1] != 0 fatal("conversion of a ppc_fp128 that is not exactly a double is not supported yet");
+        hw := NewArray(1, u64,, allocator = temp); hw[0] = w[0];
+        cw, cx := fp_convert(.DOUBLE, to, hw);
+        return cw, cx;
+    }
     d := fp_decode(from, w);
     pf, ef, mf, bf := fp_semantics(from);
     pt, et, mt, bt := fp_semantics(to);

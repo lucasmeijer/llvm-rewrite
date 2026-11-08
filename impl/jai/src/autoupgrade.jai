@@ -432,7 +432,20 @@ upgrade_intrinsic_call :: (ci: Value_Id, new_fn: Value_Id) {
             return;
         }
         if is_old_splice fatal("auto-upgrade of llvm.vector.splice is not supported yet");
-        if begins_with(name, "convert.") fatal("auto-upgrade of llvm.convert.* is not supported yet");
+        if consume_front(*name, "convert.") {
+            // upgradeConvertIntrinsicCall
+            rep: Value_Id = NONE;
+            half := type_simple(.HALF);
+            if begins_with(name, "to.fp16") {
+                c := builder_cast(*b, .FPTRUNC, call_arg(ci, 0), half);
+                rep = builder_cast(*b, .BITCAST, c, vtype(ci));
+            } else if begins_with(name, "from.fp16") {
+                c := builder_cast(*b, .BITCAST, call_arg(ci, 0), half);
+                rep = builder_cast(*b, .FPEXT, c, vtype(ci));
+            }
+            replace_and_erase(ci, rep);
+            return;
+        }
         fatal("auto-upgrade of '%' is not supported", vname(f));
     }
 
@@ -567,12 +580,26 @@ upgrade_default_case :: (ci: Value_Id, f: Value_Id, new_fn: Value_Id, b: *Builde
 }
 
 builder_extractvalue :: (b: *Builder, agg: Value_Id, idx: u32) -> Value_Id {
-    fatal("auto-upgrade of a call returning a named struct is not supported yet");
-    return NONE;
+    if is_constant_kind(vkind(agg)) { f := cf_extract_value(agg, .[idx]); if f != NONE return f; }
+    t := vtype(agg);
+    rt := type_sub(t, ifx type_kind(t) == .STRUCT then idx else 0);
+    i := new_inst(.EXTRACTVALUE, rt, 1);
+    set_op(i, 0, agg);
+    r := inst(i);
+    r.idx = cast(u32) ir.u32_pool.count; r.nidx = 1;
+    array_add(*ir.u32_pool, idx);
+    builder_insert(b, i);
+    return i;
 }
 builder_insertvalue :: (b: *Builder, agg: Value_Id, v: Value_Id, idx: u32) -> Value_Id {
-    fatal("auto-upgrade of a call returning a named struct is not supported yet");
-    return NONE;
+    if is_constant_kind(vkind(agg)) && is_constant_kind(vkind(v)) { f := cf_insert_value(agg, v, .[idx]); if f != NONE return f; }
+    i := new_inst(.INSERTVALUE, vtype(agg), 2);
+    set_op(i, 0, agg); set_op(i, 1, v);
+    r := inst(i);
+    r.idx = cast(u32) ir.u32_pool.count; r.nidx = 1;
+    array_add(*ir.u32_pool, idx);
+    builder_insert(b, i);
+    return i;
 }
 
 // llvm::UpgradeCallsToIntrinsic
