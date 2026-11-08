@@ -389,6 +389,7 @@ fn_insert_block_before :: (f: Value_Id, before: Value_Id, b: Value_Id) {
 create_block :: (f: Value_Id, name: string, before: Value_Id = NONE) -> Value_Id {
     b := new_block(f);
     fn_insert_block_before(f, before, b);
+    note_block_created(f, b);
     if name.count set_name(b, name);
     return b;
 }

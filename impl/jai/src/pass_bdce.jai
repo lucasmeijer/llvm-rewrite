@@ -51,10 +51,16 @@ bdce_run :: (f: Value_Id) -> Preserved {
                 bdce_clear_assumptions_of_users(i, db);
                 // IRBuilder<> Builder(SE); Builder.CreateZExt(Op, DstTy, SE->getName())
                 src := op(i, 0);
-                if is_constant_kind(vkind(src)) fatal("bdce: constant-folding a zext of a constant is not supported yet");
-                z := create_cast(.ZEXT, src, dst_ty);
-                insert_before_named(z, i, vname(i));
-                copy_debug_loc(z, i);
+                z: Value_Id;
+                if vkind(src) == .C_INT {
+                    // ConstantFolder::FoldCast
+                    z = const_int_words(dst_ty, ap_zext(ap_from_words(type_int_width(vtype(src)), const_int_value(src)), dst_bits).w);
+                } else {
+                    if is_constant_kind(vkind(src)) fatal("bdce: constant-folding a zext of a non-integer constant is not supported yet");
+                    z = create_cast(.ZEXT, src, dst_ty);
+                    insert_before_named(z, i, vname(i));
+                    copy_debug_loc(z, i);
+                }
                 replace_all_uses_with(i, z);
                 array_add(*wl, i);
                 changed = true;

@@ -48,6 +48,7 @@ match_apint :: (v: Value_Id) -> (ok: bool, c: APInt) {
     k := vkind(v);
     bits := kb_scalar_bits(vtype(v));
     if k == .C_INT return true, ap_from_words(bits, const_int_value(v));
+    if (k == .C_ZERO || k == .C_NULL) && type_kind(scalar_type(vtype(v))) == .INT return true, ap_zero(bits);
     if k == .C_DATA && is_vector_type(vtype(v)) && type_kind(scalar_type(vtype(v))) == .INT {
         n := const_data_count(v);
         e0 := const_data_elt(v, 0);
@@ -323,7 +324,7 @@ db_demanded_bits :: (db: *Demanded_Bits, i: Value_Id) -> APInt {
     db_perform_analysis(db);
     p := table_find_pointer(*db.alive, i);
     if p return ap_copy(p.*);
-    return ap_all_ones(type_bits(scalar_type(vtype(i))));
+    return ap_all_ones(type_bits_for_db(vtype(i)));
 }
 
 // getDemandedBits(Use *U)
@@ -341,11 +342,8 @@ db_demanded_bits_use :: (db: *Demanded_Bits, u: Use_Id) -> APInt {
     determine_live_operand_bits(db, user, v, u - ir.v_ops[user], aout, *ab, *kc);
     return ab;
 }
-type_bits_for_db :: (t: Type_Id) -> u32 {
-    st := scalar_type(t);
-    if type_kind(st) == .PTR return 64;
-    return type_bits(st);
-}
+// DL.getTypeSizeInBits(T->getScalarType())
+type_bits_for_db :: (t: Type_Id) -> u32 { return cast(u32) dl_type_size_bits(scalar_type(t)); }
 
 db_is_instruction_dead :: (db: *Demanded_Bits, i: Value_Id) -> bool {
     db_perform_analysis(db);

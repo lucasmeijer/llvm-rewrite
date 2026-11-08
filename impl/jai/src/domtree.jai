@@ -31,23 +31,38 @@ Dom_Tree :: struct {
     root_node: s32 = -1;
     dfs_valid: bool;
     slow_queries: u32;
+    vec_size: u32;       // DomTreeNodes.size()
 }
 
 // ---------------------------------------------------------------- block numbers (Function::NextBlockNum)
 
-// LLVM numbers blocks as they are inserted into a function; DomTreeNodes is a vector indexed by number + 1, and
-// ApplyUpdates compares its size against the number of updates. We number a function's blocks in layout order the
-// first time it is needed (LLParser creates forward-referenced blocks first, so this can differ from LLVM by
-// placement, which only matters for the "+1" below) and new blocks in creation order (create_block calls
-// note_block_created).
-Fn_Block_Numbers :: struct { next: u32; }
+// LLVM numbers blocks as they are inserted into a function (BasicBlock::Number, Function::NextBlockNum);
+// DomTreeNodes is a vector indexed by number + 1 whose size ApplyUpdates compares with the number of updates.
+// LLParser creates a block at its first mention (a forward reference from an operand, or its label), so the
+// first time a function's numbers are needed we replay that order: blocks in layout order, and before each one the
+// blocks its instructions name, in operand order. Blocks created later get the next number (note_block_created).
 block_numbers: Table(Value_Id, u32);
 fn_next_block_num: Table(Value_Id, u32);
 
 ensure_block_numbers :: (f: Value_Id) {
     if table_contains(*fn_next_block_num, f) return;
     n: u32 = 0;
-    for fn_blocks(f) { table_set(*block_numbers, it, n); n += 1; }
+    num :: (b: Value_Id, n: *u32) {
+        if table_contains(*block_numbers, b) return;
+        table_set(*block_numbers, b, n.*);
+        n.* += 1;
+    }
+    for b: fn_blocks(f) {
+        num(b, *n);
+        for i: block_insts(b) {
+            k := nops(i);
+            if k > 0 for o: 0..k-1 {
+                v := op(i, o);
+                if v != NONE && vkind(v) == .BLOCK && block(v).parent == f num(v, *n);
+                if inst_op(i) == .PHI num(phi_block(i, o), *n);
+            }
+        }
+    }
     table_set(*fn_next_block_num, f, n);
 }
 note_block_created :: (f: Value_Id, b: Value_Id) {
@@ -61,21 +76,6 @@ block_number :: (b: Value_Id) -> u32 {
     found, n := table_find(*block_numbers, b);
     assert(found);
     return n;
-}
-
-// DomTreeNodes.size(): resized to max(getMaxBlockNumber(), index + 1) on insertion, index = number + 1.
-dt_nodes_vector_size :: (dt: *Dom_Tree) -> u32 {
-    ensure_block_numbers(dt.fn);
-    _, maxn := table_find(*fn_next_block_num, dt.fn);
-    size: u32 = 0;
-    for dt.nodes {
-        if it.block == NONE { size = max(size, maxn); continue; }   // index 0
-        found, s := table_find(*dt.node_of, it.block);
-        if !found || s != it_index continue;
-        idx := block_number(it.block) + 1;
-        size = max(size, max(maxn, idx + 1));
-    }
-    return size;
 }
 
 // ---------------------------------------------------------------- node API
@@ -146,6 +146,13 @@ dt_create_node :: (dt: *Dom_Tree, b: Value_Id, idom: s32 = -1) -> s32 {
     id := cast(s32) dt.nodes.count;
     array_add(*dt.nodes, nd);
     table_set(*dt.node_of, b, id);
+    // getNodeIndexForInsert: resize to max(getMaxBlockNumber(), Idx + 1) when Idx doesn't fit
+    ensure_block_numbers(dt.fn);
+    idx: u32 = ifx b == NONE then 0 else block_number(b) + 1;
+    if idx >= dt.vec_size {
+        _, mx := table_find(*fn_next_block_num, dt.fn);
+        dt.vec_size = max(mx, idx + 1);
+    }
     if idom >= 0 dt_add_child(dt, idom, id);
     return id;
 }
@@ -173,6 +180,7 @@ dt_reset :: (dt: *Dom_Tree) {
     dt.root_node = -1;
     dt.dfs_valid = false;
     dt.slow_queries = 0;
+    dt.vec_size = 0;
 }
 
 dt_entry :: (dt: *Dom_Tree) -> Value_Id { return fn_entry(dt.fn); }
@@ -953,7 +961,7 @@ dt_apply_updates :: (dt: *Dom_Tree, updates: [] Dom_Update) {
     bui: Batch_Update_Info;
     bui.pre_view = *gd;
     bui.num_legalized = n;
-    size := dt_nodes_vector_size(dt);
+    size := dt.vec_size;
     if size <= 100 {
         if bui.num_legalized > size calculate_from_scratch(dt, *bui);
     } else if bui.num_legalized > size / 40 calculate_from_scratch(dt, *bui);

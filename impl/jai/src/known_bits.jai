@@ -3,7 +3,7 @@
 //
 // PARTIAL (see NOTES.md): constants, arguments with `range`, and/or/xor (without the and(x,-x)-style idioms of
 // getKnownBitsFromAndXorOr), add/sub (computeKnownBitsAddSub), shl/lshr/ashr, trunc/zext/sext, select (without
-// adjustKnownBitsForSelectArm), load !range, call return `range`. Everything else (phi, mul, div, intrinsics,
+// adjustKnownBitsForSelectArm), phi (recurrences and incoming values), load !range, call return `range`. Everything else (mul, div, intrinsics,
 // assumptions, isKnownNonZero) returns "unknown", which is always correct but can be less precise than LLVM.
 // The full port belongs with InstSimplify/InstCombine; replace this file then.
 
@@ -146,7 +146,7 @@ kb_shr :: (lhs: Known_Bits, rhs: Known_Bits, sh_amt_non_zero: bool, exact: bool,
 kb_scalar_bits :: (t: Type_Id) -> u32 {
     st := scalar_type(t);
     if type_kind(st) == .INT return type_int_width(st);
-    if type_kind(st) == .PTR return 64;
+    if type_kind(st) == .PTR return cast(u32) dl_type_size_bits(st);
     return 0;
 }
 
@@ -260,6 +260,7 @@ kb_from_operator :: (i: Value_Id, bits: u32, depth: u32) -> Known_Bits {
             a := compute_known_bits(op(i, 1), depth + 1);
             b := compute_known_bits(op(i, 2), depth + 1);
             known = kb_intersect(a, b);
+        case .PHI; known = kb_from_phi(i, bits, depth);
         case .CALL; #through;
         case .INVOKE;
             ra := attr_set_find(attr_list_ret(r.attrs), .Range);
@@ -284,6 +285,148 @@ kb_from_range_md :: (m: Md_Id, bits: u32) -> Known_Bits {
         mask := ap_high_bits_set(bits, common);
         known.one = ap_and(known.one, ap_and(umax, mask));
         known.zero = ap_and(known.zero, ap_and(ap_not(umax), mask));
+    }
+    return known;
+}
+
+// matchSimpleRecurrence (matchTwoInputRecurrence over BinaryOperator)
+match_simple_recurrence :: (p: Value_Id) -> (ok: bool, bo: Value_Id, start: Value_Id, step: Value_Id) {
+    if nops(p) != 2 return false, NONE, NONE, NONE;
+    for k: 0..1 {
+        o := phi_value(p, cast(u32) k);
+        if !is_inst(o) || !is_binary_op(inst_op(o)) continue;
+        lhs := op(o, 0); rhs := op(o, 1);
+        if lhs != p && rhs != p continue;
+        return true, o, phi_value(p, cast(u32)(1 - k)), ifx lhs == p then rhs else lhs;
+    }
+    return false, NONE, NONE, NONE;
+}
+
+// ConstantRange::makeExactICmpRegion(Pred, C).toKnownBits()
+kb_from_icmp_region :: (pred: u8, c: APInt) -> Known_Bits {
+    bits := c.bits;
+    one := ap_from_u64(bits, 1);
+    lo, hi: APInt;
+    full := false; empty := false;
+    if pred == {
+        case 32; lo = c; hi = ap_add(c, one);                                     // eq
+        case 33; lo = ap_add(c, one); hi = c;                                     // ne
+        case 36; if ap_is_zero(c) empty = true; else { lo = ap_zero(bits); hi = c; }     // ult
+        case 37; if ap_is_all_ones(c) full = true; else { lo = ap_zero(bits); hi = ap_add(c, one); }   // ule
+        case 34; if ap_is_all_ones(c) empty = true; else { lo = ap_add(c, one); hi = ap_zero(bits); }  // ugt
+        case 35; if ap_is_zero(c) full = true; else { lo = c; hi = ap_zero(bits); }      // uge
+        case 40; smin := ap_signed_min(bits); if ap_eq(c, smin) empty = true; else { lo = smin; hi = c; }   // slt
+        case 41; smin := ap_signed_min(bits); if ap_eq(c, ap_signed_max(bits)) full = true; else { lo = smin; hi = ap_add(c, one); }
+        case 38; smin := ap_signed_min(bits); if ap_eq(c, ap_signed_max(bits)) empty = true; else { lo = ap_add(c, one); hi = smin; }
+        case 39; smin := ap_signed_min(bits); if ap_eq(c, smin) full = true; else { lo = c; hi = smin; }
+    }
+    if empty || full return kb_new(bits);
+    return kb_from_range(bits, lo, hi);
+}
+icmp_inverse :: (p: u8) -> u8 {
+    if p == {
+        case 32; return 33; case 33; return 32; case 34; return 37; case 37; return 34;
+        case 35; return 36; case 36; return 35; case 38; return 41; case 41; return 38;
+        case 39; return 40; case 40; return 39;
+    }
+    return p;
+}
+icmp_swapped :: (p: u8) -> u8 {
+    if p == {
+        case 34; return 36; case 36; return 34; case 35; return 37; case 37; return 35;
+        case 38; return 40; case 40; return 38; case 39; return 41; case 41; return 39;
+    }
+    return p;
+}
+
+// computeKnownBitsFromOperator, case Instruction::PHI
+kb_from_phi :: (p: Value_Id, bits: u32, depth: u32) -> Known_Bits {
+    known := kb_new(bits);
+    ok, bo, r, l := match_simple_recurrence(p);
+    if ok {
+        opc := inst_op(bo);
+        if opc == .LSHR || opc == .ASHR || opc == .SHL || opc == .UDIV || opc == .UREM {
+            if opc == .UREM || op(bo, 0) == p {
+                k2 := compute_known_bits(r, depth + 1);
+                if opc == .SHL ap_set_bits(*known.zero, 0, kb_count_min_trailing_zeros(k2));
+                else if opc == .ASHR {
+                    ap_set_bits(*known.zero, bits - kb_count_min_leading_zeros(k2), bits);
+                    ap_set_bits(*known.one, bits - kb_count_min_leading_ones(k2), bits);
+                } else ap_set_bits(*known.zero, bits - kb_count_min_leading_zeros(k2), bits);
+            }
+        } else if opc == .ADD || opc == .SUB || opc == .AND || opc == .OR || opc == .MUL {
+            k2 := compute_known_bits(r, depth + 1);
+            k3 := compute_known_bits(l, depth + 1);
+            ap_set_bits(*known.zero, 0, min(kb_count_min_trailing_zeros(k2), kb_count_min_trailing_zeros(k3)));
+            if (opc == .ADD || opc == .SUB || opc == .MUL) && (inst(bo).flags & F_NSW) != 0 {
+                if opc == .ADD {
+                    if kb_is_non_negative(k2) && kb_is_non_negative(k3) kb_make_non_negative(*known);
+                    else if kb_is_negative(k2) && kb_is_negative(k3) kb_make_negative(*known);
+                } else if opc == .SUB {
+                    if op(bo, 0) == p {
+                        if kb_is_non_negative(k2) && kb_is_negative(k3) kb_make_non_negative(*known);
+                        else if kb_is_negative(k2) && kb_is_non_negative(k3) kb_make_negative(*known);
+                    }
+                } else {
+                    if kb_is_non_negative(k2) && kb_is_non_negative(k3) kb_make_non_negative(*known);
+                }
+            }
+        }
+    }
+    n := nops(p);
+    if n == 0 return known;
+    if depth < KB_MAX_DEPTH - 1 && kb_is_unknown(known) {
+        cv := phi_has_constant_value(p);
+        if cv != NONE && (vkind(cv) == .C_UNDEF || vkind(cv) == .C_POISON) return known;
+        kb_set_all_conflict(*known);
+        for k: 0..n-1 {
+            // breakSelfRecursivePHI
+            inc := phi_value(p, k);
+            if inc == p continue;
+            cxt := block_terminator(phi_block(p, k));
+            cxt_phi := p;
+            if is_inst(inc) && inst_op(inc) == .SELECT {
+                if op(inc, 1) == p inc = op(inc, 2);
+                else if op(inc, 2) == p inc = op(inc, 1);
+            }
+            if is_phi(inc) && nops(inc) == 2 {
+                for idx: 0..1 {
+                    if phi_value(inc, cast(u32) idx) == p {
+                        nv := phi_value(inc, cast(u32)(1 - idx));
+                        cxt_phi = inc;
+                        cxt = block_terminator(phi_block(inc, cast(u32)(1 - idx)));
+                        inc = nv;
+                        break;
+                    }
+                }
+            }
+            if inc == p continue;
+            k2 := compute_known_bits(inc, KB_MAX_DEPTH - 1);
+            if !kb_is_constant(k2) && cxt != NONE && inst_op(cxt) == .CONDBR {
+                c := op(cxt, 0);
+                if is_inst(c) && inst_op(c) == .ICMP {
+                    pred := inst(c).pred;
+                    rhs: Value_Id = NONE;
+                    if op(c, 0) == inc rhs = op(c, 1);
+                    else if op(c, 1) == inc { rhs = op(c, 0); pred = icmp_swapped(pred); }
+                    if rhs != NONE {
+                        okc, rc := match_apint(rhs);
+                        if okc {
+                            tsucc := op(cxt, 1); fsucc := op(cxt, 2);
+                            pb := inst_block(cxt_phi);
+                            if (tsucc == pb) != (fsucc == pb) {
+                                if fsucc == pb pred = icmp_inverse(pred);
+                                u := kb_union(k2, kb_from_icmp_region(pred, rc));
+                                if kb_has_conflict(u) return kb_new(bits);
+                                k2 = u;
+                            }
+                        }
+                    }
+                }
+            }
+            known = kb_intersect(known, k2);
+            if kb_is_unknown(known) break;
+        }
     }
     return known;
 }

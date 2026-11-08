@@ -120,6 +120,7 @@ ap_bool :: (a: APInt) -> bool { return !ap_is_zero(a); }
 
 // getLimitedValue(Limit = UINT64_MAX)
 ap_limited :: (a: APInt, limit: u64 = 0xFFFF_FFFF_FFFF_FFFF) -> u64 {
+    if a.w.count == 0 return 0;
     if ap_active_bits(a) > 64 return limit;
     return ifx a.w[0] > limit then limit else a.w[0];
 }
