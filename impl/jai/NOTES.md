@@ -804,5 +804,9 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   loop-mssa(loop-idiom))`), `sroa,loop(loop-rotate,indvars,loop-idiom,loop-deletion)`,
   `sroa,instcombine,loop-mssa(loop-instsimplify,loop-simplifycfg,licm),loop(loop-deletion)` (+ --per-function),
   `instcombine` whole-file and `--per-function`: 0 differs.
+- Perf (x64 build, no `@perf` benchmark runs these passes; tests/perf/scaling/loops-many, `-disable-output`,
+  minus `loop(loop-rotate)`): n500 loop-instsimplify / loop-simplifycfg ~+0.0 s (LLVM the same), loop-idiom and
+  loop-deletion +0.8 s each (LLVM +0.03 s); all four at n2000 46.6 s vs LLVM 3.2 s. The time is ScalarEvolution's
+  backedge-taken counts (loop guards of every preceding loop), the same superlinear cost as indvars above.
 - Shared fixes on the way: li_make_loop_invariant moves with LLVM's moveBefore (debug records stay), opt no longer
   adds `"target-cpu"` for `-mcpu` on a triple-less module, dl_type_alloc_size computes arrays in bytes.
