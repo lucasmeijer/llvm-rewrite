@@ -582,3 +582,38 @@ fn upgrade_module_flags() {
         }
     }
 }
+
+// UpgradeTBAANode on every instruction's !tbaa (LLParser's InstsWithTBAATag).
+fn upgrade_tbaa_node(m: i32) -> i32 {
+    if m < 0 || mds[m].kind != MK_TUPLE { return m; }
+    let n = mds[m].nops as i64;
+    if n == 0 { return m; }
+    let o0 = md_op(m, 0);
+    if o0 >= 0 && md_is_node(o0) && n >= 3 { return m; }
+    let zero = md_value(c_int(T_I64, 0));
+    if n == 3 {
+        let st = md_get(MK_TUPLE, -1, [md_op(m, 0), md_op(m, 1)], false);
+        return md_get(MK_TUPLE, -1, [st, st, zero, md_op(m, 2)], false);
+    }
+    return md_get(MK_TUPLE, -1, [m, m, zero], false);
+}
+
+fn upgrade_tbaa() {
+    var f = modules[cur_module].first_func;
+    while f >= 0 {
+        var b = globs[glob_of(f)].first_block;
+        while b >= 0 {
+            var iv = blocks[block_of(b)].first;
+            while iv >= 0 {
+                let ii = inst_of(iv);
+                for k in insts[ii].nmd {
+                    let at = insts[ii].md + 2 * k;
+                    if md_att[at] == 1 { md_att[at + 1] = upgrade_tbaa_node(md_att[at + 1]); }
+                }
+                iv = insts[ii].next;
+            }
+            b = blocks[block_of(b)].next;
+        }
+        f = globs[glob_of(f)].next;
+    }
+}

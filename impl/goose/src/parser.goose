@@ -1114,7 +1114,10 @@ fn parse_md_node_ref() -> i32 {
 }
 
 // Instruction/global attachments: pairs pushed to astack then stored sorted by kind.
-fn store_attachments(mark: i64) -> i32, i32 {
+fn store_attachments(mark: i64) -> i32, i32 { return store_attachments_ex(mark, false); }
+
+// GlobalObject::addMetadata keeps several attachments of one kind (stable-sorted by kind); Instruction::setMetadata replaces.
+fn store_attachments_ex(mark: i64, keep_dups: bool) -> i32, i32 {
     // sort pairs by kind (stable; later duplicates replace earlier)
     let n = (astack.len - mark) / 2;
     if n == 0 { return 0, 0; }
@@ -1126,7 +1129,7 @@ fn store_attachments(mark: i64) -> i32, i32 {
         let node = astack[mark + 2 * k + 1];
         // replace existing
         var replaced = false;
-        for j in cnt { if md_att[at + 2 * j] == kind { md_att[at + 2 * j + 1] = node; replaced = true; } }
+        if !keep_dups { for j in cnt { if md_att[at + 2 * j] == kind { md_att[at + 2 * j + 1] = node; replaced = true; } } }
         if replaced { continue; }
         md_att.push(kind);
         md_att.push(node);
@@ -1740,7 +1743,7 @@ fn parse_global_def(nm: i32, num: i64) {
         if c >= 0 { globs[g].comdat = c; continue; }
         perr("unknown global variable property!");
     }
-    let at, cnt = store_attachments(mark);
+    let at, cnt = store_attachments_ex(mark, true);
     globs[g].md = at;
     globs[g].nmd = cnt;
     // attributes (rare for globals)
@@ -1787,7 +1790,7 @@ fn parse_function(is_define: bool) {
             astack.push(n);
         }
     }
-    let dat, dcnt = store_attachments(dmark);
+    let dat, dcnt = store_attachments_ex(dmark, true);
     let f = parse_global_prefix();
     let cc = parse_cc();
     let retattrs = parse_param_attrs();
@@ -1866,7 +1869,7 @@ fn parse_function(is_define: bool) {
         astack.push(k);
         astack.push(n);
     }
-    var mat, mcnt = store_attachments(mmark);
+    var mat, mcnt = store_attachments_ex(mmark, true);
     if !is_define { mat = dat; mcnt = dcnt; }
     // attribute list: [fn, ret, params...]
     let lmark = astack.len;
@@ -2886,6 +2889,7 @@ fn parse_module(path: const u8[:]) {
     if symtabs[gfwd_st].count > 0 { perr_at(src.len, "use of undefined value"); }
     for f in gfwd_num { if f >= 0 { perr_at(src.len, "use of undefined value"); } }
     for k in ba_fwd.len / 4 { if ba_fwd[4 * k] >= 0 { perr_at(src.len, "expected function name in blockaddress"); } }
+    upgrade_tbaa();
     // UpgradeCallsToIntrinsic for every function (also sets intrinsic attributes)
     upgrade_module_intrinsics();
     upgrade_module_flags();
