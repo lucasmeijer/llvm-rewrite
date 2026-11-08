@@ -4926,6 +4926,7 @@ tests/imported/llvm/Transforms/InstCombine/icmp-with-selects.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-with-selects.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-xor-signbit.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-xor-signbit.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/icmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp_or_umul_overflow.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp_or_umul_overflow.ll::roundtrip
@@ -6078,6 +6079,7 @@ tests/imported/llvm/Transforms/InstCombine/statepoint.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stdio-custom-dl.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stdiocall-bad-sig.ll::opt
 tests/imported/llvm/Transforms/InstCombine/stdiocall-bad-sig.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/store.ll::opt
 tests/imported/llvm/Transforms/InstCombine/store.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/storemerge-dbg.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stpcpy-1.ll::roundtrip
@@ -6190,6 +6192,7 @@ tests/imported/llvm/Transforms/InstCombine/sub-ashr-or-to-icmp-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sub-ashr-or-to-icmp-select.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sub-from-sub.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sub-from-sub.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/sub-gep.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sub-gep.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sub-lshr-or-to-icmp-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sub-lshr-or-to-icmp-select.ll::roundtrip
@@ -6387,9 +6390,11 @@ tests/imported/llvm/Transforms/InstCombine/vec_phi_extract.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_phi_extract.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vec_sext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_sext.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vec_shuffle-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_shuffle-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vec_shuffle-phi-multiuse.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_shuffle-phi-multiuse.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vec_shuffle.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_shuffle.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vec_udiv_to_shift.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_udiv_to_shift.ll::roundtrip
@@ -6475,6 +6480,7 @@ tests/imported/llvm/Transforms/InstCombine/weak-symbols.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/widenable-conditions.ll::opt
 tests/imported/llvm/Transforms/InstCombine/widenable-conditions.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/win-math.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/with_overflow.ll::opt
 tests/imported/llvm/Transforms/InstCombine/with_overflow.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/xor-and-or.ll::opt
 tests/imported/llvm/Transforms/InstCombine/xor-and-or.ll::roundtrip
