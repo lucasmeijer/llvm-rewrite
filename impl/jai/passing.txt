@@ -5280,6 +5280,7 @@ tests/imported/llvm/Transforms/InstCombine/select-load.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select-load.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select-masked_gather.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select-masked_gather.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/select-masked_load.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select-masked_load.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select-min-max.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select-obo-peo-ops.ll::opt
@@ -5300,6 +5301,7 @@ tests/imported/llvm/Transforms/InstCombine/select-select.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select-to-cmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select-value-equivalence.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select-with-bitwise-ops.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/select-with-extreme-eq-cond.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select-with-extreme-eq-cond.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select_arithmetic.ll::opt
