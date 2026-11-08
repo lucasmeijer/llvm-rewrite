@@ -3955,7 +3955,10 @@ recursive fn simplify_binary_intrinsic(id: i32, rty: i32, a0: i32, b0: i32, fmf:
         return -1;
     }
     if id == IID_pdep || id == IID_pext {
-        is_not_ported("pdep/pext simplification");
+        if m_zero(a) { return c_null(rty); }
+        if m_zero(b) { return c_null(rty); }
+        if m_all_ones(b) { return a; }
+        return -1;
     }
     return -1;
 }

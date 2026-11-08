@@ -54,7 +54,7 @@ lib/IR/Metadata.cpp 0.5
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.85
 lib/Transforms/Scalar/EarlyCSE.cpp 0.95
-lib/Analysis/TargetLibraryInfo.cpp 0.3  # manual: Linux/generic availability, getLibFunc, isValidProtoForLibFunc incl. the manual prototypes; no Darwin/Windows/other OS tables, no vector libraries
+lib/Analysis/TargetLibraryInfo.cpp 0.85  # manual: initializeBase/initializeLibCalls for every triple, custom names, getLibFunc, isValidProtoForLibFunc, has/getName/hasOptimizedCodeGen, getWCharSize; no vector function libraries (VecFuncs.def, -vector-library) (heuristic 0.88)
 lib/IR/Intrinsics.cpp 0.7
 lib/IR/IRBuilder.cpp 0.15
 lib/AsmParser/LLLexer.cpp 0.7  # manual: own lexer structure, lexes all IR tokens (heuristic 0.19)
@@ -111,9 +111,9 @@ lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
 lib/IR/EHPersonalities.cpp 0.6  # + colorEHFunclets (mustexec.goose)
 lib/Transforms/Utils/Debugify.cpp 0.45  # manual: synthetic mode whole (debugify, check-debugify, -enable-debugify); no original-debuginfo mode, -debugify-each, stats export
-lib/Target/X86/X86InstCombineIntrinsic.cpp 0.1  # manual: simplifyDemandedUseBits/VectorEltsIntrinsic only; instCombineIntrinsic fails loudly (heuristic 0.25)
-lib/Transforms/Utils/SimplifyLibCalls.cpp 0.35  # manual: optimizeCall dispatch, str/mem len/cmp/chr, printf/puts, sqrt/exp2/fmin/fmax/cabs/double->float, int calls; the rest fails loudly per LibFunc (heuristic 0.75 counts the fail-loud names)
-lib/Transforms/Utils/BuildLibCalls.cpp 0.6  # manual: inferNonMandatoryLibFuncAttrs whole (generated), getOrInsertLibFunc, isLibFuncEmittable, hasFloatFn, a third of the emit* helpers (heuristic 0.47)
+lib/Target/X86/X86InstCombineIntrinsic.cpp 1  # manual: instCombineIntrinsic (ic_x86_intr.goose, simplifyTernarylogic generated) and the SimplifyDemanded hooks (ic_x86.goose)
+lib/Transforms/Utils/SimplifyLibCalls.cpp 0.97  # manual: all of LibCallSimplifier and FortifiedLibCallSimplifier (the fortified optimizers are one dispatch, fortified_optimize_call); left: shouldOptimizeForSize with a profile summary (-pgso), optimizeStringLength for index widths over 64 bits (heuristic 0.94)
+lib/Transforms/Utils/BuildLibCalls.cpp 0.9  # manual: inferNonMandatoryLibFuncAttrs whole (generated), getOrInsertLibFunc, isLibFuncEmittable, hasFloatFn/getFloatFn, emitLibCall and the emit* helpers LibCallSimplifier uses (hot/cold new variants in one emit_hot_cold_new); left: emitCalloc, emitWcsLen, setArgExtAttr/setRetExtAttr (non-x86 targets, loud), markRegisterParameterAttributes (loud) (heuristic 0.58)
 lib/Transforms/IPO/InferFunctionAttrs.cpp 1
 
 # --- L1.licm (2026-11)
@@ -126,3 +126,4 @@ lib/IR/DebugLoc.cpp 0.1  # getMergedLocations
 lib/IR/DebugProgramInstruction.cpp 0.35
 lib/IR/DebugInfo.cpp 0.1
 lib/IR/BasicBlock.cpp 0.3
+lib/TargetParser/Triple.cpp 0.3  # manual: Triple(Str) parsing, normalize, OS/environment versions, isMacOSXVersionLT, pointer widths, default wchar size, the Triple.h predicates; not the arch-variant/sub-arch/name helpers (heuristic 0.29)

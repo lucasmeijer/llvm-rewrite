@@ -1949,7 +1949,9 @@ tests/imported/llvm/Analysis/ValueTracking/knownbits-clmul.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownbits-clmul.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/knownbits-div.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownbits-div.ll::roundtrip
+tests/imported/llvm/Analysis/ValueTracking/knownbits-pdep.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownbits-pdep.ll::roundtrip
+tests/imported/llvm/Analysis/ValueTracking/knownbits-pext.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownbits-pext.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/knownbits-phi-deadcode.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/knownbits-rem.ll::opt
@@ -1963,6 +1965,7 @@ tests/imported/llvm/Analysis/ValueTracking/knownbits-shift.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/knownbits-shl-ctlz-msb.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownbits-shl-ctlz-msb.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/knownbits-trunc-with-min-max-clamp.ll::roundtrip
+tests/imported/llvm/Analysis/ValueTracking/knownbits-x86-hadd-hsub.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownbits-x86-hadd-hsub.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/knownzero-addrspacecast.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownzero-addrspacecast.ll::roundtrip
@@ -3951,7 +3954,9 @@ tests/imported/llvm/Transforms/InstCombine/X86/x86-avx512-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-avx512-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-avx512.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-avx512.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-bmi-tbm.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-bmi-tbm.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-crc32-demanded.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-crc32-demanded.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-f16c-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-f16c-inseltpoison.ll::roundtrip
@@ -3980,9 +3985,11 @@ tests/imported/llvm/Transforms/InstCombine/X86/x86-pmaddubsw.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pmaddubsw.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pmaddwd.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pmaddwd.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-pmulh.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pmulh.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pmulhrs.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pmulhrs.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-pmulhu.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pmulhu.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pshufb-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pshufb-inseltpoison.ll::roundtrip
@@ -5485,7 +5492,9 @@ tests/imported/llvm/Transforms/InstCombine/partally-redundant-left-shift-input-m
 tests/imported/llvm/Transforms/InstCombine/partally-redundant-left-shift-input-masking-variant-d.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/partally-redundant-left-shift-input-masking-variant-e.ll::opt
 tests/imported/llvm/Transforms/InstCombine/partally-redundant-left-shift-input-masking-variant-e.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/pdep.ll::opt
 tests/imported/llvm/Transforms/InstCombine/pdep.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/pext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/pext.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/phi-aware-aggregate-reconstruction.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/phi-cse.ll::opt

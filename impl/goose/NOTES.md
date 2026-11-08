@@ -278,8 +278,14 @@
 - Goose trap: mutually recursive functions all need `recursive fn`, including the entry of the cycle as seen from
   outside (parse_module_list, not only parse_module_elem).
 - Goose trap: a `const u8[:][]` parameter can't take a literal list; declare it `const u8[:][:]`.
+- Goose trap: `let X = 3;` is an i64 constant; tables of i32 ids (gen_triple.goose) declare `let X: i32 = 3;` so they
+  can be returned and stored as i32 without casts. `let IID_*` are i64: an i32 id compares with them, but a literal
+  list of them is `const i64[:]`.
+- Goose trap: the checker assumes a slice returned by `tli_name()` may point into tli.goose's tables, so passing it
+  to a call that can (re)build them (anything reaching `tli_init`, e.g. emit helpers) is rejected ("shrinks
+  tli_state while name is still used"): copy the name into a local `u8[>..]` first.
 - `pad` is a keyword (also as a local name).
-- TLI supports Linux and generic (no OS) triples; Darwin/Windows/BSD/GPU triples fail loudly in `tli_init`.
+- TLI covers every triple (tli.goose, see the InstCombine calls section); vector function libraries are not ported.
 - computeKnownBits (knownbits.goose) is a full port for integers of any width; what remains fails loudly (see the
   file header). isImpliedCondition (implied.goose) is fully ported, including fcmps (fpclass.goose).
 - ADCE perf trap: LLVM's `SetVector::remove` and the IDF priority queue were first ported as linear scans, which
@@ -671,26 +677,44 @@ What they were:
   Still loud: ptrauth callee folds, trampolines, gc.statepoint relocate folding, optimizeModularFormat, Hexagon.
 - ic_casts2.goose: FP casts, inttoptr/ptrtoint/ptrtoaddr, bitcast, addrspacecast (second half of InstCombineCasts.cpp).
   goose keeps FP splats as data vectors: LLVM's `dyn_cast<ConstantFP>` of a vector splat is `icx_cfp_scalar`.
-- ic_x86.goose: only X86TTIImpl::simplifyDemandedUseBitsIntrinsic / simplifyDemandedVectorEltsIntrinsic;
-  X86TTIImpl::instCombineIntrinsic fails loudly (only ~7 sweep functions reach it once SDVE is done).
-- simplify_libcalls.goose: LibCallSimplifier::optimizeCall with both dispatchers in LLVM order; unported
-  optimizers fail loudly per LibFunc (`lcs_np`), so any libcall without an optimizer in the switch simply returns
-  nullptr as in LLVM. Ported: strlen/strnlen/wcslen, strchr/strrchr/strcmp/strncmp, memchr, memcmp/bcmp,
-  memcpy/memmove/memset (calls and intrinsics), printf, puts, exit, abs/ffs/fls/isdigit/isascii/toascii, sqrt,
-  exp2, fmin/fmax, cabs, the symmetric trig calls, trig inversion pairs, memrchr, atoi/strtol, double->float shrinking. Also ValueTracking's
+- ic_x86.goose: X86TTIImpl::simplifyDemandedUseBitsIntrinsic / simplifyDemandedVectorEltsIntrinsic;
+  ic_x86_intr.goose: X86TTIImpl::instCombineIntrinsic, whole. simplifyTernarylogic's 256-case switch is data
+  (gen_x86_ternlog.goose, `tools/gen_x86_ternlog.py`: per immediate the `if (XIsConst) Res = Expr;` statements in
+  source order), interpreted by `xi_tl_eval` with the truth-table verification LLVM asserts. X86 tests need the
+  RUN line's `-mtriple` (the sweep has no triple for them, so it hardly reaches this code: use
+  `check 'tests/imported/llvm/Transforms/InstCombine/X86/*::opt'`). Left: 'core-avx2' and other CPU names the TTI
+  table lacks (tti_x86.goose), `-use-constant-int-for-fixed-length-splat`.
+- simplify_libcalls.goose (dispatch, str/mem len/cmp/chr, printf/puts, int calls, sqrt/exp2/fmin/fmax/cabs,
+  double->float shrinking, trig pairs, atoi/strtol), simplify_libcalls_str.goose (strcpy/stpcpy/strncpy/strlcpy,
+  strcat/strncat, strpbrk/strspn/strcspn/strstr, strndup, memccpy/mempcpy/realloc/bcopy, hot/cold operator new
+  with the `-optimize-hot-cold-new` family of flags, sprintf/snprintf/fprintf/fwrite/fputs, the iprintf and
+  __small_printf rewrites, error reporting, FortifiedLibCallSimplifier and the BuildLibCalls emit helpers they use),
+  simplify_libcalls_fp.goose (pow, log, fmod, sinpi/cospi, remquo, fdim, nan, the LibFunc forms of
+  emitUnary/BinaryFloatFnCall). That is all of SimplifyLibCalls.cpp. APFloat statuses the folds test (divide's
+  opInexact vs. underflow/overflow, remainder, convertToInteger) are computed exactly on bignums in
+  simplify_libcalls_fp.goose; `std::log2(float)` is the host's log2f (hostmath.c). Also the ValueTracking helpers
   getConstantDataArrayInfo / getConstantStringInfo / GetStringLength (`get_string_length`, used by memorybuiltins).
-  The builder's default operand bundles are the simplified call's (`lcs_ci`).
+  The builder's default operand bundles are the simplified call's (`lcs_ci`). Replacer/Eraser are
+  `ic_replace_inst_uses_with` / `ic_erase` (substituteInParent, sincospi, strstr == a).
 - build_libcalls.goose: inferNonMandatoryLibFuncAttrs is the statement program of gen_libfunc_attrs.goose
   (`tools/gen_libfunc_attrs.py` parses BuildLibCalls.cpp's switch: fallthroughs, `return Changed`, ternary
-  families); getOrInsertLibFunc, isLibFuncEmittable, hasFloatFn, emitLibCall + the emit helpers the ported
-  optimizers need; the `inferattrs` module pass (InferFunctionAttrs.cpp) + inferAttributesFromOthers.
-- TLI: still only Linux/generic triples (Darwin/Windows/... fail loudly in tli_init); isValidProtoForLibFunc's
-  manual prototypes (cabs, sincospi_stret, __size_returning_new) are ported. LLVM 23's FreeFnData has no plain
-  `free`: isLibFreeFunction falls back to the callee's allockind("free") (`blc_is_lib_free_function`,
-  used by getFreedOperand in local.goose).
-- Sweep (`sweep --impl goose --passes instcombine --per-function`): 28401 identical / 1 differs before this work,
-  66689 identical / 0 differs after (2026-11-11). Biggest loud groups left in this area: optimizePow/optimizeLog,
-  FortifiedLibCallSimplifier, stpncpy/strncpy, memccpy, sprintf/snprintf/fprintf, strcat, strstr.
+  families); getOrInsertLibFunc (names through TLI::getName: custom names such as `__exp10` on macOS), the extension
+  attributes of PPC64/SystemZ/MIPS/RISCV64/LoongArch fail loudly), isLibFuncEmittable, hasFloatFn, emitLibCall; the
+  `inferattrs` module pass (InferFunctionAttrs.cpp) + inferAttributesFromOthers.
+- TLI (tli.goose): one module for TargetLibraryInfoImpl + TargetLibraryInfo: initializeBase/initializeLibCalls for
+  every triple (Darwin/iOS versions, Windows MSVC/MinGW/Cygwin, FreeBSD, PS4/5, Android, AMDGPU/DXIL/NVPTX, AIX),
+  AvailabilityState with custom names (`tli_name`), opt's `-disable-simplify-libcalls`, `-disable-builtin`,
+  `-enable-builtin` (also the `-x name` form; unknown names fail like opt), the per-function no-builtin overrides,
+  getIntSize (16 on AVR/MSP430), getWCharSize, hasOptimizedCodeGen, isCallingConvCCompatible (ic_calls delegates
+  to it). Triples: triple.goose (Triple(Str), normalize, versions, predicates; tables from TripleName.def /
+  Triple.h / Triple.cpp by `tools/gen_triple.py`); opt's `-mtriple` uses its normalize, ic_loadstorealloca's ELF
+  test its object format. Not ported: vector function libraries (`-vector-library` stays an unknown option).
+  LLVM 23's FreeFnData has no plain `free`: isLibFreeFunction falls back to the callee's allockind("free")
+  (`blc_is_lib_free_function`, used by getFreedOperand in local.goose).
+- Sweep (`sweep --impl goose --passes instcombine --per-function`): 28401 identical / 1 differs before the calls
+  work, 66689 / 0 after it (2026-11-11); 67744 identical / 0 differs / 0 bad-ir after the libcalls/TLI/X86 work
+  (no identical function regressed, no libcall/TLI failure group left). L1.instcombine ::opt 1297 -> 1437 of
+  1635; InstCombine/X86 53/55.
 
 ## LICM and the MemorySSA updater (licm, mustexec, ast, mssaupdater)
 

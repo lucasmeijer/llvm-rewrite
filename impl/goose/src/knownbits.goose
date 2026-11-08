@@ -1527,7 +1527,11 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         let k2 = kb_compute(op(iv, 1), de, depth + 1);
         return kb_clmul(k1, k2);
     }
-    if id == IID_pext || id == IID_pdep { not_ported("known bits of pext/pdep"); }
+    if id == IID_pext || id == IID_pdep {
+        let k1 = kb_compute(op(iv, 0), de, depth + 1);
+        let k2 = kb_compute(op(iv, 1), de, depth + 1);
+        return if id == IID_pext { kb_pext(k1, k2) } else { kb_pdep(k1, k2) };
+    }
     if id == IID_uadd_sat || id == IID_usub_sat || id == IID_sadd_sat || id == IID_ssub_sat {
         let k1 = kb_compute(op(iv, 0), de, depth + 1);
         let k2 = kb_compute(op(iv, 1), de, depth + 1);
@@ -1582,12 +1586,46 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
     if id == IID_vscale { return kb_vscale(inst_func(iv), w); }
     // the target intrinsics computeKnownBitsFromOperator handles; any other intrinsic gives no known bits
     if id == IID_x86_sse2_pmulh_w || id == IID_x86_avx2_pmulh_w || id == IID_x86_avx512_pmulh_w_512 ||
-       id == IID_x86_sse2_pmulhu_w || id == IID_x86_avx2_pmulhu_w || id == IID_x86_avx512_pmulhu_w_512 ||
-       id == IID_x86_sse42_crc32_64_64 || id == IID_x86_ssse3_phadd_d_128 || id == IID_x86_ssse3_phadd_w_128 ||
-       id == IID_x86_avx2_phadd_d || id == IID_x86_avx2_phadd_w || id == IID_x86_ssse3_phadd_sw_128 ||
-       id == IID_x86_avx2_phadd_sw || id == IID_x86_ssse3_phsub_d_128 || id == IID_x86_ssse3_phsub_w_128 ||
-       id == IID_x86_avx2_phsub_d || id == IID_x86_avx2_phsub_w || id == IID_x86_ssse3_phsub_sw_128 ||
-       id == IID_x86_avx2_phsub_sw || id == IID_riscv_vsetvli || id == IID_riscv_vsetvlimax ||
+       id == IID_x86_sse2_pmulhu_w || id == IID_x86_avx2_pmulhu_w || id == IID_x86_avx512_pmulhu_w_512 {
+        let k1 = kb_compute(op(iv, 0), de, depth + 1);
+        let k2 = kb_compute(op(iv, 1), de, depth + 1);
+        let signed = id == IID_x86_sse2_pmulh_w || id == IID_x86_avx2_pmulh_w || id == IID_x86_avx512_pmulh_w_512;
+        // KnownBits::mulhs / mulhu
+        let bw = kb_bw(k1);
+        let wl = if signed { kb_sext(k1, 2 * bw) } else { kb_zext(k1, 2 * bw) };
+        let wr = if signed { kb_sext(k2, 2 * bw) } else { kb_zext(k2, 2 * bw) };
+        return kb_extract_bits(kb_mul(wl, wr, false), bw, bw);
+    }
+    if id == IID_x86_sse42_crc32_64_64 { return KB { z: ap_or(known.z, ap_bits_from(w, 32)), o: known.o }; }
+    if id == IID_x86_ssse3_phadd_d_128 || id == IID_x86_ssse3_phadd_w_128 || id == IID_x86_avx2_phadd_d ||
+       id == IID_x86_avx2_phadd_w || id == IID_x86_ssse3_phadd_sw_128 || id == IID_x86_avx2_phadd_sw ||
+       id == IID_x86_ssse3_phsub_d_128 || id == IID_x86_ssse3_phsub_w_128 || id == IID_x86_avx2_phsub_d ||
+       id == IID_x86_avx2_phsub_w || id == IID_x86_ssse3_phsub_sw_128 || id == IID_x86_avx2_phsub_sw {
+        // computeKnownBitsForHorizontalOperation
+        var kind = 0;   // 0 add, 1 sadd_sat, 2 sub, 3 ssub_sat
+        if id == IID_x86_ssse3_phadd_sw_128 || id == IID_x86_avx2_phadd_sw { kind = 1; }
+        else if id == IID_x86_ssse3_phsub_d_128 || id == IID_x86_ssse3_phsub_w_128 || id == IID_x86_avx2_phsub_d || id == IID_x86_avx2_phsub_w { kind = 2; }
+        else if id == IID_x86_ssse3_phsub_sw_128 || id == IID_x86_avx2_phsub_sw { kind = 3; }
+        let vt = vals[iv].ty;
+        let ne = ty_count(vt);
+        let nl = ty_count(vt) * ty_scalar_bits(vt) / 128;
+        let nepl = ne / nl;
+        let half = nepl / 2;
+        var dl: u64 = 0;
+        var dr: u64 = 0;
+        for idx in ne {
+            if ((de >> idx) & 1) == 0 { continue; }
+            let li = (idx / nepl) * nepl;
+            var lo = idx % nepl;
+            if lo < half { dl |= (1 as u64) << (li + 2 * lo); }
+            else { lo -= half; dr |= (1 as u64) << (li + 2 * lo); }
+        }
+        let emask: u64 = if ne >= 64 { 0xFFFFFFFFFFFFFFFF } else { ((1 as u64) << ne) - 1 };
+        if dr == 0 { return kb_horiz_single(op(iv, 0), dl, emask, kind, depth); }
+        if dl == 0 { return kb_horiz_single(op(iv, 1), dr, emask, kind, depth); }
+        return kb_intersect(kb_horiz_single(op(iv, 0), dl, emask, kind, depth), kb_horiz_single(op(iv, 1), dr, emask, kind, depth));
+    }
+    if id == IID_riscv_vsetvli || id == IID_riscv_vsetvlimax ||
        id == IID_amdgcn_mbcnt_hi || id == IID_amdgcn_mbcnt_lo {
         not_ported(str("known bits of ", intr_name(id as i64)));
     }
@@ -1596,3 +1634,53 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
 
 // getVScaleRange(F, BitWidth).toKnownBits() (ValueTracking.cpp; ConstantRange::toKnownBits)
 fn kb_vscale(fv: i32, w: i64) -> KB { rg_to_kb(vt_vscale_range(fv, w)) }
+
+// computeKnownBitsForHorizontalOperation's ComputeForSingleOpFunc: f(known(Op, D), known(Op, D << 1))
+recursive fn kb_horiz_single(o: i32, d: u64, emask: u64, kind: i64, depth: i64) -> KB {
+    let a = kb_compute(o, d, depth + 1);
+    let b = kb_compute(o, (d << 1) & emask, depth + 1);
+    if kind == 0 { return kb_add_sub(true, false, false, a, b); }
+    if kind == 1 { return kb_sat_add_sub(true, true, a, b); }
+    if kind == 2 { return kb_add_sub(false, false, false, a, b); }
+    return kb_sat_add_sub(false, true, a, b);
+}
+// KnownBits::pext(Val, Mask)
+fn kb_pext(v: KB, m: KB) -> KB {
+    let bw = kb_bw(v);
+    var rz = ap_ones(bw);
+    var ro = ap_ones(bw);
+    var m0: i64 = 0;
+    var m1: i64 = 0;
+    for i in bw {
+        if !ap_get_bit(m.z, i) {
+            if !ap_get_bit(v.z, i) { for j in m0..min(m1 + 1, bw) { rz = ap_clear_bit(rz, j); } }
+            if !ap_get_bit(v.o, i) { for j in m0..min(m1 + 1, bw) { ro = ap_clear_bit(ro, j); } }
+        }
+        if ap_get_bit(m.o, i) { m0++; m1++; } else if !ap_get_bit(m.z, i) { m1++; }
+    }
+    for j in m0..bw { ro = ap_clear_bit(ro, j); }
+    return KB { z: rz, o: ro };
+}
+// KnownBits::pdep(Val, Mask)
+fn kb_pdep(v: KB, m: KB) -> KB {
+    let bw = kb_bw(v);
+    var rz = ap_ones(bw);
+    var ro = ap_ones(bw);
+    var m0: i64 = 0;
+    var m1: i64 = 0;
+    for i in bw {
+        if !ap_get_bit(m.o, i) { ro = ap_clear_bit(ro, i); }
+        if !ap_get_bit(m.z, i) {
+            var all_one = true;
+            var all_zero = true;
+            for j in m0..min(m1 + 1, bw) {
+                if !ap_get_bit(v.o, j) { all_one = false; }
+                if !ap_get_bit(v.z, j) { all_zero = false; }
+            }
+            if !all_one { ro = ap_clear_bit(ro, i); }
+            if !all_zero { rz = ap_clear_bit(rz, i); }
+        }
+        if ap_get_bit(m.o, i) { m0++; m1++; } else if !ap_get_bit(m.z, i) { m1++; }
+    }
+    return KB { z: rz, o: ro };
+}

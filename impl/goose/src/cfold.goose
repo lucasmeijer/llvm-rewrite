@@ -1317,7 +1317,10 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
                 if !both { return c_null(ty); }
                 return c_int_ap(ty, ap_clmul(x0, x1));
             }
-            if id == IID_pdep || id == IID_pext { cfa_not_ported("pdep/pext folding"); }
+            if id == IID_pdep || id == IID_pext {
+                if !both { return c_null(ty); }
+                return c_int_ap(ty, if id == IID_pdep { ap_pdep(x0, x1) } else { ap_pext(x0, x1) });
+            }
             return -1;
         }
         if id == IID_experimental_cttz_elts || id == IID_get_active_lane_mask { cfa_not_ported(str("constant folding of ", intr_name(id as i64))); }
@@ -1841,4 +1844,20 @@ fn cf_fold_fma(id: i32, ty: i32, a: i32, b: i32, c3: i32) -> i32 {
     let k = fp_kind_ty(vals[a].ty);
     let lo, hi = fp_fma(k, cint_lo(a), cint_hi(a), cint_lo(b), cint_hi(b), cint_lo(c3), cint_hi(c3));
     return c_fp(ty, lo, hi);
+}
+
+// APIntOps::pext(Val, Mask) / APIntOps::pdep(Val, Mask)
+fn ap_pext(v: AP, m: AP) -> AP {
+    let bw = v.w as i64;
+    var r = ap_zero(bw);
+    var p: i64 = 0;
+    for i in bw { if ap_get_bit(m, i) { r = ap_set_bit_to(r, p, ap_get_bit(v, i)); p++; } }
+    return r;
+}
+fn ap_pdep(v: AP, m: AP) -> AP {
+    let bw = v.w as i64;
+    var r = ap_zero(bw);
+    var p: i64 = 0;
+    for i in bw { if ap_get_bit(m, i) { r = ap_set_bit_to(r, i, ap_get_bit(v, p)); p++; } }
+    return r;
 }

@@ -151,6 +151,17 @@ noted, and by diffing `opt -passes=instcombine` output on the imported tests).
 - **foldCtpop/foldCttzCtlz add a `range(iN lo, hi)` return attribute** computed from known bits (and isKnownNonZero
   for ctpop), so many ctpop/cttz/ctlz calls in `-passes=instcombine` output carry `range` attributes.
 
+- **InstCombine's builder never folds a vector-typed intrinsic call**: TargetFolder::FoldIntrinsic is
+  ConstantFoldIntrinsic = ConstantFoldScalarCall only (ConstantFolding.cpp, ConstantFoldIntrinsic), so
+  `CreateIntrinsic(sadd.sat, <8 x i16> C1, C2)` makes a call that InstCombine folds when it visits it, leaving the
+  `declare @llvm.sadd.sat.v8i16` behind (InstCombine/X86/x86-pmaddubsw.ll). Scalar calls fold in the builder.
+- **IRBuilder::CreateCast gives FP-math casts the builder's fast-math flags** (`setFPAttrs` when
+  `isa<FPMathOperator>`: fptrunc, fpext, uitofp, sitofp), so optimizeLog's `B.CreateSIToFP` under a
+  FastMathFlagGuard prints `sitofp fast i32 %y to double` (InstCombine/log-pow.ll).
+- X86 target-intrinsic folds (X86TTIImpl::instCombineIntrinsic) only run when the module has an x86 triple; most
+  InstCombine/X86 tests get it from `-mtriple` on the RUN line, so a per-function sweep without that flag never
+  reaches them.
+
 ## Compares (InstCombineCompares.cpp)
 
 Verified by porting the file and diffing `opt -passes=instcombine` per function (llvm-extract) on the imported

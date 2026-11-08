@@ -24,6 +24,24 @@ on the imported tests named).
   `x86_64-linux` -> `x86_64-unknown-linux`, but `x86_64` and `x86_64-pc_linux` stay as they are (the ANY form
   only permutes and fills empty components; it does not pad).
 
+- `initializeLibCalls` is target logic, not a table: e.g. on `x86_64-apple-macosx10.9` exp10/exp10f are available
+  as `__exp10`/`__exp10f` (setAvailableWithName: emitted calls and declarations use the custom name, getLibFunc
+  still only knows the standard name), Windows MSVC < 19 renames `_copysign`/`_logb`/`_cabs`, x86-32 macOS >= 10.7
+  uses `fwrite$UNIX2003`; memrchr is off on macOS and Windows; Itanium new/delete are off on MSVC-like triples and
+  the msvc_* ones everywhere else. Ported as code in goose's tli.goose (verified with InferFunctionAttrs/annotate.ll,
+  InstCombine/new-delete-msvc.ll, exp2-to-ldexp.ll, pow-to-ldexp.ll).
+- getIntSize() is 16 on 16-bit architectures (AVR, MSP430: `Triple::isArch16Bit`), which changes every emitted
+  `int` (putchar, strchr's character, snprintf's INT_MAX bound, powi's exponent) — pow-4.ll's CHECKI16 prefix.
+- opt's `-disable-builtin`/`-enable-builtin` are cl::lists and accept `-disable-builtin strcat` (separate value) as
+  well as `=`; with `-disable-simplify-libcalls` the lists are ignored (no "nonexistent builtin" error either).
+- Triple::Triple(Str) splits at most 4 components (the environment is everything after the third `-`); parseOS and
+  parseEnvironment are *prefix* matches in TripleName.def order, parseVendor whole names; the object format comes
+  from the environment's suffix (`-elf`, `-macho`, `coff`...) or the default for the arch/OS. OS versions come from
+  the OS component after its canonical name (`macosx10.9` -> 10.9; `darwin10` is macOS 10.6 for
+  isMacOSXVersionLT). Normalize permutes components into place (`linux-x86_64` -> `x86_64-unknown-linux`), maps
+  `win32`/`mingw32`/`cygwin` to `windows-msvc`/`windows-gnu`/`windows-cygnus` (verified against
+  `opt -mtriple=X -S` on an empty module).
+
 ## BuildLibCalls
 
 - `emitLibCall` and most emit* helpers call `inferNonMandatoryLibFuncAttrs` on the declaration after
@@ -55,6 +73,18 @@ on the imported tests named).
   space: with `P200`, `call addrspace(200) void @llvm.memcpy...` (strcpy-nonzero-as.ll).
 - `shouldOptimizeForSize` is only `optsize`/`minsize` under `-passes=instcombine`: InstCombine's PSI is a cached
   module result that exists only after `require<profile-summary>`.
+
+- emitFWrite's call is unnamed (`B.CreateCall(F, Args)` without a name) while emitFPutC/FPutS/PutChar/... name it
+  after the function; emitFPutC/FPutS/FWrite infer attributes only when the FILE argument is a pointer.
+- isFortifiedCallFoldable with a `-1` object size is foldable even when nothing else is known; `__strcpy_chk` with
+  a known string length and a too-small object size becomes `__memcpy_chk` (an unnamed call with a `nounwind`
+  declaration, emitMemCpyChk), not a plain memcpy (strcpy_chk-1.ll).
+- nan("...") parses the payload with StringRef::getAsInteger(0, APInt): radix auto-sensed (`0x`, `0b`, `0o`, a
+  leading `0` = octal), the whole string must be consumed, and the payload is truncated to the significand
+  (makeNaN), with the quiet bit (and on x86_fp80 the integer bit) set (nan.ll, nanl-fp80.ll, nanl-fp128.ll).
+- optimizeRemquo folds only when divide's status is opOK/opInexact (so not for underflowing or overflowing
+  quotients) and remainder's is opOK; the quotient's int is convertToInteger(rmNearestTiesToEven) of the rounded
+  FP quotient, stored with the call's param align or the ABI alignment (remquo.ll, remquol-fp80.ll).
 
 ## InferFunctionAttrs
 
