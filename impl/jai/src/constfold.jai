@@ -222,6 +222,11 @@ cf_fold_bitcast :: (v: Value_Id, dt: Type_Id) -> Value_Id {
     dst := scalar_type(dt); sst := scalar_type(st);
     if k == .C_INT {
         if is_vector_type(dt) && !is_vector_type(st) return ce_cast(.BITCAST, cf_vector(type_vector(1, st, false), .[v]), dt);
+        if type_kind(sst) == .BYTE {   // ConstantByte -> Constant{Int, FP}
+            if is_int_type(dst) && type_bits(dst) == type_bits(sst) return const_int_words(dt, const_int_value(v));
+            if is_fp_type(dst) && type_kind(dst) != .PPC_FP128 && type_bits(dst) == type_bits(sst) return const_fp_words(dt, const_int_value(v));
+            return NONE;
+        }
         if type_kind(dst) == .BYTE && type_bits(dst) == type_bits(sst) return const_int_words(dt, const_int_value(v));
         if is_fp_type(dst) && type_kind(dst) != .PPC_FP128 && type_bits(dst) == type_bits(sst) return const_fp_words(dt, const_int_value(v));
         return NONE;

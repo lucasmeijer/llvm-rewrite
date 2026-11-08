@@ -180,7 +180,14 @@ cfo_fold_bitcast :: (c_in: Value_Id, dt: Type_Id) -> Value_Id {
         w := type_bits(src_elt);
         c = ce_cast(.BITCAST, c, type_vector(nsrc, type_int(w), false));
     }
-    if type_kind(src_elt) == .BYTE fatal("constant folding of bitcasts from byte vectors is not supported yet");
+    // byte source: fold through integers, then restore the destination lanes whose source bytes had poison bits
+    poison_dst: [] bool;
+    if type_kind(src_elt) == .BYTE {
+        ok, pd := compute_poison_dst_lanes(c, nsrc, ndst);
+        if !ok return ce_cast(.BITCAST, c, dt);
+        poison_dst = pd;
+        c = ce_cast(.BITCAST, c, type_vector(nsrc, type_int(type_bits(src_elt)), false));
+    }
     is_le := !dl.big_endian;
     src_bits := type_bits(src_elt);
     dst_bits := type_bits(dst_elt);
@@ -221,7 +228,30 @@ cfo_fold_bitcast :: (c_in: Value_Id, dt: Type_Id) -> Value_Id {
             buf_bits -= dst_bits;
         }
     }
+    for poison_dst if it result[it_index] = const_poison(dst_elt);
     return cf_vector(dt, result);
+}
+// computePoisonDstLanes
+compute_poison_dst_lanes :: (c: Value_Id, nsrc: u32, ndst: u32) -> (bool, [] bool) {
+    pd := NewArray(ndst, bool,, allocator = temp);
+    uneven := ifx ndst < nsrc then nsrc % ndst else ndst % nsrc;
+    if uneven != 0 return !contains_poison_element(c), pd;
+    if ndst < nsrc {
+        ratio := nsrc / ndst;
+        for i: 0..ndst-1 for j: 0..ratio-1 {
+            e := cf_elt(c, i * ratio + j);
+            if e == NONE return false, pd;
+            if vkind(e) == .C_POISON { pd[i] = true; break; }
+        }
+    } else {
+        ratio := ndst / nsrc;
+        for i: 0..nsrc-1 {
+            e := cf_elt(c, i);
+            if e == NONE return false, pd;
+            if vkind(e) == .C_POISON for k: i * ratio..(i + 1) * ratio - 1 pd[k] = true;
+        }
+    }
+    return true, pd;
 }
 
 // ---------------------------------------------------------------- loads
