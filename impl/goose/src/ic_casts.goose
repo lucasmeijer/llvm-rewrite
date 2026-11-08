@@ -21,6 +21,7 @@ import ic_builder;
 import ic_common;
 import ic_demanded;
 import ic_shifts;
+import apfloat;
 
 // InstCombinerImpl::isEliminableCastPair(CI1, CI2) (with the DataLayout cases of CastInst::isEliminableCastPair)
 fn ic_eliminable_cast_pair(c1: i32, c2: i32) -> i64 {
@@ -897,4 +898,31 @@ fn visit_sext(sx: i32) -> i32 {
         }
     }
     return -1;
+}
+
+// InstCombiner::canBeCastedExactlyIntToFP(V, FPTy, IsSigned, CxtI)
+fn can_be_casted_exactly_int_to_fp(v: i32, fpty: i32, signed: bool, cx: i32) -> bool {
+    let sty = vals[v].ty;
+    let sw = ty_scalar_bits(sty);
+    let src_size = sw - (if signed { 1 } else { 0 });
+    let dk = types[ty_scalar(fpty)].kind as i64;
+    let dsig = if dk == TK_PPC_FP128 { -1 } else { fp_fmt(dk).p };
+    if src_size <= dsig { return true; }
+    if is_inst_op(v, OP_FPTOSI) || is_inst_op(v, OP_FPTOUI) {
+        let f = op(v, 0);
+        let fk = types[ty_scalar(vals[f].ty)].kind as i64;
+        var ssig = if fk == TK_PPC_FP128 { -1 } else { fp_fmt(fk).p };
+        if !signed && is_inst_op(v, OP_FPTOSI) { ssig++; }
+        if ssig > 0 && dsig > 0 && ssig <= dsig { return true; }
+    }
+    kb_cxt = cx;
+    let k = kb_compute_all(v, 0);
+    let sig = sw - kb_min_lz(k) - kb_min_tz(k);
+    if sig <= dsig { return true; }
+    if signed {
+        kb_cxt = cx;
+        let s2 = sw - num_sign_bits(v, 0);
+        if s2 <= dsig { return true; }
+    }
+    return false;
 }

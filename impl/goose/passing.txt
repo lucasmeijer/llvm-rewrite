@@ -4004,6 +4004,7 @@ tests/imported/llvm/Transforms/InstCombine/canonicalize-constant-low-bit-mask-an
 tests/imported/llvm/Transforms/InstCombine/canonicalize-constant-low-bit-mask-and-icmp-ugt-to-icmp-ugt.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/canonicalize-constant-low-bit-mask-and-icmp-ule-to-icmp-ule.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/canonicalize-constant-low-bit-mask-and-icmp-ult-to-icmp-ugt.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/canonicalize-fcmp-inf.ll::opt
 tests/imported/llvm/Transforms/InstCombine/canonicalize-fcmp-inf.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/canonicalize-gep-constglob.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/canonicalize-gep-mul.ll::roundtrip
@@ -4024,6 +4025,7 @@ tests/imported/llvm/Transforms/InstCombine/canonicalize-signed-truncation-check.
 tests/imported/llvm/Transforms/InstCombine/canonicalize-vector-extract.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/canonicalize-vector-insert.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/canonicalize.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/canonicalize_branch.ll::opt
 tests/imported/llvm/Transforms/InstCombine/canonicalize_branch.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cast-byval.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cast-call-combine-prof.ll::roundtrip

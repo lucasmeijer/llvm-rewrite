@@ -26,6 +26,7 @@ import overflow;
 import ic;
 import ic_builder;
 import cfgutil;
+import datalayout;
 
 // ---------------------------------------------------------------------------------------------
 // Small matchers (PatternMatch.h). BinaryOp_match and CastInst_match match instructions only.
@@ -1304,4 +1305,187 @@ fn fold_binop_of_sext_bool_to_select(b: i32) -> i32 {
     let tv = icb_binop(iop(b), ones, c, "");
     let fv = icb_binop(iop(b), zero, c, "");
     return ic_new_select_unknown_prof(x, tv, fv);
+}
+
+// ---------------------------------------------------------------------------------------------
+// GEP offsets: llvm::emitGEPOffset (Analysis/Local.cpp), InstCombinerImpl::EmitGEPOffset / EmitGEPOffsets
+// (InstructionCombining.cpp), the IRBuilder GEP/splat helpers they use, GEPNoWrapFlags::intersectForOffsetAdd.
+
+// GEPNoWrapFlags::intersectForOffsetAdd
+fn gep_nw_intersect_for_offset_add(a: u8, b: u8) -> u8 {
+    var r = a & b;
+    if (r & GEP_INBOUNDS) == 0 && (r & GEP_NUSW) != 0 { r &= ~GEP_NUSW; }
+    return r;
+}
+// DataLayout::getIndexType(PtrTy)
+fn dl_index_type(pt: i32) -> i32 {
+    let it = ty_int(dl_ptr(ptr_as(ty_scalar(pt))).idx);
+    if ty_is_vector(pt) { return ty_vector(it, ty_count(pt), ty_kind(pt) == TK_SVEC); }
+    return it;
+}
+// IRBuilder::CreateGEP(Ty, Ptr, IdxList, Name, NW)
+fn icb_gep(srcty: i32, p: i32, idxs: const i32[:], name: const u8[:], fl: u8) -> i32 {
+    if is_constant(p) {
+        var all = true;
+        for x in idxs { if !is_constant(x) { all = false; } }
+        if all { return tf_fold(ce_gep(srcty, p, idxs, fl, -1)); }
+    }
+    let rt = gep_ret_type(p, idxs);
+    var opsv: i32[>..<] = [];
+    opsv.push(p);
+    for x in idxs { opsv.push(x); }
+    let g = create_inst(OP_GEP, rt, opsv);
+    insts[inst_of(g)].ty2 = srcty;
+    insts[inst_of(g)].flags = fl;
+    return icb_insert(g, name);
+}
+// IRBuilder::CreatePtrAdd(Ptr, Offset, Name, NW)
+fn icb_ptr_add(p: i32, off: i32, name: const u8[:], fl: u8) -> i32 { icb_gep(T_I8, p, [off], name, fl) }
+// IRBuilder::CreateVectorSplat(EC, V, Name)
+fn icb_vector_splat(vty: i32, v: i32, name: const u8[:]) -> i32 {
+    if is_constant(v) { return c_splat(vty, v); }
+    var n1: u8[>..] = [];
+    n1.append(name); n1.append(".splatinsert");
+    let ie = icb_insert(create_inst(OP_INSERTELEMENT, vty, [c_poison(vty), v, c_int(T_I64, 0)]), n1);
+    var n2: u8[>..] = [];
+    n2.append(name); n2.append(".splat");
+    let s = create_inst(OP_SHUFFLEVECTOR, vty, [ie, c_poison(vty)]);
+    let ii = inst_of(s);
+    insts[ii].aux = ints.len as i32;
+    insts[ii].naux = ty_count(vty) as i32;
+    for k in ty_count(vty) { ints.push(0); }
+    return icb_insert(s, n2);
+}
+fn gep_all_constant_indices(g: i32) -> bool {
+    for k in 1..nops(g) { if vals[op(g, k)].kind != VK_CINT { return false; } }
+    return true;
+}
+
+// llvm::emitGEPOffset(Builder, DL, GEP, NoAssumptions = false)
+fn emit_gep_offset_raw(g: i32) -> i32 {
+    let iit = dl_index_type(vals[g].ty);
+    var res: i32 = -1;
+    let fl = gep_flags(g);
+    let nsw = (fl & GEP_NUSW) != 0;
+    let nuw = (fl & GEP_NUW) != 0;
+    var gname: u8[>..] = [];
+    gname.append(val_name(g));
+    var t = gep_src_ty(g);
+    for k in 1..nops(g) {
+        let o = op(g, k);
+        var stride: i64 = 0;
+        var is_struct = false;
+        if k == 1 { stride = dl_alloc_size(t); }
+        else if ty_is_struct(t) { is_struct = true; }
+        else { let et = ty_elem(t); stride = dl_gep_stride(t, et); }
+        if is_constant(o) {
+            if is_null_value(o) {
+                if k > 1 { if is_struct { t = ty_field(t, 0); } else { t = ty_elem(t); } }
+                continue;
+            }
+            if is_struct {
+                let fi = ap_zext64(icc_unique_int_c(o)) as i64;
+                let sz = dl_struct_offset(t, fi);
+                t = ty_field(t, fi);
+                if sz == 0 { continue; }
+                res = emit_gep_add_offset(res, c_int_ty(iit, sz as u64), gname, nuw, nsw);
+                continue;
+            }
+        }
+        if k > 1 { t = ty_elem(t); }
+        var x = o;
+        if ty_is_vector(iit) && !ty_is_vector(vals[x].ty) {
+            var nm: u8[>..] = [];
+            nm.append(val_name(x));
+            x = icb_vector_splat(iit, x, nm);
+        }
+        if vals[x].ty != iit {
+            var nm: u8[>..] = [];
+            nm.append(val_name(x)); nm.append(".c");
+            x = icb_int_cast_c(x, iit, true, nm);
+        }
+        if stride != 1 {
+            var sc = c_int_ty(ty_scalar(iit), stride as u64);
+            if ty_is_vector(iit) { sc = c_splat(iit, sc); }
+            var nm: u8[>..] = [];
+            nm.append(gname); nm.append(".idx");
+            x = icb_mul_nw(x, sc, nm, nuw, nsw);
+        }
+        res = emit_gep_add_offset(res, x, gname, nuw, nsw);
+    }
+    return if res >= 0 { res } else { c_null(iit) };
+}
+fn emit_gep_add_offset(res: i32, off: i32, gname: const u8[:], nuw: bool, nsw: bool) -> i32 {
+    if res < 0 { return off; }
+    var nm: u8[>..] = [];
+    nm.append(gname); nm.append(".offs");
+    return icb_add_nw(res, off, nm, nuw, nsw);
+}
+fn icc_unique_int_c(c: i32) -> AP { if vals[c].kind == VK_CINT { ci_ap(c) } else { ci_ap(splat_value(c, false)) } }
+// IRBuilder::CreateIntCast (ic_casts' icb_int_cast without the import cycle)
+fn icb_int_cast_c(v: i32, ty: i32, signed: bool, name: const u8[:]) -> i32 {
+    if vals[v].ty == ty { return v; }
+    let sb = ty_scalar_bits(vals[v].ty);
+    let db = ty_scalar_bits(ty);
+    let o = if sb == db { OP_BITCAST } else if sb > db { OP_TRUNC } else if signed { OP_SEXT } else { OP_ZEXT };
+    return icb_cast(o, v, ty, name);
+}
+
+// EmitGEPOffset(GEP, RewriteGEP)
+fn emit_gep_offset(g: i32, rewrite: bool) -> i32 {
+    if !rewrite { return emit_gep_offset_raw(g); }
+    let spos = icb_pos; let sbb = icb_bb; let sdl = icb_dl;
+    let inst = is_inst(g);
+    if inst { icb_set_insert_point(g); }
+    let off = emit_gep_offset_raw(g);
+    if inst && !gep_all_constant_indices(g) && !is_int_or_int_vec_w(gep_src_ty(g), 8) {
+        let ng = icb_gep(T_I8, op(g, 0), [off], "", gep_flags(g));
+        ic_replace_inst_uses_with(g, ng);
+        ic_erase(g);
+    }
+    icb_pos = spos; icb_bb = sbb; icb_dl = sdl;
+    return off;
+}
+
+// EmitGEPOffsets(GEPs, NW, IdxTy, RewriteGEPs): GEPs are geps[from..to)
+fn emit_gep_offsets(geps: const i32[:], nw: u8, idxty: i32, rewrite: bool) -> i32 {
+    var sum: i32 = -1;
+    var ou_sum: i32 = -1;
+    var ou_base: i32 = -1;
+    var ou_flags: u8 = GEP_INBOUNDS | GEP_NUSW | GEP_NUW;
+    let nuw = (nw & GEP_NUW) != 0;
+    let inb = (nw & GEP_INBOUNDS) != 0;
+    var k = geps.len;
+    while k > 0 {
+        k--;
+        let g = geps[k];
+        var off: i32 = -1;
+        let spos = icb_pos; let sbb = icb_bb; let sdl = icb_dl;
+        let inst = is_inst(g);
+        if rewrite && inst { icb_set_insert_point(g); }
+        off = emit_gep_offset_raw(g);
+        if vals[off].ty != idxty { off = icb_vector_splat(idxty, off, ""); }
+        if has_one_use(g) {
+            ou_sum = if ou_sum >= 0 { icb_add_nw(ou_sum, off, "", nuw, inb) } else { off };
+            ou_flags = gep_nw_intersect_for_offset_add(ou_flags, gep_flags(g));
+            if ou_base < 0 { ou_base = op(g, 0); }
+            icb_pos = spos; icb_bb = sbb; icb_dl = sdl;
+            continue;
+        }
+        if ou_sum >= 0 { off = icb_add_nw(ou_sum, off, "", nuw, inb); }
+        if rewrite && inst && ty_is_vector(vals[off].ty) == ty_is_vector(vals[g].ty) &&
+           !(is_int_or_int_vec_w(gep_src_ty(g), 8) && op(g, 1) == off) {
+            let np = icb_ptr_add(if ou_base >= 0 { ou_base } else { op(g, 0) }, off, "", gep_nw_intersect_for_offset_add(ou_flags, gep_flags(g)));
+            ic_replace_inst_uses_with(g, np);
+            ic_erase(g);
+        }
+        icb_pos = spos; icb_bb = sbb; icb_dl = sdl;
+        sum = if sum >= 0 { icb_add_nw(sum, off, "", nuw, inb) } else { off };
+        ou_sum = -1;
+        ou_base = -1;
+        ou_flags = GEP_INBOUNDS | GEP_NUSW | GEP_NUW;
+    }
+    if ou_sum >= 0 { sum = if sum >= 0 { icb_add_nw(sum, ou_sum, "", nuw, inb) } else { ou_sum }; }
+    if sum < 0 { return c_null(idxty); }
+    return sum;
 }

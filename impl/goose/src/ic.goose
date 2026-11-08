@@ -719,6 +719,7 @@ fn ic_visit(i: i32) -> i32 {
         OP_ZEXT => { return visit_zext(i); },
         OP_SEXT => { return visit_sext(i); },
         OP_ICMP => { return visit_icmp(i); },
+        OP_FCMP => { return visit_fcmp(i); },
         OP_RET => { return visit_return(i); },
         OP_BR => { return visit_uncond_br(i); },
         OP_CONDBR => { return visit_cond_br(i); },

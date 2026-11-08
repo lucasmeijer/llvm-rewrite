@@ -19,6 +19,7 @@ import vt;
 import knownbits;
 import apint;
 import overflow;
+import datalayout;
 import ic;
 import ic_builder;
 import ic_common;
@@ -29,7 +30,14 @@ fn sd_kb(v: i32, depth: i64) -> KB { kb_cxt = sd_cxt; return kb_compute_all(v, d
 fn sd_signbits(v: i32, depth: i64) -> i64 { kb_cxt = sd_cxt; return num_sign_bits(v, depth); }
 
 // Constant::getIntegerValue(Ty, V)
-fn c_int_value(ty: i32, a: AP) -> i32 { c_int_ap(ty, a) }
+fn c_int_value(ty: i32, a: AP) -> i32 {
+    let st = ty_scalar(ty);
+    if ty_kind(st) != TK_PTR { return c_int_ap(ty, a); }
+    // a pointer: inttoptr of the integer constant, splatted for vectors
+    let c = ce_cast(OP_INTTOPTR, c_int_ap(ty_int(a.w as i64), a), st);
+    if ty_is_vector(ty) { return c_splat(ty, c); }
+    return c;
+}
 
 // ShrinkDemandedConstant(I, OpNo, Demanded)
 fn shrink_demanded_constant(i: i32, k: i64, demanded: AP) -> bool {
@@ -61,7 +69,9 @@ fn simplify_demanded_instruction_bits_k(i: i32) -> bool, KB {
 fn sd_bit_width(t: i32) -> i64 {
     let s = ty_scalar(t);
     if ty_is_int(s) { return ty_bits(s); }
-    ic_not_ported("SimplifyDemandedBits on a pointer value");
+    // DL.getPointerTypeSizeInBits(Ty)
+    if ty_kind(s) == TK_PTR { return dl_ptr(ptr_as(s)).bits; }
+    ic_not_ported("SimplifyDemandedBits on a non-integer, non-pointer value");
     return 0;
 }
 
@@ -115,7 +125,6 @@ fn sd_check_funnel_user(i: i32) -> bool {
 recursive fn sd_use_bits(i: i32, demanded: AP, depth: i64) -> i32, KB {
     let w = demanded.w as i64;
     let vty = vals[i].ty;
-    if ty_kind(ty_scalar(vty)) == TK_PTR { ic_not_ported("SimplifyDemandedUseBits on pointers"); }
     var lk = kb_unknown(w);
     var rk = kb_unknown(w);
     var known = kb_unknown(w);
@@ -538,7 +547,17 @@ recursive fn sd_use_bits(i: i32, demanded: AP, depth: i64) -> i32, KB {
         done = true;
     }
     if !done { known = sd_kb(i, depth); }
-    if ap_is_subset_of(demanded, ap_or(known.z, known.o)) { return c_int_value(vty, known.o), known; }
+    if ty_kind(vty) == TK_PTR {
+        // Known.Zero.setLowBits(Log2(I->getPointerAlignment(DL)))
+        let al = pointer_alignment(i);
+        var lg: i64 = 0;
+        while ((1 as i64) << lg) < al { lg++; }
+        if lg > 0 { known = KB { z: ap_or(known.z, ap_low_bits(w, lg)), o: known.o }; }
+        return -1, known;
+    }
+    if ap_is_subset_of(demanded, ap_or(known.z, known.o)) {
+        return c_int_value(vty, known.o), known;
+    }
     return -1, known;
 }
 fn intr_is_target_specific(id: i32) -> bool {

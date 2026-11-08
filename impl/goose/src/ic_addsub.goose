@@ -1585,3 +1585,52 @@ fn optimize_pointer_difference(l: i32, r: i32, ty: i32, nuw: bool) -> i32 {
     ic_not_ported("OptimizePointerDifference (EmitGEPOffsets)");
     return -1;
 }
+
+// CommonPointerBase::compute(LHS, RHS) and isExpensive() (InstCombineAddSub.cpp): the result in cpb_*
+var cpb_ptr: i32 = -1;
+var cpb_lhs: i32[>..<];     // LHSGEPs
+var cpb_rhs: i32[>..<];     // RHSGEPs
+var cpb_lnw: u8 = 7;
+var cpb_rnw: u8 = 7;
+fn common_pointer_base_compute(l0: i32, r0: i32) {
+    cpb_ptr = -1;
+    cpb_lhs.resize(0);
+    cpb_rhs.resize(0);
+    cpb_lnw = GEP_INBOUNDS | GEP_NUSW | GEP_NUW;
+    cpb_rnw = GEP_INBOUNDS | GEP_NUSW | GEP_NUW;
+    if vals[l0].ty != vals[r0].ty { return; }
+    var ptrs: i32[>..<] = [];
+    var p = l0;
+    loop {
+        ptrs.push(p);
+        if is_op(p, OP_GEP) { p = op(p, 0); } else { break; }
+    }
+    var first = true;
+    var r = r0;
+    loop {
+        var hit = false;
+        for x in ptrs { if x == r { hit = true; } }
+        if hit { cpb_ptr = r; break; }
+        if is_op(r, OP_GEP) {
+            cpb_rhs.push(r);
+            if first { first = false; cpb_rnw = gep_flags(r); } else { cpb_rnw = gep_nw_intersect_for_offset_add(cpb_rnw, gep_flags(r)); }
+            r = op(r, 0);
+        } else { return; }
+    }
+    first = true;
+    var l = l0;
+    loop {
+        if l == cpb_ptr { break; }
+        cpb_lhs.push(l);
+        if first { first = false; cpb_lnw = gep_flags(l); } else { cpb_lnw = gep_nw_intersect_for_offset_add(cpb_lnw, gep_flags(l)); }
+        l = op(l, 0);
+    }
+}
+fn common_pointer_base_is_expensive() -> bool {
+    var n = 0;
+    var seen = false;
+    for g in cpb_lhs { if !has_one_use(g) { if seen { n++; } seen = true; } }
+    seen = false;
+    for g in cpb_rhs { if !has_one_use(g) { if seen { n++; } seen = true; } }
+    return n > 2;
+}

@@ -15,6 +15,7 @@ import memloc;
 import aautil;
 import flags;
 import intrinsics;
+import vt;
 
 let CT_MAX_USES_DEFAULT: i64 = 100;      // -capture-tracking-max-uses-to-explore
 
@@ -118,6 +119,7 @@ fn ct_use_capture_kind(u: i32, base: i32) -> UCI {
 let CTK_SIMPLE = 0;
 let CTK_BEFORE = 1;
 let CTK_EARLIEST = 2;
+let CTK_ICMP = 3;              // InstCombine's CmpCaptureTracker (foldAllocaCmp)
 
 let CT_STOP_ANY = 0;            // capturesAnything
 let CT_STOP_FULL_PROV = 1;      // capturesFullProvenance
@@ -138,6 +140,10 @@ var ct_include_i: bool = false;
 var ct_use_li: bool = false;
 var ct_earliest: i32 = -1;          // EarliestCaptures::EarliestCapture
 var ct_fn: i32 = -1;
+var ct_icmp_alloca: i32 = -1;      // CmpCaptureTracker::Alloca
+var ct_icmp_captured: bool = false;
+var ct_icmps: i32[>..<];           // CmpCaptureTracker::ICmps (a MapVector: insertion order)
+var ct_icmp_bits: i64[>..<];
 
 fn ct_stop_fn(cc: i64) -> bool {
     if ct_stop == CT_STOP_ANY { return cc_anything(cc); }
@@ -146,6 +152,7 @@ fn ct_stop_fn(cc: i64) -> bool {
 }
 
 fn ct_too_many_uses() {
+    if ct_kind == CTK_ICMP { ct_icmp_captured = true; return; }
     if ct_kind == CTK_SIMPLE { ct_cc = ct_mask; ct_cc_ret = ct_mask; }
     else if ct_kind == CTK_BEFORE { ct_cc = ct_mask; }
     else {
@@ -178,6 +185,17 @@ fn ct_ncd_inst(a: i32, b: i32) -> i32 {
 fn ct_captured(u: i32, c: UCI) -> i64 {
     let user = uses[u].user;
     let is_ret = is_inst_op(user, OP_RET);
+    if ct_kind == CTK_ICMP {
+        if is_inst_op(user, OP_ICMP) && (inst_pred(user) == 32 || inst_pred(user) == 33) && get_underlying_object(uses[u].val, 6) == ct_icmp_alloca {
+            let opno = (u - vals[user].ops) as i64;
+            var found = false;
+            for k in ct_icmps.len { if ct_icmps[k] == user { ct_icmp_bits[k] |= (1 as i64) << opno; found = true; } }
+            if !found { ct_icmps.push(user); ct_icmp_bits.push((1 as i64) << opno); }
+            return CTA_CONTINUE;
+        }
+        ct_icmp_captured = true;
+        return CTA_STOP;
+    }
     if ct_kind == CTK_SIMPLE {
         if cc_nothing(c.use_cc & ct_mask) { return CTA_CONTINUE; }
         ct_cc_ret |= c.use_cc & ct_mask;
@@ -272,4 +290,17 @@ fn ct_find_earliest_capture(v: i32, fv: i32, mask: i64) -> i32, i64, i64 {
     ct_fn = fv;
     ct_walk(v, 0);
     return ct_earliest, ct_cc, ct_cc_ret;
+}
+
+// PointerMayBeCaptured(Alloca, &CmpCaptureTracker) (InstCombineCompares.cpp foldAllocaCmp): captured?
+// The equality icmps based only on the alloca are left in ct_icmps / ct_icmp_bits.
+fn ct_alloca_cmp_tracker(a: i32) -> bool {
+    ct_kind = CTK_ICMP;
+    ct_icmp_alloca = a;
+    ct_icmp_captured = false;
+    ct_icmps.resize(0);
+    ct_icmp_bits.resize(0);
+    ct_walk(a, 0);
+    ct_kind = CTK_SIMPLE;
+    return ct_icmp_captured;
 }

@@ -31,6 +31,8 @@ import apint;
 import overflow;
 import domcond;
 import cfgutil;
+import capture;
+import ic_addsub;
 import ic;
 import ic_builder;
 import ic_common;
@@ -4228,27 +4230,1074 @@ fn icc_null_or_all_ones(c: i32) -> bool { is_null_value(c) || is_all_ones_value(
 // ---------------------------------------------------------------------------------------------
 // Pointers and memory: foldCmpLoadFromIndexedGlobal, foldGEPICmp, foldAllocaCmp
 
+// decomposeLinearExpression(DL, Ptr) (Analysis/Loads.cpp): BasePtr, Index (-1), Scale, Offset, Flags
+fn icc_decompose_linear_expression(ptr: i32) -> i32, i32, AP, AP, u8 {
+    let bw = dl_ptr(ptr_as(vals[ptr].ty)).idx;
+    var base = ptr;
+    var index: i32 = -1;
+    var scale = ap_zero(bw);
+    var off = ap_zero(bw);
+    var fl: u8 = GEP_INBOUNDS | GEP_NUSW | GEP_NUW;
+    loop {
+        if !is_op(base, OP_GEP) || ty_contains_scalable(gep_src_ty(base)) { return base, index, scale, off, fl; }
+        let g = base;
+        var var_idx: i32 = -1;
+        for k in 1..nops(g) {
+            let ix = op(g, k);
+            if vals[ix].kind == VK_CINT { continue; }
+            if index >= 0 || var_idx >= 0 { return base, index, scale, off, fl; }
+            var_idx = ix;
+        }
+        if var_idx >= 0 && !(ty_is_int(vals[var_idx].ty) && ty_bits(vals[var_idx].ty) == bw) { return base, index, scale, off, fl; }
+        base = op(g, 0);
+        fl = gep_nw_intersect_for_offset_add(fl, gep_flags(g));
+        var t = gep_src_ty(g);
+        for k in 1..nops(g) {
+            let ix = op(g, k);
+            var stride: i64 = 0;
+            var st = false;
+            if k == 1 { stride = dl_alloc_size(t); }
+            else if ty_is_struct(t) { st = true; }
+            else { stride = dl_gep_stride(t, ty_elem(t)); }
+            if vals[ix].kind == VK_CINT {
+                let cv = ci_ap(ix);
+                if st {
+                    let fi = ap_zext64(cv) as i64;
+                    if !ap_is_zero(cv) { off = ap_add(off, ap_u64(dl_struct_offset(t, fi) as u64, bw)); }
+                    t = ty_field(t, fi);
+                    continue;
+                }
+                if k > 1 { t = ty_elem(t); }
+                if ap_is_zero(cv) { continue; }
+                off = ap_add(off, ap_mul(ap_sext_or_trunc(cv, bw), ap_u64(stride as u64, bw)));
+                continue;
+            }
+            if st { fatal("internal: a struct GEP index that is not a constant"); }
+            if k > 1 { t = ty_elem(t); }
+            index = ix;
+            scale = ap_u64(stride as u64, bw);
+        }
+    }
+    return base, index, scale, off, fl;
+}
+
 // foldCmpLoadFromIndexedGlobal(LI, GEP, ICI, AndCst)
 fn fold_cmp_load_from_indexed_global(li: i32, gep: i32, ici: i32, andc: i32) -> i32 {
     let gv = get_underlying_object(gep, 6);
     if (insts[inst_of(li)].bits & 1) != 0 || !is_gvar(gv) || globs[glob_of(gv)].is_const == 0 || !gv_has_definitive_initializer(gv) { return -1; }
-    ic_not_ported("foldCmpLoadFromIndexedGlobal");
+    let ety = vals[li].ty;
+    if ty_contains_scalable(ety) { return -1; }
+    let esz = dl_store_size(ety);
+    let base, idx0, stride, coff, efl = icc_decompose_linear_expression(gep);
+    if idx0 < 0 || base != gv || coff.w > 64 { return -1; }
+    let init = op(gv, 0);
+    let gsz = dl_alloc_size(vals[init].ty);
+    if !ap_ult(coff, stride) { return -1; }
+    if !ap_uge_u64(stride, esz as u64) { return -1; }
+    let st = ap_zext64(stride) as i64;
+    let co = ap_zext64(coff) as i64;
+    let n = ((gsz - co) + st - 1) / st;
+    if n > 1024 { return -1; }
+    let UNDEF = -2;
+    let OVER = -3;
+    var ft: i64 = UNDEF; var stt: i64 = UNDEF;
+    var ff: i64 = UNDEF; var sf: i64 = UNDEF;
+    var tre: i64 = UNDEF; var fre: i64 = UNDEF;
+    var magic: u64 = 0;
+    let rhs = op(ici, 1);
+    let p = icc_pred(ici);
+    var offv = co;
+    for i in n {
+        var elt = cf_fold_load_from_const(init, ety, offv);
+        offv += st;
+        if elt < 0 { return -1; }
+        if andc >= 0 {
+            elt = cf_fold_binop_operands(OP_AND, elt, andc);
+            if elt < 0 { return -1; }
+        }
+        let c = cf_fold_cmp_operands(p, elt, rhs, -1);
+        if c < 0 { return -1; }
+        if is_undef_or_poison(c) {
+            if tre == i - 1 { tre = i; }
+            if fre == i - 1 { fre = i; }
+            continue;
+        }
+        if vals[c].kind != VK_CINT { return -1; }
+        let t = !ap_is_zero(ci_ap(c));
+        if t {
+            if ft == UNDEF { ft = i; tre = i; }
+            else {
+                if stt == UNDEF { stt = i; } else { stt = OVER; }
+                if tre == i - 1 { tre = i; } else { tre = OVER; }
+            }
+        } else {
+            if ff == UNDEF { ff = i; fre = i; }
+            else {
+                if sf == UNDEF { sf = i; } else { sf = OVER; }
+                if fre == i - 1 { fre = i; } else { fre = OVER; }
+            }
+        }
+        if i < 64 && t { magic |= (1 as u64) << (i as u64); }
+        if (i & 8) == 0 && i >= 64 && stt == OVER && sf == OVER && tre == OVER && fre == OVER { return -1; }
+    }
+    var idx = idx0;
+    let ity = vals[idx].ty;
+    if stt != OVER {
+        idx = icc_mask_idx(idx, efl, stride);
+        if ft == UNDEF { return ic_replace_inst_uses_with(ici, c_false()); }
+        let fti = c_int_ty(ity, ft as u64);
+        if stt == UNDEF { return ic_new_icmp(P_EQ, idx, fti); }
+        let c1 = icb_icmp(P_EQ, idx, fti, "");
+        let c2 = icb_icmp(P_EQ, idx, c_int_ty(ity, stt as u64), "");
+        return ic_new_binop(OP_OR, c1, c2);
+    }
+    if sf != OVER {
+        idx = icc_mask_idx(idx, efl, stride);
+        if ff == UNDEF { return ic_replace_inst_uses_with(ici, c_true()); }
+        let ffi = c_int_ty(ity, ff as u64);
+        if sf == UNDEF { return ic_new_icmp(P_NE, idx, ffi); }
+        let c1 = icb_icmp(P_NE, idx, ffi, "");
+        let c2 = icb_icmp(P_NE, idx, c_int_ty(ity, sf as u64), "");
+        return ic_new_binop(OP_AND, c1, c2);
+    }
+    if tre != OVER {
+        idx = icc_mask_idx(idx, efl, stride);
+        if ft != 0 { idx = icb_add(idx, c_int_ty_s(ity, -ft), ""); }
+        return ic_new_icmp(P_ULT, idx, c_int_ty(ity, (tre - ft + 1) as u64));
+    }
+    if fre != OVER {
+        idx = icc_mask_idx(idx, efl, stride);
+        if ff != 0 { idx = icb_add(idx, c_int_ty_s(ity, -ff), ""); }
+        return ic_new_icmp(P_UGT, idx, c_int_ty(ity, (fre - ff) as u64));
+    }
+    var ty: i32 = -1;
+    if n <= ty_bits(ity) { ty = ity; }
+    else {
+        // DL.getSmallestLegalIntType(Ctx, ArrayElementCount)
+        var best: i64 = 0;
+        for w in dl_native { if w >= n && (best == 0 || w < best) { best = w; } }
+        if best > 0 { ty = ty_int(best); }
+    }
+    if ty >= 0 {
+        idx = icc_mask_idx(idx, efl, stride);
+        var v = icb_int_cast(idx, ty, false, "");
+        v = icb_lshr(c_int_ty(ty, magic), v, "", false);
+        v = icb_and(c_int_ty(ty, 1), v, "");
+        return ic_new_icmp(P_NE, v, c_int_ty(ty, 0));
+    }
     return -1;
+}
+// the MaskIdx lambda
+fn icc_mask_idx(idx: i32, fl: u8, stride: AP) -> i32 {
+    let tz = ap_countr_zero(stride);
+    if (fl & GEP_INBOUNDS) == 0 && tz != 0 {
+        var m = c_all_ones(vals[idx].ty);
+        m = icb_lshr(m, c_int_ty(vals[idx].ty, tz as u64), "", false);
+        return icb_and(idx, m, "");
+    }
+    return idx;
+}
+
+// canRewriteGEPAsOffset(Start, Base, NW, DL, Explored): ok, nw; Explored in icc_explored (a SetVector)
+var icc_explored: i32[>..<];
+fn icc_explored_has(v: i32) -> bool { for x in icc_explored { if x == v { return true; } } return false; }
+fn icc_explored_insert(v: i32) { if !icc_explored_has(v) { icc_explored.push(v); } }
+fn can_rewrite_gep_as_offset(start: i32, base: i32, nw0: u8) -> bool, u8 {
+    var nw = nw0;
+    icc_explored.resize(0);
+    var wl: i32[>..<] = [];
+    wl.push(start);
+    icc_explored_insert(base);
+    while wl.len > 0 {
+        var phis: i32[>..<] = [];
+        while wl.len > 0 {
+            if icc_explored.len >= 100 { return false, nw; }
+            let v = wl[wl.len - 1];
+            if icc_explored_has(v) { wl.pop(); continue; }
+            if !is_inst_op(v, OP_GEP) && !is_phi_inst(v) { return false, nw; }
+            if is_op(v, OP_GEP) {
+                var nonc = 0;
+                for k in 1..nops(v) { if vals[op(v, k)].kind != VK_CINT { nonc++; } }
+                if (gep_flags(v) & GEP_INBOUNDS) == 0 || nonc > 1 { return false, nw; }
+                nw = gep_nw_intersect_for_offset_add(nw, gep_flags(v));
+                if !icc_explored_has(op(v, 0)) { wl.push(op(v, 0)); }
+            }
+            if wl[wl.len - 1] == v {
+                wl.pop();
+                icc_explored_insert(v);
+            }
+            if is_phi_inst(v) {
+                if iop(block_terminator(inst_parent(v))) == OP_CATCHSWITCH { return false, nw; }
+                icc_explored_insert(v);
+                var dup = false;
+                for x in phis { if x == v { dup = true; } }
+                if !dup { phis.push(v); }
+            }
+        }
+        for pn in phis {
+            for k in nops(pn) { if !icc_explored_has(op(pn, k)) { wl.push(op(pn, k)); } }
+        }
+    }
+    for val in icc_explored {
+        var u = vals[val].first_use;
+        while u >= 0 {
+            let us = uses[u].user;
+            u = uses[u].next;
+            if !is_inst(val) || val == base || val == us || !is_phi_inst(us) || !icc_explored_has(us) { continue; }
+            if inst_parent(us) == inst_parent(val) { return false, nw; }
+        }
+    }
+    return true, nw;
+}
+// setInsertionPoint(Builder, V, Before)
+fn icc_set_insertion_point(v: i32, before: bool) {
+    if is_phi_inst(v) { icb_set_insert_point(first_insertion_pt(inst_parent(v))); return; }
+    if is_inst(v) {
+        if before { icb_set_insert_point(v); } else { icb_set_insert_point(inst_next(v)); }
+        return;
+    }
+    if is_arg(v) {
+        let e = func_entry(args_parent[vals[v].sub]);
+        icb_set_insert_point(first_insertion_pt(e));
+    }
+}
+// rewriteGEPAsOffset(Start, Base, NW, DL, Explored, IC)
+fn rewrite_gep_as_offset(start: i32, base: i32, nw: u8) -> i32 {
+    let ity = ty_int(dl_ptr(ptr_as(vals[start].ty)).idx);
+    var nv: i32[>..<] = [];
+    for x in icc_explored { nv.push(-1); }
+    fn idx_of(v: i32) -> i64 { for k in icc_explored.len { if icc_explored[k] == v { return k; } } return -1; }
+    nv[idx_of(base)] = c_null(ity);
+    // a plain IRBuilder<> (no worklist, no folding into the InstCombine worklist)
+    let spos = icb_pos; let sbb = icb_bb; let sdl = icb_dl;
+    for k in icc_explored.len {
+        let v = icc_explored[k];
+        if v == base { continue; }
+        if is_phi_inst(v) {
+            let np = new_inst(OP_PHI, ity, nops(v));
+            vals[np].nops = 0;
+            inst_insert_before(np, v);
+            var nm: u8[>..] = [];
+            nm.append(val_name(v)); nm.append(".idx");
+            ic_register_name(np);
+            set_name(np, nm);
+            nv[k] = np;
+        }
+    }
+    for k in icc_explored.len {
+        let v = icc_explored[k];
+        if nv[k] >= 0 { continue; }
+        if is_op(v, OP_GEP) {
+            icc_set_insertion_point(v, true);
+            let o = nv[idx_of(op(v, 0))];
+            let off = icc_plain(emit_gep_offset_raw(v));
+            if vals[o].kind == VK_CINT && ap_is_zero(ci_ap(o)) { nv[k] = off; }
+            else {
+                var nm: u8[>..] = [];
+                nm.append(val_name(op(v, 0))); nm.append(".add");
+                nv[k] = icc_plain(icb_add_nw(o, off, nm, (nw & GEP_NUW) != 0, (nw & GEP_NUSW) != 0));
+            }
+            continue;
+        }
+        if is_phi_inst(v) { continue; }
+        fatal("internal: Unexpected instruction type");
+    }
+    for k in icc_explored.len {
+        let v = icc_explored[k];
+        if v == base || !is_phi_inst(v) { continue; }
+        let np = nv[k];
+        for j in nops(v) {
+            var ni = op(v, j);
+            let x = idx_of(ni);
+            if x >= 0 { ni = nv[x]; }
+            phi_add_incoming(np, ni, phi_block(v, j));
+        }
+    }
+    for k in icc_explored.len {
+        let v = icc_explored[k];
+        if v == base { continue; }
+        icc_set_insertion_point(v, false);
+        var nm: u8[>..] = [];
+        nm.append(val_name(v)); nm.append(".ptr");
+        let ng = icc_plain(icb_gep(T_I8, base, [nv[k]], nm, nw));
+        ic_replace_inst_uses_with(v, ng);
+        icw_add(v);
+    }
+    icb_pos = spos; icb_bb = sbb; icb_dl = sdl;
+    return nv[idx_of(start)];
+}
+// instructions made by the plain IRBuilder<> of rewriteGEPAsOffset are not added to the worklist
+fn icc_plain(v: i32) -> i32 { if is_inst(v) { icw_remove(v); } return v; }
+
+// transformToIndexedCompare(GEPLHS, RHS, Cond, DL, IC)
+fn transform_to_indexed_compare(gl: i32, rhs: i32, p0: i64) -> i32 {
+    if ty_is_vector(vals[gl].ty) { return -1; }
+    if !gep_all_constant_indices(gl) { return -1; }
+    let pb = strip_and_accumulate_offsets(gl, false, false, false);
+    let off = vt_off;
+    if vals[pb].ty != vals[gl].ty { return -1; }
+    let ok, nw = can_rewrite_gep_as_offset(rhs, pb, gep_flags(gl));
+    if !ok { return -1; }
+    let nr = rewrite_gep_as_offset(rhs, pb, nw);
+    let iw = dl_ptr(ptr_as(vals[gl].ty)).idx;
+    return ic_new_icmp(pred_signed(cp_pred(p0)), c_int_ap(ty_int(iw), ap_i64(off, iw)), nr);
 }
 
 // foldGEPICmp(GEPLHS, RHS, Cond, I)
-fn fold_gep_icmp(gep: i32, rhs: i32, p0: i64, i: i32) -> i32 {
-    if pred_is_signed(cp_pred(p0)) { return -1; }
-    ic_not_ported("foldGEPICmp");
-    return -1;
+fn fold_gep_icmp(gl: i32, rhs0: i32, p0: i64, i: i32) -> i32 {
+    let p = cp_pred(p0);
+    if pred_is_signed(p) { return -1; }
+    var rhs = rhs0;
+    if !is_inst_op(rhs, OP_GEP) { rhs = strip_pointer_casts(rhs); }
+    common_pointer_base_compute(gl, rhs);
+    if cpb_ptr == rhs && icc_gep_can_fold(p, cpb_lnw) && !common_pointer_base_is_expensive() {
+        let it = dl_index_type(vals[gl].ty);
+        var lg: i32[>..<] = [];
+        for g in cpb_lhs { lg.push(g); }
+        let lnw = cpb_lnw;
+        let o = emit_gep_offsets(lg, lnw, it, true);
+        return icc_gep_new_icmp(p, lnw, o, c_null(vals[o].ty));
+    }
+    if (gep_flags(gl) & GEP_INBOUNDS) != 0 && icmp_is_equality(p) && vals[rhs].kind == VK_CNULL &&
+       !null_pointer_is_defined(inst_func(i), ptr_as(vals[rhs].ty)) {
+        var b = op(gl, 0);
+        if ty_is_vector(vals[gl].ty) && !ty_is_vector(vals[b].ty) { b = icb_vector_splat(vals[gl].ty, b, ""); }
+        return ic_new_icmp(p, b, icc_ptr_bitcast_or_ascast(rhs, vals[b].ty));
+    } else if is_op(rhs, OP_GEP) {
+        let gr = rhs;
+        let nw = gep_flags(gl) & gep_flags(gr);
+        if op(gl, 0) != op(gr, 0) {
+            var same = nops(gl) == nops(gr) && vals[op(gl, 0)].ty == vals[op(gr, 0)].ty && gep_src_ty(gl) == gep_src_ty(gr);
+            if same { for k in 1..nops(gl) { if op(gl, k) != op(gr, k) { same = false; break; } } }
+            let bt = vals[op(gl, 0)].ty;
+            if same && cmp_result_ty(bt) == vals[i].ty && icc_gep_can_fold(p, nw) { return ic_new_icmp(p, op(gl, 0), op(gr, 0)); }
+            if (gep_flags(gl) & GEP_INBOUNDS) != 0 && (gep_flags(gr) & GEP_INBOUNDS) != 0 &&
+               (gep_all_constant_indices(gl) || has_one_use(gl)) && (gep_all_constant_indices(gr) || has_one_use(gr)) &&
+               strip_pointer_casts(op(gl, 0)) == strip_pointer_casts(op(gr, 0)) && !ty_is_vector(vals[gl].ty) {
+                var lo = emit_gep_offset(gl, false);
+                var ro = emit_gep_offset(gr, false);
+                let lt = vals[lo].ty;
+                let rt = vals[ro].ty;
+                if lt != rt {
+                    if ty_bits(lt) < ty_bits(rt) { ro = icb_trunc(ro, lt, ""); } else { lo = icb_trunc(lo, rt, ""); }
+                }
+                let c = icb_icmp(pred_signed(p), lo, ro, "");
+                return ic_replace_inst_uses_with(i, c);
+            }
+        }
+        if op(gl, 0) == op(gr, 0) && nops(gl) == nops(gr) && gep_src_ty(gl) == gep_src_ty(gr) {
+            var nd = 0;
+            var dop: i64 = 0;
+            for k in 1..nops(gr) {
+                if op(gl, k) != op(gr, k) {
+                    let lt = vals[op(gl, k)].ty;
+                    let rt = vals[op(gr, k)].ty;
+                    if dl_size_bits_prim(lt) != dl_size_bits_prim(rt) || (ty_is_vector(vals[gl].ty) && (!ty_is_vector(lt) || !ty_is_vector(rt))) { nd = 2; break; }
+                    if nd > 0 { nd++; break; }
+                    nd++;
+                    dop = k;
+                }
+            }
+            if nd == 0 { return ic_replace_inst_uses_with(i, c_bool_ty(vals[i].ty, pred_true_when_equal(p))); }
+            if nd == 1 && nw != 0 { return icc_gep_new_icmp(p, nw, op(gl, dop), op(gr, dop)); }
+        }
+        if cpb_ptr >= 0 && icc_gep_can_fold(p, cpb_lnw & cpb_rnw) && !common_pointer_base_is_expensive() {
+            let it = dl_index_type(vals[gl].ty);
+            var lg: i32[>..<] = [];
+            for g in cpb_lhs { lg.push(g); }
+            var rg: i32[>..<] = [];
+            for g in cpb_rhs { rg.push(g); }
+            let lnw = cpb_lnw;
+            let rnw = cpb_rnw;
+            let l = emit_gep_offsets(lg, lnw, it, true);
+            let r = emit_gep_offsets(rg, rnw, it, true);
+            return icc_gep_new_icmp(p, lnw & rnw, l, r);
+        }
+    }
+    return transform_to_indexed_compare(gl, rhs, p0);
+}
+fn dl_size_bits_prim(t: i32) -> i64 { if ty_is_vector(t) { ty_scalar_bits(t) * ty_count(t) } else { ty_scalar_bits(t) } }
+// the CanFold lambda
+fn icc_gep_can_fold(p: i64, nw: u8) -> bool { icmp_is_equality(p) || nw != 0 }
+// the NewICmp lambda
+fn icc_gep_new_icmp(p: i64, nw: u8, a: i32, b: i32) -> i32 {
+    if (nw & GEP_NUW) == 0 { return ic_new_icmp(pred_signed(p), a, b); }
+    let c = ic_new_icmp(p, a, b);
+    icc_set_samesign(c, (nw & GEP_NUSW) != 0);
+    return c;
+}
+// ConstantExpr::getPointerBitCastOrAddrSpaceCast
+fn icc_ptr_bitcast_or_ascast(c: i32, ty: i32) -> i32 {
+    if vals[c].ty == ty { return c; }
+    if ptr_as(vals[c].ty) != ptr_as(ty) { return ce_cast(OP_ADDRSPACECAST, c, ty); }
+    return ce_cast(OP_BITCAST, c, ty);
 }
 
 // foldAllocaCmp(Alloca)
 fn fold_alloca_cmp(a: i32) -> bool {
-    ic_not_ported("foldAllocaCmp");
-    return false;
+    if ct_alloca_cmp_tracker(a) { return false; }
+    var changed = false;
+    var cmps: i32[>..<] = [];
+    var bits: i64[>..<] = [];
+    for k in ct_icmps.len { cmps.push(ct_icmps[k]); bits.push(ct_icmp_bits[k]); }
+    for k in cmps.len {
+        let c = cmps[k];
+        let b = bits[k];
+        if b == 1 || b == 2 {
+            let res = c_bool_ty(vals[c].ty, icc_pred(c) == P_NE);
+            ic_replace_inst_uses_with(c, res);
+            ic_erase(c);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+// =============================================================================================
+// fcmp
+
+fn icc_fpk(ty: i32) -> i64 { types[ty_scalar(ty)].kind as i64 }
+// Type::getFPMantissaWidth
+fn icc_mantissa_width(ty: i32) -> i64 {
+    let k = icc_fpk(ty);
+    if k == TK_PPC_FP128 { return -1; }
+    return fp_fmt(k).p;
+}
+// ConstantFP::get(Ty, APFloat): a splat for vector types
+fn icc_cfp(ty: i32, lo: u64, hi: u64) -> i32 {
+    if ty_is_vector(ty) { return c_splat(ty, c_fp(ty_scalar(ty), lo, hi)); }
+    return c_fp(ty, lo, hi);
+}
+fn icc_fp_zero(ty: i32) -> i32 { icc_cfp(ty, 0, 0) }
+// new FCmpInst(Pred, LHS, RHS, "", FlagsSource): the fast-math flags of FlagsSource (-1: none)
+fn icc_new_fcmp(p: i64, a: i32, b: i32, fsrc: i32) -> i32 {
+    let c = create_inst(OP_FCMP, cmp_result_ty(vals[a].ty), [a, b]);
+    insts[inst_of(c)].pred = p as u8;
+    if fsrc >= 0 { insts[inst_of(c)].fmf = insts[inst_of(fsrc)].fmf; }
+    return c;
+}
+fn icc_fcmp_is_equality(p: i64) -> bool { p == P_OEQ || p == P_ONE || p == P_UEQ || p == P_UNE }
+// FCmpInst::isCommutative
+fn icc_fcmp_is_commutative(p: i64) -> bool { icc_fcmp_is_equality(p) || p == P_FALSE || p == P_TRUE || p == P_ORD || p == P_UNO }
+fn icc_has_fmf(i: i32, f: u8) -> bool { (insts[inst_of(i)].fmf & f) != 0 }
+fn icc_set_fmf(i: i32, f: u8, b: bool) {
+    let ii = inst_of(i);
+    if b { insts[ii].fmf |= f; } else { insts[ii].fmf &= ~f; }
+}
+
+// APFloat helpers on (kind, lo, hi) bit patterns
+fn icc_fp_bits_ap(kind: i64, lo: u64, hi: u64) -> AP {
+    let w = fp_fmt(kind).total;
+    if w <= 64 { return ap_u64(lo, w); }
+    return ap_from_words(w, [lo, hi]);
+}
+fn icc_fp_ap_lo(a: AP) -> u64 { ap_word(a, 0) }
+fn icc_fp_ap_hi(a: AP) -> u64 { if a.w > 64 { ap_word(a, 1) } else { 0 } }
+fn icc_fp_is_ieee_bits(kind: i64) -> bool { kind == TK_HALF || kind == TK_BFLOAT || kind == TK_FLOAT || kind == TK_DOUBLE || kind == TK_FP128 }
+// APFloat::next(nextDown) for finite and infinite values of the IEEE interchange formats
+fn icc_fp_next(kind: i64, lo: u64, hi: u64, down: bool) -> u64, u64 {
+    if !icc_fp_is_ieee_bits(kind) { ic_not_ported("APFloat::next for x86_fp80/ppc_fp128"); }
+    let p = fp_decompose(kind, lo, hi);
+    if p.cat == FC_NAN { ic_not_ported("APFloat::next of a NaN"); }
+    if down {
+        let nlo, nhi = fp_neg_bits(kind, lo, hi);
+        let ulo, uhi = icc_fp_next_up(kind, nlo, nhi);
+        return fp_neg_bits(kind, ulo, uhi);
+    }
+    return icc_fp_next_up(kind, lo, hi);
+}
+fn icc_fp_next_up(kind: i64, lo: u64, hi: u64) -> u64, u64 {
+    let p = fp_decompose(kind, lo, hi);
+    let w = fp_fmt(kind).total;
+    let b = icc_fp_bits_ap(kind, lo, hi);
+    if p.cat == FC_INF {
+        if !p.neg { return lo, hi; }
+        // -inf -> -largest
+        let r = ap_dec(b);
+        return icc_fp_ap_lo(r), icc_fp_ap_hi(r);
+    }
+    if p.cat == FC_ZERO { return 1, 0; }
+    let r = if p.neg { ap_dec(b) } else { ap_inc(b) };
+    if w <= 64 { return ap_lo64(r), 0; }
+    return icc_fp_ap_lo(r), icc_fp_ap_hi(r);
+}
+// APFloat::convertFromAPInt(V, isSigned, rmNearestTiesToEven)
+fn icc_fp_from_int(kind: i64, a: AP, signed: bool) -> u64, u64 {
+    let neg = signed && ap_is_neg(a);
+    let m = if neg { ap_neg(a) } else { a };
+    var num: u32[>..<] = [];
+    var den: u32[>..<] = [];
+    var mw: u64[>..] = [];
+    for k in ap_nwords(m) { mw.push(ap_word(m, k)); }
+    bn_from_words(num, mw);
+    bn_set_u64(den, 1);
+    return fp_round_rational(kind, neg, num, den);
+}
+// APFloat::convertToInteger(APSInt(W, !Signed), Mode, &IsExact): opOK-or-inexact, isExact, value
+fn icc_fp_to_int(kind: i64, lo: u64, hi: u64, w: i64, signed: bool, mode: i64) -> bool, bool, AP {
+    let p0 = fp_decompose(kind, lo, hi);
+    if p0.cat == FC_NAN || p0.cat == FC_INF { return false, false, ap_zero(w); }
+    if p0.cat == FC_ZERO { return true, !p0.neg, ap_zero(w); }
+    let rlo, rhi = fp_round_to_integral(kind, lo, hi, mode);
+    let frac_exact = rlo == lo && rhi == hi;
+    let f = fp_fmt(kind);
+    let p = fp_decompose(kind, rlo, rhi);
+    if p.cat == FC_ZERO { return true, frac_exact, ap_zero(w); }
+    let mw = w + 130;
+    let sig = ap_from_words(mw, [p.sig0, p.sig1]);
+    let sh = p.exponent - (if f.explicit_int { 63 } else { f.p - 1 });
+    var mag = ap_zero(mw);
+    if sh >= 0 {
+        if sh + f.p > w + 1 { return false, false, ap_zero(w); }
+        mag = ap_shl(sig, sh);
+    } else if -sh < mw {
+        mag = ap_lshr(sig, -sh);
+    }
+    let maxbits = if signed { w - 1 } else { w };
+    let abits = ap_active_bits(mag);
+    if p.neg && !ap_is_zero(mag) {
+        if !signed { return false, false, ap_zero(w); }
+        if abits > maxbits + 1 { return false, false, ap_zero(w); }
+        if abits == maxbits + 1 && ap_countr_zero(mag) != abits - 1 { return false, false, ap_zero(w); }
+        return true, frac_exact, ap_neg(ap_trunc(mag, w));
+    }
+    if abits > maxbits { return false, false, ap_zero(w); }
+    return true, frac_exact, ap_trunc(mag, w);
+}
+fn icc_cfp_lo(c: i32) -> u64 { cint_lo(c) }
+fn icc_cfp_hi(c: i32) -> u64 { cint_hi(c) }
+
+// foldFCmpIntToFPConst(I, LHSI, RHSC)
+fn fold_fcmp_int_to_fp_const(i: i32, lhsi: i32, rhsc: i32) -> i32 {
+    let rc = m_apfloat(rhsc);
+    if rc < 0 { return -1; }
+    let mwid = icc_mantissa_width(vals[lhsi].ty);
+    if mwid == -1 { return -1; }
+    let ity = vals[op(lhsi, 0)].ty;
+    let iw = ty_scalar_bits(ity);
+    let uns = iop(lhsi) == OP_UITOFP;
+    let kind = icc_fpk(vals[rc].ty);
+    let lo = icc_cfp_lo(rc);
+    let hi = icc_cfp_hi(rc);
+    let rp = fp_decompose(kind, lo, hi);
+    let fp_p = icc_pred(i);
+    if icc_fcmp_is_equality(fp_p) {
+        let ok, exact, unused = icc_fp_to_int(kind, lo, hi, iw, !uns, FRM_NEAREST_EVEN);
+        if !(ok && exact) {
+            let rlo, rhi = fp_round_to_integral(kind, lo, hi, FRM_NEAREST_EVEN);
+            if fp_compare(kind, lo, hi, rlo, rhi) != 1 {
+                if fp_p == P_OEQ || fp_p == P_UEQ { return ic_replace_inst_uses_with(i, c_bool_ty(vals[i].ty, false)); }
+                return ic_replace_inst_uses_with(i, c_bool_ty(vals[i].ty, true));
+            }
+        }
+    }
+    if iw > mwid {
+        let e = cfp_ilogb(rc);
+        let unsb = if uns { 0 } else { 1 };
+        if e == 2147483647 {
+            let maxe = fp_fmt(kind).bias;
+            if maxe < iw - unsb { return -1; }
+        } else {
+            if mwid <= e && e <= iw - unsb { return -1; }
+        }
+    }
+    var p: i64 = 0;
+    if fp_p == P_UEQ || fp_p == P_OEQ { p = P_EQ; }
+    else if fp_p == P_FUGT || fp_p == P_OGT { p = if uns { P_UGT } else { P_SGT }; }
+    else if fp_p == P_FUGE || fp_p == P_OGE { p = if uns { P_UGE } else { P_SGE }; }
+    else if fp_p == P_FULT || fp_p == P_OLT { p = if uns { P_ULT } else { P_SLT }; }
+    else if fp_p == P_FULE || fp_p == P_OLE { p = if uns { P_ULE } else { P_SLE }; }
+    else if fp_p == P_UNE || fp_p == P_ONE { p = P_NE; }
+    else if fp_p == P_ORD { return ic_replace_inst_uses_with(i, c_bool_ty(vals[i].ty, true)); }
+    else if fp_p == P_UNO { return ic_replace_inst_uses_with(i, c_bool_ty(vals[i].ty, false)); }
+    else { fatal("internal: unexpected fcmp predicate"); }
+    let it = vals[i].ty;
+    if !uns {
+        let slo, shi = icc_fp_from_int(kind, ap_smax_val(iw), true);
+        if fp_compare(kind, slo, shi, lo, hi) == 0 {
+            return ic_replace_inst_uses_with(i, c_bool_ty(it, p == P_NE || p == P_SLT || p == P_SLE));
+        }
+    } else {
+        let ulo, uhi = icc_fp_from_int(kind, ap_ones(iw), false);
+        if fp_compare(kind, ulo, uhi, lo, hi) == 0 {
+            return ic_replace_inst_uses_with(i, c_bool_ty(it, p == P_NE || p == P_ULT || p == P_ULE));
+        }
+    }
+    if !uns {
+        let slo, shi = icc_fp_from_int(kind, ap_smin_val(iw), true);
+        if fp_compare(kind, slo, shi, lo, hi) == 2 {
+            return ic_replace_inst_uses_with(i, c_bool_ty(it, p == P_NE || p == P_SGT || p == P_SGE));
+        }
+    } else {
+        let ulo, uhi = icc_fp_from_int(kind, ap_zero(iw), false);
+        if fp_compare(kind, ulo, uhi, lo, hi) == 2 {
+            return ic_replace_inst_uses_with(i, c_bool_ty(it, p == P_NE || p == P_UGT || p == P_UGE));
+        }
+    }
+    let ok, exact, rint = icc_fp_to_int(kind, lo, hi, iw, !uns, FRM_ZERO);
+    if rp.cat != FC_ZERO {
+        if !(ok && exact) {
+            if p == P_NE { return ic_replace_inst_uses_with(i, c_bool_ty(it, true)); }
+            if p == P_EQ { return ic_replace_inst_uses_with(i, c_bool_ty(it, false)); }
+            if p == P_ULE { if rp.neg { return ic_replace_inst_uses_with(i, c_bool_ty(it, false)); } }
+            else if p == P_SLE { if rp.neg { p = P_SLT; } }
+            else if p == P_ULT { if rp.neg { return ic_replace_inst_uses_with(i, c_bool_ty(it, false)); } p = P_ULE; }
+            else if p == P_SLT { if !rp.neg { p = P_SLE; } }
+            else if p == P_UGT { if rp.neg { return ic_replace_inst_uses_with(i, c_bool_ty(it, true)); } }
+            else if p == P_SGT { if rp.neg { p = P_SGE; } }
+            else if p == P_UGE { if rp.neg { return ic_replace_inst_uses_with(i, c_bool_ty(it, true)); } p = P_UGT; }
+            else if p == P_SGE { if !rp.neg { p = P_SGT; } }
+        }
+    }
+    return ic_new_icmp(p, op(lhsi, 0), c_int_ap(ity, rint));
+}
+
+// foldFCmpReciprocalAndZero(I, LHSI, RHSC)
+fn fold_fcmp_reciprocal_and_zero(i: i32, lhsi: i32, rhsc: i32) -> i32 {
+    var p = icc_pred(i);
+    if p != P_OGT && p != P_OLT && p != P_OGE && p != P_OLE { return -1; }
+    if !m_any_zero_fp(rhsc) { return -1; }
+    if !icc_has_fmf(lhsi, FMF_NINF) || !icc_has_fmf(i, FMF_NINF) { return -1; }
+    let c = m_apfloat(op(lhsi, 0));
+    if c < 0 { return -1; }
+    let cp_ = cfp_parts(c);
+    if cp_.cat == FC_ZERO { return -1; }
+    if cp_.neg { p = icc_fcmp_swapped(p); }
+    return icc_new_fcmp(p, op(lhsi, 1), rhsc, i);
+}
+
+// the ConvertFltSema lambda: convert with rmNearestTiesToEven
+fn icc_fp_conv(from: i64, to: i64, lo: u64, hi: u64) -> u64, u64 { return fp_convert(from, to, lo, hi); }
+fn icc_fp_is_inf(kind: i64, lo: u64, hi: u64) -> bool { fp_decompose(kind, lo, hi).cat == FC_INF }
+fn icc_fp_is_finite(kind: i64, lo: u64, hi: u64) -> bool { let c = fp_decompose(kind, lo, hi).cat; c != FC_INF && c != FC_NAN }
+
+// foldFCmpFpTrunc(I, FPTrunc, C)
+fn fold_fcmp_fp_trunc(i: i32, fpt: i32, c: i32) -> i32 {
+    let p = icc_pred(i);
+    let dty = vals[op(fpt, 0)].ty;
+    let cv = m_apfloat(c);
+    if cv < 0 { return -1; }
+    if p == P_ORD || p == P_UNO { return icc_new_fcmp(p, op(fpt, 0), icc_fp_zero(dty), i); }
+    var down = false;
+    if p == P_OGE || p == P_FUGE || p == P_OLT || p == P_FULT { down = true; }
+    else if p == P_OGT || p == P_FUGT || p == P_OLE || p == P_FULE { down = false; }
+    else { return -1; }
+    let sk = icc_fpk(vals[cv].ty);
+    let dk = icc_fpk(dty);
+    let clo = icc_cfp_lo(cv);
+    let chi = icc_cfp_hi(cv);
+    if !icc_fp_is_finite(sk, clo, chi) { return -1; }
+    let nlo, nhi = icc_fp_next(sk, clo, chi, down);
+    let elo0, ehi0 = icc_fp_conv(sk, dk, clo, chi);
+    var enlo, enhi = icc_fp_conv(sk, dk, nlo, nhi);
+    let next_inf = icc_fp_is_inf(sk, nlo, nhi);
+    if next_inf {
+        let plo, phi = icc_fp_next(sk, clo, chi, !down);
+        let dlo, dhi = fp_arith(sk, FOP_SUB, clo, chi, plo, phi);
+        let blo, bhi = icc_fp_conv(sk, dk, dlo, dhi);
+        let a, b = fp_arith(dk, FOP_ADD, elo0, ehi0, blo, bhi);
+        enlo = a; enhi = b;
+    }
+    let slo, shi = fp_arith(dk, FOP_ADD, elo0, ehi0, enlo, enhi);
+    var mlo, mhi = fp_scalbn(dk, slo, shi, -1);
+    let bl, bh = icc_fp_conv(dk, sk, mlo, mhi);
+    if fp_compare(sk, bl, bh, clo, chi) != 1 {
+        let a, b = icc_fp_next(dk, mlo, mhi, !down);
+        mlo = a; mhi = b;
+    }
+    if next_inf {
+        let xl, xh = icc_fp_conv(dk, sk, mlo, mhi);
+        if icc_fp_is_inf(sk, xl, xh) { return -1; }
+        let nl2, nh2 = icc_fp_next(dk, mlo, mhi, down);
+        let yl, yh = icc_fp_conv(dk, sk, nl2, nh2);
+        if icc_fp_is_finite(sk, yl, yh) { return -1; }
+    }
+    return icc_new_fcmp(p, op(fpt, 0), icc_cfp(dty, mlo, mhi), i);
+}
+
+// APFloat::isSmallestNormalized (either sign)
+fn icc_fp_is_smallest_normalized(c: i32) -> bool {
+    let k = cfp_kind(c);
+    let p = cfp_parts(c);
+    if p.cat != FC_NORMAL || p.expf != 1 { return false; }
+    let f = fp_fmt(k);
+    // the significand is exactly the implicit/explicit integer bit
+    let ib = if f.explicit_int { 63 } else { f.p - 1 };
+    if ib < 64 { return p.sig0 == ((1 as u64) << ib) && p.sig1 == 0; }
+    return p.sig0 == 0 && p.sig1 == ((1 as u64) << (ib - 64));
+}
+
+// foldFabsWithFcmpZero(I, IC)
+fn fold_fabs_with_fcmp_zero(i: i32) -> i32 {
+    let o0 = op(i, 0);
+    if inst_iid(o0) != IID_fabs { return -1; }
+    let x = op(o0, 0);
+    let c = m_apfloat(op(i, 1));
+    if c < 0 { return -1; }
+    let cp_ = cfp_parts(c);
+    let p = icc_pred(i);
+    if !(cp_.cat == FC_ZERO && !cp_.neg) {
+        if !icc_fp_is_smallest_normalized(c) { return -1; }
+        let mode = fn_denormal_mode(inst_func(i), vals[c].ty);
+        if dm_in(mode) == DMK_PS || dm_in(mode) == DMK_PZ {
+            let z = icc_fp_zero(vals[x].ty);
+            if p == P_OLT { return icc_new_fcmp(P_OEQ, x, z, i); }
+            if p == P_FUGE { return icc_new_fcmp(P_UNE, x, z, i); }
+            if p == P_OGE { return icc_new_fcmp(P_ONE, x, z, i); }
+            if p == P_FULT { return icc_new_fcmp(P_UEQ, x, z, i); }
+        }
+        return -1;
+    }
+    if p == P_FUGE || p == P_OLT { fatal("internal: fcmp should have simplified"); }
+    var np: i64 = -1;
+    if p == P_OGT { np = P_ONE; }
+    else if p == P_FUGT { np = P_UNE; }
+    else if p == P_OLE { np = P_OEQ; }
+    else if p == P_FULE { np = P_UEQ; }
+    else if p == P_OGE { np = P_ORD; }
+    else if p == P_FULT { np = P_UNO; }
+    else if p == P_OEQ || p == P_UEQ || p == P_ONE || p == P_UNE || p == P_ORD || p == P_UNO { np = p; }
+    else { return -1; }
+    icc_set_pred(i, np);
+    return ic_replace_operand(i, 0, x);
+}
+
+// foldSqrtWithFcmpZero(I, IC)
+fn fold_sqrt_with_fcmp_zero(i: i32) -> i32 {
+    let o0 = op(i, 0);
+    if inst_iid(o0) != IID_sqrt { return -1; }
+    let x = op(o0, 0);
+    if !m_pos_zero_fp(op(i, 1)) { return -1; }
+    if !icc_has_fmf(o0, FMF_NINF) { icc_set_fmf(i, FMF_NINF, false); }
+    let p = icc_pred(i);
+    if p == P_OLT || p == P_FUGE { fatal("internal: fcmp should have simplified"); }
+    if p == P_FULT || p == P_FULE || p == P_OGT || p == P_OGE || p == P_OEQ || p == P_UNE { return ic_replace_operand(i, 0, x); }
+    var np: i64 = -1;
+    if p == P_OLE { np = P_OEQ; }
+    else if p == P_FUGT { np = P_UNE; }
+    else if p == P_UEQ { np = P_FULE; }
+    else if p == P_ONE { np = P_OGT; }
+    else if p == P_ORD { np = P_OGE; }
+    else if p == P_UNO { np = P_FULT; }
+    else { fatal("internal: unexpected predicate"); }
+    icc_set_pred(i, np);
+    return ic_replace_operand(i, 0, x);
+}
+
+// foldFCmpFNegCommonOp(I)
+fn fold_fcmp_fneg_common_op(i: i32) -> i32 {
+    var p = icc_pred(i);
+    var o0 = op(i, 0);
+    var o1 = op(i, 1);
+    if m_fneg(o0) >= 0 && m_fneg(o1) < 0 {
+        let t = o0; o0 = o1; o1 = t;
+        p = icc_fcmp_swapped(icc_pred(i));
+    }
+    if m_fneg(o1) != o0 || o0 < 0 { return -1; }
+    return icc_new_fcmp(p, o0, icc_fp_zero(vals[o0].ty), i);
+}
+
+// foldFCmpFSubIntoFCmp(I, LHSI, RHSC, CI)
+fn fold_fcmp_fsub_into_fcmp(i: i32, lhsi: i32, rhsc: i32) -> i32 {
+    let p = icc_pred(i);
+    let x = op(lhsi, 0);
+    let y = op(lhsi, 1);
+    var go = false;
+    if p == P_FUGT || p == P_FULT || p == P_UNE || p == P_OEQ || p == P_OGE || p == P_OLE {
+        go = true;
+        if !icc_has_fmf(lhsi, FMF_NNAN) && !icc_has_fmf(lhsi, FMF_NINF) {
+            kb_cxt = i;
+            if !is_known_never_infinity(y, 0) {
+                kb_cxt = i;
+                if !is_known_never_infinity(x, 0) { go = false; }
+            }
+        }
+    } else if p == P_OGT || p == P_OLT || p == P_ONE || p == P_UEQ || p == P_FUGE || p == P_FULE { go = true; }
+    if !go { return -1; }
+    if m_any_zero_fp(rhsc) && fn_denormal_mode(inst_func(i), vals[lhsi].ty) == DM_IEEE {
+        ic_replace_operand(i, 0, x);
+        ic_replace_operand(i, 1, y);
+        icc_set_fmf(i, FMF_NINF, icc_has_fmf(lhsi, FMF_NINF));
+        if icc_has_fmf(lhsi, FMF_NNAN) { icc_set_fmf(i, FMF_NNAN, true); }
+        return i;
+    }
+    let c = m_apfloat(rhsc);
+    if c >= 0 && bo(lhsi, OP_FSUB) && op(lhsi, 0) == rhsc && (is_inst_op(y, OP_UITOFP) || is_inst_op(y, OP_SITOFP)) {
+        let cp_ = cfp_parts(c);
+        if cp_.cat == FC_NORMAL && cp_.expf != 0 {
+            let mw = icc_mantissa_width(vals[lhsi].ty);
+            if mw != -1 && cfp_ilogb(c) < mw {
+                let z = icc_fp_zero(vals[lhsi].ty);
+                icc_set_pred(i, icc_fcmp_swapped(p));
+                ic_replace_operand(i, 0, y);
+                ic_replace_operand(i, 1, z);
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+// foldFCmpFAbsFSubIntToFP(I, IC)
+fn fold_fcmp_fabs_fsub_int_to_fp(i: i32) -> i32 {
+    let o0 = op(i, 0);
+    if inst_iid(o0) != IID_fabs { return -1; }
+    let fa = op(o0, 0);
+    let c = m_apfloat_ap(op(i, 1), true);
+    if c < 0 { return -1; }
+    let cp_ = cfp_parts(c);
+    if cp_.cat != FC_NORMAL { return -1; }
+    let p = icc_pred(i);
+    let slt = p == P_OLT || p == P_FULT;
+    let le = p == P_OLE || p == P_FULE;
+    let sgt = p == P_OGT || p == P_FUGT;
+    let ge = p == P_OGE || p == P_FUGE;
+    if !slt && !sgt && !ge { return -1; }
+    let k = cfp_kind(c);
+    let olo, ohi = fp_from_f64(k, 1.0);
+    let cmp = fp_compare(k, cint_lo(c), cint_hi(c), olo, ohi);
+    if slt && cmp == 2 { return -1; }
+    if ge && cmp == 2 { return -1; }
+    if le && cmp != 2 { return -1; }
+    if sgt && cmp != 0 { return -1; }
+    if !bo(fa, OP_FSUB) { return -1; }
+    let l = op(fa, 0);
+    let r = op(fa, 1);
+    var signed = false;
+    if is_inst_op(l, OP_UITOFP) && is_inst_op(r, OP_UITOFP) { signed = false; }
+    else if is_inst_op(l, OP_SITOFP) && is_inst_op(r, OP_SITOFP) { signed = true; }
+    else { return -1; }
+    let a = op(l, 0);
+    let b = op(r, 0);
+    if vals[a].ty != vals[b].ty { return -1; }
+    let fty = vals[fa].ty;
+    if !can_be_casted_exactly_int_to_fp(a, fty, signed, i) || !can_be_casted_exactly_int_to_fp(b, fty, signed, i) { return -1; }
+    return ic_new_icmp(if slt || le { P_EQ } else { P_NE }, a, b);
+}
+
+// foldFCmpWithFloorAndCeil(I, IC)
+fn fold_fcmp_with_floor_and_ceil(i: i32) -> i32 {
+    var lhs = op(i, 0);
+    var rhs = op(i, 1);
+    let oty = vals[lhs].ty;
+    var p = icc_pred(i);
+    var fl = inst_iid(lhs) == IID_floor && op(lhs, 0) == rhs;
+    var ce = inst_iid(lhs) == IID_ceil && op(lhs, 0) == rhs;
+    if !fl && !ce {
+        fl = inst_iid(rhs) == IID_floor && op(rhs, 0) == lhs;
+        if !fl { ce = inst_iid(rhs) == IID_ceil && op(rhs, 0) == lhs; }
+        if fl || ce { let t = lhs; lhs = rhs; rhs = t; p = icc_fcmp_swapped(icc_pred(i)); }
+    }
+    if (fl || ce) && icc_fcmp_is_commutative(p) && has_one_use(lhs) {
+        let tx = icb_unary_intrinsic(IID_trunc, rhs, "");
+        return icc_new_fcmp(p, tx, rhs, i);
+    }
+    if p == P_OLE { if fl { return icc_new_fcmp(P_ORD, rhs, icc_fp_zero(oty), i); } }
+    else if p == P_OGT { if fl { return ic_replace_inst_uses_with(i, c_bool_ty(vals[i].ty, false)); } }
+    else if p == P_OGE { if ce { return icc_new_fcmp(P_ORD, rhs, icc_fp_zero(oty), i); } }
+    else if p == P_OLT { if ce { return ic_replace_inst_uses_with(i, c_bool_ty(vals[i].ty, false)); } }
+    else if p == P_FULE { if fl { return ic_replace_inst_uses_with(i, c_bool_ty(vals[i].ty, true)); } }
+    else if p == P_FUGT { if fl { return icc_new_fcmp(P_UNO, rhs, icc_fp_zero(oty), i); } }
+    else if p == P_FUGE { if ce { return ic_replace_inst_uses_with(i, c_bool_ty(vals[i].ty, true)); } }
+    else if p == P_FULT { if ce { return icc_new_fcmp(P_UNO, rhs, icc_fp_zero(oty), i); } }
+    return -1;
+}
+
+// isMinMaxCmpSelectEliminable(Flavor, A, B)
+fn is_minmax_cmp_select_eliminable(f: i64, a: i32, b: i32) -> bool {
+    let c = m_apfloat(b);
+    if c < 0 { return false; }
+    if !is_inst(a) || !(iop(a) == OP_SITOFP || iop(a) == OP_UITOFP) { return false; }
+    let uns = iop(a) == OP_UITOFP;
+    let bw = ty_sbits(op(a, 0));
+    let bound = if f == SPF_FMAXNUM { if uns { ap_zero(bw) } else { ap_smin_val(bw) } } else { if uns { ap_ones(bw) } else { ap_smax_val(bw) } };
+    let ok, exact, v = icc_fp_to_int(cfp_kind(c), cint_lo(c), cint_hi(c), bw, !uns, FRM_ZERO);
+    return ok && exact && ap_eq(v, bound);
+}
+
+// visitFCmpInst(I)
+fn visit_fcmp(i: i32) -> i32 {
+    var changed = false;
+    if get_complexity(op(i, 0)) < get_complexity(op(i, 1)) {
+        icc_swap_operands(i);
+        changed = true;
+    }
+    let p = icc_pred(i);
+    let o0 = op(i, 0);
+    let o1 = op(i, 1);
+    let sv = simplify_fcmp(p, o0, o1, insts[inst_of(i)].fmf, sq_at(i), RECURSION_LIMIT);
+    if sv >= 0 { return ic_replace_inst_uses_with(i, sv); }
+    let oty = vals[o0].ty;
+    if o0 == o1 {
+        if p == P_UNO || p == P_FULT || p == P_FUGT || p == P_UNE {
+            icc_set_pred(i, P_UNO);
+            set_op(i, 1, c_null(oty));
+            return i;
+        }
+        if p == P_ORD || p == P_OEQ || p == P_OGE || p == P_OLE {
+            icc_set_pred(i, P_ORD);
+            set_op(i, 1, c_null(oty));
+            return i;
+        }
+    }
+    if icc_fcmp_is_commutative(p) {
+        if match_symmetric_pair(op(i, 0), op(i, 1)) {
+            ic_replace_operand(i, 0, sp_a);
+            ic_replace_operand(i, 1, sp_b);
+            return i;
+        }
+    }
+    if p == P_ORD || p == P_UNO {
+        if !m_pos_zero_fp(o0) { kb_cxt = i; if is_known_never_nan(o0, 0) { return ic_replace_operand(i, 0, icc_fp_zero(oty)); } }
+        if !m_pos_zero_fp(o1) { kb_cxt = i; if is_known_never_nan(o1, 0) { return ic_replace_operand(i, 1, icc_fp_zero(oty)); } }
+    }
+    let nx = m_fneg(o0);
+    let ny = m_fneg(o1);
+    if nx >= 0 && ny >= 0 { return icc_new_fcmp(icc_fcmp_swapped(p), nx, ny, i); }
+    var r = fold_fcmp_fneg_common_op(i);
+    if r >= 0 { return r; }
+    if has_one_use(i) {
+        let si = icc_user_back(i);
+        if is_select_inst(si) {
+            let f = match_select_pattern_v(si, 0);
+            var redundant = false;
+            if f == SPF_FMAXNUM || f == SPF_FMINNUM { redundant = is_minmax_cmp_select_eliminable(f, sp_lhs, sp_rhs); }
+            if f != SPF_UNKNOWN && !redundant { return -1; }
+        }
+    }
+    if m_any_zero_fp(o1) && !m_pos_zero_fp(o1) { return ic_replace_operand(i, 1, icc_fp_zero(oty)); }
+    let ci = m_apfloat(o1);
+    if ci >= 0 && cfp_parts(ci).cat == FC_INF {
+        let sp = if cfp_parts(ci).neg { icc_fcmp_swapped(p) } else { p };
+        if sp == P_ORD || sp == P_UNO || sp == P_TRUE || sp == P_FALSE || sp == P_OGT || sp == P_FULE { fatal("internal: Should be simplified by InstSimplify"); }
+        if sp == P_OLT { return icc_new_fcmp(P_ONE, o0, o1, i); }
+        if sp == P_OLE { return icc_new_fcmp(P_ORD, o0, icc_fp_zero(oty), i); }
+        if sp == P_OGE { return icc_new_fcmp(P_OEQ, o0, o1, i); }
+        if sp == P_FULT { return icc_new_fcmp(P_UNE, o0, o1, i); }
+        if sp == P_FUGT { return icc_new_fcmp(P_UNO, o0, icc_fp_zero(oty), i); }
+        if sp == P_FUGE { return icc_new_fcmp(P_UEQ, o0, o1, i); }
+    }
+    if m_pos_zero_fp(o1) && one_use(o0) && is_inst_op(o0, OP_BITCAST) && ic_elementwise_bitcast(o0) && is_int_or_int_vec(vals[op(o0, 0)].ty) {
+        let mode = fn_denormal_mode(inst_func(i), vals[o1].ty);
+        let may_zero = dm_inputs_are_zero(mode) || dm_in(mode) == DMK_DYN;
+        if !may_zero {
+            var ip: i64 = -1;
+            if p == P_OEQ { ip = P_EQ; } else if p == P_UNE { ip = P_NE; }
+            if ip >= 0 {
+                let x = op(o0, 0);
+                let ity = vals[x].ty;
+                let sm = ap_not(ap_sign_mask(ty_scalar_bits(ity)));
+                let mx = icb_and(x, c_int_ap(ity, sm), "");
+                return ic_new_icmp(ip, mx, c_null(ity));
+            }
+        }
+    }
+    if is_inst(o0) && is_constant(o1) {
+        let lhsi = o0;
+        let rhsc = o1;
+        let o = iop(lhsi);
+        if o == OP_SELECT {
+            if icc_fcmp_is_equality(p) && m_any_zero_fp(rhsc) {
+                let t = op(lhsi, 1);
+                let f = op(lhsi, 2);
+                if m_fneg(t) >= 0 && m_fneg(t) == f { return ic_replace_operand(i, 0, f); }
+                if m_fneg(f) >= 0 && m_fneg(f) == t { return ic_replace_operand(i, 0, t); }
+            }
+            r = fold_op_into_select(i, lhsi, false, false);
+            if r >= 0 { return r; }
+        } else if o == OP_FSUB {
+            if has_one_use(lhsi) {
+                r = fold_fcmp_fsub_into_fcmp(i, lhsi, rhsc);
+                if r >= 0 { return r; }
+            }
+        } else if o == OP_PHI {
+            r = fold_op_into_phi(i, lhsi, false);
+            if r >= 0 { return r; }
+        } else if o == OP_SITOFP || o == OP_UITOFP {
+            r = fold_fcmp_int_to_fp_const(i, lhsi, rhsc);
+            if r >= 0 { return r; }
+        } else if o == OP_FDIV {
+            r = fold_fcmp_reciprocal_and_zero(i, lhsi, rhsc);
+            if r >= 0 { return r; }
+        } else if o == OP_LOAD {
+            if is_inst_op(op(lhsi, 0), OP_GEP) {
+                r = fold_cmp_load_from_indexed_global(lhsi, op(lhsi, 0), i, -1);
+                if r >= 0 { return r; }
+            }
+        } else if o == OP_FPTRUNC {
+            r = fold_fcmp_fp_trunc(i, lhsi, rhsc);
+            if r >= 0 { return r; }
+        }
+    }
+    r = fold_fabs_with_fcmp_zero(i);
+    if r >= 0 { return r; }
+    r = fold_fcmp_fabs_fsub_int_to_fp(i);
+    if r >= 0 { return r; }
+    r = fold_sqrt_with_fcmp_zero(i);
+    if r >= 0 { return r; }
+    r = fold_fcmp_with_floor_and_ceil(i);
+    if r >= 0 { return r; }
+    r = fold_cmp_select_of_constants(i);
+    if r >= 0 { return r; }
+    if nx >= 0 && is_constant(o1) {
+        let nc = cf_fold_unary(OP_FNEG, o1);
+        if nc >= 0 { return icc_new_fcmp(icc_fcmp_swapped(p), nx, nc, i); }
+    }
+    if bo(o0, OP_FADD) && m_any_zero_fp(op(o0, 1)) { return icc_new_fcmp(p, op(o0, 0), o1, i); }
+    if bo(o1, OP_FADD) && m_any_zero_fp(op(o1, 1)) { return icc_new_fcmp(p, o0, op(o1, 0), i); }
+    if (p == P_ORD || p == P_UNO) && is_inst_op(o0, OP_FPTRUNC) && is_inst_op(o1, OP_FPTRUNC) && vals[op(o0, 0)].ty == vals[op(o1, 0)].ty {
+        return icc_new_fcmp(p, op(o0, 0), op(o1, 0), i);
+    }
+    if is_inst_op(o0, OP_FPEXT) {
+        let x = op(o0, 0);
+        if is_inst_op(o1, OP_FPEXT) && vals[x].ty == vals[op(o1, 0)].ty { return icc_new_fcmp(p, x, op(o1, 0), i); }
+        let c = m_apfloat(o1);
+        if c >= 0 {
+            let sk = cfp_kind(c);
+            let dk = icc_fpk(vals[x].ty);
+            let tlo, thi = icc_fp_conv(sk, dk, cint_lo(c), cint_hi(c));
+            let blo, bhi = icc_fp_conv(dk, sk, tlo, thi);
+            let lossy = blo != cint_lo(c) || bhi != cint_hi(c);
+            if lossy {
+                if p == P_OEQ { return ic_replace_inst_uses_with(i, c_bool_ty(vals[i].ty, false)); }
+                if p == P_ONE { return icc_new_fcmp(P_ORD, x, icc_fp_zero(vals[x].ty), -1); }
+                if p == P_UEQ { return icc_new_fcmp(P_UNO, x, icc_fp_zero(vals[x].ty), -1); }
+                if p == P_UNE { return ic_replace_inst_uses_with(i, c_bool_ty(vals[i].ty, true)); }
+            }
+            let tp = fp_decompose(dk, tlo, thi);
+            // Fabs.isZero() || !(Fabs < getSmallestNormalized): a zero, a normal, an infinity or a NaN
+            if !lossy && (tp.cat == FC_ZERO || !(tp.cat == FC_NORMAL && tp.expf == 0)) {
+                return icc_new_fcmp(p, x, icc_cfp(vals[x].ty, tlo, thi), i);
+            }
+        }
+    }
+    if one_use(o0) && inst_iid(o0) == IID_copysign && m_any_zero_fp(o1) {
+        let c = m_apfloat(op(o0, 0));
+        if c >= 0 {
+            let cpp = cfp_parts(c);
+            if cpp.cat != FC_ZERO && cpp.cat != FC_NAN {
+                let x = op(o0, 1);
+                let ity = ty_with_elem(oty, ty_int(ty_scalar_bits(vals[x].ty)));
+                if p == P_OLT {
+                    let ix = icb_cast(OP_BITCAST, x, ity, "");
+                    return ic_new_icmp(P_SLT, ix, c_null(ity));
+                }
+            }
+        }
+    }
+    {
+        let cl = if inst_iid(o0) == IID_canonicalize { op(o0, 0) } else { -1 };
+        if cl >= 0 && cl == o1 { return icc_new_fcmp(p, o1, o1, i); }
+        let cr = if inst_iid(o1) == IID_canonicalize { op(o1, 0) } else { -1 };
+        if cr >= 0 && cr == o0 { return icc_new_fcmp(p, o0, o0, i); }
+        if cl >= 0 && cr >= 0 { return icc_new_fcmp(p, cl, cr, i); }
+    }
+    if ty_is_vector(vals[i].ty) {
+        r = fold_vector_cmp(i);
+        if r >= 0 { return r; }
+    }
+    return if changed { i } else { -1 };
 }
 
 // m_ConstantInt(uint64_t &): an int or splat (no poison) whose value fits in 64 bits
 fn icc_m_cint_u64(v: i32) -> bool { has_apint(v) && ap_fits_u64(ap_c(v)) }
-

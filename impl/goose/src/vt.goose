@@ -26,6 +26,7 @@ import apint;
 import pm;
 import constfold;
 import assume;
+import apfloat;
 
 let VT_MAX_DEPTH = 6;
 
@@ -1469,8 +1470,145 @@ recursive fn match_select_pattern_v(v: i32, depth: i64) -> i64 {
         return match_select_pattern_int(p, op(c, 0), op(c, 1), op(v, 1), op(v, 2), depth);
     }
     if is_inst_op(c, OP_FCMP) {
-        // FP flavors never combine with the integer flavors the callers here look for.
+        let p = inst_pred(c);
+        // CmpInst::isEquality for fcmp: oeq, one, ueq, une
+        if p == 1 || p == 6 || p == 9 || p == 14 { return SPF_UNKNOWN; }
+        var fmf = insts[inst_of(v)].fmf;
+        if (insts[inst_of(c)].fmf & FMF_NNAN) != 0 { fmf |= FMF_NNAN; }
+        return match_select_pattern_fp(p, fmf, op(c, 0), op(c, 1), op(v, 1), op(v, 2));
+    }
+    return SPF_UNKNOWN;
+}
+
+// The FP part of matchSelectPattern(Pred, FMF, CmpLHS, CmpRHS, TrueVal, FalseVal, LHS, RHS, Depth)
+// (ValueTracking.cpp); LHS/RHS in sp_lhs/sp_rhs.
+let SPNB_NA = 0;
+let SPNB_RETURNS_NAN = 1;
+let SPNB_RETURNS_OTHER = 2;
+let SPNB_RETURNS_ANY = 3;
+fn vt_fpred_swapped(p: i64) -> i64 { match p { 2 => 4, 3 => 5, 4 => 2, 5 => 3, 10 => 12, 11 => 13, 12 => 10, 13 => 11, _ => p } }
+fn vt_fpred_ordered(p: i64) -> bool { p >= 1 && p <= 7 }
+fn vt_contains_undef_or_poison_elt(c: i32) -> bool {
+    if is_undef_or_poison(c) { return true; }
+    if !ty_is_vector(vals[c].ty) || ty_kind(vals[c].ty) != TK_FVEC { return false; }
+    for k in ty_count(vals[c].ty) {
+        let e = agg_elem(c, k);
+        if e >= 0 && is_undef_or_poison(e) { return true; }
+    }
+    return false;
+}
+// isKnownNonNaN(V, FMF) (the static helper of matchSelectPattern)
+fn vt_sp_known_non_nan(v: i32, fmf: u8) -> bool {
+    if (fmf & FMF_NNAN) != 0 { return true; }
+    if vals[v].kind == VK_CFP && !ty_is_vector(vals[v].ty) { return fp_decompose(cfp_kind(v), cint_lo(v), cint_hi(v)).cat != FC_NAN; }
+    if vals[v].kind == VK_CDVECTOR && ty_is_vector(vals[v].ty) && ty_is_fp(ty_elem(vals[v].ty)) {
+        for k in ty_count(vals[v].ty) {
+            let e = agg_elem(v, k);
+            if fp_decompose(cfp_kind(e), cint_lo(e), cint_hi(e)).cat == FC_NAN { return false; }
+        }
+        return true;
+    }
+    if vals[v].kind == VK_AGGZERO { return true; }
+    return false;
+}
+// isKnownNonZero(V) (the static helper of matchSelectPattern)
+fn vt_sp_known_non_zero(v: i32) -> bool {
+    if vals[v].kind == VK_CFP && !ty_is_vector(vals[v].ty) { return fp_decompose(cfp_kind(v), cint_lo(v), cint_hi(v)).cat != FC_ZERO; }
+    if vals[v].kind == VK_CDVECTOR && ty_is_vector(vals[v].ty) && ty_is_fp(ty_elem(vals[v].ty)) {
+        for k in ty_count(vals[v].ty) {
+            let e = agg_elem(v, k);
+            if fp_decompose(cfp_kind(e), cint_lo(e), cint_hi(e)).cat == FC_ZERO { return false; }
+        }
+        return true;
+    }
+    return false;
+}
+fn match_select_pattern_fp(p0: i64, fmf: u8, cl0: i32, cr0: i32, tv: i32, fv: i32) -> i64 {
+    var p = p0;
+    var cl = cl0;
+    var cr = cr0;
+    var mismatched = false;
+    var oz: i32 = -1;
+    if m_any_zero_fp(tv) && !m_any_zero_fp(fv) && !vt_contains_undef_or_poison_elt(tv) { oz = tv; }
+    else if m_any_zero_fp(fv) && !m_any_zero_fp(tv) && !vt_contains_undef_or_poison_elt(fv) { oz = fv; }
+    if oz >= 0 {
+        if m_any_zero_fp(cl) && cl != oz { mismatched = true; cl = oz; }
+        if m_any_zero_fp(cr) && cr != oz { mismatched = true; cr = oz; }
+    }
+    sp_lhs = cl;
+    sp_rhs = cr;
+    let nsz = (fmf & FMF_NSZ) != 0;
+    var check_zero = false;
+    if p == 2 || p == 4 || p == 10 || p == 12 { check_zero = mismatched; }
+    else if p == 3 || p == 5 || p == 11 || p == 13 { check_zero = true; }
+    if check_zero && !nsz && !vt_sp_known_non_zero(cl) && !vt_sp_known_non_zero(cr) { return SPF_UNKNOWN; }
+    var nb = SPNB_NA;
+    var ordered = false;
+    let ls = vt_sp_known_non_nan(cl, fmf);
+    let rs = vt_sp_known_non_nan(cr, fmf);
+    if ls && rs { nb = SPNB_RETURNS_ANY; ordered = vt_fpred_ordered(p); }
+    else if vt_fpred_ordered(p) {
+        ordered = true;
+        if ls { nb = SPNB_RETURNS_NAN; } else if rs { nb = SPNB_RETURNS_OTHER; } else { return SPF_UNKNOWN; }
+    } else {
+        ordered = false;
+        if ls { nb = SPNB_RETURNS_OTHER; } else if rs { nb = SPNB_RETURNS_NAN; } else { return SPF_UNKNOWN; }
+    }
+    if tv == cr && fv == cl {
+        let t = cl; cl = cr; cr = t;
+        p = vt_fpred_swapped(p);
+        if nb == SPNB_RETURNS_NAN { nb = SPNB_RETURNS_OTHER; } else if nb == SPNB_RETURNS_OTHER { nb = SPNB_RETURNS_NAN; }
+        ordered = !ordered;
+    }
+    if tv == cl && fv == cr {
+        if p == 10 || p == 11 || p == 2 || p == 3 { return SPF_FMAXNUM; }
+        if p == 12 || p == 13 || p == 4 || p == 5 { return SPF_FMINNUM; }
         return SPF_UNKNOWN;
+    }
+    // isKnownNegation applies to integer values only
+    if nb != SPNB_RETURNS_ANY || (!nsz && !vt_sp_known_non_zero(cl) && !vt_sp_known_non_zero(cr)) { return SPF_UNKNOWN; }
+    return match_fast_float_clamp(p, cl, cr, tv, fv);
+}
+// FMaxMin_match<m_Specific(X), m_APFloat(C), Pred_t>: the constant, or -1; min: olt/ole/ult/ule, max: ogt/oge/ugt/uge
+fn vt_fmaxmin_of(v: i32, x: i32, is_min: bool) -> i32 {
+    if !is_inst_op(v, OP_SELECT) || !is_inst_op(op(v, 0), OP_FCMP) { return -1; }
+    let c = op(v, 0);
+    let t = op(v, 1);
+    let f = op(v, 2);
+    let l = op(c, 0);
+    let r = op(c, 1);
+    if (t != l || f != r) && (t != r || f != l) { return -1; }
+    let p = if t == l { inst_pred(c) } else { vt_fpred_swapped(inst_pred(c)) };
+    let ok = if is_min { p == 4 || p == 5 || p == 12 || p == 13 } else { p == 2 || p == 3 || p == 10 || p == 11 };
+    if !ok || l != x { return -1; }
+    return m_apfloat(r);
+}
+// matchFastFloatClamp(Pred, CmpLHS, CmpRHS, TrueVal, FalseVal, LHS, RHS)
+fn match_fast_float_clamp(p0: i64, cl: i32, cr: i32, tv0: i32, fv0: i32) -> i64 {
+    var p = p0;
+    var tv = tv0;
+    var fv = fv0;
+    if cr == fv { let t = tv; tv = fv; fv = t; p = 15 - p; }
+    sp_lhs = tv;
+    sp_rhs = fv;
+    let fc1 = m_apfloat(cr);
+    if cr != tv || fc1 < 0 { return SPF_UNKNOWN; }
+    let c1c = fp_decompose(cfp_kind(fc1), cint_lo(fc1), cint_hi(fc1)).cat;
+    if c1c == FC_INF || c1c == FC_NAN { return SPF_UNKNOWN; }
+    if p == 4 || p == 5 || p == 12 || p == 13 {
+        let fc2 = vt_fmaxmin_of(fv, cl, true);
+        if fc2 >= 0 && fp_cmp_lt(fc1, fc2) { return SPF_FMAXNUM; }
+        if inst_iid(fv) == IID_minnum && op(fv, 0) == cl {
+            let c2 = m_apfloat(op(fv, 1));
+            if c2 >= 0 && fp_cmp_lt(fc1, c2) { return SPF_FMAXNUM; }
+        }
+    } else if p == 2 || p == 3 || p == 10 || p == 11 {
+        let fc2 = vt_fmaxmin_of(fv, cl, false);
+        if fc2 >= 0 && fp_cmp_gt(fc1, fc2) { return SPF_FMINNUM; }
+        if inst_iid(fv) == IID_maxnum && op(fv, 0) == cl {
+            let c2 = m_apfloat(op(fv, 1));
+            if c2 >= 0 && fp_cmp_gt(fc1, c2) { return SPF_FMINNUM; }
+        }
     }
     return SPF_UNKNOWN;
 }
