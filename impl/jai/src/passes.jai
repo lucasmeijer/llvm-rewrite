@@ -145,7 +145,7 @@ Pass_Kind :: enum u8 {
     // transforms
     DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG; INSTSIMPLIFY; SROA;
     // alias analysis (aa.jai)
-    AA_EVAL; PRINT_MEMORYSSA; PRINT_MEMORYSSA_NO_OPT; PRINT_MEMORYSSA_WALKER;
+    AA_EVAL; REQUIRE_GLOBALS_AA; PRINT_MEMORYSSA; PRINT_MEMORYSSA_NO_OPT; PRINT_MEMORYSSA_WALKER;
 }
 
 Pass_Info :: struct {
@@ -188,6 +188,7 @@ PASS_TABLE :: Pass_Info.[
     .{"invalidate<postdomtree>", .FUNCTION, .INVALIDATE, true, .POSTDOMTREE},
     .{"invalidate<demanded-bits>", .FUNCTION, .INVALIDATE, true, .DEMANDED_BITS},
     .{"aa-eval", .FUNCTION, .AA_EVAL, false, .DOMTREE},
+    .{"require<globals-aa>", .MODULE, .REQUIRE_GLOBALS_AA, true, .DOMTREE},
     .{"print<memoryssa>", .FUNCTION, .PRINT_MEMORYSSA, true, .DOMTREE},
     .{"print<memoryssa><no-ensure-optimized-uses>", .FUNCTION, .PRINT_MEMORYSSA_NO_OPT, true, .DOMTREE},
     .{"print<memoryssa-walker>", .FUNCTION, .PRINT_MEMORYSSA_WALKER, true, .DOMTREE},
@@ -480,6 +481,7 @@ run_module_pm :: (n: s32) {
             case .MODULE_PM; run_module_pm(c);
             case .FUNCTION_ADAPTOR; run_function_adaptor(c);
             case .NO_OP_MODULE; should_run_pass(node, NONE);
+            case .REQUIRE_GLOBALS_AA; should_run_pass(node, NONE); if !globals_aa globals_aa = globals_aa_compute();
             case; fatal("internal: '%' is not a module pass", node.name);
         }
         c = pipeline.nodes[c].next;

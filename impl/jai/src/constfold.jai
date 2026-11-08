@@ -848,8 +848,26 @@ fcmp_compare :: (k: Type_Kind, a: [] u64, b: [] u64, p: u8) -> bool {
 }
 
 // GlobalValue::isInterposable (no -fsemantic-interposition module flag handling)
+// Module::getSemanticInterposition: the "SemanticInterposition" module flag
+module_semantic_interposition :: () -> bool {
+    for * ir.named_md {
+        if it.name != "llvm.module.flags" continue;
+        for m: it.ops {
+            if ir.mds[m].nops < 3 continue;
+            k := md_op(m, 1);
+            if k == NONE || ir.mds[k].kind != .STRING || ir.mds[k].str != "SemanticInterposition" continue;
+            v := md_op(m, 2);
+            if v == NONE || ir.mds[v].kind != .VALUE || vkind(ir.mds[v].value) != .C_INT return false;
+            return const_int_zext(ir.mds[v].value) != 0;
+        }
+    }
+    return false;
+}
+// GlobalValue::isInterposable (CheckNoIPA = true)
 gv_is_interposable :: (g: Value_Id) -> bool {
+    if vkind(g) == .FUNCTION && !is_declaration(g) && fn_has_fn_attr(g, .NoIPA) return true;   // isNoipaFnDef
     l := glob(g).linkage;
+    if !glob(g).dso_local && module_semantic_interposition() return true;
     if l == .WEAK_ANY || l == .LINKONCE_ANY || l == .COMMON || l == .EXTERN_WEAK return true;
     return false;
 }

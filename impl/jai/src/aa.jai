@@ -411,7 +411,7 @@ aa_parse_pipeline :: (text: string) {
         if name == "basic-aa" array_add(*aa_pipeline.kinds, .BASIC);
         else if name == "scoped-noalias-aa" array_add(*aa_pipeline.kinds, .SCOPED_NOALIAS);
         else if name == "tbaa" array_add(*aa_pipeline.kinds, .TBAA);
-        else if name == "globals-aa" fatal("-aa-pipeline: globals-aa (GlobalsModRef) is not implemented yet");
+        else if name == "globals-aa" array_add(*aa_pipeline.kinds, .GLOBALS);
         else if name == "scev-aa" || name == "objc-arc-aa" fatal("-aa-pipeline: % is not implemented yet", name);
         else fatal("unknown alias analysis name '%'", name);
     }
@@ -434,9 +434,10 @@ aa_results_for :: (f: Value_Id) -> Aa_Results {
     add :: (r: *Aa_Results, k: Aa_Kind) { r.kinds[r.nkinds] = k; r.nkinds += 1; }
     if aa_pipeline.is_default {
         add(*r, .BASIC); add(*r, .SCOPED_NOALIAS); add(*r, .TBAA);
-        // GlobalsAA is only consulted when a cached result exists (require<globals-aa>), which we never have.
+        // GlobalsAA (a module analysis) is only consulted when a cached result exists (require<globals-aa>)
+        if globals_aa add(*r, .GLOBALS);
     } else {
-        for aa_pipeline.kinds add(*r, it);
+        for aa_pipeline.kinds if it != .GLOBALS || globals_aa != null add(*r, it);
     }
     for k: 0..r.nkinds-1 if r.kinds[k] == .BASIC {
         r.ac = get_assumption_cache(f);
@@ -562,7 +563,7 @@ aa_alias :: (q: *Aa_Query, a: Mem_Loc, b: Mem_Loc, ctx: Value_Id = NONE) -> Alia
             case .BASIC; result = basic_aa_alias(q, a, b, ctx);
             case .SCOPED_NOALIAS; result = scoped_noalias_alias(a, b);
             case .TBAA; result = tbaa_alias(q.aar, a, b);
-            case .GLOBALS; result = ar(AR_MAY);
+            case .GLOBALS; result = globals_aa_alias(q, a, b, ctx);
         }
         if result.kind != AR_MAY break;
     }
@@ -626,6 +627,7 @@ aa_memory_effects_fn :: (q: *Aa_Query, f: Value_Id) -> u64 {
     result: u64 = MEM_UNKNOWN;
     for k: 0..q.aar.nkinds-1 {
         if q.aar.kinds[k] == .BASIC result &= basic_aa_memory_effects_fn(f);
+        if q.aar.kinds[k] == .GLOBALS result &= globals_aa_memory_effects_fn(f);
         if result == 0 return result;
     }
     return result;
@@ -665,6 +667,7 @@ aa_mod_ref_call_loc :: (q: *Aa_Query, call: Value_Id, loc: Mem_Loc) -> u8 {
             case .BASIC; result &= basic_aa_mod_ref_call_loc(q, call, loc);
             case .SCOPED_NOALIAS; result &= scoped_noalias_mod_ref_inst_loc(call, loc);
             case .TBAA; result &= tbaa_mod_ref_call_loc(q.aar, call, loc);
+            case .GLOBALS; result &= globals_aa_mod_ref_call_loc(q, call, loc);
         }
         if result == MR_NO return MR_NO;
     }

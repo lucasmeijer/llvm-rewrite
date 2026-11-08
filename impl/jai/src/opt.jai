@@ -52,6 +52,7 @@
 #load "tbaa.jai";
 #load "scoped_noalias_aa.jai";
 #load "memoryssa.jai";
+#load "globals_aa.jai";
 
 main :: () { opt_main(); }
 
