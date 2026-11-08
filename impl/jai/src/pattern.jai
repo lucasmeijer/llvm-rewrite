@@ -163,11 +163,17 @@ pm_specific_int :: (v: Value_Id, val: u64, allow_poison := false) -> bool {
 pm_specific_int_ap :: (v: Value_Id, val: APInt) -> bool {
     if v == NONE return false;
     k := vkind(v);
-    if k == .C_INT { a := const_ap(v); return a.bits == val.bits && ap_eq(a, val); }
+    if k == .C_INT return ap_is_same_value(const_ap(v), val);
     if !is_vector_type(vtype(v)) || !is_constant_kind(k) return false;
     s := get_splat_value(v, true);
-    if s != NONE && vkind(s) == .C_INT { a := const_ap(s); return a.bits == val.bits && ap_eq(a, val); }
+    if s != NONE && vkind(s) == .C_INT return ap_is_same_value(const_ap(s), val);
     return false;
+}
+// APInt::isSameValue: equal after zero-extending both to the wider width
+ap_is_same_value :: (a: APInt, b: APInt) -> bool {
+    if a.bits == b.bits return ap_eq(a, b);
+    if a.bits > b.bits return ap_eq(a, ap_zext(b, a.bits));
+    return ap_eq(ap_zext(a, b.bits), b);
 }
 
 // m_Undef: UndefValue (incl. poison) or an aggregate made only of undef/poison
