@@ -199,6 +199,8 @@ Pass_Kind :: enum u8 {
     SIMPLIFYCFG;
     // InferFunctionAttrs (pass_inferattrs.jai)
     INFERATTRS;
+    // Debugify (pass_debugify.jai)
+    DEBUGIFY; CHECK_DEBUGIFY;
 }
 
 Pass_Info :: struct {
@@ -226,6 +228,8 @@ PASS_TABLE :: Pass_Info.[
     .{"sroa<modify-cfg;aggregate-to-vector>", .FUNCTION, .SROA, false, .DOMTREE},
     .{"sroa<aggregate-to-vector;preserve-cfg>", .FUNCTION, .SROA, false, .DOMTREE},
     .{"sroa<aggregate-to-vector;modify-cfg>", .FUNCTION, .SROA, false, .DOMTREE},
+    .{"debugify", .MODULE, .DEBUGIFY, false, .DOMTREE},
+    .{"check-debugify", .MODULE, .CHECK_DEBUGIFY, false, .DOMTREE},
     .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
     .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},
@@ -553,7 +557,8 @@ cl_data_layout: string;                  // opt -data-layout (overrides the modu
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    add_dbgify_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT);
     add_tti_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT);
     add_scfg_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT);
     add_aa_cl_opts(list, 14);
@@ -642,6 +647,8 @@ run_module_pm :: (n: s32) {
             case .MODULE_PM; run_module_pm(c);
             case .FUNCTION_ADAPTOR; run_function_adaptor(c);
             case .NO_OP_MODULE; should_run_pass(node, NONE);
+            case .DEBUGIFY; if should_run_pass(node, NONE) run_debugify_pass();
+            case .CHECK_DEBUGIFY; if should_run_pass(node, NONE) check_debugify_metadata("", "CheckModuleDebugify");
             case .REQUIRE_GLOBALS_AA; should_run_pass(node, NONE); if !globals_aa globals_aa = globals_aa_compute();
             case .INFERATTRS; if should_run_pass(node, NONE) inferattrs_run_module();
             case; fatal("internal: '%' is not a module pass", node.name);
@@ -791,7 +798,12 @@ opt_main :: () {
     tti_create_target_machine();
     opt_set_function_attributes();
     if ir.source_filename.count == 0 && !saw_source_filename ir.source_filename = input;
+    // optdriver.cpp: -strip-debug runs StripDebugInfo before the verifier; -enable-debugify wraps the pipeline
+    if dbgify_opts.strip_debug strip_debug_info();
+    dbgify_check_level();
+    if dbgify_opts.enable run_debugify_pass();
     if root >= 0 run_module_pm(root);
+    if dbgify_opts.enable check_debugify_metadata("", "CheckModuleDebugify");
     defer aa_eval_print_reports();
     if disable_output return;
     text := print_module_fresh();
