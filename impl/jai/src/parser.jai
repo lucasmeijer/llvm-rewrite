@@ -927,6 +927,7 @@ set_inst_name :: (i: Value_Id, name: string, id_in: u32, has_name: bool) {
     if vname(i) != name perr("multiple definition of local value named '%'", name);
 }
 
+pending_records: u32;
 parse_basic_block :: () {
     name := "";
     id: u32 = NONE;
@@ -944,9 +945,21 @@ parse_basic_block :: () {
             iname = P.tok.text; next(); has_name = true;
             expect(.EQUAL, "'=' after instruction name");
         }
-        if P.tok.kind == .HASH perr("debug records are not supported");
+        if P.tok.kind == .HASH && !has_name {
+            // debug records attach to the next instruction
+            next();
+            rec := parse_debug_record();
+            if pending_records == 0 pending_records = rec;
+            else {
+                x := pending_records;
+                while ir.dbg_records[x - 1].next != 0 x = ir.dbg_records[x - 1].next;
+                ir.dbg_records[x - 1].next = rec;
+            }
+            continue;
+        }
         i, extra_md := parse_instruction();
         block_append_inst(b, i);
+        if pending_records { attach_records_before(i, pending_records); pending_records = 0; }
         // instruction metadata
         if extra_md || P.tok.kind == .COMMA {
             parse_instruction_metadata(i);
@@ -1841,12 +1854,12 @@ md_forward: Table(Md_Id, Md_Id);   // node replaced by an equal node
 
 md_register_uses :: (m: Md_Id) {
     r := ir.mds[m];
-    if r.kind != .TUPLE return;
+    if r.kind != .TUPLE && r.kind != .SPECIAL return;
     for i: 0..cast(s64)r.nops-1 {
         o := ir.md_ops[r.ops + cast(u32) i];
         if o == NONE continue;
         ok := ir.mds[o].kind;
-        if ok != .TUPLE && ok != .DI continue;
+        if ok != .TUPLE && ok != .DI && ok != .SPECIAL continue;
         list := table_find_pointer(*md_users, o);
         if !list { e: [..] Md_Use; list = table_add(*md_users, o, e); }
         array_add(list, .{m, cast(u32) i});
@@ -1871,7 +1884,7 @@ md_rauw :: (old: Md_Id, new: Md_Id) {
 md_handle_changed_operand :: (m: Md_Id, idx: u32, old: Md_Id, new: Md_Id) {
     if ir.v_kind.count < 0 return;
     r := *ir.mds[m];
-    if r.kind != .TUPLE return;
+    if r.kind != .TUPLE && r.kind != .SPECIAL return;
     if ir.md_ops[r.ops + idx] != old return;   // stale use
     if r.distinct || table_contains(*md_forward, m) {
         ir.md_ops[r.ops + idx] = new;
@@ -1879,13 +1892,13 @@ md_handle_changed_operand :: (m: Md_Id, idx: u32, old: Md_Id, new: Md_Id) {
         return;
     }
     // uniqued: erase from the store, change the operand, re-unique
-    key := md_tuple_key(m);
+    key := md_node_key(m);
     f, cur := table_find(*ir.md_map, key);
     if f && cur == m table_remove(*ir.md_map, key);
     ir.md_ops[r.ops + idx] = new;
     md_add_use(new, m, idx);
     if new == m { ir.mds[m].distinct = true; return; }
-    key = md_tuple_key(m);
+    key = md_node_key(m);
     f, cur = table_find(*ir.md_map, key);
     if f && cur != m {
         table_set(*md_forward, m, cur);
@@ -1898,7 +1911,7 @@ md_handle_changed_operand :: (m: Md_Id, idx: u32, old: Md_Id, new: Md_Id) {
 md_add_use :: (o: Md_Id, user: Md_Id, idx: u32) {
     if o == NONE return;
     ok := ir.mds[o].kind;
-    if ok != .TUPLE && ok != .DI return;
+    if ok != .TUPLE && ok != .DI && ok != .SPECIAL return;
     list := table_find_pointer(*md_users, o);
     if !list { e: [..] Md_Use; list = table_add(*md_users, o, e); }
     array_add(list, .{user, idx});
@@ -1923,7 +1936,8 @@ md_final_of :: (m: Md_Id) -> Md_Id {
 }
 
 parse_md_node_ref :: () -> Md_Id {
-    // !N or !{...}
+    // !N or !{...} or a specialized node (LLParser::parseMDNode)
+    if P.tok.kind == .METADATA_VAR return parse_specialized_md(false);
     if P.tok.kind == .EXCLAIM {
         next();
         if P.tok.kind == .APSINT { n := cast(u32) parse_uint(); return md_ref_numbered(n); }
@@ -1959,7 +1973,13 @@ parse_metadata_operand :: () -> Md_Id {
         if P.tok.kind == .LBRACE return parse_md_tuple_body(false);
         perr("expected metadata");
     }
-    if P.tok.kind == .METADATA_VAR perr("specialized metadata (!%) is not supported yet", P.tok.text);
+    if P.tok.kind == .METADATA_VAR {
+        if P.tok.text == "DIArgList" {
+            if P.fnv == NONE perr("found DIArgList outside of function");
+            return parse_di_arg_list();
+        }
+        return parse_specialized_md(false);
+    }
     if is_kw("distinct") perr("distinct metadata only allowed at top level");
     // ValueAsMetadata
     ty := parse_type();
@@ -1983,7 +2003,12 @@ parse_named_metadata :: () {
     }
     if P.tok.kind != .RBRACE {
         while true {
-            if P.tok.kind == .METADATA_VAR perr("specialized metadata is not supported yet");
+            if P.tok.kind == .METADATA_VAR && P.tok.text == "DIExpression" {
+                array_add(*nm.ops, parse_specialized_md(false));
+                if !eat(.COMMA) break;
+                continue;
+            }
+            if P.tok.kind == .METADATA_VAR && P.tok.text == "DIArgList" perr("found DIArgList outside of function");
             expect(.EXCLAIM, "'!'");
             if P.tok.kind != .APSINT perr("expected metadata number");
             n := cast(u32) parse_uint();
@@ -2000,10 +2025,15 @@ parse_standalone_metadata :: () {
     n := cast(u32) parse_uint();
     expect(.EQUAL, "'='");
     distinct := eat_kw("distinct");
-    if P.tok.kind == .METADATA_VAR perr("specialized metadata (!%) is not supported yet", P.tok.text);
-    expect(.EXCLAIM, "'!'");
-    if table_contains(*P.md_defined, n) perr("Metadata id is already used");
-    m := parse_md_tuple_body(distinct);
+    m: Md_Id;
+    if P.tok.kind == .METADATA_VAR {
+        if table_contains(*P.md_defined, n) perr("Metadata id is already used");
+        m = parse_specialized_md(distinct);
+    } else {
+        expect(.EXCLAIM, "'!'");
+        if table_contains(*P.md_defined, n) perr("Metadata id is already used");
+        m = parse_md_tuple_body(distinct);
+    }
     table_add(*P.md_defined, n, m);
     found, t := table_find(*P.md_numbered, n);
     if found {
@@ -2943,6 +2973,8 @@ validate_end_of_module :: () {
     }
     for P.fwd_global_ids perr("use of undefined value '@%'", it_index);
     resolve_all_metadata();
+    resolve_record_metadata();
+    cleanup_retained_nodes();
     upgrade_tbaa_tags();
     // UpgradeCallsToIntrinsic for every function (make_early_inc_range: functions appended meanwhile are visited)
     i := 0;
@@ -2951,6 +2983,7 @@ validate_end_of_module :: () {
         upgrade_calls_to_intrinsic(f);
         if i < ir.m_functions.count && ir.m_functions[i] == f i += 1;
     }
+    upgrade_debug_info();
     upgrade_module_flags();
 }
 

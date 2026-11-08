@@ -353,7 +353,8 @@ upgrade_intrinsic_function :: (f_in: Value_Id) -> Upgrade_Result {
     r := upgrade_intrinsic_function1(f_in);
     f := f_in;
     if r.new_fn != NONE f = r.new_fn;
-    if vkind(f) == .FUNCTION {
+    // (an upgraded function without a replacement is erased: its attributes are never seen)
+    if vkind(f) == .FUNCTION && !(r.upgraded && r.new_fn == NONE) {
         id := function_intrinsic_id(f);
         if id != NOT_INTRINSIC {
             otys: [..] Type_Id; otys.allocator = temp;
@@ -415,7 +416,11 @@ upgrade_intrinsic_call :: (ci: Value_Id, new_fn: Value_Id) {
         name := vname(f);
         consume_front(*name, "llvm.");
         if begins_with(name, "x86.") fatal("auto-upgrade of x86 intrinsic call '%' is not supported yet", vname(f));
-        if begins_with(name, "dbg.") fatal("debug intrinsics (llvm.%) are not supported yet (they are upgraded to debug records)", name);
+        if consume_front(*name, "dbg.") {
+            upgrade_dbg_intrinsic_to_record(name, ci);
+            erase_inst(ci);
+            return;
+        }
         is_old_splice := (consume_front(*name, "experimental.vector.splice") || consume_front(*name, "vector.splice")) &&
                          !(begins_with(name, ".left") || begins_with(name, ".right"));
         if name == "stackprotectorcheck" || name == "lifetime.start.i64" || name == "lifetime.end.i64" {
@@ -522,7 +527,7 @@ upgrade_intrinsic_call :: (ci: Value_Id, new_fn: Value_Id) {
             return;
         }
       case "llvm.dbg.value";
-        fatal("debug intrinsics (llvm.dbg.*) are not supported yet");
+        fatal("upgrade of the old 4-operand llvm.dbg.value is not supported yet");
       case;
         if begins_with(nname, "llvm.x86.") && f != new_fn && inst(ci).ty2 != glob(new_fn).value_type
             fatal("auto-upgrade of x86 intrinsic call '%' is not supported yet", vname(f));

@@ -138,6 +138,7 @@ Inst_Row :: struct {
     idx:     u32;      // start in ir.u32_pool (extract/insertvalue indices, shuffle mask, bundle info)
     nidx:    u32;
     sync:    u32;      // syncscope string id (0 = system)
+    records: u32;      // first debug record attached before this instruction: 1 + index into ir.dbg_records, 0 = none
     addrspace: u32;    // alloca addrspace
 }
 
@@ -189,7 +190,7 @@ Global_Row :: struct {
 
 // ---------------------------------------------------------------- metadata
 
-Md_Kind :: enum u8 { STRING; VALUE; TUPLE; DI; }
+Md_Kind :: enum u8 { STRING; VALUE; TUPLE; DI; SPECIAL; }   // DI = parser temporary; SPECIAL = DI* node (debuginfo.jai)
 
 Md_Row :: struct {
     kind:     Md_Kind;
@@ -198,6 +199,9 @@ Md_Row :: struct {
     nops:     u32;
     str:      string;
     value:    Value_Id;
+    sub:      u8;    // SPECIAL: DI_Kind
+    ints:     u32;   // SPECIAL: non-metadata fields, start in ir.md_ints
+    nints:    u32;
 }
 
 Attach_Row :: struct {
@@ -305,6 +309,8 @@ IR :: struct {
     md_ops:   [..] Md_Id;
     md_map:   Table(string, Md_Id);
     attaches: [..] Attach_Row;
+    md_ints:  [..] u64;           // integer fields of DI* nodes (debuginfo.jai)
+    dbg_records: [..] Dbg_Record; // debug records (#dbg_value ...), see debuginfo.jai
     md_kind_names: [..] string;
     md_kind_map:   Table(string, u32);
 
@@ -715,6 +721,18 @@ inst_unlink :: (i: Value_Id) {
 
 erase_inst :: (i: Value_Id) {
     assert(!has_uses(i), "erasing an instruction that still has uses");
+    // Instruction::handleMarkerRemoval / DbgMarker::removeMarker: debug records move to the front of the next
+    // instruction's records
+    if inst(i).records {
+        nx := inst(i).next;
+        if nx == NONE fatal("erasing a terminator that has debug records attached is not supported yet");
+        first := inst(i).records;
+        x := first;
+        while ir.dbg_records[x - 1].next != 0 x = ir.dbg_records[x - 1].next;
+        ir.dbg_records[x - 1].next = inst(nx).records;
+        inst(nx).records = first;
+        inst(i).records = 0;
+    }
     if ir.v_name[i].count set_name(i, "");
     inst_unlink(i);
     drop_all_references(i);

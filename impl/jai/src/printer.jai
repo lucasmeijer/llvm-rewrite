@@ -194,7 +194,7 @@ tf_incorporate_md :: (m: Md_Id) {
         o := ir.md_ops[r.ops + cast(u32) i];
         if o == NONE continue;
         ok := ir.mds[o].kind;
-        if ok == .TUPLE || ok == .DI { tf_incorporate_md(o); continue; }
+        if ok == .TUPLE || ok == .DI || ok == .SPECIAL { tf_incorporate_md(o); continue; }
         if ok == .VALUE {
             v := ir.mds[o].value;
             if is_constant_kind(vkind(v)) tf_incorporate_value(v);
@@ -278,7 +278,12 @@ ensure_slot_arrays :: () {
 create_md_slot :: (m: Md_Id) {
     if m == NONE return;
     k := ir.mds[m].kind;
-    if k != .TUPLE && k != .DI return;
+    if k != .TUPLE && k != .DI && k != .SPECIAL return;
+    if is_inline_md(m) {
+        // no slot (SlotTracker::CreateMetadataSlot skips DIExpression; DIArgList is not an MDNode), but the
+        // writer still reaches nodes through a DIArgList's operands only as values
+        return;
+    }
     if table_contains(*W.md_slot, m) return;
     table_add(*W.md_slot, m, cast(s32) W.md_order.count);
     array_add(*W.md_order, m);
@@ -343,6 +348,7 @@ process_function :: (f: Value_Id) {
         i := block(b).first;
         while i != NONE {
             r := inst(i);
+            if r.records slot_records_of(i);
             if r.op == .CALL {
                 cf := called_function(i);
                 if cf != NONE && glob(cf).intrinsic {
@@ -350,7 +356,7 @@ process_function :: (f: Value_Id) {
                         o := op(i, oi);
                         if o != NONE && vkind(o) == .MD_VALUE {
                             m := ir.v_aux[o];
-                            if m != NONE && (ir.mds[m].kind == .TUPLE || ir.mds[m].kind == .DI) create_md_slot(m);
+                            if m != NONE && (ir.mds[m].kind == .TUPLE || ir.mds[m].kind == .DI || ir.mds[m].kind == .SPECIAL) create_md_slot(m);
                         }
                     }
                 }
@@ -708,7 +714,8 @@ print_metadata_identifier :: (name: string) {
 write_md_operand :: (m: Md_Id, from_value: bool) {
     if m == NONE { out("null"); return; }
     r := ir.mds[m];
-    if r.kind == .TUPLE || r.kind == .DI {
+    if is_inline_md(m) { write_di_node(m); return; }
+    if r.kind == .TUPLE || r.kind == .DI || r.kind == .SPECIAL {
         found, s := table_find(*W.md_slot, m);
         if found { outc(#char "!"); out_s64(s); }
         else out("<badref>");
@@ -1143,6 +1150,7 @@ print_basic_block :: (b: Value_Id, is_entry: bool) {
     outc(#char "\n");
     i := block(b).first;
     while i != NONE {
+        if inst(i).records print_records_of(i);
         print_instruction(i);
         outc(#char "\n");
         i = inst(i).next;
@@ -1523,7 +1531,7 @@ print_module :: () -> string {
         for W.md_order {
             outc(#char "!"); out_s64(it_index); out(" = ");
             if ir.mds[it].distinct out("distinct ");
-            write_md_tuple(it);
+            if ir.mds[it].kind == .SPECIAL write_di_node(it); else write_md_tuple(it);
             outc(#char "\n");
         }
     }
