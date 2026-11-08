@@ -5181,6 +5181,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/abs.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/active-lane-mask.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/atan-intrinsic.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/atan-intrinsic.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/avx512.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/avx512.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/basictest.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/basictest.ll::roundtrip
@@ -5254,6 +5255,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/sinh-cosh-intrinsics.ll::o
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/sinh-cosh-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/smul-fix-sat.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/smul-fix.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/sse.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/sse.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/trunc.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/trunc_vec.ll::opt
