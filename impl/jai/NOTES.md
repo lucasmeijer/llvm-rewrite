@@ -379,7 +379,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   `block_unique_successor`, `icmp_is_lt` existed already). value_tracking2.jai's `block_single_successor` has
   getUniqueSuccessor semantics; loop_nest.jai has the exact getSingleSuccessor (`block_get_single_successor`).
 
-## InstCombine select (L1.instcombine.select 76/98: roundtrip 49/49, opt 27/49)
+## InstCombine select and phi (L1.instcombine.select 76/98: roundtrip 49/49, opt 27/49)
 
 - `ic_select.jai` ports InstCombineSelect.cpp completely, in LLVM's order. Helpers from other LLVM files that it
   needed and that are now shared: SimplifyDemandedVectorElts (`ic_simplify_demanded_vector_elts`, ic_demanded.jai;
@@ -396,3 +396,10 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - Sweep (`sweep --passes instcombine`) vs main before this port: 168 files went differs→identical, 0 new silent
   mismatches except minmax-fold.ll (failed→differs: now runs, still differs elsewhere); 7 differs→failed (loud: X86
   SimplifyDemandedVectorElts intrinsics, unshuffleConstant, a fixpoint in assume-icmp-null-select.ll).
+- `ic_phi.jai` ports InstCombinePHI.cpp completely (visitPHINode and every helper, LLVM's order). Shared pieces
+  added there: `combine_metadata_for_cse` (Local.cpp combineMetadata; getMostGeneric{Range,AliasScope,NoFPClass,
+  AlignmentOrDereferenceable}, MDNode::intersect, TBAA via tbaa_most_generic; merging !mmra/!prof/!memprof/
+  !callsite/!llvm.access.group/!captures/!callee_type/DIAssignID fails loudly), `erase_unlinked_inst` (`delete I`).
+  SliceUpIllegalIntegerPHI sorts its records stably (LLVM's array_pod_sort = qsort; glibc sorts small arrays by
+  insertion sort). Sweep after the phi port: no file regressed from identical; 5 more fail loudly (2 fixpoint
+  differences that need other visitors, !annotation, !mmra, !llvm.access.group).
