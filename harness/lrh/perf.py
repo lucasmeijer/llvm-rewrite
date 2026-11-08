@@ -397,7 +397,7 @@ def report(rows, impls, baselines, prev, use_instr):
             for r in rs:
                 v = r["tools"][w][metric]
                 if v is None:
-                    return None
+                    return None, False
                 base = ((baselines.get(w) or {}).get(cmd) or {}).get(metric) or 0
                 pts.append((r["size"], v - base))
             return fit_exponent(pts), max(v for _, v in pts) >= MIN_WORK[metric]
