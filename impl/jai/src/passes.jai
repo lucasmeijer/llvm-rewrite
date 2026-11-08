@@ -266,6 +266,8 @@ Pass_Kind :: enum u8 {
     PRINT_LVI; CVP; JUMP_THREADING;
     // BranchProbabilityInfo (branch_prob.jai), BlockFrequencyInfo (block_freq.jai)
     PRINT_BPI; PRINT_BFI;
+    // Reassociate (pass_reassociate.jai)
+    REASSOCIATE;
 }
 
 Pass_Info :: struct {
@@ -283,6 +285,7 @@ PASS_TABLE :: Pass_Info.[
     .{"dce", .FUNCTION, .DCE, false, .DOMTREE},
     .{"adce", .FUNCTION, .ADCE, false, .DOMTREE},
     .{"bdce", .FUNCTION, .BDCE, false, .DOMTREE},
+    .{"reassociate", .FUNCTION, .REASSOCIATE, false, .DOMTREE},
     .{"break-crit-edges", .FUNCTION, .BREAK_CRIT_EDGES, false, .DOMTREE},
     .{"mem2reg", .FUNCTION, .MEM2REG, false, .DOMTREE},
     .{"sroa", .FUNCTION, .SROA, false, .DOMTREE},
@@ -708,6 +711,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if eq >= 0 { name = slice(a, 0, eq); value = slice(a, eq + 1, a.count - eq - 1); has_value = true; }
     if tli_parse_cl_opt(name, value, has_value) return true;   // tli.jai: -disable-builtin, libcall simplifier options
     if parse_replexitval(name, value, has_value) return true;   // pass_indvars.jai
+    if reassociate_parse_cl_opt(name, value, has_value) return true;   // pass_reassociate.jai
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {
@@ -828,6 +832,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .DCE; return dce_run(f);
         case .ADCE; return adce_run(f);
         case .BDCE; return bdce_run(f);
+        case .REASSOCIATE; return reassociate_run(f);
         case .BREAK_CRIT_EDGES; return break_crit_edges_run(f);
         case .MEM2REG; return mem2reg_run(f);
         case .INSTSIMPLIFY; return instsimplify_run(f);
@@ -916,6 +921,8 @@ opt_main :: () {
         // -verify-each runs the verifier after every pass; on the valid IR our passes must produce it reports nothing
         // (the harness verifies our output separately)
         if a == "-verify-each" || a == "--verify-each" continue;
+        // -run-twice only acts in the legacy PM path of optdriver.cpp; with -passes / -O# (NewPMDriver) it is ignored
+        if a == "-run-twice" || a == "--run-twice" continue;
         if begins_with(a, "-aa-pipeline=") || begins_with(a, "--aa-pipeline=") {
             aa_parse_pipeline(slice(a, find_index_from_left(a, #char "=") + 1, a.count - find_index_from_left(a, #char "=") - 1));
             continue;

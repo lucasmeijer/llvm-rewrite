@@ -42,6 +42,7 @@
 #load "pass_dce.jai";
 #load "pass_adce.jai";
 #load "pass_bdce.jai";
+#load "pass_reassociate.jai";
 #load "dbg_records.jai";
 #load "pass_mem2reg.jai";
 #load "pass_instsimplify.jai";

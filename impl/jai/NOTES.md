@@ -733,3 +733,16 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   on an untyped literal shifts a negative s64 (cast to u64 first); `return f()` with several results, `remove` is a
   reserved word, `for < k: a..b` order, names that already existed elsewhere (`clz64`, `ctz64`, `fn_entry_count`,
   `block_terminating_deoptimize_call`).
+
+## Reassociate (L1.reassociate 159/164: roundtrip 82/82, opt 77/82)
+
+- `pass_reassociate.jai` ports Reassociate.cpp completely (rank map, LinearizeExprTree, RewriteExprTree, NegateValue,
+  OptimizeAdd/Mul/Xor/AndOrXor, factoring, BreakUpSubtract/Distribute, ConvertShiftToMul, the pair map and the
+  CSE-local heuristic, `-reassociate-use-cse-local`), plus ValueTracking's `may_have_non_def_use_dependency`.
+  RedoInsts (SetVector over a deque) is `Ra_Set` (array + tombstones + index table). EmitAddTreeOfValues' operands
+  are WeakTrackingVHs (value_handles.jai), released at the end of the run.
+- The 5 failing tests need early-cse (2) or inline (3). `-run-twice` is accepted as a no-op (knowledge/llvm/reassociate.md).
+- Sweeps: `reassociate` whole-file 7754/7754, `--per-function` 69776/69778 (2 loud ppc_fp128 parser), `debugify,reassociate`
+  and `reassociate,reassociate -reassociate-use-cse-local=false`: 0 differs.
+- Perf (x64 build, `-disable-output`, no @perf benchmark times it): straightline n16000/n64000 0.23/0.87 s (LLVM
+  0.035/0.16; parse+print alone 0.07/0.33): linear, the pass itself ~7x LLVM. sqlite3.ll +0.1 s over parsing.
