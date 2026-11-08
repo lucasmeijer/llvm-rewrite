@@ -496,7 +496,7 @@ recursive fn sc_transfer_range(a: i32, e: i32) -> bool {
     var budget: i64 = 32;     // ScanLimit of isGuaranteedToTransferExecutionToSuccessor(iterator range)
     while i >= 0 && i != e {
         budget--;
-        if budget < 0 { return false; }
+        if budget == 0 { return false; }
         if !guaranteed_to_transfer(i) { return false; }
         i = inst_next(i);
     }

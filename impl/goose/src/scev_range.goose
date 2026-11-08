@@ -414,8 +414,18 @@ recursive fn sc_pointer_dereferenceable_bytes(v: i32) -> i64 {
         let s = arg_attrs(v);
         var d = sc_aset_int(s, AK_Dereferenceable);
         if d == 0 {
-            if aset_has(s, AK_ByVal) || aset_has(s, AK_ByRef) || aset_has(s, AK_Preallocated) || aset_has(s, AK_InAlloca) || aset_has(s, AK_StructRet) {
-                fatal("ScalarEvolution: dereferenceable bytes of byval/byref/sret arguments are not ported");
+            // getPointeeInMemoryValueType: byval, byref, preallocated, inalloca, sret types
+            let kinds: i64[5] = [AK_ByVal, AK_ByRef, AK_Preallocated, AK_InAlloca, AK_StructRet];
+            for kk in kinds {
+                let a = aset_find(s, kk);
+                if a >= 0 {
+                    let mt = attrs[a].ty;
+                    if mt >= 0 && cf_ty_is_sized(mt) {
+                        if sc_type_has_scalable(mt) { fatal("ScalarEvolution: dereferenceable bytes of scalable pointee types are not ported"); }
+                        d = dl_store_size(mt);
+                    }
+                    break;
+                }
             }
         }
         if d == 0 { d = sc_aset_int(s, AK_DereferenceableOrNull); }
@@ -436,10 +446,14 @@ recursive fn sc_pointer_dereferenceable_bytes(v: i32) -> i64 {
             return d;
         }
         if o == OP_LOAD || o == OP_INTTOPTR {
-            if inst_get_md(v, md_kind_id("dereferenceable")) >= 0 || inst_get_md(v, md_kind_id("dereferenceable_or_null")) >= 0 {
-                fatal("ScalarEvolution: !dereferenceable metadata is not ported");
+            var d: i64 = 0;
+            let m1 = inst_get_md(v, md_kind_id("dereferenceable"));
+            if m1 >= 0 { d = ap_limited(ci_ap(mds[md_op(m1, 0)].extra), 0xFFFFFFFFFFFFFFFF) as! i64; }
+            if d == 0 {
+                let m2 = inst_get_md(v, md_kind_id("dereferenceable_or_null"));
+                if m2 >= 0 { d = ap_limited(ci_ap(mds[md_op(m2, 0)].extra), 0xFFFFFFFFFFFFFFFF) as! i64; }
             }
-            return 0;
+            return d;
         }
         if o == OP_ALLOCA {
             let n = op(v, 0);
