@@ -2245,6 +2245,13 @@ ic_visit_assume :: (ii: Value_Id) -> Ic_Switch_Result {
                     return remove_bundle(ii, idx);
                 }
                 if !has_offset continue;
+                okp, base_ptr, ptr_off := pm_ptr_add_apint(ptr);
+                if okp {
+                    pv := ap_sext_or_trunc(ptr_off, dl_index_type_size_bits(vtype(ptr)));
+                    if pv.bits > 64 && ap_min_signed_bits(pv) > 64 continue;   // trySExtValue
+                    icb_alignment_assumption(base_ptr, alignment, const_int(ir.t_i64, offset - cast,no_check(u64) ap_sext_value(pv)));
+                    return remove_bundle(ii, idx);
+                }
                 uo := get_underlying_object(ptr);
                 if uo == NONE || is_argument(uo) continue;
                 am := alignment - 1;
