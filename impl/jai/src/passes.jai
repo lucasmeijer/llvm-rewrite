@@ -367,12 +367,13 @@ parse_pass_pipeline :: (text: string) -> s32 {
 
 // ---------------------------------------------------------------- command-line options (cl::opt)
 
-Cl_Kind :: enum u8 { BOOL; INT; IGNORED; }
+Cl_Kind :: enum u8 { BOOL; INT; IGNORED; STRING; }
 Cl_Opt :: struct {
     name: string;
     kind: Cl_Kind;
     b: *bool;
     i: *s64;
+    s: *string = null;
 }
 
 opts: struct {
@@ -381,17 +382,25 @@ opts: struct {
     opt_bisect_limit: s64 = -1;          // OptBisect.cpp -opt-bisect-limit
     verify_dom_info := false;            // -verify-dom-info (only checks; output unaffected)
     sroa_skip_mem2reg := false;          // SROA.cpp -sroa-skip-mem2reg
+    use_constant_int_for_fixed_length_splat := false;   // Constants.cpp
+    use_constant_int_for_scalable_splat := false;       // Constants.cpp
+    disable_simplify_libcalls := false;  // opt -disable-simplify-libcalls (TLII.disableAllFunctions)
+    mtriple: string;                     // opt -mtriple
 };
 cl_data_layout: string;                  // opt -data-layout (overrides the module's datalayout)
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(5, Cl_Opt,, allocator = temp);
-    list[0] = .{"adce-remove-control-flow", .BOOL, *opts.adce_remove_control_flow, null};
-    list[1] = .{"adce-remove-loops", .BOOL, *opts.adce_remove_loops, null};
-    list[2] = .{"opt-bisect-limit", .INT, null, *opts.opt_bisect_limit};
-    list[3] = .{"verify-dom-info", .BOOL, *opts.verify_dom_info, null};
-    list[4] = .{"sroa-skip-mem2reg", .BOOL, *opts.sroa_skip_mem2reg, null};
+    list := NewArray(9, Cl_Opt,, allocator = temp);
+    list[0] = .{"adce-remove-control-flow", .BOOL, *opts.adce_remove_control_flow, null, null};
+    list[1] = .{"adce-remove-loops", .BOOL, *opts.adce_remove_loops, null, null};
+    list[2] = .{"opt-bisect-limit", .INT, null, *opts.opt_bisect_limit, null};
+    list[3] = .{"verify-dom-info", .BOOL, *opts.verify_dom_info, null, null};
+    list[4] = .{"sroa-skip-mem2reg", .BOOL, *opts.sroa_skip_mem2reg, null, null};
+    list[5] = .{"use-constant-int-for-fixed-length-splat", .BOOL, *opts.use_constant_int_for_fixed_length_splat, null, null};
+    list[6] = .{"use-constant-int-for-scalable-splat", .BOOL, *opts.use_constant_int_for_scalable_splat, null, null};
+    list[7] = .{"disable-simplify-libcalls", .BOOL, *opts.disable_simplify_libcalls, null, null};
+    list[8] = .{"mtriple", .STRING, null, null, *opts.mtriple};
     return list;
 }
 
@@ -408,6 +417,9 @@ parse_cl_opt :: (arg: string) -> bool {
             if !has_value || value == "true" || value == "1" || value == "TRUE" || value == "True" it.b.* = true;
             else if value == "false" || value == "0" || value == "FALSE" || value == "False" it.b.* = false;
             else fatal("invalid boolean value '%' for option -%", value, name);
+        } else if it.kind == .STRING {
+            if !has_value fatal("option -% needs a value", name);
+            it.s.* = value;
         } else if it.kind == .INT {
             if !has_value fatal("option -% needs a value", name);
             v, ok := string_to_int(value);
@@ -561,6 +573,7 @@ opt_main :: () {
     ir_init();
     ir.module_id = input;
     parse_module(src, input);
+    if opts.mtriple.count ir.triple = normalize_triple(opts.mtriple);
     if ir.source_filename.count == 0 && !saw_source_filename ir.source_filename = input;
     if root >= 0 run_module_pm(root);
     if disable_output return;

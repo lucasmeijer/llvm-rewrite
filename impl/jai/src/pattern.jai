@@ -63,6 +63,7 @@ const_ap :: (v: Value_Id) -> APInt { return ap_from_words(type_bits(scalar_type(
 
 // m_APInt / m_APIntAllowPoison
 pm_apint :: (v: Value_Id, allow_poison := false) -> (bool, APInt) {
+    if v == NONE return false, .{};
     k := vkind(v);
     if k == .C_INT return true, const_ap(v);
     if is_vector_type(vtype(v)) && is_constant_kind(k) {
@@ -75,9 +76,10 @@ pm_apint :: (v: Value_Id, allow_poison := false) -> (bool, APInt) {
 // m_APIntAllowPoison
 pm_apint_ap :: (v: Value_Id) -> (bool, APInt) { ok, c := pm_apint(v, true); return ok, c; }
 // m_ConstantInt() (isa<ConstantInt>)
-pm_constant_int :: (v: Value_Id) -> bool { return vkind(v) == .C_INT; }
+pm_constant_int :: (v: Value_Id) -> bool { return v != NONE && vkind(v) == .C_INT; }
 // m_ConstantInt(uint64_t &V): a ConstantInt whose value fits in 64 bits
 pm_constant_int_u64 :: (v: Value_Id) -> (bool, u64) {
+    if v == NONE return false, 0;
     if vkind(v) != .C_INT return false, 0;
     a := const_ap(v);
     if ap_active_bits(a) > 64 return false, 0;
@@ -86,6 +88,7 @@ pm_constant_int_u64 :: (v: Value_Id) -> (bool, u64) {
 
 // cstval_pred_ty<Predicate, ConstantInt, AllowPoison>::match
 pm_int_pred :: (v: Value_Id, pred: (APInt) -> bool, allow_poison := true) -> bool {
+    if v == NONE return false;
     k := vkind(v);
     if k == .C_INT return pred(const_ap(v));
     t := vtype(v);
@@ -106,6 +109,7 @@ pm_int_pred :: (v: Value_Id, pred: (APInt) -> bool, allow_poison := true) -> boo
 }
 // api_pred_ty: scalar or poison-allowing splat, binding the value
 pm_apint_pred :: (v: Value_Id, pred: (APInt) -> bool) -> (bool, APInt) {
+    if v == NONE return false, .{};
     k := vkind(v);
     if k == .C_INT { a := const_ap(v); if pred(a) return true, a; }
     else if is_vector_type(vtype(v)) && is_constant_kind(k) {
@@ -118,6 +122,7 @@ pm_apint_pred :: (v: Value_Id, pred: (APInt) -> bool) -> (bool, APInt) {
 
 // m_Zero: any null constant or a vector of zero ints (poison allowed)
 pm_zero :: (v: Value_Id) -> bool {
+    if v == NONE return false;
     if !is_constant_kind(vkind(v)) return false;
     return is_null_value(v) || pm_int_pred(v, ap_is_zero);
 }
@@ -145,6 +150,7 @@ pm_low_bit_mask_ap :: (v: Value_Id) -> (bool, APInt) { ok, c := pm_apint_pred(v,
 pm_max_signed_value_ap :: (v: Value_Id) -> (bool, APInt) { ok, c := pm_apint_pred(v, ap_is_max_signed); return ok, c; }
 // m_SpecificInt(V): a constant (splat/vector, poison allowed) equal to V
 pm_specific_int :: (v: Value_Id, val: u64) -> bool {
+    if v == NONE return false;
     k := vkind(v);
     if k == .C_INT { a := const_ap(v); return ap_active_bits(a) <= 64 && ap_zext_value(a) == val; }
     if !is_vector_type(vtype(v)) || !is_constant_kind(k) return false;
@@ -153,6 +159,7 @@ pm_specific_int :: (v: Value_Id, val: u64) -> bool {
     return false;
 }
 pm_specific_int_ap :: (v: Value_Id, val: APInt) -> bool {
+    if v == NONE return false;
     k := vkind(v);
     if k == .C_INT { a := const_ap(v); return a.bits == val.bits && ap_eq(a, val); }
     if !is_vector_type(vtype(v)) || !is_constant_kind(k) return false;
@@ -163,6 +170,7 @@ pm_specific_int_ap :: (v: Value_Id, val: APInt) -> bool {
 
 // m_Undef: UndefValue (incl. poison) or an aggregate made only of undef/poison
 pm_undef :: (v: Value_Id) -> bool {
+    if v == NONE return false;
     k := vkind(v);
     if k == .C_UNDEF || k == .C_POISON return true;
     if k == .C_ARRAY || k == .C_STRUCT || k == .C_VECTOR {
@@ -172,11 +180,12 @@ pm_undef :: (v: Value_Id) -> bool {
     }
     return false;
 }
-pm_undef_value :: inline (v: Value_Id) -> bool { k := vkind(v); return k == .C_UNDEF || k == .C_POISON; }   // isa<UndefValue>
-pm_poison :: inline (v: Value_Id) -> bool { return vkind(v) == .C_POISON; }
+pm_undef_value :: inline (v: Value_Id) -> bool { if v == NONE return false; k := vkind(v); return k == .C_UNDEF || k == .C_POISON; }   // isa<UndefValue>
+pm_poison :: inline (v: Value_Id) -> bool { return v != NONE && vkind(v) == .C_POISON; }
 
 // m_ImmConstant: a constant that is not and does not contain a constant expression
 pm_imm_constant :: (v: Value_Id) -> bool {
+    if v == NONE return false;
     if !is_constant_kind(vkind(v)) return false;
     return !contains_constant_expression(v) && vkind(v) != .C_EXPR;
 }
@@ -215,6 +224,7 @@ apf_is_signaling :: (f: APFloat) -> bool { g := f; d := fp_decode(g.k, apf_words
 
 // m_APFloat / m_APFloatAllowPoison
 pm_apfloat :: (v: Value_Id, allow_poison := false) -> (bool, APFloat) {
+    if v == NONE return false, .{};
     k := vkind(v);
     if k == .C_FP return true, apf_from_const(v);
     if is_vector_type(vtype(v)) && is_constant_kind(k) {
@@ -226,6 +236,7 @@ pm_apfloat :: (v: Value_Id, allow_poison := false) -> (bool, APFloat) {
 }
 // cstfp_pred_ty (poison allowed)
 pm_fp_pred :: (v: Value_Id, pred: (APFloat) -> bool) -> bool {
+    if v == NONE return false;
     k := vkind(v);
     if k == .C_FP return pred(apf_from_const(v));
     t := vtype(v);

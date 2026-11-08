@@ -871,7 +871,7 @@ const_int :: (type: Type_Id, value: u64) -> Value_Id {
     array_resize(*w, nw);
     w[0] = value;
     // sign-extend negative 64-bit values into the upper words
-    if (cast(s64) value) < 0 for i: 1..nw-1 w[i] = 0xFFFF_FFFF_FFFF_FFFF;
+    if (cast,no_check(s64) value) < 0 for i: 1..nw-1 w[i] = 0xFFFF_FFFF_FFFF_FFFF;
     mask_words(w, bits);
     return const_int_words(type, w);
 }
@@ -1015,6 +1015,8 @@ const_aggregate :: (kind: Value_Kind, type: Type_Id, ops: [] Value_Id) -> Value_
             if ck == .C_POISON return const_poison(type);
             if ck == .C_UNDEF return const_undef(type);
             if ck == .C_FP return const_fp_words(type, const_fp_value(c));
+            // ConstantVector::getImpl: isSplatInt (-use-constant-int-for-fixed-length-splat) / isSplatByte
+            if ck == .C_INT && (opts.use_constant_int_for_fixed_length_splat || type_kind(vtype(c)) == .BYTE) return const_int_words(type, const_int_value(c));
         }
     }
     et := type_elem(type);

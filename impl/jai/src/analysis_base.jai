@@ -84,6 +84,7 @@ is_assume_like_intrinsic :: (i: Value_Id) -> bool {
 
 // Operator::getOpcode: the opcode of an instruction or constant expression, NONE_OP otherwise
 opr_code :: inline (v: Value_Id) -> Opcode {
+    if v == NONE return .NONE_OP;
     k := vkind(v);
     if k == .INST return inst_op(v);
     if k == .C_EXPR return cexpr(v).op;

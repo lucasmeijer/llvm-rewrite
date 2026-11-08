@@ -38,6 +38,7 @@ cf_is_all_ones :: (c: Value_Id) -> bool {
 cf_all_ones :: (t: Type_Id) -> Value_Id {
     st := scalar_type(t);
     if is_int_type(st) return cf_int(t, ap_all_ones(type_int_width(st)));
+    if type_kind(st) == .BYTE return cf_int(t, ap_all_ones(type_bits(st)));
     if is_fp_type(st) return const_fp_words(t, ap_words(ap_all_ones(type_bits(st))));
     if is_vector_type(t) return cf_get_splat(t, cf_all_ones(st));
     fatal("internal: getAllOnesValue of a non-integer, non-FP type");
@@ -115,11 +116,19 @@ cf_shuffle_splat_value :: (c: Value_Id) -> Value_Id {
 
 // ConstantVector::getSplat
 cf_get_splat :: (vt: Type_Id, elt: Value_Id) -> Value_Id {
+    k := vkind(elt);
+    if k == .C_NULL return const_null(vt);
+    if k == .C_INT && type_kind(vtype(elt)) == .BYTE return const_int_words(vt, const_int_value(elt));   // ConstantByte
+    if k == .C_FP return const_fp_words(vt, const_fp_value(elt));
+    if type_kind(vt) != .SVECTOR {
+        if !is_null_value(elt) && opts.use_constant_int_for_fixed_length_splat && k == .C_INT return const_int_words(vt, const_int_value(elt));
+    }
     if type_kind(vt) == .SVECTOR {
+        // NOTE: LLVM (flag off) builds a shufflevector splat expression here; we keep the ConstantInt-style
+        // representation for scalable splats of ints (prints identically, and pm_apint sees through it like
+        // getSplatValue does).
         if is_null_value(elt) return const_zero(vt);
-        k := vkind(elt);
         if k == .C_INT return const_int_words(vt, const_int_value(elt));
-        if k == .C_FP return const_fp_words(vt, const_fp_value(elt));
         if k == .C_UNDEF return const_undef(vt);
         if k == .C_POISON return const_poison(vt);
         // shufflevector (insertelement (poison, elt, 0), poison, zeroinitializer)

@@ -84,11 +84,15 @@ parse_module :: (src: string, file: string) {
             next(); expect(.EQUAL, "'='"); ir.source_filename = parse_string(); saw_source_filename = true;
         } else break;
     }
-    if cl_data_layout.count ir.datalayout = cl_data_layout;   // opt's DataLayoutCallback: the command line wins
-    if ir.datalayout.count == 0 && ir.triple.count {
-        d, ok := compute_default_datalayout(ir.triple);
-        if !ok fatal("%: no default data layout for target triple '%' (only x86 is supported)", file, ir.triple);
-        ir.datalayout = d;
+    // opt's SetDataLayout callback: -data-layout wins, then the IR's, then the default of -mtriple / the IR triple
+    if cl_data_layout.count ir.datalayout = cl_data_layout;
+    else if ir.datalayout.count == 0 {
+        tt := ifx opts.mtriple.count then normalize_triple(opts.mtriple) else ir.triple;
+        if tt.count {
+            d, ok := compute_default_datalayout(tt);
+            if !ok fatal("%: no default data layout for target triple '%' (only x86 is supported)", file, tt);
+            ir.datalayout = d;
+        }
     }
     dl_init(ir.datalayout);
     while P.tok.kind != .EOF parse_top_level();
@@ -3131,3 +3135,16 @@ auto_declare_intrinsic :: (name: string, fw: Value_Id) {
 #import "File";
 #import "Sort";
 saw_source_filename := false;
+
+// Triple::normalize (only the padding of missing/empty components with "unknown")
+normalize_triple :: (t: string) -> string {
+    parts := split(t, "-",, allocator = temp);
+    sb: String_Builder; sb.allocator = temp;
+    n := max(parts.count, 3);
+    for i: 0..n-1 {
+        if i > 0 append(*sb, "-");
+        p := ifx i < parts.count then parts[i] else "";
+        append(*sb, ifx p.count then p else "unknown");
+    }
+    return builder_to_string(*sb);
+}
