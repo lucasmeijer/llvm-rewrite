@@ -272,8 +272,8 @@ change_to_unreachable :: (i: Value_Id, preserve_lcssa: bool, mssau: *Mssa_Update
     return removed;
 }
 
-// isSafeToSpeculativelyExecute(I) (no context; loads are not handled here)
-is_safe_to_speculatively_execute :: (i: Value_Id) -> bool {
+// isSafeToSpeculativelyExecute(I) (no context, IgnoreUBImplyingAttrs = true by default; loads are not handled)
+is_safe_to_speculatively_execute :: (i: Value_Id, ignore_ub_implying_attrs := true) -> bool {
     opc := inst_op(i);
     if opc == {
         case .UDIV; #through;
@@ -295,8 +295,7 @@ is_safe_to_speculatively_execute :: (i: Value_Id) -> bool {
         case .CALL;
             callee := call_called_function(i);
             if callee == NONE || !fn_has_fn_attr(callee, .Speculatable) return false;
-            // hasUBImplyingAttrs
-            fatal("isSafeToSpeculativelyExecute of a speculatable call (hasUBImplyingAttrs) is not implemented yet");
+            return ignore_ub_implying_attrs || !call_has_ub_implying_attrs(i);
         case .VAARG; #through;
         case .ALLOCA; #through;
         case .INVOKE; #through;
@@ -375,8 +374,33 @@ drop_ub_implying_attrs_and_unknown_metadata :: (i: Value_Id, keep_prof: bool) {
         set_metadata(i, it.kind, NONE);
     }
     if is_call_base(i) && inst(i).attrs != 0 {
-        fatal("dropUBImplyingAttrsAndUnknownMetadata of a call with attributes is not implemented yet");
+        // removeParamAttrs(ArgNo, UBImplyingAttributes) for every argument, removeRetAttrs
+        l := inst(i).attrs;
+        strip :: (s: u32) -> u32 {
+            r := attr_set_remove(s, .NoUndef);
+            r = attr_set_remove(r, .Dereferenceable);
+            return attr_set_remove(r, .DereferenceableOrNull);
+        }
+        params: [..] u32; params.allocator = temp;
+        n := call_num_args(i);
+        np := ir.attr_lists[l].params.count;
+        for k: 0..np-1 {
+            s := attr_list_param(l, cast(u32) k);
+            array_add(*params, ifx k < cast(s64) n then strip(s) else s);
+        }
+        inst(i).attrs = attr_list_get(attr_list_fn(l), strip(attr_list_ret(l)), params);
     }
+}
+
+// Instruction::hasUBImplyingAttrs (calls): CallBase::isPassingUndefUB for an argument, or a noundef /
+// dereferenceable / dereferenceable_or_null return
+call_has_ub_implying_attrs :: (c: Value_Id) -> bool {
+    n := call_num_args(c);
+    if n > 0 for k: 0..n-1 {
+        if call_param_has_attr(c, k, .NoUndef) || call_param_has_attr(c, k, .Dereferenceable) ||
+           call_param_has_attr(c, k, .DereferenceableOrNull) return true;
+    }
+    return call_has_ret_attr(c, .NoUndef) || call_has_ret_attr(c, .Dereferenceable) || call_has_ret_attr(c, .DereferenceableOrNull);
 }
 
 // simplifyOneLoop
@@ -486,7 +510,20 @@ simplify_one_loop :: (li: *Loop_Info, l: Loop_Id, worklist: *[..] Loop_Id, dt: *
                 if any_invariant changed = true;
                 if !all_invariant continue;
                 if !ls_fold_branch_to_common_dest(bi, mssau) continue;
-                fatal("loop-simplify: eliminating an exiting block after foldBranchToCommonDest is not implemented yet");
+                // the block is now dead: remove it from the loop, the dominator tree and the function
+                changed = true;
+                li_remove_block(li, eb);
+                n := dt_node(dt, eb);
+                while dt.nodes[n].first_child >= 0 {
+                    c := dt.nodes[n].first_child;
+                    dt.dfs_valid = false;
+                    dt_set_idom(dt, c, dt.nodes[n].idom);
+                }
+                dt_erase_node(dt, eb);
+                if mssau fatal("loop-simplify: MemorySSAUpdater::removeBlocks is not implemented yet");
+                block_remove_predecessor(get_successor(bi, 0), eb, preserve_lcssa);
+                block_remove_predecessor(get_successor(bi, 1), eb, preserve_lcssa);
+                erase_block_with_insts(eb);
             }
         }
         break;
@@ -494,8 +531,8 @@ simplify_one_loop :: (li: *Loop_Info, l: Loop_Id, worklist: *[..] Loop_Id, dt: *
     return changed;
 }
 
-// The part of foldBranchToCommonDest(BI, nullptr, MSSAU) (SimplifyCFG.cpp) that decides whether it folds; folding
-// itself fails loudly.
+// foldBranchToCommonDest(BI, DTU = nullptr, MSSAU, TTI = nullptr, AC = nullptr, BonusInstThreshold = 1)
+// (SimplifyCFG.cpp) for LoopSimplify's exiting blocks; branch weights fail loudly.
 ls_fold_branch_to_common_dest :: (bi: Value_Id, mssau: *Mssa_Updater) -> bool {
     bb := inst_block(bi);
     c := op(bi, 0);
@@ -506,12 +543,151 @@ ls_fold_branch_to_common_dest :: (bi: Value_Id, mssau: *Mssa_Updater) -> bool {
     if succ_contains(bb, bb) return false;
     preds: [..] Value_Id; preds.allocator = temp;
     block_predecessors(bb, *preds);
+    chosen: [..] Value_Id; chosen.allocator = temp;
     for p: preds {
         pbi := block_terminator(p);
         if inst_op(pbi) != .CONDBR continue;
-        fatal("loop-simplify: foldBranchToCommonDest (SimplifyCFG) is not implemented yet");
+        if !safe_to_merge_terminators(bi, pbi) continue;
+        ok, _, _, _ := should_fold_cond_branches_to_common_destination(bi, pbi);
+        if !ok continue;
+        array_add(*chosen, p);
     }
-    return false;
+    if chosen.count == 0 return false;
+    num_bonus := 0;
+    for i: block_insts(bb) {
+        if i == c continue;
+        if inst_op(i) == .BR || inst_op(i) == .CONDBR continue;
+        if call_iid(i) == IID_PSEUDOPROBE continue;
+        fatal("loop-simplify: foldBranchToCommonDest with bonus instructions is not implemented yet");
+    }
+    return perform_branch_to_common_dest_folding(bi, block_terminator(chosen[0]), mssau);
+}
+
+// incomingValuesAreCompatible / safeToMergeTerminators
+safe_to_merge_terminators :: (si1: Value_Id, si2: Value_Id) -> bool {
+    if si1 == si2 return false;
+    b1 := inst_block(si1); b2 := inst_block(si2);
+    s1: [..] Value_Id; s1.allocator = temp;
+    block_successors(b1, *s1);
+    s2: [..] Value_Id; s2.allocator = temp;
+    block_successors(b2, *s2);
+    for s: s2 {
+        found := false;
+        for s1 if it == s found = true;
+        if !found continue;
+        for pn: block_insts(s) {
+            if inst_op(pn) != .PHI break;
+            if phi_incoming_value_for_block(pn, b1) != phi_incoming_value_for_block(pn, b2) return false;
+        }
+    }
+    return true;
+}
+
+// shouldFoldCondBranchesToCommonDestination(BI, PBI, TTI = nullptr): (ok, CommonSucc, Opc, InvertPredCond)
+should_fold_cond_branches_to_common_destination :: (bi: Value_Id, pbi: Value_Id) -> (bool, Value_Id, Opcode, bool) {
+    if get_successor(pbi, 0) == get_successor(bi, 0) return true, get_successor(bi, 0), .OR, false;
+    if get_successor(pbi, 1) == get_successor(bi, 1) return true, get_successor(bi, 1), .AND, false;
+    if get_successor(pbi, 0) == get_successor(bi, 1) return true, get_successor(bi, 1), .AND, true;
+    if get_successor(pbi, 1) == get_successor(bi, 0) return true, get_successor(bi, 0), .OR, true;
+    return false, NONE, .AND, false;
+}
+
+// Instruction::dropUBImplyingAttrsAndMetadata
+drop_ub_implying_attrs_and_metadata :: (i: Value_Id) {
+    drop_ub_implying_metadata(i);
+    if is_call_base(i) && inst(i).attrs != 0 fatal("dropUBImplyingAttrsAndMetadata of a call is not implemented yet");
+}
+
+// performBranchToCommonDestFolding(BI, PBI, DTU = nullptr, MSSAU, TTI = nullptr)
+perform_branch_to_common_dest_folding :: (bi: Value_Id, pbi: Value_Id, mssau: *Mssa_Updater) -> bool {
+    bb := inst_block(bi);
+    pred := inst_block(pbi);
+    _, common, opc, invert := should_fold_cond_branches_to_common_destination(bi, pbi);
+    b: Irb;
+    irb_set_before(*b, pbi);
+    annotation := get_metadata(block_terminator(bb), md_kind_id("annotation"));
+    if annotation != NONE fatal("foldBranchToCommonDest with !annotation metadata is not implemented yet");
+    if invert {
+        // InvertBranch(PBI, Builder)
+        nc := op(pbi, 0);
+        if num_uses(nc) == 1 && (is_inst(nc) && (inst_op(nc) == .ICMP || inst_op(nc) == .FCMP)) {
+            inst(nc).pred = cmp_inverse(inst(nc).pred);
+        } else {
+            assert(type_kind(vtype(nc)) == .INT && type_int_width(vtype(nc)) == 1);
+            nc = irb_binop(*b, .XOR, nc, const_int(vtype(nc), 1), tprint("%.not", vname(nc)));   // CreateNot
+        }
+        set_op(pbi, 0, nc);
+        condbr_swap_successors(pbi);
+    }
+    unique_succ := ifx get_successor(pbi, 0) == bb then get_successor(bi, 0) else get_successor(bi, 1);
+    // addPredecessorToBlock(UniqueSucc, PredBlock, BB, MSSAU)
+    for pn: block_insts(unique_succ) {
+        if inst_op(pn) != .PHI break;
+        phi_add_incoming(pn, phi_incoming_value_for_block(pn, bb), pred);
+    }
+    if mssau fatal("foldBranchToCommonDest with MemorySSA is not implemented yet");
+    pw := branch_weights_of(pbi);
+    sw := branch_weights_of(bi);
+    if pw != NONE || sw != NONE fatal("foldBranchToCommonDest with branch weights is not implemented yet");
+    set_metadata(pbi, md_kind_id("prof"), NONE);
+    set_successor(pbi, ifx get_successor(pbi, 0) != bb then cast(u32) 1 else 0, unique_succ);
+    loop_md := get_metadata(bi, MD_LOOP_KIND);
+    if loop_md != NONE set_metadata(pbi, MD_LOOP_KIND, loop_md);
+    // cloneInstructionsIntoPredecessorBlockAndUpdateSSAUses
+    vm: Table(Value_Id, Value_Id); vm.allocator = temp;
+    pti := block_terminator(pred);
+    cloned: [..] u32; cloned.allocator = temp;
+    for bonus: block_insts(bb) {
+        if is_terminator(inst_op(bonus)) continue;
+        if call_iid(bonus) == IID_PSEUDOPROBE continue;
+        nb := inst_clone(bonus);
+        nl := get_metadata(nb, 0); pl := get_metadata(pti, 0);
+        same := nl == pl || ((nl != NONE) == (pl != NONE) && nl != NONE && diloc_line(nl) == diloc_line(pl) &&
+                diloc_col(nl) == diloc_col(pl) && diloc_scope(nl) == diloc_scope(pl) && diloc_inlined_at(nl) == diloc_inlined_at(pl));
+        if !same set_metadata(nb, 0, NONE);
+        else if nl != NONE && di_int(nl, 3) != 0 fatal("foldBranchToCommonDest: key-instruction atom groups are not implemented yet");
+        n := nops(nb);
+        if n > 0 for k: 0..n-1 { found, nv := table_find(*vm, op(nb, k)); if found set_op(nb, k, nv); }
+        drop_ub_implying_attrs_and_metadata(nb);
+        insert_at_position(nb, pred, pti, false);
+        if inst(bonus).records {
+            clone_debug_info_from(nb, bonus, inst(bonus).records, *cloned);
+            remap_dbg_records(cloned, *vm);
+        }
+        take_name(nb, bonus);
+        if vname(nb).count set_name(bonus, tprint("%.old", vname(nb)));
+        table_set(*vm, bonus, nb);
+        u := ir.v_first_use[bonus];
+        while u != NONE {
+            nx := ir.u_next[u];
+            user := ir.u_user[u];
+            if inst_op(user) == .PHI && ir.u_aux[u] != bb use_set(u, nb);
+            u = nx;
+        }
+    }
+    ptl := get_metadata(pti, 0);
+    if ptl != NONE && di_int(ptl, 3) != 0 fatal("foldBranchToCommonDest: key-instruction atom groups are not implemented yet");
+    // PredBlock->getTerminator()->cloneDebugInfoFrom(BB->getTerminator()) + RemapDbgRecord
+    if inst(bi).records {
+        clone_debug_info_from(block_terminator(pred), bi, inst(bi).records, *cloned);
+        remap_dbg_records(cloned, *vm);
+    }
+    found, bic := table_find(*vm, op(bi, 0));
+    if !found bic = op(bi, 0);
+    // createLogicalOp(Builder, Opc, PBI->getCondition(), BICond, "or.cond")
+    lhs := op(pbi, 0);
+    nc: Value_Id;
+    if implies_poison(bic, lhs) nc = irb_binop(*b, opc, lhs, bic, "or.cond");
+    else if opc == .AND nc = irb_select(*b, lhs, bic, const_int(vtype(lhs), 0), "or.cond");
+    else nc = irb_select(*b, lhs, const_int(vtype(lhs), 1), bic, "or.cond");
+    set_op(pbi, 0, nc);
+    return true;
+}
+
+// BasicBlock::eraseFromParent of a block that still has instructions (dropAllReferences first)
+erase_block_with_insts :: (b: Value_Id) {
+    for block_insts(b) drop_all_references(it);
+    erase_block(b);
 }
 
 // LoopInfo::replacementPreservesLCSSAForm

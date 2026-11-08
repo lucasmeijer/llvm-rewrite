@@ -268,3 +268,6 @@ IID_EXPERIMENTAL_CONSTRAINED_LOG :: #run iid_by_name("llvm.experimental.constrai
 IID_EXPERIMENTAL_CONSTRAINED_LOG10 :: #run iid_by_name("llvm.experimental.constrained.log10");
 IID_EXPERIMENTAL_CONSTRAINED_LOG2 :: #run iid_by_name("llvm.experimental.constrained.log2");
 IID_FPTRUNC_ROUND :: #run iid_by_name("llvm.fptrunc.round");
+IID_ANNOTATION :: #run iid_by_name("llvm.annotation");
+IID_EXPERIMENTAL_CONVERGENCE_LOOP :: #run iid_by_name("llvm.experimental.convergence.loop");
+IID_EXPERIMENTAL_CONVERGENCE_ENTRY :: #run iid_by_name("llvm.experimental.convergence.entry");

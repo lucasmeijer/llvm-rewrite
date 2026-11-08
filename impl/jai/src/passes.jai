@@ -239,6 +239,9 @@ PASS_TABLE :: Pass_Info.[
     .{"invalidate<cycles>", .FUNCTION, .INVALIDATE, true, .CYCLES},
     // LoopVerifierPass / CycleInfoVerifierPass: assertions only in a release build (getResult and nothing else)
     .{"verify<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
+    // TargetIRAnalysis / TargetLibraryAnalysis: no cached state here
+    .{"require<target-ir>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
+    .{"require<target-lib-info>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"verify<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
 ];
 
@@ -248,6 +251,8 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if pass_table.count == 0 for PASS_TABLE array_add(*pass_table, it);
     for * pass_table if it.name == name return it;
     if begins_with(name, "instcombine<") return lookup_pass("instcombine");
+    // passes whose parameters are parsed by the pass itself (LOOP_PASS_WITH_PARAMS)
+    if begins_with(name, "loop-rotate<") && name[name.count - 1] == #char ">" return lookup_pass("loop-rotate");
     return null;
 }
 
@@ -511,8 +516,11 @@ cl_data_layout: string;                  // opt -data-layout (overrides the modu
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(11 + AA_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
-    add_aa_cl_opts(list, 11);
+    list := NewArray(14 + AA_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    add_aa_cl_opts(list, 14);
+    list[11] = .{"rotation-max-header-size", .INT, null, *lr_opts.rotation_max_header_size, null};
+    list[12] = .{"rotation-prepare-for-lto", .BOOL, *lr_opts.rotation_prepare_for_lto, null, null};
+    list[13] = .{"enable-loop-header-duplication-at-minsize", .BOOL, *lr_opts.enable_header_dup_at_minsize, null, null};
     list[9] = .{"verify-loop-info", .BOOL, *opts.verify_loop_info, null, null};
     list[10] = .{"verify-loop-lcssa", .BOOL, *opts.verify_loop_lcssa, null, null};
     list[0] = .{"adce-remove-control-flow", .BOOL, *opts.adce_remove_control_flow, null, null};
