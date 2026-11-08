@@ -1228,9 +1228,19 @@ known_bits_from_cond :: (v: Value_Id, cond: Value_Id, known: *Known_Bits, q: Sim
     }
 }
 
-// computeKnownBitsFromContext (no CondContext / DomConditionCache)
+// computeKnownBitsFromContext (no CondContext)
 known_bits_from_context :: (v: Value_Id, known: *Known_Bits, q: Simplify_Query, depth: u32) {
     if q.cxt == NONE return;
+    if q.dc && q.dt {
+        cb := inst_block(q.cxt);
+        for br: dc_conditions_for(q.dc, v) {
+            if vkind(br) == .DEAD continue;
+            bb := inst_block(br);
+            if dt_dominates_edge_block(q.dt, bb, get_successor(br, 0), cb) known_bits_from_cond(v, op(br, 0), known, q, false, depth);
+            if dt_dominates_edge_block(q.dt, bb, get_successor(br, 1), cb) known_bits_from_cond(v, op(br, 0), known, q, true, depth);
+        }
+        if kb_has_conflict(known.*) kb_reset_all(known);
+    }
     if !q.ac return;
     bits := kb_bits(known.*);
     for e: ac_assumptions_for(q.ac, v) {
@@ -1335,6 +1345,15 @@ is_known_to_be_a_power_of_two :: (v: Value_Id, or_zero: bool, q: Simplify_Query,
             if vkind(e.assume) == .DEAD continue;
             i := e.assume;
             if is_implied_to_be_a_power_of_two_from_cond(v, or_zero, op(i, 0), true) && is_valid_assume_q(i, q) return true;
+        }
+    }
+    if q.dc && q.cxt != NONE && q.dt {
+        cb := inst_block(q.cxt);
+        for br: dc_conditions_for(q.dc, v) {
+            if vkind(br) == .DEAD continue;
+            c := op(br, 0); bb := inst_block(br);
+            if is_implied_to_be_a_power_of_two_from_cond(v, or_zero, c, true) && dt_dominates_edge_block(q.dt, bb, get_successor(br, 0), cb) return true;
+            if is_implied_to_be_a_power_of_two_from_cond(v, or_zero, c, false) && dt_dominates_edge_block(q.dt, bb, get_successor(br, 1), cb) return true;
         }
     }
     if !is_inst(v) return false;

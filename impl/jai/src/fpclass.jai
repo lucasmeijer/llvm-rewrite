@@ -783,10 +783,19 @@ fpc_elementwise_bitcast_inst :: (v: Value_Id) -> (bool, Value_Id) {
     if is_vector_type(st) && (type_count(st) != type_count(dt) || type_kind(st) != type_kind(dt)) return false, NONE;
     return true, op(v, 0);
 }
-// computeKnownFPClassFromContext (no DomConditionCache / CondContext)
+// computeKnownFPClassFromContext (no CondContext)
 compute_known_fp_class_from_context :: (v: Value_Id, q: Simplify_Query) -> Known_FP_Class {
     known: Known_FP_Class;
     if q.cxt == NONE return known;
+    if q.dc && q.dt {
+        cb := inst_block(q.cxt);
+        for br: dc_conditions_for(q.dc, v) {
+            if vkind(br) == .DEAD continue;
+            c := op(br, 0); bb := inst_block(br);
+            if dt_dominates_edge_block(q.dt, bb, get_successor(br, 0), cb) compute_known_fp_class_from_cond(v, c, true, q.cxt, *known);
+            if dt_dominates_edge_block(q.dt, bb, get_successor(br, 1), cb) compute_known_fp_class_from_cond(v, c, false, q.cxt, *known);
+        }
+    }
     if q.ac == null return known;
     for ac_assumptions_for(q.ac, v) {
         a := it.assume;

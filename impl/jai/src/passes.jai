@@ -170,7 +170,7 @@ Pass_Kind :: enum u8 {
     // analysis utilities (required: they run on optnone functions and don't count for -opt-bisect-limit)
     REQUIRE; INVALIDATE; PRINT_DOMTREE; PRINT_POSTDOMTREE; PRINT_DEMANDED_BITS; NO_OP_FUNCTION; NO_OP_MODULE;
     // transforms
-    DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG; INSTSIMPLIFY; SROA;
+    DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG; INSTSIMPLIFY; SROA; INSTCOMBINE;
     // alias analysis (aa.jai)
     AA_EVAL; REQUIRE_GLOBALS_AA; PRINT_MEMORYSSA; PRINT_MEMORYSSA_NO_OPT; PRINT_MEMORYSSA_WALKER;
     // loops (loop_info.jai, cycle_info.jai)
@@ -204,6 +204,7 @@ PASS_TABLE :: Pass_Info.[
     .{"sroa<aggregate-to-vector;modify-cfg>", .FUNCTION, .SROA, false, .DOMTREE},
     .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
+    .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},   // also instcombine<...> (lookup_pass)
     .{"verify", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},   // VerifierPass (module & function): nothing to report on valid IR
     .{"require<assumptions>", .FUNCTION, .REQUIRE, true, .ASSUMPTIONS},
     .{"invalidate<assumptions>", .FUNCTION, .INVALIDATE, true, .ASSUMPTIONS},
@@ -242,6 +243,7 @@ pass_table: [..] Pass_Info;   // PASS_TABLE copied into memory, so that pointers
 lookup_pass :: (name: string) -> *Pass_Info {
     if pass_table.count == 0 for PASS_TABLE array_add(*pass_table, it);
     for * pass_table if it.name == name return it;
+    if begins_with(name, "instcombine<") return lookup_pass("instcombine");
     return null;
 }
 
@@ -584,6 +586,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .MEM2REG; return mem2reg_run(f);
         case .INSTSIMPLIFY; return instsimplify_run(f);
         case .SROA; return sroa_run(f, node.name);
+        case .INSTCOMBINE; return instcombine_run(f, node.name);
         case .AA_EVAL;
             sb: String_Builder; sb.allocator = temp;
             aa_eval_run(f, aa_eval_counts_for(node), *sb);

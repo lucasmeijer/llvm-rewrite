@@ -17,7 +17,37 @@ Simplify_Query :: struct {
     can_use_undef := true;
     allow_ephemerals := false;
     have_tli := true;            // a TargetLibraryInfo is available (instsimplify passes one)
+    dc: *Dom_Cond_Cache;         // DomConditionCache (InstCombine); may be null
 }
+
+// DomConditionCache (llvm/lib/Analysis/DomConditionCache.cpp): affected value -> conditional branches whose condition
+// says something about it, in registration order.
+Dom_Cond_Cache :: struct {
+    affected: Table(Value_Id, [..] Value_Id);
+}
+// DomConditionCache::registerBranch
+dc_register_branch :: (dc: *Dom_Cond_Cache, br: Value_Id) {
+    aff: [..] Affected; aff.allocator = temp;
+    find_values_affected_by_condition(op(br, 0), false, *aff, 0);
+    for aff {
+        p := table_find_pointer(*dc.affected, it.v);
+        if !p {
+            empty: [..] Value_Id; empty.allocator = temp;
+            table_set(*dc.affected, it.v, empty);
+            p = table_find_pointer(*dc.affected, it.v);
+        }
+        dup := false;
+        for x: p.* if x == br { dup = true; break; }
+        if !dup array_add(p, br);
+    }
+}
+dc_conditions_for :: (dc: *Dom_Cond_Cache, v: Value_Id) -> [] Value_Id {
+    if !dc return .[];
+    p := table_find_pointer(*dc.affected, v);
+    if !p return .[];
+    return p.*;
+}
+dc_remove_value :: (dc: *Dom_Cond_Cache, v: Value_Id) { if dc table_remove(*dc.affected, v); }
 sq_with_instruction :: (q: Simplify_Query, i: Value_Id) -> Simplify_Query { r := q; r.cxt = i; return r; }
 sq_without_undef :: (q: Simplify_Query) -> Simplify_Query { r := q; r.can_use_undef = false; return r; }
 // SimplifyQuery::isUndefValue

@@ -350,6 +350,19 @@ is_non_equal_pointers_with_recursive_gep :: (a: Value_Id, b_in: Value_Id, q: Sim
 }
 is_known_non_equal_from_context :: (v1: Value_Id, v2: Value_Id, q: Simplify_Query, depth: u32) -> bool {
     if q.cxt == NONE return false;
+    if q.dc && q.dt {
+        cb := inst_block(q.cxt);
+        from_dom :: (v: Value_Id, v1: Value_Id, v2: Value_Id, q: Simplify_Query, depth: u32, cb: Value_Id) -> bool {
+            for br: dc_conditions_for(q.dc, v) {
+                if vkind(br) == .DEAD continue;
+                c := op(br, 0); bb := inst_block(br);
+                if dt_dominates_edge_block(q.dt, bb, get_successor(br, 0), cb) && is_implied_condition_pred(c, ICMP_NE, false, v1, v2, true, depth) == 1 return true;
+                if dt_dominates_edge_block(q.dt, bb, get_successor(br, 1), cb) && is_implied_condition_pred(c, ICMP_NE, false, v1, v2, false, depth) == 1 return true;
+            }
+            return false;
+        }
+        if from_dom(v1, v1, v2, q, depth, cb) || from_dom(v2, v1, v2, q, depth, cb) return true;
+    }
     if !q.ac return false;
     for e: ac_assumptions_for(q.ac, v1) {
         if vkind(e.assume) == .DEAD continue;
