@@ -20,14 +20,16 @@ src/
 ## 1. Ids and the world
 
 ```jai
-Type_Id  :: #type,distinct u32;     // index into the type table
-Value_Id :: #type,distinct u32;     // index into the value table (constants, globals, args, blocks, instructions)
-Use_Id   :: #type,distinct u32;     // index into the use (operand) table
-Md_Id    :: #type,distinct u32;     // index into the metadata table
-Attr_Set :: #type,distinct u32;     // interned, sorted attribute set; 0 = empty
-Attr_List:: #type,distinct u32;     // interned (fn, ret, params...) list of Attr_Sets; 0 = empty
+Type_Id  :: u32;     // index into the type table
+Value_Id :: u32;     // index into the value table (constants, globals, args, blocks, instructions)
+Use_Id   :: u32;     // index into the use (operand) table
+Md_Id    :: u32;     // index into the metadata table
+// attribute sets and lists are u32 indices too: 0 = empty
 NONE     :: 0xFFFF_FFFF;
 ```
+
+(Plain aliases, not `#type,distinct`: distinct types need a cast at every table index, which made the code
+noisy. The names still document intent.)
 
 There is one global `IR` struct per process (the equivalent of `LLVMContext` + `Module`s). It owns every table.
 Modules (for `llvm-link`) are lists of global-value ids inside the same world, so types and constants are shared
@@ -51,7 +53,8 @@ never from id values**, except where LLVM itself orders by creation (§6).
 
 Side tables, one row per entity of that kind, also SoA:
 
-- **Instructions** `i_*`: `opcode` (u8 enum, LLVM's `Instruction::` opcodes), `sub` (u32 "subclass data": wrap
+- **Instructions** (`ir.insts`, one `Inst_Row` struct per instruction; the per-opcode payload is folded into the
+  same fixed-width row rather than separate side tables): `opcode` (u8 enum, LLVM's `Instruction::` opcodes), `sub` (u32 "subclass data": wrap
   flags nuw/nsw, exact, disjoint, nneg, samesign, fast-math flags, predicate, atomic orderings, volatile, tail kind,
   calling conv, alignment log2…), `parent` (block Value_Id), `prev`/`next` (intrusive list inside the block),
   `extra` (u32 index into per-opcode payload arrays, e.g. GEP/alloca source type, call function type + `Attr_List`,
@@ -99,6 +102,11 @@ interned by content in a `Table`; distinct nodes never are. Instruction/global a
 `(kind_id, Md_Id, next)` in an `attach` table. Kind ids: the fixed kinds of `FixedMetadataKinds.def` (dbg = 0,
 tbaa = 1, …) pre-registered, custom kinds registered in order of first appearance, exactly like `LLVMContext`.
 Named metadata is an ordered array of `(name, [Md_Id])` on the module.
+
+The parser hands out one placeholder node per `!N` reference and resolves them all at the end of the module
+(distinct nodes first get their row so self-references work; uniqued nodes are interned after their operands are
+resolved, so two textually different but equal nodes merge as in LLVM), then rewrites every reference
+(attachments, node operands, named metadata, `metadata` operands of calls).
 
 ## 3. Use lists — reproducing LLVM's order
 

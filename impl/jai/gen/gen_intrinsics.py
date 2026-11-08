@@ -19,8 +19,19 @@ OPT = '/opt/llvm-23.1.5/bin/opt'
 
 names = set()
 for f in ['Intrinsics.td', 'IntrinsicsX86.td']:
-    for m in re.finditer(r'^\s*def\s+int_([A-Za-z0-9_]+)\s*:', open(TD + f).read(), re.M):
-        names.add('llvm.' + m.group(1).replace('_', '.'))
+    src = open(TD + f).read()
+    for m in re.finditer(r'^\s*def\s+int_([A-Za-z0-9_]+)\s*:', src, re.M):
+        # the record body runs to the next ';' at bracket depth 0; an explicit "llvm.*" string names it
+        i, depth = m.end(), 0
+        while i < len(src):
+            c = src[i]
+            if c in '<([{': depth += 1
+            elif c in '>)]}': depth -= 1
+            elif c == ';' and depth <= 0: break
+            i += 1
+        body = src[m.end():i]
+        explicit = re.search(r'"(llvm\.[A-Za-z0-9_.]+)"', body)
+        names.add(explicit.group(1) if explicit else 'llvm.' + m.group(1).replace('_', '.'))
 
 def lookup(name):
     # longest intrinsic name that equals `name` or is a prefix followed by '.'

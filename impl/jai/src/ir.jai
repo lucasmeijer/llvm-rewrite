@@ -336,7 +336,10 @@ key_str :: (k: *Key, s: string) {
 key_view :: inline (k: *Key) -> string { s: string; s.data = k.buf.data; s.count = k.buf.count; return s; }
 key_copy :: inline (k: *Key) -> string { return copy_string(key_view(k)); }
 
-tmp_key: Key;
+tmp_key: Key;     // constants
+type_key: Key;    // types
+md_key: Key;      // metadata
+attr_key_buf: Key; // attributes
 
 // ---------------------------------------------------------------- strings
 
@@ -351,7 +354,7 @@ new_type_row :: (row: Type_Row) -> Type_Id {
 }
 
 intern_type :: (kind: Type_Kind, flags: u8, a: u64, subs: [] Type_Id) -> Type_Id {
-    k := *tmp_key; key_reset(k);
+    k := *type_key; key_reset(k);
     key_u8(k, cast(u8) kind); key_u8(k, flags); key_u64(k, a);
     for subs key_u32(k, it);
     found, id := table_find(*ir.type_map, key_view(k));
@@ -1078,7 +1081,7 @@ md_kind_id :: (name: string) -> u32 {
 }
 
 md_string :: (s: string) -> Md_Id {
-    k := *tmp_key; key_reset(k); key_u8(k, 0); key_str(k, s);
+    k := *md_key; key_reset(k); key_u8(k, 0); key_str(k, s);
     found, id := table_find(*ir.md_map, key_view(k));
     if found return id;
     row: Md_Row; row.kind = .STRING; row.str = intern_str(s);
@@ -1089,7 +1092,7 @@ md_string :: (s: string) -> Md_Id {
 }
 
 md_value :: (v: Value_Id) -> Md_Id {
-    k := *tmp_key; key_reset(k); key_u8(k, 1); key_u32(k, v);
+    k := *md_key; key_reset(k); key_u8(k, 1); key_u32(k, v);
     found, id := table_find(*ir.md_map, key_view(k));
     if found return id;
     row: Md_Row; row.kind = .VALUE; row.value = v;
@@ -1100,7 +1103,7 @@ md_value :: (v: Value_Id) -> Md_Id {
 }
 
 md_tuple :: (ops: [] Md_Id, distinct: bool) -> Md_Id {
-    k := *tmp_key;
+    k := *md_key;
     if !distinct {
         key_reset(k); key_u8(k, 2);
         for ops key_u32(k, it);
@@ -1218,7 +1221,7 @@ attr_set_get :: (attrs_in: [] Attr) -> u32 {
         while j >= 0 && attr_less(*x, *attrs[j]) { attrs[j + 1] = attrs[j]; j -= 1; }
         attrs[j + 1] = x;
     }
-    k := *tmp_key; key_reset(k);
+    k := *attr_key_buf; key_reset(k);
     for * attrs attr_key(k, it);
     found, id := table_find(*ir.attr_set_map, key_view(k));
     if found return id;
@@ -1278,7 +1281,7 @@ attr_list_get :: (fn: u32, ret: u32, params_in: [] u32) -> u32 {
     np := params_in.count;
     while np > 0 && params_in[np - 1] == 0 np -= 1;
     if fn == 0 && ret == 0 && np == 0 return 0;
-    k := *tmp_key; key_reset(k);
+    k := *attr_key_buf; key_reset(k);
     key_u32(k, fn); key_u32(k, ret);
     if np > 0 for i: 0..np-1 key_u32(k, params_in[i]);
     found, id := table_find(*ir.attr_list_map, key_view(k));

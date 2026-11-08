@@ -62,6 +62,7 @@ tests/e2e/O0/memory/pointers.ll::roundtrip
 tests/e2e/O0/memory/static_local_volatile.ll::roundtrip
 tests/e2e/O0/memory/vla_alloca.ll::roundtrip
 tests/e2e/O0/misc/complex_numbers.ll::roundtrip
+tests/e2e/O0/misc/computed_goto.ll::roundtrip
 tests/e2e/O0/misc/crc32.ll::roundtrip
 tests/e2e/O0/misc/hash_table.ll::roundtrip
 tests/e2e/O0/misc/setjmp_longjmp.ll::roundtrip
@@ -89,6 +90,7 @@ tests/e2e/O0/test-suite/SingleSource/Benchmarks/Linpack/linpack-pc.ll::roundtrip
 tests/e2e/O0/test-suite/SingleSource/Benchmarks/McGill/exptree.ll::roundtrip
 tests/e2e/O0/test-suite/SingleSource/Benchmarks/McGill/queens.ll::roundtrip
 tests/e2e/O0/test-suite/SingleSource/Benchmarks/Misc/ReedSolomon.ll::roundtrip
+tests/e2e/O0/test-suite/SingleSource/Benchmarks/Misc/evalloop.ll::roundtrip
 tests/e2e/O0/test-suite/SingleSource/Benchmarks/Misc/fbench.ll::roundtrip
 tests/e2e/O0/test-suite/SingleSource/Benchmarks/Misc/ffbench.ll::roundtrip
 tests/e2e/O0/test-suite/SingleSource/Benchmarks/Misc/flops-1.ll::roundtrip
@@ -141,6 +143,7 @@ tests/e2e/O0/test-suite/SingleSource/Regression/C/2003-06-16-InvalidInitializer.
 tests/e2e/O0/test-suite/SingleSource/Regression/C/2003-06-16-VolatileError.ll::roundtrip
 tests/e2e/O0/test-suite/SingleSource/Regression/C/2003-10-12-GlobalVarInitializers.ll::roundtrip
 tests/e2e/O0/test-suite/SingleSource/Regression/C/2004-02-03-AggregateCopy.ll::roundtrip
+tests/e2e/O0/test-suite/SingleSource/Regression/C/2004-03-15-IndirectGoto.ll::roundtrip
 tests/e2e/O0/test-suite/SingleSource/Regression/C/2004-08-12-InlinerAndAllocas.ll::roundtrip
 tests/e2e/O0/test-suite/SingleSource/Regression/C/2005-05-06-LongLongSignedShift.ll::roundtrip
 tests/e2e/O0/test-suite/SingleSource/Regression/C/2008-01-07-LongDouble.ll::roundtrip
@@ -264,6 +267,7 @@ tests/e2e/O2/calls/many_args.ll::roundtrip
 tests/e2e/O2/calls/mixed_int_float_args.ll::roundtrip
 tests/e2e/O2/calls/recursion.ll::roundtrip
 tests/e2e/O2/calls/simple_call.ll::roundtrip
+tests/e2e/O2/calls/varargs.ll::roundtrip
 tests/e2e/O2/control/break_continue_goto.ll::roundtrip
 tests/e2e/O2/control/if_else.ll::roundtrip
 tests/e2e/O2/control/nested_loops.ll::roundtrip
@@ -291,6 +295,7 @@ tests/e2e/O2/memory/pointers.ll::roundtrip
 tests/e2e/O2/memory/static_local_volatile.ll::roundtrip
 tests/e2e/O2/memory/vla_alloca.ll::roundtrip
 tests/e2e/O2/misc/complex_numbers.ll::roundtrip
+tests/e2e/O2/misc/computed_goto.ll::roundtrip
 tests/e2e/O2/misc/crc32.ll::roundtrip
 tests/e2e/O2/misc/hash_table.ll::roundtrip
 tests/e2e/O2/misc/setjmp_longjmp.ll::roundtrip
@@ -318,6 +323,7 @@ tests/e2e/O2/test-suite/SingleSource/Benchmarks/Linpack/linpack-pc.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Benchmarks/McGill/exptree.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Benchmarks/McGill/queens.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Benchmarks/Misc/ReedSolomon.ll::roundtrip
+tests/e2e/O2/test-suite/SingleSource/Benchmarks/Misc/evalloop.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Benchmarks/Misc/fbench.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Benchmarks/Misc/ffbench.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Benchmarks/Misc/flops-1.ll::roundtrip
@@ -370,6 +376,7 @@ tests/e2e/O2/test-suite/SingleSource/Regression/C/2003-06-16-InvalidInitializer.
 tests/e2e/O2/test-suite/SingleSource/Regression/C/2003-06-16-VolatileError.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Regression/C/2003-10-12-GlobalVarInitializers.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Regression/C/2004-02-03-AggregateCopy.ll::roundtrip
+tests/e2e/O2/test-suite/SingleSource/Regression/C/2004-03-15-IndirectGoto.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Regression/C/2004-08-12-InlinerAndAllocas.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Regression/C/2005-05-06-LongLongSignedShift.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Regression/C/2008-01-07-LongDouble.ll::roundtrip
@@ -377,6 +384,7 @@ tests/e2e/O2/test-suite/SingleSource/Regression/C/ConstructorDestructorAttribute
 tests/e2e/O2/test-suite/SingleSource/Regression/C/DuffsDevice.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Regression/C/PR1386.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Regression/C/PR491.ll::roundtrip
+tests/e2e/O2/test-suite/SingleSource/Regression/C/PR640.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Regression/C/bigstack.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Regression/C/callargs.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/Regression/C/casts.ll::roundtrip
@@ -409,12 +417,14 @@ tests/e2e/O2/test-suite/SingleSource/UnitTests/2002-10-13-BadLoad.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2002-12-13-MishaTest.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-04-22-Switch.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-05-02-DependentPHI.ll::roundtrip
+tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-05-07-VarArgs.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-05-12-MinIntProblem.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-05-14-AtExit.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-05-31-CastToBool.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-07-08-BitOpsTest.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-07-10-SignConversions.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-08-05-CastFPToUint.ll::roundtrip
+tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-08-11-VaListArg.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-08-20-FoldBug.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-09-18-BitFieldTest.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2003-10-13-SwitchTest.ll::roundtrip
@@ -434,6 +444,7 @@ tests/e2e/O2/test-suite/SingleSource/UnitTests/2006-12-01-float_varg.ll::roundtr
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2006-12-07-Compare64BitConstant.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2006-12-11-LoadConstants.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2007-01-04-KNR-Args.ll::roundtrip
+tests/e2e/O2/test-suite/SingleSource/UnitTests/2007-03-02-VaCopy.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2007-04-10-BitfieldTest.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2007-04-25-weak.ll::roundtrip
 tests/e2e/O2/test-suite/SingleSource/UnitTests/2008-04-18-LoopBug.ll::roundtrip
@@ -517,6 +528,7 @@ tests/e2e/pipeline/memory/pointers.ll::roundtrip
 tests/e2e/pipeline/memory/static_local_volatile.ll::roundtrip
 tests/e2e/pipeline/memory/vla_alloca.ll::roundtrip
 tests/e2e/pipeline/misc/complex_numbers.ll::roundtrip
+tests/e2e/pipeline/misc/computed_goto.ll::roundtrip
 tests/e2e/pipeline/misc/crc32.ll::roundtrip
 tests/e2e/pipeline/misc/hash_table.ll::roundtrip
 tests/e2e/pipeline/misc/setjmp_longjmp.ll::roundtrip
@@ -544,6 +556,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Linpack/linpack-pc.ll::rou
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/exptree.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/queens.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/ReedSolomon.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/evalloop.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/fbench.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/ffbench.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/flops-1.ll::roundtrip
@@ -596,6 +609,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2003-06-16-InvalidInitia
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2003-06-16-VolatileError.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2003-10-12-GlobalVarInitializers.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2004-02-03-AggregateCopy.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2004-03-15-IndirectGoto.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2004-08-12-InlinerAndAllocas.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2005-05-06-LongLongSignedShift.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2008-01-07-LongDouble.ll::roundtrip
@@ -715,6 +729,7 @@ tests/function/O0/memory/buffers.ll::roundtrip
 tests/function/O2/abi/callbacks.ll::roundtrip
 tests/function/O2/abi/many_args.ll::roundtrip
 tests/function/O2/abi/struct_shapes.ll::roundtrip
+tests/function/O2/abi/varargs_callee.ll::roundtrip
 tests/function/O2/arith/float_ops.ll::roundtrip
 tests/function/O2/arith/int_ops.ll::roundtrip
 tests/function/O2/control/switches.ll::roundtrip
@@ -1596,9 +1611,11 @@ tests/imported/llvm/Transforms/CallSiteSplitting/noduplicate.ll::roundtrip
 tests/imported/llvm/Transforms/CallSiteSplitting/split-loop.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/baseoffs-sext-bug.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/codegenprepare-hang-bitcast-phi.ll::roundtrip
+tests/imported/llvm/Transforms/CodeGenPrepare/X86/computedgoto.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/cttz-ctlz.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/delete-assume-dead-code.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/extend-sink-hoist.ll::roundtrip
+tests/imported/llvm/Transforms/CodeGenPrepare/X86/gep-unmerging.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/invariant.group.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/nonintegral.ll::roundtrip
 tests/imported/llvm/Transforms/CodeGenPrepare/X86/optimize-ext-uses-nneg.ll::roundtrip
@@ -2033,6 +2050,7 @@ tests/imported/llvm/Transforms/GVN/PRE/preserve-tbaa.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/rle-addrspace-cast.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/rle-phi-translate.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/rle-semidominated.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/PRE/rle.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/volatile.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/addrspacecast.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/assume-equal.ll::roundtrip
@@ -2151,6 +2169,7 @@ tests/imported/llvm/Transforms/GlobalDCE/deadblockaddr.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/externally_available.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/global-ifunc.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/global_ctors_integration.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/indirectbr.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-nonptr.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-null.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-relative-pointers-bad.ll::roundtrip
@@ -2217,6 +2236,7 @@ tests/imported/llvm/Transforms/GlobalOpt/cxx-dtor.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/dead-constant-user.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/dead-store-status.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/deaddeclaration.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalOpt/deadfunction.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/deadglobal-2.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/deadglobal.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/disable-globals-aa.ll::roundtrip
@@ -3146,6 +3166,7 @@ tests/imported/llvm/Transforms/InstCombine/constant-fold-nexttoward-ppc-fp128.ll
 tests/imported/llvm/Transforms/InstCombine/constant-fold-nexttoward-x86-fp80.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/constant-fold-shifts.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/constrained.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/convergent.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/copysign-fneg-fabs.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cos-2.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cos-sin-intrinsic.ll::roundtrip
@@ -3388,6 +3409,7 @@ tests/imported/llvm/Transforms/InstCombine/intptr7.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/inttoptr-add-phi.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/inttoptr-nullptr.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/invariant-load-like-sink.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/invariant-metadata-propagation.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/invariant.group.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/invariant.ll::roundtrip
@@ -4371,6 +4393,8 @@ tests/imported/llvm/Transforms/JumpThreading/guards.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/header-succ.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/implied-cond.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/indirectbr-cast-int-op.ll::roundtrip
+tests/imported/llvm/Transforms/JumpThreading/indirectbr-in-predpred.ll::roundtrip
+tests/imported/llvm/Transforms/JumpThreading/indirectbr.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/induction.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/insert-placeholder-to-prevent-infinite-recursion.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/invalidate-lvi.ll::roundtrip
@@ -4393,6 +4417,7 @@ tests/imported/llvm/Transforms/JumpThreading/pr27840.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/pr33605.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/pr33917.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/pr36133.ll::roundtrip
+tests/imported/llvm/Transforms/JumpThreading/pr40992-indirectbr-folding.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/pr43276.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/pr62908.ll::roundtrip
 tests/imported/llvm/Transforms/JumpThreading/pr63013.ll::roundtrip
@@ -4530,6 +4555,7 @@ tests/imported/llvm/Transforms/LICM/promote-single-thread.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/promote-tls.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/promote-unknown-load.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/read-only-calls.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/read-volatile-register.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/scalar-promote-memmodel.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/scalar-promote-unwind.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/scalar-promote.ll::roundtrip
@@ -4709,6 +4735,7 @@ tests/imported/llvm/Transforms/LoopSimplify/2004-04-13-LoopSimplifyUpdateDomFron
 tests/imported/llvm/Transforms/LoopSimplify/2010-07-15-IncorrectDomFrontierUpdate.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/2010-12-26-PHIInfiniteLoop.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/2011-12-14-LandingpadHeader.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/2012-03-20-indirectbr.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/ashr-crash.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/basictest.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/convergent.ll::roundtrip
@@ -4761,6 +4788,7 @@ tests/imported/llvm/Transforms/LoopUnroll/2011-08-08-PhiUpdate.ll::roundtrip
 tests/imported/llvm/Transforms/LoopUnroll/2011-08-09-IVSimplify.ll::roundtrip
 tests/imported/llvm/Transforms/LoopUnroll/2011-08-09-PhiUpdate.ll::roundtrip
 tests/imported/llvm/Transforms/LoopUnroll/2011-10-01-NoopTrunc.ll::roundtrip
+tests/imported/llvm/Transforms/LoopUnroll/2012-04-09-unroll-indirectbr.ll::roundtrip
 tests/imported/llvm/Transforms/LoopUnroll/FullUnroll.ll::roundtrip
 tests/imported/llvm/Transforms/LoopUnroll/X86/partial.ll::roundtrip
 tests/imported/llvm/Transforms/LoopUnroll/X86/pr46430-inseltpoison.ll::roundtrip
@@ -5620,6 +5648,7 @@ tests/imported/llvm/Transforms/SCCP/conditions-ranges.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/constant-range-struct.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/constant-struct.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/crash.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/dangling-block-address.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/deadarg.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/definite-initializer.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/divrem-crash.ll::roundtrip
@@ -5633,6 +5662,7 @@ tests/imported/llvm/Transforms/SCCP/freeze.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/gep-nuw.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/global.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/implicit-ref-propagation.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/indirectbr.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/int-phis.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/ip-add-range-to-call.ll::roundtrip
@@ -5645,6 +5675,7 @@ tests/imported/llvm/Transforms/SCCP/ip-ranges-select.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/ip-ranges-sext.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/ipsccp-addr-taken.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/ipsccp-basic.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/ipsccp-clear-returned.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/ipsccp-cycles.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/ipsccp-noundef.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/ipsccp-predinfo-order.ll::roundtrip
@@ -6572,6 +6603,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/implied-cond-matching-false-dest.ll::
 tests/imported/llvm/Transforms/SimplifyCFG/implied-cond-matching-imm.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/implied-cond-matching.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/implied-cond.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/indirectbr.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/inline-asm-sink.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/invoke.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/invoke_unwind.ll::roundtrip
@@ -6650,6 +6682,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/speculate-vector-ops.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-with-offset.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/speculatively-execute-block-profmd.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/suppress-zero-branch-weights.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/switch-branch-fold-indirectbr-102351.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dead-default-lookup-table.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dead-default.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dedup.ll::roundtrip
@@ -6694,6 +6727,7 @@ tests/imported/llvm/Transforms/Sink/call.ll::roundtrip
 tests/imported/llvm/Transforms/Sink/convergent.ll::roundtrip
 tests/imported/llvm/Transforms/Sink/dead-user.ll::roundtrip
 tests/imported/llvm/Transforms/Sink/fence.ll::roundtrip
+tests/imported/llvm/Transforms/Sink/invariant-load.ll::roundtrip
 tests/imported/llvm/Transforms/Sink/landingpad.ll::roundtrip
 tests/imported/llvm/Transforms/Sink/single-succ.ll::roundtrip
 tests/imported/llvm/Transforms/SpeculativeExecution/spec-calls.ll::roundtrip

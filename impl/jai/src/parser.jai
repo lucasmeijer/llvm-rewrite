@@ -311,7 +311,7 @@ parse_target_ext_type :: () -> Type_Id {
         else array_add(*tys, parse_type());
     }
     expect(.RPAREN, "')'");
-    k := *tmp_key; key_reset(k);
+    k := *type_key; key_reset(k);
     key_u8(k, cast(u8) Type_Kind.TARGET_EXT); key_str(k, name);
     for tys key_u32(k, it);
     key_u8(k, 0xFF);
