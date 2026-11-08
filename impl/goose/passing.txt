@@ -7596,7 +7596,9 @@ tests/imported/llvm/Transforms/SROA/scalable-vector-array.ll::opt
 tests/imported/llvm/Transforms/SROA/scalable-vector-array.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/scalable-vector-struct.ll::opt
 tests/imported/llvm/Transforms/SROA/scalable-vector-struct.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/scalable-vectors-with-known-vscale.ll::opt
 tests/imported/llvm/Transforms/SROA/scalable-vectors-with-known-vscale.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/scalable-vectors.ll::opt
 tests/imported/llvm/Transforms/SROA/scalable-vectors.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/select-gep.ll::opt
 tests/imported/llvm/Transforms/SROA/select-gep.ll::roundtrip
