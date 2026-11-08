@@ -1151,6 +1151,7 @@ tests/imported/llvm/Analysis/GlobalsModRef/self-addresstaken.ll::analysis
 tests/imported/llvm/Analysis/GlobalsModRef/self-addresstaken.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/volatile-instrs.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/weak-interposition.ll::roundtrip
+tests/imported/llvm/Analysis/IVUsers/zext-fold-cache-invalidation.ll::analysis
 tests/imported/llvm/Analysis/IVUsers/zext-fold-cache-invalidation.ll::roundtrip
 tests/imported/llvm/Analysis/LazyCallGraph/alias.ll::roundtrip
 tests/imported/llvm/Analysis/LazyCallGraph/basic.ll::roundtrip
@@ -1419,6 +1420,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/2009-07-04-GroupConstantsWidthMisma
 tests/imported/llvm/Analysis/ScalarEvolution/2009-07-04-GroupConstantsWidthMismatch.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/2010-09-03-RequiredTransitive.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/2011-03-09-ExactNoMaxBECount.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/2011-04-26-FoldAddRec.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/2011-04-26-FoldAddRec.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/2011-10-04-ConstEvolve.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/2011-10-04-ConstEvolve.ll::roundtrip
@@ -1537,6 +1539,7 @@ tests/imported/llvm/Analysis/ScalarEvolution/infer-prestart-no-wrap.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/infer-prestart-no-wrap.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/infer-via-ranges.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/infer-via-ranges.ll::roundtrip
+tests/imported/llvm/Analysis/ScalarEvolution/inner-loop-by-latch-cond-unknown.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/inner-loop-by-latch-cond-unknown.ll::roundtrip
 tests/imported/llvm/Analysis/ScalarEvolution/iv-poison.ll::analysis
 tests/imported/llvm/Analysis/ScalarEvolution/iv-poison.ll::roundtrip

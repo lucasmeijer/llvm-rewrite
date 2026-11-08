@@ -73,6 +73,7 @@
 #load "scev_update.jai";
 #load "loop_nest.jai";
 #load "scev_aa.jai";
+#load "iv_users.jai";
 
 main :: () { opt_main(); }
 
