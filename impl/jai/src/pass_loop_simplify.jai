@@ -249,12 +249,16 @@ form_dedicated_exit_blocks :: (li: *Loop_Info, l: Loop_Id, dt: *Dom_Tree, mssau:
 }
 
 // changeToUnreachable(I, PreserveLCSSA, DTU = nullptr, MSSAU)
-change_to_unreachable :: (i: Value_Id, preserve_lcssa: bool, mssau: *Mssa_Updater) -> u32 {
+change_to_unreachable :: (i: Value_Id, preserve_lcssa: bool, mssau: *Mssa_Updater, dtu: *Dtu = null) -> u32 {
     bb := inst_block(i);
     if mssau mssau_change_to_unreachable(mssau, i);
     succs: [..] Value_Id; succs.allocator = temp;
     block_successors(bb, *succs);
-    for succs block_remove_predecessor(it, bb, preserve_lcssa);
+    uniq: [..] Value_Id; uniq.allocator = temp;
+    for succs {
+        block_remove_predecessor(it, bb, preserve_lcssa);
+        if dtu && !block_set_contains(uniq, it) array_add(*uniq, it);
+    }
     ui := new_inst(.UNREACHABLE, ir.t_void, 0);
     insert_at_position(ui, bb, i, false);
     copy_debug_loc(ui, i);
@@ -269,6 +273,11 @@ change_to_unreachable :: (i: Value_Id, preserve_lcssa: bool, mssau: *Mssa_Update
         erase_inst_with_metadata(x);
         removed += 1;
         x = nx;
+    }
+    if dtu {
+        ups: [..] Dom_Update; ups.allocator = temp;
+        for uniq array_add(*ups, .{false, bb, it});
+        dtu_apply(dtu, ups);
     }
     return removed;
 }

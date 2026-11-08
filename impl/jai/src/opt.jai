@@ -81,6 +81,12 @@
 #load "x86_lowering.jai";
 #load "gen_x86_tti.jai";
 #load "gen_x86_lowering.jai";
+#load "scfg_util.jai";
+#load "local_utils.jai";
+#load "pass_simplifycfg.jai";
+#load "pass_simplifycfg2.jai";
+#load "pass_simplifycfg3.jai";
+#load "pass_simplifycfg_switch.jai";
 
 main :: () { opt_main(); }
 

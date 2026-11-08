@@ -191,6 +191,8 @@ Pass_Kind :: enum u8 {
     PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS;
     // TargetTransformInfo (tti.jai)
     PRINT_COST_MODEL;
+    // SimplifyCFG (pass_simplifycfg*.jai)
+    SIMPLIFYCFG;
 }
 
 Pass_Info :: struct {
@@ -220,7 +222,8 @@ PASS_TABLE :: Pass_Info.[
     .{"sroa<aggregate-to-vector;modify-cfg>", .FUNCTION, .SROA, false, .DOMTREE},
     .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
-    .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},   // also instcombine<...> (lookup_pass)
+    .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},
+    .{"simplifycfg", .FUNCTION, .SIMPLIFYCFG, false, .DOMTREE},   // also simplifycfg<...> (lookup_pass)   // also instcombine<...> (lookup_pass)
     .{"verify", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},   // VerifierPass (module & function): nothing to report on valid IR
     .{"require<assumptions>", .FUNCTION, .REQUIRE, true, .ASSUMPTIONS},
     .{"invalidate<assumptions>", .FUNCTION, .INVALIDATE, true, .ASSUMPTIONS},
@@ -272,6 +275,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if pass_table.count == 0 for PASS_TABLE array_add(*pass_table, it);
     for * pass_table if it.name == name return it;
     if begins_with(name, "instcombine<") return lookup_pass("instcombine");
+    if begins_with(name, "simplifycfg<") && name[name.count - 1] == #char ">" return lookup_pass("simplifycfg");
     // passes whose parameters are parsed by the pass itself (LOOP_PASS_WITH_PARAMS)
     if begins_with(name, "loop-rotate<") && name[name.count - 1] == #char ">" return lookup_pass("loop-rotate");
     return null;
@@ -511,7 +515,7 @@ parse_pass_pipeline :: (text: string) -> s32 {
 
 // ---------------------------------------------------------------- command-line options (cl::opt)
 
-Cl_Kind :: enum u8 { BOOL; INT; IGNORED; STRING; }
+Cl_Kind :: enum u8 { BOOL; INT; IGNORED; STRING; TRISTATE; }   // TRISTATE: a bool stored as 0/1 in an s64 that is -1 when not given
 Cl_Opt :: struct {
     name: string;
     kind: Cl_Kind;
@@ -542,8 +546,9 @@ cl_data_layout: string;                  // opt -data-layout (overrides the modu
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
     add_tti_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT);
+    add_scfg_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT);
     add_aa_cl_opts(list, 14);
     add_scev_cl_opts(list, 14 + AA_CL_OPT_COUNT);
     list[11] = .{"rotation-max-header-size", .INT, null, *lr_opts.rotation_max_header_size, null};
@@ -575,6 +580,10 @@ parse_cl_opt :: (arg: string) -> bool {
         if it.kind == .BOOL {
             if !has_value || value == "true" || value == "1" || value == "TRUE" || value == "True" it.b.* = true;
             else if value == "false" || value == "0" || value == "FALSE" || value == "False" it.b.* = false;
+            else fatal("invalid boolean value '%' for option -%", value, name);
+        } else if it.kind == .TRISTATE {
+            if !has_value || value == "true" || value == "1" || value == "TRUE" || value == "True" it.i.* = 1;
+            else if value == "false" || value == "0" || value == "FALSE" || value == "False" it.i.* = 0;
             else fatal("invalid boolean value '%' for option -%", value, name);
         } else if it.kind == .STRING {
             if !has_value fatal("option -% needs a value", name);
@@ -686,6 +695,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .INSTSIMPLIFY; return instsimplify_run(f);
         case .SROA; return sroa_run(f, node.name);
         case .INSTCOMBINE; return instcombine_run(f, node.name);
+        case .SIMPLIFYCFG; return simplifycfg_run(node, f);
         case .LOOP_ADAPTOR; return run_loop_adaptor(cast(s32) (node - pipeline.nodes.data), f);
         case .AA_EVAL;
             sb: String_Builder; sb.allocator = temp;
