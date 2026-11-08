@@ -67,6 +67,8 @@
 #load "ic_fp_addsub.jai";
 #load "ic_negator.jai";
 #load "ic_muldivrem.jai";
+#load "loop_pm.jai";
+#load "pass_loop_rotate.jai";
 
 main :: () { opt_main(); }
 

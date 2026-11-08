@@ -166,7 +166,7 @@ Pass_Level :: enum u8 { MODULE; FUNCTION; LOOP; }
 
 Pass_Kind :: enum u8 {
     // structure
-    MODULE_PM; FUNCTION_ADAPTOR;
+    MODULE_PM; FUNCTION_ADAPTOR; LOOP_ADAPTOR; LOOP_PM;
     // analysis utilities (required: they run on optnone functions and don't count for -opt-bisect-limit)
     REQUIRE; INVALIDATE; PRINT_DOMTREE; PRINT_POSTDOMTREE; PRINT_DEMANDED_BITS; NO_OP_FUNCTION; NO_OP_MODULE;
     // transforms
@@ -175,6 +175,8 @@ Pass_Kind :: enum u8 {
     AA_EVAL; REQUIRE_GLOBALS_AA; PRINT_MEMORYSSA; PRINT_MEMORYSSA_NO_OPT; PRINT_MEMORYSSA_WALKER;
     // loops (loop_info.jai, cycle_info.jai)
     PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
+    // loop passes (loop_pm.jai)
+    NO_OP_LOOP; LOOP_ROTATE;
 }
 
 Pass_Info :: struct {
@@ -228,6 +230,8 @@ PASS_TABLE :: Pass_Info.[
     .{"print<loops>", .FUNCTION, .PRINT_LOOPS, true, .LOOPS},
     .{"loop-simplify", .FUNCTION, .LOOP_SIMPLIFY, false, .DOMTREE},
     .{"lcssa", .FUNCTION, .LCSSA, false, .DOMTREE},
+    .{"no-op-loop", .LOOP, .NO_OP_LOOP, false, .DOMTREE},
+    .{"loop-rotate", .LOOP, .LOOP_ROTATE, false, .DOMTREE},
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
@@ -262,6 +266,7 @@ Pass_Node :: struct {
     name: string;
     first_child: s32 = -1;
     next: s32 = -1;
+    use_mssa: bool;        // LOOP_ADAPTOR: loop-mssa(...)
 }
 
 pipeline: struct {
@@ -345,7 +350,7 @@ link_child :: (parent: s32, last: *s32, child: s32) {
 }
 
 unknown_pass :: (name: string) {
-    if name == "loop" || name == "loop-mssa" || name == "cgscc" || name == "machine-function"
+    if name == "cgscc" || name == "machine-function"
         fatal("pass pipeline: '%' pass managers are not supported yet", name);
     fatal("unknown pass name '%' (not implemented in the Jai opt yet)", name);
 }
@@ -355,12 +360,54 @@ parse_function_pass :: (fpm: s32, last: *s32, e: s32) {
     el := pipeline.elems[e];
     if el.has_children {
         if el.name == "function" fatal("pass pipeline: nested function pipelines are not supported");
+        if el.name == "loop" || el.name == "loop-mssa" {
+            la := new_node(.LOOP_ADAPTOR, null, el.name);
+            pipeline.nodes[la].use_mssa = el.name == "loop-mssa";
+            llast: s32 = -1;
+            c := el.first_child;
+            while c >= 0 { parse_loop_pass(la, *llast, c); c = pipeline.elems[c].next; }
+            link_child(fpm, last, la);
+            return;
+        }
         unknown_pass(el.name);
     }
     p := lookup_pass(el.name);
     if p == null || p.level == .MODULE unknown_pass(el.name);
-    if p.level == .LOOP unknown_pass(el.name);
+    if p.level == .LOOP {
+        // createFunctionToLoopPassAdaptor(CREATE_PASS, /*UseMemorySSA=*/false)
+        la := new_node(.LOOP_ADAPTOR, null, "loop");
+        llast: s32 = -1;
+        link_child(la, *llast, new_node(p.kind, p, el.name));
+        link_child(fpm, last, la);
+        return;
+    }
     link_child(fpm, last, new_node(p.kind, p, el.name));
+}
+
+// parseLoopPass: one element inside a loop pipeline
+parse_loop_pass :: (lpm: s32, last: *s32, e: s32) {
+    el := pipeline.elems[e];
+    if el.has_children {
+        if el.name == "loop" {
+            inner := new_node(.LOOP_PM, null, "loop");
+            ilast: s32 = -1;
+            c := el.first_child;
+            while c >= 0 { parse_loop_pass(inner, *ilast, c); c = pipeline.elems[c].next; }
+            link_child(lpm, last, inner);
+            return;
+        }
+        fatal("invalid use of '%' pass as loop pipeline", el.name);
+    }
+    p := lookup_pass(el.name);
+    if p == null || p.level != .LOOP unknown_pass(el.name);
+    link_child(lpm, last, new_node(p.kind, p, el.name));
+}
+
+// isLoopPassName (UseMemorySSA for licm)
+is_loop_pass_name :: (name: string) -> bool, bool {
+    if name == "licm" || begins_with(name, "licm<") return true, true;
+    p := lookup_pass(name);
+    return p != null && p.level == .LOOP, false;
 }
 
 // parseModulePass
@@ -406,9 +453,23 @@ parse_pass_pipeline :: (text: string) -> s32 {
     root := new_node(.MODULE_PM, null, "module");
     last: s32 = -1;
     name := pipeline.elems[first].name;
+    is_loop, loop_mssa := is_loop_pass_name(name);
+    if !is_module_pass_name(name) && is_loop {
+        // Pipeline = {{"function", {{UseMemorySSA ? "loop-mssa" : "loop", std::move(*Pipeline)}}}}
+        fa := new_node(.FUNCTION_ADAPTOR, null, "function");
+        flast: s32 = -1;
+        la := new_node(.LOOP_ADAPTOR, null, ifx loop_mssa then "loop-mssa" else "loop");
+        pipeline.nodes[la].use_mssa = loop_mssa;
+        llast: s32 = -1;
+        e := first;
+        while e >= 0 { parse_loop_pass(la, *llast, e); e = pipeline.elems[e].next; }
+        link_child(fa, *flast, la);
+        link_child(root, *last, fa);
+        return root;
+    }
     if !is_module_pass_name(name) {
         p := lookup_pass(name);
-        if p == null || p.level != .FUNCTION unknown_pass(name);
+        if (p == null || p.level != .FUNCTION) && name != "loop" && name != "loop-mssa" unknown_pass(name);
         // Pipeline = {{"function", std::move(*Pipeline)}}
         fa := new_node(.FUNCTION_ADAPTOR, null, "function");
         flast: s32 = -1;
@@ -500,6 +561,7 @@ bisect_count: s64 = 0;
 // PassInstrumentation::runBeforePass: every shouldRun callback is called (OptNone, then OptPassGate).
 should_run_pass :: (node: *Pass_Node, f: Value_Id) -> bool {
     if node.info && node.info.required return true;
+    if node.kind == .LOOP_ADAPTOR return true;   // FunctionToLoopPassAdaptor::isRequired
     run := true;
     // OptNoneInstrumentation
     if f != NONE && attr_set_has(attr_list_fn(glob(f).attrs), .OptimizeNone) run = false;
@@ -587,6 +649,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .INSTSIMPLIFY; return instsimplify_run(f);
         case .SROA; return sroa_run(f, node.name);
         case .INSTCOMBINE; return instcombine_run(f, node.name);
+        case .LOOP_ADAPTOR; return run_loop_adaptor(cast(s32) (node - pipeline.nodes.data), f);
         case .AA_EVAL;
             sb: String_Builder; sb.allocator = temp;
             aa_eval_run(f, aa_eval_counts_for(node), *sb);
