@@ -665,8 +665,17 @@ cf_binary :: (opc: Opcode, c1: Value_Id, c2: Value_Id) -> Value_Id {
                     e := cexpr(c1);
                     if (e.op == .PTRTOINT || e.op == .PTRTOADDR) && is_global_value(vkind(op(c1, 0))) {
                         gv := op(c1, 0);
-                        // GV->getPointerAlignment(DL) needs the module's DataLayout: not folded here
-                        fatal("constant folding 'and' of the address of a global with a constant is not supported yet");
+                        for split(ir.datalayout, "-",, allocator = temp) if begins_with(it, "F")
+                            fatal("constant folding 'and' of a global's address with a function pointer alignment ('%') in the datalayout is not supported yet", it);
+                        gv_align: u64 = pointer_alignment(gv);
+                        if vkind(gv) == .FUNCTION gv_align = 4;   // no DL.getFunctionPtrAlign(): assume 4 (ConstantFold.cpp)
+                        if gv_align > 1 {
+                            dst_width := a2.bits;
+                            lg: u32 = 0; while ((cast(u64) 1) << (lg + 1)) <= gv_align lg += 1;
+                            src_width := min(dst_width, lg);
+                            bits_not_set := ap_low_bits_set(dst_width, src_width);
+                            if ap_eq(ap_and(a2, bits_not_set), a2) return const_null_value(vtype(c2));
+                        }
                     }
                 }
         }

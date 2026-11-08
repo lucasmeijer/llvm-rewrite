@@ -700,10 +700,11 @@ arg_pointee_in_memory_value_type :: (a: Value_Id) -> Type_Id {
     return NONE;
 }
 // AllocaInst::getAllocationSize (fixed sizes only)
+// AllocaInst::getAllocationSize (the known minimum for scalable types)
 alloca_allocation_size :: (a: Value_Id) -> (bool, u64) {
     t := inst(a).ty2;
-    if type_is_scalable(t) return false, 0;
     sz := dl_type_alloc_size(t);
+    if sz == 0 return true, 0;
     n := op(a, 0);
     if !is_scalar_const_int(n) return false, 0;
     c := const_ap(n);
