@@ -149,6 +149,7 @@ IEK_INF :: 2147483647;
 
 // ilogb(IEEEFloat)
 fp_ilogb :: (k: Type_Kind, w: [] u64) -> s64 {
+    if k == .PPC_FP128 { h := NewArray(1, u64,, allocator = temp); h[0] = w[0]; return fp_ilogb(.DOUBLE, h); }   // the first double's
     d := fp_decode(k, w);
     if d.cat == .NAN return IEK_NAN;
     if d.cat == .ZERO return IEK_ZERO;

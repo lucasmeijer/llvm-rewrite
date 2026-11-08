@@ -1488,12 +1488,18 @@ gep_accumulate_constant_offset :: (g: Value_Id, offset_in: APInt) -> (bool, APIn
                 continue;
             }
             idx := ap_sext_or_trunc(ci, offset.bits);
-            offset = ap_add(offset, ap_mul(idx, ap_from_u64(offset.bits, dl_type_alloc_size(indexed))));
+            offset = ap_add(offset, ap_mul(idx, ap_from_u64(offset.bits, gep_seq_stride(cur, k, indexed))));
             continue;
         }
         return false, offset;
     }
     return true, offset;
+}
+// gep_type_iterator::getSequentialElementStride: the store size of a vector's element, else the alloc size
+// (operand k of the GEP indexes `container`; operand 1 indexes the source type "as an array")
+gep_seq_stride :: (container: Type_Id, k: s64, indexed: Type_Id) -> u64 {
+    if k > 1 && is_vector_type(container) return dl_type_store_size(indexed);
+    return dl_type_alloc_size(indexed);
 }
 type_is_scalable :: (t: Type_Id) -> bool {
     k := type_kind(t);

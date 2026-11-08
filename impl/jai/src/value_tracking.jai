@@ -682,7 +682,7 @@ known_bits_gep :: (i: Value_Id, bits: u32, q: Simplify_Query, depth: u32) -> Kno
         }
         if !type_is_sized(indexed) { kb_reset_all(*known); break; }
         stride_scalable := type_kind(indexed) == .SVECTOR;
-        stride := dl_type_alloc_size(indexed);
+        stride := gep_seq_stride(cur, k, indexed);
         if !stride_scalable && is_scalar_const_int(index) {
             acc = ap_add(acc, ap_mul(ap_sext_or_trunc(const_ap(index), index_width), ap_from_u64(index_width, stride)));
             continue;
@@ -1438,7 +1438,7 @@ is_gep_known_non_null :: (gep: Value_Id, q: Simplify_Query, depth_in: u32) -> bo
             if dl_struct_offset(cur, e) > 0 return true;
             continue;
         }
-        if dl_type_alloc_size(indexed) == 0 continue;
+        if gep_seq_stride(cur, k, indexed) == 0 continue;
         if is_scalar_const_int(index) {
             if !ap_is_zero(const_ap(index)) return true;
             continue;

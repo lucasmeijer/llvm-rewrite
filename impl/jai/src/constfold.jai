@@ -107,8 +107,10 @@ cf_shuffle_splat_value :: (c: Value_Id) -> Value_Id {
     e := cexpr(c);
     if e.op != .SHUFFLEVECTOR return NONE;
     if e.nidx > 0 for i: 0..e.nidx-1 if ir.u32_pool[e.idx + i] != 0 return NONE;
+    if !cf_is_undef(op(c, 1)) return NONE;   // Constant::getSplatValue: shuffle (insertelement undef, X, 0), undef, zeroinitializer
     ins := op(c, 0);
     if vkind(ins) != .C_EXPR || cexpr(ins).op != .INSERTELEMENT return NONE;
+    if !cf_is_undef(op(ins, 0)) return NONE;
     ix := op(ins, 2);
     if !(vkind(ix) == .C_INT && is_null_value(ix)) return NONE;
     return op(ins, 1);

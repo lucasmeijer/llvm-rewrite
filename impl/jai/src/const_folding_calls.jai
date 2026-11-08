@@ -254,14 +254,15 @@ cfc_const_int_or_undef :: (c: Value_Id) -> (ok: bool, undef: bool, v: APInt) {
     z: APInt;
     return false, false, z;
 }
-cfc_is_const_fp :: (c: Value_Id) -> bool { return c != NONE && vkind(c) == .C_FP && !is_vector_type(vtype(c)); }
+cfc_is_const_fp :: (c: Value_Id) -> bool { return c != NONE && vkind(c) == .C_FP; }   // dyn_cast<ConstantFP>: vector splats too
 cfc_is_const_int :: (c: Value_Id) -> bool { return c != NONE && vkind(c) == .C_INT && !is_vector_type(vtype(c)); }
 cfc_is_undef :: (c: Value_Id) -> bool { k := vkind(c); return k == .C_UNDEF || k == .C_POISON; }
 
 // Constant::isManifestConstant
 is_manifest_constant :: (c: Value_Id) -> bool {
     k := vkind(c);
-    if k == .C_INT || k == .C_FP || k == .C_NULL || k == .C_UNDEF || k == .C_POISON || k == .C_ZERO || k == .C_DATA || k == .C_TOKEN_NONE || k == .C_TARGET_NONE return true;
+    if k == .C_UNDEF || k == .C_POISON return false;
+    if k == .C_INT || k == .C_FP || k == .C_NULL || k == .C_ZERO || k == .C_DATA || k == .C_TOKEN_NONE || k == .C_TARGET_NONE return true;
     if k == .C_STRUCT || k == .C_ARRAY || k == .C_VECTOR || k == .C_EXPR {
         n := nops(c);
         if n > 0 for i: 0..n-1 if !is_manifest_constant(op(c, i)) return false;
@@ -1050,7 +1051,9 @@ cfc_scalable_vector_call :: (name: string, id: Intrinsic_Id, vt: Type_Id, ops: [
 
 // ConstantFoldScalarFrexpCall
 cfc_scalar_frexp :: (op_c: Value_Id, int_ty: Type_Id) -> (Value_Id, Value_Id) {
-    if !cfc_is_const_fp(op_c) return NONE, NONE;
+    // dyn_cast<ConstantFP>: a vector-typed ConstantFP (splat, e.g. a scalable zeroinitializer) is one too; LLVM
+    // then builds { <vector mantissa>, <scalar exponent> } (sic)
+    if op_c == NONE || vkind(op_c) != .C_FP return NONE, NONE;
     k := cfc_kind(vtype(op_c));
     mant, e := fp_frexp(k, const_fp_value(op_c), RM_NEAREST_TIES_TO_EVEN);
     r0 := cfc_fp(vtype(op_c), mant);

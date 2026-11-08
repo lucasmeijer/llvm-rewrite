@@ -49,8 +49,9 @@ dl_indexed_offset_in_type :: (elem_ty: Type_Id, idxs: [] Value_Id) -> s64 {
             result += cast(s64) dl_struct_offset(cur, fi);
             cur = type_sub(cur, fi);
         } else {
+            container := cur;
             cur = type_elem(cur);
-            result += ap_sext_value(const_ap(idx)) * cast(s64) dl_type_alloc_size(cur);
+            result += ap_sext_value(const_ap(idx)) * cast(s64) gep_seq_stride(container, k + 1, cur);
         }
     }
     return result;
