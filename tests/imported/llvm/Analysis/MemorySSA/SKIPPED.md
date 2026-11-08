@@ -1,0 +1,46 @@
+# Skipped while importing llvm/test/Analysis/MemorySSA (llvmorg-23.1.5)
+
+43 of 83 files imported. Regenerate with `./harness/run import-llvm Analysis/MemorySSA`.
+
+- `allow-check.ll`: target triple aarch64-linux
+- `debugvalue.ll`: REQUIRES asserts
+- `invalidate.ll` RUN `opt -aa-pipeline=basic-aa -passes='require<memoryssa>,invalidate<aa>,early-cse<memssa>' -debug-pass-manager -disable-output %s 2>&1 | FileCheck %s --check-prefix=CHECK-AA-INVALIDATE`: diagnostic output flag -debug-pass-manager
+- `invalidate.ll` RUN `opt -aa-pipeline=basic-aa -passes='require<memoryssa>,invalidate<domtree>,early-cse<memssa>' -debug-pass-manager -disable-output %s 2>&1 | FileCheck %s --check-prefix=CHECK-DT-INVALIDATE`: diagnostic output flag -debug-pass-manager
+- `loop-rotate-inv-template.ll`: REQUIRES asserts
+- `loop-rotate-simplified-clone.ll`: REQUIRES asserts
+- `loop-rotate-valuemap.ll`: REQUIRES asserts
+- `loop-unswitch.ll`: REQUIRES asserts
+- `loop_rotate_remove_trivial_phis.ll`: REQUIRES asserts
+- `pr36883.ll`: uses non-x86 target intrinsic @llvm.arm.
+- `pr39197.ll`: REQUIRES asserts
+- `pr40037.ll`: REQUIRES asserts
+- `pr40038.ll`: REQUIRES asserts
+- `pr40509.ll`: REQUIRES asserts
+- `pr40749.ll`: REQUIRES asserts
+- `pr40749_2.ll`: REQUIRES asserts
+- `pr40754.ll`: REQUIRES asserts
+- `pr41254.ll`: REQUIRES asserts
+- `pr41640.ll`: target triple s390x-ibm-linux
+- `pr41853.ll`: REQUIRES asserts
+- `pr42294.ll`: REQUIRES asserts
+- `pr42940.ll`: REQUIRES asserts
+- `pr43044.ll`: REQUIRES asserts
+- `pr43320.ll`: REQUIRES asserts
+- `pr43493.ll`: REQUIRES asserts
+- `pr43541.ll`: REQUIRES asserts
+- `pr43569.ll`: REQUIRES asserts
+- `pr43641.ll`: REQUIRES asserts
+- `pr44027.ll`: REQUIRES asserts
+- `pr44029.ll`: REQUIRES asserts
+- `pr45976.ll`: REQUIRES asserts
+- `pr46275.ll`: REQUIRES asserts
+- `pr46574.ll`: REQUIRES asserts
+- `pr49859.ll`: REQUIRES asserts
+- `print-dot-cfg-mssa.ll` RUN `opt -aa-pipeline=basic-aa -passes='print<memoryssa>' -dot-cfg-mssa=out.dot < %s 2>&1 > /dev/null`: writes .dot files
+- `print-dot-cfg-mssa.ll` RUN `FileCheck %s -input-file=out.dot`: not an opt invocation
+- `ptr-const-mem.ll`: target triple amdgcn
+- `reduce_clobber_limit.ll`: REQUIRES asserts
+- `renamephis.ll`: REQUIRES asserts
+- `simple_loop_unswitch_nontrivial.ll`: REQUIRES asserts
+- `unreachable.ll`: REQUIRES asserts
+- `update_unroll.ll`: REQUIRES asserts
