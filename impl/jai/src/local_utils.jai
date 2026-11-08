@@ -475,40 +475,10 @@ eliminate_duplicate_phi_nodes :: (bb: Value_Id) -> bool {
 
 // ---------------------------------------------------------------- EH personalities
 
-EH_UNKNOWN :: 0; EH_GNU_ADA :: 1; EH_GNU_C :: 2; EH_GNU_C_SJLJ :: 3; EH_GNU_CXX :: 4; EH_GNU_CXX_SJLJ :: 5;
-EH_GNU_OBJC :: 6; EH_MSVC_X86SEH :: 7; EH_MSVC_TABLESEH :: 8; EH_MSVC_CXX :: 9; EH_CORECLR :: 10; EH_RUST :: 11;
-EH_WASM_CXX :: 12; EH_XL_CXX :: 13; EH_ZOS_CXX :: 14;
-// classifyEHPersonality(Pers)
-classify_eh_personality :: (pers: Value_Id) -> s64 {
-    if pers == NONE return EH_UNKNOWN;
-    f := strip_pointer_casts(pers);
-    if vkind(f) != .FUNCTION return EH_UNKNOWN;
-    n := vname(f);
-    if n == {
-        case "__gnat_eh_personality"; return EH_GNU_ADA;
-        case "__gxx_personality_v0"; return EH_GNU_CXX;
-        case "__gxx_personality_seh0"; return EH_GNU_CXX;
-        case "__gxx_personality_sj0"; return EH_GNU_CXX_SJLJ;
-        case "__gcc_personality_v0"; return EH_GNU_C;
-        case "__gcc_personality_seh0"; return EH_GNU_C;
-        case "__gcc_personality_sj0"; return EH_GNU_C_SJLJ;
-        case "__objc_personality_v0"; return EH_GNU_OBJC;
-        case "_except_handler3"; return EH_MSVC_X86SEH;
-        case "_except_handler4"; return EH_MSVC_X86SEH;
-        case "__C_specific_handler"; return EH_MSVC_TABLESEH;
-        case "__CxxFrameHandler3"; return EH_MSVC_CXX;
-        case "ProcessCLRException"; return EH_CORECLR;
-        case "__gxx_wasm_personality_v0"; return EH_WASM_CXX;
-        case "__xlcxx_personality_v1"; return EH_XL_CXX;
-        case "__zos_cxx_personality_v2"; return EH_ZOS_CXX;
-    }
-    if ends_with(n, "rust_eh_personality") return EH_RUST;
-    return EH_UNKNOWN;
-}
-fn_personality :: (f: Value_Id) -> Value_Id { if glob(f).has_personality return op(f, 0); return NONE; }
-is_scoped_eh_personality :: (p: s64) -> bool { return p == EH_MSVC_CXX || p == EH_MSVC_X86SEH || p == EH_MSVC_TABLESEH || p == EH_CORECLR || p == EH_WASM_CXX; }
-is_funclet_eh_personality :: (p: s64) -> bool { return p == EH_MSVC_CXX || p == EH_MSVC_X86SEH || p == EH_MSVC_TABLESEH || p == EH_CORECLR; }
-is_asynchronous_eh_personality :: (p: s64) -> bool { return p == EH_MSVC_X86SEH || p == EH_MSVC_TABLESEH; }
+// classifyEHPersonality / Eh_Personality / fn_personality: ic_combining.jai
+is_scoped_eh_personality :: (p: Eh_Personality) -> bool { return p == .MSVC_CXX || p == .MSVC_X86SEH || p == .MSVC_TABLESEH || p == .CORECLR || p == .WASM_CXX; }
+is_funclet_eh_personality :: (p: Eh_Personality) -> bool { return p == .MSVC_CXX || p == .MSVC_X86SEH || p == .MSVC_TABLESEH || p == .CORECLR; }
+is_asynchronous_eh_personality :: (p: Eh_Personality) -> bool { return p == .MSVC_X86SEH || p == .MSVC_TABLESEH; }
 // Module::getModuleFlag(Key) != null: module_has_flag (pass_sroa.jai)
 // canSimplifyInvokeNoUnwind
 can_simplify_invoke_no_unwind :: (f: Value_Id) -> bool {

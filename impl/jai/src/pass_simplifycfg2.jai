@@ -58,7 +58,7 @@ same_bundle_schema :: (a: Value_Id, b: Value_Id) -> bool {
     return true;
 }
 // Instruction::isIdenticalToWhenDefined(I, IntersectAttrs)
-is_identical_to_when_defined :: (a: Value_Id, b: Value_Id, intersect_attrs := false) -> bool {
+inst_identical_when_defined :: (a: Value_Id, b: Value_Id, intersect_attrs := false) -> bool {
     if inst_op(a) != inst_op(b) || nops(a) != nops(b) || vtype(a) != vtype(b) return false;
     for k: 0..cast(s64) nops(a) - 1 if op(a, cast(u32) k) != op(b, cast(u32) k) return false;
     if inst_op(a) == .PHI {
@@ -173,7 +173,7 @@ hoist_lockstep_identical_dbg_records :: (ti: Value_Id, i1: Value_Id, others: [] 
 }
 // areIdenticalUpToCommutativity
 are_identical_up_to_commutativity :: (a: Value_Id, b: Value_Id) -> bool {
-    if is_identical_to_when_defined(a, b, true) return true;
+    if inst_identical_when_defined(a, b, true) return true;
     oa := inst_op(a); ob := inst_op(b);
     if (oa == .ICMP || oa == .FCMP) && (ob == .ICMP || ob == .FCMP)
         return oa == ob && inst(a).pred == cmp_swapped(inst(b).pred) && op(a, 0) == op(b, 1) && op(a, 1) == op(b, 0);
