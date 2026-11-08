@@ -1278,7 +1278,7 @@ print_instruction :: (i: Value_Id) {
             outc(#char "(");
             na := call_arg_count(i);
             cf := called_function(i);
-            pretty := cf != NONE && glob(cf).intrinsic && intrinsic_has_pretty_args(vname(cf));
+            pretty := cf != NONE && glob(cf).intrinsic && intrinsic_has_pretty_args(cf);
             if na > 0 for k: 0..na-1 {
                 if k > 0 out(", ");
                 if pretty print_imm_arg_comment(cf, k, op(i, k));

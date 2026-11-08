@@ -634,6 +634,8 @@ make_unique_name :: (tab: *Table(string, Value_Id), last: *u32, base: string, v:
 set_name :: (v: Value_Id, name: string) {
     old := ir.v_name[v];
     if old == name return;
+    // Function::HasLLVMReservedName follows the name
+    defer if ir.v_kind[v] == .FUNCTION glob(v).intrinsic = begins_with(ir.v_name[v], "llvm.");
     st := value_symtab(v);
     if old.count != 0 {
         if st == -1 table_remove(*ir.m_symtab, old);

@@ -10,6 +10,8 @@
 #load "parser.jai";
 #load "printer.jai";
 #load "intrinsics.jai";
+#load "gen_iit.jai";
+#load "autoupgrade.jai";
 
 main :: () {
     tool_name = "opt";

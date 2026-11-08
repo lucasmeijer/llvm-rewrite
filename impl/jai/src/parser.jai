@@ -314,6 +314,11 @@ parse_target_ext_type :: () -> Type_Id {
         else array_add(*tys, parse_type());
     }
     expect(.RPAREN, "')'");
+    return intern_target_ext(name, tys, ints);
+}
+
+// TargetExtType::get
+intern_target_ext :: (name: string, tys: [] Type_Id, ints: [] u32) -> Type_Id {
     k := *type_key; key_reset(k);
     key_u8(k, cast(u8) Type_Kind.TARGET_EXT); key_str(k, name);
     for tys key_u32(k, it);
@@ -2761,35 +2766,61 @@ validate_end_of_module :: () {
     for ir.named_types {
         // types referenced but never defined stay opaque in LLVM only if defined as opaque; otherwise error
     }
-    // forward-referenced intrinsics are auto-declared; other forward refs are errors
-    for P.fwd_global_order {
-        name := "";
-        found := false;
-        for v, n: P.fwd_globals if v == it { name = n; found = true; break; }
-        if !found continue;
-        if begins_with(name, "llvm.") {
-            // create a declaration with the call's function type
-            u := ir.v_first_use[it];
-            if u == NONE continue;
-            user := ir.u_user[u];
-            if vkind(user) != .INST || inst_op(user) != .CALL perr("intrinsic can only be used as callee");
-            ft := inst(user).ty2;
-            f := new_function(ft, name, 0);
-            array_add(*ir.m_functions, f);
-            replace_all_uses_with(it, f);
-            erase_global(it);
-            table_remove(*P.fwd_globals, name);
-            continue;
-        }
-        perr("use of undefined value '@%'", name);
+    // Forward-referenced intrinsics are auto-declared (with the mangling suffix the call's type needs);
+    // ForwardRefVals is a std::map, so this goes in name order. Other forward refs are errors.
+    names: [..] string; names.allocator = temp;
+    for v, n: P.fwd_globals array_add(*names, n);
+    quick_sort(names, (a: string, b: string) -> s64 { return compare(a, b); });
+    for name: names {
+        _, fw := table_find(*P.fwd_globals, name);
+        if !begins_with(name, "llvm.") perr("use of undefined value '@%'", name);
+        auto_declare_intrinsic(name, fw);
+        erase_global(fw);
+        table_remove(*P.fwd_globals, name);
     }
     for P.fwd_global_ids perr("use of undefined value '@%'", it_index);
     resolve_all_metadata();
-    // UpgradeCallsToIntrinsic: intrinsic declarations get Intrinsic::getAttributes
-    for f: ir.m_functions {
-        if glob(f).intrinsic upgrade_intrinsic_function(f);
+    // UpgradeCallsToIntrinsic for every function (make_early_inc_range: functions appended meanwhile are visited)
+    i := 0;
+    while i < ir.m_functions.count {
+        f := ir.m_functions[i];
+        upgrade_calls_to_intrinsic(f);
+        if i < ir.m_functions.count && ir.m_functions[i] == f i += 1;
+    }
+}
+
+auto_declare_intrinsic :: (name: string, fw: Value_Id) {
+    id := intrinsic_lookup_id(name);
+    // make_early_inc_range(Info.first->uses())
+    uses: [..] Use_Id; uses.allocator = temp;
+    u := ir.v_first_use[fw];
+    while u != NONE { array_add(*uses, u); u = ir.u_next[u]; }
+    for u: uses {
+        cb := ir.u_user[u];
+        is_callee := vkind(cb) == .INST && (inst_op(cb) == .CALL || inst_op(cb) == .INVOKE || inst_op(cb) == .CALLBR) &&
+                     u == op_use(cb, nops(cb) - 1);
+        if !is_callee perr("intrinsic can only be used as callee");
+        fty := inst(cb).ty2;
+        otys: [..] Type_Id; otys.allocator = temp;
+        if id != NOT_INTRINSIC && intrinsic_signature_valid(id, fty, *otys) {
+            use_set(u, get_or_insert_intrinsic_declaration(id, otys));
+        } else {
+            tmp := new_function(fty, name, 0);
+            array_add(*ir.m_functions, tmp);
+            tid := function_intrinsic_id(tmp);
+            if tid != NOT_INTRINSIC set_intrinsic_attributes(tmp, tid);
+            r := upgrade_intrinsic_function(tmp);
+            if !r.upgraded {
+                if id == NOT_INTRINSIC perr("unknown intrinsic '%'", name);
+                perr("invalid signature for intrinsic '%'", name);
+            }
+            use_set(u, tmp);
+            upgrade_intrinsic_call(cb, r.new_fn);
+            if !has_uses(tmp) erase_global(tmp);
+        }
     }
 }
 
 #import "File";
+#import "Sort";
 saw_source_filename := false;
