@@ -3796,6 +3796,8 @@ simplify_intrinsic_call :: (call: Value_Id, args: [] Value_Id, q: Simplify_Query
 try_constant_fold_call :: (call: Value_Id, args: [] Value_Id, q: Simplify_Query) -> Value_Id {
     f := call_called_function(call);
     if f == NONE || !can_constant_fold_call_to(call, f) return NONE;
+    // ConstantFoldLibCall1/2/3 return nullptr without a TLI; only intrinsics fold
+    if q.no_tli_libcalls && fn_iid(f) == NOT_INTRINSIC return NONE;
     cargs: [..] Value_Id; cargs.allocator = temp;
     for args {
         if !is_const(it) {

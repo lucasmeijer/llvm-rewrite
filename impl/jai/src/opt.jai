@@ -45,6 +45,8 @@
 #load "pass_reassociate.jai";
 #load "constraint_system.jai";
 #load "pass_constraint_elimination.jai";
+#load "aic_trunc.jai";
+#load "pass_aggressive_instcombine.jai";
 #load "dbg_records.jai";
 #load "pass_mem2reg.jai";
 #load "pass_instsimplify.jai";

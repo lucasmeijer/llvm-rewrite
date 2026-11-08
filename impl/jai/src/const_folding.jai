@@ -282,7 +282,9 @@ cfo_load_through_bitcast :: (c_in: Value_Id, dt: Type_Id) -> Value_Id {
         st := vtype(c);
         if st == dt return c;
         ds := dl_type_size_bits(dt); ss := dl_type_size_bits(st);
-        if type_is_scalable(dt) || type_is_scalable(st) fatal("load folding through scalable types is not supported yet");
+        // TypeSize::isKnownGE(SrcSize, DestSize) is false for a scalable destination and a fixed source
+        if type_is_scalable(dt) && !type_is_scalable(st) return NONE;
+        if type_is_scalable(st) fatal("load folding through scalable types is not supported yet");
         if ss < ds return NONE;
         r := cfo_load_from_uniform_value(c, dt);
         if r != NONE return r;

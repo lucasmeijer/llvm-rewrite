@@ -1667,8 +1667,8 @@ remap_debug_variable :: (vm: *Table(Value_Id, Value_Id), i: Value_Id) {
     }
 }
 
-// SimplifyInstructionsInBlock(BB, TLI)
-simplify_instructions_in_block :: (bb: Value_Id) -> bool {
+// SimplifyInstructionsInBlock(BB, TLI); use_tli = false is a null TLI (isInstructionTriviallyDead without TLI)
+simplify_instructions_in_block :: (bb: Value_Id, use_tli := true) -> bool {
     made_change := false;
     worklist: [..] Value_Id; worklist.allocator = temp;   // SmallSetVector
     in_list :: (wl: [] Value_Id, i: Value_Id) -> bool { for wl if it == i return true; return false; }
@@ -1677,32 +1677,32 @@ simplify_instructions_in_block :: (bb: Value_Id) -> bool {
     while bi != NONE && bi != term {
         i := bi;
         bi = inst_next(bi);
-        if !in_list(worklist, i) made_change |= jt_simplify_and_dce_instruction(i, *worklist);
+        if !in_list(worklist, i) made_change |= jt_simplify_and_dce_instruction(i, *worklist, use_tli);
     }
     while worklist.count {
         i := pop(*worklist);
-        made_change |= jt_simplify_and_dce_instruction(i, *worklist);
+        made_change |= jt_simplify_and_dce_instruction(i, *worklist, use_tli);
     }
     return made_change;
 }
 // simplifyAndDCEInstruction
-jt_simplify_and_dce_instruction :: (i: Value_Id, worklist: *[..] Value_Id) -> bool {
+jt_simplify_and_dce_instruction :: (i: Value_Id, worklist: *[..] Value_Id, use_tli := true) -> bool {
     wl_add :: (wl: *[..] Value_Id, i: Value_Id) { for wl.* if it == i return; array_add(wl, i); }
     wl_remove :: (wl: *[..] Value_Id, i: Value_Id) { for wl.* if it == i { array_ordered_remove_by_index(wl, it_index); return; } }
-    if is_instruction_trivially_dead(i) {
+    if is_instruction_trivially_dead_tli(i, use_tli) {
         salvage_debug_info(i);
         n := nops(i);
         for k: 0..cast(s64) n - 1 {
             o := op(i, cast(u32) k);
             set_op(i, cast(u32) k, NONE);
             if o == NONE || has_uses(o) || o == i continue;
-            if is_inst(o) && is_instruction_trivially_dead(o) wl_add(worklist, o);
+            if is_inst(o) && is_instruction_trivially_dead_tli(o, use_tli) wl_add(worklist, o);
         }
         wl_remove(worklist, i);
         erase_inst_with_metadata(i);
         return true;
     }
-    q: Simplify_Query; q.have_tli = false;
+    q: Simplify_Query; q.have_tli = false; q.no_tli_libcalls = !use_tli;
     simple := simplify_instruction(i, q);
     if simple != NONE {
         u := ir.v_first_use[i];
@@ -1713,7 +1713,7 @@ jt_simplify_and_dce_instruction :: (i: Value_Id, worklist: *[..] Value_Id) -> bo
         }
         changed := false;
         if has_uses(i) { rauw_with_metadata(i, simple); changed = true; }
-        if is_instruction_trivially_dead(i) {
+        if is_instruction_trivially_dead_tli(i, use_tli) {
             wl_remove(worklist, i);
             erase_inst_with_metadata(i);
             changed = true;

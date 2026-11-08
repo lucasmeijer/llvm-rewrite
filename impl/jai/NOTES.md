@@ -761,3 +761,20 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   `constraint-elimination,print<scalar-evolution>` only shows the two known printer differences.
 - Perf (x64 build, `-disable-output`, no @perf benchmark): diamonds n500/n2000/n8000 0.05/0.15/0.64 s (parse alone
   0.04/0.10/0.35; LLVM 0.03/0.04/0.12): linear. sqlite3.ll +0.3 s over parsing (LLVM +0.04 s).
+
+## AggressiveInstCombine (L1.aggressive-instcombine COMPLETE 88/88)
+
+- `pass_aggressive_instcombine.jai` ports AggressiveInstCombine.cpp completely (only merging stores that carry
+  `!DIAssignID` fails loudly); `aic_trunc.jai` ports TruncInstCombine.cpp. Two TTI hooks live in the pass file
+  (`tti_have_fast_sqrt`, `tti_allows_misaligned_memory_accesses`), as do `split_block_dtu` (SplitBlock's
+  DomTreeUpdater path), `aa_tags_concat` (AAMDNodes::concat), `gep_operator_collect_offset` users and
+  `irb_zext_or_trunc_any` (CreateZExtOrTrunc for any int/vector type).
+- Shared changes: `Simplify_Query.no_tli_libcalls` (TLI == nullptr for ConstantFoldCall; `have_tli = false` is set by
+  several callers that do pass a TLI in LLVM, so it could not be reused), `simplify_instructions_in_block(bb,
+  use_tli)` (JT keeps the default), ConstantFoldLoadThroughBitcast returns null for a scalable load from a fixed
+  constant instead of failing. `ra_has_one_use` became `value_has_one_use` (Value::hasOneUse: false for
+  ConstantData, which has no use list in LLVM).
+- Sweeps: whole-file 7753/7754 + per-function 69776/69778 (loud: ppc_fp128 parser), `-mtriple=x86_64-unknown-linux-gnu`
+  and `debugify,…`: 0 differs.
+- Perf (x64 build, `-disable-output`, no @perf benchmark): straightline n16000/n64000 +0.01/+0.1 s over parsing,
+  sqlite3.ll +0.23 s (LLVM +0.02): linear.

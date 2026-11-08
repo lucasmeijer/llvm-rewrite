@@ -17,6 +17,8 @@ Simplify_Query :: struct {
     can_use_undef := true;
     allow_ephemerals := false;
     have_tli := true;            // a TargetLibraryInfo is available (instsimplify passes one)
+    no_tli_libcalls := false;    // TLI == nullptr for ConstantFoldCall: library calls are not folded (have_tli does not
+                                 // imply this: several callers that clear have_tli do pass a TLI in LLVM)
     dc: *Dom_Cond_Cache;         // DomConditionCache (InstCombine); may be null
     cc: *Cond_Context;           // CondContext (InstCombine's visitSelectInst); may be null
 }

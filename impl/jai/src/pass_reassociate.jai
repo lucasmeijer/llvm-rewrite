@@ -77,7 +77,7 @@ reassociate_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
 
 // DenseMap::operator[] (inserts a zero entry when absent, which ValueRankMap.contains later sees)
 // Value::hasOneUse (ConstantData has no use list in LLVM)
-ra_has_one_use :: (v: Value_Id) -> bool { return !is_constant_data(v) && has_one_use(v); }
+value_has_one_use :: (v: Value_Id) -> bool { return !is_constant_data(v) && has_one_use(v); }
 
 ra_vrm_get :: (v: Value_Id) -> u32 {
     p := table_find_pointer(*ra.value_rank_map, v);
@@ -109,7 +109,7 @@ ra_has_fp_associative_flags :: (i: Value_Id) -> bool {
 
 // isReassociableOp(V, Opcode[, Opcode2])
 ra_is_reassociable_op :: (v: Value_Id, opc1: Opcode, opc2: Opcode = .NONE_OP) -> Value_Id {
-    if !is_binary_operator(v) || !ra_has_one_use(v) return NONE;
+    if !is_binary_operator(v) || !value_has_one_use(v) return NONE;
     o := inst_op(v);
     if o != opc1 && (opc2 == .NONE_OP || o != opc2) return NONE;
     if !is_fp_math_operator(v) || ra_has_fp_associative_flags(v) return v;
@@ -275,14 +275,14 @@ ra_linearize_expr_tree :: (root: Value_Id, ops: *[..] Ra_Rv, to_redo: *Ra_Set, f
             }
             p := table_find_pointer(*leaves, o);
             if !p {
-                if !ra_has_one_use(o) {
+                if !value_has_one_use(o) {
                     array_add(*leaf_order, o);
                     table_set(*leaves, o, weight);
                     continue;
                 }
             } else {
                 p.* += weight;
-                if !ra_has_one_use(o) continue;
+                if !value_has_one_use(o) continue;
                 weight = p.*;
                 table_remove(*leaves, o);
             }
@@ -524,7 +524,7 @@ ra_is_interesting_for_or :: (v: Value_Id) -> bool {
 ra_should_convert_or_with_no_common_bits_to_add :: (or: Value_Id) -> bool {
     for k: 0..cast(s64) nops(or) - 1 if ra_is_interesting_for_or(op(or, cast(u32) k)) return true;
     vb := first_user(or);
-    if ra_has_one_use(or) && ra_is_interesting_for_or(vb) return true;
+    if value_has_one_use(or) && ra_is_interesting_for_or(vb) return true;
     return false;
 }
 
@@ -540,9 +540,9 @@ ra_convert_or_with_no_common_bits_to_add :: (or: Value_Id) -> Value_Id {
 
 // ShouldBreakUpDistribution
 ra_should_break_up_distribution :: (mul: Value_Id) -> bool {
-    if !ra_has_one_use(mul) || !is_binary_operator(mul) || inst_op(mul) != .MUL return false;
+    if !value_has_one_use(mul) || !is_binary_operator(mul) || inst_op(mul) != .MUL return false;
     l := op(mul, 0);
-    if !ra_has_one_use(l) || !pm_imm_constant(op(mul, 1)) return false;
+    if !value_has_one_use(l) || !pm_imm_constant(op(mul, 1)) return false;
     lo := opr_code(l);
     if lo != .ADD && lo != .SUB return false;
     a := op(l, 0); b := op(l, 1);
@@ -551,7 +551,7 @@ ra_should_break_up_distribution :: (mul: Value_Id) -> bool {
     if uo != .ADD && uo != .SUB return false;
     for k: 0..cast(s64) nops(mul_user) - 1 {
         sib := op(mul_user, cast(u32) k);
-        if sib == mul || !ra_has_one_use(sib) continue;
+        if sib == mul || !value_has_one_use(sib) continue;
         if opr_code(sib) == .MUL && pm_imm_constant(op(sib, 1)) {
             nc := op(sib, 0);
             if (nc == a || nc == b) && !is_constant_kind(vkind(nc)) return true;
@@ -587,7 +587,7 @@ ra_should_break_up_subtract :: (sub: Value_Id) -> bool {
     v1 := op(sub, 1);
     if ra_is_reassociable_op(v1, .ADD, .FADD) != NONE || ra_is_reassociable_op(v1, .SUB, .FSUB) != NONE return true;
     vb := first_user(sub);
-    if ra_has_one_use(sub) && (ra_is_reassociable_op(vb, .ADD, .FADD) != NONE || ra_is_reassociable_op(vb, .SUB, .FSUB) != NONE)
+    if value_has_one_use(sub) && (ra_is_reassociable_op(vb, .ADD, .FADD) != NONE || ra_is_reassociable_op(vb, .SUB, .FSUB) != NONE)
         return true;
     return false;
 }
@@ -803,7 +803,7 @@ ra_create_and_instr :: (pos: Value_Id, opnd: Value_Id, c: APInt) -> Value_Id {
 // CombineXorOpnd (one operand and the constant)
 ra_combine_xor_opnd1 :: (pos: Value_Id, o1: *Ra_Xor_Opnd, const_opnd: *APInt, res: *Value_Id) -> bool {
     if !o1.is_or || ap_is_zero(o1.const_part) return false;
-    if !ra_has_one_use(o1.orig) return false;
+    if !value_has_one_use(o1.orig) return false;
     c1 := o1.const_part;
     if !ap_eq(c1, const_opnd.*) return false;
     x := o1.symbolic;
@@ -819,8 +819,8 @@ ra_combine_xor_opnd2 :: (pos: Value_Id, o1_in: *Ra_Xor_Opnd, o2_in: *Ra_Xor_Opnd
     x := o1.symbolic;
     if x != o2.symbolic return false;
     dead_inst_num := 1;
-    if ra_has_one_use(o1.orig) dead_inst_num += 1;
-    if ra_has_one_use(o2.orig) dead_inst_num += 1;
+    if value_has_one_use(o1.orig) dead_inst_num += 1;
+    if value_has_one_use(o2.orig) dead_inst_num += 1;
 
     if o1.is_or != o2.is_or {
         if o2.is_or { t := o1; o1 = o2; o2 = t; }
@@ -1256,7 +1256,7 @@ ra_erase_inst :: (i: Value_Id) {
         if !is_inst(v) continue;
         o := v;
         opcode := inst_op(o);
-        while ra_has_one_use(o) && inst_op(first_user(o)) == opcode && !table_contains(*visited, o) {
+        while value_has_one_use(o) && inst_op(first_user(o)) == opcode && !table_contains(*visited, o) {
             table_set(*visited, o, true);
             o = first_user(o);
         }
@@ -1269,7 +1269,7 @@ ra_erase_inst :: (i: Value_Id) {
 
 // getNegatibleInsts
 ra_get_negatible_insts :: (v: Value_Id, cands: *[..] Value_Id) {
-    if !is_inst(v) || !ra_has_one_use(v) return;
+    if !is_inst(v) || !value_has_one_use(v) return;
     i := v;
     o := inst_op(i);
     if o == .FMUL {
@@ -1322,15 +1322,15 @@ ra_canonicalize_neg_fp_constants_for_op :: (i: Value_Id, o: Value_Id, other: Val
 // canonicalizeNegFPConstants
 ra_canonicalize_neg_fp_constants :: (i_in: Value_Id) -> Value_Id {
     i := i_in;
-    if inst_op(i) == .FADD && is_inst(op(i, 1)) && ra_has_one_use(op(i, 1)) {
+    if inst_op(i) == .FADD && is_inst(op(i, 1)) && value_has_one_use(op(i, 1)) {
         r := ra_canonicalize_neg_fp_constants_for_op(i, op(i, 1), op(i, 0));
         if r != NONE i = r;
     }
-    if inst_op(i) == .FADD && is_inst(op(i, 0)) && ra_has_one_use(op(i, 0)) {
+    if inst_op(i) == .FADD && is_inst(op(i, 0)) && value_has_one_use(op(i, 0)) {
         r := ra_canonicalize_neg_fp_constants_for_op(i, op(i, 0), op(i, 1));
         if r != NONE i = r;
     }
-    if inst_op(i) == .FSUB && is_inst(op(i, 1)) && ra_has_one_use(op(i, 1)) {
+    if inst_op(i) == .FSUB && is_inst(op(i, 1)) && value_has_one_use(op(i, 1)) {
         r := ra_canonicalize_neg_fp_constants_for_op(i, op(i, 1), op(i, 0));
         if r != NONE i = r;
     }
@@ -1347,7 +1347,7 @@ ra_optimize_inst :: (i_in: Value_Id) {
 
     if inst_op(i) == .SHL && ra_isa_constant_int(op(i, 1)) {
         if ra_is_reassociable_op(op(i, 0), .MUL) != NONE ||
-           (ra_has_one_use(i) && (ra_is_reassociable_op(first_user(i), .MUL) != NONE ||
+           (value_has_one_use(i) && (ra_is_reassociable_op(first_user(i), .MUL) != NONE ||
                                ra_is_reassociable_op(first_user(i), .ADD) != NONE)) {
             ni := ra_convert_shift_to_mul(i);
             rs_insert(*ra.redo, i);
@@ -1398,7 +1398,7 @@ ra_optimize_inst :: (i_in: Value_Id) {
             i = ni;
         } else if okn {
             if ra_is_reassociable_op(op(i, 1), .MUL) != NONE &&
-               (!ra_has_one_use(i) || ra_is_reassociable_op(first_user(i), .MUL) == NONE) {
+               (!value_has_one_use(i) || ra_is_reassociable_op(first_user(i), .MUL) == NONE) {
                 ni := ra_lower_negate_to_multiply(i);
                 ra_redo_binop_users(ni);
                 rs_insert(*ra.redo, i);
@@ -1416,7 +1416,7 @@ ra_optimize_inst :: (i_in: Value_Id) {
         } else if okf {
             x := ifx is_binary_operator(i) then op(i, 1) else op(i, 0);
             if ra_is_reassociable_op(x, .FMUL) != NONE &&
-               (!ra_has_one_use(i) || ra_is_reassociable_op(first_user(i), .FMUL) == NONE) {
+               (!value_has_one_use(i) || ra_is_reassociable_op(first_user(i), .FMUL) == NONE) {
                 ni := ra_lower_negate_to_multiply(i);
                 ra_redo_binop_users(ni);
                 rs_insert(*ra.redo, i);
@@ -1429,13 +1429,13 @@ ra_optimize_inst :: (i_in: Value_Id) {
     if !inst_is_associative(i) return;
     bo := i;
     opcode := inst_op(bo);
-    if ra_has_one_use(bo) && inst_op(first_user(bo)) == opcode {
+    if value_has_one_use(bo) && inst_op(first_user(bo)) == opcode {
         u := first_user(bo);
         if u != bo && inst_block(bo) == inst_block(u) rs_insert(*ra.redo, u);
         return;
     }
-    if ra_has_one_use(bo) && opcode == .ADD && inst_op(first_user(bo)) == .SUB return;
-    if ra_has_one_use(bo) && opcode == .FADD && inst_op(first_user(bo)) == .FSUB return;
+    if value_has_one_use(bo) && opcode == .ADD && inst_op(first_user(bo)) == .SUB return;
+    if value_has_one_use(bo) && opcode == .FADD && inst_op(first_user(bo)) == .FSUB return;
     ra_reassociate_expression(bo);
 }
 
@@ -1503,7 +1503,7 @@ ra_reassociate_expression :: (i: Value_Id) {
         return;
     }
 
-    if ra_has_one_use(i) {
+    if value_has_one_use(i) {
         u := first_user(i);
         last := ops[ops.count - 1].op;
         if inst_op(i) == .MUL && inst_op(u) == .ADD && ra_isa_constant_int(last) && ap_is_all_ones(cf_ap(last)) {
@@ -1578,14 +1578,14 @@ ra_build_pair_map :: (rpot: [] Value_Id) {
     for bb: rpot {
         for i: block_insts(bb) {
             if !is_binary_operator(i) || !inst_is_associative(i) continue;
-            if ra_has_one_use(i) && is_inst(first_user(i)) && inst_op(first_user(i)) == inst_op(i) continue;
+            if value_has_one_use(i) && is_inst(first_user(i)) && inst_op(first_user(i)) == inst_op(i) continue;
             wl: [..] Value_Id; wl.allocator = temp;
             array_add(*wl, op(i, 0));
             array_add(*wl, op(i, 1));
             ops: [..] Value_Id; ops.allocator = temp;
             while wl.count && ops.count <= RA_GLOBAL_REASSOCIATE_LIMIT {
                 o := pop(*wl);
-                if !is_inst(o) || inst_op(o) != inst_op(i) || !ra_has_one_use(o) {
+                if !is_inst(o) || inst_op(o) != inst_op(i) || !value_has_one_use(o) {
                     array_add(*ops, o);
                     continue;
                 }
