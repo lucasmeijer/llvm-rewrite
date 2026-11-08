@@ -17,6 +17,7 @@ import bdce;
 import instsimplify;
 import mem2reg;
 import sroa;
+import earlycse;
 import demandedbits;
 import analyses;
 import loopinfo;
@@ -72,6 +73,7 @@ let P_PRINT_MEMORYSSA = 151;      // arg 1: no-ensure-optimized-uses
 let P_PRINT_MEMORYSSA_WALKER = 152;
 let P_VERIFY_MEMORYSSA = 153;
 let P_SCCP = 160;
+let P_EARLY_CSE = 170;     // arg: 1 = memssa
 let P_PRINT_SCEV = 118;
 let P_VERIFY_SCEV = 119;
 // loop passes
@@ -128,6 +130,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_LCSSA => "LCSSAPass",
         P_AA_EVAL => "AAEvaluator",
         P_SCCP => "SCCPPass",
+        P_EARLY_CSE => "EarlyCSEPass",
         P_IPSCCP => "IPSCCPPass",
         P_NOOP_MODULE => "NoOpModulePass",
         P_NOOP_FUNCTION => "NoOpFunctionPass",
@@ -354,6 +357,23 @@ recursive fn parse_function_elem(e: i32) -> i32 {
             else { perr_pipeline(str("invalid MemorySSAPrinterPass parameter '", ps, "' ")); }
         }
         return new_pnode(PK_PASS, P_PRINT_MEMORYSSA as i32, arg, true, pelems[e].name);
+    }
+    if is_param_name(name, "early-cse") {
+        // parseEarlyCSEPassOptions: parseSinglePassOption(Params, "memssa", "EarlyCSE")
+        var arg: i32 = 0;
+        if name != "early-cse" {
+            let ps = name[10..name.len - 1];
+            var st: i64 = 0;
+            while st < ps.len {
+                var j = st;
+                while j < ps.len && ps[j] != ';' { j++; }
+                let pn = ps[st..j];
+                st = j + 1;
+                if pn == "memssa" { arg = 1; }
+                else { perr_pipeline(str("invalid EarlyCSE pass parameter '", pn, "'")); }
+            }
+        }
+        return new_pnode(PK_PASS, P_EARLY_CSE as i32, arg, false, pelems[e].name);
     }
     if is_param_name(name, "sroa") {
         // parseSROAOptions: default modify-cfg
@@ -607,6 +627,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_PRINT_MEMORYSSA_WALKER => { mssa_print_walker(fv); return PA_ALL; },
         P_VERIFY_MEMORYSSA => { mssa_get(fv); return PA_ALL; },
         P_SCCP => { return sccp_run(fv); },
+        P_EARLY_CSE => { return early_cse_run(fv, pnodes[n].arg != 0); },
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
         P_VERIFY_SCEV => { scev_get(fv); return PA_ALL; },     // ScalarEvolution::verify reports only mismatches
         _ => { fatal("internal: unknown function pass id"); return PA_ALL; },
