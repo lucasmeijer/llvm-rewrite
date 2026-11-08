@@ -4708,6 +4708,7 @@ tests/imported/llvm/Transforms/InstCombine/X86/x86-f16c.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-f16c.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-fma.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-fma.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-fp-minmax-negzero.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-fp-minmax-negzero.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-insertps.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-insertps.ll::roundtrip
@@ -4739,6 +4740,7 @@ tests/imported/llvm/Transforms/InstCombine/X86/x86-pshufb-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pshufb-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pshufb.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-pshufb.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-scalar-max-min.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-scalar-max-min.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-sse-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-sse-inseltpoison.ll::roundtrip
@@ -5257,6 +5259,7 @@ tests/imported/llvm/Transforms/InstCombine/convergent.ll::opt
 tests/imported/llvm/Transforms/InstCombine/convergent.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/copysign-fneg-fabs.ll::opt
 tests/imported/llvm/Transforms/InstCombine/copysign-fneg-fabs.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/copysign.ll::opt
 tests/imported/llvm/Transforms/InstCombine/copysign.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cos-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/cos-1.ll::roundtrip
@@ -5613,6 +5616,7 @@ tests/imported/llvm/Transforms/InstCombine/gepphigep.ll::opt
 tests/imported/llvm/Transforms/InstCombine/gepphigep.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/get-lowbitmask-upto-and-including-bit.ll::opt
 tests/imported/llvm/Transforms/InstCombine/get-lowbitmask-upto-and-including-bit.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/get_active_lane_mask.ll::opt
 tests/imported/llvm/Transforms/InstCombine/get_active_lane_mask.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/get_vector_length.ll::opt
 tests/imported/llvm/Transforms/InstCombine/get_vector_length.ll::roundtrip
@@ -5732,6 +5736,7 @@ tests/imported/llvm/Transforms/InstCombine/icmp-shl.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-shl.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-shr-lt-gt.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-shr-lt-gt.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/icmp-shr.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-shr.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/icmp-signmask.ll::opt
 tests/imported/llvm/Transforms/InstCombine/icmp-signmask.ll::roundtrip
@@ -7294,6 +7299,7 @@ tests/imported/llvm/Transforms/InstCombine/trunc-extractelement.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-extractelement.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-fp-to-int.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-fp-to-int.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/trunc-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-load.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-load.ll::roundtrip
@@ -7307,6 +7313,7 @@ tests/imported/llvm/Transforms/InstCombine/trunc-shift-trunc.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-shift-trunc.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/trunc-shl-zext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc-shl-zext.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/trunc.ll::opt
 tests/imported/llvm/Transforms/InstCombine/trunc.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/truncating-saturate.ll::opt
 tests/imported/llvm/Transforms/InstCombine/truncating-saturate.ll::roundtrip

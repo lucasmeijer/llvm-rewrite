@@ -11,8 +11,8 @@
 
 // ---------------------------------------------------------------- analyses
 
-Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; SCEV; LVI; BPI; BFI; }
-ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles", "scalar-evolution", "lazy-value-info", "branch-prob", "block-freq"];
+Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; SCEV; LVI; BPI; BFI; LAST_RUN_TRACKING; }
+ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles", "scalar-evolution", "lazy-value-info", "branch-prob", "block-freq", "last-run-tracking"];
 
 // PreservedAnalyses. `cfg` = preserveSet<CFGAnalyses>().
 Preserved :: struct {
@@ -46,6 +46,9 @@ Fn_Analyses :: struct {
     lvi: *Lvi;         // LazyValueInfo (lazy_value_info.jai)
     bpi: *Bpi;         // BranchProbabilityInfo (branch_prob.jai)
     bfi: *Bfi;         // BlockFrequencyInfo (block_freq.jai)
+    // LastRunTrackingAnalysis (LastRunTrackingAnalysis.cpp): its TrackedPasses map. InstCombine is the only pass that
+    // uses it and calls update() without options, so the map is "empty" or "{InstCombine: no check}".
+    lrt_instcombine: bool;
 }
 fam: Table(Value_Id, Fn_Analyses);
 
@@ -194,6 +197,8 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     if e.se && !e.ac { e.ac = ac_build(f); e.se.ac = e.ac; }
     // LazyValueInfo::invalidate: only when not preserved (it holds the never-invalidated AssumptionCache)
     if e.lvi && !analysis_survives(.LVI, pa) { lvi_free(e.lvi); e.lvi = null; }
+    // LastRunTrackingInfo has the default invalidate(): kept only when preserved (or all preserved)
+    if e.lrt_instcombine && !analysis_survives(.LAST_RUN_TRACKING, pa) e.lrt_instcombine = false;
     if e.lvi && !e.ac { e.ac = ac_build(f); e.lvi.ac = e.ac; }
     if e.bpi && !analysis_survives(.BPI, pa) { bpi_free(e.bpi); e.bpi = null; }
     if e.bfi && !analysis_survives(.BFI, pa) { bfi_free(e.bfi); e.bfi = null; }
@@ -217,6 +222,7 @@ fam_require :: (f: Value_Id, k: Analysis_Kind) {
         case .LVI; get_lvi(f);
         case .BPI; get_bpi(f);
         case .BFI; get_bfi(f);
+        case .LAST_RUN_TRACKING;   // an empty LastRunTrackingInfo: nothing to compute
     }
 }
 fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
@@ -305,6 +311,8 @@ PASS_TABLE :: Pass_Info.[
     .{"print<demanded-bits>", .FUNCTION, .PRINT_DEMANDED_BITS, true, .DOMTREE},
     .{"print<cost-model>", .FUNCTION, .PRINT_COST_MODEL, true, .DOMTREE},
     .{"require<domtree>", .FUNCTION, .REQUIRE, true, .DOMTREE},
+    .{"require<last-run-tracking>", .FUNCTION, .REQUIRE, true, .LAST_RUN_TRACKING},
+    .{"invalidate<last-run-tracking>", .FUNCTION, .INVALIDATE, true, .LAST_RUN_TRACKING},
     .{"require<postdomtree>", .FUNCTION, .REQUIRE, true, .POSTDOMTREE},
     .{"require<demanded-bits>", .FUNCTION, .REQUIRE, true, .DEMANDED_BITS},
     .{"invalidate<domtree>", .FUNCTION, .INVALIDATE, true, .DOMTREE},
@@ -645,15 +653,17 @@ opts: struct {
     instcombine_max_sink_users: s64 = 32;    // -instcombine-max-sink-users
     instcombine_maxarray_size: s64 = 1024;   // -instcombine-maxarray-size
     instcombine_negator_enabled := true;     // InstCombineNegator.cpp -instcombine-negator-enabled
+    disable_last_run_tracking := false;      // LastRunTrackingAnalysis.cpp -disable-last-run-tracking
 };
 opt_march: string;                       // opt -march
 cl_data_layout: string;                  // opt -data-layout (overrides the module's datalayout)
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT + GVN_CL_OPT_COUNT + DSE_CL_OPT_COUNT + MCO_CL_OPT_COUNT + INDVARS_CL_OPT_COUNT + JT_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
-    add_indvars_cl_opts(list, list.count - INDVARS_CL_OPT_COUNT - JT_CL_OPT_COUNT);
-    add_jt_cl_opts(list, list.count - JT_CL_OPT_COUNT);
+    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT + GVN_CL_OPT_COUNT + DSE_CL_OPT_COUNT + MCO_CL_OPT_COUNT + INDVARS_CL_OPT_COUNT + JT_CL_OPT_COUNT + LM_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    add_indvars_cl_opts(list, list.count - INDVARS_CL_OPT_COUNT - JT_CL_OPT_COUNT - LM_CL_OPT_COUNT);
+    add_jt_cl_opts(list, list.count - JT_CL_OPT_COUNT - LM_CL_OPT_COUNT);
+    add_lm_cl_opts(list, list.count - LM_CL_OPT_COUNT);
     add_gvn_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT + LICM_CL_OPT_COUNT);
     add_dbgify_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT);
     add_licm_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT + SCFG_CL_OPT_COUNT + DBGIFY_CL_OPT_COUNT);
@@ -678,6 +688,12 @@ cl_opts :: () -> [] Cl_Opt {
     list[7] = .{"disable-simplify-libcalls", .BOOL, *opts.disable_simplify_libcalls, null, null};
     list[8] = .{"mtriple", .STRING, null, null, *opts.mtriple};
     return list;
+}
+
+// LastRunTracking and the L1.loop-misc passes (LoopDeletion, LoopIdiom, LoopLoadElim, LoopDistribute, ...)
+LM_CL_OPT_COUNT :: 1;
+add_lm_cl_opts :: (list: [] Cl_Opt, base: s64) {
+    list[base + 0] = .{"disable-last-run-tracking", .BOOL, *opts.disable_last_run_tracking, null, null};
 }
 
 // Parse `-name`, `--name`, `-name=value`. Returns false if the option isn't known.

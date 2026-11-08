@@ -536,13 +536,9 @@ create_trunc_or_bitcast :: (v: Value_Id, t: Type_Id) -> Value_Id {
 }
 
 // ShuffleVectorInst::isSplatMask-ish m_SplatMask: all non-poison lanes equal (at least one)
+// m_SplatMask: all_equal(Mask) (a poison element is -1, so it only matches an all-poison mask)
 ic_is_splat_mask :: (m: [] u32) -> bool {
-    first: u32 = 0xFFFF_FFFF;
-    for m {
-        if it == 0xFFFF_FFFF continue;
-        if first == 0xFFFF_FFFF first = it;
-        else if it != first return false;
-    }
+    for m if it != m[0] return false;
     return true;
 }
 // shrinkSplatShuffle

@@ -4287,7 +4287,7 @@ ic_visit_icmp :: (i: Value_Id) -> Value_Id {
             oke, yy := pmi_zext_or_sext(op1);
             if oke && scalar_bits(yy) == 1 && (has_one_use(op0) || has_one_use(op1)) {
                 w := scalar_bits(op0);
-                if is_inst(op0) && is_shr_op(inst_op(op0)) && pm_specific_int(op(op0, 1), cast(u64) (w - 1)) {
+                if is_inst(op0) && is_shr_op(inst_op(op0)) && pm_specific_int_allow_poison(op(op0, 1), cast(u64) (w - 1)) {
                     xv_ := op(op0, 0);
                     ext_opc := inst_op(op1); sh_opc := inst_op(op0);
                     if (ext_opc == .ZEXT && sh_opc == .LSHR) || (ext_opc == .SEXT && sh_opc == .ASHR) {

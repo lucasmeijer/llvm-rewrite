@@ -152,7 +152,21 @@ dl_type_size_bits :: (t: Type_Id) -> u64 {
     return 0;
 }
 dl_type_store_size :: (t: Type_Id) -> u64 { return (dl_type_size_bits(t) + 7) / 8; }
-dl_type_alloc_size :: (t: Type_Id) -> u64 { return align_to(dl_type_store_size(t), dl_abi_align(t)); }
+// DataLayout::getTypeAllocSize: arrays multiply the element's alloc size in bytes (not bits, which can wrap for
+// huge arrays such as [2^63 x i8]); the default case is alignTo(getTypeStoreSize, ABI alignment).
+dl_type_alloc_size :: (t: Type_Id) -> u64 {
+    r := ir.types[t];
+    if r.kind == {
+        case .ARRAY; return r.a * dl_type_alloc_size(type_elem(t));
+        case .STRUCT;
+            sz, al := dl_struct_layout(t);
+            if r.flags & TYF_PACKED return sz;
+            return align_to(sz, max(dl.struct_abi, al));
+        case .INT; return align_to((r.a + 7) / 8, dl_int_align(cast(u32) r.a, true));
+        case .PTR; return align_to(dl_ptr_spec(cast(u32) r.a).bits / 8, dl_ptr_spec(cast(u32) r.a).abi);
+    }
+    return align_to(dl_type_store_size(t), dl_abi_align(t));
+}
 
 dl_alignment :: (t: Type_Id, abi: bool) -> u64 {
     r := ir.types[t];

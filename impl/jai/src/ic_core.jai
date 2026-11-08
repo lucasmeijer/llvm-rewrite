@@ -637,7 +637,10 @@ icb_intrinsic :: (id: Intrinsic_Id, otys: [] Type_Id, args: [] Value_Id, name: s
     return icb_insert(i, name);
 }
 // CreateBinaryIntrinsic(ID, L, R): constant folds through FoldIntrinsic first
+// CreateBinaryIntrinsic / CreateUnaryIntrinsic declare the intrinsic before trying to fold (unlike CreateIntrinsic),
+// so a folded call still leaves its declaration in the module.
 icb_binary_intrinsic :: (id: Intrinsic_Id, l: Value_Id, r: Value_Id, name: string = "", fmf_src: Value_Id = NONE) -> Value_Id {
+    get_or_insert_intrinsic_declaration(id, .[vtype(l)]);
     if is_const(l) && is_const(r) {
         x := cfo_intrinsic(id, .[l, r], vtype(l));
         if x != NONE return x;
@@ -645,6 +648,7 @@ icb_binary_intrinsic :: (id: Intrinsic_Id, l: Value_Id, r: Value_Id, name: strin
     return icb_intrinsic(id, .[vtype(l)], .[l, r], name, fmf_src);
 }
 icb_unary_intrinsic :: (id: Intrinsic_Id, v: Value_Id, name: string = "", fmf_src: Value_Id = NONE) -> Value_Id {
+    get_or_insert_intrinsic_declaration(id, .[vtype(v)]);
     if is_const(v) {
         x := cfo_intrinsic(id, .[v], vtype(v));
         if x != NONE return x;
@@ -1230,6 +1234,16 @@ instcombine_run :: (f: Value_Id, name: string) -> Preserved {
             fatal("invalid InstCombine pass parameter '%'", p);
         }
     }
-    if !ic_combine_function(f, icopts) return PRESERVE_ALL;
-    return preserved_cfg();
+    // LastRunTrackingAnalysis: no changes since the last InstCombine run (whatever its options), exit early
+    lrt := fam_entry(f);
+    if lrt.lrt_instcombine && !opts.disable_last_run_tracking return PRESERVE_ALL;
+    if !ic_combine_function(f, icopts) {
+        fam_entry(f).lrt_instcombine = true;   // LRT.update(&ID, /*Changed=*/false)
+        return PRESERVE_ALL;
+    }
+    // LRT.update(&ID, /*Changed=*/true): the map is cleared, then InstCombine is tracked again
+    fam_entry(f).lrt_instcombine = true;
+    pa := preserved_cfg();
+    preserve(*pa, .LAST_RUN_TRACKING);
+    return pa;
 }

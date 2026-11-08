@@ -207,7 +207,7 @@ ic_simplify_any_mem_set :: (mi: Value_Id) -> Value_Id {
         fill := ap_zero(cast(u32) (len * 8));
         for k: 0..cast(s64) len - 1 fill = ap_or(fill, ap_shl(ap_from_u64(cast(u32) (len * 8), b), cast(u32) (k * 8)));
         fill_val := const_int_ap(type_int(cast(u32) (len * 8)), fill);
-        s := icb_store_raw(fill_val, call_arg(mi, 0), alignment, ic_mem_is_volatile(mi));
+        s := icb_store_raw(fill_val, dest, alignment, ic_mem_is_volatile(mi));
         if get_metadata(mi, md_kind_id("DIAssignID")) != NONE fatal("instcombine: SimplifyAnyMemSet with DIAssignID is not supported yet");
         if atomic inst(s).ord1 = ORD_UNORDERED;
         ic_mem_set_length(mi, 0);
@@ -2108,7 +2108,7 @@ ic_visit_copysign :: (ii: Value_Id) -> Ic_Switch_Result {
     sign_elt := scalar_type(vtype(sign));
     if has_one_use(sign) {
         okb, cast_src := pm_elementwise_bitcast(sign);
-        if okb && is_inst(sign) && has_one_use(cast_src) && is_int_or_int_vector(vtype(cast_src)) && type_kind(sign_elt) != .PPC_FP128 {
+        if okb && is_inst(sign) && has_one_use(cast_src) && is_int_or_int_vector(vtype(cast_src)) {   // hasSignBitInMSB: true for every IR FP type (also semPPCDoubleDouble)
             bw := type_bits(sign_elt);
             known := kb_new(bw);
             if ic_simplify_demanded_bits(sign, 0, ap_signed_min(bw), *known, ic.sq, 0) return sw_done(ii);
@@ -2387,7 +2387,7 @@ ic_visit_vector_extract :: (ii: Value_Id) -> Ic_Switch_Result {
     }
     if call_iid(vec) == IID_GET_ACTIVE_LANE_MASK && cf_is_int(call_arg(vec, 1)) {
         a := fn_get_fn_attr(inst_fn(ii), .VScaleRange);
-        vmin: u64 = ifx a then a.ival >> 32 else 0;
+        vmin: u64 = ifx a then a.ival >> 32 else 1;   // AttributeSet::getVScaleRangeMin: 1 without the attribute
         scale := ifx type_kind(rt) == .SVECTOR then vmin else 1;
         if ext_idx * scale >= const_int_zext(call_arg(vec, 1)) return sw_done(ic_replace_inst_uses_with(ii, const_null_value(rt)));
     }
