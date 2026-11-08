@@ -4382,9 +4382,11 @@ create_extract_value :: (agg: Value_Id, idxs: [] u32, name: string = "") -> Valu
     for idxs rt = type_sub(rt, ifx type_kind(rt) == .STRUCT then it else 0);
     i := new_inst(.EXTRACTVALUE, rt, 1);
     set_op(i, 0, agg);
+    cp := NewArray(idxs.count, u32,, allocator = temp);   // idxs may be a view into ir.u32_pool
+    for idxs cp[it_index] = it;
     r := inst(i);
-    r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) idxs.count;
-    for idxs array_add(*ir.u32_pool, it);
+    r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) cp.count;
+    for cp array_add(*ir.u32_pool, it);
     return i;
 }
 // Builder.CreateExtractValue

@@ -1489,7 +1489,7 @@ has_poison_generating_flags :: (v: Value_Id) -> bool {
             id := call_iid(v);
             if id == IID_CTLZ || id == IID_CTTZ || id == IID_ABS return pm_one(op(v, 1));
     }
-    if is_fp_math_operator(v) { fm := inst_fmf(v); return (fm & (FMF_NNAN | FMF_NINF)) != 0; }
+    if is_fp_math_op_value(v) { fm := (opr_flags(v) >> FMF_SHIFT) & FMF_ALL; return (fm & (FMF_NNAN | FMF_NINF)) != 0; }
     return false;
 }
 // canCreateUndefOrPoison

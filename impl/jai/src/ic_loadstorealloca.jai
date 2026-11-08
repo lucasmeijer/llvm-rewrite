@@ -89,9 +89,11 @@ icb_insert_value :: (agg: Value_Id, v: Value_Id, idxs: [] u32, name: string = ""
     }
     i := new_inst(.INSERTVALUE, vtype(agg), 2);
     set_op(i, 0, agg); set_op(i, 1, v);
+    cp := NewArray(idxs.count, u32,, allocator = temp);   // idxs may be a view into ir.u32_pool
+    for idxs cp[it_index] = it;
     r := inst(i);
-    r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) idxs.count;
-    for idxs array_add(*ir.u32_pool, it);
+    r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) cp.count;
+    for cp array_add(*ir.u32_pool, it);
     return icb_insert(i, name);
 }
 // CreateAddrSpaceCast
@@ -567,7 +569,7 @@ ic_unpack_load_to_aggregate :: (li: Value_Id) -> Value_Id {
         v := const_poison(t);
         if n > 0 for e: 0..n-1 {
             off := dl_struct_offset(t, e);
-            p := icb_inbounds_ptr_add(addr, const_int(idx_ty, off), tprint("%.elt", name));
+            p := icb_inbounds_ptr_add(addr, icb_type_size(idx_ty, off, type_is_scalable(t)), tprint("%.elt", name));   // CreateTypeSize(IdxType, getElementOffset(i))
             l := icb_aligned_load(type_sub(t, e), p, common_alignment(al, off), tprint("%.unpack", name));
             set_aa_metadata(l, get_aa_metadata(li));
             m := get_metadata(li, inv); if m != NONE set_metadata(l, inv, m);
@@ -873,7 +875,7 @@ ic_unpack_store_to_aggregate :: (si: Value_Id) -> bool {
         idx_ty := dl_index_type(vtype(addr));
         if n > 0 for e: 0..n-1 {
             off := dl_struct_offset(t, e);
-            p := icb_inbounds_ptr_add(addr, const_int(idx_ty, off), addr_name);
+            p := icb_inbounds_ptr_add(addr, icb_type_size(idx_ty, off, type_is_scalable(t)), addr_name);
             val := icb_extract_value(v, .[e], elt_name);
             ns := icb_aligned_store(val, p, common_alignment(al, off));
             set_aa_metadata(ns, get_aa_metadata(si));
@@ -964,9 +966,11 @@ ic_visit_store :: (si: Value_Id) -> Value_Id {
         return NONE;
     }
     if vkind(val) == .C_UNDEF || vkind(val) == .C_POISON return ic_erase_inst(si);
-    if type_kind(scalar_type(vtype(val))) == .BYTE {
-        okc := pm_imm_constant(val);
-        if okc fatal("instcombine: stores of byte constants are not supported yet");
+    if type_kind(scalar_type(vtype(val))) == .BYTE && pm_imm_constant(val) {
+        bt := vtype(val);
+        it := type_int(type_bits(scalar_type(bt)));   // Type::getIntFromByteType
+        if is_vector_type(bt) it = type_vector(type_count(bt), it, type_kind(bt) == .SVECTOR);
+        return ic_replace_operand(si, 0, ce_cast(.BITCAST, val, it));
     }
     if !null_pointer_is_defined(ic.f, type_addrspace(vtype(ptr))) {
         v := ic_simplify_non_null_operand(ptr, true);

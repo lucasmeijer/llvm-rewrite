@@ -1169,7 +1169,7 @@ ic_optimize_pointer_difference :: (lhs_in: Value_Id, rhs_in: Value_Id, ty: Type_
     base: Value_Id = NONE;
     rgeps: [..] Value_Id; rgeps.allocator = temp;
     lgeps: [..] Value_Id; lgeps.allocator = temp;
-    rnw: u32 = 0; lnw: u32 = 0;
+    rnw: u32 = GEP_NW_ALL; lnw: u32 = GEP_NW_ALL;   // CommonPointerBase: GEPNoWrapFlags::all() when there are no GEPs
     first := true;
     while true {
         if contains(ptrs, rhs) { base = rhs; break; }

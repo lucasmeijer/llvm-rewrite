@@ -974,9 +974,11 @@ icb_call_fn :: (f: Value_Id, args: [] Value_Id, name: string = "") -> Value_Id {
 create_insert_value :: (agg: Value_Id, v: Value_Id, idxs: [] u32) -> Value_Id {
     i := new_inst(.INSERTVALUE, vtype(agg), 2);
     set_op(i, 0, agg); set_op(i, 1, v);
+    cp := NewArray(idxs.count, u32,, allocator = temp);   // idxs may be a view into ir.u32_pool
+    for idxs cp[it_index] = it;
     r := inst(i);
-    r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) idxs.count;
-    for idxs array_add(*ir.u32_pool, it);
+    r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) cp.count;
+    for cp array_add(*ir.u32_pool, it);
     return i;
 }
 inst_indices_copy :: (i: Value_Id) -> [] u32 {   // a copy: u32_pool may grow while it is used

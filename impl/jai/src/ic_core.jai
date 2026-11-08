@@ -133,6 +133,8 @@ ic_take_name :: (dst: Value_Id, src: Value_Id) {
     if vname(dst).count set_name(dst, "");
     n := vname(src);
     if n.count == 0 return;
+    // getSymTab fails for values that cannot have a name (constants): nothing happens, src keeps its name
+    if is_constant_kind(vkind(dst)) return;
     set_name(src, "");
     set_name(dst, n);
 }
@@ -635,9 +637,12 @@ create_shuffle :: (v1: Value_Id, v2_in: Value_Id, mask: [] u32) -> Value_Id {
     rt := type_vector(cast(u64) mask.count, type_elem(vt), type_kind(vt) == .SVECTOR);
     i := new_inst(.SHUFFLEVECTOR, rt, 2);
     set_op(i, 0, v1); set_op(i, 1, v2);
+    // `mask` may be a view into ir.u32_pool (another shuffle's mask): copy it before the pool can grow
+    m := NewArray(mask.count, u32,, allocator = temp);
+    for mask m[it_index] = it;
     r := inst(i);
-    r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) mask.count;
-    for mask array_add(*ir.u32_pool, it);
+    r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) m.count;
+    for m array_add(*ir.u32_pool, it);
     return i;
 }
 icb_extract_element :: (v: Value_Id, idx: Value_Id, name: string = "") -> Value_Id {

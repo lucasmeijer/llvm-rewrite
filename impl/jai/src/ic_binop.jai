@@ -1228,7 +1228,7 @@ ic_fold_vector_binop :: (i: Value_Id) -> Value_Id {
         }
         break;
     }
-    if is_associative_op(opc) && is_commutative_op(opc) {
+    if inst_is_associative(i) && is_commutative_op(opc) {
         l := lhs; r := rhs;
         if is_inst(r) && inst_op(r) == .SHUFFLEVECTOR { t2 := l; l = r; r = t2; }
         oks, x, und, mc := pm_shuffle(l);
