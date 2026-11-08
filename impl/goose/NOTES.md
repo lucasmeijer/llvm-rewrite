@@ -203,6 +203,35 @@
   (transitively) imports a module with `extern fn`s needs one. Pass doubles as u64 bit patterns to keep the
   conversion out of Goose.
 
+- **Index types** (`TyId = u16 in types`, DESIGN.md §2.5): a `u16 in a` converts implicitly to `i32`, a
+  `u32 in a` does not (only to `u32`/`u64`/`i64`), which is why `TyId` is 16 bits. `var t = vals[x].ty` infers
+  `TyId`, so a later `t = ty_elem(t)` is an error: write `var t: i32 = vals[x].ty`. An array literal takes its
+  first element's type: `[vals[x].ty, ...]` is a `TyId[N]`, not an `i32[:]`: write `[vals[x].ty as i32, ...]`.
+  A generic accessor `fn ty_kind<T>(t: T)` gets a check-free instantiation for a `TyId` argument and a checked one
+  for an `i32`, so call sites don't change. A constant never converts to an index type, and `t == -1` on one is
+  a compile error ("constant -1 does not fit u16").
+- Bounds-check elimination proves `if p >= 0 && p < a.len { a[p] }` but not `if (p as u64) < (a.len as u64)`,
+  so a hand-written unsigned compare doesn't save the check (one compare either way).
+- Every global resizable array is a data stack with a 2 GB address-space reservation (~490 of them, `goose
+  --stacks src/opt.goose`): valgrind can't host that, see "Measuring" below.
+
+## Measuring (layout work, 2026-11-08)
+
+- `GOOSE_STACK_RESERVE=128M ./harness/run perf --impl goose --instr` gives instruction counts; with the default
+  2 GB reservation every goose run under valgrind dies with "cannot reserve data stack address space" (and 256M
+  leaves valgrind too little room for itself on sqlite3). build.sh rebuilds when the variable changes; run plain
+  `./build.sh` (or any check) afterwards to get the default binary back. 128M per stack is plenty: after the
+  scratch-table change the largest table on SPASS is a few MB.
+- **The harness's `rss` column is not the tool's RSS**: it reads `ru_maxrss` from `wait4` of a child forked from
+  the ~160 MB harness Python process, and Linux carries the pre-exec maximum over, so every row shows the parent's
+  size (1.00x for everything). `tools/rss.c` forks from a small process and prints the real peak RSS and CPU.
+- `-goose-layout-stats` (opt) prints the sizes of the IR tables and scratch tables, dead values and uses outside
+  live operand runs, on stderr after the pipeline.
+- `tools/check_profile.py build` builds an opt that counts executed bounds checks per source line, and one with
+  bounds checks compiled out (an upper bound on what index types can save: 12-25% of instructions).
+- Instruction counts change whenever main moves; compare a change against a binary built from the commit it is
+  based on (a second worktree), not against an older baseline.
+
 ## Design debts / things a pass porter must know
 
 - **Ids, not references.** Every entity is an `i32` index; `-1` is none. `vals[v].sub` points into the kind's
@@ -210,7 +239,9 @@
   operand API; `set_op` is `Use::set` (pushes at the head of the new value's use list). `rauw` is LLVM's loop.
   The parser uses `rauw_with_constants`, which re-uniques constant users (`handleOperandChange`).
 - **Erase**: passes use `inst_erase_from_parent` (irutil.goose), which also removes the name from the symbol
-  table (the raw `inst_erase` doesn't). Ids are never reused (DESIGN.md §2.3, §8).
+  table (the raw `inst_erase` doesn't). Value ids are never reused (DESIGN.md §2.3, §8). Code that erases by
+  hand must end with `drop_all_refs(v); val_set_dead(v)`, not `vals[v].kind = VK_DEAD`: it frees the operand run
+  (reused, so use ids are not stable across an erase) and sets `ops = -1`, so `op()` of a dead value aborts.
 - **Operand growth**: `add_op_slot` grows like `PHINode::growOperands` via `grow_ops`, which reproduces
   `growHungoffUses`' use-list effect. Switch (`3n`) and indirectbr (`2n`) growth must call `grow_ops` with their
   own capacity first.

@@ -3,8 +3,8 @@
 #
 # GOOSE_STACK_RESERVE (default 2G) is the address space reserved per data stack (`goose build --stack-reserve`).
 # The program has ~490 data stacks (one per global resizable array), so the default reserves ~1 TB of address
-# space, more than valgrind gives a client (~128 GB): under `perf --instr` every run would die with "cannot reserve
-# data stack address space". `GOOSE_STACK_RESERVE=256M ./harness/run perf --impl goose --instr` works (NOTES.md).
+# space, more than valgrind gives a client (~128 GB, of which it needs room for itself): under `perf --instr` every run would die with "cannot reserve
+# data stack address space". `GOOSE_STACK_RESERVE=128M ./harness/run perf --impl goose --instr` works (NOTES.md).
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p bin

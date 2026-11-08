@@ -22,6 +22,11 @@ Verified with a prototype (`goose build` with clang, Goose v2026.4) before writi
   references (`T&`) into the IR tables across calls; we hold **`i32` indices**. That keeps every table shrinkable and
   every function free of lifetime puzzles.
 - `block`, `type`, `self`, `in`, `pad` are keywords: no field may be named `block` or `type`.
+- **Index types** (`u32 in vals`, reference §15) make `vals[x]` check-free when `x` has the type, but they have
+  no null and no default, convert only to their own plain unsigned type (a `u32 in vals` is not an `i32`), and pin
+  the array against shrinking. Our ids are `i32` with `-1` = none everywhere, so an index type fits only a field
+  that is never none *and* whose values don't have to cross the program's `i32` API; see §2.5 for where that
+  holds and what it measured.
 - `%` is Euclidean and `/` truncates; signed overflow aborts in `--debug` builds. APInt-style arithmetic is done on
   `u64` words, where everything wraps by definition.
 
@@ -46,10 +51,11 @@ Every LLVM `Value` (constant, global variable, function, alias, argument, basic 
 metadata-as-value) has an id in **`vals: Val[>..]`**:
 
 ```goose
-struct Val { kind: u8, flags: u8, ty: i32, sub: i32, name: i32, first_use: i32, ops: i32, nops: i32, cap: i32 }
+struct Val { kind: u8, op: u8, ty: TyId, sub: i32, name: i32, first_use: i32, ops: i32, nops: i32, cap: i32 }  // 28 B
 ```
 
-`kind` is the LLVM subclass (`ValueID` order), `ty` a type id, `sub` an index into the kind's own table
+`kind` is the LLVM subclass (`ValueID` order), `op` the opcode of an instruction (0 otherwise; it lives here rather
+than in `Inst` so that `iop(v)`, the hottest query, is one load and one bounds check), `ty` a type id (`TyId`, §2.5), `sub` an index into the kind's own table
 (`insts`, `blocks`, `args`, `globals`, `consts`), `name` a string id (-1 = unnamed) and `first_use` the head of its
 use list. `ops/nops/cap` is the value's operand run (every user kind: instructions, constants, globals with
 initializers/aliasees, functions with personality/prefix/prologue). A single id space is what makes use lists, RAUW and per-value side tables uniform: any analysis can keep
@@ -72,8 +78,11 @@ A *user* (instruction or constant) owns a run `[ops_start, ops_start + ops_len)`
   them is an error, as it is in LLVM.
 - Growing a run (`phi.addIncoming`, `switch.addCase`) copies it to a bigger run at the end of the pool exactly like
   LLVM's `growHungoffUses` (`grow_ops`): each copied use is re-`set` (pushed at the head of its value's list) in
-  operand order, then the old uses are destroyed; capacity `n + n/2` for PHIs, `3n` for switches. Old runs are
-  leaked for now (a per-capacity free list is planned). Removing an
+  operand order, then the old uses are destroyed; capacity `n + n/2` for PHIs, `3n` for switches. The old run
+  goes to a free list by exact capacity (1..31, `free_runs`, linked through the run's first `Use.next`), and so
+  does the run of an erased value (`val_set_dead`, which also sets its `ops = -1` so that a stale `op()` of a dead
+  value aborts instead of reading the run's next owner); `alloc_uses` takes a free run of the right capacity
+  first. Use ids are therefore reused, like LLVM's `Use` memory; value ids are not (§2.3). Removing an
   operand (`phi.removeIncoming`) shifts the tail down *in LLVM's way* (it swaps/moves exactly like the C++ so that
   operand order matches).
 - PHI incoming blocks are **not** operands in LLVM (no uses on the block); they sit in `use_aux` beside the value's
@@ -83,7 +92,7 @@ A *user* (instruction or constant) owns a run `[ops_start, ops_start + ops_len)`
 ### 2.3 Instructions, blocks, functions: intrusive lists
 
 ```goose
-struct Inst  { op: u8, flags: u8, fmf: u8, pred: u8, align: u8, ord: u8, ord2: u8, bits: u8,
+struct Inst  { flags: u8, fmf: u8, pred: u8, align: u8, ord: u8, ord2: u8, bits: u8,     // 67 B
                val: i32, parent: i32, prev: i32, next: i32, ty2: i32, attrs: i32, cc: i32,
                aux: i32, naux: i32, md: i32, nmd: i32, ss: i32, as_: i32 }
 struct Block { val: i32, parent: i32, prev: i32, next: i32, first: i32, last: i32 }
@@ -92,7 +101,8 @@ struct Glob  { val: i32, module: i32, prev: i32, next: i32, linkage: u8, ..., vt
 ```
 
 (One `Glob` record serves functions, variables, aliases and ifuncs; the instruction record is one flat struct with
-opcode-specific meanings for `pred`, `bits`, `ty2`, `aux` rather than a separate cold table.)
+opcode-specific meanings for `pred`, `bits`, `ty2`, `aux` rather than a separate cold table: a hot/cold split was
+prototyped and measured, see §2.5.)
 
 Instructions are in a doubly linked list per block, blocks in a doubly linked list per function, globals and
 functions in per-module lists. Insertion, erase, splitting a block and moving instructions are O(1) relinks, so every
@@ -133,6 +143,51 @@ clearing on erase. The cost is a few dozen bytes per erased value until exit.
 Append-only pools mean dead records are garbage until the process exits. That is the deliberate trade: LLVM itself
 keeps dead constants and types alive for the context's lifetime. If a pipeline ever grows the pools too much, a
 compaction pass can rebuild them between passes with an id remap.
+
+### 2.5 Layout experiments: what was measured, what landed (2026-11-08)
+
+Instruction counts from `valgrind --tool=cachegrind` (exact), CPU and peak RSS from a fork+wait4 helper (the
+harness's `rss` column is wrong, see NOTES.md). Every landed step kept every sweep (instcombine whole-file and
+per-function, sroa, simplifycfg, `print<scalar-evolution>`, early-cse<memssa>, mem2reg+adce, sccp) identical.
+
+- **Bounds checks are 12-25% of our instructions** (measured by compiling the generated C with `GS_IDX` defined
+  away: -12% parse, -17% sqlite3 sroa/early-cse/sccp, -25% instcombine on straightline n64000; CPU -20%). A
+  per-site profile (counting `GS_IDX` executions by source line) puts the hottest checks in a handful of
+  `ir.goose` accessors: `iop`, `op`, `ty_*`, `inst_of`/`block_of`, `is_inst`, the lexer's `ch`.
+- **Landed: `TyId = u16 in types` for `Val.ty`.** `u16` because it then converts implicitly to `i32` (a `u32 in
+  types` doesn't, and 490 call sites broke); `ty_check_room` fails loudly beyond 65536 types (SPASS has 331). The
+  `ty_*` accessors are generic, so a `TyId` argument gets a check-free instantiation. -0.1..-2.7% instructions.
+- **Landed: the opcode in `Val`** (`Val.flags` was unused): `iop` lost a check and a dependent load into `insts`.
+  -0.3..-5.3% instructions.
+- **Not done: index types for vals, uses, insts, blocks, globs.** Nearly every link field (`Use.val/next/prev`,
+  `Inst.parent/prev/next`, `Block.*`, `Val.first_use/name`) can be -1, and an index type has no null: the doc's
+  options are an ADT (a tag per link) or a sentinel converted at use, and the conversion *is* the bounds check, so
+  nothing is saved. The always-valid fields (`Use.user`, `Inst.val`, `Block.val`) are read through `i32` accessors
+  whose callers pass plain `i32` on, and `u32 in vals` doesn't convert to `i32` (`u16` is too narrow for them). The
+  remaining first-level check on an incoming `i32` id stays whatever the field types are. Making ids index types
+  end to end would mean replacing `-1` with a reserved record 0 per table in all 114K lines: not a mechanical step.
+- **Landed: scratch tables as hash tables (§8.4).** The id-indexed epoch tables cost 96 B (vs/vm) and 240 B
+  (SROA) per id ever created, more than the IR itself: SROA's alone was 120 MB on SPASS. Peak RSS of
+  `-passes=sroa` on SPASS 204 -> 82 MB; `sroa,early-cse,sccp` 222 -> 72 MB (LLVM: 71 MB). Instructions +0.5%.
+- **Landed: operand-run free lists** (§2.2): `uses` after sroa on SPASS 387K -> 291K; RSS -1..3%.
+- **Net, start of the experiment -> end** (other agents' commits included): `perf --instr` geomean -1.0% over
+  46 rows (instcombine straightline n64000 -7.6%, mem2reg/sroa allocas -2.7/-2.1%, simplifycfg diamonds -1.9%;
+  parse-only rows +0.5% from unrelated commits). Peak RSS, before -> after (LLVM): SPASS sroa 199 -> 54 MB (66),
+  SPASS sroa,early-cse,sccp 216 -> 72 (69), sqlite3 sroa,early-cse,sccp 201 -> 61 (62), SPASS
+  mem2reg,adce,dce,instsimplify 67 -> 50 (70), allocas n8000 sroa 69 -> 30 (48); parse-only unchanged (38 vs 59).
+- **Kept: value ids never reused.** Tombstones cost 28 B (+67 B for an instruction's record) per erased value
+  (135K of 255K values after sroa on SPASS, ~13 MB). Reusing value ids breaks the `is_dead(v)` weak-handle idiom
+  every pass relies on (§8.3); reusing just the `Inst` record would let a dead value's `sub` alias a live
+  instruction, which code that reads a dead value's record without checking `is_dead` would silently follow.
+- **Rejected: hot/cold split of `Inst`** (`Inst` 23 B of links and flags, `InstCold` 36 B of ty2/attrs/cc/aux/md/
+  ss; prototype over all 55 files): +0.1..+1.2% instructions (a second bounds check per cold access), CPU +0..6% on
+  5 of 6 workloads, RSS slightly up. The tables fit in cache well enough that density doesn't pay for the check.
+- **Rejected without a prototype: variable-mode `Inst`** (per-opcode payloads in a `Inst..[>..]` sequential
+  array): a sequential array can't be indexed, so every access goes through an extra `u32` link table, which costs
+  more than the ~30 B per instruction it would save. **Relative references for the intrusive links**
+  (`Val&<u32 in vals>?`, null at no cost): every API and side table works on ids, and turning a reference back
+  into an id is `index_of` (a division by the record size); links also name values (`Inst.next` is a value id),
+  not records of the table they live in.
 
 ## 3. How passes use it
 
@@ -189,8 +244,10 @@ with data plus a `match`.
 
 ## 7. Known costs and debts
 
-- Ids are never reused; erased values are `VK_DEAD` tombstones (§8.2). Operand runs of erased values are leaked.
-- Append-only pools leak dead operand runs, types and constants until exit (see §2.4).
+- Value ids are never reused; erased values are `VK_DEAD` tombstones (§8.2), 28 B each plus 67 B for an
+  instruction's record (§2.5). Their operand runs are reused (§2.2), except runs of capacity 32 or more.
+- Append-only pools leak types, constants, metadata and strings until exit (see §2.4).
+- Index types cover only `Val.ty` (§2.5). Bounds checks remain 12-25% of our instructions.
 - A single global state means one module "context" per process. `llvm-link` has to load all inputs into it, which
   matches LLVM (all modules share one `LLVMContext`).
 
@@ -224,7 +281,10 @@ LLVM container: `SmallVector` = `i32[>..<]` with `push`/`pop`; `SetVector` = arr
 
 ### 8.4 Scratch sets and maps (O(1) clear)
 `vs_clear/vs_add/vs_has/vs_del` (sets) and `vm_clear/vm_set/vm_get/vm_has` (maps to `i64`) over value ids (or use
-ids), 6 slots each, with an epoch stamp per entry so clearing is O(1). Owners: `VS_PASS0/VS_PASS1`,
+ids), 6 slots each, with an epoch stamp per entry so clearing is O(1). Both live in one open-addressing hash table
+keyed by (id, slot) (`vs_tab`), so memory follows the entries a pass touches rather than the largest id (an
+id-indexed table cost 96 B per value id ever created; §2.5); stale entries are dropped when it is rebuilt, and
+nothing may iterate it. A new scratch table keyed by ids should do the same. Owners: `VS_PASS0/VS_PASS1`,
 `VM_PASS0/VM_PASS1` belong to the running transform pass (ADCE: live set, dead-terminator set, block numbers);
 `VS_ANA0/VM_ANA0` belong to DemandedBits (Visited, AliveBits); its DeadUses and worklist membership are private
 stamped arrays (`db_dead_*`, `db_wl_*`), because the known-bits queries it makes reach ValueTracking code that uses
@@ -232,7 +292,7 @@ VS_ANA1. A pass that calls an analysis must not hold data in the slots the analy
 `promote_mem_to_reg` (mem2reg.goose, also called by SROA) uses VM_PASS0 (AllocaLookup, PhiToAllocaMap), VM_PASS1
 (LargeBlockInfo), VS_PASS0 (new PHIs) and VS_PASS1 (values mentioned by debug records); poison.goose's
 programUndefinedIfUndefOrPoison, vt.goose's getUnderlyingObjects and SCEV's KnownPoison use VS_ANA1. A pass with more state keeps its own stamped table (SROA's `sr_*`,
-20 slots keyed by value or use id). SCCP (sccp.goose) keeps one stamped record per value id (`ScRec`: lattice
+20 slots keyed by value or use id, the same kind of hash table). SCCP (sccp.goose) keeps one stamped record per value id (`ScRec`: lattice
 index, struct-lattice base, additional-users list, tracked return/global, bit flags for executable/visited/
 in-worklist/argument-tracked blocks and functions) and PredicateInfo (predinfo.goose) another (`PiRec`); its
 transform phase uses VS_PASS1 through `m2r_collect_records` (debug-record RAUW). `m2r_collect_records(fv)` +
