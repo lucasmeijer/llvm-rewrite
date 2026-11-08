@@ -42,7 +42,7 @@ fn sc_not_ported(what: const u8[:]) { fatal(str("SCCP: ", what, " is not ported 
 let MAX_NUM_RANGE_EXTENSIONS = 10;
 
 // per-value record (valid when stamp == sc_epoch)
-struct ScRec { stamp: u32, st: i32, sst: i32, au: i32, ret: i32, mrv: i32, glob: i32, bits: u32 }
+struct ScRec { stamp: u32, st: i32, sst: i32, au: i32, ret: i32, mrv: i32, glob: i32, bits: u32, ord: i32 }
 let SB_EXEC: u32 = 1;
 let SB_VISITED: u32 = 2;
 let SB_INWL: u32 = 4;
@@ -50,6 +50,7 @@ let SB_ARGTRACK: u32 = 8;
 let SB_MUSTPRES: u32 = 16;
 let SB_HASPI: u32 = 32;
 let SB_INSERTED: u32 = 64;
+let SB_NUMBERED: u32 = 128;      // block: instruction order numbers (rec.ord) are valid
 
 var sc_recs: ScRec[>..];
 var sc_epoch: u32 = 0;
@@ -79,8 +80,8 @@ fn sc_init(ipsccp: bool) {
     pi_reset();
 }
 fn sc_r(v: i32) -> i64 {
-    while sc_recs.len <= (v as i64) { sc_recs.push(ScRec { stamp: 0, st: -1, sst: -1, au: -1, ret: -1, mrv: -1, glob: -1, bits: 0 }); }
-    if sc_recs[v].stamp != sc_epoch { sc_recs[v] = ScRec { stamp: sc_epoch, st: -1, sst: -1, au: -1, ret: -1, mrv: -1, glob: -1, bits: 0 }; }
+    while sc_recs.len <= (v as i64) { sc_recs.push(ScRec { stamp: 0, st: -1, sst: -1, au: -1, ret: -1, mrv: -1, glob: -1, bits: 0, ord: 0 }); }
+    if sc_recs[v].stamp != sc_epoch { sc_recs[v] = ScRec { stamp: sc_epoch, st: -1, sst: -1, au: -1, ret: -1, mrv: -1, glob: -1, bits: 0, ord: 0 }; }
     return v as i64;
 }
 fn sc_bit(v: i32, b: u32) -> bool { (v as i64) < sc_recs.len && sc_recs[v].stamp == sc_epoch && (sc_recs[v].bits & b) != 0 }
@@ -171,7 +172,19 @@ fn sc_lattice(v: i32) -> VL {
 // ---------------------------------------------------------------------------------------------
 // Worklists and marking
 
-fn sc_comes_before(a: i32, b: i32) -> bool { comes_before(a, b) }
+// Instruction::comesBefore with per-block order numbers (the IR does not change while the solver runs)
+fn sc_comes_before(a: i32, b: i32) -> bool {
+    let bb = inst_parent(a);
+    if !sc_bit(bb, SB_NUMBERED) {
+        sc_set_bit(bb, SB_NUMBERED);
+        var i = block_first(bb);
+        var n: i32 = 0;
+        while i >= 0 { let k = sc_r(i); sc_recs[k].ord = n; n++; i = inst_next(i); }
+    }
+    let ka = sc_r(a);
+    let kb = sc_r(b);
+    return sc_recs[ka].ord < sc_recs[kb].ord;
+}
 
 fn sc_push_to_worklist(i: i32) {
     if sc_cur >= 0 && inst_parent(i) == inst_parent(sc_cur) && sc_comes_before(sc_cur, i) { return; }
@@ -1373,11 +1386,12 @@ fn sc_change_to_unreachable(iv: i32) -> i64 {
     let bb = inst_parent(iv);
     var uniq: i32[>..<] = [];
     let tm = block_terminator(bb);
+    vs_clear(VS_PASS0);
     if tm >= 0 {
         for k in term_nsucc(tm) {
             let s = term_succ(tm, k);
             block_remove_predecessor(s, bb, false);
-            if position(uniq, s) < 0 { uniq.push(s); }
+            if vs_add(VS_PASS0, s) { uniq.push(s); }
         }
     }
     let ui = create_inst(OP_UNREACHABLE, T_VOID, []);
@@ -1461,11 +1475,13 @@ fn sc_remove_non_feasible_edges(bb: i32, new_unreach: i32&) -> bool {
     let ti = block_terminator(bb);
     if ti < 0 { return false; }
     let ns = term_nsucc(ti);
+    // FeasibleSuccessors (SmallPtrSet): list + VS_PASS0 membership
     var feas: i32[>..<] = [];
     var has_nonfeas = false;
+    vs_clear(VS_PASS0);
     for k in ns {
         let s = term_succ(ti, k);
-        if sc_edge_has(bb, s) { if position(feas, s) < 0 { feas.push(s); } }
+        if sc_edge_has(bb, s) { if vs_add(VS_PASS0, s) { feas.push(s); } }
         else { has_nonfeas = true; }
     }
     if !has_nonfeas { return false; }
@@ -1473,11 +1489,11 @@ fn sc_remove_non_feasible_edges(bb: i32, new_unreach: i32&) -> bool {
     if o != OP_BR && o != OP_CONDBR && o != OP_SWITCH && o != OP_INDIRECTBR { fatal("Terminator must be a br, switch or indirectbr"); }
     var ups: DTUpdate[>..<] = [];
     if feas.len == 0 {
-        var seen: i32[>..<] = [];
+        vs_clear(VS_PASS0);
         for k in ns {
             let s = term_succ(ti, k);
             block_remove_predecessor(s, bb, false);
-            if position(seen, s) < 0 { seen.push(s); ups.push(DTUpdate { kind: DT_DELETE, from: bb, to: s }); }
+            if vs_add(VS_PASS0, s) { ups.push(DTUpdate { kind: DT_DELETE, from: bb, to: s }); }
         }
         let ui = create_inst(OP_UNREACHABLE, T_VOID, []);
         block_append_inst(bb, ui);
@@ -1503,7 +1519,7 @@ fn sc_remove_non_feasible_edges(bb: i32, new_unreach: i32&) -> bool {
         let have_w = sc_switch_weights(ti, w);
         var changed_w = false;
         let dd = term_succ(ti, 0);
-        if position(feas, dd) < 0 {
+        if !vs_has(VS_PASS0, dd) {
             if new_unreach < 0 {
                 let fv = block_func(dd);
                 let nb = sc_create_block_before(fv, dd, "default.unreachable");
@@ -1519,7 +1535,7 @@ fn sc_remove_non_feasible_edges(bb: i32, new_unreach: i32&) -> bool {
         var ci: i64 = 0;
         while ci < (nops(ti) - 2) / 2 {
             let s = op(ti, 3 + 2 * ci);
-            if position(feas, s) >= 0 { ci++; continue; }
+            if vs_has(VS_PASS0, s) { ci++; continue; }
             block_remove_predecessor(s, bb, false);
             ups.push(DTUpdate { kind: DT_DELETE, from: bb, to: s });
             sc_switch_remove_case(ti, ci, w);
@@ -1985,10 +2001,11 @@ fn ipsccp_run(m: i32, func_spec: bool) -> bool {
         if all { sc_find_returns_to_zap(mf, zap); }
     }
     var zapped: i32[>..<] = [];
+    vs_clear(VS_PASS0);
     for ri in zap {
         let zf = inst_func(ri);
         set_op(ri, 0, c_poison(ty_fn_ret(globs[glob_of(zf)].vty)));
-        if position(zapped, zf) < 0 { zapped.push(zf); }
+        if vs_add(VS_PASS0, zf) { zapped.push(zf); }
     }
     for zf in zapped {
         let g = glob_of(zf);

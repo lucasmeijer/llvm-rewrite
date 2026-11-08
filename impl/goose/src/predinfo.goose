@@ -189,12 +189,13 @@ fn pi_process_switch(si: i32, bb: i32, ops: i32[>..<]&) {
     if (!is_inst(c) && !is_arg(c)) || !pi_should_rename_switch(c) { return; }
     // SwitchEdges: number of edges to each successor
     let n = term_nsucc(si);
+    // SwitchEdges: edges per successor (VM_PASS0; PredicateInfo is built before the solver runs)
+    vm_clear(VM_PASS0);
+    for j in n { let t = term_succ(si, j); vm_set(VM_PASS0, t, vm_get(VM_PASS0, t, 0) + 1); }
     // cases: successor 1.. (successor 0 is the default)
     for k in 1..n {
         let tb = term_succ(si, k);
-        var cnt = 0;
-        for j in n { if term_succ(si, j) == tb { cnt++; } }
-        if cnt == 1 {
+        if vm_get(VM_PASS0, tb, 0) == 1 {
             let info = pi_new(PT_SWITCH, c, c);
             pis[info].from = bb;
             pis[info].to = tb;

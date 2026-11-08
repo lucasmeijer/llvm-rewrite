@@ -231,7 +231,10 @@ for its worklist while it runs. A pass that calls an analysis must not hold data
 `promote_mem_to_reg` (mem2reg.goose, also called by SROA) uses VM_PASS0 (AllocaLookup, PhiToAllocaMap), VM_PASS1
 (LargeBlockInfo), VS_PASS0 (new PHIs) and VS_PASS1 (values mentioned by debug records); poison.goose's
 programUndefinedIfUndefOrPoison uses VS_ANA1. A pass with more state keeps its own stamped table (SROA's `sr_*`,
-20 slots keyed by value or use id).
+20 slots keyed by value or use id). SCCP (sccp.goose) keeps one stamped record per value id (`ScRec`: lattice
+index, struct-lattice base, additional-users list, tracked return/global, bit flags for executable/visited/
+in-worklist/argument-tracked blocks and functions) and PredicateInfo (predinfo.goose) another (`PiRec`); its
+transform phase uses VS_PASS1 through `m2r_collect_records` (debug-record RAUW).
 
 Block numbers (`BasicBlock::getNumber`) are tracked in ir.goose (`block_set_parent`, `block_number`,
 `func_max_block_number`): assigned from a per-function counter when a block's parent changes. Every place that

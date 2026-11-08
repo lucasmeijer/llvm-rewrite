@@ -94,13 +94,19 @@ fn cf_check_denormal_mode(cxt: i32) {
 }
 
 // ConstantFoldFPInstOperands
-recursive fn cf_fold_fp_inst_operands(o: i64, a: i32, b: i32, cxt: i32, allow_nondet: bool) -> i32 {
-    cf_check_denormal_mode(cxt);
+recursive fn cf_fold_fp_inst_operands(o: i64, a0: i32, b0: i32, cxt: i32, allow_nondet: bool) -> i32 {
+    // flush denormal inputs (FlushFPConstant with IsOutput = false)
+    let a = cf_flush_fp(a0, cxt, false);
+    if a < 0 { return -1; }
+    let b = cf_flush_fp(b0, cxt, false);
+    if b < 0 { return -1; }
     if !allow_nondet && cxt >= 0 && is_fp_math_operator(cxt) {
         let f = insts[inst_of(cxt)].fmf;
         if (f & (FMF_NSZ | FMF_REASSOC | FMF_CONTRACT | FMF_ARCP)) != 0 { return -1; }
     }
-    let c = cf_fold_binop_operands(o, a, b);
+    let c0 = cf_fold_binop_operands(o, a, b);
+    if c0 < 0 { return -1; }
+    let c = cf_flush_fp(c0, cxt, true);
     if c < 0 { return -1; }
     if !allow_nondet && const_is_nan_cf(c) { return -1; }
     return c;
@@ -801,41 +807,71 @@ recursive fn cf_fold_cmp_operands(p0: i64, a: i32, b: i32, cxt: i32) -> i32 {
         return cf_fold_cmp_operands(sp, b, a, -1);
     }
     if p < 32 {
-        // FlushFPConstant(Op, I = nullptr): getInstrDenormalMode gives Dynamic, so a denormal input stops the fold
-        if cxt < 0 {
-            if !cf_flush_fp_dynamic_ok(a) || !cf_flush_fp_dynamic_ok(b) { return -1; }
-        } else {
-            cf_check_denormal_mode(cxt);
-        }
+        // FlushFPConstant(Op, I, IsOutput = false); without I the mode is Dynamic and a denormal stops the fold
+        let fa = cf_flush_fp(a, cxt, false);
+        if fa < 0 { return -1; }
+        let fb = cf_flush_fp(b, cxt, false);
+        if fb < 0 { return -1; }
+        return cf_compare(p, fa, fb);
     }
     return cf_compare(p, a, b);
 }
 
-// FlushFPConstant(Operand, Inst = nullptr, IsOutput = false) != nullptr (the result equals Operand otherwise)
-fn cf_flush_fp_dynamic_ok(c: i32) -> bool {
+// getInstrDenormalMode(CtxI, Ty) as (input, output) kinds: 0 IEEE, 1 PreserveSign, 2 PositiveZero, 3 Dynamic.
+// No context instruction: Dynamic. denormal_fpenv's low nibble is the default mode, the next one f32's.
+fn cf_denormal_mode(cxt: i32, ty: i32, is_output: bool) -> i64 {
+    if cxt < 0 { return 3; }
+    let f = inst_func(cxt);
+    if f < 0 { return 3; }
+    let at = aset_find(alist_fn(globs[glob_of(f)].attrs), AK_DenormalFPEnv);
+    if at < 0 { return 0; }
+    var m = (attrs[at].i1 & 15) as! i64;
+    if ty_kind(ty_scalar(ty)) == TK_FLOAT { m = ((attrs[at].i1 >> 4) & 15) as! i64; }
+    return if is_output { m & 3 } else { (m >> 2) & 3 };
+}
+// flushDenormalConstantFP: -1 = nullptr
+fn cf_flush_denormal_fp(c: i32, cxt: i32, is_output: bool) -> i32 {
+    if !fp_is_denormal(c) { return c; }
+    let mode = cf_denormal_mode(cxt, vals[c].ty, is_output);
+    if mode == 0 { return c; }
+    if mode == 3 { return -1; }
+    let neg = cfp_parts(c).neg;
+    if mode == 1 && neg { return c_fp_neg_zero_ty(vals[c].ty); }
+    return c_null(vals[c].ty);
+}
+// FlushFPConstant(Operand, Inst, IsOutput): -1 = nullptr
+fn cf_flush_fp(c: i32, cxt: i32, is_output: bool) -> i32 {
     let k = vals[c].kind;
     let ty = vals[c].ty;
-    if k == VK_CFP && !ty_is_vector(ty) { return !fp_is_denormal(c); }
-    if k == VK_AGGZERO || k == VK_UNDEF || k == VK_POISON { return true; }
+    if k == VK_CFP && !ty_is_vector(ty) { return cf_flush_denormal_fp(c, cxt, is_output); }
+    if k == VK_AGGZERO || k == VK_UNDEF || k == VK_POISON { return c; }
     if ty_is_vector(ty) {
-        let s = c_splat_value(c);
-        if s >= 0 && vals[s].kind == VK_CFP { return !fp_is_denormal(s); }
-        if k == VK_CFP { return !fp_is_denormal(splat_value(c, false)); }
+        var s0 = c_splat_value(c);
+        if s0 < 0 && k == VK_CFP { s0 = splat_value(c, false); }
+        if s0 >= 0 && vals[s0].kind == VK_CFP {
+            let f = cf_flush_denormal_fp(s0, cxt, is_output);
+            if f < 0 { return -1; }
+            if f == s0 { return c; }
+            return c_splat(ty, f);
+        }
     }
-    if k == VK_CEXPR { return true; }
-    if k == VK_CVECTOR {
+    if k == VK_CEXPR { return c; }
+    if k == VK_CVECTOR || k == VK_CDVECTOR {
+        var elems: i32[>..<] = [];
+        var changed = false;
         for i in nops(c) {
             let e = op(c, i);
-            if vals[e].kind == VK_UNDEF || vals[e].kind == VK_POISON { continue; }
-            if vals[e].kind != VK_CFP || fp_is_denormal(e) { return false; }
+            if vals[e].kind == VK_UNDEF || vals[e].kind == VK_POISON { elems.push(e); continue; }
+            if vals[e].kind != VK_CFP { return -1; }
+            let f = cf_flush_denormal_fp(e, cxt, is_output);
+            if f < 0 { return -1; }
+            if f != e { changed = true; }
+            elems.push(f);
         }
-        return true;
+        if !changed { return c; }
+        return c_aggregate(ty, elems);
     }
-    if k == VK_CDVECTOR {
-        for i in nops(c) { if fp_is_denormal(op(c, i)) { return false; } }
-        return true;
-    }
-    return false;
+    return -1;
 }
 
 // Type::isScalableTy (scalable vectors, also inside structs and arrays)
@@ -1047,6 +1083,13 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
         for k in n { if is_poison(is_ops[mark + k]) { return c_poison(ty); } }
     }
     if id == 0 { cfa_not_ported(str("constant folding of the library call ", sbytes(vals[called_function(c)].name))); }
+    if (id == IID_experimental_constrained_fcmp || id == IID_experimental_constrained_fcmps) && n == 2 {
+        let a = is_ops[mark];
+        let b = is_ops[mark + 1];
+        if vals[a].kind == VK_CFP && vals[b].kind == VK_CFP && !ty_is_vector(vals[a].ty) {
+            return cf_constrained_fcmp(c, id, a, b, ty);
+        }
+    }
     if n == 1 {
         let a = is_ops[mark];
         if id == IID_is_constant { cfa_not_ported("llvm.is.constant folding"); }
@@ -1318,5 +1361,46 @@ fn cf_fold_fp_unary_intrinsic(id: i32, ty: i32, a: i32) -> i32 {
         return c_fp(ty, lo, hi);
     }
     cfa_not_ported(str("constant folding of ", intr_name(id as i64)));
+    return -1;
+}
+
+// evaluateCompare(Op1, Op2, ConstrainedFPCmpIntrinsic) with mayFoldConstrained
+fn cf_constrained_fcmp(c: i32, id: i32, a: i32, b: i32, ty: i32) -> i32 {
+    // getPredicate: the metadata string in argument 2
+    var p: i64 = -1;
+    if cb_nargs(c) >= 3 {
+        let m = cb_arg(c, 2);
+        if vals[m].kind == VK_MDVAL && mds[vals[m].sub].kind == MK_STRING { p = cf_fcmp_pred_name(sbytes(mds[vals[m].sub].extra)); }
+    }
+    if p < 0 { cfa_not_ported("constrained fcmp with an invalid predicate"); }
+    let pa = cfp_parts(a);
+    let pb = cfp_parts(b);
+    var invalid = false;
+    if id == IID_experimental_constrained_fcmps {
+        if pa.cat == FC_NAN || pb.cat == FC_NAN { invalid = true; }
+    } else {
+        if (pa.cat == FC_NAN && cfp_is_signaling(a)) || (pb.cat == FC_NAN && cfp_is_signaling(b)) { invalid = true; }
+    }
+    let kind = cfp_kind(a);
+    let r = fp_fcmp(kind, p, cint_lo(a), cint_hi(a), cint_lo(b), cint_hi(b));
+    if invalid {
+        // mayFoldConstrained: no rounding argument (not Dynamic); fold unless the exception behaviour is
+        // strict or absent
+        let n = cb_nargs(c);
+        var eb: i64 = -1;
+        if n >= 4 {
+            let m = cb_arg(c, 3);
+            if vals[m].kind == VK_MDVAL && mds[vals[m].sub].kind == MK_STRING {
+                let sname = sbytes(mds[vals[m].sub].extra);
+                if sname == "fpexcept.ignore" { eb = 0; } else if sname == "fpexcept.maytrap" { eb = 1; } else if sname == "fpexcept.strict" { eb = 2; }
+            }
+        }
+        if eb < 0 || eb == 2 { return -1; }
+    }
+    return c_int(ty_scalar(ty), if r { 1 } else { 0 });
+}
+fn cf_fcmp_pred_name(s: const u8[:]) -> i64 {
+    let names: const u8[:][] = ["false", "oeq", "ogt", "oge", "olt", "ole", "one", "ord", "uno", "ueq", "ugt", "uge", "ult", "ule", "une", "true"];
+    for x, i in names { if x == s { return i as i64; } }
     return -1;
 }

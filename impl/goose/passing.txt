@@ -5320,6 +5320,7 @@ tests/imported/llvm/Transforms/InstSimplify/cmp_ext.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/cmp_of_min_max.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/cmp_of_min_max.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/compare.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/constant-fold-fp-denormal.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/constant-fold-fp-denormal.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/constantfold-add-nuw-allones-to-allones.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/constantfold-add-nuw-allones-to-allones.ll::roundtrip
@@ -7219,6 +7220,7 @@ tests/imported/llvm/Transforms/SCCP/dont-zap-return.ll::opt
 tests/imported/llvm/Transforms/SCCP/dont-zap-return.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/exact-flags.ll::opt
 tests/imported/llvm/Transforms/SCCP/exact-flags.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/float-denormal-simplification.ll::opt
 tests/imported/llvm/Transforms/SCCP/float-denormal-simplification.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/float-nan-simplification.ll::opt
 tests/imported/llvm/Transforms/SCCP/float-nan-simplification.ll::roundtrip
@@ -7382,7 +7384,9 @@ tests/imported/llvm/Transforms/SCCP/sitofp.ll::opt
 tests/imported/llvm/Transforms/SCCP/sitofp.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/solve-after-each-resolving-undefs-for-function.ll::opt
 tests/imported/llvm/Transforms/SCCP/solve-after-each-resolving-undefs-for-function.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/strictfp-phis-fcmp.ll::opt
 tests/imported/llvm/Transforms/SCCP/strictfp-phis-fcmp.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/strictfp-phis-fcmps.ll::opt
 tests/imported/llvm/Transforms/SCCP/strictfp-phis-fcmps.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/struct-arg-resolve-undefs.ll::opt
 tests/imported/llvm/Transforms/SCCP/struct-arg-resolve-undefs.ll::roundtrip
