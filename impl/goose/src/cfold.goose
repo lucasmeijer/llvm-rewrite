@@ -726,8 +726,42 @@ recursive fn cf_fold_cmp_operands(p0: i64, a: i32, b: i32, cxt: i32) -> i32 {
         let sp = if p >= 32 { pred_swapped(p) } else { pred_swap_any(p) };
         return cf_fold_cmp_operands(sp, b, a, -1);
     }
-    if p < 32 { cf_check_denormal_mode(cxt); }
+    if p < 32 {
+        // FlushFPConstant(Op, I = nullptr): getInstrDenormalMode gives Dynamic, so a denormal input stops the fold
+        if cxt < 0 {
+            if !cf_flush_fp_dynamic_ok(a) || !cf_flush_fp_dynamic_ok(b) { return -1; }
+        } else {
+            cf_check_denormal_mode(cxt);
+        }
+    }
     return cf_compare(p, a, b);
+}
+
+// FlushFPConstant(Operand, Inst = nullptr, IsOutput = false) != nullptr (the result equals Operand otherwise)
+fn cf_flush_fp_dynamic_ok(c: i32) -> bool {
+    let k = vals[c].kind;
+    let ty = vals[c].ty;
+    if k == VK_CFP && !ty_is_vector(ty) { return !fp_is_denormal(c); }
+    if k == VK_AGGZERO || k == VK_UNDEF || k == VK_POISON { return true; }
+    if ty_is_vector(ty) {
+        let s = c_splat_value(c);
+        if s >= 0 && vals[s].kind == VK_CFP { return !fp_is_denormal(s); }
+        if k == VK_CFP { return !fp_is_denormal(splat_value(c, false)); }
+    }
+    if k == VK_CEXPR { return true; }
+    if k == VK_CVECTOR {
+        for i in nops(c) {
+            let e = op(c, i);
+            if vals[e].kind == VK_UNDEF || vals[e].kind == VK_POISON { continue; }
+            if vals[e].kind != VK_CFP || fp_is_denormal(e) { return false; }
+        }
+        return true;
+    }
+    if k == VK_CDVECTOR {
+        for i in nops(c) { if fp_is_denormal(op(c, i)) { return false; } }
+        return true;
+    }
+    return false;
 }
 
 // ConstantFoldInstOperands(I, Ops) with the operands on is_ops

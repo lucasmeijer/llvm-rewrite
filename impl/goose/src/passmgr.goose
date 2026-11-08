@@ -27,6 +27,7 @@ import lcssa;
 import aaeval;
 import memoryssa;
 import apint;
+import sccp;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -36,6 +37,7 @@ let P_NONE = 0;
 // module passes
 let P_VERIFY_MODULE = 1;
 let P_NOOP_MODULE = 2;
+let P_IPSCCP = 3;          // arg: 1 = func-spec
 // function passes
 let P_DCE = 100;
 let P_ADCE = 101;
@@ -62,6 +64,7 @@ let P_AA_EVAL = 150;
 let P_PRINT_MEMORYSSA = 151;      // arg 1: no-ensure-optimized-uses
 let P_PRINT_MEMORYSSA_WALKER = 152;
 let P_VERIFY_MEMORYSSA = 153;
+let P_SCCP = 160;
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
 // (PassInfoMixin::isRequired: printers, verifier, require/invalidate, adaptors).
@@ -89,6 +92,7 @@ let PASS_TABLE: const u8[:][] = [
     "f:aa-eval:150:0",
     "f:print<memoryssa-walker>:152:1",
     "f:verify<memoryssa>:153:1",
+    "f:sccp:160:0",
 ];
 
 // LLVM pass class names, for -opt-bisect-limit messages.
@@ -104,6 +108,8 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_LOOP_SIMPLIFY => "LoopSimplifyPass",
         P_LCSSA => "LCSSAPass",
         P_AA_EVAL => "AAEvaluator",
+        P_SCCP => "SCCPPass",
+        P_IPSCCP => "IPSCCPPass",
         P_NOOP_MODULE => "NoOpModulePass",
         P_NOOP_FUNCTION => "NoOpFunctionPass",
         _ => "Pass",
@@ -382,6 +388,23 @@ recursive fn parse_module_elem(e: i32) -> i32 {
     if starts_with(name, "default<") || starts_with(name, "thinlto") || starts_with(name, "lto") || starts_with(name, "fatlto") {
         not_implemented(name);
     }
+    if is_param_name(name, "ipsccp") {
+        // parseIPSCCPOptions: func-spec / no-func-spec, default AllowFuncSpec = true
+        var arg: i32 = 1;
+        if name != "ipsccp" {
+            let ps = name[7..name.len - 1];
+            var st: i64 = 0;
+            for j in 0..ps.len + 1 {
+                if j < ps.len && ps[j] != ';' { continue; }
+                let pn = ps[st..j];
+                st = j + 1;
+                if pn == "func-spec" { arg = 1; }
+                else if pn == "no-func-spec" { arg = 0; }
+                else { perr_pipeline(str("invalid IPSCCP pass parameter '", pn, "'")); }
+            }
+        }
+        return new_pnode(PK_PASS, P_IPSCCP as i32, arg, false, pelems[e].name);
+    }
     let r = pass_row(name, 'm');
     if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
     // module VerifierAnalysis: nothing to compute (no verifier yet; the harness verifies our output)
@@ -497,6 +520,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_PRINT_MEMORYSSA => { mssa_print(fv, pnodes[n].arg == 0); return PA_ALL; },
         P_PRINT_MEMORYSSA_WALKER => { mssa_print_walker(fv); return PA_ALL; },
         P_VERIFY_MEMORYSSA => { mssa_get(fv); return PA_ALL; },
+        P_SCCP => { return sccp_run(fv); },
         _ => { fatal("internal: unknown function pass id"); return PA_ALL; },
     }
 }
@@ -541,6 +565,18 @@ recursive fn run_module_node(n: i32, m: i32) {
     if !should_run(n, "module") { return; }
     if p == P_VERIFY_MODULE || p == P_NOOP_MODULE { return; }
     // module passes: call ap_pool_reset() after each one (apint.goose: no AP outlives its pass)
+    if p == P_IPSCCP {
+        if ipsccp_run(m, pnodes[n].arg != 0) {
+            // preserves DominatorTreeAnalysis, PostDominatorTreeAnalysis and the function analysis proxy
+            var f = modules[m].first_func;
+            while f >= 0 {
+                if !func_is_decl(f) { invalidate_function(f, (1 << A_DOMTREE) | (1 << A_POSTDOMTREE)); }
+                f = globs[glob_of(f)].next;
+            }
+        }
+        ap_pool_reset();
+        return;
+    }
     fatal("internal: unknown module pass id");
 }
 
