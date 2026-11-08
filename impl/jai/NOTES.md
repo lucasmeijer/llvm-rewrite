@@ -160,3 +160,42 @@
   `M2r_Phi_Map`), Twine "trivially empty" names (`name_ref` / `NAME_STRINGREF_EMPTY` in ir_builder.jai),
   `Instruction::insertBefore` adopting debug records (`insert_at_position`), `for < i: a..b` iterates b down
   to a (write the range ascending).
+
+## Alias analysis and MemorySSA (L1.analysis.aa 234/237, L1.analysis.memoryssa 79/86)
+
+- Files: `capture_tracking.jai`, `aa.jai`, `basic_aa.jai`, `tbaa.jai`, `scoped_noalias_aa.jai`, `globals_aa.jai`,
+  `memoryssa.jai` (see DESIGN.md "Alias analysis and MemorySSA"). Remaining failures: `inferattrs` (3 BasicAA tests,
+  pass not ported) and `loop-mssa(licm|loop-rotate|simple-loop-unswitch)` (7 MemorySSA tests).
+- Sweep (every round-tripping file + tests/e2e + tests/function, ~7700 files; LLVM vs us on stderr):
+  `aa-eval -print-all-alias-modref-info` (basic-aa, and default pipeline with `-evaluate-aa-metadata`),
+  `require<globals-aa>,aa-eval`, `print<memoryssa>`, `print<memoryssa><no-ensure-optimized-uses>`,
+  `print<memoryssa-walker>`, `-memssa-check-limit=3`: all identical except files where LLVM prints diagnostics
+  (invalid debug info, unknown CPU features) or `%"type 0x…"` addresses, and 4 SCCP files with `!callback`
+  (GlobalsAA's CallGraph fails loudly on callback calls). Sweep script:
+  same scheme as "Sweep beyond the unit's tests" above (compare stderr of `-disable-output` runs).
+- **For pass porters** (GVN, DSE, LICM, MemCpyOpt, EarlyCSE with MemorySSA):
+  - `aar := aa_results_for(f)` once per pass run, then `q := aa_query_new(*aar)` per BatchAAResults (keep it for the
+    pass if LLVM uses BatchAA; make a new one per query where LLVM calls `AA.alias(...)` on the AAResults directly).
+    DSE/MemCpyOpt use `BatchAAResults(AA, &EI)`: `aa_query_new_earliest_escape(*aar, dt)`, and call
+    `aa_query_remove_instruction(q, i)` where LLVM calls `EI.removeInstruction`.
+  - Everything is in `temp`: an `Aa_Query` must not outlive the pass (reset_temporary_storage between passes).
+  - CaptureTracking: `ct_use_capture_kind` is the full DetermineUseCaptureKind (operand bundles, `!captures`); the
+    older `determine_use_capture_kind` in inst_simplify.jai fails loudly on those. `pointer_may_be_captured_before`
+    has no LoopInfo/CycleInfo parameter yet (LLVM's callers that pass LI get more precise reachability).
+  - MemorySSA: `get_memoryssa(f)` builds and caches it (heap). It survives a pass only if the pass preserves
+    `.MEMORYSSA` and the DominatorTree survives. There is no MemorySSAUpdater, no `users()` of accesses and no
+    loop-scoped MemorySSA: LICM/GVN/DSE ports need to add them (MemorySSAUpdater.cpp) before they can preserve it.
+    `verify<memoryssa>` and `-verify-memoryssa` are accepted and verify nothing.
+  - `mssa_clobbers_query` = instructionClobbersQuery, `mssa_def_clobbers_use_or_def` = MemorySSAUtil::
+    defClobbersUseOrDef, `phi_translate_value` = PHITransAddr::translateValue (no select-condition variant yet; GVN's
+    MemoryDependence needs that one).
+- Shared fixes made here: `get_underlying_object`'s default MaxLookup is 10 (was 6); `gv_is_interposable` now
+  includes `noipa` definitions and the SemanticInterposition module flag.
+- Perf (x64 build): building MemorySSA on lua.ll +0.08 s, sqlite3.ll +0.19 s over parsing (LLVM: +0.02 s each).
+  `print<memoryssa>`/`print<domtree>` on those files are slow (lua 8.7 s vs LLVM 0.9 s) because every per-function
+  print re-initialises the module printer state (`printer_begin_function` → `process_module`), not because of the
+  analyses; worth fixing when a perf benchmark covers printers.
+- GlobalsAA: `UnknownFunctionsWithLocalLinkage` is forced false after computing, matching LLVM's move-constructor
+  quirk (knowledge/llvm/alias-analysis-and-memoryssa.md).
+- Jai trap: `print`/`tprint` treat every `%` as a placeholder (even `"%/"`); write a literal percent sign as
+  `"\x1f"` (Basic's formatter prints byte 31 as `%`), see `aa_eval_report`.

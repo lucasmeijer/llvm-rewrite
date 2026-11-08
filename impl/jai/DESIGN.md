@@ -31,6 +31,13 @@ src/
                   merged DILocations, dbg.declare -> dbg.value conversion)
   value_utils.jai GEP constant offsets and pointer stripping (sv_*)
   ssa_updater.jai SSAUpdater + LoadAndStorePromoter
+  capture_tracking.jai  CaptureTracking (DetermineUseCaptureKind, PointerMayBeCaptured[Before], FindEarliestCapture)
+                  and CFG.cpp reachability (isPotentiallyReachable*)
+  aa.jai          ModRef/MemoryEffects helpers, LocationSize, MemoryLocation, AAResults aggregation (Aa_Results,
+                  Aa_Query = AAQueryInfo), object classification, -aa-pipeline, aa-eval
+  basic_aa.jai    BasicAA (DecomposeGEP, aliasGEP/PHI/Select, call mod/ref), getBaseObjectSize/getAllocSize
+  tbaa.jai, scoped_noalias_aa.jai, globals_aa.jai (+ CallGraph and its SCCs)
+  memoryssa.jai   MemorySSA (construction, OptimizeUses, ClobberWalker, PHITransAddr, printers)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 
@@ -277,6 +284,30 @@ LLVM's recalculation thresholds), `dt_dominates` (with LLVM's slow-query counter
 GenericDomTree*. Child lists are in insertion order, exactly as LLVM's, so any pass that walks the tree sees LLVM's
 order. Keep the tree updated the way the LLVM pass does (eager `applyUpdates` or the specific helper it calls);
 recomputing gives a different child order.
+
+### Alias analysis and MemorySSA (aa.jai, basic_aa.jai, tbaa.jai, scoped_noalias_aa.jai, globals_aa.jai, memoryssa.jai)
+
+- **AAResults** = `Aa_Results` (by value, `aa_results_for(f)` = `AM.getResult<AAManager>(F)`): the registered
+  analyses as an `Aa_Kind` list in priority order plus BasicAA's DominatorTree/AssumptionCache. Every AAResults
+  method is a loop over that list with a `switch` per kind. GlobalsAA is included only when `globals_aa` (the cached
+  module result of `require<globals-aa>`) exists.
+- **AAQueryInfo** = `*Aa_Query` (temp): alias cache with LLVM's assumption bookkeeping, depth, MayBeCrossIteration,
+  the capture-analysis cache (SimpleCaptureAnalysis, or EarliestEscapeAnalysis via `aa_query_new_earliest_escape`).
+  `aa_query_new(*aar)` per top-level query = SimpleAAQueryInfo; keeping one `*Aa_Query` across queries =
+  BatchAAResults. All query entry points take the `*Aa_Query`: `aa_alias(q, la, lb, ctx)`,
+  `aa_mod_ref_inst_loc(q, i, loc)`, `aa_mod_ref_inst_opt_loc(q, i, has_loc, loc)`, `aa_mod_ref_call_loc`,
+  `aa_mod_ref_call_call`, `aa_mod_ref_inst_call`, `aa_mod_ref_inst_inst`, `aa_mod_ref_mask`, `aa_memory_effects_call`,
+  `aa_call_captures_before`. Results: `Alias_Result` (kind AR_NO/AR_MAY/AR_PARTIAL/AR_MUST + offset), ModRef u8
+  (MR_*), MemoryEffects u64 (parser.jai encoding).
+- **MemoryLocation** = `Mem_Loc {ptr, size (LocationSize encoded like LLVM: ls_*), tags: AA_Tags}`; `mloc_get(i)`,
+  `mloc_get_or_none`, `mloc_for_argument(call, k, use_tli)`, `mloc_for_dest/source`, `mloc_for_dest_call`.
+- **MemorySSA** = `*Memory_SSA` (heap, cached as `Fn_Analyses.mssa`, `get_memoryssa(f)`): a table of `Mem_Access`
+  rows (index 0 = liveOnEntry; DEF/USE/PHI tag; operands are row indices), per-block access/def lists as intrusive
+  links through the rows, `of_value` = getMemoryAccess(I or BB). Walker: `mssa_get_clobbering_access(m, a, q)`,
+  `..._for_loc`, `..._skip_self`, `mssa_ensure_optimized_uses`, `mssa_dominates`. No MemorySSAUpdater and no use lists
+  of accesses yet: passes that update MemorySSA must add them (see NOTES.md).
+- Printers with annotations use the `print_annot_block` / `print_annot_inst` hooks of printer.jai (LLVM's
+  AssemblyAnnotationWriter) around `print_function`.
 
 ## 10. How to add a pass
 
