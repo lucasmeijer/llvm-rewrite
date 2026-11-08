@@ -1644,6 +1644,30 @@ fn column() -> i64 {
     return out.len - i;
 }
 
+// AssemblyAnnotationWriter (emitBasicBlockStartAnnot / emitInstructionAnnot) as data: when pr_annot_on, the
+// text set for a block is printed after its label line and the text set for an instruction before it.
+var pr_annot_on: bool = false;
+var pr_annot_at: i64[>..];        // value id -> start in pr_annot_buf (-1: none)
+var pr_annot_end: i64[>..];
+var pr_annot_buf: u8[>..];
+var pr_annot_set_vals: i32[>..];
+fn pr_annot_set(v: i32, text: const u8[:]) {
+    while pr_annot_at.len <= (v as i64) { pr_annot_at.push(-1); pr_annot_end.push(-1); }
+    pr_annot_at[v] = pr_annot_buf.len;
+    pr_annot_buf.append(text);
+    pr_annot_end[v] = pr_annot_buf.len;
+    pr_annot_set_vals.push(v);
+}
+fn pr_annot_reset() {
+    for v in pr_annot_set_vals { pr_annot_at[v] = -1; }
+    pr_annot_set_vals.clear();
+    pr_annot_buf.clear();
+}
+fn pr_annot_emit(v: i32) {
+    if (v as i64) >= pr_annot_at.len || pr_annot_at[v] < 0 { return; }
+    put(pr_annot_buf[pr_annot_at[v]..pr_annot_end[v]]);
+}
+
 fn print_block(f: i32, b: i32) {
     let is_entry = globs[glob_of(f)].first_block == b;
     if vals[b].name >= 0 {
@@ -1674,10 +1698,12 @@ fn print_block(f: i32, b: i32) {
         if !any { put(" No predecessors!"); }
     }
     putc('\n');
+    if pr_annot_on { pr_annot_emit(b); }
     var iv = blocks[block_of(b)].first;
     while iv >= 0 {
         var r = inst_first_dbg(iv);
         while r >= 0 { put("    "); put_dbgrec(r); putc('\n'); r = dbgrecs[r].next; }
+        if pr_annot_on { pr_annot_emit(iv); }
         print_inst(iv);
         if iop(iv) == OP_CALL && is_gc_relocate(iv) { print_gc_relocate_comment(iv); }
         putc('\n');

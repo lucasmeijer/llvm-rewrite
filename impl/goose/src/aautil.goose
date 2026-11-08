@@ -13,14 +13,18 @@ import vt;
 // ---------------------------------------------------------------------------------------------
 // Stamp sets: (key * SS_N + slot) -> epoch. Keys are value ids or use ids (the slot decides).
 
-let SS_N = 4;
+let SS_N = 8;
 let SS_CT_USES = 0;     // capture tracking: visited uses
 let SS_REACH = 1;       // isPotentiallyReachable: visited blocks
 let SS_MASK = 2;        // BasicAA getModRefInfoMask: visited values
-let SS_MSSA = 3;        // MemorySSA: scratch (visited blocks, ...)
+let SS_MSSA = 3;        // MemorySSA build: defining blocks
+let SS_MSSA2 = 4;       // MemorySSA IDF: VisitedPQ
+let SS_MSSA3 = 5;       // MemorySSA IDF: VisitedWorklist
+let SS_MSSA4 = 6;       // MemorySSA renamePass: Visited
+let SS_SPARE = 7;
 var ss_stamp: i32[>..];
-var ss_epoch: i32[4] = [1, 1, 1, 1];
-var ss_count: i64[4] = [0, 0, 0, 0];
+var ss_epoch: i32[8] = [1, 1, 1, 1, 1, 1, 1, 1];
+var ss_count: i64[8] = [0, 0, 0, 0, 0, 0, 0, 0];
 
 fn ss_clear(s: i64) { ss_epoch[s] += 1; ss_count[s] = 0; }
 fn ss_has(s: i64, k: i32) -> bool {

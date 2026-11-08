@@ -181,7 +181,14 @@ fn ml_for_argument(c: i32, k: i64, use_tli: bool) -> ML {
             return ml_with_tags(arg, ls_precise(n), tags);
         }
         if id == IID_masked_load || id == IID_masked_store {
-            fatal("MemoryLocation::getForArgument: masked load/store intrinsics are not ported yet");
+            let is_load = id == IID_masked_load;
+            let vt = if is_load { vals[c].ty } else { vals[cb_arg(c, 0)].ty };
+            let n, ok = ml_known_lanes_from_mask(op(c, if is_load { 1 } else { 2 }), vt);
+            if ok {
+                let es = dl_size_bits(ty_elem(vt)) as u64;
+                return ml_with_tags(arg, ls_precise((n * es + 7) / 8), tags);
+            }
+            return ml_with_tags(arg, ls_upper_bound_ts(dl_store_size(vt) as u64, ty_kind(vt) == TK_SVEC), tags);
         }
         if id == IID_invariant_end {
             if k == 0 { return ml_with_tags(arg, ls_precise(0), tags); }
@@ -240,6 +247,22 @@ fn ml_for_argument(c: i32, k: i64, use_tli: bool) -> ML {
         }
     }
     return ml_with_tags(arg, LS_BEFORE_OR_AFTER, tags);
+}
+
+// getKnownTypeFromMaskedOp: the number of lanes of a get.active.lane.mask(C0, C1) mask
+fn ml_known_lanes_from_mask(m: i32, vt: i32) -> u64, bool {
+    if inst_iid(m) != IID_get_active_lane_mask { return 0, false; }
+    let lo, ok1 = ml_const_zext(cb_arg(m, 0));
+    let hi, ok2 = ml_const_zext(cb_arg(m, 1));
+    if !ok1 || !ok2 { return 0, false; }
+    if hi <= lo { return 0, false; }
+    var n = hi - lo;
+    let mn = ty_count(vt) as u64;
+    if n > mn {
+        if ty_kind(vt) == TK_SVEC { return 0, false; }
+        n = mn;
+    }
+    return n, true;
 }
 
 // MemoryLocation::getForSource / getForDest (memory intrinsics)

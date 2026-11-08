@@ -26,6 +26,8 @@ let KNOWN_FLAGS: const u8[:][] = [
     "use-dereferenceable-at-point-semantics",            // no-op for BasicAA (only affects canBeFreed queries)
     "basic-aa-recphi", "basic-aa-separate-storage", "enable-tbaa", "enable-scoped-noalias",
     "capture-tracking-max-uses-to-explore",
+    "memssa-check-limit",                                // read by MemorySSA
+    "verify-memoryssa",                                  // no-op: extra verification only
 ];
 
 fn flag_known(name: const u8[:]) -> bool {
