@@ -6,6 +6,14 @@ a visitor. All of this is plain Jai: `[..] T` dynamic arrays, structs of arrays 
 module in the distribution is marked experimental), `Table` from `Hash_Table` for interning, and the temporary
 allocator for per-pass scratch.
 
+**No hand-rolled vtables.** Don't emulate virtual dispatch with procedure-pointer fields in a struct (a `hook`,
+`visit`, `callback` member assigned per "subclass"), with tables of procedure pointers, or with polymorphic
+procedures standing in for a class hierarchy. Where LLVM has an interface with several implementations (a
+`SCEVRewriteVisitor` subclass, a `CaptureTracker`, an AA result, a pass), give the struct a `kind: enum` plus that
+kind's state, and `switch` on the kind (`#complete`) at the one place LLVM makes the virtual call. Where only one
+implementation matters to us, drop the interface and call the plain procedure. This keeps every behaviour visible
+with grep, keeps the data flat, and matches the Goose implementation (which has no function pointers at all).
+
 ```
 src/
   ir.jai          tables, ids, use lists, create/erase/RAUW, interning (types, constants, attributes, metadata)
