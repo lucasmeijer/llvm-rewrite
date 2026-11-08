@@ -24,219 +24,27 @@ import datalayout;
 import gen_iids;
 import autoupgrade;
 import intrinsics;
+import knownbits;
+import vt;
+import poison;
+import instsimplify;
 
 // ---------------------------------------------------------------------------------------------
-// Value-tracking queries mem2reg needs. Private, partial ports that fail loudly; to be replaced by
-// valuetracking.goose / instsimplify.goose (L1.instsimplify) when they land.
+// Value-tracking queries (poison.goose, vt.goose, instsimplify.goose)
 
 fn m2r_not_ported(what: const u8[:]) { fatal(str("mem2reg: ", what, " is not ported yet")); }
 
-fn m2r_arg_has_attr(a: i32, kind: i64) -> bool {
-    let fv = args_parent[vals[a].sub];
-    let s = alist_param(func_attrs(fv), args_no[vals[a].sub] as i64);
-    return aset_has(s, kind);
-}
-
-// Constant::containsPoisonElement / containsConstantExpression for vector constants.
-fn m2r_vec_contains_poison(c: i32) -> bool {
-    let k = vals[c].kind;
-    if k == VK_CVECTOR { for i in nops(c) { if vals[op(c, i)].kind == VK_POISON { return true; } } }
-    return false;
-}
-fn m2r_vec_contains_cexpr(c: i32) -> bool {
-    let k = vals[c].kind;
-    if k == VK_CVECTOR { for i in nops(c) { if vals[op(c, i)].kind == VK_CEXPR { return true; } } }
-    return false;
-}
-
-// isGuaranteedNotToBePoison(V, AC, CtxI = nullptr, DT) for the non-instruction values mem2reg asks about.
-fn m2r_not_poison(v: i32) -> bool {
-    let k = vals[v].kind;
-    if k == VK_MDVAL { return false; }
-    if k == VK_ARG {
-        if m2r_arg_has_attr(v, AK_NoUndef) || m2r_arg_has_attr(v, AK_Dereferenceable) ||
-           m2r_arg_has_attr(v, AK_DereferenceableOrNull) { return true; }
-        return m2r_program_undefined_if_poison(v);
-    }
-    if is_constant(v) {
-        if k == VK_POISON { return false; }
-        if k == VK_UNDEF { return true; }
-        if k == VK_CINT || k == VK_GVAR || k == VK_CFP || k == VK_CNULL || k == VK_FUNC { return true; }
-        if ty_is_vector(vals[v].ty) {
-            if k == VK_CEXPR { m2r_not_ported("isGuaranteedNotToBePoison of a vector constant expression"); }
-            if m2r_vec_contains_poison(v) { return false; }
-            return !m2r_vec_contains_cexpr(v);
-        }
-        if k == VK_CEXPR { m2r_not_ported("isGuaranteedNotToBePoison of a constant expression"); }
-        // aggregates, blockaddress, dso_local_equivalent, ...: not an Operator, no further rule applies
-        return false;
-    }
-    m2r_not_ported("isGuaranteedNotToBePoison of an instruction");
-    return false;
-}
-
-fn m2r_intrinsic_propagates_poison(id: i32) -> bool {
-    let names: const u8[:][] = ["sadd_with_overflow", "ssub_with_overflow", "smul_with_overflow", "uadd_with_overflow",
-        "usub_with_overflow", "umul_with_overflow", "ctpop", "ctlz", "cttz", "abs", "smax", "smin", "umax", "umin", "scmp",
-        "is_fpclass", "ptrmask", "ucmp", "bitreverse", "bswap", "sadd_sat", "ssub_sat", "sshl_sat", "uadd_sat", "usub_sat",
-        "ushl_sat", "smul_fix", "smul_fix_sat", "umul_fix", "umul_fix_sat", "pow", "powi", "sin", "sinh", "cos", "cosh",
-        "sincos", "sincospi", "tan", "tanh", "asin", "acos", "atan", "atan2", "canonicalize", "sqrt", "exp", "exp2", "exp10",
-        "log", "log2", "log10", "modf", "floor", "ceil", "trunc", "rint", "nearbyint", "round", "roundeven", "lrint",
-        "llrint", "fshl", "fshr", "frexp", "get_active_lane_mask"];
-    if id == 0 { return false; }
-    let full = intr_name(id as i64);     // "llvm.xxx"
-    for n in names { if full.len == n.len + 5 && full[5..] == n { return true; } }
-    return false;
-}
-
-// propagatesPoison(Use): operand k of instruction i
-fn m2r_propagates_poison(i: i32, k: i64) -> bool {
-    let o = iop(i);
-    if o == OP_FREEZE || o == OP_PHI || o == OP_INVOKE { return false; }
-    if o == OP_SELECT { return k == 0; }
-    if o == OP_CALL { return m2r_intrinsic_propagates_poison(call_iid(i)); }
-    if o == OP_ICMP || o == OP_FCMP || o == OP_GEP { return true; }
-    return is_binary_op(o) || o == OP_FNEG || is_cast_op(o);
-}
-
-fn m2r_call_param_has_attr(cb: i32, k: i64, kind: i64) -> bool {
-    if aset_has(alist_param(insts[inst_of(cb)].attrs, k), kind) { return true; }
-    let c = cb_callee(cb);
-    if c >= 0 && vals[c].kind == VK_FUNC { return aset_has(alist_param(func_attrs(c), k), kind); }
-    return false;
-}
-
-// mustTriggerUB(I, KnownPoison) via handleGuaranteedNonPoisonOps; the set is VS_ANA0.
-fn m2r_must_trigger_ub(i: i32) -> bool {
-    let o = iop(i);
-    if o == OP_STORE { return vs_has(VS_ANA0, op(i, 1)); }
-    if o == OP_LOAD { return vs_has(VS_ANA0, op(i, 0)); }
-    if o == OP_CMPXCHG || o == OP_ATOMICRMW { return vs_has(VS_ANA0, op(i, 0)); }
-    if o == OP_CALL || o == OP_INVOKE {
-        let c = cb_callee(i);
-        if !is_constant(c) && vals[c].kind != VK_INLINEASM && vs_has(VS_ANA0, c) { return true; }
-        for k in cb_nargs(i) {
-            if (m2r_call_param_has_attr(i, k, AK_NoUndef) || m2r_call_param_has_attr(i, k, AK_Dereferenceable) ||
-                m2r_call_param_has_attr(i, k, AK_DereferenceableOrNull)) && vs_has(VS_ANA0, cb_arg(i, k)) { return true; }
-        }
-        return false;
-    }
-    if o == OP_RET {
-        let fv = inst_func(i);
-        return nops(i) > 0 && aset_has(alist_ret(func_attrs(fv)), AK_NoUndef) && vs_has(VS_ANA0, op(i, 0));
-    }
-    if o == OP_SWITCH || o == OP_CONDBR { return vs_has(VS_ANA0, op(i, 0)); }
-    if o == OP_UDIV || o == OP_SDIV || o == OP_UREM || o == OP_SREM { return vs_has(VS_ANA0, op(i, 1)); }
-    return false;
-}
-
-fn m2r_transfers_execution(i: i32) -> bool {
-    let o = iop(i);
-    if o == OP_RET || o == OP_UNREACHABLE { return false; }
-    if o == OP_CATCHPAD { m2r_not_ported("isGuaranteedToTransferExecutionToSuccessor for catchpad"); }
-    return !inst_may_throw(i) && inst_will_return(i);
-}
-
-// programUndefinedIfUndefOrPoison(V, PoisonOnly = true) for an argument.
-fn m2r_program_undefined_if_poison(a: i32) -> bool {
-    let fv = args_parent[vals[a].sub];
-    if func_is_decl(fv) { return false; }
-    var bb = func_entry(fv);
-    var i = block_first(bb);
-    var limit: i64 = 32;
-    vs_clear(VS_ANA0);
-    vs_add(VS_ANA0, a);
-    mb_clear(MB_UBVIS);
-    mb_add(MB_UBVIS, bb);
-    loop {
-        while i >= 0 {
-            limit--;
-            if limit == 0 { return false; }
-            if m2r_must_trigger_ub(i) { return true; }
-            if !m2r_transfers_execution(i) { return false; }
-            for k in nops(i) {
-                if vs_has(VS_ANA0, op(i, k)) && m2r_propagates_poison(i, k) { vs_add(VS_ANA0, i); break; }
-            }
-            if iop(i) == OP_SELECT && vs_has(VS_ANA0, op(i, 1)) && vs_has(VS_ANA0, op(i, 2)) { vs_add(VS_ANA0, i); }
-            i = inst_next(i);
-        }
-        // getSingleSuccessor
-        let t = block_terminator(bb);
-        if t < 0 || term_nsucc(t) != 1 { break; }
-        bb = term_succ(t, 0);
-        if !mb_add(MB_UBVIS, bb) { break; }
-        i = first_non_phi(bb);
-    }
-    return false;
-}
-
-// DominatorTree::dominates(const Value *Def, const Instruction *User) for a PHI user (valueDominatesPHI).
-fn m2r_value_dominates_phi(v: i32, p: i32) -> bool {
-    if !is_inst(v) { return true; }
-    let use_bb = inst_parent(p);
-    let def_bb = inst_parent(v);
-    if !dt_has_node(DT_DOM, use_bb) { return true; }
-    if !dt_has_node(DT_DOM, def_bb) { return false; }
-    if v == p { return false; }
-    // dominates(Def, UseBB)
-    if def_bb == use_bb { return false; }
-    let o = iop(v);
-    if o == OP_INVOKE { return m2r_edge_dominates(def_bb, invoke_normal_dest(v), use_bb); }
-    if o == OP_CALLBR { return m2r_edge_dominates(def_bb, callbr_default_dest(v), use_bb); }
-    return dt_dominates_block(DT_DOM, def_bb, use_bb);
-}
-
-// DominatorTree::dominates(const BasicBlockEdge &BBE, const BasicBlock *UseBB)
-fn m2r_edge_dominates(start: i32, end: i32, use_bb: i32) -> bool {
-    if !dt_dominates_block(DT_DOM, end, use_bb) { return false; }
-    if single_pred(end) >= 0 { return true; }
-    var dup = 0;
-    var ok = true;
-    each_pred(end) { p =>
-        if ok {
-            if p == start {
-                if dup > 0 { ok = false; }
-                dup++;
-            } else if !dt_dominates_block(DT_DOM, end, p) { ok = false; }
-        }
-    };
-    return ok;
-}
-
-// simplifyInstruction on a PHI (simplifyPHINode). -1 = no simplification.
-fn m2r_simplify_phi(p: i32) -> i32 {
-    var common: i32 = -1;
-    var has_poison = false;
-    var has_undef = false;
-    for k in nops(p) {
-        let x = op(p, k);
-        if x == p { continue; }
-        if vals[x].kind == VK_POISON { has_poison = true; continue; }
-        if vals[x].kind == VK_UNDEF { has_undef = true; continue; }
-        if common >= 0 && x != common { return -1; }
-        common = x;
-    }
-    if common < 0 { return if has_undef { c_undef(vals[p].ty) } else { c_poison(vals[p].ty) }; }
-    if has_poison || has_undef {
-        if !m2r_value_dominates_phi(common, p) { return -1; }
-        if has_undef && !m2r_not_poison_any(common) { return -1; }
-        return common;
-    }
-    return common;
-}
-
-fn m2r_not_poison_any(v: i32) -> bool {
-    if is_inst(v) { m2r_not_ported("isGuaranteedNotToBePoison of an instruction"); }
-    return m2r_not_poison(v);
-}
-
+// isGuaranteedNotToBePoison(V, AC, CtxI = nullptr, DT)
+fn m2r_not_poison(v: i32) -> bool { return is_guaranteed_not_to_be_poison(v, -1, 0); }
+// simplifyInstruction(PN, SQ): -1 = no simplification
+fn m2r_simplify_phi(p: i32) -> i32 { return simplify_instruction(p); }
 // isKnownNonZero(V, SimplifyQuery(DL, DT, AC, LI))
-fn m2r_known_non_zero(v: i32) -> bool {
-    let k = vals[v].kind;
-    if k == VK_CNULL { return false; }
-    if k == VK_CINT { return !is_null_value(v); }
-    m2r_not_ported("isKnownNonZero");
-    return false;
+fn m2r_known_non_zero(v: i32, li: i32) -> bool {
+    let save = kb_cxt;
+    kb_cxt = li;
+    let r = is_known_non_zero(v, 0);
+    kb_cxt = save;
+    return r;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -813,7 +621,7 @@ fn m2r_convert_metadata_to_assumes(li: i32, v: i32) {
         m2r_insert_before_adopting(st, li);
         return;
     }
-    if inst_get_md(li, md_kind_id("nonnull")) >= 0 && inst_get_md(li, k_noundef) >= 0 && !m2r_known_non_zero(v) {
+    if inst_get_md(li, md_kind_id("nonnull")) >= 0 && inst_get_md(li, k_noundef) >= 0 && !m2r_known_non_zero(v, li) {
         // addAssumeNonNull
         let assume = au_get_declaration(IID_assume, []);
         let cmp = create_inst(OP_ICMP, T_I1, [li, c_null(vals[li].ty)]);
@@ -1092,13 +900,17 @@ fn promote_mem_to_reg(fv: i32, allocas: i32[>..<]&) {
     fn idf_calculate(defs: const i32[:], out: i32[>..<]&) {
         mb_clear(MB_VPQ);
         mb_clear(MB_VWL);
-        // max-heap on (level, tie) via a min-heap of negated keys; the IDF set does not depend on tie order
+        // std::priority_queue (max-heap) on (level, DFSNumIn), as a min-heap of complemented keys
+        dt_update_dfs_numbers(fv, DT_DOM);
         var pq: i64[>..<] = [];
         var pqb: i32[>..<] = [];
         fn pq_push(bv: i32) {
-            let key = ((1000000000 - dt_level(DT_DOM, bv) as i64) << 32) | (pqb.len as i64);
+            let lvl = dt_level(DT_DOM, bv) as i64;
+            let dfs = dt_dfs_in(fv, DT_DOM, bv) as i64;
+            let idx = pqb.len as i64;
+            if lvl >= (1 << 20) || dfs >= (1 << 21) || idx >= (1 << 21) { fatal("mem2reg: function too large for the IDF priority key"); }
             pqb.push(bv);
-            heap_push(pq, key);
+            heap_push(pq, (((1 << 20) - 1 - lvl) << 42) | (((1 << 21) - 1 - dfs) << 21) | idx);
         }
         for bb in defs {
             if dt_has_node(DT_DOM, bb) { pq_push(bb); mb_add(MB_VWL, bb); }
@@ -1106,7 +918,7 @@ fn promote_mem_to_reg(fv: i32, allocas: i32[>..<]&) {
         var wl: i32[>..<] = [];
         while pq.len > 0 {
             let top = heap_pop(pq);
-            let root = pqb[top & 0xFFFFFFFF];
+            let root = pqb[top & 0x1FFFFF];
             let root_level = dt_level(DT_DOM, root);
             wl.push(root);
             while wl.len > 0 {

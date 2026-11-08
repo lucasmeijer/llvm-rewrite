@@ -16,6 +16,7 @@ import adce;
 import bdce;
 import instsimplify;
 import mem2reg;
+import sroa;
 import demandedbits;
 import analyses;
 import loopinfo;
@@ -44,6 +45,7 @@ let P_INVALIDATE = 107;     // invalidate<analysis>
 let P_NOOP_FUNCTION = 108;
 let P_VERIFY_FUNCTION = 109;
 let P_MEM2REG = 130;
+let P_SROA = 131;          // arg: 1 = preserve-cfg, 2 = aggregate-to-vector
 let P_INSTSIMPLIFY = 140;
 let P_BREAK_CRIT_EDGES = 110;
 let P_PRINT_LOOPS = 111;
@@ -86,6 +88,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_ADCE => "ADCEPass",
         P_BDCE => "BDCEPass",
         P_MEM2REG => "PromotePass",
+        P_SROA => "SROAPass",
         P_INSTSIMPLIFY => "InstSimplifyPass",
         P_BREAK_CRIT_EDGES => "BreakCriticalEdgesPass",
         P_LOOP_SIMPLIFY => "LoopSimplifyPass",
@@ -298,6 +301,27 @@ recursive fn parse_function_elem(e: i32) -> i32 {
         let p: i32 = if starts_with(name, "require<") { P_REQUIRE as i32 } else { P_INVALIDATE as i32 };
         return new_pnode(PK_PASS, p, a as i32, true, pelems[e].name);
     }
+    if is_param_name(name, "sroa") {
+        // parseSROAOptions: default modify-cfg
+        var arg: i32 = 0;
+        var saw_cfg = false;
+        if name != "sroa" {
+            let ps = name[5..name.len - 1];
+            var st: i64 = 0;
+            for j in 0..ps.len + 1 {
+                if j < ps.len && ps[j] != ';' { continue; }
+                let pn = ps[st..j];
+                st = j + 1;
+                if pn == "modify-cfg" || pn == "preserve-cfg" {
+                    if saw_cfg { perr_pipeline("multiple SROA CFG options specified"); }
+                    saw_cfg = true;
+                    if pn == "preserve-cfg" { arg |= 1; } else { arg &= ~1; }
+                } else if pn == "aggregate-to-vector" { arg |= 2; }
+                else { perr_pipeline(str("invalid SROA pass parameter '", pn, "' (expected preserve-cfg, modify-cfg, or aggregate-to-vector)")); }
+            }
+        }
+        return new_pnode(PK_PASS, P_SROA as i32, arg, false, pelems[e].name);
+    }
     let r = pass_row(name, 'f');
     if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
     if llvm_knows(name, 'f') { not_implemented(name); }
@@ -428,6 +452,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_ADCE => { return adce_run(fv); },
         P_BDCE => { return bdce_run(fv); },
         P_MEM2REG => { return mem2reg_run(fv); },
+        P_SROA => { let a = pnodes[n].arg; return sroa_run(fv, (a & 1) != 0, (a & 2) != 0); },
         P_INSTSIMPLIFY => { return instsimplify_run(fv); },
         P_PRINT_DOMTREE => { print_domtree(fv, DT_DOM); return PA_ALL; },
         P_PRINT_POSTDOMTREE => { print_domtree(fv, DT_POST); return PA_ALL; },
