@@ -48,9 +48,70 @@ ic_visit :: (i: Value_Id) -> Value_Id {
         case .INSERTVALUE; #through;
         case .SHUFFLEVECTOR; return ic_visit_simplify_only(i);
     }
+    if o == {
+        case .UITOFP; return ic_visit_uitofp(i);
+        case .SITOFP; return ic_visit_sitofp(i);
+        case .ZEXT; return ic_visit_zext(i);
+        case .SEXT; return ic_visit_sext(i);
+        case .TRUNC; return ic_visit_trunc(i);
+    }
     if is_cast_op(o) return ic_visit_cast(i);
     return NONE;   // visitInstruction
 }
+
+// visitUIToFP / visitSIToFP (complete, given commonCastTransforms)
+ic_visit_uitofp :: (i: Value_Id) -> Value_Id {
+    r := ic_visit_cast(i); if r != NONE return r;
+    if (inst(i).flags & F_EXACT) == 0 && is_known_non_negative(op(i, 0), ic.sq) { set_flag(i, F_EXACT, true); return i; }
+    return NONE;
+}
+ic_visit_sitofp :: (i: Value_Id) -> Value_Id {
+    r := ic_visit_cast(i); if r != NONE return r;
+    if is_known_non_negative(op(i, 0), ic.sq) return create_cast_flags(.UITOFP, op(i, 0), vtype(i), F_EXACT);
+    return NONE;
+}
+// visitZExt: the trunc-user bailout, commonCastTransforms, zext nneg i1, the nneg inference at the end.
+// Not ported: everything in between (canEvaluateZExtd, transformZExtICmp, ...).
+ic_visit_zext :: (i: Value_Id) -> Value_Id {
+    if has_one_use(i) && inst_op(first_user(i)) == .TRUNC && !is_const(op(i, 0)) return NONE;
+    r := ic_visit_cast(i); if r != NONE return r;
+    src := op(i, 0);
+    st := vtype(src); dt := vtype(i);
+    if is_int_or_int_vector_n(st, 1) && (inst(i).flags & F_EXACT) != 0 return ic_replace_inst_uses_with(i, const_null_value(dt));
+    if (inst(i).flags & F_EXACT) == 0 {
+        if has_one_use(i) && cast(u64) scalar_bits(src) > log2_ceil_u64(cast(u64) type_bits(scalar_type(dt))) {
+            us := first_user(i);
+            if is_inst(us) && is_shift_op(inst_op(us)) && op(us, 1) == i { set_flag(i, F_EXACT, true); return i; }
+        }
+        if is_known_non_negative(src, ic_q(i)) { set_flag(i, F_EXACT, true); return i; }
+    }
+    return NONE;
+}
+log2_ceil_u64 :: (x: u64) -> u64 { if x <= 1 return 0; n: u64 = 0; v := x - 1; while v { n += 1; v >>= 1; } return n; }
+// visitSExt: the trunc-user bailout, commonCastTransforms, sext of a non-negative value. Not ported: the rest.
+ic_visit_sext :: (i: Value_Id) -> Value_Id {
+    if has_one_use(i) && inst_op(first_user(i)) == .TRUNC return NONE;
+    r := ic_visit_cast(i); if r != NONE return r;
+    src := op(i, 0);
+    if is_known_non_negative(src, ic_q(i)) return create_cast_flags(.ZEXT, src, vtype(i), F_EXACT);
+    return NONE;
+}
+// visitTrunc: commonCastTransforms, SimplifyDemandedInstructionBits, the i1-of-nonzero fold and the nuw/nsw
+// inference. Not ported: canEvaluateTruncated, narrowing, and the folds between.
+ic_visit_trunc :: (i: Value_Id) -> Value_Id {
+    r := ic_visit_cast(i); if r != NONE return r;
+    src := op(i, 0);
+    dw := scalar_bits(i); sw := scalar_bits(src);
+    if ic_simplify_demanded_instruction_bits(i) return i;
+    if dw == 1 && (has_nuw(i) || has_nsw(i)) && is_known_non_zero(src, ic_q(i)) return ic_replace_inst_uses_with(i, get_true(vtype(i)));
+    changed := false;
+    if !has_nsw(i) && max_significant_bits(src, ic_q_no_dc(i)) <= dw { set_nsw(i); changed = true; }
+    if !has_nuw(i) && ic_masked_value_is_zero(src, ap_bits_set_from(sw, dw), i) { set_nuw(i); changed = true; }
+    if changed return i;
+    return NONE;
+}
+// llvm::ComputeMaxSignificantBits(Op, DL, &AC, CxtI, &DT): no DomConditionCache, safeCxtI
+ic_q_no_dc :: (i: Value_Id) -> Simplify_Query { q: Simplify_Query; q.dt = ic.dt; q.ac = ic.ac; q.cxt = i; return q; }
 
 // The InstSimplify step every visitor starts with (when nothing else is ported for it).
 ic_visit_simplify_only :: (i: Value_Id) -> Value_Id {
@@ -86,17 +147,260 @@ ic_visit_shift :: (i: Value_Id) -> Value_Id {
         return create_binop(inst_op(i), op(i, 0), ne);
     }
     if ic_simplify_demanded_instruction_bits(i) return i;
+    if ic_set_shift_flags(i, ic_q(i)) return i;
     return NONE;
 }
 
-// visitICmpInst: operand complexity order, InstSimplify. Not ported: everything after.
+// setShiftFlags (InstCombineShifts.cpp)
+ic_set_shift_flags :: (i: Value_Id, q: Simplify_Query) -> bool {
+    if inst_op(i) == .SHL {
+        if has_nuw(i) && has_nsw(i) return false;
+    } else {
+        if is_exact(i) return false;
+        oks, x, y := pm_binop(op(i, 0), .SHL);
+        if oks && y == op(i, 1) { set_exact(i); return true; }
+        okc, cx, cz := pm_intrinsic2(op(i, 1), IID_CTTZ);
+        if okc && cx == op(i, 0) { set_exact(i); return true; }
+    }
+    kc := known_bits(op(i, 1), q);
+    bw := kb_bits(kc);
+    max_cnt := ap_limited(kb_max_value(kc), bw - 1);
+    ka := known_bits(op(i, 0), q);
+    changed := false;
+    if inst_op(i) == .SHL {
+        if !has_nuw(i) && max_cnt <= kb_count_min_leading_zeros(ka) { set_nuw(i); changed = true; }
+        if !has_nsw(i) {
+            if max_cnt < kb_count_min_sign_bits(ka) || max_cnt < num_sign_bits_ctx(op(i, 0), q.cxt, q.dt, q.ac) { set_nsw(i); changed = true; }
+        }
+        return changed;
+    }
+    changed = max_cnt <= kb_count_min_trailing_zeros(ka);
+    set_exact(i, changed);
+    return changed;
+}
+
+// visitICmpInst: operand complexity order, InstSimplify, abs(x) != 0, foldICmpTruncWithTruncOrExt,
+// canonicalizeICmpBool, canonicalizeCmpWithConstant, canonicalizeICmpPredicate. Not ported: everything after
+// (foldICmpWithConstant onwards).
 ic_visit_icmp :: (i: Value_Id) -> Value_Id {
     changed := false;
     if ic_complexity(op(i, 0)) < ic_complexity(op(i, 1)) { cmp_swap_operands(i); changed = true; }
-    v := simplify_icmp_inst(inst_pred(i), (inst(i).flags & F_EXACT) != 0, op(i, 0), op(i, 1), ic_q(i));
+    op0 := op(i, 0); op1 := op(i, 1);
+    v := simplify_icmp_inst(inst_pred(i), (inst(i).flags & F_EXACT) != 0, op0, op1, ic_q(i));
     if v != NONE return ic_replace_inst_uses_with(i, v);
+    pred := inst_pred(i);
+    if pred == ICMP_NE && pm_zero(op1) {
+        ok, cond, st, sf := pm_select(op0);
+        if ok {
+            nv := ic_dyn_cast_neg_val(st);
+            if nv != NONE { if nv == sf return create_icmp(pred, nv, op1); }
+            else {
+                nv = ic_dyn_cast_neg_val(sf);
+                if nv != NONE && nv == st return create_icmp(pred, nv, op1);
+            }
+        }
+    }
+    r := ic_fold_icmp_trunc_with_trunc_or_ext(i); if r != NONE return r;
+    if is_int_or_int_vector_n(vtype(op0), 1) { r = ic_canonicalize_icmp_bool(i); if r != NONE return r; }
+    r = ic_canonicalize_cmp_with_constant(i); if r != NONE return r;
+    r = ic_canonicalize_icmp_predicate(i); if r != NONE return r;
     if changed return i;
     return NONE;
+}
+
+// foldICmpTruncWithTruncOrExt
+ic_fold_icmp_trunc_with_trunc_or_ext :: (cmp: Value_Id) -> Value_Id {
+    pred := inst_pred(cmp);
+    o0 := op(cmp, 0); o1 := op(cmp, 1);
+    x, y: Value_Id = NONE;
+    y_is_sext := false;
+    ok0, x0 := pmi_cast(o0, .TRUNC);
+    ok1, y1 := pmi_cast(o1, .TRUNC);
+    if ok0 && ok1 {
+        nw := inst(o0).flags & inst(o1).flags & cast(u32)(F_NUW | F_NSW);
+        if icmp_is_signed(pred) { if (nw & F_NSW) == 0 return NONE; }
+        else if nw == 0 return NONE;
+        x = x0; y = y1;
+        if vtype(x) != vtype(y) && (!has_one_use(o0) || !has_one_use(o1)) return NONE;
+        if !ic_is_desirable_int_type(scalar_bits(x)) && ic_is_desirable_int_type(scalar_bits(y)) {
+            t := x; x = y; y = t;
+            pred = swapped_predicate(pred);
+        }
+        y_is_sext = (nw & F_NUW) == 0;
+    } else {
+        found := false;
+        if !icmp_is_signed(pred) {
+            for side: 0..1 {
+                t := op(cmp, cast(u32) side); z := op(cmp, cast(u32) (1 - side));
+                okt, tx := pmi_cast(t, .TRUNC);
+                okz, zy := pmi_cast(z, .ZEXT);
+                if okt && has_nuw(t) && okz && has_one_use(z) {
+                    x = tx; y = zy; found = true;
+                    if side == 1 pred = swapped_predicate(pred);
+                    break;
+                }
+            }
+        }
+        if !found {
+            for side: 0..1 {
+                t := op(cmp, cast(u32) side); z := op(cmp, cast(u32) (1 - side));
+                okt, tx := pmi_cast(t, .TRUNC);
+                okz, zy := pmi_zext_or_sext(z);
+                if okt && has_nsw(t) && okz && has_one_use(z) {
+                    x = tx; y = zy; found = true;
+                    if side == 1 pred = swapped_predicate(pred);
+                    y_is_sext = inst_op(o0) == .SEXT || inst_op(o1) == .SEXT;
+                    break;
+                }
+            }
+        }
+        if !found return NONE;
+    }
+    tbits := scalar_bits(o0);
+    if ic_is_desirable_int_type(tbits) && !ic_is_desirable_int_type(scalar_bits(x)) return NONE;
+    ny := icb_int_cast(y, vtype(x), y_is_sext);
+    return create_icmp(pred, x, ny);
+}
+
+// canonicalizeICmpBool
+ic_canonicalize_icmp_bool :: (i: Value_Id) -> Value_Id {
+    a := op(i, 0); b := op(i, 1);
+    p := inst_pred(i);
+    if pm_zero(b) {
+        if p == ICMP_EQ || p == ICMP_ULE || p == ICMP_SGE return create_not(a);
+        fatal("internal: ICmp i1 X, C not simplified as expected.");
+    } else if pm_one(b) {
+        if p == ICMP_NE || p == ICMP_ULT || p == ICMP_SGT return create_not(a);
+        fatal("internal: ICmp i1 X, C not simplified as expected.");
+    }
+    if p == {
+        case ICMP_EQ; return create_not(icb_xor(a, b));
+        case ICMP_NE; return create_binop(.XOR, a, b);
+        case ICMP_UGT; return create_binop(.AND, icb_not(b), a);
+        case ICMP_ULT; return create_binop(.AND, icb_not(a), b);
+        case ICMP_SGT; return create_binop(.AND, icb_not(a), b);
+        case ICMP_SLT; return create_binop(.AND, icb_not(b), a);
+        case ICMP_UGE; return create_binop(.OR, icb_not(b), a);
+        case ICMP_ULE; return create_binop(.OR, icb_not(a), b);
+        case ICMP_SGE; return create_binop(.OR, icb_not(a), b);
+        case ICMP_SLE; return create_binop(.OR, icb_not(b), a);
+    }
+    fatal("internal: Invalid icmp instruction!");
+    return NONE;
+}
+
+// getFlippedStrictnessPredicateAndConstant (ValueTracking.cpp)
+flipped_strictness_predicate_and_constant :: (pred: u8, c: Value_Id) -> (bool, u8, Value_Id) {
+    if pm_undef_value(c) return false, 0, NONE;
+    t := vtype(c);
+    is_signed := icmp_is_signed(pred);
+    up := icmp_unsigned_predicate(pred);
+    will_inc := up == ICMP_ULE || up == ICMP_UGT;
+    ok_c :: (ci: Value_Id, will_inc: bool, is_signed: bool) -> bool {
+        a := const_ap(ci);
+        if will_inc return !(ifx is_signed then ap_is_max_signed(a) else ap_is_all_ones(a));
+        return !(ifx is_signed then ap_is_min_signed(a) else ap_is_zero(a));
+    }
+    safe: Value_Id = NONE;
+    k := vkind(c);
+    if k == .C_INT && !is_vector_type(t) {
+        if !ok_c(c, will_inc, is_signed) return false, 0, NONE;
+    } else if type_kind(t) == .VECTOR {
+        n := type_count(t);
+        for e: 0..cast(s64) n - 1 {
+            elt := cf_elt(c, cast(u64) e);
+            if elt == NONE return false, 0, NONE;
+            if pm_undef_value(elt) continue;
+            if vkind(elt) != .C_INT || !ok_c(elt, will_inc, is_signed) return false, 0, NONE;
+            if safe == NONE safe = elt;
+        }
+    } else if is_vector_type(t) {
+        s := get_splat_value(c);
+        if s == NONE || vkind(s) != .C_INT || !ok_c(s, will_inc, is_signed) return false, 0, NONE;
+    } else return false, 0, NONE;
+    cc := c;
+    if contains_undef_or_poison_element(cc) {
+        n := type_count(t);
+        elts := NewArray(cast(s64) n, Value_Id,, allocator = temp);
+        for e: 0..cast(s64) n - 1 { elt := cf_elt(cc, cast(u64) e); elts[e] = ifx pm_undef_value(elt) then safe else elt; }
+        cc = cf_vector(t, elts);
+    }
+    np := icmp_flipped_strictness(pred);
+    one := const_int_signed(t, ifx will_inc then 1 else -1);
+    return true, np, ce_binop(.ADD, cc, one, 0);
+}
+// CmpInst::getFlippedStrictnessPredicate
+icmp_flipped_strictness :: (p: u8) -> u8 {
+    if p == {
+        case ICMP_SGT; return ICMP_SGE; case ICMP_SLT; return ICMP_SLE; case ICMP_SGE; return ICMP_SGT; case ICMP_SLE; return ICMP_SLT;
+        case ICMP_UGT; return ICMP_UGE; case ICMP_ULT; return ICMP_ULE; case ICMP_UGE; return ICMP_UGT; case ICMP_ULE; return ICMP_ULT;
+    }
+    return p;
+}
+// canonicalizeCmpWithConstant
+ic_canonicalize_cmp_with_constant :: (i: Value_Id) -> Value_Id {
+    p := inst_pred(i);
+    if icmp_is_equality(p) || !is_int_predicate(p) || is_canonical_predicate(p) return NONE;
+    c := op(i, 1);
+    if !is_const(c) return NONE;
+    ok, np, nc := flipped_strictness_predicate_and_constant(p, c);
+    if !ok return NONE;
+    return create_icmp(np, op(i, 0), nc);
+}
+// canFreelyInvertAllUsersOf
+can_freely_invert_all_users_of :: (v: Value_Id, ignored: Value_Id) -> bool {
+    u := ir.v_first_use[v];
+    while u != NONE {
+        us := ir.u_user[u];
+        defer u = ir.u_next[u];
+        if us == ignored continue;
+        if inst_op(us) == {
+            case .SELECT;
+                if u - ir.v_ops[us] != 0 return false;
+                if should_avoid_absorbing_not_into_select(us) return false;
+            case .CONDBR;
+            case .XOR;
+                ok, x := pm_not(us);
+                if !ok return false;
+            case; return false;
+        }
+    }
+    return true;
+}
+// freelyInvertAllUsersOf
+ic_freely_invert_all_users_of :: (v: Value_Id, ignored: Value_Id = NONE) {
+    u := ir.v_first_use[v];
+    while u != NONE {
+        nu := ir.u_next[u];
+        us := ir.u_user[u];
+        if us != ignored {
+            if inst_op(us) == {
+                case .SELECT;
+                    use_swap(op_use(us, 1), op_use(us, 2));
+                    swap_prof_metadata(us);
+                case .CONDBR;
+                    swap_successors(us);
+                case .XOR;
+                    ic_replace_inst_uses_with(us, v);
+                    wl_push(us);
+                case; fatal("internal: freelyInvertAllUsersOf out of sync");
+            }
+        }
+        u = nu;
+    }
+    users: [..] u32; users.allocator = temp;
+    find_dbg_users(ic.f, v, *users);
+    if users.count fatal("instcombine: freelyInvertAllUsersOf with debug users (DW_OP_not) is not supported yet");
+}
+// canonicalizeICmpPredicate
+ic_canonicalize_icmp_predicate :: (i: Value_Id) -> Value_Id {
+    p := inst_pred(i);
+    if is_canonical_predicate(p) return NONE;
+    if !can_freely_invert_all_users_of(i, NONE) return NONE;
+    inst(i).pred = cmp_inverse(p);
+    set_name(i, tprint("%.not", vname(i)));
+    ic_freely_invert_all_users_of(i);
+    return i;
 }
 // visitFCmpInst: operand complexity order, InstSimplify. Not ported: everything after.
 ic_visit_fcmp :: (i: Value_Id) -> Value_Id {
