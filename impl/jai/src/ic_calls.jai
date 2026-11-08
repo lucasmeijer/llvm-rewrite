@@ -1438,10 +1438,11 @@ ic_visit_intrinsic_switch :: (ii: Value_Id, iid: Intrinsic_Id) -> Ic_Switch_Resu
             }
         }
         base := call_arg(ii, 0);
-        if vkind(base) == .C_FP && !is_vector_type(vtype(base)) {
+        if vkind(base) == .C_FP {   // dyn_cast<ConstantFP>: also a vector-typed splat
             e := call_arg(ii, 1);
             if (get_fmf(ii) & FMF_AFN) != 0 && pm_specific_fp(base, 2.0) {
                 one := fp_from_double(vtype(base), 1.0);
+                if is_vector_type(vtype(base)) e = icb_vector_splat(type_count(vtype(base)), type_kind(vtype(base)) == .SVECTOR, e);
                 ldexp := icb_ldexp(one, e, get_fmf(ii));
                 return done(ic_replace_inst_uses_with(ii, ldexp));
             }
