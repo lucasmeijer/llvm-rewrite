@@ -316,7 +316,7 @@ let VK_INST = 26;
 let VK_FWD = 27;       // forward-reference placeholder in the parser
 let VK_DEAD = 28;
 
-struct Val { kind: u8, flags: u8, ty: TyId, sub: i32, name: i32, first_use: i32, ops: i32, nops: i32, cap: i32 }
+struct Val { kind: u8, op: u8, ty: TyId, sub: i32, name: i32, first_use: i32, ops: i32, nops: i32, cap: i32 }
 
 var vals: Val[>..];
 
@@ -330,7 +330,7 @@ fn vkind(v: i32) -> u8 { vals[v].kind }
 fn new_val(kind: i64, ty: i32, sub: i32, nops: i64) -> i32 {
     let id = vals.len as i32;
     let at = alloc_uses(id, nops);
-    vals.push(Val { kind: kind as u8, flags: 0, ty: ty as TyId, sub: sub, name: -1, first_use: -1, ops: at, nops: nops as i32, cap: nops as i32 });
+    vals.push(Val { kind: kind as u8, op: 0, ty: ty as TyId, sub: sub, name: -1, first_use: -1, ops: at, nops: nops as i32, cap: nops as i32 });
     return id;
 }
 
@@ -807,7 +807,7 @@ let FMF_FAST: u8 = 127;
 // attrs: attribute list of a call. cc: calling convention. aux/naux: run in `ints` (indices, mask).
 // md/nmd: attachments run in md_att (pairs kind, node). ss: syncscope string id (-1 = system).
 struct Inst {
-    op: u8, flags: u8, fmf: u8, pred: u8, align: u8, ord: u8, ord2: u8, bits: u8,
+    flags: u8, fmf: u8, pred: u8, align: u8, ord: u8, ord2: u8, bits: u8,
     val: i32, parent: i32, prev: i32, next: i32,
     ty2: i32, attrs: i32, cc: i32, aux: i32, naux: i32, md: i32, nmd: i32, ss: i32, as_: i32
 }
@@ -975,12 +975,14 @@ fn func_remove_block(bv: i32) {
 fn new_inst(opc: i64, ty: i32, nopnds: i64) -> i32 {
     let i = insts.len as i32;
     let v = new_val(VK_INST, ty, i, nopnds);
-    insts.push(Inst { op: opc as u8, flags: 0, fmf: 0, pred: 0, align: 0, ord: 0, ord2: 0, bits: 0, val: v,
+    vals[v].op = opc as u8;
+    insts.push(Inst { flags: 0, fmf: 0, pred: 0, align: 0, ord: 0, ord2: 0, bits: 0, val: v,
         parent: -1, prev: -1, next: -1, ty2: -1, attrs: 0, cc: 0, aux: 0, naux: 0, md: 0, nmd: 0, ss: -1, as_: 0 });
     return v;
 }
 
-fn iop(v: i32) -> i64 { insts[vals[v].sub].op as i64 }
+// The opcode lives in the value record (Val.op), so iop is one load and one bounds check (DESIGN.md §2.1).
+fn iop(v: i32) -> i64 { vals[v].op as i64 }
 
 fn block_append_inst(bv: i32, iv: i32) {
     let b = block_of(bv);

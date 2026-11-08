@@ -133,7 +133,7 @@ fn process_function(f: i32) {
                 if x.dl >= 0 { create_md_slot(x.dl); }
                 r = x.next;
             }
-            if insts[ii].op as i64 == OP_CALL && is_intrinsic_call(iv) {
+            if iop(iv) == OP_CALL && is_intrinsic_call(iv) {
                 for k in nops(iv) {
                     let o = op(iv, k);
                     if vals[o].kind == VK_MDVAL && md_is_node(vals[o].sub) { create_md_slot(vals[o].sub); }
@@ -155,7 +155,7 @@ fn process_function(f: i32) {
         while iv >= 0 {
             let ii = inst_of(iv);
             if vals[iv].ty != T_VOID && vals[iv].name < 0 { vslot[iv] = fnext; fnext++; local_slotted.push(iv); }
-            if is_call_base_op(insts[ii].op as i64) {
+            if is_call_base_op(iop(iv)) {
                 let fa = alist_fn(insts[ii].attrs);
                 if fa != 0 { create_as_slot(fa); }
             }
@@ -291,7 +291,7 @@ fn type_finder(m: i32) {
                     let o = op(iv, k);
                     if o >= 0 && vals[o].kind != VK_INST { tf_value(o); }
                 }
-                let opc = insts[ii].op as i64;
+                let opc = iop(iv);
                 if opc == OP_GEP || opc == OP_ALLOCA { tf_type(insts[ii].ty2); }
                 if is_call_base_op(opc) { tf_attrs(insts[ii].attrs); }
                 for k in insts[ii].nmd {
@@ -1882,7 +1882,7 @@ fn put_param_operand(v: i32, s: i32) {
 fn print_inst(iv: i32) {
     let ii = inst_of(iv);
     let x = insts[ii];
-    let opc = x.op as i64;
+    let opc = iop(iv);
     put("  ");
     if vals[iv].name >= 0 {
         putc('%');

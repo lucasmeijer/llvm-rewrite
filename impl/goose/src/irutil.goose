@@ -319,7 +319,7 @@ fn create_inst(opc: i64, ty: i32, opsv: const i32[:]) -> i32 {
 fn inst_clone(iv: i32) -> i32 {
     let n = nops(iv);
     let ii = inst_of(iv);
-    let nv = new_inst(insts[ii].op as i64, vals[iv].ty, n);
+    let nv = new_inst(iop(iv), vals[iv].ty, n);
     let ni = inst_of(nv);
     let src = insts[ii];
     insts[ni].flags = src.flags;
@@ -336,7 +336,7 @@ fn inst_clone(iv: i32) -> i32 {
     insts[ni].naux = src.naux;
     insts[ni].ss = src.ss;
     insts[ni].as_ = src.as_;
-    vals[nv].flags = vals[iv].flags;
+    vals[nv].op = vals[iv].op;
     for k in n {
         set_op(nv, k, op(iv, k));
         use_aux[vals[nv].ops + k] = use_aux[vals[iv].ops + k];

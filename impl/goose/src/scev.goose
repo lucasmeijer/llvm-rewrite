@@ -531,7 +531,7 @@ recursive fn sc_value_id(v: i32) -> i64 {
         VK_BLOCK => { return 24; },
         VK_MDVAL => { return 25; },
         VK_INLINEASM => { return 26; },
-        VK_INST => { return 30 + (insts[vals[v].sub].op as i64); },
+        VK_INST => { return 30 + iop(v); },
         _ => { fatal("ScalarEvolution: unexpected value kind"); return 0; },
     }
 }

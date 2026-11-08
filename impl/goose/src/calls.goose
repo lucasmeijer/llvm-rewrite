@@ -15,7 +15,7 @@ fn is_call_base_op(o: i64) -> bool { o == OP_CALL || o == OP_INVOKE || o == OP_C
 
 fn cb_nbundles(iv: i32) -> i64 {
     let x = insts[inst_of(iv)];
-    if x.naux == 0 || x.op as i64 == OP_SHUFFLEVECTOR || x.op as i64 == OP_EXTRACTVALUE || x.op as i64 == OP_INSERTVALUE { return 0; }
+    if x.naux == 0 || iop(iv) == OP_SHUFFLEVECTOR || iop(iv) == OP_EXTRACTVALUE || iop(iv) == OP_INSERTVALUE { return 0; }
     return ints[x.aux] as i64;
 }
 fn cb_nindirect(iv: i32) -> i64 {
