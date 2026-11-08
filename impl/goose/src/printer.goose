@@ -6,6 +6,7 @@ import ir;
 import bignum;
 import apfloat;
 import calls;
+import intrinsics;
 
 var out: u8[>..];
 
@@ -983,6 +984,7 @@ fn print_function(f: i32) {
         }
         if any { put("; Function Attrs: "); put(line); putc('\n'); }
     }
+    if x.intrinsic != 0 && func_iid(f) == 0 { put("; Unknown intrinsic\n"); }
     process_function(f);
     let is_decl = x.is_decl != 0;
     if is_decl {

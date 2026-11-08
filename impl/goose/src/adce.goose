@@ -1,0 +1,318 @@
+// ADCE: port of llvm/lib/Transforms/Scalar/ADCE.cpp (AggressiveDeadCodeElimination), with
+// FindFunctionBackedges (llvm/lib/Analysis/CFG.cpp) and ReverseIDFCalculator
+// (llvm/include/llvm/Support/GenericIteratedDominanceFrontier.h).
+// Not ported: debug-info scope liveness (we have no DILocation/debug records yet) and the incremental
+// (post)dominator tree update after removing edges (we invalidate both trees instead; DESIGN.md §8.5).
+import std;
+import ir;
+import irutil;
+import calls;
+import instinfo;
+import local;
+import tli;
+import flags;
+import domtree;
+
+fn adce_run(fv: i32) -> u32 {
+    tli_cur_fn = fv;
+    let remove_cf = flag_bool("adce-remove-control-flow", true);
+    let remove_loops = flag_bool("adce-remove-loops", false);
+    dt_get(fv, DT_POST);
+
+    // BlockInfo, indexed by a local block number (BB->getNumber()).
+    var blk: i32[>..<] = [];
+    vm_clear(VM_PASS0);
+    var b = func_first_block(fv);
+    while b >= 0 { vm_set(VM_PASS0, b, blk.len); blk.push(b); b = block_next(b); }
+    let nb = blk.len;
+    fn bnum(bv: i32) -> i64 { vm_get(VM_PASS0, bv, -1) }
+    var live_b: bool[>..<] = [];
+    var phis_b: bool[>..<] = [];
+    var cflive_b: bool[>..<] = [];
+    var porder: i32[>..<] = [];
+    live_b.resize(nb, false); phis_b.resize(nb, false); cflive_b.resize(nb, false); porder.resize(nb, 0);
+
+    vs_clear(VS_PASS0);           // LiveInst
+    var worklist: i32[>..<] = [];
+    var bwdt: i32[>..<] = [];     // BlocksWithDeadTerminators (SetVector; membership: VS_PASS1)
+    vs_clear(VS_PASS1);
+    var new_live: i32[>..<] = []; // NewLiveBlocks (set; order irrelevant)
+    var new_live_mark: bool[>..<] = [];
+    new_live_mark.resize(nb, false);
+
+    fn is_live(i: i32) -> bool { vs_has(VS_PASS0, i) }
+    fn bwdt_remove(bv: i32) {
+        if !vs_has(VS_PASS1, bv) { return; }
+        vs_del(VS_PASS1, bv);
+        let p = position(bwdt, bv);
+        if p >= 0 { remove_at(bwdt, p); }
+    }
+    fn add_new_live(k: i64) { if !new_live_mark[k] { new_live_mark[k] = true; new_live.push(blk[k]); } }
+    // markLive(UncondBr terminator of a block that is already live)
+    fn mark_uncond_term(i: i32) {
+        if !vs_add(VS_PASS0, i) { return; }
+        worklist.push(i);
+        bwdt_remove(inst_parent(i));
+    }
+    // markLive(BasicBlock *)
+    fn mark_block(bv: i32) {
+        let k = bnum(bv);
+        if live_b[k] { return; }
+        live_b[k] = true;
+        if !cflive_b[k] { cflive_b[k] = true; add_new_live(k); }
+        let t = block_last(bv);
+        if iop(t) == OP_BR { mark_uncond_term(t); }
+    }
+    // markLive(Instruction *)
+    fn mark_inst(i: i32) {
+        if !vs_add(VS_PASS0, i) { return; }
+        worklist.push(i);
+        let bv = inst_parent(i);
+        if i == block_last(bv) {
+            bwdt_remove(bv);
+            if iop(i) != OP_BR {
+                for k in term_nsucc(i) { mark_block(term_succ(i, k)); }
+            }
+        }
+        mark_block(bv);
+    }
+    // isInstrumentsConstant
+    fn instruments_constant(i: i32) -> bool {
+        if iop(i) != OP_CALL { return false; }
+        let c = called_function(i);
+        if c < 0 { return false; }
+        if val_name(c) != "__llvm_profile_instrument_target" { return false; }
+        return is_constant(cb_arg(i, 0));
+    }
+    fn is_always_live(i: i32) -> bool {
+        if inst_is_eh_pad(i) || inst_may_have_side_effects(i) {
+            if instruments_constant(i) { return false; }
+            return true;
+        }
+        if !is_terminator(i) { return false; }
+        let o = iop(i);
+        if remove_cf && (o == OP_BR || o == OP_CONDBR || o == OP_SWITCH) { return false; }
+        return true;
+    }
+
+    // initialize()
+    each_inst(fv) { i => if is_always_live(i) { mark_inst(i); } };
+    if remove_cf {
+        if !remove_loops {
+            // FindFunctionBackedges: mark the source terminators live
+            let entry = func_entry(fv);
+            if block_nsucc(entry) > 0 {
+                var visited: bool[>..<] = [];
+                var instack: bool[>..<] = [];
+                visited.resize(nb, false); instack.resize(nb, false);
+                var st_b: i32[>..<] = [];
+                var st_i: i32[>..<] = [];
+                var srcs: i32[>..<] = [];
+                visited[bnum(entry)] = true;
+                instack[bnum(entry)] = true;
+                st_b.push(entry); st_i.push(0);
+                while st_b.len > 0 {
+                    let top = st_b.len - 1;
+                    let pb = st_b[top];
+                    var it = st_i[top] as i64;
+                    let ns = block_nsucc(pb);
+                    var found: i32 = -1;
+                    while it < ns {
+                        let s = block_succ(pb, it);
+                        it++;
+                        if !visited[bnum(s)] { visited[bnum(s)] = true; found = s; break; }
+                        if instack[bnum(s)] { srcs.push(pb); }
+                    }
+                    st_i[top] = it as i32;
+                    if found >= 0 {
+                        instack[bnum(found)] = true;
+                        st_b.push(found); st_i.push(0);
+                    } else {
+                        instack[bnum(pb)] = false;
+                        st_b.pop(); st_i.pop();
+                    }
+                }
+                for s in srcs { mark_inst(block_terminator(s)); }
+            }
+        }
+        // Blocks with no path to a return: mark the post-dominator subtree of non-return root children live.
+        var c = dt_first_child(fv, DT_POST, DT_VROOT);
+        while c >= 0 {
+            let last = block_last(c);
+            if iop(last) != OP_RET {
+                dt_each_subtree(fv, c) { n => mark_inst(block_last(n)); };
+            }
+            c = dt_next_sibling(DT_POST, c);
+        }
+        let entry = func_entry(fv);
+        live_b[bnum(entry)] = true;
+        if iop(block_last(entry)) == OP_BR { mark_inst(block_last(entry)); }
+        for x in blk { if !is_live(block_last(x)) { if vs_add(VS_PASS1, x) { bwdt.push(x); } } }
+    }
+
+    // markLiveInstructions()
+    fn mark_phi_live(p: i32) {
+        let bv = inst_parent(p);
+        let k = bnum(bv);
+        if phis_b[k] { return; }
+        phis_b[k] = true;
+        each_pred(bv) { pb =>
+            let pk = bnum(pb);
+            if !cflive_b[pk] { cflive_b[pk] = true; add_new_live(pk); }
+        };
+    }
+    // ReverseIDFCalculator over the post-dominator tree: defining blocks = NewLiveBlocks, live-in = BWDT.
+    fn mark_live_branches_from_control_dependences() {
+        if bwdt.len == 0 { return; }
+        var idf: i32[>..<] = [];
+        var vis_pq: bool[>..<] = [];
+        var vis_wl: bool[>..<] = [];
+        var is_def: bool[>..<] = [];
+        vis_pq.resize(nb, false); vis_wl.resize(nb, false); is_def.resize(nb, false);
+        var pq: i32[>..<] = [];
+        for x in new_live { is_def[bnum(x)] = true; pq.push(x); vis_wl[bnum(x)] = true; }
+        var wl2: i32[>..<] = [];
+        while pq.len > 0 {
+            // pop the deepest node (highest level)
+            var best: i64 = 0;
+            for j in pq.len { if dt_level(DT_POST, pq[j]) > dt_level(DT_POST, pq[best]) { best = j; } }
+            let root = pq[best];
+            remove_at(pq, best);
+            let rl = dt_level(DT_POST, root);
+            wl2.push(root);
+            while wl2.len > 0 {
+                let n = wl2.pop();
+                each_pred(n) { s =>
+                    let sk = bnum(s);
+                    if dt_level(DT_POST, s) <= rl && !vis_pq[sk] {
+                        vis_pq[sk] = true;
+                        if vs_has(VS_PASS1, s) {
+                            idf.push(s);
+                            if !is_def[sk] { pq.push(s); }
+                        }
+                    }
+                };
+                var ch = dt_first_child(fv, DT_POST, n);
+                while ch >= 0 {
+                    if !vis_wl[bnum(ch)] { vis_wl[bnum(ch)] = true; wl2.push(ch); }
+                    ch = dt_next_sibling(DT_POST, ch);
+                }
+            }
+        }
+        for x in new_live { new_live_mark[bnum(x)] = false; }
+        new_live.clear();
+        for x in idf { mark_inst(block_terminator(x)); }
+    }
+    loop {
+        while worklist.len > 0 {
+            let li = worklist.pop();
+            for k in nops(li) {
+                let o = op(li, k);
+                if is_inst(o) { mark_inst(o); }
+            }
+            if iop(li) == OP_PHI { mark_phi_live(li); }
+        }
+        mark_live_branches_from_control_dependences();
+        if worklist.len == 0 { break; }
+    }
+
+    // removeDeadInstructions() -> updateDeadRegions()
+    var changed_cf = false;
+    var have_po = false;
+    fn compute_reverse_post_order() {
+        var visited: bool[>..<] = [];
+        visited.resize(nb, false);
+        var num: i32 = 0;
+        var st_b: i32[>..<] = [];
+        var st_u: i32[>..<] = [];       // next use to look at in the block's use list
+        for x in blk {
+            if block_nsucc(x) != 0 { continue; }
+            if visited[bnum(x)] { continue; }
+            visited[bnum(x)] = true;
+            st_b.push(x); st_u.push(vals[x].first_use);
+            while st_b.len > 0 {
+                let top = st_b.len - 1;
+                var u = st_u[top];
+                var pushed = false;
+                while u >= 0 {
+                    let user = uses[u].user;
+                    u = uses[u].next;
+                    if vals[user].kind == VK_INST && is_terminator_op(iop(user)) {
+                        let p = inst_parent(user);
+                        if !visited[bnum(p)] {
+                            visited[bnum(p)] = true;
+                            st_u[top] = u;
+                            st_b.push(p); st_u.push(vals[p].first_use);
+                            pushed = true;
+                            break;
+                        }
+                    }
+                }
+                if pushed { continue; }
+                porder[bnum(st_b[top])] = num;
+                num++;
+                st_b.pop(); st_u.pop();
+            }
+        }
+    }
+    for bb in bwdt {
+        let t = block_last(bb);
+        if iop(t) == OP_BR { vs_add(VS_PASS0, t); continue; }
+        if !have_po { compute_reverse_post_order(); have_po = true; }
+        var pref: i32 = -1;
+        var pref_po: i32 = 0;
+        for k in term_nsucc(t) {
+            let s = term_succ(t, k);
+            let spo = porder[bnum(s)];
+            if pref_po < spo { pref = s; pref_po = spo; }
+        }
+        if pref < 0 { fatal("ADCE: failed to find safe successor for dead branch"); }
+        var first = true;
+        var removed: i32[>..<] = [];
+        let ns = term_nsucc(t);
+        var succs: i32[>..<] = [];
+        for k in ns { succs.push(term_succ(t, k)); }
+        for s in succs {
+            if !first || s != pref {
+                block_remove_predecessor(s, bb, false);
+                if position(removed, s) < 0 { removed.push(s); }
+            } else { first = false; }
+        }
+        // makeUnconditional(BB, PreferredSucc)
+        let br = build_br(pref, t);
+        vs_add(VS_PASS0, br);
+        inst_erase_from_parent(t);
+        changed_cf = true;
+    }
+
+    // Erase everything not live, in reverse instruction order.
+    var dead: i32[>..<] = [];
+    var bb = globs[glob_of(fv)].last_block;
+    while bb >= 0 {
+        var i = block_last(bb);
+        while i >= 0 {
+            if !is_live(i) { dead.push(i); }
+            i = inst_prev(i);
+        }
+        bb = block_prev(bb);
+    }
+    for i in dead { drop_all_refs(i); }
+    for i in dead { inst_erase_from_parent(i); }
+    if !changed_cf && dead.len == 0 { return 0xFFFFFFFF; }
+    if !changed_cf { return 3; }
+    return 0;
+}
+
+// depth_first over a post-dominator subtree (pre-order).
+fn dt_each_subtree<F>(fv: i32, root: i32) {
+    var stack: i32[>..<] = [];
+    stack.push(root);
+    while stack.len > 0 {
+        let n = stack.pop();
+        F(n);
+        let mark = stack.len;
+        var c = dt_first_child(fv, DT_POST, n);
+        while c >= 0 { stack.push(c); c = dt_next_sibling(DT_POST, c); }
+        reverse(stack[mark..]);
+    }
+}

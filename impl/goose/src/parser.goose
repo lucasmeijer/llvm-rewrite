@@ -9,6 +9,8 @@ import lexer;
 import datalayout;
 import printer;
 import calls;
+import intrinsics;
+import autoupgrade;
 
 // ---------------------------------------------------------------------------------------------
 // Parser state
@@ -1849,8 +1851,7 @@ fn parse_function(is_define: bool) {
         if prologue >= 0 { set_op(v, 2, prologue); globs[g].has_prologue = 1; }
     }
     // intrinsic?
-    let nb = sbytes(vals[v].name);
-    if vals[v].name >= 0 && starts_with(nb, "llvm.") { globs[g].intrinsic = 1; }
+    func_update_iid(v);
     module_append_global(v);
     resolve_global_fwd(v, nm, num);
     // arguments
@@ -2827,91 +2828,17 @@ fn parse_module(path: const u8[:]) {
     if symtabs[gfwd_st].count > 0 { perr_at(src.len, "use of undefined value"); }
     for f in gfwd_num { if f >= 0 { perr_at(src.len, "use of undefined value"); } }
     for k in ba_fwd.len / 4 { if ba_fwd[4 * k] >= 0 { perr_at(src.len, "expected function name in blockaddress"); } }
-    // intrinsic declarations get their attributes from the intrinsic table
-    upgrade_intrinsic_attrs();
+    // UpgradeCallsToIntrinsic for every function (also sets intrinsic attributes)
+    upgrade_module_intrinsics();
 }
 
 
 // ---------------------------------------------------------------------------------------------
-// Intrinsic attributes (UpgradeIntrinsicFunction replaces the attribute list of intrinsic declarations).
+// Intrinsics at the end of the module (LLParser::validateEndOfModule)
 
-import gen_intrinsics;
-
-// Lex an extra piece of text appended after the input; returns the old length to restore.
-fn text_lex_begin(text: const u8[:]) -> i64 {
-    let save = src.len;
-    src.push('\n');
-    src.append(text);
-    src.push('\n');
-    lpos = save;
-    lex();
-    return save;
-}
-fn text_lex_end(save: i64) { src.resize(save); }
-
-fn intrinsic_entry(name: const u8[:]) -> i64 {
-    var lo = 0;
-    var hi = INTRINSIC_ATTRS.len;
-    while lo < hi {
-        let mid = (lo + hi) / 2;
-        let e = INTRINSIC_ATTRS[mid];
-        let t = find(e, "\t");
-        let c = bytes_cmp(e[..t], name);
-        if c == 0 { return mid; }
-        if c < 0 { lo = mid + 1; } else { hi = mid; }
-    }
-    return -1;
-}
-
-fn upgrade_intrinsic_attrs() {
-    var f = modules[cur_module].first_func;
-    while f >= 0 {
-        let g = glob_of(f);
-        if globs[g].intrinsic != 0 {
-            let k = intrinsic_entry(sbytes(vals[f].name));
-            if k >= 0 {
-                let e = INTRINSIC_ATTRS[k];
-                var p1: u8[>..] = [];
-                var p2: u8[>..] = [];
-                var p3: u8[>..] = [];
-                var field = 0;
-                for c in e {
-                    if c == '\t' { field++; continue; }
-                    if field == 1 { p1.push(c); } else if field == 2 { p2.push(c); } else if field == 3 { p3.push(c); }
-                }
-                // return attrs: prefix before the return type
-                let s1 = text_lex_begin(p1);
-                let ret = parse_param_attrs();
-                text_lex_end(s1);
-                let amark = astack.len;
-                let s2 = text_lex_begin(p2);
-                if tk != T_EOF {
-                    loop {
-                        if tk == T_DOTS { break; }
-                        parse_type();
-                        let pa = parse_param_attrs();
-                        astack.push(pa);
-                        if !eat_punct(',') { break; }
-                    }
-                }
-                text_lex_end(s2);
-                let s3 = text_lex_begin(p3);
-                let fa = parse_fn_attrs(GR_FN, -1);
-                text_lex_end(s3);
-                let lmark = astack.len;
-                astack.push(fa);
-                astack.push(ret);
-                for j in amark..lmark { astack.push(astack[j]); }
-                globs[g].attrs = alist_get(astack[lmark..]);
-                astack.resize(amark);
-            }
-        }
-        f = globs[g].next;
-    }
-}
-
-// Forward-referenced llvm.* names become declarations with the call's function type (validateEndOfModule),
-// in name order (ForwardRefVals is a std::map), each use set in use-list order.
+// Forward-referenced llvm.* names become declarations (std::map order = name order), each use in use-list
+// order: a valid signature gets Intrinsic::getOrInsertDeclaration (adding the mangling suffix), otherwise a
+// temporary function with the call's type is auto-upgraded.
 fn declare_forward_intrinsics() {
     var names: i32[>..] = [];
     let t = symtabs[gfwd_st];
@@ -2922,29 +2849,29 @@ fn declare_forward_intrinsics() {
     sort(names) { a, b => bytes_cmp(sbytes(vals[a].name), sbytes(vals[b].name)) < 0 };
     for ph in names {
         let nm = vals[ph].name;
+        let id = intr_lookup(sbytes(nm));
         while vals[ph].first_use >= 0 {
             let u = vals[ph].first_use;
             let user = uses[u].user;
-            if vals[user].kind != VK_INST || iop(user) != OP_CALL || u != vals[user].ops + vals[user].nops - 1 {
+            if vals[user].kind != VK_INST || !is_call_base_op(iop(user)) || u != vals[user].ops + vals[user].nops - 1 {
                 perr_at(src.len, "intrinsic can only be used as callee");
             }
             let fty = insts[inst_of(user)].ty2;
-            var f = symtab_lookup(modules[cur_module].symtab, nm);
-            if f < 0 {
-                f = new_glob(VK_FUNC, T_PTR, -1, 0);
-                let g = glob_of(f);
-                globs[g].vty = fty;
-                globs[g].intrinsic = 1;
-                globs[g].symtab = new_symtab();
-                let at = ints.len as i32;
-                for k in ty_fn_nparams(fty) { ints.push(-1); }
-                globs[g].args = at;
-                globs[g].nargs = ty_fn_nparams(fty) as i32;
-                for k in ty_fn_nparams(fty) { ints[at + k] = new_arg(f, ty_fn_param(fty, k), k); }
-                symtab_set_name(modules[cur_module].symtab, f, sbytes(nm), true);
-                module_append_global(f);
+            if id != 0 && intr_signature_valid(id, fty) {
+                var ov: i32[>..] = [];
+                for x in otys { ov.push(x); }
+                use_set(u, au_get_declaration(id, ov));
+            } else {
+                let tmp = au_create_function(sbytes(nm), fty);
+                let up, nf = upgrade_intrinsic_function(tmp);
+                if !up {
+                    if id == 0 { perr_at(src.len, str("unknown intrinsic '", sbytes(nm), "'")); }
+                    perr_at(src.len, "invalid intrinsic signature");
+                }
+                use_set(u, tmp);
+                upgrade_intrinsic_call(user, nf);
+                if vals[tmp].first_use < 0 { au_erase_function(tmp); }
             }
-            use_set(u, f);
         }
         symtab_remove(gfwd_st, ph);
         vals[ph].kind = VK_DEAD;
