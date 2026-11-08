@@ -124,8 +124,7 @@ is_single_value_type :: (t: Type_Id) -> bool {
 // AllocaInst::getAllocationSize (bytes); false if not a constant
 sroa_alloca_allocation_size :: (ai: Value_Id) -> (bool, u64) {
     t := inst(ai).ty2;
-    if type_kind(t) == .SVECTOR || type_has_scalable(t) fatal("SROA: allocas of scalable types are not supported yet");
-    sz := dl_type_alloc_size(t);
+    sz := dl_type_alloc_size(t);   // the known minimum for scalable types
     n := op(ai, 0);
     if !(vkind(n) == .C_INT && const_int_zext(n) == 1) {
         if vkind(n) != .C_INT return false, 0;
@@ -160,6 +159,7 @@ common_alignment :: (a: u64, offset: u64) -> u64 {
 Sroa_Visit :: struct { use: Use_Id; known: bool; offset: u64; }
 
 Sroa_Builder :: struct {
+    fn: Value_Id;
     as: *Sroa_Slices;
     alloc_size: u64;
     width: u32;
@@ -337,7 +337,7 @@ call_capture_components :: (c: Value_Id, opno: u32) -> u64 {
         return (ci & 0xF) | ((ci >> 4) & 0xF);
     }
     if intrinsic_id_of_call(c) == "llvm.assume" return 0;
-    fatal("SROA: capture info of operand bundle operands is not supported yet");
+    if call_bundle_tag_of_operand(c, opno) == "deopt" return 0;
     return 0xF;
 }
 // CallBase::isByValArgument (paramHasAttr: call site or callee)
@@ -346,11 +346,24 @@ call_is_byval_arg :: (c: Value_Id, k: u32) -> bool {
     f := call_called_function(c);
     return f != NONE && attr_set_has(attr_list_param(glob(f).attrs, k), .ByVal);
 }
+// getBundleOpInfoForOperand(OpNo).Tag
+call_bundle_tag_of_operand :: (c: Value_Id, opno: u32) -> string {
+    r := inst(c);
+    if r.nidx > 0 for k: 0..r.nidx-1 {
+        b := ir.u32_pool[r.idx + 3 * k + 1]; e := ir.u32_pool[r.idx + 3 * k + 2];
+        if opno >= b && opno < e return bundle_tags[ir.u32_pool[r.idx + 3 * k]];
+    }
+    fatal("internal: operand is not a bundle operand");
+    return "";
+}
 // CallBase::onlyReadsMemory(OpNo)
 call_param_only_reads :: (c: Value_Id, opno: u32) -> bool {
     n := call_arg_count(c);
     r := inst(c);
-    if opno >= n fatal("SROA: memory attributes of operand bundle operands are not supported yet");
+    if opno >= n {
+        // bundleOperandHasAttr: only deopt bundles imply readonly (for pointer operands)
+        return call_bundle_tag_of_operand(c, opno) == "deopt" && is_ptr_type(vtype(op(c, opno)));
+    }
     if call_is_byval_arg(c, opno) return true;
     has :: (c: Value_Id, opno: u32, k: Attr_Kind) -> bool {
         if attr_set_has(attr_list_param(inst(c).attrs, opno), k) return true;
@@ -381,14 +394,20 @@ sb_visit :: (b: *Sroa_Builder, i: Value_Id) {
       case .LOAD;
         if !b.known { b.escaped_ro = i; return; }
         t := vtype(i);
-        if type_has_scalable(t) fatal("SROA: loads of scalable vectors are not supported yet");
+        if type_has_scalable(t) {
+            if fn_vscale_value(b.fn) == 0 { b.aborted = i; return; }
+            fatal("SROA: scalable loads with a known vscale are not supported yet");
+        }
         sb_load_or_store(b, t, i, dl_type_store_size(t), (inst(i).flags & F_VOLATILE) != 0);
       case .STORE;
         v := op(i, 0);
         if v == use_value(b.u) { b.escaped = i; b.aborted = i; return; }
         if !b.known { b.aborted = i; return; }
         t := vtype(v);
-        if type_has_scalable(t) fatal("SROA: stores of scalable vectors are not supported yet");
+        if type_has_scalable(t) {
+            if fn_vscale_value(b.fn) == 0 { b.aborted = i; return; }
+            fatal("SROA: scalable stores with a known vscale are not supported yet");
+        }
         size := dl_type_store_size(t);
         if size > b.alloc_size || b.offset > b.alloc_size - size { sb_mark_dead(b, i); return; }
         sb_load_or_store(b, t, i, size, (inst(i).flags & F_VOLATILE) != 0);
@@ -449,6 +468,7 @@ build_alloca_slices :: (ai: Value_Id, as: *Sroa_Slices) {
     as.dead_use_if_promotable.allocator = temp; as.dead_operands.allocator = temp;
     b: Sroa_Builder;
     b.as = as;
+    b.fn = block_fn(inst(ai).parent);
     ok, sz := sroa_alloca_allocation_size(ai);
     b.alloc_size = sz;
     b.width = dl_index_type_size_bits(vtype(ai));
@@ -2884,7 +2904,7 @@ run_on_alloca :: (pass: *Sroa, ai: Value_Id) -> bool {
         return true;
     }
     ok, size := sroa_alloca_allocation_size(ai);
-    if alloca_is_array_allocation(ai) || !ok || size == 0 return changed;
+    if alloca_is_array_allocation(ai) || !ok || type_has_scalable(inst(ai).ty2) || size == 0 return changed;
     b: Irb;
     irb_set_before(*b, ai);
     if agg_rewrite(*b, ai) changed = true;
@@ -2987,8 +3007,9 @@ sroa_run :: (f: Value_Id, name: string) -> Preserved {
     i := block(entry).first;
     while i != NONE && i != last {
         if inst_op(i) == .ALLOCA {
-            if type_has_scalable(inst(i).ty2) fatal("SROA: allocas of scalable types are not supported yet");
-            svec_insert(*pass.worklist, i);
+            ok, sz := sroa_alloca_allocation_size(i);
+            if ok && type_has_scalable(inst(i).ty2) && is_alloca_promotable(i) svec_insert(*pass.promotable, i);
+            else svec_insert(*pass.worklist, i);
         }
         i = inst(i).next;
     }
@@ -3251,4 +3272,13 @@ md_range_contains_zero :: (m: Md_Id) -> bool {
         i += 2;
     }
     return false;
+}
+
+// Function::getVScaleValue: vscale_range(N, N) gives N, else 0
+fn_vscale_value :: (f: Value_Id) -> u64 {
+    a := attr_set_find(attr_list_fn(glob(f).attrs), .VScaleRange);
+    if !a return 0;
+    mn := a.ival >> 32; mx := a.ival & 0xFFFF_FFFF;
+    if mn != 0 && mn == mx return mn;
+    return 0;
 }
