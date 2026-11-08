@@ -12,8 +12,9 @@
     intrinsic used in the corpus (incomplete and not a port).
   - "Print imported tests" turned out to mean porting large parts of AutoUpgrade.cpp, DebugInfoMetadata (every
     `!DI*` node, its field defaults, its *internal operand order* for slot numbering), debug records,
-    ConstantFold.cpp, the Verifier's debug-info stripping, ODR type uniquing and more. The remaining 15 tests need
-    the x86 intrinsic upgrades (thousands of lines of IRBuilder code in AutoUpgrade.cpp).
+    ConstantFold.cpp, the Verifier's debug-info stripping, ODR type uniquing and more. The last 15 tests needed
+    the x86 intrinsic upgrades (thousands of lines of IRBuilder code in AutoUpgrade.cpp; I ported the name
+    predicate whole and only the call rewrites the corpus uses).
   - Goose compile times: a generated file with ~60k array-literal elements took 4m43s to compile; the same data
     as hex strings compiles in seconds.
 - **Time or effort lost:** ~30 min on the shared-tree problems (stray commit, rebuild confusion, re-checking that
