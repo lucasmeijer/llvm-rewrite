@@ -227,21 +227,26 @@ fn m_specific_int_ap(v: i32, x: u64) -> bool {
 
 // m_ConstantInt (scalar ConstantInt only, vector-typed ConstantInt excluded) -> id
 fn m_constant_int(v: i32) -> i32 { if v >= 0 && vals[v].kind == VK_CINT && !ty_is_vector(vals[v].ty) { v } else { -1 } }
-// m_ImmConstant: a Constant that is not a ConstantExpr and contains no constant expressions.
-recursive fn contains_cexpr(v: i32) -> bool {
+// m_ConstantExpr: a ConstantExpr or a fixed vector constant with a ConstantExpr element
+fn m_constant_expr(v: i32) -> bool {
     let k = vals[v].kind;
     if k == VK_CEXPR { return true; }
-    if k == VK_CVECTOR || k == VK_CARRAY || k == VK_CSTRUCT {
-        for i in nops(v) { if contains_cexpr(op(v, i)) { return true; } }
+    if k == VK_CINT || k == VK_CFP { return false; }
+    if ty_kind(vals[v].ty) == TK_FVEC && (k == VK_CVECTOR) {
+        for i in nops(v) { if vals[op(v, i)].kind == VK_CEXPR { return true; } }
     }
     return false;
 }
+// m_ImmConstant (immconstant_ty): a constant that is not a constant expression, or a vector whose splat
+// value (poison allowed) is not one.
 fn m_imm_constant(v: i32) -> bool {
     if v < 0 || !is_constant(v) { return false; }
-    let k = vals[v].kind;
-    if k == VK_CEXPR || k == VK_BLOCKADDR || k == VK_DSOLOCAL || k == VK_NOCFI || k == VK_PTRAUTH { return false; }
-    if is_global(v) { return false; }
-    return !contains_cexpr(v);
+    if !m_constant_expr(v) { return true; }
+    if ty_is_vector(vals[v].ty) {
+        let s = splat_value(v, true);
+        if s >= 0 && !m_constant_expr(s) { return true; }
+    }
+    return false;
 }
 
 // FP predicates
@@ -366,34 +371,14 @@ fn m_c_binop_both(v: i32, o: i64, a: i32, b: i32) -> bool {
 fn m_intrinsic(v: i32, id: i32) -> bool { inst_iid(v) == id && id != 0 }
 fn m_ptrtoint_or_addr(v: i32) -> i32 { if is_op(v, OP_PTRTOINT) || is_op(v, OP_PTRTOADDR) { op(v, 0) } else { -1 } }
 
-// m_SMax/m_SMin/m_UMax/m_UMin (MaxMin_match): the intrinsic, or select (icmp pred a, b), a, b (and the
-// swapped forms). kind: 0 smax, 1 smin, 2 umax, 3 umin. Returns true with the operands in mm_a/mm_b.
+// m_SMax/m_SMin/m_UMax/m_UMin: the min/max intrinsic (LLVM 23 matches intrinsics only). kind: 0 smax, 1 smin, 2 umax, 3 umin. Returns true with the operands in mm_a/mm_b.
 var mm_a: i32 = -1;
 var mm_b: i32 = -1;
 fn minmax_iid(kind: i64) -> i32 { match kind { 0 => IID_smax, 1 => IID_smin, 2 => IID_umax, _ => IID_umin } }
 fn m_minmax(v: i32, kind: i64) -> bool {
     if v < 0 { return false; }
     if m_intrinsic(v, minmax_iid(kind)) { mm_a = op(v, 0); mm_b = op(v, 1); return true; }
-    if !is_inst_op(v, OP_SELECT) { return false; }
-    let c = op(v, 0);
-    if !is_inst_op(c, OP_ICMP) { return false; }
-    let t = op(v, 1);
-    let f = op(v, 2);
-    let l = op(c, 0);
-    let r = op(c, 1);
-    if (t != l || f != r) && (t != r || f != l) { return false; }
-    var p = inst_pred(c);
-    if t != l { p = pred_swap_i(p); }
-    let ok = match kind {
-        0 => p == 38 || p == 39,
-        1 => p == 40 || p == 41,
-        2 => p == 34 || p == 35,
-        _ => p == 36 || p == 37,
-    };
-    if !ok { return false; }
-    mm_a = l;
-    mm_b = r;
-    return true;
+    return false;
 }
 fn pred_swap_i(p: i64) -> i64 {
     match p { 34 => 36, 35 => 37, 36 => 34, 37 => 35, 38 => 40, 39 => 41, 40 => 38, 41 => 39, _ => p }

@@ -23,6 +23,7 @@ import implied;
 import crange;
 import pm;
 import constfold;
+import assume;
 
 let VT_MAX_DEPTH = 6;
 
@@ -298,6 +299,7 @@ fn gep_accumulate_constant_offset(g: i32) -> bool, i64 {
     // GEPOperator::accumulateConstantOffset: all indices must be constant
     var t = gep_src_ty(g);
     var off: i64 = 0;
+    if ty_contains_scalable(t) { return false, 0; }
     for k in 1..nops(g) {
         let ix = op(g, k);
         if k == 1 {
@@ -420,7 +422,7 @@ recursive fn ikz(v: i32, de: u64, depth0: i64) -> bool {
     if k == VK_ARG && arg_range(v) {
         if !cr_contains_val(vt_cr, 0) { return true; }
     }
-    if !is_constant(v) { vt_check_assumes(v); }
+    if !is_constant(v) && nonzero_from_assume(v) { return true; }
     if depth >= VT_MAX_DEPTH { return false; }
     depth++;
     if ty_kind(ty) == TK_PTR && k == VK_ARG {
@@ -564,33 +566,14 @@ recursive fn nonnull_from_dominating_condition(v: i32) -> bool {
     return false;
 }
 
-// isValidAssumeForContext(Inv, CxtI, DT, AllowEphemerals = false) for non-assume "Inv" (division users).
-fn is_valid_assume_for_context(inv: i32, cx: i32) -> bool {
-    if inst_parent(inv) == inst_parent(cx) {
-        if comes_before(inv, cx) { return true; }
-        if inv == cx { return false; }
-        // context comes first: all instructions from cx up to inv must transfer execution
-        var x = cx;
-        var n = 0;
-        while x >= 0 && x != inv {
-            if n >= 15 { return false; }
-            if !guaranteed_to_transfer(x) { return false; }
-            n++;
-            x = inst_next(x);
-        }
-        vt_not_ported("isEphemeralValueOf");
-        return false;
-    }
-    return dom_inst(inv, cx);
-}
+fn is_valid_assume_for_context(inv: i32, cx: i32) -> bool { valid_assume_for_context(inv, cx) }
 
 // isGuaranteedToTransferExecutionToSuccessor(const Instruction *I)
 fn guaranteed_to_transfer(i: i32) -> bool {
     let o = iop(i);
-    if o == OP_RESUME || o == OP_UNREACHABLE || o == OP_CLEANUPRET || o == OP_CATCHSWITCH || o == OP_CATCHRET { return false; }
-    if inst_may_throw(i) { return false; }
-    if !inst_will_return(i) { return false; }
-    return true;
+    if o == OP_RET || o == OP_UNREACHABLE { return false; }
+    if o == OP_CATCHPAD { vt_not_ported("isGuaranteedToTransferExecutionToSuccessor of catchpad (EH personality)"); }
+    return !inst_may_throw(i) && inst_will_return(i);
 }
 
 fn match_op_with_op_eq_zero(a: i32, b: i32) -> bool {
@@ -961,7 +944,7 @@ recursive fn is_known_pow2(v: i32, or_zero: bool, depth0: i64) -> bool {
         return m_power2(v);
     }
     if or_zero && scalar_bits(v) == 1 { return true; }
-    vt_check_assumes(v);
+    if kb_cxt >= 0 && pow2_from_assume(v, or_zero) { return true; }
     if !is_inst(v) { return false; }
     if kb_cxt >= 0 && inst_iid(v) == IID_vscale { return func_has_fn_attr(inst_func(kb_cxt), AK_VScaleRange); }
     let o = iop(v);
@@ -1216,7 +1199,7 @@ recursive fn ikne(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
         }
     }
     // isKnownNonEqualFromContext: no DC; assumptions
-    if kb_cxt >= 0 { vt_check_assumes(v1); }
+    if kb_cxt >= 0 && nonequal_from_assume(v1, v2, depth) { return true; }
     return false;
 }
 
@@ -1933,7 +1916,7 @@ recursive fn compute_constant_range(v: i32, for_signed: bool, use_info: bool, de
             vt_not_ported("computeConstantRange of frexp exponents");
         }
     }
-    if kb_cxt >= 0 { vt_check_assumes(v); }
+    if kb_cxt >= 0 { cr = range_from_assumptions(v, cr, depth); }
     return cr;
 }
 fn range_md_to_cr(md: i32) -> CR {

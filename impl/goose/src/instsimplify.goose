@@ -32,6 +32,7 @@ import cfold;
 import fpclass;
 import local;
 import tli;
+import assume;
 
 let RECURSION_LIMIT = 3;
 
@@ -2210,7 +2211,11 @@ recursive fn simplify_icmp(p0: i64, l0: i32, r0: i32, q: SQ, mr: i64) -> i32 {
     v = simplify_icmp_using_monotonic(pred_swapped(p), r, l, q);
     if v >= 0 { return v; }
     // simplifyICmpWithDominatingAssume
-    if q.cxt >= 0 && vt_fn_has_assumes(inst_func(q.cxt)) { is_not_ported("simplifyICmpWithDominatingAssume"); }
+    if q.cxt >= 0 {
+        kb_cxt = q.cxt;
+        let da = icmp_from_dominating_assume(cp(p, ss), l, r);
+        if da >= 0 { return c_bool_ty(ity, da == 1); }
+    }
     let imp = implied_by_dom_condition_cp(cp(p, ss), l, r, q.cxt);
     if imp >= 0 { return c_bool_ty(ity, imp == 1); }
     if ty_kind(vals[l].ty) == TK_PTR {
@@ -4319,6 +4324,7 @@ fn instsimplify_run(fv: i32) -> u32 {
     local_have_tli = true;
     dt_get(fv, DT_DOM);
     vt_invalidate_assumes();
+    ac_invalidate();
     var changed = false;
     // ToSimplify / Next: scratch sets VS_PASS0 / VS_PASS1 (swapped by index)
     var cur_set = VS_PASS0;
@@ -4349,6 +4355,7 @@ fn instsimplify_run(fv: i32) -> u32 {
                             if vs_add(next_set, us) { next_count++; }
                             u = uses[u].next;
                         }
+                        ac_rauw(i, v);
                         rauw(i, v);
                         changed = true;
                         if is_instruction_trivially_dead(i) { dead.push(i); }

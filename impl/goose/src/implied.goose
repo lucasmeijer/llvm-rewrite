@@ -7,6 +7,11 @@ import ir;
 import irutil;
 import instinfo;
 import gen_iids;
+import pm;
+import crange;
+import vt;
+import knownbits;
+import assume;
 
 let P_EQ = 32;
 let P_NE = 33;
@@ -147,7 +152,24 @@ fn implied_cond_operands(p: i64, al: i32, ar: i32, bl: i32, br: i32) -> i64 {
     return -1;
 }
 
-fn is_imm_constant(v: i32) -> bool { is_constant(v) && vals[v].kind != VK_CEXPR && !is_global(v) }
+fn is_imm_constant(v: i32) -> bool { m_imm_constant(v) }
+
+// isImpliedCondCommonOperandWithCR
+fn implied_common_operand_with_cr(lp0: i64, lcr: CR, rp0: i64, rcr: CR) -> i64 {
+    fn cr_implies(c: CR, p: i64, rcr: CR) -> i64 {
+        if cr_icmp(p, c, rcr) { return 1; }
+        if cr_icmp(pred_inverse(p), c, rcr) { return 0; }
+        return -1;
+    }
+    let r = cr_implies(cr_allowed_icmp_cp(cp_pred(lp0), cp_ss(lp0), lcr), cp_pred(rp0), rcr);
+    if r >= 0 { return r; }
+    if cp_ss(lp0) != cp_ss(rp0) {
+        let lp = if cp_ss(lp0) { pred_flipped_signedness(cp_pred(lp0)) } else { cp_pred(lp0) };
+        let rp = if cp_ss(rp0) { pred_flipped_signedness(cp_pred(rp0)) } else { cp_pred(rp0) };
+        return cr_implies(cr_allowed_icmp(lp, lcr), rp, rcr);
+    }
+    return -1;
+}
 
 // isImpliedCondICmps
 fn implied_cond_icmps(lp0: i64, l00: i32, l10: i32, rp0: i64, r00: i32, r10: i32, lhs_true: bool) -> i64 {
@@ -166,8 +188,15 @@ fn implied_cond_icmps(lp0: i64, l00: i32, l10: i32, rp0: i64, r00: i32, r10: i32
             let u = r0; r0 = r1; r1 = u; rp = cp(pred_swapped(cp_pred(rp)), cp_ss(rp));
         }
     }
-    if l0 == r0 && (apint_of(l1) || apint_of(r1)) {
-        fatal("isImpliedCondition: the constant-range case (computeConstantRange) is not ported yet");
+    if l0 == r0 && (m_apint(l1) >= 0 || m_apint(r1) >= 0) {
+        let save = kb_cxt;
+        kb_cxt = -1;
+        let lcr = compute_constant_range(l1, pred_is_signed(cp_pred(lp)), true, 5);
+        let rcr = compute_constant_range(r1, pred_is_signed(cp_pred(rp)), true, 5);
+        kb_cxt = save;
+        let res = implied_common_operand_with_cr(lp, lcr, rp, rcr);
+        if res >= 0 { return res; }
+        if m_apint(l1) >= 0 && m_apint(r1) >= 0 { return -1; }
     }
     if l0 == r0 && l1 == r1 { return implied_by_matching_cmp(lp, rp); }
     var slp = cp_pred(lp);

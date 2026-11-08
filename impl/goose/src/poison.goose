@@ -14,6 +14,7 @@ import knownbits;
 import pm;
 import vt;
 import constfold;
+import assume;
 
 let UPK_POISON = 1;
 let UPK_UNDEF = 2;
@@ -321,8 +322,7 @@ recursive fn guaranteed_not_undef_or_poison(v: i32, cxt: i32, depth: i64, kind: 
         }
     }
     // getKnowledgeValidInContext(V, {NoUndef}, AC, CtxI, DT): assume operand bundles
-    let fv = inst_func(cxt);
-    if vt_fn_has_assumes(fv) { vt_not_ported("assume knowledge (noundef bundles)"); }
+    if noundef_from_assume(v, cxt) { return true; }
     return false;
 }
 
