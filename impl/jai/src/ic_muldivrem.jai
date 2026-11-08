@@ -171,6 +171,7 @@ ic_try_get_log2 :: (v: Value_Id, assume_non_zero: bool) -> Value_Id {
 
 // ---------------------------------------------------------------- visitMul
 
+ic_checked_int_c1: APInt;   // the capture of visitMul's UDivCheck / SDivCheck lambdas
 ic_visit_mul :: (i: Value_Id) -> Value_Id {
     op0 := op(i, 0); op1 := op(i, 1);
     v := simplify_mul_inst(op0, op1, has_nsw(i), has_nuw(i), ic_q(i));
@@ -322,14 +323,12 @@ ic_visit_mul :: (i: Value_Id) -> Value_Id {
     if has_one_use(op0) {
         okc, c1 := pm_apint(op1);
         if okc && is_binary_operator(op0) && is_exact(op0) && (inst_op(op0) == .UDIV || inst_op(op0) == .SDIV) {
-            okd, dc := pm_apint(op(op0, 1));
-            if okd {
-                pass := false;
-                if inst_op(op0) == .UDIV pass = ap_is_zero(ap_urem(dc, c1));
-                else {
-                    q, rm := ap_sdivrem(dc, c1);
-                    pass = ap_is_zero(rm) && !ap_is_all_ones(q);
-                }
+            // m_CheckedInt(UDivCheck / SDivCheck): every (non-poison) element of the divisor; C1 is the lambdas' capture
+            udiv_check :: (c: APInt) -> bool { return ap_is_zero(ap_urem(c, ic_checked_int_c1)); }
+            sdiv_check :: (c: APInt) -> bool { q, rm := ap_sdivrem(c, ic_checked_int_c1); return ap_is_zero(rm) && !ap_is_all_ones(q); }
+            ic_checked_int_c1 = c1;
+            pass := ifx inst_op(op0) == .UDIV then pm_int_pred(op(op0, 1), udiv_check) else pm_int_pred(op(op0, 1), sdiv_check);
+            {
                 if pass {
                     bopc := inst_op(op0);
                     return create_binop_flags(bopc, op(op0, 0), icb_binop(bopc, op(op0, 1), op1), F_EXACT);
