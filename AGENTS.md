@@ -42,6 +42,9 @@ oracle cache is `/persistent/llvm-rewrite/oracle-cache` (safe to delete; it refi
    - `./harness/run check --impl <lang> --update`: the full ratchet must pass, and newly passing tests get recorded
      in `impl/<lang>/passing.txt`.
    - Update `knowledge/` and `NOTES.md` with what you learned that someone will need later.
+   - Keep `impl/<lang>/port-progress.txt` honest: for every LLVM `.cpp` your file headers name but you ported only
+     partly, add `lib/<path>.cpp <fraction>` (0.0–1.0, your best estimate of the share of that file's code ported).
+     `scripts/port-progress.py` uses it to report the share of LLVM pass code ported.
    - For a pass unit, run `./harness/run perf --impl <lang>` on the benchmarks that time your pass (report only).
      Note a scaling exponent well above LLVM's, or a large slowdown, in `NOTES.md`.
    - If anything got in your way, write a challenge report (see below).
