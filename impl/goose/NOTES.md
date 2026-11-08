@@ -46,9 +46,14 @@
   `gvn,instcombine,simplifycfg`). Both give output identical to LLVM's on all tests/e2e O0 and pipeline inputs
   and on the four tests/perf/compile programs, and run 1.3-2.5x faster than LLVM there; linear on
   scaling/allocas (k 1.04 mem2reg, 1.07 sroa; LLVM 1.19, 1.25).
-- L1.analysis.domtree and L1.analysis.demanded-bits complete. L1.analysis.loops 24/28: LoopInfo and CycleInfo
-  complete, the 4 left are `print<loopnest>` (a loop pass: needs the loop pass manager, LoopSimplify+LCSSA
-  canonicalization in the adaptor, and ScalarEvolution for `Loop::getBounds`). L1.loop-canonical: loop-simplify and
+- L1.analysis.scev 501/505 (all 266 roundtrip; 243/247 `print<scalar-evolution>` lines of the corpus): the 4 left
+  run `print<iv-users>` (2), `indvars` and `-aa-pipeline=scev-aa`. `print<scalar-evolution>` also matches LLVM on
+  all 723 tests/e2e and tests/function inputs, the four tests/perf/compile programs and 6913 of the 6989 imported
+  test files (the rest stop loudly, mostly in computeKnownBits gaps, or differ only in LLVM's debug-info and
+  `-mattr` warnings on stderr). Speed: like LLVM's or faster on tests/perf/scaling (both are superlinear on
+  `loops-many`: n500 0.16 s / 0.11 s, n2000 5.1 s / 5.0 s, LLVM vs Goose); no `@perf` line times it.
+- L1.analysis.loops complete (print<loopnest> through the loop pass manager).
+- L1.analysis.domtree and L1.analysis.demanded-bits complete. L1.loop-canonical: loop-simplify and
   lcssa pass 31 of their 58 `::opt` tests; every other one stops loudly (other passes in the pipeline: licm,
   loop-mssa, instcombine, debugify, verify<scalar-evolution>, -keep-loops; and LoopSimplify's exit merging,
   which needs SimplifyCFG's foldBranchToCommonDest). loop-simplify, lcssa, break-crit-edges and adce give
@@ -88,6 +93,14 @@
 | `src/domtree.goose`, `src/dtu.goose` | Dominator trees with incremental updates; DomTreeUpdater |
 | `src/loopinfo.goose`, `src/cycleinfo.goose` | LoopInfo (+ update API, loop metadata), CycleInfo |
 | `src/breakcrit.goose`, `src/loopsimplify.goose`, `src/lcssa.goose` | SplitCriticalEdge/break-crit-edges, SplitBlockPredecessors + LoopSimplify, LCSSA |
+| `src/lpm.goose` | Loop pass manager worklist (SmallPriorityWorklist) and LPMUpdater; the adaptor runs in passmgr.goose |
+| `src/scev.goose` | ScalarEvolution nodes, uniquing, folding constructors (add/mul/udiv/addrec/min/max/casts), complexity order, printing |
+| `src/scev_create.goose` | getSCEV/createSCEV, AddRecs from PHIs, selects, GEPs, value maps, forgetMemoizedResults, rewriters |
+| `src/scev_range.goose` | Constant multiples, ranges, isKnown* sign queries |
+| `src/scev_btc.goose`, `src/scev_lt.goose` | Backedge-taken counts and exit limits; howManyLessThans/GreaterThans, SCEV predicates |
+| `src/scev_eval.goose` | evaluateAtIteration, constant evolution, getSCEVAtScope, howFarToZero, quadratic solvers, dispositions |
+| `src/scev_pred.goose`, `src/scev_guards.goose` | isKnownPredicate / isImpliedCond families; LoopGuards |
+| `src/scev_print.goose`, `src/loopnest.goose` | print<scalar-evolution>; print<loopnest> (LoopNest, Loop::getBounds, isInductionPHI) |
 | `src/analyses.goose` | Analysis ids, preserved sets |
 | `src/memloc.goose` | MemoryLocation/LocationSize, ModRef, MemoryEffects, CaptureInfo, CallBase operand attribute queries, identified objects, stripPointerCastsForAliasAnalysis |
 | `src/aa.goose` | AAResults aggregation, AAQueryInfo (cache, assumptions, capture analyses), BasicAA, getBaseObjectSize |
@@ -207,8 +220,8 @@
   user's operand list grows (`grow_ops`): don't hold use ids across adding operands to their user.
 - `inst_clone` (irutil.goose) is Instruction::clone: operands, flags, attributes, metadata; no name, no debug
   records, not inserted.
-- Not ported: the loop pass manager (`loop(...)`, `loop-mssa(...)`), so loop passes and `print<loopnest>` fail as
-  "not implemented yet".
+- The loop pass manager is in passmgr.goose/lpm.goose (DESIGN.md §9); `loop-mssa` fails loudly until MemorySSA
+  is wired into it, loop-nest passes are not ported.
 - `print<demanded-bits>` prints in instruction order; LLVM's order is a DenseMap's, the test compares sorted lines.
 - L1.dce can't be COMPLETE on its own: its exit selector includes tests whose pipelines need simplifycfg, sroa, gvn,
   licm, instcombine, debugify, redundant-dbg-inst-elim, and `--preserve-ll-uselistorder`, plus debug-info parsing.
@@ -334,3 +347,22 @@
 - DataLayout now caches StructLayout per type (dl_struct_layout; cleared by dl_reset/dl_set_spec), and attribute
   sets carry a bitmap of their enum kinds (aset_find of an absent kind is O(1)); both were the top of the aa-eval
   profile.
+
+## ScalarEvolution (scev.goose, scev_create, scev_range, scev_btc, scev_pred, scev_eval, scev_lt, scev_guards, scev_print)
+
+- Layout and conventions: DESIGN.md §8.7. Every function in these files is `recursive fn` (one cycle, like LLVM's).
+  A function with a growable local can't be in the cycle: use the mark-based scratch stacks.
+- Goose trap: `ss[b] = f(...)` where `f` may shrink `ss` is rejected; bind the call result first.
+- Goose trap: `var x = -1;` is an i64; SCEV ids are i32 (`var x: i32 = -1;`).
+- Order traps found by the port (all verified against opt): `AddRec->getNoWrapFlags(ComputeFlags(...))` evaluates
+  ComputeFlags first (it adds flags to the AddRec through its range computation); loop guards erase an entry
+  before re-rewriting it; nested sequential-min/max deduplicators have their own SeenOps; computeKnownBits without
+  a context uses the instruction itself (`safeCxtI`); getConstantMultiple allows ephemeral assumptions.
+- Fails loudly: createAddRecFromPHIWithCasts (casted-PHI predicated rewrites), sizeof of aggregates with scalable
+  vectors, scalable allocas; ValueTracking gaps it relies on (vectors > 64 lanes, pext/pdep, ...).
+- Not ported: SCEVExpander, PredicatedScalarEvolution, `verify<scalar-evolution>` (accepted, prints nothing:
+  LLVM only prints on a mismatch), IVUsers, SCEVAA, getLoopInvariantPredicate & co (transform helpers).
+- The function names use the prefix `sc_`, which SCCP also uses for a few helpers (`sc_alist_set`, ...): check for
+  a clash before adding one.
+- `tools`: /tmp scripts were used to sweep `print<scalar-evolution>` over the corpus in parallel (compare stdout+
+  stderr with LLVM's for every file); worth turning into a harness command.

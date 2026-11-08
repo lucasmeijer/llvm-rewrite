@@ -345,6 +345,36 @@ Ports of `MemoryLocation.cpp`, `AliasAnalysis.cpp`, `BasicAliasAnalysis.cpp`, `T
   a block (printed after its label) or an instruction (printed before it), `pr_annot_on` while `print_function`
   runs (printer.goose); the annotation texts are computed first in printing order.
 
+### 8.7 ScalarEvolution (scev*.goose)
+One ScalarEvolution instance exists at a time, for the function `sc_fv`: `scev_get(fv)` builds it (empty, as
+LLVM's constructor does), `scev_invalidate(fv)` drops it, and a different function resets every table.
+- **Nodes**: `scevs: Scev[>..]` (kind in `SCEVTypes` order, flags, expression size, type, operand run in
+  `sc_ops`, value for constants/unknowns, loop for AddRecs). Uniquing is a chained hash table keyed exactly like
+  LLVM's FoldingSetNodeIDs (kind, operands, value, loop; the type only for vscale/trunc/zext/sext/ptrtoaddr). Id 0
+  is SCEVCouldNotCompute. SCEVUse's use-flags are never set in LLVM 23, so an operand is a plain id.
+- **Operand lists**: the builders form one big recursive cycle, and Goose forbids growable locals across a
+  recursive call, so every `SmallVector<SCEVUse>` is a run on the scratch stack `ss`: a builder that takes
+  `SmallVectorImpl &Ops` (`sc_add_n`, `sc_mul_n`, `sc_addrec_n`, `sc_minmax_n`, `sc_seq_minmax_n`, ...) gets the
+  base `b` of a run reaching the top of `ss`, owns it and truncates `ss` to `b` before returning. Other
+  mark-based scratch stacks: `sc_newops` (worklists, LIOps, AddRecOps, DeadIndices), `sc_cops`/`sc_newscales`
+  (CollectAddOperandsWithScales), `sc_seen` (visited sets: each traversal searches only from its own mark),
+  `sc_vops`/`sc_cstack` (createSCEVIter), `sc_tmp` (exiting blocks, assumptions). Never index two of them in
+  parallel unless only that pair is pushed in between.
+- **Caches**: per-SCEV side tables (`sc_side`: ranges, has-AddRec; `sc_cm`: constant multiples; `sc_side2`:
+  generation and the *WrapViaInductionTried bits) and hash maps (`HMap`, u64 -> i64) for ValueExprMap, FoldCache,
+  loop/block dispositions, ValuesAtScopes, BackedgeTakenCounts. Erasing every entry of a forgotten SCEV is a
+  generation bump (`sc_side2[s].gen`): dispositions, ValuesAtScopes and FoldCache entries carry the generation of
+  the SCEV they were computed for (and of their result), stale ones are misses. SCEVUsers / ExprValueMap /
+  BECountUsers / LoopUsers are linked lists in `sc_lpool`.
+- **APInt lifetime**: wide APInts live in a pool reset after every pass, but SCEV caches outlive passes (loop passes
+  preserve SCEV), so cached ranges and constant multiples are stored as IR ConstantInts.
+- **Rewriters**: one `SCEVRewriteVisitor` (`sc_rw_visit`, RewriteResults keyed by a per-instance serial) with a
+  `RW` record whose kind selects the overrides (Init, PostInc, BackedgeConditionFolder, Shift, LoopGuards,
+  PredicateRewriter).
+- **Predicates**: compare and wrap predicates uniqued in `sc_preds`; ExitLimits and ExitNotTakenInfos keep runs
+  of predicate ids in `sc_predl`.
+- **LoopGuards**: an id into `sc_guards`; its RewriteMap and NotEqual set are hash maps keyed by the id.
+
 ## 9. The pass manager and how to add a pass (passmgr.goose)
 
 `-passes=` text is parsed like `PassBuilder::parsePipelineText` into a tree of `PNode`s (module / function
@@ -368,6 +398,18 @@ To add a function pass `foo`:
 5. Printers write to `errs(...)` (flags.goose); `errs_operand`/`errs_inst` print values exactly as the IR printer
    does (they number the function with the printer's SlotTracker).
 Module passes: an `m:` row and a case in `run_module_node`.
+
+**Loop passes** (lpm.goose, passmgr.goose): `loop(...)`/`loop-mssa(...)` and a loop pass in a function pipeline
+become a `PK_LOOP` node (FunctionToLoopPassAdaptor) whose `pass` field links its two canonicalization nodes
+(loop-simplify, lcssa: run like a function pass manager, counted by bisect); a nested `loop(...)` is a `PK_LPM`
+node. `run_loop_adaptor` runs the canonicalization, gets LoopInfo (no loops: done), builds the
+LoopStandardAnalysisResults (DT, SCEV, TLI; MSSA fails loudly for now), fills the worklist with
+`appendLoopsToWorklist(LI)` and pops loops LIFO; each loop runs the children (`run_loop_list`, stopping when
+`lpm_skip`). The adaptor's preserved set is the intersection of every pass's plus DT, LoopInfo and SCEV. A loop pass
+`foo` is an `l:` row, a case in `run_loop_pass(n, l, fv)`, and uses the LPMUpdater API in lpm.goose
+(`lpm_cur`, `lpm_mark_loop_as_deleted`, `lpm_add_child_loops`, `lpm_add_sibling_loops`, `lpm_revisit_current_loop`).
+Loop-nest passes are not ported. Bisect prints the pipeline name of the pass (`loop-simplify`, not the class name)
+and `[module]`, `<function>`, `loop %<header> in function <f>` as the IR unit.
 
 ## 10. Arbitrary-width integers (apint.goose)
 
