@@ -6,7 +6,7 @@ lib/Transforms/InstCombine/InstructionCombining.cpp 0.93
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
 lib/Analysis/MemoryBuiltins.cpp 0.9
 lib/Analysis/Loads.cpp 0.55
-lib/Transforms/Utils/Local.cpp 0.3
+lib/Transforms/Utils/Local.cpp 0.45
 lib/Analysis/TargetLibraryInfo.cpp 0.85
 lib/Transforms/Utils/SimplifyLibCalls.cpp 0.97
 lib/TargetParser/Triple.cpp 0.25
@@ -22,8 +22,8 @@ lib/AsmParser/LLParser.cpp 0.7  # manual: own parser structure; all IR construct
 lib/Analysis/ValueTracking.cpp 0.9
 lib/Transforms/InstCombine/InstCombineCompares.cpp 0.95
 lib/IR/AutoUpgrade.cpp 0.3
-lib/Target/X86/X86TargetTransformInfo.cpp 0.7
-lib/Transforms/Utils/SimplifyCFG.cpp 0.95
+lib/Target/X86/X86TargetTransformInfo.cpp 0.8
+lib/Transforms/Utils/SimplifyCFG.cpp 0.97
 lib/Analysis/InstructionSimplify.cpp 0.95
 lib/IR/AsmWriter.cpp 0.75  # manual: own printer structure; no summary-index printing or use-list-order prediction (~17%) (heuristic 0.40)
 lib/Support/APFloat.cpp 0.4
@@ -47,9 +47,9 @@ lib/IR/ConstantRange.cpp 0.8
 lib/IR/Metadata.cpp 0.5
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.95
-lib/Analysis/TargetTransformInfo.cpp 0.2
+lib/Analysis/TargetTransformInfo.cpp 0.3
 lib/Transforms/Utils/BasicBlockUtils.cpp 0.65
-lib/Analysis/VectorUtils.cpp 0.4
+lib/Analysis/VectorUtils.cpp 0.45
 lib/IR/Intrinsics.cpp 0.75
 lib/IR/Instruction.cpp 0.7
 lib/IR/IRBuilder.cpp 0.25
@@ -78,7 +78,7 @@ lib/Transforms/Utils/SSAUpdater.cpp 0.75
 lib/Analysis/MemoryLocation.cpp 1
 lib/Transforms/Utils/LCSSA.cpp 0.7
 lib/Transforms/Scalar/SimplifyCFGPass.cpp 1
-lib/IR/ProfDataUtils.cpp 0.5
+lib/IR/ProfDataUtils.cpp 0.6
 lib/Analysis/LoopNestAnalysis.cpp 0.75
 lib/Analysis/CaptureTracking.cpp 0.95
 lib/Analysis/CFG.cpp 0.65
@@ -94,7 +94,7 @@ lib/Analysis/CodeMetrics.cpp 0.7
 lib/IR/TypeFinder.cpp 0.8
 lib/Transforms/Scalar/BDCE.cpp 0.9
 lib/Analysis/ScopedNoAliasAA.cpp 0.85
-lib/Analysis/CostModel.cpp 0.55
+lib/Analysis/CostModel.cpp 0.9
 lib/Analysis/ScalarEvolutionAliasAnalysis.cpp 0.9
 lib/Transforms/Scalar/InstSimplifyPass.cpp 1
 lib/Transforms/Scalar/DCE.cpp 0.65
@@ -117,3 +117,7 @@ lib/Analysis/AliasSetTracker.cpp 0.85  # no printers
 lib/Analysis/InstructionPrecedenceTracking.cpp 0.9
 lib/Transforms/Utils/LoopUtils.cpp 0.1  # appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint
 lib/IR/EHPersonalities.cpp 0.8  # classifyEHPersonality, colorEHFunclets
+lib/CodeGen/TargetLoweringBase.cpp 0.3   # jai_simplifycfg: initActions, computeRegisterProperties, getTypeConversion, isBeneficialToExpandPowI, getBitWidthForCttzElements
+lib/Target/X86/X86ISelLowering.cpp 0.03   # jai_simplifycfg: the X86TargetLowering constructor's operation actions (generated), getPreferredVectorAction, isLegalAddressingMode, isCheapToSpeculateCt*, isNoopAddrSpaceCast
+lib/IR/Attributes.cpp 0.5
+lib/IR/MemoryModelRelaxationAnnotations.cpp 0.5

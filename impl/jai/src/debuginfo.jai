@@ -703,8 +703,9 @@ upgrade_debug_info :: () {
             break;
         }
     }
-    if version == 3 && !debug_info_broken() return;
-    strip_debug_info();
+    if version == 3 { if debug_info_broken() strip_debug_info(); return; }
+    // DiagnosticInfoIgnoringInvalidDebugMetadata when StripDebugInfo changed something
+    if strip_debug_info() print("warning: ignoring debug info with an invalid version (%) in %\n", version, P.lx.file, to_standard_error = true);
 }
 
 // The part of the Verifier's debug-info checks (Verifier.cpp, BrokenDebugInfo) that is ported: inlinable calls
@@ -722,6 +723,7 @@ debug_info_broken :: () -> bool {
                     if vkind(c) == .FUNCTION && glob(c).value_type == inst(i).ty2 && !gv_is_interposable(c) &&
                        !is_declaration(c) && get_metadata(c, 0) != NONE && get_metadata(i, 0) == NONE {
                         print("inlinable function call in a function with debug info must have a !dbg location\n", to_standard_error = true);
+                        print("%\n", inst_to_string(i), to_standard_error = true);   // CheckFailed writes the call
                         print("warning: ignoring invalid debug info in %\n", P.lx.file, to_standard_error = true);
                         return true;
                     }
@@ -735,11 +737,12 @@ debug_info_broken :: () -> bool {
 }
 
 // llvm::StripDebugInfo(Module &)
-strip_debug_info :: () {
+strip_debug_info :: () -> bool {
+    changed := false;
     i := 0;
     while i < ir.named_md.count {
         n := ir.named_md[i].name;
-        if begins_with(n, "llvm.dbg.") || n == "llvm.gcov" { array_ordered_remove_by_index(*ir.named_md, i); continue; }
+        if begins_with(n, "llvm.dbg.") || n == "llvm.gcov" { array_ordered_remove_by_index(*ir.named_md, i); changed = true; continue; }
         i += 1;
     }
     dbg := cast(u32) 0;
@@ -748,17 +751,19 @@ strip_debug_info :: () {
     assign := md_kind_id("DIAssignID");
     loop_map: Table(Md_Id, Md_Id); loop_map.allocator = temp;
     for f: ir.m_functions {
+        if get_metadata(f, dbg) != NONE changed = true;
         set_metadata(f, dbg, NONE);
         b := glob(f).first_block;
         while b != NONE {
             x := block(b).first;
             while x != NONE {
+                if get_metadata(x, dbg) != NONE || inst(x).records != 0 || get_metadata(x, assign) != NONE changed = true;
                 set_metadata(x, dbg, NONE);
                 lid := get_metadata(x, loop_kind);
                 if lid != NONE {
                     found, nl := table_find(*loop_map, lid);
                     if !found { nl = strip_debug_loc_from_loop_id(lid); table_add(*loop_map, lid, nl); }
-                    if nl != lid set_metadata(x, loop_kind, nl);
+                    if nl != lid { set_metadata(x, loop_kind, nl); changed = true; }
                 }
                 set_metadata(x, heap, NONE);
                 set_metadata(x, assign, NONE);
@@ -768,7 +773,9 @@ strip_debug_info :: () {
             b = block(b).next;
         }
     }
-    for g: ir.m_globals set_metadata(g, dbg, NONE);
+    for g: ir.m_globals { if get_metadata(g, dbg) != NONE changed = true; set_metadata(g, dbg, NONE); }
+    if changed print_state.dirty = true;   // the slot tracker numbers metadata afresh
+    return changed;
 }
 
 // stripDebugLocFromLoopID: drop DILocation operands (and nodes that only contain them) from a loop ID

@@ -4,6 +4,8 @@
 // - DomTreeUpdater with the Eager strategy: llvm/lib/Analysis/DomTreeUpdater.cpp (Dtu, dtu_*)
 // - DeleteDeadBlock(s) / detachDeadBlocks / emptyAndDetachBlock: llvm/lib/Transforms/Utils/BasicBlockUtils.cpp
 // - BasicBlock::eraseFromParent of a block whose address is taken (~BasicBlock): llvm/lib/IR/BasicBlock.cpp
+// - AttributeSet/AttributeList::intersectWith: llvm/lib/IR/Attributes.cpp (attr_set_intersect, attr_list_intersect)
+// - MMRAMetadata (parse, ==, combine): llvm/lib/IR/MemoryModelRelaxationAnnotations.cpp (mmra_*)
 
 // ---------------------------------------------------------------- ProfDataUtils.cpp
 
