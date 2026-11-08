@@ -8807,6 +8807,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landi
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-compatible-invokes-of-landingpad.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cond-stores-cost.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/merge-cond-stores-cost.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/X86/pr39187-g.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/pr39187-g.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/remove-debug-2.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/remove-debug-2.ll::roundtrip
@@ -8851,6 +8852,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/avoid-complex-phi.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/avoid-complex-phi.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/basictest.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/basictest.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/bbi-23595.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/bbi-23595.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/branch-cond-dont-merge.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/branch-cond-dont-merge.ll::roundtrip
@@ -8949,7 +8951,9 @@ tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip-pseudoprobe.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip-pseudoprobe.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue-inlined.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue-inlined.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-from-addresstaken-block.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-from-addresstaken-block.ll::roundtrip
