@@ -320,8 +320,7 @@ fn fp_to_integer_exact(kind: i64, lo: u64, hi: u64, w: i64, signed: bool) -> boo
     let ilo, ihi = fp_round_to_integral(kind, lo, hi, FRM_ZERO);
     if ilo != lo || ihi != hi { return false, ap_zero(w); }
     var mag: u32[>..<] = [];
-    let ok = fp_trunc_magnitude(kind, lo, hi, mag);
-    if !ok { return false, ap_zero(w); }
+    let isneg = fp_trunc_magnitude(kind, lo, hi, mag);
     // the magnitude as an APInt of width w (+1 to detect overflow)
     var ws: u64[>..] = [];
     var k: i64 = 0;

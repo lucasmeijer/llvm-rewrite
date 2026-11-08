@@ -30,6 +30,7 @@ import aaeval;
 import memoryssa;
 import apint;
 import sccp;
+import build_libcalls;
 import globalsaa;
 import lpm;
 import tli;
@@ -52,6 +53,7 @@ let P_REQUIRE_GLOBALS_AA = 5;
 let P_INVALIDATE_GLOBALS_AA = 6;
 let P_DEBUGIFY = 7;
 let P_CHECK_DEBUGIFY = 8;
+let P_INFERATTRS = 9;
 // function passes
 let P_DCE = 100;
 let P_ADCE = 101;
@@ -98,6 +100,7 @@ let PASS_TABLE: const u8[:][] = [
     "m:no-op-module:2:0",
     "m:debugify:7:0",
     "m:check-debugify:8:0",
+    "m:inferattrs:9:0",
     "f:dce:100:0",
     "f:adce:101:0",
     "f:bdce:102:0",
@@ -146,6 +149,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_IPSCCP => "IPSCCPPass",
         P_DEBUGIFY => "NewPMDebugifyPass",
         P_CHECK_DEBUGIFY => "NewPMCheckDebugifyPass",
+        P_INFERATTRS => "InferFunctionAttrsPass",
         P_NOOP_MODULE => "NoOpModulePass",
         P_NOOP_FUNCTION => "NoOpFunctionPass",
         _ => "Pass",
@@ -851,6 +855,18 @@ recursive fn run_module_node(n: i32, m: i32) {
                 if !func_is_decl(f) { invalidate_function(f, (1 << A_DOMTREE) | (1 << A_POSTDOMTREE)); }
                 f = globs[glob_of(f)].next;
             }
+        }
+        ap_pool_reset();
+        return;
+    }
+    if p == P_INFERATTRS {
+        if inferattrs_run(m) {
+            var f = modules[m].first_func;
+            while f >= 0 {
+                if !func_is_decl(f) { invalidate_function(f, PA_NONE); }
+                f = globs[glob_of(f)].next;
+            }
+            gm_invalidate();
         }
         ap_pool_reset();
         return;

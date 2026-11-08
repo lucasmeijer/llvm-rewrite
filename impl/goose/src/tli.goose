@@ -132,9 +132,39 @@ fn tli_match_type(c: u8, t: i32) -> bool {
 // they are reported as not matching).
 fn tli_valid_proto(fty: i32, lf: i32) -> bool {
     let sig = TLI_SIGS[lf];
-    if sig[0] == '?' { return false; }
-    if starts_with(TLI_NAMES[lf], "__size_returning_new") { return false; }
     let np = ty_fn_nparams(fty);
+    let nm = TLI_NAMES[lf];
+    if nm == "cabs" || nm == "cabsf" || nm == "cabsl" {
+        let rt = ty_fn_ret(fty);
+        if !ty_is_fp(rt) || np == 0 { return false; }
+        let pt = ty_fn_param(fty, 0);
+        if np == 1 { return ty_is_array(pt) && ty_count(pt) == 2 && ty_elem(pt) == rt; }
+        if np == 2 { return pt == rt && ty_fn_param(fty, 1) == rt; }
+        return false;
+    }
+    if nm == "__sincospi_stret" || nm == "__sincospif_stret" {
+        if np != 1 { return false; }
+        let rt = ty_fn_ret(fty);
+        let pt = ty_fn_param(fty, 0);
+        if ty_is_struct(rt) { return ty_count(rt) == 2 && ty_field(rt, 0) == pt && ty_field(rt, 1) == pt; }
+        if ty_kind(rt) == TK_FVEC { return ty_count(rt) == 2 && ty_elem(rt) == pt; }
+        return false;
+    }
+    if starts_with(nm, "__size_returning_new") {
+        let sb = tli_sizet_bits();
+        fn isz(t: i32, b: i64) -> bool { ty_is_int(t) && ty_bits(t) == b }
+        if nm == "__size_returning_new" { if np != 1 || !isz(ty_fn_param(fty, 0), sb) { return false; } }
+        else if nm == "__size_returning_new_hot_cold" { if np != 2 || !isz(ty_fn_param(fty, 0), sb) || !isz(ty_fn_param(fty, 1), 8) { return false; } }
+        else if nm == "__size_returning_new_aligned" { if np != 2 || !isz(ty_fn_param(fty, 0), sb) || !isz(ty_fn_param(fty, 1), sb) { return false; } }
+        else if nm == "__size_returning_new_aligned_hot_cold" {
+            if np != 3 || !isz(ty_fn_param(fty, 0), sb) || !isz(ty_fn_param(fty, 1), sb) || !isz(ty_fn_param(fty, 2), 8) { return false; }
+        } else { return false; }
+        let rt = ty_fn_ret(fty);
+        // StructType::get({ptr, iSizeT}) (literal, not packed)
+        return ty_is_struct(rt) && types[rt].name < 0 && (types[rt].flags & TF_PACKED) == 0 && ty_count(rt) == 2 &&
+            ty_field(rt, 0) == ty_ptr(0) && isz(ty_field(rt, 1), sb);
+    }
+    if sig[0] == '?' { return false; }
     var idx: i64 = 0;
     var t: i32 = ty_fn_ret(fty);
     var last = t;

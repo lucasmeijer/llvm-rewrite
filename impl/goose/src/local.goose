@@ -8,6 +8,7 @@ import irutil;
 import calls;
 import instinfo;
 import tli;
+import build_libcalls;
 import gen_attrs;
 import gen_iids;
 import intrinsics;
@@ -64,7 +65,11 @@ fn call_arg_with_attr(iv: i32, kind: i64) -> i32 {
 // getFreedOperand
 fn get_freed_operand(iv: i32) -> i32 {
     let f = mb_called_function(iv);
-    if f >= 0 && local_have_tli && tli_is_free_fn(f) { return cb_arg(iv, 0); }
+    // TLI->getLibFunc && TLI->has && isLibFreeFunction (FreeFnData, else the callee's allockind("free"))
+    if f >= 0 && local_have_tli {
+        let lf = tli_lib_func_available(f);
+        if lf >= 0 && blc_is_lib_free_function(f, lf) { return cb_arg(iv, 0); }
+    }
     if (call_alloc_kind(iv) & AFK_FREE) != 0 { return call_arg_with_attr(iv, AK_AllocatedPointer); }
     return -1;
 }

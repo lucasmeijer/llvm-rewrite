@@ -50,6 +50,7 @@ import memorybuiltins;
 import ic_combining;
 import ic_vectorops;
 import ic_visit_misc;
+import simplify_libcalls;
 
 // ---------------------------------------------------------------------------------------------
 // Builder helpers with an FMFSource (IRBuilder Create*Intrinsic(..., FMFSource), CreateFNegFMF, ...)
@@ -3656,17 +3657,6 @@ fn ld_bit_or_pointer_cast_opcode(st: i32, dt: i32) -> i64 {
     return OP_BITCAST;
 }
 
-// LibCallSimplifier::optimizeCall(CI, Builder) (simplify_libcalls.goose): -1 = nullptr
-fn lcs_optimize_call(ci: i32) -> i32 {
-    let f = called_function(ci);
-    if ic_maybe_libcall(f) { ic_not_ported("LibCallSimplifier (tryOptimizeCall)"); }
-    let id = call_iid(ci);
-    if id == IID_pow || id == IID_exp2 || id == IID_log || id == IID_log2 || id == IID_log10 || id == IID_sqrt ||
-       id == IID_memset || id == IID_memcpy || id == IID_memmove || id == IID_sin || id == IID_cos {
-        ic_not_ported("LibCallSimplifier (intrinsics)");
-    }
-    return -1;
-}
 
 // isModSet(AA->getModRefInfoMask(MI->getDest()))
 fn icx_mod_set_dest(mi: i32) -> bool {
