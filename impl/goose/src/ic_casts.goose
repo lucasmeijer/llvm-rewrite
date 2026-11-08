@@ -21,6 +21,7 @@ import ic_builder;
 import ic_common;
 import ic_demanded;
 import ic_shifts;
+import ic_calls;
 import apfloat;
 
 // InstCombinerImpl::isEliminableCastPair(CI1, CI2) (with the DataLayout cases of CastInst::isEliminableCastPair)
@@ -92,7 +93,16 @@ fn common_cast_transforms(ci: i32) -> i32 {
         }
     }
     if one_use(src) && is_inst_op(src, OP_SHUFFLEVECTOR) && is_poison(op(src, 1)) {
-        ic_not_ported("commonCastTransforms of a unary shuffle");
+        let x = op(src, 0);
+        let st = vals[x].ty;
+        if ty_kind(st) == TK_FVEC && ty_kind(ty) == TK_FVEC && ty_count(st) == ty_count(ty) &&
+           ty_count(st) * cc_prim_bits(ty_scalar(st)) == ty_count(ty) * cc_prim_bits(ty_scalar(ty)) {
+            let cx = icb_cast(iop(ci), x, ty, "");
+            var mask: i32[>..<] = [];
+            let ii = inst_of(src);
+            for k in insts[ii].naux { mask.push(ints[insts[ii].aux + k]); }
+            return ic_new_shuffle1(cx, mask);
+        }
     }
     return -1;
 }
@@ -219,12 +229,34 @@ recursive fn te_truncated_pred(v: i32, ty: i32, cx: i32) -> bool {
         for k in nops(v) { if !te_can_evaluate(op(v, k), ty, 0, cx) { return false; } }
         return true;
     }
-    if o == OP_FPTOUI || o == OP_FPTOSI { ic_not_ported("canEvaluateTruncated of fptoui/fptosi"); }
+    if o == OP_FPTOUI || o == OP_FPTOSI {
+        let k = types[ty_scalar(vals[op(v, 0)].ty)].kind as i64;
+        let maxexp = if k == TK_PPC_FP128 { 1023 } else { fp_fmt(k).bias };
+        let minbw = maxexp + 1 + (if o == OP_FPTOSI { 1 } else { 0 });
+        return ty_scalar_bits(ty) >= minbw;
+    }
     if o == OP_SHUFFLEVECTOR { return te_can_evaluate(op(v, 0), ty, 0, cx) && te_can_evaluate(op(v, 1), ty, 0, cx); }
     if o == OP_CALL {
         let id = inst_iid(v);
-        if id == IID_abs || is_minmax_iid(id) { ic_not_ported("canEvaluateTruncated of abs/min/max"); }
-        return false;
+        if id == IID_abs {
+            let a = op(v, 0);
+            if compute_max_significant_bits(a, cx) > ty_scalar_bits(ty) { return false; }
+            return te_can_evaluate(a, ty, 0, cx);
+        }
+        if !is_minmax_iid(id) { return false; }
+        let o0 = op(v, 0);
+        let o1 = op(v, 1);
+        let bw = ty_scalar_bits(ty);
+        if id == IID_smin || id == IID_smax {
+            if compute_max_significant_bits(o0, cx) > bw || compute_max_significant_bits(o1, cx) > bw { return false; }
+        } else {
+            let m = ap_bits_from(ty_scalar_bits(ot), bw);
+            kb_cxt = cx;
+            if !masked_value_is_zero(o0, m, 0) { return false; }
+            kb_cxt = cx;
+            if !masked_value_is_zero(o1, m, 0) { return false; }
+        }
+        return te_can_evaluate(o0, ty, 0, cx) && te_can_evaluate(o1, ty, 0, cx);
     }
     return false;
 }
@@ -371,7 +403,15 @@ recursive fn evaluate_in_different_type_impl(v: i32, ty: i32, signed: bool) -> i
             res = ic_new_intrinsic(id, [ty], [a, f]);
         } else { fatal("Unsupported call!"); }
     } else if o == OP_SHUFFLEVECTOR {
-        ic_not_ported("EvaluateInDifferentType of a shufflevector");
+        let st = ty_scalar(ty);
+        let vt0 = vals[op(v, 0)].ty;
+        let fty = ty_vector(st, ty_count(vt0), ty_kind(vt0) == TK_SVEC);
+        let a = evaluate_in_different_type_impl(op(v, 0), fty, signed);
+        let b = evaluate_in_different_type_impl(op(v, 1), fty, signed);
+        var mask: i32[>..<] = [];
+        let ii = inst_of(v);
+        for k in insts[ii].naux { mask.push(ints[insts[ii].aux + k]); }
+        res = ic_new_shuffle(a, b, mask);
     } else {
         fatal("Unreachable!");
     }
@@ -958,4 +998,17 @@ fn shrink_insert_elt(tr: i32) -> i32 {
     let ty = vals[tr].ty;
     let no = icb_cast(iop(tr), op(ie, 1), ty_scalar(ty), "");
     return create_inst(OP_INSERTELEMENT, ty, [c_poison(ty), no, op(ie, 2)]);
+}
+
+// Type::getPrimitiveSizeInBits of a vector element (pointers have none: 0)
+fn cc_prim_bits(t: i32) -> i64 {
+    if ty_is_int(t) { return ty_bits(t); }
+    let k = ty_kind(t);
+    if k == TK_HALF || k == TK_BFLOAT { return 16; }
+    if k == TK_FLOAT { return 32; }
+    if k == TK_DOUBLE { return 64; }
+    if k == TK_X86_FP80 { return 80; }
+    if k == TK_FP128 || k == TK_PPC_FP128 { return 128; }
+    if k == TK_BYTE { return ty_bits(t); }
+    return 0;
 }

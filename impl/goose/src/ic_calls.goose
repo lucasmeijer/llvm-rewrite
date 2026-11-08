@@ -1285,7 +1285,9 @@ fn visit_intrinsic_switch(ii: i32, iid: i32) -> i32 {
     let ci = ii;
     let rty = vals[ii].ty;
     if iid == IID_objectsize {
-        ic_not_ported("lowerObjectSizeCall in visitCallInst");
+        ic_aa_ensure();
+        let v = mb_lower_object_size_call(ii, false);
+        if v >= 0 { return ic_replace_inst_uses_with(ci, v); }
         return -1;
     }
     if iid == IID_abs {

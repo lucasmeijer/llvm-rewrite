@@ -33,6 +33,9 @@ import ic_calls;
 import ic_loadstorealloca;
 import ic_casts;
 import speculate;
+import apfloat;
+import fpu;
+import intrinsics;
 
 fn lcs_np(what: const u8[:]) { fatal(str("LibCallSimplifier: ", what, " is not ported yet")); }
 
@@ -808,9 +811,9 @@ fn optimize_floating_point_libcall(ci: i32, lf: i64, unsafe_shrink: bool) -> i32
     if v >= 0 { return v; }
     if lf_in(lf, [LF_sinpif, LF_sinpi, LF_cospif, LF_cospi]) { lcs_np("optimizeSinCosPi"); }
     if lf_in(lf, [LF_powf, LF_pow, LF_powl]) { lcs_np("optimizePow"); }
-    if lf_in(lf, [LF_exp2l, LF_exp2, LF_exp2f]) { lcs_np("optimizeExp2"); }
+    if lf_in(lf, [LF_exp2l, LF_exp2, LF_exp2f]) { return optimize_exp2(ci, unsafe_shrink); }
     if lf_in(lf, [LF_fabsf, LF_fabs, LF_fabsl]) { return replace_unary_call(ci, IID_fabs); }
-    if lf_in(lf, [LF_sqrtf, LF_sqrt, LF_sqrtl]) { lcs_np("optimizeSqrt"); }
+    if lf_in(lf, [LF_sqrtf, LF_sqrt, LF_sqrtl]) { return optimize_sqrt(ci, unsafe_shrink); }
     if lf_in(lf, [LF_fmod, LF_fmodf, LF_fmodl]) { lcs_np("optimizeFMod"); }
     if lf_in(lf, [LF_logf, LF_log, LF_logl, LF_log10f, LF_log10, LF_log10l, LF_log1pf, LF_log1p, LF_log1pl, LF_log2f,
                   LF_log2, LF_log2l, LF_logbf, LF_logb, LF_logbl]) { lcs_np("optimizeLog"); }
@@ -824,15 +827,16 @@ fn optimize_floating_point_libcall(ci: i32, lf: i64, unsafe_shrink: bool) -> i32
     if lf == LF_rint { return replace_unary_call(ci, IID_rint); }
     if lf == LF_trunc { return replace_unary_call(ci, IID_trunc); }
     if lf_in(lf, [LF_acos, LF_acosh, LF_asin, LF_atan, LF_cbrt, LF_exp, LF_exp10, LF_expm1, LF_cos, LF_sin, LF_tanh]) {
-        if unsafe_shrink && lcs_has_float_version(ci) { lcs_np("optimizeUnaryDoubleFP"); }
+        if unsafe_shrink && lcs_has_float_version(ci) { return optimize_double_fp(ci, false, true); }
         return -1;
     }
     if lf == LF_copysign {
-        if lcs_has_float_version(ci) { lcs_np("optimizeBinaryDoubleFP"); }
+        if lcs_has_float_version(ci) { return optimize_double_fp(ci, true, false); }
         return -1;
     }
     if lf_in(lf, [LF_fdim, LF_fdimf, LF_fdiml]) { lcs_np("optimizeFdim"); }
-    if lf_in(lf, [LF_fminf, LF_fmin, LF_fminl, LF_fmaxf, LF_fmax, LF_fmaxl]) { lcs_np("optimizeFMinFMax"); }
+    if lf_in(lf, [LF_fminf, LF_fmin, LF_fminl]) { return optimize_fmin_fmax(ci, IID_minnum); }
+    if lf_in(lf, [LF_fmaxf, LF_fmax, LF_fmaxl]) { return optimize_fmin_fmax(ci, IID_maxnum); }
     if lf_in(lf, [LF_fminimum_numf, LF_fminimum_num, LF_fminimum_numl]) { return replace_binary_call(ci, IID_minimumnum); }
     if lf_in(lf, [LF_fmaximum_numf, LF_fmaximum_num, LF_fmaximum_numl]) { return replace_binary_call(ci, IID_maximumnum); }
     if lf_in(lf, [LF_cabs, LF_cabsf, LF_cabsl]) { return optimize_cabs(ci); }
@@ -913,14 +917,14 @@ fn lcs_optimize_call_impl(ci: i32, callee: i32, is_ccc: bool) -> i32 {
     if id != 0 {
         if !is_ccc { return -1; }
         if id == IID_pow { lcs_np("optimizePow (llvm.pow)"); }
-        if id == IID_exp2 { lcs_np("optimizeExp2 (llvm.exp2)"); }
+        if id == IID_exp2 { return optimize_exp2(ci, unsafe_shrink); }
         if id == IID_log || id == IID_log2 || id == IID_log10 { lcs_np("optimizeLog (llvm.log*)"); }
-        if id == IID_sqrt { lcs_np("optimizeSqrt (llvm.sqrt)"); }
+        if id == IID_sqrt { return optimize_sqrt(ci, unsafe_shrink); }
         if id == IID_memset { return optimize_memset(ci); }
         if id == IID_memcpy { return optimize_memcpy(ci); }
         if id == IID_memmove { return optimize_memmove(ci); }
         if id == IID_sin || id == IID_cos {
-            if unsafe_shrink { lcs_np("optimizeUnaryDoubleFP (llvm.sin/cos)"); }
+            if unsafe_shrink { return optimize_double_fp(ci, false, true); }
             return -1;
         }
         return -1;
@@ -1269,4 +1273,203 @@ fn optimize_cabs(ci: i32) -> i32 {
     let ii = icx_fbinop(OP_FMUL, im, im, fmf, "");
     let sum = icx_fbinop(OP_FADD, rr, ii, fmf, "");
     return copy_flags(ci, icx_unary_intrinsic_f(IID_sqrt, sum, fmf, "cabs"));
+}
+
+// valueHasFloatPrecision(Val)
+fn value_has_float_precision(v: i32) -> i32 {
+    if is_inst_op(v, OP_FPEXT) && ty_kind(vals[op(v, 0)].ty) == TK_FLOAT { return op(v, 0); }
+    if vals[v].kind == VK_CFP && !ty_is_vector(vals[v].ty) {
+        let k = types[vals[v].ty].kind as i64;
+        let lo, hi = fp_convert(k, TK_FLOAT, cint_lo(v), cint_hi(v));
+        let blo, bhi = fp_convert(TK_FLOAT, k, lo, hi);
+        let p = fp_decompose(k, cint_lo(v), cint_hi(v));
+        var same = blo == cint_lo(v) && bhi == cint_hi(v);
+        if p.cat == FC_NAN {
+            let q1, q2 = fp_make_quiet(k, cint_lo(v), cint_hi(v));
+            let r1, r2 = fp_make_quiet(k, blo, bhi);
+            same = q1 == r1 && q2 == r2;
+        }
+        if same { return c_fp(ty_simple(TK_FLOAT), lo, hi); }
+    }
+    return -1;
+}
+
+// emitUnaryFloatFnCall(Op, TLI, Name, B, Attrs) / emitBinaryFloatFnCall: the name gets the type suffix
+fn emit_float_fn_call(a: i32, b: i32, name0: const u8[:], attrs_l: i32) -> i32 {
+    var nm: u8[>..] = [];
+    nm.append(name0);
+    let k = ty_kind(vals[a].ty);
+    if k != TK_DOUBLE { if k == TK_FLOAT { nm.push('f'); } else { nm.push('l'); } }
+    let lf = tli_lookup_name(nm);
+    let t: i32 = vals[a].ty;
+    var f: i32 = -1;
+    if b < 0 {
+        f = blc_get_or_insert(lf as i64, ty_func_of(t, [t], false), 0);
+    } else {
+        let bt: i32 = vals[b].ty;
+        f = blc_get_or_insert(lf as i64, ty_func_of(t, [t, bt], false), 0);
+        blc_infer_by_name(nm);
+    }
+    let c = if b < 0 { lcs_create_call(f, [a], nm) } else { lcs_create_call(f, [a, b], nm) };
+    // Attrs.removeFnAttribute(Speculatable)
+    let l = attrs_l;
+    var sets: i32[>..<] = [];
+    let n = if l == 0 { 0 } else { alists[l].n as i64 };
+    for j in n {
+        var s = alist_runs[alists[l].at + j];
+        if j == 0 { s = aset_without(s, AK_Speculatable); }
+        sets.push(s);
+    }
+    insts[inst_of(c)].attrs = alist_get(sets);
+    insts[inst_of(c)].cc = globs[glob_of(f)].cc;
+    return c;
+}
+
+// optimizeDoubleFP(CI, B, isBinary, TLI, isPrecise)
+fn optimize_double_fp(ci: i32, binary: bool, precise: bool) -> i32 {
+    let cf = called_function(ci);
+    if ty_kind(vals[ci].ty) != TK_DOUBLE || cf < 0 { return -1; }
+    if precise {
+        var u = vals[ci].first_use;
+        while u >= 0 {
+            let us = uses[u].user;
+            u = uses[u].next;
+            if !is_inst_op(us, OP_FPTRUNC) || ty_kind(vals[us].ty) != TK_FLOAT { return -1; }
+        }
+    }
+    let v0 = value_has_float_precision(cb_arg(ci, 0));
+    let v1 = if binary { value_has_float_precision(cb_arg(ci, 1)) } else { -1 };
+    if v0 < 0 || (binary && v1 < 0) { return -1; }
+    var cname: u8[>..] = [];
+    cname.append(val_name(cf));
+    let intr = globs[glob_of(cf)].intrinsic != 0;
+    if !intr {
+        let caller = val_name(inst_func(ci));
+        if ends_with(caller, "f") && caller.len == cname.len + 1 && starts_with(caller, cname) { return -1; }
+    }
+    let sv = icb_fmf;
+    icb_fmf = icx_fmf(ci);
+    var r: i32 = -1;
+    let ft = ty_simple(TK_FLOAT);
+    if intr {
+        let id = call_iid(ci) as i64;
+        r = if binary { icx_intrinsic_f(id, [ft], [v0, v1], icb_fmf, "") } else { icx_intrinsic_f(id, [ft], [v0], icb_fmf, "") };
+    } else {
+        r = emit_float_fn_call(v0, if binary { v1 } else { -1 }, cname, insts[inst_of(ci)].attrs);
+    }
+    let res = icb_cast(OP_FPEXT, r, ty_simple(TK_DOUBLE), "");
+    icb_fmf = sv;
+    return res;
+}
+
+// mergeSqrtToExp(CI, B)
+fn merge_sqrt_to_exp(ci: i32) -> i32 {
+    if (icx_fmf(ci) & FMF_REASSOC) == 0 { return -1; }
+    let sf = called_function(ci);
+    let arg = cb_arg(ci, 0);
+    if !is_inst_op(arg, OP_CALL) || !is_fp_math_operator(arg) || (icx_fmf(arg) & FMF_REASSOC) == 0 || !has_one_use(arg) { return -1; }
+    let aid = call_iid(arg);
+    var alb: i64 = -1;
+    let acf = called_function(arg);
+    if acf >= 0 && !call_is_nobuiltin(arg) { alb = tli_get_libfunc(acf) as i64; }
+    var e: i64 = -1;
+    var e2: i64 = -1;
+    var e10: i64 = -1;
+    let slb = tli_lookup_name(val_name(sf));
+    if slb >= 0 {
+        if slb == LF_sqrtf { e = LF_expf; e2 = LF_exp2f; e10 = LF_exp10f; }
+        else if slb == LF_sqrt { e = LF_exp; e2 = LF_exp2; e10 = LF_exp10; }
+        else if slb == LF_sqrtl { e = LF_expl; e2 = LF_exp2l; e10 = LF_exp10l; }
+        else { return -1; }
+    } else if call_iid(ci) == IID_sqrt {
+        let st = ty_kind(ty_scalar(vals[ci].ty));
+        if st == TK_FLOAT { e = LF_expf; e2 = LF_exp2f; e10 = LF_exp10f; }
+        else if st == TK_DOUBLE { e = LF_exp; e2 = LF_exp2; e10 = LF_exp10; }
+        else { return -1; }
+    } else { return -1; }
+    if alb != e && alb != e2 && alb != e10 && aid != IID_exp && aid != IID_exp2 { return -1; }
+    let sp = icb_pos; let sb = icb_bb; let sd = icb_dl;
+    icb_set_insert_point(arg);
+    let eo = op(arg, 0);
+    let fm = icx_fbinop(OP_FMUL, eo, c_fp_from_f64(vals[eo].ty, 0.5), icx_fmf(ci), "merged.sqrt");
+    icb_pos = sp; icb_bb = sb; icb_dl = sd;
+    set_op(arg, 0, fm);
+    return arg;
+}
+
+// optimizeSqrt(CI, B)
+fn optimize_sqrt(ci: i32, unsafe_shrink: bool) -> i32 {
+    let cf = called_function(ci);
+    var ret: i32 = -1;
+    if blc_is_emittable(LF_sqrtf) && (val_name(cf) == "sqrt" || call_iid(ci) == IID_sqrt) {
+        ret = optimize_double_fp(ci, false, true);
+    }
+    let o = merge_sqrt_to_exp(ci);
+    if o >= 0 { return o; }
+    if (icx_fmf(ci) & FMF_FAST) != FMF_FAST { return ret; }
+    let i = cb_arg(ci, 0);
+    if !is_inst_op(i, OP_FMUL) || (icx_fmf(i) & FMF_FAST) != FMF_FAST { return ret; }
+    let o0 = op(i, 0);
+    let o1 = op(i, 1);
+    var rep: i32 = -1;
+    var oth: i32 = -1;
+    if o0 == o1 { rep = o0; }
+    else if is_inst_op(o0, OP_FMUL) && op(o0, 0) == op(o0, 1) && (icx_fmf(o0) & FMF_FAST) == FMF_FAST { rep = op(o0, 0); oth = o1; }
+    else if is_inst_op(o1, OP_FMUL) && op(o1, 0) == op(o1, 1) && (icx_fmf(o1) & FMF_FAST) == FMF_FAST { rep = op(o1, 0); oth = o0; }
+    if rep < 0 { return ret; }
+    let fab = icx_unary_intrinsic_f(IID_fabs, rep, icx_fmf(i), "fabs");
+    if oth >= 0 {
+        let sq = icx_unary_intrinsic_f(IID_sqrt, oth, icx_fmf(i), "sqrt");
+        return copy_flags(ci, icx_fbinop(OP_FMUL, fab, sq, icx_fmf(i), ""));
+    }
+    return copy_flags(ci, fab);
+}
+
+// getIntToFPVal(I2F, B, DstWidth)
+fn get_int_to_fp_val(i2f: i32, dw: i64) -> i32 {
+    if is_inst_op(i2f, OP_SITOFP) || is_inst_op(i2f, OP_UITOFP) {
+        let o = op(i2f, 0);
+        let bw = ty_scalar_bits(vals[o].ty);
+        if bw < dw || (bw == dw && iop(i2f) == OP_SITOFP) {
+            let it = ty_with_new_bits(vals[o].ty, dw);
+            return if iop(i2f) == OP_SITOFP { icb_sext(o, it, "") } else { icb_zext(o, it, "") };
+        }
+    }
+    return -1;
+}
+
+// optimizeExp2(CI, B)
+fn optimize_exp2(ci: i32, unsafe_shrink: bool) -> i32 {
+    let cf = called_function(ci);
+    var ret: i32 = -1;
+    if unsafe_shrink && val_name(cf) == "exp2" && lcs_has_float_version(ci) { ret = optimize_double_fp(ci, false, true); }
+    let ui = globs[glob_of(cf)].intrinsic != 0;
+    let ty: i32 = vals[ci].ty;
+    if !ui && ty_is_vector(ty) { return ret; }
+    let o = cb_arg(ci, 0);
+    if (is_inst_op(o, OP_SITOFP) || is_inst_op(o, OP_UITOFP)) && (ui || blc_has_float_fn(ty, LF_ldexp, LF_ldexpf, LF_ldexpl)) {
+        let e = get_int_to_fp_val(o, 32);
+        if e >= 0 {
+            let one = c_fp_from_f64(ty, 1.0);
+            if ui { return copy_flags(ci, icx_intrinsic_f(IID_ldexp, [ty, vals[e].ty as i32], [one, e], icx_fmf(ci), "")); }
+            let sv = icb_fmf;
+            icb_fmf = icx_fmf(ci);
+            let lf = blc_get_float_fn(ty, LF_ldexp, LF_ldexpf, LF_ldexpl);
+            var nm: u8[>..] = [];
+            nm.append(TLI_NAMES[lf]);
+            let f = blc_get_or_insert(lf, ty_func_of(ty, [ty, vals[e].ty as i32], false), 0);
+            blc_infer_by_name(nm);
+            let c = lcs_create_call(f, [one, e], nm);
+            insts[inst_of(c)].cc = globs[glob_of(f)].cc;
+            icb_fmf = sv;
+            return copy_flags(ci, c);
+        }
+    }
+    return ret;
+}
+
+// optimizeFMinFMax(CI, B, IID)
+fn optimize_fmin_fmax(ci: i32, id: i64) -> i32 {
+    let fmf = icx_fmf(ci) | FMF_NSZ;
+    return copy_flags(ci, icx_binary_intrinsic_f(id, cb_arg(ci, 0), cb_arg(ci, 1), fmf, ""));
 }
