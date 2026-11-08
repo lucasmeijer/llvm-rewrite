@@ -6211,9 +6211,11 @@ tests/imported/llvm/Transforms/InstCombine/vec_phi_extract-inseltpoison.ll::roun
 tests/imported/llvm/Transforms/InstCombine/vec_phi_extract.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vec_sext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_sext.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vec_shuffle-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_shuffle-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vec_shuffle-phi-multiuse.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_shuffle-phi-multiuse.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vec_shuffle.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_shuffle.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vec_udiv_to_shift.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vec_udiv_to_shift.ll::roundtrip
