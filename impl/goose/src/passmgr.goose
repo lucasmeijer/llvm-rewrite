@@ -61,7 +61,7 @@ let P_VERIFY_FUNCTION = 109;
 let P_MEM2REG = 130;
 let P_SROA = 131;          // arg: 1 = preserve-cfg, 2 = aggregate-to-vector
 let P_INSTSIMPLIFY = 140;
-let P_INSTCOMBINE = 170;   // arg: bit 0 = verify-fixpoint, bits 1.. = max-iterations
+let P_INSTCOMBINE = 175;   // arg: bit 0 = verify-fixpoint, bits 1.. = max-iterations
 let P_BREAK_CRIT_EDGES = 110;
 let P_PRINT_LOOPS = 111;
 let P_PRINT_CYCLES = 112;
