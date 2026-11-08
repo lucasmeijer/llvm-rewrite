@@ -70,51 +70,17 @@ tli_get_lib_func :: (name: string) -> bool {
 
 // isValidProtoForLibFunc for the subset (TargetLibraryInfo.td signatures; LDbl matches any fp type)
 tli_valid_proto :: (ft: Type_Id, name: string) -> bool {
-    base, is_f, is_l, finite := cfc_libfunc_base(name);
-    if base.count == 0 return false;
-    if func_vararg(ft) return false;
-    match :: (t: Type_Id, is_f: bool, is_l: bool) -> bool {
-        k := type_kind(t);
-        if is_l return is_fp_type(t);
-        if is_f return k == .FLOAT;
-        return k == .DOUBLE;
-    }
-    nargs := 1;
-    for CFC_BINARY_LIBFUNCS if it == base nargs = 2;
-    if func_nparams(ft) != cast(u32) nargs return false;
-    r := func_ret(ft);
-    if base == "ilogb" { if type_kind(r) != .INT || type_int_width(r) != 32 return false; }
-    else if !match(r, is_f, is_l) return false;
-    if !match(func_param(ft, 0), is_f, is_l) return false;
-    if nargs == 2 {
-        p1 := func_param(ft, 1);
-        if base == "nexttoward" { if !is_fp_type(p1) return false; }
-        else if !match(p1, is_f, is_l) return false;
-    }
-    return true;
+    ok, lf := tli_lookup_name(name);
+    return ok && tli_valid_proto_for(ft, lf);
 }
 
 // TLI->has(F) for the caller of `call`: module triple availability, -disable-simplify-libcalls, and the
 // function's "no-builtins" / "no-builtin-<name>" attributes.
 tli_has :: (call: Value_Id, name: string) -> bool {
-    if opts.disable_simplify_libcalls return false;
-    base, is_f, is_l, finite := cfc_libfunc_base(name);
-    t := ir.triple;
-    if t.count {
-        parts := split(t, "-",, allocator = temp);
-        os := ifx parts.count > 2 then parts[2] else "";
-        env := ifx parts.count > 3 then parts[3] else "";
-        if !begins_with(os, "linux") && !begins_with(os, "unknown") && os != "" && !begins_with(os, "none") && !begins_with(os, "elf")
-            fatal("constant folding libm calls: TargetLibraryInfo for the target triple '%' is not supported yet", t);
-        // the *_finite functions only exist on GNU/Linux (glibc)
-        if finite && !(begins_with(os, "linux") && begins_with(env, "gnu")) return false;
-    } else if finite return false;
+    ok, lf := tli_lookup_name(name);
+    if !ok return false;
     caller := ifx call != NONE && vkind(call) == .INST && inst(call).parent != NONE then value_function(call) else NONE;
-    if caller != NONE {
-        if fn_has_str_attr(caller, "no-builtins") return false;
-        if fn_has_str_attr(caller, tprint("no-builtin-%", name)) return false;
-    }
-    return true;
+    return tli_func_has(tli_for(caller), lf);
 }
 
 // ---------------------------------------------------------------- canConstantFoldCallTo

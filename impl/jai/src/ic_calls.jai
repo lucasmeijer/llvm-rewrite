@@ -2655,7 +2655,10 @@ ic_visit_call_base :: (call: Value_Id) -> Value_Id {
     if vkind(callee) == .INLINE_ASM && !call_does_not_throw(call) {
         if !ic_inline_asm_can_throw(callee) { call_add_fn_attr(call, .NoUnwind); changed = true; }
     }
-    // tryOptimizeCall (LibCallSimplifier) is not ported: library calls are left alone
+    if inst_op(call) == .CALL {
+        r := ic_try_optimize_call(call);
+        if r != NONE return ic_erase_inst(r);
+    }
     if has_uses(call) && ((inst(call).flags >> TAIL_SHIFT) & 3) != 2 {
         ra := call_returned_arg(call);
         if ra != NONE && can_losslessly_bitcast_to(vtype(ra), vtype(call))
@@ -2670,6 +2673,19 @@ ic_visit_call_base :: (call: Value_Id) -> Value_Id {
     if is_removable_alloc(call) return ic_visit_alloc_site(call);
     if call_iid(call) == IID_EXPERIMENTAL_GC_STATEPOINT fatal("instcombine: gc.statepoint is not supported yet");
     return ifx changed then call else NONE;
+}
+// tryOptimizeCall: LibCallSimplifier (simplify_lib_calls.jai), then optimizeModularFormat
+ic_try_optimize_call :: (ci: Value_Id) -> Value_Id {
+    if call_called_function(ci) == NONE return NONE;
+    tk := call_tail_kind(ci);
+    if tk == TCK_MUSTTAIL || tk == TCK_NOTAIL return NONE;
+    with := lcs_optimize_call(ci);
+    if with != NONE {
+        if !has_uses(ci) return ci;
+        return ic_replace_inst_uses_with(ci, with);
+    }
+    if call_has_fn_str_attr(ci, "modular-format") || fn_has_str_attr(call_called_function(ci), "modular-format") fatal("instcombine: optimizeModularFormat is not supported yet");
+    return NONE;
 }
 // InlineAsm::canThrow
 ic_inline_asm_can_throw :: (ia: Value_Id) -> bool { return (inline_asms[ir.v_aux[ia]].flags & 8) != 0; }

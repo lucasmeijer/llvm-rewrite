@@ -282,43 +282,12 @@ ls_upper_bound_ts :: (t: Type_Id) -> u64 {
 
 // ---------------------------------------------------------------- TargetLibraryInfo: getLibFunc for calls
 
-// The library functions alias analysis asks about, with their TargetLibraryInfo.td prototypes
-// (p = ptr, i = int (i32), s = size_t (i64 on x86_64), v = void; first letter is the return type).
-// memset_pattern4/8/16 are Darwin-only (TLI marks them unavailable on Linux), so they are not listed.
-AA_LIB_FUNCS :: struct { name: string; proto: string; }.[
-    .{"strcpy", "ppp"}, .{"strcat", "ppp"}, .{"strncat", "ppps"}, .{"__memset_chk", "ppiss"},
-    .{"__memcpy_chk", "pppss"}, .{"strncpy", "ppps"}, .{"bcmp", "ipps"}, .{"memcmp", "ipps"},
-    .{"memchr", "ppis"}, .{"memccpy", "pppis"},
-];
-// TLI.getLibFunc(*Call, F) && TLI.has(F) for the functions in AA_LIB_FUNCS: the name, or ""
+// TLI.getLibFunc(*Call, F) && TLI.has(F) (tli.jai): the standard name of F, or ""
 tli_lib_func_of_call :: (call: Value_Id) -> string {
-    if call_is_no_builtin(call) return "";
-    f := call_called_function(call);
-    if f == NONE || glob(f).intrinsic return "";
-    name := vname(f);
-    for AA_LIB_FUNCS {
-        if it.name != name continue;
-        if !tli_proto_matches(glob(f).value_type, it.proto) return "";
-        if !tli_available(inst_fn(call), name) return "";
-        return name;
-    }
-    return "";
+    ok, lf := tli_lookup_call(call);
+    if !ok || !tli_func_has(tli_for(inst_fn(call)), lf) return "";
+    return tli_standard_name(lf);
 }
-tli_proto_matches :: (ft: Type_Id, proto: string) -> bool {
-    if (ir.types[ft].flags & TYF_VARARG) != 0 return false;
-    if func_nparams(ft) != cast(u32)(proto.count - 1) return false;
-    ok :: (t: Type_Id, c: u8) -> bool {
-        if c == #char "p" return is_ptr_type(t);
-        if c == #char "i" return type_kind(t) == .INT && type_int_width(t) == 32;
-        if c == #char "s" return type_kind(t) == .INT && type_int_width(t) == 64;
-        if c == #char "v" return type_kind(t) == .VOID;
-        return false;
-    }
-    if !ok(func_ret(ft), proto[0]) return false;
-    for k: 1..proto.count-1 if !ok(func_param(ft, cast(u32)(k - 1)), proto[k]) return false;
-    return true;
-}
-TLI_INT_SIZE :: 32;   // TLI.getIntSize() on x86_64
 
 // MemoryBuiltins: isMallocOrCallocLikeFn (AllocationFnData entries other than strdup-like)
 is_malloc_or_calloc_like_fn :: (v: Value_Id) -> bool { ok := mb_alloc_data(v, AT_MALLOC_OR_OPNEW); return ok; }

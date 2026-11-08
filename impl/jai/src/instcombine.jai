@@ -20,3 +20,7 @@
 #load "ic_loadstorealloca.jai";
 #load "ic_combining.jai";
 #load "ic_vectorops.jai";
+#load "value_tracking_strings.jai";
+#load "build_lib_calls.jai";
+#load "simplify_lib_calls.jai";
+#load "simplify_lib_calls2.jai";

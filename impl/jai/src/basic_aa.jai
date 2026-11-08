@@ -559,7 +559,7 @@ basic_aa_mod_ref_call_call :: (q: *Aa_Query, call1: Value_Id, call2: Value_Id) -
 
 // BasicAAResult::aliasErrno
 basic_aa_alias_errno :: (loc: Mem_Loc) -> u8 {
-    if ls_has_value(loc.size) && ls_value(loc.size) * 8 > TLI_INT_SIZE return AR_NO;
+    if ls_has_value(loc.size) && ls_value(loc.size) * 8 > tli_int_bits() return AR_NO;
     if is_identified_function_local(get_underlying_object(loc.ptr)) return AR_NO;
     return AR_MAY;
 }

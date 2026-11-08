@@ -241,12 +241,12 @@ block_is_eh_pad :: (b: Value_Id) -> bool { f := block_first_non_phi(b); return f
 
 // ---------------------------------------------------------------- TargetLibraryInfo (the subset passes need so far)
 
-// TargetLibraryInfo for the caller function: "no-builtins" disables everything, "no-builtin-<name>" one function.
+// TLI.has(F) for the library function called `name` in the TargetLibraryInfo of `caller` (tli.jai); names that
+// are not library functions are reported available (callers check the name against their own tables first).
 tli_available :: (caller: Value_Id, name: string) -> bool {
-    if caller == NONE return true;
-    if fn_has_str_attr(caller, "no-builtins") return false;
-    if fn_has_str_attr(caller, tprint("no-builtin-%", name)) return false;
-    return true;
+    ok, lf := tli_lookup_name(name);
+    if !ok return true;
+    return tli_func_has(tli_for(caller), lf);
 }
 
 // The AllocationFnData / FreeFnData tables are in memory_builtins.jai.
@@ -311,32 +311,17 @@ MATH_BINARY :: string.["pow", "fmod", "remainder", "atan2", "nextafter", "nextto
 
 // TLI.getLibFunc for a math function: returns the base name ("log" for logf/logl) and the fp kind, or "".
 math_libfunc :: (callee: Value_Id) -> (base: string, k: Type_Kind) {
+    known, lf := tli_lookup_fn(callee);   // the TargetLibraryInfo.td prototype (LDbl = any fp type)
+    if !known return "", .VOID;
     name := vname(callee);
     ft := glob(callee).value_type;
-    check :: (base: string, name: string) -> bool, Type_Kind {
-        if name == base return true, .DOUBLE;
-        if name.count == base.count + 1 && begins_with(name, base) {
-            if name[base.count] == #char "f" return true, .FLOAT;
-            if name[base.count] == #char "l" return true, .X86_FP80;
-        }
-        return false, .VOID;
+    check :: (base: string, name: string) -> bool {
+        if name == base return true;
+        if name.count == base.count + 1 && begins_with(name, base) && (name[base.count] == #char "f" || name[base.count] == #char "l") return true;
+        return false;
     }
-    for MATH_UNARY {
-        ok, k := check(it, name);
-        if !ok continue;
-        if func_nparams(ft) != 1 || type_kind(func_param(ft, 0)) != k return "", .VOID;
-        if it == "ilogb" { if type_kind(func_ret(ft)) != .INT || type_int_width(func_ret(ft)) != 32 return "", .VOID; }
-        else if type_kind(func_ret(ft)) != k return "", .VOID;
-        return it, k;
-    }
-    for MATH_BINARY {
-        ok, k := check(it, name);
-        if !ok continue;
-        if func_nparams(ft) != 2 || type_kind(func_ret(ft)) != k || type_kind(func_param(ft, 0)) != k return "", .VOID;
-        if it == "nexttoward" { if type_kind(func_param(ft, 1)) != .X86_FP80 return "", .VOID; }
-        else if type_kind(func_param(ft, 1)) != k return "", .VOID;
-        return it, k;
-    }
+    for MATH_UNARY if check(it, name) return it, type_kind(func_param(ft, 0));
+    for MATH_BINARY if check(it, name) return it, type_kind(func_param(ft, 0));
     return "", .VOID;
 }
 

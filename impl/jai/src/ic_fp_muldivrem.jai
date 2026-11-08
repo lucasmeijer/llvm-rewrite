@@ -271,8 +271,29 @@ ic_visit_fdiv :: (i: Value_Id) -> Value_Id {
         oks2, sx := pm_intrinsic1(op1, IID_SIN);
         is_cot := !is_tan && okc2 && oks2 && sx == x2;
         if is_tan || is_cot {
-            base, k := math_libfunc_for_type(ty, "tan");
-            if base.count && tli_available(ic.f, base) fatal("instcombine: sin/cos -> tan (emitUnaryFloatFnCall) is not supported yet");
+            t := tli_for(ic.f);
+            if has_float_fn(t, ty, .tan, .tanf, .tanl) {
+                // IRBuilder<> B(&I) (ConstantFolder, nothing goes to the worklist), FMF = I's;
+                // emitUnaryFloatFnCall(X, TLI, tan, tanf, tanl, B, sin/cos's function attributes)
+                name, lf := get_float_fn(t, ty, .tan, .tanf, .tanl);
+                f := get_or_insert_lib_func(t, lf, type_func(vtype(x), .[vtype(x)], false));
+                c := new_inst(.CALL, vtype(x), 2);
+                inst(c).ty2 = glob(f).value_type;
+                set_op(c, 0, ifx is_tan then x else x2); set_op(c, 1, f);
+                set_fmf(c, get_fmf(i));
+                inst(c).attrs = attr_list_without_fn_attr(glob(call_called_function(op0)).attrs, .Speculatable);
+                inst(c).cc = glob(f).cc;
+                irb_insert(*ic.b, c, name);
+                res := c;
+                if is_cot {
+                    d := new_inst(.FDIV, ty, 2);
+                    set_op(d, 0, fp_const(ty, 1)); set_op(d, 1, c);
+                    set_fmf(d, get_fmf(i));
+                    irb_insert(*ic.b, d, "");
+                    res = d;
+                }
+                return ic_replace_inst_uses_with(i, res);
+            }
         }
     }
     if has_fmf(i, FMF_NNAN) && has_fmf(i, FMF_REASSOC) {

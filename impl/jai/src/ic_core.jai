@@ -114,6 +114,7 @@ Ic_State :: struct {
     computed_back_edges: bool;
     rpot: [..] Value_Id;
     annotation_src: Value_Id = NONE;
+    default_bundles_src: Value_Id = NONE;   // IRBuilder default operand bundles (LibCallSimplifier): not ported
     max_array_size: u64 = 1024;   // -instcombine-maxarray-size
     min_size: bool;
     pred_order: Table(Value_Id, [..] Value_Id);
@@ -410,6 +411,8 @@ icb_insert :: (i: Value_Id, name: string = "") -> Value_Id {
     irb_insert(*ic.b, i, name);
     if negator { array_add(*negator.new_insts, i); return i; }   // the Negator's IRBuilderCallbackInserter
     wl_add(i);
+    if ic.default_bundles_src != NONE && inst_op(i) == .CALL
+        fatal("instcombine: LibCallSimplifier creating a call while the simplified call has operand bundles (IRBuilder default operand bundles) is not supported yet");
     if is_intrinsic_call(i, IID_ASSUME) ic_register_assumption(i);
     if ic.annotation_src != NONE {
         k := md_kind_id("annotation");

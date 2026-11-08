@@ -58,8 +58,8 @@ FREE_FNS :: Free_Fn.[
 // TLI->getLibFunc(F) && TLI->has(F) for the functions of the tables above (their TLI prototypes are the checks
 // getAllocationDataForFunction / isLibFreeFunction make, which are at least as strict here) and for `free`.
 mb_tli_knows :: (callee: Value_Id, caller: Value_Id) -> bool {
-    if glob(callee).intrinsic return false;
-    return tli_available(caller, vname(callee));
+    ok, lf := tli_lookup_fn(callee);
+    return ok && tli_func_has(tli_for(caller), lf);
 }
 
 // getAllocationDataForFunction(Callee, AllocTy, TLI)
