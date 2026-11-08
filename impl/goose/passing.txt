@@ -7489,13 +7489,16 @@ tests/imported/llvm/Transforms/SROA/irregular-type.ll::opt
 tests/imported/llvm/Transforms/SROA/irregular-type.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/lifetime-intrinsic.ll::opt
 tests/imported/llvm/Transforms/SROA/lifetime-intrinsic.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/mem-par-metadata-sroa-cast.ll::opt
 tests/imported/llvm/Transforms/SROA/mem-par-metadata-sroa-cast.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/mem-par-metadata-sroa.ll::opt
 tests/imported/llvm/Transforms/SROA/mem-par-metadata-sroa.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/non-capturing-call-readonly.ll::opt
 tests/imported/llvm/Transforms/SROA/non-capturing-call-readonly.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/non-integral-pointers.ll::opt
 tests/imported/llvm/Transforms/SROA/non-integral-pointers.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/phi-and-select.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/phi-gep.ll::opt
 tests/imported/llvm/Transforms/SROA/phi-gep.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/phi-speculate-different-load-types.ll::opt
 tests/imported/llvm/Transforms/SROA/phi-speculate-different-load-types.ll::roundtrip
@@ -7513,6 +7516,7 @@ tests/imported/llvm/Transforms/SROA/prefer-integer-partition.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/preserve-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/propagate-fast-math-flags-on-phi.ll::opt
 tests/imported/llvm/Transforms/SROA/propagate-fast-math-flags-on-phi.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/readonlynocapture.ll::opt
 tests/imported/llvm/Transforms/SROA/readonlynocapture.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/scalable-vector-array.ll::opt
 tests/imported/llvm/Transforms/SROA/scalable-vector-array.ll::roundtrip
@@ -7557,8 +7561,11 @@ tests/imported/llvm/Transforms/SROA/vector-promotion-via-tree-structure-merge.ll
 tests/imported/llvm/Transforms/SROA/vector-promotion.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/vectors-of-pointers.ll::opt
 tests/imported/llvm/Transforms/SROA/vectors-of-pointers.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/widen-load-of-small-alloca-special-cases.ll::opt
 tests/imported/llvm/Transforms/SROA/widen-load-of-small-alloca-special-cases.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/widen-load-of-small-alloca-with-zero-upper-half.ll::opt
 tests/imported/llvm/Transforms/SROA/widen-load-of-small-alloca-with-zero-upper-half.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/widen-load-of-small-alloca.ll::opt
 tests/imported/llvm/Transforms/SROA/widen-load-of-small-alloca.ll::roundtrip
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/2006-06-13-SingleEntryPHI.ll::roundtrip
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/2006-06-27-DeadSwitchCase.ll::roundtrip
