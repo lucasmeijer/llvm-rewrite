@@ -431,10 +431,10 @@
 - Fixed in shared code on the way: TLI size_t is now the DataLayout index size of AS 0 (`tli_sizet_bits`,
   was a constant 64); `ac_register_assumption` / `ac_update_affected` (assume.goose) for assumes created or
   changed by a pass.
-- Not ported / known gaps (fail loudly): SimplifyDemandedVectorElts, SimplifyDemandedFPClass, foldVectorBinop
+- Not ported / known gaps (fail loudly): SimplifyDemandedFPClass, foldVectorBinop
   with shuffle/intrinsic operands, OptimizePointerDifference, LibCallSimplifier, alloc-site handling, salvaging
   debug info (erasing an instruction used by a debug record), dropDroppableUses when sinking, AliasScopeTracker,
-  LowerDbgDeclare, the !annotation copy, branch-weight updates, foldBinopWithRecurrence, symmetric PHI pairs.
+  LowerDbgDeclare, the !annotation copy, branch-weight updates, foldBinopWithRecurrence.
 - Perf: not measurable yet (`tests/perf/scaling/straightline/*` has an `@perf: opt -passes=instcombine` line,
   but it stops at the unported `xor` visitor). Known linear scans to revisit when it matters: removing an
   entry from the deferred worklist, DeadEdges, DomConditionCache dedupe per value, the cast TypeEvaluationHelper
@@ -452,6 +452,22 @@
   getMaskedTypeForICmpPair's outputs are the globals `mk_*`: copy them before calling it again.
   Still loud: setExplicitlyUnknownBranchWeightsIfProfiled in reassociateBooleanAndOr (profiled functions),
   shufflevector of constants in foldIntegerPackFromVector, APFloat negation of ppc_fp128.
+- select/phi (ic_select.goose, ic_phi.goose, ic_demanded_elts.goose): InstCombineSelect.cpp and InstCombinePHI.cpp
+  whole, in file order, and SimplifyDemandedVectorElts (entries `ic_simplify_demanded_vector_elts(v, demanded, depth,
+  allow_multi) -> i32, AP` and `ic_simplify_demanded_vector_elts_root`). matchSelectPattern with a CastOp
+  (lookThroughCast) and SelectPatternResult::Ordered are local to ic_select (`sl_match_select_pattern_cast`,
+  `sp_ordered` set by vt's FP path). visitPHINode's PredOrder map is per InstCombinerImpl: `ic_phi_reset_pred_order()`
+  runs at the start of every iteration (ic.goose). The select-arm known-bits fold needs a CondContext: knownbits.goose
+  `kb_cc_cond/kb_cc_invert/kb_cc_aff` (consulted by kb_from_context and kfc_from_context, cleared around phi
+  recursion in computeKnownBits/computeKnownFPClass; isKnownNonZero/isKnownToBeAPowerOfTwo/ComputeNumSignBits/
+  isKnownNonEqual phis fail loudly under a CondContext via `kb_cc_check_phi`). simplifyWithOpReplaced's DropFlags
+  vector is `swo_drop_on/swo_drop` in instsimplify.goose. setExplicitlyUnknownBranchWeightsIfProfiled is
+  `ic_set_unknown_branch_weights_if_profiled` (ic_builder.goose; entry count > 0 -> !{!"unknown", !"instcombine"}).
+  Shared fixes found once selects/phis ran: matchSymmetricPhiNodesPair (was a stub), foldBinOpOfSelectAndCastOf-
+  SelectCondition arms were swapped, the Negator's swapped select must stay unnamed (Builder.Insert names it ""),
+  Constant::containsUndefElement excludes poison, `(mul (div exact X, C0), C1)` checks every lane (m_CheckedInt).
+  Checked with tools/ic_func_sweep.py (per function, all InstCombine tests: 0 differ) and a select-heavy variant of
+  tools/fuzz_ic.py (8000 scalar + vector cases, 0 differ).
 - Matcher traps found by the per-function sweep (also in knowledge/llvm/instcombine.md): `m_ConstantInt(uint64_t&)`
   matches splat vectors (fixed in ic_shifts, ic_casts canEvaluateZExtd, ic_demanded's packed-element select);
   `m_Power2/m_NegatedPower2/m_LowBitMask(const APInt*&)` allow poison lanes; fcmpToClassTest's LookThroughSrc

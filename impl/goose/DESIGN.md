@@ -477,6 +477,9 @@ max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
 | `ic_demanded.goose` | SimplifyDemandedBits (integer and pointer part of InstCombineSimplifyDemanded.cpp) |
 | `ic_compares.goose` | InstCombineCompares.cpp, whole: `visit_icmp`/`visit_fcmp` and every helper in file order (GEP compares, load-from-constant-global compares, alloca compares, the APFloat helpers the fcmp folds need); also decomposeBitTestICmp (CmpInstAnalysis.cpp) and decomposeLinearExpression (Loads.cpp) |
 | `ic_andorxor.goose` | InstCombineAndOrXor.cpp (insertRangeTest so far) |
+| `ic_select.goose` | InstCombineSelect.cpp, whole: `visit_select` and every helper in file order (matchSelectPattern with casts locally) |
+| `ic_phi.goose` | InstCombinePHI.cpp, whole: `visit_phi`, the foldPHIArg* folds, SliceUpIllegalIntegerPHI, PredOrder (reset per iteration) |
+| `ic_demanded_elts.goose` | SimplifyDemandedVectorElts (InstCombineSimplifyDemanded.cpp) |
 | `ic_visit_misc.goose` | calls (`visitCallInst`/`visitCallBase` for ordinary functions, `llvm.assume`), and the fail-loudly fallback for every visitor that isn't ported |
 | `domcond.goose` (global) | DomConditionCache; ValueTracking consults it (knownbits, pow2, non-equal, fpclass) while `dc_active` |
 | `overflow.goose` (global) | computeOverflowFor*, haveNoCommonBitsSet |

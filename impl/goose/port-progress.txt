@@ -39,7 +39,7 @@ lib/Transforms/Scalar/SROA.cpp 0.85
 lib/Transforms/InstCombine/InstCombineCalls.cpp 0.1
 lib/Analysis/ConstantFolding.cpp 0.8
 lib/IR/Constants.cpp 0.55
-lib/Transforms/InstCombine/InstCombineSimplifyDemanded.cpp 0.35
+lib/Transforms/InstCombine/InstCombineSimplifyDemanded.cpp 0.5
 lib/Transforms/InstCombine/InstCombineAddSub.cpp 0.7
 lib/Transforms/InstCombine/InstCombineCasts.cpp 0.45
 lib/Support/APInt.cpp 0.5

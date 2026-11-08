@@ -111,6 +111,27 @@ noted, and by diffing `opt -passes=instcombine` output on the imported tests).
 - `Constant::isElementWiseEqual(Y)` is false unless Y is a constant of the same *vector* type (scalars only match by
   identity).
 
+- **`IRBuilder::Insert(I, Name = "")` renames I to the given name**: the Negator's `select c, -x, x` case clones the
+  select, `setName(I.getName() + ".neg")`, then `Builder.Insert(NewSelect)` renames it to "", so the result is
+  unnamed (sub-of-negatible.ll `negate_select_of_op_vs_negated_op`; IRBuilderDefaultInserter::InsertHelper).
+- **`Constant::containsUndefElement` excludes poison** (Constants.cpp: `isa<UndefValue> && !isa<PoisonValue>`), so
+  `isGuaranteedNotToBeUndef(<i8 2, i8 poison>)` is true and foldSelectValueEquivalence replaces the arm with
+  `<i8 2, i8 poison>` (select.ll `select_replacement_add_eq_vec_poison`).
+- `simplifyWithOpReplaced(..., AllowRefinement=false, &DropFlags)` (foldSelectValueEquivalence) folds constant
+  operands even for instructions that can create poison (`canCreatePoison(I, !DropFlags)` ignores flags), clears the
+  `i1` flag of abs/ctlz/cttz before folding, and the select fold then drops the poison-generating annotations of
+  every instruction recorded; the vector keeps entries from the first (failed) substitution attempt.
+- foldBinOpOfSelectAndCastOfSelectCondition: the true arm gets `CastTrueVal` (`NewFoldedConst(false, TrueVal)`
+  picks `IsTrueArm ? CastFalseVal : CastTrueVal`); binop-select.ll `commonArgWithAdd0` → `select c, 22, 61`.
+- matchSymmetricPhiNodesPair accepts any number of incoming values: every pair (Lk, Rk) must be (L0, R0) or
+  (R0, L0) (commutative-operation-over-phis.ll `fold_phi_mul_three`).
+- visitSelectInst's matchSelectPattern call passes a CastOp, so min/max through casts (lookThroughCast) are
+  canonicalized; `SelectPatternResult::Ordered` decides `fcmp olt` vs `ult` of the new compare.
+- visitPHINode's `PredOrder` (block order of the first PHI seen per block) lives in the InstCombinerImpl, i.e. it is
+  rebuilt every iteration; later PHIs of the block are permuted to that order without returning "changed".
+- SliceUpIllegalIntegerPHI creates its element PHIs with `PHINode::Create(..., InsertBefore)` (not
+  InsertNewInstBefore), so they are not added to the worklist.
+
 ## Casts and calls
 
 - **InstVisitor sends `llvm.va_end` to `visitVAEndInst`, not `visitCallInst`** (InstVisitor::visitCall delegates by
