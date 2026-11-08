@@ -247,7 +247,7 @@ Pass_Kind :: enum u8 {
     // loops (loop_info.jai, cycle_info.jai)
     PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
     // loop passes (loop_pm.jai)
-    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS; LOOP_DELETION; LOOP_INSTSIMPLIFY; LOOP_SIMPLIFYCFG;
+    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS; LOOP_DELETION; LOOP_INSTSIMPLIFY; LOOP_SIMPLIFYCFG; LOOP_IDIOM;
     // ScalarEvolution (scev_print.jai)
     PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS; REQUIRE_IV_USERS;
     // TargetTransformInfo (tti.jai)
@@ -344,6 +344,7 @@ PASS_TABLE :: Pass_Info.[
     .{"loop-deletion", .LOOP, .LOOP_DELETION, false, .DOMTREE},
     .{"loop-instsimplify", .LOOP, .LOOP_INSTSIMPLIFY, false, .DOMTREE},
     .{"loop-simplifycfg", .LOOP, .LOOP_SIMPLIFYCFG, false, .DOMTREE},
+    .{"loop-idiom", .LOOP, .LOOP_IDIOM, false, .DOMTREE},
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
@@ -595,6 +596,17 @@ parse_module_pass :: (mpm: s32, last: *s32, e: s32) {
         link_child(mpm, last, fa);
         return;
     }
+    if p.level == .LOOP {
+        // createModuleToFunctionPassAdaptor(createFunctionToLoopPassAdaptor(CREATE_PASS, /*UseMemorySSA=*/false))
+        fa := new_node(.FUNCTION_ADAPTOR, null, "function");
+        flast: s32 = -1;
+        la := new_node(.LOOP_ADAPTOR, null, "loop");
+        llast: s32 = -1;
+        link_child(la, *llast, new_node(p.kind, p, el.name));
+        link_child(fa, *flast, la);
+        link_child(mpm, last, fa);
+        return;
+    }
     unknown_pass(el.name);
 }
 
@@ -701,8 +713,9 @@ cl_opts :: () -> [] Cl_Opt {
 }
 
 // LastRunTracking and the L1.loop-misc passes (LoopDeletion, LoopIdiom, LoopLoadElim, LoopDistribute, ...)
-LM_CL_OPT_COUNT :: 3;
+LM_CL_OPT_COUNT :: 3 + LIR_CL_OPT_COUNT;
 add_lm_cl_opts :: (list: [] Cl_Opt, base: s64) {
+    add_lir_cl_opts(list, base + 3);
     list[base + 0] = .{"disable-last-run-tracking", .BOOL, *opts.disable_last_run_tracking, null, null};
     list[base + 1] = .{"loop-deletion-enable-symbolic-execution", .BOOL, *ld_opts.enable_symbolic_execution, null, null};
     list[base + 2] = .{"enable-loop-simplifycfg-term-folding", .BOOL, *lscfg_opts.enable_term_folding, null, null};

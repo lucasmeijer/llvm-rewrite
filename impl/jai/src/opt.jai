@@ -121,6 +121,9 @@
 #load "pass_loop_deletion.jai";
 #load "pass_loop_instsimplify.jai";
 #load "pass_loop_simplifycfg.jai";
+#load "loop_access.jai";
+#load "hash_recognize.jai";
+#load "pass_loop_idiom.jai";
 
 main :: () { opt_main(); }
 

@@ -357,7 +357,7 @@ li_make_loop_invariant :: (li: *Loop_Info, l: Loop_Id, v: Value_Id, changed: *bo
     }
     n := nops(i);
     if n > 0 for k: 0..n-1 if !li_make_loop_invariant(li, l, op(i, k), changed, pt, mssau) return false;
-    inst_move_before(i, pt);
+    inst_move_before_dbg(i, pt);   // I->moveBefore(InsertPt->getIterator()): records stay, I adopts InsertPt's
     if mssau {
         a := mssa_access_of(mssau.mssa, i);
         if a >= 0 mssau_move_to_place(mssau, a, inst_block(pt), .BEFORE_TERMINATOR);

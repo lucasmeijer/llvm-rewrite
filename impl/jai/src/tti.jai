@@ -259,6 +259,8 @@ mattr_features_string :: () -> string {
 // codegen::setFunctionAttributes(M, CPU, Features, TuneCPU): opt adds "target-cpu" / "target-features" to every
 // function from -mcpu / -mattr
 opt_set_function_attributes :: () {
+    // optdriver.cpp clears CPUStr / FeaturesStr when the module triple has no known architecture
+    if triple_parse(ir.triple).arch == .UnknownArch return;
     cpu := tti_opts.mcpu;
     feats := mattr_features_string();
     if cpu.count == 0 && feats.count == 0 return;
