@@ -3,11 +3,13 @@
 // The tables are generated (gen_intrinsics.jai, see impl/jai/gen/gen_intrinsics.py).
 
 // Intrinsic::lookupIntrinsicID: the longest intrinsic name that equals `name` or prefixes it before a '.'.
+// Non-overloaded intrinsics only match exactly.
 intrinsic_lookup :: (name: string) -> string {
+    for INTRINSIC_NAMES if name == it return it;
     best := "";
-    for INTRINSIC_NAMES {
+    for INTRINSIC_OVERLOADED {
         if it.count <= best.count continue;
-        if name == it || (name.count > it.count && begins_with(name, it) && name[it.count] == #char ".") best = it;
+        if name.count > it.count && begins_with(name, it) && name[it.count] == #char "." best = it;
     }
     return best;
 }

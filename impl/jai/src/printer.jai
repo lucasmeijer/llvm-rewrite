@@ -814,6 +814,21 @@ write_attribute :: (a: *Attr, in_group: bool) {
             if other != 0 || other == ret { write_capture_components(other); first = false; }
             if other != ret { if !first out(", "); out("ret: "); write_capture_components(ret); }
             outc(#char ")");
+        case .DenormalFPEnv;
+            out("denormal_fpenv(");
+            dflt := a.ival & 0xFF; f32 := (a.ival >> 8) & 0xFF;
+            pmode :: (m: u64) {
+                o := m & 0xF; i := (m >> 4) & 0xF;
+                out(DENORMAL_NAMES[o]);
+                if i != o { outc(#char "|"); out(DENORMAL_NAMES[i]); }
+            }
+            if f32 == dflt pmode(dflt);
+            else {
+                if dflt != 0 { pmode(dflt); out(", "); }
+                out("float: ");
+                pmode(f32);
+            }
+            outc(#char ")");
         case .NoFPClass;
             out("nofpclass");
             write_fpclass(a.ival);
@@ -1001,6 +1016,7 @@ print_function :: (f: Value_Id) {
             outc(#char "\n");
         }
     }
+    if g.intrinsic && intrinsic_lookup(vname(f)).count == 0 out("; Unknown intrinsic\n");
     process_function(f);
     current_function = f;
     decl := g.first_block == NONE;

@@ -1556,7 +1556,7 @@ parse_enum_attribute :: (kind: Attr_Kind, out: *[..] Attr, in_group: bool) {
             expect(.RPAREN, "')'");
             a.lo = lo; a.hi = hi;
         case .DenormalFPEnv;
-            perr("denormal_fpenv attribute is not supported yet");
+            a.ival = parse_denormal_fpenv();
         case;
             next();
     }
@@ -1602,6 +1602,46 @@ parse_memory_attr :: () -> u64 {
     }
     expect(.RPAREN, "')'");
     return me;
+}
+
+// DenormalFPEnv encoding: default output | default input << 4 | f32 output << 8 | f32 input << 12;
+// kinds: ieee 0, preservesign 1, positivezero 2, dynamic 3 (llvm/ADT/FloatingPointMode.h).
+DENORMAL_NAMES :: string.["ieee", "preservesign", "positivezero", "dynamic"];
+
+parse_denormal_entry :: () -> u64 {
+    outm: u64 = 0xFF;
+    for DENORMAL_NAMES if is_kw(it) { outm = cast(u64) it_index; break; }
+    if outm == 0xFF perr("expected denormal behavior kind (ieee, preservesign, positivezero, dynamic)");
+    next();
+    inm := outm;
+    if eat(.BAR) {
+        inm = 0xFF;
+        for DENORMAL_NAMES if is_kw(it) { inm = cast(u64) it_index; break; }
+        if inm == 0xFF perr("expected denormal behavior kind (ieee, preservesign, positivezero, dynamic)");
+        next();
+    }
+    return outm | (inm << 4);
+}
+
+parse_denormal_fpenv :: () -> u64 {
+    P.lx.ignore_colon = true;
+    defer P.lx.ignore_colon = false;
+    next();
+    expect(.LPAREN, "'('");
+    dflt: u64 = 0;
+    f32: u64 = 0xFFFF;
+    has_default := false;
+    if !is_kw("float") { dflt = parse_denormal_entry(); has_default = true; }
+    comma := eat(.COMMA);
+    if is_kw("float") {
+        if has_default && !comma perr("expected ',' before float:");
+        next();
+        expect(.COLON, "':' before float denormal_fpenv");
+        f32 = parse_denormal_entry();
+    }
+    expect(.RPAREN, "unterminated denormal_fpenv");
+    if f32 == 0xFFFF f32 = dflt;
+    return dflt | (f32 << 8);
 }
 
 // FPClassTest bits (llvm/ADT/FloatingPointMode.h)

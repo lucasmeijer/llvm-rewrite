@@ -1086,6 +1086,7 @@ tests/imported/llvm/Analysis/LoopAccessAnalysis/underlying-object-loop-varying-p
 tests/imported/llvm/Analysis/LoopAccessAnalysis/underlying-objects-1.ll::roundtrip
 tests/imported/llvm/Analysis/LoopAccessAnalysis/underlying-objects-2.ll::roundtrip
 tests/imported/llvm/Analysis/LoopAccessAnalysis/unknown-dependence-retry-with-runtime-checks.ll::roundtrip
+tests/imported/llvm/Analysis/LoopAccessAnalysis/unsafe-and-rt-checks-convergent.ll::roundtrip
 tests/imported/llvm/Analysis/LoopAccessAnalysis/unsafe-and-rt-checks.ll::roundtrip
 tests/imported/llvm/Analysis/LoopAccessAnalysis/wide-pointer-index-distance.ll::roundtrip
 tests/imported/llvm/Analysis/LoopAccessAnalysis/wrapping-pointer-versioning.ll::roundtrip
@@ -1927,6 +1928,7 @@ tests/imported/llvm/Transforms/EarlyCSE/and_or.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/atan.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/atomics.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/basic.ll::roundtrip
+tests/imported/llvm/Transforms/EarlyCSE/cannot-be-negative-zero-assert.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/commute.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/conditional.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/const-speculation.ll::roundtrip
@@ -2098,6 +2100,7 @@ tests/imported/llvm/Transforms/GVN/cond_br2.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/condprop.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/constexpr-vector-constainsundef-crash-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/constexpr-vector-constainsundef-crash.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/convergent.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/crash-no-aa.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/crash.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/critical-edge-split-indbr-pred-in-loop.ll::roundtrip
@@ -2113,6 +2116,7 @@ tests/imported/llvm/Transforms/GVN/freeze.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/gvn-loop-load-pre-order.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/int_sideeffect.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/intersect-empty-attr.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/intrinsics_in_cg.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/invariant.group.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/invariant.start.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/load-constant-mem.ll::roundtrip
@@ -2167,6 +2171,7 @@ tests/imported/llvm/Transforms/GVN/pr82884.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/pre-compare.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/pre-invalid-prof-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/pre-new-inst.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/pre-skip-convergent.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/propagate-ir-flags.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/ptrtoaddr.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/readattrs.ll::roundtrip
@@ -2329,6 +2334,7 @@ tests/imported/llvm/Transforms/GlobalOpt/malloc-promote-opaque-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/memcpy.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/memset-null.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/memset.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalOpt/metadata.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/musttail_cc.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/naked_functions.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/new-promote.ll::roundtrip
@@ -2436,6 +2442,7 @@ tests/imported/llvm/Transforms/IndVarSimplify/X86/variable-stride-ivs-1.ll::roun
 tests/imported/llvm/Transforms/IndVarSimplify/X86/verify-scev.ll::roundtrip
 tests/imported/llvm/Transforms/IndVarSimplify/X86/widen-nsw.ll::roundtrip
 tests/imported/llvm/Transforms/IndVarSimplify/X86/widening-vs-and-elimination.ll::roundtrip
+tests/imported/llvm/Transforms/IndVarSimplify/addrec_no_exec_on_every_iteration.ll::roundtrip
 tests/imported/llvm/Transforms/IndVarSimplify/ashr-expansion.ll::roundtrip
 tests/imported/llvm/Transforms/IndVarSimplify/ashr-tripcount.ll::roundtrip
 tests/imported/llvm/Transforms/IndVarSimplify/avoid-i0.ll::roundtrip
@@ -2973,6 +2980,8 @@ tests/imported/llvm/Transforms/InstCombine/X86/x86-addsub-inseltpoison.ll::round
 tests/imported/llvm/Transforms/InstCombine/X86/x86-addsub.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-amx-load-store.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-amx.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-avx2-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-avx2.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-avx512-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-avx512.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-crc32-demanded.ll::roundtrip
@@ -3185,6 +3194,7 @@ tests/imported/llvm/Transforms/InstCombine/ceil-shift.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ceil.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cmp-intrinsic.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cmp-x-vs-neg-x.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/combine-is.fpclass-and-fcmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/commutative-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/commutative-operation-over-phis.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/commutative-operation-over-selects.ll::roundtrip
@@ -3212,6 +3222,7 @@ tests/imported/llvm/Transforms/InstCombine/convergent.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/copysign-fneg-fabs.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cos-2.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/cos-sin-intrinsic.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/create-class-from-logic-fcmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ctlz-cttz-bitreverse.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ctlz-cttz-shifts.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ctlz-cttz.ll::roundtrip
@@ -3240,6 +3251,7 @@ tests/imported/llvm/Transforms/InstCombine/div-i1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/div.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/divceil.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/dont-distribute-phi.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/double-float-shrink-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/drop-callee-type-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/early_constfold_changes_IR.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/early_dce_clobbers_callgraph.ll::roundtrip
@@ -3260,6 +3272,7 @@ tests/imported/llvm/Transforms/InstCombine/fadd-fsub-factor.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fadd-maximum-minimum.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fast-basictest.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fast-math.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fcmp-denormals-are-zero.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-fadd-select.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-range-check-idiom.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fcmp-select-sign.ll::roundtrip
@@ -3271,6 +3284,7 @@ tests/imported/llvm/Transforms/InstCombine/fdiv.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ffs-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/float-shrink-compare.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fls.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fmod.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fmul-bool.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fmul-exp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fmul-exp2.ll::roundtrip
@@ -3460,6 +3474,7 @@ tests/imported/llvm/Transforms/InstCombine/invariant.group.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/invariant.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/invert-variable-mask-in-masked-merge-scalar.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/invert-variable-mask-in-masked-merge-vector.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/is_fpclass.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/isascii-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/isdigit-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/issue173148-sext-phi-select-infloop.ll::roundtrip
@@ -3496,6 +3511,7 @@ tests/imported/llvm/Transforms/InstCombine/loadstore-alignment.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/loadstore-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/log-pow-nofastmath.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/log-pow.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/log-to-intrinsic.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/log1p.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/logb.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/logical-select-inseltpoison.ll::roundtrip
@@ -3917,13 +3933,21 @@ tests/imported/llvm/Transforms/InstCombine/simple_phi_condition.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-bits-pointer.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-aggregates.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-extractelement.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-fadd.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-fma.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-fpext.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-fptrunc-round.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-fptrunc.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-frexp.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-fsub.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-insertelement.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-ldexp.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-maximum.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-maximumnum.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-maxnum.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-minimum.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-minimumnum.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass-minnum.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-demanded-fpclass.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/simplify-libcalls-erased.ll::roundtrip
@@ -4264,6 +4288,8 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/trunc_vec.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-type-constant-folding.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-undef-elts-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-undef-elts.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/vscale-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/vscale.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/X86/fp-nan-strictfp.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/abs_intrinsic.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/add-mask.ll::roundtrip
@@ -4289,6 +4315,7 @@ tests/imported/llvm/Transforms/InstSimplify/cmp-alloca-offsets.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/cmp-vec-fast-path.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/cmp_ext.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/cmp_of_min_max.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/constant-fold-fp-denormal.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/constantfold-add-nuw-allones-to-allones.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/constantfold-shl-nuw-C-to-C.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/constfold-constrained.ll::roundtrip
@@ -4310,6 +4337,7 @@ tests/imported/llvm/Transforms/InstSimplify/fcmp-select.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fdiv-strictfp.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fdiv.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/floating-point-arithmetic-strictfp.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/floating-point-compare.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fold-bfloat-half-bitcasts.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fold-vscale.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fp-nan.ll::roundtrip
@@ -4654,7 +4682,10 @@ tests/imported/llvm/Transforms/LoopDeletion/switch.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDeletion/update-scev.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDeletion/use-in-unreachable.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDeletion/zero-btc.ll::roundtrip
+tests/imported/llvm/Transforms/LoopDistribute/basic-with-memchecks.ll::roundtrip
+tests/imported/llvm/Transforms/LoopDistribute/basic.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDistribute/bounds-expansion-bug.ll::roundtrip
+tests/imported/llvm/Transforms/LoopDistribute/convergent-no-cross-partition-checks.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDistribute/crash-in-memcheck-generation.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDistribute/cross-partition-access.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDistribute/disable_nonforced.ll::roundtrip
@@ -4670,6 +4701,7 @@ tests/imported/llvm/Transforms/LoopDistribute/outside-use.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDistribute/pointer-phi-in-loop.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDistribute/pr28443.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDistribute/program-order.ll::roundtrip
+tests/imported/llvm/Transforms/LoopDistribute/scev-inserted-runtime-check.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDistribute/symbolic-stride.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDistribute/uncomputable-backedge-taken-count.ll::roundtrip
 tests/imported/llvm/Transforms/LoopDistribute/unknown-bounds-for-memchecks.ll::roundtrip
@@ -4738,6 +4770,7 @@ tests/imported/llvm/Transforms/LoopInstSimplify/basic.ll::roundtrip
 tests/imported/llvm/Transforms/LoopInstSimplify/pr55072.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/backward.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/cond-load.ll::roundtrip
+tests/imported/llvm/Transforms/LoopLoadElim/convergent.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/def-store-before-load.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/early-exit.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/forward.ll::roundtrip
@@ -5659,6 +5692,7 @@ tests/imported/llvm/Transforms/Reassociate/cse-pairs.ll::roundtrip
 tests/imported/llvm/Transforms/Reassociate/deadcode.ll::roundtrip
 tests/imported/llvm/Transforms/Reassociate/defeat-licm.ll::roundtrip
 tests/imported/llvm/Transforms/Reassociate/erase_inst_made_change.ll::roundtrip
+tests/imported/llvm/Transforms/Reassociate/factorize-again.ll::roundtrip
 tests/imported/llvm/Transforms/Reassociate/fast-AgressiveSubMove.ll::roundtrip
 tests/imported/llvm/Transforms/Reassociate/fast-ArrayOutOfBounds.ll::roundtrip
 tests/imported/llvm/Transforms/Reassociate/fast-MissedTree.ll::roundtrip
@@ -5772,6 +5806,7 @@ tests/imported/llvm/Transforms/SCCP/divrem.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/domtree-update.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/dont-zap-return.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/exact-flags.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/float-denormal-simplification.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/float-nan-simplification.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/float-phis.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/freeze.ll::roundtrip
@@ -5813,6 +5848,7 @@ tests/imported/llvm/Transforms/SCCP/logical-nuke.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/metadata.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/multiple_callbacks.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/musttail-call.ll::roundtrip
+tests/imported/llvm/Transforms/SCCP/no-fold-fcmp-dynamic-denormal-mode-issue114947.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/noipa.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/opaque-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/SCCP/openmp_parallel_for.ll::roundtrip
@@ -6612,6 +6648,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/2003-03-07-DominateProblem.ll::roundt
 tests/imported/llvm/Transforms/SimplifyCFG/2003-08-05-InvokeCrash.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/2003-08-17-BranchFold.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/2003-08-17-BranchFoldOrdering.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/2003-08-17-FoldSwitch-dbg.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/2003-08-17-FoldSwitch.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/2004-12-10-SimplifyCFGCrash.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/2005-06-16-PHICrash.ll::roundtrip
@@ -6703,6 +6740,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/common-code-hoisting.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/common-dest-folding.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/commondest-loopid.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/convergent.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/dbginfo.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/dce-cond-after-folding-terminator.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/debug-info-thread-phi.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/div-rem-pairs.ll::roundtrip

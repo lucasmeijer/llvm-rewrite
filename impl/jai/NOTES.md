@@ -19,9 +19,10 @@
   `llc.jai` and `llvm_link.jai` are still stubs; they should `#load` the same files.
 - Generated tables (do not edit, rerun the script): `gen_attrs.jai` (`gen/gen_attrs.py`, attribute kinds in
   TableGen order from Attributes.td), `gen_cc.jai` (`gen/gen_cc.py`, calling conventions), `gen_intrinsics.jai`
-  (`gen/gen_intrinsics.py`, intrinsic names from Intrinsics.td/IntrinsicsX86.td and the attributes the oracle gives
-  each intrinsic declared somewhere in `tests/`). An intrinsic declaration that isn't in the table fails loudly:
-  add a test that declares it and rerun the script.
+  (`gen/gen_intrinsics.py`: intrinsic names and overloadedness from Intrinsics.td/IntrinsicsX86.td, and the
+  attributes the oracle prints for every intrinsic declaration in `opt -S` of any file in `tests/`; a return
+  `range(iN ...)` is stored as `range(i@ ...)` and gets the return width at run time). An intrinsic that isn't in
+  the table fails loudly: add a test that uses it and rerun the script.
 
 ## Jai traps hit so far
 
@@ -45,6 +46,11 @@
   indices) instead of per-opcode side tables; fine for now (~64 bytes per instruction).
 - Specialized metadata (`!DILocation(...)` and the other `DI*` nodes), debug records (`#dbg_value`), `uselistorder`
   directives, funclet instructions, `callbr`, and the `extractelement`/`insertelement`/`shufflevector`/`ptrauth`
-  constant expressions are rejected with an error. Constant folding of constant expressions is minimal (no-op GEPs,
+  constant expressions are rejected with an error. These are most of the remaining L0.print-imported errors
+  (debug info alone is ~200 files).
+- No AutoUpgrade (llvm/lib/IR/AutoUpgrade.cpp) beyond intrinsic attributes: old intrinsic signatures
+  (`llvm.lifetime.start` with a size, `llvm.masked.load` with an alignment argument, ...), missing or wrong name
+  mangling (`@llvm.smin(` → `@llvm.smin.i32`), and module-flag upgrades are the bulk of the remaining
+  L0.print-imported diffs. Constant folding of constant expressions is minimal (no-op GEPs,
   casts of poison/undef/null); real folding belongs with InstSimplify/ConstantFolding.
 - Erased values keep their rows (`v_kind = DEAD`); nothing is compacted.
