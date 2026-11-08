@@ -838,5 +838,5 @@ fn loop_simplify_run(fv: i32) -> u32 {
         k++;
     }
     if !changed { return PA_ALL; }
-    return ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_LOOPS);
+    return ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_LOOPS) | ((1 as u32) << A_SCEV);
 }

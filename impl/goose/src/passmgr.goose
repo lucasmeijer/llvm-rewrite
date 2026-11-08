@@ -29,6 +29,10 @@ import memoryssa;
 import apint;
 import sccp;
 import globalsaa;
+import lpm;
+import tli;
+import scev;
+import loopnest;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -68,6 +72,13 @@ let P_PRINT_MEMORYSSA = 151;      // arg 1: no-ensure-optimized-uses
 let P_PRINT_MEMORYSSA_WALKER = 152;
 let P_VERIFY_MEMORYSSA = 153;
 let P_SCCP = 160;
+let P_PRINT_SCEV = 118;
+// loop passes
+let P_PRINT_LOOPNEST = 200;
+let P_NOOP_LOOP = 201;
+let P_PRINT_LOOP = 202;
+let P_LREQUIRE = 203;      // require<analysis> in a loop pipeline (arg = analysis id; none are cached)
+let P_LINVALIDATE = 204;
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
 // (PassInfoMixin::isRequired: printers, verifier, require/invalidate, adaptors).
@@ -96,6 +107,9 @@ let PASS_TABLE: const u8[:][] = [
     "f:print<memoryssa-walker>:152:1",
     "f:verify<memoryssa>:153:1",
     "f:sccp:160:0",
+    "f:print<scalar-evolution>:118:1",
+    "l:print<loopnest>:200:1",
+    "l:no-op-loop:201:0",
 ];
 
 // LLVM pass class names, for -opt-bisect-limit messages.
@@ -130,6 +144,7 @@ fn analysis_id(name: const u8[:]) -> i64 {
     if name == "cycles" { return A_CYCLES; }
     if name == "memoryssa" { return A_MEMORYSSA; }
     if name == "aa" { return A_AA; }
+    if name == "scalar-evolution" { return A_SCEV; }
     return -1;
 }
 
@@ -141,6 +156,7 @@ let PK_FUNCTION = 1;    // function(...) adaptor
 let PK_LOOP = 2;
 let PK_CGSCC = 3;
 let PK_PASS = 4;
+let PK_LPM = 5;         // a nested loop(...) inside a loop pipeline (LoopPassManager)
 
 struct PNode { kind: u8, pass: i32, arg: i32, required: bool, name: i32, first: i32, next: i32 }
 var pnodes: PNode[>..];
@@ -308,7 +324,12 @@ recursive fn parse_function_elem(e: i32) -> i32 {
             parse_function_list(fpm, pelems[e].first);
             return fpm;
         }
-        if name == "loop" || name == "loop-mssa" { not_implemented(name); }
+        if name == "loop" || name == "loop-mssa" {
+            let ad = new_loop_adaptor(name == "loop-mssa", pelems[e].name);
+            parse_loop_list(ad, pelems[e].first);
+            check_loop_nest_mode(ad);
+            return ad;
+        }
         if name == "machine-function" { not_implemented(name); }
         perr_pipeline(str("invalid use of '", name, "' pass as function pipeline"));
     }
@@ -356,7 +377,13 @@ recursive fn parse_function_elem(e: i32) -> i32 {
     let r = pass_row(name, 'f');
     if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
     if llvm_knows(name, 'f') { not_implemented(name); }
-    if is_loop_pass_name(name) { not_implemented(name); }
+    if is_loop_pass_name(name) {
+        // LOOP_PASS / LOOPNEST_PASS in a function pipeline: its own adaptor (createFunctionToLoopPassAdaptor)
+        let ad = new_loop_adaptor(false, pelems[e].name);
+        pnodes[ad].first = parse_loop_elem(e);
+        check_loop_nest_mode(ad);
+        return ad;
+    }
     perr_pipeline(str("unknown function pass '", name, "'"));
     return -1;
 }
@@ -366,6 +393,50 @@ recursive fn parse_function_list(parent: i32, first: i32) {
     var e = first;
     while e >= 0 {
         let c = parse_function_elem(e);
+        last = link_child(parent, last, c);
+        e = pelems[e].next;
+    }
+}
+
+// FunctionToLoopPassAdaptor node: pass = the first of its two canonicalization pass nodes (loop-simplify,
+// then lcssa, linked by next), arg = UseMemorySSA.
+fn new_loop_adaptor(mssa: bool, name: i32) -> i32 {
+    let ls = new_pnode(PK_PASS, P_LOOP_SIMPLIFY as i32, 0, false, intern("loop-simplify"));
+    let lc = new_pnode(PK_PASS, P_LCSSA as i32, 0, false, intern("lcssa"));
+    pnodes[ls].next = lc;
+    return new_pnode(PK_LOOP, ls, if mssa { 1 } else { 0 }, true, name);
+}
+
+// Loop-nest mode (only loop-nest passes) isn't ported: no loop-nest pass is.
+fn check_loop_nest_mode(ad: i32) { }
+
+// parseLoopPass
+recursive fn parse_loop_elem(e: i32) -> i32 {
+    let name = sbytes(pelems[e].name);
+    if pelems[e].first >= 0 {
+        if name == "loop" {
+            let lpm = new_pnode(PK_LPM, 0, 0, true, pelems[e].name);
+            parse_loop_list(lpm, pelems[e].first);
+            return lpm;
+        }
+        perr_pipeline(str("invalid use of '", name, "' pass as loop pipeline"));
+    }
+    if starts_with(name, "require<") || starts_with(name, "invalidate<") {
+        if llvm_knows(name, 'l') { not_implemented(name); }
+        perr_pipeline(str("unknown loop pass '", name, "'"));
+    }
+    let r = pass_row(name, 'l');
+    if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
+    if llvm_knows(name, 'l') || llvm_knows(name, 'n') || is_param_name(name, "licm") || is_param_name(name, "lnicm") { not_implemented(name); }
+    perr_pipeline(str("unknown loop pass '", name, "'"));
+    return -1;
+}
+
+recursive fn parse_loop_list(parent: i32, first: i32) {
+    var last: i32 = -1;
+    var e = first;
+    while e >= 0 {
+        let c = parse_loop_elem(e);
         last = link_child(parent, last, c);
         e = pelems[e].next;
     }
@@ -451,7 +522,12 @@ fn parse_pass_pipeline(text: const u8[:]) -> i32 {
             pelems.push(PElem { name: intern("function"), first: first, next: -1 });
             top = w;
         } else if is_loop_pass_name(fname) {
-            not_implemented(fname);
+            let mssa = is_param_name(fname, "licm");
+            let lp = pelems.len as i32;
+            pelems.push(PElem { name: intern(if mssa { "loop-mssa" } else { "loop" }), first: first, next: -1 });
+            let w = pelems.len as i32;
+            pelems.push(PElem { name: intern("function"), first: lp, next: -1 });
+            top = w;
         } else {
             let what = if pelems[first].first >= 0 { "pipeline" } else { "pass" };
             perr_pipeline(str("unknown ", what, " name '", fname, "'"));
@@ -474,7 +550,7 @@ fn should_run(n: i32, unit: const u8[:]) -> bool {
     bisect_count++;
     let run = bisect_count <= bisect_limit;
     write_stderr(str("BISECT: ", if run { "" } else { "NOT " }, "running pass (", bisect_count, ") ",
-        pass_class_name(pnodes[n].pass as i64), " on ", unit, "\n"));
+        name_no_bracket(sbytes(pnodes[n].name)), " on ", unit, "\n"));
     return run;
 }
 
@@ -487,6 +563,8 @@ fn invalidate_function(fv: i32, preserved: u32) {
     if (preserved & (1 << A_LOOPS)) == 0 { li_invalidate(fv); }
     if (preserved & (1 << A_CYCLES)) == 0 { ci_invalidate(fv); }
     if (preserved & (1 << A_MEMORYSSA)) == 0 || (preserved & (1 << A_DOMTREE)) == 0 || (preserved & (1 << A_AA)) == 0 { mssa_invalidate(fv); }
+    // ScalarEvolution::invalidate: also when the domtree or loops go
+    if (preserved & (1 << A_SCEV)) == 0 || (preserved & (1 << A_DOMTREE)) == 0 || (preserved & (1 << A_LOOPS)) == 0 { scev_invalidate(fv); }
 }
 
 fn require_analysis(fv: i32, a: i64) {
@@ -496,6 +574,7 @@ fn require_analysis(fv: i32, a: i64) {
     else if a == A_CYCLES { ci_get(fv); }
     else if a == A_MEMORYSSA { mssa_get(fv); }
     else if a == A_AA { aa_begin(fv); }
+    else if a == A_SCEV { scev_get(fv); }
 }
 
 fn run_function_pass(n: i32, fv: i32) -> u32 {
@@ -526,8 +605,79 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_PRINT_MEMORYSSA_WALKER => { mssa_print_walker(fv); return PA_ALL; },
         P_VERIFY_MEMORYSSA => { mssa_get(fv); return PA_ALL; },
         P_SCCP => { return sccp_run(fv); },
+        P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
         _ => { fatal("internal: unknown function pass id"); return PA_ALL; },
     }
+}
+
+// A loop pass on loop l (PassModel::run); returns the preserved set.
+fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
+    let p = pnodes[n].pass as i64;
+    match p {
+        P_PRINT_LOOPNEST => { print_loopnest(l); return PA_ALL; },
+        P_NOOP_LOOP => { return PA_ALL; },
+        _ => { fatal("internal: unknown loop pass id"); return PA_ALL; },
+    }
+}
+
+// LoopPassManager::runSinglePass + PassInstrumentation (bisect, optnone). Returns -1 (as u64) when skipped.
+fn loop_single_pass(n: i32, l: i32, fv: i32) -> u32, bool {
+    if !should_run(n, str("loop %", loop_name(l), " in function ", val_name(fv))) { return PA_ALL, false; }
+    if !pnodes[n].required && aset_has(alist_fn(globs[glob_of(fv)].attrs), AK_OptimizeNone) { return PA_ALL, false; }
+    return run_loop_pass(n, l, fv), true;
+}
+
+// LoopPassManager::runWithoutLoopNestPasses over the children of node n (an adaptor or a nested loop(...)).
+recursive fn run_loop_list(n: i32, l: i32, fv: i32) -> u32 {
+    var pa = PA_ALL;
+    var c = pnodes[n].first;
+    while c >= 0 {
+        var ppa = PA_ALL;
+        var ran = true;
+        if pnodes[c].kind == PK_LPM { ppa = run_loop_list(c, l, fv); }
+        else { let r, ok = loop_single_pass(c, l, fv); ppa = r; ran = ok; }
+        if ran {
+            pa &= ppa;
+            if lpm_skip { break; }
+        }
+        c = pnodes[c].next;
+    }
+    return pa;
+}
+
+// FunctionToLoopPassAdaptor::run
+fn run_loop_adaptor(n: i32, fv: i32) {
+    // the canonicalization pipeline (LoopSimplifyPass, LCSSAPass), a required function pass manager
+    var pa = PA_ALL;
+    var c = pnodes[n].pass;
+    while c >= 0 {
+        if should_run(c, val_name(fv)) && !aset_has(alist_fn(globs[glob_of(fv)].attrs), AK_OptimizeNone) {
+            let p = run_function_pass(c, fv);
+            invalidate_function(fv, p);
+            pa &= p;
+        }
+        c = pnodes[c].next;
+    }
+    li_get(fv);
+    if li_ntop(fv) == 0 { invalidate_function(fv, pa); return; }
+    // LoopStandardAnalysisResults: AA, AC, DT, LI, SE, TLI, TTI (and MSSA)
+    dt_get(fv, DT_DOM);
+    scev_get(fv);
+    if pnodes[n].arg != 0 { not_implemented("loop-mssa (MemorySSA)"); }
+    tli_cur_fn = fv;
+    lpm_nest_mode = false;
+    lpm_append_function_loops(fv);
+    loop {
+        let l = lpm_wl_pop();
+        lpm_cur = l;
+        lpm_skip = false;
+        let ppa = run_loop_list(n, l, fv);
+        pa &= ppa;
+        if lpm_wl_empty() { break; }
+    }
+    lpm_cur = -1;
+    pa |= ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_LOOPS) | ((1 as u32) << A_SCEV);
+    invalidate_function(fv, pa);
 }
 
 // Runs a function-level node (a pass or a nested function pass manager) on fv.
@@ -537,7 +687,8 @@ recursive fn run_function_node(n: i32, fv: i32) {
         while c >= 0 { run_function_node(c, fv); c = pnodes[c].next; }
         return;
     }
-    if !should_run(n, str("function (", val_name(fv), ")")) { return; }
+    if pnodes[n].kind == PK_LOOP { run_loop_adaptor(n, fv); return; }
+    if !should_run(n, val_name(fv)) { return; }
     // OptNoneInstrumentation::shouldRun (after OptBisect has counted the pass, as both callbacks run)
     if !pnodes[n].required && aset_has(alist_fn(globs[glob_of(fv)].attrs), AK_OptimizeNone) { return; }
     let pa = run_function_pass(n, fv);
@@ -567,7 +718,7 @@ recursive fn run_module_node(n: i32, m: i32) {
         return;
     }
     let p = pnodes[n].pass as i64;
-    if !should_run(n, "module") { return; }
+    if !should_run(n, "[module]") { return; }
     if p == P_VERIFY_MODULE || p == P_NOOP_MODULE { return; }
     // module passes: call ap_pool_reset() after each one (apint.goose: no AP outlives its pass)
     if p == P_IPSCCP {

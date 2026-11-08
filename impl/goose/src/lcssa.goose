@@ -186,5 +186,5 @@ fn lcssa_run(fv: i32) -> u32 {
     var changed = false;
     for k in li_ntop(fv) { if form_lcssa_recursively(li_top(fv, k)) { changed = true; } }
     if !changed { return PA_ALL; }
-    return PA_CFG;
+    return PA_CFG | ((1 as u32) << A_SCEV);
 }
