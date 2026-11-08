@@ -8781,6 +8781,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue-inlined.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/hoist-from-addresstaken-block.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-from-addresstaken-block.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-sink-swifterror-store.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-sink-swifterror-store.ll::roundtrip
@@ -8796,6 +8797,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/implied-cond-matching.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/implied-cond-matching.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/implied-cond.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/implied-cond.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/indirectbr.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/indirectbr.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/inline-asm-sink.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/inline-asm-sink.ll::roundtrip
@@ -8970,6 +8972,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/statepoint-invoke-unwind.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/statepoint-invoke-unwind.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/suppress-zero-branch-weights.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/suppress-zero-branch-weights.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/switch-branch-fold-indirectbr-102351.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-branch-fold-indirectbr-102351.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dead-default-lookup-table.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dead-default-lookup-table.ll::roundtrip
@@ -8981,6 +8984,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/switch-dup-bbs.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-dup-bbs.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switch-masked-bits.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-masked-bits.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/switch-on-cmp.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-on-cmp.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switch-on-const.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-on-const.ll::roundtrip
@@ -9002,6 +9006,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/switch-to-select-two-case.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-to-select-two-case.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switch-transformations-no-lut.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-transformations-no-lut.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/switch-umin.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switch-umin.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/switchToSelect-domtree-preservation-edgecase.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/switchToSelect-domtree-preservation-edgecase.ll::roundtrip
@@ -9054,6 +9059,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/unsigned-multiplication-will-overflow
 tests/imported/llvm/Transforms/SimplifyCFG/unsigned-multiplication-will-overflow.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/volatile-phioper.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/volatile-phioper.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/wc-widen-block.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/wc-widen-block.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/wineh-unreachable.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/wineh-unreachable.ll::roundtrip
