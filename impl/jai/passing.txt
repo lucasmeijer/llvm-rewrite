@@ -9908,6 +9908,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/X86/switch_to_lookup_table.ll::roundt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/two-entry-phi-fold-unpredictable.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/unreachable-blocks.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/unreachable-blocks.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/annotations.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/annotations.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/assume.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/assume.ll::roundtrip
@@ -9996,6 +9997,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/fold-branch-to-common-dest-pseudoprob
 tests/imported/llvm/Transforms/SimplifyCFG/fold-branch-to-common-dest-pseudoprobe.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/fold-branch-to-common-dest-two-preds-cost.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/fold-branch-to-common-dest-two-preds-cost.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/fold-branch-to-common-dest.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/fold-branch-to-common-dest.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/fold-debug-info.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/fold-debug-info.ll::roundtrip
@@ -10007,6 +10009,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/fold-two-entry-phi-node-with-two-bloc
 tests/imported/llvm/Transforms/SimplifyCFG/fold-two-entry-phi-node-with-two-blocks-profmd.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/guards.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/guards.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/hoist-cb-diff-attrs.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-cb-diff-attrs.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-code-with-unreachable.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-code-with-unreachable.ll::roundtrip
@@ -10018,6 +10021,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip-pseudoprobe.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip-pseudoprobe.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-common-skip.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue-inlined.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue-inlined.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-dbgvalue.ll::roundtrip
@@ -10025,6 +10029,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/hoist-from-addresstaken-block.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-from-addresstaken-block.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-sink-swifterror-store.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-sink-swifterror-store.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/hoist-with-metadata.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/hoist-with-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/implied-and-or.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/implied-and-or.ll::roundtrip
@@ -10090,6 +10095,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/merge-empty-return-blocks.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-empty-return-blocks.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/merge-phis-in-switch.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-phis-in-switch.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/mmra.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/mmra.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/multiple-phis.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/multiple-phis.ll::roundtrip
@@ -10179,6 +10185,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/simplifyUnreachable-degenerate-condit
 tests/imported/llvm/Transforms/SimplifyCFG/simplifyUnreachable-degenerate-conditional-branch-with-matching-destinations.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/sink-and-convert-switch.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/sink-and-convert-switch.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/sink-cb-diff-attrs.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/sink-cb-diff-attrs.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/sink-inf-loop.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/sink-inf-loop.ll::roundtrip
@@ -10189,11 +10196,13 @@ tests/imported/llvm/Transforms/SimplifyCFG/speculate-call.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-call.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-dbgvalue.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-dbgvalue.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/speculate-derefable-load.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-derefable-load.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-math.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-math.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-store-opaque-pointer.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-store-opaque-pointer.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/speculate-store.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-store.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-vector-insert-extract.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/speculate-vector-insert-extract.ll::roundtrip

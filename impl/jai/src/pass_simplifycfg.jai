@@ -252,10 +252,8 @@ is_safe_to_speculatively_execute_cx :: (i: Value_Id, ctx: Value_Id, ac: *Assumpt
         if !is_unordered(i) return false;   // mustSuppressSpeculation
         fa := attr_list_fn(glob(inst_fn(i)).attrs);
         if attr_set_has(fa, .SanitizeThread) || attr_set_has(fa, .SanitizeAddress) || attr_set_has(fa, .SanitizeHWAddress) return false;
-        ty := vtype(i);
-        if !type_is_sized(ty) || type_kind(ty) == .SVECTOR return false;
-        visited: [..] Value_Id; visited.allocator = temp;
-        return deref_and_aligned(op(i, 0), inst(i).align, dl_type_store_size(ty), ctx, *visited, 16);
+        q: Simplify_Query; q.ac = ac; q.cxt = ctx; q.have_tli = false;
+        return is_dereferenceable_and_aligned_pointer_ty(op(i, 0), vtype(i), inst(i).align, q);
     }
     return is_safe_to_speculatively_execute(i);
 }
