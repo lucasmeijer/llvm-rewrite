@@ -2064,11 +2064,17 @@ fn split_block_and_insert_if_then(cond: i32, before: i32, unreachable: bool, wei
 // ---------------------------------------------------------------------------------------------
 // SimplifyCondBranchToCondBranch, tryWidenCondBranchToCondBranch
 
+// llvm::isWidenableBranch (GuardUtils.cpp parseWidenableBranch)
 fn is_widenable_branch(bi: i32) -> bool {
-    // m_LogicalAnd(m_Value(), m_Intrinsic<experimental_widenable_condition>()) or the reverse
     let c = br_cond(bi);
-    if !m_logical(c, true) { return false; }
-    return inst_iid(lg_a) == IID_experimental_widenable_condition || inst_iid(lg_b) == IID_experimental_widenable_condition;
+    if !has_one_use(c) { return false; }
+    if inst_iid(c) == IID_experimental_widenable_condition { return true; }
+    if !is_inst_op(c, OP_AND) { return false; }
+    let a = op(c, 0);
+    let b = op(c, 1);
+    if inst_iid(a) == IID_experimental_widenable_condition && has_one_use(a) { return true; }
+    if inst_iid(b) == IID_experimental_widenable_condition && has_one_use(b) { return true; }
+    return false;
 }
 
 fn try_widen_cond_branch(pbi: i32, bi: i32) -> bool {
@@ -2077,7 +2083,33 @@ fn try_widen_cond_branch(pbi: i32, bi: i32) -> bool {
     if !is_widenable_branch(pbi) || itb != inst_parent(bi) || single_pred(inst_parent(bi)) < 0 { return false; }
     if cu_has_phis(ifb) { return false; }
     if block_nsucc(ifb) != 0 { return false; }
-    scf_not_ported("tryWidenCondBranchToCondBranch");
+    let bb = inst_parent(bi);
+    fn no_side_effects(b: i32) -> bool {
+        var i = block_first(b);
+        while i >= 0 { if inst_may_write_memory(i) || inst_may_have_side_effects(i) { return false; } i = inst_next(i); }
+        return true;
+    }
+    // BasicBlock::getTerminatingDeoptimizeCall
+    fn deopt_terminated(b: i32) -> bool {
+        let t = block_last(b);
+        if t < 0 || iop(t) != OP_RET || t == block_first(b) { return false; }
+        let p = inst_prev(t);
+        return p >= 0 && iop(p) == OP_CALL && called_function(p) >= 0 && func_iid(called_function(p)) == IID_experimental_deoptimize;
+    }
+    for k in [1, 0] {
+        let old = br_succ(bi, k);
+        if old != ifb && deopt_terminated(old) && no_side_effects(bb) {
+            block_remove_predecessor(old, bb, false);
+            br_set_succ(bi, k, ifb);
+            if cu_dtu {
+                var ups: DTUpdate[>..<] = [];
+                cu_upd(ups, DT_INSERT, bb, ifb);
+                cu_upd(ups, DT_DELETE, bb, old);
+                dtu_apply_updates(ups);
+            }
+            return true;
+        }
+    }
     return false;
 }
 
@@ -4070,8 +4102,79 @@ fn simplify_switch_of_cmp_intrinsic(si: i32) -> bool {
     let id = inst_iid(cmp);
     if id != IID_scmp && id != IID_ucmp { return false; }
     if !has_one_use(cmp) { return false; }
-    scf_not_ported("simplifySwitchOfCmpIntrinsic");
-    return false;
+    var ws: u64[>..<] = [];
+    let has_w = pd_extract(si, ws);
+    if !has_w { ws.clear(); for q in 4 { ws.push(0); } }
+    fn sval(c: i32) -> bool, i64 {
+        let x = ci_ap(c);
+        if ap_sig_bits(x) > 64 { return false, 0; }
+        return true, ap_sext64_checked(x);
+    }
+    var res: i64 = 0;
+    var succ: i32 = -1;
+    var other: i32 = -1;
+    var sw: u64 = 0;
+    var ow: u64 = 0;
+    var unr: i32 = -1;
+    let n = sw_ncases(si);
+    if n == 2 {
+        var missing: i64[>..<] = [1, 0, -1];
+        succ = sw_default(si);
+        sw = ws[0];
+        for k in n {
+            let ok, v = sval(sw_case_val(si, k));
+            if !ok { return false; }
+            let p = position(missing, v);
+            if p < 0 { return false; }
+            missing[p] = missing[missing.len - 1];
+            missing.pop();
+            let d = sw_case_dest(si, k);
+            if other >= 0 && other != d { return false; }
+            other = d;
+            ow += ws[k + 1];
+        }
+        res = missing[0];
+    } else if n == 3 && cu_default_dest_unreachable(si) {
+        unr = sw_default(si);
+        for k in n {
+            let d = sw_case_dest(si, k);
+            let w = ws[k + 1];
+            if other < 0 || other == d { other = d; ow += w; }
+            else if succ < 0 { succ = d; sw = w; }
+            else if succ == d {
+                let t = succ; succ = other; other = t;
+                let tw = sw; sw = ow; ow = tw;
+            } else { return false; }
+        }
+        for k in n {
+            let ok, v = sval(sw_case_val(si, k));
+            if !ok || (v != 1 && v != 0 && v != -1) { return false; }
+            if sw_case_dest(si, k) == succ { res = v; break; }
+        }
+    } else {
+        return false;
+    }
+    var pred: i64 = if res == 1 { P_UGT } else if res == 0 { P_EQ } else { P_ULT };
+    if id == IID_scmp { pred = if res == 1 { P_SGT } else if res == 0 { P_EQ } else { P_SLT }; }
+    let bb = inst_parent(si);
+    let ic = cu_build_icmp_before(pred, op(cmp, 0), op(cmp, 1), "", si);
+    let br = create_inst(OP_CONDBR, T_VOID, [ic, succ, other]);
+    inst_insert_before(br, si);
+    let loc = inst_get_md(si, MDK_DBG_SC);
+    if loc >= 0 { inst_set_md(br, MDK_DBG_SC, loc); }
+    if has_w { pd_set(br, [sw & 0xffffffff, ow & 0xffffffff], false, false); }
+    let um = inst_get_md(si, mdk_unpredictable());
+    if um >= 0 { inst_set_md(br, mdk_unpredictable(), um); }
+    block_remove_predecessor(other, bb, false);
+    if unr >= 0 { block_remove_predecessor(unr, bb, false); }
+    scf_erase(si);
+    scf_erase(cmp);
+    if cu_dtu && unr >= 0 {
+        var ups: DTUpdate[>..<] = [];
+        cu_upd(ups, DT_DELETE, bb, unr);
+        dtu_apply_updates(ups);
+    }
+    return true;
 }
 
 fn simplify_switch_when_umin(si: i32) -> bool {
@@ -4080,8 +4183,32 @@ fn simplify_switch_when_umin(si: i32) -> bool {
     let a = mm_a;
     let k = mm_b;
     if vals[k].kind != VK_CINT || ty_is_vector(vals[k].ty) { return false; }
-    scf_not_ported("simplifySwitchWhenUMin");
-    return false;
+    var ups: DTUpdate[>..<] = [];
+    swp_begin(si);
+    let bb = inst_parent(si);
+    let kv = ci_ap(k);
+    var j: i64 = 0;
+    while j < sw_ncases(si) {
+        if !ap_ugt(ci_ap(sw_case_val(si, j)), kv) { j++; continue; }
+        let dead = sw_case_dest(si, j);
+        block_remove_predecessor(dead, bb, false);
+        cu_upd(ups, DT_DELETE, bb, dead);
+        swp_remove_case(si, j);
+    }
+    let ci = sw_find_case_value(si, k);
+    if !cu_default_dest_unreachable(si) || ci < 0 {
+        swp_end();
+        if cu_dtu { dtu_apply_updates(ups); }
+        return ups.len > 0;
+    }
+    let unr = sw_default(si);
+    swp_replace_default_dest(si, ci);
+    swp_remove_case(si, ci);
+    set_op(si, 0, a);
+    swp_end();
+    cu_upd(ups, DT_DELETE, bb, unr);
+    if cu_dtu { dtu_apply_updates(ups); }
+    return true;
 }
 
 // ---------------------------------------------------------------------------------------------

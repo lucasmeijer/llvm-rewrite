@@ -33,6 +33,7 @@ import dinfo;
 import earlycse;
 import instident;
 import fpu;
+import parser;
 
 var cu_dtu: bool = false;
 
@@ -128,7 +129,13 @@ fn cu_block_rauw(old: i32, nw: i32) {
         u = nu;
     }
     block_replace_successors_phi_uses_with(old, old, nw);
-    if cu_has_address_taken(old) { cu_not_ported("replacing the uses of a block whose address is taken"); }
+    // BlockAddress::handleOperandChangeImpl: the block address now names the new block (or its uses move to
+    // the new block's existing block address)
+    loop {
+        let ba = cu_block_address(old);
+        if ba < 0 { break; }
+        const_handle_operand_change(ba, old, nw);
+    }
 }
 
 // Instruction::isSpecialTerminator: invoke, callbr, catchswitch, cleanupret, catchret... (the EH and callbr ones)
@@ -321,9 +328,20 @@ fn cu_detach_dead_blocks(bbs: const i32[:], ups: DTUpdate[>..<]&, keep_one_input
     }
 }
 
+// ~BasicBlock with its address taken: the BlockAddress's uses become inttoptr (i32 1), the constant is destroyed
+fn cu_drop_block_address(bb: i32) {
+    let ba = cu_block_address(bb);
+    if ba < 0 { return; }
+    let one = c_int(T_I32, 1);
+    let repl = ce_cast(OP_INTTOPTR, one, vals[ba].ty);
+    rauw_with_constants(ba, repl);
+    cst_remove(ba);
+    cu_destroy_block_address(ba);
+}
+
 // BasicBlock::eraseFromParent for an emptied block
 fn cu_erase_block(bb: i32) {
-    if cu_has_address_taken(bb) { cu_not_ported("deleting a block whose address is taken"); }
+    cu_drop_block_address(bb);
     block_erase(bb);
 }
 
@@ -333,7 +351,7 @@ fn cu_delete_dead_blocks(bbs: const i32[:], keep_one_input_phis: bool) {
     cu_detach_dead_blocks(bbs, ups, keep_one_input_phis);
     cu_apply(ups);
     for bb in bbs {
-        if cu_has_address_taken(bb) { cu_not_ported("deleting a block whose address is taken"); }
+        cu_drop_block_address(bb);
         if cu_dtu { dtu_delete_bb(bb); } else { block_erase(bb); }
     }
 }
