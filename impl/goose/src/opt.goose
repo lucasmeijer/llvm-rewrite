@@ -6,6 +6,7 @@ import parser;
 import printer;
 import flags;
 import passmgr;
+import layoutstats;
 
 // Triple::normalize for the triples the tests use: empty components become "unknown".
 fn triple_normalize(t: const u8[:], out: u8[>..]&) {
@@ -28,6 +29,7 @@ fn main() {
     var have_pipeline = false;
     var emit_text = false;
     var disable_output = false;
+    var layout_stats = false;
     var i = 1;
     while i < av.len {
         var a = av[i];
@@ -35,6 +37,7 @@ fn main() {
         if starts_with(a, "--") && a.len > 2 { a = a[1..]; }
         if a == "-S" { emit_text = true; }
         else if a == "-disable-output" { disable_output = true; }
+        else if a == "-goose-layout-stats" { layout_stats = true; }
         else if a == "-o" { i++; if i < av.len { output.clear(); output.append(av[i]); } }
         else if starts_with(a, "-o=") { output.clear(); output.append(a[3..]); }
         else if starts_with(a, "-passes=") {
@@ -94,6 +97,7 @@ fn main() {
         run_pipeline(root, cur_module);
     }
     if errbuf.len > 0 { write_stderr(errbuf); }
+    if layout_stats { layout_stats_print(); }
     if disable_output { return; }
     print_module(cur_module);
     if output.len == 0 || output == "-" { write_stdout(out); }
