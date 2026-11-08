@@ -783,6 +783,24 @@ recursive fn parse_constant(ty: i32) -> i32 {
             return c_splat(ty, v);
         }
         if w == "blockaddress" { return parse_blockaddress(ty); }
+        if w == "ptrauth" {
+            // ConstantPtrAuth: (ptr, i32 key, i64 disc = 0, ptr addrdisc = null, ptr deactivation = null)
+            lex();
+            expect_punct('(', "'(' in constant ptrauth expression");
+            let pt = parse_type();
+            let p = parse_value(pt);
+            expect_punct(',', "comma in constant ptrauth expression");
+            let kt = parse_type();
+            let key = parse_value(kt);
+            var disc = c_int(T_I64, 0);
+            var ad = c_null(T_PTR);
+            var ds = c_null(T_PTR);
+            if eat_punct(',') { let t2 = parse_type(); disc = parse_value(t2); }
+            if eat_punct(',') { let t3 = parse_type(); ad = parse_value(t3); }
+            if eat_punct(',') { let t4 = parse_type(); ds = parse_value(t4); }
+            expect_punct(')', "')' in constant ptrauth expression");
+            return cst_get(VK_PTRAUTH, vals[p].ty, cst_none(), [p, key, disc, ad, ds]);
+        }
         if w == "dso_local_equivalent" || w == "no_cfi" {
             // DSOLocalEquivalent::get / NoCFIValue::get
             let kd = if w == "no_cfi" { VK_NOCFI } else { VK_DSOLOCAL };

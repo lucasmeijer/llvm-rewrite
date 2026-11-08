@@ -637,6 +637,16 @@ recursive fn put_constant(v: i32) {
         putc('>');
         return;
     }
+    if k == VK_PTRAUTH {
+        put("ptrauth (");
+        var n = 2;
+        if !is_null_value(op(v, 2)) { n = 3; }
+        if vals[op(v, 3)].kind != VK_CNULL { n = 4; }
+        if vals[op(v, 4)].kind != VK_CNULL { n = 5; }
+        for i in n { if i > 0 { put(", "); } put_operand(op(v, i), true); }
+        putc(')');
+        return;
+    }
     if k == VK_DSOLOCAL || k == VK_NOCFI {
         put(if k == VK_DSOLOCAL { "dso_local_equivalent " } else { "no_cfi " });
         put_operand(op(v, 0), false);
