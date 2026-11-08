@@ -197,7 +197,7 @@ call_add_fn_attr :: (i: Value_Id, k: Attr_Kind) {
 
 // ---------------------------------------------------------------- terminators (InstructionCombining.cpp)
 
-// visitReturnInst. Not ported: SimplifyDemandedFPClass (fails loudly when it applies).
+// visitReturnInst
 ic_visit_return :: (i: Value_Id) -> Value_Id {
     if nops(i) == 0 return NONE;
     rv := op(i, 0);
@@ -212,7 +212,11 @@ ic_visit_return :: (i: Value_Id) -> Value_Id {
             if v != NONE return ic_replace_operand(i, 0, v);
         }
     }
-    if attr_set_has(ret_attrs, .NoFPClass) fatal("instcombine: SimplifyDemandedFPClass (nofpclass return) is not supported yet");
+    if !is_fp_math_type(rt) return NONE;   // isNoFPClassCompatibleType
+    a := attr_set_find(ret_attrs, .NoFPClass);
+    if !a || cast(u32) a.ival == FC_NONE return NONE;
+    known: Known_FP_Class;
+    if ic_simplify_demanded_fp_class(i, 0, fc_not(cast(u32) a.ival), *known, ic_q(i), 0) return i;
     return NONE;
 }
 

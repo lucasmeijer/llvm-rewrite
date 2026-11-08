@@ -134,9 +134,9 @@ ic_visit_fmul :: (i: Value_Id) -> Value_Id {
     for side: 0..1 {
         x := op(i, cast(u32) side); l := op(i, cast(u32) (1 - side));
         if call_iid(l) == IID_LDEXP && has_one_use(l) && has_fmf(i, FMF_REASSOC) && has_fmf(l, FMF_REASSOC) && pm_fp_one(op(l, 0))
-            fatal("instcombine: X * ldexp(1.0, Y) is not supported yet");
+            return ic_replace_inst_uses_with(i, icb_intrinsic(IID_LDEXP, .[vtype(x), vtype(op(l, 1))], .[x, op(l, 1)], "", i));
     }
-    // SimplifyDemandedInstructionFPClass(I): not ported
+    if ic_simplify_demanded_instruction_fp_class(i) return i;
     return NONE;
 }
 
