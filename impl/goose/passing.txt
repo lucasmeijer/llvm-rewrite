@@ -1547,6 +1547,7 @@ tests/imported/llvm/Analysis/ValueTracking/known-bits-from-operator-constexpr.ll
 tests/imported/llvm/Analysis/ValueTracking/known-bits-from-range-md.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/known-bits.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/known-bits.ll::roundtrip
+tests/imported/llvm/Analysis/ValueTracking/known-fpclass.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/known-fpclass.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/known-non-equal.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/known-non-equal.ll::roundtrip
@@ -1587,6 +1588,7 @@ tests/imported/llvm/Analysis/ValueTracking/phi-known-nonzero.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/phi-known-nonzero.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/phi-self.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/phi-self.ll::roundtrip
+tests/imported/llvm/Analysis/ValueTracking/powi-nneg.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/powi-nneg.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/pr23011.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/pr75505.ll::roundtrip
@@ -4835,6 +4837,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/avx512.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/basictest.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/binop-identity-undef.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/binop-identity-undef.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/bitcast.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/bitcast.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/bitcount.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/bitreverse.ll::roundtrip
@@ -4929,9 +4932,11 @@ tests/imported/llvm/Transforms/InstSimplify/and-or-icmp-nullptr.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/and-or-icmp-nullptr.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/and-or-icmp-zero.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/and-or-icmp-zero.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/and-or-implied-cond.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/and-or-implied-cond.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/and.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/and.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/assume-fcmp-constant-implies-class.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/assume-fcmp-constant-implies-class.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/assume-non-zero.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/assume-non-zero.ll::roundtrip
@@ -4946,6 +4951,7 @@ tests/imported/llvm/Transforms/InstSimplify/bswap.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/bswap.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/call.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/canonicalize.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/cast-unsigned-icmp-cmp-0.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/cast-unsigned-icmp-cmp-0.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/cast.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/cast.ll::roundtrip
@@ -4980,6 +4986,7 @@ tests/imported/llvm/Transforms/InstSimplify/div-by-0-guard-before-umul_ov.ll::op
 tests/imported/llvm/Transforms/InstSimplify/div-by-0-guard-before-umul_ov.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/div.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/div.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/domcondition.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/domcondition.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/exact-nsw-nuw.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/exact-nsw-nuw.ll::roundtrip
@@ -4987,15 +4994,20 @@ tests/imported/llvm/Transforms/InstSimplify/exp10.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/extract-element.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/extract-vector.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/extract-vector.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/fast-math-strictfp.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/fast-math-strictfp.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/fast-math.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/fast-math.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/fcmp-select.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/fcmp-select.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fcmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fdiv-strictfp.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fdiv.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/fdiv.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/floating-point-arithmetic-strictfp.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/floating-point-arithmetic-strictfp.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/floating-point-arithmetic.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/floating-point-compare.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/floating-point-compare.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fminmax-folds.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/fminmax-folds.ll::roundtrip
@@ -5130,11 +5142,13 @@ tests/imported/llvm/Transforms/InstSimplify/select-icmp.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/select-icmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/select-implied.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/select-implied.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/select-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/select-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/select-logical.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/select-logical.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/select-maxmin.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/select-maxmin.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/select.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/select.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/select_or_and.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/select_or_and.ll::roundtrip
@@ -5156,7 +5170,9 @@ tests/imported/llvm/Transforms/InstSimplify/smul_fix.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/srem.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/srem.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/strictfp-fadd.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/strictfp-fsub.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/strictfp-fsub.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/strictfp-sqrt-nonneg.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/strictfp-sqrt-nonneg.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/structured-gep.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/structured-gep.ll::roundtrip
