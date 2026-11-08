@@ -70,7 +70,9 @@ fn visit_call(ci: i32) -> i32 {
         ic_call_set_does_not_throw(ci);
         return ci;
     }
-    if call_iid(ci) == 0 { return visit_call_base(ci); }
+    let iid = call_iid(ci);
+    if iid == 0 { return visit_call_base(ci); }
+    if iid == IID_assume { return visit_assume(ci); }
     if ic_experiment_lenient { errs(str("LENIENT ", intr_name(call_iid(ci) as i64), "\n")); return -1; }
     var nm: u8[>..] = [];
     nm.append("the InstCombine visitor for the intrinsic ");
@@ -102,11 +104,23 @@ fn visit_call_base(ci: i32) -> i32 {
     var changed = false;
     if ty_kind(vals[ci].ty) == TK_PTR && is_alloc_like_fn(ci) { ic_not_ported("annotateAnyAllocSite"); }
     let nargs = cb_nargs(ci);
+    var argnos: i64[>..<] = [];
     for k in nargs {
         let v = cb_arg(ci, k);
         if ty_kind(vals[v].ty) == TK_PTR {
-            ic_not_ported("visitCallBase pointer arguments (nonnull inference)");
+            let deref = aset_int(alist_param(insts[inst_of(ci)].attrs, k), AK_Dereferenceable) > 0;
+            if cb_param_has_attr(ci, k, AK_NonNull) || (deref && !null_pointer_is_defined(inst_func(ci), ptr_as(vals[v].ty))) {
+                let res = ic_simplify_non_null_operand(v, deref, 0);
+                if res >= 0 { ic_replace_operand(ci, k, res); changed = true; }
+            } else {
+                kb_cxt = ci;
+                if is_known_non_zero(v, 0) { argnos.push(k); }
+            }
         }
+    }
+    if argnos.len > 0 {
+        for k in argnos { ic_call_add_param_attr(ci, k, attr_enum(AK_NonNull)); }
+        changed = true;
     }
     let callee = cb_callee(ci);
     let cf = called_function(ci);
@@ -143,4 +157,65 @@ fn ic_simplify_non_null_operand(v: i32, deref: bool, depth: i64) -> i32 {
 fn ic_merge_store_into_successor(si: i32) -> bool {
     ic_not_ported("mergeStoreIntoSuccessor");
     return false;
+}
+
+// AttributeList::addParamAttribute(Ctx, ArgNo, Attr) on a call site
+fn ic_call_add_param_attr(ci: i32, k: i64, a: i32) {
+    let ii = inst_of(ci);
+    let l = insts[ii].attrs;
+    let n = if l == 0 { 0 } else { alists[l].n as i64 };
+    var sets: i32[>..<] = [];
+    let need = k + 3;
+    for j in 0..(if n > need { n } else { need }) {
+        var s: i32 = 0;
+        if j < n { s = alist_runs[alists[l].at + j]; }
+        if j == k + 2 {
+            var xs: i32[>..<] = [];
+            for q in aset_n(s) { xs.push(aset_attr(s, q)); }
+            xs.push(a);
+            s = aset_get(xs);
+        }
+        sets.push(s);
+    }
+    insts[ii].attrs = alist_get(sets);
+}
+
+// visitCallInst for llvm.assume: the generic intrinsic steps (memory intrinsics, vector results, commutative
+// operands, constrained FP: none apply), the `case Intrinsic::assume` of the switch, then visitCallBase.
+fn visit_assume(ii: i32) -> i32 {
+    if cb_nbundles(ii) > 0 { ic_not_ported("llvm.assume operand bundles"); }
+    let c = cb_arg(ii, 0);
+    if m_logical_and(c) {
+        let a = lg_a; let b = lg_b;
+        icb_assumption(a);
+        icb_assumption(b);
+        return ic_erase(ii);
+    }
+    let n = m_not(c);
+    if n >= 0 && m_logical_or(n) {
+        let a = lg_a; let b = lg_b;
+        icb_assumption(icb_not(a, ""));
+        icb_assumption(icb_not(b, ""));
+        return ic_erase(ii);
+    }
+    if is_inst_op(c, OP_ICMP) && inst_pred(c) == 33 && m_zero(op(c, 1)) && ty_kind(vals[op(c, 0)].ty) == TK_PTR {
+        ic_not_ported("CreateNonnullAssumption");
+    }
+    if n >= 0 && is_inst_op(n, OP_TRUNC) && m_ptrtoint_or_addr(op(n, 0)) >= 0 { ic_not_ported("CreateAlignmentAssumption"); }
+    if is_inst_op(c, OP_ICMP) && inst_pred(c) == 32 && m_zero(op(c, 1)) && bo(op(c, 0), OP_AND) && m_constant_int(op(op(c, 0), 1)) >= 0 &&
+       m_ptrtoint_or_addr(op(op(c, 0), 0)) >= 0 {
+        ic_not_ported("CreateAlignmentAssumption");
+    }
+    if (vals[c].kind == VK_CINT && !ty_is_vector(vals[c].ty)) || is_undef_or_poison(c) {
+        if vals[c].kind != VK_CINT || cint_lo(c) == 0 { ic_create_non_terminator_unreachable(ii); }
+        return ic_erase(ii);
+    }
+    if ac_fn >= 0 && ac_fn == inst_func(ii) { ac_update_affected(ii); }
+    return visit_call_base(ii);
+}
+
+// IRBuilder::CreateAssumption(Cond)
+fn icb_assumption(c: i32) -> i32 {
+    let call = ic_new_intrinsic(IID_assume, [], [c]);
+    return icb_insert(call, "");
 }
