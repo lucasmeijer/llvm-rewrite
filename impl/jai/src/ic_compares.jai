@@ -3684,8 +3684,9 @@ ic_fold_icmp_using_known_bits :: (i: Value_Id) -> Value_Id {
             kzi := ap_not(k0.zero);
             if kb_is_zero(k1) {
                 lhs := op0;
-                okl, lhsc := pm_apint(op(op0, 1));
-                if !(ic_is_binop(op0, .AND) && okl) || !ap_eq(lhsc, kzi) lhs = op0;
+                oka, _, andc := pm_binop(op0, .AND);
+                okl, lhsc := pm_apint(andc);
+                if !(oka && okl) || !ap_eq(lhsc, kzi) lhs = op0;
                 else lhs = op(op0, 0);
                 if ic_is_binop(lhs, .SHL) {
                     okp, c1 := pm_power2_ap(op(lhs, 0));

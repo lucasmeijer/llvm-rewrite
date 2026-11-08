@@ -11,3 +11,4 @@
 #load "ic_demanded.jai";
 #load "ic_compares.jai";
 #load "ic_shifts.jai";
+#load "ic_andorxor.jai";

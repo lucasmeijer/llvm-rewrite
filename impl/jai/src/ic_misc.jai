@@ -24,9 +24,9 @@ ic_visit :: (i: Value_Id) -> Value_Id {
         case .FDIV; return ic_visit_fdiv(i);
         case .FREM; return ic_visit_frem(i);
         case .FNEG; return ic_visit_fneg(i);
-        case .AND; #through;
-        case .OR; #through;
-        case .XOR; return ic_visit_bitwise(i);
+        case .AND; return ic_visit_and(i);
+        case .OR; return ic_visit_or(i);
+        case .XOR; return ic_visit_xor(i);
         case .SHL; return ic_visit_shl(i);
         case .LSHR; return ic_visit_lshr(i);
         case .ASHR; return ic_visit_ashr(i);
@@ -120,18 +120,6 @@ ic_visit_simplify_only :: (i: Value_Id) -> Value_Id {
     return NONE;
 }
 
-// visitAnd / visitOr / visitXor: InstSimplify, SimplifyAssociativeOrCommutative, foldVectorBinop,
-// foldBinopWithPhiOperands, SimplifyDemandedInstructionBits (visitXor: after foldNot etc., not ported).
-// Not ported: everything after SimplifyDemandedInstructionBits.
-ic_visit_bitwise :: (i: Value_Id) -> Value_Id {
-    v := simplify_instruction(i, ic_q(i));
-    if v != NONE return ic_replace_inst_uses_with(i, v);
-    if ic_simplify_associative_or_commutative(i) return i;
-    r := ic_fold_vector_binop(i); if r != NONE return r;
-    r = ic_fold_binop_with_phi_operands(i); if r != NONE return r;
-    if inst_op(i) != .XOR && ic_simplify_demanded_instruction_bits(i) return i;
-    return NONE;
-}
 
 // getFlippedStrictnessPredicateAndConstant (ValueTracking.cpp)
 flipped_strictness_predicate_and_constant :: (pred: u8, c: Value_Id) -> (bool, u8, Value_Id) {
