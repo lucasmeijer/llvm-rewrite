@@ -40,20 +40,7 @@ block_has_address_taken :: (b: Value_Id) -> bool {
     return false;
 }
 
-// getUniquePredecessor (duplicate edges from one block allowed)
-block_unique_predecessor :: (b: Value_Id) -> Value_Id {
-    p: Value_Id = NONE;
-    u := ir.v_first_use[b];
-    while u != NONE {
-        user := ir.u_user[u];
-        u = ir.u_next[u];
-        if !is_inst(user) || !is_terminator(inst_op(user)) continue;
-        q := inst(user).parent;
-        if p != NONE && p != q return NONE;
-        p = q;
-    }
-    return p;
-}
+// getUniquePredecessor: block_unique_predecessor (ic_core.jai)
 // getUniqueSuccessor
 block_unique_successor :: (b: Value_Id) -> Value_Id {
     t := block_terminator(b);
@@ -95,21 +82,7 @@ inst_move_before_dbg :: (i: Value_Id, pos: Value_Id) {
 
 // Instruction::clone: operands (with phi blocks / case values), flags, payload, attributes and all metadata; no
 // name, no parent, no debug records
-inst_clone :: (i: Value_Id) -> Value_Id {
-    n := nops(i);
-    c := new_inst(inst_op(i), vtype(i), n);
-    r := inst(i).*;
-    r.parent = NONE; r.prev = NONE; r.next = NONE; r.records = 0;
-    inst(c).* = r;
-    if n > 0 for k: 0..n-1 {
-        ir.u_aux[op_use(c, k)] = ir.u_aux[op_use(i, k)];
-        set_op(c, k, op(i, k));
-    }
-    all: [..] Kind_Md; all.allocator = temp;
-    get_all_metadata(i, *all);
-    for all set_metadata(c, it.kind, it.md);
-    return c;
-}
+inst_clone :: (i: Value_Id) -> Value_Id { return ic_clone_inst(i); }   // ic_core.jai
 
 // AssumptionCache::registerAssumption
 ac_register_assumption :: (ac: *Assumption_Cache, ci: Value_Id) {

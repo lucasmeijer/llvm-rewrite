@@ -592,11 +592,7 @@ should_fold_cond_branches_to_common_destination :: (bi: Value_Id, pbi: Value_Id)
     return false, NONE, .AND, false;
 }
 
-// Instruction::dropUBImplyingAttrsAndMetadata
-drop_ub_implying_attrs_and_metadata :: (i: Value_Id) {
-    drop_ub_implying_metadata(i);
-    if is_call_base(i) && inst(i).attrs != 0 fatal("dropUBImplyingAttrsAndMetadata of a call is not implemented yet");
-}
+// Instruction::dropUBImplyingAttrsAndMetadata: drop_ub_implying_attrs_and_metadata (ic_core.jai)
 
 // performBranchToCommonDestFolding(BI, PBI, DTU = nullptr, MSSAU, TTI = nullptr)
 perform_branch_to_common_dest_folding :: (bi: Value_Id, pbi: Value_Id, mssau: *Mssa_Updater) -> bool {
