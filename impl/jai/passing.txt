@@ -7555,6 +7555,7 @@ tests/imported/llvm/Transforms/LICM/PR24013.ll::opt
 tests/imported/llvm/Transforms/LICM/PR24013.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/Preserve-LCSSA.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/alias-set-tracker-loss.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/allow-speculation-option.ll::opt
 tests/imported/llvm/Transforms/LICM/allow-speculation-option.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/argmemonly-call.ll::opt
 tests/imported/llvm/Transforms/LICM/argmemonly-call.ll::roundtrip
@@ -7600,6 +7601,7 @@ tests/imported/llvm/Transforms/LICM/gep-reassociate.ll::opt
 tests/imported/llvm/Transforms/LICM/gep-reassociate.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/hoist-add-sub.ll::opt
 tests/imported/llvm/Transforms/LICM/hoist-add-sub.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/hoist-alloc.ll::opt
 tests/imported/llvm/Transforms/LICM/hoist-alloc.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/hoist-binop.ll::opt
 tests/imported/llvm/Transforms/LICM/hoist-binop.ll::roundtrip
@@ -7617,7 +7619,9 @@ tests/imported/llvm/Transforms/LICM/hoist-metadata.ll::opt
 tests/imported/llvm/Transforms/LICM/hoist-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/hoist-nounwind.ll::opt
 tests/imported/llvm/Transforms/LICM/hoist-nounwind.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/hoist-phi-metadata.ll::opt
 tests/imported/llvm/Transforms/LICM/hoist-phi-metadata.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/hoist-phi.ll::opt
 tests/imported/llvm/Transforms/LICM/hoist-phi.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/hoist-profdata.ll::opt
 tests/imported/llvm/Transforms/LICM/hoist-profdata.ll::roundtrip
@@ -7641,6 +7645,7 @@ tests/imported/llvm/Transforms/LICM/lcssa-ssa-promoter.ll::opt
 tests/imported/llvm/Transforms/LICM/lcssa-ssa-promoter.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/licm-ci.ll::opt
 tests/imported/llvm/Transforms/LICM/licm-ci.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/lnicm-sink.ll::opt
 tests/imported/llvm/Transforms/LICM/lnicm-sink.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/loop-sink-phi-in-preheader.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/loopsink-phi.ll::roundtrip
@@ -7662,6 +7667,7 @@ tests/imported/llvm/Transforms/LICM/pr35342.ll::opt
 tests/imported/llvm/Transforms/LICM/pr35342.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/pr36228.ll::opt
 tests/imported/llvm/Transforms/LICM/pr36228.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/pr37323.ll::opt
 tests/imported/llvm/Transforms/LICM/pr37323.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/pr42969.ll::opt
 tests/imported/llvm/Transforms/LICM/pr42969.ll::roundtrip

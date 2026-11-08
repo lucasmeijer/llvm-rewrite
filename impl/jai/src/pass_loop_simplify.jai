@@ -358,7 +358,10 @@ li_make_loop_invariant :: (li: *Loop_Info, l: Loop_Id, v: Value_Id, changed: *bo
     n := nops(i);
     if n > 0 for k: 0..n-1 if !li_make_loop_invariant(li, l, op(i, k), changed, pt, mssau) return false;
     inst_move_before(i, pt);
-    if mssau fatal("Loop::makeLoopInvariant with MemorySSA (MSSAU->moveToPlace) is not implemented yet");
+    if mssau {
+        a := mssa_access_of(mssau.mssa, i);
+        if a >= 0 mssau_move_to_place(mssau, a, inst_block(pt), .BEFORE_TERMINATOR);
+    }
     keep_prof := original_parent == li_header(li, l);
     drop_ub_implying_attrs_and_unknown_metadata(i, keep_prof);
     if !keep_prof && inst_op(i) == .SELECT set_explicitly_unknown_branch_weights_if_profiled(i, "LoopInfo");
@@ -569,7 +572,7 @@ simplify_one_loop :: (li: *Loop_Info, l: Loop_Id, worklist: *[..] Loop_Id, dt: *
                     dt_set_idom(dt, c, dt.nodes[n].idom);
                 }
                 dt_erase_node(dt, eb);
-                if mssau fatal("loop-simplify: MemorySSAUpdater::removeBlocks is not implemented yet");
+                if mssau mssau_remove_blocks(mssau, .[eb]);
                 block_remove_predecessor(get_successor(bi, 0), eb, preserve_lcssa);
                 block_remove_predecessor(get_successor(bi, 1), eb, preserve_lcssa);
                 erase_block_with_insts(eb);
@@ -670,7 +673,10 @@ perform_branch_to_common_dest_folding :: (bi: Value_Id, pbi: Value_Id, mssau: *M
         if inst_op(pn) != .PHI break;
         phi_add_incoming(pn, phi_incoming_value_for_block(pn, bb), pred);
     }
-    if mssau fatal("foldBranchToCommonDest with MemorySSA is not implemented yet");
+    if mssau {
+        mp := mssa_access_of(mssau.mssa, unique_succ);
+        if mp >= 0 mphi_add_incoming(mssau.mssa, mp, mphi_value_for_block(mssau.mssa, mp, bb), pred);
+    }
     // extractPredSuccWeights
     md_weights: [2] u64;
     have_weights := false;

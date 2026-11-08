@@ -190,7 +190,7 @@ Pass_Kind :: enum u8 {
     // loops (loop_info.jai, cycle_info.jai)
     PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
     // loop passes (loop_pm.jai)
-    NO_OP_LOOP; LOOP_ROTATE; LICM;
+    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM;
     // ScalarEvolution (scev_print.jai)
     PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS;
     // TargetTransformInfo (tti.jai)
@@ -263,6 +263,7 @@ PASS_TABLE :: Pass_Info.[
     .{"no-op-loop", .LOOP, .NO_OP_LOOP, false, .DOMTREE},
     .{"loop-rotate", .LOOP, .LOOP_ROTATE, false, .DOMTREE},
     .{"licm", .LOOP, .LICM, false, .DOMTREE},
+    .{"lnicm", .LOOP, .LNICM, false, .DOMTREE},   // a LoopNest pass
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
@@ -296,6 +297,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     // passes whose parameters are parsed by the pass itself (LOOP_PASS_WITH_PARAMS)
     if begins_with(name, "loop-rotate<") && name[name.count - 1] == #char ">" return lookup_pass("loop-rotate");
     if begins_with(name, "licm<") && name[name.count - 1] == #char ">" return lookup_pass("licm");
+    if begins_with(name, "lnicm<") && name[name.count - 1] == #char ">" return lookup_pass("lnicm");
     return null;
 }
 
@@ -407,7 +409,13 @@ unknown_pass :: (name: string) {
 parse_function_pass :: (fpm: s32, last: *s32, e: s32) {
     el := pipeline.elems[e];
     if el.has_children {
-        if el.name == "function" fatal("pass pipeline: nested function pipelines are not supported");
+        if el.name == "function" {
+            // a nested FunctionPassManager: its passes run in order with invalidation after each, and it preserves
+            // all function analyses itself, so it is the same as its passes inlined into this pipeline
+            c := el.first_child;
+            while c >= 0 { parse_function_pass(fpm, last, c); c = pipeline.elems[c].next; }
+            return;
+        }
         if el.name == "loop" || el.name == "loop-mssa" {
             la := new_node(.LOOP_ADAPTOR, null, el.name);
             pipeline.nodes[la].use_mssa = el.name == "loop-mssa";
@@ -454,6 +462,7 @@ parse_loop_pass :: (lpm: s32, last: *s32, e: s32) {
 // isLoopPassName (UseMemorySSA for licm)
 is_loop_pass_name :: (name: string) -> bool, bool {
     if name == "licm" || begins_with(name, "licm<") return true, true;
+    if name == "lnicm" || begins_with(name, "lnicm<") return true, true;   // isLoopNestPassName
     p := lookup_pass(name);
     return p != null && p.level == .LOOP, false;
 }

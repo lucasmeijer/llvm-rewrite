@@ -12,8 +12,10 @@
 // Uses must_execute.jai (ICFLoopSafetyInfo), alias_set_tracker.jai, ssa_updater.jai (LoadAndStorePromoter),
 // mssa_updater.jai.
 //
-// Not ported (fail loudly): ControlFlowHoister (-licm-control-flow-hoisting=1), LNICM (lnicm / sinkRegionForLoopNest),
-// funclet colours, sinking calls with funclet bundles, optimization remarks (never printed without -pass-remarks).
+// ControlFlowHoister is a struct of LICM state (cfh_*); its DenseMaps are vectors in insertion order (every LLVM
+// iteration over them is order-independent or asserts a unique match).
+// Not ported (fail loudly): sinking calls with funclet bundles,
+// optimization remarks (never printed without -pass-remarks).
 
 licm_opts: struct {
     disable_promotion := false;            // -disable-licm-promotion
@@ -58,16 +60,24 @@ Licm :: struct {
     opt_counter: u32;
     is_sink: bool;
     too_many_mem_acc: bool;
+    loop_nest_mode: bool;
+    outermost: Loop_Id = NONE;   // sinkRegion's OutermostLoop (LoopNestMode)
+    // ControlFlowHoister
+    cfh_dest: [..] Cfh_Pair;        // HoistDestinationMap (block -> hoisted block)
+    cfh_branches: [..] Cfh_Pair;    // HoistableBranches (branch -> common successor)
 }
+Cfh_Pair :: struct { a: Value_Id; b: Value_Id; }
 
 // LICMPass::run
-licm_run :: (node: *Pass_Node, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater) -> Preserved {
-    if !lar.mssa fatal("LICM requires MemorySSA (loop-mssa)");
+// LICMPass::run / LNICMPass::run (loop_nest_mode: on the outermost loop of a nest)
+licm_run :: (node: *Pass_Node, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater, loop_nest_mode := false) -> Preserved {
+    if !lar.mssa fatal(ifx loop_nest_mode then "LNICM requires MemorySSA (loop-mssa)" else "LICM requires MemorySSA (loop-mssa)");
     allow := true;
     // parseLICMOptions
     nm := node.name;
-    if begins_with(nm, "licm<") {
-        params := slice(nm, 5, nm.count - 6);
+    prefix := ifx loop_nest_mode then "lnicm<" else "licm<";
+    if begins_with(nm, prefix) {
+        params := slice(nm, prefix.count, nm.count - prefix.count - 1);
         while params.count {
             p := params;
             k := find_index_from_left(params, #char ";");
@@ -83,6 +93,7 @@ licm_run :: (node: *Pass_Node, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updat
     c.aar = aa_results_for(lar.fn);
     c.tti = tti_get(lar.fn);
     c.allow_speculation = allow;
+    c.loop_nest_mode = loop_nest_mode;
     c.opt_cap = cast(u32) licm_opts.mssa_opt_cap;
     c.no_acc_cap = cast(u32) licm_opts.mssa_no_acc_for_promotion_cap;
     if !licm_run_on_loop(*c) return PRESERVE_ALL;
@@ -129,9 +140,12 @@ licm_run_on_loop :: (c: *Licm) -> bool {
     safety: Loop_Safety_Info;
     lsi_compute(*safety, li, l);
     c.safety = *safety;
-    if licm_opts.control_flow_hoisting fatal("LICM: -licm-control-flow-hoisting (ControlFlowHoister) is not implemented yet");
+    c.cfh_dest.allocator = temp; c.cfh_branches.allocator = temp;
     header := li_header(li, l);
-    if li_has_dedicated_exits(li, l) changed |= licm_sink_region(c, dt_node(c.dt, header));
+    if li_has_dedicated_exits(li, l) {
+        if c.loop_nest_mode changed |= licm_sink_region_for_loop_nest(c);
+        else changed |= licm_sink_region(c, dt_node(c.dt, header));
+    }
     c.is_sink = false;
     if preheader != NONE changed |= licm_hoist_region(c, dt_node(c.dt, header), preheader);
 
@@ -150,7 +164,7 @@ licm_run_on_loop :: (c: *Licm) -> bool {
                 local_promoted := false;
                 cands := licm_collect_promotion_candidates(c);
                 for cands
-                    local_promoted |= licm_promote_loop_accesses_to_scalars(c, it.ptrs, *exits, *insert_pts, *mssa_insert_pts, *pic, it.has_reads_outside, preheader);
+                    local_promoted |= licm_promote_loop_accesses_to_scalars(c, it.ptrs, *exits, *insert_pts, *mssa_insert_pts, *pic, it.has_reads_outside, li_loop_preheader(li, l));
                 promoted |= local_promoted;
                 if !local_promoted break;
             }
@@ -180,6 +194,27 @@ collect_children_in_loop :: (dt: *Dom_Tree, n: s32, li: *Loop_Info, l: Loop_Id, 
         }
         i += 1;
     }
+}
+
+// sinkRegionForLoopNest
+licm_sink_region_for_loop_nest :: (c: *Licm) -> bool {
+    changed := false;
+    cur := c.l;
+    w: Loop_Worklist;
+    lwl_init(*w);
+    lwl_insert(*w, cur);
+    subs: [..] Loop_Id; subs.allocator = temp;
+    for li_subloops(c.li, cur) array_add(*subs, it);
+    append_loops_to_worklist(c.li, subs, *w);
+    while !lwl_empty(*w) {
+        l := lwl_pop(*w);
+        c.l = l;
+        c.outermost = cur;
+        changed |= licm_sink_region(c, dt_node(c.dt, li_header(c.li, l)));
+    }
+    c.l = cur;
+    c.outermost = NONE;
+    return changed;
 }
 
 // eraseInstruction
@@ -258,16 +293,18 @@ licm_hoist_region :: (c: *Licm, n: s32, preheader: Value_Id) -> bool {
     li := c.li; l := c.l;
     worklist: [..] Value_Id; worklist.allocator = temp;
     loop_blocks_rpo(li, l, *worklist);
+    hoisted: [..] Value_Id; hoisted.allocator = temp;   // HoistedInstructions
     changed := false;
     for bb: worklist {
-        if licm_in_sub_loop(c, bb) continue;
+        if !c.loop_nest_mode && licm_in_sub_loop(c, bb) continue;
         i := block_first(bb);
         while i != NONE {
             nx := inst_next(i);
             defer i = nx;
             if licm_has_loop_invariant_operands(c, i) && licm_can_sink_or_hoist_inst(c, i, true) &&
                licm_is_safe_to_execute_unconditionally(c, i, block_terminator(preheader)) {
-                licm_hoist(c, i, preheader);
+                licm_hoist(c, i, cfh_get_or_create_hoisted_block(c, bb));
+                array_add(*hoisted, i);
                 changed = true;
                 continue;
             }
@@ -286,23 +323,147 @@ licm_hoist_region :: (c: *Licm, n: s32, preheader: Value_Id) -> bool {
                 set_metadata(product, 0, get_metadata(i, 0));
                 rauw_with_metadata(i, product);
                 licm_erase_instruction(c, i);
-                licm_hoist(c, recip, preheader);
+                licm_hoist(c, recip, cfh_get_or_create_hoisted_block(c, bb));
+                array_add(*hoisted, recip);
                 changed = true;
                 continue;
             }
             is_invariant_start := !has_uses(i) && call_iid(i) == IID_INVARIANT_START;
             if (is_invariant_start || is_guard(i)) && licm_has_loop_invariant_operands(c, i) &&
                lsi_is_guaranteed_to_execute(c.safety, i, c.dt, l) && lsi_does_not_write_memory_before(c.safety, i, l) {
-                licm_hoist(c, i, preheader);
+                licm_hoist(c, i, cfh_get_or_create_hoisted_block(c, bb));
+                array_add(*hoisted, i);
                 changed = true;
                 continue;
             }
-            // (PHI hoisting needs the ControlFlowHoister, disabled by default)
-            if licm_hoist_arithmetics(c, i, preheader) { changed = true; continue; }
+            if inst_op(i) == .PHI && cfh_can_hoist_phi(c, i) {
+                for k: 0..cast(s64) nops(i) - 1 phi_set_block(i, cast(u32) k, cfh_get_or_create_hoisted_block(c, phi_block(i, cast(u32) k)));
+                licm_hoist(c, i, cfh_get_or_create_hoisted_block(c, bb));
+                changed = true;
+                continue;
+            }
+            if licm_hoist_arithmetics(c, i, li_loop_preheader(li, l)) { changed = true; continue; }
+            if inst_op(i) == .CONDBR cfh_register_possibly_hoistable_branch(c, i);
+        }
+    }
+    // rehoist instructions hoisted into conditional blocks that don't dominate their uses
+    hoist_point: Value_Id = NONE;
+    if licm_opts.control_flow_hoisting {
+        for < i: hoisted {
+            all := true;
+            u := ir.v_first_use[i];
+            while u != NONE { if !dt_dominates_use(c.dt, i, u) { all = false; break; } u = ir.u_next[u]; }
+            if all continue;
+            dominator := c.dt.nodes[dt_idom(c.dt, dt_node(c.dt, inst_block(i)))].block;
+            if hoist_point == NONE || !dt_dominates(c.dt, inst_block(hoist_point), dominator) hoist_point = block_terminator(dominator);
+            licm_move_instruction_before(c, i, hoist_point);
+            hoist_point = i;
+            changed = true;
         }
     }
     if mssa_opts.verify mssa_verify(c.mssa);
     return changed;
+}
+
+// ControlFlowHoister::registerPossiblyHoistableBranch
+cfh_register_possibly_hoistable_branch :: (c: *Licm, bi: Value_Id) {
+    if !licm_opts.control_flow_hoisting || !licm_has_loop_invariant_operands(c, bi) return;
+    td := get_successor(bi, 0);
+    fd := get_successor(bi, 1);
+    if !li_contains(c.li, c.l, td) || !li_contains(c.li, c.l, fd) || td == fd return;
+    ts: [..] Value_Id; ts.allocator = temp; block_successors(td, *ts);
+    fs: [..] Value_Id; fs.allocator = temp; block_successors(fd, *fs);
+    has :: (l: [] Value_Id, b: Value_Id) -> bool { for l if it == b return true; return false; }
+    common: Value_Id = NONE;
+    if has(ts, fd) common = fd;
+    else if has(fs, td) common = td;
+    else {
+        inter: [..] Value_Id; inter.allocator = temp;
+        for ts if has(fs, it) && !has(inter, it) array_add(*inter, it);
+        if inter.count == 1 common = inter[0];
+        else if inter.count > 1 {
+            for b: fn_blocks(block_fn(td)) if has(inter, b) { common = b; break; }
+        }
+    }
+    if common != NONE && dt_dominates_inst_block(c.dt, bi, common) {
+        for * c.cfh_branches if it.a == bi { it.b = common; return; }
+        array_add(*c.cfh_branches, .{bi, common});
+    }
+}
+
+// ControlFlowHoister::canHoistPHI
+cfh_can_hoist_phi :: (c: *Licm, pn: Value_Id) -> bool {
+    if !licm_opts.control_flow_hoisting || !licm_has_loop_invariant_operands(c, pn) return false;
+    bb := inst_block(pn);
+    preds: [..] Value_Id; preds.allocator = temp;
+    block_predecessors(bb, *preds);
+    set: [..] Value_Id; set.allocator = temp;
+    for preds { dup := false; for x: set if x == it { dup = true; break; } if !dup array_add(*set, it); }
+    if set.count != preds.count return false;
+    erase :: (s: *[..] Value_Id, b: Value_Id) { for s.* if it == b { array_ordered_remove_by_index(s, it_index); return; } }
+    for p: c.cfh_branches {
+        if p.b != bb continue;
+        s0 := get_successor(p.a, 0); s1 := get_successor(p.a, 1);
+        if s0 == bb { erase(*set, inst_block(p.a)); erase(*set, s1); }
+        else if s1 == bb { erase(*set, inst_block(p.a)); erase(*set, s0); }
+        else { erase(*set, s0); erase(*set, s1); }
+    }
+    return set.count == 0;
+}
+
+// ControlFlowHoister::getOrCreateHoistedBlock
+cfh_get_or_create_hoisted_block :: (c: *Licm, bb: Value_Id) -> Value_Id {
+    if !licm_opts.control_flow_hoisting return li_loop_preheader(c.li, c.l);
+    for c.cfh_dest if it.a == bb return it.b;
+    bi: Value_Id = NONE;
+    for p: c.cfh_branches {
+        if bb != p.b && (get_successor(p.a, 0) == bb || get_successor(p.a, 1) == bb) { bi = p.a; break; }
+    }
+    initial_ph := li_loop_preheader(c.li, c.l);
+    if bi == NONE {
+        array_add(*c.cfh_dest, .{bb, initial_ph});
+        return initial_ph;
+    }
+    td := get_successor(bi, 0);
+    fd := get_successor(bi, 1);
+    common: Value_Id = NONE;
+    for c.cfh_branches if it.a == bi { common = it.b; break; }
+    hoist_target := cfh_get_or_create_hoisted_block(c, inst_block(bi));
+    f := block_fn(bb);
+    create_hoisted :: (c: *Licm, orig: Value_Id, hoist_target: Value_Id, f: Value_Id) -> Value_Id {
+        for c.cfh_dest if it.a == orig return it.b;
+        nb := create_block(f, tprint("%.licm", vname(orig)));
+        array_add(*c.cfh_dest, .{orig, nb});
+        dt_add_new_block(c.dt, nb, hoist_target);
+        p := li_parent(c.li, c.l);
+        if p != NONE li_add_basic_block_to_loop(c.li, p, nb);
+        return nb;
+    }
+    htd := create_hoisted(c, td, hoist_target, f);
+    hfd := create_hoisted(c, fd, hoist_target, f);
+    hcs := create_hoisted(c, common, hoist_target, f);
+    if block_terminator(hcs) == NONE {
+        target_succ := block_get_single_successor(hoist_target);
+        assert(target_succ != NONE, "Expected hoist target to have a single successor");
+        block_move_before(hcs, target_succ);
+        block_append_inst(hcs, create_br(target_succ));
+    }
+    if block_terminator(htd) == NONE { block_move_before(htd, hcs); block_append_inst(htd, create_br(hcs)); }
+    if block_terminator(hfd) == NONE { block_move_before(hfd, hcs); block_append_inst(hfd, create_br(hcs)); }
+    if hoist_target == initial_ph {
+        block_replace_successors_phi_uses_with(initial_ph, initial_ph, hcs);
+        mssau_wire_old_predecessors_to_new_immediate_predecessor(c.mssau, block_get_single_successor(hoist_target), hcs, .[hoist_target]);
+        dt_change_idom(c.dt, li_header(c.li, c.l), hcs);
+        for * c.cfh_dest if it.b == initial_ph && it.a != inst_block(bi) it.b = hcs;
+    }
+    old_t := block_terminator(hoist_target);
+    nbi := create_cond_br(op(bi, 0), htd, hfd);
+    insert_at_position(nbi, hoist_target, old_t, false);
+    erase_inst_with_metadata(old_t);
+    prof := get_metadata(bi, md_kind_id("prof"));
+    if prof != NONE set_metadata(nbi, md_kind_id("prof"), prof);
+    for c.cfh_dest if it.a == bb return it.b;
+    return NONE;
 }
 
 // isLoadInvariantInLoop
@@ -415,7 +576,7 @@ is_trivially_replaceable_phi :: (pn: Value_Id, i: Value_Id) -> bool {
 }
 
 // isFoldableInLoop
-licm_is_foldable_in_loop :: (c: *Licm, i: Value_Id) -> bool {
+licm_is_foldable_in_loop :: (c: *Licm, i: Value_Id, cl: Loop_Id) -> bool {
     if inst_op(i) != .GEP return false;
     cost := tti_instruction_cost(c.tti, i, TCK_SIZE_AND_LATENCY);
     if cost != TCC_FREE return false;
@@ -424,18 +585,26 @@ licm_is_foldable_in_loop :: (c: *Licm, i: Value_Id) -> bool {
     while u != NONE {
         ui := ir.u_user[u];
         u = ir.u_next[u];
-        if licm_contains_inst(c, ui) && (bb != inst_block(ui) || (inst_op(ui) != .STORE && inst_op(ui) != .LOAD)) return false;
+        if li_contains(c.li, cl, inst_block(ui)) && (bb != inst_block(ui) || (inst_op(ui) != .STORE && inst_op(ui) != .LOAD)) return false;
     }
     return true;
 }
 
 // isNotUsedOrFoldableInLoop (LoopNestMode = false; no funclet colours)
 licm_is_not_used_or_foldable_in_loop :: (c: *Licm, i: Value_Id, foldable_in_loop: *bool) -> bool {
-    is_foldable := licm_is_foldable_in_loop(c, i);
+    lnm := c.outermost != NONE;
+    cl := ifx lnm then c.outermost else c.l;
+    is_foldable := licm_is_foldable_in_loop(c, i, cl);
     u := ir.v_first_use[i];
     while u != NONE {
         ui := ir.u_user[u];
         u = ir.u_next[u];
+        if lnm && inst_op(ui) == .PHI {
+            while inst_op(ui) == .PHI && has_one_user(ui) && nops(ui) == 1 {
+                if !li_contains(c.li, cl, inst_block(ui)) break;
+                ui = ir.u_user[ir.v_first_use[ui]];
+            }
+        }
         if inst_op(ui) == .PHI {
             pb := inst_block(ui);
             if inst_op(block_terminator(pb)) == .CATCHSWITCH return false;
@@ -444,7 +613,7 @@ licm_is_not_used_or_foldable_in_loop :: (c: *Licm, i: Value_Id, foldable_in_loop
                 if !cv || cv.count != 1 return false;
             }
         }
-        if licm_contains_inst(c, ui) {
+        if li_contains(c.li, cl, inst_block(ui)) {
             if is_foldable { foldable_in_loop.* = true; continue; }
             return false;
         }
@@ -593,11 +762,18 @@ licm_sink :: (c: *Licm, i: Value_Id) -> bool {
     return changed;
 }
 
-// moveInstructionBefore(I, Dest, SafetyInfo, MSSAU, SE): Dest = the terminator of `dest` (no head bit)
-licm_move_instruction_before_terminator :: (c: *Licm, i: Value_Id, dest: Value_Id) {
+// moveInstructionBefore(I, Dest, SafetyInfo, MSSAU, SE): Dest = `pos` (head: the iterator has the head bit)
+licm_move_instruction_before :: (c: *Licm, i: Value_Id, pos: Value_Id, head := false) {
+    dest := inst_block(pos);
     lsi_remove_instruction(c.safety, i);
     lsi_insert_instruction_to(c.safety, i, dest);
-    inst_move_before_dbg(i, block_terminator(dest));
+    if !head inst_move_before_dbg(i, pos);
+    else {
+        // moveBefore(BB, It) with the head bit: the records stay behind (on the next instruction), none are absorbed
+        if inst(i).records && inst_next(i) != NONE records_prepend(inst_next(i), records_take(i));
+        inst_unlink(i);
+        inst_insert_before(i, pos);
+    }
     a := mssa_access_of(c.mssa, i);
     if a >= 0 mssau_move_to_place(c.mssau, a, dest, .BEFORE_TERMINATOR);
     pse_forget_block_and_loop_dispositions(i);
@@ -612,8 +788,8 @@ licm_hoist :: (c: *Licm, i: Value_Id, dest: Value_Id) {
         for all if it.kind != 0 { has_md = true; break; }
     }
     if (has_md || inst_op(i) == .CALL) && !lsi_is_guaranteed_to_execute(c.safety, i, c.dt, c.l) drop_ub_implying_attrs_and_metadata(i);
-    assert(inst_op(i) != .PHI, "LICM: hoisting a phi needs the ControlFlowHoister");
-    licm_move_instruction_before_terminator(c, i, dest);
+    if inst_op(i) == .PHI licm_move_instruction_before(c, i, block_first_non_phi(dest), true);
+    else licm_move_instruction_before(c, i, block_terminator(dest));
     drop_location(i);   // updateLocationAfterHoist
 }
 

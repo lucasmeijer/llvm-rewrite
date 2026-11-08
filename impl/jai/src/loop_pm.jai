@@ -192,6 +192,11 @@ run_loop_pass :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater)
         case .NO_OP_LOOP; return PRESERVE_ALL;
         case .LOOP_ROTATE; return loop_rotate_run(node, l, lar, u);
         case .LICM; return licm_run(node, l, lar, u);
+        case .LNICM;
+            // a loop-nest pass runs on the LoopNest of the outermost loop containing L
+            root := l;
+            while li_parent(lar.li, root) != NONE root = li_parent(lar.li, root);
+            return licm_run(node, root, lar, u, true);
         case .PRINT_LOOPNEST; return loop_nest_printer_run(l, lar);
         case .PRINT_IV_USERS; return iv_users_printer_run(l, lar);
     }
@@ -229,7 +234,14 @@ run_loop_adaptor :: (n: s32, f: Value_Id) -> Preserved {
     lwl_init(*w);
     u: Lpm_Updater;
     u.worklist = *w;
-    append_loops_to_worklist_li(li, *w);
+    // LoopNestMode (the loop pipeline has only loop-nest passes): only the top-level loops, in LoopInfo's order
+    loop_nest_mode := pipeline.nodes[n].first_child >= 0;
+    {
+        c := pipeline.nodes[n].first_child;
+        while c >= 0 { if pipeline.nodes[c].kind != .LNICM loop_nest_mode = false; c = pipeline.nodes[c].next; }
+    }
+    if loop_nest_mode for li.top_level lwl_insert(*w, it);
+    else append_loops_to_worklist_li(li, *w);
     while !lwl_empty(*w) {
         l := lwl_pop(*w);
         u.current = l;

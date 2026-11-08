@@ -412,7 +412,8 @@ aa_results_for :: (f: Value_Id) -> Aa_Results {
         if r.kinds[k] == .SCEV r.se = get_scev(f);   // SCEVAA::run: AM.getResult<ScalarEvolutionAnalysis>(F)
     }
     r.tbaa_enabled = !fn_has_fn_attr(f, .SanitizeType);
-    if !use_deref_at_point_semantics fatal("-use-dereferenceable-at-point-semantics=false is not supported");
+    // -use-dereferenceable-at-point-semantics only feeds getPointerDereferenceableBytes' CanBeFreed out-parameter,
+    // which only Loads.cpp (loads.jai) and LoopAccessAnalysis request; BasicAA passes nullptr.
     return r;
 }
 
