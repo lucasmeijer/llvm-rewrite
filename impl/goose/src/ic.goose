@@ -38,6 +38,7 @@ import ic_common;
 import ic_addsub;
 import ic_muldivrem;
 import ic_shifts;
+import ic_casts;
 import ic_demanded;
 import ic_visit_misc;
 
@@ -712,6 +713,9 @@ fn ic_visit(i: i32) -> i32 {
         OP_SHL => { return visit_shl(i); },
         OP_LSHR => { return visit_lshr(i); },
         OP_ASHR => { return visit_ashr(i); },
+        OP_TRUNC => { return visit_trunc(i); },
+        OP_ZEXT => { return visit_zext(i); },
+        OP_SEXT => { return visit_sext(i); },
         OP_RET => { return visit_return(i); },
         OP_BR => { return visit_uncond_br(i); },
         OP_CONDBR => { return visit_cond_br(i); },
@@ -906,7 +910,7 @@ fn visit_cond_br(bi: i32) -> i32 {
         return -1;
     }
     if is_cint(cond) {
-        ic_handle_potentially_dead_successors(inst_parent(bi), term_succ(bi, if cint_lo(cond) != 0 { 1 } else { 0 }));
+        ic_handle_potentially_dead_successors(inst_parent(bi), term_succ(bi, if cint_lo(cond) != 0 { 0 } else { 1 }));
         return -1;
     }
     let s0 = term_succ(bi, 0);
