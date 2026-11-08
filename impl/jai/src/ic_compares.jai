@@ -274,17 +274,9 @@ ic_can_rewrite_gep_as_offset :: (start: Value_Id, base: Value_Id, nw: *u32, expl
             }
         }
     }
-    for val: explored.* {
-        u := ir.v_first_use[val];
-        while u != NONE {
-            defer u = ir.u_next[u];
-            us := ir.u_user[u];
-            phi := ifx is_inst(us) && inst_op(us) == .PHI then us else NONE;
-            iv := ifx is_inst(val) then val else NONE;
-            if iv == base || iv == phi || iv == NONE || phi == NONE || !contains(explored.*, phi) continue;
-            if inst_block(phi) == inst_block(iv) return false;
-        }
-    }
+    // The "PHI node users of transformed instructions" check that follows in LLVM iterates `Val->uses()` and
+    // converts each Use to a Value*, which yields Val itself (Use::operator Value*), not the user: PHI is then
+    // either null or equal to Inst, so the check never fails. Reproduced as written: no check.
     return true;
 }
 

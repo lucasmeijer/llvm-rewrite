@@ -415,6 +415,9 @@ ic_is_back_edge :: (from: Value_Id, to: Value_Id) -> bool {
 icb_insert :: (i_in: Value_Id, name: string = "") -> Value_Id {
     i := i_in;
     if ic.default_bundles_src != NONE && inst_op(i) == .CALL && inst(i).nidx == 0 i = call_with_default_bundles(i, ic.default_bundles_src);
+    // IRBuilderDefaultInserter::InsertHelper: I->setName(Name), so an empty name drops a name the unlinked
+    // instruction already had (BinaryOperator::Create(..., "x.sext") followed by Builder.Insert(I))
+    if name.count == 0 && ir.v_name[i].count ir.v_name[i] = "";
     irb_insert(*ic.b, i, name);
     if negator { array_add(*negator.new_insts, i); return i; }   // the Negator's IRBuilderCallbackInserter
     wl_add(i);

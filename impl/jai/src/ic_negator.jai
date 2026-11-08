@@ -128,16 +128,16 @@ neg_visit_impl :: (n: *Negator, v: Value_Id, is_nsw_in: bool, depth: u32) -> Val
             if is_known_negation(op(i, 1), op(i, 2), false, false) {
                 ns := ic_clone_inst(i);
                 use_swap(op_use(ns, 1), op_use(ns, 2));
-                set_name(ns, nm);
                 tv := op(ns, 1); fv := op(ns, 2);
                 okt, tn := pm_neg(tv);
                 okf, fn := pm_neg(fv);
                 if okt && tn == fv drop_poison_generating_flags(tv);
                 else if okf && fn == tv drop_poison_generating_flags(fv);
                 else { drop_poison_generating_flags(tv); drop_poison_generating_flags(fv); }
-                nm2 := vname(ns);
+                // Builder.Insert(NewSelect): IRBuilderDefaultInserter::InsertHelper calls setName("") and so drops
+                // the ".neg" name set on the unlinked clone
                 ir.v_name[ns] = "";
-                icb_insert(ns, nm2);
+                icb_insert(ns, "");
                 return ns;
             }
             n1 := neg_negate(n, op(i, 1), is_nsw, depth + 1);
