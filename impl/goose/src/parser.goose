@@ -760,7 +760,12 @@ recursive fn parse_constant(ty: i32) -> i32 {
         }
         if w == "blockaddress" { return parse_blockaddress(ty); }
         if w == "dso_local_equivalent" || w == "no_cfi" {
-            perr("dso_local_equivalent/no_cfi constants are not supported yet");
+            // DSOLocalEquivalent::get / NoCFIValue::get
+            let kd = if w == "no_cfi" { VK_NOCFI } else { VK_DSOLOCAL };
+            lex();
+            if tk != T_GVAR && tk != T_GID { perr("expected global value name"); }
+            let gv = parse_constant(ty);
+            return cst_get(kd, vals[gv].ty, cst_none(), [gv]);
         }
         if w == "asm" {
             lex();

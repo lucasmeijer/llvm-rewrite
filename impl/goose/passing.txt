@@ -2461,6 +2461,9 @@ tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-derived-pointer-call.
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-nonptr.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-novfe.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-null.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-relative-pointers-bad.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-relative-pointers-gep.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-relative-pointers.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-visibility-post-lto.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions-visibility-pre-lto.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalDCE/virtual-functions.ll::roundtrip
@@ -4790,6 +4793,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/funnel-shift.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/gep-alias-gep-load.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/gep-alias.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/gep-zeroinit-vector.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/icmp-global.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/insertvalue.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/inttoptr-gep-nonintegral.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/libfunc.ll::roundtrip
@@ -7300,6 +7304,7 @@ tests/imported/llvm/Transforms/SROA/assume.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/basictest.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/big-endian.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/dbg-inline.ll::roundtrip
+tests/imported/llvm/Transforms/SROA/dbg-single-piece.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/fake-use-escape.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/fake-use-sroa.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/fca.ll::roundtrip

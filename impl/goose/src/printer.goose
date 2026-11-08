@@ -626,6 +626,11 @@ recursive fn put_constant(v: i32) {
         putc('>');
         return;
     }
+    if k == VK_DSOLOCAL || k == VK_NOCFI {
+        put(if k == VK_DSOLOCAL { "dso_local_equivalent " } else { "no_cfi " });
+        put_operand(op(v, 0), false);
+        return;
+    }
     if k == VK_CNULL {
         if ty_is_vector(ty) { put("splat ("); put_type(types[ty].a); put(" null)"); return; }
         put("null");
