@@ -1,6 +1,6 @@
 # L1.instcombine.arith cannot be completed by porting the arith files: every test file needs most of InstCombine
 
-- **Date / implementation / unit:** 2026-11-10 / jai / L1.instcombine.arith (plus the InstCombine framework)
+- **Date / implementation / unit:** 2026-11-08 / jai / L1.instcombine.arith (plus the InstCombine framework)
 - **What happened:** the unit's exit tests are whole imported files (`add*.ll`, `sub*.ll`, `*div*.ll`, ...) checked
   with an exact `::opt` diff. Almost every function in them also contains compares, selects, shifts, casts or
   bitwise ops, and InstCombine rewrites those too (an `icmp ugt X, -2` must become `icmp eq X, -1`, a
