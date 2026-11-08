@@ -341,9 +341,9 @@ def main(argv=None):
     s.add_argument("--impl", required=True, help="one implementation, or several separated by commas (e.g. goose,jai)")
     s.add_argument("--no-build", action="store_true", help="skip impl/<lang>/build.sh")
     s.add_argument("globs", nargs="*", help="path globs, default all of tests/perf (e.g. 'tests/perf/scaling/allocas/*')")
-    s.add_argument("--no-instr", action="store_true", help="skip instruction counting (valgrind); wall time and memory only")
-    s.add_argument("--reps", type=int, default=3, help="timed runs per tool and benchmark; the median is reported")
-    s.add_argument("-j", "--jobs", type=int, default=os.cpu_count(), help="parallel valgrind runs")
+    s.add_argument("--instr", action="store_true", help="also count executed instructions with valgrind (exact, ~40x slower; cached)")
+    s.add_argument("--reps", type=int, default=0, help="runs per tool and benchmark (default: until ~1s of samples, max 5)")
+    s.add_argument("-j", "--jobs", type=int, default=0, help="parallel timed runs (default: half the cores)")
     s.add_argument("--no-history", action="store_true", help="don't append this run to the history")
     s.set_defaults(fn=perf.cmd_perf)
 

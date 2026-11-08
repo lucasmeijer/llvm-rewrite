@@ -60,7 +60,8 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/`, `imported/` and `perf/` are genera
 ./harness/run import-llvm Transforms/LICM                # import LLVM's tests for a pass
 ./harness/run import-test-suite SingleSource/UnitTests   # import llvm-test-suite programs
 
-./harness/run perf --impl rust                           # compile-time report vs LLVM (see Performance)
+./harness/run perf --impl rust                           # compile-time report vs LLVM, ~25 s (see Performance)
+./harness/run perf --impl rust --instr                   # plus exact instruction counts (valgrind; slow, cached)
 ./harness/run perf --impl rust,zig 'tests/perf/scaling/allocas/*'   # several impls side by side, some benchmarks
 ./harness/run gen-perf                                   # regenerate tests/perf
 ```
@@ -81,22 +82,33 @@ backend on LLVM's `opt` output for the file's first `@opt`.
 
 | Column | Meaning |
 | --- | --- |
-| `llvm Minstr`, `llvm s` | LLVM's millions of executed instructions, and its median wall time |
-| `instr` | our executed instructions ÷ LLVM's. Counted with `valgrind --tool=cachegrind` (the VM exposes no hardware counters): exact and repeatable, so this is the number to watch. Cached by (binary, args, input) |
-| `wall` | our median wall time ÷ LLVM's (`--reps`, default 3, tools interleaved). Noisy on a shared machine: even identical binaries can come out at 0.6×–1.5× with one rep |
+| `llvm cpu s` | LLVM's CPU time (user + system), the minimum over the runs |
+| `cpu` | our CPU time ÷ LLVM's |
 | `rss` | our peak memory ÷ LLVM's |
-| `Δprev` | change in our instruction count since the previous `perf` run of this implementation (from the history) |
+| `instr` | only with `--instr`: our executed instructions ÷ LLVM's (see below) |
+| `Δprev` | change in our ratio to LLVM since the previous `perf` run of this implementation (from the history); `=` within the noise (10% for cpu, 0.05% for instr) |
 | `ok` | whether we pass the correctness check for that output (`::roundtrip` or `::opt`, from `passing.txt`); `-` if none |
 
 Below the table: the geometric mean of the ratios, and for `tests/perf/scaling/` a fitted exponent k (cost ~ n^k,
 over three sizes, after subtracting the cost of the same command on an empty module). A k well above LLVM's means an
-algorithm with worse complexity than LLVM's, even when the absolute numbers are still small. LLVM's own k isn't
-always 1 (e.g. `-O2` on many sequential loops is about 2).
+algorithm with worse complexity than LLVM's, even when the absolute numbers are still small. `(k)` in parentheses
+means there was too little work above process startup to measure. LLVM's own k isn't always 1 (e.g. `-O2` on many
+sequential loops is about 2).
 
-The first run of the whole corpus takes about 4 minutes on 16 cores (valgrind slows programs down about 40 times);
-LLVM's counts are cached in the oracle cache after that, and so are ours for an unchanged binary. `--no-instr` skips
-valgrind. Results: `.harness-out/perf/<impl>.json`; every run is appended to
-`/persistent/llvm-rewrite/perf-history/<impl>.jsonl` (with commit and dirty flag) unless `--no-history`.
+**Speed and noise.** Runs go in parallel on half the cores (`-j`), LLVM and implementations in the same batch, biggest
+first; each benchmark repeats until it has about a second of samples (at most 15 runs, `--reps N` to fix it), and
+the minimum counts. The whole corpus takes about 25 s (6 s for `tests/perf/compile/*` with stub implementations).
+Measured with LLVM against itself: half the rows are within 3% of 1.00x, 90% within 10%, the worst about 20%. So
+read single-row differences under ~15% as noise; the geomean is good to a few percent.
+
+**Exact numbers: `--instr`.** Adds instructions executed, counted with `valgrind --tool=cachegrind` (the VM exposes
+no hardware counters). Repeatable to the instruction, so it shows 1% differences, but valgrind is about 40 times
+slower: a full run with a freshly built implementation takes several minutes. Counts are cached by (binary, args,
+input), so LLVM's are paid once and an unchanged binary is free. With `--instr`, scaling exponents and `Δprev` use
+instruction counts.
+
+Results: `.harness-out/perf/<impl>.json`; every run is appended to `/persistent/llvm-rewrite/perf-history/<impl>.jsonl`
+(with commit and dirty flag) unless `--no-history`.
 
 ## The CLI contract for our tools
 

@@ -49,8 +49,8 @@ different languages, all data-oriented, so they can be compared.
     source, llvm-test-suite, Zig, Goose and valgrind, so every workspace starts ready. Jai's download URL is private, so
     `scripts/ensure-jai.sh` installs Jai at runtime from `$JAI_COMPILER_URL` into `/persistent`, once per template.
 13. **Compile-time performance is measured and reported, not gated.** `./harness/run perf` compares our tools'
-    executed instructions (valgrind cachegrind: exact, since the VM has no hardware counters), wall time and peak
-    memory against LLVM's on `tests/perf/`: whole llvm-test-suite programs plus synthetic inputs at three sizes,
+    CPU time (parallel runs, ~25 s for everything, ~10% noise per row) and peak memory against LLVM's, optionally
+    with exact executed-instruction counts (`--instr`, valgrind; the VM has no hardware counters), on `tests/perf/`: whole llvm-test-suite programs plus synthetic inputs at three sizes,
     whose fitted growth exponent exposes worse algorithms early. No ceiling and no ratchet; a history in
     `/persistent` shows trends. The speed of the *generated code* is a later unit (L5).
 

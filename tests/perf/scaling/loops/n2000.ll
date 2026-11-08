@@ -1,10 +1,6 @@
 ; @perf-size: 2000
-; @opt: -passes=loop-rotate
-; @opt: -passes=licm
 ; @opt: -O2
 ; @perf: opt
-; @perf: opt -passes=loop-rotate
-; @perf: opt -passes=licm
 ; @perf: opt -O2
 ; @generated: harness/run gen-perf, shape 'loops', n=2000
 define i64 @f(ptr %p, i64 %len) {

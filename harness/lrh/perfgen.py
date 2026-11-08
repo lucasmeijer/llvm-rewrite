@@ -136,9 +136,9 @@ def shape_calls(n):
     return L
 
 
-def shape_loops(n):
+def shape_loops(n, per=50):
     """n/50 sequential counted loops over an array argument. (LLVM's -O2 takes minutes at 800 loops.)"""
-    k = max(1, n // 50)
+    k = max(1, n // per)
     L = ["define i64 @f(ptr %p, i64 %len) {", "entry:", "  br label %h0"]
     for i in range(k):
         prev_acc = "0" if i == 0 else f"%acc{i - 1}.out"
@@ -171,7 +171,9 @@ SHAPES = {
     "allocas": (shape_allocas, ["-passes=mem2reg", "-passes=sroa", "-O2"]),
     "switch": (shape_switch, ["-passes=simplifycfg", "-O2"]),
     "calls": (shape_calls, ["-passes=inline", "-O2"]),
-    "loops": (shape_loops, ["-passes=loop-rotate", "-passes=licm", "-O2"]),
+    "loops": (shape_loops, ["-O2"]),
+    # Same shape with 10x the loops, for the loop passes: at /50 they cost too little to measure.
+    "loops-many": (lambda n: shape_loops(n, 5), ["-passes=loop-rotate", "-passes=licm"]),
     "globals": (shape_globals, ["-passes=globalopt", "-O2"]),
 }
 
