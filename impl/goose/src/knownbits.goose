@@ -270,7 +270,8 @@ fn kb_shl(l: KB, r: KB, nuw: bool, nsw: bool, sa_nonzero: bool) -> KB {
         return known;
     }
     var max_sa = max_shift_amount(kb_max(r), w);
-    if nuw && nsw { max_sa = min(max_sa, kb_max_lz(l) - 1); }
+    // countMaxLeadingZeros() - 1 is unsigned in LLVM: 0 - 1 wraps and doesn't limit the amount
+    if nuw && nsw && kb_max_lz(l) > 0 { max_sa = min(max_sa, kb_max_lz(l) - 1); }
     if nuw { max_sa = min(max_sa, kb_max_lz(l)); }
     if nsw { max_sa = min(max_sa, max(kb_max_lz(l), kb_max_lo(l)) - 1); }
     if min_sa == 0 && max_sa == w - 1 && is_pow2_w(w) {
@@ -363,8 +364,9 @@ fn kb_smin_op(l: KB, r: KB) -> KB { kb_smin_flip(kb_umax(kb_smin_flip(l), kb_smi
 fn kb_fsh(l: KB, r: KB, amt: AP, left: bool) -> KB {
     let w = kb_bw(l);
     var sa = ap_rot_amount(l.z, amt);
+    // a zero shift returns the first operand for fshl and the second for fshr
+    if sa == 0 { return if left { l } else { r }; }
     if !left { sa = (w - sa) % w; }
-    if sa == 0 { return l; }
     // fshl(a, b, s) = (a << s) | (b >> (w - s))
     return KB { z: ap_fshl(l.z, r.z, sa), o: ap_fshl(l.o, r.o, sa) };
 }

@@ -341,9 +341,9 @@ recursive fn sc_get_range_ref(s: i32, hint: i64, depth: i64) -> CRange {
     if !ap_eq(kmin, ap_inc(kmax)) { cons = rg_intersect_t(cons, rg_new(kmin, ap_inc(kmax)), rt); }
     if ns > 1 { cons = rg_intersect_t(cons, rg_new(ap_ashr(ap_smin_val(bw), ns - 1), ap_inc(ap_ashr(ap_smax_val(bw), ns - 1))), rt); }
     if sc_is_ptr(s) && hint == HINT_UNSIGNED {
-        let db = sc_pointer_dereferenceable_bytes(v);
-        if db > 1 && (bw >= 64 || db < ((1 as i64) << bw)) {
-            var maxv = ap_sub(ap_ones(bw), ap_u64(db as u64, bw));
+        let db = sc_pointer_dereferenceable_bytes(v) as! u64;
+        if db > 1 && (bw >= 64 || db < ((1 as u64) << bw)) {
+            var maxv = ap_sub(ap_ones(bw), ap_u64(db, bw));
             let al = pointer_alignment(v);
             let rem = ap_urem(maxv, ap_u64(al as u64, bw));
             maxv = ap_sub(maxv, rem);
@@ -391,13 +391,15 @@ recursive fn sc_range_from_metadata(v: i32) -> bool, CRange {
         let md = inst_get_md(v, md_kind_id("range"));
         if md >= 0 { return true, rg_from_range_md(md); }
         if is_callbase(v) {
+            // CallBase::getRange: the call-site range intersected with the callee's
             let ok, r = rg_from_range_attr(alist_ret(insts[inst_of(v)].attrs));
-            if ok { return true, r; }
             let cf = called_function(v);
-            if cf >= 0 {
-                let ok2, r2 = rg_from_range_attr(alist_ret(globs[glob_of(cf)].attrs));
-                if ok2 { return true, r2; }
-            }
+            var ok2 = false;
+            var r2 = r;
+            if cf >= 0 { let a, b = rg_from_range_attr(alist_ret(globs[glob_of(cf)].attrs)); ok2 = a; r2 = b; }
+            if ok && ok2 { return true, rg_intersect(r, r2); }
+            if ok { return true, r; }
+            if ok2 { return true, r2; }
         }
     }
     if vals[v].kind as i64 == VK_ARG {
@@ -460,7 +462,12 @@ recursive fn sc_pointer_dereferenceable_bytes(v: i32) -> i64 {
             if vals[n].kind as i64 != VK_CINT { return 0; }
             let ty = insts[inst_of(v)].ty2;
             if sc_type_has_scalable(ty) { fatal("ScalarEvolution: scalable allocas are not ported"); }
-            return dl_alloc_size(ty) * (ap_lo64(ap_from_cint(n)) as i64);
+            // checkedMulUnsigned(size, count): no size on overflow
+            let sz = dl_alloc_size(ty) as u64;
+            let cnt = ap_lo64(ap_from_cint(n));
+            if !ap_fits_u64(ap_from_cint(n)) { return 0; }
+            if sz != 0 && cnt > 0xFFFFFFFFFFFFFFFF / sz { return 0; }
+            return (sz * cnt) as! i64;
         }
         return 0;
     }

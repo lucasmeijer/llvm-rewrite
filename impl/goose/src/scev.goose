@@ -2233,14 +2233,22 @@ recursive fn sc_extract_const_without_wrapping_step(c: AP, step: i32) -> AP {
     return ap_zero(bw);
 }
 
-// insertFoldCacheEntry (FoldCacheUser is not kept: the cache is dropped with the instance and on forgetting)
-recursive fn sc_fold_insert(kind: i64, o: i32, t: i32, s: i32) { hm_put(sc_fold, sc_fold_key(kind, o, t), s as i64); }
+// insertFoldCacheEntry. FoldCacheUser (forgetMemoizedResults erases the entries whose value is forgotten) is
+// the value's generation stored with the entry: an entry is valid only while it matches.
+recursive fn sc_fold_insert(kind: i64, o: i32, t: i32, s: i32) { hm_put(sc_fold, sc_fold_key(kind, o, t), (s as i64) | ((sc_gen(s) as i64) << 32)); }
+recursive fn sc_fold_lookup(kind: i64, o: i32, t: i32) -> i32 {
+    let key = sc_fold_key(kind, o, t);
+    let c = hm_get(sc_fold, key, -1);
+    if c < 0 { return -1; }
+    let s = (c & 0xFFFFFFFF) as i32;
+    if (c >> 32) as i32 != sc_gen(s) { hm_del(sc_fold, key); return -1; }
+    return s;
+}
 
 recursive fn sc_get_zero_extend(o: i32, t0: i32, depth: i64) -> i32 {
     let t = sc_effective_ty(t0);
-    let key = sc_fold_key(SC_ZEXT, o, t);
-    let c = hm_get(sc_fold, key, -1);
-    if c >= 0 { return c as i32; }
+    let c = sc_fold_lookup(SC_ZEXT, o, t);
+    if c >= 0 { return c; }
     let s = sc_get_zero_extend_impl(o, t, depth);
     if sc_kind(s) != SC_ZEXT { sc_fold_insert(SC_ZEXT, o, t, s); }
     return s;
@@ -2402,9 +2410,8 @@ recursive fn sc_get_zero_extend_impl(o: i32, t: i32, depth: i64) -> i32 {
 
 recursive fn sc_get_sign_extend(o: i32, t0: i32, depth: i64) -> i32 {
     let t = sc_effective_ty(t0);
-    let key = sc_fold_key(SC_SEXT, o, t);
-    let c = hm_get(sc_fold, key, -1);
-    if c >= 0 { return c as i32; }
+    let c = sc_fold_lookup(SC_SEXT, o, t);
+    if c >= 0 { return c; }
     let s = sc_get_sign_extend_impl(o, t, depth);
     if sc_kind(s) != SC_SEXT { sc_fold_insert(SC_SEXT, o, t, s); }
     return s;

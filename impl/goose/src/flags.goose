@@ -146,7 +146,46 @@ fn errs_operand(v: i32, fv: i32, with_type: bool) {
 }
 
 // Instruction::print (`OS << *I`): the instruction line as the module printer prints it, without the newline.
+// Instruction::print uses a SlotTracker that numbers the metadata of every function (in module order) when the
+// instruction is an intrinsic call with an MDNode operand (isReferencingMDNode in AsmWriter.cpp).
+fn errs_referencing_md_node(iv: i32) -> bool {
+    if iop(iv) != OP_CALL || !is_intrinsic_call(iv) { return false; }
+    for k in nops(iv) { let o = op(iv, k); if vals[o].kind == VK_MDVAL && md_is_node(vals[o].sub) { return true; } }
+    return false;
+}
+fn slots_begin_all_metadata(fv: i32) {
+    slots_end();
+    slots_begin(fv);
+    slots_end();
+    // module slots are done; number every function's metadata in module order
+    slots_md_mark = md_order.len;
+    slots_as_mark = as_order.len;
+    var f = modules[globs[glob_of(fv)].module].first_func;
+    while f >= 0 {
+        if !func_is_decl(f) {
+            let am = as_order.len;
+            process_function(f);
+            purge_function();
+            while as_order.len > am { asslot[as_order[as_order.len - 1]] = -1; as_order.resize(as_order.len - 1); }
+        }
+        f = globs[glob_of(f)].next;
+    }
+    process_function(fv);
+    slots_fn = fv;
+}
+
 fn errs_inst(iv: i32, fv: i32) {
+    if errs_referencing_md_node(iv) {
+        slots_begin_all_metadata(fv);
+        let mark = out.len;
+        print_inst(iv);
+        var end = out.len;
+        if end > mark && out[end - 1] == '\n' { end--; }
+        errbuf.append(out[mark..end]);
+        out.resize(mark);
+        slots_end();
+        return;
+    }
     slots_begin(fv);
     let mark = out.len;
     print_inst(iv);
