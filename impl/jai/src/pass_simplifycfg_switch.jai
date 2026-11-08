@@ -76,7 +76,7 @@ merge_compatible_invokes_impl :: (s: *Scfg, invokes: [] Value_Id) {
         block_append_inst(pbb, br);
         copy_debug_loc(br, ii);
         try_intersect_attributes(merged, ii);
-        replace_all_uses_with(ii, merged);
+        rauw_with_metadata(ii, merged);
         erase_inst_with_metadata(ii);
     }
     set_metadata(merged, 0, merged_loc);
@@ -1870,11 +1870,11 @@ ensure_value_available_in_successor :: (v: Value_Id, bb: Value_Id, alt: Value_Id
     return phi;
 }
 // SplitBlockAndInsertIfThen(Cond, SplitBefore, Unreachable = false, BranchWeights = null, DTU): the new terminator
-split_block_and_insert_if_then :: (s: *Scfg, cond: Value_Id, split_before: Value_Id) -> Value_Id {
+split_block_and_insert_if_then :: (s: *Scfg, cond: Value_Id, split_before: Value_Id, head_bit := false) -> Value_Id {
     head := inst_block(split_before);
     orig := unique_successors(head);
     f := block_fn(head);
-    tail := split_basic_block(head, split_before, "");
+    tail := split_basic_block(head, split_before, "", head_bit);
     bb := create_block(f, "", tail);
     br := create_br(tail);
     block_append_inst(bb, br);
@@ -1936,14 +1936,14 @@ merge_conditional_store_to_address :: (s: *Scfg, ptb: Value_Id, pfb: Value_Id, q
     pphi := ensure_value_available_in_successor(op(ps, 0), inst_block(ps));
     qphi := ensure_value_available_in_successor(op(qs, 0), inst_block(qs), pphi);
     first := block_first_insertion_pt(post);
-    b: Irb; irb_set_at(*b, post, first, false);
+    b: Irb; irb_set_at(*b, post, first, true);   // getFirstInsertionPt carries the head bit
     b.dbg = get_metadata(first, 0);   // getStableDebugLoc
     inv_p := inv_p_in != (inst_block(ps) != ptb);
     inv_q := inv_q_in != (inst_block(qs) != qtb);
     ppred := ifx inv_p then irb_not(*b, pc) else pc;
     qpred := ifx inv_q then irb_not(*b, qc) else qc;
     combined := irb_binop(*b, .OR, ppred, qpred);
-    t := split_block_and_insert_if_then(s, combined, ifx b.pt != NONE then b.pt else block_first_insertion_pt(post));
+    t := split_block_and_insert_if_then(s, combined, ifx b.pt != NONE then b.pt else block_first_insertion_pt(post), b.head);
     if prof_has_branch_weight_md(pbr) && prof_has_branch_weight_md(qbr) {
         _, pw := prof_extract_branch_weights(pbr);
         _, qw := prof_extract_branch_weights(qbr);

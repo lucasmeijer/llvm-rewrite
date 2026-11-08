@@ -474,7 +474,7 @@ eliminate_duplicate_phi_nodes :: (bb: Value_Id) -> bool {
             if block_set_contains(to_remove, dup) continue;
             same := ifx set_based then is_identical_to(dup, pn) else phi_identical_when_defined(dup, pn);
             if !same continue;
-            replace_all_uses_with(dup, pn);
+            rauw_with_metadata(dup, pn);
             array_add(*to_remove, dup);
             changed = true;
             restarted = true;
@@ -536,7 +536,7 @@ create_call_matching_invoke :: (ii: Value_Id) -> Value_Id {
 // changeToCall(II, DTU)
 change_to_call :: (ii: Value_Id, dtu: *Dtu) -> Value_Id {
     c := create_call_matching_invoke(ii);
-    inst_insert_before(c, ii);
+    inst_insert_before_adopt(c, ii);
     take_name(c, ii);
     rauw_with_metadata(ii, c);
     normal := invoke_normal_dest(ii);
@@ -828,6 +828,13 @@ destroy_constant :: (c: Value_Id) {
         f2, cur := table_find(*ir.const_map, key);
         if f2 && cur == c table_remove(*ir.const_map, key);
     }
+    md_value_deleted(c);   // ~Value: ValueAsMetadata::handleDeletion
     drop_all_references(c);
     ir.v_kind[c] = .DEAD;
+}
+
+// Instruction::insertBefore(I->getIterator()) under RemoveDIs: an instruction inserted at a position without the
+// head bit adopts the debug records attached to the instruction it is inserted before
+inst_insert_before_adopt :: (i: Value_Id, pos: Value_Id) {
+    insert_at_position(i, inst_block(pos), pos, false);
 }

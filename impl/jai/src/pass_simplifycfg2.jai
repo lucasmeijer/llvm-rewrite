@@ -1001,19 +1001,19 @@ fold_cond_branch_on_value_known_in_predecessor_impl :: (s: *Scfg, bi: Value_Id) 
             } else if has_uses(cur) table_set(*tmap, cur, n);
             if n != NONE {
                 while src_cursor != cur {
-                    if inst(src_cursor).records { clone_debug_info_from(n, src_cursor, inst(src_cursor).records, *cloned); remap_dbg_records(cloned, *tmap); }
+                    if inst(src_cursor).records { clone_debug_info_from(n, src_cursor, inst(src_cursor).records, *cloned); }
                     src_cursor = inst_next(src_cursor);
                 }
                 src_cursor = inst_next(cur);
-                if inst(cur).records { clone_debug_info_from(n, cur, inst(cur).records, *cloned); remap_dbg_records(cloned, *tmap); }
+                if inst(cur).records { clone_debug_info_from(n, cur, inst(cur).records, *cloned); }
                 if call_iid(n) == IID_ASSUME && s.opts.ac ac_register_assumption(s.opts.ac, n);
             }
         }
         while src_cursor != bi {
-            if inst(src_cursor).records { clone_debug_info_from(insert_pt, src_cursor, inst(src_cursor).records, *cloned); remap_dbg_records(cloned, *tmap); }
+            if inst(src_cursor).records { clone_debug_info_from(insert_pt, src_cursor, inst(src_cursor).records, *cloned); }
             src_cursor = inst_next(src_cursor);
         }
-        if inst(bi).records { clone_debug_info_from(insert_pt, bi, inst(bi).records, *cloned); remap_dbg_records(cloned, *tmap); }
+        if inst(bi).records { clone_debug_info_from(insert_pt, bi, inst(bi).records, *cloned); }
         block_remove_predecessor(bb, edge_bb);
         ebi := block_terminator(edge_bb);
         set_successor(ebi, 0, real_dest);

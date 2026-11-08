@@ -256,7 +256,7 @@ block_erase_from_parent :: (bb: Value_Id) {
         user := ir.u_user[u];
         if vkind(user) == .C_BLOCKADDR {
             repl := ce_cast(.INTTOPTR, const_int(type_int(cast(u64) 32), 1), vtype(user));
-            replace_all_uses_with(user, repl);
+            rauw_with_metadata(user, repl);
         }
         u = nx;
     }

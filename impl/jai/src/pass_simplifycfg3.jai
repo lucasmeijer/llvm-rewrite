@@ -215,7 +215,8 @@ remove_undef_introducing_predecessor :: (s: *Scfg, bb: Value_Id) -> bool {
                 return true;
             } else if inst_op(t) == .SWITCH {
                 u := create_block(block_fn(bb), "unreachable", bb);
-                block_append_inst(u, new_inst(.UNREACHABLE, ir.t_void, 0));
+                irb_set_end(*b, u);   // keeps the switch's debug location
+                irb_insert(*b, new_inst(.UNREACHABLE, ir.t_void, 0));
                 for k: 0..cast(s64) sw_num_cases(t) - 1 {
                     if sw_case_dest(t, cast(u32) k) == bb {
                         block_remove_predecessor(bb, pred);
