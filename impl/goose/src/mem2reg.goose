@@ -1092,13 +1092,17 @@ fn promote_mem_to_reg(fv: i32, allocas: i32[>..<]&) {
     fn idf_calculate(defs: const i32[:], out: i32[>..<]&) {
         mb_clear(MB_VPQ);
         mb_clear(MB_VWL);
-        // max-heap on (level, tie) via a min-heap of negated keys; the IDF set does not depend on tie order
+        // std::priority_queue (max-heap) on (level, DFSNumIn), as a min-heap of complemented keys
+        dt_update_dfs_numbers(fv, DT_DOM);
         var pq: i64[>..<] = [];
         var pqb: i32[>..<] = [];
         fn pq_push(bv: i32) {
-            let key = ((1000000000 - dt_level(DT_DOM, bv) as i64) << 32) | (pqb.len as i64);
+            let lvl = dt_level(DT_DOM, bv) as i64;
+            let dfs = dt_dfs_in(fv, DT_DOM, bv) as i64;
+            let idx = pqb.len as i64;
+            if lvl >= (1 << 20) || dfs >= (1 << 21) || idx >= (1 << 21) { fatal("mem2reg: function too large for the IDF priority key"); }
             pqb.push(bv);
-            heap_push(pq, key);
+            heap_push(pq, (((1 << 20) - 1 - lvl) << 42) | (((1 << 21) - 1 - dfs) << 21) | idx);
         }
         for bb in defs {
             if dt_has_node(DT_DOM, bb) { pq_push(bb); mb_add(MB_VWL, bb); }
@@ -1106,7 +1110,7 @@ fn promote_mem_to_reg(fv: i32, allocas: i32[>..<]&) {
         var wl: i32[>..<] = [];
         while pq.len > 0 {
             let top = heap_pop(pq);
-            let root = pqb[top & 0xFFFFFFFF];
+            let root = pqb[top & 0x1FFFFF];
             let root_level = dt_level(DT_DOM, root);
             wl.push(root);
             while wl.len > 0 {
