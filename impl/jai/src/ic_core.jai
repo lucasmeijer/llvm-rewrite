@@ -532,7 +532,7 @@ copy_prof_unpredictable :: (dst: Value_Id, src: Value_Id) {
     if unpred != NONE set_metadata(dst, md_kind_id("unpredictable"), unpred);
 }
 // Function::getEntryCount: !prof !{!"function_entry_count" | !"synthetic_function_entry_count", i64 N}
-fn_entry_count :: (f: Value_Id) -> (bool, u64) {
+ic_fn_entry_count :: (f: Value_Id) -> (bool, u64) {
     m := get_metadata(f, md_kind_id("prof"));
     if m == NONE || ir.mds[m].kind != .TUPLE || ir.mds[m].nops < 2 return false, 0;
     tag := md_op(m, 0);
@@ -541,11 +541,13 @@ fn_entry_count :: (f: Value_Id) -> (bool, u64) {
     if t != "function_entry_count" && t != "synthetic_function_entry_count" return false, 0;
     vm := md_op(m, 1);
     if vm == NONE || ir.mds[vm].kind != .VALUE || vkind(ir.mds[vm].value) != .C_INT return false, 0;
-    return true, const_int_zext(ir.mds[vm].value);
+    v := const_int_zext(ir.mds[vm].value);
+    if v == 0xFFFF_FFFF_FFFF_FFFF return false, 0;
+    return true, v;
 }
 // setExplicitlyUnknownBranchWeightsIfProfiled(I, "instcombine")
 ic_set_unknown_profile_if_profiled :: (i: Value_Id) {
-    ok, ec := fn_entry_count(ic.f);
+    ok, ec := ic_fn_entry_count(ic.f);
     if !ok || ec == 0 return;
     ops: [2] Md_Id;
     ops[0] = md_string("unknown"); ops[1] = md_string("instcombine");
