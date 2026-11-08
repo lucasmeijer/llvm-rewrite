@@ -273,7 +273,8 @@ fn fold_select_op_op(si: i32, ti: i32, fi: i32) -> i32 {
             if r2 >= 0 { return r2; }
         }
     }
-    if nops(ti) != 2 || nops(fi) != 2 || !sl_same_operation_as(ti, fi) || (!is_binop_inst(ti) && iop(ti) != OP_GEP) ||
+    // (isSameOperationAs is pure: the binop/GEP test is evaluated first so calls never reach it)
+    if nops(ti) != 2 || nops(fi) != 2 || (!is_binop_inst(ti) && iop(ti) != OP_GEP) || !sl_same_operation_as(ti, fi) ||
        !has_one_use(ti) || !has_one_use(fi) { return -1; }
     let comm = is_binop_inst(ti) && is_commutative(iop(ti));
     let mop, ot, of, iz = sl_get_common_op(ti, fi, comm, false);
