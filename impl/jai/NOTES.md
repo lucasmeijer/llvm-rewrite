@@ -458,8 +458,8 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   scalable source type is refused (isSupportedGetElementPtr); emitGEPOffset handles splatted scalar indices and
   scalable strides (CreateTypeSize: vscale * min, nuw); CommonPointerBase's no-wrap flags default to all();
   has_poison_generating_flags no longer reads `inst()` of a constant expression.
-- Tools: `/tmp`-style per-function comparison as in ic_funcdiff.py with PORTED extended to memory/vector/cast
-  opcodes found the u32_pool bug (masks like `<3, 31721, 2, 0>`) — extend the tool's PORTED set when visitors land.
+- Tools: `tools/ic_funcdiff.py` (PORTED now includes the memory/vector/cast opcodes; calls are still excluded)
+  found the u32_pool bug (masks like `<3, 31721, 2, 0>`); 53 function diffs remain in InstCombine, none in these files.
 - Traps: `type_info` is a reserved identifier; `xx` likewise; `for e: 0..n-1` with `n: u32 == 0` (empty structs)
   loops forever; Jai `cast(u32)` of a -1 mask element fails the bounds check — use `cast,no_check`.
 

@@ -5,7 +5,7 @@
 import sys, subprocess, re, os, concurrent.futures as cf
 LL="/opt/llvm-23.1.5/bin"
 OURS=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "opt")
-PORTED=set("add sub mul udiv sdiv urem srem and or xor shl lshr ashr icmp ret br select fcmp fneg fadd fsub fmul".split())
+PORTED=set("add sub mul udiv sdiv urem srem and or xor shl lshr ashr icmp ret br select fcmp fneg fadd fsub fmul fdiv frem phi load store alloca getelementptr extractelement insertelement shufflevector extractvalue insertvalue freeze switch unreachable trunc zext sext bitcast ptrtoint inttoptr fptrunc fpext fptoui fptosi uitofp sitofp addrspacecast".split())
 def run(cmd, inp=None):
     r=subprocess.run(cmd, input=inp, capture_output=True, text=True, timeout=60)
     return r.returncode, r.stdout, r.stderr
