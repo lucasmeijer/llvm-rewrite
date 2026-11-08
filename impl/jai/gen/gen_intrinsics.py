@@ -2,8 +2,8 @@
 """Generates src/gen_intrinsics.jai: intrinsic names and the attributes Intrinsic::getAttributes gives them.
 
 LLVM computes these with TableGen from llvm/include/llvm/IR/Intrinsics*.td. We have no TableGen, so:
-  * intrinsic names come from the `def int_*` records of Intrinsics.td and IntrinsicsX86.td
-    (int_foo_bar -> llvm.foo.bar), used for Intrinsic::lookupIntrinsicID-style longest-prefix lookup;
+  * intrinsic names come from gen_iit.py's evaluation of Intrinsics.td and IntrinsicsX86.td, used for
+    Intrinsic::lookupIntrinsicID-style longest-prefix lookup;
   * the attributes come from running the oracle (LLVM 23.1.5 opt -S) on every test file in tests/ that mentions
     an intrinsic, and reading the intrinsic declarations it prints (including ones the parser created for
     undeclared calls). The attributes LLVM attaches depend only on the intrinsic ID for
@@ -18,26 +18,12 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')
 TD = '/opt/llvm-project-23.1.5/llvm/include/llvm/IR/'
 OPT = '/opt/llvm-23.1.5/bin/opt'
 
-names = set()
-overloaded = set()
-for f in ['Intrinsics.td', 'IntrinsicsX86.td']:
-    src = open(TD + f).read()
-    for m in re.finditer(r'^\s*def\s+int_([A-Za-z0-9_]+)\s*:', src, re.M):
-        # the record body runs to the next ';' at bracket depth 0; an explicit "llvm.*" string names it
-        i, depth = m.end(), 0
-        while i < len(src):
-            c = src[i]
-            if c in '<([{': depth += 1
-            elif c in '>)]}': depth -= 1
-            elif c == ';' and depth <= 0: break
-            i += 1
-        body = src[m.end():i]
-        explicit = re.search(r'"(llvm\.[A-Za-z0-9_.]+)"', body)
-        n = explicit.group(1) if explicit else 'llvm.' + m.group(1).replace('_', '.')
-        names.add(n)
-        # overloaded intrinsics (any "any" type) match by prefix; the others only exactly
-        if re.search(r'llvm_any\w*_ty|LLVMAny|llvm_vararg_ty', body):
-            overloaded.add(n)
+# intrinsic names and overloadedness from the TableGen evaluator in gen_iit.py (the IntrinsicNameTable)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gen_iit
+_rows, _x86 = gen_iit.intrinsic_rows()
+names = set(r[0] for r in _rows)
+overloaded = set(r[0] for r in _rows if r[2])
 
 def lookup(name):
     # longest intrinsic name that equals `name` or is a prefix followed by '.'

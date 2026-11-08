@@ -4700,6 +4700,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/sse.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/trunc.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/trunc_vec.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vecreduce.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-calls.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-type-constant-folding.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-undef-elts-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-undef-elts.ll::roundtrip
@@ -4867,6 +4868,7 @@ tests/imported/llvm/Transforms/InstSimplify/uscmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/vec-cmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/vec-icmp-of-cast.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/vector-inseltextelt.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/vector-interleave-deinterleave.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/vector_gep.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/vector_ptr_bitcast.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/vp-reverse.ll::roundtrip
