@@ -6,9 +6,7 @@
 // insertDebugValuesForPHIs (Local.cpp), MergeBlockIntoPredecessor / FoldSingleEntryPHINodes /
 // RemoveRedundantDbgInstrs (BasicBlockUtils.cpp), Loop::setLoopID (LoopInfo.cpp).
 //
-// The x86 code-size cost of the header (TTI::getInstructionCost(TCK_CodeSize)) is not fully ported: see
-// tti_code_size_bounds. The decision "NumInsts > MaxHeaderSize" is made from lower/upper bounds and fails loudly
-// when the bounds don't decide it.
+// The header cost is TTI::getInstructionCost(TCK_CodeSize) (tti.jai), summed by CodeMetrics::analyzeBasicBlock.
 
 lr_opts: struct {
     rotation_max_header_size: s64 = 16;            // -rotation-max-header-size
@@ -181,95 +179,15 @@ collect_ephemeral_values :: (li: *Loop_Info, l: Loop_Id, ac: *Assumption_Cache, 
     }
 }
 
-// TTI::isLoweredToCall (TargetTransformInfoImpl.h)
-tti_is_lowered_to_call :: (f: Value_Id) -> bool {
-    if glob(f).intrinsic return false;
-    if is_local_linkage(glob(f).linkage) || vname(f).count == 0 return true;
-    NOT_CALLS :: string.["copysign", "copysignf", "copysignl", "fabs", "fabsf", "fabsl", "fmin", "fminf", "fminl",
-        "fmax", "fmaxf", "fmaxl", "sin", "sinf", "sinl", "cos", "cosf", "cosl", "tan", "tanf", "tanl", "asin", "asinf",
-        "asinl", "acos", "acosf", "acosl", "atan", "atanf", "atanl", "atan2", "atan2f", "atan2l", "sinh", "sinhf",
-        "sinhl", "cosh", "coshf", "coshl", "tanh", "tanhf", "tanhl", "sqrt", "sqrtf", "sqrtl", "exp10", "exp10l",
-        "exp10f", "pow", "powf", "powl", "exp2", "exp2l", "exp2f", "floor", "floorf", "ceil", "round", "ffs", "ffsl",
-        "abs", "labs", "llabs"];
-    for NOT_CALLS if vname(f) == it return false;
-    return true;
-}
-
-TTI_UNBOUNDED :: 1 << 40;
-
-// Bounds of TTI.getInstructionCost(I, TCK_CodeSize) on x86-64. Exact where the rule is ported (calls, CF
-// instructions, free intrinsics, the TCC_Basic default); scalar integer (<= 64 bits), pointer and float/double
-// arithmetic, compares, selects, casts, GEPs, loads and stores are bounded by [0, 2]: X86TTIImpl answers these
-// from BasicTTIImpl's "legal = LT.first * 1, custom = 2" rules or code-size table entries of 1 (see NOTES.md);
-// everything else is unbounded.
-tti_code_size_bounds :: (i: Value_Id) -> (lo: s64, hi: s64) {
-    opc := inst_op(i);
-    if is_call_base(i) {
-        callee := call_called_function(i);
-        if callee != NONE && glob(callee).intrinsic {
-            id := call_iid(i);
-            if id == IID_ALLOW_RUNTIME_CHECK || id == IID_ALLOW_UBSAN_CHECK || id == IID_ASSUME || id == IID_SIDEEFFECT ||
-               id == IID_PSEUDOPROBE || id == IID_ARITHMETIC_FENCE || id == IID_DBG_ASSIGN || id == IID_DBG_DECLARE ||
-               id == IID_DBG_VALUE || id == IID_DBG_LABEL || id == IID_INVARIANT_START || id == IID_INVARIANT_END ||
-               id == IID_LAUNDER_INVARIANT_GROUP || id == IID_STRIP_INVARIANT_GROUP || id == IID_IS_CONSTANT ||
-               id == IID_LIFETIME_START || id == IID_LIFETIME_END || id == IID_EXPERIMENTAL_NOALIAS_SCOPE_DECL ||
-               id == IID_OBJECTSIZE || id == IID_PTR_ANNOTATION || id == IID_VAR_ANNOTATION || id == IID_ANNOTATION ||
-               id == IID_EXPERIMENTAL_GC_RESULT || id == IID_EXPERIMENTAL_GC_RELOCATE || id == IID_THREADLOCAL_ADDRESS ||
-               id == IID_SSA_COPY
-                return 0, 0;
-            return 0, TTI_UNBOUNDED;
-        }
-        if callee != NONE {
-            if !tti_is_lowered_to_call(callee) return 1, 1;
-            np := cast(s64) func_nparams(glob(callee).value_type);
-            return np + 1, np + 1;
-        }
-        a := cast(s64) call_num_args(i);
-        return a + 1, a + 1;
-    }
-    if opc == {
-        case .PHI; return 0, 0;
-        case .BR; #through;
-        case .CONDBR; #through;
-        case .RET; #through;
-        case .SWITCH; return 1, 1;
-        case .FREEZE; return 0, 0;
-        case .ALLOCA; if is_static_alloca(i) return 0, 0; return 1, 1;
-        // not in getInstructionCost's switch: "everything remaining is basic"
-        case .VAARG; #through; case .LANDINGPAD; #through; case .CATCHPAD; #through; case .CLEANUPPAD; #through;
-        case .FENCE; #through; case .CMPXCHG; #through; case .ATOMICRMW; #through; case .RESUME; #through;
-        case .UNREACHABLE; #through; case .INDIRECTBR; #through; case .CATCHSWITCH; #through; case .CATCHRET; #through;
-        case .CLEANUPRET; return 1, 1;
-    }
-    simple_ty :: (t: Type_Id) -> bool {
-        k := type_kind(t);
-        if k == .INT return type_int_width(t) <= 64;
-        return k == .PTR || k == .FLOAT || k == .DOUBLE;
-    }
-    if opc == {
-        case .ADD; #through; case .SUB; #through; case .AND; #through; case .OR; #through; case .XOR; #through;
-        case .SHL; #through; case .LSHR; #through; case .ASHR; #through; case .MUL; #through;
-        case .FADD; #through; case .FSUB; #through; case .FMUL; #through; case .FNEG; #through;
-        case .TRUNC; #through; case .ZEXT; #through; case .SEXT; #through; case .PTRTOINT; #through;
-        case .INTTOPTR; #through; case .BITCAST; #through; case .SELECT; #through; case .GEP; #through;
-        case .LOAD;
-            if simple_ty(vtype(i)) return 0, 2;
-        case .ICMP; #through; case .FCMP; #through; case .STORE;
-            if simple_ty(vtype(op(i, 0))) return 0, 2;
-    }
-    return 0, TTI_UNBOUNDED;
-}
-
 Code_Metrics :: struct {
     not_duplicatable: bool;
     convergent: bool;
-    num_insts_lo: s64;
-    num_insts_hi: s64;
+    num_insts: Cost;
     num_inline_candidates: s64;
 }
 
 // CodeMetrics::analyzeBasicBlock(BB, TTI, EphValues, PrepareForLTO)
-analyze_basic_block :: (m: *Code_Metrics, b: Value_Id, eph: *Table(Value_Id, bool), prepare_for_lto: bool) {
+analyze_basic_block :: (m: *Code_Metrics, t: *Tti, b: Value_Id, eph: *Table(Value_Id, bool), prepare_for_lto: bool) {
     for i: block_insts(b) {
         if table_contains(eph, i) continue;
         if is_call_base(i) {
@@ -299,12 +217,10 @@ analyze_basic_block :: (m: *Code_Metrics, b: Value_Id, eph: *Table(Value_Id, boo
                 m.convergent = true;
             }
         }
-        lo, hi := tti_code_size_bounds(i);
-        m.num_insts_lo += lo;
-        m.num_insts_hi += hi;
+        m.num_insts = cost_add(m.num_insts, tti_instruction_cost(t, i, TCK_CODE_SIZE));
     }
-    t := block_terminator(b);
-    if t != NONE && inst_op(t) == .INDIRECTBR m.not_duplicatable = true;
+    term := block_terminator(b);
+    if term != NONE && inst_op(term) == .INDIRECTBR m.not_duplicatable = true;
 }
 
 // Function::hasOneLiveUse: one use that is not a dead constant user
@@ -766,13 +682,11 @@ lr_rotate_loop :: (lr: *Loop_Rotate, l: Loop_Id, simplified_latch: bool) -> bool
         eph: Table(Value_Id, bool); eph.allocator = temp;
         collect_ephemeral_values(li, l, lr.ac, *eph);
         m: Code_Metrics;
-        analyze_basic_block(*m, orig_header, *eph, lr.prepare_for_lto);
+        analyze_basic_block(*m, tti_get(block_fn(orig_header)), orig_header, *eph, lr.prepare_for_lto);
         if m.not_duplicatable return false;
         if m.convergent return false;
-        if m.num_insts_lo > lr.max_header_size return false;
-        if m.num_insts_hi > lr.max_header_size
-            fatal("loop-rotate: the x86 code-size cost of header '%' (between % and % against a threshold of %) is not ported precisely enough to decide",
-                  vname(orig_header), m.num_insts_lo, ifx m.num_insts_hi >= TTI_UNBOUNDED then -1 else m.num_insts_hi, lr.max_header_size);
+        if !cost_valid(m.num_insts) return false;
+        if m.num_insts > lr.max_header_size return false;
         if lr.prepare_for_lto && m.num_inline_candidates > 0 return false;
     }
     orig_ph := li_loop_preheader(li, l);

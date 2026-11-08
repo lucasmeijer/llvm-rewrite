@@ -115,7 +115,11 @@ cached_cycle_info :: (f: Value_Id) -> *Cycle_Info { e := table_find_pointer(*fam
 // AM.getResult<AssumptionAnalysis>(F)
 get_assumption_cache :: (f: Value_Id) -> *Assumption_Cache {
     e := fam_entry(f);
-    if !e.ac e.ac = ac_build(f);
+    if !e.ac {
+        // AssumptionAnalysis::run asks for the function's TTI (which creates its subtarget)
+        if tti_is_x86_triple(ir.triple) tti_get(f);
+        e.ac = ac_build(f);
+    }
     return e.ac;
 }
 cached_assumption_cache :: (f: Value_Id) -> *Assumption_Cache { e := table_find_pointer(*fam, f); if e return e.ac; return null; }
@@ -185,6 +189,8 @@ Pass_Kind :: enum u8 {
     NO_OP_LOOP; LOOP_ROTATE;
     // ScalarEvolution (scev_print.jai)
     PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS;
+    // TargetTransformInfo (tti.jai)
+    PRINT_COST_MODEL;
 }
 
 Pass_Info :: struct {
@@ -221,6 +227,7 @@ PASS_TABLE :: Pass_Info.[
     .{"print<domtree>", .FUNCTION, .PRINT_DOMTREE, true, .DOMTREE},
     .{"print<postdomtree>", .FUNCTION, .PRINT_POSTDOMTREE, true, .DOMTREE},
     .{"print<demanded-bits>", .FUNCTION, .PRINT_DEMANDED_BITS, true, .DOMTREE},
+    .{"print<cost-model>", .FUNCTION, .PRINT_COST_MODEL, true, .DOMTREE},
     .{"require<domtree>", .FUNCTION, .REQUIRE, true, .DOMTREE},
     .{"require<postdomtree>", .FUNCTION, .REQUIRE, true, .POSTDOMTREE},
     .{"require<demanded-bits>", .FUNCTION, .REQUIRE, true, .DEMANDED_BITS},
@@ -535,7 +542,8 @@ cl_data_layout: string;                  // opt -data-layout (overrides the modu
 
 cl_opts :: () -> [] Cl_Opt {
     // pointers into the global `opts`
-    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    list := NewArray(14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT + TTI_CL_OPT_COUNT, Cl_Opt,, allocator = temp);
+    add_tti_cl_opts(list, 14 + AA_CL_OPT_COUNT + SCEV_CL_OPT_COUNT);
     add_aa_cl_opts(list, 14);
     add_scev_cl_opts(list, 14 + AA_CL_OPT_COUNT);
     list[11] = .{"rotation-max-header-size", .INT, null, *lr_opts.rotation_max_header_size, null};
@@ -664,6 +672,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
             dt_print(get_postdomtree(f), *sb);
             write_string(builder_to_string(*sb,, allocator = temp), to_standard_error = true);
             return PRESERVE_ALL;
+        case .PRINT_COST_MODEL; cost_model_printer_run(f); return PRESERVE_ALL;
         case .PRINT_DEMANDED_BITS;
             sb: String_Builder; sb.allocator = temp;
             db_print(get_demanded_bits(f), *sb);
@@ -758,6 +767,7 @@ opt_main :: () {
     ir.module_id = input;
     parse_module(src, input);
     if opts.mtriple.count ir.triple = normalize_triple(opts.mtriple);
+    tti_create_target_machine();
     if ir.source_filename.count == 0 && !saw_source_filename ir.source_filename = input;
     if root >= 0 run_module_pm(root);
     defer aa_eval_print_reports();

@@ -74,6 +74,11 @@
 #load "loop_nest.jai";
 #load "scev_aa.jai";
 #load "iv_users.jai";
+#load "tti.jai";
+#load "tti_x86.jai";
+#load "x86_lowering.jai";
+#load "gen_x86_tti.jai";
+#load "gen_x86_lowering.jai";
 
 main :: () { opt_main(); }
 
