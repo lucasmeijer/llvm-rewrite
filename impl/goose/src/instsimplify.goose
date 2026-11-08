@@ -1192,34 +1192,7 @@ recursive fn simplify_and(a0: i32, b0: i32, q: SQ, mr: i64) -> i32 {
 }
 
 // isImpliedCondition(LHS, RHS, DL, LHSIsTrue)
-fn implied_condition_vals(l: i32, r: i32, lhs_true: bool) -> i64 {
-    // RHS must be an icmp (or i1 trunc/not forms) for the ported path
-    if l == r { return if lhs_true { 1 } else { 0 }; }
-    var rr = r;
-    var inv = false;
-    let nr = m_not(rr);
-    if nr >= 0 { rr = nr; inv = true; }
-    var res: i64 = -1;
-    if is_op(rr, OP_ICMP) {
-        res = implied_condition(l, cp(cmp_pred_of(rr), has_flag(rr, FL_SAMESIGN)), op(rr, 0), op(rr, 1), lhs_true, 0);
-    } else if is_op(rr, OP_FCMP) {
-        if is_op(l, OP_FCMP) || is_op(l, OP_AND) || is_op(l, OP_OR) || is_inst_op(l, OP_SELECT) || m_not(l) >= 0 {
-            is_not_ported("isImpliedCondition with fcmp");
-        }
-        return -1;
-    } else {
-        if ty_is_vector(vals[l].ty) != ty_is_vector(vals[rr].ty) { return -1; }
-        // LHS ==> (RHS1 || RHS2) / (RHS1 && RHS2) through logical and/or
-        if m_logical(rr, true) || m_logical(rr, false) {
-            is_not_ported("isImpliedCondition with a logical and/or right-hand side");
-        }
-        if is_op(rr, OP_TRUNC) && is_inst(rr) && op_nuw(rr) { is_not_ported("isImpliedCondition with a trunc nuw right-hand side"); }
-        return -1;
-    }
-    if res < 0 { return -1; }
-    if inv { return 1 - res; }
-    return res;
-}
+fn implied_condition_vals(l: i32, r: i32, lhs_true: bool) -> i64 { implied_condition_v(l, r, lhs_true, 0) }
 
 recursive fn simplify_or_logic(x: i32, y: i32) -> i32 {
     let ty = vals[x].ty;
@@ -3466,7 +3439,7 @@ let RM_NEAREST = 1;
 let RM_DYNAMIC = 7;
 let RM_TOWARD_NEG = 3;
 fn is_default_fp_env(eb: i64, rm: i64) -> bool { eb == EB_IGNORE && rm == RM_NEAREST }
-fn can_ignore_snan(eb: i64, fmf: u8) -> bool { eb != EB_STRICT || (fmf & FMF_NNAN) != 0 }
+fn can_ignore_snan(eb: i64, fmf: u8) -> bool { eb == EB_IGNORE || (fmf & FMF_NNAN) != 0 }
 fn can_rounding_mode_be(rm: i64, qrm: i64) -> bool { rm == RM_DYNAMIC || rm == qrm }
 
 recursive fn simplify_fp_op(mark: i64, n: i64, fmf: u8, q: SQ, eb: i64, rm: i64) -> i32 {
@@ -3629,15 +3602,8 @@ recursive fn simplify_fdiv(a0: i32, b0: i32, fmf: u8, q: SQ, mr: i64, eb: i64, r
             let x = m_c_binop_with(a, OP_FMUL, b);
             if x >= 0 { return x; }
         }
-        // m_FNegNSZ(m_Specific(X)): fneg X, or fsub nsz -0.0/0.0, X
-        fn fneg_nsz_of(v: i32, x: i32) -> bool {
-            if is_op(v, OP_FNEG) && op(v, 0) == x { return true; }
-            if is_op(v, OP_FSUB) && op(v, 1) == x {
-                if m_neg_zero_fp(op(v, 0)) { return true; }
-                if m_any_zero_fp(op(v, 0)) && (inst_fmf(v) & FMF_NSZ) != 0 { return true; }
-            }
-            return false;
-        }
+        // m_FNegNSZ(m_Specific(X)): m_FSub(m_AnyZeroFP(), X) (PatternMatch.h; no fneg form)
+        fn fneg_nsz_of(v: i32, x: i32) -> bool { is_op(v, OP_FSUB) && op(v, 1) == x && m_any_zero_fp(op(v, 0)) }
         if fneg_nsz_of(a, b) || fneg_nsz_of(b, a) { return c_fp_from_f64(vals[a].ty, -1.0); }
         if (fmf & FMF_NINF) != 0 && m_any_zero_fp(b) { return c_poison(vals[b].ty); }
     }

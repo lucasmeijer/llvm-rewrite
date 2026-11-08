@@ -4,7 +4,7 @@
 // Coverage policy: every case of LLVM's computeKnownBits is either ported, or detected and reported with
 // fatal() ("not ported"), so a less precise answer can never silently produce different IR. Cases LLVM
 // itself answers with "unknown" (unlisted opcodes/intrinsics) are unknown here too. Not ported: integers
-// wider than 64 bits, bitcasts from FP (needs computeKnownFPClass) or between vector shapes, vscale,
+// wider than 64 bits, bitcasts between vector shapes, vscale,
 // target intrinsics. Assumptions: assume.goose.
 import std;
 import ir;
@@ -24,6 +24,8 @@ import constfold;
 import cfold;
 import instsimplify;
 import assume;
+import fpclass;
+import apfloat;
 
 let MAX_ANALYSIS_DEPTH = 6;   // MaxAnalysisRecursionDepth
 
@@ -1205,7 +1207,24 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         let st = vals[src].ty;
         if (ty_is_int(st) || ty_kind(st) == TK_PTR) && !ty_is_vector(vals[iv].ty) { return kb_compute_all(src, depth + 1); }
         if is_fp_or_fp_vec(st) && elementwise_bitcast_v(iv) {
-            not_ported("known bits of a bitcast from floating point (computeKnownFPClass)");
+            let fk = known_fp_class_de(src, de, FCL_ALL, depth + 1);
+            let cls = fk.known;
+            if cls == 0 { return known; }
+            if kfc_never(fk, FCL_NORMAL | FCL_SUBNORMAL | FCL_NAN) {
+                known = kb_all_conflict(w);
+                let fkind = types[ty_scalar(st)].kind as i64;
+                if (cls & FCL_INF) != 0 {
+                    let f = fp_fmt(fkind);
+                    let infb: u64 = (((1 as u64) << f.ebits) - 1) << (f.p - 1);
+                    known = kb_intersect(known, kb_const(infb, w));
+                }
+                if (cls & FCL_ZERO) != 0 { known = kb_intersect(known, kb_const(0, w)); }
+                known.z &= ~sbit(w);
+                known.o &= ~sbit(w);
+            }
+            if fk.sign == 1 { known = kb_make_neg(known); }
+            else if fk.sign == 0 { known = kb_make_nonneg(known); }
+            return known;
         }
         if ty_kind(st) != TK_FVEC || !ty_is_int(types[st].a) || !is_int_or_int_vec(vals[iv].ty) || ty_kind(vals[iv].ty) == TK_SVEC { return known; }
         not_ported("known bits of a bitcast between integer vector shapes");

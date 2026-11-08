@@ -1,7 +1,7 @@
 // Condition implication: port of isImpliedCondition / isImpliedCondICmps / isImpliedCondOperands /
 // isTruePredicate / isImpliedCondAndOr / isImpliedByDomCondition (llvm/lib/Analysis/ValueTracking.cpp) and
 // ICmpInst::isImpliedByMatchingCmp / CmpPredicate::getMatching (llvm/lib/IR/Instructions.cpp).
-// Not ported (fail loudly): the constant-range path (a common operand compared with a constant) and fcmps.
+// The fcmp path (isImpliedCondFCmps) lives in fpclass.goose next to ConstantFPRange.
 import std;
 import ir;
 import irutil;
@@ -12,6 +12,7 @@ import crange;
 import vt;
 import knownbits;
 import assume;
+import fpclass;
 
 let P_EQ = 32;
 let P_NE = 33;
@@ -248,9 +249,13 @@ recursive fn implied_condition(lhs0: i32, rp: i64, r0: i32, r1: i32, lhs_true0: 
     let st = ty_scalar(vals[r0].ty);
     if ty_is_int(st) || ty_kind(st) == TK_PTR {
         if binop_is(lhs, OP_ICMP) { return implied_cond_icmps(icmp_cp(lhs), op(lhs, 0), op(lhs, 1), rp, r0, r1, lhs_true); }
-        if binop_is(lhs, OP_TRUNC) && has_nuw(lhs) { fatal("isImpliedCondition: m_ICmpLike(trunc nuw) is not ported"); }
+        // m_ICmpLike: trunc nuw X to i1 is icmp ne X, 0
+        if binop_is(lhs, OP_TRUNC) && has_nuw(lhs) && is_int_or_int_vec_w(vals[lhs].ty, 1) {
+            let a = op(lhs, 0);
+            return implied_cond_icmps(cp(P_NE, false), a, c_null(vals[a].ty), rp, r0, r1, lhs_true);
+        }
     } else {
-        if binop_is(lhs, OP_FCMP) { fatal("isImpliedCondition: fcmp conditions are not ported"); }
+        if binop_is(lhs, OP_FCMP) { return implied_cond_fcmps(inst_pred(lhs), op(lhs, 0), op(lhs, 1), cp_pred(rp), r0, r1, lhs_true); }
     }
     if is_inst(lhs) {
         let o = iop(lhs);
@@ -275,6 +280,49 @@ recursive fn implied_condition(lhs0: i32, rp: i64, r0: i32, r1: i32, lhs_true0: 
                 return implied_condition(b, rp, r0, r1, lhs_true, depth + 1);
             }
         }
+    }
+    return -1;
+}
+
+// isImpliedCondition(LHS, RHS, DL, LHSIsTrue, Depth): 1 true, 0 false, -1 unknown.
+recursive fn implied_condition_v(l: i32, r0: i32, lhs_true: bool, depth: i64) -> i64 {
+    if l == r0 { return if lhs_true { 1 } else { 0 }; }
+    var r = r0;
+    var inv = false;
+    let nr = is_not_of(r);
+    if nr >= 0 {
+        r = nr;
+        if l == r { return if lhs_true { 0 } else { 1 }; }
+        inv = true;
+    }
+    // m_ICmpLike(RHSPred, RHSOp0, RHSOp1)
+    var rp: i64 = -1;
+    var a: i32 = -1;
+    var b: i32 = -1;
+    if binop_is(r, OP_ICMP) { rp = icmp_cp(r); a = op(r, 0); b = op(r, 1); }
+    else if binop_is(r, OP_TRUNC) && has_nuw(r) && is_int_or_int_vec_w(vals[r].ty, 1) { rp = cp(P_NE, false); a = op(r, 0); b = c_null(vals[a].ty); }
+    if rp >= 0 {
+        let x = implied_condition(l, rp, a, b, lhs_true, depth);
+        if x < 0 { return -1; }
+        return if inv { 1 - x } else { x };
+    }
+    if binop_is(r, OP_FCMP) {
+        let x = implied_condition(l, inst_pred(r), op(r, 0), op(r, 1), lhs_true, depth);
+        if x < 0 { return -1; }
+        return if inv { 1 - x } else { x };
+    }
+    if depth == 6 { return -1; }
+    if m_logical(r, false) {
+        let r1 = lg_a;
+        let r2 = lg_b;
+        if implied_condition_v(l, r1, lhs_true, depth + 1) == 1 { return if inv { 0 } else { 1 }; }
+        if implied_condition_v(l, r2, lhs_true, depth + 1) == 1 { return if inv { 0 } else { 1 }; }
+    }
+    if m_logical(r, true) {
+        let r1 = lg_a;
+        let r2 = lg_b;
+        if implied_condition_v(l, r1, lhs_true, depth + 1) == 0 { return if inv { 1 } else { 0 }; }
+        if implied_condition_v(l, r2, lhs_true, depth + 1) == 0 { return if inv { 1 } else { 0 }; }
     }
     return -1;
 }
