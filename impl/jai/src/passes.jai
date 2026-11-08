@@ -11,8 +11,8 @@
 
 // ---------------------------------------------------------------- analyses
 
-Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; SCEV; }
-ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles", "scalar-evolution"];
+Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; SCEV; LVI; }
+ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles", "scalar-evolution", "lazy-value-info"];
 
 // PreservedAnalyses. `cfg` = preserveSet<CFGAnalyses>().
 Preserved :: struct {
@@ -43,6 +43,7 @@ Fn_Analyses :: struct {
     li: *Loop_Info;
     ci: *Cycle_Info;
     se: *Scev_State;   // ScalarEvolution (scev_print.jai get_scev)
+    lvi: *Lvi;         // LazyValueInfo (lazy_value_info.jai)
 }
 fam: Table(Value_Id, Fn_Analyses);
 
@@ -122,6 +123,17 @@ get_assumption_cache :: (f: Value_Id) -> *Assumption_Cache {
     }
     return e.ac;
 }
+// AM.getResult<LazyValueAnalysis>(F) (LazyValueAnalysis::run requests the AssumptionCache)
+get_lvi :: (f: Value_Id) -> *Lvi {
+    e := fam_entry(f);
+    if !e.lvi {
+        ac := get_assumption_cache(f);
+        e = fam_entry(f);
+        e.lvi = lvi_new(f, ac);
+    }
+    return e.lvi;
+}
+cached_lvi :: (f: Value_Id) -> *Lvi { e := table_find_pointer(*fam, f); if e return e.lvi; return null; }
 cached_assumption_cache :: (f: Value_Id) -> *Assumption_Cache { e := table_find_pointer(*fam, f); if e return e.ac; return null; }
 
 dt_new :: (post: bool) -> *Dom_Tree {
@@ -149,6 +161,9 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     // never invalidates itself in LLVM; here it is rebuilt, so a surviving ScalarEvolution gets the new one.)
     if e.se && (!analysis_survives(.SCEV, pa) || !e.dt || !e.li) { scev_free(e.se); e.se = null; }
     if e.se && !e.ac { e.ac = ac_build(f); e.se.ac = e.ac; }
+    // LazyValueInfo::invalidate: only when not preserved (it holds the never-invalidated AssumptionCache)
+    if e.lvi && !analysis_survives(.LVI, pa) { lvi_free(e.lvi); e.lvi = null; }
+    if e.lvi && !e.ac { e.ac = ac_build(f); e.lvi.ac = e.ac; }
     // MemorySSAAnalysis::Result::invalidate: preserved, and AAManager and DominatorTreeAnalysis survive. AAManager
     // depends on BasicAA's AssumptionCache (never invalidated in LLVM: rebuilt here and re-pointed) and DT, and on
     // SCEVAA's ScalarEvolution.
@@ -166,6 +181,7 @@ fam_require :: (f: Value_Id, k: Analysis_Kind) {
         case .LOOPS; get_loop_info(f);
         case .CYCLES; get_cycle_info(f);
         case .SCEV; get_scev(f);
+        case .LVI; get_lvi(f);
     }
 }
 fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
@@ -205,6 +221,8 @@ Pass_Kind :: enum u8 {
     GVN;
     // DeadStoreElimination (pass_dse.jai), MemCpyOpt (pass_memcpyopt.jai)
     DSE; MEMCPYOPT;
+    // LazyValueInfo (lazy_value_info.jai), CorrelatedValuePropagation (pass_cvp.jai), JumpThreading (pass_jump_threading.jai)
+    PRINT_LVI; CVP; JUMP_THREADING;
 }
 
 Pass_Info :: struct {
@@ -295,6 +313,10 @@ PASS_TABLE :: Pass_Info.[
     .{"verify<scalar-evolution>", .FUNCTION, .VERIFY_SCEV, true, .SCEV},
     .{"require<scalar-evolution>", .FUNCTION, .REQUIRE, true, .SCEV},
     .{"invalidate<scalar-evolution>", .FUNCTION, .INVALIDATE, true, .SCEV},
+    .{"print<lazy-value-info>", .FUNCTION, .PRINT_LVI, true, .LVI},
+    .{"require<lazy-value-info>", .FUNCTION, .REQUIRE, true, .LVI},
+    .{"invalidate<lazy-value-info>", .FUNCTION, .INVALIDATE, true, .LVI},
+    .{"correlated-propagation", .FUNCTION, .CVP, false, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -778,6 +800,9 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .PRINT_MEMORYSSA_NO_OPT; mssa_printer_run(f, false); return PRESERVE_ALL;
         case .PRINT_MEMORYSSA_WALKER; mssa_walker_printer_run(f); return PRESERVE_ALL;
         case .VERIFY_MEMORYSSA; mssa_verifier_run(f); return PRESERVE_ALL;
+        case .PRINT_LVI; return print_lazy_value_info_run(f);
+        case .CVP; return cvp_run(f);
+        case .JUMP_THREADING; return jump_threading_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

@@ -471,9 +471,15 @@ call_param_attr :: (c: Value_Id, argno: u32, k: Attr_Kind) -> *Attr {
 call_param_has_attr :: (c: Value_Id, argno: u32, k: Attr_Kind) -> bool { return call_param_attr(c, argno, k) != null; }
 // CallBase::getRange
 call_range :: (c: Value_Id) -> (bool, Const_Range) {
-    at := call_ret_attr(c, .Range);
-    if !at { r: Const_Range; return false, r; }
-    return true, attr_range(at);
+    ca := attr_set_find(attr_list_ret(inst(c).attrs), .Range);
+    fa: *Attr;
+    f := call_called_function(c);
+    if f != NONE fa = attr_set_find(attr_list_ret(glob(f).attrs), .Range);
+    if ca && fa return true, cr_intersect(attr_range(ca), attr_range(fa));
+    if ca return true, attr_range(ca);
+    if fa return true, attr_range(fa);
+    r: Const_Range;
+    return false, r;
 }
 // CallBase::getReturnedArgOperand
 call_returned_arg :: (c: Value_Id) -> Value_Id {

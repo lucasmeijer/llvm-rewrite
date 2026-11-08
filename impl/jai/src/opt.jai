@@ -77,6 +77,10 @@
 #load "assume_builder.jai";
 #load "pass_dse.jai";
 #load "pass_memcpyopt.jai";
+#load "value_lattice.jai";
+#load "lazy_value_info.jai";
+#load "pass_cvp.jai";
+#load "pass_jump_threading.jai";
 #load "scev.jai";
 #load "scev_create.jai";
 #load "scev_range.jai";

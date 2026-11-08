@@ -220,11 +220,77 @@ sw_successor_weight :: (sw: Value_Id, idx: u32) -> (bool, u32) {
 
 // ---------------------------------------------------------------- DomTreeUpdater (Eager)
 
-// A null *Dtu = no DTU. With the Eager strategy every update is applied immediately.
-Dtu :: struct { dt: *Dom_Tree; }
+// A null *Dtu = no DTU. With the Eager strategy every update is applied immediately. `lazy` = UpdateStrategy::Lazy
+// (GenericDomTreeUpdater(Impl).h, DomTreeUpdater.cpp): updates are queued in `pending` and applied as one batch by
+// dtu_flush / dtu_get_dom_tree, deleted blocks wait in `deleted` until no update is pending.
+Dtu :: struct {
+    dt: *Dom_Tree;
+    lazy: bool;
+    pending: [..] Dom_Update;   // PendUpdates[PendDTUpdateIndex..] (applied ones are dropped right away)
+    deleted: [..] Value_Id;     // DeletedBBs
+}
 dtu_apply :: (dtu: *Dtu, updates: [] Dom_Update) {
     if !dtu || !dtu.dt || updates.count == 0 return;
+    if dtu.lazy {
+        for updates if it.from != it.to array_add(*dtu.pending, it);
+        return;
+    }
     dt_apply_updates(dtu.dt, updates);
+}
+// applyUpdatesPermissive: deduplicated by edge, and only updates that agree with the current CFG
+dtu_apply_permissive :: (dtu: *Dtu, updates: [] Dom_Update) {
+    if !dtu || !dtu.dt return;
+    seen: [..] [2] Value_Id; seen.allocator = temp;
+    dedup: [..] Dom_Update; dedup.allocator = temp;
+    for u: updates {
+        if u.from == u.to continue;
+        dup := false;
+        for seen if it[0] == u.from && it[1] == u.to { dup = true; break; }
+        if dup continue;
+        array_add(*seen, .[u.from, u.to]);
+        has_edge := false;
+        t := block_terminator(u.from);
+        if t != NONE for k: 0..cast(s64) num_successors(t) - 1 if get_successor(t, cast(u32) k) == u.to { has_edge = true; break; }
+        if u.insert != has_edge continue;   // isUpdateValid
+        if dtu.lazy array_add(*dtu.pending, u); else array_add(*dedup, u);
+    }
+    if dtu.lazy return;
+    if dedup.count dt_apply_updates(dtu.dt, dedup);
+}
+dtu_has_pending_updates :: (dtu: *Dtu) -> bool { return dtu && dtu.pending.count > 0; }
+dtu_has_pending_deleted_bb :: (dtu: *Dtu) -> bool { return dtu && dtu.deleted.count > 0; }
+// isBBPendingDeletion
+dtu_is_bb_pending_deletion :: (dtu: *Dtu, bb: Value_Id) -> bool {
+    if !dtu || !dtu.lazy return false;
+    for dtu.deleted if it == bb return true;
+    return false;
+}
+// forceFlushDeletedBB
+dtu_force_flush_deleted_bb :: (dtu: *Dtu) {
+    for dtu.deleted {
+        if dtu.dt && dt_node(dtu.dt, it) >= 0 dt_erase_node(dtu.dt, it);
+        block_erase_from_parent(it);
+    }
+    dtu.deleted.count = 0;
+}
+// applyDomTreeUpdates + dropOutOfDateUpdates (tryFlushDeletedBB)
+dtu_flush :: (dtu: *Dtu) {
+    if !dtu || !dtu.lazy return;
+    if dtu.dt && dtu.pending.count {
+        dt_apply_updates(dtu.dt, dtu.pending);
+        dtu.pending.count = 0;
+    }
+    if !dtu.dt dtu.pending.count = 0;
+    if dtu.pending.count == 0 dtu_force_flush_deleted_bb(dtu);
+}
+// getDomTree: applyDomTreeUpdates, dropOutOfDateUpdates
+dtu_get_dom_tree :: (dtu: *Dtu) -> *Dom_Tree { dtu_flush(dtu); return dtu.dt; }
+// recalculate(F) (Lazy: flush deleted blocks, recalculate, drop the pending updates)
+dtu_recalculate :: (dtu: *Dtu, f: Value_Id) {
+    if !dtu.lazy { if dtu.dt dt_recalculate(dtu.dt, f); return; }
+    dtu_force_flush_deleted_bb(dtu);
+    if dtu.dt dt_recalculate(dtu.dt, f);
+    dtu.pending.count = 0;
 }
 dtu_apply1 :: (dtu: *Dtu, insert: bool, from: Value_Id, to: Value_Id) {
     if !dtu return;
@@ -234,6 +300,11 @@ dtu_apply1 :: (dtu: *Dtu, insert: bool, from: Value_Id, to: Value_Id) {
 // DomTreeUpdater::deleteBB: validateDeleteBB, eraseDelBBNode, eraseFromParent
 dtu_delete_bb :: (dtu: *Dtu, bb: Value_Id) {
     validate_delete_bb(bb);
+    if dtu && dtu.lazy {
+        for dtu.deleted if it == bb return;
+        array_add(*dtu.deleted, bb);
+        return;
+    }
     if dtu && dtu.dt && dt_node(dtu.dt, bb) >= 0 dt_erase_node(dtu.dt, bb);
     block_erase_from_parent(bb);
 }
