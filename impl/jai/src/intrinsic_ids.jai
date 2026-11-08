@@ -271,3 +271,4 @@ IID_FPTRUNC_ROUND :: #run iid_by_name("llvm.fptrunc.round");
 IID_ANNOTATION :: #run iid_by_name("llvm.annotation");
 IID_EXPERIMENTAL_CONVERGENCE_LOOP :: #run iid_by_name("llvm.experimental.convergence.loop");
 IID_EXPERIMENTAL_CONVERGENCE_ENTRY :: #run iid_by_name("llvm.experimental.convergence.entry");
+IID_VP_IS_FPCLASS :: #run iid_by_name("llvm.vp.is.fpclass");

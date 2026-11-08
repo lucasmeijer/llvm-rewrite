@@ -143,7 +143,8 @@ is_fp_binop :: (o: Opcode) -> bool { return o == .FADD || o == .FSUB || o == .FM
 inst_is_associative :: (i: Value_Id) -> bool {
     o := inst_op(i);
     if is_associative_op(o) return true;
-    if o == .FADD || o == .FMUL { f := get_fmf(i); return (f & FMF_REASSOC) != 0 && (f & FMF_NSZ) != 0; }
+    if o == .FMUL return (get_fmf(i) & FMF_REASSOC) != 0;
+    if o == .FADD { f := get_fmf(i); return (f & FMF_REASSOC) != 0 && (f & FMF_NSZ) != 0; }
     return false;
 }
 
