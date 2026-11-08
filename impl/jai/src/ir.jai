@@ -507,8 +507,9 @@ num_uses :: (v: Value_Id) -> int {
     return n;
 }
 
-// Grow a user's operand storage to at least `cap` slots, relocating the operand range to the end of the use
-// table and patching use-list links (mirrors LLVM's hung-off operand growth, which keeps use-list positions).
+// User::growHungoffUses: allocate a new operand range at the end of the use table, copy the old operands in operand
+// order with Use::operator= (which is Use::set, so each copied use goes to the FRONT of its value's use list), then
+// destroy the old uses. Growing therefore reorders use lists, exactly like LLVM.
 grow_ops :: (user: Value_Id, cap: u32) {
     if ir.v_cap[user] >= cap return;
     old := ir.v_ops[user];
@@ -524,26 +525,30 @@ grow_ops :: (user: Value_Id, cap: u32) {
     for i: 0..cast(s64)n-1 {
         ou := old + cast(u32) i;
         nu := start + cast(u32) i;
-        v := ir.u_val[ou];
-        ir.u_val[nu] = v;
         ir.u_aux[nu] = ir.u_aux[ou];
-        if v != NONE {
-            nx := ir.u_next[ou]; pv := ir.u_prev[ou];
-            ir.u_next[nu] = nx; ir.u_prev[nu] = pv;
-            if pv == NONE ir.v_first_use[v] = nu; else ir.u_next[pv] = nu;
-            if nx != NONE ir.u_prev[nx] = nu;
-        }
-        ir.u_val[ou] = NONE; ir.u_next[ou] = NONE; ir.u_prev[ou] = NONE; ir.u_user[ou] = NONE;
+        use_set(nu, ir.u_val[ou]);
+    }
+    for i: 0..cast(s64)n-1 {
+        ou := old + cast(u32) i;
+        use_set(ou, NONE);
+        ir.u_user[ou] = NONE;
     }
     ir.v_ops[user] = start;
     ir.v_cap[user] = cap;
 }
 
-// Append an operand (phi addIncoming, switch addCase, ...).
+// Append an operand (PHINode::addIncoming, SwitchInst::addCase, IndirectBrInst::addDestination, ...), growing the
+// reserved space by the owning class's growOperands policy.
 add_op :: (user: Value_Id, v: Value_Id, aux: Value_Id = NONE) -> u32 {
     n := ir.v_nops[user];
     if n + 1 > ir.v_cap[user] {
-        newcap := ifx ir.v_cap[user] < 2 then 4 else ir.v_cap[user] * 2;
+        newcap: u32;
+        op := ifx vkind(user) == .INST then inst_op(user) else .NONE_OP;
+        if op == .PHI { newcap = n + n / 2; if newcap < 2 newcap = 2; }
+        else if op == .SWITCH newcap = n * 3;
+        else if op == .INDIRECTBR newcap = n * 2;
+        else if op == .LANDINGPAD newcap = (max(n, 1) + 0) * 2;
+        else newcap = max(n * 2, 4);
         if newcap < n + 1 newcap = n + 1;
         grow_ops(user, newcap);
     }

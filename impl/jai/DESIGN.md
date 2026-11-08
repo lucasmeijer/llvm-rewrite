@@ -72,11 +72,15 @@ Side tables, one row per entity of that kind, also SoA:
 ### Uses (one row per operand slot)
 
 `u_val` (the used value), `u_user` (the user Value_Id), `u_next`, `u_prev` (doubly linked use list of `u_val`;
-`u_prev == NONE` means "I am the head"), `u_aux` (phi incoming block; not part of any use list, matching LLVM where
-a phi's block list is not a `Use`). A user's operands are a contiguous range `v_ops .. v_ops+v_nops`; `v_cap` is the
-reserved capacity. Growing past capacity (phi `addIncoming`, `switch` `addCase`, call rebuilding) relocates the range
-to the end of the table and patches the neighbours' `u_next/u_prev` and list heads; this mirrors LLVM's hung-off
-operand reallocation, which also preserves use-list positions.
+`u_prev == NONE` means "I am the head"), `u_aux` (side data that is *not* a `Use` in LLVM and so is in no use list:
+a phi's incoming block, a switch case's `ConstantInt` value; LLVM 23 keeps switch case values next to the hung-off
+operands, so a switch's operands are `[cond, default, dest...]`). A user's operands are a contiguous range
+`v_ops .. v_ops+v_nops`; `v_cap` is the reserved capacity (LLVM's `ReservedSpace`). Growing past capacity (phi
+`addIncoming`, `switch` `addCase`, `indirectbr` `addDestination`, landingpad clauses) follows each class's
+`growOperands` policy (phi `n + n/2` (min 2), switch `3n`, indirectbr `2n`) and `User::growHungoffUses`: a new
+range at the end of the use table, the old operands copied in operand order with `Use::set` (each copied use moves
+to the *front* of its value's use list), then the old uses destroyed. So growth reorders use lists the way LLVM's
+does.
 
 ### Types (interned, `Type_Id`)
 
@@ -146,8 +150,8 @@ while parsing stays on its global's use list, as in LLVM (until a `removeDeadCon
   uses is an assertion failure, as in LLVM. Dead rows are garbage that is never compacted within a run; a run is one
   process invocation.
 - **Phis**: incoming values are operands, incoming blocks the `u_aux` column of the same rows, so
-  `removeIncomingValue` keeps them in lockstep (LLVM's order-preserving removal is reproduced: later entries shift
-  down, which moves uses between rows; we re-point the use-list links of moved rows).
+  `removeIncomingValue` keeps them in lockstep. LLVM's removal copies later entries down one slot with `Use::set`,
+  which moves those uses to the front of their values' lists; the port must do the same (not patch links).
 
 Analyses (dominator tree, loop info, …) are separate tables keyed by block id and built on demand into the temporary
 allocator or a per-analysis arena; passes invalidate them explicitly, mirroring the new-PM preserved-analyses sets.

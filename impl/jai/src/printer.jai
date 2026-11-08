@@ -1224,11 +1224,9 @@ print_instruction :: (i: Value_Id) {
         case .SWITCH;
             outc(#char " "); write_operand(op(i, 0), true); out(", "); write_operand(op(i, 1), true);
             out(" [");
-            k: u32 = 2;
-            while k + 1 < n + 1 && k < n {
+            for k: 2..cast(s64)n-1 {
                 out("\n    ");
-                write_operand(op(i, k), true); out(", "); write_operand(op(i, k + 1), true);
-                k += 2;
+                write_operand(ir.u_aux[ir.v_ops[i] + cast(u32) k], true); out(", "); write_operand(op(i, cast(u32) k), true);
             }
             out("\n  ]");
         case .INDIRECTBR;

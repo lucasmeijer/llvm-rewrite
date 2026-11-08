@@ -2201,10 +2201,12 @@ parse_instruction :: () -> Value_Id, bool {
             array_add(*cases, cv); array_add(*cases, dest);
         }
         next();
+        // SwitchInst::Create(Cond, Default, NumCases) + addCase: successors are operands, case values side data
         i := new_inst(.SWITCH, ir.t_void, 2);
-        grow_ops(i, cast(u32)(2 + cases.count));
+        grow_ops(i, cast(u32)(2 + cases.count / 2));
         set_op(i, 0, c); set_op(i, 1, d);
-        for cases add_op(i, it);
+        k := 0;
+        while k < cases.count { add_op(i, cases[k + 1], cases[k]); k += 2; }
         return i, false;
     }
     if s == "indirectbr" {
@@ -2316,16 +2318,18 @@ parse_instruction :: () -> Value_Id, bool {
     }
     if s == "landingpad" {
         ty := parse_type();
-        i := new_inst(.LANDINGPAD, ty, 0);
+        i := new_inst(.LANDINGPAD, ty, 0);   // LandingPadInst::Create(Ty, NumReservedClauses) + addClause
         if eat_kw("cleanup") inst(i).flags |= F_CLEANUP;
         kinds: [..] u32; kinds.allocator = temp;
+        clauses: [..] Value_Id; clauses.allocator = temp;
         while is_kw("catch") || is_kw("filter") {
             ik: u32 = ifx is_kw("catch") then cast(u32) 0 else 1;
             next();
-            v := parse_type_and_value();
-            add_op(i, v);
+            array_add(*clauses, parse_type_and_value());
             array_add(*kinds, ik);
         }
+        grow_ops(i, cast(u32) clauses.count);
+        for clauses add_op(i, it);
         r := inst(i);
         r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) kinds.count;
         for kinds array_add(*ir.u32_pool, it);
