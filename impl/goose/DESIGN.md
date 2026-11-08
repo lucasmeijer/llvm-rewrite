@@ -226,11 +226,12 @@ LLVM container: `SmallVector` = `i32[>..<]` with `push`/`pop`; `SetVector` = arr
 `vs_clear/vs_add/vs_has/vs_del` (sets) and `vm_clear/vm_set/vm_get/vm_has` (maps to `i64`) over value ids (or use
 ids), 6 slots each, with an epoch stamp per entry so clearing is O(1). Owners: `VS_PASS0/VS_PASS1`,
 `VM_PASS0/VM_PASS1` belong to the running transform pass (ADCE: live set, dead-terminator set, block numbers);
-`VS_ANA0/VS_ANA1/VM_ANA0` belong to DemandedBits (Visited, DeadUses, AliveBits), which also borrows `VS_PASS1`
-for its worklist while it runs. A pass that calls an analysis must not hold data in the slots the analysis uses.
+`VS_ANA0/VM_ANA0` belong to DemandedBits (Visited, AliveBits); its DeadUses and worklist membership are private
+stamped arrays (`db_dead_*`, `db_wl_*`), because the known-bits queries it makes reach ValueTracking code that uses
+VS_ANA1. A pass that calls an analysis must not hold data in the slots the analysis uses.
 `promote_mem_to_reg` (mem2reg.goose, also called by SROA) uses VM_PASS0 (AllocaLookup, PhiToAllocaMap), VM_PASS1
 (LargeBlockInfo), VS_PASS0 (new PHIs) and VS_PASS1 (values mentioned by debug records); poison.goose's
-programUndefinedIfUndefOrPoison uses VS_ANA1. A pass with more state keeps its own stamped table (SROA's `sr_*`,
+programUndefinedIfUndefOrPoison, vt.goose's getUnderlyingObjects and SCEV's KnownPoison use VS_ANA1. A pass with more state keeps its own stamped table (SROA's `sr_*`,
 20 slots keyed by value or use id). SCCP (sccp.goose) keeps one stamped record per value id (`ScRec`: lattice
 index, struct-lattice base, additional-users list, tracked return/global, bit flags for executable/visited/
 in-worklist/argument-tracked blocks and functions) and PredicateInfo (predinfo.goose) another (`PiRec`); its

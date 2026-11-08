@@ -47,6 +47,10 @@ Facts needed to reproduce `-passes=sccp` and `-passes=ipsccp` exactly. Sources:
   (`implicit-ref-propagation.ll`).
 
 ## Transformations
+- A folded instruction is erased only if `wouldInstructionBeTriviallyDead(&Inst)` (SCCPSolver.cpp
+  simplifyInstsInBlock), called **without a TargetLibraryInfo**: a call to `log(1.0)` is replaced by `0.0` but stays
+  (no isMathLibCallNoop, no library alloc/free knowledge), unlike after instsimplify (DCE/calls-errno.ll,
+  EarlyCSE/math-1.ll under `-passes=sccp`).
 - `changeToUnreachable` puts the new `unreachable` before the first non-PHI and adopts the debug records
   attached there; the records of the erased instructions move forward and those of the old terminator end
   as trailing records, which `flushTerminatorDbgRecords` gives to the new `unreachable`

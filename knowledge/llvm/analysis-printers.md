@@ -15,7 +15,9 @@ What the `::analysis` check compares (see `docs/testing.md`). Verified with opt 
   (`tests/analysis/postdomtree/infinite_loop.ll`).
 - **`print<demanded-bits>` iterates a `DenseMap<Instruction*, APInt>`** (`DemandedBits::print`,
   `lib/Analysis/DemandedBits.cpp`), so its line order changes from run to run with heap addresses. Tests use
-  `@analysis-unordered`; LLVM's own tests use `CHECK-DAG`.
+  `@analysis-unordered`; LLVM's own tests use `CHECK-DAG`. A non-integer operand prints `getAllOnes(DL.getTypeSizeInBits(T->getScalarType()))`
+  through `getLimitedValue`: a pointer under `p:32` is `0xffffffff`, x86_fp80 is 64 ones; a metadata operand hits
+  `llvm_unreachable` (undefined in release builds; it happens to print 64 ones).
 - **`print<alias-sets>` and `print-callgraph` print pointer values** (`AliasSet[0x…`, `Call graph node <<null function>><<0x…>>`), so
   they can't be compared at all; `import-llvm` skips them as nondeterministic.
 - **`print<lazy-value-info>` shows only what is cached**: on its own (or after `require<lazy-value-info>`) it prints just

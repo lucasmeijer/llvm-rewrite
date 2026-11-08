@@ -36,6 +36,7 @@ import tli;
 import scev;
 import loopnest;
 import simplifycfg;
+import subtarget;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -669,8 +670,23 @@ fn require_analysis(fv: i32, a: i64) {
     else if a == A_SCEV { scev_get(fv); }
 }
 
+// Passes whose LLVM counterpart asks for TargetIRAnalysis (directly or through AssumptionAnalysis) before it
+// prints anything; print<scalar-evolution> does it after its header (scev_print.goose).
+fn pass_creates_subtarget(n: i32) -> bool {
+    let p = pnodes[n].pass as i64;
+    if p == P_REQUIRE {
+        let a = pnodes[n].arg as i64;
+        return a == A_MEMORYSSA || a == A_AA || a == A_SCEV;
+    }
+    return p == P_BDCE || p == P_MEM2REG || p == P_SROA || p == P_INSTSIMPLIFY || p == P_SIMPLIFYCFG ||
+        p == P_INSTCOMBINE || p == P_PRINT_DEMANDED_BITS || p == P_LOOP_SIMPLIFY || p == P_AA_EVAL ||
+        p == P_PRINT_MEMORYSSA || p == P_PRINT_MEMORYSSA_WALKER || p == P_VERIFY_MEMORYSSA || p == P_SCCP ||
+        p == P_EARLY_CSE || p == P_VERIFY_SCEV;
+}
+
 fn run_function_pass(n: i32, fv: i32) -> u32 {
     let p = pnodes[n].pass as i64;
+    if pass_creates_subtarget(n) { st_touch(fv); }
     match p {
         P_DCE => { return dce_run(fv); },
         P_ADCE => { return adce_run(fv); },
@@ -743,6 +759,7 @@ recursive fn run_loop_list(n: i32, l: i32, fv: i32) -> u32 {
 
 // FunctionToLoopPassAdaptor::run
 fn run_loop_adaptor(n: i32, fv: i32) {
+    st_touch(fv);   // LoopStandardAnalysisResults (TTI, AC), requested even for a function without loops
     // the canonicalization pipeline (LoopSimplifyPass, LCSSAPass), a required function pass manager
     var pa = PA_ALL;
     var c = pnodes[n].pass;
@@ -818,6 +835,8 @@ recursive fn run_module_node(n: i32, m: i32) {
     if p == P_VERIFY_MODULE || p == P_NOOP_MODULE { return; }
     // module passes: call ap_pool_reset() after each one (apint.goose: no AP outlives its pass)
     if p == P_IPSCCP {
+        var tf = modules[m].first_func;
+        while tf >= 0 { if !func_is_decl(tf) { st_touch(tf); } tf = globs[glob_of(tf)].next; }
         if ipsccp_run(m, pnodes[n].arg != 0) {
             // preserves DominatorTreeAnalysis, PostDominatorTreeAnalysis and the function analysis proxy
             var f = modules[m].first_func;
@@ -836,6 +855,7 @@ recursive fn run_module_node(n: i32, m: i32) {
 
 fn run_pipeline(root: i32, m: i32) {
     flags_check_unsupported();
+    st_init_target_machine(m);
     run_module_node(root, m);
     aa_eval_finish();
     slots_end();

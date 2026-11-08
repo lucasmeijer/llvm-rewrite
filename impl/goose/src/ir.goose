@@ -567,7 +567,34 @@ fn c_null(ty: i32) -> i32 {
     if k == TK_TARGETEXT { return c_simple(VK_CTARGETNONE, ty); }
     // LLVM 23: a null vector of pointers is a vector-typed ConstantPointerNull (printed "splat (ptr null)")
     if (k == TK_FVEC || k == TK_SVEC) && types[types[ty].a].kind == TK_PTR { return c_simple(VK_CNULL, ty); }
+    if (k == TK_FVEC || k == TK_SVEC) && ty_is_fp(types[ty].a) { return c_fp_vec_zero(ty); }
     return c_simple(VK_AGGZERO, ty);
+}
+// LLVM 23 has two zero vectors of FP elements, both printed `zeroinitializer`: Constant::getNullValue (and
+// ConstantVector::getSplat of 0.0) gives a vector-typed ConstantFP, ConstantVector::get of all-null elements a
+// ConstantAggregateZero. Both are VK_AGGZERO here; the ConstantFP one has flags = 1 (a distinct constant, as in
+// LLVM). Only code that dyn_casts to ConstantFP tells them apart: `c_is_vector_cfp`.
+fn c_fp_vec_zero(ty: i32) -> i32 {
+    var c = cst_none();
+    c.flags = 1;
+    return cst_get(VK_AGGZERO, ty, c, []);
+}
+// dyn_cast<ConstantFP> of a vector constant succeeds: LLVM's FP splats (all elements the same ConstantFP) and
+// the getNullValue zero vector (see c_fp_vec_zero)
+fn c_is_vector_cfp(v: i32) -> bool {
+    let ty = vals[v].ty;
+    if !ty_is_vector(ty) || !ty_is_fp(types[ty].a) { return false; }
+    let k = vals[v].kind;
+    if k == VK_CFP { return true; }
+    if k == VK_AGGZERO { return csts[vals[v].sub].flags == 1; }
+    if k == VK_CDVECTOR || k == VK_CVECTOR {
+        let n = vals[v].nops as i64;
+        let f = op(v, 0);
+        if vals[f].kind != VK_CFP { return false; }
+        for i in 1..n { if op(v, i) != f { return false; } }
+        return true;
+    }
+    return false;
 }
 fn c_undef(ty: i32) -> i32 { c_simple(VK_UNDEF, ty) }
 fn c_poison(ty: i32) -> i32 { c_simple(VK_POISON, ty) }

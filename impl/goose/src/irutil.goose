@@ -471,7 +471,7 @@ fn vm_del(s: i64, v: i32) {
 let VS_PASS0 = 0;      // transform passes: scratch
 let VS_PASS1 = 1;
 let VS_ANA0 = 2;       // analyses alive during a pass (DemandedBits: Visited)
-let VS_ANA1 = 3;       // DemandedBits: DeadUses (keyed by use id, not value id)
+let VS_ANA1 = 3;       // ValueTracking: poison.goose, vt.goose getUnderlyingObjects; SCEV KnownPoison
 let VS_PASS2 = 4;      // InstSimplifyPass: ToSimplify / Next (VS_PASS1 holds the debug-record values)
 let VS_PASS3 = 5;
 let VM_PASS0 = 0;

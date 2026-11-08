@@ -16,12 +16,14 @@ import scev_btc;
 import scev_pred;
 import scev_eval;
 import scev_lt;
+import subtarget;
 
 fn print_scev(fv: i32) {
     scev_get(fv);
     errs("Printing analysis 'Scalar Evolution Analysis' for function '");
     errs(val_name(fv));
     errs("':\n");
+    st_touch(fv);
     sc_print_all();
 }
 

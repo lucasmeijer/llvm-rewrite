@@ -115,6 +115,7 @@ recursive fn c_splat(vty: i32, v: i32) -> i32 {
     let k = vals[v].kind;
     if k == VK_CNULL { return c_simple(VK_CNULL, ty_vector(vals[v].ty, n, sc)); }
     let ty = ty_vector(vals[v].ty, n, sc);
+    if ty_is_fp(vals[v].ty) && is_null_value(v) { return c_fp_vec_zero(ty); }
     if !sc {
         let mark = cf_stack.len;
         for i in n { cf_stack.push(v); }

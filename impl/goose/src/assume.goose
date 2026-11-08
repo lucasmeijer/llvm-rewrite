@@ -297,6 +297,17 @@ fn bundle_implies_nonnull(v: i32, fv: i32, a: i32, k: i64) -> bool {
     let n = cb_bundle_count(a, k);
     if n == 0 || op(a, b) != v { return false; }
     if tag == "nonnull" { return true; }
+    if tag == "align" {
+        // getAssumeAlignInfo: a missing offset is 0, a non-constant one unknown
+        if n < 2 { return false; }
+        let al = m_constant_int(op(a, b + 1));
+        if al < 0 || n < 3 { return false; }
+        let oc = m_constant_int(op(a, b + 2));
+        if oc < 0 { return false; }
+        let alv = ci_val(al);
+        let ofv = ci_val(oc);
+        return alv != 0 && (alv & (alv - 1)) == 0 && ofv % alv != 0;
+    }
     if tag == "dereferenceable" {
         if n < 2 { return false; }
         let c = m_constant_int(op(a, b + 1));

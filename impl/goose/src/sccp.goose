@@ -1093,11 +1093,16 @@ fn sc_get_range(v: i32) -> CRange {
     return vl_as_range_ty(sc_lattice(v), vals[v].ty, false);
 }
 
+// wouldInstructionBeTriviallyDead(I) without a TargetLibraryInfo: no library allocation/free functions and no
+// isMathLibCallNoop (a folded `log(1.0)` call stays)
 fn sc_would_be_trivially_dead(i: i32) -> bool {
     let s = sq_no_tli;
+    let t = local_have_tli;
     sq_no_tli = true;
+    local_have_tli = false;
     let r = would_be_trivially_dead(i);
     sq_no_tli = s;
+    local_have_tli = t;
     return r;
 }
 

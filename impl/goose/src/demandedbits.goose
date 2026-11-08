@@ -1,7 +1,8 @@
 // DemandedBits: port of llvm/lib/Analysis/DemandedBits.cpp (performAnalysis, determineLiveOperandBits,
 // getDemandedBits, isInstructionDead, isUseDead, print), for integers of at most 64 bits.
 // State lives in scratch slots (irutil.goose): AliveBits = VM_ANA0 (value -> demanded mask), Visited = VS_ANA0,
-// DeadUses = VS_ANA1 (keyed by use id), worklist membership = VS_PASS1 while the analysis runs.
+// DeadUses and worklist membership are private stamped sets (db_dead_*, db_wl_*): ValueTracking, which the
+// analysis calls through computeKnownBits, uses VS_ANA1 (poison.goose, vt.goose) and callers hold VS_PASS*.
 import std;
 import ir;
 import irutil;
@@ -11,8 +12,25 @@ import flags;
 import knownbits;
 import apint;
 import gen_iids;
+import datalayout;
 
 var db_fn: i32 = -1;          // function the current results are for (-1: none)
+
+// private stamped sets: DeadUses (keyed by use id) and worklist membership (keyed by value id)
+var db_dead_stamp: i32[>..];
+var db_dead_epoch: i32 = 1;
+var db_wl_stamp: i32[>..];
+var db_wl_epoch: i32 = 1;
+fn db_dead_has(u: i32) -> bool { (u as i64) < db_dead_stamp.len && db_dead_stamp[u] == db_dead_epoch }
+fn db_dead_add(u: i32) { while db_dead_stamp.len <= (u as i64) { db_dead_stamp.push(0); } db_dead_stamp[u] = db_dead_epoch; }
+fn db_dead_del(u: i32) { if db_dead_has(u) { db_dead_stamp[u] = 0; } }
+fn db_wl_add(v: i32) -> bool {
+    while db_wl_stamp.len <= (v as i64) { db_wl_stamp.push(0); }
+    if db_wl_stamp[v] == db_wl_epoch { return false; }
+    db_wl_stamp[v] = db_wl_epoch;
+    return true;
+}
+fn db_wl_del(v: i32) { if (v as i64) < db_wl_stamp.len && db_wl_stamp[v] == db_wl_epoch { db_wl_stamp[v] = 0; } }
 
 fn db_invalidate() { db_fn = -1; }
 
@@ -184,11 +202,11 @@ fn db_analyze(fv: i32) {
     if db_fn == fv { return; }
     db_fn = fv;
     vs_clear(VS_ANA0);
-    vs_clear(VS_ANA1);
+    db_dead_epoch += 1;
     vm_clear(VM_ANA0);
-    vs_clear(VS_PASS1);
+    db_wl_epoch += 1;
     var wl: i32[>..<] = [];
-    fn wl_insert(i: i32) { if vs_add(VS_PASS1, i) { wl.push(i); } }
+    fn wl_insert(i: i32) { if db_wl_add(i) { wl.push(i); } }
     each_inst(fv) { i =>
         if db_always_live(i) {
             if is_int_ty(vals[i].ty) {
@@ -206,7 +224,7 @@ fn db_analyze(fv: i32) {
     };
     while wl.len > 0 {
         let user = wl.pop();
-        vs_del(VS_PASS1, user);
+        db_wl_del(user);
         var aout: u64 = 0;
         var dead_in = false;
         if is_int_ty(vals[user].ty) {
@@ -227,7 +245,7 @@ fn db_analyze(fv: i32) {
                     ab = 0;
                 } else {
                     ab = determine_live_operand_bits(user, ov, k, aout, ab, bw, kc);
-                    if ab == 0 { vs_add(VS_ANA1, u); } else { vs_del(VS_ANA1, u); }
+                    if ab == 0 { db_dead_add(u); } else { db_dead_del(u); }
                 }
                 if isi {
                     if !vm_has(VM_ANA0, ov) {
@@ -264,7 +282,7 @@ fn db_is_use_dead(user: i32, k: i64) -> bool {
     if !is_int_ty(vals[v].ty) { return false; }
     if db_always_live(user) { return false; }
     db_analyze(inst_func(user));
-    if vs_has(VS_ANA1, vals[user].ops + k as i32) { return true; }
+    if db_dead_has(vals[user].ops + k as i32) { return true; }
     if is_int_ty(vals[user].ty) && vm_has(VM_ANA0, user) && vm_get(VM_ANA0, user, 0) == 0 { return true; }
     return false;
 }
@@ -285,16 +303,16 @@ fn db_demanded_bits_use(user: i32, k: i64) -> u64 {
     return determine_live_operand_bits(user, v, k, aout, wmask(bw), bw, kc);
 }
 
-// DL.getTypeSizeInBits of a scalar type, as far as the printer needs it (pointers, FP).
+// DL.getTypeSizeInBits of a non-integer scalar type (pointer sizes come from the module's DataLayout); the printer
+// shows APInt::getLimitedValue, so anything wider than 64 bits prints as 64 ones
 fn ty_size_in_bits_for_print(t0: i32) -> i64 {
-    let t = ty_scalar(t0);
-    let k = ty_kind(t);
-    if k == TK_PTR { return 64; }
-    if k == TK_HALF || k == TK_BFLOAT { return 16; }
-    if k == TK_FLOAT { return 32; }
-    if k == TK_DOUBLE { return 64; }
-    fatal("print<demanded-bits>: operand type size not supported");
-    return 0;
+    let k = ty_kind(ty_scalar(t0));
+    if k == TK_METADATA || k == TK_TOKEN || k == TK_VOID {
+        // DataLayout::getTypeSizeInBits hits llvm_unreachable (undefined in a release build)
+        fatal("print<demanded-bits>: the size of a metadata/token operand is undefined in LLVM (not supported)");
+    }
+    let sz = dl_size_bits(ty_scalar(t0));
+    return if sz > 64 { 64 } else { sz };
 }
 
 // DemandedBits::print. LLVM iterates a DenseMap keyed by pointers (unordered; tests compare sorted lines);

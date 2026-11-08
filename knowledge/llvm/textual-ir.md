@@ -129,6 +129,13 @@ Facts needed to make a parse+print round trip byte-identical. Sources: `llvm/lib
   `warning: ignoring invalid debug info in <file>` on stderr; e.g. a call to a defined, non-interposable function
   with a subprogram, inside a function with a subprogram, without `!dbg`
   (tests/imported/llvm/Transforms/Inline/memprof_inline2.ll).
+  Before that warning the Verifier prints each finding (it doesn't stop at the first: `CheckDI` returns from the
+  one visit only), e.g. `inlinable function call in a function with debug info must have a !dbg location` and then
+  the instruction (`  %call2 = call noundef ptr @_Z3bazv()`), printed with a `ModuleSlotTracker(&M)` that numbers
+  all metadata *before* stripping. A version other than 3 prints `warning: ignoring debug info with an invalid
+  version (N) in <file>` only when StripDebugInfo changed something: named `llvm.dbg.*`/`llvm.gcov` metadata or a
+  function/global/instruction `!dbg` (AutoUpgrade.cpp UpgradeDebugInfo, DebugInfo.cpp StripDebugInfo;
+  DeadStoreElimination/merge-stores.ll, Inline/memprof_inline2.ll under any analysis printer).
 - **opt enables ODR uniquing of debug types** (tools/opt/optdriver.cpp `Context.enableDebugTypeODRUniquing()`):
   a `!DICompositeType` with an `identifier:` is created distinct and later ones with the same identifier and tag
   return it (DICompositeType::buildODRType), so uniqued input nodes print as `distinct`

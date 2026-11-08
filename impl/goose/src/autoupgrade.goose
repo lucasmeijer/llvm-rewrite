@@ -11,6 +11,7 @@ import datalayout;
 import dinfo;
 import constfold;
 import autoupgrade_x86;
+import flags;
 
 // ---------------------------------------------------------------------------------------------
 // Small IR helpers
@@ -727,9 +728,14 @@ fn upgrade_debug_info() {
     }
     if version == 3 {
         if !debug_info_broken() { return; }
-        write_stderr("warning: ignoring invalid debug info\n");
+        // DiagnosticInfoIgnoringInvalidDebugMetadata (the Verifier printed its findings first)
+        errs(str("warning: ignoring invalid debug info in ", sbytes(modules[cur_module].module_id), "\n"));
     }
-    strip_debug_info();
+    let modified = strip_debug_info();
+    if modified && version != 3 {
+        // DiagnosticInfoDebugMetadataVersion
+        errs(str("warning: ignoring debug info with an invalid version (", version, ") in ", sbytes(modules[cur_module].module_id), "\n"));
+    }
 }
 
 fn has_dbg_att(at: i32, n: i32) -> bool { for k in n { if md_att[at + 2 * k] == 0 { return true; } } return false; }
@@ -737,6 +743,7 @@ fn has_dbg_att(at: i32, n: i32) -> bool { for k in n { if md_att[at + 2 * k] == 
 // The Verifier's debug-info checks that make UpgradeDebugInfo strip debug info (subset: inlinable calls
 // without !dbg in a function with a subprogram).
 fn debug_info_broken() -> bool {
+    var broken = false;
     var f = modules[cur_module].first_func;
     while f >= 0 {
         let g = glob_of(f);
@@ -753,7 +760,10 @@ fn debug_info_broken() -> bool {
                             let lk = globs[cg].linkage as i64;
                             let interposable = lk == LK_WEAK_ANY || lk == LK_LINKONCE_ANY || lk == LK_COMMON || lk == LK_EXTERN_WEAK;
                             if !interposable && globs[cg].is_decl == 0 && has_dbg_att(globs[cg].md, globs[cg].nmd) && !has_dbg_att(insts[ii].md, insts[ii].nmd) {
-                                return true;
+                                errs("inlinable function call in a function with debug info must have a !dbg location\n");
+                                errs_inst_module_slots(iv, f);
+                                errs("\n");
+                                broken = true;
                             }
                         }
                     }
@@ -764,7 +774,7 @@ fn debug_info_broken() -> bool {
         }
         f = globs[g].next;
     }
-    return false;
+    return broken;
 }
 
 fn att_remove_kind(at: i32, n: i32, kind: i32) -> i32 {
@@ -797,13 +807,16 @@ fn strip_loop_id_locs(n: i32) -> i32 {
     return r;
 }
 
-fn strip_debug_info() {
+// Returns StripDebugInfo's "Changed": named llvm.dbg.*/llvm.gcov metadata, a function's or global's !dbg, an
+// instruction's debug location (not loop IDs, heapallocsite, DIAssignID or debug records).
+fn strip_debug_info() -> bool {
+    var changed = false;
     // named metadata llvm.dbg.* and llvm.gcov
     var w = 0;
     for k in named_mds.len {
         let nm = named_mds[k];
         let s = sbytes(nm.name);
-        if nm.module == cur_module && (starts_with(s, "llvm.dbg.") || s == "llvm.gcov") { continue; }
+        if nm.module == cur_module && (starts_with(s, "llvm.dbg.") || s == "llvm.gcov") { changed = true; continue; }
         named_mds[w] = nm;
         w++;
     }
@@ -814,12 +827,14 @@ fn strip_debug_info() {
     var f = modules[cur_module].first_func;
     while f >= 0 {
         let g = glob_of(f);
+        if has_dbg_att(globs[g].md, globs[g].nmd) { changed = true; }
         globs[g].nmd = att_remove_kind(globs[g].md, globs[g].nmd, 0);
         var b = globs[g].first_block;
         while b >= 0 {
             var iv = blocks[block_of(b)].first;
             while iv >= 0 {
                 let ii = inst_of(iv);
+                if has_dbg_att(insts[ii].md, insts[ii].nmd) { changed = true; }
                 var n = att_remove_kind(insts[ii].md, insts[ii].nmd, 0);
                 n = att_remove_kind(insts[ii].md, n, k_heap);
                 n = att_remove_kind(insts[ii].md, n, k_assign);
@@ -846,9 +861,11 @@ fn strip_debug_info() {
     var gv = modules[cur_module].first_gvar;
     while gv >= 0 {
         let g = glob_of(gv);
+        if has_dbg_att(globs[g].md, globs[g].nmd) { changed = true; }
         globs[g].nmd = att_remove_kind(globs[g].md, globs[g].nmd, 0);
         gv = globs[g].next;
     }
+    return changed;
 }
 
 // IRBuilder::CreateExtractValue / CreateInsertValue at ci (one index; inherits ci's !dbg)

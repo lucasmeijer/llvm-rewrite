@@ -195,6 +195,29 @@ fn slots_begin_all_metadata(fv: i32) {
     slots_fn = fv;
 }
 
+// Instruction::print with a ModuleSlotTracker(&M) (ShouldInitializeAllMetadata), as the Verifier's Write does
+fn errs_inst_module_slots(iv: i32, fv: i32) {
+    slots_begin_all_metadata(fv);
+    let mark = out.len;
+    print_inst(iv);
+    var end = out.len;
+    if end > mark && out[end - 1] == '\n' { end--; }
+    errbuf.append(out[mark..end]);
+    out.resize(mark);
+    slots_reset_all();
+}
+
+// Forget all slot numbers, the module's included (for printing before the module's metadata changes: the
+// Verifier runs before UpgradeDebugInfo strips debug info).
+fn slots_reset_all() {
+    slots_end();
+    while md_order.len > 0 { mdslot[md_order[md_order.len - 1]] = -1; md_order.resize(md_order.len - 1); }
+    while as_order.len > 0 { asslot[as_order[as_order.len - 1]] = -1; as_order.resize(as_order.len - 1); }
+    slots_md_mark = 0;
+    slots_as_mark = 0;
+    slots_module_done = false;
+}
+
 fn errs_inst(iv: i32, fv: i32) {
     if errs_referencing_md_node(iv) {
         slots_begin_all_metadata(fv);

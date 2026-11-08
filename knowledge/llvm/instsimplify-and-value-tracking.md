@@ -51,7 +51,10 @@ Verified against LLVM 23.1.5 source and the imported InstSimplify tests.
   `ConstantInt::get(<N x iK>, C)` is a ConstantDataVector (zero: CAZ); FP and byte splats are always vector-typed
   ConstantFP/ConstantByte. `dyn_cast<ConstantFP>` succeeds on a vector splat, and ConstantFoldScalarCall1 tests
   ConstantFP before its vector cases, so `llvm.x86.sse.cvttss2si(<4 x float> zeroinitializer)` is not folded
-  (SLPVectorizer/X86/multi-incoming-blocks-in-phi.ll), and `frexp` of a scalable splat yields
+  (SLPVectorizer/X86/multi-incoming-blocks-in-phi.ll), nor is it with any FP splat such as `splat (float 2.0)`;
+  an explicit `<float 0.0, float 0.0, …>` *is* folded, because ConstantVector::get makes all-null elements a
+  ConstantAggregateZero, not a ConstantFP (both print `zeroinitializer`). The AVX-512 variants need
+  `isa<ConstantVector/ConstantDataVector>`, so they never fold a splat or zero vector. And `frexp` of a scalable splat yields
   `{ <vscale x N x float> splat (...), i32 E }` (sic; checked with opt).
 - **`Constant::getSplatValue` of a shufflevector expression** needs `shufflevector (insertelement undef|poison, X, 0),
   undef|poison, zeroinitializer` (Constants.cpp:1866); only that form prints as `splat (X)` (AsmWriter.cpp:1828).
@@ -123,3 +126,7 @@ Verified against LLVM 23.1.5 source and the imported InstSimplify tests.
 - `computeKnownFPClass` takes `nofpclass` from the return attributes of any CallBase, invokes included.
 - KnownFPClass::bitcast uses NaN/inf/zero bit patterns only for IEEE-like types (half, bfloat, float, double,
   fp128); for x86_fp80 and ppc_fp128 it transfers only the sign bit.
+- **`assumeBundleImpliesNonNull`** (BundleAttributes.cpp) also knows `"align"(ptr %p, i64 A, i64 Off)`: non-null
+  when A is a power of two and `Off % A != 0` (constant A and Off; without an offset it is 0). `"nonnull"` and a
+  non-zero constant `"dereferenceable"` (where null isn't defined) are the other cases
+  (Analysis/ValueTracking/assume.ll `@align_with_non_zero_offset_is_nonnull`).
