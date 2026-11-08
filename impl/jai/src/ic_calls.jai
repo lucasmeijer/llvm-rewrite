@@ -1598,7 +1598,7 @@ ic_visit_intrinsic_switch :: (ii: Value_Id, iid: Intrinsic_Id) -> Ic_Switch_Resu
     case IID_EXPERIMENTAL_GUARD;
         next_inst := inst(ii).next;
         for 0..GUARD_WIDENING_WINDOW-1 {
-            if !is_safe_to_speculatively_execute(next_inst) break;
+            if !ic_is_safe_to_speculatively_execute_no_cxt(next_inst) break;
             next_inst = inst(next_inst).next;
         }
         if call_iid(next_inst) == IID_EXPERIMENTAL_GUARD {
@@ -2645,7 +2645,12 @@ ic_visit_call_base :: (call: Value_Id) -> Value_Id {
         return ic_erase_inst(call);
     }
     if call_iid(strip_pointer_casts(callee)) == IID_ADJUST_TRAMPOLINE fatal("instcombine: transformCallThroughTrampoline is not supported yet");
-    if call_has_bundle(call, "ptrauth") fatal("instcombine: ptrauth call bundles are not supported yet");
+    if call_has_bundle(call, "ptrauth") {
+        // foldPtrAuthIntrinsicCallee / foldPtrAuthConstantCallee
+        c := callee;
+        if (opr_code(c) == .INTTOPTR && is_inst(c) && (call_iid(op(c, 0)) == IID_PTRAUTH_RESIGN || call_iid(op(c, 0)) == IID_PTRAUTH_SIGN)) || vkind(c) == .C_PTRAUTH
+            fatal("instcombine: ptrauth call bundles are not supported yet");
+    }
     if vkind(callee) == .INLINE_ASM && !call_does_not_throw(call) {
         if !ic_inline_asm_can_throw(callee) { call_add_fn_attr(call, .NoUnwind); changed = true; }
     }
@@ -2760,4 +2765,14 @@ ic_gep_max_preserved_alignment :: (g: Value_Id) -> u64 {
         result = min_align(offset, result);
     }
     return result;
+}
+
+// isSafeToSpeculativelyExecute(I) without a context instruction (loads via Loads.cpp)
+ic_is_safe_to_speculatively_execute_no_cxt :: (i: Value_Id) -> bool {
+    if inst_op(i) == .LOAD {
+        if must_suppress_speculation(i) return false;
+        q: Simplify_Query;
+        return is_dereferenceable_and_aligned_pointer_ty(op(i, 0), vtype(i), inst(i).align, q);
+    }
+    return is_safe_to_speculatively_execute(i);
 }
