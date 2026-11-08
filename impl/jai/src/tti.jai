@@ -239,6 +239,57 @@ tti_create_target_machine :: () {
     x86_apply_features(*feat, tti_opts.mattr, true);
 }
 
+// codegen::getFeaturesStr: the -mattr list, lower-cased, '+' added where no sign was given
+mattr_features_string :: () -> string {
+    if tti_opts.mattr.count == 0 return "";
+    sb: String_Builder; sb.allocator = temp;
+    first := true;
+    for part: split(tti_opts.mattr, ",",, allocator = temp) {
+        if part.count == 0 continue;
+        f := to_lower_copy(part,, allocator = temp);
+        if !first append(*sb, ",");
+        first = false;
+        if f[0] != #char "+" && f[0] != #char "-" append(*sb, "+");
+        append(*sb, f);
+    }
+    return builder_to_string(*sb);
+}
+// codegen::setFunctionAttributes(M, CPU, Features, TuneCPU): opt adds "target-cpu" / "target-features" to every
+// function from -mcpu / -mattr
+opt_set_function_attributes :: () {
+    cpu := tti_opts.mcpu;
+    feats := mattr_features_string();
+    if cpu.count == 0 && feats.count == 0 return;
+    for f: ir.m_functions {
+        fa := attr_list_fn(glob(f).attrs);
+        items: [..] Attr; items.allocator = temp;
+        old_feats := "";
+        has_cpu := false;
+        for attr_set_items(fa) {
+            if it.kind == .STRING_ATTR && it.key == "target-cpu" has_cpu = true;
+            if it.kind == .STRING_ATTR && it.key == "target-features" { old_feats = it.val; continue; }
+            array_add(*items, it);
+        }
+        changed := false;
+        if cpu.count && !has_cpu {
+            a: Attr; a.kind = .STRING_ATTR; a.key = copy_string(cpu); a.val = "";
+            a.key = "target-cpu"; a.val = copy_string(cpu);
+            array_add(*items, a);
+            changed = true;
+        }
+        if feats.count {
+            a: Attr; a.kind = .STRING_ATTR; a.key = "target-features";
+            a.val = copy_string(ifx old_feats.count == 0 then feats else tprint("%,%", old_feats, feats));
+            array_add(*items, a);
+            changed = true;
+        } else if old_feats.count {
+            a: Attr; a.kind = .STRING_ATTR; a.key = "target-features"; a.val = old_feats;
+            array_add(*items, a);
+        }
+        if changed glob(f).attrs = attr_list_with_fn(glob(f).attrs, attr_set_get(items));
+    }
+}
+
 // X86Subtarget::initSubtargetFeatures + X86Subtarget constructor (vector widths)
 x86_subtarget_init :: (st: *X86_Lowering, triple: string, cpu_in: string, tune_in: string, fs: string, pvw: u32, rvw: u32) {
     st.triple = copy_string(triple);

@@ -1186,6 +1186,7 @@ tests/imported/llvm/Analysis/GlobalsModRef/noescape-nocapture-nocallback.ll::rou
 tests/imported/llvm/Analysis/GlobalsModRef/nonescaping-noalias.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/pr12351.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/pr25309.ll::roundtrip
+tests/imported/llvm/Analysis/GlobalsModRef/pr35899-dbg-value.ll::opt
 tests/imported/llvm/Analysis/GlobalsModRef/pr35899-dbg-value.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/purecse.ll::roundtrip
 tests/imported/llvm/Analysis/GlobalsModRef/self-addresstaken.ll::analysis
@@ -3895,6 +3896,7 @@ tests/imported/llvm/Transforms/InstCombine/StoreToNull-DbgCheck.ll::opt
 tests/imported/llvm/Transforms/InstCombine/StoreToNull-DbgCheck.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/addcarry.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/addcarry.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/blend_x86.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/blend_x86.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/clmulqdq.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/clmulqdq.ll::roundtrip
@@ -3994,6 +3996,7 @@ tests/imported/llvm/Transforms/InstCombine/X86/x86-vpermil-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-vpermil-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-vpermil.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-vpermil.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/X86/x86-vpmadd52.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-vpmadd52.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/X86/x86-xop-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/X86/x86-xop-inseltpoison.ll::roundtrip
@@ -4715,6 +4718,7 @@ tests/imported/llvm/Transforms/InstCombine/freeze-landingpad.ll::opt
 tests/imported/llvm/Transforms/InstCombine/freeze-landingpad.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/freeze-phi.ll::opt
 tests/imported/llvm/Transforms/InstCombine/freeze-phi.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/freeze.ll::opt
 tests/imported/llvm/Transforms/InstCombine/freeze.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/frem-inf.ll::opt
 tests/imported/llvm/Transforms/InstCombine/frem-inf.ll::roundtrip
@@ -9646,11 +9650,13 @@ tests/imported/llvm/Transforms/SimplifyCFG/FoldValueComparisonIntoPredecessors-n
 tests/imported/llvm/Transforms/SimplifyCFG/FoldValueComparisonIntoPredecessors-no-new-successors.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/ForwardSwitchConditionToPHI.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/ForwardSwitchConditionToPHI.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/HoistCode.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/HoistCode.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/PHINode.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/PHINode.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/PR25267.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/PR25267.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/PR27615-simplify-cond-br.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/PR27615-simplify-cond-br.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/PR9946.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/PR9946.ll::roundtrip
@@ -9686,6 +9692,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/X86/PR29163.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/PR29163.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/PR30210.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/PR30210.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/X86/PR80122.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/PR80122.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/SpeculativeExec.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/SpeculativeExec.ll::roundtrip
@@ -9717,6 +9724,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/X86/safe-low-bit-extract.ll::roundtri
 tests/imported/llvm/Transforms/SimplifyCFG/X86/sink-common-code-into-unreachable.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/sink-common-code-into-unreachable.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/sink-common-code.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/X86/speculate-cttz-ctlz.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/speculate-cttz-ctlz.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/switch-covered-bug.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/switch-covered-bug.ll::roundtrip
@@ -9732,6 +9740,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/X86/switch-to-lookup-globals.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/switch-to-lookup-globals.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/switch-to-lookup-large-types.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/switch-to-lookup-large-types.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/X86/switch_to_lookup_table.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/X86/switch_to_lookup_table.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/two-entry-phi-fold-unpredictable.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/X86/unreachable-blocks.ll::opt
@@ -9743,6 +9752,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/attr-convergent.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/attr-convergent.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/attr-noduplicate.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/attr-noduplicate.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/avoid-complex-phi.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/avoid-complex-phi.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/basictest.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/basictest.ll::roundtrip
@@ -9792,6 +9802,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/commondest-loopid.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/commondest-loopid.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/constantexprs.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/constantexprs.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/convergent.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/convergent.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/dbginfo.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/dbginfo.ll::roundtrip
@@ -9810,6 +9821,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/duplicate-landingpad.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/duplicate-landingpad.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/duplicate-phis.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/duplicate-phis.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/empty-catchpad.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/empty-catchpad.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/extract-cost.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/extract-cost.ll::roundtrip
@@ -9879,16 +9891,21 @@ tests/imported/llvm/Transforms/SimplifyCFG/jump-threading-live-on-exit.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/jump-threading-live-on-exit.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/jump-threading-max-jump-threading-live-blocks.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/jump-threading-max-jump-threading-live-blocks.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/jump-threading.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/jump-threading.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/lifetime-landingpad.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/lifetime-landingpad.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/lifetime.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/lifetime.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/merge-callee-type-metadata.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-callee-type-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-alloc-token.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-alloc-token.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-memprof-left.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-memprof-left.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-memprof-right.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-memprof-right.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-memprof.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-calls-memprof.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/merge-cond-stores-debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/merge-cond-stores.ll::opt
@@ -9896,9 +9913,13 @@ tests/imported/llvm/Transforms/SimplifyCFG/merge-cond-stores.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/merge-default.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-default.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/merge-deopt-bundle-constants.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/merge-direct-call-branch-weights-in-hoist.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-direct-call-branch-weights-in-hoist.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/merge-direct-call-branch-weights-in-sink.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-direct-call-branch-weights-in-sink.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/merge-direct-call-branch-weights-preserve-hoist.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-direct-call-branch-weights-preserve-hoist.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/merge-direct-call-branch-weights-preserve-sink.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-direct-call-branch-weights-preserve-sink.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/merge-duplicate-conditional-ret-val.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/merge-duplicate-conditional-ret-val.ll::roundtrip
@@ -9922,6 +9943,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/nonintegral.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/nonintegral.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/noreturn-call.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/noreturn-call.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/opaque-ptr.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/opaque-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/opt-for-fuzzing.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/opt-for-fuzzing.ll::roundtrip
@@ -9969,6 +9991,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/preserve-load-metadata-2.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/preserve-load-metadata-2.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/preserve-load-metadata-3.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/preserve-load-metadata-3.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/preserve-load-metadata.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/preserve-load-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/preserve-make-implicit-on-switch-to-br.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/preserve-make-implicit-on-switch-to-br.ll::roundtrip
@@ -10101,6 +10124,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/unreachable-eliminate-on-ret.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/unreachable-eliminate-on-ret.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/unreachable-matching-successor.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/unreachable-matching-successor.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/unreachable-multi-basic-block-funclet.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/unreachable-multi-basic-block-funclet.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/unreachable-selfloop.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/unreachable-selfloop.ll::roundtrip
@@ -10111,6 +10135,7 @@ tests/imported/llvm/Transforms/SimplifyCFG/volatile-phioper.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/volatile-phioper.ll::roundtrip
 tests/imported/llvm/Transforms/SimplifyCFG/wc-widen-block.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/wc-widen-block.ll::roundtrip
+tests/imported/llvm/Transforms/SimplifyCFG/wineh-unreachable.ll::opt
 tests/imported/llvm/Transforms/SimplifyCFG/wineh-unreachable.ll::roundtrip
 tests/imported/llvm/Transforms/Sink/badloadsink.ll::roundtrip
 tests/imported/llvm/Transforms/Sink/basic.ll::roundtrip

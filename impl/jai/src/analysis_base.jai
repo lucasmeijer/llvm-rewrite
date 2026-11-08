@@ -234,7 +234,7 @@ dt_dominates_use :: (dt: *Dom_Tree, def: Value_Id, u: Use_Id) -> bool {
 is_guaranteed_to_transfer_execution :: (i: Value_Id) -> bool {
     o := inst_op(i);
     if o == .RET || o == .UNREACHABLE return false;
-    if o == .CATCHPAD fatal("isGuaranteedToTransferExecutionToSuccessor on catchpad (EH personality classification) is not supported yet");
+    if o == .CATCHPAD return classify_eh_personality(fn_personality(inst_fn(i))) == .CORECLR;
     return !may_throw(i) && will_return(i);
 }
 // the [begin, end) range version with a scan limit

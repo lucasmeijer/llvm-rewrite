@@ -670,18 +670,35 @@ mark_alive_blocks :: (f: Value_Id, reachable: *Table(Value_Id, bool), dtu: *Dtu)
             }
         } else if inst_op(t) == .CATCHSWITCH {
             // duplicate handlers (catchpads identical to an earlier one) are removed
-            has_unwind := (inst(t).flags & F_HAS_UNWIND) != 0;
-            first: u32 = ifx has_unwind then cast(u32) 2 else 1;
+            ps_keys: [..] Value_Id; ps_keys.allocator = temp;
+            ps_cnt: [..] s64; ps_cnt.allocator = temp;
+            first := catchswitch_first_handler(t);
             k := first;
             seen: [..] Value_Id; seen.allocator = temp;
             while k < nops(t) {
                 h := op(t, k);
+                if dtu {
+                    idx := -1;
+                    for ps_keys if it == h idx = it_index;
+                    if idx < 0 { array_add(*ps_keys, h); array_add(*ps_cnt, 0); idx = ps_keys.count - 1; }
+                    ps_cnt[idx] += 1;
+                }
                 cp := block_first_non_phi(h);
                 dup := false;
                 for seen if is_identical_to(it, cp) dup = true;
-                if dup { fatal("markAliveBlocks: removing a duplicate catchswitch handler is not supported yet"); }
+                if dup {
+                    if dtu { for ps_keys if it == h ps_cnt[it_index] -= 1; }
+                    catchswitch_remove_handler(t, k);
+                    changed = true;
+                    continue;
+                }
                 array_add(*seen, cp);
                 k += 1;
+            }
+            if dtu {
+                ups: [..] Dom_Update; ups.allocator = temp;
+                for ps_keys if ps_cnt[it_index] == 0 array_add(*ups, .{false, bb, it});
+                dtu_apply(dtu, ups);
             }
         }
         changed |= constant_fold_terminator(bb, true, dtu);

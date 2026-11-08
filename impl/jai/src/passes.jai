@@ -777,7 +777,9 @@ opt_main :: () {
     ir.module_id = input;
     parse_module(src, input);
     if opts.mtriple.count ir.triple = normalize_triple(opts.mtriple);
+    if opt_strip_debug strip_debug_info();   // "Strip debug info before running the verifier"
     tti_create_target_machine();
+    opt_set_function_attributes();
     if ir.source_filename.count == 0 && !saw_source_filename ir.source_filename = input;
     if root >= 0 run_module_pm(root);
     defer aa_eval_print_reports();

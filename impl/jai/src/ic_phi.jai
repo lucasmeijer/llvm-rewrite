@@ -929,7 +929,7 @@ combine_metadata_for_cse :: (k: Value_Id, j: Value_Id, does_k_move: bool) {
             case "alias.scope"; if does_k_move set_metadata(k, kind, md_most_generic_alias_scope(jmd, kmd));
             case "noalias"; #through; case "llvm.mem.parallel_loop_access";
                 if does_k_move set_metadata(k, kind, md_intersect(jmd, kmd));
-            case "llvm.access.group"; if does_k_move && kmd != jmd fatal("combineMetadata: !llvm.access.group merging is not supported yet");
+            case "llvm.access.group"; if does_k_move set_metadata(k, kind, intersect_access_groups(k, j));
             case "range";
                 if does_k_move || !has_noundef set_metadata(k, kind, md_most_generic_range(jmd, kmd));
             case "align";
@@ -938,28 +938,43 @@ combine_metadata_for_cse :: (k: Value_Id, j: Value_Id, does_k_move: bool) {
                 if does_k_move || !has_noundef set_metadata(k, kind, md_most_generic_nofpclass(jmd, kmd));
             case "nonnull";
                 if does_k_move || !has_noundef set_metadata(k, kind, jmd);
-            case "fpmath"; set_metadata(k, kind, generic(kmd, jmd, name));
+            case "fpmath"; set_metadata(k, kind, md_most_generic_fpmath(jmd, kmd));
             case "invariant.load"; #through; case "invariant.group"; if does_k_move set_metadata(k, kind, jmd);
             case "prof"; #through; case "mmra"; #through; case "memprof"; #through; case "callsite";
-            case "callee_type"; fatal("combineMetadata: !callee_type merging is not supported yet");
+            case "callee_type"; set_metadata(k, kind, md_merged_callee_type(kmd, jmd));
             case "dereferenceable"; #through; case "dereferenceable_or_null";
                 if does_k_move set_metadata(k, kind, md_most_generic_align_or_deref(jmd, kmd));
             case "llvm.preserve.access.index";
             case "noundef"; if does_k_move set_metadata(k, kind, jmd);
             case "nontemporal"; set_metadata(k, kind, jmd);
             case "mem.cache_hint"; if kmd != jmd set_metadata(k, kind, NONE);
-            case "noalias.addrspace"; if does_k_move set_metadata(k, kind, generic(kmd, jmd, name));
+            case "noalias.addrspace"; if does_k_move set_metadata(k, kind, md_most_generic_noalias_addrspace(jmd, kmd));
             case "nosanitize"; set_metadata(k, kind, jmd);
             case "captures"; if kmd != jmd fatal("combineMetadata: !captures merging is not supported yet");
             case "alloc_token"; if kmd != jmd set_metadata(k, kind, NONE);
             case; set_metadata(k, kind, NONE);
         }
     }
-    for n: string.["mmra", "memprof", "callsite", "prof"] {
+    {
+        id := kid("mmra");
+        if id != NONE {
+            a := get_metadata(j, id); b := get_metadata(k, id);
+            if (a != NONE || b != NONE) && a != b fatal("combineMetadata: merging !mmra is not supported yet");
+        }
+    }
+    // getMergedMemProfMetadata / getMergedCallsiteMetadata: keep K's, else J's
+    for n: string.["memprof", "callsite"] {
         id := kid(n);
         if id == NONE continue;
-        a := get_metadata(j, id); b := get_metadata(k, id);
-        if a != NONE || b != NONE fatal(tprint("combineMetadata: merging !% is not supported yet", n));
+        jm := get_metadata(j, id); km := get_metadata(k, id);
+        if jm != NONE || km != NONE set_metadata(k, id, ifx km != NONE then km else jm);
+    }
+    {
+        id := kid("prof");
+        if id != NONE {
+            jm := get_metadata(j, id); km := get_metadata(k, id);
+            if jm != NONE || km != NONE set_metadata(k, id, md_merged_prof(km, jm, k, j));
+        }
     }
 }
 
@@ -1088,5 +1103,103 @@ md_most_generic_nofpclass :: (a: Md_Id, b: Md_Id) -> Md_Id {
     if x == 0 return NONE;
     ops: [1] Md_Id;
     ops[0] = md_value(const_int(vtype(av), x));
+    return md_tuple(ops, false);
+}
+
+// MDNode::getMostGenericFPMath
+md_most_generic_fpmath :: (a: Md_Id, b: Md_Id) -> Md_Id {
+    if a == NONE || b == NONE return NONE;
+    av, _ := fp_const_as_f64(md_value_of(md_op(a, 0)));
+    bv, _ := fp_const_as_f64(md_value_of(md_op(b, 0)));
+    if av < bv return a;
+    return b;
+}
+md_value_of :: (m: Md_Id) -> Value_Id { return ir.mds[m].value; }
+// MDNode::getMergedCalleeTypeMetadata
+md_merged_callee_type :: (a: Md_Id, b: Md_Id) -> Md_Id {
+    if a == NONE || b == NONE return NONE;
+    ab: [..] Md_Id; ab.allocator = temp;
+    for n: Md_Id.[a, b] for k: 0..cast(s64) md_nops(n) - 1 {
+        o := md_op(n, cast(u32) k);
+        seen := false; for ab if it == o seen = true;
+        if !seen array_add(*ab, o);
+    }
+    return md_tuple(ab, false);
+}
+// MDNode::getMergedProfMetadata (+ mergeDirectCallProfMetadata)
+md_merged_prof :: (a: Md_Id, b: Md_Id, ai: Value_Id, bi: Value_Id) -> Md_Id {
+    legal :: (i: Value_Id) -> bool {
+        o := inst_op(i);
+        return o == .INVOKE || o == .CONDBR || o == .SWITCH || o == .CALL || o == .INDIRECTBR || o == .SELECT || o == .CALLBR;
+    }
+    if ai != NONE && !legal(ai) return NONE;
+    if bi != NONE && !legal(bi) return NONE;
+    if a == NONE || b == NONE return ifx a != NONE then a else b;
+    if inst_op(ai) == .CALL && inst_op(bi) == .CALL && call_called_function(ai) != NONE && call_called_function(bi) != NONE {
+        an := md_op(a, 0); bn := md_op(b, 0);
+        if ir.mds[an].str == "branch_weights" && ir.mds[bn].str == "branch_weights" {
+            ao: u32 = ifx prof_has_branch_weight_origin(a) then cast(u32) 2 else 1;
+            bo: u32 = ifx prof_has_branch_weight_origin(b) then cast(u32) 2 else 1;
+            aw := const_int_zext(md_const_int_op(a, ao));
+            bw := const_int_zext(md_const_int_op(b, bo));
+            sum := aw + bw;
+            if sum < aw sum = U64_MAX;   // SaturatingAdd
+            ops := Md_Id.[md_string("branch_weights"), md_value(const_int(type_int(cast(u64) 64), sum))];
+            return md_tuple(ops, false);
+        }
+        return NONE;
+    }
+    if a == b return a;
+    return NONE;
+}
+// intersectAccessGroups (VectorUtils.cpp)
+intersect_access_groups :: (i1: Value_Id, i2: Value_Id) -> Md_Id {
+    m1 := may_read_or_write_memory(i1); m2 := may_read_or_write_memory(i2);
+    ag := md_kind_id("llvm.access.group");
+    if !m1 && !m2 return NONE;
+    if !m1 return get_metadata(i2, ag);
+    if !m2 return get_metadata(i1, ag);
+    a := get_metadata(i1, ag); b := get_metadata(i2, ag);
+    if a == NONE || b == NONE return NONE;
+    if a == b return a;
+    set2: [..] Md_Id; set2.allocator = temp;
+    if md_nops(b) == 0 array_add(*set2, b); else for k: 0..cast(s64) md_nops(b) - 1 array_add(*set2, md_op(b, cast(u32) k));
+    inter: [..] Md_Id; inter.allocator = temp;
+    contains :: (s: [] Md_Id, x: Md_Id) -> bool { for s if it == x return true; return false; }
+    if md_nops(a) == 0 { if contains(set2, a) array_add(*inter, a); }
+    else for k: 0..cast(s64) md_nops(a) - 1 { x := md_op(a, cast(u32) k); if contains(set2, x) array_add(*inter, x); }
+    if inter.count == 0 return NONE;
+    if inter.count == 1 return inter[0];
+    return md_tuple(inter, false);
+}
+
+// MDNode::getMostGenericNoaliasAddrspace (ConstantRangeList::intersectWith)
+md_most_generic_noalias_addrspace :: (a: Md_Id, b: Md_Id) -> Md_Id {
+    if a == NONE || b == NONE return NONE;
+    if a == b return a;
+    ranges :: (m: Md_Id) -> [..] Const_Range {
+        r: [..] Const_Range; r.allocator = temp;
+        for i: 0..cast(s64) md_nops(m) / 2 - 1 array_add(*r, cr_new(const_ap(md_const_int_op(m, cast(u32) (2 * i))), const_ap(md_const_int_op(m, cast(u32) (2 * i + 1)))));
+        return r;
+    }
+    ra := ranges(a); rb := ranges(b);
+    res: [..] Const_Range; res.allocator = temp;
+    if ra.count == 0 res = ra; else if rb.count == 0 res = rb;
+    else {
+        i := 0; j := 0;
+        while i < ra.count && j < rb.count {
+            st := ifx ap_sgt(ra[i].lo, rb[j].lo) then ra[i].lo else rb[j].lo;
+            en := ifx ap_slt(ra[i].hi, rb[j].hi) then ra[i].hi else rb[j].hi;
+            if ap_slt(st, en) array_add(*res, cr_new(st, en));
+            if ap_slt(ra[i].hi, rb[j].hi) i += 1; else j += 1;
+        }
+    }
+    if res.count == 0 return NONE;
+    ops: [..] Md_Id; ops.allocator = temp;
+    for res {
+        t := type_int(cast(u64) it.lo.bits);
+        array_add(*ops, md_value(const_int_words(t, ap_words(it.lo))));
+        array_add(*ops, md_value(const_int_words(t, ap_words(it.hi))));
+    }
     return md_tuple(ops, false);
 }

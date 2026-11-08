@@ -218,9 +218,9 @@ may_throw :: (i: Value_Id, include_phase_one_unwind := false) -> bool {
             pad := block_first_non_phi(unwind);
             if pad != NONE && inst_op(pad) == .LANDINGPAD return can_unwind_past_landing_pad(pad, include_phase_one_unwind);
             return false;
-        case .CLEANUPRET; #through;
-        case .CATCHSWITCH; #through;
-        case .CLEANUPPAD; fatal("funclet instructions are not supported yet");
+        case .CLEANUPRET; return nops(i) < 2;                       // unwindsToCaller: no unwind destination
+        case .CATCHSWITCH; return (r.flags & F_HAS_UNWIND) == 0;    // unwindsToCaller
+        case .CLEANUPPAD; return include_phase_one_unwind;          // treated like a cleanup landingpad
     }
     return false;
 }

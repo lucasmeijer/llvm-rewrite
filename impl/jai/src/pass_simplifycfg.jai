@@ -11,6 +11,8 @@ scfg_np :: (what: string) { fatal("simplifycfg: % is not supported yet", what); 
 
 // ---------------------------------------------------------------- cl::opts (SimplifyCFG.cpp, SimplifyCFGPass.cpp)
 
+opt_strip_debug := false;
+
 scfg_cl: struct {
     require_and_preserve_domtree := false;     // -simplifycfg-require-and-preserve-domtree
     phi_node_folding_threshold: s64 = 2;       // -phi-node-folding-threshold
@@ -44,7 +46,7 @@ scfg_cl: struct {
     user_speculate_unpredictables: s64 = -1;
 };
 
-SCFG_CL_OPT_COUNT :: 29;
+SCFG_CL_OPT_COUNT :: 31;
 add_scfg_cl_opts :: (list: [] Cl_Opt, start: s64) {
     o := *scfg_cl;
     k := start;
@@ -69,6 +71,8 @@ add_scfg_cl_opts :: (list: [] Cl_Opt, start: s64) {
     add(list, *k, "simplifycfg-merge-compatible-invokes", *o.enable_merge_compatible_invokes, null);
     add(list, *k, "max-switch-cases-per-result", null, *o.max_switch_cases_per_result);
     add(list, *k, "max-jump-threading-live-blocks", null, *o.max_jump_threading_live_blocks);
+    add(list, *k, "max-phi-entries-increase-after-removing-empty-block", null, *local_opts.max_phi_entries_increase_after_removing_empty_block);
+    add(list, *k, "strip-debug", *opt_strip_debug, null);   // opt -strip-debug (optdriver.cpp)
     // tri-state user overrides: parsed as INT with "true"/"false" accepted (see parse_cl_opt's TRISTATE kind)
     tri :: (list: [] Cl_Opt, k: *s64, name: string, i: *s64) { list[k.*] = .{name, .TRISTATE, null, i, null}; k.* += 1; }
     list[k] = .{"bonus-inst-threshold", .INT, null, *o.user_bonus_inst_threshold, null}; k += 1;

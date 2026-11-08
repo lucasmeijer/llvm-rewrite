@@ -273,7 +273,11 @@ and_ir_flags :: (dst: Value_Id, src: Value_Id) {
     }
     if (so == .ZEXT || so == .UITOFP) && (d.op == .ZEXT || d.op == .UITOFP) && (sf & F_EXACT) == 0 d.flags &= ~cast(u32) F_EXACT;
     if so == .ICMP && d.op == .ICMP && (sf & F_EXACT) == 0 d.flags &= ~cast(u32) F_EXACT;
-    if so == .GEP && d.op == .GEP fatal("instcombine: andIRFlags of GEPs is not supported yet");
+    if so == .GEP && d.op == .GEP {
+        // DestGEP->setNoWrapFlags(DestGEP->getNoWrapFlags() & SrcGEP->getNoWrapFlags())
+        nw := ic_gep_nw_intersect(dst, src);
+        d.flags = (d.flags & ~cast(u32) (F_INBOUNDS | F_NUSW | F_GEP_NUW)) | nw;
+    }
 }
 
 // Instruction::isIdenticalTo (same opcode, type, operands and "special state")
