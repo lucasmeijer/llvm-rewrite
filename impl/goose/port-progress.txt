@@ -28,7 +28,7 @@ lib/Analysis/CmpInstAnalysis.cpp 0.35
 # scaled by the share of the identifiers they call that the impl mentions (catches a 1900-line visitCallInst ported
 # in part). Legacy-PM wrappers and print/dump are left out. fraction = matched function lines / all function lines,
 # rounded down to 0.05. "manual" lines were spot-checked by hand where the port does not follow LLVM's structure.
-lib/Analysis/ScalarEvolution.cpp 0.85
+lib/Analysis/ScalarEvolution.cpp 0.88
 lib/AsmParser/LLParser.cpp 0.7  # manual: own parser structure; all IR constructs, no summary-index parsing (~19% of LLParser) (heuristic 0.18)
 lib/IR/AutoUpgrade.cpp 0.25
 lib/Analysis/InstructionSimplify.cpp 0.9
@@ -48,7 +48,7 @@ lib/IR/Attributes.cpp 0.2
 lib/Analysis/MemorySSA.cpp 0.75  # + the mutation API and verifier; no loop constructor, DOT output
 lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95  # manual: all but visitFDiv's sin/cos -> tan (emitUnaryFloatFnCall, loud)
 lib/Transforms/Utils/SCCPSolver.cpp 0.7
-lib/Transforms/Utils/LoopUtils.cpp 0.08
+lib/Transforms/Utils/LoopUtils.cpp 0.2  # + rewriteLoopExitValues, hasHardUserWithinLoop, canLoopBeDeleted, isAlmostDeadIV (indvars.goose)
 lib/IR/ConstantRange.cpp 0.7
 lib/IR/Metadata.cpp 0.5
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
@@ -68,7 +68,7 @@ lib/Analysis/GlobalsModRef.cpp 0.85
 lib/Analysis/AliasAnalysis.cpp 0.9
 lib/Transforms/Utils/PredicateInfo.cpp 0.6
 lib/IR/ConstantFPRange.cpp 0.35
-lib/Transforms/Utils/LoopSimplify.cpp 0.85
+lib/Transforms/Utils/LoopSimplify.cpp 0.9
 lib/Analysis/TypeBasedAliasAnalysis.cpp 0.85
 lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.5
 lib/Analysis/DemandedBits.cpp 0.95
@@ -77,7 +77,7 @@ lib/Transforms/Scalar/ADCE.cpp 0.85
 lib/Transforms/Utils/SSAUpdater.cpp 0.9  # + LoadAndStorePromoter::run (licm.goose)
 lib/Analysis/MemoryLocation.cpp 1
 lib/Transforms/Utils/BreakCriticalEdges.cpp 0.5  # + MemorySSAUpdater, PreserveLCSSA
-lib/Transforms/Utils/LCSSA.cpp 0.7
+lib/Transforms/Utils/LCSSA.cpp 0.8  # + ScalarEvolution, PHIsToRemove / InsertedPHIs
 lib/Analysis/LoopNestAnalysis.cpp 0.65
 lib/Analysis/CaptureTracking.cpp 0.95
 lib/Analysis/PHITransAddr.cpp 0.95  # manual: all but the debug-only verify/verifySubExpr/dump (heuristic 0.69)
@@ -146,3 +146,6 @@ lib/Analysis/BranchProbabilityInfo.cpp 0.95  # manual: BPIConstruction whole, th
 lib/Analysis/BlockFrequencyInfoImpl.cpp 0.9  # + the BasicBlock instantiation of BlockFrequencyInfoImpl.h; no -use-iterative-bfi-inference, debug dumps (heuristic 0.85)
 lib/Analysis/BlockFrequencyInfo.cpp 0.4  # analysis, calculate, getBlockFreq/setBlockFreq, printer; no view/DOT, profile-count API, legacy wrapper
 lib/Transforms/Scalar/ConstraintElimination.cpp 0.9  # all but generateReproducer (-constraint-elimination-dump-reproducers fails loudly) and the LLVM_DEBUG dumps
+lib/Transforms/Utils/ScalarEvolutionExpander.cpp 0.85  # manual: no predicate expansion (expandCodeForPredicate, generateOverflowCheck, expand{Compare,Wrap,Union}Predicate) and no post-inc expansion (normalizeForPostIncUse fails loudly) (heuristic 0.93)
+lib/Analysis/IVUsers.cpp 0.8  # manual: print<iv-users> path whole; not getExpr/getStride/findAddRecForLoop/IVStrideUse callbacks (LSR) (heuristic 0.95)
+lib/Analysis/ScalarEvolutionNormalization.cpp 1  # manual: NormalizeDenormalizeRewriter is scev_create.goose's RW_NORMALIZE (heuristic 0.6)

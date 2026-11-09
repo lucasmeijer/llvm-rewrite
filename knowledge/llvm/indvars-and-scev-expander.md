@@ -65,3 +65,22 @@ function-attrs), and `loop(indvars)` identical to opt 23.1.5 on every round-trip
   then survives, and a following `instcombine` is skipped entirely: `sroa,instcombine,loop-mssa(loop-rotate,licm),
   loop(indvars),instcombine` on Analysis/ScalarEvolution/avoid-smax-0.ll keeps `sext i32 %i.0` although
   instcombine alone on the same IR turns it into `zext nneg` (verified with `-disable-last-run-tracking`).
+
+## Verified again with the Goose port (impl/goose/src/scev_expander.goose, simplify_indvar.goose, indvars.goose)
+
+211/223 `::opt` checks of IndVarSimplify; `loop(indvars)` and `sroa,loop(loop-rotate,indvars)` identical on every
+round-tripping corpus file, whole-file and `--per-function`, and on the four tests/perf/compile programs.
+
+- WidenIV::widenIVUse: when the cloned wide use's SCEV differs from the expected recurrence (or the clone fails),
+  the `tryAddRecExpansion` lambda returns null and widenIVUse continues with widenLoopCompare and
+  widenWithVariantUse before truncating. A port that returns early instead turns `sub nsw i32 %a, %iv` + `sext`
+  into a truncated IV where LLVM produces `sext %a` + `sub nsw i64` (lua.ll `symbexec`, SPASS, sqlite3; no corpus
+  file shows it). The mismatch is common: createSCEV builds `sext(sub nsw a, b)` as `sext(a) - sext(b)`, while the
+  recurrence uses the already uniqued `sext(a - b)` node.
+- isHighCostExpansion asks the X86 TTI for scalar `shl` (a multiply by a power of two) and scalar casts; X86's
+  tables have no entry and BasicTTIImplBase answers LT.first for Legal operations.
+- replaceCongruentIVs and optimizeLoopExits/predicateLoopExits sort with std::stable_sort / std::sort whose
+  comparators make DominatorTree queries; the sequence of comparisons is libstdc++'s.
+- PHINode replaced with a constant through replaceAllUsesWith triggers ScalarEvolution's callback on the PHI
+  (forgetValue walks its users) before the uses change; erasing a SCEVUnknown's value removes the unknown from
+  the uniquing set, so a later getUnknown(V) is a new node.

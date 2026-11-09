@@ -114,3 +114,17 @@ passing 243/247 `print<scalar-evolution>` lines of `tests/analysis/scev` + `Anal
 - LLVM 23's SCEVUse (a SCEV pointer plus use-specific NUW/NSW bits) exists, but nothing in 23.1.5 constructs a use
   with flags (grep `SCEVUse(` in lib/), so every SCEV is its own canonical and operands can be plain pointers.
 - SCEVExpander and IndVarSimplify (the main SCEV clients so far): see indvars-and-scev-expander.md.
+
+## Keeping a cached ScalarEvolution valid (verified with the Goose port, scev_update.goose)
+
+- `registerUser` skips SCEVConstant operands (ScalarEvolution.cpp:15665): forgetting a constant SCEV (e.g. the
+  SCEV of a PHI that folded to 0) must not forget every expression containing that constant. Without this,
+  `loop(indvars),print<scalar-evolution>` on IndVarSimplify/eliminate-max.ll recomputes `select` SCEVs after
+  indvars changed an icmp predicate in place and prints `umin` where LLVM keeps the cached `smin`.
+- ValueHandleBase::ValueIsRAUWd runs before the use list is rewritten, so SCEVCallbackVH::allUsesReplacedWith's
+  forgetValue still sees the old users; a value only has a SCEVCallbackVH while it is in ValueExprMap
+  (eraseValueFromMap drops it), so forgetValue(PN) followed by RAUW(PN) does not forget twice.
+- forgetBlockAndLoopDispositions(V) erases the dispositions of V's SCEV and, only while something was erased,
+  of its SCEVUsers; forgetMemoizedResults' LoopDispositions.erase(S) erases every loop's entry for S.
+- `print<iv-users>` prints `getSCEV(operand)` (not the normalized expression) and the post-inc loops in
+  insertion order; IVUsers reuses the normalized ISE for the next user of the same instruction.

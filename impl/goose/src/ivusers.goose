@@ -1,8 +1,9 @@
 // IVUsers (print<iv-users>).
 // Port of llvm/lib/Analysis/IVUsers.cpp (LLVM 23.1.5): isInteresting, IVUseShouldUsePostIncValue (in
 // scev_create.goose, next to the normalization rewriter it is the predicate of), AddUsersIfInteresting, AddUser,
-// the IVUsers constructor (with CodeMetrics::collectEphemeralValues), print, getReplacementExpr, getExpr,
-// findAddRecForLoop, getStride. The post-increment normalization (ScalarEvolutionNormalization.cpp) is
+// the IVUsers constructor (with CodeMetrics::collectEphemeralValues), print, getReplacementExpr. Not ported
+// (only LSR needs them): getExpr, findAddRecForLoop, getStride, IVStrideUse::transformToPostInc/deleted.
+// The post-increment normalization (ScalarEvolutionNormalization.cpp) is
 // scev_create.goose's RW_NORMALIZE rewriter.
 //
 // One IVUsers at a time (the analysis of the loop being printed). AddUsersIfInteresting recurses, so its

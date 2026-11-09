@@ -227,15 +227,15 @@ attachment) becomes `!3` because named metadata is numbered first, and the TBAA 
 ## 5. Value handles and callbacks without function pointers
 
 Some passes and analyses rely on `WeakVH`, `WeakTrackingVH`, `AssertingVH` and `CallbackVH` (e.g. `ValueMap` in
-cloning, SCEV's value cache). These are a table of handle records with a per-value intrusive list, and the *kind* of
-handle decides what `erase`/`RAUW` does to it: null it out, follow the replacement, or append an event (handle id,
-event kind) to a queue that the owning analysis drains. That replaces virtual `deleted()`/`allUsesReplacedWith()`
-with data plus a `match`.
-
-Implemented so far: LazyValueInfo's LVIValueHandles (CallbackVH: deleted / allUsesReplacedWith both erase the value
-from the cache). While LVI holds any handle (`vh_lvi_n`), `rauw` and `val_set_dead` append the value to
-`vh_lvi_events`; lvi.goose drains the queue at each of its entry points. Since LVI never changes IR, handling the
-events late is exact. MemorySSA's handles are their own (§8.6).
+cloning, SCEV's value cache). Implemented (wvh.goose): a table of handle records `WVh { val, kind, next, prev }`
+with a per-value intrusive list (`val_wvh[v]`), and the *kind* decides what erase/RAUW does to it (Weak: null on
+erase, stays on RAUW; WeakTracking and Tracking: null on erase, follow RAUW). ir.goose's `val_set_dead` (every erase
+ends there) and `rauw` (before the uses change, like Value::doRAUW) call `wvh_value_deleted` / `wvh_value_rauwd`
+while any handle is linked. Handles are allocated on a stack (`wvh_mark` / `wvh_release`), matching the scoped
+lifetime of the C++ containers that hold them. Since value ids are never reused, AssertingVH and PoisoningVH are
+plain ids. The callback kinds are not handles but direct calls with a cheap guard: ScalarEvolution's
+SCEVCallbackVH/SCEVUnknown callbacks (`scev_note_erase` / `scev_note_rauw`, while `sc_valid`), LVI's event queue
+(`vh_lvi_events`), MemorySSA's own tracking handles (`vh_new` in mssaupdater.goose).
 
 ## 6. Text in, text out
 
@@ -283,7 +283,8 @@ last entry into the hole), `phi_has_constant_value`. Flags: `drop_poison_generat
 Ids are never reused (§2.3).
 
 ### 8.3 Value handles and worklists
-No handle table yet: passes keep ids and check `is_dead(v)` where LLVM would use a `WeakVH`. Worklists follow the
+Passes keep ids and check `is_dead(v)` where LLVM would use a `WeakVH`; where a handle must follow RAUW
+(WeakTrackingVH, TrackingVH) or be nulled while the id stays live, use wvh.goose (§5). Worklists follow the
 LLVM container: `SmallVector` = `i32[>..<]` with `push`/`pop`; `SetVector` = array + scratch set membership
 (DCE: insert if `vs_add` returned true, `vs_del` on pop).
 
@@ -472,6 +473,14 @@ LLVM's constructor does), `scev_invalidate(fv)` drops it, and a different functi
 - **Predicates**: compare and wrap predicates uniqued in `sc_preds`; ExitLimits and ExitNotTakenInfos keep runs
   of predicate ids in `sc_predl`.
 - **LoopGuards**: an id into `sc_guards`; its RewriteMap and NotEqual set are hash maps keyed by the id.
+- **Keeping a cached instance valid** (scev_update.goose): the value-handle callbacks (§5), forgetLoop /
+  forgetTopmostLoop / forgetValue / forgetLcssaPhiWithNewPredecessor, and forgetMemoizedResults over a list
+  (`su_forget_memoized`, hash-set based). Dispositions carry a per-node disposition generation on top of the node
+  generation (`ldg`/`bdg` in `sc_side2`) so LoopDispositions.erase(S) is exact; BECountUsers entries name the BTC
+  instance. Transform passes call these exactly where LLVM calls them; anything else (setOperand, setPredicate)
+  is invisible to the cache, as in LLVM.
+- **Normalization** (ScalarEvolutionNormalization.cpp) is the RW_NORMALIZE rewriter; its loop set is the global
+  `sc_norm_loops`.
 
 ## 9. The pass manager and how to add a pass (passmgr.goose)
 
@@ -685,3 +694,20 @@ max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
   computed up front: GVN never changes the CFG while it walks one.
 - MergeBlockIntoPredecessor for GVN is `gvn_merge_block_into_predecessor` (lazy DomTreeUpdater through dtu.goose,
   LoopInfo, MemorySSAUpdater, MemDep); critical edges are split by breakcrit.goose with `CESOpts.mssau`.
+
+## 15. SCEVExpander, IndVarSimplify, SimplifyIndVar (scev_expander.goose, indvars.goose, simplify_indvar.goose)
+
+- **SCEVExpander** is a set of module globals (`sx_*`): one expander alive at a time (`sx_begin`/`sx_end`; a
+  second `sx_begin` fails loudly). Its maps are `HMap`s: InsertedExpressions (SCEV, insert-point instruction) ->
+  TrackingVH handle, InsertedValues / InsertedPostIncValues (set + insertion-order list), ReusedValues, OrigFlags
+  (the instruction's poison-flag byte = PoisonFlags), RelevantLoops, ChainedPhis; InsertedIVs are WeakVH handles.
+- The expansion functions (expand, visit*, the AddRec PHI builders) are one `recursive fn` cycle with the SCEV
+  builders called from it; their SmallVectors are runs on `sx_ol` (OpsAndLoops) and `sx_tmp`. Non-recursive
+  helpers (hoistIVInc, replaceCongruentIVs, isHighCostExpansion, fixupLCSSAFormFor's LCSSA call) are plain fns.
+- The IRBuilder<InstSimplifyFolder, IRBuilderCallbackInserter> is `sxb_*`: an iterator (`SxIt`: block,
+  instruction or -1 = end(), head bit) and a debug location; SetInsertPoint(Instruction*) and
+  SetInsertPoint(BB, It) set the location as LLVM's do, SCEVInsertPointGuard is `sx_guard_push/pop`.
+- **IndVarSimplify / SimplifyIndvar / WidenIV** are globals too (`ivs_*`, `si_*`, `wv_*`); DeadInsts is the
+  handle list `iv_dead`. Order-relevant containers follow LLVM's: SmallVector worklists popped from the back,
+  SmallPtrSets as HMaps (never iterated), sorts through stdsort.goose (libstdc++'s std::sort / std::stable_sort,
+  comparison by comparison, because comparators query the dominator tree).

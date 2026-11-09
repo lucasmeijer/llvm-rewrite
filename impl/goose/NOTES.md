@@ -98,11 +98,27 @@
   `gvn,instcombine,simplifycfg`). Both give output identical to LLVM's on all tests/e2e O0 and pipeline inputs
   and on the four tests/perf/compile programs, and run 1.3-2.5x faster than LLVM there; linear on
   scaling/allocas (k 1.04 mem2reg, 1.07 sroa; LLVM 1.19, 1.25).
-- L1.analysis.scev 501/505 (all 266 roundtrip; 243/247 `print<scalar-evolution>` lines of the corpus): the 4 left
-  run `print<iv-users>` (2), `indvars` and `-aa-pipeline=scev-aa`. `print<scalar-evolution>` also matches LLVM on
-  all 723 tests/e2e and tests/function inputs, the four tests/perf/compile programs and 6913 of the 6989 imported
-  test files (the rest stop loudly, mostly in computeKnownBits gaps, or differ only in LLVM's debug-info and
-  `-mattr` warnings on stderr). Speed: like LLVM's or faster on tests/perf/scaling (both are superlinear on
+- L1.indvars 434/446 (all 223 roundtrip, 211/223 opt). The 12 left run other passes (loop-deletion ×9,
+  simple-loop-unswitch, inline+function-attrs with `-disable-nounwind-inference`) or stop in InstSimplify's
+  vscale_range decoding (rewrite-loop-exit-value.ll). New: SCEVExpander (scev_expander.goose), IndVarSimplify +
+  rewriteLoopExitValues (indvars.goose), SimplifyIndVar + WidenIV (simplify_indvar.goose), value handles
+  (wvh.goose), ScalarEvolution's value-handle callbacks and forgetLoop/forgetTopmostLoop/forgetValue
+  (scev_update.goose), libstdc++'s std::stable_sort / std::sort (stdsort.goose). Sweeps: `loop(indvars)` and
+  `sroa,loop(loop-rotate,indvars)`, whole-file and `--per-function` (69778 functions), and `loop(indvars)
+  --with-test-flags`: 0 differs; `print<scalar-evolution>` --analysis: 0 differs. Byte-identical (after
+  llvm-as|llvm-dis) on the four tests/perf/compile programs with `sroa,loop(loop-rotate,indvars)`; that check found
+  a WidenIV bug no corpus file hits (see "IndVarSimplify" below). Known: `loop(indvars),print<scalar-evolution>`
+  differs on one file (LoopVectorize/pr58811-scev-expansion.ll @test2: cached signed ranges of `%p.1` after
+  rewriteLoopExitValues; our values equal a fresh ScalarEvolution, LLVM's keep older ones), not yet explained.
+  Speed (by hand, no `@perf` line times indvars): `sroa,loop(loop-rotate,indvars)` minus `sroa,loop(loop-rotate)`
+  is +0.27 s on SPASS (LLVM +0.13), +0.20 s on oggenc (+0.09), +0.13 s sqlite3 (+0.12), +0.03 s lua (+0.03);
+  the whole pipeline stays faster than LLVM's. scaling/loops-many n2000 4.7 s vs 3.7 s, n8000 585 s vs 531 s:
+  both superlinear in the same way (forgetTopmostLoop over a function with thousands of loops).
+- L1.analysis.scev complete: IVUsers (ivusers.goose, print<iv-users>, with the post-increment normalization
+  rewriter in scev_create.goose) and SCEVAA (scevaa.goose, `-aa-pipeline=scev-aa`). `print<scalar-evolution>`
+  also matches LLVM on all 723 tests/e2e and tests/function inputs, the four tests/perf/compile programs and
+  the round-tripping corpus (sweep: 0 differs). `loop(print<iv-users>)` and `aa-eval -aa-pipeline=scev-aa`
+  sweeps: 0 differs. Speed: like LLVM's or faster on tests/perf/scaling (both are superlinear on
   `loops-many`: n500 0.16 s / 0.11 s, n2000 5.1 s / 5.0 s, LLVM vs Goose); no `@perf` line times it.
 - L1.analysis.loops complete (print<loopnest> through the loop pass manager).
 - L1.licm 243/268 (all 134 roundtrip, 109/134 opt). Every test left runs another unported pass (loop-rotate,
@@ -122,8 +138,8 @@
   ported), noalias scope declarations in the header, or run unported passes (loop-deletion, indvars, loop-reduce).
   Sweeps `loop-rotate`, `loop-rotate<header-duplication;check-exit-count>`, `loop-mssa(loop-rotate,licm)` (whole
   file and per function) and `loop-mssa(loop-rotate),print<memoryssa>` / `loop(loop-rotate),print<scalar-evolution>`
-  --analysis: 0 differs. ScalarEvolution::forgetTopmostLoop/forgetValue aren't ported: a rotation drops the whole
-  ScalarEvolution (a superset; the print<scalar-evolution> sweep after it is identical). Speed (`perf`
+  --analysis: 0 differs. LoopRotate keeps a cached ScalarEvolution up to date like LLVM (forgetTopmostLoop,
+  forgetBlockAndLoopDispositions, forgetValue of the rewritten header values). Speed (`perf`
   loops-many): 0.5-0.9x LLVM's time, k (0.84) vs LLVM (1.14).
 - L1.analysis.domtree and L1.analysis.demanded-bits complete. L1.loop-canonical: loop-simplify and
   lcssa pass 31 of their 58 `::opt` tests; every other one stops loudly (other passes in the pipeline: licm,
@@ -169,6 +185,11 @@
 | `src/scev.goose` | ScalarEvolution nodes, uniquing, folding constructors (add/mul/udiv/addrec/min/max/casts), complexity order, printing |
 | `src/scev_create.goose` | getSCEV/createSCEV, AddRecs from PHIs, selects, GEPs, value maps, forgetMemoizedResults, rewriters |
 | `src/scev_range.goose` | Constant multiples, ranges, isKnown* sign queries |
+| `src/scev_update.goose` | ScalarEvolution value-handle callbacks (scev_note_erase/rauw), forgetLoop/forgetTopmostLoop/forgetValue/forgetLcssaPhiWithNewPredecessor, getSCEVValues, canReuseInstruction, getStrengthenedNoWrapFlagsFromBinOp, getLoopInvariantPredicate, getLoopInvariantExitCondDuringFirstIterations, evaluatePredicate(At) |
+| `src/scev_expander.goose` | SCEVExpander (one at a time: sx_begin/sx_end) and its IRBuilder<InstSimplifyFolder> (sxb_*); replaceCongruentIVs, isHighCostExpansion, isSafeToExpand(At), LoopInfo LCSSA queries |
+| `src/simplify_indvar.goose`, `src/indvars.goose` | SimplifyIndVar.cpp (SimplifyIndvar, WidenIV); IndVarSimplify.cpp + rewriteLoopExitValues and the Local.cpp deletion helpers |
+| `src/ivusers.goose`, `src/scevaa.goose` | IVUsers (print<iv-users>), SCEVAA |
+| `src/wvh.goose`, `src/stdsort.goose` | WeakVH/WeakTrackingVH/TrackingVH; libstdc++ std::stable_sort and std::sort (exact comparison sequence) |
 | `src/scev_btc.goose`, `src/scev_lt.goose` | Backedge-taken counts and exit limits; howManyLessThans/GreaterThans, SCEV predicates |
 | `src/scev_eval.goose` | evaluateAtIteration, constant evolution, getSCEVAtScope, howFarToZero, quadratic solvers, dispositions |
 | `src/scev_pred.goose`, `src/scev_guards.goose` | isKnownPredicate / isImpliedCond families; LoopGuards |
@@ -520,8 +541,20 @@
   a context uses the instruction itself (`safeCxtI`); getConstantMultiple allows ephemeral assumptions.
 - Fails loudly: createAddRecFromPHIWithCasts (casted-PHI predicated rewrites), sizeof of aggregates with scalable
   vectors, scalable allocas; ValueTracking gaps it relies on (vectors > 64 lanes, pext/pdep, ...).
-- Not ported: SCEVExpander, PredicatedScalarEvolution, `verify<scalar-evolution>` (accepted, prints nothing:
-  LLVM only prints on a mismatch), IVUsers, SCEVAA, getLoopInvariantPredicate & co (transform helpers).
+- Not ported: PredicatedScalarEvolution, `verify<scalar-evolution>` (accepted, prints nothing: LLVM only prints on
+  a mismatch), forgetAllLoops.
+- A cached ScalarEvolution now follows IR changes like LLVM's: ir.goose's `val_set_dead` / `rauw` call
+  scev_note_erase / scev_note_rauw while `sc_valid` (SCEVCallbackVH / SCEVUnknown callbacks; rauw notifies before
+  the uses change, as Value::doRAUW does). So a pass that erases or RAUWs values while ScalarEvolution is cached
+  (every loop pass, and any function pass after one until invalidation) pays a hash lookup per value and real
+  forget work for mapped values. Passes that change instructions in place (setOperand, setPredicate) must call
+  the forget functions themselves, exactly where LLVM does: SCEV is not told otherwise.
+- Dispositions are erased per SCEV (LoopDispositions.erase(S)) through a per-node disposition generation plus a
+  cache epoch (scev_eval.goose `sc_ldisp_erase`); forgetBlockAndLoopDispositions(V) is exact now.
+- SCEVUsers does not record constant operands (registerUser): forgetting a constant must not forget every
+  expression containing it. BECountUsers entries name the BTC instance (its first exit entry), so a stale entry no
+  longer forgets a recomputed BTC.
+- `-goose-scev-trace` (development only) prints ValueExprMap insertions/erasures, forgets and RAUW callbacks.
 - The function names use the prefix `sc_`, which SCCP also uses for a few helpers (`sc_alist_set`, ...): check for
   a clash before adding one.
 - `tools`: /tmp scripts were used to sweep `print<scalar-evolution>` over the corpus in parallel (compare stdout+
@@ -1019,3 +1052,30 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   (vectors > 64 lanes, GEP index width != pointer width), ppc_fp128, SCEV gaps.
 - Speed: sqlite3/SPASS/lua `sroa,constraint-elimination` minus `sroa` +0.03/+0.03(after the SCEV fix)/+0.01 s
   (LLVM +0.00/+0.09/+0.01 s); every scaling shape at its largest size is as fast as LLVM or faster.
+
+## IndVarSimplify and SCEVExpander (indvars, simplify_indvar, scev_expander, wvh)
+
+- DeadInsts are WeakTrackingVH handles in `iv_dead` (simplify_indvar.goose); handles are a stack (`wvh_mark` /
+  `wvh_release`); the expander releases its own (InsertedExpressions' TrackingVHs, InsertedIVs' WeakVHs) in
+  `sx_end`. Never keep a handle id past the release of its mark.
+- One SCEVExpander at a time: `sx_begin(name, preserve_lcssa)` ... `sx_end()`; `sx_clear()` is Rewriter.clear().
+  The expand/visit cycle is `recursive fn`: OpsAndLoops runs live on `sx_ol`, scratch on `sx_tmp`; the builder
+  state (`sxb_*`) and SCEVInsertPointGuard stack (`sx_guards`) are globals. getAllInsertedInstructions iterates
+  insertion order (LLVM iterates a DenseSet; only SCEVExpanderCleaner/eraseDeadInstructions use it).
+- The expander's IRBuilder folds with InstSimplify under a bare SimplifyQuery(DL): `sxf_begin` sets
+  sq_no_dt/ac/tli and clears dc_active. Other IRBuilder<> uses in indvars are ConstantFolder (`ib_*`).
+- WidenIV trap (found only on tests/perf/compile): when the cloned wide use's SCEV does not match the expected
+  AddRec, tryAddRecExpansion returns null and widenIVUse goes on to widenLoopCompare / widenWithVariantUse; it
+  does not return. (`sext(sub nsw a, b)` is built as `sext(a) - sext(b)` by createSCEV, so the clone's SCEV and the
+  recurrence differ whenever the sext node of the narrow operand already exists.)
+- Exit-block sorts are llvm::sort = std::sort and comparators make DT queries; stdsort.goose reproduces libstdc++
+  exactly (also used for LoopCompare and replaceCongruentIVs' stable_sort).
+- LoopSimplify now keeps a cached ScalarEvolution up to date (forgetLoop in separateNestedLoop, forgetValue on
+  simplified header PHIs, forgetTopmostLoop when anything changed, makeLoopInvariant's dispositions) and simplifies
+  PHIs with InstSimplify (`ls_simplify_inst`, DT and AC, no TLI) instead of ssaupdater's partial simplifyPHINode;
+  LCSSA calls getSCEV on new LCSSA PHIs of values with a cached SCEV (`lcssa_se`).
+- X86 TTI: BasicTTIImpl's fallback for scalar integer ops/casts that are Legal on x86 (shl/lshr/ashr/add/sub/
+  and/or/xor, zext/sext/trunc on i8..i64) was missing; isHighCostExpansion asks for them. tti_is_truncate_free and
+  tti_int_imm_cost_inst (NoTTIImpl only; X86's fails loudly) are new.
+- Not ported (fail loudly): `-replexitval=unusedindvarinloop` (InductionDescriptor), SCEVExpander predicate checks
+  and post-increment expansion (LSR / vectorizer runtime checks).
