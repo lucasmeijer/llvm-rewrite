@@ -196,7 +196,7 @@ remap_instruction :: (vm: *Value_Map, i: Value_Id, flags: u32) {
         o := op(i, cast(u32) k);
         if o == NONE continue;
         v := map_value(vm, o, flags);
-        if v != NONE { if v != o set_op(i, cast(u32) k, v); }
+        if v != NONE set_op(i, cast(u32) k, v);   // `Op = V` is Use::set even when V is the old value (the use moves to the front)
         else if !(flags & RF_IGNORE_MISSING_LOCALS) fatal("ValueMapper: referenced value not in value map");
     }
     if is_call_base(i) {

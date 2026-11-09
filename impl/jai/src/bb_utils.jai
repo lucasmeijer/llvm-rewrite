@@ -315,11 +315,11 @@ split_landing_pad_predecessors :: (orig: Value_Id, preds: [] Value_Id, suffix1: 
     }
     lpad := block_first_non_phi(orig);
     c1 := inst_clone(lpad);
-    insert_at_position(c1, nb1, block_first(nb1), true);
+    insert_at_position(c1, nb1, block_first_non_phi(nb1), true);   // NewBB1->getFirstInsertionPt()
     set_name(c1, tprint("lpad%", suffix1));
     if nb2 != NONE {
         c2 := inst_clone(lpad);
-        insert_at_position(c2, nb2, block_first(nb2), true);
+        insert_at_position(c2, nb2, block_first_non_phi(nb2), true);
         set_name(c2, tprint("lpad%", suffix2));
         if has_uses(lpad) {
             assert(type_kind(vtype(lpad)) != .TOKEN);

@@ -1035,11 +1035,15 @@ prove_no_wrap_by_varying_start :: (start: Scev_Id, step: Scev_Id, l: Loop_Id, si
     wrap_type := ifx signed then SF_NSW else SF_NUW;
     if !sc_is_const(start) return false;
     start_ai := sc_ap(start);
-    for delta: s64.[-2, -1, 1, 2] {
-        pre_start := sc_get_constant(ap_sub(start_ai, ap_from_s64(start_ai.bits, delta)));
+    // `for (unsigned Delta : {-2, -1, 1, 2})`: Delta is a 32-bit unsigned, zero-extended to uint64_t by
+    // APInt::operator-(uint64_t) and getConstant(Ty, uint64_t), so for types wider than 32 bits -2 and -1 are
+    // 2^32 - 2 and 2^32 - 1
+    for delta32: u32.[0xFFFF_FFFE, 0xFFFF_FFFF, 1, 2] {
+        delta := cast(u64) delta32;
+        pre_start := sc_get_constant(ap_sub(start_ai, ap_from_u64(start_ai.bits, delta)));
         pre_ar := sc_find(.ADDREC, .[pre_start, step], NONE, NONE, l);
         if pre_ar && sc_flags(pre_ar, wrap_type) != 0 {
-            delta_s := sc_get_constant_t(sc_type(start), cast,no_check(u64) delta);
+            delta_s := sc_get_constant_t(sc_type(start), delta);
             limit, pred := overflow_limit_for_step(delta_s, signed);
             if limit != SCEV_CNC && sc_is_known_predicate(pred, pre_ar, limit) return true;
         }

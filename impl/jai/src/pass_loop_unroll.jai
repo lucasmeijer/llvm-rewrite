@@ -317,7 +317,7 @@ uia_visit :: (a: *Unrolled_Inst_Analyzer, i: Value_Id) -> bool {
         x := op(i, 0);
         s := uia_lookup(a, x);
         if s != NONE x = s;
-        if cast_is_valid(o, vtype(x), vtype(i)) {
+        if cast_inst_cast_is_valid(o, vtype(x), vtype(i)) {
             q: Simplify_Query; q.have_tli = false;
             v := simplify_cast_inst(o, x, vtype(i), q);
             if v != NONE { table_set(a.simplified_values, i, v); return true; }
@@ -363,6 +363,40 @@ uia_visit_load :: (a: *Unrolled_Inst_Analyzer, i: Value_Id) -> bool {
     if res == NONE return false;
     table_set(a.simplified_values, i, res);
     return true;
+}
+// CastInst::castIsValid(op, SrcTy, DstTy)
+cast_inst_cast_is_valid :: (opc: Opcode, st: Type_Id, dt: Type_Id) -> bool {
+    if !is_first_class(st) || !is_first_class(dt) || is_aggregate(st) || is_aggregate(dt) return false;
+    // ElementCount: (count, scalable); scalars are (0, fixed)
+    ec_eq :: (a: Type_Id, b: Type_Id) -> bool {
+        ca: u64 = 0; cb: u64 = 0;
+        if is_vector_type(a) ca = type_count(a);
+        if is_vector_type(b) cb = type_count(b);
+        return ca == cb && (type_kind(a) == .SVECTOR) == (type_kind(b) == .SVECTOR);
+    }
+    s := scalar_type(st); d := scalar_type(dt);
+    sbits := ifx is_int_type(s) || is_fp_type(s) then type_bits(s) else 0;
+    dbits := ifx is_int_type(d) || is_fp_type(d) then type_bits(d) else 0;
+    if opc == {
+        case .TRUNC; return is_int_type(s) && is_int_type(d) && ec_eq(st, dt) && sbits > dbits;
+        case .ZEXT; #through;
+        case .SEXT; return is_int_type(s) && is_int_type(d) && ec_eq(st, dt) && sbits < dbits;
+        case .FPTRUNC; return is_fp_type(s) && is_fp_type(d) && ec_eq(st, dt) && sbits > dbits;
+        case .FPEXT; return is_fp_type(s) && is_fp_type(d) && ec_eq(st, dt) && sbits < dbits;
+        case .UITOFP; #through;
+        case .SITOFP; return is_int_type(s) && is_fp_type(d) && ec_eq(st, dt);
+        case .FPTOUI; #through;
+        case .FPTOSI; return is_fp_type(s) && is_int_type(d) && ec_eq(st, dt);
+        case .PTRTOADDR; #through;
+        case .PTRTOINT; return ec_eq(st, dt) && is_ptr_type(s) && is_int_type(d);
+        case .INTTOPTR; return ec_eq(st, dt) && is_int_type(s) && is_ptr_type(d);
+        case .BITCAST; return cast_is_valid(opc, st, dt);
+        case .ADDRSPACECAST;
+            if !is_ptr_type(s) || !is_ptr_type(d) return false;
+            if ptr_addrspace(s) == ptr_addrspace(d) return false;
+            return ec_eq(st, dt);
+    }
+    return false;
 }
 // ICmpInst::compare(LHS, RHS, Pred) (an equality or unsigned/signed integer predicate on two APInts)
 ap_icmp_compare :: (a: APInt, b: APInt, pred: u8) -> bool {
