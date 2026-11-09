@@ -13,8 +13,11 @@
 // NONE when erased, like WeakTrackingVH. ClonedCodeInfo::OperandBundleCallSites (WeakTrackingVHs) is another
 // tracking map keyed by the original call.
 //
+// Also updateCallProfile / updateProfileCallee (ProfileSummaryInfo in psi.jai), scaleProfData (ProfDataUtils.cpp),
+// PGOIndirectCallVisitor::tryGetVTableInstruction and Function::setEntryCount.
+//
 // Not ported (fail loudly when reached): memprof metadata (!memprof / !callsite) propagation, assignment tracking
-// (DIAssignID), profile scaling of the callee/caller (updateCallProfile with function entry counts), strictfp hosts
+// (DIAssignID), strictfp hosts
 // (constrained-intrinsic cloning), ObjC ARC attached calls (inlineRetainOrClaimRVCalls), PGO contextual profiles.
 
 if_opts: struct {

@@ -316,7 +316,8 @@ Ported from `llvm/lib/Passes/PassBuilder.cpp`, `llvm/include/llvm/IR/PassManager
   pass nodes, with LLVM's wrapping rules (first element not a module pass: the whole list goes into one
   `function(...)`; a function pass inside a module list gets its own adaptor). `loop(...)`/`loop-mssa(...)` become
   `LOOP_ADAPTOR` nodes whose children are loop passes (`LOOP_PM` for a nested `loop(...)`); see "Loops" below.
-  `cgscc` and unknown names fail loudly. `-O<n>` fails loudly in `opt_main`.
+  `cgscc(...)` / `devirt<N>(...)` become `CGSCC_ADAPTOR` / `CGSCC_PM` / `DEVIRT` / `CGSCC_FN_ADAPTOR` nodes (see
+  "CGSCC" below). Unknown names fail loudly. `-O<n>` fails loudly in `opt_main`.
 - **Running**: `run_module_pm` → `run_function_adaptor` (every defined function in module order) →
   `should_run_pass` (OptNone, then OptBisect: prints `BISECT: ...` lines like LLVM) → `run_function_pass`, a
   `switch` on `Pass_Kind` that returns a `Preserved`. After each pass: `fam_invalidate(f, preserved)` and
@@ -478,9 +479,12 @@ a Table, a `Block_Set` or null for its def / live-in sets, and keeps its visited
 ### Cloning: ValueMapper, CloneBasicBlock, LoopUnroll (value_mapper.jai, clone_function.jai, loop_unroll*.jai, loop_peel.jai)
 
 - **ValueToValueMapTy** = `Value_Map` (temp): `map` (Value_Id -> Value_Id) and `md` (Md_Id -> Md_Id, ValueMap::MD()).
-  `vmap_set/get/lookup/find/erase`. LLVM's map values are WeakTrackingVHs and its keys follow RAUW; the unroll and peel
-  code never RAUWs or erases a mapped value while a map is live, so it is a plain table. A future user that does
-  (the inliner's VMap across `replaceAllUsesWith`) must add value handles (value_handles.jai).
+  `vmap_set/get/lookup/find/erase`. LLVM's map values are WeakTrackingVHs; the unroll and peel code never RAUWs or
+  erases a mapped value while a map is live, so for them it is a plain table. The inliner's VMap (and its
+  OperandBundleCallSites map) is a *tracking* map: `vmap_track_begin(*vm)` / `vmap_track_end` register it in a global
+  list; `replace_all_uses_with` / `value_is_rauwd` call `vmap_note_rauw` and `erase_inst` calls `vmap_note_erase`
+  (through `vm.rev`, value -> keys), so values follow RAUW and become NONE when erased (`map_value` treats NONE as
+  missing, like a null WeakTrackingVH).
 - **Mapper** = `map_value(*vm, v, flags)`, `remap_instruction(*vm, i, flags)`, `remap_dbg_record(_range)`,
   `map_metadata` with LLVM's RF_* flags. Faithful for RF_NoModuleLevelChanges (+ IgnoreMissingLocals,
   NullMapMissingGlobalValues): globals / inline asm map to themselves and are memoized in the map, constants are
@@ -554,6 +558,28 @@ a Table, a `Block_Set` or null for its def / live-in sets, and keeps its visited
   The visitor is the `if sc_kind(s) ==` switch in `sx_visit`. Iterators with LLVM's head bit are `Sx_It`.
 - Printers: print<scalar-evolution> (scev_print.jai), print<loopnest> (loop_nest.jai, a loop pass),
   print<iv-users> (iv_users.jai, a loop pass), `-aa-pipeline=scev-aa` (scev_aa.jai).
+
+### CGSCC: LazyCallGraph and the CGSCC pass manager (lazy_call_graph.jai, cgscc_pm.jai)
+
+- **LazyCallGraph** = the global `lcg: *Lazy_Call_Graph` (null when not cached; `lcg_get()` = AM.getResult):
+  nodes, SCCs and RefSCCs are s32 row ids (`Lcg_Node`, `Lcg_Scc`, `Lcg_Ref_Scc`; ids are never reused, a dead row is
+  flagged). An `Lcg_Edges` (EdgeSequence) is `[..] Lcg_Edge{node, call}` plus the EdgeIndexMap table, so insertion /
+  erasure order matches LLVM; SCCMap is `scc_of` by node id. `buildRefSCCs` /
+  `buildSCCs` are the iterative Tarjan walks of LazyCallGraph.cpp; the incremental updates (switchInternalEdgeToCall
+  / ToRef, switchOutgoingEdgeToCall/ToRef, insertIncomingRefEdge, removeOutgoingEdge, removeInternalRefEdges,
+  addSplitFunction, addSplitRefRecursiveFunctions, removeDeadFunctions) keep the post-order lists in the same order.
+  `print-lcg` is `lcg_printer_run`. Library functions (`isKnownLibFunction`) are part of the graph like in LLVM.
+- **CGSCC PM** (cgscc_pm.jai): `run_cgscc_adaptor` = ModuleToPostOrderCGSCCPassAdaptor with its RefSCC/SCC
+  worklists as `Prio_Worklist`s and a `Cgscc_Ur` (CGSCCUpdateResult: InvalidatedSCCs/RefSCCs, UpdatedC,
+  CWorklist/RCWorklist, IndirectVHs, CrossSCCPA, InlinedInternalEdges, DeadFunctions). `run_cgscc_pm`, `run_devirt`
+  (DevirtSCCRepeatedPass: the IndirectVHs call counts) and `run_cgscc_fn_adaptor` (CGSCCToFunctionPassAdaptor +
+  `update_cg_and_am_for_pass` = updateCGAndAnalysisManagerForFunctionPass / ForCGSCCPass). IndirectVHs are WeakVHs:
+  `cg_vh_note_rauw` / `cg_vh_note_erase` hooks in ir.jai. Function analyses are invalidated per function through the
+  same `fam_invalidate`; the CGSCC analysis results we need (none are cached across SCCs) are not modelled.
+- Module-level CGSCC passes: function-attrs (pass_function_attrs.jai), inline / always-inline / module-inline /
+  inliner-wrapper (pass_inliner.jai); InlineCost (inline_cost.jai, InlineCostCallAnalyzer only, its virtual hooks are
+  plain calls), InlineFunction + CloneAndPruneFunctionInto (inline_function.jai), ProfileSummaryInfo (psi.jai: the
+  module's one result; `psi_cached_or_null()` = getCachedResult, `psi_require()` = getResult).
 
 ## 11. InstCombine (instcombine.jai and ic_*.jai)
 

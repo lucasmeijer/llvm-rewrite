@@ -9,8 +9,10 @@
 //
 // CallAnalyzer is a base class with two subclasses in LLVM; only InlineCostCallAnalyzer matters here
 // (InlineCostFeaturesAnalyzer serves the ML advisor), so the virtual on* callbacks are plain procedures.
-// Not ported: the cost-benefit analysis (needs a profile summary: fails loudly when it would be enabled),
-// -print-instruction-comments / print<inline-cost>.
+// The ProfileSummaryInfo is the cached one (psi_cached_or_null): hot/cold call sites and callees, the cost-benefit
+// analysis (costBenefitAnalysis, with an instrumentation profile or -inline-enable-cost-benefit-analysis) and the
+// switch's shouldOptimizeForSize use it.
+// Not ported: -print-instruction-comments / print<inline-cost>.
 
 ic_opts: struct {
     default_threshold: s64 = 225;          // -inlinedefault-threshold

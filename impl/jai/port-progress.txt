@@ -151,8 +151,22 @@ lib/Transforms/Utils/LoopUnroll.cpp 0.85  # no parallel-reduction accumulators (
 lib/Transforms/Utils/LoopUnrollRuntime.cpp 0.98
 lib/Transforms/Utils/LoopPeel.cpp 0.98
 lib/Analysis/LoopUnrollAnalyzer.cpp 1
-lib/Transforms/Utils/ValueMapper.cpp 0.35  # mapValue, mapBlockAddress, remapInstruction, remapDbgRecord, mapSimpleMetadata; not the MDNodeMapper, global/alias/appending remapping, TypeMapper
-lib/Transforms/Utils/CloneFunction.cpp 0.3  # CloneBasicBlock, remapInstructionsInBlocks, cloneNoAliasScopes/adaptNoAliasScopes/cloneAndAdaptNoAliasScopes, identifyNoAliasScopesToClone
+lib/Transforms/Utils/ValueMapper.cpp 0.35  # mapValue, mapBlockAddress, remapInstruction, remapDbgRecord, mapSimpleMetadata (+ WeakTrackingVH maps for the inliner); not the MDNodeMapper, global/alias/appending remapping, TypeMapper
+lib/Transforms/Utils/CloneFunction.cpp 0.75  # + CloneAndPruneFunctionInto (PruningFunctionCloner) for the inliner; not CloneFunctionInto/CloneModule/cloneLoopWithPreheader's module-level variants
 lib/Transforms/Scalar/SimpleLoopUnswitch.cpp 0.97  # jai_unswitch: all of the pass; not ShouldRunExtraSimpleLoopUnswitch / extra-simple-loop-unswitch-passes (O3 pipeline), printPipeline, statistics; TTI.hasBranchDivergence is false (X86 / no target only)
 lib/Transforms/Vectorize/VectorCombine.cpp 0.97  # all folds; the VP-intrinsic paths (scalarizeVPIntrinsic, foldBitcastOfVPLoad) only match and fail loudly
 lib/Transforms/Vectorize/SLPVectorizer.cpp 0.04  # manual: static helpers, InstructionsState/getSameOpcode, LookAheadHeuristics, VLOperands, TreeEntry layout only (the port-audit heuristic says 0.15: shared names); not a pass yet
+
+# --- CGSCC, function-attrs, inliner (jai_inline; scripts/port-audit.py --file, spot-checked)
+lib/Analysis/LazyCallGraph.cpp 0.85  # manual: all of the graph and its incremental updates + print-lcg; not verify()/isAncestorOf (asserts), DOT printer (heuristic 0.78)
+lib/Analysis/CGSCCPassManager.cpp 0.95  # not the CGSCC analysis-manager proxies' outer-analysis invalidation bookkeeping
+lib/Transforms/IPO/FunctionAttrs.cpp 0.9
+lib/Analysis/InlineCost.cpp 0.85  # InlineCostCallAnalyzer + cost-benefit; not InlineCostFeaturesAnalyzer (ML), the -print-instruction-comments annotation writer
+lib/Analysis/InlineAdvisor.cpp 0.5  # default advisor, shouldBeDeferred, inline-remark attribute; not remarks emission, replay/ML/plugin advisors
+lib/Analysis/InlineOrder.cpp 0.7  # manual: size/cost/cost-benefit priorities with the libstdc++ heap order (heuristic 0.55); not ML priority / plugin
+lib/Transforms/IPO/Inliner.cpp 0.85
+lib/Transforms/IPO/AlwaysInliner.cpp 0.95
+lib/Transforms/Utils/InlineFunction.cpp 0.85  # not inlineRetainOrClaimRVCalls (ObjC ARC), memprof metadata, strictfp hosts, convergence edge cases (fail loudly)
+lib/Transforms/IPO/ModuleInliner.cpp 0.9  # manual: ModuleInlinerPass::run as module_inliner_run (heuristic 0.03: renamed)
+lib/Analysis/ProfileSummaryInfo.cpp 0.75  # not the legacy wrapper / print-profile-summary
+lib/IR/ProfileSummary.cpp 0.4  # getFromMD only (no getMD / printSummary)

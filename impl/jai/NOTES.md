@@ -1034,3 +1034,40 @@ Still slow / known:
 - Every `[..]` with `allocator = temp` costs an allocator call on its first add (~100 instructions with
   array_reserve); in SCEV that's 6-8% of the time.
 
+## CGSCC, FunctionAttrs, inliner (L2.function-attrs 106/118: roundtrip 59/59, opt 47/59; L2.inline 438/466: roundtrip 233/233, opt 205/233)
+
+- Files: `lazy_call_graph.jai` (LazyCallGraph.cpp + print-lcg), `cgscc_pm.jai` (CGSCCPassManager.cpp, the
+  `cgscc(...)` / `devirt<N>(...)` adaptors), `pass_function_attrs.jai` (FunctionAttrs.cpp, ConstantRangeList),
+  `inline_cost.jai` (InlineCost.cpp + TTI inlining hooks + CodeMetrics ephemeral values), `inline_function.jai`
+  (InlineFunction.cpp + CloneAndPruneFunctionInto), `pass_inliner.jai` (Inliner.cpp, AlwaysInliner.cpp,
+  ModuleInliner.cpp, InlineOrder.cpp, the default InlineAdvisor, `inliner-wrapper`), `psi.jai` (ProfileSummaryInfo,
+  ProfileSummary::getFromMD, SizeOpts' block query). DESIGN.md "CGSCC".
+- Sweeps, every round-tripping corpus file, 0 differs: `cgscc(function-attrs)`, `inline`, `always-inline`,
+  `module-inline`, `inliner-wrapper`, `require<profile-summary>,cgscc(inline)`, `cgscc(function-attrs,inline)`,
+  `cgscc(inline,function(instcombine,simplifycfg))`, all also `--with-test-flags`;
+  `cgscc(devirt<4>(inline,function(sroa,instcombine)))` 0 differs whole-file, 1 with test flags
+  (InstCombine/new-delete-msvc.ll: an instcombine-only Windows `operator new/delete` pair, not an inliner issue).
+  print-lcg: 7753/7754 identical; Analysis/GlobalsModRef/pr12351.ll differs (not investigated).
+- APIs others can use: `lcg_get()` / `lcg_invalidate()`, `run_cgscc_adaptor`, `inline_function(cb, *ifi, merge_attrs,
+  *aar, insert_lifetime, track_inlined_call_sites)`, `get_inline_cost(cb, params)`, `get_inline_params_t(threshold)`,
+  `is_inline_viable(f)`, `get_attribute_based_inlining_decision`, `clone_and_prune_function_into`,
+  `update_profile_callee`, `scale_prof_data`, `fn_set_entry_count`, `psi_get()` / `psi_cached_or_null()` /
+  `psi_require()`, `psi_is_hot_call_site`, `should_optimize_for_size_bb(bb, psi, bfi)`, `value_is_rauwd(old, new)`
+  (ValueHandleBase::ValueIsRAUWd without moving uses), `vmap_track_begin/_end` (tracking Value_Maps).
+- ProfileSummaryInfo: `psi_cached` (passes.jai) = the module analysis exists; `require<profile-summary>` and
+  `always-inline` (MAM.getResult) set it. The other PSI users (loop-unroll, loop-load-elim, LibCallSimplifier) still
+  fail loudly through `psi_check` when a summary is cached; they can now use psi.jai instead.
+- Fail loudly: `--enable-knowledge-retention` under `cgscc`, X86TTIImpl::areTypesABICompatible with differing
+  features, `!memprof` / `!callsite`, strictfp callers, ObjC ARC attached calls, assignment tracking, the replay / ML
+  advisors, `promoteCall` (devirtualising an indirect call with a known callee), the MDNodeMapper. Remaining L2.inline
+  failures are those plus `-O<n>` / `default<O<n>>`, mergefunc, partial-inliner, scc-oz-module-inliner, globalopt,
+  globaldce, early-cse, verify<domtree>. L2.function-attrs: attributor-light, `-O3` and inline pipelines.
+- Trap: InstCombine's transformConstExprCastCall must call `value_is_rauwd(call, new_call)` when the old call has no
+  uses: the CGSCC devirt wrapper's WeakVH on the call follows it, otherwise devirt<N> sees a "new" direct call and
+  repeats (Inline/inline-indirect-chain.ll).
+- Perf (`-passes=inline`, x64 backend build): calls/n500 10.6 s vs LLVM 0.24 s, n2000 28 s vs 0.76 s, n8000 110 s
+  vs 3.5 s: the same growth (k about 0.8 for both), a 30-45x constant. callgrind: the same number of
+  simplifyBinOp calls as LLVM (454,972 for 120 functions), 90% of the time in the shared InstSimplify/ConstantFold
+  code called by CallAnalyzer::visitBinaryOperator (~32K instructions per call vs ~700 in LLVM; constant creation
+  hashes keys, trivial accessors like type_bits cost ~150 instructions unoptimised). Compile benchmarks: sqlite3 3.0 s
+  vs 0.44 s, SPASS 7.3 s vs 0.85 s.
