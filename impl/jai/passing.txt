@@ -4568,6 +4568,7 @@ tests/imported/llvm/Transforms/Inline/inline-call-penalty-option.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-call-with-asm-call.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-call-with-asm-call.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-cold-callsite-pgo.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-cold-callsite.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-cold-callsite.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-cold.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-constexpr-addrspacecast-argument.ll::roundtrip
@@ -4682,7 +4683,9 @@ tests/imported/llvm/Transforms/Inline/invoke_test-2.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/invoke_test-3.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/label-annotation.ll::opt
 tests/imported/llvm/Transforms/Inline/label-annotation.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/last-call-bonus.ll::opt
 tests/imported/llvm/Transforms/Inline/last-call-bonus.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/last-call-no-bonus.ll::opt
 tests/imported/llvm/Transforms/Inline/last-call-no-bonus.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/last-callsite.ll::opt
 tests/imported/llvm/Transforms/Inline/last-callsite.ll::roundtrip
