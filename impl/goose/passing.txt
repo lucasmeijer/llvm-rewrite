@@ -3024,6 +3024,7 @@ tests/imported/llvm/Transforms/GVN/PRE/pre-basic-add.ll::opt
 tests/imported/llvm/Transforms/GVN/PRE/pre-basic-add.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/pre-gep-load.ll::opt
 tests/imported/llvm/Transforms/GVN/PRE/pre-gep-load.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/PRE/pre-jt-add.ll::opt
 tests/imported/llvm/Transforms/GVN/PRE/pre-jt-add.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/pre-load-combine-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/PRE/pre-load-dbg.ll::opt
