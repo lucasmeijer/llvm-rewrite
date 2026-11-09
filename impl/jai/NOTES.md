@@ -991,7 +991,14 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   decide results fail loudly when the order matters (collectUserStores with several store groups).
 - Fail loudly already in the helpers: REVEC, struct-typed scalars, VFDatabase vector variants, operand bundles in
   getSameOpcode / generateKeySubkey, VP intrinsics, target extension element types.
-- Sweep `--passes slp-vectorizer`: 6184 identical / 0 differs / 1570 loud.
+- Sweeps `--passes slp-vectorizer` (0 differs / 0 bad-ir in all): whole-file 6184 identical / 1570 loud;
+  `--with-test-flags` 7436 identical; `--per-function` 63159 identical. L1.vectorize.slp: 27/650 `::opt`.
+- Debugging: `DEBUG_SLP` (slp_driver.jai) is a compile-time switch for `#if DEBUG_SLP` traces (tree entries after
+  buildTree, call costs).
+- The cost model is the next stage and must land as a whole: LLVM only decides "not profitable" after
+  calculateTreeCostAndTrimNonProfitable + getTreeCost, so no function changes from loud to identical before both
+  (and their helpers: processBuildVector + ShuffleCostEstimator, getVectorSpillReloadCost, getScaleToLoopIterations
+  / getLoopNestScale / getGatherNodeEffectiveScale, getSpillCost, buildExternalUses) are ported.
 
 ## Performance (compile time; jai_perf task, 2026-11)
 
