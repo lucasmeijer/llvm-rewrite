@@ -286,6 +286,9 @@ Lv_Cm :: struct {
     has_small_constant_max_tc: bool;
     small_constant_max_tc: u32;
     uses_interleaved_access_info: bool;        // IAI.analyzeInterleaving was run (not ported: no groups)
+    per_vf: [..] Lv_Cm_Vf;                     // Uniforms / Scalars / ForcedScalars / InstsToScalarize per VF
+    decisions: Table(u64, Lv_Decision);        // WideningDecisions
+    num_pred_stores: s64;
 }
 
 // requiresScalarEpilogue
@@ -665,6 +668,7 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
     cm.f = f; cm.l = l; cm.li = p.li; cm.pse = *pse; cm.tti = p.tti; cm.lvl = *lvl; cm.hints = *hints; cm.ac = p.ac;
     cm.opt_for_size = opt_for_size;
     cm.values_to_ignore = iset_new(); cm.vec_values_to_ignore = iset_new(); cm.element_types.allocator = temp;
+    cm.per_vf.allocator = temp; cm.decisions.allocator = temp;
     cm.sel = lv_get_epilogue_lowering(f, *hints, opt_for_size);
     known, etc := lv_small_best_known_tc(*cm, l);
     if known && !etc.scalable && etc.n < cast(u64) lv_opts.tiny_trip_count_threshold {
@@ -689,9 +693,13 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
     }
     if max_factors.scalable.n lv_unported("scalable vectorization");
     max_user_vf := ifx user_vf.scalable then max_factors.scalable else max_factors.fixed;
-    if user_vf.n && ec_known_le(user_vf, max_user_vf) {
-        if !ec_is_scalar(user_vf) lv_unported("vectorization with a user-specified VF (VPlan)");
-    } else if ec_is_vector(max_factors.fixed) lv_unported("vectorization (VPlan)");
+    if (user_vf.n && ec_known_le(user_vf, max_user_vf) && !ec_is_scalar(user_vf)) || ec_is_vector(max_factors.fixed) {
+        lp: Lv_Planner;
+        lp.p = p; lp.l = l; lp.li = p.li; lp.lvl = *lvl; lp.cm = *cm; lp.hints = *hints; lp.pse = *pse;
+        lp.vplans.allocator = temp; lp.in_loop_reductions.allocator = temp;
+        lvp_collect_in_loop_reductions(*lp);
+        return lvp_plan_and_vectorize(*lp, user_vf, user_ic, max_factors);
+    }
     // Only VF 1 is a candidate. LLVM builds a scalar VPlan; computeBestVF returns VF 1 without costing, and
     // selectInterleaveCount clamps the interleave count by TTI.getMaxInterleaveFactor(VF=1), which is 1 for X86 and
     // NoTTI. So the loop is neither vectorized nor interleaved unless the user asked for an interleave count.

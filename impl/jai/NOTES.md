@@ -1091,4 +1091,32 @@ Still slow / known:
 - Loud gaps of milestone 1: InterleavedAccessInfo (X86 always runs analyzeInterleaving), isDereferenceableAndAligned-
   InLoop (only decides which predicated loads are masked: recorded in `lv_deref_unknown_loads`, must be ported
   before masking decisions), early exits with uncountable exits, VFDatabase variants, scalable VFs, outer loops.
-- Sweep `--passes loop-vectorize` (milestone 1): 7136 identical, 0 differs, 618 loud.
+- Sweep `--passes loop-vectorize`: 7183 identical, 0 differs, 571 loud.
+- Milestone 2 (in progress): the VPlan data model and plan construction (DESIGN.md "LoopVectorize and VPlan"):
+  `vplan.jai` (tables, VPValue/VPUser/VPDef ops, recipe lists, VPBlockUtils, traversals, duplicate(), VPDT,
+  VPBuilder), `vplan_utils.jai` (VPlanPatternMatch subset, getSCEVExprForVPValue, VPSCEVExpander), `vplan_props.jai`
+  (the per-recipe-class virtual queries as switches, onlyFirstLaneUsed, isSingleScalar, clone),
+  `vplan_construction.jai` (PlainCFGBuilder, skeleton, header phi recipes incl. FOR sinking, loop regions, check
+  blocks, minimum-iteration check), `vplan_simplify.jai` (simplifyRecipes, removeDeadRecipes), `vplan_transforms.jai`
+  (optimize() and its sub-passes, dropPoisonGeneratingRecipes, ...), `lv_cm.jai` (widening decisions, uniforms,
+  scalars), `lv_plan.jai` (tryToBuildVPlan1, buildVPlans, tryToBuildVPlan, the recipe builder, mem-op decisions,
+  optimizeInductionLiveOutUsers). For `-force-vector-width` loops with NoTTI the plan for the user VF is built;
+  everything after (interleave count, runtime checks, executePlan) fails loudly.
+- Decision costs are recorded as LV_COST_LAZY (lv_cm.jai header): no decision of the ported subset compares costs.
+  The forced-VF path assumes `cost(Plan, UserVF).isValid()` (always true for the fixed-VF recipes ported).
+
+### LoopVectorize next steps (in data-flow order; each currently fails loudly with the quoted message)
+
+1. executePlan (LoopVectorize.cpp 5903): replaceWideCanonicalIVWithWideIV, unrollByUF (VPlanUnroll.cpp),
+   materializePacksAndUnpacks, materializeBroadcasts, replicateByVF, materializeConstantVectorTripCount,
+   optimizeForVFAndUF, convertToConcreteRecipes (expands WidenIntOrFpInduction / DerivedIV / pointer IVs),
+   dissolveLoopRegions, materializeBackedgeTakenCount / VectorTripCount / Factors, expandSCEVsToVPInstructions, cse,
+   expandSCEVs, createVectorizedLoopSkeleton, VPlan::execute + every recipe's execute (VPlanRecipes.cpp),
+   updateLoopMetadataAndProfileInfo (llvm.loop.isvectorized + unroll.runtime.disable), legacyCSE. With UserIC unset and
+   getMaxInterleaveFactor = 1 (NoTTI) selectInterleaveCount returns 1 without needing costs (see lv_pass.jai).
+2. GeneratedRTChecks (SCEV and memory runtime checks; LoopVersioning noalias metadata), the "executing VPlans" gate.
+3. Reductions (createInLoopReductionRecipes, addReductionResultComputation, ComputeReductionResult), first-order
+   recurrences, if-conversion (VPlanPredicator: needs a VPlan post-dominator tree), replicate regions, calls,
+   computeMinimumValueSizes / truncateToMinimalBitwidths, induction truncates, reverse accesses, tail folding.
+4. The VPlan cost model (VPCostContext, VPlan::cost, precomputeCosts, the legacy getInstructionCost) for
+   computeBestVF / selectInterleaveCount on X86, InterleavedAccessInfo, epilogue vectorization.

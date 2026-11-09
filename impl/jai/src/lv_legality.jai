@@ -474,7 +474,7 @@ lvl_can_speculate_pointer_op :: (v: *Lvl, ptr: Value_Id) -> bool {
             continue;
         }
         if inst_op(cur) == .LOAD && !is_guaranteed_not_to_be_poison(cur, v.ac) return false;
-        if inst_op(cur) != .PHI && !is_safe_to_speculatively_execute(cur) return false;
+        if inst_op(cur) != .PHI && !lv_is_safe_to_speculatively_execute(cur) return false;
         for k: 0..cast(s64) nops(cur) - 1 array_add(*wl, op(cur, cast(u32) k));
     }
     return true;
@@ -548,7 +548,7 @@ lvl_is_vectorizable_early_exit_loop :: (v: *Lvl) -> bool {
             return false;
         }
         o := inst_op(i);
-        if o != .LOAD && o != .STORE && o != .PHI && o != .BR && o != .CONDBR && !is_safe_to_speculatively_execute(i) return false;
+        if o != .LOAD && o != .STORE && o != .PHI && o != .BR && o != .CONDBR && !lv_is_safe_to_speculatively_execute(i) return false;
     }
     fatal("loop-vectorize: early-exit loops with uncountable exits are not supported yet");
     return false;
@@ -566,4 +566,64 @@ lvl_can_fold_tail_by_masking :: (v: *Lvl) -> bool {
 lvl_prepare_to_fold_tail_by_masking :: (v: *Lvl) {
     safe := iset_new();
     for bb: li_blocks(v.li, v.l) lvl_block_can_be_predicated(v, bb, *safe, *v.tail_folded_masked_ops);
+}
+
+// SCEVAddRecForUniformityRewriter::visit / visitAddRecExpr / visitUnknown / visitCouldNotCompute
+sc_rw_uniformity_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
+    if rw.cannot_analyze || sc_is_loop_invariant(s, rw.l) return true, s;
+    k := sc_kind(s);
+    if k == .ADDREC {
+        ty := sc_type(s);
+        step := sc_step_recurrence(s);
+        if !sc_is_loop_invariant(step, rw.l) { rw.cannot_analyze = true; return true, s; }
+        new_step := sc_get_mul2(step, sc_get_constant(ap_from_u64(sc_type_bits(ty), rw.step_multiplier)));
+        scaled := sc_get_mul2(step, sc_get_constant(ap_from_u64(sc_type_bits(ty), rw.offset)));
+        new_start := sc_get_add2(sc_start(s), scaled);
+        return true, sc_get_add_rec(new_start, new_step, rw.l, SF_ANY);
+    }
+    if k == .UNKNOWN || k == .CNC { rw.cannot_analyze = true; return true, s; }
+    return false, s;
+}
+// SCEVAddRecForUniformityRewriter::rewrite
+lv_uniformity_rewrite :: (s: Scev_Id, mult: u64, offset: u64, l: Loop_Id) -> Scev_Id {
+    if !sc_expr_contains(s, .CONTAINS_UDIV, SCEV_NULL) return SCEV_CNC;
+    rw: Sc_Rewriter;
+    sc_rewriter_init(*rw, .UNIFORMITY);
+    rw.step_multiplier = mult; rw.offset = offset; rw.l = l;
+    r := sc_rewrite(*rw, s);
+    if !rw.cannot_analyze return r;
+    return SCEV_CNC;
+}
+// LoopVectorizationLegality::isUniform (vf = 0: std::nullopt)
+lvl_is_uniform :: (v: *Lvl, x: Value_Id, vf: Ec, has_vf: bool) -> bool {
+    if lvl_is_invariant(v, x) return true;
+    if !has_vf || vf.scalable return false;
+    if ec_is_scalar(vf) return true;
+    if !sc_is_scevable(vtype(x)) return false;
+    s := sc_get_scev(x);
+    n := vf.n;
+    first := lv_uniformity_rewrite(s, n, 0, v.l);
+    if sc_is_cnc(first) return false;
+    i := n - 1;
+    while i >= 1 {
+        if lv_uniformity_rewrite(s, n, i, v.l) != first return false;
+        i -= 1;
+    }
+    return true;
+}
+// LoopVectorizationLegality::isUniformMemOp
+lvl_is_uniform_mem_op :: (v: *Lvl, i: Value_Id, vf: Ec, has_vf: bool) -> bool {
+    p := load_store_pointer_operand(i);
+    if p == NONE return false;
+    return lvl_is_uniform(v, p, vf, has_vf) && !lvl_block_needs_predication(v, inst_block(i));
+}
+
+// isSafeToSpeculativelyExecute(I) without a context instruction (loads: isDereferenceableAndAlignedPointer)
+lv_is_safe_to_speculatively_execute :: (i: Value_Id) -> bool {
+    if inst_op(i) == .LOAD {
+        if must_suppress_speculation(i) return false;
+        q: Simplify_Query;
+        return is_dereferenceable_and_aligned_pointer_ty(op(i, 0), vtype(i), inst(i).align, q);
+    }
+    return is_safe_to_speculatively_execute(i);
 }

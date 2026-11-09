@@ -150,6 +150,7 @@ Sc_Rewriter_Kind :: enum u8 {
     LOOP_GUARDS;     // LoopGuards::rewrite's SCEVLoopGuardRewriter (scev_guards.jai)
     PREDICATE;       // SCEVPredicateRewriter                        (scev_pred.jai)
     NORMALIZE;       // NormalizeDenormalizeRewriter                 (iv_users.jai)
+    UNIFORMITY;      // SCEVAddRecForUniformityRewriter              (lv_legality.jai)
 }
 Sc_Rewriter :: struct {
     kind: Sc_Rewriter_Kind;
@@ -166,6 +167,9 @@ Sc_Rewriter :: struct {
     pred_union: [] u32;                 // PREDICATE: Pred, a SCEVUnionPredicate (has_pred)
     has_pred: bool;                     // PREDICATE
     norm: *Norm_Ctx;                    // NORMALIZE
+    step_multiplier: u64;               // UNIFORMITY
+    offset: u64;                        // UNIFORMITY
+    cannot_analyze: bool;               // UNIFORMITY
 }
 sc_rewriter_init :: (rw: *Sc_Rewriter, kind: Sc_Rewriter_Kind) { rw.kind = kind; rw.memo.allocator = temp; }
 sc_rewrite :: (rw: *Sc_Rewriter, s: Scev_Id) -> Scev_Id {
@@ -186,6 +190,7 @@ sc_rewrite_dispatch :: (rw: *Sc_Rewriter, s: Scev_Id) -> Scev_Id {
         case .LOOP_GUARDS;   handled, r = sc_rw_loop_guards_visit(rw, s);
         case .PREDICATE;     handled, r = sc_rw_predicate_visit(rw, s);
         case .NORMALIZE;     handled, r = sc_rw_normalize_visit(rw, s);
+        case .UNIFORMITY;    handled, r = sc_rw_uniformity_visit(rw, s);
     }
     if handled return r;
     return sc_rewrite_default(rw, s);

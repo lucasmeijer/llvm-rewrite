@@ -170,6 +170,14 @@
 #load "pass_global_opt.jai";
 #load "pass_dead_arg_elim.jai";
 #load "pass_assign_guid.jai";
+#load "vplan.jai";
+#load "vplan_utils.jai";
+#load "vplan_props.jai";
+#load "vplan_construction.jai";
+#load "vplan_simplify.jai";
+#load "lv_plan.jai";
+#load "lv_cm.jai";
+#load "vplan_transforms.jai";
 
 main :: () { opt_main(); }
 

@@ -476,6 +476,40 @@ a Table, a `Block_Set` or null for its def / live-in sets, and keeps its visited
   manipulate the per-instruction lists; erasing a terminator with records needs `records_take` first (there is no
   "trailing records" state in this implementation).
 
+### LoopVectorize and VPlan (iv_descriptors.jai, lv_*.jai, vplan*.jai)
+
+LLVM's VPlan is a class hierarchy (VPBlockBase -> VPBasicBlock / VPIRBasicBlock / VPRegionBlock; VPValue ->
+VPIRValue / VPSymbolicValue / VPRegionValue / VPSingleDefValue / VPMultiDefValue; VPRecipeBase with ~35 recipe
+classes and mixins VPIRFlags, VPIRMetadata, VPPhiAccessors, VPWidenMemoryRecipe). The port keeps one plan's entities
+in flat tables of one `Vp_Plan` struct; every entity is a u32 row index:
+
+- **Blocks** `Vp_Blk` -> `Vp_Block_Row {kind: .BASIC/.IR_BASIC/.REGION, name, parent region, preds, succs (in
+  LLVM's order: setTwoSuccessors, swapSuccessors, ... are list edits), first/last recipe (intrusive list through the
+  recipe rows, = iplist<VPRecipeBase>), irbb, entry/exiting (regions), can_iv / header_mask region values and the
+  canonical-IV NUW bit (VPCanonicalIVInfo; a region without can_iv is a replicate region)}`.
+- **Values** `Vp_Val` -> `Vp_Value_Row {kind: .IR/.SYMBOLIC/.REGION/.SINGLE_DEF/.MULTI_DEF, underlying IR Value_Id,
+  scalar type (VPRecipeValue::Ty, VPSymbolicValue::Ty), users: [..] Vp_Rec (a SmallVector in LLVM: push_back on
+  addOperand, erase of the first match on removeUser, so the order is reproduced exactly), defining recipe,
+  materialized flag, region}`. A recipe that defines one value has `def`; interleave groups have `defs`.
+- **Recipes** `Vp_Rec` -> `Vp_Recipe_Row {kind: Vp_Kind (VPRecipeTy in LLVM's enum order, so the
+  VPFirstPHISC..VPLastPHISC range tests work), parent block, prev/next, ops: [..] Vp_Val, debug loc, opcode (IR
+  `Opcode` values or VPI_* VPInstruction opcodes), flags: Vp_Flags (VPIRFlags: operation type + the union's bits),
+  md: [..] (kind, node) pairs (VPIRMetadata), name, and the union of all per-kind payload fields (intrinsic id,
+  source element type, stride, induction descriptor index, reduction kind/style, memory ingredient, alignment,
+  consecutive/masked bits, SCEV expression, interleave group, ...), each commented with the kinds that use it}`.
+  `VPInstructionWithType` and `VPPhi` are VPInstruction rows (classified by opcode, exactly like their classof);
+  `VPIRPhi` is an IR_INSTRUCTION row whose instruction is a phi.
+- **Virtual calls are switches** on `Vp_Kind` (`#complete` where it matters): `vp_execute(r)`, `vp_compute_cost(r)`,
+  `vp_clone(r)`, `vp_uses_first_lane_only(r, op)`, `vp_may_read_from_memory(r)`, ... live next to each other in
+  vplan_recipes.jai, one `case` per recipe class, so the behaviour of a recipe kind can be read in one place.
+- **Plans are values**: `VPlan::duplicate()` copies the tables (ids stay meaningful in the copy) and then rebuilds
+  every user list in the order LLVM's remapOperands produces (deep RPO over the blocks, recipes in order, operands
+  in order), so transforms that walk users see LLVM's order. The global `vpl: *Vp_Plan` is the plan being worked
+  on (like `se` for ScalarEvolution); `vp_use(plan)` switches it.
+- **VPTransformState** (`Vp_State`) maps a Vp_Val to its IR vector value and per-lane scalars (Tables keyed by the
+  value id and lane), plus the CFG state; recipes emit IR through an `Irb`.
+- Everything not ported yet fails loudly (`vp_unported("...")`) at the point where LLVM would act.
+
 ### Cloning: ValueMapper, CloneBasicBlock, LoopUnroll (value_mapper.jai, clone_function.jai, loop_unroll*.jai, loop_peel.jai)
 
 - **ValueToValueMapTy** = `Value_Map` (temp): `map` (Value_Id -> Value_Id) and `md` (Md_Id -> Md_Id, ValueMap::MD()).

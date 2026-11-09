@@ -520,6 +520,7 @@ Sc_Visitor_Kind :: enum u8 {
     INVALIDATION_ROOTS;      // forgetLcssaPhiWithNewPredecessor's InvalidationRootCollector (scev_update.jai)
     CONTAINS_UNSAFE_UDIV_FOR_HOIST;  // SCEVExpander::expand's SafeToHoist predicate         (scev_expander.jai)
     FIND_UNSAFE_EXPAND;      // SCEVExpander's SCEVFindUnsafe                  (scev_expander.jai)
+    CONTAINS_UDIV;           // SCEVExprContains(S, isa<SCEVUDivExpr>)         (lv_legality.jai)
 }
 Sc_Visitor :: struct {
     kind: Sc_Visitor_Kind;
@@ -556,6 +557,9 @@ sc_visitor_follow :: (v: *Sc_Visitor, s: Scev_Id) -> bool {
             if !v.found v.found = sx_vis_unsafe_udiv_follow(s);
             return !v.found;
         case .FIND_UNSAFE_EXPAND;     return sx_vis_find_unsafe_follow(v, s);
+        case .CONTAINS_UDIV;
+            if !v.found v.found = sc_is_udiv(s);
+            return !v.found;
     }
     return false;
 }
@@ -568,6 +572,7 @@ sc_visitor_is_done :: (v: *Sc_Visitor) -> bool {
         case .MIN_MAX_CONTAINS; #through;
         case .CONTAINS_UNSAFE_UDIV_FOR_HOIST; #through;
         case .FIND_UNSAFE_EXPAND; #through;
+        case .CONTAINS_UDIV; #through;
         case .CONST_IN_ADD_MUL_CHAIN; return v.found;
         case .POISON_COLLECTOR; #through;
         case .USED_LOOPS; #through;
