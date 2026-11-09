@@ -128,6 +128,7 @@
 #load "pass_loop_idiom.jai";
 #load "loop_versioning.jai";
 #load "pass_loop_load_elim.jai";
+#load "pass_loop_distribute.jai";
 #load "value_mapper.jai";
 #load "clone_function.jai";
 #load "loop_utils.jai";

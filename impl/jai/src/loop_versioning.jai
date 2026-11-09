@@ -1,6 +1,6 @@
 // LoopVersioning: llvm/lib/Transforms/Utils/LoopVersioning.cpp (versionLoop, addPHINodes, the noalias annotation),
-// with addRuntimeChecks / expandBounds (llvm/lib/Transforms/Utils/LoopUtils.cpp), cloneLoopWithPreheader /
-// CloneBasicBlock / remapInstructionsInBlocks (llvm/lib/Transforms/Utils/CloneFunction.cpp) and SCEVExpander's
+// with addRuntimeChecks / expandBounds (llvm/lib/Transforms/Utils/LoopUtils.cpp), cloneLoopWithPreheader
+// (llvm/lib/Transforms/Utils/CloneFunction.cpp; CloneBasicBlock is in clone_function.jai) and SCEVExpander's
 // predicate expansion (expandCodeForPredicate, expandComparePredicate, generateOverflowCheck, expandWrapPredicate,
 // expandUnionPredicate; llvm/lib/Transforms/Utils/ScalarEvolutionExpander.cpp).
 
@@ -8,23 +8,8 @@ lver_opts: struct { annotate_no_alias := true; };   // -loop-version-annotate-no
 
 // ---------------------------------------------------------------- cloning (CloneFunction.cpp)
 
-// CloneBasicBlock(BB, VMap, NameSuffix, F): the new block is appended to F
-clone_basic_block :: (bb: Value_Id, vm: *Table(Value_Id, Value_Id), suffix: string, f: Value_Id) -> Value_Id {
-    nb := create_block(f, "", NONE);
-    if vname(bb).count set_name(nb, tprint("%1%2", vname(bb), suffix));
-    recs: [..] u32; recs.allocator = temp;
-    for i: block_insts(bb) {
-        c := inst_clone(i);
-        block_append_inst(nb, c);
-        if vname(i).count set_name(c, tprint("%1%2", vname(i), suffix));
-        if inst(i).records clone_debug_info_from(c, i, inst(i).records, *recs);
-        table_set(vm, i, c);
-    }
-    return nb;
-}
-
 // cloneLoopWithPreheader(Before, LoopDomBB, OrigLoop, VMap, NameSuffix, LI, DT, Blocks)
-clone_loop_with_preheader :: (before: Value_Id, loop_dom_bb: Value_Id, orig: Loop_Id, vm: *Table(Value_Id, Value_Id), suffix: string,
+clone_loop_with_preheader :: (before: Value_Id, loop_dom_bb: Value_Id, orig: Loop_Id, vm: *Value_Map, suffix: string,
                               li: *Loop_Info, dt: *Dom_Tree, blocks: *[..] Value_Id) -> Loop_Id {
     f := li.fn;
     parent := li_parent(li, orig);
@@ -35,7 +20,7 @@ clone_loop_with_preheader :: (before: Value_Id, loop_dom_bb: Value_Id, orig: Loo
     else li_add_top_level_loop(li, new_loop);
     orig_ph := li_loop_preheader(li, orig);
     new_ph := clone_basic_block(orig_ph, vm, suffix, f);
-    table_set(vm, orig_ph, new_ph);
+    vmap_set(vm, orig_ph, new_ph);
     array_add(blocks, new_ph);
     if parent != NONE li_add_basic_block_to_loop(li, parent, new_ph);
     dt_add_new_block(dt, new_ph, loop_dom_bb);
@@ -53,26 +38,22 @@ clone_loop_with_preheader :: (before: Value_Id, loop_dom_bb: Value_Id, orig: Loo
     for bb: obl {
         _, nl := table_find(*lmap, li_loop_for(li, bb));
         nb := clone_basic_block(bb, vm, suffix, f);
-        table_set(vm, bb, nb);
+        vmap_set(vm, bb, nb);
         li_add_basic_block_to_loop(li, nl, nb);
         dt_add_new_block(dt, nb, new_ph);
         array_add(blocks, nb);
     }
     for bb: obl {
         cur := li_loop_for(li, bb);
-        _, nb := table_find(vm, bb);
+        nb := vmap_lookup(vm, bb);
         if bb == li_header(li, cur) { _, nl := table_find(*lmap, cur); li_move_to_header(li, nl, nb); }
-        _, nidom := table_find(vm, dt_idom_block(dt, bb));
+        nidom := vmap_lookup(vm, dt_idom_block(dt, bb));
         dt_change_idom(dt, nb, nidom);
     }
     // F->splice: the new preheader, then everything from the new header to the end of F, go before `before`
     fn_unlink_block(f, new_ph);
     fn_insert_block_before(f, before, new_ph);
-    nh := li_header(li, new_loop);
-    moving: [..] Value_Id; moving.allocator = temp;
-    b := nh;
-    while b != NONE { array_add(*moving, b); b = block(b).next; }
-    for moving { fn_unlink_block(f, it); fn_insert_block_before(f, before, it); }
+    fn_splice_blocks(f, before, li_header(li, new_loop));
     return new_loop;
 }
 // Loop::getLoopsInPreorder
@@ -84,31 +65,6 @@ li_loops_in_preorder_of :: (li: *Loop_Info, l: Loop_Id, out: *[..] Loop_Id) {
         array_add(out, x);
         subs := li_subloops(li, x);
         for < subs array_add(*stack, it);
-    }
-}
-
-// remapInstructionsInBlocks(Blocks, VMap) with RF_NoModuleLevelChanges | RF_IgnoreMissingLocals: operands and phi
-// blocks found in VMap are replaced, metadata maps to itself
-remap_instructions_in_blocks :: (blocks: [] Value_Id, vm: *Table(Value_Id, Value_Id)) {
-    recs: [..] u32; recs.allocator = temp;
-    for bb: blocks for i: block_insts(bb) {
-        recs.count = 0;
-        r := inst(i).records;
-        while r != 0 { array_add(*recs, r); r = dbgr(r).next; }
-        remap_dbg_records(recs, vm);
-        n := nops(i);
-        for k: 0..cast(s64) n - 1 {
-            o := op(i, cast(u32) k);
-            if o == NONE continue;
-            found, m := table_find(vm, o);
-            if found && m != o set_op(i, cast(u32) k, m);
-        }
-        if inst_op(i) == .PHI {
-            for k: 0..cast(s64) n - 1 {
-                found, m := table_find(vm, phi_block(i, cast(u32) k));
-                if found phi_set_block(i, cast(u32) k, m);
-            }
-        }
     }
 }
 
@@ -242,11 +198,11 @@ sx_expand_union_predicate :: (x: *Scev_Expander, preds: [] u32, ip: Value_Id) ->
 
 Ptr_Bounds :: struct { start: Value_Id; end: Value_Id; stride: Value_Id = NONE; }
 // expandBounds(CG, TheLoop, Loc, Exp, HoistRuntimeChecks)
-lver_expand_bounds :: (g: *Rt_Group, l: Loop_Id, li: *Loop_Info, loc: Value_Id, x: *Scev_Expander) -> Ptr_Bounds {
+lver_expand_bounds :: (g: *Rt_Group, l: Loop_Id, li: *Loop_Info, loc: Value_Id, x: *Scev_Expander, hoist: bool) -> Ptr_Bounds {
     ptr_ty := type_ptr(g.addrspace);
     low := g.low; high := g.high; stride := SCEV_NULL;
     outer := li_parent(li, l);
-    if laa_opts.hoist_runtime_checks && outer != NONE && sc_is_addrec(high) && sc_is_addrec(low) {
+    if hoist && outer != NONE && sc_is_addrec(high) && sc_is_addrec(low) {
         recur := sc_step_recurrence(low);
         if recur == sc_step_recurrence(high) && sc_loop(high) == outer && sc_loop(low) == outer {
             oec := sc_get_exit_count(outer, li_loop_latch(li, outer), .EXACT);
@@ -275,14 +231,14 @@ lver_expand_bounds :: (g: *Rt_Group, l: Loop_Id, li: *Loop_Info, loc: Value_Id, 
     return r;
 }
 
-// addRuntimeChecks(Loc, TheLoop, PointerChecks, Exp, HoistRuntimeChecks): NONE when there are no checks
-lver_add_runtime_checks :: (loc: Value_Id, l: Loop_Id, li: *Loop_Info, rt: *Rpc, checks: [] s64, x: *Scev_Expander) -> Value_Id {
+// addRuntimeChecks(Loc, TheLoop, PointerChecks, Exp, HoistRuntimeChecks = false): NONE when there are no checks
+lver_add_runtime_checks :: (loc: Value_Id, l: Loop_Id, li: *Loop_Info, rt: *Rpc, checks: [] s64, x: *Scev_Expander, hoist := false) -> Value_Id {
     Pair :: struct { a: Ptr_Bounds; b: Ptr_Bounds; }
     expanded: [..] Pair; expanded.allocator = temp;
     for ci: checks {
         c := rt.checks[ci];
-        first := lver_expand_bounds(*rt.groups[c[0]], l, li, loc, x);
-        second := lver_expand_bounds(*rt.groups[c[1]], l, li, loc, x);
+        first := lver_expand_bounds(*rt.groups[c[0]], l, li, loc, x, hoist);
+        second := lver_expand_bounds(*rt.groups[c[1]], l, li, loc, x, hoist);
         array_add(*expanded, .{first, second});
     }
     b: Irb;
@@ -316,13 +272,13 @@ Lver :: struct {
     checks: [] s64;                     // AliasChecks: indices into lai.rt.checks
     li: *Loop_Info;
     dt: *Dom_Tree;
-    vm: Table(Value_Id, Value_Id);
+    vm: Value_Map;
 }
 
-// LoopVersioning::versionLoop(DefsUsedOutside = {})
-lver_version_loop :: (v: *Lver) {
+// LoopVersioning::versionLoop(DefsUsedOutside)
+lver_version_loop :: (v: *Lver, defs_used_outside: [] Value_Id = .[]) {
     li := v.li; dt := v.dt; l := v.versioned;
-    v.vm.allocator = temp;
+    vmap_init(*v.vm);
     check_bb := li_loop_preheader(li, l);
     exp2: Scev_Expander; sx_init(*exp2, "induction");
     mem_check := lver_add_runtime_checks(block_terminator(check_bb), l, li, *v.lai.rt, v.checks, *exp2);
@@ -347,19 +303,93 @@ lver_version_loop :: (v: *Lver) {
     set_explicitly_unknown_branch_weights_if_profiled(bi, "loop-versioning");
     erase_inst(orig_term);
     dt_change_idom(dt, li_exit_block(li, l), check_bb);
-    lver_add_phi_nodes(v);
+    lver_add_phi_nodes(v, defs_used_outside);
     form_dedicated_exit_blocks(li, v.non_versioned, dt, null, true);
     form_dedicated_exit_blocks(li, l, dt, null, true);
 }
 
-// addPHINodes with no DefsUsedOutside
-lver_add_phi_nodes :: (v: *Lver) {
+// addPHINodes
+lver_add_phi_nodes :: (v: *Lver, defs: [] Value_Id) {
     phi_block_ := li_exit_block(v.li, v.versioned);
+    for d: defs {
+        pn: Value_Id = NONE;
+        for p: block_insts(phi_block_) {
+            if inst_op(p) != .PHI break;
+            if op(p, 0) == d { sc_forget_lcssa_phi_with_new_predecessor(v.versioned, p); pn = p; break; }
+        }
+        if pn == NONE {
+            pn = create_phi(vtype(d), 2);
+            insert_at_position(pn, phi_block_, block_first(phi_block_), true);
+            set_name(pn, tprint("%.lver", vname(d)));
+            users: [..] Value_Id; users.allocator = temp;
+            u := ir.v_first_use[d];
+            while u != NONE { usr := ir.u_user[u]; if !li_contains(v.li, v.versioned, inst_block(usr)) array_add(*users, usr); u = ir.u_next[u]; }
+            for usr: users {   // User::replaceUsesOfWith(Inst, PN)
+                n := nops(usr);
+                for k: 0..cast(s64) n - 1 if op(usr, cast(u32) k) == d set_op(usr, cast(u32) k, pn);
+            }
+            phi_add_incoming(pn, d, li_exiting_block(v.li, v.versioned));
+        }
+    }
     for pn: block_insts(phi_block_) {
         if inst_op(pn) != .PHI break;
         cloned := op(pn, 0);
-        found, m := table_find(*v.vm, cloned);
+        found, m := vmap_find(*v.vm, cloned);
         if found cloned = m;
         phi_add_incoming(pn, cloned, li_exiting_block(v.li, v.non_versioned));
     }
+}
+
+// annotateLoopWithNoAlias (prepareNoAliasMetadata + annotateInstWithNoAlias on every memory instruction)
+lver_annotate_loop_with_no_alias :: (v: *Lver) {
+    if !lver_opts.annotate_no_alias return;
+    rt := *v.lai.rt;
+    // MDBuilder::createAnonymousAliasScopeDomain("LVerDomain"), createAnonymousAliasScope(Domain)
+    domain := md_self_ref_loop_id(Md_Id.[NONE, md_string("LVerDomain")]);
+    group_scope := NewArray(rt.groups.count, Md_Id,, allocator = temp);
+    ptr_to_group: Table(Value_Id, s64); ptr_to_group.allocator = temp;
+    for g, gi: rt.groups {
+        group_scope[gi] = md_self_ref_loop_id(Md_Id.[NONE, domain]);
+        for m: g.members table_set(*ptr_to_group, rt.pointers[m].ptr, gi);
+    }
+    non_aliasing := NewArray(rt.groups.count, [..] Md_Id,, allocator = temp);
+    has_list := NewArray(rt.groups.count, bool,, allocator = temp);
+    for ci: v.checks {
+        c := rt.checks[ci];
+        non_aliasing[c[0]].allocator = temp;
+        array_add(*non_aliasing[c[0]], group_scope[c[1]]);
+        has_list[c[0]] = true;
+    }
+    lists := NewArray(rt.groups.count, Md_Id,, allocator = temp);
+    for k: 0..rt.groups.count-1 lists[k] = ifx has_list[k] then md_tuple(non_aliasing[k], false) else NONE;
+    scope_kind := md_kind_id("alias.scope"); noalias_kind := md_kind_id("noalias");
+    for i: v.lai.dc.inst_map {
+        ptr := ifx inst_op(i) == .LOAD then op(i, 0) else op(i, 1);
+        found, gi := table_find(*ptr_to_group, ptr);
+        if !found continue;
+        scope := md_concatenate(get_metadata(i, scope_kind), md_tuple(Md_Id.[group_scope[gi]], false));
+        if scope != NONE set_metadata(i, scope_kind, scope);
+        if lists[gi] != NONE {
+            na := md_concatenate(get_metadata(i, noalias_kind), lists[gi]);
+            if na != NONE set_metadata(i, noalias_kind, na);
+        }
+    }
+}
+// MDNode::concatenate(A, B)
+md_concatenate :: (a: Md_Id, b: Md_Id) -> Md_Id {
+    if a == NONE return b;
+    if b == NONE return a;
+    ops: [..] Md_Id; ops.allocator = temp;
+    for k: 0..cast(s64) md_nops(a) - 1 { o := md_op(a, cast(u32) k); if !array_find(ops, o) array_add(*ops, o); }
+    for k: 0..cast(s64) md_nops(b) - 1 { o := md_op(b, cast(u32) k); if !array_find(ops, o) array_add(*ops, o); }
+    // getOrSelfReference
+    if ops.count && ops[0] != NONE && md_is_node(ops[0]) {
+        n := ops[0];
+        if md_nops(n) == ops.count && md_op(n, 0) == n {
+            same := true;
+            for k: 1..ops.count-1 if ops[k] != md_op(n, cast(u32) k) { same = false; break; }
+            if same return n;
+        }
+    }
+    return md_tuple(ops, false);
 }
