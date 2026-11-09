@@ -126,6 +126,7 @@
 #load "loop_access.jai";
 #load "hash_recognize.jai";
 #load "pass_loop_idiom.jai";
+#load "pass_loop_load_elim.jai";
 
 main :: () { opt_main(); }
 

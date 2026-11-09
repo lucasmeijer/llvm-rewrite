@@ -402,3 +402,12 @@ sc_create_add_rec_from_phi_with_casts :: (symbolic_phi: Scev_Id) -> (bool, Scev_
     }
     return true, s, preds;
 }
+// PredicatedScalarEvolution(const PredicatedScalarEvolution &Init): RewriteMap, predicates, Generation and
+// BackedgeCount are copied (not the symbolic max or small constant max trip count)
+pse_copy :: (dst: *Pse, src: *Pse) {
+    pse_init(dst, src.l);
+    for v, k: src.rewrite_map table_set(*dst.rewrite_map, k, v);
+    for src.preds array_add(*dst.preds, it);
+    dst.generation = src.generation;
+    dst.backedge_count = src.backedge_count;
+}
