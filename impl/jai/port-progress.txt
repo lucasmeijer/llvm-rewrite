@@ -48,7 +48,7 @@ lib/IR/Metadata.cpp 0.5
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.95
 lib/Analysis/TargetTransformInfo.cpp 0.3
-lib/Transforms/Utils/BasicBlockUtils.cpp 0.72
+lib/Transforms/Utils/BasicBlockUtils.cpp 0.75
 lib/Analysis/VectorUtils.cpp 0.5
 lib/IR/Intrinsics.cpp 0.75
 lib/IR/Instruction.cpp 0.7
@@ -197,3 +197,4 @@ lib/IR/Globals.cpp 0.35
 lib/IR/Function.cpp 0.15  # deleteBody, copyAttributesFrom, splice
 lib/IR/Module.cpp 0.1  # getGlobalVariable, getFunction, global_values order
 lib/Support/MD5.cpp 0.8  # update / final / stringifyResult / MD5Hash
+lib/Transforms/Scalar/TailRecursionElimination.cpp 0.95  # no optimization remarks (ORE)

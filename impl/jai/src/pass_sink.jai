@@ -1,11 +1,12 @@
 // Sink: port of llvm/lib/Transforms/Scalar/Sink.cpp (isSafeToMove, IsAcceptableTarget, SinkInstruction,
 // ProcessBlock, iterativelySinkInstructions). Each AA->getModRefInfo call gets its own SimpleAAQueryInfo.
 
-sink_is_safe_to_move :: (i: Value_Id, aar: *Aa_Results, stores: *[..] Value_Id) -> bool {
+Sink_Stores :: struct { list: [..] Value_Id; set: Table(Value_Id, bool); }   // SmallPtrSet
+
+sink_is_safe_to_move :: (i: Value_Id, aar: *Aa_Results, st: *Sink_Stores) -> bool {
+    stores := *st.list;
     if may_write_to_memory(i) {
-        found := false;
-        for stores.* if it == i { found = true; break; }
-        if !found array_add(stores, i);
+        if !table_contains(*st.set, i) { table_set(*st.set, i, true); array_add(stores, i); }
         return false;
     }
     if inst_op(i) == .ALLOCA && alloca_is_static(i) return false;
@@ -32,7 +33,7 @@ sink_is_acceptable_target :: (i: Value_Id, succ: Value_Id, li: *Loop_Info) -> bo
     return true;
 }
 
-sink_instruction :: (i: Value_Id, stores: *[..] Value_Id, dt: *Dom_Tree, li: *Loop_Info, aar: *Aa_Results) -> bool {
+sink_instruction :: (i: Value_Id, stores: *Sink_Stores, dt: *Dom_Tree, li: *Loop_Info, aar: *Aa_Results) -> bool {
     if !sink_is_safe_to_move(i, aar, stores) return false;
     succ: Value_Id = NONE;
     bb := inst_block(i);
@@ -58,7 +59,7 @@ sink_instruction :: (i: Value_Id, stores: *[..] Value_Id, dt: *Dom_Tree, li: *Lo
 sink_process_block :: (bb: Value_Id, dt: *Dom_Tree, li: *Loop_Info, aar: *Aa_Results) -> bool {
     if !dt_is_reachable_from_entry(dt, bb) return false;
     made_change := false;
-    stores: [..] Value_Id; stores.allocator = temp;   // SmallPtrSet (only membership matters)
+    stores: Sink_Stores; stores.list.allocator = temp; stores.set.allocator = temp;   // only membership matters
     it := block_last(bb);
     while it != NONE {
         i := it;

@@ -1165,3 +1165,24 @@ Still slow / known:
   DISubprogram.
 - Perf (optimized build): `-passes=globalopt` on scaling/globals 0.73-0.87x LLVM's CPU, k = 1.00 (LLVM 1.09);
   globalopt / globaldce / deadargelim / argpromotion on SPASS.ll and sqlite3.ll are below LLVM's time.
+
+## L1.scalar-misc: LowerExpect, LowerConstantIntrinsics, InferAlignment, DivRemPairs, Float2Int, Sink, TailCallElim, MergedLoadStoreMotion, SpeculativeExecution, CallSiteSplitting (217/218)
+
+- Files: `pass_lower_expect.jai`, `pass_lower_constant_intrinsics.jai` (+ `replace_and_recursively_simplify`),
+  `pass_infer_alignment.jai`, `pass_div_rem_pairs.jai` (+ `tti_has_div_rem_op` in tti.jai), `pass_float2int.jai`
+  (its own EquivalenceClasses: Members in insertion order, leader lists), `pass_sink.jai`, `pass_tailcallelim.jai`
+  (+ FoldReturnIntoUncondBranch, an eager DT+PDT updater `Tre_Dtu`), `pass_mldst_motion.jai`
+  (`mldst-motion<[no-]split-footer-bb>`), `pass_speculative_execution.jai` (`<only-if-divergent-target>`: X86 and
+  NoTTI have no branch divergence, so that form is a no-op), `pass_callsite_splitting.jai`. All their cl::opts are
+  parsed in `scalar_misc_cl.jai`, which also lists the integer ones LLVM's tests write as `-name value`
+  (`scalar_misc_takes_value`, called from opt_main).
+- `require<memdep>` is a registered no-op: MemoryDependenceAnalysis is a lazily filled cache and no pass we have
+  reads a *cached* memdep (GVN builds its own).
+- `remap_debug_variable` (DuplicateInstructionsInSplitBetween, shared with JumpThreading) now also remaps a
+  `#dbg_assign`'s address operand (RemapAssignAddress) instead of failing.
+- The one remaining exit test is `MergedLoadStoreMotion/st_sink_bugfix_22613.ll` (`-O2`).
+- Sweeps (every round-tripping file, plain and `--with-test-flags`, and `sroa,<pass>` on tests/perf/compile): 0
+  differs / 0 bad-ir for all ten passes. Loud failures are only other passes' options (`-earlycse-debug-hash`,
+  `-slp-revec`, ...), `-enable-knowledge-retention`, and 2 files with ppc_fp128 constant folding (float2int).
+- Perf: no tests/perf benchmark times these passes alone (`-O2` rows don't run yet). Sink keeps its store set as a
+  table (SmallPtrSet); MLSM is bounded by MagicCompileTimeControl like LLVM.
