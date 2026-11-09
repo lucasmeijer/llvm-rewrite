@@ -959,6 +959,18 @@ recursive fn parse_module_elem(e: i32) -> i32 {
         }
         return new_pnode(PK_PASS, P_IPSCCP as i32, arg, false, pelems[e].name);
     }
+    if name == "inliner-wrapper" || name == "inliner-wrapper-no-mandatory-first" {
+        // ModuleInlinerWrapperPass: cgscc(inline<only-mandatory>, inline) (MaxDevirtIterations = 0)
+        let ad = new_pnode(PK_CGSCC, 0, 0, true, pelems[e].name);
+        let nm = intern("inline");
+        let last = new_pnode(PK_PASS, P_INLINE as i32, 0, false, nm);
+        if name == "inliner-wrapper" {
+            let mand = new_pnode(PK_PASS, P_INLINE as i32, 1, false, nm);
+            pnodes[ad].first = mand;
+            pnodes[mand].next = last;
+        } else { pnodes[ad].first = last; }
+        return ad;
+    }
     let r = pass_row(name, 'm');
     if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
     // module VerifierAnalysis: nothing to compute (no verifier yet; the harness verifies our output)
@@ -969,7 +981,6 @@ recursive fn parse_module_elem(e: i32) -> i32 {
     if name == "invalidate<profile-summary>" { return new_pnode(PK_PASS, P_INVALIDATE_PSI as i32, 0, true, pelems[e].name); }
     if name == "require<lcg>" { return new_pnode(PK_PASS, P_REQUIRE_LCG as i32, 0, true, pelems[e].name); }
     if name == "invalidate<lcg>" { return new_pnode(PK_PASS, P_INVALIDATE_LCG as i32, 0, true, pelems[e].name); }
-    if name == "inliner-wrapper-no-mandatory-first" { return new_pnode(PK_PASS, P_INLINER_WRAPPER as i32, 1, false, pelems[e].name); }
     if llvm_knows(name, 'm') { not_implemented(name); }
     if is_cgscc_pass_name(name) {
         // a CGSCC pass in a module pipeline gets its own adaptor (createModuleToPostOrderCGSCCPassAdaptor)

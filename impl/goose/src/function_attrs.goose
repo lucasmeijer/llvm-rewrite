@@ -27,6 +27,7 @@ import constrange;
 import apint;
 import memloc;
 import aa;
+import inline_cost;
 import aautil;
 import capture;
 import intrinsics;

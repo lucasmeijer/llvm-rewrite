@@ -96,6 +96,27 @@ let KNOWN_FLAGS: const u8[:][] = [
     "loop-version-annotate-no-alias",                    // loop-versioning
     "enable-loop-distribute", "loop-distribute-non-if-convertible", "loop-distribute-scev-check-threshold",   // loop-distribute
     "loop-distribute-scev-check-threshold-with-pragma", "loop-distribute-verify",
+    "inline-threshold", "inlinehint-threshold", "inlinedefault-threshold", "inline-cold-callsite-threshold",   // InlineCost
+    "inlinecold-threshold", "hot-callsite-threshold", "locally-hot-callsite-threshold", "cold-callsite-rel-freq",
+    "hot-callsite-rel-freq", "inline-enable-cost-benefit-analysis", "inline-savings-multiplier",
+    "inline-savings-profitable-multiplier", "inline-size-allowance", "inline-instr-cost", "inline-asm-instr-cost",
+    "inline-memaccess-cost", "inline-call-penalty", "inline-max-stacksize", "recursive-inline-max-stacksize",
+    "inline-cost-full", "inline-caller-superset-nobuiltin", "disable-gep-const-evaluation", "inline-all-viable-calls",
+    "ignore-tti-inline-compatible", "print-instruction-comments",
+    "min-jump-table-entries", "max-jump-table-size", "jump-table-density", "optsize-jump-table-density",   // TargetLoweringBase
+    "min-bit-test-cmps",
+    "intra-scc-cost-multiplier", "inliner-forwarding-scan-limit", "inline-remark-attribute", "inline-deferral",   // Inliner
+    "inline-deferral-scale", "inline-priority-mode", "module-inliner-top-priority-threshold", "cgscc-inline-replay",
+    "enable-scc-inline-advisor-printing", "keep-inline-advisor-for-printing",
+    "max-devirt-iterations",                             // no-op: only read by the default pipelines
+    "enable-noalias-to-md-conversion", "use-noalias-intrinsic-during-inlining",   // InlineFunction
+    "preserve-alignment-assumptions-during-inlining", "max-inst-checked-for-throw-during-inlining",
+    "profile-summary-cutoff-hot", "profile-summary-cutoff-cold", "profile-summary-hot-count",   // ProfileSummaryInfo
+    "profile-summary-cold-count", "profile-summary-huge-working-set-size-threshold",
+    "profile-summary-large-working-set-size-threshold", "partial-profile", "scale-partial-sample-profile-working-set-size",
+    "partial-sample-profile-working-set-size-scale-factor",
+    "pgso-lwss-only", "pgso-cold-code-only", "pgso-cold-code-only-for-instr-pgo", "pgso-cold-code-only-for-sample-pgo",   // SizeOpts
+    "pgso-cold-code-only-for-partial-sample-pgo", "force-pgso", "pgso-cutoff-instr-prof", "pgso-cutoff-sample-prof",
     "run-twice",                                         // no-op: optdriver.cpp only reads it on the legacy-PM path
     "unroll-threshold", "unroll-optsize-threshold", "unroll-partial-threshold",   // loop-unroll (LoopUnrollPass.cpp)
     "unroll-max-percent-threshold-boost", "unroll-max-iteration-count-to-analyze", "unroll-count", "unroll-max-count",

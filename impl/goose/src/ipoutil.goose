@@ -86,3 +86,23 @@ fn func_erase_from_parent(f: i32) {
     if vals[f].name >= 0 { symtab_remove(modules[m].symtab, f); }
     val_set_dead(f);
 }
+
+// Function::dropAllReferences: the body goes (every block erased), the function stays
+fn func_drop_all_references(f: i32) {
+    var b = func_first_block(f);
+    while b >= 0 {
+        var i = block_first(b);
+        while i >= 0 { drop_all_refs(i); i = inst_next(i); }
+        b = block_next(b);
+    }
+    b = func_first_block(f);
+    while b >= 0 { let nb = block_next(b); block_erase(b); b = nb; }
+}
+
+// makeFunctionBodyUnreachable (Inliner.cpp): drop the body, then one block with `unreachable`
+fn func_make_body_unreachable(f: i32) {
+    func_drop_all_references(f);
+    let bb = create_block_after(f, -1, "");
+    let u = create_inst(OP_UNREACHABLE, T_VOID, []);
+    block_append_inst(bb, u);
+}
