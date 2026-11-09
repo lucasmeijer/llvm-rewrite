@@ -209,7 +209,6 @@ tti_store_minimum_vf :: (t: *Tti, vf_in: u64, mem_ty: Type_Id, val_ty: Type_Id) 
 
 // ---------------------------------------------------------------- the frontier (not ported yet)
 
-slp_transform_nodes :: () { slp_fail("transformNodes"); }
 slp_compute_minimum_value_sizes :: () { slp_fail("computeMinimumValueSizes"); }
 slp_clear_analyzed_min_bw_vals :: () {}
 slp_delete_tree_later_state :: () {   // the deleteTree members of later stages
