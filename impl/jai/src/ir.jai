@@ -573,6 +573,16 @@ drop_all_references :: (user: Value_Id) {
 
 // Value::replaceAllUsesWith (llvm/lib/IR/Value.cpp doRAUW): take the head use each time.
 // Constant users are re-uniqued like Constant::handleOperandChange.
+// ValueHandleBase::ValueIsRAUWd without moving any use: every value handle (and callback handle) of `old` follows
+value_is_rauwd :: (old: Value_Id, new: Value_Id) {
+    ac_note_rauw(old, new);
+    scev_note_rauw(old, new);
+    vh_note_rauw(old, new);
+    lvi_note_rauw(old);
+    cg_vh_note_rauw(old, new);
+    vmap_note_rauw(old, new);
+}
+
 replace_all_uses_with :: (old: Value_Id, new: Value_Id) {
     ac_note_rauw(old, new);   // AssumptionCache's AffectedValueCallbackVH::allUsesReplacedWith
     scev_note_rauw(old, new); // ScalarEvolution's SCEVCallbackVH / SCEVUnknown::allUsesReplacedWith (scev_update.jai)

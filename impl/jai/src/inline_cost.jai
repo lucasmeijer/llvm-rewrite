@@ -335,6 +335,7 @@ Call_Analyzer :: struct {
     static_bonus_applied: s64;
     boost_indirect_calls: bool;
     ignore_threshold: bool;
+    use_eph_cache: bool;         // GetEphValuesCache given
     cost: s64;
     cost_at_bb_start: s64;
     decided_by_cost_threshold: bool;
@@ -345,7 +346,7 @@ Call_Analyzer :: struct {
     sroa_arg_costs: Table(Value_Id, s64);
 }
 
-cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indirect: bool, ignore_threshold: bool) -> *Call_Analyzer {
+cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indirect: bool, ignore_threshold: bool, use_eph_cache := false) -> *Call_Analyzer {
     ca := New(Call_Analyzer,, allocator = temp);
     ca.f = callee; ca.call = call;
     ca.tti = tti_get(callee);
@@ -360,6 +361,7 @@ cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indir
     ca.threshold = params.default_threshold;
     ca.boost_indirect_calls = boost_indirect;
     ca.ignore_threshold = ignore_threshold;
+    ca.use_eph_cache = use_eph_cache;
     ca.allow_recursive_call = params.allow_recursive_call;
     return ca;
 }
@@ -738,7 +740,8 @@ const_has_n_live_uses :: (f: Value_Id, n: s64) -> bool {
     u := ir.v_first_use[f];
     while u != NONE {
         usr := ir.u_user[u];
-        if !(is_constant_kind(vkind(usr)) && !is_global_value(vkind(usr)) && constant_is_dead(usr)) {
+        // (a blockaddress has no operands in LLVM 23: it does not use its function)
+        if vkind(usr) != .C_BLOCKADDR && !(is_constant_kind(vkind(usr)) && !is_global_value(vkind(usr)) && constant_is_dead(usr)) {
             count += 1;
             if count > n return false;
         }
@@ -925,6 +928,8 @@ cax_simplify_call_site :: (ca: *Call_Analyzer, f: Value_Id, call: Value_Id) -> b
         if c == NONE return false;
         array_add(*cargs, c);
     }
+    // ConstantFoldCall(&Call, F, ConstantArgs) without a TargetLibraryInfo: library functions are not folded
+    if fn_iid(f) == NOT_INTRINSIC return false;
     c := cfo_call(call, f, cargs);
     if c != NONE { table_set(*ca.simplified, call, c); return true; }
     return false;
@@ -1235,6 +1240,33 @@ cax_find_dead_blocks :: (ca: *Call_Analyzer, curr: Value_Id, next: Value_Id) {
     }
 }
 
+// EphemeralValuesAnalysis: EphemeralValuesCache (lazily collected per function, cleared by the CGSCC inliner)
+Eph_Cache :: struct { collected: bool; set: Table(Value_Id, bool); }
+get_eph_cache :: (f: Value_Id) -> *Eph_Cache {
+    e := fam_entry(f);
+    if !e.eph {
+        get_assumption_cache(f);   // EphemeralValuesAnalysis::run takes the AssumptionCache
+        e = fam_entry(f);
+        e.eph = New(Eph_Cache);
+    }
+    return e.eph;
+}
+// EphemeralValuesCache::ephValues
+eph_values :: (f: Value_Id) -> *Table(Value_Id, bool) {
+    c := get_eph_cache(f);
+    if !c.collected {
+        collect_ephemeral_values_fn(f, get_assumption_cache(f), *c.set);
+        c.collected = true;
+    }
+    return *c.set;
+}
+// EphemeralValuesCache::clear
+eph_clear :: (f: Value_Id) {
+    c := get_eph_cache(f);
+    table_reset(*c.set);
+    c.collected = false;
+}
+
 // CodeMetrics::collectEphemeralValues(F, AC, EphValues)
 collect_ephemeral_values_fn :: (f: Value_Id, ac: *Assumption_Cache, eph: *Table(Value_Id, bool)) {
     visited: Table(Value_Id, bool); visited.allocator = temp;
@@ -1305,8 +1337,10 @@ cax_analyze :: (ca: *Call_Analyzer) -> Inline_Result {
     }
     ca.num_constant_offset_ptr_args = cast(u32) ca.const_offset_ptrs.count;
     ca.num_alloca_args = cast(u32) ca.sroa_arg_values.count;
-    eph: Table(Value_Id, bool); eph.allocator = temp;
-    collect_ephemeral_values_fn(f, get_assumption_cache(f), *eph);
+    eph_storage: Table(Value_Id, bool); eph_storage.allocator = temp;
+    eph := *eph_storage;
+    if ca.use_eph_cache eph = eph_values(f);
+    else collect_ephemeral_values_fn(f, get_assumption_cache(f), eph);
     worklist: [..] Value_Id; worklist.allocator = temp;
     in_wl: Table(Value_Id, bool); in_wl.allocator = temp;
     wl_insert :: (wl: *[..] Value_Id, s: *Table(Value_Id, bool), b: Value_Id) { if table_contains(s, b) return; table_set(s, b, true); array_add(wl, b); }
@@ -1319,7 +1353,7 @@ cax_analyze :: (ca: *Call_Analyzer) -> Inline_Result {
         if block_first(bb) == NONE continue;
         ca.cost_at_bb_start = ca.cost;
         if block_has_address_taken_any(bb) return ir_failure("blockaddress used");
-        r := cax_analyze_block(ca, bb, *eph);
+        r := cax_analyze_block(ca, bb, eph);
         if !r.ok return r;
         ti := block_terminator(bb);
         if inst_op(ti) == .CONDBR {
@@ -1446,7 +1480,7 @@ gv_is_interposable_no_ipa_check :: (g: Value_Id) -> bool {
 }
 
 // getInlineCost(Call, Callee, Params, ...)
-get_inline_cost :: (call: Value_Id, params: Inline_Params) -> Inline_Cost {
+get_inline_cost :: (call: Value_Id, params: Inline_Params, use_eph_cache := false) -> Inline_Cost {
     callee := call_called_function(call);
     decided, r := get_attribute_based_inlining_decision(call, callee);
     if decided {
@@ -1454,7 +1488,7 @@ get_inline_cost :: (call: Value_Id, params: Inline_Params) -> Inline_Cost {
         return inline_cost_never(r.reason);
     }
     if ic_opts.inline_all_viable_calls && is_inline_viable(callee).ok return inline_cost_always("Inlining forced by -inline-all-viable-calls");
-    ca := cax_new(callee, call, params, true, false);
+    ca := cax_new(callee, call, params, true, false, use_eph_cache);
     should := cax_analyze(ca);
     if ca.decided_by_cost_threshold return inline_cost_get(ca.cost, ca.threshold, ca.static_bonus_applied);
     if should.ok return inline_cost_always("empty function");
@@ -1546,3 +1580,10 @@ inline_cost_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
 IID_ICALL_BRANCH_FUNNEL :: #run iid_by_name("llvm.icall.branch.funnel");
 IID_LOCALESCAPE :: #run iid_by_name("llvm.localescape");
 CC_COLD :: 9;
+
+// Value::use_empty for a function (a blockaddress is not a user of its function in LLVM 23)
+fn_use_empty :: (f: Value_Id) -> bool {
+    u := ir.v_first_use[f];
+    while u != NONE { if vkind(ir.u_user[u]) != .C_BLOCKADDR return false; u = ir.u_next[u]; }
+    return true;
+}

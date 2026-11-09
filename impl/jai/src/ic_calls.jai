@@ -2822,6 +2822,7 @@ ic_transform_const_expr_cast_call :: (call: Value_Id) -> bool {
         nv = cst;
     }
     if has_uses(call) ic_replace_inst_uses_with(call, nv);
+    else if old_ret == vtype(nv) value_is_rauwd(call, nv);   // ValueHandleBase::ValueIsRAUWd(Caller, NV)
     ic_erase_inst(call);
     return true;
 }

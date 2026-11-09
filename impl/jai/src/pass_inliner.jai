@@ -41,6 +41,13 @@ inliner_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
         case "inline-deferral"; inl_opts.enable_inline_deferral = bool_opt(name, value, has_value);
         case "inline-deferral-scale"; inl_opts.inline_deferral_scale = int_opt(name, value, has_value);
         case "max-devirt-iterations"; inl_opts.max_devirt_iterations = int_opt(name, value, has_value);
+        case "inline-priority-mode";
+            if value == "size" io_opts.mode = .SIZE;
+            else if value == "cost" io_opts.mode = .COST;
+            else if value == "cost-benefit" io_opts.mode = .COST_BENEFIT;
+            else if value == "ml" io_opts.mode = .ML;
+            else fatal("invalid value '%' for option -inline-priority-mode", value);
+        case "module-inliner-top-priority-threshold"; io_opts.top_priority_threshold = int_opt(name, value, has_value);
         case; return inline_cost_parse_cl_opt(name, value, has_value);
     }
     return true;
@@ -78,7 +85,7 @@ should_be_deferred :: (caller: Value_Id, ic: Inline_Cost, params: Inline_Params,
         usr := ir.u_user[u];
         u = ir.u_next[u];
         if !(vkind(usr) == .INST && is_call_base(usr)) || call_called_function(usr) != caller { apply_last_call_bonus = false; continue; }
-        ic2 := get_inline_cost(usr, params);
+        ic2 := get_inline_cost(usr, params, true);
         if !ic_bool(ic2) { apply_last_call_bonus = false; continue; }
         if ic_is_always(ic2) continue;
         if ic_cost_delta(ic2) <= candidate_cost {
@@ -97,7 +104,7 @@ should_be_deferred :: (caller: Value_Id, ic: Inline_Cost, params: Inline_Params,
 
 // getDefaultInlineAdvice + shouldInline: (has advice, the cost)
 default_inline_advice :: (cb: Value_Id, params: Inline_Params) -> (bool, Inline_Cost) {
-    ic := get_inline_cost(cb, params);
+    ic := get_inline_cost(cb, params, true);
     if ic_is_always(ic) return true, ic;
     if !ic_bool(ic) {
         set_inline_remark(cb, inline_cost_str(ic));
@@ -278,6 +285,7 @@ inline_one :: (cb: Value_Id, callee: Value_Id, callee_n: s32, callee_scc: s32, c
         set_inline_remark(cb, tprint("%; %", r.reason, inline_cost_str(ic)));
         return false;
     }
+    eph_clear(f);
     found := false;
     for inlined_callees.* if it == callee found = true;
     if !found array_add(inlined_callees, callee);
@@ -313,7 +321,25 @@ inline_one :: (cb: Value_Id, callee: Value_Id, callee_n: s32, callee_scc: s32, c
 
 // filterDeadComdatFunctions (ModuleUtils.cpp): keep the functions whose comdat has no other live members
 filter_dead_comdat_functions :: (dead: *[..] Value_Id) {
-    fatal("inline: deleting dead functions in comdats (filterDeadComdatFunctions) is not implemented yet");
+    in_list :: (l: [] Value_Id, v: Value_Id) -> bool { for l if it == v return true; return false; }
+    comdats: [..] s32; comdats.allocator = temp;
+    for f: dead.* { c := glob(f).comdat; if c >= 0 { found := false; for comdats if it == c found = true; if !found array_add(*comdats, c); } }
+    dead_comdats: [..] s32; dead_comdats.allocator = temp;
+    for c: comdats {
+        all_dead := true;
+        // Comdat::getUsers: every global object with this comdat
+        for g: ir.m_functions if glob(g).comdat == c && !in_list(dead.*, g) { all_dead = false; break; }
+        if all_dead for g: ir.m_globals if glob(g).comdat == c { all_dead = false; break; }
+        if all_dead for g: ir.m_ifuncs if glob(g).comdat == c { all_dead = false; break; }
+        if all_dead array_add(*dead_comdats, c);
+    }
+    k := 0;
+    while k < dead.count {
+        c := glob(dead.*[k]).comdat;
+        keep := c < 0;
+        if !keep for dead_comdats if it == c keep = true;
+        if keep k += 1; else array_ordered_remove_by_index(dead, k);
+    }
 }
 
 // ---------------------------------------------------------------- AlwaysInlinerPass
@@ -399,7 +425,10 @@ always_inliner_run :: () -> Preserved {
             }
         }
     }
-    if inlined_comdat.count fatal("always-inline: deleting inlined comdat functions (filterDeadComdatFunctions) is not implemented yet");
+    if inlined_comdat.count {
+        filter_dead_comdat_functions(*inlined_comdat);
+        for f: inlined_comdat { table_remove(*fam, f); erase_function(f); changed = true; }
+    }
     if !changed return PRESERVE_ALL;
     pa: Preserved;
     pa.all_fn = true;
@@ -409,5 +438,195 @@ always_inliner_run :: () -> Preserved {
 fn_is_def_trivially_dead :: (f: Value_Id) -> bool {
     l := glob(f).linkage;
     if !(l == .LINKONCE_ANY || l == .LINKONCE_ODR) && !gv_has_local_linkage(f) && l != .AVAILABLE_EXTERNALLY return false;
-    return !has_uses(f);
+    return fn_use_empty(f);
+}
+
+// ---------------------------------------------------------------- InlineOrder.cpp (PriorityInlineOrder) and ModuleInliner.cpp
+
+Inline_Priority_Mode :: enum u8 { SIZE; COST; COST_BENEFIT; ML; }
+io_opts: struct {
+    mode := Inline_Priority_Mode.SIZE;     // -inline-priority-mode
+    top_priority_threshold: s64 = 0;       // -module-inliner-top-priority-threshold
+};
+// The priority of one call (SizePriority / CostPriority / CostBenefitPriority / MLPriority)
+Inline_Priority :: struct { size: u32 = 0xFFFF_FFFF; cost: s64 = INT_MAX32; static_bonus: s64; }
+io_priority :: (cb: Value_Id, params: Inline_Params) -> Inline_Priority {
+    p: Inline_Priority;
+    if io_opts.mode == .SIZE {
+        n: u32 = 0;
+        for i: fn_insts(call_called_function(cb)) n += 1;   // Function::getInstructionCount
+        p.size = n;
+        return p;
+    }
+    // getInlineCostWrapper (no ephemeral-values cache)
+    ic := get_inline_cost(cb, params, false);
+    if !ic_is_always(ic) && !ic_is_never(ic) { p.cost = ic.cost; p.static_bonus = ic.static_bonus; }
+    else p.cost = ifx ic_is_never(ic) then cast(s64) INT_MAX32 else INT_MIN32;
+    return p;
+}
+io_is_more_desirable :: (a: Inline_Priority, b: Inline_Priority) -> bool {
+    if io_opts.mode == .SIZE return a.size < b.size;
+    if io_opts.mode == .COST_BENEFIT {
+        ar := a.cost + a.static_bonus < io_opts.top_priority_threshold;
+        br := b.cost + b.static_bonus < io_opts.top_priority_threshold;
+        if ar || br {
+            if ar != br return ar;
+            return a.cost < b.cost;
+        }
+        // no CostBenefit without a profile
+        return a.cost < b.cost;
+    }
+    return a.cost < b.cost;
+}
+Inline_Order :: struct {
+    heap: [..] Value_Id;
+    priorities: Table(Value_Id, Inline_Priority);
+    params: Inline_Params;
+}
+io_less :: (o: *Inline_Order, l: Value_Id, r: Value_Id) -> bool {   // hasLowerPriority(L, R)
+    p1 := table_find_pointer(*o.priorities, l);
+    p2 := table_find_pointer(*o.priorities, r);
+    return io_is_more_desirable(p2.*, p1.*);
+}
+// libstdc++ __push_heap / __adjust_heap / push_heap / pop_heap / make_heap
+io_push_heap_impl :: (o: *Inline_Order, hole_in: s64, top: s64, value: Value_Id) {
+    hole := hole_in;
+    parent := (hole - 1) / 2;
+    while hole > top && io_less(o, o.heap[parent], value) {
+        o.heap[hole] = o.heap[parent];
+        hole = parent;
+        parent = (hole - 1) / 2;
+    }
+    o.heap[hole] = value;
+}
+io_adjust_heap :: (o: *Inline_Order, hole_in: s64, len: s64, value: Value_Id) {
+    hole := hole_in;
+    top := hole;
+    second := hole;
+    while second < (len - 1) / 2 {
+        second = 2 * (second + 1);
+        if io_less(o, o.heap[second], o.heap[second - 1]) second -= 1;
+        o.heap[hole] = o.heap[second];
+        hole = second;
+    }
+    if (len & 1) == 0 && second == (len - 2) / 2 {
+        second = 2 * (second + 1);
+        o.heap[hole] = o.heap[second - 1];
+        hole = second - 1;
+    }
+    io_push_heap_impl(o, hole, top, value);
+}
+io_push_heap :: (o: *Inline_Order) {
+    n := o.heap.count;
+    io_push_heap_impl(o, n - 1, 0, o.heap[n - 1]);
+}
+io_pop_heap :: (o: *Inline_Order) {
+    n := o.heap.count;
+    if n <= 1 return;
+    last := n - 1;
+    value := o.heap[last];
+    o.heap[last] = o.heap[0];
+    io_adjust_heap(o, 0, last, value);
+}
+io_make_heap :: (o: *Inline_Order) {
+    len := o.heap.count;
+    if len < 2 return;
+    parent := (len - 2) / 2;
+    while true {
+        io_adjust_heap(o, parent, len, o.heap[parent]);
+        if parent == 0 return;
+        parent -= 1;
+    }
+}
+io_push :: (o: *Inline_Order, cb: Value_Id) {
+    array_add(*o.heap, cb);
+    table_set(*o.priorities, cb, io_priority(cb, o.params));
+    io_push_heap(o);
+}
+io_pop :: (o: *Inline_Order) -> Value_Id {
+    io_pop_heap(o);
+    while true {
+        cb := o.heap[o.heap.count - 1];
+        p := table_find_pointer(*o.priorities, cb);
+        old := p.*;
+        p.* = io_priority(cb, o.params);
+        if !io_is_more_desirable(old, p.*) break;
+        io_push_heap(o);
+        io_pop_heap(o);
+    }
+    return pop(*o.heap);
+}
+
+// ModuleInlinerPass::run
+module_inliner_run :: () -> Preserved {
+    params := get_inline_params();
+    changed := false;
+    order: Inline_Order;
+    order.heap.allocator = temp; order.priorities.allocator = temp;
+    order.params = params;
+    for f: ir.m_functions {
+        if is_declaration(f) continue;
+        for i: fn_insts(f) {
+            if !is_call_base(i) continue;
+            callee := call_called_function(i);
+            if callee == NONE continue;
+            if !is_declaration(callee) io_push(*order, i);
+            else if !glob(callee).intrinsic set_inline_remark(i, "unavailable definition");
+        }
+    }
+    if order.heap.count == 0 return PRESERVE_ALL;
+    dead: [..] Value_Id; dead.allocator = temp;
+    while order.heap.count {
+        cb := io_pop(*order);
+        callee := call_called_function(cb);
+        ok, ic := default_inline_advice(cb, params);
+        if !ok continue;
+        ifi: Inline_Function_Info;
+        ifi.use_assumption_cache = true;
+        ifi.caller_bfi = get_bfi(inst_fn(cb));
+        ifi.callee_bfi = get_bfi(callee);
+        aar := aa_results_for(inst_fn(cb));
+        r := inline_function(cb, *ifi, true, *aar, true, true);
+        if !r.ok {
+            set_inline_remark(cb, tprint("%; %", r.reason, inline_cost_str(ic)));
+            continue;
+        }
+        changed = true;
+        printer_note_ir_changed();
+        for < icb: ifi.inlined_call_sites {
+            nc := call_called_function(icb);
+            if nc != NONE && !is_declaration(nc) io_push(*order, icb);
+        }
+        if gv_has_local_linkage(callee) {
+            remove_dead_constant_users(callee);
+            if fn_use_empty(callee) && !lcg_is_known_lib_function(callee) {
+                k := 0;
+                while k < order.heap.count {
+                    if inst_fn(order.heap[k]) == callee array_ordered_remove_by_index(*order.heap, k);
+                    else k += 1;
+                }
+                io_make_heap(*order);
+                fn_drop_all_references(callee);
+                array_add(*dead, callee);
+            }
+        }
+    }
+    for dead { table_remove(*fam, it); erase_function(it); }
+    if !changed return PRESERVE_ALL;
+    return PRESERVE_NONE;
+}
+
+// ModuleInlinerWrapperPass (`inliner-wrapper`: MandatoryFirst, no devirt repetition): cgscc(inline<only-mandatory>,
+// inline) with the InlineAdvisorAnalysis's DefaultInlineAdvisor (the same advice as the passes' own)
+inliner_wrapper_run :: () {
+    ad := new_node(.CGSCC_ADAPTOR, null, "cgscc");
+    pm := new_node(.CGSCC_PM, null, "cgscc");
+    p := lookup_pass("inline");
+    m := new_node(.INLINE, p, "inline<only-mandatory>");
+    i := new_node(.INLINE, p, "inline");
+    alast: s32 = -1; plast: s32 = -1;
+    link_child(pm, *plast, m);
+    link_child(pm, *plast, i);
+    link_child(ad, *alast, pm);
+    mam_invalidate(run_cgscc_adaptor(ad));
 }

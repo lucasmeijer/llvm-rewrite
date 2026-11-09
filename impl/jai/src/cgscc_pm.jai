@@ -178,7 +178,7 @@ md_global_value_deleted :: (v: Value_Id) {
     k := *md_key; key_reset(k); key_u8(k, 1); key_u32(k, v);
     found, m := table_find(*ir.md_map, key_view(k));
     if !found return;
-    table_remove(*ir.md_map, key_view(k));
+    defer md_value_deleted(v);   // debug records that use it get poison (DebugValueUser::handleChangedValue)
     for * row, id: ir.mds {
         if row.kind != .TUPLE || row.nops == 0 continue;
         uses := false;

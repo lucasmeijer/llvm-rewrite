@@ -11,8 +11,8 @@
 
 // ---------------------------------------------------------------- analyses
 
-Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; SCEV; LVI; BPI; BFI; LAST_RUN_TRACKING; }
-ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles", "scalar-evolution", "lazy-value-info", "branch-prob", "block-freq", "last-run-tracking"];
+Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; SCEV; LVI; BPI; BFI; LAST_RUN_TRACKING; EPHEMERAL_VALUES; }
+ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles", "scalar-evolution", "lazy-value-info", "branch-prob", "block-freq", "last-run-tracking", "ephemerals"];
 
 // PreservedAnalyses. `cfg` = preserveSet<CFGAnalyses>().
 Preserved :: struct {
@@ -53,6 +53,7 @@ Fn_Analyses :: struct {
     // LastRunTrackingAnalysis (LastRunTrackingAnalysis.cpp): its TrackedPasses map. InstCombine is the only pass that
     // uses it and calls update() without options, so the map is "empty" or "{InstCombine: no check}".
     lrt_instcombine: bool;
+    eph: *Eph_Cache;   // EphemeralValuesAnalysis (inline_cost.jai)
 }
 fam: Table(Value_Id, Fn_Analyses);
 
@@ -205,6 +206,7 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     if e.lrt_instcombine && !analysis_survives(.LAST_RUN_TRACKING, pa) e.lrt_instcombine = false;
     if e.lvi && !e.ac { e.ac = ac_build(f); e.lvi.ac = e.ac; }
     if e.bpi && !analysis_survives(.BPI, pa) { bpi_free(e.bpi); e.bpi = null; }
+    if e.eph && !analysis_survives(.EPHEMERAL_VALUES, pa) { deinit(*e.eph.set); free(e.eph); e.eph = null; }
     if e.bfi && !analysis_survives(.BFI, pa) { bfi_free(e.bfi); e.bfi = null; }
     // MemorySSAAnalysis::Result::invalidate: preserved, and AAManager and DominatorTreeAnalysis survive. AAManager
     // depends on BasicAA's AssumptionCache (never invalidated in LLVM: rebuilt here and re-pointed) and DT, and on
@@ -227,6 +229,7 @@ fam_require :: (f: Value_Id, k: Analysis_Kind) {
         case .BPI; get_bpi(f);
         case .BFI; get_bfi(f);
         case .LAST_RUN_TRACKING;   // an empty LastRunTrackingInfo: nothing to compute
+        case .EPHEMERAL_VALUES; get_eph_cache(f);
     }
 }
 fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
@@ -287,7 +290,7 @@ Pass_Kind :: enum u8 {
     // FunctionAttrs (pass_function_attrs.jai)
     FUNCTION_ATTRS; RPO_FUNCTION_ATTRS; NORECURSE_LTO_INFERENCE;
     // Inliner (pass_inliner.jai), AlwaysInliner (pass_always_inliner.jai)
-    INLINE; ALWAYS_INLINE;
+    INLINE; ALWAYS_INLINE; MODULE_INLINE; INLINER_WRAPPER;
     // ProfileSummaryAnalysis (require<profile-summary>)
     REQUIRE_PROFILE_SUMMARY;
 }
@@ -418,6 +421,8 @@ PASS_TABLE :: Pass_Info.[
     .{"norecurse-lto-inference", .MODULE, .NORECURSE_LTO_INFERENCE, false, .DOMTREE},
     .{"inline", .CGSCC, .INLINE, false, .DOMTREE},   // also inline<only-mandatory>
     .{"always-inline", .MODULE, .ALWAYS_INLINE, false, .DOMTREE},
+    .{"module-inline", .MODULE, .MODULE_INLINE, false, .DOMTREE},
+    .{"inliner-wrapper", .MODULE, .INLINER_WRAPPER, false, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -985,6 +990,8 @@ run_module_pm :: (n: s32) {
             case .RPO_FUNCTION_ATTRS; if should_run_pass(node, NONE) mam_invalidate(rpo_function_attrs_run());
             case .NORECURSE_LTO_INFERENCE; if should_run_pass(node, NONE) mam_invalidate(norecurse_lto_inference_run());
             case .ALWAYS_INLINE; if should_run_pass(node, NONE) mam_invalidate(always_inliner_run());
+            case .MODULE_INLINE; if should_run_pass(node, NONE) mam_invalidate(module_inliner_run());
+            case .INLINER_WRAPPER; if should_run_pass(node, NONE) inliner_wrapper_run();
             case; fatal("internal: '%' is not a module pass", node.name);
         }
         c = pipeline.nodes[c].next;

@@ -377,10 +377,15 @@ clone_and_prune_function_into :: (new_fn: Value_Id, old_fn: Value_Id, vm: *Value
         if inst_op(t) != .BR { i = block(i).next; continue; }
         dest := get_successor(t, 0);
         if block_single_predecessor(dest) == NONE || block_has_address_taken_any(dest) { i = block(i).next; continue; }
+        // BI->eraseFromParent(): its records become the block's trailing records, which the splice at end()
+        // then puts in front of Dest's first instruction
+        trailing := records_take(t);
         erase_inst(t);
         block_rauw(dest, i);
         // I->splice(I->end(), Dest)
+        dfirst := block_first(dest);
         block_move_all_insts_to_end(i, dest);
+        if trailing records_prepend(dfirst, trailing);
         block_erase_from_parent(dest);
     }
     i = begin;
@@ -388,16 +393,6 @@ clone_and_prune_function_into :: (new_fn: Value_Id, old_fn: Value_Id, vm: *Value
         t := block_terminator(i);
         if t != NONE && inst_op(t) == .RET array_add(returns, t);
         i = block(i).next;
-    }
-}
-// BasicBlock::splice(end(), Src): every instruction of src to the end of dest (records included)
-block_move_all_insts_to_end :: (dest: Value_Id, src: Value_Id) {
-    x := block_first(src);
-    while x != NONE {
-        nx := inst(x).next;
-        inst_unlink(x);
-        block_append_inst(dest, x);
-        x = nx;
     }
 }
 // PHINode::removeIncomingValueIf(Predicate, DeletePHIIfEmpty = false) with the kept entries given
@@ -1182,12 +1177,19 @@ add_param_and_fn_basic_attributes :: (cb: Value_Id, vm: *Value_Map, info: *Clone
         inst(nic).attrs = al;
     }
 }
-// CallBase::getParamAttr(ArgNo, Kind): the call-site attribute only
-call_param_attr_any :: (c: Value_Id, k: u32, kind: Attr_Kind) -> *Attr { return attr_set_find(attr_list_param(inst(c).attrs, k), kind); }
+// CallBase::getParamAttr(ArgNo, Kind): the call-site attribute, else the called Function's (getParamAttrOnCalledFunction)
+call_param_attr_any :: (c: Value_Id, k: u32, kind: Attr_Kind) -> *Attr {
+    a := attr_set_find(attr_list_param(inst(c).attrs, k), kind);
+    if a return a;
+    f := call_called_operand_fn(c);
+    if f != NONE return attr_set_find(attr_list_param(glob(f).attrs, k), kind);
+    return null;
+}
 attr_from_range :: (r: Const_Range) -> Attr {
     a: Attr; a.kind = .Range; a.ty = NONE; a.ival = r.lo.bits;
-    lo := NewArray(r.lo.w.count, u64,, allocator = temp); for r.lo.w lo[it_index] = it;
-    hi := NewArray(r.hi.w.count, u64,, allocator = temp); for r.hi.w hi[it_index] = it;
+    lw := ap_words(r.lo); hw := ap_words(r.hi);
+    lo := NewArray(lw.count, u64,, allocator = temp); for lw lo[it_index] = it;
+    hi := NewArray(hw.count, u64,, allocator = temp); for hw hi[it_index] = it;
     a.lo = lo; a.hi = hi;
     return a;
 }
@@ -1324,8 +1326,7 @@ create_alloca_unlinked :: (ty: Type_Id, addrspace: u32, align: u64) -> Value_Id 
 }
 // HandleByValArgumentInit
 handle_byval_argument_init :: (byval_ty: Type_Id, dst: Value_Id, src: Value_Id, src_align: u64, insert_block: Value_Id, ifi: *Inline_Function_Info, called: Value_Id) {
-    b: Irb; irb_set_at(*b, insert_block, block_first(insert_block), true);
-    b.dbg = NONE;
+    b: Irb; irb_set_at_stable(*b, insert_block, block_first(insert_block), true);
     size := const_int(type_int(64), dl_type_store_size(byval_ty));
     dst_align := pointer_alignment(dst);
     ci := irb_memcpy(*b, dst, dst_align, src, src_align, size, false);
@@ -1644,6 +1645,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
                 if ics == NONE || vkind(ics) != .INST || !is_call_base(ics) continue;
                 ni := call_with_merged_deopt(ics, cb, pbs, pbe);
                 inst_insert_before(ni, ics);
+                if vname(ics).count set_name(ni, vname(ics));   // CallBase::Create(ICS, OpDefs, ICS) takes ICS's name
                 replace_all_uses_with(ics, ni);
                 vmap_set(*info.bundle_calls, orig, NONE);
                 erase_inst(ics);
@@ -1659,7 +1661,13 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
         if get_metadata(cb, md_kind_id("callsite")) != NONE || info.contains_memprof fatal("inline: memprof metadata propagation is not implemented yet");
         propagate_call_site_metadata(cb, first_new_block);
         propagate_alloc_token_metadata(called, cb, *vm, *info);
-        if get_metadata(called, md_kind_id("implicit.ref")) != NONE fatal("inline: !implicit.ref propagation is not implemented yet");
+        {
+            k_ir := md_kind_id("implicit.ref");
+            mds: [..] Md_Id; mds.allocator = temp;
+            a := ir.v_md[called];
+            while a != NONE { if ir.attaches[a].kind == k_ir array_add(*mds, ir.attaches[a].md); a = ir.attaches[a].next; }
+            for mds add_metadata(caller, k_ir, it);
+        }
         propagate_inlined_from_metadata(cb, vname(called), vname(caller), first_new_block);
         if ifi.use_assumption_cache {
             ac := get_assumption_cache(caller);
@@ -1689,13 +1697,18 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
                 array_add(*ifi.static_allocas, i);
                 i = inst(i).next;
             }
-            // Caller->getEntryBlock().splice(InsertPoint, FirstNewBlock, AI, I) with I's tail bit set
-            x := ai;
-            while x != i {
-                nx := inst(x).next;
-                inst_unlink(x);
-                inst_insert_before(x, insert_point);
-                x = nx;
+            // Caller->getEntryBlock().splice(InsertPoint (head bit), FirstNewBlock, AI (no head bit), I (tail bit set))
+            {
+                dest_recs := records_take(insert_point);
+                if i != NONE { plus := records_take(ai); records_prepend(i, plus); }
+                x := ai;
+                while x != i {
+                    nx := inst(x).next;
+                    inst_unlink(x);
+                    inst_insert_before(x, insert_point);
+                    x = nx;
+                }
+                if dest_recs attach_records_before(insert_point, dest_recs);
             }
         }
     }
@@ -1714,7 +1727,28 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
             for :early_inc ci_: block_insts(b) {
                 ci := ci_;
                 if inst_op(ci) != .CALL continue;
-                if vararg_vals.count && call_is_must_tail(ci) fatal("inline: forwarding varargs to a musttail call is not implemented yet");
+                if vararg_vals.count && call_is_must_tail(ci) {
+                    attrs := inst(ci).attrs;
+                    arg_attrs: [..] u32; arg_attrs.allocator = temp;
+                    if attrs != 0 || vararg_attrs.count {
+                        for k: 0..cast(s64) func_nparams(inst(ci).ty2) - 1 array_add(*arg_attrs, attr_list_param(attrs, cast(u32) k));
+                    }
+                    for vararg_attrs array_add(*arg_attrs, it);
+                    new_attrs := attr_list_get(attr_list_fn(attrs), attr_list_ret(attrs), arg_attrs);
+                    na := call_num_args(ci);
+                    nci := new_inst(.CALL, vtype(ci), na + cast(u32) vararg_vals.count + 1);
+                    inst(nci).ty2 = inst(ci).ty2;
+                    for k: 0..cast(s64) na - 1 set_op(nci, cast(u32) k, call_arg(ci, cast(u32) k));
+                    for v, k: vararg_vals set_op(nci, na + cast(u32) k, v);
+                    set_op(nci, na + cast(u32) vararg_vals.count, call_callee(ci));
+                    inst_insert_before_adopt(nci, ci);
+                    set_metadata(nci, 0, get_metadata(ci, 0));
+                    inst(nci).attrs = new_attrs;
+                    inst(nci).cc = inst(ci).cc;
+                    rauw_with_metadata(ci, nci);
+                    erase_inst(ci);
+                    ci = nci;
+                }
                 cf := call_called_function(ci);
                 if cf != NONE inlined_deoptimize |= fn_iid(cf) == IID_EXPERIMENTAL_DEOPTIMIZE;
                 child := call_tail_kind(ci);
@@ -1727,8 +1761,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
         }
     }
     if (insert_lifetime || fn_has_fn_attr(caller, .PresplitCoroutine)) && ifi.static_allocas.count {
-        bld: Irb; irb_set_at(*bld, first_new_block, block_first(first_new_block), true);
-        bld.dbg = NONE;
+        bld: Irb; irb_set_at_stable(*bld, first_new_block, block_first(first_new_block), true);
         for ai: ifi.static_allocas {
             if (inst(ai).flags & F_SWIFTERROR) != 0 continue;
             if has_lifetime_markers(ai) continue;
@@ -1744,8 +1777,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
         }
     }
     if info.contains_dynamic_allocas {
-        sb: Irb; irb_set_at(*sb, first_new_block, block_first(first_new_block), true);
-        sb.dbg = NONE;
+        sb: Irb; irb_set_at_stable(*sb, first_new_block, block_first(first_new_block), true);
         saved := irb_intrinsic(*sb, "llvm.stacksave", .[type_ptr(dl_alloca_addrspace())], .[]);
         set_name(saved, "savedstack");
         for ri: returns {
@@ -1785,7 +1817,39 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
                 if block_terminating_deoptimize_call(inst_block(returns[k])) != NONE array_ordered_remove_by_index(*returns, k);
                 else k += 1;
             }
-        } else fatal("inline: deoptimize calls returning a different type than the caller are not implemented yet");
+        } else {
+            normal: [..] Value_Id; normal.allocator = temp;
+            new_deopt := get_or_insert_intrinsic_declaration(IID_EXPERIMENTAL_DEOPTIMIZE, .[fn_ret_type(caller)]);
+            for ri: returns {
+                deopt_call := block_terminating_deoptimize_call(inst_block(ri));
+                if deopt_call == NONE { array_add(*normal, ri); continue; }
+                cconv := glob(call_called_function(deopt_call)).cc;
+                glob(new_deopt).cc = cconv;
+                cur_bb := inst_block(ri);
+                erase_inst(ri);
+                // CreateCall(NewDeoptIntrinsic, args, bundles) at the end of the block (no debug location)
+                nc := ic_clone_inst(deopt_call);
+                clear_all_metadata(nc);
+                ir.v_type[nc] = fn_ret_type(caller);
+                inst(nc).ty2 = glob(new_deopt).value_type;
+                inst(nc).flags &= ~((cast(u32) 3) << TAIL_SHIFT);
+                set_op(nc, nops(nc) - 1, new_deopt);
+                deopt_attrs := inst(deopt_call).attrs;
+                erase_inst(deopt_call);
+                block_append_inst(cur_bb, nc);
+                inst(nc).cc = cconv;
+                inst(nc).attrs = deopt_attrs;
+                ret := new_inst(.RET, ir.t_void, ifx type_kind(vtype(nc)) == .VOID then cast(u32) 0 else 1);
+                if type_kind(vtype(nc)) != .VOID set_op(ret, 0, nc);
+                block_append_inst(cur_bb, ret);
+                l := inst(nc).attrs;
+                if l != 0 {
+                    ps := ir.attr_lists[l].params;
+                    inst(nc).attrs = attr_list_get(attr_list_fn(l), attr_set_type_incompatible(vtype(nc), attr_list_ret(l)), ps);
+                }
+            }
+            returns = normal;
+        }
     }
     if inlined_must_tail {
         normal: [..] Value_Id; normal.allocator = temp;
@@ -1863,10 +1927,10 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
         loc: Md_Id = NONE;
         for ri: returns {
             bi := create_br(after_call_bb);
-            inst_insert_before(bi, ri);
+            inst_insert_before_adopt(bi, ri);
             loc = get_metadata(ri, 0);
             set_metadata(bi, 0, loc);
-            erase_inst_moving_records(ri);
+            erase_inst(ri);
         }
         if created_br != NONE set_metadata(created_br, 0, loc);
     } else if returns.count {
@@ -1880,7 +1944,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
         // AfterCallBB->splice(AfterCallBB->begin(), ReturnBB)
         block_splice_all_at_begin(after_call_bb, return_bb);
         if created_br != NONE set_metadata(created_br, 0, get_metadata(returns[0], 0));
-        erase_inst_moving_records(returns[0]);
+        erase_inst(returns[0]);
         block_erase_from_parent(return_bb);
     } else if has_uses(cb) {
         if created_br != NONE set_metadata(created_br, 0, NONE);
@@ -1930,27 +1994,43 @@ call_with_merged_deopt :: (ics: Value_Id, parent: Value_Id, pbs: u32, pbe: u32) 
     copy_metadata(nc, ics);
     return nc;
 }
-// Instruction::eraseFromParent of a return whose debug records move to the next instruction (none follows a terminator)
-erase_inst_moving_records :: (i: Value_Id) {
-    if inst(i).records fatal("inline: a return with debug records in front of it is not supported yet");
-    erase_inst(i);
+// IRBuilder(BB, IP): the insertion point's getStableDebugLoc becomes the builder's location
+irb_set_at_stable :: (b: *Irb, bb: Value_Id, pt: Value_Id, head: bool) {
+    b.bb = bb; b.pt = pt; b.head = head;
+    if pt != NONE {
+        x := pt;
+        if is_debug_or_pseudo_inst(x) && call_iid(x) != IID_PSEUDOPROBE {
+            n := inst(x).next;
+            while n != NONE && is_debug_or_pseudo_inst(n) n = inst(n).next;
+            if n != NONE x = n;
+        }
+        b.dbg = get_metadata(x, 0);
+    }
 }
-// OrigBB->splice(Pos, Src, Src->begin(), Src->end()): every instruction of src in front of pos
-block_splice_all_before :: (dest: Value_Id, pos: Value_Id, src: Value_Id) {
-    x := block_first(src);
+// BasicBlock::splice(Dest, Src, Src->begin(), Src->end()) with spliceDebugInfo's rules for a whole block (First has
+// the head bit, Last = end() carries no trailing records here): the records in front of Dest go in front of the
+// first moved instruction unless Dest has the head bit. dest = NONE: at the end of the block.
+block_splice_whole :: (dest_bb: Value_Id, dest: Value_Id, dest_head: bool, src: Value_Id) {
+    first := block_first(src);
+    if first == NONE return;
+    dest_recs: u32 = 0;
+    if dest != NONE dest_recs = records_take(dest);
+    x := first;
     while x != NONE {
         nx := inst(x).next;
         inst_unlink(x);
-        inst_insert_before(x, pos);
+        if dest != NONE inst_insert_before(x, dest); else block_append_inst(dest_bb, x);
         x = nx;
     }
+    if dest_recs {
+        if dest_head attach_records_before(dest, dest_recs);
+        else records_prepend(first, dest_recs);
+    }
 }
-// Dest->splice(Dest->begin(), Src)
-block_splice_all_at_begin :: (dest: Value_Id, src: Value_Id) {
-    first := block_first(dest);
-    if first == NONE { block_move_all_insts_to_end(dest, src); return; }
-    block_splice_all_before(dest, first, src);
-}
+block_splice_all_before :: (dest: Value_Id, pos: Value_Id, src: Value_Id) { block_splice_whole(inst_block(pos), pos, false, src); }
+block_splice_all_at_begin :: (dest: Value_Id, src: Value_Id) { block_splice_whole(dest, block_first(dest), true, src); }
+block_move_all_insts_to_end :: (dest: Value_Id, src: Value_Id) { block_splice_whole(dest, NONE, false, src); }
+
 // IRBuilder::CreateLifetimeStart / CreateLifetimeEnd(Ptr)
 irb_lifetime :: (b: *Irb, id: Intrinsic_Id, ptr: Value_Id) -> Value_Id {
     f := get_or_insert_intrinsic_declaration(id, .[vtype(ptr)]);
@@ -2150,3 +2230,10 @@ fn_param_align :: (f: Value_Id, k: u32) -> u64 { a := attr_set_find(attr_list_pa
 // getKnownAlignment(V, DL, CxtI, AC, DT)
 get_known_alignment :: (v: Value_Id, cxt: Value_Id, ac: *Assumption_Cache, dt: *Dom_Tree) -> u64 { return get_or_enforce_known_alignment(v, 0, cxt, ac, dt); }
 block_num_predecessors :: (b: Value_Id) -> u32 { return cast(u32) block_num_preds(b); }
+
+// Instruction metadata cleared (a fresh CallInst carries none)
+clear_all_metadata :: (i: Value_Id) {
+    all: [..] Kind_Md; all.allocator = temp;
+    get_all_metadata(i, *all);
+    for all set_metadata(i, it.kind, NONE);
+}

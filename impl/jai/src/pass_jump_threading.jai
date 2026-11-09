@@ -685,15 +685,30 @@ find_available_ptr_load_store :: (loc: Mem_Loc, access_ty: Type_Id, at_least_ato
             sp_ok := (is_inst(stripped) && inst_op(stripped) == .ALLOCA) || vkind(stripped) == .GLOBAL_VAR;
             st_ok := (is_inst(store_ptr) && inst_op(store_ptr) == .ALLOCA) || vkind(store_ptr) == .GLOBAL_VAR;
             if sp_ok && st_ok && stripped != store_ptr continue;
-            if !mr_is_mod_set(aa_mod_ref_inst_loc(aaq, i, loc)) continue;
+            if !aaq {
+                if are_non_overlap_same_base_load_and_store(loc.ptr, access_ty, op(i, 1), vtype(op(i, 0))) continue;
+            } else if !mr_is_mod_set(aa_mod_ref_inst_loc(aaq, i, loc)) continue;
             return NONE, inst_next(scan_from);
         }
         if may_write_to_memory(i) {
-            if !mr_is_mod_set(aa_mod_ref_inst_loc(aaq, i, loc)) continue;
+            if aaq && !mr_is_mod_set(aa_mod_ref_inst_loc(aaq, i, loc)) continue;
             return NONE, inst_next(scan_from);
         }
     }
     return NONE, scan_from;
+}
+
+// areNonOverlapSameBaseLoadAndStore (Loads.cpp; findAvailablePtrLoadStore without AA)
+are_non_overlap_same_base_load_and_store :: (load_ptr: Value_Id, load_ty: Type_Id, store_ptr: Value_Id, store_ty: Type_Id) -> bool {
+    lw := dl_index_type_size_bits(vtype(load_ptr));
+    sw := dl_index_type_size_bits(vtype(store_ptr));
+    if lw != sw return false;
+    lb, lo := strip_and_accumulate_constant_offsets(load_ptr, ap_zero(lw), false);
+    sb, so := strip_and_accumulate_constant_offsets(store_ptr, ap_zero(sw), false);
+    if lb != sb return false;
+    lr := cr_new(lo, ap_add(lo, ap_from_u64(lw, dl_type_store_size(load_ty))));
+    sr := cr_new(so, ap_add(so, ap_from_u64(sw, dl_type_store_size(store_ty))));
+    return cr_is_empty_set(cr_intersect(lr, sr));
 }
 
 // simplifyPartiallyRedundantLoad
