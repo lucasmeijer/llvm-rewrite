@@ -31,6 +31,7 @@ import autoupgrade;
 import loopsimplify;
 import sccp;
 import lvi;
+import scev;
 import tli;
 
 fn cv_not_ported(what: const u8[:]) { fatal(str("CorrelatedValuePropagation: ", what, " is not ported yet")); }
@@ -315,13 +316,11 @@ fn cv_process_switch(si: i32) -> bool {
     var cond = op(si, 0);
     let bb = inst_parent(si);
     var changed = false;
-    var succs: i32[>..<] = [];
-    var counts: i64[>..<] = [];
+    // SuccessorsCount (DenseMap<BasicBlock *, int>)
+    var counts = hm_new();
     for k in term_nsucc(si) {
-        let s = term_succ(si, k);
-        var found = false;
-        for j in succs.len { if succs[j] == s { counts[j] = counts[j] + 1; found = true; } }
-        if !found { succs.push(s); counts.push(1); }
+        let s = (term_succ(si, k) as i64) as u64;
+        hm_put(counts, s, hm_get(counts, s, 0) + 1);
     }
     {
         swp_begin(si);
@@ -346,14 +345,12 @@ fn cv_process_switch(si: i32) -> bool {
                 swp_remove_case(si, k);
                 cond = op(si, 0);
                 changed = true;
-                for j in succs.len {
-                    if succs[j] == succ {
-                        counts[j] = counts[j] - 1;
-                        if counts[j] == 0 {
-                            let ups: DTUpdate[1] = [DTUpdate { kind: DT_DELETE, from: bb, to: succ }];
-                            dtu_apply_updates_permissive(ups);
-                        }
-                    }
+                let sk = (succ as i64) as u64;
+                let c = hm_get(counts, sk, 0) - 1;
+                hm_put(counts, sk, c);
+                if c == 0 {
+                    let ups: DTUpdate[1] = [DTUpdate { kind: DT_DELETE, from: bb, to: succ }];
+                    dtu_apply_updates_permissive(ups);
                 }
                 continue;
             }
@@ -372,9 +369,7 @@ fn cv_process_switch(si: i32) -> bool {
             block_append_inst(nb, ui);
             block_remove_predecessor(dd, bb, false);
             set_op(si, 1, nb);
-            var cnt: i64 = 0;
-            for j in succs.len { if succs[j] == dd { cnt = counts[j]; } }
-            if cnt == 1 {
+            if hm_get(counts, (dd as i64) as u64, 0) == 1 {
                 let ups: DTUpdate[1] = [DTUpdate { kind: DT_DELETE, from: bb, to: dd }];
                 dtu_apply_updates(ups);
             }

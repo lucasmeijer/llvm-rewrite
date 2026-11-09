@@ -24,6 +24,15 @@
   `--per-function`), `debugify,gvn`, `debugify,gvn<memoryssa>`, `require<memoryssa>,gvn,print<memoryssa>` and
   `gvn<memoryssa>,print<memoryssa>` (`--analysis`): 0 silent mismatches.
 
+- L1.analysis.lvi, L1.cvp, L1.analysis.bfi, L1.jump-threading COMPLETE (lvi 6/6, cvp 104/104, bfi 64/64 incl.
+  branch-prob, jump-threading 194/194). Sweeps over every round-tripping corpus file, whole-file and
+  `--per-function`: `correlated-propagation`, `jump-threading`, `require<branch-prob>,require<block-freq>,jump-threading`,
+  `jump-threading,correlated-propagation`, and `--analysis` `jump-threading,print<lazy-value-info>`,
+  `print<branch-prob>`, `print<block-freq>`: 0 differs, 0 bad-ir. The loud ones are other files' gaps (X86 CPUs the
+  TTI doesn't know, separate_storage in BasicAA, inttoptr offsets in ValueTracking, getMostGenericTBAA, is.constant
+  folding, dbg_assign in RemoveRedundantDbgInstrs, ppc_fp128 literals). Speed (by hand, no `@perf` line times them):
+  on the four tests/perf/compile programs CVP/JT/BPI/BFI cost about what LLVM's do (SPASS: `sroa,correlated-propagation`
+  0.20 s vs LLVM 0.35 s); linear on every tests/perf/scaling shape after three fixes (see "LVI, CVP, JumpThreading").
 - L1.simplifycfg 563/578 (all 289 roundtrip, 274/289 opt). Left, other passes/flags: debugify ×3,
   `-strip-debug`, `-O1`, instcombine visitors/LibCallSimplifier ×4 (`duplicate-phis`, `merge-cond-stores`,
   `unreachable_assume`, ...); SimplifyCFG pieces still failing loudly: cloning debug records (bonus instructions,
@@ -181,6 +190,10 @@
 | `src/instident.goose` | isIdenticalToWhenDefined, hasSameSpecialState, attribute intersection, andIRFlags |
 | `src/salvage.goose` | salvageDebugInfo and the DIExpression helpers it needs (foldConstantMath, appendOpsToArg, ...) |
 | `src/knowledge.goose` | salvageKnowledge (`--enable-knowledge-retention`, AssumeBundleBuilder) |
+| `src/lvi.goose` | LazyValueInfo.cpp: the cache, the solver, the query interface (`lvi_*`), print<lazy-value-info> |
+| `src/cvp.goose` | CorrelatedValuePropagation.cpp |
+| `src/jt.goose` | JumpThreading.cpp + SimplifyInstructionsInBlock, cloneNoAliasScopes & co, findAvailablePtrLoadStore, DuplicateInstructionsInSplitBetween |
+| `src/bpi.goose`, `src/bfi.goose` | BranchProbability + BranchProbabilityInfo.cpp (`bp_*`, `bpi_*`); ScaledNumber, BlockFrequencyInfoImpl, BlockFrequencyInfo (`sn_*`, `bf_*`, `bfi_*`) |
 | `src/simplifycfg.goose` | SimplifyCFG.cpp + SimplifyCFGPass.cpp: `simplifycfg_run(fv, SCOpts)`, every `simplifycfg<...>` option (`scf_` prefix) |
 | `src/cfgutil.goose` | Local.cpp/BasicBlockUtils.cpp CFG helpers (`cu_*`): ConstantFoldTerminator, MergeBlockIntoPredecessor, removeUnreachableBlocks, DeleteDeadBlocks, changeToUnreachable, combineMetadata, SplitBlockPredecessors, block RAUW incl. BlockAddress, debug-record splice/drop |
 | `src/speculate.goose` | isSafeToSpeculativelyExecute (`spec_safe`), isDereferenceableAndAlignedPointer incl. assume bundles, canBeFreed, willNotFreeBetween |
@@ -897,3 +910,34 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   a linear `position` per case, quadratic), loops-many 2.4x: PHITransAddr's scan of every user of a GEP base is
   quadratic in LLVM too (same algorithm), our dominance query per user is ~3x LLVM's cost.
 - Not ported: optimization remarks (never printed); `-enable-gvn-memoryssa` together with MemDep (loud).
+## LVI, CVP, JumpThreading, BPI/BFI (lvi, cvp, jt, bpi, bfi)
+
+- Facts: knowledge/llvm/lazy-value-info-and-jump-threading.md. LazyValueInfo is one result at a time (`lvi_get(fv)`,
+  `A_LVI`), lazy like LLVM's (the Impl exists after the first query). It survives passes that preserve it
+  (JumpThreading), so cached lattice values store wide APInts as IR constants (`lv_store`/`lv_load`: the AP pool is
+  reset after every pass).
+- LVIValueHandle without callbacks: while LVI holds handles (`vh_lvi_n > 0`), ir.goose's `rauw` and `val_set_dead`
+  queue the value (`vh_lvi_events`); every LVI entry point drains the queue first (`lvi_drain` = eraseValue). LVI never
+  changes IR, so draining lazily is exact. Code that replaces uses without `rauw` (Use::set, replaceUsesWithIf) does
+  not fire the handle, exactly like LLVM.
+- The AssumptionCache LVI uses is assume.goose's per-function cache, built once (`ac_build`) and never invalidated
+  by CVP/JT (LLVM's isn't either: stale after SSAUpdater rewrites). Passes RAUW through `cv_rauw`/`jt_rauw`, which
+  also call `ac_rauw` (AffectedValueCallbackVH).
+- JT's BatchAAResults has the DT disabled: `jt_mod_ref` sets `sq_no_dt` around `aa_inst_loc_mr`, or BasicAA's
+  ValueTracking queries read the lazily-updated (stale) DT; with it, pr79175.ll PRE'd a load across an aliasing store.
+- BPI/BFI are one result each (`bpi_fn`, `bf_fn`, `A_BPI`, `A_BFI`), invalidated unless preserved or PA_CFG is.
+  JT computes them only for threaded blocks with branch weights (runExternalAnalysis invalidates loops, cycles,
+  postdom, MemorySSA, SCEV and flushes the DTU first) and keeps them up to date. `bfi_freq`/`bfi_set_freq` are
+  getBlockFreq/setBlockFreq (named so they don't clash with the analysis getter `bfi_get(fv)`).
+- Perf traps fixed: Intrinsic::getDeclarationIfExists for the guard intrinsic is a symbol-table lookup (a scan of the
+  module's functions per LVI Impl made CVP quadratic in the number of functions: SPASS 0.5 s -> 0.2 s);
+  DomTreeUpdater's DeletedBBs membership is a stamp per block (dtu.goose; a linear `position` made JT quadratic on
+  scaling/diamonds and allocas); processSwitch's SuccessorsCount is a hash map (was quadratic on scaling/switch).
+- Shared fixes on the way: splitBasicBlock's new branch gets the split point's debug location (irutil `split_block`);
+  DominatorTree::dominates(Instruction*, BasicBlock*) for invoke/callbr definitions (edge dominance, domtree.goose);
+  MergeBasicBlockIntoOnlyPred of an address-taken block (cfgutil); opt accepts `-aa-pipeline <value>` and
+  `-verify-each`; ConstantRange getEquivalentPredWithFlippedSignedness / areInsensitiveToSignedness*.
+- Not ported (fail loudly): -lvi-per-pred-ranges (unknown flag), key-instruction atom groups in JT cloning,
+  DebugLoc::getMergedLocation of two different locations (unfoldSelectInstr), SplitEdge through splitBlockBefore,
+  -use-iterative-bfi-inference, ScaledNumber printing of numbers that need the x87 APFloat fallback. BPI's SccInfo
+  iterates SccBlocks in insertion order (LLVM: DenseMap pointer order); nothing in the corpus depends on it.

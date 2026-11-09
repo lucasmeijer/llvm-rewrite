@@ -18,6 +18,17 @@ var dtu_pend: DTUPend[>..<];         // PendUpdates
 var dtu_dt_idx: i64 = 0;             // PendDTUpdateIndex
 var dtu_pdt_idx: i64 = 0;            // PendPDTUpdateIndex
 var dtu_deleted: i32[>..<];          // DeletedBBs (SmallPtrSet; iterated in insertion order)
+var dtu_del_stamp: u32[>..];         // membership in DeletedBBs: block index -> dtu_del_epoch
+var dtu_del_epoch: u32 = 1;
+fn dtu_deleted_clear() { dtu_deleted.clear(); dtu_del_epoch += 1; }
+fn dtu_deleted_has(bb: i32) -> bool { let b = block_of(bb) as i64; return b < dtu_del_stamp.len && dtu_del_stamp[b] == dtu_del_epoch; }
+fn dtu_deleted_insert(bb: i32) {
+    if dtu_deleted_has(bb) { return; }
+    let b = block_of(bb) as i64;
+    while dtu_del_stamp.len <= b { dtu_del_stamp.push(0); }
+    dtu_del_stamp[b] = dtu_del_epoch;
+    dtu_deleted.push(bb);
+}
 var dtu_recalc_dt: bool = false;     // IsRecalculatingDomTree
 var dtu_recalc_pdt: bool = false;
 
@@ -32,7 +43,7 @@ fn dtu_begin(fv: i32, use_dt: bool, use_pdt: bool, lazy: bool) {
     dtu_pend.clear();
     dtu_dt_idx = 0;
     dtu_pdt_idx = 0;
-    dtu_deleted.clear();
+    dtu_deleted_clear();
     dtu_recalc_dt = false;
     dtu_recalc_pdt = false;
 }
@@ -47,7 +58,7 @@ fn dtu_has_pending_pdt_updates() -> bool { dtu_pdt && dtu_pend.len != dtu_pdt_id
 fn dtu_has_pending_updates() -> bool { dtu_has_pending_dt_updates() || dtu_has_pending_pdt_updates() }
 fn dtu_is_bb_pending_deletion(bb: i32) -> bool {
     if !dtu_lazy || dtu_deleted.len == 0 { return false; }
-    return position(dtu_deleted, bb) >= 0;
+    return dtu_deleted_has(bb);
 }
 
 fn dtu_tree_updates(t: i64, ups: const DTUpdate[:]) { dt_apply_updates(dtu_f, t, ups); }
@@ -143,7 +154,7 @@ fn dtu_force_flush_deleted_bb() -> bool {
         dtu_erase_del_bb_node(bb);
         block_erase(bb);
     }
-    dtu_deleted.clear();
+    dtu_deleted_clear();
     return true;
 }
 
@@ -261,7 +272,7 @@ fn dtu_validate_delete_bb(bb: i32) {
 fn dtu_delete_bb(bb: i32) {
     dtu_validate_delete_bb(bb);
     if dtu_lazy {
-        if position(dtu_deleted, bb) < 0 { dtu_deleted.push(bb); }
+        dtu_deleted_insert(bb);
         return;
     }
     dtu_erase_del_bb_node(bb);

@@ -104,12 +104,11 @@ fn lv_get_impl() {
     lv_impl = true;
     lv_guard = lv_find_guard_decl(lv_fn);
 }
+// Intrinsic::getDeclarationIfExists(M, experimental_guard): a module symbol table lookup
 fn lv_find_guard_decl(fv: i32) -> i32 {
-    var f = modules[globs[glob_of(fv)].module].first_func;
-    while f >= 0 {
-        if func_iid(f) == IID_experimental_guard { return f; }
-        f = globs[glob_of(f)].next;
-    }
+    let st = modules[globs[glob_of(fv)].module].symtab;
+    let f = symtab_lookup(st, intern("llvm.experimental.guard"));
+    if f >= 0 && is_func(f) && func_iid(f) == IID_experimental_guard { return f; }
     return -1;
 }
 

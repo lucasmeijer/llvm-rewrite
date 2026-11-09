@@ -230,6 +230,11 @@ handle decides what `erase`/`RAUW` does to it: null it out, follow the replaceme
 event kind) to a queue that the owning analysis drains. That replaces virtual `deleted()`/`allUsesReplacedWith()`
 with data plus a `match`.
 
+Implemented so far: LazyValueInfo's LVIValueHandles (CallbackVH: deleted / allUsesReplacedWith both erase the value
+from the cache). While LVI holds any handle (`vh_lvi_n`), `rauw` and `val_set_dead` append the value to
+`vh_lvi_events`; lvi.goose drains the queue at each of its entry points. Since LVI never changes IR, handling the
+events late is exact. MemorySSA's handles are their own (§8.6).
+
 ## 6. Text in, text out
 
 - **Lexer**: one pass over the input bytes (read with `read_file` into a global buffer), tokens are (kind, offset,

@@ -54,6 +54,15 @@ that only went away with the behaviour described (impl/jai, sweeps over every ro
 - cloneInstructions clones `llvm.experimental.noalias.scope.decl` scopes as anonymous distinct scopes
   `!{!self, domain, !"name:thread"}` and rewrites `!noalias`/`!alias.scope` of the copies.
 - getJumpThreadDuplicationCost uses `TTI.getInstructionCost(TCK_SizeAndLatency)` (free instructions don't count).
+- simplifyPartiallyRedundantLoad's BatchAAResults calls `disableDominatorTree()` (the DT is updated lazily): BasicAA's
+  ValueTracking queries must then see no DT at all. Answering them with the stale tree made BasicAA call a store to
+  `gep inbounds @f, %idx` NoModRef for a load of `@f` and PRE the load across the store (verified: impl/goose,
+  JumpThreading/pr79175.ll).
+- tryToUnfoldSelectInCurrBB's SplitBlockAndInsertIfThen gives the new conditional branch the debug location of the
+  `br` that `splitBasicBlock` created, which is the split point's (`I->getStableDebugLoc()` without its atom group)
+  (verified: JumpThreading/preserving-debugloc-fold-select.ll).
+- MergeBasicBlockIntoOnlyPred of an address-taken block replaces the BlockAddress's uses with `inttoptr (i32 1)` and
+  destroys it (reached by JT on SCCP/indirectbr.ll).
 
 ## BranchProbabilityInfo
 - `calcZeroHeuristics` ignores the result of `TLI->getLibFunc(*CalledFn, Func)`: Func is set from the *name* before
@@ -63,6 +72,9 @@ that only went away with the behaviour described (impl/jai, sweeps over every ro
   of its own SCC as "outside" (header/exiting bits). `SccBlocks` is a DenseMap iterated in pointer order in
   getSccEnterBlocks/ExitBlocks; impl/jai uses insertion order (no test depends on it so far).
 - Printing: `0x%08x / 0x%08x = %.2f%%` with the percentage rounded by `rint` first.
+- calcFloatingPointHeuristics: `CmpInst::isTrueWhenEqual` of an FP predicate is true only for `true`, `ueq`, `uge`,
+  `ule`, so `fcmp oeq` gets the "unlikely equal" weights the wrong way round from what the comment suggests:
+  `{FPTakenProb, FPUntakenProb}` = 62.5% for the true edge (verified: print<branch-prob> sweep, InstCombine/fmod.ll).
 
 ## BlockFrequencyInfo
 - `print<block-freq>` prints every block in function order; a block unreachable from the entry has no node:

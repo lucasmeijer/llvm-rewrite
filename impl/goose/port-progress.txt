@@ -137,3 +137,11 @@ lib/Transforms/Utils/VNCoercion.cpp 1
 lib/Transforms/Scalar/DeadStoreElimination.cpp 0.97  # manual: all but shortenAssignment's dbg_assign updates (loud) and the legacy pass
 lib/IR/ConstantRangeList.cpp 0.1  # intersectWith only (dse.goose)
 lib/Transforms/Scalar/MemCpyOptimizer.cpp 0.98  # manual: all but mergeDIAssignID of stores with DIAssignIDs (loud) and the legacy pass
+
+# --- L1.analysis.lvi, L1.cvp, L1.analysis.bfi, L1.jump-threading (2026-11)
+lib/Analysis/LazyValueInfo.cpp 0.95  # manual: all but -lvi-per-pred-ranges (fails loudly) and the legacy wrapper (heuristic 0.98)
+lib/Transforms/Scalar/CorrelatedValuePropagation.cpp 1  # manual: every process* function, runImpl, run (heuristic 0.99)
+lib/Transforms/Scalar/JumpThreading.cpp 0.97  # manual: all; loud: key-instruction atom remapping, getMergedLocation of two different locations, SplitEdge via splitBlockBefore (heuristic 0.99)
+lib/Analysis/BranchProbabilityInfo.cpp 0.95  # manual: BPIConstruction whole, the result and printer; no -print-bpi, legacy wrapper (heuristic 0.93)
+lib/Analysis/BlockFrequencyInfoImpl.cpp 0.9  # + the BasicBlock instantiation of BlockFrequencyInfoImpl.h; no -use-iterative-bfi-inference, debug dumps (heuristic 0.85)
+lib/Analysis/BlockFrequencyInfo.cpp 0.4  # analysis, calculate, getBlockFreq/setBlockFreq, printer; no view/DOT, profile-count API, legacy wrapper
