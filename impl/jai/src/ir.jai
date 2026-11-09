@@ -1081,6 +1081,7 @@ const_aggregate :: (kind: Value_Kind, type: Type_Id, ops: [] Value_Id) -> Value_
         if is_undef return const_undef(type);
         return const_aggregate_raw(kind, type, ops);
     }
+    if ops.count == 0 return const_zero(type);   // ConstantArray::getImpl: an empty array is ConstantAggregateZero
     c := ops[0];
     all_same := true;
     for ops if it != c { all_same = false; break; }

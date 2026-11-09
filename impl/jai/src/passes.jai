@@ -297,6 +297,9 @@ Pass_Kind :: enum u8 {
     INLINE; ALWAYS_INLINE; MODULE_INLINE; INLINER_WRAPPER;
     // ProfileSummaryAnalysis (require<profile-summary>)
     REQUIRE_PROFILE_SUMMARY;
+    // IPO: GlobalOpt, GlobalDCE, ConstantMerge, StripDeadPrototypes, EliminateAvailableExternally, Internalize,
+    // DeadArgumentElimination, ArgumentPromotion (pass_global_opt.jai, pass_global_dce.jai, ...)
+    GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
 }
 
 Pass_Info :: struct {
@@ -429,6 +432,15 @@ PASS_TABLE :: Pass_Info.[
     .{"always-inline", .MODULE, .ALWAYS_INLINE, false, .DOMTREE},
     .{"module-inline", .MODULE, .MODULE_INLINE, false, .DOMTREE},
     .{"inliner-wrapper", .MODULE, .INLINER_WRAPPER, false, .DOMTREE},
+    .{"globalopt", .MODULE, .GLOBAL_OPT, false, .DOMTREE},
+    .{"globaldce", .MODULE, .GLOBAL_DCE, false, .DOMTREE},   // also globaldce<vfe-linkage-unit-visibility>
+    .{"constmerge", .MODULE, .CONSTANT_MERGE, false, .DOMTREE},
+    .{"strip-dead-prototypes", .MODULE, .STRIP_DEAD_PROTOTYPES, false, .DOMTREE},
+    .{"elim-avail-extern", .MODULE, .ELIM_AVAIL_EXTERN, false, .DOMTREE},
+    .{"internalize", .MODULE, .INTERNALIZE, false, .DOMTREE},   // also internalize<preserve-gv=...>
+    .{"deadargelim", .MODULE, .DEAD_ARG_ELIM, false, .DOMTREE},
+    .{"argpromotion", .CGSCC, .ARG_PROMOTION, false, .DOMTREE},
+    .{"assign-guid", .MODULE, .ASSIGN_GUID, false, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -449,6 +461,8 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "simple-loop-unswitch<") && name[name.count - 1] == #char ">" return lookup_pass("simple-loop-unswitch");
     if begins_with(name, "function-attrs<") && name[name.count - 1] == #char ">" return lookup_pass("function-attrs");
     if begins_with(name, "inline<") && name[name.count - 1] == #char ">" return lookup_pass("inline");
+    if begins_with(name, "globaldce<") && name[name.count - 1] == #char ">" return lookup_pass("globaldce");
+    if begins_with(name, "internalize<") && name[name.count - 1] == #char ">" return lookup_pass("internalize");
     return null;
 }
 
@@ -900,6 +914,7 @@ parse_cl_opt :: (arg: string) -> bool {
     // -mattr is a cl::list (CommaSeparated): repeated options accumulate
     if name == "mattr" && has_value && tti_opts.mattr.count { tti_opts.mattr = sprint("%,%", tti_opts.mattr, value); return true; }
     if ipo_parse_cl_opt(name, value, has_value) return true;   // cgscc_pm.jai, pass_function_attrs.jai, inliner
+    if globals_parse_cl_opt(name, value, has_value) return true;   // pass_global_opt.jai, internalize, globaldce, ...
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {
@@ -1001,6 +1016,14 @@ run_module_pm :: (n: s32) {
             case .ALWAYS_INLINE; if should_run_pass(node, NONE) mam_invalidate(always_inliner_run());
             case .MODULE_INLINE; if should_run_pass(node, NONE) mam_invalidate(module_inliner_run());
             case .INLINER_WRAPPER; if should_run_pass(node, NONE) inliner_wrapper_run();
+            case .GLOBAL_OPT; if should_run_pass(node, NONE) mam_invalidate(global_opt_run());
+            case .GLOBAL_DCE; if should_run_pass(node, NONE) mam_invalidate(global_dce_run(node));
+            case .CONSTANT_MERGE; if should_run_pass(node, NONE) mam_invalidate(constant_merge_run());
+            case .STRIP_DEAD_PROTOTYPES; if should_run_pass(node, NONE) mam_invalidate(strip_dead_prototypes_run());
+            case .ELIM_AVAIL_EXTERN; if should_run_pass(node, NONE) mam_invalidate(elim_avail_extern_run());
+            case .INTERNALIZE; if should_run_pass(node, NONE) mam_invalidate(internalize_run(node));
+            case .ASSIGN_GUID; if should_run_pass(node, NONE) mam_invalidate(assign_guid_run());
+            case .DEAD_ARG_ELIM; if should_run_pass(node, NONE) mam_invalidate(dead_arg_elim_run());
             case; fatal("internal: '%' is not a module pass", node.name);
         }
         c = pipeline.nodes[c].next;
@@ -1139,7 +1162,9 @@ opt_main :: () {
         if a == "-S" continue;
         if a == "-o" { if i >= args.count fatal("-o needs a file"); output = args[i]; i += 1; continue; }
         // cl::list / value-required options also take their value from the next argument
-        if a == "-disable-builtin" || a == "--disable-builtin" || a == "-enable-builtin" || a == "--enable-builtin" {
+        if a == "-disable-builtin" || a == "--disable-builtin" || a == "-enable-builtin" || a == "--enable-builtin" ||
+           a == "-internalize-public-api-list" || a == "--internalize-public-api-list" ||
+           a == "-internalize-public-api-file" || a == "--internalize-public-api-file" {
             if i >= args.count fatal("option % needs a value", a);
             if !parse_cl_opt(tprint("%=%", a, args[i])) fatal("unsupported option '%'", a);
             i += 1;

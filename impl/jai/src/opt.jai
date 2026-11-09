@@ -159,6 +159,16 @@
 #load "iv_descriptors.jai";
 #load "lv_legality.jai";
 #load "lv_pass.jai";
+#load "ipo_utils.jai";
+#load "md5.jai";
+#load "pass_global_dce.jai";
+#load "pass_constant_merge.jai";
+#load "pass_strip_dead_prototypes.jai";
+#load "pass_elim_avail_extern.jai";
+#load "pass_internalize.jai";
+#load "pass_global_opt.jai";
+#load "pass_dead_arg_elim.jai";
+#load "pass_assign_guid.jai";
 
 main :: () { opt_main(); }
 
