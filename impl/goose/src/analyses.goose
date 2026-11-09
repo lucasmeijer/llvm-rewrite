@@ -19,6 +19,12 @@ let A_VERIFY = 20;
 let A_TARGET_IR = 21;        // TargetIRAnalysis: require<target-ir> creates the function's subtarget
 let A_PHI_VALUES = 23;       // PhiValuesAnalysis: computed lazily by its users; nothing reads it any more
 let A_ORE = 22;              // OptimizationRemarkEmitterAnalysis: no state without -pass-remarks-with-hotness           // VerifierAnalysis: require<verify> is accepted; no verifier yet (the harness verifies our output)
+// Analyses beyond the function level (bits above PA_FN): the call graph and the CGSCC proxies
+let A_LCG = 27;              // LazyCallGraphAnalysis (module)
+let A_FAMPROXY = 28;         // FunctionAnalysisManagerCGSCCProxy
+let A_SCC_ALL = 29;          // AllAnalysesOn<LazyCallGraph::SCC>
+let A_NOOP_CGSCC = 30;       // NoOpCGSCCAnalysis
+let PA_FN: u32 = 0x07FFFFFF; // every function analysis (bits 0..26): AllAnalysesOn<Function>
 let PA_ALL: u32 = 0xFFFFFFFF;
 let PA_NONE: u32 = 0;
 let PA_CFG: u32 = 0x1B;      // domtree | postdomtree | loops | cycles

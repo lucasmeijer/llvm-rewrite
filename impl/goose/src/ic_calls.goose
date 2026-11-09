@@ -37,6 +37,7 @@ import fpu;
 import ic;
 import ic_builder;
 import ic_common;
+import wvh;
 import ic_compares;
 import ic_andorxor;
 import ic_demanded;
@@ -3635,6 +3636,10 @@ fn transform_const_expr_cast_call(ci: i32) -> bool {
         nv = cst;
     }
     if !use_empty(ci) { ic_replace_inst_uses_with(ci, nv); }
+    else if wvh_live > 0 {
+        // Caller->hasValueHandle(): ValueIsRAUWd when the type matches, else ValueIsDeleted
+        if oldrt == vals[nv].ty { wvh_value_rauwd(ci, nv); } else { wvh_value_deleted(ci); }
+    }
     ic_erase(ci);
     return true;
 }

@@ -61,6 +61,11 @@ import memcpyopt;
 import reassociate;
 import constraint_elimination;
 import aggressive_instcombine;
+import lcg;
+import cgscc;
+import inliner;
+import function_attrs;
+import psi;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -76,6 +81,22 @@ let P_INVALIDATE_GLOBALS_AA = 6;
 let P_DEBUGIFY = 7;
 let P_CHECK_DEBUGIFY = 8;
 let P_INFERATTRS = 9;
+let P_PRINT_LCG = 10;
+let P_PRINT_LCG_DOT = 11;
+let P_ALWAYS_INLINE = 12;
+let P_MODULE_INLINE = 13;
+let P_INLINER_WRAPPER = 14;     // arg: 1 = inliner-wrapper-no-mandatory-first
+let P_RPO_FUNCTION_ATTRS = 15;
+let P_REQUIRE_PSI = 16;         // require<profile-summary>
+let P_INVALIDATE_PSI = 17;
+let P_REQUIRE_LCG = 18;
+let P_INVALIDATE_LCG = 19;
+let P_NORECURSE_LTO = 20;
+// CGSCC passes
+let P_FUNCTION_ATTRS = 300;     // arg: 1 = skip-non-recursive-function-attrs
+let P_INLINE = 301;             // arg: 1 = only-mandatory
+let P_NOOP_CGSCC = 302;         // also require<no-op-cgscc>
+let P_CG_INVALIDATE = 303;      // invalidate<no-op-cgscc>
 // function passes
 let P_DCE = 100;
 let P_REDUNDANT_DBG_INST_ELIM = 120;
@@ -142,6 +163,13 @@ let PASS_TABLE: const u8[:][] = [
     "m:debugify:7:0",
     "m:check-debugify:8:0",
     "m:inferattrs:9:0",
+    "m:print-lcg:10:1",
+    "m:print-lcg-dot:11:1",
+    "m:always-inline:12:1",
+    "m:module-inline:13:0",
+    "m:inliner-wrapper:14:0",
+    "m:rpo-function-attrs:15:0",
+    "m:norecurse-lto-inference:20:0",
     "f:reassociate:260:0",
     "f:constraint-elimination:261:0",
     "f:aggressive-instcombine:262:0",
@@ -218,6 +246,15 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_INFERATTRS => "InferFunctionAttrsPass",
         P_NOOP_MODULE => "NoOpModulePass",
         P_NOOP_FUNCTION => "NoOpFunctionPass",
+        P_FUNCTION_ATTRS => "PostOrderFunctionAttrsPass",
+        P_INLINE => "InlinerPass",
+        P_NOOP_CGSCC => "NoOpCGSCCPass",
+        P_ALWAYS_INLINE => "AlwaysInlinerPass",
+        P_MODULE_INLINE => "ModuleInlinerPass",
+        P_INLINER_WRAPPER => "ModuleInlinerWrapperPass",
+        P_RPO_FUNCTION_ATTRS => "ReversePostOrderFunctionAttrsPass",
+        P_NORECURSE_LTO => "NoRecurseLTOInferencePass",
+        P_PRINT_LCG => "LazyCallGraphPrinterPass",
         _ => "Pass",
     }
 }
@@ -252,6 +289,9 @@ let PK_LOOP = 2;
 let PK_CGSCC = 3;
 let PK_PASS = 4;
 let PK_LPM = 5;         // a nested loop(...) inside a loop pipeline (LoopPassManager)
+let PK_CGSCC_PM = 6;    // a nested cgscc(...) CGSCC pass manager
+let PK_DEVIRT = 7;      // devirt<N>(...): arg = N, children = the nested CGSCC pass manager
+let PK_CGFN = 8;        // CGSCCToFunctionPassAdaptor: arg bit 0 eager-inv, bit 1 no-rerun; pass 1 = a function(...) manager
 
 struct PNode { kind: u8, pass: i32, arg: i32, required: bool, name: i32, first: i32, next: i32 }
 var pnodes: PNode[>..];
@@ -696,6 +736,95 @@ recursive fn parse_loop_list(parent: i32, first: i32) {
     }
 }
 
+// parseSinglePassOption for `<base><opt>` passes: 1 if the option is given
+fn parse_single_option(name: const u8[:], base: const u8[:], opt: const u8[:], class: const u8[:]) -> i32 {
+    if name == base { return 0; }
+    let ps = name[base.len + 1..name.len - 1];
+    var r: i32 = 0;
+    var st: i64 = 0;
+    for j in 0..ps.len + 1 {
+        if j < ps.len && ps[j] != ';' { continue; }
+        let pn = ps[st..j];
+        st = j + 1;
+        if pn == opt { r = 1; } else { perr_pipeline(str("invalid ", class, " pass parameter '", pn, "'")); }
+    }
+    return r;
+}
+
+// parseFunctionPipelineName: function<eager-inv;no-rerun>; -1 if the name isn't a function pipeline name
+fn parse_function_pipeline_params(name: const u8[:]) -> i32 {
+    if name == "function" { return 0; }
+    if !is_param_name(name, "function") { return -1; }
+    let ps = name[9..name.len - 1];
+    var r: i32 = 0;
+    var st: i64 = 0;
+    for j in 0..ps.len + 1 {
+        if j < ps.len && ps[j] != ';' { continue; }
+        let pn = ps[st..j];
+        st = j + 1;
+        if pn == "eager-inv" { r |= 1; } else if pn == "no-rerun" { r |= 2; } else { return -1; }
+    }
+    return r;
+}
+
+// parseCGSCCPass
+recursive fn parse_cgscc_elem(e: i32) -> i32 {
+    let name = sbytes(pelems[e].name);
+    if pelems[e].first >= 0 {
+        if name == "cgscc" {
+            let pm = new_pnode(PK_CGSCC_PM, 0, 0, true, pelems[e].name);
+            parse_cgscc_list(pm, pelems[e].first);
+            return pm;
+        }
+        let fp = parse_function_pipeline_params(name);
+        if fp >= 0 {
+            if (fp & 2) != 0 { not_implemented("function<no-rerun>"); }
+            let ad = new_pnode(PK_CGFN, 1, fp, true, pelems[e].name);
+            parse_function_list(ad, pelems[e].first);
+            return ad;
+        }
+        if starts_with(name, "devirt<") && name[name.len - 1] == '>' {
+            let v, ok = parse_int(name[7..name.len - 1]);
+            if ok && v >= 0 {
+                let dv = new_pnode(PK_DEVIRT, 0, v as i32, true, pelems[e].name);
+                parse_cgscc_list(dv, pelems[e].first);
+                return dv;
+            }
+        }
+        perr_pipeline(str("invalid use of '", name, "' pass as cgscc pipeline"));
+    }
+    if is_param_name(name, "function-attrs") {
+        let a = parse_single_option(name, "function-attrs", "skip-non-recursive-function-attrs", "PostOrderFunctionAttrs");
+        return new_pnode(PK_PASS, P_FUNCTION_ATTRS as i32, a, false, pelems[e].name);
+    }
+    if is_param_name(name, "inline") {
+        let a = parse_single_option(name, "inline", "only-mandatory", "InlinerPass");
+        return new_pnode(PK_PASS, P_INLINE as i32, a, false, pelems[e].name);
+    }
+    if name == "no-op-cgscc" { return new_pnode(PK_PASS, P_NOOP_CGSCC as i32, 0, false, pelems[e].name); }
+    if name == "require<no-op-cgscc>" { return new_pnode(PK_PASS, P_NOOP_CGSCC as i32, 0, true, pelems[e].name); }
+    if name == "invalidate<no-op-cgscc>" { return new_pnode(PK_PASS, P_CG_INVALIDATE as i32, 0, true, pelems[e].name); }
+    if llvm_knows(name, 'c') { not_implemented(name); }
+    // a function or loop pass in a CGSCC pipeline gets its own adaptor (createCGSCCToFunctionPassAdaptor)
+    if is_function_pass_name(name) || is_loop_pass_name(name) || starts_with(name, "require<") || starts_with(name, "invalidate<") {
+        let ad = new_pnode(PK_CGFN, 0, 0, true, pelems[e].name);
+        pnodes[ad].first = parse_function_elem(e);
+        return ad;
+    }
+    perr_pipeline(str("unknown cgscc pass '", name, "'"));
+    return -1;
+}
+
+recursive fn parse_cgscc_list(parent: i32, first: i32) {
+    var last: i32 = -1;
+    var e = first;
+    while e >= 0 {
+        let c = parse_cgscc_elem(e);
+        last = link_child(parent, last, c);
+        e = pelems[e].next;
+    }
+}
+
 // parseModulePass
 recursive fn parse_module_elem(e: i32) -> i32 {
     let name = sbytes(pelems[e].name);
@@ -710,7 +839,12 @@ recursive fn parse_module_elem(e: i32) -> i32 {
             parse_function_list(fpm, pelems[e].first);
             return fpm;
         }
-        if name == "cgscc" || name == "coro-cond" { not_implemented(name); }
+        if name == "cgscc" {
+            let ad = new_pnode(PK_CGSCC, 0, 0, true, pelems[e].name);
+            parse_cgscc_list(ad, pelems[e].first);
+            return ad;
+        }
+        if name == "coro-cond" { not_implemented(name); }
         perr_pipeline(str("invalid use of '", name, "' pass as module pipeline"));
     }
     if starts_with(name, "default<") || starts_with(name, "thinlto") || starts_with(name, "lto") || starts_with(name, "fatlto") {
@@ -739,8 +873,18 @@ recursive fn parse_module_elem(e: i32) -> i32 {
     if name == "require<verify>" || name == "invalidate<verify>" { return new_pnode(PK_PASS, P_NOOP_MODULE as i32, 0, true, pelems[e].name); }
     if name == "require<globals-aa>" { return new_pnode(PK_PASS, P_REQUIRE_GLOBALS_AA as i32, 0, true, pelems[e].name); }
     if name == "invalidate<globals-aa>" { return new_pnode(PK_PASS, P_INVALIDATE_GLOBALS_AA as i32, 0, true, pelems[e].name); }
+    if name == "require<profile-summary>" { return new_pnode(PK_PASS, P_REQUIRE_PSI as i32, 0, true, pelems[e].name); }
+    if name == "invalidate<profile-summary>" { return new_pnode(PK_PASS, P_INVALIDATE_PSI as i32, 0, true, pelems[e].name); }
+    if name == "require<lcg>" { return new_pnode(PK_PASS, P_REQUIRE_LCG as i32, 0, true, pelems[e].name); }
+    if name == "invalidate<lcg>" { return new_pnode(PK_PASS, P_INVALIDATE_LCG as i32, 0, true, pelems[e].name); }
+    if name == "inliner-wrapper-no-mandatory-first" { return new_pnode(PK_PASS, P_INLINER_WRAPPER as i32, 1, false, pelems[e].name); }
     if llvm_knows(name, 'm') { not_implemented(name); }
-    if llvm_knows(name, 'c') { not_implemented(name); }
+    if is_cgscc_pass_name(name) {
+        // a CGSCC pass in a module pipeline gets its own adaptor (createModuleToPostOrderCGSCCPassAdaptor)
+        let ad = new_pnode(PK_CGSCC, 0, 0, true, pelems[e].name);
+        pnodes[ad].first = parse_cgscc_elem(e);
+        return ad;
+    }
     // a function pass in a module pipeline gets its own adaptor (createModuleToFunctionPassAdaptor)
     if is_function_pass_name(name) || is_loop_pass_name(name) || starts_with(name, "require<") || starts_with(name, "invalidate<") {
         let fpm = new_pnode(PK_FUNCTION, 0, 0, true, pelems[e].name);
@@ -770,7 +914,9 @@ fn parse_pass_pipeline(text: const u8[:]) -> i32 {
     var top = first;
     if !is_module_pass_name(fname) {
         if is_cgscc_pass_name(fname) {
-            not_implemented("cgscc");
+            let w = pelems.len as i32;
+            pelems.push(PElem { name: intern("cgscc"), first: first, next: -1 });
+            top = w;
         } else if is_function_pass_name(fname) {
             let w = pelems.len as i32;
             pelems.push(PElem { name: intern("function"), first: first, next: -1 });
@@ -810,7 +956,7 @@ fn should_run(n: i32, unit: const u8[:]) -> bool {
 
 // Drop analyses of fv that the pass didn't preserve.
 fn invalidate_function(fv: i32, preserved: u32) {
-    if preserved == PA_ALL { return; }
+    if preserved == PA_ALL || (preserved & PA_FN) == PA_FN { return; }
     slots_invalidate();
     if (preserved & (1 << A_LRT)) == 0 { ic::ic_lrt_invalidate(fv); }
     if (preserved & (1 << A_DOMTREE)) == 0 { dt_invalidate(fv, DT_DOM); }
@@ -994,7 +1140,7 @@ fn run_loop_adaptor(n: i32, fv: i32) {
         c = pnodes[c].next;
     }
     li_get(fv);
-    if li_ntop(fv) == 0 { invalidate_function(fv, pa); return; }
+    if li_ntop(fv) == 0 { fn_pa_acc &= pa; invalidate_function(fv, pa); return; }
     // MSSA = UseMemorySSA ? &AM.getResult<MemorySSAAnalysis>(F) : nullptr; LoopStandardAnalysisResults: AA, AC,
     // DT, LI, SE, TLI, TTI
     let use_mssa = (pnodes[n].arg & 1) != 0;
@@ -1023,8 +1169,13 @@ fn run_loop_adaptor(n: i32, fv: i32) {
     lpm_cur = -1;
     pa |= ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_LOOPS) | ((1 as u32) << A_SCEV);
     if use_mssa { pa |= (1 as u32) << A_MEMORYSSA; }
+    fn_pa_acc &= pa;
     invalidate_function(fv, pa);
 }
+
+// The intersection of the preserved sets of the function passes run since it was last reset (a function pass
+// manager's PreservedAnalyses, without the AllAnalysesOn<Function> set it adds).
+var fn_pa_acc: u32 = 0xFFFFFFFF;
 
 // Runs a function-level node (a pass or a nested function pass manager) on fv.
 recursive fn run_function_node(n: i32, fv: i32) {
@@ -1038,6 +1189,7 @@ recursive fn run_function_node(n: i32, fv: i32) {
     // OptNoneInstrumentation::shouldRun (after OptBisect has counted the pass, as both callbacks run)
     if !pnodes[n].required && aset_has(alist_fn(globs[glob_of(fv)].attrs), AK_OptimizeNone) { return; }
     let pa = run_function_pass(n, fv);
+    fn_pa_acc &= pa;
     invalidate_function(fv, pa);
     // APInt words of the pass are dead now (apint.goose: no AP outlives its pass)
     ap_pool_reset();
@@ -1052,6 +1204,7 @@ recursive fn run_module_node(n: i32, m: i32) {
     }
     if k == PK_FUNCTION {
         // ModuleToFunctionPassAdaptor: every function definition in module order
+        fn_pa_acc = PA_ALL;
         var f = modules[m].first_func;
         while f >= 0 {
             let nf = globs[glob_of(f)].next;
@@ -1061,6 +1214,14 @@ recursive fn run_module_node(n: i32, m: i32) {
             }
             f = nf;
         }
+        // the adaptor preserves AllAnalysesOn<Function> and the proxy, not module analyses
+        module_invalidate(m, fn_pa_acc | PA_FN);
+        return;
+    }
+    if k == PK_CGSCC {
+        let pa = cg_run_adaptor(n, m);
+        if pa != PA_ALL { gm_invalidate(); }
+        module_invalidate(m, pa);
         return;
     }
     let p = pnodes[n].pass as i64;
@@ -1071,6 +1232,7 @@ recursive fn run_module_node(n: i32, m: i32) {
         var tf = modules[m].first_func;
         while tf >= 0 { if !func_is_decl(tf) { st_touch(tf); } tf = globs[glob_of(tf)].next; }
         if ipsccp_run(m, pnodes[n].arg != 0) {
+            lcg_invalidate();
             // preserves DominatorTreeAnalysis, PostDominatorTreeAnalysis and the function analysis proxy
             var f = modules[m].first_func;
             while f >= 0 {
@@ -1083,6 +1245,7 @@ recursive fn run_module_node(n: i32, m: i32) {
     }
     if p == P_INFERATTRS {
         if inferattrs_run(m) {
+            lcg_invalidate();
             var f = modules[m].first_func;
             while f >= 0 {
                 if !func_is_decl(f) { invalidate_function(f, PA_NONE); }
@@ -1094,10 +1257,29 @@ recursive fn run_module_node(n: i32, m: i32) {
         return;
     }
     if p == P_REQUIRE_GLOBALS_AA { if !gm_valid { gm_compute(m); } return; }
-    if p == P_DEBUGIFY { debugify_run(m); invalidate_module_functions(m, PA_CFG); return; }
+    if p == P_PRINT_LCG { lcg_print_pass(m); return; }
+    if p == P_PRINT_LCG_DOT { lcg_print_dot_pass(m); return; }
+    if p == P_REQUIRE_LCG { lcg_get(m); return; }
+    if p == P_INVALIDATE_LCG { lcg_invalidate(); return; }
+    if p == P_REQUIRE_PSI { psi_get(m); return; }
+    if p == P_INVALIDATE_PSI { psi_invalidate(); return; }
+    if p == P_ALWAYS_INLINE { let pa = always_inliner_run(m); module_invalidate(m, pa); ap_pool_reset(); return; }
+    if p == P_MODULE_INLINE { let pa = module_inliner_run(m); module_invalidate(m, pa); ap_pool_reset(); return; }
+    if p == P_INLINER_WRAPPER { let pa = inliner_wrapper_run(m, pnodes[n].arg != 0); module_invalidate(m, pa); ap_pool_reset(); return; }
+    if p == P_RPO_FUNCTION_ATTRS { let pa = rpo_function_attrs_run(m); module_invalidate(m, pa); ap_pool_reset(); return; }
+    if p == P_NORECURSE_LTO { let pa = norecurse_lto_run(m); module_invalidate(m, pa); ap_pool_reset(); return; }
+    if p == P_DEBUGIFY { lcg_invalidate(); debugify_run(m); invalidate_module_functions(m, PA_CFG); return; }
     if p == P_CHECK_DEBUGIFY { check_debugify_run(m); return; }
     if p == P_INVALIDATE_GLOBALS_AA { gm_invalidate(); return; }
     fatal("internal: unknown module pass id");
+}
+
+// A module pass's PreservedAnalyses: module analyses (the call graph, the profile summary is immutable) and,
+// through FunctionAnalysisManagerModuleProxy, the function analyses of every definition.
+fn module_invalidate(m: i32, pa: u32) {
+    if pa == PA_ALL { return; }
+    if (pa & ((1 as u32) << A_LCG)) == 0 { lcg_invalidate(); }
+    if (pa & PA_FN) != PA_FN { invalidate_module_functions(m, pa); }
 }
 
 // invalidate the function analyses of every definition not in the preserved set (a module pass's result)
