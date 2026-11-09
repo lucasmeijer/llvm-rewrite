@@ -566,13 +566,13 @@ promote_mem_to_reg :: (allocas: [] Value_Id, dt: *Dom_Tree, ac: *Assumption_Cach
         m.value_types[n] = info.value_type;
         table_set(*m.lookup, ai, cast(u32) n);
 
-        def_set: Table(Value_Id, bool); def_set.allocator = temp;
+        def_set := *m2r_def_set; bset_clear(def_set);
         def_list: [..] Value_Id; def_list.allocator = temp;
-        for info.defining_blocks if !table_contains(*def_set, it) { table_set(*def_set, it, true); array_add(*def_list, it); }
-        live_in: Table(Value_Id, bool); live_in.allocator = temp;
-        compute_live_in_blocks(ai, *info, *def_set, *live_in);
+        for info.defining_blocks if !bset_has(def_set, it) { bset_add(def_set, it); array_add(*def_list, it); }
+        live_in := *m2r_live_in; bset_clear(live_in);
+        compute_live_in_blocks(ai, *info, def_set, live_in);
         phi_blocks: [..] Value_Id; phi_blocks.allocator = temp;
-        idf_calculate(dt, def_list, *def_set, *live_in, *phi_blocks);
+        idf_calculate(dt, def_list, def_set, live_in, *phi_blocks);
         for i: 1..phi_blocks.count-1 {
             x := phi_blocks[i]; nx := block_number(x);
             j := i - 1;
@@ -671,7 +671,11 @@ push_worklist :: (m: *M2r, bb: Value_Id, pred: Value_Id) {
 }
 
 // ComputeLiveInBlocks
-compute_live_in_blocks :: (ai: Value_Id, info: *M2r_Info, def_set: *Table(Value_Id, bool), live_in: *Table(Value_Id, bool)) {
+// DefBlocks / LiveInBlocks of the alloca being promoted (Block_Set: cleared per alloca in O(1))
+m2r_def_set: Block_Set;
+m2r_live_in: Block_Set;
+
+compute_live_in_blocks :: (ai: Value_Id, info: *M2r_Info, def_set: *Block_Set, live_in: *Block_Set) {
     wl: [..] Value_Id; wl.allocator = temp;
     for info.using_blocks array_add(*wl, it);
     i := -1;
@@ -680,7 +684,7 @@ compute_live_in_blocks :: (ai: Value_Id, info: *M2r_Info, def_set: *Table(Value_
         i += 1;
         if i == e break;
         bb := wl[i];
-        if !table_contains(def_set, bb) continue;
+        if !bset_has(def_set, bb) continue;
         x := block(bb).first;
         while true {
             o := inst_op(x);
@@ -699,11 +703,11 @@ compute_live_in_blocks :: (ai: Value_Id, info: *M2r_Info, def_set: *Table(Value_
     preds: [..] Value_Id; preds.allocator = temp;
     while wl.count {
         bb := pop(*wl);
-        if table_contains(live_in, bb) continue;
-        table_set(live_in, bb, true);
+        if bset_has(live_in, bb) continue;
+        bset_add(live_in, bb);
         block_predecessors(bb, *preds);
         for p: preds {
-            if table_contains(def_set, p) continue;
+            if bset_has(def_set, p) continue;
             array_add(*wl, p);
         }
     }
@@ -714,7 +718,7 @@ queue_phi_node :: (m: *M2r, bb: Value_Id, alloca_no: u32, version: *u32) -> bool
     slot := phi_map_get(*m.new_phis, block_number(bb), alloca_no);
     if m.new_phis.val[slot] != NONE return false;
     pn := create_phi(m.value_types[alloca_no], m2r_num_preds(m, bb));
-    name := tprint("%.%", vname(m.allocas[alloca_no]), version.*);
+    name := tconcat(vname(m.allocas[alloca_no]), ".", tdec(version.*));
     version.* += 1;
     m.new_phis.val[slot] = pn;
     insert_before_named(pn, block(bb).first, name);

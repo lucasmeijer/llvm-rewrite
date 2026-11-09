@@ -1135,19 +1135,19 @@ AA_Tags :: struct { tbaa: Md_Id = NONE; tbaa_struct: Md_Id = NONE; scope: Md_Id 
 aa_any :: (a: AA_Tags) -> bool { return a.tbaa != NONE || a.tbaa_struct != NONE || a.scope != NONE || a.noalias != NONE || a.noalias_as != NONE; }
 get_aa_metadata :: (i: Value_Id) -> AA_Tags {
     a: AA_Tags;
-    a.tbaa = get_metadata(i, md_kind_id("tbaa"));
-    a.tbaa_struct = get_metadata(i, md_kind_id("tbaa.struct"));
-    a.scope = get_metadata(i, md_kind_id("alias.scope"));
-    a.noalias = get_metadata(i, md_kind_id("noalias"));
-    a.noalias_as = get_metadata(i, md_kind_id("noalias.addrspace"));
+    a.tbaa = get_metadata(i, MDK_TBAA);
+    a.tbaa_struct = get_metadata(i, MDK_TBAA_STRUCT);
+    a.scope = get_metadata(i, MDK_ALIAS_SCOPE);
+    a.noalias = get_metadata(i, MDK_NOALIAS);
+    a.noalias_as = get_metadata(i, MDK_NOALIAS_ADDRSPACE);
     return a;
 }
 set_aa_metadata :: (i: Value_Id, a: AA_Tags) {
-    set_metadata(i, md_kind_id("tbaa"), a.tbaa);
-    set_metadata(i, md_kind_id("tbaa.struct"), a.tbaa_struct);
-    set_metadata(i, md_kind_id("alias.scope"), a.scope);
-    set_metadata(i, md_kind_id("noalias"), a.noalias);
-    set_metadata(i, md_kind_id("noalias.addrspace"), a.noalias_as);
+    set_metadata(i, MDK_TBAA, a.tbaa);
+    set_metadata(i, MDK_TBAA_STRUCT, a.tbaa_struct);
+    set_metadata(i, MDK_ALIAS_SCOPE, a.scope);
+    set_metadata(i, MDK_NOALIAS, a.noalias);
+    set_metadata(i, MDK_NOALIAS_ADDRSPACE, a.noalias_as);
 }
 md_const_u64 :: (m: Md_Id) -> u64 {
     if m == NONE || ir.mds[m].kind != .VALUE fatal("internal: expected a constant metadata operand");
@@ -1472,7 +1472,7 @@ rw_visit :: (r: *Sroa_Rewriter, si: s64, sl: Sroa_Slice) -> bool {
     user := use_user(sl.use);
     irb_set_before(*r.irb, user);
     r.irb.dbg = get_metadata(user, 0);
-    r.irb.prefix = tprint("%.%.", vname(r.new_ai), r.begin);
+    r.irb.prefix = tconcat(vname(r.new_ai), ".", tdec(r.begin), ".");
     o := inst_op(user);
     if o == .LOAD return rw_visit_load(r, user);
     if o == .STORE return rw_visit_store(r, user);

@@ -41,15 +41,17 @@ Dom_Tree :: struct {
 // LLParser creates a block at its first mention (a forward reference from an operand, or its label), so the
 // first time a function's numbers are needed we replay that order: blocks in layout order, and before each one the
 // blocks its instructions name, in operand order. Blocks created later get the next number (note_block_created).
-block_numbers: Table(Value_Id, u32);
-fn_next_block_num: Table(Value_Id, u32);
+// Numbers live in Block_Row.number (assigned once, like the table they replaced) and the counter in
+// Global_Row.next_block_num (-1 = the function was never numbered).
+BLOCK_NUMBER_NONE :: 0xFFFF_FFFF;
 
 ensure_block_numbers :: (f: Value_Id) {
-    if table_contains(*fn_next_block_num, f) return;
+    if glob(f).next_block_num >= 0 return;
     n: u32 = 0;
     num :: (b: Value_Id, n: *u32) {
-        if table_contains(*block_numbers, b) return;
-        table_set(*block_numbers, b, n.*);
+        br := block(b);
+        if br.number != BLOCK_NUMBER_NONE return;
+        br.number = n.*;
         n.* += 1;
     }
     for b: fn_blocks(f) {
@@ -63,20 +65,22 @@ ensure_block_numbers :: (f: Value_Id) {
             }
         }
     }
-    table_set(*fn_next_block_num, f, n);
+    glob(f).next_block_num = n;
 }
 note_block_created :: (f: Value_Id, b: Value_Id) {
-    found, n := table_find(*fn_next_block_num, f);
-    if !found return;
-    table_set(*block_numbers, b, n);
-    table_set(*fn_next_block_num, f, n + 1);
+    g := glob(f);
+    if g.next_block_num < 0 return;
+    block(b).number = cast(u32) g.next_block_num;
+    g.next_block_num += 1;
 }
 block_number :: (b: Value_Id) -> u32 {
     ensure_block_numbers(block_fn(b));
-    found, n := table_find(*block_numbers, b);
-    assert(found);
+    n := block(b).number;
+    assert(n != BLOCK_NUMBER_NONE);
     return n;
 }
+// Function::getMaxBlockNumber (after ensure_block_numbers)
+fn_max_block_number :: (f: Value_Id) -> u32 { return cast(u32) glob(f).next_block_num; }
 
 // ---------------------------------------------------------------- node API
 
@@ -150,8 +154,7 @@ dt_create_node :: (dt: *Dom_Tree, b: Value_Id, idom: s32 = -1) -> s32 {
     ensure_block_numbers(dt.fn);
     idx: u32 = ifx b == NONE then 0 else block_number(b) + 1;
     if idx >= dt.vec_size {
-        _, mx := table_find(*fn_next_block_num, dt.fn);
-        dt.vec_size = max(mx, idx + 1);
+        dt.vec_size = max(fn_max_block_number(dt.fn), idx + 1);
     }
     if idom >= 0 dt_add_child(dt, idom, id);
     return id;
@@ -1108,8 +1111,38 @@ dt_print :: (dt: *Dom_Tree, sb: *String_Builder) {
 // the priority queue only through (level, DFSIn), which are unique).
 // gd: the GraphDiff of IDFCalculator(DT, GD) (children = GD->getChildren<IsPostDom>(N): forward successors in
 // reverse order, then the diff applied); null = the current CFG (children<OrderedNodeTy>: successors in order).
-idf_calculate :: (dt: *Dom_Tree, def_blocks: [] Value_Id, def_set: *Table(Value_Id, bool),
-                  live_in: *Table(Value_Id, bool), out: *[..] Value_Id, gd: *Graph_Diff = null) {
+// Sets of blocks for hot paths (mem2reg): a stamp per block row (ir.v_aux of the block, unique module-wide), so
+// clearing is O(1). Keep one per use in a global and reuse it; the array grows to the number of block rows.
+Block_Set :: struct { stamp: [..] u32; gen: u32 = 1; }
+bset_clear :: (s: *Block_Set) {
+    s.gen += 1;
+    if s.gen == 0 { for * s.stamp it.* = 0; s.gen = 1; }
+}
+bset_has :: inline (s: *Block_Set, b: Value_Id) -> bool {
+    r := ir.v_aux[b];
+    return r < s.stamp.count && s.stamp[r] == s.gen;
+}
+bset_add :: (s: *Block_Set, b: Value_Id) {
+    r := cast(s64) ir.v_aux[b];
+    if r >= s.stamp.count {
+        old := s.stamp.count;
+        array_resize(*s.stamp, max(ir.blocks.count, r + 1));
+        for i: old..s.stamp.count-1 s.stamp[i] = 0;
+    }
+    s.stamp[r] = s.gen;
+}
+// idf_calculate's def_set / live_in membership (a Table of blocks, a Block_Set, or no live-in set)
+idf_set_has :: inline (s: *Table(Value_Id, bool), b: Value_Id) -> bool { return table_contains(s, b); }
+idf_set_has :: inline (s: *Block_Set, b: Value_Id) -> bool { return bset_has(s, b); }
+idf_set_has :: inline (s: *void, b: Value_Id) -> bool { return true; }
+
+// IDF's VisitedPQ / VisitedWorklist, by tree node index; stamps so a call costs nothing to clear
+idf_visited_pq: [..] u32;
+idf_visited_wl: [..] u32;
+idf_visited_gen: u32;
+
+idf_calculate :: (dt: *Dom_Tree, def_blocks: [] Value_Id, def_set: *$D, live_in: *$L, out: *[..] Value_Id,
+                  gd: *Graph_Diff = null) {
     Pq_Item :: struct { n: s32; level: u32; dfs_in: u32; }
     less :: (a: Pq_Item, b: Pq_Item) -> bool {   // less_second on (level, DFSIn)
         if a.level != b.level return a.level < b.level;
@@ -1146,13 +1179,24 @@ idf_calculate :: (dt: *Dom_Tree, def_blocks: [] Value_Id, def_set: *Table(Value_
     }
     dt_update_dfs_numbers(dt);
     worklist: [..] s32; worklist.allocator = temp;
-    visited_pq: Table(s32, bool); visited_pq.allocator = temp;
-    visited_wl: Table(s32, bool); visited_wl.allocator = temp;
+    if idf_visited_pq.count < dt.nodes.count {
+        old := idf_visited_pq.count;
+        array_resize(*idf_visited_pq, dt.nodes.count);
+        array_resize(*idf_visited_wl, dt.nodes.count);
+        for i: old..dt.nodes.count-1 { idf_visited_pq[i] = 0; idf_visited_wl[i] = 0; }
+    }
+    idf_visited_gen += 1;
+    if idf_visited_gen == 0 {
+        for * idf_visited_pq it.* = 0;
+        for * idf_visited_wl it.* = 0;
+        idf_visited_gen = 1;
+    }
+    gen := idf_visited_gen;
     for b: def_blocks {
         n := dt_node(dt, b);
         if n < 0 continue;
         push(*pq, .{n, dt.nodes[n].level, dt.nodes[n].dfs_in});
-        table_set(*visited_wl, n, true);
+        idf_visited_wl[n] = gen;
     }
     succs: [..] Value_Id; succs.allocator = temp;
     while pq.count {
@@ -1174,16 +1218,16 @@ idf_calculate :: (dt: *Dom_Tree, def_blocks: [] Value_Id, def_set: *Table(Value_
                 sn := dt_node(dt, succ);
                 sl := dt.nodes[sn].level;
                 if sl > root_level continue;
-                if table_contains(*visited_pq, sn) continue;
-                table_set(*visited_pq, sn, true);
+                if idf_visited_pq[sn] == gen continue;
+                idf_visited_pq[sn] = gen;
                 sbb := dt.nodes[sn].block;
-                if live_in && !table_contains(live_in, sbb) continue;
+                if live_in && !idf_set_has(live_in, sbb) continue;
                 array_add(out, sbb);
-                if !table_contains(def_set, sbb) push(*pq, .{sn, sl, dt.nodes[sn].dfs_in});
+                if !idf_set_has(def_set, sbb) push(*pq, .{sn, sl, dt.nodes[sn].dfs_in});
             }
             c := dt.nodes[node].first_child;
             while c >= 0 {
-                if !table_contains(*visited_wl, c) { table_set(*visited_wl, c, true); array_add(*worklist, c); }
+                if idf_visited_wl[c] != gen { idf_visited_wl[c] = gen; array_add(*worklist, c); }
                 c = dt.nodes[c].sibling;
             }
         }

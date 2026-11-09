@@ -20,12 +20,13 @@ ap_mask64 :: inline (bits: u32) -> u64 { if bits >= 64 return 0xFFFF_FFFF_FFFF_F
 ap_word :: inline (a: APInt, i: s64) -> u64 { if a.bits <= 64 return ifx i == 0 then a.v else 0; return a.w[i]; }
 ap_set_word :: inline (a: *APInt, i: s64, x: u64) { if a.bits <= 64 a.v = x; else a.w[i] = x; }
 
-ap_alloc :: (bits: u32) -> APInt {
+ap_alloc :: inline (bits: u32) -> APInt {
     r: APInt;
     r.bits = bits;
-    if bits > 64 r.w = NewArray(ap_nwords(bits), u64,, allocator = temp);   // zeroed
+    if bits > 64 r.w = ap_alloc_words(bits);
     return r;
 }
+ap_alloc_words :: (bits: u32) -> [] u64 { return NewArray(ap_nwords(bits), u64,, allocator = temp); }   // zeroed
 
 ap_normalize :: (a: *APInt) {
     if a.bits <= 64 { a.v &= ap_mask64(a.bits); return; }
@@ -57,7 +58,7 @@ ap_assign :: (dst: *APInt, a: APInt) {
     for a.w dst.w[it_index] = it;
 }
 
-ap_zero :: (bits: u32) -> APInt { return ap_alloc(bits); }
+ap_zero :: inline (bits: u32) -> APInt { return ap_alloc(bits); }
 ap_from_u64 :: (bits: u32, v: u64) -> APInt {
     r := ap_alloc(bits);
     ap_set_word(*r, 0, v);

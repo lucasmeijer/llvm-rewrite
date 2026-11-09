@@ -42,7 +42,7 @@ irb_insert :: (b: *Irb, i: Value_Id, name: string = "") -> Value_Id {
     insert_at_position(i, b.bb, b.pt, b.head);
     // Twine semantics: a "" literal is trivially empty (no prefix); a StringRef name (name_ref) is not
     if name == NAME_STRINGREF_EMPTY { if b.prefix.count set_name(i, b.prefix); }
-    else if name.count set_name(i, ifx b.prefix.count then tprint("%1%2", b.prefix, name) else name);
+    else if name.count set_name(i, ifx b.prefix.count then tconcat(b.prefix, name) else name);
     d := b.dbg;
     if d == NONE d = get_metadata(i, 0);
     set_metadata(i, 0, d);

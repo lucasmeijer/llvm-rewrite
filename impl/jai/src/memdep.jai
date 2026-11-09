@@ -174,7 +174,7 @@ md_entry_result :: (md: *Mem_Dep_Results, bb: Value_Id) -> Mem_Dep {
 // starts (NONE = BB->end())
 md_call_dependency_from :: (md: *Mem_Dep_Results, call: Value_Id, is_read_only_call: bool, scan_pos: Value_Id, bb: Value_Id) -> Mem_Dep {
     limit := md.block_scan_limit;
-    is_invariant_load := get_metadata(call, md_kind_id("invariant.load")) != NONE;
+    is_invariant_load := get_metadata(call, MDK_INVARIANT_LOAD) != NONE;
     i := ifx scan_pos == NONE then block_last(bb) else inst_prev(scan_pos);
     while i != NONE {
         cur := i;
@@ -226,7 +226,7 @@ md_pointer_dependency_from_new_batch :: (md: *Mem_Dep_Results, loc: Mem_Loc, is_
 
 // getInvariantGroupPointerDependency
 md_invariant_group_pointer_dependency :: (md: *Mem_Dep_Results, li: Value_Id, bb: Value_Id) -> Mem_Dep {
-    if get_metadata(li, md_kind_id("invariant.group")) == NONE return mdr_unknown();
+    if get_metadata(li, MDK_INVARIANT_GROUP) == NONE return mdr_unknown();
     load_op := strip_pointer_casts(op(li, 0));
     if is_global_value(vkind(load_op)) return mdr_unknown();
     closest: Value_Id = NONE;
@@ -236,7 +236,7 @@ md_invariant_group_pointer_dependency :: (md: *Mem_Dep_Results, li: Value_Id, bb
         u = ir.u_next[u];
         if !is_inst(usr) || usr == li || !dt_dominates_inst(md.dt, usr, li) continue;
         o := inst_op(usr);
-        if (o == .LOAD || (o == .STORE && op(usr, 1) == load_op)) && get_metadata(usr, md_kind_id("invariant.group")) != NONE {
+        if (o == .LOAD || (o == .STORE && op(usr, 1) == load_op)) && get_metadata(usr, MDK_INVARIANT_GROUP) != NONE {
             if closest == NONE || dt_dominates_inst(md.dt, closest, usr) closest = usr;
         }
     }
@@ -285,7 +285,7 @@ md_simple_pointer_dependency_from :: (md: *Mem_Dep_Results, loc: Mem_Loc, is_loa
     limit := limit_in;
     if !limit limit = *default_limit;
     if is_load && query != NONE {
-        is_invariant_load = get_metadata(query, md_kind_id("invariant.load")) != NONE;
+        is_invariant_load = get_metadata(query, MDK_INVARIANT_LOAD) != NONE;
         if inst_op(query) == .LOAD loc_align = inst(query).align;
     }
     i := ifx scan_pos == NONE then block_last(bb) else inst_prev(scan_pos);
@@ -519,7 +519,7 @@ md_get_non_local_pointer_dependency :: (md: *Mem_Dep_Results, query: Value_Id, r
 // getNonLocalInfoForBlock
 md_non_local_info_for_block :: (md: *Mem_Dep_Results, query: Value_Id, loc: Mem_Loc, is_load: bool, bb: Value_Id,
                                 cache_row: s64, num_sorted: s64, q: *Aa_Query) -> Mem_Dep {
-    is_invariant_load := query != NONE && get_metadata(query, md_kind_id("invariant.load")) != NONE;
+    is_invariant_load := query != NONE && get_metadata(query, MDK_INVARIANT_LOAD) != NONE;
     cache := *md.nlp[cache_row].deps;
     existing := md_find_sorted(cache.*, num_sorted, bb);
     if existing >= 0 && is_invariant_load && !mdr_is_nonfunclocal(cache.*[existing].r) existing = -1;
@@ -571,7 +571,7 @@ md_non_local_pointer_dep_from_bb :: (md: *Mem_Dep_Results, query: Value_Id, poin
     skip_first_block := skip_first_block_in;
     is_incomplete := is_incomplete_in;
     cache_key := md_vil_key(pointer.addr, is_load);
-    is_invariant_load := query != NONE && get_metadata(query, md_kind_id("invariant.load")) != NONE;
+    is_invariant_load := query != NONE && get_metadata(query, MDK_INVARIANT_LOAD) != NONE;
 
     inserted := !table_contains(*md.nlp_index, cache_key);
     row := md_nlp_row(md, cache_key);

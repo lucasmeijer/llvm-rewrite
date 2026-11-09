@@ -6,7 +6,7 @@ Known_Bits :: struct {
     one: APInt;
 }
 
-kb_new :: (bits: u32) -> Known_Bits { k: Known_Bits; k.zero = ap_zero(bits); k.one = ap_zero(bits); return k; }
+kb_new :: inline (bits: u32) -> Known_Bits { k: Known_Bits; k.zero = ap_zero(bits); k.one = ap_zero(bits); return k; }
 kb_make :: (zero: APInt, one: APInt) -> Known_Bits { k: Known_Bits; k.zero = zero; k.one = one; return k; }
 kb_bits :: inline (k: Known_Bits) -> u32 { return k.zero.bits; }
 kb_from_const :: (c: APInt) -> Known_Bits { k: Known_Bits; k.one = ap_copy(c); k.zero = ap_not(c); return k; }   // makeConstant
@@ -15,7 +15,7 @@ kb_constant :: (k: Known_Bits) -> APInt { return k.one; }
 kb_has_conflict :: (k: Known_Bits) -> bool { return ap_intersects(k.zero, k.one); }
 kb_is_unknown :: (k: Known_Bits) -> bool { return ap_is_zero(k.zero) && ap_is_zero(k.one); }
 kb_is_sign_unknown :: (k: Known_Bits) -> bool { return !ap_is_negative(k.zero) && !ap_is_negative(k.one); }
-kb_reset_all :: (k: *Known_Bits) { k.zero = ap_zero(kb_bits(k.*)); k.one = ap_zero(kb_bits(k.*)); }
+kb_reset_all :: inline (k: *Known_Bits) { k.zero = ap_zero(kb_bits(k.*)); k.one = ap_zero(kb_bits(k.*)); }
 kb_set_all_zero :: (k: *Known_Bits) { k.zero = ap_all_ones(kb_bits(k.*)); k.one = ap_zero(kb_bits(k.*)); }
 kb_set_all_ones :: (k: *Known_Bits) { k.one = ap_all_ones(kb_bits(k.*)); k.zero = ap_zero(kb_bits(k.*)); }
 kb_set_all_conflict :: (k: *Known_Bits) { k.zero = ap_all_ones(kb_bits(k.*)); k.one = ap_all_ones(kb_bits(k.*)); }

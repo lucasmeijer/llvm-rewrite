@@ -27,7 +27,10 @@ out :: (s: string) {
     array_resize(*W.buf, n + s.count, initialize = false);
     memcpy(W.buf.data + n, s.data, s.count);
 }
-outc :: inline (c: u8) { array_add(*W.buf, c); }
+outc :: inline (c: u8) {
+    if W.buf.count < W.buf.allocated { W.buf.data[W.buf.count] = c; W.buf.count += 1; }
+    else array_add(*W.buf, c);
+}
 out_u64 :: (x: u64) {
     buf: [24] u8;
     n := 0;

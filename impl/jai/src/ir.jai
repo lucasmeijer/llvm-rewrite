@@ -148,6 +148,7 @@ Block_Row :: struct {
     last:   Value_Id;
     prev:   Value_Id;
     next:   Value_Id;
+    number: u32 = 0xFFFF_FFFF;   // BasicBlock::Number, assigned once (domtree.jai block_number)
 }
 
 Linkage :: enum u8 {
@@ -181,6 +182,7 @@ Global_Row :: struct {
     has_prologue: bool;
     has_personality: bool;
     first_block: Value_Id = NONE;
+    next_block_num: s64 = -1;   // functions: Function::NextBlockNum, -1 = not numbered yet (domtree.jai)
     last_block:  Value_Id = NONE;
     arg_start:  Value_Id;
     nargs:      u32;
@@ -330,15 +332,28 @@ Key :: struct {
     buf: [..] u8;
 }
 key_reset :: inline (k: *Key) { k.buf.count = 0; }
-key_u8 :: inline (k: *Key, x: u8) { array_add(*k.buf, x); }
-key_u32 :: (k: *Key, x: u32) {
-    array_add(*k.buf, cast,trunc(u8) x); array_add(*k.buf, cast,trunc(u8)(x >> 8));
-    array_add(*k.buf, cast,trunc(u8)(x >> 16)); array_add(*k.buf, cast,trunc(u8)(x >> 24));
+// The key bytes are the little-endian encoding of each field. Written directly into the buffer (a byte-wise
+// array_add was ~12% of parsing; see NOTES.md "Performance").
+key_grow :: inline (k: *Key, n: s64) {
+    if k.buf.count + n > k.buf.allocated {
+        want := k.buf.allocated * 2;
+        if want < k.buf.count + n want = k.buf.count + n;
+        if want < 64 want = 64;
+        array_reserve(*k.buf, want);
+    }
 }
-key_u64 :: (k: *Key, x: u64) { key_u32(k, cast,trunc(u32) x); key_u32(k, cast,trunc(u32)(x >> 32)); }
+key_u8 :: inline (k: *Key, x: u8) { key_grow(k, 1); k.buf.data[k.buf.count] = x; k.buf.count += 1; }
+key_u32 :: inline (k: *Key, x: u32) {
+    key_grow(k, 4); (cast(*u32) (k.buf.data + k.buf.count)).* = x; k.buf.count += 4;
+}
+key_u64 :: inline (k: *Key, x: u64) {
+    key_grow(k, 8); (cast(*u64) (k.buf.data + k.buf.count)).* = x; k.buf.count += 8;
+}
 key_str :: (k: *Key, s: string) {
     key_u32(k, cast(u32) s.count);
-    for i: 0..s.count-1 array_add(*k.buf, s[i]);
+    key_grow(k, s.count);
+    if s.count > 0 memcpy(k.buf.data + k.buf.count, s.data, s.count);
+    k.buf.count += s.count;
 }
 key_view :: inline (k: *Key) -> string { s: string; s.data = k.buf.data; s.count = k.buf.count; return s; }
 key_copy :: inline (k: *Key) -> string { return copy_string(key_view(k)); }
@@ -351,6 +366,31 @@ attr_key_buf: Key; // attributes
 // ---------------------------------------------------------------- strings
 
 intern_str :: (s: string) -> string { return copy_string(s); }
+
+// Concatenation / decimal formatting into temp. tprint and a String_Builder zero a 4 KB inline buffer on every
+// call (~5000 instructions), so naming code on hot paths uses these (NOTES.md "Performance").
+tconcat :: (parts: .. string) -> string {
+    n := 0;
+    for parts n += it.count;
+    if n == 0 return "";
+    s: string;
+    s.data = alloc(n,, temp);
+    s.count = n;
+    p := 0;
+    for parts { if it.count memcpy(s.data + p, it.data, it.count); p += it.count; }
+    return s;
+}
+tdec :: (x: u64) -> string {
+    buf: [20] u8;
+    n := 0;
+    if x == 0 { buf[0] = #char "0"; n = 1; }
+    while x > 0 { buf[n] = cast(u8)(#char "0" + x % 10); x /= 10; n += 1; }
+    s: string;
+    s.data = alloc(n,, temp);
+    s.count = n;
+    for i: 0..n-1 s.data[i] = buf[n - 1 - i];
+    return s;
+}
 
 // ---------------------------------------------------------------- types API
 
@@ -376,7 +416,18 @@ intern_type :: (kind: Type_Kind, flags: u8, a: u64, subs: [] Type_Id) -> Type_Id
 }
 
 type_simple :: (kind: Type_Kind) -> Type_Id { return intern_type(kind, 0, 0, .[]); }
-type_int    :: (bits: u64) -> Type_Id { return intern_type(.INT, 0, bits, .[]); }
+// type_int is hot (every APInt -> constant); the interned ids of small widths are cached (id + 1, 0 = not yet).
+int_type_cache: [257] Type_Id;
+type_int    :: (bits: u64) -> Type_Id {
+    if bits <= 256 {
+        c := int_type_cache[bits];
+        if c return c - 1;
+        t := intern_type(.INT, 0, bits, .[]);
+        int_type_cache[bits] = t + 1;
+        return t;
+    }
+    return intern_type(.INT, 0, bits, .[]);
+}
 type_byte   :: (bits: u64) -> Type_Id { return intern_type(.BYTE, 0, bits, .[]); }
 type_ptr    :: (as: u64) -> Type_Id { return intern_type(.PTR, 0, as, .[]); }
 type_array  :: (n: u64, elt: Type_Id) -> Type_Id { return intern_type(.ARRAY, 0, n, .[elt]); }
@@ -637,15 +688,11 @@ arg_parent :: inline (v: Value_Id) -> Value_Id { return arg_parents[ir.v_aux[v]]
 
 // ValueSymbolTable::makeUniqueName
 make_unique_name :: (tab: *Table(string, Value_Id), last: *u32, base: string, v: Value_Id, is_global: bool) -> string {
-    sb: String_Builder;
     while true {
-        reset(*sb);
-        append(*sb, base);
-        if is_global append(*sb, ".");
         last.* += 1;
-        append_u64(*sb, last.*);
-        s := builder_to_string(*sb);
+        s := tconcat(base, ifx is_global then "." else "", tdec(last.*));
         if !table_contains(tab, s) {
+            s = copy_string(s);
             table_add(tab, s, v);
             return s;
         }
@@ -1137,13 +1184,26 @@ constant_handle_operand_change :: (c: Value_Id, from: Value_Id, to: Value_Id) {
 
 // ---------------------------------------------------------------- metadata API
 
+// A direct-mapped cache in front of md_kind_map, keyed by the string's address (callers pass literals). A hit
+// is confirmed by comparing the contents with the interned name, so a reused buffer can't return a wrong id.
+Md_Kind_Cache_Entry :: struct { data: *u8; count: s64; id: u32; }
+md_kind_cache: [256] Md_Kind_Cache_Entry;
 md_kind_id :: (name: string) -> u32 {
+    h := (cast(u64) name.data) >> 2;
+    h = (h ^ (h >> 9) ^ cast(u64) name.count) & 255;
+    e := *md_kind_cache[h];
+    if e.data == name.data && e.count == name.count && e.data != null {
+        s := ir.md_kind_names[e.id];
+        if s.count == name.count && memcmp(s.data, name.data, s.count) == 0 return e.id;
+    }
     found, id := table_find(*ir.md_kind_map, name);
-    if found return id;
-    id = cast(u32) ir.md_kind_names.count;
-    s := intern_str(name);
-    array_add(*ir.md_kind_names, s);
-    table_add(*ir.md_kind_map, s, id);
+    if !found {
+        id = cast(u32) ir.md_kind_names.count;
+        s := intern_str(name);
+        array_add(*ir.md_kind_names, s);
+        table_add(*ir.md_kind_map, s, id);
+    }
+    e.data = name.data; e.count = name.count; e.id = id;
     return id;
 }
 
@@ -1396,6 +1456,15 @@ ir_init :: () {
     array_add(*ir.sync_scopes, "singlethread");
 }
 
+// Ids of fixed kinds used on hot paths (positions in FIXED_MD_KINDS, which ir_init registers first, in order).
+MDK_DBG :: 0; MDK_TBAA :: 1; MDK_TBAA_STRUCT :: 5; MDK_INVARIANT_LOAD :: 6; MDK_ALIAS_SCOPE :: 7; MDK_NOALIAS :: 8;
+MDK_INVARIANT_GROUP :: 16; MDK_NOALIAS_ADDRSPACE :: 41;
+#run {
+    assert(FIXED_MD_KINDS[MDK_TBAA] == "tbaa" && FIXED_MD_KINDS[MDK_TBAA_STRUCT] == "tbaa.struct");
+    assert(FIXED_MD_KINDS[MDK_INVARIANT_LOAD] == "invariant.load" && FIXED_MD_KINDS[MDK_ALIAS_SCOPE] == "alias.scope");
+    assert(FIXED_MD_KINDS[MDK_NOALIAS] == "noalias" && FIXED_MD_KINDS[MDK_INVARIANT_GROUP] == "invariant.group");
+    assert(FIXED_MD_KINDS[MDK_NOALIAS_ADDRSPACE] == "noalias.addrspace" && FIXED_MD_KINDS[MDK_DBG] == "dbg");
+}
 FIXED_MD_KINDS :: string.[
     "dbg", "tbaa", "prof", "fpmath", "range", "tbaa.struct", "invariant.load", "alias.scope", "noalias",
     "nontemporal", "llvm.mem.parallel_loop_access", "nonnull", "dereferenceable", "dereferenceable_or_null",
