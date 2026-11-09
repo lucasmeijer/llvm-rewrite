@@ -41,6 +41,7 @@ import lpm;
 import tli;
 import scev;
 import indvars;
+import ivusers;
 import loopnest;
 import simplifycfg;
 import subtarget;
@@ -119,6 +120,7 @@ let P_LINVALIDATE = 204;
 let P_LOOP_ROTATE = 206;   // arg: bit 0 = header-duplication, 1 = prepare-for-lto, 2 = check-exit-count
 let P_LICM = 205;          // arg: bit 0 = AllowSpeculation, bit 1 = lnicm (a loop-nest pass)
 let P_INDVARS = 207;
+let P_PRINT_IV_USERS = 208;
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
 // (PassInfoMixin::isRequired: printers, verifier, require/invalidate, adaptors).
@@ -163,6 +165,7 @@ let PASS_TABLE: const u8[:][] = [
     "l:print<loopnest>:200:1",
     "l:no-op-loop:201:0",
     "l:indvars:207:0",
+    "l:print<iv-users>:208:1",
 ];
 
 // LLVM pass class names, for -opt-bisect-limit messages.
@@ -893,6 +896,7 @@ fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
             ap_pool_reset();
             return pa;
         },
+        P_PRINT_IV_USERS => { print_iv_users(l); return PA_ALL; },
         P_INDVARS => {
             let pa = indvars_pass_run(l, lpm_use_mssa);
             ap_pool_reset();

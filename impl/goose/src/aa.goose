@@ -16,6 +16,8 @@
 //   aa_inst_call_mr / aa_inst_inst_mr / aa_call_call_mr / aa_call_loc_mr / aa_mod_ref_mask / aa_call_me
 //   aa_alias_simple(a, b) etc.        the AAResults entry points that make a fresh SimpleAAQueryInfo
 import std;
+import scevaa;
+import scev;
 import ir;
 import irutil;
 import calls;
@@ -76,6 +78,7 @@ let AAK_BASIC = 0;
 let AAK_SCOPED = 1;
 let AAK_TBAA = 2;
 let AAK_GLOBALS = 3;
+let AAK_SCEV = 4;
 
 var aa_kinds: i32[>..];
 var aa_pipeline_done: bool = false;
@@ -105,7 +108,8 @@ fn aa_pipeline_init() {
         else if nm == "scoped-noalias-aa" { aa_kinds.push(AAK_SCOPED as i32); }
         else if nm == "tbaa" { aa_kinds.push(AAK_TBAA as i32); }
         else if nm == "globals-aa" { aa_kinds.push(AAK_GLOBALS as i32); }
-        else if nm == "scev-aa" || nm == "objc-arc-aa" { fatal(str("opt: alias analysis '", nm, "' is not implemented yet in the Goose opt")); }
+        else if nm == "scev-aa" { aa_kinds.push(AAK_SCEV as i32); }
+        else if nm == "objc-arc-aa" { fatal(str("opt: alias analysis '", nm, "' is not implemented yet in the Goose opt")); }
         else { fatal(str("opt: unknown alias analysis name '", nm, "'")); }
     }
 }
@@ -347,6 +351,12 @@ recursive fn aa_alias(a: ML, b: ML, q: i32, cxt: i32) -> AR {
         else if k == AAK_SCOPED { r = if sna_alias_may(a, b) { ar(AR_MAY) } else { ar(AR_NO) }; }
         else if k == AAK_TBAA { r = if tbaa_alias_may(aa_cur_fn, a, b) { ar(AR_MAY) } else { ar(AR_NO) }; }
         else if k == AAK_GLOBALS { r = if gm_alias_may(a, b, cxt) { ar(AR_MAY) } else { ar(AR_NO) }; }
+        else if k == AAK_SCEV {
+            // SCEVAA::run: AM.getResult<ScalarEvolutionAnalysis>(F)
+            scev_get(aa_cur_fn);
+            let x = scaa_alias(a, b);
+            r = if x == 0 { ar(AR_NO) } else if x == 3 { ar(AR_MUST) } else { ar(AR_MAY) };
+        }
         if r.k != AR_MAY as u8 { break; }
     }
     aqs[q].depth -= 1;

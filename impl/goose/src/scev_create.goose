@@ -618,6 +618,7 @@ let RW_SHIFT = 3;         // SCEVShiftRewriter
 let RW_LOOP_ADDREC = 4;   // SCEVLoopAddRecRewriter (map in sc_rw_map: loop -> value)
 let RW_GUARDS = 5;        // applyLoopGuards' rewriter (scev_btc.goose)
 let RW_PREDICATE = 6;     // SCEVPredicateRewriter
+let RW_NORMALIZE = 7;     // NormalizeDenormalizeRewriter (ScalarEvolutionNormalization.cpp); pos = Denormalize
 
 struct RW { kind: i32, l: i32, serial: i32, seen_variant: bool, seen_other: bool, valid: bool, becond: i32, pos: bool }
 var sc_rw_cache = hm_new();
@@ -657,6 +658,7 @@ recursive fn sc_rw_visit_impl(rw: RW&, s: i32) -> i32 {
         rw.valid = false;
         return s;
     }
+    if k == SC_ADDREC && rw.kind as i64 == RW_NORMALIZE { return sc_rw_normalize_addrec(rw, s); }
     if rw.kind as i64 == RW_GUARDS { return sc_guards_visit(rw, s); }
     if rw.kind as i64 == RW_PREDICATE && (k == SC_ZEXT || k == SC_SEXT) { return sc_rw_predicate_ext(rw, s); }
     return sc_rw_default(rw, s);
@@ -718,8 +720,85 @@ recursive fn sc_rw_visit_unknown(rw: RW&, s: i32) -> i32 {
         if rw.becond == i { return if rw.pos { sc_get_one(ty_int(1)) } else { sc_get_zero(ty_int(1)) }; }
         return s;
     }
-    if kind == RW_LOOP_ADDREC { return s; }
+    if kind == RW_LOOP_ADDREC || kind == RW_NORMALIZE { return s; }
     return sc_rw_visit_unknown_ext(rw, s);
+}
+
+// ---------------------------------------------------------------------------------------------
+// ScalarEvolutionNormalization.cpp: post-increment normalization. The loop set (PostIncLoopSet) is
+// sc_norm_loops; with sc_norm_iv_pred the predicate is IVUsers' IVUseShouldUsePostIncValue(sc_norm_user,
+// sc_norm_oper, AR's loop), which records the loops it accepts in sc_norm_loops.
+
+var sc_norm_loops: i32[>..<];
+var sc_norm_iv_pred: bool = false;
+var sc_norm_user: i32 = -1;
+var sc_norm_oper: i32 = -1;
+
+recursive fn sc_norm_pred(ar: i32) -> bool {
+    let l = sc_loop(ar);
+    if sc_norm_iv_pred {
+        let r = iu_should_use_post_inc_value(sc_norm_user, sc_norm_oper, l);
+        if r && position(sc_norm_loops, l) < 0 { sc_norm_loops.push(l); }
+        return r;
+    }
+    return position(sc_norm_loops, l) >= 0;
+}
+// IVUsers.cpp IVUseShouldUsePostIncValue(User, Operand, L, DT)
+recursive fn iu_should_use_post_inc_value(user: i32, operand: i32, l: i32) -> bool {
+    if loop_contains(l, inst_parent(user)) { return false; }
+    let latch = loop_latch(l);
+    if latch < 0 { return false; }
+    if dt_dominates_block(DT_DOM, latch, inst_parent(user)) { return true; }
+    if iop(user) != OP_PHI || operand < 0 { return false; }
+    for i in nops(user) {
+        if phi_value(user, i) == operand && !dt_dominates_block(DT_DOM, latch, phi_block(user, i)) { return false; }
+    }
+    return true;
+}
+
+// NormalizeDenormalizeRewriter::visitAddRecExpr
+recursive fn sc_rw_normalize_addrec(rw: RW&, s: i32) -> i32 {
+    let b = ss.len;
+    for i in sc_nops(s) {
+        let x = sc_rw_visit(rw, sc_op(s, i));
+        ss.push(x);
+    }
+    let n = ss.len - b;
+    if !sc_norm_pred(s) { return sc_addrec_n(b, sc_loop(s), SF_ANY); }
+    if rw.pos {
+        var i: i64 = 0;
+        while i < n - 1 { let x = sc_add(ss[b + i], ss[b + i + 1]); ss[b + i] = x; i++; }
+    } else {
+        var i = n - 2;
+        while i >= 0 { let x = sc_minus(ss[b + i], ss[b + i + 1]); ss[b + i] = x; i--; }
+    }
+    return sc_addrec_n(b, sc_loop(s), SF_ANY);
+}
+// normalizeForPostIncUseIf(S, Pred) / denormalizeForPostIncUse(S, Loops) / normalizeForPostIncUse(S, Loops)
+recursive fn sc_normalize_for_post_inc_use_if(s: i32) -> i32 {
+    var rw = rw_new(RW_NORMALIZE, -1);
+    return sc_rw_visit(rw, s);
+}
+recursive fn sc_denormalize_for_post_inc_use(s: i32) -> i32 {
+    if sc_norm_loops.len == 0 { return s; }
+    let save = sc_norm_iv_pred;
+    sc_norm_iv_pred = false;
+    var rw = rw_new(RW_NORMALIZE, -1);
+    rw.pos = true;
+    let r = sc_rw_visit(rw, s);
+    sc_norm_iv_pred = save;
+    return r;
+}
+recursive fn sc_normalize_for_post_inc_use(s: i32, check_invertible: bool) -> i32 {
+    if sc_norm_loops.len == 0 { return s; }
+    let save = sc_norm_iv_pred;
+    sc_norm_iv_pred = false;
+    var rw = rw_new(RW_NORMALIZE, -1);
+    let n = sc_rw_visit(rw, s);
+    let d = sc_denormalize_for_post_inc_use(n);
+    sc_norm_iv_pred = save;
+    if check_invertible && d != s { return -1; }
+    return n;
 }
 
 // SCEVInitRewriter::rewrite
