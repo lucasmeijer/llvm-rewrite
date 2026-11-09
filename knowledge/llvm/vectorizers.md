@@ -85,6 +85,26 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - VectorInstrContext hints only reach BasicTTI's getVectorInstrCost, which ignores them: on X86 they do not change
   any cost.
 
+- **`m_SMax` / `m_SMin` / `m_UMax` / `m_UMin` match only the intrinsics in LLVM 23** (PatternMatch.h 2850-2867), not
+  `select (icmp)` patterns. So `HorizontalReduction::getRdxKind` classifies a `select(icmp ult a, b), a, b` chain only
+  through its own select fallback, which requires the non-compared operands to be identical extractelements: plain
+  select-based min/max chains are *not* reductions (verified with an assertions opt: matchAssociativeReduction fails
+  on SLPVectorizer/X86/vectorize-reorder-reuse.ll). The same holds for computeMinimumValueSizes' IsSignedCmp.
+- `canConvertToFMA`'s `CheckForContractable` lambda captures the fadd's InstructionsState `S`; when it is applied to
+  the fmul operands, `S.getMatchingMainOpOrAltOp(fmul)` is null, so every fmul is skipped and the check passes
+  whatever the fmuls' flags are (only the fadds need `contract`). This decides FMA candidates in the driver and
+  `getNumScalarInsts`.
+- `TTI::getNumberOfParts` (BasicTTIImpl) is `ceil(N / legal subvector elements)` for a non-power-of-2 fixed vector
+  whose legal type has the same element type, not the legalization split count: `<6 x i64>` on SSE2 is 3 parts (the
+  split count is 4). SLP's `::getNumberOfParts` then accepts it (6 % 3 == 0), which changes how gathers are sliced.
+- getTreeCost returns early, before any external-use extract cost, when `Cost >= -SLPCostThreshold` and no external
+  user is an insertelement (and when the cost is >= 100 over the threshold on small trees); calculateTreeCost...
+  scales node costs by loop trip counts (`-slp-cost-loop-trip-count=2` for unknown trip counts, products over the
+  loop nest), and gathers by the per-lane average (`-slp-per-lane-gather-scale`). Verified tree by tree against
+  `-debug-only=SLP` of an assertions opt on the whole corpus.
+- Debugging without a debug build: `-pass-remarks=slp-vectorizer -pass-remarks-missed=slp-vectorizer` prints the
+  cost of vectorized lists/stores/reductions and of rejected lists. An assertions build of opt 23.1.5 (for
+  `-debug-only=SLP`) is at /persistent/llvm-rewrite/llvm-23.1.5-assert/bin/opt (impl/jai/tools/build_llvm_assert.sh).
 
 ## LoopVectorize (from LoopVectorize.cpp, LoopVectorizationLegality.cpp, LoopVectorizationPlanner.cpp, VPlan*.cpp of 23.1.5)
 
