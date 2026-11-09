@@ -5,6 +5,8 @@
 import std;
 import ir;
 import irutil;
+import gen_attrs;
+import tli;
 
 fn gv_linkage(v: i32) -> i64 { globs[glob_of(v)].linkage as i64 }
 fn gv_has_local_linkage(v: i32) -> bool { let l = gv_linkage(v); l == LK_INTERNAL || l == LK_PRIVATE }
@@ -14,23 +16,30 @@ fn gv_has_available_externally_linkage(v: i32) -> bool { gv_linkage(v) == LK_AVA
 fn gv_is_discardable_if_unused(v: i32) -> bool {
     gv_has_linkonce_linkage(v) || gv_has_local_linkage(v) || gv_has_available_externally_linkage(v)
 }
-// GlobalValue::isInterposable: weak, linkonce (non-ODR), extern_weak, common, external_weak... (mayBeDerefined)
-fn gv_is_interposable(v: i32) -> bool {
+// GlobalValue::isInterposableLinkage
+fn gv_interposable_linkage(v: i32) -> bool {
     let l = gv_linkage(v);
-    if l == LK_WEAK_ANY || l == LK_LINKONCE_ANY || l == LK_COMMON || l == LK_EXTERN_WEAK { return true; }
-    // isInterposableLinkage(External) is false; semantic interposition (the "SemanticInterposition" module flag)
-    // is not consulted by the passes using this helper
-    return false;
+    return l == LK_WEAK_ANY || l == LK_LINKONCE_ANY || l == LK_COMMON || l == LK_EXTERN_WEAK;
 }
-// GlobalValue::hasExactDefinition: !isDeclaration && !mayBeDerefined (linkonce/weak non-ODR, available_externally, ...)
-fn gv_has_exact_definition(v: i32) -> bool {
-    if func_is_decl(v) { return false; }
+fn gv_fn_def_has(v: i32, kind: i64) -> bool {
+    vals[v].kind == VK_FUNC && !func_is_decl(v) && aset_has(alist_fn(globs[glob_of(v)].attrs), kind)
+}
+// Module::getSemanticInterposition
+fn module_semantic_interposition(m: i32) -> bool { tli_module_flag_int(m, "SemanticInterposition") > 0 }
+// GlobalValue::isInterposable(CheckNoIPA)
+fn gv_is_interposable(v: i32, check_noipa: bool) -> bool {
+    if check_noipa && gv_fn_def_has(v, AK_NoIPA) { return true; }
+    if gv_interposable_linkage(v) { return true; }
+    return globs[glob_of(v)].dso_local == 0 && module_semantic_interposition(globs[glob_of(v)].module);
+}
+// GlobalValue::mayBeDerefined
+fn gv_may_be_derefined(v: i32) -> bool {
     let l = gv_linkage(v);
-    // isDefinitionExact: !mayBeDerefined(); mayBeDerefined: weak/linkonce (any and ODR), available_externally,
-    // extern_weak, common
-    return !(l == LK_WEAK_ANY || l == LK_WEAK_ODR || l == LK_LINKONCE_ANY || l == LK_LINKONCE_ODR ||
-             l == LK_AVAILABLE_EXTERNALLY || l == LK_EXTERN_WEAK || l == LK_COMMON);
+    if l == LK_WEAK_ODR || l == LK_LINKONCE_ODR || l == LK_AVAILABLE_EXTERNALLY { return true; }
+    return gv_is_interposable(v, true) || gv_fn_def_has(v, AK_NoBuiltin);
 }
+// GlobalValue::hasExactDefinition
+fn gv_has_exact_definition(v: i32) -> bool { !func_is_decl(v) && !gv_may_be_derefined(v) }
 
 // constantIsDead(C, RemoveDeadUsers = false)
 recursive fn ipo_constant_is_dead(c: i32) -> bool {

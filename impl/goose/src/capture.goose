@@ -120,6 +120,7 @@ let CTK_SIMPLE = 0;
 let CTK_BEFORE = 1;
 let CTK_EARLIEST = 2;
 let CTK_ICMP = 3;              // InstCombine's CmpCaptureTracker (foldAllocaCmp)
+let CTK_ARGUSES = 4;           // FunctionAttrs' ArgumentUsesTracker
 
 let CT_STOP_ANY = 0;            // capturesAnything
 let CT_STOP_FULL_PROV = 1;      // capturesFullProvenance
@@ -144,6 +145,9 @@ var ct_icmp_alloca: i32 = -1;      // CmpCaptureTracker::Alloca
 var ct_icmp_captured: bool = false;
 var ct_icmps: i32[>..<];           // CmpCaptureTracker::ICmps (a MapVector: insertion order)
 var ct_icmp_bits: i64[>..<];
+// ArgumentUsesTracker: the SCC's functions with an exact definition, CI (as ct_cc: other, ct_cc_ret: ret) and Uses
+var ct_arg_scc: i32[>..];
+var ct_arg_uses: i32[>..<];
 
 fn ct_stop_fn(cc: i64) -> bool {
     if ct_stop == CT_STOP_ANY { return cc_anything(cc); }
@@ -153,6 +157,7 @@ fn ct_stop_fn(cc: i64) -> bool {
 
 fn ct_too_many_uses() {
     if ct_kind == CTK_ICMP { ct_icmp_captured = true; return; }
+    if ct_kind == CTK_ARGUSES { ct_cc = CC_ALL; ct_cc_ret = CC_ALL; return; }
     if ct_kind == CTK_SIMPLE { ct_cc = ct_mask; ct_cc_ret = ct_mask; }
     else if ct_kind == CTK_BEFORE { ct_cc = ct_mask; }
     else {
@@ -182,9 +187,34 @@ fn ct_ncd_inst(a: i32, b: i32) -> i32 {
     return block_terminator(d);
 }
 
+// ArgumentUsesTracker::updateCaptureInfo: true when the use was recorded as a capture
+fn ct_arg_update_capture_info(u: i32, cc: i64) -> bool {
+    let user = uses[u].user;
+    if !(is_inst(user) && is_callbase(user)) {
+        if is_inst_op(user, OP_RET) { ct_cc_ret |= cc; } else { ct_cc |= cc; ct_cc_ret |= cc; }
+        return true;
+    }
+    let f = called_function(user);
+    var in_scc = false;
+    if f >= 0 { for x in ct_arg_scc { if x == f { in_scc = true; } } }
+    if !in_scc { ct_cc |= cc; ct_cc_ret |= cc; return true; }
+    let use_index = (u - vals[user].ops) as i64;
+    if use_index >= cb_nargs(user) { ct_cc |= cc; ct_cc_ret |= cc; return true; }
+    if use_index >= func_nargs(f) { ct_cc |= cc; ct_cc_ret |= cc; return true; }
+    ct_arg_uses.push(func_arg(f, use_index));
+    return false;
+}
+
 fn ct_captured(u: i32, c: UCI) -> i64 {
     let user = uses[u].user;
     let is_ret = is_inst_op(user, OP_RET);
+    if ct_kind == CTK_ARGUSES {
+        if ct_arg_update_capture_info(u, c.use_cc) {
+            if ct_cc == CC_ALL { return CTA_STOP; }
+            return CTA_CONTINUE;
+        }
+        return CTA_CONTINUE_IGNORING_RETURN;
+    }
     if ct_kind == CTK_ICMP {
         if is_inst_op(user, OP_ICMP) && (inst_pred(user) == 32 || inst_pred(user) == 33) && get_underlying_object(uses[u].val, 6) == ct_icmp_alloca {
             let opno = (u - vals[user].ops) as i64;
@@ -256,6 +286,17 @@ fn ct_pointer_may_be_captured(v: i32, mask: i64, stop: i64, max_uses: i64) -> i6
     ct_cc_ret = 0;
     ct_walk(v, max_uses);
     return ct_cc, ct_cc_ret;
+}
+
+// PointerMayBeCaptured(A, &ArgumentUsesTracker): returns the tracker's CaptureInfo; Uses are left in ct_arg_uses
+// (ct_arg_scc must hold the SCC's functions with an exact definition)
+fn ct_argument_uses_tracker(a: i32) -> i64 {
+    ct_kind = CTK_ARGUSES;
+    ct_cc = 0;
+    ct_cc_ret = 0;
+    ct_arg_uses.resize(0);
+    ct_walk(a, 0);
+    return ci_make(ct_cc, ct_cc_ret);
 }
 
 // PointerMayBeCaptured(V, ReturnCaptures)

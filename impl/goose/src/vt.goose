@@ -158,8 +158,9 @@ fn call_param_has_attr(c: i32, k: i64, kind: i64) -> bool {
 }
 fn call_ret_has_attr(c: i32, kind: i64) -> bool {
     if aset_has(alist_ret(insts[inst_of(c)].attrs), kind) { return true; }
-    let f = cb_callee(c);
-    if is_func(f) && aset_has(alist_ret(globs[glob_of(f)].attrs), kind) { return true; }
+    // CallBase::hasRetAttrImpl: the callee only through getCalledFunction (matching function type)
+    let f = called_function(c);
+    if f >= 0 && aset_has(alist_ret(globs[glob_of(f)].attrs), kind) { return true; }
     return false;
 }
 // CallBase::getReturnedArgOperand
@@ -420,7 +421,7 @@ recursive fn ikz(v: i32, de: AP, depth0: i64) -> bool {
     let k = vals[v].kind;
     if is_constant(v) {
         if is_null_value(v) { return false; }
-        if k == VK_CINT { return true; }
+        if k == VK_CINT && ty_kind(ty) != TK_BYTE { return true; }   // a ConstantByte is not a ConstantInt
         if ty_kind(ty) == TK_FVEC {
             for i in ty_count(ty) {
                 if !de_get(de, i) { continue; }
@@ -434,7 +435,7 @@ recursive fn ikz(v: i32, de: AP, depth0: i64) -> bool {
         if is_global(v) {
             // !isAbsoluteSymbolRef() && !hasExternalWeakLinkage() && addrspace 0
             let g = globs[glob_of(v)];
-            if g.linkage as i64 != LK_EXTERN_WEAK && g.addrspace == 0 {
+            if g.linkage as i64 != LK_EXTERN_WEAK && ptr_as(vals[v].ty) == 0 {
                 if glob_has_absolute_symbol(v) { return false; }
                 return true;
             }
@@ -887,11 +888,11 @@ recursive fn ikz_operator(i: i32, de: AP, depth: i64) -> bool {
             if id == IID_ctlz { return kb_is_nonneg(kb_compute(cb_arg(i, 0), de, depth)); }
             if id == IID_fshr || id == IID_fshl {
                 if cb_arg(i, 0) == cb_arg(i, 1) { return ikz(cb_arg(i, 0), de, depth); }
-                return false;
             }
             if id == IID_vscale { return true; }
             if id == IID_experimental_get_vector_length { return is_known_non_zero(op(i, 0), depth); }
-            return false;
+            // every other intrinsic: `break` out of the opcode switch to the known-bits fallback
+            return kb_nonzero_fallback(i, de, depth);
         }
         return false;
     }
