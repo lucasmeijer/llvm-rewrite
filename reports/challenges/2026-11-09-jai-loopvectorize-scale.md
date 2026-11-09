@@ -1,6 +1,6 @@
 # L1.vectorize.loop is far larger than one agent session; the first vectorized loop needs ~20k lines of LLVM
 
-- **Date / implementation / unit:** 2026-11-25 / jai / L1.vectorize.loop
+- **Date / implementation / unit:** 2026-11-09 / jai / L1.vectorize.loop
 - **What happened:** LoopVectorize in LLVM 23 is LoopVectorize.cpp (8.5k lines) plus the VPlan infrastructure
   (VPlan.h 5.2k, VPlanRecipes 5k, VPlanTransforms 7.8k, VPlanConstruction 2.3k, VPlanUnroll, VPlanUtils, ...),
   ~38k lines in total. Even the simplest test (`-force-vector-width=4` on a single-block `a[i] = b[i] + c` loop, no
