@@ -961,34 +961,37 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
 
 ## SLPVectorizer (in progress; L1.vectorize.slp)
 
-- `-passes=slp-vectorizer` is registered (passes.jai) and its cl::opts are parsed (`slp_parse_cl_opt`). Files:
-  - `slp_utils.jai`: cl::opts, static helpers of SLPVectorizer.cpp lines 100-1980, InstructionsState, getSameOpcode,
-    SLPUtils.cpp. `slp_lookahead.jai`: LookAheadHeuristics. `slp_operands.jai`: VLOperands, findBestRootPair.
-  - `slp_tree.jai`: BoUpSLP state (`slp`, Tree_Entry rows). `slp_build.jai`: BoUpSLP entry points used by the driver
-    (constructor, getVectorElementSize, getMaximumVF, reduction bookkeeping, getStoreMinimumVF) and the frontier
-    stubs that `slp_fail`.
-  - `slp_ica.jai`: InstructionsCompatibilityAnalysis (copyables) + PHIHandler (complete).
-  - `slp_driver.jai`: SLPVectorizerPass (complete up to the BoUpSLP calls): seeds, store chains (StoreChainContext,
-    RelatedStoreInsts, masked-store fallback with sortPtrAccesses), tryToVectorizeList, tryToVectorizeSequence (the
-    lambda sets are a `Seq_Kind` switch), phis/inserts/cmps/non-vectorizable roots/poor-throughput seeds/FMA
-    candidates, GEP indices, canConvertToFMA.
-  - `slp_hor_reduction.jai`: HorizontalReduction matching (complete) and tryToReduce / tryToReduceOrdered up to
-    the first buildTree.
-- Frontier (fails loudly, in data-flow order): `BoUpSLP::buildTree` (the first thing nearly every seed reaches);
-  canBuildSplitNode (reductions of >4 values in two alternating groups); reduction IR without a tree (const.rdx,
-  emitScaleForReusedOps).
-- Next steps, in order: buildTree/buildTreeRec (+ TreeEntry creation, getScalarsVectorizationState,
-  getScalarsVectorizationLegality, tryToFindDuplicates, canVectorizeLoads, BlockScheduling: tryScheduleBundle,
-  calculateDependencies), isTreeTinyAndNotFullyVectorizable (first point where whole functions match LLVM: tiny
-  trees are rejected before any cost); then reordering, transformNodes, computeMinimumValueSizes, the cost model
-  (getEntryCost, ShuffleCostEstimator, getSpillCost, getTreeCost, HorizontalReduction::getReductionCost) and
-  vectorizeTree (ShuffleInstructionBuilder, scheduleBlock, external extracts, optimizeGatherSequence, ~BoUpSLP
-  erasing). knowledge/llvm/vectorizers.md has the map of the LLVM file.
-- Sorting: LLVM's `stable_sort` calls go through `gnu_stable_sort` (scev.jai, libstdc++'s algorithm) when the
-  comparator may not be a strict weak order (PHICompare, compareCmp); insertion sort elsewhere.
+- `-passes=slp-vectorizer` is registered (passes.jai) and its cl::opts are parsed (`slp_parse_cl_opt`). Files, in
+  data-flow order (each names its LLVM functions in the header):
+  - `slp_utils.jai` (cl::opts, static helpers, InstructionsState, getSameOpcode, SLPUtils.cpp), `slp_lookahead.jai`,
+    `slp_operands.jai` (VLOperands), `slp_tree.jai` (state `slp`, Tree_Entry rows), `slp_ica.jai`
+    (InstructionsCompatibilityAnalysis, PHIHandler).
+  - `slp_driver.jai`: SLPVectorizerPass (complete). `slp_hor_reduction.jai`: HorizontalReduction matching and
+    tryToReduce / tryToReduceOrdered up to the cost check.
+  - `slp_build.jai`: BoUpSLP entry points + more state (`slpx`) + the frontier stubs. `slp_build_tree.jai`:
+    buildTree/buildTreeRec, legality, getScalarsVectorizationState, tryToFindDuplicates, canBuildSplitNode,
+    canReuseExtract, canVectorizeLoads (X86 subset), isTreeTinyAndNotFullyVectorizable. `slp_sched.jai`:
+    BlockScheduling (tryScheduleBundle, calculateDependencies, schedule) without ScheduleCopyableData.
+  - `slp_reorder.jai`: reorderTopToBottom / reorderBottomToTop (+ getReorderingData, libstdc++ heap for the
+    PriorityQueue). `slp_gather.jai`: tryToGatherExtractElements, isGatherShuffledEntry,
+    getLastInstructionInBundle, findReusedOrderedScalars. `slp_transform.jai`: transformNodes, reorderGatherNode.
+    `slp_minbw.jai`: computeMinimumValueSizes / collectValuesToDemote (DenseSet<unsigned> order emulated).
+- Frontier (fails loudly), most frequent first in the corpus sweep: calculateTreeCostAndTrimNonProfitable and the
+  rest of the cost model; scheduling bundles with copyable elements; HorizontalReduction cost/codegen;
+  tryToVectorizeGatheredLoads; const.rdx / emitScaleForReusedOps; isMaskedLoadCompress and the masked-gather
+  cost check in canVectorizeLoads; matchesShlZExt / matchesInversedZExtSelect / matchesSelectOfBits.
+- Next steps, in order: buildExternalUses; the cost model (ShuffleCostEstimator 15729, getEntryCost 17029,
+  getSpillCost 18744, calculateTreeCostAndTrimNonProfitable 19291, getTreeCost 19859,
+  HorizontalReduction::getReductionCost 30841) — with it, functions where LLVM decides "not profitable" match;
+  then vectorizeTree (ShuffleInstructionBuilder 22131, vectorizeTree 23272-25490, scheduleBlock 26676,
+  optimizeGatherSequence 25489, ~BoUpSLP 6576) and HorizontalReduction's emitReduction; then the fail-loudly
+  paths above. knowledge/llvm/vectorizers.md has the map of the LLVM file.
+- Sorting: LLVM `stable_sort`s go through `gnu_stable_sort` (scev.jai, libstdc++'s algorithm) when the comparator
+  may not be a strict weak order (PHICompare, compareCmp); insertion sort elsewhere. Hash-ordered containers that
+  decide results fail loudly when the order matters (collectUserStores with several store groups).
 - Fail loudly already in the helpers: REVEC, struct-typed scalars, VFDatabase vector variants, operand bundles in
   getSameOpcode / generateKeySubkey, VP intrinsics, target extension element types.
-- Sweep `--passes slp-vectorizer`: 5036 identical / 0 differs / 2718 loud (2607 at buildTree).
+- Sweep `--passes slp-vectorizer`: 6184 identical / 0 differs / 1570 loud.
 
 ## Performance (compile time; jai_perf task, 2026-11)
 

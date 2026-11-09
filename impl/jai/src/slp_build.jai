@@ -41,6 +41,9 @@ Slp_Extra :: struct {
     entry_to_last_instruction: Table(Te_Id, Value_Id);
     phi_cmp_te: Te_Id;                            // state of getReorderingData's PHICompare
     phi_cmp_heads: [] Value_Id;
+    min_bws: Table(Te_Id, Min_Bw);
+    analyzed_min_bw_vals: Table(Value_Id, bool);
+    reduction_bit_width: u64;
 }
 slpx: Slp_Extra;
 
@@ -68,6 +71,7 @@ slp_init :: (f: Value_Id, tti: *Tti, aar: Aa_Results, li: *Loop_Info, dt: *Dom_T
     slpx.extra_bitwidth_nodes.allocator = temp; slpx.known_non_vectorizable_loads.allocator = temp;
     slpx.batch_aa = aa_query_new(*slpx.aar);
     slpx.entry_to_last_instruction.allocator = temp;
+    slpx.min_bws.allocator = temp; slpx.analyzed_min_bw_vals.allocator = temp;
     collect_ephemeral_values_fn(f, ac, *slpx.eph_values);
     slp_init_reg_sizes(slp_cl.max_reg_size_given, slp_cl.min_reg_size_given);
 }
@@ -209,10 +213,11 @@ tti_store_minimum_vf :: (t: *Tti, vf_in: u64, mem_ty: Type_Id, val_ty: Type_Id) 
 
 // ---------------------------------------------------------------- the frontier (not ported yet)
 
-slp_compute_minimum_value_sizes :: () { slp_fail("computeMinimumValueSizes"); }
-slp_clear_analyzed_min_bw_vals :: () {}
+slp_clear_analyzed_min_bw_vals :: () { table_reset(*slpx.analyzed_min_bw_vals); }
 slp_delete_tree_later_state :: () {   // the deleteTree members of later stages
     table_reset(*slpx.entry_to_last_instruction);
+    table_reset(*slpx.min_bws);
+    slpx.reduction_bit_width = 0;
 }
 slp_calculate_tree_cost_and_trim_non_profitable :: () -> Cost { slp_fail("calculateTreeCostAndTrimNonProfitable"); return 0; }
 slp_build_external_uses :: () { slp_fail("buildExternalUses"); }
