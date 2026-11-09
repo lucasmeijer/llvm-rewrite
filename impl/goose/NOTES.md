@@ -1014,7 +1014,7 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
 
 ## Reassociate (reassociate.goose)
 
-- L1.reassociate 78/82 ::opt (all roundtrips). Left: three tests run `inline` (cgscc pipeline not ported);
+- L1.reassociate 79/82 ::opt (all roundtrips). Left: three tests run `inline` (cgscc pipeline not ported);
   fast-ReassociateVector.ll's `-use-constant-int-for-fixed-length-splat` line is identical since `ra_isa_cint`
   accepts vector-typed ConstantInts.
 - State and containers: file header. RedoInsts/ToRedo are SetVectors over a deque (array with tombstones + HMap
