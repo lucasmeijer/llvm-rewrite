@@ -113,8 +113,8 @@ fn ra_one_use(v: i32) -> bool { if is_constant_data(v) { return false; } let u =
 fn ra_user_back(v: i32) -> i32 { uses[vals[v].first_use].user }
 fn ra_is_binop(v: i32) -> bool { is_inst(v) && is_binary_op(iop(v)) }
 fn ra_is_unop(v: i32) -> bool { is_inst(v) && iop(v) == OP_FNEG }
-// isa<ConstantInt>: vector-typed ConstantInts exist only behind -use-constant-int-for-*-splat (rejected by opt)
-fn ra_isa_cint(v: i32) -> bool { vals[v].kind == VK_CINT && !ty_is_vector(vals[v].ty) }
+// isa<ConstantInt>: also a vector-typed splat ConstantInt (-use-constant-int-for-*-splat)
+fn ra_isa_cint(v: i32) -> bool { vals[v].kind == VK_CINT }
 // isa<ConstantFP>: a scalar, or a vector splat (ConstantVector::getSplat gives a ConstantFP). Scalable FP
 // splats are shufflevector constant expressions here (c_splat), ConstantFPs in LLVM.
 fn ra_isa_cfp(v: i32) -> bool {
