@@ -7,10 +7,28 @@
 - Docs: `/persistent/toolchains/jai/how_to/*.jai` (numbered tutorials), `README.txt`, `CHANGELOG.txt`, and the module
   sources in `/persistent/toolchains/jai/modules`. Training data for Jai is thin and the language changes between
   betas, so check against the how_to files and modules rather than relying on memory.
-- `build.sh` compiles each `src/<tool>.jai` with the x64 backend (`-x64`): about 0.5 s for `opt`. The LLVM backend
-  with `-o` takes ~6.5 s per tool but the result parses+prints sqlite3.ll in 0.26 s vs 1.5 s for the x64 build
-  (LLVM's opt: 0.36 s). `perf` numbers from the default build are therefore ~5-9x LLVM for parse+print; that's the
-  backend, not the algorithms (scaling exponents are all ~1.0). Switch build.sh to `-o` when speed matters.
+- `build.sh` compiles each `src/<tool>.jai` with the x64 backend (`-x64`, bounds checks and stack traces on) by
+  default: ~3 s for all three tools. See "Build modes" below for the optimized build that `perf` uses.
+
+## Build modes and compile-time performance
+
+- **`JAI_BUILD=x64`** (default, what `check` builds): the x64 backend, ~3 s. Its binaries are 5-8x slower than the
+  optimized build (parse+print sqlite3.ll 1.2 s vs 0.15 s; `-passes=gvn` 4.9 s vs 0.6 s).
+- **`JAI_BUILD=optimized`** (`impl/jai/perf.env` sets it for `harness/run perf`): `build_optimized.jai`, a metaprogram
+  with the `-o` settings (LLVM backend, VERY_OPTIMIZED, no stack traces, **no bounds checks**). ~2 min under load (one
+  thread per tool; the three tools build in parallel). Splitting into LLVM modules (`enable_split_modules`) builds
+  5x faster but the binary is 2.4x slower (no cross-module inlining), and stack traces on cost another 2x, so neither
+  is used. The full ratchet passes with the optimized binary too (`check --no-build` after a `JAI_BUILD=optimized`
+  build), but keep `check` on x64: bounds checks turn silent memory bugs into loud failures.
+- Both are cached in `bin/.cache/<mode>-<hash of build.sh, build_optimized.jai, src/, compiler version>/` (4 newest
+  per mode); `bin/.stamp` names the installed one. Switching modes (perf, then check) is a copy. The optimized build
+  compiles a snapshot of `src/` so edits during the two minutes can't end up under the wrong hash; each build has its
+  own `.build` directory (a concurrent build's cleanup used to delete the other's object files).
+- Decision (2026-11): keep x64 for `check` (the harness rebuilds before every check; 2 min would dominate an edit/check
+  loop) and time the optimized build in `perf`. `perf` after a source change therefore costs ~2 min extra once.
+- Profiling: `valgrind --tool=callgrind` works on both builds (perf(1) has no hardware counters in this VM); profile
+  the optimized build (the x64 build's hotspots are mostly backend artefacts). Function names come out as
+  `file.jai:proc_<hash>`; with `--tree=caller` you get call counts per caller.
 
 ## Layout of the code
 
@@ -965,3 +983,54 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   vectorizeTree. knowledge/llvm/vectorizers.md has the map of the LLVM file.
 - Fail loudly already in the helpers: REVEC, struct-typed scalars, VFDatabase vector variants, operand bundles in
   getSameOpcode, VP intrinsics (vu_is_vector_intrinsic_with_scalar_op_at_arg), target extension element types.
+
+## Performance (compile time; jai_perf task, 2026-11)
+
+`perf --impl jai` geomean CPU ratio: 3.88x (x64 build) -> 0.78x (optimized build of the same sources) -> 0.66x
+(after the changes below); `--instr` on allocas, straightline and sqlite3.ll: 0.77x LLVM's instructions. Measured
+with the optimized build, callgrind instruction counts (`valgrind --tool=callgrind`,
+the "Ir" totals of one run). LLVM's own counts in the last column.
+
+| workload (instructions, M) | before | after | LLVM |
+| --- | ---: | ---: | ---: |
+| `-S` sqlite3.ll (parse + print) | 1371 | 1141 | 2032 |
+| `-passes=gvn` sqlite3.ll | 5018 | 3711 | 2640 |
+| `-passes=dse` sqlite3.ll | 3640 | 2654 | 2305 |
+| `-passes=sroa` allocas/n8000 | 1823 | 713 | 897 |
+| `-passes=mem2reg` allocas/n8000 | 1563 | 621 | 837 |
+| `-passes=instcombine` straightline/n16000 | 1710 | 1474 | 627 |
+| `loop(loop-rotate,indvars)` loops-many/n500 | 1906 | 1167 | 757 |
+| `loop(loop-rotate,indvars)` loops-many/n2000 (CPU s) | 6.3 | 4.1 | 3.6 |
+
+What changed (behaviour identical: full ratchet, and sweeps of print<scalar-evolution>, indvars, loop-unroll,
+loop-deletion, mem2reg, sroa, gvn, dse, instcombine, simplifycfg, adce, licm, memcpyopt, jump-threading,
+print<domtree>, reassociate, aa-eval and `sroa,loop(loop-rotate,indvars,loop-idiom,loop-deletion)` show no new
+differs or failures):
+- Interning keys (`Key`) were built with one `array_add` per byte (~12% of parsing): now direct little-endian stores.
+- `md_kind_id(literal)` was a string-hash lookup per call (10% of GVN/DSE via get_aa_metadata and memdep): hot paths
+  use the `MDK_*` constants of the fixed kinds, others go through a verified direct-mapped cache.
+- `type_int` caches widths <= 256. Trap: const_folding.jai has its own `type_int :: (bits: u32)` overload; it now
+  forwards to the cached one (it was bypassing every cache: all SCEV constants went through it).
+- mem2reg / SROA: block numbers moved from a global Table into `Block_Row.number`; IDF's visited sets are stamp
+  arrays; mem2reg's def / live-in sets are `Block_Set`s; PHI and SROA names use `tconcat` instead of `tprint`
+  (4 KB memset per call): sroa/mem2reg 2.5x fewer instructions.
+- `dt_node` is a dense array lookup (was a Table per query; 18% of indvars on loops-many n2000 through
+  compare_scev_complexity's dominance check of AddRec loops).
+- SCEV: GroupByComplexity's grouping scan is O(n^2) per run of one kind (36% of indvars on loops-many n2000: umax/umin
+  of hundreds of distinct loop guards); it only acts on duplicates, so it is skipped when there are none
+  (`sc_has_duplicate_ids`). constantFoldAndGroupOps erased constants one by one (quadratic in Jai, whose ordered
+  remove is an element loop): one compacting pass. `sc_get_constant` has a (width, value) cache.
+- DataLayout struct layouts are cached (`dl_cached_struct_layout`); GEP offsets in GVN/BasicAA recomputed them
+  recursively per query.
+- Stack buffers instead of temp `[..]` arrays in `simplify_instruction` and `strip_pointer_casts_for_alias_analysis`.
+
+Still slow / known:
+- instcombine on straightline is 2.3x LLVM's instructions: known-bits recursion makes about as many calls as LLVM's
+  computeKnownBits, each ~2x the work (KnownBits/APInt by value, pattern helpers). No single hotspot left.
+- GVN and DSE, pass only (minus parsing): ~3x LLVM's instructions; spread over memdep, BasicAA, temp arrays.
+- LoopUnroll/pr77842.ll (`-passes=loop-unroll`): 9.6 s vs LLVM 5.4 s and **5.7 GB RSS**: temp storage is only reset
+  between passes, and the unrolled body's SCEV folding makes ~76M temp allocations (operand lists). Resetting temp
+  inside SCEV is unsafe (wide APInts and ranges in caches may live in temp); fixing it means pooled operand lists.
+- Every `[..]` with `allocator = temp` costs an allocator call on its first add (~100 instructions with
+  array_reserve); in SCEV that's 6-8% of the time.
+

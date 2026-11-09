@@ -263,6 +263,12 @@ cached per function; passes return the preserved set and the pass manager invali
 - Per-pass and per-print scratch (worklists, slot maps, visited sets) uses `temporary_storage` and is reset between
   passes (`reset_temporary_storage()`), so passes need no frees.
 - Nothing is freed individually; the process exits after writing the output.
+- Hot-path traps (NOTES.md "Performance"): `tprint` / a `String_Builder` zero a 4 KB inline buffer per call (use
+  `tconcat` / `tdec` for names), a `[..]` array's first `array_add` is an allocator call (use a stack buffer for small
+  fixed-size scratch), and `Table` lookups are ~40 instructions (prefer dense arrays indexed by ids).
+- Caches of derived data: struct layouts (`dl_cached_struct_layout`, per type, invalidated by bumping
+  `dl_layout_gen` in `dl_init` and `set_struct_body`), the interned ids of `iN` for N <= 256 (`int_type_cache`), md
+  kind ids of literals (`md_kind_cache`; fixed kinds on hot paths use the `MDK_*` constants).
 
 ## 6. Orders that LLVM's output depends on
 
@@ -357,6 +363,14 @@ LLVM's recalculation thresholds), `dt_dominates` (with LLVM's slow-query counter
 GenericDomTree*. Child lists are in insertion order, exactly as LLVM's, so any pass that walks the tree sees LLVM's
 order. Keep the tree updated the way the LLVM pass does (eager `applyUpdates` or the specific helper it calls);
 recomputing gives a different child order.
+
+Block -> node lookup (`dt_node`) is a dense array `node_dense` over block rows (`ir.v_aux` of the block) from
+`dense_base`, the function's lowest block row when the tree was reset; the `node_of` Table holds the rest (the
+post-dominator virtual root `NONE`, blocks moved in from a function created earlier). Write it only through
+`dt_map_set`. Block numbers (`BasicBlock::Number`) are `Block_Row.number` (assigned once, in LLParser order by
+`ensure_block_numbers`, then `note_block_created`); the function's counter is `Global_Row.next_block_num` (-1 = not
+numbered yet). `Block_Set` (stamp per block row, O(1) clear) is the fast block set for hot paths; `idf_calculate` takes
+a Table, a `Block_Set` or null for its def / live-in sets, and keeps its visited marks in global stamp arrays.
 
 ### Alias analysis and MemorySSA (aa.jai, basic_aa.jai, tbaa.jai, scoped_noalias_aa.jai, globals_aa.jai, memoryssa.jai)
 
@@ -491,6 +505,8 @@ recomputing gives a different child order.
   `sc_insert` hash into `se.unique` with buckets chained through `hnext`; flags live on the node and only grow
   (`sc_set_no_wrap_flags` = ScalarEvolution::setNoWrapFlags, `sc_row(s).flags |=` = SCEVNAryExpr::setNoWrapFlags).
   LLVM 23's SCEVUse can carry use flags, but 23.1.5 never creates one, so operands are plain ids.
+  `sc_get_constant` of a <= 64-bit value first looks in `se.const_cache` (direct-mapped (width, value) -> id; SCEV
+  constants are never removed from the uniquing table).
 - **State**: one `*Scev_State` per function (`Fn_Analyses.se`, `get_scev(f)` = AM.getResult, `cached_scev(f)`);
   every `sc_*` procedure works on the global `se`, which `get_scev` (and the loop PM / AA entry points) set. All of
   LLVM's caches are tables of the state with the same keys (ValueExprMap / ExprValueMap, ranges, constant
