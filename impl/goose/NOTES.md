@@ -33,6 +33,7 @@
   folding, dbg_assign in RemoveRedundantDbgInstrs, ppc_fp128 literals). Speed (by hand, no `@perf` line times them):
   on the four tests/perf/compile programs CVP/JT/BPI/BFI cost about what LLVM's do (SPASS: `sroa,correlated-propagation`
   0.20 s vs LLVM 0.35 s); linear on every tests/perf/scaling shape after three fixes (see "LVI, CVP, JumpThreading").
+
 - L1.simplifycfg 563/578 (all 289 roundtrip, 274/289 opt). Left, other passes/flags: debugify ×3,
   `-strip-debug`, `-O1`, instcombine visitors/LibCallSimplifier ×4 (`duplicate-phis`, `merge-cond-stores`,
   `unreachable_assume`, ...); SimplifyCFG pieces still failing loudly: cloning debug records (bonus instructions,
@@ -910,6 +911,7 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   a linear `position` per case, quadratic), loops-many 2.4x: PHITransAddr's scan of every user of a GEP base is
   quadratic in LLVM too (same algorithm), our dominance query per user is ~3x LLVM's cost.
 - Not ported: optimization remarks (never printed); `-enable-gvn-memoryssa` together with MemDep (loud).
+
 ## LVI, CVP, JumpThreading, BPI/BFI (lvi, cvp, jt, bpi, bfi)
 
 - Facts: knowledge/llvm/lazy-value-info-and-jump-threading.md. LazyValueInfo is one result at a time (`lvi_get(fv)`,
