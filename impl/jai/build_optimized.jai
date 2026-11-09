@@ -22,6 +22,7 @@ build :: () {
     options.stack_trace = false;
     options.output_executable_name = args[1];
     options.output_path = args[2];
+    options.intermediate_path = tprint("%/.build", args[2]);   // per build: concurrent builds don't share .build
     set_build_options(options, w);
     add_build_file(args[0], w);
 }

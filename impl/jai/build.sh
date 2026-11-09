@@ -60,4 +60,4 @@ for tool in $TOOLS; do
   cp -f "$CACHE/$tool" "bin/$tool.tmp" && mv -f "bin/$tool.tmp" "bin/$tool"
 done
 echo "$KEY" > bin/.stamp
-rm -rf src/.build bin/.build .build
+rm -rf src/.build bin/.build

@@ -730,6 +730,10 @@ group_by_complexity :: (ops: *[..] Scev_Id) {
     // llvm::stable_sort: the comparator is not a strict weak order at the depth limit, so reproduce libstdc++'s
     // algorithm exactly (LLVM 23.1.5's opt is built against GCC 12's libstdc++)
     gnu_stable_sort(ops.*, sc_is_less_complex);
+    // The grouping loop below only moves an operand when it meets an equal one, and is quadratic in the length of
+    // a run of one kind (36% of indvars on loops-many n2000: umax/umin of hundreds of distinct guards). Without
+    // duplicates it changes nothing, so skip it then.
+    if n > 16 && !sc_has_duplicate_ids(ops.*) return;
     i := 0;
     e := n;
     while i != e - 2 {
@@ -746,6 +750,24 @@ group_by_complexity :: (ops: *[..] Scev_Id) {
         }
         i += 1;
     }
+}
+
+// Whether an id occurs twice (open addressing over a temp table of twice the size)
+sc_has_duplicate_ids :: (ops: [] Scev_Id) -> bool {
+    size := 32;
+    while size < ops.count * 2 size *= 2;
+    slots := NewArray(size, u32,, allocator = temp);   // id + 1, 0 = empty
+    mask := cast(u64) (size - 1);
+    for ops {
+        key := cast(u32) it + 1;
+        h := ((cast(u64) key * 0x9E37_79B9_7F4A_7C15) >> 32) & mask;
+        while slots[cast(s64) h] != 0 {
+            if slots[cast(s64) h] == key return true;
+            h = (h + 1) & mask;
+        }
+        slots[cast(s64) h] = key;
+    }
+    return false;
 }
 
 has_huge_expression :: (ops: [] Scev_Id) -> bool {
@@ -789,18 +811,20 @@ fold_is_absorber :: (k: Fold_Kind, c: APInt) -> bool {
 }
 // constantFoldAndGroupOps: returns the folded result or SCEV_CNC (= nullptr)
 constant_fold_and_group_ops :: (ops: *[..] Scev_Id, k: Fold_Kind) -> Scev_Id {
+    // fold the constants in order and erase them (one compacting pass; erasing one by one was quadratic)
     folded: Scev_Id = SCEV_CNC;
-    idx := 0;
-    while idx < ops.count {
+    out := 0;
+    for idx: 0..ops.count-1 {
         o := ops.*[idx];
         if sc_is_const(o) {
             if folded == SCEV_CNC folded = o;
             else folded = sc_get_constant(fold_apply(k, sc_ap(folded), sc_ap(o)));
-            array_ordered_remove_by_index(ops, idx);
             continue;
         }
-        idx += 1;
+        ops.*[out] = o;
+        out += 1;
     }
+    ops.count = out;
     if ops.count == 0 return folded;
     if folded != SCEV_CNC && fold_is_absorber(k, sc_ap(folded)) return folded;
     group_by_complexity(ops);
@@ -1598,7 +1622,9 @@ sc_get_add :: (ops: *[..] Scev_Id, orig_flags: u8 = SF_ANY, depth: u32 = 0) -> S
             mul := sc_get_mul2(scale, ops.*[i], SF_ANY, depth + 1);
             if ops.count == count return mul;
             ops.*[i] = mul;
-            for 1..count-1 array_ordered_remove_by_index(ops, i + 1);
+            shift := count - 1;   // erase [i + 1, i + count) in one move
+            for j: i + 1..ops.count - 1 - shift ops.*[j] = ops.*[j + shift];
+            ops.count -= shift;
             i -= 1; e -= count - 1;
             found_match = true;
         }
