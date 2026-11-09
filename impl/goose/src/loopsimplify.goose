@@ -25,6 +25,11 @@ import memoryssa;
 import mssaupdater;
 import loopinfo;
 import ssaupdater;
+import instsimplify;
+import vt;
+import scev;
+import scev_eval;
+import scev_update;
 
 // ---------------------------------------------------------------------------------------------
 // Block list helpers
@@ -416,12 +421,23 @@ fn insert_preheader_for_loop(l: i32, preserve_lcssa: bool) -> i32 {
 // separateNestedLoop
 
 // findPHIToPartitionLoops
+// LoopSimplify's ScalarEvolution: AM.getCachedResult<ScalarEvolutionAnalysis>(F) (set by loop_simplify_run)
+var ls_se: bool = false;
+// simplifyInstruction(PN, {DL, nullptr, DT, AC})
+fn ls_simplify_inst(pn: i32) -> i32 {
+    let st = sq_no_tli;
+    sq_no_tli = true;
+    let r = simplify_instruction(pn);
+    sq_no_tli = st;
+    return r;
+}
+
 fn find_phi_to_partition_loops(l: i32) -> i32 {
     var i = block_first(loop_header(l));
     while i >= 0 && iop(i) == OP_PHI {
         let pn = i;
         i = inst_next(i);
-        let v = simplify_phi(pn, true);
+        let v = ls_simplify_inst(pn);
         if v >= 0 {
             rauw(pn, v);
             inst_erase_from_parent(pn);
@@ -472,6 +488,7 @@ fn separate_nested_loop(l: i32, preheader: i32, preserve_lcssa: bool) -> i32 {
             outer_preds.push(phi_block(pn, k));
         }
     }
+    if ls_se { sc_forget_loop(l); }
     let nb = split_block_predecessors(header, outer_preds, ".outer", true, true, preserve_lcssa);
     place_split_block_carefully(nb, outer_preds, l);
     let no = li_allocate_loop(fv);
@@ -691,9 +708,12 @@ recursive fn make_loop_invariant(l: i32, v: i32, ins_pt: i32, changed: bool&) ->
         let ops: i32[2] = [md_string("unknown"), md_string("LoopInfo")];
         inst_set_md(v, md_kind_id("prof"), md_get(MK_TUPLE, -1, ops, false));
     }
+    if mli_se { sc_forget_block_and_loop_dispositions(v); }
     changed = true;
     return true;
 }
+// Loop::makeLoopInvariant's ScalarEvolution argument (LoopSimplify passes its cached one)
+var mli_se: bool = false;
 
 // Function::getEntryCount()->getCount() (0 when absent)
 fn ls_fn_entry_count(fv: i32) -> u64 {

@@ -48,6 +48,7 @@ fn scev_note_erase(v: i32) {
 
 // SCEVCallbackVH::allUsesReplacedWith and SCEVUnknown::allUsesReplacedWith (before the uses change)
 fn scev_note_rauw(old: i32, nv: i32) {
+    if sc_trace { errs(str("[scev] rauw ", val_name(old), "\n")); }
     if hm_has(sc_vmap, old as u64) { sc_forget_value(old); }
     let u = sc_find_unknown(old);
     if u >= 0 {
@@ -64,6 +65,11 @@ fn scev_note_rauw(old: i32, nv: i32) {
 // on each (order-independent: each one only erases cache entries).
 fn su_forget_memoized(list: const i32[:]) {
     if list.len == 0 { return; }
+    if sc_trace {
+        errs("[scev] forget");
+        for x in list { errs(" "); sc_print(x); }
+        errs("\n");
+    }
     sc_side2_grow();
     var seen = hm_new();
     var all: i32[>..<] = [];

@@ -78,7 +78,8 @@ let KNOWN_FLAGS: const u8[:][] = [
     "dse-memoryssa-samebb-cost", "dse-memoryssa-otherbb-cost", "dse-memoryssa-path-check-limit",
     "dse-optimize-memoryssa", "enable-dse-initializes-attr-improvement", "dse-max-dom-cond-depth",
     "enable-memcpyopt-without-libcalls",                 // memcpyopt
-    "goose-ic-lenient",                                  // development only: unported InstCombine visitors do nothing
+    "goose-ic-lenient",
+    "goose-scev-trace",                                  // development only: ScalarEvolution value map events                                  // development only: unported InstCombine visitors do nothing
 ];
 
 // Flags whose non-default value is not supported (checked before the pipeline runs).

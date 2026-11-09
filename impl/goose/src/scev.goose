@@ -92,6 +92,7 @@ recursive fn sc_read_flags() {
     sc_addops_inline_threshold = flag_int("scev-addops-inline-threshold", 500);
     sc_range_iter_threshold = flag_int("scev-range-iter-threshold", 32);
     sc_classify_expressions = flag_bool("scalar-evolution-classify-expressions", true);
+    sc_trace = flag_bool("goose-scev-trace", false);
     sc_use_expensive_range_sharpening = flag_bool("scalar-evolution-use-expensive-range-sharpening", false);
 }
 

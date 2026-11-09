@@ -3708,6 +3708,7 @@ tests/imported/llvm/Transforms/IndVarSimplify/X86/scev-phi-debug-info.ll::opt
 tests/imported/llvm/Transforms/IndVarSimplify/X86/scev-phi-debug-info.ll::roundtrip
 tests/imported/llvm/Transforms/IndVarSimplify/X86/uglygep.ll::opt
 tests/imported/llvm/Transforms/IndVarSimplify/X86/uglygep.ll::roundtrip
+tests/imported/llvm/Transforms/IndVarSimplify/X86/variable-stride-ivs-1.ll::opt
 tests/imported/llvm/Transforms/IndVarSimplify/X86/variable-stride-ivs-1.ll::roundtrip
 tests/imported/llvm/Transforms/IndVarSimplify/X86/verify-scev.ll::opt
 tests/imported/llvm/Transforms/IndVarSimplify/X86/verify-scev.ll::roundtrip
@@ -8592,6 +8593,7 @@ tests/imported/llvm/Transforms/LoopSimplify/indirectbr.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/indirectbr.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/merge-exits.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/merge-exits.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/notify-scev.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/notify-scev.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/phi-node-simplify.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/phi-node-simplify.ll::roundtrip

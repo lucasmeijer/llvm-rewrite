@@ -66,6 +66,8 @@ recursive fn sc_register_users(u: i32) {
     sc_side2_grow();
     for k in sc_nops(u) {
         let o = sc_op(u, k);
+        // constants are not recorded (forgetting a constant's users never sharpens anything)
+        if sc_is_const(o) { continue; }
         sc_users_head[o] = sc_list_push(sc_users_head[o], u);
     }
 }
@@ -81,10 +83,15 @@ recursive fn sc_get_existing(v: i32) -> i32 { hm_get(sc_vmap, v as u64, -1) as i
 recursive fn sc_insert_value_to_map(v: i32, s: i32) {
     if hm_has(sc_vmap, v as u64) { return; }
     hm_put(sc_vmap, v as u64, s as i64);
+    if sc_trace { errs(str("[scev] map ", val_name(v), " (", v, ") -> ")); sc_print(s); errs("\n"); }
     sc_side2_grow();
     sc_values_head[s] = sc_list_push(sc_values_head[s], v);
 }
-recursive fn sc_erase_value_from_map(v: i32) { hm_del(sc_vmap, v as u64); }
+recursive fn sc_erase_value_from_map(v: i32) {
+    if sc_trace && hm_has(sc_vmap, v as u64) { errs(str("[scev] erase ", val_name(v), " (", v, ")\n")); }
+    hm_del(sc_vmap, v as u64);
+}
+var sc_trace: bool = false;     // -goose-scev-trace (development only)
 
 // forgetMemoizedResults(SCEVs): the transitive users through SCEVUsers, then forgetMemoizedResultsImpl
 recursive fn sc_forget_memoized(s0: i32) {

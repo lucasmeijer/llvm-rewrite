@@ -16,6 +16,9 @@ import loopsimplify;
 import simplifycfg;
 import flags;
 import local;
+import scev;
+import scev_eval;
+import scev_update;
 
 // ---------------------------------------------------------------------------------------------
 // simplifyOneLoop / simplifyLoop
@@ -74,8 +77,9 @@ fn simplify_one_loop(l: i32, worklist: i32[>..<]&, preserve_lcssa: bool) -> bool
         while i >= 0 && iop(i) == OP_PHI {
             let pn = i;
             i = inst_next(i);
-            let v = simplify_phi(pn, true);
+            let v = ls_simplify_inst(pn);
             if v >= 0 {
+                if ls_se { sc_forget_value(pn); }
                 if preserve_lcssa { fatal("LoopSimplify with PreserveLCSSA (replacementPreservesLCSSAForm) is not ported yet"); }
                 rauw(pn, v);
                 inst_erase_from_parent(pn);
@@ -107,7 +111,10 @@ fn simplify_one_loop(l: i32, worklist: i32[>..<]&, preserve_lcssa: bool) -> bool
                     let nj = inst_next(j);
                     if j != ci {
                         let ip = if preheader >= 0 { block_terminator(preheader) } else { -1 };
-                        if !make_loop_invariant(l, j, ip, any_inv) { all_inv = false; break; }
+                        mli_se = ls_se;
+                        let ok = make_loop_invariant(l, j, ip, any_inv);
+                        mli_se = false;
+                        if !ok { all_inv = false; break; }
                     }
                     j = nj;
                 }
@@ -149,6 +156,7 @@ fn simplify_loop(l: i32, preserve_lcssa: bool) -> bool {
         let x = worklist.pop();
         if simplify_one_loop(x, worklist, preserve_lcssa) { changed = true; }
     }
+    if changed && ls_se { sc_forget_topmost_loop(l); }
     return changed;
 }
 
@@ -159,6 +167,7 @@ fn loop_simplify_run(fv: i32) -> u32 {
     // AM.getCachedResult<MemorySSAAnalysis>(F): keep it up to date with a MemorySSAUpdater
     let has_mssa = mssa_valid(fv);
     ls_mssau = has_mssa;
+    ls_se = scev_valid(fv);
     if has_mssa { msu_reset(); }
     var changed = false;
     var k: i64 = 0;
@@ -167,6 +176,7 @@ fn loop_simplify_run(fv: i32) -> u32 {
         k++;
     }
     ls_mssau = false;
+    ls_se = false;
     if !changed { return PA_ALL; }
     var pa = ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_LOOPS) | ((1 as u32) << A_SCEV);
     if has_mssa { pa |= (1 as u32) << A_MEMORYSSA; }
