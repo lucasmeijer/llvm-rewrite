@@ -464,7 +464,10 @@
   cvp/lvi/jt (`jt_is_cint`), simplifycfg `get_constant_int`, memcpyopt/dse lengths, simplify_libcalls sizes.
 - Whole-corpus sweeps with both flags (`--extra='-use-constant-int-for-fixed-length-splat
   -use-constant-int-for-scalable-splat'`): instsimplify, instcombine, sccp, gvn, reassociate: 0 differs, 0 crashes
-  (2026-11-09). Use that sweep after touching any isa<ConstantInt> site.
+  (2026-11-09). Use that sweep after touching any isa<ConstantInt> site. `--with-test-flags` sweeps before -> after
+  this work (identical runs; 0 differs and no identical -> other in all): instsimplify 8072 -> 8147, sccp 8098 ->
+  8172, gvn 8054 -> 8131, memcpyopt 8142 -> 8208 (of 10034), instcombine `--per-function` 75656 -> 78329 (of
+  96729). Speed unchanged (instcombine on scaling/straightline ~2.2x LLVM, k 1.05 vs 1.10).
 - Demanded-elements masks are APs (`AP`, apint.goose `de_get`/`de_scalar`): computeKnownBits (`kb_compute`),
   isKnownNonZero (`ikz`), isKnownNonEqual, ComputeNumSignBits (`ncsb`), computeKnownFPClass (`kfc_compute`),
   getShuffleDemandedElts, the X86 intrinsic callers. Width = the fixed vector's element count, `APInt(1, 1)` for
