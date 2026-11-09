@@ -53,6 +53,12 @@
 #load "pass_mldst_motion.jai";
 #load "pass_speculative_execution.jai";
 #load "pass_callsite_splitting.jai";
+#load "pass_coroutines.jai";
+#load "pass_openmp_opt.jai";
+#load "pass_remark_only.jai";
+#load "pass_misc_module.jai";
+#load "pass_inject_tli_mappings.jai";
+#load "pass_ee_instrument.jai";
 #load "pass_reassociate.jai";
 #load "constraint_system.jai";
 #load "pass_constraint_elimination.jai";

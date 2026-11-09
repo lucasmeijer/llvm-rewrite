@@ -23,6 +23,7 @@ scalar_misc_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
         case "spec-exec-max-not-hoisted"; se_cl.max_not_hoisted = smisc_int(name, value, has_value);
         case "spec-exec-only-if-divergent-target"; se_cl.only_if_divergent_target = smisc_bool(name, value, has_value);
         case "callsite-splitting-duplication-threshold"; css_cl.duplication_threshold = smisc_int(name, value, has_value);
+        case "disable-lower-comment-string"; lower_comment_string_cl.disable = smisc_bool(name, value, has_value);
         case; return false;
     }
     return true;

@@ -11,8 +11,8 @@
 
 // ---------------------------------------------------------------- analyses
 
-Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; SCEV; LVI; BPI; BFI; LAST_RUN_TRACKING; EPHEMERAL_VALUES; }
-ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles", "scalar-evolution", "lazy-value-info", "branch-prob", "block-freq", "last-run-tracking", "ephemerals"];
+Analysis_Kind :: enum u8 { DOMTREE; POSTDOMTREE; DEMANDED_BITS; ASSUMPTIONS; MEMORYSSA; LOOPS; CYCLES; SCEV; LVI; BPI; BFI; LAST_RUN_TRACKING; EPHEMERAL_VALUES; SHOULD_NOT_RUN; }
+ANALYSIS_NAMES :: string.["domtree", "postdomtree", "demanded-bits", "assumptions", "memoryssa", "loops", "cycles", "scalar-evolution", "lazy-value-info", "branch-prob", "block-freq", "last-run-tracking", "ephemerals", "should-not-run-function-passes"];
 
 // PreservedAnalyses. `cfg` = preserveSet<CFGAnalyses>().
 Preserved :: struct {
@@ -54,6 +54,7 @@ Fn_Analyses :: struct {
     // uses it and calls update() without options, so the map is "empty" or "{InstCombine: no check}".
     lrt_instcombine: bool;
     eph: *Eph_Cache;   // EphemeralValuesAnalysis (inline_cost.jai)
+    should_not_run: bool;   // ShouldNotRunFunctionPassesAnalysis (an empty result; default invalidate())
 }
 fam: Table(Value_Id, Fn_Analyses);
 
@@ -208,6 +209,7 @@ fam_invalidate :: (f: Value_Id, pa: Preserved) {
     if e.bpi && !analysis_survives(.BPI, pa) { bpi_free(e.bpi); e.bpi = null; }
     if e.eph && !analysis_survives(.EPHEMERAL_VALUES, pa) { deinit(*e.eph.set); free(e.eph); e.eph = null; }
     if e.bfi && !analysis_survives(.BFI, pa) { bfi_free(e.bfi); e.bfi = null; }
+    if e.should_not_run && !analysis_survives(.SHOULD_NOT_RUN, pa) e.should_not_run = false;
     // MemorySSAAnalysis::Result::invalidate: preserved, and AAManager and DominatorTreeAnalysis survive. AAManager
     // depends on BasicAA's AssumptionCache (never invalidated in LLVM: rebuilt here and re-pointed) and DT, and on
     // SCEVAA's ScalarEvolution.
@@ -230,6 +232,7 @@ fam_require :: (f: Value_Id, k: Analysis_Kind) {
         case .BFI; get_bfi(f);
         case .LAST_RUN_TRACKING;   // an empty LastRunTrackingInfo: nothing to compute
         case .EPHEMERAL_VALUES; get_eph_cache(f);
+        case .SHOULD_NOT_RUN; fam_entry(f).should_not_run = true;
     }
 }
 fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
@@ -302,6 +305,10 @@ Pass_Kind :: enum u8 {
     GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
     // L1.scalar-misc (pass_lower_expect.jai, ...; options in scalar_misc_cl.jai)
     LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT; DIV_REM_PAIRS; FLOAT2INT; SINK; TAILCALLELIM; MLDST_MOTION; SPECULATIVE_EXECUTION; CALLSITE_SPLITTING;
+    // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
+    CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
+    ANNOTATION2METADATA; ANNOTATION_REMARKS; FORCEATTRS; MEMPROF_REMOVE_INFO; RECOMPUTE_GLOBALSAA; LOWER_COMMENT_STRING;
+    INJECT_TLI_MAPPINGS; EE_INSTRUMENT;
 }
 
 Pass_Info :: struct {
@@ -456,6 +463,28 @@ PASS_TABLE :: Pass_Info.[
     .{"mldst-motion", .FUNCTION, .MLDST_MOTION, false, .DOMTREE},   // also mldst-motion<...>
     .{"speculative-execution", .FUNCTION, .SPECULATIVE_EXECUTION, false, .DOMTREE},   // also speculative-execution<...>
     .{"callsite-splitting", .FUNCTION, .CALLSITE_SPLITTING, false, .DOMTREE},
+    .{"coro-early", .MODULE, .CORO_EARLY, false, .DOMTREE},
+    .{"coro-cleanup", .MODULE, .CORO_CLEANUP, false, .DOMTREE},
+    .{"coro-elide", .FUNCTION, .CORO_ELIDE, false, .DOMTREE},
+    .{"coro-split", .CGSCC, .CORO_SPLIT, false, .DOMTREE},   // also coro-split<reuse-storage>
+    .{"coro-annotation-elide", .CGSCC, .CORO_ANNOTATION_ELIDE, false, .DOMTREE},
+    .{"openmp-opt", .MODULE, .OPENMP_OPT, false, .DOMTREE},
+    .{"openmp-opt-cgscc", .CGSCC, .OPENMP_OPT_CGSCC, false, .DOMTREE},
+    .{"annotation2metadata", .MODULE, .ANNOTATION2METADATA, false, .DOMTREE},
+    .{"annotation-remarks", .FUNCTION, .ANNOTATION_REMARKS, false, .DOMTREE},
+    .{"forceattrs", .MODULE, .FORCEATTRS, false, .DOMTREE},
+    .{"memprof-remove-attributes", .MODULE, .MEMPROF_REMOVE_INFO, false, .DOMTREE},
+    .{"recompute-globalsaa", .MODULE, .RECOMPUTE_GLOBALSAA, false, .DOMTREE},
+    .{"lower-comment-string", .MODULE, .LOWER_COMMENT_STRING, false, .DOMTREE},
+    .{"inject-tli-mappings", .FUNCTION, .INJECT_TLI_MAPPINGS, false, .DOMTREE},
+    .{"ee-instrument", .FUNCTION, .EE_INSTRUMENT, false, .DOMTREE},   // also ee-instrument<...>
+    // AAManager keeps no state here (aa_results_for builds the result per query)
+    .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
+    .{"require<should-not-run-function-passes>", .FUNCTION, .REQUIRE, true, .SHOULD_NOT_RUN},
+    .{"invalidate<should-not-run-function-passes>", .FUNCTION, .INVALIDATE, true, .SHOULD_NOT_RUN},
+    // ExtraLoopPassManager<ShouldRunExtraSimpleLoopUnswitch> parsed from text is empty (its printPipeline drops the
+    // inner simple-loop-unswitch that -O2 puts into it), so this textual form is a no-op (a required pass)
+    .{"extra-simple-loop-unswitch-passes", .LOOP, .NO_OP_LOOP, true, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -480,6 +509,8 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "internalize<") && name[name.count - 1] == #char ">" return lookup_pass("internalize");
     if begins_with(name, "mldst-motion<") && name[name.count - 1] == #char ">" return lookup_pass("mldst-motion");
     if begins_with(name, "speculative-execution<") && name[name.count - 1] == #char ">" return lookup_pass("speculative-execution");
+    if name == "coro-split<reuse-storage>" || name == "coro-split<>" return lookup_pass("coro-split");
+    if begins_with(name, "ee-instrument<") && name[name.count - 1] == #char ">" return lookup_pass("ee-instrument");
     return null;
 }
 
@@ -500,7 +531,8 @@ Pass_Node :: struct {
     next: s32 = -1;
     use_mssa: bool;        // LOOP_ADAPTOR: loop-mssa(...)
     count: s32;            // DEVIRT: devirt<N>
-    eager_inv: bool;       // CGSCC_FN_ADAPTOR: function<eager-inv>(...)
+    eager_inv: bool;       // CGSCC_FN_ADAPTOR / FUNCTION_ADAPTOR: function<eager-inv>(...)
+    no_rerun: bool;        // CGSCC_FN_ADAPTOR: function<no-rerun>(...) skips functions with a cached ShouldNotRunFunctionPassesAnalysis
 }
 
 pipeline: struct {
@@ -573,6 +605,25 @@ is_module_pass_name :: (name: string) -> bool {
     return p != null && p.level == .MODULE;
 }
 
+// parseFunctionPipelineName: function, function<eager-inv;no-rerun> (any order) -> (ok, eager-inv, no-rerun)
+parse_function_pipeline_name :: (name_in: string) -> (bool, bool, bool) {
+    if !begins_with(name_in, "function") return false, false, false;
+    name := slice(name_in, 8, name_in.count - 8);
+    if name.count == 0 return true, false, false;
+    if name[0] != #char "<" || name[name.count - 1] != #char ">" return false, false, false;
+    name = slice(name, 1, name.count - 2);
+    eager, no_rerun := false;
+    while name.count {
+        k := find_index_from_left(name, #char ";");
+        front := ifx k >= 0 then slice(name, 0, k) else name;
+        name = ifx k >= 0 then slice(name, k + 1, name.count - k - 1) else "";
+        if front == "eager-inv" eager = true;
+        else if front == "no-rerun" no_rerun = true;
+        else return false, false, false;
+    }
+    return true, eager, no_rerun;
+}
+
 // parseDevirtPassName: devirt<N>, N >= 0
 parse_devirt_pass_name :: (name: string) -> (bool, s32) {
     if !begins_with(name, "devirt<") || name[name.count - 1] != #char ">" return false, 0;
@@ -604,16 +655,17 @@ parse_cgscc_pass :: (cgpm: s32, last: *s32, e: s32) {
             link_child(cgpm, last, inner);
             return;
         }
-        if el.name == "function" || el.name == "function<eager-inv>" {
+        okf, eager, no_rerun := parse_function_pipeline_name(el.name);
+        if okf {
             fa := new_node(.CGSCC_FN_ADAPTOR, null, el.name);
-            pipeline.nodes[fa].eager_inv = el.name == "function<eager-inv>";
+            pipeline.nodes[fa].eager_inv = eager;
+            pipeline.nodes[fa].no_rerun = no_rerun;
             flast: s32 = -1;
             c := el.first_child;
             while c >= 0 { parse_function_pass(fa, *flast, c); c = pipeline.elems[c].next; }
             link_child(cgpm, last, fa);
             return;
         }
-        if begins_with(el.name, "function<") fatal("pass pipeline: '%' (no-rerun) is not supported yet", el.name);
         ok, n := parse_devirt_pass_name(el.name);
         if ok {
             dv := new_node(.DEVIRT, null, el.name);
@@ -741,8 +793,11 @@ parse_module_pass :: (mpm: s32, last: *s32, e: s32) {
             link_child(mpm, last, ad);
             return;
         }
-        if el.name == "function" || el.name == "function<eager-inv>" {
+        okf, eager, no_rerun := parse_function_pipeline_name(el.name);
+        if okf {
+            if no_rerun pipeline_error("cannot have a no-rerun module to function adaptor");
             fa := new_node(.FUNCTION_ADAPTOR, null, el.name);
+            pipeline.nodes[fa].eager_inv = eager;
             flast: s32 = -1;
             c := el.first_child;
             while c >= 0 { parse_function_pass(fa, *flast, c); c = pipeline.elems[c].next; }
@@ -1042,6 +1097,14 @@ run_module_pm :: (n: s32) {
             case .INTERNALIZE; if should_run_pass(node, NONE) mam_invalidate(internalize_run(node));
             case .ASSIGN_GUID; if should_run_pass(node, NONE) mam_invalidate(assign_guid_run());
             case .DEAD_ARG_ELIM; if should_run_pass(node, NONE) mam_invalidate(dead_arg_elim_run());
+            case .CORO_EARLY; if should_run_pass(node, NONE) mam_invalidate(coro_early_run());
+            case .CORO_CLEANUP; if should_run_pass(node, NONE) mam_invalidate(coro_cleanup_run());
+            case .OPENMP_OPT; if should_run_pass(node, NONE) mam_invalidate(openmp_opt_run());
+            case .ANNOTATION2METADATA; if should_run_pass(node, NONE) mam_invalidate(annotation2metadata_run());
+            case .FORCEATTRS; if should_run_pass(node, NONE) mam_invalidate(forceattrs_run());
+            case .MEMPROF_REMOVE_INFO; if should_run_pass(node, NONE) mam_invalidate(memprof_remove_info_run());
+            case .RECOMPUTE_GLOBALSAA; if should_run_pass(node, NONE) recompute_globalsaa_run();
+            case .LOWER_COMMENT_STRING; if should_run_pass(node, NONE) mam_invalidate(lower_comment_string_run());
             case; fatal("internal: '%' is not a module pass", node.name);
         }
         c = pipeline.nodes[c].next;
@@ -1075,6 +1138,8 @@ run_function_adaptor :: (n: s32) {
             reset_temporary_storage();
             c = pipeline.nodes[c].next;
         }
+        // ModuleToFunctionPassAdaptor with EagerlyInvalidate: FAM.invalidate(F, PreservedAnalyses::none())
+        if pipeline.nodes[n].eager_inv fam_invalidate(f, PRESERVE_NONE);
     }
 }
 
@@ -1120,6 +1185,10 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .MLDST_MOTION; return mldst_motion_run(f, node.name);
         case .SPECULATIVE_EXECUTION; return speculative_execution_run(f, node.name);
         case .CALLSITE_SPLITTING; return callsite_splitting_run(f);
+        case .CORO_ELIDE; return coro_elide_run(f);
+        case .ANNOTATION_REMARKS; return annotation_remarks_run(f);
+        case .INJECT_TLI_MAPPINGS; return inject_tli_mappings_run(f);
+        case .EE_INSTRUMENT; return ee_instrument_run(f, node.name);
         case .REASSOCIATE; return reassociate_run(f);
         case .CONSTRAINT_ELIMINATION; return constraint_elimination_run(f);
         case .AGGRESSIVE_INSTCOMBINE; return aggressive_instcombine_run(f);

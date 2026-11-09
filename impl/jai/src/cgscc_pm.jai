@@ -213,6 +213,9 @@ run_cgscc_pass :: (n: s32, c: s32, ur: *Cgscc_Ur) -> Preserved {
         case .FUNCTION_ATTRS; return function_attrs_run_scc(node, c);
         case .INLINE; return inliner_run(node, c, ur);
         case .ARG_PROMOTION; return arg_promotion_run_scc(node, c);
+        case .CORO_SPLIT; return coro_split_run_scc(c);
+        case .CORO_ANNOTATION_ELIDE; return coro_annotation_elide_run_scc(c);
+        case .OPENMP_OPT_CGSCC; return openmp_opt_cgscc_run(c);
     }
     fatal("internal: '%' is not a cgscc pass", node.name);
     return PRESERVE_NONE;
@@ -316,6 +319,7 @@ run_cgscc_fn_adaptor :: (n: s32, c_in: s32, ur: *Cgscc_Ur) -> Preserved {
     for nd: nodes {
         if lcg_lookup_scc(nd) != current_c continue;
         f := lcg_fn(nd);
+        if pipeline.nodes[n].no_rerun { e := table_find_pointer(*fam, f); if e && e.should_not_run continue; }
         fpa := PRESERVE_ALL;   // the FunctionPassManager's result (or the single pass's)
         p := pipeline.nodes[n].first_child;
         while p >= 0 {
