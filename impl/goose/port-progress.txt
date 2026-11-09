@@ -80,7 +80,7 @@ lib/Transforms/Utils/BreakCriticalEdges.cpp 0.5  # + MemorySSAUpdater, PreserveL
 lib/Transforms/Utils/LCSSA.cpp 0.7
 lib/Analysis/LoopNestAnalysis.cpp 0.65
 lib/Analysis/CaptureTracking.cpp 0.95
-lib/Analysis/PHITransAddr.cpp 1  # whole, incl. the select-condition form and translateWithInsertion (L1.gvn)
+lib/Analysis/PHITransAddr.cpp 0.95  # manual: all but the debug-only verify/verifySubExpr/dump (heuristic 0.69)
 lib/Analysis/AliasAnalysisEvaluator.cpp 0.5
 lib/Transforms/IPO/SCCP.cpp 1
 lib/IR/DIExpressionOptimizer.cpp 0.85
@@ -131,7 +131,7 @@ lib/Transforms/Scalar/LoopRotation.cpp 1
 lib/Transforms/Utils/LoopRotationUtils.cpp 0.75  # no debug records (cloneDebugInfoFrom & co.), noalias scope cloning, atoms
 lib/Analysis/CodeMetrics.cpp 0.5  # collectEphemeralValues(Loop), analyzeBasicBlock's notDuplicatable/convergence/NumInsts/inline candidates
 # --- L1.gvn (2026-11)
-lib/Transforms/Scalar/GVN.cpp 0.97  # manual: all but optimization remarks (never printed) and gc.relocate of landingpad tokens
+lib/Transforms/Scalar/GVN.cpp 0.97  # manual: all but optimization remarks (never printed; findMayClobberedPtrAccess, liesBetween) (heuristic 0.90)
 lib/Analysis/MemoryDependenceAnalysis.cpp 0.95  # manual: all of MemoryDependenceResults but verifyRemoved and the legacy wrapper pass
 lib/Transforms/Utils/VNCoercion.cpp 1
 lib/Transforms/Scalar/DeadStoreElimination.cpp 0.97  # manual: all but shortenAssignment's dbg_assign updates (loud) and the legacy pass

@@ -65,6 +65,11 @@ Facts needed to make a parse+print round trip byte-identical. Sources: `llvm/lib
   payload without the quiet bit. `half`, `bfloat`, `x86_fp80`, `fp128` use the same rules (old `0xH`/`0xK` forms are
   only accepted on input). Verified with `opt -S` on hand-written globals (`double 3.14159265358979` →
   `f0x400921FB54442D11`, `double 1234567.0` → `f0x4132D68700000000`, `double 123456.0` → `1.234560e+05`).
+- `x86_fp80` bit patterns whose explicit integer bit disagrees with the exponent are NaNs to APFloat
+  (`initFromF80LongDoubleAPInt`): exponent 0x7FFF with a significand other than 0x8000000000000000 (pseudo-NaN,
+  pseudo-infinity), and *unnormals* (exponent neither 0 nor 0x7FFF, integer bit 0). So a load of `x86_fp80` from
+  `{i64 123, i64 112312312}` folds to bits `0xBFF8_000000000000007B` and prints as `-snan(0x7B)`
+  (InstSimplify/ConstProp/loads.ll, visible only in an unnormalized printer output such as `print<memoryssa>`).
 - `APFloat::toString` first divides the exact decimal significand by 10^k (truncating) and then rounds the digit
   string half-up, so it is not `printf("%.6e")`; port `AdjustToPrecision` both steps.
 - Decimal literals are converted directly to the target type (one rounding); old-style `0x` hex literals are a

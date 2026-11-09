@@ -649,3 +649,32 @@ max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
   the AssumptionCache, the new `llvm.assume` with operand bundles). Callers in LLVM: DCE, EarlyCSE (ported), DSE,
   GVN, NewGVN, LICM, the inliner.
 
+
+## 14. GVN, MemoryDependence, VNCoercion, PHITransAddr (gvn.goose, memdep.goose, vncoerce.goose, phitrans.goose)
+
+- **PHITransAddr** (phitrans.goose) is a record per translator (`ptas`: Addr, AC flag, InstInputs as a run with
+  capacity in `pta_pool`). `pta_new(addr, ac)`, `pta_copy(t)` (= the copy constructor), `pta_translate_value`,
+  `pta_translate_select` (the select-condition overload), `pta_get_select_condition`,
+  `pta_translate_with_insertion`; records are released with `pta_mark()`/`pta_release(m)` (stack order; the pool
+  is emptied when the last record goes). MemorySSA passes `ac = false` (LLVM: AC = nullptr), MemDep and GVN true.
+- **MemoryDependenceResults** (memdep.goose, one instance, `mdep_begin(fv)`): MemDepResult is `MDR { k, i }`;
+  LocalDeps, NonLocalDepsMap, NonLocalPointerDeps, NonLocalDefsCache and ClobberOffsets are HMaps (scev.goose)
+  into record arrays; the vectors of NonLocalDepEntry are runs with capacity in `md_ents` (`mv_*`: push, insert,
+  upper_bound, sort = radix sort on block ids, equivalent because a cache has one entry per block). The four
+  reverse maps share one node pool (`rm_insert/rm_erase/rm_take`: (map, key, member) nodes in a per-key list plus
+  a pair hash): their iteration order never reaches the output. PredIteratorCache is `md_pred_run(bb)` (runs in
+  `md_preds`, cleared by `mdep_invalidate_cached_predecessors`). A non-local pointer query writes its Result vector
+  to `md_result`. BatchAAResults(AA, &EEA) = `aq_push(CA_EARLIEST)` per LLVM BatchAA object (one per
+  getNonLocalPointerDepFromBB level, one per getPointerDependencyFrom call), direct AA calls = `aa_*_simple`.
+- **GVN** (gvn.goose): the ValueTable is HMaps (ValueNumbering, NumberingPhi, NumberingBB, PhiTranslateTable) plus
+  expression records `gx` with VarArgs in `gx_args`, found through a chained hash table whose chains keep insertion
+  order (`gx_find`, `gx_get` = `ExpressionNumbering[Exp]`, inserting number 0). Because numbering is recursive
+  (createExpr calls lookupOrAdd), an expression under construction is a `GE { opc, comm, ty, attrs, mark }` whose
+  VarArgs are `gvs[mark..]`; `vn_assign_exp` truncates `gvs` back to the mark. Opcodes are our `OP_*` values
+  (cmp expressions `OP_ICMP << 8 | pred` as in LLVM). The LeaderMap is a node pool with a head per number; insert
+  puts the new node second, as LLVM's does. AvailableValue / AvailableValueInBlock / ReachingMemVal are small
+  structs (`AV`, `AVB`, `RMV`); MapVectors are vectors of `BV { bb, v }` searched linearly (they hold at most a
+  few predecessors). DependencyBlockSet (MemorySSA path) is `gv_dbi` + an HMap. The orders (RPOT, depth_first) are
+  computed up front: GVN never changes the CFG while it walks one.
+- MergeBlockIntoPredecessor for GVN is `gvn_merge_block_into_predecessor` (lazy DomTreeUpdater through dtu.goose,
+  LoopInfo, MemorySSAUpdater, MemDep); critical edges are split by breakcrit.goose with `CESOpts.mssau`.

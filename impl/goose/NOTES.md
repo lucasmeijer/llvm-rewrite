@@ -18,6 +18,12 @@
 
 ## Status
 
+- L1.gvn 397/404 (all 202 roundtrip, 195/202 opt). Left, all outside GVN: `mldst-motion` ×2, `loop-simplifycfg` ×2,
+  `default<O1>`, `-use-constant-int-for-fixed-length-splat` (opaque-ptr.ll), ValueTracking's DemandedElts of more
+  than 64 lanes (masked-load-store.ll, `<128 x i8>`). Sweeps `gvn`, `gvn<memoryssa>` (whole files and
+  `--per-function`), `debugify,gvn`, `debugify,gvn<memoryssa>`, `require<memoryssa>,gvn,print<memoryssa>` and
+  `gvn<memoryssa>,print<memoryssa>` (`--analysis`): 0 silent mismatches.
+
 - L1.simplifycfg 563/578 (all 289 roundtrip, 274/289 opt). Left, other passes/flags: debugify ×3,
   `-strip-debug`, `-O1`, instcombine visitors/LibCallSimplifier ×4 (`duplicate-phis`, `merge-cond-stores`,
   `unreachable_assume`, ...); SimplifyCFG pieces still failing loudly: cloning debug records (bonus instructions,
@@ -171,6 +177,7 @@
 | `src/looprotate.goose` | LoopRotate (LoopRotation.cpp, LoopRotationUtils.cpp), CodeMetrics for the header, MergeBlockIntoPredecessor with LoopInfo/MemorySSA/two successors |
 | `src/licm.goose`, `src/mustexec.goose`, `src/ast.goose` | LICM / LNICM (with LoadAndStorePromoter); ICFLoopSafetyInfo, InstructionPrecedenceTracking, colorEHFunclets; AliasSetTracker |
 | `src/earlycse.goose` | EarlyCSE (early-cse, early-cse<memssa>): scoped hash tables, combineMetadataForCSE, replaceDominatedUsesWith |
+| `src/gvn.goose`, `src/memdep.goose`, `src/vncoerce.goose` | GVN (gvn, gvn<...>), MemoryDependenceAnalysis, VNCoercion |
 | `src/instident.goose` | isIdenticalToWhenDefined, hasSameSpecialState, attribute intersection, andIRFlags |
 | `src/salvage.goose` | salvageDebugInfo and the DIExpression helpers it needs (foldConstantMath, appendOpsToArg, ...) |
 | `src/knowledge.goose` | salvageKnowledge (`--enable-knowledge-retention`, AssumeBundleBuilder) |
@@ -437,7 +444,7 @@
 - MemorySSA: one instance (`mssa_fn`); `mssa_get(fv)` builds; invalidated by `invalidate_function` unless the
   pass preserves `A_MEMORYSSA` and `A_DOMTREE` (AAManager is stateless: only `invalidate<aa>` abandons it, which
   is the preserved set `PA_ALL & ~A_AA`). A pass that keeps it updates it through mssaupdater.goose (DESIGN.md
-  §8.6: the whole MemorySSAUpdater except updateForClonedLoop). GVN needs MemoryDependenceAnalysis (not ported).
+  §8.6: the whole MemorySSAUpdater except updateForClonedLoop). GVN's MemoryDependenceAnalysis is memdep.goose.
 - Not ported (fail loudly or absent): separate_storage assumptions in BasicAA, APInt widths over 64 bits,
   `!callback` metadata in the CallGraph, MemorySSA's loop constructor, the
   `scev-aa`, `objc-arc-aa`. EarliestEscapeAnalysis and the CFG reachability with LoopInfo/CycleInfo are ported
@@ -862,3 +869,31 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   +0.17 s (LLVM +0.16 s), memcpyopt +0.03 s (+0.07 s); SPASS dse +0.30 s (+0.38 s), memcpyopt +0.09 s (+0.12 s);
   every tests/perf/scaling shape is linear and as fast as LLVM or faster (allocas n2000 -> n8000 dse
   +0.017 -> +0.076 s).
+
+## GVN and MemoryDependence (gvn, memdep, vncoerce, phitrans)
+
+- Design: DESIGN.md §14. Facts: knowledge/llvm/gvn.md.
+- One MemoryDependenceResults per GVN run (`mdep_begin`), started fresh every run: LLVM keeps a cached MemDep
+  across passes only while nothing changed, and only GVN reads it. Its EarliestEscapeAnalysis is aa.goose's single
+  EEA instance; the MemorySSA path makes a fresh one per load (`ea_begin(true, false)`). Both together
+  (`-enable-gvn-memoryssa` without `gvn<memoryssa>`, so calls through MemDep and loads through MemorySSA) fails
+  loudly: two EEAs would have to live at once.
+- Every RAUW goes through `gvn_rauw` (`ac_rauw` first): the AssumptionCache must follow replacements like LLVM's
+  AffectedValueCallbackVH (knowledge/llvm/gvn.md). New passes that RAUW should do the same.
+- PHITransAddr translators are records (phitrans.goose `pta_new/pta_copy`, released with `pta_mark/pta_release`):
+  MemDep's recursion and GVN's DependencyBlockInfo hold many at once. MemorySSA's walker uses them too.
+- Goose trap (again): `getNonLocalPointerDepFromBB` is recursive, so its Worklist and PredList are global stacks
+  (`md_wl`, `md_pl_bb`, `md_pl_pta`) with per-call bases; every return path must truncate them.
+- ICF (ImplicitControlFlowTracking) reuses mustexec.goose's FirstSpecialInsts cache (`icf_*` wrappers in gvn.goose;
+  `cleanupGlobalSets` bumps `lsi_icf_epoch`): the same lazily stale cache LLVM has.
+- Fixed on the way (shared files): `GEPOperator::accumulateConstantOffset` (vt.goose) is now a faithful port (scalar
+  ConstantInt indices only, zero indices skipped before the scalable test, the `i8` fast path); `simplifyCall` tests
+  musttail (`Inst.pred == 2`, not `bits & 8`); alloca dereferenceable bytes of scalable types; globals' store size;
+  int<->byte bitcast folding (`cf_scalar_size` of `bN`); x87 unnormals are NaNs (apfloat.goose); masked.load
+  constant folding; `getMostGenericTBAA` in cfgutil's combineMetadata; canBeFreed with the statepoint-example GC.
+- Speed (no `@perf` row times GVN; measured with tools/rss.c): `sroa,early-cse,gvn` minus `sroa,early-cse` on
+  tests/perf/compile is 1.2-2x LLVM's GVN time. Scaling shapes at the largest size: allocas 1.0x (after replacing
+  the comparison sort of MemDep caches by a radix sort: it was 2.2x), switch 0.45x (the switch's edge counts were
+  a linear `position` per case, quadratic), loops-many 2.4x: PHITransAddr's scan of every user of a GEP base is
+  quadratic in LLVM too (same algorithm), our dominance query per user is ~3x LLVM's cost.
+- Not ported: optimization remarks (never printed); `-enable-gvn-memoryssa` together with MemDep (loud).

@@ -137,3 +137,13 @@ Verified against LLVM 23.1.5 source and the imported InstSimplify tests.
   `stripAndAccumulateConstantOffsets(gep <vscale x 4 x i32>, ptr %p, i64 0, i64 1)` is `%p` + 4, which lets DSE's
   isOverwrite see it does not overlap a store to `%p` (verified with goose: `dse,print<memoryssa>` on
   `Transforms/GVN/vscale.ll` prints `MemoryDef(1)->liveOnEntry` only with this).
+
+- **Constant folding `llvm.masked.load`** (ConstantFolding.cpp ConstantFoldFixedVectorCall): an `undef`/`poison`
+  mask lane appends the passthru (or loaded) element and then falls through to the null/one tests, which fail, so
+  any undef mask lane makes the whole fold fail. Only all-`i1 0`/`i1 1` masks fold.
+- **`simplifyCall` never simplifies a `musttail` call** (it would break the call-ret chain), not even `call undef`
+  to poison (InstSimplify/call.ll `call_undef_musttail`, seen through `gvn --per-function`).
+- `Value::getPointerDereferenceableBytes` of a non-array alloca is the *known minimum* alloc size, so scalable
+  allocas count (InstSimplify/compare.ll `scalar_vectors_are_non_empty`); globals use the *store* size.
+- `GEPOperator::accumulateConstantOffset` takes only scalar `ConstantInt` indices (a vector zero index fails), skips
+  zero indices before looking at scalability, and has an `i8` fast path that reads only the first index.

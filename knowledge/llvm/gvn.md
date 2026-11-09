@@ -45,6 +45,30 @@ unit tests (`tests/imported/llvm/Transforms/GVN`) and `sweep --passes gvn` / `gv
 - The scalar-PRE clone has no name, so the inserted instruction is `%.pre` and the phi `%<name>.pre-phi`.
 - NonLocalDepEntry sorts by BasicBlock pointer. No sweep difference came from it with blocks ordered by creation.
 
+- `AnalyzeLoadAvailability` for a clobbering load uses MemDep's `ClobberOffsets` (filled by the *last*
+  `getDependency`/non-local query: `getDependency` clears the map first) in MemDep mode, and the offset carried in
+  the ReachingMemVal (from `scanMemoryAccessesUsers`' PartialAlias) in MemorySSA mode.
+- The MemDep caches (`NonLocalDepInfo`) hold one entry per block, so any sort by block gives the same order: an
+  O(n) radix sort on block ids is equivalent to `llvm::sort`. LLVM sorts a lot here (`removeInstruction` re-sorts
+  every pointer cache that mentioned the removed instruction): ~0.8 G instructions of introsort on
+  `tests/perf/scaling/allocas/n2000.ll` (callgrind), so a slow comparison sort doubles GVN's time there.
+- PHITransAddr's GEP lookup scans every user of the translated base pointer, with a dominance query each: GVN is
+  quadratic in LLVM too on many GEPs of one base (`scaling/loops-many`: 6x the instructions for 4x the size,
+  ~55% in `translateSubExpr`). The order of the checks matters only because `DominatorTree::dominates` counts
+  slow queries (visible in a later `print<domtree>`): keep LLVM's order (types, operand count, function,
+  dominance, then the operands).
+
+## Interaction with other analyses
+
+- The AssumptionCache follows GVN's `replaceAllUsesWith`s through its AffectedValueCallbackVH: when an assume's
+  condition mentions a value that GVN replaces (instsimplify of `lshr x, x` -> 0, `shl x, 0` -> x), the
+  replacement inherits the assume, and `simplifyInstruction` of a later compare can then fold it with known bits
+  from that assume (InstCombine/assume.ll `assumption_conflicts_with_known_bits` under `-passes=gvn`: the
+  first assume becomes `assume(false)`, i.e. `store i8 poison, ptr null`). An implementation that RAUWs without
+  updating its assumption cache keeps the compare and propagates the wrong equality instead.
+- `processAssumeIntrinsic` of `assume(false)` inserts `store i8 poison, ptr null` (align 1) *before* the assume
+  (adopting its debug records), then erases the assume only when its bundles are all `ignore` (or absent).
+
 ## CFG
 
 - The initial MergeBlockIntoPredecessor loop uses a *lazy* DomTreeUpdater: all updates are applied in one
