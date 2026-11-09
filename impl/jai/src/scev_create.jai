@@ -148,7 +148,7 @@ Sc_Rewriter_Kind :: enum u8 {
     SHIFT;           // SCEVShiftRewriter                  (scev_create.jai)
     BACKEDGE_FOLD;   // SCEVBackedgeConditionFolder        (scev_create.jai)
     LOOP_GUARDS;     // LoopGuards::rewrite's SCEVLoopGuardRewriter (scev_guards.jai)
-    PREDICATE;       // SCEVPredicateRewriter (NewPreds form)        (scev_pred.jai)
+    PREDICATE;       // SCEVPredicateRewriter                        (scev_pred.jai)
     NORMALIZE;       // NormalizeDenormalizeRewriter                 (iv_users.jai)
 }
 Sc_Rewriter :: struct {
@@ -162,7 +162,9 @@ Sc_Rewriter :: struct {
     is_positive_be_cond: bool;          // BACKEDGE_FOLD
     guards: *Loop_Guards;               // LOOP_GUARDS
     flag_mask: u8;                      // LOOP_GUARDS: FlagMask
-    new_preds: *[..] u32;               // PREDICATE: NewPreds
+    new_preds: *[..] u32;               // PREDICATE: NewPreds (null = none)
+    pred_union: [] u32;                 // PREDICATE: Pred, a SCEVUnionPredicate (has_pred)
+    has_pred: bool;                     // PREDICATE
     norm: *Norm_Ctx;                    // NORMALIZE
 }
 sc_rewriter_init :: (rw: *Sc_Rewriter, kind: Sc_Rewriter_Kind) { rw.kind = kind; rw.memo.allocator = temp; }

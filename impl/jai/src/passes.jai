@@ -249,7 +249,7 @@ Pass_Kind :: enum u8 {
     // loop passes (loop_pm.jai)
     NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS; LOOP_DELETION; LOOP_INSTSIMPLIFY; LOOP_SIMPLIFYCFG; LOOP_IDIOM;
     // ScalarEvolution (scev_print.jai)
-    PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS; REQUIRE_IV_USERS;
+    PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS; REQUIRE_IV_USERS; PRINT_ACCESS_INFO;
     // TargetTransformInfo (tti.jai)
     PRINT_COST_MODEL;
     // SimplifyCFG (pass_simplifycfg*.jai)
@@ -369,6 +369,7 @@ PASS_TABLE :: Pass_Info.[
     .{"print<loopnest>", .LOOP, .PRINT_LOOPNEST, true, .SCEV},
     .{"print<iv-users>", .LOOP, .PRINT_IV_USERS, true, .SCEV},
     .{"require<iv-users>", .LOOP, .REQUIRE_IV_USERS, true, .SCEV},
+    .{"print<access-info>", .FUNCTION, .PRINT_ACCESS_INFO, true, .SCEV},
     .{"verify<scalar-evolution>", .FUNCTION, .VERIFY_SCEV, true, .SCEV},
     .{"require<scalar-evolution>", .FUNCTION, .REQUIRE, true, .SCEV},
     .{"invalidate<scalar-evolution>", .FUNCTION, .INVALIDATE, true, .SCEV},
@@ -396,6 +397,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     // passes whose parameters are parsed by the pass itself (LOOP_PASS_WITH_PARAMS)
     if begins_with(name, "loop-rotate<") && name[name.count - 1] == #char ">" return lookup_pass("loop-rotate");
     if begins_with(name, "licm<") && name[name.count - 1] == #char ">" return lookup_pass("licm");
+    if begins_with(name, "print<access-info><") && name[name.count - 1] == #char ">" return lookup_pass("print<access-info>");
     if begins_with(name, "lnicm<") && name[name.count - 1] == #char ">" return lookup_pass("lnicm");
     return null;
 }
@@ -716,9 +718,10 @@ cl_opts :: () -> [] Cl_Opt {
 }
 
 // LastRunTracking and the L1.loop-misc passes (LoopDeletion, LoopIdiom, LoopLoadElim, LoopDistribute, ...)
-LM_CL_OPT_COUNT :: 3 + LIR_CL_OPT_COUNT;
+LM_CL_OPT_COUNT :: 3 + LIR_CL_OPT_COUNT + LAA_CL_OPT_COUNT;
 add_lm_cl_opts :: (list: [] Cl_Opt, base: s64) {
     add_lir_cl_opts(list, base + 3);
+    add_laa_cl_opts(list, base + 3 + LIR_CL_OPT_COUNT);
     list[base + 0] = .{"disable-last-run-tracking", .BOOL, *opts.disable_last_run_tracking, null, null};
     list[base + 1] = .{"loop-deletion-enable-symbolic-execution", .BOOL, *ld_opts.enable_symbolic_execution, null, null};
     list[base + 2] = .{"enable-loop-simplifycfg-term-folding", .BOOL, *lscfg_opts.enable_term_folding, null, null};
@@ -848,6 +851,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
             write_string(builder_to_string(*sb,, allocator = temp), to_standard_error = true);
             return PRESERVE_ALL;
         case .PRINT_COST_MODEL; cost_model_printer_run(f); return PRESERVE_ALL;
+        case .PRINT_ACCESS_INFO; return access_info_printer_run(f, node.name);
         case .PRINT_DEMANDED_BITS;
             sb: String_Builder; sb.allocator = temp;
             db_print(get_demanded_bits(f), *sb);

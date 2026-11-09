@@ -142,5 +142,5 @@ lib/Analysis/BlockFrequencyInfo.cpp 0.4  # calculate/getBlockFreq/setBlockFreq/p
 lib/Support/ScaledNumber.cpp 0.85  # toStringAPFloat (tiny numbers) fails loudly
 lib/Transforms/Scalar/ConstraintElimination.cpp 0.92  # all but generateReproducer (-constraint-elimination-dump-reproducers) and debug dumps
 lib/Transforms/AggressiveInstCombine/AggressiveInstCombine.cpp 0.98  # all but mergeDIAssignID (fails loudly)
-lib/Analysis/LoopAccessAnalysis.cpp 0.03  # getPointersDiff, isConsecutiveAccess only (loop_access.jai)
+lib/Analysis/LoopAccessAnalysis.cpp 0.85  # no sortPtrAccesses, getStrideFromPointer users outside LAA, LoopAccessInfoManager::clear/invalidate (one LAI per printer run), remarks only as Report text
 lib/Analysis/HashRecognize.cpp 0.85  # no print<hash-recognize> printer

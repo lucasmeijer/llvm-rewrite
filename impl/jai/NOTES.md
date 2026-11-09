@@ -810,3 +810,18 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   backedge-taken counts (loop guards of every preceding loop), the same superlinear cost as indvars above.
 - Shared fixes on the way: li_make_loop_invariant moves with LLVM's moveBefore (debug records stay), opt no longer
   adds `"target-cpu"` for `-mcpu` on a triple-less module, dl_type_alloc_size computes arrays in bytes.
+
+## LoopAccessAnalysis and PredicatedScalarEvolution (L1.analysis.laa COMPLETE 72/72 + tests/analysis/access-info)
+
+- `loop_access.jai`: LAA (`Laa` = LoopAccessInfo, `Mdc` = MemoryDepChecker, `Rpc` = RuntimePointerChecking,
+  `Access_Analysis`, `Eqc` = EquivalenceClasses<MemAccessInfo> as leader -> member list, `Mai` = MemAccessInfo
+  packed in a u64), print<access-info>[<allow-partial>]. `scev_pred.jai` now has PredicatedScalarEvolution (`Pse`),
+  SCEVUnionPredicate as a `[..] u32` of predicate rows (`sc_union_implies/_add/_is_always_true`), and the
+  SCEVPredicateRewriter's Pred form (`sc_rewrite_using_predicate`).
+- The LoopAccessInfoManager is not cached across passes: each print<access-info> run computes a fresh LAI per loop.
+  A user that needs LLVM's caching (LoopDistribute / LLE share LAIs, `clear()` keeps only check-free ones) must add it.
+- Loud: VFDatabase mappings (calls with `vector-function-abi-variant`), printing a non-global, non-argument,
+  non-instruction pointer. `getKnowledgeForValue` is ported only for the Dereferenceable bundles LAA asks for.
+- `GEPOperator::hasNoUnsignedSignedWrap` is true for `inbounds` too (the jai flags keep F_INBOUNDS and F_NUSW apart).
+- Sweeps: `print<access-info>` whole-file 7746/7754 identical (7 loud, pr12351 diagnostic), `--per-function` 0 differs,
+  `sroa,instcombine,loop-mssa(loop-rotate,licm),print<access-info>` 0 differs from LAA.

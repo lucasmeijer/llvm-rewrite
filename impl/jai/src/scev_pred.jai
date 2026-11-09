@@ -96,11 +96,23 @@ sc_pred_print :: (sb: *String_Builder, p: u32, depth: s64) {
     append(sb, "\n");
 }
 
-// ---------------------------------------------------------------- SCEVPredicateRewriter (NewPreds form)
+// ---------------------------------------------------------------- SCEVPredicateRewriter
 
+// addOverflowAssumption(P)
+sc_rw_add_overflow_assumption :: (rw: *Sc_Rewriter, p: u32) -> bool {
+    if !rw.new_preds return rw.has_pred && sc_union_implies(rw.pred_union, p);
+    array_add(rw.new_preds, p);
+    return true;
+}
 sc_rw_predicate_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
     k := sc_kind(s);
     if k == .UNKNOWN {
+        if rw.has_pred {
+            for p: rw.pred_union {
+                r := se.preds[p];
+                if r.kind == .COMPARE && r.a == s && r.pred == ICMP_EQ return true, r.b;
+            }
+        }
         // convertToAddRecWithPreds
         v := sc_value(s);
         if !is_inst(v) || inst_op(v) != .PHI return true, s;
@@ -108,7 +120,7 @@ sc_rw_predicate_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
         if !ok return true, s;
         for p: preds {
             if se.preds[p].kind == .WRAP && rw.l != sc_loop(se.preds[p].a) return true, s;
-            array_add(rw.new_preds, p);
+            if !sc_rw_add_overflow_assumption(rw, p) return true, s;
         }
         return true, res;
     }
@@ -118,9 +130,10 @@ sc_rw_predicate_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
         if sc_is_addrec(operand) && sc_loop(operand) == rw.l && sc_is_affine(operand) {
             step := sc_step_recurrence(operand);
             flag := ifx k == .ZEXT then INCREMENT_NUSW else INCREMENT_NSSW;
-            array_add(rw.new_preds, sc_get_wrap_predicate(operand, flag));
-            start := ifx k == .ZEXT then sc_get_zero_extend(sc_start(operand), ty) else sc_get_sign_extend(sc_start(operand), ty);
-            return true, sc_get_add_rec(start, sc_get_sign_extend(step, ty), rw.l, sc_flags(operand));
+            if sc_rw_add_overflow_assumption(rw, sc_get_wrap_predicate(operand, flag)) {
+                start := ifx k == .ZEXT then sc_get_zero_extend(sc_start(operand), ty) else sc_get_sign_extend(sc_start(operand), ty);
+                return true, sc_get_add_rec(start, sc_get_sign_extend(step, ty), rw.l, sc_flags(operand));
+            }
         }
         if k == .ZEXT return true, sc_get_zero_extend(operand, ty);
         return true, sc_get_sign_extend(operand, ty);
@@ -132,6 +145,151 @@ scev_predicate_rewrite :: (s: Scev_Id, l: Loop_Id, new_preds: *[..] u32) -> Scev
     rw.l = l;
     rw.new_preds = new_preds;
     return sc_rewrite(*rw, s);
+}
+// ScalarEvolution::rewriteUsingPredicate(S, L, Preds) with a SCEVUnionPredicate
+sc_rewrite_using_predicate :: (s: Scev_Id, l: Loop_Id, preds: [] u32) -> Scev_Id {
+    rw: Sc_Rewriter; sc_rewriter_init(*rw, .PREDICATE);
+    rw.l = l;
+    rw.has_pred = true;
+    rw.pred_union = preds;
+    return sc_rewrite(*rw, s);
+}
+
+// ---------------------------------------------------------------- SCEVUnionPredicate (a list of predicate rows)
+
+// SCEVWrapPredicate::getImpliedFlags
+sc_wrap_implied_flags :: (ar: Scev_Id) -> u8 {
+    implied: u8 = 0;
+    f := sc_flags(ar);
+    if (f & SF_NSW) == SF_NSW implied = INCREMENT_NSSW;
+    if (f & SF_NUW) == SF_NUW {
+        step := sc_step_recurrence(ar);
+        if sc_is_const(step) && !ap_is_negative(sc_ap(step)) implied |= INCREMENT_NUSW;
+    }
+    return implied;
+}
+// SCEVPredicate::isAlwaysTrue
+sc_pred_is_always_true :: (p: u32) -> bool {
+    r := se.preds[p];
+    if r.kind == .COMPARE return false;
+    flags := r.pred;
+    if (sc_flags(r.a) & SF_NSW) == SF_NSW flags &= ~INCREMENT_NSSW;
+    return flags == 0;
+}
+sc_union_is_always_true :: (preds: [] u32) -> bool { for preds if !sc_pred_is_always_true(it) return false; return true; }
+// SCEVUnionPredicate::implies(N) for a compare or wrap predicate N
+sc_union_implies :: (preds: [] u32, n: u32) -> bool {
+    for preds if sc_pred_implies(it, n) return true;
+    if se.preds[n].kind != .WRAP return false;
+    l := sc_loop(se.preds[n].a);
+    for preds {
+        if se.preds[it].kind != .WRAP continue;
+        rw := sc_rewrite_using_predicate(se.preds[it].a, l, preds);
+        if !sc_is_addrec(rw) continue;
+        if sc_pred_implies(sc_get_wrap_predicate(rw, se.preds[it].pred), n) return true;
+    }
+    return false;
+}
+// SCEVUnionPredicate::add(N)
+sc_union_add :: (preds: *[..] u32, n: u32) {
+    check_implies := preds.count < 16;
+    if check_implies && sc_union_implies(preds.*, n) return;
+    pruned: [..] u32; pruned.allocator = preds.allocator;
+    for preds.* {
+        if check_implies && sc_pred_implies(n, it) continue;
+        array_add(*pruned, it);
+    }
+    array_add(*pruned, n);
+    preds.* = pruned;
+}
+
+// ---------------------------------------------------------------- PredicatedScalarEvolution
+
+Pse_Entry :: struct { generation: u32; s: Scev_Id = SCEV_NULL; }
+Pse :: struct {
+    l: Loop_Id;
+    preds: [..] u32;                         // the SCEVUnionPredicate
+    rewrite_map: Table(Scev_Id, Pse_Entry);
+    generation: u32;
+    backedge_count: Scev_Id = SCEV_NULL;
+    symbolic_max_backedge_count: Scev_Id = SCEV_NULL;
+}
+pse_init :: (p: *Pse, l: Loop_Id) {
+    p.l = l;
+    p.preds.allocator = temp;
+    p.rewrite_map.allocator = temp;
+}
+pse_get_predicated_scev :: (p: *Pse, expr_in: Scev_Id) -> Scev_Id {
+    expr := expr_in;
+    e := table_find_pointer(*p.rewrite_map, expr);
+    if !e { table_set(*p.rewrite_map, expr, .{}); e = table_find_pointer(*p.rewrite_map, expr); }
+    if e.s != SCEV_NULL && p.generation == e.generation return e.s;
+    if e.s != SCEV_NULL expr = e.s;
+    new := sc_rewrite_using_predicate(expr, p.l, p.preds);
+    e = table_find_pointer(*p.rewrite_map, expr_in);   // the rewrite may have grown the table
+    e.* = .{p.generation, new};
+    return new;
+}
+pse_get_scev :: (p: *Pse, v: Value_Id) -> Scev_Id { return pse_get_predicated_scev(p, sc_get_scev(v)); }
+pse_add_predicate :: (p: *Pse, pred: u32) {
+    if sc_union_implies(p.preds, pred) return;
+    new_preds: [..] u32; new_preds.allocator = temp;
+    for p.preds array_add(*new_preds, it);
+    array_add(*new_preds, pred);
+    u: [..] u32; u.allocator = temp;
+    for new_preds sc_union_add(*u, it);
+    p.preds = u;
+    p.generation += 1;   // updateGeneration (no wrap-around in practice)
+}
+pse_add_predicates :: (p: *Pse, preds: [] u32) { for preds pse_add_predicate(p, it); }
+pse_get_backedge_taken_count :: (p: *Pse) -> Scev_Id {
+    if p.backedge_count == SCEV_NULL {
+        preds: [..] u32; preds.allocator = temp;
+        p.backedge_count = sc_get_predicated_backedge_taken_count(p.l, *preds);
+        for preds pse_add_predicate(p, it);
+    }
+    return p.backedge_count;
+}
+pse_get_symbolic_max_backedge_taken_count :: (p: *Pse) -> Scev_Id {
+    if p.symbolic_max_backedge_count == SCEV_NULL {
+        preds: [..] u32; preds.allocator = temp;
+        p.symbolic_max_backedge_count = sc_get_predicated_symbolic_max_backedge_taken_count(p.l, *preds);
+        for preds pse_add_predicate(p, it);
+    }
+    return p.symbolic_max_backedge_count;
+}
+// hasNoOverflow(V, Flags)
+pse_has_no_overflow :: (p: *Pse, v: Value_Id, flags_in: u8) -> bool {
+    ar := pse_get_scev(p, v);
+    if !sc_is_addrec(ar) return false;
+    flags := flags_in & ~sc_wrap_implied_flags(ar);
+    return flags == 0;
+}
+// getAsAddRec(V, ExtraPreds): SCEV_NULL when no AddRec
+pse_get_as_add_rec :: (p: *Pse, v: Value_Id, extra_preds: *[..] u32 = null) -> Scev_Id {
+    expr := pse_get_scev(p, v);
+    new_preds: [..] u32; new_preds.allocator = temp;
+    new := sc_convert_scev_to_add_rec_with_predicates(expr, p.l, *new_preds);
+    if new == SCEV_CNC return SCEV_NULL;
+    if extra_preds { for new_preds array_add(extra_preds, it); return new; }
+    pse_add_predicates(p, new_preds);
+    table_set(*p.rewrite_map, sc_get_scev(v), .{p.generation, new});
+    return new;
+}
+// PredicatedScalarEvolution::print
+pse_print :: (sb: *String_Builder, p: *Pse, li: *Loop_Info, depth: s64) {
+    for bb: li_blocks(li, p.l) for i: block_insts(bb) {
+        if !sc_is_scevable(vtype(i)) continue;
+        expr := sc_get_scev(i);
+        found, e := table_find(*p.rewrite_map, expr);
+        if !found || e.s == expr continue;
+        for 1..depth append(sb, " ");
+        append(sb, "[PSE]"); append(sb, inst_to_string(i)); append(sb, ":\n");
+        for 1..depth+2 append(sb, " ");
+        sc_print(sb, expr); append(sb, "\n");
+        for 1..depth+2 append(sb, " ");
+        append(sb, "--> "); sc_print(sb, e.s); append(sb, "\n");
+    }
 }
 
 // convertSCEVToAddRecWithPredicates (SCEV_CNC = nullptr)
