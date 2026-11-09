@@ -56,6 +56,34 @@ Verified against LLVM 23.1.5 source and the imported InstSimplify tests.
   ConstantAggregateZero, not a ConstantFP (both print `zeroinitializer`). The AVX-512 variants need
   `isa<ConstantVector/ConstantDataVector>`, so they never fold a splat or zero vector. And `frexp` of a scalable splat yields
   `{ <vscale x N x float> splat (...), i32 E }` (sic; checked with opt).
+- **Vector-typed ConstantInt splats** (`-use-constant-int-for-fixed-length-splat`, `-use-constant-int-for-scalable-splat`,
+  Constants.cpp:39; both default false). LLVM 23 has *no* `-use-constant-fp-for-*-splat` options: FP splats are
+  always vector-typed ConstantFP and `opt` rejects those flags as unknown. With the int flags, ConstantVector::getImpl
+  and getSplat return `ConstantInt::get(Ctx, EC, V)` (a ConstantInt whose type is the vector) for a splat of one
+  non-zero ConstantInt of any width (i1, i128 too); zero stays ConstantAggregateZero ("maintain special handling of
+  zero"), ConstantDataVector::get is never called directly by the middle end, so no integer CDV splat exists in that
+  mode. Printing is unchanged (`splat (i32 1)` either way, AsmWriter.cpp:1766). Every `isa<ConstantInt>`,
+  `dyn_cast<ConstantInt>`, `m_ConstantInt` then also matches vector splats, and getAggregateElement/getSplatValue
+  give the scalar ConstantInt. LLVM's output differs between the two modes in only a few corpus tests, and those
+  are exactly such sites: InstCombine/or.ll `test30vec` (visitOr's `(X|C) | V --> (X|V) | C` uses m_ConstantInt),
+  exact.ll, SCCP/overdefined-ext.ll (getConstantInt of a select condition), Reassociate/fast-ReassociateVector.ll
+  (`shl X, C` -> `mul` needs isa<ConstantInt>), load-store-forward.ll (scalable). Checked by sweeping the whole
+  corpus with both flags through instsimplify/instcombine/sccp/gvn/reassociate against opt (goose, 2026-11-09).
+  Not every site follows: GEPOperator::accumulateConstantOffset tests `getType()->isIntegerTy()` and so rejects a
+  vector ConstantInt index.
+- **ConstantFoldFixedVectorCall `vector.insert` folds only at index 0**: elements below the index are read with
+  `SubVec->getAggregateElement(I - IdxN)` in `unsigned`, which wraps to a huge index (null), so any non-zero index
+  returns null (ConstantFolding.cpp:4396). ConstantFoldScalableVectorCall folds trivially-vectorizable intrinsics
+  only when every vector operand has a getSplatValue, and returns a splat.
+- **ppc_fp128 is a DoubleAPFloat** (APFloat.cpp:4657 on): two doubles (Hi = the APInt's low word, Lo = the high
+  word), `semPPCDoubleDouble = {-1, 0, 0, 128}` (no IEEE parameters). Category and sign are Hi's; `isDenormal` is
+  `normal && (Hi.isDenormal() || Lo.isDenormal() || Hi != Hi + Lo)`; `isInteger` needs both parts integral;
+  `getExactLog2Abs` needs Lo == 0; `compare` compares Hi then Lo; `scalbn` scales both parts; `ilogb` is Hi's, minus
+  one for `2^a - 2^b` shapes. add/multiply are custom double-double algorithms, while divide, remainder, mod,
+  fusedMultiplyAdd, toString and convertToHexString go through `semPPCDoubleDoubleLegacy = {1023, -969, 106, 128}`
+  (an IEEE-like 106-bit format: Hi+Lo rounded). So a port needs both a double-double and a 106-bit IEEE path; a
+  "decompose as one IEEE number" shortcut gets denormals, isInteger and next() wrong. Goose and Jai fail loudly on
+  ppc_fp128 arithmetic/classification (only parsing, printing and a few bit operations work).
 - **`Constant::getSplatValue` of a shufflevector expression** needs `shufflevector (insertelement undef|poison, X, 0),
   undef|poison, zeroinitializer` (Constants.cpp:1866); only that form prints as `splat (X)` (AsmWriter.cpp:1828).
 - **ConstantFoldCompareInstruction with an undef operand** returns undef only for `icmp eq/ne` (or icmp of

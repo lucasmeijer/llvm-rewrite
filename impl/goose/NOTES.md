@@ -19,8 +19,8 @@
 ## Status
 
 - L1.gvn 397/404 (all 202 roundtrip, 195/202 opt). Left, all outside GVN: `mldst-motion` ×2, `loop-simplifycfg` ×2,
-  `default<O1>`, `-use-constant-int-for-fixed-length-splat` (opaque-ptr.ll), ValueTracking's DemandedElts of more
-  than 64 lanes (masked-load-store.ll, `<128 x i8>`). Sweeps `gvn`, `gvn<memoryssa>` (whole files and
+  `default<O1>` (opaque-ptr.ll's `-use-constant-int-for-fixed-length-splat` lines and masked-load-store.ll's
+  `<128 x i8>` lanes pass since the vector-infrastructure work below). Sweeps `gvn`, `gvn<memoryssa>` (whole files and
   `--per-function`), `debugify,gvn`, `debugify,gvn<memoryssa>`, `require<memoryssa>,gvn,print<memoryssa>` and
   `gvn<memoryssa>,print<memoryssa>` (`--analysis`): 0 silent mismatches.
 
@@ -73,9 +73,7 @@
   ConstantExprs; findScalarElement; m_FPOne; isAssumeWithEmptyBundle; InstSimplifyPass checks deadness without
   TLI; the dereferenceable-argument case of isKnownNonNullFromDominatingCondition), and x86 cvt folding.
 - L1.sccp 331/340 (all 170 roundtrip, 161/170 opt). Left: 7 tests run other passes (simplifycfg ×2,
-  loop-deletion, internalize, deadargelim, instcombine, debugify); `overdefined-ext.ll` passes its
-  `-use-constant-int-for-fixed-length-splat=false` line but not the `=true` line (vector-typed ConstantInt
-  splats are not supported: fails loudly); `2007-05-16-InvokeCrash.ll` needs libm folding of `sin`
+  loop-deletion, internalize, deadargelim, instcombine, debugify); `2007-05-16-InvokeCrash.ll` needs libm folding of `sin`
   (ConstantFolding uses the host's libm; Goose's std has no libm). sccp and ipsccp also agree with LLVM
   on 6711 of the other imported test files (the rest stop loudly, mostly in ConstantFolding; one silent
   difference: InstSimplify/ConstProp/avx512.ll, x86 avx512 cvt intrinsics not folded) and on all tests/e2e O0
@@ -433,7 +431,7 @@
   `m_specific_int_apv`; `ci_val` still fails loudly above 64 bits and is only right where LLVM takes
   `getZExtValue()`. `m_specific_int(v, u64)` has LLVM's `uint64_t` semantics (no truncation of the constant).
   Still 64-bit (fail loudly): DemandedBits, GEP offset accumulation (index widths > 64), crange.goose's `CR`
-  (BasicAA only), demanded-element masks (vectors of more than 64 elements).
+  (BasicAA only). Demanded-element masks are APs (any vector length; see "Vector infrastructure" below).
 - FP call folding (cfold.goose, DESIGN.md §11): math intrinsics and libcalls through the host libm, exact
   rounding/fma/scalbn/fptoi.sat/frexp. Not ported (fail loudly): canonicalize, constrained-FP rounding and
   arithmetic, fp128 `log`/`logl` (logf128), remainder, nextafter/nexttoward, nvvm/amdgcn/wasm intrinsics,
@@ -444,6 +442,40 @@
   (not `{ f() }`); name clashes across modules (apfloat's FC_NAN vs FPClassTest → `FCL_*`).
 - Perf: no `@opt -passes=instsimplify` perf benchmark exists. Timed by hand: straightline n4000/n16000/n64000 took
   0.026/0.037/0.062 s (LLVM 0.031/0.045/0.099 s), so it scales linearly.
+
+## Vector infrastructure: vector-typed ConstantInt splats, long vectors, vector call folding
+
+- `-use-constant-int-for-fixed-length-splat` / `-use-constant-int-for-scalable-splat` (Constants.cpp cl::opts) are
+  read in opt.goose *before* parsing (`cl_ci_fixed_splat`, `cl_ci_scalable_splat` in ir.goose): the parser builds
+  constants through ConstantVector::get/getSplat, so the representation is decided at parse time. With a flag,
+  `c_aggregate` (ConstantVector::getImpl, fixed) and `c_splat` (getSplat, fixed and scalable) turn a splat of one
+  non-zero integer ConstantInt into `c_int_vec`: a `VK_CINT` whose type is the vector and whose payload is the
+  element's value. Zero stays `zeroinitializer`; ConstantByte splats (VK_CINT of a byte type) are not affected.
+  Width of a CINT is always `ty_bits(ty_scalar(vals[v].ty))` (cst_hash/cst_eq, cint_sext, ap_from_cint, put_cint).
+- Rule for porters: port `isa<ConstantInt>` / `dyn_cast<ConstantInt>` / `m_ConstantInt` as `kind == VK_CINT`
+  *without* a `!ty_is_vector` guard, and build results with `c_int_ap(ty, ..)` / `c_int_ty` (ConstantInt::get(Ty),
+  a splat for vector types). Keep the guard only where LLVM also has one (e.g. accumulateConstantOffset's
+  `getType()->isIntegerTy()`). Fixed so far: m_ConstantInt, cf_is_cint (ConstantFold binop/icmp/extract/insert),
+  FoldBitCast (vector CI -> FP/byte vector), SCCP getConstantInt and getExpressionForConstant, GEP
+  hasAllConstantIndices, dyn_castNegVal, getFlippedStrictnessPredicateAndConstant, m_CheckedInt,
+  foldICmpInstWithConstant's select case, processUMulZExtIdiom, SROA foldPHINodeOrSelectInst, isNotOneValue,
+  isNotMinSignedValue, isGuaranteedNotToBeUndefOrPoison, PHITransAddr, Reassociate, shuffle masks
+  (getShuffleMask via getAggregateElement). Not reviewed (scalar by construction, or other owners' files):
+  cvp/lvi/jt (`jt_is_cint`), simplifycfg `get_constant_int`, memcpyopt/dse lengths, simplify_libcalls sizes.
+- Whole-corpus sweeps with both flags (`--extra='-use-constant-int-for-fixed-length-splat
+  -use-constant-int-for-scalable-splat'`): instsimplify, instcombine, sccp, gvn, reassociate: 0 differs, 0 crashes
+  (2026-11-09). Use that sweep after touching any isa<ConstantInt> site.
+- Demanded-elements masks are APs (`AP`, apint.goose `de_get`/`de_scalar`): computeKnownBits (`kb_compute`),
+  isKnownNonZero (`ikz`), isKnownNonEqual, ComputeNumSignBits (`ncsb`), computeKnownFPClass (`kfc_compute`),
+  getShuffleDemandedElts, the X86 intrinsic callers. Width = the fixed vector's element count, `APInt(1, 1)` for
+  scalars and scalable vectors; `de_get` returns false past the width. SimplifyDemandedVectorElts already was AP.
+  For <= 64 lanes an AP is a register value, so this costs nothing measurable.
+- ConstantFoldScalableVectorCall is ported (convert_from_svbool, get_active_lane_mask, interleaveN splats,
+  trivially-vectorizable intrinsics on splat operands); ConstantFoldFixedVectorCall gained get_active_lane_mask,
+  arm.mve.vctp*, vector.extract, vector.insert (LLVM's `I - IdxN` wraps for I < IdxN, so a non-zero index never
+  folds) and vector.interleaveN. Still loud: vector.deinterleave, wasm.dot, byte-vector bitcasts.
+- ppc_fp128 arithmetic/classification (APFloat's DoubleAPFloat) is still not ported: see
+  knowledge/llvm/instsimplify-and-value-tracking.md for what it would take.
 
 ## Memory analyses (aa, memoryssa)
 
@@ -715,7 +747,7 @@ What they were:
   source order), interpreted by `xi_tl_eval` with the truth-table verification LLVM asserts. X86 tests need the
   RUN line's `-mtriple` (the sweep has no triple for them, so it hardly reaches this code: use
   `check 'tests/imported/llvm/Transforms/InstCombine/X86/*::opt'`). Left: 'core-avx2' and other CPU names the TTI
-  table lacks (tti_x86.goose), `-use-constant-int-for-fixed-length-splat`.
+  table lacks (tti_x86.goose).
 - simplify_libcalls.goose (dispatch, str/mem len/cmp/chr, printf/puts, int calls, sqrt/exp2/fmin/fmax/cabs,
   double->float shrinking, trig pairs, atoi/strtol), simplify_libcalls_str.goose (strcpy/stpcpy/strncpy/strlcpy,
   strcat/strncat, strpbrk/strspn/strcspn/strstr, strndup, memccpy/mempcpy/realloc/bcopy, hot/cold operator new
@@ -846,8 +878,8 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
 
 ## DSE and MemCpyOpt (dse.goose, memintr.goose)
 
-- L1.dse COMPLETE (166/166). L1.memcpyopt 111/112: the one left runs `-use-constant-int-for-fixed-length-splat`
-  (vector-typed ConstantInt splats are not supported anywhere in the Goose opt: fails loudly). dse.goose ports DeadStoreElimination.cpp whole except shortenAssignment's dbg_assign
+- L1.dse COMPLETE (166/166). L1.memcpyopt 112/112 (store-to-memset-constant-splat.ll's
+  `-use-constant-int-for-fixed-length-splat` passes since the vector-infrastructure work below). dse.goose ports DeadStoreElimination.cpp whole except shortenAssignment's dbg_assign
   updates (fails loudly when the shortened intrinsic has a DIAssignID). DSEState is the `ds_*` globals; maps and
   sets keyed by values/blocks are fields of a per-value record `ds_v` stamped with the run's epoch, sets keyed by
   memory accesses fields of `ds_a`; each set gets a fresh stamp from `ds_tick`, so creating a set is O(1).
@@ -946,9 +978,9 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
 
 ## Reassociate (reassociate.goose)
 
-- L1.reassociate 78/82 ::opt (all roundtrips). Left: three tests run `inline` (cgscc pipeline not ported) and
-  fast-ReassociateVector.ll's second RUN line `-use-constant-int-for-fixed-length-splat` (vector-typed ConstantInt
-  splats are not supported anywhere in the Goose opt).
+- L1.reassociate 78/82 ::opt (all roundtrips). Left: three tests run `inline` (cgscc pipeline not ported);
+  fast-ReassociateVector.ll's `-use-constant-int-for-fixed-length-splat` line is identical since `ra_isa_cint`
+  accepts vector-typed ConstantInts.
 - State and containers: file header. RedoInsts/ToRedo are SetVectors over a deque (array with tombstones + HMap
   index); ValueRankMap/RankMap are HMaps read with DenseMap::operator[] semantics (a lookup inserts 0, which
   EraseInst's `ValueRankMap.contains` sees). EmitAddTreeOfValues' operands are WeakTrackingVHs (wvh.goose).

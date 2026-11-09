@@ -37,8 +37,8 @@ lib/Transforms/InstCombine/InstructionCombining.cpp 0.85
 lib/Support/APFloat.cpp 0.25
 lib/Transforms/Scalar/SROA.cpp 0.85
 lib/Transforms/InstCombine/InstCombineCalls.cpp 0.9  # manual: all of visitCallInst/visitCallBase; left: ptrauth callee folds, trampolines, gc.statepoint relocates, optimizeModularFormat, Hexagon vandvrt, dynamic objectsize (heuristic 0.98)
-lib/Analysis/ConstantFolding.cpp 0.8
-lib/IR/Constants.cpp 0.55
+lib/Analysis/ConstantFolding.cpp 0.85  # + ConstantFoldScalableVectorCall, fixed-vector lane-mask/extract/insert/interleave (2026-11-09)
+lib/IR/Constants.cpp 0.6  # + vector-typed ConstantInt splats (UseConstantIntFor*Splat)
 lib/Transforms/InstCombine/InstCombineSimplifyDemanded.cpp 0.95
 lib/Transforms/InstCombine/InstCombineAddSub.cpp 0.95
 lib/Transforms/InstCombine/InstCombineCasts.cpp 0.85  # manual: all visitors; left foldVec(Ext)TruncToExtElt, mergeUndefsWith cases, trunc of clamp selects (heuristic 0.9)

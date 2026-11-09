@@ -1129,10 +1129,41 @@ recursive fn cf_fold_call(c: i32, f: i32, mark: i64, n: i64, allow_nondet: bool)
             if intrinsic_propagates_poison(id) { for k in n { if is_poison(is_ops[mark + k]) { return c_poison(rty); } } }
             return cf_fold_frexp_sincos(id, rty, is_ops[mark]);
         }
-        if deinterleave_factor_cf(id) != 0 { cfa_not_ported("constant folding of vector.deinterleave"); }
+        if deinterleave_factor_cf(id) != 0 { return cf_fold_deinterleave(rty, is_ops[mark], deinterleave_factor_cf(id)); }
         return cf_fold_scalar_call(c, id, rty, mark, n);
     }
     return cf_fold_scalar_call(c, id, rty, mark, n);
+}
+
+// ConstantFoldStructCall: vector_deinterleave2..8
+recursive fn cf_fold_deinterleave(sty: i32, vec: i32, nf: i64) -> i32 {
+    let vty = ty_field(sty, 0);
+    if ty_kind(vty) == TK_SVEC {
+        let s = c_splat_value(vec);
+        if s < 0 { return -1; }
+        let sp = c_splat(vty, s);
+        let rm = is_ops.len;
+        for k in nf { is_ops.push(sp); }
+        let r = c_aggregate(sty, is_ops[rm..rm + nf]);
+        is_ops.resize(rm);
+        return r;
+    }
+    let ne = ty_count(vty);
+    let rm = is_ops.len;
+    for j in nf {
+        let em = is_ops.len;
+        for i in ne {
+            let e = agg_elem(vec, nf * i + j);
+            if e < 0 { is_ops.resize(rm); return -1; }
+            is_ops.push(e);
+        }
+        let v = c_aggregate(vty, is_ops[em..em + ne]);
+        is_ops.resize(em);
+        is_ops.push(v);
+    }
+    let r = c_aggregate(sty, is_ops[rm..rm + nf]);
+    is_ops.resize(rm);
+    return r;
 }
 
 // ConstantFoldFixedVectorCall: Intrinsic::masked_load (operands: pointer, mask, passthru)

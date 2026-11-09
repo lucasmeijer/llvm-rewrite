@@ -126,7 +126,9 @@ clearing on erase. The cost is a few dozen bytes per erased value until exit.
   same way LLVM's `TypeFinder` collects them (see §4).
 - **Constants** are uniqued like LLVMContext's tables: an open-addressing hash table maps (kind, type, payload,
   operand run) → value id. Wide integers (`i128`, `i256`) keep their words in `words: u64[>..]`; doubles keep their
-  bit pattern. Constant expressions and aggregates are users with operand runs in `uses`, so a global's use list
+  bit pattern. Under `-use-constant-int-for-*-splat` a splat ConstantInt has the vector type
+  itself (`VK_CINT`, payload = the element value, width = `ty_scalar`), as in LLVM; without the flags integer
+  splats are ConstantDataVectors (NOTES.md "Vector infrastructure"). Constant expressions and aggregates are users with operand runs in `uses`, so a global's use list
   includes uses from initializers and constant expressions, as in LLVM.
 - **Strings** (value names, section names, MDStrings, string attributes) live in one byte pool `chars: u8[>..]`;
   `strs: Str[>..]` holds (offset, length). Lookups go through our own hash tables of `i32` (not `dictionary` with
@@ -533,7 +535,7 @@ value.
 - Division is shift-subtract on scratch words in the pool (the quotient/remainder are unique, so the algorithm
   needn't match LLVM's Knuth D); everything else follows APInt.cpp. `tools/aptest.py` is a differential test
   against Python integers (widths 1..4097, all operations; `tools/gb.sh src/aptest.goose bin/aptest` first).
-- Users: `KB { z: AP, o: AP }` (knownbits.goose, width = `kb_bw`), `CRange { lo: AP, hi: AP }`
+- Users: demanded-elements masks (one bit per vector lane, `de_get`), `KB { z: AP, o: AP }` (knownbits.goose, width = `kb_bw`), `CRange { lo: AP, hi: AP }`
   (constrange.goose), constant folding (`ap_from_cint`/`ap_to_cint`, `ci_ap`/`c_int_ap` in pm.goose). The 64-bit
   `CR` of crange.goose remains only for BasicAA's index-width arithmetic (aa.goose) and fails loudly above 64 bits;
   DemandedBits is still u64-based and fails loudly above 64 bits.

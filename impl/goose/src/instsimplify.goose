@@ -3781,7 +3781,17 @@ recursive fn simplify_binary_intrinsic(id: i32, rty: i32, a0: i32, b0: i32, fmf:
     if id == IID_get_active_lane_mask {
         if m_zero(b) { return get_false(rty); }
         if q.cxt < 0 { return -1; }
-        if ty_kind(rty) == TK_SVEC && func_has_fn_attr(inst_func(q.cxt), AK_VScaleRange) { is_not_ported("get_active_lane_mask with vscale_range"); }
+        let fa = aset_find(alist_fn(func_attrs(inst_func(q.cxt))), AK_VScaleRange);
+        if ty_kind(rty) == TK_SVEC && fa >= 0 {
+            // Attribute::getVScaleRangeMax: the low 32 bits, 0 = unbounded (std::nullopt)
+            let vmax = (attrs[fa].i1 & 0xFFFFFFFF) as! i64;
+            if vmax == 0 { return -1; }
+            let maxe = (ty_count(rty) * vmax) as! u64;
+            let c1 = m_apint(b);
+            if m_zero(a) && c1 >= 0 && !ap_ult_u64(ci_ap(c1), maxe) {
+                return c_all_ones(rty);
+            }
+        }
         return -1;
     }
     if id == IID_abs { if m_intrinsic(a, IID_abs) { return a; } return -1; }
