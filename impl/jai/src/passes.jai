@@ -301,7 +301,7 @@ Pass_Kind :: enum u8 {
     // DeadArgumentElimination, ArgumentPromotion (pass_global_opt.jai, pass_global_dce.jai, ...)
     GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
     // L1.scalar-misc (pass_lower_expect.jai, ...; options in scalar_misc_cl.jai)
-    LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT; DIV_REM_PAIRS; FLOAT2INT; SINK; TAILCALLELIM;
+    LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT; DIV_REM_PAIRS; FLOAT2INT; SINK; TAILCALLELIM; MLDST_MOTION;
 }
 
 Pass_Info :: struct {
@@ -401,6 +401,8 @@ PASS_TABLE :: Pass_Info.[
     .{"require<target-lib-info>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     // PhiValuesAnalysis: no pass or analysis we have consumes it (BasicAA and MemDep stopped using it)
     .{"require<phi-values>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
+    // MemoryDependenceAnalysis: a lazily filled cache; no pass we have consumes a cached result (GVN requests its own)
+    .{"require<memdep>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"verify<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
     .{"print<scalar-evolution>", .FUNCTION, .PRINT_SCEV, true, .SCEV},
     .{"print<loopnest>", .LOOP, .PRINT_LOOPNEST, true, .SCEV},
@@ -451,6 +453,7 @@ PASS_TABLE :: Pass_Info.[
     .{"float2int", .FUNCTION, .FLOAT2INT, false, .DOMTREE},
     .{"sink", .FUNCTION, .SINK, false, .DOMTREE},
     .{"tailcallelim", .FUNCTION, .TAILCALLELIM, false, .DOMTREE},
+    .{"mldst-motion", .FUNCTION, .MLDST_MOTION, false, .DOMTREE},   // also mldst-motion<...>
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -473,6 +476,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "inline<") && name[name.count - 1] == #char ">" return lookup_pass("inline");
     if begins_with(name, "globaldce<") && name[name.count - 1] == #char ">" return lookup_pass("globaldce");
     if begins_with(name, "internalize<") && name[name.count - 1] == #char ">" return lookup_pass("internalize");
+    if begins_with(name, "mldst-motion<") && name[name.count - 1] == #char ">" return lookup_pass("mldst-motion");
     return null;
 }
 
@@ -1110,6 +1114,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .FLOAT2INT; return float2int_run(f);
         case .SINK; return sink_run(f);
         case .TAILCALLELIM; return tailcallelim_run(f);
+        case .MLDST_MOTION; return mldst_motion_run(f, node.name);
         case .REASSOCIATE; return reassociate_run(f);
         case .CONSTRAINT_ELIMINATION; return constraint_elimination_run(f);
         case .AGGRESSIVE_INSTCOMBINE; return aggressive_instcombine_run(f);
