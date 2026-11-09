@@ -840,6 +840,9 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   printed without LLVM's source-location prefix (stderr is not compared by ::opt).
 - Remaining unit failures all need unported passes: loop-vectorize (5), simple-loop-unswitch (2), sccp (1),
   require<profile-summary> (1).
+- Perf (x64 build, no `@perf` benchmark; tests/perf/scaling/loops-many/n500, minus `loop(loop-rotate)`):
+  loop-load-elim / loop-distribute / print<access-info> +0.9-1.0 s each (LLVM +0.05-0.07 s). The cost is the
+  symbolic max backedge-taken count every LAI asks for (the loop-guard walk, as for indvars/loop-deletion).
 - Sweeps (0 differs): `loop-load-elim` whole-file and `--per-function`, `loop-distribute -enable-loop-distribute`
   whole-file and `--per-function`, `sroa,instcombine,loop-mssa(loop-rotate,licm),loop-distribute,loop-load-elim,
   loop(loop-idiom,loop-deletion)`. Loud: 6 files with VFDatabase mappings.
