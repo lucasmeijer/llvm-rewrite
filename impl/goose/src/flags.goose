@@ -78,6 +78,8 @@ let KNOWN_FLAGS: const u8[:][] = [
     "dse-memoryssa-samebb-cost", "dse-memoryssa-otherbb-cost", "dse-memoryssa-path-check-limit",
     "dse-optimize-memoryssa", "enable-dse-initializes-attr-improvement", "dse-max-dom-cond-depth",
     "enable-memcpyopt-without-libcalls",                 // memcpyopt
+    "reassociate-use-cse-local",                         // reassociate
+    "run-twice",                                         // no-op: optdriver.cpp only reads it on the legacy-PM path
     "goose-ic-lenient",
     "goose-scev-trace",                                  // development only: ScalarEvolution value map events                                  // development only: unported InstCombine visitors do nothing
 ];

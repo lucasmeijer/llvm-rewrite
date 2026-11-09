@@ -943,3 +943,21 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   DebugLoc::getMergedLocation of two different locations (unfoldSelectInstr), SplitEdge through splitBlockBefore,
   -use-iterative-bfi-inference, ScaledNumber printing of numbers that need the x87 APFloat fallback. BPI's SccInfo
   iterates SccBlocks in insertion order (LLVM: DenseMap pointer order); nothing in the corpus depends on it.
+
+## Reassociate (reassociate.goose)
+
+- L1.reassociate 78/82 ::opt (all roundtrips). Left: three tests run `inline` (cgscc pipeline not ported) and
+  fast-ReassociateVector.ll's second RUN line `-use-constant-int-for-fixed-length-splat` (vector-typed ConstantInt
+  splats are not supported anywhere in the Goose opt).
+- State and containers: file header. RedoInsts/ToRedo are SetVectors over a deque (array with tombstones + HMap
+  index); ValueRankMap/RankMap are HMaps read with DenseMap::operator[] semantics (a lookup inserts 0, which
+  EraseInst's `ValueRankMap.contains` sees). EmitAddTreeOfValues' operands are WeakTrackingVHs (wvh.goose).
+- Trap: scalable FP splats are shufflevector constant expressions here (constfold.goose `c_splat`), ConstantFPs in
+  LLVM (`ConstantVector::getSplat` of a ConstantFP). Every `isa<ConstantFP>` in the port goes through `ra_isa_cfp`,
+  which also accepts that CE form (fast-ReassociateVector.ll `@test19_scalable_vector` factors a scalable -0.0).
+- Sweeps (`reassociate`: whole-file, `--per-function`, `--with-test-flags`, `debugify,reassociate`,
+  `-reassociate-use-cse-local=false`): 0 differs, 0 bad-ir; loud: and(ptrtoint(@g), C) folding, ppc_fp128
+  literals, dbg_assign salvaging (and other passes' unknown flags with the test flags).
+- Speed (no `@perf` line times it; by hand, `-disable-output`): sqlite3/SPASS `sroa,reassociate` minus `sroa`
+  +0.03/+0.02 s (LLVM ~0/+0.04 s); straightline n4000/n16000/n64000 0.036/0.048/0.104 s (LLVM 0.041/0.050/0.157 s):
+  linear.

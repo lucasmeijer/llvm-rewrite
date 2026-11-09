@@ -24,3 +24,8 @@ Facts about `Transforms/Scalar/Reassociate.cpp` (LLVM 23.1.5) that decide output
   does not leak into the output. Its scores are computed once per function, before any rewriting.
 - `opt -run-twice` only acts in optdriver.cpp's legacy-PM path; with `-passes=`/`-O#` (NewPMDriver) it is silently
   ignored (Reassociate/pointer-collision-non-determinism.ll).
+- Scalable FP splats (`splat (float -0.0)` of `<vscale x 4 x float>`, and what constant folding makes of them) are
+  ConstantFP in LLVM 23 (`ConstantVector::getSplat` returns `ConstantFP::get(Ctx, EC, V)` for any EC), so OptimizeAdd's
+  negative-constant factor and RemoveFactorFromExpression see them; an implementation that represents them as
+  shufflevector constant expressions must still treat them as ConstantFP (fast-ReassociateVector.ll
+  `@test19_scalable_vector`, verified with the Goose port).
