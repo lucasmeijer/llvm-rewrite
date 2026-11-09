@@ -97,7 +97,7 @@ fn xi_masked_store_fold(ii: i32) -> bool {
 
 // computeKnownBits(V, DL) / computeKnownBits(V, DemandedElts, DL): no context
 fn xi_kb(v: i32) -> KB { kb_cxt = -1; return kb_compute_all(v, 0); }
-fn xi_kb_elts(v: i32, de: u64) -> KB { kb_cxt = -1; return kb_compute(v, de, 0); }
+fn xi_kb_elts(v: i32, de: AP) -> KB { kb_cxt = -1; return kb_compute(v, de, 0); }
 
 fn xi_shift(logical: bool, left: bool, v: i32, amt: i32) -> i32 {
     if !logical { return icb_ashr(v, amt, "", false); }
@@ -150,12 +150,11 @@ fn xi_imm_shift(ii: i32) -> i32 {
         }
     } else {
         let na = ty_count(vals[amt].ty);
-        let dl: u64 = 1;
-        var du: u64 = 0;
-        for k in 1..na / 2 { du |= (1 as u64) << k; }
+        let dl = ap_one_bit(na, 0);
+        let du = ap_bits_set(na, 1, na / 2);
         let kl = xi_kb_elts(amt, dl);
         let ku = xi_kb_elts(amt, du);
-        if ap_ult_u64(kb_max(kl), bw as u64) && (du == 0 || kb_is_zero_known(ku)) {
+        if ap_ult_u64(kb_max(kl), bw as u64) && (ap_is_zero(du) || kb_is_zero_known(ku)) {
             var zs: i32[>..<] = [];
             for k in vw { zs.push(0); }
             amt = icb_shuffle1(amt, zs, "");
@@ -423,7 +422,7 @@ fn xi_fp_maxmin(ii: i32, nid: i64, scalar: bool) -> i32 {
     let a0 = cb_arg(ii, 0);
     let a1 = cb_arg(ii, 1);
     let vw = ty_count(vals[a0].ty);
-    let de: u64 = if scalar { 1 } else if vw >= 64 { 0xFFFFFFFFFFFFFFFF } else { ((1 as u64) << vw) - 1 };
+    let de = if scalar { ap_one_bit(vw, 0) } else { ap_ones(vw) };
     var f0 = FCL_NAN | FCL_INF | FCL_SUBNORMAL;
     var f1 = FCL_NAN | FCL_INF | FCL_SUBNORMAL;
     if nid == IID_maxnum { f1 |= FCL_NEG_ZERO; } else { f0 |= FCL_NEG_ZERO; }

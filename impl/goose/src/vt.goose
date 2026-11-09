@@ -405,19 +405,16 @@ fn strip_and_accumulate_offsets(v0: i32, allow_non_inbounds: bool, allow_invaria
 // ---------------------------------------------------------------------------------------------
 // isKnownNonZero
 
-fn all_elts_of(v: i32) -> u64 {
+// DemandedElts of all elements (an AP, apint.goose de_*): getAllOnes(NumElts) for fixed vectors, APInt(1, 1)
+fn all_elts_of(v: i32) -> AP {
     let t = vals[v].ty;
-    if ty_kind(t) == TK_FVEC {
-        let n = ty_count(t);
-        if n > 64 { vt_not_ported("vectors of more than 64 elements"); }
-        return wmask64(n);
-    }
-    return 1;
+    if ty_kind(t) == TK_FVEC { return ap_ones(ty_count(t)); }
+    return de_scalar();
 }
 
 recursive fn is_known_non_zero(v: i32, depth: i64) -> bool { ikz(v, all_elts_of(v), depth) }
 
-recursive fn ikz(v: i32, de: u64, depth0: i64) -> bool {
+recursive fn ikz(v: i32, de: AP, depth0: i64) -> bool {
     var depth = depth0;
     let ty = vals[v].ty;
     let k = vals[v].kind;
@@ -426,7 +423,7 @@ recursive fn ikz(v: i32, de: u64, depth0: i64) -> bool {
         if k == VK_CINT { return true; }
         if ty_kind(ty) == TK_FVEC {
             for i in ty_count(ty) {
-                if ((de >> i) & 1) == 0 { continue; }
+                if !de_get(de, i) { continue; }
                 let e = agg_elem(v, i);
                 if e < 0 || is_null_value(e) { return false; }
                 if vals[e].kind != VK_POISON && vals[e].kind != VK_CINT { return false; }
@@ -623,7 +620,7 @@ fn match_op_with_op_eq_zero(a: i32, b: i32) -> bool {
     return one(a, b) || one(b, a);
 }
 
-recursive fn is_non_zero_add(de: u64, w: i64, x: i32, y: i32, nsw: bool, nuw: bool, depth: i64) -> bool {
+recursive fn is_non_zero_add(de: AP, w: i64, x: i32, y: i32, nsw: bool, nuw: bool, depth: i64) -> bool {
     if match_op_with_op_eq_zero(x, y) { return true; }
     if nuw { return ikz(y, de, depth) || ikz(x, de, depth); }
     let xk = kb_compute(x, de, depth);
@@ -641,13 +638,13 @@ recursive fn is_non_zero_add(de: u64, w: i64, x: i32, y: i32, nsw: bool, nuw: bo
     return kb_is_nonzero(kb_add_sub(true, nsw, nuw, xk, yk));
 }
 
-recursive fn is_non_zero_sub(de: u64, w: i64, x: i32, y: i32, depth: i64) -> bool {
+recursive fn is_non_zero_sub(de: AP, w: i64, x: i32, y: i32, depth: i64) -> bool {
     if match_op_with_op_eq_zero(x, y) { return true; }
     if is_constant(x) && is_null_value(x) && ikz(y, de, depth) { return true; }
     return ikne(x, y, de, depth);
 }
 
-recursive fn is_non_zero_mul(de: u64, w: i64, x: i32, y: i32, nsw: bool, nuw: bool, depth: i64) -> bool {
+recursive fn is_non_zero_mul(de: AP, w: i64, x: i32, y: i32, nsw: bool, nuw: bool, depth: i64) -> bool {
     if nsw || nuw { return ikz(x, de, depth) && ikz(y, de, depth); }
     let xk = kb_compute(x, de, depth);
     if ap_get_bit(xk.o, 0) { return ikz(y, de, depth); }
@@ -666,7 +663,7 @@ fn inv_shift_op_val(o: i64, x: AP, s: i64) -> AP {
     return ap_shl(x, s);
 }
 
-recursive fn is_non_zero_shift(i: i32, de: u64, kv: KB, depth: i64) -> bool {
+recursive fn is_non_zero_shift(i: i32, de: AP, kv: KB, depth: i64) -> bool {
     if kb_is_unknown(kv) { return false; }
     let kc = kb_compute(op(i, 1), de, depth);
     let maxs = kb_max(kc);
@@ -685,7 +682,7 @@ fn int_bit_width(t: i32) -> i64 {
     return ty_bits(s);
 }
 
-recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
+recursive fn ikz_operator(i: i32, de: AP, depth: i64) -> bool {
     let w = int_bit_width(vals[i].ty);
     let o = opcode_of(i);
     let is_i = is_inst(i);
@@ -786,18 +783,18 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
         let n = ty_count(vals[i].ty);
         if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) {
             let ix = ap_lo64(ci_ap(ci)) as i64;
-            dv &= ~((1 as u64) << ix);
-            skip = ((de >> ix) & 1) == 0;
+            dv = ap_clear_bit(dv, ix);
+            skip = !de_get(de, ix);
         }
-        return (skip || is_known_non_zero(elt, depth)) && (dv == 0 || ikz(vec, dv, depth));
+        return (skip || is_known_non_zero(elt, depth)) && (ap_is_zero(dv) || ikz(vec, dv, depth));
     } else if o == OP_EXTRACTELEMENT {
         if is_i {
             let vec = op(i, 0);
             let ci = m_constant_int(op(i, 1));
             if ty_kind(vals[vec].ty) == TK_FVEC {
                 let n = ty_count(vals[vec].ty);
-                var dv = wmask64(n);
-                if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) { dv = (1 as u64) << ap_lo64(ci_ap(ci)); }
+                var dv = ap_ones(n);
+                if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) { dv = ap_one_bit(n, ap_lo64(ci_ap(ci)) as i64); }
                 return ikz(vec, dv, depth);
             }
         }
@@ -805,7 +802,7 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
         if is_i {
             let ok, dl, dr = shuffle_demanded(i, de);
             if ok {
-                return (dr == 0 || ikz(op(i, 1), dr, depth)) && (dl == 0 || ikz(op(i, 0), dl, depth));
+                return (ap_is_zero(dr) || ikz(op(i, 1), dr, depth)) && (ap_is_zero(dl) || ikz(op(i, 0), dl, depth));
             }
         }
     } else if o == OP_FREEZE {
@@ -901,7 +898,7 @@ recursive fn ikz_operator(i: i32, de: u64, depth: i64) -> bool {
     return kb_nonzero_fallback(i, de, depth);
 }
 
-recursive fn kb_nonzero_fallback(i: i32, de: u64, depth: i64) -> bool {
+recursive fn kb_nonzero_fallback(i: i32, de: AP, depth: i64) -> bool {
     let k = kb_compute(i, de, depth);
     return kb_is_nonzero(k);
 }
@@ -940,7 +937,7 @@ fn is_non_zero_recurrence() -> bool {
     return false;
 }
 
-recursive fn select_arm_nonzero(i: i32, true_arm: bool, de: u64, depth: i64) -> bool {
+recursive fn select_arm_nonzero(i: i32, true_arm: bool, de: AP, depth: i64) -> bool {
     let a = op(i, if true_arm { 1 } else { 2 });
     if ikz(a, de, depth) { return true; }
     let c = op(i, 0);
@@ -955,18 +952,18 @@ recursive fn select_arm_nonzero(i: i32, true_arm: bool, de: u64, depth: i64) -> 
 fn cmp_pred_of(c: i32) -> i64 { if is_inst(c) { inst_pred(c) } else { csts[vals[c].sub].pred as i64 } }
 
 // getShuffleDemandedElts: ok, demanded LHS, demanded RHS
-fn shuffle_demanded(i: i32, de: u64) -> bool, u64, u64 {
+fn shuffle_demanded(i: i32, de: AP) -> bool, AP, AP {
     let x = insts[inst_of(i)];
     let a = op(i, 0);
-    if ty_kind(vals[a].ty) != TK_FVEC { return false, 0, 0; }
+    if ty_kind(vals[a].ty) != TK_FVEC { return false, de_scalar(), de_scalar(); }
     let nin = ty_count(vals[a].ty);
-    var dl: u64 = 0;
-    var dr: u64 = 0;
+    var dl = ap_zero(nin);
+    var dr = ap_zero(nin);
     for k in x.naux {
-        if ((de >> k) & 1) == 0 { continue; }
+        if !de_get(de, k) { continue; }
         let mv = ints[x.aux + k] as i64;
-        if mv < 0 { return false, 0, 0; }
-        if mv < nin { dl |= (1 as u64) << mv; } else { dr |= (1 as u64) << (mv - nin); }
+        if mv < 0 { return false, dl, dr; }
+        if mv < nin { dl = ap_set_bit(dl, mv); } else { dr = ap_set_bit(dr, mv - nin); }
     }
     return true, dl, dr;
 }
@@ -1137,7 +1134,7 @@ recursive fn invertible_operands(o1: i32, o2: i32) -> bool, i32, i32 {
     return false, -1, -1;
 }
 
-recursive fn modifying_binop_of_nonzero(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
+recursive fn modifying_binop_of_nonzero(v1: i32, v2: i32, de: AP, depth: i64) -> bool {
     if !is_inst(v1) { return false; }
     let o = iop(v1);
     if o == OP_OR && !op_disjoint(v1) { return false; }
@@ -1146,17 +1143,17 @@ recursive fn modifying_binop_of_nonzero(v1: i32, v2: i32, de: u64, depth: i64) -
     if v2 == op(v1, 0) { x = op(v1, 1); } else if v2 == op(v1, 1) { x = op(v1, 0); } else { return false; }
     return ikz(x, de, depth + 1);
 }
-recursive fn non_equal_mul(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
+recursive fn non_equal_mul(v1: i32, v2: i32, de: AP, depth: i64) -> bool {
     if !is_op(v2, OP_MUL) { return false; }
     let c = m_apint(op(v2, 1));
     return op(v2, 0) == v1 && c >= 0 && (op_nuw(v2) || op_nsw(v2)) && !ap_is_zero(ci_ap(c)) && !ap_is_one(ci_ap(c)) && ikz(v1, de, depth + 1);
 }
-recursive fn non_equal_shl(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
+recursive fn non_equal_shl(v1: i32, v2: i32, de: AP, depth: i64) -> bool {
     if !is_op(v2, OP_SHL) { return false; }
     let c = m_apint(op(v2, 1));
     return op(v2, 0) == v1 && c >= 0 && (op_nuw(v2) || op_nsw(v2)) && !ap_is_zero(ci_ap(c)) && ikz(v1, de, depth + 1);
 }
-recursive fn non_equal_phis(p1: i32, p2: i32, de: u64, depth: i64) -> bool {
+recursive fn non_equal_phis(p1: i32, p2: i32, de: AP, depth: i64) -> bool {
     if inst_parent(p1) != inst_parent(p2) { return false; }
     kb_cc_check_phi("isKnownNonEqual");
     var used_full = false;
@@ -1180,7 +1177,7 @@ recursive fn non_equal_phis(p1: i32, p2: i32, de: u64, depth: i64) -> bool {
     kb_cxt = save;
     return true;
 }
-recursive fn non_equal_select(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
+recursive fn non_equal_select(v1: i32, v2: i32, de: AP, depth: i64) -> bool {
     if !is_inst_op(v1, OP_SELECT) { return false; }
     if is_inst_op(v2, OP_SELECT) {
         if op(v1, 0) == op(v2, 0) {
@@ -1206,7 +1203,7 @@ fn non_equal_ptrs_recursive_gep(a: i32, b: i32) -> bool {
     return s == bb && ((so >= ob && sto > 0) || (so <= ob && sto < 0));
 }
 
-recursive fn ikne(v1: i32, v2: i32, de: u64, depth: i64) -> bool {
+recursive fn ikne(v1: i32, v2: i32, de: AP, depth: i64) -> bool {
     if v1 == v2 { return false; }
     if vals[v1].ty != vals[v2].ty { return false; }
     if depth >= VT_MAX_DEPTH { return false; }
@@ -1261,7 +1258,7 @@ recursive fn num_sign_bits(v: i32, depth: i64) -> i64 {
     return r;
 }
 
-recursive fn ncsb(v: i32, de: u64, depth: i64) -> i64 {
+recursive fn ncsb(v: i32, de: AP, depth: i64) -> i64 {
     let tb = int_bit_width(vals[v].ty);
     var first_answer: i64 = 1;
     if depth == VT_MAX_DEPTH { return 1; }
@@ -1401,9 +1398,9 @@ recursive fn ncsb(v: i32, de: u64, depth: i64) -> i64 {
             let ok, dl, dr = shuffle_demanded(v, de);
             if !ok { return 1; }
             var t: i64 = 0x7FFFFFFF;
-            if dl != 0 { t = ncsb(op(v, 0), dl, depth + 1); }
+            if !ap_is_zero(dl) { t = ncsb(op(v, 0), dl, depth + 1); }
             if t != 1 {
-                if dr != 0 { t = min(t, ncsb(op(v, 1), dr, depth + 1)); }
+                if !ap_is_zero(dr) { t = min(t, ncsb(op(v, 1), dr, depth + 1)); }
                 if t != 1 { return t; }
             }
         } else if o == OP_CALL {
@@ -1419,13 +1416,13 @@ recursive fn ncsb(v: i32, de: u64, depth: i64) -> i64 {
     return ncsb_fallback(v, de, depth, first_answer, tb);
 }
 
-recursive fn ncsb_fallback(v: i32, de: u64, depth: i64, first_answer: i64, tb: i64) -> i64 {
+recursive fn ncsb_fallback(v: i32, de: AP, depth: i64, first_answer: i64, tb: i64) -> i64 {
     // computeNumSignBitsVectorConstant
     if is_constant(v) && ty_kind(vals[v].ty) == TK_FVEC {
         var minb = tb;
         var ok = true;
         for i in ty_count(vals[v].ty) {
-            if ((de >> i) & 1) == 0 { continue; }
+            if !de_get(de, i) { continue; }
             let e = agg_elem(v, i);
             if e < 0 || vals[e].kind != VK_CINT { ok = false; break; }
             minb = min(minb, num_sign_bits_of(ci_ap(e)));

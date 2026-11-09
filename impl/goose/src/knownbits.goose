@@ -1,11 +1,10 @@
 // KnownBits (llvm/lib/Support/KnownBits.cpp) and computeKnownBits (llvm/lib/Analysis/ValueTracking.cpp),
-// for integers of any width (apint.goose) and fixed vectors of at most 64 elements.
+// for integers of any width (apint.goose) and vectors of any length (demanded-elements masks are APs).
 //
 // Coverage policy: every case of LLVM's computeKnownBits is either ported, or detected and reported with
 // fatal() ("not ported"), so a less precise answer can never silently produce different IR. Cases LLVM
 // itself answers with "unknown" (unlisted opcodes/intrinsics) are unknown here too. Not ported: bitcasts
-// between vector shapes, vscale, target intrinsics, vectors of more than 64 elements (the demanded-elements
-// mask is a u64). Assumptions: assume.goose.
+// between vector shapes, vscale, target intrinsics. Assumptions: assume.goose.
 import std;
 import domcond;
 import ir;
@@ -647,22 +646,19 @@ fn kb_width_ty(t0: i32) -> i64 {
     return ty_bits(t);
 }
 
-fn all_elts(v: i32) -> u64 {
+// APInt::getAllOnes(NumElts) for a fixed vector, APInt(1, 1) otherwise
+fn all_elts(v: i32) -> AP {
     let t = vals[v].ty;
-    if ty_kind(t) == TK_FVEC {
-        let n = ty_count(t);
-        if n > 64 { not_ported("a vector of more than 64 elements"); }
-        return wmask(n);
-    }
-    return 1;
+    if ty_kind(t) == TK_FVEC { return ap_ones(ty_count(t)); }
+    return de_scalar();
 }
 
 recursive fn kb_compute_all(v: i32, depth: i64) -> KB { kb_compute(v, all_elts(v), depth) }
 
 
-recursive fn kb_compute(v: i32, de: u64, depth: i64) -> KB {
+recursive fn kb_compute(v: i32, de: AP, depth: i64) -> KB {
     let w = kb_width(v);
-    if de == 0 { return kb_unknown(w); }
+    if ap_is_zero(de) { return kb_unknown(w); }
     let k = vals[v].kind;
     let c = m_apint(v);
     if c >= 0 { return kb_const_ap(ci_ap(c)); }
@@ -670,7 +666,7 @@ recursive fn kb_compute(v: i32, de: u64, depth: i64) -> KB {
     if k == VK_CDVECTOR {
         var r = kb_all_conflict(w);
         for i in nops(v) {
-            if ((de >> i) & 1) == 0 { continue; }
+            if !de_get(de, i) { continue; }
             let x = ci_ap(op(v, i));
             r.z = ap_and(r.z, ap_not(x));
             r.o = ap_and(r.o, x);
@@ -681,7 +677,7 @@ recursive fn kb_compute(v: i32, de: u64, depth: i64) -> KB {
     if k == VK_CVECTOR {
         var r = kb_all_conflict(w);
         for i in nops(v) {
-            if ((de >> i) & 1) == 0 { continue; }
+            if !de_get(de, i) { continue; }
             let e = op(v, i);
             if vals[e].kind == VK_POISON { continue; }
             if vals[e].kind != VK_CINT { return kb_unknown(w); }
@@ -795,7 +791,7 @@ fn match_apint(v: i32) -> bool { m_apint(v) >= 0 }
 fn apint_value(v: i32) -> AP { ci_ap(m_apint(v)) }
 
 // getKnownBitsFromAndXorOr
-recursive fn kb_and_xor_or(iv: i32, de: u64, kl: KB, kr: KB, depth: i64) -> KB {
+recursive fn kb_and_xor_or(iv: i32, de: AP, kl: KB, kr: KB, depth: i64) -> KB {
     let w = kb_bw(kl);
     let o = opcode_of(iv);
     var out = kb_unknown(w);
@@ -857,7 +853,7 @@ fn kb_from_range_md(md: i32, w: i64) -> KB {
 }
 
 // computeKnownBitsAddSub
-recursive fn kb_add_sub_ops(add: bool, a: i32, b: i32, nsw: bool, nuw: bool, de: u64, depth: i64) -> KB {
+recursive fn kb_add_sub_ops(add: bool, a: i32, b: i32, nsw: bool, nuw: bool, de: AP, depth: i64) -> KB {
     let kr = kb_compute(b, de, depth + 1);
     if kb_is_unknown(kr) && !nsw && !nuw { return kr; }
     let kl = kb_compute(a, de, depth + 1);
@@ -871,7 +867,7 @@ recursive fn kb_add_sub_ops(add: bool, a: i32, b: i32, nsw: bool, nuw: bool, de:
 fn m_c_smin_with(v: i32, x: i32) -> bool { m_minmax(v, 1) && (mm_a == x || mm_b == x) }
 
 // computeKnownBitsMul
-recursive fn kb_mul_ops(a: i32, b: i32, nsw: bool, nuw: bool, de: u64, depth: i64) -> KB {
+recursive fn kb_mul_ops(a: i32, b: i32, nsw: bool, nuw: bool, de: AP, depth: i64) -> KB {
     let k1 = kb_compute(b, de, depth + 1);
     let k2 = kb_compute(a, de, depth + 1);
     var is_nonneg = false;
@@ -906,7 +902,7 @@ recursive fn kb_mul_ops(a: i32, b: i32, nsw: bool, nuw: bool, de: u64, depth: i6
 }
 
 // computeKnownBitsFromLerpPattern
-recursive fn kb_from_lerp(op0: i32, op1: i32, de: u64, known0: KB, depth: i64) -> KB {
+recursive fn kb_from_lerp(op0: i32, op1: i32, de: AP, known0: KB, depth: i64) -> KB {
     var known = known0;
     if ty_is_vector(vals[op0].ty) { return known; }
     let w = ty_bits(vals[op0].ty);
@@ -1119,7 +1115,7 @@ fn break_self_recursive_phi(p: i32, k: i64) -> i32, i32, i32 {
     return val, cxt, phi;
 }
 
-recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
+recursive fn kb_from_operator(iv: i32, de: AP, known0: KB, depth: i64) -> KB {
     let w = kb_bw(known0);
     var known = known0;
     let o = opcode_of(iv);
@@ -1188,14 +1184,13 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         if ty_kind(st) != TK_FVEC || !ty_is_int(types[st].a) || !is_int_or_int_vec(vals[iv].ty) || ty_kind(vals[iv].ty) == TK_SVEC { return known; }
         let nelts = if ty_kind(vals[iv].ty) == TK_FVEC { ty_count(vals[iv].ty) } else { 1 };
         let subw = ty_bits(types[st].a);
-        if ty_count(st) > 64 { not_ported("a vector of more than 64 elements"); }
         // Look through a cast from narrow vector elements to wider type (v4i32 -> v2i64, v3i8 -> i24)
         if w % subw == 0 {
             let scale = w / subw;
-            var sub_de: u64 = 0;
-            for i in nelts { if ((de >> i) & 1) != 0 { sub_de |= (1 as u64) << (i * scale); } }
+            var sub_de = ap_zero(nelts * scale);
+            for i in nelts { if de_get(de, i) { sub_de = ap_set_bit(sub_de, i * scale); } }
             for i in scale {
-                let ks = kb_compute(src, sub_de << i, depth + 1);
+                let ks = kb_compute(src, ap_shl(sub_de, i), depth + 1);
                 let se = if dl_big_endian { scale - 1 - i } else { i };
                 known = kb_insert_bits(known, ks, se * subw);
             }
@@ -1204,14 +1199,16 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         if subw % w == 0 {
             let scale = subw / w;
             // APIntOps::ScaleBitMask(DemandedElts, NumElts / SubScale)
-            var sub_de: u64 = 0;
+            var sub_de = ap_zero(nelts / scale);
             for j in nelts / scale {
-                if ((de >> (j * scale)) & low_bits(scale)) != 0 { sub_de |= (1 as u64) << j; }
+                var any = false;
+                for t in scale { if de_get(de, j * scale + t) { any = true; } }
+                if any { sub_de = ap_set_bit(sub_de, j); }
             }
             let ks = kb_compute(src, sub_de, depth + 1);
             known = kb_all_conflict(w);
             for i in nelts {
-                if ((de >> i) & 1) != 0 {
+                if de_get(de, i) {
                     let sh = if dl_big_endian { nelts - 1 - i } else { i };
                     let off = (sh % scale) * w;
                     known = kb_intersect(known, kb_extract_bits(ks, w, off));
@@ -1289,11 +1286,11 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         let ok, dl, dr = shuffle_demanded(iv, de);
         if !ok { return kb_unknown(w); }
         known = kb_all_conflict(w);
-        if dl != 0 {
+        if !ap_is_zero(dl) {
             known = kb_compute(op(iv, 0), dl, depth + 1);
             if kb_is_unknown(known) { return known; }
         }
-        if dr != 0 {
+        if !ap_is_zero(dr) {
             let k2 = kb_compute(op(iv, 1), dr, depth + 1);
             known = kb_intersect(known, k2);
         }
@@ -1310,15 +1307,15 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         let ci = m_constant_int(idx);
         if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) {
             let x = ap_lo64(ci_ap(ci)) as i64;
-            dv &= ~((1 as u64) << x);
-            needs = ((de >> x) & 1) != 0;
+            dv = ap_clear_bit(dv, x);
+            needs = de_get(de, x);
         }
         known = kb_all_conflict(w);
         if needs {
             known = kb_compute_all(elt, depth + 1);
             if kb_is_unknown(known) { return known; }
         }
-        if dv != 0 {
+        if !ap_is_zero(dv) {
             let k2 = kb_compute(vec, dv, depth + 1);
             known = kb_intersect(known, k2);
         }
@@ -1329,9 +1326,9 @@ recursive fn kb_from_operator(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         let idx = op(iv, 1);
         if ty_kind(vals[vec].ty) == TK_SVEC { return kb_unknown(w); }
         let n = ty_count(vals[vec].ty);
-        var dv = wmask(n);
+        var dv = ap_ones(n);
         let ci = m_constant_int(idx);
-        if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) { dv = (1 as u64) << ap_lo64(ci_ap(ci)); }
+        if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) { dv = ap_one_bit(n, ap_lo64(ci_ap(ci)) as i64); }
         return kb_compute(vec, dv, depth + 1);
     }
     if o == OP_EXTRACTVALUE {
@@ -1396,7 +1393,7 @@ recursive fn kb_gep(iv: i32, known0: KB, depth: i64) -> KB {
     return known;
 }
 
-recursive fn kb_phi(p: i32, de: u64, known0: KB, depth: i64) -> KB {
+recursive fn kb_phi(p: i32, de: AP, known0: KB, depth: i64) -> KB {
     var known = known0;
     let w = kb_bw(known);
     let save = kb_cxt;
@@ -1477,7 +1474,7 @@ recursive fn kb_phi(p: i32, de: u64, known0: KB, depth: i64) -> KB {
     return known;
 }
 
-recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
+recursive fn kb_call(iv: i32, de: AP, known0: KB, depth: i64) -> KB {
     var known = known0;
     let w = kb_bw(known);
     let rm = inst_get_md(iv, md_kind_id("range"));
@@ -1538,8 +1535,7 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         return kb_sat_add_sub(id == IID_uadd_sat || id == IID_sadd_sat, id == IID_sadd_sat || id == IID_ssub_sat, k1, k2);
     }
     if id == IID_vector_reverse {
-        let n = ty_count(vals[iv].ty);
-        return kb_compute(op(iv, 0), ap_lo64(ap_reverse_bits(ap_u64(de, n))), depth + 1);
+        return kb_compute(op(iv, 0), ap_reverse_bits(de), depth + 1);
     }
     if id == IID_vector_reduce_and || id == IID_vector_reduce_or || id == IID_vector_reduce_umax || id == IID_vector_reduce_umin ||
        id == IID_vector_reduce_smax || id == IID_vector_reduce_smin {
@@ -1611,19 +1607,18 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
         let nl = ty_count(vt) * ty_scalar_bits(vt) / 128;
         let nepl = ne / nl;
         let half = nepl / 2;
-        var dl: u64 = 0;
-        var dr: u64 = 0;
+        var dl = ap_zero(ne);
+        var dr = ap_zero(ne);
         for idx in ne {
-            if ((de >> idx) & 1) == 0 { continue; }
+            if !de_get(de, idx) { continue; }
             let li = (idx / nepl) * nepl;
             var lo = idx % nepl;
-            if lo < half { dl |= (1 as u64) << (li + 2 * lo); }
-            else { lo -= half; dr |= (1 as u64) << (li + 2 * lo); }
+            if lo < half { dl = ap_set_bit(dl, li + 2 * lo); }
+            else { lo -= half; dr = ap_set_bit(dr, li + 2 * lo); }
         }
-        let emask: u64 = if ne >= 64 { 0xFFFFFFFFFFFFFFFF } else { ((1 as u64) << ne) - 1 };
-        if dr == 0 { return kb_horiz_single(op(iv, 0), dl, emask, kind, depth); }
-        if dl == 0 { return kb_horiz_single(op(iv, 1), dr, emask, kind, depth); }
-        return kb_intersect(kb_horiz_single(op(iv, 0), dl, emask, kind, depth), kb_horiz_single(op(iv, 1), dr, emask, kind, depth));
+        if ap_is_zero(dr) { return kb_horiz_single(op(iv, 0), dl, kind, depth); }
+        if ap_is_zero(dl) { return kb_horiz_single(op(iv, 1), dr, kind, depth); }
+        return kb_intersect(kb_horiz_single(op(iv, 0), dl, kind, depth), kb_horiz_single(op(iv, 1), dr, kind, depth));
     }
     if id == IID_riscv_vsetvli || id == IID_riscv_vsetvlimax ||
        id == IID_amdgcn_mbcnt_hi || id == IID_amdgcn_mbcnt_lo {
@@ -1636,9 +1631,9 @@ recursive fn kb_call(iv: i32, de: u64, known0: KB, depth: i64) -> KB {
 fn kb_vscale(fv: i32, w: i64) -> KB { rg_to_kb(vt_vscale_range(fv, w)) }
 
 // computeKnownBitsForHorizontalOperation's ComputeForSingleOpFunc: f(known(Op, D), known(Op, D << 1))
-recursive fn kb_horiz_single(o: i32, d: u64, emask: u64, kind: i64, depth: i64) -> KB {
+recursive fn kb_horiz_single(o: i32, d: AP, kind: i64, depth: i64) -> KB {
     let a = kb_compute(o, d, depth + 1);
-    let b = kb_compute(o, (d << 1) & emask, depth + 1);
+    let b = kb_compute(o, ap_shl(d, 1), depth + 1);
     if kind == 0 { return kb_add_sub(true, false, false, a, b); }
     if kind == 1 { return kb_sat_add_sub(true, true, a, b); }
     if kind == 2 { return kb_add_sub(false, false, false, a, b); }

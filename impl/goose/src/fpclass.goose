@@ -877,11 +877,6 @@ fn nofpclass_of(s: i32) -> u64 {
 
 fn fp_ty_kind(ty: i32) -> i64 { types[ty_scalar(ty)].kind as i64 }
 
-fn reverse_bits_n(x: u64, n: i64) -> u64 {
-    var r: u64 = 0;
-    for i in n { if ((x >> i) & 1) != 0 { r |= (1 as u64) << (n - 1 - i); } }
-    return r;
-}
 
 // isAbsoluteValueULEOne
 fn is_abs_value_ule_one(v: i32) -> bool {
@@ -903,9 +898,9 @@ fn mmk_of(id: i32) -> i64 {
 }
 
 // computeKnownFPClass(V, DemandedElts, InterestedClasses, Known, Q, Depth)
-recursive fn kfc_compute(v: i32, de: u64, interested0: u64, depth: i64) -> KFC {
+recursive fn kfc_compute(v: i32, de: AP, interested0: u64, depth: i64) -> KFC {
     var interested = interested0;
-    if de == 0 { return kfc_unknown(); }
+    if ap_is_zero(de) { return kfc_unknown(); }
     let k = vals[v].kind;
     let ty = vals[v].ty;
     if k == VK_CFP {
@@ -919,7 +914,7 @@ recursive fn kfc_compute(v: i32, de: u64, interested0: u64, depth: i64) -> KFC {
         var all_zero = true;
         var all_one = true;
         for i in ty_count(ty) {
-            if ((de >> i) & 1) == 0 { continue; }
+            if !de_get(de, i) { continue; }
             let e = agg_elem(v, i);
             if e < 0 { return kfc_unknown(); }
             if vals[e].kind == VK_POISON { continue; }
@@ -975,13 +970,11 @@ recursive fn kfc_compute(v: i32, de: u64, interested0: u64, depth: i64) -> KFC {
 
 recursive fn kfc_compute_all(v: i32, interested: u64, depth: i64) -> KFC {
     let t = vals[v].ty;
-    var de: u64 = 1;
-    if ty_kind(t) == TK_FVEC { de = all_elts(v); }
-    return kfc_compute(v, de, interested, depth);
+    return kfc_compute(v, all_elts(v), interested, depth);
 }
 
 // computeKnownFPClass(V, DemandedElts, FMF, InterestedClasses, SQ, Depth)
-recursive fn kfc_compute_fmf(v: i32, de: u64, fmf: u8, interested0: u64, depth: i64) -> KFC {
+recursive fn kfc_compute_fmf(v: i32, de: AP, fmf: u8, interested0: u64, depth: i64) -> KFC {
     var interested = interested0;
     if (fmf & FMF_NNAN) != 0 { interested &= ~FCL_NAN; }
     if (fmf & FMF_NINF) != 0 { interested &= ~FCL_INF; }
@@ -994,11 +987,9 @@ recursive fn kfc_compute_fmf(v: i32, de: u64, fmf: u8, interested0: u64, depth: 
 // The public entry point: computeKnownFPClass(V, FMF, InterestedClasses, Q, Depth), context in kb_cxt
 recursive fn known_fp_class(v: i32, interested: u64, fmf: u8, depth: i64) -> KFC {
     let t = vals[v].ty;
-    var de: u64 = 1;
-    if ty_kind(t) == TK_FVEC { de = all_elts(v); }
-    return kfc_compute_fmf(v, de, fmf, interested, depth);
+    return kfc_compute_fmf(v, all_elts(v), fmf, interested, depth);
 }
-recursive fn known_fp_class_de(v: i32, de: u64, interested: u64, depth: i64) -> KFC { kfc_compute(v, de, interested, depth) }
+recursive fn known_fp_class_de(v: i32, de: AP, interested: u64, depth: i64) -> KFC { kfc_compute(v, de, interested, depth) }
 
 // cannotBeNegativeZero / cannotBeOrderedLessThanZero / isKnownNeverInfinity / isKnownNeverInfOrNaN / isKnownNeverNaN
 recursive fn cannot_be_negative_zero(v: i32, depth: i64) -> bool { kfc_never(kfc_compute_all(v, FCL_NEG_ZERO, depth), FCL_NEG_ZERO) }
@@ -1008,10 +999,10 @@ recursive fn is_known_never_inf_or_nan(v: i32, depth: i64) -> bool { kfc_never_i
 recursive fn is_known_never_nan(v: i32, depth: i64) -> bool { kfc_never_nan(kfc_compute_all(v, FCL_NAN, depth)) }
 recursive fn compute_known_fp_sign_bit(v: i32, depth: i64) -> i64 { kfc_compute_all(v, FCL_ALL, depth).sign }
 
-recursive fn kfc_one_src(v: i32, de: u64, interested: u64, depth: i64) -> KFC { kfc_compute(v, de, interested, depth + 1) }
+recursive fn kfc_one_src(v: i32, de: AP, interested: u64, depth: i64) -> KFC { kfc_compute(v, de, interested, depth + 1) }
 
 // The Operator switch of computeKnownFPClass
-recursive fn kfc_from_operator(v: i32, de: u64, interested: u64, knot: u64, depth: i64) -> KFC {
+recursive fn kfc_from_operator(v: i32, de: AP, interested: u64, knot: u64, depth: i64) -> KFC {
     var known = kfc_unknown();
     let o = opcode_of(v);
     let ty = vals[v].ty;
@@ -1141,12 +1132,11 @@ recursive fn kfc_from_operator(v: i32, de: u64, interested: u64, knot: u64, dept
     }
     if o == OP_EXTRACTELEMENT {
         let vec = op(v, 0);
-        var dv: u64 = 1;
+        var dv = all_elts(vec);
         if ty_kind(vals[vec].ty) == TK_FVEC {
             let n = ty_count(vals[vec].ty);
-            dv = all_elts(vec);
             let ci = m_constant_int(op(v, 1));
-            if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) { dv = (1 as u64) << ap_lo64(ci_ap(ci)); }
+            if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) { dv = ap_one_bit(n, ap_lo64(ci_ap(ci)) as i64); }
         }
         return kfc_compute(vec, dv, interested, depth + 1);
     }
@@ -1159,9 +1149,9 @@ recursive fn kfc_from_operator(v: i32, de: u64, interested: u64, knot: u64, dept
         var dv = de;
         var needs_elt = true;
         if ci >= 0 && ap_ult_u64(ci_ap(ci), n as u64) {
-            let ix = ap_lo64(ci_ap(ci));
-            dv &= ~((1 as u64) << ix);
-            needs_elt = ((de >> ix) & 1) != 0;
+            let ix = ap_lo64(ci_ap(ci)) as i64;
+            dv = ap_clear_bit(dv, ix);
+            needs_elt = de_get(de, ix);
         }
         if needs_elt {
             known = kfc_compute_all(elt, interested, depth + 1);
@@ -1169,7 +1159,7 @@ recursive fn kfc_from_operator(v: i32, de: u64, interested: u64, knot: u64, dept
         } else {
             known.known = 0;
         }
-        if dv != 0 {
+        if !ap_is_zero(dv) {
             let k2 = kfc_compute(vec, dv, interested, depth + 1);
             known = kfc_or(known, k2);
         }
@@ -1181,13 +1171,13 @@ recursive fn kfc_from_operator(v: i32, de: u64, interested: u64, knot: u64, dept
         if !is_inst(v) { return known; }
         let ok, dl, dr = shuffle_demanded(v, de);
         if !ok { return known; }
-        if dl != 0 {
+        if !ap_is_zero(dl) {
             known = kfc_compute(op(v, 0), dl, interested, depth + 1);
             if kfc_is_unknown(known) { return known; }
         } else {
             known.known = 0;
         }
-        if dr != 0 {
+        if !ap_is_zero(dr) {
             let k2 = kfc_compute(op(v, 1), dr, interested, depth + 1);
             known = kfc_or(known, k2);
         }
@@ -1236,7 +1226,7 @@ recursive fn kfc_from_operator(v: i32, de: u64, interested: u64, knot: u64, dept
     return known;
 }
 
-recursive fn kfc_phi(v: i32, de: u64, interested: u64, depth: i64) -> KFC {
+recursive fn kfc_phi(v: i32, de: AP, interested: u64, depth: i64) -> KFC {
     var known = kfc_unknown();
     let n = nops(v);
     if n == 0 { return known; }
@@ -1299,7 +1289,7 @@ recursive fn kfc_phi(v: i32, de: u64, interested: u64, depth: i64) -> KFC {
     return known;
 }
 
-recursive fn kfc_call(v: i32, de: u64, interested: u64, knot: u64, depth: i64) -> KFC {
+recursive fn kfc_call(v: i32, de: AP, interested: u64, knot: u64, depth: i64) -> KFC {
     var known = kfc_unknown();
     let id = inst_iid(v);
     if id == 0 { return known; }
@@ -1373,17 +1363,13 @@ recursive fn kfc_call(v: i32, de: u64, interested: u64, knot: u64, depth: i64) -
     }
     if id == IID_vector_reduce_fmax || id == IID_vector_reduce_fmin || id == IID_vector_reduce_fmaximum || id == IID_vector_reduce_fminimum {
         let a = op(v, 0);
-        var dea: u64 = 1;
-        if ty_kind(vals[a].ty) == TK_FVEC { dea = all_elts(a); }
-        known = kfc_compute_fmf(a, dea, inst_fmf(v), interested, depth + 1);
+        known = kfc_compute_fmf(a, all_elts(a), inst_fmf(v), interested, depth + 1);
         if !kfc_never_nan(known) { known.sign = -1; }
         return known;
     }
     if id == IID_vector_reverse {
         let a = op(v, 0);
-        var der = de;
-        if ty_kind(vals[a].ty) == TK_FVEC { der = reverse_bits_n(de, ty_count(vals[a].ty)); }
-        return kfc_compute_fmf(a, der, inst_fmf(v), interested, depth + 1);
+        return kfc_compute_fmf(a, ap_reverse_bits(de), inst_fmf(v), interested, depth + 1);
     }
     if id == IID_trunc || id == IID_floor || id == IID_ceil || id == IID_rint || id == IID_nearbyint || id == IID_round || id == IID_roundeven {
         var isrc = interested;
@@ -1414,7 +1400,7 @@ recursive fn kfc_call(v: i32, de: u64, interested: u64, knot: u64, depth: i64) -
         if (interested & (FCL_NAN | FCL_INF | FCL_NEGATIVE)) == 0 { return known; }
         let e = op(v, 1);
         let et = vals[e].ty;
-        let ek = kb_compute(e, if ty_is_vector(et) { de } else { 1 }, depth + 1);
+        let ek = kb_compute(e, if ty_is_vector(et) { de } else { de_scalar() }, depth + 1);
         var isrc: u64 = 0;
         if (interested & FCL_NAN) != 0 { isrc |= FCL_NAN; }
         let ezero = kb_is_zero_known(ek);

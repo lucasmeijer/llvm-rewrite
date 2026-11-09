@@ -791,6 +791,13 @@ fn ap_most_sig_diff_bit(a: AP, b: AP) -> i64 {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Demanded-elements masks (LLVM's APInt DemandedElts): one bit per element of a fixed vector, APInt(1, 1)
+// for scalars and scalable vectors. de_get tolerates an index beyond the width (false), as a u64 mask did.
+
+fn de_get(d: AP, i: i64) -> bool { i >= 0 && i < (d.w as i64) && ap_get_bit(d, i) }
+fn de_scalar() -> AP { ap_small(1, 1) }
+
+// ---------------------------------------------------------------------------------------------
 // Conversions
 
 fn ap_from_cint(v: i32) -> AP {

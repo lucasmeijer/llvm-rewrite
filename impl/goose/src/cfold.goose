@@ -1183,11 +1183,73 @@ fn vec_intrinsic_scalar_op_at(id: i32, k: i64) -> bool {
 recursive fn cf_fold_fixed_vector_call(c: i32, id: i32, vty: i32, mark: i64, n: i64) -> i32 {
     let et = types[vty].a;
     if id == IID_masked_load { return cf_fold_masked_load(vty, mark); }
-    if id == IID_get_active_lane_mask || id == IID_vector_extract || id == IID_vector_insert ||
-       interleave_factor_cf(id) != 0 {
-        cfa_not_ported(str("constant folding of ", intr_name(id as i64)));
-    }
     let ne = ty_count(vty);
+    if id == IID_arm_mve_vctp8 || id == IID_arm_mve_vctp16 || id == IID_arm_mve_vctp32 || id == IID_arm_mve_vctp64 ||
+       id == IID_get_active_lane_mask {
+        let mve = id != IID_get_active_lane_mask;
+        let a = is_ops[mark];
+        let b = if mve { a } else { is_ops[mark + 1] };
+        if vals[a].kind != VK_CINT || vals[b].kind != VK_CINT { return -1; }
+        if ap_active_bits(ci_ap(a)) > 64 || ap_active_bits(ci_ap(b)) > 64 { cfa_not_ported("getZExtValue of a constant wider than 64 bits"); }
+        let base: u64 = if mve { 0 } else { ap_lo64(ci_ap(a)) };
+        let limit = ap_lo64(ci_ap(b));
+        let rm = is_ops.len;
+        for i in ne { is_ops.push(c_bool_ty(et, base + (i as u64) < limit)); }
+        let r = c_aggregate(vty, is_ops[rm..rm + ne]);
+        is_ops.resize(rm);
+        return r;
+    }
+    if id == IID_vector_extract {
+        let vec = is_ops[mark];
+        let idx = is_ops[mark + 1];
+        if vals[idx].kind != VK_CINT || ty_kind(vals[vec].ty) != TK_FVEC { return -1; }
+        let vn = ty_count(vals[vec].ty);
+        let start = ap_lo64(ci_ap(idx)) as i64;
+        if ne == vn && start == 0 { return vec; }
+        let rm = is_ops.len;
+        for i in start..start + ne {
+            let e = agg_elem(vec, i);
+            if e < 0 { is_ops.resize(rm); return -1; }
+            is_ops.push(e);
+        }
+        let r = c_aggregate(vty, is_ops[rm..rm + ne]);
+        is_ops.resize(rm);
+        return r;
+    }
+    if id == IID_vector_insert {
+        let vec = is_ops[mark];
+        let sub = is_ops[mark + 1];
+        let idx = is_ops[mark + 2];
+        if vals[idx].kind != VK_CINT || ty_kind(vals[vec].ty) != TK_FVEC { return -1; }
+        let sn = ty_count(vals[sub].ty);
+        let vn = ty_count(vals[vec].ty);
+        let ixn = (ap_lo64(ci_ap(idx)) & 0xFFFFFFFF) as i64;
+        if sn == vn && ixn == 0 { return sub; }
+        let rm = is_ops.len;
+        for i in vn {
+            // (unsigned) I - IdxN wraps below IdxN: getAggregateElement of a huge index is null
+            let e = if i < ixn + sn { if i < ixn { -1 } else { agg_elem(sub, i - ixn) } } else { agg_elem(vec, i) };
+            if e < 0 { is_ops.resize(rm); return -1; }
+            is_ops.push(e);
+        }
+        let r = c_aggregate(vty, is_ops[rm..rm + vn]);
+        is_ops.resize(rm);
+        return r;
+    }
+    if interleave_factor_cf(id) != 0 {
+        let en = ty_count(vals[is_ops[mark]].ty);
+        let rm = is_ops.len;
+        for i in en {
+            for j in n {
+                let e = agg_elem(is_ops[mark + j], i);
+                if e < 0 { is_ops.resize(rm); return -1; }
+                is_ops.push(e);
+            }
+        }
+        let r = c_aggregate(vty, is_ops[rm..rm + ne]);
+        is_ops.resize(rm);
+        return r;
+    }
     let rm = is_ops.len;
     for i in ne {
         let lm = is_ops.len;
