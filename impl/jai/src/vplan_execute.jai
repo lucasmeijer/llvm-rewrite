@@ -554,7 +554,10 @@ vs_execute_recipes :: (s: *Vp_State, b: Vp_Blk) {
     s.prev_vpbb = b;
     r := vb(b).first;
     while r != NONE {
-        s.b.dbg = vr(r).dl;   // setDebugLocFrom (no debugInfoForProfiling discriminators)
+        // setDebugLocFrom
+        if vr(r).dl != NONE && get_metadata(s.f, 0) != NONE && module_debug_info_for_profiling()
+            vp_unported("discriminators for debug-info-for-profiling (cloneByMultiplyingDuplicationFactor)");
+        s.b.dbg = vr(r).dl;
         vp_execute_recipe(s, r);
         r = vr(r).next;
     }

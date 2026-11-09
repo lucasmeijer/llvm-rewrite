@@ -703,7 +703,13 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
     // Only VF 1 is a candidate. LLVM builds a scalar VPlan; computeBestVF returns VF 1 without costing, and
     // selectInterleaveCount clamps the interleave count by TTI.getMaxInterleaveFactor(VF=1), which is 1 for X86 and
     // NoTTI. So the loop is neither vectorized nor interleaved unless the user asked for an interleave count.
-    if user_ic > 1 lv_unported("interleaving with a user-specified interleave count (VPlan)");
+    if user_ic > 1 {
+        lp: Lv_Planner;
+        lp.p = p; lp.l = l; lp.li = p.li; lp.lvl = *lvl; lp.cm = *cm; lp.hints = *hints; lp.pse = *pse;
+        lp.vplans.allocator = temp; lp.in_loop_reductions.allocator = temp;
+        lvp_collect_in_loop_reductions(*lp);
+        return lvp_plan_scalar_and_interleave(*lp, user_vf, user_ic, max_factors);
+    }
     if lv_opts.force_target_max_scalar_interleave.set && lv_opts.force_target_max_scalar_interleave.v > 1
         lv_unported("-force-target-max-scalar-interleave (VPlan interleave-count selection)");
     if lv_tti_max_interleave_factor(p.tti, ec_fixed(1), false) > 1 lv_unported("scalar interleaving (VPlan)");

@@ -151,6 +151,7 @@ Sc_Rewriter_Kind :: enum u8 {
     PREDICATE;       // SCEVPredicateRewriter                        (scev_pred.jai)
     NORMALIZE;       // NormalizeDenormalizeRewriter                 (iv_users.jai)
     UNIFORMITY;      // SCEVAddRecForUniformityRewriter              (lv_legality.jai)
+    PTR_TO_ADDR;     // SCEVPtrToAddrRewriter (LoopUtils.cpp)        (lv_execute.jai)
 }
 Sc_Rewriter :: struct {
     kind: Sc_Rewriter_Kind;
@@ -191,6 +192,7 @@ sc_rewrite_dispatch :: (rw: *Sc_Rewriter, s: Scev_Id) -> Scev_Id {
         case .PREDICATE;     handled, r = sc_rw_predicate_visit(rw, s);
         case .NORMALIZE;     handled, r = sc_rw_normalize_visit(rw, s);
         case .UNIFORMITY;    handled, r = sc_rw_uniformity_visit(rw, s);
+        case .PTR_TO_ADDR;   handled, r = sc_rw_ptr_to_addr_visit(rw, s);
     }
     if handled return r;
     return sc_rewrite_default(rw, s);

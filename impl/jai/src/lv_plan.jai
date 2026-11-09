@@ -17,9 +17,9 @@ Lv_Planner :: struct {
 lvp_try_to_build_vplan1 :: (lp: *Lv_Planner) -> *Vp_Plan {
     lvl := lp.lvl;
     laa := lvl.laa;
-    if laa.rt.checks.count && !(laa.rt.can_use_diff_check && laa.rt.diff_checks.count)
-        vp_unported("LoopVersioning noalias metadata for runtime-checked loops (prepareNoAliasMetadata)");
-    plan := vp_build_vplan0(lp.li, lp.l, lvl.widest_ind_ty, lp.pse, null);
+    lver := New(Lv_Noalias,, allocator = temp);
+    if laa.rt.checks.count && !laa.rt.can_use_diff_check lv_prepare_no_alias_metadata(lver, *laa.rt);
+    plan := vp_build_vplan0(lp.li, lp.l, lvl.widest_ind_ty, lp.pse, lver);
     dt := vp_dt_build();
     if laa.symbolic_strides.count vp_unported("replaceSymbolicStrides");
     vp_simplify_recipes();
@@ -507,6 +507,22 @@ lvp_plan_and_vectorize :: (lp: *Lv_Planner, user_vf: Ec, user_ic: u64, max_facto
     }
     vp_unported("choosing the VF with the VPlan cost model (computeBestVF)");
     return false;
+}
+// LoopVectorizationPlanner::plan when VF 1 is the only candidate (or the user VF), followed by computeBestVF (a
+// single scalar plan) and the rest of processLoop: the loop is only interleaved
+lvp_plan_scalar_and_interleave :: (lp: *Lv_Planner, user_vf: Ec, user_ic: u64, max_factors: Vf_Pair) -> bool {
+    if ec_is_vector(max_factors.fixed) || ec_is_vector(max_factors.scalable) lvl_collect_unit_stride_predicates(lp.lvl);
+    vplan1 := lvp_try_to_build_vplan1(lp);
+    if !vplan1 return false;
+    if lv_cm_block_needs_predication_for_any_reason(lp.cm, li_header(lp.li, lp.l)) && lv_tti_enable_interleaved_access_vectorization(lp.cm.tti)
+        vp_unported("invalidating interleave groups for tail folding");
+    if lv_cm_fold_tail_by_masking(lp.cm) lvl_prepare_to_fold_tail_by_masking(lp.lvl);
+    one := ec_fixed(1);
+    lvp_build_vplans(lp, vplan1, one, max_factors.fixed);
+    if max_factors.scalable.n lvp_build_vplans(lp, vplan1, ec_scalable(1), max_factors.scalable);
+    if lp.vplans.count == 0 return false;
+    assert(lp.vplans.count == 1 && vp_plan_single_vf(lp.vplans[0]).n == 1, "expected a single scalar plan");
+    return lvp_vectorize_with_plan(lp, lp.vplans[0], one, user_ic);
 }
 vp_plan_single_vf :: (p: *Vp_Plan) -> Ec { assert(p.vfs.count == 1); return p.vfs[0]; }
 

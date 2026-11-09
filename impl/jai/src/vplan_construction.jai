@@ -38,12 +38,49 @@ vp_flags_from_inst :: (i: Value_Id) -> Vp_Flags {
     return .{};
 }
 
+// ---------------------------------------------------------------- LoopVersioning's noalias metadata
+
+// The alias-scope part of LoopVersioning (LoopVersioning.cpp): prepareNoAliasMetadata / getNoAliasMetadataFor
+Lv_Noalias :: struct {
+    prepared: bool;
+    ptr_to_group: Table(Value_Id, s64);
+    group_scope: [..] Md_Id;
+    lists: [..] Md_Id;                 // GroupToNonAliasingScopeList (NONE = none)
+}
+lv_prepare_no_alias_metadata :: (n: *Lv_Noalias, rt: *Rpc) {
+    n.prepared = true;
+    n.ptr_to_group.allocator = temp; n.group_scope.allocator = temp; n.lists.allocator = temp;
+    domain := md_self_ref_loop_id(Md_Id.[NONE, md_string("LVerDomain")]);
+    for g, gi: rt.groups {
+        array_add(*n.group_scope, md_self_ref_loop_id(Md_Id.[NONE, domain]));
+        for m: g.members table_set(*n.ptr_to_group, rt.pointers[m].ptr, gi);
+    }
+    non_aliasing := NewArray(rt.groups.count, [..] Md_Id,, allocator = temp);
+    has := NewArray(rt.groups.count, bool,, allocator = temp);
+    for c: rt.checks {
+        non_aliasing[c[0]].allocator = temp;
+        array_add(*non_aliasing[c[0]], n.group_scope[c[1]]);
+        has[c[0]] = true;
+    }
+    for k: 0..rt.groups.count-1 array_add(*n.lists, ifx has[k] then md_tuple(non_aliasing[k], false) else NONE);
+}
+lv_no_alias_metadata_for :: (n: *Lv_Noalias, i: Value_Id) -> (Md_Id, Md_Id) {
+    if !lver_opts.annotate_no_alias || !n.prepared return NONE, NONE;
+    ptr := ifx inst_op(i) == .LOAD then op(i, 0) else op(i, 1);
+    found, gi := table_find(*n.ptr_to_group, ptr);
+    if !found return NONE, NONE;
+    scope := md_concatenate(get_metadata(i, md_kind_id("alias.scope")), md_tuple(Md_Id.[n.group_scope[gi]], false));
+    na: Md_Id = NONE;
+    if n.lists[gi] != NONE na = md_concatenate(get_metadata(i, md_kind_id("noalias")), n.lists[gi]);
+    return scope, na;
+}
+
 // ---------------------------------------------------------------- PlainCFGBuilder
 
 Vp_Cfg_Builder :: struct {
     li: *Loop_Info;
     l: Loop_Id;
-    lver: *Lver;
+    lver: *Lv_Noalias;
     bb2vpbb: Table(Value_Id, Vp_Blk);
     irdef2vpv: Table(Value_Id, Vp_Val);
     phis_to_fix: [..] Value_Id;
@@ -112,7 +149,9 @@ vpcb_create_instructions :: (c: *Vp_Cfg_Builder, vpbb: Vp_Blk, bb: Value_Id) {
         } else {
             md := vp_metadata_to_propagate(i);
             if (o == .LOAD || o == .STORE) && c.lver {
-                vp_unported("LoopVersioning::getNoAliasMetadataFor");
+                scope, na := lv_no_alias_metadata_for(c.lver, i);
+                if scope != NONE set_vp_md_list(*md, md_kind_id("alias.scope"), scope);
+                if na != NONE set_vp_md_list(*md, md_kind_id("noalias"), na);
             }
             ops: [..] Vp_Val; ops.allocator = temp;
             for k: 0..cast(s64) nops(i) - 1 array_add(*ops, vpcb_operand(c, op(i, cast(u32) k)));
@@ -323,7 +362,7 @@ vp_simplify_live_ins_with_scev :: (pse: *Pse) {
 }
 
 // VPlanTransforms::buildVPlan0
-vp_build_vplan0 :: (li: *Loop_Info, l: Loop_Id, induction_ty: Type_Id, pse: *Pse, lver: *Lver) -> *Vp_Plan {
+vp_build_vplan0 :: (li: *Loop_Info, l: Loop_Id, induction_ty: Type_Id, pse: *Pse, lver: *Lv_Noalias) -> *Vp_Plan {
     p := vp_plan_new(li, l, induction_ty);
     c: Vp_Cfg_Builder;
     c.li = li; c.l = l; c.lver = lver;

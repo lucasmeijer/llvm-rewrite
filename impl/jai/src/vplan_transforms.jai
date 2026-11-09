@@ -344,7 +344,45 @@ vp_is_defined_outside_loop_regions :: (v: Vp_Val) -> bool {
 vp_licm_cannot_hoist_or_sink :: (r: Vp_Rec, first: Vp_Blk, last: Vp_Blk, sinking := false) -> bool {
     if vr(r).kind != .REPLICATE || !vp_may_read_or_write_memory(r) || vp_intrinsic_id(r) == IID_ASSUME
         return vp_cannot_hoist_or_sink_recipe(r, sinking);
-    vp_unported("licm of memory-accessing replicate recipes (canHoistOrSinkWithNoAliasCheck)");
+    ok, loc := vp_memory_location(r);
+    leader := ifx sinking then r else NONE;
+    return !ok || !vp_can_hoist_or_sink_with_no_alias_check(loc, first, last, sinking, leader);
+}
+// VPIRMetadata recipes (the classes that derive from VPIRMetadata)
+vp_has_ir_metadata :: (r: Vp_Rec) -> bool {
+    k := vr(r).kind;
+    return k == .INSTRUCTION || k == .WIDEN || k == .WIDEN_CAST || k == .WIDEN_INTRINSIC || k == .WIDEN_CALL || k == .HISTOGRAM ||
+           k == .INTERLEAVE || k == .INTERLEAVE_EVL || k == .REPLICATE || vp_is_widen_memory_kind(k);
+}
+// vputils::getMemoryLocation: only the scoped-noalias tags
+vp_memory_location :: (r: Vp_Rec) -> (bool, Mem_Loc) {
+    loc: Mem_Loc;
+    if !vp_has_ir_metadata(r) return false, loc;
+    loc.tags.noalias = vp_get_md(r, md_kind_id("noalias"));
+    loc.tags.scope = vp_get_md(r, md_kind_id("alias.scope"));
+    return true, loc;
+}
+// VPBlockUtils::blocksInSingleSuccessorChainBetween
+vpbu_blocks_in_single_successor_chain_between :: (first: Vp_Blk, last: Vp_Blk) -> [..] Vp_Blk {
+    out: [..] Vp_Blk; out.allocator = temp;
+    for vp_blocks_only_basic(vp_depth_first_deep(first)) { array_add(*out, it); if it == last break; }
+    return out;
+}
+// canHoistOrSinkWithNoAliasCheck (with SinkStoreInfo(GroupLeader) when sinking)
+vp_can_hoist_or_sink_with_no_alias_check :: (loc: Mem_Loc, first: Vp_Blk, last: Vp_Blk, sinking: bool, leader: Vp_Rec) -> bool {
+    check_reads := sinking;
+    for bb: vpbu_blocks_in_single_successor_chain_between(first, last) {
+        r := vb(bb).first;
+        while r != NONE {
+            defer r = vr(r).next;
+            // SinkStoreInfo::shouldSkip: without PSE, isNoAliasViaDistance(A, B) is A == B for two stores
+            if sinking && r == leader && inst_op(vp_underlying_instr(r)) == .STORE continue;
+            if !vp_may_write_to_memory(r) && !(check_reads && vp_may_read_from_memory(r)) continue;
+            ok, l2 := vp_memory_location(r);
+            if !ok return false;
+            if scoped_noalias_alias(l2, loc).kind != AR_NO return false;
+        }
+    }
     return true;
 }
 vp_licm :: () {

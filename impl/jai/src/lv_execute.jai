@@ -8,27 +8,177 @@ LV_FOLLOWUP_ALL :: "llvm.loop.vectorize.followup_all";
 LV_FOLLOWUP_VECTORIZED :: "llvm.loop.vectorize.followup_vectorized";
 LV_FOLLOWUP_EPILOGUE :: "llvm.loop.vectorize.followup_epilogue";
 
-// GeneratedRTChecks (only the "no checks needed" and "too many checks" paths are ported)
+// GeneratedRTChecks
 Lv_Rt_Checks :: struct {
     scev_cond: Value_Id = NONE;
     scev_block: Value_Id = NONE;
     mem_cond: Value_Id = NONE;
     mem_block: Value_Id = NONE;
     cost_too_high: bool;
+    scev_exp: Scev_Expander;
+    mem_exp: Scev_Expander;
+    created: bool;
+    outer_loop: Loop_Id = NONE;
 }
 lv_rt_checks_has_checks :: (c: *Lv_Rt_Checks) -> bool { return c.scev_block != NONE || c.mem_block != NONE; }
 
 // GeneratedRTChecks::create
 lv_rt_checks_create :: (c: *Lv_Rt_Checks, lp: *Lv_Planner, vf: Ec, ic: u64) {
     laa := lp.lvl.laa;
+    li := lp.li; dt := lp.p.dt; l := lp.l;
+    sx_init(*c.scev_exp, "scev.check", false);
+    sx_init(*c.mem_exp, "scev.check", false);
+    c.created = true;
     c.cost_too_high = laa.rt.checks.count > lv_opts.memory_check_threshold;
     if c.cost_too_high {
         c.mem_cond = const_int(ir.t_i1, 1);
         c.scev_cond = const_int(ir.t_i1, 1);
         return;
     }
-    if lp.pse.preds.count vp_unported("SCEV runtime checks (GeneratedRTChecks, expandCodeForPredicate)");
-    if laa.rt.need vp_unported("memory runtime checks (GeneratedRTChecks)");
+    header := li_header(li, l);
+    ph := li_loop_preheader(li, l);
+    if lp.pse.preds.count {
+        c.scev_block = split_block(ph, block_terminator(ph), dt, li, null, "vector.scevcheck");
+        c.scev_cond = sx_expand_union_predicate(*c.scev_exp, lp.pse.preds, block_terminator(c.scev_block));
+        if is_const(c.scev_cond) sx_cleanup(*c.scev_exp);
+    }
+    rt := *laa.rt;
+    if rt.need {
+        pred := ifx c.scev_block != NONE then c.scev_block else ph;
+        c.mem_block = split_block(pred, block_terminator(pred), dt, li, null, "vector.memcheck");
+        if rt.can_use_diff_check && rt.diff_checks.count {
+            c.mem_cond = lv_add_diff_runtime_checks(block_terminator(c.mem_block), rt.diff_checks, *c.mem_exp, vf, ic);
+        } else {
+            idx: [..] s64; idx.allocator = temp;
+            for 0..rt.checks.count-1 array_add(*idx, it);
+            c.mem_cond = lver_add_runtime_checks(block_terminator(c.mem_block), l, li, rt, idx, *c.mem_exp, laa_opts.hoist_runtime_checks);
+        }
+        assert(c.mem_cond != NONE, "no RT checks generated although RtPtrChecking claimed checks are required");
+    }
+    sx_erase_dead_instructions(*c.scev_exp, c.scev_cond);
+    if c.mem_block == NONE && c.scev_block == NONE return;
+    if c.scev_block != NONE block_rauw(c.scev_block, ph);
+    if c.mem_block != NONE block_rauw(c.mem_block, ph);
+    unhook :: (blk: Value_Id, ph: Value_Id) {
+        t := block_terminator(blk);
+        pt := block_terminator(ph);
+        inst_unlink(t);
+        inst_insert_before(t, pt);
+        u := new_inst(.UNREACHABLE, ir.t_void, 0);
+        block_append_inst(blk, u);
+        erase_inst(pt);
+    }
+    if c.scev_block != NONE unhook(c.scev_block, ph);
+    if c.mem_block != NONE unhook(c.mem_block, ph);
+    dt_change_idom(dt, header, ph);
+    if c.mem_block != NONE { dt_erase_node(dt, c.mem_block); li_remove_block(li, c.mem_block); }
+    if c.scev_block != NONE { dt_erase_node(dt, c.scev_block); li_remove_block(li, c.scev_block); }
+    c.outer_loop = li_parent(li, l);
+}
+
+// GeneratedRTChecks::getCost
+lv_rt_checks_get_cost :: (c: *Lv_Rt_Checks, lp: *Lv_Planner) -> Cost {
+    if c.cost_too_high return COST_INVALID;
+    kind := ifx fn_has_min_size(lp.cm.f) then TCK_CODE_SIZE else TCK_RECIP_THROUGHPUT;
+    t := lp.cm.tti;
+    total: Cost = 0;
+    if c.scev_block != NONE {
+        term := block_terminator(c.scev_block);
+        for i: block_insts(c.scev_block) if i != term total = cost_add(total, tti_instruction_cost(t, i, kind));
+    }
+    if c.mem_block != NONE {
+        mc: Cost = 0;
+        term := block_terminator(c.mem_block);
+        for i: block_insts(c.mem_block) if i != term mc = cost_add(mc, tti_instruction_cost(t, i, kind));
+        if c.outer_loop != NONE {
+            cond := sc_get_scev(c.mem_cond);
+            if sc_is_loop_invariant(cond, c.outer_loop) {
+                best: u64 = 2;
+                ok, est := lv_small_best_known_tc(lp.cm, c.outer_loop, false);
+                if ok && !est.scalable best = est.n;
+                if cost_valid(mc) mc = max(mc / cast(s64) best, 1);
+            }
+        }
+        total = cost_add(total, mc);
+    }
+    return total;
+}
+
+// isOutsideLoopWorkProfitable (the paths that do not need the VPlan cost of the vector loop)
+lv_is_outside_loop_work_profitable :: (c: *Lv_Rt_Checks, lp: *Lv_Planner, vf: Ec, scalar_cost: Cost) -> bool {
+    rtc := lv_rt_checks_get_cost(c, lp);
+    if !cost_valid(rtc) return false;
+    if ec_is_scalar(vf) return rtc <= lv_opts.memory_check_threshold;
+    if scalar_cost == 0 return true;
+    vp_unported("isOutsideLoopWorkProfitable with the VPlan cost model (minimum profitable trip count)");
+    return false;
+}
+
+// ~GeneratedRTChecks: remove the check blocks and instructions when they ended up unused
+lv_rt_checks_destroy :: (c: *Lv_Rt_Checks) {
+    if !c.created return;
+    scev_used := c.scev_block == NONE || block_has_predecessors(c.scev_block);
+    mem_used := c.mem_block == NONE || block_has_predecessors(c.mem_block);
+    if !mem_used {
+        insts: [..] Value_Id; insts.allocator = temp;
+        for block_insts(c.mem_block) array_add(*insts, it);
+        for < i: insts {
+            if sx_is_inserted_instruction(*c.mem_exp, i) continue;
+            sc_forget_value(i);
+            erase_inst(i);
+        }
+    }
+    if !mem_used sx_cleanup(*c.mem_exp);
+    if !scev_used sx_cleanup(*c.scev_exp);
+    if !scev_used block_erase_from_parent(c.scev_block);
+    if !mem_used block_erase_from_parent(c.mem_block);
+}
+
+// SCEVPtrToAddrRewriter::visitPtrToIntExpr
+sc_rw_ptr_to_addr_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
+    if sc_kind(s) != .PTRTOINT return false, s;
+    o := sc_rewrite(rw, sc_op(s, 0));
+    if sc_type(s) == dl_int_ptr_type(sc_type(sc_op(s, 0))) return true, sc_get_ptr_to_addr(o);
+    if o == sc_op(s, 0) return true, s;
+    return true, sc_get_ptr_to_int(o, sc_type(s));
+}
+// SCEVPtrToAddrRewriter + addDiffRuntimeChecks (LoopUtils.cpp)
+lv_add_diff_runtime_checks :: (loc: Value_Id, checks: [] Rt_Diff_Check, x: *Scev_Expander, vf: Ec, ic: u64) -> Value_Id {
+    if vf.scalable vp_unported("diff runtime checks for scalable VFs");
+    b: Irb;
+    irb_set_before(*b, loc);
+    mem_check: Value_Id = NONE;
+    Seen :: struct { diff: Value_Id; thr: Value_Id; cmp: Value_Id; }
+    seen: [..] Seen; seen.allocator = temp;
+    Thr :: struct { ty: Type_Id; n: u64; v: Value_Id; }
+    thr_cache: [..] Thr; thr_cache.allocator = temp;
+    rw: Sc_Rewriter;
+    sc_rewriter_init(*rw, .PTR_TO_ADDR);
+    for chk: checks {
+        ty := sc_type(chk.sink_start);
+        n := ic * chk.access_size;
+        one := const_int(ty, 1);
+        thr: Value_Id = NONE;
+        for thr_cache if it.ty == ty && it.n == n { thr = it.v; break; }
+        if thr == NONE {
+            m := isf_binop(*b, .MUL, const_int(ty, vf.n), const_int(ty, n));
+            thr = isf_binop(*b, .SUB, m, one);
+            array_add(*thr_cache, .{ty, n, thr});
+        }
+        sink := sc_rewrite(*rw, chk.sink_start);
+        src := sc_rewrite(*rw, chk.src_start);
+        diff := sx_expand_code_for_at(x, sc_get_minus(sink, src), ty, loc);
+        dup := false;
+        for seen if it.diff == diff && it.thr == thr { dup = true; break; }
+        if dup continue;
+        conflict := isf_icmp(*b, ICMP_ULT, isf_binop(*b, .SUB, diff, one), thr, "diff.check");
+        array_add(*seen, .{diff, thr, conflict});
+        if chk.needs_freeze conflict = irb_freeze(*b, conflict, tprint("%.fr", ir.v_name[conflict]));
+        if mem_check != NONE conflict = isf_binop(*b, .OR, mem_check, conflict, "conflict.rdx");
+        mem_check = conflict;
+    }
+    sx_erase_dead_instructions(x, mem_check);
+    return mem_check;
 }
 
 // LoopVectorizationPlanner::selectInterleaveCount up to the point where the target's maximum interleave factor
@@ -68,12 +218,12 @@ lvp_vectorize_with_plan :: (lp: *Lv_Planner, plan: *Vp_Plan, vf: Ec, user_ic: u6
     checks: Lv_Rt_Checks;
     if ec_is_vector(vf) || selected_ic > 1 {
         lv_rt_checks_create(*checks, lp, vf, selected_ic);
-        if checks.scev_cond != NONE && is_const(checks.scev_cond) && vkind(checks.scev_cond) == .C_INT && const_int_zext(checks.scev_cond) == 1 return false;
-        if checks.mem_cond != NONE && is_const(checks.mem_cond) && vkind(checks.mem_cond) == .C_INT && const_int_zext(checks.mem_cond) == 1 return false;
+        if checks.scev_cond != NONE && vkind(checks.scev_cond) == .C_INT && const_int_zext(checks.scev_cond) == 1 { lv_rt_checks_destroy(*checks); return false; }
+        if checks.mem_cond != NONE && vkind(checks.mem_cond) == .C_INT && const_int_zext(checks.mem_cond) == 1 { lv_rt_checks_destroy(*checks); return false; }
     }
-    // isOutsideLoopWorkProfitable: with a user VF the scalar cost is 0 and the answer is true (the runtime-check cost
-    // is valid: no checks are generated in the ported subset)
-    if ec_is_scalar(vf) vp_unported("interleaving without vectorization (VF 1)");
+    force := lvh_force(lp.hints) == FK_ENABLED;
+    // the plan was chosen for the user VF (or is the only, scalar, plan): computeBestVF's scalar cost is 0
+    if !force && !lv_is_outside_loop_work_profitable(*checks, lp, vf, 0) { lv_rt_checks_destroy(*checks); return false; }
     ic = ifx user_ic > 0 then user_ic else ic;
     if lvl_has_uncountable_exit_with_side_effects(lp.lvl) && ic > 1 ic = 1;
     // selectBestEpiloguePlan
@@ -83,6 +233,7 @@ lvp_vectorize_with_plan :: (lp: *Lv_Planner, plan: *Vp_Plan, vf: Ec, user_ic: u6
     lvp_add_minimum_iteration_check(lp, vf, cast(u32) ic, ec_fixed(0), has_bw);
     lvp_attach_runtime_checks(lp, *checks, has_bw);
     lvp_execute_plan(lp, vf, cast(u32) ic, *checks);
+    lv_rt_checks_destroy(*checks);
     return true;
 }
 
