@@ -498,9 +498,31 @@ vpsx_try_to_expand :: (x: *Vp_Scev_Expander, s: Scev_Id) -> Vp_Val {
         return vr(vpb_scalar_cast(x.b, opc, o, sc_type(s), x.dl, vp_default_flags(vp_opc(opc), sc_type(s)))).def;
     }
     if k == .UMAX || k == .SMAX || k == .UMIN || k == .SMIN {
-        vp_unported("VPSCEVExpander of min/max expressions");
+        id := ifx k == .UMAX then IID_UMAX else ifx k == .SMAX then IID_SMAX else ifx k == .UMIN then IID_UMIN else IID_SMIN;
+        ops: [..] Vp_Val; ops.allocator = temp;
+        n := sc_nops(s);
+        k2 := cast(s64) n - 1;
+        while k2 >= 0 {
+            ov := vpsx_try_to_expand(x, sc_op(s, cast(u32) k2));
+            if ov == NONE return NONE;
+            array_add(*ops, ov);
+            k2 -= 1;
+        }
+        result := ops[0];
+        for i: 1..ops.count-1 result = vr(vpb_scalar_intrinsic(x.b, id, .[result, ops[i]], sc_type(s), x.dl)).def;
+        return result;
     }
     return NONE;
+}
+
+// VPBuilder::createScalarIntrinsic
+vpb_scalar_intrinsic :: (b: *Vp_Builder, id: Intrinsic_Id, args: [] Vp_Val, ty: Type_Id, dl: Md_Id) -> Vp_Rec {
+    ops: [..] Vp_Val; ops.allocator = temp;
+    for args array_add(*ops, it);
+    array_add(*ops, vp_const_int(type_int(32), cast(u64) id));
+    r := vp_new_instruction(VPI_INTRINSIC, ops, .{}, .[], dl, "", ty);
+    vr(r).with_type = true;
+    return vpb_insert(b, r);
 }
 
 // IR flag accessors used by VPIRFlags(Instruction &)

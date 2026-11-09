@@ -899,7 +899,10 @@ vpb_scalar_phi :: (b: *Vp_Builder, incoming: [] Vp_Val, dl: Md_Id = NONE, name :
     return vpb_insert(b, r);
 }
 // createScalarCast (VPInstructionWithType)
-vpb_scalar_cast :: (b: *Vp_Builder, opc: Opcode, v: Vp_Val, ty: Type_Id, dl: Md_Id = NONE, flags := Vp_Flags.{}, md: [] Vp_Md = .[]) -> Vp_Rec {
+// (flags with optype OTHER = VPIRFlags::getDefaultFlags(Opcode), the overload without explicit flags)
+vpb_scalar_cast :: (b: *Vp_Builder, opc: Opcode, v: Vp_Val, ty: Type_Id, dl: Md_Id = NONE, flags_in := Vp_Flags.{}, md: [] Vp_Md = .[]) -> Vp_Rec {
+    flags := flags_in;
+    if flags.optype == .OTHER flags = vp_default_flags(vp_opc(opc), ty);
     r := vp_new_instruction(vp_opc(opc), .[v], flags, md, dl, "", ty);
     vr(r).with_type = true;
     return vpb_insert(b, r);

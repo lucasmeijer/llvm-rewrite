@@ -157,7 +157,14 @@ lvp_try_to_create_widen_non_phi_recipe :: (lp: *Lv_Planner, r: Vp_Rec, range: *V
         i := vp_underlying_instr(r);
         ctx := Lvp_Vf_Ctx.{lp, i};
         opt :: (vf: Ec, d: *void) -> bool { c := cast(*Lvp_Vf_Ctx) d; return lv_cm_is_optimizable_iv_truncate(c.lp.cm, c.i, vf); }
-        if lvp_decision_and_clamp_range(range, opt, *ctx) vp_unported("optimizable induction truncates (tryToOptimizeInductionTruncate)");
+        if lvp_decision_and_clamp_range(range, opt, *ctx) {
+            // tryToOptimizeInductionTruncate
+            wiv := vp_def(vp_op(r, 0));
+            assert(vr(wiv).kind == .WIDEN_INT_OR_FP_INDUCTION, "expected a widened induction");
+            d := *vpl.inds[vr(wiv).ind];
+            step := vp_get_or_create_value_for_scev(d.step);
+            return vp_new_widen_int_or_fp_induction(vp_uv(vr(wiv).def), vp_op(wiv, 0), step, vpl.vf, vr(wiv).ind, vpf_wrap(false, false), vr(r).dl, i);
+        }
     }
     scalar :: (vf: Ec, d: *void) -> bool { return ec_is_scalar(vf); }
     if lvp_decision_and_clamp_range(range, scalar, null) return NONE;
@@ -318,7 +325,8 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
             instr := vv(vr(r).def).uv;
             recipe := lvp_try_to_create_widen_non_phi_recipe(lp, r, range);
             if recipe == NONE recipe = lvp_handle_replication(lp, r, range);
-            vp_insert_before(recipe, r);
+            if vr(recipe).kind == .WIDEN_INT_OR_FP_INDUCTION && inst_op(instr) == .TRUNC vp_insert_recipe(recipe, header, vp_first_non_phi(header));
+            else vp_insert_before(recipe, r);
             if vp_num_defined_values(recipe) == 1 vp_rauw(vr(r).def, vp_defined_value(recipe, 0));
             vp_erase_recipe(r);
         }

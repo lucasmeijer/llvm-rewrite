@@ -20,7 +20,20 @@ Lv_Rt_Checks :: struct {
     created: bool;
     outer_loop: Loop_Id = NONE;
 }
-lv_rt_checks_has_checks :: (c: *Lv_Rt_Checks) -> bool { return c.scev_block != NONE || c.mem_block != NONE; }
+// getSCEVChecks / getMemRuntimeChecks: a check folded to false is no check
+lv_is_zero_int :: (v: Value_Id) -> bool { return v != NONE && vkind(v) == .C_INT && const_int_zext(v) == 0; }
+lv_rt_scev_checks :: (c: *Lv_Rt_Checks) -> (Value_Id, Value_Id) {
+    if c.scev_cond == NONE || lv_is_zero_int(c.scev_cond) return NONE, NONE;
+    return c.scev_cond, c.scev_block;
+}
+lv_rt_mem_checks :: (c: *Lv_Rt_Checks) -> (Value_Id, Value_Id) {
+    if lv_is_zero_int(c.mem_cond) return NONE, NONE;
+    return c.mem_cond, c.mem_block;
+}
+lv_rt_checks_has_checks :: (c: *Lv_Rt_Checks) -> bool {
+    a := lv_rt_scev_checks(c); b := lv_rt_mem_checks(c);
+    return a != NONE || b != NONE;
+}
 
 // GeneratedRTChecks::create
 lv_rt_checks_create :: (c: *Lv_Rt_Checks, lp: *Lv_Planner, vf: Ec, ic: u64) {
@@ -37,7 +50,7 @@ lv_rt_checks_create :: (c: *Lv_Rt_Checks, lp: *Lv_Planner, vf: Ec, ic: u64) {
     }
     header := li_header(li, l);
     ph := li_loop_preheader(li, l);
-    if lp.pse.preds.count {
+    if !sc_union_is_always_true(lp.pse.preds) {
         c.scev_block = split_block(ph, block_terminator(ph), dt, li, null, "vector.scevcheck");
         c.scev_cond = sx_expand_union_predicate(*c.scev_exp, lp.pse.preds, block_terminator(c.scev_block));
         if is_const(c.scev_cond) sx_cleanup(*c.scev_exp);
@@ -212,14 +225,16 @@ lvp_vectorize_with_plan :: (lp: *Lv_Planner, plan: *Vp_Plan, vf: Ec, user_ic: u6
     vp_print_plan("chosen");
     ic: u64 = 1;
     // selectInterleaveCount is only needed when the user did not force the count, or for the runtime checks
-    needs_ic := user_ic == 0 || lp.pse.preds.count > 0 || lp.lvl.laa.rt.need;
+    needs_ic := user_ic == 0 || !sc_union_is_always_true(lp.pse.preds) || lp.lvl.laa.rt.need;
     if needs_ic ic = lvp_select_interleave_count(lp, vf);
     selected_ic := max(ic, user_ic);
     checks: Lv_Rt_Checks;
     if ec_is_vector(vf) || selected_ic > 1 {
         lv_rt_checks_create(*checks, lp, vf, selected_ic);
-        if checks.scev_cond != NONE && vkind(checks.scev_cond) == .C_INT && const_int_zext(checks.scev_cond) == 1 { lv_rt_checks_destroy(*checks); return false; }
-        if checks.mem_cond != NONE && vkind(checks.mem_cond) == .C_INT && const_int_zext(checks.mem_cond) == 1 { lv_rt_checks_destroy(*checks); return false; }
+        sc := lv_rt_scev_checks(*checks);
+        mc := lv_rt_mem_checks(*checks);
+        if sc != NONE && vkind(sc) == .C_INT && const_int_zext(sc) == 1 { lv_rt_checks_destroy(*checks); return false; }
+        if mc != NONE && vkind(mc) == .C_INT && const_int_zext(mc) == 1 { lv_rt_checks_destroy(*checks); return false; }
     }
     force := lvh_force(lp.hints) == FK_ENABLED;
     // the plan was chosen for the user VF (or is the only, scalar, plan): computeBestVF's scalar cost is 0
@@ -270,8 +285,10 @@ lvp_add_minimum_iteration_check :: (lp: *Lv_Planner, vf: Ec, uf: u32, min_profit
 
 // LoopVectorizationPlanner::attachRuntimeChecks
 lvp_attach_runtime_checks :: (lp: *Lv_Planner, c: *Lv_Rt_Checks, has_bw: bool) {
-    if c.scev_block != NONE && !block_has_predecessors(c.scev_block) vp_attach_check_block(c.scev_cond, c.scev_block, has_bw);
-    if c.mem_block != NONE && !block_has_predecessors(c.mem_block) vp_attach_check_block(c.mem_cond, c.mem_block, has_bw);
+    scond, sblock := lv_rt_scev_checks(c);
+    if sblock != NONE && !block_has_predecessors(sblock) vp_attach_check_block(scond, sblock, has_bw);
+    mcond, mblock := lv_rt_mem_checks(c);
+    if mblock != NONE && !block_has_predecessors(mblock) vp_attach_check_block(mcond, mblock, has_bw);
 }
 
 // replaceVPBBWithIRVPBB

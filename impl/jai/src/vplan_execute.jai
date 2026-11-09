@@ -382,6 +382,16 @@ vpi_with_type_execute :: (s: *Vp_State, r: Vp_Rec) {
         return;
     }
     if o == VPI_STEP_VECTOR { vs_set(s, vr(r).def, vs_step_vector(s, type_vector(s.vf.n, rty, s.vf.scalable))); return; }
+    if o == VPI_INTRINSIC {
+        args: [..] Value_Id; args.allocator = temp;
+        for k: 0..vp_nops(r)-2 array_add(*args, vs_get(s, vp_op(r, k), true));
+        id := vp_intrinsic_id(r);
+        if !(id == IID_UMAX || id == IID_SMAX || id == IID_UMIN || id == IID_SMIN) vp_unported(tprint("executing scalar intrinsic %", intrinsic_name(id)));
+        c := irb_intrinsic(*s.b, intrinsic_name(id), .[rty], args);
+        if vr(r).name.count set_name(c, vr(r).name);
+        vs_set(s, vr(r).def, c, true);
+        return;
+    }
     if o == vp_opc(.LOAD) vp_unported("executing scalar VPInstruction loads");
     vp_unported(tprint("executing VPInstructionWithType %", vp_opcode_name(o)));
 }
