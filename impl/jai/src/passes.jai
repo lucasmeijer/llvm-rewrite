@@ -300,6 +300,8 @@ Pass_Kind :: enum u8 {
     // IPO: GlobalOpt, GlobalDCE, ConstantMerge, StripDeadPrototypes, EliminateAvailableExternally, Internalize,
     // DeadArgumentElimination, ArgumentPromotion (pass_global_opt.jai, pass_global_dce.jai, ...)
     GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
+    // L1.scalar-misc (pass_lower_expect.jai, ...; options in scalar_misc_cl.jai)
+    LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT;
 }
 
 Pass_Info :: struct {
@@ -441,6 +443,10 @@ PASS_TABLE :: Pass_Info.[
     .{"deadargelim", .MODULE, .DEAD_ARG_ELIM, false, .DOMTREE},
     .{"argpromotion", .CGSCC, .ARG_PROMOTION, false, .DOMTREE},
     .{"assign-guid", .MODULE, .ASSIGN_GUID, false, .DOMTREE},
+    // L1.scalar-misc
+    .{"lower-expect", .FUNCTION, .LOWER_EXPECT, false, .DOMTREE},
+    .{"lower-constant-intrinsics", .FUNCTION, .LOWER_CONSTANT_INTRINSICS, false, .DOMTREE},
+    .{"infer-alignment", .FUNCTION, .INFER_ALIGNMENT, false, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -915,6 +921,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if name == "mattr" && has_value && tti_opts.mattr.count { tti_opts.mattr = sprint("%,%", tti_opts.mattr, value); return true; }
     if ipo_parse_cl_opt(name, value, has_value) return true;   // cgscc_pm.jai, pass_function_attrs.jai, inliner
     if globals_parse_cl_opt(name, value, has_value) return true;   // pass_global_opt.jai, internalize, globaldce, ...
+    if scalar_misc_parse_cl_opt(name, value, has_value) return true;   // scalar_misc_cl.jai (L1.scalar-misc passes)
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {
@@ -1092,6 +1099,9 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .DCE; return dce_run(f);
         case .ADCE; return adce_run(f);
         case .BDCE; return bdce_run(f);
+        case .LOWER_EXPECT; return lower_expect_run(f);
+        case .LOWER_CONSTANT_INTRINSICS; return lower_constant_intrinsics_run(f);
+        case .INFER_ALIGNMENT; return infer_alignment_run(f);
         case .REASSOCIATE; return reassociate_run(f);
         case .CONSTRAINT_ELIMINATION; return constraint_elimination_run(f);
         case .AGGRESSIVE_INSTCOMBINE; return aggressive_instcombine_run(f);

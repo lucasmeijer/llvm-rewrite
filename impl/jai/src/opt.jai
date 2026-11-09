@@ -42,6 +42,10 @@
 #load "pass_dce.jai";
 #load "pass_adce.jai";
 #load "pass_bdce.jai";
+#load "scalar_misc_cl.jai";
+#load "pass_lower_expect.jai";
+#load "pass_lower_constant_intrinsics.jai";
+#load "pass_infer_alignment.jai";
 #load "pass_reassociate.jai";
 #load "constraint_system.jai";
 #load "pass_constraint_elimination.jai";
