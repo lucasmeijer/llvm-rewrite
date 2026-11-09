@@ -62,3 +62,26 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - `VLOperands::getBestLaneToStartReordering` keys a MapVector by a `hash_combine` of
   `(OpIdx + 1) * (ValueID + 1)` per operand; only equality of those hashes matters, so a port can key by the exact
   sequence instead of reproducing `hash_combine`.
+- X86 target facts the SLP port relies on (X86TargetTransformInfo.h/.cpp): `preferAlternateOpcodeVectorization()`
+  is **false** on X86 (true in the base), so split-vectorize nodes (canBuildSplitNode) are built for alternating
+  bundles of more than 4 lanes; `isLegalStridedLoadStore` and `isLegalInterleavedAccessType` are the base `false`
+  (no strided load/store nodes, no store interleave factor); `isLegalAltInstr` only accepts fsub/fadd alternation
+  on float (SSE3, VF % 4 == 0) and double (SSE3, VF % 2 == 0).
+- `getStoreMinimumVF` (BasicTTIImpl) uses `TLI->isOperationCustom(ISD::STORE, VT)`, which has **no** type-legality
+  check (unlike isOperationLegal): X86 marks stores of v2i8/v4i8/v8i8/... Custom, so the VF halves down to 2 and
+  4 x i8 store chains are tried.
+- `getVectorCallCosts` retries an over-limit intrinsic cost with argument-aware IntrinsicCostAttributes; that query
+  is not type-based, so BasicTTI recomputes the scalarization overhead from the arguments and ignores the
+  ScalarLimit it was given (e.g. `powi(x, %n)` costs 10 for v4f32 instead of 10000 + 4).
+- `HorizontalReduction::optimizeReducedVals` calls `buildInstructionsState(Ops, R, true, true)` with a
+  "TryCopyableElementsVectorization" comment, but the two bools bind to WithProfitabilityCheck and
+  SkipSameCodeCheck.
+- `areAllUsersVectorized(I, VectorizedVals)`: with a non-null set, `hasOneUse()` only counts when `I` itself is in
+  the set; the users are always checked with isVectorized / isVectorLikeInstWithConstOps / gathered extracts.
+- Order-sensitive containers: `reorderBottomToTop`'s PriorityQueue (equal user indices: libstdc++ heap order decides
+  OrdersUses' insertion order and so ties), `computeMinimumValueSizes`' `ExtraBitWidthNodes` (DenseSet<unsigned>:
+  begin() is bucket order, hash = key * 37 in 64 buckets), `collectUserStores` (DenseMap keyed by pointers: hash
+  order; the jai port fails loudly when it matters).
+- VectorInstrContext hints only reach BasicTTI's getVectorInstrCost, which ignores them: on X86 they do not change
+  any cost.
+

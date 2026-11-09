@@ -8,6 +8,7 @@
 //
 // The comparator/compatibility lambdas of the tryToVectorizeSequence template instances are a `Seq_Kind` switch.
 
+DEBUG_SLP :: false;   // compile-time switch for the `#if DEBUG_SLP` traces
 Slp_Pass :: struct {
     // MapVector<Value *, StoreList> Stores / GEPs: keys in insertion order
     store_keys: [..] Value_Id;
@@ -149,6 +150,7 @@ slp_vectorize_store_chain :: (chain: [] Value_Id, idx: s64, min_vf: u64) -> (boo
         }
     }
     slp_build_tree(chain);
+    #if DEBUG_SLP for slp.entries print("DBG te% state=% n=% op=% user=%\n", it_index, it.state, it.scalars.count, ifx is_valid(it.s) then inst_op(it.s.main) else .NONE_OP, it.user_tree_index);
     if slp_is_tree_tiny_and_not_fully_vectorizable() {
         if slp_is_gathered(chain[0]) || slp_is_not_scheduled(op(chain[0], 0)) return false, false, size;
         size = slp_canonical_graph_size();
@@ -1506,9 +1508,12 @@ slp_vector_call_costs :: (ci: Value_Id, vec_ty: Type_Id, arg_tys: [] Type_Id) ->
         for k: 0..cast(s64) call_num_args(ci) - 1 array_add(*args, call_arg(ci, cast(u32) k));
         b := ica_types(id, vec_ty, arg_tys, fmf, ifx call_iid(ci) != NOT_INTRINSIC then ci else NONE, SCALAR_LIMIT);
         b.args = args;
+        b.type_based_only = false;
         ic = tti_intrinsic_cost(slp.tti, *b, TCK_RECIP_THROUGHPUT);
+        #if DEBUG_SLP print("DBG retry ic=%\n", ic);
         if ic > SCALAR_LIMIT ic = COST_INVALID;
     }
+    #if DEBUG_SLP print("DBG call costs ic=% lc=%\n", ic, lib_cost);
     return ic, lib_cost;
 }
 // getVectorOpCost(I, VF, TTI, TLI)
