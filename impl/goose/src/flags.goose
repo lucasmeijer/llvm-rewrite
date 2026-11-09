@@ -80,6 +80,8 @@ let KNOWN_FLAGS: const u8[:][] = [
     "enable-memcpyopt-without-libcalls",                 // memcpyopt
     "reassociate-use-cse-local",                         // reassociate
     "constraint-elimination-max-rows",                   // constraint-elimination
+    "loop-deletion-enable-symbolic-execution",           // loop-deletion
+    "enable-loop-simplifycfg-term-folding",              // loop-simplifycfg
     "run-twice",                                         // no-op: optdriver.cpp only reads it on the legacy-PM path
     "goose-ic-lenient",
     "goose-scev-trace",                                  // development only: ScalarEvolution value map events                                  // development only: unported InstCombine visitors do nothing

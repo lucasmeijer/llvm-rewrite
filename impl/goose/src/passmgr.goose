@@ -41,6 +41,9 @@ import lpm;
 import tli;
 import scev;
 import indvars;
+import loop_deletion;
+import loop_instsimplify;
+import loop_simplifycfg;
 import ivusers;
 import loopnest;
 import simplifycfg;
@@ -124,6 +127,9 @@ let P_LINVALIDATE = 204;
 let P_LOOP_ROTATE = 206;   // arg: bit 0 = header-duplication, 1 = prepare-for-lto, 2 = check-exit-count
 let P_LICM = 205;          // arg: bit 0 = AllowSpeculation, bit 1 = lnicm (a loop-nest pass)
 let P_INDVARS = 207;
+let P_LOOP_DELETION = 210;
+let P_LOOP_INSTSIMPLIFY = 211;
+let P_LOOP_SIMPLIFYCFG = 212;
 let P_PRINT_IV_USERS = 208;
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
@@ -171,6 +177,9 @@ let PASS_TABLE: const u8[:][] = [
     "l:print<loopnest>:200:1",
     "l:no-op-loop:201:0",
     "l:indvars:207:0",
+    "l:loop-deletion:210:0",
+    "l:loop-instsimplify:211:0",
+    "l:loop-simplifycfg:212:0",
     "l:print<iv-users>:208:1",
 ];
 
@@ -615,6 +624,7 @@ recursive fn parse_loop_elem(e: i32) -> i32 {
         }
         perr_pipeline(str("invalid use of '", name, "' pass as loop pipeline"));
     }
+    if name == "require<iv-users>" { return new_pnode(PK_PASS, P_LREQUIRE as i32, 1, true, pelems[e].name); }
     if starts_with(name, "require<") || starts_with(name, "invalidate<") {
         if llvm_knows(name, 'l') { not_implemented(name); }
         perr_pipeline(str("unknown loop pass '", name, "'"));
@@ -901,6 +911,11 @@ fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
     match p {
         P_PRINT_LOOPNEST => { print_loopnest(l); return PA_ALL; },
         P_NOOP_LOOP => { return PA_ALL; },
+        P_LREQUIRE => {
+            // require<iv-users>: IVUsers(L, AC, LI, DT, SE) is built (its getSCEV calls fill ScalarEvolution's caches)
+            if pnodes[n].arg == 1 { iu_build(l); ap_pool_reset(); }
+            return PA_ALL;
+        },
         P_LOOP_ROTATE => {
             let a = pnodes[n].arg;
             let pa = loop_rotate_pass_run(l, (a & 1) != 0, (a & 2) != 0, (a & 4) != 0, lpm_use_mssa);
@@ -908,6 +923,9 @@ fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
             return pa;
         },
         P_PRINT_IV_USERS => { print_iv_users(l); return PA_ALL; },
+        P_LOOP_DELETION => { let pa = loop_deletion_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
+        P_LOOP_INSTSIMPLIFY => { let pa = loop_instsimplify_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
+        P_LOOP_SIMPLIFYCFG => { let pa = loop_simplifycfg_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
         P_INDVARS => {
             let pa = indvars_pass_run(l, lpm_use_mssa);
             ap_pool_reset();
