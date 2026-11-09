@@ -68,6 +68,7 @@ import cgscc;
 import inliner;
 import function_attrs;
 import psi;
+import loop_unroll_pass;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -158,6 +159,8 @@ let P_LOOP_INSTSIMPLIFY = 211;
 let P_LOOP_SIMPLIFYCFG = 212;
 let P_LOOP_IDIOM = 213;
 let P_PRINT_IV_USERS = 208;
+let P_LOOP_UNROLL = 290;      // function pass; arg: index into lu_opt_table
+let P_LOOP_UNROLL_FULL = 291; // loop pass
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
 // (PassInfoMixin::isRequired: printers, verifier, require/invalidate, adaptors).
@@ -217,6 +220,7 @@ let PASS_TABLE: const u8[:][] = [
     "l:loop-simplifycfg:212:0",
     "l:loop-idiom:213:0",
     "l:print<iv-users>:208:1",
+    "l:loop-unroll-full:291:0",
 ];
 
 // LLVM pass class names, for -opt-bisect-limit messages.
@@ -260,6 +264,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_RPO_FUNCTION_ATTRS => "ReversePostOrderFunctionAttrsPass",
         P_NORECURSE_LTO => "NoRecurseLTOInferencePass",
         P_PRINT_LCG => "LazyCallGraphPrinterPass",
+        P_LOOP_UNROLL => "LoopUnrollPass",
         _ => "Pass",
     }
 }
@@ -605,6 +610,42 @@ recursive fn parse_function_elem(e: i32) -> i32 {
         let idx = scf_opt_table.len as i32;
         scf_opt_table.push(o);
         return new_pnode(PK_PASS, P_SIMPLIFYCFG as i32, idx, false, pelems[e].name);
+    }
+    if is_param_name(name, "loop-unroll") {
+        // parseLoopUnrollOptions
+        var o = LUOpts { opt_level: 2, only_when_forced: false, forget_scev: false, allow_partial: -1, allow_peeling: -1,
+                         allow_runtime: -1, allow_upper_bound: -1, allow_profile_peeling: -1, full_unroll_max_count: -1 };
+        if name != "loop-unroll" {
+            let ps = name[12..name.len - 1];
+            var st: i64 = 0;
+            for j in 0..ps.len + 1 {
+                if j < ps.len && ps[j] != ';' { continue; }
+                var pn = ps[st..j];
+                st = j + 1;
+                if pn == "O0" || pn == "O1" || pn == "O2" || pn == "O3" { o.opt_level = (pn[1] - '0') as i64; continue; }
+                if pn == "Os" || pn == "Oz" {
+                    write_stderr(str("LLVM ERROR: The optimization level \"", pn, "\" is no longer supported. Use O2 in conjunction with the optsize attribute instead.\n"));
+                    exit(1);
+                }
+                if starts_with(pn, "full-unroll-max=") {
+                    let v, ok = parse_int(pn[16..]);
+                    if !ok { perr_pipeline(str("invalid LoopUnrollPass parameter '", pn[16..], "'")); }
+                    o.full_unroll_max_count = v & 0xFFFFFFFF;
+                    continue;
+                }
+                var en: i64 = 1;
+                if starts_with(pn, "no-") { en = 0; pn = pn[3..]; }
+                if pn == "partial" { o.allow_partial = en; }
+                else if pn == "peeling" { o.allow_peeling = en; }
+                else if pn == "profile-peeling" { o.allow_profile_peeling = en; }
+                else if pn == "runtime" { o.allow_runtime = en; }
+                else if pn == "upperbound" { o.allow_upper_bound = en; }
+                else { perr_pipeline(str("invalid LoopUnrollPass parameter '", pn, "'")); }
+            }
+        }
+        let idx = lu_opt_table.len as i32;
+        lu_opt_table.push(o);
+        return new_pnode(PK_PASS, P_LOOP_UNROLL as i32, idx, false, pelems[e].name);
     }
     if is_param_name(name, "sroa") {
         // parseSROAOptions: default modify-cfg
@@ -1015,7 +1056,7 @@ fn pass_creates_subtarget(n: i32) -> bool {
         p == P_INSTCOMBINE || p == P_PRINT_DEMANDED_BITS || p == P_LOOP_SIMPLIFY || p == P_AA_EVAL ||
         p == P_PRINT_MEMORYSSA || p == P_PRINT_MEMORYSSA_WALKER || p == P_VERIFY_MEMORYSSA || p == P_SCCP ||
         p == P_EARLY_CSE || p == P_VERIFY_SCEV || p == P_CVP || p == P_JUMP_THREADING || p == P_GVN || p == P_DSE || p == P_MEMCPYOPT ||
-        p == P_CONSTRAINT_ELIMINATION || p == P_AGGRESSIVE_INSTCOMBINE;
+        p == P_CONSTRAINT_ELIMINATION || p == P_AGGRESSIVE_INSTCOMBINE || p == P_LOOP_UNROLL;
 }
 
 fn run_function_pass(n: i32, fv: i32) -> u32 {
@@ -1065,6 +1106,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_CVP => { return cvp_run(fv); },
         P_JUMP_THREADING => { return jump_threading_run(fv, (pnodes[n].arg as i64) - 1); },
         P_VERIFY_SCEV => { scev_get(fv); return PA_ALL; },     // ScalarEvolution::verify reports only mismatches
+        P_LOOP_UNROLL => { let pa = loop_unroll_pass_run(fv, lu_opt_table[pnodes[n].arg]); ap_pool_reset(); return pa; },
         _ => { fatal("internal: unknown function pass id"); return PA_ALL; },
     }
 }
@@ -1093,6 +1135,11 @@ fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
         P_LOOP_INSTSIMPLIFY => { let pa = loop_instsimplify_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
         P_LOOP_SIMPLIFYCFG => { let pa = loop_simplifycfg_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
         P_LOOP_IDIOM => { let pa = loop_idiom_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
+        P_LOOP_UNROLL_FULL => {
+            let pa = loop_full_unroll_pass_run(l, 2, false, false);
+            ap_pool_reset();
+            return pa;
+        },
         P_INDVARS => {
             let pa = indvars_pass_run(l, lpm_use_mssa);
             ap_pool_reset();

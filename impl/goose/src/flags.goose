@@ -93,6 +93,19 @@ let KNOWN_FLAGS: const u8[:][] = [
     "store-to-load-forwarding-conflict-detection", "max-forked-scev-depth", "laa-speculate-unit-stride",
     "hoist-runtime-checks", "runtime-memory-check-threshold", "force-vector-width", "force-vector-interleave",
     "run-twice",                                         // no-op: optdriver.cpp only reads it on the legacy-PM path
+    "unroll-threshold", "unroll-optsize-threshold", "unroll-partial-threshold",   // loop-unroll (LoopUnrollPass.cpp)
+    "unroll-max-percent-threshold-boost", "unroll-max-iteration-count-to-analyze", "unroll-count", "unroll-max-count",
+    "unroll-full-max-count", "unroll-allow-partial", "unroll-allow-remainder", "unroll-runtime", "unroll-max-upperbound",
+    "pragma-unroll-threshold", "flat-loop-tripcount-threshold", "unroll-remainder", "unroll-revisit-child-loops",
+    "unroll-threshold-aggressive", "unroll-threshold-default", "pragma-unroll-full-max-iterations",
+    "forget-scev-loop-unroll", "unroll-runtime-epilog", "unroll-verify-domtree", "unroll-verify-loopinfo",   // LoopUnroll.cpp
+    "unroll-add-parallel-reductions",
+    "unroll-runtime-multi-exit", "unroll-runtime-other-exit-predictable",   // LoopUnrollRuntime.cpp
+    "unroll-peel-count", "unroll-allow-peeling", "unroll-allow-loop-nests-peeling", "unroll-peel-max-count",   // LoopPeel.cpp
+    "unroll-force-peel-count", "disable-advanced-peeling", "enable-peeling-for-iv",
+    "partial-unrolling-threshold",                       // BasicTTIImpl.cpp
+    "disable-verify",                                    // no-op: opt only skips its own input/output verification
+    "disable-loop-unrolling",                            // no-op for -passes= (PipelineTuningOptions of -O<n>)
     "goose-ic-lenient",
     "goose-scev-trace",                                  // development only: ScalarEvolution value map events                                  // development only: unported InstCombine visitors do nothing
 ];

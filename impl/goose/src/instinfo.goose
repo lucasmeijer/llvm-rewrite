@@ -316,6 +316,7 @@ fn drop_poison_generating_annotations(iv: i32) {
 
 // Instruction::setMetadata(KindID, Node): attachments stay sorted by kind; a new run is appended to md_att.
 fn inst_set_md(iv: i32, kind: i32, node: i32) {
+    if node < 0 { inst_erase_md(iv, kind); return; }     // setMetadata(Kind, nullptr)
     let ii = inst_of(iv);
     let at = insts[ii].md;
     let n = insts[ii].nmd;

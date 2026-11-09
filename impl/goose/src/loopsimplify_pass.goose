@@ -80,10 +80,17 @@ fn simplify_one_loop(l: i32, worklist: i32[>..<]&, preserve_lcssa: bool) -> bool
             let v = ls_simplify_inst(pn);
             if v >= 0 {
                 if ls_se { sc_forget_value(pn); }
-                if preserve_lcssa { fatal("LoopSimplify with PreserveLCSSA (replacementPreservesLCSSAForm) is not ported yet"); }
-                rauw(pn, v);
-                inst_erase_from_parent(pn);
-                changed = true;
+                // LoopInfo::replacementPreservesLCSSAForm(PN, V)
+                var ok = true;
+                if preserve_lcssa && is_inst(v) && inst_parent(v) != inst_parent(pn) {
+                    let tl = li_loop_for(inst_parent(v));
+                    if tl >= 0 { ok = loop_contains_loop(tl, li_loop_for(inst_parent(pn))); }
+                }
+                if ok {
+                    rauw(pn, v);
+                    inst_erase_from_parent(pn);
+                    changed = true;
+                }
             }
         }
         // Merge exits through foldBranchToCommonDest when every exit goes to one block.

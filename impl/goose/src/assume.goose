@@ -28,6 +28,7 @@ var ac_val: i32[>..<];
 var ac_asm: i32[>..<];
 var ac_idx: i32[>..<];
 var ac_has_any: bool = false;
+var ac_handles: i32[>..<];   // AssumeHandles (AssumptionCache::assumptions()), registration order
 
 fn ac_invalidate() { ac_fn = -1; }
 
@@ -128,14 +129,15 @@ fn ac_build(fv: i32) {
     ac_asm.clear();
     ac_idx.clear();
     ac_has_any = false;
-    var handles: i32[>..<] = [];
-    each_inst(fv) { i => if inst_iid(i) == IID_assume { handles.push(i); } };
-    for a in handles { ac_update_affected(a); }
+    ac_handles.clear();
+    each_inst(fv) { i => if inst_iid(i) == IID_assume { ac_handles.push(i); } };
+    for k in ac_handles.len { ac_update_affected(ac_handles[k]); }
 }
 
 // AssumptionCache::registerAssumption(CI): only once the cache has scanned the function
 fn ac_register_assumption(a: i32) {
     if ac_fn < 0 || ac_fn != inst_func(a) { return; }
+    ac_handles.push(a);
     ac_update_affected(a);
 }
 
@@ -160,6 +162,12 @@ fn ac_update_affected(a: i32) {
         }
         ac_affected_by_condition(cb_arg(a, 0), a);
     }
+}
+
+// AssumptionCache::assumptions() of fv (scans it first): the live assume calls in registration order
+fn ac_assumptions(fv: i32, out: i32[>..<]&) {
+    ac_build(fv);
+    for a in ac_handles { if !is_dead(a) { out.push(a); } }
 }
 
 // AffectedValueCallbackVH::allUsesReplacedWith(NV)

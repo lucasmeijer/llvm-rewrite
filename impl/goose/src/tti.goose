@@ -161,6 +161,26 @@ fn tti_arith_cost(o: i64, ty: i32, kind: i64, args: const i32[:]) -> i64 {
     return base;
 }
 
+// getInstructionCost(U, Operands, CostKind) with Operands != U's operands (LoopUnroll's cost analysis passes
+// the simplified operands): while tti_ovr_inst = U, operand k of U reads as tti_ovr_ops[k] where the cost
+// model takes it from Operands (operand infos of arithmetic, GEP indices), not from U itself.
+var tti_ovr_inst: i32 = -1;
+var tti_ovr_ops: i32[>..<];
+fn tti_opnd(u: i32, k: i64) -> i32 {
+    if u == tti_ovr_inst && k < tti_ovr_ops.len { return tti_ovr_ops[k]; }
+    return op(u, k);
+}
+// getArithmeticInstrCost(Opcode, Ty, CostKind, getOperandInfo(Operands[0..]), Args = U's operands)
+fn tti_arith_cost_ov(o: i64, ty: i32, kind: i64, args: const i32[:], infos: const i32[:]) -> i64 {
+    let base = tti_base_arith_cost(o, ty, kind, args);
+    if tti_kind == TTI_X86 {
+        let o1 = if infos.len > 0 { tti_operand_info(infos[0]) } else { 0 };
+        let o2 = if infos.len > 1 { tti_operand_info(infos[1]) } else { 0 };
+        return x86_arith_cost(o, ty, kind, o1, o2, args.len, base);
+    }
+    return base;
+}
+
 fn tti_base_arith_cost(o: i64, ty: i32, kind: i64, args: const i32[:]) -> i64 {
     if o == OP_FDIV || o == OP_FREM || o == OP_SDIV || o == OP_SREM || o == OP_UDIV || o == OP_UREM { return TCC_EXPENSIVE; }
     if o == OP_AND || o == OP_OR {
@@ -317,7 +337,7 @@ fn tti_gep_cost(src_ty: i32, ptr: i32, g: i32, access_ty0: i32, kind: i64) -> i6
     var t = src_ty;            // the indexed type before the current index
     var target_ty: i32 = -1;
     for k in n {
-        let ix = op(g, k + 1);
+        let ix = tti_opnd(g, k + 1);
         // gep_type_iterator: the first index steps over the source type itself
         var cur = t;
         var is_struct = false;
@@ -438,8 +458,8 @@ fn tti_instruction_cost(u: i32, kind: i64) -> i64 {
         return tti_gep_cost(src, op(u, 0), u, at, kind);
     }
     if is_binary_op(o) || o == OP_FNEG {
-        if o == OP_FNEG { return tti_arith_cost(o, ty, kind, [op(u, 0)]); }
-        return tti_arith_cost(o, ty, kind, [op(u, 0), op(u, 1)]);
+        if o == OP_FNEG { return tti_arith_cost_ov(o, ty, kind, [op(u, 0)], [tti_opnd(u, 0)]); }
+        return tti_arith_cost_ov(o, ty, kind, [op(u, 0), op(u, 1)], [tti_opnd(u, 0), tti_opnd(u, 1)]);
     }
     if is_cast_op(o) || o == OP_PTRTOADDR {
         return tti_cast_cost_i(o, ty, vals[op(u, 0)].ty, kind, if is_i { u } else { -1 });

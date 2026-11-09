@@ -18,6 +18,7 @@ import calls;
 import instinfo;
 import gen_iids;
 import gen_x86costs;
+import gen_x86sched;
 import datalayout;
 import apint;
 import pm;
@@ -129,6 +130,14 @@ fn x86_parse_uint(s: const u8[:]) -> i64 {
 }
 
 // X86TargetMachine::getSubtargetImpl(F) + X86Subtarget::initSubtargetFeatures.
+var x86_tune_sched: i64 = -1;   // the TuneCPU's index in gen_x86sched.goose (selects the scheduling model)
+
+// ST->getSchedModel().LoopMicroOpBufferSize (the TuneCPU's model, gen_x86sched.goose)
+fn x86_loop_micro_op_buffer_size() -> i64 {
+    if x86_tune_sched < 0 { fatal("TargetTransformInfo: no scheduling model for the X86 tune CPU"); }
+    return X86SCHED_LOOP_UOP_BUFFER[x86_tune_sched] as i64;
+}
+
 fn x86_subtarget_init(triple: const u8[:], fv: i32) {
     // the triple: arch-vendor-os-environment
     var parts: i64[4] = [0, 0, 0, 0];
@@ -187,6 +196,8 @@ fn x86_subtarget_init(triple: const u8[:], fv: i32) {
     for w in 4 { x86_bits[w] = 0; }
     x86_apply_cpu(cpu, false);
     x86_apply_cpu(tune, true);
+    x86_tune_sched = -1;
+    for c in X86SCHED_CPUS.len { if X86SCHED_CPUS[c] == tune { x86_tune_sched = c; } }
     if x86_is64 { x86_apply_features("+64bit-mode,-32bit-mode,-16bit-mode,+sse2"); }
     else { x86_apply_features("-64bit-mode,+32bit-mode,-16bit-mode"); }
     if x86_soft_float { x86_apply_features("+soft-float"); }
