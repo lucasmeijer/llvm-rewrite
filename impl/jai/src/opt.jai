@@ -59,6 +59,7 @@
 #load "pass_misc_module.jai";
 #load "pass_inject_tli_mappings.jai";
 #load "pass_ee_instrument.jai";
+#load "pass_loop_sink.jai";
 #load "pass_reassociate.jai";
 #load "constraint_system.jai";
 #load "pass_constraint_elimination.jai";

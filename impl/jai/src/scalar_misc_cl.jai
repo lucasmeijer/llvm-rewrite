@@ -24,6 +24,8 @@ scalar_misc_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
         case "spec-exec-only-if-divergent-target"; se_cl.only_if_divergent_target = smisc_bool(name, value, has_value);
         case "callsite-splitting-duplication-threshold"; css_cl.duplication_threshold = smisc_int(name, value, has_value);
         case "disable-lower-comment-string"; lower_comment_string_cl.disable = smisc_bool(name, value, has_value);
+        case "sink-freq-percent-threshold"; ls_cl.sink_freq_percent_threshold = smisc_int(name, value, has_value);
+        case "max-uses-for-sinking"; ls_cl.max_uses_for_sinking = smisc_int(name, value, has_value);
         case; return false;
     }
     return true;
@@ -34,6 +36,7 @@ scalar_misc_takes_value :: (a: string) -> bool {
     n := a;
     if begins_with(n, "--") n = slice(n, 2, n.count - 2); else if begins_with(n, "-") n = slice(n, 1, n.count - 1); else return false;
     for string.["likely-branch-weight", "unlikely-branch-weight", "float2int-max-integer-bw", "spec-exec-max-speculation-cost",
-                "spec-exec-max-not-hoisted", "callsite-splitting-duplication-threshold"] if n == it return true;
+                "spec-exec-max-not-hoisted", "callsite-splitting-duplication-threshold",
+                "sink-freq-percent-threshold", "max-uses-for-sinking"] if n == it return true;
     return false;
 }

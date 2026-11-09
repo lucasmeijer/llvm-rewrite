@@ -308,7 +308,7 @@ Pass_Kind :: enum u8 {
     // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
     ANNOTATION2METADATA; ANNOTATION_REMARKS; FORCEATTRS; MEMPROF_REMOVE_INFO; RECOMPUTE_GLOBALSAA; LOWER_COMMENT_STRING;
-    INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN;
+    INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK;
 }
 
 Pass_Info :: struct {
@@ -480,6 +480,7 @@ PASS_TABLE :: Pass_Info.[
     .{"rel-lookup-table-converter", .MODULE, .REL_LOOKUP_TABLE_CONVERTER, false, .DOMTREE},
     .{"cg-profile", .MODULE, .CG_PROFILE, false, .DOMTREE},   // also cg-profile<in-lto-post-link>
     .{"alloc-token", .MODULE, .ALLOC_TOKEN, true, .DOMTREE},
+    .{"loop-sink", .FUNCTION, .LOOP_SINK, false, .DOMTREE},
     .{"ee-instrument", .FUNCTION, .EE_INSTRUMENT, true, .DOMTREE},   // also ee-instrument<...>
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
@@ -1196,6 +1197,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .ANNOTATION_REMARKS; return annotation_remarks_run(f);
         case .INJECT_TLI_MAPPINGS; return inject_tli_mappings_run(f);
         case .EE_INSTRUMENT; return ee_instrument_run(f, node.name);
+        case .LOOP_SINK; return loop_sink_run(f);
         case .REASSOCIATE; return reassociate_run(f);
         case .CONSTRAINT_ELIMINATION; return constraint_elimination_run(f);
         case .AGGRESSIVE_INSTCOMBINE; return aggressive_instcombine_run(f);
