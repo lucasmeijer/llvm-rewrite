@@ -48,6 +48,8 @@ import dbgutil;
 import lvi;
 import cvp;
 import jt;
+import bpi;
+import bfi;
 import gvn;
 import dse;
 import memcpyopt;
@@ -795,6 +797,9 @@ fn invalidate_function(fv: i32, preserved: u32) {
     if (preserved & (1 << A_SCEV)) == 0 || (preserved & (1 << A_DOMTREE)) == 0 || (preserved & (1 << A_LOOPS)) == 0 { scev_invalidate(fv); }
     // LazyValueInfo::invalidate: only when not preserved (its AssumptionCache is never invalidated)
     if (preserved & (1 << A_LVI)) == 0 { lvi_invalidate(); }
+    // BranchProbabilityInfo / BlockFrequencyInfo::invalidate: kept when preserved or when the CFG analyses are
+    if (preserved & (1 << A_BPI)) == 0 && (preserved & PA_CFG) != PA_CFG { bpi_invalidate(); }
+    if (preserved & (1 << A_BFI)) == 0 && (preserved & PA_CFG) != PA_CFG { bfi_invalidate(); }
 }
 
 fn require_analysis(fv: i32, a: i64) {
@@ -806,6 +811,8 @@ fn require_analysis(fv: i32, a: i64) {
     else if a == A_AA { aa_begin(fv); }
     else if a == A_SCEV { scev_get(fv); }
     else if a == A_LVI { lvi_get(fv); }
+    else if a == A_BPI { bpi_get(fv); }
+    else if a == A_BFI { bfi_get(fv); }
 }
 
 // Passes whose LLVM counterpart asks for TargetIRAnalysis (directly or through AssumptionAnalysis) before it
@@ -860,6 +867,8 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_MEMCPYOPT => { return memcpyopt_run(fv); },
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
         P_PRINT_LVI => { lvi_print(fv); return PA_ALL; },
+        P_PRINT_BPI => { bpi_print(fv); return PA_ALL; },
+        P_PRINT_BFI => { bfi_print(fv); return PA_ALL; },
         P_CVP => { return cvp_run(fv); },
         P_JUMP_THREADING => { return jump_threading_run(fv, (pnodes[n].arg as i64) - 1); },
         P_VERIFY_SCEV => { scev_get(fv); return PA_ALL; },     // ScalarEvolution::verify reports only mismatches

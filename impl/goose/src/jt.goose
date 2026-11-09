@@ -1533,8 +1533,8 @@ fn jt_thread_through_two_basic_blocks(ppbb: i32, pbb: i32, bb: i32, succ: i32) {
     let nbb = create_block_before(fv, pbb, jt_name_plus(pbb, ".thread"));
     block_move_after(nbb, pbb);
     if have_bfi {
-        let f = bf_mul(bfi_get(ppbb), bpi_edge_prob_to(ppbb, pbb));
-        bfi_set(nbb, f);
+        let f = bf_mul(bfi_freq(ppbb), bpi_edge_prob_to(ppbb, pbb));
+        bfi_set_freq(nbb, f);
     }
     let s = VM_PASS0;
     vm_clear(s);
@@ -1584,8 +1584,8 @@ fn jt_thread_edge(bb: i32, preds: const i32[:], succ: i32) {
     let nbb = create_block_before(fv, bb, jt_name_plus(bb, ".thread"));
     block_move_after(nbb, pbb);
     if have_bfi {
-        let f = bf_mul(bfi_get(pbb), bpi_edge_prob_to(pbb, bb));
-        bfi_set(nbb, f);
+        let f = bf_mul(bfi_freq(pbb), bpi_edge_prob_to(pbb, bb));
+        bfi_set_freq(nbb, f);
     }
     let s = VM_PASS0;
     vm_clear(s);
@@ -1622,7 +1622,7 @@ fn jt_split_block_preds(bb: i32, preds: const i32[:], suffix: const u8[:]) -> i3
             for x in fm_bb { if x == p { seen = true; } }
             if seen { continue; }
             fm_bb.push(p);
-            fm_f.push(bf_mul(bfi_get(p), bpi_edge_prob_to(p, bb)));
+            fm_f.push(bf_mul(bfi_freq(p), bpi_edge_prob_to(p, bb)));
         }
     }
     var nbbs: i32[>..<] = [];
@@ -1646,7 +1646,7 @@ fn jt_split_block_preds(bb: i32, preds: const i32[:], suffix: const u8[:]) -> i3
             ups.push(DTUpdate { kind: DT_INSERT, from: p, to: nb });
             if have_bfi { for j in fm_bb.len { if fm_bb[j] == p { f = bf_add(f, fm_f[j]); } } }
         }
-        if have_bfi { bfi_set(nb, f); }
+        if have_bfi { bfi_set_freq(nb, f); }
     }
     dtu_apply_updates_permissive(ups);
     return nbbs[0];
@@ -1662,10 +1662,10 @@ fn jt_does_block_have_profile_data(bb: i32) -> bool {
 // updateBlockFreqAndEdgeWeight
 fn jt_update_block_freq_and_edge_weight(pbb: i32, bb: i32, nbb: i32, succ: i32, have_bfi: bool, have_bpi: bool, has_profile: bool) {
     if !have_bfi { return; }
-    let orig = bfi_get(bb);
-    let nf = bfi_get(nbb);
+    let orig = bfi_freq(bb);
+    let nf = bfi_freq(nbb);
     let newf = bf_sub(orig, nf);
-    bfi_set(bb, newf);
+    bfi_set_freq(bb, newf);
     var sfreq: u64[>..<] = [];
     let t = block_terminator(bb);
     for k in term_nsucc(t) {
@@ -1894,7 +1894,7 @@ fn jt_unfold_select_instr(pred: i32, bb: i32, si: i32, siuse: i32, idx: i64) {
     if jt_get_bfi() {
         if tw + fw == 0 { tw = 1; fw = 1; }
         let p = bp_get(tw, tw + fw);
-        bfi_set(nbb, bf_mul(bfi_get(pred), p));
+        bfi_set_freq(nbb, bf_mul(bfi_freq(pred), p));
     }
     inst_erase_from_parent(si);
     let ups: DTUpdate[2] = [DTUpdate { kind: DT_INSERT, from: nbb, to: bb }, DTUpdate { kind: DT_INSERT, from: pred, to: nbb }];
@@ -2008,9 +2008,9 @@ fn jt_try_to_unfold_select_in_curr_bb(bb: i32) -> bool {
             let bp: u32[2] = [tp, fp];
             if have_bpi { bpi_set_edge_probability(bb, bp); }
             if have_bfi {
-                let orig = bfi_get(bb);
-                bfi_set(nbb, bf_mul(orig, tp));
-                bfi_set(split_bb, orig);
+                let orig = bfi_freq(bb);
+                bfi_set_freq(nbb, bf_mul(orig, tp));
+                bfi_set_freq(split_bb, orig);
             }
         }
         inst_erase_from_parent(si);
