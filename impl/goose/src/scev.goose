@@ -1919,6 +1919,11 @@ recursive fn sc_get_size_of(int_ty: i32, t: i32) -> i32 {
     return sc_get_constant_ty(int_ty, dl_alloc_size(t) as u64, false);
 }
 recursive fn sc_get_store_size_of(int_ty: i32, t: i32) -> i32 {
+    if ty_kind(t) == TK_SVEC {
+        // getStoreSizeOfExpr -> getSizeOfExpr(IntTy, TypeSize): vscale * the known minimum store size
+        let r = sc_get_constant_ty(int_ty, dl_store_size(t) as u64, false);
+        return sc_mul(sc_get_vscale(int_ty), r);
+    }
     if sc_type_has_scalable(t) { fatal("ScalarEvolution: store size of a scalable type is not ported"); }
     return sc_get_constant_ty(int_ty, dl_store_size(t) as u64, false);
 }

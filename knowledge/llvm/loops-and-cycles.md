@@ -180,6 +180,18 @@ Verified with the jai port (impl/jai/src/pass_licm.jai) on Transforms/LICM and s
   (ScalarEvolution::getRangeRef); a dominating `icmp eq %p, null` branch doesn't count
   (`tests/e2e/O2/test-suite/SingleSource/Benchmarks/CoyoteBench/lpbench.ll`, `loop-mssa(licm),print<scalar-evolution>`).
 
+- LoopDeletion's `isLoopDead` uses `Function::mustProgress()`, which is `mustprogress || willreturn`: a `willreturn`
+  function's no-op loop nest is deleted even with unpredictable trip counts (LoopDeletion/noop-loops-with-subloops.ll,
+  pr173357.ll; verified with the Goose port). `Instruction::isDroppable` (assume, pseudoprobe and
+  `llvm.experimental.noalias.scope.decl`) lets those calls stay in a deleted loop (LoopDeletion/noalias.ll).
+- LoopIdiom's MemmoveVerifier calls `GetPointerBaseWithConstantOffset` with its default AllowNonInbounds = true
+  (LoopIdiom/memmove-tbaa.ll, basic.ll). `Value::replaceUsesOutsideBlock` also rewrites the location operands of
+  debug records outside the block (replaceDbgUsesOutsideBlock; LoopIdiom/X86/*-debuginfo.ll under debugify).
+- The shift-until-bittest freeze of BitPos is inserted with `getInsertionPointAfterDef()`: for an instruction that is
+  `std::next(It)` without the head bit (the freeze adopts the next instruction's debug records), for a PHI the block's
+  `getFirstInsertionPt()` (head bit); for a non-instruction `getFirstNonPHIOrDbgOrAlloca()` of the entry block, which
+  clears the head bit.
+
 ## LoopAccessAnalysis, LoopLoadElimination, LoopDistribute, LoopVersioning (verified by the Jai port)
 
 - `GEPOperator::hasNoUnsignedSignedWrap()` is true for `inbounds` GEPs; LAA's isNoWrap relies on it, so an
@@ -196,6 +208,14 @@ Verified with the jai port (impl/jai/src/pass_licm.jai) on Transforms/LICM and s
   exact backedge-taken count, *not* the symbolic max); LoopVersioning uses the LAI's own predicate.
 - `shouldOptimizeForSize(BB, PSI, BFI)` is true for an `optsize`/`minsize` function even without a
   ProfileSummaryInfo: LLE then refuses to version (LoopLoadElim/opt-size.ll).
+- `MemoryDepChecker::shouldRetryWithRuntimeChecks()` is `ShouldRetryWithRuntimeChecks && Status ==
+  PossiblySafeWithRtChecks`: a loop with an InvariantUnsafe or IndirectUnsafe dependence keeps its dependences and
+  reports them instead of retrying with run-time checks (LoopAccessAnalysis/invariant-dep-same-ptr.ll,
+  loops-with-indirect-reads-and-writes.ll). `MaxSafeVectorWidthInBits` starts at `-1U` (32 bits; the printer's
+  "maximum safe vector width" appears when it is not UINT_MAX), `MinDepDistBytes` is reset to `-1` (64 bits) by
+  areDepsSafe. areDepsSafe walks each class of DepCands from its leader (`findLeader`), not from the checked access.
+- `getStoreSizeOfExpr` of a scalable vector is `vscale * <known minimum store size>`
+  (LoopAccessAnalysis/bounded-access-pattern.ll, runtime-pointer-checking-insert-typesize.ll).
 - `addRuntimeChecks` defaults to HoistRuntimeChecks = false; LoopVersioning (LLE, LoopDistribute) never hoists
   bounds to the outer loop, only LoopVectorize passes the option.
 

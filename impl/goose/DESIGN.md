@@ -473,6 +473,12 @@ LLVM's constructor does), `scev_invalidate(fv)` drops it, and a different functi
 - **Predicates**: compare and wrap predicates uniqued in `sc_preds`; ExitLimits and ExitNotTakenInfos keep runs
   of predicate ids in `sc_predl`.
 - **LoopGuards**: an id into `sc_guards`; its RewriteMap and NotEqual set are hash maps keyed by the id.
+- **Union predicates and PSE**: a SCEVUnionPredicate is an immutable run of predicate ids (`su_runs`/`su_pool`, id 0
+  = empty; `su_add` returns a new union, as PSE::addPredicate rebuilds its union). A PredicatedScalarEvolution is
+  an id into `pses` (pse.goose); its RewriteMap is a per-PSE entry list plus one HMap keyed by (pse, SCEV), so a
+  copy (LoopLoadElimination's) is a list walk. LoopAccessAnalysis keeps one LoopAccessInfo at a time in globals
+  (laa.goose); MemAccessInfo is `ptr * 2 + isWrite`; EquivalenceClasses are linked node lists with LLVM's
+  append-on-union member order.
 - **Keeping a cached instance valid** (scev_update.goose): the value-handle callbacks (§5), forgetLoop /
   forgetTopmostLoop / forgetValue / forgetLcssaPhiWithNewPredecessor, and forgetMemoizedResults over a list
   (`su_forget_memoized`, hash-set based). Dispositions carry a per-node disposition generation on top of the node

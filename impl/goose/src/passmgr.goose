@@ -44,6 +44,8 @@ import indvars;
 import loop_deletion;
 import loop_instsimplify;
 import loop_simplifycfg;
+import loop_idiom;
+import laa;
 import ivusers;
 import loopnest;
 import simplifycfg;
@@ -131,6 +133,7 @@ let P_EARLY_CSE = 170;     // arg: 1 = memssa
 let P_GVN = 171;           // arg: gvn<...> options (gvn.goose gvn_opt)
 let P_DSE = 190;
 let P_MEMCPYOPT = 191;
+let P_PRINT_ACCESS_INFO = 195;   // arg: AllowPartial
 let P_REASSOCIATE = 260;
 let P_CONSTRAINT_ELIMINATION = 261;
 let P_AGGRESSIVE_INSTCOMBINE = 262;
@@ -153,6 +156,7 @@ let P_INDVARS = 207;
 let P_LOOP_DELETION = 210;
 let P_LOOP_INSTSIMPLIFY = 211;
 let P_LOOP_SIMPLIFYCFG = 212;
+let P_LOOP_IDIOM = 213;
 let P_PRINT_IV_USERS = 208;
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
@@ -211,6 +215,7 @@ let PASS_TABLE: const u8[:][] = [
     "l:loop-deletion:210:0",
     "l:loop-instsimplify:211:0",
     "l:loop-simplifycfg:212:0",
+    "l:loop-idiom:213:0",
     "l:print<iv-users>:208:1",
 ];
 
@@ -478,6 +483,15 @@ recursive fn parse_function_elem(e: i32) -> i32 {
         }
         let p: i32 = if starts_with(name, "require<") { P_REQUIRE as i32 } else { P_INVALIDATE as i32 };
         return new_pnode(PK_PASS, p, a as i32, true, pelems[e].name);
+    }
+    if is_param_name(name, "print<access-info>") {
+        var arg: i32 = 0;
+        if name != "print<access-info>" {
+            let ps = name[19..name.len - 1];
+            if ps == "allow-partial" { arg = 1; }
+            else { perr_pipeline(str("invalid LoopAccessInfoPrinterPass pass parameter '", ps, "'")); }
+        }
+        return new_pnode(PK_PASS, P_PRINT_ACCESS_INFO as i32, arg, true, pelems[e].name);
     }
     if is_param_name(name, "print<memoryssa>") {
         var arg: i32 = 0;
@@ -1045,6 +1059,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_AGGRESSIVE_INSTCOMBINE => { return aggressive_instcombine_run(fv); },
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
         P_PRINT_LVI => { lvi_print(fv); return PA_ALL; },
+        P_PRINT_ACCESS_INFO => { print_access_info(fv, pnodes[n].arg == 1); ap_pool_reset(); return PA_ALL; },
         P_PRINT_BPI => { bpi_print(fv); return PA_ALL; },
         P_PRINT_BFI => { bfi_print(fv); return PA_ALL; },
         P_CVP => { return cvp_run(fv); },
@@ -1077,6 +1092,7 @@ fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
         P_LOOP_DELETION => { let pa = loop_deletion_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
         P_LOOP_INSTSIMPLIFY => { let pa = loop_instsimplify_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
         P_LOOP_SIMPLIFYCFG => { let pa = loop_simplifycfg_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
+        P_LOOP_IDIOM => { let pa = loop_idiom_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
         P_INDVARS => {
             let pa = indvars_pass_run(l, lpm_use_mssa);
             ap_pool_reset();

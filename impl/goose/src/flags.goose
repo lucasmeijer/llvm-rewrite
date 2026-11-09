@@ -86,6 +86,12 @@ let KNOWN_FLAGS: const u8[:][] = [
     "enable-poison-arg-attr-prop", "disable-nounwind-inference", "disable-nofree-inference",   // function-attrs
     "disable-thinlto-funcattrs",
     "abort-on-max-devirt-iterations-reached",            // the CGSCC devirt<N> wrapper
+    "disable-loop-idiom-all", "disable-loop-idiom-memset", "disable-loop-idiom-memcpy",   // loop-idiom
+    "disable-loop-idiom-strlen", "disable-loop-idiom-wcslen", "disable-loop-idiom-hashrecognize",
+    "use-lir-code-size-heurs", "loop-idiom-force-memset-pattern-intrinsic",
+    "memory-check-merge-threshold", "max-dependences", "enable-mem-access-versioning",   // loop-access analysis
+    "store-to-load-forwarding-conflict-detection", "max-forked-scev-depth", "laa-speculate-unit-stride",
+    "hoist-runtime-checks", "runtime-memory-check-threshold", "force-vector-width", "force-vector-interleave",
     "run-twice",                                         // no-op: optdriver.cpp only reads it on the legacy-PM path
     "goose-ic-lenient",
     "goose-scev-trace",                                  // development only: ScalarEvolution value map events                                  // development only: unported InstCombine visitors do nothing

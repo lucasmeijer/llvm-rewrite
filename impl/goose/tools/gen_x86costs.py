@@ -122,7 +122,15 @@ for m in re.finditer(r'list<SubtargetFeature> (\w+) =\s*(.*?);', pf, re.S):
 
 def proc(name):
     m = re.search(r'def\s*:\s*Proc(?:Model)?<"' + re.escape(name) + r'",\s*(?:\w+,\s*)?(.*?)>\s*;', td, re.S)
-    body = m.group(1)
+    if m is None:
+        # foreach P = ["a", "b", ...] in { def : ProcModel<P, Model, Features, Tuning>; }
+        for fm in re.finditer(r'foreach P = \[([^\]]*)\] in \{\s*def\s*:\s*Proc(?:Model)?<P,\s*(?:\w+,\s*)?(.*?)>\s*;\s*\}', td, re.S):
+            if name in [x.strip().strip('"') for x in fm.group(1).split(',')]:
+                m = fm
+                break
+        body = m.group(2)
+    else:
+        body = m.group(1)
     # two lists: features, tuning
     parts = []; depth = 0; cur = ''
     for ch in body:
@@ -138,11 +146,27 @@ def proc(name):
     return ev(parts[0]), ev(parts[1])
 
 
-CPUS = ['generic', 'i586', 'x86-64', 'x86-64-v2', 'x86-64-v3', 'x86-64-v4']
+CPUS = ['generic', 'i586', 'x86-64', 'x86-64-v2', 'x86-64-v3', 'x86-64-v4',
+        # Intel/AMD CPUs used by -mcpu in the test corpus (feature and tuning lists; no scheduling models)
+        'core2', 'nehalem', 'corei7', 'westmere', 'sandybridge', 'corei7-avx', 'ivybridge', 'core-avx-i', 'haswell',
+        'core-avx2', 'broadwell', 'skylake', 'skylake-avx512', 'skx', 'cascadelake', 'cooperlake', 'cannonlake',
+        'icelake-client', 'icelake-server', 'tigerlake', 'alderlake', 'sapphirerapids', 'knl', 'knm',
+        'bonnell', 'atom', 'silvermont', 'slm', 'goldmont', 'goldmont-plus', 'tremont',
+        'btver1', 'btver2', 'bdver1', 'bdver2', 'bdver3', 'bdver4', 'znver1', 'znver2', 'znver3', 'znver4', 'znver5']
 cpu_rows = []
+skipped = []
 for c in CPUS:
-    f, t = proc(c)
-    cpu_rows.append((c, [idx[x] for x in f], [idx[x] for x in t]))
+    try:
+        f, t = proc(c)
+        row = (c, [idx[x] for x in f], [idx[x] for x in t])
+    except KeyError:
+        # a list built with !listremove & co. (not evaluated), or a feature without a name (ProcIntelAtom):
+        # the CPU stays unsupported (fails loudly)
+        skipped.append(c)
+        continue
+    cpu_rows.append(row)
+CPUS = [c for c in CPUS if c not in skipped]
+if skipped: print('CPUs skipped:', ' '.join(skipped), file=sys.stderr)
 
 # ---- vector MVTs
 vts = [m.group(1) for m in re.finditer(r'\ndef (v\d+(?:i|f|bf)\d+)\s*:', open(VT).read())]

@@ -48,7 +48,7 @@ lib/IR/Attributes.cpp 0.2
 lib/Analysis/MemorySSA.cpp 0.75  # + the mutation API and verifier; no loop constructor, DOT output
 lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95  # manual: all but visitFDiv's sin/cos -> tan (emitUnaryFloatFnCall, loud)
 lib/Transforms/Utils/SCCPSolver.cpp 0.7
-lib/Transforms/Utils/LoopUtils.cpp 0.2  # + rewriteLoopExitValues, hasHardUserWithinLoop, canLoopBeDeleted, isAlmostDeadIV (indvars.goose)
+lib/Transforms/Utils/LoopUtils.cpp 0.3  # + deleteDeadLoop, breakLoopBackedge, getBooleanLoopAttribute, isMustProgress (loop_utils.goose); + rewriteLoopExitValues, hasHardUserWithinLoop, canLoopBeDeleted, isAlmostDeadIV (indvars.goose)
 lib/IR/ConstantRange.cpp 0.7
 lib/IR/Metadata.cpp 0.5
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
@@ -62,7 +62,7 @@ lib/Analysis/IVDescriptors.cpp 0.05
 lib/IR/ConstantFold.cpp 0.8
 lib/Analysis/MemorySSAUpdater.cpp 0.9  # manual: all but updateForClonedLoop / updateExitBlocksForClonedLoop (heuristic 0.99)
 lib/Support/KnownBits.cpp 0.7
-lib/Analysis/LoopInfo.cpp 0.45
+lib/Analysis/LoopInfo.cpp 0.55  # + LoopInfo::erase / UnloopUpdater (loop_utils.goose)
 lib/IR/DataLayout.cpp 0.2
 lib/Analysis/GlobalsModRef.cpp 0.85
 lib/Analysis/AliasAnalysis.cpp 0.9
@@ -105,7 +105,7 @@ lib/Analysis/ValueLatticeUtils.cpp 1  # manual: renamed: sc_can_track_* in sccp.
 lib/Analysis/DomConditionCache.cpp 1
 lib/Transforms/InstCombine/InstCombineSelect.cpp 0.95
 lib/Transforms/InstCombine/InstCombinePHI.cpp 0.9
-lib/Analysis/VectorUtils.cpp 0.15
+lib/Analysis/VectorUtils.cpp 0.16  # + getVectorIntrinsicIDForCall (laa.goose)
 lib/Analysis/MemoryBuiltins.cpp 0.55
 lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
@@ -113,12 +113,12 @@ lib/IR/EHPersonalities.cpp 0.6  # + colorEHFunclets (mustexec.goose)
 lib/Transforms/Utils/Debugify.cpp 0.45  # manual: synthetic mode whole (debugify, check-debugify, -enable-debugify); no original-debuginfo mode, -debugify-each, stats export
 lib/Target/X86/X86InstCombineIntrinsic.cpp 1  # manual: instCombineIntrinsic (ic_x86_intr.goose, simplifyTernarylogic generated) and the SimplifyDemanded hooks (ic_x86.goose)
 lib/Transforms/Utils/SimplifyLibCalls.cpp 0.97  # manual: all of LibCallSimplifier and FortifiedLibCallSimplifier (the fortified optimizers are one dispatch, fortified_optimize_call); left: shouldOptimizeForSize with a profile summary (-pgso), optimizeStringLength for index widths over 64 bits (heuristic 0.94)
-lib/Transforms/Utils/BuildLibCalls.cpp 0.9  # manual: inferNonMandatoryLibFuncAttrs whole (generated), getOrInsertLibFunc, isLibFuncEmittable, hasFloatFn/getFloatFn, emitLibCall and the emit* helpers LibCallSimplifier uses (hot/cold new variants in one emit_hot_cold_new); emitCalloc (dse.goose); left: emitWcsLen, setArgExtAttr/setRetExtAttr (non-x86 targets, loud), markRegisterParameterAttributes (loud) (heuristic 0.58)
+lib/Transforms/Utils/BuildLibCalls.cpp 0.9  # manual: inferNonMandatoryLibFuncAttrs whole (generated), getOrInsertLibFunc, isLibFuncEmittable, hasFloatFn/getFloatFn, emitLibCall and the emit* helpers LibCallSimplifier uses (hot/cold new variants in one emit_hot_cold_new); emitCalloc (dse.goose); left: setArgExtAttr/setRetExtAttr (non-x86 targets, loud), markRegisterParameterAttributes (loud) (heuristic 0.58)
 lib/Transforms/IPO/InferFunctionAttrs.cpp 1
 
 # --- L1.licm (2026-11)
 lib/Transforms/Scalar/LICM.cpp 0.97  # manual: all but optimization remarks and sinking calls into funclets (heuristic 1.00)
-lib/Analysis/MustExecute.cpp 0.4  # ICFLoopSafetyInfo only; no SimpleLoopSafetyInfo printer, MustBeExecutedContextExplorer
+lib/Analysis/MustExecute.cpp 0.45  # ICFLoopSafetyInfo, SimpleLoopSafetyInfo::computeLoopSafetyInfo (loop_idiom.goose); no SimpleLoopSafetyInfo printer, MustBeExecutedContextExplorer
 lib/Analysis/AliasSetTracker.cpp 0.9  # no add() of memset/memtransfer/va_arg/argmemonly calls (LICM adds loads/stores), print
 lib/Analysis/InstructionPrecedenceTracking.cpp 0.6  # no validate()
 lib/IR/DebugLoc.cpp 0.1  # getMergedLocations
@@ -149,3 +149,5 @@ lib/Transforms/Scalar/ConstraintElimination.cpp 0.9  # all but generateReproduce
 lib/Transforms/Utils/ScalarEvolutionExpander.cpp 0.85  # manual: no predicate expansion (expandCodeForPredicate, generateOverflowCheck, expand{Compare,Wrap,Union}Predicate) and no post-inc expansion (normalizeForPostIncUse fails loudly) (heuristic 0.93)
 lib/Analysis/IVUsers.cpp 0.8  # manual: print<iv-users> path whole; not getExpr/getStride/findAddRecForLoop/IVStrideUse callbacks (LSR) (heuristic 0.95)
 lib/Analysis/ScalarEvolutionNormalization.cpp 1  # manual: NormalizeDenormalizeRewriter is scev_create.goose's RW_NORMALIZE (heuristic 0.6)
+lib/Analysis/HashRecognize.cpp 0.85  # all but the print<hash-recognize> printer
+lib/Analysis/LoopAccessAnalysis.cpp 0.9  # all but sortPtrAccesses, LoopAccessInfoManager caching/clear, getPointersDiff of vectors

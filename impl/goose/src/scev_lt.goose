@@ -82,6 +82,15 @@ recursive fn sc_rw_visit_unknown_ext(rw: RW&, s: i32) -> i32 {
 }
 
 recursive fn sc_convert_to_addrec_with_preds_unknown(rw: RW&, s: i32) -> i32 {
+    // With a Pred (a union predicate, rw.becond >= 0): an `Equal predicate: s == X` rewrites s to X
+    if rw.becond >= 0 {
+        let u = rw.becond;
+        for k in su_n(u) {
+            let p = su_get(u, k);
+            let x = sc_preds[p];
+            if x.kind as i64 == PK_COMPARE && x.lhs == s && x.pred as i64 == P_EQ { return x.rhs; }
+        }
+    }
     let v = sc_value(s);
     if !sc_is_phi_value(v) { return s; }
     let r = sc_create_addrec_from_phi_with_casts(s);
@@ -98,9 +107,14 @@ recursive fn sc_rw_predicate_ext(rw: RW&, s: i32) -> i32 {
         let step = sc_get_step_recurrence(o);
         let ty = sc_ty(s);
         let f = if k == SC_ZEXT { IW_NUSW } else { IW_NSSW };
-        sc_tpreds.push(sc_get_wrap_predicate(o, f));
-        if k == SC_ZEXT { return sc_addrec2(sc_get_zero_extend(sc_op(o, 0), ty, 0), sc_get_sign_extend(step, ty, 0), rw.l, sc_flags(o)); }
-        return sc_addrec2(sc_get_sign_extend(sc_op(o, 0), ty, 0), sc_get_sign_extend(step, ty, 0), rw.l, sc_flags(o));
+        // addOverflowAssumption: NewPreds collects it; with only a Pred it must already be implied
+        let wp = sc_get_wrap_predicate(o, f);
+        var ok = true;
+        if rw.becond >= 0 { ok = su_implies(rw.becond, wp); } else { sc_tpreds.push(wp); }
+        if ok {
+            if k == SC_ZEXT { return sc_addrec2(sc_get_zero_extend(sc_op(o, 0), ty, 0), sc_get_sign_extend(step, ty, 0), rw.l, sc_flags(o)); }
+            return sc_addrec2(sc_get_sign_extend(sc_op(o, 0), ty, 0), sc_get_sign_extend(step, ty, 0), rw.l, sc_flags(o));
+        }
     }
     if k == SC_ZEXT { return sc_get_zero_extend(o, sc_ty(s), 0); }
     return sc_get_sign_extend(o, sc_ty(s), 0);
@@ -360,3 +374,129 @@ recursive fn sc_how_many_greater_thans(lhs: i32, rhs: i32, l: i32, signed: bool,
     let pat, np = sc_preds_from_lin(pm);
     return el_make(bec, cmax, smax, false, pat, np);
 }
+
+// ---------------------------------------------------------------------------------------------
+// SCEVUnionPredicate (immutable runs of predicate ids in su_pool; id 0 is the empty union),
+// SCEVComparePredicate / SCEVWrapPredicate implies and isAlwaysTrue, getImpliedFlags, rewriteUsingPredicate.
+
+struct SURun { at: i32, n: i32 }
+var su_runs: SURun[>..];
+var su_pool: i32[>..];
+
+recursive fn su_n(u: i32) -> i64 { su_runs[u].n as i64 }
+recursive fn su_get(u: i32, k: i64) -> i32 { su_pool[(su_runs[u].at as i64) + k] }
+// a new union from the run on su_tmp[from..]
+var su_tmp: i32[>..<];
+recursive fn su_make(from: i64) -> i32 {
+    let at = su_pool.len as i32;
+    for k in from..su_tmp.len { su_pool.push(su_tmp[k]); }
+    su_runs.push(SURun { at: at, n: (su_tmp.len - from) as i32 });
+    return (su_runs.len - 1) as i32;
+}
+recursive fn su_empty() -> i32 {
+    if su_runs.len == 0 { su_runs.push(SURun { at: 0, n: 0 }); }
+    return 0;
+}
+
+// SCEVWrapPredicate::getImpliedFlags(AR, SE)
+recursive fn sc_wrap_implied_flags(ar: i32) -> i64 {
+    var f: i64 = 0;
+    let sf = sc_flags(ar);
+    if (sf & SF_NSW) == SF_NSW { f = IW_NSSW; }
+    if (sf & SF_NUW) == SF_NUW {
+        let st = sc_get_step_recurrence(ar);
+        if sc_is_const(st) && !ap_is_neg(sc_ap(st)) { f |= IW_NUSW; }
+    }
+    return f;
+}
+
+// SCEVPredicate::isAlwaysTrue
+recursive fn sc_pred_always_true(p: i32) -> bool {
+    let x = sc_preds[p];
+    if x.kind as i64 == PK_COMPARE { return false; }
+    var f = x.pred as i64;
+    if (sc_flags(x.lhs) & SF_NSW) == SF_NSW { f &= ~IW_NSSW; }
+    return f == 0;
+}
+recursive fn su_always_true(u: i32) -> bool {
+    for k in su_n(u) { if !sc_pred_always_true(su_get(u, k)) { return false; } }
+    return true;
+}
+
+// SCEVPredicate::implies(N) for a compare or wrap predicate a
+recursive fn sc_pred_implies(a: i32, n: i32) -> bool {
+    let x = sc_preds[a];
+    let y = sc_preds[n];
+    if x.kind as i64 == PK_COMPARE {
+        if y.kind as i64 != PK_COMPARE { return false; }
+        if x.pred as i64 != P_EQ { return false; }
+        return y.lhs == x.lhs && y.rhs == x.rhs;
+    }
+    if y.kind as i64 != PK_WRAP { return false; }
+    let flags = x.pred as i64;
+    if (flags | (y.pred as i64)) != flags { return false; }
+    if y.lhs == x.lhs { return true; }
+    if flags != IW_NSSW && flags != IW_NUSW { return false; }
+    let ar = x.lhs;
+    let oar = y.lhs;
+    var start = sc_op(ar, 0);
+    var ostart = sc_op(oar, 0);
+    let sp = sc_is_ptr_ty(sc_ty(start));
+    if sp != sc_is_ptr_ty(sc_ty(ostart)) { return false; }
+    if sp && sc_ty(start) != sc_ty(ostart) { return false; }
+    if sc_type_bits(sc_ty(ar)) > sc_type_bits(sc_ty(oar)) { return false; }
+    var step = sc_get_step_recurrence(ar);
+    var ostep = sc_get_step_recurrence(oar);
+    if !sc_is_known_positive(step) || !sc_is_known_positive(ostep) { return false; }
+    let wt = if sc_type_bits(sc_ty(step)) >= sc_type_bits(sc_ty(ostep)) { sc_ty(step) } else { sc_ty(ostep) };
+    step = sc_get_noop_or_zero_extend(step, wt);
+    ostep = sc_get_noop_or_zero_extend(ostep, wt);
+    let nuw = flags == IW_NUSW;
+    ostart = if nuw { sc_get_noop_or_zero_extend(ostart, wt) } else { sc_get_noop_or_sign_extend(ostart, wt) };
+    start = if nuw { sc_get_noop_or_zero_extend(start, wt) } else { sc_get_noop_or_sign_extend(start, wt) };
+    let pr = if nuw { P_ULE } else { P_SLE };
+    return sc_is_known_predicate(pr, ostep, step) && sc_is_known_predicate(pr, ostart, start);
+}
+
+// SCEVUnionPredicate::implies(N) for a single predicate N
+recursive fn su_implies(u: i32, n: i32) -> bool {
+    for k in su_n(u) { if sc_pred_implies(su_get(u, k), n) { return true; } }
+    let y = sc_preds[n];
+    if y.kind as i64 != PK_WRAP { return false; }
+    let l = sc_loop(y.lhs);
+    for k in su_n(u) {
+        let p = su_get(u, k);
+        let x = sc_preds[p];
+        if x.kind as i64 != PK_WRAP { continue; }
+        let r = sc_rewrite_using_predicate(x.lhs, l, u);
+        if !sc_is_addrec(r) { continue; }
+        if sc_pred_implies(sc_get_wrap_predicate(r, x.pred as i64), n) { return true; }
+    }
+    return false;
+}
+
+// SCEVUnionPredicate::add(N): the new union (on top of the run of u)
+recursive fn su_add(u: i32, n: i32) -> i32 {
+    let check = su_n(u) < 16;
+    if check && su_implies(u, n) { return u; }
+    let b = su_tmp.len;
+    for k in su_n(u) {
+        let p = su_get(u, k);
+        if check && sc_pred_implies(n, p) { continue; }
+        su_tmp.push(p);
+    }
+    su_tmp.push(n);
+    let r = su_make(b);
+    su_tmp.resize(b);
+    return r;
+}
+
+// ScalarEvolution::rewriteUsingPredicate(S, L, Preds) with a union predicate
+recursive fn sc_rewrite_using_predicate(s: i32, l: i32, u: i32) -> i32 {
+    var rw = rw_new(RW_PREDICATE, l);
+    rw.becond = u;
+    return sc_rw_visit(rw, s);
+}
+
+// SCEVUnionPredicate::print
+recursive fn su_print(u: i32, depth: i64) { for k in su_n(u) { sc_print_predicate(su_get(u, k), depth); } }

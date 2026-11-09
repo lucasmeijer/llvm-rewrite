@@ -109,6 +109,8 @@ fn lu_boolean_loop_attr(l: i32, name: const u8[:]) -> bool {
     if vals[c].kind != VK_CINT { return false; }
     return !is_null_value(c);
 }
+// Loop::isLoopInvariant(V)
+fn lu_loop_invariant(l: i32, v: i32) -> bool { !is_inst(v) || !loop_contains(l, inst_parent(v)) }
 // hasMustProgress(L)
 fn lu_has_must_progress(l: i32) -> bool { lu_boolean_loop_attr(l, "llvm.loop.mustprogress") }
 

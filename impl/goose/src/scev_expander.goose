@@ -56,6 +56,7 @@ import scev_eval;
 import scev_btc;
 import scev_pred;
 import scev_update;
+import scev_lt;
 
 // cl::opt scev-cheap-expansion-budget
 fn sx_cheap_budget() -> i64 { flag_int("scev-cheap-expansion-budget", 4) }
@@ -1816,4 +1817,118 @@ fn sx_cleanup() {
         inst_erase_from_parent(i);
         k--;
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// expandCodeForPredicate / expandUnionPredicate / expandComparePredicate / expandWrapPredicate /
+// generateOverflowCheck (the predicate checks of LoopVersioning). `u` is a SCEVUnionPredicate (scev_lt.goose).
+
+// CreateExtractValue(Agg, {Idx}, Name) through the InstSimplifyFolder
+recursive fn sxb_extract_value(agg: i32, idx: i32, name: const u8[:]) -> i32 {
+    let ty = ty_field(vals[agg].ty, idx as i64);
+    let e = create_inst(OP_EXTRACTVALUE, ty, [agg]);
+    let at = ints.len as i32;
+    ints.push(idx);
+    insts[inst_of(e)].aux = at;
+    insts[inst_of(e)].naux = 1;
+    let q = sxf_begin();
+    let f = simplify_extractvalue(e, agg, q);
+    sxf_end();
+    if f >= 0 { drop_all_refs(e); val_set_dead(e); return f; }
+    return sxb_insert(e, name);
+}
+// CreateIntrinsic(ID, {Ty}, {A, B}, nullptr, Name) for a with.overflow intrinsic (struct result)
+recursive fn sxb_intrinsic2(id: i64, ovt: i32, a: i32, b: i32, name: const u8[:]) -> i32 { sxb_intrinsic(id, ovt, a, b, 2, name) }
+
+// expand(S, I)
+recursive fn sx_expand_at(s: i32, i: i32) -> i32 { sxb_set_before(i); return sx_expand(s); }
+
+// generateOverflowCheck(AR, Loc, Signed)
+recursive fn sx_generate_overflow_check(ar: i32, loc: i32, signed: bool) -> i32 {
+    let m = sc_out_preds.len;
+    let ec = sc_get_predicated_btc(sc_loop(ar), BTC_SYMBOLIC_MAX);
+    sc_out_preds.resize(m);
+    let step = sc_get_step_recurrence(ar);
+    let start = sc_op(ar, 0);
+    let arty = sc_ty(ar);
+    let src_bits = sc_type_bits(sc_ty(ec));
+    let dst_bits = sc_type_bits(arty);
+    sxb_set_before(loc);
+    let tcv = sx_expand_at(ec, loc);
+    let ty = ty_int(dst_bits);
+    let stepv = sx_expand_at(step, loc);
+    let negstepv = sx_expand_at(sc_get_negative(step, SF_ANY), loc);
+    let startv = sx_expand_at(start, loc);
+    let zero = c_int(ty_int(dst_bits), 0);
+    sxb_set_before(loc);
+    let stepcmp = sxb_icmp(P_SLT, stepv, zero, "");
+    let absstep = sxb_select(stepcmp, negstepv, stepv, "");
+    // ComputeEndCheck
+    var ttc = tcv;
+    let tb = ty_bits(vals[tcv].ty);
+    if tb < ty_bits(ty) { ttc = sxb_zext(tcv, ty, "", false); } else if tb > ty_bits(ty) { ttc = sxb_trunc(tcv, ty, "", false, false); }
+    let mul = sxb_intrinsic2(IID_umul_with_overflow, ty, absstep, ttc, "mul");
+    let mulv = sxb_extract_value(mul, 0, "mul.result");
+    let ofmul = sxb_extract_value(mul, 1, "mul.overflow");
+    var add: i32 = -1;
+    var sub: i32 = -1;
+    let need_pos = !sc_is_known_negative(step);
+    let need_neg = !sc_is_known_positive(step);
+    if ty_kind(arty) == TK_PTR {
+        let negmul = sxb_binop(OP_SUB, c_int(vals[mulv].ty, 0), mulv, false, false, "");
+        if need_pos { add = sxb_ptr_add(startv, mulv, "", 0); }
+        if need_neg { sub = sxb_ptr_add(startv, negmul, "", 0); }
+    } else {
+        if need_pos { add = sxb_binop(OP_ADD, startv, mulv, false, false, ""); }
+        if need_neg { sub = sxb_binop(OP_SUB, startv, mulv, false, false, ""); }
+    }
+    var endcheck: i32 = -1;
+    var lt: i32 = -1;
+    var gt: i32 = -1;
+    if need_pos { lt = sxb_icmp(if signed { P_SLT } else { P_ULT }, add, startv, ""); endcheck = lt; }
+    if need_neg { gt = sxb_icmp(if signed { P_SGT } else { P_UGT }, sub, startv, ""); endcheck = gt; }
+    if need_pos && need_neg { endcheck = sxb_select(stepcmp, gt, lt, ""); }
+    endcheck = sxb_binop(OP_OR, endcheck, ofmul, false, false, "");
+    if src_bits > dst_bits {
+        let maxv = ap_zext(ap_ones(dst_bits), src_bits);
+        var bc = sxb_icmp(P_UGT, tcv, ap_to_cint(ty_int(src_bits), maxv), "");
+        bc = sxb_binop(OP_AND, bc, sxb_icmp(P_NE, stepv, zero, ""), false, false, "");
+        endcheck = sxb_binop(OP_OR, endcheck, bc, false, false, "");
+    }
+    return endcheck;
+}
+
+// expandCodeForPredicate(Pred, IP) for a single compare or wrap predicate
+recursive fn sx_expand_code_for_single_predicate(p: i32, ip: i32) -> i32 {
+    let x = sc_preds[p];
+    if x.kind as i64 == PK_COMPARE {
+        let e0 = sx_expand_at(x.lhs, ip);
+        let e1 = sx_expand_at(x.rhs, ip);
+        sxb_set_before(ip);
+        return sxb_icmp(icmp_inverse_pred(x.pred as i64), e0, e1, "ident.check");
+    }
+    // expandWrapPredicate
+    var nusw: i32 = -1;
+    var nssw: i32 = -1;
+    if ((x.pred as i64) & IW_NUSW) != 0 { nusw = sx_generate_overflow_check(x.lhs, ip, false); }
+    if ((x.pred as i64) & IW_NSSW) != 0 { nssw = sx_generate_overflow_check(x.lhs, ip, true); }
+    if nusw >= 0 && nssw >= 0 { return sxb_binop(OP_OR, nusw, nssw, false, false, ""); }
+    if nusw >= 0 { return nusw; }
+    if nssw >= 0 { return nssw; }
+    return c_false();
+}
+// expandUnionPredicate(Union, IP)
+recursive fn sx_expand_union_predicate(u: i32, ip: i32) -> i32 {
+    let n = su_n(u);
+    if n == 0 { return c_false(); }
+    let b = sx_tmp.len;
+    for k in n {
+        let c = sx_expand_code_for_single_predicate(su_get(u, k), ip);
+        sx_tmp.push(c);
+        sxb_set_before(ip);
+    }
+    var acc = sx_tmp[b];
+    for k in 1..n { acc = sxb_binop(OP_OR, acc, sx_tmp[b + k], false, false, ""); }
+    sx_tmp.resize(b);
+    return acc;
 }
