@@ -23,9 +23,10 @@ Sink, TailCallElim, MergedLoadStoreMotion, SpeculativeExecution and CallSiteSpli
   the best known alignment per base pointer (after stripAndAccumulateConstantOffsets) per scope. `Align()` (1) in
   the table means "absent". `and (ptrtoint p), C` folds to 0 or to the ptrtoint when the alignment decides it;
   `trunc (ptrtoint p)` folds to 0 when log2(align) >= the result width.
-- **DivRemPairs**: X86 `hasDivRemOp` is `isOperationLegal([SU]DIVREM, VT)`, which is false for every type (the
-  X86 lowering marks DIVREM Expand), so on x86 the pass decomposes `rem` into `sub(x, mul(div, y))` (freezing x/y
-  when not provably non-undef) and never recomposes. Without a target (NoTTI) the same.
+- **DivRemPairs**: X86 `hasDivRemOp` is `isOperationLegal([SU]DIVREM, VT)`: legal for the scalar integer types
+  (checked for i32 with `-mtriple=x86_64-unknown-linux-gnu`: a dominated `srem` is hoisted next to the `sdiv`,
+  nothing else changes), not for i128/vectors. Without a target (NoTTI: false) the pass instead decomposes `rem`
+  into `sub(x, mul(div, y))`, freezing x / y (`.frozen`) unless they are provably not undef.
 - **Float2Int**: the partitions are visited in EquivalenceClasses member insertion order (`unionSets(I, Operand)`
   inserts I first); a root whose operands are not instructions is never inserted, so it is never converted. The
   integer type is the smallest legal integer type (datalayout `n...`) >= MinBW, else i32/i64.
