@@ -2863,6 +2863,7 @@ tests/imported/llvm/Transforms/EarlyCSE/invariant.start.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/invariant.start.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/masked-intrinsics-unequal-masks.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/masked-intrinsics-unequal-masks.ll::roundtrip
+tests/imported/llvm/Transforms/EarlyCSE/masked-intrinsics.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/masked-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/EarlyCSE/materialize-align-assumptions.ll::opt
 tests/imported/llvm/Transforms/EarlyCSE/materialize-align-assumptions.ll::roundtrip
@@ -3231,6 +3232,7 @@ tests/imported/llvm/Transforms/GVN/masked-load-store-no-mem-dep.ll::opt
 tests/imported/llvm/Transforms/GVN/masked-load-store-no-mem-dep.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/masked-load-store-vn-crash.ll::opt
 tests/imported/llvm/Transforms/GVN/masked-load-store-vn-crash.ll::roundtrip
+tests/imported/llvm/Transforms/GVN/masked-load-store.ll::opt
 tests/imported/llvm/Transforms/GVN/masked-load-store.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/matrix-intrinsics.ll::opt
 tests/imported/llvm/Transforms/GVN/matrix-intrinsics.ll::roundtrip
@@ -5145,6 +5147,7 @@ tests/imported/llvm/Transforms/InstCombine/constant-fold-nexttoward-ppc-fp128.ll
 tests/imported/llvm/Transforms/InstCombine/constant-fold-nexttoward-x86-fp80.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/constant-fold-shifts.ll::opt
 tests/imported/llvm/Transforms/InstCombine/constant-fold-shifts.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/constant-vector-insert.ll::opt
 tests/imported/llvm/Transforms/InstCombine/constant-vector-insert.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/constrained.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/convergent.ll::opt
@@ -5725,6 +5728,7 @@ tests/imported/llvm/Transforms/InstCombine/intptr6.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/intptr7.ll::opt
 tests/imported/llvm/Transforms/InstCombine/intptr7.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/intptr8.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/intrinsic-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/intrinsic-select.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/intrinsics.ll::opt
 tests/imported/llvm/Transforms/InstCombine/intrinsics.ll::roundtrip
@@ -6432,16 +6436,25 @@ tests/imported/llvm/Transforms/InstCombine/recurrence-binary-intrinsic.ll::opt
 tests/imported/llvm/Transforms/InstCombine/recurrence-binary-intrinsic.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/recurrence.ll::opt
 tests/imported/llvm/Transforms/InstCombine/recurrence.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/reduction-add-sext-zext-i1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/reduction-add-sext-zext-i1.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/reduction-and-sext-zext-i1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/reduction-and-sext-zext-i1.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/reduction-mul-sext-zext-i1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/reduction-mul-sext-zext-i1.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/reduction-or-sext-zext-i1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/reduction-or-sext-zext-i1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/reduction-shufflevector.ll::opt
 tests/imported/llvm/Transforms/InstCombine/reduction-shufflevector.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/reduction-smax-sext-zext-i1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/reduction-smax-sext-zext-i1.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/reduction-smin-sext-zext-i1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/reduction-smin-sext-zext-i1.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/reduction-umax-sext-zext-i1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/reduction-umax-sext-zext-i1.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/reduction-umin-sext-zext-i1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/reduction-umin-sext-zext-i1.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/reduction-xor-sext-zext-i1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/reduction-xor-sext-zext-i1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/redundant-fcmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/redundant-fcmp.ll::roundtrip
@@ -7439,7 +7452,9 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/InsertElement-inseltpoison
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/InsertElement-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/InsertElement.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/InsertElement.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/abs.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/abs.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/active-lane-mask.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/active-lane-mask.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/atan-intrinsic.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/atan-intrinsic.ll::roundtrip
@@ -7451,8 +7466,11 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/binop-identity-undef.ll::o
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/binop-identity-undef.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/bitcast.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/bitcast.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/bitcount.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/bitcount.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/bitreverse.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/bitreverse.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/bswap.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/bswap.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/calls-math-finite.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/calls-math-finite.ll::roundtrip
@@ -7474,6 +7492,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/extractvalue.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/extractvalue.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/float-to-ptr-cast.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/float-to-ptr-cast.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/fma.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/fma.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/fneg.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/fneg.ll::roundtrip
@@ -7625,6 +7644,7 @@ tests/imported/llvm/Transforms/InstSimplify/domcondition.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/domcondition.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/exact-nsw-nuw.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/exact-nsw-nuw.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/exp10.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/exp10.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/extract-element.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/extract-element.ll::roundtrip
@@ -7659,6 +7679,7 @@ tests/imported/llvm/Transforms/InstSimplify/fp-nan.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/fp-nan.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fp-undef-poison-strictfp.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/fp-undef-poison-strictfp.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/fp-undef-poison.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/fp-undef-poison.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/fptoi-range.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/fptoi-range.ll::roundtrip
