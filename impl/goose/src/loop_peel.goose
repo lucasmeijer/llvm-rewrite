@@ -39,7 +39,7 @@ import scev_expander;
 import value_mapper;
 import clone_function;
 import loop_md;
-import loop_unroll;
+import unroll_utils;
 
 fn lp_not_ported(what: const u8[:]) { fatal(str("LoopPeel: ", what, " is not ported yet")); }
 
@@ -71,19 +71,6 @@ fn can_peel(l: i32) -> bool {
 // Loop::isLoopInvariant(V)
 fn lp_is_loop_invariant(l: i32, v: i32) -> bool { if is_inst(v) { return !loop_contains(l, inst_parent(v)); } return true; }
 
-// getUniqueNonLatchExitBlocks
-fn loop_unique_non_latch_exit_blocks(l: i32, out: i32[>..<]&) {
-    let latch = loop_latch(l);
-    for k in loop_nblocks(l) {
-        let bb = loop_block(l, k);
-        if bb == latch { continue; }
-        let t = block_terminator(bb);
-        for j in term_nsucc(t) {
-            let s = term_succ(t, j);
-            if !loop_contains(l, s) && position(out, s) < 0 { out.push(s); }
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------------------------
 // PhiAnalyzer: counters are encoded as -1 = Unknown, else value * 2 + type (0 Invariant, 1 Induction)
@@ -469,103 +456,7 @@ fn compute_peel_count(l: i32, loop_size: i64, pp: PeelPrefs&, trip_count: i64, t
 // ---------------------------------------------------------------------------------------------
 // SplitEdge / SplitBlock with DT and LI
 
-// SplitBlock(Old, SplitPt, DT, LI) (Before = false)
-fn lp_split_block(old: i32, at0: i32) -> i32 {
-    let fv = block_func(old);
-    var at = at0;
-    while iop(at) == OP_PHI || inst_is_eh_pad(at) { at = inst_next(at); }
-    var nm: u8[>..] = [];
-    nm.append(val_name(old));
-    nm.append(".split");
-    let nb = split_block(old, at, nm);
-    let l = li_loop_for(old);
-    if l >= 0 { loop_add_basic_block_to_loop(l, nb); }
-    if dt_has_node(DT_DOM, old) {
-        var ch: i32[>..<] = [];
-        ul_dt_children(fv, old, ch);
-        dt_add_new_block(fv, DT_DOM, nb, old);
-        for c in ch { dt_change_idom(fv, DT_DOM, c, nb); }
-    }
-    return nb;
-}
-// splitBlockBefore(Old, SplitPt, DTU (local lazy over DT), LI) for a block with a single predecessor
-fn lp_split_block_before(old: i32, at0: i32) -> i32 {
-    let fv = block_func(old);
-    var at = at0;
-    while iop(at) == OP_PHI || inst_is_eh_pad(at) { at = inst_next(at); }
-    var preds: i32[>..<] = [];
-    each_pred(old) { p => preds.push(p); };
-    if preds.len != 1 { lp_not_ported("splitBlockBefore of a block with several predecessors"); }
-    // BasicBlock::splitBasicBlockBefore
-    var nm: u8[>..] = [];
-    nm.append(val_name(old));
-    nm.append(".split");
-    let nb = create_block_after(fv, block_prev(old), "");
-    if nm.len > 0 { set_name(nb, nm); }
-    var loc = inst_get_md(at, 0);
-    if loc >= 0 && mds[loc].kind == MK_DI && di_kind(loc) == DIK_LOCATION && di_int(loc, "atomGroup") != 0 { lp_not_ported("key-instruction atoms"); }
-    if block_first(old) != at { block_splice(nb, -1, false, old, block_first(old), true, at, false); }
-    for p in preds {
-        term_replace_successor_with(block_terminator(p), old, nb);
-        block_replace_phi_uses_with(old, p, nb);
-    }
-    let br = create_inst(OP_BR, T_VOID, [old]);
-    block_append_inst(nb, br);
-    if loc >= 0 { inst_set_md(br, 0, loc); }
-    // UpdateAnalysisInformation(Old, New, Preds, DTU, nullptr, LI, nullptr, false, HasLoopExit)
-    var ups: DTUpdate[>..<] = [];
-    ups.push(DTUpdate { kind: DT_INSERT, from: nb, to: old });
-    ups.push(DTUpdate { kind: DT_INSERT, from: preds[0], to: nb });
-    ups.push(DTUpdate { kind: DT_DELETE, from: preds[0], to: old });
-    dtu_begin(fv, true, false, true);
-    dtu_apply_updates(ups);
-    dtu_get_dt();
-    let l = li_loop_for(old);
-    if l >= 0 {
-        var entry = true;
-        var new_header = false;
-        for p in preds {
-            if !dt_has_node(DT_DOM, p) { continue; }
-            if loop_contains(l, p) { entry = false; } else { new_header = true; }
-        }
-        if entry {
-            var inner: i32 = -1;
-            for p in preds {
-                var pl = li_loop_for(p);
-                while pl >= 0 && !loop_contains(pl, old) { pl = loop_parent(pl); }
-                if pl >= 0 && (inner < 0 || loop_depth(inner) < loop_depth(pl)) { inner = pl; }
-            }
-            if inner >= 0 { loop_add_basic_block_to_loop(inner, nb); }
-        } else {
-            loop_add_basic_block_to_loop(l, nb);
-            if new_header { lp_not_ported("splitBlockBefore creating a new loop header"); }
-        }
-    }
-    dtu_end();
-    return nb;
-}
-// SplitEdge(BB, Succ, DT, LI)
-fn lp_split_edge(bb: i32, succ: i32) -> i32 {
-    let t = block_terminator(bb);
-    var k: i64 = -1;
-    for j in term_nsucc(t) { if term_succ(t, j) == succ && k < 0 { k = j; } }
-    if is_critical_edge(t, k, false) { lp_not_ported("SplitEdge of a critical edge"); }
-    if single_pred(succ) >= 0 { return lp_split_block_before(succ, block_first(succ)); }
-    return lp_split_block(bb, block_terminator(bb));
-}
 
-// cloneLoop(L, PL, VM, LI, LPM = null)
-recursive fn clone_loop(l: i32, pl: i32, m: i32) -> i32 {
-    let fv = loops[l].fv;
-    let nl = li_allocate_loop(fv);
-    if pl >= 0 { loop_add_child(pl, nl); } else { li_add_top_level_loop(fv, nl); }
-    for k in loop_nblocks(l) {
-        let bb = loop_block(l, k);
-        if li_loop_for(bb) == l { loop_add_basic_block_to_loop(nl, vmm_get(m, bb)); }
-    }
-    for k in loop_nsubs(l) { clone_loop(loop_sub(l, k), nl, m); }
-    return nl;
-}
 
 // ---------------------------------------------------------------------------------------------
 // Peeling
@@ -828,11 +719,4 @@ fn lp_create_sub(a: i32, b: i32, before: i32) -> i32 {
     let dl = inst_get_md(before, 0);
     if dl >= 0 { inst_set_md(s, 0, dl); }
     return s;
-}
-// Loop::getExitBlock: the unique exit block (all exit edges to one block), else -1
-fn loop_exit_block(l: i32) -> i32 {
-    var ex: i32[>..<] = [];
-    loop_exit_blocks(l, ex);
-    if ex.len != 1 { return -1; }
-    return ex[0];
 }

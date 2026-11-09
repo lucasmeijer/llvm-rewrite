@@ -853,6 +853,7 @@ fn loop_full_unroll_pass_run(l: i32, opt_level: i64, only_when_forced: bool, for
     lu_check_flags();
     let fv = block_func(loop_header(l));
     tli_cur_fn = fv;
+    tti_init_function(fv, globs[glob_of(fv)].module);
     lu_fv = fv;
     let parent = loop_parent(l);
     var old: i32[>..<] = [];
@@ -889,6 +890,7 @@ var lu_fv: i32 = -1;
 fn loop_unroll_pass_run(fv: i32, o: LUOpts) -> u32 {
     lu_check_flags();
     tli_cur_fn = fv;
+    tti_init_function(fv, globs[glob_of(fv)].module);
     lu_fv = fv;
     li_get(fv);
     if li_ntop(fv) == 0 { return PA_ALL; }

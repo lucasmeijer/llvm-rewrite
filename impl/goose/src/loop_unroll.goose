@@ -46,6 +46,7 @@ import value_mapper;
 import clone_function;
 import loop_md;
 import loop_unroll_runtime;
+import unroll_utils;
 
 fn ul_not_ported(what: const u8[:]) { fatal(str("LoopUnroll: ", what, " is not ported yet")); }
 
@@ -56,178 +57,9 @@ struct UnrollLoopOpts { count: i64, force: bool, allow_expensive_trip_count: boo
 // ---------------------------------------------------------------------------------------------
 // Loop helpers
 
-// Loop::isSafeToClone
-fn loop_is_safe_to_clone(l: i32) -> bool {
-    for k in loop_nblocks(l) {
-        let bb = loop_block(l, k);
-        if iop(block_terminator(bb)) == OP_INDIRECTBR { return false; }
-        var i = block_first(bb);
-        while i >= 0 {
-            if is_callbase(i) && call_has_fn_attr(i, AK_NoDuplicate) { return false; }
-            i = inst_next(i);
-        }
-    }
-    return true;
-}
 
-var ul_dfs_seen = hm_new();
-// LoopBlocksDFS::perform(LI): the postorder of the loop's blocks from the header (successors in order;
-// a successor is visited when its innermost loop is contained in l)
-fn loop_blocks_dfs_post(l: i32, post: i32[>..<]&) {
-    hm_clear(ul_dfs_seen);
-    var st_b: i32[>..<] = [];
-    var st_k: i64[>..<] = [];
-    let h = loop_header(l);
-    hm_put(ul_dfs_seen, h as u64, 1);
-    st_b.push(h);
-    st_k.push(0);
-    while st_b.len > 0 {
-        let top = st_b.len - 1;
-        let b = st_b[top];
-        let k = st_k[top];
-        if k < block_nsucc(b) {
-            st_k[top] = k + 1;
-            let s = block_succ(b, k);
-            let sl = li_loop_for(s);
-            if sl >= 0 && loop_contains_loop(l, sl) && !hm_has(ul_dfs_seen, s as u64) {
-                hm_put(ul_dfs_seen, s as u64, 1);
-                st_b.push(s);
-                st_k.push(0);
-            }
-        } else {
-            post.push(b);
-            st_b.pop();
-            st_k.pop();
-        }
-    }
-}
-fn loop_blocks_rpo(l: i32, out: i32[>..<]&) {
-    var post: i32[>..<] = [];
-    loop_blocks_dfs_post(l, post);
-    var i = post.len;
-    while i > 0 { i--; out.push(post[i]); }
-}
 
-// LoopInfo::removeLoop(I) for a top-level loop
-fn li_remove_top_level_loop(fv: i32, l: i32) {
-    let g = glob_of(fv);
-    let r = li_heads[g].top;
-    var w: i64 = 0;
-    for k in r.n { let x = lrun_get(r, k); if x != l { li_pool[r.at + w] = x; w++; } }
-    li_heads[g].top.n = w as i32;
-}
 
-// LoopInfo::erase(Unloop)
-fn li_erase_loop(ul: i32) {
-    let fv = loops[ul].fv;
-    if loop_parent(ul) < 0 {
-        for k in loop_nblocks(ul) {
-            let bb = loop_block(ul, k);
-            if li_loop_for(bb) != ul { continue; }
-            li_change_loop_for(bb, -1);
-        }
-        li_remove_top_level_loop(fv, ul);
-        while !loop_is_innermost(ul) {
-            let c = loop_sub(ul, loop_nsubs(ul) - 1);
-            loop_remove_child(ul, c);
-            li_add_top_level_loop(fv, c);
-        }
-        li_destroy_loop(ul);
-        return;
-    }
-    // UnloopUpdater
-    var sp_k: i32[>..<] = [];      // SubloopParents keys
-    var sp_v: i32[>..<] = [];
-    fn sp_find(x: i32) -> i64 { for j in sp_k.len { if sp_k[j] == x { return j; } } return -1; }
-    var found_ib = false;
-    var post: i32[>..<] = [];
-    // getNearestLoop(BB, BBLoop)
-    fn nearest_loop(bb: i32, bbl: i32) -> i32 {
-        var near = bbl;
-        var sub: i32 = -1;
-        if near != ul && loop_contains_loop(ul, near) {
-            sub = near;
-            while loop_parent(sub) != ul { sub = loop_parent(sub); }
-            var j = sp_find(sub);
-            if j < 0 { sp_k.push(sub); sp_v.push(ul); j = sp_k.len - 1; }
-            near = sp_v[j];
-        }
-        if block_nsucc(bb) == 0 { near = -1; }
-        for k in block_nsucc(bb) {
-            let s = block_succ(bb, k);
-            if s == bb { continue; }
-            var l2 = li_loop_for(s);
-            if l2 == ul { found_ib = true; }
-            if l2 != ul && loop_contains_loop(ul, l2) {
-                if sub >= 0 { continue; }
-                let j = sp_find(l2);
-                if j < 0 { sp_k.push(l2); sp_v.push(-1); l2 = -1; } else { l2 = sp_v[j]; }
-            }
-            if l2 == ul { continue; }
-            if l2 >= 0 && !loop_contains_loop(l2, ul) { l2 = loop_parent(l2); }
-            if near == ul || near < 0 || loop_contains_loop(near, l2) { near = l2; }
-        }
-        if sub >= 0 {
-            let j = sp_find(sub);
-            sp_v[j] = near;
-            return bbl;
-        }
-        return near;
-    }
-    // updateBlockParents
-    if loop_nblocks(ul) > 0 {
-        loop_blocks_dfs_post(ul, post);
-        for b in post {
-            let l2 = li_loop_for(b);
-            let nl = nearest_loop(b, l2);
-            if nl != l2 { li_change_loop_for(b, nl); }
-        }
-    }
-    var changed = found_ib;
-    while changed {
-        changed = false;
-        for b in post {
-            let l2 = li_loop_for(b);
-            let nl = nearest_loop(b, l2);
-            if nl != l2 { li_change_loop_for(b, nl); changed = true; }
-        }
-    }
-    // removeBlocksFromAncestors
-    var blocks: i32[>..<] = [];
-    for k in loop_nblocks(ul) { blocks.push(loop_block(ul, k)); }
-    for bb in blocks {
-        var op_ = li_loop_for(bb);
-        if loop_contains_loop(ul, op_) {
-            while loop_parent(op_) != ul { op_ = loop_parent(op_); }
-            let j = sp_find(op_);
-            if j < 0 { sp_k.push(op_); sp_v.push(-1); op_ = -1; } else { op_ = sp_v[j]; }
-        }
-        var old = loop_parent(ul);
-        while old != op_ {
-            if old < 0 { fatal("internal: LoopInfo::erase: new loop is not an ancestor of the original"); }
-            loop_remove_block_from_loop(old, bb);
-            old = loop_parent(old);
-        }
-    }
-    // updateSubloopParents
-    while !loop_is_innermost(ul) {
-        let sub = loop_sub(ul, loop_nsubs(ul) - 1);
-        loop_remove_child(ul, sub);
-        let j = sp_find(sub);
-        if j < 0 { fatal("internal: LoopInfo::erase: DFS failed to visit subloop"); }
-        let p = sp_v[j];
-        if p >= 0 { loop_add_child(p, sub); } else { li_add_top_level_loop(fv, sub); }
-    }
-    let parent = loop_parent(ul);
-    loop_remove_child(parent, ul);
-    li_destroy_loop(ul);
-}
-// LoopInfo::destroy: the loop is invalid from now on
-fn li_destroy_loop(l: i32) {
-    loops[l].blocks.n = 0;
-    loops[l].subs.n = 0;
-    loops[l].parent = -1;
-}
 
 // needToInsertPhisForLCSSA(L, Blocks, LI)
 fn need_to_insert_phis_for_lcssa(l: i32, bbs: const i32[:]) -> bool {
@@ -249,27 +81,6 @@ fn need_to_insert_phis_for_lcssa(l: i32, bbs: const i32[:]) -> bool {
     return false;
 }
 
-// addClonedBlockToLoopInfo(OriginalBB, ClonedBB, LI, NewLoops): NewLoops is the pair list (nl_o, nl_n);
-// returns the original loop if a new loop was created, else -1
-fn add_cloned_block_to_loop_info(obb: i32, cbb: i32, nl_o: i32[>..<]&, nl_n: i32[>..<]&) -> i32 {
-    let fv = block_func(obb);
-    let old = li_loop_for(obb);
-    var j: i64 = -1;
-    for k in nl_o.len { if nl_o[k] == old { j = k; } }
-    if j < 0 {
-        let nl = li_allocate_loop(fv);
-        nl_o.push(old);
-        nl_n.push(nl);
-        var np: i32 = -1;
-        let op_ = loop_parent(old);
-        for k in nl_o.len { if nl_o[k] == op_ && op_ >= 0 { np = nl_n[k]; } }
-        if np >= 0 { loop_add_child(np, nl); } else { li_add_top_level_loop(fv, nl); }
-        loop_add_basic_block_to_loop(nl, cbb);
-        return old;
-    }
-    loop_add_basic_block_to_loop(nl_n[j], cbb);
-    return -1;
-}
 
 // isEpilogProfitable(L)
 fn is_epilog_profitable(l: i32) -> bool {
@@ -354,14 +165,6 @@ fn ul_is_simple_load(i: i32) -> bool { (insts[inst_of(i)].bits & 1) == 0 && inst
 // ---------------------------------------------------------------------------------------------
 // simplifyLoopAfterUnroll
 
-// RecursivelyDeleteTriviallyDeadInstructions(V) for one value (TLI = nullptr)
-fn ul_delete_dead_inst(v: i32) {
-    if v < 0 || is_dead(v) || !is_inst(v) { return; }
-    if !is_instruction_trivially_dead(v) { return; }
-    var one: i32[>..<] = [];
-    one.push(v);
-    recursively_delete_trivially_dead(one);
-}
 
 fn simplify_loop_after_unroll(l: i32, simplify_ivs: bool, bbs: const i32[:], use_aa: bool) {
     let save_tli = local_have_tli;
@@ -527,89 +330,8 @@ fn fix_prob_contradiction(l: i32, runtime: bool, orig_prob: u32, complete: bool,
 // ---------------------------------------------------------------------------------------------
 // CFG helpers
 
-// DomTreeNode::setIDom (no DFS-number invalidation)
-fn ul_dt_set_idom(fv: i32, bb: i32, idom: i32) { dt_focus(fv, DT_DOM); t_set_idom(bb, idom); }
-fn ul_dt_children(fv: i32, bb: i32, out: i32[>..<]&) {
-    var c = dt_first_child(fv, DT_DOM, bb);
-    while c >= 0 { out.push(c); c = dt_next_sibling(DT_DOM, c); }
-}
 
-// changeToUnreachable(I, PreserveLCSSA) without DTU / MSSAU
-fn ul_change_to_unreachable(iv: i32, preserve_lcssa: bool) -> i64 {
-    let bb = inst_parent(iv);
-    let t = block_terminator(bb);
-    var succs: i32[>..<] = [];
-    for k in term_nsucc(t) { succs.push(term_succ(t, k)); }
-    for s in succs { block_remove_predecessor(s, bb, preserve_lcssa); }
-    let ui = create_inst(OP_UNREACHABLE, T_VOID, []);
-    inst_insert_before(ui, iv);
-    let dl = inst_get_md(iv, 0);
-    if dl >= 0 { inst_set_md(ui, 0, dl); }
-    var n: i64 = 0;
-    var i = iv;
-    while i >= 0 {
-        let ni = inst_next(i);
-        if vals[i].first_use >= 0 { rauw(i, c_poison(vals[i].ty)); }
-        inst_erase_from_parent(i);
-        n++;
-        i = ni;
-    }
-    block_flush_terminator_records(bb);
-    return n;
-}
 
-// MergeBlockIntoPredecessor(BB, DTU, LI, MSSAU = null, MemDep = null, PredecessorWithTwoSuccessors = false, DT):
-// use_dtu = the active (lazy) DomTreeUpdater, else the DT is updated directly
-fn ul_merge_block_into_predecessor(bb: i32, use_dtu: bool) -> bool {
-    let fv = block_func(bb);
-    if cu_has_address_taken(bb) { return false; }
-    let pred = cu_unique_pred(bb);
-    if pred < 0 || pred == bb { return false; }
-    let pti = block_terminator(pred);
-    if cu_is_special_terminator(pti) || inst_may_have_side_effects(pti) { return false; }
-    if cu_unique_succ(pred) != bb { return false; }
-    var i = block_first(bb);
-    while i >= 0 && iop(i) == OP_PHI {
-        for k in nops(i) { if op(i, k) == i { return false; } }
-        i = inst_next(i);
-    }
-    if cu_has_loop_or_entry_convergence_token(bb) && cu_has_loop_or_entry_convergence_token(pred) { return false; }
-    if cu_has_phis(bb) { cu_fold_single_entry_phis(bb); }
-    if !use_dtu {
-        if dt_has_node(DT_DOM, pred) {
-            var ch: i32[>..<] = [];
-            ul_dt_children(fv, bb, ch);
-            for c in ch { ul_dt_set_idom(fv, c, pred); }
-        }
-    }
-    var ups: DTUpdate[>..<] = [];
-    if use_dtu {
-        var seen: i32[>..<] = [];
-        var succs_of_pred: i32[>..<] = [];
-        cu_succs(pred, succs_of_pred);
-        var succs: i32[>..<] = [];
-        cu_succs(bb, succs);
-        for s in succs { if position(succs_of_pred, s) < 0 && cu_push_unique(seen, s) { ups.push(DTUpdate { kind: DT_INSERT, from: pred, to: s }); } }
-        seen.clear();
-        for s in succs { if cu_push_unique(seen, s) { ups.push(DTUpdate { kind: DT_DELETE, from: bb, to: s }); } }
-        ups.push(DTUpdate { kind: DT_DELETE, from: pred, to: bb });
-    }
-    let sti = block_terminator(bb);
-    block_splice(pred, pti, false, bb, block_first(bb), true, sti, false);
-    cu_block_rauw(bb, pred);
-    inst_erase_from_parent(pti);
-    inst_move_impl(sti, pred, -1, false, true);
-    block_append_inst(bb, create_inst(OP_UNREACHABLE, T_VOID, []));
-    if vals[pred].name < 0 && vals[bb].name >= 0 { cu_take_name(pred, bb); }
-    li_remove_block(bb);
-    if use_dtu { dtu_apply_updates(ups); }
-    if !use_dtu { dt_erase_node(fv, DT_DOM, bb); }
-    let save = cu_dtu;
-    cu_dtu = use_dtu;
-    cu_delete_dead_block(bb);
-    cu_dtu = save;
-    return true;
-}
 
 // ---------------------------------------------------------------------------------------------
 // UnrollLoop
@@ -618,33 +340,31 @@ struct ULExitInfo { exiting: i32, trip_count: i64, trip_multiple: i64, breakout_
 
 fn ul_gcd(a: i64, b: i64) -> i64 { var x = a; var y = b; while y != 0 { let t = x % y; x = y; y = t; } return x; }
 
-// UnrollLoop(L, UnrollLoopOpts, LI, SE, DT, AC, TTI, ORE, PreserveLCSSA, RemainderLoop, AA): (result, remainder loop)
-fn unroll_loop(l0: i32, ulo0: UnrollLoopOpts, preserve_lcssa: bool, use_aa: bool) -> i64, i32 {
-    var l = l0;
-    var ulo = ulo0;
-    var remainder: i32 = -1;
-    if loop_preheader(l) < 0 { return 0, -1; }
-    if loop_latch(l) < 0 { return 0, -1; }
-    if !loop_is_safe_to_clone(l) { return 0, -1; }
-    if cu_has_address_taken(loop_header(l)) { return 0, -1; }
-    let preheader = loop_preheader(l);
-    let header = loop_header(l);
-    let latch_block = loop_latch(l);
-    let fv = block_func(header);
-    var exit_blocks: i32[>..<] = [];
+struct ULState { preheader: i32, header: i32, latch_block: i32, fv: i32, max_trip_count: i64, max_or_zero: bool,
+               has_otc: bool, otc: u64, orig_prob: u32, complete: bool, preserve_only_first: bool, need_fix_lcssa: bool,
+               latch_is_exiting: bool, epilog_prof: bool }
+
+// UnrollLoop up to the runtime remainder (false: LoopUnrollResult::Unmodified)
+fn ul_phase1(l: i32, ulo: UnrollLoopOpts&, st: ULState&, preserve_lcssa: bool, exit_blocks: i32[>..<]&, orig_blocks: i32[>..<]&, infos: ULExitInfo[>..<]&, xbs: i32[>..<]&, xbn: i64[>..<]&, exiting: i32[>..<]&) -> bool {
+    if loop_preheader(l) < 0 { return false; }
+    if loop_latch(l) < 0 { return false; }
+    if !loop_is_safe_to_clone(l) { return false; }
+    if cu_has_address_taken(loop_header(l)) { return false; }
+    st.preheader = loop_preheader(l);
+    st.header = loop_header(l);
+    st.latch_block = loop_latch(l);
+    st.fv = block_func(st.header);
+    let latch_block = st.latch_block;
     loop_exit_blocks(l, exit_blocks);
-    var orig_blocks: i32[>..<] = [];
     for k in loop_nblocks(l) { orig_blocks.push(loop_block(l, k)); }
-    let max_trip_count = sc_get_small_constant_max_trip_count(l);
-    let max_or_zero = sc_is_backedge_taken_count_max_or_zero(l);
+    st.max_trip_count = sc_get_small_constant_max_trip_count(l);
+    st.max_or_zero = sc_is_backedge_taken_count_max_or_zero(l);
     let has_otc, otc = get_loop_estimated_trip_count(l);
-    let orig_prob = get_loop_probability(l);
-    if max_trip_count != 0 && ulo.count > max_trip_count { ulo.count = max_trip_count; }
+    st.has_otc = has_otc;
+    st.otc = otc;
+    st.orig_prob = get_loop_probability(l);
+    if st.max_trip_count != 0 && ulo.count > st.max_trip_count { ulo.count = st.max_trip_count; }
     // ExitInfos (MapVector by exiting block); ExitingBlocks of each info are runs in xbs
-    var infos: ULExitInfo[>..<] = [];
-    var xbs: i32[>..<] = [];          // per info: Count slots (orig + one per iteration)
-    var xbn: i64[>..<] = [];          // number used per info
-    var exiting: i32[>..<] = [];
     loop_exiting_blocks(l, exiting);
     for eb in exiting {
         let bi = block_terminator(eb);
@@ -660,27 +380,36 @@ fn unroll_loop(l0: i32, ulo0: UnrollLoopOpts, preserve_lcssa: bool, use_aa: bool
         xbs[xbs.len - ulo.count] = eb;
         xbn.push(1);
     }
-    fn info_of(bb: i32) -> i64 { for k in infos.len { if infos[k].exiting == bb { return k; } } return -1; }
-    let complete = ulo.count == max_trip_count;
-    let preserve_only_first = complete && max_or_zero;
-    if complete { ulo.runtime = false; }
-    var need_fix_lcssa = false;
-    if preserve_lcssa && complete {
-        for e in exit_blocks { if iop(block_first(e)) == OP_PHI { need_fix_lcssa = true; } }
+    st.complete = ulo.count == st.max_trip_count;
+    st.preserve_only_first = st.complete && st.max_or_zero;
+    if st.complete { ulo.runtime = false; }
+    st.need_fix_lcssa = false;
+    if preserve_lcssa && st.complete {
+        for e in exit_blocks { if iop(block_first(e)) == OP_PHI { st.need_fix_lcssa = true; } }
     }
     let latch_term = block_terminator(latch_block);
-    let latch_is_exiting = loop_is_exiting(l, latch_block);
-    if iop(latch_term) != OP_BR && !(iop(latch_term) == OP_CONDBR && latch_is_exiting) { return 0, -1; }
-    let epilog_prof = if flag_given("unroll-runtime-epilog") { flag_bool("unroll-runtime-epilog", false) } else { is_epilog_profitable(l) };
-    if ulo.runtime {
-        let ok, rl = unroll_runtime_loop_remainder(l, ulo.count, ulo.allow_expensive_trip_count, epilog_prof, ulo.unroll_remainder,
-                                                   ulo.forget_all_scev, preserve_lcssa, ulo.scev_budget, ulo.runtime_multi_exit,
-                                                   has_otc, otc, orig_prob);
-        if ok { remainder = rl; }
-        else {
-            if ulo.force { ulo.runtime = false; } else { return 0, -1; }
-        }
-    }
+    st.latch_is_exiting = loop_is_exiting(l, latch_block);
+    if iop(latch_term) != OP_BR && !(iop(latch_term) == OP_CONDBR && st.latch_is_exiting) { return false; }
+    st.epilog_prof = if flag_given("unroll-runtime-epilog") { flag_bool("unroll-runtime-epilog", false) } else { is_epilog_profitable(l) };
+    return true;
+}
+
+// UnrollLoop after the runtime remainder: the result (1 partial, 2 full)
+fn ul_phase2(l0: i32, ulo: UnrollLoopOpts&, st: ULState&, preserve_lcssa: bool, use_aa: bool, exit_blocks: i32[>..<]&, orig_blocks: i32[>..<]&, infos: ULExitInfo[>..<]&, xbs: i32[>..<]&, xbn: i64[>..<]&, exiting: i32[>..<]&) -> i64 {
+    var l = l0;
+    let preheader = st.preheader;
+    let header = st.header;
+    let latch_block = st.latch_block;
+    let fv = st.fv;
+    let has_otc = st.has_otc;
+    let otc = st.otc;
+    let orig_prob = st.orig_prob;
+    let complete = st.complete;
+    let preserve_only_first = st.preserve_only_first;
+    var need_fix_lcssa = st.need_fix_lcssa;
+    let latch_is_exiting = st.latch_is_exiting;
+    let epilog_prof = st.epilog_prof;
+    fn info_of(bb: i32) -> i64 { for k in infos.len { if infos[k].exiting == bb { return k; } } return -1; }
     if func_subprogram(fv) >= 0 && di_debug_info_for_profiling(func_subprogram(fv)) { ul_not_ported("FS discriminators (debug-info-for-profiling)"); }
     if scev_valid(fv) {
         if ulo.forget_all_scev { ul_not_ported("ScalarEvolution::forgetAllLoops"); }
@@ -946,7 +675,58 @@ fn unroll_loop(l0: i32, ulo0: UnrollLoopOpts, preserve_lcssa: bool, use_aa: bool
     }
     ls_se = save_ls;
     lcssa_se = save_lc;
-    return if complete { 2 } else { 1 }, remainder;
+    return if complete { 2 } else { 1 };
+}
+
+fn ul_new_state() -> ULState {
+    ULState { preheader: -1, header: -1, latch_block: -1, fv: -1, max_trip_count: 0, max_or_zero: false, has_otc: false, otc: 0,
+              orig_prob: 0, complete: false, preserve_only_first: false, need_fix_lcssa: false, latch_is_exiting: false, epilog_prof: false }
+}
+
+// UnrollLoop(L, ULO, LI, SE, DT, AC, TTI, ORE, PreserveLCSSA, RemainderLoop, AA): (result, remainder loop)
+fn unroll_loop(l: i32, ulo0: UnrollLoopOpts, preserve_lcssa: bool, use_aa: bool) -> i64, i32 {
+    var ulo = ulo0;
+    var st = ul_new_state();
+    var exit_blocks: i32[>..<] = [];
+    var orig_blocks: i32[>..<] = [];
+    var infos: ULExitInfo[>..<] = [];
+    var xbs: i32[>..<] = [];          // per info: Count slots (orig + one per iteration)
+    var xbn: i64[>..<] = [];          // number used per info
+    var exiting: i32[>..<] = [];
+    if !ul_phase1(l, ulo, st, preserve_lcssa, exit_blocks, orig_blocks, infos, xbs, xbn, exiting) { return 0, -1; }
+    var remainder: i32 = -1;
+    if ulo.runtime {
+        let ok, rl, unroll_rem = unroll_runtime_loop_remainder(l, ulo.count, ulo.allow_expensive_trip_count, st.epilog_prof, ulo.unroll_remainder,
+                                                   ulo.forget_all_scev, preserve_lcssa, ulo.scev_budget, ulo.runtime_multi_exit,
+                                                   st.has_otc, st.otc, st.orig_prob);
+        if ok {
+            remainder = rl;
+            if unroll_rem {
+                let ro = UnrollLoopOpts { count: ulo.count - 1, force: false, allow_expensive_trip_count: false, unroll_remainder: false,
+                                          runtime: false, forget_all_scev: ulo.forget_all_scev, heart: -1, scev_budget: ulo.scev_budget,
+                                          runtime_multi_exit: false, add_accumulators: false };
+                let r2 = unroll_loop_no_runtime(rl, ro, preserve_lcssa);
+                if r2 == 2 { remainder = -1; }
+            }
+        } else {
+            if ulo.force { ulo.runtime = false; } else { return 0, -1; }
+        }
+    }
+    let r = ul_phase2(l, ulo, st, preserve_lcssa, use_aa, exit_blocks, orig_blocks, infos, xbs, xbn, exiting);
+    return r, remainder;
+}
+// UnrollLoop of the remainder loop from UnrollRuntimeLoopRemainder (ULO.Runtime = false, no AA)
+fn unroll_loop_no_runtime(l: i32, ulo0: UnrollLoopOpts, preserve_lcssa: bool) -> i64 {
+    var ulo = ulo0;
+    var st = ul_new_state();
+    var exit_blocks: i32[>..<] = [];
+    var orig_blocks: i32[>..<] = [];
+    var infos: ULExitInfo[>..<] = [];
+    var xbs: i32[>..<] = [];
+    var xbn: i64[>..<] = [];
+    var exiting: i32[>..<] = [];
+    if !ul_phase1(l, ulo, st, preserve_lcssa, exit_blocks, orig_blocks, infos, xbs, xbn, exiting) { return 0; }
+    return ul_phase2(l, ulo, st, preserve_lcssa, false, exit_blocks, orig_blocks, infos, xbs, xbn, exiting);
 }
 
 // DICompileUnit::getDebugInfoForProfiling of a subprogram's unit
