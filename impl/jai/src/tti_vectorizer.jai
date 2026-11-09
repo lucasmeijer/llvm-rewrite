@@ -103,3 +103,14 @@ tti_common_operand_info :: (x: Value_Id, y: Value_Id) -> Op_Info {
     if ox.props == oy.props p = ox.props;
     return .{cast(u8) k, cast(u8) p};
 }
+
+// isLegalBroadcastLoad(ElementTy, NumElements)
+tti_is_legal_broadcast_load :: (t: *Tti, elt: Type_Id, n: u64) -> bool {
+    if t.kind == .X86 return x86_is_legal_broadcast_load(*t.xl, elt, n, false);
+    return false;
+}
+// isLegalMaskedGather(DataType, Alignment)
+tti_is_legal_masked_gather :: (t: *Tti, ty: Type_Id, align: u64) -> bool {
+    if t.kind == .X86 return x86_is_legal_masked_gather(*t.xl, ty);
+    return false;
+}

@@ -50,6 +50,10 @@
 #load "tti_vectorizer.jai";
 #load "vector_utils.jai";
 #load "pass_vector_combine.jai";
+#load "slp_utils.jai";
+#load "slp_lookahead.jai";
+#load "slp_operands.jai";
+#load "slp_tree.jai";
 #load "dbg_records.jai";
 #load "pass_mem2reg.jai";
 #load "pass_instsimplify.jai";

@@ -10,6 +10,14 @@
   hand-written glob each time.
 - **What would have helped:** pass units sized by the LLVM source they port; anything above ~10k lines of source split
   up front (SLP itself could be split by test directory or by feature, e.g. stores/reductions/revec).
+- **SLP in one session was not realistic:** after VectorCombine I read about a sixth of SLPVectorizer.cpp and ported
+  the helpers, InstructionsState, LookAheadHeuristics and VLOperands (~1.5k lines of Jai), but no SLP test can pass
+  until the whole chain buildTree -> scheduling -> reorder -> min bit widths -> cost -> vectorizeTree exists, and
+  even a "fail loudly" driver is of little use: almost every function with a loop or two stores reaches
+  `buildTree` through the reduction or store seeds. Only 26 of the 1326 SLP RUN lines leave the IR unchanged, so
+  there is no cheap subset of passing tests either. A unit sized for one agent would be a slice of the pipeline
+  with its own observable exit (e.g. "SLP rejects tiny trees": every SLP test whose functions LLVM leaves unchanged
+  passes) rather than test directories; such exits need either a debug printer or hand-written tests.
 - **What you did instead:** split docs/roadmap.md into L1.vectorize.vector-combine, L1.vectorize.slp and
   L1.vectorize.loop (each `<Pass>/*::roundtrip` + `<Pass>/*::opt`, the same tests as before) and kept L1.vectorize
   with its original exit selector, now depending on the three. Nothing was loosened: the union of the three new

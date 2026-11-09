@@ -155,3 +155,4 @@ lib/Transforms/Utils/ValueMapper.cpp 0.35  # mapValue, mapBlockAddress, remapIns
 lib/Transforms/Utils/CloneFunction.cpp 0.3  # CloneBasicBlock, remapInstructionsInBlocks, cloneNoAliasScopes/adaptNoAliasScopes/cloneAndAdaptNoAliasScopes, identifyNoAliasScopesToClone
 lib/Transforms/Scalar/SimpleLoopUnswitch.cpp 0.97  # jai_unswitch: all of the pass; not ShouldRunExtraSimpleLoopUnswitch / extra-simple-loop-unswitch-passes (O3 pipeline), printPipeline, statistics; TTI.hasBranchDivergence is false (X86 / no target only)
 lib/Transforms/Vectorize/VectorCombine.cpp 0.97  # all folds; the VP-intrinsic paths (scalarizeVPIntrinsic, foldBitcastOfVPLoad) only match and fail loudly
+lib/Transforms/Vectorize/SLPVectorizer.cpp 0.04  # manual: static helpers, InstructionsState/getSameOpcode, LookAheadHeuristics, VLOperands, TreeEntry layout only (the port-audit heuristic says 0.15: shared names); not a pass yet

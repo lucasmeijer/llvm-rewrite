@@ -108,6 +108,8 @@ src/
                       demanded-lane scalarization, reduction costs, commonOperandInfo)
   vector_utils.jai    VectorUtils/LoopUtils helpers for vectorizers (shuffle-mask scaling, propagateIRFlags, reductions)
   pass_vector_combine.jai  VectorCombine (`vc` state, its own InstructionWorklist, `vcb_*` = IRBuilder<InstSimplifyFolder>)
+  slp_utils.jai, slp_lookahead.jai, slp_operands.jai, slp_tree.jai   SLPVectorizer (in progress, not a pass yet):
+                      helpers + InstructionsState, LookAheadHeuristics, VLOperands, BoUpSLP state (`slp`, Tree_Entry rows)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 
