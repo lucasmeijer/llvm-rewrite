@@ -846,3 +846,42 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
 - Sweeps (0 differs): `loop-load-elim` whole-file and `--per-function`, `loop-distribute -enable-loop-distribute`
   whole-file and `--per-function`, `sroa,instcombine,loop-mssa(loop-rotate,licm),loop-distribute,loop-load-elim,
   loop(loop-idiom,loop-deletion)`. Loud: 6 files with VFDatabase mappings.
+## LoopUnroll, runtime unrolling, peeling, ValueMapper (L1.loop-unroll 252/256: roundtrip 128/128, opt 124/128)
+
+- Files: `pass_loop_unroll.jai` (LoopUnrollPass.cpp + LoopUnrollAnalyzer.cpp + BasicTTI's unrolling/peeling
+  preferences + CodeMetrics with convergence kinds), `loop_unroll_utils.jai` (Utils/LoopUnroll.cpp, loadCSE with a
+  loop-scoped MemorySSA `mssa_build_loop`), `loop_unroll_runtime.jai` (LoopUnrollRuntime.cpp, SplitEdge,
+  splitBlockBefore), `loop_peel.jai` (LoopPeel.cpp), `value_mapper.jai`, `clone_function.jai`, `loop_utils.jai`
+  (loop metadata helpers, BranchProbability as `Bprob`), generated `gen_x86_sched.jai` (`gen/gen_x86_sched.py`:
+  CPU -> scheduling model -> LoopMicroOpBufferSize; rerun after an LLVM bump). DESIGN.md "Cloning".
+- **Reusable for the inliner / LoopVersioning / unswitch**: `Value_Map` + `map_value` / `remap_instruction` /
+  `remap_dbg_record_range` (RF_* flags), `clone_basic_block(bb, *vm, suffix, f)` (f = NONE: detached block, link with
+  `fn_insert_detached_block_before`), `remap_instructions_in_blocks`, `identify_no_alias_scopes_to_clone` +
+  `clone_and_adapt_no_alias_scopes` (jump threading still has its own copy: jt_clone_no_alias_scopes),
+  `clone_loop`, `fn_splice_blocks`, `split_edge`, `split_block_before`, `unroll_loop(li, l, ulo, dt, ac, tti, ...)`,
+  `peel_loop`, `compute_peel_count`, `simplify_loop_after_unroll`, `make_followup_loop_id`,
+  `add_string_metadata_to_loop`, `li_set_loop_already_unrolled`, `li_loop_estimated_trip_count`, `li_*_loop_attribute`,
+  `tti_instruction_cost_ops` (getInstructionCost with replacement operands). The inliner needs the MDNodeMapper
+  (module-level metadata cloning) and value handles in `Value_Map`: both fail loudly / are documented as missing.
+- Fail loudly: `-unroll-add-parallel-reductions` (parallel reduction phis; no x86 TTI enables AddAdditionalAccumulators),
+  discriminator cloning for `debugInfoForProfiling` compile units (cloneByMultiplyingDuplicationFactor),
+  key-instruction atom groups, `#dbg_assign` remapping, ehAwareSplitEdge, the MDNodeMapper. `-pgso` /
+  `require<profile-summary>` (PSI-based optsize) and `-O<n>` are not supported, which is what the 4 failing unit
+  tests need.
+- Shared fixes made here: SCEV `prove_no_wrap_by_varying_start` used signed -2/-1 deltas (LLVM's are 32-bit unsigned,
+  see knowledge/llvm/loop-unroll.md); `split_landing_pad_predecessors` put the cloned landingpad before the new phis;
+  `merge_block_into_predecessor` got the DT (no DTU) mode (`direct_dt`); `tti_instruction_cost` now delegates to
+  `tti_instruction_cost_ops` (constant-expression users get at least 3 operand slots so the old reads stay
+  identical — callers pass ConstantExprs, whose `inst_op` is garbage: a latent bug in compute_speculation_cost's use);
+  `X86_Lowering.tune_cpu`; opt accepts `-disable-verify` and `-disable-loop-unrolling` (no effect on -passes runs).
+- Sweeps (whole-file and `--per-function`): `loop-unroll`, `loop(loop-unroll-full)`: 0 differs, 0 bad-ir; loud only
+  ppc_fp128 literals and LoopUnroll/pr77842.ll timing out (below). Also 0 differs with `--extra` `-unroll-runtime`,
+  `-unroll-runtime -unroll-runtime-epilog=false`, `-unroll-force-peel-count=2`, `-unroll-count=3`,
+  `-unroll-allow-partial -unroll-runtime -unroll-threshold=300` (loud: the discriminator case, timeouts).
+  `loop(indvars)` and `print<scalar-evolution>` sweeps unchanged after the SCEV fix.
+- Perf (x64 build, `-disable-output`, no @perf benchmark times loop-unroll): tests/perf/scaling/loops n2000/n8000
+  0.29/4.2 s (LLVM 0.04/0.27), loops-many n500/n2000 3.0/72 s (LLVM 0.18/5.2; n8000 > 300 s for LLVM too). Almost all
+  of it is ScalarEvolution trip-count computation (howManyLessThans -> loop-entry guards over every preceding loop,
+  the same superlinear path as indvars) and SimplifyIndVar's SCEV queries after partial unrolling; the unroller
+  itself is linear. pr77842.ll (an unroll-by-2048 pragma) takes LLVM 6 s and us > 60 s (simplifyLoopIVs on the
+  unrolled body); IndVarSimplify/eliminate-exit.ll with -unroll-count=3 takes LLVM 31 s.

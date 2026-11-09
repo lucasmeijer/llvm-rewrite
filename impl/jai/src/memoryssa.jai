@@ -18,7 +18,8 @@
 // updater) are rows of `vh`, allocated stack-like by the updater. The result lives on the heap (cached in the
 // function analysis manager); AA query state (BatchAAResults) lives in temp for one construction / walk / printer run.
 //
-// Not ported: loop-scoped MemorySSA (MemorySSA(Loop&), only used by LoopSink's legacy path), -dot-cfg-mssa.
+// The loop-scoped MemorySSA (MemorySSA(Loop&), loop unrolling's loadCSE) is mssa_build_loop in loop_unroll_utils.jai.
+// Not ported: -dot-cfg-mssa.
 
 MSSA_LIVE_ON_ENTRY :: cast(s32) 0;
 MSSA_INVALID_ID :: 0xFFFF_FFFF;

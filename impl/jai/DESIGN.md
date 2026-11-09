@@ -91,6 +91,16 @@ src/
                   DuplicateInstructionsInSplitBetween, findAvailablePtrLoadStore, noalias-scope cloning
   branch_prob.jai BranchProbabilityInfo (`*Bpi`, bpi_*; BranchProbability helpers bp_*, CFG scc_iterator)
   block_freq.jai  BlockFrequencyInfo (`*Bfi`, bfi_*; ScaledNumber `Scaled64` sn_*, BlockMass bm_*)
+  value_mapper.jai    ValueMapper (`Value_Map` = ValueToValueMapTy; map_value, remap_instruction, remap_dbg_record)
+  clone_function.jai  CloneBasicBlock, remapInstructionsInBlocks, noalias-scope cloning, cloneLoop
+  loop_utils.jai      loop metadata (attributes, followup ids, estimated trip counts, convergence heart),
+                      BranchProbability (`Bprob`) and the branch/loop probability helpers of LoopUtils
+  pass_loop_unroll.jai  LoopUnrollPass / LoopFullUnrollPass, UnrollingPreferences (+ BasicTTI's), UnrolledInstAnalyzer,
+                      analyzeLoopUnrollCost, the unroll cl::opts (`lu_cl`)
+  loop_unroll_utils.jai  UnrollLoop, simplifyLoopAfterUnroll, loadCSE (+ loop-scoped MemorySSA), fixProbContradiction
+  loop_unroll_runtime.jai  UnrollRuntimeLoopRemainder (prolog/epilog), SplitEdge, splitBlockBefore
+  loop_peel.jai       LoopPeel (computePeelCount, PhiAnalyzer, peelLoop)
+  gen_x86_sched.jai   generated: X86 CPU -> scheduling model -> LoopMicroOpBufferSize (gen/gen_x86_sched.py)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 
@@ -441,6 +451,27 @@ recomputing gives a different child order.
   are absorbed); `insert_at_position(i, bb, pt, head)` is `insertBefore(It)`. `records_take/prepend/append`
   manipulate the per-instruction lists; erasing a terminator with records needs `records_take` first (there is no
   "trailing records" state in this implementation).
+
+### Cloning: ValueMapper, CloneBasicBlock, LoopUnroll (value_mapper.jai, clone_function.jai, loop_unroll*.jai, loop_peel.jai)
+
+- **ValueToValueMapTy** = `Value_Map` (temp): `map` (Value_Id -> Value_Id) and `md` (Md_Id -> Md_Id, ValueMap::MD()).
+  `vmap_set/get/lookup/find/erase`. LLVM's map values are WeakTrackingVHs and its keys follow RAUW; the unroll and peel
+  code never RAUWs or erases a mapped value while a map is live, so it is a plain table. A future user that does
+  (the inliner's VMap across `replaceAllUsesWith`) must add value handles (value_handles.jai).
+- **Mapper** = `map_value(*vm, v, flags)`, `remap_instruction(*vm, i, flags)`, `remap_dbg_record(_range)`,
+  `map_metadata` with LLVM's RF_* flags. Faithful for RF_NoModuleLevelChanges (+ IgnoreMissingLocals,
+  NullMapMissingGlobalValues): globals / inline asm map to themselves and are memoized in the map, constants are
+  rebuilt only when an operand maps elsewhere (blockaddress of a cloned block), LocalAsMetadata / DIArgList operands
+  of calls are mapped, every mapped operand is re-`set` (Use::set moves the use to the front even when the value is
+  unchanged: use-list order). Not ported (fatal): the MDNodeMapper (module-level changes: distinct-node cloning,
+  uniqued-graph POT), TypeMapper/Materializer, global initializer and alias remapping, atom groups.
+- **CloneBasicBlock** = `clone_basic_block(bb, *vm, suffix, f)`. With `f = NONE` the block has no parent: names are
+  stored raw and uniqued when `fn_insert_detached_block_before/_after` links it (instructions first, then the block,
+  as SymbolTableListTraits does). Debug records are cloned (`cloneDebugInfoFrom`).
+- UnrollLoop / peelLoop / the runtime remainder keep DominatorTree and LoopInfo updated exactly like LLVM (addNewBlock
+  per clone, changeImmediateDominator, the lazy DTU of the exit folding, MergeBlockIntoPredecessor with a direct DT
+  via `merge_block_into_predecessor(..., direct_dt = dt)`). The SE is the global `se` (= `scev_pass_se` while the
+  pass runs, so LoopSimplify/LCSSA called from the unroller update it).
 
 ### ScalarEvolution (scev*.jai, loop_nest.jai, iv_users.jai)
 

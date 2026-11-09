@@ -48,7 +48,7 @@ lib/IR/Metadata.cpp 0.5
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.95
 lib/Analysis/TargetTransformInfo.cpp 0.3
-lib/Transforms/Utils/BasicBlockUtils.cpp 0.7
+lib/Transforms/Utils/BasicBlockUtils.cpp 0.72
 lib/Analysis/VectorUtils.cpp 0.45
 lib/IR/Intrinsics.cpp 0.75
 lib/IR/Instruction.cpp 0.7
@@ -60,7 +60,7 @@ lib/IR/ConstantFold.cpp 0.9
 lib/IR/Value.cpp 0.6
 lib/Analysis/MemorySSAUpdater.cpp 0.8  # no updateForClonedLoop / updateExitBlocksForClonedLoop
 lib/Support/KnownBits.cpp 0.85
-lib/Analysis/LoopInfo.cpp 0.6
+lib/Analysis/LoopInfo.cpp 0.7
 lib/IR/DataLayout.cpp 0.3
 lib/Transforms/Utils/PromoteMemoryToRegister.cpp 0.8
 lib/Analysis/GlobalsModRef.cpp 0.85
@@ -90,7 +90,7 @@ lib/IR/Dominators.cpp 0.9
 lib/Analysis/IVUsers.cpp 0.75
 lib/Analysis/CallGraph.cpp 0.4
 lib/Transforms/Scalar/LoopPassManager.cpp 0.7
-lib/Analysis/CodeMetrics.cpp 0.7
+lib/Analysis/CodeMetrics.cpp 0.8
 lib/IR/TypeFinder.cpp 0.8
 lib/Transforms/Scalar/BDCE.cpp 0.9
 lib/Analysis/ScopedNoAliasAA.cpp 0.85
@@ -115,7 +115,7 @@ lib/Transforms/Scalar/LICM.cpp 0.97  # all of LICM/LNICM incl. ControlFlowHoiste
 lib/Analysis/MustExecute.cpp 0.35  # LoopSafetyInfo + ICFLoopSafetyInfo only (no SimpleLoopSafetyInfo, printers, MustBeExecutedContextExplorer)
 lib/Analysis/AliasSetTracker.cpp 0.85  # no printers
 lib/Analysis/InstructionPrecedenceTracking.cpp 0.9
-lib/Transforms/Utils/LoopUtils.cpp 0.35  # + addRuntimeChecks/expandBounds, findDefsUsedOutsideOfLoop; appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint, isAlmostDeadIV, rewriteLoopExitValues (+ canLoopBeDeleted, hasHardUserWithinLoop; not the UnusedIndVarInLoop mode), deleteDeadLoop, breakLoopBackedge, hasMustProgress
+lib/Transforms/Utils/LoopUtils.cpp 0.45  # addRuntimeChecks/expandBounds, findDefsUsedOutsideOfLoop; appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint, isAlmostDeadIV, rewriteLoopExitValues (+ canLoopBeDeleted, hasHardUserWithinLoop; not the UnusedIndVarInLoop mode), deleteDeadLoop, breakLoopBackedge, hasMustProgress; cloneLoop, addStringMetadataToLoop, makeFollowupLoopID, has{Unroll,UnrollAndJam}Transformation, get/setLoopEstimatedTripCount, get/setLoopProbability, get/setBranchProbability
 lib/IR/EHPersonalities.cpp 0.8  # classifyEHPersonality, colorEHFunclets
 lib/CodeGen/TargetLoweringBase.cpp 0.3   # jai_simplifycfg: initActions, computeRegisterProperties, getTypeConversion, isBeneficialToExpandPowI, getBitWidthForCttzElements
 lib/Target/X86/X86ISelLowering.cpp 0.03   # jai_simplifycfg: the X86TargetLowering constructor's operation actions (generated), getPreferredVectorAction, isLegalAddressingMode, isCheapToSpeculateCt*, isNoopAddrSpaceCast
@@ -145,3 +145,11 @@ lib/Transforms/AggressiveInstCombine/AggressiveInstCombine.cpp 0.98  # all but m
 lib/Analysis/LoopAccessAnalysis.cpp 0.85  # no sortPtrAccesses, getStrideFromPointer users outside LAA, LoopAccessInfoManager::clear/invalidate (one LAI per printer run), remarks only as Report text
 lib/Analysis/HashRecognize.cpp 0.85  # no print<hash-recognize> printer
 lib/Transforms/Utils/LoopVersioning.cpp 0.8  # versionLoop, addPHINodes, annotateLoopWithNoAlias; no LoopVersioningPass (loop-versioning) or LoopVersioningLICM
+# L1.loop-unroll
+lib/Transforms/Scalar/LoopUnrollPass.cpp 0.9  # no optimization remarks, no PSI/BFI-based optsize (PGSO), no UniformityInfo, no legacy pass
+lib/Transforms/Utils/LoopUnroll.cpp 0.85  # no parallel-reduction accumulators (canParallelizeReductionWhenUnrolling, AddAdditionalAccumulators), no discriminator cloning for -fdebug-info-for-profiling
+lib/Transforms/Utils/LoopUnrollRuntime.cpp 0.98
+lib/Transforms/Utils/LoopPeel.cpp 0.98
+lib/Analysis/LoopUnrollAnalyzer.cpp 1
+lib/Transforms/Utils/ValueMapper.cpp 0.35  # mapValue, mapBlockAddress, remapInstruction, remapDbgRecord, mapSimpleMetadata; not the MDNodeMapper, global/alias/appending remapping, TypeMapper
+lib/Transforms/Utils/CloneFunction.cpp 0.3  # CloneBasicBlock, remapInstructionsInBlocks, cloneNoAliasScopes/adaptNoAliasScopes/cloneAndAdaptNoAliasScopes, identifyNoAliasScopesToClone
