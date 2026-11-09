@@ -1124,6 +1124,13 @@ Still slow / known:
    expandSCEVs, createVectorizedLoopSkeleton, VPlan::execute + every recipe's execute (VPlanRecipes.cpp),
    updateLoopMetadataAndProfileInfo (llvm.loop.isvectorized + unroll.runtime.disable), legacyCSE. With UserIC unset and
    getMaxInterleaveFactor = 1 (NoTTI) selectInterleaveCount returns 1 without needing costs (see lv_pass.jai).
+   Traps found while reading it: replicateByVF always replicates VPScalarIVStepsRecipes per lane (the lane-0 clone
+   takes the first-lane uses, the rest die); the ScalarIVSteps -> DerivedIV -> canonical IV simplifications in
+   simplifyRecipe only fire once the plan is unrolled (`Plan->isUnrolled()`, i.e. after unrollByUF sets the UF);
+   materializeConstantVectorTripCount gives the symbolic vector trip count an *underlying value* instead of replacing
+   it (materializeVectorTripCount then skips it); simplifyBranchConditionForVFAndUF turns the latch BranchOnCount into
+   BranchOnCond(true) when the vector trip count is known <= VF*UF. lv_plan.jai's `lvp_vectorize_with_plan` is the
+   place to continue.
 2. GeneratedRTChecks (SCEV and memory runtime checks; LoopVersioning noalias metadata), the "executing VPlans" gate.
 3. Reductions (createInLoopReductionRecipes, addReductionResultComputation, ComputeReductionResult), first-order
    recurrences, if-conversion (VPlanPredicator: needs a VPlan post-dominator tree), replicate regions, calls,
