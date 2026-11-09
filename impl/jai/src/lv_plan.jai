@@ -511,10 +511,6 @@ lvp_plan_and_vectorize :: (lp: *Lv_Planner, user_vf: Ec, user_ic: u64, max_facto
 vp_plan_single_vf :: (p: *Vp_Plan) -> Ec { assert(p.vfs.count == 1); return p.vfs[0]; }
 
 // the rest of processLoop for a chosen plan
-lvp_vectorize_with_plan :: (lp: *Lv_Planner, plan: *Vp_Plan, vf: Ec, user_ic: u64) -> bool {
-    vp_unported("executing VPlans (interleave count, runtime checks, executePlan)");
-    return false;
-}
 
 // VFSelectionContext::collectInLoopReductions
 lvp_collect_in_loop_reductions :: (lp: *Lv_Planner) {

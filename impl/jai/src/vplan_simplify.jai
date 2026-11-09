@@ -26,7 +26,8 @@ vp_try_to_fold_live_ins :: (r: Vp_Rec, ops: [] Vp_Val) -> Vp_Val {
         cand := o;
         okb, bx := vpm_vpi(o, VPI_BROADCAST, 1);
         if okb cand = vp_op(bx, 0);
-        if !vp_is_ir_value(cand) return NONE;
+        ck := vv(cand).kind;
+        if ck != .IR && ck != .SYMBOLIC && ck != .REGION return NONE;   // m_LiveIn
         v := vp_uv(cand);
         if v == NONE return NONE;
         array_add(*irs, v);
@@ -84,10 +85,16 @@ vpm_logical_and :: (v: Vp_Val) -> (bool, Vp_Val, Vp_Val) {
 vpm_not :: (v: Vp_Val) -> (bool, Vp_Val) {
     ok, r := vpm_vpi(v, VPI_NOT, 1);
     if ok return true, vp_op(r, 0);
+    // m_c_Binary<Xor>(m_AllOnes(), Op0)
+    okx, a, b := vpm_c_binary(v, vp_opc(.XOR));
+    if okx {
+        if vpm_all_ones(a) return true, b;
+        if vpm_all_ones(b) return true, a;
+    }
     return false, NONE;
 }
-vpm_is_false :: (v: Vp_Val) -> bool { return vp_is_constant_int(v) && type_bits(vp_scalar_type(v)) == 1 && ap_is_zero(vp_const_int_value(v)); }
-vpm_is_true :: (v: Vp_Val) -> bool { return vp_is_constant_int(v) && type_bits(vp_scalar_type(v)) == 1 && ap_is_one(vp_const_int_value(v)); }
+vpm_is_false :: (v_in: Vp_Val) -> bool { v := vpm_through_broadcast(v_in); return vp_is_constant_int(v) && type_bits(vp_scalar_type(v)) == 1 && ap_is_zero(vp_const_int_value(v)); }
+vpm_is_true :: (v_in: Vp_Val) -> bool { v := vpm_through_broadcast(v_in); return vp_is_constant_int(v) && type_bits(vp_scalar_type(v)) == 1 && ap_is_one(vp_const_int_value(v)); }
 // commuted binary (AllRecipe_commutative_match): both operand orders
 vpm_c_binary :: (v: Vp_Val, opc: u16) -> (bool, Vp_Val, Vp_Val) {
     r := vp_def(v);
@@ -363,7 +370,53 @@ vp_simplify_recipe :: (def: Vp_Rec) {
     }
     if vp_nops(def) == 1 && vp_is_vpi(def, VPI_COMPUTE_REDUCTION_RESULT) && vp_is_ir_value(vp_op(def, 0)) { vp_rauw(d, vp_op(def, 0)); return; }
     if !vp_is_unrolled() return;
-    vp_unported("simplifyRecipe on unrolled plans");
+    // extract-lane(%lane, %src) after unrolling
+    if vpm_vpi_r(def, VPI_EXTRACT_LANE, 2) {
+        lane := vp_op(def, 0); a := vp_op(def, 1);
+        if vp_is_single_scalar(a) { vp_rauw(d, a); return; }
+        ar := vp_def(a);
+        if vpm_zero_int(lane) && vp_is_canonical_widen_iv(ar) { vp_rauw(d, vb(vp_recipe_region(ar)).can_iv); return; }
+        vp_rauw(d, vr(vpb_nary(*b, vp_opc(.EXTRACTELEMENT), .[a, lane], .{}, .[], vr(def).dl)).def);
+        return;
+    }
+    // Def = (X + _) + Y with X = phi(0, Def.op0), Y a live-in: fold Y into the phi's start value
+    {
+        ok1, inc, y := vpm_binary(d, vp_opc(.ADD));
+        if ok1 && vp_is_ir_value(y) {
+            ok2, x, _ := vpm_binary(inc, vp_opc(.ADD));
+            xr := vp_def(x);
+            if ok2 && vp_is_vp_phi(xr) && vp_nops(xr) == 2 && vpm_zero_int(vp_op(xr, 0)) && vp_op(xr, 1) == vp_op(def, 0) {
+                iv_inc := vp_op(def, 0);
+                if vp_num_users(iv_inc) == 2 {
+                    xd := vr(xr).def;
+                    inc2: Vp_Rec = NONE;
+                    for u: vv(xd).users {
+                        oka, p, q := vpm_binary(vr(u).def, vp_opc(.ADD));
+                        if vr(u).def != NONE && oka && p == xd && q == y { inc2 = u; break; }
+                    }
+                    if vp_num_users(xd) == 1 || (vp_num_users(xd) == 2 && inc2 != NONE) {
+                        vp_rauw(d, iv_inc);
+                        if inc2 != NONE vp_rauw(vr(inc2).def, xd);
+                        vp_set_operand(xr, 0, y);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    if k == .VECTOR_POINTER {
+        if vp_nops(def) <= 2 || vpm_zero_int(vp_op(def, 2)) { vp_rauw(d, vp_op(def, 0)); return; }
+    }
+    if k == .SCALAR_IV_STEPS {
+        if vp_steps_start_index(def) == NONE && vp_only_first_lane_used(d) { vp_rauw(d, vp_op(def, 0)); return; }
+    }
+    if vpm_vpi_r(def, VPI_REDUCTION_START_VECTOR, 3) {
+        start_v := vp_op(def, 0);
+        in_loop :: (u: Vp_Rec, idx: s64, data: *void) -> bool { return vr(u).kind == .REDUCTION_PHI && vr(u).rdx_style != .UNORDERED; }
+        vp_replace_uses_with_if(d, start_v, in_loop, null);
+        return;
+    }
+    if vpl.ufs[0] == 1 && vpm_vpi_r(def, VPI_EXTRACT_LAST_PART, 1) { vp_rauw(d, vp_op(def, 0)); return; }
 }
 vp_is_uno_self :: (v: Vp_Val) -> bool {
     r := vp_def(v);

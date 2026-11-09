@@ -65,10 +65,17 @@ vpm_c_binary_with :: (v: Vp_Val, opc: u16, want: Vp_Val) -> (bool, Vp_Val) {
     return false, NONE;
 }
 // m_ZeroInt / m_One / m_AllOnes / m_SpecificInt on a live-in ConstantInt
-vpm_zero_int :: (v: Vp_Val) -> bool { return vp_is_const_int_zero(v); }
-vpm_one :: (v: Vp_Val) -> bool { return vp_is_const_int_one(v); }
-vpm_all_ones :: (v: Vp_Val) -> bool { return vp_is_constant_int(v) && ap_is_all_ones(vp_const_int_value(v)); }
-vpm_specific_int :: (v: Vp_Val, x: u64) -> bool {
+// (int_pred_ty looks through a Broadcast)
+vpm_through_broadcast :: (v: Vp_Val) -> Vp_Val {
+    r := vp_def(v);
+    if r != NONE && vr(r).kind == .INSTRUCTION && vr(r).opcode == VPI_BROADCAST return vp_op(r, 0);
+    return v;
+}
+vpm_zero_int :: (v_in: Vp_Val) -> bool { v := vpm_through_broadcast(v_in); return vp_is_const_int_zero(v); }
+vpm_one :: (v_in: Vp_Val) -> bool { v := vpm_through_broadcast(v_in); return vp_is_const_int_one(v); }
+vpm_all_ones :: (v_in: Vp_Val) -> bool { v := vpm_through_broadcast(v_in); return vp_is_constant_int(v) && ap_is_all_ones(vp_const_int_value(v)); }
+vpm_specific_int :: (v_in: Vp_Val, x: u64) -> bool {
+    v := vpm_through_broadcast(v_in);
     if !vp_is_constant_int(v) return false;
     a := vp_const_int_value(v);
     return ap_active_bits(a) <= 64 && ap_zext_value(a) == x;

@@ -185,6 +185,11 @@
 #load "lv_plan.jai";
 #load "lv_cm.jai";
 #load "vplan_transforms.jai";
+#load "vplan_print.jai";
+#load "vplan_unroll.jai";
+#load "vplan_exec_transforms.jai";
+#load "vplan_execute.jai";
+#load "lv_execute.jai";
 
 main :: () { opt_main(); }
 
