@@ -85,3 +85,30 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - VectorInstrContext hints only reach BasicTTI's getVectorInstrCost, which ignores them: on X86 they do not change
   any cost.
 
+
+## LoopVectorize (from LoopVectorize.cpp, LoopVectorizationLegality.cpp, LoopVectorizationPlanner.cpp, VPlan*.cpp of 23.1.5)
+
+- **The pass changes IR even when it vectorizes nothing**: `runImpl` runs `simplifyLoop` (LoopSimplify, no LCSSA
+  preservation) on every top-level loop and `formLCSSARecursively` on every candidate loop (innermost loops with
+  reducible CFG, collected in `LI` top-level order and popped from the back) before `processLoop`. It bails out before
+  any of that only when the target has no vector registers *and* `getMaxInterleaveFactor(VF=1)` < 2 (X86 without
+  SSE).
+- **NoTTI vectorizes narrow types**: without a target triple, `getRegisterBitWidth(FixedWidthVector)` is 32, so a loop
+  whose widest load/store/reduction type is i8 or i16 gets MaxVF 4 or 2 and is costed with the base cost model. With
+  i32 and wider the maximum VF is 1. `getMaxInterleaveFactor` is 1 for NoTTI and for X86 at VF 1, so a scalar-only loop
+  is never interleaved unless the user forces an interleave count; `selectInterleaveCount` then returns 1 on every
+  path (its loop-cost and register-usage computations do not matter).
+- `LoopVectorizeHints`: `llvm.loop.isvectorized` is implied when the width and the interleave count are both 1
+  (`-force-vector-width=1 -force-vector-interleave=1` disables the pass). `-force-vector-width` does not set the
+  `Force` hint: `isOutsideLoopWorkProfitable` still runs, but with the user VF the scalar cost is 0 and it returns true.
+- `VFDatabase::getMappings` reads `vector-function-abi-variant` through `CallBase::getFnAttr`, i.e. the call site's
+  attributes and then the called function's (a declaration-level attribute counts).
+- Legality's `canVectorizeWithIfConvert` computes "safe pointers" with `isDereferenceableAndAlignedInLoop`, but the
+  answer only decides which loads of predicated blocks are masked; it never makes legality fail.
+- `computeMinimumValueSizes(Blocks, DB, &TTI)`: with NoTTI `isTypeLegal` is false for every type, so a loop with any
+  zext/sext and a trunc/icmp root is analysed; without a zext/sext the result is empty.
+- **VPlan user lists are ordered**: `VPValue::Users` is a SmallVector (push_back on addOperand, erase of the first
+  match on removeUser). `VPlan::duplicate()` clones the blocks and then `remapOperands` re-points every operand in deep
+  RPO / recipe / operand order, so the copy's user lists are in that order, not the original's.
+- `VPlanTransforms::makeMemOpWideningDecisions` widens unit-stride accesses itself (`widenConsecutiveMemOps`, from the
+  SCEV of the VPlan address) before consulting the legacy cost model's decisions for the rest.

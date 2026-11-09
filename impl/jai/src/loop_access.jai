@@ -1377,7 +1377,10 @@ laa_analyze_loop :: (a: *Laa) -> bool {
     return false;
 }
 call_has_vector_variants :: (c: Value_Id) -> bool {
+    // CallBase::getFnAttr: the call site's attributes, then the called function's
     for attr_set_items(attr_list_fn(inst(c).attrs)) if it.kind == .STRING_ATTR && it.key == "vector-function-abi-variant" return true;
+    f := call_called_function(c);
+    if f != NONE for attr_set_items(attr_list_fn(glob(f).attrs)) if it.kind == .STRING_ATTR && it.key == "vector-function-abi-variant" return true;
     return false;
 }
 

@@ -54,7 +54,7 @@ lib/IR/Intrinsics.cpp 0.75
 lib/IR/Instruction.cpp 0.7
 lib/IR/IRBuilder.cpp 0.25
 lib/AsmParser/LLLexer.cpp 0.7  # manual: own lexer structure, lexes all IR tokens (heuristic 0.72)
-lib/Analysis/IVDescriptors.cpp 0.05
+lib/Analysis/IVDescriptors.cpp 0.95
 lib/Transforms/InstCombine/InstCombinePHI.cpp 0.95
 lib/IR/ConstantFold.cpp 0.9
 lib/IR/Value.cpp 0.6
@@ -170,3 +170,12 @@ lib/Transforms/Utils/InlineFunction.cpp 0.85  # not inlineRetainOrClaimRVCalls (
 lib/Transforms/IPO/ModuleInliner.cpp 0.9  # manual: ModuleInlinerPass::run as module_inliner_run (heuristic 0.03: renamed)
 lib/Analysis/ProfileSummaryInfo.cpp 0.75  # not the legacy wrapper / print-profile-summary
 lib/IR/ProfileSummary.cpp 0.4  # getFromMD only (no getMD / printSummary)
+lib/Transforms/Vectorize/LoopVectorizationLegality.cpp 0.85  # no outer loops, uncountable early exits, histograms
+lib/Transforms/Vectorize/LoopVectorize.cpp 0.2  # driver, hints, max VF, decisions, plan building; no cost model / execution
+lib/Transforms/Vectorize/LoopVectorizationPlanner.cpp 0.35  # VFSelectionContext max-VF parts
+lib/Transforms/Vectorize/VPlan.cpp 0.3  # blocks, values, duplicate, VPBuilder pieces; no execute / printing
+lib/Transforms/Vectorize/VPlanConstruction.cpp 0.45
+lib/Transforms/Vectorize/VPlanTransforms.cpp 0.12
+lib/Transforms/Vectorize/VPlanUtils.cpp 0.6
+lib/Transforms/Vectorize/VPlanRecipes.cpp 0.08  # the recipe property queries only
+lib/Transforms/Vectorize/VPlanPredicator.cpp 0.05
