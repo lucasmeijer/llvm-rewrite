@@ -34,4 +34,5 @@ inferattrs_run_module :: () {
     printer_note_ir_changed();
     for f: ir.m_functions fam_invalidate(f, PRESERVE_NONE);
     globals_aa = null;
+    lcg_invalidate();
 }

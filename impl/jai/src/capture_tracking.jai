@@ -22,7 +22,7 @@ ct_should_stop :: (s: Ct_Stop, cc: u8) -> bool {
     return false;
 }
 
-Ct_Kind :: enum u8 { SIMPLE; BEFORE; EARLIEST; ALLOCA_CMP; }
+Ct_Kind :: enum u8 { SIMPLE; BEFORE; EARLIEST; ALLOCA_CMP; ARG_USES; }   // ARG_USES: FunctionAttrs' ArgumentUsesTracker (pass_function_attrs.jai)
 Ct_Action :: enum u8 { STOP; CONTINUE; CONTINUE_IGNORING_RETURN; }
 
 Capture_Tracker :: struct {
@@ -54,6 +54,7 @@ ct_too_many_uses :: (t: *Capture_Tracker) {
             t.cc = t.mask; t.cc_with_ret = t.mask;
             t.earliest = block(fn_entry(t.f)).first;
         case .ALLOCA_CMP; t.captured = true;
+        case .ARG_USES; fa_arg_uses_too_many();
     }
 }
 
@@ -96,6 +97,7 @@ ct_captured :: (t: *Capture_Tracker, u: Use_Id, use_cc: u8) -> Ct_Action {
             }
             t.captured = true;
             return .STOP;
+        case .ARG_USES; return fa_arg_uses_captured(u, use_cc);
     }
     return .CONTINUE;
 }

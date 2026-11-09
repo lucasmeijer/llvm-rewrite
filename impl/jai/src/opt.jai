@@ -138,6 +138,10 @@
 #load "loop_unroll_utils.jai";
 #load "loop_unroll_runtime.jai";
 #load "loop_peel.jai";
+#load "lazy_call_graph.jai";
+#load "cgscc_pm.jai";
+#load "pass_function_attrs.jai";
+#load "pass_inliner.jai";
 
 main :: () { opt_main(); }
 

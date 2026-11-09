@@ -1923,13 +1923,14 @@ is_guaranteed_not_to_be_undef_or_poison_kind :: (v: Value_Id, ac: *Assumption_Ca
     if is_constant_kind(k) {
         if k == .C_POISON return !includes_poison(kind);
         if k == .C_UNDEF return !includes_undef(kind);
-        if k == .C_INT || k == .GLOBAL_VAR || k == .C_FP || k == .C_NULL || k == .FUNCTION {
+        // (a C_INT of byte type is a ConstantByte, not a ConstantInt)
+        if (k == .C_INT && type_kind(scalar_type(vtype(v))) != .BYTE) || k == .GLOBAL_VAR || k == .C_FP || k == .C_NULL || k == .FUNCTION {
             if !(k == .C_NULL && is_vector_type(vtype(v))) return true;
         }
         if is_vector_type(vtype(v)) {
             if k == .C_EXPR {
                 s := get_splat_value(v);
-                if s != NONE && (vkind(s) == .C_INT || vkind(s) == .C_FP) return true;
+                if s != NONE && ((vkind(s) == .C_INT && type_kind(vtype(s)) != .BYTE) || vkind(s) == .C_FP) return true;
             } else {
                 if includes_undef(kind) && contains_undef_element(v) return false;
                 if includes_poison(kind) && contains_poison_element(v) return false;

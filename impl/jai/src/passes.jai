@@ -19,6 +19,9 @@ Preserved :: struct {
     all: bool;
     cfg: bool;
     mask: u32;
+    all_fn: bool;    // preserveSet<AllAnalysesOn<Function>>
+    all_scc: bool;   // preserveSet<AllAnalysesOn<LazyCallGraph::SCC>>
+    lcg: bool;       // preserve<LazyCallGraphAnalysis>
 }
 PRESERVE_ALL :: Preserved.{all = true};
 PRESERVE_NONE :: Preserved.{};
@@ -29,6 +32,7 @@ is_preserved :: (pa: Preserved, k: Analysis_Kind) -> bool { return pa.all || (pa
 // Whether a cached result survives (Result::invalidate). DominatorTree/PostDominatorTree are CFG analyses.
 analysis_survives :: (k: Analysis_Kind, pa: Preserved) -> bool {
     if is_preserved(pa, k) return true;
+    if pa.all_fn return true;   // every Analysis_Kind is a function analysis
     if k == .DOMTREE || k == .POSTDOMTREE || k == .LOOPS || k == .CYCLES || k == .BPI || k == .BFI return pa.cfg;
     return false;
 }
@@ -233,7 +237,7 @@ fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
 
 // ---------------------------------------------------------------- the registry
 
-Pass_Level :: enum u8 { MODULE; FUNCTION; LOOP; }
+Pass_Level :: enum u8 { MODULE; FUNCTION; LOOP; CGSCC; }
 
 Pass_Kind :: enum u8 {
     // structure
@@ -276,6 +280,12 @@ Pass_Kind :: enum u8 {
     LOOP_UNROLL; LOOP_UNROLL_FULL;
     // SimpleLoopUnswitch (pass_simple_loop_unswitch.jai)
     SIMPLE_LOOP_UNSWITCH;
+    // CGSCC pass manager (cgscc_pm.jai), LazyCallGraph (lazy_call_graph.jai)
+    CGSCC_ADAPTOR; CGSCC_PM; CGSCC_FN_ADAPTOR; DEVIRT; NO_OP_CGSCC; PRINT_LCG; REQUIRE_LCG; INVALIDATE_LCG;
+    // FunctionAttrs (pass_function_attrs.jai)
+    FUNCTION_ATTRS; RPO_FUNCTION_ATTRS; NORECURSE_LTO_INFERENCE;
+    // Inliner (pass_inliner.jai), AlwaysInliner (pass_always_inliner.jai)
+    INLINE; ALWAYS_INLINE;
 }
 
 Pass_Info :: struct {
@@ -393,6 +403,13 @@ PASS_TABLE :: Pass_Info.[
     .{"print<block-freq>", .FUNCTION, .PRINT_BFI, true, .BFI},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
     .{"invalidate<block-freq>", .FUNCTION, .INVALIDATE, true, .BFI},
+    .{"no-op-cgscc", .CGSCC, .NO_OP_CGSCC, false, .DOMTREE},
+    .{"print-lcg", .MODULE, .PRINT_LCG, true, .DOMTREE},
+    .{"require<lcg>", .MODULE, .REQUIRE_LCG, true, .DOMTREE},
+    .{"invalidate<lcg>", .MODULE, .INVALIDATE_LCG, true, .DOMTREE},
+    .{"function-attrs", .CGSCC, .FUNCTION_ATTRS, false, .DOMTREE},   // also function-attrs<skip-non-recursive-function-attrs>
+    .{"rpo-function-attrs", .MODULE, .RPO_FUNCTION_ATTRS, false, .DOMTREE},
+    .{"norecurse-lto-inference", .MODULE, .NORECURSE_LTO_INFERENCE, false, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -410,6 +427,8 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "lnicm<") && name[name.count - 1] == #char ">" return lookup_pass("lnicm");
     if begins_with(name, "loop-unroll<") && name[name.count - 1] == #char ">" return lookup_pass("loop-unroll");
     if begins_with(name, "simple-loop-unswitch<") && name[name.count - 1] == #char ">" return lookup_pass("simple-loop-unswitch");
+    if begins_with(name, "function-attrs<") && name[name.count - 1] == #char ">" return lookup_pass("function-attrs");
+    if begins_with(name, "inline<") && name[name.count - 1] == #char ">" return lookup_pass("inline");
     return null;
 }
 
@@ -429,6 +448,8 @@ Pass_Node :: struct {
     first_child: s32 = -1;
     next: s32 = -1;
     use_mssa: bool;        // LOOP_ADAPTOR: loop-mssa(...)
+    count: s32;            // DEVIRT: devirt<N>
+    eager_inv: bool;       // CGSCC_FN_ADAPTOR: function<eager-inv>(...)
 }
 
 pipeline: struct {
@@ -495,9 +516,76 @@ parse_pipeline_text :: (text: string) -> s32 {
 is_module_pass_name :: (name: string) -> bool {
     if name == "module" return true;
     if name == "function" || begins_with(name, "function<") return true;   // still a module-level element
-    if name == "cgscc" || name == "loop" || name == "loop-mssa" return false;
+    if name == "cgscc" return true;
+    if name == "loop" || name == "loop-mssa" return false;
     p := lookup_pass(name);
     return p != null && p.level == .MODULE;
+}
+
+// parseDevirtPassName: devirt<N>, N >= 0
+parse_devirt_pass_name :: (name: string) -> (bool, s32) {
+    if !begins_with(name, "devirt<") || name[name.count - 1] != #char ">" return false, 0;
+    inner := slice(name, 7, name.count - 8);
+    if inner.count == 0 return false, 0;
+    v, ok, rest := string_to_int(inner);
+    if !ok || rest.count != 0 || v < 0 return false, 0;
+    return true, cast(s32) v;
+}
+
+// isCGSCCPassName
+is_cgscc_pass_name :: (name: string) -> bool {
+    if name == "cgscc" || name == "function" || begins_with(name, "function<") return true;
+    ok, _ := parse_devirt_pass_name(name);
+    if ok return true;
+    p := lookup_pass(name);
+    return p != null && p.level == .CGSCC;
+}
+
+// parseCGSCCPass: one element inside a cgscc pipeline
+parse_cgscc_pass :: (cgpm: s32, last: *s32, e: s32) {
+    el := pipeline.elems[e];
+    if el.has_children {
+        if el.name == "cgscc" {
+            inner := new_node(.CGSCC_PM, null, "cgscc");
+            ilast: s32 = -1;
+            c := el.first_child;
+            while c >= 0 { parse_cgscc_pass(inner, *ilast, c); c = pipeline.elems[c].next; }
+            link_child(cgpm, last, inner);
+            return;
+        }
+        if el.name == "function" || el.name == "function<eager-inv>" {
+            fa := new_node(.CGSCC_FN_ADAPTOR, null, el.name);
+            pipeline.nodes[fa].eager_inv = el.name == "function<eager-inv>";
+            flast: s32 = -1;
+            c := el.first_child;
+            while c >= 0 { parse_function_pass(fa, *flast, c); c = pipeline.elems[c].next; }
+            link_child(cgpm, last, fa);
+            return;
+        }
+        if begins_with(el.name, "function<") fatal("pass pipeline: '%' (no-rerun) is not supported yet", el.name);
+        ok, n := parse_devirt_pass_name(el.name);
+        if ok {
+            dv := new_node(.DEVIRT, null, el.name);
+            pipeline.nodes[dv].count = n;
+            inner := new_node(.CGSCC_PM, null, "cgscc");
+            ilast: s32 = -1;
+            c := el.first_child;
+            while c >= 0 { parse_cgscc_pass(inner, *ilast, c); c = pipeline.elems[c].next; }
+            dlast: s32 = -1;
+            link_child(dv, *dlast, inner);
+            link_child(cgpm, last, dv);
+            return;
+        }
+        fatal("invalid use of '%' pass as cgscc pipeline", el.name);
+    }
+    p := lookup_pass(el.name);
+    if p == null || p.level == .MODULE unknown_pass(el.name);
+    if p.level == .CGSCC { link_child(cgpm, last, new_node(p.kind, p, el.name)); return; }
+    // createCGSCCToFunctionPassAdaptor(CREATE_PASS) (a loop pass: of createFunctionToLoopPassAdaptor(CREATE_PASS))
+    fa := new_node(.CGSCC_FN_ADAPTOR, null, "function");
+    flast: s32 = -1;
+    parse_function_pass(fa, *flast, e);
+    link_child(cgpm, last, fa);
 }
 
 new_node :: (kind: Pass_Kind, info: *Pass_Info, name: string) -> s32 {
@@ -512,7 +600,7 @@ link_child :: (parent: s32, last: *s32, child: s32) {
 }
 
 unknown_pass :: (name: string) {
-    if name == "cgscc" || name == "machine-function"
+    if name == "machine-function"
         fatal("pass pipeline: '%' pass managers are not supported yet", name);
     fatal("unknown pass name '%' (not implemented in the Jai opt yet)", name);
 }
@@ -591,6 +679,17 @@ parse_module_pass :: (mpm: s32, last: *s32, e: s32) {
             link_child(mpm, last, inner);
             return;
         }
+        if el.name == "cgscc" {
+            ad := new_node(.CGSCC_ADAPTOR, null, "cgscc");
+            alast: s32 = -1;
+            inner := new_node(.CGSCC_PM, null, "cgscc");
+            ilast: s32 = -1;
+            c := el.first_child;
+            while c >= 0 { parse_cgscc_pass(inner, *ilast, c); c = pipeline.elems[c].next; }
+            link_child(ad, *alast, inner);
+            link_child(mpm, last, ad);
+            return;
+        }
         if el.name == "function" || el.name == "function<eager-inv>" {
             fa := new_node(.FUNCTION_ADAPTOR, null, el.name);
             flast: s32 = -1;
@@ -604,6 +703,14 @@ parse_module_pass :: (mpm: s32, last: *s32, e: s32) {
     p := lookup_pass(el.name);
     if p == null unknown_pass(el.name);
     if p.level == .MODULE { link_child(mpm, last, new_node(p.kind, p, el.name)); return; }
+    if p.level == .CGSCC {
+        // createModuleToPostOrderCGSCCPassAdaptor(CREATE_PASS)
+        ad := new_node(.CGSCC_ADAPTOR, null, "cgscc");
+        alast: s32 = -1;
+        link_child(ad, *alast, new_node(p.kind, p, el.name));
+        link_child(mpm, last, ad);
+        return;
+    }
     if p.level == .FUNCTION {
         // a function pass in a module pipeline gets its own ModuleToFunctionPassAdaptor
         fa := new_node(.FUNCTION_ADAPTOR, null, "function");
@@ -634,6 +741,18 @@ parse_pass_pipeline :: (text: string) -> s32 {
     last: s32 = -1;
     name := pipeline.elems[first].name;
     is_loop, loop_mssa := is_loop_pass_name(name);
+    if !is_module_pass_name(name) && is_cgscc_pass_name(name) {
+        // Pipeline = {{"cgscc", std::move(*Pipeline)}}
+        ad := new_node(.CGSCC_ADAPTOR, null, "cgscc");
+        alast: s32 = -1;
+        inner := new_node(.CGSCC_PM, null, "cgscc");
+        ilast: s32 = -1;
+        e := first;
+        while e >= 0 { parse_cgscc_pass(inner, *ilast, e); e = pipeline.elems[e].next; }
+        link_child(ad, *alast, inner);
+        link_child(root, *last, ad);
+        return root;
+    }
     if !is_module_pass_name(name) && is_loop {
         // Pipeline = {{"function", {{UseMemorySSA ? "loop-mssa" : "loop", std::move(*Pipeline)}}}}
         fa := new_node(.FUNCTION_ADAPTOR, null, "function");
@@ -757,6 +876,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if unswitch_parse_cl_opt(name, value, has_value) return true;   // pass_simple_loop_unswitch.jai
     // -mattr is a cl::list (CommaSeparated): repeated options accumulate
     if name == "mattr" && has_value && tti_opts.mattr.count { tti_opts.mattr = sprint("%,%", tti_opts.mattr, value); return true; }
+    if ipo_parse_cl_opt(name, value, has_value) return true;   // cgscc_pm.jai, pass_function_attrs.jai, inliner
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {
@@ -824,14 +944,29 @@ run_module_pm :: (n: s32) {
             case .MODULE_PM; run_module_pm(c);
             case .FUNCTION_ADAPTOR; run_function_adaptor(c);
             case .NO_OP_MODULE; should_run_pass(node, NONE);
-            case .DEBUGIFY; if should_run_pass(node, NONE) run_debugify_pass();
-            case .CHECK_DEBUGIFY; if should_run_pass(node, NONE) check_debugify_metadata("", "CheckModuleDebugify");
+            case .DEBUGIFY; if should_run_pass(node, NONE) { run_debugify_pass(); lcg_invalidate(); }
+            case .CHECK_DEBUGIFY; if should_run_pass(node, NONE) { check_debugify_metadata("", "CheckModuleDebugify"); lcg_invalidate(); }
             case .REQUIRE_GLOBALS_AA; should_run_pass(node, NONE); if !globals_aa globals_aa = globals_aa_compute();
             case .INFERATTRS; if should_run_pass(node, NONE) inferattrs_run_module();
+            case .CGSCC_ADAPTOR; mam_invalidate(run_cgscc_adaptor(c));
+            case .PRINT_LCG; should_run_pass(node, NONE); lcg_printer_run();
+            case .REQUIRE_LCG; should_run_pass(node, NONE); lcg_get();
+            case .INVALIDATE_LCG; should_run_pass(node, NONE); lcg_invalidate();
+            case .RPO_FUNCTION_ATTRS; if should_run_pass(node, NONE) mam_invalidate(rpo_function_attrs_run());
+            case .NORECURSE_LTO_INFERENCE; if should_run_pass(node, NONE) mam_invalidate(norecurse_lto_inference_run());
             case; fatal("internal: '%' is not a module pass", node.name);
         }
         c = pipeline.nodes[c].next;
     }
+}
+
+// MAM.invalidate(M, PA) after a module pass: the LazyCallGraph, and (FunctionAnalysisManagerModuleProxy) every
+// function's analyses unless PA preserves AllAnalysesOn<Function>
+mam_invalidate :: (pa: Preserved) {
+    if pa.all return;
+    if !pa.lcg lcg_invalidate();
+    if !pa.all_fn for f: ir.m_functions fam_invalidate(f, pa);
+    globals_aa = null;
 }
 
 // ModuleToFunctionPassAdaptor::run: every defined function in module order
@@ -846,7 +981,7 @@ run_function_adaptor :: (n: s32) {
             node := *pipeline.nodes[c];
             if should_run_pass(node, f) {
                 pa := run_function_pass(node, f);
-                if !pa.all printer_note_ir_changed();
+                if !pa.all { printer_note_ir_changed(); lcg_invalidate(); }
                 fam_invalidate(f, pa);
             }
             reset_temporary_storage();
