@@ -49,6 +49,7 @@
 #load "pass_div_rem_pairs.jai";
 #load "pass_float2int.jai";
 #load "pass_sink.jai";
+#load "pass_tailcallelim.jai";
 #load "pass_reassociate.jai";
 #load "constraint_system.jai";
 #load "pass_constraint_elimination.jai";

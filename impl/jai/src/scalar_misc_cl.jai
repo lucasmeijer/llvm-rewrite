@@ -18,6 +18,7 @@ scalar_misc_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
         case "likely-branch-weight"; le_cl.likely_branch_weight = cast(u32) smisc_int(name, value, has_value);
         case "unlikely-branch-weight"; le_cl.unlikely_branch_weight = cast(u32) smisc_int(name, value, has_value);
         case "float2int-max-integer-bw"; f2i_cl.max_integer_bw = cast(u32) smisc_int(name, value, has_value);
+        case "tre-disable-entrycount-recompute"; tre_cl.disable_entrycount_recompute = smisc_bool(name, value, has_value);
         case; return false;
     }
     return true;
