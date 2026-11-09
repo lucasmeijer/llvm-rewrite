@@ -44,6 +44,11 @@ Slp_Extra :: struct {
     min_bws: Table(Te_Id, Min_Bw);
     analyzed_min_bw_vals: Table(Value_Id, bool);
     reduction_bit_width: u64;
+    // cost model (slp_cost.jai, slp_tree_cost.jai)
+    external_uses: [..] External_User;
+    external_uses_as_original_scalar: [..] Value_Id;   // SmallPtrSet (membership)
+    external_uses_with_non_users: [..] Value_Id;       // SmallPtrSet (membership)
+    loop_nest_scale_cache: Table(Loop_Id, u64);
 }
 slpx: Slp_Extra;
 
@@ -72,6 +77,8 @@ slp_init :: (f: Value_Id, tti: *Tti, aar: Aa_Results, li: *Loop_Info, dt: *Dom_T
     slpx.batch_aa = aa_query_new(*slpx.aar);
     slpx.entry_to_last_instruction.allocator = temp;
     slpx.min_bws.allocator = temp; slpx.analyzed_min_bw_vals.allocator = temp;
+    slpx.external_uses.allocator = temp; slpx.external_uses_as_original_scalar.allocator = temp;
+    slpx.external_uses_with_non_users.allocator = temp; slpx.loop_nest_scale_cache.allocator = temp;
     collect_ephemeral_values_fn(f, ac, *slpx.eph_values);
     slp_init_reg_sizes(slp_cl.max_reg_size_given, slp_cl.min_reg_size_given);
 }
@@ -218,9 +225,9 @@ slp_delete_tree_later_state :: () {   // the deleteTree members of later stages
     table_reset(*slpx.entry_to_last_instruction);
     table_reset(*slpx.min_bws);
     slpx.reduction_bit_width = 0;
+    array_reset_keeping_memory(*slpx.external_uses);
+    array_reset_keeping_memory(*slpx.external_uses_as_original_scalar);
+    array_reset_keeping_memory(*slpx.external_uses_with_non_users);
 }
-slp_calculate_tree_cost_and_trim_non_profitable :: () -> Cost { slp_fail("calculateTreeCostAndTrimNonProfitable"); return 0; }
-slp_build_external_uses :: () { slp_fail("buildExternalUses"); }
-slp_get_tree_cost :: (tree_cost: Cost) -> Cost { slp_fail("getTreeCost"); return 0; }
 slp_vectorize_tree :: () { slp_fail("vectorizeTree"); }
 slp_optimize_gather_sequence :: () { slp_fail("optimizeGatherSequence"); }

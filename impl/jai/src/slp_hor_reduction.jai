@@ -700,7 +700,70 @@ hr_try_to_reduce :: (h: *Hr_Reduction) -> Value_Id {
                     slp_analyzed_reduction_vals(vl);
                 continue;
             }
-            slp_fail("cost modelling of a horizontal reduction");
+            slp_reorder_top_to_bottom();
+            slp_reorder_bottom_to_top((rdx_fmf & FMF_REASSOC) != 0 || is_int_or_int_vector(vtype(vl[0])) || h.reduction_limit > 2 || h.rk == HR_ORDERED);
+            // LocalExternallyUsedValues (TrackedVals map every value to itself: nothing was vectorized yet)
+            local_ext := vl_copy(excluded);
+            set_add_v(*local_ext, h.root);
+            for cnt: 0..h.reduced_vals.count-1 {
+                if cnt == i || (shuffled_extracts && cnt == i - 1) continue;
+                for v: h.reduced_vals[cnt] if is_inst(v) set_add_v(*local_ext, v);
+            }
+            nsv_keys := hr_new_list(); nsv_cnts: [..] u32; nsv_cnts.allocator = temp;
+            if !h.is_supported_identity_op {
+                for cnt: 0..cast(s64) num_reduced - 1 {
+                    if cast(u64) cnt >= pos && cast(u64) cnt < pos + redux continue;
+                    orig := candidates[cnt];
+                    found := false;
+                    for nsv_keys if it == orig { nsv_cnts[it_index] += 1; found = true; break; }
+                    if !found { array_add(*nsv_keys, orig); array_add(*nsv_cnts, 1); }
+                }
+            }
+            slp_transform_nodes();
+            slp_compute_minimum_value_sizes();
+            tree_cost := slp_calculate_tree_cost_and_trim_non_profitable(vl);
+            {
+                visited := hr_new_list();
+                for cnt: 0..cast(s64) num_reduced - 1 {
+                    if cast(u64) cnt >= pos && cast(u64) cnt < pos + redux continue;
+                    rdx := candidates[cnt];
+                    if slp_has(visited, rdx) continue;
+                    array_add(*visited, rdx);
+                    if !slp_has(vl, rdx) && slp_is_vectorized(rdx) { set_add_v(*local_ext, rdx); continue; }
+                    num_ops: u32 = 0;
+                    if h.is_supported_identity_op { for same_keys if it == rdx { num_ops = same_cnts[it_index]; break; } }
+                    else { for nsv_keys if it == rdx { num_ops = nsv_cnts[it_index]; break; } }
+                    rops := hr_rv_ops_find(h, rdx);
+                    if !rops || cast(s64) num_ops != rops.count set_add_v(*local_ext, rdx);
+                }
+            }
+            slp_build_external_uses(local_ext);
+            reduction_cost: Cost = 0;
+            if !(h.rk == HR_ORDERED || slp_is_reduced_bitcast_root() || slp_is_reduced_cmp_bitcast_root()) {
+                if h.is_supported_identity_op reduction_cost = hr_get_reduction_cost(h, vl, same_keys, same_cnts, is_csmm, rdx_fmf);
+                else reduction_cost = hr_get_reduction_cost(h, vl, .[], .[], is_csmm, rdx_fmf);
+            }
+            insert_pt := h.root;
+            if is_csmm insert_pt = op(h.root, 0);
+            cost := slp_get_tree_cost(tree_cost, vl, reduction_cost, insert_pt);
+            #if DEBUG_SLP print("DBG reduction tree cost %\n", cost_to_string(cost));
+            if !cost_valid(cost) break;
+            if cost >= -slp_cl.threshold {
+                if !adjust(h, false, ignore_list, *check_local, prev_redux, *redux, *pos, start, num_reduced, sty) {
+                    slp_analyzed_reduction_vals(vl);
+                    offset := ifx pos == start then pos else pos - 1;
+                    if redux > h.reduction_limit && slp_is_tree_not_extendable() {
+                        vf := slp_floor_full_vector_number_of_elements(slp.tti, vtype(vl[0]), redux - 1);
+                        while vf >= h.reduction_limit {
+                            defer vf = slp_floor_full_vector_number_of_elements(slp.tti, vtype(vl[0]), vf - 1);
+                            if has_single_bit(vf) && slp_canonical_graph_size() != cast(u32) slp.entries.count continue;
+                            for idx: 0..cast(s64) (redux - vf) - 1 array_add(*ignored, .[offset + cast(u64) idx, vf]);
+                        }
+                    }
+                }
+                continue;
+            }
+            slp_fail("vectorizeTree of a horizontal reduction");
         }
         // nothing vectorized (AnyVectorized is false): reused scalars are still emitted as scaled values
         if opt_reused slp_fail("scaled reused values of a horizontal reduction (emitScaleForReusedOps)");
@@ -729,7 +792,26 @@ hr_try_to_reduce_ordered :: (h: *Hr_Reduction) -> Value_Id {
         for vl if is_inst(it) && slp_is_deleted(it) return false;
         slp_build_tree_with_ignore(vl, ignore_list);
         if slp_is_tree_tiny_and_not_fully_vectorizable(true) { slp_analyzed_reduction_vals(vl); return false; }
-        slp_fail("cost modelling of an ordered horizontal reduction");
+        slp_reorder_bottom_to_top();
+        local_ext := hr_new_list();
+        set_add_v(*local_ext, h.root);
+        for c, cnt: candidates {
+            if cast(u64) cnt >= start && cast(u64) cnt < start + width continue;
+            if is_inst(c) set_add_v(*local_ext, c);
+        }
+        slp_transform_nodes();
+        slp_compute_minimum_value_sizes();
+        tree_cost := slp_calculate_tree_cost_and_trim_non_profitable(vl, h.root);
+        slp_build_external_uses(local_ext);
+        // RdxFMF: the flags of the reduction ops of the candidates, without reassoc
+        fmf: u32 = FMF_ALL;
+        for c: candidates { p := hr_rv_ops_find(h, c); if p for o: p.* if is_fp_math_inst(o) fmf &= inst_fmf(o); }
+        fmf &= ~cast(u32) FMF_REASSOC;
+        reduction_cost := hr_get_reduction_cost(h, vl, .[], .[], false, fmf);
+        cost := slp_get_tree_cost(tree_cost, vl, reduction_cost, h.root);
+        #if DEBUG_SLP print("DBG ordered reduction tree cost %\n", cost_to_string(cost));
+        if cost > -slp_cl.threshold { slp_analyzed_reduction_vals(vl); return false; }
+        slp_fail("vectorizeTree of an ordered horizontal reduction");
         return false;
     }
     n := cast(u64) candidates.count;
@@ -745,4 +827,122 @@ hr_try_to_reduce_ordered :: (h: *Hr_Reduction) -> Value_Id {
     }
     hr_mark_ops_analyzed(h);
     return NONE;
+}
+
+// ---------------------------------------------------------------- the cost of a reduction
+
+// RecurrenceDescriptor::getOpcode(RdxKind)
+hr_kind_opcode :: (k: Hr_Rdx_Kind) -> Opcode {
+    if k == {
+        case .ADD; return .ADD; case .MUL; return .MUL; case .OR; return .OR; case .AND; return .AND; case .XOR; return .XOR;
+        case .FADD; return .FADD; case .FMUL; return .FMUL;
+    }
+    fatal("internal: slp: getOpcode of a min/max reduction kind");
+    return .NONE_OP;
+}
+// getMinMaxReductionIntrinsicOp(RdxKind)
+hr_kind_min_max_intrinsic :: (k: Hr_Rdx_Kind) -> Intrinsic_Id {
+    if k == {
+        case .SMAX; return IID_SMAX; case .SMIN; return IID_SMIN; case .UMAX; return IID_UMAX; case .UMIN; return IID_UMIN;
+        case .FMAX; return IID_MAXNUM; case .FMIN; return IID_MINNUM; case .FMAXIMUM; return IID_MAXIMUM; case .FMINIMUM; return IID_MINIMUM;
+    }
+    fatal("internal: slp: getMinMaxReductionIntrinsicOp of a non-min/max kind");
+    return NOT_INTRINSIC;
+}
+
+// HorizontalReduction::getReductionCost(TTI, ReducedVals, SameValuesCounter, IsCmpSelMinMax, FMF, R, DT, DL, TLI)
+hr_get_reduction_cost :: (h: *Hr_Reduction, reduced: [] Value_Id, svc_keys: [] Value_Id, svc_cnts: [] u32, is_csmm: bool, fmf: u32) -> Cost {
+    t := slp.tti;
+    K :: TCK_RECIP_THROUGHPUT;
+    sty := vtype(reduced[0]);
+    redux := reduced.count;
+    vec_ty := slp_reduction_type();
+    vector_cost: Cost = 0;
+    scalar_cost: Cost;
+    all_consts := slp_all_constant(reduced);
+    svc :: (keys: [] Value_Id, cnts: [] u32, v: Value_Id) -> u32 { for keys if it == v return cnts[it_index]; return 0; }
+    get_reduction_op :: (h: *Hr_Reduction, v: Value_Id) -> Value_Id {
+        p := hr_rv_ops_find(h, v);
+        if p return p.*[0];
+        u := ir.v_first_use[v];
+        while u != NONE {
+            usr := ir.u_user[u]; u = ir.u_next[u];
+            if hr_get_rdx_kind(usr) == h.kind return usr;
+        }
+        return v;
+    }
+    // EvaluateScalarCost(GenCostFn): GenCostFn is the per-kind scalar op cost (gen_cost below)
+    gen_cost :: (h: *Hr_Reduction, rdx_op: Value_Id, sty: Type_Id, fmf: u32) -> Cost {
+        if hr_is_min_max_kind(h.kind) {
+            id := hr_kind_min_max_intrinsic(h.kind);
+            ica := ica_types(id, sty, .[sty, sty], fmf);
+            return tti_intrinsic_cost(slp.tti, *ica, TCK_RECIP_THROUGHPUT);
+        }
+        return tti_arith_cost(slp.tti, hr_kind_opcode(h.kind), sty, TCK_RECIP_THROUGHPUT,
+                              tti_operand_info(op(rdx_op, 0)), tti_operand_info(op(rdx_op, 1)), .[], rdx_op);
+    }
+    evaluate_scalar_cost :: (h: *Hr_Reduction, reduced: [] Value_Id, svc_keys: [] Value_Id, svc_cnts: [] u32, is_csmm: bool, sty: Type_Id, fmf: u32) -> Cost {
+        cost: Cost = 0;
+        cnt := reduced.count;
+        for rdx_val: reduced {
+            if !is_inst(rdx_val) continue;
+            rdx_op := get_reduction_op(h, rdx_val);
+            if cnt == 1 {
+                sv := svc(svc_keys, svc_cnts, rdx_val);
+                cost = cost_add(cost, cost_mul(cast(s64) (ifx sv != 0 then sv - 1 else 0), gen_cost(h, rdx_op, sty, fmf)));
+                break;
+            }
+            cnt -= 1;
+            if has_n_uses_or_more(rdx_val, ifx is_csmm then 3 else 2) {
+                sv := svc(svc_keys, svc_cnts, rdx_val);
+                cost = cost_add(cost, cost_mul(cast(s64) (ifx sv != 0 then sv else 1), gen_cost(h, rdx_op, sty, fmf)));
+                continue;
+            }
+            sc: Cost = 0;
+            u := ir.v_first_use[rdx_val];
+            while u != NONE {
+                ro := ir.u_user[u]; u = ir.u_next[u];
+                if hr_has_required_number_of_uses(is_csmm, ro) {
+                    if h.kind == .FADD {
+                        a: [1] Value_Id; a[0] = ro;
+                        fma := slp_can_convert_to_fma(a, slp_get_same_opcode(a));
+                        if cost_valid(fma) {
+                            fma = cost_sub(fma, tti_instruction_cost(slp.tti, rdx_val, TCK_RECIP_THROUGHPUT));
+                            sc = cost_add(sc, fma);
+                            continue;
+                        }
+                    }
+                    sc = cost_add(sc, tti_instruction_cost(slp.tti, ro, TCK_RECIP_THROUGHPUT));
+                    continue;
+                }
+                sc = COST_INVALID;
+                break;
+            }
+            if cost_valid(sc) cost = cost_add(cost, sc);
+            else cost = cost_add(cost, gen_cost(h, rdx_op, sty, fmf));
+        }
+        return cost;
+    }
+    does_require_reduction_op := !all_consts;   // VectorValuesAndScales is empty: nothing was vectorized before
+    k := h.kind;
+    if k == .ADD || k == .MUL || k == .OR || k == .AND || k == .XOR || k == .FADD || k == .FMUL {
+        rdx_opc := hr_kind_opcode(k);
+        if !all_consts {
+            if is_vector_type(sty) slp_fail("REVEC reductions");
+            red_ty := type_elem(vec_ty);
+            has, rtype, signed := slp_root_node_type_with_no_cast();
+            if !has { rtype = red_ty; signed = true; }
+            if rtype == red_ty vector_cost = tti_arithmetic_reduction_cost(t, rdx_opc, vec_ty, true, fmf, K);
+            else vector_cost = tti_extended_reduction_cost(t, rdx_opc, !signed, red_ty, slp_widened_type(rtype, cast(u64) redux), true, fmf, K);
+        }
+        scalar_cost = evaluate_scalar_cost(h, reduced, svc_keys, svc_cnts, is_csmm, sty, fmf);
+    } else if hr_is_min_max_kind(k) && k != .FMINIMUMNUM && k != .FMAXIMUMNUM {
+        id := hr_kind_min_max_intrinsic(k);
+        if !all_consts vector_cost = tti_min_max_reduction_cost(t, id, vec_ty, fmf, K);
+        scalar_cost = evaluate_scalar_cost(h, reduced, svc_keys, svc_cnts, is_csmm, sty, fmf);
+    } else {
+        fatal("internal: slp: expected arithmetic or min/max reduction operation");
+    }
+    #if DEBUG_SLP print("DBG reduction cost vec=% scalar=%\n", cost_to_string(vector_cost), cost_to_string(scalar_cost));
+    return cost_sub(vector_cost, scalar_cost);
 }

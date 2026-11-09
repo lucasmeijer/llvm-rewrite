@@ -797,6 +797,7 @@ slp_try_to_vectorize_list :: (vl: [] Value_Id, max_vf_only := false, limit_to_re
     max_vf = min(slp_get_maximum_vf(sz, is_opcode(s)), max_vf);
     if limit_to_register_vf && sz != 0 max_vf = min(max_vf, max(min_vf, slp.max_vec_reg_size / sz));
     if max_vf < 2 return false;
+    #if DEBUG_SLP print("DBG try list n=% sz=% minvf=% maxvf=% maxvfonly=% limit=%\n", vl.count, sz, min_vf, max_vf, max_vf_only, limit_to_register_vf);
     changed := false;
     next_inst: u64 = 0; max_inst := cast(u64) vl.count;
     vf := max_vf;
@@ -822,7 +823,9 @@ slp_try_to_vectorize_list :: (vl: [] Value_Id, max_vf_only := false, limit_to_re
                 }
             }
             if idx != actual_vf break;
+            #if DEBUG_SLP { print("DBG list"); for ops print(" %", vname(it)); print("\n"); }
             slp_build_tree(ops);
+            #if DEBUG_SLP for slp.entries print("DBG te% state=% n=% op=% user=% reuse=%\n", it_index, it.state, it.scalars.count, ifx is_valid(it.s) then inst_op(it.s.main) else .NONE_OP, it.user_tree_index, it.reuse_shuffle_indices.count);
             if slp_is_tree_tiny_and_not_fully_vectorizable() continue;
             if slp_is_profitable_to_reorder() {
                 slp_reorder_top_to_bottom();
@@ -1880,7 +1883,7 @@ slp_can_convert_to_fma :: (vl: [] Value_Id, s: Inst_State) -> Cost {
     ops_s := slp_get_same_opcode(operands[0]);
     if !is_valid(ops_s) return COST_INVALID;
     if is_alt_shuffle(ops_s) || is_opcode(ops_s) != .FMUL return COST_INVALID;
-    if !check_contractable(operands[0], ops_s) return COST_INVALID;
+    if !check_contractable(operands[0], s) return COST_INVALID;   // LLVM checks the fmuls against the fadd state S (CheckForContractable captures S)
     fmul_plus_fadd: Cost = 0;
     fma_cost: Cost = 0;
     fmf: u32 = FMF_ALL;
