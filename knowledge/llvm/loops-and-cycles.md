@@ -179,3 +179,22 @@ Verified with the jai port (impl/jai/src/pass_licm.jai) on Transforms/LICM and s
   `isKnownNonZero(V, DL)` (DataLayout only: no context instruction, DT or AC) to raise the minimum to the alignment
   (ScalarEvolution::getRangeRef); a dominating `icmp eq %p, null` branch doesn't count
   (`tests/e2e/O2/test-suite/SingleSource/Benchmarks/CoyoteBench/lpbench.ll`, `loop-mssa(licm),print<scalar-evolution>`).
+
+## LoopAccessAnalysis, LoopLoadElimination, LoopDistribute, LoopVersioning (verified by the Jai port)
+
+- `GEPOperator::hasNoUnsignedSignedWrap()` is true for `inbounds` GEPs; LAA's isNoWrap relies on it, so an
+  `inbounds` pointer that is dereferenced every iteration needs no `<nusw>` SCEV assumption (nusw-predicates.ll).
+- LAA's Dependence::print indents the instructions by Depth + 4 (DepName at Depth + 2, both inside `Depth + 2`),
+  and an Instruction printed with `<<` starts with two spaces. A global pointer in a check group prints as its whole
+  definition line (`@best = internal unnamed_addr global i32 0, align 4`); remark locations print as
+  `file:line:col` (`DebugLoc::print`).
+- `evaluatePtrAddRecAtMaxBTCWillNotWrap` raises the dereferenceable size with every `"dereferenceable"(ptr, n)`
+  assume bundle valid at the loop predecessor's branch (getKnowledgeForValue with a filter that never accepts).
+- SCEVUnionPredicate::add prunes predicates implied by the new one only while the union has fewer than 16
+  entries; PSE::addPredicate rebuilds the union from scratch (so pruning can reorder) and bumps the generation.
+- LoopLoadElimination copies the LAI's PredicatedScalarEvolution (RewriteMap, predicates, generation and the
+  exact backedge-taken count, *not* the symbolic max); LoopVersioning uses the LAI's own predicate.
+- `shouldOptimizeForSize(BB, PSI, BFI)` is true for an `optsize`/`minsize` function even without a
+  ProfileSummaryInfo: LLE then refuses to version (LoopLoadElim/opt-size.ll).
+- `addRuntimeChecks` defaults to HoistRuntimeChecks = false; LoopVersioning (LLE, LoopDistribute) never hoists
+  bounds to the outer loop, only LoopVectorize passes the option.

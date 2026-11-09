@@ -818,10 +818,28 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   packed in a u64), print<access-info>[<allow-partial>]. `scev_pred.jai` now has PredicatedScalarEvolution (`Pse`),
   SCEVUnionPredicate as a `[..] u32` of predicate rows (`sc_union_implies/_add/_is_always_true`), and the
   SCEVPredicateRewriter's Pred form (`sc_rewrite_using_predicate`).
-- The LoopAccessInfoManager is not cached across passes: each print<access-info> run computes a fresh LAI per loop.
-  A user that needs LLVM's caching (LoopDistribute / LLE share LAIs, `clear()` keeps only check-free ones) must add it.
+- The LoopAccessInfoManager is not cached across passes: each print<access-info>, loop-load-elim and loop-distribute
+  run computes a fresh LAI per loop (`laa_cached_info`). LLVM keeps LAIs across passes until LoopAccessAnalysis is
+  invalidated; a pipeline where that matters (two LAA users with nothing invalidating in between) may differ.
 - Loud: VFDatabase mappings (calls with `vector-function-abi-variant`), printing a non-global, non-argument,
   non-instruction pointer. `getKnowledgeForValue` is ported only for the Dereferenceable bundles LAA asks for.
 - `GEPOperator::hasNoUnsignedSignedWrap` is true for `inbounds` too (the jai flags keep F_INBOUNDS and F_NUSW apart).
 - Sweeps: `print<access-info>` whole-file 7746/7754 identical (7 loud, pr12351 diagnostic), `--per-function` 0 differs,
   `sroa,instcombine,loop-mssa(loop-rotate,licm),print<access-info>` 0 differs from LAA.
+
+## LoopLoadElimination, LoopDistribute, LoopVersioning (L1.loop-misc: 144/153 ::opt, 153/153 roundtrip)
+
+- Files: `pass_loop_load_elim.jai` (LLE; `Lel` holds a *copy* of the LAI's PSE, as LLVM's member does),
+  `pass_loop_distribute.jai` (`Ld_Part` / `Ld_Parts`: std::list of partitions with `removed` flags),
+  `loop_versioning.jai` (LoopVersioning `Lver`, addRuntimeChecks / expandBounds, cloneLoopWithPreheader, the
+  SCEVExpander predicate expansion, MDNode::concatenate, an InstSimplifyFolder IRBuilder `isf_*`).
+  CloneBasicBlock / remapInstructionsInBlocks / Value_Map come from clone_function.jai / value_mapper.jai.
+- `addRuntimeChecks` defaults to HoistRuntimeChecks = false and LoopVersioning does not pass it: the hoisting of
+  bounds to the outer loop is only for LoopVectorize (a linpack-pc.ll sweep difference found this).
+- LoopDistribute's forced-failure diagnostic (`llvm.loop.distribute.enable` and the loop is not distributed) is
+  printed without LLVM's source-location prefix (stderr is not compared by ::opt).
+- Remaining unit failures all need unported passes: loop-vectorize (5), simple-loop-unswitch (2), sccp (1),
+  require<profile-summary> (1).
+- Sweeps (0 differs): `loop-load-elim` whole-file and `--per-function`, `loop-distribute -enable-loop-distribute`
+  whole-file and `--per-function`, `sroa,instcombine,loop-mssa(loop-rotate,licm),loop-distribute,loop-load-elim,
+  loop(loop-idiom,loop-deletion)`. Loud: 6 files with VFDatabase mappings.
