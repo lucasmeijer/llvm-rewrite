@@ -142,6 +142,8 @@
 #load "cgscc_pm.jai";
 #load "pass_function_attrs.jai";
 #load "pass_inliner.jai";
+#load "inline_function.jai";
+#load "inline_cost.jai";
 
 main :: () { opt_main(); }
 

@@ -30,9 +30,64 @@ Value_Map :: struct {
     map: Table(Value_Id, Value_Id);
     md: Table(Md_Id, Md_Id);       // ValueMap::MD()
     has_md: bool;
+    // A tracking map (vmap_track_begin/_end; the inliner's): the values are WeakTrackingVHs, so they follow
+    // replace_all_uses_with and become NONE when the value is erased. `rev` = value -> keys mapped to it.
+    tracking: bool;
+    rev: Table(Value_Id, [..] Value_Id);
 }
-vmap_init :: (vm: *Value_Map) { vm.map.allocator = temp; vm.md.allocator = temp; }
-vmap_set :: (vm: *Value_Map, k: Value_Id, v: Value_Id) { table_set(*vm.map, k, v); }
+vmap_init :: (vm: *Value_Map) { vm.map.allocator = temp; vm.md.allocator = temp; vm.rev.allocator = temp; }
+vmap_set :: (vm: *Value_Map, k: Value_Id, v: Value_Id) {
+    if vm.tracking {
+        found, old := table_find(*vm.map, k);
+        if found && old == v return;
+        if found && old != NONE {
+            p := table_find_pointer(*vm.rev, old);
+            if p for p.* if it == k { array_unordered_remove_by_index(p, it_index); break; }
+        }
+        if v != NONE {
+            p := table_find_pointer(*vm.rev, v);
+            if !p { e: [..] Value_Id; e.allocator = temp; table_set(*vm.rev, v, e); p = table_find_pointer(*vm.rev, v); }
+            array_add(p, k);
+        }
+    }
+    table_set(*vm.map, k, v);
+}
+tracked_vmaps: [..] *Value_Map;
+vmap_track_begin :: (vm: *Value_Map) {
+    vm.tracking = true;
+    for v, k: vm.map {
+        if v == NONE continue;
+        p := table_find_pointer(*vm.rev, v);
+        if !p { e: [..] Value_Id; e.allocator = temp; table_set(*vm.rev, v, e); p = table_find_pointer(*vm.rev, v); }
+        array_add(p, k);
+    }
+    array_add(*tracked_vmaps, vm);
+}
+vmap_track_end :: (vm: *Value_Map) {
+    for tracked_vmaps if it == vm { array_unordered_remove_by_index(*tracked_vmaps, it_index); break; }
+    vm.tracking = false;
+}
+// WeakTrackingVH::allUsesReplacedWith / ValueIsDeleted for every tracking map (called from ir.jai)
+vmap_note_rauw :: (old: Value_Id, new: Value_Id) {
+    if tracked_vmaps.count == 0 || old == new return;
+    for vm: tracked_vmaps {
+        p := table_find_pointer(*vm.rev, old);
+        if !p || p.count == 0 continue;
+        keys: [..] Value_Id; keys.allocator = temp;
+        for p.* array_add(*keys, it);
+        p.count = 0;
+        for k: keys vmap_set(vm, k, new);
+    }
+}
+vmap_note_erase :: (v: Value_Id) {
+    if tracked_vmaps.count == 0 return;
+    for vm: tracked_vmaps {
+        p := table_find_pointer(*vm.rev, v);
+        if !p || p.count == 0 continue;
+        for k: p.* table_set(*vm.map, k, NONE);
+        p.count = 0;
+    }
+}
 vmap_find :: (vm: *Value_Map, k: Value_Id) -> (bool, Value_Id) { found, v := table_find(*vm.map, k); return found, v; }
 // ValueMap::lookup: NONE when absent
 vmap_lookup :: (vm: *Value_Map, k: Value_Id) -> Value_Id { found, v := table_find(*vm.map, k); if found return v; return NONE; }
@@ -56,14 +111,14 @@ md_as_value :: (m: Md_Id) -> Value_Id {
 map_value :: (vm: *Value_Map, v: Value_Id, flags: u32) -> Value_Id {
     if v == NONE return NONE;
     found, m := table_find(*vm.map, v);
-    if found return m;
+    if found && m != NONE return m;   // (a null WeakTrackingVH counts as missing)
     k := vkind(v);
     if is_global_value(k) {
         if flags & RF_NULL_MAP_MISSING_GLOBAL_VALUES return NONE;
-        table_set(*vm.map, v, v);
+        vmap_set(vm, v, v);
         return v;
     }
-    if k == .INLINE_ASM { table_set(*vm.map, v, v); return v; }
+    if k == .INLINE_ASM { vmap_set(vm, v, v); return v; }
     if k == .MD_VALUE {
         md := cast(Md_Id) ir.v_aux[v];
         if md != NONE && ir.mds[md].kind == .VALUE && !is_constant_kind(vkind(ir.mds[md].value)) {
@@ -91,18 +146,18 @@ map_value :: (vm: *Value_Map, v: Value_Id, flags: u32) -> Value_Id {
             }
             return md_as_value(di_arg_list_get(mapped));
         }
-        if flags & RF_NO_MODULE_LEVEL_CHANGES { table_set(*vm.map, v, v); return v; }
+        if flags & RF_NO_MODULE_LEVEL_CHANGES { vmap_set(vm, v, v); return v; }
         mm := map_metadata(vm, md, flags);
-        if mm == md { table_set(*vm.map, v, v); return v; }
+        if mm == md { vmap_set(vm, v, v); return v; }
         r := md_as_value(mm);
-        table_set(*vm.map, v, r);
+        vmap_set(vm, v, r);
         return r;
     }
     if !is_constant_kind(k) return NONE;
     if k == .C_BLOCKADDR return map_block_address(vm, v, flags);
     if k == .C_DSO_EQUIV || k == .C_NO_CFI {
         gv := map_value(vm, op(v, 0), flags);
-        if gv == op(v, 0) { table_set(*vm.map, v, v); return v; }
+        if gv == op(v, 0) { vmap_set(vm, v, v); return v; }
         fatal("ValueMapper: remapping a dso_local_equivalent / no_cfi constant to another global is not implemented yet");
     }
     // some other constant: check whether all operands have an identity remapping
@@ -116,7 +171,7 @@ map_value :: (vm: *Value_Map, v: Value_Id, flags: u32) -> Value_Id {
         if mapped != o break;
         opno += 1;
     }
-    if opno == n { table_set(*vm.map, v, v); return v; }
+    if opno == n { vmap_set(vm, v, v); return v; }
     ops: [..] Value_Id; ops.allocator = temp;
     for j: 0..cast(s64) opno - 1 array_add(*ops, op(v, cast(u32) j));
     array_add(*ops, mapped);
@@ -141,7 +196,7 @@ map_value :: (vm: *Value_Map, v: Value_Id, flags: u32) -> Value_Id {
         case;
             fatal("ValueMapper: remapping the operands of this constant kind is not implemented yet");
     }
-    table_set(*vm.map, v, r);
+    vmap_set(vm, v, r);
     return r;
 }
 
@@ -152,7 +207,7 @@ map_block_address :: (vm: *Value_Map, ba: Value_Id, flags: u32) -> Value_Id {
     bb := map_value(vm, op(ba, 1), flags);
     if bb != NONE && vkind(bb) != .BLOCK bb = NONE;
     r := const_blockaddr(f, ifx bb != NONE then bb else op(ba, 1));
-    table_set(*vm.map, ba, r);
+    vmap_set(vm, ba, r);
     return r;
 }
 

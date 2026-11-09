@@ -27,7 +27,7 @@ clone_basic_block :: (bb: Value_Id, vm: *Value_Map, suffix: string, f: Value_Id 
         block_append_inst(nb, c);
         if f != NONE ic_reinsert_name(c);
         if inst(i).records clone_debug_info_from(c, i, inst(i).records, *recs);
-        table_set(*vm.map, i, c);
+        vmap_set(vm, i, c);
         map_atom_instance(c);
     }
     return nb;

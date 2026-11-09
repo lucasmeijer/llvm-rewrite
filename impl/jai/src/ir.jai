@@ -578,6 +578,7 @@ replace_all_uses_with :: (old: Value_Id, new: Value_Id) {
     scev_note_rauw(old, new); // ScalarEvolution's SCEVCallbackVH / SCEVUnknown::allUsesReplacedWith (scev_update.jai)
     vh_note_rauw(old, new);   // WeakTrackingVH / TrackingVH (value_handles.jai)
     cg_vh_note_rauw(old, new);   // CGSCCUpdateResult::IndirectVHs (cgscc_pm.jai)
+    vmap_note_rauw(old, new);    // tracking Value_Maps (value_mapper.jai)
     lvi_note_rauw(old);       // LazyValueInfo's LVIValueHandle::allUsesReplacedWith (lazy_value_info.jai)
     while ir.v_first_use[old] != NONE {
         u := ir.v_first_use[old];
@@ -729,6 +730,7 @@ erase_inst :: (i: Value_Id) {
     scev_note_erase(i);   // ScalarEvolution's value handles (scev_update.jai)
     vh_note_erase(i);     // WeakTrackingVH / TrackingVH (value_handles.jai)
     cg_vh_note_erase(i);  // CGSCCUpdateResult::IndirectVHs (cgscc_pm.jai)
+    vmap_note_erase(i);   // tracking Value_Maps (value_mapper.jai)
     lvi_note_erase(i);    // LazyValueInfo's LVIValueHandle::deleted (lazy_value_info.jai)
     // Instruction::handleMarkerRemoval / DbgMarker::removeMarker: debug records move to the front of the next
     // instruction's records

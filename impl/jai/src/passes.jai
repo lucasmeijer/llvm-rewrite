@@ -413,6 +413,8 @@ PASS_TABLE :: Pass_Info.[
     .{"function-attrs", .CGSCC, .FUNCTION_ATTRS, false, .DOMTREE},   // also function-attrs<skip-non-recursive-function-attrs>
     .{"rpo-function-attrs", .MODULE, .RPO_FUNCTION_ATTRS, false, .DOMTREE},
     .{"norecurse-lto-inference", .MODULE, .NORECURSE_LTO_INFERENCE, false, .DOMTREE},
+    .{"inline", .CGSCC, .INLINE, false, .DOMTREE},   // also inline<only-mandatory>
+    .{"always-inline", .MODULE, .ALWAYS_INLINE, false, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -978,6 +980,7 @@ run_module_pm :: (n: s32) {
             case .INVALIDATE_LCG; should_run_pass(node, NONE); lcg_invalidate();
             case .RPO_FUNCTION_ATTRS; if should_run_pass(node, NONE) mam_invalidate(rpo_function_attrs_run());
             case .NORECURSE_LTO_INFERENCE; if should_run_pass(node, NONE) mam_invalidate(norecurse_lto_inference_run());
+            case .ALWAYS_INLINE; if should_run_pass(node, NONE) mam_invalidate(always_inliner_run());
             case; fatal("internal: '%' is not a module pass", node.name);
         }
         c = pipeline.nodes[c].next;

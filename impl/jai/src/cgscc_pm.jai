@@ -169,7 +169,30 @@ run_cgscc_adaptor :: (n: s32) -> Preserved {
 erase_function :: (f: Value_Id) {
     table_remove(*fam, f);
     fn_drop_all_references(f);
+    md_global_value_deleted(f);
     erase_global(f);
+}
+// ValueAsMetadata::handleDeletion for a global (a ConstantAsMetadata): every node using it gets a null operand, and
+// a uniqued node becomes distinct (MDNode::handleChangedOperand: "deleted constants")
+md_global_value_deleted :: (v: Value_Id) {
+    k := *md_key; key_reset(k); key_u8(k, 1); key_u32(k, v);
+    found, m := table_find(*ir.md_map, key_view(k));
+    if !found return;
+    table_remove(*ir.md_map, key_view(k));
+    for * row, id: ir.mds {
+        if row.kind != .TUPLE || row.nops == 0 continue;
+        uses := false;
+        for x: 0..row.nops-1 if ir.md_ops[row.ops + x] == m { uses = true; break; }
+        if !uses continue;
+        if !row.distinct {
+            key_reset(k); key_u8(k, 2);
+            for x: 0..row.nops-1 key_u32(k, ir.md_ops[row.ops + x]);
+            f2, cur := table_find(*ir.md_map, key_view(k));
+            if f2 && cur == cast(Md_Id) id table_remove(*ir.md_map, key_view(k));
+            row.distinct = true;
+        }
+        for x: 0..row.nops-1 if ir.md_ops[row.ops + x] == m ir.md_ops[row.ops + x] = NONE;
+    }
 }
 // Function::dropAllReferences: delete the body (every block), keep the declaration
 fn_drop_all_references :: (f: Value_Id) {
