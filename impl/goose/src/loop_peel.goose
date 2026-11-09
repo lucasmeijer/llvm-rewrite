@@ -310,12 +310,12 @@ fn count_to_eliminate_compares(l: i32, max0: i64) -> i64, i64 {
             }
             let ar = ls;
             if sc_nops(ar) != 2 || sc_loop(ar) != l { continue; }
-            if !(lp_is_equality(p) && sc_has_nw(ar)) && sc_get_monotonic_predicate_type(ar, p) < 0 { continue; }
+            if !(lp_is_equality(p) && sc_has_nw(ar)) && sc_get_monotonic_predicate_type(ar, p & 0xFF) < 0 { continue; }
             var npc = desired;
             var iv = sc_evaluate_at_iteration(ar, sc_get_constant_ty(sc_ty(ls), npc as u64, false));
             if !sc_is_known_predicate(p, iv, rs) { p = sc_inverse_pred(p & 0xFF); }
             let step = sc_get_step_recurrence(ar);
-            let ok, npc2, iv2 = peel_while(npc, iv, rs, step, p);
+            let ok, npc2, iv2 = peel_while(npc, iv, rs, step, p & 0xFF);
             npc = npc2;
             iv = iv2;
             if !ok {
