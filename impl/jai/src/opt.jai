@@ -176,6 +176,7 @@
 #load "pass_global_opt.jai";
 #load "pass_dead_arg_elim.jai";
 #load "pass_assign_guid.jai";
+#load "pass_arg_promotion.jai";
 #load "vplan.jai";
 #load "vplan_utils.jai";
 #load "vplan_props.jai";

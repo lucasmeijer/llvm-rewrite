@@ -212,6 +212,7 @@ run_cgscc_pass :: (n: s32, c: s32, ur: *Cgscc_Ur) -> Preserved {
         case .NO_OP_CGSCC; return PRESERVE_ALL;
         case .FUNCTION_ATTRS; return function_attrs_run_scc(node, c);
         case .INLINE; return inliner_run(node, c, ur);
+        case .ARG_PROMOTION; return arg_promotion_run_scc(node, c);
     }
     fatal("internal: '%' is not a cgscc pass", node.name);
     return PRESERVE_NONE;
