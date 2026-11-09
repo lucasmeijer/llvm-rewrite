@@ -50,7 +50,7 @@ import loop_md;
 import loop_unroll;
 import loop_peel;
 
-fn lu_not_ported(what: const u8[:]) { fatal(str("LoopUnroll: ", what, " is not ported yet")); }
+fn lup_not_ported(what: const u8[:]) { fatal(str("LoopUnroll: ", what, " is not ported yet")); }
 
 let LU_UINT_MAX: i64 = 0xFFFFFFFF;
 let LUR_UNMODIFIED: i64 = 0;
@@ -371,7 +371,7 @@ fn ua_visit(i: i32) -> bool {
         let gv = ua_addrs[j].base;
         if vals[gv].kind != VK_GVAR || !gv_has_definitive_initializer(gv) || globs[glob_of(gv)].is_const == 0 { return false; }
         let off = ua_addrs[j].off;
-        if ap_sig_bits(off) > 64 { lu_not_ported("loads at offsets wider than 64 bits"); }
+        if ap_sig_bits(off) > 64 { lup_not_ported("loads at offsets wider than 64 bits"); }
         let r = cf_fold_load_from_const(op(gv, 0), vals[i].ty, ap_sext64(off));
         if r < 0 { return false; }
         hm_put(ua_simplified, i as u64, r as i64);
@@ -842,9 +842,9 @@ fn lu_small_constant_trip_count(l: i32, eb: i32) -> i64 { sc_constant_trip_count
 fn lu_small_constant_trip_multiple(l: i32, eb: i32) -> i64 { sc_trip_multiple_of_exit_count(l, sc_get_exit_count(l, eb, BTC_EXACT, false)) }
 
 fn lu_check_flags() {
-    if flag_bool("forget-scev-loop-unroll", false) { lu_not_ported("-forget-scev-loop-unroll (ScalarEvolution::forgetAllLoops)"); }
+    if flag_bool("forget-scev-loop-unroll", false) { lup_not_ported("-forget-scev-loop-unroll (ScalarEvolution::forgetAllLoops)"); }
     if flag_given("unroll-add-parallel-reductions") && flag_bool("unroll-add-parallel-reductions", false) {
-        lu_not_ported("-unroll-add-parallel-reductions (RecurrenceDescriptor::isReductionPHI)");
+        lup_not_ported("-unroll-add-parallel-reductions (RecurrenceDescriptor::isReductionPHI)");
     }
 }
 
