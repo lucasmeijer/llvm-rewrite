@@ -281,9 +281,78 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             return irb_intrinsic(*s.b, "llvm.vector.reduce.or", .[vtype(res)], .[res]);
         case VPI_RESUME_FOR_EPILOGUE;
             return vs_get(s, vp_op(r, 0), true);
+        case VPI_REDUCTION_START_VECTOR;
+            if ec_is_scalar(s.vf) return vs_get(s, vp_op(r, 0), true);
+            saved := s.fmf; defer s.fmf = saved;
+            s.fmf = vp_fmf_or_none(r);
+            scale := ap_zext_value(vp_const_int_value(vp_op(r, 2)));
+            iden := irb_vector_splat(*s.b, s.vf.n / scale, vs_get(s, vp_op(r, 1), true), "");
+            return vs_insert_element(s, iden, vs_get(s, vp_op(r, 0), true), const_int(ir.t_i32, 0));
+        case VPI_COMPUTE_REDUCTION_RESULT;
+            f := vr(r).flags;
+            rk := f.rdx_kind;
+            assert(!rk_is_find_iv(rk), "FindIV should use min/max reduction kinds");
+            n := vp_nops(r);
+            parts: [..] Value_Id; parts.allocator = temp;
+            for k: 0..n-1 array_add(*parts, vs_get(s, vp_op(r, k), f.rdx_in_loop));
+            saved := s.fmf; defer s.fmf = saved;
+            s.fmf = vp_fmf_or_none(r);
+            red := parts[0];
+            if f.rdx_ordered red = parts[n - 1];
+            else for k: 1..n-1 {
+                if rk_is_min_max(rk) red = vs_create_min_max_op(s, rk, red, parts[k]);
+                else {
+                    opc := rk_opcode(rk);
+                    if rk == .SUB opc = .ADD;
+                    else if rk == .FSUB opc = .FADD;
+                    red = vs_binop(s, opc, parts[k], red, "bin.rdx");
+                }
+            }
+            if ec_is_vector(s.vf) && !f.rdx_in_loop red = vs_create_simple_reduction(s, red, rk);
+            return red;
     }
     vp_unported(tprint("executing VPInstruction %", vp_opcode_name(o)));
     return NONE;
+}
+
+// createMinMaxOp (LoopUtils.cpp)
+vs_create_min_max_op :: (s: *Vp_State, rk: Recur_Kind, l: Value_Id, r: Value_Id) -> Value_Id {
+    ty := vtype(l);
+    if type_kind(scalar_type(ty)) == .INT || rk == .FMINNUM || rk == .FMAXNUM || rk == .FMINIMUM || rk == .FMAXIMUM ||
+       rk == .FMINIMUMNUM || rk == .FMAXIMUMNUM {
+        name: string;
+        if rk == {
+            case .UMIN; name = "llvm.umin"; case .UMAX; name = "llvm.umax"; case .SMIN; name = "llvm.smin"; case .SMAX; name = "llvm.smax";
+            case .FMIN; #through; case .FMINNUM; name = "llvm.minnum";
+            case .FMAX; #through; case .FMAXNUM; name = "llvm.maxnum";
+            case .FMINIMUM; name = "llvm.minimum"; case .FMAXIMUM; name = "llvm.maximum";
+            case .FMINIMUMNUM; name = "llvm.minimumnum"; case .FMAXIMUMNUM; name = "llvm.maximumnum";
+        }
+        if is_const(l) && is_const(r) vp_unported("constant-folding min/max intrinsics");
+        c := irb_intrinsic(*s.b, name, .[ty], .[l, r]);
+        if is_fp_math_operator(c) set_fmf(c, s.fmf);
+        set_name(c, "rdx.minmax");
+        return c;
+    }
+    vp_unported("FMin/FMax reduction parts (createMinMaxOp compare and select)");
+    return NONE;
+}
+// createSimpleReduction (LoopUtils.cpp)
+vs_create_simple_reduction :: (s: *Vp_State, src: Value_Id, rk: Recur_Kind) -> Value_Id {
+    vty := vtype(src);
+    elt := type_elem(vty);
+    name := lv_reduction_intrinsic_id(rk);
+    c: Value_Id;
+    if rk == .FMULADD || rk == .FADD_CHAIN_WITH_SUBS || rk == .FSUB || rk == .FADD || rk == .FMUL {
+        iden := lv_recurrence_identity(rk, elt, s.fmf);
+        c = irb_intrinsic(*s.b, name, .[vty], .[iden, src]);
+    } else {
+        if rk_is_any_of(rk) || rk_is_find(rk) fatal("internal: unhandled recurrence kind in createSimpleReduction");
+        if is_const(src) vp_unported("constant-folding reduction intrinsics");
+        c = irb_intrinsic(*s.b, name, .[vty], .[src]);
+    }
+    if is_fp_math_operator(c) set_fmf(c, s.fmf);
+    return c;
 }
 
 // VPInstruction::execute
@@ -464,6 +533,16 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
             st := irb_store(*s.b, val, addr, vr(r).align);
             vp_apply_metadata(r, st);
         case .WIDEN_PHI; vs_execute_phi(s, r, false, vr(r).name);
+        case .REDUCTION_PHI;
+            _, vector_ph := table_find(*s.vpbb2irbb, vp_cfg_predecessor(vr(r).parent, 0));
+            scalar_phi := ec_is_scalar(s.vf) || vr(r).rdx_style != .UNORDERED;
+            start := vs_get(s, vp_op(r, 0), scalar_phi);
+            header := s.prev_bb;
+            phi := create_phi(vtype(start), 2);
+            insert_at_position(phi, header, block_first_insertion_pt(header), false);
+            set_name(phi, "vec.phi");
+            vs_set(s, vr(r).def, phi, vr(r).rdx_style != .UNORDERED);
+            phi_add_incoming(phi, start, vector_ph);
         case;
             vp_unported(tprint("executing % recipes", k));
     }

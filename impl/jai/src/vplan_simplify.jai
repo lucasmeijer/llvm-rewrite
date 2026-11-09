@@ -509,9 +509,3 @@ vp_recursively_delete_dead_recipes :: (v: Vp_Val) {
 }
 
 // VPlanTransforms::introduceMasksAndLinearize: only single-block loop bodies are ported (no masks needed)
-vp_introduce_masks_and_linearize :: () {
-    region := vp_vector_loop_region();
-    header := vp_entry_basic_block(region);
-    rpo := vp_rpo(header, false);
-    if rpo.count > 1 vp_unported("if-conversion of multi-block loop bodies (VPlanPredicator)");
-}

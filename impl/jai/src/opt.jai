@@ -201,6 +201,7 @@
 #load "vplan_transforms.jai";
 #load "vplan_print.jai";
 #load "vplan_unroll.jai";
+#load "vplan_predicator.jai";
 #load "vplan_exec_transforms.jai";
 #load "vplan_execute.jai";
 #load "lv_execute.jai";

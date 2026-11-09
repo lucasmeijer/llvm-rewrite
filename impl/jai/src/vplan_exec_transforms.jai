@@ -362,7 +362,14 @@ vp_convert_to_concrete_recipes :: () {
                 vp_erase_recipe(r);
                 continue;
             }
-            if k == .BLEND { vp_unported("expanding VPBlendRecipes (convertToConcreteRecipes)"); continue; }
+            if k == .BLEND {
+                sel := vp_blend_incoming(r, 0);
+                for i: 1..vp_blend_num_incoming(r)-1
+                    sel = vr(vpb_select(*b, vp_blend_mask(r, i), vp_blend_incoming(r, i), sel, vr(r).dl, "predphi", vr(r).flags)).def;
+                vp_rauw(vr(r).def, sel);
+                vp_erase_recipe(r);
+                continue;
+            }
             if k == .VECTOR_END_POINTER { vp_unported("VPVectorEndPointerRecipe::materializeOffset"); continue; }
             if k == .EXPRESSION { vp_unported("VPExpressionRecipe::decompose"); continue; }
             if vp_is_vpi(r, VPI_LAST_ACTIVE_LANE) { vp_unported("expanding LastActiveLane"); continue; }

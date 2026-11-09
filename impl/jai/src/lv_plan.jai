@@ -324,8 +324,16 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
         }
     }
     for vp_block_phis(header) if vr(it).kind == .FIRST_ORDER_RECURRENCE_PHI vp_unported("first-order recurrences");
-    for vp_block_phis(header) if vr(it).kind == .REDUCTION_PHI vp_unported("reductions");
+    lvp_add_reduction_result_computation(lp, range.start);
+    for vp_block_phis(header) if vr(it).kind == .REDUCTION_PHI && rk_is_find_iv(vr(it).rdx_kind)
+        vp_unported("FindIV reductions (optimizeFindIVReductions)");
     lvp_optimize_induction_live_out_users(lp);
+    // handleMultiUseReductions, handleMaxMinNumReductions, handleFindLastReductions
+    for vp_block_phis(header) if vr(it).kind == .REDUCTION_PHI {
+        if vr(it).has_uses_outside_chain vp_unported("min/max reductions with uses outside the chain (handleMultiUseReductions)");
+        if rk_is_fp_min_max_num(vr(it).rdx_kind) vp_unported("FP minnum/maxnum reductions (handleMaxMinNumReductions)");
+        if rk_is_find_last(vr(it).rdx_kind) vp_unported("FindLast reductions (handleFindLastReductions)");
+    }
     vp_remove_branch_on_const(false);
     for bb: vp_blocks_only_basic(vp_depth_first_shallow(vb(vp_vector_loop_region()).entry))
         for r: vp_block_recipes(bb) if vr(r).kind == .WIDEN_LOAD && !vr(r).consecutive vp_unported("non-consecutive widened loads (convertToStridedAccesses)");
@@ -336,6 +344,107 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
     vp_drop_poison_generating_recipes();
     return true;
 }
+// LoopVectorizationPlanner::addReductionResultComputation (not AnyOf / FindIV / FindLast; no tail folding)
+lvp_add_reduction_result_computation :: (lp: *Lv_Planner, min_vf: Ec) {
+    region := vp_vector_loop_region();
+    middle := vp_middle_block();
+    header_mask := vb(region).header_mask;
+    ip := vp_first_non_phi(middle);
+    for phir: vp_block_phis(vp_entry_basic_block(region)) {
+        if vr(phir).kind != .REDUCTION_PHI continue;
+        rk := vr(phir).rdx_kind;
+        rd := lvl_find_reduction(lp.lvl, vp_underlying_instr(phir));
+        phi_ty := vp_scalar_type(vr(phir).def);
+        bd := vp_def(vp_op(phir, 1));
+        if bd != NONE && vr(bd).kind == .BLEND vp_unported("blend backedge values of reductions");
+        orig_exiting := vp_op(phir, 1);
+        new_exiting := orig_exiting;
+        if header_mask != NONE vp_unported("predicated reduction selects (usePredicatedReductionSelect)");
+        exit_dl := inst_dl(block_terminator(li_loop_latch(lp.li, lp.l)));
+        b := vpb_at(middle, ip);
+        final: Vp_Val;
+        if rk_is_any_of(rk) {
+            vp_unported("AnyOf reductions");
+        } else {
+            rop := new_exiting;
+            has_ext := false; ext_opc := Opcode.ZEXT;
+            if ec_is_vector(min_vf) && phi_ty != rd.recur_type {
+                assert(vr(phir).rdx_style == .UNORDERED, "Unexpected truncated inloop reduction!");
+                rty := rd.recur_type;
+                ext_opc = ifx rd.is_signed then Opcode.SEXT else .ZEXT; has_ext = true;
+                nd := vp_def(new_exiting);
+                tb := vpb_after(nd);
+                rop = vr(vpb_widen_cast(*tb, .TRUNC, new_exiting, rty)).def;
+                extnd := vpb_widen_cast(*tb, ext_opc, rop, phi_ty);
+                if vp_op(phir, 1) == new_exiting vp_set_operand(phir, 1, vr(extnd).def);
+            }
+            flags := vpf_reduction(rk, vr(phir).rdx_style == .ORDERED, vr(phir).rdx_style != .UNORDERED, vp_fmf_or_none(phir));
+            fr := vpb_nary(*b, VPI_COMPUTE_REDUCTION_RESULT, .[rop], flags, .[], exit_dl);
+            final = vr(fr).def;
+            if has_ext final = vr(vpb_scalar_cast(*b, ext_opc, final, phi_ty, NONE)).def;
+        }
+        users: [..] Vp_Rec; users.allocator = temp;
+        for vv(orig_exiting).users array_add(*users, it);
+        for u_in: users {
+            u := u_in;
+            parent := vr(u).parent;
+            if vp_def(final) == u || vb(parent).parent != NONE continue;
+            if vp_is_vpi(u, VPI_COMPUTE_REDUCTION_RESULT) || (rk_is_find_iv(rk) && vp_is_vpi(u, vp_opc(.ICMP))) continue;
+            vp_replace_uses_of_with(u, orig_exiting, final);
+            if vpm_vpi_r(u, VPI_EXTRACT_LAST_PART, 1) u = vp_single_user(vr(u).def);
+            if u != NONE && (vpm_vpi_r(u, VPI_EXTRACT_LANE, 2) || vpm_vpi_r(u, VPI_EXTRACT_LAST_LANE, 1)) vp_rauw(vr(u).def, final);
+        }
+        if !rk_is_any_of(rk) && !rk_is_find_iv(rk) && !rk_is_min_max(rk) && !rk_is_find_last(rk) {
+            phb := vpb_at_end(vp_vector_preheader());
+            iden := vp_live_in(lv_recurrence_identity(rk, phi_ty, vp_fmf_or_none(phir)));
+            scale := vp_const_int(type_int(32), 1);
+            sv := vpb_nary(*phb, VPI_REDUCTION_START_VECTOR, .[vp_op(phir, 0), iden, scale], vr(phir).flags);
+            vp_set_operand(phir, 0, vr(sv).def);
+        }
+    }
+    // clearReductionWrapFlags
+    for phir: vp_block_phis(vp_entry_basic_block(region)) {
+        if vr(phir).kind != .REDUCTION_PHI continue;
+        k := vr(phir).rdx_kind;
+        if k != .ADD && k != .MUL && k != .SUB && k != .ADD_CHAIN_WITH_SUBS continue;
+        for u: vp_collect_users_recursively(vr(phir).def) if vp_is_with_ir_flags_kind(vr(u).kind) vp_drop_poison_generating_flags(u);
+    }
+}
+
+// getReductionIntrinsicID(RecurKind)
+lv_reduction_intrinsic_id :: (k: Recur_Kind) -> string {
+    if k == {
+        case .ADD_CHAIN_WITH_SUBS; #through; case .SUB; #through; case .ADD; return "llvm.vector.reduce.add";
+        case .MUL; return "llvm.vector.reduce.mul";
+        case .AND; return "llvm.vector.reduce.and";
+        case .OR; return "llvm.vector.reduce.or";
+        case .XOR; return "llvm.vector.reduce.xor";
+        case .FMULADD; #through; case .FADD_CHAIN_WITH_SUBS; #through; case .FSUB; #through; case .FADD; return "llvm.vector.reduce.fadd";
+        case .FMUL; return "llvm.vector.reduce.fmul";
+        case .SMAX; return "llvm.vector.reduce.smax";
+        case .SMIN; return "llvm.vector.reduce.smin";
+        case .UMAX; return "llvm.vector.reduce.umax";
+        case .UMIN; return "llvm.vector.reduce.umin";
+        case .FMAX; #through; case .FMAXNUM; return "llvm.vector.reduce.fmax";
+        case .FMIN; #through; case .FMINNUM; return "llvm.vector.reduce.fmin";
+        case .FMAXIMUM; return "llvm.vector.reduce.fmaximum";
+        case .FMINIMUM; return "llvm.vector.reduce.fminimum";
+        case .FMAXIMUMNUM; return "llvm.vector.reduce.fmaximumnum";
+        case .FMINIMUMNUM; return "llvm.vector.reduce.fminimumnum";
+    }
+    fatal("internal: unexpected recurrence kind %", k);
+    return "";
+}
+// getRecurrenceIdentity (the arithmetic kinds: ConstantExpr::getBinOpIdentity with NSZ)
+lv_recurrence_identity :: (k: Recur_Kind, ty: Type_Id, fmf: u32) -> Value_Id {
+    if rk_is_min_max(k) || rk_is_any_of(k) || rk_is_find(k) vp_unported(tprint("recurrence identities of % reductions", k));
+    opc := rk_opcode(k);
+    if k == .SUB || k == .ADD_CHAIN_WITH_SUBS opc = .ADD;
+    if k == .FSUB || k == .FADD_CHAIN_WITH_SUBS || k == .FMULADD opc = .FADD;
+    if opc == .FADD && (fmf & FMF_NSZ) return const_fp_words(ty, fp_zero(type_kind(scalar_type(ty)), false));
+    return cf_binop_identity(opc, ty, false);
+}
+
 // isIndvarOverflowCheckKnownFalse
 lvp_is_indvar_overflow_check_known_false :: (lp: *Lv_Planner, vf: Ec) -> bool {
     t := lp.cm.tti;

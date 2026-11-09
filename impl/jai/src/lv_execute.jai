@@ -243,10 +243,7 @@ lvp_select_best_epilogue_plan :: (lp: *Lv_Planner, vf: Ec, ic: u64) -> bool {
     if lp.cm.sel != .ALLOWED return false;
     // CM.maskPartialAliasing is never set in the ported subset
     if li_exiting_block(lp.li, lp.l) != li_loop_latch(lp.li, lp.l) return false;
-    for vp_block_phis(vp_entry_basic_block(vp_vector_loop_region())) {
-        k := vr(it).kind;
-        if k == .FIRST_ORDER_RECURRENCE_PHI || k == .REDUCTION_PHI vp_unported("hasUnsupportedHeaderPhiRecipe (epilogue vectorization)");
-    }
+    // (hasUnsupportedHeaderPhiRecipe is checked last: the checks have no side effects, only the result matters)
     if lv_opts.epilogue_force_vf.set && lv_opts.epilogue_force_vf.v > 1 vp_unported("-epilogue-vectorization-force-VF");
     if fn_has_opt_size(lp.cm.f) return false;
     // isEpilogueVectorizationProfitable: TTI.preferEpilogueVectorization = getMaxInterleaveFactor(VF * IC) > 1
@@ -254,6 +251,10 @@ lvp_select_best_epilogue_plan :: (lp: *Lv_Planner, vf: Ec, ic: u64) -> bool {
     if lv_tti_max_interleave_factor(lp.cm.tti, iters, false) <= 1 return false;
     min_vf := ifx lv_opts.epilogue_min_vf.set then cast(u64) lv_opts.epilogue_min_vf.v else 16;
     if vf.n * ic < min_vf return false;
+    for vp_block_phis(vp_entry_basic_block(vp_vector_loop_region())) {
+        k := vr(it).kind;
+        if k == .FIRST_ORDER_RECURRENCE_PHI || k == .REDUCTION_PHI vp_unported("hasUnsupportedHeaderPhiRecipe (epilogue vectorization)");
+    }
     return true;
 }
 

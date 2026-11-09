@@ -117,11 +117,6 @@ vp_reassociate_header_mask :: () {
     vp_unported("reassociateHeaderMask (tail folding)");
 }
 
-// simplifyBlends
-vp_simplify_blends :: () {
-    for bb: vp_blocks_only_basic(vp_depth_first_shallow(vb(vp_vector_loop_region()).entry))
-        for r: vp_block_recipes(bb) if vr(r).kind == .BLEND vp_unported("VPBlendRecipe simplification (simplifyBlends)");
-}
 
 // createScalarIVSteps
 vp_create_scalar_iv_steps :: (kind: Ind_Kind, ind_opcode: Opcode, fp_binop: Value_Id, trunc_i: Value_Id, start: Vp_Val, step_in: Vp_Val, dl: Md_Id, b: *Vp_Builder) -> Vp_Rec {
