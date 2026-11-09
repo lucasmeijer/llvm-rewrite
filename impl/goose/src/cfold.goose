@@ -1123,7 +1123,7 @@ recursive fn cf_fold_call(c: i32, f: i32, mark: i64, n: i64, allow_nondet: bool)
     let rty = ty_fn_ret(globs[glob_of(f)].vty);
     if !allow_nondet && is_fp_or_fp_vec(rty) { return -1; }
     if ty_kind(rty) == TK_FVEC { return cf_fold_fixed_vector_call(c, id, rty, mark, n); }
-    if ty_kind(rty) == TK_SVEC { cfa_not_ported("constant folding of scalable vector calls"); }
+    if ty_kind(rty) == TK_SVEC { return cf_fold_scalable_vector_call(c, id, rty, mark, n); }
     if ty_is_struct(rty) {
         if id == IID_frexp || id == IID_sincos {
             if intrinsic_propagates_poison(id) { for k in n { if is_poison(is_ops[mark + k]) { return c_poison(rty); } } }
@@ -1206,6 +1206,55 @@ recursive fn cf_fold_fixed_vector_call(c: i32, id: i32, vty: i32, mark: i64, n: 
     let r = c_aggregate(vty, is_ops[rm..rm + ne]);
     is_ops.resize(rm);
     return r;
+}
+
+// isTriviallyVectorizable (VectorUtils.cpp)
+fn is_trivially_vectorizable(id: i32) -> bool {
+    return id == IID_abs || id == IID_bswap || id == IID_bitreverse || id == IID_ctpop || id == IID_ctlz || id == IID_cttz ||
+        id == IID_fshl || id == IID_fshr || id == IID_smax || id == IID_smin || id == IID_umax || id == IID_umin ||
+        id == IID_sadd_sat || id == IID_ssub_sat || id == IID_uadd_sat || id == IID_usub_sat || id == IID_smul_fix ||
+        id == IID_smul_fix_sat || id == IID_umul_fix || id == IID_umul_fix_sat || id == IID_uadd_with_overflow ||
+        id == IID_sadd_with_overflow || id == IID_usub_with_overflow || id == IID_ssub_with_overflow ||
+        id == IID_umul_with_overflow || id == IID_smul_with_overflow || id == IID_sqrt || id == IID_asin || id == IID_acos ||
+        id == IID_atan || id == IID_atan2 || id == IID_sin || id == IID_cos || id == IID_sincos || id == IID_sincospi ||
+        id == IID_tan || id == IID_sinh || id == IID_cosh || id == IID_tanh || id == IID_exp || id == IID_exp10 ||
+        id == IID_exp2 || id == IID_frexp || id == IID_ldexp || id == IID_log || id == IID_log10 || id == IID_log2 ||
+        id == IID_fabs || id == IID_minnum || id == IID_maxnum || id == IID_minimum || id == IID_maximum ||
+        id == IID_minimumnum || id == IID_maximumnum || id == IID_modf || id == IID_copysign || id == IID_floor ||
+        id == IID_ceil || id == IID_trunc || id == IID_rint || id == IID_nearbyint || id == IID_round ||
+        id == IID_roundeven || id == IID_pow || id == IID_fma || id == IID_fmuladd || id == IID_is_fpclass ||
+        id == IID_powi || id == IID_canonicalize || id == IID_fptosi_sat || id == IID_fptoui_sat || id == IID_lround ||
+        id == IID_llround || id == IID_lrint || id == IID_llrint || id == IID_ucmp || id == IID_scmp || id == IID_clmul;
+}
+
+// ConstantFoldScalableVectorCall
+recursive fn cf_fold_scalable_vector_call(c: i32, id: i32, vty: i32, mark: i64, n: i64) -> i32 {
+    if id == IID_aarch64_sve_convert_from_svbool {
+        if is_null_value(is_ops[mark]) { return c_null(vty); }   // ConstantInt::getFalse(SVTy)
+    } else if id == IID_get_active_lane_mask {
+        let a = is_ops[mark];
+        let b = is_ops[mark + 1];
+        if vals[a].kind == VK_CINT && vals[b].kind == VK_CINT && ap_uge(ci_ap(a), ci_ap(b)) { return c_null(vty); }
+    } else if interleave_factor_cf(id) != 0 {
+        let s = c_splat_value(is_ops[mark]);
+        if s < 0 { return -1; }
+        for k in 1..n { if is_ops[mark + k] != is_ops[mark] { return -1; } }
+        return c_splat(vty, s);
+    }
+    // If trivially vectorizable, try folding it via the scalar call if all operands are splats.
+    if !is_trivially_vectorizable(id) { return -1; }
+    let rm = is_ops.len;
+    for j in n {
+        let opj = is_ops[mark + j];
+        if vec_intrinsic_scalar_op_at(id, j) { is_ops.push(opj); continue; }
+        let s = c_splat_value(opj);
+        if s < 0 { is_ops.resize(rm); return -1; }
+        is_ops.push(s);
+    }
+    let folded = cf_fold_scalar_call(c, id, types[vty].a, rm, n);
+    is_ops.resize(rm);
+    if folded < 0 { return -1; }
+    return c_splat(vty, folded);
 }
 
 // getConstIntOrUndef: 1 = ConstantInt, 0 = undef, -1 = neither

@@ -2303,24 +2303,6 @@ fn is_not_cross_lane(i: i32) -> bool {
     if o == OP_SHUFFLEVECTOR && !shuffle_is_select(i) { return false; }
     return !is_callbase(i) && o != OP_BITCAST && o != OP_EXTRACTELEMENT;
 }
-// isTriviallyVectorizable (VectorUtils.cpp)
-fn is_trivially_vectorizable(id: i32) -> bool {
-    return id == IID_abs || id == IID_bswap || id == IID_bitreverse || id == IID_ctpop || id == IID_ctlz || id == IID_cttz ||
-        id == IID_fshl || id == IID_fshr || id == IID_smax || id == IID_smin || id == IID_umax || id == IID_umin ||
-        id == IID_sadd_sat || id == IID_ssub_sat || id == IID_uadd_sat || id == IID_usub_sat || id == IID_smul_fix ||
-        id == IID_smul_fix_sat || id == IID_umul_fix || id == IID_umul_fix_sat || id == IID_uadd_with_overflow ||
-        id == IID_sadd_with_overflow || id == IID_usub_with_overflow || id == IID_ssub_with_overflow ||
-        id == IID_umul_with_overflow || id == IID_smul_with_overflow || id == IID_sqrt || id == IID_asin || id == IID_acos ||
-        id == IID_atan || id == IID_atan2 || id == IID_sin || id == IID_cos || id == IID_sincos || id == IID_sincospi ||
-        id == IID_tan || id == IID_sinh || id == IID_cosh || id == IID_tanh || id == IID_exp || id == IID_exp10 ||
-        id == IID_exp2 || id == IID_frexp || id == IID_ldexp || id == IID_log || id == IID_log10 || id == IID_log2 ||
-        id == IID_fabs || id == IID_minnum || id == IID_maxnum || id == IID_minimum || id == IID_maximum ||
-        id == IID_minimumnum || id == IID_maximumnum || id == IID_modf || id == IID_copysign || id == IID_floor ||
-        id == IID_ceil || id == IID_trunc || id == IID_rint || id == IID_nearbyint || id == IID_round ||
-        id == IID_roundeven || id == IID_pow || id == IID_fma || id == IID_fmuladd || id == IID_is_fpclass ||
-        id == IID_powi || id == IID_canonicalize || id == IID_fptosi_sat || id == IID_fptoui_sat || id == IID_lround ||
-        id == IID_llround || id == IID_lrint || id == IID_llrint || id == IID_ucmp || id == IID_scmp || id == IID_clmul;
-}
 
 // The DropFlags vector of simplifyWithOpReplaced: on when the caller passes one (InstCombine's
 // foldSelectValueEquivalence); the instructions whose poison-generating annotations must be dropped.
