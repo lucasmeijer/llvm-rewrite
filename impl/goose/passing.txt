@@ -3946,6 +3946,7 @@ tests/imported/llvm/Transforms/IndVarSimplify/replace-sdiv-by-udiv.ll::opt
 tests/imported/llvm/Transforms/IndVarSimplify/replace-sdiv-by-udiv.ll::roundtrip
 tests/imported/llvm/Transforms/IndVarSimplify/replace-srem-by-urem.ll::opt
 tests/imported/llvm/Transforms/IndVarSimplify/replace-srem-by-urem.ll::roundtrip
+tests/imported/llvm/Transforms/IndVarSimplify/rewrite-loop-exit-value.ll::opt
 tests/imported/llvm/Transforms/IndVarSimplify/rewrite-loop-exit-value.ll::roundtrip
 tests/imported/llvm/Transforms/IndVarSimplify/rewrite-loop-exit-values-phi.ll::opt
 tests/imported/llvm/Transforms/IndVarSimplify/rewrite-loop-exit-values-phi.ll::roundtrip
