@@ -223,11 +223,11 @@ soa :: (st: *X86_Lowering, isds: [] u32, vts: [] u32, a: u8) { for i: isds for v
 // setOperationPromotedToType: Promote + AddPromotedToType
 sopt :: (st: *X86_Lowering, isd: u32, vt: u32, to: u32) {
     soa(st, isd, vt, LA_PROMOTE);
-    table_set(*st.promote_to, (cast(u64) isd << 32) | cast(u64) xl_ord(vt), to);
+    table_set(*st.promote_to, ((cast(u64) isd) << 32) | cast(u64) xl_ord(vt), to);
 }
 sopt :: (st: *X86_Lowering, isds: [] u32, vt: u32, to: u32) { for isds sopt(st, it, vt, to); }
 slea :: (st: *X86_Lowering, ext: u32, val: u32, mem: u32, a: u8) {
-    table_set(*st.load_ext, (cast(u64) ext << 40) | (cast(u64) xl_ord(val) << 20) | cast(u64) xl_ord(mem), a);
+    table_set(*st.load_ext, ((cast(u64) ext) << 40) | (cast(u64) xl_ord(val) << 20) | cast(u64) xl_ord(mem), a);
 }
 slea :: (st: *X86_Lowering, exts: [] u32, val: u32, mem: u32, a: u8) { for exts slea(st, it, val, mem, a); }
 slea :: (st: *X86_Lowering, exts: [] u32, val: u32, mems: [] u32, a: u8) { for e: exts for m: mems slea(st, e, val, m, a); }
@@ -235,7 +235,7 @@ slea :: (st: *X86_Lowering, ext: u32, val: u32, mems: [] u32, a: u8) { for mems 
 stsa :: (st: *X86_Lowering, val: u32, mem: u32, a: u8) {
     table_set(*st.trunc_store, (cast(u64) xl_ord(val) << 20) | cast(u64) xl_ord(mem), a);
 }
-scca :: (st: *X86_Lowering, cc: u32, vt: u32, a: u8) { table_set(*st.cond_code, (cast(u64) cc << 32) | cast(u64) xl_ord(vt), a); }
+scca :: (st: *X86_Lowering, cc: u32, vt: u32, a: u8) { table_set(*st.cond_code, ((cast(u64) cc) << 32) | cast(u64) xl_ord(vt), a); }
 scca :: (st: *X86_Lowering, ccs: [] u32, vt: u32, a: u8) { for ccs scca(st, it, vt, a); }
 add_reg_class :: (st: *X86_Lowering, vt: u32) { st.reg_class[xl_ord(vt)] = true; }
 
@@ -279,7 +279,7 @@ is_op_expand_or_libcall :: (st: *X86_Lowering, isd: u32, vt: u32) -> bool {
     return a == LA_EXPAND || a == LA_LIBCALL;
 }
 xl_load_ext_action :: (st: *X86_Lowering, ext: u32, val: u32, mem: u32) -> u8 {
-    found, a := table_find(*st.load_ext, (cast(u64) ext << 40) | (cast(u64) xl_ord(val) << 20) | cast(u64) xl_ord(mem));
+    found, a := table_find(*st.load_ext, ((cast(u64) ext) << 40) | (cast(u64) xl_ord(val) << 20) | cast(u64) xl_ord(mem));
     return ifx found then a else LA_LEGAL;
 }
 xl_trunc_store_action :: (st: *X86_Lowering, val: u32, mem: u32) -> u8 {

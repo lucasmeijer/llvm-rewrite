@@ -401,7 +401,7 @@ slp_get_location :: (i: Value_Id) -> (bool, Mem_Loc) {
 }
 // BoUpSLP::isAliased(Loc1, Inst1, Inst2) with the AliasCache
 slp_is_aliased :: (loc: Mem_Loc, i1: Value_Id, i2: Value_Id) -> bool {
-    key := (cast(u64) i1 << 32) | cast(u64) i2;
+    key := ((cast(u64) i1) << 32) | cast(u64) i2;
     found, r := table_find(*slpx.alias_cache, key);
     if found return r;
     aliased := aa_mod_ref_inst_loc(slpx.batch_aa, i2, loc) != 0;

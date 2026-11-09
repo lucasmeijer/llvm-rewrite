@@ -82,7 +82,7 @@ slp_get_split_tree_entries :: (v: Value_Id) -> [] Te_Id {
 }
 // getOperandEntry(E, Idx): OperandsToTreeEntry
 slp_get_operand_entry :: (te: Te_Id, idx: u32) -> Te_Id {
-    found, r := table_find(*slpx.operands_to_tree_entry, (cast(u64) te << 32) | idx);
+    found, r := table_find(*slpx.operands_to_tree_entry, ((cast(u64) te) << 32) | idx);
     if !found fatal("internal: slp: operand entry not found");
     return r;
 }
@@ -182,7 +182,7 @@ slp_new_tree_entry_state :: (vl: [] Value_Id, state: s32, bundle: s32, s: Inst_S
     e.idx = last;
     e.state = state;
     if ei.user != TE_NONE {
-        key := (cast(u64) ei.user << 32) | ei.edge;
+        key := ((cast(u64) ei.user) << 32) | ei.edge;
         if !table_contains(*slpx.operands_to_tree_entry, key) table_set(*slpx.operands_to_tree_entry, key, last);
     }
     for reuse array_add(*e.reuse_shuffle_indices, it);

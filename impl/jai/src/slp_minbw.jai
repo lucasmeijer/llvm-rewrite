@@ -69,6 +69,7 @@ slp_collect_values_to_demote :: (te: Te_Id, c: *Demote_Ctx, bit_width: *u64, max
     orig := dl_type_size_bits(scalar_type(vtype(e.scalars[0])));
     if orig == bit_width.* { max_depth.* = 1; return true; }
     for c.nodes_to_keep if it == te return false;
+    #if DEBUG_SLP print("DBG   collect enter te% bw % orig %\n", te, bit_width.*, orig);
     q := slp_simple_query();
     is_signed_node := false;
     for r: e.scalars { if pm_poison(r) continue; if !is_known_non_negative(r, q) { is_signed_node = true; break; } }
@@ -148,7 +149,7 @@ slp_collect_values_to_demote :: (te: Te_Id, c: *Demote_Ctx, bit_width: *u64, max
             if !is_cmp_inst(usr) && type_is_sized(ut) && type_kind(ut) != .SVECTOR && dl_type_size_bits(ut) <= bit_width.* continue;
             all = false; break;
         }
-        if !all && !is_potentially_truncated(v, bit_width, orig, is_signed_node) return false;
+        if !all && !is_potentially_truncated(v, bit_width, orig, is_signed_node) { #if DEBUG_SLP print("DBG   collect te% users fail %\n", te, vname(v)); return false; }
     }
     process_operands :: (ops: [] Te_Id, c: *Demote_Ctx, bit_width: *u64, max_depth: *u64, need_to_exit: *bool, te: Te_Id, orig: u64, is_signed_node: bool) -> bool {
         need_to_exit.* = false;
@@ -267,6 +268,7 @@ slp_collect_values_to_demote :: (te: Te_Id, c: *Demote_Ctx, bit_width: *u64, max
             c.is_profitable_to_demote.* = true;
             return try_process(te, c, bit_width, max_depth, .[], CHK_NONE, orig, is_signed_node);
         case .ADD; #through; case .SUB; #through; case .MUL; #through; case .AND; #through; case .OR; #through; case .XOR;
+            #if DEBUG_SLP { print("DBG   add ops % % te=%\n", o0(te), o1(te), te); for v, k: slpx.operands_to_tree_entry print("  key % -> %\n", k, v); }
             return try_process(te, c, bit_width, max_depth, .[o0(te), o1(te)], CHK_NONE, orig, is_signed_node);
         case .FREEZE;
             return try_process(te, c, bit_width, max_depth, .[o0(te)], CHK_NONE, orig, is_signed_node);
@@ -425,7 +427,9 @@ slp_compute_minimum_value_sizes :: () {
         c.nodes_to_keep = nodes_to_keep;
         c.is_profitable_to_demote = *is_profitable;
         c.is_trunc_root = is_trunc_root;
-        if !slp_collect_values_to_demote(te, *c, *max_bw, *max_depth) return 0;
+        cr := slp_collect_values_to_demote(te, *c, *max_bw, *max_depth);
+        #if DEBUG_SLP print("DBG collect te% -> % depth % maxbw % demote %\n", te, cr, max_depth, max_bw, to_demote.*);
+        if !cr return 0;
         if max_depth <= limit {
             ext_ok := (o == .SEXT || o == .ZEXT) &&
                       (!is_top_root || !(is_store_or_insert || slpx.has_user_ignore_list) ||
@@ -473,6 +477,7 @@ slp_compute_minimum_value_sizes :: () {
         limit: u64 = 2;
         if is_top_root && slpx.reduction_bit_width == dl_type_size_bits(vtype(slp.entries[0].scalars[0])) limit = 3;
         max_bw := compute_max_bit_width(cast(Te_Id) node_idx, is_top_root, is_profitable_to_demote_root, limit, is_trunc_root, is_signed_cmp, *to_demote, nodes_to_keep, is_store_or_insert);
+        #if DEBUG_SLP print("DBG minbw root % -> max_bw % to_demote %\n", node_idx, max_bw, to_demote);
         if slpx.reduction_bit_width != 0 && (is_top_root || root_demotes.count) {
             if max_bw != 0 && slpx.reduction_bit_width < max_bw slpx.reduction_bit_width = bit_ceil(max_bw);
             else if max_bw == 0 slpx.reduction_bit_width = 0;

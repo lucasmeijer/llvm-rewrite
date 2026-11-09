@@ -798,7 +798,7 @@ ec_cost_diff :: (c: *Slp_Ec) -> Cost {
         }
     }
     vec = cost_add(vec, c.spills);
-    #if DEBUG_SLP print("DBG entry % cost vec=% scalar=% common=%\n", te, vec, scalar, c.common_cost);
+    #if DEBUG_SLP print("DBG entry % cost common=% vec=% scalar=% minbw=% %\n", te, c.common_cost, cost_sub(vec, c.common_cost), scalar, c.has_bw, c.bw);
     return cost_sub(vec, scalar);
 }
 
