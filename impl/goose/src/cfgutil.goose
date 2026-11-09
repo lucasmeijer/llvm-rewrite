@@ -464,7 +464,8 @@ fn cu_merge_basic_block_into_only_pred(dest: i32) {
         for p in pp { if cu_push_unique(seen, p) { cu_upd(ups, DT_DELETE, p, pred); } }
         cu_upd(ups, DT_DELETE, pred, dest);
     }
-    if cu_has_address_taken(dest) { cu_not_ported("MergeBasicBlockIntoOnlyPred of an address-taken block"); }
+    // Zap anything that took the address of DestBB: its uses become inttoptr (i32 1), the constant is destroyed
+    if cu_has_address_taken(dest) { cu_drop_block_address(dest); }
     cu_block_rauw(pred, dest);
     inst_erase_from_parent(block_terminator(pred));
     // DestBB->splice(DestBB->begin(), PredBB)

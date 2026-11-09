@@ -1358,7 +1358,20 @@ fn lv_format_value(dst: u8[>..]&, c: i32, fv: i32) {
         out.resize(pm);
         return;
     }
-    if k == VK_FUNC { lv_not_ported("printing a function in a lattice value"); }
+    if k == VK_FUNC {
+        // Value::print of a Function: AssemblyWriter::printFunction with its own function slots
+        slots_begin(fv);
+        slots_end();
+        let md_mark = md_order.len;
+        let as_mark = as_order.len;
+        let pm = out.len;
+        print_function(c);
+        dst.append(out[pm..]);
+        out.resize(pm);
+        while md_order.len > md_mark { mdslot[md_order[md_order.len - 1]] = -1; md_order.resize(md_order.len - 1); }
+        while as_order.len > as_mark { asslot[as_order[as_order.len - 1]] = -1; as_order.resize(as_order.len - 1); }
+        return;
+    }
     if is_global(c) { lv_not_ported("printing an alias in a lattice value"); }
     errs_operand(c, fv, true);
     dst.append(errbuf[mark..]);

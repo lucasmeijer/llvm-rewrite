@@ -725,9 +725,9 @@ fn bc_calc_fp_heuristics(bb: i32) -> bool {
     let fp_untaken = bp_new(12, 32);
     let ord_taken = bp_new(1024 * 1024 - 1, 1024 * 1024);
     let ord_untaken = bp_new(1, 1024 * 1024);
-    // isEquality: oeq, one, ueq, une; isTrueWhenEqual: oeq, ueq (and ole, oge, ule, uge, true)
+    // isEquality: oeq, one, ueq, une; CmpInst::isTrueWhenEqual of an FP predicate: true, ueq, uge, ule only
     if p == 1 || p == 6 || p == 9 || p == 14 {
-        let twe = p == 1 || p == 9;
+        let twe = p == 9;
         if !twe { let a: u32[2] = [fp_taken, fp_untaken]; bpi_set_edge_probability(bb, a); }
         else { let b: u32[2] = [fp_untaken, fp_taken]; bpi_set_edge_probability(bb, b); }
     } else if p == 7 {
