@@ -142,3 +142,9 @@ Verified with the jai port (`sweep --passes dse|memcpyopt`, whole-file and per-f
   dead and its knowledge is kept (`BasicAA/2008-11-23-NoaliasRet.ll`).
 - `CallBase::getParamAttr(ArgNo, Kind)` falls back to the callee's attributes: DSE's `initializes` handling sees
   attributes written only on the declaration.
+- MemCpyOpt's load/store -> memcpy promotion sizes the copy with `IRBuilder::CreateTypeSize(i64, StoreSize)`: for a
+  scalable type that is `%1 = call i64 @llvm.vscale.i64()` + `%2 = mul nuw i64 %1, N` (no multiply when N is 1),
+  inserted before the memcpy (`MemCpyOpt/vscale-crashes.ll`, verified with goose).
+- BasicAA's aliasGEP computes an index's range with `computeConstantRange` at the index *value's* width and only
+  then truncates it to the index width (`CastedValue::evaluateWith(ConstantRange)`), so an `i128` GEP index needs
+  an any-width ConstantRange (`MemCpyOpt/memset-memcpy-redundant-memset.ll`, `test_different_types_i32_i128`).

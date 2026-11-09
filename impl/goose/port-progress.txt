@@ -8,7 +8,7 @@ lib/Analysis/TargetTransformInfo.cpp 0.15
 lib/Analysis/CFG.cpp 0.2
 lib/Analysis/Loads.cpp 0.6
 lib/Analysis/ValueTracking.cpp 0.6
-lib/IR/Value.cpp 0.3
+lib/IR/Value.cpp 0.35  # + getPointerOffsetFrom (memcpyopt.goose)
 lib/IR/Instruction.cpp 0.5
 lib/IR/Instructions.cpp 0.08
 lib/IR/ProfDataUtils.cpp 0.4
@@ -98,7 +98,7 @@ lib/Analysis/DomTreeUpdater.cpp 1
 lib/IR/OptBisect.cpp 0.5
 lib/Analysis/ValueLattice.cpp 1
 lib/Transforms/Utils/Mem2Reg.cpp 1
-lib/Analysis/PostDominators.cpp 0.15  # manual: only the printer pass (heuristic 0.00)
+lib/Analysis/PostDominators.cpp 0.3  # manual: the printer pass and dominates(Instruction, Instruction) (memcpyopt.goose) (heuristic 0.00)
 lib/Analysis/CycleAnalysis.cpp 1
 lib/Analysis/PtrUseVisitor.cpp 1
 lib/Analysis/ValueLatticeUtils.cpp 1  # manual: renamed: sc_can_track_* in sccp.goose (heuristic 0.00)
@@ -136,3 +136,4 @@ lib/Analysis/MemoryDependenceAnalysis.cpp 0.95  # manual: all of MemoryDependenc
 lib/Transforms/Utils/VNCoercion.cpp 1
 lib/Transforms/Scalar/DeadStoreElimination.cpp 0.97  # manual: all but shortenAssignment's dbg_assign updates (loud) and the legacy pass
 lib/IR/ConstantRangeList.cpp 0.1  # intersectWith only (dse.goose)
+lib/Transforms/Scalar/MemCpyOptimizer.cpp 0.98  # manual: all but mergeDIAssignID of stores with DIAssignIDs (loud) and the legacy pass

@@ -825,11 +825,23 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
 
 ## DSE and MemCpyOpt (dse.goose, memintr.goose)
 
-- L1.dse COMPLETE (166/166). dse.goose ports DeadStoreElimination.cpp whole except shortenAssignment's dbg_assign
+- L1.dse COMPLETE (166/166). L1.memcpyopt 111/112: the one left runs `-use-constant-int-for-fixed-length-splat`
+  (vector-typed ConstantInt splats are not supported anywhere in the Goose opt: fails loudly). dse.goose ports DeadStoreElimination.cpp whole except shortenAssignment's dbg_assign
   updates (fails loudly when the shortened intrinsic has a DIAssignID). DSEState is the `ds_*` globals; maps and
   sets keyed by values/blocks are fields of a per-value record `ds_v` stamped with the run's epoch, sets keyed by
   memory accesses fields of `ds_a`; each set gets a fresh stamp from `ds_tick`, so creating a set is O(1).
   IOLs (MapVector of MapVector of std::map) are block list + per-block entry chain + sorted interval lists.
+- memcpyopt.goose ports MemCpyOptimizer.cpp whole except mergeDIAssignID (loud). MemCpyOptPass's members are
+  `mc_*`; BBI is `mc_bbi` (-1 = end()); the EarliestEscapeAnalysis lives for the run (`ea_begin` once) while each
+  `BatchAAResults BAA(*AA, EEA)` is a fresh `aq_push(CA_EARLIEST)` popped by the wrapper function (`*_q` split:
+  every return path pops); `AA->...` calls are the `aa_*_simple` entry points. Its IRBuilder (`mcb_*`) folds
+  like ConstantFolder (constant GEPs, zext, icmp, sub, select) and inserts before the builder's instruction
+  with its `!dbg` (`inst_insert_before`: the new instruction adopts the records there, like `IRBuilder<>(I)`).
+  Value::getPointerOffsetFrom is `mc_pointer_offset_from`; PostDominatorTree::dominates(Instruction,
+  Instruction) is `mc_pdt_dominates_inst`.
+- Shared fix: BasicAA's aliasGEP range of a GEP index wider than 64 bits (an `i128` index truncated to the
+  index width) failed loudly converting the APInt ConstantRange to the 64-bit CR; it now evaluates the CastedValue
+  on the any-width CRange first (`rg_cv_eval`, aa.goose) and converts after the sextOrTrunc to the index width.
 - memintr.goose (shared with MemCpyOpt): the IntrinsicInst.h mem-intrinsic classes (`mi_*`), isBytewiseValue,
   MemoryLocation::getForDest(CallBase, TLI) (`ml_for_dest_call`; memorybuiltins' `mb_memloc_for_dest` only returns
   the pointer), BatchAA isMustAlias (`aa_is_must_alias_vals`: precise(1) locations, see knowledge).
@@ -841,6 +853,12 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   LLVM (GEPOperator::accumulateConstantOffset) only bails on a *non-zero* index into a scalable indexed type, so
   `gep <vscale x 4 x i32>, ptr %p, i64 0, i64 1` is %p + 4 (seen as a print<memoryssa> difference after DSE's
   setOptimized on GVN/vscale.ll).
-- Sweeps (whole file and --per-function, every round-tripping file): `dse`, `dse -enable-knowledge-retention`,
-  `debugify,dse`, `dse,print<memoryssa>` --analysis: 0 differs, 0 bad-ir; loud: separate_storage assumptions,
-  APInt widths over 64 bits in BasicAA, ppc_fp128 literals.
+- Sweeps (whole file and --per-function, every round-tripping file): `dse`, `memcpyopt`, `memcpyopt,dse`,
+  `dse -enable-knowledge-retention`, `debugify,dse`, `dse,print<memoryssa>` and `memcpyopt,print<memoryssa>`
+  --analysis, `dse` / `memcpyopt --with-test-flags`: 0 differs, 0 bad-ir; loud: separate_storage assumptions,
+  APInt widths over 64 bits in BasicAA/ValueTracking, ppc_fp128 literals (and, with the test flags, other
+  passes' unknown cl::opts).
+- Speed (no `@perf` line times these passes; by hand, `-disable-output`, pass time = total - parse): sqlite3 dse
+  +0.17 s (LLVM +0.16 s), memcpyopt +0.03 s (+0.07 s); SPASS dse +0.30 s (+0.38 s), memcpyopt +0.09 s (+0.12 s);
+  every tests/perf/scaling shape is linear and as fast as LLVM or faster (allocas n2000 -> n8000 dse
+  +0.017 -> +0.076 s).

@@ -983,6 +983,16 @@ fn cv_eval_cr(c: CV, n0: CR) -> CR {
     if c.zext > 0 { w += c.zext as i64; n = cr_zext(n, w); }
     return n;
 }
+// evaluateWith(ConstantRange N) on an any-width CRange
+fn rg_cv_eval(c: CV, n0: CRange) -> CRange {
+    var n = n0;
+    var w = rg_w(n);
+    if c.trunc > 0 { w -= c.trunc as i64; n = rg_truncate(n, w); }
+    if c.nonneg && !rg_is_all_nonneg(n) { n = rg_intersect(n, rg_new(ap_zero(w), ap_smin_val(w))); }
+    if c.sext > 0 { w += c.sext as i64; n = rg_sext(n, w); }
+    if c.zext > 0 { w += c.zext as i64; n = rg_zext(n, w); }
+    return n;
+}
 fn cv_can_distribute(c: CV, nuw: bool, nsw: bool) -> bool { (c.zext == 0 || nuw) && (c.sext == 0 || nsw) }
 fn cv_same_casts(a: CV, b: CV) -> bool {
     if vals[a.v].ty != vals[b.v].ty { return false; }
@@ -1447,9 +1457,17 @@ recursive fn bas_alias_gep_impl(gep1: i32, s1_0: u64, v2: i32, s2_0: u64, u1_0: 
         }
         if i == 0 { gcd = bas_abs_w(sgcd, w); } else { gcd = bas_gcd_u(gcd, bas_abs_w(sgcd, w)); }
         kb_cxt = x.cxt;
-        var cr = rg_to_cr(compute_constant_range(x.val.v, false, true, 0));
-        cr = cr_intersect_t(cr, cr_from_kb(known, true), CR_SIGNED);
-        cr = cr_sext_or_trunc(cv_eval_cr(x.val, cr), w);
+        var cr = cr_new(0, 0, w);
+        if bas_prim_bits(x.val.v) > 64 {
+            // a value wider than 64 bits (truncated to the index width): the range in APInt arithmetic first
+            var rg = compute_constant_range(x.val.v, false, true, 0);
+            rg = rg_intersect_t(rg, rg_from_kb(known, true), RG_SIGNED);
+            cr = rg_to_cr(rg_sext_or_trunc(rg_cv_eval(x.val, rg), w));
+        } else {
+            cr = rg_to_cr(compute_constant_range(x.val.v, false, true, 0));
+            cr = cr_intersect_t(cr, cr_from_kb(known, true), CR_SIGNED);
+            cr = cr_sext_or_trunc(cv_eval_cr(x.val, cr), w);
+        }
         if x.nsw { cr = cr_smul_sat(cr, cr_single(scale, w)); } else { cr = cr_smul_fast(cr, cr_single(scale, w)); }
         if x.neg { orange = cr_sub(orange, cr); } else { orange = cr_add(orange, cr); }
     }

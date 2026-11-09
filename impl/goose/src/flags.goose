@@ -75,6 +75,7 @@ let KNOWN_FLAGS: const u8[:][] = [
     "dse-memoryssa-walklimit", "dse-memoryssa-partial-store-limit", "dse-memoryssa-defs-per-block-limit",
     "dse-memoryssa-samebb-cost", "dse-memoryssa-otherbb-cost", "dse-memoryssa-path-check-limit",
     "dse-optimize-memoryssa", "enable-dse-initializes-attr-improvement", "dse-max-dom-cond-depth",
+    "enable-memcpyopt-without-libcalls",                 // memcpyopt
     "goose-ic-lenient",                                  // development only: unported InstCombine visitors do nothing
 ];
 
