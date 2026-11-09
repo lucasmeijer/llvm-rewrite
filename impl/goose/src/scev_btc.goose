@@ -60,6 +60,7 @@ struct BTI { at: i32, n: i32, complete: bool, cmax: i32, moz: bool, symmax: i32 
 var sc_btis: BTI[>..];
 var sc_bti_map = hm_new();      // (loop << 1 | predicated) -> index in sc_btis
 var sc_cevl_exit = hm_new();    // ConstantEvolutionLoopExitValue: phi -> constant value id
+var sc_bti_tag = hm_new();      // BTI.at -> (loop << 1 | predicated) of the BTC whose exit entries start there
 
 recursive fn scev_reset_btc() {
     sc_predl.resize(0);
@@ -68,6 +69,7 @@ recursive fn scev_reset_btc() {
     sc_btis.resize(0);
     hm_clear(sc_bti_map);
     hm_clear(sc_cevl_exit);
+    hm_clear(sc_bti_tag);
     sc_elc.resize(0);
     scev_reset_pred();
     scev_reset_eval();
@@ -333,11 +335,11 @@ recursive fn sc_compute_backedge_taken_count(l: i32, allow_preds: bool) -> BTI {
         let e = sc_ent_tmp[k];
         sc_ents.push(e);
         sc_side2_grow();
-        let tag = (l << 1) | (if allow_preds { 1 } else { 0 });
-        if !sc_is_const(e.exact) { sc_becusers_head[e.exact] = sc_list_push(sc_becusers_head[e.exact], tag); }
-        if !sc_is_const(e.smax) { sc_becusers_head[e.smax] = sc_list_push(sc_becusers_head[e.smax], tag); }
+        if !sc_is_const(e.exact) { sc_becusers_head[e.exact] = sc_list_push(sc_becusers_head[e.exact], at); }
+        if !sc_is_const(e.smax) { sc_becusers_head[e.smax] = sc_list_push(sc_becusers_head[e.smax], at); }
     }
     let n = (sc_ent_tmp.len - em) as i32;
+    if n > 0 { hm_put(sc_bti_tag, at as u64, ((l as i64) << 1) | (if allow_preds { 1 } else { 0 })); }
     sc_ent_tmp.resize(em);
     return BTI { at: at, n: n, complete: could, cmax: maxbe, moz: moz, symmax: -1 };
 }

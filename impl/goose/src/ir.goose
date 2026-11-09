@@ -4,6 +4,9 @@ import std;
 import os;
 import gen_attrs;
 import dinfo;
+import wvh;
+import scev;
+import scev_update;
 
 // ---------------------------------------------------------------------------------------------
 // Errors
@@ -385,6 +388,9 @@ var vh_lvi_events: i32[>..<];
 // instead of reading the run's next owner.
 fn val_set_dead(v: i32) {
     if vh_lvi_n > 0 { vh_lvi_events.push(v); }
+    // ~Value: ValueHandleBase::ValueIsDeleted (WeakVH/WeakTrackingVH, ScalarEvolution's callback handles)
+    if wvh_live > 0 { wvh_value_deleted(v); }
+    if sc_valid { scev_note_erase(v); }
     let at = vals[v].ops;
     let cap = vals[v].cap as i64;
     for k in vals[v].nops { if uses[at + k].val >= 0 { fatal("internal: erasing a value whose operands are still set"); } }
@@ -469,6 +475,9 @@ fn drop_all_refs(user: i32) {
 // Value::replaceAllUsesWith: also ValueAsMetadata::handleRAUW when the value is used by debug records.
 fn rauw(old: i32, nv: i32) {
     if vh_lvi_n > 0 { vh_lvi_events.push(old); }
+    // ValueHandleBase::ValueIsRAUWd, before the uses change (WeakTrackingVH/TrackingVH, ScalarEvolution)
+    if wvh_live > 0 { wvh_value_rauwd(old, nv); }
+    if sc_valid { scev_note_rauw(old, nv); }
     if old < val_vam.len && val_vam[old] >= 0 { vam_handle_rauw(old, nv); }
     while vals[old].first_use >= 0 {
         let u = vals[old].first_use;

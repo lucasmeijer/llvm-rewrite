@@ -11,6 +11,8 @@ import domtree;
 import loopinfo;
 import ssaupdater;
 import dinfo;
+import scev;
+import scev_create;
 
 fn lcssa_new_phi(ty: i32, reserve: i64) -> i32 {
     let pn = new_inst(OP_PHI, ty, reserve);
@@ -36,7 +38,12 @@ fn lcssa_rewrite_dbg_values(iv: i32, ibb: i32, l: i32, added: const i32[:]) {
     }
 }
 
-// formLCSSAForInstructions(Worklist, DT, LI, SE = null, PHIsToRemove = null, InsertedPHIs = null)
+var lcssa_se: bool = false;
+var lcssa_collect: bool = false;
+var lcssa_phis_to_remove: i32[>..<];
+var lcssa_inserted: i32[>..<];
+
+// formLCSSAForInstructions(Worklist, DT, LI, SE, PHIsToRemove, InsertedPHIs)
 fn form_lcssa_for_instructions(worklist: i32[>..<]&) -> bool {
     var changed = false;
     var to_rewrite: i32[>..<] = [];     // use ids
@@ -75,6 +82,7 @@ fn form_lcssa_for_instructions(worklist: i32[>..<]&) -> bool {
         added.clear();
         post.clear();
         ssa_init(vals[iv].ty, val_name(iv));
+        let has_scev = lcssa_se && sc_valid && sc_is_scevable(vals[iv].ty) && sc_get_existing(iv) >= 0;
         for eb in exits {
             let en = if dt_has_node(DT_DOM, eb) { eb } else { -1 };
             if !dt_dominates_nodes(fv, DT_DOM, domn, en) { continue; }
@@ -84,6 +92,7 @@ fn form_lcssa_for_instructions(worklist: i32[>..<]&) -> bool {
             let pn = lcssa_new_phi(vals[iv].ty, preds.len);
             let f = block_first(eb);
             if f >= 0 { inst_insert_before_head(pn, f); } else { block_append_inst(eb, pn); }
+            if lcssa_collect { lcssa_inserted.push(pn); }
             var nm: u8[>..] = [];
             nm.append(val_name(iv));
             nm.append(".lcssa");
@@ -99,6 +108,8 @@ fn form_lcssa_for_instructions(worklist: i32[>..<]&) -> bool {
             ssa_add_available_value(eb, pn);
             let ol = li_loop_for(eb);
             if ol >= 0 && !loop_contains_loop(l, ol) { post.push(pn); }
+            // a cached SCEV for the original instruction: the new LCSSA phi gets one too
+            if has_scev { sc_get_scev(pn); }
         }
         for u2 in to_rewrite {
             let user = uses[u2].user;
@@ -113,12 +124,14 @@ fn form_lcssa_for_instructions(worklist: i32[>..<]&) -> bool {
         for pn in ssa_inserted {
             let ol = li_loop_for(inst_parent(pn));
             if ol >= 0 && !loop_contains_loop(l, ol) { post.push(pn); }
+            if lcssa_collect { lcssa_inserted.push(pn); }
         }
         for pn in post { if vals[pn].first_use >= 0 { worklist.push(pn); } }
         for pn in added { if vals[pn].first_use < 0 && position(to_remove, pn) < 0 { to_remove.push(pn); } }
         changed = true;
     }
-    for pn in to_remove { if !is_dead(pn) && vals[pn].first_use < 0 { inst_erase_from_parent(pn); } }
+    if lcssa_collect { for pn in to_remove { lcssa_phis_to_remove.push(pn); } }
+    else { for pn in to_remove { if !is_dead(pn) && vals[pn].first_use < 0 { inst_erase_from_parent(pn); } } }
     return changed;
 }
 
@@ -173,8 +186,11 @@ recursive fn form_lcssa_recursively(l: i32) -> bool {
 fn lcssa_run(fv: i32) -> u32 {
     li_get(fv);
     dt_get(fv, DT_DOM);
+    // AM.getCachedResult<ScalarEvolutionAnalysis>(F)
+    lcssa_se = scev_valid(fv);
     var changed = false;
     for k in li_ntop(fv) { if form_lcssa_recursively(li_top(fv, k)) { changed = true; } }
+    lcssa_se = false;
     if !changed { return PA_ALL; }
     return PA_CFG | ((1 as u32) << A_SCEV) | ((1 as u32) << A_MEMORYSSA);
 }

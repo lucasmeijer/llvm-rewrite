@@ -40,6 +40,7 @@ import globalsaa;
 import lpm;
 import tli;
 import scev;
+import indvars;
 import loopnest;
 import simplifycfg;
 import subtarget;
@@ -117,6 +118,7 @@ let P_LREQUIRE = 203;      // require<analysis> in a loop pipeline (arg = analys
 let P_LINVALIDATE = 204;
 let P_LOOP_ROTATE = 206;   // arg: bit 0 = header-duplication, 1 = prepare-for-lto, 2 = check-exit-count
 let P_LICM = 205;          // arg: bit 0 = AllowSpeculation, bit 1 = lnicm (a loop-nest pass)
+let P_INDVARS = 207;
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
 // (PassInfoMixin::isRequired: printers, verifier, require/invalidate, adaptors).
@@ -160,6 +162,7 @@ let PASS_TABLE: const u8[:][] = [
     "f:print<block-freq>:184:1",
     "l:print<loopnest>:200:1",
     "l:no-op-loop:201:0",
+    "l:indvars:207:0",
 ];
 
 // LLVM pass class names, for -opt-bisect-limit messages.
@@ -887,6 +890,11 @@ fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
         P_LOOP_ROTATE => {
             let a = pnodes[n].arg;
             let pa = loop_rotate_pass_run(l, (a & 1) != 0, (a & 2) != 0, (a & 4) != 0, lpm_use_mssa);
+            ap_pool_reset();
+            return pa;
+        },
+        P_INDVARS => {
+            let pa = indvars_pass_run(l, lpm_use_mssa);
             ap_pool_reset();
             return pa;
         },

@@ -613,3 +613,17 @@ fn shuffle_is_zero_mask_tti(u: i32) -> bool {
     for k in insts[ii].naux { let m = ints[insts[ii].aux + k]; if m != 0 && m != -1 { return false; } }
     return true;
 }
+
+// isTruncateFree(Ty1, Ty2): TargetTransformInfoImplBase says no; X86TargetLowering::isTruncateFree: integer types
+// with Ty1 wider than Ty2
+fn tti_is_truncate_free(t1: i32, t2: i32) -> bool {
+    if tti_kind != TTI_X86 { return false; }
+    if !ty_is_int(t1) || !ty_is_int(t2) { return false; }
+    return ty_bits(t1) > ty_bits(t2);
+}
+
+// getIntImmCostInst(Opcode, Idx, Imm, Ty, CostKind): TCC_Free for NoTTIImpl
+fn tti_int_imm_cost_inst(o: i64, idx: i64, imm: AP, ty: i32, kind: i64) -> i64 {
+    if tti_kind == TTI_X86 { fatal("TargetTransformInfo: X86TTIImpl::getIntImmCostInst is not ported yet"); }
+    return TCC_FREE;
+}

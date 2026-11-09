@@ -392,8 +392,8 @@ recursive fn scev_reset() {
     sc_side.resize(0);
     hm_clear(sc_vmap);
     hm_clear(sc_fold);
-    hm_clear(sc_ldisp);
-    hm_clear(sc_bdisp);
+    sc_clear_ldisp();
+    sc_clear_bdisp();
     hm_clear(sc_atscope);
     hm_clear(sc_atscope_users);
     hm_clear(sc_pending_loop_preds);

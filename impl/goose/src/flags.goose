@@ -58,6 +58,9 @@ let KNOWN_FLAGS: const u8[:][] = [
     "earlycse-debug-hash",                               // no-op in release builds (see earlycse.goose)
     "earlycse-mssa-optimization-cap",                    // read by early-cse<memssa>
     "verify-scev",                                       // no-op: extra verification only
+    "replexitval", "indvars-post-increment-ranges", "disable-lftr", "indvars-predicate-loops",   // indvars
+    "indvars-predicate-loop-traps", "indvars-widen-indvars", "scev-cheap-expansion-budget",
+    "scalar-evolution-use-context-for-no-wrap-flag-inference",
     "enable-scalar-pre", "enable-load-pre", "enable-load-in-loop-pre", "enable-split-backedge-in-load-pre",   // gvn
     "enable-gvn-memdep", "enable-gvn-memoryssa", "gvn-max-num-deps", "gvn-max-block-speculations",
     "gvn-max-num-visited-insts", "gvn-max-num-insns", "gvn-scan-users-limit", "gvn-add-phi-translation",

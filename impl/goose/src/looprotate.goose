@@ -40,6 +40,7 @@ import tti;
 import scev;
 import scev_btc;
 import scev_eval;
+import scev_update;
 
 var lr_mssau: bool = false;
 var lr_fv: i32 = -1;
@@ -87,8 +88,9 @@ fn lr_set_loop_id(l: i32, md: i32) {
     }
 }
 
-fn lr_forget_scev() {
-    if scev_valid(lr_fv) { scev_invalidate(lr_fv); scev_get(lr_fv); }
+// SE->forgetTopmostLoop(L); SE->forgetBlockAndLoopDispositions()
+fn lr_forget_scev(l: i32) {
+    if scev_valid(lr_fv) { sc_forget_topmost_loop(l); sc_forget_block_and_loop_dispositions_all(); }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -468,6 +470,8 @@ fn lr_rewrite_uses_of_cloned(oh: i32, oph: i32) {
         var nm: u8[>..] = [];
         nm.append(val_name(ohv));
         ssa_init(vals[ohv].ty, nm);
+        // force re-computation of OrigHeaderVal, as some users now need to use the new PHI node
+        if scev_valid(lr_fv) { sc_forget_value(ohv); }
         ssa_add_available_value(oh, ohv);
         ssa_add_available_value(oph, ophv);
         var u = vals[ohv].first_use;
@@ -511,7 +515,7 @@ fn lr_rotate_loop(l: i32, simplified_latch: bool, threshold: i64, prepare_for_lt
     let oph = loop_preheader(l);
     if oph < 0 || !loop_has_dedicated_exits(l) { return false; }
     lr_check_no_debug_records();
-    lr_forget_scev();
+    lr_forget_scev(l);
     if lr_mssau && flag_bool("verify-memoryssa", false) { mssa_verify(lr_fv); }
     var exit = term_succ(bi, 0);
     var nh = term_succ(bi, 1);

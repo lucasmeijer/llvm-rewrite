@@ -599,26 +599,68 @@ recursive fn sc_how_far_to_non_zero(v: i32, l: i32) -> EL {
 // Dispositions (stored with the SCEV's generation: forgetMemoizedResults erases them)
 
 // ScalarEvolution::forgetBlockAndLoopDispositions() (no value: both caches)
-fn sc_forget_block_and_loop_dispositions_all() { if sc_valid { hm_clear(sc_ldisp); hm_clear(sc_bdisp); } }
+fn sc_forget_block_and_loop_dispositions_all() { if sc_valid { sc_clear_ldisp(); sc_clear_bdisp(); } }
 // ScalarEvolution::forgetLoopDispositions
-fn sc_forget_loop_dispositions() { if sc_valid { hm_clear(sc_ldisp); } }
-// ScalarEvolution::forgetBlockAndLoopDispositions(V). LLVM erases the dispositions of V's SCEV and, recursively, of
-// its users; this clears both caches when V has a SCEV (a superset: entries of unrelated SCEVs are recomputed).
+fn sc_forget_loop_dispositions() { if sc_valid { sc_clear_ldisp(); } }
+// ScalarEvolution::forgetBlockAndLoopDispositions(V): erase the dispositions of V's SCEV and, while entries were
+// erased, of its users (SCEVUsers, recursively)
 fn sc_forget_block_and_loop_dispositions(v: i32) {
     if !sc_valid || !sc_is_scevable(vals[v].ty) { return; }
-    if sc_get_existing(v) < 0 { return; }
-    hm_clear(sc_ldisp);
-    hm_clear(sc_bdisp);
+    let s = sc_get_existing(v);
+    if s < 0 { return; }
+    var wl: i32[>..<] = [];
+    var seen = hm_new();
+    wl.push(s);
+    hm_put(seen, s as u64, 1);
+    while wl.len > 0 {
+        let c = wl.pop();
+        let a = sc_ldisp_erase(c);
+        let b = sc_bdisp_erase(c);
+        if !a && !b { continue; }
+        var u = sc_users_head[c];
+        while u >= 0 {
+            let us = sc_lpool[u].val;
+            if !hm_has(seen, us as u64) { hm_put(seen, us as u64, 1); wl.push(us); }
+            u = sc_lpool[u].next;
+        }
+    }
+}
+
+// A disposition entry of S is valid while S's stamp (its generation plus its own disposition generation) is the
+// one it was stored with; erasing every entry of S (LoopDispositions.erase(S)) bumps the disposition generation.
+// lde/bde record whether S has entries in the current cache (the epoch of their insertion).
+var sc_ld_epoch: i32 = 1;
+var sc_bd_epoch: i32 = 1;
+recursive fn sc_clear_ldisp() { hm_clear(sc_ldisp); sc_ld_epoch++; }
+recursive fn sc_clear_bdisp() { hm_clear(sc_bdisp); sc_bd_epoch++; }
+recursive fn sc_lstamp(s: i32) -> i64 { sc_side2_grow(); return (sc_side2[s].gen as i64) + (sc_side2[s].ldg as i64); }
+recursive fn sc_bstamp(s: i32) -> i64 { sc_side2_grow(); return (sc_side2[s].gen as i64) + (sc_side2[s].bdg as i64); }
+recursive fn sc_ldisp_note(s: i32) { sc_side2[s].lde = sc_ld_epoch; sc_side2[s].lds = sc_lstamp(s) as i32; }
+recursive fn sc_bdisp_note(s: i32) { sc_side2[s].bde = sc_bd_epoch; sc_side2[s].bds = sc_bstamp(s) as i32; }
+// LoopDispositions.erase(S) / BlockDispositions.erase(S): true if S had entries
+recursive fn sc_ldisp_erase(s: i32) -> bool {
+    sc_side2_grow();
+    let had = sc_side2[s].lde == sc_ld_epoch && (sc_side2[s].lds as i64) == sc_lstamp(s);
+    if had { sc_side2[s].ldg += 1; sc_side2[s].lde = 0; }
+    return had;
+}
+recursive fn sc_bdisp_erase(s: i32) -> bool {
+    sc_side2_grow();
+    let had = sc_side2[s].bde == sc_bd_epoch && (sc_side2[s].bds as i64) == sc_bstamp(s);
+    if had { sc_side2[s].bdg += 1; sc_side2[s].bde = 0; }
+    return had;
 }
 
 recursive fn sc_get_loop_disposition(s: i32, l: i32) -> i64 {
     let key = sc_atscope_key(s, l);
-    let g = sc_gen(s) as i64;
+    let g = sc_lstamp(s);
     let f = hm_get(sc_ldisp, key, -1);
     if f >= 0 && (f >> 8) == g { return f & 0xFF; }
     hm_put(sc_ldisp, key, (g << 8) | LD_VARIANT);
+    sc_ldisp_note(s);
     let d = sc_compute_loop_disposition(s, l);
-    hm_put(sc_ldisp, key, ((sc_gen(s) as i64) << 8) | d);
+    // the entry is updated only if it still exists (LoopDispositions[S] was not erased meanwhile)
+    if sc_lstamp(s) == g { hm_put(sc_ldisp, key, (g << 8) | d); }
     return d;
 }
 
@@ -663,12 +705,13 @@ recursive fn sc_has_computable_loop_evolution(s: i32, l: i32) -> bool { sc_get_l
 
 recursive fn sc_get_block_disposition(s: i32, bb: i32) -> i64 {
     let key = hk2(s, bb);
-    let g = sc_gen(s) as i64;
+    let g = sc_bstamp(s);
     let f = hm_get(sc_bdisp, key, -1);
     if f >= 0 && (f >> 8) == g { return f & 0xFF; }
     hm_put(sc_bdisp, key, (g << 8) | BD_DOES_NOT_DOMINATE);
+    sc_bdisp_note(s);
     let d = sc_compute_block_disposition(s, bb);
-    hm_put(sc_bdisp, key, ((sc_gen(s) as i64) << 8) | d);
+    if sc_bstamp(s) == g { hm_put(sc_bdisp, key, (g << 8) | d); }
     return d;
 }
 

@@ -34,7 +34,8 @@ var sc_users_head: i32[>..];      // per SCEV: users (SCEVUsers[S])
 var sc_values_head: i32[>..];     // per SCEV: values mapped to it (ExprValueMap[S])
 var sc_becusers_head: i32[>..];   // per SCEV: (loop << 1 | predicated) of the BTCs using it (BECountUsers)
 var sc_side2: ScSide2[>..];
-struct ScSide2 { gen: i32, uwit: bool, swit: bool }     // generation; Unsigned/SignedWrapViaInductionTried
+// generation; Unsigned/SignedWrapViaInductionTried; disposition generations, epochs and stamps (scev_eval.goose)
+struct ScSide2 { gen: i32, uwit: bool, swit: bool, ldg: i32, bdg: i32, lde: i32, bde: i32, lds: i32, bds: i32 }
 var sc_loop_users = hm_new();     // loop -> head of a list of AddRecs (LoopUsers)
 
 recursive fn scev_reset_create() {
@@ -54,7 +55,7 @@ recursive fn sc_side2_grow() {
     while sc_users_head.len < scevs.len { sc_users_head.push(-1); }
     while sc_values_head.len < scevs.len { sc_values_head.push(-1); }
     while sc_becusers_head.len < scevs.len { sc_becusers_head.push(-1); }
-    while sc_side2.len < scevs.len { sc_side2.push(ScSide2 { gen: 0, uwit: false, swit: false }); }
+    while sc_side2.len < scevs.len { sc_side2.push(ScSide2 { gen: 0, uwit: false, swit: false, ldg: 0, bdg: 0, lde: 0, bde: 0, lds: 0, bds: 0 }); }
 }
 recursive fn sc_gen(s: i32) -> i32 { sc_side2_grow(); return sc_side2[s].gen; }
 
@@ -128,8 +129,14 @@ recursive fn sc_forget_memoized_impl(s: i32) {
     var b = sc_becusers_head[s];
     sc_becusers_head[s] = -1;
     while b >= 0 {
-        let x = sc_lpool[b].val;
-        sc_forget_backedge_taken_counts(x >> 1, (x & 1) != 0);
+        // the BTC that registered this user (by the start of its exit entries), if it is still the cached one
+        // (forgetBackedgeTakenCounts erased its BECountUsers entries otherwise)
+        let at = sc_lpool[b].val;
+        let x = hm_get(sc_bti_tag, at as u64, -1);
+        if x >= 0 {
+            let cur = hm_get(sc_bti_map, x as u64, -1);
+            if cur >= 0 && sc_btis[cur].n > 0 && sc_btis[cur].at == at { sc_forget_backedge_taken_counts((x >> 1) as i32, (x & 1) != 0); }
+        }
         b = sc_lpool[b].next;
     }
 }
