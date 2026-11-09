@@ -1065,9 +1065,7 @@ Still slow / known:
 - Trap: InstCombine's transformConstExprCastCall must call `value_is_rauwd(call, new_call)` when the old call has no
   uses: the CGSCC devirt wrapper's WeakVH on the call follows it, otherwise devirt<N> sees a "new" direct call and
   repeats (Inline/inline-indirect-chain.ll).
-- Perf (`-passes=inline`, x64 backend build): calls/n500 10.6 s vs LLVM 0.24 s, n2000 28 s vs 0.76 s, n8000 110 s
-  vs 3.5 s: the same growth (k about 0.8 for both), a 30-45x constant. callgrind: the same number of
-  simplifyBinOp calls as LLVM (454,972 for 120 functions), 90% of the time in the shared InstSimplify/ConstantFold
-  code called by CallAnalyzer::visitBinaryOperator (~32K instructions per call vs ~700 in LLVM; constant creation
-  hashes keys, trivial accessors like type_bits cost ~150 instructions unoptimised). Compile benchmarks: sqlite3 3.0 s
-  vs 0.44 s, SPASS 7.3 s vs 0.85 s.
+- Perf (`./harness/run perf`, optimized build, `-passes=inline` on scaling/calls): 3.9x / 3.9x / 3.5x LLVM's time at
+  n = 500 / 2000 / 8000, scaling exponent 0.92 (LLVM 0.97). callgrind (x64 build, 120 functions): the same number of
+  simplifyBinOp calls as LLVM (454,972); ~90% of the time is the shared InstSimplify / ConstantFold code called by
+  CallAnalyzer::visitBinaryOperator (constant creation hashes a key per folded constant).
