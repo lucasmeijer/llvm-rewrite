@@ -1669,13 +1669,24 @@ remap_debug_variable :: (vm: *Table(Value_Id, Value_Id), i: Value_Id) {
     r := inst(i).records;
     while r != 0 {
         nr := dbgr(r).next;
-        if dbgr(r).kind == .ASSIGN fatal("jump-threading: remapping #dbg_assign records is not implemented yet");
         if dbgr(r).kind != .LABEL {
             ops: [..] Value_Id; ops.allocator = temp;
             dbgr_location_ops(r, *ops);
             for o: ops {
                 found, m := table_find(vm, o);
                 if found dbgr_replace_variable_location_op(r, o, m, true);
+            }
+        }
+        if dbgr(r).kind == .ASSIGN {
+            // RemapAssignAddress: DA->setAddress(Mapping[DA->getAddress()])
+            a := dbgr(r).addr;
+            if a != NONE && ir.mds[a].kind == .VALUE {
+                found, m := table_find(vm, ir.mds[a].value);
+                if found {
+                    dbgr(r).addr = md_value(m);
+                    if dbgr(r).owner != NONE dbgr_restamp(r);
+                    if dbg_index.fn != NONE dbgr_index_record(r);
+                }
             }
         }
         r = nr;
