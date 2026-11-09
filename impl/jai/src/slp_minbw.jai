@@ -215,10 +215,10 @@ slp_collect_values_to_demote :: (te: Te_Id, c: *Demote_Ctx, bit_width: *u64, max
     attempt_check_bitwidth :: (kind: s64, te: Te_Id, c: *Demote_Ctx, bit_width: *u64, max_depth: *u64, need_to_exit: *bool, orig: u64, is_signed_node: bool, id: Intrinsic_Id) -> bool {
         need_to_exit.* = false;
         best_fail: u64 = 0;
-        while bit_width.* < orig {
-            defer bit_width.* *= 2;
+        while bit_width.* < orig {   // (no `defer` for the step: it would also run on the `return true`)
             if run_checker(kind, te, bit_width.*, orig, id) return true;
             if best_fail == 0 && final_analysis(te, c, bit_width, max_depth, orig, is_signed_node) best_fail = bit_width.*;
+            bit_width.* *= 2;
         }
         if bit_width.* >= orig {
             if best_fail == 0 { bit_width.* = orig; return false; }
@@ -469,7 +469,7 @@ slp_compute_minimum_value_sizes :: () {
     is_signed_cmp := false;
     if slpx.has_user_ignore_list {
         all := true;
-        for v: slpx.user_ignore_list if !(ic_pm_min_max_lr(v, IID_SMIN) || ic_pm_min_max_lr(v, IID_SMAX)) { all = false; break; }
+        for v: slpx.user_ignore_list if !(call_iid(v) == IID_SMIN || call_iid(v) == IID_SMAX) { all = false; break; }   // m_SMin / m_SMax: intrinsics only
         is_signed_cmp = all;
     }
     while node_idx < slp.entries.count {

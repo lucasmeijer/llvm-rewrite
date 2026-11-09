@@ -160,8 +160,15 @@ slp_widened_type :: (sty: Type_Id, vf: u64) -> Type_Id {
 // TTI::getNumberOfParts (BasicTTIImplBase: the legalization split count; 0 when invalid)
 tti_number_of_parts :: (t: *Tti, ty: Type_Id) -> u64 {
     if t.kind != .X86 return 1;   // TargetTransformInfoImplBase::getNumberOfParts
-    c, _ := bt_type_legalization_cost(*t.xl, ty);
+    c, m := bt_type_legalization_cost(*t.xl, ty);
     if !cost_valid(c) return 0;
+    // non-power-of-2 vectors: ceil(num-of-elements / num-of-subtype-elements) when the legal type has the same element
+    if type_kind(ty) == .VECTOR && mvt_is_vec(m) && !mvt_is_scalable(m) && !has_single_bit(type_count(ty)) {
+        elt := type_elem(ty);
+        same := (is_int_type(elt) && mvt_is_int(m) && cast(u32) type_int_width(elt) == mvt_scalar_bits(m)) ||
+                (is_fp_type(elt) && mvt_is_fp(m) && cast(u32) dl_type_size_bits(elt) == mvt_scalar_bits(m));
+        if same return divide_ceil(type_count(ty), cast(u64) mvt_n(m));
+    }
     return cast(u64) c;
 }
 // getFullVectorNumberOfElements

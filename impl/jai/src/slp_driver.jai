@@ -167,6 +167,7 @@ slp_vectorize_store_chain :: (chain: [] Value_Id, idx: s64, min_vf: u64) -> (boo
     size = slp_canonical_graph_size();
     if is_valid(s) && is_opcode(s) == .LOAD size = 2;
     cost := slp_get_tree_cost(tree_cost);
+    #if DEBUG_SLP print("SLP: Found cost = % for VF=%\n", cost_to_string(cost), vf);
     if cost < -slp_cl.threshold {
         slp_vectorize_tree();
         return true, true, size;
@@ -783,6 +784,7 @@ slp_vectorize_store_chains :: () -> bool {
 
 slp_try_to_vectorize_list :: (vl: [] Value_Id, max_vf_only := false, limit_to_register_vf := false) -> bool {
     if vl.count < 2 return false;
+    #if DEBUG_SLP print("SLP: Trying to vectorize a list of length = %.\n", vl.count);
     s := slp_get_same_opcode(vl);
     if !is_valid(s) return false;
     i0 := s.main;
@@ -823,7 +825,7 @@ slp_try_to_vectorize_list :: (vl: [] Value_Id, max_vf_only := false, limit_to_re
                 }
             }
             if idx != actual_vf break;
-            #if DEBUG_SLP { print("DBG list"); for ops print(" %", vname(it)); print("\n"); }
+            #if DEBUG_SLP print("SLP: Analyzing % operations \n", actual_vf);
             slp_build_tree(ops);
             #if DEBUG_SLP for slp.entries print("DBG te% state=% n=% op=% user=% reuse=%\n", it_index, it.state, it.scalars.count, ifx is_valid(it.s) then inst_op(it.s.main) else .NONE_OP, it.user_tree_index, it.reuse_shuffle_indices.count);
             if slp_is_tree_tiny_and_not_fully_vectorizable() continue;
@@ -837,6 +839,7 @@ slp_try_to_vectorize_list :: (vl: [] Value_Id, max_vf_only := false, limit_to_re
             tree_cost := slp_calculate_tree_cost_and_trim_non_profitable();
             slp_build_external_uses();
             cost := slp_get_tree_cost(tree_cost);
+            #if DEBUG_SLP print("SLP: Found cost = % for VF=%\n", cost_to_string(cost), actual_vf);
             if cost < -slp_cl.threshold {
                 slp_vectorize_tree();
                 i += vf - 1;

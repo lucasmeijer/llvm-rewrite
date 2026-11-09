@@ -118,10 +118,11 @@ hr_get_rdx_kind :: (v: Value_Id) -> Hr_Rdx_Kind {
     if id == IID_MINNUM return .FMIN;
     if id == IID_MAXIMUM return .FMAXIMUM;
     if id == IID_MINIMUM return .FMINIMUM;
-    if ic_pm_min_max_lr(v, IID_SMAX) return .SMAX;
-    if ic_pm_min_max_lr(v, IID_SMIN) return .SMIN;
-    if ic_pm_min_max_lr(v, IID_UMAX) return .UMAX;
-    if ic_pm_min_max_lr(v, IID_UMIN) return .UMIN;
+    // m_SMax / m_SMin / m_UMax / m_UMin match the intrinsics only in LLVM 23 (PatternMatch.h)
+    if id == IID_SMAX return .SMAX;
+    if id == IID_SMIN return .SMIN;
+    if id == IID_UMAX return .UMAX;
+    if id == IID_UMIN return .UMIN;
     if o == .SELECT {
         lhs := op(v, 1); rhs := op(v, 2); cond := op(v, 0);
         if !is_cmp_inst(cond) return .NONE;
@@ -746,7 +747,7 @@ hr_try_to_reduce :: (h: *Hr_Reduction) -> Value_Id {
             insert_pt := h.root;
             if is_csmm insert_pt = op(h.root, 0);
             cost := slp_get_tree_cost(tree_cost, vl, reduction_cost, insert_pt);
-            #if DEBUG_SLP print("DBG reduction tree cost %\n", cost_to_string(cost));
+            #if DEBUG_SLP print("SLP: Found cost = % for reduction\n", cost_to_string(cost));
             if !cost_valid(cost) break;
             if cost >= -slp_cl.threshold {
                 if !adjust(h, false, ignore_list, *check_local, prev_redux, *redux, *pos, start, num_reduced, sty) {
@@ -809,7 +810,7 @@ hr_try_to_reduce_ordered :: (h: *Hr_Reduction) -> Value_Id {
         fmf &= ~cast(u32) FMF_REASSOC;
         reduction_cost := hr_get_reduction_cost(h, vl, .[], .[], false, fmf);
         cost := slp_get_tree_cost(tree_cost, vl, reduction_cost, h.root);
-        #if DEBUG_SLP print("DBG ordered reduction tree cost %\n", cost_to_string(cost));
+        #if DEBUG_SLP print("SLP: Found cost = % for ordered reduction\n", cost_to_string(cost));
         if cost > -slp_cl.threshold { slp_analyzed_reduction_vals(vl); return false; }
         slp_fail("vectorizeTree of an ordered horizontal reduction");
         return false;

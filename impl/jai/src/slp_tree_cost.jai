@@ -241,7 +241,7 @@ slp_calculate_tree_cost_and_trim_non_profitable :: (vectorized_vals: [] Value_Id
         if e.state == TE_COMBINED_VECTORIZE { nodes_costs[k] = 0; continue; }
         if te_has_state(te) && (te_is_gather(te) || e.state == TE_SPLIT_VECTORIZE) {
             s := slp_get_same_values_tree_entry(e.s.main, e.scalars);
-            if s != TE_NONE && te_vector_factor(s) == te_vector_factor(te) { nodes_costs[k] = 0; continue; }
+            if s != TE_NONE && te_vector_factor(s) == te_vector_factor(te) { nodes_costs[k] = 0; #if DEBUG_SLP print("SLP: Adding cost 0 for bundle Idx: %\n", te); continue; }
         }
         c := slp_get_entry_cost(te, vectorized_vals, *checked_extracts);
         #if DEBUG_SLP print("DBG cost te% = %\n", te, cost_to_string(c));
@@ -261,7 +261,7 @@ slp_calculate_tree_cost_and_trim_non_profitable :: (vectorized_vals: [] Value_Id
             if entry_to_scale[k] == 0 entry_to_scale[k] = scale;
             if !te_is_gather(te) && te_has_state(te) { prev_vec_parent = inst_block(e.s.main); prev_scale = scale; }
         }
-        #if DEBUG_SLP print("DBG   scaled te% = % (scale %)\n", te, cost_to_string(c), scale);
+        #if DEBUG_SLP print("SLP: Adding cost % for bundle Idx: %\n", cost_to_string(c), te);
         cost = cost_add(cost, c);
         nodes_costs[k] = c;
         if te > 0 && e.user_tree_index.user == TE_NONE && te_has_state(te) && te_opcode(te) == .LOAD set_add_te(*gathered_loads_nodes, te);

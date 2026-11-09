@@ -513,6 +513,7 @@ sce_create_shuffle :: (b: *Bv_Builder, p1: Pu, p2: Pu, mask: [] s32, vl: [] Valu
     }
     b.in_vectors[0] = pu_v(const_null_value(slp_widened_type(sty, cast(u64) cm.count)));
     if b.in_vectors.count == 2 pop(*b.in_vectors);
+    #if DEBUG_SLP print("DBG   create_shuffle extra=% shuffle=% mask=%\n", extra, bsa_create_shuffle_cost(v1, v2, cm, sty, vl), cm);
     return cost_add(extra, bsa_create_shuffle_cost(v1, v2, cm, sty, vl));
 }
 
@@ -688,6 +689,7 @@ bv_add_v :: (b: *Bv_Builder, v1: Value_Id, mask: [] s32, for_extracts := false) 
 }
 // gather(VL, MaskVF, Root)
 bv_gather :: (b: *Bv_Builder, vl: [] Value_Id, mask_vf: s64 = 0, root: Value_Id = NONE) -> Value_Id {
+    #if DEBUG_SLP { bvc := sce_build_vector_cost(b, vl, root); print("DBG   gather cost % (n=% root=%)\n", bvc, vl.count, root); }
     b.cost = cost_add(b.cost, sce_build_vector_cost(b, vl, root));
     if b.bv_engaged {
         if b.bv_values.count == 0 && b.in_vectors.count == 0 { for vl array_add(*b.bv_values, it); }
@@ -928,9 +930,11 @@ slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Cost {
     vec_ty := slp_widened_type(sty, cast(u64) gathered.count);
     num_parts := slp_number_of_parts(slp.tti, vec_ty, sty, cast(u64) gathered.count);
     all_undef := true; for gathered if !pm_undef_value(it) { all_undef = false; break; }
+    #if DEBUG_SLP print("DBG pbv te% vf=% n=% parts=% subvectors=% svmask=% gathered=%\n", te, vf, gathered.count, num_parts, sub_vectors, sub_vectors_mask, gathered);
     if !all_undef {
         resized := false;
         extract_shuffles = slp_try_to_gather_extract_elements(gathered, *extract_mask, num_parts);
+        #if DEBUG_SLP print("DBG   extract shuffles % mask %\n", extract_shuffles, extract_mask);
         if extract_shuffles.count {
             vb, uvb := sce_adjust_extracts(b, te, extract_mask, extract_shuffles, num_parts);
             use_vec_base = uvb;
@@ -953,6 +957,7 @@ slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Cost {
            (te_has_state(te) && is_alt_shuffle(e.s)) || all_vec || slp_is_splat(e.scalars) ||
            (!vl_equal(e.scalars, gathered) && gathered.count <= 2) {
             gather_shuffles = slp_is_gather_shuffled_entry(te, gathered, *mask, *entries, num_parts);
+            #if DEBUG_SLP print("DBG   gather shuffles % mask % entries %\n", gather_shuffles, mask, entries);
         }
         if gather_shuffles.count {
             if gather_shuffles.count == 1 && gather_shuffles[0] == SK_PERMUTE_SINGLE_SRC &&
