@@ -376,6 +376,13 @@ tti_is_type_legal :: (t: *Tti, ty: Type_Id) -> bool {
     if !ok return false;
     return xl_is_type_legal(*t.xl, e);
 }
+// TTI::hasDivRemOp (X86TTIImpl: TLI->isOperationLegal([SU]DIVREM, getValueType(DataType)); NoTTI: false)
+tti_has_div_rem_op :: (t: *Tti, ty: Type_Id, signed: bool) -> bool {
+    if t.kind != .X86 return false;
+    e := x86_evt(*t.xl, ty);
+    if !evt_is_simple(e) return false;   // isTypeLegal of an extended EVT is false
+    return is_op_legal(*t.xl, ifx signed then ISD_SDIVREM else ISD_UDIVREM, e.m);
+}
 tti_reg_usage_for_type :: (t: *Tti, ty: Type_Id) -> s64 {
     if t.kind != .X86 return 1;
     return x86_reg_usage_for_type(*t.xl, ty);

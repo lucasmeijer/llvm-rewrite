@@ -301,7 +301,7 @@ Pass_Kind :: enum u8 {
     // DeadArgumentElimination, ArgumentPromotion (pass_global_opt.jai, pass_global_dce.jai, ...)
     GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
     // L1.scalar-misc (pass_lower_expect.jai, ...; options in scalar_misc_cl.jai)
-    LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT;
+    LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT; DIV_REM_PAIRS;
 }
 
 Pass_Info :: struct {
@@ -447,6 +447,7 @@ PASS_TABLE :: Pass_Info.[
     .{"lower-expect", .FUNCTION, .LOWER_EXPECT, false, .DOMTREE},
     .{"lower-constant-intrinsics", .FUNCTION, .LOWER_CONSTANT_INTRINSICS, false, .DOMTREE},
     .{"infer-alignment", .FUNCTION, .INFER_ALIGNMENT, false, .DOMTREE},
+    .{"div-rem-pairs", .FUNCTION, .DIV_REM_PAIRS, false, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -1102,6 +1103,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .LOWER_EXPECT; return lower_expect_run(f);
         case .LOWER_CONSTANT_INTRINSICS; return lower_constant_intrinsics_run(f);
         case .INFER_ALIGNMENT; return infer_alignment_run(f);
+        case .DIV_REM_PAIRS; return div_rem_pairs_run(f);
         case .REASSOCIATE; return reassociate_run(f);
         case .CONSTRAINT_ELIMINATION; return constraint_elimination_run(f);
         case .AGGRESSIVE_INSTCOMBINE; return aggressive_instcombine_run(f);
