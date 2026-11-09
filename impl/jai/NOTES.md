@@ -920,3 +920,23 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
 - Perf (x64 build, `-disable-output`, no @perf benchmark times the pass): `sroa,loop-mssa(loop-rotate,licm,
   simple-loop-unswitch<nontrivial>)` minus the same without unswitch: sqlite3.ll +0.07 s, oggenc.ll +0.18 s (LLVM
   +0.02 / +0.0); the tests/perf/scaling loop shapes have no unswitch candidates (no measurable cost).
+
+## VectorCombine (L1.vectorize.vector-combine COMPLETE 130/130)
+
+- Files: `pass_vector_combine.jai` (VectorCombine.cpp, every fold in LLVM's order, the worklist driver),
+  `tti_vectorizer.jai` (the TTI queries vectorizers ask: register classes/widths, getVectorInstrCost with explicit
+  operands, getScalarizationOverhead with demanded lanes, arithmetic/min-max/extended/mul-acc reduction costs,
+  commonOperandInfo; NoTTI answers for module without an x86 triple), `vector_utils.jai` (narrow/widenShuffleMaskElts,
+  propagateIRFlags, reduction-intrinsic mappings, isVectorIntrinsicWithScalarOpAtArg with the splice/war-mask cases).
+- State is one global `vc: Vc_State` per run (worklist `vc.wl` + `vc.wl_map` = a second InstructionWorklist, the pass's
+  IRBuilder<InstSimplifyFolder> as `vc.b` with `vcb_*` creators). Local `IRBuilder<>` builders are plain `Irb`s with
+  `irb_*` (ConstantFolder).
+- Use `value_has_one_use` (not `has_one_use`) for anything that can be ConstantData: LLVM 23's constants have no use
+  lists (knowledge/llvm/vectorizers.md).
+- Fail loudly: VP intrinsics (scalarizeVPIntrinsic, foldBitcastOfVPLoad, isVectorIntrinsicWithScalarOpAtArg of a vp.*
+  id), foldSelectsFromBitcast with more than one profitable condition group (DenseMap order).
+- Sweeps (`--passes vector-combine`): whole-file 7754/7754 identical; `--extra='-mtriple=x86_64-unknown-linux-gnu
+  -mcpu=X'` for x86-64, corei7-avx, skylake-avx512, znver4, btver2: 7752/7752 identical (2 llvm-failed);
+  `--with-test-flags` 9455 identical / 0 differs (579 loud: other passes' cl::opts, -enable-knowledge-retention);
+  `--per-function --with-test-flags` 93568 identical / 0 differs (3230 loud, same causes + 2 ppc_fp128 literals).
+- Perf: no `@perf` benchmark times vector-combine; on tests/perf the pass is a no-op walk.

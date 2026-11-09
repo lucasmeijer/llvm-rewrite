@@ -49,7 +49,7 @@ lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.95
 lib/Analysis/TargetTransformInfo.cpp 0.3
 lib/Transforms/Utils/BasicBlockUtils.cpp 0.72
-lib/Analysis/VectorUtils.cpp 0.45
+lib/Analysis/VectorUtils.cpp 0.5
 lib/IR/Intrinsics.cpp 0.75
 lib/IR/Instruction.cpp 0.7
 lib/IR/IRBuilder.cpp 0.25
@@ -154,3 +154,4 @@ lib/Analysis/LoopUnrollAnalyzer.cpp 1
 lib/Transforms/Utils/ValueMapper.cpp 0.35  # mapValue, mapBlockAddress, remapInstruction, remapDbgRecord, mapSimpleMetadata; not the MDNodeMapper, global/alias/appending remapping, TypeMapper
 lib/Transforms/Utils/CloneFunction.cpp 0.3  # CloneBasicBlock, remapInstructionsInBlocks, cloneNoAliasScopes/adaptNoAliasScopes/cloneAndAdaptNoAliasScopes, identifyNoAliasScopesToClone
 lib/Transforms/Scalar/SimpleLoopUnswitch.cpp 0.97  # jai_unswitch: all of the pass; not ShouldRunExtraSimpleLoopUnswitch / extra-simple-loop-unswitch-passes (O3 pipeline), printPipeline, statistics; TTI.hasBranchDivergence is false (X86 / no target only)
+lib/Transforms/Vectorize/VectorCombine.cpp 0.97  # all folds; the VP-intrinsic paths (scalarizeVPIntrinsic, foldBitcastOfVPLoad) only match and fail loudly

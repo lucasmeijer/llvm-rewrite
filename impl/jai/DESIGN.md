@@ -104,6 +104,10 @@ src/
   loop_unroll_runtime.jai  UnrollRuntimeLoopRemainder (prolog/epilog), SplitEdge, splitBlockBefore
   loop_peel.jai       LoopPeel (computePeelCount, PhiAnalyzer, peelLoop)
   gen_x86_sched.jai   generated: X86 CPU -> scheduling model -> LoopMicroOpBufferSize (gen/gen_x86_sched.py)
+  tti_vectorizer.jai  TTI queries of the vectorizers (register classes/widths, explicit-operand insert/extract,
+                      demanded-lane scalarization, reduction costs, commonOperandInfo)
+  vector_utils.jai    VectorUtils/LoopUtils helpers for vectorizers (shuffle-mask scaling, propagateIRFlags, reductions)
+  pass_vector_combine.jai  VectorCombine (`vc` state, its own InstructionWorklist, `vcb_*` = IRBuilder<InstSimplifyFolder>)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 

@@ -228,8 +228,20 @@ unit yet.
 - deps: L1.licm
 - exit: tests/imported/llvm/Transforms/SimpleLoopUnswitch/*::roundtrip, tests/imported/llvm/Transforms/SimpleLoopUnswitch/*::opt
 
+### L1.vectorize.vector-combine — VectorCombine (x86 cost model)
+- deps: L1.instcombine, L1.analysis.cost-model
+- exit: tests/imported/llvm/Transforms/VectorCombine/*::roundtrip, tests/imported/llvm/Transforms/VectorCombine/*::opt
+
+### L1.vectorize.slp — SLPVectorizer (x86 cost model)
+- deps: L1.vectorize.vector-combine
+- exit: tests/imported/llvm/Transforms/SLPVectorizer/*::roundtrip, tests/imported/llvm/Transforms/SLPVectorizer/*::opt
+
+### L1.vectorize.loop — LoopVectorize (x86 cost model)
+- deps: L1.loop-unroll, L1.instcombine, L1.analysis.laa
+- exit: tests/imported/llvm/Transforms/LoopVectorize/*::roundtrip, tests/imported/llvm/Transforms/LoopVectorize/*::opt
+
 ### L1.vectorize — LoopVectorize, SLPVectorizer, VectorCombine (x86 cost model)
-- deps: L1.loop-unroll, L1.instcombine
+- deps: L1.vectorize.vector-combine, L1.vectorize.slp, L1.vectorize.loop
 - exit: tests/imported/llvm/Transforms/LoopVectorize/*::roundtrip, tests/imported/llvm/Transforms/SLPVectorizer/*::roundtrip, tests/imported/llvm/Transforms/VectorCombine/*::roundtrip, tests/imported/llvm/Transforms/LoopVectorize/*::opt, tests/imported/llvm/Transforms/SLPVectorizer/*::opt, tests/imported/llvm/Transforms/VectorCombine/*::opt
 
 ### L1.scalar-misc — The remaining small scalar passes in the O2 pipeline

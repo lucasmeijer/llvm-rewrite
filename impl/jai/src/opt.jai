@@ -47,6 +47,9 @@
 #load "pass_constraint_elimination.jai";
 #load "aic_trunc.jai";
 #load "pass_aggressive_instcombine.jai";
+#load "tti_vectorizer.jai";
+#load "vector_utils.jai";
+#load "pass_vector_combine.jai";
 #load "dbg_records.jai";
 #load "pass_mem2reg.jai";
 #load "pass_instsimplify.jai";
