@@ -45,6 +45,9 @@ import looprotate;
 import value_mapper;
 import clone_function;
 import loop_md;
+import aa;
+import memoryssa;
+import mssaupdater;
 import loop_unroll_runtime;
 import unroll_utils;
 
@@ -108,6 +111,8 @@ fn load_cse(l: i32) {
         while k > 0 { k--; if ents[k].key == key { return k; } }
         return -1;
     }
+    var have_mssa = false;
+    let baa = aq_push(CA_SIMPLE);
     let h = loop_header(l);
     nodes.push(ULLCNode { bb: h, cur_gen: 0, child_gen: 0, child: dt_first_child(fv, DT_DOM, h), processed: false, scope_mark: 0 });
     var cur_gen: i64 = 0;
@@ -131,8 +136,15 @@ fn load_cse(l: i32) {
                 if e >= 0 {
                     let lv = ents[e];
                     if lv.defi >= 0 && !is_dead(lv.defi) && vals[lv.defi].ty == vals[i].ty {
-                        if lv.gen != cur_gen { ul_not_ported("loadCSE across generations (MemorySSA(Loop&))"); }
-                        m = lv.defi;
+                        if lv.gen != cur_gen {
+                            // getMatchingValue: the loop's MemorySSA, built on first use
+                            if !have_mssa { mssa_build_loop(l); have_mssa = true; }
+                            let earlier = mssa_access_of(lv.defi);
+                            let later = mssa_get_clobbering(mssa_access_of(i), baa);
+                            if mssa_dominates(later, earlier) { m = lv.defi; }
+                        } else {
+                            m = lv.defi;
+                        }
                     }
                 }
                 if m >= 0 {
@@ -158,6 +170,65 @@ fn load_cse(l: i32) {
             nodes.pop();
         }
     }
+    aq_pop(baa);
+    if have_mssa { mssa_invalidate_all(); }
+}
+
+// MemorySSA::MemorySSA(Loop &L, AA, DT): accesses for the loop's blocks only, renaming from the preheader with
+// the exit blocks marked visited, a MemoryPhi that placePHINodes put in the preheader removed
+fn mssa_build_loop(l: i32) {
+    let fv = block_func(loop_header(l));
+    aa_begin(fv);
+    dt_get(fv, DT_DOM);
+    mssa_epoch++;
+    mssa_fn = fv;
+    mssa_optimized = false;
+    macc.clear();
+    mphi_v.clear();
+    mphi_b.clear();
+    mphi_u.clear();
+    muses.clear();
+    mssa_next_id = 0;
+    let live = ma_new(MAK_LIVE, -1, loop_header(l));
+    macc[live].id = mssa_next_id;
+    mssa_next_id++;
+    let q = aq_push(CA_SIMPLE);
+    var defblocks: i32[>..<] = [];
+    for k in loop_nblocks(l) {
+        let b = loop_block(l, k);
+        var has_def = false;
+        var i = block_first(b);
+        while i >= 0 {
+            let a = mssa_create_new_access(i, q);
+            if a >= 0 {
+                mssa_append(b, a);
+                if macc[a].kind == MAK_DEF { has_def = true; mssa_append_def(b, a); }
+            }
+            i = inst_next(i);
+        }
+        if has_def && position(defblocks, b) < 0 { defblocks.push(b); }
+    }
+    var idf: i32[>..<] = [];
+    mssa_idf(fv, defblocks, idf, false, 0);
+    for x in idf { mssa_create_phi(x); }
+    let ph = loop_preheader(l);
+    let pp = mssa_access_of(ph);
+    if pp >= 0 {
+        var u = mssa_first_use(pp);
+        while u >= 0 { let nx = mssa_use_next(u); fatal("internal: MemorySSA(Loop&): preheader phi with uses"); u = nx; }
+        mssa_remove_from_lookups(pp);
+        mssa_remove_from_lists(pp);
+    }
+    ss_clear(SS_MSSA4);
+    var exits: i32[>..<] = [];
+    loop_exit_blocks(l, exits);
+    for e in exits { ss_add(SS_MSSA4, e); }
+    mssa_rename_pass(fv, ph, live, false, false);
+    for k in loop_nblocks(l) {
+        let b = loop_block(l, k);
+        if !ss_has(SS_MSSA4, b) { mssa_mark_unreachable(b); }
+    }
+    aq_pop(q);
 }
 // LoadInst::isSimple
 fn ul_is_simple_load(i: i32) -> bool { (insts[inst_of(i)].bits & 1) == 0 && insts[inst_of(i)].ord == 0 }

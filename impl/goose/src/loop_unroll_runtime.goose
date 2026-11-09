@@ -237,6 +237,7 @@ fn connect_epilog(l: i32, mod_val: i32, new_exit: i32, exit: i32, ph: i32, epil_
     let ci = create_inst(OP_CALL, T_VOID, [nn, assume]);
     insts[inst_of(ci)].ty2 = globs[glob_of(assume)].vty;
     ur_insert(ci, "");
+    vt_invalidate_assumes();
     ac_register_assumption(ci);
 }
 
