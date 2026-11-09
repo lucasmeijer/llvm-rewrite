@@ -12,6 +12,7 @@
 // The SimplifyQuery is SQ { cxt, undef } (context instruction, CanUseUndef); DT/TLI/AC are global
 // (dt_get, tli_cur_fn, assumptions fail loudly in vt.goose). RecursionLimit = 3 as in LLVM.
 import std;
+import speculate;
 import ir;
 import irutil;
 import calls;
@@ -2706,7 +2707,7 @@ fn const_is_dereferenceable(c: i32) -> bool {
     if vals[c].kind == VK_FUNC || vals[c].kind == VK_UNDEF || vals[c].kind == VK_POISON { return false; }
     if is_cexpr(c) && cexpr_op(c) == OP_INTTOPTR { return false; }
     if is_global(c) { return false; }
-    if is_cexpr(c) { is_not_ported("isDereferenceablePointer of a constant expression"); }
+    if is_cexpr(c) { return spec_deref_aligned_ty(c, T_I8, 1); }
     return false;
 }
 
@@ -4061,8 +4062,11 @@ recursive fn simplify_intrinsic_args(id: i32, rty: i32, mark: i64, n: i64, fmf: 
 fn vscale_range_of(fv: i32) -> bool, u64, u64 {
     let at = aset_find(alist_fn(func_attrs(fv)), AK_VScaleRange);
     if at < 0 { return false, 0, 0; }
-    is_not_ported("vscale_range attribute decoding");
-    return false, 0, 0;
+    // unpackVScaleRangeArgs: (min, max) with max 0 = unbounded (getVScaleRange then has no single element)
+    let lo = attrs[at].i1 >> 32;
+    let hi = attrs[at].i1 & 0xFFFFFFFF;
+    if hi == 0 { return false, 0, 0; }
+    return true, lo, hi;
 }
 
 fn simplify_identity_interleave(id: i32, mark: i64, n: i64) -> i32 {

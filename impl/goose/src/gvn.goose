@@ -283,10 +283,16 @@ recursive fn vn_create_expr(i: i32) -> GE {
     return e;
 }
 
-// GCRelocateInst::getBasePtr (k = 1) / getDerivedPtr (k = 2)
+// GCRelocateInst::getBasePtr (k = 1) / getDerivedPtr (k = 2), through GCProjectionInst::getStatepoint
 fn gvn_gc_relocate_ptr(i: i32, k: i64) -> i32 {
-    let tok = op(i, 0);
-    if !is_inst_op(tok, OP_CALL) && !is_inst_op(tok, OP_INVOKE) { gvn_not_ported("gc.relocate of a landingpad token"); }
+    var tok = op(i, 0);
+    if vals[tok].kind == VK_UNDEF || vals[tok].kind == VK_POISON { return c_undef(vals[tok].ty); }
+    if vals[tok].kind == VK_CTOKENNONE { return c_undef(vals[tok].ty); }
+    if is_inst_op(tok, OP_LANDINGPAD) {
+        let ibb = cu_unique_pred(inst_parent(tok));
+        if ibb < 0 { fatal("internal: GVN: safepoints should have unique landingpads"); }
+        tok = block_terminator(ibb);
+    }
     let idx = cint_lo(op(i, k)) as! i64;
     for b in cb_nbundles(tok) {
         if sbytes(cb_bundle_tag(tok, b)) == "gc-live" { return op(tok, cb_bundle_begin(tok, b) + idx); }
@@ -2077,6 +2083,8 @@ fn gvn_propagate_equality(lhs0: i32, rhs0: i32, es: i32, ee: i32, ri: i32) -> bo
 // ---------------------------------------------------------------------------------------------
 // The main loop
 
+var gv_switch_edges = hm_new();
+
 // processInstruction(I)
 fn gvn_process_instruction(i: i32) -> bool {
     let v = simplify_instruction(i);
@@ -2121,18 +2129,15 @@ fn gvn_process_instruction(i: i32) -> bool {
         let c = op(i, 0);
         let parent = inst_parent(i);
         var changed = false;
-        var succs: i32[>..<] = [];
-        var cnt: i64[>..<] = [];
+        hm_clear(gv_switch_edges);
         for k in term_nsucc(i) {
             let s = term_succ(i, k);
-            let j = position(succs, s);
-            if j >= 0 { cnt[j]++; } else { succs.push(s); cnt.push(1); }
+            hm_put(gv_switch_edges, vk(s), hm_get(gv_switch_edges, vk(s), 0) + 1);
         }
         let ncases = (nops(i) - 2) / 2;
         for k in ncases {
             let dst = op(i, 3 + 2 * k);
-            let j = position(succs, dst);
-            if j >= 0 && cnt[j] == 1 {
+            if hm_get(gv_switch_edges, vk(dst), 0) == 1 {
                 if gvn_propagate_equality(c, op(i, 2 + 2 * k), parent, dst, -1) { changed = true; }
             }
         }

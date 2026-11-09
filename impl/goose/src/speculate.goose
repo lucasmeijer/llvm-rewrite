@@ -229,7 +229,15 @@ fn spec_can_be_freed(v: i32) -> bool {
     if is_inst(v) { f = inst_func(v); }
     if f < 0 { return true; }
     if globs[glob_of(f)].gc < 0 { return true; }
-    spec_not_ported("Value::canBeFreed with a garbage collector");
+    if sbytes(globs[glob_of(f)].gc) == "statepoint-example" {
+        if ptr_as(vals[v].ty) != 1 { return true; }
+        var g = modules[globs[glob_of(f)].module].first_func;
+        while g >= 0 {
+            if func_iid(g) == IID_experimental_gc_statepoint { return true; }
+            g = globs[glob_of(g)].next;
+        }
+        return false;
+    }
     return true;
 }
 

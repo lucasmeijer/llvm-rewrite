@@ -207,11 +207,15 @@ recursive fn pta_translate_sub(t: i32, v: i32, cur: i32, pred: i32, cond: i32, c
         }
         let base = is_ops[mark];
         if is_constant_data(base) { is_ops.resize(mark); return -1; }
+        let curf = block_func(cur);
+        let vty = vals[v].ty;
+        let vty2 = insts[inst_of(v)].ty2;
+        let vn = nops(v);
         var u = vals[base].first_use;
         while u >= 0 {
             let g = uses[u].user;
-            if is_inst(g) && iop(g) == OP_GEP && vals[g].ty == vals[v].ty && insts[inst_of(g)].ty2 == insts[inst_of(v)].ty2 &&
-               nops(g) == nops(v) && inst_func(g) == block_func(cur) && dt_dominates_block(DT_DOM, inst_parent(g), pred) {
+            if is_inst(g) && iop(g) == OP_GEP && vals[g].ty == vty && insts[inst_of(g)].ty2 == vty2 &&
+               nops(g) == vn && inst_func(g) == curf && dt_dominates_block(DT_DOM, inst_parent(g), pred) {
                 var same = true;
                 for j in nops(g) { if op(g, j) != is_ops[mark + j] { same = false; } }
                 if same { is_ops.resize(mark); return g; }

@@ -196,7 +196,7 @@ fn eliminable_cast_pair(first: i64, second: i64, src: i32, mid: i32, dst: i32) -
 fn cf_scalar_size(t: i32) -> i64 {
     let s = ty_scalar(t);
     let k = types[s].kind;
-    if k == TK_INT { return ty_bits(s); }
+    if k == TK_INT || k == TK_BYTE { return types[s].n as i64; }
     if k == TK_HALF || k == TK_BFLOAT { return 16; }
     if k == TK_FLOAT { return 32; }
     if k == TK_DOUBLE { return 64; }
@@ -219,6 +219,10 @@ recursive fn fold_bitcast(v: i32, dty: i32) -> i32 {
     if k == VK_CINT && !ty_is_vector(sty) {
         if ty_is_vector(dty) { return ce_cast(OP_BITCAST, c_splat(ty_vector(sty, 1, false), v), dty); }
         let dst = ty_scalar(dty);
+        // ConstantInt -> ConstantByte and ConstantByte -> ConstantInt (both are VK_CINT here)
+        let src_byte = types[sty].kind == TK_BYTE;
+        if !src_byte && types[dst].kind == TK_BYTE && cf_scalar_size(dst) == cf_scalar_size(sty) { return ap_to_cint(dty, ci_ap(v)); }
+        if src_byte && ty_is_int(dst) && cf_scalar_size(dst) == cf_scalar_size(sty) { return ap_to_cint(dty, ci_ap(v)); }
         if ty_is_fp(dst) && types[dst].kind != TK_PPC_FP128 && cf_scalar_size(dst) == cf_scalar_size(sty) {
             return c_fp(dty, cint_lo(v), cint_hi(v));
         }
@@ -229,6 +233,9 @@ recursive fn fold_bitcast(v: i32, dty: i32) -> i32 {
         if ty_is_vector(dty) { return ce_cast(OP_BITCAST, c_splat(ty_vector(sty, 1, false), v), dty); }
         if types[sty].kind == TK_PPC_FP128 { return -1; }
         if ty_is_int(ty_scalar(dty)) && cf_scalar_size(dty) == cf_scalar_size(sty) {
+            return ap_to_cint(dty, ap_from_words(cf_scalar_size(dty), [cint_lo(v), cint_hi(v)]));
+        }
+        if types[ty_scalar(dty)].kind == TK_BYTE && cf_scalar_size(dty) == cf_scalar_size(sty) {
             return ap_to_cint(dty, ap_from_words(cf_scalar_size(dty), [cint_lo(v), cint_hi(v)]));
         }
         return -1;

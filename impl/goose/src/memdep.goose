@@ -162,11 +162,58 @@ fn mv_insert(v: i32, k: i64, e: NLE) {
 // std::sort over [0, n) by block id
 fn mv_sort_prefix(v: i32, n: i64) {
     if n < 2 { return; }
-    var tmp: NLE[>..<] = [];
-    for k in n { tmp.push(md_ents[mv_at(v, k)]); }
-    sort(tmp) { a, b => a.bb < b.bb };
-    for k in n { md_ents[mv_at(v, k)] = tmp[k]; }
+    // block ids are unique in a cache, so any sorting algorithm gives LLVM's order: an LSD radix sort on the
+    // (non-negative) block ids, 8 bits per pass, skipping the passes whose digit is the same everywhere
+    let st = mv_at(v, 0);
+    var sorted = true;
+    for k in 1..n { if md_ents[st + k - 1].bb > md_ents[st + k].bb { sorted = false; break; } }
+    if sorted { return; }
+    if n <= 16 {
+        for i in 1..n {
+            let x = md_ents[st + i];
+            var j = i - 1;
+            while j >= 0 && md_ents[st + j].bb > x.bb { md_ents[st + j + 1] = md_ents[st + j]; j--; }
+            md_ents[st + j + 1] = x;
+        }
+        return;
+    }
+    md_sort_a.clear();
+    md_sort_b.clear();
+    for k in n { md_sort_a.push(md_ents[st + k]); md_sort_b.push(md_ents[st + k]); }
+    var in_a = true;
+    md_sort_cnt.resize(256, 0);
+    for pass in 4 {
+        let sh = (pass * 8) as u32;
+        for d in 256 { md_sort_cnt[d] = 0; }
+        for k in n {
+            let key = if in_a { md_sort_a[k].bb } else { md_sort_b[k].bb };
+            md_sort_cnt[((key as u32) >> sh) & 255]++;
+        }
+        var same = false;
+        for d in 256 { if md_sort_cnt[d] == n { same = true; } }
+        if same { continue; }
+        var tot: i64 = 0;
+        for d in 256 { let c = md_sort_cnt[d]; md_sort_cnt[d] = tot; tot += c; }
+        for k in n {
+            if in_a {
+                let x = md_sort_a[k];
+                let d = ((x.bb as u32) >> sh) & 255;
+                md_sort_b[md_sort_cnt[d]] = x;
+                md_sort_cnt[d]++;
+            } else {
+                let x = md_sort_b[k];
+                let d = ((x.bb as u32) >> sh) & 255;
+                md_sort_a[md_sort_cnt[d]] = x;
+                md_sort_cnt[d]++;
+            }
+        }
+        in_a = !in_a;
+    }
+    for k in n { md_ents[st + k] = if in_a { md_sort_a[k] } else { md_sort_b[k] }; }
 }
+var md_sort_a: NLE[>..<];
+var md_sort_cnt: i64[>..<];
+var md_sort_b: NLE[>..<];
 fn mv_sort(v: i32) { mv_sort_prefix(v, mv_len(v)); }
 
 // std::upper_bound(begin, begin + n, NonLocalDepEntry(bb))

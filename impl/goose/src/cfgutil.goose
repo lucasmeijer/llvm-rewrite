@@ -15,6 +15,7 @@
 // The DomTreeUpdater is the active one of dtu.goose; cu_dtu says whether the caller passed one (LLVM's DTU
 // pointer). Debug records: erasing an instruction a record uses fails loudly (inst_erase_from_parent).
 import std;
+import tbaa;
 import ir;
 import irutil;
 import calls;
@@ -1878,9 +1879,7 @@ fn cu_combine_metadata(k: i32, j: i32, does_k_move: bool, aa_only: bool) {
         let has_noundef = inst_get_md(k, noundef_k) >= 0;
         if nm == "DIAssignID" { if !aa_only && jmd != kmd { cu_not_ported("mergeDIAssignID"); } }
         else if nm == "tbaa" {
-            if does_k_move && jmd != kmd {
-                if jmd < 0 { cu_set_md(k, kind, -1); } else { cu_not_ported("MDNode::getMostGenericTBAA of different tags"); }
-            }
+            if does_k_move { cu_set_md(k, kind, tb_most_generic_tbaa(jmd, kmd)); }
         }
         else if nm == "alias.scope" { if does_k_move { cu_set_md(k, kind, cu_most_generic_alias_scope(jmd, kmd)); } }
         else if nm == "noalias" || nm == "llvm.mem.parallel_loop_access" { if does_k_move { cu_set_md(k, kind, cu_md_intersect(jmd, kmd)); } }

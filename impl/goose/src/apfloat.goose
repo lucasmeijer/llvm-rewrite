@@ -50,6 +50,20 @@ fn fp_decompose(kind: i64, lo: u64, hi: u64) -> FpParts {
         frac1 = hi & 0xFFFFFFFFFFFF;
     }
     r.expf = expf;
+    if kind == TK_X86_FP80 {
+        // initFromF80LongDoubleAPInt: an explicit integer bit that disagrees with the exponent (pseudo-NaN,
+        // pseudo-infinity, unnormal) is a NaN
+        if expf == 0x7FFF && lo != 0x8000000000000000 {
+            r.cat = FC_NAN;
+            r.sig0 = frac0;
+            return r;
+        }
+        if expf != 0x7FFF && expf != 0 && (lo >> 63) == 0 {
+            r.cat = FC_NAN;
+            r.sig0 = frac0;
+            return r;
+        }
+    }
     let fzero = frac0 == 0 && frac1 == 0;
     if expf == emask {
         r.cat = if fzero { FC_INF } else { FC_NAN };

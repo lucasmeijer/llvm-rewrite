@@ -1135,6 +1135,44 @@ recursive fn cf_fold_call(c: i32, f: i32, mark: i64, n: i64, allow_nondet: bool)
     return cf_fold_scalar_call(c, id, rty, mark, n);
 }
 
+// ConstantFoldFixedVectorCall: Intrinsic::masked_load (operands: pointer, mask, passthru)
+recursive fn cf_fold_masked_load(vty: i32, mark: i64) -> i32 {
+    let src = is_ops[mark];
+    let mask = is_ops[mark + 1];
+    let pt = is_ops[mark + 2];
+    let vd = cf_fold_load_from_const_ptr(src, vty, 0, false);
+    let ne = ty_count(vty);
+    let rm = is_ops.len;
+    var n: i64 = 0;
+    for i in ne {
+        let me = agg_elem(mask, i);
+        if me < 0 { break; }
+        let pe = agg_elem(pt, i);
+        let ve = if vd >= 0 { agg_elem(vd, i) } else { -1 };
+        if vals[me].kind == VK_UNDEF || vals[me].kind == VK_POISON {
+            if pe >= 0 { is_ops.push(pe); n++; }
+            else if ve >= 0 { is_ops.push(ve); n++; }
+            else { is_ops.resize(rm); return -1; }
+        }
+        if is_null_value(me) {
+            if pe < 0 { is_ops.resize(rm); return -1; }
+            is_ops.push(pe);
+            n++;
+        } else if vals[me].kind == VK_CINT && !cint_is_zero(me) && ty_bits(vals[me].ty) == 1 {
+            if ve < 0 { is_ops.resize(rm); return -1; }
+            is_ops.push(ve);
+            n++;
+        } else {
+            is_ops.resize(rm);
+            return -1;
+        }
+    }
+    if n != ne { is_ops.resize(rm); return -1; }
+    let r = c_aggregate(vty, is_ops[rm..rm + ne]);
+    is_ops.resize(rm);
+    return r;
+}
+
 fn vec_intrinsic_scalar_op_at(id: i32, k: i64) -> bool {
     if id == IID_abs || id == IID_ctlz || id == IID_cttz || id == IID_is_fpclass || id == IID_powi || id == IID_vector_extract { return k == 1; }
     if id == IID_smul_fix || id == IID_smul_fix_sat || id == IID_umul_fix || id == IID_umul_fix_sat ||
@@ -1144,7 +1182,8 @@ fn vec_intrinsic_scalar_op_at(id: i32, k: i64) -> bool {
 
 recursive fn cf_fold_fixed_vector_call(c: i32, id: i32, vty: i32, mark: i64, n: i64) -> i32 {
     let et = types[vty].a;
-    if id == IID_masked_load || id == IID_get_active_lane_mask || id == IID_vector_extract || id == IID_vector_insert ||
+    if id == IID_masked_load { return cf_fold_masked_load(vty, mark); }
+    if id == IID_get_active_lane_mask || id == IID_vector_extract || id == IID_vector_insert ||
        interleave_factor_cf(id) != 0 {
         cfa_not_ported(str("constant folding of ", intr_name(id as i64)));
     }
