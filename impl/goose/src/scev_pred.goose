@@ -44,23 +44,20 @@ var sc_walking_be_dom: bool = false;
 recursive fn scev_reset_pred() { sc_proving_split = false; sc_walking_be_dom = false; scev_reset_guards(); }
 
 // HasGuards: llvm.experimental.guard is declared and used
+// (a module symbol-table lookup, as Intrinsic::getDeclarationIfExists is: a scan of the module's functions made
+// every ScalarEvolution instance cost O(functions))
 recursive fn sc_init_has_guards(fv: i32) {
-    sc_has_guards = false;
-    var f = modules[globs[glob_of(fv)].module].first_func;
-    while f >= 0 {
-        if func_iid(f) == IID_experimental_guard && vals[f].first_use >= 0 { sc_has_guards = true; }
-        f = globs[glob_of(f)].next;
-    }
+    let f = sc_guard_decl_in(fv);
+    sc_has_guards = f >= 0 && vals[f].first_use >= 0;
 }
-recursive // Intrinsic::getDeclarationIfExists(M, experimental_guard)
-fn sc_guard_decl() -> i32 {
-    var f = modules[globs[glob_of(sc_fv)].module].first_func;
-    while f >= 0 {
-        if func_iid(f) == IID_experimental_guard { return f; }
-        f = globs[glob_of(f)].next;
-    }
+recursive fn sc_guard_decl_in(fv: i32) -> i32 {
+    let st = modules[globs[glob_of(fv)].module].symtab;
+    let f = symtab_lookup(st, intern("llvm.experimental.guard"));
+    if f >= 0 && is_func(f) && func_iid(f) == IID_experimental_guard { return f; }
     return -1;
 }
+recursive // Intrinsic::getDeclarationIfExists(M, experimental_guard)
+fn sc_guard_decl() -> i32 { sc_guard_decl_in(sc_fv) }
 fn sc_has_assumptions() -> bool { vt_fn_has_assumes(sc_fv) }
 
 // AC.assumptions(): llvm.assume calls of the function in instruction order

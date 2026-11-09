@@ -145,3 +145,4 @@ lib/Transforms/Scalar/JumpThreading.cpp 0.97  # manual: all; loud: key-instructi
 lib/Analysis/BranchProbabilityInfo.cpp 0.95  # manual: BPIConstruction whole, the result and printer; no -print-bpi, legacy wrapper (heuristic 0.93)
 lib/Analysis/BlockFrequencyInfoImpl.cpp 0.9  # + the BasicBlock instantiation of BlockFrequencyInfoImpl.h; no -use-iterative-bfi-inference, debug dumps (heuristic 0.85)
 lib/Analysis/BlockFrequencyInfo.cpp 0.4  # analysis, calculate, getBlockFreq/setBlockFreq, printer; no view/DOT, profile-count API, legacy wrapper
+lib/Transforms/Scalar/ConstraintElimination.cpp 0.9  # all but generateReproducer (-constraint-elimination-dump-reproducers fails loudly) and the LLVM_DEBUG dumps

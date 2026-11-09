@@ -996,3 +996,26 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
 - Speed (no `@perf` line times it; by hand, `-disable-output`): sqlite3/SPASS `sroa,reassociate` minus `sroa`
   +0.03/+0.02 s (LLVM ~0/+0.04 s); straightline n4000/n16000/n64000 0.036/0.048/0.104 s (LLVM 0.041/0.050/0.157 s):
   linear.
+
+## ConstraintElimination (constraint_elimination.goose)
+
+- L1.constraint-elimination COMPLETE (104/104). Data layout: file header. Both ConstraintSystems share one entry
+  pool; rows are linked per system and never edited, so `isConditionImplied`'s copy of the system is a list of
+  row descriptors (`fm_rows`) whose new FM rows are appended to the pool and truncated afterwards.
+- Goose recursion: decompose is recursive and doesHold/isValid are mutually recursive, so Decompositions,
+  coefficient vectors and preconditions are runs on global stacks (`dc_vars`, `ce_coef`, `ce_pre`); a `CT` names
+  its runs and `ct_release` truncates them. GEP variable offsets (`co_vals`/`co_scale`) likewise.
+- The worklist sort's `comesBefore` uses positions computed once per function (`ce_pos`); comes_before (vt.goose)
+  is a linear scan.
+- Matchers: m_Add/m_ZExt/m_SExt/m_DisjointOr/trunc match instructions only, m_NSWAdd & co
+  (OverflowingBinaryOperator) also constant expressions (`ce_obo`).
+- Shared fix: ScalarEvolution's HasGuards / getDeclarationIfExists(experimental_guard) scanned every function of
+  the module per SCEV instance (scev_pred.goose), making any pass that asks for SCEV quadratic in the number of
+  functions: `-passes=constraint-elimination` on scaling/globals n8000 1.38 -> 0.07 s (LLVM 0.37 s). Now a
+  symbol-table lookup.
+- Sweeps (`constraint-elimination` whole-file, `--per-function`, `--with-test-flags`; `sroa,constraint-elimination`,
+  `debugify,constraint-elimination`, `-constraint-elimination-max-rows=3`,
+  `constraint-elimination,print<scalar-evolution>` --analysis): 0 differs, 0 bad-ir; loud: computeKnownBits gaps
+  (vectors > 64 lanes, GEP index width != pointer width), ppc_fp128, SCEV gaps.
+- Speed: sqlite3/SPASS/lua `sroa,constraint-elimination` minus `sroa` +0.03/+0.03(after the SCEV fix)/+0.01 s
+  (LLVM +0.00/+0.09/+0.01 s); every scaling shape at its largest size is as fast as LLVM or faster.
