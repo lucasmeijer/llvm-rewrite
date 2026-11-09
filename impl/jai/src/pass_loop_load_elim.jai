@@ -216,7 +216,8 @@ loop_load_elim_run :: (f: Value_Id) -> Preserved {
     s := get_scev(f);
     dt := get_domtree(f);
     ac := get_assumption_cache(f);
-    if module_get_flag("ProfileSummary") != NONE fatal("loop-load-elim: ProfileSummaryInfo is not supported yet");
+    // MAMProxy.getCachedResult<ProfileSummaryAnalysis>: never cached here (require<profile-summary> is not supported),
+    // so PSI and BFI are null and shouldOptimizeForSize is false
     se = s;
     saved := scev_pass_se;
     scev_pass_se = s;
