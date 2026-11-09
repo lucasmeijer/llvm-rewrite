@@ -308,7 +308,7 @@ Pass_Kind :: enum u8 {
     // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
     ANNOTATION2METADATA; ANNOTATION_REMARKS; FORCEATTRS; MEMPROF_REMOVE_INFO; RECOMPUTE_GLOBALSAA; LOWER_COMMENT_STRING;
-    INJECT_TLI_MAPPINGS; EE_INSTRUMENT;
+    INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN;
 }
 
 Pass_Info :: struct {
@@ -463,21 +463,24 @@ PASS_TABLE :: Pass_Info.[
     .{"mldst-motion", .FUNCTION, .MLDST_MOTION, false, .DOMTREE},   // also mldst-motion<...>
     .{"speculative-execution", .FUNCTION, .SPECULATIVE_EXECUTION, false, .DOMTREE},   // also speculative-execution<...>
     .{"callsite-splitting", .FUNCTION, .CALLSITE_SPLITTING, false, .DOMTREE},
-    .{"coro-early", .MODULE, .CORO_EARLY, false, .DOMTREE},
-    .{"coro-cleanup", .MODULE, .CORO_CLEANUP, false, .DOMTREE},
-    .{"coro-elide", .FUNCTION, .CORO_ELIDE, false, .DOMTREE},
-    .{"coro-split", .CGSCC, .CORO_SPLIT, false, .DOMTREE},   // also coro-split<reuse-storage>
+    .{"coro-early", .MODULE, .CORO_EARLY, true, .DOMTREE},
+    .{"coro-cleanup", .MODULE, .CORO_CLEANUP, true, .DOMTREE},
+    .{"coro-elide", .FUNCTION, .CORO_ELIDE, true, .DOMTREE},
+    .{"coro-split", .CGSCC, .CORO_SPLIT, true, .DOMTREE},   // also coro-split<reuse-storage>
     .{"coro-annotation-elide", .CGSCC, .CORO_ANNOTATION_ELIDE, false, .DOMTREE},
     .{"openmp-opt", .MODULE, .OPENMP_OPT, false, .DOMTREE},
     .{"openmp-opt-cgscc", .CGSCC, .OPENMP_OPT_CGSCC, false, .DOMTREE},
     .{"annotation2metadata", .MODULE, .ANNOTATION2METADATA, false, .DOMTREE},
-    .{"annotation-remarks", .FUNCTION, .ANNOTATION_REMARKS, false, .DOMTREE},
+    .{"annotation-remarks", .FUNCTION, .ANNOTATION_REMARKS, true, .DOMTREE},
     .{"forceattrs", .MODULE, .FORCEATTRS, false, .DOMTREE},
     .{"memprof-remove-attributes", .MODULE, .MEMPROF_REMOVE_INFO, false, .DOMTREE},
     .{"recompute-globalsaa", .MODULE, .RECOMPUTE_GLOBALSAA, false, .DOMTREE},
-    .{"lower-comment-string", .MODULE, .LOWER_COMMENT_STRING, false, .DOMTREE},
+    .{"lower-comment-string", .MODULE, .LOWER_COMMENT_STRING, true, .DOMTREE},
     .{"inject-tli-mappings", .FUNCTION, .INJECT_TLI_MAPPINGS, false, .DOMTREE},
-    .{"ee-instrument", .FUNCTION, .EE_INSTRUMENT, false, .DOMTREE},   // also ee-instrument<...>
+    .{"rel-lookup-table-converter", .MODULE, .REL_LOOKUP_TABLE_CONVERTER, false, .DOMTREE},
+    .{"cg-profile", .MODULE, .CG_PROFILE, false, .DOMTREE},   // also cg-profile<in-lto-post-link>
+    .{"alloc-token", .MODULE, .ALLOC_TOKEN, true, .DOMTREE},
+    .{"ee-instrument", .FUNCTION, .EE_INSTRUMENT, true, .DOMTREE},   // also ee-instrument<...>
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<should-not-run-function-passes>", .FUNCTION, .REQUIRE, true, .SHOULD_NOT_RUN},
@@ -510,6 +513,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "mldst-motion<") && name[name.count - 1] == #char ">" return lookup_pass("mldst-motion");
     if begins_with(name, "speculative-execution<") && name[name.count - 1] == #char ">" return lookup_pass("speculative-execution");
     if name == "coro-split<reuse-storage>" || name == "coro-split<>" return lookup_pass("coro-split");
+    if name == "cg-profile<in-lto-post-link>" || name == "cg-profile<>" return lookup_pass("cg-profile");
     if begins_with(name, "ee-instrument<") && name[name.count - 1] == #char ">" return lookup_pass("ee-instrument");
     return null;
 }
@@ -1105,6 +1109,9 @@ run_module_pm :: (n: s32) {
             case .MEMPROF_REMOVE_INFO; if should_run_pass(node, NONE) mam_invalidate(memprof_remove_info_run());
             case .RECOMPUTE_GLOBALSAA; if should_run_pass(node, NONE) recompute_globalsaa_run();
             case .LOWER_COMMENT_STRING; if should_run_pass(node, NONE) mam_invalidate(lower_comment_string_run());
+            case .REL_LOOKUP_TABLE_CONVERTER; if should_run_pass(node, NONE) mam_invalidate(rel_lookup_table_converter_run());
+            case .CG_PROFILE; if should_run_pass(node, NONE) mam_invalidate(cg_profile_run());
+            case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
             case; fatal("internal: '%' is not a module pass", node.name);
         }
         c = pipeline.nodes[c].next;

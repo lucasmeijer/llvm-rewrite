@@ -365,10 +365,13 @@ tti_should_build_lookup_tables :: (t: *Tti) -> bool {
 }
 tti_should_build_lookup_tables_for_constant :: (t: *Tti, c: Value_Id) -> bool { return true; }
 tti_minimum_lookup_table_entry_bit_width :: (t: *Tti) -> s64 { return 8; }
+// BasicTTIImplBase::shouldBuildRelLookupTables: PIC (getEffectiveRelocModel without -relocation-model), not the
+// medium/large code model (opt's default is small), a 64-bit arch (aarch64-darwin excluded, irrelevant for X86)
 tti_should_build_rel_lookup_tables :: (t: *Tti) -> bool {
     if t.kind != .X86 return false;
-    fatal("TTI::shouldBuildRelLookupTables (relocation model / code model) is not ported yet");
-    return false;
+    st := *t.xl;
+    if !x86_is_pic(st) return false;
+    return st_is64Bit(st);
 }
 tti_is_type_legal :: (t: *Tti, ty: Type_Id) -> bool {
     if t.kind != .X86 return false;

@@ -2788,6 +2788,7 @@ INTRINSIC_ATTRS :: Intrinsic_Attrs.[
     .{"llvm.ptrmask", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .["", ""]},
     .{"llvm.read_register", "nocallback nofree nosync nounwind willreturn memory(read)", "", .[""]},
     .{"llvm.read_volatile_register", "nounwind", "", .[""]},
+    .{"llvm.returnaddress", "nocallback nofree nosync nounwind willreturn memory(none)", "", .["immarg"]},
     .{"llvm.rint", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
     .{"llvm.round", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
     .{"llvm.roundeven", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
