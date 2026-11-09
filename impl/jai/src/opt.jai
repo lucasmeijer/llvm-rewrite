@@ -126,6 +126,7 @@
 #load "loop_access.jai";
 #load "hash_recognize.jai";
 #load "pass_loop_idiom.jai";
+#load "loop_versioning.jai";
 #load "pass_loop_load_elim.jai";
 #load "value_mapper.jai";
 #load "clone_function.jai";

@@ -1,5 +1,5 @@
-// LoopLoadElimination: llvm/lib/Transforms/Scalar/LoopLoadElimination.cpp. Loops that need LoopVersioning (runtime
-// memory checks or SCEV predicates) fail loudly: LoopVersioning is not ported yet.
+// LoopLoadElimination: llvm/lib/Transforms/Scalar/LoopLoadElimination.cpp (complete; LoopVersioning in
+// loop_versioning.jai).
 
 lle_opts: struct {
     check_per_elim: s64 = 1;          // -runtime-check-per-loop-load-elim
@@ -200,8 +200,19 @@ lel_process_loop :: (c: *Lel) -> bool {
     if !li_is_loop_simplify_form(c.li, c.l) return false;
     if checks.count != 0 || !sc_union_is_always_true(c.lai.pse.preds) {
         if c.lai.has_convergent_op return false;
-        // shouldOptimizeForSize(Header, PSI, BFI): false without a ProfileSummaryInfo
-        fatal("loop-load-elim: LoopVersioning (runtime checks or SCEV predicates) is not supported yet");
+        // shouldOptimizeForSize(Header, PSI, BFI): the function's optsize/minsize, else false without a PSI
+        if fn_has_opt_size(c.li.fn) return false;
+        if !li_is_recursively_lcssa_form(c.li, c.l, c.dt) form_lcssa_recursively(c.li, c.l, c.dt);
+        lv: Lver;
+        lv.versioned = c.l; lv.lai = c.lai; lv.checks = checks; lv.li = c.li; lv.dt = c.dt;
+        lver_version_loop(*lv);
+        // NoLongerGoodCandidate
+        k := 0;
+        for candidates {
+            if !sc_is_addrec(pse_get_scev(*c.pse, op(it.load, 0))) || !sc_is_addrec(pse_get_scev(*c.pse, op(it.store, 1))) continue;
+            candidates[k] = it; k += 1;
+        }
+        candidates.count = k;
     }
     x: Scev_Expander;
     sx_init(*x, "storeforward");

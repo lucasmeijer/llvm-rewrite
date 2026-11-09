@@ -9019,12 +9019,14 @@ tests/imported/llvm/Transforms/LoopLoadElim/def-store-before-load.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/def-store-before-load.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/early-exit.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/early-exit.ll::roundtrip
+tests/imported/llvm/Transforms/LoopLoadElim/forward.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/forward.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/invalidate-laa-after-versioning.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/loop-i1-count.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/loop-i1-count.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/loop-simplify-dep.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/loop-simplify-dep.ll::roundtrip
+tests/imported/llvm/Transforms/LoopLoadElim/memcheck.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/memcheck.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/multiple-stores-same-block.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/multiple-stores-same-block.ll::roundtrip
@@ -9034,10 +9036,12 @@ tests/imported/llvm/Transforms/LoopLoadElim/non-consecutive.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/non-consecutive.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/non-const-distance.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/non-const-distance.ll::roundtrip
+tests/imported/llvm/Transforms/LoopLoadElim/non-lcssa-input.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/non-lcssa-input.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/opt-size.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/pr-48150.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/pr-48150.ll::roundtrip
+tests/imported/llvm/Transforms/LoopLoadElim/symbolic-stride.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/symbolic-stride.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/type-mismatch-opaque-ptr.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/type-mismatch-opaque-ptr.ll::roundtrip
@@ -9047,6 +9051,7 @@ tests/imported/llvm/Transforms/LoopLoadElim/uncomputable-backedge-taken-count.ll
 tests/imported/llvm/Transforms/LoopLoadElim/uncomputable-backedge-taken-count.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/unknown-dep.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/unknown-dep.ll::roundtrip
+tests/imported/llvm/Transforms/LoopLoadElim/unknown-stride-known-dep.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/unknown-stride-known-dep.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/update-debugloc-store-forwarded.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/update-debugloc-store-forwarded.ll::roundtrip
