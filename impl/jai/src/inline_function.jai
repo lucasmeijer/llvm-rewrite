@@ -54,6 +54,7 @@ cci_indirect_insert :: (c: *Cloned_Code_Info, v: Value_Id) { if !cci_indirect_co
 // InlineFunctionInfo
 Inline_Function_Info :: struct {
     use_assumption_cache: bool;   // GetAssumptionCache given
+    psi: *Psi;
     caller_bfi: *Bfi;
     callee_bfi: *Bfi;
     update_profile := true;
@@ -1277,6 +1278,123 @@ call_ret_deref_bytes :: (cb: Value_Id, k: Attr_Kind) -> u64 {
     return 0;
 }
 
+// updateCallProfile
+update_call_profile :: (callee: Value_Id, vm: *Value_Map, callee_entry_count: u64, call: Value_Id, psi: *Psi, caller_bfi: *Bfi) {
+    if callee_entry_count < 1 return;
+    ok, site := false, cast(u64) 0;
+    if psi ok, site = psi_profile_count(psi, call, caller_bfi);
+    call_count := min(ifx ok then site else 0, callee_entry_count);
+    update_profile_callee(callee, -cast,no_check(s64) call_count, vm);
+}
+// updateProfileCallee(Callee, EntryDelta, VMap)
+update_profile_callee :: (callee: Value_Id, entry_delta: s64, vm: *Value_Map) {
+    ok, callee_count := function_entry_count(callee);
+    if !ok return;
+    new_entry_count: u64 = ifx entry_delta < 0 && cast,no_check(u64) (-entry_delta) > callee_count then 0 else callee_count + cast,no_check(u64) entry_delta;
+    update_vtable_prof_weight :: (cb: Value_Id, s: u64, t: u64) {
+        vptr := try_get_vtable_instruction(cb);
+        if vptr != NONE scale_prof_data(vptr, s, t);
+    }
+    // CallInst/InvokeInst::updateProfWeight
+    update_prof_weight :: (cb: Value_Id, s: u64, t: u64) { if t != 0 scale_prof_data(cb, s, t); }
+    if vm {
+        clone_entry_count := callee_count - new_entry_count;
+        for v, k: vm.map {
+            if vkind(k) != .INST || v == NONE || vkind(v) != .INST continue;
+            if (inst_op(k) == .CALL && inst_op(v) == .CALL) || (inst_op(k) == .INVOKE && inst_op(v) == .INVOKE) {
+                update_prof_weight(v, clone_entry_count, callee_count);
+                update_vtable_prof_weight(v, clone_entry_count, callee_count);
+            }
+        }
+    }
+    if entry_delta != 0 {
+        fn_set_entry_count(callee, new_entry_count);
+        for bb: fn_blocks(callee) {
+            if vm && !vmap_contains(vm, bb) continue;
+            for i: block_insts(bb) {
+                if inst_op(i) != .CALL && inst_op(i) != .INVOKE continue;
+                update_prof_weight(i, new_entry_count, callee_count);
+                update_vtable_prof_weight(i, new_entry_count, callee_count);
+            }
+        }
+    }
+}
+// Function::setEntryCount(Count): MDBuilder::createFunctionEntryCount with the import GUIDs kept (sorted)
+fn_set_entry_count :: (f: Value_Id, count: u64) {
+    kind := md_kind_id("prof");
+    old := get_metadata(f, kind);
+    guids: [..] u64; guids.allocator = temp;
+    if old != NONE && md_nops(old) > 0 {
+        s := md_op(old, 0);
+        if s != NONE && ir.mds[s].kind == .STRING && ir.mds[s].str == "function_entry_count" {
+            for k: 2..cast(s64) md_nops(old) - 1 {
+                g := const_int_zext(md_const_int_op(old, cast(u32) k));
+                dup := false;
+                for guids if it == g { dup = true; break; }
+                if !dup array_add(*guids, g);
+            }
+        }
+    }
+    // llvm::sort
+    for a: 1..guids.count - 1 {
+        x := guids[a]; b := a - 1;
+        while b >= 0 && guids[b] > x { guids[b + 1] = guids[b]; b -= 1; }
+        guids[b + 1] = x;
+    }
+    ops: [..] Md_Id; ops.allocator = temp;
+    array_add(*ops, md_string("function_entry_count"));
+    array_add(*ops, md_value(const_int(ir.t_i64, count)));
+    for guids array_add(*ops, md_value(const_int(ir.t_i64, it)));
+    set_metadata(f, kind, md_tuple(ops, false));
+}
+// PGOIndirectCallVisitor::tryGetVTableInstruction
+try_get_vtable_instruction :: (cb: Value_Id) -> Value_Id {
+    callee := call_callee(cb);
+    // CallBase::isIndirectCall
+    if is_const(callee) || vkind(callee) == .INLINE_ASM return NONE;
+    if vkind(callee) != .INST || inst_op(callee) != .LOAD return NONE;
+    vt := strip_in_bounds_constant_offsets(op(callee, 0));
+    if vt != NONE && vkind(vt) == .INST return vt;
+    return NONE;
+}
+// scaleProfData(I, S, T)
+scale_prof_data :: (i: Value_Id, s: u64, t: u64) {
+    kind := md_kind_id("prof");
+    pd := get_metadata(i, kind);
+    if pd == NONE || md_nops(pd) == 0 return;
+    nm := md_op(pd, 0);
+    if nm == NONE || ir.mds[nm].kind != .STRING return;
+    name := ir.mds[nm].str;
+    if name != "branch_weights" && name != "VP" return;
+    // hasCountTypeMD
+    is_vp := md_nops(pd) >= 5;
+    is_bw := prof_is_branch_weight_md(pd);
+    if !(name == "VP" && is_vp) && !((vkind(i) == .INST && is_call_base(i)) && !(name == "branch_weights" && is_bw)) return;
+    ops: [..] Md_Id; ops.allocator = temp;
+    array_add(*ops, nm);
+    W :: 128;
+    aps := ap_from_u64(W, s); apt := ap_from_u64(W, t);
+    if name == "branch_weights" && md_nops(pd) > 0 {
+        off: u32 = ifx prof_has_branch_weight_origin(pd) then cast(u32) 2 else 1;
+        val := ap_mul(ap_from_u64(W, const_int_zext(md_const_int_op(pd, off))), aps);
+        array_add(*ops, md_value(const_int(ir.t_i32, ap_limited_value(ap_udiv(val, apt), 0xFFFF_FFFF))));
+    } else if name == "VP" {
+        idx: u32 = 1;
+        while idx < md_nops(pd) {
+            array_add(*ops, md_op(pd, idx));
+            count := const_int_zext(md_const_int_op(pd, idx + 1));
+            if count == 0xFFFF_FFFF_FFFF_FFFF {
+                array_add(*ops, md_op(pd, idx + 1));
+            } else {
+                val := ap_mul(ap_from_u64(W, count), aps);
+                array_add(*ops, md_value(const_int(ir.t_i64, ap_limited_value(ap_udiv(val, apt), 0xFFFF_FFFF_FFFF_FFFF))));
+            }
+            idx += 2;
+        }
+    }
+    set_metadata(i, kind, md_tuple(ops, false));
+}
+
 // AddAlignmentAssumptions
 add_alignment_assumptions :: (cb: Value_Id, ifi: *Inline_Function_Info) {
     if !if_opts.preserve_alignment_assumptions || !ifi.use_assumption_cache return;
@@ -1292,7 +1410,20 @@ add_alignment_assumptions :: (cb: Value_Id, ifi: *Inline_Function_Info) {
         if !dt { dt = dt_new(false); dt_recalculate(dt, caller); }
         av := call_arg(cb, arg_no(a));
         if get_known_alignment(av, cb, ac, dt) >= al.ival continue;
-        fatal("inline: -preserve-alignment-assumptions-during-inlining (CreateAlignmentAssumption) is not implemented yet");
+        // IRBuilder<>(&CB).CreateAlignmentAssumption(DL, ArgVal, Alignment)
+        f := get_or_insert_intrinsic_declaration(IID_ASSUME, .[]);
+        i := new_inst(.CALL, ir.t_void, 4);
+        inst(i).ty2 = glob(f).value_type;
+        set_op(i, 0, get_true(ir.t_i1));
+        set_op(i, 1, av);
+        set_op(i, 2, const_int(ir.t_i64, al.ival));
+        set_op(i, 3, f);
+        r := inst(i);
+        r.idx = cast(u32) ir.u32_pool.count; r.nidx = 1;
+        array_add(*ir.u32_pool, bundle_tag_id("align")); array_add(*ir.u32_pool, 1); array_add(*ir.u32_pool, 3);
+        b: Irb; irb_set_before(*b, cb);
+        irb_insert(*b, i);
+        ac_register_assumption(ac, i);
     }
     if dt dt_free(dt);
 }
@@ -1634,7 +1765,8 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
         if call_bundle_index(cb, "clang.arc.attachedcall") >= 0 fatal("inline: ObjC ARC attached calls (inlineRetainOrClaimRVCalls) are not implemented yet");
         if ifi.update_profile {
             if ifi.caller_bfi && ifi.callee_bfi update_caller_bfi(orig_bb, *vm, ifi.caller_bfi, ifi.callee_bfi, fn_entry(called));
-            if function_entry_count_present(called) fatal("inline: updating profile counts (function_entry_count) is not implemented yet");
+            ok, profile := function_entry_count(called);
+            if ok update_call_profile(called, *vm, profile, cb, ifi.psi, ifi.caller_bfi);
         }
         for byval_inits handle_byval_argument_init(it.ty, it.dst, it.src, it.src_align, first_new_block, ifi, called);
         pdi := call_bundle_index(cb, "deopt");

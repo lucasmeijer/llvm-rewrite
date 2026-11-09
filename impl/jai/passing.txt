@@ -4459,6 +4459,7 @@ tests/imported/llvm/Transforms/Inline/X86/switch.ll::opt
 tests/imported/llvm/Transforms/Inline/X86/switch.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/access-attributes-prop.ll::opt
 tests/imported/llvm/Transforms/Inline/access-attributes-prop.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/align.ll::opt
 tests/imported/llvm/Transforms/Inline/align.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/alloc-token.ll::opt
 tests/imported/llvm/Transforms/Inline/alloc-token.ll::roundtrip
@@ -4481,9 +4482,11 @@ tests/imported/llvm/Transforms/Inline/attributes.ll::opt
 tests/imported/llvm/Transforms/Inline/attributes.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/basictest.ll::opt
 tests/imported/llvm/Transforms/Inline/basictest.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/bfi-update.ll::opt
 tests/imported/llvm/Transforms/Inline/bfi-update.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/blockaddress.ll::opt
 tests/imported/llvm/Transforms/Inline/blockaddress.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/byref-align.ll::opt
 tests/imported/llvm/Transforms/Inline/byref-align.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/byval-align.ll::opt
 tests/imported/llvm/Transforms/Inline/byval-align.ll::roundtrip
@@ -4560,8 +4563,11 @@ tests/imported/llvm/Transforms/Inline/flatten.ll::opt
 tests/imported/llvm/Transforms/Inline/flatten.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/frameescape.ll::opt
 tests/imported/llvm/Transforms/Inline/frameescape.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/function-count-update-2.ll::opt
 tests/imported/llvm/Transforms/Inline/function-count-update-2.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/function-count-update-3.ll::opt
 tests/imported/llvm/Transforms/Inline/function-count-update-3.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/function-count-update.ll::opt
 tests/imported/llvm/Transforms/Inline/function-count-update.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/guard-intrinsic.ll::opt
 tests/imported/llvm/Transforms/Inline/guard-intrinsic.ll::roundtrip
@@ -4585,9 +4591,11 @@ tests/imported/llvm/Transforms/Inline/inline-call-penalty-option.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-call-penalty-option.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-call-with-asm-call.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-call-with-asm-call.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-cold-callsite-pgo.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-cold-callsite-pgo.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-cold-callsite.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-cold-callsite.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-cold.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-cold.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-constexpr-addrspacecast-argument.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-constexpr-addrspacecast-argument.ll::roundtrip
@@ -4607,6 +4615,7 @@ tests/imported/llvm/Transforms/Inline/inline-history-invoke.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-history-invoke.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-history.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-history.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-hot-callsite-2.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-hot-callsite-2.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-hot-callsite.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-incompat-attrs.ll::opt
@@ -4798,11 +4807,15 @@ tests/imported/llvm/Transforms/Inline/pr64804.ll::opt
 tests/imported/llvm/Transforms/Inline/pr64804.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/pr97590.ll::opt
 tests/imported/llvm/Transforms/Inline/pr97590.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/prof-update-instr.ll::opt
 tests/imported/llvm/Transforms/Inline/prof-update-instr.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/prof-update-sample-alwaysinline.ll::opt
 tests/imported/llvm/Transforms/Inline/prof-update-sample-alwaysinline.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/prof-update-sample.ll::opt
 tests/imported/llvm/Transforms/Inline/prof-update-sample.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/profile-meta.ll::opt
 tests/imported/llvm/Transforms/Inline/profile-meta.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/profile_meta_invoke.ll::opt
 tests/imported/llvm/Transforms/Inline/profile_meta_invoke.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/promote-call-bitwidth.ll::opt
 tests/imported/llvm/Transforms/Inline/promote-call-bitwidth.ll::roundtrip
@@ -4831,7 +4844,9 @@ tests/imported/llvm/Transforms/Inline/switch.ll::opt
 tests/imported/llvm/Transforms/Inline/switch.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/unwind-inline-asm.ll::opt
 tests/imported/llvm/Transforms/Inline/unwind-inline-asm.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/update_invoke_prof.ll::opt
 tests/imported/llvm/Transforms/Inline/update_invoke_prof.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/update_value_profile.ll::opt
 tests/imported/llvm/Transforms/Inline/update_value_profile.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/vector-bonus.ll::opt
 tests/imported/llvm/Transforms/Inline/vector-bonus.ll::roundtrip

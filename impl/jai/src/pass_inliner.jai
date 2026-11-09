@@ -222,6 +222,7 @@ inliner_run :: (node: *Pass_Node, initial_c: s32, ur: *Cgscc_Ur) -> Preserved {
                 if !recommended continue;
                 ifi: Inline_Function_Info;
                 ifi.use_assumption_cache = true;
+                ifi.psi = psi_cached_or_null();
                 ifi.caller_bfi = get_bfi(inst_fn(cb));
                 ifi.callee_bfi = get_bfi(callee);
                 if !inline_one(cb, callee, callee_n, callee_scc, c, *ifi, ic, ur, *calls, i, *inlined_callees, *dead_functions, *dead_in_comdats, f) continue;
@@ -232,6 +233,7 @@ inliner_run :: (node: *Pass_Node, initial_c: s32, ur: *Cgscc_Ur) -> Preserved {
                 if !recommended continue;
                 ifi: Inline_Function_Info;
                 ifi.use_assumption_cache = true;
+                ifi.psi = psi_cached_or_null();
                 ifi.caller_bfi = get_bfi(inst_fn(cb));
                 ifi.callee_bfi = get_bfi(callee);
                 ic := inline_cost_always("always inline attribute");
@@ -345,6 +347,7 @@ filter_dead_comdat_functions :: (dead: *[..] Value_Id) {
 // ---------------------------------------------------------------- AlwaysInlinerPass
 
 always_inliner_run :: () -> Preserved {
+    psi_require();
     changed := false;
     calls: [..] Value_Id; calls.allocator = temp;
     need_flattening: [..] Value_Id; need_flattening.allocator = temp;
@@ -355,6 +358,7 @@ always_inliner_run :: () -> Preserved {
         caller := inst_fn(cb);
         ifi: Inline_Function_Info;
         ifi.use_assumption_cache = true;
+        ifi.psi = psi_get();   // the AlwaysInliner's MAM.getResult<ProfileSummaryAnalysis>(M) (always_inliner_run)
         aar := aa_results_for(callee);
         res := inline_function(cb, *ifi, true, *aar, true, new_call_sites != null);
         if !res.ok return false;
@@ -583,6 +587,7 @@ module_inliner_run :: () -> Preserved {
         if !ok continue;
         ifi: Inline_Function_Info;
         ifi.use_assumption_cache = true;
+        ifi.psi = psi_cached_or_null();
         ifi.caller_bfi = get_bfi(inst_fn(cb));
         ifi.callee_bfi = get_bfi(callee);
         aar := aa_results_for(inst_fn(cb));

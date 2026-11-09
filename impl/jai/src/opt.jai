@@ -150,6 +150,7 @@
 #load "pass_function_attrs.jai";
 #load "pass_inliner.jai";
 #load "inline_function.jai";
+#load "psi.jai";
 #load "inline_cost.jai";
 
 main :: () { opt_main(); }

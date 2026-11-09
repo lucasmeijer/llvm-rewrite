@@ -25,6 +25,10 @@ ic_opts: struct {
     locally_hot_callsite_threshold: s64 = 525;   // -locally-hot-callsite-threshold
     locally_hot_given := false;
     cold_callsite_rel_freq: s64 = 2;       // -cold-callsite-rel-freq
+    enable_cost_benefit: bool; enable_cost_benefit_given: bool;   // -inline-enable-cost-benefit-analysis
+    inline_savings_multiplier: s64 = 8;    // -inline-savings-multiplier (else TTI's 8)
+    inline_savings_profitable_multiplier: s64 = 8;   // -inline-savings-profitable-multiplier (else TTI's 8)
+    inline_size_allowance: s64 = 100;      // -inline-size-allowance
     hot_callsite_rel_freq: u64 = 60;       // -hot-callsite-rel-freq
     instr_cost: s64 = 5;                   // -inline-instr-cost
     inline_asm_instr_cost: s64 = 0;        // -inline-asm-instr-cost
@@ -167,7 +171,7 @@ tti_fp_op_cost :: (t: *Tti, ty: Type_Id) -> Cost {
     return TCC_EXPENSIVE;
 }
 // getEstimatedNumberOfCaseClusters: (clusters, jump table size)
-tti_estimated_number_of_case_clusters :: (t: *Tti, sw: Value_Id) -> (u32, u32) {
+tti_estimated_number_of_case_clusters :: (t: *Tti, sw: Value_Id, psi: *Psi = null, bfi: *Bfi = null) -> (u32, u32) {
     n := (nops(sw) - 2);
     if t.kind != .X86 return n, 0;
     st := *t.xl;
@@ -207,8 +211,8 @@ tti_estimated_number_of_case_clusters :: (t: *Tti, sw: Value_Id) -> (u32, u32) {
     }
     if jt_allowed {
         if n < 2 || n < ic_opts.min_jump_table_entries return n, 0;
-        // isSuitableForJumpTable (shouldOptimizeForSize without a profile: hasOptSize)
-        opt_for_size := fn_has_opt_size(f);
+        // isSuitableForJumpTable
+        opt_for_size := fn_has_opt_size(f) || should_optimize_for_size_bb(inst_block(sw), psi, bfi);
         min_density := ifx opt_for_size then ic_opts.optsize_jump_table_density else ic_opts.jump_table_density;
         if (opt_for_size || rng <= ic_opts.max_jump_table_size) && (cast(u64) n * 100 >= rng * min_density) return 1, cast(u32) rng;
     }
@@ -344,6 +348,10 @@ Call_Analyzer :: struct {
     sroa_cost_savings: u64;
     sroa_cost_savings_lost: u64;
     sroa_arg_costs: Table(Value_Id, s64);
+    psi: *Psi;                   // the cached ProfileSummaryInfo (null without require<profile-summary>)
+    cost_benefit_enabled: bool;  // CostBenefitAnalysisEnabled
+    cold_size: s64;
+    has_cost_benefit: bool;      // CostBenefit (Size, CycleSavings) was computed
 }
 
 cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indirect: bool, ignore_threshold: bool, use_eph_cache := false) -> *Call_Analyzer {
@@ -356,14 +364,75 @@ cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indir
     ca.load_addr_set.allocator = temp; ca.sroa_arg_costs.allocator = temp;
     ca.enable_load_elimination = true;
     ca.single_bb = true;
-    // isCostBenefitAnalysisEnabled: false without a profile summary
-    ca.compute_full_inline_cost = ic_opts.compute_full_inline_cost || params.compute_full_inline_cost;
+    ca.psi = psi_cached_or_null();
+    ca.cost_benefit_enabled = cax_is_cost_benefit_analysis_enabled(ca);
+    ca.compute_full_inline_cost = ic_opts.compute_full_inline_cost || params.compute_full_inline_cost || ca.cost_benefit_enabled;
     ca.threshold = params.default_threshold;
     ca.boost_indirect_calls = boost_indirect;
     ca.ignore_threshold = ignore_threshold;
     ca.use_eph_cache = use_eph_cache;
     ca.allow_recursive_call = params.allow_recursive_call;
     return ca;
+}
+
+// isCostBenefitAnalysisEnabled (GetBFI is always given)
+cax_is_cost_benefit_analysis_enabled :: (ca: *Call_Analyzer) -> bool {
+    if !ca.psi || !ca.psi.has_summary return false;
+    if ic_opts.enable_cost_benefit_given {
+        if !ic_opts.enable_cost_benefit return false;
+    } else if !psi_has_instrumentation_profile(ca.psi) return false;
+    caller := inst_fn(ca.call);
+    ok, _ := function_entry_count(caller);
+    if !ok return false;
+    if !psi_is_hot_call_site(ca.psi, ca.call, get_bfi(caller)) return false;
+    ok2, ec := function_entry_count(ca.f);
+    if !ok2 || ec == 0 return false;
+    return true;
+}
+// costBenefitAnalysis: (has a decision, inline)
+cax_cost_benefit_analysis :: (ca: *Call_Analyzer) -> (bool, bool) {
+    if !ca.cost_benefit_enabled return false, false;
+    if ca.threshold == 0 return false, false;
+    callee_bfi := get_bfi(ca.f);
+    W :: 128;
+    cycle_savings := ap_from_u64(W, 0);
+    for bb: fn_blocks(ca.f) {
+        current := ap_from_u64(W, 0);
+        for i: block_insts(bb) {
+            if inst_op(i) == .CONDBR {
+                if cax_simplified(ca, op(i, 0), .CONSTANT_INT) != NONE current = ap_add(current, ap_from_u64(W, cast,no_check(u64) ic_opts.instr_cost));
+            } else if inst_op(i) == .SWITCH {
+                if cax_simplified(ca, op(i, 0), .CONSTANT_INT) != NONE current = ap_add(current, ap_from_u64(W, cast,no_check(u64) ic_opts.instr_cost));
+            } else if table_contains(*ca.simplified, i) {
+                current = ap_add(current, ap_from_u64(W, cast,no_check(u64) ic_opts.instr_cost));
+            }
+        }
+        _, pc := bfi_block_profile_count(callee_bfi, bb);
+        current = ap_mul(current, ap_from_u64(W, pc));
+        cycle_savings = ap_add(cycle_savings, current);
+    }
+    _, entry := function_entry_count(ca.f);
+    cycle_savings = ap_add(cycle_savings, ap_from_u64(W, entry / 2));
+    cycle_savings = ap_udiv(cycle_savings, ap_from_u64(W, entry));
+    caller_bb := inst_block(ca.call);
+    caller_bfi := get_bfi(block_fn(caller_bb));
+    cycle_savings = ap_add(cycle_savings, ap_from_u64(W, cast,no_check(u64) get_callsite_cost(ca.tti, ca.call)));
+    _, cc := bfi_block_profile_count(caller_bfi, caller_bb);
+    cycle_savings = ap_mul(cycle_savings, ap_from_u64(W, cc));
+    size := ca.cost - ca.cold_size;
+    size = ifx size > ic_opts.inline_size_allowance then size - ic_opts.inline_size_allowance else 1;
+    // OverrideCycleSavingsAndSizeForTesting
+    ok1, cs := call_str_fn_attr_as_int(ca.call, "inline-cycle-savings-for-test");
+    if ok1 cycle_savings = ap_from_u64(W, cast,no_check(u64) cs);
+    ok2, rc := call_str_fn_attr_as_int(ca.call, "inline-runtime-cost-for-test");
+    if ok2 size = rc;
+    ca.has_cost_benefit = true;
+    threshold := ap_mul(ap_from_u64(W, psi_or_comp_hot_count_threshold(ca.psi)), ap_from_u64(W, cast,no_check(u64) size));
+    upper := ap_mul(cycle_savings, ap_from_u64(W, cast,no_check(u64) ic_opts.inline_savings_multiplier));
+    if ap_uge(upper, threshold) return true, true;
+    lower := ap_mul(cycle_savings, ap_from_u64(W, cast,no_check(u64) ic_opts.inline_savings_profitable_multiplier));
+    if ap_ult(lower, threshold) return true, false;
+    return false, false;
 }
 
 // addCost
@@ -709,8 +778,9 @@ cax_allow_size_growth :: (call: Value_Id) -> bool {
     }
     return true;
 }
-// isColdCallSite (no profile summary: BFI relative to the caller's entry)
-cax_is_cold_call_site :: (call: Value_Id, caller_bfi: *Bfi) -> bool {
+// isColdCallSite
+cax_is_cold_call_site :: (ca: *Call_Analyzer, call: Value_Id, caller_bfi: *Bfi) -> bool {
+    if ca.psi && ca.psi.has_summary return psi_is_cold_call_site(ca.psi, call, caller_bfi);
     if !caller_bfi return false;
     site_freq := bfi_get_block_freq(caller_bfi, inst_block(call));
     entry_freq := bfi_get_block_freq(caller_bfi, fn_entry(inst_fn(call)));
@@ -718,8 +788,9 @@ cax_is_cold_call_site :: (call: Value_Id, caller_bfi: *Bfi) -> bool {
     p := bp_make(cast(u64) ic_opts.cold_callsite_rel_freq, 100);
     return site_freq < bf_mul_prob(entry_freq, p);
 }
-// getHotCallSiteThreshold (no profile summary)
+// getHotCallSiteThreshold
 cax_hot_call_site_threshold :: (ca: *Call_Analyzer, call: Value_Id, caller_bfi: *Bfi) -> (bool, s64) {
+    if ca.psi && ca.psi.has_summary && psi_is_hot_call_site(ca.psi, call, caller_bfi) return ca.params.has_hot_callsite, ca.params.hot_callsite_threshold;
     if !caller_bfi || !ca.params.has_locally_hot return false, 0;
     site := bfi_get_block_freq(caller_bfi, inst_block(call));
     entry := bfi_get_entry_freq(caller_bfi);
@@ -785,9 +856,16 @@ cax_update_threshold :: (ca: *Call_Analyzer) {
         hot_ok, hot := cax_hot_call_site_threshold(ca, call, caller_bfi);
         if !fn_has_opt_size(caller) && hot_ok {
             ca.threshold = hot;
-        } else if cax_is_cold_call_site(call, caller_bfi) {
+        } else if cax_is_cold_call_site(ca, call, caller_bfi) {
             single_bb_bonus_percent = 0; vector_bonus_percent = 0; last_call_to_static_bonus = 0;
             ca.threshold = min_if(ca.threshold, p.has_cold_callsite, p.cold_callsite_threshold);
+        } else if ca.psi {
+            if psi_is_function_entry_hot(ca.psi, ca.f) {
+                ca.threshold = max_if(ca.threshold, has_hint, hint);
+            } else if psi_is_function_entry_cold(ca.psi, ca.f) {
+                single_bb_bonus_percent = 0; vector_bonus_percent = 0; last_call_to_static_bonus = 0;
+                ca.threshold = min_if(ca.threshold, p.has_cold, p.cold_threshold);
+            }
         }
     }
     ca.threshold += tti_adjust_inlining_threshold(ca.tti, call);
@@ -1080,7 +1158,7 @@ cax_visit_select :: (ca: *Call_Analyzer, si: Value_Id) -> bool {
 }
 cax_visit_switch :: (ca: *Call_Analyzer, sw: Value_Id) -> bool {
     if cax_direct_or_simplified(ca, op(sw, 0), .CONSTANT_INT) != NONE return true;
-    num_clusters, jt_size := tti_estimated_number_of_case_clusters(ca.tti, sw);
+    num_clusters, jt_size := tti_estimated_number_of_case_clusters(ca.tti, sw, ca.psi, get_bfi(ca.f));
     default_unreachable := switch_default_dest_unreachable(sw);
     // onFinalizeSwitch
     ic := ic_opts.instr_cost;
@@ -1379,6 +1457,10 @@ cax_analyze :: (ca: *Call_Analyzer) -> Inline_Result {
         block_successors(bb, *succs);
         for succs wl_insert(*worklist, *in_wl, it);
         // onBlockAnalyzed
+        if ca.cost_benefit_enabled {
+            _, pc := bfi_block_profile_count(get_bfi(f), bb);
+            if pc == 0 ca.cold_size += ca.cost - ca.cost_at_bb_start;
+        }
         if ca.single_bb && num_successors(ti) > 1 { ca.threshold -= ca.single_bb_bonus; ca.single_bb = false; }
     }
     if !is_sole_call_to_local_function(ca.call, f) && ca.contains_no_duplicate_call return ir_failure("noduplicate");
@@ -1419,6 +1501,12 @@ cax_finalize_analysis :: (ca: *Call_Analyzer) -> Inline_Result {
     if ok2 ca.cost *= mult;
     ok3, th := call_str_fn_attr_as_int(ca.call, "function-inline-threshold");
     if ok3 ca.threshold = th;
+    decided, inline_it := cax_cost_benefit_analysis(ca);
+    if decided {
+        ca.decided_by_cost_benefit = true;
+        if inline_it return ir_success();
+        return ir_failure("Cost over threshold.");
+    }
     if ca.ignore_threshold return ir_success();
     ca.decided_by_cost_threshold = true;
     if ca.cost < max(1, ca.threshold) return ir_success();
@@ -1490,6 +1578,10 @@ get_inline_cost :: (call: Value_Id, params: Inline_Params, use_eph_cache := fals
     if ic_opts.inline_all_viable_calls && is_inline_viable(callee).ok return inline_cost_always("Inlining forced by -inline-all-viable-calls");
     ca := cax_new(callee, call, params, true, false, use_eph_cache);
     should := cax_analyze(ca);
+    if ca.decided_by_cost_benefit {
+        if should.ok return inline_cost_always("benefit over cost");
+        return inline_cost_never(should.reason);
+    }
     if ca.decided_by_cost_threshold return inline_cost_get(ca.cost, ca.threshold, ca.static_bonus_applied);
     if should.ok return inline_cost_always("empty function");
     return inline_cost_never(should.reason);
@@ -1552,6 +1644,10 @@ inline_cost_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
         case "hot-callsite-threshold"; ic_opts.hot_callsite_threshold = int_opt(name, value, has_value);
         case "locally-hot-callsite-threshold"; ic_opts.locally_hot_callsite_threshold = int_opt(name, value, has_value); ic_opts.locally_hot_given = true;
         case "cold-callsite-rel-freq"; ic_opts.cold_callsite_rel_freq = int_opt(name, value, has_value);
+        case "inline-enable-cost-benefit-analysis"; ic_opts.enable_cost_benefit = bool_opt(name, value, has_value); ic_opts.enable_cost_benefit_given = true;
+        case "inline-savings-multiplier"; ic_opts.inline_savings_multiplier = int_opt(name, value, has_value);
+        case "inline-savings-profitable-multiplier"; ic_opts.inline_savings_profitable_multiplier = int_opt(name, value, has_value);
+        case "inline-size-allowance"; ic_opts.inline_size_allowance = int_opt(name, value, has_value);
         case "hot-callsite-rel-freq"; ic_opts.hot_callsite_rel_freq = cast(u64) int_opt(name, value, has_value);
         case "inline-instr-cost"; ic_opts.instr_cost = int_opt(name, value, has_value);
         case "inline-asm-instr-cost"; ic_opts.inline_asm_instr_cost = int_opt(name, value, has_value);
@@ -1572,7 +1668,7 @@ inline_cost_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
         case "use-noalias-intrinsic-during-inlining"; if_opts.use_noalias_intrinsic = bool_opt(name, value, has_value);
         case "preserve-alignment-assumptions-during-inlining"; if_opts.preserve_alignment_assumptions = bool_opt(name, value, has_value);
         case "max-inst-checked-for-throw-during-inlining"; if_opts.attribute_window = int_opt(name, value, has_value);
-        case; return false;
+        case; return psi_parse_cl_opt(name, value, has_value);
     }
     return true;
 }
