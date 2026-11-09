@@ -1075,3 +1075,20 @@ Still slow / known:
   n = 500 / 2000 / 8000, scaling exponent 0.92 (LLVM 0.97). callgrind (x64 build, 120 functions): the same number of
   simplifyBinOp calls as LLVM (454,972); ~90% of the time is the shared InstSimplify / ConstantFold code called by
   CallAnalyzer::visitBinaryOperator (constant creation hashes a key per folded constant).
+
+
+## LoopVectorize (in progress; L1.vectorize.loop)
+
+- Files: `iv_descriptors.jai` (IVDescriptors.cpp: `Recur_Kind`, `Rdx_Desc` = RecurrenceDescriptor, `Ind_Desc` =
+  InductionDescriptor, rk_* kind predicates), `lv_legality.jai` (LoopVectorizationLegality `Lvl`, LoopVectorizeHints
+  `Lv_Hints`, the Requirements' ExactFPMathInst), `lv_pass.jai` (the pass driver runImpl / processLoop, the
+  cost-model and VFSelectionContext parts that compute the maximum VF, every LoopVectorize cl::opt in `lv_opts`).
+- Milestone 1 (done): the pass runs LoopSimplify on every loop and LCSSA on every candidate loop exactly like LLVM,
+  then decides "not vectorized" whenever LLVM does so without a vector VPlan: legality failures, hints, computeMaxVF
+  returning none, or only VF 1 being feasible (computeBestVF then returns VF 1 without costing, and
+  selectInterleaveCount is clamped by getMaxInterleaveFactor(VF=1) = 1 on X86 and NoTTI). Everything that would
+  build a vector VPlan or interleave fails loudly ("loop-vectorize: ... is not supported yet").
+- Loud gaps of milestone 1: InterleavedAccessInfo (X86 always runs analyzeInterleaving), isDereferenceableAndAligned-
+  InLoop (only decides which predicated loads are masked: recorded in `lv_deref_unknown_loads`, must be ported
+  before masking decisions), early exits with uncountable exits, VFDatabase variants, scalable VFs, outer loops.
+- Sweep `--passes loop-vectorize` (milestone 1): 7136 identical, 0 differs, 618 loud.

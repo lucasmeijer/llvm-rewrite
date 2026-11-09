@@ -285,6 +285,8 @@ Pass_Kind :: enum u8 {
     SLP_VECTORIZER;
     // LoopUnroll (pass_loop_unroll.jai)
     LOOP_UNROLL; LOOP_UNROLL_FULL;
+    // LoopVectorize (lv_pass.jai)
+    LOOP_VECTORIZE;
     // SimpleLoopUnswitch (pass_simple_loop_unswitch.jai)
     SIMPLE_LOOP_UNSWITCH;
     // CGSCC pass manager (cgscc_pm.jai), LazyCallGraph (lazy_call_graph.jai)
@@ -376,6 +378,7 @@ PASS_TABLE :: Pass_Info.[
     .{"loop-idiom", .LOOP, .LOOP_IDIOM, false, .DOMTREE},
     .{"loop-unroll", .FUNCTION, .LOOP_UNROLL, false, .DOMTREE},   // also loop-unroll<...> (lookup_pass)
     .{"loop-unroll-full", .LOOP, .LOOP_UNROLL_FULL, false, .DOMTREE},
+    .{"loop-vectorize", .FUNCTION, .LOOP_VECTORIZE, false, .DOMTREE},   // also loop-vectorize<...> (lookup_pass)
     .{"simple-loop-unswitch", .LOOP, .SIMPLE_LOOP_UNSWITCH, false, .DOMTREE},   // also simple-loop-unswitch<...>
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
@@ -442,6 +445,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "print<access-info><") && name[name.count - 1] == #char ">" return lookup_pass("print<access-info>");
     if begins_with(name, "lnicm<") && name[name.count - 1] == #char ">" return lookup_pass("lnicm");
     if begins_with(name, "loop-unroll<") && name[name.count - 1] == #char ">" return lookup_pass("loop-unroll");
+    if begins_with(name, "loop-vectorize<") && name[name.count - 1] == #char ">" return lookup_pass("loop-vectorize");
     if begins_with(name, "simple-loop-unswitch<") && name[name.count - 1] == #char ">" return lookup_pass("simple-loop-unswitch");
     if begins_with(name, "function-attrs<") && name[name.count - 1] == #char ">" return lookup_pass("function-attrs");
     if begins_with(name, "inline<") && name[name.count - 1] == #char ">" return lookup_pass("inline");
@@ -890,6 +894,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if aggressive_instcombine_parse_cl_opt(name, value, has_value) return true;   // pass_aggressive_instcombine.jai
     if vector_combine_parse_cl_opt(name, value, has_value) return true;   // pass_vector_combine.jai
     if slp_parse_cl_opt(name, value, has_value) return true;   // slp_utils.jai
+    if lv_parse_cl_opt(name, value, has_value) return true;   // lv_pass.jai (LoopVectorize, before the LAA list: -force-vector-*)
     if unroll_parse_cl_opt(name, value, has_value) return true;   // pass_loop_unroll.jai
     if unswitch_parse_cl_opt(name, value, has_value) return true;   // pass_simple_loop_unswitch.jai
     // -mattr is a cl::list (CommaSeparated): repeated options accumulate
@@ -1070,6 +1075,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .VECTOR_COMBINE; return vector_combine_run(f);
         case .SLP_VECTORIZER; return slp_vectorizer_run(f);
         case .LOOP_UNROLL; return loop_unroll_run(node, f);
+        case .LOOP_VECTORIZE; return loop_vectorize_run(f, node.name);
         case .BREAK_CRIT_EDGES; return break_crit_edges_run(f);
         case .MEM2REG; return mem2reg_run(f);
         case .INSTSIMPLIFY; return instsimplify_run(f);

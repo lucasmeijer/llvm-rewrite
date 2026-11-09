@@ -156,6 +156,9 @@
 #load "inline_function.jai";
 #load "psi.jai";
 #load "inline_cost.jai";
+#load "iv_descriptors.jai";
+#load "lv_legality.jai";
+#load "lv_pass.jai";
 
 main :: () { opt_main(); }
 
