@@ -60,6 +60,8 @@
 #load "slp_build.jai";
 #load "slp_build_tree.jai";
 #load "slp_sched.jai";
+#load "slp_reorder.jai";
+#load "slp_gather.jai";
 #load "dbg_records.jai";
 #load "pass_mem2reg.jai";
 #load "pass_instsimplify.jai";

@@ -38,6 +38,9 @@ Slp_Extra :: struct {
     known_non_vectorizable_loads: [..] string;
     has_user_ignore_list: bool;
     user_ignore_list: [] Value_Id;
+    entry_to_last_instruction: Table(Te_Id, Value_Id);
+    phi_cmp_te: Te_Id;                            // state of getReorderingData's PHICompare
+    phi_cmp_heads: [] Value_Id;
 }
 slpx: Slp_Extra;
 
@@ -64,6 +67,7 @@ slp_init :: (f: Value_Id, tti: *Tti, aar: Aa_Results, li: *Loop_Info, dt: *Dom_T
     slpx.current_loop_nest.allocator = temp; slpx.merged_loop_btcs.allocator = temp;
     slpx.extra_bitwidth_nodes.allocator = temp; slpx.known_non_vectorizable_loads.allocator = temp;
     slpx.batch_aa = aa_query_new(*slpx.aar);
+    slpx.entry_to_last_instruction.allocator = temp;
     collect_ephemeral_values_fn(f, ac, *slpx.eph_values);
     slp_init_reg_sizes(slp_cl.max_reg_size_given, slp_cl.min_reg_size_given);
 }
@@ -205,13 +209,12 @@ tti_store_minimum_vf :: (t: *Tti, vf_in: u64, mem_ty: Type_Id, val_ty: Type_Id) 
 
 // ---------------------------------------------------------------- the frontier (not ported yet)
 
-slp_is_profitable_to_reorder :: () -> bool { slp_fail("isProfitableToReorder"); return false; }
-slp_reorder_top_to_bottom :: () { slp_fail("reorderTopToBottom"); }
-slp_reorder_bottom_to_top :: (ignore_reorder := false) { slp_fail("reorderBottomToTop"); }
 slp_transform_nodes :: () { slp_fail("transformNodes"); }
 slp_compute_minimum_value_sizes :: () { slp_fail("computeMinimumValueSizes"); }
 slp_clear_analyzed_min_bw_vals :: () {}
-slp_delete_tree_later_state :: () {}   // MinBWs, ExternalUses, EntryToLastInstruction, ... (not ported yet)
+slp_delete_tree_later_state :: () {   // the deleteTree members of later stages
+    table_reset(*slpx.entry_to_last_instruction);
+}
 slp_calculate_tree_cost_and_trim_non_profitable :: () -> Cost { slp_fail("calculateTreeCostAndTrimNonProfitable"); return 0; }
 slp_build_external_uses :: () { slp_fail("buildExternalUses"); }
 slp_get_tree_cost :: (tree_cost: Cost) -> Cost { slp_fail("getTreeCost"); return 0; }
