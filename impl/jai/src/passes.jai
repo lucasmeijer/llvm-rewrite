@@ -1160,6 +1160,9 @@ opt_main :: () {
         a := args[i];
         i += 1;
         if a == "-S" continue;
+        // -f (write binary output to a terminal) and -emulated-tls (a TargetOptions flag of the code generator) do
+        // not change what opt's IR passes do
+        if a == "-f" || a == "--f" || a == "-emulated-tls" || a == "--emulated-tls" continue;
         if a == "-o" { if i >= args.count fatal("-o needs a file"); output = args[i]; i += 1; continue; }
         // cl::list / value-required options also take their value from the next argument
         if a == "-disable-builtin" || a == "--disable-builtin" || a == "-enable-builtin" || a == "--enable-builtin" ||

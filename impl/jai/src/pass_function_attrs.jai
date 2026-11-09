@@ -1368,6 +1368,7 @@ fn_has_address_taken :: (f: Value_Id) -> bool {
     while u != NONE {
         defer u = ir.u_next[u];
         usr := ir.u_user[u];
+        if vkind(usr) == .C_BLOCKADDR continue;   // a blockaddress has no operands in LLVM 23: not a use of its function
         if !(is_inst(usr) && is_call_base(usr)) {
             o := opr_code(usr);
             if o == .BITCAST || o == .ADDRSPACECAST {

@@ -50,7 +50,7 @@ cm_replace :: (old: Value_Id, new: Value_Id) {
     mds: [..] Md_Id; mds.allocator = temp;
     gv_get_debug_info(old, *mds);
     for mds gv_add_debug_info(new, it);
-    replace_all_uses_with(old, new);
+    ipo_rauw(old, new);
     assert(gv_has_local_linkage(old));
     gv_erase_from_parent(old);
 }

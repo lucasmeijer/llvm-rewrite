@@ -193,9 +193,23 @@ fn_delete_body :: (f: Value_Id) {
 
 // GlobalValue::eraseFromParent for any global (a function's body is dropped first, metadata uses become null)
 gv_erase_from_parent :: (g: Value_Id) {
+    md_as_value_deleted(g, false);
     if vkind(g) == .FUNCTION { erase_function(g); return; }
     md_global_value_deleted(g);
     erase_global(g);
+}
+// ValueAsMetadata::handleDeletion / SalvageDebugInfo for MetadataAsValue owners: `metadata ptr @g` operands of calls
+// become `metadata !{}` (deletion: canonicalizeMetadataForValue(nullptr)) or `metadata ptr poison` (salvage)
+md_as_value_deleted :: (g: Value_Id, salvage: bool) {
+    k := *md_key; key_reset(k); key_u8(k, 1); key_u32(k, g);
+    found, m := table_find(*ir.md_map, key_view(k));
+    if !found return;
+    repl: Md_Id = NONE;
+    for kind, v: ir.v_kind {
+        if kind != .MD_VALUE || ir.v_aux[v] != m continue;
+        if repl == NONE repl = ifx salvage then md_value(const_poison(vtype(g))) else md_tuple(.[], false);
+        ir.v_aux[v] = repl;
+    }
 }
 
 // Constant::destroyConstant: constant users are destroyed first (they must all be constants)
@@ -369,6 +383,130 @@ remove_global_ctors :: (gcl: Value_Id, to_remove: [] bool) {
     ngv := gv_create_detached(vtype(ca), glob(gcl).is_const, glob(gcl).linkage, ca, glob(gcl).tls, glob(gcl).addrspace);
     gv_insert_before(ngv, gcl, "");
     gv_take_name(ngv, gcl);
-    if has_uses(gcl) replace_all_uses_with(gcl, ngv);
+    if has_uses(gcl) ipo_rauw(gcl, ngv);
     gv_erase_from_parent(gcl);
+}
+
+// ---------------------------------------------------------------- GlobalStatus.cpp
+
+Gs_Stored :: enum u8 { NOT_STORED; INITIALIZER_STORED; STORED_ONCE; STORED; }
+Global_Status :: struct {
+    is_compared: bool;
+    is_loaded: bool;
+    num_stores: u32;
+    stored_type: Gs_Stored;
+    stored_once_store: Value_Id = NONE;
+    accessing_function: Value_Id = NONE;
+    has_multiple_accessing_functions: bool;
+    ordering: u8;   // AtomicOrdering (0 = NotAtomic)
+}
+gs_stored_once_value :: (gs: *Global_Status) -> Value_Id {
+    if gs.stored_type == .STORED_ONCE && gs.stored_once_store != NONE return op(gs.stored_once_store, 0);
+    return NONE;
+}
+// strongerOrdering (AtomicOrdering: 0 NotAtomic, 1 Unordered, 2 Monotonic, 4 Acquire, 5 Release, 6 AcqRel, 7 SeqCst)
+gs_stronger_ordering :: (x: u8, y: u8) -> u8 {
+    if (x == 4 && y == 5) || (y == 4 && x == 5) return 6;
+    return max(x, y);
+}
+
+// GlobalStatus::analyzeGlobal: true = the global's address escapes (give up)
+analyze_global :: (v: Value_Id, gs: *Global_Status) -> bool {
+    visited: Table(Value_Id, bool); visited.allocator = temp;
+    return analyze_global_aux(v, gs, *visited);
+}
+analyze_global_aux :: (v: Value_Id, gs: *Global_Status, visited: *Table(Value_Id, bool)) -> bool {
+    if vkind(v) == .GLOBAL_VAR && glob(v).ext_init gs.stored_type = .STORED_ONCE;
+    u := ir.v_first_use[v];
+    while u != NONE {
+        defer u = ir.u_next[u];
+        ur := ir.u_user[u];
+        k := vkind(ur);
+        if k == .C_BLOCKADDR continue;   // not a user of its function in LLVM 23
+        if is_constant_kind(k) {
+            if k == .C_EXPR && is_ptr_type(vtype(ur)) {
+                if analyze_global_aux(ur, gs, visited) return true;
+            } else {
+                if !is_safe_to_destroy_constant(ur) return true;
+            }
+        } else if k == .INST {
+            if !gs.has_multiple_accessing_functions {
+                f := inst_fn(ur);
+                if gs.accessing_function == NONE gs.accessing_function = f;
+                else if gs.accessing_function != f gs.has_multiple_accessing_functions = true;
+            }
+            o := inst_op(ur);
+            if o == .LOAD {
+                gs.is_loaded = true;
+                if (inst(ur).flags & F_VOLATILE) != 0 return true;
+                gs.ordering = gs_stronger_ordering(gs.ordering, inst(ur).ord1);
+            } else if o == .STORE {
+                if op(ur, 0) == v return true;
+                if (inst(ur).flags & F_VOLATILE) != 0 return true;
+                gs.num_stores += 1;
+                gs.ordering = gs_stronger_ordering(gs.ordering, inst(ur).ord1);
+                if gs.stored_type != .STORED {
+                    ptr := strip_pointer_casts(op(ur, 1));
+                    if vkind(ptr) == .GLOBAL_VAR {
+                        sv := op(ur, 0);
+                        if is_const(sv) && const_is_thread_dependent(sv) return true;
+                        if glob(ptr).has_init && sv == gv_initializer(ptr) {
+                            if gs.stored_type < .INITIALIZER_STORED gs.stored_type = .INITIALIZER_STORED;
+                        } else if is_inst(sv) && inst_op(sv) == .LOAD && op(sv, 0) == ptr {
+                            if gs.stored_type < .INITIALIZER_STORED gs.stored_type = .INITIALIZER_STORED;
+                        } else if gs.stored_type < .STORED_ONCE {
+                            gs.stored_type = .STORED_ONCE;
+                            gs.stored_once_store = ur;
+                        } else if gs.stored_type == .STORED_ONCE && gs_stored_once_value(gs) == sv {
+                            // noop
+                        } else {
+                            gs.stored_type = .STORED;
+                        }
+                    } else {
+                        gs.stored_type = .STORED;
+                    }
+                }
+            } else if o == .GEP || o == .ADDRSPACECAST {
+                if analyze_global_aux(ur, gs, visited) return true;
+            } else if o == .SELECT || o == .PHI {
+                if !table_contains(visited, ur) {
+                    table_add(visited, ur, true);
+                    if analyze_global_aux(ur, gs, visited) return true;
+                }
+            } else if o == .ICMP || o == .FCMP {
+                gs.is_compared = true;
+            } else if o == .CALL && is_mem_transfer_inst(ur) {
+                if mi_is_volatile(ur) return true;
+                if call_arg(ur, 0) == v gs.stored_type = .STORED;
+                if call_arg(ur, 1) == v gs.is_loaded = true;
+            } else if o == .CALL && is_mem_set_inst(ur) {
+                if mi_is_volatile(ur) return true;
+                gs.stored_type = .STORED;
+            } else if o == .CALL || o == .INVOKE || o == .CALLBR {
+                if call_iid(ur) == IID_THREADLOCAL_ADDRESS {
+                    if analyze_global_aux(ur, gs, visited) return true;
+                } else {
+                    if opno_of(u) != nops(ur) - 1 return true;   // !CB->isCallee(&U)
+                    gs.is_loaded = true;
+                }
+            } else {
+                return true;
+            }
+        } else {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Value::replaceAllUsesWith including the metadata half (ValueAsMetadata::handleRAUW): a constant replaced by a
+// function-local value drops its metadata uses (ConstantAsMetadata -> null), everything else follows the value
+ipo_rauw :: (old: Value_Id, new: Value_Id) {
+    if is_constant_kind(vkind(old)) && !is_constant_kind(vkind(new)) {
+        replace_all_uses_with(old, new);
+        md_as_value_deleted(old, false);
+        md_global_value_deleted(old);
+        return;
+    }
+    rauw_with_metadata(old, new);
 }

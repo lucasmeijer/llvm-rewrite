@@ -166,6 +166,7 @@
 #load "pass_strip_dead_prototypes.jai";
 #load "pass_elim_avail_extern.jai";
 #load "pass_internalize.jai";
+#load "evaluator.jai";
 #load "pass_global_opt.jai";
 #load "pass_dead_arg_elim.jai";
 #load "pass_assign_guid.jai";
