@@ -1023,6 +1023,17 @@ fn x86_intrinsic_cost(id: i32, rt: i32, args: const i32[:], fmf: u8, kind: i64, 
     // BasicTTIImplBase::getIntrinsicInstrCost
     if base == 0 { return 0; }
     if id > IID_xray_typedevent { return 1; }
+    if (id == IID_fptosi_sat || id == IID_fptoui_sat) && !ty_is_vector(rt) && ty_is_int(rt) {
+        // getTypeBasedIntrinsicInstrCost: ISD::FP_TO_[SU]INT_SAT on the legalized return type, whose action
+        // (X86ISelLowering) is Custom for i8/i16/i32 (and i64 in 64-bit mode) with SSE2, Legal for i32/i64 with
+        // AVX10.2: Legal costs LT.first (2 * LT.first when split), Custom 2 * LT.first
+        let ltc, lt = x86_legalize(rt);
+        let lb = mvt_scalar_bits(lt);
+        if !mvt_is_vec(lt) && xe_is_int(mvt_elt(lt)) && x86_sse2() && (lb == 8 || lb == 16 || lb == 32 || (lb == 64 && x86_is64)) {
+            if x86_has(X86F_FeatureAVX10_2) && (lb == 32 || lb == 64) { return if ltc > 1 { ltc * 2 } else { ltc }; }
+            return ltc * 2;
+        }
+    }
     x86_np(str("getIntrinsicInstrCost fallback (BasicTTIImplBase) for intrinsic ", id as i64));
     return 0;
 }

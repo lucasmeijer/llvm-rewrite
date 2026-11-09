@@ -1079,3 +1079,27 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   tti_int_imm_cost_inst (NoTTIImpl only; X86's fails loudly) are new.
 - Not ported (fail loudly): `-replexitval=unusedindvarinloop` (InductionDescriptor), SCEVExpander predicate checks
   and post-increment expansion (LSR / vectorizer runtime checks).
+
+## AggressiveInstCombine (aggressive_instcombine.goose, aic_trunc.goose)
+
+- L1.aggressive-instcombine 43/44. Left: X86/fptosisat.ll needs RecipThroughput costs the X86 TTI doesn't have
+  yet: fptosi of half (getCastInstrCost through promoted types) and vector fptosi.sat (BasicTTIImpl's
+  minnum/maxnum/fcmp/select expansion with scalarization). The scalar fptosi.sat cost (Custom: 2 * LT.first) is
+  in tti_x86.goose; the other functions of that test pass.
+- aic_trunc.goose also holds the IRBuilder<> with ConstantFolder semantics (`ab_*`: FoldBinOp/FoldCast/FoldCmp/
+  FoldSelect, CreateIntrinsic never folds, the insert point's debug location, the iterator head bit) for passes
+  that use a plain IRBuilder; ic_builder.goose is the TargetFolder one.
+- TTI is created lazily (`ai_tti()` before the first query): only a real query reaches x86_subtarget_init and its
+  unsupported CPUs, as LICM does. haveFastSqrt and allowsMisalignedMemoryAccesses (X86TargetLowering: any
+  misaligned access allowed; 128/256-bit "fast" unless slow-unaligned-mem-16/32) are local to the pass.
+- The final cleanup is SimplifyInstructionsInBlock with TLI = nullptr (`local_have_tli = false`, `sq_no_tli`):
+  dead libm calls are kept and not folded (knowledge/llvm/aggressive-instcombine.md).
+- Shared fixes: Value::getPointerDereferenceableBytes for calls (return attributes of the call and the callee),
+  loads and inttoptr (!dereferenceable / !dereferenceable_or_null) in instsimplify.goose `pointer_deref_bytes`
+  (was a loud gap; the strncmp inliner asks it).
+- Sweeps (`aggressive-instcombine` whole-file, `--per-function`, `--with-test-flags`, with
+  `-mtriple=x86_64-unknown-linux-gnu` (whole-file and per function), `debugify,aggressive-instcombine`): 0 differs,
+  0 bad-ir; loud: separate_storage assumptions (BasicAA), and(ptrtoint(@g), C) folding, ppc_fp128, the fptosi.sat
+  costs above.
+- Speed: within the noise of a loaded machine on sqlite3/SPASS/lua and every scaling shape (`sroa,
+  aggressive-instcombine` vs `sroa`: +0.00..0.07 s; LLVM +0.00..0.12 s).

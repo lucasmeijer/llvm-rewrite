@@ -82,6 +82,7 @@ let KNOWN_FLAGS: const u8[:][] = [
     "constraint-elimination-max-rows",                   // constraint-elimination
     "loop-deletion-enable-symbolic-execution",           // loop-deletion
     "enable-loop-simplifycfg-term-folding",              // loop-simplifycfg
+    "aggressive-instcombine-max-scan-instrs", "strncmp-inline-threshold", "memchr-inline-threshold",   // aggressive-instcombine
     "run-twice",                                         // no-op: optdriver.cpp only reads it on the legacy-PM path
     "goose-ic-lenient",
     "goose-scev-trace",                                  // development only: ScalarEvolution value map events                                  // development only: unported InstCombine visitors do nothing

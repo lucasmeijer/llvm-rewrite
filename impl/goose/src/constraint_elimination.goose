@@ -265,7 +265,7 @@ fn ct_empty() -> CT { CT { cb: ce_coef.len, cn: 0, pb: ce_pre.len, pn: 0, signed
 fn ct_release(c: CT) { ce_coef.resize(c.cb); ce_pre.resize(c.pb); }
 
 // isa<ConstantInt>
-fn ce_isa_cint(v: i32) -> bool { vals[v].kind == VK_CINT && !ty_is_vector(vals[v].ty) }
+fn ce_isa_cint(v: i32) -> bool { vals[v].kind == VK_CINT }   // also a vector-typed splat ConstantInt
 // canUseSExt
 fn ce_can_use_sext(ci: i32) -> bool {
     let a = ci_ap(ci);

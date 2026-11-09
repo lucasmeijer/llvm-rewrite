@@ -27,3 +27,12 @@ Facts about `Transforms/AggressiveInstCombine/*.cpp` (LLVM 23.1.5), verified by 
   could expose that, and such parts never merge.
 - `m_ShlOrSelf`/`m_LShrOrSelf` (ShiftLike_match) do not fall back to "self" when the value *is* a shift of the
   opcode with a non-constant amount: the match fails.
+- Matchers: `m_Add`/`m_Or`/`m_Mul`/`m_LShr`/... (BinaryOp_match) and the cast matchers match **instructions only** in
+  LLVM 23 (PatternMatch.h `BinaryOp_match::match`: `V->getValueID() == Value::InstructionVal + Opc`), so constant
+  expressions never take part in these folds; `m_ShlOrSelf`'s amount is `m_ConstantInt(uint64_t&)`, which accepts
+  a non-poison splat (`ap_match`) of a value that fits in 64 bits. Verified with the Goose port (0 differs over the
+  corpus, also per function and with `-mtriple=x86_64-unknown-linux-gnu`).
+- tryToFPToSat's `getIntrinsicInstrCost(fptosi.sat)` on x86 has no cost-table entry: BasicTTIImpl's type-based path
+  sets ISD::FP_TO_SINT_SAT, and X86ISelLowering marks it Custom for i8/i16/i32 (and i64 in 64-bit mode) with SSE2
+  (Legal for i32/i64 with AVX10.2), so a scalar costs 2 * LT.first; vector types fall through to the
+  minnum/maxnum/fptosi/fcmp/select expansion (X86/fptosisat.ll).

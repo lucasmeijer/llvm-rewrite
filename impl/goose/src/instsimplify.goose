@@ -1457,9 +1457,36 @@ fn pointer_deref_bytes(v: i32) -> u64, bool {
         return 0, false;
     }
     if is_callbase(v) {
-        is_not_ported("dereferenceable bytes of calls");
+        // CallBase::getRetDereferenceableBytes / getRetDereferenceableOrNullBytes
+        fn ret_int(kind: i64) -> u64 {
+            var b: u64 = 0;
+            let a = aset_find(alist_ret(insts[inst_of(v)].attrs), kind);
+            if a >= 0 { b = attrs[a].i1; }
+            let f = called_function(v);
+            if f >= 0 {
+                let fa = aset_find(alist_ret(globs[glob_of(f)].attrs), kind);
+                if fa >= 0 && attrs[fa].i1 > b { b = attrs[fa].i1; }
+            }
+            return b;
+        }
+        let b = ret_int(AK_Dereferenceable);
+        if b != 0 { return b, false; }
+        return ret_int(AK_DereferenceableOrNull), true;
     }
-    if is_inst_op(v, OP_LOAD) { is_not_ported("dereferenceable bytes of loads"); }
+    if is_inst_op(v, OP_LOAD) || is_inst_op(v, OP_INTTOPTR) {
+        // !dereferenceable / !dereferenceable_or_null (getLimitedValue)
+        fn md_bytes(kind: i32) -> u64 {
+            let m = inst_get_md(v, kind);
+            if m < 0 { return 0; }
+            let o = md_op(m, 0);
+            if o < 0 || mds[o].kind != MK_VALUE { return 0; }
+            let c = mds[o].extra;
+            return ap_limited(ci_ap(c), 0xFFFFFFFFFFFFFFFF);
+        }
+        let b = md_bytes(md_kind_id("dereferenceable"));
+        if b != 0 { return b, false; }
+        return md_bytes(md_kind_id("dereferenceable_or_null")), true;
+    }
     return 0, false;
 }
 fn gv_has_external_weak(v: i32) -> bool { globs[glob_of(v)].linkage as i64 == LK_EXTERN_WEAK }
