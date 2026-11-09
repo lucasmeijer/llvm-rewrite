@@ -17,7 +17,27 @@ Slp_Extra :: struct {
     instr_element_size: Table(Value_Id, u64);
     analyzed_reduction_vals: [..] string;      // DenseSet<hash_code(VL)>: the joined value ids
     non_scheduled_first: Table(Value_Id, bool);
-    base_graph_size: u32;
+    base_graph_size: u32 = 1;
+    // buildTree state (slp_build_tree.jai, slp_sched.jai)
+    block_schedules: [..] *Block_Sched;           // MapVector<BasicBlock *, BlockScheduling>
+    cur_bundle_sched: *Block_Sched;
+    alias_cache: Table(u64, bool);
+    batch_aa: *Aa_Query;
+    operands_to_tree_entry: Table(u64, Te_Id);    // (user entry, edge) -> entry
+    scalars_in_split_nodes: Table(Value_Id, [..] Te_Id);
+    value_to_gather_nodes: Table(Value_Id, [..] Te_Id);
+    load_entries_to_vectorize: [..] u32;
+    is_graph_transform_mode: bool;
+    gathered_loads_first: s64 = -1;
+    current_loop_nest: [..] Loop_Id;
+    merged_loop_btcs: [..] Scev_Id;
+    has_cast_max_min_bw: bool;
+    cast_max_bw: u64;
+    cast_min_bw: u64;
+    extra_bitwidth_nodes: [..] Te_Id;
+    known_non_vectorizable_loads: [..] string;
+    has_user_ignore_list: bool;
+    user_ignore_list: [] Value_Id;
 }
 slpx: Slp_Extra;
 
@@ -38,6 +58,12 @@ slp_init :: (f: Value_Id, tti: *Tti, aar: Aa_Results, li: *Loop_Info, dt: *Dom_T
     slpx.instr_element_size.allocator = temp;
     slpx.analyzed_reduction_vals.allocator = temp;
     slpx.non_scheduled_first.allocator = temp;
+    slpx.block_schedules.allocator = temp; slpx.alias_cache.allocator = temp;
+    slpx.operands_to_tree_entry.allocator = temp; slpx.scalars_in_split_nodes.allocator = temp;
+    slpx.value_to_gather_nodes.allocator = temp; slpx.load_entries_to_vectorize.allocator = temp;
+    slpx.current_loop_nest.allocator = temp; slpx.merged_loop_btcs.allocator = temp;
+    slpx.extra_bitwidth_nodes.allocator = temp; slpx.known_non_vectorizable_loads.allocator = temp;
+    slpx.batch_aa = aa_query_new(*slpx.aar);
     collect_ephemeral_values_fn(f, ac, *slpx.eph_values);
     slp_init_reg_sizes(slp_cl.max_reg_size_given, slp_cl.min_reg_size_given);
 }
@@ -179,17 +205,15 @@ tti_store_minimum_vf :: (t: *Tti, vf_in: u64, mem_ty: Type_Id, val_ty: Type_Id) 
 
 // ---------------------------------------------------------------- the frontier (not ported yet)
 
-slp_build_tree :: (roots: [] Value_Id, ignore_list: [] Value_Id = .[]) { slp_fail("BoUpSLP::buildTree"); }
-slp_is_tree_tiny_and_not_fully_vectorizable :: (for_reduction := false) -> bool { slp_fail("isTreeTinyAndNotFullyVectorizable"); return true; }
 slp_is_profitable_to_reorder :: () -> bool { slp_fail("isProfitableToReorder"); return false; }
 slp_reorder_top_to_bottom :: () { slp_fail("reorderTopToBottom"); }
 slp_reorder_bottom_to_top :: (ignore_reorder := false) { slp_fail("reorderBottomToTop"); }
 slp_transform_nodes :: () { slp_fail("transformNodes"); }
 slp_compute_minimum_value_sizes :: () { slp_fail("computeMinimumValueSizes"); }
 slp_clear_analyzed_min_bw_vals :: () {}
+slp_delete_tree_later_state :: () {}   // MinBWs, ExternalUses, EntryToLastInstruction, ... (not ported yet)
 slp_calculate_tree_cost_and_trim_non_profitable :: () -> Cost { slp_fail("calculateTreeCostAndTrimNonProfitable"); return 0; }
 slp_build_external_uses :: () { slp_fail("buildExternalUses"); }
 slp_get_tree_cost :: (tree_cost: Cost) -> Cost { slp_fail("getTreeCost"); return 0; }
 slp_vectorize_tree :: () { slp_fail("vectorizeTree"); }
 slp_optimize_gather_sequence :: () { slp_fail("optimizeGatherSequence"); }
-slp_can_build_split_node :: (vl: [] Value_Id, s: Inst_State) -> bool { slp_fail("canBuildSplitNode"); return false; }

@@ -10092,6 +10092,7 @@ tests/imported/llvm/Transforms/LoopVectorize/X86/pr72969.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr81872.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/propagate-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/ptr-indvar-crash.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/X86/rauw-bug.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/rauw-bug.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/reduction-fastmath.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/register-assumption.ll::roundtrip
@@ -11206,6 +11207,7 @@ tests/imported/llvm/Transforms/SCCP/with.overflow.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/InstructionsState-is-invalid-2.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/InstructionsState-is-invalid-2.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/BinOpSameOpcodeHelper.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/InstructionsState-is-invalid-1.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/InstructionsState-is-invalid-1.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR32086.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR34635.ll::roundtrip
@@ -11271,6 +11273,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/associate-copyable-non-copyable
 tests/imported/llvm/Transforms/SLPVectorizer/X86/atomics.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/atomics.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/bad-reduction.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/bad_types.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/bad_types.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/barriercall.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/bitreverse.ll::roundtrip
@@ -11358,6 +11361,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_scheduling-inseltpoison.l
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_scheduling.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_sim4b1.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_smallpt.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_undef_mask_elem.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_undef_mask_elem.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_vectorizeTree.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/cross_block_slp.ll::roundtrip
@@ -11558,6 +11562,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/non-scheduled-inst-reused-as-la
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-vectorizable-inst-operand.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/num-uses-for-copyable-elements.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/odd_store.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/opaque-ptr-2.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/opaque-ptr-2.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/opaque-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/operand-reorder-with-copyables.ll::roundtrip
@@ -11575,6 +11580,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/parent-phi-node-reordered.ll::r
 tests/imported/llvm/Transforms/SLPVectorizer/X86/partail.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/perfect-matched-reused-bv.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/phi-comparator-fix-vec-ops-compare.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/phi-comparator.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/phi-comparator.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/phi-multi-same-nodes.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/phi-node-bitwidt-op-not.ll::roundtrip
@@ -11588,6 +11594,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/phi-reordered-reshuffled.ll::ro
 tests/imported/llvm/Transforms/SLPVectorizer/X86/phi-vectorization-budget.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/phi3.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/phi_landingpad.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/poison-element-shuffle.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/poison-element-shuffle.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/poison-within-divisions.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/poor-throughput-seeds.ll::roundtrip
@@ -11596,6 +11603,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/powi-regression.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/powi.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/powof2div.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/powof2mul.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/pr16628.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr16628.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr176906.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr19657.ll::roundtrip
@@ -11629,6 +11637,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/recalc-copyable-operand-deps-sh
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduce-constants.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduce-with-folded-to-consts.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduced-bswap-with-larger-reduced-type.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/reduced-ordered-values-update.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduced-ordered-values-update.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduced-val-extracted-and-externally-used.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduced-val-vectorized-in-transform.ll::roundtrip
@@ -11691,6 +11700,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/revec-reduced-value-replace-ext
 tests/imported/llvm/Transforms/SLPVectorizer/X86/revec-reduced-value-vectorized-later.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/revec-scalar-insertelement.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/revec-split-entry.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/revectorize-phis.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/revectorize-phis.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reverse_extract_elements.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/root-gather-reused-scalar.ll::roundtrip
@@ -11771,6 +11781,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/store-load-forward-conflict.ll:
 tests/imported/llvm/Transforms/SLPVectorizer/X86/stores_constant_float.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/stores_mix_sizes.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/stores_vectorize.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-different-bb.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-different-bb.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-extract-dominance.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-ordering-stress.ll::roundtrip
@@ -11800,6 +11811,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/vec_list_bias_external_insert_s
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vect-gather-same-nodes.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vect_copyable_in_binops.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vector-like-instr-does-not-dominate.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/vector.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vector.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vector_gep.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vector_gep.ll::roundtrip
@@ -11816,6 +11828,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/zext.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/abs-overflow-incorrect-minbws.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/alt-cmp-vectorize.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/alternate-non-profitable.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/bbi-106161.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/bbi-106161.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/big-number-reduced-values.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/boolean-op-with-poisons.ll::roundtrip
@@ -11834,14 +11847,17 @@ tests/imported/llvm/Transforms/SLPVectorizer/isCommutative.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/isOpcodeOrAlt.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/is_fpclass.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/last-buildvector-node.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/loads-with-large-distance.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/loads-with-large-distance.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/logical-ops-poisonous-repeated.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/non-power-of-2-bswap.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/non-power-of-2-buildvector.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/non-vect-loads.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/order-reduction-infinite-loop.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/order-reduction-infinite-loop.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/orig-btiwidth-les-projected.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/partial-register-extract.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/phi-not-ordered.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/phi-not-ordered.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/rdar128092379.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/reduction-root-node-with-no-state-but-gathered-loads.ll::roundtrip
@@ -11859,6 +11875,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/slp-max-phi-size.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/slp-max-reg-size.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/slp-non-pow-2-insertelement.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/slp-umax-rdx-matcher-crash.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/slp-variable-insertelement.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/slp-variable-insertelement.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/struct-return-revec.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/test_intermediate_dual_use.ll::roundtrip

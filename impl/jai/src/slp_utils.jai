@@ -39,6 +39,7 @@ slp_cl: struct {
     max_reg_size_given: bool;             // getNumOccurrences() of -slp-max-reg-size / -slp-min-reg-size / -slp-max-vf
     min_reg_size_given: bool;
     max_vf_given: bool;
+    threshold_given: bool;              // SLPCostThreshold.getNumOccurrences() > 0
 };
 
 slp_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
@@ -56,7 +57,7 @@ slp_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
     if name == {
         case "vectorize-slp"; b(*slp_cl.run, name, value, has_value);
         case "slp-revec"; b(*slp_cl.revec, name, value, has_value);
-        case "slp-threshold"; n(*slp_cl.threshold, name, value, has_value);
+        case "slp-threshold"; n(*slp_cl.threshold, name, value, has_value); slp_cl.threshold_given = true;
         case "slp-vectorize-hor"; b(*slp_cl.vectorize_hor, name, value, has_value);
         case "slp-vectorize-hor-store"; b(*slp_cl.vectorize_hor_store, name, value, has_value);
         case "slp-split-alternate-instructions"; b(*slp_cl.split_alternate, name, value, has_value);

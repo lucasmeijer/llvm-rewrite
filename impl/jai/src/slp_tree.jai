@@ -20,13 +20,13 @@ Edge_Info :: struct {
     edge: u32 = EDGE_NONE;
 }
 
-TE_VECTORIZE :: 0; TE_SCATTER_VECTORIZE :: 1; TE_STRIDED_VECTORIZE :: 2; TE_EXPAND_VECTORIZE :: 3;
-TE_COMPRESS_VECTORIZE :: 4; TE_NEED_TO_GATHER :: 5; TE_COMBINED_VECTORIZE :: 6; TE_SPLIT_VECTORIZE :: 7;
+TE_VECTORIZE : s32 : 0; TE_SCATTER_VECTORIZE : s32 : 1; TE_STRIDED_VECTORIZE : s32 : 2; TE_EXPAND_VECTORIZE : s32 : 3;
+TE_COMPRESS_VECTORIZE : s32 : 4; TE_NEED_TO_GATHER : s32 : 5; TE_COMBINED_VECTORIZE : s32 : 6; TE_SPLIT_VECTORIZE : s32 : 7;
 
 // TreeEntry::CombinedOpcode (MinMax = Instruction::OtherOpsEnd + 1)
 TE_NOT_COMBINED :: -1;
-TE_MIN_MAX :: 70; TE_FMULADD :: 71; TE_REDUCED_BITCAST :: 72; TE_REDUCED_BITCAST_BSWAP :: 73;
-TE_REDUCED_BITCAST_LOADS :: 74; TE_REDUCED_BITCAST_BSWAP_LOADS :: 75; TE_REDUCED_CMP_BITCAST :: 76;
+TE_MIN_MAX : s32 : 70; TE_FMULADD : s32 : 71; TE_REDUCED_BITCAST : s32 : 72; TE_REDUCED_BITCAST_BSWAP : s32 : 73;
+TE_REDUCED_BITCAST_LOADS : s32 : 74; TE_REDUCED_BITCAST_BSWAP_LOADS : s32 : 75; TE_REDUCED_CMP_BITCAST : s32 : 76;
 
 Tree_Entry :: struct {
     scalars: [..] Value_Id;
@@ -87,8 +87,9 @@ slp_is_vectorized :: (v: Value_Id) -> bool {
 // isDeleted(I)
 slp_is_deleted :: (i: Value_Id) -> bool { return table_contains(*slp.deleted_instructions, i); }
 // areAllUsersVectorized(I, VectorizedVals = nullptr)
-slp_are_all_users_vectorized :: (i: Value_Id) -> bool {
-    if has_one_use(i) return true;
+// with_ignore: VectorizedVals = UserIgnoreList (users in the reduction's ignore list count as vectorized)
+slp_are_all_users_vectorized :: (i: Value_Id, with_ignore := false) -> bool {
+    if has_one_use(i) && (!(with_ignore && slpx.has_user_ignore_list) || slp_in_user_ignore_list(i)) return true;
     u := ir.v_first_use[i];
     while u != NONE {
         usr := ir.u_user[u];

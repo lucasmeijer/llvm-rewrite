@@ -693,7 +693,7 @@ hr_try_to_reduce :: (h: *Hr_Reduction) -> Value_Id {
             for vl if is_inst(it) && slp_is_deleted(it) { any_del = true; break; }
             if any_del break;
             if h.rk == HR_ORDERED slp_build_tree(vl);
-            else slp_build_tree(vl, ignore_list);
+            else slp_build_tree_with_ignore(vl, ignore_list);
             if slp_is_tree_tiny_and_not_fully_vectorizable(h.rk == HR_UNORDERED) {
                 CANDIDATES_LIMIT :: 64;
                 if !adjust(h, h.rk == HR_ORDERED && candidates.count >= CANDIDATES_LIMIT, ignore_list, *check_local, prev_redux, *redux, *pos, start, num_reduced, sty)
@@ -727,7 +727,7 @@ hr_try_to_reduce_ordered :: (h: *Hr_Reduction) -> Value_Id {
         vl := array_view(candidates, cast(s64) start, cast(s64) width);
         if slp_are_analyzed_reduction_vals(vl) return false;
         for vl if is_inst(it) && slp_is_deleted(it) return false;
-        slp_build_tree(vl, ignore_list);
+        slp_build_tree_with_ignore(vl, ignore_list);
         if slp_is_tree_tiny_and_not_fully_vectorizable(true) { slp_analyzed_reduction_vals(vl); return false; }
         slp_fail("cost modelling of an ordered horizontal reduction");
         return false;
