@@ -308,7 +308,7 @@ Pass_Kind :: enum u8 {
     // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
     ANNOTATION2METADATA; ANNOTATION_REMARKS; FORCEATTRS; MEMPROF_REMOVE_INFO; RECOMPUTE_GLOBALSAA; LOWER_COMMENT_STRING;
-    INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING;
+    INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING; DROP_UNNECESSARY_ASSUMES;
 }
 
 Pass_Info :: struct {
@@ -482,6 +482,7 @@ PASS_TABLE :: Pass_Info.[
     .{"alloc-token", .MODULE, .ALLOC_TOKEN, true, .DOMTREE},
     .{"loop-sink", .FUNCTION, .LOOP_SINK, false, .DOMTREE},
     .{"transform-warning", .FUNCTION, .TRANSFORM_WARNING, false, .DOMTREE},
+    .{"drop-unnecessary-assumes", .FUNCTION, .DROP_UNNECESSARY_ASSUMES, false, .DOMTREE},   // also <drop-deref>
     .{"ee-instrument", .FUNCTION, .EE_INSTRUMENT, true, .DOMTREE},   // also ee-instrument<...>
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
@@ -516,6 +517,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "speculative-execution<") && name[name.count - 1] == #char ">" return lookup_pass("speculative-execution");
     if name == "coro-split<reuse-storage>" || name == "coro-split<>" return lookup_pass("coro-split");
     if name == "cg-profile<in-lto-post-link>" || name == "cg-profile<>" return lookup_pass("cg-profile");
+    if begins_with(name, "drop-unnecessary-assumes<") && name[name.count - 1] == #char ">" return lookup_pass("drop-unnecessary-assumes");
     if begins_with(name, "ee-instrument<") && name[name.count - 1] == #char ">" return lookup_pass("ee-instrument");
     return null;
 }
@@ -1200,6 +1202,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .EE_INSTRUMENT; return ee_instrument_run(f, node.name);
         case .LOOP_SINK; return loop_sink_run(f);
         case .TRANSFORM_WARNING; return transform_warning_run(f);
+        case .DROP_UNNECESSARY_ASSUMES; return drop_unnecessary_assumes_run(f, node.name);
         case .REASSOCIATE; return reassociate_run(f);
         case .CONSTRAINT_ELIMINATION; return constraint_elimination_run(f);
         case .AGGRESSIVE_INSTCOMBINE; return aggressive_instcombine_run(f);
