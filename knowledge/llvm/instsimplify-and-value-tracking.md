@@ -130,3 +130,10 @@ Verified against LLVM 23.1.5 source and the imported InstSimplify tests.
   when A is a power of two and `Off % A != 0` (constant A and Off; without an offset it is 0). `"nonnull"` and a
   non-zero constant `"dereferenceable"` (where null isn't defined) are the other cases
   (Analysis/ValueTracking/assume.ll `@align_with_non_zero_offset_is_nonnull`).
+
+- **`GEPOperator::accumulateConstantOffset` accepts scalable types as long as their indices are zero**
+  (Operator.cpp: a zero `ConstantInt` index is skipped before the `isScalableTy()` check, and the check is on
+  `GTI.getIndexedType()`, i.e. the vector's *element* type for the index into a scalable vector). So
+  `stripAndAccumulateConstantOffsets(gep <vscale x 4 x i32>, ptr %p, i64 0, i64 1)` is `%p` + 4, which lets DSE's
+  isOverwrite see it does not overlap a store to `%p` (verified with goose: `dse,print<memoryssa>` on
+  `Transforms/GVN/vscale.ll` prints `MemoryDef(1)->liveOnEntry` only with this).

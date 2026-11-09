@@ -113,7 +113,7 @@ lib/IR/EHPersonalities.cpp 0.6  # + colorEHFunclets (mustexec.goose)
 lib/Transforms/Utils/Debugify.cpp 0.45  # manual: synthetic mode whole (debugify, check-debugify, -enable-debugify); no original-debuginfo mode, -debugify-each, stats export
 lib/Target/X86/X86InstCombineIntrinsic.cpp 1  # manual: instCombineIntrinsic (ic_x86_intr.goose, simplifyTernarylogic generated) and the SimplifyDemanded hooks (ic_x86.goose)
 lib/Transforms/Utils/SimplifyLibCalls.cpp 0.97  # manual: all of LibCallSimplifier and FortifiedLibCallSimplifier (the fortified optimizers are one dispatch, fortified_optimize_call); left: shouldOptimizeForSize with a profile summary (-pgso), optimizeStringLength for index widths over 64 bits (heuristic 0.94)
-lib/Transforms/Utils/BuildLibCalls.cpp 0.9  # manual: inferNonMandatoryLibFuncAttrs whole (generated), getOrInsertLibFunc, isLibFuncEmittable, hasFloatFn/getFloatFn, emitLibCall and the emit* helpers LibCallSimplifier uses (hot/cold new variants in one emit_hot_cold_new); left: emitCalloc, emitWcsLen, setArgExtAttr/setRetExtAttr (non-x86 targets, loud), markRegisterParameterAttributes (loud) (heuristic 0.58)
+lib/Transforms/Utils/BuildLibCalls.cpp 0.9  # manual: inferNonMandatoryLibFuncAttrs whole (generated), getOrInsertLibFunc, isLibFuncEmittable, hasFloatFn/getFloatFn, emitLibCall and the emit* helpers LibCallSimplifier uses (hot/cold new variants in one emit_hot_cold_new); emitCalloc (dse.goose); left: emitWcsLen, setArgExtAttr/setRetExtAttr (non-x86 targets, loud), markRegisterParameterAttributes (loud) (heuristic 0.58)
 lib/Transforms/IPO/InferFunctionAttrs.cpp 1
 
 # --- L1.licm (2026-11)
@@ -134,3 +134,5 @@ lib/Analysis/CodeMetrics.cpp 0.5  # collectEphemeralValues(Loop), analyzeBasicBl
 lib/Transforms/Scalar/GVN.cpp 0.97  # manual: all but optimization remarks (never printed) and gc.relocate of landingpad tokens
 lib/Analysis/MemoryDependenceAnalysis.cpp 0.95  # manual: all of MemoryDependenceResults but verifyRemoved and the legacy wrapper pass
 lib/Transforms/Utils/VNCoercion.cpp 1
+lib/Transforms/Scalar/DeadStoreElimination.cpp 0.97  # manual: all but shortenAssignment's dbg_assign updates (loud) and the legacy pass
+lib/IR/ConstantRangeList.cpp 0.1  # intersectWith only (dse.goose)

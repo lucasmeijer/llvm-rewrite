@@ -822,3 +822,25 @@ What they were:
 Left in `debugify,instcombine`: frexp.ll `frexp_poison_scaleable_vector` (debugify names the variable type of a
 scalable struct `ty0`, we say `ty128`) and predicatedinst-loop-invariant.ll `loop_invariant_srem` (a loop phi's
 records end up `i8 0` instead of `poison`: InstCombine reaches the same IR through a different fold order).
+
+## DSE and MemCpyOpt (dse.goose, memintr.goose)
+
+- L1.dse COMPLETE (166/166). dse.goose ports DeadStoreElimination.cpp whole except shortenAssignment's dbg_assign
+  updates (fails loudly when the shortened intrinsic has a DIAssignID). DSEState is the `ds_*` globals; maps and
+  sets keyed by values/blocks are fields of a per-value record `ds_v` stamped with the run's epoch, sets keyed by
+  memory accesses fields of `ds_a`; each set gets a fresh stamp from `ds_tick`, so creating a set is O(1).
+  IOLs (MapVector of MapVector of std::map) are block list + per-block entry chain + sorted interval lists.
+- memintr.goose (shared with MemCpyOpt): the IntrinsicInst.h mem-intrinsic classes (`mi_*`), isBytewiseValue,
+  MemoryLocation::getForDest(CallBase, TLI) (`ml_for_dest_call`; memorybuiltins' `mb_memloc_for_dest` only returns
+  the pointer), BatchAA isMustAlias (`aa_is_must_alias_vals`: precise(1) locations, see knowledge).
+- Goose trap (again): `ds_v[ds_vr(x)]` where ds_vr grows ds_v reads the old length first ("index 34 out of bounds
+  (length 0)"); always bind the index to a local first.
+- opt now accepts `-data-layout <s>` (separate argument) and `-march=<x>` (ignored without a target triple, as
+  opt only reads it when it creates a TargetMachine; fails loudly with a triple).
+- Fixed in shared code: vt.goose gep_accumulate_constant_offset bailed on any GEP with a scalable source type;
+  LLVM (GEPOperator::accumulateConstantOffset) only bails on a *non-zero* index into a scalable indexed type, so
+  `gep <vscale x 4 x i32>, ptr %p, i64 0, i64 1` is %p + 4 (seen as a print<memoryssa> difference after DSE's
+  setOptimized on GVN/vscale.ll).
+- Sweeps (whole file and --per-function, every round-tripping file): `dse`, `dse -enable-knowledge-retention`,
+  `debugify,dse`, `dse,print<memoryssa>` --analysis: 0 differs, 0 bad-ir; loud: separate_storage assumptions,
+  APInt widths over 64 bits in BasicAA, ppc_fp128 literals.

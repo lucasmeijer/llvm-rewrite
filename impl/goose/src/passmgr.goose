@@ -48,6 +48,7 @@ import dbgutil;
 import lvi;
 import cvp;
 import gvn;
+import dse;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -95,6 +96,7 @@ let P_VERIFY_MEMORYSSA = 153;
 let P_SCCP = 160;
 let P_EARLY_CSE = 170;     // arg: 1 = memssa
 let P_GVN = 171;           // arg: gvn<...> options (gvn.goose gvn_opt)
+let P_DSE = 190;
 let P_PRINT_SCEV = 118;
 let P_PRINT_LVI = 180;
 let P_CVP = 181;
@@ -142,6 +144,7 @@ let PASS_TABLE: const u8[:][] = [
     "f:print<memoryssa-walker>:152:1",
     "f:verify<memoryssa>:153:1",
     "f:sccp:160:0",
+    "f:dse:190:0",
     "f:print<scalar-evolution>:118:1",
     "f:verify<scalar-evolution>:119:1",
     "f:print<lazy-value-info>:180:1",
@@ -173,6 +176,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_CVP => "CorrelatedValuePropagationPass",
         P_JUMP_THREADING => "JumpThreadingPass",
         P_GVN => "GVNPass",
+        P_DSE => "DSEPass",
         P_IPSCCP => "IPSCCPPass",
         P_DEBUGIFY => "NewPMDebugifyPass",
         P_CHECK_DEBUGIFY => "NewPMCheckDebugifyPass",
@@ -809,7 +813,7 @@ fn pass_creates_subtarget(n: i32) -> bool {
     return p == P_BDCE || p == P_MEM2REG || p == P_SROA || p == P_INSTSIMPLIFY || p == P_SIMPLIFYCFG ||
         p == P_INSTCOMBINE || p == P_PRINT_DEMANDED_BITS || p == P_LOOP_SIMPLIFY || p == P_AA_EVAL ||
         p == P_PRINT_MEMORYSSA || p == P_PRINT_MEMORYSSA_WALKER || p == P_VERIFY_MEMORYSSA || p == P_SCCP ||
-        p == P_EARLY_CSE || p == P_VERIFY_SCEV || p == P_CVP || p == P_JUMP_THREADING || p == P_GVN;
+        p == P_EARLY_CSE || p == P_VERIFY_SCEV || p == P_CVP || p == P_JUMP_THREADING || p == P_GVN || p == P_DSE;
 }
 
 fn run_function_pass(n: i32, fv: i32) -> u32 {
@@ -846,6 +850,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_SCCP => { return sccp_run(fv); },
         P_EARLY_CSE => { return early_cse_run(fv, pnodes[n].arg != 0); },
         P_GVN => { return gvn_run(fv, pnodes[n].arg); },
+        P_DSE => { return dse_run(fv); },
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
         P_PRINT_LVI => { lvi_print(fv); return PA_ALL; },
         P_CVP => { return cvp_run(fv); },

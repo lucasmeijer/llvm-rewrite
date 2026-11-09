@@ -19,6 +19,7 @@ fn main() {
     var emit_text = false;
     var disable_output = false;
     var layout_stats = false;
+    var march: u8[>..] = [];
     var i = 1;
     while i < av.len {
         var a = av[i];
@@ -39,6 +40,9 @@ fn main() {
             exit(1);
         }
         else if starts_with(a, "-data-layout=") { cl_datalayout.append(a[13..]); }
+        else if a == "-data-layout" { i++; if i < av.len { cl_datalayout.clear(); cl_datalayout.append(av[i]); } }
+        // codegen's -march: only read when opt creates a TargetMachine (the module triple names an architecture)
+        else if starts_with(a, "-march=") { march.clear(); march.append(a[7..]); }
         else if starts_with(a, "-mtriple=") { triple_normalize(a[9..], cl_mtriple); }
         else if a == "-mtriple" { i++; if i < av.len { triple_normalize(av[i], cl_mtriple); } }
         // TargetLibraryInfo options (optdriver.cpp): cl::list, "-x=v" or "-x v"
@@ -87,6 +91,12 @@ fn main() {
     if flag_bool("strip-debug", false) { strip_debug_info(); }
     // -mtriple overrides the module's triple (M->setTargetTriple(Triple::normalize(TargetTriple)))
     if cl_mtriple.len > 0 { modules[cur_module].triple = intern(cl_mtriple); }
+    if march.len > 0 && modules[cur_module].triple >= 0 {
+        let ts = sbytes(modules[cur_module].triple);
+        let e = find(ts, "-");
+        let arch = if e < 0 { ts } else { ts[..e] };
+        if arch.len > 0 && arch != "unknown" { write_stderr("opt: -march with a target triple is not supported yet\n"); exit(1); }
+    }
     set_function_attributes(cur_module);
     var tli_err: u8[>..] = [];
     tli_check_cl_builtins(tli_err);
