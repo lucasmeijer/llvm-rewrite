@@ -939,7 +939,7 @@ fn icc_flipped_strictness(p0: i64, c0: i32) -> bool, i64, i32 {
     let up = pred_unsigned(p);
     let inc = up == P_ULE || up == P_UGT;
     var safe: i32 = -1;
-    if vals[c].kind == VK_CINT && !ty_is_vector(ty) {
+    if vals[c].kind == VK_CINT {
         if !icc_const_ok(c, inc, signed) { return false, 0, -1; }
     } else if ty_kind(ty) == TK_FVEC {
         for k in ty_count(ty) {
@@ -1663,7 +1663,7 @@ fn fold_icmp_inst_with_constant(cmp: i32) -> i32 {
             let r = fold_icmp_binop_with_constant(cmp, o0, c);
             if r >= 0 { return r; }
         }
-        if is_select_inst(o0) && vals[o1].kind == VK_CINT && !ty_is_vector(vals[o1].ty) {
+        if is_select_inst(o0) && vals[o1].kind == VK_CINT {
             let r = fold_icmp_select_constant(cmp, o0, o1);
             if r >= 0 { return r; }
         }
@@ -3335,7 +3335,7 @@ fn process_umul_zext_idiom(i: i32, mv: i32, other: AP) -> i32 {
             } else if is_binop_inst(us) {
                 if iop(us) != OP_AND { return -1; }
                 let ci = op(us, 1);
-                if vals[ci].kind == VK_CINT && !ty_is_vector(vals[ci].ty) {
+                if vals[ci].kind == VK_CINT {
                     let cv = ci_ap(ci);
                     if (cv.w as i64) - ap_countl_zero(cv) > mw { return -1; }
                 } else { return -1; }

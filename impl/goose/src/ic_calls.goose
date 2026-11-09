@@ -1032,7 +1032,7 @@ fn fold_minimum_over_tz_lz_count(i0: i32, i1: i32, id: i64) -> i32 {
 }
 // m_CheckedInt(pred) with pred = C.ult(bw): ConstantInt, or a fixed vector constant whose elements all are
 fn icx_checked_int_ult(v: i32, bw: i64) -> bool {
-    if vals[v].kind == VK_CINT && !ty_is_vector(vals[v].ty) { return ap_ult_u64(ci_ap(v), bw as u64); }
+    if vals[v].kind == VK_CINT { return ap_ult_u64(ci_ap(v), bw as u64); }
     if !is_constant(v) || !ty_is_vector(vals[v].ty) { return false; }
     let s = splat_value(v, true);
     if s >= 0 { return vals[s].kind == VK_CINT && ap_ult_u64(ci_ap(s), bw as u64); }

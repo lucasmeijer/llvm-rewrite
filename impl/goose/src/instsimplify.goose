@@ -2477,7 +2477,7 @@ fn inverse_minmax_iid(id: i32) -> i32 {
 // Constant::isNotMinSignedValue
 recursive fn is_not_min_signed_value(c: i32) -> bool {
     let k = vals[c].kind;
-    if k == VK_CINT && !ty_is_vector(vals[c].ty) { return !ap_is_min_signed(ci_ap(c)); }
+    if k == VK_CINT { return !ap_is_min_signed(ci_ap(c)); }
     if ty_kind(vals[c].ty) == TK_FVEC && (k == VK_CDVECTOR || k == VK_CVECTOR) {
         for i in ty_count(vals[c].ty) {
             let e = agg_elem(c, i);

@@ -512,7 +512,7 @@ fn cst_hash(kind: i64, ty: i32, c: Cst, opsv: const i32[:]) -> u32 {
     h = (h ^ (c.inr as! u32)) * 16777619;
     for x in opsv { h = (h ^ (x as! u32)) * 16777619; }
     if c.ext >= 0 {
-        let nw = (ty_bits(ty) + 63) / 64;
+        let nw = (ty_bits(ty_scalar(ty)) + 63) / 64;
         for k in nw { h = (h ^ (words[c.ext + k] as! u32)) * 16777619; }
     }
     for k in c.naux { h = (h ^ (ints[c.aux + k] as! u32)) * 16777619; }
@@ -528,7 +528,7 @@ fn cst_eq(v: i32, kind: i64, ty: i32, c: Cst, opsv: const i32[:]) -> bool {
     for k in opsv.len { if uses[x.ops + k].val != opsv[k] { return false; } }
     if (d.ext >= 0) != (c.ext >= 0) { return false; }
     if c.ext >= 0 {
-        let nw = (ty_bits(ty) + 63) / 64;
+        let nw = (ty_bits(ty_scalar(ty)) + 63) / 64;
         for k in nw { if words[d.ext + k] != words[c.ext + k] { return false; } }
     }
     for k in c.naux { if ints[d.aux + k] != ints[c.aux + k] { return false; } }
@@ -654,6 +654,20 @@ fn c_is_vector_cfp(v: i32) -> bool {
     }
     return false;
 }
+// -use-constant-int-for-fixed-length-splat / -use-constant-int-for-scalable-splat (Constants.cpp cl::opts, set by
+// opt's main before parsing): ConstantVector::get/getSplat of a non-zero ConstantInt splat gives a vector-typed
+// ConstantInt (`VK_CINT` whose type is the vector; its payload is the element's value, `ty_scalar` gives its width).
+var cl_ci_fixed_splat = false;
+var cl_ci_scalable_splat = false;
+// ConstantInt::get(Context, EC, APInt): the vector-typed ConstantInt of vector type vty with the value of the scalar
+// ConstantInt e
+fn c_int_vec(vty: i32, e: i32) -> i32 {
+    var c = csts[vals[e].sub];
+    c.hash = 0;
+    return cst_get(VK_CINT, vty, c, []);
+}
+// isa<ConstantInt> of a vector-typed constant (only with the flags above)
+fn is_vec_cint(v: i32) -> bool { vals[v].kind == VK_CINT && ty_is_vector(vals[v].ty) }
 fn c_undef(ty: i32) -> i32 { c_simple(VK_UNDEF, ty) }
 fn c_poison(ty: i32) -> i32 { c_simple(VK_POISON, ty) }
 fn c_true() -> i32 { c_int(T_I1, 1) }
@@ -662,7 +676,7 @@ fn c_false() -> i32 { c_int(T_I1, 0) }
 fn cint_lo(v: i32) -> u64 { csts[vals[v].sub].lo }
 fn cint_hi(v: i32) -> u64 { csts[vals[v].sub].hi }
 fn cint_sext(v: i32) -> i64 {
-    let bits = ty_bits(vals[v].ty);
+    let bits = ty_bits(ty_scalar(vals[v].ty));
     let lo = csts[vals[v].sub].lo;
     if bits >= 64 { return lo as! i64; }
     let sh = 64 - bits;
@@ -671,7 +685,7 @@ fn cint_sext(v: i32) -> i64 {
 fn cint_is_zero(v: i32) -> bool {
     let c = csts[vals[v].sub];
     if c.ext >= 0 {
-        let nw = (ty_bits(vals[v].ty) + 63) / 64;
+        let nw = (ty_bits(ty_scalar(vals[v].ty)) + 63) / 64;
         for k in nw { if words[c.ext + k] != 0 { return false; } }
         return true;
     }
@@ -718,6 +732,9 @@ fn c_aggregate(ty: i32, elems: const i32[:]) -> i32 {
     if all_null { return c_simple(VK_AGGZERO, ty); }
     if all_poison { return c_poison(ty); }
     if all_undef { return c_undef(ty); }
+    // ConstantVector::getImpl: isSplatInt (-use-constant-int-for-fixed-length-splat)
+    // (ConstantByte splats, VK_CINT of a byte type here, are not affected)
+    if k == TK_FVEC && cl_ci_fixed_splat && all_same && vals[elems[0]].kind == VK_CINT && ty_is_int(vals[elems[0]].ty) { return c_int_vec(ty, elems[0]); }
     if k == TK_STRUCT { return cst_get(VK_CSTRUCT, ty, cst_none(), elems); }
     let et = types[ty].a;
     if is_cds_elem_ty(et) {

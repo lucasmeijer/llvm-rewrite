@@ -84,7 +84,7 @@ fn splat_value(v: i32, allow_poison: bool) -> i32 {
     let ty = vals[v].ty;
     let k = vals[v].kind;
     if !ty_is_vector(ty) { return -1; }
-    if k == VK_CINT { return c_int_words(ty_scalar(ty), cint_lo(v), cint_hi(v)); }
+    if k == VK_CINT { return ap_to_cint(ty_scalar(ty), ap_from_cint(v)); }
     if k == VK_CFP { return c_fp(ty_scalar(ty), cint_lo(v), cint_hi(v)); }
     if allow_poison && k == VK_CVECTOR {
         var s: i32 = -1;
@@ -240,8 +240,8 @@ fn m_specific_int_apv(v: i32, x: AP) -> bool {
     return ap_same_value_u(ci_ap(c), x);
 }
 
-// m_ConstantInt (scalar ConstantInt only, vector-typed ConstantInt excluded) -> id
-fn m_constant_int(v: i32) -> i32 { if v >= 0 && vals[v].kind == VK_CINT && !ty_is_vector(vals[v].ty) { v } else { -1 } }
+// m_ConstantInt: isa<ConstantInt>, so also a vector-typed splat ConstantInt (-use-constant-int-for-*-splat) -> id
+fn m_constant_int(v: i32) -> i32 { if v >= 0 && vals[v].kind == VK_CINT { v } else { -1 } }
 // m_ConstantExpr: a ConstantExpr or a fixed vector constant with a ConstantExpr element
 fn m_constant_expr(v: i32) -> bool {
     let k = vals[v].kind;

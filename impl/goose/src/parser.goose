@@ -2609,7 +2609,8 @@ fn shuffle_mask_elem(m: i32, k: i64) -> i32 {
     let kind = vals[m].kind;
     if kind == VK_AGGZERO { return 0; }
     if kind == VK_UNDEF || kind == VK_POISON { return -1; }
-    let e = op(m, k);
+    // ShuffleVectorInst::getShuffleMask: Mask->getAggregateElement(i) (a vector-typed ConstantInt splat too)
+    let e = if kind == VK_CINT { m } else { op(m, k) };
     if vals[e].kind == VK_CINT { return cint_sext(e) as i32; }
     return -1;
 }

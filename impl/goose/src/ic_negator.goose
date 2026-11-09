@@ -64,7 +64,7 @@ fn contains_undef_or_poison_element(c: i32) -> bool {
 }
 // Constant::isNotOneValue
 fn is_not_one_value(c: i32) -> bool {
-    if vals[c].kind == VK_CINT && !ty_is_vector(vals[c].ty) { return !ap_is_one(ci_ap(c)); }
+    if vals[c].kind == VK_CINT { return !ap_is_one(ci_ap(c)); }
     if ty_is_vector(vals[c].ty) {
         let s = splat_value(c, false);
         if s >= 0 && vals[s].kind == VK_CINT { return !ap_is_one(ci_ap(s)); }

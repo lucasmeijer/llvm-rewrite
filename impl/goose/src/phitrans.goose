@@ -97,8 +97,8 @@ fn pta_add_as_input(t: i32, v: i32) -> i32 {
     return v;
 }
 
-// isa<ConstantInt> (splat ConstantInts: -use-constant-int-for-fixed-length-splat fails loudly in flags.goose)
-fn pta_is_cint(v: i32) -> bool { is_cint(v) && !ty_is_vector(vals[v].ty) }
+// isa<ConstantInt> (also a vector-typed splat ConstantInt)
+fn pta_is_cint(v: i32) -> bool { is_cint(v) }
 
 fn pta_can_trans(i: i32) -> bool {
     let o = iop(i);

@@ -1375,7 +1375,7 @@ fn fbsc_const(o: i64, cast_rhs: bool, castval: i32, v: i32) -> i32 {
 fn dyn_cast_neg_val(v: i32) -> i32 {
     let n = m_neg(v);
     if n >= 0 { return n; }
-    if vals[v].kind == VK_CINT && !ty_is_vector(vals[v].ty) { return ce_binop(OP_SUB, c_null(vals[v].ty), v, 0); }
+    if vals[v].kind == VK_CINT { return ce_binop(OP_SUB, c_null(vals[v].ty), v, 0); }
     if vals[v].kind == VK_CDVECTOR && ty_is_int(ty_scalar(vals[v].ty)) { return ce_binop(OP_SUB, c_null(vals[v].ty), v, 0); }
     if vals[v].kind == VK_CVECTOR {
         for k in nops(v) {

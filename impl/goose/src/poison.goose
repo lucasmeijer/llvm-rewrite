@@ -258,7 +258,7 @@ recursive fn guaranteed_not_undef_or_poison(v: i32, cxt: i32, depth: i64, kind: 
     if is_constant(v) {
         if k == VK_POISON { return !inc_poison; }
         if k == VK_UNDEF { return !inc_undef; }
-        if (k == VK_CINT && !ty_is_vector(vals[v].ty)) || k == VK_GVAR || (k == VK_CFP && !ty_is_vector(vals[v].ty)) || (k == VK_CNULL && !ty_is_vector(vals[v].ty)) || k == VK_FUNC { return true; }
+        if k == VK_CINT || k == VK_GVAR || (k == VK_CFP && !ty_is_vector(vals[v].ty)) || (k == VK_CNULL && !ty_is_vector(vals[v].ty)) || k == VK_FUNC { return true; }
         if ty_is_vector(vals[v].ty) {
             if k == VK_CEXPR {
                 let s = splat_value(v, false);

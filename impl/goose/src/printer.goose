@@ -460,7 +460,7 @@ recursive fn put_struct_body(t: i32) {
 // Integers
 
 fn put_cint(v: i32) {
-    let ty = vals[v].ty;
+    let ty = ty_scalar(vals[v].ty);
     let bits = ty_bits(ty);
     let c = csts[vals[v].sub];
     if bits == 1 { put(if c.lo != 0 { "true" } else { "false" }); return; }

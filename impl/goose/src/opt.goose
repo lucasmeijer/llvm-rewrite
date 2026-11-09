@@ -87,6 +87,9 @@ fn main() {
     }
     if !emit_text && !disable_output { write_stderr("opt: only textual output (-S) is supported\n"); exit(1); }
     if input.len == 0 { write_stderr("opt: no input file\n"); exit(1); }
+    // Constants.cpp's splat cl::opts: they decide how the parser already builds splat constants
+    cl_ci_fixed_splat = flag_bool("use-constant-int-for-fixed-length-splat", false);
+    cl_ci_scalable_splat = flag_bool("use-constant-int-for-scalable-splat", false);
     init_ir();
     parse_module(input);
     // optdriver.cpp: -strip-debug runs StripDebugInfo right after parsing

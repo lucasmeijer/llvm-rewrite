@@ -20,7 +20,8 @@ import apint;
 fn cf_is_poison(v: i32) -> bool { vals[v].kind == VK_POISON }
 // isa<UndefValue> (poison included)
 fn cf_is_undef(v: i32) -> bool { let k = vals[v].kind; k == VK_UNDEF || k == VK_POISON }
-fn cf_is_cint(v: i32) -> bool { vals[v].kind == VK_CINT && !ty_is_vector(vals[v].ty) }
+// isa<ConstantInt> (a vector-typed splat ConstantInt too, -use-constant-int-for-*-splat)
+fn cf_is_cint(v: i32) -> bool { vals[v].kind == VK_CINT }
 fn cf_is_cfp(v: i32) -> bool { vals[v].kind == VK_CFP && !ty_is_vector(vals[v].ty) }
 fn cf_is_cexpr(v: i32) -> bool { vals[v].kind == VK_CEXPR }
 fn cexpr_op(v: i32) -> i64 { csts[vals[v].sub].op as i64 }
@@ -102,6 +103,7 @@ fn c_aggregate_element(v: i32, k: i64) -> i32 {
     let et = ty_index(ty, k);
     if kind == VK_AGGZERO { if k < n { return c_null(ty_index(ty, k)); } return -1; }
     if kind == VK_CNULL && ty_is_vector(ty) { if k < n { return c_null(et); } return -1; }
+    if kind == VK_CINT && ty_is_vector(ty) { if k < n { return c_splat_value(v); } return -1; }
     if types[ty].kind == TK_SVEC { return -1; }
     if kind == VK_POISON { if k < n { return c_poison(et); } return -1; }
     if kind == VK_UNDEF { if k < n { return c_undef(et); } return -1; }
@@ -116,6 +118,8 @@ recursive fn c_splat(vty: i32, v: i32) -> i32 {
     if k == VK_CNULL { return c_simple(VK_CNULL, ty_vector(vals[v].ty, n, sc)); }
     let ty = ty_vector(vals[v].ty, n, sc);
     if ty_is_fp(vals[v].ty) && is_null_value(v) { return c_fp_vec_zero(ty); }
+    // "Maintain special handling of zero": a zero ConstantInt splat stays a ConstantAggregateZero
+    if k == VK_CINT && ty_is_int(vals[v].ty) && !is_null_value(v) && (if sc { cl_ci_scalable_splat } else { cl_ci_fixed_splat }) { return c_int_vec(ty, v); }
     if !sc {
         let mark = cf_stack.len;
         for i in n { cf_stack.push(v); }
@@ -216,15 +220,19 @@ recursive fn fold_bitcast(v: i32, dty: i32) -> i32 {
     if sty == dty { return v; }
     if is_all_ones_value(v) { return c_all_ones(dty); }
     let k = vals[v].kind;
-    if k == VK_CINT && !ty_is_vector(sty) {
-        if ty_is_vector(dty) { return ce_cast(OP_BITCAST, c_splat(ty_vector(sty, 1, false), v), dty); }
+    // (a vector-typed splat ConstantInt, -use-constant-int-for-*-splat, takes this branch too)
+    if k == VK_CINT && (!ty_is_vector(sty) || ty_is_int(ty_scalar(sty))) {
+        if ty_is_vector(dty) && !ty_is_vector(sty) { return ce_cast(OP_BITCAST, c_splat(ty_vector(sty, 1, false), v), dty); }
         let dst = ty_scalar(dty);
+        let ssty = ty_scalar(sty);
         // ConstantInt -> ConstantByte and ConstantByte -> ConstantInt (both are VK_CINT here)
-        let src_byte = types[sty].kind == TK_BYTE;
-        if !src_byte && types[dst].kind == TK_BYTE && cf_scalar_size(dst) == cf_scalar_size(sty) { return ap_to_cint(dty, ci_ap(v)); }
-        if src_byte && ty_is_int(dst) && cf_scalar_size(dst) == cf_scalar_size(sty) { return ap_to_cint(dty, ci_ap(v)); }
-        if ty_is_fp(dst) && types[dst].kind != TK_PPC_FP128 && cf_scalar_size(dst) == cf_scalar_size(sty) {
-            return c_fp(dty, cint_lo(v), cint_hi(v));
+        let src_byte = types[ssty].kind == TK_BYTE;
+        if !src_byte && types[dst].kind == TK_BYTE && cf_scalar_size(dst) == cf_scalar_size(ssty) { return ap_to_cint(dty, ci_ap(v)); }
+        if src_byte && ty_is_int(dst) && cf_scalar_size(dst) == cf_scalar_size(ssty) { return ap_to_cint(dty, ci_ap(v)); }
+        if ty_is_fp(dst) && types[dst].kind != TK_PPC_FP128 && cf_scalar_size(dst) == cf_scalar_size(ssty) {
+            let f = c_fp(dst, cint_lo(v), cint_hi(v));
+            if ty_is_vector(dty) { return c_splat(dty, f); }
+            return f;
         }
         return -1;
     }

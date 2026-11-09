@@ -775,7 +775,7 @@ fn sb_unsafe_phi_or_select_use(root: i32) -> i32, i64 {
 fn fold_phi_or_select(i: i32) -> i32 {
     if iop(i) == OP_PHI { return sr_phi_has_constant_value_or_null(i); }
     let c = op(i, 0);
-    if vals[c].kind == VK_CINT && !ty_is_vector(vals[c].ty) { return op(i, if is_null_value(c) { 2 } else { 1 }); }
+    if vals[c].kind == VK_CINT { return op(i, if is_null_value(c) { 2 } else { 1 }); }
     if op(i, 1) == op(i, 2) { return op(i, 1); }
     return -1;
 }

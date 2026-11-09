@@ -78,13 +78,13 @@ fn nw_intersect_for_reassociate(a: u8, b: u8) -> u8 {
     return nw_denorm(r);
 }
 fn gep_all_const_indices(g: i32) -> bool {
-    for k in 1..nops(g) { let x = op(g, k); if vals[x].kind != VK_CINT || ty_is_vector(vals[x].ty) { return false; } }
+    for k in 1..nops(g) { let x = op(g, k); if vals[x].kind != VK_CINT { return false; } }
     return true;
 }
 fn gep_all_zero_indices(g: i32) -> bool {
     for k in 1..nops(g) {
         let x = op(g, k);
-        if vals[x].kind != VK_CINT || ty_is_vector(vals[x].ty) || !ap_is_zero(ci_ap(x)) { return false; }
+        if vals[x].kind != VK_CINT || !ap_is_zero(ci_ap(x)) { return false; }
     }
     return true;
 }

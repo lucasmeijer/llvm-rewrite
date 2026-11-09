@@ -48,8 +48,7 @@ let KNOWN_FLAGS: const u8[:][] = [
     "licm-max-num-uses-traversed", "licm-max-num-fp-reassociations", "licm-max-num-int-reassociations",
     "licm-mssa-optimization-cap", "licm-mssa-max-acc-promotion", "alias-set-saturation-threshold",
     "rotation-max-header-size", "rotation-prepare-for-lto", "enable-loop-header-duplication-at-minsize",   // loop-rotate
-    "use-constant-int-for-fixed-length-splat", "use-constant-fp-for-fixed-length-splat",   // only =false (the default)
-    "use-constant-int-for-scalable-splat", "use-constant-fp-for-scalable-splat",           // is supported
+    "use-constant-int-for-fixed-length-splat", "use-constant-int-for-scalable-splat",   // Constants.cpp (ir.goose)
     "scalar-evolution-max-iterations", "scalar-evolution-classify-expressions",      // read by ScalarEvolution
     "scalar-evolution-max-arith-depth", "scalar-evolution-max-cast-depth", "scalar-evolution-max-add-rec-size",
     "scalar-evolution-huge-expr-threshold", "scev-addops-inline-threshold", "scev-mulops-inline-threshold",
@@ -84,11 +83,6 @@ let KNOWN_FLAGS: const u8[:][] = [
 
 // Flags whose non-default value is not supported (checked before the pipeline runs).
 fn flags_check_unsupported() {
-    let names: const u8[:][] = ["use-constant-int-for-fixed-length-splat", "use-constant-fp-for-fixed-length-splat",
-                                "use-constant-int-for-scalable-splat", "use-constant-fp-for-scalable-splat"];
-    for n in names {
-        if flag_bool(n, false) { fatal(str("opt: -", n, "=true is not supported yet in the Goose opt")); }
-    }
 }
 
 fn flag_known(name: const u8[:]) -> bool {

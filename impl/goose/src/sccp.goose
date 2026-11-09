@@ -271,7 +271,8 @@ fn sc_get_constant(l: VL, ty: i32) -> i32 {
 }
 fn sc_get_constant_int(l: VL, ty: i32) -> i32 {
     let c = sc_get_constant(l, ty);
-    if c >= 0 && vals[c].kind == VK_CINT && !ty_is_vector(vals[c].ty) { return c; }
+    // dyn_cast<ConstantInt>: a vector-typed splat ConstantInt too
+    if c >= 0 && vals[c].kind == VK_CINT { return c; }
     return -1;
 }
 // SCCPSolver::isConstant / isOverdefined
@@ -2085,7 +2086,7 @@ fn sc_const_value_expr(v: u64) -> i32 {
 }
 // getExpressionForConstant(DIB, C, Ty)
 fn sc_expression_for_constant(c: i32, ty: i32) -> i32 {
-    if vals[c].kind == VK_CINT && !ty_is_vector(vals[c].ty) { return sc_int_expr(c); }
+    if vals[c].kind == VK_CINT { return sc_int_expr(c); }
     if vals[c].kind == VK_CFP && !ty_is_vector(vals[c].ty) && ty_is_fp(ty) && ty_bits_fp(ty) <= 64 {
         return sc_const_value_expr(cint_lo(c));
     }
