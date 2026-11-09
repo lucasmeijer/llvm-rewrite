@@ -54,7 +54,10 @@ lines that combine your pass with others, if the others already work. If your pa
 flag-controlled code (TTI hooks, X86 intrinsic folds, cost models, a pass `cl::opt`), also sweep with
 `--with-test-flags`: a plain sweep passes no `-mtriple`/`-mattr`/`-mcpu`, so most modules have no target and that
 code never runs; `--with-test-flags` adds each file's own RUN-line flags (see "--with-test-flags" in
-`docs/testing.md`).
+`docs/testing.md`). Finally, sweep the four large real programs, which the default sweep skips:
+`./harness/run sweep --impl <lang> --passes '<pipeline>' 'tests/perf/compile/*'` (e.g. `sroa,<your pass>` so the
+input looks like what the pass sees in `-O2`). They exercise combinations no unit test has; silent bugs and cost-model
+gaps have been found there that the whole corpus missed.
 
 Look at compile time: `./harness/run perf --impl <lang> 'tests/perf/scaling/*'` (and `tests/perf/compile/*` once
 `-O2` works). If a shape that runs your pass scales worse than LLVM (exponent k clearly higher), you probably used a
