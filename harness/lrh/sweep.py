@@ -18,6 +18,10 @@ Per file the outcome is one of
 
 --per-function: every defined function is cut into its own module (llvm-extract) and compared separately; the
 outcomes above are then per function. See the section below and "--per-function" in docs/testing.md.
+
+--with-test-flags: every file is run once per distinct set of extra flags its own @opt/@analysis directives carry
+(-mtriple, -mattr, -mcpu, -data-layout, pass cl::opts, ...; never the pipeline or output flags), so that
+target-specific code is exercised. See test_flag_sets() and "--with-test-flags" in docs/testing.md.
 """
 
 import hashlib
@@ -57,6 +61,61 @@ def error_key(stderr: str, path: str, rc: int, timed_out: bool, timeout: float) 
     first = first[:200]
     sig = f"[signal {-rc}] " if rc < 0 else ""
     return sig + (first or f"[exit {rc}, no stderr]")
+
+
+# ---------------------------------------------------------------- --with-test-flags
+#
+# Flags of a directive that are NOT carried: the pipeline (the sweep supplies its own) and the I/O mode (the sweep
+# supplies -S/-o or -disable-output). Also the ones that change which passes run rather than the context they run in.
+DROP_FLAGS = {"passes", "p", "O0", "O1", "O2", "O3", "Os", "Oz", "S", "o", "disable-output", "f",
+              "opt-bisect-limit", "run-twice", "debug-pass-manager", "print-after-all", "print-before-all",
+              "print-changed", "time-passes"}
+# Options whose value may be written as a separate token (`-passes loop-reduce`): for dropped options only; any
+# other `-flag value` pair is kept as written (see split_flags).
+WITH_VALUE = {"passes", "p", "o"}
+
+
+def flag_name(tok: str) -> str:
+    return tok.lstrip("-").split("=", 1)[0]
+
+
+def split_flags(args: str) -> list[list[str]]:
+    """opt arguments -> [[flag, (separate value)], ...]. A token not starting with '-' is the value of the flag before
+    it (`-mtriple x86_64`, `-internalize-public-api-list main`); directives never name an input file."""
+    out = []
+    for tok in shlex.split(args):
+        if tok.startswith("-") and tok != "-" or not out:
+            out.append([tok])
+        else:
+            out[-1].append(tok)
+    return out
+
+
+def carried_flags(args: str, own: set[str]) -> str:
+    """The flags of one directive that --with-test-flags adds to the sweep's arguments, as one string."""
+    kept = []
+    for grp in split_flags(args):
+        name = flag_name(grp[0])
+        if not grp[0].startswith("-") or name in DROP_FLAGS or name in own:
+            continue
+        kept += grp
+    return shlex.join(kept)
+
+
+def test_flag_sets(t, own_args: str) -> list[str]:
+    """The distinct flag sets of a test file's @opt, @analysis and @analysis-unordered directives, in first-seen order
+    (a file without directives gets none). Options the sweep's own arguments already set win (not repeated)."""
+    own = {flag_name(g[0]) for g in split_flags(own_args)}
+    sets = []
+    for args in t.opt + [a for a, _ in t.analysis]:
+        f = carried_flags(args, own)
+        if f not in sets:
+            sets.append(f)
+    return sets
+
+
+def join_args(args: str, flags: str) -> str:
+    return f"{args} {flags}" if flags else args
 
 
 def run_impl(impl: str, args: str, in_arg: str, cwd, wd: Path, analysis: bool, timeout: float) -> proc.Res:
@@ -116,10 +175,11 @@ def new_res(path: str, **extra) -> dict:
     return {"path": path, "status": IDENTICAL, "key": "", "message": "", "artifacts": {}, **extra}
 
 
-def sweep_one(impl: str, path: str, args: str, analysis: bool, unordered: bool, timeout: float) -> dict:
-    """-> {path, status, key (for failed), message, artifacts}"""
+def sweep_one(impl: str, path: str, flags: str | None, args: str, analysis: bool, unordered: bool, timeout: float) -> dict:
+    """-> {path, flags, status, key (for failed), message, artifacts}. flags: from --with-test-flags (None: off)."""
     t = corpus.TestFile(path)
-    res = new_res(path)
+    res = new_res(path, flags=flags)
+    args = join_args(args, flags or "")
     exp = checks.oracle_analysis(t, args, unordered) if analysis else canon_expected(checks.oracle_opt(t, args))
     if not exp["ok"]:
         res.update(status=LLVM_FAILED, message=exp["text"])
@@ -222,8 +282,10 @@ def oracle_piece(text: str, args: str, analysis: bool, unordered: bool) -> dict:
     return exp if analysis else canon_expected(exp)
 
 
-def sweep_function(impl: str, path: str, idx: int, tok: str, args: str, analysis: bool, unordered: bool, timeout: float) -> dict:
-    res = new_res(path, func="@" + tok, idx=idx)
+def sweep_function(impl: str, path: str, idx: int, tok: str, flags: str | None, args: str, analysis: bool, unordered: bool,
+                   timeout: float) -> dict:
+    res = new_res(path, func="@" + tok, idx=idx, flags=flags)
+    args = join_args(args, flags or "")
     piece = extract_piece(path, idx, tok)
     if not piece["ok"]:
         res.update(status=LLVM_FAILED, message=piece["text"])
@@ -242,17 +304,27 @@ def sweep_function(impl: str, path: str, idx: int, tok: str, args: str, analysis
     return res
 
 
-def function_job(job) -> dict:
-    (path, i, tok), (impl, args, analysis, unordered, timeout) = job
+def file_job(job) -> dict:
+    (path, flags), (impl, args, analysis, unordered, timeout) = job
     try:
-        return sweep_function(impl, path, i, tok, args, analysis, unordered, timeout)
+        return sweep_one(impl, path, flags, args, analysis, unordered, timeout)
     except Exception as e:  # a harness bug; surface it loudly but keep going
-        return new_res(path, func="@" + tok, idx=i, status=FAILED, key=f"[harness exception] {type(e).__name__}: {e}",
+        return new_res(path, flags=flags, status=FAILED, key=f"[harness exception] {type(e).__name__}: {e}",
+                       message=f"[harness exception] {type(e).__name__}: {e}")
+
+
+def function_job(job) -> dict:
+    (path, i, tok, flags), (impl, args, analysis, unordered, timeout) = job
+    try:
+        return sweep_function(impl, path, i, tok, flags, args, analysis, unordered, timeout)
+    except Exception as e:  # a harness bug; surface it loudly but keep going
+        return new_res(path, func="@" + tok, idx=i, flags=flags, status=FAILED, key=f"[harness exception] {type(e).__name__}: {e}",
                        message=f"[harness exception] {type(e).__name__}: {e}")
 
 
 def label(r: dict) -> str:
-    return f"{r['path']} {r['func']}" if r.get("func") else r["path"]
+    s = f"{r['path']} {r['func']}" if r.get("func") else r["path"]
+    return s + (f" [{r['flags']}]" if r.get("flags") else "")
 
 
 def select_files(a, tests, passing) -> tuple[list[str], int]:
@@ -286,20 +358,22 @@ def cmd_sweep(a):
         build(a.impl)
     tests = corpus.discover()
     files, perf_skipped = select_files(a, tests, read_passing(a.impl))
+    # (file, flags) units; flags is None without --with-test-flags.
+    if a.with_test_flags:
+        by_path = {t.path: t for t in tests}
+        units = [(f, fl) for f in files for fl in (test_flag_sets(by_path[f], args) or [""])]
+    else:
+        units = [(f, None) for f in files]
     mode = "analysis (stdout+stderr" + (", lines sorted" if a.unordered else "") + ")" if a.analysis else "IR (canonicalized)"
     print(c(BOLD, f"impl/{a.impl}: sweep `opt {args}` over {len(files)} files, {mode}"))
+    if a.with_test_flags:
+        print(c(DIM, f"  with test flags: {len(units)} (file, flag set) runs, {len({fl for _, fl in units})} distinct flag sets, "
+                f"{sum(1 for _, fl in units if fl)} runs with flags"))
     if perf_skipped:
         print(c(DIM, f"  ({perf_skipped} tests/perf files left out; select them with a glob)"))
     if not files:
         print(c(YELLOW, "no files selected" + ("" if a.all_files else " (default: files listed as ::roundtrip in passing.txt; --all-files for every file)")))
         return
-
-    def guard(fn, path, **extra):
-        try:
-            return fn()
-        except Exception as e:  # a harness bug; surface it loudly but keep going
-            return new_res(path, status=FAILED, key=f"[harness exception] {type(e).__name__}: {e}",
-                           message=f"[harness exception] {type(e).__name__}: {e}", **extra)
 
     def progress(i, n):
         if TTY:
@@ -308,19 +382,28 @@ def cmd_sweep(a):
     results = []
     with ThreadPoolExecutor(max_workers=a.jobs) as ex:
         if not a.per_function:
-            for i, r in enumerate(ex.map(lambda p: guard(lambda: sweep_one(a.impl, p, args, a.analysis, a.unordered, a.timeout), p), files), 1):
-                results.append(r)
-                progress(i, len(files))
+            # Worker processes, as for --per-function below (the harness's own Python work is GIL-bound in threads).
+            with ProcessPoolExecutor(max_workers=a.jobs) as pex:
+                fixed = (a.impl, args, a.analysis, a.unordered, a.timeout)
+                rs = pex.map(file_job, [(u, fixed) for u in units], chunksize=4)
+                for i, r in enumerate(rs, 1):
+                    results.append(r)
+                    progress(i, len(units))
         else:
-            jobs, no_defs = [], 0
+            jobs, no_defs, nfuncs = [], 0, 0
+            flag_sets = {}
+            for path, fl in units:
+                flag_sets.setdefault(path, []).append(fl)
             for path, (ok, toks) in zip(files, ex.map(list_functions, files)):
                 if not ok:
                     results.append(new_res(path, func="", idx=-1, status=LLVM_FAILED, message="LLVM cannot parse the file:\n" + toks))
                 elif not toks:
                     no_defs += 1
-                jobs += [(path, i, tok) for i, tok in enumerate(toks if ok else [])]
-            print(c(DIM, f"  per function: {len(jobs)} defined functions"
-                    + (f" ({no_defs} files without any)" if no_defs else "")))
+                nfuncs += len(toks) if ok else 0
+                jobs += [(path, i, tok, fl) for i, tok in enumerate(toks if ok else []) for fl in flag_sets[path]]
+            print(c(DIM, f"  per function: {nfuncs} defined functions"
+                    + (f" ({no_defs} files without any)" if no_defs else "")
+                    + (f", {len(jobs)} (function, flag set) runs" if a.with_test_flags else "")))
 
             # Many small jobs, each mostly process spawns and cache reads: threads serialize on the GIL there, so
             # use worker processes.
@@ -333,15 +416,20 @@ def cmd_sweep(a):
         print("\r" + " " * 20 + "\r", end="")
 
     # Artifacts: .harness-out/sweep/<impl>/<args slug>/<test path>/[<index>-<function>/], plus results.tsv and summary.json.
-    out = config.OUT / "sweep" / a.impl / slug(("per-function " if a.per_function else "") + ("analysis " if a.analysis else "") + args)
+    out = config.OUT / "sweep" / a.impl / slug(("per-function " if a.per_function else "") + ("analysis " if a.analysis else "")
+                                               + ("with-test-flags " if a.with_test_flags else "") + args)
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True, exist_ok=True)
     (out / "args.txt").write_text(args + ("\n(analysis" + (", unordered" if a.unordered else "") + ")" if a.analysis else "")
-                                  + ("\n(per function)" if a.per_function else "") + "\n")
+                                  + ("\n(per function)" if a.per_function else "")
+                                  + ("\n(with test flags)" if a.with_test_flags else "") + "\n")
     for r in results:
         if r["status"] == IDENTICAL:
             continue
         d = out / r["path"]
+        if r.get("flags") is not None:
+            d = d / ("with-" + slug(r["flags"]))
+            r["message"] = f"with test flags: {r['flags'] or '(none)'}\n" + r["message"]
         if r.get("func"):
             r["dir"] = f"{r['idx']:04d}-" + re.sub(r"[^A-Za-z0-9_.$-]+", "_", r["func"][1:].strip('"'))[:60]
             d = d / r["dir"]
@@ -349,10 +437,10 @@ def cmd_sweep(a):
         (d / "message.txt").write_text(r["message"] + "\n")
         for name, text in r["artifacts"].items():
             (d / name).write_text(text)
-    if a.per_function:
-        (out / "results.tsv").write_text("".join(f"{r['status']}\t{r['path']}\t{r['func']}\t{r['key']}\n" for r in results))
-    else:
-        (out / "results.tsv").write_text("".join(f"{r['status']}\t{r['path']}\t{r['key']}\n" for r in results))
+    def row(r):
+        cols = [r["status"], r["path"]] + ([r["flags"] or ""] if a.with_test_flags else []) + ([r.get("func", "")] if a.per_function else [])
+        return "\t".join(cols + [r["key"]]) + "\n"
+    (out / "results.tsv").write_text("".join(row(r) for r in results))
 
     by = {s: [r for r in results if r["status"] == s] for s in ORDER}
     groups = {}
@@ -361,6 +449,7 @@ def cmd_sweep(a):
     groups = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     (out / "summary.json").write_text(json.dumps({
         "impl": a.impl, "args": args, "analysis": a.analysis, "unordered": a.unordered, "per_function": a.per_function,
+        "with_test_flags": a.with_test_flags,
         "counts": {s: len(by[s]) for s in ORDER},
         "silent": [label(r) for r in by[DIFFERS] + by[BAD_IR]],
         "failed_groups": [{"error": k, "count": len(v), "files": v} for k, v in groups],
@@ -394,6 +483,7 @@ def cmd_sweep(a):
         print(c(DIM, f"\nllvm-failed ({len(by[LLVM_FAILED])}):"))
         for r in by[LLVM_FAILED][: a.max_shown]:
             print(f"  {label(r)}: {(r['message'].strip().splitlines() or [''])[0][:150]}")
-    what = "<test path>/<n>-<function>/ for every non-identical function" if a.per_function else "<test path>/ for every non-identical file"
+    what = "<test path>/" + ("with-<flags>/" if a.with_test_flags else "") + (
+        "<n>-<function>/ for every non-identical function" if a.per_function else " for every non-identical file")
     print(c(DIM, f"\nartifacts: {out.relative_to(config.REPO)}/  (results.tsv, summary.json, {what})"))
     sys.exit(0)

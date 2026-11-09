@@ -5,7 +5,7 @@ import os
 import shlex
 import shutil
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 from . import checks, config, corpus, gen, perf, perfgen, proc, roadmap, sweep
@@ -75,19 +75,24 @@ def select(tests, globs, unit_id, ratchet_only, passing):
     return [(t, ch) for t, ch in pairs if corpus.match(f"{t.path}::{ch}", sel)]
 
 
+def run_one_check(job) -> checks.Outcome:
+    impl, t, ch = job
+    try:
+        return checks.CHECK_FNS[ch](impl, t)
+    except Exception as e:  # a harness bug; surface it loudly but keep going
+        return checks.Outcome(f"{t.path}::{ch}", checks.FAIL, f"[harness exception] {type(e).__name__}: {e}")
+
+
 def run_checks(impl, pairs, jobs, progress=True) -> list[checks.Outcome]:
     out = []
     n = len(pairs)
-
-    def one(pair):
-        t, ch = pair
-        try:
-            return checks.CHECK_FNS[ch](impl, t)
-        except Exception as e:  # a harness bug; surface it loudly but keep going
-            return checks.Outcome(f"{t.path}::{ch}", checks.FAIL, f"[harness exception] {type(e).__name__}: {e}")
-
-    with ThreadPoolExecutor(max_workers=jobs) as ex:
-        for i, o in enumerate(ex.map(one, pairs), 1):
+    # Each check is a few process spawns plus cache reads (hashing and JSON-decoding whole files): in threads that
+    # Python work serializes on the GIL and was the bottleneck of a warm ratchet, so use worker processes. Small runs
+    # stay in threads (a process pool costs ~0.1-0.2 s to start).
+    pool = ProcessPoolExecutor if n >= 64 and jobs > 1 else ThreadPoolExecutor
+    with pool(max_workers=jobs) as ex:
+        kw = {"chunksize": max(1, min(16, n // (jobs * 8)))} if pool is ProcessPoolExecutor else {}
+        for i, o in enumerate(ex.map(run_one_check, [(impl, t, ch) for t, ch in pairs], **kw), 1):
             out.append(o)
             if progress and TTY:
                 print(f"\r{c(DIM, f'{i}/{n}')}", end="", flush=True)
@@ -338,6 +343,8 @@ def main(argv=None):
     s.add_argument("--all-files", action="store_true", help="every corpus file, not just the ones the impl round-trips")
     s.add_argument("--per-function", action="store_true", help="split every file into one module per defined function "
                    "(llvm-extract) and compare each piece separately")
+    s.add_argument("--with-test-flags", action="store_true", help="run each file once per distinct set of extra flags in its "
+                   "own @opt/@analysis directives (-mtriple, -mattr, -mcpu, -data-layout, pass cl::opts; not -passes/-O/-S/-o)")
     s.add_argument("--timeout", type=float, default=60, help="seconds per run of the implementation's opt (default 60)")
     s.add_argument("-j", "--jobs", type=int, default=os.cpu_count())
     s.add_argument("-v", "--verbose", action="store_true", help="print the diff of every silent mismatch shown")

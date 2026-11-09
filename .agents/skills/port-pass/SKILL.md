@@ -50,7 +50,11 @@ fix it, or, if it comes from someone else's code, make it fail loudly or write i
 result (identical / failed counts, main failure groups) in `NOTES.md`. While many files still fail loudly on some
 unported construct, add `--per-function`: it splits every file into one module per function, so the functions you do
 support get compared too (often several times as many comparisons; see "--per-function" in `docs/testing.md`). Also sweep the pipelines from your unit's RUN
-lines that combine your pass with others, if the others already work.
+lines that combine your pass with others, if the others already work. If your pass has target-specific or
+flag-controlled code (TTI hooks, X86 intrinsic folds, cost models, a pass `cl::opt`), also sweep with
+`--with-test-flags`: a plain sweep passes no `-mtriple`/`-mattr`/`-mcpu`, so most modules have no target and that
+code never runs; `--with-test-flags` adds each file's own RUN-line flags (see "--with-test-flags" in
+`docs/testing.md`).
 
 Look at compile time: `./harness/run perf --impl <lang> 'tests/perf/scaling/*'` (and `tests/perf/compile/*` once
 `-O2` works). If a shape that runs your pass scales worse than LLVM (exponent k clearly higher), you probably used a

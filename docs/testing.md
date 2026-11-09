@@ -95,7 +95,11 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/`, `imported/` and `perf/` are genera
 ./harness/run gen-perf                                   # regenerate tests/perf
 ```
 
-`check` runs `impl/<lang>/build.sh` first (skip with `--no-build`). For every failing check it writes artifacts to
+`check` runs `impl/<lang>/build.sh` first (skip with `--no-build`), then the checks in `-j` worker processes (default:
+all cores). Timing, 16 cores, warm oracle cache: the goose ratchet (`--ratchet-only`, ~10700 checks) takes 10-20 s and
+the whole goose check (`--update`, ~16500) under a minute; with a cold cache (after a cache wipe, or where many
+outputs changed) under a minute too. The build is usually the larger part (goose ~2 min from scratch), and both scale
+with how loaded the machine is (other agents' sweeps). For every failing check it writes artifacts to
 `.harness-out/<impl>/<test path>/<check>/`: `message.txt`, `expected.ll` and `actual.ll` (canonicalized), `diff.txt`,
 `input.ll`, `out.s`, `expected.stdout` and `actual.stdout`, `stderr.txt`; for `::analysis`, `args.txt`,
 `expected.stderr`, `actual.stderr`, `diff.stderr.txt` (and the same for stdout if it differs).
@@ -118,6 +122,7 @@ own tests never contain, shared ValueTracking/printer bugs). `sweep` does that:
 ./harness/run sweep --impl rust --extra=-O2                             # no --passes: any opt arguments
 ./harness/run sweep --impl llvm --passes sroa                          # self-test: everything identical
 ./harness/run sweep --impl rust --passes instcombine --per-function    # one module per defined function (below)
+./harness/run sweep --impl rust --passes instcombine --with-test-flags # plus each file's own -mtriple/-mattr/... (below)
 ```
 
 Files: by default every file whose `::roundtrip` is in `impl/<lang>/passing.txt` (for `--impl llvm`, and with
@@ -175,6 +180,36 @@ and every non-identical function has `<test path>/<n>-<function>/` (`n` = its po
 definitions) with `input.ll` (the piece; reproduce with `opt <args> -S input.ll` in that directory), `message.txt`
 and the usual `expected.ll`, `actual.ll`, `diff.txt`, `stderr.txt`. A whole-file and a per-function sweep of the same
 arguments don't overwrite each other.
+
+### `--with-test-flags`
+
+A sweep runs every file with only the sweep's arguments, so a module without a `target triple` gets no target and
+code behind `-mtriple`/`-mattr`/`-mcpu` (TTI hooks such as X86 intrinsic folds, cost models) or behind a pass
+`cl::opt` is never exercised: those tests set it on their RUN line. `--with-test-flags` runs each file once per
+distinct *flag set* of its own directives and reports one outcome per (file, flag set) (per (function, flag set)
+with `--per-function`; works with `--analysis` too):
+
+- **Which directives**: every `@opt`, `@analysis` and `@analysis-unordered` of the file (in IR and in analysis mode
+  alike: the flags describe the context the module is meant to be compiled in). Each directive gives one flag set;
+  identical sets are run once. A file without directives, or whose directives carry no flags, is run once without
+  flags (as in a plain sweep). Files are not run additionally without their flags; a plain sweep does that.
+- **Which flags are carried**: everything except the pipeline and the output mode, which the sweep supplies:
+  `-passes`/`--passes`/`-p` (also `-passes X`), `-O0`…`-O3`/`-Os`/`-Oz`, `-S`, `-o`, `-disable-output`, `-f`, and the
+  pass-selection/debug-output flags `-opt-bisect-limit`, `-run-twice`, `-debug-pass-manager`, `-print-after-all`,
+  `-print-before-all`, `-print-changed`, `-time-passes`. So `-mtriple`, `-mattr`, `-mcpu`, `-data-layout`,
+  `-aa-pipeline`, `-disable-builtin`, `-verify-*` and every pass `cl::opt` are carried, in their original order and
+  spelling (`-mtriple x86_64` stays two tokens). An option the sweep's own arguments already set (`--extra=-mattr=…`)
+  is not taken from the test (no duplicate options).
+- The flags are appended after the sweep's arguments. An implementation that doesn't support one of them must fail
+  loudly; such runs show up as a `failed` group (e.g. "unknown option -cost-kind"), not as mismatches.
+- Over the corpus: ~7800 files give ~10000 runs (most files have one set; cost-model tests up to 16), ~1300 distinct
+  flag sets. LLVM's results are cached per argument string, so the first such sweep runs LLVM again on the files
+  that have flags.
+
+Artifacts go to `.harness-out/sweep/<impl>/[per-function_]with-test-flags_<args>/`; `results.tsv` gets a flags
+column after the file (empty = no flags), `summary.json` and the printed lists show `<file> [<flags>]`, and the
+artifact directory of a non-identical run is `<test path>/with-<flags slug>/` (then `<n>-<function>/` per
+function); its `message.txt` starts with the flags. To reproduce: `opt <sweep args> <flags> -S <file>`.
 
 ## Performance (compile time; report only)
 
