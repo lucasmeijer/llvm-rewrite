@@ -37,6 +37,7 @@ dl_set_ptr :: (as: u32, bits: u32, abi: u64, pref: u64, idx: u32) {
 
 dl_init :: (s: string) {
     dl = .{};
+    dl_layout_gen += 1;
     dl_set_prim(*dl.int_specs, 8, 1, 1);
     dl_set_prim(*dl.int_specs, 16, 2, 2);
     dl_set_prim(*dl.int_specs, 32, 4, 4);
@@ -207,7 +208,46 @@ dl_pref_align :: (t: Type_Id) -> u64 {
 }
 
 // StructLayout: returns (size in bytes, alignment).
+// StructLayout cache (DataLayout::getStructLayout): size, alignment and member offsets per struct type, valid for
+// the layout generation it was computed in (dl_init and set_struct_body start a new one).
+Struct_Layout :: struct { gen: u32; size: u64; align: u64; offsets: [..] u64; }
+dl_layouts: [..] Struct_Layout;   // by type id
+dl_layout_gen: u32 = 1;
+
+dl_cached_struct_layout :: (t: Type_Id) -> *Struct_Layout {
+    if t >= dl_layouts.count {
+        old := dl_layouts.count;
+        array_resize(*dl_layouts, max(cast(s64) t + 1, ir.types.count));
+        for i: old..dl_layouts.count-1 dl_layouts[i].gen = 0;
+    }
+    c := *dl_layouts[t];
+    if c.gen == dl_layout_gen return c;
+    r := ir.types[t];
+    offsets: [..] u64;
+    offsets.allocator = context.default_allocator;
+    size: u64 = 0;
+    al: u64 = 1;
+    if r.nsub > 0 for i: 0..r.nsub-1 {
+        et := ir.type_list[r.sub + i];
+        ta := ifx (r.flags & TYF_PACKED) then cast(u64) 1 else dl_abi_align(et);
+        if size % ta != 0 size = align_to(size, ta);
+        al = max(al, ta);
+        array_add(*offsets, size);
+        size += dl_type_alloc_size(et);
+    }
+    if size % al != 0 size = align_to(size, al);
+    c = *dl_layouts[t];   // the recursion may have grown dl_layouts
+    array_free(c.offsets);
+    c.offsets = offsets;
+    c.size = size; c.align = al; c.gen = dl_layout_gen;
+    return c;
+}
+
 dl_struct_layout :: (t: Type_Id) -> (u64, u64) {
+    c := dl_cached_struct_layout(t);
+    return c.size, c.align;
+}
+dl_struct_layout_uncached :: (t: Type_Id) -> (u64, u64) {
     r := ir.types[t];
     size: u64 = 0;
     al: u64 = 1;
@@ -222,6 +262,11 @@ dl_struct_layout :: (t: Type_Id) -> (u64, u64) {
     return size, al;
 }
 dl_struct_offset :: (t: Type_Id, idx: u32) -> u64 {
+    c := dl_cached_struct_layout(t);
+    if idx < c.offsets.count return c.offsets[idx];
+    return dl_struct_offset_uncached(t, idx);
+}
+dl_struct_offset_uncached :: (t: Type_Id, idx: u32) -> u64 {
     r := ir.types[t];
     size: u64 = 0;
     if r.nsub > 0 for i: 0..r.nsub-1 {

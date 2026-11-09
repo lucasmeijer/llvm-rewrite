@@ -457,6 +457,7 @@ set_struct_body :: (t: Type_Id, elts: [] Type_Id, packed: bool) {
     if packed r.flags |= TYF_PACKED;
     r.sub = cast(u32) ir.type_list.count; r.nsub = cast(u32) elts.count;
     for elts array_add(*ir.type_list, it);
+    dl_layout_gen += 1;   // cached struct layouts (datalayout.jai) may contain this type
 }
 
 type_kind :: inline (t: Type_Id) -> Type_Kind { return ir.types[t].kind; }
