@@ -301,7 +301,7 @@ Pass_Kind :: enum u8 {
     // DeadArgumentElimination, ArgumentPromotion (pass_global_opt.jai, pass_global_dce.jai, ...)
     GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
     // L1.scalar-misc (pass_lower_expect.jai, ...; options in scalar_misc_cl.jai)
-    LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT; DIV_REM_PAIRS; FLOAT2INT; SINK; TAILCALLELIM; MLDST_MOTION;
+    LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT; DIV_REM_PAIRS; FLOAT2INT; SINK; TAILCALLELIM; MLDST_MOTION; SPECULATIVE_EXECUTION;
 }
 
 Pass_Info :: struct {
@@ -454,6 +454,7 @@ PASS_TABLE :: Pass_Info.[
     .{"sink", .FUNCTION, .SINK, false, .DOMTREE},
     .{"tailcallelim", .FUNCTION, .TAILCALLELIM, false, .DOMTREE},
     .{"mldst-motion", .FUNCTION, .MLDST_MOTION, false, .DOMTREE},   // also mldst-motion<...>
+    .{"speculative-execution", .FUNCTION, .SPECULATIVE_EXECUTION, false, .DOMTREE},   // also speculative-execution<...>
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -477,6 +478,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "globaldce<") && name[name.count - 1] == #char ">" return lookup_pass("globaldce");
     if begins_with(name, "internalize<") && name[name.count - 1] == #char ">" return lookup_pass("internalize");
     if begins_with(name, "mldst-motion<") && name[name.count - 1] == #char ">" return lookup_pass("mldst-motion");
+    if begins_with(name, "speculative-execution<") && name[name.count - 1] == #char ">" return lookup_pass("speculative-execution");
     return null;
 }
 
@@ -1115,6 +1117,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .SINK; return sink_run(f);
         case .TAILCALLELIM; return tailcallelim_run(f);
         case .MLDST_MOTION; return mldst_motion_run(f, node.name);
+        case .SPECULATIVE_EXECUTION; return speculative_execution_run(f, node.name);
         case .REASSOCIATE; return reassociate_run(f);
         case .CONSTRAINT_ELIMINATION; return constraint_elimination_run(f);
         case .AGGRESSIVE_INSTCOMBINE; return aggressive_instcombine_run(f);
@@ -1191,6 +1194,12 @@ opt_main :: () {
         if a == "-disable-builtin" || a == "--disable-builtin" || a == "-enable-builtin" || a == "--enable-builtin" ||
            a == "-internalize-public-api-list" || a == "--internalize-public-api-list" ||
            a == "-internalize-public-api-file" || a == "--internalize-public-api-file" {
+            if i >= args.count fatal("option % needs a value", a);
+            if !parse_cl_opt(tprint("%=%", a, args[i])) fatal("unsupported option '%'", a);
+            i += 1;
+            continue;
+        }
+        if scalar_misc_takes_value(a) {   // scalar_misc_cl.jai: integer options written `-name value`
             if i >= args.count fatal("option % needs a value", a);
             if !parse_cl_opt(tprint("%=%", a, args[i])) fatal("unsupported option '%'", a);
             i += 1;

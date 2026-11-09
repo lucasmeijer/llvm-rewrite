@@ -51,6 +51,7 @@
 #load "pass_sink.jai";
 #load "pass_tailcallelim.jai";
 #load "pass_mldst_motion.jai";
+#load "pass_speculative_execution.jai";
 #load "pass_reassociate.jai";
 #load "constraint_system.jai";
 #load "pass_constraint_elimination.jai";

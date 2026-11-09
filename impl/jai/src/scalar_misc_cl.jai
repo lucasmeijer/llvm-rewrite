@@ -19,7 +19,19 @@ scalar_misc_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
         case "unlikely-branch-weight"; le_cl.unlikely_branch_weight = cast(u32) smisc_int(name, value, has_value);
         case "float2int-max-integer-bw"; f2i_cl.max_integer_bw = cast(u32) smisc_int(name, value, has_value);
         case "tre-disable-entrycount-recompute"; tre_cl.disable_entrycount_recompute = smisc_bool(name, value, has_value);
+        case "spec-exec-max-speculation-cost"; se_cl.max_speculation_cost = smisc_int(name, value, has_value);
+        case "spec-exec-max-not-hoisted"; se_cl.max_not_hoisted = smisc_int(name, value, has_value);
+        case "spec-exec-only-if-divergent-target"; se_cl.only_if_divergent_target = smisc_bool(name, value, has_value);
         case; return false;
     }
     return true;
+}
+
+// cl::opt<unsigned/int> of these passes given as `-name value` (a value-required option takes the next argument)
+scalar_misc_takes_value :: (a: string) -> bool {
+    n := a;
+    if begins_with(n, "--") n = slice(n, 2, n.count - 2); else if begins_with(n, "-") n = slice(n, 1, n.count - 1); else return false;
+    for string.["likely-branch-weight", "unlikely-branch-weight", "float2int-max-integer-bw", "spec-exec-max-speculation-cost",
+                "spec-exec-max-not-hoisted", "callsite-splitting-duplication-threshold"] if n == it return true;
+    return false;
 }
