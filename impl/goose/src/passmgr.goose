@@ -47,6 +47,7 @@ import debugify;
 import dbgutil;
 import lvi;
 import cvp;
+import gvn;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -93,6 +94,7 @@ let P_PRINT_MEMORYSSA_WALKER = 152;
 let P_VERIFY_MEMORYSSA = 153;
 let P_SCCP = 160;
 let P_EARLY_CSE = 170;     // arg: 1 = memssa
+let P_GVN = 171;           // arg: gvn<...> options (gvn.goose gvn_opt)
 let P_PRINT_SCEV = 118;
 let P_PRINT_LVI = 180;
 let P_CVP = 181;
@@ -170,6 +172,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_EARLY_CSE => "EarlyCSEPass",
         P_CVP => "CorrelatedValuePropagationPass",
         P_JUMP_THREADING => "JumpThreadingPass",
+        P_GVN => "GVNPass",
         P_IPSCCP => "IPSCCPPass",
         P_DEBUGIFY => "NewPMDebugifyPass",
         P_CHECK_DEBUGIFY => "NewPMCheckDebugifyPass",
@@ -197,6 +200,7 @@ fn analysis_id(name: const u8[:]) -> i64 {
     if name == "lazy-value-info" { return A_LVI; }
     if name == "branch-prob" { return A_BPI; }
     if name == "block-freq" { return A_BFI; }
+    if name == "phi-values" { return A_PHI_VALUES; }
     return -1;
 }
 
@@ -404,6 +408,30 @@ recursive fn parse_function_elem(e: i32) -> i32 {
             else { perr_pipeline(str("invalid MemorySSAPrinterPass parameter '", ps, "' ")); }
         }
         return new_pnode(PK_PASS, P_PRINT_MEMORYSSA as i32, arg, true, pelems[e].name);
+    }
+    if is_param_name(name, "gvn") {
+        // parseGVNOptions: bits 2k (set) and 2k+1 (value); k: 0 scalar-pre, 1 load-pre, 2 split-backedge-load-pre,
+        // 3 memdep, 4 memoryssa (memdep and memoryssa set each other's opposite)
+        var arg: i32 = 0;
+        if name != "gvn" {
+            let ps = name[4..name.len - 1];
+            var st: i64 = 0;
+            while st < ps.len {
+                var j = st;
+                while j < ps.len && ps[j] != ';' { j++; }
+                var pn = ps[st..j];
+                st = j + 1;
+                var en: i32 = 1;
+                if starts_with(pn, "no-") { en = 0; pn = pn[3..]; }
+                if pn == "scalar-pre" { arg = (arg & ~3) | 1 | (en << 1); }
+                else if pn == "load-pre" { arg = (arg & ~12) | 4 | (en << 3); }
+                else if pn == "split-backedge-load-pre" { arg = (arg & ~48) | 16 | (en << 5); }
+                else if pn == "memdep" { arg = (arg & ~960) | 64 | (en << 7) | 256 | ((1 - en) << 9); }
+                else if pn == "memoryssa" { arg = (arg & ~960) | 256 | (en << 9) | 64 | ((1 - en) << 7); }
+                else { perr_pipeline(str("invalid GVN pass parameter '", pn, "'")); }
+            }
+        }
+        return new_pnode(PK_PASS, P_GVN as i32, arg, false, pelems[e].name);
     }
     if is_param_name(name, "early-cse") {
         // parseEarlyCSEPassOptions: parseSinglePassOption(Params, "memssa", "EarlyCSE")
@@ -781,7 +809,7 @@ fn pass_creates_subtarget(n: i32) -> bool {
     return p == P_BDCE || p == P_MEM2REG || p == P_SROA || p == P_INSTSIMPLIFY || p == P_SIMPLIFYCFG ||
         p == P_INSTCOMBINE || p == P_PRINT_DEMANDED_BITS || p == P_LOOP_SIMPLIFY || p == P_AA_EVAL ||
         p == P_PRINT_MEMORYSSA || p == P_PRINT_MEMORYSSA_WALKER || p == P_VERIFY_MEMORYSSA || p == P_SCCP ||
-        p == P_EARLY_CSE || p == P_VERIFY_SCEV || p == P_CVP || p == P_JUMP_THREADING;
+        p == P_EARLY_CSE || p == P_VERIFY_SCEV || p == P_CVP || p == P_JUMP_THREADING || p == P_GVN;
 }
 
 fn run_function_pass(n: i32, fv: i32) -> u32 {
@@ -817,6 +845,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_VERIFY_MEMORYSSA => { mssa_get(fv); mssa_verify(fv); return PA_ALL; },
         P_SCCP => { return sccp_run(fv); },
         P_EARLY_CSE => { return early_cse_run(fv, pnodes[n].arg != 0); },
+        P_GVN => { return gvn_run(fv, pnodes[n].arg); },
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
         P_PRINT_LVI => { lvi_print(fv); return PA_ALL; },
         P_CVP => { return cvp_run(fv); },

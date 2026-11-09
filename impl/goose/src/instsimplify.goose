@@ -1437,16 +1437,21 @@ fn pointer_deref_bytes(v: i32) -> u64, bool {
         return b, cbn;
     }
     if is_inst_op(v, OP_ALLOCA) {
-        if !is_constant(op(v, 0)) || vals[op(v, 0)].kind != VK_CINT { return 0, false; }
+        // AllocaInst::getAllocationSize: the known minimum size (scalable types too)
         let at = insts[inst_of(v)].ty2;
-        if ty_kind(at) == TK_SVEC { return 0, false; }
-        return (dl_alloc_size(at) as u64) * ci_val(op(v, 0)), false;
+        let sz = dl_alloc_size(at) as u64;
+        let n = op(v, 0);
+        if vals[n].kind == VK_CINT && ci_val(n) == 1 { return sz, false; }
+        if vals[n].kind != VK_CINT { return 0, false; }
+        let c = ci_val(n);
+        if c != 0 && sz > 0xFFFFFFFFFFFFFFFF / c { return 0, false; }
+        return sz * c, false;
     }
     if is_gvar(v) {
         let g = globs[glob_of(v)];
         // GlobalVariable with a known size: !isInterposable/definitive or not; LLVM: if (!GV->getValueType()->isSized() ...)
         if g.vty >= 0 && ty_is_sized(g.vty) && !gv_has_external_weak(v) {
-            return dl_alloc_size(g.vty) as u64, false;
+            return dl_store_size(g.vty) as u64, false;
         }
         return 0, false;
     }
@@ -4158,7 +4163,7 @@ recursive fn try_constant_fold_call(c: i32, mark: i64, n: i64, q: SQ) -> i32 {
 }
 
 recursive fn simplify_call(c: i32, callee: i32, mark: i64, n: i64, q: SQ) -> i32 {
-    if (insts[inst_of(c)].bits & 8) != 0 { return -1; }
+    if insts[inst_of(c)].pred == 2 { return -1; }   // isMustTailCall (the tail kind is in Inst.pred)
     if is_undef_val(callee) || (vals[callee].kind == VK_CNULL) { return c_poison(vals[c].ty); }
     let v = try_constant_fold_call(c, mark, n, q);
     if v >= 0 { return v; }

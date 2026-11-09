@@ -307,34 +307,48 @@ fn get_underlying_objects(v: i32, out: i32[>..<]&) {
 // ExternalAnalysis = null, LookThroughIntToPtr). Offsets are 64-bit (index width <= 64).
 var vt_off: i64 = 0;
 fn gep_accumulate_constant_offset(g: i32) -> bool, i64 {
-    // GEPOperator::accumulateConstantOffset: all indices must be constant
-    var t = gep_src_ty(g);
+    // GEPOperator::accumulateConstantOffset (no ExternalAnalysis); the offset wraps like the APInt (the caller
+    // masks it to the index width)
+    let src = gep_src_ty(g);
+    if ty_kind(src) == TK_INT && ty_bits(src) == 8 && nops(g) > 1 {
+        let ix = op(g, 1);
+        if vals[ix].kind == VK_CINT && ty_kind(vals[ix].ty) == TK_INT { return true, ci_sval(ix); }
+        return false, 0;
+    }
+    var t = src;
     var off: i64 = 0;
-    if ty_contains_scalable(t) { return false, 0; }
     for k in 1..nops(g) {
         let ix = op(g, k);
-        if k == 1 {
-            let c = m_apint(ix);
-            if c < 0 { if is_constant(ix) && is_null_value(ix) { continue; } return false, 0; }
-            off += ci_sval(c) * dl_alloc_size(t);
+        var indexed = t;
+        var is_struct = false;
+        var stride: i64 = 0;
+        if k == 1 { indexed = src; stride = dl_alloc_size(src); }
+        else if ty_is_struct(t) {
+            is_struct = true;
+            if vals[ix].kind != VK_CINT || ty_kind(vals[ix].ty) != TK_INT { return false, 0; }
+            indexed = ty_field(t, ci_val(ix) as i64);
+        } else { indexed = types[t].a; stride = dl_gep_stride(t, indexed); }
+        let scalable = vt_is_scalable_ty(indexed);
+        if vals[ix].kind == VK_CINT && ty_kind(vals[ix].ty) == TK_INT {
+            if cint_is_zero(ix) { t = indexed; continue; }
+            if scalable { return false, 0; }
+            if is_struct { off = ((off as! u64) + (dl_struct_offset(t, ci_val(ix) as i64) as! u64)) as! i64; }
+            else { off = ((off as! u64) + (ci_sval(ix) as! u64) * (stride as! u64)) as! i64; }
+            t = indexed;
             continue;
         }
-        if ty_is_struct(t) {
-            let c = m_apint(ix);
-            if c < 0 { return false, 0; }
-            let fi = ci_val(c) as i64;
-            off += dl_struct_offset(t, fi);
-            t = ty_field(t, fi);
-        } else {
-            let et = types[t].a;
-            let c = m_apint(ix);
-            if c < 0 { if is_constant(ix) && is_null_value(ix) { t = et; continue; } return false, 0; }
-            if ty_kind(t) == TK_SVEC { return false, 0; }
-            off += ci_sval(c) * dl_gep_stride(t, et);
-            t = et;
-        }
+        return false, 0;
     }
     return true, off;
+}
+// Type::isScalableTy
+recursive fn vt_is_scalable_ty(t: i32) -> bool {
+    let k = types[t].kind;
+    if k == TK_SVEC { return true; }
+    if k == TK_ARRAY { return vt_is_scalable_ty(types[t].a); }
+    if k == TK_STRUCT { for j in types[t].cnt { if vt_is_scalable_ty(ty_field(t, j)) { return true; } } return false; }
+    if k == TK_TARGETEXT { return types[target_layout_type(t)].kind == TK_SVEC; }
+    return false;
 }
 fn gep_src_ty(g: i32) -> i32 {
     if vals[g].kind == VK_INST { return insts[inst_of(g)].ty2; }

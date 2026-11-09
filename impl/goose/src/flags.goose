@@ -55,6 +55,12 @@ let KNOWN_FLAGS: const u8[:][] = [
     "earlycse-debug-hash",                               // no-op in release builds (see earlycse.goose)
     "earlycse-mssa-optimization-cap",                    // read by early-cse<memssa>
     "verify-scev",                                       // no-op: extra verification only
+    "enable-scalar-pre", "enable-load-pre", "enable-load-in-loop-pre", "enable-split-backedge-in-load-pre",   // gvn
+    "enable-gvn-memdep", "enable-gvn-memoryssa", "gvn-max-num-deps", "gvn-max-block-speculations",
+    "gvn-max-num-visited-insts", "gvn-max-num-insns", "gvn-scan-users-limit", "gvn-add-phi-translation",
+    "memdep-block-scan-limit", "memdep-block-number-limit", "memdep-cache-global-limit",   // MemoryDependence
+    "disable-basic-aa",                                  // no-op: only read by the legacy AAResultsWrapperPass
+    "verify-analysis-invalidation",                      // no-op: extra verification only
     "instcombine-code-sinking", "instcombine-max-sink-users", "instcombine-negator-enabled",   // read by instcombine
     "instcombine-negator-max-depth", "instcombine-lower-dbg-declare", "disable-last-run-tracking",
     "debugify-quiet", "debugify-level", "debugify-atoms",   // read by debugify / check-debugify

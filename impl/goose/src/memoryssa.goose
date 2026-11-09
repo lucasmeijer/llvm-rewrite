@@ -709,8 +709,10 @@ fn mssa_guaranteed_loop_invariant(p0: i32) -> bool {
 fn mssa_upward_def(phi: i32, k: i64, loc: ML, cross: bool) -> UDE {
     var e = UDE { ma: mphi_val(phi, k), loc: loc, cross: cross, phi_block: mphi_blk(phi, k) };
     if loc.ptr >= 0 {
-        pta_init(loc.ptr);
-        let addr = pta_translate_value(macc[phi].bb, mphi_blk(phi, k), true);
+        let pm0 = pta_mark();
+        let tr = pta_new(loc.ptr, false);
+        let addr = pta_translate_value(tr, macc[phi].bb, mphi_blk(phi, k), true);
+        pta_release(pm0);
         if addr >= 0 && addr != e.loc.ptr { e.loc.ptr = addr; }
         if !mssa_guaranteed_loop_invariant(e.loc.ptr) { e.loc.size = LS_BEFORE_OR_AFTER; }
     } else {
