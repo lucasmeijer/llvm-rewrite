@@ -864,8 +864,7 @@ compute_unroll_count :: (li: *Loop_Info, l: Loop_Id, t: *Tti, dt: *Dom_Tree, ac:
     if max_trip_count && up.count > max_trip_count up.count = max_trip_count;
     if up.count < 2 up.count = 0;
 }
-// Function::hasProfileData
-fn_has_profile_data :: (f: Value_Id) -> bool { ok, _ := fn_entry_count(f); return ok; }
+// Function::hasProfileData is fn_has_profile_data (pass_loop_idiom.jai)
 
 // ---------------------------------------------------------------- tryToUnrollLoop
 
