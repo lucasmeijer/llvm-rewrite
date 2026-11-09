@@ -679,6 +679,12 @@ recursive fn x86_arith_cost(o: i64, ty: i32, kind: i64, op1: i64, op2: i64, narg
     if x86_sse1() { r = xc1(XCT_A_SSE1CostTable, isd, lt, kind); if r >= 0 { return ltc * r; } }
     if x86_is64 { r = xc1(XCT_A_X64CostTbl, isd, lt, kind); if r >= 0 { return ltc * r; } }
     r = xc1(XCT_A_X86CostTbl, isd, lt, kind); if r >= 0 { return ltc * r; }
+    // BasicTTIImplBase::getArithmeticInstrCost: an operation that is Legal on the legalized type costs
+    // LT.first * 1 (scalar integer shifts and bitwise/add/sub ops are Legal for i8..i64 on x86)
+    if kind == 0 && !mvt_is_vec(lt) && (mvt_elt(lt) == XE_I8 || mvt_elt(lt) == XE_I16 || mvt_elt(lt) == XE_I32 || (mvt_elt(lt) == XE_I64 && x86_is64)) &&
+       (isd == XISD_SHL || isd == XISD_SRL || isd == XISD_SRA || isd == XISD_ADD || isd == XISD_SUB || isd == XISD_AND || isd == XISD_OR || isd == XISD_XOR) {
+        return ltc;
+    }
     if kind == 0 { x86_np("getArithmeticInstrCost for TCK_RecipThroughput"); }
     if kind == 2 {
         if isd == XISD_FADD || isd == XISD_FSUB || isd == XISD_FMUL || isd == XISD_FDIV || isd == XISD_FNEG ||
@@ -915,6 +921,14 @@ fn x86_basic_cast_cost(o: i64, dst: i32, src: i32, cch: i64, kind: i64, i: i32, 
         x86_np("getCastInstrCost of addrspacecast (isFreeAddrSpaceCast)");
     }
     if kind != 0 { return 1; }
+    // a cast marked Legal on the legalized types costs SrcLT.first (scalar integer zext/sext/trunc are Legal
+    // for i8..i64 on x86); otherwise a non-Expand scalar conversion costs 1
+    let sint = !mvt_is_vec(ls) && (mvt_elt(ls) == XE_I8 || mvt_elt(ls) == XE_I16 || mvt_elt(ls) == XE_I32 || (mvt_elt(ls) == XE_I64 && x86_is64));
+    let dint = !mvt_is_vec(ld) && (mvt_elt(ld) == XE_I8 || mvt_elt(ld) == XE_I16 || mvt_elt(ld) == XE_I32 || (mvt_elt(ld) == XE_I64 && x86_is64));
+    if sint && dint && !ty_is_vector(src) && !ty_is_vector(dst) && (o == OP_ZEXT || o == OP_SEXT || o == OP_TRUNC) {
+        if lsc == ldc { return lsc; }
+        return 1;
+    }
     x86_np("getCastInstrCost for TCK_RecipThroughput");
     return 0;
 }

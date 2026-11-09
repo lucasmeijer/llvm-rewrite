@@ -1103,14 +1103,15 @@ fn wv_widen_iv_use(du: NDU) -> i32 {
         else {
             wide_use = wv_clone_iv_user(du, war);
         }
+        // (tryAddRecExpansion returns null on a failed clone or a mismatch: fall through to the other widenings)
         if wide_use >= 0 {
             if war != sc_get_scev(wide_use) {
                 iv_dead_push(wide_use);
-                return -1;
+            } else {
+                replace_all_dbg_uses_with(du.use, wide_use, wide_use);
+                hm_put(wv_ek, du.use as u64, wek);
+                return wide_use;
             }
-            replace_all_dbg_uses_with(du.use, wide_use, wide_use);
-            hm_put(wv_ek, du.use as u64, wek);
-            return wide_use;
         }
     }
     if wv_widen_loop_compare(du) { return -1; }
