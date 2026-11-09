@@ -110,6 +110,12 @@ src/
   pass_vector_combine.jai  VectorCombine (`vc` state, its own InstructionWorklist, `vcb_*` = IRBuilder<InstSimplifyFolder>)
   slp_utils.jai, slp_lookahead.jai, slp_operands.jai, slp_tree.jai   SLPVectorizer (in progress, not a pass yet):
                       helpers + InstructionsState, LookAheadHeuristics, VLOperands, BoUpSLP state (`slp`, Tree_Entry rows)
+  ipo_utils.jai   GlobalValue / GlobalVariable / Function helpers for module passes (linkage, comdats, deleteBody,
+                  eraseFromParent with metadata, destroyConstant, llvm.used, CtorUtils, GlobalStatus) and function
+                  signature rewriting (ipo_fn_create / ipo_fn_splice_body / ipo_create_call_like)
+  evaluator.jai, pass_global_opt.jai, pass_global_dce.jai, pass_constant_merge.jai, pass_internalize.jai,
+  pass_strip_dead_prototypes.jai, pass_elim_avail_extern.jai, pass_assign_guid.jai, md5.jai   IPO module passes
+  pass_dead_arg_elim.jai, pass_arg_promotion.jai   DeadArgumentElimination (module), ArgumentPromotion (CGSCC)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 

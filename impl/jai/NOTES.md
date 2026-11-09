@@ -1137,3 +1137,31 @@ Still slow / known:
    computeMinimumValueSizes / truncateToMinimalBitwidths, induction truncates, reverse accesses, tail folding.
 4. The VPlan cost model (VPCostContext, VPlan::cost, precomputeCosts, the legacy getInstructionCost) for
    computeBestVF / selectInterleaveCount on X86, InterleavedAccessInfo, epilogue vectorization.
+
+## IPO: GlobalOpt, GlobalDCE, ConstantMerge, Internalize, DeadArgElim, ArgumentPromotion (L2.globals 443/450, L2.ipo-args COMPLETE 206/206)
+
+- Files: `ipo_utils.jai` (GlobalValue/GlobalVariable/Function helpers: linkage predicates, setLinkage, getComdat,
+  copyAttributesFrom, setInitializer, deleteBody, eraseFromParent incl. metadata, destroyConstant,
+  collectUsedGlobalVariables, CtorUtils' optimizeGlobalCtorsList, GlobalStatus, and the signature-rewriting helpers
+  `ipo_fn_create` / `ipo_fn_copy_attributes_from` / `ipo_fn_splice_body` / `ipo_create_call_like`),
+  `evaluator.jai` (Evaluator; MutableValue/MutableAggregate are rows), `pass_global_opt.jai`, `pass_global_dce.jai`
+  (+ TypeMetadataUtils' getPointerAtOffset), `pass_constant_merge.jai`, `pass_strip_dead_prototypes.jai`,
+  `pass_elim_avail_extern.jai` (+ getUniqueModuleId), `pass_internalize.jai` (+ GlobPattern matching),
+  `pass_assign_guid.jai`, `md5.jai`, `pass_dead_arg_elim.jai`, `pass_arg_promotion.jai` (a CGSCC pass:
+  `run_cgscc_pass` case). knowledge/llvm/ipo-globals-and-arguments.md has the LLVM facts.
+- Sweeps, every round-tripping file, 0 differs plain and `--with-test-flags`: globalopt (also `--per-function`),
+  globaldce, constmerge, strip-dead-prototypes, elim-avail-extern, internalize, deadargelim,
+  `deadargelim,function(instcombine),function(dce)`, argpromotion. Remaining L2.globals failures need `-O2`,
+  `lto<O2>`, `default<O0>` or early-cse.
+- Traps: a blockaddress is a constant *user* of its function in our IR but not in LLVM 23: skip `C_BLOCKADDR` users
+  whenever a pass walks a function's uses (`go_users`, `dae_call_users`, `ap_fn_users`, `fn_use_empty`;
+  `fn_has_address_taken` now skips them too). RAUW of a global or argument must also move its metadata
+  (`ipo_rauw` / `rauw_with_metadata`); erasing a global goes through `gv_erase_from_parent` (MetadataAsValue
+  operands become `!{}`, MDTuple operands null). Module lists are plain arrays: `list_index_of_hint` keeps the
+  early-inc loops linear.
+- `-f` and `-emulated-tls` are accepted and ignored by opt_main (they don't change IR passes).
+- Fail loudly: `-avail-extern-to-local` (convertToLocalCopy of functions), X86 areTypesABICompatible for extended
+  value types / AVX-512 masks / bf16 across subtargets, rewriting callbr call sites, replacing the type of a uniqued
+  DISubprogram.
+- Perf (optimized build): `-passes=globalopt` on scaling/globals 0.73-0.87x LLVM's CPU, k = 1.00 (LLVM 1.09);
+  globalopt / globaldce / deadargelim / argpromotion on SPASS.ll and sqlite3.ll are below LLVM's time.

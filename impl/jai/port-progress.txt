@@ -179,3 +179,21 @@ lib/Transforms/Vectorize/VPlanTransforms.cpp 0.12
 lib/Transforms/Vectorize/VPlanUtils.cpp 0.6
 lib/Transforms/Vectorize/VPlanRecipes.cpp 0.08  # the recipe property queries only
 lib/Transforms/Vectorize/VPlanPredicator.cpp 0.05
+# --- L2.globals / L2.ipo-args (jai_globals, 2026-11; port-audit.py heuristic in parentheses where it misses renamed entry points)
+lib/Transforms/IPO/GlobalOpt.cpp 0.85  # not OptimizeNonTrivialIFuncs (TTI::isMultiversionedFunction is false off AArch64) nor the BFI coldcc candidate search (useColdCCForColdCall is false on X86)
+lib/Transforms/Utils/Evaluator.cpp 1
+lib/Transforms/Utils/CtorUtils.cpp 1
+lib/Transforms/Utils/GlobalStatus.cpp 1
+lib/Transforms/IPO/GlobalDCE.cpp 1
+lib/Transforms/IPO/ConstantMerge.cpp 1  # manual (heuristic 0.46: mergeConstants = constant_merge_run)
+lib/Transforms/IPO/StripDeadPrototypes.cpp 1  # manual
+lib/Transforms/IPO/ElimAvailExtern.cpp 0.75  # not convertToLocalCopy(Function) (-avail-extern-to-local / contextual profiles): fails loudly
+lib/Transforms/IPO/Internalize.cpp 1  # manual (heuristic 0.37); GlobPattern matching without brace expansion, as GlobPattern::create without MaxSubPatterns
+lib/Transforms/IPO/DeadArgumentElimination.cpp 0.95  # no optimization remarks
+lib/Transforms/IPO/ArgumentPromotion.cpp 0.95  # no optimization remarks; X86 areTypesABICompatible only for simple MVTs (fails loudly otherwise)
+lib/Transforms/Utils/AssignGUID.cpp 1  # manual
+lib/Analysis/TypeMetadataUtils.cpp 0.35  # getPointerAtOffset, replaceRelativePointerUsersWithZero
+lib/IR/Globals.cpp 0.35
+lib/IR/Function.cpp 0.15  # deleteBody, copyAttributesFrom, splice
+lib/IR/Module.cpp 0.1  # getGlobalVariable, getFunction, global_values order
+lib/Support/MD5.cpp 0.8  # update / final / stringifyResult / MD5Hash
