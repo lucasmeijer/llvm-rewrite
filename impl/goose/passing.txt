@@ -894,6 +894,7 @@ tests/imported/llvm/Analysis/BasicAA/matrix-intrinsics.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/matrix-intrinsics.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/memset-pattern.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/memset-pattern.ll::roundtrip
+tests/imported/llvm/Analysis/BasicAA/modref.ll::opt
 tests/imported/llvm/Analysis/BasicAA/modref.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/must-and-partial.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/must-and-partial.ll::roundtrip

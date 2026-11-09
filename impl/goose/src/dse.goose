@@ -268,28 +268,26 @@ fn ds_is_partial_overwrite(kloc: ML, dloc: ML, koff: i64, doff: i64, di: i32) ->
 
 // memoryIsNotModifiedBetween(FirstI, SecondI, AA, DL, DT)
 fn ds_mem_not_modified_between(first: i32, second: i32) -> bool {
+    let pm = pta_mark();
+    let r = ds_mem_not_modified_between_impl(first, second);
+    pta_release(pm);
+    return r;
+}
+fn ds_mem_not_modified_between_impl(first: i32, second: i32) -> bool {
     var wl_bb: i32[>..<] = [];
-    var wl_addr: i32[>..<] = [];
-    var wl_in_at: i64[>..<] = [];
-    var wl_in_n: i64[>..<] = [];
-    var pool: i32[>..<] = [];
+    var wl_t: i32[>..<] = [];          // PHITransAddr records
     let vtick = ds_new_tick();
     let fbb = inst_parent(first);
     let sbb = inst_parent(second);
     let loc = if mi_is_memset(second) { ml_for_dest(second) } else { ml_get(second) };
-    pta_init(loc.ptr);
     wl_bb.push(sbb);
-    wl_addr.push(pta_addr);
-    wl_in_at.push(pool.len);
-    for x in pta_inputs { pool.push(x); }
-    wl_in_n.push(pta_inputs.len);
+    wl_t.push(pta_new(loc.ptr, false));
     var is_first = true;
     var preds: i32[>..<] = [];
     while wl_bb.len > 0 {
         let b = wl_bb.pop();
-        let ptr = wl_addr.pop();
-        let in_at = wl_in_at.pop();
-        let in_n = wl_in_n.pop();
+        let t = wl_t.pop();
+        let ptr = pta_get_addr(t);
         var bi = if b == fbb { inst_next(first) } else { block_first(b) };
         var ei: i32 = -1;
         if is_first { ei = second; is_first = false; }
@@ -305,17 +303,12 @@ fn ds_mem_not_modified_between(first: i32, second: i32) -> bool {
             preds.clear();
             each_pred(b) { p => preds.push(p); };
             for pred in preds {
-                // PHITransAddr PredAddr = Addr
-                pta_addr = ptr;
-                pta_inputs.clear();
-                for j in in_n { pta_inputs.push(pool[in_at + j]); }
-                var needs = false;
-                for x in pta_inputs { if inst_parent(x) == b { needs = true; } }
-                if needs {
-                    if is_inst(pta_addr) && !pta_can_trans(pta_addr) { return false; }
-                    if pta_translate_value(b, pred, false) < 0 { return false; }
+                let pt = pta_copy(t);
+                if pta_needs_translation_from_block(pt, b) {
+                    if !pta_is_potentially_translatable(pt) { return false; }
+                    if pta_translate_value(pt, b, pred, false) < 0 { return false; }
                 }
-                let tp = pta_addr;
+                let tp = pta_get_addr(pt);
                 let r = ds_vr(pred);
                 if ds_v[r].vis == vtick {
                     if tp != ds_v[r].vis_ptr { return false; }
@@ -324,10 +317,7 @@ fn ds_mem_not_modified_between(first: i32, second: i32) -> bool {
                 ds_v[r].vis = vtick;
                 ds_v[r].vis_ptr = tp;
                 wl_bb.push(pred);
-                wl_addr.push(tp);
-                wl_in_at.push(pool.len);
-                for x in pta_inputs { pool.push(x); }
-                wl_in_n.push(pta_inputs.len);
+                wl_t.push(pt);
             }
         }
     }
