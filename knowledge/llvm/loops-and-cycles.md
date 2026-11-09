@@ -198,3 +198,31 @@ Verified with the jai port (impl/jai/src/pass_licm.jai) on Transforms/LICM and s
   ProfileSummaryInfo: LLE then refuses to version (LoopLoadElim/opt-size.ll).
 - `addRuntimeChecks` defaults to HoistRuntimeChecks = false; LoopVersioning (LLE, LoopDistribute) never hoists
   bounds to the outer loop, only LoopVectorize passes the option.
+
+## SimpleLoopUnswitch (verified by the Jai port, L1.unswitch, and sweeps of `simple-loop-unswitch<nontrivial>`)
+
+- `simple-loop-unswitch` defaults to `<no-nontrivial;trivial>`; non-trivial unswitching needs `<nontrivial>` or
+  `-enable-nontrivial-unswitch`, is skipped for optsize/minsize functions and for loops that are not safe to clone,
+  contain convergent calls, tokens used outside their block, irreducible cycles, or cleanuppad/catchswitch exits.
+- Trivial unswitching walks from the header through blocks without side effects (with MemorySSA: a block whose defs
+  list is more than one MemoryPhi stops it), following unconditional branches produced by earlier unswitches.
+- Cost: sum of `getInstructionCost(I, TCK_SizeAndLatency)` (TCK_CodeSize for minsize) over non-ephemeral
+  instructions; a candidate costs (LoopCost - cost of the dominator subtrees that are not duplicated) times
+  (#unique successors - 1), times the cost multiplier (siblings, parent size, 2^(candidates - 8)); unswitch only if the
+  cheapest is < `-unswitch-threshold` (50). Ties keep the first candidate (block order, selects/guards before the
+  block's terminator; the partially-invariant header candidate last, injections after that).
+- Non-trivial unswitching inserts `freeze` on the hoisted condition unless the branch is guaranteed to execute or the
+  condition is known not undef/poison (`-freeze-loop-unswitch-cond`); clones are named `.us`, exit merge phis
+  `.us-phi`, split exits get `.split` (the merge block takes the exit's name). After a partial (partially-invariant or
+  injected) unswitch the loop gets `llvm.loop.unswitch.partial.disable` / `.injection.disable` instead of being
+  revisited.
+- Nondeterminism in LLVM itself: unswitchTrivialSwitch builds its DT updates from a `SmallDenseMap` of split exits
+  (pointer-hash order), and with MemorySSA the number of slow DT queries varies between runs, so `print<domtree>` after
+  the pass can differ from run to run (tests/imported/llvm/Transforms/JumpThreading/crash.ll `@test7`,
+  IndVarSimplify/X86/verify-scev.ll `@test3`: LLVM printed different trees / counts on 8 repeated runs). The IR is
+  unaffected. collectUnswitchCandidatesWithInjections iterates a `DenseMap<Value *, ...>` too (only matters with
+  several injection groups in one loop).
+- OptBisect (`-opt-bisect-limit`) names a pass by its registered name without parameters:
+  `BISECT: running pass (3) simple-loop-unswitch on loop %for.body in function f` for `simple-loop-unswitch<nontrivial>`,
+  `instcombine` for `instcombine<max-iterations=1>`.
+- `-mattr` is a comma-separated cl::list: `-mattr=+avx2 -mattr=+f16c` gives `"target-features"="+avx2,+f16c"`.

@@ -286,6 +286,8 @@ Pass_Kind :: enum u8 {
     FUNCTION_ATTRS; RPO_FUNCTION_ATTRS; NORECURSE_LTO_INFERENCE;
     // Inliner (pass_inliner.jai), AlwaysInliner (pass_always_inliner.jai)
     INLINE; ALWAYS_INLINE;
+    // ProfileSummaryAnalysis (require<profile-summary>)
+    REQUIRE_PROFILE_SUMMARY;
 }
 
 Pass_Info :: struct {
@@ -343,6 +345,7 @@ PASS_TABLE :: Pass_Info.[
     .{"invalidate<demanded-bits>", .FUNCTION, .INVALIDATE, true, .DEMANDED_BITS},
     .{"aa-eval", .FUNCTION, .AA_EVAL, false, .DOMTREE},
     .{"require<globals-aa>", .MODULE, .REQUIRE_GLOBALS_AA, true, .DOMTREE},
+    .{"require<profile-summary>", .MODULE, .REQUIRE_PROFILE_SUMMARY, true, .DOMTREE},
     .{"inferattrs", .MODULE, .INFERATTRS, false, .DOMTREE},
     .{"print<memoryssa>", .FUNCTION, .PRINT_MEMORYSSA, true, .DOMTREE},
     .{"print<memoryssa><no-ensure-optimized-uses>", .FUNCTION, .PRINT_MEMORYSSA_NO_OPT, true, .DOMTREE},
@@ -905,6 +908,26 @@ parse_cl_opt :: (arg: string) -> bool {
 
 bisect_count: s64 = 0;
 
+// ProfileSummaryAnalysis: the module result exists once require<profile-summary> ran (it is never invalidated).
+// ProfileSummaryInfo itself is not ported: a pass that would consult a cached PSI of a module that has a profile
+// summary fails loudly through psi_check (with no summary every PSI query answers like a null PSI).
+psi_cached := false;
+psi_has_profile_summary :: () -> bool {
+    if !psi_cached return false;
+    for * ir.named_md {
+        if it.name != "llvm.module.flags" continue;
+        for m: it.ops {
+            if ir.mds[m].nops < 3 continue;
+            k := md_op(m, 1);
+            if k != NONE && ir.mds[k].kind == .STRING && (ir.mds[k].str == "ProfileSummary" || ir.mds[k].str == "CSProfileSummary") return true;
+        }
+    }
+    return false;
+}
+psi_check :: (pass_name: string) {
+    if psi_has_profile_summary() fatal("%: a cached ProfileSummaryInfo with a module profile summary (require<profile-summary>) is not implemented yet", pass_name);
+}
+
 // The name OptBisect prints: PIC->getPassNameForClassName(ClassName), the registered name without parameters
 bisect_pass_name :: (name: string) -> string {
     k := find_index_from_left(name, #char "<");
@@ -947,6 +970,7 @@ run_module_pm :: (n: s32) {
             case .DEBUGIFY; if should_run_pass(node, NONE) { run_debugify_pass(); lcg_invalidate(); }
             case .CHECK_DEBUGIFY; if should_run_pass(node, NONE) { check_debugify_metadata("", "CheckModuleDebugify"); lcg_invalidate(); }
             case .REQUIRE_GLOBALS_AA; should_run_pass(node, NONE); if !globals_aa globals_aa = globals_aa_compute();
+            case .REQUIRE_PROFILE_SUMMARY; should_run_pass(node, NONE); psi_cached = true;
             case .INFERATTRS; if should_run_pass(node, NONE) inferattrs_run_module();
             case .CGSCC_ADAPTOR; mam_invalidate(run_cgscc_adaptor(c));
             case .PRINT_LCG; should_run_pass(node, NONE); lcg_printer_run();

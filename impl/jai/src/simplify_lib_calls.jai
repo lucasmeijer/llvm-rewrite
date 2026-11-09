@@ -1030,8 +1030,9 @@ icb_or_list :: (ops: [] Value_Id) -> Value_Id {
 lcs_should_optimize_for_size :: (bb: Value_Id) -> bool {
     f := block_fn(bb);
     if fn_has_opt_size(f) return true;
-    // PSI is MAM.getCachedResult<ProfileSummaryAnalysis>: only present after require<profile-summary>, which the
-    // pass registry rejects, so shouldOptimizeForSizeImpl is always false here
+    psi_check("instcombine (LibCallSimplifier)");
+    // PSI is MAM.getCachedResult<ProfileSummaryAnalysis>: only present after require<profile-summary>; without a
+    // module profile summary shouldOptimizeForSizeImpl is false (psi_check fails loudly in the other case)
     return false;
 }
 

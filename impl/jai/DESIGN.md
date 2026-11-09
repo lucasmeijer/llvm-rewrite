@@ -70,7 +70,10 @@ src/
                   foldBranchToCommonDest for exit merging), LCSSA (formLCSSA*, SSAUpdater::RewriteUse)
   loop_pm.jai     loop(...) / loop-mssa(...): FunctionToLoopPassAdaptor, LoopPassManager, LPMUpdater
   pass_loop_rotate.jai  LoopRotate, MergeBlockIntoPredecessor, CodeMetrics, x86 code-size cost bounds
-  mssa_updater.jai MemorySSAUpdater (insertDef/insertUse, removeMemoryAccess, moveTo*, applyUpdates, removeBlocks, ...)
+  mssa_updater.jai MemorySSAUpdater (insertDef/insertUse, removeMemoryAccess, moveTo*, applyUpdates, removeBlocks,
+                  updateForClonedLoop / updateExitBlocksForClonedLoop, ...)
+  pass_simple_loop_unswitch.jai  SimpleLoopUnswitch (`slu_*` state, trivial + non-trivial unswitching, loop cloning,
+                  hasPartialIVCondition, SplitBlockAndInsertIfThen with an eager DTU)
   must_execute.jai ICFLoopSafetyInfo (MustExecute.cpp) + InstructionPrecedenceTracking, colorEHFunclets
   alias_set_tracker.jai  AliasSetTracker
   pass_licm.jai   LICM / LNICM (incl. ControlFlowHoister, LoopPromoter, hoistArithmetics)

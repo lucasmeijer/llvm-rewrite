@@ -58,7 +58,7 @@ lib/Analysis/IVDescriptors.cpp 0.05
 lib/Transforms/InstCombine/InstCombinePHI.cpp 0.95
 lib/IR/ConstantFold.cpp 0.9
 lib/IR/Value.cpp 0.6
-lib/Analysis/MemorySSAUpdater.cpp 0.8  # no updateForClonedLoop / updateExitBlocksForClonedLoop
+lib/Analysis/MemorySSAUpdater.cpp 0.97  # all (updateForClonedLoop / updateExitBlocksForClonedLoop since L1.unswitch); no debug dumps
 lib/Support/KnownBits.cpp 0.85
 lib/Analysis/LoopInfo.cpp 0.7
 lib/IR/DataLayout.cpp 0.3
@@ -115,7 +115,7 @@ lib/Transforms/Scalar/LICM.cpp 0.97  # all of LICM/LNICM incl. ControlFlowHoiste
 lib/Analysis/MustExecute.cpp 0.35  # LoopSafetyInfo + ICFLoopSafetyInfo only (no SimpleLoopSafetyInfo, printers, MustBeExecutedContextExplorer)
 lib/Analysis/AliasSetTracker.cpp 0.85  # no printers
 lib/Analysis/InstructionPrecedenceTracking.cpp 0.9
-lib/Transforms/Utils/LoopUtils.cpp 0.45  # addRuntimeChecks/expandBounds, findDefsUsedOutsideOfLoop; appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint, isAlmostDeadIV, rewriteLoopExitValues (+ canLoopBeDeleted, hasHardUserWithinLoop; not the UnusedIndVarInLoop mode), deleteDeadLoop, breakLoopBackedge, hasMustProgress; cloneLoop, addStringMetadataToLoop, makeFollowupLoopID, has{Unroll,UnrollAndJam}Transformation, get/setLoopEstimatedTripCount, get/setLoopProbability, get/setBranchProbability
+lib/Transforms/Utils/LoopUtils.cpp 0.5  # hasPartialIVCondition (L1.unswitch); addRuntimeChecks/expandBounds, findDefsUsedOutsideOfLoop; appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint, isAlmostDeadIV, rewriteLoopExitValues (+ canLoopBeDeleted, hasHardUserWithinLoop; not the UnusedIndVarInLoop mode), deleteDeadLoop, breakLoopBackedge, hasMustProgress; cloneLoop, addStringMetadataToLoop, makeFollowupLoopID, has{Unroll,UnrollAndJam}Transformation, get/setLoopEstimatedTripCount, get/setLoopProbability, get/setBranchProbability
 lib/IR/EHPersonalities.cpp 0.8  # classifyEHPersonality, colorEHFunclets
 lib/CodeGen/TargetLoweringBase.cpp 0.3   # jai_simplifycfg: initActions, computeRegisterProperties, getTypeConversion, isBeneficialToExpandPowI, getBitWidthForCttzElements
 lib/Target/X86/X86ISelLowering.cpp 0.03   # jai_simplifycfg: the X86TargetLowering constructor's operation actions (generated), getPreferredVectorAction, isLegalAddressingMode, isCheapToSpeculateCt*, isNoopAddrSpaceCast
@@ -153,3 +153,4 @@ lib/Transforms/Utils/LoopPeel.cpp 0.98
 lib/Analysis/LoopUnrollAnalyzer.cpp 1
 lib/Transforms/Utils/ValueMapper.cpp 0.35  # mapValue, mapBlockAddress, remapInstruction, remapDbgRecord, mapSimpleMetadata; not the MDNodeMapper, global/alias/appending remapping, TypeMapper
 lib/Transforms/Utils/CloneFunction.cpp 0.3  # CloneBasicBlock, remapInstructionsInBlocks, cloneNoAliasScopes/adaptNoAliasScopes/cloneAndAdaptNoAliasScopes, identifyNoAliasScopesToClone
+lib/Transforms/Scalar/SimpleLoopUnswitch.cpp 0.97  # jai_unswitch: all of the pass; not ShouldRunExtraSimpleLoopUnswitch / extra-simple-loop-unswitch-passes (O3 pipeline), printPipeline, statistics; TTI.hasBranchDivergence is false (X86 / no target only)

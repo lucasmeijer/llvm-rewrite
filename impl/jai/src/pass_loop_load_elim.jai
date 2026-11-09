@@ -202,6 +202,7 @@ lel_process_loop :: (c: *Lel) -> bool {
         if c.lai.has_convergent_op return false;
         // shouldOptimizeForSize(Header, PSI, BFI): the function's optsize/minsize, else false without a PSI
         if fn_has_opt_size(c.li.fn) return false;
+        psi_check("loop-load-elim");
         if !li_is_recursively_lcssa_form(c.li, c.l, c.dt) form_lcssa_recursively(c.li, c.l, c.dt);
         lv: Lver;
         lv.versioned = c.l; lv.lai = c.lai; lv.checks = checks; lv.li = c.li; lv.dt = c.dt;
@@ -227,8 +228,8 @@ loop_load_elim_run :: (f: Value_Id) -> Preserved {
     s := get_scev(f);
     dt := get_domtree(f);
     ac := get_assumption_cache(f);
-    // MAMProxy.getCachedResult<ProfileSummaryAnalysis>: never cached here (require<profile-summary> is not supported),
-    // so PSI and BFI are null and shouldOptimizeForSize is false
+    // MAMProxy.getCachedResult<ProfileSummaryAnalysis>: PSI is only consulted with a module profile summary, which
+    // fails loudly (psi_check); otherwise BFI is null and shouldOptimizeForSize is false
     se = s;
     saved := scev_pass_se;
     scev_pass_se = s;

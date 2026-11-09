@@ -205,7 +205,7 @@ tti_get_peeling_preferences :: (t: *Tti, pp: *Peel_Prefs) {
     pp.peel_profiled_iterations = true;
 }
 
-// gatherUnrollingPreferences (PSI and BFI are never available here: shouldOptimizeForSize is false)
+// gatherUnrollingPreferences (a cached PSI with a module profile summary fails loudly: psi_check)
 gather_unrolling_preferences :: (li: *Loop_Info, l: Loop_Id, t: *Tti, opt_level: s64, o: *Unroll_Options) -> Unroll_Prefs {
     up: Unroll_Prefs;
     up.threshold = ifx opt_level > 2 then lu_u32(lu_cl.unroll_threshold_aggressive) else lu_u32(lu_cl.unroll_threshold_default);
@@ -237,6 +237,7 @@ gather_unrolling_preferences :: (li: *Loop_Info, l: Loop_Id, t: *Tti, opt_level:
 
     f := li.fn;
     opt_for_size := fn_has_opt_size(f);   // || shouldOptimizeForSize(Header, PSI = null, BFI = null) = false
+    if !opt_for_size psi_check("loop-unroll");
     if opt_for_size {
         up.threshold = up.opt_size_threshold;
         up.partial_threshold = up.partial_opt_size_threshold;

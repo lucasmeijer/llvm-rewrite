@@ -885,3 +885,38 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   the same superlinear path as indvars) and SimplifyIndVar's SCEV queries after partial unrolling; the unroller
   itself is linear. pr77842.ll (an unroll-by-2048 pragma) takes LLVM 6 s and us > 60 s (simplifyLoopIVs on the
   unrolled body); IndVarSimplify/eliminate-exit.ll with -unroll-count=3 takes LLVM 31 s.
+
+## SimpleLoopUnswitch (L1.unswitch 130/134: roundtrip 67/67, opt 63/67)
+
+- `pass_simple_loop_unswitch.jai` ports SimpleLoopUnswitch.cpp (everything the pass does; not the O3-only
+  ShouldRunExtraSimpleLoopUnswitch analysis / extra-simple-loop-unswitch-passes), LoopUtils' hasPartialIVCondition and
+  SplitBlockAndInsertIfThen with an eager DomTreeUpdater + LoopInfo. `mssa_updater.jai` got updateForClonedLoop and
+  updateExitBlocksForClonedLoop (Mssa_Clone_Ctx.region_set = IsInClonedRegion over loop + exit blocks). The cl::opts
+  (`-enable-nontrivial-unswitch`, `-unswitch-threshold`, `-freeze-loop-unswitch-cond`, ...) are parsed by
+  `unswitch_parse_cl_opt`. TTI.hasBranchDivergence is false for every target we support.
+- The 4 failing tests need cgscc(inline), scc-oz-module-inliner, loop-interchange and `default<O1/2/3>`.
+- `require<profile-summary>` exists now (passes.jai `psi_cached`; ProfileSummaryInfo itself is not ported). The passes
+  that read a cached PSI (LoopUnroll, LoopLoadElimination, the LibCallSimplifier inside InstCombine) call `psi_check`,
+  which fails loudly when the module has a `ProfileSummary` flag; without one every PSI query answers like a null PSI.
+- ValueToValueMapTy semantics that matter here: values are WeakTrackingVHs (an erased cloned block must read as
+  absent: `slu_vlookup` treats DEAD values as missing), and the one key RAUW (exit-block phi -> `.us-phi`) moves the
+  key like ValueMap's FollowRAUW. Nothing else RAUWs a key while the maps are used.
+- Debug records: LLVM keeps the records of a block whose terminator was erased as "trailing" records, and the next
+  instruction inserted at the end adopts them (also a terminator moved with non-preserving moveBefore leaves its records
+  behind). `slu.trailing` + `slu_erase_terminator_keep_trailing` / `slu_append` / `slu_move_terminator_to_end` model it;
+  the pass fails loudly if trailing records are left at the end. `split_block(..., head = true)` is SplitBlock at
+  `BB->begin()` (the head bit survives only when no phi / EH pad is skipped).
+- Shared fixes: OptBisect prints the registered pass name without parameters (`simple-loop-unswitch`, `instcombine`,
+  `loop-rotate`, not `instcombine<max-iterations=1>`); repeated `-mattr` options accumulate (cl::list, CommaSeparated).
+- Sweeps (every round-tripping file; whole-file, `--per-function`, `--with-test-flags`, `--per-function
+  --with-test-flags`) of `simple-loop-unswitch<nontrivial>` and `loop-mssa(simple-loop-unswitch<nontrivial>)`: 0 differs
+  (loud only: other passes' options, `-enable-knowledge-retention` with loop pipelines, the ppc_fp128 parser gap).
+  Also 0 differs: `sroa,loop-mssa(loop-rotate,licm,simple-loop-unswitch<nontrivial>)`, `sroa,loop(loop-rotate,
+  simple-loop-unswitch<nontrivial>),loop-mssa(licm,simple-loop-unswitch<nontrivial>)`, `debugify,function(loop-mssa(
+  simple-loop-unswitch<nontrivial>))`, `debugify,function(sroa,loop(loop-rotate,simple-loop-unswitch<nontrivial>))`, the
+  4 tests/perf/compile programs, and the analysis sweeps `...,print<memoryssa>` (-verify-memoryssa) and `...,print<loops>`.
+  `...,print<domtree>` shows 2 differences that are LLVM's own nondeterminism (pointer-ordered containers; LLVM gives
+  different output on repeated runs: knowledge/llvm/loops-and-cycles.md).
+- Perf (x64 build, `-disable-output`, no @perf benchmark times the pass): `sroa,loop-mssa(loop-rotate,licm,
+  simple-loop-unswitch<nontrivial>)` minus the same without unswitch: sqlite3.ll +0.07 s, oggenc.ll +0.18 s (LLVM
+  +0.02 / +0.0); the tests/perf/scaling loop shapes have no unswitch candidates (no measurable cost).

@@ -11530,7 +11530,9 @@ tests/imported/llvm/Transforms/SimpleLoopUnswitch/2012-05-20-Phi.ll::opt
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/2012-05-20-Phi.ll::roundtrip
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/2015-09-18-Addrspace.ll::opt
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/2015-09-18-Addrspace.ll::roundtrip
+tests/imported/llvm/Transforms/SimpleLoopUnswitch/PGO-nontrivial-unswitch2.ll::opt
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/PGO-nontrivial-unswitch2.ll::roundtrip
+tests/imported/llvm/Transforms/SimpleLoopUnswitch/PGO-nontrivial-unswitch3.ll::opt
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/PGO-nontrivial-unswitch3.ll::roundtrip
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/basictest-profmd.ll::opt
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/basictest-profmd.ll::roundtrip
