@@ -490,7 +490,7 @@ tti_cast_context_hint :: (i: Value_Id) -> u8 {
     return CCH_NONE;
 }
 
-iid_name :: (id: Intrinsic_Id) -> string { return INTRINSIC_INFOS[id - 1].name; }
+iid_name :: (id: Intrinsic_Id) -> string { if id == NOT_INTRINSIC return ""; return INTRINSIC_INFOS[id - 1].name; }
 
 // ---------------------------------------------------------------- ShuffleVectorInst mask predicates
 
@@ -695,6 +695,7 @@ FREE_INTRINSICS :: string.["llvm.allow.runtime.check", "llvm.allow.ubsan.check",
     "llvm.coro.size", "llvm.coro.align", "llvm.coro.suspend", "llvm.coro.subfn.addr", "llvm.threadlocal.address",
     "llvm.experimental.widenable.condition", "llvm.ssa.copy"];
 is_free_intrinsic :: (id: Intrinsic_Id) -> bool {
+    if id == NOT_INTRINSIC return false;
     n := iid_name(id);
     for FREE_INTRINSICS if it == n return true;
     return false;

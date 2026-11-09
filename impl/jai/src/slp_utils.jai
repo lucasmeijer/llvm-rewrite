@@ -36,6 +36,9 @@ slp_cl: struct {
     copyable := true;                     // -slp-copyable-elements
     loop_trip_count: s64 = 2;             // -slp-cost-loop-trip-count
     per_lane_gather_scale := true;        // -slp-per-lane-gather-scale
+    max_reg_size_given: bool;             // getNumOccurrences() of -slp-max-reg-size / -slp-min-reg-size / -slp-max-vf
+    min_reg_size_given: bool;
+    max_vf_given: bool;
 };
 
 slp_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
@@ -58,10 +61,10 @@ slp_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
         case "slp-vectorize-hor-store"; b(*slp_cl.vectorize_hor_store, name, value, has_value);
         case "slp-split-alternate-instructions"; b(*slp_cl.split_alternate, name, value, has_value);
         case "slp-inst-count-check"; b(*slp_cl.inst_count_check, name, value, has_value);
-        case "slp-max-reg-size"; n(*slp_cl.max_reg_size, name, value, has_value);
-        case "slp-max-vf"; n(*slp_cl.max_vf, name, value, has_value, true);
+        case "slp-max-reg-size"; n(*slp_cl.max_reg_size, name, value, has_value); slp_cl.max_reg_size_given = true;
+        case "slp-max-vf"; n(*slp_cl.max_vf, name, value, has_value, true); slp_cl.max_vf_given = true;
         case "slp-schedule-budget"; n(*slp_cl.schedule_budget, name, value, has_value);
-        case "slp-min-reg-size"; n(*slp_cl.min_reg_size, name, value, has_value);
+        case "slp-min-reg-size"; n(*slp_cl.min_reg_size, name, value, has_value); slp_cl.min_reg_size_given = true;
         case "slp-recursion-max-depth"; n(*slp_cl.recursion_max_depth, name, value, has_value, true);
         case "slp-min-tree-size"; n(*slp_cl.min_tree_size, name, value, has_value, true);
         case "slp-phi-vectorization-budget"; n(*slp_cl.phi_budget, name, value, has_value, true);
