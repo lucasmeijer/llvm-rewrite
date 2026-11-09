@@ -24,7 +24,7 @@ dl_index_type :: (t: Type_Id) -> Type_Id {
     return it;
 }
 dl_address_type :: (t: Type_Id) -> Type_Id { return dl_index_type(t); }
-type_int :: (bits: u32) -> Type_Id { return intern_type(.INT, 0, bits, .[]); }
+type_int :: inline (bits: u32) -> Type_Id { return type_int(cast(u64) bits); }
 // DataLayout::isNonIntegralPointerType / mustNotIntroduceIntToPtr: address spaces listed in "ni:" of the datalayout
 dl_is_non_integral_as :: (as: u32) -> bool { return dl_ni_as(as); }
 dl_is_non_integral_pointer_type :: (t: Type_Id) -> bool { st := scalar_type(t); return is_ptr_type(st) && dl_is_non_integral_as(cast(u32) ir.types[st].a); }

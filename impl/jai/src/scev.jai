@@ -87,6 +87,7 @@ Scev_State :: struct {
     preds: [..] Scev_Pred_Row;                     // UniquePreds
     pred_ops: [..] u32;
     pred_unique: Table(u64, u32);
+    const_cache: [..] Scev_Const_Cache_Entry;     // sc_get_constant (ours)
     walking_be_dominating_conds: bool;
     proving_split_predicate: bool;
     has_guards: bool;
@@ -94,6 +95,8 @@ Scev_State :: struct {
 }
 
 Disp_Entry :: struct { key: u32; d: u8; }
+Scev_Const_Cache_Entry :: struct { v: u64; bits: u32; id: Scev_Id; }
+SCEV_CONST_CACHE_SIZE :: 1024;
 Scope_Entry :: struct { l: Loop_Id; s: Scev_Id; }   // s == NONE: pending
 Pred_Rewrite :: struct { s: Scev_Id; preds: [..] u32; }
 Loop_Properties :: struct { has_no_abnormal_exits: bool; has_no_side_effects: bool; }
@@ -142,7 +145,7 @@ scev_new :: (f: Value_Id, dt: *Dom_Tree, li: *Loop_Info, ac: *Assumption_Cache) 
 }
 
 scev_free :: (s: *Scev_State) {
-    array_free(s.nodes); array_free(s.ops);
+    array_free(s.nodes); array_free(s.ops); array_free(s.const_cache);
     deinit(*s.unique); deinit(*s.value_expr); deinit(*s.expr_values); deinit(*s.fold_cache);
     deinit(*s.has_rec); deinit(*s.unsigned_ranges); deinit(*s.signed_ranges); deinit(*s.const_multiple);
     deinit(*s.loop_disp); deinit(*s.block_disp); deinit(*s.values_at_scopes);
@@ -360,6 +363,19 @@ sc_get_constant_value :: (v: Value_Id) -> Scev_Id {
 }
 // getConstant(const APInt &)
 sc_get_constant :: (a: APInt) -> Scev_Id {
+    if a.bits <= 64 {
+        // direct-mapped cache of (width, value) -> SCEVConstant: skips building the ConstantInt key and both
+        // uniquing lookups when the constant exists already (constants are never removed from UniqueSCEVs)
+        if se.const_cache.count == 0 { array_resize(*se.const_cache, SCEV_CONST_CACHE_SIZE); }
+        h := (a.v * 0x9E37_79B9_7F4A_7C15) ^ (cast(u64) a.bits * 0xC2B2_AE3D_27D4_EB4F);
+        e := *se.const_cache[cast(s64) ((h >> 40) & (SCEV_CONST_CACHE_SIZE - 1))];
+        if e.id != SCEV_CNC && e.v == a.v && e.bits == a.bits return e.id;
+        w: [1] u64;
+        w[0] = a.v;
+        id := sc_get_constant_value(const_int_words(type_int(a.bits), w));
+        e.v = a.v; e.bits = a.bits; e.id = id;
+        return id;
+    }
     w := ap_words(a);
     return sc_get_constant_value(const_int_words(type_int(a.bits), w));
 }

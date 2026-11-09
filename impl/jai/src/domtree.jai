@@ -26,7 +26,9 @@ Dom_Tree :: struct {
     post: bool;
     fn: Value_Id = NONE;
     nodes: [..] Dom_Node;
-    node_of: Table(Value_Id, s32);
+    node_of: Table(Value_Id, s32);   // blocks whose row (ir.v_aux) is below dense_base, and the virtual root NONE
+    node_dense: [..] s32;            // node of the block with row dense_base + i (-1 = none)
+    dense_base: s64 = 0x7FFF_FFFF_FFFF_FFFF;
     roots: [..] Value_Id;
     root_node: s32 = -1;
     dfs_valid: bool;
@@ -84,10 +86,31 @@ fn_max_block_number :: (f: Value_Id) -> u32 { return cast(u32) glob(f).next_bloc
 
 // ---------------------------------------------------------------- node API
 
+// The block -> node map is a dense array over block rows from dense_base (the function's first row when the tree
+// was computed; blocks are appended to ir.blocks as they are created), the Table for anything else.
 dt_node :: inline (dt: *Dom_Tree, b: Value_Id) -> s32 {
+    if b != NONE && ir.v_kind[b] == .BLOCK {
+        r := cast(s64) ir.v_aux[b] - dt.dense_base;
+        if r >= 0 { if r < dt.node_dense.count return dt.node_dense[r]; return -1; }
+    }
     found, n := table_find(*dt.node_of, b);
     if found return n;
     return -1;
+}
+dt_map_set :: (dt: *Dom_Tree, b: Value_Id, n: s32) {
+    if b != NONE && ir.v_kind[b] == .BLOCK {
+        r := cast(s64) ir.v_aux[b] - dt.dense_base;
+        if r >= 0 {
+            if r >= dt.node_dense.count {
+                old := dt.node_dense.count;
+                array_resize(*dt.node_dense, r + 1, initialize = false);
+                for i: old..r dt.node_dense[i] = -1;
+            }
+            dt.node_dense[r] = n;
+            return;
+        }
+    }
+    if n < 0 table_remove(*dt.node_of, b); else table_set(*dt.node_of, b, n);
 }
 dt_level :: inline (dt: *Dom_Tree, n: s32) -> u32 { return dt.nodes[n].level; }
 dt_idom :: inline (dt: *Dom_Tree, n: s32) -> s32 { return dt.nodes[n].idom; }
@@ -149,7 +172,7 @@ dt_create_node :: (dt: *Dom_Tree, b: Value_Id, idom: s32 = -1) -> s32 {
     nd.level = ifx idom >= 0 then dt.nodes[idom].level + 1 else 0;
     id := cast(s32) dt.nodes.count;
     array_add(*dt.nodes, nd);
-    table_set(*dt.node_of, b, id);
+    dt_map_set(dt, b, id);
     // getNodeIndexForInsert: resize to max(getMaxBlockNumber(), Idx + 1) when Idx doesn't fit
     ensure_block_numbers(dt.fn);
     idx: u32 = ifx b == NONE then 0 else block_number(b) + 1;
@@ -167,7 +190,7 @@ dt_erase_node :: (dt: *Dom_Tree, b: Value_Id) {
     assert(dt.nodes[n].first_child < 0, "Node is not a leaf node.");
     dt.dfs_valid = false;
     if dt.nodes[n].idom >= 0 dt_remove_child(dt, dt.nodes[n].idom, n);
-    table_remove(*dt.node_of, b);
+    dt_map_set(dt, b, -1);
     if !dt.post return;
     for dt.roots if it == b {
         dt.roots[it_index] = dt.roots[dt.roots.count - 1];
@@ -179,6 +202,9 @@ dt_erase_node :: (dt: *Dom_Tree, b: Value_Id) {
 dt_reset :: (dt: *Dom_Tree) {
     dt.nodes.count = 0;
     table_reset(*dt.node_of);
+    dt.node_dense.count = 0;
+    dt.dense_base = 0x7FFF_FFFF_FFFF_FFFF;
+    if dt.fn != NONE for b: fn_blocks(dt.fn) dt.dense_base = min(dt.dense_base, cast(s64) ir.v_aux[b]);
     dt.roots.count = 0;
     dt.root_node = -1;
     dt.dfs_valid = false;

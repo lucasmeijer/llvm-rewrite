@@ -3903,9 +3903,12 @@ simplify_instruction_with_operands :: (i: Value_Id, new_ops: [] Value_Id, q: Sim
 }
 // llvm::simplifyInstruction
 simplify_instruction :: (i: Value_Id, q: Simplify_Query) -> Value_Id {
-    ops: [..] Value_Id; ops.allocator = temp;
-    n := nops(i);
-    for k: 0..cast(s64) n - 1 array_add(*ops, op(i, cast(u32) k));
+    n := cast(s64) nops(i);
+    buf: [8] Value_Id = ---;   // most instructions: no temp allocation
+    ops: [] Value_Id;
+    if n <= buf.count { ops.data = buf.data; ops.count = n; }
+    else ops = NewArray(n, Value_Id,, allocator = temp);
+    for k: 0..n - 1 ops[k] = op(i, cast(u32) k);
     res := simplify_instruction_with_operands_r(i, ops, q, RECURSION_LIMIT);
     if res == i return const_poison(vtype(i));
     return res;

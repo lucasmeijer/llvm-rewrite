@@ -377,8 +377,11 @@ argument_aliasing_to_returned_pointer_aa :: (c: Value_Id, must_preserve_offset: 
 strip_pointer_casts_for_alias_analysis :: (v_in: Value_Id) -> Value_Id {
     v := v_in;
     if !is_ptr_type(vtype(v)) return v;
+    // SmallPtrSet<const Value *, 4> Visited: a stack buffer first
+    vbuf: [8] Value_Id = ---;
+    nvis := 1;
+    vbuf[0] = v;
     visited: [..] Value_Id; visited.allocator = temp;
-    array_add(*visited, v);
     while true {
         o := opr_code(v);
         if o == .GEP {
@@ -403,8 +406,10 @@ strip_pointer_casts_for_alias_analysis :: (v_in: Value_Id) -> Value_Id {
                 }
             } else return v;
         }
+        for i: 0..min(nvis, vbuf.count) - 1 if vbuf[i] == v return v;
         for visited if it == v return v;
-        array_add(*visited, v);
+        if nvis < vbuf.count vbuf[nvis] = v; else array_add(*visited, v);
+        nvis += 1;
     }
     return v;
 }

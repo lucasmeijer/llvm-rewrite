@@ -179,7 +179,7 @@ dt_new :: (post: bool) -> *Dom_Tree {
     return dt;
 }
 dt_free :: (dt: *Dom_Tree) {
-    array_free(dt.nodes); array_free(dt.roots); deinit(*dt.node_of);
+    array_free(dt.nodes); array_free(dt.roots); deinit(*dt.node_of); array_free(dt.node_dense);
     free(dt);
 }
 
