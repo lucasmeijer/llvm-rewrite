@@ -273,7 +273,8 @@ fn split_block_predecessors(bb: i32, preds: const i32[:], suffix: const u8[:], u
     return nb;
 }
 
-// SplitLandingPadPredecessorsImpl: returns NewBBs[0].
+// SplitLandingPadPredecessorsImpl: returns NewBBs[0]; NewBBs[1] (or -1) is left in split_lp_nb2.
+var split_lp_nb2: i32 = -1;
 fn split_landing_pad_predecessors(orig: i32, preds: const i32[:], suffix1: const u8[:], suffix2: const u8[:], use_dt: bool, use_li: bool, preserve_lcssa: bool) -> i32 {
     let fv = block_func(orig);
     let nm1 = block_name_plus(orig, suffix1);
@@ -298,6 +299,7 @@ fn split_landing_pad_predecessors(orig: i32, preds: const i32[:], suffix1: const
         hle = update_analysis_information(orig, nb2, preds2, use_dt, use_li, preserve_lcssa);
         update_phi_nodes(orig, nb2, preds2, bi2, hle);
     }
+    split_lp_nb2 = nb2;
     let lpad = first_non_phi(orig);
     let c1 = inst_clone(lpad);
     inst_insert_before_head(c1, first_non_phi(nb1));

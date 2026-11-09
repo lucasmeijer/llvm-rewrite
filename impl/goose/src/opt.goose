@@ -45,6 +45,8 @@ fn main() {
         else if starts_with(a, "-march=") { march.clear(); march.append(a[7..]); }
         else if starts_with(a, "-mtriple=") { triple_normalize(a[9..], cl_mtriple); }
         else if a == "-mtriple" { i++; if i < av.len { triple_normalize(av[i], cl_mtriple); } }
+        // cl::opt<std::string> (ValueRequired): "-aa-pipeline basic-aa" takes the next argument
+        else if a == "-aa-pipeline" { i++; if i < av.len { flag_set("aa-pipeline", av[i]); } }
         // TargetLibraryInfo options (optdriver.cpp): cl::list, "-x=v" or "-x v"
         else if a == "-disable-simplify-libcalls" { tli_cl_disable_all = true; }
         else if starts_with(a, "-disable-builtin=") { tli_cl_disable.append(a[17..]); tli_cl_disable.push('\n'); }

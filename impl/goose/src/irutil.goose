@@ -398,11 +398,15 @@ fn create_block_after(fv: i32, after: i32, name: const u8[:]) -> i32 {
 fn split_block(bv: i32, at: i32, name: const u8[:]) -> i32 {
     let fv = block_func(bv);
     let nb = create_block_after(fv, bv, name);
+    // DebugLoc Loc = I->getStableDebugLoc() (without its atom group)
+    let loc = inst_get_md(at, 0);
+    if loc >= 0 && mds[loc].kind == MK_DI && di_kind(loc) == DIK_LOCATION && di_int(loc, "atomGroup") != 0 { fatal("splitBasicBlock: key-instructions atom groups are not ported yet"); }
     // New->splice(New->end(), this, I, end()) with I = I->getIterator() (no head bit): I's records stay
     // here and end up in front of the new branch
     block_splice(nb, -1, false, bv, at, false, -1, false);
     let br = create_inst(OP_BR, T_VOID, [nb]);
     block_append_inst(bv, br);
+    if loc >= 0 { inst_set_md(br, 0, loc); }
     block_replace_successors_phi_uses_with(nb, bv, nb);
     return nb;
 }

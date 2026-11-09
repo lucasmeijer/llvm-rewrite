@@ -47,6 +47,7 @@ import debugify;
 import dbgutil;
 import lvi;
 import cvp;
+import jt;
 import gvn;
 import dse;
 
@@ -149,6 +150,7 @@ let PASS_TABLE: const u8[:][] = [
     "f:verify<scalar-evolution>:119:1",
     "f:print<lazy-value-info>:180:1",
     "f:correlated-propagation:181:0",
+    "f:jump-threading:182:0",
     "f:print<branch-prob>:183:1",
     "f:print<block-freq>:184:1",
     "l:print<loopnest>:200:1",
@@ -854,6 +856,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
         P_PRINT_LVI => { lvi_print(fv); return PA_ALL; },
         P_CVP => { return cvp_run(fv); },
+        P_JUMP_THREADING => { return jump_threading_run(fv, (pnodes[n].arg as i64) - 1); },
         P_VERIFY_SCEV => { scev_get(fv); return PA_ALL; },     // ScalarEvolution::verify reports only mismatches
         _ => { fatal("internal: unknown function pass id"); return PA_ALL; },
     }

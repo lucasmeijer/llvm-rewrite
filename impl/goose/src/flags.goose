@@ -18,6 +18,7 @@ var cl_mcpu: u8[>..];      // -mcpu
 let KNOWN_FLAGS: const u8[:][] = [
     "adce-remove-loops", "adce-remove-control-flow",
     "verify-dom-info",                                   // no-op: extra verification only
+    "verify-each",                                       // no-op: the verifier would only report broken IR
     "verify-loop-info", "verify-loop-lcssa",             // no-op: extra verification only
     "simplifycfg-require-and-preserve-domtree",          // read by simplifycfg
     "bonus-inst-threshold", "keep-loops", "switch-range-to-icmp", "switch-to-lookup", "forward-switch-cond",
@@ -30,6 +31,8 @@ let KNOWN_FLAGS: const u8[:][] = [
     "simplifycfg-max-small-block-size", "simplifycfg-branch-fold-threshold",
     "simplifycfg-branch-fold-common-dest-vector-multiplier", "simplifycfg-merge-compatible-invokes",
     "max-switch-cases-per-result", "max-jump-threading-live-blocks",
+    "jump-threading-threshold", "jump-threading-implication-search-threshold",   // read by jump-threading
+    "jump-threading-phi-threshold", "jump-threading-across-loop-headers",
     "max-phi-entries-increase-after-removing-empty-block",   // read by simplifycfg (Local.cpp)
     "sroa-skip-mem2reg",                                 // read by sroa
     "aa-pipeline",                                       // the AAManager pipeline (aa.goose)
