@@ -5503,6 +5503,7 @@ tests/imported/llvm/Transforms/InstCombine/gepphigep.ll::opt
 tests/imported/llvm/Transforms/InstCombine/gepphigep.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/get-lowbitmask-upto-and-including-bit.ll::opt
 tests/imported/llvm/Transforms/InstCombine/get-lowbitmask-upto-and-including-bit.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/get_active_lane_mask.ll::opt
 tests/imported/llvm/Transforms/InstCombine/get_active_lane_mask.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/get_vector_length.ll::opt
 tests/imported/llvm/Transforms/InstCombine/get_vector_length.ll::roundtrip
@@ -7551,6 +7552,7 @@ tests/imported/llvm/Transforms/InstSimplify/ConstProp/trunc_vec.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/trunc_vec.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vecreduce.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vecreduce.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-calls.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-calls.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-type-constant-folding.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/ConstProp/vector-type-constant-folding.ll::roundtrip
@@ -7693,6 +7695,7 @@ tests/imported/llvm/Transforms/InstSimplify/gc_relocate.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/gc_relocate.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/gep.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/gep.ll::roundtrip
+tests/imported/llvm/Transforms/InstSimplify/get_active_lane_mask.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/get_active_lane_mask.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/gv-alloca-cmp.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/gv-alloca-cmp.ll::roundtrip
@@ -9693,6 +9696,7 @@ tests/imported/llvm/Transforms/Reassociate/fast-ArrayOutOfBounds.ll::opt
 tests/imported/llvm/Transforms/Reassociate/fast-ArrayOutOfBounds.ll::roundtrip
 tests/imported/llvm/Transforms/Reassociate/fast-MissedTree.ll::opt
 tests/imported/llvm/Transforms/Reassociate/fast-MissedTree.ll::roundtrip
+tests/imported/llvm/Transforms/Reassociate/fast-ReassociateVector.ll::opt
 tests/imported/llvm/Transforms/Reassociate/fast-ReassociateVector.ll::roundtrip
 tests/imported/llvm/Transforms/Reassociate/fast-SubReassociate.ll::opt
 tests/imported/llvm/Transforms/Reassociate/fast-SubReassociate.ll::roundtrip
