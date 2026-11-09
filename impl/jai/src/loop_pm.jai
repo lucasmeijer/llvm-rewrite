@@ -157,7 +157,7 @@ should_run_loop_pass :: (node: *Pass_Node, li: *Loop_Info, l: Loop_Id) -> bool {
     if opts.opt_bisect_limit >= 0 {
         bisect_count += 1;
         ok := bisect_count <= opts.opt_bisect_limit;
-        print_stderr("BISECT: %running pass (%) % on %\n", ifx ok then "" else "NOT ", bisect_count, node.name, loop_bisect_name(li, l));
+        print_stderr("BISECT: %running pass (%) % on %\n", ifx ok then "" else "NOT ", bisect_count, bisect_pass_name(node.name), loop_bisect_name(li, l));
         if !ok run = false;
     }
     return run;
@@ -199,6 +199,7 @@ run_loop_pass :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater)
         case .LOOP_SIMPLIFYCFG; return loop_simplifycfg_run(node, l, lar, u);
         case .LOOP_IDIOM; return loop_idiom_run(node, l, lar, u);
         case .LOOP_UNROLL_FULL; return loop_unroll_full_run(node, l, lar, u);
+        case .SIMPLE_LOOP_UNSWITCH; return simple_loop_unswitch_run(node, l, lar, u);
         case .LNICM;
             // a loop-nest pass runs on the LoopNest of the outermost loop containing L
             root := l;

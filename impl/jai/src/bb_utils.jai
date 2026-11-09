@@ -256,12 +256,14 @@ create_phis_for_split_loop_exit :: (preds: [] Value_Id, split_bb: Value_Id, dest
 }
 
 // SplitBlock(Old, SplitPt, DT, LI, MSSAU, BBName) (the DT path, not DomTreeUpdater)
-split_block :: (old: Value_Id, split_pt: Value_Id, dt: *Dom_Tree, li: *Loop_Info, mssau: *Mssa_Updater = null, name := "") -> Value_Id {
+// `head`: the split point is an iterator with the head bit (BB->begin()); skipping phis / EH pads clears it.
+split_block :: (old: Value_Id, split_pt: Value_Id, dt: *Dom_Tree, li: *Loop_Info, mssau: *Mssa_Updater = null, name := "", head := false) -> Value_Id {
     it := split_pt;
-    while inst_op(it) == .PHI || is_eh_pad(it) it = inst_next(it);
+    h := head;
+    while inst_op(it) == .PHI || is_eh_pad(it) { it = inst_next(it); h = false; }
     nm := name;
     if nm.count == 0 nm = tprint("%.split", vname(old));
-    nb := split_basic_block(old, it, nm);
+    nb := split_basic_block(old, it, nm, h);
     if li {
         l := li_loop_for(li, old);
         if l != NONE li_add_basic_block_to_loop(li, l, nb);

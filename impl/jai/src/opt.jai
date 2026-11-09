@@ -134,6 +134,7 @@
 #load "loop_utils.jai";
 #load "gen_x86_sched.jai";
 #load "pass_loop_unroll.jai";
+#load "pass_simple_loop_unswitch.jai";
 #load "loop_unroll_utils.jai";
 #load "loop_unroll_runtime.jai";
 #load "loop_peel.jai";

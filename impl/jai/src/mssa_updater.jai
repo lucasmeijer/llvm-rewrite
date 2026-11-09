@@ -3,8 +3,8 @@
 // removeDuplicatePhiEdgesBetween, applyUpdates / applyInsertUpdates, wireOldPredecessorsToNewImmediatePredecessor,
 // updatePhisWhenInsertingUniqueBackedgeBlock, removeBlocks, changeToUnreachable; moving: moveTo / moveBefore /
 // moveAfter / moveToPlace, moveAllAfterSpliceBlocks / moveAllAfterMergeBlocks; cloning: cloneUsesAndDefs,
-// updateForClonedBlockIntoPred; removeMemoryAccess; createMemoryAccessInBB / Before / After).
-// Not ported (fail loudly if a pass ever needs them): updateForClonedLoop, updateExitBlocksForClonedLoop.
+// updateForClonedBlockIntoPred, updateForClonedLoop, updateExitBlocksForClonedLoop; removeMemoryAccess;
+// createMemoryAccessInBB / Before / After). The whole file is ported.
 //
 // Value handles: LLVM keeps TrackingVH / WeakVH on accesses across operations that may RAUW or delete phis. They are
 // rows of `mssa.vh` (memoryssa.jai). Every public entry point brackets itself with mssau_enter / mssau_leave; when the
@@ -413,7 +413,12 @@ only_single_value :: (m: *Memory_SSA, mp: s32) -> s32 {
 Mssa_Clone_Ctx :: struct {
     vmap: *Table(Value_Id, Value_Id);
     phi_map: Table(s32, s32);
-    region: Value_Id;        // updateForClonedBlockIntoPred: BB == CheckBB
+    region: Value_Id = NONE;                // updateForClonedBlockIntoPred: BB == CheckBB
+    region_set: *Table(Value_Id, bool);     // updateForClonedLoop: Blocks.contains(BB)
+}
+mssa_clone_in_region :: (c: *Mssa_Clone_Ctx, bb: Value_Id) -> bool {
+    if c.region_set return table_contains(c.region_set, bb);
+    return bb == c.region;
 }
 
 // getNewDefiningAccessForClone
@@ -422,7 +427,7 @@ get_new_defining_access_for_clone :: (m: *Memory_SSA, a: s32, c: *Mssa_Clone_Ctx
     if ma_is_def(m, a) {
         if is_live_on_entry(a) return a;
         di := m.acc[a].inst;
-        if inst_block(di) != c.region return a;
+        if !mssa_clone_in_region(c, inst_block(di)) return a;
         found, nd := table_find(c.vmap, di);
         insn_defining = -1;
         if found && nd != NONE && is_inst(nd) insn_defining = mssa_access_of(m, nd);
@@ -485,6 +490,79 @@ mssau_update_for_cloned_block_into_pred :: (u: *Mssa_Updater, bb: Value_Id, p1: 
     mp := mssau_phi_of(m, bb);
     if mp >= 0 table_set(*c.phi_map, mp, mphi_value_for_block(m, mp, p1));
     mssau_clone_uses_and_defs(u, bb, p1, *c, true);
+}
+
+// updateForClonedLoop(LoopBlocks, ExitBlocks, VMap, IgnoreIncomingWithNoClones). `loop_blocks` is the LoopBlocksRPO
+// order. VMap values that were erased since (WeakTrackingVH = null) read as absent.
+mssau_update_for_cloned_loop :: (u: *Mssa_Updater, loop_blocks: [] Value_Id, exit_blocks: [] Value_Id, vm: *Table(Value_Id, Value_Id),
+                                 ignore_incoming_with_no_clones: bool) {
+    mssau_enter(u); defer mssau_leave(u);
+    m := u.mssa;
+    blocks: [..] Value_Id; blocks.allocator = temp;           // SmallSetVector
+    in_set: Table(Value_Id, bool); in_set.allocator = temp;
+    for loop_blocks if !table_contains(*in_set, it) { table_set(*in_set, it, true); array_add(*blocks, it); }
+    for exit_blocks if !table_contains(*in_set, it) { table_set(*in_set, it, true); array_add(*blocks, it); }
+    c: Mssa_Clone_Ctx;
+    c.vmap = vm; c.region_set = *in_set; c.phi_map.allocator = temp;
+    lookup_block :: (vm: *Table(Value_Id, Value_Id), b: Value_Id) -> Value_Id {
+        found, nb := table_find(vm, b);
+        if !found || nb == NONE || vkind(nb) != .BLOCK return NONE;
+        return nb;
+    }
+    // ProcessBlock
+    for bb: blocks {
+        nb := lookup_block(vm, bb);
+        if nb == NONE continue;
+        assert(mssa_first_access(m, nb) < 0, "Cloned block should have no accesses");
+        mp := mssau_phi_of(m, bb);
+        if mp >= 0 {
+            np := mssa_create_phi(m, nb);
+            table_set(*c.phi_map, mp, np);
+        }
+        mssau_clone_uses_and_defs(u, bb, nb, *c, false);
+    }
+    preds: [..] Value_Id; preds.allocator = temp;
+    for bb: blocks {
+        mp := mssau_phi_of(m, bb);
+        if mp < 0 continue;
+        found, np := table_find(*c.phi_map, mp);
+        if !found || np < 0 continue;
+        // FixPhiIncomingValues(MPhi, NewPhi)
+        new_bb := m.acc[np].block;
+        block_predecessors(new_bb, *preds);
+        n := ma_nops(m, mp);
+        for k: 0..cast(s64) n - 1 {
+            inc := mphi_value(m, mp, cast(u32) k);
+            inc_bb := mphi_block(m, mp, cast(u32) k);
+            nib := lookup_block(vm, inc_bb);
+            if nib != NONE inc_bb = nib;
+            else if ignore_incoming_with_no_clones continue;
+            is_pred := false;
+            for preds if it == inc_bb { is_pred = true; break; }
+            if !is_pred continue;
+            mphi_add_incoming(m, np, get_new_defining_access_for_clone(m, inc, *c), inc_bb);
+        }
+        single := only_single_value(m, np);
+        if single >= 0 {
+            table_set(*c.phi_map, mp, single);
+            mssau_remove_memory_access(u, np);
+        }
+    }
+}
+
+// updateExitBlocksForClonedLoop(ExitBlocks, VMaps, DT)
+mssau_update_exit_blocks_for_cloned_loop :: (u: *Mssa_Updater, exit_blocks: [] Value_Id, vms: [] *Table(Value_Id, Value_Id), dt: *Dom_Tree) {
+    mssau_enter(u); defer mssau_leave(u);
+    updates: [..] Dom_Update; updates.allocator = temp;
+    for e: exit_blocks for vm: vms {
+        found, ne := table_find(vm, e);
+        if !found || ne == NONE || vkind(ne) != .BLOCK continue;
+        array_add(*updates, .{true, ne, get_successor(block_terminator(ne), 0)});
+    }
+    gd: Graph_Diff;
+    empty: [] Dom_Update;
+    gd_init(*gd, empty, false, false);
+    mssau_apply_insert_updates(u, updates, dt, *gd);
 }
 
 // applyUpdates(Updates, DT, UpdateDT)

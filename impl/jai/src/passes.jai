@@ -274,6 +274,8 @@ Pass_Kind :: enum u8 {
     AGGRESSIVE_INSTCOMBINE;
     // LoopUnroll (pass_loop_unroll.jai)
     LOOP_UNROLL; LOOP_UNROLL_FULL;
+    // SimpleLoopUnswitch (pass_simple_loop_unswitch.jai)
+    SIMPLE_LOOP_UNSWITCH;
 }
 
 Pass_Info :: struct {
@@ -352,6 +354,7 @@ PASS_TABLE :: Pass_Info.[
     .{"loop-idiom", .LOOP, .LOOP_IDIOM, false, .DOMTREE},
     .{"loop-unroll", .FUNCTION, .LOOP_UNROLL, false, .DOMTREE},   // also loop-unroll<...> (lookup_pass)
     .{"loop-unroll-full", .LOOP, .LOOP_UNROLL_FULL, false, .DOMTREE},
+    .{"simple-loop-unswitch", .LOOP, .SIMPLE_LOOP_UNSWITCH, false, .DOMTREE},   // also simple-loop-unswitch<...>
     .{"print<cycles>", .FUNCTION, .PRINT_CYCLES, true, .CYCLES},
     .{"require<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
     .{"require<cycles>", .FUNCTION, .REQUIRE, true, .CYCLES},
@@ -406,6 +409,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "print<access-info><") && name[name.count - 1] == #char ">" return lookup_pass("print<access-info>");
     if begins_with(name, "lnicm<") && name[name.count - 1] == #char ">" return lookup_pass("lnicm");
     if begins_with(name, "loop-unroll<") && name[name.count - 1] == #char ">" return lookup_pass("loop-unroll");
+    if begins_with(name, "simple-loop-unswitch<") && name[name.count - 1] == #char ">" return lookup_pass("simple-loop-unswitch");
     return null;
 }
 
@@ -750,6 +754,9 @@ parse_cl_opt :: (arg: string) -> bool {
     if constraint_elimination_parse_cl_opt(name, value, has_value) return true;   // pass_constraint_elimination.jai
     if aggressive_instcombine_parse_cl_opt(name, value, has_value) return true;   // pass_aggressive_instcombine.jai
     if unroll_parse_cl_opt(name, value, has_value) return true;   // pass_loop_unroll.jai
+    if unswitch_parse_cl_opt(name, value, has_value) return true;   // pass_simple_loop_unswitch.jai
+    // -mattr is a cl::list (CommaSeparated): repeated options accumulate
+    if name == "mattr" && has_value && tti_opts.mattr.count { tti_opts.mattr = sprint("%,%", tti_opts.mattr, value); return true; }
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {
@@ -778,6 +785,13 @@ parse_cl_opt :: (arg: string) -> bool {
 
 bisect_count: s64 = 0;
 
+// The name OptBisect prints: PIC->getPassNameForClassName(ClassName), the registered name without parameters
+bisect_pass_name :: (name: string) -> string {
+    k := find_index_from_left(name, #char "<");
+    if k > 0 return slice(name, 0, k);
+    return name;
+}
+
 // PassInstrumentation::runBeforePass: every shouldRun callback is called (OptNone, then OptPassGate).
 should_run_pass :: (node: *Pass_Node, f: Value_Id) -> bool {
     if node.info && node.info.required return true;
@@ -790,7 +804,7 @@ should_run_pass :: (node: *Pass_Node, f: Value_Id) -> bool {
         bisect_count += 1;
         ok := bisect_count <= opts.opt_bisect_limit;
         desc := ifx f != NONE then vname(f) else "[module]";
-        print_stderr("BISECT: %running pass (%) % on %\n", ifx ok then "" else "NOT ", bisect_count, node.name, desc);
+        print_stderr("BISECT: %running pass (%) % on %\n", ifx ok then "" else "NOT ", bisect_count, bisect_pass_name(node.name), desc);
         if !ok run = false;
     }
     return run;
