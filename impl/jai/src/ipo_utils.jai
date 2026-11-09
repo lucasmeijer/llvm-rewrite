@@ -510,3 +510,123 @@ ipo_rauw :: (old: Value_Id, new: Value_Id) {
     }
     rauw_with_metadata(old, new);
 }
+
+// ---------------------------------------------------------------- function signature rewriting
+// (Function::Create / copyAttributesFrom / splice, CallInst::Create / InvokeInst::Create with operand bundles)
+
+// Function::Create(Ty, Linkage, AddrSpace) without a module and a name
+ipo_fn_create :: (ft: Type_Id, linkage: Linkage, as: u32) -> Value_Id {
+    nf := new_function(ft, "", as);
+    gv_set_linkage(nf, linkage);
+    return nf;
+}
+// Function::copyAttributesFrom
+ipo_fn_copy_attributes_from :: (nf: Value_Id, f: Value_Id) {
+    gv_copy_attributes_from(nf, f);
+    d := glob(nf); s := glob(f);
+    d.cc = s.cc;
+    d.attrs = s.attrs;
+    d.gc = s.gc;
+    if s.has_personality { set_op(nf, 0, op(f, 0)); d.has_personality = true; }
+    if s.has_prefix { set_op(nf, 1, op(f, 1)); d.has_prefix = true; }
+    if s.has_prologue { set_op(nf, 2, op(f, 2)); d.has_prologue = true; }
+}
+// getFunctionList().insert(F->getIterator(), NF)
+ipo_fn_insert_before :: (nf: Value_Id, f: Value_Id) {
+    idx := -1;
+    for ir.m_functions if it == f { idx = it_index; break; }
+    assert(idx >= 0);
+    array_insert_at(*ir.m_functions, nf, idx);
+}
+// NF->splice(NF->begin(), F): every block moves (with its instructions' names) to the new function's symbol table;
+// the blocks are numbered anew in order (BasicBlock::setParent)
+ipo_fn_splice_body :: (nf: Value_Id, f: Value_Id) {
+    names: [..] string; names.allocator = temp;
+    vals: [..] Value_Id; vals.allocator = temp;
+    for b: fn_blocks(f) {
+        if vname(b).count { array_add(*names, vname(b)); array_add(*vals, b); }
+        for i: block_insts(b) if vname(i).count { array_add(*names, vname(i)); array_add(*vals, i); }
+    }
+    for vals set_name(it, "");
+    g := glob(f); ng := glob(nf);
+    assert(ng.first_block == NONE);
+    ng.first_block = g.first_block; ng.last_block = g.last_block;
+    g.first_block = NONE; g.last_block = NONE;
+    for b: fn_blocks(nf) block(b).parent = nf;
+    ng.next_block_num = -1;
+    for vals set_name(it, names[it_index]);
+    table_remove(*fam, f);
+    table_remove(*fam, nf);
+}
+// the parameter attribute sets of a list, as an array
+ipo_param_attrs :: (l: u32, n: u32) -> [..] u32 {
+    out: [..] u32; out.allocator = temp;
+    for k: 0..cast(s64) n - 1 array_add(*out, attr_list_param(l, cast(u32) k));
+    return out;
+}
+
+// CallInst::Create(FTy, Callee, Args, CB's operand bundles, "", InsertBefore) / InvokeInst::Create(..., Normal,
+// Unwind, ...): a fresh call (no flags, no attributes, no metadata) inserted before `before`, or at the end of
+// `at_end` when before == NONE
+ipo_create_call_like :: (cb: Value_Id, fty: Type_Id, callee: Value_Id, args: [] Value_Id, before: Value_Id, at_end: Value_Id = NONE) -> Value_Id {
+    o := inst_op(cb);
+    if o == .CALLBR fatal("IPO: rewriting a callbr call site is not supported yet");
+    nb := call_num_bundles(cb);
+    nbops: u32 = 0;
+    for k: 0..cast(s64) nb - 1 { b, e := call_bundle_range(cb, cast(u32) k); nbops += e - b; }
+    tail: u32 = ifx o == .INVOKE then cast(u32) 3 else 1;
+    n := cast(u32) args.count + nbops + tail;
+    i := new_inst(o, func_ret(fty), n);
+    inst(i).ty2 = fty;
+    k: u32 = 0;
+    for args { set_op(i, k, it); k += 1; }
+    if nb {
+        r := inst(i);
+        r.idx = cast(u32) ir.u32_pool.count; r.nidx = nb;
+        for x: 0..cast(s64) nb - 1 {
+            b, e := call_bundle_range(cb, cast(u32) x);
+            tag := ir.u32_pool[inst(cb).idx + 3 * cast(u32) x];
+            array_add(*ir.u32_pool, tag); array_add(*ir.u32_pool, k); array_add(*ir.u32_pool, k + (e - b));
+            for y: b..e-1 { set_op(i, k, op(cb, y)); k += 1; }
+        }
+    }
+    if o == .INVOKE {
+        set_op(i, k, get_successor(cb, 0)); k += 1;
+        set_op(i, k, get_successor(cb, 1)); k += 1;
+    }
+    set_op(i, k, callee);
+    if before != NONE insert_at_position(i, inst_block(before), before, false);
+    else block_append_inst(at_end, i);
+    return i;
+}
+// copyMetadata(CB, {MD_prof, MD_dbg})
+ipo_copy_prof_dbg :: (dst: Value_Id, src: Value_Id) {
+    k := md_kind_id("prof");
+    m := get_metadata(src, k);
+    if m != NONE set_metadata(dst, k, m);
+    d := get_metadata(src, MDK_DBG);
+    if d != NONE set_metadata(dst, MDK_DBG, d);
+}
+// AttributeFuncs::updateMinLegalVectorWidthAttr
+ipo_update_min_legal_vector_width_attr :: (f: Value_Id, width: u64) {
+    a := fn_find_str_attr(f, "min-legal-vector-width");
+    if !a return;
+    old, ok := str_to_u64_auto(a.val);
+    if width > old fn_add_fn_str_attr(f, "min-legal-vector-width", tprint("%", width));
+}
+// SP->replaceType(SP->getType()->cloneWithCC(DW_CC_nocall))
+ipo_mark_subprogram_nocall :: (f: Value_Id) {
+    sp := get_metadata(f, MDK_DBG);
+    if sp == NONE || ir.mds[sp].kind != .SPECIAL || di_kind(sp) != .SUBPROGRAM return;
+    ty := di_op(sp, 4);
+    if ty == NONE fatal("IPO: DISubprogram without a type");
+    r := ir.mds[ty];
+    ops := NewArray(r.nops, Md_Id,, allocator = temp);
+    for k: 0..cast(s64) r.nops - 1 ops[k] = md_op(ty, cast(u32) k);
+    ints := NewArray(r.nints, u64,, allocator = temp);
+    for k: 0..cast(s64) r.nints - 1 ints[k] = di_int(ty, cast(u32) k);
+    ints[1] = 0x03;   // cc: DW_CC_nocall
+    nt := di_get(.SUBROUTINE_TYPE, false, ops, ints);   // MDNode::replaceWithPermanent: uniqued
+    if !ir.mds[sp].distinct fatal("IPO: replacing the type of a uniqued DISubprogram is not supported yet");
+    ir.md_ops[ir.mds[sp].ops + 4] = nt;
+}
