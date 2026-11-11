@@ -1136,7 +1136,23 @@ slp_vectorize_tree_entry :: (te: Te_Id) -> Value_Id {
             }
             new_li = slp_propagate_flags_for(te, new_li);
             v = sgb_shuffle(new_li, NONE, mc.compress_mask);
-        } else slp_fail("vectorizeTree of strided / gathered load nodes");
+        } else if e.state == TE_SCATTER_VECTORIZE {
+            vec_ptr := slp_vectorize_operand(te, 0);
+            if is_vector_type(sty) slp_fail("REVEC masked gathers");
+            common_align: u64 = 0;
+            for x: slp.entries[te].scalars if is_inst(x) && inst_op(x) == .LOAD { a := inst(x).align; if common_align == 0 || a < common_align common_align = a; }
+            n := slp_num_elements(vec_ty);
+            ones: [..] Value_Id; ones.allocator = temp;
+            for 1..n array_add(*ones, const_int(ir.t_i1, 1));
+            f := get_or_insert_intrinsic_declaration(IID_MASKED_GATHER, .[vec_ty, vtype(vec_ptr)]);
+            fty := glob(f).value_type;
+            c := new_inst(.CALL, func_ret(fty), 4);
+            inst(c).ty2 = fty;
+            set_op(c, 0, vec_ptr); set_op(c, 1, const_vector_of(ones)); set_op(c, 2, const_poison(vec_ty)); set_op(c, 3, f);
+            new_li := sgb_insert(c);
+            add_param_align(new_li, 0, common_align);
+            v = slp_propagate_flags_for(te, new_li);
+        } else slp_fail("vectorizeTree of strided load nodes");
         v = slp_final_shuffle(v, te, sty);
         te_set_vv(te, v);
         return v;

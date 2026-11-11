@@ -667,7 +667,9 @@ slp_register_non_vectorizable_loads :: (vl: [] Value_Id) {
 }
 
 // canVectorizeLoads(VL, VL0, Order, PointerOps, SPtrInfo, BestVF = nullptr, TryRecursiveCheck = true)
-slp_can_vectorize_loads :: (vl: [] Value_Id, vl0: Value_Id, order: *[..] u32 = null, pointer_ops: *[..] Value_Id = null) -> s32 {
+slp_can_vectorize_loads :: (vl: [] Value_Id, vl0: Value_Id, order: *[..] u32 = null, pointer_ops: *[..] Value_Id = null,
+                            best_vf: *u64 = null, try_recursive_check := true) -> s32 {
+    if best_vf best_vf.* = 0;
     lorder: [..] u32; lorder.allocator = temp;
     lptrs: [..] Value_Id; lptrs.allocator = temp;
     if !order order = *lorder;
@@ -707,8 +709,133 @@ slp_can_vectorize_loads :: (vl: [] Value_Id, vl0: Value_Id, order: *[..] u32 = n
         // analyzeConstantStrideCandidate: no legal strided loads on X86
     }
     if !masked_gather_legal(vec_ty, common_align) return LS_GATHER;
-    slp_fail("masked-gather cost check of canVectorizeLoads (CheckForShuffledLoads)");
+    l := li_loop_for(slp.li, inst_block(vl0));
+    profitable_gather_pointers := false;
+    if l != NONE && sz > 2 {
+        inv := 0;
+        for p: pointer_ops.* if !is_inst(p) || !li_contains_inst(slp.li, l, p) inv += 1;
+        profitable_gather_pointers = inv <= sz / 2;
+    }
+    all_simple := true;
+    for p: pointer_ops.* {
+        is_gep := is_inst(p) && inst_op(p) == .GEP;
+        if (!is_gep && slp_does_not_need_to_be_scheduled(p)) || (is_gep && nops(p) == 2 && (is_const(op(p, 1)) || is_inst(op(p, 1)))) continue;
+        all_simple = false; break;
+    }
+    if profitable_gather_pointers || all_simple {
+        if !try_recursive_check || !slp_check_for_shuffled_loads(vl, vl0, pointer_ops.*, sty, vec_ty, common_align, best_vf, profitable_gather_pointers, try_recursive_check)
+            return LS_SCATTER;
+    }
     return LS_GATHER;
+}
+
+// the CheckForShuffledLoads lambda of canVectorizeLoads: true if loads + shuffles are better than a masked gather
+slp_check_for_shuffled_loads :: (vl: [] Value_Id, vl0: Value_Id, pointer_ops: [] Value_Id, sty: Type_Id, vec_ty: Type_Id, common_align: u64,
+                                 best_vf: *u64, profitable_gather_pointers: bool, try_recursive_check: bool) -> bool {
+    if best_vf best_vf.* = 0;
+    t := slp.tti;
+    K :: TCK_RECIP_THROUGHPUT;
+    sz := vl.count;
+    scalar_gep, vector_gep := slp_gep_costs(pointer_ops, pointer_ops[0], .LOAD, sty, vec_ty);
+    all_dem := NewArray(sz, bool,, temp);
+    for * all_dem it.* = true;
+    ptr_sty := scalar_type(vtype(pointer_ops[0]));
+    ptr_vec_ty := slp_widened_type(ptr_sty, cast(u64) sz);
+    front_uo := get_underlying_object(pointer_ops[0]);
+    num_geps := 0; for pointer_ops if is_inst(it) && inst_op(it) == .GEP num_geps += 1;
+    diff_uo := false; for pointer_ops if get_underlying_object(it) != front_uo { diff_uo = true; break; }
+    one_dem :: (n: s64) -> [] bool { d := NewArray(n, bool,, temp); d[0] = true; return d; }
+    if num_geps < sz - 1 || diff_uo
+        vector_gep = cost_add(vector_gep, slp_get_scalarization_overhead(ptr_sty, ptr_vec_ty, all_dem, true, false, K));
+    else
+        vector_gep = cost_add(vector_gep, cost_add(slp_get_scalarization_overhead(ptr_sty, ptr_vec_ty, one_dem(sz), true, false, K),
+                                                   slp_shuffle_cost(SK_BROADCAST, ptr_vec_ty, .[])));
+    scalar_loads: Cost = 0;
+    for v: vl scalar_loads = cost_add(scalar_loads, tti_instruction_cost(t, v, K));
+    scalar_loads = cost_add(scalar_loads, scalar_gep);
+    gather_mica :: (ty: Type_Id, ptr: Value_Id, align: u64) -> Cost {
+        m: Mica;
+        m.id = IID_MASKED_GATHER; m.data_ty = ty; m.ptr = ptr; m.variable_mask = false; m.align = align;
+        return x86_mem_intrinsic_cost(slp.tti, *m, TCK_RECIP_THROUGHPUT);
+    }
+    masked_gather_cost := cost_add(gather_mica(vec_ty, op(vl0, 0), common_align), ifx profitable_gather_pointers then cast(Cost) 0 else vector_gep);
+    gather_cost := cost_add(slp_get_scalarization_overhead(sty, vec_ty, all_dem, true, false, K), scalar_loads);
+    LIST_LIMIT :: 4;
+    #if DEBUG_SLP print("DBG cfsl n=% mg=% g=% vgep=% sgep=% pgp=%\n", vl.count, masked_gather_cost, gather_cost, vector_gep, scalar_gep, profitable_gather_pointers);
+    if !try_recursive_check || vl.count < LIST_LIMIT return cost_sub(masked_gather_cost, gather_cost) >= -slp_cl.threshold;
+    esz := dl_type_size_bits(sty);
+    min_vf := slp_get_min_vf(2 * esz);
+    dem := NewArray(sz, bool,, temp);
+    vf := slp_floor_full_vector_number_of_elements(t, sty, cast(u64) vl.count - 1);
+    #if DEBUG_SLP print("DBG cfsl loop vf=% minvf=%\n", vf, min_vf);
+    while vf >= min_vf {
+        defer vf = slp_floor_full_vector_number_of_elements(t, sty, vf - 1);
+        St :: struct { start: s64; ls: s32; }
+        states: [..] St; states.allocator = temp;
+        cnt := 0;
+        while cnt < sz {
+            defer cnt += cast(s64) vf;
+            slice_vf := min(cast(s64) vf, sz - cnt);
+            slice := array_view(vl, cnt, slice_vf);
+            ord: [..] u32; ord.allocator = temp;
+            pops: [..] Value_Id; pops.allocator = temp;
+            ls := slp_can_vectorize_loads(slice, slice[0], *ord, *pops, best_vf, false);
+            if ls == LS_GATHER {
+                if best_vf { for * dem it.* = true; break; }
+                for k: cnt..cnt + slice_vf - 1 dem[k] = true;
+                continue;
+            }
+            if (ls == LS_VECTORIZE || ls == LS_STRIDED || ls == LS_COMPRESS) && ord.count && !slp_is_reverse_order(ord) ls = LS_SCATTER;
+            array_add(*states, .{cnt, ls});
+        }
+        if all_bits(dem) continue;
+        vec_ld_cost: Cost = 0;
+        if any_bits(dem) {
+            vec_ld_cost = cost_add(slp_get_scalarization_overhead(sty, vec_ty, dem, true, false, K), scalar_gep);
+            for idx: 0..sz-1 if dem[idx] vec_ld_cost = cost_add(vec_ld_cost, tti_instruction_cost(t, vl[idx], K));
+        }
+        for st: states {
+            slice_vf := min(cast(s64) vf, sz - st.start);
+            sub_vec_ty := slp_widened_type(sty, cast(u64) slice_vf);
+            li0 := vl[st.start];
+            vgep: Cost = 0;
+            if !(st.ls == LS_SCATTER && profitable_gather_pointers) {
+                _, gv := slp_gep_costs(array_view(pointer_ops, st.start, slice_vf), op(li0, 0), .LOAD, sty, sub_vec_ty);
+                vgep = gv;
+            }
+            if st.ls == LS_SCATTER {
+                if num_geps < sz - 1 || diff_uo {
+                    d := NewArray(slice_vf, bool,, temp); for * d it.* = true;
+                    vgep = cost_add(vgep, slp_get_scalarization_overhead(sty, sub_vec_ty, d, true, false, K));
+                } else {
+                    vgep = cost_add(vgep, cost_add(slp_get_scalarization_overhead(sty, sub_vec_ty, one_dem(slice_vf), true, false, K),
+                                                   slp_shuffle_cost(SK_BROADCAST, sub_vec_ty, .[])));
+                }
+            }
+            if st.ls == {
+            case LS_VECTORIZE;
+                vec_ld_cost = cost_add(vec_ld_cost, cost_add(tti_memory_op_cost(t, .LOAD, sub_vec_ty, inst(li0).align, ptr_addrspace(vtype(op(li0, 0))), K), vgep));
+            case LS_STRIDED;
+                slp_fail("strided load costs");
+            case LS_COMPRESS;
+                m: Mica;
+                m.id = IID_MASKED_LOAD; m.data_ty = sub_vec_ty; m.align = common_align; m.addrspace = ptr_addrspace(vtype(op(li0, 0)));
+                vec_ld_cost = cost_add(vec_ld_cost, cost_add(x86_mem_intrinsic_cost(t, *m, K), slp_shuffle_cost(SK_PERMUTE_SINGLE_SRC, sub_vec_ty, .[])));
+            case LS_SCATTER;
+                vec_ld_cost = cost_add(vec_ld_cost, cost_add(gather_mica(sub_vec_ty, op(li0, 0), common_align), vgep));
+            }
+            shuffle_mask := new_mask(sz);
+            slice_idx := st.start / cast(s64) vf;
+            for idx: 0..sz-1 shuffle_mask[idx] = cast(s32) (ifx idx / cast(s64) vf == slice_idx then sz + idx % cast(s64) vf else idx);
+            if st.start > 0 vec_ld_cost = cost_add(vec_ld_cost, slp_shuffle_cost(SK_INSERT_SUBVECTOR, vec_ty, shuffle_mask, K, st.start, sub_vec_ty));
+        }
+        #if DEBUG_SLP print("DBG cfsl vf=% vecld=% dem=% states=%\n", vf, vec_ld_cost, dem, states);
+        if masked_gather_cost >= vec_ld_cost && cost_sub(vec_ld_cost, gather_cost) < -slp_cl.threshold {
+            if best_vf best_vf.* = vf;
+            return true;
+        }
+    }
+    return cost_sub(masked_gather_cost, gather_cost) >= -slp_cl.threshold;
 }
 Masked_Load_Compress :: struct {
     ok: bool;
@@ -817,7 +944,7 @@ slp_is_masked_load_compress :: (vl: [] Value_Id, ptrs: [] Value_Id, order: [] u3
     if is_masked {
         m: Mica;
         m.id = IID_MASKED_LOAD; m.data_ty = load_vec_ty; m.align = common_align; m.addrspace = as;
-        load_cost = x86_masked_memory_op_cost(t, *m, K);
+        load_cost = x86_mem_intrinsic_cost(t, *m, K);
     } else {
         load_cost = tti_memory_op_cost(t, .LOAD, load_vec_ty, common_align, as, K);
     }
@@ -933,7 +1060,7 @@ slp_get_scalars_vectorization_state :: (s: Inst_State, vl: [] Value_Id, is_scatt
                 slp_register_non_vectorizable_loads(vl);
                 return TE_NEED_TO_GATHER;
             }
-            if st == LS_COMPRESS {
+            if st == LS_COMPRESS || st == LS_SCATTER {
                 if !slpx.is_graph_transform_mode && slp.entries.count > 1 {
                     n := cast(u32) slp.entries.count;
                     if !slp_has(slpx.load_entries_to_vectorize, n) array_add(*slpx.load_entries_to_vectorize, n);
@@ -947,9 +1074,10 @@ slp_get_scalars_vectorization_state :: (s: Inst_State, vl: [] Value_Id, is_scatt
                     for slp_get_tree_entries(v) if it >= slpx.gathered_loads_first { any = true; break; }
                     if !any { gathered = false; break; }
                 }
-                return ifx gathered then TE_NEED_TO_GATHER else TE_COMPRESS_VECTORIZE;
+                if gathered return TE_NEED_TO_GATHER;
+                return ifx st == LS_COMPRESS then TE_COMPRESS_VECTORIZE else TE_SCATTER_VECTORIZE;
             }
-            slp_fail("scattered / strided loads");
+            slp_fail("strided loads");
             return TE_NEED_TO_GATHER;
         case .ZEXT; #through; case .SEXT; #through; case .FPTOUI; #through; case .FPTOSI; #through;
         case .FPEXT; #through; case .PTRTOINT; #through; case .INTTOPTR; #through; case .SITOFP; #through;
@@ -1259,12 +1387,14 @@ slp_build_tree_rec :: (vl_ref: [] Value_Id, depth: u32, ei: Edge_Info, interleav
             te: Te_Id;
             if state == TE_VECTORIZE te = slp_new_tree_entry(vl, b, s, ei, reuse, current_order, interleave);
             else if state == TE_COMPRESS_VECTORIZE te = slp_new_tree_entry_state(vl, TE_COMPRESS_VECTORIZE, b, s, ei, reuse, current_order);
+            else if state == TE_SCATTER_VECTORIZE te = slp_new_tree_entry_state(vl, TE_SCATTER_VECTORIZE, b, s, ei, reuse);
             else slp_fail("non-consecutive load nodes");
             if current_order.count && state != TE_SCATTER_VECTORIZE {
                 mask := slp_inverse_permutation(current_order);
                 slp_reorder_scalars(*operands[0], mask);
             }
             te_set_operands(te, operands);
+            if state == TE_SCATTER_VECTORIZE slp_build_tree_rec(pointer_ops, depth + 1, .{te, 0});
             return;
         case .ZEXT; #through; case .SEXT; #through; case .FPTOUI; #through; case .FPTOSI; #through;
         case .FPEXT; #through; case .PTRTOINT; #through; case .INTTOPTR; #through; case .SITOFP; #through;

@@ -211,8 +211,7 @@ slp_try_to_vectorize_gathered_loads :: (gathered_loads: [] [..] Ld_Group) {
                 if allow {
                     order: [..] u32; order.allocator = temp;
                     ptrs: [..] Value_Id; ptrs.allocator = temp;
-                    ls := slp_can_vectorize_loads(slice, slice[0], *order, *ptrs);
-                    best_vf = 0;   // canVectorizeLoads resets *BestVF (only its masked-gather recursion sets it)
+                    ls := slp_can_vectorize_loads(slice, slice[0], *order, *ptrs, *best_vf);
                     if ls != LS_GATHER || (best_vf > 1 && num_elts == 2 * best_vf) {
                         if ls == LS_SCATTER {
                             if masked_gather_vectorized.count == 0 || cnt >= masked_gather_vectorized[masked_gather_vectorized.count - 1] + num_elts

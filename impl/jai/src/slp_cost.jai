@@ -1082,12 +1082,18 @@ ec_vector_cost :: (c: *Slp_Ec, common: Cost) -> Cost {
             if mc.is_masked {
                 m: Mica;
                 m.id = IID_MASKED_LOAD; m.data_ty = mc.load_vec_ty; m.align = align; m.addrspace = as;
-                vc = x86_masked_memory_op_cost(t, *m, K);
+                vc = x86_mem_intrinsic_cost(t, *m, K);
             } else {
                 vc = tti_memory_op_cost(t, .LOAD, mc.load_vec_ty, align, as, K);
             }
             vc = cost_add(vc, slp_shuffle_cost(SK_PERMUTE_SINGLE_SRC, mc.load_vec_ty, mc.compress_mask));
-        } else slp_fail("costs of strided / gathered load nodes");
+        } else if e.state == TE_SCATTER_VECTORIZE {
+            common_align: u64 = 0;
+            for v: c.unique_values if is_inst(v) && inst_op(v) == .LOAD { a := load_store_align(v); if common_align == 0 || a < common_align common_align = a; }
+            m: Mica;
+            m.id = IID_MASKED_GATHER; m.data_ty = c.vec_ty; m.ptr = op(li0, 0); m.variable_mask = false; m.align = common_align;
+            vc = x86_mem_intrinsic_cost(t, *m, K);
+        } else slp_fail("costs of strided load nodes");
         return cost_add(vc, common);
     }
     if s == ec_op_s32(.STORE) {
