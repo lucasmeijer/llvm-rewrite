@@ -666,7 +666,8 @@ slp_try_to_vectorize_sequence :: (c: *Seq_Ctx, incoming: [] Value_Id, max_vf_onl
         num_elts := vl.count;
         if num_elts > 1 && seq_try_helper(c, vl, max_vf_only) {
             changed = true;
-            prev := array_copy(vl,, temp);
+            // VL.swap(Candidates); Candidates.clear(); then the live elements of VL (the previous candidates)
+            prev := array_copy(candidates,, temp);
             array_reset_keeping_memory(*candidates);
             for prev if is_live(it) array_add(*candidates, it);
         } else {

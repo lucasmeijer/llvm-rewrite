@@ -555,15 +555,16 @@ slp_is_first_insert_element :: (ie1: Value_Id, ie2: Value_Id) -> bool {
 }
 
 // areTwoInsertFromSameBuildVector(VU, V, GetBaseOperand) with the getTreeCost / vectorizeTree GetBaseOperand
-slp_are_two_insert_from_same_build_vector :: (vu: Value_Id, v: Value_Id) -> bool {
+slp_are_two_insert_from_same_build_vector :: (vu: Value_Id, v: Value_Id, plain_base := false) -> bool {
     if inst_block(vu) != inst_block(v) return false;
     if vtype(vu) != vtype(v) return false;
     if !has_one_use(vu) && !has_one_use(v) return false;
     ok1, idx1 := slp_element_index(vu);
     ok2, idx2 := slp_element_index(v);
     if !ok1 || !ok2 return false;
-    get_base :: (ii: Value_Id) -> Value_Id {
+    get_base :: (ii: Value_Id, plain: bool) -> Value_Id {
         op0 := op(ii, 0);
+        if plain return op0;   // vectorizeTree's GetBaseOperand
         if slp_is_vectorized(ii) && !slp_is_vectorized(op0) return NONE;
         return op0;
     }
@@ -580,7 +581,7 @@ slp_are_two_insert_from_same_build_vector :: (vu: Value_Id, v: Value_Id) -> bool
             is_reused |= reused[i];
             reused[i] = true;
             if (ie1 != vu && !has_one_use(ie1)) || is_reused ie1 = NONE;
-            else { b := get_base(ie1); ie1 = ifx is_ie(b) then b else NONE; }
+            else { b := get_base(ie1, plain_base); ie1 = ifx is_ie(b) then b else NONE; }
         }
         if ie2 != NONE && ie2 != vu {
             ok, x := slp_element_index(ie2);
@@ -588,7 +589,7 @@ slp_are_two_insert_from_same_build_vector :: (vu: Value_Id, v: Value_Id) -> bool
             is_reused |= reused[i];
             reused[i] = true;
             if (ie2 != v && !has_one_use(ie2)) || is_reused ie2 = NONE;
-            else { b := get_base(ie2); ie2 = ifx is_ie(b) then b else NONE; }
+            else { b := get_base(ie2, plain_base); ie2 = ifx is_ie(b) then b else NONE; }
         }
         if !((!is_reused && (ie1 != NONE || ie2 != NONE))) break;
     }
@@ -604,7 +605,7 @@ slp_get_tree_cost :: (tree_cost: Cost, vectorized_vals: [] Value_Id = .[], reduc
     n := slp.entries.count;
     t := slp.tti;
     K :: TCK_RECIP_THROUGHPUT;
-    if slp_cl.inst_count_check && te_vector_factor(0) == 2 && slp_cl.threshold == 0 && !is_vector_type(vtype(slp.entries[0].scalars[0])) {
+    if slp_cl.inst_count_check && te_vector_factor(0) == 2 && slp_cl.threshold == 0 {   // (!SLPReVec || ...): REVEC is not supported
         num_scalar := slp_num_scalar_insts();
         num_vector := slp_num_vector_insts();
         #if DEBUG_SLP print("DBG inst count check: vector=% scalar=%\n", num_vector, num_scalar);

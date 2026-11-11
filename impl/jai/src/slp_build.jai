@@ -81,10 +81,7 @@ slp_init :: (f: Value_Id, tti: *Tti, aar: Aa_Results, li: *Loop_Info, dt: *Dom_T
     slpx.external_uses_with_non_users.allocator = temp; slpx.loop_nest_scale_cache.allocator = temp;
     collect_ephemeral_values_fn(f, ac, *slpx.eph_values);
     slp_init_reg_sizes(slp_cl.max_reg_size_given, slp_cl.min_reg_size_given);
-}
-// ~BoUpSLP
-slp_finish :: () {
-    vh_release_all();
+    slpg_init();
 }
 
 // getMaximumVF(ElemWidth, Opcode): X86 has no getMaximumVF override (0 = no limit)
@@ -228,6 +225,7 @@ slp_delete_tree_later_state :: () {   // the deleteTree members of later stages
     array_reset_keeping_memory(*slpx.external_uses);
     array_reset_keeping_memory(*slpx.external_uses_as_original_scalar);
     array_reset_keeping_memory(*slpx.external_uses_with_non_users);
+    array_reset_keeping_memory(*slpg.postponed_gathers);
+    table_reset(*slpg.last_inst_to_pos);
 }
-slp_vectorize_tree :: () { slp_fail("vectorizeTree"); }
-slp_optimize_gather_sequence :: () { slp_fail("optimizeGatherSequence"); }
+

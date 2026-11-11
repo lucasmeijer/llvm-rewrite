@@ -30,7 +30,8 @@ TE_REDUCED_BITCAST_LOADS : s32 : 74; TE_REDUCED_BITCAST_BSWAP_LOADS : s32 : 75; 
 
 Tree_Entry :: struct {
     scalars: [..] Value_Id;
-    vectorized_value: Value_Id = NONE;           // WeakTrackingVH
+    vv: Vh;                                      // VectorizedValue (a WeakTrackingVH): te_vv / te_set_vv
+    has_vv: bool;
     state: s32;
     combined_op: s32 = TE_NOT_COMBINED;
     reuse_shuffle_indices: [..] s32;

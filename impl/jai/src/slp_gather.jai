@@ -144,7 +144,7 @@ slp_last_instruction_in_bundle :: (te: Te_Id) -> Value_Id {
     if e.state == TE_SPLIT_VECTORIZE {
         res = find_last(te, front, *bb);
         for x: slp_get_tree_entries(res) {
-            i := slp.entries[x].vectorized_value;
+            i := te_vv(x);
             if i == NONE || !is_inst(i) i = slp_last_instruction_in_bundle(x);
             if inst_block(res) == inst_block(i) && comes_before(res, i) res = i;
         }

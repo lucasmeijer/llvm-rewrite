@@ -59,6 +59,7 @@ Block_Sched :: struct {
     cd_by_inst_user: Table(u64, [..] Cd_Edge);     // ScheduleCopyableDataMapByInstUser: ((User, OpIdx), V), keyed (User, V)
     cd_by_users: Table(Value_Id, [..] s32);        // ScheduleCopyableDataMapByUsers (SetVector)
     recalc_copyable: [..] s32;                     // RecalcCopyableOperandDeps (SetVector)
+    sorted_ready: bool;                            // scheduleBlock's std::set<ScheduleEntity *, ScheduleDataCompare> (ascending priority, unique)
 }
 Cd_Edge :: struct { edge: u32; sd: s32; }
 cd_key :: (ei: Edge_Info, v: Value_Id) -> u64 {
@@ -288,7 +289,24 @@ sb_has_valid_deps :: (bs: *Block_Sched, b: s32) -> bool {
 sb_is_ready :: (bs: *Block_Sched, b: s32) -> bool { return sb_unscheduled_deps(bs, b) == 0 && !bs.bundles[b].scheduled; }
 ent_is_ready :: (bs: *Block_Sched, e: Sched_Ent) -> bool { return ifx ent_is_bundle(e) then sb_is_ready(bs, ent_bundle(e)) else sd_is_ready(bs, e); }
 
-ready_insert :: (bs: *Block_Sched, e: Sched_Ent) { for bs.ready if it == e return; array_add(*bs.ready, e); }
+ready_insert :: (bs: *Block_Sched, e: Sched_Ent) {
+    if bs.sorted_ready {
+        // std::set ordered by descending priority (kept ascending here, picked from the back); equal priorities are
+        // the same key
+        p := ent_priority(bs, e);
+        pos := bs.ready.count;
+        for bs.ready {
+            q := ent_priority(bs, it);
+            if q == p return;
+            if q > p { pos = it_index; break; }
+        }
+        array_insert_at(*bs.ready, e, pos);
+        return;
+    }
+    for bs.ready if it == e return;
+    array_add(*bs.ready, e);
+}
+ent_priority :: (bs: *Block_Sched, e: Sched_Ent) -> s32 { return ifx ent_is_bundle(e) then bs.bundles[ent_bundle(e)].priority else bs.data[e].priority; }
 ready_remove :: (bs: *Block_Sched, e: Sched_Ent) { for bs.ready if it == e { array_ordered_remove_by_index(*bs.ready, it_index); return; } }
 
 // DecrUnsched of schedule(): one fewer unscheduled dependency of `sd`
@@ -1063,4 +1081,124 @@ bs_copyable_prechecks :: (bs: *Block_Sched, vl: [] Value_Id, s: Inst_State, ei: 
         }
     }
     return true;
+}
+
+// ---------------------------------------------------------------- scheduleBlock
+
+// moveAfter(LastScheduledInst->getPrevNode()): i goes right before `next` (at the head of its debug records); its own
+// records stay behind on the instruction that followed it
+slp_move_before_head :: (i: Value_Id, next: Value_Id) {
+    if next == i {   // splicing before itself: only the records move on
+        if inst(i).records && inst_next(i) != NONE records_prepend(inst_next(i), records_take(i));
+        return;
+    }
+    if inst(i).records {
+        nx := inst_next(i);
+        assert(nx != NONE, "moving a terminator with debug records");
+        records_prepend(nx, records_take(i));
+    }
+    inst_unlink(i);
+    inst_insert_before(i, next);
+}
+
+// BoUpSLP::scheduleBlock(R, BS)
+bs_schedule_block :: (bs: *Block_Sched) {
+    if bs.schedule_start == NONE return;
+    bs_reset_schedule(bs);
+    bs.sorted_ready = true;
+    defer bs.sorted_ready = false;
+    idx: s32 = 0;
+    i := bs.schedule_start;
+    while i != bs.schedule_end {
+        defer i = inst_next(i);
+        bundles := bs_bundles(bs, i);
+        if bundles.count {
+            sd := bs_data(bs, i);
+            if sd >= 0 && sd_has_valid_deps(bs, sd) && bs_cd_of_inst(bs, i).count sd_clear_direct_deps(bs, sd);
+            for b: bundles {
+                bs.bundles[b].priority = idx; idx += 1;
+                te := bs.bundles[b].te;
+                if te != TE_NONE && sb_has_valid_deps(bs, b) && slp.entries[te].user_tree_index.user != TE_NONE {
+                    ei := slp.entries[te].user_tree_index;
+                    ue := *slp.entries[ei.user];
+                    c := false;
+                    if ue.state == TE_VECTORIZE && ue.does_not_need_to_schedule {
+                        for v: ue.scalars if slp_te_is_expanded_bin_op(ei.user, v) { c = true; break; }
+                    }
+                    if !c c = ei.edge == EDGE_NONE && te_is_gather(ei.user);
+                    if c for m: bs.bundles[b].members if !bs.data[m].copyable sd_clear_direct_deps(bs, m);
+                }
+                if !sb_has_valid_deps(bs, b) bs_calculate_dependencies(bs, b, false, .[], .[]);
+            }
+            sds := bs_cd_of_inst(bs, i);
+            for < sds {
+                b := bs.data[it].cd_bundle;
+                bs.bundles[b].priority = idx; idx += 1;
+                if !sb_has_valid_deps(bs, b) bs_calculate_dependencies(bs, b, false, .[], .[]);
+            }
+            continue;
+        }
+        copyable_data := bs_cd_users(bs, i);
+        sd := bs_data(bs, i);
+        if sd >= 0 {
+            bs.data[sd].priority = idx; idx += 1;
+            need := copyable_data.count > 0;
+            if !need {
+                p := table_find_pointer(*slpx.value_to_gather_nodes, i);
+                if p for te: p.* if te_has_state(te) && slp_te_has_copyables(te) && slp_te_is_copyable(te, i) { need = true; break; }
+            }
+            if need {
+                sd_clear_direct_deps(bs, sd);
+                nb: Sched_Bundle;
+                nb.members.allocator = temp;
+                array_add(*nb.members, sd);
+                array_add(*bs.bundles, nb);   // a temporary ScheduleBundle (not registered for any instruction)
+                bs_calculate_dependencies(bs, cast(s32) (bs.bundles.count - 1), false, .[], .[]);
+            }
+        }
+        for < copyable_data {
+            b := bs.data[it].cd_bundle;
+            bs.bundles[b].priority = idx; idx += 1;
+            if !sb_has_valid_deps(bs, b) bs_calculate_dependencies(bs, b, false, .[], .[]);
+        }
+    }
+    bs_initial_fill_ready_list(bs);
+    last := bs.schedule_end;
+    scheduled: Table(Value_Id, bool); scheduled.allocator = temp;
+    while bs.ready.count {
+        picked := pop(*bs.ready);
+        if ent_is_bundle(picked) {
+            b := ent_bundle(picked);
+            te := bs.bundles[b].te;
+            for m: bs.bundles[b].members {
+                pi := bs.data[m].inst;
+                is_copyable := slp_te_is_copyable(te, pi);
+                if is_copyable && bs_data(bs, pi) >= 0 continue;
+                if !is_copyable {
+                    if table_contains(*scheduled, pi) continue;
+                    table_set(*scheduled, pi, true);
+                }
+                if inst_next(pi) != last slp_move_before_head(pi, last);
+                last = pi;
+            }
+            if slp_te_has_copyables(te) {
+                e := *slp.entries[te];
+                main := e.s.main;
+                for v: e.scalars {
+                    if !is_inst(v) continue;
+                    if !has_one_use(v) && slp_te_is_copyable(te, v) && inst_block(v) == inst_block(main) && slp_does_not_need_to_be_scheduled(v) &&
+                       !is_non_schedulable(e.s, v)
+                        inst_move_before(v, last);
+                }
+            }
+            if !table_contains(*slpx.entry_to_last_instruction, te) table_set(*slpx.entry_to_last_instruction, te, last);
+        } else {
+            pi := bs.data[picked].inst;
+            if inst_next(pi) != last slp_move_before_head(pi, last);
+            last = pi;
+        }
+        invalid: Inst_State;
+        bs_schedule(bs, invalid, picked);
+    }
+    bs.schedule_start = NONE;
 }

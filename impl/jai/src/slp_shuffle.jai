@@ -14,7 +14,7 @@ pu_v :: (v: Value_Id) -> Pu { p: Pu; p.v = v; return p; }
 pu_te :: (te: Te_Id) -> Pu { p: Pu; p.te = te; return p; }
 pu_null :: (p: Pu) -> bool { return p.v == NONE && p.te == TE_NONE; }
 
-Bv_Kind :: enum u8 { COST; }
+Bv_Kind :: enum u8 { COST; IR; }   // ShuffleCostEstimator, ShuffleInstructionBuilder (slp_codegen.jai)
 
 Bv_Builder :: struct {
     kind: Bv_Kind;
@@ -29,7 +29,9 @@ Bv_Builder :: struct {
     vectorized_vals: [..] Value_Id;     // SmallDenseSet (membership)
     checked_extracts: *[..] Value_Id;   // SmallPtrSet (membership)
     same_nodes_estimated := true;
+    need_freeze: bool;                  // processBuildVector's NeedFreeze (also set by the finalize action)
 }
+Bv_Res :: struct { cost: Cost; v: Value_Id = NONE; }
 
 bv_init_cost :: (b: *Bv_Builder, sty: Type_Id, vectorized_vals: [] Value_Id, checked_extracts: *[..] Value_Id) {
     b.* = .{};
@@ -623,6 +625,7 @@ slp_are_all_users_vectorized_set :: (i: Value_Id, vals: [] Value_Id) -> bool {
 // resetForSameNode()
 sce_reset_for_same_node :: (b: *Bv_Builder) {
     b.is_finalized = false;
+    if b.kind == .IR { array_reset_keeping_memory(*b.common_mask); array_reset_keeping_memory(*b.in_vectors); return; }
     array_reset_keeping_memory(*b.common_mask);
     array_reset_keeping_memory(*b.in_vectors);
     b.cost = 0;
@@ -632,6 +635,7 @@ sce_reset_for_same_node :: (b: *Bv_Builder) {
 
 // add(E1, E2, Mask)
 bv_add_te2 :: (b: *Bv_Builder, e1: Te_Id, e2: Te_Id, mask: [] s32) {
+    if b.kind == .IR { sib_add_v2(b, sib_get_vectorized_value(b, e1), sib_get_vectorized_value(b, e2), mask); return; }
     b.bv_engaged = false;
     if e1 == e2 { bv_add_te(b, e1, mask); return; }
     if b.in_vectors.count == 0 {
@@ -648,6 +652,7 @@ bv_add_te2 :: (b: *Bv_Builder, e1: Te_Id, e2: Te_Id, mask: [] s32) {
 }
 // add(E1, Mask)
 bv_add_te :: (b: *Bv_Builder, e1: Te_Id, mask: [] s32) {
+    if b.kind == .IR { sib_add_v(b, sib_get_vectorized_value(b, e1), mask); return; }
     b.bv_engaged = false;
     if b.in_vectors.count == 0 {
         b.common_mask = mask_copy(mask);
@@ -663,9 +668,12 @@ bv_add_te :: (b: *Bv_Builder, e1: Te_Id, mask: [] s32) {
     if !b.same_nodes_estimated && b.in_vectors.count == 1 array_add(*b.in_vectors, pu_te(e1));
 }
 // add(V1, V2, Mask): only for extracts of two vectors, already handled by adjustExtracts
-bv_add_v2 :: (b: *Bv_Builder, v1: Value_Id, v2: Value_Id, mask: [] s32) {}
+bv_add_v2 :: (b: *Bv_Builder, v1: Value_Id, v2: Value_Id, mask: [] s32) {
+    if b.kind == .IR sib_add_v2(b, v1, v2, mask);
+}
 // add(V1, Mask, ForExtracts)
 bv_add_v :: (b: *Bv_Builder, v1: Value_Id, mask: [] s32, for_extracts := false) {
+    if b.kind == .IR { sib_add_v(b, v1, mask); return; }
     if b.bv_engaged && !is_const(v1) b.bv_engaged = false;
     if b.in_vectors.count == 0 {
         b.common_mask = mask_copy(mask);
@@ -689,6 +697,7 @@ bv_add_v :: (b: *Bv_Builder, v1: Value_Id, mask: [] s32, for_extracts := false) 
 }
 // gather(VL, MaskVF, Root)
 bv_gather :: (b: *Bv_Builder, vl: [] Value_Id, mask_vf: s64 = 0, root: Value_Id = NONE) -> Value_Id {
+    if b.kind == .IR return slp_gather(vl, root, b.sty, b);
     #if DEBUG_SLP { bvc := sce_build_vector_cost(b, vl, root); print("DBG   gather cost % (n=% root=%)\n", bvc, vl.count, root); }
     b.cost = cost_add(b.cost, sce_build_vector_cost(b, vl, root));
     if b.bv_engaged {
@@ -722,7 +731,13 @@ Pbv_Action :: struct {
 }
 
 // finalize(ExtMask, SubVectors, SubVectorsMask, VF, Action)
-bv_finalize :: (b: *Bv_Builder, ext_mask: [] s32, sub_vectors: [] [2] s64, sub_vectors_mask: [] s32, vf: s64 = 0, action: *Pbv_Action = null) -> Cost {
+bv_finalize :: (b: *Bv_Builder, ext_mask: [] s32, sub_vectors: [] [2] s64, sub_vectors_mask: [] s32, vf: s64 = 0, action: *Pbv_Action = null) -> Bv_Res {
+    r: Bv_Res;
+    if b.kind == .IR r.v = sib_finalize(b, ext_mask, sub_vectors, sub_vectors_mask, vf, action);
+    else r.cost = sce_finalize(b, ext_mask, sub_vectors, sub_vectors_mask, vf, action);
+    return r;
+}
+sce_finalize :: (b: *Bv_Builder, ext_mask: [] s32, sub_vectors: [] [2] s64, sub_vectors_mask: [] s32, vf: s64 = 0, action: *Pbv_Action = null) -> Cost {
     b.is_finalized = true;
     if action {
         vec := b.in_vectors[0];
@@ -854,7 +869,7 @@ pbv_run_action :: (b: *Bv_Builder, a: *Pbv_Action, vec: *Value_Id, mask: *[..] s
     nc := a.non_constants;
     is_splat := slp_is_splat(nc.*);
     bv_mask := new_mask(mask.count);
-    if pbv_try_pack_scalars(a.te, nc, *bv_mask, false, a.vf, a.orig_sty) slp_fail("freeze of a broadcast with undefs in a gathered node");
+    if pbv_try_pack_scalars(a.te, nc, *bv_mask, false, a.vf, a.orig_sty) b.need_freeze = true;
     check_if_splat_is_profitable :: (a: *Pbv_Action, nc: [] Value_Id, mask: [] s32, bv_mask: [] s32, vec: Value_Id) -> bool {
         v: Value_Id = NONE; for nc if !pm_undef_value(it) { v = it; break; }
         if is_inst(v) && inst_op(v) == .EXTRACTELEMENT || slp_is_vectorized(v) return false;
@@ -883,23 +898,30 @@ pbv_run_action :: (b: *Bv_Builder, a: *Pbv_Action, vec: *Value_Id, mask: *[..] s
         bvv := bv_gather(b, values, bv_mask.count);
         splat_mask := new_mask(bv_mask.count);
         for i, k: bv_mask splat_mask[k] = ifx i == PME then PME else 0;
-        if !svm_is_identity(splat_mask, a.vf) {
-            b.cost = cost_add(b.cost, sce_create_shuffle(b, pu_v(bvv), Pu.{}, splat_mask));
-        }
+        if !svm_is_identity(splat_mask, a.vf) bvv = pbv_create_shuffle(b, bvv, NONE, splat_mask);
         for i, idx: bv_mask if i != PME mask.*[idx] = cast(s32) (bv_mask.count + idx);
-        b.cost = cost_add(b.cost, sce_create_shuffle(b, pu_v(vec.*), pu_v(bvv), mask.*));
+        vec.* = pbv_create_shuffle(b, vec.*, bvv, mask.*);
         for i, idx: mask.* if i != PME mask.*[idx] = cast(s32) idx;
     }
+}
+
+// the CreateShuffle callback the finalize action gets
+pbv_create_shuffle :: (b: *Bv_Builder, v1: Value_Id, v2: Value_Id, mask: [] s32) -> Value_Id {
+    if b.kind == .IR return sib_create_shuffle(b, v1, v2, mask);
+    b.cost = cost_add(b.cost, sce_create_shuffle(b, pu_v(v1), ifx v2 == NONE then Pu.{} else pu_v(v2), mask));
+    return v1;
 }
 
 // processBuildVector<ShuffleCostEstimator, InstructionCost>(E, ScalarTy, TTI, VectorizedVals, R, CheckedExtracts)
 slp_build_vector_cost :: (te: Te_Id, sty: Type_Id, vectorized_vals: [] Value_Id, checked_extracts: *[..] Value_Id) -> Cost {
     b: Bv_Builder;
     bv_init_cost(*b, sty, vectorized_vals, checked_extracts);
-    return slp_process_build_vector(te, sty, *b);
+    return slp_process_build_vector(te, sty, *b).cost;
 }
 
-slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Cost {
+// processBuildVector<BVTy, ResTy>(E, ScalarTy, ...): the builder kind selects ShuffleCostEstimator (cost) or
+// ShuffleInstructionBuilder (value)
+slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Bv_Res {
     e := *slp.entries[te];
     vf := te_vector_factor(te);
     need_freeze := false;
@@ -936,7 +958,19 @@ slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Cost {
         extract_shuffles = slp_try_to_gather_extract_elements(gathered, *extract_mask, num_parts);
         #if DEBUG_SLP print("DBG   extract shuffles % mask %\n", extract_shuffles, extract_mask);
         if extract_shuffles.count {
-            vb, uvb := sce_adjust_extracts(b, te, extract_mask, extract_shuffles, num_parts);
+            if b.kind == .IR {
+                deps: [1] [..] Te_Id;
+                deps[0].allocator = temp;
+                for i, idx: extract_mask {
+                    if i == PME continue;
+                    for slp_get_tree_entries(op(stored_gs[idx], 0)) array_add(*deps[0], it);
+                }
+                delayed := sib_need_to_delay(b, te, deps);
+                if delayed != NONE { set_add_te(*slpg.postponed_gathers, te); r: Bv_Res; r.v = delayed; return r; }
+            }
+            vb: Value_Id; uvb: bool;
+            if b.kind == .IR vb, uvb = sib_adjust_extracts(b, te, *extract_mask, extract_shuffles, num_parts);
+            else vb, uvb = sce_adjust_extracts(b, te, extract_mask, extract_shuffles, num_parts);
             use_vec_base = uvb;
             if vb != NONE {
                 extract_vec_base = vb;
@@ -960,6 +994,10 @@ slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Cost {
             #if DEBUG_SLP { print("DBG   gather shuffles % mask % entries %\n", gather_shuffles, mask, entries); for es: entries for x: es print("DBG     entry % scalars % reuse % reorder % state %\n", x, slp.entries[x].scalars, slp.entries[x].reuse_shuffle_indices, slp.entries[x].reorder_indices, slp.entries[x].state); }
         }
         if gather_shuffles.count {
+            if b.kind == .IR {
+                delayed := sib_need_to_delay(b, te, entries);
+                if delayed != NONE { set_add_te(*slpg.postponed_gathers, te); r: Bv_Res; r.v = delayed; return r; }
+            }
             if gather_shuffles.count == 1 && gather_shuffles[0] == SK_PERMUTE_SINGLE_SRC &&
                (te_is_same(entries[0][0], e.scalars) || te_is_same(te, slp.entries[entries[0][0]].scalars)) {
                 array_resize(*mask, e.scalars.count);
@@ -993,7 +1031,7 @@ slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Cost {
             for i: 0..mask.count-1 if mask[i] != PME gathered[i] = const_poison(orig_sty);
         }
     }
-    res: Cost = 0;
+    res: Bv_Res;
     if extract_shuffles.count || gather_shuffles.count {
         is_non_poisoned := true;
         is_used_in_expr := true;
@@ -1008,7 +1046,7 @@ slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Cost {
                     if pm_undef_value(stored_gs[i]) continue;
                     vec_op := op(stored_gs[i], 0);
                     tes := slp_get_tree_entries(vec_op);
-                    if tes.count && slp.entries[tes[0]].vectorized_value != NONE vec_op = slp.entries[tes[0]].vectorized_value;
+                    if tes.count && te_vv(tes[0]) != NONE vec_op = te_vv(tes[0]);
                     if vec1 == NONE vec1 = vec_op;
                     else if vec1 != vec_op vec2 = vec_op;
                 }
@@ -1038,7 +1076,7 @@ slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Cost {
                 for * vec_mask it.* = PME;
                 for k: 0..limit-1 vec_mask[i * slice + k] = mask[i * slice + k];
                 if tes.count == 1 {
-                    vv := slp.entries[tes[0]].vectorized_value;
+                    vv := te_vv(tes[0]);
                     not_poisoned := ifx vv != NONE then is_guaranteed_not_to_be_poison(vv, slp.ac) else true;
                     is_used_in_expr &= pbv_find_reused_splat(te, gathered, *vec_mask, te_vector_factor(tes[0]), i, slice, not_poisoned);
                     bv_add_te(b, tes[0], vec_mask);
@@ -1046,7 +1084,7 @@ slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Cost {
                 } else {
                     is_used_in_expr = false;
                     bv_add_te2(b, tes[0], tes[1], vec_mask);
-                    v0 := slp.entries[tes[0]].vectorized_value; v1 := slp.entries[tes[1]].vectorized_value;
+                    v0 := te_vv(tes[0]); v1 := te_vv(tes[1]);
                     if v0 != NONE && v1 != NONE is_non_poisoned &= is_guaranteed_not_to_be_poison(v0, slp.ac) && is_guaranteed_not_to_be_poison(v1, slp.ac);
                 }
             }
@@ -1102,7 +1140,8 @@ slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Cost {
         bv_add_v(b, bv, m);
         res = bv_finalize(b, e.reuse_shuffle_indices, sub_vectors, sub_vectors_mask);
     }
-    return res;   // createFreeze(Cost) is the identity for the cost estimator
+    if (need_freeze || b.need_freeze) && b.kind == .IR res.v = sgb_freeze(res.v);   // createFreeze (the identity for costs)
+    return res;
 }
 
 // the FindReusedSplat lambda

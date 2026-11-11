@@ -990,26 +990,25 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   flags, and every per-function piece that fails loudly) equals LLVM's, in the same order
   (`tools/slp_cost_compare.py`, see Debugging). Cost paths not reached by X86 trees fail loudly: strided / masked /
   compressed / scattered load and store nodes, interleaved accesses, reduced-bitcast nodes, REVEC.
-- Frontier (fails loudly), most frequent first in the per-function sweep: vectorizeTree (1153) and the
-  vectorization of a profitable reduction (427 + ordered); const.rdx (126); isMaskedLoadCompress / the masked-gather
-  cost check in canVectorizeLoads (99); struct-typed scalars (42); emitScaleForReusedOps (36); matchesShlZExt /
-  matchesSelectOfBits / matchesInversedZExtSelect (~40).
+- Code generation (`slp_codegen.jai`: the Builder = IRBuilder<TargetFolder> as `sgb_*`, setInsertPointAfterBundle,
+  gather, ShuffleInstructionBuilder as the `.IR` kind of `Bv_Builder`, vectorizeTree(E) per opcode;
+  `slp_codegen2.jai`: vectorizeTree() with postponed gathers, external-use extraction, shuffled insertelement users,
+  scalar removal, removeInstructionsAndOperands, optimizeGatherSequence, ~BoUpSLP; `slp_sched.jai`:
+  scheduleBlock). TreeEntry::VectorizedValue is a WeakTrackingVH (`te_vv` / `te_set_vv` over value_handles.jai).
+  Removed-from-parent instructions drop their name (LLVM's symbol table forgets it).
+- Frontier (fails loudly), most frequent first in the per-function sweep: the vectorization of a profitable
+  reduction (429 + 5 ordered); const.rdx (127); isMaskedLoadCompress / the masked-gather cost check in
+  canVectorizeLoads (~75); struct-typed scalars; emitScaleForReusedOps; matchesShlZExt / matchesSelectOfBits /
+  matchesInversedZExtSelect; strided / masked / compressed loads and stores, vector library calls.
 - Next steps, in order:
-  1. vectorizeTree (codegen): ShuffleInstructionBuilder (22131) as a second `Bv_Kind` of `Bv_Builder` (processBuildVector
-     is already shared; its `bv_*` calls switch on the kind), gather (21931), setInsertPointAfterBundle (21888),
-     vectorizeOperand / vectorizeTree(E) (22668, 23272-24620: one case per opcode, like getEntryCost), vectorizeTree
-     (24626-25488: postponed gathers, external-use extracts with the ExternalUsesAsOriginalScalar /
-     ExternalUsesWithNonUsers sets built by getTreeCost / buildExternalUses, shuffled insertelement users through
-     performExtractsShuffleAction, removal of the vectorized scalars), scheduleBlock (26676), optimizeGatherSequence
-     (25489), ~BoUpSLP (6576, the deleted-instruction sweep). Then the reduction's vectorization (tryToReduce after
-     the cost check, 30285-30530; emitReduction 31083 / 31263; TrackedVals / VectorizedVals / RequiredExtract become
-     non-trivial) and tryToReduceOrdered's emission.
+  1. The reduction's vectorization (tryToReduce after the cost check, 30285-30530; emitReduction 31083 / 31263;
+     TrackedVals / VectorizedVals / RequiredExtract become non-trivial) and tryToReduceOrdered's emission.
   2. isMaskedLoadCompress + the masked-gather cost check of canVectorizeLoads (needs X86 getMemIntrinsicInstrCost
-     for masked_gather / masked_load), matchesShlZExt & co (transformNodes): analysis, verifiable with
-     tools/slp_cost_compare.py before codegen. const.rdx and emitScaleForReusedOps in tryToReduce need the
-     reduction's emission (1.).
-  Driver flows that differ from LLVM only after a loud failure may still hide bugs: once vectorizeTree exists, rerun
-  `tools/slp_cost_compare.py` (it then compares whole decision sequences) and the sweeps.
+     for masked_gather / masked_load), matchesShlZExt & co (transformNodes), then their codegen.
+  3. const.rdx and emitScaleForReusedOps in tryToReduce, struct-typed scalars.
+  `tools/slp_cost_compare.py` now compares whole decision sequences (every tree after a vectorization too): run
+  it with a `--with-test-flags` sweep's results.tsv after every change; DEBUG_SLP also dumps the module after each
+  vectorizeTree ("DBG IR after vectorizeTree").
 - Sorting: LLVM `stable_sort`s go through `gnu_stable_sort` (scev.jai, libstdc++'s algorithm) when the comparator
   may not be a strict weak order (PHICompare, compareCmp); insertion sort elsewhere. Hash-ordered containers that
   decide results fail loudly when the order matters (collectUserStores with several store groups).

@@ -1950,10 +1950,10 @@ is_guaranteed_not_to_be_undef_or_poison_kind :: (v: Value_Id, ac: *Assumption_Ca
             if is_phi(v) {
                 n := nops(v);
                 well := true;
-                for i: 0..n-1 {
-                    inc := phi_value(v, i);
+                for i: 0..cast(s64) n - 1 {
+                    inc := phi_value(v, cast(u32) i);
                     if inc == v continue;
-                    ti := block_terminator(phi_block(v, i));
+                    ti := block_terminator(phi_block(v, cast(u32) i));
                     if !is_guaranteed_not_to_be_undef_or_poison_kind(inc, ac, ti, dt, depth + 1, kind) { well = false; break; }
                 }
                 if well return true;
