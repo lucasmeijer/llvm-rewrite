@@ -82,8 +82,7 @@ fn can_inline_call_site(cb: i32) -> bool {
     let nb = cb_nbundles(cb);
     for k in nb {
         let t = sbytes(cb_bundle_tag(cb, k));
-        if t == "deopt" { if_not_ported("inlining a call with a deopt bundle"); }
-        if t == "funclet" || t == "kcfi" { continue; }
+        if t == "deopt" || t == "funclet" || t == "kcfi" { continue; }
         if t == "clang.arc.attachedcall" { if_not_ported("inlining an ObjC ARC attached call"); }
         if t == "convergencectrl" { if_not_ported("convergence control tokens"); }
         if_fail_reason = intern("unsupported operand bundle");
@@ -214,8 +213,8 @@ fn pfc_clone_block(bb: i32, start: i32, nf: i32, m: i32, suffix: const u8[:], to
     }
     if !done {
         let ni = inst_clone(old_ti);
-        if_name_with(ni, old_ti, suffix);
         block_append_inst(nbb, ni);
+        if_name_with(ni, old_ti, suffix);   // named before insertInto: uniqued on insertion
         clone_dbg_to_here(ni, old_ti);
         vmm_set(m, old_ti, ni);
         vmm_set(cci_orig_vmap, old_ti, ni);
@@ -737,7 +736,7 @@ fn fixup_line_numbers(caller: i32, first: i32, cb: i32, callee_has_di: bool) {
     }
     let ia_node = if_dil(dil_line(call_dl), dil_col(call_dl), dil_scope(call_dl), dil_ia(call_dl), false, true);
     hm_clear(ia_cache);
-    if aset_find_str(alist_fn(func_attrs(caller)), "no-inline-line-tables") >= 0 { if_not_ported("no-inline-line-tables"); }
+    let no_lt = aset_find_str(alist_fn(func_attrs(caller)), "no-inline-line-tables") >= 0;
     var b = first;
     while b >= 0 {
         var i = block_first(b);
@@ -745,8 +744,8 @@ fn fixup_line_numbers(caller: i32, first: i32, cb: i32, callee_has_di: bool) {
             update_loop_md_debug_locations(i, ia_node);
             let dl = inst_get_md(i, 0);
             var done = false;
-            if dl >= 0 { inst_set_md(i, 0, inline_debug_loc(dl, ia_node)); done = true; }
-            if !done && !callee_has_di {
+            if !no_lt && dl >= 0 { inst_set_md(i, 0, inline_debug_loc(dl, ia_node)); done = true; }
+            if !done && (!callee_has_di || no_lt) {
                 var skip = false;
                 if iop(i) == OP_ALLOCA && is_constant(op(i, 0)) && (insts[inst_of(i)].bits & 2) == 0 { skip = true; }
                 if inst_iid(i) == IID_pseudoprobe { skip = true; }
@@ -754,10 +753,14 @@ fn fixup_line_numbers(caller: i32, first: i32, cb: i32, callee_has_di: bool) {
             }
             var r = inst_first_dbg(i);
             while r >= 0 {
-                dbgrecs[r].dl = inline_debug_loc(dbgrecs[r].dl, ia_node);
+                dbgrecs[r].dl = if no_lt { call_dl } else { inline_debug_loc(dbgrecs[r].dl, ia_node) };
                 r = dbgrecs[r].next;
             }
             i = inst_next(i);
+        }
+        if no_lt {
+            var j = block_first(b);
+            while j >= 0 { cu_drop_dbg_records(j); j = inst_next(j); }
         }
         b = block_next(b);
     }
@@ -1369,6 +1372,118 @@ fn merge_attributes_for_inlining(caller: i32, callee: i32) {
 // InlineFunction
 
 // Instruction::getTerminatingMustTailCall / getTerminatingDeoptimizeCall of a block ending in `ret`
+// BasicBlock::getTerminatingDeoptimizeCall
+fn block_terminating_deoptimize_call(bb: i32) -> i32 {
+    let t = block_terminator(bb);
+    if t < 0 || iop(t) != OP_RET || block_first(bb) == t { return -1; }
+    let p = inst_prev(t);
+    if p >= 0 && iop(p) == OP_CALL {
+        let f = called_function(p);
+        if f >= 0 && func_iid(f) == IID_experimental_deoptimize { return p; }
+    }
+    return -1;
+}
+
+// CallBase::Create(CB, Bundles, InsertPt): a copy of call/invoke `c` with the bundles (tag, operands) given as
+// pairs (tag, count) and their operands, inserted before c. Other metadata is not copied.
+fn if_recreate_with_bundles(c: i32, pairs: const i32[:], bops: const i32[:]) -> i32 {
+    let na = cb_nargs(c);
+    var opsv: i32[>..<] = [];
+    for k in na { opsv.push(cb_arg(c, k)); }
+    for v in bops { opsv.push(v); }
+    if iop(c) == OP_INVOKE { opsv.push(invoke_normal_dest(c)); opsv.push(invoke_unwind_dest(c)); }
+    else if iop(c) != OP_CALL { if_not_ported("re-creating a callbr with new operand bundles"); }
+    opsv.push(cb_callee(c));
+    let nc = create_inst(iop(c), vals[c].ty, opsv);
+    let ni = inst_of(nc);
+    let oi = inst_of(c);
+    insts[ni].ty2 = insts[oi].ty2;
+    insts[ni].pred = insts[oi].pred;
+    insts[ni].cc = insts[oi].cc;
+    insts[ni].fmf = insts[oi].fmf;
+    insts[ni].flags = insts[oi].flags;
+    insts[ni].attrs = insts[oi].attrs;
+    cb_set_bundles(nc, na, pairs, 0);
+    inst_insert_before(nc, c);
+    if vals[c].name >= 0 { var nm: u8[>..] = []; nm.append(val_name(c)); set_name(nc, nm); }
+    let dl = inst_get_md(c, 0);
+    if dl >= 0 { inst_set_md(nc, 0, dl); }
+    return nc;
+}
+
+// The parent's "deopt" continuation is prepended to the inlined calls' deopt bundles
+fn merge_parent_deopt_bundles(cb: i32) {
+    var pk: i64 = -1;
+    for k in cb_nbundles(cb) { if sbytes(cb_bundle_tag(cb, k)) == "deopt" { pk = k; break; } }
+    if pk < 0 { return; }
+    for h in cci_bundle_sites {
+        let ics = wvh_get(h);
+        if ics < 0 || is_dead(ics) || !is_inst(ics) || !is_callbase(ics) { continue; }
+        var pairs: i32[>..<] = [];
+        var bops: i32[>..<] = [];
+        for k in cb_nbundles(ics) {
+            let t = cb_bundle_tag(ics, k);
+            var n: i64 = 0;
+            if sbytes(t) == "deopt" {
+                let pb = cb_bundle_begin(cb, pk);
+                for j in cb_bundle_count(cb, pk) { bops.push(op(cb, pb + j)); n++; }
+            }
+            let b = cb_bundle_begin(ics, k);
+            for j in cb_bundle_count(ics, k) { bops.push(op(ics, b + j)); n++; }
+            pairs.push(t);
+            pairs.push(n as i32);
+        }
+        let ni = if_recreate_with_bundles(ics, pairs, bops);
+        rauw(ics, ni);
+        wvh_set(h, -1);
+        inst_erase_from_parent(ics);
+    }
+}
+
+// InlinedDeoptimizeCalls: the deoptimizing returns leave the Return set; with a different caller return type the
+// deoptimize calls are re-created with the caller's return type.
+fn rewrite_deoptimize_returns(cb: i32, caller: i32, returns: i32[>..<]&) {
+    let crt = ty_fn_ret(globs[glob_of(caller)].vty);
+    var normal: i32[>..<] = [];
+    if crt == vals[cb].ty {
+        for ri in returns { if block_terminating_deoptimize_call(inst_parent(ri)) < 0 { normal.push(ri); } }
+    } else {
+        let nd = au_get_declaration(IID_experimental_deoptimize, [crt]);
+        for ri in returns {
+            let dc = block_terminating_deoptimize_call(inst_parent(ri));
+            if dc < 0 { normal.push(ri); continue; }
+            let ccv = globs[glob_of(called_function(dc))].cc;
+            globs[glob_of(nd)].cc = ccv;
+            let cur = inst_parent(ri);
+            inst_erase_from_parent(ri);
+            var opsv: i32[>..<] = [];
+            for k in cb_nargs(dc) { opsv.push(cb_arg(dc, k)); }
+            var pairs: i32[>..<] = [];
+            for k in cb_nbundles(dc) {
+                let b = cb_bundle_begin(dc, k);
+                for j in cb_bundle_count(dc, k) { opsv.push(op(dc, b + j)); }
+                pairs.push(cb_bundle_tag(dc, k));
+                pairs.push(cb_bundle_count(dc, k) as i32);
+            }
+            let na = cb_nargs(dc);
+            let dattrs = insts[inst_of(dc)].attrs;
+            inst_erase_from_parent(dc);
+            opsv.push(nd);
+            let nc = create_inst(OP_CALL, crt, opsv);
+            insts[inst_of(nc)].ty2 = globs[glob_of(nd)].vty;
+            insts[inst_of(nc)].cc = ccv;
+            insts[inst_of(nc)].attrs = dattrs;
+            cb_set_bundles(nc, na, pairs, 0);
+            block_append_inst(cur, nc);
+            let r = if crt == T_VOID { create_inst(OP_RET, T_VOID, []) } else { create_inst(OP_RET, T_VOID, [nc]) };
+            block_append_inst(cur, r);
+            cb_set_ret_set(nc, ic::aset_remove_incompatible(crt, cb_ret_set(nc), 3));
+        }
+    }
+    returns.resize(0);
+    for r in normal { returns.push(r); }
+}
+
 fn block_terminating_musttail(bb: i32) -> i32 {
     let t = block_terminator(bb);
     if t < 0 || iop(t) != OP_RET { return -1; }
@@ -1444,6 +1559,7 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
         if with_bfi { if_update_caller_bfi(orig_bb, m, callee); }
         if callee_has_entry_count(callee) { if_update_profile(cb, callee, m, orig_bb, with_psi, with_bfi); }
         for j in bv_dst.len { handle_byval_argument_init(bv_ty[j], bv_dst[j], bv_src[j], bv_align[j], first_new, callee); }
+        merge_parent_deopt_bundles(cb);
         fixup_line_numbers(caller, first_new, cb, func_subprogram(callee) >= 0);
         dc_clone();
         dc_remap(first_new);
@@ -1453,7 +1569,13 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
         if cci_contains_memprof { if_not_ported("memprof metadata in the inlined function"); }
         propagate_call_site_metadata(cb, first_new);
         propagate_alloc_token_metadata(callee, cb, m);
-        if func_get_md(callee, mdk("implicit.ref")) >= 0 { if_not_ported("!implicit.ref function metadata"); }
+        let irk = mdk("implicit.ref");
+        if func_get_md(callee, irk) >= 0 {
+            var irs: i32[>..<] = [];
+            let cg = globs[glob_of(callee)];
+            for k in cg.nmd { if md_att[cg.md + 2 * k] == irk { irs.push(md_att[cg.md + 2 * k + 1]); } }
+            for x in irs { glob_add_md(caller, irk, x); }
+        }
         propagate_inlined_from_metadata(cb, callee, caller, first_new);
         var b = first_new;
         while b >= 0 {
@@ -1490,6 +1612,7 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
     var va_attrs: i32[>..<] = [];
     for i in callee_np..cb_nargs(cb) { va_fwd.push(cb_arg(cb, i)); va_attrs.push(cb_param_set(cb, i)); }
     var inlined_musttail = false;
+    var inlined_deopt = false;
     if cci_contains_calls {
         var site_tk: u8 = 0;
         if iop(cb) == OP_CALL { site_tk = insts[inst_of(cb)].pred; }
@@ -1502,10 +1625,29 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
                 i = inst_next(i);
                 if iop(ci) != OP_CALL { continue; }
                 if va_fwd.len > 0 && insts[inst_of(ci)].pred == 2 {
-                    if_not_ported("forwarding varargs to an inlined musttail call");
+                    // forward the call site's varargs (CallInst::Create without a tail kind or name)
+                    let al = insts[inst_of(ci)].attrs;
+                    let fty = insts[inst_of(ci)].ty2;
+                    var sets: i32[>..<] = [alist_fn(al), alist_ret(al)];
+                    for k in ty_fn_nparams(fty) { sets.push(alist_param(al, k)); }
+                    for x in va_attrs { sets.push(x); }
+                    var opsv: i32[>..<] = [];
+                    for k in cb_nargs(ci) { opsv.push(cb_arg(ci, k)); }
+                    for x in va_fwd { opsv.push(x); }
+                    opsv.push(cb_callee(ci));
+                    let nc = create_inst(OP_CALL, vals[ci].ty, opsv);
+                    insts[inst_of(nc)].ty2 = fty;
+                    insts[inst_of(nc)].cc = insts[inst_of(ci)].cc;
+                    insts[inst_of(nc)].attrs = alist_get(sets);
+                    inst_insert_before(nc, ci);
+                    let dl = inst_get_md(ci, 0);
+                    if dl >= 0 { inst_set_md(nc, 0, dl); }
+                    rauw(ci, nc);
+                    inst_erase_from_parent(ci);
+                    ci = nc;
                 }
                 let f = called_function(ci);
-                if f >= 0 && func_iid(f) == IID_experimental_deoptimize { if_not_ported("experimental.deoptimize calls"); }
+                if f >= 0 && func_iid(f) == IID_experimental_deoptimize { inlined_deopt = true; }
                 var child = insts[inst_of(ci)].pred;
                 if child != 3 { child = if site_tk < child { site_tk } else { child }; }
                 insts[inst_of(ci)].pred = child;
@@ -1525,6 +1667,7 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
             if_intrinsic_call_at(IID_lifetime_start, [vals[ai].ty as i32], [ai], "", first, first_new, true);
             for ri in returns {
                 if inlined_musttail && block_terminating_musttail(inst_parent(ri)) >= 0 { continue; }
+                if inlined_deopt && block_terminating_deoptimize_call(inst_parent(ri)) >= 0 { continue; }
                 if_intrinsic_call(IID_lifetime_end, [vals[ai].ty as i32], [ai], "", ri, -1);
             }
         }
@@ -1535,6 +1678,7 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
         let saved = if_intrinsic_call_at(IID_stacksave, [pt], [], "savedstack", first, first_new, true);
         for ri in returns {
             if inlined_musttail && block_terminating_musttail(inst_parent(ri)) >= 0 { continue; }
+            if inlined_deopt && block_terminating_deoptimize_call(inst_parent(ri)) >= 0 { continue; }
             if_intrinsic_call(IID_stackrestore, [pt], [saved], "", ri, -1);
         }
     }
@@ -1544,6 +1688,7 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
         if fnp >= 0 && iop(fnp) == OP_LANDINGPAD { handle_inlined_landing_pad(cb, first_new); }
         else { if_not_ported("inlining an invoke with a funclet unwind destination"); }
     }
+    if inlined_deopt { rewrite_deoptimize_returns(cb, caller, returns); }
     if inlined_musttail {
         var normal: i32[>..<] = [];
         for ri in returns { if block_terminating_musttail(inst_parent(ri)) < 0 { normal.push(ri); } }
@@ -1687,10 +1832,33 @@ fn cb_add_fn_attr_enum(c: i32, kind: i64) {
     insts[ii].attrs = alist_get(sets);
 }
 fn dl_alloca_as() -> i64 { 0 }
+// Function::setPersonalityFn: the hung-off operands [personality, prefix, prologue] are allocated on first use
 fn if_set_personality(f: i32, p: i32) {
-    if_not_ported("setting the caller's personality function");
+    if vals[f].nops < 3 { while vals[f].nops < 3 { add_op_slot(f); } }
+    set_op(f, 0, p);
+    globs[glob_of(f)].has_personality = 1;
 }
 fn callee_has_entry_count(f: i32) -> bool { let ok, c = fn_entry_count(f); return ok; }
+
+// uniteAccessGroups (llvm/lib/Analysis/VectorUtils.cpp)
+fn unite_access_groups(a: i32, b: i32) -> i32 {
+    if a < 0 { return b; }
+    if b < 0 { return a; }
+    if a == b { return a; }
+    var u: i32[>..<] = [];
+    for g in [a, b] {
+        if mds[g].nops == 0 { var seen = false; for x in u { if x == g { seen = true; } } if !seen { u.push(g); } continue; }
+        for k in mds[g].nops as i64 {
+            let it = md_op(g, k);
+            var seen = false;
+            for x in u { if x == it { seen = true; } }
+            if !seen { u.push(it); }
+        }
+    }
+    if u.len == 0 { return -1; }
+    if u.len == 1 { return u[0]; }
+    return md_get(MK_TUPLE, -1, u, false);
+}
 
 // PropagateCallSiteMetadata
 fn propagate_call_site_metadata(cb: i32, first: i32) {
@@ -1699,7 +1867,6 @@ fn propagate_call_site_metadata(cb: i32, first: i32) {
     let asc = inst_get_md(cb, MDK_ALIAS_SCOPE);
     let na = inst_get_md(cb, MDK_NOALIAS);
     if mpla < 0 && ag < 0 && asc < 0 && na < 0 { return; }
-    if ag >= 0 { if_not_ported("propagating !llvm.access.group into inlined code"); }
     var b = first;
     while b >= 0 {
         var i = block_first(b);
@@ -1709,6 +1876,7 @@ fn propagate_call_site_metadata(cb: i32, first: i32) {
                     mpla = md_concatenate(inst_get_md(i, MDK_MEM_PARALLEL_LOOP_ACCESS), mpla);
                     inst_set_md(i, MDK_MEM_PARALLEL_LOOP_ACCESS, mpla);
                 }
+                if ag >= 0 { inst_set_md(i, MDK_ACCESS_GROUP, unite_access_groups(inst_get_md(i, MDK_ACCESS_GROUP), ag)); }
                 if asc >= 0 { inst_set_md(i, MDK_ALIAS_SCOPE, md_concatenate(inst_get_md(i, MDK_ALIAS_SCOPE), asc)); }
                 if na >= 0 { inst_set_md(i, MDK_NOALIAS, md_concatenate(inst_get_md(i, MDK_NOALIAS), na)); }
             }
@@ -1821,6 +1989,175 @@ fn ifq_set_after(after: i32, orig: i32) {
     bfi_get(block_func(orig));
     bfi_set_freq(after, bfi_freq(orig));
 }
+// updateCallProfile
 fn if_update_profile(cb: i32, callee: i32, m: i32, orig_bb: i32, with_psi: bool, with_bfi: bool) {
-    if_not_ported("profile updates when inlining a callee with an entry count");
+    let ok, cec = fn_entry_count(callee);
+    if !ok || cec < 1 { return; }
+    var cs: u64 = 0;
+    if with_psi {
+        if with_bfi { bfi_get(inst_func(cb)); }
+        let pok, pc = psi_profile_count(cb, with_bfi);
+        if pok { cs = pc; }
+    }
+    let cc = if cs < cec { cs } else { cec };
+    update_profile_callee(callee, -(cc as! i64), m);
+}
+
+// llvm::updateProfileCallee(Callee, EntryDelta, VMap); m = -1: no VMap
+fn update_profile_callee(callee: i32, delta: i64, m: i32) {
+    let ok, cc = fn_entry_count(callee);
+    if !ok { return; }
+    let nec: u64 = if delta < 0 && ((-delta) as! u64) > cc { 0 } else { cc + (delta as! u64) };
+    if m >= 0 {
+        let clone_ec = cc - nec;
+        var e = vmm_first(m);
+        while e >= 0 {
+            let k = vmm_ent_key(e);
+            let v = vmm_val(e);
+            e = vmm_next(e);
+            if k < 0 || !is_inst(k) || v < 0 || is_dead(v) || !is_inst(v) { continue; }
+            if (iop(k) == OP_CALL && iop(v) == OP_CALL) || (iop(k) == OP_INVOKE && iop(v) == OP_INVOKE) {
+                if_update_prof_weight(v, clone_ec, cc);
+                if_update_vtable_prof_weight(v, clone_ec, cc);
+            }
+        }
+    }
+    if delta != 0 {
+        fn_set_entry_count(callee, nec);
+        var b = func_first_block(callee);
+        while b >= 0 {
+            if m < 0 || vmm_find(m, b) >= 0 {
+                var i = block_first(b);
+                while i >= 0 {
+                    if iop(i) == OP_CALL || iop(i) == OP_INVOKE {
+                        if_update_prof_weight(i, nec, cc);
+                        if_update_vtable_prof_weight(i, nec, cc);
+                    }
+                    i = inst_next(i);
+                }
+            }
+            b = block_next(b);
+        }
+    }
+}
+// CallInst / InvokeInst::updateProfWeight(S, T)
+fn if_update_prof_weight(i: i32, sv: u64, tv: u64) {
+    if tv == 0 { return; }
+    if_scale_prof_data(i, sv, tv);
+}
+fn if_update_vtable_prof_weight(cb: i32, sv: u64, tv: u64) {
+    let vp = try_get_vtable_instruction(cb);
+    if vp >= 0 { if_scale_prof_data(vp, sv, tv); }
+}
+// PGOIndirectCallVisitor::tryGetVTableInstruction
+fn try_get_vtable_instruction(cb: i32) -> i32 {
+    let callee = cb_callee(cb);
+    if is_func(callee) || is_constant(callee) || vals[callee].kind == VK_INLINEASM { return -1; }
+    if !is_inst_op(callee, OP_LOAD) { return -1; }
+    let vt = if_strip_inbounds_constant_offsets(op(callee, 0));
+    if vt >= 0 && is_inst(vt) { return vt; }
+    return -1;
+}
+// Value::stripInBoundsConstantOffsets
+fn if_strip_inbounds_constant_offsets(v0: i32) -> i32 {
+    var v = v0;
+    if ty_kind(vals[v].ty) != TK_PTR { return v; }
+    var seen: i32[>..<] = [v];
+    loop {
+        let o = opcode_of(v);
+        if o == OP_GEP {
+            for k in 1..nops(v) { if vals[op(v, k)].kind != VK_CINT { return v; } }
+            if (op_flags(v) & GEP_INBOUNDS) == 0 { return v; }
+            v = op(v, 0);
+        } else if o == OP_BITCAST {
+            let nv = op(v, 0);
+            if ty_kind(vals[nv].ty) != TK_PTR { return v; }
+            v = nv;
+        } else if o == OP_ADDRSPACECAST {
+            v = op(v, 0);
+        } else if is_inst(v) && is_callbase(v) {
+            let rv = returned_arg_operand(v);
+            if rv < 0 { return v; }
+            v = rv;
+        } else {
+            return v;
+        }
+        for x in seen { if x == v { return v; } }
+        seen.push(v);
+    }
+}
+// scaleProfData(I, S, T)
+fn if_scale_prof_data(i: i32, sv: u64, tv: u64) {
+    let pd = inst_get_md(i, MDK_PROF);
+    if pd < 0 || mds[pd].nops < 1 { return; }
+    let nm = md_op(pd, 0);
+    let is_bw = pd_md_string_is(nm, "branch_weights");
+    let is_vp = pd_md_string_is(nm, "VP");
+    if !is_bw && !is_vp { return; }
+    // hasCountTypeMD: value profiles, or a call's non-branch-weight (fewer than 3 operands) profile
+    let count_type = (is_vp && mds[pd].nops >= 5) || (is_callbase(i) && !pd_is_branch_weight_md(pd));
+    if !count_type { return; }
+    var opsv: i32[>..<] = [nm];
+    let aps = ap_u64(sv, 128);
+    let apt = ap_u64(tv, 128);
+    if is_bw && mds[pd].nops > 0 {
+        let w = pd_md_weight(pd, pd_offset(pd));
+        let q = ap_udiv(ap_mul(ap_u64(w, 128), aps), apt);
+        opsv.push(md_value(c_int(T_I32, ap_limited(q, 0xFFFFFFFF) as! i64)));
+    } else if is_vp {
+        var k: i64 = 1;
+        while k < (mds[pd].nops as i64) {
+            opsv.push(md_op(pd, k));
+            let cnt = pd_md_weight(pd, k + 1);
+            if cnt == 0xFFFFFFFFFFFFFFFF { opsv.push(md_op(pd, k + 1)); k += 2; continue; }
+            let q = ap_udiv(ap_mul(ap_u64(cnt, 128), aps), apt);
+            opsv.push(md_value(c_int(T_I64, ap_limited(q, 0xFFFFFFFFFFFFFFFF) as! i64)));
+            k += 2;
+        }
+    }
+    inst_set_md(i, MDK_PROF, md_get(MK_TUPLE, -1, opsv, false));
+}
+// Function::setEntryCount(Count): keeps the import GUIDs of a function_entry_count
+fn fn_set_entry_count(f: i32, n: u64) {
+    var opsv: i32[>..<] = [md_string("function_entry_count"), md_value(c_int(T_I64, n as! i64))];
+    let old = func_get_md(f, MDK_PROF);
+    if old >= 0 && pd_md_string_is(md_op(old, 0), "function_entry_count") {
+        var guids: u64[>..<] = [];
+        for k in 2..(mds[old].nops as i64) { guids.push(pd_md_weight(old, k)); }
+        // sorted, unique (a DenseSet)
+        var a: i64 = 1;
+        while a < guids.len { var b = a; while b > 0 && guids[b - 1] > guids[b] { let t = guids[b]; guids[b] = guids[b - 1]; guids[b - 1] = t; b--; } a++; }
+        var last: u64 = 0;
+        for g, j in guids { if j > 0 && g == last { continue; } opsv.push(md_value(c_int(T_I64, g as! i64))); last = g; }
+    }
+    glob_set_md(f, MDK_PROF, md_get(MK_TUPLE, -1, opsv, false));
+}
+// GlobalObject::addMetadata(Kind, MD): another attachment of the kind (getAllMetadata stable-sorts by kind)
+fn glob_add_md(f: i32, kind: i32, node: i32) {
+    let g = glob_of(f);
+    let at = globs[g].md;
+    let n = globs[g].nmd;
+    let nat = md_att.len as i32;
+    var placed = false;
+    for k in n {
+        let kk = md_att[at + 2 * k];
+        if !placed && kk > kind { md_att.push(kind); md_att.push(node); placed = true; }
+        md_att.push(kk);
+        md_att.push(md_att[at + 2 * k + 1]);
+    }
+    if !placed { md_att.push(kind); md_att.push(node); }
+    globs[g].md = nat;
+    globs[g].nmd = n + 1;
+}
+fn glob_set_md(f: i32, kind: i32, node: i32) {
+    let g = glob_of(f);
+    let at = globs[g].md;
+    let n = globs[g].nmd;
+    for k in n { if md_att[at + 2 * k] == kind { md_att[at + 2 * k + 1] = node; return; } }
+    let nat = md_att.len as i32;
+    for k in n { md_att.push(md_att[at + 2 * k]); md_att.push(md_att[at + 2 * k + 1]); }
+    md_att.push(kind);
+    md_att.push(node);
+    globs[g].md = nat;
+    globs[g].nmd = n + 1;
 }

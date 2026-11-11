@@ -8,6 +8,7 @@ import irutil;
 import gen_attrs;
 import tli;
 import dinfo;
+import sccp;
 
 fn gv_linkage(v: i32) -> i64 { globs[glob_of(v)].linkage as i64 }
 fn gv_has_local_linkage(v: i32) -> bool { let l = gv_linkage(v); l == LK_INTERNAL || l == LK_PRIVATE }
@@ -80,6 +81,7 @@ fn func_erase_from_parent(f: i32) {
     }
     b = func_first_block(f);
     while b >= 0 { let nb = block_next(b); block_erase(b); b = nb; }
+    sc_remove_dead_constant_users(f);   // ~GlobalValue
     if first_use(f) >= 0 { fatal("internal: erasing a function that still has uses"); }
     if f < val_vam.len && val_vam[f] >= 0 { vam_handle_deletion(f); }
     ipo_metadata_handle_deletion(f);

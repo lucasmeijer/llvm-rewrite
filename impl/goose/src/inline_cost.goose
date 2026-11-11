@@ -295,21 +295,37 @@ fn tti_are_inline_compatible(caller: i32, callee: i32) -> bool {
     for w in 4 { if cc[w] != ee[w] { same = false; } }
     if same && c512 == e512 { return true; }
     var ok = true;
+    var tys: i32[>..<] = [];
     each_inst(callee) { i =>
-        if is_callbase(i) {
+        if ok && is_callbase(i) {
             let cal = cb_callee(i);
             if !(vals[cal].kind == VK_INLINEASM || call_iid(i) != 0) {
-                var simple = true;
+                tys.resize(0);
                 let na = cb_nargs(i);
-                for k in na { let t = vals[cb_arg(i, k)].ty; if ty_is_vector(t) || ty_is_aggregate(t) { simple = false; } }
-                let rt = vals[i].ty;
-                if ty_is_vector(rt) || ty_is_aggregate(rt) { simple = false; }
-                if !simple { ok = false; }
+                for k in na { tys.push(vals[cb_arg(i, k)].ty); }
+                if vals[i].ty != T_VOID { tys.push(vals[i].ty); }
+                var simple = true;
+                for t in tys { if ty_is_vector(t) || ty_is_aggregate(t) { simple = false; } }
+                if !simple && !x86_are_types_abi_compatible(caller, callee, tys, m) { ok = false; }
             }
         }
     };
-    if !ok { ic_not_ported("X86TTIImpl::areTypesABICompatible with vector or aggregate call types"); }
-    return true;
+    return ok;
+}
+
+// X86TTIImpl::areTypesABICompatible(Caller, Callee, Types): the callee's calling convention puts every value
+// type in the same register type under both subtargets
+fn x86_are_types_abi_compatible(caller: i32, callee: i32, tys: const i32[:], m: i32) -> bool {
+    let cc = globs[glob_of(callee)].cc as i64;
+    var vts: i64[>..<] = [];
+    for t in tys { x86_compute_value_vts(t, vts); }
+    var a: i32[>..<] = [];
+    tti_init_function(caller, m);
+    for e in vts { a.push(x86_register_type_for_cc(e, cc)); }
+    tti_init_function(callee, m);
+    var ok = true;
+    for e, k in vts { if x86_register_type_for_cc(e, cc) != a[k] { ok = false; } }
+    return ok;
 }
 
 // TargetLibraryInfo::areInlineCompatible(CalleeTLI, AllowCallerSuperset): the OverrideAsUnavailable sets come
