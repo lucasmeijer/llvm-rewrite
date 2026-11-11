@@ -20,7 +20,7 @@
 
 - L1.loop-misc 298/306 (all 153 roundtrip, 145/153 opt): LoopDeletion 30/30, LoopInstSimplify 2/2, LoopSimplifyCFG
   7/9, LoopIdiom 63/63, LoopLoadElim 28/31, LoopDistribute 25/28; the 8 left run loop-vectorize (5) or
-  simple-loop-unswitch (2), or need PGSO with a profile summary (1). L1.analysis.laa 72/73 (+73 roundtrip; the one
+  simple-loop-unswitch (2), or need PGSO with a profile summary (1). L1.analysis.laa 144/145 (73/73 roundtrip, 71/72 analysis; the one
   left needs createAddRecFromPHIWithCasts in SCEV). Details and sweeps in "Loop passes and LoopAccessAnalysis".
 
 - L1.gvn 397/404 (all 202 roundtrip, 195/202 opt). Left, all outside GVN: `mldst-motion` ×2, `loop-simplifycfg` ×2,
@@ -1133,7 +1133,7 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
 - Goose trap: an array literal of `vals[x].ty as i32` followed by a call that can grow the constant table
   (`c_false()`) in the same statement is rejected ("shrinks cst_tab"); hoist the constant into a local first.
 - Unit status: L1.loop-misc: LoopDeletion 30/30 ::opt, LoopInstSimplify 2/2, LoopSimplifyCFG 7/9 (2 run
-  simple-loop-unswitch), LoopIdiom 63/63. L1.analysis.laa 72/73 analysis lines (left:
+  simple-loop-unswitch), LoopIdiom 63/63. L1.analysis.laa 71/72 analysis lines (left:
   retry-runtime-checks-non-addrec-after-predicates.ll needs createAddRecFromPHIWithCasts in SCEV). LoopLoadElim
   28/31, LoopDistribute 25/28 (left: loop-vectorize in the pipeline, PGSO).
 - LoopLoadElimination (`lle.goose`), LoopDistribute (`loop_distribute.goose`), LoopVersioning
