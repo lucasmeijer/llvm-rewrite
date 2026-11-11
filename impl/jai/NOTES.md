@@ -959,7 +959,7 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   `--per-function --with-test-flags` 93568 identical / 0 differs (3230 loud, same causes + 2 ppc_fp128 literals).
 - Perf: no `@perf` benchmark times vector-combine; on tests/perf the pass is a no-op walk.
 
-## SLPVectorizer (in progress; L1.vectorize.slp)
+## SLPVectorizer (in progress; L1.vectorize.slp: 615/650 `::opt`)
 
 - `-passes=slp-vectorizer` is registered (passes.jai) and its cl::opts are parsed (`slp_parse_cl_opt`). Files, in
   data-flow order (each names its LLVM functions in the header):
@@ -967,57 +967,64 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
     `slp_operands.jai` (VLOperands), `slp_tree.jai` (state `slp`, Tree_Entry rows), `slp_ica.jai`
     (InstructionsCompatibilityAnalysis, PHIHandler).
   - `slp_driver.jai`: SLPVectorizerPass (complete). `slp_hor_reduction.jai`: HorizontalReduction matching,
-    tryToReduce / tryToReduceOrdered up to the vectorization of a profitable tree, getReductionCost.
-  - `slp_build.jai`: BoUpSLP entry points + more state (`slpx`) + the frontier stubs. `slp_build_tree.jai`:
-    buildTree/buildTreeRec, legality, getScalarsVectorizationState, tryToFindDuplicates, canBuildSplitNode,
-    canReuseExtract, canVectorizeLoads (X86 subset), isTreeTinyAndNotFullyVectorizable. `slp_sched.jai`:
-    BlockScheduling (tryScheduleBundle, calculateDependencies, schedule) including ScheduleCopyableData (copyable
-    elements are `Sched_Data` rows with `copyable` set, outside data_map; their four maps are `cd_*`).
+    tryToReduce / tryToReduceOrdered with their emission (TrackedVals as WeakTrackingVHs, VectorizedVals,
+    RequiredExtract, VectorValuesAndScales, const.rdx, emitScaleForReusedOps / emitReusedOps, emitReduction,
+    createSingleOp, createOp, the final bool-logic-safe reduction ops), getReductionCost. The reduction has its own
+    IRBuilder<TargetFolder> (`Hr_Builder`); `hrb_use(hb)` points the `sgb_*` calls at it for the rest of a scope.
+  - `slp_build.jai`: BoUpSLP entry points + more state (`slpx`). `slp_build_tree.jai`: buildTree/buildTreeRec,
+    legality, getScalarsVectorizationState, tryToFindDuplicates, canBuildSplitNode, canReuseExtract,
+    canVectorizeLoads (with isMaskedLoadCompress and CheckForShuffledLoads; X86 has no strided accesses),
+    isMaskedStoreCompress, isTreeTinyAndNotFullyVectorizable. `slp_sched.jai`: BlockScheduling (tryScheduleBundle,
+    calculateDependencies, schedule) including ScheduleCopyableData (copyable elements are `Sched_Data` rows with
+    `copyable` set, outside data_map; their four maps are `cd_*`), and scheduleBlock (its std::set ready list is
+    `bs.ready` kept sorted by priority while `bs.sorted_ready` is set; equal priorities are one key, as in LLVM).
   - `slp_reorder.jai`: reorderTopToBottom / reorderBottomToTop (+ getReorderingData, libstdc++ heap for the
     PriorityQueue). `slp_gather.jai`: tryToGatherExtractElements, isGatherShuffledEntry,
-    getLastInstructionInBundle, findReusedOrderedScalars. `slp_transform.jai`: transformNodes, reorderGatherNode.
-    `slp_minbw.jai`: computeMinimumValueSizes / collectValuesToDemote (DenseSet<unsigned> order emulated).
-    `slp_gathered_loads.jai`: gatherPossiblyVectorizableLoads, tryToVectorizeGatheredLoads (complete for X86: no
-    interleaved accesses; canVectorizeLoads' BestVF is 0 whenever it returns).
-  - The cost model (complete for the states X86 builds): `slp_cost.jai` (getEntryCost with the GetCostDiff lambdas
-    as `Slp_Ec` + `ec_scalar_elt_cost` / `ec_vector_cost` switches, loop-trip-count scales, getVectorSpillReloadCost,
-    getGatherCost, getGEPCosts, getNumScalarInsts' helpers, the small TTI queries tti*.jai lacked:
-    getPointersChainCost, getExtractWithExtendCost, getCallInstrCost, getAltInstrCost), `slp_shuffle.jai`
-    (BaseShuffleAnalysis, ShuffleCostEstimator, processBuildVector over `Bv_Builder` whose `kind` will select the
-    ShuffleInstructionBuilder behaviour), `slp_tree_cost.jai` (buildExternalUses, getNumScalar/VectorInsts,
+    getLastInstructionInBundle, findReusedOrderedScalars. `slp_transform.jai`: transformNodes (incl.
+    matchesShlZExt / matchesSelectOfBits / matchesInversedZExtSelect), reorderGatherNode. `slp_minbw.jai`:
+    computeMinimumValueSizes / collectValuesToDemote (DenseSet<unsigned> order emulated). `slp_gathered_loads.jai`:
+    gatherPossiblyVectorizableLoads, tryToVectorizeGatheredLoads.
+  - The cost model: `slp_cost.jai` (getEntryCost with the GetCostDiff lambdas as `Slp_Ec` + `ec_scalar_elt_cost` /
+    `ec_vector_cost` switches, loop-trip-count scales, getVectorSpillReloadCost, getGatherCost, getGEPCosts, the
+    small TTI queries tti*.jai lacked), `slp_shuffle.jai` (BaseShuffleAnalysis, ShuffleCostEstimator,
+    processBuildVector over `Bv_Builder`), `slp_tree_cost.jai` (buildExternalUses, getNumScalar/VectorInsts,
     calculateTreeCostAndTrimNonProfitable, getTreeCost with performExtractsShuffleAction, getSpillCost).
-- Verified: every getTreeCost decision ("SLP: Found cost = ...") on the whole corpus (plain, with each file's test
-  flags, and every per-function piece that fails loudly) equals LLVM's, in the same order
-  (`tools/slp_cost_compare.py`, see Debugging). Cost paths not reached by X86 trees fail loudly: strided / masked /
-  compressed / scattered load and store nodes, interleaved accesses, reduced-bitcast nodes, REVEC.
-- Code generation (`slp_codegen.jai`: the Builder = IRBuilder<TargetFolder> as `sgb_*`, setInsertPointAfterBundle,
-  gather, ShuffleInstructionBuilder as the `.IR` kind of `Bv_Builder`, vectorizeTree(E) per opcode;
-  `slp_codegen2.jai`: vectorizeTree() with postponed gathers, external-use extraction, shuffled insertelement users,
-  scalar removal, removeInstructionsAndOperands, optimizeGatherSequence, ~BoUpSLP; `slp_sched.jai`:
-  scheduleBlock). TreeEntry::VectorizedValue is a WeakTrackingVH (`te_vv` / `te_set_vv` over value_handles.jai).
-  Removed-from-parent instructions drop their name (LLVM's symbol table forgets it).
-- Frontier (fails loudly), most frequent first in the per-function sweep: the vectorization of a profitable
-  reduction (429 + 5 ordered); const.rdx (127); isMaskedLoadCompress / the masked-gather cost check in
-  canVectorizeLoads (~75); struct-typed scalars; emitScaleForReusedOps; matchesShlZExt / matchesSelectOfBits /
-  matchesInversedZExtSelect; strided / masked / compressed loads and stores, vector library calls.
+  - Code generation: `slp_codegen.jai` (the Builder = IRBuilder<TargetFolder> as `sgb_*` over `slpg.cb`,
+    setInsertPointAfterBundle, gather, ShuffleInstructionBuilder as the `.IR` kind of `Bv_Builder` (processBuildVector
+    is shared: every `bv_*` call switches on the kind; it returns `Bv_Res`), vectorizeTree(E) per opcode incl.
+    compressed / masked-gather loads, expanded (masked) stores, insertvalue through a stack slot, reduced (cmp)
+    bitcasts), `slp_codegen2.jai` (vectorizeTree() with postponed gathers, external-use extraction, shuffled
+    insertelement users, scalar removal, removeInstructionsAndOperands, optimizeGatherSequence, ~BoUpSLP).
+    TreeEntry::VectorizedValue is a WeakTrackingVH (`te_vv` / `te_set_vv` over value_handles.jai). eraseInstruction
+    only marks (`slp_erase_instruction`, insertion-ordered `slpg.deleted_list`); removed-from-parent instructions
+    drop their name (LLVM's symbol table forgets it) and their debug records move to the next instruction.
+- Verified: every getTreeCost decision ("SLP: Found cost = ...", trees after earlier vectorizations included) on
+  the whole corpus with each file's test flags equals LLVM's (`tools/slp_cost_compare.py`, 0 of 10293 runs differ).
+- Frontier (fails loudly), per-function sweep: struct-typed scalars (42: calls returning structs, e.g.
+  `llvm.sadd.with.overflow`, and the extractvalue nodes over them), target extension element types (7), VFDatabase
+  vector variants (4); with test flags also REVEC (20) and other passes' options. Strided / interleaved accesses are
+  unreachable on X86 and fail loudly where LLVM would build them.
 - Next steps, in order:
-  1. The reduction's vectorization (tryToReduce after the cost check, 30285-30530; emitReduction 31083 / 31263;
-     TrackedVals / VectorizedVals / RequiredExtract become non-trivial) and tryToReduceOrdered's emission.
-  2. isMaskedLoadCompress + the masked-gather cost check of canVectorizeLoads (needs X86 getMemIntrinsicInstrCost
-     for masked_gather / masked_load), matchesShlZExt & co (transformNodes), then their codegen.
-  3. const.rdx and emitScaleForReusedOps in tryToReduce, struct-typed scalars.
-  `tools/slp_cost_compare.py` now compares whole decision sequences (every tree after a vectorization too): run
-  it with a `--with-test-flags` sweep's results.tsv after every change; DEBUG_SLP also dumps the module after each
-  vectorizeTree ("DBG IR after vectorizeTree").
+  1. Struct-typed scalars: getWidenedType of a struct (a struct of vectors), checkEVsForVecCalls +
+     StructEVIndices (getScalarsVectorizationState 10870, buildTreeRec 13284), allStructUsersAreExtractValueInsts,
+     the struct paths of buildExternalUses (9644), getEntryCost (17303), getTreeCost's extract costs (20160-20320),
+     vectorizeTree (23386, 23624, the call's TysForDecl 24326, the struct external-use extraction with
+     StructFieldExtracts 24869-25169) and the driver (31471, 31939).
+  2. VFDatabase vector variants (`-vector-library`, vector-function-abi-variant), REVEC.
+  `tools/slp_cost_compare.py` compares whole decision sequences: run it with a `--with-test-flags` sweep's
+  results.tsv after every change; DEBUG_SLP also dumps the module after each vectorizeTree ("DBG IR after
+  vectorizeTree") and the CheckForShuffledLoads costs ("DBG cfsl").
+- Compile time (x64 debug build): `-passes=slp-vectorizer` on tests/perf/compile costs ~2.5 s over parse+print for
+  SPASS.ll / sqlite3.ll (LLVM: ~1 s total); no `@perf` benchmark times SLP. `comes_before` is a linear walk.
 - Sorting: LLVM `stable_sort`s go through `gnu_stable_sort` (scev.jai, libstdc++'s algorithm) when the comparator
   may not be a strict weak order (PHICompare, compareCmp); insertion sort elsewhere. Hash-ordered containers that
   decide results fail loudly when the order matters (collectUserStores with several store groups).
   calculateTreeCostAndTrimNonProfitable's PriorityQueue has distinct (cost, Idx) keys, so a sorted list is exact.
 - Fail loudly already in the helpers: REVEC, struct-typed scalars, VFDatabase vector variants, operand bundles in
   getSameOpcode / generateKeySubkey, VP intrinsics, target extension element types.
-- Sweeps `--passes slp-vectorizer` (0 differs / 0 bad-ir in all): whole-file 7016 identical / 738 loud;
-  `--with-test-flags` 8322 identical / 1712 loud; `--per-function` 67827 identical / 1951 loud. L1.vectorize.slp: 79/650 `::opt`. No piece that fails
-  with "vectorizeTree" is left unchanged by LLVM (so none of them is a cost mismatch).
+- Sweeps `--passes slp-vectorizer` (0 differs / 0 bad-ir in all): whole-file 7957 identical / 23 loud;
+  `--with-test-flags` 10035 identical / 258 loud; `--per-function` 70407 identical / 55 loud; tests/perf/compile 4/4
+  identical.
 - Debugging:
   - `DEBUG_SLP` (slp_driver.jai) is a compile-time switch for `#if DEBUG_SLP` traces (tree entries, per-entry costs,
     "SLP: Adding cost C for bundle Idx: N" and "SLP: Found cost = X ..." in LLVM's -debug-only=SLP format, minbw
@@ -1027,7 +1034,8 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
     `tools/build_llvm_assert.sh` if missing): `-debug-only=SLP` dumps every tree entry with its scalar/vector costs.
     For LLVM internals it does not print (ShuffleCostEstimator, matchAssociativeReduction), add temporary
     `LLVM_DEBUG(dbgs() << "TRACE ...")` lines to /persistent/llvm-rewrite/llvm-assert-src/src/llvm/lib/Transforms/
-    Vectorize/SLPVectorizer.cpp, `ninja opt` in ../build (~1 min), copy bin/opt elsewhere, restore the file.
+    Vectorize/SLPVectorizer.cpp, `ninja opt` in ../build (~1-2 min), copy bin/opt elsewhere, restore the file and
+    rebuild (the source tree and build dir are shared by every workspace: keep the edit window short).
   - `tools/slp_cost_compare.py LIST` diffs the decision sequences of both; `-pass-remarks=slp-vectorizer
     -pass-remarks-missed=slp-vectorizer` on the release opt also reports costs.
 - LLVM quirks reproduced: TreeEntry::findLaneForValue's ValueToLane cache is never invalidated (stale lanes after

@@ -106,6 +106,32 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
   cost of vectorized lists/stores/reductions and of rejected lists. An assertions build of opt 23.1.5 (for
   `-debug-only=SLP`) is at /persistent/llvm-rewrite/llvm-23.1.5-assert/bin/opt (impl/jai/tools/build_llvm_assert.sh).
 
+### SLP code generation (verified by matching the whole corpus, sweeps with 0 differs)
+
+- BoUpSLP's Builder is an `IRBuilder<TargetFolder>` without fast-math flags; a horizontal reduction uses its own
+  IRBuilder<TargetFolder> and gives it the reduction ops' flags (`setFastMathFlags(RdxFMF)`) only right before the
+  first vectorizeTree, so const.rdx / scaled reused values built earlier get the empty flags (createOp then copies the
+  IR flags of ReductionOps[0], without nuw/nsw). Constant vectors fold through TargetFolder, so a reduction of a
+  constant-folded tree is itself folded (ConstantFoldIntrinsic).
+- `TreeEntry::VectorizedValue` is a WeakTrackingVH: the RAUW of a postponed gather's stub load (and of extracted
+  scalars) moves every entry that pointed at it. Postponed gathers are `load <VF x ty>, ptr poison` stubs;
+  setInsertPointAfterBundle also inserts (and immediately marks deleted) a `load ptr, ptr poison` as an insertion
+  anchor after the bundle's last instruction, cached per last instruction in LastInstructionToPos. Both stay in the IR
+  until ~BoUpSLP and are visible to later trees of the same function.
+- eraseInstruction only marks; removeInstructionsAndOperands removes the scalars from their blocks (their names
+  leave the symbol table, their debug records move to the next instruction) and deletes trivially dead operands;
+  everything marked is erased in ~BoUpSLP (after optimizeGatherSequence, which runs once per function).
+- scheduleBlock moves instructions with `moveAfter(LastScheduledInst->getPrevNode())`: the moved instruction leaves
+  its debug records behind and is inserted at the head of the next instruction's records.
+- tryToVectorizeSequence after a successful attempt does `VL.swap(Candidates); Candidates.clear();` and then refills
+  Candidates from VL, i.e. from the *previous* candidates, not from the just-vectorized list (so the leftovers of a
+  successful list are not retried in the final same-type attempt).
+- getTreeCost's instruction-count check (`-slp-inst-count-check`, VF 2, threshold 0) applies to insertelement roots
+  too: its `!SLPReVec || !isa<VectorType>(...)` guard is true whenever REVEC is off.
+- canVectorizeLoads' masked-gather check costs through `getMemIntrinsicInstrCost` (X86: getGatherScatterOpCost for
+  gathers, getMaskedMemoryOpCost for masked loads); CheckForShuffledLoads only recurses (with TryRecursiveCheck off)
+  for lists of 4+ loads, and on 8 x i32 the only VF it tries is 4 (getFloorFullVectorNumberOfElements(3) is 0).
+
 ## LoopVectorize (from LoopVectorize.cpp, LoopVectorizationLegality.cpp, LoopVectorizationPlanner.cpp, VPlan*.cpp of 23.1.5)
 
 - **The pass changes IR even when it vectorizes nothing**: `runImpl` runs `simplifyLoop` (LoopSimplify, no LCSSA
