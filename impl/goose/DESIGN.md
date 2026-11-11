@@ -424,9 +424,9 @@ Ports of `MemoryLocation.cpp`, `AliasAnalysis.cpp`, `BasicAliasAnalysis.cpp`, `T
   `mssa_get_clobbering(ma, q)` (CachingWalker, MaxCheckLimit), `mssa_get_clobbering_loc(ma, loc, q)`,
   `mssa_clobbering_access(ma, q, skip_self, use_invariant_group)` with `cw_limit` as the UpwardWalkLimit;
   `mssa_ensure_optimized()`, `mssa_dominates`, `mssa_locally_dominates`, `mssa_def_clobbers`
-  (instructionClobbersQuery). Not ported: the loop (`MemorySSA(Loop&)`) constructor, DOT output.
-- **MemorySSAUpdater** (mssaupdater.goose): the whole of MemorySSAUpdater.cpp except updateForClonedLoop /
-  updateExitBlocksForClonedLoop: `msu_insert_use/def`, `msu_remove_memory_access` / `msu_remove_inst_access`,
+  (instructionClobbersQuery). The loop (`MemorySSA(Loop&)`) constructor is `mssa_build_loop` (loop_unroll.goose, for loadCSE); not ported: DOT output.
+- **MemorySSAUpdater** (mssaupdater.goose): the whole of MemorySSAUpdater.cpp (updateForClonedLoop /
+  updateExitBlocksForClonedLoop take a value_mapper.goose map: `msu_update_for_cloned_loop`, `msu_update_exit_blocks_for_cloned_loop`): `msu_insert_use/def`, `msu_remove_memory_access` / `msu_remove_inst_access`,
   `msu_move_before/after/to_place`, `msu_move_all_after_splice_blocks/merge_blocks`, `msu_wire_old_preds_to_new_pred`,
   `msu_update_phis_unique_backedge`, `msu_apply_updates` / `msu_apply_insert_updates`, `msu_remove_edge`,
   `msu_remove_blocks`, `msu_change_to_unreachable`, `msu_create_access_in_bb/before/after`,
@@ -717,3 +717,17 @@ max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
   handle list `iv_dead`. Order-relevant containers follow LLVM's: SmallVector worklists popped from the back,
   SmallPtrSets as HMaps (never iterated), sorts through stdsort.goose (libstdc++'s std::sort / std::stable_sort,
   comparison by comparison, because comparators query the dominator tree).
+
+## 16. Cloning: ValueToValueMapTy, the ValueMapper, CloneBasicBlock (value_mapper.goose, clone_function.goose)
+
+- A ValueToValueMapTy is a map id from `vmm_new()`; maps live on a stack (`vmm_mark` / `vmm_release`), so a pass
+  marks before a transformation and releases after it, like the C++ locals. One open-addressing table holds the
+  entries of all maps keyed by (map, key) with a per-map epoch (clearing is O(1)); keys are value ids, metadata keys
+  are `-2 - md` (the MD() map). Iteration (`vmm_first` / `vmm_next`) is insertion order: LLVM iterates a DenseMap
+  only to copy entries. The value is a plain id that reads as -1 once erased (WeakTrackingVH's null on delete); RAUW
+  of a mapped value is not followed.
+- The ValueMapper ports Mapper::mapValue / remapInstruction / remapDbgRecord with the RF_* flags as bits; under
+  RF_NoModuleLevelChanges metadata maps to itself unless the MD() map says otherwise. Module-level remapping
+  (MDNodeMapper, globals, types) fails loudly.
+- CloneBasicBlock has the two LLVM naming orders (`clone_basic_block` with a function, `clone_basic_block_insert`
+  for "no function, then F->insert"); ClonedCodeInfo is the `cln_contains_*` globals.

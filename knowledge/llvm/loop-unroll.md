@@ -67,3 +67,26 @@ round-tripping corpus file, whole-file and `--per-function`, also with `-unroll-
 
 - `-disable-loop-unrolling` only sets PipelineTuningOptions::LoopUnrolling (read by -O<n> pipelines); `-disable-verify`
   only skips opt's own input/output verification. Neither changes a `-passes=` run.
+
+## More facts (Goose port, 2026-11-11: impl/goose/src/loop_unroll*.goose, loop_peel.goose; verified by the LoopUnroll tests and the sweeps listed in impl/goose/NOTES.md)
+
+- The AssumptionCache is never invalidated (AssumptionCache::invalidate returns false), so within an opt run it is
+  the scan order of the function's first query plus every registerAssumption since. UnrollLoop registers the cloned
+  assumes, LoopPeel does not: ValueTracking/SCEV queries after peeling don't see the peeled copies' assumes
+  (ScalarEvolution's guard collection walks AC.assumptions(), not the function). Seen as extra nuw flags from
+  simplifyLoopIVs after `-unroll-force-peel-count`. RAUW of a value that is an affected value of an assume updates
+  the cache (AffectedValueCallbackVH), e.g. loadCSE's replacement of a load used by a cloned assume condition.
+- countToEliminateCompares passes the CmpPredicate (with samesign) to evaluatePredicate / isKnownPredicate, but
+  getMonotonicPredicateType and PeelWhilePredicateIsKnown take an ICmpInst::Predicate: `icmp samesign ult` is
+  treated as plain `ult` there (needs nuw), and getInversePredicate / getSwappedPredicate drop samesign too.
+- Loop::getExitBlock (used by peeling the last iteration) is null when the single exit block is reached by two
+  edges (getExitBlockHelper with AllowRepeats = false).
+- simplifyLoopAfterUnroll's `add (add X, C1), C2` fold uses m_APInt, so it folds splat vector constants too.
+- Epilog `niter` names are built from the uniqued phi name: `%niter11` gives `%niter11.next`, `%niter11.ncmp`.
+- X86 (BasicTTIImplBase) costs of scalar intrinsics the unroller sees often: memcpy with an instruction = getMemcpyCost
+  = TCC_Expensive (4); memset/memmove = 1 (the scalar "default" case); fabs f32/f64 = 2 (FABS is Custom with SSE);
+  sin/cos/exp/exp2/log/log2/log10/pow f32/f64 = 1 for TCK_CodeSize, 10 otherwise (Expand = library call);
+  floor/ceil/trunc = legal with SSE4.1, else the library-call cost; fmuladd = legal (1) with any FMA feature, else
+  fmul + fadd costs (always for x86_fp80). insertvalue/extractvalue use TargetTransformInfoImplBase's
+  getInsertExtractValueCost (not overridden by X86 or BasicTTI).
+- `-costmodel-reduxcost` is declared but unused in LLVM 23 (TargetTransformInfo.cpp).

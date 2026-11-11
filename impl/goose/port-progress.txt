@@ -2,7 +2,7 @@
 # Format: lib/<path>.cpp <fraction 0.0-1.0>
 lib/Transforms/Utils/SimplifyCFG.cpp 0.9
 lib/Transforms/Scalar/SimplifyCFGPass.cpp 0.95
-lib/Transforms/Utils/BasicBlockUtils.cpp 0.3
+lib/Transforms/Utils/BasicBlockUtils.cpp 0.35  # + MergeBlockIntoPredecessor with DT, SplitBlock/SplitEdge/splitBlockBefore with DT+LI+MSSAU (unroll_utils.goose)
 lib/Transforms/Utils/Local.cpp 0.5
 lib/Analysis/TargetTransformInfo.cpp 0.15
 lib/Analysis/CFG.cpp 0.2
@@ -45,10 +45,10 @@ lib/Transforms/InstCombine/InstCombineCasts.cpp 0.85  # manual: all visitors; le
 lib/Support/APInt.cpp 0.5
 lib/IR/DebugInfoMetadata.cpp 0.3
 lib/IR/Attributes.cpp 0.2
-lib/Analysis/MemorySSA.cpp 0.75  # + the mutation API and verifier; no loop constructor, DOT output
+lib/Analysis/MemorySSA.cpp 0.8  # + the mutation API and verifier, the loop constructor (loop_unroll.goose mssa_build_loop); no DOT output
 lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95  # manual: all but visitFDiv's sin/cos -> tan (emitUnaryFloatFnCall, loud)
 lib/Transforms/Utils/SCCPSolver.cpp 0.7
-lib/Transforms/Utils/LoopUtils.cpp 0.4  # + addRuntimeChecks, expandBounds, findDefsUsedOutsideOfLoop (loop_versioning.goose); makeFollowupLoopID, addStringMetadataToLoop (loop_distribute.goose); deleteDeadLoop, breakLoopBackedge, getBooleanLoopAttribute, isMustProgress (loop_utils.goose); + rewriteLoopExitValues, hasHardUserWithinLoop, canLoopBeDeleted, isAlmostDeadIV (indvars.goose)
+lib/Transforms/Utils/LoopUtils.cpp 0.5  # + estimated trip count / loop probability API, hasUnrollTransformation, hasPartialIVCondition, cloneLoop (loop_md.goose, simple_loop_unswitch_nt.goose, unroll_utils.goose); + addRuntimeChecks, expandBounds, findDefsUsedOutsideOfLoop (loop_versioning.goose); makeFollowupLoopID, addStringMetadataToLoop (loop_distribute.goose); deleteDeadLoop, breakLoopBackedge, getBooleanLoopAttribute, isMustProgress (loop_utils.goose); + rewriteLoopExitValues, hasHardUserWithinLoop, canLoopBeDeleted, isAlmostDeadIV (indvars.goose)
 lib/IR/ConstantRange.cpp 0.7
 lib/IR/Metadata.cpp 0.5  # + MDNode::concatenate (loop_versioning.goose)
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
@@ -60,7 +60,7 @@ lib/IR/IRBuilder.cpp 0.15
 lib/AsmParser/LLLexer.cpp 0.7  # manual: own lexer structure, lexes all IR tokens (heuristic 0.19)
 lib/Analysis/IVDescriptors.cpp 0.05
 lib/IR/ConstantFold.cpp 0.8
-lib/Analysis/MemorySSAUpdater.cpp 0.9  # manual: all but updateForClonedLoop / updateExitBlocksForClonedLoop (heuristic 0.99)
+lib/Analysis/MemorySSAUpdater.cpp 1  # manual: all of it (updateForClonedLoop / updateExitBlocksForClonedLoop for SimpleLoopUnswitch)
 lib/Support/KnownBits.cpp 0.7
 lib/Analysis/LoopInfo.cpp 0.6  # + LoopInfo::erase / UnloopUpdater (loop_utils.goose), setLoopID, getOptionalBoolLoopAttribute (loop_distribute.goose)
 lib/IR/DataLayout.cpp 0.2
@@ -129,7 +129,7 @@ lib/IR/BasicBlock.cpp 0.3
 lib/TargetParser/Triple.cpp 0.3  # manual: Triple(Str) parsing, normalize, OS/environment versions, isMacOSXVersionLT, pointer widths, default wchar size, the Triple.h predicates; not the arch-variant/sub-arch/name helpers (heuristic 0.29)
 lib/Transforms/Scalar/LoopRotation.cpp 1
 lib/Transforms/Utils/LoopRotationUtils.cpp 0.75  # no debug records (cloneDebugInfoFrom & co.), noalias scope cloning, atoms
-lib/Analysis/CodeMetrics.cpp 0.5  # collectEphemeralValues(Loop), analyzeBasicBlock's notDuplicatable/convergence/NumInsts/inline candidates
+lib/Analysis/CodeMetrics.cpp 0.7  # + analyzeBasicBlock with a loop (convergence kinds, NumCalls; loop_unroll_pass.goose); collectEphemeralValues(Loop), analyzeBasicBlock's notDuplicatable/convergence/NumInsts/inline candidates
 # --- L1.gvn (2026-11)
 lib/Transforms/Scalar/GVN.cpp 0.97  # manual: all but optimization remarks (never printed; findMayClobberedPtrAccess, liesBetween) (heuristic 0.90)
 lib/Analysis/MemoryDependenceAnalysis.cpp 0.95  # manual: all of MemoryDependenceResults but verifyRemoved and the legacy wrapper pass
@@ -152,4 +152,14 @@ lib/Analysis/ScalarEvolutionNormalization.cpp 1  # manual: NormalizeDenormalizeR
 lib/Analysis/HashRecognize.cpp 0.85  # all but the print<hash-recognize> printer
 lib/Analysis/LoopAccessAnalysis.cpp 0.9  # all but sortPtrAccesses, LoopAccessInfoManager caching/clear, getPointersDiff of vectors
 lib/Transforms/Scalar/LoopLoadElimination.cpp 0.95  # all but PGSO with a cached ProfileSummaryInfo (loud)
-lib/Transforms/Utils/CloneFunction.cpp 0.1  # CloneBasicBlock, cloneLoopWithPreheader (innermost loops), remapInstructionsInBlocks (loop_versioning.goose)
+
+# --- L1.loop-unroll / L1.unswitch (2026-11)
+lib/Transforms/Scalar/LoopUnrollPass.cpp 0.9  # all decisions; no optimization remarks, PGSO (ProfileSummaryInfo), UniformityInfo, forgetAllLoops
+lib/Transforms/Utils/LoopUnroll.cpp 0.9  # all but parallel reduction phis (canParallelizeReductionWhenUnrolling), FS discriminators
+lib/Transforms/Utils/LoopUnrollRuntime.cpp 0.97  # all; breakLoopBackedge of an unconditional latch is loud
+lib/Transforms/Utils/LoopPeel.cpp 0.95  # all; -disable-advanced-peeling loud
+lib/Transforms/Utils/ValueMapper.cpp 0.3  # mapValue/remapInstruction/remapDbgRecord under RF_NoModuleLevelChanges; no MDNodeMapper, global/function remapping, type remapping
+lib/Transforms/Utils/CloneFunction.cpp 0.3  # (clone_function.goose; loop_versioning.goose has its own copy) CloneBasicBlock, remapInstructionsInBlocks, cloneLoopWithPreheader, the noalias-scope cloning; no CloneFunctionInto / CloneAndPruneFunctionInto
+lib/Transforms/Scalar/SimpleLoopUnswitch.cpp 0.97  # all; injected conditions over several compared values loud (DenseMap order)
+lib/Analysis/LoopIterator.cpp 0.8
+lib/Support/BranchProbability.cpp 0.8
