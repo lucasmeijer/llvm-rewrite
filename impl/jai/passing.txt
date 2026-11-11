@@ -11495,6 +11495,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/alternate-fp-inseltpoison.ll::r
 tests/imported/llvm/Transforms/SLPVectorizer/X86/alternate-fp.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/alternate-int-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/alternate-int.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/alternate-op-constant.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/alternate-op-constant.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/alternate-opcode-strict-bitwidth-than-main.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-abs.ll::roundtrip
@@ -11592,7 +11593,9 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/const-reduced-vals-resized.ll::
 tests/imported/llvm/Transforms/SLPVectorizer/X86/constant-based-reductions.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/continue_vectorizing.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/control-dependence.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/control-dependent-schedule.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/control-dependent-schedule.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/control-deps-schedule-data-recalculate.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/control-deps-schedule-data-recalculate.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/conversion-fp16.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/copyable-addsub-reorder.ll::roundtrip
@@ -11610,6 +11613,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/copyable_reorder.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/copyables-with-parent-scalars-in-phis.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash-on-out-of-bound-extract.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_7zip.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_binaryop.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_binaryop.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_bullet.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_bullet3.ll::roundtrip
@@ -11826,9 +11830,11 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-before-main.ll:
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-instructions-become-schedulable.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-node-with-non-schedulable-parent.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-parent-multi-copyables.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-recalculate-deps.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-recalculate-deps.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-split-node.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-user-different-bb.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-with-copyable-op.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-with-copyable-op.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-with-multi-used-expanded.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-with-multi-used-expanded.ll::roundtrip
@@ -11842,6 +11848,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/opaque-ptr-2.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/opaque-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/operand-reorder-with-copyables.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/opt.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/ordered-reduction-replaced.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/ordered-reduction-replaced.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/ordered-reduction-root-deleted.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/ordered-reductions.ll::roundtrip
@@ -11853,6 +11860,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/parent-node-schedulable-with-mu
 tests/imported/llvm/Transforms/SLPVectorizer/X86/parent-node-split-non-schedulable.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/parent-non-schedule-multi-use-in-binop.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/parent-phi-node-reordered.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/partail.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/partail.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/perfect-matched-reused-bv.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/phi-comparator-fix-vec-ops-compare.ll::opt
@@ -11998,7 +12006,9 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/scatter-vectorize-reorder-non-e
 tests/imported/llvm/Transforms/SLPVectorizer/X86/scatter-vectorize-reorder.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/scatter-vectorize-reused-pointer.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/schedule-bundle.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/schedule-control-deps-after-copyable.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/schedule-control-deps-after-copyable.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/schedule-same-user-with-copyable.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/schedule-same-user-with-copyable.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/schedule_budget.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/schedule_budget_debug_info.ll::roundtrip

@@ -971,7 +971,8 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   - `slp_build.jai`: BoUpSLP entry points + more state (`slpx`) + the frontier stubs. `slp_build_tree.jai`:
     buildTree/buildTreeRec, legality, getScalarsVectorizationState, tryToFindDuplicates, canBuildSplitNode,
     canReuseExtract, canVectorizeLoads (X86 subset), isTreeTinyAndNotFullyVectorizable. `slp_sched.jai`:
-    BlockScheduling (tryScheduleBundle, calculateDependencies, schedule) without ScheduleCopyableData.
+    BlockScheduling (tryScheduleBundle, calculateDependencies, schedule) including ScheduleCopyableData (copyable
+    elements are `Sched_Data` rows with `copyable` set, outside data_map; their four maps are `cd_*`).
   - `slp_reorder.jai`: reorderTopToBottom / reorderBottomToTop (+ getReorderingData, libstdc++ heap for the
     PriorityQueue). `slp_gather.jai`: tryToGatherExtractElements, isGatherShuffledEntry,
     getLastInstructionInBundle, findReusedOrderedScalars. `slp_transform.jai`: transformNodes, reorderGatherNode.
@@ -987,11 +988,10 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   flags, and every per-function piece that fails loudly) equals LLVM's, in the same order
   (`tools/slp_cost_compare.py`, see Debugging). Cost paths not reached by X86 trees fail loudly: strided / masked /
   compressed / scattered load and store nodes, interleaved accesses, reduced-bitcast nodes, REVEC.
-- Frontier (fails loudly), most frequent first in the per-function sweep: scheduling bundles with copyable elements
-  (2068); vectorizeTree (1044) and the vectorization of a profitable reduction (265 + 5 ordered);
-  tryToVectorizeGatheredLoads (153); const.rdx (118); isMaskedLoadCompress / the masked-gather cost check in
-  canVectorizeLoads (90); struct-typed scalars (42); emitScaleForReusedOps (36); matchesSelectOfBits /
-  matchesInversedZExtSelect / matchesShlZExt (21+).
+- Frontier (fails loudly), most frequent first in the per-function sweep: vectorizeTree (1102) and the
+  vectorization of a profitable reduction (412 + 8 ordered); tryToVectorizeGatheredLoads (193); const.rdx (126);
+  isMaskedLoadCompress / the masked-gather cost check in canVectorizeLoads (93); struct-typed scalars (42);
+  emitScaleForReusedOps (36); matchesShlZExt / matchesSelectOfBits / matchesInversedZExtSelect (42).
 - Next steps, in order:
   1. vectorizeTree (codegen): ShuffleInstructionBuilder (22131) as a second `Bv_Kind` of `Bv_Builder` (processBuildVector
      is already shared; its `bv_*` calls switch on the kind), gather (21931), setInsertPointAfterBundle (21888),
@@ -1002,8 +1002,9 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
      (25489), ~BoUpSLP (6576, the deleted-instruction sweep). Then the reduction's vectorization (tryToReduce after
      the cost check, 30285-30530; emitReduction 31083 / 31263; TrackedVals / VectorizedVals / RequiredExtract become
      non-trivial) and tryToReduceOrdered's emission.
-  2. Copyable-element scheduling (ScheduleCopyableData in BlockScheduling, 4900-6500), the largest loud group.
-  3. tryToVectorizeGatheredLoads (10056), const.rdx and emitScaleForReusedOps in tryToReduce, isMaskedLoadCompress.
+  2. tryToVectorizeGatheredLoads (10056; analysis, verifiable with tools/slp_cost_compare.py before codegen),
+     isMaskedLoadCompress, matchesShlZExt & co (transformNodes); const.rdx and emitScaleForReusedOps in tryToReduce
+     need the reduction's emission (1.).
   Driver flows that differ from LLVM only after a loud failure may still hide bugs: once vectorizeTree exists, rerun
   `tools/slp_cost_compare.py` (it then compares whole decision sequences) and the sweeps.
 - Sorting: LLVM `stable_sort`s go through `gnu_stable_sort` (scev.jai, libstdc++'s algorithm) when the comparator
@@ -1012,8 +1013,9 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   calculateTreeCostAndTrimNonProfitable's PriorityQueue has distinct (cost, Idx) keys, so a sorted list is exact.
 - Fail loudly already in the helpers: REVEC, struct-typed scalars, VFDatabase vector variants, operand bundles in
   getSameOpcode / generateKeySubkey, VP intrinsics, target extension element types.
-- Sweeps `--passes slp-vectorizer` (0 differs / 0 bad-ir in all): whole-file 6687 identical / 1067 loud;
-  `--with-test-flags` 7960 identical / 2074 loud; `--per-function` 65918 identical / 3860 loud. L1.vectorize.slp: 58/650 `::opt`.
+- Sweeps `--passes slp-vectorizer` (0 differs / 0 bad-ir in all): whole-file 6939 identical / 815 loud;
+  `--with-test-flags` 8229 identical / 1805 loud; `--per-function` 67708 identical / 2070 loud. L1.vectorize.slp: 68/650 `::opt`. No piece that fails
+  with "vectorizeTree" is left unchanged by LLVM (so none of them is a cost mismatch).
 - Debugging:
   - `DEBUG_SLP` (slp_driver.jai) is a compile-time switch for `#if DEBUG_SLP` traces (tree entries, per-entry costs,
     "SLP: Adding cost C for bundle Idx: N" and "SLP: Found cost = X ..." in LLVM's -debug-only=SLP format, minbw
