@@ -134,11 +134,28 @@ vp_simplify_logical_recipe :: (def: Vp_Rec, b: *Vp_Builder, can_create: bool) ->
         for side: 0..1 { o := ifx side == 0 then a1 else a0; if vpm_zero_int(o) { vp_rauw_def(def, vp_zero(vp_scalar_type(d))); return true; } }
         for side: 0..1 { x := ifx side == 0 then a0 else a1; o := ifx side == 0 then a1 else a0; if vpm_all_ones(o) { vp_rauw_def(def, x); return true; } }
     }
-    // m_c_LogicalAnd(X, false) / (X, true): VPInstruction LogicalAnd only (commutative)
-    okla, lr := vpm_vpi(d, VPI_LOGICAL_AND, 2);
-    if okla {
-        for side: 0..1 { o := vp_op(lr, 1 - side); if vpm_is_false(o) { vp_rauw_def(def, vp_false()); return true; } }
-        for side: 0..1 { x := vp_op(lr, side); o := vp_op(lr, 1 - side); if vpm_is_true(o) { vp_rauw_def(def, x); return true; } }
+    // m_c_LogicalAnd(X, Y): the VPInstruction (either operand order) or m_c_Select(X, Y, false), i.e.
+    // select(X, Y, false) or select(not X, false, Y)
+    c_logical_and :: (d: Vp_Val, want_true: bool) -> (bool, Vp_Val) {
+        is_y :: (v: Vp_Val, want_true: bool) -> bool { return ifx want_true then vpm_is_true(v) else vpm_is_false(v); }
+        okla, lr := vpm_vpi(d, VPI_LOGICAL_AND, 2);
+        if okla {
+            if is_y(vp_op(lr, 1), want_true) return true, vp_op(lr, 0);
+            if is_y(vp_op(lr, 0), want_true) return true, vp_op(lr, 1);
+        }
+        oks, c, t, f := vpm_select(d);
+        if oks {
+            if is_y(t, want_true) && vpm_is_false(f) return true, c;
+            okn, nc := vpm_not(c);
+            if okn && vpm_is_false(t) && is_y(f, want_true) return true, nc;
+        }
+        return false, NONE;
+    }
+    {
+        okf, _ := c_logical_and(d, false);
+        if okf { vp_rauw_def(def, vp_false()); return true; }
+        okt, x := c_logical_and(d, true);
+        if okt { vp_rauw_def(def, x); return true; }
     }
     ok, a0, a1 = vpm_c_binary(d, vp_opc(.OR));
     if can_create && ok {

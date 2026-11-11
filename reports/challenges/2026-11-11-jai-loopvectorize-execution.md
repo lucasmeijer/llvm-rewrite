@@ -6,7 +6,7 @@
   packs/unpacks, broadcasts, ~12 executePlan transforms, region dissolution, the recipe executes, the skeleton and the
   loop metadata all at once (~2.2k lines of Jai written before the first run). Once it ran, 8 tests passed at once
   and every further feature (runtime checks, reductions, if-conversion, FORs, reverse accesses, minimal bitwidths)
-  was a 50-300 line step with an immediate signal: 28 -> 170 of the unit's 468 `::opt` checks, 0 silent differences
+  was a 50-300 line step with an immediate signal: 28 -> 173 of the unit's 468 `::opt` checks, 0 silent differences
   in the plain, `--with-test-flags` and `--per-function` sweeps throughout.
 - **Time or effort lost:** little on the forced-VF path (the previous agent's data-flow-ordered next-steps list in
   NOTES.md was accurate and saved a lot of reading). The real limit is the cost model: almost every remaining X86

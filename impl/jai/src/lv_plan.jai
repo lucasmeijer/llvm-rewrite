@@ -478,7 +478,63 @@ lvp_add_reduction_result_computation :: (lp: *Lv_Planner, min_vf: Ec) {
         b := vpb_at(middle, ip);
         final: Vp_Val;
         if rk_is_any_of(rk) {
-            vp_unported("AnyOf reductions");
+            sel: Vp_Rec = NONE;
+            for u: vv(vr(phir).def).users { ok, _, _, _ := vpm_select(vr(u).def); if vr(u).def != NONE && ok { sel = u; break; } }
+            assert(sel != NONE, "expected the AnyOf select");
+            start := vp_op(phir, 0);
+            true_is_phi := vp_op(sel, 1) == vr(phir).def;
+            new_val := ifx true_is_phi then vp_op(sel, 2) else vp_op(sel, 1);
+            cmp := vp_op(sel, 0);
+            cr := vp_def(cmp);
+            if cr != NONE vp_replace_uses_of_with(cr, vr(phir).def, start);
+            sb := vpb_before(sel);
+            if true_is_phi cmp = vr(vpb_not(*sb, cmp)).def;
+            new_phi := vp_new_reduction_phi(vp_uv(vr(phir).def), rk, vp_false(), vp_false(), vr(phir).rdx_style, vr(phir).rdx_scale,
+                                            vr(phir).flags, vr(phir).has_uses_outside_chain);
+            vp_insert_before(new_phi, phir);
+            new_ex := vr(vpb_or(*sb, vr(new_phi).def, cmp)).def;
+            subst_from: [..] Vp_Val; subst_from.allocator = temp;
+            subst_to: [..] Vp_Val; subst_to.allocator = temp;
+            array_add(*subst_from, vr(sel).def); array_add(*subst_to, new_ex);
+            array_add(*subst_from, vr(phir).def); array_add(*subst_to, vr(new_phi).def);
+            lookup :: (from: [] Vp_Val, to: [] Vp_Val, v: Vp_Val) -> Vp_Val { for from if it == v return to[it_index]; return NONE; }
+            clone_chain :: (old: Vp_Rec, from: *[..] Vp_Val, to: *[..] Vp_Val) {
+                if lookup(from.*, to.*, vr(old).def) != NONE return;
+                ops: [..] Vp_Val; ops.allocator = temp;
+                for o: vr(old).ops {
+                    od := vp_def(o);
+                    oks, _, _, _ := vpm_select(o);
+                    if od != NONE && (vr(od).kind == .BLEND || oks) clone_chain(od, from, to);
+                    x := lookup(from.*, to.*, o);
+                    array_add(*ops, ifx x != NONE then x else o);
+                }
+                k := vr(old).kind;
+                n: Vp_Rec;
+                if k == .BLEND n = vp_new_blend(vp_uv(vr(old).def), ops, vr(old).flags, vr(old).dl);
+                else if k == .WIDEN {
+                    n = vp_new_single_def(.WIDEN, ops, vp_compute_scalar_type_for_instruction(vr(old).opcode, ops), vp_uv(vr(old).def), vr(old).dl);
+                    vr(n).opcode = vr(old).opcode; vr(n).flags = vr(old).flags; for vr(old).md array_add(*vr(n).md, it);
+                } else if k == .REPLICATE {
+                    n = vp_new_replicate(vp_underlying_instr(old), ops, vr(old).single_scalar, NONE, vr(old).flags, vr(old).md, vr(old).dl);
+                    if vr(old).predicated vp_unported("cloning predicated replicate recipes");
+                } else {
+                    n = vp_new_instruction(vr(old).opcode, ops, vr(old).flags, vr(old).md, vr(old).dl, vr(old).name);
+                    if vp_uv(vr(old).def) != NONE vp_set_underlying(vr(n).def, vp_uv(vr(old).def));
+                }
+                vp_insert_before(n, old);
+                array_add(from, vr(old).def); array_add(to, vr(n).def);
+            }
+            if orig_exiting != vr(sel).def {
+                clone_chain(vp_def(orig_exiting), *subst_from, *subst_to);
+                new_ex = lookup(subst_from, subst_to, orig_exiting);
+            }
+            vp_set_operand(new_phi, 1, new_ex);
+            vp_rauw(vr(phir).def, vp_poison(phi_ty));
+            b = vpb_at(middle, ip);
+            fl := vpf_reduction(.OR, false, false, 0);
+            orr := vpb_nary(*b, VPI_COMPUTE_REDUCTION_RESULT, .[new_ex], fl, .[], exit_dl);
+            frz := vpb_nary(*b, vp_opc(.FREEZE), .[vr(orr).def], .{}, .[], exit_dl);
+            final = vr(vpb_select(*b, vr(frz).def, new_val, start, exit_dl, "rdx.select")).def;
         } else {
             rop := new_exiting;
             has_ext := false; ext_opc := Opcode.ZEXT;

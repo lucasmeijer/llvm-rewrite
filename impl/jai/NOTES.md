@@ -1141,7 +1141,7 @@ Still slow / known:
   VPlan::execute, every ported recipe's execute), `vplan_print.jai` (debug dump, see below).
 - Done: forced-VF (`-force-vector-width`) and forced-IC (`-force-vector-interleave`, also VF 1) plans for inner loops
   are built and executed end to end: inductions (int / FP / pointer, truncated, derived, scalar steps), reductions
-  (unordered, not AnyOf / FindIV / FindLast / in-loop), first-order recurrences, if-conversion with blends (no
+  (unordered and AnyOf; not FindIV / FindLast / in-loop / ordered), first-order recurrences, if-conversion with blends (no
   replicate regions), reverse accesses, minimal bitwidths, SCEV and memory runtime checks (diff checks and
   addRuntimeChecks, check blocks removed when unused), LoopVersioning alias scopes, deletion of an unreachable scalar
   loop, unrolling by UF, licm, cse, loop metadata (isvectorized, unroll.runtime.disable, followup ids), legacyCSE.
@@ -1180,7 +1180,7 @@ Still slow / known:
    narrowInterleaveGroups, dropPoisonGeneratingRecipes' interleave path.
 4. Tail folding ("tail folding by masking (foldTailByMasking)"): header mask, materializeHeaderMask, active lane mask
    styles, masked loads/stores execute, reassociateHeaderMask, optimizeVectorInductionWidthForTCAndVFUF's narrowing.
-5. Smaller gaps: AnyOf / FindIV / FindLast / in-loop / ordered reductions (handleFindLastReductions,
+5. Smaller gaps: FindIV / FindLast / in-loop / ordered reductions (handleFindLastReductions,
    optimizeFindIVReductions, createInLoopReductionRecipes, VPReductionRecipe), epilogue vectorization
    (`-epilogue-vectorization-force-VF` and the profitability path), VFDatabase variants, uncountable early exits,
    replaceSymbolicStrides, scalable VFs, outer loops, branch weights (addBranchWeightToMiddleTerminator and the
