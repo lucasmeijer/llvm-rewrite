@@ -28,6 +28,13 @@ scalar_misc_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
         case "max-uses-for-sinking"; ls_cl.max_uses_for_sinking = smisc_int(name, value, has_value);
         case "jump-table-to-switch-size-threshold"; jtts_cl.size_threshold = smisc_int(name, value, has_value);
         case "jump-table-to-switch-function-size-threshold"; jtts_cl.function_size_threshold = smisc_int(name, value, has_value);
+        case "relocation-model";
+            if value == {
+                case "static"; reloc_model_cl.model = RELOC_STATIC;
+                case "pic"; reloc_model_cl.model = RELOC_PIC;
+                case "dynamic-no-pic"; reloc_model_cl.model = RELOC_DYNAMIC_NO_PIC;
+                case; fatal(tprint("opt: -relocation-model=% is not supported yet", value));
+            }
         case; return false;
     }
     return true;

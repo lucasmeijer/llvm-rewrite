@@ -51,35 +51,6 @@ lower_comment_string_run :: () -> Preserved {
 }
 triple_is_os_aix :: () -> bool { return find_index_from_left(ir.triple, "-aix") >= 0; }
 
-// RelLookupTableConverterPass (llvm/lib/Transforms/Utils/RelLookupTableConverter.cpp,
-// convertToRelativeLookupTables): returns false at the first defined function whose TTI says no relative lookup
-// tables (always, unless the target is PIC by default: x86-64 Darwin / Windows). The conversion itself
-// (shouldConvertToRelLookupTable, convertToRelLookupTable) is not ported and fails loudly.
-rel_lookup_table_converter_run :: () -> Preserved {
-    for f: ir.m_functions {
-        if is_declaration(f) continue;
-        if !tti_should_build_rel_lookup_tables(tti_get(f)) return PRESERVE_ALL;
-        break;
-    }
-    has_function := false;
-    for f: ir.m_functions if !is_declaration(f) { has_function = true; break; }
-    if !has_function return PRESERVE_ALL;
-    fatal("rel-lookup-table-converter: converting lookup tables to relative ones is not implemented yet");
-    return PRESERVE_NONE;
-}
-
-// CGProfilePass (llvm/lib/Transforms/Instrumentation/CGProfile.cpp, runCGProfilePass): only functions with an
-// entry count contribute; without any the "CG Profile" module flag is not added. Profiled modules fail loudly
-// (BFI::getBlockProfileCount and value-profile data are not ported).
-cg_profile_run :: () -> Preserved {
-    for f: ir.m_functions {
-        if is_declaration(f) continue;
-        ok, _ := function_entry_count(f);
-        if ok fatal("cg-profile: modules with profile data are not supported yet");
-    }
-    return PRESERVE_ALL;
-}
-
 // AllocTokenPass (llvm/lib/Transforms/Instrumentation/AllocToken.cpp, AllocToken::instrumentFunction): a function
 // is instrumented only with sanitize_alloc_token (and without disable_sanitizer_instrumentation), and
 // llvm.alloc.token.id calls are always lowered; anything to do fails loudly (the instrumentation is not ported).

@@ -63,6 +63,8 @@
 #load "pass_transform_warning.jai";
 #load "pass_drop_unnecessary_assumes.jai";
 #load "pass_jump_table_to_switch.jai";
+#load "pass_rel_lookup_table_converter.jai";
+#load "pass_cg_profile.jai";
 #load "pass_reassociate.jai";
 #load "constraint_system.jai";
 #load "pass_constraint_elimination.jai";

@@ -75,11 +75,23 @@ st_is_coff :: (st: *X86_Lowering) -> bool { return st_isOSWindows(st) && !ends_w
 st_is_macho :: (st: *X86_Lowering) -> bool { return st_isTargetDarwin(st) || (st_isOSWindows(st) && ends_with(st.triple, "-macho")); }
 // getEffectiveRelocModel (no -relocation-model): Darwin 64-bit PIC, Darwin 32-bit DynamicNoPIC, Win64 PIC, else static
 RELOC_STATIC :: 0; RELOC_PIC :: 1; RELOC_DYNAMIC_NO_PIC :: 2;
+// (with -relocation-model: X86TargetMachine's getEffectiveRelocModel adjustments of an explicit model)
 x86_reloc_model :: (st: *X86_Lowering) -> s64 {
-    if st_isTargetDarwin(st) return ifx st_is64Bit(st) then RELOC_PIC else RELOC_DYNAMIC_NO_PIC;
-    if st_isOSWindows(st) && st_is64Bit(st) return RELOC_PIC;
-    return RELOC_STATIC;
+    rm := reloc_model_cl.model;
+    if rm < 0 {
+        if st_isTargetDarwin(st) return ifx st_is64Bit(st) then RELOC_PIC else RELOC_DYNAMIC_NO_PIC;
+        if st_isOSWindows(st) && st_is64Bit(st) return RELOC_PIC;
+        return RELOC_STATIC;
+    }
+    if rm == RELOC_DYNAMIC_NO_PIC {
+        if st_is64Bit(st) return RELOC_PIC;
+        if !st_isTargetDarwin(st) return RELOC_STATIC;
+    }
+    if rm == RELOC_STATIC && st_isTargetDarwin(st) && st_is64Bit(st) return RELOC_PIC;
+    return rm;
 }
+// opt -relocation-model (codegen::getExplicitRelocModel): -1 = not given
+reloc_model_cl: struct { model: s64 = -1; };
 // TargetMachine::isPositionIndependent
 x86_is_pic :: (st: *X86_Lowering) -> bool { return x86_reloc_model(st) == RELOC_PIC; }
 // TargetMachine::shouldAssumeDSOLocal
