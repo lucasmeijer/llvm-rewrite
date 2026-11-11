@@ -281,6 +281,15 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             return irb_intrinsic(*s.b, "llvm.vector.reduce.or", .[vtype(res)], .[res]);
         case VPI_RESUME_FOR_EPILOGUE;
             return vs_get(s, vp_op(r, 0), true);
+        case VPI_FIRST_ORDER_RECURRENCE_SPLICE;
+            v1 := vs_get(s, vp_op(r, 0));
+            if !is_vector_type(vtype(v1)) return v1;
+            v2 := vs_get(s, vp_op(r, 1));
+            if type_kind(vtype(v1)) == .SVECTOR vp_unported("splicing scalable vectors");
+            n := type_count(vtype(v1));
+            mask: [..] u32; mask.allocator = temp;
+            for k: 0..n-1 array_add(*mask, cast(u32) (n - 1 + k));
+            return irb_shuffle(*s.b, v1, v2, mask);
         case VPI_REVERSE;
             v := vs_get(s, vp_op(r, 0));
             vt := vtype(v);
@@ -557,6 +566,23 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
             st := irb_store(*s.b, val, addr, vr(r).align);
             vp_apply_metadata(r, st);
         case .WIDEN_PHI; vs_execute_phi(s, r, false, vr(r).name);
+        case .FIRST_ORDER_RECURRENCE_PHI;
+            init := vp_ir(vp_op(r, 0));
+            vty := ifx ec_is_scalar(s.vf) then vtype(init) else type_vector(s.vf.n, vtype(init), s.vf.scalable);
+            _, vector_ph := table_find(*s.vpbb2irbb, vp_cfg_predecessor(vr(r).parent, 0));
+            if ec_is_vector(s.vf) {
+                saved := s.b;
+                irb_set_before(*s.b, block_terminator(vector_ph));
+                last := const_int(ir.t_i32, s.vf.n - 1);
+                init = vs_insert_element(s, const_poison(vty), init, last, "vector.recur.init");
+                s.b = saved;
+            }
+            header := s.prev_bb;
+            phi := create_phi(vty, 2);
+            insert_at_position(phi, header, block_first_insertion_pt(header), false);
+            set_name(phi, "vector.recur");
+            phi_add_incoming(phi, init, vector_ph);
+            vs_set(s, vr(r).def, phi);
         case .REDUCTION_PHI;
             _, vector_ph := table_find(*s.vpbb2irbb, vp_cfg_predecessor(vr(r).parent, 0));
             scalar_phi := ec_is_scalar(s.vf) || vr(r).rdx_style != .UNORDERED;

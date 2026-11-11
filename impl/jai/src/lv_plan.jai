@@ -346,7 +346,7 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
             vp_erase_recipe(r);
         }
     }
-    for vp_block_phis(header) if vr(it).kind == .FIRST_ORDER_RECURRENCE_PHI vp_unported("first-order recurrences");
+    vp_adjust_first_order_recurrence_middle_users(range);
     lvp_add_reduction_result_computation(lp, range.start);
     for vp_block_phis(header) if vr(it).kind == .REDUCTION_PHI && rk_is_find_iv(vr(it).rdx_kind)
         vp_unported("FindIV reductions (optimizeFindIVReductions)");
@@ -367,6 +367,37 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
     vp_drop_poison_generating_recipes();
     return true;
 }
+// VPlanTransforms::adjustFirstOrderRecurrenceMiddleUsers
+vp_adjust_first_order_recurrence_middle_users :: (range: *Vf_Range) {
+    region := vp_vector_loop_region();
+    middle := vp_middle_block();
+    mb := vpb_at(middle, vp_first_non_phi(middle));
+    for f: vp_block_phis(vp_entry_basic_block(region)) {
+        if vr(f).kind != .FIRST_ORDER_RECURRENCE_PHI continue;
+        splice: Vp_Rec = NONE;
+        for u: vv(vr(f).def).users if vp_is_vpi(u, VPI_FIRST_ORDER_RECURRENCE_SPLICE) { splice = u; break; }
+        assert(splice != NONE, "expected FirstOrderRecurrenceSplice");
+        outside := false;
+        for u: vv(vr(splice).def).users if vp_recipe_region(u) == NONE { outside = true; break; }
+        if outside {
+            scalable_one :: (vf: Ec, d: *void) -> bool { return vf.scalable && vf.n == 1; }
+            if lvp_decision_and_clamp_range(range, scalable_one, null) return;
+        }
+        r := vp_first_non_phi(middle);
+        while r != NONE {
+            nx := vr(r).next;
+            defer r = nx;
+            if !vpm_vpi_r(r, VPI_EXTRACT_LAST_LANE, 1) continue;
+            okp, elp := vpm_vpi(vp_op(r, 0), VPI_EXTRACT_LAST_PART, 1);
+            if !okp || vp_op(elp, 0) != vr(splice).def continue;
+            pen := vpb_nary(*mb, VPI_EXTRACT_PENULTIMATE_ELEMENT, .[vp_op(splice, 1)], .{}, .[], NONE, "vector.recur.extract.for.phi");
+            users: [..] Vp_Rec; users.allocator = temp;
+            for vv(vr(r).def).users array_add(*users, it);
+            for u: users if vp_is_ir_phi(u) vp_replace_uses_of_with(u, vr(r).def, vr(pen).def);
+        }
+    }
+}
+
 // LoopVectorizationPlanner::addReductionResultComputation (not AnyOf / FindIV / FindLast; no tail folding)
 lvp_add_reduction_result_computation :: (lp: *Lv_Planner, min_vf: Ec) {
     region := vp_vector_loop_region();
