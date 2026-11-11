@@ -308,7 +308,7 @@ Pass_Kind :: enum u8 {
     // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
     ANNOTATION2METADATA; ANNOTATION_REMARKS; FORCEATTRS; MEMPROF_REMOVE_INFO; RECOMPUTE_GLOBALSAA; LOWER_COMMENT_STRING;
-    INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING; DROP_UNNECESSARY_ASSUMES; JUMP_TABLE_TO_SWITCH; MOVE_AUTO_INIT; ALIGNMENT_FROM_ASSUMPTIONS;
+    INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING; DROP_UNNECESSARY_ASSUMES; JUMP_TABLE_TO_SWITCH; MOVE_AUTO_INIT; ALIGNMENT_FROM_ASSUMPTIONS; LIBCALLS_SHRINKWRAP;
 }
 
 Pass_Info :: struct {
@@ -486,6 +486,7 @@ PASS_TABLE :: Pass_Info.[
     .{"jump-table-to-switch", .FUNCTION, .JUMP_TABLE_TO_SWITCH, false, .DOMTREE},
     .{"move-auto-init", .FUNCTION, .MOVE_AUTO_INIT, false, .DOMTREE},
     .{"alignment-from-assumptions", .FUNCTION, .ALIGNMENT_FROM_ASSUMPTIONS, false, .DOMTREE},
+    .{"libcalls-shrinkwrap", .FUNCTION, .LIBCALLS_SHRINKWRAP, false, .DOMTREE},
     .{"ee-instrument", .FUNCTION, .EE_INSTRUMENT, true, .DOMTREE},   // also ee-instrument<...>
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
@@ -1209,6 +1210,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .JUMP_TABLE_TO_SWITCH; return jump_table_to_switch_run(f);
         case .MOVE_AUTO_INIT; return move_auto_init_run(f);
         case .ALIGNMENT_FROM_ASSUMPTIONS; return alignment_from_assumptions_run(f);
+        case .LIBCALLS_SHRINKWRAP; return libcalls_shrinkwrap_run(f);
         case .REASSOCIATE; return reassociate_run(f);
         case .CONSTRAINT_ELIMINATION; return constraint_elimination_run(f);
         case .AGGRESSIVE_INSTCOMBINE; return aggressive_instcombine_run(f);
