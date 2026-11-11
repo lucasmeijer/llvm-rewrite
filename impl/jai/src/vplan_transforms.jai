@@ -194,7 +194,8 @@ vp_legalize_and_optimize_inductions :: () {
     for phi: wide_ivs {
         if vr(phi).kind == .WIDEN_POINTER_INDUCTION {
             if !vp_has_scalar_vf_only() && !vp_ptr_iv_only_scalars_generated(phi) continue;
-            vp_unported("scalarizing pointer inductions (scalarizeVPWidenPointerInduction)");
+            ptr_add := vp_scalarize_widen_pointer_induction(phi, *b);
+            vp_rauw(vr(phi).def, ptr_add);
             continue;
         }
         any_scalar_user := false;
@@ -215,8 +216,16 @@ vp_legalize_and_optimize_inductions :: () {
 }
 // VPWidenPointerInductionRecipe::onlyScalarsGenerated
 vp_ptr_iv_only_scalars_generated :: (r: Vp_Rec) -> bool {
-    vp_unported("VPWidenPointerInductionRecipe::onlyScalarsGenerated");
-    return false;
+    scalable := false;
+    for vpl.vfs if it.scalable scalable = true;
+    return vp_only_scalar_values_used(vr(r).def) && (!scalable || vp_only_first_lane_used(vr(r).def));
+}
+// scalarizeVPWidenPointerInduction
+vp_scalarize_widen_pointer_induction :: (r: Vp_Rec, b: *Vp_Builder) -> Vp_Val {
+    d := *vpl.inds[vr(r).ind];
+    start := vp_zero(sc_type(d.step));
+    steps := vp_create_scalar_iv_steps(.INT, .ADD, NONE, NONE, start, vp_op(r, 1), vr(r).dl, b);
+    return vr(vpb_ptr_add(b, vp_op(r, 0), vr(steps).def, vr(r).dl, "next.gep")).def;
 }
 
 // narrowToSingleScalarRecipes
@@ -295,10 +304,41 @@ vp_remove_redundant_expand_scev_recipes :: () {
     }
 }
 
-// simplifyReverses
+// vputils::isElementwise
+vp_is_elementwise :: (r: Vp_Rec) -> bool {
+    k := vr(r).kind;
+    if k != .INSTRUCTION && k != .WIDEN return false;
+    o := vr(r).opcode;
+    return vp_is_ir_opcode(o) && (vp_ir_opcode(o) == .FNEG || is_binary_op(vp_ir_opcode(o)));
+}
+// simplifyReverses (pullOutPermutations with m_Reverse, then reverse(reverse(x)) -> x)
 vp_simplify_reverses :: () {
-    for bb: vp_blocks_only_basic(vp_depth_first_deep(vpl.entry))
-        for r: vp_block_recipes(bb) if vp_is_vpi(r, VPI_REVERSE) vp_unported("reverse simplification (simplifyReverses)");
+    is_rev :: (v: Vp_Val) -> (bool, Vp_Val) { ok, r := vpm_vpi(v, VPI_REVERSE, 1); if ok return true, vp_op(r, 0); return false, NONE; }
+    for bb: vp_blocks_only_basic(vp_depth_first_deep(vpl.entry)) for r: vp_block_recipes(bb) {
+        if vr(r).dead || !vp_is_single_def_kind(vr(r).kind) || !vp_is_elementwise(r) continue;
+        any := false;
+        for vr(r).ops { ok, _ := is_rev(it); if ok { any = true; break; } }
+        if !any continue;
+        all := true;
+        for vr(r).ops {
+            ok, _ := is_rev(it);
+            if ok && vp_has_one_use(it) continue;
+            k := vv(it).kind;
+            if k == .IR || k == .SYMBOLIC || k == .REGION continue;
+            all = false; break;
+        }
+        if !all continue;
+        for i: 0..vp_nops(r)-1 { ok, x := is_rev(vp_op(r, i)); if ok vp_set_operand(r, i, x); }
+        res := vp_new_instruction(VPI_REVERSE, .[vr(r).def]);
+        vp_insert_after(res, r);
+        not_res :: (u: Vp_Rec, idx: s64, data: *void) -> bool { return u != (cast(*Vp_Rec) data).*; }
+        vp_replace_uses_with_if(vr(r).def, vr(res).def, not_res, *res);
+    }
+    for bb: vp_blocks_only_basic(vp_depth_first_deep(vpl.entry)) for r: vp_block_recipes(bb) {
+        if vr(r).dead || !vp_is_vpi(r, VPI_REVERSE) || vp_nops(r) != 1 continue;
+        ok, x := is_rev(vp_op(r, 0));
+        if ok vp_rauw(vr(r).def, x);
+    }
 }
 
 // createAndOptimizeReplicateRegions

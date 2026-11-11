@@ -172,7 +172,12 @@ vpu_unroll_recipe :: (u: *Vp_Unroll_State, r: Vp_Rec) {
                 vp_set_operand(phi, 1, vr(copy).def);
             }
         }
-        if vr(copy).kind == .VECTOR_END_POINTER vp_unported("unrolling reverse accesses (VPVectorEndPointerRecipe::materializeOffset)");
+        if vr(copy).kind == .VECTOR_END_POINTER {
+            vp_set_operand(copy, 0, vp_op(r, 0));
+            vp_set_operand(copy, 1, vp_op(r, 1));
+            vp_materialize_end_pointer_offset(copy, part);
+            continue;
+        }
         vpu_remap_operands(u, copy, part);
         if vr(copy).kind == .SCALAR_IV_STEPS vp_add_start_index_for_scalar_steps(copy, part);
         if vp_is_vpi(copy, VPI_CANONICAL_IV_INCREMENT_FOR_PART) {
@@ -181,7 +186,7 @@ vpu_unroll_recipe :: (u: *Vp_Unroll_State, r: Vp_Rec) {
             vp_set_operand(copy, 1, vr(scaled).def);
         }
     }
-    if vr(r).kind == .VECTOR_END_POINTER vp_unported("unrolling reverse accesses (VPVectorEndPointerRecipe::materializeOffset)");
+    if vr(r).kind == .VECTOR_END_POINTER vp_materialize_end_pointer_offset(r, 0);
     if vr(r).kind == .WIDEN_CANONICAL_IV vp_add_operand(r, vpu_can_iv_const(0));
 }
 
@@ -288,7 +293,7 @@ vp_add_lane_to_start_index :: (steps: Vp_Rec, lane: u32, insert_pt: Vp_Rec) {
         flags = vpf_fmf(0);
     } else {
         bits := type_bits(base_ty);
-        lane_off = vp_const_int_ap(ap_trunc(ap_from_u64(64, lane), bits));
+        lane_off = vp_const_int_ap(ap_u64_implicit_trunc(bits, lane));
         add_opc = vp_opc(.ADD);
         flags = vpf_wrap(false, false);
     }
@@ -382,4 +387,10 @@ vp_replicate_by_vf :: (vf: Ec) {
     }
     for < to_remove vp_erase_recipe(it);
     vp_replicate_replicate_regions_by_vf(vf, idx_ty);
+}
+
+// APInt(Bits, V, /*isSigned=*/false, /*implicitTrunc=*/true)
+ap_u64_implicit_trunc :: (bits: u32, v: u64) -> APInt {
+    if bits >= 64 return ap_from_u64(bits, v);
+    return ap_trunc(ap_from_u64(64, v), bits);
 }

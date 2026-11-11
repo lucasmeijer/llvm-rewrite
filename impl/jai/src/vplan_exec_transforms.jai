@@ -332,6 +332,22 @@ vp_expand_derived_iv :: (r: Vp_Rec) {
     }
 }
 
+// VPVectorEndPointerRecipe::materializeOffset: Offset = Stride * (VF - 1) + Part * Stride * VF
+vp_materialize_end_pointer_offset :: (r: Vp_Rec, part: u32) {
+    assert(vp_nops(r) < 3, "Unexpected offset operand");
+    b := vpb_before(r);
+    vfv := vp_op(r, 1);
+    index_ty := dl_index_type(vp_scalar_type(vr(r).def));
+    stride := vp_const_int_ap(ap_from_s64(type_bits(index_ty), vr(r).stride));
+    vf := vpb_scalar_zext_or_trunc(*b, vfv, index_ty, vp_scalar_type(vfv), NONE);
+    vfm1 := vpb_sub(*b, vf, vp_const_int(index_ty, 1), NONE, "", true, true);
+    off0 := vpb_overflowing(*b, .MUL, .[vr(vfm1).def, stride], false, false);
+    pxs := vp_const_int_ap(ap_from_s64(type_bits(index_ty), cast(s64) part * vr(r).stride));
+    m := vpb_overflowing(*b, .MUL, .[pxs, vf], false, false);
+    off := vpb_add(*b, vr(off0).def, vr(m).def);
+    vp_add_operand(r, vr(off).def);
+}
+
 // VPlanTransforms::convertToConcreteRecipes
 vp_convert_to_concrete_recipes :: () {
     for bb: vp_blocks_only_basic(vp_depth_first_deep(vpl.entry)) {
@@ -341,7 +357,12 @@ vp_convert_to_concrete_recipes :: () {
             k := vr(r).kind;
             if k == .WIDEN_INT_OR_FP_INDUCTION { vp_expand_widen_int_or_fp_induction(r); vp_erase_recipe(r); continue; }
             if k == .WIDEN_POINTER_INDUCTION {
-                if vp_ptr_iv_only_scalars_generated(r) vp_unported("scalarizeVPWidenPointerInduction");
+                if vp_ptr_iv_only_scalars_generated(r) {
+                    pa := vp_scalarize_widen_pointer_induction(r, *b);
+                    vp_rauw(vr(r).def, pa);
+                    vp_erase_recipe(r);
+                    continue;
+                }
                 vp_expand_widen_pointer_induction(r);
                 vp_erase_recipe(r);
                 continue;
@@ -370,7 +391,10 @@ vp_convert_to_concrete_recipes :: () {
                 vp_erase_recipe(r);
                 continue;
             }
-            if k == .VECTOR_END_POINTER { vp_unported("VPVectorEndPointerRecipe::materializeOffset"); continue; }
+            if k == .VECTOR_END_POINTER {
+                if vp_nops(r) < 3 vp_materialize_end_pointer_offset(r, 0);
+                continue;
+            }
             if k == .EXPRESSION { vp_unported("VPExpressionRecipe::decompose"); continue; }
             if vp_is_vpi(r, VPI_LAST_ACTIVE_LANE) { vp_unported("expanding LastActiveLane"); continue; }
             if vp_is_vpi(r, VPI_MASKED_COND) {

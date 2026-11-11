@@ -65,7 +65,12 @@ lvp_decision_and_clamp_range :: (r: *Vf_Range, pred: (vf: Ec, data: *void) -> bo
 // VPBuilder::createConsecutiveVectorPointer
 vpb_consecutive_vector_pointer :: (b: *Vp_Builder, ptr: Vp_Val, src_elt_ty: Type_Id, reverse: bool, dl: Md_Id) -> Vp_Rec {
     flags := vp_gep_flags_for_ptr(ptr);
-    if reverse vp_unported("reverse consecutive accesses (VPVectorEndPointerRecipe)");
+    if reverse {
+        rflags := ifx vp_has_tail_folded() then cast(u32) 0 else flags & ~cast(u32) F_GEP_NUW;
+        r := vp_new_single_def(.VECTOR_END_POINTER, .[ptr, vpl.vf], vp_scalar_type(ptr), NONE, dl);
+        vr(r).src_elt_ty = src_elt_ty; vr(r).stride = -1; vr(r).flags = vpf_gep(rflags);
+        return vpb_insert(b, r);
+    }
     stride_ty := dl_int_ptr_type(vp_scalar_type(ptr));
     one := vp_const_int(stride_ty, 1);
     return vpb_insert(b, vp_new_vector_pointer(ptr, src_elt_ty, one, flags, dl));
@@ -146,9 +151,19 @@ lvp_try_to_widen_memory :: (lp: *Lv_Planner, vpi: Vp_Rec, range: *Vf_Range, b: *
         bb := vpb_before(vpi);
         ptr = vr(vpb_consecutive_vector_pointer(*bb, ptr, load_store_type(i), reverse, vr(vpi).dl)).def;
     }
-    if reverse vp_unported("reverse accesses");
-    if is_load return vp_new_widen_load(i, ptr, mask, consecutive, vr(vpi).md, inst_dl(i));
-    return vp_new_widen_store(i, ptr, vp_op(vpi, 0), mask, consecutive, vr(vpi).md, inst_dl(i));
+    bb := vpb_before(vpi);
+    if reverse && mask != NONE mask = vr(vpb_nary(*bb, VPI_REVERSE, .[mask], .{}, .[], inst_dl(i))).def;
+    if is_load {
+        ld := vp_new_widen_load(i, ptr, mask, consecutive, vr(vpi).md, inst_dl(i));
+        if reverse {
+            vpb_insert(*bb, ld);
+            return vp_new_instruction(VPI_REVERSE, .[vr(ld).def], .{}, .[], vr(ld).dl);
+        }
+        return ld;
+    }
+    stored := vp_op(vpi, 0);
+    if reverse stored = vr(vpb_nary(*bb, VPI_REVERSE, .[stored], .{}, .[], inst_dl(i))).def;
+    return vp_new_widen_store(i, ptr, stored, mask, consecutive, vr(vpi).md, inst_dl(i));
 }
 // VPRecipeBuilder::tryToCreateWidenNonPhiRecipe
 lvp_try_to_create_widen_non_phi_recipe :: (lp: *Lv_Planner, r: Vp_Rec, range: *Vf_Range) -> Vp_Rec {

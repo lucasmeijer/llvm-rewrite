@@ -281,6 +281,14 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             return irb_intrinsic(*s.b, "llvm.vector.reduce.or", .[vtype(res)], .[res]);
         case VPI_RESUME_FOR_EPILOGUE;
             return vs_get(s, vp_op(r, 0), true);
+        case VPI_REVERSE;
+            v := vs_get(s, vp_op(r, 0));
+            vt := vtype(v);
+            if type_kind(vt) == .SVECTOR vp_unported("reversing scalable vectors");
+            n := type_count(vt);
+            mask: [..] u32; mask.allocator = temp;
+            for k: 0..n-1 array_add(*mask, cast(u32) (n - 1 - k));
+            return irb_shuffle(*s.b, v, NONE, mask, "reverse");
         case VPI_REDUCTION_START_VECTOR;
             if ec_is_scalar(s.vf) return vs_get(s, vp_op(r, 0), true);
             saved := s.fmf; defer s.fmf = saved;
@@ -454,7 +462,7 @@ vp_scalar_iv_steps_execute :: (s: *Vp_State, r: Vp_Rec) {
     start0 := ifx si != NONE then vs_get(s, si, true) else const_null_value(bty);
     for lane: 0..end_lane-1 {
         lv: Value_Id;
-        if type_kind(bty) == .INT lv = const_int_ap(bty, ap_trunc(ap_from_u64(64, lane), type_bits(bty)));
+        if type_kind(bty) == .INT lv = const_int_ap(bty, ap_u64_implicit_trunc(type_bits(bty), lane));
         else lv = fp_const(bty, cast(s64) lane);
         start := vs_binop(s, add_op, start0, lv);
         mul := vs_binop(s, mul_op, start, step);
@@ -522,6 +530,12 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
                 st = irb_zext_or_trunc(*s.b, st, vtype(off));
                 off = vs_binop(s, .MUL, off, st);
             }
+            g := irb_gep(*s.b, vr(r).src_elt_ty, p, .[off], "", vr(r).flags.gep);
+            vs_set(s, vr(r).def, g, true);
+        case .VECTOR_END_POINTER;
+            assert(vp_nops(r) == 3, "Expected prior materialization of offset");
+            p := vs_get(s, vp_op(r, 0), true);
+            off := vs_get(s, vp_op(r, 2), true);
             g := irb_gep(*s.b, vr(r).src_elt_ty, p, .[off], "", vr(r).flags.gep);
             vs_set(s, vr(r).def, g, true);
         case .SCALAR_IV_STEPS; vp_scalar_iv_steps_execute(s, r);
