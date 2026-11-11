@@ -929,7 +929,7 @@ slp_vectorize_tree_entry :: (te: Te_Id) -> Value_Id {
         return vec;
     }
     shuffle_or_op := ifx is_alt_shuffle(e.s) then cast(s32) Opcode.SHUFFLEVECTOR else cast(s32) te_opcode(te);
-    if !is_alt_shuffle(e.s) && e.combined_op >= TE_REDUCED_BITCAST slp_fail("vectorizeTree of reduced bitcast nodes");
+    if !is_alt_shuffle(e.s) && e.combined_op >= TE_REDUCED_BITCAST return slp_vectorize_reduced_bitcast(te, sty);
     vl0 := e.s.main;
     o := cast(Opcode) shuffle_or_op;
     if o == {
@@ -1406,4 +1406,71 @@ slp_struct_return_overload_at_field :: (id: Intrinsic_Id, ret_idx: s32) -> bool 
     n := iid_name(id);
     if n == "llvm.frexp" return ret_idx == 0 || ret_idx == 1;
     return ret_idx == 0;
+}
+
+// CreateUnaryIntrinsic(ID, V) (TargetFolder::FoldIntrinsic for scalars)
+sgb_unary_intrinsic :: (id: Intrinsic_Id, v: Value_Id) -> Value_Id {
+    f := get_or_insert_intrinsic_declaration(id, .[vtype(v)]);
+    fty := glob(f).value_type;
+    if is_const(v) {
+        if is_vector_type(func_ret(fty)) slp_fail("constant folding of vector-typed intrinsics");
+        x := cfo_intrinsic(id, .[v], func_ret(fty));
+        if x != NONE return x;
+    }
+    c := new_inst(.CALL, func_ret(fty), 2);
+    inst(c).ty2 = fty;
+    set_op(c, 0, v); set_op(c, 1, f);
+    return sgb_insert(c);
+}
+
+// the ReducedBitcast* / ReducedCmpBitcast cases of vectorizeTree(E)
+slp_vectorize_reduced_bitcast :: (te: Te_Id, sty: Type_Id) -> Value_Id {
+    code := slp.entries[te].combined_op;
+    vf := cast(u64) te_vector_factor(te);
+    if code == TE_REDUCED_BITCAST || code == TE_REDUCED_BITCAST_BSWAP {
+        if !slpx.has_user_ignore_list fatal("internal: slp: reduced bitcast outside a reduction");
+        slp_set_insert_point_after_bundle(te);
+        zext := slp_get_operand_entry(te, 0);
+        te_set_vv(zext, const_poison(slp_widened_type(vtype(slp.entries[zext].s.main), cast(u64) te_vector_factor(zext))));
+        cte := slp_get_operand_entry(te, 1);
+        te_set_vv(cte, const_poison(slp_widened_type(vtype(slp.entries[cte].scalars[0]), cast(u64) te_vector_factor(cte))));
+        o := slp_vectorize_operand(zext, 0);
+        src_sty := vtype(op(slp.entries[zext].s.main, 0));
+        src_type := type_int(cast(u32) (dl_type_size_bits(src_sty) * vf));
+        o = slp_final_shuffle(o, te, src_sty);
+        v := sgb_cast(.BITCAST, o, src_type);
+        if code == TE_REDUCED_BITCAST_BSWAP v = sgb_unary_intrinsic(IID_BSWAP, v);
+        if src_type != sty v = sgb_int_cast(v, sty, false);
+        te_set_vv(te, v);
+        return v;
+    }
+    if code == TE_REDUCED_BITCAST_LOADS || code == TE_REDUCED_BITCAST_BSWAP_LOADS {
+        if !slpx.has_user_ignore_list fatal("internal: slp: reduced bitcast outside a reduction");
+        zext := slp_get_operand_entry(te, 0);
+        load_te := slp_get_operand_entry(zext, 0);
+        slp_set_insert_point_after_bundle(load_te);
+        te_set_vv(zext, const_poison(slp_widened_type(vtype(slp.entries[zext].s.main), cast(u64) te_vector_factor(zext))));
+        cte := slp_get_operand_entry(te, 1);
+        te_set_vv(cte, const_poison(slp_widened_type(vtype(slp.entries[cte].scalars[0]), cast(u64) te_vector_factor(cte))));
+        te_set_vv(load_te, const_poison(slp_widened_type(vtype(slp.entries[load_te].s.main), cast(u64) te_vector_factor(load_te))));
+        li := slp.entries[load_te].s.main;
+        src_ty := type_int(cast(u32) (dl_type_size_bits(vtype(op(slp.entries[zext].s.main, 0))) * vf));
+        v := sgb_load(src_ty, op(li, 0), inst(li).align);
+        if code == TE_REDUCED_BITCAST_BSWAP_LOADS v = sgb_unary_intrinsic(IID_BSWAP, v);
+        if src_ty != sty v = sgb_int_cast(v, sty, false);
+        te_set_vv(te, v);
+        return v;
+    }
+    if !slpx.has_user_ignore_list fatal("internal: slp: reduced cmp bitcast outside a reduction");
+    slp_set_insert_point_after_bundle(te);
+    o1 := slp_get_operand_entry(te, 1);
+    o2 := slp_get_operand_entry(te, 2);
+    te_set_vv(o1, const_poison(slp_widened_type(sty, cast(u64) te_vector_factor(o1))));
+    te_set_vv(o2, const_poison(slp_widened_type(sty, cast(u64) te_vector_factor(o2))));
+    cmp := slp_vectorize_operand(te, 0);
+    dst := type_int(cast(u32) vf);
+    v := sgb_cast(.BITCAST, cmp, dst);
+    if dst != sty v = sgb_int_cast(v, sty, false);
+    te_set_vv(te, v);
+    return v;
 }

@@ -1012,8 +1012,39 @@ ec_vector_cost :: (c: *Slp_Ec, common: Cost) -> Cost {
         ica := ica_types(IID_FMULADD, c.vec_ty, .[c.vec_ty, c.vec_ty, c.vec_ty], fmf);
         return cost_add(tti_intrinsic_cost(t, *ica, K), common);
     }
-    if s == TE_REDUCED_BITCAST || s == TE_REDUCED_BITCAST_BSWAP || s == TE_REDUCED_BITCAST_LOADS || s == TE_REDUCED_BITCAST_BSWAP_LOADS || s == TE_REDUCED_CMP_BITCAST {
-        slp_fail("costs of reduced bitcast nodes");
+    if s == TE_REDUCED_BITCAST || s == TE_REDUCED_BITCAST_BSWAP {
+        lhs := slp_get_operand_entry(te, 0);
+        cast_ctx := slp_get_cast_context_hint(slp_get_operand_entry(lhs, 0));
+        src_sty := vtype(op(slp.entries[lhs].s.main, 0));
+        src_vec_ty := slp_widened_type(src_sty, cast(u64) te_vector_factor(lhs));
+        bc := tti_cast_cost(t, .BITCAST, c.sty, src_vec_ty, cast_ctx, K);
+        if s == TE_REDUCED_BITCAST_BSWAP {
+            src_type := type_int(cast(u32) (dl_type_size_bits(src_sty) * cast(u64) te_vector_factor(te)));
+            ica := ica_types(IID_BSWAP, src_type, .[src_type]);
+            bc = cost_add(bc, tti_intrinsic_cost(t, *ica, K));
+            if src_type != c.sty bc = cost_add(bc, tti_cast_cost(t, .ZEXT, c.sty, src_type, CCH_NONE, K));
+        }
+        return cost_add(bc, common);
+    }
+    if s == TE_REDUCED_BITCAST_LOADS || s == TE_REDUCED_BITCAST_BSWAP_LOADS {
+        lhs := slp_get_operand_entry(te, 0);
+        load_te := slp_get_operand_entry(lhs, 0);
+        li0 := slp.entries[load_te].s.main;
+        src_type := type_int(cast(u32) (dl_type_size_bits(vtype(li0)) * cast(u64) te_vector_factor(te)));
+        lc := tti_memory_op_cost(t, .LOAD, src_type, load_store_align(li0), ptr_addrspace(vtype(op(li0, 0))), K);
+        if s == TE_REDUCED_BITCAST_BSWAP_LOADS {
+            ica := ica_types(IID_BSWAP, src_type, .[src_type]);
+            lc = cost_add(lc, tti_intrinsic_cost(t, *ica, K));
+            if src_type != c.sty lc = cost_add(lc, tti_cast_cost(t, .ZEXT, c.sty, src_type, CCH_NONE, K));
+        }
+        return cost_add(lc, common);
+    }
+    if s == TE_REDUCED_CMP_BITCAST {
+        cmp_ty := make_cmp_result_type(c.vec_ty);
+        dst := type_int(cast(u32) te_vector_factor(te));
+        bc := tti_cast_cost(t, .BITCAST, dst, cmp_ty, CCH_NONE, K);
+        if dst != c.sty bc = cost_add(bc, tti_cast_cost(t, .ZEXT, c.sty, dst, CCH_NONE, K));
+        return cost_add(bc, common);
     }
     if ec_is_arith(s) {
         if s == ec_op_s32(.AND) && c.has_bw {

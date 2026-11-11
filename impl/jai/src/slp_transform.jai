@@ -311,8 +311,41 @@ slp_transform_nodes :: () {
                     slp.entries[cond].state = TE_COMBINED_VECTORIZE;
                 continue;
             }
-            for v: e.scalars if is_inst(v) && inst_op(v) == .ZEXT { slp_fail("matchesInversedZExtSelect"); break; }
-            if slpx.has_user_ignore_list && e.idx == 0 slp_fail("matchesSelectOfBits");
+            inversed := slp_matches_inversed_zext_select(t);
+            if inversed.count {
+                cmp_te := slp_get_operand_entry(t, 0);
+                op1_te := slp_get_operand_entry(t, 1);
+                op2_te := slp_get_operand_entry(t, 2);
+                cm := slp.entries[cmp_te].s.main;
+                slp.entries[cmp_te].s = .{cm, cm, false};
+                // UpdateGatherEntry(OldTE, NewTE, V)
+                update_gather_entry :: (old: Te_Id, new: Te_Id, v: Value_Id) {
+                    if slp_is_constant(v) return;
+                    p := table_find_pointer(*slpx.value_to_gather_nodes, v);
+                    if !p fatal("internal: slp: value without gather nodes");
+                    if !slp_has(slp.entries[old].scalars, v) set_remove_te(p, old);
+                    set_add_te(p, new);
+                }
+                e = *slp.entries[k];
+                for idx: inversed {
+                    o1 := *slp.entries[op1_te]; o2 := *slp.entries[op2_te];
+                    v1 := o1.scalars[idx]; v2 := o2.scalars[idx];
+                    o1.scalars[idx] = v2; o2.scalars[idx] = v1;
+                    x := e.operands[1][idx]; e.operands[1][idx] = e.operands[2][idx]; e.operands[2][idx] = x;
+                    update_gather_entry(op1_te, op2_te, v1);
+                    update_gather_entry(op2_te, op1_te, v2);
+                }
+                table_set(*slpx.operands_to_tree_entry, ((cast(u64) t) << 32) | 1, op1_te);
+                table_set(*slpx.operands_to_tree_entry, ((cast(u64) t) << 32) | 2, op2_te);
+            }
+            if slp_matches_select_of_bits(t) {
+                e = *slp.entries[k];
+                e.combined_op = TE_REDUCED_CMP_BITCAST;
+                o1 := slp_get_operand_entry(t, 1);
+                o2 := slp_get_operand_entry(t, 2);
+                slp.entries[o1].state = TE_COMBINED_VECTORIZE; slp.entries[o1].combined_op = TE_REDUCED_CMP_BITCAST;
+                slp.entries[o2].state = TE_COMBINED_VECTORIZE; slp.entries[o2].combined_op = TE_REDUCED_CMP_BITCAST;
+            }
         } else if o == .FSUB || o == .FADD {
             if e.state != TE_VECTORIZE || !is_add_sub_like_op(e.s) || is_alt_shuffle(e.s) continue;
             lhs := slp_get_operand_entry(t, 0);
@@ -333,7 +366,22 @@ slp_transform_nodes :: () {
             all_disjoint := true;
             for v: slpx.user_ignore_list if !(is_inst(v) && inst_op(v) == .OR && (inst(v).flags & F_EXACT) != 0) { all_disjoint = false; break; }
             if !all_disjoint continue;
-            slp_fail("matchesShlZExt (reduced bitcasts)");
+            ok, order, is_bswap, for_loads := slp_matches_shl_zext(t);
+            if !ok continue;
+            code := ifx is_bswap then (ifx for_loads then TE_REDUCED_BITCAST_BSWAP_LOADS else TE_REDUCED_BITCAST_BSWAP)
+                    else (ifx for_loads then TE_REDUCED_BITCAST_LOADS else TE_REDUCED_BITCAST);
+            e = *slp.entries[k];
+            e.combined_op = code;
+            array_reset_keeping_memory(*e.reorder_indices);
+            for order array_add(*e.reorder_indices, it);
+            zext_te := slp_get_operand_entry(t, 0);
+            slp.entries[zext_te].state = TE_COMBINED_VECTORIZE; slp.entries[zext_te].combined_op = code;
+            if for_loads {
+                lte := slp_get_operand_entry(zext_te, 0);
+                slp.entries[lte].state = TE_COMBINED_VECTORIZE; slp.entries[lte].combined_op = code;
+            }
+            cte := slp_get_operand_entry(t, 1);
+            slp.entries[cte].state = TE_COMBINED_VECTORIZE; slp.entries[cte].combined_op = code;
         }
     }
     if slpx.load_entries_to_vectorize.count == 0 {
@@ -352,3 +400,197 @@ slp_transform_nodes :: () {
     }
     slp_collect_and_vectorize_gathered_loads();
 }
+
+set_remove_te :: (l: *[..] Te_Id, x: Te_Id) { for l.* if it == x { array_ordered_remove_by_index(l, it_index); return; } }
+
+// matchesShlZExt(TE, Order, IsBSwap, ForLoads): (matches, order, is bswap, for loads)
+slp_matches_shl_zext :: (te: Te_Id) -> (bool, [..] u32, bool, bool) {
+    order: [..] u32; order.allocator = temp;
+    is_bswap := false; for_loads := false;
+    e := *slp.entries[te];
+    t := slp.tti;
+    K :: TCK_RECIP_THROUGHPUT;
+    if e.state != TE_VECTORIZE || e.reorder_indices.count || e.reuse_shuffle_indices.count || table_contains(*slpx.min_bws, te) return false, order, false, false;
+    for e.scalars if !has_one_use(it) return false, order, false, false;
+    sty := vtype(e.s.main);
+    if !is_int_type(sty) return false, order, false, false;
+    sz := dl_type_size_bits(sty);
+    lhs := slp_get_operand_entry(te, 0);
+    rhs := slp_get_operand_entry(te, 1);
+    le := *slp.entries[lhs];
+    if !(le.state == TE_VECTORIZE && te_opcode(lhs) == .ZEXT && le.reorder_indices.count == 0 && le.reuse_shuffle_indices.count == 0 &&
+         !table_contains(*slpx.min_bws, lhs)) return false, order, false, false;
+    for le.scalars if !has_one_use(it) return false, order, false, false;
+    src_sty := vtype(op(le.s.main, 0));
+    stride := dl_type_size_bits(src_sty);
+    lvf := cast(u64) te_vector_factor(lhs);
+    if !has_single_bit(stride) || stride >= sz || sz % stride != 0 || !has_single_bit(lvf) return false, order, false, false;
+    re := *slp.entries[rhs];
+    if !(te_is_gather(rhs) && re.reorder_indices.count == 0 && re.reuse_shuffle_indices.count == 0 && !table_contains(*slpx.min_bws, rhs))
+        return false, order, false, false;
+    unique_int :: (c: Value_Id) -> APInt {
+        if vkind(c) != .C_INT slp_fail("getUniqueInteger of a non-ConstantInt shift amount");
+        return const_ap(c);
+    }
+    cur: u64 = 0;
+    all := true;
+    for v: re.scalars {
+        cur += stride;
+        if pm_undef_value(v) continue;
+        if !is_const(v) { all = false; break; }
+        a := unique_int(v);
+        if a.bits > 64 || ap_active_bits(a) > 64 || ap_zext_value(a) != cur - stride { all = false; break; }
+    }
+    if all && cur <= sz {
+        array_reset_keeping_memory(*order);
+    } else {
+        vf := cast(u64) te_vector_factor(rhs);
+        array_reset_keeping_memory(*order);
+        for 1..vf array_add(*order, cast(u32) vf);
+        seen := NewArray(cast(s64) vf, bool,, temp);
+        if vf * stride > sz return false, order, false, false;
+        for v, idx: re.scalars {
+            if pm_undef_value(v) continue;
+            if !is_const(v) return false, order, false, false;
+            a := unique_int(v);
+            if ap_is_negative(a) || ap_active_bits(a) > 64 || ap_zext_value(a) >= sz || ap_zext_value(a) % stride != 0 return false, order, false, false;
+            pos := ap_zext_value(a) / stride;
+            if order[idx] != cast(u32) vf || pos >= vf return false, order, false, false;
+            if seen[pos] return false, order, false, false;
+            seen[pos] = true;
+            order[idx] = cast(u32) pos;
+        }
+        for order if it == cast(u32) vf return false, order, false, false;
+    }
+    src_type := type_int(cast(u32) (stride * lvf));
+    vec_ty := slp_widened_type(sty, cast(u64) te_vector_factor(te));
+    src_vec_ty := slp_widened_type(src_sty, lvf);
+    cast_ctx := slp_get_cast_context_hint(slp_get_operand_entry(lhs, 0));
+    vec_cost := tti_arithmetic_reduction_cost(t, .OR, vec_ty, true, 0, K);
+    vec_cost = cost_add(vec_cost, tti_arith_cost(t, .SHL, vec_ty, K, slp_get_operand_info(le.scalars)));
+    vec_cost = cost_add(vec_cost, tti_cast_cost(t, .ZEXT, vec_ty, src_vec_ty, cast_ctx, K));
+    bitcast_cost := tti_cast_cost(t, .BITCAST, src_type, src_vec_ty, cast_ctx, K);
+    if order.count {
+        slp_fixup_ordering_indices(order);
+        m := slp_inverse_permutation(order);
+        bitcast_cost = cost_add(bitcast_cost, slp_shuffle_cost(SK_PERMUTE_SINGLE_SRC, src_vec_ty, m));
+    }
+    BYTE_SIZE :: 8;
+    if order.count && slp_is_reverse_order(order) && dl_type_size_bits(src_sty) == BYTE_SIZE {
+        ica := ica_types(IID_BSWAP, src_type, .[src_type]);
+        bswap_cost := cost_add(tti_cast_cost(t, .BITCAST, src_type, src_vec_ty, cast_ctx, K), tti_intrinsic_cost(t, *ica, K));
+        if bswap_cost <= bitcast_cost {
+            bitcast_cost = bswap_cost;
+            is_bswap = true;
+            array_reset_keeping_memory(*order);
+            src_te := slp_get_operand_entry(lhs, 0);
+            se := *slp.entries[src_te];
+            if se.state == TE_VECTORIZE && se.reorder_indices.count == 0 && se.reuse_shuffle_indices.count == 0 && te_opcode(src_te) == .LOAD &&
+               !is_alt_shuffle(se.s) && slp_all_one_use(se.scalars) {
+                li := se.s.main;
+                as := ptr_addrspace(vtype(op(li, 0)));
+                ica2 := ica_types(IID_BSWAP, src_type, .[src_type]);
+                bc2 := cost_add(tti_memory_op_cost(t, .LOAD, src_type, inst(li).align, as, K), tti_intrinsic_cost(t, *ica2, K));
+                if bc2 <= bitcast_cost {
+                    vec_cost = cost_add(vec_cost, tti_memory_op_cost(t, .LOAD, src_vec_ty, inst(li).align, as, K));
+                    bitcast_cost = bc2;
+                    for_loads = true;
+                }
+            }
+        }
+    } else if order.count == 0 && dl_type_size_bits(src_sty) == BYTE_SIZE {
+        src_te := slp_get_operand_entry(lhs, 0);
+        se := *slp.entries[src_te];
+        if se.state == TE_VECTORIZE && se.reorder_indices.count == 0 && se.reuse_shuffle_indices.count == 0 && te_opcode(src_te) == .LOAD &&
+           !is_alt_shuffle(se.s) && slp_all_one_use(se.scalars) {
+            li := se.s.main;
+            as := ptr_addrspace(vtype(op(li, 0)));
+            bitcast_cost = tti_memory_op_cost(t, .LOAD, src_type, inst(li).align, as, K);
+            vec_cost = cost_add(vec_cost, tti_memory_op_cost(t, .LOAD, src_vec_ty, inst(li).align, as, K));
+            for_loads = true;
+        }
+    }
+    if src_type != sty bitcast_cost = cost_add(bitcast_cost, tti_cast_cost(t, .ZEXT, sty, src_type, CCH_NONE, K));
+    return bitcast_cost < vec_cost, order, is_bswap, for_loads;
+}
+slp_all_one_use :: (vl: [] Value_Id) -> bool { for vl if !has_one_use(it) return false; return true; }
+
+// matchesInversedZExtSelect(SelectTE, InversedCmpsIndices): the indices (empty = no match)
+slp_matches_inversed_zext_select :: (te: Te_Id) -> [..] u32 {
+    res: [..] u32; res.allocator = temp;
+    e := *slp.entries[te];
+    t := slp.tti;
+    K :: TCK_RECIP_THROUGHPUT;
+    any_zext := false;
+    for v: e.scalars if is_inst(v) && inst_op(v) == .ZEXT { any_zext = true; break; }
+    if !any_zext return res;
+    cmp_te := slp_get_operand_entry(te, 0);
+    op1_te := slp_get_operand_entry(te, 1);
+    op2_te := slp_get_operand_entry(te, 2);
+    ce := *slp.entries[cmp_te]; o1 := *slp.entries[op1_te]; o2 := *slp.entries[op2_te];
+    if ce.state != TE_VECTORIZE || !is_alt_shuffle(ce.s) || (te_opcode(cmp_te) != .ICMP && te_opcode(cmp_te) != .FCMP) ||
+       ce.reorder_indices.count || ce.reuse_shuffle_indices.count || o1.reorder_indices.count || o1.reuse_shuffle_indices.count ||
+       o2.reorder_indices.count || o2.reuse_shuffle_indices.count return res;
+    if !te_is_gather(op1_te) || !te_is_gather(op2_te) return res;
+    cmp := ce.s.main;
+    if !is_cmp_inst(cmp) return res;
+    same_sign :: (c: Value_Id) -> bool { return inst_op(c) == .ICMP && (inst(c).flags & F_EXACT) != 0; }
+    main_pred := inst(cmp).pred; main_ss := same_sign(cmp);
+    inv_pred := cmp_inverse(main_pred); inv_ss := main_ss;
+    for v, idx: ce.scalars {
+        if !is_cmp_inst(v) continue;
+        p := inst(v).pred; pss := same_sign(v);
+        ok := cmp_get_matching(main_pred, main_ss, p, pss);
+        if ok continue;
+        ok2 := cmp_get_matching(inv_pred, inv_ss, p, pss);
+        if !ok2 { array_reset_keeping_memory(*res); return res; }
+        if !has_one_use(v) { array_reset_keeping_memory(*res); return res; }
+        array_add(*res, cast(u32) idx);
+    }
+    if res.count == 0 return res;
+    vec_ty := slp_widened_type(vtype(op(cmp, 0)), cast(u64) te_vector_factor(cmp_te));
+    cmp_ty := make_cmp_result_type(vec_ty);
+    vec_cost := tti_cmp_sel_cost(t, te_opcode(cmp_te), vec_ty, cmp_ty, main_pred, K, slp_get_operand_info(ce.operands[0]), slp_get_operand_info(ce.operands[1]));
+    dem := NewArray(te_vector_factor(cmp_te), bool,, temp);
+    for * dem it.* = true;
+    bv_cost := slp_get_scalarization_overhead(vtype(cmp), cmp_ty, dem, true, false, K);
+    for v: ce.scalars if is_inst(v) bv_cost = cost_add(bv_cost, tti_instruction_cost(t, v, K));
+    if !(vec_cost < bv_cost) array_reset_keeping_memory(*res);
+    return res;
+}
+
+// matchesSelectOfBits(SelectTE)
+slp_matches_select_of_bits :: (te: Te_Id) -> bool {
+    e := *slp.entries[te];
+    t := slp.tti;
+    K :: TCK_RECIP_THROUGHPUT;
+    if e.reorder_indices.count || e.reuse_shuffle_indices.count return false;
+    if !slpx.has_user_ignore_list || e.idx != 0 return false;
+    if !slp_all_one_use(e.scalars) return false;
+    for v: slpx.user_ignore_list if !(is_inst(v) && inst_op(v) == .OR) return false;
+    op1_te := slp_get_operand_entry(te, 1);
+    op2_te := slp_get_operand_entry(te, 2);
+    if !te_is_gather(op1_te) || !te_is_gather(op2_te) return false;
+    o1 := *slp.entries[op1_te]; o2 := *slp.entries[op2_te];
+    if o1.reorder_indices.count || o1.reuse_shuffle_indices.count || o2.reuse_shuffle_indices.count return false;
+    sty := vtype(o1.scalars[0]);
+    if !is_int_type(sty) return false;
+    for v: o2.scalars if !pm_zero_int(v) return false;
+    for v, idx: o1.scalars {
+        ok, x := pm_constant_int_u64(v);
+        if !ok || !has_single_bit(x) || cast(s64) slp_log2_u64(x) != idx return false;
+    }
+    vf := cast(u64) te_vector_factor(te);
+    dst_ty := type_int(cast(u32) vf);
+    op_ty := slp_widened_type(dst_ty, vf);
+    cmp_ty := make_cmp_result_type(op_ty);
+    vec_ty := slp_widened_type(sty, vf);
+    found, bw := slp_min_bw_of(te);
+    if found vec_ty = slp_widened_type(type_int(cast(u32) bw.bits), vf);
+    bitcast_cost := tti_cast_cost(t, .BITCAST, dst_ty, cmp_ty, CCH_NONE, K);
+    if dst_ty != sty bitcast_cost = cost_add(bitcast_cost, tti_cast_cost(t, .ZEXT, sty, dst_ty, CCH_NONE, K));
+    select_cost := cost_add(tti_cmp_sel_cost(t, .SELECT, vec_ty, cmp_ty, BAD_ICMP_PREDICATE, K, slp_get_operand_info(o1.scalars), slp_get_operand_info(o2.scalars)),
+                            tti_arithmetic_reduction_cost(t, .OR, vec_ty, true, 0, K));
+    return bitcast_cost <= select_cost;
+}
+slp_log2_u64 :: (x: u64) -> u64 { r: u64 = 0; y := x; while y > 1 { y >>= 1; r += 1; } return r; }
