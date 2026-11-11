@@ -1035,7 +1035,28 @@ ec_vector_cost :: (c: *Slp_Ec, common: Cost) -> Cost {
         if e.state == TE_VECTORIZE {
             if e.interleave_factor != 0 slp_fail("interleaved load costs");
             vc = tti_memory_op_cost(t, .LOAD, c.vec_ty, load_store_align(li0), ptr_addrspace(vtype(op(li0, 0))), K);
-        } else slp_fail("costs of strided / compressed / gathered load nodes");
+        } else if e.state == TE_COMPRESS_VECTORIZE {
+            scalars := vl_copy(vl);
+            if e.reorder_indices.count {
+                m := new_mask(); for e.reorder_indices array_add(*m, cast(s32) it);
+                slp_reorder_scalars(*scalars, m);
+            }
+            ptrs := hr_new_list();
+            for scalars array_add(*ptrs, op(it, 0));
+            mc := slp_is_masked_load_compress(scalars, ptrs, e.reorder_indices, true);
+            if !table_contains(*slpx.compress_data, c.te) table_set(*slpx.compress_data, c.te, mc);
+            align := load_store_align(li0);
+            as := ptr_addrspace(vtype(op(li0, 0)));
+            if mc.interleave_factor != 0 slp_fail("interleaved load costs");
+            if mc.is_masked {
+                m: Mica;
+                m.id = IID_MASKED_LOAD; m.data_ty = mc.load_vec_ty; m.align = align; m.addrspace = as;
+                vc = x86_masked_memory_op_cost(t, *m, K);
+            } else {
+                vc = tti_memory_op_cost(t, .LOAD, mc.load_vec_ty, align, as, K);
+            }
+            vc = cost_add(vc, slp_shuffle_cost(SK_PERMUTE_SINGLE_SRC, mc.load_vec_ty, mc.compress_mask));
+        } else slp_fail("costs of strided / gathered load nodes");
         return cost_add(vc, common);
     }
     if s == ec_op_s32(.STORE) {

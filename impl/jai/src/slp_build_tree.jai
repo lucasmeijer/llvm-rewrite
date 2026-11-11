@@ -702,13 +702,141 @@ slp_can_vectorize_loads :: (vl: [] Value_Id, vl0: Value_Id, order: *[..] u32 = n
         _, diffn := get_pointers_diff(sty, pointer_ops.*[0], sty, ptrn);
         diff := diffn - diff0;
         if cast(u64) diff == cast(u64) (sz - 1) return LS_VECTORIZE;
-        slp_fail("non-consecutive sorted loads (isMaskedLoadCompress in canVectorizeLoads)");
+        mc := slp_is_masked_load_compress(vl, pointer_ops.*, order.*);
+        if mc.ok return LS_COMPRESS;
         // analyzeConstantStrideCandidate: no legal strided loads on X86
     }
     if !masked_gather_legal(vec_ty, common_align) return LS_GATHER;
     slp_fail("masked-gather cost check of canVectorizeLoads (CheckForShuffledLoads)");
     return LS_GATHER;
 }
+Masked_Load_Compress :: struct {
+    ok: bool;
+    is_masked: bool;
+    interleave_factor: u32;
+    compress_mask: [..] s32;
+    load_vec_ty: Type_Id = NONE;
+}
+
+// buildCompressMask(PointerOps, Order, ScalarTy, DL, SE, CompressMask): (built, is strided)
+slp_build_compress_mask :: (ptrs: [] Value_Id, order: [] u32, sty: Type_Id, mask: *[..] s32) -> (bool, bool) {
+    sz := ptrs.count;
+    mask.* = new_mask(sz);
+    mask.*[0] = 0;
+    has_stride := true;
+    stride: s64 = 0;
+    ptr0 := ifx order.count == 0 then ptrs[0] else ptrs[order[0]];
+    for i: 1..sz-1 {
+        ptr := ifx order.count == 0 then ptrs[i] else ptrs[order[i]];
+        ok, pos := get_pointers_diff(sty, ptr0, sty, ptr);
+        if !ok || pos > 0xFFFF_FFFF return false, false;
+        p := cast(s64) (cast,no_check(u32) pos);
+        mask.*[i] = cast,no_check(s32) p;
+        if !has_stride continue;
+        if stride == 0 { stride = p; continue; }
+        if p != stride * i has_stride = false;
+    }
+    return true, has_stride;
+}
+
+// llvm::isSafeToLoadUnconditionally(V, Ty, Alignment, DL, ScanFrom, AC, DT, TLI)
+slp_is_safe_to_load_unconditionally :: (v_in: Value_Id, ty: Type_Id, align: u64, scan_from: Value_Id) -> bool {
+    size := dl_type_store_size(ty);
+    q: Simplify_Query;
+    q.dt = slp.dt; q.ac = slp.ac; q.cxt = scan_from;
+    if is_dereferenceable_and_aligned_pointer(v_in, align, ap_from_u64(cast(u32) dl_pointer_type_size_bits(vtype(v_in)), size), q) {
+        if scan_from == NONE return true;
+        fa := attr_list_fn(glob(block_fn(inst_block(scan_from))).attrs);
+        if !(attr_set_has(fa, .SanitizeThread) || attr_set_has(fa, .SanitizeAddress) || attr_set_has(fa, .SanitizeHWAddress)) return true;
+    }
+    if scan_from == NONE return false;
+    v := strip_pointer_casts(v_in);
+    x := inst_prev(scan_from);
+    while x != NONE {
+        cur := x;
+        x = inst_prev(x);
+        o := inst_op(cur);
+        if o == .CALL && may_write_to_memory(cur) && !is_lifetime_start_or_end(cur) return false;
+        ptr: Value_Id; aty: Type_Id; al: u64;
+        if o == .LOAD {
+            if inst(cur).flags & F_VOLATILE continue;
+            ptr = op(cur, 0); aty = vtype(cur); al = inst(cur).align;
+        } else if o == .STORE {
+            if inst(cur).flags & F_VOLATILE continue;
+            ptr = op(cur, 1); aty = vtype(op(cur, 0)); al = inst(cur).align;
+        } else continue;
+        if al < align continue;
+        if ptr == v && size <= dl_type_store_size(aty) return true;
+        if equivalent_address_values(strip_pointer_casts(ptr), v) && size <= dl_type_store_size(aty) return true;
+    }
+    return false;
+}
+
+// isMaskedLoadCompress(VL, PointerOps, Order, TTI, DL, SE, AC, DT, TLI, AreAllUsersVectorized, IsMasked,
+// InterleaveFactor, CompressMask, LoadVecTy)
+slp_is_masked_load_compress :: (vl: [] Value_Id, ptrs: [] Value_Id, order: [] u32, all_users_vectorized := false) -> Masked_Load_Compress {
+    r: Masked_Load_Compress;
+    t := slp.tti;
+    K :: TCK_RECIP_THROUGHPUT;
+    sty := vtype(vl[0]);
+    sz := vl.count;
+    vec_ty := slp_widened_type(sty, cast(u64) sz);
+    mask := slp_inverse_permutation(order);
+    for v, i: vl {
+        if all_users_vectorized || slp_are_all_users_vectorized(v, true) continue;
+        ext := tti_vector_instr_cost(t, .EXTRACTELEMENT, vec_ty, K, cast(u32) (ifx mask.count == 0 then i else mask[i]));
+        sc := tti_instruction_cost(t, v, K);
+        if ext <= sc return r;
+    }
+    ptr0 := ifx order.count == 0 then ptrs[0] else ptrs[order[0]];
+    ptrn := ifx order.count == 0 then ptrs[sz - 1] else ptrs[order[order.count - 1]];
+    ok, diff := get_pointers_diff(sty, ptr0, sty, ptrn);
+    if !ok return r;
+    max_reg := tti_register_bit_width(t, RGK_FIXED_WIDTH_VECTOR);
+    if (cast,no_check(u64) diff) / cast(u64) sz >= max_reg / 8 return r;
+    load_vec_ty := slp_widened_type(sty, cast(u64) diff + 1);
+    li := ifx order.count == 0 then vl[0] else vl[order[0]];
+    common_align := inst(li).align;
+    last := ifx order.count == 0 then vl[sz - 1] else vl[order[order.count - 1]];
+    is_masked := !slp_is_safe_to_load_unconditionally(ptr0, load_vec_ty, common_align, last);
+    if is_masked && !(t.kind == .X86 && x86_is_legal_masked_load(*t.xl, load_vec_ty)) return r;
+    compress_mask: [..] s32;
+    built, is_strided := slp_build_compress_mask(ptrs, order, sty, *compress_mask);
+    if !built fatal("internal: slp: buildCompressMask failed after a successful getPointersDiff");
+    ordered_ptrs := vl_copy(ptrs);
+    if order.count slp_reorder_scalars(*ordered_ptrs, mask);
+    scalar_gep, vector_gep := slp_gep_costs(ordered_ptrs, ordered_ptrs[0], .LOAD, sty, load_vec_ty);
+    scalar_loads: Cost = 0;
+    for v: vl scalar_loads = cost_add(scalar_loads, tti_instruction_cost(t, v, K));
+    scalar_loads = cost_add(scalar_loads, scalar_gep);
+    dem := NewArray(sz, bool,, temp);
+    for * dem it.* = true;
+    gather_cost := cost_add(slp_get_scalarization_overhead(sty, vec_ty, dem, true, false, K), scalar_loads);
+    load_cost: Cost;
+    as := cast(u32) ir.types[vtype(op(li, 0))].a;
+    if is_masked {
+        m: Mica;
+        m.id = IID_MASKED_LOAD; m.data_ty = load_vec_ty; m.align = common_align; m.addrspace = as;
+        load_cost = x86_masked_memory_op_cost(t, *m, K);
+    } else {
+        load_cost = tti_memory_op_cost(t, .LOAD, load_vec_ty, common_align, as, K);
+    }
+    // isLegalInterleavedAccessType is false on X86: no segmented loads
+    if cost_add(vector_gep, load_cost) >= gather_cost return r;
+    compress_cost := slp_shuffle_cost(SK_PERMUTE_SINGLE_SRC, load_vec_ty, compress_mask);
+    if order.count {
+        nm := new_mask(sz);
+        for i: 0..sz-1 nm[i] = compress_mask[mask[i]];
+        compress_mask = nm;
+    }
+    total := cost_add(cost_add(vector_gep, load_cost), compress_cost);
+    r.ok = total < gather_cost;
+    r.is_masked = is_masked;
+    r.compress_mask = compress_mask;
+    r.load_vec_ty = load_vec_ty;
+    return r;
+}
+
 // TTI::forceScalarizeMaskedGather (X86: needs AVX512 or Fast_gather for 2/4-wide; see X86TTIImpl)
 tti_force_scalarize_masked_gather :: (t: *Tti, ty: Type_Id, align: u64) -> bool {
     if t.kind != .X86 return false;
@@ -805,7 +933,23 @@ slp_get_scalars_vectorization_state :: (s: Inst_State, vl: [] Value_Id, is_scatt
                 slp_register_non_vectorizable_loads(vl);
                 return TE_NEED_TO_GATHER;
             }
-            slp_fail("compressed / scattered / strided loads");
+            if st == LS_COMPRESS {
+                if !slpx.is_graph_transform_mode && slp.entries.count > 1 {
+                    n := cast(u32) slp.entries.count;
+                    if !slp_has(slpx.load_entries_to_vectorize, n) array_add(*slpx.load_entries_to_vectorize, n);
+                    return TE_NEED_TO_GATHER;
+                }
+                // IsGatheredNode()
+                gathered := slpx.gathered_loads_first >= 0;
+                if gathered for v: vl {
+                    if pm_poison(v) continue;
+                    any := false;
+                    for slp_get_tree_entries(v) if it >= slpx.gathered_loads_first { any = true; break; }
+                    if !any { gathered = false; break; }
+                }
+                return ifx gathered then TE_NEED_TO_GATHER else TE_COMPRESS_VECTORIZE;
+            }
+            slp_fail("scattered / strided loads");
             return TE_NEED_TO_GATHER;
         case .ZEXT; #through; case .SEXT; #through; case .FPTOUI; #through; case .FPTOSI; #through;
         case .FPEXT; #through; case .PTRTOINT; #through; case .INTTOPTR; #through; case .SITOFP; #through;
@@ -1114,6 +1258,7 @@ slp_build_tree_rec :: (vl_ref: [] Value_Id, depth: u32, ei: Edge_Info, interleav
             slp_fixup_ordering_indices(current_order);
             te: Te_Id;
             if state == TE_VECTORIZE te = slp_new_tree_entry(vl, b, s, ei, reuse, current_order, interleave);
+            else if state == TE_COMPRESS_VECTORIZE te = slp_new_tree_entry_state(vl, TE_COMPRESS_VECTORIZE, b, s, ei, reuse, current_order);
             else slp_fail("non-consecutive load nodes");
             if current_order.count && state != TE_SCATTER_VECTORIZE {
                 mask := slp_inverse_permutation(current_order);

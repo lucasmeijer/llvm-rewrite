@@ -49,6 +49,7 @@ Slp_Extra :: struct {
     external_uses_as_original_scalar: [..] Value_Id;   // SmallPtrSet (membership)
     external_uses_with_non_users: [..] Value_Id;       // SmallPtrSet (membership)
     loop_nest_scale_cache: Table(Loop_Id, u64);
+    compress_data: Table(Te_Id, Masked_Load_Compress);   // CompressEntryToData
 }
 slpx: Slp_Extra;
 
@@ -79,6 +80,7 @@ slp_init :: (f: Value_Id, tti: *Tti, aar: Aa_Results, li: *Loop_Info, dt: *Dom_T
     slpx.min_bws.allocator = temp; slpx.analyzed_min_bw_vals.allocator = temp;
     slpx.external_uses.allocator = temp; slpx.external_uses_as_original_scalar.allocator = temp;
     slpx.external_uses_with_non_users.allocator = temp; slpx.loop_nest_scale_cache.allocator = temp;
+    slpx.compress_data.allocator = temp;
     collect_ephemeral_values_fn(f, ac, *slpx.eph_values);
     slp_init_reg_sizes(slp_cl.max_reg_size_given, slp_cl.min_reg_size_given);
     slpg_init();
@@ -226,6 +228,7 @@ slp_delete_tree_later_state :: () {   // the deleteTree members of later stages
     array_reset_keeping_memory(*slpx.external_uses_as_original_scalar);
     array_reset_keeping_memory(*slpx.external_uses_with_non_users);
     array_reset_keeping_memory(*slpg.postponed_gathers);
+    table_reset(*slpx.compress_data);
     table_reset(*slpg.last_inst_to_pos);
 }
 

@@ -1107,10 +1107,36 @@ slp_vectorize_tree_entry :: (te: Te_Id) -> Value_Id {
     case .LOAD;
         slp_set_insert_point_after_bundle(te);
         e = *slp.entries[te];
-        if e.state != TE_VECTORIZE slp_fail("vectorizeTree of strided / compressed / gathered load nodes");
         li := vl0;
-        new_li := sgb_load(vec_ty, op(li, 0), inst(li).align);
-        v := slp_propagate_flags_for(te, new_li);
+        v: Value_Id;
+        if e.state == TE_VECTORIZE {
+            new_li := sgb_load(vec_ty, op(li, 0), inst(li).align);
+            v = slp_propagate_flags_for(te, new_li);
+        } else if e.state == TE_COMPRESS_VECTORIZE {
+            found, mc := table_find(*slpx.compress_data, te);
+            if !found fatal("internal: slp: no CompressEntryToData for a compressed load node");
+            align := inst(li).align;
+            new_li: Value_Id;
+            if mc.is_masked {
+                lvf := cast(s64) slp_num_elements(mc.load_vec_ty);
+                vals: [..] Value_Id; vals.allocator = temp;
+                for 1..lvf / cast(s64) slp_num_elements(vtype(li)) array_add(*vals, const_int(ir.t_i1, 0));
+                for mc.compress_mask vals[it] = const_int(ir.t_i1, 1);
+                if is_vector_type(vtype(li)) slp_fail("REVEC masked loads");
+                ptr := op(li, 0);
+                f := get_or_insert_intrinsic_declaration(IID_MASKED_LOAD, .[mc.load_vec_ty, vtype(ptr)]);
+                fty := glob(f).value_type;
+                c := new_inst(.CALL, func_ret(fty), 4);
+                inst(c).ty2 = fty;
+                set_op(c, 0, ptr); set_op(c, 1, const_vector_of(vals)); set_op(c, 2, const_poison(mc.load_vec_ty)); set_op(c, 3, f);
+                new_li = sgb_insert(c);
+                add_param_align(new_li, 0, align);
+            } else {
+                new_li = sgb_load(mc.load_vec_ty, op(li, 0), align);
+            }
+            new_li = slp_propagate_flags_for(te, new_li);
+            v = sgb_shuffle(new_li, NONE, mc.compress_mask);
+        } else slp_fail("vectorizeTree of strided / gathered load nodes");
         v = slp_final_shuffle(v, te, sty);
         te_set_vv(te, v);
         return v;
