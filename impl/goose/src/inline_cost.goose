@@ -173,18 +173,12 @@ fn tti_inline_call_penalty(f: i32, cb: i32, dflt: i64) -> i64 { dflt }
 fn tti_cb_savings_multiplier() -> i64 { 8 }
 fn tti_cb_profitable_multiplier() -> i64 { 8 }
 
-// getFPOpCost(Ty) for the subtarget set up by tti_init_function
+// getFPOpCost(Ty) for the subtarget set up by tti_init_function (BasicTTIImplBase::getFPOpCost: FADD legal,
+// custom or promoted on the value type)
 fn tti_fp_op_cost(ty: i32) -> i64 {
     if tti_kind != TTI_X86 { return TCC_BASIC; }
-    // BasicTTIImpl: FADD legal, custom or promoted on the value type
-    let e = x86_value_type(ty, true);
-    if e == EVT_OTHER || !evt_is_simple(e) { return TCC_EXPENSIVE; }
-    let m = evt_to_mvt(e);
-    if !x86_mvt_legal(m) { return TCC_EXPENSIVE; }
-    let c = mvt_elt(m);
-    if c == XE_F32 || c == XE_F64 || c == XE_F80 { return TCC_BASIC; }
-    if c == XE_F128 { return TCC_EXPENSIVE; }    // FADD f128 is a LibCall
-    x86_np("getFPOpCost of this floating-point type");
+    let e = x86_value_type(ty, false);
+    if tl_legal_or_custom_or_promote(XISD_FADD, e) { return TCC_BASIC; }
     return TCC_EXPENSIVE;
 }
 
