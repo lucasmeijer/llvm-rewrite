@@ -309,6 +309,8 @@ Pass_Kind :: enum u8 {
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
     ANNOTATION2METADATA; ANNOTATION_REMARKS; FORCEATTRS; MEMPROF_REMOVE_INFO; RECOMPUTE_GLOBALSAA; LOWER_COMMENT_STRING;
     INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING; DROP_UNNECESSARY_ASSUMES; JUMP_TABLE_TO_SWITCH; MOVE_AUTO_INIT; ALIGNMENT_FROM_ASSUMPTIONS; LIBCALLS_SHRINKWRAP; CALLED_VALUE_PROPAGATION;
+    // EarlyCSE (pass_early_cse.jai)
+    EARLY_CSE;
 }
 
 Pass_Info :: struct {
@@ -347,6 +349,8 @@ PASS_TABLE :: Pass_Info.[
     .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
     .{"gvn", .FUNCTION, .GVN, false, .DOMTREE},   // also gvn<...> (lookup_pass)
+    .{"early-cse", .FUNCTION, .EARLY_CSE, false, .DOMTREE},
+    .{"early-cse<memssa>", .FUNCTION, .EARLY_CSE, false, .DOMTREE},
     .{"dse", .FUNCTION, .DSE, false, .DOMTREE},
     .{"memcpyopt", .FUNCTION, .MEMCPYOPT, false, .DOMTREE},
     .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},
@@ -989,6 +993,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if tli_parse_cl_opt(name, value, has_value) return true;   // tli.jai: -disable-builtin, libcall simplifier options
     if parse_replexitval(name, value, has_value) return true;   // pass_indvars.jai
     if reassociate_parse_cl_opt(name, value, has_value) return true;   // pass_reassociate.jai
+    if early_cse_parse_cl_opt(name, value, has_value) return true;   // pass_early_cse.jai
     if constraint_elimination_parse_cl_opt(name, value, has_value) return true;   // pass_constraint_elimination.jai
     if aggressive_instcombine_parse_cl_opt(name, value, has_value) return true;   // pass_aggressive_instcombine.jai
     if vector_combine_parse_cl_opt(name, value, has_value) return true;   // pass_vector_combine.jai
@@ -1227,6 +1232,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .MEMCPYOPT; return memcpyopt_run(f);
         case .SROA; return sroa_run(f, node.name);
         case .GVN; return gvn_run(f, node.name);
+        case .EARLY_CSE; return early_cse_run(f, node.name);
         case .INSTCOMBINE; return instcombine_run(f, node.name);
         case .REDUNDANT_DBG_INST_ELIM; return redundant_dbg_inst_elim_run(f);
         case .SIMPLIFYCFG; return simplifycfg_run(node, f);

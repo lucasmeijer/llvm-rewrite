@@ -114,6 +114,7 @@
 #load "memdep.jai";
 #load "vn_coercion.jai";
 #load "pass_gvn.jai";
+#load "pass_early_cse.jai";
 #load "globals_aa.jai";
 #load "loop_info.jai";
 #load "cycle_info.jai";

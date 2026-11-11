@@ -124,7 +124,7 @@ lib/IR/MemoryModelRelaxationAnnotations.cpp 0.5
 lib/Transforms/InstCombine/InstCombineAtomicRMW.cpp 1
 lib/Transforms/Scalar/DeadStoreElimination.cpp 0.97  # all but shortenAssignment's dbg.assign updates (assignment tracking does not parse)
 lib/Transforms/Scalar/MemCpyOptimizer.cpp 0.98  # all but DIAssignID merging/copying (assignment tracking does not parse)
-lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.4  # salvageKnowledge / buildAssumeFromInst without an AssumptionCache; no assume-simplify / assume-builder passes
+lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.5  # salvageKnowledge / buildAssumeFromInst (with or without an AssumptionCache, DT = null); no assume-simplify / assume-builder passes
 lib/Transforms/Scalar/GVN.cpp 0.95  # jai_gvn: all of GVNPass incl. the MemorySSA load analysis; no optimization remarks (findMayClobberedPtrAccess/reportMayClobberedLoad/reportLoadElim), no legacy pass
 lib/Analysis/MemoryDependenceAnalysis.cpp 0.95  # no debug-only verifyRemoved/AssertSorted, no legacy wrapper; invalidate() n/a (per-run result)
 lib/Transforms/Utils/VNCoercion.cpp 0.85  # no getConstantValueForLoad / getConstantMemInstValueForLoad (NewGVN only)

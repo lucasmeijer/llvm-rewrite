@@ -40,3 +40,10 @@ claim was checked by comparing a port's output with opt on all of `tests/importe
 - **Target memory intrinsics**: `TTI.getTgtMemIntrinsic` is false for x86 and for the default target, so only
   `llvm.masked.load/store` and `llvm.memset(.inline)` are memory "intrinsics" here; every other intrinsic call is
   a non-load, non-store `ParseMemoryInst` (not valid).
+- **`--enable-knowledge-retention`**: EarlyCSE calls `salvageKnowledge(&Inst, &AC)` (no DT). With an
+  AssumptionCache, `tryToPreserveWithoutAddingAssume` first looks for an existing assume bundle on the same value
+  and attribute (`getKnowledgeForValue` over `AC.assumptionsFor`, filtered by `isValidAssumeForContext(Assume,
+  Inst, nullptr)`): a bundle with an argument >= the new one makes the new knowledge redundant; a weaker one that
+  comes after `Inst` gets its argument raised in place. The new assume is registered in the AC, so later
+  simplifications in the same pass see it (`EarlyCSE/invariant.start.ll`, `guards.ll`, `invariant-loads.ll`, verified
+  by impl/jai).

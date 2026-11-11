@@ -1267,3 +1267,18 @@ Still slow / known:
   the first correlated-propagation in the CGSCC pipeline (opt-bisect position 20). The same passes run standalone
   on the bisected input agree, so it is a difference in cached analysis state carried through the earlier part of
   the pipeline (LVI / AssumptionCache / DT caching): a lead for L2.pipeline-O2.
+
+## EarlyCSE (L1.early-cse COMPLETE 96/96)
+
+- File: `pass_early_cse.jai` (`early-cse`, `early-cse<memssa>`, `-earlycse-mssa-optimization-cap`,
+  `-earlycse-debug-hash` accepted and ignored). The five ScopedHashTables share one bucket store (`Ec_Bucket`: key of
+  the first insertion + hash at insertion time, chained per hash) and one value list (`Ec_Val` = ScopedHashTableVal);
+  every dominator-tree scope starts its own `next_scope` chain at -1 (forgetting that made a scope exit pop the
+  parent's entries too). A lookup that would read a value LLVM has already freed (a stale bucket) fails loudly.
+- `salvage_knowledge(i, ac)` (assume_builder.jai) now has LLVM's AssumptionCache form (tryToPreserveWithoutAddingAssume
+  and registering the new assume); `knowledge_retention_check` allows early-cse.
+- `replace_dominated_uses_with_edge` (pass_early_cse.jai) is LLVM's replaceDominatedUsesWith(From, To, DT, Edge).
+- Sweeps (0 differs / 0 bad-ir): `early-cse` and `early-cse<memssa>` whole-file 7817/7826 (9 loud: nextafter,
+  frexp ranges, ppc_fp128 folding, x86 hadd known bits, operand-bundle capture tracking), `--with-test-flags`
+  10003/10113 (loud: other passes' options), `--per-function` 69904/70067; `sroa,early-cse[<memssa>]` on
+  tests/perf/compile 4/4. No tests/perf benchmark times early-cse alone.

@@ -12,7 +12,7 @@ knowledge_retention: struct {
 // the passes that honour -enable-knowledge-retention here (the others call salvageKnowledge in ways not ported)
 knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     if !knowledge_retention.enabled return;
-    if kind == .DSE || kind == .REQUIRE || kind == .INVALIDATE || kind == .NO_OP_FUNCTION || kind == .NO_OP_MODULE ||
+    if kind == .DSE || kind == .EARLY_CSE || kind == .REQUIRE || kind == .INVALIDATE || kind == .NO_OP_FUNCTION || kind == .NO_OP_MODULE ||
        kind == .MODULE_PM || kind == .FUNCTION_ADAPTOR || kind == .VERIFY_MEMORYSSA || kind == .PRINT_MEMORYSSA return;
     // IPO passes that never call salvageKnowledge (GlobalOpt.cpp, GlobalDCE.cpp, ConstantMerge.cpp, ...)
     if kind == .GLOBAL_OPT || kind == .GLOBAL_DCE || kind == .CONSTANT_MERGE || kind == .STRIP_DEAD_PROTOTYPES ||
@@ -97,6 +97,7 @@ strip_pointer_casts_one_step_in_bounds :: (v: Value_Id) -> Value_Id {
 
 Assume_Builder :: struct {
     inst_being_modified: Value_Id = NONE;
+    ac: *Assumption_Cache;     // salvageKnowledge(I, AC, DT = nullptr): tryToPreserveWithoutAddingAssume
     keys: [..] Ab_Knowledge;   // SmallMapVector<(WasOn, Kind), ArgValue>: insertion order
 }
 
@@ -132,10 +133,58 @@ ab_is_knowledge_worth_preserving :: (b: *Assume_Builder, rk: Ab_Knowledge) -> bo
 ab_add_knowledge :: (b: *Assume_Builder, rk_in: Ab_Knowledge) {
     rk := ab_canonicalized_knowledge(rk_in);
     if !ab_is_knowledge_worth_preserving(b, rk) return;
-    // tryToPreserveWithoutAddingAssume: no AssumptionCache here
+    if ab_try_to_preserve_without_adding_assume(b, rk) return;
     for * b.keys if it.was_on == rk.was_on && it.kind == rk.kind { it.arg = max(it.arg, rk.arg); return; }
     array_add(*b.keys, rk);
 }
+// getKnowledgeFromBundle(Assume, BOI)
+ab_knowledge_from_bundle :: (assume: Value_Id, k: u32) -> Ab_Knowledge {
+    rk: Ab_Knowledge;
+    rk.kind = attr_kind_from_name(call_bundle_tag(assume, k));
+    begin := ir.u32_pool[inst(assume).idx + 3 * k + 1];
+    end := ir.u32_pool[inst(assume).idx + 3 * k + 2];
+    if end > begin rk.was_on = op(assume, begin);
+    arg_or :: (assume: Value_Id, begin: u32, end: u32, idx: u32, default: u64) -> u64 {
+        c := op(assume, begin + 1 + idx);
+        if vkind(c) == .C_INT && !is_vector_type(vtype(c)) return ap_zext_value(const_ap(c));
+        return default;
+    }
+    if end - begin > 1 {
+        if rk.kind == {
+            case .Alignment; rk.arg = arg_or(assume, begin, end, 0, 1);
+            case .Dereferenceable; #through;
+            case .DereferenceableOrNull; rk.arg = arg_or(assume, begin, end, 0, 0);
+            case .NONE_ATTR; rk.arg = 0;
+            case; fatal("internal: assume bundle '%' has an argument", call_bundle_tag(assume, k));
+        }
+    }
+    if rk.kind == .Alignment && end - begin > 2 {
+        a := rk.arg | arg_or(assume, begin, end, 1, 1);
+        rk.arg = a & (~a + 1);   // MinAlign
+    }
+    return rk;
+}
+
+// tryToPreserveWithoutAddingAssume (getKnowledgeForValue over AC.assumptionsFor(WasOn), DT = nullptr)
+ab_try_to_preserve_without_adding_assume :: (b: *Assume_Builder, rk: Ab_Knowledge) -> bool {
+    if b.inst_being_modified == NONE || rk.was_on == NONE || !b.ac return false;
+    for e: ac_assumptions_for(b.ac, rk.was_on) {
+        if vkind(e.assume) == .DEAD || e.index == AC_EXPR_RESULT_IDX continue;
+        other := ab_knowledge_from_bundle(e.assume, e.index);
+        if other.kind == .NONE_ATTR continue;   // RetainedKnowledge's operator bool
+        if rk.was_on != other.was_on continue;
+        if other.kind != rk.kind continue;
+        if !is_valid_assume_for_context(e.assume, b.inst_being_modified, null) continue;
+        if other.arg >= rk.arg return true;
+        if is_valid_assume_for_context(b.inst_being_modified, e.assume, null) {
+            begin := ir.u32_pool[inst(e.assume).idx + 3 * e.index + 1];
+            set_op(e.assume, begin + 1, const_int(ir.t_i64, rk.arg));   // ABA_Argument
+            return true;
+        }
+    }
+    return false;
+}
+
 ab_add_attribute :: (b: *Assume_Builder, a: Attr, was_on: Value_Id) {
     if a.kind == .STRING_ATTR || a.ty != NONE || !ab_is_usefull_to_preserve(a.kind) return;
     arg: u64 = ifx ab_is_int_attr_kind(a.kind) then a.ival else 0;
@@ -201,13 +250,14 @@ ab_build :: (b: *Assume_Builder) -> Value_Id {
     return i;
 }
 
-// salvageKnowledge(I, AC = nullptr, DT = nullptr)
-salvage_knowledge :: (i: Value_Id) -> bool {
+// salvageKnowledge(I, AC, DT = nullptr); AC may be null
+salvage_knowledge :: (i: Value_Id, ac: *Assumption_Cache = null) -> bool {
     if !knowledge_retention.enabled || is_terminator(inst_op(i)) return false;
-    b: Assume_Builder; b.inst_being_modified = i; b.keys.allocator = temp;
+    b: Assume_Builder; b.inst_being_modified = i; b.keys.allocator = temp; b.ac = ac;
     ab_add_instruction(*b, i);
     a := ab_build(*b);
     if a == NONE return false;
     insert_at_position(a, inst_block(i), i, false);
+    if ac ac_register_assumption(ac, a);
     return true;
 }

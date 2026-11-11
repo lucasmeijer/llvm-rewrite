@@ -87,6 +87,7 @@ src/
   memdep.jai      MemoryDependenceAnalysis (md_*: local/non-local deps, caches, removeInstruction)
   vn_coercion.jai VNCoercion (vnc_*)
   pass_gvn.jai    GVN (gvn_*: ValueTable, LeaderMap, load elimination with MemDep or MemorySSA, load/scalar PRE)
+  pass_early_cse.jai  EarlyCSE (`Early_Cse`, ec_*: the five ScopedHashTables in one bucket store, ParseMemoryInst)
   value_lattice.jai   ValueLatticeElement (`Vle`, vle_*)
   lazy_value_info.jai LazyValueInfo (`*Lvi`, lvi_*: block-value cache, solver, edge values, query API, printer)
   pass_cvp.jai    CorrelatedValuePropagation (cvp_*)
