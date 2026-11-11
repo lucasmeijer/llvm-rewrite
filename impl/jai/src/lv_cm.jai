@@ -1,12 +1,8 @@
 // LoopVectorizationCostModel: per-VF widening decisions, uniforms, scalars, predication queries.
 // Ported from llvm/lib/Transforms/Vectorize/LoopVectorize.cpp (LoopVectorizationCostModel) (LLVM 23.1.5).
-//
-// Costs: a decision's cost is only needed by the cost model (cost(), selectInterleaveCount). With the target
-// models ported so far (NoTTI and X86 without gather/scatter or interleave groups) no decision compares costs of
-// valid alternatives, so decisions record LV_COST_LAZY and the cost model must compute them when it needs them.
+// The costs themselves (getInstructionCost and friends) are in lv_cost.jai.
 
 Lv_Widening :: enum u8 { UNKNOWN; WIDEN; WIDEN_REVERSE; INTERLEAVE; GATHER_SCATTER; SCALARIZE; INVALIDATED; }
-LV_COST_LAZY :: -0x7FFF_FFFF;
 
 Lv_Decision :: struct { w: Lv_Widening; cost: s64; }
 
@@ -16,7 +12,9 @@ Lv_Cm_Vf :: struct {
     scalars: Iset;
     forced_scalars: [..] Value_Id;
     insts_to_scalarize: [..] Value_Id;         // MapVector keys of InstsToScalarize[VF]
-    predicated_bbs: Iset;
+    insts_to_scalarize_cost: [..] Cost;        // ... and their scalar costs
+    predicated_bbs: Iset;                      // PredicatedBBsAfterVectorization[VF]
+    scalars_done: bool;                        // Scalars.contains(VF)
 }
 
 lv_cm_vf_state :: (cm: *Lv_Cm, vf: Ec, create := false) -> *Lv_Cm_Vf {
@@ -24,7 +22,7 @@ lv_cm_vf_state :: (cm: *Lv_Cm, vf: Ec, create := false) -> *Lv_Cm_Vf {
     if !create return null;
     s: Lv_Cm_Vf;
     s.vf = vf; s.uniforms = iset_new(); s.scalars = iset_new(); s.predicated_bbs = iset_new();
-    s.forced_scalars.allocator = temp; s.insts_to_scalarize.allocator = temp;
+    s.forced_scalars.allocator = temp; s.insts_to_scalarize.allocator = temp; s.insts_to_scalarize_cost.allocator = temp;
     array_add(*cm.per_vf, s);
     return *cm.per_vf[cm.per_vf.count - 1];
 }
@@ -93,9 +91,8 @@ lv_cm_is_scalar_with_predication :: (cm: *Lv_Cm, i: Value_Id, vf: Ec) -> bool {
             cons := lvl_is_consecutive_ptr(cm.lvl, load_store_type(i), load_store_pointer_operand(i)) != 0;
             return !(cons && lv_is_legal_masked_load_or_store(cm, i, vf)) && !lv_is_legal_gather_or_scatter(cm, i, vf);
         case .UDIV; #through; case .SDIV; #through; case .SREM; #through; case .UREM;
-            if lv_opts.force_masked_divrem.set return lv_opts.force_masked_divrem.v == 0;
-            vp_unported("the div/rem speculation cost (getDivRemSpeculationCost)");
-            return true;
+            sc, mc := lv_cm_div_rem_speculation_cost(cm, i, vf);
+            return lv_cm_is_div_rem_scalar_with_predication(sc, mc);
     }
     return true;
 }
@@ -133,21 +130,24 @@ lv_cm_set_cost_based_widening_decision :: (cm: *Lv_Cm, vf: Ec) {
         ptr := load_store_pointer_operand(i);
         if ptr == NONE continue;
         if lv_cm_is_uniform_mem_op(cm, i, vf) {
-            // GatherScatterCost < ScalarizationCost needs a valid gather/scatter cost
-            if lv_is_legal_gather_or_scatter(cm, i, vf) vp_unported("gather/scatter costs (getGatherScatterCost)");
-            if vf.scalable vp_unported("scalable VFs");
-            lv_cm_set_widening_decision(cm, i, vf, .SCALARIZE, LV_COST_LAZY);
+            legal_to_scalarize := !vf.scalable || !lv_cm_fold_tail_by_masking(cm) || inst_op(i) == .LOAD || li_is_loop_invariant(cm.li, cm.l, op(i, 0));
+            gs := ifx lv_is_legal_gather_or_scatter(cm, i, vf) then lv_cm_gather_scatter_cost(cm, i, vf) else COST_INVALID;
+            sc := ifx legal_to_scalarize then lv_cm_uniform_mem_op_cost(cm, i, vf) else COST_INVALID;
+            if gs < sc lv_cm_set_widening_decision(cm, i, vf, .GATHER_SCATTER, gs);
+            else lv_cm_set_widening_decision(cm, i, vf, .SCALARIZE, sc);
             continue;
         }
         ok, dec := lv_cm_memory_instruction_can_be_widened(cm, i, vf);
-        if ok { lv_cm_set_widening_decision(cm, i, vf, dec, LV_COST_LAZY); continue; }
-        // interleave groups: none (InterleavedAccessInfo is not ported; processLoop fails when it would run)
-        if lv_is_legal_gather_or_scatter(cm, i, vf) vp_unported("gather/scatter costs (getGatherScatterCost)");
-        lv_cm_set_widening_decision(cm, i, vf, .SCALARIZE, LV_COST_LAZY);
+        if ok { lv_cm_set_widening_decision(cm, i, vf, dec, lv_cm_consecutive_mem_op_cost(cm, i, vf, dec)); continue; }
+        // interleave groups: processLoop fails loudly when InterleavedAccessInfo forms any group
+        num_accesses: s64 = 1;
+        gs := ifx lv_is_legal_gather_or_scatter(cm, i, vf) then lc_mul(lv_cm_gather_scatter_cost(cm, i, vf), num_accesses) else COST_INVALID;
+        sc := lc_mul(lv_cm_mem_inst_scalarization_cost(cm, i, vf), num_accesses);
+        if gs < sc lv_cm_set_widening_decision(cm, i, vf, .GATHER_SCATTER, gs);
+        else lv_cm_set_widening_decision(cm, i, vf, .SCALARIZE, sc);
     }
     if lv_tti_prefers_vectorized_addressing(cm.tti) return;
-    // scalarize the address computations (the decisions' costs stay lazy: the cost model recomputes them)
-    addr_defs: [..] Value_Id; addr_defs.allocator = temp;
+    addr_defs: [..] Value_Id; addr_defs.allocator = temp;   // SmallSetVector
     add_def :: (s: *[..] Value_Id, v: Value_Id) -> bool { if array_find(s.*, v) return false; array_add(s, v); return true; }
     for bb: li_blocks(cm.li, cm.l) for i: block_insts(bb) {
         pd := load_store_pointer_operand(i);
@@ -164,13 +164,23 @@ lv_cm_set_cost_based_widening_decision :: (cm: *Lv_Cm, vf: Ec) {
             if is_inst(o) && li_contains_inst(cm.li, cm.l, o) && inst_op(o) != .PHI && add_def(*addr_defs, o) array_add(*wl, o);
         }
     }
+    update_mem_op_user_cost :: (cm: *Lv_Cm, li_: Value_Id, vf: Ec) {
+        u := ir.v_first_use[li_];
+        while u != NONE {
+            usr := ir.u_user[u];
+            u = ir.u_next[u];
+            if inst_op(usr) != .LOAD && inst_op(usr) != .STORE continue;
+            if lv_cm_widening_decision(cm, usr, vf) != .SCALARIZE continue;
+            lv_cm_set_widening_decision(cm, usr, vf, .SCALARIZE, lv_cm_mem_inst_scalarization_cost(cm, usr, vf));
+        }
+    }
     st := lv_cm_vf_state(cm, vf);
     for i: addr_defs {
         if inst_op(i) == .LOAD {
             dec := lv_cm_widening_decision(cm, i, vf);
             if !lv_cm_is_predicated_inst(cm, i) && (dec == .WIDEN || dec == .WIDEN_REVERSE || (!lv_cm_is_uniform_mem_op(cm, i, vf) && dec == .SCALARIZE)) {
-                lv_cm_set_widening_decision(cm, i, vf, .SCALARIZE, LV_COST_LAZY);
-                // UpdateMemOpUserCost: only costs change
+                lv_cm_set_widening_decision(cm, i, vf, .SCALARIZE, lc_mul(lv_cm_memory_instruction_cost(cm, i, ec_fixed(1)), cast(s64) vf.n));
+                update_mem_op_user_cost(cm, i, vf);
             }
             // interleave groups fail loudly before the cost model runs
             continue;
@@ -374,21 +384,13 @@ lv_cm_collect_loop_scalars :: (cm: *Lv_Cm, vf: Ec) {
         add(*wl, *inwl, upd);
     }
     for wl iset_insert(*st.scalars, it);
+    st.scalars_done = true;
 }
 // the members of a set in loop-instruction order (only membership is used afterwards)
 lv_iset_ordered :: (s: *Iset, cm: *Lv_Cm) -> [..] Value_Id {
     out: [..] Value_Id; out.allocator = temp;
     for bb: li_blocks(cm.li, cm.l) for i: block_insts(bb) if iset_has(s, i) array_add(*out, i);
     return out;
-}
-
-// collectInstsToScalarize
-lv_cm_collect_insts_to_scalarize :: (cm: *Lv_Cm, vf: Ec) {
-    st := lv_cm_vf_state(cm, vf, true);
-    for bb: li_blocks(cm.li, cm.l) {
-        if !lv_cm_block_needs_predication_for_any_reason(cm, bb) continue;
-        for i: block_insts(bb) if lv_cm_is_scalar_with_predication(cm, i, vf) vp_unported("scalarization of predicated instructions (collectInstsToScalarize)");
-    }
 }
 
 // collectNonVectorizedAndSetWideningDecisions
@@ -403,8 +405,8 @@ lv_cm_collect_non_vectorized_and_set_widening_decisions :: (cm: *Lv_Cm, vf: Ec) 
 }
 
 lv_cm_is_uniform_after_vectorization :: (cm: *Lv_Cm, i: Value_Id, vf: Ec) -> bool {
-    if ec_is_scalar(vf) return true;
     if call_iid(i) == IID_PSEUDOPROBE return false;
+    if ec_is_scalar(vf) return true;
     st := lv_cm_vf_state(cm, vf);
     return iset_has(*st.uniforms, i);
 }

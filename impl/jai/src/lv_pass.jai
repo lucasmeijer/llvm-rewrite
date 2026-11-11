@@ -286,6 +286,10 @@ Lv_Cm :: struct {
     per_vf: [..] Lv_Cm_Vf;                     // Uniforms / Scalars / ForcedScalars / InstsToScalarize per VF
     decisions: Table(u64, Lv_Decision);        // WideningDecisions
     num_pred_stores: s64;
+    cost_kind: s64;                            // VFSelectionContext::CostKind
+    bfi: *Bfi;                                 // getBFI() (computed on first use)
+    min_bws: *Table(Value_Id, u64);            // VFSelectionContext::MinBWs (computeMinimalBitwidths)
+    has_in_loop_reductions: bool;              // !Config.getInLoopReductions().empty()
 }
 
 // requiresScalarEpilogue
@@ -670,6 +674,7 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
     cm.values_to_ignore = iset_new(); cm.vec_values_to_ignore = iset_new(); cm.element_types.allocator = temp;
     cm.per_vf.allocator = temp; cm.decisions.allocator = temp;
     cm.sel = lv_get_epilogue_lowering(f, *hints, opt_for_size);
+    cm.cost_kind = ifx fn_has_fn_attr(f, .MinSize) then TCK_CODE_SIZE else TCK_RECIP_THROUGHPUT;
     known, etc := lv_small_best_known_tc(*cm, l);
     if known && !etc.scalable && etc.n < cast(u64) lv_opts.tiny_trip_count_threshold {
         if lvh_force(*hints) != FK_ENABLED && cm.sel != .NOT_NEEDED_FOLD_TAIL cm.sel = .NOT_ALLOWED_LOW_TRIP_LOOP;
@@ -693,27 +698,20 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
     }
     if max_factors.scalable.n lv_unported("scalable vectorization");
     max_user_vf := ifx user_vf.scalable then max_factors.scalable else max_factors.fixed;
-    if (user_vf.n && ec_known_le(user_vf, max_user_vf) && !ec_is_scalar(user_vf)) || ec_is_vector(max_factors.fixed) {
-        lp: Lv_Planner;
-        lp.p = p; lp.l = l; lp.li = p.li; lp.lvl = *lvl; lp.cm = *cm; lp.hints = *hints; lp.pse = *pse;
-        lp.vplans.allocator = temp; lp.in_loop_reductions.allocator = temp;
-        lvp_collect_in_loop_reductions(*lp);
-        return lvp_plan_and_vectorize(*lp, user_vf, user_ic, max_factors);
-    }
-    // Only VF 1 is a candidate. LLVM builds a scalar VPlan; computeBestVF returns VF 1 without costing, and
-    // selectInterleaveCount clamps the interleave count by TTI.getMaxInterleaveFactor(VF=1), which is 1 for X86 and
-    // NoTTI. So the loop is neither vectorized nor interleaved unless the user asked for an interleave count.
-    if user_ic > 1 {
-        lp: Lv_Planner;
-        lp.p = p; lp.l = l; lp.li = p.li; lp.lvl = *lvl; lp.cm = *cm; lp.hints = *hints; lp.pse = *pse;
-        lp.vplans.allocator = temp; lp.in_loop_reductions.allocator = temp;
-        lvp_collect_in_loop_reductions(*lp);
-        return lvp_plan_scalar_and_interleave(*lp, user_vf, user_ic, max_factors);
-    }
-    if lv_opts.force_target_max_scalar_interleave.set && lv_opts.force_target_max_scalar_interleave.v > 1
-        lv_unported("-force-target-max-scalar-interleave (VPlan interleave-count selection)");
-    if lv_tti_max_interleave_factor(p.tti, ec_fixed(1), false) > 1 lv_unported("scalar interleaving (VPlan)");
-    return false;
+    // Only VF 1 is a candidate and the user did not ask for an interleave count: LLVM builds a scalar VPlan, and
+    // computeBestVF returns it without costing; selectInterleaveCount then clamps the count by
+    // TTI.getMaxInterleaveFactor(VF=1), which is 1 for X86 and NoTTI. So the loop is neither vectorized nor
+    // interleaved and building the plan would not change the IR.
+    only_scalar := !((user_vf.n && ec_known_le(user_vf, max_user_vf) && !ec_is_scalar(user_vf)) || ec_is_vector(max_factors.fixed));
+    if only_scalar && user_ic <= 1 && !(lv_opts.force_target_max_scalar_interleave.set && lv_opts.force_target_max_scalar_interleave.v > 1) &&
+       lv_tti_max_interleave_factor(p.tti, ec_fixed(1), false) <= 1
+        return false;
+    lp: Lv_Planner;
+    lp.p = p; lp.l = l; lp.li = p.li; lp.lvl = *lvl; lp.cm = *cm; lp.hints = *hints; lp.pse = *pse;
+    lp.vplans.allocator = temp; lp.in_loop_reductions.allocator = temp; lp.profitable_vfs.allocator = temp;
+    lvp_collect_in_loop_reductions(*lp);
+    cm.has_in_loop_reductions = lp.in_loop_reductions.count > 0;
+    return lvp_plan_and_vectorize(*lp, user_vf, user_ic, max_factors);
 }
 
 // LoopVectorizePass::run + runImpl

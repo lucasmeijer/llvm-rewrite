@@ -223,6 +223,8 @@
 #load "vplan_exec_transforms.jai";
 #load "vplan_execute.jai";
 #load "lv_execute.jai";
+#load "lv_cost.jai";
+#load "vplan_cost.jai";
 #load "lv_interleave.jai";
 
 main :: () { opt_main(); }

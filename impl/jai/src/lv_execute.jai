@@ -90,41 +90,58 @@ lv_rt_checks_create :: (c: *Lv_Rt_Checks, lp: *Lv_Planner, vf: Ec, ic: u64) {
 }
 
 // GeneratedRTChecks::getCost
-lv_rt_checks_get_cost :: (c: *Lv_Rt_Checks, lp: *Lv_Planner) -> Cost {
+lv_rt_checks_get_cost :: (c: *Lv_Rt_Checks, lp: *Lv_Planner) -> Lc {
     if c.cost_too_high return COST_INVALID;
     kind := ifx fn_has_min_size(lp.cm.f) then TCK_CODE_SIZE else TCK_RECIP_THROUGHPUT;
     t := lp.cm.tti;
     total: Cost = 0;
     if c.scev_block != NONE {
         term := block_terminator(c.scev_block);
-        for i: block_insts(c.scev_block) if i != term total = cost_add(total, tti_instruction_cost(t, i, kind));
+        for i: block_insts(c.scev_block) if i != term total = lc_add(total, lt_instruction_cost(t, i, kind));
     }
     if c.mem_block != NONE {
         mc: Cost = 0;
         term := block_terminator(c.mem_block);
-        for i: block_insts(c.mem_block) if i != term mc = cost_add(mc, tti_instruction_cost(t, i, kind));
+        for i: block_insts(c.mem_block) if i != term mc = lc_add(mc, lt_instruction_cost(t, i, kind));
         if c.outer_loop != NONE {
             cond := sc_get_scev(c.mem_cond);
             if sc_is_loop_invariant(cond, c.outer_loop) {
                 best: u64 = 2;
                 ok, est := lv_small_best_known_tc(lp.cm, c.outer_loop, false);
                 if ok && !est.scalable best = est.n;
-                if cost_valid(mc) mc = max(mc / cast(s64) best, 1);
+                if cost_valid(mc) mc = lcv(max(lc_value(lc_div(mc, best)), 1));
             }
         }
-        total = cost_add(total, mc);
+        total = lc_add(total, mc);
     }
     return total;
 }
 
-// isOutsideLoopWorkProfitable (the paths that do not need the VPlan cost of the vector loop)
-lv_is_outside_loop_work_profitable :: (c: *Lv_Rt_Checks, lp: *Lv_Planner, vf: Ec, scalar_cost: Cost) -> bool {
+// isOutsideLoopWorkProfitable
+lv_is_outside_loop_work_profitable :: (c: *Lv_Rt_Checks, lp: *Lv_Planner, vf: *Lv_Vf, plan: *Vp_Plan) -> bool {
     rtc := lv_rt_checks_get_cost(c, lp);
     if !cost_valid(rtc) return false;
-    if ec_is_scalar(vf) return rtc <= lv_opts.memory_check_threshold;
-    if scalar_cost == 0 return true;
-    vp_unported("isOutsideLoopWorkProfitable with the VPlan cost model (minimum profitable trip count)");
-    return false;
+    if ec_is_scalar(vf.width) return rtc <= lcv(lv_opts.memory_check_threshold);
+    scalar_c := lc_value(vf.scalar_cost);
+    if scalar_c == 0 return true;
+    vp_use(plan);
+    ctx: Vp_Cost_Ctx;
+    vpc_init(*ctx, lp);
+    total := rtc;
+    for ex: vpl.exit_blocks for p: vb(ex).preds if p != vp_middle_block() total = lc_add(total, vp_basic_block_cost(*ctx, p, vf.width));
+    total = lc_add(total, vp_basic_block_cost(*ctx, vp_middle_block(), vf.width));
+    int_vf := cast(u64) vf.width.n;
+    // uint64_t arithmetic, like LLVM's
+    div := cast(u64) scalar_c * int_vf - cast(u64) lc_value(vf.cost);
+    min_tc1: u64 = ifx div == 0 then 0 else (cast(u64) lc_value(total) * int_vf + div - 1) / div;
+    min_tc2 := (cast(u64) lc_value(rtc) * 10 + cast(u64) scalar_c - 1) / cast(u64) scalar_c;
+    min_tc := max(min_tc1, min_tc2);
+    if lp.cm.sel == .ALLOWED min_tc = (min_tc + int_vf - 1) / int_vf * int_vf;
+    vf.min_profitable_tc = ec_fixed(min_tc);
+    lv_dbg("LV: Minimum required TC for runtime checks to be profitable:%\n", min_tc);
+    known, etc := lv_small_best_known_tc(lp.cm, lp.l);
+    if known && ec_known_lt(etc, vf.min_profitable_tc) return false;
+    return true;
 }
 
 // ~GeneratedRTChecks: remove the check blocks and instructions when they ended up unused
@@ -194,60 +211,48 @@ lv_add_diff_runtime_checks :: (loc: Value_Id, checks: [] Rt_Diff_Check, x: *Scev
     return mem_check;
 }
 
-// LoopVectorizationPlanner::selectInterleaveCount up to the point where the target's maximum interleave factor
-// decides (the register-usage and loop-cost heuristics are not ported)
-lvp_select_interleave_count :: (lp: *Lv_Planner, vf: Ec) -> u64 {
-    cm := lp.cm;
-    if cm.sel != .ALLOWED return 1;   // !isEpilogueAllowed() && !(preferTailFoldedLoop && useWideActiveLaneMask)
-    header := vp_entry_basic_block(vp_vector_loop_region());
-    for vp_block_phis(header) if vr(it).kind == .CURRENT_ITERATION_PHI return 1;
-    if !lvl_is_safe_for_any_vector_width(lp.lvl) return 1;
-    if vp_has_early_exit() return 1;
-    has_rdx := false; has_ordered := false;
-    for vp_block_phis(header) if vr(it).kind == .REDUCTION_PHI { has_rdx = true; if vr(it).rdx_style == .ORDERED has_ordered = true; }
-    for vp_block_phis(header) if vr(it).kind == .REDUCTION_PHI && rk_is_find_last(vr(it).rdx_kind) return 1;
-    max_ic := lv_tti_max_interleave_factor(cm.tti, vf, has_rdx && !has_ordered);
-    if ec_is_scalar(vf) { if lv_opts.force_target_max_scalar_interleave.set max_ic = cast(u64) lv_opts.force_target_max_scalar_interleave.v; }
-    else if lv_opts.force_target_max_vector_interleave.set max_ic = cast(u64) lv_opts.force_target_max_vector_interleave.v;
-    // With a maximum of 1 every remaining path of the heuristic returns 1 (the loop cost only matters to decide
-    // between larger counts).
-    if max_ic <= 1 return 1;
-    vp_unported("choosing the interleave count with the VPlan cost model (selectInterleaveCount)");
-    return 1;
-}
-
 // LoopVectorizationPlanner::requiresScalarEpilogue (VPlan-based, before removeBranchOnConst)
 lvp_requires_scalar_epilogue :: () -> bool { return vp_single_succ(vp_middle_block()) == vp_scalar_preheader(); }
 
-// the rest of processLoop for a chosen plan
-lvp_vectorize_with_plan :: (lp: *Lv_Planner, plan: *Vp_Plan, vf: Ec, user_ic: u64) -> bool {
-    vp_use(plan);
-    vp_print_plan("chosen");
+// the rest of processLoop after computeBestVF
+lvp_process_best_plan :: (lp: *Lv_Planner, vf_in: Lv_Vf, plan: *Vp_Plan, user_ic: u64) -> bool {
+    vf := vf_in;
     ic: u64 = 1;
-    // selectInterleaveCount is only needed when the user did not force the count, or for the runtime checks
-    needs_ic := user_ic == 0 || !sc_union_is_always_true(lp.pse.preds) || lp.lvl.laa.rt.need;
-    if needs_ic ic = lvp_select_interleave_count(lp, vf);
-    selected_ic := max(ic, user_ic);
     checks: Lv_Rt_Checks;
-    if ec_is_vector(vf) || selected_ic > 1 {
-        lv_rt_checks_create(*checks, lp, vf, selected_ic);
-        sc := lv_rt_scev_checks(*checks);
-        mc := lv_rt_mem_checks(*checks);
-        if sc != NONE && vkind(sc) == .C_INT && const_int_zext(sc) == 1 { lv_rt_checks_destroy(*checks); return false; }
-        if mc != NONE && vkind(mc) == .C_INT && const_int_zext(mc) == 1 { lv_rt_checks_destroy(*checks); return false; }
+    if plan {
+        vp_use(plan);
+        vp_print_plan("chosen");
+        ic = lvp_select_interleave_count(lp, plan, vf.width, vf.cost);
+        vp_use(plan);
+        selected_ic := max(ic, user_ic);
+        if ec_is_vector(vf.width) || selected_ic > 1 {
+            lv_rt_checks_create(*checks, lp, vf.width, selected_ic);
+            sc := lv_rt_scev_checks(*checks);
+            mc := lv_rt_mem_checks(*checks);
+            if sc != NONE && vkind(sc) == .C_INT && const_int_zext(sc) == 1 { lv_rt_checks_destroy(*checks); return false; }
+            if mc != NONE && vkind(mc) == .C_INT && const_int_zext(mc) == 1 { lv_rt_checks_destroy(*checks); return false; }
+        }
+        force := lvh_force(lp.hints) == FK_ENABLED;
+        if !force && !lv_is_outside_loop_work_profitable(*checks, lp, *vf, plan) { lv_rt_checks_destroy(*checks); return false; }
+        vp_use(plan);
     }
-    force := lvh_force(lp.hints) == FK_ENABLED;
-    // the plan was chosen for the user VF (or is the only, scalar, plan): computeBestVF's scalar cost is 0
-    if !force && !lv_is_outside_loop_work_profitable(*checks, lp, vf, 0) { lv_rt_checks_destroy(*checks); return false; }
+    vectorize_loop := !ec_is_scalar(vf.width);
+    interleave_loop := true;
+    if user_ic == 1 && lvh_interleave(lp.hints) > 1 interleave_loop = false;
+    else if !plan && user_ic > 1 interleave_loop = false;
+    else if ic == 1 && user_ic <= 1 interleave_loop = false;
+    else if ic > 1 && user_ic == 1 interleave_loop = false;
+    // histograms are not supported (legality)
     ic = ifx user_ic > 0 then user_ic else ic;
-    if lvl_has_uncountable_exit_with_side_effects(lp.lvl) && ic > 1 ic = 1;
-    // selectBestEpiloguePlan
-    if lvp_select_best_epilogue_plan(lp, vf, ic) vp_unported("epilogue vectorization");
+    if interleave_loop && lvl_has_uncountable_exit_with_side_effects(lp.lvl) { interleave_loop = false; ic = 1; }
+    if !vectorize_loop && !interleave_loop { lv_rt_checks_destroy(*checks); return false; }
+    lv_dbg("LV: Vectorizing with VF % and IC %\n", lv_ec_str(vf.width), ic);
+    if lvp_select_best_epilogue_plan(lp, vf.width, ic) vp_unported("epilogue vectorization");
     latch := li_loop_latch(lp.li, lp.l);
     has_bw := prof_has_branch_weight_md(block_terminator(latch));
-    lvp_add_minimum_iteration_check(lp, vf, cast(u32) ic, ec_fixed(0), has_bw);
+    lvp_add_minimum_iteration_check(lp, vf.width, cast(u32) ic, vf.min_profitable_tc, has_bw);
     lvp_attach_runtime_checks(lp, *checks, has_bw);
-    lvp_execute_plan(lp, vf, cast(u32) ic, *checks);
+    lvp_execute_plan(lp, vf.width, cast(u32) ic, *checks);
     lv_rt_checks_destroy(*checks);
     return true;
 }

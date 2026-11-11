@@ -11,6 +11,7 @@ Lv_Planner :: struct {
     pse: *Pse;
     vplans: [..] *Vp_Plan;
     in_loop_reductions: [..] Value_Id;
+    profitable_vfs: [..] Lv_Vf;               // ProfitableVFs
 }
 
 // LoopVectorizationPlanner::tryToBuildVPlan1
@@ -751,7 +752,8 @@ lvp_build_vplans :: (lp: *Lv_Planner, vplan1: *Vp_Plan, min_vf: Ec, max_vf: Ec) 
 }
 // VFSelectionContext::computeMinimalBitwidths (computeMinimumValueSizes): only the empty result is ported
 lvp_minimal_bitwidths :: (lp: *Lv_Planner) -> *Table(Value_Id, u64) {
-    return lv_compute_minimum_value_sizes(li_blocks(lp.li, lp.l), lp.p.db, lp.cm.tti);
+    if !lp.cm.min_bws lp.cm.min_bws = lv_compute_minimum_value_sizes(li_blocks(lp.li, lp.l), lp.p.db, lp.cm.tti);
+    return lp.cm.min_bws;
 }
 
 // llvm::computeMinimumValueSizes (VectorUtils.cpp)
@@ -888,43 +890,39 @@ lv_tti_is_type_legal :: (t: *Tti, ty: Type_Id) -> bool {
     return tti_is_type_legal(t, ty);
 }
 
-// the vector part of LoopVectorizationPlanner::plan and the rest of processLoop (the VPlan path)
+// LoopVectorizationPlanner::plan (the part after computeMaxVF), followed by computeBestVF and the rest of
+// processLoop
 lvp_plan_and_vectorize :: (lp: *Lv_Planner, user_vf: Ec, user_ic: u64, max_factors: Vf_Pair) -> bool {
-    if ec_is_vector(max_factors.fixed) lvl_collect_unit_stride_predicates(lp.lvl);
-    vplan1 := lvp_try_to_build_vplan1(lp);
-    if lv_cm_block_needs_predication_for_any_reason(lp.cm, li_header(lp.li, lp.l)) && lv_tti_enable_interleaved_access_vectorization(lp.cm.tti)
-        vp_unported("invalidating interleave groups for tail folding");
-    if lv_cm_fold_tail_by_masking(lp.cm) lvl_prepare_to_fold_tail_by_masking(lp.lvl);
-    max_user_vf := ifx user_vf.scalable then max_factors.scalable else max_factors.fixed;
-    if user_vf.n && ec_known_le(user_vf, max_user_vf) {
-        lv_cm_collect_non_vectorized_and_set_widening_decisions(lp.cm, user_vf);
-        if lv_opts.epilogue_force_vf.set && lv_opts.epilogue_force_vf.v > 1 vp_unported("-epilogue-vectorization-force-VF");
-        if vplan1 lvp_build_vplans(lp, vplan1, user_vf, user_vf);
-        if lp.vplans.count && ec_eq(vp_plan_single_vf(lp.vplans[lp.vplans.count - 1]), user_vf) {
-            // cost(*VPlans.back(), UserVF).isValid(): the VPlan cost model is not ported; fixed-VF costs of the ported
-            // recipes are always valid
-            return lvp_vectorize_with_plan(lp, lp.vplans[lp.vplans.count - 1], user_vf, user_ic);
-        }
-        vp_unported("UserVF ignored because of invalid costs");
-    }
-    vp_unported("choosing the VF with the VPlan cost model (computeBestVF)");
-    return false;
-}
-// LoopVectorizationPlanner::plan when VF 1 is the only candidate (or the user VF), followed by computeBestVF (a
-// single scalar plan) and the rest of processLoop: the loop is only interleaved
-lvp_plan_scalar_and_interleave :: (lp: *Lv_Planner, user_vf: Ec, user_ic: u64, max_factors: Vf_Pair) -> bool {
     if ec_is_vector(max_factors.fixed) || ec_is_vector(max_factors.scalable) lvl_collect_unit_stride_predicates(lp.lvl);
     vplan1 := lvp_try_to_build_vplan1(lp);
-    if !vplan1 return false;
-    if lv_cm_block_needs_predication_for_any_reason(lp.cm, li_header(lp.li, lp.l)) && lv_tti_enable_interleaved_access_vectorization(lp.cm.tti)
-        vp_unported("invalidating interleave groups for tail folding");
-    if lv_cm_fold_tail_by_masking(lp.cm) lvl_prepare_to_fold_tail_by_masking(lp.lvl);
-    one := ec_fixed(1);
-    lvp_build_vplans(lp, vplan1, one, max_factors.fixed);
-    if max_factors.scalable.n lvp_build_vplans(lp, vplan1, ec_scalable(1), max_factors.scalable);
-    if lp.vplans.count == 0 return false;
-    assert(lp.vplans.count == 1 && vp_plan_single_vf(lp.vplans[0]).n == 1, "expected a single scalar plan");
-    return lvp_vectorize_with_plan(lp, lp.vplans[0], one, user_ic);
+    if vplan1 {
+        lp.cm.min_bws = lv_compute_minimum_value_sizes(li_blocks(lp.li, lp.l), lp.p.db, lp.cm.tti);
+        if lv_cm_block_needs_predication_for_any_reason(lp.cm, li_header(lp.li, lp.l)) && lv_tti_enable_interleaved_access_vectorization(lp.cm.tti)
+            vp_unported("invalidating interleave groups for tail folding");
+        if lv_cm_fold_tail_by_masking(lp.cm) lvl_prepare_to_fold_tail_by_masking(lp.lvl);
+        max_user_vf := ifx user_vf.scalable then max_factors.scalable else max_factors.fixed;
+        done := false;
+        if user_vf.n && ec_known_le(user_vf, max_user_vf) {
+            lv_cm_collect_non_vectorized_and_set_widening_decisions(lp.cm, user_vf);
+            if lv_opts.epilogue_force_vf.set && lv_opts.epilogue_force_vf.v > 1 vp_unported("-epilogue-vectorization-force-VF");
+            lvp_build_vplans(lp, vplan1, user_vf, user_vf);
+            if lp.vplans.count && ec_eq(vp_plan_single_vf(lp.vplans[lp.vplans.count - 1]), user_vf) {
+                if ec_is_scalar(user_vf) || cost_valid(lvp_cost(lp, lp.vplans[lp.vplans.count - 1], user_vf, null)) done = true;
+            }
+            if !done {
+                lp.vplans.count = 0;
+                lv_dbg("LV: UserVF ignored because of invalid costs.\n");
+            }
+        }
+        if !done {
+            if max_factors.scalable.n vp_unported("scalable vectorization");
+            vf := ec_fixed(1);
+            while ec_known_le(vf, max_factors.fixed) { lv_cm_collect_non_vectorized_and_set_widening_decisions(lp.cm, vf); vf.n *= 2; }
+            lvp_build_vplans(lp, vplan1, ec_fixed(1), max_factors.fixed);
+        }
+    }
+    best, plan := lvp_compute_best_vf(lp);
+    return lvp_process_best_plan(lp, best, plan, user_ic);
 }
 vp_plan_single_vf :: (p: *Vp_Plan) -> Ec { assert(p.vfs.count == 1); return p.vfs[0]; }
 
