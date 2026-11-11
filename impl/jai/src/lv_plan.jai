@@ -245,7 +245,22 @@ lvp_make_mem_op_widening_decisions :: (lp: *Lv_Planner, range: *Vf_Range) {
         array_add(*remaining2, vpi);
     }
     mem_ops = remaining2;
-    if !lv_tti_prefers_vectorized_addressing(lp.cm.tti) vp_unported("makeVPlanMemOpDecision");
+    if !lv_tti_prefers_vectorized_addressing(lp.cm.tti) {
+        // makeVPlanMemOpDecision: scalarize unpredicated loads used as addresses
+        rem: [..] Vp_Rec; rem.allocator = temp;
+        for vpi: mem_ops {
+            i := vp_underlying_instr(vpi);
+            if lv_cm_is_predicated_inst(lp.cm, i) || vr(vpi).opcode != vp_opc(.LOAD) || !vp_is_used_by_load_store_address(vr(vpi).def) {
+                array_add(*rem, vpi);
+                continue;
+            }
+            ptr := vp_op(vpi, 0);
+            ps := vp_scev_for_value(ptr, lp.pse, lp.l);
+            single := !sc_is_cnc(ps) && sc_is_loop_invariant(ps, lp.l);
+            replace_with(vpi, vp_new_replicate(i, .[ptr], single, NONE, vr(vpi).flags, vr(vpi).md, vr(vpi).dl));
+        }
+        mem_ops = rem;
+    }
     // widenConsecutiveMemOps
     remaining3: [..] Vp_Rec; remaining3.allocator = temp;
     for vpi: mem_ops {
@@ -274,6 +289,49 @@ lvp_make_mem_op_widening_decisions :: (lp: *Lv_Planner, range: *Vf_Range) {
         if r != NONE replace_with(vpi, r);
         else replace_with(vpi, lvp_handle_replication(lp, vpi, range));
     }
+}
+
+// vputils::isUsedByLoadStoreAddress
+vp_is_used_by_load_store_address :: (v: Vp_Val) -> bool {
+    seen: [..] Vp_Val; seen.allocator = temp;
+    wl: [..] Vp_Val; wl.allocator = temp;
+    array_add(*wl, v);
+    is_mem_with_addr :: (u: Vp_Rec, cur: Vp_Val) -> bool {
+        k := vr(u).kind;
+        if k == .INTERLEAVE || k == .INTERLEAVE_EVL return vp_op(u, 0) == cur;
+        ok, o := vpm_opcode(u);
+        if ok && o == vp_opc(.LOAD) && vpm_arity_ok(u, 1) && vp_op(u, 0) == cur return true;
+        if ok && o == vp_opc(.STORE) && vpm_arity_ok(u, 2) && vp_op(u, 1) == cur return true;
+        if vp_is_widen_memory_kind(k) && vp_op(u, 0) == cur && vr(u).consecutive return true;
+        return false;
+    }
+    while wl.count {
+        cur := pop(*wl);
+        if array_find(seen, cur) continue;
+        array_add(*seen, cur);
+        cr := vp_def(cur);
+        is_blend := cr != NONE && vr(cr).kind == .BLEND;
+        if is_blend {
+            any := false;
+            for i: 0..vp_blend_num_incoming(cr)-1 if array_find(seen, vp_blend_incoming(cr, i)) { any = true; break; }
+            if !any continue;
+        }
+        for u: vv(cur).users if is_mem_with_addr(u, cur) return true;
+        if is_blend continue;
+        for u: vv(cur).users {
+            if vr(u).kind == .INSTRUCTION {
+                m := vp_mask_of(u);
+                if m == cur {
+                    used := false;
+                    for k: 0..vpm_num_ops_without_mask(u)-1 if vp_op(u, k) == cur { used = true; break; }
+                    if !used continue;
+                }
+                if vr(u).opcode == vp_opc(.LOAD) continue;
+            }
+            if vp_is_single_def_kind(vr(u).kind) array_add(*wl, vr(u).def);
+        }
+    }
+    return false;
 }
 
 // VPlanTransforms::makeScalarizationDecisions

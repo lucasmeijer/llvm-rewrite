@@ -66,16 +66,19 @@ lv_cm_is_predicated_inst :: (cm: *Lv_Cm, i: Value_Id) -> bool {
 lv_is_legal_masked_load_or_store :: (cm: *Lv_Cm, i: Value_Id, vf: Ec) -> bool {
     if lv_opts.force_target_supports_masked_memory_ops return true;
     if cm.tti.kind != .X86 return false;
-    vp_unported("X86 isLegalMaskedLoad/Store");
-    return false;
+    ty := load_store_type(i);
+    if inst_op(i) == .LOAD return x86_is_legal_masked_load(*cm.tti.xl, ty);
+    return x86_is_legal_masked_store(*cm.tti.xl, ty);
 }
 lv_is_legal_gather_or_scatter :: (cm: *Lv_Cm, i: Value_Id, vf: Ec) -> bool {
     o := inst_op(i);
     if o != .LOAD && o != .STORE return false;
     if lv_opts.force_target_supports_gather_scatter_ops return true;
     if cm.tti.kind != .X86 return false;
-    vp_unported("X86 isLegalMaskedGather/Scatter");
-    return false;
+    ty := load_store_type(i);
+    if ec_is_vector(vf) ty = type_vector(vf.n, ty, vf.scalable);
+    if o == .LOAD return x86_is_legal_masked_gather(*cm.tti.xl, ty);
+    return x86_is_legal_masked_scatter(*cm.tti.xl, ty);
 }
 
 // isScalarWithPredication
@@ -143,13 +146,43 @@ lv_cm_set_cost_based_widening_decision :: (cm: *Lv_Cm, vf: Ec) {
         lv_cm_set_widening_decision(cm, i, vf, .SCALARIZE, LV_COST_LAZY);
     }
     if lv_tti_prefers_vectorized_addressing(cm.tti) return;
-    vp_unported("prefersVectorizedAddressing() == false (address computation scalarization)");
+    // scalarize the address computations (the decisions' costs stay lazy: the cost model recomputes them)
+    addr_defs: [..] Value_Id; addr_defs.allocator = temp;
+    add_def :: (s: *[..] Value_Id, v: Value_Id) -> bool { if array_find(s.*, v) return false; array_add(s, v); return true; }
+    for bb: li_blocks(cm.li, cm.l) for i: block_insts(bb) {
+        pd := load_store_pointer_operand(i);
+        if pd == NONE || !is_inst(pd) || !li_contains_inst(cm.li, cm.l, pd) continue;
+        if lv_cm_widening_decision(cm, i, vf) == .GATHER_SCATTER continue;
+        add_def(*addr_defs, pd);
+    }
+    wl: [..] Value_Id; wl.allocator = temp;
+    for addr_defs array_add(*wl, it);
+    while wl.count {
+        i := pop(*wl);
+        for k: 0..cast(s64) nops(i) - 1 {
+            o := op(i, cast(u32) k);
+            if is_inst(o) && li_contains_inst(cm.li, cm.l, o) && inst_op(o) != .PHI && add_def(*addr_defs, o) array_add(*wl, o);
+        }
+    }
+    st := lv_cm_vf_state(cm, vf);
+    for i: addr_defs {
+        if inst_op(i) == .LOAD {
+            dec := lv_cm_widening_decision(cm, i, vf);
+            if !lv_cm_is_predicated_inst(cm, i) && (dec == .WIDEN || dec == .WIDEN_REVERSE || (!lv_cm_is_uniform_mem_op(cm, i, vf) && dec == .SCALARIZE)) {
+                lv_cm_set_widening_decision(cm, i, vf, .SCALARIZE, LV_COST_LAZY);
+                // UpdateMemOpUserCost: only costs change
+            }
+            // interleave groups fail loudly before the cost model runs
+            continue;
+        }
+        if inst_op(i) == .PHI && lvl_is_fixed_order_recurrence(cm.lvl, i) continue;
+        if !array_find(st.forced_scalars, i) array_add(*st.forced_scalars, i);
+    }
 }
 // TTI::prefersVectorizedAddressing: true for NoTTI; X86 returns supportsGather()
 lv_tti_prefers_vectorized_addressing :: (t: *Tti) -> bool {
     if t.kind != .X86 return true;
-    vp_unported("X86TTIImpl::prefersVectorizedAddressing");
-    return true;
+    return x86_supports_gather(*t.xl);
 }
 
 // collectLoopUniforms

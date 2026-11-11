@@ -7,7 +7,7 @@ vp_metadata_to_propagate :: (i: Value_Id) -> [..] Vp_Md {
     out: [..] Vp_Md; out.allocator = temp;
     all: [..] Kind_Md; all.allocator = temp;
     get_all_metadata(i, *all);
-    supported :: string.["tbaa", "alias.scope", "noalias", "fpmath", "nontemporal", "invariant.load", "access_group", "mmra"];
+    supported :: string.["tbaa", "alias.scope", "noalias", "fpmath", "nontemporal", "invariant.load", "llvm.access.group", "mmra"];
     for all {
         if it.kind == MDK_DBG continue;
         ok := false;
