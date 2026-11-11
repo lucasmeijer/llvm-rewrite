@@ -116,6 +116,15 @@ src/
   evaluator.jai, pass_global_opt.jai, pass_global_dce.jai, pass_constant_merge.jai, pass_internalize.jai,
   pass_strip_dead_prototypes.jai, pass_elim_avail_extern.jai, pass_assign_guid.jai, md5.jai   IPO module passes
   pass_dead_arg_elim.jai, pass_arg_promotion.jai   DeadArgumentElimination (module), ArgumentPromotion (CGSCC)
+  pass_lower_expect.jai, pass_lower_constant_intrinsics.jai, pass_infer_alignment.jai, pass_div_rem_pairs.jai,
+  pass_float2int.jai, pass_sink.jai, pass_tailcallelim.jai, pass_mldst_motion.jai, pass_speculative_execution.jai,
+  pass_callsite_splitting.jai (L1.scalar-misc; their cl::opts: scalar_misc_cl.jai), and the small -O2 passes:
+  pass_loop_sink.jai, pass_transform_warning.jai, pass_drop_unnecessary_assumes.jai, pass_jump_table_to_switch.jai,
+  pass_move_auto_init.jai, pass_alignment_from_assumptions.jai, pass_libcalls_shrinkwrap.jai,
+  pass_called_value_propagation.jai (+ its SparseSolver), pass_rel_lookup_table_converter.jai, pass_cg_profile.jai,
+  pass_ee_instrument.jai, pass_inject_tli_mappings.jai, pass_misc_module.jai (forceattrs, memprof-remove-attributes,
+  recompute-globalsaa, lower-comment-string, alloc-token), pass_remark_only.jai, pass_coroutines.jai,
+  pass_openmp_opt.jai (early exits)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 
