@@ -1,0 +1,64 @@
+# Skipped while importing llvm/test/Transforms/Util (llvmorg-23.1.5)
+
+39 of 69 files imported. Regenerate with `./harness/run import-llvm Transforms/Util`.
+
+- `loc-only-original-mode.ll` RUN `opt < %s -passes=deadargelim -verify-each-debuginfo-preserve -debugify-level=locations -S 2>&1 | FileCheck %s`: diagnostic output flag -debugify-level=locations
+- `loc-only-original-mode.ll` RUN `opt < %s -passes=deadargelim -verify-each-debuginfo-preserve -debugify-level=location+variables -S 2>&1 | FileCheck %s --check-prefix=CHECK-DROP`: diagnostic output flag -debugify-level=location+variables
+- `loc-only-original-mode.ll` RUN `opt < %s -passes=deadargelim -verify-each-debuginfo-preserve -debugify-func-limit=0 -S 2>&1 | FileCheck %s`: diagnostic output flag -debugify-func-limit=0
+- `loc-only-original-mode.ll` RUN `opt < %s -passes=deadargelim -verify-each-debuginfo-preserve -debugify-func-limit=2 -S 2>&1 | FileCheck %s --check-prefix=CHECK-DROP`: diagnostic output flag -debugify-func-limit=2
+- `loc-only.ll` RUN `opt -passes=debugify -debugify-level=locations -S < %s | FileCheck --check-prefixes=ALL --implicit-check-not=dbg_value %s`: diagnostic output flag -debugify-level=locations
+- `aix.ll`: REQUIRES webassembly-registered-target
+- `armpl.ll`: REQUIRES aarch64-registered-target
+- `codegen-opt-flags.ll`: REQUIRES arm-registered-target
+- `darwin.ll`: REQUIRES aarch64-registered-target, arm-registered-target
+- `emscripten.ll`: REQUIRES webassembly-registered-target
+- `sincos_stret.ll` RUN `%if x86-registered-target %{ opt -S -passes=declare-runtime-libcalls -mtriple=x86_64-apple-macos10.9 < %s | FileCheck -check-prefixes=CHECK,X64 %s %}`: not an opt invocation
+- `sincos_stret.ll` RUN `%if aarch64-registered-target %{ opt -S -passes=declare-runtime-libcalls -mtriple=arm64-apple-macos10.9 < %s | FileCheck -check-prefixes=CHECK,STRUCT %s %}`: not an opt invocation
+- `sincos_stret.ll` RUN `%if arm-registered-target %{ opt -S -passes=declare-runtime-libcalls -mtriple=thumbv7k-apple-watchos2.0 < %s | FileCheck -check-prefixes=CHECK,STRUCT %s %}`: not an opt invocation
+- `sincos_stret.ll` RUN `%if arm-registered-target %{ opt -S -passes=declare-runtime-libcalls -mtriple=armv7-apple-ios7 < %s | FileCheck -check-prefix=SRET %s %}`: not an opt invocation
+- `sincos_stret.ll` RUN `%if arm-registered-target %{ opt -S -passes=declare-runtime-libcalls -mtriple=thumbv7-apple-ios7 < %s | FileCheck -check-prefix=SRET %s %}`: not an opt invocation
+- `sincos_stret.ll` RUN `%if arm-registered-target %{ opt -S -passes=declare-runtime-libcalls -mtriple=armv7-apple-ios6 < %s | FileCheck -check-prefix=NONE %s %}`: not an opt invocation
+- `sincos_stret.ll` RUN `%if x86-registered-target %{ opt -S -passes=declare-runtime-libcalls -mtriple=x86_64-apple-macos10.8 < %s | FileCheck -check-prefix=NONE %s %}`: not an opt invocation
+- `sleef.ll`: REQUIRES aarch64-registered-target
+- `xcore.ll`: REQUIRES webassembly-registered-target
+- `assume-operand-bundles.ll` RUN `opt -S -passes='print<predicate-info>' %s 2>&1 >/dev/null | FileCheck %s`: redirects or chains commands
+- `branch-on-same-cond.ll` RUN `opt -S -passes='print<predicate-info>' < %s 2>&1 >/dev/null | FileCheck %s`: redirects or chains commands
+- `ordering.ll`: REQUIRES asserts
+- `add-TLI-mappings.ll` RUN `opt -mtriple=powerpc64-unknown-linux-gnu -vector-library=MASSV -passes=inject-tli-mappings -S < %s | FileCheck %s  --check-prefixes=COMMON,MASSV`: non-x86_64 target powerpc64-unknown-linux-gnu
+- `add-TLI-mappings.ll` RUN `opt -mtriple=aarch64-unknown-linux-gnu -vector-library=LIBMVEC -passes=inject-tli-mappings -S < %s | FileCheck %s  --check-prefixes=COMMON,LIBMVEC-AARCH64`: non-x86_64 target aarch64-unknown-linux-gnu
+- `add-TLI-mappings.ll` RUN `opt -mtriple=aarch64-unknown-linux-gnu -vector-library=sleefgnuabi -passes=inject-tli-mappings -S < %s | FileCheck %s  --check-prefixes=COMMON,SLEEFGNUABI`: non-x86_64 target aarch64-unknown-linux-gnu
+- `add-TLI-mappings.ll` RUN `opt -mtriple=riscv64-unknown-linux-gnu -vector-library=sleefgnuabi -passes=inject-tli-mappings -S < %s | FileCheck %s  --check-prefixes=COMMON,SLEEFGNUABI_RISCV`: non-x86_64 target riscv64-unknown-linux-gnu
+- `add-TLI-mappings.ll` RUN `opt -mtriple=aarch64-unknown-linux-gnu -vector-library=ArmPL -passes=inject-tli-mappings -S < %s | FileCheck %s  --check-prefixes=COMMON,ARMPL`: non-x86_64 target aarch64-unknown-linux-gnu
+- `annotation-remarks-dbg-info.ll` RUN `opt -passes='annotation-remarks' -pass-remarks-missed='annotation-remarks' -disable-output -pass-remarks-output=%t.opt.yaml %s`: diagnostic output flag -pass-remarks-missed=annotation-remarks
+- `annotation-remarks-dbg-info.ll` RUN `FileCheck --input-file=%t.opt.yaml %s`: not an opt invocation
+- `annotation-remarks.ll` RUN `opt -passes='annotation-remarks' -pass-remarks-missed='annotation-remarks' -disable-output -pass-remarks-output=%t.opt.yaml %s`: diagnostic output flag -pass-remarks-missed=annotation-remarks
+- `annotation-remarks.ll` RUN `FileCheck --input-file=%t.opt.yaml %s`: not an opt invocation
+- `annotation2metadata.ll` RUN `opt -passes='annotation2metadata' -pass-remarks-analysis='annotation-remarks' -S %s | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=annotation-remarks
+- `assume-builder-counter.ll` RUN `opt -passes='assume-builder,verify' --enable-knowledge-retention --debug-counter=assume-builder-counter=5 -S %s | FileCheck %s --check-prefixes=COUNTER1`: diagnostic output flag --debug-counter=assume-builder-counter=5
+- `assume-builder-counter.ll` RUN `opt -passes='assume-builder,verify' --enable-knowledge-retention --debug-counter=assume-builder-counter=1-3 -S %s | FileCheck %s --check-prefixes=COUNTER2`: diagnostic output flag --debug-counter=assume-builder-counter=1-3
+- `assume-builder-counter.ll` RUN `opt -passes='assume-builder,verify' --enable-knowledge-retention --debug-counter=assume-builder-counter=2-202 -S %s | FileCheck %s --check-prefixes=COUNTER3`: diagnostic output flag --debug-counter=assume-builder-counter=2-202
+- `call-promotion-utils-ptrcast-attribute.ll` RUN `opt -S -passes=pgo-icall-prom -icp-total-percent-threshold=0 < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `call-promotion-utils-ptrcast.ll` RUN `opt -S -passes=pgo-icall-prom -icp-total-percent-threshold=0 -icp-max-prom=4 < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `libcalls-opt-remarks.ll` RUN `opt < %s -passes=instcombine -o /dev/null  -pass-remarks-output=%t -S -pass-remarks=instcombine 2>&1 | FileCheck %s`: writes to a file
+- `libcalls-opt-remarks.ll` RUN `cat %t | FileCheck -check-prefix=YAML %s`: not an opt invocation
+- `libcalls-opt-remarks.ll` RUN `opt < %s -passes='require<opt-remark-emit>,instcombine' -o /dev/null -pass-remarks-output=%t -S -pass-remarks=instcombine 2>&1 | FileCheck %s`: writes to a file
+- `libcalls-opt-remarks.ll` RUN `cat %t | FileCheck -check-prefix=YAML %s`: not an opt invocation
+- `local-dbg-print.ll`: REQUIRES asserts
+- `nofpclass.ll` RUN `opt -S -passes=pgo-icall-prom -icp-total-percent-threshold=0 < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `pr49185.ll`: REQUIRES asserts
+- `simplify-dbg-declare-load.ll`: XFAIL in LLVM
+- `strip-nonlinetable-debuginfo-containingtypes.ll` RUN `opt -S -passes=strip-nonlinetable-debuginfo %s -o %t.ll`: writes to a file
+- `strip-nonlinetable-debuginfo-containingtypes.ll` RUN `cat %t.ll | FileCheck %s`: not an opt invocation
+- `strip-nonlinetable-debuginfo-containingtypes.ll` RUN `cat %t.ll | FileCheck %s --check-prefix=CHECK-NEG`: not an opt invocation
+- `strip-nonlinetable-debuginfo-heapallocsite.ll` RUN `opt -S -strip-debug %s -o - |  FileCheck %s`: no -passes / -O pipeline
+- `strip-nonlinetable-debuginfo-loops.ll` RUN `opt -S -passes=strip-nonlinetable-debuginfo %s -o %t`: writes to a file
+- `strip-nonlinetable-debuginfo-loops.ll` RUN `cat %t | FileCheck %s`: not an opt invocation
+- `strip-nonlinetable-debuginfo-loops.ll` RUN `cat %t | FileCheck %s --check-prefix=NEGATIVE`: not an opt invocation
+- `strip-nonlinetable-debuginfo-pr125116.ll` RUN `opt < %s -p=strip-nonlinetable-debuginfo -S | FileCheck %s`: no -passes / -O pipeline
+- `trivial-auto-var-init-call.ll` RUN `opt -passes=annotation-remarks -o /dev/null -S -pass-remarks-output=%t.opt.yaml %s -pass-remarks-missed=annotation-remarks 2>&1 | FileCheck %s`: writes to a file
+- `trivial-auto-var-init-call.ll` RUN `cat %t.opt.yaml | FileCheck -check-prefix=YAML %s`: not an opt invocation
+- `trivial-auto-var-init-crash-20210521.ll`: target triple arm64-apple-ios14.4.0
+- `trivial-auto-var-init-store.ll` RUN `opt -passes=annotation-remarks -o /dev/null -S -pass-remarks-output=%t.opt.yaml %s -pass-remarks-missed=annotation-remarks 2>&1 | FileCheck %s`: writes to a file
+- `trivial-auto-var-init-store.ll` RUN `cat %t.opt.yaml | FileCheck -check-prefix=YAML %s`: not an opt invocation
+- `trivial-auto-var-init-unknown.ll` RUN `opt -passes=annotation-remarks -o /dev/null -S -pass-remarks-output=%t.opt.yaml %s -pass-remarks-missed=annotation-remarks 2>&1 | FileCheck %s`: writes to a file
+- `trivial-auto-var-init-unknown.ll` RUN `cat %t.opt.yaml | FileCheck -check-prefix=YAML %s`: not an opt invocation
