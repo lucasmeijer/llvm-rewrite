@@ -117,6 +117,10 @@
 #load "vn_coercion.jai";
 #load "pass_gvn.jai";
 #load "pass_early_cse.jai";
+#load "predicate_info.jai";
+#load "sccp_solver.jai";
+#load "pass_sccp.jai";
+#load "function_specialization.jai";
 #load "globals_aa.jai";
 #load "loop_info.jai";
 #load "cycle_info.jai";

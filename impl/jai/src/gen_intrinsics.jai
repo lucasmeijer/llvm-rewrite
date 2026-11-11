@@ -2818,6 +2818,7 @@ INTRINSIC_ATTRS :: Intrinsic_Attrs.[
     .{"llvm.structured.gep", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
     .{"llvm.tan", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
     .{"llvm.tanh", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
+    .{"llvm.test.set.loop.iterations", "nocallback noduplicate nofree nosync nounwind willreturn", "", .[""]},
     .{"llvm.threadlocal.address", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "nonnull", .["nonnull"]},
     .{"llvm.trap", "cold noreturn nounwind memory(inaccessiblemem: write)", "", .[]},
     .{"llvm.trunc", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},

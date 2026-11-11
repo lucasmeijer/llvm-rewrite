@@ -311,6 +311,8 @@ Pass_Kind :: enum u8 {
     INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING; DROP_UNNECESSARY_ASSUMES; JUMP_TABLE_TO_SWITCH; MOVE_AUTO_INIT; ALIGNMENT_FROM_ASSUMPTIONS; LIBCALLS_SHRINKWRAP; CALLED_VALUE_PROPAGATION;
     // EarlyCSE (pass_early_cse.jai)
     EARLY_CSE;
+    // SCCP, IPSCCP (pass_sccp.jai)
+    SCCP; IPSCCP; PRINT_PREDICATE_INFO;
 }
 
 Pass_Info :: struct {
@@ -351,6 +353,9 @@ PASS_TABLE :: Pass_Info.[
     .{"gvn", .FUNCTION, .GVN, false, .DOMTREE},   // also gvn<...> (lookup_pass)
     .{"early-cse", .FUNCTION, .EARLY_CSE, false, .DOMTREE},
     .{"early-cse<memssa>", .FUNCTION, .EARLY_CSE, false, .DOMTREE},
+    .{"sccp", .FUNCTION, .SCCP, false, .DOMTREE},
+    .{"ipsccp", .MODULE, .IPSCCP, false, .DOMTREE},   // also ipsccp<[no-]func-spec>
+    .{"print<predicate-info>", .FUNCTION, .PRINT_PREDICATE_INFO, true, .DOMTREE},
     .{"dse", .FUNCTION, .DSE, false, .DOMTREE},
     .{"memcpyopt", .FUNCTION, .MEMCPYOPT, false, .DOMTREE},
     .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},
@@ -403,6 +408,8 @@ PASS_TABLE :: Pass_Info.[
     .{"invalidate<cycles>", .FUNCTION, .INVALIDATE, true, .CYCLES},
     // LoopVerifierPass / CycleInfoVerifierPass: assertions only in a release build (getResult and nothing else)
     .{"verify<loops>", .FUNCTION, .REQUIRE, true, .LOOPS},
+    // DominatorTreeVerifierPass: getResult and an assert(DT.verify())
+    .{"verify<domtree>", .FUNCTION, .REQUIRE, true, .DOMTREE},
     // TargetIRAnalysis / TargetLibraryAnalysis: no cached state here
     .{"require<target-ir>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     // AAManager: BasicAA requests the AssumptionCache, DominatorTree and TLI (no other state)
@@ -509,6 +516,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     for * pass_table if it.name == name return it;
     if begins_with(name, "instcombine<") return lookup_pass("instcombine");
     if begins_with(name, "gvn<") && name[name.count - 1] == #char ">" return lookup_pass("gvn");
+    if begins_with(name, "ipsccp<") && name[name.count - 1] == #char ">" return lookup_pass("ipsccp");
     if begins_with(name, "simplifycfg<") && name[name.count - 1] == #char ">" return lookup_pass("simplifycfg");
     // passes whose parameters are parsed by the pass itself (LOOP_PASS_WITH_PARAMS)
     if begins_with(name, "loop-rotate<") && name[name.count - 1] == #char ">" return lookup_pass("loop-rotate");
@@ -994,6 +1002,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if parse_replexitval(name, value, has_value) return true;   // pass_indvars.jai
     if reassociate_parse_cl_opt(name, value, has_value) return true;   // pass_reassociate.jai
     if early_cse_parse_cl_opt(name, value, has_value) return true;   // pass_early_cse.jai
+    if fs_parse_cl_opt(name, value, has_value) return true;   // function_specialization.jai
     if constraint_elimination_parse_cl_opt(name, value, has_value) return true;   // pass_constraint_elimination.jai
     if aggressive_instcombine_parse_cl_opt(name, value, has_value) return true;   // pass_aggressive_instcombine.jai
     if vector_combine_parse_cl_opt(name, value, has_value) return true;   // pass_vector_combine.jai
@@ -1127,6 +1136,7 @@ run_module_pm :: (n: s32) {
             case .CG_PROFILE; if should_run_pass(node, NONE) mam_invalidate(cg_profile_run());
             case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
             case .CALLED_VALUE_PROPAGATION; if should_run_pass(node, NONE) mam_invalidate(called_value_propagation_run());
+            case .IPSCCP; if should_run_pass(node, NONE) mam_invalidate(ipsccp_run(node.name));
             case; fatal("internal: '%' is not a module pass", node.name);
         }
         c = pipeline.nodes[c].next;
@@ -1233,6 +1243,8 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .SROA; return sroa_run(f, node.name);
         case .GVN; return gvn_run(f, node.name);
         case .EARLY_CSE; return early_cse_run(f, node.name);
+        case .SCCP; return sccp_run(f);
+        case .PRINT_PREDICATE_INFO; return print_predicate_info_run(f);
         case .INSTCOMBINE; return instcombine_run(f, node.name);
         case .REDUNDANT_DBG_INST_ELIM; return redundant_dbg_inst_elim_run(f);
         case .SIMPLIFYCFG; return simplifycfg_run(node, f);

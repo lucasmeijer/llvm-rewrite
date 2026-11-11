@@ -12,7 +12,7 @@ knowledge_retention: struct {
 // the passes that honour -enable-knowledge-retention here (the others call salvageKnowledge in ways not ported)
 knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     if !knowledge_retention.enabled return;
-    if kind == .DSE || kind == .EARLY_CSE || kind == .REQUIRE || kind == .INVALIDATE || kind == .NO_OP_FUNCTION || kind == .NO_OP_MODULE ||
+    if kind == .DSE || kind == .EARLY_CSE || kind == .SCCP || kind == .IPSCCP || kind == .REQUIRE || kind == .INVALIDATE || kind == .NO_OP_FUNCTION || kind == .NO_OP_MODULE ||
        kind == .MODULE_PM || kind == .FUNCTION_ADAPTOR || kind == .VERIFY_MEMORYSSA || kind == .PRINT_MEMORYSSA return;
     // IPO passes that never call salvageKnowledge (GlobalOpt.cpp, GlobalDCE.cpp, ConstantMerge.cpp, ...)
     if kind == .GLOBAL_OPT || kind == .GLOBAL_DCE || kind == .CONSTANT_MERGE || kind == .STRIP_DEAD_PROTOTYPES ||

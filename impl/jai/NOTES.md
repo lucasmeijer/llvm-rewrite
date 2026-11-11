@@ -1281,3 +1281,31 @@ Still slow / known:
   frexp ranges, ppc_fp128 folding, x86 hadd known bits, operand-bundle capture tracking), `--with-test-flags`
   10003/10113 (loud: other passes' options), `--per-function` 69904/70067; `sroa,early-cse[<memssa>]` on
   tests/perf/compile 4/4. No tests/perf benchmark times early-cse alone.
+
+## SCCP, IPSCCP, PredicateInfo, FunctionSpecialization (L1.sccp COMPLETE 340/340)
+
+- Files: `predicate_info.jai`, `sccp_solver.jai`, `pass_sccp.jai`, `function_specialization.jai` (DESIGN.md file map).
+  Also imported `tests/imported/llvm/Transforms/FunctionSpecialization` (59 files; 58/59 `::opt` pass, the other needs
+  `default<O3>`); `tests/imported/llvm/Transforms/Util/PredicateInfo` 8/8 `::analysis`.
+- Shared changes: `isa_constant_int` (value_lattice.jai): scalable int splats are C_INT here but a shufflevector
+  constant expression in LLVM, so ValueLatticeElement::markConstant must not treat them as ConstantInt (also affects
+  LVI); `change_to_unreachable` now moves the erased terminator's debug records onto the new `unreachable`
+  (flushTerminatorDbgRecords) instead of dropping them; `verify<domtree>` is a registered no-op requiring the DT;
+  `salvage_knowledge(i, ac)`; TTI: scalar `llvm.modf/sincos/sincospi` costs no longer fail (only struct-of-vector
+  results take getMultipleResultIntrinsicVectorLibCallCost).
+- Data layout: one `Sccp` per pass run. `lat: [..] Vle` holds every lattice value, `value_state` / `struct_state`
+  (key `v << 32 | i`) / tracked globals / return values hold indices, so references survive insertions (LLVM re-fetches
+  DenseMap references in the same places). Iteration orders: TrackedRetVals / TrackedMultipleRetVals MapVectors,
+  InstWorkList a SetVector popped from the back, AdditionalUsers a SetVector per value, SmallPtrSets in insertion order
+  (LLVM's are in small mode at the sizes that occur; where LLVM's order is pointer order and the result depends on
+  it, function specialization fails loudly: OriginalFuncs with more than 8 functions calling each other).
+- FunctionSpecialization: CloneFunction maps metadata like the MDNodeMapper under createIdentityMDPredicate
+  (distinct nodes reachable from the function are cloned, uniqued ones re-uniqued when an operand changed); the results
+  go into the Value_Map's MD map before RemapInstruction. `#dbg_assign` records and uniqued metadata cycles fail
+  loudly. The candidate selection uses libstdc++'s make_heap / push_heap / pop_heap (fs_make_heap & co.).
+- Sweeps (0 differs / 0 bad-ir; loud only ppc_fp128 folding, other passes' options): `sccp`, `ipsccp` whole-file
+  7823/7826, `--with-test-flags` ~10000/10113, `function(sroa),sccp|ipsccp` on tests/perf/compile 4/4,
+  `print<predicate-info>` 7825/7826 (pr12351 debug-info warning, the known diagnostic gap). FS stress:
+  `ipsccp --extra=-force-specialization` 7823/7826, `-funcspec-min-function-size=1` 7823/7826, perf/compile with
+  `-force-specialization` 2 identical / 2 loud (SmallPtrSet order).
+- Perf: no tests/perf benchmark times sccp/ipsccp alone.

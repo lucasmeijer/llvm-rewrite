@@ -68,3 +68,25 @@ Facts needed to reproduce `-passes=sccp` and `-passes=ipsccp` exactly. Sources:
   size: with `f16:32`, `getelementptr <2 x half>, ptr @g, i64 0, i64 1` is 2 bytes (InstCombine/getelementptr.ll).
 - `ConstantFoldLoadFromUniformValue` refuses constants whose size differs from their store size (an `i1 true`
   global loaded as `i8` is not folded; InstSimplify/ConstProp/loads.ll).
+
+## FunctionSpecialization (verified with tests/imported/llvm/Transforms/FunctionSpecialization, 58/59 for impl/jai,
+## and `ipsccp -force-specialization` / `-funcspec-min-function-size=1` sweeps over the corpus)
+- Clones are created by `CloneFunction` (appended at the end of the module's function list, first named like the
+  original - which bumps the symbol table's unique counter - then renamed `<name>.specialized.<N>` with N = number of
+  specializations so far + 1), internal linkage, all same-type bitcasts removed (also user-written ones), entry count 0
+  when the original has one. `CloneFunctionInto(LocalChangesOnly)` maps metadata with RF_None: the function's
+  DISubprogram, its scopes and local variables, loop IDs and other distinct nodes are cloned; compile units, other
+  subprograms, global variable expressions and non-local types map to themselves (createIdentityMDPredicate).
+- `CallBase::onlyReadsMemory(ArgNo)` is true for byval arguments and otherwise reads only the readonly/readnone
+  parameter attributes (no memory effects): promoteConstantStackValues promotes `alloca`s passed to byval parameters
+  (`PhaseOrdering/pr64289-tce.ll` under `ipsccp -force-specialization`).
+- InstCostVisitor's load and cast visitors fold `LastVisited->second` (the constant of the operand just propagated),
+  not the instruction's own operand; `KnownConstants.insert` keeps an existing entry, so LastVisited can carry an
+  older constant for the same value.
+- `OriginalFuncs` is a SmallPtrSet<Function *, 8>: with more than 8 functions specialized in one round its iteration
+  (updateCallSites, promoteConstantStackValues) is in pointer order. A function's call sites inside another original
+  function that updateCallSites marks dead are then counted or not depending on that order (seen on sqlite3 with
+  -force-specialization: LLVM deleted `codeReal`, insertion order keeps it).
+- The specialization budget picks NumCandidates * funcspec-max-clones specs with std::make_heap / push_heap /
+  pop_heap over the indices (CompareScore: score, then index); the creation order (and so the .specialized.N
+  names) is the order of the heap array.

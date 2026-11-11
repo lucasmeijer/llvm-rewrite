@@ -88,6 +88,11 @@ src/
   vn_coercion.jai VNCoercion (vnc_*)
   pass_gvn.jai    GVN (gvn_*: ValueTable, LeaderMap, load elimination with MemDep or MemorySSA, load/scalar PRE)
   pass_early_cse.jai  EarlyCSE (`Early_Cse`, ec_*: the five ScopedHashTables in one bucket store, ParseMemoryInst)
+  predicate_info.jai  PredicateInfo (`Predicate_Info`, pi_*: SSA copies as no-op bitcasts, getConstraint, print<predicate-info>)
+  sccp_solver.jai     SCCPSolver (`*Sccp`, sc_*: lattice values in `lat`, maps hold indices; the InstVisitor is a switch)
+  pass_sccp.jai       sccp / ipsccp drivers (runSCCP, runIPSCCP, findReturnsToZap, getExpressionForConstant)
+  function_specialization.jai  FunctionSpecializer + InstCostVisitor (`Func_Spec`, `Fs_Cost_Visitor`, fs_*), CloneFunction
+                      with a LocalChangesOnly MDNodeMapper (fs_map_md), libstdc++ heap algorithms for the spec selection
   value_lattice.jai   ValueLatticeElement (`Vle`, vle_*)
   lazy_value_info.jai LazyValueInfo (`*Lvi`, lvi_*: block-value cache, solver, edge values, query API, printer)
   pass_cvp.jai    CorrelatedValuePropagation (cvp_*)

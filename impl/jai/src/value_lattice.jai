@@ -18,6 +18,13 @@ Vle_Merge_Options :: struct {
     max_widen_steps: u32 = 1;
 }
 
+// isa<ConstantInt>(C): scalable int splats are C_INT here but a shufflevector constant expression in LLVM unless
+// -use-constant-int-for-scalable-splat (fixed-length vector C_INTs exist only with the fixed-length flag)
+isa_constant_int :: (c: Value_Id) -> bool {
+    if c == NONE || vkind(c) != .C_INT return false;
+    return !(type_kind(vtype(c)) == .SVECTOR && !opts.use_constant_int_for_scalable_splat);
+}
+
 vle_heap_copy :: (v: Vle) -> Vle {
     r := v;
     if v.tag == .CONSTANTRANGE || v.tag == .CONSTANTRANGE_INCLUDING_UNDEF {
@@ -58,7 +65,7 @@ vle_get_overdefined :: () -> Vle { r: Vle; r.tag = .OVERDEFINED; return r; }
 
 // asConstantInteger
 vle_as_constant_integer :: (v: Vle) -> (bool, APInt) {
-    if v.tag == .CONSTANT && vkind(v.c) == .C_INT return true, const_ap(v.c);
+    if v.tag == .CONSTANT && isa_constant_int(v.c) return true, const_ap(v.c);
     if vle_is_constant_range(v) {
         ok, e := cr_single_element(v.r);
         if ok return true, e;
@@ -95,7 +102,7 @@ vle_mark_constant :: (v: *Vle, c: Value_Id, may_include_undef := false) -> bool 
         assert(v.c == c, "Marking constant with different value");
         return false;
     }
-    if k == .C_INT {
+    if isa_constant_int(c) {
         o: Vle_Merge_Options; o.may_include_undef = may_include_undef;
         return vle_mark_constant_range(v, cr_single(const_ap(c)), o);
     }
@@ -106,7 +113,7 @@ vle_mark_constant :: (v: *Vle, c: Value_Id, may_include_undef := false) -> bool 
 }
 vle_mark_not_constant :: (v: *Vle, c: Value_Id) -> bool {
     k := vkind(c);
-    if k == .C_INT {
+    if isa_constant_int(c) {
         a := const_ap(c);
         return vle_mark_constant_range(v, cr_new(ap_add_u64(a, 1), a), .{});
     }

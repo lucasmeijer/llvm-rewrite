@@ -189,9 +189,12 @@ bt_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
         c = cost_add(c, bt_type_based_intrinsic_cost(t, *ra, kind));
         return cost_add(c, x86_arith_cost(t, .SUB, net, kind, OI_ANY, OI_ANY));
     }
-    if n == "llvm.modf" || n == "llvm.sincos" ||
-       n == "llvm.sincospi" || begins_with(n, "llvm.loop.dependence")
-        x86_np(tprint("getIntrinsicInstrCost of %", n));
+    // modf / sincos / sincospi: getMultipleResultIntrinsicVectorLibCallCost is nullopt unless the result is a
+    // struct of vectors (isVectorizedStructTy); scalar results fall through to the default cost
+    if n == "llvm.modf" || n == "llvm.sincos" || n == "llvm.sincospi" {
+        if type_kind(ret) == .STRUCT && type_nsub(ret) > 0 && is_vector_type(type_sub(ret, 0)) x86_np(tprint("getIntrinsicInstrCost of %", n));
+    }
+    if begins_with(n, "llvm.loop.dependence") x86_np(tprint("getIntrinsicInstrCost of %", n));
     scal := COST_INVALID;
     if ret_vector && type_kind(contained_types(ret)[0]) != .SVECTOR {
         scal = 0;

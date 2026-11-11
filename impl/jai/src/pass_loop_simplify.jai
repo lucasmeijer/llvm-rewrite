@@ -268,7 +268,8 @@ change_to_unreachable :: (i: Value_Id, preserve_lcssa: bool, mssau: *Mssa_Update
         nx := inst_next(x);
         if has_uses(x) rauw_with_metadata(x, const_poison(vtype(x)));
         if inst(x).records {
-            if nx == NONE { while inst(x).records dbgr_erase(inst(x).records); }   // trailing: flushTerminatorDbgRecords
+            // the terminator's records fall off the end; flushTerminatorDbgRecords moves them onto the new terminator
+            if nx == NONE { r := inst(x).records; inst(x).records = 0; attach_records_before(ui, r); }
         }
         erase_inst_with_metadata(x);
         removed += 1;
