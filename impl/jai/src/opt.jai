@@ -66,6 +66,7 @@
 #load "pass_rel_lookup_table_converter.jai";
 #load "pass_cg_profile.jai";
 #load "pass_move_auto_init.jai";
+#load "pass_alignment_from_assumptions.jai";
 #load "pass_reassociate.jai";
 #load "constraint_system.jai";
 #load "pass_constraint_elimination.jai";
