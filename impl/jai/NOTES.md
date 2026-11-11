@@ -1142,7 +1142,7 @@ Still slow / known:
 - Debugging: `JAI_VPLAN_DEBUG=1 bin/opt ...` dumps the plan at "chosen", after materializeFactors /
   expandSCEVsToVPInstructions / cse+simplify, and "execute" to stderr (an approximation of VPlan::print; LLVM's release
   opt cannot print plans, so only final IR can be compared).
-- Sweeps `--passes loop-vectorize` (plain 7185 identical / 569 loud; `--with-test-flags`; `--with-test-flags
+- Sweeps `--passes loop-vectorize` (plain 7279 identical / 547 loud; `--with-test-flags`; `--with-test-flags
   --per-function`): 0 differs, 0 bad-ir. `sroa,loop-vectorize` on tests/perf/compile/*: all 4 loud (cost model).
 - Decision costs are still LV_COST_LAZY (lv_cm.jai header) and the forced-VF path assumes `cost(Plan, UserVF)` is
   valid. selectInterleaveCount only returns 1 when the target's maximum interleave factor is 1 (NoTTI, X86 at VF 1);

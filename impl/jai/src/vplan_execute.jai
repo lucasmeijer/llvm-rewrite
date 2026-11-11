@@ -351,8 +351,17 @@ vs_create_min_max_op :: (s: *Vp_State, rk: Recur_Kind, l: Value_Id, r: Value_Id)
         set_name(c, "rdx.minmax");
         return c;
     }
-    vp_unported("FMin/FMax reduction parts (createMinMaxOp compare and select)");
-    return NONE;
+    pred: u8 = 0;
+    if rk == {
+        case .UMIN; pred = ICMP_ULT; case .UMAX; pred = ICMP_UGT; case .SMIN; pred = ICMP_SLT; case .SMAX; pred = ICMP_SGT;
+        case .FMIN; pred = FCMP_OLT; case .FMAX; pred = FCMP_OGT;
+        case; fatal("internal: unknown min/max recurrence kind");
+    }
+    c := vs_cmp(s, pred, l, r, "rdx.minmax.cmp");
+    sel := vs_select(s, c, l, r, s.fmf, "rdx.minmax.select");
+    ok_ec, ec := fn_entry_count(s.f);
+    if is_inst(sel) && inst_op(sel) == .SELECT && ok_ec vp_unported("setExplicitlyUnknownBranchWeightsIfProfiled on profiled functions");
+    return sel;
 }
 // createSimpleReduction (LoopUtils.cpp)
 vs_create_simple_reduction :: (s: *Vp_State, src: Value_Id, rk: Recur_Kind) -> Value_Id {

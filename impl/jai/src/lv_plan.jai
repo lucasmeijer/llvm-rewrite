@@ -468,7 +468,9 @@ lvp_add_reduction_result_computation :: (lp: *Lv_Planner, min_vf: Ec) {
         rd := lvl_find_reduction(lp.lvl, vp_underlying_instr(phir));
         phi_ty := vp_scalar_type(vr(phir).def);
         bd := vp_def(vp_op(phir, 1));
-        if bd != NONE && vr(bd).kind == .BLEND vp_unported("blend backedge values of reductions");
+        // a blend backedge value only becomes a select when its first mask is the header mask (tail folding)
+        if bd != NONE && vr(bd).kind == .BLEND && header_mask != NONE && vp_blend_num_incoming(bd) == 2 && vp_blend_mask(bd, 0) == header_mask
+            vp_unported("blend backedge values of tail-folded reductions");
         orig_exiting := vp_op(phir, 1);
         new_exiting := orig_exiting;
         if header_mask != NONE vp_unported("predicated reduction selects (usePredicatedReductionSelect)");
@@ -655,7 +657,14 @@ lvp_optimize_induction_live_out_users :: (lp: *Lv_Planner) {
                 step := vp_op(w, 1);
                 sty := vp_scalar_type(vr(w).def);
                 if type_kind(sty) == .INT esc = vr(vpb_sub(*b, end, step, NONE, "ind.escape")).def;
-                else vp_unported("pointer / FP induction escapes (ind.escape)");
+                else if type_kind(sty) == .PTR {
+                    neg := vpb_sub(*b, vp_zero(vp_scalar_type(step)), step);
+                    esc = vr(vpb_ptr_add(*b, end, vr(neg).def, NONE, "ind.escape")).def;
+                } else {
+                    bop := vpl.inds[vr(w).ind].bop;
+                    opc := ifx inst_op(bop) == .FADD then Opcode.FSUB else .FADD;
+                    esc = vr(vpb_nary(*b, vp_opc(opc), .[end, step], vpf_fmf(inst_fmf(bop)))).def;
+                }
             }
             vp_set_operand(r, idx, esc);
         }
