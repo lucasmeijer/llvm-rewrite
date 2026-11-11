@@ -20,6 +20,7 @@ import mem2reg;
 import sroa;
 import earlycse;
 import demandedbits;
+import tti;
 import analyses;
 import loopinfo;
 import cycleinfo;
@@ -151,6 +152,7 @@ let P_CVP = 181;
 let P_JUMP_THREADING = 182;  // arg: threshold + 1 (0 = default)
 let P_PRINT_BPI = 183;
 let P_PRINT_BFI = 184;
+let P_PRINT_COST_MODEL = 185;
 let P_VERIFY_SCEV = 119;
 // loop passes
 let P_PRINT_LOOPNEST = 200;
@@ -195,6 +197,7 @@ let PASS_TABLE: const u8[:][] = [
     "f:print<domtree>:103:1",
     "f:print<postdomtree>:104:1",
     "f:print<demanded-bits>:105:1",
+    "f:print<cost-model>:185:1",
     "f:no-op-function:108:0",
     "f:verify:109:1",
     "f:mem2reg:130:0",
@@ -1101,7 +1104,7 @@ fn pass_creates_subtarget(n: i32) -> bool {
         return a == A_MEMORYSSA || a == A_AA || a == A_SCEV || a == A_TARGET_IR;
     }
     return p == P_BDCE || p == P_MEM2REG || p == P_SROA || p == P_INSTSIMPLIFY || p == P_SIMPLIFYCFG ||
-        p == P_INSTCOMBINE || p == P_PRINT_DEMANDED_BITS || p == P_LOOP_SIMPLIFY || p == P_AA_EVAL ||
+        p == P_INSTCOMBINE || p == P_PRINT_DEMANDED_BITS || p == P_PRINT_COST_MODEL || p == P_LOOP_SIMPLIFY || p == P_AA_EVAL ||
         p == P_PRINT_MEMORYSSA || p == P_PRINT_MEMORYSSA_WALKER || p == P_VERIFY_MEMORYSSA || p == P_SCCP ||
         p == P_EARLY_CSE || p == P_VERIFY_SCEV || p == P_CVP || p == P_JUMP_THREADING || p == P_GVN || p == P_DSE || p == P_MEMCPYOPT ||
         p == P_CONSTRAINT_ELIMINATION || p == P_AGGRESSIVE_INSTCOMBINE || p == P_LOOP_UNROLL;
@@ -1123,6 +1126,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_PRINT_DOMTREE => { print_domtree(fv, DT_DOM); return PA_ALL; },
         P_PRINT_POSTDOMTREE => { print_domtree(fv, DT_POST); return PA_ALL; },
         P_PRINT_DEMANDED_BITS => { print_demanded_bits(fv); return PA_ALL; },
+        P_PRINT_COST_MODEL => { print_cost_model(fv); return PA_ALL; },
         P_REQUIRE => { require_analysis(fv, pnodes[n].arg as i64); return PA_ALL; },
         P_INVALIDATE => { return PA_ALL & ~((1 as u32) << pnodes[n].arg); },
         P_NOOP_FUNCTION, P_VERIFY_FUNCTION => { return PA_ALL; },

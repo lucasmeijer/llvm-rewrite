@@ -31,7 +31,7 @@ import loopsimplify;
 import tli;
 import tti;
 import tti_x86;
-import gen_x86costs;
+import gen_x86target;
 import instsimplify;
 import salvage;
 import simplify_libcalls;

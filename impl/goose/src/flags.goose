@@ -135,6 +135,7 @@ let KNOWN_FLAGS: const u8[:][] = [
     "simple-loop-unswitch-memoryssa-threshold", "freeze-loop-unswitch-cond",
     "simple-loop-unswitch-inject-invariant-conditions", "simple-loop-unswitch-inject-invariant-condition-hotness-threshold",
     "simple-loop-unswitch-estimate-profile",
+    "cost-kind", "intrinsic-cost-strategy",               // read by print<cost-model> (tti.goose)
     "costmodel-reduxcost",                               // no-op: declared but unused in TargetTransformInfo.cpp
     "disable-verify",                                    // no-op: opt only skips its own input/output verification
     "disable-loop-unrolling",                            // no-op for -passes= (PipelineTuningOptions of -O<n>)
