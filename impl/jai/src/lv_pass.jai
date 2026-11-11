@@ -252,11 +252,8 @@ lv_tti_enable_interleaved_access_vectorization :: (t: *Tti) -> bool {
     return !st_isAtom(*t.xl);
 }
 // TTI::enableMaskedInterleavedAccessVectorization
-lv_tti_enable_masked_interleaved_access_vectorization :: (t: *Tti) -> bool {
-    if t.kind != .X86 return false;
-    fatal("loop-vectorize: X86TTIImpl::enableMaskedInterleavedAccessVectorization is not ported yet");
-    return false;
-}
+// (X86TTIImpl does not override it: the base answer, false)
+lv_tti_enable_masked_interleaved_access_vectorization :: (t: *Tti) -> bool { return false; }
 // useMaskedInterleavedAccesses
 lv_use_masked_interleaved_accesses :: (t: *Tti) -> bool {
     if lv_opts.enable_masked_interleaved_mem_accesses.set return lv_opts.enable_masked_interleaved_mem_accesses.v != 0;
@@ -663,7 +660,10 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
     }
     use_interleaved := is_inner && lv_tti_enable_interleaved_access_vectorization(p.tti);
     if lv_opts.enable_interleaved_mem_accesses.set use_interleaved = is_inner && lv_opts.enable_interleaved_mem_accesses.v != 0;
-    if use_interleaved lv_unported("interleaved access analysis (InterleavedAccessInfo)");
+    iai: Iai;
+    iai_init(*iai, *pse, l, p.li, p.dt, lvl.laa, opt_for_size);
+    if use_interleaved iai_analyze_interleaving(*iai, lv_use_masked_interleaved_accesses(p.tti));
+    if iai_has_groups(*iai) lv_unported("interleave groups (InterleavedAccessInfo found candidate groups)");
     cm: Lv_Cm;
     cm.f = f; cm.l = l; cm.li = p.li; cm.pse = *pse; cm.tti = p.tti; cm.lvl = *lvl; cm.hints = *hints; cm.ac = p.ac;
     cm.opt_for_size = opt_for_size;
