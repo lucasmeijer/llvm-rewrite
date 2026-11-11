@@ -34,7 +34,7 @@ lvp_try_to_build_vplan1 :: (lp: *Lv_Planner) -> *Vp_Plan {
     if !vp_handle_early_exits(lvl_has_uncountable_early_exit(lvl)) return null;
     pi := lvl.primary_induction;
     vp_create_loop_regions(lv_debug_loc_from_inst_or_operands(pi));
-    if lv_cm_fold_tail_by_masking(lp.cm) vp_unported("tail folding by masking (foldTailByMasking)");
+    if lv_cm_fold_tail_by_masking(lp.cm) vp_fold_tail_by_masking();
     vp_introduce_masks_and_linearize();
     return plan;
 }
@@ -375,7 +375,12 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
     may_overflow := false;
     vf := range.start;
     while vf.n < range.end.n { may_overflow |= !lvp_is_indvar_overflow_check_known_false(lp, vf); vf.n *= 2; }
-    if may_overflow && lp.cm.tail_folding_style != .NONE vp_unported("clearing the canonical IV NUW flag (tail folding)");
+    if may_overflow && lp.cm.tail_folding_style != .NONE {
+        region := vp_vector_loop_region();
+        iv_inc := vp_op(vp_terminator(vp_exiting_basic_block(region)), 0);
+        vp_drop_poison_generating_flags(vp_def(iv_inc));
+        vb(region).can_iv_nuw = false;
+    }
     for lp.lvl.reductions if lv_use_ordered_reductions(lp.cm, *it.d) || lp.in_loop_reductions.count vp_unported("in-loop reductions");
     igs: [..] s32; igs.allocator = temp;
     for gid: lp.cm.iai.order {
@@ -477,11 +482,19 @@ lvp_add_reduction_result_computation :: (lp: *Lv_Planner, min_vf: Ec) {
         phi_ty := vp_scalar_type(vr(phir).def);
         bd := vp_def(vp_op(phir, 1));
         // a blend backedge value only becomes a select when its first mask is the header mask (tail folding)
-        if bd != NONE && vr(bd).kind == .BLEND && header_mask != NONE && vp_blend_num_incoming(bd) == 2 && vp_blend_mask(bd, 0) == header_mask
-            vp_unported("blend backedge values of tail-folded reductions");
+        if bd != NONE && vr(bd).kind == .BLEND && header_mask != NONE && vp_blend_num_incoming(bd) == 2 && vp_blend_mask(bd, 0) == header_mask {
+            sb := vpb_before(bd);
+            sel := vpb_select(*sb, vp_blend_mask(bd, 0), vp_blend_incoming(bd, 0), vp_blend_incoming(bd, 1), NONE, "", vr(bd).flags);
+            vp_rauw(vr(bd).def, vr(sel).def);
+            vp_erase_recipe(bd);
+        }
         orig_exiting := vp_op(phir, 1);
         new_exiting := orig_exiting;
-        if header_mask != NONE vp_unported("predicated reduction selects (usePredicatedReductionSelect)");
+        // usePredicatedReductionSelect: -prefer-predicated-reduction-select (TTI.preferPredicatedReductionSelect is false)
+        if !lv_opts.prefer_predicated_reduction_select && header_mask != NONE {
+            oks, c, t, f := vpm_select(vp_op(phir, 1));
+            if oks && c == header_mask && f == vr(phir).def vp_set_operand(phir, 1, t);
+        }
         exit_dl := inst_dl(block_terminator(li_loop_latch(lp.li, lp.l)));
         b := vpb_at(middle, ip);
         final: Vp_Val;
@@ -704,14 +717,20 @@ lvp_optimize_induction_live_out_users :: (lp: *Lv_Planner) {
         for p, idx: vb(eb).preds {
             if p != middle vp_unported("early-exit induction users (optimizeEarlyExitInductionUser)");
             o := vp_op(r, idx);
-            ok1, ell := vpm_vpi(o, VPI_EXTRACT_LAST_LANE, 1);
-            if !ok1 {
-                if vp_val_is_vpi(o, VPI_EXTRACT_LANE) vp_unported("tail-folded live-out induction users");
-                continue;
+            incoming: Vp_Val = NONE;
+            ell := vp_def(o);
+            ok1, _ := vpm_vpi(o, VPI_EXTRACT_LAST_LANE, 1);
+            if ok1 {
+                ok2, elp := vpm_vpi(vp_op(ell, 0), VPI_EXTRACT_LAST_PART, 1);
+                if ok2 incoming = vp_op(elp, 0);
             }
-            ok2, elp := vpm_vpi(vp_op(ell, 0), VPI_EXTRACT_LAST_PART, 1);
-            if !ok2 continue;
-            incoming := vp_op(elp, 0);
+            if incoming == NONE {
+                ok3, el := vpm_vpi(o, VPI_EXTRACT_LANE, 2);
+                if !ok3 continue;
+                ok4, lal := vpm_vpi(vp_op(el, 0), VPI_LAST_ACTIVE_LANE, 1);
+                if !ok4 || !vp_is_header_mask(vp_op(lal, 0)) continue;
+                incoming = vp_op(el, 1);
+            }
             w := vp_optimizable_iv_of(incoming, lp.pse);
             if w == NONE continue;
             _, end := table_find(*end_values, w);
@@ -752,7 +771,9 @@ lvp_build_vplans :: (lp: *Lv_Planner, vplan1: *Vp_Plan, min_vf: Ec, max_vf: Ec) 
         vp_optimize();
         if lp.cm.tail_folding_style == .DATA_WITH_EVL vp_unported("EVL tail folding");
         vp_check_narrow_interleave_groups(lp.cm.tti);
-        vp_materialize_header_mask(false, false);
+        st := lp.cm.tail_folding_style;
+        vp_materialize_header_mask(st == .DATA || st == .DATA_AND_CONTROL_FLOW || st == .DATA_AND_CONTROL_FLOW_WITHOUT_RUNTIME_CHECK,
+                                   st == .DATA_AND_CONTROL_FLOW || st == .DATA_AND_CONTROL_FLOW_WITHOUT_RUNTIME_CHECK);
         array_add(*lp.vplans, plan);
     }
 }

@@ -9,7 +9,7 @@
 // variable-length-step paths fail loudly (tail folding is not ported).
 
 // VPlanTransforms::replaceWideCanonicalIVWithWideIV
-vp_replace_wide_canonical_iv_with_wide_iv :: (vf: Ec, uf: u32) {
+vp_replace_wide_canonical_iv_with_wide_iv :: (vf: Ec, uf: u32, t: *Tti, kind: s64, values_to_ignore: *Iset) {
     region := vp_vector_loop_region();
     if region == NONE return;
     can_iv := vb(region).can_iv;
@@ -32,7 +32,26 @@ vp_replace_wide_canonical_iv_with_wide_iv :: (vf: Ec, uf: u32) {
         vp_erase_recipe(wide);
         return;
     }
-    vp_unported("introducing a wide canonical induction (replaceWideCanonicalIVWithWideIV costs)");
+    vec_ty := type_vector(vf.n, can_ty, vf.scalable);
+    bc := tti_shuffle_cost(t, SK_BROADCAST, vec_ty, vec_ty, .[], kind, 0, NONE, .[], NONE);
+    phic := tti_cf_cost(t, .PHI, kind);
+    if phic > bc return;
+    rus := vp_calculate_register_usage(.[vf], t, values_to_ignore);
+    base := *rus[0];
+    for * base.max_local_users it.n *= uf;
+    cls := tti_register_class_for_type(t, true, vec_ty);
+    projected: Vp_Reg_Usage;
+    projected.max_local_users.allocator = temp; projected.loop_invariant_regs.allocator = temp;
+    for base.max_local_users array_add(*projected.max_local_users, it);
+    rcc_get(*projected.max_local_users, cls).n += cast(u32) tti_reg_usage_for_type(t, vec_ty);
+    if vp_spill_cost(t, *projected) > vp_spill_cost(t, base) return;
+    ind := vp_add_ind(ind_canonical_int(can_ty));
+    nwiv := vp_new_widen_int_or_fp_induction(NONE, vp_zero(can_ty), vp_const_int(can_ty, 1), vpl.vf, ind,
+                                             vpf_wrap(vr(wide).flags.nuw, vr(wide).flags.nsw), vr(wide).dl);
+    header := vp_entry_basic_block(region);
+    vp_insert_recipe(nwiv, header, vp_first_non_phi(header));
+    vp_rauw(vr(wide).def, vr(nwiv).def);
+    vp_erase_recipe(wide);
 }
 
 // VPlanTransforms::materializePacksAndUnpacks
@@ -215,7 +234,15 @@ vp_optimize_vector_induction_width_for_tc_and_vf_uf :: (vf: Ec, uf: u32) -> bool
         if !okc || vpm_opcode_is_fcmp(su) || l != d continue;
         okb, bo := vpm_vpi(rr, VPI_BROADCAST, 1);
         if !okb || vpl.btc == NONE || vp_op(bo, 0) != vpl.btc continue;
-        vp_unported("narrowing the canonical wide IV (optimizeVectorInductionWidthForTCAndVFUF, tail folding)");
+        nw := vp_new_widen_int_or_fp_induction(vp_uv(d), vp_zero(new_ty), vp_const_int(new_ty, 1), vp_op(phi, 2), vr(phi).ind,
+                                               vr(phi).flags, vr(phi).dl);
+        vp_insert_before(nw, phi);
+        pb := vpb_at_end(vp_vector_preheader());
+        nbtc := vpb_widen_cast(*pb, .TRUNC, vp_or_create_backedge_taken_count(), new_ty);
+        cb := vpb_before(su);
+        nc := vpb_icmp(*cb, vr(su).flags.pred, vr(nw).def, vr(nbtc).def);
+        vp_rauw(vr(su).def, vr(nc).def);
+        changed = true;
     }
     return changed;
 }

@@ -564,17 +564,39 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
             sty := vp_scalar_type(vr(r).def);
             dty := type_vector(s.vf.n, sty, s.vf.scalable);
             gather := !vr(r).consecutive;
-            if gather || vr(r).masked vp_unported("executing masked loads / gathers");
+            mask: Value_Id = NONE;
+            if vr(r).masked mask = vs_get(s, vp_op(r, vp_nops(r) - 1));
             addr := vs_get(s, vp_op(r, 0), !gather);
-            ld := irb_load(*s.b, dty, addr, vr(r).align, false, "wide.load");
+            ld: Value_Id;
+            if gather {
+                if mask == NONE mask = const_all_ones_of(type_vector(s.vf.n, type_int(1), s.vf.scalable));
+                f := get_or_insert_intrinsic_declaration(iidn("llvm.masked.gather"), .[dty, vtype(addr)]);
+                ld = irb_call(*s.b, f, .[addr, mask, const_poison(dty)], "wide.masked.gather");
+                add_param_align(ld, 0, vr(r).align);
+            } else if mask != NONE {
+                f := get_or_insert_intrinsic_declaration(iidn("llvm.masked.load"), .[dty, vtype(addr)]);
+                ld = irb_call(*s.b, f, .[addr, mask, const_poison(dty)], "wide.masked.load");
+                add_param_align(ld, 0, vr(r).align);
+            } else ld = irb_load(*s.b, dty, addr, vr(r).align, false, "wide.load");
             vp_apply_metadata(r, ld);
             vs_set(s, vr(r).def, ld);
         case .WIDEN_STORE;
             gather := !vr(r).consecutive;
-            if gather || vr(r).masked vp_unported("executing masked stores / scatters");
+            mask: Value_Id = NONE;
+            if vr(r).masked mask = vs_get(s, vp_op(r, vp_nops(r) - 1));
             val := vs_get(s, vp_op(r, 1));
             addr := vs_get(s, vp_op(r, 0), !gather);
-            st := irb_store(*s.b, val, addr, vr(r).align);
+            st: Value_Id;
+            if gather {
+                if mask == NONE mask = const_all_ones_of(type_vector(s.vf.n, type_int(1), s.vf.scalable));
+                f := get_or_insert_intrinsic_declaration(iidn("llvm.masked.scatter"), .[vtype(val), vtype(addr)]);
+                st = irb_call(*s.b, f, .[val, addr, mask]);
+                add_param_align(st, 1, vr(r).align);
+            } else if mask != NONE {
+                f := get_or_insert_intrinsic_declaration(iidn("llvm.masked.store"), .[vtype(val), vtype(addr)]);
+                st = irb_call(*s.b, f, .[val, addr, mask]);
+                add_param_align(st, 1, vr(r).align);
+            } else st = irb_store(*s.b, val, addr, vr(r).align);
             vp_apply_metadata(r, st);
         case .WIDEN_PHI; vs_execute_phi(s, r, false, vr(r).name);
         case .FIRST_ORDER_RECURRENCE_PHI;

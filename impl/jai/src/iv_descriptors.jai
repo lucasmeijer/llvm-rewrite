@@ -200,10 +200,11 @@ rdx_has_required_fmf :: (fpop: Value_Id, rk: *Recur_Kind) -> (bool, u32) {
 // getMinMaxRecurrence's GetMinMaxRK
 rdx_min_max_rk :: (v: Value_Id) -> (Recur_Kind, Value_Id, Value_Id) {
     if !is_inst(v) return .NONE, NONE, NONE;
-    ok, a, b := pm_max_min(v, IID_UMIN); if ok return .UMIN, a, b;
-    ok, a, b = pm_max_min(v, IID_UMAX); if ok return .UMAX, a, b;
-    ok, a, b = pm_max_min(v, IID_SMAX); if ok return .SMAX, a, b;
-    ok, a, b = pm_max_min(v, IID_SMIN); if ok return .SMIN, a, b;
+    // m_UMin / m_UMax / m_SMax / m_SMin match only the intrinsics in LLVM 23 (not select(icmp) patterns)
+    ok, a, b := pm_intrinsic2(v, IID_UMIN); if ok return .UMIN, a, b;
+    ok, a, b = pm_intrinsic2(v, IID_UMAX); if ok return .UMAX, a, b;
+    ok, a, b = pm_intrinsic2(v, IID_SMAX); if ok return .SMAX, a, b;
+    ok, a, b = pm_intrinsic2(v, IID_SMIN); if ok return .SMIN, a, b;
     ok, a, b = pm_ord_or_unord_fmin(v); if ok return .FMIN, a, b;
     ok, a, b = pm_intrinsic2(v, IID_MINNUM); if ok return .FMIN, a, b;
     ok, a, b = pm_ord_or_unord_fmax(v); if ok return .FMAX, a, b;

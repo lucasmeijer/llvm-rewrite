@@ -114,7 +114,25 @@ vp_remove_redundant_induction_casts :: () {
 vp_reassociate_header_mask :: () {
     hm := vb(vp_vector_loop_region()).header_mask;
     if hm == NONE return;
-    vp_unported("reassociateHeaderMask (tail folding)");
+    wl: [..] Vp_Rec; wl.allocator = temp;
+    for u: vv(hm).users {
+        if !vp_is_single_def_kind(vr(u).kind) || vr(u).def == NONE continue;
+        ok, a, _ := vpm_logical_and(vr(u).def);
+        if ok && a == hm for vv(vr(u).def).users array_add(*wl, it);
+    }
+    while wl.count {
+        r := pop(*wl);
+        if !vp_is_single_def_kind(vr(r).kind) || vr(r).def == NONE || vr(r).dead continue;
+        ok, inner, y := vpm_logical_and(vr(r).def);
+        if !ok continue;
+        ok2, a, x := vpm_logical_and(inner);
+        if !ok2 || a != hm continue;
+        for vv(vr(r).def).users array_add(*wl, it);
+        b := vpb_before(r);
+        xy := vpb_logical_and(*b, x, y);
+        n := vpb_logical_and(*b, hm, vr(xy).def);
+        vp_rauw(vr(r).def, vr(n).def);
+    }
 }
 
 
@@ -586,5 +604,15 @@ vp_materialize_header_mask :: (use_alm: bool, use_alm_cf: bool) {
     region := vp_vector_loop_region();
     hm := vb(region).header_mask;
     if hm == NONE || vp_num_users(hm) == 0 return;
-    vp_unported("materializeHeaderMask (tail folding)");
+    if use_alm_cf vp_unported("active lane masks for control flow (addVPLaneMaskPhiAndUpdateExitBranch)");
+    header := vp_entry_basic_block(region);
+    b := vpb_at(header, vp_first_non_phi(header));
+    can_iv := vb(region).can_iv;
+    w := vp_new_single_def(.WIDEN_CANONICAL_IV, .[can_iv], vv(can_iv).ty, NONE, NONE);
+    vr(w).flags = vpf_wrap(true, false);
+    vpb_insert(*b, w);
+    mask: Vp_Val;
+    if use_alm vp_unported("active lane masks (materializeHeaderMask)");
+    mask = vr(vpb_icmp(*b, ICMP_ULE, vr(w).def, vp_or_create_backedge_taken_count())).def;
+    vp_rauw(hm, mask);
 }

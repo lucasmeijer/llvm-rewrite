@@ -713,3 +713,63 @@ md_branch_weights :: (w: [] u32, is_expected: bool) -> Md_Id {
     for w array_add(*ops, md_value(const_int(type_int(32), it)));
     return md_tuple(ops, false);
 }
+
+// VPlanTransforms::foldTailByMasking (VPlanConstruction.cpp)
+vp_fold_tail_by_masking :: () {
+    assert(vpl.exit_blocks.count == 1, "only a single-exit block is supported currently");
+    region := vp_vector_loop_region();
+    header := vp_entry_basic_block(region);
+    vp_split_at(header, vp_first_non_phi(header));
+    hm := vp_create_header_mask(region);
+    b := vpb_at(header, vp_first_non_phi(header));
+    vpb_nary(*b, VPI_BRANCH_ON_COND, .[hm]);
+    orig_latch := vp_exiting_basic_block(region);
+    term := vp_terminator(orig_latch);
+    okc, iv_inc, _ := vpm_branch_on_count(term);
+    assert(okc, "Unexpected canonical iv increment");
+    latch := vp_split_at(orig_latch, vp_def(iv_inc));
+    vb(latch).name = "vector.latch";
+    vpbu_connect(header, latch);
+    // NeedsPhi: MapVector<VPValue *, SmallVector<VPUser *>>
+    Need :: struct { v: Vp_Val; users: [..] Vp_Rec; }
+    needs: [..] Need; needs.allocator = temp;
+    add_need :: (needs: *[..] Need, v: Vp_Val, u: Vp_Rec) {
+        for * needs.* if it.v == v { array_add(*it.users, u); return; }
+        n: Need; n.v = v; n.users.allocator = temp; array_add(*n.users, u);
+        array_add(needs, n);
+    }
+    for r: vp_block_phis(header) {
+        if vp_is_widen_induction_kind(vr(r).kind) continue;
+        add_need(*needs, vp_op(r, 1), r);
+    }
+    middle := vp_middle_block();
+    for r: vp_block_recipes(middle) {
+        ok, _ := vpm_vpi(vr(r).def, VPI_EXTRACT_LAST_PART, 1);
+        if vr(r).def != NONE && ok add_need(*needs, vp_op(r, 0), r);
+    }
+    lb := vpb_at(latch, vb(latch).first);
+    for nd: needs {
+        if vp_is_ir_value(nd.v) continue;
+        tail := vp_poison(vp_scalar_type(nd.v));
+        flags: Vp_Flags;
+        rdx: Vp_Rec = NONE;
+        for u: nd.users if vr(u).kind == .REDUCTION_PHI { rdx = u; break; }
+        if rdx != NONE && vr(rdx).rdx_style == .UNORDERED { tail = vr(rdx).def; flags = vr(rdx).flags; }
+        phi := vpb_scalar_phi(*lb, .[nd.v, tail], NONE, "", flags);
+        for u: nd.users vp_replace_uses_of_with(u, nd.v, vr(phi).def);
+    }
+    mb := vpb_before(vp_terminator(middle));
+    r := vb(middle).first;
+    while r != NONE {
+        nx := vr(r).next;
+        defer r = nx;
+        if !vpm_vpi_r(r, VPI_EXTRACT_LAST_LANE, 1) continue;
+        okp, elp := vpm_vpi(vp_op(r, 0), VPI_EXTRACT_LAST_PART, 1);
+        if !okp continue;
+        op0 := vp_op(elp, 0);
+        lal := vpb_nary(*mb, VPI_LAST_ACTIVE_LANE, .[hm], .{}, .[], NONE, "", dl_index_type(type_ptr(0)));
+        ext := vpb_nary(*mb, VPI_EXTRACT_LANE, .[vr(lal).def, op0]);
+        vp_rauw(vr(r).def, vr(ext).def);
+    }
+    vp_set_operand(vp_terminator(middle), 0, vp_true());
+}

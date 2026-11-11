@@ -395,7 +395,7 @@ lv_legacy_cse :: (bb: Value_Id) {
 // LoopVectorizationPlanner::executePlan (EpilogueVecKind = None)
 lvp_execute_plan :: (lp: *Lv_Planner, vf: Ec, uf: u32, checks: *Lv_Rt_Checks) {
     pse := lp.pse;
-    vp_replace_wide_canonical_iv_with_wide_iv(vf, uf);
+    vp_replace_wide_canonical_iv_with_wide_iv(vf, uf, lp.cm.tti, lp.cm.cost_kind, *lp.cm.values_to_ignore);
     vp_unroll_by_uf(uf);
     vp_materialize_packs_and_unpacks();
     vp_materialize_broadcasts();
