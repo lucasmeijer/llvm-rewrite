@@ -550,6 +550,7 @@ tests/e2e/pipeline/calls/recursion.ll::opt
 tests/e2e/pipeline/calls/recursion.ll::roundtrip
 tests/e2e/pipeline/calls/simple_call.ll::opt
 tests/e2e/pipeline/calls/simple_call.ll::roundtrip
+tests/e2e/pipeline/calls/varargs.ll::opt
 tests/e2e/pipeline/calls/varargs.ll::roundtrip
 tests/e2e/pipeline/control/break_continue_goto.ll::opt
 tests/e2e/pipeline/control/break_continue_goto.ll::roundtrip
@@ -621,6 +622,7 @@ tests/e2e/pipeline/return/ret_expr.ll::opt
 tests/e2e/pipeline/return/ret_expr.ll::roundtrip
 tests/e2e/pipeline/return/ret_param_use.ll::opt
 tests/e2e/pipeline/return/ret_param_use.ll::roundtrip
+tests/e2e/pipeline/structs/array_of_structs.ll::opt
 tests/e2e/pipeline/structs/array_of_structs.ll::roundtrip
 tests/e2e/pipeline/structs/struct_basic.ll::opt
 tests/e2e/pipeline/structs/struct_basic.ll::roundtrip
@@ -642,6 +644,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Dhrystone/dry.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Dhrystone/dry.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Dhrystone/fldry.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Linpack/linpack-pc.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/exptree.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/exptree.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/queens.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/queens.ll::roundtrip
@@ -754,6 +757,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Regression/C/PR491.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/PR491.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/PR640.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/PR640.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Regression/C/bigstack.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/bigstack.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/callargs.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/callargs.ll::roundtrip
@@ -872,7 +876,9 @@ tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2007-04-10-BitfieldTest.ll:
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2007-04-10-BitfieldTest.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2007-04-25-weak.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2007-04-25-weak.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2008-04-18-LoopBug.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2008-04-18-LoopBug.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2008-04-20-LoopBug2.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2008-04-20-LoopBug2.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2008-07-13-InlineSetjmp.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2008-07-13-InlineSetjmp.ll::roundtrip
@@ -920,7 +926,9 @@ tests/e2e/pipeline/test-suite/SingleSource/UnitTests/conditional-gnu-ext.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/conditional-gnu-ext.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/ms_struct-bitfield-1.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/ms_struct-bitfield-1.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/UnitTests/ms_struct-bitfield-init-1.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/ms_struct-bitfield-init-1.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/UnitTests/ms_struct-bitfield-init.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/ms_struct-bitfield-init.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/ms_struct-bitfield.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/ms_struct-bitfield.ll::roundtrip
@@ -963,9 +971,11 @@ tests/function/pipeline/abi/callbacks.ll::opt
 tests/function/pipeline/abi/callbacks.ll::roundtrip
 tests/function/pipeline/abi/many_args.ll::opt
 tests/function/pipeline/abi/many_args.ll::roundtrip
+tests/function/pipeline/abi/struct_shapes.ll::opt
 tests/function/pipeline/abi/struct_shapes.ll::roundtrip
 tests/function/pipeline/abi/varargs_callee.ll::opt
 tests/function/pipeline/abi/varargs_callee.ll::roundtrip
+tests/function/pipeline/arith/float_ops.ll::opt
 tests/function/pipeline/arith/float_ops.ll::roundtrip
 tests/function/pipeline/arith/int_ops.ll::opt
 tests/function/pipeline/arith/int_ops.ll::roundtrip
@@ -11791,6 +11801,7 @@ tests/imported/llvm/Transforms/PhaseOrdering/X86/horizontal-reduce-umin.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/horizontal-reduce-umin.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/hsub.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/hsub.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/X86/loadcombine.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/loadcombine.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/loop-idiom-vs-indvars.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/loop-idiom-vs-indvars.ll::roundtrip
@@ -11812,6 +11823,7 @@ tests/imported/llvm/Transforms/PhaseOrdering/X86/pixel-splat.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pixel-splat.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pr38280.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pr38280.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/X86/pr48223.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pr48223.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pr48844-br-to-switch-vectorization.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pr50392.ll::opt
