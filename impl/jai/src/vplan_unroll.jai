@@ -193,7 +193,7 @@ vpu_unroll_recipe :: (u: *Vp_Unroll_State, r: Vp_Rec) {
 // UnrollState::unrollBlock
 vpu_unroll_block :: (u: *Vp_Unroll_State, b: Vp_Blk) {
     if vp_is_region(b) {
-        if vp_is_replicator(b) { vp_unported("unrolling replicate regions (unrollReplicateRegionByUF)"); return; }
+        if vp_is_replicator(b) { vpu_unroll_replicate_region(u, b); return; }
         for x: vp_rpo(vb(b).entry, false) vpu_unroll_block(u, x);
         return;
     }
@@ -340,8 +340,11 @@ vpi_does_generate_per_all_lanes :: (r: Vp_Rec) -> bool { return vr(r).opcode == 
 
 // replicateReplicateRegionsByVF
 vp_replicate_replicate_regions_by_vf :: (vf: Ec, idx_ty: Type_Id) {
+    regions: [..] Vp_Blk; regions.allocator = temp;
     for r: vp_blocks_only_region(vp_depth_first_shallow(vb(vp_vector_loop_region()).entry))
-        if vp_is_replicator(r) vp_unported("dissolving replicate regions (dissolveReplicateRegion)");
+        if vp_is_replicator(r) array_add(*regions, r);
+    assert(regions.count == 0 || !vf.scalable, "cannot replicate across scalable VFs");
+    for < regions vp_dissolve_replicate_region(it, vf, idx_ty);
     vp_merge_blocks_into_predecessors();
 }
 

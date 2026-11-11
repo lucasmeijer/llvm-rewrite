@@ -216,7 +216,7 @@ vp_uses_first_lane_only :: (r: Vp_Rec, op: Vp_Val) -> bool {
 vp_uses_scalars :: (r: Vp_Rec, op: Vp_Val) -> bool {
     k := vr(r).kind;
     if k == .INSTRUCTION && vp_is_instruction_with_type(r) && vp_opcode_is_cast(vr(r).opcode) return true;
-    if k == .IR_INSTRUCTION || k == .REPLICATE || k == .BRANCH_ON_MASK return true;
+    if k == .IR_INSTRUCTION || k == .REPLICATE || k == .BRANCH_ON_MASK || k == .PRED_INST_PHI return true;
     return vp_uses_first_lane_only(r, op);
 }
 // VPUser::usesFirstPartOnly

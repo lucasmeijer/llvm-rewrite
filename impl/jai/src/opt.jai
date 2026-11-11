@@ -231,6 +231,7 @@
 #load "lv_execute.jai";
 #load "lv_cost.jai";
 #load "vplan_cost.jai";
+#load "vplan_replicate.jai";
 #load "lv_interleave.jai";
 
 main :: () { opt_main(); }

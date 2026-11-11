@@ -480,14 +480,91 @@ lvl_can_speculate_pointer_op :: (v: *Lvl, ptr: Value_Id) -> bool {
     return true;
 }
 
-// isDereferenceableAndAlignedInLoop (Loads.cpp) is not ported yet: the answer only decides which loads of predicated
-// blocks are masked (ConditionallyExecutedOps), so legality does not depend on it. Record that the answer is unknown;
-// lvl_masked_ops_known must be checked before anything uses ConditionallyExecutedOps for a predicated block's load.
+// isDereferenceableAndAlignedInLoop(LoadInst *, Loop *, SE, DT, AC, &Predicates) (Loads.cpp)
 lv_is_dereferenceable_and_aligned_in_loop :: (v: *Lvl, ld: Value_Id) -> bool {
-    lv_deref_unknown_loads += 1;
+    l := v.l;
+    ptr := op(ld, 0);
+    ptr_scev := sc_get_scev(ptr);
+    elt_size := ap_from_u64(dl_index_type_size_bits(vtype(ptr)), dl_type_store_size(vtype(ld)));
+    align := load_store_align(ld);
+    header := li_header(v.li, l);
+    if li_is_loop_invariant(v.li, l, ptr) {
+        q: Simplify_Query;
+        q.dt = v.dt; q.ac = v.ac; q.cxt = block_first_non_phi(header);
+        return is_dereferenceable_and_aligned_pointer(ptr, align, elt_size, q);
+    }
+    ar := ptr_scev;
+    if !sc_is_addrec(ar) || sc_loop(ar) != l || !sc_is_affine(ar) return false;
+    step := sc_step_recurrence(ar);
+    if !sc_is_const(step) return false;
+    if ap_zext_value(ap_urem(elt_size, ap_from_u64(elt_size.bits, align))) != 0 return false;
+    sa := sc_ap(step);
+    abs_step := ifx ap_is_negative(sa) then ap_neg(sa) else sa;
+    if elt_size.bits != abs_step.bits vp_unported("isDereferenceableAndAlignedInLoop with a step wider or narrower than the index type");
+    if ap_ugt(elt_size, abs_step) return false;
+    preds: [..] u32; preds.allocator = temp;
+    max_be := sc_get_predicated_symbolic_max_backedge_taken_count(l, *preds);
+    be := sc_get_predicated_backedge_taken_count(l, *preds);
+    if sc_is_cnc(max_be) return false;
+    lg: Laa_Loop_Guards;
+    elt_scev := sc_get_constant(elt_size);
+    a_start, a_end := laa_start_and_end_for_access_size(l, ptr_scev, elt_scev, be, max_be, null, v.dt, v.ac, *lg);
+    if sc_is_cnc(a_start) || sc_is_cnc(a_end) return false;
+    diff := sc_get_minus(a_end, a_start);
+    if sc_is_cnc(diff) return false;
+    g := laa_guards(*lg, sc_loop(ar));
+    max_diff := cr_umax(sc_unsigned_range(sc_apply_loop_guards_with(diff, g)));
+    base: Value_Id = NONE;
+    access_size: APInt;
+    access_size_scev: Scev_Id;
+    if sc_is_unknown(a_start) {
+        base = sc_value(a_start);
+        access_size = max_diff;
+        access_size_scev = diff;
+    } else if sc_kind(a_start) == .ADD {
+        if sc_nops(a_start) != 2 return false;
+        off := sc_op(a_start, 0); nb := sc_op(a_start, 1);
+        if !sc_is_const(off) || !sc_is_unknown(nb) return false;
+        oa := sc_ap(off);
+        if ap_is_negative(oa) return false;
+        if ap_zext_value(ap_urem(oa, ap_from_u64(oa.bits, align))) != 0 return false;
+        sum, overflow := ap_uadd_ov(max_diff, oa);
+        if overflow return false;
+        access_size = sum;
+        access_size_scev = sc_get_add2(diff, off);
+        base = sc_value(nb);
+    } else return false;
+    cxt := block_first_non_phi(header);
+    lp := li_loop_predecessor(v.li, l);
+    if lp != NONE { t := block_terminator(lp); if inst_op(t) == .BR || inst_op(t) == .CONDBR cxt = t; }
+    q: Simplify_Query;
+    q.dt = v.dt; q.ac = v.ac; q.cxt = cxt;
+    if lv_deref_aligned_via_assumption_scev(base, align, q, access_size_scev, g) return true;
+    return is_dereferenceable_and_aligned_pointer(base, align, access_size, q);
+}
+// isDereferenceableAndAlignedPointerViaAssumption with isDereferenceableAndAlignedInLoop's CheckSize (a SCEV
+// comparison of the access size with the assumed dereferenceable size)
+lv_deref_aligned_via_assumption_scev :: (ptr: Value_Id, align: u64, q: Simplify_Query, access_size: Scev_Id, g: *Loop_Guards) -> bool {
+    if q.cxt == NONE return false;
+    can_be_freed := value_can_be_freed(ptr);
+    is_aligned := pointer_alignment(ptr) >= align;
+    align_rk: u64 = 0; have_align := false;
+    deref_rk: u64 = 0; have_deref := false;
+    deref_val: Value_Id = NONE;
+    for e: ac_assumptions_for(q.ac, ptr) {
+        if vkind(e.assume) == .DEAD || e.index == AC_EXPR_RESULT_IDX continue;
+        ok, rk := knowledge_from_bundle(e.assume, e.index);
+        if !ok || rk.was_on != ptr continue;
+        if !is_valid_assume_for_context(e.assume, q.cxt, q.dt) continue;
+        if rk.kind == .Alignment { if !have_align || rk.arg > align_rk { align_rk = rk.arg; have_align = true; } }
+        if (!can_be_freed || will_not_free_between(e.assume, q.cxt)) && rk.kind == .Dereferenceable {
+            vp_unported("dereferenceable assumptions in isDereferenceableAndAlignedInLoop");
+        }
+        is_aligned |= have_align && align_rk >= align;
+        if is_aligned && have_deref return true;
+    }
     return false;
 }
-lv_deref_unknown_loads := 0;
 
 // LoopVectorizationLegality::canVectorizeLoopCFG
 lvl_can_vectorize_loop_cfg :: (v: *Lvl, lp: Loop_Id) -> bool {

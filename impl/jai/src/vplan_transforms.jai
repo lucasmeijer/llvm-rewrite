@@ -341,12 +341,6 @@ vp_simplify_reverses :: () {
     }
 }
 
-// createAndOptimizeReplicateRegions
-vp_create_and_optimize_replicate_regions :: () {
-    for bb: vp_blocks_only_basic(vp_depth_first_deep(vpl.entry))
-        for r: vp_block_recipes(bb) if vr(r).kind == .REPLICATE && vr(r).predicated vp_unported("replicate regions (predicated scalarized recipes)");
-    while vp_merge_blocks_into_predecessors() {}
-}
 
 // mergeBlocksIntoPredecessors
 vp_merge_blocks_into_predecessors :: () -> bool {

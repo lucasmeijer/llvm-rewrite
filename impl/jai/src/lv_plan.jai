@@ -736,7 +736,7 @@ lvp_build_vplans :: (lp: *Lv_Planner, vplan1: *Vp_Plan, min_vf: Ec, max_vf: Ec) 
         ok := lvp_try_to_build_vplan(lp, *range);
         vf = range.end;
         if !ok continue;
-        // hoistPredicatedLoads / sinkPredicatedStores: no predicated replicate recipes in the ported subset
+        vp_check_complementary_predicated_mem_ops(lp.pse, lp.l);   // hoistPredicatedLoads / sinkPredicatedStores
         min_bws := lvp_minimal_bitwidths(lp);
         vp_truncate_to_minimal_bitwidths(min_bws);
         vp_optimize();
