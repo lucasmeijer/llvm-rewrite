@@ -526,7 +526,14 @@ in flat tables of one `Vp_Plan` struct; every entity is a u32 row index:
 - **Virtual calls are switches** on `Vp_Kind`: `vp_execute_recipe(s, r)` (vplan_execute.jai), `vp_clone(r)`,
   `vp_uses_first_lane_only(r, op)`, `vp_may_read_from_memory(r)`, ... (vplan_props.jai), one `case` per recipe class,
   so the behaviour of a recipe kind can be read in one place; VPInstruction::generate is `vpi_generate`, a switch on the
-  opcode. The cost model (`vp_compute_cost`) will be the next such switch.
+  opcode; VPRecipeBase::computeCost is `vp_compute_cost` (vplan_cost.jai), VPRecipeBase::cost (the skip set and
+  -force-target-instruction-cost) is `vp_recipe_cost`.
+- **Costs** (LoopVectorizationCostModel and VPCostContext) are computed in LLVM 23's fixed-point InstructionCost domain:
+  `Lc` = 4 * the cost (lv_cost.jai), so divisions by block-frequency divisors keep their fractions. TTI answers stay
+  plain integers and are converted at the call (`lt_*` wrappers). `Vp_Cost_Ctx` is VPCostContext (the skip set is an
+  Iset; NumPredStores is -1 until computed).
+- **Interleave groups** are referred to by index into the loop's `Iai` (`vr(r).ig`); the `Iai` of the loop being
+  vectorized is the global `lv_cur_iai`, like `vpl` for the plan.
 - **Plans are values**: `VPlan::duplicate()` copies the tables (ids stay meaningful in the copy) and then rebuilds
   every user list in the order LLVM's remapOperands produces (deep RPO over the blocks, recipes in order, operands
   in order), so transforms that walk users see LLVM's order. The global `vpl: *Vp_Plan` is the plan being worked

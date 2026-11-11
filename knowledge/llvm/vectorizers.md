@@ -156,3 +156,36 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
   `makeVPlanMemOpDecision` step). `enableMaskedInterleavedAccessVectorization()` is not overridden (false).
 - InterleavedAccessInfo::analyzeInterleaving commits the strided-access SCEV predicates to the PSE as soon as any
   candidate group was formed, even if every group is released afterwards.
+- **InstructionCost is fixed point in LLVM 23** (Support/InstructionCost.h: `CostGranularity = 4`; the value is stored
+  times 4, `getValue()` divides back and truncates, `operator/(CostType)` divides the raw value). LoopVectorize divides
+  block costs by `getPredBlockCostDivisor` (BFI header/block frequency, `std::round`), so costs like 8.5 are real and
+  decide VFs; `print` writes the fraction ("8.5", "0.25"). isOutsideLoopWorkProfitable and selectInterleaveCount's
+  `SmallLoopCost / LoopCost.getValue()` use the truncated integer.
+- **computeBestVF**: with a single VPlan (a user VF, or only VF 1 feasible) no cost is computed; otherwise the scalar
+  cost is `CM.expectedCost(1)` (legacy) and every vector VF is `precomputeCosts` (legacy costs of inductions, branches,
+  forced scalars, InstsToScalarize — except div/rem) + `VPlan::cost` (recipes, skipping instructions already costed or
+  in ValuesToIgnore) + the backedge. `selectInterleaveCount` computes the plan cost itself when it gets cost 0 (user
+  VF). The legacy/VPlan cross-check assertion of earlier releases is gone.
+- `VPRecipeWithIRFlags::getCostForRecipeWithOpcode` for selects runs four matchers in a row (m_c_LogicalAnd,
+  m_c_LogicalOr, then the inverted forms) whose `m_VPValue` bindings persist even when a later operand fails, so the
+  operand infos passed for a logical-or select can come from the `true` constant.
+- LoopVectorizationCostModel::getScalarizationOverhead does add the insert cost for loads:
+  `supportsEfficientVectorElementLoadStore()` is false on X86 (and in the base TTI).
+- **IVDescriptors' getMinMaxRecurrence** uses m_UMin/m_UMax/m_SMax/m_SMin, which in LLVM 23 match only the
+  intrinsics: `select (icmp sgt %phi, 10), %phi, 10` is not an SMax recurrence but an AnyOf one
+  (LoopVectorize/select-reduction.ll). The FP ones (m_OrdOrUnordFMin/FMax) still match select(fcmp).
+- X86's interleaved-access cost tables (`getInterleavedMemoryOpCost`, AVX512/AVX2/SSSE3/SSE2) are `CostTblEntry`
+  keyed by the interleave factor instead of an ISD opcode; AVX-512 uses a formula with table exceptions. Masked
+  (predicated or gap) groups fall back to BasicTTIImpl's scalarization-based estimate.
+- VPReplicateRecipe::computeCost for loads/stores bails to the legacy cost when the address SCEV cannot be computed for
+  the VPValue (e.g. an address loaded inside the loop), so the replicated load's cost is the legacy widening decision's.
+- `InterleaveGroup::addMetadata` propagates metadata over `Members` (DenseMap<int32_t>) in bucket order:
+  `(unsigned)(Key * 37) & 63` for groups of up to 48 members.
+- Tail folding (LLVM 23) is control flow first: `foldTailByMasking` splits the header, branches on the abstract header
+  mask to a new `vector.latch`, adds scalar phis for header-phi backedges and live-outs, and makes live-out extracts
+  `ExtractLane(LastActiveLane(header mask), x)`; the predicator turns it into masks. `materializeHeaderMask` (after
+  optimize) makes it `icmp ule (WIDEN-CANONICAL-INDUCTION), BTC` for the data-without-lane-mask style (X86's default).
+  Reductions drop the header-mask select from the backedge unless `-prefer-predicated-reduction-select`.
+- Debugging: `-debug-only=loop-vectorize` of the assertions opt prints "LV: Scalar loop costs", every recipe's
+  "Cost of C for VF V", "Cost for VF V: C (Estimated cost per lane ...)", "LV: Selecting VF", "LV: IC is". The jai port
+  prints the same lines with `JAI_LV_DEBUG=1`; `impl/jai/tools/lv_cost_compare.py` diffs them.

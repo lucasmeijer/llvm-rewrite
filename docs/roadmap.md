@@ -240,6 +240,30 @@ unit yet.
 - deps: L1.loop-unroll, L1.instcombine, L1.analysis.laa
 - exit: tests/imported/llvm/Transforms/LoopVectorize/*::roundtrip, tests/imported/llvm/Transforms/LoopVectorize/*::opt
 
+### L1.vectorize.loop.x86 — LoopVectorize: the X86 cost model tests (VF / interleave-count selection on x86 targets)
+- deps: L1.vectorize.loop.interleave, L1.vectorize.loop.tail-folding
+- exit: tests/imported/llvm/Transforms/LoopVectorize/X86/*::opt
+
+### L1.vectorize.loop.interleave — LoopVectorize: interleave groups
+- deps: L1.analysis.laa
+- exit: tests/imported/llvm/Transforms/LoopVectorize/*interleav*::opt
+
+### L1.vectorize.loop.tail-folding — LoopVectorize: tail folding by masking
+- deps: L1.analysis.laa
+- exit: tests/imported/llvm/Transforms/LoopVectorize/*tail-fold*::opt
+
+### L1.vectorize.loop.epilogue — LoopVectorize: epilogue vectorization
+- deps: L1.vectorize.loop.x86
+- exit: tests/imported/llvm/Transforms/LoopVectorize/*epilog*::opt
+
+### L1.vectorize.loop.reductions — LoopVectorize: reductions (in-loop, ordered, FindIV / FindLast, AnyOf, min/max)
+- deps: L1.analysis.laa
+- exit: tests/imported/llvm/Transforms/LoopVectorize/*reduction*::opt
+
+### L1.vectorize.loop.outer — LoopVectorize: outer-loop vectorization (the VPlan-native path)
+- deps: L1.analysis.laa
+- exit: tests/imported/llvm/Transforms/LoopVectorize/*outer*::opt
+
 ### L1.vectorize — LoopVectorize, SLPVectorizer, VectorCombine (x86 cost model)
 - deps: L1.vectorize.vector-combine, L1.vectorize.slp, L1.vectorize.loop
 - exit: tests/imported/llvm/Transforms/LoopVectorize/*::roundtrip, tests/imported/llvm/Transforms/SLPVectorizer/*::roundtrip, tests/imported/llvm/Transforms/VectorCombine/*::roundtrip, tests/imported/llvm/Transforms/LoopVectorize/*::opt, tests/imported/llvm/Transforms/SLPVectorizer/*::opt, tests/imported/llvm/Transforms/VectorCombine/*::opt
