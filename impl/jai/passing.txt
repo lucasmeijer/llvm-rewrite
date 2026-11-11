@@ -10449,10 +10449,12 @@ tests/imported/llvm/Transforms/LoopVectorize/if-conversion-nest.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/if-conversion-reduction.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/if-conversion-reduction.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/if-conversion-scalable.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/if-conversion.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/if-conversion.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/if-pred-non-void.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/if-pred-not-when-safe.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/if-pred-stores.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/if-reduction.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/if-reduction.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/incorrect-dom-info.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/increment.ll::opt
@@ -10498,6 +10500,7 @@ tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-no-wrap.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-non-const-iv-start.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-trunc.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/iv_outside_user.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/iv_outside_user.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/lcssa-crashes.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/lifetime.ll::roundtrip
@@ -10619,6 +10622,7 @@ tests/imported/llvm/Transforms/LoopVectorize/pr50686.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr51614-fold-tail-by-masking.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr55100-expand-scev-predicate-used.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/pr55100-expand-scev-predicate-used.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/pr55167-fold-tail-live-out.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/pr55167-fold-tail-live-out.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr58811-scev-expansion.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/pr58811-scev-expansion.ll::roundtrip
@@ -10653,6 +10657,7 @@ tests/imported/llvm/Transforms/LoopVectorize/reduction-ptr.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/reduction-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction-small-size.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction-with-invariant-store.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/reduction.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/reduction.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/remove-redundant-trip-count-scev.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/remove_metadata.ll::opt
@@ -10793,6 +10798,7 @@ tests/imported/llvm/Transforms/LoopVectorize/vector-geps.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/vector-geps.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/vector-intrinsic-call-cost.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/vector-loop-backedge-elimination-early-exit.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/vector-loop-backedge-elimination-outside-iv-users.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/vector-loop-backedge-elimination-outside-iv-users.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/vector-loop-backedge-elimination-tail-folding.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/vector-loop-backedge-elimination.ll::roundtrip
