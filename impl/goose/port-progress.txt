@@ -12,7 +12,7 @@ lib/IR/Value.cpp 0.35  # + getPointerOffsetFrom (memcpyopt.goose)
 lib/IR/Instruction.cpp 0.5
 lib/IR/Instructions.cpp 0.08
 lib/IR/ProfDataUtils.cpp 0.4
-lib/IR/MDBuilder.cpp 0.1
+lib/IR/MDBuilder.cpp 0.12  # + createAnonymousAARoot (loop_versioning.goose)
 lib/Target/X86/X86TargetTransformInfo.cpp 0.3
 lib/Target/X86/X86ISelLowering.cpp 0.01
 lib/Target/X86/X86Subtarget.cpp 0.2
@@ -48,9 +48,9 @@ lib/IR/Attributes.cpp 0.2
 lib/Analysis/MemorySSA.cpp 0.75  # + the mutation API and verifier; no loop constructor, DOT output
 lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95  # manual: all but visitFDiv's sin/cos -> tan (emitUnaryFloatFnCall, loud)
 lib/Transforms/Utils/SCCPSolver.cpp 0.7
-lib/Transforms/Utils/LoopUtils.cpp 0.3  # + deleteDeadLoop, breakLoopBackedge, getBooleanLoopAttribute, isMustProgress (loop_utils.goose); + rewriteLoopExitValues, hasHardUserWithinLoop, canLoopBeDeleted, isAlmostDeadIV (indvars.goose)
+lib/Transforms/Utils/LoopUtils.cpp 0.4  # + addRuntimeChecks, expandBounds, findDefsUsedOutsideOfLoop (loop_versioning.goose); makeFollowupLoopID, addStringMetadataToLoop (loop_distribute.goose); deleteDeadLoop, breakLoopBackedge, getBooleanLoopAttribute, isMustProgress (loop_utils.goose); + rewriteLoopExitValues, hasHardUserWithinLoop, canLoopBeDeleted, isAlmostDeadIV (indvars.goose)
 lib/IR/ConstantRange.cpp 0.7
-lib/IR/Metadata.cpp 0.5
+lib/IR/Metadata.cpp 0.5  # + MDNode::concatenate (loop_versioning.goose)
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.85
 lib/Transforms/Scalar/EarlyCSE.cpp 0.95
@@ -62,7 +62,7 @@ lib/Analysis/IVDescriptors.cpp 0.05
 lib/IR/ConstantFold.cpp 0.8
 lib/Analysis/MemorySSAUpdater.cpp 0.9  # manual: all but updateForClonedLoop / updateExitBlocksForClonedLoop (heuristic 0.99)
 lib/Support/KnownBits.cpp 0.7
-lib/Analysis/LoopInfo.cpp 0.55  # + LoopInfo::erase / UnloopUpdater (loop_utils.goose)
+lib/Analysis/LoopInfo.cpp 0.6  # + LoopInfo::erase / UnloopUpdater (loop_utils.goose), setLoopID, getOptionalBoolLoopAttribute (loop_distribute.goose)
 lib/IR/DataLayout.cpp 0.2
 lib/Analysis/GlobalsModRef.cpp 0.85
 lib/Analysis/AliasAnalysis.cpp 0.9
@@ -146,8 +146,10 @@ lib/Analysis/BranchProbabilityInfo.cpp 0.95  # manual: BPIConstruction whole, th
 lib/Analysis/BlockFrequencyInfoImpl.cpp 0.9  # + the BasicBlock instantiation of BlockFrequencyInfoImpl.h; no -use-iterative-bfi-inference, debug dumps (heuristic 0.85)
 lib/Analysis/BlockFrequencyInfo.cpp 0.4  # analysis, calculate, getBlockFreq/setBlockFreq, printer; no view/DOT, profile-count API, legacy wrapper
 lib/Transforms/Scalar/ConstraintElimination.cpp 0.9  # all but generateReproducer (-constraint-elimination-dump-reproducers fails loudly) and the LLVM_DEBUG dumps
-lib/Transforms/Utils/ScalarEvolutionExpander.cpp 0.85  # manual: no predicate expansion (expandCodeForPredicate, generateOverflowCheck, expand{Compare,Wrap,Union}Predicate) and no post-inc expansion (normalizeForPostIncUse fails loudly) (heuristic 0.93)
+lib/Transforms/Utils/ScalarEvolutionExpander.cpp 0.9  # manual: predicate expansion (expandCodeForPredicate & co.) ported (loop-versioning); no post-inc expansion (normalizeForPostIncUse fails loudly) (heuristic 0.93)
 lib/Analysis/IVUsers.cpp 0.8  # manual: print<iv-users> path whole; not getExpr/getStride/findAddRecForLoop/IVStrideUse callbacks (LSR) (heuristic 0.95)
 lib/Analysis/ScalarEvolutionNormalization.cpp 1  # manual: NormalizeDenormalizeRewriter is scev_create.goose's RW_NORMALIZE (heuristic 0.6)
 lib/Analysis/HashRecognize.cpp 0.85  # all but the print<hash-recognize> printer
 lib/Analysis/LoopAccessAnalysis.cpp 0.9  # all but sortPtrAccesses, LoopAccessInfoManager caching/clear, getPointersDiff of vectors
+lib/Transforms/Scalar/LoopLoadElimination.cpp 0.95  # all but PGSO with a cached ProfileSummaryInfo (loud)
+lib/Transforms/Utils/CloneFunction.cpp 0.1  # CloneBasicBlock, cloneLoopWithPreheader (innermost loops), remapInstructionsInBlocks (loop_versioning.goose)

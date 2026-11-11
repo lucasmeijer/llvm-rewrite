@@ -92,6 +92,10 @@ let KNOWN_FLAGS: const u8[:][] = [
     "memory-check-merge-threshold", "max-dependences", "enable-mem-access-versioning",   // loop-access analysis
     "store-to-load-forwarding-conflict-detection", "max-forked-scev-depth", "laa-speculate-unit-stride",
     "hoist-runtime-checks", "runtime-memory-check-threshold", "force-vector-width", "force-vector-interleave",
+    "runtime-check-per-loop-load-elim", "loop-load-elimination-scev-check-threshold", "pgso",   // loop-load-elim
+    "loop-version-annotate-no-alias",                    // loop-versioning
+    "enable-loop-distribute", "loop-distribute-non-if-convertible", "loop-distribute-scev-check-threshold",   // loop-distribute
+    "loop-distribute-scev-check-threshold-with-pragma", "loop-distribute-verify",
     "run-twice",                                         // no-op: optdriver.cpp only reads it on the legacy-PM path
     "unroll-threshold", "unroll-optsize-threshold", "unroll-partial-threshold",   // loop-unroll (LoopUnrollPass.cpp)
     "unroll-max-percent-threshold-boost", "unroll-max-iteration-count-to-analyze", "unroll-count", "unroll-max-count",

@@ -216,6 +216,13 @@ Verified with the jai port (impl/jai/src/pass_licm.jai) on Transforms/LICM and s
   areDepsSafe. areDepsSafe walks each class of DepCands from its leader (`findLeader`), not from the checked access.
 - `getStoreSizeOfExpr` of a scalable vector is `vscale * <known minimum store size>`
   (LoopAccessAnalysis/bounded-access-pattern.ll, runtime-pointer-checking-insert-typesize.ll).
+- `makeFollowupLoopID(OrigLoopID, Options)` with the default `InheritOptionsExceptPrefix = nullptr` inherits none
+  of the original attributes (its InheritThisAttribute lambda returns false unless a non-empty prefix is given), and
+  returns std::nullopt (loop ID unchanged) when none of the followup options exist (LoopUtils.cpp; LoopDistribute's
+  setNewLoopID, verified on LoopDistribute/followup.ll with the Goose port). Loop IDs it and addStringMetadataToLoop
+  build are self-referencing, so they print as `distinct !{!N, ...}`.
+- LoopDistribute's partition VMap lookup `InstToPartitionId[Inst]` uses DenseMap::operator[]: an instruction in no
+  partition counts as partition 0 (computePartitionSetForPointers).
 - `addRuntimeChecks` defaults to HoistRuntimeChecks = false; LoopVersioning (LLE, LoopDistribute) never hoists
   bounds to the outer loop, only LoopVectorize passes the option.
 

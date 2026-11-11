@@ -18,9 +18,10 @@
 
 ## Status
 
-- L1.loop-misc (in progress): LoopDeletion 30/30, LoopInstSimplify 2/2, LoopSimplifyCFG 7/9, LoopIdiom 63/63 ::opt;
-  LoopLoadElim, LoopDistribute (+ LoopVersioning) not ported. L1.analysis.laa 72/73. Details and sweeps in "Loop
-  passes and LoopAccessAnalysis".
+- L1.loop-misc 298/306 (all 153 roundtrip, 145/153 opt): LoopDeletion 30/30, LoopInstSimplify 2/2, LoopSimplifyCFG
+  7/9, LoopIdiom 63/63, LoopLoadElim 28/31, LoopDistribute 25/28; the 8 left run loop-vectorize (5) or
+  simple-loop-unswitch (2), or need PGSO with a profile summary (1). L1.analysis.laa 72/73 (+73 roundtrip; the one
+  left needs createAddRecFromPHIWithCasts in SCEV). Details and sweeps in "Loop passes and LoopAccessAnalysis".
 
 - L1.gvn 397/404 (all 202 roundtrip, 195/202 opt). Left, all outside GVN: `mldst-motion` ×2, `loop-simplifycfg` ×2,
   `default<O1>` (opaque-ptr.ll's `-use-constant-int-for-fixed-length-splat` lines and masked-load-store.ll's
@@ -1133,8 +1134,28 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   (`c_false()`) in the same statement is rejected ("shrinks cst_tab"); hoist the constant into a local first.
 - Unit status: L1.loop-misc: LoopDeletion 30/30 ::opt, LoopInstSimplify 2/2, LoopSimplifyCFG 7/9 (2 run
   simple-loop-unswitch), LoopIdiom 63/63. L1.analysis.laa 72/73 analysis lines (left:
-  retry-runtime-checks-non-addrec-after-predicates.ll needs createAddRecFromPHIWithCasts in SCEV). LoopLoadElim,
-  LoopDistribute, LoopVersioning are not ported yet ("not implemented yet").
+  retry-runtime-checks-non-addrec-after-predicates.ll needs createAddRecFromPHIWithCasts in SCEV). LoopLoadElim
+  28/31, LoopDistribute 25/28 (left: loop-vectorize in the pipeline, PGSO).
+- LoopLoadElimination (`lle.goose`), LoopDistribute (`loop_distribute.goose`), LoopVersioning
+  (`loop_versioning.goose`: versionLoop, addRuntimeChecks/expandBounds, the noalias scopes, CloneBasicBlock /
+  cloneLoopWithPreheader / remapInstructionsInBlocks for innermost loops; VMaps are one HMap keyed by (VMap id, value),
+  id 0 = LoopVersioning's, 1 + partition for LoopDistribute). SCEVExpander's predicate expansion is at the end of
+  scev_expander.goose. LLE's getPtrStride runs against its PSE copy with `laa_no_strides` (empty StridesMap).
+  Not ported (loud): cloning loops with subloops, dbg_assign records in cloned blocks, metadata-as-value operands
+  that need remapping, PGSO with a cached ProfileSummaryInfo.
+- More sweeps (0 differs, 0 bad-ir): loop-load-elim, loop-distribute -enable-loop-distribute, loop-versioning
+  (whole-file, --per-function, --with-test-flags each); `sroa,loop-mssa(loop-rotate,licm),loop-distribute,
+  loop-load-elim,loop(loop-idiom,loop-deletion)` and `sroa,loop-mssa(loop-rotate,licm),loop-versioning` over the corpus
+  and tests/perf/compile; `sroa,loop(loop-rotate,indvars,loop-idiom,loop-deletion)` and
+  `sroa,loop(loop-instsimplify,loop-simplifycfg,loop-deletion)` on tests/perf/compile. With `instcombine` in front the
+  same pipelines differ on IndVarSimplify/eliminate-backedge.ll and tests/perf/compile/lua.ll, but
+  `sroa,instcombine,loop-mssa(loop-rotate,licm)` alone already differs there (InstCombine: `select` vs `or` of an
+  i1, `icmp eq` vs `icmp slt` of an i8), not the loop passes.
+- Speed (by hand, no `@perf` line times these passes; tests/perf/scaling/loops-many, CPU s, LLVM vs Goose): n500
+  every pass 0.01-0.06 vs 0.01-0.09; n2000 loop-deletion 2.96/3.27, loop-idiom 3.18/3.24, loop-load-elim 2.89/3.25,
+  loop-distribute 2.81/3.29, loop-versioning 2.84/3.28, print<access-info> 3.01/3.19, loop-instsimplify and
+  loop-simplifycfg 0.02/0.02. The superlinear part is ScalarEvolution's loop guards (every preceding loop), the same in
+  LLVM; Goose is within 1.2x.
 - Sweeps (0 differs, 0 bad-ir; whole-file, --per-function, --with-test-flags and both): loop(loop-deletion),
   loop-mssa(loop-deletion), loop(loop-instsimplify), loop-mssa(loop-instsimplify), loop(loop-simplifycfg),
   loop-mssa(loop-simplifycfg), loop(loop-idiom), loop-mssa(loop-idiom) -verify-memoryssa, loop(loop-idiom) with

@@ -275,11 +275,14 @@ fn lu_remove_top_level_loop(fv: i32, l: i32) {
 
 // SplitBlock(Old, SplitPt, DT, LI, MSSAU, BBName = "", Before = false)
 fn lu_split_block(old: i32, at0: i32, use_mssau: bool) -> i32 {
-    var at = at0;
-    while iop(at) == OP_PHI || inst_is_eh_pad(at) { at = inst_next(at); }
     var nm: u8[>..] = [];
     nm.append(val_name(old));
     nm.append(".split");
+    return lu_split_block_named(old, at0, nm, use_mssau);
+}
+fn lu_split_block_named(old: i32, at0: i32, nm: const u8[:], use_mssau: bool) -> i32 {
+    var at = at0;
+    while iop(at) == OP_PHI || inst_is_eh_pad(at) { at = inst_next(at); }
     let nb = split_block(old, at, nm);
     let l = li_loop_for(old);
     if l >= 0 { loop_add_basic_block_to_loop(l, nb); }

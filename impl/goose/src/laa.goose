@@ -438,9 +438,11 @@ fn laa_is_no_wrap(ar: i32, ptr: i32, at: i32, l: i32, has_stride: bool, stride0:
     return false;
 }
 
-// replaceSymbolicStrideSCEV(PSE, PtrToStride, Ptr)
+// replaceSymbolicStrideSCEV(PSE, PtrToStride, Ptr); laa_no_strides: an empty PtrToStride map (callers outside LAA)
+var laa_no_strides: bool = false;
 fn laa_replace_symbolic_stride_scev(ptr: i32) -> i32 {
     let orig = pse_get_scev(lai_pse, ptr);
+    if laa_no_strides { return orig; }
     var st: i32 = -1;
     for k in lai_strides_k.len { if lai_strides_k[k] == ptr { st = lai_strides_v[k]; } }
     if st < 0 { return orig; }

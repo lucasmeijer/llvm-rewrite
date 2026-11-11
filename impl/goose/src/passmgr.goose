@@ -46,6 +46,9 @@ import loop_instsimplify;
 import loop_simplifycfg;
 import loop_idiom;
 import laa;
+import lle;
+import loop_versioning;
+import loop_distribute;
 import ivusers;
 import loopnest;
 import simplifycfg;
@@ -135,6 +138,9 @@ let P_GVN = 171;           // arg: gvn<...> options (gvn.goose gvn_opt)
 let P_DSE = 190;
 let P_MEMCPYOPT = 191;
 let P_PRINT_ACCESS_INFO = 195;   // arg: AllowPartial
+let P_LOOP_LOAD_ELIM = 196;
+let P_LOOP_VERSIONING = 197;
+let P_LOOP_DISTRIBUTE = 198;
 let P_REASSOCIATE = 260;
 let P_CONSTRAINT_ELIMINATION = 261;
 let P_AGGRESSIVE_INSTCOMBINE = 262;
@@ -212,6 +218,9 @@ let PASS_TABLE: const u8[:][] = [
     "f:jump-threading:182:0",
     "f:print<branch-prob>:183:1",
     "f:print<block-freq>:184:1",
+    "f:loop-load-elim:196:0",
+    "f:loop-versioning:197:0",
+    "f:loop-distribute:198:0",
     "l:print<loopnest>:200:1",
     "l:no-op-loop:201:0",
     "l:indvars:207:0",
@@ -246,6 +255,9 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_GVN => "GVNPass",
         P_DSE => "DSEPass",
         P_MEMCPYOPT => "MemCpyOptPass",
+        P_LOOP_LOAD_ELIM => "LoopLoadEliminationPass",
+        P_LOOP_VERSIONING => "LoopVersioningPass",
+        P_LOOP_DISTRIBUTE => "LoopDistributePass",
         P_REASSOCIATE => "ReassociatePass",
         P_CONSTRAINT_ELIMINATION => "ConstraintEliminationPass",
         P_AGGRESSIVE_INSTCOMBINE => "AggressiveInstCombinePass",
@@ -1100,6 +1112,9 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_AGGRESSIVE_INSTCOMBINE => { return aggressive_instcombine_run(fv); },
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
         P_PRINT_LVI => { lvi_print(fv); return PA_ALL; },
+        P_LOOP_LOAD_ELIM => { let pa = loop_load_elim_run(fv); ap_pool_reset(); return pa; },
+        P_LOOP_VERSIONING => { let pa = loop_versioning_run(fv); ap_pool_reset(); return pa; },
+        P_LOOP_DISTRIBUTE => { let pa = loop_distribute_run(fv); ap_pool_reset(); return pa; },
         P_PRINT_ACCESS_INFO => { print_access_info(fv, pnodes[n].arg == 1); ap_pool_reset(); return PA_ALL; },
         P_PRINT_BPI => { bpi_print(fv); return PA_ALL; },
         P_PRINT_BFI => { bfi_print(fv); return PA_ALL; },
