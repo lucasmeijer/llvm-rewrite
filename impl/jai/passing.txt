@@ -10,6 +10,12 @@ tests/analysis/branch-prob/weights.ll::analysis
 tests/analysis/branch-prob/weights.ll::roundtrip
 tests/analysis/cost-model/arith.ll::analysis
 tests/analysis/cost-model/arith.ll::roundtrip
+tests/analysis/cost-model/cpus.ll::analysis
+tests/analysis/cost-model/cpus.ll::roundtrip
+tests/analysis/cost-model/globals.ll::analysis
+tests/analysis/cost-model/globals.ll::roundtrip
+tests/analysis/cost-model/misc.ll::analysis
+tests/analysis/cost-model/misc.ll::roundtrip
 tests/analysis/cycles/irreducible.ll::analysis
 tests/analysis/cycles/irreducible.ll::roundtrip
 tests/analysis/demanded-bits/masks.ll::analysis
