@@ -10495,6 +10495,7 @@ tests/imported/llvm/Transforms/LoopVectorize/is_fpclass.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-blend.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-blend.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-decreasing.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-nested-loop.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-nested-loop.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-no-wrap.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-non-const-iv-start.ll::roundtrip
@@ -10706,6 +10707,7 @@ tests/imported/llvm/Transforms/LoopVectorize/scev-exitlim-crash.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/scev-exitlim-crash.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/scev-predicate-reasoning.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/scev-predicate-reasoning.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/select-cmp-blend-chain.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/select-cmp-blend-chain.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-cmp-multiuse.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-cmp-predicated.ll::roundtrip
@@ -10718,6 +10720,7 @@ tests/imported/llvm/Transforms/LoopVectorize/select-index-interleaving.ll::round
 tests/imported/llvm/Transforms/LoopVectorize/select-last-index-fp.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/select-last-index-fp.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-min-max-last-index-epilogue.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/select-reduction-start-value-may-be-undef-or-poison.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/select-reduction-start-value-may-be-undef-or-poison.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-reduction.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-smax-last-index.ll::roundtrip
