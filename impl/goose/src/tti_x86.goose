@@ -186,7 +186,6 @@ fn x86_subtarget_init(triple: const u8[:], fv: i32) {
     }
     // getEffectiveRelocModel without -relocation-model
     x86_pic = (x86_os == 1 && x86_st_is64) || (x86_os == 2 && x86_st_is64);
-    if x86_os == 1 && !x86_st_is64 { x86_np("32-bit Darwin (dynamic-no-pic)"); }
 
     var cpu: const u8[:] = cl_mcpu[..];
     var fs: const u8[:] = cl_mattr[..];
@@ -291,11 +290,10 @@ fn x86_glm_divsqrt() -> bool { xst_useGLMDivSqrtCosts() }
 // TargetLoweringBase::getValueType(DL, Ty, AllowUnknown); MVT_Other for a type without an EVT when allowed
 recursive fn x86_value_type(t: i32, allow_unknown: bool) -> i64 {
     let k = ty_kind(t);
-    if k == TK_SVEC { x86_np("scalable vector types"); }
-    if k == TK_FVEC {
+    if k == TK_FVEC || k == TK_SVEC {
         let e = x86_value_type(ty_elem(t), allow_unknown);
         if e == MVT_Other as i64 { return e; }
-        return evt_vec(e, ty_count(t));
+        return evt_vec_s(e, ty_count(t), k == TK_SVEC);
     }
     if k == TK_INT { return evt_int(ty_bits(t)); }
     if k == TK_HALF { return MVT_f16 as i64; }
@@ -983,22 +981,85 @@ fn x86_has_conditional_load_store_for_type(t: i32) -> bool {
     return b == 16 || b == 32 || b == 64;
 }
 
-// X86TargetLowering::isLegalAddressingMode (small code model; the base global classified by
-// X86Subtarget::classifyGlobalReference / TargetMachine::shouldAssumeDSOLocal)
+// X86II operand flags of a global reference (X86BaseInfo.h)
+let XMO_NO_FLAG = 0;
+let XMO_GOTPCREL = 1;
+let XMO_GOTPCREL_NORELAX = 2;
+let XMO_GOT = 3;
+let XMO_GOTOFF = 4;
+let XMO_PIC_BASE_OFFSET = 5;
+let XMO_DLLIMPORT = 6;
+let XMO_COFFSTUB = 7;
+let XMO_DARWIN_NONLAZY = 8;
+let XMO_DARWIN_NONLAZY_PIC_BASE = 9;
+
+// X86Subtarget::classifyLocalReference (small code model)
+fn x86_classify_local_reference(gv: i32) -> i64 {
+    if xst_allowTaggedGlobals() && gv >= 0 && vals[gv].kind != VK_FUNC { return XMO_GOTPCREL_NORELAX; }
+    if !x86_pic { return XMO_NO_FLAG; }
+    if x86_st_is64 { return XMO_NO_FLAG; }
+    if x86_os == 2 { return XMO_NO_FLAG; }
+    if x86_os == 1 {
+        let g = globs[glob_of(gv)];
+        if gv >= 0 && (x86_is_declaration_for_linker(gv) || g.linkage as i64 == LK_COMMON) { return XMO_DARWIN_NONLAZY_PIC_BASE; }
+        return XMO_PIC_BASE_OFFSET;
+    }
+    return XMO_GOTOFF;
+}
+
+// X86Subtarget::classifyGlobalReference (small code model; no !absolute_symbol ranges)
+fn x86_classify_global_reference(gv: i32) -> i64 {
+    if x86_dso_local(gv) { return x86_classify_local_reference(gv); }
+    if x86_os == 2 {
+        if globs[glob_of(gv)].dll == 1 { return XMO_DLLIMPORT; }
+        return XMO_COFFSTUB;
+    }
+    if x86_st_is64 {
+        if xst_allowTaggedGlobals() && vals[gv].kind != VK_FUNC { return XMO_GOTPCREL_NORELAX; }
+        return XMO_GOTPCREL;
+    }
+    if x86_os == 1 { return if !x86_pic { XMO_DARWIN_NONLAZY } else { XMO_DARWIN_NONLAZY_PIC_BASE }; }
+    return XMO_NO_FLAG;    // Reloc::Static
+}
+fn x86_is_global_stub_reference(f: i64) -> bool {
+    f == XMO_DLLIMPORT || f == XMO_COFFSTUB || f == XMO_GOTPCREL || f == XMO_GOTPCREL_NORELAX || f == XMO_GOT ||
+        f == XMO_DARWIN_NONLAZY || f == XMO_DARWIN_NONLAZY_PIC_BASE
+}
+fn x86_is_global_relative_to_pic_base(f: i64) -> bool {
+    f == XMO_GOTOFF || f == XMO_GOT || f == XMO_PIC_BASE_OFFSET || f == XMO_DARWIN_NONLAZY_PIC_BASE
+}
+
+// X86TargetLowering::isLegalAddressingMode (small code model)
 fn x86_legal_addressing_mode(base_gv: i32, off: i64, has_base: bool, scale: i64) -> bool {
+    // X86::isOffsetSuitableForCodeModel
     if off < -2147483648 || off > 2147483647 { return false; }
+    if base_gv >= 0 && off >= 16 * 1024 * 1024 { return false; }
     if base_gv >= 0 {
-        if off >= 16 * 1024 * 1024 { return false; }
-        if !x86_st_is64 { x86_np("isLegalAddressingMode with a global base on 32-bit x86"); }
-        if !x86_dso_local(base_gv) { return false; }   // MO_GOTPCREL / MO_COFFSTUB / MO_DLLIMPORT: a stub
-        if x86_pic && (off != 0 || scale > 1) { return false; }
+        let fl = x86_classify_global_reference(base_gv);
+        if x86_is_global_stub_reference(fl) { return false; }
+        if has_base && x86_is_global_relative_to_pic_base(fl) { return false; }
+        if x86_pic && x86_st_is64 && (off != 0 || scale > 1) { return false; }
     }
     if scale == 0 || scale == 1 || scale == 2 || scale == 4 || scale == 8 { return true; }
     if scale == 3 || scale == 5 || scale == 9 { return !has_base; }
     return false;
 }
 
-// TargetMachine::shouldAssumeDSOLocal for a 64-bit target
+// GlobalValue::isDeclarationForLinker
+fn x86_is_declaration_for_linker(gv: i32) -> bool {
+    let g = globs[glob_of(gv)];
+    return g.linkage as i64 == LK_AVAILABLE_EXTERNALLY || g.is_decl != 0;
+}
+// GlobalValue::isStrongDefinitionForLinker
+fn x86_is_strong_definition_for_linker(gv: i32) -> bool {
+    let lk = globs[glob_of(gv)].linkage as i64;
+    let weak = lk == LK_WEAK_ANY || lk == LK_WEAK_ODR || lk == LK_LINKONCE_ANY || lk == LK_LINKONCE_ODR || lk == LK_COMMON ||
+               lk == LK_EXTERN_WEAK;
+    return !(x86_is_declaration_for_linker(gv) || weak);
+}
+
+// TargetMachine::shouldAssumeDSOLocal. The parser marks local-linkage and non-default-visibility globals
+// dso_local (GlobalValue::maybeSetDsoLocal), which the first checks reproduce.
 fn x86_dso_local(gv: i32) -> bool {
     let g = globs[glob_of(gv)];
     let lk = g.linkage as i64;
@@ -1007,14 +1068,11 @@ fn x86_dso_local(gv: i32) -> bool {
     if g.vis != 0 && lk != LK_EXTERN_WEAK { return true; }
     if x86_os == 2 {
         if g.dll == 1 { return false; }   // dllimport
+        if x86_is_cygming() && x86_is_declaration_for_linker(gv) && vals[gv].kind == VK_GVAR { return false; }
         if lk == LK_EXTERN_WEAK { return false; }
-        if g.is_decl != 0 && vals[gv].kind == VK_GVAR { x86_np("shouldAssumeDSOLocal of a declared variable on Windows (MinGW auto-import)"); }
         return true;
     }
-    if x86_os == 1 {
-        if !x86_pic { return true; }
-        x86_np("shouldAssumeDSOLocal on Darwin (isStrongDefinitionForLinker)");
-    }
+    if x86_os == 1 { return x86_is_strong_definition_for_linker(gv); }   // PIC / DynamicNoPIC, never Static
     return false;
 }
 

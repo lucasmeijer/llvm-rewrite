@@ -67,6 +67,14 @@ fn mvt_vec(elt: i32, n: i64) -> i32 {
     }
     return 0;
 }
+// MVT::getVectorVT(elt, ElementCount(n, scalable))
+fn mvt_vec_s(elt: i32, n: i64, sc: bool) -> i32 {
+    if !sc { return mvt_vec(elt, n); }
+    for m in MVT_FIRST_SCALABLE_VECTOR..MVT_LAST_SCALABLE_VECTOR + 1 {
+        if MVT_ELT[m] == elt && MVT_NELEM[m] as i64 == n { return m; }
+    }
+    return 0;
+}
 fn mvt_change_elt_to_int(m: i32) -> i32 {
     let e = mvt_int(mvt_scalar_bits(m));
     if !mvt_is_vec(m) { return e; }
@@ -76,7 +84,7 @@ fn next_pow2_u(n: i64) -> i64 { var p: i64 = 1; while p < n { p *= 2; } return p
 // MVT::getPow2VectorType
 fn mvt_pow2_vec(m: i32) -> i32 {
     if mvt_is_pow2_vec(m) { return m; }
-    return mvt_vec(mvt_elt(m), next_pow2_u(mvt_nelem(m)));
+    return mvt_vec_s(mvt_elt(m), next_pow2_u(mvt_nelem(m)), mvt_is_scalable(m));
 }
 
 // ---------------------------------------------------------------- EVTs
@@ -84,6 +92,7 @@ fn mvt_pow2_vec(m: i32) -> i32 {
 let EVT_EXT: i64 = 0x4000000000000000;
 let EVT_EXTVEC: i64 = 0x2000000000000000;
 let EVT_EXTINT: i64 = 0x100000;
+let EVT_SCALABLE: i64 = 0x1000000000000000;   // an extended scalable vector
 
 fn evt_is_simple(e: i64) -> bool { e < EVT_EXT }
 fn evt_mvt(e: i64) -> i32 { if evt_is_simple(e) { e as i32 } else { 0 } }
@@ -99,20 +108,27 @@ fn evt_elt_code(elt: i64) -> i64 {
     return EVT_EXTINT | (elt & 0xfffff);
 }
 // EVT::getVectorVT
-fn evt_vec(elt: i64, n: i64) -> i64 {
+fn evt_vec(elt: i64, n: i64) -> i64 { evt_vec_s(elt, n, false) }
+fn evt_vec_s(elt: i64, n: i64, sc: bool) -> i64 {
     if evt_is_simple(elt) {
-        let m = mvt_vec(elt as i32, n);
+        let m = mvt_vec_s(elt as i32, n, sc);
         if m != 0 { return m as i64; }
     }
-    return EVT_EXT | EVT_EXTVEC | (n << 24) | evt_elt_code(elt);
+    return EVT_EXT | EVT_EXTVEC | (if sc { EVT_SCALABLE } else { 0 }) | (n << 24) | evt_elt_code(elt);
 }
+fn evt_is_scalable(e: i64) -> bool {
+    if evt_is_simple(e) { return mvt_is_scalable(e as i32); }
+    return (e & EVT_EXTVEC) != 0 && (e & EVT_SCALABLE) != 0;
+}
+// the same scalability with another element count
+fn evt_vec_like(e: i64, elt: i64, n: i64) -> i64 { evt_vec_s(elt, n, evt_is_scalable(e)) }
 fn evt_is_vec(e: i64) -> bool {
     if evt_is_simple(e) { return mvt_is_vec(e as i32); }
     return (e & EVT_EXTVEC) != 0;
 }
 fn evt_nelem(e: i64) -> i64 {
     if evt_is_simple(e) { return mvt_nelem(e as i32); }
-    return (e >> 24) & 0xffffffff;
+    return (e >> 24) & 0xfffffffff;
 }
 // getVectorElementType (or the scalar itself)
 fn evt_elt(e: i64) -> i64 {
@@ -149,10 +165,10 @@ fn evt_round_int(e: i64) -> i64 {
     if b <= 8 { return evt_int(8); }
     return evt_int(next_pow2_u(b));
 }
-fn evt_half_elts(e: i64) -> i64 { evt_vec(evt_elt(e), evt_nelem(e) / 2) }
+fn evt_half_elts(e: i64) -> i64 { evt_vec_like(e, evt_elt(e), evt_nelem(e) / 2) }
 // EVT::changeTypeToInteger / changeVectorElementTypeToInteger
 fn evt_to_int(e: i64) -> i64 {
-    if evt_is_vec(e) { return evt_vec(evt_int(evt_scalar_bits(e)), evt_nelem(e)); }
+    if evt_is_vec(e) { return evt_vec_like(e, evt_int(evt_scalar_bits(e)), evt_nelem(e)); }
     return evt_int(evt_bits(e));
 }
 
@@ -288,11 +304,12 @@ fn xl_vector_breakdown_mvt(vt: i32) -> i32, i32 {
     var nregs: i64 = 1;
     if mvt_is_scalable(vt) && (ec & (ec - 1)) != 0 { fatal("TargetTransformInfo: scalable non-power-of-2 MVT"); }
     if (ec & (ec - 1)) != 0 { nregs = ec; ec = 1; }
-    while ec > 1 && !xl_is_type_legal(mvt_vec(elt, ec)) {
+    let sc = mvt_is_scalable(vt);
+    while ec > 1 && !xl_is_type_legal(mvt_vec_s(elt, ec, sc)) {
         ec = ec / 2;
         nregs = nregs << 1;
     }
-    var nvt = mvt_vec(elt, ec);
+    var nvt = mvt_vec_s(elt, ec, sc);
     if ec == 1 && nvt == 0 { nvt = elt; }
     if !xl_is_type_legal(nvt) { nvt = elt; }
     var lane = mvt_scalar_bits(nvt) as i64;
@@ -494,32 +511,37 @@ recursive fn tl_type_conversion(e: i64) -> i32, i64 {
     }
     var nelts = evt_nelem(e);
     var elt = evt_elt(e);
-    if nelts == 1 { return TA_SCALARIZE, elt; }
+    let sc = evt_is_scalable(e);
+    if nelts == 1 && !sc { return TA_SCALARIZE, elt; }
     if evt_is_int(elt) {
         if !evt_is_pow2_vec(e) {
             nelts = next_pow2_strict(nelts);
-            return TA_WIDEN, evt_vec(elt, nelts);
+            return TA_WIDEN, evt_vec_s(elt, nelts, sc);
         }
         let la, ln = tl_type_conversion(elt);
-        if la == TA_EXPAND { return TA_SPLIT, evt_half_elts(e); }
+        if la == TA_EXPAND {
+            if sc && nelts == 1 { return TA_SCALARIZE_SCALABLE, elt; }
+            return TA_SPLIT, evt_half_elts(e);
+        }
         let old = elt;
         loop {
             elt = evt_round_int(evt_int(1 + evt_bits(elt)));
             if !evt_is_simple(elt) { break; }
-            let nvt = mvt_vec(elt as i32, nelts);
-            if nvt != 0 && xl_ta[nvt] as i32 == TA_LEGAL { return TA_PROMOTE, evt_vec(elt, nelts); }
+            let nvt = mvt_vec_s(elt as i32, nelts, sc);
+            if nvt != 0 && xl_ta[nvt] as i32 == TA_LEGAL { return TA_PROMOTE, evt_vec_s(elt, nelts, sc); }
         }
         elt = old;
     }
     loop {
         nelts = next_pow2_strict(nelts);
         if !evt_is_simple(elt) { break; }
-        let lv = mvt_vec(elt as i32, nelts);
+        let lv = mvt_vec_s(elt as i32, nelts, sc);
         if lv == 0 { break; }
         if xl_ta[lv] as i32 == TA_LEGAL { return TA_WIDEN, lv as i64; }
     }
-    if !evt_is_pow2_vec(e) { return TA_WIDEN, evt_vec(evt_elt(e), next_pow2_u(evt_nelem(e))); }
-    return TA_SPLIT, evt_vec(evt_elt(e), evt_nelem(e) / 2);
+    if !evt_is_pow2_vec(e) { return TA_WIDEN, evt_vec_s(evt_elt(e), next_pow2_u(evt_nelem(e)), sc); }
+    if sc && evt_nelem(e) == 1 { return TA_SCALARIZE_SCALABLE, evt_elt(e); }
+    return TA_SPLIT, evt_vec_s(evt_elt(e), evt_nelem(e) / 2, sc);
 }
 // NextPowerOf2: strictly greater
 fn next_pow2_strict(n: i64) -> i64 { var p: i64 = 1; while p <= n { p *= 2; } return p; }
@@ -564,6 +586,7 @@ recursive fn tl_vector_type_breakdown(e: i64) -> i64, i64, i64, i32 {
         if tl_is_type_legal(r) { return 1, r, 1, r as i32; }
     }
     let elt = evt_elt(e);
+    if evt_is_scalable(e) { fatal("TargetTransformInfo: getVectorTypeBreakdown of a scalable vector type is not ported"); }
     var nvr: i64 = 1;
     var nelts = nelts0;
     if (nelts & (nelts - 1)) != 0 { nvr = nelts; nelts = 1; }

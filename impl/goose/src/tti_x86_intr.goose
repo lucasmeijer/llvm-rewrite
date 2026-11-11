@@ -371,7 +371,36 @@ recursive fn bt_intrinsic_cost(ic: i64, kind: i64) -> i64 {
             }
         }
         return c;
-    } else if id == IID_experimental_cttz_elts || id == IID_modf || id == IID_sincos || id == IID_sincospi ||
+    } else if id == IID_experimental_cttz_elts {
+        let at = ica_ty(ic, 0);
+        // shouldExpandCttzElements is true for x86
+        if ty_kind(at) == TK_SVEC { x86_np("getIntrinsicInstrCost of cttz.elts on scalable vectors"); }
+        let zp = !ap_is_zero(ci_ap(ica_arg(ic, 1)));
+        // getBitWidthForCttzElements (fixed EC): ConstantRange(EC) - ZeroIsPoison
+        var ub = ty_count(at);
+        if zp { ub = ub - 1; }
+        var ab: i64 = 0;
+        var x = ub;
+        while x > 0 { ab++; x = x >> 1; }
+        var ew = tt_scalar_bits(rt);
+        if ab < ew { ew = ab; }
+        ew = next_pow2_u(ew);
+        if ew < 8 { ew = 8; }
+        let net = ty_int(ew);
+        let nvt = tt_vec(net, ty_count(vals[ica_arg(ic, 0)].ty));
+        let m = ica_mark();
+        let sv = ica_new(IID_stepvector, nvt, fmf, -1, TTI_INVALID);
+        var c = x86_intrinsic_cost(sv, kind);
+        c = tc_add(c, x86_arith0(OP_SUB, nvt, kind));
+        c = tc_add(c, x86_cast_cost(OP_SEXT, nvt, vals[ica_arg(ic, 0)].ty, 0, kind, -1));
+        c = tc_add(c, x86_arith0(OP_AND, nvt, kind));
+        let ra = ica_new(IID_vector_reduce_umax, net, fmf, ii, 1);
+        ica_add_type(ra, nvt);
+        c = tc_add(c, bt_type_based_intrinsic_cost(ra, kind));
+        c = tc_add(c, x86_arith0(OP_SUB, net, kind));
+        ica_release(m);
+        return c;
+    } else if id == IID_modf || id == IID_sincos || id == IID_sincospi ||
               id == IID_loop_dependence_war_mask || id == IID_loop_dependence_raw_mask {
         x86_np(str("getIntrinsicInstrCost of ", intr_name(id as i64)));
     } else if id == IID_get_active_lane_mask || id == IID_experimental_vector_match ||

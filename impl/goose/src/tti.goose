@@ -412,10 +412,13 @@ fn ty_index_type(t: i32, ix: i32) -> i32 {
     return types[t].a;
 }
 
-// Value::stripPointerCasts
+// Value::stripPointerCasts (stripPointerCastsAndOffsets<PSK_ZeroIndices>: stops when a value repeats)
 fn strip_pointer_casts_tti(v0: i32) -> i32 {
     var v = v0;
+    var seen: i32[>..<] = [];
     loop {
+        for x in seen { if x == v { return v; } }
+        seen.push(v);
         let o = opcode_of(v);
         if o == OP_BITCAST || o == OP_ADDRSPACECAST { v = op(v, 0); continue; }
         if o == OP_GEP {
@@ -423,7 +426,6 @@ fn strip_pointer_casts_tti(v0: i32) -> i32 {
             for k in 1..nops(v) { let x = op(v, k); if !(is_constant(x) && is_null_value(x)) { allz = false; } }
             if allz { v = op(v, 0); continue; }
         }
-        if vals[v].kind == VK_ALIAS { return v; }
         return v;
     }
 }
@@ -541,9 +543,18 @@ fn tti_instruction_cost(u: i32, kind: i64) -> i64 {
     return c;
 }
 
+// isa<IntrinsicInst>: a call of a function whose name starts with "llvm." (Function::isIntrinsic), whether or not
+// it is a known intrinsic
+fn tti_is_intrinsic_inst(u: i32) -> bool {
+    if !is_inst_op(u, OP_CALL) { return false; }
+    let f = called_function(u);
+    if f < 0 || vals[f].name < 0 { return false; }
+    return starts_with(sbytes(vals[f].name), "llvm.");
+}
+
 fn tti_instruction_cost_impl(u: i32, kind: i64) -> i64 {
     let is_i = is_inst(u);
-    if is_i && is_callbase(u) && inst_iid(u) == 0 {
+    if is_i && is_callbase(u) && !tti_is_intrinsic_inst(u) {
         let f = called_function(u);
         if f >= 0 {
             if !tti_is_lowered_to_call(f) { return TCC_BASIC; }
@@ -747,7 +758,7 @@ fn cm_intrinsic_strategy() -> i64 {
 }
 
 fn cm_get_cost(i: i32, kind: i64, strategy: i64) -> i64 {
-    if strategy != 0 && is_inst_op(i, OP_CALL) && inst_iid(i) != 0 {
+    if strategy != 0 && tti_is_intrinsic_inst(i) {
         return tti_intrinsic_cost_strategy(i, kind, strategy == 2);
     }
     return tti_instruction_cost(i, kind);
