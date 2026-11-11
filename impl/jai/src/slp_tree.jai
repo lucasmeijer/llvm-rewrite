@@ -44,6 +44,7 @@ Tree_Entry :: struct {
     s: Inst_State;
     interleave_factor: u32;
     does_not_need_to_schedule: bool;
+    value_to_lane: Table(Value_Id, u32);          // findLaneForValue's cache: never invalidated (also in LLVM)
 }
 
 Slp_State :: struct {

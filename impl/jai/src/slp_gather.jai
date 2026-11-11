@@ -325,7 +325,6 @@ slp_is_gather_shuffled_single_register_entry :: (te: Te_Id, vl: [] Value_Id, mas
                 array_add(*gather_nodes, x);
             }
         }
-        broke := false;
         for tp: gather_nodes {
             p := *slp.entries[tp];
             if tp == te || p.idx == 0 || table_contains(*slp.deleted_nodes, tp) continue;
@@ -358,11 +357,12 @@ slp_is_gather_shuffled_single_register_entry :: (te: Te_Id, vl: [] Value_Id, mas
                 }
                 if bad continue;
             }
-            if check_and_use_same_node(tp, te, vl, *is_reused_node_found, *used_tes, *used_vals_keys, *used_vals_idx) { broke = true; break; }
+            if check_and_use_same_node(tp, te, vl, *is_reused_node_found, *used_tes, *used_vals_keys, *used_vals_idx) break;   // leaves the gather-node loop only
             if check_non_schedulable_ordering(uei.user, ip, use_ei_insert_pt_used_outside, insert_pt) continue;
             set_add(*vto, tp);
         }
-        if !broke {
+        // (the `continue` / `break` of the split and vectorized-entry checks act on the VL loop, as in LLVM)
+        {
             vtes := slp_get_split_tree_entries(v);
             if vtes.count {
                 vte := TE_NONE;
@@ -373,14 +373,15 @@ slp_is_gather_shuffled_single_register_entry :: (te: Te_Id, vl: [] Value_Id, mas
                     if none {
                         lbi := slp_last_instruction_in_bundle(vte);
                         if lbi == insert_pt || !check_ordering(lbi, insert_pt, node_ui) cont = true;
+                        #if DEBUG_SLP print("DBG   split vte % lbi % insert_pt % cont %\n", vte, lbi, insert_pt, cont);
                     }
                     if cont continue;
-                    if check_and_use_same_node(vte, te, vl, *is_reused_node_found, *used_tes, *used_vals_keys, *used_vals_idx) broke = true;
-                    else set_add(*vto, vte);
+                    if check_and_use_same_node(vte, te, vl, *is_reused_node_found, *used_tes, *used_vals_keys, *used_vals_idx) break v;
+                    set_add(*vto, vte);
                 }
             }
         }
-        if !broke {
+        {
             vtes := slp_get_tree_entries(v);
             if vtes.count {
                 k := -1;
@@ -402,12 +403,13 @@ slp_is_gather_shuffled_single_register_entry :: (te: Te_Id, vl: [] Value_Id, mas
                         if lbi == insert_pt || !check_ordering(lbi, insert_pt, node_ui) || check_non_schedulable_ordering(vte, lbi, use_ei_insert_pt_used_outside, insert_pt) cont = true;
                     }
                     if cont continue;
-                    if check_and_use_same_node(vte, te, vl, *is_reused_node_found, *used_tes, *used_vals_keys, *used_vals_idx) broke = true;
-                    else set_add(*vto, vte);
+                    if check_and_use_same_node(vte, te, vl, *is_reused_node_found, *used_tes, *used_vals_keys, *used_vals_idx) break v;
+                    set_add(*vto, vte);
                 }
             }
         }
         if is_reused_node_found break;
+        #if DEBUG_SLP print("DBG   value % vto %\n", v, vto);
         if vto.count == 0 continue;
         if used_tes.count == 0 {
             array_add(*used_tes, vto);

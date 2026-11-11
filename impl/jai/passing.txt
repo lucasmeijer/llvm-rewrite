@@ -11663,6 +11663,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-umin.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/ashr-main-opcode-copyables.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/ashr-node-with-poison.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/ashr-node-with-poison.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/associate-copyable-non-copyable-op.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/associate-copyable-non-copyable-op.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/atomics.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/atomics.ll::roundtrip
@@ -11788,6 +11789,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/empty-vectorizable-tree.ll::rou
 tests/imported/llvm/Transforms/SLPVectorizer/X86/entries-different-vf.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/entries-shuffled-diff-sizes.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/entry-no-bundle-but-extra-use-on-vec.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/expanded-binop-copyable-operand-deps.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/expanded-binop-copyable-operand-deps.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/expanded-binop-doesnotneedschedule-user.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/expanded-operand-already-scheduled.ll::roundtrip
@@ -11864,6 +11866,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/hsub-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/hsub.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/icmp-altopcode-after-reordering.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/identity-match-splat-less-defined.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/identity-reuses-with-poisons.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/identity-reuses-with-poisons.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/idiv-by-const.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/implicitfloat.ll::opt
@@ -11902,6 +11905,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/main-alternate-interechanged-de
 tests/imported/llvm/Transforms/SLPVectorizer/X86/malformed_phis.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/many-uses-parent-node.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/many_stores.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/mask-size-less-common-mask.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/mask-size-less-common-mask.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/masked-load-compress-reordered.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/masked-stores.ll::roundtrip
@@ -11953,9 +11957,11 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/non-power-of-2-num-elems.ll::ro
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-power-of-2-order-detection.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-power-of-2-subvectors-insert.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-reduced-select-of-bits.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/non-sched-inst-has-copyable-before.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-sched-inst-has-copyable-before.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-before-main.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-instructions-become-schedulable.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-node-with-non-schedulable-parent.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-node-with-non-schedulable-parent.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-parent-multi-copyables.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-recalculate-deps.ll::opt
@@ -12072,6 +12078,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/reduction-root-multiuse-same-op
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduction-same-vals.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduction-shl1-add-merge.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduction-transpose.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/reduction-vals-used-as-load-indices.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduction-vals-used-as-load-indices.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduction-value-in-tree.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reduction-with-removed-extracts.ll::roundtrip
@@ -12122,6 +12129,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/revectorize-phis.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reverse_extract_elements.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/root-gather-reused-scalar.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/root-gather-reused-scalar.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/root-node-reordered-reused.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/root-node-reordered-reused.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/runtime-alias-checks.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/runtime-alias-checks.ll::roundtrip
@@ -12152,7 +12160,9 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-compatible-with-add.ll::rou
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation2.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation2.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation3.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation3.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation4.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation4.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation5.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shll1-add-sub-combined.ll::roundtrip
@@ -12160,6 +12170,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/shrink_after_reorder.ll::roundt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shuffle-mask-emission.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shuffle-multiple-nodes.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shuffled-gathered-vectors.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/shuffled-gathers-diff-size.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shuffled-gathers-diff-size.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/sign-extend-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/sign-extend.ll::roundtrip

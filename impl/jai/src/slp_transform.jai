@@ -4,7 +4,7 @@
 //
 // X86 facts used: TTI::isLegalStridedLoadStore and isLegalInterleavedAccessType are the base `false`, so the
 // load/store strided rewrites and the store interleave factor never apply. Not ported (fail loudly):
-// tryToVectorizeGatheredLoads (gathered load groups), matchesShlZExt (reduced bitcasts), matchesInversedZExtSelect,
+// matchesShlZExt (reduced bitcasts), matchesInversedZExtSelect,
 // matchesSelectOfBits.
 
 // TreeEntry::getOrdered(Idx)
@@ -350,19 +350,5 @@ slp_transform_nodes :: () {
             if c == 1 return;
         }
     }
-    for k: 0..slp.entries.count-1 {
-        t := cast(Te_Id) k;
-        e := *slp.entries[k];
-        if !te_is_gather(t) || slp_is_splat(e.scalars) continue;
-        cand := te_has_state(t) && te_opcode(t) == .LOAD;
-        if !cand && !te_has_state(t) {
-            for v: e.scalars if is_inst(v) && inst_op(v) == .LOAD && !slp_is_vectorized(v) && !slp_is_deleted(v) { cand = true; break; }
-        }
-        if !cand continue;
-        for v: e.scalars {
-            if !is_inst(v) || inst_op(v) != .LOAD continue;
-            if slp_is_deleted(v) || slp_is_vectorized(v) || !is_simple_load_store(v) continue;
-            slp_fail("gathered loads (tryToVectorizeGatheredLoads)");
-        }
-    }
+    slp_collect_and_vectorize_gathered_loads();
 }

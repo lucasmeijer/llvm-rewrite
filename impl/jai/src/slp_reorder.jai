@@ -122,8 +122,17 @@ te_reorder_split_node :: (te: Te_Id, idx: u32, mask: [] s32, mask_order: [] s32)
     slp_reorder_order(*e.reorder_indices, nmo, true);
     if e.reorder_indices.count && slp_is_identity_order(e.reorder_indices) array_reset_keeping_memory(*e.reorder_indices);
 }
-// TreeEntry::findLaneForValue(V) (the ValueToLane cache only memoizes)
+// TreeEntry::findLaneForValue(V). The ValueToLane cache is never invalidated, so a lane computed before the entry
+// was reordered stays the answer (LLVM does the same; it changes gather masks).
 te_find_lane_for_value :: (te: Te_Id, v: Value_Id) -> u32 {
+    e := *slp.entries[te];
+    cached, lane := table_find(*e.value_to_lane, v);
+    if cached return lane;
+    found := slp_find_lane_uncached(te, v);
+    table_set(*e.value_to_lane, v, found);
+    return found;
+}
+slp_find_lane_uncached :: (te: Te_Id, v: Value_Id) -> u32 {
     e := *slp.entries[te];
     found := cast(u32) te_vector_factor(te);
     for k: 0..e.scalars.count-1 {

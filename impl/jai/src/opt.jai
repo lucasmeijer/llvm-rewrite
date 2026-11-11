@@ -94,6 +94,7 @@
 #load "slp_cost.jai";
 #load "slp_shuffle.jai";
 #load "slp_tree_cost.jai";
+#load "slp_gathered_loads.jai";
 #load "dbg_records.jai";
 #load "pass_mem2reg.jai";
 #load "pass_instsimplify.jai";

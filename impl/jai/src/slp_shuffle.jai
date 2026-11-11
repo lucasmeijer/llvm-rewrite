@@ -957,7 +957,7 @@ slp_process_build_vector :: (te: Te_Id, sty: Type_Id, b: *Bv_Builder) -> Cost {
            (te_has_state(te) && is_alt_shuffle(e.s)) || all_vec || slp_is_splat(e.scalars) ||
            (!vl_equal(e.scalars, gathered) && gathered.count <= 2) {
             gather_shuffles = slp_is_gather_shuffled_entry(te, gathered, *mask, *entries, num_parts);
-            #if DEBUG_SLP print("DBG   gather shuffles % mask % entries %\n", gather_shuffles, mask, entries);
+            #if DEBUG_SLP { print("DBG   gather shuffles % mask % entries %\n", gather_shuffles, mask, entries); for es: entries for x: es print("DBG     entry % scalars % reuse % reorder % state %\n", x, slp.entries[x].scalars, slp.entries[x].reuse_shuffle_indices, slp.entries[x].reorder_indices, slp.entries[x].state); }
         }
         if gather_shuffles.count {
             if gather_shuffles.count == 1 && gather_shuffles[0] == SK_PERMUTE_SINGLE_SRC &&

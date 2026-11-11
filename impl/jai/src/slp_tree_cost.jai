@@ -189,6 +189,7 @@ Subtree_Cost :: struct { total: Cost; cost: Cost; nodes: [..] s64; }
 slp_calculate_tree_cost_and_trim_non_profitable :: (vectorized_vals: [] Value_Id = .[], rdx_root: Value_Id = NONE) -> Cost {
     n := slp.entries.count;
     for k: 0..n-1 if te_is_gather(cast(Te_Id) k) && type_kind(vtype(slp.entries[k].scalars[0])) == .STRUCT return COST_INVALID;
+    #if DEBUG_SLP for slp.entries print("DBG tree te% state=% scalars=% reuse=% reorder=% user=%\n", it_index, it.state, it.scalars, it.reuse_shuffle_indices, it.reorder_indices, it.user_tree_index);
     NO_COST :: COST_INVALID + 1;   // "not in NodesCosts"
     nodes_costs := NewArray(n, Cost,, temp);
     for * nodes_costs it.* = NO_COST;

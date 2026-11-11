@@ -175,7 +175,7 @@ slp_new_tree_entry_state :: (vl: [] Value_Id, state: s32, bundle: s32, s: Inst_S
     ne: Tree_Entry;
     ne.scalars.allocator = temp; ne.reuse_shuffle_indices.allocator = temp; ne.reorder_indices.allocator = temp;
     ne.combined_entries_with_indices.allocator = temp; ne.struct_ev_indices.allocator = temp;
-    ne.operands.allocator = temp; ne.copyable_elements.allocator = temp;
+    ne.operands.allocator = temp; ne.copyable_elements.allocator = temp; ne.value_to_lane.allocator = temp;
     array_add(*slp.entries, ne);
     last := cast(Te_Id) (slp.entries.count - 1);
     e := *slp.entries[last];
