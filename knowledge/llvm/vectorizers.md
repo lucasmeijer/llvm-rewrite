@@ -132,3 +132,27 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
   RPO / recipe / operand order, so the copy's user lists are in that order, not the original's.
 - `VPlanTransforms::makeMemOpWideningDecisions` widens unit-stride accesses itself (`widenConsecutiveMemOps`, from the
   SCEV of the VPlan address) before consulting the legacy cost model's decisions for the rest.
+- **Executing a plan** (LoopVectorizationPlanner::executePlan, verified by the forced-VF LoopVectorize tests): the
+  scalar preheader is a new block `scalar.ph` split off the original preheader (createVectorizedLoopSkeleton); the
+  vector preheader / body / middle blocks are created by VPBasicBlock::execute *before* that block (CFG.ExitBB), so
+  the block order is entry, [check blocks], vector.ph, vector.body, middle.block, scalar.ph, loop. When the middle
+  block's `cmp.n` folds to true (constant trip count multiple of VF*UF), removeBranchOnConst disconnects the scalar
+  loop and VPlan::execute deletes it (DeleteDeadBlocks).
+- `VPReplicateRecipe::execute` clones the instruction and names the clone `<name>.cloned`, but IRBuilder::Insert
+  then calls `setName("")`, so replicated scalars are unnamed in the output.
+- GeneratedRTChecks: `getSCEVChecks()` / `getMemRuntimeChecks()` return "no check" when the condition folded to
+  `false`; such a check block is never attached and the destructor erases it. Whether a SCEV check block is created
+  at all is `!PSE.getPredicate().isAlwaysTrue()`, evaluated with the AddRecs' flags at that time. Checks are created
+  for VF > 1 or a selected interleave count > 1, before the profitability decision; with a forced VF the scalar cost
+  is 0, so isOutsideLoopWorkProfitable accepts any valid check cost.
+- LoopVersioning's alias scopes are only attached (in the plain-CFG builder) when the loop has pointer checks that
+  are not diff checks (`!RtPtrChecking.getDiffChecks()`); then every load/store of a checked pointer gets
+  `!alias.scope` (its group) and `!noalias` (the groups it was checked against).
+- VPlan's live-in folding (tryToFoldLiveIns) uses InstSimplifyFolder: intrinsics go through `simplifyIntrinsic`,
+  which returns poison for poison-propagating intrinsics before `umax(x, poison) -> -1`-style undef rules
+  (seen with a poison induction step: the vector trip count becomes poison).
+- X86: `prefersVectorizedAddressing()` is `supportsGather()` (AVX-512, or AVX2 with fast gather); without it loads
+  that feed addresses are scalarized (setCostBasedWideningDecision's address scalarization and the VPlan
+  `makeVPlanMemOpDecision` step). `enableMaskedInterleavedAccessVectorization()` is not overridden (false).
+- InterleavedAccessInfo::analyzeInterleaving commits the strided-access SCEV predicates to the PSE as soon as any
+  candidate group was formed, even if every group is released afterwards.

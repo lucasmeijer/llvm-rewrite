@@ -514,15 +514,21 @@ in flat tables of one `Vp_Plan` struct; every entity is a u32 row index:
   consecutive/masked bits, SCEV expression, interleave group, ...), each commented with the kinds that use it}`.
   `VPInstructionWithType` and `VPPhi` are VPInstruction rows (classified by opcode, exactly like their classof);
   `VPIRPhi` is an IR_INSTRUCTION row whose instruction is a phi.
-- **Virtual calls are switches** on `Vp_Kind` (`#complete` where it matters): `vp_execute(r)`, `vp_compute_cost(r)`,
-  `vp_clone(r)`, `vp_uses_first_lane_only(r, op)`, `vp_may_read_from_memory(r)`, ... live next to each other in
-  vplan_recipes.jai, one `case` per recipe class, so the behaviour of a recipe kind can be read in one place.
+- **Virtual calls are switches** on `Vp_Kind`: `vp_execute_recipe(s, r)` (vplan_execute.jai), `vp_clone(r)`,
+  `vp_uses_first_lane_only(r, op)`, `vp_may_read_from_memory(r)`, ... (vplan_props.jai), one `case` per recipe class,
+  so the behaviour of a recipe kind can be read in one place; VPInstruction::generate is `vpi_generate`, a switch on the
+  opcode. The cost model (`vp_compute_cost`) will be the next such switch.
 - **Plans are values**: `VPlan::duplicate()` copies the tables (ids stay meaningful in the copy) and then rebuilds
   every user list in the order LLVM's remapOperands produces (deep RPO over the blocks, recipes in order, operands
   in order), so transforms that walk users see LLVM's order. The global `vpl: *Vp_Plan` is the plan being worked
   on (like `se` for ScalarEvolution); `vp_use(plan)` switches it.
 - **VPTransformState** (`Vp_State`) maps a Vp_Val to its IR vector value and per-lane scalars (Tables keyed by the
-  value id and lane), plus the CFG state; recipes emit IR through an `Irb`.
+  value id; lane vectors), plus the CFG state (VPBB2IRBB, a Lazy `Dtu`, the current parent loop); recipes emit IR
+  through an `Irb` (ConstantFolder semantics) and `s.fmf` stands for the IRBuilder's FastMathFlags (applied to FP
+  operations the helpers `vs_binop` / `vs_unop` / `vs_cmp` create).
+- **InterleavedAccessInfo** (`Iai`, lv_interleave.jai): groups are rows of a table (`Ig`, members as parallel
+  key/value arrays = the DenseMap), released groups stay as dead rows; InterleaveGroups is the ordered list of live
+  ids.
 - Everything not ported yet fails loudly (`vp_unported("...")`) at the point where LLVM would act.
 
 ### Cloning: ValueMapper, CloneBasicBlock, LoopUnroll (value_mapper.jai, clone_function.jai, loop_unroll*.jai, loop_peel.jai)

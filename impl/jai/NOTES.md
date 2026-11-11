@@ -1119,56 +1119,66 @@ Still slow / known:
   CallAnalyzer::visitBinaryOperator (constant creation hashes a key per folded constant).
 
 
-## LoopVectorize (in progress; L1.vectorize.loop)
+## LoopVectorize (in progress; L1.vectorize.loop 164/468 opt, 468/468 roundtrip)
 
-- Files: `iv_descriptors.jai` (IVDescriptors.cpp: `Recur_Kind`, `Rdx_Desc` = RecurrenceDescriptor, `Ind_Desc` =
-  InductionDescriptor, rk_* kind predicates), `lv_legality.jai` (LoopVectorizationLegality `Lvl`, LoopVectorizeHints
-  `Lv_Hints`, the Requirements' ExactFPMathInst), `lv_pass.jai` (the pass driver runImpl / processLoop, the
-  cost-model and VFSelectionContext parts that compute the maximum VF, every LoopVectorize cl::opt in `lv_opts`).
-- Milestone 1 (done): the pass runs LoopSimplify on every loop and LCSSA on every candidate loop exactly like LLVM,
-  then decides "not vectorized" whenever LLVM does so without a vector VPlan: legality failures, hints, computeMaxVF
-  returning none, or only VF 1 being feasible (computeBestVF then returns VF 1 without costing, and
-  selectInterleaveCount is clamped by getMaxInterleaveFactor(VF=1) = 1 on X86 and NoTTI). Everything that would
-  build a vector VPlan or interleave fails loudly ("loop-vectorize: ... is not supported yet").
-- Loud gaps of milestone 1: InterleavedAccessInfo (X86 always runs analyzeInterleaving), isDereferenceableAndAligned-
-  InLoop (only decides which predicated loads are masked: recorded in `lv_deref_unknown_loads`, must be ported
-  before masking decisions), early exits with uncountable exits, VFDatabase variants, scalable VFs, outer loops.
-- Sweep `--passes loop-vectorize`: 7183 identical, 0 differs, 571 loud.
-- Milestone 2 (in progress): the VPlan data model and plan construction (DESIGN.md "LoopVectorize and VPlan"):
-  `vplan.jai` (tables, VPValue/VPUser/VPDef ops, recipe lists, VPBlockUtils, traversals, duplicate(), VPDT,
-  VPBuilder), `vplan_utils.jai` (VPlanPatternMatch subset, getSCEVExprForVPValue, VPSCEVExpander), `vplan_props.jai`
-  (the per-recipe-class virtual queries as switches, onlyFirstLaneUsed, isSingleScalar, clone),
-  `vplan_construction.jai` (PlainCFGBuilder, skeleton, header phi recipes incl. FOR sinking, loop regions, check
-  blocks, minimum-iteration check), `vplan_simplify.jai` (simplifyRecipes, removeDeadRecipes), `vplan_transforms.jai`
-  (optimize() and its sub-passes, dropPoisonGeneratingRecipes, ...), `lv_cm.jai` (widening decisions, uniforms,
-  scalars), `lv_plan.jai` (tryToBuildVPlan1, buildVPlans, tryToBuildVPlan, the recipe builder, mem-op decisions,
-  optimizeInductionLiveOutUsers). For `-force-vector-width` loops with NoTTI the plan for the user VF is built;
-  everything after (interleave count, runtime checks, executePlan) fails loudly.
-- Decision costs are recorded as LV_COST_LAZY (lv_cm.jai header): no decision of the ported subset compares costs.
-  The forced-VF path assumes `cost(Plan, UserVF).isValid()` (always true for the fixed-VF recipes ported).
+- Files: `iv_descriptors.jai` (IVDescriptors.cpp), `lv_legality.jai` (LoopVectorizationLegality, LoopVectorizeHints),
+  `lv_pass.jai` (runImpl / processLoop, computeMaxVF, every cl::opt in `lv_opts`), `lv_cm.jai` (widening decisions,
+  uniforms, scalars, X86 masked / gather legality), `lv_interleave.jai` (InterleavedAccessInfo), `lv_plan.jai`
+  (tryToBuildVPlan1 / buildVPlans / tryToBuildVPlan, the recipe builder, mem-op decisions, reductions result
+  computation, FOR middle users, computeMinimumValueSizes), `lv_execute.jai` (the processLoop tail: interleave count,
+  GeneratedRTChecks, isOutsideLoopWorkProfitable, epilogue gate, executePlan, skeleton, loop metadata, legacyCSE),
+  `vplan*.jai`: `vplan.jai` (data model, VPBuilder, VPDT), `vplan_utils.jai`, `vplan_props.jai`,
+  `vplan_construction.jai` (incl. LoopVersioning noalias metadata `Lv_Noalias`), `vplan_simplify.jai`,
+  `vplan_transforms.jai` (optimize(), licm with scoped-noalias checks, truncateToMinimalBitwidths, simplifyReverses),
+  `vplan_predicator.jai` (VPPredicator, blends), `vplan_unroll.jai` (unrollByUF, replicateByVF),
+  `vplan_exec_transforms.jai` (everything executePlan runs before IR emission), `vplan_execute.jai` (VPTransformState,
+  VPlan::execute, every ported recipe's execute), `vplan_print.jai` (debug dump, see below).
+- Done: forced-VF (`-force-vector-width`) and forced-IC (`-force-vector-interleave`, also VF 1) plans for inner loops
+  are built and executed end to end: inductions (int / FP / pointer, truncated, derived, scalar steps), reductions
+  (unordered, not AnyOf / FindIV / FindLast / in-loop), first-order recurrences, if-conversion with blends (no
+  replicate regions), reverse accesses, minimal bitwidths, SCEV and memory runtime checks (diff checks and
+  addRuntimeChecks, check blocks removed when unused), LoopVersioning alias scopes, deletion of an unreachable scalar
+  loop, unrolling by UF, licm, cse, loop metadata (isvectorized, unroll.runtime.disable, followup ids), legacyCSE.
+- Debugging: `JAI_VPLAN_DEBUG=1 bin/opt ...` dumps the plan at "chosen", after materializeFactors /
+  expandSCEVsToVPInstructions / cse+simplify, and "execute" to stderr (an approximation of VPlan::print; LLVM's release
+  opt cannot print plans, so only final IR can be compared).
+- Sweeps `--passes loop-vectorize` (plain 7185 identical / 569 loud; `--with-test-flags`; `--with-test-flags
+  --per-function`): 0 differs, 0 bad-ir. `sroa,loop-vectorize` on tests/perf/compile/*: all 4 loud (cost model).
+- Decision costs are still LV_COST_LAZY (lv_cm.jai header) and the forced-VF path assumes `cost(Plan, UserVF)` is
+  valid. selectInterleaveCount only returns 1 when the target's maximum interleave factor is 1 (NoTTI, X86 at VF 1);
+  with a user IC it is only computed when runtime checks need SelectedIC (fails loudly otherwise).
+- Traps met: VPRegionValue is a VPSymbolicValue (m_LiveIn, getValueForPart, State.get accept it); int_pred_ty matchers
+  (m_ZeroInt / m_One / m_AllOnes / m_SpecificInt / m_True / m_False) look through Broadcast; m_Not also matches
+  `xor x, -1`; GeneratedRTChecks::getSCEVChecks/getMemRuntimeChecks treat a check folded to false as no check (the
+  block is then erased); handleFindLastReductions' `hasScalarVFOnly()` is false while building (VFs are added at the
+  end of tryToBuildVPlan); a replicate clone is unnamed (IRBuilder::Insert's setName("") drops ".cloned"); VPlan
+  live-in intrinsic folding is simplifyIntrinsic (poison propagation before the binary-intrinsic rules); createScalarCast
+  without flags uses getDefaultFlags; X86 does not override enableMaskedInterleavedAccessVectorization; the metadata
+  kind is "llvm.access.group"; `int IndexA` in analyzeInterleaving truncates an int64 expression.
 
-### LoopVectorize next steps (in data-flow order; each currently fails loudly with the quoted message)
+### LoopVectorize next steps (each fails loudly with the quoted message today)
 
-1. executePlan (LoopVectorize.cpp 5903): replaceWideCanonicalIVWithWideIV, unrollByUF (VPlanUnroll.cpp),
-   materializePacksAndUnpacks, materializeBroadcasts, replicateByVF, materializeConstantVectorTripCount,
-   optimizeForVFAndUF, convertToConcreteRecipes (expands WidenIntOrFpInduction / DerivedIV / pointer IVs),
-   dissolveLoopRegions, materializeBackedgeTakenCount / VectorTripCount / Factors, expandSCEVsToVPInstructions, cse,
-   expandSCEVs, createVectorizedLoopSkeleton, VPlan::execute + every recipe's execute (VPlanRecipes.cpp),
-   updateLoopMetadataAndProfileInfo (llvm.loop.isvectorized + unroll.runtime.disable), legacyCSE. With UserIC unset and
-   getMaxInterleaveFactor = 1 (NoTTI) selectInterleaveCount returns 1 without needing costs (see lv_pass.jai).
-   Traps found while reading it: replicateByVF always replicates VPScalarIVStepsRecipes per lane (the lane-0 clone
-   takes the first-lane uses, the rest die); the ScalarIVSteps -> DerivedIV -> canonical IV simplifications in
-   simplifyRecipe only fire once the plan is unrolled (`Plan->isUnrolled()`, i.e. after unrollByUF sets the UF);
-   materializeConstantVectorTripCount gives the symbolic vector trip count an *underlying value* instead of replacing
-   it (materializeVectorTripCount then skips it); simplifyBranchConditionForVFAndUF turns the latch BranchOnCount into
-   BranchOnCond(true) when the vector trip count is known <= VF*UF. lv_plan.jai's `lvp_vectorize_with_plan` is the
-   place to continue.
-2. GeneratedRTChecks (SCEV and memory runtime checks; LoopVersioning noalias metadata), the "executing VPlans" gate.
-3. Reductions (createInLoopReductionRecipes, addReductionResultComputation, ComputeReductionResult), first-order
-   recurrences, if-conversion (VPlanPredicator: needs a VPlan post-dominator tree), replicate regions, calls,
-   computeMinimumValueSizes / truncateToMinimalBitwidths, induction truncates, reverse accesses, tail folding.
-4. The VPlan cost model (VPCostContext, VPlan::cost, precomputeCosts, the legacy getInstructionCost) for
-   computeBestVF / selectInterleaveCount on X86, InterleavedAccessInfo, epilogue vectorization.
+1. The cost model ("choosing the VF with the VPlan cost model (computeBestVF)", 56 unit tests, all 4 perf programs,
+   most X86 tests): the legacy LoopVectorizationCostModel::getInstructionCost / getMemoryInstructionCost family and
+   real widening-decision costs (replace LV_COST_LAZY), VPCostContext, VPlan::cost / every recipe's computeCost,
+   precomputeCosts, LoopVectorizationPlanner::cost, computeBestVF / isMoreProfitable, calculateRegisterUsageForPlan and
+   the rest of selectInterleaveCount ("choosing the interleave count ..."), isOutsideLoopWorkProfitable's minimum
+   profitable trip count. Calls need it too ("call widening decisions (makeCallWideningDecisions)": decideCallWidening
+   compares computeCallCost / intrinsic / variant costs), and so does collectInstsToScalarize
+   ("scalarization of predicated instructions": computePredInstDiscount).
+2. Replicate regions for predicated scalar recipes (createAndOptimizeReplicateRegions, sinkScalarOperands,
+   mergeReplicateRegionsIntoSuccessors, dissolveReplicateRegion in replicateByVF, BranchOnMask / PredInstPHI execute),
+   once collectInstsToScalarize has costs.
+3. Interleave groups (InterleavedAccessInfo is ported; "interleave groups (... found candidate groups)" fails at the
+   first group): interleave widening costs, createInterleaveGroups, VPInterleaveRecipe::execute,
+   narrowInterleaveGroups, dropPoisonGeneratingRecipes' interleave path.
+4. Tail folding ("tail folding by masking (foldTailByMasking)"): header mask, materializeHeaderMask, active lane mask
+   styles, masked loads/stores execute, reassociateHeaderMask, optimizeVectorInductionWidthForTCAndVFUF's narrowing.
+5. Smaller gaps: AnyOf / FindIV / FindLast / in-loop / ordered reductions (handleFindLastReductions,
+   optimizeFindIVReductions, createInLoopReductionRecipes, VPReductionRecipe), epilogue vectorization
+   (`-epilogue-vectorization-force-VF` and the profitability path), VFDatabase variants, uncountable early exits,
+   replaceSymbolicStrides, scalable VFs, outer loops, branch weights (addBranchWeightToMiddleTerminator and the
+   estimated trip-count metadata), debug-info-for-profiling discriminators.
 
 ## IPO: GlobalOpt, GlobalDCE, ConstantMerge, Internalize, DeadArgElim, ArgumentPromotion (L2.globals 443/450, L2.ipo-args COMPLETE 206/206)
 

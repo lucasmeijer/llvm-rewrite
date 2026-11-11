@@ -49,7 +49,7 @@ lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.95
 lib/Analysis/TargetTransformInfo.cpp 0.3
 lib/Transforms/Utils/BasicBlockUtils.cpp 0.75
-lib/Analysis/VectorUtils.cpp 0.5
+lib/Analysis/VectorUtils.cpp 0.65  # + InterleavedAccessInfo::analyzeInterleaving, computeMinimumValueSizes, getMetadataToPropagate
 lib/IR/Intrinsics.cpp 0.75
 lib/IR/Instruction.cpp 0.7
 lib/IR/IRBuilder.cpp 0.25
@@ -115,7 +115,7 @@ lib/Transforms/Scalar/LICM.cpp 0.97  # all of LICM/LNICM incl. ControlFlowHoiste
 lib/Analysis/MustExecute.cpp 0.35  # LoopSafetyInfo + ICFLoopSafetyInfo only (no SimpleLoopSafetyInfo, printers, MustBeExecutedContextExplorer)
 lib/Analysis/AliasSetTracker.cpp 0.85  # no printers
 lib/Analysis/InstructionPrecedenceTracking.cpp 0.9
-lib/Transforms/Utils/LoopUtils.cpp 0.5  # hasPartialIVCondition (L1.unswitch); addRuntimeChecks/expandBounds, findDefsUsedOutsideOfLoop; appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint, isAlmostDeadIV, rewriteLoopExitValues (+ canLoopBeDeleted, hasHardUserWithinLoop; not the UnusedIndVarInLoop mode), deleteDeadLoop, breakLoopBackedge, hasMustProgress; cloneLoop, addStringMetadataToLoop, makeFollowupLoopID, has{Unroll,UnrollAndJam}Transformation, get/setLoopEstimatedTripCount, get/setLoopProbability, get/setBranchProbability
+lib/Transforms/Utils/LoopUtils.cpp 0.5  # hasPartialIVCondition (L1.unswitch); addRuntimeChecks/expandBounds, findDefsUsedOutsideOfLoop; appendLoopsToWorklist, collectChildrenInLoop, hasDisable*TransformsHint, isAlmostDeadIV, rewriteLoopExitValues (+ canLoopBeDeleted, hasHardUserWithinLoop; not the UnusedIndVarInLoop mode), deleteDeadLoop, breakLoopBackedge, hasMustProgress; cloneLoop, addStringMetadataToLoop, makeFollowupLoopID, has{Unroll,UnrollAndJam}Transformation, get/setLoopEstimatedTripCount, get/setLoopProbability, get/setBranchProbability; addDiffRuntimeChecks + SCEVPtrToAddrRewriter (LV)
 lib/IR/EHPersonalities.cpp 0.8  # classifyEHPersonality, colorEHFunclets
 lib/CodeGen/TargetLoweringBase.cpp 0.3   # jai_simplifycfg: initActions, computeRegisterProperties, getTypeConversion, isBeneficialToExpandPowI, getBitWidthForCttzElements
 lib/Target/X86/X86ISelLowering.cpp 0.03   # jai_simplifycfg: the X86TargetLowering constructor's operation actions (generated), getPreferredVectorAction, isLegalAddressingMode, isCheapToSpeculateCt*, isNoopAddrSpaceCast
@@ -171,14 +171,15 @@ lib/Transforms/IPO/ModuleInliner.cpp 0.9  # manual: ModuleInlinerPass::run as mo
 lib/Analysis/ProfileSummaryInfo.cpp 0.75  # not the legacy wrapper / print-profile-summary
 lib/IR/ProfileSummary.cpp 0.4  # getFromMD only (no getMD / printSummary)
 lib/Transforms/Vectorize/LoopVectorizationLegality.cpp 0.85  # no outer loops, uncountable early exits, histograms
-lib/Transforms/Vectorize/LoopVectorize.cpp 0.2  # driver, hints, max VF, decisions, plan building; no cost model / execution
-lib/Transforms/Vectorize/LoopVectorizationPlanner.cpp 0.35  # VFSelectionContext max-VF parts
-lib/Transforms/Vectorize/VPlan.cpp 0.3  # blocks, values, duplicate, VPBuilder pieces; no execute / printing
-lib/Transforms/Vectorize/VPlanConstruction.cpp 0.45
-lib/Transforms/Vectorize/VPlanTransforms.cpp 0.12
-lib/Transforms/Vectorize/VPlanUtils.cpp 0.6
-lib/Transforms/Vectorize/VPlanRecipes.cpp 0.08  # the recipe property queries only
-lib/Transforms/Vectorize/VPlanPredicator.cpp 0.05
+lib/Transforms/Vectorize/LoopVectorize.cpp 0.4  # driver, hints, max VF, decisions, plan building, processLoop tail, GeneratedRTChecks, executePlan, skeleton, legacyCSE; no cost model, epilogue vectorization, outer loops
+lib/Transforms/Vectorize/LoopVectorizationPlanner.cpp 0.4  # VFSelectionContext max-VF parts, masked/gather legality, minimal bitwidths
+lib/Transforms/Vectorize/VPlan.cpp 0.55  # blocks, values, duplicate, VPBuilder, VPTransformState, VPlan::execute, block execution, dissolveToCFGLoop, loop metadata; no cost / printing
+lib/Transforms/Vectorize/VPlanConstruction.cpp 0.5  # no in-loop reductions, uncountable early exits, FindLast / MaxMinNum / multi-use reductions
+lib/Transforms/Vectorize/VPlanTransforms.cpp 0.35  # optimize() subset, executePlan transforms, licm, minimal bitwidths, reverses, FOR middle users; no replicate regions, interleave groups, EVL / tail folding, partial / abstract reductions, cost-based transforms
+lib/Transforms/Vectorize/VPlanUtils.cpp 0.7
+lib/Transforms/Vectorize/VPlanRecipes.cpp 0.3  # property queries and execute() of the ported recipes; no costs, printing, interleave / call / intrinsic / EVL / histogram recipes
+lib/Transforms/Vectorize/VPlanPredicator.cpp 0.85  # no switch edge masks
+lib/Transforms/Vectorize/VPlanUnroll.cpp 0.7  # no replicate regions
 # --- L2.globals / L2.ipo-args (jai_globals, 2026-11; port-audit.py heuristic in parentheses where it misses renamed entry points)
 lib/Transforms/IPO/GlobalOpt.cpp 0.85  # not OptimizeNonTrivialIFuncs (TTI::isMultiversionedFunction is false off AArch64) nor the BFI coldcc candidate search (useColdCCForColdCall is false on X86)
 lib/Transforms/Utils/Evaluator.cpp 1
