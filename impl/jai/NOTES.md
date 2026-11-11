@@ -1326,3 +1326,9 @@ Still slow / known:
   `--with-test-flags` 10075/10189 (loud: other passes' options), `mergeicmps,print<domtree>`;
   `dfa-jump-threading` 7885/7885, stressed with `-dfa-cost-threshold=100000 -dfa-early-exit-heuristic=false
   -dfa-max-cloned-rate=1000` (also `,print<domtree>`); `function(sroa),<pass>` on tests/perf/compile 4/4 for both.
+- Not done: LoopInterchange (`loop-interchange`, the last -O2 gap besides expand-memcmp). It is a LoopNest pass that
+  needs DependenceInfo::depends (lib/Analysis/DependenceAnalysis.cpp + Delinearization.cpp; SCEV-based subscript
+  tests) for its direction matrix in every configuration, and LoopCacheAnalysis (CacheCost) only for the `cache`
+  profitability rule, which is not in the default list (`instorder,vectorize`). Plan: port DependenceAnalysis with
+  its `print<da>` printer first (tests/imported/llvm/Analysis/DependenceAnalysis, import it), then the pass;
+  `-loop-interchange-profitabilities=cache` can fail loudly until LoopCacheAnalysis is ported.

@@ -212,3 +212,5 @@ lib/Transforms/Utils/RelLookupTableConverter.cpp 0.95  # dropping unnamed_addr (
 lib/Transforms/Utils/EntryExitInstrumenter.cpp 0.85  # AIX / RISC-V / AArch64 / LoongArch / SystemZ mcount variants fail loudly
 lib/Transforms/IPO/FunctionSpecialization.cpp 0.97  # all of it; fails loudly where the result depends on SmallPtrSet pointer order (>8 specialized functions in one round)
 lib/IR/BundleAttributes.cpp 0.15  # getAssumeNonNullInfo only (PredicateInfo)
+lib/Transforms/Utils/SSAUpdaterBulk.cpp 0.75  # RewriteAllUses (inside pass_dfa_jump_threading.jai); not RewriteAndOptimizeAllUses / simplifyPass
+lib/Transforms/Scalar/DFAJumpThreading.cpp 0.97  # optimization remarks are not emitted
