@@ -10255,6 +10255,7 @@ tests/imported/llvm/Transforms/LoopVectorize/X86/limit-vf-by-tripcount.ll::round
 tests/imported/llvm/Transforms/LoopVectorize/X86/load-deref-pred.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/masked_load_store.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/max-mstore.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/X86/min-trip-count-switch.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/min-trip-count-switch.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/nondetermisitic-widening-cost.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/nontemporal.ll::roundtrip
@@ -10263,6 +10264,7 @@ tests/imported/llvm/Transforms/LoopVectorize/X86/outer-loop-non-power-of-2-type.
 tests/imported/llvm/Transforms/LoopVectorize/X86/outer_loop_test1_no_explicit_vect_width.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/parallel-loops-after-reg2mem.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/parallel-loops-after-reg2mem.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/X86/parallel-loops.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/parallel-loops.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/powof2div.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr141968-instsimplifyfolder.ll::roundtrip
