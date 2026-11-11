@@ -68,6 +68,7 @@
 #load "pass_move_auto_init.jai";
 #load "pass_alignment_from_assumptions.jai";
 #load "pass_libcalls_shrinkwrap.jai";
+#load "pass_called_value_propagation.jai";
 #load "pass_reassociate.jai";
 #load "constraint_system.jai";
 #load "pass_constraint_elimination.jai";

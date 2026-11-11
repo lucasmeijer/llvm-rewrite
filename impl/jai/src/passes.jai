@@ -308,7 +308,7 @@ Pass_Kind :: enum u8 {
     // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
     ANNOTATION2METADATA; ANNOTATION_REMARKS; FORCEATTRS; MEMPROF_REMOVE_INFO; RECOMPUTE_GLOBALSAA; LOWER_COMMENT_STRING;
-    INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING; DROP_UNNECESSARY_ASSUMES; JUMP_TABLE_TO_SWITCH; MOVE_AUTO_INIT; ALIGNMENT_FROM_ASSUMPTIONS; LIBCALLS_SHRINKWRAP;
+    INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING; DROP_UNNECESSARY_ASSUMES; JUMP_TABLE_TO_SWITCH; MOVE_AUTO_INIT; ALIGNMENT_FROM_ASSUMPTIONS; LIBCALLS_SHRINKWRAP; CALLED_VALUE_PROPAGATION;
 }
 
 Pass_Info :: struct {
@@ -487,6 +487,7 @@ PASS_TABLE :: Pass_Info.[
     .{"move-auto-init", .FUNCTION, .MOVE_AUTO_INIT, false, .DOMTREE},
     .{"alignment-from-assumptions", .FUNCTION, .ALIGNMENT_FROM_ASSUMPTIONS, false, .DOMTREE},
     .{"libcalls-shrinkwrap", .FUNCTION, .LIBCALLS_SHRINKWRAP, false, .DOMTREE},
+    .{"called-value-propagation", .MODULE, .CALLED_VALUE_PROPAGATION, false, .DOMTREE},
     .{"ee-instrument", .FUNCTION, .EE_INSTRUMENT, true, .DOMTREE},   // also ee-instrument<...>
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
@@ -1120,6 +1121,7 @@ run_module_pm :: (n: s32) {
             case .REL_LOOKUP_TABLE_CONVERTER; if should_run_pass(node, NONE) mam_invalidate(rel_lookup_table_converter_run());
             case .CG_PROFILE; if should_run_pass(node, NONE) mam_invalidate(cg_profile_run());
             case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
+            case .CALLED_VALUE_PROPAGATION; if should_run_pass(node, NONE) mam_invalidate(called_value_propagation_run());
             case; fatal("internal: '%' is not a module pass", node.name);
         }
         c = pipeline.nodes[c].next;
