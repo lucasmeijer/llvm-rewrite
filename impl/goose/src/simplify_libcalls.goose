@@ -249,11 +249,7 @@ fn annotate_nonnull_and_dereferenceable(ci: i32, a0: i64, a1: i64, size: i32) {
         if a1 >= 0 { annotate_dereferenceable_bytes(ci, a1, len); }
         return;
     }
-    let sv = kb_cxt;
-    kb_cxt = -1;
-    let nz = is_known_non_zero(size, 0);
-    kb_cxt = sv;
-    if nz {
+    if known_non_zero_dl(size) {
         annotate_nonnull_noundef(ci, a0);
         if a1 >= 0 { annotate_nonnull_noundef(ci, a1); }
         if is_select_inst(size) {
@@ -393,7 +389,7 @@ fn optimize_string_length(ci: i32, cs: i64, bound: i32) -> i32 {
     let cty = ty_int(cs);
     if is_only_used_in_zero_equality_comparison(ci) {
         var ok = bound < 0;
-        if !ok { kb_cxt = -1; ok = is_known_non_zero(bound, 0); }
+        if !ok { ok = known_non_zero_dl(bound); }
         if ok { return icb_zext(icb_load(cty, src, "char0"), vals[ci].ty, ""); }
     }
     if bound >= 0 && vals[bound].kind == VK_CINT {
@@ -477,8 +473,7 @@ fn optimize_strnlen(ci: i32) -> i32 {
     let bound = cb_arg(ci, 1);
     let v = optimize_string_length(ci, 8, bound);
     if v >= 0 { return v; }
-    kb_cxt = -1;
-    if is_known_non_zero(bound, 0) { annotate_nonnull_noundef(ci, 0); }
+    if known_non_zero_dl(bound) { annotate_nonnull_noundef(ci, 0); }
     return -1;
 }
 fn optimize_wcslen(ci: i32) -> i32 {
@@ -998,12 +993,15 @@ fn is_only_used_in_equality_comparison(v: i32, with: i32) -> bool {
     }
     return true;
 }
-// isKnownNonZero(V, DL): no context instruction, no assumptions
+// isKnownNonZero(V, DL): SimplifyQuery(DL) has no CxtI, DT, AC, DC or TLI. The PHI case recurses with the
+// incoming terminators as context, so without sq_no_dt/sq_no_ac it would still use dominating conditions and
+// assumptions (lua.ll @lmemfind: memchr's length phi is non-zero only under the loop guard)
 fn known_non_zero_dl(v: i32) -> bool {
     let sv = kb_cxt;
-    kb_cxt = -1;
+    let s1 = sq_no_dt; let s2 = sq_no_ac; let s3 = sq_no_tli;
+    kb_cxt = -1; sq_no_dt = true; sq_no_ac = true; sq_no_tli = true;
     let r = is_known_non_zero(v, 0);
-    kb_cxt = sv;
+    kb_cxt = sv; sq_no_dt = s1; sq_no_ac = s2; sq_no_tli = s3;
     return r;
 }
 // memChrToCharCompare(CI, NBytes, B, DL)

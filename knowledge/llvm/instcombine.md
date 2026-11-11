@@ -29,6 +29,11 @@ noted, and by diffing `opt -passes=instcombine` output on the imported tests).
 ## Worklist and visiting
 
 - `InstructionWorklist`: `push` is a stack with a set (no duplicates); `add` goes to `Deferred` (a SetVector).
+  **`InstCombiner::addToWorklist(I)` is `Worklist.push(I)`**, not `add`: addDeadEdge's phis, handleUnreachableFrom's
+  poisoned terminator operands, the dominated-condition users in visitBranchInst, DCE'd old extracts and the like
+  go straight onto the stack. Only `InsertNewInstBefore`, the IRBuilder inserter and explicit `Worklist.add` defer.
+  Deferring changes which fold erases a phi first (a `#dbg_value(i8 0)` instead of `poison` after a store to
+  poison; LoopVectorize/predicatedinst-loop-invariant.ll under debugify).
   Before every pop, all deferred instructions are moved to the stack in reverse order of addition (each DCE'd
   if trivially dead), so they are visited in the order they were added. Builder-created instructions are
   `add`ed (IRBuilderInstCombineInserter); `replaceOperand`/`eraseInstFromFunction` call
@@ -172,6 +177,9 @@ icmp*/fcmp* tests.
 - `ICmpInst::swapOperands` (operand-complexity canonicalization at the top of visitICmp/visitFCmp) is
   `Op<0>().swap(Op<1>())`, i.e. `Use::swap`: the two uses trade values *and use-list positions*. Re-setting the
   operands instead pushes both uses to the heads of their lists and changes later user-iteration order.
+  The same holds for `BinaryOperator::swapOperands` (SimplifyAssociativeOrCommutative, Reassociate's
+  canonicalizeOperands) and `ShuffleVectorInst::commute`: use-list order is hidden state that a later pass in the
+  same opt run sees (sieve.ll: reassociate then loop-rotate built an extra phi when the use order differed).
 - `isSignTest(Pred, C)` takes `Pred` by reference and rewrites `slt 1` → `sle`, `sgt -1` → `sge` whenever it
   returns true, even if the caller's other condition then fails: in foldICmpMulConstant
   `isSignTest(Pred, C) && Mul->hasNoSignedWrap()` leaves the updated predicate for the folds below

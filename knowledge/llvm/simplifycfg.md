@@ -53,6 +53,14 @@ Facts verified while porting `llvm/lib/Transforms/Utils/SimplifyCFG.cpp` (LLVM 2
 
 ## More pass facts (verified in the Jai port, all of tests/imported/llvm/Transforms/SimplifyCFG but `-O1`)
 
+- **`PHINode::removeIncomingValueIf` is not stable**: it walks the entries backwards and moves the current *last*
+  entry into each removed slot (like `removeIncomingValue`). removeSwitchAfterSelectFold on
+  `phi [-1, %switch], [0, %a], [%y, %entry]` gives `[%y, %entry], [0, %a]` before adding `[%sel, %switch]`
+  (SCCP/switch.ll after an O2-like pipeline; verified by the goose port's pipeline sweeps).
+- `IRBuilder::CreateInBoundsGEP`/`CreateInBoundsPtrAdd` use `GEPNoWrapFlags::inBounds()` = inbounds **and** nusw.
+  An implementation that tracks nusw separately must set both, or a later InstCombine never infers `nuw` from
+  `inbounds` + a non-negative offset (AggressiveInstCombine's strcmp expansion, then instcombine).
+
 - foldCondBranchOnValueKnownInPredecessor clones debug records into the threaded edge block **without**
   remapping them (no RemapDbgRecordRange there): the clones keep naming the original values (`%x`, not `%x.c`).
   foldBranchToCommonDest's bonus-instruction cloning *does* remap them (SimplifyCFG.cpp:1206, :3664-3705;

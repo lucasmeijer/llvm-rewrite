@@ -113,9 +113,13 @@ fn sb_set_before(i: i32) { sb_bb = inst_parent(i); sb_pos = i; sb_dl = inst_get_
 // SetInsertPoint(BB): at the end; the debug location is kept
 fn sb_set_end(bb: i32) { sb_bb = bb; sb_pos = -1; }
 
+// sb_head: the insert point is an iterator with the head bit (IRBuilder(BB, BB->getFirstInsertionPt())): new
+// instructions go in front of sb_pos's debug records
+var sb_head = false;
 fn sb_insert(iv: i32, name: const u8[:]) -> i32 {
     // IRBuilder::SetInsertPoint(I) keeps no head bit: the new instruction adopts I's debug records
-    if sb_pos >= 0 { inst_insert_before(iv, sb_pos); } else { block_append_inst(sb_bb, iv); }
+    if sb_pos >= 0 { if sb_head { inst_insert_before_head(iv, sb_pos); } else { inst_insert_before(iv, sb_pos); } }
+    else { block_append_inst(sb_bb, iv); }
     if name.len > 0 && vals[iv].ty != T_VOID { set_name(iv, name); }
     if sb_annot >= 0 { inst_set_md(iv, mdk_annotation(), sb_annot); }
     if sb_dl >= 0 { inst_set_md(iv, MDK_DBG_SC, sb_dl); }
@@ -2042,15 +2046,19 @@ fn merge_conditional_store_to_address(ptb: i32, pfb: i32, qtb: i32, qfb: i32, po
     let pphi = ensure_value_available_in_successor(op(ps, 0), inst_parent(ps), -1);
     let qphi = ensure_value_available_in_successor(op(qs, 0), inst_parent(qs), pphi);
     let first = scf_first_insertion_pt(post);
-    sb_bb = post; sb_pos = first; sb_nofold = false; sb_annot = -1;
+    // IRBuilder<> QB(PostBB, PostBB->getFirstInsertionPt()): the iterator has the head bit, so the predicate goes
+    // in front of PostBB's debug records and SplitBlockAndInsertIfThen at that iterator moves them to the tail
+    // (oggenc.ll @vorbis_encode_ctl under debugify)
+    sb_bb = post; sb_pos = first; sb_nofold = false; sb_annot = -1; sb_head = true;
     sb_dl = inst_get_md(first, MDK_DBG_SC);
     let inv_p = inv_p0 != (inst_parent(ps) != ptb);
     let inv_q = inv_q0 != (inst_parent(qs) != qtb);
     let ppred = if inv_p { sb_not(pcond, "") } else { pcond };
     let qpred = if inv_q { sb_not(qcond, "") } else { qcond };
     let comb = sb_binop(OP_OR, ppred, qpred, "");
+    sb_head = false;
     let ins_pt = sb_pos;
-    let t = split_block_and_insert_if_then(comb, ins_pt, false, -1);
+    let t = split_block_and_insert_if_then_at(comb, ins_pt, true, false, -1);
     if pd_has_branch_weights(pbr) && pd_has_branch_weights(qbr) {
         var pw: u64[>..<] = [];
         var qw: u64[>..<] = [];
@@ -2116,6 +2124,11 @@ fn ensure_value_available_in_successor(v: i32, bb: i32, alt: i32) -> i32 {
 
 // SplitBlockAndInsertIfThen(Cond, SplitBefore, Unreachable, BranchWeights, DTU): returns the then-block's terminator
 fn split_block_and_insert_if_then(cond: i32, before: i32, unreachable: bool, weights: i32) -> i32 {
+    return split_block_and_insert_if_then_at(cond, before, false, unreachable, weights);
+}
+// SplitBlockAndInsertIfThen(Cond, SplitBefore, ...) where SplitBefore may be an iterator with the head bit
+// (head: the debug records in front of `before` move to the tail with it)
+fn split_block_and_insert_if_then_at(cond: i32, before: i32, head_bit: bool, unreachable: bool, weights: i32) -> i32 {
     var ups: DTUpdate[>..<] = [];
     var orig: i32[>..<] = [];
     let head = inst_parent(before);
@@ -2123,7 +2136,7 @@ fn split_block_and_insert_if_then(cond: i32, before: i32, unreachable: bool, wei
     // splitBasicBlock(SplitBefore): unnamed, the branch gets the split point's location without its atom
     var loc = inst_get_md(before, MDK_DBG_SC);
     if loc >= 0 && scf_atom_group(loc) != 0 { scf_not_ported("DILocation::getWithoutAtom"); }
-    let tail = split_block(head, before, "");
+    let tail = if head_bit { split_block_head(head, before, "") } else { split_block(head, before, "") };
     let hbr = block_terminator(head);
     if loc >= 0 { inst_set_md(hbr, MDK_DBG_SC, loc); }
     let fv = block_func(head);

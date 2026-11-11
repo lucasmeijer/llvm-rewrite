@@ -142,6 +142,25 @@ Verified against LLVM 23.1.5 source and the imported InstSimplify tests.
 
 ## Other ValueTracking facts found while making the analyses arbitrary-width
 
+- **`ComputeMaxSignificantBits(V, DL, AC, CxtI, DT, Depth)` runs with UseInstrInfo = false**: it calls
+  `ComputeNumSignBits(V, DL, AC, CxtI, DT, Depth)`, whose sixth parameter is `bool UseInstrInfo` (Depth is the
+  seventh, defaulted), so Depth 0 becomes UseInstrInfo=false (ValueTracking.cpp:380). The whole query then ignores
+  nsw/nuw/exact, nsz and instruction metadata (`Q.IIQ`). It is not just less precise: without nsw a simple
+  recurrence `phi [0], [add nsw %iv, 1]` has no known sign bit, so computeKnownBits falls through to the per-edge
+  union, which uses the backedge branch `icmp ult %iv.next, 12` and finds 28 leading zeros. visitTrunc's nsw
+  inference (`ComputeMaxSignificantBits(Src) <= DestWidth`) therefore sets `trunc nsw` where computeKnownBits
+  alone (the nuw check, UseInstrInfo=true) does not (`trunc nsw i32 %iv to i8`, verified by porting: goose's
+  iiq_off). Every InstCombine ComputeMaxSignificantBits call and SimplifyCFG's eliminateDeadSwitchCases have it.
+- **`isGuaranteedNotToBeUndefOrPoison` without a context instruction has no DominatorTree either**: all callers
+  that pass `CtxI = nullptr` (impliesPoison, createLogicalOp in SimplifyCFG/LoopSimplify, ...) also pass
+  `DT = nullptr` except NewGVN. The PHI case recurses with the incoming block's terminator as CtxI, but `!DT` still
+  skips the dominating-branch walk, so `icmp eq %iv, 0` with `%iv` a loop phi is *not* known non-poison and
+  FoldBranchToCommonDest makes a `select` (IndVarSimplify/eliminate-backedge.ll after instcombine,loop-simplify).
+  JumpThreading:3027 and SimplifyCFG:5345 pass a CtxI but no DT.
+- **`CallBase::paramHasAttr` / `getArgOperandWithAttribute` read the callee's attributes only through
+  `getCalledFunction()`**, which is null when the callee's function type differs from the call's: a `returned`
+  parameter of `define i64 @f(i64 returned)` called as `call float @f(float)` does not make InstCombine replace the
+  call (InstCombine/bitcast-function.ll after function-attrs).
 - **computeKnownBitsFromContext resets conflicting known bits whenever the query has an AssumptionCache**, even
   when there are no assumptions: `call range(i32 0, 32) ... !range !{i32 32, i32 64}` has conflicting bits, and
   InstSimplify (which has an AC) does not fold `shl %a, %b` to poison (InstSimplify/shift-knownbits.ll).

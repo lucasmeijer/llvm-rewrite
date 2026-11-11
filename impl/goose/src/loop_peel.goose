@@ -498,11 +498,15 @@ fn clone_loop_blocks(l: i32, iter: i64, peel_last: bool, top: i32, bot: i32, ori
     dt_change_idom(fv, DT_DOM, bot, nlatch);
     if peel_last {
         let pos = first_non_phi(top);
+        // IRBuilder<> B(InsertTop, InsertTop->getFirstNonPHIIt()): SetInsertPoint takes the debug location of the
+        // instruction there (getStableDebugLoc), and CreatePHI gives it to every new phi
+        let bdl = if pos >= 0 { inst_get_md(pos, 0) } else { -1 };
         var i = block_first(header);
         while i >= 0 && iop(i) == OP_PHI {
             let np = vmm_get(vm, i);
             let pn = new_phi(vals[np].ty, 2);
             inst_insert_before_head(pn, pos);
+            if bdl >= 0 { inst_set_md(pn, 0, bdl); }
             inst_erase_from_parent(np);
             if orig_ph >= 0 { phi_add_incoming(pn, phi_value_for_block(i, ph), orig_ph); }
             phi_add_incoming(pn, phi_value_for_block(i, latch), latch);

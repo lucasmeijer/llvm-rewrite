@@ -411,6 +411,20 @@ fn split_block(bv: i32, at: i32, name: const u8[:]) -> i32 {
     return nb;
 }
 
+// splitBasicBlock(It) for an iterator with the head bit: the records in front of `at` move with it
+fn split_block_head(bv: i32, at: i32, name: const u8[:]) -> i32 {
+    let fv = block_func(bv);
+    let nb = create_block_after(fv, bv, name);
+    let loc = inst_get_md(at, 0);
+    if loc >= 0 && mds[loc].kind == MK_DI && di_kind(loc) == DIK_LOCATION && di_int(loc, "atomGroup") != 0 { fatal("splitBasicBlock: key-instructions atom groups are not ported yet"); }
+    block_splice(nb, -1, false, bv, at, true, -1, false);
+    let br = create_inst(OP_BR, T_VOID, [nb]);
+    block_append_inst(bv, br);
+    if loc >= 0 { inst_set_md(br, 0, loc); }
+    block_replace_successors_phi_uses_with(nb, bv, nb);
+    return nb;
+}
+
 // BasicBlock::eraseFromParent for a block whose instructions are already gone or droppable: drops all
 // references of its instructions, erases them (last first), unlinks the block. The block must be unused.
 fn block_erase(bv: i32) {

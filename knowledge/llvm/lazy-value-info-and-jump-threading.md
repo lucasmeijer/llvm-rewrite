@@ -28,6 +28,12 @@ that only went away with the behaviour described (impl/jai, sweeps over every ro
   (ShouldInitializeAllMetadata) — different `!N` from the surrounding function print (verified:
   JumpThreading/noalias-scope-decl.ll). Arguments print as `i32 %a`, blocks as operands.
 - `isSafeToSpeculativelyExecuteWithVariableReplaced` in getValueAtUse is called with IgnoreUBImplyingAttrs=false.
+- **LVI is cached per function** by the FunctionAnalysisManager like every function analysis: with
+  `function(jump-threading),function(correlated-propagation)` (or any module-level list such as `debugify,jt,cvp`,
+  where each function pass gets its own adaptor) JumpThreading's LVI for `f` survives while the first adaptor runs
+  on the other functions, and CVP on `f` then reads those cached (partly stale) lattice values. A fresh LVI folds
+  less: `Stanford/Queens.ll` keeps `icmp slt %.0, 17` that LLVM folds to `true`, ~20 corpus files differ
+  (verified: goose with a single LVI slot vs one per function, sweep of the split O2-like pipeline).
 
 ## CorrelatedValuePropagation
 - Blocks are visited with `depth_first(&F.getEntryBlock())`, a *lazy* iterator: a block's successors are read when

@@ -8,8 +8,9 @@
 #   SWEEP_ARGS='--per-function' impl/goose/tools/pipeline_sweeps.sh -k 1
 #   NO_DEBUGIFY=1 / NO_PERF=1 / NO_CORPUS=1 / NO_SPLIT=1 to skip parts
 #
-# Artifacts: .harness-out/sweep/goose/<args>/ as for every sweep. Passes Goose doesn't have yet are left out
-# (simple-loop-unswitch, mldst-motion, loop-unroll is listed but still fails loudly on most files).
+# Artifacts: .harness-out/sweep/goose/<args>/ as for every sweep (a copy per label: <dir>.<label>). Passes Goose
+# doesn't have yet (mldst-motion, the vectorizers, globalopt, ...) are left out. Results: impl/goose/NOTES.md
+# ("Multi-pass pipeline sweeps").
 set -uo pipefail
 cd "$(dirname "$0")/../../.."
 
@@ -18,6 +19,7 @@ P=(
   'sroa,early-cse<memssa>,instcombine,simplifycfg,gvn,sccp,instcombine,jump-threading,correlated-propagation,dse,adce,simplifycfg'
   'sroa,instcombine,loop-mssa(loop-rotate,licm)'
   'sroa,instcombine,simplifycfg,loop-mssa(loop-instsimplify,loop-simplifycfg,licm,loop-rotate,licm)'
+  'sroa,instcombine,simplifycfg,loop-mssa(loop-instsimplify,loop-simplifycfg,licm,loop-rotate,licm,simple-loop-unswitch<nontrivial>),simplifycfg,instcombine'
   'sroa,instcombine,simplifycfg,loop(loop-idiom,indvars,loop-deletion)'
   'sroa,instcombine,simplifycfg,loop-mssa(loop-rotate,licm),loop(loop-idiom,indvars,loop-deletion,loop-unroll-full)'
   'sroa,early-cse<memssa>,simplifycfg,instcombine,aggressive-instcombine,jump-threading,correlated-propagation,simplifycfg,instcombine,reassociate,loop-mssa(loop-instsimplify,loop-simplifycfg,licm,loop-rotate,licm),simplifycfg,instcombine,loop(loop-idiom,indvars,loop-deletion),sroa,gvn,sccp,bdce,instcombine,jump-threading,correlated-propagation,adce,memcpyopt,dse,loop-mssa(licm),simplifycfg,instcombine'
