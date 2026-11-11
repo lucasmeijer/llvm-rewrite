@@ -28,6 +28,7 @@ import memloc;
 import aautil;
 import aa;
 import memoryssa;
+import value_mapper;
 
 let MAK_DEAD: u8 = 4;
 
@@ -1239,7 +1240,16 @@ fn msu_create_access_after(i: i32, definition: i32, insert_pt: i32) -> i32 {
 var msu_vmap: i64 = 0;
 var msu_region: i32 = -1;   // updateForClonedBlockIntoPred: IsInClonedRegion(BB) = BB == region
 
-fn msu_vmap_lookup(v: i32) -> i32 { vm_get(msu_vmap, v, -1) as i32 }
+var msu_vmm: i32 = -1;          // >= 0: the VMap is this ValueToValueMapTy (value_mapper.goose) instead
+var msu_region_set: i32[>..<];  // msu_region == -2: IsInClonedRegion(BB) = BB in this list
+fn msu_vmap_lookup(v: i32) -> i32 {
+    if msu_vmm >= 0 { return vmm_get(msu_vmm, v); }
+    return vm_get(msu_vmap, v, -1) as i32;
+}
+fn msu_in_cloned_region(bb: i32) -> bool {
+    if msu_region == -2 { return position(msu_region_set, bb) >= 0; }
+    return bb == msu_region;
+}
 
 // getNewDefiningAccessForClone(MA, VMap, MPhiMap, MSSA, IsInClonedRegion)
 recursive fn msu_new_defining_access_for_clone(a: i32) -> i32 {
@@ -1247,7 +1257,7 @@ recursive fn msu_new_defining_access_for_clone(a: i32) -> i32 {
     if macc[a].kind == MAK_DEF || macc[a].kind == MAK_LIVE {
         if mssa_is_live(a) { return a; }
         let di = macc[a].inst;
-        if inst_parent(di) != msu_region { return a; }
+        if !msu_in_cloned_region(inst_parent(di)) { return a; }
         let ni = msu_vmap_lookup(di);
         d = if ni >= 0 && is_inst(ni) { mssa_access_of(ni) } else { -1 };
         if d < 0 || macc[d].kind == MAK_USE { d = msu_new_defining_access_for_clone(ma_def(a)); }
@@ -1279,6 +1289,7 @@ fn msu_clone_uses_and_defs(bv: i32, nbv: i32, clone_was_simplified: bool) {
 // updateForClonedBlockIntoPred(BB, P1, VM): VM in vm slot vmap
 fn msu_update_for_cloned_block_into_pred(bv: i32, p1: i32, vmap: i64) {
     msu_enter();
+    msu_vmm = -1;
     msu_vmap = vmap;
     msu_region = bv;
     ms_clear(MS_TMP);
@@ -1286,6 +1297,78 @@ fn msu_update_for_cloned_block_into_pred(bv: i32, p1: i32, vmap: i64) {
     if mp >= 0 { ms_set(MS_TMP, mp, mphi_value_for_block(mp, p1)); }
     msu_clone_uses_and_defs(bv, p1, true);
     msu_leave();
+}
+
+// onlySingleValue(MP)
+fn msu_only_single_value_phi(p: i32) -> i32 {
+    var a: i32 = -1;
+    for k in mphi_n(p) {
+        let v = mphi_val(p, k);
+        if a < 0 { a = v; } else if a != v { return -1; }
+    }
+    return a;
+}
+
+// updateForClonedLoop(LoopBlocks (RPO), ExitBlocks, VMap (a ValueToValueMapTy), IgnoreIncomingWithNoClones)
+fn msu_update_for_cloned_loop(rpo: const i32[:], exits: const i32[:], vm: i32, ignore_no_clones: bool) {
+    msu_enter();
+    msu_vmm = vm;
+    msu_region = -2;
+    msu_region_set.clear();
+    for b in rpo { if position(msu_region_set, b) < 0 { msu_region_set.push(b); } }
+    for b in exits { if position(msu_region_set, b) < 0 { msu_region_set.push(b); } }
+    ms_clear(MS_TMP);
+    var blocks: i32[>..<] = [];
+    for b in msu_region_set { blocks.push(b); }
+    for bb in blocks {
+        let nb = vmm_get(vm, bb);
+        if nb < 0 { continue; }
+        let mp = mssa_access_of(bb);
+        if mp >= 0 && macc[mp].kind == MAK_PHI {
+            let np = mssa_create_phi(nb);
+            ms_set(MS_TMP, mp, np);
+        }
+        msu_clone_uses_and_defs(bb, nb, false);
+    }
+    for bb in blocks {
+        let mp = mssa_access_of(bb);
+        if mp < 0 || macc[mp].kind != MAK_PHI || !ms_has(MS_TMP, mp) { continue; }
+        let np = ms_get(MS_TMP, mp);
+        // FixPhiIncomingValues(MPhi, NewPhi)
+        let npbb = macc[np].bb;
+        var preds: i32[>..<] = [];
+        each_pred(npbb) { p => preds.push(p); };
+        let n = mphi_n(mp);
+        for k in n {
+            let ia = mphi_val(mp, k);
+            var ib = mphi_blk(mp, k);
+            let nib = vmm_get(vm, ib);
+            if nib >= 0 { ib = nib; } else if ignore_no_clones { continue; }
+            if position(preds, ib) < 0 { continue; }
+            mphi_add_incoming(np, msu_new_defining_access_for_clone(ia), ib);
+        }
+        let single = msu_only_single_value_phi(np);
+        if single >= 0 {
+            ms_set(MS_TMP, mp, single);
+            msu_remove_memory_access(np, false);
+        }
+    }
+    msu_vmm = -1;
+    msu_region = -1;
+    msu_leave();
+}
+
+// updateExitBlocksForClonedLoop(ExitBlocks, VMaps, DT)
+fn msu_update_exit_blocks_for_cloned_loop(fv: i32, exits: const i32[:], vms: const i32[:]) {
+    var ups: DTUpdate[>..<] = [];
+    for e in exits {
+        for vm in vms {
+            let ne = vmm_get(vm, e);
+            if ne < 0 { continue; }
+            ups.push(DTUpdate { kind: DT_INSERT, from: ne, to: term_succ(block_terminator(ne), 0) });
+        }
+    }
+    msu_apply_insert_updates(fv, ups);
 }
 
 // ---------------------------------------------------------------------------------------------

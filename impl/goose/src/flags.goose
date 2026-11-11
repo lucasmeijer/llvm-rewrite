@@ -108,6 +108,12 @@ let KNOWN_FLAGS: const u8[:][] = [
     "unroll-peel-count", "unroll-allow-peeling", "unroll-allow-loop-nests-peeling", "unroll-peel-max-count",   // LoopPeel.cpp
     "unroll-force-peel-count", "disable-advanced-peeling", "enable-peeling-for-iv",
     "partial-unrolling-threshold",                       // BasicTTIImpl.cpp
+    "enable-nontrivial-unswitch", "unswitch-threshold", "enable-unswitch-cost-multiplier",   // simple-loop-unswitch
+    "unswitch-siblings-toplevel-div", "unswitch-parent-blocks-div", "unswitch-num-initial-unscaled-candidates",
+    "simple-loop-unswitch-guards", "simple-loop-unswitch-drop-non-trivial-implicit-null-checks",
+    "simple-loop-unswitch-memoryssa-threshold", "freeze-loop-unswitch-cond",
+    "simple-loop-unswitch-inject-invariant-conditions", "simple-loop-unswitch-inject-invariant-condition-hotness-threshold",
+    "simple-loop-unswitch-estimate-profile",
     "costmodel-reduxcost",                               // no-op: declared but unused in TargetTransformInfo.cpp
     "disable-verify",                                    // no-op: opt only skips its own input/output verification
     "disable-loop-unrolling",                            // no-op for -passes= (PipelineTuningOptions of -O<n>)

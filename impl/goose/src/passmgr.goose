@@ -72,6 +72,7 @@ import inliner;
 import function_attrs;
 import psi;
 import loop_unroll_pass;
+import simple_loop_unswitch_nt;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -167,6 +168,7 @@ let P_LOOP_IDIOM = 213;
 let P_PRINT_IV_USERS = 208;
 let P_LOOP_UNROLL = 290;      // function pass; arg: index into lu_opt_table
 let P_LOOP_UNROLL_FULL = 291; // loop pass
+let P_SIMPLE_LOOP_UNSWITCH = 292;  // loop pass; arg: bit 0 = nontrivial, bit 1 = trivial
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
 // (PassInfoMixin::isRequired: printers, verifier, require/invalidate, adaptors).
@@ -764,6 +766,29 @@ recursive fn parse_loop_elem(e: i32) -> i32 {
         }
         return new_pnode(PK_PASS, P_LOOP_ROTATE as i32, arg, false, pelems[e].name);
     }
+    if is_param_name(name, "simple-loop-unswitch") {
+        // parseLoopUnswitchOptions: {NonTrivial = false, Trivial = true}
+        var arg: i32 = 2;
+        let lt = find(name, "<");
+        if lt >= 0 {
+            let params = name[(lt as i64) + 1..name.len - 1];
+            var start: i64 = 0;
+            while start <= params.len {
+                var end = start;
+                while end < params.len && params[end] != ';' { end++; }
+                var pn = params[start..end];
+                var en = true;
+                if starts_with(pn, "no-") { en = false; pn = pn[3..]; }
+                var bit: i32 = -1;
+                if pn == "nontrivial" { bit = 1; }
+                else if pn == "trivial" { bit = 2; }
+                else { perr_pipeline(str("invalid LoopUnswitch pass parameter '", pn, "'")); }
+                if en { arg |= bit; } else { arg &= ~bit; }
+                start = end + 1;
+            }
+        }
+        return new_pnode(PK_PASS, P_SIMPLE_LOOP_UNSWITCH as i32, arg, false, pelems[e].name);
+    }
     if is_param_name(name, "licm") || is_param_name(name, "lnicm") {
         // parseLICMOptions
         let nest = is_param_name(name, "lnicm");
@@ -1150,6 +1175,12 @@ fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
         P_LOOP_INSTSIMPLIFY => { let pa = loop_instsimplify_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
         P_LOOP_SIMPLIFYCFG => { let pa = loop_simplifycfg_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
         P_LOOP_IDIOM => { let pa = loop_idiom_pass_run(l, lpm_use_mssa); ap_pool_reset(); return pa; },
+        P_SIMPLE_LOOP_UNSWITCH => {
+            let a = pnodes[n].arg;
+            let pa = simple_loop_unswitch_pass_run(l, (a & 1) != 0, (a & 2) != 0, lpm_use_mssa);
+            ap_pool_reset();
+            return pa;
+        },
         P_LOOP_UNROLL_FULL => {
             let pa = loop_full_unroll_pass_run(l, 2, false, false);
             ap_pool_reset();

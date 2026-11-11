@@ -28,6 +28,10 @@ import breakcrit;
 import cfgutil;
 import scev;
 import value_mapper;
+import memoryssa;
+import mssaupdater;
+
+var uu_mssau: bool = false;   // SplitBlock / SplitEdge get the MemorySSAUpdater
 
 fn uu_not_ported(what: const u8[:]) { fatal(str("loop utilities: ", what, " is not ported yet")); }
 
@@ -339,6 +343,7 @@ fn lp_split_block(old: i32, at0: i32) -> i32 {
         dt_add_new_block(fv, DT_DOM, nb, old);
         for c in ch { dt_change_idom(fv, DT_DOM, c, nb); }
     }
+    if uu_mssau { msu_move_all_after_splice_blocks(old, nb, block_first(nb)); }
     return nb;
 }
 
@@ -373,6 +378,7 @@ fn lp_split_block_before(old: i32, at0: i32) -> i32 {
     ups.push(DTUpdate { kind: DT_DELETE, from: preds[0], to: old });
     dtu_begin(fv, true, false, true);
     dtu_apply_updates(ups);
+    if uu_mssau { msu_wire_old_preds_to_new_pred(old, nb, preds, true); }
     dtu_get_dt();
     let l = li_loop_for(old);
     if l >= 0 {
