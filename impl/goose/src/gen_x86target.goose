@@ -1273,3 +1273,103 @@ let X86SM_HIGH_LATENCY: i32[23] = [10, 30, 25, 10, 25, 25, 25, 25, 10, 10, 10, 1
 let X86SM_MISPREDICT_PENALTY: i32[23] = [14, 10, 20, 16, 14, 16, 16, 16, 10, 10, 16, 14, 14, 10, 10, 16, 14, 14, 14, 17, 17, 13, 13];
 let X86SM_POST_R_A_SCHEDULER: i32[23] = [0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1];
 let X86SM_COMPLETE_MODEL: i32[23] = [0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1];
+
+// ---- VP intrinsics (VPIntrinsics.def): (functional opcode (OP_*, 0 none), functional intrinsic (0 none),
+// flags: 1 binop, 2 cast, 4 cmp, 8 reduction)
+fn x86_vp_info(id: i32) -> i64, i32, i64 {
+    if id == IID_vp_add { return OP_ADD, 0, 1; }
+    if id == IID_vp_and { return OP_AND, 0, 1; }
+    if id == IID_vp_ashr { return OP_ASHR, 0, 1; }
+    if id == IID_vp_lshr { return OP_LSHR, 0, 1; }
+    if id == IID_vp_mul { return OP_MUL, 0, 1; }
+    if id == IID_vp_or { return OP_OR, 0, 1; }
+    if id == IID_vp_sdiv { return OP_SDIV, 0, 1; }
+    if id == IID_vp_shl { return OP_SHL, 0, 1; }
+    if id == IID_vp_srem { return OP_SREM, 0, 1; }
+    if id == IID_vp_sub { return OP_SUB, 0, 1; }
+    if id == IID_vp_udiv { return OP_UDIV, 0, 1; }
+    if id == IID_vp_urem { return OP_UREM, 0, 1; }
+    if id == IID_vp_xor { return OP_XOR, 0, 1; }
+    if id == IID_vp_smin { return 0, IID_smin, 1; }
+    if id == IID_vp_smax { return 0, IID_smax, 1; }
+    if id == IID_vp_umin { return 0, IID_umin, 1; }
+    if id == IID_vp_umax { return 0, IID_umax, 1; }
+    if id == IID_vp_abs { return 0, IID_abs, 0; }
+    if id == IID_vp_bswap { return 0, IID_bswap, 0; }
+    if id == IID_vp_bitreverse { return 0, IID_bitreverse, 0; }
+    if id == IID_vp_ctpop { return 0, IID_ctpop, 0; }
+    if id == IID_vp_ctlz { return 0, IID_ctlz, 0; }
+    if id == IID_vp_cttz { return 0, IID_cttz, 0; }
+    if id == IID_vp_cttz_elts { return 0, 0, 0; }
+    if id == IID_vp_fshl { return 0, IID_fshl, 0; }
+    if id == IID_vp_fshr { return 0, IID_fshr, 0; }
+    if id == IID_vp_sadd_sat { return 0, IID_sadd_sat, 1; }
+    if id == IID_vp_uadd_sat { return 0, IID_uadd_sat, 1; }
+    if id == IID_vp_ssub_sat { return 0, IID_ssub_sat, 1; }
+    if id == IID_vp_usub_sat { return 0, IID_usub_sat, 1; }
+    if id == IID_vp_fadd { return OP_FADD, 0, 1; }
+    if id == IID_vp_fsub { return OP_FSUB, 0, 1; }
+    if id == IID_vp_fmul { return OP_FMUL, 0, 1; }
+    if id == IID_vp_fdiv { return OP_FDIV, 0, 1; }
+    if id == IID_vp_frem { return OP_FREM, 0, 1; }
+    if id == IID_vp_fneg { return OP_FNEG, 0, 0; }
+    if id == IID_vp_fabs { return 0, IID_fabs, 0; }
+    if id == IID_vp_sqrt { return 0, IID_sqrt, 0; }
+    if id == IID_vp_fma { return 0, IID_fma, 0; }
+    if id == IID_vp_fmuladd { return 0, IID_fmuladd, 0; }
+    if id == IID_vp_copysign { return 0, IID_copysign, 1; }
+    if id == IID_vp_minnum { return 0, IID_minnum, 1; }
+    if id == IID_vp_maxnum { return 0, IID_maxnum, 1; }
+    if id == IID_vp_minimum { return 0, IID_minimum, 1; }
+    if id == IID_vp_maximum { return 0, IID_maximum, 1; }
+    if id == IID_vp_ceil { return 0, IID_ceil, 0; }
+    if id == IID_vp_floor { return 0, IID_floor, 0; }
+    if id == IID_vp_round { return 0, IID_round, 0; }
+    if id == IID_vp_roundeven { return 0, IID_roundeven, 0; }
+    if id == IID_vp_roundtozero { return 0, IID_trunc, 0; }
+    if id == IID_vp_rint { return 0, IID_rint, 0; }
+    if id == IID_vp_nearbyint { return 0, IID_nearbyint, 0; }
+    if id == IID_vp_lrint { return 0, IID_lrint, 0; }
+    if id == IID_vp_llrint { return 0, IID_llrint, 0; }
+    if id == IID_vp_fptoui { return OP_FPTOUI, 0, 2; }
+    if id == IID_vp_fptosi { return OP_FPTOSI, 0, 2; }
+    if id == IID_vp_uitofp { return OP_UITOFP, 0, 2; }
+    if id == IID_vp_sitofp { return OP_SITOFP, 0, 2; }
+    if id == IID_vp_fptrunc { return OP_FPTRUNC, 0, 2; }
+    if id == IID_vp_fpext { return OP_FPEXT, 0, 2; }
+    if id == IID_vp_trunc { return OP_TRUNC, 0, 2; }
+    if id == IID_vp_zext { return OP_ZEXT, 0, 2; }
+    if id == IID_vp_sext { return OP_SEXT, 0, 2; }
+    if id == IID_vp_ptrtoint { return OP_PTRTOINT, 0, 2; }
+    if id == IID_vp_inttoptr { return OP_INTTOPTR, 0, 2; }
+    if id == IID_vp_fcmp { return OP_FCMP, 0, 4; }
+    if id == IID_vp_icmp { return OP_ICMP, 0, 4; }
+    if id == IID_vp_is_fpclass { return 0, IID_is_fpclass, 0; }
+    if id == IID_vp_store { return OP_STORE, IID_masked_store, 0; }
+    if id == IID_experimental_vp_strided_store { return 0, 0, 0; }
+    if id == IID_vp_scatter { return 0, IID_masked_scatter, 0; }
+    if id == IID_vp_load { return OP_LOAD, IID_masked_load, 0; }
+    if id == IID_vp_load_ff { return 0, 0, 0; }
+    if id == IID_experimental_vp_strided_load { return 0, 0, 0; }
+    if id == IID_vp_gather { return 0, IID_masked_gather, 0; }
+    if id == IID_vp_reduce_add { return 0, IID_vector_reduce_add, 8; }
+    if id == IID_vp_reduce_mul { return 0, IID_vector_reduce_mul, 8; }
+    if id == IID_vp_reduce_and { return 0, IID_vector_reduce_and, 8; }
+    if id == IID_vp_reduce_or { return 0, IID_vector_reduce_or, 8; }
+    if id == IID_vp_reduce_xor { return 0, IID_vector_reduce_xor, 8; }
+    if id == IID_vp_reduce_smax { return 0, IID_vector_reduce_smax, 8; }
+    if id == IID_vp_reduce_smin { return 0, IID_vector_reduce_smin, 8; }
+    if id == IID_vp_reduce_umax { return 0, IID_vector_reduce_umax, 8; }
+    if id == IID_vp_reduce_umin { return 0, IID_vector_reduce_umin, 8; }
+    if id == IID_vp_reduce_fmax { return 0, IID_vector_reduce_fmax, 8; }
+    if id == IID_vp_reduce_fmin { return 0, IID_vector_reduce_fmin, 8; }
+    if id == IID_vp_reduce_fmaximum { return 0, IID_vector_reduce_fmaximum, 8; }
+    if id == IID_vp_reduce_fminimum { return 0, IID_vector_reduce_fminimum, 8; }
+    if id == IID_vp_reduce_fadd { return 0, IID_vector_reduce_fadd, 8; }
+    if id == IID_vp_reduce_fmul { return 0, IID_vector_reduce_fmul, 8; }
+    if id == IID_vp_select { return OP_SELECT, 0, 0; }
+    if id == IID_vp_merge { return 0, 0, 0; }
+    if id == IID_experimental_vp_splice { return 0, 0, 0; }
+    if id == IID_experimental_vp_reverse { return 0, 0, 0; }
+    return -1, 0, 0;
+}

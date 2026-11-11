@@ -225,6 +225,52 @@ o.append(f'let X86SM_NAMES: const u8[:][] = [{", ".join(gstr(m) for m in models)
 for j, p in enumerate(list(MDEF) + ['PostRAScheduler', 'CompleteModel']):
     nm = re.sub(r'(?<!^)(?=[A-Z])', '_', p).upper()
     o.append(f'let X86SM_{nm}: i32[{len(models)}] = [{", ".join(str(mparams[m][j]) for m in models)}];')
+# ---- VP intrinsics (VPIntrinsics.def through the C preprocessor): functional opcode / intrinsic, binop flag
+import subprocess, tempfile
+vpsrc = '''#define BEGIN_REGISTER_VP_INTRINSIC(VPID, MASKPOS, EVLPOS) @B VPID MASKPOS EVLPOS ;
+#define END_REGISTER_VP_INTRINSIC(VPID) @E VPID ;
+#define VP_PROPERTY_FUNCTIONAL_OPC(OPC) @O OPC ;
+#define VP_PROPERTY_FUNCTIONAL_INTRINSIC(ID) @F ID ;
+#define VP_PROPERTY_BINARYOP @BIN ;
+#include "llvm/IR/VPIntrinsics.def"
+'''
+with tempfile.NamedTemporaryFile('w', suffix='.c') as tf:
+    tf.write(vpsrc)
+    tf.flush()
+    pp = subprocess.run(['/opt/llvm-23.1.5/bin/clang', '-E', '-P', '-I', LLVM + '/include', tf.name], check=True,
+                        capture_output=True, text=True).stdout
+vps = []
+cur = None
+for tok in pp.replace('\n', ' ').split(';'):
+    w = tok.split()
+    if not w:
+        continue
+    if w[0] == '@B':
+        cur = {'id': w[1], 'mask': w[2], 'evl': w[3], 'opc': None, 'fid': None, 'bin': False}
+    elif w[0] == '@O':
+        cur['opc'] = w[1]
+    elif w[0] == '@F':
+        cur['fid'] = w[1]
+    elif w[0] == '@BIN':
+        cur['bin'] = True
+    elif w[0] == '@E':
+        vps.append(cur)
+o.append('')
+o.append('// ---- VP intrinsics (VPIntrinsics.def): (functional opcode (OP_*, 0 none), functional intrinsic (0 none),')
+o.append('// flags: 1 binop, 2 cast, 4 cmp, 8 reduction)')
+o.append('fn x86_vp_info(id: i32) -> i64, i32, i64 {')
+CASTS = {'Trunc', 'ZExt', 'SExt', 'FPToUI', 'FPToSI', 'UIToFP', 'SIToFP', 'FPTrunc', 'FPExt', 'PtrToInt', 'IntToPtr',
+         'BitCast', 'AddrSpaceCast', 'PtrToAddr'}
+for v in vps:
+    opc = 'OP_' + v['opc'].upper() if v['opc'] else '0'
+    if v['opc'] == 'GetElementPtr':
+        opc = 'OP_GEP'
+    fid = 'IID_' + v['fid'] if v['fid'] else '0'
+    fl = (1 if v['bin'] else 0) | (2 if v['opc'] in CASTS else 0) | (4 if v['id'] in ('vp_fcmp', 'vp_icmp') else 0) | \
+         (8 if v['id'].startswith('vp_reduce_') else 0)
+    o.append(f'    if id == IID_{v["id"]} {{ return {opc}, {fid}, {fl}; }}')
+o.append('    return -1, 0, 0;')
+o.append('}')
 with open(os.path.join(C.SRC, 'gen_x86target.goose'), 'w') as f:
     f.write('\n'.join(o) + '\n')
 

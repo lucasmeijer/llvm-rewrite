@@ -260,10 +260,13 @@ recursive fn bt_intrinsic_cost(ic: i64, kind: i64) -> i64 {
     let rt = ica_tab[ic].ret;
     if base_intrinsic_cost(id, rt) == 0 { return 0; }
     if tt_is_target_intrinsic(id) { return TCC_BASIC; }
-    if tt_is_vp_intrinsic(id) { x86_np("getIntrinsicInstrCost of VP intrinsics"); }
-    if ica_type_based(ic) { return bt_type_based_intrinsic_cost(ic, kind); }
     let ii = ica_tab[ic].inst;
     let fmf = ica_tab[ic].fmf;
+    if tt_is_vp_intrinsic(id) {
+        let vc = bt_vp_intrinsic_cost(ic, kind);
+        if vc != TT_VP_NOT_HANDLED { return vc; }
+    }
+    if ica_type_based(ic) { return bt_type_based_intrinsic_cost(ic, kind); }
     let ret_vec = tt_is_vectorized_ty(rt);
     if id == IID_powi {
         let r = ica_arg(ic, 1);
@@ -423,6 +426,80 @@ recursive fn bt_intrinsic_cost(ic: i64, kind: i64) -> i64 {
     ica_release(m);
     return c;
 }
+
+// the VP part of BasicTTIImplBase::getIntrinsicInstrCost
+recursive fn bt_vp_intrinsic_cost(ic: i64, kind: i64) -> i64 {
+    let id = ica_tab[ic].id;
+    let rt = ica_tab[ic].ret;
+    let ii = ica_tab[ic].inst;
+    let fmf = ica_tab[ic].fmf;
+    let nt = ica_tab[ic].ntys as i64;
+    let fop, fid0, fl = x86_vp_info(id);
+    if fop > 0 {
+        if id == IID_vp_load {
+            let al = if ii >= 0 { tt_param_align(ii, 0) } else { 1 };
+            var as_: i64 = 0;
+            if nt > 1 && ty_kind(ica_ty(ic, 0)) == TK_PTR { as_ = types[ica_ty(ic, 0)].n as i64; }
+            return x86_memory_op_cost(OP_LOAD, rt, al, as_, kind, 0, -1);
+        }
+        if id == IID_vp_store {
+            let al = if ii >= 0 { tt_param_align(ii, 1) } else { 1 };
+            var as_: i64 = 0;
+            if nt >= 2 && ty_kind(ica_ty(ic, 1)) == TK_PTR { as_ = types[ica_ty(ic, 1)].n as i64; }
+            return x86_memory_op_cost(OP_STORE, ica_ty(ic, 0), al, as_, kind, 0, -1);
+        }
+        if (fl & 1) != 0 || id == IID_vp_fneg { return x86_arith0(fop, rt, kind); }
+        if (fl & 2) != 0 { return x86_cast_cost(fop, rt, ica_ty(ic, 0), 0, kind, -1); }
+        if (fl & 4) != 0 && ii >= 0 { x86_np("getIntrinsicInstrCost of vp.icmp / vp.fcmp (VPCmpIntrinsic::getPredicate)"); }
+    }
+    if id == IID_vp_load_ff { return TTI_INVALID; }
+    if id == IID_vp_scatter || id == IID_vp_gather {
+        if ica_type_based(ic) {
+            let m = ica_mark();
+            let a = ica_new(fid0, rt, fmf, -1, TTI_INVALID);
+            for k in nt - 1 { ica_add_type(a, ica_ty(ic, k)); }
+            let c = bt_type_based_intrinsic_cost(a, kind);
+            ica_release(m);
+            return c;
+        }
+        if id == IID_vp_scatter {
+            let al = if ii >= 0 { tt_param_align(ii, 1) } else { 1 };
+            return x86_mem_intrinsic_cost(id, ica_ty(ic, 0), ica_arg(ic, 1), is_constant(ica_arg(ic, 2)), al, 0, kind);
+        }
+        let al = if ii >= 0 { tt_param_align(ii, 0) } else { 1 };
+        return x86_mem_intrinsic_cost(id, rt, ica_arg(ic, 0), is_constant(ica_arg(ic, 1)), al, 0, kind);
+    }
+    if id == IID_vp_select || id == IID_vp_merge {
+        var ox: i64 = 0;
+        var oy: i64 = 0;
+        if !ica_type_based(ic) { ox = tti_operand_info(ica_arg(ic, 0)); oy = tti_operand_info(ica_arg(ic, 1)); }
+        return x86_cmpsel_cost(OP_SELECT, rt, ica_ty(ic, 0), PRED_BAD_ICMP, kind, ox, oy, -1);
+    }
+    var fid = fid0;
+    if id == IID_experimental_vp_reverse { fid = IID_vector_reverse; }
+    if fid != 0 {
+        let na = ica_tab[ic].nargs as i64;
+        var a0: i64 = 0;
+        var an = na;
+        if !ica_type_based(ic) { an = na - 2; }
+        var t0: i64 = 0;
+        var tn = nt - 2;
+        if (fl & 8) != 0 && fid != IID_vector_reduce_fadd && fid != IID_vector_reduce_fmul {
+            if !ica_type_based(ic) { a0 = 1; an = an - 1; }
+            t0 = 1;
+            tn = tn - 1;
+        }
+        let m = ica_mark();
+        let a = ica_new(fid, rt, fmf, -1, TTI_INVALID);
+        if !ica_type_based(ic) { for k in an { ica_add_arg(a, ica_arg(ic, a0 + k)); } }
+        for k in tn { ica_add_type(a, ica_ty(ic, t0 + k)); }
+        let c = x86_intrinsic_cost(a, kind);
+        ica_release(m);
+        return c;
+    }
+    return TT_VP_NOT_HANDLED;
+}
+let TT_VP_NOT_HANDLED: i64 = 0x4000000000000001;
 
 // getOperandsScalarizationOverhead(filterConstantAndDuplicatedOperands(Args, ArgTys))
 recursive fn x86_ica_operands_overhead_filtered(ic: i64, kind: i64) -> i64 {

@@ -1294,3 +1294,284 @@ recursive fn x86_minmax_reduction_cost(id: i32, valty: i32, fmf: u8, kind: i64) 
     }
     return tc_add(mm, x86_vector_inst_cost(OP_EXTRACTELEMENT, ty, 0, -1, -1, kind));
 }
+
+// ---------------------------------------------------------------- interleaved memory ops
+
+// BasicTTIImplBase::getInterleavedMemoryOpCost. (is, ni): the Indices run.
+recursive fn bt_interleaved_memory_op_cost(o: i64, vecty: i32, factor: i64, is: i64, ni: i64, align: i64, as_: i64, kind: i64,
+                                           mask_cond: bool, mask_gaps: bool) -> i64 {
+    if ty_kind(vecty) == TK_SVEC { return TTI_INVALID; }
+    let ne = ty_count(vecty);
+    let nse = ne / factor;
+    let subvt = tt_vec(ty_elem(vecty), nse);
+    var c: i64 = 0;
+    if mask_cond || mask_gaps {
+        c = x86_mem_intrinsic_cost(if o == OP_LOAD { IID_masked_load } else { IID_masked_store }, vecty, -1, true, align, as_, kind);
+    } else {
+        c = x86_memory_op_cost(o, vecty, align, as_, kind, 0, -1);
+    }
+    let lc, ltl = x86_legalize(vecty);
+    let vsz = dl_store_size(vecty);
+    let lsz = (mvt_bits(ltl) as i64 + 7) / 8;
+    let m = mk_mark();
+    if tc_valid(c) && vsz > lsz {
+        let nli = (vsz + lsz - 1) / lsz;
+        let epi = (ne + nli - 1) / nli;
+        let used = mk_push_n(nli, 0);
+        for k in ni { for e in nse { mk_pool[used + (mk_at(is, k) + e * factor) / epi] = 1; } }
+        c = (mk_count_set(used, nli) * c + nli - 1) / nli;
+    }
+    let dsub = mk_push_n(nse, 1);
+    let dls = mk_push_n(ne, 0);
+    for k in ni { for e in nse { mk_pool[dls + mk_at(is, k) + e * factor] = 1; } }
+    if o == OP_LOAD {
+        let ins = x86_scalarization_overhead(subvt, dsub, true, false, kind, true);
+        c = tc_add(c, tc_mul(ins, ni));
+        c = tc_add(c, x86_scalarization_overhead(vecty, dls, false, true, kind, true));
+    } else {
+        let ext = x86_scalarization_overhead(subvt, dsub, false, true, kind, true);
+        c = tc_add(c, tc_mul(ext, ni));
+        c = tc_add(c, x86_scalarization_overhead(vecty, dls, true, false, kind, true));
+    }
+    if !mask_cond { mk_release(m); return c; }
+    let i8t = ty_int(8);
+    let dall = mk_push_n(ne, 1);
+    c = tc_add(c, x86_replication_shuffle_cost(i8t, factor, nse, if mask_gaps { dls } else { dall }, kind));
+    if mask_gaps { c = tc_add(c, x86_arith0(OP_AND, tt_vec(i8t, ne), kind)); }
+    mk_release(m);
+    return c;
+}
+
+// X86TTIImpl::getInterleavedMemoryOpCostAVX512
+recursive fn x86_interleaved_cost_avx512(o: i64, vecty: i32, factor: i64, is: i64, ni: i64, align: i64, as_: i64, kind: i64,
+                                         mask_cond: bool, mask_gaps: bool) -> i64 {
+    let lc, legal = x86_legalize(vecty);
+    let vsz = dl_store_size(vecty);
+    let lsz = (mvt_bits(legal) as i64 + 7) / 8;
+    let nmem = (vsz + lsz - 1) / lsz;
+    let single = tt_vec(ty_elem(vecty), mvt_nelem(legal) as i64);
+    let masked = mask_cond || mask_gaps;
+    var memc: i64 = 0;
+    if masked { memc = x86_masked_memory_op_cost(if o == OP_LOAD { IID_masked_load } else { IID_masked_store }, single, align, as_, kind); }
+    else { memc = x86_memory_op_cost(o, single, align, as_, kind, 0, -1); }
+    let vf = ty_count(vecty) / factor;
+    let sv = x86_value_type(ty_scalar(vecty), false);
+    let vt = if evt_is_simple(sv) { mvt_vec(sv as i32, vf) } else { 0 };
+    var maskc: i64 = 0;
+    let m = mk_mark();
+    if masked {
+        let ne = ty_count(vecty);
+        let dls = mk_push_n(ne, 0);
+        for k in ni { for e in vf { mk_pool[dls + mk_at(is, k) + e * factor] = 1; } }
+        let dall = mk_push_n(ne, 1);
+        let i1 = ty_int(1);
+        maskc = x86_replication_shuffle_cost(i1, factor, vf, if mask_gaps { dls } else { dall }, kind);
+        if mask_gaps { maskc = tc_add(maskc, x86_arith0(OP_AND, tt_vec(i1, ne), kind)); }
+    }
+    mk_release(m);
+    if o == OP_LOAD {
+        if vt != 0 && xct_has(XCT_K_AVX512InterleavedLoadTbl, factor as i32, vt, 0) {
+            return tc_add3(maskc, tc_mul(memc, nmem), xc1(XCT_K_AVX512InterleavedLoadTbl, factor as i32, vt, 0));
+        }
+        let sk = if nmem > 1 { SK_PERMUTETWOSRC } else { SK_PERMUTESINGLESRC };
+        let shc = x86_shuffle_cost(sk, single, single, 0, 0, kind, 0, -1, -1, -1, 0, -1);
+        let nloads = if ni > 0 { ni } else { factor };
+        let rt = tt_vec(ty_elem(vecty), ty_count(vecty) / factor);
+        let nres = tc_mul(x86_legalize_first(rt), nloads);
+        let nunf = if masked || nres > 1 { nmem } else { nmem / 2 };
+        let nspr = if nmem - 1 > 1 { nmem - 1 } else { 1 };
+        var nmov: i64 = 0;
+        if nres > 1 && sk == SK_PERMUTETWOSRC { nmov = tc_mul(nres, nspr) / 2; }
+        return tc_add(tc_add(tc_mul(tc_mul(nres, nspr), shc), maskc), tc_add(tc_mul(memc, nunf), nmov));
+    }
+    if vt != 0 && xct_has(XCT_K_AVX512InterleavedStoreTbl, factor as i32, vt, 0) {
+        return tc_add3(maskc, tc_mul(memc, nmem), xc1(XCT_K_AVX512InterleavedStoreTbl, factor as i32, vt, 0));
+    }
+    let shc = x86_shuffle_cost(SK_PERMUTETWOSRC, single, single, 0, 0, kind, 0, -1, -1, -1, 0, -1);
+    let nsps = factor - 1;
+    let nmov = nmem * nsps / 2;
+    return tc_add(tc_add(maskc, tc_mul(tc_add(memc, tc_mul(shc, nsps)), nmem)), nmov);
+}
+
+// X86TTIImpl::getInterleavedMemoryOpCost
+recursive fn x86_interleaved_memory_op_cost(o: i64, vecty: i32, factor: i64, is: i64, ni: i64, align: i64, as_: i64, kind: i64,
+                                            mask_cond: bool, mask_gaps: bool) -> i64 {
+    let et = ty_elem(vecty);
+    let k = ty_kind(et);
+    var sup = k == TK_FLOAT || k == TK_DOUBLE || k == TK_PTR || (k == TK_INT && (ty_bits(et) == 64 || ty_bits(et) == 32));
+    if (k == TK_INT && (ty_bits(et) == 16 || ty_bits(et) == 8)) || k == TK_HALF { sup = x86_bwi(); }
+    if k == TK_BFLOAT { sup = xst_hasBF16(); }
+    if x86_avx512() && sup { return x86_interleaved_cost_avx512(o, vecty, factor, is, ni, align, as_, kind, mask_cond, mask_gaps); }
+    if mask_cond || mask_gaps { return bt_interleaved_memory_op_cost(o, vecty, factor, is, ni, align, as_, kind, mask_cond, mask_gaps); }
+    let lc, legal = x86_legalize(vecty);
+    if !mvt_is_vec(legal) { return bt_interleaved_memory_op_cost(o, vecty, factor, is, ni, align, as_, kind, false, false); }
+    let vf = ty_count(vecty) / factor;
+    var st = et;
+    if !ty_is_int(st) { st = ty_int(dl_size_bits(st)); }
+    let memc = x86_memory_op_cost(o, vecty, align, as_, kind, 0, -1);
+    let vt = tt_vec(st, vf);
+    let ety = x86_value_type(vt, false);
+    if !evt_is_simple(ety) { return bt_interleaved_memory_op_cost(o, vecty, factor, is, ni, align, as_, kind, false, false); }
+    let mv = ety as i32;
+    let f = factor as i32;
+    if o == OP_LOAD {
+        if x86_avx2() && xct_has(XCT_L_AVX2InterleavedLoadTbl, f, mv, 0) {
+            return tc_add(memc, (ni * xc1(XCT_L_AVX2InterleavedLoadTbl, f, mv, 0) + factor - 1) / factor);
+        }
+        if x86_ssse3() && xct_has(XCT_L_SSSE3InterleavedLoadTbl, f, mv, 0) {
+            return tc_add(memc, (ni * xc1(XCT_L_SSSE3InterleavedLoadTbl, f, mv, 0) + factor - 1) / factor);
+        }
+        if x86_sse2() && xct_has(XCT_L_SSE2InterleavedLoadTbl, f, mv, 0) {
+            return tc_add(memc, (ni * xc1(XCT_L_SSE2InterleavedLoadTbl, f, mv, 0) + factor - 1) / factor);
+        }
+    } else {
+        if x86_avx2() && xct_has(XCT_L_AVX2InterleavedStoreTbl, f, mv, 0) { return tc_add(memc, xc1(XCT_L_AVX2InterleavedStoreTbl, f, mv, 0)); }
+        if x86_sse2() && xct_has(XCT_L_SSE2InterleavedStoreTbl, f, mv, 0) { return tc_add(memc, xc1(XCT_L_SSE2InterleavedStoreTbl, f, mv, 0)); }
+    }
+    return bt_interleaved_memory_op_cost(o, vecty, factor, is, ni, align, as_, kind, mask_cond, mask_gaps);
+}
+
+// ---------------------------------------------------------------- extended / mul-acc reductions, misc queries
+
+// BasicTTIImplBase::getExtendedReductionCost (ordered: requiresOrderedReduction(FMF))
+recursive fn bt_extended_reduction_cost(o: i64, unsigned: bool, rt: i32, ty: i32, fmf: u8, ordered: bool, kind: i64) -> i64 {
+    if ty_kind(ty) == TK_FVEC && unsigned && o == OP_ADD && ty_is_int(ty_elem(ty)) && ty_bits(ty_elem(ty)) == 1 {
+        let it = ty_int(ty_count(ty));
+        let m = ica_mark();
+        let ic = ica_new(IID_ctpop, it, fmf, -1, TTI_INVALID);
+        ica_add_type(ic, it);
+        let pc = x86_intrinsic_cost(ic, kind);
+        ica_release(m);
+        return tc_add(x86_cast_cost(OP_BITCAST, it, ty, 0, kind, -1), pc);
+    }
+    let ext = ty_vector(rt, ty_count(ty), ty_kind(ty) == TK_SVEC);
+    let rc = x86_arith_reduction_cost(o, ext, ordered, kind);
+    let ec = x86_cast_cost(if unsigned { OP_ZEXT } else { OP_SEXT }, ext, ty, 0, kind, -1);
+    return tc_add(rc, ec);
+}
+
+// BasicTTIImplBase::getMulAccReductionCost
+recursive fn bt_mul_acc_reduction_cost(unsigned: bool, ro: i64, rt: i32, ty: i32, kind: i64) -> i64 {
+    let ext = ty_vector(rt, ty_count(ty), ty_kind(ty) == TK_SVEC);
+    let rc = x86_arith_reduction_cost(ro, ext, false, kind);
+    let ec = x86_cast_cost(if unsigned { OP_ZEXT } else { OP_SEXT }, ext, ty, 0, kind, -1);
+    let mc = x86_arith0(OP_MUL, ext, kind);
+    return tc_add3(rc, mc, tc_mul(ec, 2));
+}
+
+// X86TTIImpl::getRegisterBitWidth: 0 scalar, 1 fixed-width vector, 2 scalable vector
+fn x86_register_bit_width(k: i64) -> i64 {
+    if k == 0 { return if x86_is64() { 64 } else { 32 }; }
+    if k == 1 {
+        if x86_avx512() && x86_prefer_width >= 512 { return 512; }
+        if x86_avx() && x86_prefer_width >= 256 { return 256; }
+        if x86_sse1() && x86_prefer_width >= 128 { return 128; }
+        return 0;
+    }
+    return 0;
+}
+// X86TTIImpl::getNumberOfRegisters (ClassID: 0 GPR, 1 vector, 2 scalar FP)
+fn x86_number_of_registers(cls: i64) -> i64 {
+    if cls == 1 && !x86_sse1() { return 0; }
+    if !x86_is64() { return 8; }
+    if (cls == 0 && xst_hasEGPR()) || (cls != 0 && x86_avx512()) { return 32; }
+    return 16;
+}
+// X86TTIImpl::getRegisterClassForType
+fn x86_register_class_for_type(vector: bool, t: i32) -> i64 {
+    if vector { return 1; }
+    if t >= 0 && ty_is_fp(t) { return 2; }
+    return 0;
+}
+// X86TTIImpl::getMaxInterleaveFactor (VF: element count, scalar = 1)
+fn x86_max_interleave_factor(vf: i64) -> i64 {
+    if vf <= 1 { return 1; }
+    if xst_isAtom() { return 1; }
+    if x86_avx() { return 4; }
+    return 2;
+}
+fn x86_load_store_vec_reg_bit_width() -> i64 { x86_register_bit_width(1) }
+// X86TTIImpl::getPopcntSupport: 2 PSK_FastHardware, 0 PSK_Software
+fn x86_popcnt_support() -> i64 { if xst_hasPOPCNT() { 2 } else { 0 } }
+// X86TTIImpl::isVectorShiftByScalarCheap
+fn x86_is_vector_shift_by_scalar_cheap(t: i32) -> bool {
+    let b = tt_scalar_bits(t);
+    if x86_xop() && (b == 8 || b == 16 || b == 32 || b == 64) { return false; }
+    if x86_avx2() && (b == 32 || b == 64) { return false; }
+    if x86_bwi() && b == 16 { return false; }
+    return true;
+}
+// X86TTIImpl::isLegalAltInstr (OpcodeMask: run (ms, n) of 0/1, set = Opcode1)
+fn x86_is_legal_alt_instr(vecty: i32, o0: i64, o1: i64, ms: i64) -> bool {
+    let n = ty_count(vecty);
+    if (n & (n - 1)) != 0 { return false; }
+    for lane in n {
+        let o = if mk_at(ms, lane) != 0 { o1 } else { o0 };
+        if lane % 2 == 0 && o != OP_FSUB { return false; }
+        if lane % 2 == 1 && o != OP_FADD { return false; }
+    }
+    let et = ty_elem(vecty);
+    if ty_kind(et) == TK_FLOAT { return x86_sse3() && n % 4 == 0; }
+    if ty_kind(et) == TK_DOUBLE { return x86_sse3() && n % 2 == 0; }
+    return false;
+}
+// X86TTIImpl::getAltInstrCost
+fn x86_alt_instr_cost(vecty: i32, o0: i64, o1: i64, ms: i64, kind: i64) -> i64 {
+    if x86_is_legal_alt_instr(vecty, o0, o1, ms) { return TCC_BASIC; }
+    return TTI_INVALID;
+}
+// X86TTIImpl::getScalingFactorCost
+fn x86_scaling_factor_cost(base_gv: i32, off: i64, has_base: bool, scale: i64) -> i64 {
+    if x86_legal_addressing_mode(base_gv, off, has_base, scale) { return if scale != 0 { 1 } else { 0 }; }
+    return TTI_INVALID;
+}
+// BasicTTIImplBase::getCallInstrCost
+fn bt_call_instr_cost() -> i64 { 10 }
+// BasicTTIImplBase::getNumberOfParts
+fn x86_number_of_parts(t: i32) -> i64 {
+    let c, lt = x86_legalize(t);
+    if !tc_valid(c) { return 0; }
+    if ty_kind(t) == TK_FVEC && mvt_is_vec(lt) && !mvt_is_scalable(lt) {
+        let n = ty_count(t);
+        if (n & (n - 1)) != 0 {
+            let sub_n = mvt_nelem(lt) as i64;
+            // EVT(LT.second).getTypeForEVT: the same element type?
+            let se = mvt_elt(lt);
+            let ev = x86_value_type(ty_elem(t), true);
+            if ev == se as i64 { return (n + sub_n - 1) / sub_n; }
+        }
+    }
+    return c;
+}
+// X86TTIImpl::isLegalNTLoad / isLegalNTStore / isLegalBroadcastLoad
+fn x86_is_legal_nt_load(t: i32, align: i64) -> bool {
+    let sz = dl_store_size(t);
+    if align >= sz && (sz == 16 || sz == 32) { return if sz == 16 { x86_sse1() } else { x86_avx2() }; }
+    return false;
+}
+fn x86_is_legal_nt_store(t: i32, align: i64) -> bool {
+    let sz = dl_store_size(t);
+    if xst_hasSSE4A() && (ty_kind(t) == TK_FLOAT || ty_kind(t) == TK_DOUBLE) { return true; }
+    if align < sz || sz < 4 || sz > 32 || (sz & (sz - 1)) != 0 { return false; }
+    if sz == 32 { return x86_avx(); }
+    if sz == 16 { return x86_sse1(); }
+    return true;
+}
+fn x86_is_legal_broadcast_load(elt: i32, n: i64) -> bool { x86_sse3() && n == 2 && ty_kind(elt) == TK_DOUBLE }
+// X86TTIImpl::hasDivRemOp
+fn x86_has_div_rem_op(t: i32, signed: bool) -> bool { tl_op_legal(if signed { XISD_SDIVREM } else { XISD_UDIVREM }, x86_value_type(t, false)) }
+// X86TTIImpl::getStoreMinimumVF (BasicTTIImplBase's for everything but half with F16C)
+fn x86_store_minimum_vf(vf: i64, mem_ty: i32, val_ty: i32) -> i64 {
+    if xst_hasF16C() && ty_kind(mem_ty) == TK_HALF { return 4; }
+    // BasicTTIImplBase::getStoreMinimumVF
+    var v = vf;
+    while v > 2 && x86_store_vf_supported(v, mem_ty, val_ty) { v = v / 2; }
+    return v;
+}
+fn x86_store_vf_supported(vf: i64, mem_ty: i32, val_ty: i32) -> bool {
+    let vt = x86_value_type(tt_vec(mem_ty, vf / 2), false);
+    if tl_op_legal(XISD_STORE, vt) || tl_op_custom(XISD_STORE, vt) { return true; }
+    let valvt = x86_value_type(tt_vec(val_ty, vf / 2), false);
+    let lvt = tl_type_to_transform_to(vt);
+    return tl_truncstore_legal(lvt, valvt);
+}
