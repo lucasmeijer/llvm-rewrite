@@ -263,7 +263,7 @@ fn tti_shuffle_cost(i: i32, kind: i64) -> i64 {
 }
 
 fn tti_insert_extract_value_cost(o: i64, kind: i64) -> i64 {
-    if tti_kind == TTI_X86 { tti_x86_not_ported("getInsertExtractValueCost"); }
+    // TargetTransformInfoImplBase::getInsertExtractValueCost (neither BasicTTIImpl nor X86 overrides it)
     if o == OP_INSERTVALUE && kind != TCK_RECIP_THROUGHPUT { return TCC_BASIC; }
     return TCC_FREE;
 }
@@ -271,6 +271,8 @@ fn tti_insert_extract_value_cost(o: i64, kind: i64) -> i64 {
 // getIntrinsicInstrCost (TargetTransformInfoImplBase) for an intrinsic call
 fn tti_intrinsic_cost(c: i32, id: i32, kind: i64) -> i64 {
     let base = tti_base_intrinsic_cost(id, vals[c].ty);
+    // BasicTTIImplBase::getIntrinsicInstrCost: memcpy with an instruction costs getMemcpyCost(I) = TCC_Expensive
+    if tti_kind == TTI_X86 && id == IID_memcpy { return TCC_EXPENSIVE; }
     if tti_kind == TTI_X86 {
         var args: i32[>..<] = [];
         for k in cb_nargs(c) { args.push(cb_arg(c, k)); }

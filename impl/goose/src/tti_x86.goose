@@ -1045,8 +1045,47 @@ fn x86_intrinsic_cost(id: i32, rt: i32, args: const i32[:], fmf: u8, kind: i64, 
             return ltc * 2;
         }
     }
+    // getTypeBasedIntrinsicInstrCost for scalar f32/f64 math intrinsics (X86ISelLowering's actions for the
+    // scalar SSE types: FABS Custom, FSIN/FCOS Expand, FEXP/FEXP2/FLOG/FLOG2/FLOG10/FPOW Expand (the
+    // TargetLoweringBase default), FMA Legal with any FMA feature else Expand)
+    let sty = rt;
+    let is_f32 = ty_kind(sty) == TK_FLOAT && x86_sse1();
+    let is_f64 = ty_kind(sty) == TK_DOUBLE && x86_sse2();
+    if !ty_is_vector(rt) && (is_f32 || is_f64) {
+        let single_call: i64 = if kind == 2 { 1 } else { 10 };
+        if id == IID_fabs { let ltc, lt = x86_legalize(rt); return ltc * 2; }
+        if id == IID_sin || id == IID_cos || id == IID_exp || id == IID_exp2 || id == IID_log || id == IID_log2 ||
+           id == IID_log10 || id == IID_pow {
+            return single_call;
+        }
+        if id == IID_floor || id == IID_ceil || id == IID_trunc {
+            if x86_sse41() { let ltc, lt = x86_legalize(rt); return ltc; }
+            return single_call;
+        }
+        if id == IID_fmuladd {
+            if x86_has(X86F_FeatureFMA) || x86_has(X86F_FeatureFMA4) || x86_avx512() { let ltc, lt = x86_legalize(rt); return ltc; }
+            let m = tti_arith_cost_x86_fallback(OP_FMUL, rt, kind);
+            let a = tti_arith_cost_x86_fallback(OP_FADD, rt, kind);
+            return m + a;
+        }
+    }
+    // x86_fp80 (x87): FMA is never legal, so fmuladd costs an fmul and an fadd
+    if !ty_is_vector(rt) && ty_kind(rt) == TK_X86_FP80 && id == IID_fmuladd {
+        return tti_arith_cost_x86_fallback(OP_FMUL, rt, kind) + tti_arith_cost_x86_fallback(OP_FADD, rt, kind);
+    }
+    // the default case: a scalar call of an intrinsic without vector types costs 1
+    if (id == IID_memset || id == IID_memmove) && !ty_is_vector(rt) {
+        var anyv = false;
+        for a in args { if a >= 0 && ty_is_vector(vals[a].ty) { anyv = true; } }
+        if !anyv { return 1; }
+    }
     x86_np(str("getIntrinsicInstrCost fallback (BasicTTIImplBase) for intrinsic ", id as i64));
     return 0;
+}
+// getArithmeticInstrCost(Opcode, Ty, CostKind) with default operand infos
+fn tti_arith_cost_x86_fallback(o: i64, ty: i32, kind: i64) -> i64 {
+    let base: i64 = if kind == 1 { 3 } else { 1 };
+    return x86_arith_cost(o, ty, kind, 0, 0, 0, base);
 }
 
 let FMF_NNAN_TTI: u8 = 2;
