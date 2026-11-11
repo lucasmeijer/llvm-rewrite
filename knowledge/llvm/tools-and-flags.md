@@ -42,3 +42,14 @@
   header first, the other printers after. An unknown `target-cpu` warns several times and then aborts with
   `LLVM ERROR: 64-bit code requested on a subtarget that doesn't support it!`. Verified with opt on a module with
   `"target-features"="+mpx,+foo,-bar"` (LoopVectorize/X86/int128_no_gather.ll has `+mpx`).
+
+## Debug (assertions) build of opt for tracing LLVM's decisions
+
+The release `opt` in `/opt/llvm-23.1.5` has no `-debug`/`-debug-only=<type>` output and compiles out verifiers.
+An assertions build of the same 23.1.5 sources is at `/persistent/llvm-rewrite/llvm-23.1.5-assert/bin/opt`
+(rebuild: `impl/jai/tools/build_llvm_assert.sh`, ~12 min; incremental rebuild after adding a temporary trace print
+~1 min, recipe in `impl/jai/NOTES.md`). Use it to compare intermediate decisions, e.g.
+`-debug-only=SLP`, `-debug-only=loop-vectorize`, `-debug-only=instcombine`, `-debug-only=inline`.
+It is a debugging aid only: the oracle for every check stays the release build (assertions builds can differ,
+e.g. extra verification, `-verify-memoryssa` actually verifying). Verified: the jai SLP port compared its cost
+decisions against `-debug-only=SLP` output from this binary.
