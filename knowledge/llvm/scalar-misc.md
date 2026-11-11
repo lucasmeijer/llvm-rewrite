@@ -33,3 +33,28 @@ Sink, TailCallElim, MergedLoadStoreMotion, SpeculativeExecution and CallSiteSpli
 - **SpeculativeExecution** in `-O2` is `speculative-execution<only-if-divergent-target>`: a no-op on x86.
 - **MergedLoadStoreMotion** in `-O2` is `mldst-motion<no-split-footer-bb>`; plain `-passes=mldst-motion` is also
   `no-split-footer-bb` (MergedLoadStoreMotionOptions default).
+
+## The -O2 pipeline as text
+
+- `opt -passes='default<O2>' -print-pipeline-passes` does not round-trip exactly: the
+  `extra-simple-loop-unswitch-passes` element is an `ExtraLoopPassManager<ShouldRunExtraSimpleLoopUnswitch>` whose
+  printPipeline drops its inner `simple-loop-unswitch<...>` (PassBuilderPipelines.cpp builds it with one), so the
+  textual pipeline runs an empty manager there. It only runs its passes when IndVarSimplify left the
+  ShouldRunExtraSimpleLoopUnswitch marker cached for the loop.
+- Passes in `default<O2>` that never change IR without a feature: annotation2metadata / annotation-remarks (only with
+  remarks enabled), forceattrs (only with -force-attribute*), coro-* (only with coroutine intrinsics), openmp-opt*
+  (only with the "openmp" module flag), alloc-token (sanitize_alloc_token), lower-comment-string (AIX),
+  inject-tli-mappings (only with -vector-library), loop-sink (only with a function entry count), cg-profile (only
+  with entry counts), rel-lookup-table-converter (only for PIC: opt's default relocation model is static except
+  x86-64 Darwin / Windows; `-relocation-model=pic` turns it on). Verified by sweeping each over the corpus.
+- Required passes (RequiredPassInfoMixin: run on optnone functions, not counted by -opt-bisect-limit):
+  coro-early/cleanup/elide/split, alloc-token, ee-instrument, lower-comment-string, annotation-remarks,
+  extra-simple-loop-unswitch-passes.
+- CalledValuePropagation's !callees lists are sorted by function name; its SparseSolver treats a phi's incoming
+  edge as feasible from the edge's terminator alone (isEdgeFeasible does not ask whether the predecessor block is
+  executable).
+- JumpTableToSwitch: the switch is created with IRBuilder::CreateSwitch's default 10 reserved cases, gets
+  `!prof !{!"unknown", !"jump-table-to-switch"}` unless the call had VP data with a non-zero weight for one of the
+  table's functions (a function's GUID is its !guid attachment, else MD5 of its PGO name = the global identifier).
+- LibCallsShrinkWrap in a strictfp function emits `llvm.experimental.constrained.fcmp(..., metadata !"<pred>",
+  metadata !"fpexcept.strict")` calls with the strictfp attribute (IRBuilder setIsFPConstrained).

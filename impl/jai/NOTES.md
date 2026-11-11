@@ -1218,3 +1218,36 @@ Still slow / known:
   `-slp-revec`, ...), `-enable-knowledge-retention`, and 2 files with ppc_fp128 constant folding (float2int).
 - Perf: no tests/perf benchmark times these passes alone (`-O2` rows don't run yet). Sink keeps its store set as a
   table (SmallPtrSet); MLSM is bounded by MagicCompileTimeControl like LLVM.
+
+## The rest of the -O2 pipeline's small passes (jai_scalar_misc, 2026-11)
+
+- Ported in full: `loop-sink` (pass_loop_sink.jai; profile-only, uses licm_can_sink_or_hoist_inst on a Licm state),
+  `transform-warning` (warnings on stderr in the default handler's format), `drop-unnecessary-assumes[<drop-deref>]`,
+  `jump-table-to-switch` (incl. value-profile weights and the !guid / MD5(PGO name) lookup), `move-auto-init`,
+  `alignment-from-assumptions`, `libcalls-shrinkwrap` (incl. strictfp constrained compares),
+  `called-value-propagation` (+ a SparseSolver specialized to its lattice; prefix `clv_`, `cvp_` is
+  CorrelatedValuePropagation), `rel-lookup-table-converter`, `cg-profile` (indirect calls with VP data fail
+  loudly), `ee-instrument<[post-inline]>`, `memprof-remove-attributes`, `recompute-globalsaa`.
+- Early exits that are exact for every module without the feature (and fail loudly otherwise): `coro-early`,
+  `coro-cleanup`, `coro-elide`, `coro-split`, `coro-annotation-elide` (no coroutine intrinsics / presplit
+  functions / `.noalloc` callees), `openmp-opt`, `openmp-opt-cgscc` (no "openmp" module flag), `alloc-token` (no
+  sanitize_alloc_token, no llvm.alloc.token.id), `lower-comment-string` (non-AIX), `forceattrs` (its flags are
+  rejected), `annotation2metadata` / `annotation-remarks` (remarks are never enabled), `inject-tli-mappings` (no
+  vector library).
+- Pipeline structure: `function<eager-inv;no-rerun>` (parse_function_pipeline_name; module-level eager-inv now
+  invalidates after each function), `require<should-not-run-function-passes>` (Analysis_Kind.SHOULD_NOT_RUN; the
+  no-rerun CGSCC adaptor skips functions that have it cached), `invalidate<aa>` (no AA state is cached),
+  `extra-simple-loop-unswitch-passes` (empty when parsed from text, see knowledge/llvm/scalar-misc.md), `-relocation-model`
+  (static / pic / dynamic-no-pic: X86TargetMachine's effective model; `-code-model` is still rejected).
+- gen_intrinsics.jai only knows intrinsics declared somewhere in tests/: tests/roundtrip/intrinsics/pass-created.ll
+  declares the ones passes create (llvm.returnaddress, llvm.load.relative); add more there.
+- Sweeps (plain, every round-tripping file): 0 differs for every pass above; `--with-test-flags` for
+  rel-lookup-table-converter 0 differs.
+- With the 8 passes still missing removed from `default<O2>`'s printed pipeline (early-cse x2, ipsccp, sccp,
+  mergeicmps, expand-memcmp, dfa-jump-threading, loop-interchange; /tmp-style: sed them out of
+  `opt -passes='default<O2>' -print-pipeline-passes`), a sweep over tests/e2e/pipeline + tests/function/pipeline
+  gives 170 identical / 241, 69 loud (vectorizers: InterleavedAccessInfo, SLP vectorizeTree, ...), 2 differs:
+  e2e/pipeline/memory/heap.ll and calls/function_pointers.ll get `trunc nuw` where LLVM has `trunc nuw nsw` after
+  the first correlated-propagation in the CGSCC pipeline (opt-bisect position 20). The same passes run standalone
+  on the bisected input agree, so it is a difference in cached analysis state carried through the earlier part of
+  the pipeline (LVI / AssumptionCache / DT caching): a lead for L2.pipeline-O2.

@@ -198,3 +198,14 @@ lib/IR/Function.cpp 0.15  # deleteBody, copyAttributesFrom, splice
 lib/IR/Module.cpp 0.1  # getGlobalVariable, getFunction, global_values order
 lib/Support/MD5.cpp 0.8  # update / final / stringifyResult / MD5Hash
 lib/Transforms/Scalar/TailRecursionElimination.cpp 0.95  # no optimization remarks (ORE)
+# -O2 pipeline passes that are early exits or partial (jai_scalar_misc)
+lib/Transforms/IPO/OpenMPOpt.cpp 0  # only the containsOpenMP early exit (pass_openmp_opt.jai)
+lib/Transforms/IPO/MemProfContextDisambiguation.cpp 0.01  # MemProfRemoveInfo only
+lib/Transforms/Coroutines/CoroEarly.cpp 0.05  # declaresCoroEarlyIntrinsics early exit (also CoroCleanup/CoroElide/CoroSplit/CoroAnnotationElide early exits)
+lib/Transforms/IPO/ForceFunctionAttrs.cpp 0.05  # no -force-attribute / -force-remove-attribute / CSV support
+lib/Transforms/Utils/InjectTLIMappings.cpp 0.1  # no vector-library mappings
+lib/Transforms/IPO/Annotation2Metadata.cpp 0.2  # allowExtraAnalysis is always false (no remark support)
+lib/Transforms/Scalar/AnnotationRemarks.cpp 0.2  # no remarks
+lib/Transforms/Utils/LowerCommentStringPass.cpp 0.3  # non-AIX early exit
+lib/Transforms/Utils/RelLookupTableConverter.cpp 0.95  # dropping unnamed_addr (AArch64 / x86 Darwin) fails loudly
+lib/Transforms/Utils/EntryExitInstrumenter.cpp 0.85  # AIX / RISC-V / AArch64 / LoongArch / SystemZ mcount variants fail loudly
