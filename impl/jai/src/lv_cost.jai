@@ -716,3 +716,44 @@ lv_inst_str :: (i: Value_Id) -> string {
     if n.count return tprint("%%= %", "%", n, inst_op(i));
     return tprint("%", inst_op(i));
 }
+
+// ---------------------------------------------------------------- interleave groups
+
+// interleavedAccessCanBeWidened
+lv_cm_interleaved_access_can_be_widened :: (cm: *Lv_Cm, i: Value_Id, vf: Ec) -> bool {
+    g := iai_group(cm.iai, i);
+    sty := load_store_type(i);
+    if lv_has_irregular_type(sty) return false;
+    if vf.scalable && g.factor > 8 return false;
+    scalar_ni := dl_is_non_integral_pointer_type(sty);
+    for m: ig_members(g) {
+        mty := load_store_type(m);
+        member_ni := dl_is_non_integral_pointer_type(mty);
+        if member_ni != scalar_ni return false;
+        if member_ni && scalar_ni && ptr_addrspace(sty) != ptr_addrspace(mty) return false;
+    }
+    pred_masking := lv_cm_block_needs_predication_for_any_reason(cm, inst_block(i)) && lv_cm_is_mask_required(cm, i);
+    load_gaps := inst_op(i) == .LOAD && ig_requires_scalar_epilogue(g) && cm.sel != .ALLOWED;
+    store_gaps := inst_op(i) == .STORE && !ig_is_full(g);
+    if !pred_masking && !load_gaps && !store_gaps return true;
+    assert(lv_use_masked_interleaved_accesses(cm.tti), "Masked interleave-groups for predicated accesses are not enabled.");
+    if g.reverse return false;
+    if vf.scalable && (load_gaps || store_gaps) return false;
+    return lv_is_legal_masked_load_or_store(cm, i, vf);
+}
+// getInterleaveGroupCost
+lv_cm_interleave_group_cost :: (cm: *Lv_Cm, i: Value_Id, vf: Ec) -> Lc {
+    g := iai_group(cm.iai, i);
+    ip := g.insert_pos;
+    val_ty := load_store_type(ip);
+    vty := lv_to_vector_ty(val_ty, vf);
+    as := ptr_addrspace(vtype(load_store_pointer_operand(ip)));
+    wide := type_vector(vf.n * g.factor, val_ty, vf.scalable);
+    indices: [..] u32; indices.allocator = temp;
+    for k: 0..g.factor - 1 if ig_get_member(g, k) != NONE array_add(*indices, k);
+    use_mask_for_gaps := (ig_requires_scalar_epilogue(g) && cm.sel != .ALLOWED) || (inst_op(i) == .STORE && !ig_is_full(g));
+    c := lcv(tti_interleaved_memory_op_cost(cm.tti, inst_op(ip), wide, g.factor, indices, g.align, as, cm.cost_kind,
+                                            lv_cm_is_mask_required(cm, i), use_mask_for_gaps));
+    if g.reverse c = lc_add(c, lc_mul(lv_tti_shuffle(cm.tti, SK_REVERSE, vty, cm.cost_kind, 0), g.keys.count));
+    return c;
+}

@@ -573,7 +573,9 @@ vp_drop_poison_generating_recipes :: () {
                 mask := ifx vr(r).masked then vp_op(r, vp_nops(r) - 1) else NONE;
                 if ad != NONE && vr(r).consecutive && not_header_mask(mask) collect(ad, *visited);
             } else if k == .INTERLEAVE {
-                vp_unported("interleave groups (dropPoisonGeneratingRecipes)");
+                ad := vp_def(vp_op(r, 0));
+                mask := ifx vr(r).masked then vp_op(r, vp_nops(r) - 1) else NONE;
+                if ad != NONE && not_header_mask(mask) collect(ad, *visited);
             }
         }
     }

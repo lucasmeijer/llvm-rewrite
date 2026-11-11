@@ -31,6 +31,13 @@ lv_dec_key :: (i: Value_Id, vf: Ec) -> u64 { return ((cast(u64) i) << 32) | vf.n
 lv_cm_set_widening_decision :: (cm: *Lv_Cm, i: Value_Id, vf: Ec, w: Lv_Widening, cost: s64) {
     table_set(*cm.decisions, lv_dec_key(i, vf), .{w, cost});
 }
+// setWideningDecision(const InterleaveGroup *, VF, W, Cost)
+lv_cm_set_group_widening_decision :: (cm: *Lv_Cm, g: *Ig, vf: Ec, w: Lv_Widening, cost: Lc) {
+    insert_pos_cost := cost;
+    other_cost: Lc = 0;
+    if w != .INTERLEAVE { insert_pos_cost = lc_div(cost, cast(u64) g.keys.count); other_cost = insert_pos_cost; }
+    for m: ig_members(g) lv_cm_set_widening_decision(cm, m, vf, w, ifx m == g.insert_pos then insert_pos_cost else other_cost);
+}
 lv_cm_widening_decision :: (cm: *Lv_Cm, i: Value_Id, vf: Ec) -> Lv_Widening {
     found, d := table_find(*cm.decisions, lv_dec_key(i, vf));
     if !found return .UNKNOWN;
@@ -139,12 +146,27 @@ lv_cm_set_cost_based_widening_decision :: (cm: *Lv_Cm, vf: Ec) {
         }
         ok, dec := lv_cm_memory_instruction_can_be_widened(cm, i, vf);
         if ok { lv_cm_set_widening_decision(cm, i, vf, dec, lv_cm_consecutive_mem_op_cost(cm, i, vf, dec)); continue; }
-        // interleave groups: processLoop fails loudly when InterleavedAccessInfo forms any group
+        interleave_cost := COST_INVALID;
         num_accesses: s64 = 1;
+        grp := iai_group(cm.iai, i);
+        if grp {
+            if lv_cm_widening_decision(cm, i, vf) != .UNKNOWN continue;
+            num_accesses = grp.keys.count;
+            if lv_cm_interleaved_access_can_be_widened(cm, i, vf) interleave_cost = lv_cm_interleave_group_cost(cm, i, vf);
+        }
         gs := ifx lv_is_legal_gather_or_scatter(cm, i, vf) then lc_mul(lv_cm_gather_scatter_cost(cm, i, vf), num_accesses) else COST_INVALID;
         sc := lc_mul(lv_cm_mem_inst_scalarization_cost(cm, i, vf), num_accesses);
-        if gs < sc lv_cm_set_widening_decision(cm, i, vf, .GATHER_SCATTER, gs);
-        else lv_cm_set_widening_decision(cm, i, vf, .SCALARIZE, sc);
+        cost: Lc; w: Lv_Widening;
+        if interleave_cost <= gs && interleave_cost < sc { w = .INTERLEAVE; cost = interleave_cost; }
+        else if gs < sc { w = .GATHER_SCATTER; cost = gs; }
+        else { w = .SCALARIZE; cost = sc; }
+        if grp {
+            if w == .SCALARIZE {
+                for m: ig_members(grp) lv_cm_set_widening_decision(cm, m, vf, w, lv_cm_mem_inst_scalarization_cost(cm, m, vf));
+            } else {
+                lv_cm_set_group_widening_decision(cm, grp, vf, w, cost);
+            }
+        } else lv_cm_set_widening_decision(cm, i, vf, w, cost);
     }
     if lv_tti_prefers_vectorized_addressing(cm.tti) return;
     addr_defs: [..] Value_Id; addr_defs.allocator = temp;   // SmallSetVector
@@ -181,8 +203,17 @@ lv_cm_set_cost_based_widening_decision :: (cm: *Lv_Cm, vf: Ec) {
             if !lv_cm_is_predicated_inst(cm, i) && (dec == .WIDEN || dec == .WIDEN_REVERSE || (!lv_cm_is_uniform_mem_op(cm, i, vf) && dec == .SCALARIZE)) {
                 lv_cm_set_widening_decision(cm, i, vf, .SCALARIZE, lc_mul(lv_cm_memory_instruction_cost(cm, i, ec_fixed(1)), cast(s64) vf.n));
                 update_mem_op_user_cost(cm, i, vf);
+            } else {
+                grp := iai_group(cm.iai, i);
+                if grp {
+                    for m: ig_members(grp) {
+                        c := ifx array_find(addr_defs, m) then lc_mul(lv_cm_memory_instruction_cost(cm, m, ec_fixed(1)), cast(s64) vf.n)
+                             else lv_cm_mem_inst_scalarization_cost(cm, m, vf);
+                        lv_cm_set_widening_decision(cm, m, vf, .SCALARIZE, c);
+                        update_mem_op_user_cost(cm, m, vf);
+                    }
+                }
             }
-            // interleave groups fail loudly before the cost model runs
             continue;
         }
         if inst_op(i) == .PHI && lvl_is_fixed_order_recurrence(cm.lvl, i) continue;

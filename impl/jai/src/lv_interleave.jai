@@ -229,3 +229,36 @@ iai_analyze_interleaving :: (a: *Iai, enable_predicated: bool) {
         }
     }
 }
+
+// invalidateGroupsRequiringScalarEpilogue
+iai_invalidate_groups_requiring_scalar_epilogue :: (a: *Iai) {
+    if !a.requires_scalar_epilogue return;
+    released := false;
+    for a.order {
+        g := *a.groups[it];
+        if !g.alive || !ig_requires_scalar_epilogue(g) continue;
+        iai_release_group(a, it);
+        released = true;
+    }
+    assert(released, "At least one group must be invalidated, as a scalar epilogue was required");
+    a.requires_scalar_epilogue = false;
+}
+// invalidateGroups
+iai_invalidate_groups :: (a: *Iai) -> bool {
+    if !iai_has_groups(a) return false;
+    for a.order a.groups[it].alive = false;
+    table_reset(*a.map);
+    a.requires_scalar_epilogue = false;
+    return true;
+}
+// InterleaveGroup::members(): the members in index order
+ig_members :: (g: *Ig) -> [..] Value_Id {
+    out: [..] Value_Id; out.allocator = temp;
+    for k: 0..g.factor - 1 { m := ig_get_member(g, k); if m != NONE array_add(*out, m); }
+    return out;
+}
+iai_group :: (a: *Iai, i: Value_Id) -> *Ig {
+    id := iai_group_of(a, i);
+    if id < 0 return null;
+    return *a.groups[id];
+}

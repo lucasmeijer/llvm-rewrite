@@ -300,8 +300,8 @@ vp_compute_cost :: (c: *Vp_Cost_Ctx, r: Vp_Rec, vf: Ec) -> Cost {
         return vp_widen_call_cost(c, vr(r).variant);
     case .REDUCTION;
         return vp_reduction_cost(c, r, vf);
-    case .INTERLEAVE; #through; case .INTERLEAVE_EVL;
-        vp_unported("interleave group costs (VPInterleaveBase::computeCost)");
+    case .INTERLEAVE; return vp_interleave_cost(c, r, vf);
+    case .INTERLEAVE_EVL; vp_unported("EVL interleave group costs");
     case .HISTOGRAM; vp_unported("histogram costs");
     case .EXPRESSION; vp_unported("VPExpressionRecipe::computeCost");
     case .REDUCTION_EVL; vp_unported("EVL reduction costs");

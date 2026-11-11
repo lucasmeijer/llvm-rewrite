@@ -67,8 +67,12 @@ for k in range(len(starts) - 1):
                     ents.append((isd, mvt(g[1]), mvt(g[2]), cs))
                 else:
                     ents.append((isd, mvt(g[1]), 0, cs))
+        # the interleaved-access tables are keyed by the interleave factor: {Factor, MVT, Cost} (isd = the factor)
+        if kind == 'CostTblEntry' and not ents:
+            for em in re.finditer(r'\{\s*(\d+)\s*,\s*MVT::(\w+)\s*,\s*(\d+)\s*\}', content):
+                ents.append((int(em.group(1)), mvt(em.group(2)), 0, [int(em.group(3)), -1, -1, -1]))
         # sanity: count the entries by counting '{' at depth 1
-        n_open = len(re.findall(r'\{\s*(?:X86ISD|ISD|TTI)::', content))
+        n_open = len(re.findall(r'\{\s*(?:X86ISD|ISD|TTI)::', content)) + len(re.findall(r'\{\s*\d+\s*,\s*MVT::', content))
         assert n_open == len(ents), (fname, tname, n_open, len(ents))
         name = f'XT_{fname}_{tname}'
         assert name not in seen, name
@@ -224,7 +228,8 @@ with open(OUT, 'w') as o:
     for name, ents in tables:
         o.write(f'{name} :: XCost_Entry.[\n')
         for isd, d, s, cs in ents:
-            o.write(f'    .{{ISD_{isd}, {d}, {s}, .[{cs[0]}, {cs[1]}, {cs[2]}, {cs[3]}]}},\n')
+            key = str(isd) if isinstance(isd, int) else f'ISD_{isd}'
+            o.write(f'    .{{{key}, {d}, {s}, .[{cs[0]}, {cs[1]}, {cs[2]}, {cs[3]}]}},\n')
         o.write('];\n')
     o.write(f'\nX86_FEATURE_WORDS :: {NWORDS};\n')
     for i, (d, s, _) in enumerate(feats):

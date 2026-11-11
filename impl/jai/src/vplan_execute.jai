@@ -559,6 +559,7 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
         case .SCALAR_IV_STEPS; vp_scalar_iv_steps_execute(s, r);
         case .REPLICATE; vp_replicate_execute(s, r);
         case .WIDEN_INTRINSIC; vp_widen_intrinsic_execute(s, r);
+        case .INTERLEAVE; vp_interleave_execute(s, r);
         case .WIDEN_LOAD;
             sty := vp_scalar_type(vr(r).def);
             dty := type_vector(s.vf.n, sty, s.vf.scalable);

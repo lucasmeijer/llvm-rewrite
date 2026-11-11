@@ -160,6 +160,7 @@
 #load "tti.jai";
 #load "tti_x86.jai";
 #load "tti_x86_vec.jai";
+#load "tti_interleaved.jai";
 #load "tti_intrinsics.jai";
 #load "x86_lowering.jai";
 #load "gen_x86_tti.jai";
@@ -234,6 +235,7 @@
 #load "lv_cost.jai";
 #load "vplan_cost.jai";
 #load "vplan_replicate.jai";
+#load "vplan_interleave.jai";
 #load "lv_interleave.jai";
 
 main :: () { opt_main(); }

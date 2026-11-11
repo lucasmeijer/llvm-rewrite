@@ -377,6 +377,15 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
     while vf.n < range.end.n { may_overflow |= !lvp_is_indvar_overflow_check_known_false(lp, vf); vf.n *= 2; }
     if may_overflow && lp.cm.tail_folding_style != .NONE vp_unported("clearing the canonical IV NUW flag (tail folding)");
     for lp.lvl.reductions if lv_use_ordered_reductions(lp.cm, *it.d) || lp.in_loop_reductions.count vp_unported("in-loop reductions");
+    igs: [..] s32; igs.allocator = temp;
+    for gid: lp.cm.iai.order {
+        if !lp.cm.iai.groups[gid].alive continue;
+        Ig_Ctx :: struct { cm: *Lv_Cm; ip: Value_Id; }
+        ic := Ig_Ctx.{lp.cm, lp.cm.iai.groups[gid].insert_pos};
+        apply :: (vf: Ec, d: *void) -> bool { c := cast(*Ig_Ctx) d; return ec_is_vector(vf) && lv_cm_widening_decision(c.cm, c.ip, vf) == .INTERLEAVE; }
+        if !lvp_decision_and_clamp_range(range, apply, *ic) continue;
+        array_add(*igs, gid);
+    }
     lvp_make_mem_op_widening_decisions(lp, range);
     lvp_make_scalarization_decisions(range);
     lvp_make_call_widening_decisions(lp, range);
@@ -414,6 +423,7 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
         if rk_is_find_last(vr(it).rdx_kind) vp_unported("FindLast reductions (handleFindLastReductions)");
     }
     vp_remove_branch_on_const(false);
+    vp_create_interleave_groups(igs, lp.cm.sel == .ALLOWED);
     for bb: vp_blocks_only_basic(vp_depth_first_shallow(vb(vp_vector_loop_region()).entry))
         for r: vp_block_recipes(bb) if vr(r).kind == .WIDEN_LOAD && !vr(r).consecutive vp_unported("non-consecutive widened loads (convertToStridedAccesses)");
     if ec_is_scalar(range.start) range.end = Ec.{range.start.n * 2, range.start.scalable};
@@ -741,8 +751,7 @@ lvp_build_vplans :: (lp: *Lv_Planner, vplan1: *Vp_Plan, min_vf: Ec, max_vf: Ec) 
         vp_truncate_to_minimal_bitwidths(min_bws);
         vp_optimize();
         if lp.cm.tail_folding_style == .DATA_WITH_EVL vp_unported("EVL tail folding");
-        for bb: vp_blocks_only_basic(vp_depth_first_deep(vpl.entry)) for r: vp_block_recipes(bb)
-            if vr(r).kind == .INTERLEAVE vp_unported("narrowInterleaveGroups");
+        vp_check_narrow_interleave_groups(lp.cm.tti);
         vp_materialize_header_mask(false, false);
         array_add(*lp.vplans, plan);
     }
@@ -894,8 +903,12 @@ lvp_plan_and_vectorize :: (lp: *Lv_Planner, user_vf: Ec, user_ic: u64, max_facto
     vplan1 := lvp_try_to_build_vplan1(lp);
     if vplan1 {
         lp.cm.min_bws = lv_compute_minimum_value_sizes(li_blocks(lp.li, lp.l), lp.p.db, lp.cm.tti);
-        if lv_cm_block_needs_predication_for_any_reason(lp.cm, li_header(lp.li, lp.l)) && lv_tti_enable_interleaved_access_vectorization(lp.cm.tti)
-            vp_unported("invalidating interleave groups for tail folding");
+        if lv_cm_block_needs_predication_for_any_reason(lp.cm, li_header(lp.li, lp.l)) && !lv_use_masked_interleaved_accesses(lp.cm.tti) {
+            if iai_invalidate_groups(lp.cm.iai) {   // invalidateCostModelingDecisions
+                lp.cm.per_vf.count = 0;
+                table_reset(*lp.cm.decisions);
+            }
+        }
         if lv_cm_fold_tail_by_masking(lp.cm) lvl_prepare_to_fold_tail_by_masking(lp.lvl);
         max_user_vf := ifx user_vf.scalable then max_factors.scalable else max_factors.fixed;
         done := false;

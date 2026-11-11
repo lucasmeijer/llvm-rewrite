@@ -282,7 +282,7 @@ Lv_Cm :: struct {
     max_permissible_fixed: Ec;                 // MaxPermissibleVFWithoutMaxBW.FixedVF
     has_small_constant_max_tc: bool;
     small_constant_max_tc: u32;
-    uses_interleaved_access_info: bool;        // IAI.analyzeInterleaving was run (not ported: no groups)
+    iai: *Iai;                                 // InterleaveInfo
     per_vf: [..] Lv_Cm_Vf;                     // Uniforms / Scalars / ForcedScalars / InstsToScalarize per VF
     decisions: Table(u64, Lv_Decision);        // WideningDecisions
     num_pred_stores: s64;
@@ -297,7 +297,7 @@ lv_cm_requires_scalar_epilogue :: (cm: *Lv_Cm, is_vectorizing: bool) -> bool {
     if cm.sel != .ALLOWED return false;
     if li_exiting_block(cm.li, cm.l) != li_loop_latch(cm.li, cm.l) && !(lv_opts.enable_early_exit && lvl_has_uncountable_early_exit(cm.lvl))
         return true;
-    // InterleaveInfo.requiresScalarEpilogue(): no interleave groups are formed (IAI not ported, see processLoop)
+    if is_vectorizing && cm.iai.requires_scalar_epilogue return true;
     return false;
 }
 
@@ -308,6 +308,7 @@ lv_cm_collect_values_to_ignore :: (cm: *Lv_Cm) {
     collect_ephemeral_values(li, l, cm.ac, *eph);
     for v, k: eph iset_insert(*cm.values_to_ignore, k);
     dead_ops: [..] Value_Id; dead_ops.allocator = temp;
+    dead_interleave_ptr_ops: [..] Value_Id; dead_interleave_ptr_ops.allocator = temp;
     req_epi := lv_cm_requires_scalar_epilogue(cm, true);
     is_live_out_dead :: (cm: *Lv_Cm, u: Value_Id, req: bool) -> bool { return req && !li_contains(cm.li, cm.l, inst_block(u)); }
     rpo: [..] Value_Id; rpo.allocator = temp;
@@ -328,9 +329,31 @@ lv_cm_collect_values_to_ignore :: (cm: *Lv_Cm) {
                 }
                 if all array_add(*dead_ops, i);
             }
-            // isAccessInterleaved: no interleave groups (IAI not ported)
+            grp := iai_group(cm.iai, i);
+            if grp {
+                if grp.insert_pos == i continue;
+                array_add(*dead_interleave_ptr_ops, load_store_pointer_operand(i));
+            }
             if inst_op(i) == .CONDBR array_add(*dead_ops, i);
         }
+    }
+    kk := 0;
+    while kk < dead_interleave_ptr_ops.count {
+        x := dead_interleave_ptr_ops[kk];
+        kk += 1;
+        if !is_inst(x) || !li_contains_inst(li, l, x) continue;
+        bad := false;
+        u := ir.v_first_use[x];
+        while u != NONE {
+            usr := ir.u_user[u];
+            u = ir.u_next[u];
+            if iset_has(*cm.vec_values_to_ignore, usr) continue;
+            g := iai_group(cm.iai, usr);
+            if !g || g.insert_pos == usr { bad = true; break; }
+        }
+        if bad continue;
+        iset_insert(*cm.vec_values_to_ignore, x);
+        for j: 0..cast(s64) nops(x) - 1 array_add(*dead_interleave_ptr_ops, op(x, cast(u32) j));
     }
     header := li_header(li, l);
     is_empty_block :: (cm: *Lv_Cm, bb: Value_Id) -> bool {
@@ -547,7 +570,7 @@ lv_cm_compute_max_vf :: (cm: *Lv_Cm, user_vf: Ec, user_ic: u64) -> Vf_Pair {
         case .NOT_ALLOWED_OPT_SIZE;
             if lv_runtime_checks_required(cm) return vfp_none();
     }
-    // !useMaskedInterleavedAccesses(TTI): InterleaveInfo.invalidateGroupsRequiringScalarEpilogue() (no groups)
+    if !lv_use_masked_interleaved_accesses(cm.tti) iai_invalidate_groups_requiring_scalar_epilogue(cm.iai);
     max_factors := lv_compute_feasible_max_vf(cm, max_tc, user_vf, user_ic, true, lv_cm_requires_scalar_epilogue(cm, true));
     has_p2: bool = true;
     max_p2 := max_factors.fixed.n;
@@ -667,9 +690,15 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
     iai: Iai;
     iai_init(*iai, *pse, l, p.li, p.dt, lvl.laa, opt_for_size);
     if use_interleaved iai_analyze_interleaving(*iai, lv_use_masked_interleaved_accesses(p.tti));
-    if iai_has_groups(*iai) lv_unported("interleave groups (InterleavedAccessInfo found candidate groups)");
+    lv_cur_iai = *iai;
+    if lvl_has_uncountable_early_exit(*lvl) {
+        latch := li_loop_latch(p.li, l);
+        bad := iai.requires_scalar_epilogue;
+        for lvl.countable_exiting_blocks if it != latch bad = true;
+        if bad return false;
+    }
     cm: Lv_Cm;
-    cm.f = f; cm.l = l; cm.li = p.li; cm.pse = *pse; cm.tti = p.tti; cm.lvl = *lvl; cm.hints = *hints; cm.ac = p.ac;
+    cm.f = f; cm.l = l; cm.li = p.li; cm.pse = *pse; cm.tti = p.tti; cm.lvl = *lvl; cm.hints = *hints; cm.ac = p.ac; cm.iai = *iai;
     cm.opt_for_size = opt_for_size;
     cm.values_to_ignore = iset_new(); cm.vec_values_to_ignore = iset_new(); cm.element_types.allocator = temp;
     cm.per_vf.allocator = temp; cm.decisions.allocator = temp;
