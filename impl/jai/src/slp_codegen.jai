@@ -10,6 +10,8 @@
 
 Slp_Gen :: struct {
     b: Irb;                                       // BoUpSLP::Builder (IRBuilder<TargetFolder>, no fast-math flags)
+    cb: *Irb;                                     // the builder the sgb_* calls use: &b, or a reduction's own IRBuilder
+    cfmf: u32;                                    // its fast-math flags (setFPAttrs of FP-math results)
     gather_seq: [..] Value_Id;                    // SetVector<Instruction *> GatherShuffleExtractSeq
     gather_seq_set: Table(Value_Id, bool);
     cse_blocks: [..] Value_Id;                    // DenseSet<BasicBlock *> CSEBlocks (sorted by DFS number when used)
@@ -21,6 +23,7 @@ slpg: Slp_Gen;
 
 slpg_init :: () {
     slpg = .{};
+    slpg.cb = *slpg.b;
     slpg.gather_seq.allocator = temp; slpg.gather_seq_set.allocator = temp; slpg.cse_blocks.allocator = temp;
     slpg.postponed_gathers.allocator = temp; slpg.last_inst_to_pos.allocator = temp; slpg.deleted_list.allocator = temp;
 }
@@ -57,11 +60,14 @@ slp_erase_instruction :: (i: Value_Id) {
 
 // ---------------------------------------------------------------- the Builder (IRBuilder<TargetFolder>)
 
-sgb_insert :: (i: Value_Id, name: string = "") -> Value_Id { return irb_insert(*slpg.b, i, name); }
-sgb_set_before :: (i: Value_Id) { irb_set_before(*slpg.b, i); }
-sgb_set_at :: (bb: Value_Id, pt: Value_Id, head := false) { irb_set_at(*slpg.b, bb, pt, head); }
-sgb_set_dbg :: (i: Value_Id) { slpg.b.dbg = get_metadata(i, 0); }
-sgb_insert_block :: () -> Value_Id { return slpg.b.bb; }
+sgb_insert :: (i: Value_Id, name: string = "") -> Value_Id {
+    if slpg.cfmf != 0 && is_fp_math_inst(i) set_fmf(i, slpg.cfmf);
+    return irb_insert(slpg.cb, i, name);
+}
+sgb_set_before :: (i: Value_Id) { irb_set_before(slpg.cb, i); }
+sgb_set_at :: (bb: Value_Id, pt: Value_Id, head := false) { irb_set_at(slpg.cb, bb, pt, head); }
+sgb_set_dbg :: (i: Value_Id) { slpg.cb.dbg = get_metadata(i, 0); }
+sgb_insert_block :: () -> Value_Id { return slpg.cb.bb; }
 
 // FoldBinOp
 sgb_binop :: (opc: Opcode, l: Value_Id, r: Value_Id, name: string = "") -> Value_Id {
@@ -103,9 +109,9 @@ sgb_cmp :: (pred: u8, l: Value_Id, r: Value_Id, name: string = "") -> Value_Id {
     return sgb_insert(create_icmp(pred, l, r), name);
 }
 // CreateSelectWithUnknownProfile(C, True, False, "slp-vectorizer")
-sgb_select_unknown_profile :: (c: Value_Id, t: Value_Id, f: Value_Id) -> Value_Id {
+sgb_select_unknown_profile :: (c: Value_Id, t: Value_Id, f: Value_Id, name: string = "") -> Value_Id {
     if is_const(c) && is_const(t) && is_const(f) { x := cf_select(c, t, f); if x != NONE return x; }
-    i := sgb_insert(create_select(c, t, f));
+    i := sgb_insert(create_select(c, t, f), name);
     set_explicitly_unknown_branch_weights_if_profiled(i, "slp-vectorizer");
     return i;
 }
@@ -145,9 +151,17 @@ sgb_extract_element :: (vec: Value_Id, idx: u64, name: string = "") -> Value_Id 
 sgb_load :: (ty: Type_Id, ptr: Value_Id, align: u64, name: string = "") -> Value_Id {
     a := align;
     if a == 0 a = dl_abi_align(ty);
-    return irb_load(*slpg.b, ty, ptr, a, false, name);
+    i := new_inst(.LOAD, ty, 1);
+    set_op(i, 0, ptr);
+    inst(i).align = a;
+    return sgb_insert(i, name);
 }
-sgb_store :: (v: Value_Id, ptr: Value_Id, align: u64) -> Value_Id { return irb_store(*slpg.b, v, ptr, align); }
+sgb_store :: (v: Value_Id, ptr: Value_Id, align: u64) -> Value_Id {
+    i := new_inst(.STORE, ir.t_void, 2);
+    set_op(i, 0, v); set_op(i, 1, ptr);
+    inst(i).align = align;
+    return sgb_insert(i);
+}
 // CreateGEP(Ty, Ptr, IdxList) (TargetFolder::FoldGEP)
 sgb_gep :: (srcty: Type_Id, ptr: Value_Id, idxs: [] Value_Id) -> Value_Id {
     if is_const(ptr) {
@@ -157,8 +171,8 @@ sgb_gep :: (srcty: Type_Id, ptr: Value_Id, idxs: [] Value_Id) -> Value_Id {
     }
     return sgb_insert(create_gep(srcty, ptr, idxs, 0));
 }
-sgb_phi :: (ty: Type_Id, reserved: u32) -> Value_Id { return irb_phi(*slpg.b, ty, reserved); }
-sgb_extract_value :: (agg: Value_Id, idxs: [] u32) -> Value_Id { return irb_extract_value(*slpg.b, agg, idxs); }
+sgb_phi :: (ty: Type_Id, reserved: u32) -> Value_Id { return sgb_insert(create_phi(ty, reserved)); }
+sgb_extract_value :: (agg: Value_Id, idxs: [] u32) -> Value_Id { return irb_extract_value(slpg.cb, agg, idxs); }
 
 // ---------------------------------------------------------------- IR flags and metadata
 
