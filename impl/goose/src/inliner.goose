@@ -343,7 +343,7 @@ fn inl_run_cgscc(c: i32, only_mandatory: bool) -> u32 {
             let mok, mult0 = ic_call_str_int(cb, "function-inline-cost-multiplier");
             let mult = if mok { mult0 } else { 1 };
             let track = lcg_scc_size(callee_scc) != 1 || lcg_rc_size(lcg_sccs[callee_scc].rc) != 1 || lcg_has_edge(callee_n, callee_n);
-            if !inline_function(cb, true, true, track, with_psi, true) {
+            if !inline_function(cb, true, true, track, with_psi, true, inst_func(cb)) {
                 // recordUnsuccessfulInlining
                 if !only_mandatory && flag_bool("inline-remark-attribute", false) {
                     var msg: u8[>..] = [];
@@ -517,7 +517,7 @@ fn ai_try_inline(cb: i32, callee: i32, want_sites: bool) -> bool {
     let caller = inst_func(cb);
     let d, why = get_attribute_based_inlining_decision(cb, callee);
     if d != 1 { return false; }
-    if !inline_function(cb, true, true, want_sites, true, false) { return false; }
+    if !inline_function(cb, true, true, want_sites, true, false, callee) { return false; }
     invalidate_function(caller, PA_NONE);
     if !want_sites { ifi_inlined_call_sites.resize(0); }
     return true;
@@ -671,7 +671,7 @@ fn module_inliner_run(m: i32) -> u32 {
         let callee = called_function(cb);
         let rec, oic = get_advice(cb, false, io_params, io_with_psi);
         if !rec { continue; }
-        if !inline_function(cb, true, true, true, io_with_psi, true) {
+        if !inline_function(cb, true, true, true, io_with_psi, true, inst_func(cb)) {
             if flag_bool("inline-remark-attribute", false) {
                 var msg: u8[>..] = [];
                 msg.append(sbytes(if_fail_reason));

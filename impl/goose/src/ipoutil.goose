@@ -7,6 +7,7 @@ import ir;
 import irutil;
 import gen_attrs;
 import tli;
+import dinfo;
 
 fn gv_linkage(v: i32) -> i64 { globs[glob_of(v)].linkage as i64 }
 fn gv_has_local_linkage(v: i32) -> bool { let l = gv_linkage(v); l == LK_INTERNAL || l == LK_PRIVATE }
@@ -80,6 +81,8 @@ fn func_erase_from_parent(f: i32) {
     b = func_first_block(f);
     while b >= 0 { let nb = block_next(b); block_erase(b); b = nb; }
     if first_use(f) >= 0 { fatal("internal: erasing a function that still has uses"); }
+    if f < val_vam.len && val_vam[f] >= 0 { vam_handle_deletion(f); }
+    ipo_metadata_handle_deletion(f);
     drop_all_refs(f);
     module_remove_global(f);
     let m = globs[glob_of(f)].module;
@@ -105,4 +108,30 @@ fn func_make_body_unreachable(f: i32) {
     let bb = create_block_after(f, -1, "");
     let u = create_inst(OP_UNREACHABLE, T_VOID, []);
     block_append_inst(bb, u);
+}
+
+// ValueAsMetadata::handleDeletion for a constant (a function): the nodes using its ValueAsMetadata get a null
+// operand and lose their uniquing (MDNode::handleChangedOperand: "deleted constants" become distinct)
+fn ipo_metadata_handle_deletion(v: i32) {
+    if md_tab.len == 0 { md_rebuild_tab(); }
+    let h = md_hash(MK_VALUE, v, []);
+    let mask = md_tab.len - 1;
+    var j = (h as i64) & mask;
+    var vam: i32 = -1;
+    loop {
+        let e = md_tab[j];
+        if e < 0 { break; }
+        if mds[e].kind as i64 == MK_VALUE && mds[e].extra == v && mds[e].nops == 0 { vam = e; break; }
+        j = (j + 1) & mask;
+    }
+    if vam < 0 { return; }
+    var changed = false;
+    for k in mds.len {
+        let n = mds[k];
+        if n.kind as i64 != MK_TUPLE { continue; }
+        var hit = false;
+        for q in n.nops as i64 { if md_ops[(n.ops as i64) + q] == vam { md_ops[(n.ops as i64) + q] = -1; hit = true; } }
+        if hit { mds[k].distinct = 1; changed = true; }
+    }
+    if changed { md_tab.clear(); }
 }

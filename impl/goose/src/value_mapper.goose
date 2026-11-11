@@ -21,6 +21,7 @@ import calls;
 import dinfo;
 import salvage;
 import parser;
+import wvh;
 
 let RF_NO_MODULE_LEVEL_CHANGES: i64 = 1;
 let RF_IGNORE_MISSING_LOCALS: i64 = 2;
@@ -33,8 +34,8 @@ fn vmp_not_ported(what: const u8[:]) { fatal(str("ValueMapper: ", what, " is not
 // ---------------------------------------------------------------------------------------------
 // ValueToValueMapTy
 
-struct VMEnt { map: i32, key: i32, val: i32, onext: i32, epoch: i32 }
-struct VMHead { epoch: i32, first: i32, last: i32 }
+struct VMEnt { map: i32, key: i32, val: i32, onext: i32, epoch: i32, h: i32 }
+struct VMHead { epoch: i32, first: i32, last: i32, tracking: bool }
 var vmm_heads: VMHead[>..<];
 var vmm_ents: VMEnt[>..<];
 var vmm_tab: i32[>..];        // open addressing over vmm_ents; -1 = empty
@@ -51,9 +52,12 @@ fn vmm_release(mark: i64) {
 fn vmm_new() -> i32 {
     vmm_epoch_ctr += 1;
     let m = vmm_heads.len as i32;
-    vmm_heads.push(VMHead { epoch: vmm_epoch_ctr, first: -1, last: -1 });
+    vmm_heads.push(VMHead { epoch: vmm_epoch_ctr, first: -1, last: -1, tracking: false });
     return m;
 }
+// A map whose values are WeakTrackingVHs (the handles live on the wvh.goose stack: create the map after taking
+// a wvh_mark and release both together)
+fn vmm_new_tracking() -> i32 { let m = vmm_new(); vmm_heads[m].tracking = true; return m; }
 fn vmm_clear(m: i32) {
     vmm_epoch_ctr += 1;
     vmm_heads[m].epoch = vmm_epoch_ctr;
@@ -108,7 +112,7 @@ fn vmm_has(m: i32, k: i32) -> bool { vmm_find(m, k) >= 0 }
 fn vmm_get(m: i32, k: i32) -> i32 {
     let e = vmm_find(m, k);
     if e < 0 { return -1; }
-    let v = vmm_ents[e].val;
+    let v = vmm_val(e);
     if v >= 0 && is_dead(v) { return -1; }
     return v;
 }
@@ -117,9 +121,10 @@ fn vmm_set(m: i32, k: i32, v: i32) {
     if vmm_tab.len == 0 || (vmm_used + 1) * 2 > vmm_tab.len { vmm_rehash(); }
     let j = vmm_slot(m, k);
     let e = vmm_tab[j];
-    if e >= 0 && vmm_live(e) { vmm_ents[e].val = v; return; }
+    if e >= 0 && vmm_live(e) { vmm_ents[e].val = v; if vmm_ents[e].h >= 0 { wvh_set(vmm_ents[e].h, v); } return; }
     let ne = vmm_ents.len as i32;
-    vmm_ents.push(VMEnt { map: m, key: k, val: v, onext: -1, epoch: vmm_heads[m].epoch });
+    let h = if vmm_heads[m].tracking && k >= 0 { wvh_new(v, WVH_WEAK_TRACKING) } else { -1 };
+    vmm_ents.push(VMEnt { map: m, key: k, val: v, onext: -1, epoch: vmm_heads[m].epoch, h: h });
     if vmm_heads[m].last >= 0 { vmm_ents[vmm_heads[m].last].onext = ne; } else { vmm_heads[m].first = ne; }
     vmm_heads[m].last = ne;
     if e < 0 { vmm_used++; }
@@ -139,7 +144,9 @@ fn vmm_skip(e0: i32) -> i32 {
 fn vmm_first(m: i32) -> i32 { vmm_skip(vmm_heads[m].first) }
 fn vmm_next(e: i32) -> i32 { vmm_skip(vmm_ents[e].onext) }
 fn vmm_ent_key(e: i32) -> i32 { vmm_ents[e].key }
-fn vmm_ent_val(e: i32) -> i32 { let v = vmm_ents[e].val; if v >= 0 && is_dead(v) { -1 } else { v } }
+fn vmm_ent_val(e: i32) -> i32 { let v = vmm_val(e); if v >= 0 && is_dead(v) { -1 } else { v } }
+// the mapped value: a tracking map's entry follows RAUW (WeakTrackingVH) and is -1 once the value is erased
+fn vmm_val(e: i32) -> i32 { let h = vmm_ents[e].h; if h >= 0 { wvh_get(h) } else { vmm_ents[e].val } }
 fn vmm_is_md_key(k: i32) -> bool { k <= -2 }
 // VMap.MD(): metadata keys are stored as -2 - md
 fn vmm_md_get(m: i32, md: i32) -> i32 { vmm_get(m, -2 - md) }
@@ -148,7 +155,7 @@ fn vmm_md_set(m: i32, md: i32, v: i32) { vmm_set(m, -2 - md, v) }
 // Copy every entry of `src` into `dst` (for (auto &KV : Src) Dst[KV.first] = KV.second).
 fn vmm_copy_into(dst: i32, src: i32) {
     var e = vmm_first(src);
-    while e >= 0 { vmm_set(dst, vmm_ents[e].key, vmm_ents[e].val); e = vmm_next(e); }
+    while e >= 0 { vmm_set(dst, vmm_ents[e].key, vmm_val(e)); e = vmm_next(e); }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -160,7 +167,7 @@ var vmp_stack: i32[>..<];
 recursive fn vmp_map_value(m: i32, v: i32, flags: i64) -> i32 {
     let found = vmm_find(m, v);
     if found >= 0 {
-        let r = vmm_ents[found].val;
+        let r = vmm_val(found);
         if r >= 0 && !is_dead(r) { return r; }
         fatal("internal: ValueMapper: unexpected null mapping");
     }

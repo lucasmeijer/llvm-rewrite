@@ -1062,9 +1062,74 @@ fn bfi_compute(fv: i32) {
     bf_unwrap_loops();
     bf_finalize_metrics();
 }
-fn bfi_get(fv: i32) { if !bfi_valid(fv) { bfi_compute(fv); } }
+// The FunctionAnalysisManager caches one BlockFrequencyInfo per function, and a cached result is kept (stale)
+// while its function changes until the function's analyses are invalidated (the inliner relies on this: it
+// queries the caller's BFI after earlier inlines into it, and InlineFunction sets frequencies of new blocks).
+// The working state above holds one function; the results of others are stashed here and restored on use.
+struct BStash { fv: i32, at: i32, n: i32, nat: i32, nn: i32 }
+var bs_recs: BStash[>..<];
+var bs_bb: i32[>..<];            // (block, node) pairs
+var bs_node: i32[>..<];
+var bs_sd: u64[>..<];            // per node
+var bs_ss: i64[>..<];
+var bs_int: u64[>..<];
+var bs_irr: bool[>..<];
+var bs_rpot: i32[>..<];
+var bf_dirty: bool = false;      // the working state differs from its stash (or has none)
+
+fn bs_find(fv: i32) -> i64 { for r, k in bs_recs { if r.fv == fv { return k as i64; } } return -1; }
+fn bs_drop(fv: i32) {
+    let k = bs_find(fv);
+    if k < 0 { return; }
+    bs_recs[k] = bs_recs[bs_recs.len - 1];
+    bs_recs.pop();
+    if bs_recs.len == 0 { bs_bb.clear(); bs_node.clear(); bs_sd.clear(); bs_ss.clear(); bs_int.clear(); bs_irr.clear(); bs_rpot.clear(); }
+}
+fn bs_save() {
+    if bf_fn < 0 || !bf_dirty { return; }
+    bs_drop(bf_fn);
+    let at = bs_bb.len as i32;
+    for sl in bf_node.slots {
+        if sl.key == HM_EMPTY || sl.key == HM_TOMB { continue; }
+        bs_bb.push(sl.key as i32);
+        bs_node.push(sl.val as i32);
+    }
+    let nat = bs_sd.len as i32;
+    for k in bf_freq_int.len {
+        bs_sd.push(bf_freq_sd[k]); bs_ss.push(bf_freq_ss[k]); bs_int.push(bf_freq_int[k]); bs_irr.push(bf_irr[k]);
+        bs_rpot.push(if k < bf_rpot.len { bf_rpot[k] } else { -1 });
+    }
+    bs_recs.push(BStash { fv: bf_fn, at: at, n: (bs_bb.len as i32) - at, nat: nat, nn: (bs_sd.len as i32) - nat });
+    bf_dirty = false;
+}
+fn bs_restore(k: i64) {
+    let r = bs_recs[k];
+    hm_clear(bf_node);
+    for j in r.n { hm_put(bf_node, (bs_bb[(r.at as i64) + j] as i64) as u64, bs_node[(r.at as i64) + j] as i64); }
+    bf_freq_sd.clear(); bf_freq_ss.clear(); bf_freq_int.clear(); bf_irr.clear(); bf_rpot.clear();
+    for j in r.nn {
+        let x = (r.nat as i64) + j;
+        bf_freq_sd.push(bs_sd[x]); bf_freq_ss.push(bs_ss[x]); bf_freq_int.push(bs_int[x]); bf_irr.push(bs_irr[x]);
+        if bs_rpot[x] >= 0 { bf_rpot.push(bs_rpot[x]); }
+    }
+    bf_fn = r.fv;
+    bf_dirty = false;
+}
+
+fn bfi_get(fv: i32) {
+    if bfi_valid(fv) { return; }
+    bs_save();
+    let k = bs_find(fv);
+    if k >= 0 { bs_restore(k); return; }
+    bfi_compute(fv);
+    bf_dirty = true;
+}
 fn bfi_valid(fv: i32) -> bool { bf_fn == fv && fv >= 0 }
-fn bfi_invalidate() { bf_fn = -1; }
+// BlockFrequencyAnalysis invalidated for fv
+fn bfi_invalidate(fv: i32) {
+    bs_drop(fv);
+    if bf_fn == fv { bf_fn = -1; }
+}
 
 // getBlockFreq
 fn bfi_freq(bb: i32) -> u64 {
@@ -1081,6 +1146,7 @@ fn bfi_set_freq(bb: i32, f: u64) {
         bf_freq_sd.push(0); bf_freq_ss.push(0); bf_freq_int.push(0); bf_irr.push(false);
     }
     bf_freq_int[n] = f;
+    bf_dirty = true;
 }
 
 // Function::getEntryCount() (AllowSynthetic = false): (has, count)

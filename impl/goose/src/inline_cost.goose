@@ -686,7 +686,7 @@ fn ca_hot_call_site_threshold(cb: i32, with_bfi: bool) -> bool, i64 {
     bfi_get(caller);
     let cs = bfi_freq(inst_parent(cb));
     let ent = bfi_freq(func_entry(caller));
-    let hi, lo = ap_mul64(ent, ic_opt("hot-callsite-rel-freq", 60) as u64);
+    let lo, hi = ap_mul64(ent, ic_opt("hot-callsite-rel-freq", 60) as u64);
     if hi == 0 && cs >= lo { return true, cas[c].params.locally_hot_cs; }
     return false, 0;
 }
@@ -1111,7 +1111,7 @@ fn ca_visit_alloca(i: i32) -> bool {
 }
 fn sat_add(a: u64, b: u64) -> u64 { let s = a + b; if s < a { 0xFFFFFFFFFFFFFFFF } else { s } }
 fn sat_mul_add(a: u64, b: u64, c: u64) -> u64 {
-    let hi, lo = ap_mul64(a, b);
+    let lo, hi = ap_mul64(a, b);
     if hi != 0 { return 0xFFFFFFFFFFFFFFFF; }
     return sat_add(lo, c);
 }
