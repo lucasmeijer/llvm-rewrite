@@ -558,6 +558,7 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
             vs_set(s, vr(r).def, g, true);
         case .SCALAR_IV_STEPS; vp_scalar_iv_steps_execute(s, r);
         case .REPLICATE; vp_replicate_execute(s, r);
+        case .WIDEN_INTRINSIC; vp_widen_intrinsic_execute(s, r);
         case .WIDEN_LOAD;
             sty := vp_scalar_type(vr(r).def);
             dty := type_vector(s.vf.n, sty, s.vf.scalable);
@@ -745,4 +746,43 @@ vp_execute_plan :: (s: *Vp_State) {
             phi_add_incoming(phi, val, latch_bb);
         }
     }
+}
+
+// isVectorIntrinsicWithOverloadTypeAtArg (VectorUtils.cpp; idx -1 is the return type; no target intrinsics here)
+is_vector_intrinsic_with_overload_type_at_arg :: (id: Intrinsic_Id, idx: s64) -> bool {
+    n := intrinsic_name(id);
+    if begins_with(n, "llvm.x86.") vp_unported(tprint("target intrinsic % (isTargetIntrinsicWithOverloadTypeAtArg)", n));
+    if begins_with(n, "llvm.vp.") vp_unported(tprint("VP intrinsic % in isVectorIntrinsicWithOverloadTypeAtArg", n));
+    if n == "llvm.fptosi.sat" || n == "llvm.fptoui.sat" || n == "llvm.lround" || n == "llvm.llround" || n == "llvm.lrint" ||
+       n == "llvm.llrint" || n == "llvm.ucmp" || n == "llvm.scmp" || n == "llvm.vector.extract" || n == "llvm.loop.dependence.war.mask"
+        return idx == -1 || idx == 0;
+    if n == "llvm.modf" || n == "llvm.sincos" || n == "llvm.sincospi" || n == "llvm.is.fpclass" return idx == 0;
+    if n == "llvm.powi" || n == "llvm.ldexp" return idx == -1 || idx == 1;
+    return idx == -1;
+}
+// VPWidenIntrinsicRecipe::execute (createVectorCall)
+vp_widen_intrinsic_execute :: (s: *Vp_State, r: Vp_Rec) {
+    id := vr(r).iid;
+    tys: [..] Type_Id; tys.allocator = temp;
+    sty := vp_scalar_type(vr(r).def);
+    if is_vector_intrinsic_with_overload_type_at_arg(id, -1) {
+        if type_kind(sty) == .STRUCT vp_unported("struct-returning vector intrinsics");
+        array_add(*tys, lv_to_vectorized_ty(sty, s.vf));
+    }
+    args: [..] Value_Id; args.allocator = temp;
+    for o, k: vr(r).ops {
+        a: Value_Id;
+        if is_vector_intrinsic_with_scalar_op_at_arg(id, cast(u32) k) a = vs_get_lane(s, o, 0);
+        else a = vs_get(s, o, vp_uses_first_lane_only(r, o));
+        if is_vector_intrinsic_with_overload_type_at_arg(id, k) array_add(*tys, vtype(a));
+        array_add(*args, a);
+    }
+    f := get_or_insert_intrinsic_declaration(id, tys);
+    ci := vp_uv(vr(r).def);
+    if ci != NONE && is_inst(ci) && call_num_bundles(ci) > 0 vp_unported("operand bundles on widened intrinsic calls");
+    v := irb_call(*s.b, f, args);
+    if is_fp_math_operator(v) set_fmf(v, s.fmf);
+    vp_apply_flags(r, v);
+    vp_apply_metadata(r, v);
+    if type_kind(vtype(v)) != .VOID vs_set(s, vr(r).def, v);
 }

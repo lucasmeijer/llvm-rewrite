@@ -379,10 +379,7 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
     for lp.lvl.reductions if lv_use_ordered_reductions(lp.cm, *it.d) || lp.in_loop_reductions.count vp_unported("in-loop reductions");
     lvp_make_mem_op_widening_decisions(lp, range);
     lvp_make_scalarization_decisions(range);
-    // makeCallWideningDecisions
-    for bb: vp_depth_first_shallow(vb(vp_vector_loop_region()).entry)
-        for r: vp_block_recipes(bb) if vr(r).kind == .INSTRUCTION && vv(vr(r).def).uv != NONE && vr(r).opcode == vp_opc(.CALL)
-            vp_unported("call widening decisions (makeCallWideningDecisions)");
+    lvp_make_call_widening_decisions(lp, range);
     header := vp_entry_basic_block(vp_vector_loop_region());
     for bb: vp_blocks_only_basic(vp_rpo(header, false)) {
         start := vp_first_non_phi(bb);
@@ -600,8 +597,8 @@ lv_reduction_intrinsic_id :: (k: Recur_Kind) -> string {
         case .FMIN; #through; case .FMINNUM; return "llvm.vector.reduce.fmin";
         case .FMAXIMUM; return "llvm.vector.reduce.fmaximum";
         case .FMINIMUM; return "llvm.vector.reduce.fminimum";
-        case .FMAXIMUMNUM; return "llvm.vector.reduce.fmaximumnum";
-        case .FMINIMUMNUM; return "llvm.vector.reduce.fminimumnum";
+        case .FMAXIMUMNUM; return "llvm.vector.reduce.fmax";
+        case .FMINIMUMNUM; return "llvm.vector.reduce.fmin";
     }
     fatal("internal: unexpected recurrence kind %", k);
     return "";
@@ -944,4 +941,66 @@ lvp_collect_in_loop_reductions :: (lp: *Lv_Planner) {
             vp_unported("in-loop reductions");
         }
     }
+}
+
+// decideCallWidening (CallWideningDecision; vector library variants fail loudly at legality)
+Lv_Call_Widening :: enum u8 { SCALARIZE; INTRINSIC; VECTOR_VARIANT; }
+lvp_decide_call_widening :: (c: *Vp_Cost_Ctx, vpi: Vp_Rec, ops: [] Vp_Val, vf: Ec) -> Lv_Call_Widening {
+    ci := vp_underlying_instr(vpi);
+    if ec_is_scalar(vf) || vpc_will_be_scalarized(c, ci, vf) return .SCALARIZE;
+    called := vp_ir(vp_op(vpi, vpm_num_ops_without_mask(vpi) - 1));
+    result_ty := vp_scalar_type(vr(vpi).def);
+    id := get_vector_intrinsic_id_for_call(ci);
+    if id != NOT_INTRINSIC && vpc_is_free_scalar_intrinsic(id) return .SCALARIZE;
+    scalar_cost := vp_replicate_call_cost(c, called, result_ty, ops, false, vf);
+    // findVectorVariant: no VFDatabase mappings (legality fails loudly on them)
+    if id != NOT_INTRINSIC {
+        ic := vp_widen_intrinsic_call_cost(c, id, ops, vpi, vf);
+        if cost_valid(ic) && scalar_cost >= ic return .INTRINSIC;
+    }
+    return .SCALARIZE;
+}
+// VPlanTransforms::makeCallWideningDecisions
+lvp_make_call_widening_decisions :: (lp: *Lv_Planner, range: *Vf_Range) {
+    c: Vp_Cost_Ctx;
+    vpc_init(*c, lp);
+    for bb: vp_blocks_only_basic(vp_depth_first_shallow(vb(vp_vector_loop_region()).entry)) {
+        r := vb(bb).first;
+        while r != NONE {
+            next := vr(r).next;
+            defer r = next;
+            if vr(r).kind != .INSTRUCTION || vv(vr(r).def).uv == NONE || vr(r).opcode != vp_opc(.CALL) continue;
+            ci := vp_underlying_instr(r);
+            n := cast(s64) call_arg_count(ci);
+            ops: [..] Vp_Val; ops.allocator = temp;
+            for k: 0..n - 1 array_add(*ops, vp_op(r, k));
+            decision := lvp_decide_call_widening(*c, r, ops, range.start);
+            Ctx :: struct { c: *Vp_Cost_Ctx; r: Vp_Rec; ops: [] Vp_Val; d: Lv_Call_Widening; }
+            cx := Ctx.{*c, r, ops, decision};
+            same :: (vf: Ec, d: *void) -> bool { x := cast(*Ctx) d; return x.d == lvp_decide_call_widening(x.c, x.r, x.ops, vf); }
+            lvp_decision_and_clamp_range(range, same, *cx);
+            repl: Vp_Rec;
+            if decision == .INTRINSIC {
+                id := get_vector_intrinsic_id_for_call(ci);
+                repl = vp_new_widen_intrinsic(ci, id, ops, vp_scalar_type(vr(r).def), vr(r).flags, vr(r).md, vr(r).dl);
+            } else {
+                repl = lvp_handle_replication(lp, r, range);
+            }
+            vp_insert_before(repl, r);
+            vp_rauw(vr(r).def, vr(repl).def);
+            vp_erase_recipe(r);
+        }
+    }
+}
+// VPWidenIntrinsicRecipe(CallInst &CI, ID, CallArguments, Ty, Flags, MD, DL)
+vp_new_widen_intrinsic :: (ci: Value_Id, id: Intrinsic_Id, ops: [] Vp_Val, ty: Type_Id, flags: Vp_Flags, md: [] Vp_Md, dl: Md_Id) -> Vp_Rec {
+    r := vp_new_single_def(.WIDEN_INTRINSIC, ops, ty, ci, dl);
+    vr(r).iid = id; vr(r).flags = flags;
+    for md array_add(*vr(r).md, it);
+    if ci != NONE {
+        vr(r).may_read = may_read_from_memory(ci);
+        vr(r).may_write = may_write_to_memory(ci);
+        vr(r).may_side_effects = may_have_side_effects(ci);
+    }
+    return r;
 }

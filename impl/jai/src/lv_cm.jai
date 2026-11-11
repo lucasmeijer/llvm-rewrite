@@ -405,8 +405,8 @@ lv_cm_collect_non_vectorized_and_set_widening_decisions :: (cm: *Lv_Cm, vf: Ec) 
 }
 
 lv_cm_is_uniform_after_vectorization :: (cm: *Lv_Cm, i: Value_Id, vf: Ec) -> bool {
-    if call_iid(i) == IID_PSEUDOPROBE return false;
     if ec_is_scalar(vf) return true;
+    if call_iid(i) == IID_PSEUDOPROBE return false;
     st := lv_cm_vf_state(cm, vf);
     return iset_has(*st.uniforms, i);
 }
