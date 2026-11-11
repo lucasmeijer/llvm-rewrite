@@ -753,8 +753,7 @@ fn ty_with_new_bits(ty: i32, w: i64) -> i32 {
 // ComputeMaxSignificantBits(V, CxtI)
 fn compute_max_significant_bits(v: i32, cx: i32) -> i64 {
     kb_cxt = cx;
-    let n = num_sign_bits(v, 0);
-    return ty_scalar_bits(vals[v].ty) - n + 1;
+    return max_significant_bits(v);
 }
 
 // foldClampRangeOfTwo(II, Builder)

@@ -14,6 +14,7 @@
 // global stacks with marks (Goose forbids growable locals across a recursive call).
 import std;
 import ir;
+import cfgutil;
 import irutil;
 import analyses;
 import instinfo;
@@ -367,14 +368,13 @@ fn ra_canonicalize_operands(i: i32) {
     let rhs = op(i, 1);
     if lhs == rhs || is_constant(rhs) { return; }
     if is_constant(lhs) || ra_get_rank(rhs) < ra_get_rank(lhs) {
-        set_op(i, 0, rhs);
-        set_op(i, 1, lhs);
+        ra_swap(i);
         ra_made_change = true;
     }
 }
 
-// Instruction::swapOperands of a binary operator
-fn ra_swap(i: i32) { let a = op(i, 0); let b = op(i, 1); set_op(i, 0, b); set_op(i, 1, a); }
+// Instruction::swapOperands of a binary operator (Use::swap: both uses keep their use-list positions)
+fn ra_swap(i: i32) { let u0 = vals[i].ops; cu_use_swap(u0, u0 + 1); }
 
 // LowerNegateToMultiply: replace 0-X with X*-1
 fn ra_lower_negate_to_multiply(neg: i32) -> i32 {

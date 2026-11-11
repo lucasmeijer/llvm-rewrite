@@ -372,6 +372,16 @@ fn has_flag(v: i32, f: u8) -> bool { (op_flags(v) & f) != 0 }
 fn op_nsw(v: i32) -> bool { has_flag(v, FL_NSW) }
 fn op_nuw(v: i32) -> bool { has_flag(v, FL_NUW) }
 fn op_exact(v: i32) -> bool { has_flag(v, FL_EXACT) }
+// SimplifyQuery::IIQ (InstrInfoQuery): with UseInstrInfo = false, ValueTracking ignores nsw/nuw/exact, nsz and
+// instruction metadata. Only ComputeMaxSignificantBits(V, DL, AC, CxtI, DT, Depth) queries run that way: it calls
+// ComputeNumSignBits(V, DL, AC, CxtI, DT, /*UseInstrInfo=*/Depth = 0) (an argument mix-up in LLVM 23.1.5,
+// ValueTracking.cpp:380), so every InstCombine ComputeMaxSignificantBits query sees no flags. iiq_off is that
+// query's UseInstrInfo; the iiq_* helpers are Q.IIQ.hasNoSignedWrap/... and are used only where LLVM uses IIQ.
+var iiq_off = false;
+fn iiq_nsw(v: i32) -> bool { !iiq_off && op_nsw(v) }
+fn iiq_nuw(v: i32) -> bool { !iiq_off && op_nuw(v) }
+fn iiq_exact(v: i32) -> bool { !iiq_off && op_exact(v) }
+fn iiq_md(v: i32, kind: i32) -> i32 { if iiq_off { -1 } else { inst_get_md(v, kind) } }
 fn op_disjoint(v: i32) -> bool { has_flag(v, FL_DISJOINT) }
 fn inst_fmf(v: i32) -> u8 { if is_inst(v) { insts[inst_of(v)].fmf } else { 0 } }
 fn inst_pred(v: i32) -> i64 { insts[inst_of(v)].pred as i64 }

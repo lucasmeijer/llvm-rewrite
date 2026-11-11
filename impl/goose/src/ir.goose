@@ -558,12 +558,19 @@ fn cst_get(kind: i64, ty: i32, c0: Cst, opsv: const i32[:]) -> i32 {
     if cst_tab.len == 0 || (cst_count + 1) * 2 > cst_tab.len { rebuild_cst_tab(); }
     let mask = cst_tab.len - 1;
     var j = (c.hash as i64) & mask;
+    // -2 is a tombstone left by cst_remove (parser.goose, Constant::handleOperandChange): keep probing past it,
+    // or a constant stored behind it is missed and created a second time (two `i32 35`s, so InstCombine's
+    // getLosslessInvCast round trip `back != c` failed: tests/perf/compile/lua.ll)
+    var tomb: i64 = -1;
     loop {
         let e = cst_tab[j];
-        if e < 0 { break; }
-        if csts[vals[e].sub].hash == c.hash && cst_eq(e, kind, ty, c, opsv) { return e; }
+        if e == -1 { break; }
+        if e == -2 {
+            if tomb < 0 { tomb = j; }
+        } else if csts[vals[e].sub].hash == c.hash && cst_eq(e, kind, ty, c, opsv) { return e; }
         j = (j + 1) & mask;
     }
+    if tomb >= 0 { j = tomb; }
     let sub = csts.len as i32;
     csts.push(c);
     let id = new_val(kind, ty, sub, opsv.len);

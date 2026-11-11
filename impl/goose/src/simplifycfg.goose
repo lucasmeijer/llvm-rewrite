@@ -2519,7 +2519,7 @@ fn simplify_branch_on_icmp_chain(bi: i32) -> bool {
         sq_no_dt = true;
         sq_no_ac = false;
         ac_invalidate();
-        if !is_guaranteed_not_to_be_undef_or_poison(extra, bi, 0) {
+        if !is_guaranteed_not_to_be_undef_or_poison_no_dt(extra, bi) {
             extra = sb_freeze(extra, "");
         }
         sq_no_dt = save_dt;
@@ -3585,7 +3585,7 @@ fn eliminate_dead_switch_cases(si: i32) -> bool {
     var kvals: i32[>..<] = [];
     let kvalid = collect_possible_values(cond, kvals, 4);
     kb_cxt = si;
-    let maxsig = ty_scalar_bits(vals[cond].ty) - num_sign_bits(cond, 0) + 1;
+    let maxsig = max_significant_bits(cond);
     kb_cxt = save;
     sq_no_dt = s1; sq_no_ac = s2; sq_no_tli = s3;
     var dead: i32[>..<] = [];
@@ -3998,7 +3998,6 @@ fn remove_switch_after_select_fold(si: i32, phi: i32, selv: i32) {
     }
     sb_br(dbb);
     var k = nops(phi);
-    // removeIncomingValueIf: keeps the relative order of the rest
     phi_remove_incoming_if_block(phi, sbb);
     phi_add_incoming(phi, selv, sbb);
     var removed: i32[>..<] = [];
@@ -4013,21 +4012,11 @@ fn remove_switch_after_select_fold(si: i32, phi: i32, selv: i32) {
     k = k;
 }
 
-// PHINode::removeIncomingValueIf(Pred): stable compaction of the kept entries
+// PHINode::removeIncomingValueIf(Pred): backwards, each removed entry takes the current last one (not stable:
+// [-1, %switch], [0, %a], [%y, %entry] minus %switch is [%y, %entry], [0, %a]; SCCP/switch.ll after O2-like passes)
 fn phi_remove_incoming_if_block(p: i32, b: i32) {
-    let n = nops(p);
-    var w: i64 = 0;
-    for k in n {
-        if phi_block(p, k) == b { continue; }
-        if w != k {
-            set_op(p, w, op(p, k));
-            phi_set_block(p, w, phi_block(p, k));
-        }
-        w++;
-    }
-    var k = n;
-    while k > w { k--; set_op(p, k, -1); use_aux[vals[p].ops + k] = -1; }
-    vals[p].nops = w as i32;
+    var k = nops(p);
+    while k > 0 { k--; if phi_block(p, k) == b { phi_remove_incoming(p, k); } }
 }
 
 fn try_switch_to_select(si: i32) -> bool {
@@ -4603,7 +4592,7 @@ fn sb_gep_inbounds(srcty: i32, p: i32, idxs: const i32[:], name: const u8[:]) ->
     for x in idxs { opsv.push(x); }
     let g = create_inst(OP_GEP, vals[p].ty, opsv);
     insts[inst_of(g)].ty2 = srcty;
-    insts[inst_of(g)].flags = GEP_INBOUNDS;
+    insts[inst_of(g)].flags = GEP_INBOUNDS | GEP_NUSW;
     return sb_insert(g, name);
 }
 // CreateLoad(Ty, Ptr, Name): ABI alignment of the type

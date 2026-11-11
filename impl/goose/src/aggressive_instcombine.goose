@@ -1026,7 +1026,8 @@ fn ai_fold_consecutive_loads(i: i32) -> bool {
 }
 // CreatePtrAdd / CreateInBoundsPtrAdd: gep i8, ptr, offset
 fn ai_ptr_add(p: i32, off: i32, inbounds: bool) -> i32 {
-    let fl: u8 = if inbounds { GEP_INBOUNDS } else { 0 };
+    // GEPNoWrapFlags::inBounds() is inbounds | nusw (without nusw InstCombine never infers nuw from it)
+    let fl: u8 = if inbounds { GEP_INBOUNDS | GEP_NUSW } else { 0 };
     if is_constant(p) && is_constant(off) { return ce_gep(T_I8, p, [off], fl, -1); }
     let g = create_inst(OP_GEP, vals[p].ty, [p, off]);
     insts[inst_of(g)].ty2 = T_I8;

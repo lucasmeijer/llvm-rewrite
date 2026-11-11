@@ -87,7 +87,9 @@ fn icw_grow(v: i32) {
     while icw_idx.len <= (v as i64) { icw_idx.push(-1); icw_in_def.push(false); }
 }
 fn icw_is_empty() -> bool { icw.len == 0 && icw_def.len == 0 }
-// add: deferred, visited in the order added
+// add: deferred, visited in the order added (Worklist.add; InsertNewInstBefore and the IRBuilder inserter use it).
+// InstCombiner::addToWorklist is Worklist.push, not add: map it to icw_push (deferring it changed the visit order
+// and with it which of two folds erased a phi first: a dbg_value of 0 instead of poison).
 fn icw_add(i: i32) {
     icw_grow(i);
     if icw_in_def[i] { return; }
@@ -311,7 +313,7 @@ fn ic_add_dead_edge(from: i32, to: i32, wl: i32[>..<]&) {
         for k in nops(p) {
             if phi_block(p, k) == from && !is_poison(op(p, k)) {
                 ic_replace_use(vals[p].ops + (k as i32), c_poison(vals[p].ty));
-                icw_add(p);
+                icw_push(p);
                 ic_made_change = true;
             }
         }
@@ -358,7 +360,7 @@ fn ic_handle_unreachable_from(first: i32, wl: i32[>..<]&) {
     var changed: i32[>..<] = [];
     if ic_handle_unreachable_terminator(term, changed) {
         ic_made_change = true;
-        for v in changed { icw_add(v); }
+        for v in changed { icw_push(v); }
     }
     for k in term_nsucc(term) { ic_add_dead_edge(bb, term_succ(term, k), wl); }
 }
@@ -1076,12 +1078,12 @@ fn visit_cond_br(bi: i32) -> i32 {
             u = uses[u].next;
             if dom_edge_use(bb, s0, uu) {
                 ic_replace_use(uu, c_int_ty(vals[cond].ty, 1));
-                icw_add(uses[uu].user);
+                icw_push(uses[uu].user);
                 continue;
             }
             if dom_edge_use(bb, s1, uu) {
                 ic_replace_use(uu, c_int_ty(vals[cond].ty, 0));
-                icw_add(uses[uu].user);
+                icw_push(uses[uu].user);
             }
         }
     }

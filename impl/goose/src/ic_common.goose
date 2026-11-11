@@ -114,12 +114,12 @@ fn m_fneg_v(v: i32) -> bool {
 fn add_one(c: i32) -> i32 { ce_binop(OP_ADD, c, c_int_ty(vals[c].ty, 1), 0) }
 fn sub_one(c: i32) -> i32 { ce_binop(OP_SUB, c, c_int_ty(vals[c].ty, 1), 0) }
 
-// Instruction::swapOperands for a commutative binary operator
+// Instruction::swapOperands for a commutative binary operator: Use::swap, the two uses keep their places in
+// the use lists (two set_op calls would move both to the front: a different use-list order that changes
+// later passes' visiting orders)
 fn swap_operands(i: i32) {
-    let a = op(i, 0);
-    let b = op(i, 1);
-    set_op(i, 0, b);
-    set_op(i, 1, a);
+    let u0 = vals[i].ops;
+    cu_use_swap(u0, u0 + 1);
 }
 
 // maintainNoSignedWrap(I, B, C)
@@ -1219,7 +1219,7 @@ fn freely_invert_all_users_of(v: i32, ignored: i32) {
             cu_swap_successors(us);
         } else if o == OP_XOR {
             ic_replace_inst_uses_with(us, v);
-            icw_add(us);
+            icw_push(us);
         } else { fatal("internal: freelyInvertAllUsersOf out of sync with canFreelyInvertAllUsersOf"); }
     }
     // Update pre-existing debug value uses.

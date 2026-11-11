@@ -2,7 +2,13 @@
 // LazyValueInfo query interface and LazyValueInfoPrinterPass with its annotated writer).
 // ValueLatticeElement is valuelattice.goose (VL), ConstantRange constrange.goose.
 //
-// One LazyValueInfo result exists at a time, for the function lv_fn (LazyValueAnalysis result). Like LLVM's it is
+// One LazyValueInfo result per function, like LLVM's FunctionAnalysisManager cache: results of several functions
+// coexist (a function(jump-threading),function(correlated-propagation) pipeline keeps the first function's LVI,
+// filled by JumpThreading, while the second adaptor runs CVP on the other functions; a single slot recomputed it
+// from scratch and CVP then folded less). lv_fn is the function of the last lvi_get (the "current" result), lv_fns
+// holds every function with a result (its Impl state). Entries of all results share the tables below (they are
+// keyed by block, which belongs to one function); each function's block entries are chained (LvBlk.fnext from
+// lv_fblk) so invalidating one result kills only its entries. Like LLVM's it is
 // fully lazy: the Impl (cache, guard declaration) is created by the first query (lv_impl), and the printer prints
 // only its header when nothing queried LVI before. The result survives passes that preserve it (JumpThreading),
 // so cached lattice values must not hold APInt pool words: wide ranges are stored as IR constants (lv_store).
@@ -48,11 +54,13 @@ let LV_K_OVERDEF: i64 = 1;
 let LV_K_NONNULL: i64 = 2;
 
 struct LvEnt { bb: i32, v: i32, kind: u8, alive: bool, vnext: i32, bnext: i32, l: VL }
-struct LvBlk { head: i32, nover: i32, nn_done: bool }
+struct LvBlk { head: i32, nover: i32, nn_done: bool, bb: i32, fnext: i32 }
 
 var lv_fn: i32 = -1;              // function of the current LazyValueInfo result (-1: none)
 var lv_impl: bool = false;        // PImpl != nullptr
 var lv_guard: i32 = -1;           // GuardDecl
+var lv_fns = hm_new();            // function -> 1 + (lv_impl ? 1 : 0) + 2 * (1 + GuardDecl): the valid results
+var lv_fblk = hm_new();           // function -> head of its chain of block entries (LvBlk.fnext)
 var lv_ents: LvEnt[>..<];
 var lv_blks: LvBlk[>..<];
 var lv_emap = hm_new();           // (bb, v * 4 + kind) -> entry
@@ -76,26 +84,56 @@ fn lv_reset_cache() {
     hm_clear(lv_emap);
     hm_clear(lv_bmap);
     hm_clear(lv_vmap);
+    hm_clear(lv_fblk);
     lv_stack.clear();
     hm_clear(lv_stack_set);
     vh_lvi_n = 0;
     vh_lvi_events.clear();
 }
 
+fn lv_fkey(fv: i32) -> u64 { (fv as i64) as u64 }
+// save the current result's Impl state into lv_fns
+fn lv_save_current() {
+    if lv_fn < 0 { return; }
+    hm_put(lv_fns, lv_fkey(lv_fn), 1 + (if lv_impl { 1 } else { 0 }) + 2 * (1 + lv_guard as i64));
+}
+
 // AM.getResult<LazyValueAnalysis>(F)
 fn lvi_get(fv: i32) {
     if lv_fn == fv { return; }
-    lvi_invalidate();
+    lv_save_current();
     lv_fn = fv;
-    ac_build(fv);
-}
-fn lvi_valid(fv: i32) -> bool { lv_fn == fv }
-fn lvi_invalidate() {
-    if lv_fn < 0 { return; }
-    lv_reset_cache();
-    lv_fn = -1;
+    let st = hm_get(lv_fns, lv_fkey(fv), 0);
+    if st > 0 {
+        lv_impl = ((st - 1) & 1) != 0;
+        lv_guard = (((st - 1) >> 1) - 1) as i32;
+        return;
+    }
     lv_impl = false;
     lv_guard = -1;
+    hm_put(lv_fns, lv_fkey(fv), 1);
+    ac_build(fv);
+}
+fn lvi_valid(fv: i32) -> bool { lv_fn == fv || hm_has(lv_fns, lv_fkey(fv)) }
+// LazyValueInfo::invalidate of F's result (the AnalysisManager drops it)
+fn lvi_invalidate(fv: i32) {
+    if !hm_has(lv_fns, lv_fkey(fv)) { return; }
+    hm_del(lv_fns, lv_fkey(fv));
+    if lv_fn == fv { lv_fn = -1; lv_impl = false; lv_guard = -1; }
+    if lv_fns.n == 0 { lv_reset_cache(); return; }
+    lvi_drain();
+    var be = hm_get(lv_fblk, lv_fkey(fv), -1);
+    while be >= 0 {
+        let bb = lv_blks[be].bb;
+        var e = lv_blks[be].head as i64;
+        while e >= 0 {
+            if lv_ents[e].alive { lv_kill_entry(e); }
+            e = lv_ents[e].bnext as i64;
+        }
+        if hm_get(lv_bmap, (bb as i64) as u64, -1) == be { hm_del(lv_bmap, (bb as i64) as u64); }
+        be = lv_blks[be].fnext as i64;
+    }
+    hm_del(lv_fblk, lv_fkey(fv));
 }
 // LazyValueInfo::getOrCreateImpl
 fn lv_get_impl() {
@@ -143,7 +181,9 @@ fn lv_get_or_create_block_entry(bb: i32) -> i64 {
     let e = lv_block_entry(bb);
     if e >= 0 { return e; }
     let n = lv_blks.len;
-    lv_blks.push(LvBlk { head: -1, nover: 0, nn_done: false });
+    let fk = lv_fkey(block_func(bb));
+    lv_blks.push(LvBlk { head: -1, nover: 0, nn_done: false, bb: bb, fnext: hm_get(lv_fblk, fk, -1) as i32 });
+    hm_put(lv_fblk, fk, n);
     hm_put(lv_bmap, (bb as i64) as u64, n);
     return n;
 }
@@ -212,7 +252,7 @@ fn lvi_drain() {
     var i: i64 = 0;
     while i < vh_lvi_events.len {
         let v = vh_lvi_events[i];
-        if lv_fn >= 0 { lv_erase_value(v); }
+        if lv_fns.n > 0 { lv_erase_value(v); }
         i++;
     }
     vh_lvi_events.clear();

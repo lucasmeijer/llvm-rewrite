@@ -1332,7 +1332,7 @@ recursive fn kfc_call(v: i32, de: AP, interested: u64, knot: u64, depth: i64) ->
         if (interested & FCL_NAN) != 0 { isrc |= FCL_ORDERED_LT_ZERO_MASK; }
         let ks = kfc_compute(op(v, 0), de, isrc, depth + 1);
         var mode = DM_DYNAMIC;
-        let nsz = (inst_fmf(v) & FMF_NSZ) != 0;
+        let nsz = !iiq_off && (inst_fmf(v) & FMF_NSZ) != 0;      // Q.IIQ.hasNoSignedZeros(II)
         if !nsz { mode = inst_denormal_mode(v); }
         known = kfc_sqrt(ks, mode);
         if nsz { known = kfc_known_not(known, FCL_NEG_ZERO); }

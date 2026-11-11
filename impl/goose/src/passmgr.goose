@@ -1076,7 +1076,7 @@ fn invalidate_function(fv: i32, preserved: u32) {
     // ScalarEvolution::invalidate: also when the domtree or loops go
     if (preserved & (1 << A_SCEV)) == 0 || (preserved & (1 << A_DOMTREE)) == 0 || (preserved & (1 << A_LOOPS)) == 0 { scev_invalidate(fv); }
     // LazyValueInfo::invalidate: only when not preserved (its AssumptionCache is never invalidated)
-    if (preserved & (1 << A_LVI)) == 0 { lvi_invalidate(); }
+    if (preserved & (1 << A_LVI)) == 0 { lvi_invalidate(fv); }
     // BranchProbabilityInfo / BlockFrequencyInfo::invalidate: kept when preserved or when the CFG analyses are
     if (preserved & (1 << A_BPI)) == 0 && (preserved & PA_CFG) != PA_CFG { bpi_invalidate(); }
     if (preserved & (1 << A_BFI)) == 0 && (preserved & PA_CFG) != PA_CFG { bfi_invalidate(fv); }

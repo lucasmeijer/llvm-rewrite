@@ -454,7 +454,7 @@ recursive fn get_shifted_value(v: i32, nb: i64, left: bool, sem: i64) -> i32 {
         let so = if left { OP_SHL } else { if sem == SS_SIGNED { OP_ASHR } else { OP_LSHR } };
         return icb_binop(so, v, c_int_ty(vals[v].ty, nb as u64), "");
     }
-    icw_add(v);
+    icw_push(v);
     let o = iop(v);
     if o == OP_AND || o == OP_OR || o == OP_XOR {
         let a = get_shifted_value(op(v, 0), nb, left, sem);

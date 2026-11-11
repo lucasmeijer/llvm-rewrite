@@ -17,6 +17,7 @@
 namespace ic;
 import std;
 import ir;
+import cfgutil;
 import irutil;
 import calls;
 import instinfo;
@@ -217,10 +218,9 @@ fn sv_commute(s: i32) {
     let at = ints.len as i32;
     for x in m { ints.push(x); }
     insts[inst_of(s)].aux = at;
-    let a = op(s, 0);
-    let b = op(s, 1);
-    set_op(s, 0, b);
-    set_op(s, 1, a);
+    // Op<0>().swap(Op<1>()): Use::swap keeps the use-list positions
+    let u0 = vals[s].ops;
+    cu_use_swap(u0, u0 + 1);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -299,7 +299,7 @@ fn scalarize_phi(ei: i32, pn: i32) -> i32 {
     }
     for e in extracts {
         ic_replace_inst_uses_with(e, sphi);
-        icw_add(e);
+        icw_push(e);
     }
     return ei;
 }
@@ -631,7 +631,7 @@ fn replace_extract_elements(ins: i32, ext: i32) -> bool {
         let ne = ic_new_extract_element(wv, op(old, 1));
         ic_insert_new_with(ne, old);
         ic_replace_inst_uses_with(old, ne);
-        icw_add(old);
+        icw_push(old);
     }
     return true;
 }
@@ -1962,7 +1962,7 @@ fn fold_extraction_of_vector_deinterleave(rz: i32) -> i32 {
     let nf1 = icb_lshr(bc, c_int_ty(bt, bw as u64), "", false);
     for k in rep_i.len {
         ic_replace_inst_uses_with(rep_i[k], if rep_k[k] != 0 { nf1 } else { nf0 });
-        icw_add(rep_i[k]);
+        icw_push(rep_i[k]);
     }
     return rz;
 }

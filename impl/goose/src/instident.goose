@@ -126,7 +126,9 @@ fn ii_aset_intersect(s0: i32, s1: i32) -> bool, i32 {
             } else if kind == AK_Captures {
                 out.push(attr_int(kind, attrs[a0].i1 | attrs[a1].i1));
             } else if kind == AK_NoFPClass {
-                out.push(attr_int(kind, attrs[a0].i1 & attrs[a1].i1));
+                // AttrBuilder::addNoFPClassAttr drops an empty mask (fcNone)
+                let m = attrs[a0].i1 & attrs[a1].i1;
+                if m != 0 { out.push(attr_int(kind, m)); }
             } else if kind == AK_Range {
                 let r = rg_union(ii_range_of(a0), ii_range_of(a1));
                 if !rg_is_full(r) {

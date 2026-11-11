@@ -246,7 +246,23 @@ fn strip_ptr_casts_same_repr(v0: i32) -> i32 {
     return v;
 }
 
+// A query made without a context instruction (depth 0, cxt < 0) is one LLVM makes without a DominatorTree too
+// (every such call site in lib/Analysis and lib/Transforms passes DT = nullptr, except NewGVN's): the PHI case
+// recurses with the incoming block's terminator as CtxI, but `!DT` still stops the dominating-condition walk.
+// gnp_no_dt carries that through the recursion (sq_no_dt is the explicit "no DT" of the caller).
+var gnp_no_dt = false;
+
 recursive fn guaranteed_not_undef_or_poison(v: i32, cxt: i32, depth: i64, kind: i64) -> bool {
+    if depth == 0 && cxt < 0 && !gnp_no_dt {
+        gnp_no_dt = true;
+        let r = guaranteed_not_undef_or_poison_i(v, cxt, depth, kind);
+        gnp_no_dt = false;
+        return r;
+    }
+    return guaranteed_not_undef_or_poison_i(v, cxt, depth, kind);
+}
+
+recursive fn guaranteed_not_undef_or_poison_i(v: i32, cxt: i32, depth: i64, kind: i64) -> bool {
     if depth >= VT_MAX_DEPTH { return false; }
     let k = vals[v].kind;
     if k == VK_MDVAL { return false; }
@@ -302,7 +318,7 @@ recursive fn guaranteed_not_undef_or_poison(v: i32, cxt: i32, depth: i64, kind: 
            inst_get_md(v, md_kind_id("dereferenceable_or_null")) >= 0 { return true; }
     }
     if program_undefined_if_undef_or_poison(v, !inc_undef) { return true; }
-    if cxt < 0 || sq_no_dt { return false; }
+    if cxt < 0 || sq_no_dt || gnp_no_dt { return false; }
     let cbb = inst_parent(cxt);
     if cbb < 0 { return false; }
     if !block_reachable(cbb) { return false; }
@@ -340,6 +356,14 @@ fn shuffle_splat_value(v: i32) -> i32 {
 }
 
 recursive fn is_guaranteed_not_to_be_undef_or_poison(v: i32, cxt: i32, depth: i64) -> bool { guaranteed_not_undef_or_poison(v, cxt, depth, UPK_BOTH) }
+// isGuaranteedNotToBeUndefOrPoison(V, AC, CtxI, /*DT=*/nullptr): a context instruction but no DominatorTree
+fn is_guaranteed_not_to_be_undef_or_poison_no_dt(v: i32, cxt: i32) -> bool {
+    let s = sq_no_dt;
+    sq_no_dt = true;
+    let r = guaranteed_not_undef_or_poison(v, cxt, 0, UPK_BOTH);
+    sq_no_dt = s;
+    return r;
+}
 recursive fn is_guaranteed_not_to_be_poison(v: i32, cxt: i32, depth: i64) -> bool { guaranteed_not_undef_or_poison(v, cxt, depth, UPK_POISON) }
 recursive fn is_guaranteed_not_to_be_undef(v: i32, cxt: i32, depth: i64) -> bool { guaranteed_not_undef_or_poison(v, cxt, depth, UPK_UNDEF) }
 

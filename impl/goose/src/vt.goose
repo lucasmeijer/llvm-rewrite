@@ -152,8 +152,10 @@ fn call_range(c: i32) -> bool {
 // CallBase::paramHasAttr
 fn call_param_has_attr(c: i32, k: i64, kind: i64) -> bool {
     if aset_has(alist_param(insts[inst_of(c)].attrs, k), kind) { return true; }
-    let f = cb_callee(c);
-    if is_func(f) && aset_has(alist_param(globs[glob_of(f)].attrs, k), kind) { return true; }
+    // CallBase::paramHasAttr: the callee's attributes only through getCalledFunction (a callee whose function
+    // type differs from the call's is no "called function": bitcast-function.ll's `returned` must not fold)
+    let f = called_function(c);
+    if f >= 0 && aset_has(alist_param(globs[glob_of(f)].attrs, k), kind) { return true; }
     return false;
 }
 fn call_ret_has_attr(c: i32, kind: i64) -> bool {
@@ -712,7 +714,7 @@ recursive fn ikz_operator(i: i32, de: AP, depth: i64) -> bool {
     } else if o == OP_SEXT || o == OP_ZEXT {
         return ikz(op(i, 0), de, depth);
     } else if o == OP_SHL {
-        if op_nuw(i) || op_nsw(i) { return ikz(op(i, 0), de, depth); }
+        if iiq_nuw(i) || iiq_nsw(i) { return ikz(op(i, 0), de, depth); }
         let kn = kb_compute(op(i, 0), de, depth);
         if ap_get_bit(kn.o, 0) { return true; }
         return is_non_zero_shift(i, de, kn, depth);
@@ -738,14 +740,14 @@ recursive fn ikz_operator(i: i32, de: AP, depth: i64) -> bool {
         if o == OP_SDIV { xk = kb_abs(xk, false); yk = kb_abs(yk, false); }
         return kb_uge(xk, yk) == 1;
     } else if o == OP_ADD {
-        return is_non_zero_add(de, w, op(i, 0), op(i, 1), op_nsw(i), op_nuw(i), depth);
+        return is_non_zero_add(de, w, op(i, 0), op(i, 1), iiq_nsw(i), iiq_nuw(i), depth);
     } else if o == OP_MUL {
-        return is_non_zero_mul(de, w, op(i, 0), op(i, 1), op_nsw(i), op_nuw(i), depth);
+        return is_non_zero_mul(de, w, op(i, 0), op(i, 1), iiq_nsw(i), iiq_nuw(i), depth);
     } else if o == OP_SELECT {
         if select_arm_nonzero(i, true, de, depth) && select_arm_nonzero(i, false, de, depth) { return true; }
     } else if o == OP_PHI {
         kb_cc_check_phi("isKnownNonZero");
-        if match_simple_recurrence(i) && is_non_zero_recurrence() { return true; }
+        if !iiq_off && match_simple_recurrence(i) && is_non_zero_recurrence() { return true; }
         let nd = max(depth, VT_MAX_DEPTH - 1);
         let save = kb_cxt;
         for k in nops(i) {
@@ -810,10 +812,10 @@ recursive fn ikz_operator(i: i32, de: AP, depth: i64) -> bool {
         return is_known_non_zero(op(i, 0), depth) && guaranteed_not_poison_hook(op(i, 0), depth);
     } else if o == OP_LOAD {
         if ty_kind(vals[i].ty) == TK_PTR {
-            if inst_get_md(i, md_kind_id("nonnull")) >= 0 ||
-               (inst_get_md(i, md_kind_id("dereferenceable")) >= 0 && !null_pointer_is_defined(inst_func(i), ptr_as(vals[i].ty))) { return true; }
+            if iiq_md(i, md_kind_id("nonnull")) >= 0 ||
+               (iiq_md(i, md_kind_id("dereferenceable")) >= 0 && !null_pointer_is_defined(inst_func(i), ptr_as(vals[i].ty))) { return true; }
         } else {
-            let rm = inst_get_md(i, md_kind_id("range"));
+            let rm = iiq_md(i, md_kind_id("range"));
             if rm >= 0 { return range_md_excludes_zero(rm); }
         }
         return false;
@@ -832,7 +834,7 @@ recursive fn ikz_operator(i: i32, de: AP, depth: i64) -> bool {
             let rp = arg_aliasing_returned_ptr(i, true);
             if rp >= 0 { return is_known_non_zero(rp, depth); }
         } else {
-            let rm = inst_get_md(i, md_kind_id("range"));
+            let rm = iiq_md(i, md_kind_id("range"));
             if rm >= 0 { return range_md_excludes_zero(rm); }
             if call_range(i) { if !rg_contains_ap(vt_cr, ap_zero(rg_w(vt_cr))) { return true; } }
             let rv = returned_arg_operand(i);
@@ -990,9 +992,9 @@ recursive fn is_known_pow2(v: i32, or_zero: bool, depth0: i64) -> bool {
     depth++;
     if o == OP_ZEXT { return is_known_pow2(op(v, 0), or_zero, depth); }
     if o == OP_TRUNC { return or_zero && is_known_pow2(op(v, 0), or_zero, depth); }
-    if o == OP_SHL { if or_zero || op_nuw(v) || op_nsw(v) { return is_known_pow2(op(v, 0), or_zero, depth); } return false; }
-    if o == OP_LSHR { if or_zero || op_exact(v) { return is_known_pow2(op(v, 0), or_zero, depth); } return false; }
-    if o == OP_UDIV { if op_exact(v) { return is_known_pow2(op(v, 0), or_zero, depth); } return false; }
+    if o == OP_SHL { if or_zero || iiq_nuw(v) || iiq_nsw(v) { return is_known_pow2(op(v, 0), or_zero, depth); } return false; }
+    if o == OP_LSHR { if or_zero || iiq_exact(v) { return is_known_pow2(op(v, 0), or_zero, depth); } return false; }
+    if o == OP_UDIV { if iiq_exact(v) { return is_known_pow2(op(v, 0), or_zero, depth); } return false; }
     if o == OP_MUL {
         return is_known_pow2(op(v, 1), or_zero, depth) && is_known_pow2(op(v, 0), or_zero, depth) && (or_zero || is_known_non_zero(v, depth));
     }
@@ -1004,7 +1006,7 @@ recursive fn is_known_pow2(v: i32, or_zero: bool, depth0: i64) -> bool {
     if o == OP_ADD {
         let a = op(v, 0);
         let b = op(v, 1);
-        if or_zero || op_nuw(v) || op_nsw(v) {
+        if or_zero || iiq_nuw(v) || iiq_nsw(v) {
             if m_c_binop_with(a, OP_AND, b) >= 0 && is_known_pow2(b, or_zero, depth) { return true; }
             if m_c_binop_with(b, OP_AND, a) >= 0 && is_known_pow2(a, or_zero, depth) { return true; }
             let lk = kb_compute_all(a, depth);
@@ -1014,7 +1016,7 @@ recursive fn is_known_pow2(v: i32, or_zero: bool, depth0: i64) -> bool {
                 if or_zero || kb_is_nonzero(rk) || kb_is_nonzero(lk) { return true; }
             }
         }
-        if or_zero || op_nuw(v) {
+        if or_zero || iiq_nuw(v) {
             if is_op(a, OP_LSHR) && m_all_ones(op(a, 0)) && m_one(b) { return true; }
         }
         return false;
@@ -1062,18 +1064,18 @@ recursive fn pow2_recurrence(pn: i32, or_zero: bool, depth: i64) -> bool {
     let o = iop(bo);
     if o != OP_MUL && op(bo, 1) != step { return false; }
     kb_cxt = block_terminator(inst_parent(bo));
-    if o == OP_MUL { return (or_zero || op_nuw(bo) || op_nsw(bo)) && is_known_pow2(step, or_zero, depth); }
+    if o == OP_MUL { return (or_zero || iiq_nuw(bo) || iiq_nsw(bo)) && is_known_pow2(step, or_zero, depth); }
     if o == OP_SDIV {
         if !m_power2(start) || m_sign_mask(start) { return false; }
-        return (or_zero || op_exact(bo)) && is_known_pow2(step, false, depth);
+        return (or_zero || iiq_exact(bo)) && is_known_pow2(step, false, depth);
     }
-    if o == OP_UDIV { return (or_zero || op_exact(bo)) && is_known_pow2(step, false, depth); }
-    if o == OP_SHL { return or_zero || op_nuw(bo) || op_nsw(bo); }
+    if o == OP_UDIV { return (or_zero || iiq_exact(bo)) && is_known_pow2(step, false, depth); }
+    if o == OP_SHL { return or_zero || iiq_nuw(bo) || iiq_nsw(bo); }
     if o == OP_ASHR {
         if !m_power2(start) || m_sign_mask(start) { return false; }
-        return or_zero || op_exact(bo);
+        return or_zero || iiq_exact(bo);
     }
-    if o == OP_LSHR { return or_zero || op_exact(bo); }
+    if o == OP_LSHR { return or_zero || iiq_exact(bo); }
     return false;
 }
 
@@ -1250,6 +1252,16 @@ fn num_sign_bits_of(x: AP) -> i64 { ap_num_sign_bits(x) }
 // The public ComputeNumSignBits(Op, DL, AC, CxtI, DT, Depth) builds a SimplifyQuery without a
 // DomConditionCache: a top-level query (depth 0) runs with dc_active off. Recursion from computeKnownBits
 // (which passes its own query, DC included) goes through ncsb.
+// llvm::ComputeMaxSignificantBits(V, DL, AC, CxtI, DT, Depth): the bit width minus ComputeNumSignBits plus one,
+// with UseInstrInfo = false (pm.goose iiq_off: the call passes its Depth argument as UseInstrInfo)
+fn max_significant_bits(v: i32) -> i64 {
+    let s = iiq_off;
+    iiq_off = true;
+    let n = num_sign_bits(v, 0);
+    iiq_off = s;
+    return ty_scalar_bits(vals[v].ty) - n + 1;
+}
+
 recursive fn num_sign_bits(v: i32, depth: i64) -> i64 {
     if depth != 0 { return ncsb(v, all_elts_of(v), depth); }
     let sv = dc_active;
@@ -1793,8 +1805,8 @@ fn limits_for_binop(bo: i32, w: i64, prefer_signed: bool) -> AP, AP {
         let c = m_apint(op(bo, 0));
         if c >= 0 {
             let cv = ci_ap(c);
-            let nsw = op_nsw(bo);
-            var nuw = op_nuw(bo);
+            let nsw = iiq_nsw(bo);
+            var nuw = iiq_nuw(bo);
             if prefer_signed && nsw && nuw { nuw = false; }
             if nuw { upper = ap_inc(cv); }
             else if nsw {
@@ -1806,8 +1818,8 @@ fn limits_for_binop(bo: i32, w: i64, prefer_signed: bool) -> AP, AP {
         let c = m_apint(op(bo, 1));
         if c >= 0 && !ap_is_zero(ci_ap(c)) {
             let cv = ci_ap(c);
-            let nsw = op_nsw(bo);
-            var nuw = op_nuw(bo);
+            let nsw = iiq_nsw(bo);
+            var nuw = iiq_nuw(bo);
             if prefer_signed && nsw && nuw { nuw = false; }
             if nuw { lower = cv; }
             else if nsw {
@@ -1833,7 +1845,7 @@ fn limits_for_binop(bo: i32, w: i64, prefer_signed: bool) -> AP, AP {
             if c0 >= 0 {
                 let cv = ci_ap(c0);
                 var sa = w - 1;
-                if !ap_is_zero(cv) && op_exact(bo) { sa = ap_countr_zero(cv); }
+                if !ap_is_zero(cv) && iiq_exact(bo) { sa = ap_countr_zero(cv); }
                 if ap_is_neg(cv) { lower = cv; upper = ap_inc(ap_ashr(cv, sa)); }
                 else { lower = ap_ashr(cv, sa); upper = ap_inc(cv); }
             }
@@ -1847,7 +1859,7 @@ fn limits_for_binop(bo: i32, w: i64, prefer_signed: bool) -> AP, AP {
             if c0 >= 0 {
                 let cv = ci_ap(c0);
                 var sa = w - 1;
-                if !ap_is_zero(cv) && op_exact(bo) { sa = ap_countr_zero(cv); }
+                if !ap_is_zero(cv) && iiq_exact(bo) { sa = ap_countr_zero(cv); }
                 lower = ap_lshr(cv, sa);
                 upper = ap_inc(cv);
             }
@@ -1856,10 +1868,10 @@ fn limits_for_binop(bo: i32, w: i64, prefer_signed: bool) -> AP, AP {
         let c0 = m_apint(op(bo, 0));
         if c0 >= 0 {
             let cv = ci_ap(c0);
-            if op_nuw(bo) {
+            if iiq_nuw(bo) {
                 lower = cv;
                 upper = ap_inc(ap_shl(cv, ap_countl_zero(cv)));
-            } else if op_nsw(bo) {
+            } else if iiq_nsw(bo) {
                 if ap_is_neg(cv) {
                     lower = ap_shl(cv, ap_countl_one(cv) - 1);
                     upper = ap_inc(cv);
@@ -1940,7 +1952,7 @@ fn range_for_intrinsic(ii: i32, w: i64) -> CRange {
     let smax = ap_smax_val(w);
     if id == IID_ctlz || id == IID_cttz {
         var up = ap_u64(w as u64, w);
-        if !m_one(op(ii, 1)) { up = ap_inc(up); }
+        if iiq_off || !m_one(op(ii, 1)) { up = ap_inc(up); }
         return rg_nonempty(z, up);
     }
     if id == IID_ctpop { return rg_nonempty(z, ap_inc(ap_u64(w as u64, w))); }
@@ -2017,7 +2029,7 @@ fn range_for_select_pattern(si: i32, w: i64) -> CRange {
     let r = sp_rhs;
     if f == SPF_UNKNOWN { return rg_full(w); }
     if f == SPF_ABS {
-        if m_neg(r) == l && l >= 0 && is_inst(r) && op_nsw(r) { return rg_nonempty(z, ap_inc(smax)); }
+        if m_neg(r) == l && l >= 0 && is_inst(r) && iiq_nsw(r) { return rg_nonempty(z, ap_inc(smax)); }
         return rg_nonempty(z, ap_inc(smin));
     }
     if f == SPF_NABS { return rg_nonempty(smin, ap_u64(1, w)); }
@@ -2032,7 +2044,7 @@ fn range_for_select_pattern(si: i32, w: i64) -> CRange {
     return rg_full(w);
 }
 
-// computeConstantRange(V, ForSigned, SQ, Depth); UseInstrInfo is always true
+// computeConstantRange(V, ForSigned, SQ, Depth); SQ.IIQ.UseInstrInfo is !iiq_off (pm.goose)
 recursive fn compute_constant_range(v: i32, for_signed: bool, use_info: bool, depth: i64) -> CRange {
     let w = ty_scalar_bits(vals[v].ty);
     if depth == VT_MAX_DEPTH { return rg_full(w); }
@@ -2064,7 +2076,7 @@ recursive fn compute_constant_range(v: i32, for_signed: bool, use_info: bool, de
         if arg_range(v) { cr = vt_cr; }
     }
     if is_inst(v) {
-        let md = inst_get_md(v, md_kind_id("range"));
+        let md = iiq_md(v, md_kind_id("range"));
         if md >= 0 { cr = rg_intersect(cr, rg_from_range_md(md)); }
         if is_callbase(v) {
             if call_range(v) { cr = rg_intersect(cr, vt_cr); }

@@ -72,7 +72,7 @@ recursive fn x86_sdve_intrinsic(ii: i32, demanded0: AP, undef0: AP, depth: i64) 
     let one = ap_u64(1, vw);
     if nm == "llvm.x86.xop.vfrcz.ss" || nm == "llvm.x86.xop.vfrcz.sd" {
         if !ap_get_bit(demanded, 0) {
-            icw_add(ii);
+            icw_push(ii);
             return true, c_null(vals[ii].ty), undef;
         }
         demanded = one;
@@ -82,13 +82,13 @@ recursive fn x86_sdve_intrinsic(ii: i32, demanded0: AP, undef0: AP, depth: i64) 
     }
     if nm == "llvm.x86.sse.rcp.ss" || nm == "llvm.x86.sse.rsqrt.ss" {
         undef = sde_set_op(ii, 0, demanded, undef, depth);
-        if !ap_get_bit(demanded, 0) { icw_add(ii); return true, cb_arg(ii, 0), undef; }
+        if !ap_get_bit(demanded, 0) { icw_push(ii); return true, cb_arg(ii, 0), undef; }
         return false, -1, undef;
     }
     if x86_id_in(id, ["llvm.x86.sse.min.ss", "llvm.x86.sse.max.ss", "llvm.x86.sse.cmp.ss", "llvm.x86.sse2.min.sd",
                       "llvm.x86.sse2.max.sd", "llvm.x86.sse2.cmp.sd"]) {
         undef = sde_set_op(ii, 0, demanded, undef, depth);
-        if !ap_get_bit(demanded, 0) { icw_add(ii); return true, cb_arg(ii, 0), undef; }
+        if !ap_get_bit(demanded, 0) { icw_push(ii); return true, cb_arg(ii, 0), undef; }
         demanded = one;
         let u2 = sde_set_op(ii, 1, demanded, ap_zero(vw), depth);
         if !ap_get_bit(u2, 0) { undef = ap_clear_bit(undef, 0); }
@@ -97,7 +97,7 @@ recursive fn x86_sdve_intrinsic(ii: i32, demanded0: AP, undef0: AP, depth: i64) 
     if nm == "llvm.x86.sse41.round.ss" || nm == "llvm.x86.sse41.round.sd" {
         let d2 = ap_clear_bit(demanded, 0);
         undef = sde_set_op(ii, 0, d2, undef, depth);
-        if !ap_get_bit(demanded, 0) { icw_add(ii); return true, cb_arg(ii, 0), undef; }
+        if !ap_get_bit(demanded, 0) { icw_push(ii); return true, cb_arg(ii, 0), undef; }
         demanded = one;
         let u2 = sde_set_op(ii, 1, demanded, ap_zero(vw), depth);
         undef = ap_clear_bit(undef, 0);
@@ -109,7 +109,7 @@ recursive fn x86_sdve_intrinsic(ii: i32, demanded0: AP, undef0: AP, depth: i64) 
                       "llvm.x86.avx512.mask.add.sd.round", "llvm.x86.avx512.mask.div.sd.round", "llvm.x86.avx512.mask.mul.sd.round",
                       "llvm.x86.avx512.mask.sub.sd.round", "llvm.x86.avx512.mask.max.sd.round", "llvm.x86.avx512.mask.min.sd.round"]) {
         undef = sde_set_op(ii, 0, demanded, undef, depth);
-        if !ap_get_bit(demanded, 0) { icw_add(ii); return true, cb_arg(ii, 0), undef; }
+        if !ap_get_bit(demanded, 0) { icw_push(ii); return true, cb_arg(ii, 0), undef; }
         demanded = one;
         let u2 = sde_set_op(ii, 1, demanded, ap_zero(vw), depth);
         let u3 = sde_set_op(ii, 2, demanded, ap_zero(vw), depth);

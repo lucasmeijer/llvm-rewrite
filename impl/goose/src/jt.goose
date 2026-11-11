@@ -1981,7 +1981,7 @@ fn jt_try_to_unfold_select_in_curr_bb(bb: i32) -> bool {
         }
         if si < 0 { pn = inst_next(pn); continue; }
         var cond = op(si, 0);
-        if !is_guaranteed_not_to_be_undef_or_poison(cond, si, 0) {
+        if !is_guaranteed_not_to_be_undef_or_poison_no_dt(cond, si) {
             let fr = create_inst(OP_FREEZE, vals[cond].ty, [cond]);
             inst_insert_before(fr, si);
             set_name(fr, "cond.fr");

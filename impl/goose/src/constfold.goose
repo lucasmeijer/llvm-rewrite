@@ -754,7 +754,10 @@ recursive fn c_gep_expr(srcty: i32, opsv: const i32[:], flags: u8, inr: i32, rt:
             if types[cur].kind == TK_STRUCT { cur = ty_field(cur, cint_lo(x) as! i64); } else { cur = types[cur].a; }
         }
     }
-    let r = c_expr(OP_GEP, rt, cf_stack[mark..], flags, 0, srcty, inr);
+    // GEPNoWrapFlags: inbounds always carries nusw (GEPNoWrapFlags::inBounds()); a constant without the bit would
+    // be a second, distinct constant that prints the same
+    let fl = if (flags & GEP_INBOUNDS) != 0 { flags | GEP_NUSW } else { flags };
+    let r = c_expr(OP_GEP, rt, cf_stack[mark..], fl, 0, srcty, inr);
     cf_stack.resize(mark);
     return r;
 }

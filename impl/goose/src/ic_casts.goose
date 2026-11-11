@@ -636,7 +636,7 @@ fn visit_trunc(tr: i32) -> i32 {
     var changed = false;
     if (insts[inst_of(tr)].flags & FL_NSW) == 0 {
         kb_cxt = tr;
-        let msb = sw - num_sign_bits(src, 0) + 1;
+        let msb = max_significant_bits(src);
         if msb <= dw { insts[inst_of(tr)].flags |= FL_NSW; changed = true; }
     }
     if (insts[inst_of(tr)].flags & FL_NUW) == 0 {

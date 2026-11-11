@@ -644,12 +644,12 @@ fn ao_fold_is_power_of2_or_zero(cmp0: i32, cmp1: i32, is_and: bool) -> i32 {
     let ct = op(cmp0, 0);
     if is_and && p0 == P_NE && p1 == P_NE {
         drop_poison_generating_annotations(ct);
-        icw_add(ct);
+        icw_push(ct);
         return icb_icmp(P_UGT, ct, c_int_ty(vals[ct].ty, 1), "");
     }
     if !is_and && p0 == P_EQ && p1 == P_EQ {
         drop_poison_generating_annotations(ct);
-        icw_add(ct);
+        icw_push(ct);
         return icb_icmp(P_ULT, ct, c_int_ty(vals[ct].ty, 2), "");
     }
     return -1;
@@ -666,7 +666,7 @@ fn ao_fold_is_power_of2(c0: i32, c1: i32, joined_by_and: bool) -> i32 {
         if inst_pred(cmp1) == P_ULT && ao_m_ctpop(op(cmp1, 0)) == x && m_specific_int(op(cmp1, 1), 2) {
             let ct = op(cmp1, 0);
             drop_poison_generating_annotations(ct);
-            icw_add(ct);
+            icw_push(ct);
             return icb_icmp(P_EQ, ct, c_int_ty(vals[ct].ty, 1), "");
         }
     }
@@ -675,7 +675,7 @@ fn ao_fold_is_power_of2(c0: i32, c1: i32, joined_by_and: bool) -> i32 {
         if inst_pred(cmp1) == P_UGT && ao_m_ctpop(op(cmp1, 0)) == x && m_specific_int(op(cmp1, 1), 1) {
             let ct = op(cmp1, 0);
             drop_poison_generating_annotations(ct);
-            icw_add(ct);
+            icw_push(ct);
             return icb_icmp(P_NE, ct, c_int_ty(vals[ct].ty, 1), "");
         }
     }
@@ -2215,7 +2215,7 @@ fn fold_and_or_of_icmps(lhs: i32, rhs: i32, i: i32, is_and: bool, is_logical: bo
     if v >= 0 {
         if is_logical && icc_samesign(rhs) && !use_empty(rhs) {
             icc_set_samesign(rhs, false);
-            icw_add(rhs);
+            icw_push(rhs);
         }
         return v;
     }

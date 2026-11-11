@@ -1121,7 +1121,7 @@ recursive fn kb_from_operator(iv: i32, de: AP, known0: KB, depth: i64) -> KB {
     let o = opcode_of(iv);
     let is_i = vals[iv].kind == VK_INST;
     if o == OP_LOAD {
-        let rm = inst_get_md(iv, md_kind_id("range"));
+        let rm = iiq_md(iv, md_kind_id("range"));
         if rm >= 0 { known = kb_from_range_md(rm, w); }
         return known;
     }
@@ -1130,16 +1130,16 @@ recursive fn kb_from_operator(iv: i32, de: AP, known0: KB, depth: i64) -> KB {
         let kl = kb_compute(op(iv, 0), de, depth + 1);
         return kb_and_xor_or(iv, de, kl, kr, depth);
     }
-    if o == OP_MUL { return kb_mul_ops(op(iv, 0), op(iv, 1), op_nsw(iv), op_nuw(iv), de, depth); }
+    if o == OP_MUL { return kb_mul_ops(op(iv, 0), op(iv, 1), iiq_nsw(iv), iiq_nuw(iv), de, depth); }
     if o == OP_UDIV {
         let a = kb_compute(op(iv, 0), de, depth + 1);
         let b = kb_compute(op(iv, 1), de, depth + 1);
-        return kb_udiv(a, b, op_exact(iv));
+        return kb_udiv(a, b, iiq_exact(iv));
     }
     if o == OP_SDIV {
         let a = kb_compute(op(iv, 0), de, depth + 1);
         let b = kb_compute(op(iv, 1), de, depth + 1);
-        return kb_sdiv(a, b, op_exact(iv));
+        return kb_sdiv(a, b, iiq_exact(iv));
     }
     if o == OP_SELECT {
         let c = op(iv, 0);
@@ -1229,7 +1229,7 @@ recursive fn kb_from_operator(iv: i32, de: AP, known0: KB, depth: i64) -> KB {
         let k1 = kb_compute(b, de, depth + 1);
         let sa_nonzero = kb_is_nonzero(k1) || (ap_ult_u64(kb_max(k1), kb_bw(k1) as u64) && ikz(b, de, depth + 1));
         if o == OP_SHL {
-            known = kb_shl(k2, k1, op_nuw(iv), op_nsw(iv), sa_nonzero);
+            known = kb_shl(k2, k1, iiq_nuw(iv), iiq_nsw(iv), sa_nonzero);
             if match_apint(a) { known = kb_or_z(known, lowb(w, ap_countr_zero(apint_value(a)))); }
             // shl X, sub(Y, xor(ctlz(X, true), BitWidth-1))
             if is_pow2_w(w) && is_op(b, OP_SUB) && m_apint(op(b, 0)) >= 0 {
@@ -1248,12 +1248,12 @@ recursive fn kb_from_operator(iv: i32, de: AP, known0: KB, depth: i64) -> KB {
             }
             return known;
         }
-        known = kb_shr(k2, k1, sa_nonzero, op_exact(iv), o == OP_ASHR);
+        known = kb_shr(k2, k1, sa_nonzero, iiq_exact(iv), o == OP_ASHR);
         if o == OP_LSHR && match_apint(a) { known = kb_or_z(known, highb(w, ap_countl_zero(apint_value(a)))); }
         return known;
     }
-    if o == OP_SUB { return kb_add_sub_ops(false, op(iv, 0), op(iv, 1), op_nsw(iv), op_nuw(iv), de, depth); }
-    if o == OP_ADD { return kb_add_sub_ops(true, op(iv, 0), op(iv, 1), op_nsw(iv), op_nuw(iv), de, depth); }
+    if o == OP_SUB { return kb_add_sub_ops(false, op(iv, 0), op(iv, 1), iiq_nsw(iv), iiq_nuw(iv), de, depth); }
+    if o == OP_ADD { return kb_add_sub_ops(true, op(iv, 0), op(iv, 1), iiq_nsw(iv), iiq_nuw(iv), de, depth); }
     if o == OP_SREM {
         let a = kb_compute(op(iv, 0), de, depth + 1);
         let b = kb_compute(op(iv, 1), de, depth + 1);
@@ -1421,7 +1421,7 @@ recursive fn kb_phi(p: i32, de: AP, known0: KB, depth: i64) -> KB {
             kb_cxt = save;
             known = kb_or_z(known, lowb(w, min(kb_min_tz(k2), kb_min_tz(k3))));
             let is_ovf_op = o == OP_ADD || o == OP_SUB || o == OP_MUL;
-            if is_ovf_op && op_nsw(bo) {
+            if is_ovf_op && iiq_nsw(bo) {
                 if o == OP_ADD {
                     if kb_is_nonneg(k2) && kb_is_nonneg(k3) { known = kb_make_nonneg(known); }
                     else if kb_is_neg(k2) && kb_is_neg(k3) { known = kb_make_neg(known); }
@@ -1477,7 +1477,7 @@ recursive fn kb_phi(p: i32, de: AP, known0: KB, depth: i64) -> KB {
 recursive fn kb_call(iv: i32, de: AP, known0: KB, depth: i64) -> KB {
     var known = known0;
     let w = kb_bw(known);
-    let rm = inst_get_md(iv, md_kind_id("range"));
+    let rm = iiq_md(iv, md_kind_id("range"));
     if rm >= 0 { known = kb_from_range_md(rm, w); }
     if call_range(iv) { known = kb_union(known, rg_to_kb(vt_cr)); }
     let rv = returned_arg_operand(iv);

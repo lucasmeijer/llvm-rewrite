@@ -897,7 +897,7 @@ recursive fn ic_simplify_non_null_operand(v: i32, deref: bool, depth: i64) -> i3
             let res = ic_simplify_non_null_operand(op(v, 0), deref, depth + 1);
             if res >= 0 {
                 ic_replace_operand(v, 0, res);
-                icw_add(v);
+                icw_push(v);
                 return -1;
             }
         }
@@ -911,7 +911,7 @@ recursive fn ic_simplify_non_null_operand(v: i32, deref: bool, depth: i64) -> i3
                 changed = true;
             }
         }
-        if changed { icw_add(v); }
+        if changed { icw_push(v); }
         return -1;
     }
     return -1;

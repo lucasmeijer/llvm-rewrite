@@ -76,7 +76,7 @@ fn icc_nonzero(v: i32, cx: i32) -> bool { kb_cxt = cx; return is_known_non_zero(
 fn icc_pow2(v: i32, or_zero: bool, cx: i32) -> bool { kb_cxt = cx; return is_known_pow2(v, or_zero, 0); }
 fn icc_signbits(v: i32, cx: i32) -> i64 { kb_cxt = cx; return num_sign_bits(v, 0); }
 // ComputeMaxSignificantBits
-fn icc_max_sig_bits(v: i32, cx: i32) -> i64 { ty_sbits(v) - icc_signbits(v, cx) + 1 }
+fn icc_max_sig_bits(v: i32, cx: i32) -> i64 { kb_cxt = cx; return max_significant_bits(v); }
 // isKnownPositive(V, SQ)
 fn icc_known_positive(v: i32, cx: i32) -> bool {
     if vals[v].kind == VK_CINT { return ap_is_strictly_pos(ci_ap(v)); }
@@ -3356,7 +3356,7 @@ fn process_umul_zext_idiom(i: i32, mv: i32, other: AP) -> i32 {
     if wa < mw { ma = icb_zext(a, mty, ""); }
     if wb < mw { mb = icb_zext(b, mty, ""); }
     let call = icb_intrinsic(IID_umul_with_overflow, [mty], [ma, mb], "umul");
-    icw_add(mv);
+    icw_push(mv);
     if has_n_uses_or_more(mv, 2) {
         let mul = icb_extractvalue(call, 0, "umul.value");
         var u = vals[mv].first_use;
@@ -3373,7 +3373,7 @@ fn process_umul_zext_idiom(i: i32, mv: i32, other: AP) -> i32 {
                 let zx = icb_zext(sa, vals[us].ty, "");
                 ic_replace_inst_uses_with(us, zx);
             }
-            icw_add(us);
+            icw_push(us);
         }
     }
     if p == P_ULT {
@@ -4517,7 +4517,7 @@ fn rewrite_gep_as_offset(start: i32, base: i32, nw: u8) -> i32 {
         nm.append(val_name(v)); nm.append(".ptr");
         let ng = icc_plain(icb_gep(T_I8, base, [nv[k]], nm, nw));
         ic_replace_inst_uses_with(v, ng);
-        icw_add(v);
+        icw_push(v);
     }
     icb_pos = spos; icb_bb = sbb; icb_dl = sdl; icb_head = false;
     return nv[idx_of(start)];
