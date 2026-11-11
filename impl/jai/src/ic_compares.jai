@@ -681,7 +681,7 @@ ic_process_ugt_addcst_add :: (i: Value_Id, a: Value_Id, b: Value_Id, ci2: APInt,
     if new_width != 7 && new_width != 15 && new_width != 31 return NONE;
     new_width += 1;
     if ci1.bits == new_width || !ap_eq(ci1, ap_low_bits_set(ci1.bits, new_width)) return NONE;
-    if max_significant_bits(a, ic_q_no_dc(i)) > new_width || max_significant_bits(b, ic_q_no_dc(i)) > new_width return NONE;
+    if ic_max_significant_bits(a, i) > new_width || ic_max_significant_bits(b, i) > new_width return NONE;
     orig_add := op(add_with_cst, 0);
     u := ir.v_first_use[orig_add];
     while u != NONE {

@@ -659,7 +659,10 @@ eliminate_dead_switch_cases :: (s: *Scfg, si: Value_Id) -> bool {
     known := known_bits_ctx(cond, si, null, s.opts.ac);
     kv: [..] Value_Id; kv.allocator = temp;
     kv_valid := collect_possible_values(cond, *kv, 4);
-    max_sig := type_bits(vtype(cond)) - num_sign_bits_ctx(cond, si, null, s.opts.ac) + 1;
+    // ComputeMaxSignificantBits(Cond, DL, AC, SI): its Depth argument (0) lands in ComputeNumSignBits'
+    // UseInstrInfo parameter, so nsw/nuw/exact flags are ignored
+    msq: Simplify_Query; msq.ac = s.opts.ac; msq.cxt = safe_cxt(cond, si); msq.use_instr_info = false;
+    max_sig := type_bits(vtype(cond)) - num_sign_bits(cond, msq) + 1;
     dead: [..] Value_Id; dead.allocator = temp;
     ps_keys: [..] Value_Id; ps_keys.allocator = temp;
     ps_cnt: [..] s64; ps_cnt.allocator = temp;

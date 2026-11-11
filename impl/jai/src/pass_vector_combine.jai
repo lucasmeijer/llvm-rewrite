@@ -3442,7 +3442,7 @@ vc_run :: () -> bool {
 }
 
 // VectorCombinePass::run (TryEarlyFoldsOnly = false: the PassRegistry's "vector-combine")
-vector_combine_run :: (f: Value_Id) -> Preserved {
+vector_combine_run :: (f: Value_Id, try_early_folds_only := false) -> Preserved {
     ac := get_assumption_cache(f);
     tti := tti_get(f);
     dt := get_domtree(f);
@@ -3451,7 +3451,7 @@ vector_combine_run :: (f: Value_Id) -> Preserved {
     vc.f = f; vc.tti = tti; vc.dt = dt; vc.ac = ac; vc.aar = aar;
     vc.kind = ifx fn_has_opt_size(f) then TCK_CODE_SIZE else TCK_RECIP_THROUGHPUT;
     vc.sq.dt = dt; vc.sq.ac = ac; vc.sq.have_tli = false; vc.sq.no_tli_libcalls = true;
-    vc.early_only = false;
+    vc.early_only = try_early_folds_only;
     vc.wl.allocator = temp;
     vc.wl_map.allocator = temp;
     if !vc_run() return PRESERVE_ALL;

@@ -171,6 +171,9 @@ run_loop_pm :: (n: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater) -> 
         idx := c;
         node := *pipeline.nodes[c];
         c = node.next;
+        // a loop-nest pass (LoopPassManager::run): only on a top-level loop (runWithLoopNestPasses), on the
+        // LoopNest of that loop; runWithoutLoopNestPasses skips it without instrumentation
+        if node.kind == .LOOP_INTERCHANGE && li_parent(lar.li, l) != NONE continue;
         if !should_run_loop_pass(node, lar.li, l) continue;
         p := run_loop_pass(idx, l, lar, u);
         if !p.all printer_note_ir_changed();
@@ -191,6 +194,14 @@ run_loop_pass :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater)
     if node.kind == {
         case .LOOP_PM; return run_loop_pm(idx, l, lar, u);
         case .NO_OP_LOOP; return PRESERVE_ALL;
+        case .EXTRA_LOOP_UNSWITCH;
+            // ExtraLoopPassManager<ShouldRunExtraSimpleLoopUnswitch>::run: the inner passes only when IndVarSimplify
+            // left the marker analysis cached for L; the marker is abandoned either way
+            pa := PRESERVE_ALL;
+            if table_contains(*extra_unswitch_marker, l) pa = run_loop_pm(idx, l, lar, u);
+            table_remove(*extra_unswitch_marker, l);
+            return pa;
+        case .LOOP_INTERCHANGE; return loop_interchange_run(node, l, lar, u);
         case .LOOP_ROTATE; return loop_rotate_run(node, l, lar, u);
         case .LICM; return licm_run(node, l, lar, u);
         case .INDVARS; return indvars_run(node, l, lar, u);
@@ -213,8 +224,13 @@ run_loop_pass :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater)
     return PRESERVE_NONE;
 }
 
+// ShouldRunExtraSimpleLoopUnswitch: the loops for which IndVarSimplify requested the marker (a loop analysis that
+// lives until the ExtraLoopPassManager right after it abandons it)
+extra_unswitch_marker: Table(Loop_Id, bool);
+
 // FunctionToLoopPassAdaptor::run. The loop pipeline (the adaptor's children) runs as one LoopPassManager.
 run_loop_adaptor :: (n: s32, f: Value_Id) -> Preserved {
+    table_reset(*extra_unswitch_marker);
     use_mssa := pipeline.nodes[n].use_mssa;
     pa := PRESERVE_ALL;
     // LoopCanonicalizationFPM (a FunctionPassManager: required) = LoopSimplifyPass, LCSSAPass

@@ -489,11 +489,11 @@ tre_process_block :: (s: *Tre, bb: Value_Id) -> bool {
     return false;
 }
 
-tailcallelim_run :: (f: Value_Id) -> Preserved {
+tailcallelim_run :: (f: Value_Id, update_function_entry_count := true) -> Preserved {
     aar := aa_results_for(f);
     has_count, count := function_entry_count(f);
     bfi: *Bfi = null;
-    if !tre_cl.disable_entrycount_recompute && has_count && count != 0 bfi = get_bfi(f);
+    if update_function_entry_count && !tre_cl.disable_entrycount_recompute && has_count && count != 0 bfi = get_bfi(f);
     s: Tre;
     s.f = f; s.aar = aar; s.bfi = bfi;
     s.dtu.dt = cached_domtree(f);

@@ -160,6 +160,9 @@ inliner_run :: (node: *Pass_Node, initial_c: s32, ur: *Cgscc_Ur) -> Preserved {
     if node.name == "inline<only-mandatory>" only_mandatory = true;
     else if node.name != "inline" fatal("invalid inline pass parameter in '%'", node.name);
     params := get_inline_params();
+    // InlinerPass inside a ModuleInlinerWrapperPass of a default pipeline: the wrapper's InlineAdvisor has
+    // getInlineParamsFromOptLevel(Level) (pass_builder_pipelines.jai)
+    if node.opt_level >= 0 params = get_inline_params_from_opt_level(cast(u32) node.opt_level);
     changed := false;
     calls: [..] Value_Id;
     defer array_free(calls);
@@ -346,7 +349,9 @@ filter_dead_comdat_functions :: (dead: *[..] Value_Id) {
 
 // ---------------------------------------------------------------- AlwaysInlinerPass
 
-always_inliner_run :: () -> Preserved {
+always_inline_insert_lifetime := true;   // AlwaysInlinerPass(InsertLifetimeIntrinsics) of the running pass
+always_inliner_run :: (insert_lifetime := true) -> Preserved {
+    always_inline_insert_lifetime = insert_lifetime;
     psi_require();
     changed := false;
     calls: [..] Value_Id; calls.allocator = temp;
@@ -360,7 +365,7 @@ always_inliner_run :: () -> Preserved {
         ifi.use_assumption_cache = true;
         ifi.psi = psi_get();   // the AlwaysInliner's MAM.getResult<ProfileSummaryAnalysis>(M) (always_inliner_run)
         aar := aa_results_for(callee);
-        res := inline_function(cb, *ifi, true, *aar, true, new_call_sites != null);
+        res := inline_function(cb, *ifi, true, *aar, always_inline_insert_lifetime, new_call_sites != null);
         if !res.ok return false;
         printer_note_ir_changed();
         fam_invalidate(caller, PRESERVE_NONE);

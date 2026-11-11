@@ -32,7 +32,6 @@ inferattrs_run_module :: () {
     if !changed return;
     // PreservedAnalyses::none(): every function analysis and the module analyses go
     printer_note_ir_changed();
-    for f: ir.m_functions fam_invalidate(f, PRESERVE_NONE);
-    globals_aa = null;
+    for f: ir.m_functions fam_invalidate(f, PRESERVE_NONE);   // GlobalsAA is stateless (mam_invalidate)
     lcg_invalidate();
 }

@@ -1175,6 +1175,8 @@ indvars_run :: (node: *Pass_Node, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Up
     if !changed return PRESERVE_ALL;
     pa := loop_pass_preserved();
     pa.cfg = true;
+    // AM.getResult<ShouldRunExtraSimpleLoopUnswitch>(L, AR) (loop_pm.jai)
+    if s.run_unswitching table_set(*extra_unswitch_marker, l, true);
     if lar.mssa preserve(*pa, .MEMORYSSA);
     return pa;
 }

@@ -123,6 +123,10 @@
 #load "function_specialization.jai";
 #load "pass_mergeicmps.jai";
 #load "pass_dfa_jump_threading.jai";
+#load "pass_builder_pipelines.jai";
+#load "pass_loop_interchange.jai";
+#load "pass_expand_memcmp.jai";
+#load "pass_chr.jai";
 #load "globals_aa.jai";
 #load "loop_info.jai";
 #load "cycle_info.jai";

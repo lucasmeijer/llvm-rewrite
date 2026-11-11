@@ -315,6 +315,10 @@ Pass_Kind :: enum u8 {
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
     MERGEICMPS; DFA_JUMP_THREADING;
+    // the default pipelines (pass_builder_pipelines.jai): ModuleInlinerWrapperPass, ExtraLoopPassManager,
+    // CoroConditionalWrapper; LoopInterchange (pass_loop_interchange.jai), ExpandMemCmp (pass_expand_memcmp.jai),
+    // ControlHeightReduction (pass_chr.jai)
+    INLINER_WRAPPER_PM; EXTRA_LOOP_UNSWITCH; CORO_COND; LOOP_INTERCHANGE; EXPAND_MEMCMP; CHR;
 }
 
 Pass_Info :: struct {
@@ -355,6 +359,7 @@ PASS_TABLE :: Pass_Info.[
     .{"gvn", .FUNCTION, .GVN, false, .DOMTREE},   // also gvn<...> (lookup_pass)
     .{"early-cse", .FUNCTION, .EARLY_CSE, false, .DOMTREE},
     .{"early-cse<memssa>", .FUNCTION, .EARLY_CSE, false, .DOMTREE},
+    .{"early-cse<>", .FUNCTION, .EARLY_CSE, false, .DOMTREE},
     .{"sccp", .FUNCTION, .SCCP, false, .DOMTREE},
     .{"ipsccp", .MODULE, .IPSCCP, false, .DOMTREE},   // also ipsccp<[no-]func-spec>
     .{"print<predicate-info>", .FUNCTION, .PRINT_PREDICATE_INFO, true, .DOMTREE},
@@ -455,7 +460,7 @@ PASS_TABLE :: Pass_Info.[
     .{"rpo-function-attrs", .MODULE, .RPO_FUNCTION_ATTRS, false, .DOMTREE},
     .{"norecurse-lto-inference", .MODULE, .NORECURSE_LTO_INFERENCE, false, .DOMTREE},
     .{"inline", .CGSCC, .INLINE, false, .DOMTREE},   // also inline<only-mandatory>
-    .{"always-inline", .MODULE, .ALWAYS_INLINE, false, .DOMTREE},
+    .{"always-inline", .MODULE, .ALWAYS_INLINE, true, .DOMTREE},   // RequiredPassInfoMixin
     .{"module-inline", .MODULE, .MODULE_INLINE, false, .DOMTREE},
     .{"inliner-wrapper", .MODULE, .INLINER_WRAPPER, false, .DOMTREE},
     .{"globalopt", .MODULE, .GLOBAL_OPT, false, .DOMTREE},
@@ -511,6 +516,10 @@ PASS_TABLE :: Pass_Info.[
     // ExtraLoopPassManager<ShouldRunExtraSimpleLoopUnswitch> parsed from text is empty (its printPipeline drops the
     // inner simple-loop-unswitch that -O2 puts into it), so this textual form is a no-op (a required pass)
     .{"extra-simple-loop-unswitch-passes", .LOOP, .NO_OP_LOOP, true, .DOMTREE},
+    .{"coro-cond", .MODULE, .CORO_COND, true, .DOMTREE},   // only with an inner pipeline: coro-cond(...)
+    .{"loop-interchange", .LOOP, .LOOP_INTERCHANGE, false, .DOMTREE},   // a LoopNest pass
+    .{"expand-memcmp", .FUNCTION, .EXPAND_MEMCMP, false, .DOMTREE},
+    .{"chr", .FUNCTION, .CHR, false, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -562,6 +571,14 @@ Pass_Node :: struct {
     count: s32;            // DEVIRT: devirt<N>
     eager_inv: bool;       // CGSCC_FN_ADAPTOR / FUNCTION_ADAPTOR: function<eager-inv>(...)
     no_rerun: bool;        // CGSCC_FN_ADAPTOR: function<no-rerun>(...) skips functions with a cached ShouldNotRunFunctionPassesAnalysis
+    // parameters of passes built by the default pipelines that their printed (textual) names don't carry
+    // (pass_builder_pipelines.jai); a node parsed from text keeps the defaults
+    opt_level: s8 = -1;            // loop-unroll-full / loop-unroll: OptLevel; inline / module-inline: the advisor's getInlineParamsFromOptLevel
+    only_when_forced: bool;        // loop-unroll-full / loop-unroll: OnlyWhenForced = !PTO.LoopUnrolling
+    no_entry_count_update: bool;   // tailcallelim: UpdateFunctionEntryCount = false
+    no_lifetime: bool;             // always-inline: InsertLifetimeIntrinsics = false
+    early_folds_only: bool;        // vector-combine: TryEarlyFoldsOnly
+    late_first: s32 = -1;          // INLINER_WRAPPER_PM: the first of its late module passes (not printed)
 }
 
 pipeline: struct {
@@ -628,7 +645,8 @@ parse_pipeline_text :: (text: string) -> s32 {
 is_module_pass_name :: (name: string) -> bool {
     if name == "module" return true;
     if name == "function" || begins_with(name, "function<") return true;   // still a module-level element
-    if name == "cgscc" return true;
+    if name == "cgscc" || name == "coro-cond" return true;
+    if begins_with(name, "default<") || pb_is_unsupported_alias(name) return true;
     if name == "loop" || name == "loop-mssa" return false;
     p := lookup_pass(name);
     return p != null && p.level == .MODULE;
@@ -822,6 +840,14 @@ parse_module_pass :: (mpm: s32, last: *s32, e: s32) {
             link_child(mpm, last, ad);
             return;
         }
+        if el.name == "coro-cond" {
+            inner := new_node(.CORO_COND, lookup_pass("coro-cond"), "coro-cond");
+            ilast: s32 = -1;
+            c := el.first_child;
+            while c >= 0 { parse_module_pass(inner, *ilast, c); c = pipeline.elems[c].next; }
+            link_child(mpm, last, inner);
+            return;
+        }
         okf, eager, no_rerun := parse_function_pipeline_name(el.name);
         if okf {
             if no_rerun pipeline_error("cannot have a no-rerun module to function adaptor");
@@ -835,6 +861,9 @@ parse_module_pass :: (mpm: s32, last: *s32, e: s32) {
         }
         unknown_pass(el.name);
     }
+    if pb_parse_default_pipeline(mpm, last, el.name) return;   // default<O#> (pass_builder_pipelines.jai)
+    if pb_is_unsupported_alias(el.name) fatal("pass pipeline '%': the LTO pipelines are not implemented yet", el.name);
+    if el.name == "coro-cond" pipeline_error("invalid use of 'coro-cond' pass as module pipeline");
     p := lookup_pass(el.name);
     if p == null unknown_pass(el.name);
     if p.level == .MODULE { link_child(mpm, last, new_node(p.kind, p, el.name)); return; }
@@ -1020,6 +1049,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if ipo_parse_cl_opt(name, value, has_value) return true;   // cgscc_pm.jai, pass_function_attrs.jai, inliner
     if globals_parse_cl_opt(name, value, has_value) return true;   // pass_global_opt.jai, internalize, globaldce, ...
     if scalar_misc_parse_cl_opt(name, value, has_value) return true;   // scalar_misc_cl.jai (L1.scalar-misc passes)
+    if pb_parse_cl_opt(name, value, has_value) return true;   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {
@@ -1118,9 +1148,14 @@ run_module_pm :: (n: s32) {
             case .INVALIDATE_LCG; should_run_pass(node, NONE); lcg_invalidate();
             case .RPO_FUNCTION_ATTRS; if should_run_pass(node, NONE) mam_invalidate(rpo_function_attrs_run());
             case .NORECURSE_LTO_INFERENCE; if should_run_pass(node, NONE) mam_invalidate(norecurse_lto_inference_run());
-            case .ALWAYS_INLINE; if should_run_pass(node, NONE) mam_invalidate(always_inliner_run());
+            case .ALWAYS_INLINE; if should_run_pass(node, NONE) mam_invalidate(always_inliner_run(!node.no_lifetime));
             case .MODULE_INLINE; if should_run_pass(node, NONE) mam_invalidate(module_inliner_run());
             case .INLINER_WRAPPER; if should_run_pass(node, NONE) inliner_wrapper_run();
+            // ModuleInlinerWrapperPass::run: its module pipeline runs with the same analysis managers (each pass
+            // invalidates as it goes); the wrapper itself returns PreservedAnalyses::all() (the InlineAdvisor aside)
+            case .INLINER_WRAPPER_PM; if should_run_pass(node, NONE) run_module_pm(c);
+            // CoroConditionalWrapper::run (required)
+            case .CORO_COND; if coro_declares_any_intrinsic() run_module_pm(c);
             case .GLOBAL_OPT; if should_run_pass(node, NONE) mam_invalidate(global_opt_run());
             case .GLOBAL_DCE; if should_run_pass(node, NONE) mam_invalidate(global_dce_run(node));
             case .CONSTANT_MERGE; if should_run_pass(node, NONE) mam_invalidate(constant_merge_run());
@@ -1154,7 +1189,8 @@ mam_invalidate :: (pa: Preserved) {
     if pa.all return;
     if !pa.lcg lcg_invalidate();
     if !pa.all_fn for f: ir.m_functions fam_invalidate(f, pa);
-    globals_aa = null;
+    // GlobalsAAResult::invalidate: stateless, only an explicit abandon<GlobalsAA>() (sanitizers, LowerEmuTLS)
+    // invalidates it, so the result computed by require<globals-aa> lives on (recompute-globalsaa refreshes it)
 }
 
 // ModuleToFunctionPassAdaptor::run: every defined function in module order
@@ -1218,7 +1254,9 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .DIV_REM_PAIRS; return div_rem_pairs_run(f);
         case .FLOAT2INT; return float2int_run(f);
         case .SINK; return sink_run(f);
-        case .TAILCALLELIM; return tailcallelim_run(f);
+        case .TAILCALLELIM; return tailcallelim_run(f, !node.no_entry_count_update);
+        case .EXPAND_MEMCMP; return expand_memcmp_run(f);
+        case .CHR; return chr_run(f);
         case .MLDST_MOTION; return mldst_motion_run(f, node.name);
         case .SPECULATIVE_EXECUTION; return speculative_execution_run(f, node.name);
         case .CALLSITE_SPLITTING; return callsite_splitting_run(f);
@@ -1236,7 +1274,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .REASSOCIATE; return reassociate_run(f);
         case .CONSTRAINT_ELIMINATION; return constraint_elimination_run(f);
         case .AGGRESSIVE_INSTCOMBINE; return aggressive_instcombine_run(f);
-        case .VECTOR_COMBINE; return vector_combine_run(f);
+        case .VECTOR_COMBINE; return vector_combine_run(f, node.early_folds_only);
         case .SLP_VECTORIZER; return slp_vectorizer_run(f);
         case .LOOP_UNROLL; return loop_unroll_run(node, f);
         case .LOOP_VECTORIZE; return loop_vectorize_run(f, node.name);
@@ -1293,6 +1331,9 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
 
 // ---------------------------------------------------------------- opt's main
 
+opt_level_flag: string;      // opt -O0 .. -O3 (-Os / -Oz are rejected by parseOptLevel)
+jai_print_pipeline := false;   // -jai-print-pipeline: print the parsed pipeline like -print-pipeline-passes and stop
+
 opt_main :: () {
     tool_name = "opt";
     args := get_command_line_arguments();
@@ -1348,22 +1389,38 @@ opt_main :: () {
         if a == "-run-twice" || a == "--run-twice" continue;
         // -disable-verify: opt does not verify its input and output; we never verify
         if a == "-disable-verify" || a == "--disable-verify" continue;
-        // -disable-loop-unrolling sets PipelineTuningOptions::LoopUnrolling, which only -O<n> pipelines read
-        if a == "-disable-loop-unrolling" || a == "--disable-loop-unrolling" || begins_with(a, "-disable-loop-unrolling=") || begins_with(a, "--disable-loop-unrolling=") continue;
         if begins_with(a, "-aa-pipeline=") || begins_with(a, "--aa-pipeline=") {
             aa_parse_pipeline(slice(a, find_index_from_left(a, #char "=") + 1, a.count - find_index_from_left(a, #char "=") - 1));
             continue;
         }
-        if a == "-O0" || a == "-O1" || a == "-O2" || a == "-O3" || a == "-Os" || a == "-Oz"
-            fatal("'%' pipelines are not implemented yet (only -passes=<pipeline> with the passes in impl/jai/src/passes.jai)", a);
+        if a == "-O0" || a == "-O1" || a == "-O2" || a == "-O3" || a == "-Os" || a == "-Oz" || a == "--O0" || a == "--O1" || a == "--O2" || a == "--O3" || a == "--Os" || a == "--Oz" {
+            // optdriver.cpp: -O# is the pipeline "default<O#>"
+            if opt_level_flag.count && opt_level_flag != a fatal("Cannot specify multiple -O#");
+            opt_level_flag = a;
+            continue;
+        }
+        if a == "-jai-print-pipeline" { jai_print_pipeline = true; continue; }
         if begins_with(a, "-") && a != "-" {
             if parse_cl_opt(a) continue;
             fatal("unsupported option '%'", a);
         }
         input = a;
     }
+    if opt_level_flag.count {
+        if have_passes fatal("Cannot specify -O# and --passes=/--foo-pass, use -passes='default<O#>,other-pass'");
+        k := find_index_from_left(opt_level_flag, #char "O");
+        passes = tprint("default<%>", slice(opt_level_flag, k, opt_level_flag.count - k));
+        have_passes = true;
+    }
     root: s32 = -1;
     if have_passes root = parse_pass_pipeline(passes);
+    if jai_print_pipeline && root >= 0 {
+        sb: String_Builder;
+        pb_print_pipeline(root, *sb);
+        append(*sb, "\n");
+        write_string(builder_to_string(*sb));
+        return;
+    }
     if input.count == 0 fatal("no input file");
     if input == "-" fatal("reading from stdin is not supported");
     src, ok := read_entire_file(input);

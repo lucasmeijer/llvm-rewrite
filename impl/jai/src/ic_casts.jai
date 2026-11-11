@@ -17,7 +17,10 @@ ic_user_back :: (v: Value_Id) -> Value_Id { return first_user(v); }
 // a known-bits query with only the DataLayout (llvm::computeKnownBits(V, DL))
 ic_known_bits_dl :: (v: Value_Id) -> Known_Bits { q: Simplify_Query; return known_bits(v, q); }
 // InstCombiner::ComputeMaxSignificantBits
-ic_max_significant_bits :: (v: Value_Id, cxt: Value_Id) -> u32 { return max_significant_bits(v, ic_q_no_dc(cxt)); }
+// llvm::ComputeMaxSignificantBits(V, DL, AC, CxtI, DT, Depth) forwards Depth into ComputeNumSignBits'
+// UseInstrInfo parameter: with Depth = 0 the query ignores nsw/nuw/exact flags (UseInstrInfo = false)
+ic_max_significant_bits :: (v: Value_Id, cxt: Value_Id) -> u32 { return max_significant_bits(v, ic_q_max_sig(cxt)); }
+ic_q_max_sig :: (i: Value_Id) -> Simplify_Query { q := ic_q_no_dc(i); q.use_instr_info = false; return q; }
 // llvm::ComputeMaxSignificantBits(Op, DL, &AC, CxtI, &DT): no DomConditionCache, safeCxtI
 ic_q_no_dc :: (i: Value_Id) -> Simplify_Query { q: Simplify_Query; q.dt = ic.dt; q.ac = ic.ac; q.cxt = i; return q; }
 // CastInst::CreateIntegerCast (unlinked)

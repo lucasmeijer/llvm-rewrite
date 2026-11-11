@@ -47,3 +47,14 @@ coro_annotation_elide_run_scc :: (c: s32) -> Preserved {
     }
     return PRESERVE_ALL;
 }
+
+// coro::declaresAnyIntrinsic (Coroutines.cpp, NonOverloadedCoroIntrinsics): CoroConditionalWrapper's condition
+coro_declares_any_intrinsic :: () -> bool {
+    return coro_declares_any(.["llvm.coro.alloc", "llvm.coro.async.context.alloc", "llvm.coro.async.context.dealloc",
+        "llvm.coro.async.resume", "llvm.coro.async.size.replace", "llvm.coro.await.suspend.bool",
+        "llvm.coro.await.suspend.handle", "llvm.coro.await.suspend.void", "llvm.coro.begin", "llvm.coro.begin.custom.abi",
+        "llvm.coro.destroy", "llvm.coro.done", "llvm.coro.end", "llvm.coro.end.async", "llvm.coro.frame", "llvm.coro.free",
+        "llvm.coro.id", "llvm.coro.id.async", "llvm.coro.id.retcon", "llvm.coro.id.retcon.once", "llvm.coro.noop",
+        "llvm.coro.prepare.async", "llvm.coro.prepare.retcon", "llvm.coro.promise", "llvm.coro.resume", "llvm.coro.save",
+        "llvm.coro.subfn.addr", "llvm.coro.suspend", "llvm.coro.is_in_ramp"]);
+}

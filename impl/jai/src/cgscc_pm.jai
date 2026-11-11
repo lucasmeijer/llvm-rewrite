@@ -96,12 +96,14 @@ cgam_invalidate :: (c: s32, pa: Preserved) {
 
 // PassInstrumentation::runBeforePass for an SCC (OptNone does not apply to SCCs; OptBisect counts optional passes)
 should_run_pass_scc :: (node: *Pass_Node, c: s32) -> bool {
-    if node.kind == .CGSCC_PM || node.kind == .CGSCC_FN_ADAPTOR return true;
+    // pass managers and adaptors are required; DevirtSCCRepeatedPass is optional but OptPassGateInstrumentation
+    // ignores it (isIgnored: "DevirtSCCRepeatedPass" is not a registered pass name)
+    if node.kind == .CGSCC_PM || node.kind == .CGSCC_FN_ADAPTOR || node.kind == .DEVIRT return true;
     if node.info && node.info.required return true;
     if opts.opt_bisect_limit >= 0 {
         bisect_count += 1;
         ok := bisect_count <= opts.opt_bisect_limit;
-        print_stderr("BISECT: %running pass (%) % on %\n", ifx ok then "" else "NOT ", bisect_count, node.name, lcg_scc_name(c));
+        print_stderr("BISECT: %running pass (%) % on %\n", ifx ok then "" else "NOT ", bisect_count, bisect_pass_name(node.name), lcg_scc_name(c));
         if !ok return false;
     }
     return true;

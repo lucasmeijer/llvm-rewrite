@@ -1013,7 +1013,11 @@ loop_unroll_full_run :: (node: *Pass_Node, l: Loop_Id, lar: *Loop_Std_Results, u
     o.has_peeling = true; o.peeling = true;
     o.has_profile_peeling = true; o.profile_peeling = false;
     se = lar.se;
-    changed := try_to_unroll_loop(*c, l, true, 2, true, false, false, *o) != .UNMODIFIED;
+    // LoopFullUnrollPass(OptLevel = 2, OnlyWhenForced = false, ForgetSCEV = false) unless built by a default
+    // pipeline (pass_builder_pipelines.jai: Level, !PTO.LoopUnrolling, PTO.ForgetAllSCEVInLoopUnroll)
+    opt_level: s64 = ifx node.opt_level >= 0 then cast(s64) node.opt_level else 2;
+    forget := node.opt_level >= 0 && lu_cl.forget_scev_loop_unroll.v != 0;
+    changed := try_to_unroll_loop(*c, l, true, opt_level, true, node.only_when_forced, forget, *o) != .UNMODIFIED;
     vh_release_all();
     if !changed return PRESERVE_ALL;
 
@@ -1038,6 +1042,11 @@ loop_unroll_full_run :: (node: *Pass_Node, l: Loop_Id, lar: *Loop_Std_Results, u
 // LoopUnrollPass::run (loop-unroll<...>)
 loop_unroll_run :: (node: *Pass_Node, f: Value_Id) -> Preserved {
     opts := parse_loop_unroll_options(node.name);
+    if node.opt_level >= 0 {
+        // LoopUnrollOptions(Level, !PTO.LoopUnrolling, PTO.ForgetAllSCEVInLoopUnroll) (pass_builder_pipelines.jai)
+        opts.only_when_forced = node.only_when_forced;
+        opts.forget_scev = lu_cl.forget_scev_loop_unroll.v != 0;
+    }
     li := get_loop_info(f);
     if li.top_level.count == 0 return PRESERVE_ALL;
     s := get_scev(f);
