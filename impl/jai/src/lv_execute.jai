@@ -414,9 +414,12 @@ lvp_execute_plan :: (lp: *Lv_Planner, vf: Ec, uf: u32, checks: *Lv_Rt_Checks) {
     has_mrs, mvs := ic_vscale_range_max(lp.cm.f);
     vp_materialize_vector_trip_count(vector_ph, has_tail_folded, requires_scalar_epilogue, vpl.vfxuf, has_mrs, mvs * vf.n * uf);
     vp_materialize_factors(vector_ph, vf);
+    vp_print_plan("after materializeFactors");
     vp_expand_scevs_to_vp_instructions();
+    vp_print_plan("after expandSCEVsToVPInstructions");
     vp_cse();
     vp_simplify_recipes();
+    vp_print_plan("after cse+simplify");
     if vp_remove_branch_on_const(false) vp_simplify_recipes();
     entry_irbb := vb(vpl.entry).irbb;
     vp_expand_scevs(entry_irbb);

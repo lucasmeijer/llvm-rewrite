@@ -59,13 +59,7 @@ vp_try_to_fold_live_ins :: (r: Vp_Rec, ops: [] Vp_Val) -> Vp_Val {
 }
 // InstSimplifyFolder::FoldIntrinsic
 isf_fold_intrinsic :: (id: Intrinsic_Id, args: [] Value_Id, ty: Type_Id, fmf: u32, q: Simplify_Query) -> Value_Id {
-    if args.count == 2 return simplify_binary_intrinsic(id, ty, args[0], args[1], fmf, q);
-    if args.count == 1 {
-        // simplifyIntrinsic with a single operand only folds constants
-        for args if !is_const(it) return NONE;
-    }
-    vp_unported("folding intrinsics of live-ins with other than two operands");
-    return NONE;
+    return simplify_intrinsic(id, ty, args, fmf, q, NONE, EB_IGNORE, RM_NEAREST_TIES_TO_EVEN);
 }
 // VPIRFlags::getFastMathFlagsOrNone
 vp_fmf_or_none :: (r: Vp_Rec) -> u32 {
