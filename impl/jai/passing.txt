@@ -14927,6 +14927,7 @@ tests/perf/scaling/diamonds/n2000.ll::opt
 tests/perf/scaling/diamonds/n2000.ll::roundtrip
 tests/perf/scaling/diamonds/n500.ll::opt
 tests/perf/scaling/diamonds/n500.ll::roundtrip
+tests/perf/scaling/diamonds/n8000.ll::opt
 tests/perf/scaling/diamonds/n8000.ll::roundtrip
 tests/perf/scaling/globals/n2000.ll::opt
 tests/perf/scaling/globals/n2000.ll::roundtrip
