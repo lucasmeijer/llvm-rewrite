@@ -4,20 +4,20 @@ lib/Transforms/Utils/SimplifyCFG.cpp 0.9
 lib/Transforms/Scalar/SimplifyCFGPass.cpp 0.95
 lib/Transforms/Utils/BasicBlockUtils.cpp 0.35  # + MergeBlockIntoPredecessor with DT, SplitBlock/SplitEdge/splitBlockBefore with DT+LI+MSSAU (unroll_utils.goose)
 lib/Transforms/Utils/Local.cpp 0.5
-lib/Analysis/TargetTransformInfo.cpp 0.15
+lib/Analysis/TargetTransformInfo.cpp 0.4  # goose_tti: the wrappers the passes call, getOperandInfo, getCastContextHint, IntrinsicCostAttributes, getPredictableBranchThreshold
 lib/Analysis/CFG.cpp 0.2
 lib/Analysis/Loads.cpp 0.6
 lib/Analysis/ValueTracking.cpp 0.6
 lib/IR/Value.cpp 0.35  # + getPointerOffsetFrom (memcpyopt.goose)
 lib/IR/Instruction.cpp 0.5
-lib/IR/Instructions.cpp 0.08
+lib/IR/Instructions.cpp 0.1  # + ShuffleVectorInst mask predicates (tti_x86_vec.goose)
 lib/IR/ProfDataUtils.cpp 0.4
 lib/IR/MDBuilder.cpp 0.12  # + createAnonymousAARoot (loop_versioning.goose)
-lib/Target/X86/X86TargetTransformInfo.cpp 0.3
-lib/Target/X86/X86ISelLowering.cpp 0.01
-lib/Target/X86/X86Subtarget.cpp 0.2
-lib/Target/X86/X86TargetMachine.cpp 0.2
-lib/CodeGen/TargetLoweringBase.cpp 0.1
+lib/Target/X86/X86TargetTransformInfo.cpp 0.85  # goose_tti: every cost function and table, legality queries; not getAddressComputationCost, getPointersChainCost, getIntImmCostIntrin, enableMemCmpExpansion, isLSRCostLess, isProfitableToSinkOperands, getCacheSize (areInlineCompatible/areTypesABICompatible are in inline_cost.goose)
+lib/Target/X86/X86ISelLowering.cpp 0.04  # goose_tti: the constructor's actions (generated, gen_x86lower.goose), getPreferredVectorAction, isLegalAddressingMode, isTruncateFree/isZExtFree, isCheapToSpeculateCt*
+lib/Target/X86/X86Subtarget.cpp 0.4  # goose_tti: initSubtargetFeatures, classifyGlobalReference/classifyLocalReference
+lib/Target/X86/X86TargetMachine.cpp 0.25  # goose_tti: getSubtargetImpl, getEffectiveRelocModel, isNoopAddrSpaceCast
+lib/CodeGen/TargetLoweringBase.cpp 0.3  # goose_tti: initActions (generated), computeRegisterProperties, getTypeConversion, getVectorTypeBreakdown(MVT), getBitWidthForCttzElements, isFreeAddrSpaceCast
 lib/Transforms/InstCombine/InstCombineCompares.cpp 0.98
 lib/Transforms/InstCombine/InstCombineAndOrXor.cpp 0.98
 lib/Analysis/CmpInstAnalysis.cpp 0.35
@@ -105,7 +105,7 @@ lib/Analysis/ValueLatticeUtils.cpp 1  # manual: renamed: sc_can_track_* in sccp.
 lib/Analysis/DomConditionCache.cpp 1
 lib/Transforms/InstCombine/InstCombineSelect.cpp 0.95
 lib/Transforms/InstCombine/InstCombinePHI.cpp 0.9
-lib/Analysis/VectorUtils.cpp 0.16  # + getVectorIntrinsicIDForCall (laa.goose)
+lib/Analysis/VectorUtils.cpp 0.16  # + getVectorIntrinsicIDForCall (laa.goose), processShuffleMasks (tti_x86_vec.goose)
 lib/Analysis/MemoryBuiltins.cpp 0.55
 lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
@@ -163,3 +163,4 @@ lib/Transforms/Utils/CloneFunction.cpp 0.3  # (clone_function.goose; loop_versio
 lib/Transforms/Scalar/SimpleLoopUnswitch.cpp 0.97  # all; injected conditions over several compared values loud (DenseMap order)
 lib/Analysis/LoopIterator.cpp 0.8
 lib/Support/BranchProbability.cpp 0.8
+lib/Analysis/CostModel.cpp 1

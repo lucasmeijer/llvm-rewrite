@@ -488,6 +488,21 @@ LLVM's constructor does), `scev_invalidate(fv)` drops it, and a different functi
 - **Normalization** (ScalarEvolutionNormalization.cpp) is the RW_NORMALIZE rewriter; its loop set is the global
   `sc_norm_loops`.
 
+### 8.8 The target cost model (tti*.goose, x86_lower.goose, gen_x86*.goose)
+
+- One subtarget at a time: `tti_init_function(fv, m)` selects NoTTIImpl (no triple) or X86, and for X86 builds the
+  X86Subtarget (feature bits `x86_bits`, SSE level, widths) and, when it differs from the previous one, the
+  TargetLowering tables (`xl_*`: register classes, operation / load-ext / trunc-store actions per MVT, type actions,
+  transform-to types, register counts). No dispatch tables: the `tti_*` entry points switch on `tti_kind`; inside
+  the X86 code LLVM's `thisT()->` / `BaseT::` calls are direct calls to `x86_*` / `bt_*` functions.
+- MVTs are SimpleValueType numbers and EVTs i64 encodings (x86_lower.goose); every LLVM type query goes through
+  `x86_value_type` (getValueType) and `x86_legalize` (getTypeLegalizationCost).
+- Cost tables are data (gen_x86costs.goose, one decoded int array: key, dst, src, 4 costs per entry), looked up
+  first-match like CostTableLookup; the constructor's actions are code translated by tools/gen_x86lower.py.
+- The cost functions recurse into each other, so variable-length arguments (shuffle masks, demanded elements,
+  intrinsic arguments/types) live in global pools (`mk_pool`, `ica_tab`/`ica_vals`/`ica_tys`) addressed by
+  (start, length), with mark/release around each top-level query (tti_instruction_cost does it).
+
 ## 9. The pass manager and how to add a pass (passmgr.goose)
 
 `-passes=` text is parsed like `PassBuilder::parsePipelineText` into a tree of `PNode`s (module / function

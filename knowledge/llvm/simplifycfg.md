@@ -106,3 +106,22 @@ Facts verified while porting `llvm/lib/Transforms/Utils/SimplifyCFG.cpp` (LLVM 2
   named `.old`, `.old1`, ... Each collision bumps the function symbol table's LastUnique counter (ValueSymbolTable
   makeUniqueName), which is why a later `%or.cond` can come out as `%or.cond3` in unnamed (-O0, clang) IR. Verified
   on tests/e2e/O0/test-suite/SingleSource/Regression/C/PR640.ll with `-passes=simplifycfg`.
+- `isa<IntrinsicInst>` is true for a call of *any* function whose name starts with `llvm.` (Function::isIntrinsic
+  = HasLLVMReservedName), known intrinsic or not: getInstructionCost then takes the intrinsic path with
+  `Intrinsic::not_intrinsic` and ends in getTypeBasedIntrinsicInstrCost's default case (cost 1 for scalars), not
+  the call path (`TCC_Basic * (params + 1)`). Verified with the Goose port on GlobalOpt/metadata.ll
+  (`@llvm.foo`), Reassociate/factorize-again.ll (`@llvm.rsqrt.f32`), SimplifyCFG/dbginfo.ll
+  (`@llvm.dbg.func.start`) under `print<cost-model>`.
+- getGEPCost's stripPointerCasts guards against cycles (a value seen twice ends the walk): unreachable
+  `%p2 = gep %p1, 0` / `%p1 = gep %p2, 0` loops terminate (GVN/unreachable_block_infinite_loop.ll).
+- X86 doesn't override useFPRegsForHalfType (false), so an illegal f16's NumRegisters/RegisterType come from i16
+  in computeRegisterProperties, while its TransformToType is f32 (TypeSoftPromoteHalf).
+- BasicTTI's vp.scatter / vp.gather costing passes `VarMask = isa<Constant>(mask)` (the opposite of the
+  masked.* intrinsics' `!isa<Constant>`); VP binops cost as the functional opcode on the return type with
+  default operand infos, VP reductions drop the start value except for fadd/fmul (BasicTTIImpl.h getIntrinsicInstrCost).
+- The X86 CPU list LLVM accepts is exactly the `Processor` records of X86.td (136 names in 23.1.5);
+  `llvm-min-tblgen --print-records -I include -I lib/Target/X86 lib/Target/X86/X86.td` evaluates their
+  `!listconcat`/`!listremove` feature lists, and every `SubtargetFeature` record's `FieldName`/`Value` gives the
+  X86Subtarget getter (`hasCMOV()` = `HasCMOV`; `TuningPreferNoGather` sets `PreferGather = false`, so
+  `preferGather()` defaults to true).
+
