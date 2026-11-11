@@ -215,7 +215,17 @@ vp_simplify_recipe :: (def: Vp_Rec) {
             if tt == at vp_rauw(d, a);
             else {
                 if k != .WIDEN_CAST return;
-                vp_unported("simplifyRecipe of trunc(ext) to a different width");
+                if type_bits(scalar_type(at)) < type_bits(scalar_type(tt)) {
+                    oks, _ := vpm_unary(t0, vp_opc(.SEXT));
+                    ext_opc := ifx oks then Opcode.SEXT else .ZEXT;
+                    ext := vpb_widen_cast(*b, ext_opc, a, tt);
+                    ue := vp_uv(t0);
+                    if ue != NONE vp_set_underlying(vr(ext).def, ue);
+                    vp_rauw(d, vr(ext).def);
+                } else if type_bits(scalar_type(at)) > type_bits(scalar_type(tt)) {
+                    tr := vpb_widen_cast(*b, .TRUNC, a, tt);
+                    vp_rauw(d, vr(tr).def);
+                }
             }
         }
     }

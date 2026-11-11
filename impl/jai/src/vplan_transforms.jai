@@ -445,14 +445,54 @@ vp_optimize :: () {
 vp_truncate_to_minimal_bitwidths :: (min_bws: *Table(Value_Id, u64)) {
     if vp_has_scalar_vf_only() return;
     if min_bws.count == 0 return;
+    processed: Table(Vp_Val, Vp_Rec); processed.allocator = temp;
+    ph := vp_vector_preheader();
     for bb: vp_blocks_only_basic(vp_depth_first_deep(vp_vector_loop_region())) {
         for r: vp_block_recipes(bb) {
             k := vr(r).kind;
             if k != .WIDEN && k != .WIDEN_CAST && k != .REPLICATE && k != .WIDEN_LOAD && k != .WIDEN_INTRINSIC continue;
             uv := vv(vr(r).def).uv;
             if uv == NONE || !table_contains(min_bws, uv) continue;
+            _, new_bits := table_find(min_bws, uv);
+            if new_bits == 0 continue;
             if k == .REPLICATE || k == .WIDEN_CAST continue;
-            vp_unported("truncateToMinimalBitwidths");
+            res := vr(r).def;
+            old_ty := vp_scalar_type(res);
+            old_bits := cast(u64) type_bits(old_ty);
+            new_ty := type_int(cast(u32) new_bits);
+            if vp_is_with_ir_flags_kind(k) vp_drop_poison_generating_flags(r);
+            if k == .WIDEN_LOAD || k == .WIDEN_INTRINSIC {
+                if old_bits != new_bits {
+                    b := vpb_after(r);
+                    ext := vpb_widen_cast(*b, .ZEXT, res, old_ty);
+                    vp_rauw(res, vr(ext).def);
+                    vp_set_operand(ext, 0, res);
+                }
+                continue;
+            }
+            start := ifx vr(r).opcode == vp_opc(.SELECT) then 1 else 0;
+            new_ops: [..] Vp_Val; new_ops.allocator = temp;
+            for vr(r).ops array_add(*new_ops, it);
+            for idx: start..new_ops.count-1 {
+                o := new_ops[idx];
+                if cast(u64) type_bits(vp_scalar_type(o)) == new_bits continue;
+                found, tr := table_find(*processed, o);
+                if !found {
+                    b: Vp_Builder;
+                    if vp_is_ir_value(o) b = vpb_at_end(ph); else b = vpb_before(r);
+                    tr = vpb_widen_cast(*b, .TRUNC, o, new_ty);
+                    table_set(*processed, o, tr);
+                }
+                new_ops[idx] = vr(tr).def;
+            }
+            nwr := vp_new_single_def(.WIDEN, new_ops, vp_compute_scalar_type_for_instruction(vr(r).opcode, new_ops), uv, vr(r).dl);
+            vr(nwr).opcode = vr(r).opcode; vr(nwr).flags = vr(r).flags;
+            for vr(r).md array_add(*vr(nwr).md, it);
+            vp_insert_before(nwr, r);
+            repl := vr(nwr).def;
+            if old_bits != new_bits { b := vpb_after(nwr); repl = vr(vpb_widen_cast(*b, .ZEXT, repl, old_ty)).def; }
+            vp_rauw(res, repl);
+            vp_erase_recipe(r);
         }
     }
 }

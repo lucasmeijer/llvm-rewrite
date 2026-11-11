@@ -582,20 +582,136 @@ lvp_build_vplans :: (lp: *Lv_Planner, vplan1: *Vp_Plan, min_vf: Ec, max_vf: Ec) 
 }
 // VFSelectionContext::computeMinimalBitwidths (computeMinimumValueSizes): only the empty result is ported
 lvp_minimal_bitwidths :: (lp: *Lv_Planner) -> *Table(Value_Id, u64) {
+    return lv_compute_minimum_value_sizes(li_blocks(lp.li, lp.l), lp.p.db, lp.cm.tti);
+}
+
+// llvm::computeMinimumValueSizes (VectorUtils.cpp)
+lv_compute_minimum_value_sizes :: (blocks: [] Value_Id, db: *Demanded_Bits, tti: *Tti) -> *Table(Value_Id, u64) {
     t := New(Table(Value_Id, u64),, allocator = temp);
     t.allocator = temp;
+    // EquivalenceClasses<Value *>: insertion-ordered elements, a leader per element, member lists per leader
+    Ec_State :: struct {
+        order: [..] Value_Id;
+        leader: Table(Value_Id, Value_Id);
+        members: Table(Value_Id, [..] Value_Id);
+    }
+    ecs: Ec_State;
+    ecs.order.allocator = temp; ecs.leader.allocator = temp; ecs.members.allocator = temp;
+    leader_of :: (e: *Ec_State, v: Value_Id) -> Value_Id {
+        found, l := table_find(*e.leader, v);
+        if found return l;
+        array_add(*e.order, v);
+        table_set(*e.leader, v, v);
+        m: [..] Value_Id; m.allocator = temp; array_add(*m, v);
+        table_set(*e.members, v, m);
+        return v;
+    }
+    union_sets :: (e: *Ec_State, a: Value_Id, b: Value_Id) {
+        la := leader_of(e, a); lb := leader_of(e, b);
+        if la == lb return;
+        ma := table_find_pointer(*e.members, la);
+        mb := table_find_pointer(*e.members, lb);
+        for mb.* { array_add(ma, it); table_set(*e.leader, it, la); }
+        table_remove(*e.members, lb);
+    }
+    worklist: [..] Value_Id; worklist.allocator = temp;
+    roots: Table(Value_Id, bool); roots.allocator = temp;
+    visited: Table(Value_Id, bool); visited.allocator = temp;
+    dbits: Table(Value_Id, u64); dbits.allocator = temp;
+    dbits_order: [..] Value_Id; dbits_order.allocator = temp;
+    in_set: Table(Value_Id, bool); in_set.allocator = temp;
     seen_ext_from_illegal := false;
-    has_root := false;
-    for bb: li_blocks(lp.li, lp.l) for i: block_insts(bb) {
+    for bb: blocks for i: block_insts(bb) {
+        table_set(*in_set, i, true);
         o := inst_op(i);
-        if (o == .ZEXT || o == .SEXT) && !lv_tti_is_type_legal(lp.cm.tti, vtype(op(i, 0))) seen_ext_from_illegal = true;
+        if (o == .ZEXT || o == .SEXT) && !lv_tti_is_type_legal(tti, vtype(op(i, 0))) seen_ext_from_illegal = true;
         if (o == .TRUNC || o == .ICMP) && !is_vector_type(vtype(i)) && type_bits(scalar_type(vtype(op(i, 0)))) <= 64 {
-            if o == .TRUNC && lv_tti_is_type_legal(lp.cm.tti, vtype(i)) continue;
-            has_root = true;
+            if o == .TRUNC && lv_tti_is_type_legal(tti, vtype(i)) continue;
+            array_add(*worklist, i);
+            table_set(*roots, i, true);
         }
     }
-    if !has_root || !seen_ext_from_illegal return t;
-    vp_unported("computeMinimumValueSizes");
+    if worklist.count == 0 || !seen_ext_from_illegal return t;
+    dbits_or :: (d: *Table(Value_Id, u64), order: *[..] Value_Id, v: Value_Id, x: u64) {
+        p := table_find_pointer(d, v);
+        if p { p.* |= x; return; }
+        table_set(d, v, x); array_add(order, v);
+    }
+    dbits_get :: (d: *Table(Value_Id, u64), v: Value_Id) -> u64 { found, x := table_find(d, v); return ifx found then x else 0; }
+    while worklist.count {
+        i := pop(*worklist);
+        leader := leader_of(*ecs, i);
+        if table_contains(*visited, i) continue;
+        table_set(*visited, i, true);
+        dm := db_demanded_bits(db, i);
+        if dm.bits > 64 { table_reset(t); return t; }
+        v := ap_zext_value(dm);
+        dbits_or(*dbits, *dbits_order, leader, v);
+        p := table_find_pointer(*dbits, i);
+        if p p.* = v; else { table_set(*dbits, i, v); array_add(*dbits_order, i); }
+        o := inst_op(i);
+        if o == .SEXT || o == .ZEXT || o == .LOAD || !table_contains(*in_set, i) continue;
+        if o == .BITCAST || o == .PTRTOINT || o == .INTTOPTR || type_kind(vtype(i)) != .INT {
+            dbits_or(*dbits, *dbits_order, leader, 0xFFFF_FFFF_FFFF_FFFF);
+            continue;
+        }
+        if o == .PHI continue;
+        if is_call_base(i) continue;
+        if dbits_get(*dbits, leader) == 0xFFFF_FFFF_FFFF_FFFF continue;
+        for k: 0..cast(s64) nops(i) - 1 {
+            x := op(i, cast(u32) k);
+            union_sets(*ecs, leader, x);
+            if is_inst(x) array_add(*worklist, x);
+        }
+    }
+    // users not seen poison the chain
+    snapshot: [..] Value_Id; snapshot.allocator = temp;
+    for dbits_order array_add(*snapshot, it);
+    for v: snapshot {
+        u := ir.v_first_use[v];
+        while u != NONE {
+            usr := ir.u_user[u];
+            if type_kind(vtype(usr)) == .INT && !table_contains(*dbits, usr) dbits_or(*dbits, *dbits_order, leader_of(*ecs, v), 0xFFFF_FFFF_FFFF_FFFF);
+            u = ir.u_next[u];
+        }
+    }
+    for e: ecs.order {
+        _, l := table_find(*ecs.leader, e);
+        if l != e continue;
+        mem := table_find_pointer(*ecs.members, e);
+        ldb: u64 = 0;
+        for m: mem.* ldb |= dbits_get(*dbits, m);
+        bw: u64 = 0;
+        { x := ldb; while x { bw += 1; x >>= 1; } }
+        min_bw: u64 = 1;
+        while min_bw < bw min_bw *= 2;   // llvm::bit_ceil (bit_ceil(0) = 1)
+        abort := false;
+        for m: mem.* if is_inst(m) && inst_op(m) == .PHI && min_bw < cast(u64) type_bits(scalar_type(vtype(m))) { abort = true; break; }
+        if abort continue;
+        for m: mem.* {
+            if !is_inst(m) continue;
+            ty := vtype(m);
+            if table_contains(*roots, m) ty = vtype(op(m, 0));
+            if min_bw >= cast(u64) type_bits(scalar_type(ty)) continue;
+            n := ifx is_call_base(m) then call_arg_count(m) else nops(m);
+            bad := false;
+            mo := inst_op(m);
+            for k: 0..cast(s64) n - 1 {
+                x := op(m, cast(u32) k);
+                if vkind(x) == .C_INT && (mo == .SHL || mo == .LSHR || mo == .ASHR) && k == 1 {
+                    if ap_uge_u64(const_ap(x), min_bw) { bad = true; break; }
+                    continue;
+                }
+                ud := db_demanded_bits_use(db, ir.v_ops[m] + cast(u32) k);
+                ub: u64 = 0;
+                { x2 := ap_zext_value(ud); while x2 { ub += 1; x2 >>= 1; } }
+                c: u64 = 1; while c < ub c *= 2;
+                if c > min_bw { bad = true; break; }
+            }
+            if bad continue;
+            table_set(t, m, min_bw);
+        }
+    }
     return t;
 }
 lv_tti_is_type_legal :: (t: *Tti, ty: Type_Id) -> bool {
