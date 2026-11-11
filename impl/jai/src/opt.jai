@@ -121,6 +121,8 @@
 #load "sccp_solver.jai";
 #load "pass_sccp.jai";
 #load "function_specialization.jai";
+#load "pass_mergeicmps.jai";
+#load "pass_dfa_jump_threading.jai";
 #load "globals_aa.jai";
 #load "loop_info.jai";
 #load "cycle_info.jai";

@@ -313,6 +313,8 @@ Pass_Kind :: enum u8 {
     EARLY_CSE;
     // SCCP, IPSCCP (pass_sccp.jai)
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
+    // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
+    MERGEICMPS; DFA_JUMP_THREADING;
 }
 
 Pass_Info :: struct {
@@ -356,6 +358,8 @@ PASS_TABLE :: Pass_Info.[
     .{"sccp", .FUNCTION, .SCCP, false, .DOMTREE},
     .{"ipsccp", .MODULE, .IPSCCP, false, .DOMTREE},   // also ipsccp<[no-]func-spec>
     .{"print<predicate-info>", .FUNCTION, .PRINT_PREDICATE_INFO, true, .DOMTREE},
+    .{"mergeicmps", .FUNCTION, .MERGEICMPS, false, .DOMTREE},
+    .{"dfa-jump-threading", .FUNCTION, .DFA_JUMP_THREADING, false, .DOMTREE},
     .{"dse", .FUNCTION, .DSE, false, .DOMTREE},
     .{"memcpyopt", .FUNCTION, .MEMCPYOPT, false, .DOMTREE},
     .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},
@@ -1003,6 +1007,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if reassociate_parse_cl_opt(name, value, has_value) return true;   // pass_reassociate.jai
     if early_cse_parse_cl_opt(name, value, has_value) return true;   // pass_early_cse.jai
     if fs_parse_cl_opt(name, value, has_value) return true;   // function_specialization.jai
+    if dfa_parse_cl_opt(name, value, has_value) return true;   // pass_dfa_jump_threading.jai
     if constraint_elimination_parse_cl_opt(name, value, has_value) return true;   // pass_constraint_elimination.jai
     if aggressive_instcombine_parse_cl_opt(name, value, has_value) return true;   // pass_aggressive_instcombine.jai
     if vector_combine_parse_cl_opt(name, value, has_value) return true;   // pass_vector_combine.jai
@@ -1244,6 +1249,8 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .GVN; return gvn_run(f, node.name);
         case .EARLY_CSE; return early_cse_run(f, node.name);
         case .SCCP; return sccp_run(f);
+        case .MERGEICMPS; return mergeicmps_run(f);
+        case .DFA_JUMP_THREADING; return dfa_jump_threading_run(f);
         case .PRINT_PREDICATE_INFO; return print_predicate_info_run(f);
         case .INSTCOMBINE; return instcombine_run(f, node.name);
         case .REDUNDANT_DBG_INST_ELIM; return redundant_dbg_inst_elim_run(f);

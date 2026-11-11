@@ -93,6 +93,9 @@ src/
   pass_sccp.jai       sccp / ipsccp drivers (runSCCP, runIPSCCP, findReturnsToZap, getExpressionForConstant)
   function_specialization.jai  FunctionSpecializer + InstCostVisitor (`Func_Spec`, `Fs_Cost_Visitor`, fs_*), CloneFunction
                       with a LocalChangesOnly MDNodeMapper (fs_map_md), libstdc++ heap algorithms for the spec selection
+  pass_mergeicmps.jai MergeICmps (`Mic_Block` = BCECmpBlock, `Mic_Chain`, dt_set_new_root)
+  pass_dfa_jump_threading.jai  DFAJumpThreading (`Dfa`, MainSwitch / AllSwitchPaths / TransformDFA as dfa_* procedures,
+                      SSAUpdaterBulk::RewriteAllUses as dfa_ssa_rewrite_all_uses)
   value_lattice.jai   ValueLatticeElement (`Vle`, vle_*)
   lazy_value_info.jai LazyValueInfo (`*Lvi`, lvi_*: block-value cache, solver, edge values, query API, printer)
   pass_cvp.jai    CorrelatedValuePropagation (cvp_*)

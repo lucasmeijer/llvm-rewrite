@@ -1309,3 +1309,20 @@ Still slow / known:
   `ipsccp --extra=-force-specialization` 7823/7826, `-funcspec-min-function-size=1` 7823/7826, perf/compile with
   `-force-specialization` 2 identical / 2 loud (SmallPtrSet order).
 - Perf: no tests/perf benchmark times sccp/ipsccp alone.
+
+## MergeICmps, DFAJumpThreading (L1.o2-gaps: MergeICmps 23/23, DFAJumpThreading 10/10)
+
+- Files: `pass_mergeicmps.jai`, `pass_dfa_jump_threading.jai` (DESIGN.md file map). Imported tests:
+  Transforms/MergeICmps, Transforms/DFAJumpThreading, Transforms/LoopInterchange (roadmap unit L1.o2-gaps).
+- MergeICmps runs only with a target (X86's enableMemCmpExpansion; the default target has no memcmp expansion).
+  `AM.getResult<AAManager>` comes first: BasicAA computes the DominatorTree, which the pass then updates through
+  its eager DTU (and which a later print<domtree> shows). llvm::sort of the comparisons is an insertion sort up to
+  16 elements; larger chains with equal keys fail loudly (introsort order). `EntryBlock_->isEntryBlock()` is asked
+  after the merged blocks were inserted in front of it (so setNewRoot practically never runs; ported as is).
+- DFAJumpThreading requests DT / LoopInfo / TTI before the optsize early exit (LoopInfo updates the DT's DFS
+  numbers, visible in print<domtree>); `LI->verify(DTU->getDomTree())` in a release build only flushes the DTU.
+  SSAUpdaterBulk::RewriteAllUses is ported inside the pass (new phis go to the front of the IDF blocks).
+- Sweeps (0 differs / 0 bad-ir / 0 loud): `mergeicmps -mtriple=x86_64-unknown-linux-gnu` 7884/7884,
+  `--with-test-flags` 10075/10189 (loud: other passes' options), `mergeicmps,print<domtree>`;
+  `dfa-jump-threading` 7885/7885, stressed with `-dfa-cost-threshold=100000 -dfa-early-exit-heuristic=false
+  -dfa-max-cloned-rate=1000` (also `,print<domtree>`); `function(sroa),<pass>` on tests/perf/compile 4/4 for both.
