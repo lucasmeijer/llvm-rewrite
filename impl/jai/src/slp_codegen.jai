@@ -1162,8 +1162,28 @@ slp_vectorize_tree_entry :: (te: Te_Id) -> Value_Id {
         vec_value := slp_vectorize_operand(te, 0);
         if vtype(vec_value) != vec_ty vec_value = sgb_int_cast(vec_value, vec_ty, slp_operand_signedness(te, 0));
         vec_value = slp_final_shuffle(vec_value, te, sty);
-        if slp.entries[te].state != TE_VECTORIZE slp_fail("vectorizeTree of strided / masked store nodes");
-        st := sgb_store(vec_value, op(si, 1), inst(si).align);
+        st: Value_Id;
+        if slp.entries[te].state == TE_EXPAND_VECTORIZE {
+            found, mst := table_find(*slpx.expand_store_ty, te);
+            if !found fatal("internal: slp: expanded store without a masked store type");
+            e = *slp.entries[te];
+            common_align: u64 = 0;
+            for x: e.scalars { a := inst(x).align; if common_align == 0 || a < common_align common_align = a; }
+            expand_mask := e.reuse_shuffle_indices;
+            vals: [..] Value_Id; vals.allocator = temp;
+            for expand_mask array_add(*vals, const_int(ir.t_i1, ifx it != PME then cast(u64) 1 else 0));
+            base_ptr := op(e.scalars[0], 1);
+            f := get_or_insert_intrinsic_declaration(IID_MASKED_STORE, .[mst, vtype(base_ptr)]);
+            fty := glob(f).value_type;
+            c := new_inst(.CALL, func_ret(fty), 4);
+            inst(c).ty2 = fty;
+            set_op(c, 0, vec_value); set_op(c, 1, base_ptr); set_op(c, 2, const_vector_of(vals)); set_op(c, 3, f);
+            st = sgb_insert(c);
+            add_param_align(st, 1, common_align);
+        } else {
+            if slp.entries[te].state != TE_VECTORIZE slp_fail("vectorizeTree of strided store nodes");
+            st = sgb_store(vec_value, op(si, 1), inst(si).align);
+        }
         v := slp_propagate_flags_for(te, st);
         te_set_vv(te, v);
         return v;
@@ -1293,7 +1313,18 @@ slp_vectorize_insert :: (te: Te_Id, sty_in: Type_Id, o: Opcode) -> Value_Id {
             slpg_record(v);
         }
     }
-    if o == .INSERTVALUE && !slp_can_vector_store_insert_value(te) slp_fail("vectorizeTree of insertvalue nodes stored through a stack slot");
+    if o == .INSERTVALUE && !slp_can_vector_store_insert_value(te) {
+        agg_ty := vtype(slp.entries[te].s.main);
+        slot_align := max(dl_pref_align(vtype(v)), dl_pref_align(agg_ty));
+        saved := slpg.b;   // InsertPointGuard + SetInsertPointPastAllocas(F) (the debug location stays)
+        entry := fn_entry(slp.f);
+        slpg.b.bb = entry; slpg.b.pt = block_first_non_phi_or_dbg_or_alloca(entry); slpg.b.head = false;
+        slot := sgb_insert(create_alloca_unlinked(agg_ty, 0, dl_pref_align(agg_ty)), "vec2struct.slot");
+        inst_set_align(slot, slot_align);
+        slpg.b = saved;
+        sgb_store(v, slot, slot_align);
+        v = sgb_load(agg_ty, slot, slot_align, "vec2struct");
+    }
     te_set_vv(te, v);
     return v;
 }

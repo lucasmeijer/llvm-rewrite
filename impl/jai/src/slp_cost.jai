@@ -1099,7 +1099,16 @@ ec_vector_cost :: (c: *Slp_Ec, common: Cost) -> Cost {
     if s == ec_op_s32(.STORE) {
         is_reorder := e.reorder_indices.count > 0;
         base_si := ifx is_reorder then vl[e.reorder_indices[0]] else c.vl0;
-        if e.state != TE_VECTORIZE slp_fail("costs of strided / masked store nodes");
+        if e.state == TE_EXPAND_VECTORIZE {
+            found, mst := table_find(*slpx.expand_store_ty, te);
+            if !found fatal("internal: slp: expanded store without a masked store type");
+            common_align: u64 = 0;
+            for v: c.unique_values if is_inst(v) && inst_op(v) == .STORE { a := load_store_align(v); if common_align == 0 || a < common_align common_align = a; }
+            m: Mica;
+            m.id = IID_MASKED_STORE; m.data_ty = mst; m.align = common_align; m.addrspace = ptr_addrspace(vtype(op(base_si, 1)));
+            return cost_add(x86_mem_intrinsic_cost(t, *m, K), common);
+        }
+        if e.state != TE_VECTORIZE slp_fail("costs of strided store nodes");
         if e.interleave_factor != 0 slp_fail("interleaved store costs");
         vc := tti_memory_op_cost(t, .STORE, c.vec_ty, load_store_align(base_si), ptr_addrspace(vtype(op(base_si, 1))), K, slp_get_operand_info(e.operands[0]));
         return cost_add(vc, common);

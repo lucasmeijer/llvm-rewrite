@@ -987,8 +987,17 @@ slp_is_masked_store_compress :: (vl: [] Value_Id, ptrs: [] Value_Id, order: [] u
     if bits == 0 || cast(u64) diff / cast(u64) sz >= max_reg / bits return false;
     store_vec_ty := slp_widened_type(sty, cast(u64) diff + 1);
     if !tti_is_legal_masked_store_const_mask(slp.tti, store_vec_ty, align) return false;
-    slp_fail("masked stores of non-consecutive store chains (ExpandVectorize)");
-    return false;
+    reuse.* = new_mask(diff + 1);
+    prev: s64 = -1;
+    for i: 0..sz-1 {
+        ptr := ifx order.count == 0 then ptrs[i] else ptrs[order[i]];
+        ok2, off := get_pointers_diff(sty, ptr0, sty, ptr);
+        if !ok2 || off <= prev || off > diff return false;
+        reuse.*[off] = cast(s32) i;
+        prev = off;
+    }
+    slpx.pending_expand_store_ty = store_vec_ty;   // SPtrInfo.Ty
+    return true;
 }
 // TTI::isLegalMaskedStore(DataType, Alignment, AddressSpace, ConstantMask)
 tti_is_legal_masked_store_const_mask :: (t: *Tti, ty: Type_Id, align: u64) -> bool {
@@ -1467,7 +1476,14 @@ slp_build_tree_rec :: (vl_ref: [] Value_Id, depth: u32, ei: Edge_Info, interleav
             for k: 0..operands.count-1 slp_build_tree_rec(operands[k], depth + 1, .{te, cast(u32) k});
             return;
         case .STORE;
-            if state == TE_STRIDED_VECTORIZE || state == TE_EXPAND_VECTORIZE slp_fail("strided / expanded store nodes");
+            if state == TE_STRIDED_VECTORIZE slp_fail("strided store nodes");
+            if state == TE_EXPAND_VECTORIZE {
+                te := slp_new_tree_entry_state(vl, TE_EXPAND_VECTORIZE, b, s, ei, expand_mask, current_order);
+                table_set(*slpx.expand_store_ty, te, slpx.pending_expand_store_ty);
+                te_set_operands(te, operands);
+                slp_build_tree_rec(te_operand(te, 0), depth + 1, .{te, 0});
+                return;
+            }
             te := slp_new_tree_entry(vl, b, s, ei, reuse, current_order);
             te_set_operands(te, operands);
             slp_build_tree_rec(te_operand(te, 0), depth + 1, .{te, 0});

@@ -12199,6 +12199,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35628_1.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35628_1.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35628_2.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35628_2.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35777.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35777.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35865-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35865-inseltpoison.ll::roundtrip
@@ -12692,6 +12693,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/insertelement-with-copyable-arg
 tests/imported/llvm/Transforms/SLPVectorizer/X86/insertelement-with-copyable-args.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/insertelements-with-reused-indices.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/insertelements-with-reused-indices.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/insertvalue-reordered-operands.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/insertvalue-reordered-operands.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/insertvalue.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/insertvalue.ll::roundtrip
@@ -12749,6 +12751,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/mask-size-less-common-mask.ll::
 tests/imported/llvm/Transforms/SLPVectorizer/X86/mask-size-less-common-mask.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/masked-load-compress-reordered.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/masked-load-compress-reordered.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/masked-stores.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/masked-stores.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/matched-bv-schedulable.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/matched-bv-schedulable.ll::roundtrip
@@ -13274,6 +13277,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/stores_constant_float.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/stores_constant_float.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/stores_mix_sizes.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/stores_mix_sizes.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/stores_vectorize.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/stores_vectorize.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-different-bb.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-different-bb.ll::roundtrip
