@@ -1020,87 +1020,31 @@ fn x86_dso_local(gv: i32) -> bool {
 
 // ---------------------------------------------------------------- calling-convention register types
 
-// RegisterTypeForVT of an MVT (TargetLoweringBase::computeRegisterProperties)
-recursive fn x86_register_type_mvt(m: i32) -> i32 {
-    if x86_mvt_legal(m) { return m; }
-    let c = mvt_elt(m);
-    if !mvt_is_vec(m) {
-        if xe_is_int(c) {
-            let b = xe_bits(c);
-            let lg = x86_largest_int_bits();
-            if b > lg { return mvt_mk(xe_int_code(lg), 0); }
-            var w: i64 = b;
-            while !x86_mvt_legal(mvt_mk(xe_int_code(w), 0)) { w = if w < 8 { 8 } else { w * 2 }; }
-            return mvt_mk(xe_int_code(w), 0);
-        }
-        if c == XE_F128 { return x86_register_type_mvt(mvt_mk(XE_I128, 0)); }
-        if c == XE_F80 { return x86_register_type_mvt(mvt_mk(XE_I32, 0)); }
-        if c == XE_F64 { return x86_register_type_mvt(mvt_mk(XE_I64, 0)); }
-        if c == XE_F32 { return x86_register_type_mvt(mvt_mk(XE_I32, 0)); }
-        if c == XE_F16 { return x86_register_type_mvt(mvt_mk(XE_I16, 0)); }   // useFPRegsForHalfType() is false
-        if c == XE_BF16 { return x86_register_type_mvt(mvt_mk(XE_F32, 0)); }
-        x86_np("the register type of this scalar value type");
-    }
-    let a, nx = x86_mvt_action(m);
-    if (a == TA_PROMOTE || a == TA_WIDEN) && evt_is_simple(nx) && x86_mvt_legal(evt_to_mvt(nx)) { return evt_to_mvt(nx); }
-    // getVectorTypeBreakdownMVT
-    var n = mvt_n(m);
-    if (n & (n - 1)) != 0 { n = 1; }
-    while n > 1 && !(mvt_vec_index(mvt_mk(c, n)) >= 0 && x86_mvt_legal(mvt_mk(c, n))) { n = n / 2; }
-    var nv = mvt_mk(c, n);
-    if !(mvt_vec_index(nv) >= 0 && x86_mvt_legal(nv)) { nv = mvt_mk(c, 0); }
-    return x86_register_type_mvt(nv);
-}
-
-fn x86_evt_legal(e: i64) -> bool { evt_is_simple(e) && x86_mvt_legal(evt_to_mvt(e)) }
-
-// TargetLoweringBase::getRegisterType(Context, EVT)
-recursive fn x86_register_type(e: i64) -> i32 {
-    if evt_is_simple(e) { return x86_register_type_mvt(evt_to_mvt(e)); }
-    if evt_is_vec(e) {
-        // getVectorTypeBreakdown
-        let ta, rt = x86_type_conversion(e);
-        if evt_n(e) != 1 && (ta == TA_WIDEN || ta == TA_PROMOTE) && x86_evt_legal(rt) { return evt_to_mvt(rt); }
-        let elt = evt_elt(e);
-        var n = evt_n(e);
-        if (n & (n - 1)) != 0 { n = 1; }
-        while n > 1 && !x86_evt_legal(evt_vec(elt, n)) { n = n / 2; }
-        var nv = evt_vec(elt, n);
-        if !x86_evt_legal(nv) { nv = elt; }
-        return x86_register_type(nv);
-    }
-    if xe_is_int(evt_code(e)) {
-        let ta, rt = x86_type_conversion(e);
-        return x86_register_type(rt);
-    }
-    x86_np("the register type of an extended non-integer value type");
-    return 0;
-}
-
 // X86TargetLowering::getRegisterTypeForCallingConv(Context, CC, VT) for the current subtarget
+// (llvm/lib/Target/X86/X86ISelLoweringCall.cpp, handleMaskRegisterForCallingConv)
 recursive fn x86_register_type_for_cc(e: i64, cc: i64) -> i32 {
     if evt_is_vec(e) {
-        let elt = evt_code(evt_elt(e));
-        let n = evt_n(e);
-        if elt == XE_I1 && x86_avx512() {
-            // handleMaskRegisterForCallingConv; X86_RegCall = 92, Intel_OCL_BI = 77
+        let elt = evt_elt(e);
+        let n = evt_nelem(e);
+        if elt == (MVT_i1 as i64) && x86_avx512() {
+            // X86_RegCall = 92, Intel_OCL_BI = 77
             let rc = cc == 92 || cc == 77;
-            if n == 2 { return mvt_mk(XE_I64, 2); }
-            if n == 4 { return mvt_mk(XE_I32, 4); }
-            if n == 8 && !rc { return mvt_mk(XE_I16, 8); }
-            if n == 16 && !rc { return mvt_mk(XE_I8, 16); }
-            if n == 32 && (!x86_bwi() || cc != 92) { return mvt_mk(XE_I8, 32); }
-            if n == 64 && x86_bwi() && cc != 92 { return if x86_use_avx512_regs() { mvt_mk(XE_I8, 64) } else { mvt_mk(XE_I8, 32) }; }
-            if (n & (n - 1)) != 0 || (n == 64 && !x86_bwi()) || n > 64 { return mvt_mk(XE_I8, 0); }
+            if n == 2 { return MVT_v2i64; }
+            if n == 4 { return MVT_v4i32; }
+            if n == 8 && !rc { return MVT_v8i16; }
+            if n == 16 && !rc { return MVT_v16i8; }
+            if n == 32 && (!xst_hasBWI() || cc != 92) { return MVT_v32i8; }
+            if n == 64 && xst_hasBWI() && cc != 92 { return if x86_use_avx512_regs() { MVT_v64i8 } else { MVT_v32i8 }; }
+            if (n & (n - 1)) != 0 || (n == 64 && !xst_hasBWI()) || n > 64 { return MVT_i8; }
         }
-        if elt == XE_F16 && n < 8 { return mvt_mk(XE_F16, 8); }
+        if elt == (MVT_f16 as i64) && n < 8 { return MVT_v8f16; }
     }
-    if !x86_is64 && !x86_has(X86F_FeatureX87) && !evt_is_vec(e) && (evt_code(e) == XE_F64 || evt_code(e) == XE_F80) { return mvt_mk(XE_I32, 0); }
-    if x86_mvt_legal(mvt_mk(XE_F16, 0)) {
-        if evt_is_vec(e) && evt_code(evt_elt(e)) == XE_BF16 { return x86_register_type_for_cc(evt_vec(evt_mk(XE_F16, 16, 0), evt_n(e)), cc); }
-        if !evt_is_vec(e) && evt_code(e) == XE_BF16 { return mvt_mk(XE_F16, 0); }
+    if (e == (MVT_f64 as i64) || e == (MVT_f80 as i64)) && !x86_is64() && !xst_hasX87() { return MVT_i32; }
+    if tl_is_type_legal(MVT_f16 as i64) {
+        if evt_is_vec(e) && evt_elt(e) == (MVT_bf16 as i64) { return x86_register_type_for_cc(evt_vec(MVT_f16 as i64, evt_nelem(e)), cc); }
+        if e == (MVT_bf16 as i64) { return MVT_f16; }
     }
-    return x86_register_type(e);
+    return xl_register_type_evt(e);
 }
 
 // ComputeValueVTs(TLI, DL, Ty, VTs): the value types of the scalar / vector leaves of an aggregate
