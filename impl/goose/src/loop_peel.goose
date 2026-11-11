@@ -17,6 +17,7 @@ import flags;
 import apint;
 import pm;
 import memloc;
+import assume;
 import speculate;
 import domtree;
 import dtu;
@@ -660,8 +661,8 @@ fn peel_loop(l0: i32, peel_count: i64, peel_last: bool, preserve_lcssa: bool, lv
         for k in ev_p.len {
             let pv = ev_p[k];
             let e = ev_v[k];
-            if is_inst(e) && loop_contains(l, inst_parent(e)) { rauw(pv, vmm_get(vm, e)); }
-            else { rauw(pv, e); }
+            if is_inst(e) && loop_contains(l, inst_parent(e)) { ac_rauw(pv, vmm_get(vm, e)); rauw(pv, vmm_get(vm, e)); }
+            else { ac_rauw(pv, e); rauw(pv, e); }
             inst_erase_from_parent(pv);
         }
         let save = lcssa_se;

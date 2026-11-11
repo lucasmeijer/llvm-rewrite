@@ -16,6 +16,7 @@ import implied;
 import gen_iids;
 import intrinsics;
 import vt;
+import assume;
 import apint;
 import constrange;
 import loopinfo;
@@ -58,12 +59,16 @@ recursive fn sc_guard_decl_in(fv: i32) -> i32 {
 }
 recursive // Intrinsic::getDeclarationIfExists(M, experimental_guard)
 fn sc_guard_decl() -> i32 { sc_guard_decl_in(sc_fv) }
-fn sc_has_assumptions() -> bool { vt_fn_has_assumes(sc_fv) }
-
-// AC.assumptions(): llvm.assume calls of the function in instruction order
-fn sc_collect_assumes(out: i32[>..<]&) {
-    each_inst(sc_fv) { i => if inst_iid(i) == IID_assume { out.push(i); } };
+// !AC.assumptions().empty()
+fn sc_has_assumptions() -> bool {
+    ac_build(sc_fv);
+    for a in ac_handles { if !is_dead(a) { return true; } }
+    return false;
 }
+
+// AC.assumptions(): the AssumptionCache's handles in registration order (a scan of the function in
+// instruction order, then registerAssumption calls; assumes cloned without registration are not in it)
+fn sc_collect_assumes(out: i32[>..<]&) { ac_assumptions(sc_fv, out); }
 
 // Instruction::isIdenticalTo (for HasSameValue: binary operators and GEPs)
 recursive fn sc_inst_identical(a: i32, b: i32) -> bool {

@@ -149,7 +149,7 @@ fn load_cse(l: i32) {
                 }
                 if m >= 0 {
                     if lr_replacement_preserves_lcssa(i, m) {
-                        rauw(i, m);
+                        ac_rauw(i, m); rauw(i, m);
                         inst_erase_from_parent(i);
                     }
                 } else {
@@ -273,12 +273,11 @@ fn simplify_loop_after_unroll(l: i32, simplify_ivs: bool, bbs: const i32[:], use
             if v >= 0 && lr_replacement_preserves_lcssa(i, v) { ac_rauw(i, v); rauw(i, v); }
             if is_instruction_trivially_dead(i) { dead.push(i); }
             // Fold ((add X, C1), C2) to (add X, C1+C2)
-            if iop(i) == OP_ADD && vals[op(i, 1)].kind == VK_CINT && is_inst_op(op(i, 0), OP_ADD) &&
-               vals[op(op(i, 0), 1)].kind == VK_CINT && !ty_is_vector(vals[i].ty) {
+            if iop(i) == OP_ADD && m_apint(op(i, 1)) >= 0 && is_inst_op(op(i, 0), OP_ADD) && m_apint(op(op(i, 0), 1)) >= 0 {
                 let inner = op(i, 0);
                 let x = op(inner, 0);
-                let c1 = ci_ap(op(inner, 1));
-                let c2 = ci_ap(op(i, 1));
+                let c1 = ci_ap(m_apint(op(inner, 1)));
+                let c2 = ci_ap(m_apint(op(i, 1)));
                 let nc = ap_add(c1, c2);
                 let ov = ap_sadd_overflows(c1, c2);
                 let inuw = has_flag(inner, FL_NUW);

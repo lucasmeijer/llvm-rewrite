@@ -550,9 +550,15 @@ fn unroll_runtime_loop_remainder(l: i32, count: i64, allow_expensive: bool, epil
         ur_set(lb);
         let zero = c_int(vals[nidx].ty, 0);
         let one = c_int(vals[nidx].ty, 1);
-        let inext = ur_binop(OP_ADD, nidx, one, "niter.next");
+        var nn: u8[>..] = [];
+        nn.append(val_name(nidx));
+        nn.append(".next");
+        let inext = ur_binop(OP_ADD, nidx, one, nn);
         let pred: i64 = if term_succ(lb, 0) == header { 33 } else { 32 };
-        let icmp = ur_icmp(pred, inext, test, "niter.ncmp");
+        var nc: u8[>..] = [];
+        nc.append(val_name(nidx));
+        nc.append(".ncmp");
+        let icmp = ur_icmp(pred, inext, test, nc);
         phi_add_incoming(nidx, zero, nph);
         phi_add_incoming(nidx, inext, latch);
         set_op(lb, 0, icmp);
