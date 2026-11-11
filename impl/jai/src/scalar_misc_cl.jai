@@ -28,6 +28,7 @@ scalar_misc_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
         case "max-uses-for-sinking"; ls_cl.max_uses_for_sinking = smisc_int(name, value, has_value);
         case "jump-table-to-switch-size-threshold"; jtts_cl.size_threshold = smisc_int(name, value, has_value);
         case "jump-table-to-switch-function-size-threshold"; jtts_cl.function_size_threshold = smisc_int(name, value, has_value);
+        case "move-auto-init-threshold"; mai_cl.threshold = smisc_int(name, value, has_value);
         case "relocation-model";
             if value == {
                 case "static"; reloc_model_cl.model = RELOC_STATIC;
@@ -47,6 +48,6 @@ scalar_misc_takes_value :: (a: string) -> bool {
     for string.["likely-branch-weight", "unlikely-branch-weight", "float2int-max-integer-bw", "spec-exec-max-speculation-cost",
                 "spec-exec-max-not-hoisted", "callsite-splitting-duplication-threshold",
                 "sink-freq-percent-threshold", "max-uses-for-sinking",
-                "jump-table-to-switch-size-threshold", "jump-table-to-switch-function-size-threshold"] if n == it return true;
+                "jump-table-to-switch-size-threshold", "jump-table-to-switch-function-size-threshold", "move-auto-init-threshold"] if n == it return true;
     return false;
 }
