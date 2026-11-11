@@ -1,0 +1,47 @@
+# Skipped while importing llvm/test/Transforms/LoopInterchange (llvmorg-23.1.5)
+
+62 of 96 files imported. Regenerate with `./harness/run import-llvm Transforms/LoopInterchange`.
+
+- `bail-out-all-deps.ll` RUN `opt < %s -passes=loop-interchange -pass-remarks-output=%t -disable-output`: uses lit substitution -pass-remarks-output=%t
+- `bail-out-all-deps.ll` RUN `FileCheck -input-file %t %s`: not an opt invocation
+- `bail-out-one-loop.ll`: REQUIRES asserts
+- `call-instructions-remarks.ll`: REQUIRES asserts
+- `call-instructions.ll` RUN `opt < %s -passes=loop-interchange -S -verify-dom-info -verify-loop-info 2>&1 | FileCheck %s`: redirects or chains commands
+- `deep-loop-nest.ll` RUN `opt < %s -passes=loop-interchange -pass-remarks-missed='loop-interchange' -disable-output 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-missed=loop-interchange
+- `deep-loop-nest.ll` RUN `opt < %s -passes=loop-interchange -pass-remarks-missed='loop-interchange' -loop-interchange-max-loop-nest-depth=12 -disable-output 2>&1 | FileCheck --allow-empty -check-prefix=CHECK-MAX %s`: diagnostic output flag -pass-remarks-missed=loop-interchange
+- `delay-cachecost-calculation.ll`: REQUIRES asserts
+- `gh54176-scalar-deps.ll`: XFAIL in LLVM
+- `inner-indvar-depend-on-outer-indvar-remark.ll`: REQUIRES asserts
+- `inner-indvar-depend-on-outer-indvar.ll` RUN `opt < %s -passes=loop-interchange -verify-dom-info -verify-loop-info -S -da-enable-dependence-test=all 2>&1 | FileCheck %s`: redirects or chains commands
+- `innermost-latch-uses-values-in-middle-header.ll`: XFAIL in LLVM
+- `interchange-flow-dep-outer.ll`: XFAIL in LLVM
+- `interchange-no-deps.ll` RUN `opt < %s -passes='loop(loop-interchange),simplifycfg' -simplifycfg-require-and-preserve-domtree=1 -pass-remarks=loop-interchange -pass-remarks-missed=loop-interchange -stats -S 2>&1 | FileCheck -check-prefix=STATS %s`: diagnostic output flag -pass-remarks=loop-interchange
+- `interchanged-loop-nest-3.ll` RUN `opt < %s -passes=loop-interchange -verify-dom-info -verify-loop-info -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `interchanged-loop-nest-4.ll`: REQUIRES asserts
+- `large-nested-4d.ll` RUN `opt < %s -passes=loop-interchange -cache-line-size=64 -pass-remarks='loop-interchange' -pass-remarks-missed='loop-interchange' -pass-remarks-output=%t -disable-output -S`: diagnostic output flag -pass-remarks=loop-interchange
+- `large-nested-4d.ll` RUN `FileCheck --input-file=%t %s`: not an opt invocation
+- `large-nested-6d.ll` RUN `opt < %s -passes=loop-interchange -cache-line-size=64 -pass-remarks='loop-interchange' -pass-remarks-missed='loop-interchange' -pass-remarks-output=%t -disable-output -S`: diagnostic output flag -pass-remarks=loop-interchange
+- `large-nested-6d.ll` RUN `FileCheck --input-file=%t %s`: not an opt invocation
+- `lcssa.ll`: XFAIL in LLVM
+- `legality-check.ll`: REQUIRES asserts
+- `loop-interchange-optimization-remarks.ll` RUN `opt < %s -passes=loop-interchange -cache-line-size=64 -verify-dom-info -verify-loop-info -pass-remarks-output=%t -pass-remarks-missed='loop-interchange' -pass-remarks='loop-interchange' -S`: uses lit substitution -pass-remarks-output=%t
+- `loop-interchange-optimization-remarks.ll` RUN `cat %t |  FileCheck %s`: not an opt invocation
+- `loop-interchange-optimization-remarks.ll` RUN `opt < %s -passes=loop-interchange -cache-line-size=64 -verify-dom-info -verify-loop-info -pass-remarks-output=%t -pass-remarks-missed='loop-interchange' -pass-remarks='loop-interchange' -S -da-disable-delinearization-checks -loop-interchange-profitabilities=cache`: uses lit substitution -pass-remarks-output=%t
+- `loop-interchange-optimization-remarks.ll` RUN `cat %t |  FileCheck --check-prefix=DELIN %s`: not an opt invocation
+- `no-dependence-info.ll`: target triple aarch64-unknown-linux-gnu
+- `not-interchanged-dependencies-1.ll` RUN `opt < %s -passes=loop-interchange -cache-line-size=64 -verify-dom-info -verify-loop-info -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `not-interchanged-loop-nest-3.ll` RUN `opt < %s -passes=loop-interchange -cache-line-size=64 -verify-dom-info -verify-loop-info -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `not-interchanged-tightly-nested.ll` RUN `opt < %s -passes=loop-interchange -verify-dom-info -verify-loop-info -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `outer-header-jump-to-inner-latch.ll`: XFAIL in LLVM
+- `phi-ordering.ll` RUN `opt < %s -passes=loop-interchange -cache-line-size=64 -verify-dom-info -verify-loop-info -verify-scev -verify-loop-lcssa -loop-interchange-threshold=0 -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `position-in-pipeline.ll` RUN `opt -passes='default<O3>' -enable-loopinterchange -disable-output -disable-verify -verify-analysis-invalidation=0 -debug-pass-manager=quiet %s 2>&1 | FileCheck %s`: diagnostic output flag -debug-pass-manager=quiet
+- `pr43797-lcssa-for-multiple-outer-loop-blocks.ll`: XFAIL in LLVM
+- `pr56275.ll`: target triple aarch64-unknown-linux-gnu
+- `profitability.ll`: XFAIL in LLVM
+- `reduction2mem-extra-lcssa.ll` RUN `opt < %s -passes=loop-interchange -loop-interchange-reduction-to-mem -pass-remarks-missed=loop-interchange -pass-remarks-output=%t -S | FileCheck -check-prefix=IR %s`: diagnostic output flag -pass-remarks-missed=loop-interchange
+- `reduction2mem-extra-lcssa.ll` RUN `FileCheck --input-file=%t %s`: not an opt invocation
+- `reduction2mem-limitation.ll` RUN `opt < %s -passes="loop-interchange"  -loop-interchange-reduction-to-mem -pass-remarks-missed='loop-interchange' -pass-remarks-output=%t -S | FileCheck -check-prefix=IR %s`: diagnostic output flag -pass-remarks-missed=loop-interchange
+- `reduction2mem-limitation.ll` RUN `FileCheck --input-file=%t %s`: not an opt invocation
+- `transform-stop-partway.ll` RUN `opt < %s -passes=loop-interchange -loop-interchange-profitabilities=ignore -S 2>&1 | FileCheck %s`: redirects or chains commands
+- `unique-dep-matrix.ll`: REQUIRES asserts
+- `vector-gep-operand.ll`: XFAIL in LLVM
