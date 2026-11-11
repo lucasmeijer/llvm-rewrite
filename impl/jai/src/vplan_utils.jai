@@ -220,9 +220,9 @@ vp_scev_for_value :: (v: Vp_Val, pse: *Pse, l: Loop_Id = NONE) -> Scev_Id {
     if ok { ok2, x, y := two(a, b, pse, l); if !ok2 return SCEV_CNC; return pse_get_predicated_scev(pse, sc_get_add2(x, y)); }
     ok, a, b = vpm_binary(v, vp_opc(.SUB));
     if ok { ok2, x, y := two(a, b, pse, l); if !ok2 return SCEV_CNC; return pse_get_predicated_scev(pse, sc_get_minus(x, y)); }
-    okn, na := vpm_vpi(v, VPI_NOT, 1);
+    okn, nx := vpm_not(v);   // m_Not: VPInstruction Not, or xor with all-ones (either operand)
     if okn {
-        x := sub(vp_op(na, 0), pse, l); if sc_is_cnc(x) return SCEV_CNC;
+        x := sub(nx, pse, l); if sc_is_cnc(x) return SCEV_CNC;
         return pse_get_predicated_scev(pse, sc_get_minus(sc_get_minus_one(sc_type(x)), x));
     }
     ok, a, b = vpm_binary(v, vp_opc(.MUL));

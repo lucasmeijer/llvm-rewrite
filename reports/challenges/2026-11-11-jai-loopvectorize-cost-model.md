@@ -1,6 +1,6 @@
 # LoopVectorize cost model: a decision-diff tool against the assertions opt made it tractable; the unit is now split
 
-- **Date / implementation / unit:** 2026-11-14 / jai / L1.vectorize.loop
+- **Date / implementation / unit:** 2026-11-11 / jai / L1.vectorize.loop
 - **What happened:** ported the LoopVectorize cost model (legacy getInstructionCost family, VPlan recipe costs,
   computeBestVF, selectInterleaveCount), call widening, replicate regions, interleave groups and tail folding:
   173 -> 283 of the unit's 468 `::opt` checks, 0 silent differences in every `--passes loop-vectorize` sweep. Two

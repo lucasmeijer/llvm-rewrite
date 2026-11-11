@@ -10702,6 +10702,7 @@ tests/imported/llvm/Transforms/LoopVectorize/find-last-iv-interleave.ll::roundtr
 tests/imported/llvm/Transforms/LoopVectorize/find-last-iv-sinkable-expr-epilogue.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/find-last-iv-sinkable-expr-tail-folding.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/find-last-iv-sinkable-expr.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/find-last-iv-sinkable-load.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/find-last-iv-sinkable-load.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/find-last.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/first-order-recurrence-chains.ll::opt
@@ -11064,6 +11065,7 @@ tests/imported/llvm/Transforms/LoopVectorize/select-cmp-blend-chain.ll::roundtri
 tests/imported/llvm/Transforms/LoopVectorize/select-cmp-multiuse.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-cmp-predicated.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/select-cmp-predicated.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/select-cmp.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/select-cmp.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-first-index-fp.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/select-first-index-fp.ll::roundtrip
@@ -14587,6 +14589,7 @@ tests/roundtrip/globals/linkage.ll::roundtrip
 tests/roundtrip/instructions/calls_and_intrinsics.ll::roundtrip
 tests/roundtrip/instructions/casts_and_fp.ll::roundtrip
 tests/roundtrip/instructions/memory_ops.ll::roundtrip
+tests/roundtrip/intrinsics/pass-created-loop-vectorize.ll::roundtrip
 tests/roundtrip/intrinsics/pass-created.ll::roundtrip
 tests/roundtrip/metadata/named_and_attached.ll::roundtrip
 tests/roundtrip/types/aggregates.ll::roundtrip

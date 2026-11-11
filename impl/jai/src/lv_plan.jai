@@ -420,13 +420,16 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
     lvp_add_reduction_result_computation(lp, range.start);
     for vp_block_phis(header) if vr(it).kind == .REDUCTION_PHI && rk_is_find_iv(vr(it).rdx_kind)
         vp_unported("FindIV reductions (optimizeFindIVReductions)");
+    // optimizeFindIVReductions: FindLast reductions of an induction become sentinel min/max reductions
+    for vp_block_phis(header) if vr(it).kind == .REDUCTION_PHI && rk_is_find_last(vr(it).rdx_kind) && vp_find_iv_reduction_applies(it, lp.pse, lp.l)
+        vp_unported("FindLast reductions of inductions (optimizeFindIVReductions)");
     lvp_optimize_induction_live_out_users(lp);
     // handleMultiUseReductions, handleMaxMinNumReductions, handleFindLastReductions
     for vp_block_phis(header) if vr(it).kind == .REDUCTION_PHI {
         if vr(it).has_uses_outside_chain vp_unported("min/max reductions with uses outside the chain (handleMultiUseReductions)");
         if rk_is_fp_min_max_num(vr(it).rdx_kind) vp_unported("FP minnum/maxnum reductions (handleMaxMinNumReductions)");
-        if rk_is_find_last(vr(it).rdx_kind) vp_unported("FindLast reductions (handleFindLastReductions)");
     }
+    if !vp_handle_find_last_reductions() return false;
     vp_remove_branch_on_const(false);
     vp_create_interleave_groups(igs, lp.cm.sel == .ALLOWED);
     for bb: vp_blocks_only_basic(vp_depth_first_shallow(vb(vp_vector_loop_region()).entry))
@@ -490,8 +493,10 @@ lvp_add_reduction_result_computation :: (lp: *Lv_Planner, min_vf: Ec) {
         }
         orig_exiting := vp_op(phir, 1);
         new_exiting := orig_exiting;
-        // usePredicatedReductionSelect: -prefer-predicated-reduction-select (TTI.preferPredicatedReductionSelect is false)
-        if !lv_opts.prefer_predicated_reduction_select && header_mask != NONE {
+        // usePredicatedReductionSelect: always for FindLast (and EVL / alias masking, not ported), otherwise
+        // -prefer-predicated-reduction-select (TTI.preferPredicatedReductionSelect is false)
+        use_pred_sel := rk_is_find_last(rk) || lv_opts.prefer_predicated_reduction_select;
+        if !use_pred_sel && header_mask != NONE {
             oks, c, t, f := vpm_select(vp_op(phir, 1));
             if oks && c == header_mask && f == vr(phir).def vp_set_operand(phir, 1, t);
         }
@@ -1037,4 +1042,136 @@ vp_new_widen_intrinsic :: (ci: Value_Id, id: Intrinsic_Id, ops: [] Vp_Val, ty: T
         vr(r).may_side_effects = may_have_side_effects(ci);
     }
     return r;
+}
+
+// VPlanTransforms::handleFindLastReductions (VPlanConstruction.cpp)
+vp_handle_find_last_reductions :: () -> bool {
+    if vp_has_scalar_vf_only() return false;
+    region := vp_vector_loop_region();
+    phis: [..] Vp_Rec; phis.allocator = temp;
+    for vp_block_phis(vp_entry_basic_block(region)) if vr(it).kind == .REDUCTION_PHI && rk_is_find_last(vr(it).rdx_kind) array_add(*phis, it);
+    if phis.count == 0 return true;
+    hm := vb(region).header_mask;
+    for phir: phis {
+        pd := vr(phir).def;
+        backedge_select := vp_op(phir, 1);
+        cond_select := backedge_select;
+        if hm != NONE {
+            // m_SelectLike(m_Specific(HeaderMask), m_VPValue(CondSelect), m_Specific(PhiR))
+            matched := false;
+            oks, c, t, f := vpm_select(backedge_select);
+            if oks && c == hm && f == pd { cond_select = t; matched = true; }
+            if !matched {
+                bd := vp_def(backedge_select);
+                if bd != NONE && vr(bd).kind == .BLEND && vp_blend_num_incoming(bd) == 2 && vp_blend_mask(bd, 1) == hm &&
+                   vp_blend_incoming(bd, 0) == pd { cond_select = vp_blend_incoming(bd, 1); matched = true; }
+            }
+            if !matched return false;
+        }
+        cond: Vp_Val = NONE; op1: Vp_Val = NONE; op2: Vp_Val = NONE;
+        sel_r := vp_def(cond_select);
+        oks, c, t, f := vpm_select(cond_select);
+        if oks { cond = c; op1 = t; op2 = f; }
+        else {
+            if sel_r == NONE || vr(sel_r).kind != .BLEND return false;
+            n_data := 0;
+            for k: 0..vp_blend_num_incoming(sel_r) - 1 {
+                inc := vp_blend_incoming(sel_r, k);
+                if inc != pd { n_data += 1; cond = vp_blend_mask(sel_r, k); op1 = inc; op2 = pd; }
+            }
+            if n_data != 1 return false;
+        }
+        rdx_result: Vp_Rec = NONE;
+        for u: vv(backedge_select).users if vp_is_vpi(u, VPI_COMPUTE_REDUCTION_RESULT) { rdx_result = u; break; }
+        assert(rdx_result != NONE, "Could not find reduction result");
+        ab := vpb_after(phir);
+        mask_phi := vp_new_single_def(.WIDEN_PHI, .[vp_false()], type_int(1), NONE, NONE);
+        vpb_insert(*ab, mask_phi);
+        b := vpb_before(sel_r);
+        if op1 == pd {
+            t2 := op1; op1 = op2; op2 = t2;
+            cond = vr(vpb_not(*b, cond)).def;
+        }
+        assert(op2 == pd, "data value must be selected if Cond is true");
+        if hm != NONE cond = vr(vpb_logical_and(*b, hm, cond)).def;
+        any_of := vpb_nary(*b, VPI_ANY_OF, .[cond]);
+        mask_select := vpb_select(*b, vr(any_of).def, cond, vr(mask_phi).def);
+        vp_add_operand(mask_phi, vr(mask_select).def);
+        data_select := vpb_select(*b, vr(any_of).def, op1, op2, vr(sel_r).dl);
+        vp_rauw(vr(sel_r).def, vr(data_select).def);
+        vp_set_operand(phir, 1, vr(data_select).def);
+        vp_erase_recipe(sel_r);
+        rb := vpb_before(rdx_result);
+        ela := vpb_nary(*rb, VPI_EXTRACT_LAST_ACTIVE, .[vp_op(phir, 0), vr(data_select).def, vr(mask_select).def], .{}, .[], vr(rdx_result).dl,
+                        "", vp_scalar_type(vr(data_select).def));
+        vp_rauw(vr(rdx_result).def, vr(ela).def);
+        vp_erase_recipe(rdx_result);
+    }
+    return true;
+}
+
+// optimizeFindIVReductions' checks: true when the transform would rewrite the FindLast reduction PhiR
+vp_find_iv_reduction_applies :: (phir: Vp_Rec, pse: *Pse, l: Loop_Id) -> bool {
+    pd := vr(phir).def;
+    pty := vp_scalar_type(pd);
+    if type_kind(pty) == .PTR || is_fp_type(pty) return false;
+    hm := vb(vp_vector_loop_region()).header_mask;
+    backedge := vp_op(phir, 1);
+    fls := backedge;
+    if hm != NONE {
+        oks, c, t, f := vpm_select(backedge);
+        if !oks || c != hm || f != pd || vp_def(t) == NONE return false;
+        fls = t;
+    }
+    // m_SelectLike(Cond, PhiR, Expr) or m_SelectLike(Cond, Expr, PhiR)
+    expr: Vp_Val = NONE;
+    oks, c, t, f := vpm_select(fls);
+    if oks {
+        if t == pd expr = f; else if f == pd expr = t;
+    } else {
+        bd := vp_def(fls);
+        if bd != NONE && vr(bd).kind == .BLEND && vp_blend_num_incoming(bd) == 2 {
+            tv := vp_blend_incoming(bd, 1); fv := vp_blend_incoming(bd, 0);
+            if tv == pd expr = fv; else if fv == pd expr = tv;
+        }
+    }
+    if expr == NONE return false;
+    // getExpressionIV
+    iv_of_expr: Vp_Val = NONE;
+    er := vp_def(expr);
+    if er != NONE && vr(er).kind == .WIDEN && vp_is_ir_opcode(vr(er).opcode) && is_binary_op(vp_ir_opcode(vr(er).opcode)) {
+        o := vp_ir_opcode(vr(er).opcode);
+        if !(o == .UDIV || o == .SDIV || o == .UREM || o == .SREM) {
+            cand := vp_op(er, 0); inv := vp_op(er, 1);
+            cd := vp_def(cand);
+            if cd == NONE || vr(cd).kind != .WIDEN_INT_OR_FP_INDUCTION { t2 := cand; cand = inv; inv = t2; }
+            cd = vp_def(cand);
+            if vp_is_defined_outside_loop_regions(inv) && cd != NONE && vr(cd).kind == .WIDEN_INT_OR_FP_INDUCTION iv_of_expr = cand;
+        }
+    }
+    ivscev := vp_scev_for_value(ifx iv_of_expr != NONE then iv_of_expr else expr, pse, l);
+    is_affine :: (s: Scev_Id) -> bool { return !sc_is_cnc(s) && sc_is_addrec(s) && sc_is_affine(s); }
+    if !is_affine(ivscev) return false;
+    step := sc_step_recurrence(ivscev);
+    if !sc_is_known_non_zero(step) return false;
+    check_sentinel :: (s: Scev_Id, use_max: bool) -> bool {
+        bw := type_bits(scalar_type(sc_type(s)));
+        for signed: bool.[true, false] {
+            sentinel: APInt;
+            if use_max sentinel = ifx signed then ap_signed_min(bw) else ap_zero(bw);
+            else sentinel = ifx signed then ap_signed_max(bw) else ap_all_ones(bw);
+            r := ifx signed then sc_signed_range(s) else sc_unsigned_range(s);
+            if !cr_contains(r, sentinel) return true;
+        }
+        return false;
+    }
+    sentinel := check_sentinel(ivscev, sc_is_known_positive(step));
+    if iv_of_expr != NONE {
+        fs := vp_scev_for_value(expr, pse, l);
+        if is_affine(fs) && check_sentinel(fs, sc_is_known_positive(sc_step_recurrence(fs))) sentinel = true;
+    }
+    if !sentinel {
+        if (sc_flags(ivscev) & (SF_NSW | SF_NUW)) == 0 return false;
+    }
+    return true;
 }

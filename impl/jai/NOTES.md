@@ -1124,7 +1124,7 @@ Still slow / known:
   CallAnalyzer::visitBinaryOperator (constant creation hashes a key per folded constant).
 
 
-## LoopVectorize (in progress; L1.vectorize.loop 283/468 opt, 468/468 roundtrip)
+## LoopVectorize (in progress; L1.vectorize.loop 285/468 opt, 468/468 roundtrip)
 
 - Files: `iv_descriptors.jai` (IVDescriptors.cpp), `lv_legality.jai` (LoopVectorizationLegality, LoopVectorizeHints,
   isDereferenceableAndAlignedInLoop), `lv_pass.jai` (runImpl / processLoop, computeMaxVF, collectValuesToIgnore, every
@@ -1179,9 +1179,10 @@ Still slow / known:
    "hasUnsupportedHeaderPhiRecipe"): selectBestEpiloguePlan over ProfitableVFs (already collected by computeBestVF),
    preparePlanForMainVectorLoop / preparePlanForEpilogueVectorLoop, addIterationCountCheckBlock, the two executePlan
    runs and connectEpilogueVectorLoop. AVX targets reach it often (VF * IC >= 16).
-2. FindLast reductions (18, handleFindLastReductions: mask phi + ExtractLastActive) and the other reduction kinds:
-   FindIV (optimizeFindIVReductions), in-loop / ordered reductions (6: createInLoopReductionRecipes,
-   VPReductionRecipe, getReductionPatternCost), handleMultiUseReductions (3).
+2. Reductions: FindLast reductions of inductions (optimizeFindIVReductions: the sentinel min/max / AnyOf rewrite;
+   its applicability check is ported and fails loudly; handleFindLastReductions itself is ported), in-loop / ordered
+   reductions (6: createInLoopReductionRecipes, VPReductionRecipe, getReductionPatternCost),
+   handleMultiUseReductions (10).
 3. Outer loops (18, VPlan-native path), scalable VFs (13), uncountable early exits (5), replaceSymbolicStrides (8),
    convertToStridedAccesses (6), -force-partial-aliasing-vectorization (4), VFDatabase variants (8), -vector-library.
 4. Tail folding leftovers: active lane masks (-force-tail-folding-style=data*), EVL, m_HeaderMask on materialized

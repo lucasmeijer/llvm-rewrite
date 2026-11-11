@@ -2685,6 +2685,7 @@ INTRINSIC_ATTRS :: Intrinsic_Attrs.[
     .{"llvm.experimental.memset.pattern", "nocallback nofree nosync nounwind willreturn memory(argmem: write)", "", .["writeonly captures(none)", "", "", "immarg"]},
     .{"llvm.experimental.noalias.scope.decl", "nocallback nofree nosync nounwind willreturn memory(inaccessiblemem: readwrite)", "", .[""]},
     .{"llvm.experimental.patchpoint.void", "", "", .["immarg", "immarg", "", "immarg"]},
+    .{"llvm.experimental.vector.extract.last.active", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .["", "", ""]},
     .{"llvm.experimental.vp.reverse", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .["", "", ""]},
     .{"llvm.experimental.widenable.condition", "nocallback nofree nosync nounwind speculatable willreturn memory(inaccessiblemem: readwrite)", "noundef", .[]},
     .{"llvm.fabs", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},

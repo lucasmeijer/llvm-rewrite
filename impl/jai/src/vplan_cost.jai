@@ -340,7 +340,12 @@ vp_instruction_cost :: (c: *Vp_Cost_Ctx, r: Vp_Rec, vf: Ec) -> Cost {
         sty := vp_scalar_type(vp_op(r, 0));
         if ec_is_scalar(vf) return lt_cmp_sel_cost(t, .ICMP, sty, lv_cmp_result_type(sty), ICMP_EQ, kind);
         vp_unported("cttz.elts costs (First/LastActiveLane)");
-    case VPI_EXTRACT_LAST_ACTIVE; vp_unported("extract.last.active costs");
+    case VPI_EXTRACT_LAST_ACTIVE;
+        sty := vp_scalar_type(vr(r).def);
+        vty := lv_to_vector_ty(sty, vf);
+        mty := lv_to_vector_ty(type_int(1), vf);
+        a := ica_types(iidn("llvm.experimental.vector.extract.last.active"), sty, .[vty, mty, sty]);
+        return lt_intrinsic_cost(t, *a, kind);
     case VPI_FIRST_ORDER_RECURRENCE_SPLICE;
         vty := lv_to_vector_ty(vp_scalar_type(vr(r).def), vf);
         return lv_tti_shuffle(t, SK_SPLICE, vty, kind, -1);

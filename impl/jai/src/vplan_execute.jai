@@ -281,6 +281,17 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             return irb_intrinsic(*s.b, "llvm.vector.reduce.or", .[vtype(res)], .[res]);
         case VPI_RESUME_FOR_EPILOGUE;
             return vs_get(s, vp_op(r, 0), true);
+        case VPI_EXTRACT_LAST_ACTIVE;
+            res := vs_get(s, vp_op(r, 0), true);
+            k := 1;
+            while k < vp_nops(r) {
+                data := vs_get(s, vp_op(r, k));
+                mask := vs_get(s, vp_op(r, k + 1));
+                if ec_is_scalar(s.vf) res = vs_select(s, mask, data, res, 0);
+                else res = irb_intrinsic(*s.b, "llvm.experimental.vector.extract.last.active", .[vtype(data)], .[data, mask, res]);
+                k += 2;
+            }
+            return res;
         case VPI_FIRST_ORDER_RECURRENCE_SPLICE;
             v1 := vs_get(s, vp_op(r, 0));
             if !is_vector_type(vtype(v1)) return v1;
