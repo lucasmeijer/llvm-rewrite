@@ -26,6 +26,7 @@ fn main() {
         // opt accepts --x as well as -x
         if starts_with(a, "--") && a.len > 2 { a = a[1..]; }
         if a == "-S" { emit_text = true; }
+        else if a == "-f" { }   // -f: write binary output to a terminal (no effect on -S)
         else if a == "-disable-output" { disable_output = true; }
         else if a == "-goose-layout-stats" { layout_stats = true; }
         else if a == "-o" { i++; if i < av.len { output.clear(); output.append(av[i]); } }
@@ -47,6 +48,8 @@ fn main() {
         else if a == "-mtriple" { i++; if i < av.len { triple_normalize(av[i], cl_mtriple); } }
         // cl::opt<std::string> (ValueRequired): "-aa-pipeline basic-aa" takes the next argument
         else if a == "-aa-pipeline" { i++; if i < av.len { flag_set("aa-pipeline", av[i]); } }
+        // cl::list<std::string> / cl::opt<std::string>: "-x v" takes the next argument (Internalize.cpp)
+        else if a == "-internalize-public-api-list" || a == "-internalize-public-api-file" { i++; if i < av.len { flag_set(a[1..], av[i]); } }
         // TargetLibraryInfo options (optdriver.cpp): cl::list, "-x=v" or "-x v"
         else if a == "-disable-simplify-libcalls" { tli_cl_disable_all = true; }
         else if starts_with(a, "-disable-builtin=") { tli_cl_disable.append(a[17..]); tli_cl_disable.push('\n'); }

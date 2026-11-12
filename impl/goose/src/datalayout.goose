@@ -14,6 +14,7 @@ var dl_struct_pref: i64 = 8;
 var dl_stack_align: i64 = 0;
 var dl_vec_elem_aligned: bool = false;
 var dl_prog_as: i64 = 0;      // P<n>: program address space (functions, calls)
+var dl_alloca_addr_space: i64 = 0;   // A<n>: alloca address space
 var dl_native: i64[>..<];          // "n" legal integer widths
 var dl_nonintegral: i64[>..<];     // "ni" address spaces
 var dl_unstable: i64[>..<];        // "pu<AS>": unstable pointer representation
@@ -59,6 +60,7 @@ fn dl_reset() {
     dl_struct_abi = 1;
     dl_struct_pref = 8;
     dl_prog_as = 0;
+    dl_alloca_addr_space = 0;
 }
 
 fn parse_num(s: const u8[:]) -> i64 {
@@ -136,6 +138,8 @@ fn dl_parse(s: const u8[:]) {
             if pe { dl_extstate.push(as_); }
         } else if c == 'P' {
             dl_prog_as = parse_num(part[1..]);
+        } else if c == 'A' {
+            dl_alloca_addr_space = parse_num(part[1..]);
         } else if c == 'n' && part.len > 1 && part[1] == 'i' {
             // ni:AS:AS...
             var st = 3;

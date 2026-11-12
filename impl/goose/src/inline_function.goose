@@ -1833,7 +1833,7 @@ fn cb_add_fn_attr_enum(c: i32, kind: i64) {
     }
     insts[ii].attrs = alist_get(sets);
 }
-fn dl_alloca_as() -> i64 { 0 }
+fn dl_alloca_as() -> i64 { dl_alloca_addr_space }
 // Function::setPersonalityFn: the hung-off operands [personality, prefix, prologue] are allocated on first use
 fn if_set_personality(f: i32, p: i32) {
     if vals[f].nops < 3 { while vals[f].nops < 3 { add_op_slot(f); } }

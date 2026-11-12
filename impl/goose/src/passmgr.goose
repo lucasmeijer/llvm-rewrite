@@ -74,6 +74,9 @@ import function_attrs;
 import psi;
 import loop_unroll_pass;
 import simple_loop_unswitch_nt;
+import ipo_globals;
+import ipo_args;
+import globalopt;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -100,6 +103,15 @@ let P_INVALIDATE_PSI = 17;
 let P_REQUIRE_LCG = 18;
 let P_INVALIDATE_LCG = 19;
 let P_NORECURSE_LTO = 20;
+let P_STRIP_DEAD_PROTOTYPES = 21;
+let P_ELIM_AVAIL_EXTERN = 22;
+let P_CONSTMERGE = 23;
+let P_GLOBALDCE = 24;           // arg: 1 = vfe-linkage-unit-visibility (InLTOPostLink)
+let P_GLOBALOPT = 25;
+let P_DEADARGELIM = 26;
+let P_DEADARGHAX = 27;          // deadarghaxor (DeadArgumentEliminationSAPass)
+let P_INTERNALIZE = 28;
+let P_ASSIGN_GUID = 29;
 // CGSCC passes
 let P_FUNCTION_ATTRS = 300;     // arg: 1 = skip-non-recursive-function-attrs
 let P_INLINE = 301;             // arg: 1 = only-mandatory
@@ -187,6 +199,12 @@ let PASS_TABLE: const u8[:][] = [
     "m:inliner-wrapper:14:0",
     "m:rpo-function-attrs:15:0",
     "m:norecurse-lto-inference:20:0",
+    "m:strip-dead-prototypes:21:0",
+    "m:elim-avail-extern:22:0",
+    "m:constmerge:23:0",
+    "m:assign-guid:29:1",
+    "m:deadargelim:26:0",
+    "m:globalopt:25:0",
     "f:reassociate:260:0",
     "f:constraint-elimination:261:0",
     "f:aggressive-instcombine:262:0",
@@ -280,6 +298,15 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_INLINER_WRAPPER => "ModuleInlinerWrapperPass",
         P_RPO_FUNCTION_ATTRS => "ReversePostOrderFunctionAttrsPass",
         P_NORECURSE_LTO => "NoRecurseLTOInferencePass",
+        P_STRIP_DEAD_PROTOTYPES => "StripDeadPrototypesPass",
+        P_ELIM_AVAIL_EXTERN => "EliminateAvailableExternallyPass",
+        P_CONSTMERGE => "ConstantMergePass",
+        P_GLOBALDCE => "GlobalDCEPass",
+        P_GLOBALOPT => "GlobalOptPass",
+        P_DEADARGELIM => "DeadArgumentEliminationPass",
+        P_DEADARGHAX => "DeadArgumentEliminationSAPass",
+        P_INTERNALIZE => "InternalizePass",
+        P_ASSIGN_GUID => "AssignGUIDPass",
         P_PRINT_LCG => "LazyCallGraphPrinterPass",
         P_LOOP_UNROLL => "LoopUnrollPass",
         _ => "Pass",
@@ -974,6 +1001,40 @@ recursive fn parse_module_elem(e: i32) -> i32 {
         } else { pnodes[ad].first = last; }
         return ad;
     }
+    if is_param_name(name, "globaldce") {
+        // parseGlobalDCEPassOptions: vfe-linkage-unit-visibility
+        var arg: i32 = 0;
+        if name != "globaldce" {
+            let ps = name[10..name.len - 1];
+            var st: i64 = 0;
+            for j in 0..ps.len + 1 {
+                if j < ps.len && ps[j] != ';' { continue; }
+                let pn = ps[st..j];
+                st = j + 1;
+                if pn == "vfe-linkage-unit-visibility" { arg = 1; }
+                else { perr_pipeline(str("invalid GlobalDCE pass parameter '", pn, "'")); }
+            }
+        }
+        return new_pnode(PK_PASS, P_GLOBALDCE as i32, arg, false, pelems[e].name);
+    }
+    if is_param_name(name, "internalize") {
+        // parseInternalizeGVs: preserve-gv=NAME (any number); with none, the -internalize-public-api-* lists
+        var arg: i32 = -1;
+        if name != "internalize" {
+            let ps = name[12..name.len - 1];
+            var st: i64 = 0;
+            arg = ints.len as i32;
+            ints.push(0);
+            for j in 0..ps.len + 1 {
+                if j < ps.len && ps[j] != ';' { continue; }
+                let pn = ps[st..j];
+                st = j + 1;
+                if starts_with(pn, "preserve-gv=") { ints.push(intern(pn[12..])); ints[arg] = ints[arg] + 1; }
+                else { perr_pipeline(str("invalid Internalize pass parameter '", pn, "'")); }
+            }
+        }
+        return new_pnode(PK_PASS, P_INTERNALIZE as i32, arg, false, pelems[e].name);
+    }
     let r = pass_row(name, 'm');
     if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
     // module VerifierAnalysis: nothing to compute (no verifier yet; the harness verifies our output)
@@ -1395,6 +1456,40 @@ recursive fn run_module_node(n: i32, m: i32) {
     if p == P_DEBUGIFY { lcg_invalidate(); debugify_run(m); invalidate_module_functions(m, PA_CFG); return; }
     if p == P_CHECK_DEBUGIFY { check_debugify_run(m); return; }
     if p == P_INVALIDATE_GLOBALS_AA { gm_invalidate(); return; }
+    if p == P_ASSIGN_GUID { assign_guid_run(m); return; }
+    if p == P_GLOBALOPT {
+        if globalopt_run(m) {
+            gm_invalidate();
+            // PreservedAnalyses::none() + FunctionAnalysisManagerModuleProxy + CFGAnalyses
+            module_invalidate(m, PA_CFG);
+        }
+        ap_pool_reset();
+        return;
+    }
+    if p == P_DEADARGELIM || p == P_INTERNALIZE {
+        var changed = false;
+        if p == P_DEADARGELIM { changed = deadargelim_run(m); }
+        else {
+            in_preserve_gv.clear();
+            let a = pnodes[n].arg;
+            in_has_preserve_param = a >= 0 && ints[a] > 0;
+            if a >= 0 { for k in ints[a] as i64 { in_preserve_gv.push(ints[a + 1 + k]); } }
+            changed = internalize_run(m);
+        }
+        if changed { gm_invalidate(); module_invalidate(m, PA_NONE); }
+        ap_pool_reset();
+        return;
+    }
+    if p == P_STRIP_DEAD_PROTOTYPES || p == P_ELIM_AVAIL_EXTERN || p == P_CONSTMERGE || p == P_GLOBALDCE {
+        var changed = false;
+        if p == P_STRIP_DEAD_PROTOTYPES { changed = strip_dead_prototypes_run(m); }
+        else if p == P_ELIM_AVAIL_EXTERN { changed = elim_avail_extern_run(m); }
+        else if p == P_CONSTMERGE { changed = constmerge_run(m); }
+        else { gd_in_lto_post_link = pnodes[n].arg != 0; changed = globaldce_run(m); }
+        if changed { gm_invalidate(); module_invalidate(m, PA_NONE); }
+        ap_pool_reset();
+        return;
+    }
     fatal("internal: unknown module pass id");
 }
 

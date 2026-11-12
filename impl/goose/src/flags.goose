@@ -34,6 +34,10 @@ let KNOWN_FLAGS: const u8[:][] = [
     "jump-threading-threshold", "jump-threading-implication-search-threshold",   // read by jump-threading
     "jump-threading-phi-threshold", "jump-threading-across-loop-headers",
     "max-phi-entries-increase-after-removing-empty-block",   // read by simplifycfg (Local.cpp)
+    "emulated-tls",                                      // codegen (TargetOptions): no effect on IR passes
+    "enable-coldcc-stress-test", "coldcc-rel-freq", "optimize-non-fmv-callers", "max-ifunc-versions",   // globalopt
+    "internalize-public-api-list", "internalize-public-api-file",
+    "enable-vfe", "avail-extern-to-local", "avail-extern-gv-in-addrspace-to-local",   // globaldce, elim-avail-extern
     "sroa-skip-mem2reg",                                 // read by sroa
     "aa-pipeline",                                       // the AAManager pipeline (aa.goose)
     "print-all-alias-modref-info", "print-no-aliases", "print-may-aliases", "print-partial-aliases",

@@ -9,6 +9,8 @@ import gen_attrs;
 import tli;
 import dinfo;
 import sccp;
+import constfold;
+import parser;
 
 fn gv_linkage(v: i32) -> i64 { globs[glob_of(v)].linkage as i64 }
 fn gv_has_local_linkage(v: i32) -> bool { let l = gv_linkage(v); l == LK_INTERNAL || l == LK_PRIVATE }
@@ -79,13 +81,25 @@ fn ipo_kill_dead_blockaddresses(f: i32) {
         let us = uses[bu].user;
         let nx = use_next(bu);
         if vals[us].kind == VK_BLOCKADDR {
-            if first_use(us) >= 0 { fatal("internal: erasing a function whose blockaddress is still used"); }
+            // a blockaddress that is still used is replaced when its block goes (ipo_drop_block_addresses)
+            if first_use(us) >= 0 { bu = nx; continue; }
             drop_all_refs(us);
             vals[us].kind = VK_DEAD;
             bu = first_use(f);
             continue;
         }
         bu = nx;
+    }
+}
+// ~BasicBlock with its address taken: the blockaddress is replaced by `inttoptr (i32 1 to ptr)` and destroyed
+fn ipo_drop_block_addresses(b: i32) {
+    while first_use(b) >= 0 {
+        let ba = uses[first_use(b)].user;
+        if vals[ba].kind != VK_BLOCKADDR { return; }
+        rauw_with_constants(ba, ce_cast(OP_INTTOPTR, c_int(T_I32, 1), vals[ba].ty));
+        cst_remove(ba);
+        drop_all_refs(ba);
+        vals[ba].kind = VK_DEAD;
     }
 }
 
@@ -99,7 +113,7 @@ fn func_erase_from_parent(f: i32) {
     }
     ipo_kill_dead_blockaddresses(f);
     b = func_first_block(f);
-    while b >= 0 { let nb = block_next(b); block_erase(b); b = nb; }
+    while b >= 0 { let nb = block_next(b); ipo_drop_block_addresses(b); block_erase(b); b = nb; }
     sc_remove_dead_constant_users(f);   // ~GlobalValue
     if first_use(f) >= 0 { fatal("internal: erasing a function that still has uses"); }
     if f < val_vam.len && val_vam[f] >= 0 { vam_handle_deletion(f); }
@@ -121,7 +135,7 @@ fn func_drop_all_references(f: i32) {
     }
     ipo_kill_dead_blockaddresses(f);
     b = func_first_block(f);
-    while b >= 0 { let nb = block_next(b); block_erase(b); b = nb; }
+    while b >= 0 { let nb = block_next(b); ipo_drop_block_addresses(b); block_erase(b); b = nb; }
 }
 
 // makeFunctionBodyUnreachable (Inliner.cpp): drop the body, then one block with `unreachable`

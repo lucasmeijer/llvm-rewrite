@@ -371,16 +371,22 @@ fn strip_and_accumulate_offsets(v0: i32, allow_non_inbounds: bool, allow_invaria
         if o == OP_GEP {
             if !allow_non_inbounds && (gep_flags(v) & GEP_INBOUNDS) == 0 { return v; }
             // Only scalar pointer base
-            let ok, off = gep_accumulate_constant_offset(v);
+            let ok, off0 = gep_accumulate_constant_offset(v);
             if !ok { return v; }
-            // GEPOffset must fit the index width (APInt arithmetic wraps)
+            // GEPOffset is computed at the GEP's own index width (an addrspacecast may have been stripped);
+            // stop if it does not fit the width of Offset, else sextOrTrunc it (APInt arithmetic wraps)
+            let gw = dl_ptr(ptr_as(vals[v].ty)).idx;
+            var off = off0;
+            if gw != bitw {
+                if gw > 64 { vt_not_ported("index widths over 64 bits"); }
+                off = sext64((off0 as! u64) & wmask64(gw), gw);
+                // getSignificantBits(GEPOffset) > BitWidth
+                if bitw < 64 && (off < -(1 << (bitw - 1)) || off >= (1 << (bitw - 1))) { return v; }
+            }
             vt_off = sext64(((vt_off + off) as! u64) & wmask64(bitw), bitw);
             v = op(v, 0);
         } else if o == OP_BITCAST || o == OP_ADDRSPACECAST {
-            if o == OP_ADDRSPACECAST {
-                let nb = dl_ptr(ptr_as(vals[op(v, 0)].ty)).idx;
-                if nb != bitw { vt_not_ported("addrspacecast between index widths"); }
-            }
+            if o == OP_BITCAST && !is_ptr_or_ptr_vec(vals[op(v, 0)].ty) { return v; }
             v = op(v, 0);
         } else if vals[v].kind == VK_ALIAS {
             let l = globs[glob_of(v)].linkage as i64;
