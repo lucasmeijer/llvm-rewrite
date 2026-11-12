@@ -11,6 +11,7 @@
 // lists per entry, each a run of `slp_vp`). A run that changes length is re-allocated at the end of its pool. All
 // pools are per tree (deleteTree truncates them). Value-keyed maps are slots of slp_util.goose's hash table.
 import std;
+import assume;
 import ir;
 import irutil;
 import calls;
@@ -415,11 +416,10 @@ fn slp_collect_ephemeral_values(f: i32) {
             if is_inst(o) && !inst_may_have_side_effects(o) && !is_terminator(o) { wl.push(o); }
         }
     }
-    var cell = ia_assumptions_first(f);
-    while cell >= 0 {
-        let a = ia_ac_val[cell];
-        cell = ia_ac_next[cell];
-        if is_dead(a) || inst_func(a) != f { continue; }
+    var asms: i32[>..<] = [];
+    ac_assumptions(f, asms);     // the function's AssumptionCache (assume.goose)
+    for a in asms {
+        if inst_func(a) != f { continue; }
         if sh_add(SH_EPH, a as i64, 0) { slp_has_eph = true; append_ops(a); }
     }
     var k: i64 = 0;
