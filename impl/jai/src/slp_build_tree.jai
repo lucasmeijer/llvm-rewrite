@@ -117,15 +117,22 @@ slp_in_user_ignore_list :: (v: Value_Id) -> bool {
 
 // ---------------------------------------------------------------- deleteTree / buildTree
 
+// DenseMap::clear: keeps the buckets unless the map is sparse (then shrink_and_clear). Regrowing a temp-allocated
+// table from scratch for every tree of a long seed list was most of the time on large blocks (diamonds/n8000).
+slp_table_clear :: (t: *$T/Table) {
+    if t.count * 4 < t.allocated && t.allocated > 64 table_reset(t);
+    else table_reset_keeping_memory(t);
+}
+
 slp_delete_tree :: () {
     array_reset_keeping_memory(*slp.entries);
-    table_reset(*slp.scalar_to_tree_entries);
-    table_reset(*slp.deleted_nodes);
-    table_reset(*slp.transformed_to_gather_nodes);
-    table_reset(*slpx.operands_to_tree_entry);
-    table_reset(*slpx.scalars_in_split_nodes);
-    table_reset(*slp.must_gather);
-    table_reset(*slpx.non_scheduled_first);
+    slp_table_clear(*slp.scalar_to_tree_entries);
+    slp_table_clear(*slp.deleted_nodes);
+    slp_table_clear(*slp.transformed_to_gather_nodes);
+    slp_table_clear(*slpx.operands_to_tree_entry);
+    slp_table_clear(*slpx.scalars_in_split_nodes);
+    slp_table_clear(*slp.must_gather);
+    slp_table_clear(*slpx.non_scheduled_first);
     array_reset_keeping_memory(*slpx.load_entries_to_vectorize);
     slpx.is_graph_transform_mode = false;
     slpx.gathered_loads_first = -1;
@@ -133,10 +140,10 @@ slp_delete_tree :: () {
     slpx.base_graph_size = 1;
     slpx.has_cast_max_min_bw = false;
     array_reset_keeping_memory(*slpx.extra_bitwidth_nodes);
-    table_reset(*slpx.instr_element_size);
+    slp_table_clear(*slpx.instr_element_size);
     slpx.has_user_ignore_list = false;
     slpx.user_ignore_list = .[];
-    table_reset(*slpx.value_to_gather_nodes);
+    slp_table_clear(*slpx.value_to_gather_nodes);
     array_reset_keeping_memory(*slpx.current_loop_nest);
     array_reset_keeping_memory(*slpx.merged_loop_btcs);
     slp_delete_tree_later_state();
@@ -1318,7 +1325,8 @@ slp_build_tree_rec :: (vl_ref: [] Value_Id, depth: u32, ei: Edge_Info, interleav
     bb := inst_block(vl0);
     bs := slp_block_sched(bb);
     uniques: [..] Value_Id; uniques.allocator = temp;
-    for v: vl { dup := false; for uniques if it == v { dup = true; break; } if !dup array_add(*uniques, v); }
+    seen_u: Table(Value_Id, bool); seen_u.allocator = temp;
+    for v: vl { if !table_contains(*seen_u, v) { table_set(*seen_u, v, true); array_add(*uniques, v); } }
     has_bundle, bundle := bs_try_schedule_bundle(bs, uniques, s, ei);
     if !has_bundle {
         if is_alt_shuffle(s) && reuse.count == 0 && try_split_node(vl, s, depth, ei) return;

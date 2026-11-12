@@ -83,9 +83,9 @@ slp_block_sched :: (bb: Value_Id) -> *Block_Sched {
 
 // clear()
 bs_clear :: (bs: *Block_Sched) {
-    table_reset(*bs.scheduled_bundles);
+    slp_table_clear(*bs.scheduled_bundles);
     array_reset_keeping_memory(*bs.bundles);
-    table_reset(*bs.cd_map); table_reset(*bs.cd_by_inst); table_reset(*bs.cd_by_inst_user); table_reset(*bs.cd_by_users);
+    slp_table_clear(*bs.cd_map); slp_table_clear(*bs.cd_by_inst); slp_table_clear(*bs.cd_by_inst_user); slp_table_clear(*bs.cd_by_users);
     array_reset_keeping_memory(*bs.ready);
     array_reset_keeping_memory(*bs.recalc_copyable);
     bs.schedule_start = NONE;
