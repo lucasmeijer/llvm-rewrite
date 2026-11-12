@@ -319,6 +319,8 @@ Pass_Kind :: enum u8 {
     // CoroConditionalWrapper; LoopInterchange (pass_loop_interchange.jai), ExpandMemCmp (pass_expand_memcmp.jai),
     // ControlHeightReduction (pass_chr.jai)
     INLINER_WRAPPER_PM; EXTRA_LOOP_UNSWITCH; CORO_COND; LOOP_INTERCHANGE; EXPAND_MEMCMP; CHR;
+    // DependenceAnalysis (dependence_analysis.jai), Delinearization and SCEVDivision (delinearization.jai)
+    PRINT_DA; PRINT_DELINEARIZATION; PRINT_SCEV_DIVISION;
 }
 
 Pass_Info :: struct {
@@ -436,6 +438,11 @@ PASS_TABLE :: Pass_Info.[
     .{"print<iv-users>", .LOOP, .PRINT_IV_USERS, true, .SCEV},
     .{"require<iv-users>", .LOOP, .REQUIRE_IV_USERS, true, .SCEV},
     .{"print<access-info>", .FUNCTION, .PRINT_ACCESS_INFO, true, .SCEV},
+    .{"print<da>", .FUNCTION, .PRINT_DA, true, .SCEV},
+    .{"print<da><normalized-results>", .FUNCTION, .PRINT_DA, true, .SCEV},
+    .{"require<da>", .FUNCTION, .REQUIRE, true, .SCEV},   // DependenceInfo itself keeps nothing; it needs AA, SCEV, LoopInfo
+    .{"print<delinearization>", .FUNCTION, .PRINT_DELINEARIZATION, true, .SCEV},
+    .{"print<scev-division>", .FUNCTION, .PRINT_SCEV_DIVISION, true, .SCEV},
     .{"loop-load-elim", .FUNCTION, .LOOP_LOAD_ELIM, false, .SCEV},
     .{"loop-distribute", .FUNCTION, .LOOP_DISTRIBUTE, false, .SCEV},
     .{"verify<scalar-evolution>", .FUNCTION, .VERIFY_SCEV, true, .SCEV},
@@ -1049,7 +1056,9 @@ parse_cl_opt :: (arg: string) -> bool {
     if ipo_parse_cl_opt(name, value, has_value) return true;   // cgscc_pm.jai, pass_function_attrs.jai, inliner
     if globals_parse_cl_opt(name, value, has_value) return true;   // pass_global_opt.jai, internalize, globaldce, ...
     if scalar_misc_parse_cl_opt(name, value, has_value) return true;   // scalar_misc_cl.jai (L1.scalar-misc passes)
-    if pb_parse_cl_opt(name, value, has_value) return true;   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
+    if pb_parse_cl_opt(name, value, has_value) return true;
+    if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)
+    if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {
@@ -1238,6 +1247,9 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
             return PRESERVE_ALL;
         case .PRINT_COST_MODEL; cost_model_printer_run(f); return PRESERVE_ALL;
         case .PRINT_ACCESS_INFO; return access_info_printer_run(f, node.name);
+        case .PRINT_DA; return da_printer_run(f, node.name == "print<da><normalized-results>");
+        case .PRINT_DELINEARIZATION; return delinearization_printer_run(f);
+        case .PRINT_SCEV_DIVISION; return scev_division_printer_run(f);
         case .LOOP_LOAD_ELIM; return loop_load_elim_run(f);
         case .LOOP_DISTRIBUTE; return loop_distribute_run(f);
         case .PRINT_DEMANDED_BITS;

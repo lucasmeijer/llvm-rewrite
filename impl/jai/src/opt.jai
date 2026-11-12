@@ -127,6 +127,8 @@
 #load "pass_dfa_jump_threading.jai";
 #load "pass_builder_pipelines.jai";
 #load "pass_loop_interchange.jai";
+#load "dependence_analysis.jai";
+#load "delinearization.jai";
 #load "pass_expand_memcmp.jai";
 #load "pass_chr.jai";
 #load "globals_aa.jai";

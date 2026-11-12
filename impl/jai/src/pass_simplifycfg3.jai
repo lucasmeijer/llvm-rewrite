@@ -411,6 +411,9 @@ simplifycfg_run :: (node: *Pass_Node, f: Value_Id) -> Preserved {
     dt: *Dom_Tree = null;
     if scfg_cl.require_and_preserve_domtree dt = get_domtree(f);
     if !simplify_function_cfg(f, tti, dt, *o) return PRESERVE_ALL;
+    // F.renumberBlocks(): dense numbers in layout order again; DT->updateBlockNumbers() resizes its node vector
+    fn_renumber_blocks(f);
+    if dt dt.vec_size = fn_max_block_number(f) + 1;
     pa := PRESERVE_NONE;
     if scfg_cl.require_and_preserve_domtree preserve(*pa, .DOMTREE);
     return pa;

@@ -81,6 +81,12 @@ block_number :: (b: Value_Id) -> u32 {
     assert(n != BLOCK_NUMBER_NONE);
     return n;
 }
+// Function::renumberBlocks (SimplifyCFGPass::run calls it after a change)
+fn_renumber_blocks :: (f: Value_Id) {
+    n: u32 = 0;
+    for b: fn_blocks(f) { block(b).number = n; n += 1; }
+    glob(f).next_block_num = n;
+}
 // Function::getMaxBlockNumber (after ensure_block_numbers)
 fn_max_block_number :: (f: Value_Id) -> u32 { return cast(u32) glob(f).next_block_num; }
 
