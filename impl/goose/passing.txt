@@ -12928,6 +12928,7 @@ tests/roundtrip/globals/linkage.ll::roundtrip
 tests/roundtrip/instructions/calls_and_intrinsics.ll::roundtrip
 tests/roundtrip/instructions/casts_and_fp.ll::roundtrip
 tests/roundtrip/instructions/memory_ops.ll::roundtrip
+tests/roundtrip/intrinsics/pass-created-loop-vectorize.ll::roundtrip
 tests/roundtrip/intrinsics/pass-created.ll::roundtrip
 tests/roundtrip/metadata/named_and_attached.ll::roundtrip
 tests/roundtrip/types/aggregates.ll::roundtrip
