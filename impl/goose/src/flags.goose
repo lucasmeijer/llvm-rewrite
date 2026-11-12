@@ -178,7 +178,7 @@ let KNOWN_FLAGS_LV: const u8[:][] = [
     "force-tail-folding-style", "epilogue-tail-folding-policy", "epilogue-vectorization-force-VF",
     "force-partial-aliasing-vectorization", "vectorizer-maximize-bandwidth", "vectorizer-maximize-bandwidth-for-vector-calls",
     "prefer-inloop-reductions", "force-target-max-scalar-interleave", "vplan-build-outerloop-stress-test",
-    "enable-vplan-native-path",
+    "enable-vplan-native-path", "max-interleave-group-factor",
 ];
 
 // Flags whose non-default value is not supported (checked before the pipeline runs).

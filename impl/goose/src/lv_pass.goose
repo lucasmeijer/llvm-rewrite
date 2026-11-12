@@ -43,6 +43,7 @@ import ivusers;
 import demandedbits;
 import iv_descriptors;
 import lv_legality;
+import lv_interleave;
 import lv_cm;
 import vplan;
 import vplan_construct;
@@ -198,8 +199,6 @@ fn cm_requires_scalar_epilogue(is_vectorizing: bool) -> bool {
     if is_vectorizing && iai_requires_scalar_epilogue() { return true; }
     return false;
 }
-// InterleavedAccessInfo::requiresScalarEpilogue (no groups are formed yet in this milestone)
-fn iai_requires_scalar_epilogue() -> bool { false }
 
 // setTailFoldingStyle(IsScalableVF, UserIC)
 fn cm_set_tail_folding_style(user_ic: i64) {
@@ -232,6 +231,7 @@ fn cm_collect_values_to_ignore() {
         while i >= 0 { if hm_has(iu_eph, i as u64) { hm_put(cm_vals_to_ignore, i as u64, 1); } i = inst_next(i); }
     }
     var dead_ops: i32[>..<] = [];
+    var dead_ilv_ptrs: i32[>..<] = [];
     let rse = cm_requires_scalar_epilogue(true);
     fn live_out_dead(u: i32) -> bool { rse && !loop_contains(l, inst_parent(u)) }
     fn ignored(u: i32) -> bool { hm_has(cm_vec_vals_to_ignore, u as u64) || hm_has(cm_vals_to_ignore, u as u64) }
@@ -248,10 +248,28 @@ fn cm_collect_values_to_ignore() {
                 while u >= 0 { let us = uses[u].user; if !ignored(us) && !live_out_dead(us) { all = false; } u = uses[u].next; }
                 if all { dead_ops.push(i); }
             }
-            // interleave groups: none in this milestone (isAccessInterleaved is false)
+            // interleave groups: only the insert position gets a pointer; queue the other members' addresses
+            if iai_is_interleaved(i) && ig_insert_pos(iai_group_of(i)) != i { dead_ilv_ptrs.push(laa_ldst_ptr(i)); }
             if iop(i) == OP_CONDBR { dead_ops.push(i); }
             i = inst_prev(i);
         }
+    }
+    // mark ops feeding interleave group members as free if only other dead computations use them
+    var di: i64 = 0;
+    while di < dead_ilv_ptrs.len {
+        let o = dead_ilv_ptrs[di];
+        di++;
+        if !is_inst(o) || !loop_contains(l, inst_parent(o)) { continue; }
+        var live = false;
+        var u = vals[o].first_use;
+        while u >= 0 {
+            let us = uses[u].user;
+            if !hm_has(cm_vec_vals_to_ignore, us as u64) && (!iai_is_interleaved(us) || ig_insert_pos(iai_group_of(us)) == us) { live = true; }
+            u = uses[u].next;
+        }
+        if live { continue; }
+        hm_put(cm_vec_vals_to_ignore, o as u64, 1);
+        for j in nops(o) { dead_ilv_ptrs.push(op(o, j)); }
     }
     let header = loop_header(l);
     fn is_empty_block(bb: i32) -> bool {
@@ -484,7 +502,6 @@ fn cm_compute_max_vf_impl(user_vf: i64, user_ic: i64) -> i64 {
     if tc == 0 { return 0; }
     return 0;
 }
-fn iai_invalidate_groups_requiring_scalar_epilogue() {}
 
 // tryToEnablePartialAliasMasking
 fn cm_try_to_enable_partial_alias_masking() {
@@ -538,7 +555,8 @@ fn lv_process_loop(l: i32, interleave_only_when_forced: bool, vectorize_only_whe
     // InterleavedAccessInfo: TTI->enableInterleavedAccessVectorization() is true on X86
     var use_interleaved = inner && tti_kind == TTI_X86;
     if flag_given("enable-interleaved-mem-accesses") { use_interleaved = inner && flag_bool("enable-interleaved-mem-accesses", false); }
-    if use_interleaved { lvx_unported("interleaved access analysis (InterleavedAccessInfo)"); }
+    iai_reset();
+    if use_interleaved { iai_analyze_interleaving(l, lv_pse, lv_opt_for_size, lv_use_masked_interleaved_accesses()); }
     if lvl_has_uncountable_early_exit() {
         let latch = loop_latch(l);
         for b in lvl_countable_exiting { if b != latch { return false; } }

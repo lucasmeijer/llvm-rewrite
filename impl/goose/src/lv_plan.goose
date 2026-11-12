@@ -23,6 +23,7 @@ import laa;
 import tti;
 import iv_descriptors;
 import lv_legality;
+import lv_interleave;
 import lv_cm;
 import vplan;
 import vplan_utils;
@@ -530,7 +531,7 @@ fn cm_requires_scalar_epilogue_lv(is_vectorizing: bool) -> bool {
     if !lvp_epilogue_allowed { return false; }
     let l = lvp_l;
     if lvp_exiting_block(l) != loop_latch(l) && !(flag_bool("enable-early-exit-vectorization", true) && lvl_has_uncountable_early_exit()) { return true; }
-    if is_vectorizing && iai_has_groups() { vp_unported("interleave groups requiring a scalar epilogue"); }
+    if is_vectorizing && iai_requires_scalar_epilogue() { return true; }
     return false;
 }
 fn lvp_exiting_block(l: i32) -> i32 {
@@ -538,7 +539,6 @@ fn lvp_exiting_block(l: i32) -> i32 {
     loop_exiting_blocks(l, ex);
     return if ex.len == 1 { ex[0] } else { -1 };
 }
-fn iai_has_groups() -> bool { false }
 
 // addReductionResultComputation (no reductions in this milestone)
 fn lvp_add_reduction_result_computation() {

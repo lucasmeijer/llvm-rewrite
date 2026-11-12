@@ -23,6 +23,7 @@ import tti_vec;
 import tti_x86_vec;
 import iv_descriptors;
 import lv_legality;
+import lv_interleave;
 
 // InstWidening
 let CM_UNKNOWN: i64 = 0; let CM_WIDEN: i64 = 1; let CM_WIDEN_REVERSE: i64 = 2; let CM_INTERLEAVE: i64 = 3;
@@ -155,6 +156,7 @@ fn cm_set_cost_based_widening_decision(vf: i64) {
             }
             let d = cm_memory_instruction_can_be_widened(i, vf);
             if d != CM_UNKNOWN { cm_set_widening_decision(i, vf, d, -1); i = inst_next(i); continue; }
+            if iai_is_interleaved(i) { vp_unported_cm("interleave groups (getInterleaveGroupCost)"); }
             vp_unported_cm("non-consecutive memory accesses (gather/scatter or scalarization costs)");
             i = inst_next(i);
         }

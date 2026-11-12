@@ -115,12 +115,38 @@ fn vpt_simplify_recipe(r: i32) {
         let c = vp_op(r, 1);
         if vp_is_constant_int(c) && ap_is_pow2(ci_ap(vp_ir(c))) { vp_unported("simplifying udiv by a power of two"); }
     }
-    if opc == VPI_NOT && vpm_arity_ok(r, 1) {
-        let a = vp_op(r, 0);
+    let not_a = vpm_not(def);
+    if not_a >= 0 {
+        let a = not_a;
         let ad = vp_def(a);
-        if vpm_opcode(ad, true) == VPI_NOT && vpm_arity_ok(ad, 1) { vpt_replace_all(r, vp_op(ad, 0)); return; }
+        let aa = vpm_not(a);
+        if aa >= 0 { vpt_replace_all(r, aa); return; }
         let ao = vpm_opcode(ad, true);
-        if (ao == OP_ICMP as i32 || ao == OP_FCMP as i32) && vpm_arity_ok(ad, 2) { vp_unported("folding not into a compare"); }
+        if (ao == OP_ICMP as i32 || ao == OP_FCMP as i32) && vpm_arity_ok(ad, 2) {
+            var all = true;
+            for j in vp_num_users(a) {
+                let u = vp_user(a, j);
+                let uv = vpr[u].def;
+                if uv < 0 { all = false; break; }
+                let is_not = vpm_not(uv) == a;
+                let oks, sc, st, sf = vpm_select(uv);
+                if !(is_not || (oks && sc == a)) { all = false; break; }
+            }
+            if all {
+                let p = vpr[ad].f.pred as i64;
+                let ip = if ao == OP_FCMP as i32 { 15 - p } else { pred_inverse_vpt(p) };
+                vpr[ad].f.pred = ip as u8;
+                var users: i32[>..<] = [];
+                vp_users(a, users);
+                for u in users {
+                    let uv = vpr[u].def;
+                    let oks, sc, st, sf = vpm_select(uv);
+                    if oks && sc == a { vp_set_operand(u, 1, sf); vp_set_operand(u, 2, st); }
+                    else { vp_rauw(uv, a); }
+                }
+                if vpr[ad].dl < 0 && vpr[r].dl >= 0 { vpr[ad].dl = vpr[r].dl; }
+            }
+        }
     }
     if opc == VPI_ANY_OF { vp_unported("simplifying any-of"); }
     if k == VPR_DERIVED_IV {
@@ -966,3 +992,10 @@ fn vpt_sink_predicated_stores() {}
 fn vpt_truncate_to_minimal_bitwidths() {}
 fn vpt_narrow_interleave_groups() {}
 fn vpt_materialize_header_mask() { if vpb[vp_vector_loop_region()].header_mask >= 0 { vp_unported("materializeHeaderMask"); } }
+
+fn pred_inverse_vpt(p: i64) -> i64 {
+    if p == 32 { return 33; } if p == 33 { return 32; }
+    if p == 34 { return 37; } if p == 35 { return 36; } if p == 36 { return 35; } if p == 37 { return 34; }
+    if p == 38 { return 41; } if p == 39 { return 40; } if p == 40 { return 39; } if p == 41 { return 38; }
+    return p;
+}

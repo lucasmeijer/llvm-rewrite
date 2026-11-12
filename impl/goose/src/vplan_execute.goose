@@ -593,7 +593,9 @@ fn vts_connect_to_predecessors(vpbb: i32) {
 fn vts_execute_ir_block(b: i32) {
     let irbb = vpb[b].irbb;
     if pred_count(irbb) == 0 && block_nsucc(irbb) == 0 { block_move_after(irbb, vts_prev_bb); }
+    // IRBuilder::SetInsertPoint(Instruction) also takes the instruction's debug location
     vxb_set_before(block_terminator(irbb));
+    vxb_dl = inst_get_md(block_terminator(irbb), 0);
     vts_prev_bb = irbb;
     hm_put(vts_bb, b as u64, irbb as i64);
     vts_execute_recipes(b);
@@ -617,6 +619,7 @@ fn vts_execute_basic_block(b: i32) {
     vxb_set_end(new_bb);
     let term = create_inst(OP_UNREACHABLE, T_VOID, []);
     block_append_inst(new_bb, term);
+    if vxb_dl >= 0 { inst_set_md(term, 0, vxb_dl); }
     vxb_set_before(term);
     vts_prev_bb = new_bb;
     hm_put(vts_bb, b as u64, new_bb as i64);
