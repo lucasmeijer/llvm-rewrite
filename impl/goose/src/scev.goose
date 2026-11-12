@@ -416,8 +416,22 @@ recursive fn scev_reset() {
     sc_side_grow();
 }
 
+// LLVM keeps one ScalarEvolution per function in the FunctionAnalysisManager; we keep only the current one. A
+// result that a transform kept up to date (preserved it while changing the IR: indvars, loop-rotate, ...) is not
+// what a recomputation gives (cached trip counts in terms of the old values, inferred flags), so when another
+// function's result replaces such a result and the first function asks again while LLVM would still have it
+// cached (function(loop(indvars)),function(loop-unroll)), we fail loudly instead of answering from scratch.
+var sc_dirty: bool = false;           // the current result survived an IR change
+var sc_lost: i32[>..<];               // functions whose (dirty) result LLVM would still have
+fn scev_note_preserved_change(fv: i32) { if sc_valid && sc_fv == fv { sc_dirty = true; } }
+
 recursive fn scev_get(fv: i32) {
     if sc_valid && sc_fv == fv { return; }
+    if sc_valid && sc_dirty { sc_lost.push(sc_fv); }
+    for x in sc_lost {
+        if x == fv { fatal("ScalarEvolution: this function's result was kept up to date by a transform and LLVM would reuse it across function adaptors; one ScalarEvolution per function is not ported yet"); }
+    }
+    sc_dirty = false;
     sc_read_flags();
     scev_reset();
     sc_fv = fv;
@@ -427,7 +441,11 @@ recursive fn scev_get(fv: i32) {
     sc_init_has_guards(fv);
 }
 recursive fn scev_valid(fv: i32) -> bool { sc_valid && sc_fv == fv }
-recursive fn scev_invalidate(fv: i32) { if sc_fv == fv { sc_valid = false; } }
+recursive fn scev_invalidate(fv: i32) {
+    if sc_fv == fv { sc_valid = false; sc_dirty = false; }
+    var k: i64 = 0;
+    while k < sc_lost.len { if sc_lost[k] == fv { sc_lost[k] = sc_lost[sc_lost.len - 1]; sc_lost.pop(); } else { k++; } }
+}
 
 // ---------------------------------------------------------------------------------------------
 // Printing (SCEV::print)

@@ -1596,7 +1596,8 @@ fn handle_byval_argument(bty: i32, arg: i32, cb: i32, callee: i32, byval_align: 
     insts[inst_of(ai)].align = (log2_ceil(al as i64) + 1) as u8;
     insts[inst_of(ai)].as_ = ptr_as(vals[arg].ty) as i32;
     let entry = func_entry(caller);
-    inst_insert_at(ai, entry, block_first(entry), false);
+    // NewAlloca->insertBefore(Caller->begin()->begin()): the head bit puts it in front of the entry's records
+    inst_insert_at(ai, entry, block_first(entry), true);
     if vals[arg].name >= 0 { var nm: u8[>..] = []; nm.append(val_name(arg)); set_name(ai, nm); }
     ifi_static_allocas.push(ai);
     return ai;
@@ -1610,7 +1611,8 @@ fn handle_byval_argument_init(bty: i32, dst: i32, src: i32, src_align: u64, bb: 
     let fl = c_false();
     let t1: i32 = vals[dst].ty;
     let t2: i32 = vals[src].ty;
-    let ci = if_intrinsic_call(IID_memcpy, [t1, t2, T_I64], [dst, src, size, fl], "", first, bb);
+    // IRBuilder<> Builder(InsertBlock, InsertBlock->begin()): head bit, in front of the block's first records
+    let ci = if_intrinsic_call_at(IID_memcpy, [t1, t2, T_I64], [dst, src, size, fl], "", first, bb, true);
     var sets: i32[>..<] = [0, 0, if_align_set(dal), if_align_set(src_align)];
     insts[inst_of(ci)].attrs = alist_get(sets);
     let sp = func_subprogram(inst_func(ci));
@@ -2372,8 +2374,9 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
                 last = i;
                 i = inst_next(i);
             }
-            // Caller->getEntryBlock().splice(InsertPoint, FirstNewBlock, AI, I) with I's tail bit set
-            block_splice(entry, insert_pt, false, first_new, ai, false, i, true);
+            // Caller->getEntryBlock().splice(InsertPoint, FirstNewBlock, AI, I) with I's tail bit set; InsertPoint
+            // is Caller->begin()->begin(), with the head bit: the allocas go in front of the entry's first records
+            block_splice(entry, insert_pt, true, first_new, ai, false, i, true);
         }
     }
     let mark_nounwind = call_has_fn_attr(cb, AK_NoUnwind);

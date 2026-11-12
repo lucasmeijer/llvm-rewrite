@@ -993,6 +993,13 @@ fn lc_clone_in_exit_block(i: i32, exit: i32, pn: i32) -> i32 {
     let nw = inst_clone(i);
     let ip = lc_first_insertion_pt(exit);
     if ip >= 0 { inst_insert_before_head(nw, ip); } else { block_append_inst(exit, nw); }
+    if iop(i) == OP_CALL && vals[i].name >= 0 {
+        // CallInst::Create(CI, OpBundles) names the clone CI->getName(): inserting it uniquifies that name (one
+        // more ++LastUnique in the function's symbol table) before setName(".le") below
+        var cn: u8[>..] = [];
+        cn.append(val_name(i));
+        set_name(nw, cn);
+    }
     if vals[i].name >= 0 {
         var nm: u8[>..] = [];
         nm.append(val_name(i));

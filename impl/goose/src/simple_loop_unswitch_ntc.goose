@@ -87,6 +87,9 @@ fn build_cloned_loop_blocks(l: i32, loop_ph: i32, exits: const i32[:], parent_bb
             if dl >= 0 { inst_set_md(mpn, 0, dl); }
             ac_rauw(i, mpn);
             rauw(i, mpn);
+            // VMap is a ValueMap: its entry for I follows the RAUW (MergePN -> ClonedI), so the cloned exit's debug
+            // records, which the RAUW pointed at MergePN, are remapped back to ClonedI below
+            vmm_follow_rauw(vm, i, mpn);
             phi_add_incoming(mpn, i, eb);
             phi_add_incoming(mpn, ci, ceb);
             i = ni;

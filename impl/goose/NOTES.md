@@ -176,9 +176,10 @@
   by hand the pass itself (minus parsing) costs 0.31 s on SPASS and 0.20 s on oggenc vs LLVM's 0.14/0.10 s (lua,
   sqlite3: 0.07/0.15 s vs 0.09/0.11 s): ~2x on big functions, not profiled yet.
 - L1.loop-canonical 151/184 (all 92 roundtrip, 59/92 opt) with LoopRotate (looprotate.goose): 21/34 LoopRotate
-  tests; the 13 left have debug records (LoopRotate fails loudly in functions with records: cloneDebugInfoFrom,
-  RemapDbgRecordRange, the duplicate-record hashes, findDbgValues rewriting and insertDebugValuesForPHIs are not
-  ported), noalias scope declarations in the header, or run unported passes (loop-deletion, indvars, loop-reduce).
+  tests; the rest have noalias scope declarations in the header or run unported passes (loop-reduce,
+  `require<assumptions>`). Debug records are ported (cloneDebugInfoFrom with NextDbgInsts, RemapDbgRecordRange, the
+  duplicate-record hashes, findDbgValues rewriting, insertDebugValuesForPHIs, RemoveRedundantDbgInstrs; see
+  knowledge/llvm/debug-info.md); only #dbg_assign records in the header fail loudly.
   Sweeps `loop-rotate`, `loop-rotate<header-duplication;check-exit-count>`, `loop-mssa(loop-rotate,licm)` (whole
   file and per function) and `loop-mssa(loop-rotate),print<memoryssa>` / `loop(loop-rotate),print<scalar-evolution>`
   --analysis: 0 differs. LoopRotate keeps a cached ScalarEvolution up to date like LLVM (forgetTopmostLoop,
@@ -1192,10 +1193,8 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   (whole-file, --per-function, --with-test-flags each); `sroa,loop-mssa(loop-rotate,licm),loop-distribute,
   loop-load-elim,loop(loop-idiom,loop-deletion)` and `sroa,loop-mssa(loop-rotate,licm),loop-versioning` over the corpus
   and tests/perf/compile; `sroa,loop(loop-rotate,indvars,loop-idiom,loop-deletion)` and
-  `sroa,loop(loop-instsimplify,loop-simplifycfg,loop-deletion)` on tests/perf/compile. With `instcombine` in front the
-  same pipelines differ on IndVarSimplify/eliminate-backedge.ll and tests/perf/compile/lua.ll, but
-  `sroa,instcombine,loop-mssa(loop-rotate,licm)` alone already differs there (InstCombine: `select` vs `or` of an
-  i1, `icmp eq` vs `icmp slt` of an i8), not the loop passes.
+  `sroa,loop(loop-instsimplify,loop-simplifycfg,loop-deletion)` on tests/perf/compile. (The `instcombine`-in-front
+  differences on IndVarSimplify/eliminate-backedge.ll and lua.ll are fixed: see "Multi-pass pipeline sweeps".)
 - Speed (by hand, no `@perf` line times these passes; tests/perf/scaling/loops-many, CPU s, LLVM vs Goose): n500
   every pass 0.01-0.06 vs 0.01-0.09; n2000 loop-deletion 2.96/3.27, loop-idiom 3.18/3.24, loop-load-elim 2.89/3.25,
   loop-distribute 2.81/3.29, loop-versioning 2.84/3.28, print<access-info> 3.01/3.19, loop-instsimplify and

@@ -1139,7 +1139,10 @@ fn should_run(n: i32, unit: const u8[:]) -> bool {
 
 // Drop analyses of fv that the pass didn't preserve.
 fn invalidate_function(fv: i32, preserved: u32) {
-    if preserved == PA_ALL || (preserved & PA_FN) == PA_FN { return; }
+    if preserved == PA_ALL { return; }
+    // a pass that changed fv and kept its ScalarEvolution (see scev_get)
+    if (preserved & (1 << A_SCEV)) != 0 && (preserved & (1 << A_DOMTREE)) != 0 && (preserved & (1 << A_LOOPS)) != 0 { scev_note_preserved_change(fv); }
+    if (preserved & PA_FN) == PA_FN { return; }
     slots_invalidate();
     if (preserved & (1 << A_LRT)) == 0 { ic::ic_lrt_invalidate(fv); }
     if (preserved & (1 << A_DOMTREE)) == 0 { dt_invalidate(fv, DT_DOM); }

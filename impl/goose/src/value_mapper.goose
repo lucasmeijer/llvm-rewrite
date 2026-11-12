@@ -134,6 +134,16 @@ fn vmm_erase(m: i32, k: i32) {
     let e = vmm_find(m, k);
     if e >= 0 { vmm_ents[e].val = VMM_ERASED; }
 }
+// ValueMapCallbackVH::allUsesReplacedWith with FollowRAUW (the default ValueMapConfig): after RAUW(old, new) the
+// entry keyed by `old` moves to `new`, unless `new` is a key already (then it is just erased). Call right after a
+// rauw of a value that may be a key of a live map.
+fn vmm_follow_rauw(m: i32, old: i32, nw: i32) {
+    let e = vmm_find(m, old);
+    if e < 0 { return; }
+    let v = vmm_val(e);
+    vmm_ents[e].val = VMM_ERASED;
+    if !vmm_has(m, nw) { vmm_set(m, nw, v); }
+}
 // iteration in insertion order over live entries: e = vmm_first(m); while e >= 0 { ...; e = vmm_next(e); }
 fn vmm_skip(e0: i32) -> i32 {
     var e = e0;

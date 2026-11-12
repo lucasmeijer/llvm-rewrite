@@ -610,6 +610,9 @@ fn peel_loop(l0: i32, peel_count: i64, peel_last: bool, preserve_lcssa: bool, lv
             let cond = lp_icmp_ne_zero(btcv, phbr);
             let bi = create_inst(OP_CONDBR, T_VOID, [cond, nph, top]);
             inst_insert_before(bi, phbr);
+            // IRBuilder<> B(PreHeaderBR): CreateCondBr gets the branch's debug location too
+            let pdl = inst_get_md(phbr, 0);
+            if pdl >= 0 { inst_set_md(bi, 0, pdl); }
             let olb = block_terminator(latch);
             var ws: u64[>..<] = [];
             if pd_extract(olb, ws) {

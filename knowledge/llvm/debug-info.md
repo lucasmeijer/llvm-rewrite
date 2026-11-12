@@ -84,6 +84,28 @@ the oracle unless noted).
   returns `SelectInst::Create(C, A, B, "", nullptr, SI)` keeps SI's location (InstCombineLoadStoreAlloca.cpp:1169).
 - InstCombine lowers `#dbg_declare` by default (`-instcombine-lower-dbg-declare` is `cl::init(true)`): LowerDbgDeclare
   (Local.cpp) for scalar, constant-size allocas without volatile accesses, then RemoveRedundantDbgInstrs on every block.
+- `SplitBlock(BB, BB->begin(), ...)` (SimpleLoopUnswitch's exit splits, SimpleLoopUnswitch.cpp:721/999/1026/1330)
+  passes a head-bit iterator, so the records in front of the first instruction move to the new tail block with it;
+  SplitBlockImpl's `++SplitIt` over phis / EH pads clears the bit, and an `Instruction*` split point never has it.
+  Seen with `debugify,...,simple-loop-unswitch<nontrivial>` on LICM/callbr-crash.ll.
+- `~BasicBlock` deletes the trailing marker: records of instructions erased last-first while deleting a block
+  (they pile up in the trailing marker) stop using their values. A port that keeps them tracked lets later
+  findDbgValues callers (LCSSA) see records of dead blocks. And a block can legitimately keep trailing records after
+  changeToUnreachable (unreachable inserted before the old terminator, which is then erased): LCSSA's
+  `DVR->getMarker()->getParent()` is that block (`debugify,function(sroa,loop-simplify,lcssa)`, SPASS
+  @red_SearchTerminator).
+- LoopRotate (LoopRotationUtils.cpp:481-595) clones header records through `NextDbgInsts`, the record range of the
+  next header instruction captured *before* the current one is hoisted (a hoisted instruction's own records fall
+  down onto the next one; cloning from the captured start skips them). A hoisted instruction's records are cloned
+  onto the preheader branch, a duplicated one's onto the clone; after a duplicated instruction NextDbgInsts becomes
+  empty and is only refilled by the next hoist, so in a run of duplicated instructions only the first gets its
+  records cloned. Clones are remapped (RF_IgnoreMissingLocals) and dropped if (location ops, variable, expression)
+  equals a record the preheader branch had before rotation. Then: flushTerminatorDbgRecords, findDbgValues
+  rewriting of uses outside the header (preheader → the mapped value, else the SSAUpdater's value or poison),
+  insertDebugValuesForPHIs for the new phis (each clone inserted at the head of getFirstInsertionPt's marker), and
+  RemoveRedundantDbgInstrs on the predecessor after the final merge (not after simplifyLoopLatch's merge).
+  Verified: goose `sweep --passes 'debugify,function(loop(loop-rotate))'` 0 differs on 7600+ files, LoopRotate
+  dbg-value-duplicates*.ll, dbgvalue.ll, delete-dbg-values.ll, phi-dbgvalue.ll.
 - `#dbg_value` on a phi is invalid IR (`PHI Node must not have any attached DbgRecords`): an LLVM phi inserted
   before a block's records always uses a head-bit iterator.
 
