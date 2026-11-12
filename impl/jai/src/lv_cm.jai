@@ -93,7 +93,7 @@ lv_cm_is_scalar_with_predication :: (cm: *Lv_Cm, i: Value_Id, vf: Ec) -> bool {
     if o == {
         case .CALL;
             if ec_is_scalar(vf) return true;
-            return get_vector_intrinsic_id_for_call(i) == NOT_INTRINSIC;   // no vector library variants
+            return get_vector_intrinsic_id_for_call(i) == NOT_INTRINSIC && lv_vector_library_variant_for(i, vf, lv_cm_is_mask_required(cm, i)) == NONE;
         case .LOAD; #through; case .STORE;
             cons := lvl_is_consecutive_ptr(cm.lvl, load_store_type(i), load_store_pointer_operand(i)) != 0;
             return !(cons && lv_is_legal_masked_load_or_store(cm, i, vf)) && !lv_is_legal_gather_or_scatter(cm, i, vf);

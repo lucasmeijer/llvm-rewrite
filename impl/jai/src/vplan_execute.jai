@@ -565,6 +565,7 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
         case .SCALAR_IV_STEPS; vp_scalar_iv_steps_execute(s, r);
         case .REPLICATE; vp_replicate_execute(s, r);
         case .WIDEN_INTRINSIC; vp_widen_intrinsic_execute(s, r);
+        case .WIDEN_CALL; vp_widen_call_execute(s, r);
         case .INTERLEAVE; vp_interleave_execute(s, r);
         case .WIDEN_LOAD;
             sty := vp_scalar_type(vr(r).def);
@@ -788,6 +789,27 @@ is_vector_intrinsic_with_overload_type_at_arg :: (id: Intrinsic_Id, idx: s64) ->
     if n == "llvm.modf" || n == "llvm.sincos" || n == "llvm.sincospi" || n == "llvm.is.fpclass" return idx == 0;
     if n == "llvm.powi" || n == "llvm.ldexp" return idx == -1 || idx == 1;
     return idx == -1;
+}
+// VPWidenCallRecipe::execute
+vp_widen_call_execute :: (s: *Vp_State, r: Vp_Rec) {
+    assert(ec_is_vector(s.vf), "not widening");
+    variant := vr(r).variant;
+    vfty := glob(variant).value_type;
+    args: [..] Value_Id; args.allocator = temp;
+    for k: 0..vp_nops(r) - 2 {
+        o := vp_op(r, k);
+        a: Value_Id;
+        if !is_vector_type(type_sub(vfty, cast(u32) (k + 1))) a = vs_get_lane(s, o, 0);
+        else a = vs_get(s, o, vp_uses_first_lane_only(r, o));
+        array_add(*args, a);
+    }
+    ci := vp_uv(vr(r).def);
+    if ci != NONE && is_inst(ci) && call_num_bundles(ci) > 0 vp_unported("operand bundles on widened vector-variant calls");
+    v := irb_call(*s.b, variant, args);
+    vp_apply_flags(r, v);
+    vp_apply_metadata(r, v);
+    inst(v).cc = glob(variant).cc;
+    if type_kind(vtype(v)) != .VOID vs_set(s, vr(r).def, v);
 }
 // VPWidenIntrinsicRecipe::execute (createVectorCall)
 vp_widen_intrinsic_execute :: (s: *Vp_State, r: Vp_Rec) {

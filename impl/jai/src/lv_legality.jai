@@ -246,10 +246,18 @@ lvl_add_induction_phi :: (v: *Lvl, phi: Value_Id, d: Ind_Desc) {
     }
 }
 
-// isTLIScalarize: not ported yet; it can only be true for a function the -vector-library tables map (vfabi.jai)
+// isTLIScalarize
 lv_is_tli_scalarize :: (c: Value_Id) -> bool {
-    if tli_is_function_vectorizable(vname(call_called_function(c))) fatal("loop-vectorize: vector-library functions (isTLIScalarize) are not supported yet");
-    return false;
+    name := vname(call_called_function(c));
+    scalarize := tli_is_function_vectorizable(name);
+    if scalarize {
+        wf, ws := tli_get_widest_vf(name);
+        vf: u32 = 2;
+        while vf <= wf { scalarize &= tli_get_vectorized_function(name, vf, false, false) == "" && tli_get_vectorized_function(name, vf, false, true) == ""; vf *= 2; }
+        vf = 1;
+        while ws != 0 && vf <= ws { scalarize &= tli_get_vectorized_function(name, vf, true, false) == "" && tli_get_vectorized_function(name, vf, true, true) == ""; vf *= 2; }
+    }
+    return scalarize;
 }
 
 // LoopVectorizationLegality::canVectorizeInstr
@@ -292,8 +300,7 @@ lvl_can_vectorize_instr :: (v: *Lvl, i: Value_Id) -> bool {
     is_call := inst_op(i) == .CALL;
     if is_call {
         f := call_called_function(i);
-        if call_has_vector_variants(i) fatal("loop-vectorize: calls with vector-function-abi-variant mappings (VFDatabase) are not supported yet");
-        if get_vector_intrinsic_id_for_call(i) == NOT_INTRINSIC && !(f != NONE && lv_is_tli_scalarize(i)) return false;
+        if get_vector_intrinsic_id_for_call(i) == NOT_INTRINSIC && !(f != NONE && (call_has_vector_variants(i) || lv_is_tli_scalarize(i))) return false;
         id := get_vector_intrinsic_id_for_call(i);
         for k: 0..cast(s64) call_num_args(i) - 1 {
             if vu_is_vector_intrinsic_with_scalar_op_at_arg(id, cast(u32) k) {
@@ -301,6 +308,7 @@ lvl_can_vectorize_instr :: (v: *Lvl, i: Value_Id) -> bool {
             }
         }
     }
+    if is_call && call_has_vector_variants(i) v.vec_call_variants_found = true;
     can_widen_ty :: (i: Value_Id) -> bool {
         t := vtype(i);
         if type_kind(t) != .STRUCT return can_vectorize_ty(t);
@@ -426,8 +434,7 @@ lvl_block_can_be_predicated :: (v: *Lvl, bb: Value_Id, safe_ptrs: *Iset, masked:
     for i: block_insts(bb) {
         if call_iid(i) == IID_ASSUME { iset_insert(masked, i); continue; }
         if call_iid(i) == IID_EXPERIMENTAL_NOALIAS_SCOPE_DECL continue;
-        if inst_op(i) == .CALL && call_has_vector_variants(i)
-            fatal("loop-vectorize: calls with vector-function-abi-variant mappings (VFDatabase) are not supported yet");
+        if inst_op(i) == .CALL && vfdb_has_masked_variant(i) { iset_insert(masked, i); continue; }
         if inst_op(i) == .LOAD {
             if !iset_has(safe_ptrs, op(i, 0)) iset_insert(masked, i);
             continue;

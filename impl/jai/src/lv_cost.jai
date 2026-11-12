@@ -410,6 +410,17 @@ lv_cm_vector_intrinsic_cost :: (cm: *Lv_Cm, ci: Value_Id, vf: Ec) -> Cost {
     a.scalar_cost = COST_INVALID;
     return lt_intrinsic_cost(cm.tti, *a, cm.cost_kind);
 }
+// getVectorLibraryVariantFor
+lv_vector_library_variant_for :: (ci: Value_Id, vf: Ec, mask_required: bool) -> Value_Id {
+    if call_is_no_builtin(ci) return NONE;
+    for info: vfdb_get_mappings(ci) {
+        if info.shape.vf != cast(u32) vf.n || info.shape.scalable != vf.scalable continue;
+        if mask_required && !vf_info_is_masked(*info) continue;
+        f := module_get_function(info.vector_name);
+        if f != NONE return f;
+    }
+    return NONE;
+}
 // getVectorCallCost
 lv_cm_vector_call_cost :: (cm: *Lv_Cm, ci: Value_Id, vf: Ec) -> Cost {
     scalar_call := lv_tti_call_instr_cost(cm.tti);
@@ -418,7 +429,11 @@ lv_cm_vector_call_cost :: (cm: *Lv_Cm, ci: Value_Id, vf: Ec) -> Cost {
         ic := lv_cm_vector_intrinsic_cost(cm, ci, vf);
         if ic < c c = ic;
     }
-    // vector library variants: legality fails loudly on calls with VFDatabase mappings
+    variant := lv_vector_library_variant_for(ci, vf, lv_cm_is_mask_required(cm, ci));
+    if variant != NONE {
+        vc := lv_tti_call_instr_cost(cm.tti);
+        if vc < c c = vc;
+    }
     return c;
 }
 

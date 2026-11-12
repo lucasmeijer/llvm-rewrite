@@ -477,9 +477,9 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
     lvp_add_reduction_result_computation(lp, range.start);
     vp_optimize_find_iv_reductions(lp.pse, lp.l);
     lvp_optimize_induction_live_out_users(lp);
+    if !vp_handle_multi_use_reductions() return false;
     // handleMultiUseReductions, handleMaxMinNumReductions, handleFindLastReductions
     for vp_block_phis(header) if vr(it).kind == .REDUCTION_PHI {
-        if vr(it).has_uses_outside_chain vp_unported("min/max reductions with uses outside the chain (handleMultiUseReductions)");
         if rk_is_fp_min_max_num(vr(it).rdx_kind) vp_unported("FP minnum/maxnum reductions (handleMaxMinNumReductions)");
     }
     if !vp_handle_find_last_reductions() return false;
@@ -1051,21 +1051,57 @@ lvp_collect_in_loop_reductions :: (lp: *Lv_Planner) {
 }
 
 // decideCallWidening (CallWideningDecision; vector library variants fail loudly at legality)
-Lv_Call_Widening :: enum u8 { SCALARIZE; INTRINSIC; VECTOR_VARIANT; }
+Lv_Call_Widening_Kind :: enum u8 { SCALARIZE; INTRINSIC; VECTOR_VARIANT; }
+Lv_Call_Widening :: struct { kind: Lv_Call_Widening_Kind; variant: Value_Id = NONE; }
+// areVFParamsOk
+vp_are_vf_params_ok :: (info: *Vf_Info, args: [] Vp_Val, pse: *Pse, l: Loop_Id) -> bool {
+    for p: info.shape.params {
+        if p.kind == {
+            case .VECTOR; #through; case .GLOBAL_PREDICATE; continue;
+            case .OMP_UNIFORM;
+                a := args[p.pos];
+                if !sc_is_scevable(vp_scalar_type(a)) || !sc_is_loop_invariant(vp_scev_for_value(a, pse, l), l) return false;
+            case .OMP_LINEAR;
+                e := vp_scev_for_value(args[p.pos], pse, l);
+                if sc_is_cnc(e) || !sc_is_addrec(e) || !sc_is_affine(e) || sc_loop(e) != l return false;
+                st := sc_step_recurrence(e);
+                if !sc_is_const(st) return false;
+                sv := const_ap(sc_value(st));
+                if sv.bits > 64 || ap_sext_value(sv) != cast(s64) p.step return false;
+            case; return false;
+        }
+    }
+    return true;
+}
+// findVectorVariant
+vp_find_vector_variant :: (ci: Value_Id, args: [] Vp_Val, vf: Ec, mask_required: bool, pse: *Pse, l: Loop_Id) -> Value_Id {
+    if call_is_no_builtin(ci) return NONE;
+    for * info: vfdb_get_mappings(ci) {
+        if info.shape.vf != cast(u32) vf.n || info.shape.scalable != vf.scalable continue;
+        if mask_required && !vf_info_is_masked(info) continue;
+        if !vp_are_vf_params_ok(info, args, pse, l) continue;
+        return module_get_function(info.vector_name);
+    }
+    return NONE;
+}
 lvp_decide_call_widening :: (c: *Vp_Cost_Ctx, vpi: Vp_Rec, ops: [] Vp_Val, vf: Ec) -> Lv_Call_Widening {
     ci := vp_underlying_instr(vpi);
-    if ec_is_scalar(vf) || vpc_will_be_scalarized(c, ci, vf) return .SCALARIZE;
+    if ec_is_scalar(vf) || vpc_will_be_scalarized(c, ci, vf) return .{.SCALARIZE, NONE};
     called := vp_ir(vp_op(vpi, vpm_num_ops_without_mask(vpi) - 1));
     result_ty := vp_scalar_type(vr(vpi).def);
     id := get_vector_intrinsic_id_for_call(ci);
-    if id != NOT_INTRINSIC && vpc_is_free_scalar_intrinsic(id) return .SCALARIZE;
+    mask_required := lv_cm_is_mask_required(c.lp.cm, ci);
+    if id != NOT_INTRINSIC && vpc_is_free_scalar_intrinsic(id) return .{.SCALARIZE, NONE};
     scalar_cost := vp_replicate_call_cost(c, called, result_ty, ops, false, vf);
-    // findVectorVariant: no VFDatabase mappings (legality fails loudly on them)
+    vec_func := vp_find_vector_variant(ci, ops, vf, mask_required, c.lp.pse, c.lp.l);
+    vec_call_cost := COST_INVALID;
+    if vec_func != NONE vec_call_cost = vp_widen_call_cost(c, vec_func);
     if id != NOT_INTRINSIC {
         ic := vp_widen_intrinsic_call_cost(c, id, ops, vpi, vf);
-        if cost_valid(ic) && scalar_cost >= ic return .INTRINSIC;
+        if cost_valid(ic) && scalar_cost >= ic && (vec_func == NONE || vec_call_cost >= ic) return .{.INTRINSIC, NONE};
     }
-    return .SCALARIZE;
+    if vec_func != NONE && scalar_cost >= vec_call_cost return .{.VECTOR_VARIANT, vec_func};
+    return .{.SCALARIZE, NONE};
 }
 // VPlanTransforms::makeCallWideningDecisions
 lvp_make_call_widening_decisions :: (lp: *Lv_Planner, range: *Vf_Range) {
@@ -1084,12 +1120,26 @@ lvp_make_call_widening_decisions :: (lp: *Lv_Planner, range: *Vf_Range) {
             decision := lvp_decide_call_widening(*c, r, ops, range.start);
             Ctx :: struct { c: *Vp_Cost_Ctx; r: Vp_Rec; ops: [] Vp_Val; d: Lv_Call_Widening; }
             cx := Ctx.{*c, r, ops, decision};
-            same :: (vf: Ec, d: *void) -> bool { x := cast(*Ctx) d; return x.d == lvp_decide_call_widening(x.c, x.r, x.ops, vf); }
+            same :: (vf: Ec, d: *void) -> bool {
+                x := cast(*Ctx) d;
+                o := lvp_decide_call_widening(x.c, x.r, x.ops, vf);
+                return x.d.kind == o.kind && x.d.variant == o.variant;
+            }
             lvp_decision_and_clamp_range(range, same, *cx);
             repl: Vp_Rec;
-            if decision == .INTRINSIC {
+            if decision.kind == .INTRINSIC {
                 id := get_vector_intrinsic_id_for_call(ci);
                 repl = vp_new_widen_intrinsic(ci, id, ops, vp_scalar_type(vr(r).def), vr(r).flags, vr(r).md, vr(r).dl);
+            } else if decision.kind == .VECTOR_VARIANT {
+                // masked variants take the mask as a trailing parameter
+                if cast(s64) fn_nargs(decision.variant) > ops.count {
+                    m := ifx vp_is_masked(r) then vp_op(r, vp_nops(r) - 1) else vp_true();
+                    array_add(*ops, m);
+                }
+                array_add(*ops, vp_op(r, vpm_num_ops_without_mask(r) - 1));
+                repl = vp_new_single_def(.WIDEN_CALL, ops, vp_scalar_type(vr(r).def), ci, vr(r).dl);
+                vr(repl).variant = decision.variant; vr(repl).flags = vr(r).flags;
+                for vr(r).md array_add(*vr(repl).md, it);
             } else {
                 repl = lvp_handle_replication(lp, r, range);
             }
@@ -1174,6 +1224,136 @@ vp_handle_find_last_reductions :: () -> bool {
                         "", vp_scalar_type(vr(data_select).def));
         vp_rauw(vr(rdx_result).def, vr(ela).def);
         vp_erase_recipe(rdx_result);
+    }
+    return true;
+}
+
+// findFindIVSelect: the select of the FindIV result pattern of `be`
+vp_find_find_iv_select :: (be: Vp_Val) -> Vp_Rec {
+    wl: [..] Vp_Val; wl.allocator = temp;
+    array_add(*wl, be);
+    i := 0;
+    while i < wl.count {
+        cur := wl[i]; i += 1;
+        r := vp_def(cur);
+        if r == NONE continue;
+        if vr(r).kind == .INSTRUCTION {
+            ok, red, _ := vp_match_find_iv_result(r);
+            if ok && red == be return r;
+        }
+        for u: vv(cur).users {
+            if vr(u).def != NONE array_add_if_unique(*wl, vr(u).def);
+            for d: vr(u).defs array_add_if_unique(*wl, d);
+        }
+    }
+    return NONE;
+}
+vp_find_user_vpi :: (v: Vp_Val, opc: u16) -> Vp_Rec { for u: vv(v).users if vp_is_vpi(u, opc) return u; return NONE; }
+
+// handleFirstArgMinOrMax
+vp_handle_first_arg_min_or_max :: (mm_phi: Vp_Rec, fiv_phi: Vp_Rec, wide_iv: Vp_Rec, mm_result: Vp_Rec, fiv_select: Vp_Rec, fiv_cmp: Vp_Rec, fiv_rdx: Vp_Rec) -> bool {
+    region := vp_vector_loop_region();
+    ty := vv(vb(region).can_iv).ty;
+    if ty != vp_scalar_type(vr(wide_iv).def) return false;
+    sel := vp_def(vp_op(fiv_phi, 1));
+    wiv := vr(wide_iv).def;
+    if vp_op(sel, 1) != wiv && vp_op(sel, 2) != wiv return false;
+    canonical := vpm_zero_int(vp_op(wide_iv, 0)) && vp_is_const_int_one(vp_op(wide_iv, 1)) && vp_scalar_type(wiv) == ty;
+    if !canonical {
+        wc := vp_new_widen_int_or_fp_induction(NONE, vp_const_int(ty, 0), vp_const_int(ty, 1), vp_op(wide_iv, 2), vr(wide_iv).ind,
+                                                vpf_wrap(true, false), vr(wide_iv).dl);
+        vp_insert_before(wc, wide_iv);
+        vp_set_operand(sel, ifx vp_op(sel, 1) == wiv then 1 else 2, vr(wc).def);
+    }
+    vp_set_operand(fiv_phi, 0, vp_poison(ty));
+    b := vpb_before(fiv_rdx);
+    mm_exiting := vp_op(mm_result, 0);
+    final_cmp := vpb_icmp(*b, ICMP_EQ, mm_exiting, vr(mm_result).def);
+    last_iv_exiting := vp_op(fiv_rdx, 0);
+    max_iv := vp_const_int_ap(ap_all_ones(type_bits(ty)));
+    final_sel := vpb_select(*b, vr(final_cmp).def, last_iv_exiting, max_iv);
+    final_can_iv := vr(vpb_nary(*b, VPI_COMPUTE_REDUCTION_RESULT, .[vr(final_sel).def], vpf_reduction(.UMIN, false, false, 0), .[], vr(fiv_rdx).dl)).def;
+    if !canonical {
+        d := vp_new_derived_iv(.INT, NONE, vp_op(wide_iv, 0), final_can_iv, vp_op(wide_iv, 1));
+        vp_insert_recipe(d, b.bb, b.ip);
+        final_can_iv = vr(d).def;
+    }
+    always_false := vpb_icmp(*b, ICMP_EQ, vr(mm_result).def, vp_op(mm_phi, 0));
+    final_iv := vpb_select(*b, vr(always_false).def, vp_op(fiv_select, 2), final_can_iv);
+    vp_rauw(vr(fiv_select).def, vr(final_iv).def);
+    vp_erase_recipe(fiv_select);
+    vp_erase_recipe(fiv_cmp);
+    vp_erase_recipe(fiv_rdx);
+    return true;
+}
+
+// VPlanTransforms::handleMultiUseReductions
+vp_handle_multi_use_reductions :: () -> bool {
+    for phir: vp_block_phis(vp_entry_basic_block(vp_vector_loop_region())) {
+        if vr(phir).kind != .REDUCTION_PHI || !vr(phir).has_uses_outside_chain continue;
+        rk := vr(phir).rdx_kind;
+        assert(rk_is_int_min_max(rk), "only min/max recurrences support users outside the reduction chain");
+        pd := vr(phir).def;
+        mm_op := vp_def(vp_op(phir, 1));
+        if mm_op == NONE || !vp_is_with_ir_flags_kind(vr(mm_op).kind) return false;
+        expected: Intrinsic_Id;
+        if rk == .UMIN expected = IID_UMIN; else if rk == .UMAX expected = IID_UMAX; else if rk == .SMIN expected = IID_SMIN; else expected = IID_SMAX;
+        if vp_intrinsic_id(mm_op) != expected return false;
+        mm_val := vp_op(mm_op, 0);
+        if mm_val == pd mm_val = vp_op(mm_op, 1);
+        cmp: Vp_Rec = NONE; a, bb: Vp_Val;
+        for u: vv(pd).users {
+            if vr(u).def == NONE continue;
+            ok, x, y := vpm_cmp(vr(u).def);
+            if ok { cmp = u; a = x; bb = y; break; }
+        }
+        if cmp == NONE || !vp_is_with_ir_flags_kind(vr(cmp).kind) || vp_num_users(vr(cmp).def) != 1 || (a != mm_val && bb != mm_val) return false;
+        pred := vr(cmp).flags.pred;
+        if mm_val != bb pred = cmp_swapped(pred);
+        if vp_num_users(pd) != 2 return false;
+        mm_result := vp_find_user_vpi(vr(mm_op).def, VPI_COMPUTE_REDUCTION_RESULT);
+        assert(mm_result != NONE, "MinOrMaxResult must be a user of MinOrMaxOp");
+        sel_r := vp_single_user(vr(cmp).def);
+        if sel_r == NONE || vr(sel_r).def == NONE || vp_num_users(vr(sel_r).def) != 2 return false;
+        oks, c, iv_op, find_iv := vpm_select(vr(sel_r).def);
+        if !oks || c != vr(cmp).def return false;
+        fd := vp_def(find_iv);
+        if fd == NONE || vr(fd).kind != .REDUCTION_PHI {
+            t := find_iv; find_iv = iv_op; iv_op = t;
+            pred = cmp_inverse(pred);
+        }
+        fiv_phi := vp_def(find_iv);
+        if fiv_phi == NONE || vr(fiv_phi).kind != .REDUCTION_PHI || !rk_is_find_iv(vr(fiv_phi).rdx_kind) return false;
+        fiv_result := vp_find_user_vpi(vp_op(fiv_phi, 1), VPI_COMPUTE_REDUCTION_RESULT);
+        assert(fiv_result != NONE, "must be able to retrieve the FindIVResult VPInstruction");
+        fk := vr(fiv_result).flags.rdx_kind;
+        if fk != .SMAX && fk != .UMAX return false;
+        okt, tx := vpm_unary(iv_op, vp_opc(.TRUNC));
+        if okt iv_op = tx;
+        ivr := vp_def(iv_op);
+        if ivr == NONE || vr(ivr).kind != .WIDEN_INT_OR_FP_INDUCTION return false;
+        valid: bool;
+        if rk == .UMIN valid = pred == ICMP_UGE || pred == ICMP_UGT;
+        else if rk == .UMAX valid = pred == ICMP_ULE || pred == ICMP_ULT;
+        else if rk == .SMAX valid = pred == ICMP_SLE || pred == ICMP_SLT;
+        else valid = pred == ICMP_SGE || pred == ICMP_SGT;
+        if !valid return false;
+        fiv_select := vp_find_find_iv_select(vp_op(fiv_phi, 1));
+        fiv_cmp := vp_def(vp_op(fiv_select, 0));
+        fiv_rdx := vp_def(vp_op(fiv_cmp, 0));
+        vp_move_before(mm_result, vr(fiv_rdx).parent, fiv_rdx);
+        strict := pred == ICMP_SLT || pred == ICMP_ULT || pred == ICMP_SGT || pred == ICMP_UGT;
+        if strict {
+            if !vp_handle_first_arg_min_or_max(phir, fiv_phi, ivr, mm_result, fiv_select, fiv_cmp, fiv_rdx) return false;
+            continue;
+        }
+        b := vpb_before(fiv_rdx);
+        mm_exiting := vp_op(mm_result, 0);
+        fcmp := vpb_icmp(*b, ICMP_EQ, mm_exiting, vr(mm_result).def);
+        sentinel := vp_op(fiv_cmp, 1);
+        last_iv := vp_op(fiv_rdx, 0);
+        fsel := vpb_select(*b, vr(fcmp).def, last_iv, sentinel);
+        vp_set_operand(fiv_rdx, 0, vr(fsel).def);
     }
     return true;
 }
