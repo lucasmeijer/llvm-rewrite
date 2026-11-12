@@ -1,7 +1,7 @@
 // Internalize and DeadArgumentElimination. Ported from llvm/lib/Transforms/IPO/Internalize.cpp,
 // llvm/lib/Transforms/IPO/DeadArgumentElimination.cpp, llvm/lib/Support/GlobPattern.cpp (the subset without
-// brace expansion), llvm/lib/IR/Function.cpp (Function::Create / copyAttributesFrom / splice) and the
-// CallInst::Create / InvokeInst::Create paths that rebuild a call site.
+// brace expansion), llvm/lib/IR/Function.cpp (Function::Create / copyAttributesFrom / splice, hasAddressTaken)
+// and the CallInst::Create / InvokeInst::Create paths that rebuild a call site.
 import std;
 import ir;
 import irutil;

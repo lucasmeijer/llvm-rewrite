@@ -1,11 +1,14 @@
 // Global-value helpers and the small module passes over globals. Ported from:
 // - llvm/lib/Transforms/Utils/GlobalStatus.cpp (isSafeToDestroyConstant, GlobalStatus::analyzeGlobal)
 // - llvm/lib/Transforms/Utils/CtorUtils.cpp (optimizeGlobalCtorsList, removeGlobalCtors)
-// - llvm/lib/IR/Globals.cpp (setLinkage/isImplicitDSOLocal, getComdat, findBaseObject, copyAttributesFrom),
-//   llvm/lib/IR/Function.cpp (deleteBody), llvm/lib/IR/Constants.cpp (destroyConstant), llvm/lib/IR/Module.cpp
-//   (getGlobalVariable, collectUsedGlobalVariables)
-// - llvm/lib/Transforms/IPO/StripDeadPrototypes.cpp, ElimAvailExtern.cpp, ConstantMerge.cpp, GlobalDCE.cpp
+// - llvm/lib/IR/Globals.cpp (setLinkage/isImplicitDSOLocal, getComdat, findBaseObject, copyAttributesFrom,
+//   getGlobalIdentifier, assignGUID), llvm/lib/IR/Function.cpp (deleteBody), llvm/lib/IR/Constants.cpp
+//   (destroyConstant), llvm/lib/IR/Module.cpp (getGlobalVariable, collectUsedGlobalVariables)
+// - llvm/lib/Transforms/IPO/StripDeadPrototypes.cpp, llvm/lib/Transforms/IPO/ElimAvailExtern.cpp,
+//   llvm/lib/Transforms/IPO/ConstantMerge.cpp, llvm/lib/Transforms/IPO/GlobalDCE.cpp,
+//   llvm/lib/Transforms/Utils/AssignGUID.cpp
 // - llvm/lib/Analysis/TypeMetadataUtils.cpp (getPointerAtOffset, replaceRelativePointerUsersWithZero)
+// - llvm/lib/Transforms/Utils/ModuleUtils.cpp (getUniqueModuleId)
 // A blockaddress is not a user of its function in LLVM 23 (BlockAddress has no operands); here it has the
 // function as operand 0, so every walk over a function's uses skips VK_BLOCKADDR users.
 import std;

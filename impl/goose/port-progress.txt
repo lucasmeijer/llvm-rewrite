@@ -179,9 +179,18 @@ lib/Analysis/ProfileSummaryInfo.cpp 0.85  # summary from module flags, threshold
 lib/IR/ProfileSummary.cpp 0.4  # getFromMD only
 lib/ProfileData/ProfileSummaryBuilder.cpp 0.1  # getEntryForPercentile only
 lib/Transforms/Utils/SizeOpts.cpp 0.7  # shouldOptimizeForSize(F/BB) with PGSO options
-lib/Transforms/Utils/ModuleUtils.cpp 0.05  # filterDeadComdatFunctions only
 lib/IR/Function.cpp 0.15  # eraseFromParent, dropAllReferences, getEntryCount/setEntryCount, isIntrinsic
 lib/Transforms/Utils/CallPromotionUtils.cpp 0.2  # tryPromoteCall, isLegalToPromote, promoteCall when the function types match (loud otherwise); no versionCallSite / promoteCallWithIfThenElse / ctxprof
-lib/Analysis/TypeMetadataUtils.cpp 0.3  # getPointerAtOffset, getFunctionAtVTableOffset; no devirt call/type-test helpers
 lib/Analysis/MemoryProfileInfo.cpp 0.6  # CallStackTrie built from existing MIB metadata (addCallStack, buildMIBNodes, saveFilteredNewMIBNodes, buildAndAttachMIBMetadata, attributes); no profile-time paths, -memprof-report-hinted-sizes loud
 lib/IR/FPEnv.cpp 0.3  # getConstrainedIntrinsicID
+
+# --- L2.globals / L2.ipo-args (2026-11)
+lib/Transforms/IPO/GlobalOpt.cpp 0.9  # all but OptimizeNonTrivialIFuncs (a no-op without AArch64 multiversioning), transferSRADebugInfo (loud), the BFI-based coldcc candidate check (TTI says no coldcc on X86)
+lib/Transforms/IPO/ElimAvailExtern.cpp 0.85  # no -avail-extern-to-local for functions (loud)
+lib/Transforms/IPO/Internalize.cpp 0.9  # no -internalize-public-api-file, glob brace expansion (loud)
+lib/Transforms/IPO/ArgumentPromotion.cpp 0.97  # all but copyMetadata of !type attachments (loud)
+lib/IR/Globals.cpp 0.35  # linkage/visibility setters, getComdat, findBaseObject, copyAttributesFrom, getGlobalIdentifier, assignGUID, isInterposable
+lib/IR/Module.cpp 0.05  # getGlobalVariable, getFunction, collectUsedGlobalVariables
+lib/Analysis/TypeMetadataUtils.cpp 0.5  # getPointerAtOffset, getFunctionAtVTableOffset, replaceRelativePointerUsersWithZero; no devirt call/type-test helpers
+lib/Support/GlobPattern.cpp 0.6  # *, ?, [...], escapes; no brace expansion
+lib/Transforms/Utils/ModuleUtils.cpp 0.1  # filterDeadComdatFunctions, getUniqueModuleId (ipo_globals.goose)

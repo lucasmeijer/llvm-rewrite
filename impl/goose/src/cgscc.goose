@@ -13,6 +13,7 @@
 // CGSCCUpdateResult is global state (`ur_*`); one ModuleToPostOrderCGSCCPassAdaptor runs at a time.
 // The CGSCC pipeline runners form one recursive cycle (nested cgscc(...) / devirt<N>(...)), so they keep no
 // growable locals: DevirtSCCRepeatedPass's CallCounts live on `dv_counts` above a mark.
+import argpromotion;
 import std;
 import ir;
 import irutil;
@@ -271,6 +272,7 @@ recursive fn cg_run_pass(n: i32, c: i32) -> u32 {
     if p == P_CG_INVALIDATE { return PA_ALL & ~((1 as u32) << A_NOOP_CGSCC); }
     if p == P_FUNCTION_ATTRS { let pa = fa_run_cgscc(c, pnodes[n].arg != 0); ap_pool_reset(); return pa; }
     if p == P_INLINE { let pa = inl_run_cgscc(c, pnodes[n].arg != 0); ap_pool_reset(); return pa; }
+    if p == P_ARGPROMOTION { let pa = argpromotion_run_cgscc(c); ap_pool_reset(); return pa; }
     fatal("internal: unknown CGSCC pass id");
     return PA_ALL;
 }

@@ -117,6 +117,7 @@ let P_FUNCTION_ATTRS = 300;     // arg: 1 = skip-non-recursive-function-attrs
 let P_INLINE = 301;             // arg: 1 = only-mandatory
 let P_NOOP_CGSCC = 302;         // also require<no-op-cgscc>
 let P_CG_INVALIDATE = 303;      // invalidate<no-op-cgscc>
+let P_ARGPROMOTION = 304;
 // function passes
 let P_DCE = 100;
 let P_REDUNDANT_DBG_INST_ELIM = 120;
@@ -292,6 +293,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_NOOP_FUNCTION => "NoOpFunctionPass",
         P_FUNCTION_ATTRS => "PostOrderFunctionAttrsPass",
         P_INLINE => "InlinerPass",
+        P_ARGPROMOTION => "ArgumentPromotionPass",
         P_NOOP_CGSCC => "NoOpCGSCCPass",
         P_ALWAYS_INLINE => "AlwaysInlinerPass",
         P_MODULE_INLINE => "ModuleInlinerPass",
@@ -923,6 +925,7 @@ recursive fn parse_cgscc_elem(e: i32) -> i32 {
         let a = parse_single_option(name, "inline", "only-mandatory", "InlinerPass");
         return new_pnode(PK_PASS, P_INLINE as i32, a, false, pelems[e].name);
     }
+    if name == "argpromotion" { return new_pnode(PK_PASS, P_ARGPROMOTION as i32, 0, false, pelems[e].name); }
     if name == "no-op-cgscc" { return new_pnode(PK_PASS, P_NOOP_CGSCC as i32, 0, false, pelems[e].name); }
     if name == "require<no-op-cgscc>" { return new_pnode(PK_PASS, P_NOOP_CGSCC as i32, 0, true, pelems[e].name); }
     if name == "invalidate<no-op-cgscc>" { return new_pnode(PK_PASS, P_CG_INVALIDATE as i32, 0, true, pelems[e].name); }

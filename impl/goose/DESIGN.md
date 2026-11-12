@@ -525,7 +525,13 @@ To add a function pass `foo`:
    `invalidate_function`, and decide whether it's in `PA_CFG` (LLVM's `CFGAnalyses` set).
 5. Printers write to `errs(...)` (flags.goose); `errs_operand`/`errs_inst` print values exactly as the IR printer
    does (they number the function with the printer's SlotTracker).
-Module passes: an `m:` row and a case in `run_module_node`.
+Module passes: an `m:` row and a case in `run_module_node`. A module pass that changes the IR returns PreservedAnalyses
+through `module_invalidate(m, pa)` (and `gm_invalidate()`); one that erases or replaces functions calls
+`invalidate_function(f, PA_NONE)` first (FAM.clear). Global values are created detached (`ig_new_gvar`,
+`ig_new_function`), linked with `ig_insert_global_before`, renamed with `set_name` *after* linking (the module
+symbol table uniques), and erased with `ig_erase_global`, which applies ValueAsMetadata::handleDeletion
+(ipo_globals.goose). A CGSCC pass is a case in `cg_run_pass` (cgscc.goose) returning its preserved set; replacing a
+function in the call graph is `lcg_replace_node_function`.
 
 **Loop passes** (lpm.goose, passmgr.goose): `loop(...)`/`loop-mssa(...)` and a loop pass in a function pipeline
 become a `PK_LOOP` node (FunctionToLoopPassAdaptor) whose `pass` field links its two canonicalization nodes

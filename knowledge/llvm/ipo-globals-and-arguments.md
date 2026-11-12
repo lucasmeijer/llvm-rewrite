@@ -18,6 +18,17 @@ every round-tripping corpus file, also with each test's own flags; `globalopt --
   its destructor; if they are not deleted, their initializers stay constant users and later isSafeToDestroyConstant
   checks fail (GlobalOpt/evaluate-call.ll lost its `local_unnamed_addr`).
 
+- Deleting a block whose address is still used (~BasicBlock: a dead function with a `blockaddress` in some
+  initializer) replaces the blockaddress by `inttoptr (i32 1 to ptr)` (GlobalOpt/deadfunction.ll; verified with the
+  goose port).
+- `Function::hasAddressTaken()` has IgnoreAssumeLikeCalls = true by default: a direct use by an assume-like
+  intrinsic (`llvm.objectsize`, lifetime, assume, ...) or a bitcast/addrspacecast constant whose users are all
+  assume-like intrinsics is not "address taken". GlobalOpt still gives such a function `fastcc`
+  (GlobalOpt/fastcc.ll @assume_fastcc, @constexpr_self_user); DAE's deleteDeadVarargs uses the same query.
+- `GlobalValue::isInterposable()` defaults to CheckNoIPA = true: a `noipa` function definition is interposable.
+  The Evaluator refuses to call one (GlobalOpt/global-constructor-noipa.ll), static ifunc resolution refuses a
+  `noipa` resolver (resolve-static-ifunc-noipa.ll); DAE's isDefinitionExact goes through mayBeDerefined, the same.
+
 ## GlobalOpt
 
 - processGlobal runs on functions too: any function or global whose address is never compared gets
@@ -44,6 +55,11 @@ every round-tripping corpus file, also with each test's own flags; `globalopt --
 - ConstantMerge's `getAlign(GV)` is the explicit alignment when there is one, else DataLayout::getPreferredAlign
   (ConstantMerge/align.ll: align 1 and align 2 merge to align 2, not to the preferred 4).
 
+- Localizing a global needs `GV->getType()->getAddressSpace() == DL.getAllocaAddrSpace()`: with `A5` in the
+  data layout a global in address space 0 is not turned into an alloca (global_alloca_diff_addrspaces.ll).
+- `opt -f` (force binary output) and the codegen option `-emulated-tls` change nothing in `-S` output; GlobalOpt
+  tests pass them.
+
 ## DeadArgElim and ArgumentPromotion
 
 - markFnOrRetTyFrozenOnMusttail tests `CC != SwiftTail || CC != Tail`, which is always true: any musttail call
@@ -56,3 +72,10 @@ every round-tripping corpus file, also with each test's own flags; `globalopt --
   so the second argument's allocas are inserted before the first one's. Loads in callers get `.val` names from the
   passed value, including `.val` for an unnamed value.
 - `-passes=argpromotion` is `cgscc(argpromotion)` with MaxElements = 2.
+- ArgumentPromotion creates the new function with `Function::Create(..., F->getName())` and then inserts it next
+  to F: the module symbol table uniques the name first (`foo.N`, bumping the module's unique-name counter), then
+  `takeName` gives it `foo`. Later uniqued global names count from there. (DAE creates its new function unnamed.)
+- ArgumentPromotion hands the callee-side allocas to PromoteMemToReg in `SmallDenseMap<int64_t, AllocaInst *>`
+  order (offset -> alloca, 4 inline buckets, hash `offset * 37`, quadratic probing), not offset order.
+- The `sret` -> `noalias` rewrite of an argument happens before the promotability checks, so it changes the IR even
+  when nothing is promoted (and the pass then reports "all preserved").
