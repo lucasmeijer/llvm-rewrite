@@ -37,6 +37,14 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
   `vectorizeLoadInsert`, `widenSubvectorLoad`, `foldInterleaveIntrinsics`, `foldDeinterleaveIntrinsics`,
   `shrinkLoadForShuffles` and `shrinkPhiOfShuffles` use a local `IRBuilder<>` (ConstantFolder) instead.
 
+- `m_FNeg` (foldInsExtFNeg) also matches `fsub nsz +0.0, X`: with `nsz` any zero is accepted as the minuend.
+- foldSignBitReductionCmp's `isIntN(BitWidth, NumSources * NumElts)` is the *signed* range: a reduce.add over
+  `<2 x i2>` (count 2) or `<5 x i3>` (count 5) is not folded (VectorCombine/X86/fold-signbit-reduction-cmp.ll).
+- foldSelectShuffle: `checkSVNonOpUses(I)` returns true (= bail out) for a null input or one whose operand 0 type is
+  not the shuffle type, so non-shuffle binop operands only survive when they are instructions of that type; and
+  `AddShuffleMaskAdjustedCost` computes `ShuffleCost * NumUniqueGroups / NumGroups` on InstructionCost, whose
+  division is fixed point (granularity 4), so the costs compared there can be fractional.
+
 ## SLPVectorizer (structure facts for porters; from reading SLPVectorizer.cpp of 23.1.5)
 
 - Size and shape: 33.3k lines in one file (+ SLPVectorizer/SLPUtils.cpp). Roughly: helpers and

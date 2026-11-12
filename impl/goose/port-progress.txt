@@ -105,7 +105,7 @@ lib/Analysis/ValueLatticeUtils.cpp 1  # manual: renamed: sc_can_track_* in sccp.
 lib/Analysis/DomConditionCache.cpp 1
 lib/Transforms/InstCombine/InstCombineSelect.cpp 0.95
 lib/Transforms/InstCombine/InstCombinePHI.cpp 0.9
-lib/Analysis/VectorUtils.cpp 0.16  # + getVectorIntrinsicIDForCall (laa.goose), processShuffleMasks (tti_x86_vec.goose)
+lib/Analysis/VectorUtils.cpp 0.2  # + getVectorIntrinsicIDForCall (laa.goose), processShuffleMasks (tti_x86_vec.goose), isVectorIntrinsicWith*AtArg, get/isSplatValue, narrow/widenShuffleMaskElts (vecutils.goose)
 lib/Analysis/MemoryBuiltins.cpp 0.55
 lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
@@ -194,3 +194,4 @@ lib/IR/Module.cpp 0.05  # getGlobalVariable, getFunction, collectUsedGlobalVaria
 lib/Analysis/TypeMetadataUtils.cpp 0.5  # getPointerAtOffset, getFunctionAtVTableOffset, replaceRelativePointerUsersWithZero; no devirt call/type-test helpers
 lib/Support/GlobPattern.cpp 0.6  # *, ?, [...], escapes; no brace expansion
 lib/Transforms/Utils/ModuleUtils.cpp 0.1  # filterDeadComdatFunctions, getUniqueModuleId (ipo_globals.goose)
+lib/Transforms/Vectorize/VectorCombine.cpp 0.95  # all folds and the driver; not ported (fail loudly): scalarizeVPIntrinsic's rewrite, foldBitcastOfVPLoad, foldSelectsFromBitcast with several condition groups (DenseMap order)

@@ -91,14 +91,21 @@ fn ld_suppress_for_sanitizers(i: i32) -> bool { spec_sanitizer_suppresses(i) }
 // isSafeToLoadUnconditionally(V, Alignment, Size, DL, ScanFrom, AC = null, DT = null, TLI = null).
 // Size has the index width of V's type.
 fn ld_safe_to_load_unconditionally(v0: i32, align: i64, size: AP, scan_from: i32) -> bool {
+    return ld_safe_to_load_unconditionally_q(v0, align, size, scan_from, false);
+}
+// acdt: the caller passes its AssumptionCache and DominatorTree (VectorCombine)
+fn ld_safe_to_load_unconditionally_q(v0: i32, align: i64, size: AP, scan_from: i32, acdt: bool) -> bool {
     let save_cxt = spec_cxt;
     let save_ac = spec_use_ac;
+    let save_dt = spec_use_dt;
     spec_cxt = scan_from;
-    spec_use_ac = false;
+    spec_use_ac = acdt;
+    if acdt { spec_use_dt = true; }
     spec_visited.clear();
     let d = spec_deref_aligned(v0, align, size, 16);
     spec_cxt = save_cxt;
     spec_use_ac = save_ac;
+    spec_use_dt = save_dt;
     if d {
         if scan_from < 0 || !ld_suppress_for_sanitizers(scan_from) { return true; }
     }
@@ -134,6 +141,12 @@ fn ld_safe_to_load_unconditionally(v0: i32, align: i64, size: AP, scan_from: i32
     return false;
 }
 
+// isSafeToLoadUnconditionally(V, Ty, Alignment, DL, ScanFrom, AC, DT)
+fn ld_safe_to_load_unconditionally_ty_acdt(v: i32, ty: i32, align: i64, scan_from: i32) -> bool {
+    if ty_contains_scalable(ty) { return false; }
+    let w = dl_ptr(ptr_as(vals[v].ty)).idx;
+    return ld_safe_to_load_unconditionally_q(v, align, ap_u64(dl_store_size(ty) as u64, w), scan_from, true);
+}
 // isSafeToLoadUnconditionally(V, Ty, Alignment, DL, ScanFrom)
 fn ld_safe_to_load_unconditionally_ty(v: i32, ty: i32, align: i64, scan_from: i32) -> bool {
     if ty_contains_scalable(ty) { return false; }

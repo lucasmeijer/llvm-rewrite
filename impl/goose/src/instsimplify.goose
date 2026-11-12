@@ -3299,17 +3299,21 @@ recursive fn fold_identity_shuffles(dest: i64, op0: i32, op1: i32, mv: i64, root
 
 recursive fn simplify_shufflevector(iv: i32, op00: i32, op10: i32, q: SQ, mr: i64) -> i32 {
     let x = insts[inst_of(iv)];
-    let rt = vals[iv].ty;
+    let mark = is_ops.len;
+    for k in x.naux { is_ops.push(ints[x.aux + k]); }
+    return simplify_shufflevector_mask(vals[iv].ty, op00, op10, mark, x.naux as i64, q, mr);
+}
+
+// simplifyShuffleVectorInst(Op0, Op1, Mask, RetTy, Q, MaxRecurse): the mask is is_ops[mark..mark + nm); the
+// function truncates is_ops back to mark.
+recursive fn simplify_shufflevector_mask(rt: i32, op00: i32, op10: i32, mark: i64, nm: i64, q: SQ, mr: i64) -> i32 {
     var allp = true;
-    for k in x.naux { if ints[x.aux + k] != -1 { allp = false; } }
-    if allp { return c_poison(rt); }
+    for k in nm { if is_ops[mark + k] != -1 { allp = false; } }
+    if allp { is_ops.resize(mark); return c_poison(rt); }
     var op0 = op00;
     var op1 = op10;
     let ivt = vals[op0].ty;
-    let nm = x.naux as i64;
     let scalable = ty_kind(ivt) == TK_SVEC;
-    let mark = is_ops.len;
-    for k in nm { is_ops.push(ints[x.aux + k]); }
     if !scalable {
         var s0 = false;
         var s1 = false;

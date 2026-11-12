@@ -16,6 +16,7 @@ var cl_mcpu: u8[>..];      // -mcpu
 // Options passes read. Options that would change output in ways we don't implement are not listed, so they
 // fail loudly. Options listed as no-ops change nothing we print (e.g. extra verification).
 let KNOWN_FLAGS: const u8[:][] = [
+    "disable-vector-combine", "disable-binop-extract-shuffle", "vector-combine-max-scan-instrs",   // vector-combine
     "adce-remove-loops", "adce-remove-control-flow",
     "verify-dom-info",                                   // no-op: extra verification only
     "verify-each",                                       // no-op: the verifier would only report broken IR

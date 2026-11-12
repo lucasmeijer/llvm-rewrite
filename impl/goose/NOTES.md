@@ -31,6 +31,12 @@
 - L2.ipo-args COMPLETE (206/206: ArgumentPromotion 55/55, DeadArgElim 39/39, Internalize 9/9 roundtrip + opt).
   L2.globals 445/450 (all 225 roundtrip, 220/225 opt): the 5 left run `-O2`, `lto<O2>` or `default<O0>`
   pipelines. See "IPO over globals and arguments" below for the sweeps (0 differs everywhere).
+- L1.vectorize.vector-combine COMPLETE (130/130: 65 roundtrip, 65 opt). Sweeps of `vector-combine`: whole-file
+  8064 identical / 0 differs (16 loud: VP intrinsics, a 16-bit triple), `--with-test-flags` 9822 identical / 0 differs
+  (the loud ones are other passes' options), `--per-function` 70741 identical / 0 differs (4 loud: ppc_fp128, x32),
+  `instcombine,vector-combine` 0 differs, tests/perf/compile `sroa,vector-combine` 4/4 identical. See
+  "VectorCombine" below.
+
 - L1.loop-unroll 248/256 (all 128 roundtrip, 120/128 opt). The 8 left: `-O1`/`-O2` pipelines (3), `-pgso` with
   `require<profile-summary>` (1), X86 CPUs the TTI didn't know then (`nehalem`, `znver3`; 2; now known), X86 getIntrinsicInstrCost
   of `llvm.experimental.guard` (1), and one more pipeline/flag test. Sweeps (every round-tripping corpus file): `loop-unroll` whole-file (7687 identical, 0 differs) and
@@ -275,6 +281,9 @@
 | `src/loop_deletion.goose`, `src/loop_instsimplify.goose`, `src/loop_simplifycfg.goose` | LoopDeletion, LoopInstSimplify, LoopSimplifyCFG |
 | `src/loop_idiom.goose`, `src/hash_recognize.goose` | LoopIdiomRecognize (memset/memcpy/memmove, CRC table, strlen/wcslen, popcount, ctlz/cttz, shift idioms); HashRecognize |
 | `src/laa.goose`, `src/pse.goose` | LoopAccessAnalysis + print<access-info>; PredicatedScalarEvolution |
+| `src/vector_combine.goose`, `src/vector_combine2.goose` | VectorCombine (VectorCombine.cpp, whole): worklist, IRBuilder<InstSimplifyFolder> `vcb_*`, every fold, the driver |
+| `src/tti_vec.goose` | the vectorizers' TTI front end `tv_*` (X86 or NoTTIImpl): shuffle / insert-extract / arith / cast / memory / scalarization / intrinsic / reduction costs, register queries |
+| `src/vecutils.goose` | VectorUtils + LoopUtils helpers `vu_*`: scalar-op / overload-type intrinsic args, splat values, mask narrowing/widening, reduction intrinsic mapping, copyIRFlags/andIRFlags/propagateIRFlags, getLosslessInvCast |
 | `tools/gb.sh` | `tools/gb.sh src/opt.goose bin/opt` builds with warnings hidden (Goose has no `-w`) |
 
 ## Goose traps (cost me time)
@@ -1239,6 +1248,31 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   compared value the order isn't reproducible, so that case fails loudly.
 - Uses goose_loopmisc's loop_utils.goose (containsIrreducibleCFG, LoopBlocksRPO, RecursivelyDeleteTriviallyDead with
   MSSAU); unroll_utils.goose and loop_utils.goose both port LoopInfo::erase (written concurrently; merge later).
+
+## VectorCombine and the vectorizer TTI layer (vector_combine.goose, vector_combine2.goose, tti_vec.goose, vecutils.goose)
+
+- vector_combine.goose: state, InstructionWorklist (vc_wl + VM_PASS0 as WorklistMap), replaceValue / eraseInstruction /
+  RecursivelyDeleteTriviallyDeadInstructions with the NextInst callback (VS_PASS1 = Visited), the builder, and the
+  folds from vectorizeLoadInsert to foldConcatOfBoolMasks; vector_combine2.goose: the rest of the folds, FoldInst and
+  vector_combine_run. Fold-local sets use VS_PASS0.
+- The builder `vcb_*` is IRBuilder<InstSimplifyFolder> (SimplifyQuery(DL): vcf_begin sets sq_no_dt/ac/tli and clears
+  dc_active). The folds that make a local `IRBuilder<> Builder(I)` call vcb_local(I), which switches the same global
+  builder to ConstantFolder mode (vcb_cf) until the next FoldInst. CreateUnaryIntrinsic inserts the declaration before
+  folding; CreateIntrinsic(RetTy, ...) finds the overload types by matching the signature (vc_decl_for_signature).
+- instsimplify.goose has simplify_shufflevector_mask (simplifyShuffleVectorInst on a mask in is_ops) for the
+  folder; simplify_shufflevector is a wrapper. loads.goose has ld_safe_to_load_unconditionally_ty_acdt
+  (isSafeToLoadUnconditionally with the caller's AC and DT, which also makes ScanFrom the context instruction).
+- tti_vec.goose (`tv_*`) is the TTI front end for the vectorizers: every query dispatches to X86TTIImpl or the
+  NoTTIImpl defaults (shuffles/inserts/extracts/memory/reductions 1, scalarization overhead 0, register width 32,
+  min vector register width 128, 8 registers) and copies masks / demanded elements into mk_pool. SLP should use it.
+- foldSelectShuffle's AddShuffleMaskAdjustedCost divides an InstructionCost (fixed point, granularity 4): its costs
+  are kept in quarter units (vcq) so fractional results compare like LLVM's.
+- Not ported (fail loudly): scalarizeVPIntrinsic past its splat/all-true-mask checks, foldBitcastOfVPLoad of a
+  vp.load, foldSelectsFromBitcast with more than one condition group (DenseMap order), CreateInBoundsGEP in
+  ConstantFolder mode (no caller). foldSelectShuffle's null-dereference paths (non-instruction binop operands that
+  pass the use checks, a -1 inner mask index) fail loudly where LLVM would crash.
+- Perf: VectorCombine is a single pass over the function plus a worklist; no scaling benchmark exercises it (the
+  perf corpus is scalar after sroa), so no number yet.
 
 ## X86 TTI and print<cost-model> (tti*.goose, x86_lower.goose, gen_x86*.goose)
 
