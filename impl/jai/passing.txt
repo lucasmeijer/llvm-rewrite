@@ -730,6 +730,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Bubblesort.ll::ro
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/FloatMM.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/FloatMM.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/IntMM.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Oscar.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Oscar.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Perm.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Perm.ll::roundtrip
@@ -8752,8 +8753,11 @@ tests/imported/llvm/Transforms/InstCombine/strstr-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strstr-2.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/strto-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/strto-1.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/struct-assign-tbaa-2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/struct-assign-tbaa-2.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/struct-assign-tbaa-new.ll::opt
 tests/imported/llvm/Transforms/InstCombine/struct-assign-tbaa-new.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/struct-assign-tbaa.ll::opt
 tests/imported/llvm/Transforms/InstCombine/struct-assign-tbaa.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sub-after-sle-is-non-negative.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sub-after-sle-is-non-negative.ll::roundtrip
@@ -10378,6 +10382,7 @@ tests/imported/llvm/Transforms/LoopInterchange/confused-dependence.ll::opt
 tests/imported/llvm/Transforms/LoopInterchange/confused-dependence.ll::roundtrip
 tests/imported/llvm/Transforms/LoopInterchange/currentLimitation.ll::opt
 tests/imported/llvm/Transforms/LoopInterchange/currentLimitation.ll::roundtrip
+tests/imported/llvm/Transforms/LoopInterchange/debug-record-after-phi.ll::opt
 tests/imported/llvm/Transforms/LoopInterchange/debug-record-after-phi.ll::roundtrip
 tests/imported/llvm/Transforms/LoopInterchange/debuginfo.ll::opt
 tests/imported/llvm/Transforms/LoopInterchange/debuginfo.ll::roundtrip
@@ -10480,6 +10485,7 @@ tests/imported/llvm/Transforms/LoopInterchange/reduction-extra-use-in-inner-loop
 tests/imported/llvm/Transforms/LoopInterchange/reduction-extra-use-in-inner-loop.ll::roundtrip
 tests/imported/llvm/Transforms/LoopInterchange/reduction-not-involve-innermost.ll::opt
 tests/imported/llvm/Transforms/LoopInterchange/reduction-not-involve-innermost.ll::roundtrip
+tests/imported/llvm/Transforms/LoopInterchange/reduction2mem.ll::opt
 tests/imported/llvm/Transforms/LoopInterchange/reduction2mem.ll::roundtrip
 tests/imported/llvm/Transforms/LoopInterchange/reductions-across-inner-and-outer-loop.ll::opt
 tests/imported/llvm/Transforms/LoopInterchange/reductions-across-inner-and-outer-loop.ll::roundtrip
@@ -12091,6 +12097,7 @@ tests/imported/llvm/Transforms/PartiallyInlineLibCalls/nobuiltin.ll::roundtrip
 tests/imported/llvm/Transforms/PartiallyInlineLibCalls/strictfp.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/2010-03-22-empty-baseclass.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/2010-03-22-empty-baseclass.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/X86/SROA-after-final-loop-unrolling-2.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/SROA-after-final-loop-unrolling-2.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/SROA-after-final-loop-unrolling.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/SROA-after-final-loop-unrolling.ll::roundtrip

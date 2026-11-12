@@ -3,8 +3,7 @@
 // DependenceInfo, dependence_analysis.jai), LoopInterchangeLegality, LoopInterchangeProfitability (the instorder
 // and vectorize rules) and LoopInterchangeTransform.
 //
-// Not ported, failing loudly: the `cache` profitability rule (CacheCost, LoopCacheAnalysis.cpp) and
-// -loop-interchange-reduction-to-mem (reduction2Memory). Optimization remarks are never printed, so they are left
+// Not ported, failing loudly: the `cache` profitability rule (CacheCost, LoopCacheAnalysis.cpp). Optimization remarks are never printed, so they are left
 // out.
 
 Li_Rule :: enum u8 { CACHE; INSTORDER; VECTORIZE; IGNORE; }
@@ -176,6 +175,17 @@ Li_Legality :: struct {
     inner_loop_inductions: [..] Value_Id;
     has_no_wrap_reductions: [..] Value_Id;
     has_no_inf_insts: [..] Value_Id;
+    inner_reductions: [..] Li_Inner_Reduction;
+}
+// LoopInterchangeLegality::InnerReduction
+Li_Inner_Reduction :: struct {
+    reduction: Value_Id;
+    init: Value_Id;
+    next: Value_Id;
+    lcssa_phi: Value_Id;
+    lcssa_store: Value_Id;
+    mem_ref: Value_Id;
+    elem_ty: Type_Id;
 }
 
 value_users :: (v: Value_Id, out: *[..] Value_Id) {
@@ -195,7 +205,7 @@ li_contains_unsafe_instructions :: (bb: Value_Id, skip: Value_Id) -> bool {
 }
 
 // tightlyNested
-li_tightly_nested :: (c: *Li_Ctx, outer: Loop_Id, inner: Loop_Id) -> bool {
+li_tightly_nested :: (c: *Li_Ctx, lg: *Li_Legality, outer: Loop_Id, inner: Loop_Id) -> bool {
     li := c.li;
     outer_header := li_header(li, outer);
     inner_ph := li_loop_preheader(li, inner);
@@ -204,6 +214,7 @@ li_tightly_nested :: (c: *Li_Ctx, outer: Loop_Id, inner: Loop_Id) -> bool {
     block_successors(outer_header, *succs);
     for succs if it != inner_ph && it != li_header(li, inner) return false;
     skip: Value_Id = NONE;
+    if lg.inner_reductions.count == 1 skip = lg.inner_reductions[0].lcssa_store;
     if li_contains_unsafe_instructions(outer_header, skip) || li_contains_unsafe_instructions(outer_latch, skip) return false;
     if inner_ph != outer_header && li_contains_unsafe_instructions(inner_ph, skip) return false;
     inner_exit := li_exit_block(li, inner);
@@ -298,6 +309,54 @@ li_find_inner_reduction_phi :: (c: *Li_Ctx, l: Loop_Id, v: Value_Id, no_wrap: *[
     return NONE;
 }
 
+// isInnerReduction
+li_is_inner_reduction :: (c: *Li_Ctx, lg: *Li_Legality, l: Loop_Id, phi: Value_Id) -> bool {
+    li := c.li;
+    if !li_is_innermost(li, l) return false;
+    if phi_num_incoming(phi) != 2 return false;
+    init := phi_incoming_value_for_block(phi, li_loop_preheader(li, l));
+    next := phi_incoming_value_for_block(phi, li_loop_latch(li, l));
+    if !is_const(init) return false;
+    if is_inst(next) && !li_contains(li, l, inst_block(next)) return false;
+    if !has_one_user(phi) return false;
+    if !li_check_reduction_kind(c, l, phi, *lg.has_no_wrap_reductions, *lg.has_no_inf_insts) return false;
+    exit_block := li_exit_block(li, l);
+    if exit_block == NONE return false;
+    lcssa: Value_Id = NONE;
+    users: [..] Value_Id; users.allocator = temp;
+    value_users(next, *users);
+    for u: users {
+        if is_inst(u) && inst_op(u) == .PHI {
+            if u == phi continue;
+            if lcssa == NONE && inst_block(u) == exit_block && phi_incoming_value_for_block(u, li_loop_latch(li, l)) == next lcssa = u;
+            else return false;
+        } else return false;
+    }
+    if lcssa == NONE return false;
+    if !has_one_user(lcssa) return false;
+    st := unique_undroppable_user(lcssa);
+    if st == NONE || !is_inst(st) || inst_op(st) != .STORE || inst_block(st) != exit_block return false;
+    mem_ref := op(st, 1);
+    elem_ty := vtype(op(st, 0));
+    if !is_inst(mem_ref) fatal("loop-interchange: reduction2Memory with a non-instruction memory reference (DT->dominates(nullptr, BB)) is not supported");
+    // DominatorTree::dominates(const Instruction *Def, const BasicBlock *UseBB)
+    {
+        def_bb := inst_block(mem_ref);
+        use_bb := li_header(li, l);
+        dom := true;
+        if dt_is_reachable_from_entry(c.dt, use_bb) {
+            if !dt_is_reachable_from_entry(c.dt, def_bb) || def_bb == use_bb dom = false;
+            else if inst_op(mem_ref) == .INVOKE fatal("loop-interchange: reduction2Memory with an invoke memory reference is not supported");
+            else dom = dt_dominates(c.dt, def_bb, use_bb);
+        }
+        if !dom return false;
+    }
+    r: Li_Inner_Reduction;
+    r.reduction = phi; r.init = init; r.next = next; r.lcssa_phi = lcssa; r.lcssa_store = st; r.mem_ref = mem_ref; r.elem_ty = elem_ty;
+    array_add(*lg.inner_reductions, r);
+    return true;
+}
+
 // checkInductionsAndReductions
 li_check_inductions_and_reductions :: (c: *Li_Ctx, lg: *Li_Legality, outer: Loop_Id) -> bool {
     li := c.li;
@@ -336,11 +395,11 @@ li_check_inductions_and_reductions :: (c: *Li_Ctx, lg: *Li_Legality, outer: Loop
                 if !contains_value(lg.outer_inner_reductions, inner_red) array_add(*lg.outer_inner_reductions, inner_red);
             } else {
                 if contains_value(lg.outer_inner_reductions, phi) {
-                } else if li_cl.reduction_to_mem {
-                    fatal("loop-interchange: -loop-interchange-reduction-to-mem (isInnerReduction, reduction2Memory) is not implemented yet");
+                } else if li_cl.reduction_to_mem && li_is_inner_reduction(c, lg, cur, phi) {
                 } else return false;
             }
         }
+        if lg.inner_reductions.count > 1 return false;
         cur = child(li, cur);
     }
     return lg.inner_loop_inductions.count != 0;
@@ -369,13 +428,14 @@ li_current_limitations :: (c: *Li_Ctx, lg: *Li_Legality) -> bool {
 }
 
 // areInnerLoopExitPHIsSupported
-li_are_inner_loop_exit_phis_supported :: (c: *Li_Ctx, outer: Loop_Id, inner: Loop_Id, reductions: [] Value_Id) -> bool {
+li_are_inner_loop_exit_phis_supported :: (c: *Li_Ctx, outer: Loop_Id, inner: Loop_Id, reductions: [] Value_Id, lcssa_reduction: Value_Id) -> bool {
     li := c.li;
     inner_exit := li_unique_exit_block(li, inner);
     users: [..] Value_Id; users.allocator = temp;
     for phi: block_insts(inner_exit) {
         if inst_op(phi) != .PHI break;
         if phi_num_incoming(phi) > 1 return false;
+        if phi == lcssa_reduction continue;
         value_users(phi, *users);
         for u: users {
             if !(is_inst(u) && inst_op(u) == .PHI) return false;
@@ -441,8 +501,10 @@ li_can_interchange_loops :: (c: *Li_Ctx, lg: *Li_Legality, inner_id: s64, outer_
     if !li_check_inductions_and_reductions(c, lg, lg.outer) return false;
     if !li_are_inner_loop_latch_phis_supported(c, lg.inner) return false;
     if li_current_limitations(c, lg) return false;
-    if !li_tightly_nested(c, lg.outer, lg.inner) return false;
-    if !li_are_inner_loop_exit_phis_supported(c, lg.outer, lg.inner, lg.outer_inner_reductions) return false;
+    if !li_tightly_nested(c, lg, lg.outer, lg.inner) return false;
+    lcssa_reduction: Value_Id = NONE;
+    if lg.inner_reductions.count == 1 lcssa_reduction = lg.inner_reductions[0].lcssa_phi;
+    if !li_are_inner_loop_exit_phis_supported(c, lg.outer, lg.inner, lg.outer_inner_reductions, lcssa_reduction) return false;
     if !li_are_outer_loop_exit_phis_supported(c, lg.outer) return false;
     outer_latch := li_loop_latch(li, lg.outer);
     for phi: block_insts(outer_latch) {
@@ -747,11 +809,30 @@ li_adjust_loop_branches :: (c: *Li_Ctx, lg: *Li_Legality) {
     form_lcssa_for_instructions(*may_need, dt, li, *cache);
 }
 
+// reduction2Memory
+li_reduction_to_memory :: (c: *Li_Ctx, lg: *Li_Legality) {
+    li := c.li;
+    sr := lg.inner_reductions[0];
+    inner := lg.inner;
+    header := li_header(li, inner);
+    b: Irb;
+    irb_set_at(*b, header, block_first_non_phi(header), true);
+    first_iter := irb_phi(*b, ir.t_i1, 2, "first.iter");
+    phi_add_incoming(first_iter, const_int(ir.t_i1, 1), li_loop_preheader(li, inner));
+    phi_add_incoming(first_iter, const_int(ir.t_i1, 0), li_loop_latch(li, inner));
+    load_mem := irb_load(*b, sr.elem_ty, sr.mem_ref, dl_abi_align(sr.elem_ty));
+    new_var := irb_select(*b, first_iter, sr.init, load_mem, "new.var");
+    replace_all_uses_with(sr.reduction, new_var);
+    set_op(sr.lcssa_store, 0, sr.next);
+    drp_move_after(sr.lcssa_store, sr.next);
+}
+
 // LoopInterchangeTransform::transform
 li_transform :: (c: *Li_Ctx, lg: *Li_Legality) {
     li := c.li;
     dt := c.dt;
     outer := lg.outer; inner := lg.inner;
+    if lg.inner_reductions.count == 1 li_reduction_to_memory(c, lg);
     inductions := lg.inner_loop_inductions;
     inner_index_vars: [..] Value_Id; inner_index_vars.allocator = temp;
     for phi: inductions {
@@ -828,7 +909,7 @@ li_process_loop :: (c: *Li_Ctx, loops: *[..] Loop_Id, inner_id: s64, outer_id: s
     lg: Li_Legality;
     lg.outer = outer; lg.inner = inner;
     lg.outer_inner_reductions.allocator = temp; lg.inner_loop_inductions.allocator = temp;
-    lg.has_no_wrap_reductions.allocator = temp; lg.has_no_inf_insts.allocator = temp;
+    lg.has_no_wrap_reductions.allocator = temp; lg.has_no_inf_insts.allocator = temp; lg.inner_reductions.allocator = temp;
     if !li_can_interchange_loops(c, *lg, inner_id, outer_id, dep_matrix.*) return false;
     if !li_is_profitable(c, inner, outer, inner_id, outer_id, dep_matrix.*) return false;
     li_transform(c, *lg);

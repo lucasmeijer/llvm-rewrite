@@ -137,14 +137,9 @@ ic_has_undef_source :: (mi: Value_Id) -> bool {
     return is_inst(src) && inst_op(src) == .ALLOCA && has_one_use(src);
 }
 
-// AAMDNodes::adjustForAccess(Size) of a mem intrinsic's AA metadata (only the no-TBAA cases)
-ic_mem_aa_copy_md :: (mi: Value_Id, dst: Value_Id) {
-    if get_metadata(mi, md_kind_id("tbaa")) != NONE || get_metadata(mi, md_kind_id("tbaa.struct")) != NONE
-        fatal("instcombine: SimplifyAnyMemTransfer with TBAA metadata (AAMDNodes::adjustForAccess) is not supported yet");
-    for n: string.["alias.scope", "noalias"] {
-        m := get_metadata(mi, md_kind_id(n));
-        if m != NONE set_metadata(dst, md_kind_id(n), m);
-    }
+// Instruction::setAAMetadata(MI->getAAMetadata().adjustForAccess(Size))
+ic_mem_aa_copy_md :: (mi: Value_Id, dst: Value_Id, size: u64) {
+    set_aa_metadata(dst, aa_adjust_size(get_aa_metadata(mi), size));
 }
 
 // SimplifyAnyMemTransfer
@@ -166,13 +161,13 @@ ic_simplify_any_mem_transfer :: (mi: Value_Id) -> Value_Id {
     int_ty := type_int(cast(u32) (size << 3));
     src := call_arg(mi, 1); dest := call_arg(mi, 0);
     l := icb_load_raw(int_ty, src, copy_src_align);
-    ic_mem_aa_copy_md(mi, l);
+    ic_mem_aa_copy_md(mi, l, cast(u64) size);
     lmp := get_metadata(mi, md_kind_id("llvm.mem.parallel_loop_access"));
     if lmp != NONE set_metadata(l, md_kind_id("llvm.mem.parallel_loop_access"), lmp);
     ag := get_metadata(mi, md_kind_id("llvm.access.group"));
     if ag != NONE set_metadata(l, md_kind_id("llvm.access.group"), ag);
     s := icb_store_raw(l, dest, copy_dst_align);
-    ic_mem_aa_copy_md(mi, s);
+    ic_mem_aa_copy_md(mi, s, cast(u64) size);
     if lmp != NONE set_metadata(s, md_kind_id("llvm.mem.parallel_loop_access"), lmp);
     if ag != NONE set_metadata(s, md_kind_id("llvm.access.group"), ag);
     da := get_metadata(mi, md_kind_id("DIAssignID"));
