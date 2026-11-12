@@ -61,7 +61,8 @@ fn ipo_has_n_live_uses(c: i32, n: i64) -> bool {
     var u = first_use(c);
     while u >= 0 {
         let us = uses[u].user;
-        if !is_constant(us) || !ipo_constant_is_dead(us) {
+        // a blockaddress is not a user of its function in LLVM 23
+        if vals[us].kind != VK_BLOCKADDR && (!is_constant(us) || !ipo_constant_is_dead(us)) {
             num++;
             if num > n { return false; }
         }
@@ -71,6 +72,23 @@ fn ipo_has_n_live_uses(c: i32, n: i64) -> bool {
 }
 fn ipo_has_zero_live_uses(c: i32) -> bool { ipo_has_n_live_uses(c, 0) }
 
+fn ipo_kill_dead_blockaddresses(f: i32) {
+    // ~BasicBlock: blockaddresses of the deleted blocks (their users were in the body)
+    var bu = first_use(f);
+    while bu >= 0 {
+        let us = uses[bu].user;
+        let nx = use_next(bu);
+        if vals[us].kind == VK_BLOCKADDR {
+            if first_use(us) >= 0 { fatal("internal: erasing a function whose blockaddress is still used"); }
+            drop_all_refs(us);
+            vals[us].kind = VK_DEAD;
+            bu = first_use(f);
+            continue;
+        }
+        bu = nx;
+    }
+}
+
 // Function::eraseFromParent: dropAllReferences (the body goes), then the function leaves its module.
 fn func_erase_from_parent(f: i32) {
     var b = func_first_block(f);
@@ -79,6 +97,7 @@ fn func_erase_from_parent(f: i32) {
         while i >= 0 { drop_all_refs(i); i = inst_next(i); }
         b = block_next(b);
     }
+    ipo_kill_dead_blockaddresses(f);
     b = func_first_block(f);
     while b >= 0 { let nb = block_next(b); block_erase(b); b = nb; }
     sc_remove_dead_constant_users(f);   // ~GlobalValue
@@ -100,6 +119,7 @@ fn func_drop_all_references(f: i32) {
         while i >= 0 { drop_all_refs(i); i = inst_next(i); }
         b = block_next(b);
     }
+    ipo_kill_dead_blockaddresses(f);
     b = func_first_block(f);
     while b >= 0 { let nb = block_next(b); block_erase(b); b = nb; }
 }

@@ -144,7 +144,7 @@ lib/Transforms/Scalar/CorrelatedValuePropagation.cpp 1  # manual: every process*
 lib/Transforms/Scalar/JumpThreading.cpp 0.97  # manual: all; loud: key-instruction atom remapping, getMergedLocation of two different locations, SplitEdge via splitBlockBefore (heuristic 0.99)
 lib/Analysis/BranchProbabilityInfo.cpp 0.95  # manual: BPIConstruction whole, the result and printer; no -print-bpi, legacy wrapper (heuristic 0.93)
 lib/Analysis/BlockFrequencyInfoImpl.cpp 0.9  # + the BasicBlock instantiation of BlockFrequencyInfoImpl.h; no -use-iterative-bfi-inference, debug dumps (heuristic 0.85)
-lib/Analysis/BlockFrequencyInfo.cpp 0.4  # analysis, calculate, getBlockFreq/setBlockFreq, printer; no view/DOT, profile-count API, legacy wrapper
+lib/Analysis/BlockFrequencyInfo.cpp 0.5  # analysis (cached per function, kept stale until invalidated), calculate, getBlockFreq/setBlockFreq/setBlockFreqAndScale, getBlockProfileCount (psi.goose), printer; no view/DOT, legacy wrapper
 lib/Transforms/Scalar/ConstraintElimination.cpp 0.9  # all but generateReproducer (-constraint-elimination-dump-reproducers fails loudly) and the LLVM_DEBUG dumps
 lib/Transforms/Utils/ScalarEvolutionExpander.cpp 0.9  # manual: predicate expansion (expandCodeForPredicate & co.) ported (loop-versioning); no post-inc expansion (normalizeForPostIncUse fails loudly) (heuristic 0.93)
 lib/Analysis/IVUsers.cpp 0.8  # manual: print<iv-users> path whole; not getExpr/getStride/findAddRecForLoop/IVStrideUse callbacks (LSR) (heuristic 0.95)
@@ -159,8 +159,25 @@ lib/Transforms/Utils/LoopUnroll.cpp 0.9  # all but parallel reduction phis (canP
 lib/Transforms/Utils/LoopUnrollRuntime.cpp 0.97  # all; breakLoopBackedge of an unconditional latch is loud
 lib/Transforms/Utils/LoopPeel.cpp 0.95  # all; -disable-advanced-peeling loud
 lib/Transforms/Utils/ValueMapper.cpp 0.3  # mapValue/remapInstruction/remapDbgRecord under RF_NoModuleLevelChanges; no MDNodeMapper, global/function remapping, type remapping
-lib/Transforms/Utils/CloneFunction.cpp 0.3  # (clone_function.goose; loop_versioning.goose has its own copy) CloneBasicBlock, remapInstructionsInBlocks, cloneLoopWithPreheader, the noalias-scope cloning; no CloneFunctionInto / CloneAndPruneFunctionInto
+lib/Transforms/Utils/CloneFunction.cpp 0.55  # (clone_function.goose; loop_versioning.goose has its own copy) CloneBasicBlock, remapInstructionsInBlocks, cloneLoopWithPreheader, the noalias-scope cloning; PruningFunctionCloner / CloneAndPruneIntoFromInst (inline_function.goose); no CloneFunctionInto / CloneFunction / CloneModule
 lib/Transforms/Scalar/SimpleLoopUnswitch.cpp 0.97  # all; injected conditions over several compared values loud (DenseMap order)
 lib/Analysis/LoopIterator.cpp 0.8
 lib/Support/BranchProbability.cpp 0.8
 lib/Analysis/CostModel.cpp 1
+# L2.inline / L2.function-attrs (goose_inline)
+lib/Analysis/LazyCallGraph.cpp 0.85  # build, RefSCC/SCC formation (Tarjan), postorder walk, edge switch/insert/remove incl. RefSCC splitting, dead functions, print-lcg; no addSplitFunction/addSplitRefRecursiveFunctions, no -verify
+lib/Analysis/CGSCCPassManager.cpp 0.8  # ModuleToPostOrderCGSCC adaptor, DevirtSCCRepeatedPass, CGSCC->function adaptor, updateCGAndAnalysisManagerForPass, proxies as preserved bits; no outer-analysis invalidation bookkeeping beyond what passes need
+lib/Transforms/IPO/FunctionAttrs.cpp 0.95  # PostOrder, ReversePostOrder and NoRecurseLTO passes: memory, argument (captures, access, returned, initializes), noalias/nonnull/noundef returns, convergent/nounwind/nofree/nosync, norecurse, noreturn, cold, willreturn, top-down norecurse/nofpclass; no thinLTOPropagateFunctionAttrs
+lib/Analysis/InlineCost.cpp 0.9  # InlineCostCallAnalyzer + cost-benefit, InlineCostFeaturesAnalyzer-free paths, getAttributeBasedInliningDecision, isInlineViable, getInliningCostEstimate; no -print-instruction-comments annotator, no ML features
+lib/Transforms/Utils/InlineFunction.cpp 0.8  # all of InlineFunction except funclet EH (HandleInlinedEHPad), memprof/callsite metadata, ObjC ARC attached calls, convergence tokens, strictfp callers, assignment tracking, contextual profiles (loud)
+lib/Transforms/IPO/Inliner.cpp 0.9  # InlinerPass::run; no tryPromoteCall, no remarks
+lib/Analysis/InlineAdvisor.cpp 0.45  # DefaultInlineAdvisor, mandatory advice, shouldInline/shouldBeDeferred, inline remark attribute; no replay/ML/plugin advisors, no ORE remarks
+lib/Analysis/InlineOrder.cpp 0.8  # size / cost / cost-benefit priorities; ml loud
+lib/Transforms/IPO/AlwaysInliner.cpp 0.95
+lib/Transforms/IPO/ModuleInliner.cpp 0.85  # no contextual-profile ICP
+lib/Analysis/ProfileSummaryInfo.cpp 0.85  # summary from module flags, thresholds, hot/cold counts, call sites, entry hot/cold, partial profiles
+lib/IR/ProfileSummary.cpp 0.4  # getFromMD only
+lib/ProfileData/ProfileSummaryBuilder.cpp 0.1  # getEntryForPercentile only
+lib/Transforms/Utils/SizeOpts.cpp 0.7  # shouldOptimizeForSize(F/BB) with PGSO options
+lib/Transforms/Utils/ModuleUtils.cpp 0.05  # filterDeadComdatFunctions only
+lib/IR/Function.cpp 0.15  # eraseFromParent, dropAllReferences, getEntryCount/setEntryCount, isIntrinsic

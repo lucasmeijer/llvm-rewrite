@@ -1,7 +1,7 @@
 // The inliner passes: port of llvm/lib/Transforms/IPO/Inliner.cpp (InlinerPass::run, makeFunctionBodyUnreachable;
 // ModuleInlinerWrapperPass is expanded by the pipeline parser into cgscc(inline<only-mandatory>,inline)),
-// llvm/lib/Transforms/IPO/AlwaysInliner.cpp (AlwaysInlineImpl with flattening), llvm/lib/Transforms/IPO/
-// ModuleInliner.cpp (ModuleInlinerPass::run), llvm/lib/Analysis/InlineOrder.cpp (PriorityInlineOrder with the
+// llvm/lib/Transforms/IPO/AlwaysInliner.cpp (AlwaysInlineImpl with flattening),
+// llvm/lib/Transforms/IPO/ModuleInliner.cpp (ModuleInlinerPass::run), llvm/lib/Analysis/InlineOrder.cpp (PriorityInlineOrder with the
 // size / cost / cost-benefit / ml priorities on libstdc++'s heap algorithms), llvm/lib/Analysis/InlineAdvisor.cpp
 // (DefaultInlineAdvisor, the mandatory advice, getDefaultInlineAdvice, shouldInline / shouldBeDeferred,
 // setInlineRemark / inlineCostStr), FindAvailableLoadedValue without AA (llvm/lib/Analysis/Loads.cpp:

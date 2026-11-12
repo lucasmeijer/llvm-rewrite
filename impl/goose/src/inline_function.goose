@@ -890,7 +890,7 @@ fn add_param_and_fn_basic_attributes(cb: i32, m: i32, callee: i32) {
                     if enf != 0 { nab = aset_put(nab, attr_int(AK_NoFPClass, enf | aset_int_of(nab, AK_NoFPClass))); }
                     for k in aset_n(nab) { s = aset_put(s, aset_attr(nab, k)); }
                 } else if ty_kind(vals[narg].ty) == TK_PTR {
-                    let u = get_underlying_object(oarg, 6);
+                    let u = get_underlying_object(oarg, 10);
                     if !is_arg(u) || args_parent[vals[u].sub] != callee { continue; }
                     argno = args_no[vals[u].sub] as i64;
                 } else { continue; }
@@ -1372,6 +1372,8 @@ fn merge_attributes_for_inlining(caller: i32, callee: i32) {
 // InlineFunction
 
 // Instruction::getTerminatingMustTailCall / getTerminatingDeoptimizeCall of a block ending in `ret`
+fn if_is_intrinsic(f: i32) -> bool { func_iid(f) != 0 || starts_with(val_name(f), "llvm.") }
+
 // BasicBlock::getTerminatingDeoptimizeCall
 fn block_terminating_deoptimize_call(bb: i32) -> i32 {
     let t = block_terminator(bb);
@@ -1702,7 +1704,7 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
             while i >= 0 {
                 if is_callbase(i) {
                     let f = called_function(i);
-                    if !(f >= 0 && func_iid(f) != 0) { ifi_inlined_call_sites.push(i); }
+                    if !(f >= 0 && if_is_intrinsic(f)) { ifi_inlined_call_sites.push(i); }   // Function::isIntrinsic: an llvm.* name
                 }
                 i = inst_next(i);
             }

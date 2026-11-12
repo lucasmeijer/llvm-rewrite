@@ -52,3 +52,35 @@ are identical to opt 23.1.5 on every round-tripping corpus file (also with each 
   transformConstExprCastCall replaces a call whose result is unused with `ValueHandleBase::ValueIsRAUWd(Caller, NC)`
   (InstCombineCalls.cpp), so the handle follows the new call: no "devirtualized" call appears, and the SCC is not
   re-run. Without that, `devirt<4>` repeats the pipeline and inlines more (Inline/inline-indirect-chain.ll).
+
+## InlineFunction details (verified by the Goose port, impl/goose/src/inline_function.goose)
+
+- BlockFrequencyInfo is cached per function and goes *stale*: the CGSCC inliner invalidates a caller's analyses only
+  after all of its calls are processed (Inliner.cpp:547), the module inliner never does. Later cost queries in the
+  same caller read the stale BFI; a block it does not know has frequency 0, which makes its call sites *cold*
+  (threshold 45). InlineFunction keeps the stale BFI usable: `updateCallerBFI` runs on every inline (IFI.UpdateProfile
+  defaults to true, not only with entry counts) and gives each cloned block its callee frequency (the max when
+  several callee blocks fold into one clone), scaled so the entry clone gets the call site block's frequency; the
+  split-off AfterCallBB gets OrigBB's frequency. The IFI constructor computes the caller's and the callee's BFI
+  before inlining. (Inline/nested-inline.ll under both `inline` and `module-inline`.)
+- `CallBase::isIndirectCall` is false for any Constant callee, so `call void undef()` is not "originally indirect"
+  and gets no `!inline_history` (Inline/pr28298.ll).
+- `Function::isIntrinsic()` is name based: a declaration `@llvm.unknown` (no intrinsic ID) is an intrinsic, so its
+  calls are not InlinedCallSites and get no `!inline_history` (GVN/intrinsics_in_cg.ll with `module-inline`).
+- AddParamAndFnBasicAttributes finds the argument behind an inner call's pointer operand with getUnderlyingObject's
+  default MaxLookup = 10 (through launder/strip.invariant.group); with 6 the deeper calls lose `readnone`
+  (Inline/launder.invariant.group.ll under `cgscc(devirt<4>(inline,function-attrs))`).
+- The lifetime.start markers and llvm.stacksave are built at `FirstNewBlock->begin()`, an iterator with the head
+  bit: they go *before* the debug records of the first instruction, and get its debug location
+  (Inline/inline-skip-use-empty-alloca.ll).
+- PruningFunctionCloner names a cloned terminator before inserting it, so the name is uniqued on insertion with the
+  function's symbol table counter; re-creating a call with merged deopt bundles (`CallBase::Create(CB, Bundles)`)
+  takes the old name while it is still live, so the new call is `%v.i1` and later uniqued names shift
+  (Inline/deopt-bundles.ll).
+- Deleting a function runs ~GlobalValue's removeDeadConstantUsers (e.g. `ptrtoint (ptr @f to i64)` left by an
+  inlined call's argument), and the blockaddresses of its blocks die with the body (Inline/last-callsite.ll,
+  GlobalOpt/2012-05-11-blockaddress.ll with `inline`).
+- X86TTIImpl::areInlineCompatible with different features checks every non-intrinsic call of the callee whose
+  argument/return types are vectors or aggregates: each ComputeValueVTs leaf must get the same
+  `getRegisterTypeForCallingConv(callee CC)` under the caller's and the callee's subtargets
+  (Inline/X86/call-abi-compatibility.ll).
