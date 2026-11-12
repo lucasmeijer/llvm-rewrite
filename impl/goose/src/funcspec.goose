@@ -570,7 +570,6 @@ fn fs_metrics(f: i32) -> i64, bool, bool {
     var visited = hm_new();
     var wl: i32[>..<] = [];
     vt_invalidate_assumes();
-    ac_invalidate();
     var asms: i32[>..<] = [];
     ac_assumptions(f, asms);
     fn append_ops(v: i32, visited: HMap&, wl: i32[>..<]&) {
