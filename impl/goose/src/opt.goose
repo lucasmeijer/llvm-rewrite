@@ -83,7 +83,9 @@ fn main() {
                 write_stderr(str("opt: unsupported option '", av[i], "'\n"));
                 exit(1);
             }
-            flag_set(name, value);
+            // a cl::opt with a value (not a bool) also takes "-x v"
+            if eq < 0 && flag_takes_value(name) && i + 1 < av.len { i++; flag_set(name, av[i]); }
+            else { flag_set(name, value); }
         }
         else { input.clear(); input.append(a); }
         i++;

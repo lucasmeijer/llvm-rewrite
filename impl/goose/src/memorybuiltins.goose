@@ -478,7 +478,9 @@ fn mb_get_object_size(p: i32, mode: i64, round: bool, null_unknown: bool, use_aa
 }
 
 // lowerObjectSizeCall(ObjectSize, DL, TLI, AA, MustSucceed, InsertedInstructions): -1 = nullptr
-fn mb_lower_object_size_call(ii: i32, must_succeed: bool) -> i32 {
+fn mb_lower_object_size_call(ii: i32, must_succeed: bool) -> i32 { mb_lower_object_size_call_aa(ii, must_succeed, true) }
+// the same with AA = nullptr when !use_aa (LowerConstantIntrinsics' overload without AA)
+fn mb_lower_object_size_call_aa(ii: i32, must_succeed: bool, use_aa: bool) -> i32 {
     let max_val = ap_is_zero(ci_ap(cb_arg(ii, 1)));
     var mode = OSM_EXACT_SIZE_FROM_OFFSET;
     if must_succeed { mode = if max_val { OSM_MAX } else { OSM_MIN }; }
@@ -486,7 +488,7 @@ fn mb_lower_object_size_call(ii: i32, must_succeed: bool) -> i32 {
     let rt = vals[ii].ty;
     let static_only = ap_is_zero(ci_ap(cb_arg(ii, 3)));
     if static_only {
-        let ok, size = mb_get_object_size(cb_arg(ii, 0), mode, false, null_unknown, true);
+        let ok, size = mb_get_object_size(cb_arg(ii, 0), mode, false, null_unknown, use_aa);
         let bw = ty_bits(rt);
         if ok && (bw >= 64 || size < ((1 as u64) << bw)) { return c_int_ty(rt, size); }
     } else {

@@ -6,6 +6,7 @@
 import std;
 import os;
 import ir;
+import misc_passes;
 import irutil;
 import flags;
 import gen_passes;
@@ -311,7 +312,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_ASSIGN_GUID => "AssignGUIDPass",
         P_PRINT_LCG => "LazyCallGraphPrinterPass",
         P_LOOP_UNROLL => "LoopUnrollPass",
-        _ => "Pass",
+        _ => mp_class_name(p),
     }
 }
 
@@ -529,6 +530,8 @@ recursive fn parse_function_elem(e: i32) -> i32 {
         let an = name[lt + 1..name.len - 1];
         let a = analysis_id(an);
         if a < 0 {
+            let rmid, rmarg, rmreq = mp_parse_function(name);
+            if rmid >= 0 { return new_pnode(PK_PASS, rmid, rmarg, rmreq, pelems[e].name); }
             if llvm_knows(name, 'f') { not_implemented(name); }
             perr_pipeline(str("unknown function pass '", name, "'"));
         }
@@ -716,6 +719,8 @@ recursive fn parse_function_elem(e: i32) -> i32 {
     }
     let r = pass_row(name, 'f');
     if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
+    let mpid, mparg, mpreq = mp_parse_function(name);
+    if mpid >= 0 { return new_pnode(PK_PASS, mpid, mparg, mpreq, pelems[e].name); }
     if llvm_knows(name, 'f') { not_implemented(name); }
     if is_loop_pass_name(name) {
         // LOOP_PASS / LOOPNEST_PASS in a function pipeline: its own adaptor (createFunctionToLoopPassAdaptor)
@@ -1040,6 +1045,8 @@ recursive fn parse_module_elem(e: i32) -> i32 {
     }
     let r = pass_row(name, 'm');
     if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
+    let mmid, mmarg, mmreq = mp_parse_module(name);
+    if mmid >= 0 { return new_pnode(PK_PASS, mmid, mmarg, mmreq, pelems[e].name); }
     // module VerifierAnalysis: nothing to compute (no verifier yet; the harness verifies our output)
     if name == "require<verify>" || name == "invalidate<verify>" { return new_pnode(PK_PASS, P_NOOP_MODULE as i32, 0, true, pelems[e].name); }
     if name == "require<globals-aa>" { return new_pnode(PK_PASS, P_REQUIRE_GLOBALS_AA as i32, 0, true, pelems[e].name); }
@@ -1226,7 +1233,11 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_JUMP_THREADING => { return jump_threading_run(fv, (pnodes[n].arg as i64) - 1); },
         P_VERIFY_SCEV => { scev_get(fv); return PA_ALL; },     // ScalarEvolution::verify reports only mismatches
         P_LOOP_UNROLL => { let pa = loop_unroll_pass_run(fv, lu_opt_table[pnodes[n].arg]); ap_pool_reset(); return pa; },
-        _ => { fatal("internal: unknown function pass id"); return PA_ALL; },
+        _ => {
+            if mp_is_ours(p) { let pa = mp_run_function(p, pnodes[n].arg, fv); ap_pool_reset(); return pa; }
+            fatal("internal: unknown function pass id");
+            return PA_ALL;
+        },
     }
 }
 
@@ -1490,6 +1501,12 @@ recursive fn run_module_node(n: i32, m: i32) {
         else if p == P_CONSTMERGE { changed = constmerge_run(m); }
         else { gd_in_lto_post_link = pnodes[n].arg != 0; changed = globaldce_run(m); }
         if changed { gm_invalidate(); module_invalidate(m, PA_NONE); }
+        ap_pool_reset();
+        return;
+    }
+    if mp_is_ours(p) {
+        let pa = mp_run_module(p, pnodes[n].arg, m);
+        if pa != PA_ALL { gm_invalidate(); module_invalidate(m, pa); }
         ap_pool_reset();
         return;
     }

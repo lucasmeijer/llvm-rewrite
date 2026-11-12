@@ -150,12 +150,30 @@ let KNOWN_FLAGS: const u8[:][] = [
     "goose-scev-trace",                                  // development only: ScalarEvolution value map events                                  // development only: unported InstCombine visitors do nothing
 ];
 
+// Flags read by the small passes of misc_passes.goose (L1.scalar-misc, L1.o2-gaps, the rest of default<O2>).
+let KNOWN_FLAGS_MISC: const u8[:][] = [
+    "likely-branch-weight", "unlikely-branch-weight",                      // lower-expect
+    "spec-exec-max-speculation-cost", "spec-exec-max-not-hoisted", "spec-exec-only-if-divergent-target",
+    "float2int-max-integer-bw", "tre-disable-entrycount-recompute", "callsite-splitting-duplication-threshold",
+];
+
 // Flags whose non-default value is not supported (checked before the pipeline runs).
 fn flags_check_unsupported() {
 }
 
+// Non-boolean cl::opts that may be given as "-x v" (the value in the next argument)
+let VALUE_FLAGS_MISC: const u8[:][] = [
+    "spec-exec-max-speculation-cost", "spec-exec-max-not-hoisted", "float2int-max-integer-bw",
+    "callsite-splitting-duplication-threshold", "likely-branch-weight", "unlikely-branch-weight",
+];
+fn flag_takes_value(name: const u8[:]) -> bool {
+    for k in VALUE_FLAGS_MISC { if k == name { return true; } }
+    return false;
+}
+
 fn flag_known(name: const u8[:]) -> bool {
     for k in KNOWN_FLAGS { if k == name { return true; } }
+    for k in KNOWN_FLAGS_MISC { if k == name { return true; } }
     return false;
 }
 

@@ -1391,7 +1391,7 @@ recursive fn cf_fold_scalar_call(c: i32, id: i32, ty: i32, mark: i64, n: i64) ->
     }
     if n == 1 {
         let a = is_ops[mark];
-        if id == IID_is_constant { cfa_not_ported("llvm.is.constant folding"); }
+        if id == IID_is_constant { return if cf_is_manifest_constant(a) { c_int(ty, 1) } else { -1 }; }
         if is_undef_val(a) {
             if id == IID_cos || id == IID_ctpop || id == IID_fptoui_sat || id == IID_fptosi_sat || id == IID_canonicalize { return c_null(ty); }
             if id == IID_bswap || id == IID_bitreverse || id == IID_launder_invariant_group || id == IID_strip_invariant_group { return a; }
@@ -2061,4 +2061,16 @@ fn ap_pdep(v: AP, m: AP) -> AP {
     var p: i64 = 0;
     for i in bw { if ap_get_bit(m, i) { r = ap_set_bit_to(r, i, ap_get_bit(v, p)); p++; } }
     return r;
+}
+
+// Constant::isManifestConstant
+recursive fn cf_is_manifest_constant(c: i32) -> bool {
+    let k = vals[c].kind;
+    if k == VK_UNDEF || k == VK_POISON { return false; }
+    if is_constant_data(c) { return true; }
+    if k == VK_CARRAY || k == VK_CSTRUCT || k == VK_CVECTOR || k == VK_CEXPR {
+        for j in nops(c) { if !cf_is_manifest_constant(op(c, j)) { return false; } }
+        return true;
+    }
+    return false;
 }
