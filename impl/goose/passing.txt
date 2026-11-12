@@ -9979,6 +9979,7 @@ tests/imported/llvm/Transforms/LoopLoadElim/early-exit.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/early-exit.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/forward.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/forward.ll::roundtrip
+tests/imported/llvm/Transforms/LoopLoadElim/invalidate-laa-after-versioning.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/invalidate-laa-after-versioning.ll::roundtrip
 tests/imported/llvm/Transforms/LoopLoadElim/loop-i1-count.ll::opt
 tests/imported/llvm/Transforms/LoopLoadElim/loop-i1-count.ll::roundtrip
@@ -10445,8 +10446,10 @@ tests/imported/llvm/Transforms/LoopUnroll/verify-dominators.ll::roundtrip
 tests/imported/llvm/Transforms/LoopUnroll/wrong_assert_in_peeling.ll::opt
 tests/imported/llvm/Transforms/LoopUnroll/wrong_assert_in_peeling.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/12-12-11-if-conv.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/2012-10-20-infloop.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/2012-10-20-infloop.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/2012-10-22-isconsec.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/2016-07-27-loop-vec.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/2016-07-27-loop-vec.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/VPlan/interleave-and-scalarize-only.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/amdlibm-calls-finite.ll::roundtrip
@@ -10461,6 +10464,7 @@ tests/imported/llvm/Transforms/LoopVectorize/X86/conversion-cost.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/cost-any-of.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/cost-conditional-branches.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/cost-divisor-overflow.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/X86/cost-model-assert.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/cost-model-assert.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/cost-model.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/drop-inbounds-flags-for-reverse-vector-pointer.ll::roundtrip
@@ -10503,6 +10507,7 @@ tests/imported/llvm/Transforms/LoopVectorize/X86/nontemporal.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/optsize.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/outer-loop-non-power-of-2-type.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/outer_loop_test1_no_explicit_vect_width.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/X86/parallel-loops-after-reg2mem.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/parallel-loops-after-reg2mem.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/parallel-loops.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/powof2div.ll::roundtrip
@@ -10515,6 +10520,7 @@ tests/imported/llvm/Transforms/LoopVectorize/X86/pr42674.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr47437.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr48340.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr51366-sunk-instruction-used-outside-of-loop.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/X86/pr54413-select-interleave-count-loop-with-cost-zero.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr54413-select-interleave-count-loop-with-cost-zero.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr54634.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/pr55096-scalarize-add.ll::roundtrip
@@ -10530,6 +10536,7 @@ tests/imported/llvm/Transforms/LoopVectorize/X86/scatter_crash.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/slm-no-vectorize.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/small-size.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/strided_load_cost.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/X86/struct-store.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/struct-store.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/svml-calls-finite.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/svml-calls.ll::roundtrip
@@ -10589,6 +10596,7 @@ tests/imported/llvm/Transforms/LoopVectorize/dead_instructions.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/debugloc-optimize-vfuf-term.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/debugloc.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/demanded-bits-of-pointer-instruction.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/disable_nonforced.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/disable_nonforced.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/disable_nonforced_enable.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/discriminator.ll::roundtrip
@@ -10597,6 +10605,7 @@ tests/imported/llvm/Transforms/LoopVectorize/dont-fold-tail-for-divisible-TC.ll:
 tests/imported/llvm/Transforms/LoopVectorize/early-exit-calls.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/early-exit-minmax-trip-count.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/early-exit-unary-ops.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/ee-crash.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/ee-crash.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/epilog-iv-select-cmp.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/epilog-vectorization-fixed-order-recurrences.ll::roundtrip
@@ -10618,9 +10627,11 @@ tests/imported/llvm/Transforms/LoopVectorize/first-order-recurrence-tail-folding
 tests/imported/llvm/Transforms/LoopVectorize/first-order-recurrence-with-uniform-ops.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/first-order-recurrence.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/fix-reduction-dbg.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/fixed-order-recurrences-memory-instructions.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/fixed-order-recurrences-memory-instructions.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/flags.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/float-induction.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/float-minmax-instruction-flag.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/float-minmax-instruction-flag.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/float-reduction.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/fneg.ll::roundtrip
@@ -10638,9 +10649,12 @@ tests/imported/llvm/Transforms/LoopVectorize/hoist-loads.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/hoist-predicated-loads-with-predicated-stores.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/hoist-predicated-loads.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/i8-induction.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/if-conv-crash.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/if-conv-crash.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/if-conversion-edgemasks.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/if-conversion-edgemasks.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/if-conversion-nest.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/if-conversion-reduction.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/if-conversion-reduction.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/if-conversion-scalable.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/if-conversion.ll::roundtrip
@@ -10656,6 +10670,7 @@ tests/imported/llvm/Transforms/LoopVectorize/induction-step.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/induction-unroll-novec.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/induction.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/induction_plus.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/infiniteloop.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/infiniteloop.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/instruction-only-used-outside-of-loop.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/int_sideeffect.ll::roundtrip
@@ -10674,6 +10689,7 @@ tests/imported/llvm/Transforms/LoopVectorize/invariant-store-vectorization-2.ll:
 tests/imported/llvm/Transforms/LoopVectorize/invariant-store-vectorization.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/irregular_type.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/is_fpclass.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-blend.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-blend.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-decreasing.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/iv-select-cmp-nested-loop.ll::roundtrip
@@ -10701,6 +10717,7 @@ tests/imported/llvm/Transforms/LoopVectorize/minimumnum-maximumnum-reductions.ll
 tests/imported/llvm/Transforms/LoopVectorize/miniters.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/minmax-reduction-unknown-prof.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/minmax_reduction.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/multi-use-reduction-bug.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/multi-use-reduction-bug.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/multiple-address-spaces.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/multiple-argmin-argmax.ll::roundtrip
@@ -10711,16 +10728,20 @@ tests/imported/llvm/Transforms/LoopVectorize/narrow-interleave-groups-scalable-v
 tests/imported/llvm/Transforms/LoopVectorize/nested-loops-scev-expansion.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/nested-outer-loop-vect.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/no-fold-tail-by-masking-iv-external-uses.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/no-interleave-up-front.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/no-interleave-up-front.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/no_idiv_reduction.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/no_idiv_reduction.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/no_int_induction.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/noalias-md-licm.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/noalias-md.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/noalias-scope-decl-outer-loop.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/noalias-scope-decl.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/nofloat.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/nofloat.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/non-const-n.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/non-widenable-intrinsics-outer-loop.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/nontemporal.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/nontemporal.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/nsw-crash.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/nuw.ll::roundtrip
@@ -10738,6 +10759,7 @@ tests/imported/llvm/Transforms/LoopVectorize/outer_loop_hcfg_construction.ll::ro
 tests/imported/llvm/Transforms/LoopVectorize/outer_loop_test1.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/outer_loop_test2.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/partial-lcssa.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/phi-hang.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/phi-hang.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pointer-induction-unroll.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pointer-induction.ll::roundtrip
@@ -10787,6 +10809,7 @@ tests/imported/llvm/Transforms/LoopVectorize/reduction-inloop-uf4.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction-inloop.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction-odd-interleave-counts.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction-predselect.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/reduction-ptr.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/reduction-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction-small-size.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction-with-invariant-store.ll::roundtrip
@@ -10804,6 +10827,7 @@ tests/imported/llvm/Transforms/LoopVectorize/runtime-check-small-bounded-ranges.
 tests/imported/llvm/Transforms/LoopVectorize/runtime-check.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/runtime-checks-difference-simplifications.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/runtime-checks-difference.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/runtime-drop-crash.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/runtime-drop-crash.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/safegep.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/same-base-access.ll::roundtrip
@@ -10825,9 +10849,11 @@ tests/imported/llvm/Transforms/LoopVectorize/select-cmp-blend-chain.ll::roundtri
 tests/imported/llvm/Transforms/LoopVectorize/select-cmp-multiuse.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-cmp-predicated.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-cmp.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/select-first-index-fp.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/select-first-index-fp.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-folds.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-index-interleaving.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/select-last-index-fp.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/select-last-index-fp.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-min-max-last-index-epilogue.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/select-reduction-start-value-may-be-undef-or-poison.ll::roundtrip
@@ -10874,6 +10900,7 @@ tests/imported/llvm/Transforms/LoopVectorize/uniform_across_vf_induction1_div_ur
 tests/imported/llvm/Transforms/LoopVectorize/uniform_across_vf_induction1_lshr.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/uniform_across_vf_induction2.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/unroll-novec-memcheck-metadata.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/unroll.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/unroll.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/unroll_nonlatch.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/unroll_novec.ll::roundtrip

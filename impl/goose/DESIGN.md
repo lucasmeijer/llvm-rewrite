@@ -757,3 +757,36 @@ max_iterations)` and `ic::ic_lrt_invalidate(fv)`.
   (MDNodeMapper, globals, types) fails loudly.
 - CloneBasicBlock has the two LLVM naming orders (`clone_basic_block` with a function, `clone_basic_block_insert`
   for "no function, then F->insert"); ClonedCodeInfo is the `cln_contains_*` globals.
+
+## 17. LoopVectorize and VPlan (iv_descriptors.goose, lv_*.goose, vplan*.goose)
+
+LLVM's LoopVectorize is a class hierarchy (VPBlockBase/VPBasicBlock/VPIRBasicBlock/VPRegionBlock, VPValue and its
+subclasses, ~35 VPRecipe classes with mixins) plus several analyses with per-loop state
+(LoopVectorizationLegality, LoopVectorizationCostModel, InterleavedAccessInfo, VFSelectionContext). In Goose it is
+one set of module globals for the loop being vectorized, reset when `processLoop` returns:
+
+- **Analyses as globals.** Legality (`lvl_*`), hints (`lvh_*`), the cost model (`cm_*`), interleave groups
+  (`iai_*`) are globals of their file; maps keyed by IR value ids are `HMap`s, ordered containers (MapVector,
+  SetVector) are an `i32[>..<]` of keys plus an HMap for lookup. A RecurrenceDescriptor / InductionDescriptor is a
+  fixed-size record in a table (`rdx_descs`, `ind_descs`); their variable parts (cast instructions, no-wrap
+  predicates) are runs in shared pools.
+- **VPlan entities are rows of three global tables** (`vpb` blocks, `vpv` values, `vpr` recipes), addressed by `i32`
+  ids. All plans of a loop live in the same tables (a plan is a `vpp` row: entry block, scalar header, symbolic
+  values, VF list, live-in map); `VPlan::duplicate()` appends copies and remaps ids. Each row is fixed-size; every
+  SmallVector a row owns in LLVM (block preds/succs, value users, recipe operands, defined values, metadata,
+  expression recipes) is a handle into the VPlan's own growable-vector pool (`xv_*`, ivec.goose's scheme: a record
+  (start, len, cap) + a run in one i32 pool, copied to the end when it grows), so list order is LLVM's: users are
+  appended on addOperand and the first match is erased on removeUser. The recipe list of a basic block is intrusive
+  (`prev`/`next`), as iplist<VPRecipeBase> is. Everything is dropped (`vp_reset`) after each loop.
+- **Kinds instead of classes.** `VPR_*` recipe kinds are numbered in VPRecipeTy order (so the phi / header-phi
+  ranges are integer ranges); VPInstruction opcodes extend the IR opcode space (`VPI_*` = 1000 + n). A recipe row
+  is the union of the per-class payload fields (commented with the kinds that use them). Virtual methods are
+  functions with a `match` on the kind (`vp_execute`, `vp_compute_cost`, `vp_clone`, `vp_may_read_from_memory`, ...),
+  so a recipe kind's behaviour can be read per method, as in LLVM's VPlanRecipes.cpp.
+- **Costs** are LLVM 23's fixed-point InstructionCost: i64 = 4 x the cost (`LC_INVALID` for invalid); TTI answers stay
+  plain integers and are scaled where the cost model receives them.
+- **VPTransformState** maps VPValue ids to IR values (`vts_*` HMaps keyed by (value, lane)); recipes emit IR through
+  one builder (`vib_*`, IRBuilder with the InstSimplifyFolder / ConstantFolder distinction made per call site).
+- Recursion: the plan walks (RPO, dominator tree over VP blocks, region nesting) use explicit stacks; nothing in the
+  vectorizer is a `recursive fn` except calls into SCEV / the TTI.
+- Unported paths fail loudly with `loop-vectorize: <what> is not supported yet` at the point where LLVM would act.

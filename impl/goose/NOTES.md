@@ -1472,3 +1472,17 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
 - datalayout.goose now parses `A<n>` (alloca address space, `dl_alloca_addr_space`); vt.goose's
   stripAndAccumulateConstantOffsets handles addrspacecasts between index widths (GEP offsets at the GEP's own width,
   stop when they don't fit).
+
+## LoopVectorize (in progress: iv_descriptors.goose, lv_legality.goose, lv_pass.goose; DESIGN.md §17)
+
+- Milestone 1 (legality and the no-vectorize decisions): runImpl (simplifyLoop, collectSupportedLoops with
+  containsIrreducibleCFG, LCSSA), LoopVectorizeHints, the whole of LoopVectorizationLegality for inner loops
+  (IVDescriptors, if-conversion with isDereferenceableAndAlignedInLoop, LAA, read-only early-exit loops),
+  processLoop up to plan(), collectValuesToIgnore, collectElementTypesForWidening and computeMaxVF. A loop whose
+  MaxVF is none or 1 (and no forced interleave count) is decided without building VPlans: computeBestVF then
+  returns the scalar VF and selectInterleaveCount 1 (getMaxInterleaveFactor(VF=1) is 1 on X86 and NoTTI).
+  Everything past that fails loudly ("VPlan construction and the cost model").
+- Debug builds (`goose build --debug`, ~1 min instead of ~4.5 min for the release build) catch `as` range errors that
+  release builds wrap: scev.goose's proveNoWrapByVaryingStart had two `(d as u64)` of negative deltas (now `as!`).
+  For quick iteration: build `--debug` into /tmp, copy it to bin/opt and sweep with `--no-build`; remove bin/opt
+  before the real check so build.sh rebuilds the release binary.

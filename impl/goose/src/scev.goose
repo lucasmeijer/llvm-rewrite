@@ -2221,7 +2221,7 @@ recursive fn sc_prove_no_wrap_by_varying_start(start: i32, step: i32, l: i32, si
     let deltas: i64[4] = [-2, -1, 1, 2];
     for d in deltas {
         // StartAI - Delta with Delta an unsigned (32-bit) value
-        let dap = ap_zext_or_trunc(ap_u64((d as u64) & 0xFFFFFFFF, 32), sai.w as i64);
+        let dap = ap_zext_or_trunc(ap_u64((d as! u64) & 0xFFFFFFFF, 32), sai.w as i64);
         let pre = sc_get_constant(ap_sub(sai, dap));
         let b = ss.len;
         ss.push(pre);
@@ -2229,7 +2229,7 @@ recursive fn sc_prove_no_wrap_by_varying_start(start: i32, step: i32, l: i32, si
         let par = sc_find(SC_ADDREC, b, 2, -1, l, -1);
         ss.resize(b);
         if par >= 0 && (sc_flags(par) & wrap) != 0 {
-            let ds = sc_get_constant_ty(sc_ty(start), (d as u64) & 0xFFFFFFFF, false);
+            let ds = sc_get_constant_ty(sc_ty(start), (d as! u64) & 0xFFFFFFFF, false);
             let lim, pred = sc_overflow_limit_for_step(ds, signed);
             if lim >= 0 && sc_is_known_predicate(pred, par, lim) { return true; }
         }

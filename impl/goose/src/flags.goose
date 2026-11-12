@@ -167,6 +167,19 @@ let KNOWN_FLAGS_MISC: const u8[:][] = [
     "funcspec-for-literal-constant", "funcspec-max-iters",
 ];
 
+// Flags read by LoopVectorize (lv_*.goose, iv_descriptors.goose); each one is handled or fails loudly where read.
+let KNOWN_FLAGS_LV: const u8[:][] = [
+    "interleave-loops", "vectorize-loops", "enable-if-conversion", "lv-strided-pointer-ivs", "hints-allow-reordering",
+    "scalable-vectorization", "enable-histogram-loop-vectorization", "vectorizer-min-trip-count",
+    "loop-vectorize-with-block-frequency", "enable-early-exit-vectorization",
+    "enable-early-exit-vectorization-with-side-effects", "enable-interleaved-mem-accesses",
+    "enable-masked-interleaved-mem-accesses", "force-ordered-reductions", "tail-folding-policy",
+    "force-tail-folding-style", "epilogue-tail-folding-policy", "epilogue-vectorization-force-VF",
+    "force-partial-aliasing-vectorization", "vectorizer-maximize-bandwidth", "vectorizer-maximize-bandwidth-for-vector-calls",
+    "prefer-inloop-reductions", "force-target-max-scalar-interleave", "vplan-build-outerloop-stress-test",
+    "enable-vplan-native-path",
+];
+
 // Flags whose non-default value is not supported (checked before the pipeline runs).
 fn flags_check_unsupported() {
 }
@@ -186,6 +199,7 @@ fn flag_takes_value(name: const u8[:]) -> bool {
 fn flag_known(name: const u8[:]) -> bool {
     for k in KNOWN_FLAGS { if k == name { return true; } }
     for k in KNOWN_FLAGS_MISC { if k == name { return true; } }
+    for k in KNOWN_FLAGS_LV { if k == name { return true; } }
     return false;
 }
 

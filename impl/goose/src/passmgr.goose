@@ -76,6 +76,7 @@ import inliner;
 import function_attrs;
 import psi;
 import loop_unroll_pass;
+import lv_pass;
 import simple_loop_unswitch_nt;
 import ipo_globals;
 import ipo_args;
@@ -164,6 +165,7 @@ let P_CONSTRAINT_ELIMINATION = 261;
 let P_AGGRESSIVE_INSTCOMBINE = 262;
 let P_VECTOR_COMBINE = 420;
 let P_SLP_VECTORIZER = 421;
+let P_LOOP_VECTORIZE = 422;    // arg: bit 0 = interleave-forced-only, bit 1 = vectorize-forced-only
 let P_PRINT_SCEV = 118;
 let P_PRINT_LVI = 180;
 let P_CVP = 181;
@@ -216,6 +218,7 @@ let PASS_TABLE: const u8[:][] = [
     "f:aggressive-instcombine:262:0",
     "f:vector-combine:420:0",
     "f:slp-vectorizer:421:0",
+    "f:loop-vectorize:422:0",
     "f:dce:100:0",
     "f:redundant-dbg-inst-elim:120:0",
     "f:adce:101:0",
@@ -294,6 +297,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_AGGRESSIVE_INSTCOMBINE => "AggressiveInstCombinePass",
         P_VECTOR_COMBINE => "VectorCombinePass",
         P_SLP_VECTORIZER => "SLPVectorizerPass",
+        P_LOOP_VECTORIZE => "LoopVectorizePass",
         P_IPSCCP => "IPSCCPPass",
         P_DEBUGIFY => "NewPMDebugifyPass",
         P_CHECK_DEBUGIFY => "NewPMCheckDebugifyPass",
@@ -667,6 +671,32 @@ recursive fn parse_function_elem(e: i32) -> i32 {
         let idx = scf_opt_table.len as i32;
         scf_opt_table.push(o);
         return new_pnode(PK_PASS, P_SIMPLIFYCFG as i32, idx, false, pelems[e].name);
+    }
+    if is_param_name(name, "loop-vectorize") {
+        // parseLoopVectorizeOptions; LoopVectorizePass(Opts): -interleave-loops / -vectorize-loops (default true)
+        var ilv: bool = false;
+        var vec: bool = false;
+        if name != "loop-vectorize" {
+            let ps = name[15..name.len - 1];
+            var st: i64 = 0;
+            for j in 0..ps.len + 1 {
+                if j < ps.len && ps[j] != ';' { continue; }
+                var pn = ps[st..j];
+                st = j + 1;
+                if pn.len == 0 { continue; }
+                var en = true;
+                if starts_with(pn, "no-") { en = false; pn = pn[3..]; }
+                if pn == "interleave-forced-only" { ilv = en; }
+                else if pn == "vectorize-forced-only" { vec = en; }
+                else { perr_pipeline(str("invalid LoopVectorize parameter '", pn, "'")); }
+            }
+        }
+        if !flag_bool("interleave-loops", true) { ilv = true; }
+        if !flag_bool("vectorize-loops", true) { vec = true; }
+        var arg: i32 = 0;
+        if ilv { arg = arg | 1; }
+        if vec { arg = arg | 2; }
+        return new_pnode(PK_PASS, P_LOOP_VECTORIZE as i32, arg, false, pelems[e].name);
     }
     if is_param_name(name, "loop-unroll") {
         // parseLoopUnrollOptions
@@ -1236,6 +1266,12 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_AGGRESSIVE_INSTCOMBINE => { return aggressive_instcombine_run(fv); },
         P_VECTOR_COMBINE => { return vector_combine_run(fv); },
         P_SLP_VECTORIZER => { return slp_vectorizer_run(fv); },
+        P_LOOP_VECTORIZE => {
+            let a = pnodes[n].arg as i64;
+            let pa = loop_vectorize_run(fv, (a & 1) != 0, (a & 2) != 0);
+            ap_pool_reset();
+            return pa;
+        },
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
         P_PRINT_LVI => { lvi_print(fv); return PA_ALL; },
         P_LOOP_LOAD_ELIM => { let pa = loop_load_elim_run(fv); ap_pool_reset(); return pa; },
