@@ -47,7 +47,7 @@ lib/IR/DebugInfoMetadata.cpp 0.3
 lib/IR/Attributes.cpp 0.2
 lib/Analysis/MemorySSA.cpp 0.8  # + the mutation API and verifier, the loop constructor (loop_unroll.goose mssa_build_loop); no DOT output
 lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95  # manual: all but visitFDiv's sin/cos -> tan (emitUnaryFloatFnCall, loud)
-lib/Transforms/Utils/SCCPSolver.cpp 0.7
+lib/Transforms/Utils/SCCPSolver.cpp 0.75  # + the FunctionSpecializer entry points (funcspec.goose)
 lib/Transforms/Utils/LoopUtils.cpp 0.5  # + estimated trip count / loop probability API, hasUnrollTransformation, hasPartialIVCondition, cloneLoop (loop_md.goose, simple_loop_unswitch_nt.goose, unroll_utils.goose); + addRuntimeChecks, expandBounds, findDefsUsedOutsideOfLoop (loop_versioning.goose); makeFollowupLoopID, addStringMetadataToLoop (loop_distribute.goose); deleteDeadLoop, breakLoopBackedge, getBooleanLoopAttribute, isMustProgress (loop_utils.goose); + rewriteLoopExitValues, hasHardUserWithinLoop, canLoopBeDeleted, isAlmostDeadIV (indvars.goose)
 lib/IR/ConstantRange.cpp 0.7
 lib/IR/Metadata.cpp 0.5  # + MDNode::concatenate (loop_versioning.goose)
@@ -129,7 +129,7 @@ lib/IR/BasicBlock.cpp 0.3
 lib/TargetParser/Triple.cpp 0.3  # manual: Triple(Str) parsing, normalize, OS/environment versions, isMacOSXVersionLT, pointer widths, default wchar size, the Triple.h predicates; not the arch-variant/sub-arch/name helpers (heuristic 0.29)
 lib/Transforms/Scalar/LoopRotation.cpp 1
 lib/Transforms/Utils/LoopRotationUtils.cpp 0.75  # no debug records (cloneDebugInfoFrom & co.), noalias scope cloning, atoms
-lib/Analysis/CodeMetrics.cpp 0.7  # + analyzeBasicBlock with a loop (convergence kinds, NumCalls; loop_unroll_pass.goose); collectEphemeralValues(Loop), analyzeBasicBlock's notDuplicatable/convergence/NumInsts/inline candidates
+lib/Analysis/CodeMetrics.cpp 0.8  # + collectEphemeralValues(F) and isRecursive (funcspec.goose); + analyzeBasicBlock with a loop (convergence kinds, NumCalls; loop_unroll_pass.goose); collectEphemeralValues(Loop), analyzeBasicBlock's notDuplicatable/convergence/NumInsts/inline candidates
 # --- L1.gvn (2026-11)
 lib/Transforms/Scalar/GVN.cpp 0.97  # manual: all but optimization remarks (never printed; findMayClobberedPtrAccess, liesBetween) (heuristic 0.90)
 lib/Analysis/MemoryDependenceAnalysis.cpp 0.95  # manual: all of MemoryDependenceResults but verifyRemoved and the legacy wrapper pass
@@ -159,7 +159,7 @@ lib/Transforms/Utils/LoopUnroll.cpp 0.9  # all but parallel reduction phis (canP
 lib/Transforms/Utils/LoopUnrollRuntime.cpp 0.97  # all; breakLoopBackedge of an unconditional latch is loud
 lib/Transforms/Utils/LoopPeel.cpp 0.95  # all; -disable-advanced-peeling loud
 lib/Transforms/Utils/ValueMapper.cpp 0.3  # mapValue/remapInstruction/remapDbgRecord under RF_NoModuleLevelChanges; no MDNodeMapper, global/function remapping, type remapping
-lib/Transforms/Utils/CloneFunction.cpp 0.55  # (clone_function.goose; loop_versioning.goose has its own copy) CloneBasicBlock, remapInstructionsInBlocks, cloneLoopWithPreheader, the noalias-scope cloning; PruningFunctionCloner incl. strictfp cloneInstruction / CloneAndPruneIntoFromInst (inline_function.goose); no CloneFunctionInto / CloneFunction / CloneModule
+lib/Transforms/Utils/CloneFunction.cpp 0.65  # + CloneFunction / CloneFunctionInto(LocalChangesOnly) in funcspec.goose; (clone_function.goose; loop_versioning.goose has its own copy) CloneBasicBlock, remapInstructionsInBlocks, cloneLoopWithPreheader, the noalias-scope cloning; PruningFunctionCloner incl. strictfp cloneInstruction / CloneAndPruneIntoFromInst (inline_function.goose); no CloneFunctionInto / CloneFunction / CloneModule
 lib/Transforms/Scalar/SimpleLoopUnswitch.cpp 0.97  # all; injected conditions over several compared values loud (DenseMap order)
 lib/Analysis/LoopIterator.cpp 0.8
 lib/Support/BranchProbability.cpp 0.8
@@ -196,3 +196,24 @@ lib/Support/GlobPattern.cpp 0.6  # *, ?, [...], escapes; no brace expansion
 lib/Transforms/Utils/ModuleUtils.cpp 0.1  # filterDeadComdatFunctions, getUniqueModuleId (ipo_globals.goose)
 lib/Transforms/Vectorize/VectorCombine.cpp 0.95  # all folds and the driver; not ported (fail loudly): scalarizeVPIntrinsic's rewrite, foldBitcastOfVPLoad, foldSelectsFromBitcast with several condition groups (DenseMap order)
 lib/Transforms/Vectorize/SLPVectorizer.cpp 0.03  # the pass driver only (slp.goose); BoUpSLP, HorizontalReduction, getSameOpcode not ported
+# misc_passes.goose and its files (L1.scalar-misc, L1.o2-gaps, the small passes of default<O2>)
+lib/Transforms/Scalar/LowerExpectIntrinsic.cpp 0.95  # no MisExpect diagnostics
+lib/Transforms/Scalar/TailRecursionElimination.cpp 0.95  # no optimization remarks
+lib/Transforms/Scalar/JumpTableToSwitch.cpp 0.95
+lib/Transforms/IPO/FunctionSpecialization.cpp 0.95  # >8 originals per round (SmallPtrSet pointer order) fails loudly
+lib/Transforms/Utils/EntryExitInstrumenter.cpp 0.75  # no AIX/RISC-V/AArch64/LoongArch/SystemZ mcount
+lib/Transforms/IPO/ForceFunctionAttrs.cpp 0.1  # early exit only
+lib/Transforms/IPO/MemProfContextDisambiguation.cpp 0.01  # MemProfRemoveInfo only
+lib/Transforms/Utils/LowerCommentStringPass.cpp 0.2  # early exit only
+lib/Transforms/Instrumentation/AllocToken.cpp 0.05  # early exit only
+lib/Transforms/IPO/Annotation2Metadata.cpp 0.3
+lib/Transforms/Scalar/AnnotationRemarks.cpp 0.3
+lib/Transforms/Coroutines/CoroEarly.cpp 0.05  # early exit only
+lib/Transforms/Coroutines/CoroCleanup.cpp 0.05
+lib/Transforms/Coroutines/CoroElide.cpp 0.02
+lib/Transforms/Coroutines/CoroSplit.cpp 0.01
+lib/Transforms/Coroutines/CoroAnnotationElide.cpp 0.1
+lib/Transforms/IPO/OpenMPOpt.cpp 0.0  # early exit only
+lib/Transforms/Utils/InjectTLIMappings.cpp 0.1  # no -vector-library
+lib/Transforms/Instrumentation/CGProfile.cpp 0.1  # early exit only
+lib/Transforms/Utils/RelLookupTableConverter.cpp 0.1  # early exit only

@@ -1486,3 +1486,33 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   release builds wrap: scev.goose's proveNoWrapByVaryingStart had two `(d as u64)` of negative deltas (now `as!`).
   For quick iteration: build `--debug` into /tmp, copy it to bin/opt and sweep with `--no-build`; remove bin/opt
   before the real check so build.sh rebuilds the release binary.
+
+## Small passes of default<O2>, FunctionSpecialization, MergeICmps (misc_passes.goose and friends)
+
+- **Registration**: misc_passes.goose owns pass ids 1400..1599 (`mp_is_ours`); passmgr.goose/cgscc.goose only call
+  `mp_parse_function/module/cgscc` and `mp_run_*`. Pick new ids for other passes outside that range: the first range
+  (400..599) clashed with vector-combine/slp-vectorizer (420/421) and silently ran the wrong pass. Their cl::opts are
+  `KNOWN_FLAGS_MISC` (flags.goose); `VALUE_FLAGS_MISC` lists the non-bool ones that may be given as `-x v`.
+- Full ports: lower-expect, lower-constant-intrinsics, sink, speculative-execution, div-rem-pairs, float2int,
+  infer-alignment, mldst-motion, tailcallelim, callsite-splitting, alignment-from-assumptions, drop-unnecessary-assumes,
+  move-auto-init, libcalls-shrinkwrap (incl. constrained fcmp in strictfp), jump-table-to-switch, called-value-propagation,
+  ee-instrument, transform-warning, memprof-remove-attributes, recompute-globalsaa, loop-sink, mergeicmps, and IPSCCP's
+  FunctionSpecialization (funcspec.goose).
+- Early exits only (o2_small.goose; the transformation fails loudly when LLVM would start it): forceattrs, coro-early/
+  cleanup/elide/split/annotation-elide, openmp-opt(-cgscc), alloc-token, annotation2metadata, annotation-remarks,
+  inject-tli-mappings, lower-comment-string, cg-profile (any entry count: loud; 116 corpus files), rel-lookup-table-converter
+  (x86-64 Darwin/Windows with a candidate table: loud; `-relocation-model` is not an opt option yet).
+- Not done (fail loudly): dfa-jump-threading, loop-interchange, expand-memcmp, dynamic llvm.objectsize
+  (ObjectSizeOffsetEvaluator), ObjectSizeVisitor::visitLoadInst, #dbg_assign remapping in callsite-splitting,
+  FunctionSpecialization rounds with more than 8 specialized originals (LLVM iterates a SmallPtrSet in pointer order:
+  sqlite3/oggenc/SPASS with -force-specialization hit it; the default thresholds don't).
+- FunctionSpecialization: CloneFunction is ported in funcspec.goose (au_create_function + attribute copy, clone_basic_block,
+  a metadata mapper with createIdentityMDPredicate premapping every node the body refers to, then RemapInstruction with
+  RF_None). The solver gained SB_INVAL (the Invalidated set; sc_solve clears it) and the specializer entry points.
+  Sweeps: `ipsccp`, `ipsccp -force-specialization`, `ipsccp -funcspec-min-function-size=1` (whole corpus) and
+  `--with-test-flags`: 0 differs; `function(sroa),ipsccp` on the four tests/perf/compile programs: identical.
+- Sweeps (whole corpus, `--with-test-flags`, and `function(sroa,<pass>)` on tests/perf/compile) for every pass above:
+  0 differs, 0 bad-ir after two fixes they found: InferAlignment's `m_PtrToIntOrAddr` matches constant expressions, and
+  SplitEdge's non-critical split names the new block `<old>.split` before DuplicateInstructionsInSplitBetween renames it
+  (the second name bumps the function's unique counter: lua's `.split14` vs `.split13`).
+- Speed: not measured with `perf` (no @perf line times these passes); the sweeps over tests/perf/compile run in seconds.

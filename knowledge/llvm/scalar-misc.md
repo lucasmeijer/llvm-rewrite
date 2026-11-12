@@ -66,3 +66,23 @@ Sink, TailCallElim, MergedLoadStoreMotion, SpeculativeExecution and CallSiteSpli
   table, e.g. `smax1`, `smax3`) before `setName(Name + ".le")`; other instructions are `clone()`d unnamed. So the
   second sunk copy of a call `%smax` is `%smax.le4`, not `%smax.le1` (SCCP/2003-06-24-OverdefinedPHIValue.ll after
   lcssa, `licm<allowspeculation>`).
+
+## More facts (verified by impl/goose ports: imported tests + corpus sweeps with 0 differences)
+
+- **SplitEdge** of a non-critical edge calls `SplitBlock(BB, BB->getTerminator())`, and an empty name becomes
+  `Old->getName() + ".split"`. DuplicateInstructionsInSplitBetween (CallSiteSplitting, JumpThreading) then sets the
+  name `<pred>.split` again; when the first name collided, the rename collides too and the function's unique counter
+  is bumped twice (seen on lua: `.split14` in LLVM).
+- **InferAlignment** returns `PreservedAnalyses::all()` even when it changed alignments, and `m_PtrToIntOrAddr`
+  matches `ptrtoint` constant expressions, so `and (ptrtoint @g), C` folds too (InstCombine/constant-fold-alias.ll).
+- **`-use-dereferenceable-at-point-semantics`** defaults to true (Value.cpp); with `=0`, getPointerDereferenceableBytes
+  never asks canBeFreed (MergeICmps/X86/no-gep-other-work.ll).
+- **ConstantFolding of `llvm.is.constant`** returns true iff the operand `isManifestConstant` (no undef/poison, only
+  ConstantData / aggregates / constant expressions of those); otherwise it does not fold (LowerConstantIntrinsics).
+- **MergeICmps**: the merged blocks are created before the chain's entry block, so the later
+  `EntryBlock_->isEntryBlock()` (and setNewRoot) never fires; enableMemCmpExpansion is false without a target (NoTTI),
+  so the pass is a no-op on modules without an x86 triple.
+- **LoopSink** gets no ScalarEvolution (`nullptr`), and only runs on functions with profile data
+  (`function_entry_count` or `synthetic_function_entry_count`).
+- **libcalls-shrinkwrap** builds its conditions before the call with the call's debug location; `createOrCond` creates the
+  second condition first.
