@@ -88,7 +88,7 @@ lvp_try_to_build_vplan1 :: (lp: *Lv_Planner) -> *Vp_Plan {
     threshold := ifx force then lv_opts.pragma_scev_check_threshold else lv_opts.scev_check_threshold;
     if !vp_finalize_scev_predicates(lp.pse, opt_for_size, threshold) return null;
     vp_add_middle_check();
-    if !vp_handle_early_exits(lvl_has_uncountable_early_exit(lvl)) return null;
+    if !vp_handle_early_exits(lvl.uncountable_exit, lvl, lp.pse) return null;
     pi := lvl.primary_induction;
     vp_create_loop_regions(lv_debug_loc_from_inst_or_operands(pi));
     if lv_cm_fold_tail_by_masking(lp.cm) vp_fold_tail_by_masking();
@@ -781,7 +781,11 @@ lvp_optimize_induction_live_out_users :: (lp: *Lv_Planner) {
     }
     for eb: vpl.exit_blocks for r: vp_block_phis(eb) {
         for p, idx: vb(eb).preds {
-            if p != middle vp_unported("early-exit induction users (optimizeEarlyExitInductionUser)");
+            if p != middle {
+                esc := vp_optimize_early_exit_induction_user(vp_op(r, idx), lp.pse);
+                if esc != NONE vp_set_operand(r, idx, esc);
+                continue;
+            }
             o := vp_op(r, idx);
             incoming: Vp_Val = NONE;
             ell := vp_def(o);
@@ -818,6 +822,34 @@ lvp_optimize_induction_live_out_users :: (lp: *Lv_Planner) {
             vp_set_operand(r, idx, esc);
         }
     }
+}
+
+// optimizeEarlyExitInductionUser
+vp_optimize_early_exit_induction_user :: (op: Vp_Val, pse: *Pse) -> Vp_Val {
+    ok, ext := vpm_vpi(op, VPI_EXTRACT_LANE, 2);
+    if !ok return NONE;
+    okf, fal := vpm_vpi(vp_op(ext, 0), VPI_FIRST_ACTIVE_LANE, 1);
+    if !okf return NONE;
+    mask := vp_op(fal, 0);
+    incoming := vp_op(ext, 1);
+    w := vp_optimizable_iv_of(incoming, pse);
+    if w == NONE return NONE;
+    if vr(w).kind == .WIDEN_INT_OR_FP_INDUCTION && vr(w).ir_inst != NONE return NONE;
+    region := vp_vector_loop_region();
+    can_iv := vb(region).can_iv;
+    can_ty := vv(can_iv).ty;
+    b := vpb_before(ext);
+    dl := vr(ext).dl;
+    f := vr(vpb_nary(*b, VPI_FIRST_ACTIVE_LANE, .[mask], .{}, .[], dl, "", dl_index_type(type_ptr(0)))).def;
+    f = vpb_scalar_zext_or_trunc(*b, f, can_ty, vp_scalar_type(f), dl);
+    end := vr(vpb_add(*b, can_iv, f, dl)).def;
+    if incoming != vr(w).def end = vr(vpb_add(*b, end, vp_const_int(can_ty, 1), dl)).def;
+    if !vp_is_canonical_widen_iv(w) {
+        d := *vpl.inds[vr(w).ind];
+        fpb := ifx d.bop != NONE && is_fp_math_operator(d.bop) then d.bop else NONE;
+        end = vr(vpb_insert(*b, vp_new_derived_iv(d.kind, fpb, vp_op(w, 0), end, vp_op(w, 1)))).def;
+    }
+    return end;
 }
 
 // LoopVectorizationPlanner::buildVPlans

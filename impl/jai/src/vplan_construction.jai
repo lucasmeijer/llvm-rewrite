@@ -606,10 +606,109 @@ sc_union_complexity :: (preds: [] u32) -> s64 {
     return preds.count;
 }
 
-// VPlanTransforms::handleEarlyExits (countable exits only)
-vp_handle_early_exits :: (has_uncountable: bool) -> bool {
-    if has_uncountable { vp_unported("uncountable early exits"); return false; }
+// areAllLoadsDereferenceable
+vp_are_all_loads_dereferenceable :: (header: Vp_Blk, lvl: *Lvl, pse: *Pse) -> bool {
+    for bb: vp_rpo_plain_cfg_loop_body(header) for r: vp_block_recipes(bb) {
+        if !(vp_is_instruction_with_type(r) && vr(r).opcode == vp_opc(.LOAD)) continue;
+        ptr := vp_op(r, 0);
+        ps := vp_scev_for_value(ptr, pse, lvl.l);
+        if sc_is_cnc(ps) return false;
+        ld := vp_uv(vr(r).def);
+        size := sc_get_constant_t(dl_index_type(sc_type(ps)), dl_type_store_size(vp_scalar_type(vr(r).def)));
+        if lv_is_dereferenceable_and_aligned_in_loop_scev(lvl, ps, inst(ld).align, size) continue;
+        return false;
+    }
+    return true;
+}
+
+// handleUncountableEarlyExits (the ReadOnly style)
+vp_handle_uncountable_early_exits :: (header: Vp_Blk, latch: Vp_Blk, middle: Vp_Blk) -> bool {
+    lb := vpb_before(vp_terminator(latch));
+    Exit_Info :: struct { exiting: Vp_Blk; exit: Vp_Blk; cond: Vp_Val; }
+    exits: [..] Exit_Info; exits.allocator = temp;
+    for eb: vpl.exit_blocks {
+        preds: [..] Vp_Blk; preds.allocator = temp;
+        for vb(eb).preds array_add(*preds, it);
+        for p: preds {
+            if p == middle continue;
+            true_succ := vb(p).succs[0];
+            term := vp_terminator(p);
+            assert(vpm_vpi_r(term, VPI_BRANCH_ON_COND, 1), "Terminator must be BranchOnCond");
+            c := vp_op(term, 0);
+            eb2 := vpb_before(term);
+            if true_succ != eb c = vr(vpb_not(*eb2, c)).def;
+            mc := vpb_nary(*eb2, VPI_MASKED_COND, .[c]);
+            array_add(*exits, .{p, eb, vr(mc).def});
+        }
+    }
+    assert(exits.count > 0, "must have at least one early exit");
+    rpo := vp_rpo(header, false);
+    rpo_idx :: (rpo: [] Vp_Blk, b: Vp_Blk) -> s64 { for rpo if it == b return it_index; return -1; }
+    // llvm::sort (stable enough: distinct keys)
+    for i: 1..exits.count - 1 {
+        j := i;
+        while j > 0 && rpo_idx(rpo, exits[j].exiting) < rpo_idx(rpo, exits[j - 1].exiting) {
+            t := exits[j]; exits[j] = exits[j - 1]; exits[j - 1] = t;
+            j -= 1;
+        }
+    }
+    combined := exits[0].cond;
+    for i: 1..exits.count - 1 combined = vr(vpb_logical_or(*lb, combined, exits[i].cond)).def;
+    any_taken := vr(vpb_nary(*lb, VPI_ANY_OF, .[combined])).def;
+    latch_br := vp_terminator(latch);
+    assert(vp_is_vpi(latch_br, VPI_BRANCH_ON_COND), "Unexpected terminator");
+    latch_taken := vp_op(latch_br, 0);
+    ldl := vr(latch_br).dl;
+    vp_erase_recipe(latch_br);
+    le := vpb_at_end(latch);
+    vpb_nary(*le, VPI_BRANCH_ON_TWO_CONDS, .[any_taken, latch_taken], .{}, .[], ldl);
+    vb(latch).succs.count = 0;
+    vee: [..] Vp_Blk; vee.allocator = temp;
+    for i: 0..exits.count - 1 array_add(*vee, vp_new_block(.BASIC, ifx exits.count == 1 then "vector.early.exit" else tprint("vector.early.exit.%", i)));
+    dispatch := ifx exits.count == 1 then vee[0] else vp_new_block(.BASIC, "vector.early.exit.check");
+    vb(dispatch).preds.count = 0; array_add(*vb(dispatch).preds, latch);
+    array_add(*vb(latch).succs, dispatch); array_add(*vb(latch).succs, middle); array_add(*vb(latch).succs, header);
+    db := vpb_at(dispatch, vb(dispatch).first);
+    fal := vr(vpb_nary(*db, VPI_FIRST_ACTIVE_LANE, .[combined], .{}, .[], NONE, "first.active.lane", dl_index_type(type_ptr(0)))).def;
+    for ex, k: exits {
+        for r: vp_block_phis(ex.exit) {
+            inc := vp_phi_incoming_value_for_block(r, ex.exiting);
+            new_inc := inc;
+            if !vp_is_ir_value(inc) {
+                xb := vpb_at_end(vee[k]);
+                new_inc = vr(vpb_nary(*xb, VPI_EXTRACT_LANE, .[fal, inc], .{}, .[], NONE, "early.exit.value")).def;
+            }
+            vp_phi_remove_incoming_value_for(r, ex.exiting);
+            vp_add_operand(r, new_inc);
+        }
+        vp_erase_recipe(vp_terminator(ex.exiting));
+        vpbu_disconnect(ex.exiting, ex.exit);
+        vpbu_connect(vee[k], ex.exit);
+    }
+    cur := dispatch;
+    if exits.count > 1 for i: 0..exits.count - 2 {
+        lane_val := vr(vpb_nary(*db, VPI_EXTRACT_LANE, .[fal, exits[i].cond], .{}, .[], NONE, "exit.cond.at.lane")).def;
+        is_last := i + 2 == exits.count;
+        false_bb := ifx is_last then vee[vee.count - 1] else vp_new_block(.BASIC, tprint("vector.early.exit.check.%", i));
+        vpb_nary(*db, VPI_BRANCH_ON_COND, .[lane_val]);
+        vb(cur).succs.count = 0; array_add(*vb(cur).succs, vee[i]); array_add(*vb(cur).succs, false_bb);
+        vb(vee[i]).preds.count = 0; array_add(*vb(vee[i]).preds, cur);
+        vb(false_bb).preds.count = 0; array_add(*vb(false_bb).preds, cur);
+        cur = false_bb;
+        db = vpb_at_end(cur);
+    }
+    return true;
+}
+
+// VPlanTransforms::handleEarlyExits
+vp_handle_early_exits :: (style: Uncountable_Exit_Trait, lvl: *Lvl, pse: *Pse) -> bool {
     middle := vpbu_plain_cfg_middle_block();
+    if style != .NONE {
+        header, latch := vpbu_plain_cfg_header_and_latch();
+        if style == .READ_WRITE vp_unported("uncountable early exits with side effects (MaskedHandleExitInScalarLoop)");
+        if !vp_are_all_loads_dereferenceable(header, lvl, pse) return false;
+        return vp_handle_uncountable_early_exits(header, latch, middle);
+    }
     for eb: vpl.exit_blocks {
         preds: [..] Vp_Blk; preds.allocator = temp;
         for vb(eb).preds array_add(*preds, it);

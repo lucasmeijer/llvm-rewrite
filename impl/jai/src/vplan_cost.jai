@@ -339,7 +339,15 @@ vp_instruction_cost :: (c: *Vp_Cost_Ctx, r: Vp_Rec, vf: Ec) -> Cost {
     case VPI_FIRST_ACTIVE_LANE; #through; case VPI_LAST_ACTIVE_LANE;
         sty := vp_scalar_type(vp_op(r, 0));
         if ec_is_scalar(vf) return lt_cmp_sel_cost(t, .ICMP, sty, lv_cmp_result_type(sty), ICMP_EQ, kind);
-        vp_unported("cttz.elts costs (First/LastActiveLane)");
+        pty := lv_to_vector_ty(sty, vf);
+        rty := vp_scalar_type(vr(r).def);
+        a := ica_types(IID_EXPERIMENTAL_CTTZ_ELTS, rty, .[pty, type_int(1)]);
+        cst := lt_intrinsic_cost(t, *a, kind);
+        if o == VPI_LAST_ACTIVE_LANE {
+            cst = lc_add(cst, lt_arith_cost(t, .XOR, pty, kind, OI_ANY, Op_Info.{OK_UNIFORM_CONSTANT_VALUE, OP_NONE}));
+            cst = lc_add(cst, lt_arith_cost(t, .SUB, rty, kind));
+        }
+        return cst;
     case VPI_EXTRACT_LAST_ACTIVE;
         sty := vp_scalar_type(vr(r).def);
         vty := lv_to_vector_ty(sty, vf);

@@ -274,6 +274,28 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             for k: 1..vp_nops(r)-1 res = vs_binop(s, .OR, res, irb_freeze(*s.b, vs_get(s, vp_op(r, k))));
             if ec_is_scalar(s.vf) return res;
             return irb_intrinsic(*s.b, "llvm.vector.reduce.or", .[vtype(res)], .[res]);
+        case VPI_FIRST_ACTIVE_LANE;
+            ty := vp_scalar_type(vr(r).def);
+            cttz :: (s: *Vp_State, ty: Type_Id, m: Value_Id, name: string) -> Value_Id {
+                f := get_or_insert_intrinsic_declaration(IID_EXPERIMENTAL_CTTZ_ELTS, .[ty, vtype(m)]);
+                return irb_call(*s.b, f, .[m, const_int(ir.t_i1, 0)], name);
+            }
+            if vp_nops(r) == 1 return cttz(s, ty, vs_get(s, vp_op(r, 0)), name);
+            rvf := const_int(ty, s.vf.n);
+            res: Value_Id = NONE;
+            idx := vp_nops(r) - 1;
+            while idx >= 0 {
+                tz: Value_Id;
+                if ec_is_scalar(s.vf) tz = irb_cast(*s.b, .ZEXT, isf_icmp_b(s, ICMP_EQ, vs_get(s, vp_op(r, idx)), const_int(ir.t_i1, 0)), ty);
+                else tz = cttz(s, ty, vs_get(s, vp_op(r, idx)), name);
+                cur := vs_binop(s, .ADD, vs_binop(s, .MUL, rvf, const_int(ty, cast(u64) idx)), tz);
+                if res != NONE {
+                    c := isf_icmp_b(s, ICMP_NE, tz, rvf);
+                    res = irb_select(*s.b, c, cur, res);
+                } else res = cur;
+                idx -= 1;
+            }
+            return res;
         case VPI_RESUME_FOR_EPILOGUE;
             return vs_get(s, vp_op(r, 0), true);
         case VPI_EXTRACT_LAST_ACTIVE;
@@ -751,7 +773,28 @@ vp_execute_plan :: (s: *Vp_State) {
         if vp_is_ir_basic(b) vs_execute_ir_block(s, b);
         else vs_execute_basic_block(s, b);
     }
-    if vp_has_early_exit() vp_unported("LoopInfo updates for early-exit dispatch blocks");
+    if vp_has_early_exit() {
+        // LoopInfo for the extra dispatch blocks: the innermost loop containing all successors that are in a loop
+        for < vpb: rpo {
+            if !vp_is_basic(vpb) || vp_is_ir_basic(vpb) continue;
+            _, bb := table_find(*s.vpbb2irbb, vpb);
+            l := li_loop_for(s.li, bb);
+            if l == NONE continue;
+            t := block_terminator(bb);
+            n := num_successors(t);
+            any_in := false;
+            for k: 0..cast(s64) n - 1 if li_contains(s.li, l, get_successor(t, cast(u32) k)) any_in = true;
+            if any_in continue;
+            target: Loop_Id = NONE;
+            for k: 0..cast(s64) n - 1 {
+                sl := li_loop_for(s.li, get_successor(t, cast(u32) k));
+                if sl == NONE continue;
+                if target == NONE target = sl; else target = li_smallest_common_loop(s.li, target, sl);
+            }
+            li_remove_block(s.li, bb);
+            if target != NONE li_add_basic_block_to_loop(s.li, target, bb);
+        }
+    }
     if sph == NONE {
         // the original loop is unreachable: delete it and all its blocks
         for eb: vpl.exit_blocks for r: vp_block_phis(eb) if vp_nops(r) == 1 vp_erase_recipe(r);
@@ -790,6 +833,7 @@ is_vector_intrinsic_with_overload_type_at_arg :: (id: Intrinsic_Id, idx: s64) ->
     if n == "llvm.powi" || n == "llvm.ldexp" return idx == -1 || idx == 1;
     return idx == -1;
 }
+isf_icmp_b :: (s: *Vp_State, pred: u8, a: Value_Id, b: Value_Id) -> Value_Id { return isf_icmp(*s.b, pred, a, b); }
 // VPWidenCallRecipe::execute
 vp_widen_call_execute :: (s: *Vp_State, r: Vp_Rec) {
     assert(ec_is_vector(s.vf), "not widening");

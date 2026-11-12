@@ -503,6 +503,13 @@ lv_is_dereferenceable_and_aligned_in_loop :: (v: *Lvl, ld: Value_Id) -> bool {
         q.dt = v.dt; q.ac = v.ac; q.cxt = block_first_non_phi(header);
         return is_dereferenceable_and_aligned_pointer(ptr, align, elt_size, q);
     }
+    return lv_is_dereferenceable_and_aligned_in_loop_scev(v, ptr_scev, align, sc_get_constant(elt_size));
+}
+// isDereferenceableAndAlignedInLoop(const SCEV *PtrSCEV, Align, const SCEV *EltSizeSCEV, Loop *, ...)
+lv_is_dereferenceable_and_aligned_in_loop_scev :: (v: *Lvl, ptr_scev: Scev_Id, align: u64, elt_scev: Scev_Id) -> bool {
+    l := v.l;
+    header := li_header(v.li, l);
+    elt_size := sc_ap(elt_scev);
     ar := ptr_scev;
     if !sc_is_addrec(ar) || sc_loop(ar) != l || !sc_is_affine(ar) return false;
     step := sc_step_recurrence(ar);
@@ -517,7 +524,6 @@ lv_is_dereferenceable_and_aligned_in_loop :: (v: *Lvl, ld: Value_Id) -> bool {
     be := sc_get_predicated_backedge_taken_count(l, *preds);
     if sc_is_cnc(max_be) return false;
     lg: Laa_Loop_Guards;
-    elt_scev := sc_get_constant(elt_size);
     a_start, a_end := laa_start_and_end_for_access_size(l, ptr_scev, elt_scev, be, max_be, null, v.dt, v.ac, *lg);
     if sc_is_cnc(a_start) || sc_is_cnc(a_end) return false;
     diff := sc_get_minus(a_end, a_start);
@@ -608,8 +614,7 @@ lvl_can_vectorize :: (v: *Lvl, use_vplan_native_path: bool) -> bool {
     return true;
 }
 
-// LoopVectorizationLegality::isVectorizableEarlyExitLoop: only the parts that reject the loop before the
-// read-only / movable-load analysis are ported.
+// LoopVectorizationLegality::isVectorizableEarlyExitLoop
 lvl_is_vectorizable_early_exit_loop :: (v: *Lvl) -> bool {
     latch := li_loop_latch(v.li, v.l);
     if latch == NONE return false;
@@ -637,8 +642,24 @@ lvl_is_vectorizable_early_exit_loop :: (v: *Lvl) -> bool {
         o := inst_op(i);
         if o != .LOAD && o != .STORE && o != .PHI && o != .BR && o != .CONDBR && !lv_is_safe_to_speculatively_execute(i) return false;
     }
-    fatal("loop-vectorize: early-exit loops with uncountable exits are not supported yet");
-    return false;
+    non_deref: [..] Value_Id; non_deref.allocator = temp;
+    if !has_side_effects {
+        // isReadOnlyLoop
+        for bb: li_blocks(v.li, v.l) for i: block_insts(bb) {
+            if inst_op(i) == .LOAD {
+                if !lv_is_dereferenceable_and_aligned_in_loop(v, i) array_add(*non_deref, i);
+            } else if may_read_from_memory(i) || may_write_to_memory(i) || may_throw(i) return false;
+        }
+    } else {
+        // canUncountableExitConditionLoadBeMoved for every uncountable exiting block: only reached with
+        // -enable-early-exit-vectorization-with-side-effects (processLoop rejects such loops otherwise, and so does
+        // a failing check here, with the same result)
+        if !lv_opts.enable_early_exit_with_side_effects return false;
+        fatal("loop-vectorize: early-exit loops with side effects (canUncountableExitConditionLoadBeMoved) are not supported yet");
+    }
+    for ld: non_deref if lvl_is_consecutive_ptr(v, vtype(ld), op(ld, 0)) != 1 return false;
+    v.uncountable_exit = ifx has_side_effects then .READ_WRITE else .READ_ONLY;
+    return true;
 }
 
 // LoopVectorizationLegality::canFoldTailByMasking

@@ -753,3 +753,14 @@ li_print_loop :: (li: *Loop_Info, l: Loop_Id, sb: *String_Builder, depth: u32 = 
 li_print :: (li: *Loop_Info, sb: *String_Builder) {
     for li.top_level li_print_loop(li, it, sb);
 }
+
+// LoopInfoBase::getSmallestCommonLoop
+li_smallest_common_loop :: (li: *Loop_Info, a_in: Loop_Id, b_in: Loop_Id) -> Loop_Id {
+    a := a_in; b := b_in;
+    if a == NONE || b == NONE return NONE;
+    depth :: (li: *Loop_Info, l: Loop_Id) -> s64 { d := 0; x := l; while x != NONE { d += 1; x = li.loops[x].parent; } return d; }
+    while depth(li, a) > depth(li, b) a = li.loops[a].parent;
+    while depth(li, b) > depth(li, a) b = li.loops[b].parent;
+    while a != b { a = li.loops[a].parent; b = li.loops[b].parent; }
+    return a;
+}
