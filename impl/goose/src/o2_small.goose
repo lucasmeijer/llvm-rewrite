@@ -399,15 +399,6 @@ fn os_has_profile_data(f: i32) -> bool {
     return n == "function_entry_count" || n == "synthetic_function_entry_count";
 }
 
-// LoopSinkPass::run: only with profile data and loops
-fn loop_sink_run(fv: i32) -> u32 {
-    if !os_has_profile_data(fv) { return PA_ALL; }
-    li_get(fv);
-    if li_ntop(fv) == 0 { return PA_ALL; }
-    os_not_ported("loop-sink (functions with profile data)");
-    return PA_ALL;
-}
-
 // CGProfilePass: only functions with a (non-synthetic) entry count
 fn cg_profile_run(m: i32) -> u32 {
     var f = modules[m].first_func;

@@ -19,6 +19,7 @@ import tailcallelim;
 import callsite_splitting;
 import subtarget;
 import o2_small;
+import loop_sink;
 import mergeicmps;
 import jump_table_to_switch;
 import called_value_propagation;
