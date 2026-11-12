@@ -122,9 +122,19 @@ lvp_select_best_epilogue_plan :: (lp: *Lv_Planner, main_plan: *Vp_Plan, main_vf_
     min_vf := ifx lv_opts.epilogue_min_vf.set then cast(u64) lv_opts.epilogue_min_vf.v else 16;
     if main_vf_in.n * ic < min_vf return null;
 
-    // GetEffectiveVF: narrowInterleaveGroups is not ported (it fails loudly), so no plan processes fewer than VF
-    // elements per iteration.
-    main_vf := main_vf_in;
+    // GetEffectiveVF: 1 for plans whose interleave groups were narrowed (the canonical IV steps by UF)
+    get_effective_vf :: (plan: *Vp_Plan, vf: Ec) -> Ec {
+        saved := vpl;
+        defer vpl = saved;
+        vp_use(plan);
+        ok, inc, _ := vpm_branch_on_count(vp_terminator(vp_exiting_basic_block(vp_vector_loop_region())));
+        if ok {
+            oka, a, b := vpm_binary(inc, vp_opc(.ADD));
+            if oka && a == vb(vp_vector_loop_region()).can_iv && b == vpl.uf return Ec.{1, vf.scalable};
+        }
+        return vf;
+    }
+    main_vf := get_effective_vf(main_plan, main_vf_in);
     if main_vf.scalable vp_unported("epilogue vectorization of scalable main loops");
     tc_ty := lp.lvl.widest_ind_ty;
     vp_use(main_plan);
@@ -143,7 +153,7 @@ lvp_select_best_epilogue_plan :: (lp: *Lv_Planner, main_plan: *Vp_Plan, main_vf_
     for next: lp.profitable_vfs {
         if !lvp_has_plan_with_vf(lp, next.width) continue;
         cur := lvp_get_plan_for(lp, next.width);
-        evf := next.width;
+        evf := get_effective_vf(cur, next.width);
         if evf.scalable vp_unported("scalable epilogue VFs");
         if ec_known_gt(evf, main_vf) continue;
         if sc_is_known_predicate(ICMP_UGT, sc_get_element_count(tc_ty, evf.n, false), rem) continue;

@@ -14,6 +14,62 @@ Lv_Planner :: struct {
     profitable_vfs: [..] Lv_Vf;               // ProfitableVFs
 }
 
+// VPlanTransforms::replaceSymbolicStrides
+vp_replace_symbolic_strides :: (pse: *Pse, strides: *Table(Value_Id, Scev_Id), dt: *Vp_Dom_Tree) {
+    if strides.count == 0 return;
+    preheader := vb(vpl.entry).succs[1];
+    Ctx :: struct { dt: *Vp_Dom_Tree; ph: Vp_Blk; }
+    ctx := Ctx.{dt, preheader};
+    can_use :: (u: Vp_Rec, idx: s64, data: *void) -> bool { c := cast(*Ctx) data; return vp_dt_dominates(c.dt, c.ph, vr(u).parent); }
+    rewrite_map: Table(Value_Id, Scev_Id); rewrite_map.allocator = temp;
+    for stride: strides.* {
+        stride_v := sc_value(stride);
+        ps := pse_get_scev(pse, stride_v);
+        if !sc_is_const(ps) continue;
+        c := const_ap(sc_value(ps));
+        ci := vp_const_int_ap(c);
+        sv := vp_get_live_in(stride_v);
+        if sv != NONE vp_replace_uses_with_if(sv, ci, can_use, *ctx);
+        use := ir.v_first_use[stride_v];
+        while use != NONE {
+            u := ir.u_user[use];
+            use = ir.u_next[use];
+            if !is_inst(u) continue;
+            o := inst_op(u);
+            if o != .SEXT && o != .ZEXT continue;
+            uv := vp_get_live_in(u);
+            if uv == NONE continue;
+            bw := type_bits(scalar_type(vtype(u)));
+            cc := vp_const_int_ap(ifx o == .SEXT then ap_sext(c, bw) else ap_zext(c, bw));
+            vp_replace_uses_with_if(uv, cc, can_use, *ctx);
+        }
+        table_set(*rewrite_map, stride_v, ps);
+    }
+    rw: Sc_Rewriter;
+    sc_rewriter_init(*rw, .PARAMETER);
+    rw.param_map = *rewrite_map;
+    for r: vp_block_recipes(vpl.entry) {
+        if vr(r).kind != .EXPAND_SCEV continue;
+        e := vr(r).expr;
+        ns := sc_rewrite(*rw, e);
+        if ns == e continue;
+        nv := vp_get_or_create_vp_value_for_scev_expr(ns);
+        vp_rauw(vr(r).def, nv);
+        if vpl.trip_count == vr(r).def vpl.trip_count = nv;
+    }
+}
+// vputils::getOrCreateVPValueForSCEVExpr
+vp_get_or_create_vp_value_for_scev_expr :: (e: Scev_Id) -> Vp_Val {
+    if sc_is_const(e) return vp_live_in(sc_value(e));
+    if sc_kind(e) == .UNKNOWN && !is_inst(sc_value(e)) return vp_live_in(sc_value(e));
+    x := vp_new_expand_scev(e);
+    entry := vpl.entry;
+    it := vp_first_non_phi(entry);
+    while it != NONE && vr(it).kind == .IR_INSTRUCTION it = vr(it).next;
+    vp_insert_recipe(x, entry, it);
+    return vr(x).def;
+}
+
 // LoopVectorizationPlanner::tryToBuildVPlan1
 lvp_try_to_build_vplan1 :: (lp: *Lv_Planner) -> *Vp_Plan {
     lvl := lp.lvl;
@@ -22,10 +78,11 @@ lvp_try_to_build_vplan1 :: (lp: *Lv_Planner) -> *Vp_Plan {
     if laa.rt.checks.count && !laa.rt.can_use_diff_check lv_prepare_no_alias_metadata(lver, *laa.rt);
     plan := vp_build_vplan0(lp.li, lp.l, lvl.widest_ind_ty, lp.pse, lver);
     dt := vp_dt_build();
-    if laa.symbolic_strides.count vp_unported("replaceSymbolicStrides");
+    vp_replace_symbolic_strides(lp.pse, *laa.symbolic_strides, *dt);
     vp_simplify_recipes();
     vp_remove_dead_recipes();
     if !vp_create_header_phi_recipes(lp.pse, lp.li, lp.l, *dt, lvl, lp.in_loop_reductions, lvh_allow_reordering(lp.hints)) return null;
+    vp_replace_symbolic_strides(lp.pse, *laa.symbolic_strides, *dt);
     force := lvh_force(lp.hints) == FK_ENABLED;
     opt_for_size := !force && (lp.cm.sel == .NOT_ALLOWED_OPT_SIZE || lp.cm.sel == .NOT_ALLOWED_LOW_TRIP_LOOP);
     threshold := ifx force then lv_opts.pragma_scev_check_threshold else lv_opts.scev_check_threshold;
@@ -779,7 +836,9 @@ lvp_build_vplans :: (lp: *Lv_Planner, vplan1: *Vp_Plan, min_vf: Ec, max_vf: Ec) 
         vp_truncate_to_minimal_bitwidths(min_bws);
         vp_optimize();
         if lp.cm.tail_folding_style == .DATA_WITH_EVL vp_unported("EVL tail folding");
-        vp_check_narrow_interleave_groups(lp.cm.tti);
+        np := vp_narrow_interleave_groups(lp.cm.tti);
+        if np array_add(*lp.vplans, np);
+        vp_use(plan);
         st := lp.cm.tail_folding_style;
         vp_materialize_header_mask(st == .DATA || st == .DATA_AND_CONTROL_FLOW || st == .DATA_AND_CONTROL_FLOW_WITHOUT_RUNTIME_CHECK,
                                    st == .DATA_AND_CONTROL_FLOW || st == .DATA_AND_CONTROL_FLOW_WITHOUT_RUNTIME_CHECK);

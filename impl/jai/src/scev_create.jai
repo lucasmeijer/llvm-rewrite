@@ -152,6 +152,7 @@ Sc_Rewriter_Kind :: enum u8 {
     NORMALIZE;       // NormalizeDenormalizeRewriter                 (iv_users.jai)
     UNIFORMITY;      // SCEVAddRecForUniformityRewriter              (lv_legality.jai)
     PTR_TO_ADDR;     // SCEVPtrToAddrRewriter (LoopUtils.cpp)        (lv_execute.jai)
+    PARAMETER;       // SCEVParameterRewriter                         (lv_plan.jai)
 }
 Sc_Rewriter :: struct {
     kind: Sc_Rewriter_Kind;
@@ -171,6 +172,7 @@ Sc_Rewriter :: struct {
     step_multiplier: u64;               // UNIFORMITY
     offset: u64;                        // UNIFORMITY
     cannot_analyze: bool;               // UNIFORMITY
+    param_map: *Table(Value_Id, Scev_Id);   // PARAMETER
 }
 sc_rewriter_init :: (rw: *Sc_Rewriter, kind: Sc_Rewriter_Kind) { rw.kind = kind; rw.memo.allocator = temp; }
 sc_rewrite :: (rw: *Sc_Rewriter, s: Scev_Id) -> Scev_Id {
@@ -193,6 +195,11 @@ sc_rewrite_dispatch :: (rw: *Sc_Rewriter, s: Scev_Id) -> Scev_Id {
         case .NORMALIZE;     handled, r = sc_rw_normalize_visit(rw, s);
         case .UNIFORMITY;    handled, r = sc_rw_uniformity_visit(rw, s);
         case .PTR_TO_ADDR;   handled, r = sc_rw_ptr_to_addr_visit(rw, s);
+        case .PARAMETER;
+            if sc_kind(s) == .UNKNOWN {
+                found, m := table_find(rw.param_map, sc_value(s));
+                handled = true; r = ifx found then m else s;
+            }
     }
     if handled return r;
     return sc_rewrite_default(rw, s);

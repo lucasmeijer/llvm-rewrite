@@ -251,40 +251,167 @@ vp_interleave_execute :: (s: *Vp_State, r: Vp_Rec) {
     vp_ig_add_metadata(g, st);
 }
 
-// narrowInterleaveGroups: the checks before the transform; a plan the transform would change fails loudly
-vp_check_narrow_interleave_groups :: (t: *Tti) {
+// canNarrowLoad
+vp_can_narrow_load :: (wide_member0: Vp_Rec, op_idx: s64, opv: Vp_Val, idx: s64, scalable: bool) -> bool {
+    m0op := vp_op(wide_member0, op_idx);
+    if vp_is_defined_outside_loop_regions(m0op) {
+        if m0op == opv return true;
+        return !scalable && vp_is_defined_outside_loop_regions(opv) && vp_scalar_type(opv) == vp_scalar_type(m0op);
+    }
+    r := vp_def(m0op);
+    if vr(r).kind == .WIDEN_LOAD return !scalable && !vr(r).masked && vr(r).consecutive && m0op == opv;
+    if vr(r).kind == .INTERLEAVE {
+        g := vp_ig(r);
+        return g.factor == cast(u32) g.keys.count && vr(r).defs[idx] == opv;
+    }
+    return false;
+}
+// getOpcodeOrIntrinsicID for VPWidenRecipe / VPWidenCastRecipe
+vp_can_narrow_ops :: (ops: [] Vp_Val, scalable: bool) -> bool {
+    m0 := vp_def(ops[0]);
+    if m0 == NONE || !vp_is_with_ir_flags_kind(vr(m0).kind) return false;
+    for v: ops {
+        r := vp_def(v);
+        if r == NONE || (vr(r).kind != .WIDEN && vr(r).kind != .WIDEN_CAST) return false;
+        if vr(r).opcode != vr(m0).opcode return false;
+        if vp_scalar_type(v) != vp_scalar_type(ops[0]) return false;
+        has_pred := vr(r).flags.optype == .CMP || vr(r).flags.optype == .FCMP;
+        if has_pred && vr(r).flags.pred != vr(m0).flags.pred return false;
+    }
+    for idx: 0..vp_nops(m0) - 1 {
+        opsi: [..] Vp_Val; opsi.allocator = temp;
+        for ops array_add(*opsi, vp_op(vp_def(it), idx));
+        if vp_can_narrow_ops(opsi, scalable) continue;
+        for opv, op_idx: opsi if !vp_can_narrow_load(m0, idx, opv, op_idx, scalable) return false;
+    }
+    return true;
+}
+// isAlreadyNarrow
+vp_is_already_narrow :: (v: Vp_Val) -> bool {
+    if vp_is_ir_value(v) return true;
+    r := vp_def(v);
+    return r != NONE && vr(r).kind == .REPLICATE && vr(r).single_scalar;
+}
+// narrowInterleaveGroupOp
+vp_narrow_interleave_group_op :: (members: [] Vp_Val, narrowed: *[..] Vp_Val, preheader: Vp_Blk) -> Vp_Val {
+    v := members[0];
+    if array_find(narrowed.*, v) return v;
+    if vp_is_defined_outside_loop_regions(v) {
+        bv := vp_new_instruction(VPI_BUILD_VECTOR, members);
+        vp_append_recipe(preheader, bv);
+        array_add(narrowed, vr(bv).def);
+        return vr(bv).def;
+    }
+    if vp_is_already_narrow(v) return v;
+    r := vp_def(v);
+    k := vr(r).kind;
+    if k == .WIDEN || k == .WIDEN_CAST {
+        for m: members { if it_index == 0 continue; vp_intersect_flags(*vr(r).flags, vr(vp_def(m)).flags); }
+        for idx: 0..vp_nops(r) - 1 {
+            opsi: [..] Vp_Val; opsi.allocator = temp;
+            for members array_add(*opsi, vp_op(vp_def(it), idx));
+            vp_set_operand(r, idx, vp_narrow_interleave_group_op(opsi, narrowed, preheader));
+        }
+        return v;
+    }
+    if k == .INTERLEAVE {
+        g := vp_ig(r);
+        l := vp_new_widen_load(g.insert_pos, vp_op(r, 0), vp_interleave_mask(r), true, vr(r).md, vr(r).dl);
+        vp_insert_before(l, r);
+        array_add(narrowed, vr(l).def);
+        return vr(l).def;
+    }
+    if k == .REPLICATE {
+        assert(vr(r).single_scalar && inst_op(vp_underlying_instr(r)) == .LOAD, "must be a single scalar load");
+        array_add(narrowed, v);
+        return v;
+    }
+    assert(k == .WIDEN_LOAD);
+    ptr := vp_op(r, 0);
+    pr := vp_def(ptr);
+    if pr != NONE && vr(pr).kind == .VECTOR_POINTER ptr = vp_op(pr, 0);
+    n := vp_new_replicate(vr(r).ir_inst, .[ptr], true, NONE, .{}, vr(r).md, vr(r).dl);
+    vp_insert_before(n, r);
+    array_add(narrowed, vr(n).def);
+    return vr(n).def;
+}
+
+// VPlanTransforms::narrowInterleaveGroups: returns the copy of the plan with all VFs but the narrowed one, or null
+vp_narrow_interleave_groups :: (t: *Tti) -> *Vp_Plan {
     region := vp_vector_loop_region();
-    if region == NONE return;
+    if region == NONE return null;
     e := vp_entry_basic_block(region);
-    if e != vp_exiting_basic_block(region) return;
+    if e != vp_exiting_basic_block(region) return null;
     okb, _, _ := vpm_branch_on_count(vb(e).last);
-    if !okb return;
+    if !okb return null;
     have_vf := false; vf_to_opt: Ec;
-    n_store_groups := 0;
+    store_groups: [..] Vp_Rec; store_groups.allocator = temp;
     for r: vp_block_recipes(e) {
         k := vr(r).kind;
         if (k == .DERIVED_IV || k == .SCALAR_IV_STEPS) && vp_only_first_lane_used(vr(r).def) continue;
-        if vp_is_phi_recipe(r) return;
+        if vp_is_phi_recipe(r) return null;
         is_ig := k == .INTERLEAVE;
-        if vp_may_write_to_memory(r) && !is_ig return;
+        if vp_may_write_to_memory(r) && !is_ig return null;
         for d: 0..vp_num_defined_values(r) - 1 {
             v := vp_defined_value(r, d);
-            for u: vv(v).users if vb(vr(u).parent).parent != region return;
+            for u: vv(v).users if vb(vr(u).parent).parent != region return null;
         }
         if !is_ig continue;
         vfs: [..] Ec; vfs.allocator = temp;
         if have_vf array_add(*vfs, vf_to_opt); else for vpl.vfs array_add(*vfs, it);
         ok, nvf := vp_is_consecutive_interleave_group(r, vfs, t);
-        if !ok || (have_vf && !ec_eq(nvf, vf_to_opt)) return;
+        if !ok || (have_vf && !ec_eq(nvf, vf_to_opt)) return null;
         vf_to_opt = nvf; have_vf = true;
-        if vp_interleave_num_store_operands(r) == 0 continue;
-        n_store_groups += 1;
+        stored := vp_interleave_stored_values(r);
+        if stored.count == 0 continue;
+        m0 := stored[0];
+        all_eq := true;
+        for stored if it != m0 all_eq = false;
+        if vp_is_already_narrow(m0) && all_eq { array_add(*store_groups, r); continue; }
+        all_loads := true;
+        for sv, si: stored {
+            dr := vp_def(sv);
+            if dr == NONE || vr(dr).kind != .INTERLEAVE { all_loads = false; break; }
+            g := vp_ig(dr);
+            if g.factor != cast(u32) g.keys.count || vr(dr).defs[si] != sv { all_loads = false; break; }
+        }
+        if all_loads { array_add(*store_groups, r); continue; }
+        if !vp_can_narrow_ops(stored, vf_to_opt.scalable) return null;
+        array_add(*store_groups, r);
     }
-    if n_store_groups == 0 return;
+    if store_groups.count == 0 return null;
     middle := vp_middle_block();
     req_epi := vb(middle).succs.count == 1 && vp_single_succ(middle) == vp_scalar_preheader();
-    if vb(middle).succs.count != 2 && !req_epi return;
-    vp_unported("narrowInterleaveGroups");
+    if vb(middle).succs.count != 2 && !req_epi return null;
+    if vf_to_opt.scalable vp_unported("narrowInterleaveGroups for scalable VFs");
+    new_plan: *Vp_Plan = null;
+    if vpl.vfs.count != 1 {
+        plan := vpl;
+        new_plan = vp_duplicate(plan);
+        // NewPlan->removeVF
+        for vpl.vfs if ec_eq(it, vf_to_opt) { array_ordered_remove_by_index(*vpl.vfs, it_index); break; }
+        vp_use(plan);
+        vp_set_vf(vf_to_opt);
+    }
+    narrowed: [..] Vp_Val; narrowed.allocator = temp;
+    preheader := vp_vector_preheader();
+    for sg: store_groups {
+        res := vp_narrow_interleave_group_op(vp_interleave_stored_values(sg), *narrowed, preheader);
+        g := vp_ig(sg);
+        st := vp_new_widen_store(g.insert_pos, vp_op(sg, 0), res, NONE, true, vr(sg).md, vr(sg).dl);
+        vp_insert_before(st, sg);
+        vp_erase_recipe(sg);
+    }
+    inc := vp_find_canonical_iv_increment();
+    can_ty := vv(vb(region).can_iv).ty;
+    vector_ph := vp_vector_preheader();
+    step := vpl.uf;
+    vp_rauw(vpl.vf, vp_const_int(can_ty, 1));
+    vp_materialize_vector_trip_count(vector_ph, false, req_epi, step, false, 0);
+    vp_set_operand(inc, 1, step);
+    vp_rauw(vpl.vfxuf, step);
+    vp_remove_dead_recipes();
+    return new_plan;
 }
 // isConsecutiveInterleaveGroup
 vp_is_consecutive_interleave_group :: (r: Vp_Rec, vfs: [] Ec, t: *Tti) -> (bool, Ec) {
