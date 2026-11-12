@@ -332,7 +332,7 @@ lv_add_runtime_unroll_disable_metadata :: (li: *Loop_Info, l: Loop_Id) {
 
 // LoopVectorizationPlanner::updateLoopMetadataAndProfileInfo
 lvp_update_loop_metadata_and_profile_info :: (lp: *Lv_Planner, vector_loop: Loop_Id, header_vpbb: Vp_Blk, vectorizing_epilogue: bool,
-                                              orig_loop_id: Md_Id, has_avg_tc: bool, orig_avg_tc: u32, estimated_vfxuf: u64,
+                                              orig_loop_id: Md_Id, has_avg_tc: bool, orig_avg_tc: u32, inv_weight_in: u32, estimated_vfxuf: u64,
                                               disable_runtime_unroll: bool) {
     li := lp.li; l := lp.l;
     sph := vp_scalar_preheader();
@@ -355,11 +355,20 @@ lvp_update_loop_metadata_and_profile_info :: (lp: *Lv_Planner, vector_loop: Loop
     lv_add_runtime_unroll_disable_metadata(li, vector_loop);
     ok_ec, ec := fn_entry_count(lp.cm.f);
     is_profiled := ok_ec && ec != 0;
+    inv_weight := inv_weight_in;
+    avg_vec_tc: u32; rem_tc: u32;
     if !has_avg_tc {
         if !is_profiled return;
-        vp_unported("profile-based trip-count metadata of vectorized loops (updateLoopMetadataAndProfileInfo)");
+        avg_vec_tc = sc_get_small_constant_trip_count(vector_loop);
+        if avg_vec_tc == 0 return;
+        if sph != NONE rem_tc = cast(u32) (sc_get_small_constant_trip_count(l) % estimated_vfxuf);
+        inv_weight = 1;
+    } else {
+        avg_vec_tc = cast(u32) (orig_avg_tc / estimated_vfxuf);
+        rem_tc = cast(u32) (orig_avg_tc % estimated_vfxuf);
     }
-    vp_unported("estimated trip-count metadata of vectorized loops (setLoopEstimatedTripCount)");
+    if header_vpbb != NONE li_set_loop_estimated_trip_count_with_weight(li, vector_loop, avg_vec_tc, inv_weight);
+    if sph != NONE li_set_loop_estimated_trip_count_with_weight(li, l, rem_tc, inv_weight);
 }
 
 // legacyCSE
@@ -387,7 +396,14 @@ lvp_execute_plan :: (lp: *Lv_Planner, vf: Ec, uf: u32, checks: *Lv_Rt_Checks, ki
     vp_materialize_broadcasts();
     vp_replicate_by_vf(vf);
     latch := li_loop_latch(lp.li, lp.l);
-    if prof_has_branch_weight_md(block_terminator(latch)) vp_unported("addBranchWeightToMiddleTerminator");
+    if prof_has_branch_weight_md(block_terminator(latch)) {
+        // addBranchWeightToMiddleTerminator
+        mt := vp_terminator(vp_middle_block());
+        if mt != NONE && vr(mt).kind == .INSTRUCTION {
+            step := vpl.ufs[0] * cast(u32) vf.n;
+            vp_set_md(mt, md_kind_id(MD_PROF_NAME), md_branch_weights(.[1, step - 1], false));
+        }
+    }
     vector_ph := vp_vector_preheader();
     vp_materialize_constant_vector_trip_count(vf, uf, pse);
     vp_optimize_for_vf_and_uf(vf, uf, pse);
@@ -449,14 +465,14 @@ lvp_execute_plan :: (lp: *Lv_Planner, vf: Ec, uf: u32, checks: *Lv_Rt_Checks, ki
     sc_forget_loop(lp.l);
     sc_forget_block_and_loop_dispositions();
     lid := li_loop_id(lp.li, lp.l);
-    has_avg, avg := li_loop_estimated_trip_count(lp.li, lp.l);
+    has_avg, avg, inv_weight := li_loop_estimated_trip_count_with_weight(lp.li, lp.l);
     vp_execute_plan(*st);
     header_vpbb: Vp_Blk = NONE;
     for b: vp_depth_first_shallow(vpl.entry) if vpbu_is_header(b, *st.vpdt) { header_vpbb = b; break; }
     disable_runtime_unroll := !lv_rt_checks_has_checks(checks) && !ec_is_scalar(vf);
     vloop: Loop_Id = NONE;
     if header_vpbb != NONE { _, hbb := table_find(*st.vpbb2irbb, header_vpbb); vloop = li_loop_for(lp.li, hbb); }
-    lvp_update_loop_metadata_and_profile_info(lp, vloop, header_vpbb, kind == .EPILOGUE, lid, has_avg, avg, vf.n * uf, disable_runtime_unroll);
+    lvp_update_loop_metadata_and_profile_info(lp, vloop, header_vpbb, kind == .EPILOGUE, lid, has_avg, avg, inv_weight, vf.n * uf, disable_runtime_unroll);
     // fixVectorizedLoop
     if header_vpbb != NONE {
         _, hbb := table_find(*st.vpbb2irbb, header_vpbb);

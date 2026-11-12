@@ -355,3 +355,27 @@ li_set_loop_probability :: (li: *Loop_Info, l: Loop_Id, p: Bprob) -> bool {
     return true;
 }
 lu_round :: (x: float64) -> float64 #foreign cfc_libm "round";
+
+// getLoopEstimatedTripCount(L, &EstimatedLoopInvocationWeight): (has, trip count, invocation weight)
+li_loop_estimated_trip_count_with_weight :: (li: *Loop_Info, l: Loop_Id) -> (bool, u32, u32) {
+    br := li_expected_exit_loop_latch_branch(li, l);
+    if br == NONE return false, 0, 0;
+    ok, loop_w, exit_w := extract_branch_weights_2u(br);
+    if !ok return false, 0, 0;
+    if li_contains(li, l, get_successor(br, 1)) { t := loop_w; loop_w = exit_w; exit_w = t; }
+    if exit_w == 0 return false, 0, 0;
+    has, tc := li_loop_estimated_trip_count(li, l);
+    return has, tc, cast,trunc(u32) exit_w;
+}
+// setLoopEstimatedTripCount(L, EstimatedTripCount, EstimatedloopInvocationWeight)
+li_set_loop_estimated_trip_count_with_weight :: (li: *Loop_Info, l: Loop_Id, tc: u32, weight: u32) -> bool {
+    br := li_expected_exit_loop_latch_branch(li, l);
+    if br == NONE return false;
+    add_string_metadata_to_loop(li, l, "llvm.loop.estimated_trip_count", tc);
+    exit_w: u32 = 1;
+    taken_w: u32 = 0;
+    if tc != 0 { exit_w = weight; taken_w = (tc - 1) * exit_w; }
+    if get_successor(br, 0) != li_header(li, l) { t := taken_w; taken_w = exit_w; exit_w = t; }
+    set_metadata(br, md_kind_id(MD_PROF_NAME), md_branch_weights(.[taken_w, exit_w], false));
+    return true;
+}
