@@ -63,9 +63,10 @@ cfc_libfunc_base :: (name: string) -> (base: string, is_f: bool, is_l: bool, fin
 }
 
 // TargetLibraryInfoImpl::getLibFunc(StringRef): only the math subset above
+cfc_libfunc_set: Table(string, bool);   // CFC_LIBFUNCS as a set, built on first use
 tli_get_lib_func :: (name: string) -> bool {
-    for CFC_LIBFUNCS if it == name return true;
-    return false;
+    if cfc_libfunc_set.count == 0 for CFC_LIBFUNCS table_set(*cfc_libfunc_set, it, true);
+    return table_contains(*cfc_libfunc_set, name);
 }
 
 // isValidProtoForLibFunc for the subset (TargetLibraryInfo.td signatures; LDbl matches any fp type)

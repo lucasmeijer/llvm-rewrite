@@ -1293,7 +1293,8 @@ Still slow / known:
   e2e/pipeline/memory/heap.ll and calls/function_pointers.ll get `trunc nuw` where LLVM has `trunc nuw nsw` after
   the first correlated-propagation in the CGSCC pipeline (opt-bisect position 20). The same passes run standalone
   on the bisected input agree, so it is a difference in cached analysis state carried through the earlier part of
-  the pipeline (LVI / AssumptionCache / DT caching): a lead for L2.pipeline-O2.
+  the pipeline. Resolved in L2.pipeline-O2: it was ComputeMaxSignificantBits honouring instruction flags (LLVM's
+  call passes UseInstrInfo in the Depth slot, see below).
 
 ## EarlyCSE (L1.early-cse COMPLETE 96/96)
 
@@ -1354,9 +1355,41 @@ Still slow / known:
   `--with-test-flags` 10075/10189 (loud: other passes' options), `mergeicmps,print<domtree>`;
   `dfa-jump-threading` 7885/7885, stressed with `-dfa-cost-threshold=100000 -dfa-early-exit-heuristic=false
   -dfa-max-cloned-rate=1000` (also `,print<domtree>`); `function(sroa),<pass>` on tests/perf/compile 4/4 for both.
-- Not done: LoopInterchange (`loop-interchange`, the last -O2 gap besides expand-memcmp). It is a LoopNest pass that
-  needs DependenceInfo::depends (lib/Analysis/DependenceAnalysis.cpp + Delinearization.cpp; SCEV-based subscript
-  tests) for its direction matrix in every configuration, and LoopCacheAnalysis (CacheCost) only for the `cache`
-  profitability rule, which is not in the default list (`instorder,vectorize`). Plan: port DependenceAnalysis with
-  its `print<da>` printer first (tests/imported/llvm/Analysis/DependenceAnalysis, import it), then the pass;
-  `-loop-interchange-profitabilities=cache` can fail loudly until LoopCacheAnalysis is ported.
+- LoopInterchange, DependenceAnalysis and Delinearization: see "Default pipelines (L2.pipeline-O2)" below.
+
+## Default pipelines, DependenceAnalysis, LoopInterchange (L2.pipeline-O2 234/241, L2.phase-ordering 127/144, L1.o2-gaps 379/380)
+
+- Files: `pass_builder_pipelines.jai` (PassBuilderPipelines.cpp: `-O#`, `default<O#>`; built as Pass_Node rows,
+  `-jai-print-pipeline` diffs against `opt -print-pipeline-passes`), `dependence_analysis.jai` (DependenceAnalysis.cpp,
+  `print<da>`, `print<da><normalized-results>`, `require<da>`), `delinearization.jai` (Delinearization.cpp,
+  ScalarEvolutionDivision.cpp, ScalarEvolution::getElementSize, `print<delinearization>`, `print<scev-division>`),
+  `pass_loop_interchange.jai` (LoopInterchange.cpp). Imported: Analysis/DependenceAnalysis (72/72),
+  Analysis/Delinearization (23/23), both in the L1.o2-gaps exit selector.
+- Use `./harness/run bisect` for every pipeline mismatch: it names the first diverging opt-bisect position. Then
+  rerun that pass (and its neighbours) standalone on LLVM's `-opt-bisect-limit=<n-1>` output: if standalone agrees,
+  the difference is pipeline state, not the pass. The state differences found so far:
+  - **Block numbers.** `SimplifyCFGPass::run` calls `F.renumberBlocks()` after any change (and
+    `DT->updateBlockNumbers()`); mem2reg orders PHI blocks by number, so the renumbering decides the `.N` version
+    suffixes of SROA's phis later (fbench.ll). `fn_renumber_blocks` in domtree.jai; nothing else renumbers IR blocks.
+  - **ExprValueMap order** (open, linpack-pc.ll): SCEV keeps every value with the same SCEV in insertion order and
+    SCEVExpander reuses the first dominating one. slp-vectorizer + loop-unroll on dgefa reproduces it standalone:
+    our SLP/SCEV registers `%wide.trip.count` before `%9` (both `zext nneg i32 %2`), LLVM `%9` first. The first
+    registration comes from strengthenNoWrapFlags -> getSignedRange -> getConstantMaxBackedgeTakenCount inside a
+    getGEPExpr reached from SLP's getPointersDiff; the query order up to there differs somewhere.
+- DependenceAnalysis is a per-query object (`da_new`): LoopInterchange builds one per run, `print<da>` one per
+  function. `Da_Dependence` is one struct for Dependence and FullDependence (`confused`). Loop levels are u64 masks
+  (more than 62 levels fails loudly). `findArrayDimensions` sorts terms by SCEV pointer in LLVM; we use Scev_Id
+  (creation order); the following llvm::sort is stable up to 16 terms and fails loudly above.
+- LoopInterchange: the LoopNest pass runs only when the LPM starts on a top-level loop; after an interchange the
+  current loop is the new inner loop and the rest of the LPM runs on it (LLVM does the same). `cache` profitability
+  (LoopCacheAnalysis) fails loudly; -loop-interchange-reduction-to-mem is ported. `is_constant` is a Jai builtin
+  (compile-time constness), not isa<Constant>: use `is_const`.
+- Remaining -O2 failures (2026-11-12): 5 blocked only by LoopVectorize (uncountable early exits x3, stores of
+  reductions to invariant addresses x2), 1 linpack-pc (ExprValueMap order above), 1 SLP/inliner-independent.
+  Phase-ordering: LTO pipelines (4), mergefunc (3), PGO options (2), -force-attribute, expand-reductions,
+  expand-memcmp, knowledge retention in loop passes, ptrauth protected.field.ptr, LoopVectorize (3).
+- Perf: tests/perf/scaling/calls/n8000 -O2 takes ~115-130 s on the x64 build (harness limit 120 s; LLVM 4.8 s):
+  the inliner's cost analysis (46k CallAnalyzer runs on n500, the same count as LLVM) and instcombine's known-bits
+  queries, i.e. the x64 backend's per-call overhead on small helpers (no single hotspot). Inlining the hottest
+  helpers (`const_ap`, `type_bits`, `scalar_type`, attribute lookups, `call_*`), a word-wise
+  `tli_are_inline_compatible` and a hashed libfunc name set cut callgrind Ir on n500 by 18%.

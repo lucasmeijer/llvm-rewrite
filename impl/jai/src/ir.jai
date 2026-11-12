@@ -467,7 +467,7 @@ type_int_width :: inline (t: Type_Id) -> u32 { return cast(u32) ir.types[t].a; }
 type_elem :: inline (t: Type_Id) -> Type_Id { return type_sub(t, 0); }
 type_count :: inline (t: Type_Id) -> u64 { return ir.types[t].a; }
 is_vector_type :: inline (t: Type_Id) -> bool { k := type_kind(t); return k == .VECTOR || k == .SVECTOR; }
-scalar_type :: (t: Type_Id) -> Type_Id { if is_vector_type(t) return type_elem(t); return t; }
+scalar_type :: inline (t: Type_Id) -> Type_Id { if is_vector_type(t) return type_elem(t); return t; }
 is_fp_kind :: inline (k: Type_Kind) -> bool { return k >= .HALF && k <= .PPC_FP128; }
 is_fp_type :: inline (t: Type_Id) -> bool { return is_fp_kind(type_kind(t)); }
 is_int_type :: inline (t: Type_Id) -> bool { return type_kind(t) == .INT; }
@@ -494,7 +494,7 @@ fp_semantics :: (k: Type_Kind) -> (precision: s32, max_exp: s32, min_exp: s32, b
 }
 
 // Primitive size in bits (for constant word counts).
-type_bits :: (t: Type_Id) -> u32 {
+type_bits :: inline (t: Type_Id) -> u32 {
     k := type_kind(t);
     if k == .INT || k == .BYTE return cast(u32) ir.types[t].a;
     if is_fp_kind(k) { p, mx, mn, b := fp_semantics(k); return cast(u32) b; }
@@ -958,7 +958,7 @@ const_int :: (type: Type_Id, value: u64) -> Value_Id {
     mask_words(w, bits);
     return const_int_words(type, w);
 }
-const_int_value :: (v: Value_Id) -> [] u64 {
+const_int_value :: inline (v: Value_Id) -> [] u64 {
     bits := type_bits(scalar_type(vtype(v)));
     nw := words_for_bits(bits);
     r: [] u64;
@@ -1020,6 +1020,11 @@ const_null_value :: (type: Type_Id) -> Value_Id {
 
 is_null_value :: (v: Value_Id) -> bool {
     k := vkind(v);
+    if k == .C_INT {
+        // fast path for the common one-word integer
+        t := ir.v_type[v];
+        if ir.types[t].kind == .INT && ir.types[t].a <= 64 return ir.words[ir.v_aux[v]] == 0;
+    }
     if k == .C_NULL || k == .C_ZERO || k == .C_TOKEN_NONE return true;
     if k == .C_INT || k == .C_FP {
         for const_int_value(v) if it != 0 return false;
@@ -1369,7 +1374,7 @@ attr_set_get :: (attrs_in: [] Attr) -> u32 {
     return id;
 }
 
-attr_set_items :: (s: u32) -> [] Attr {
+attr_set_items :: inline (s: u32) -> [] Attr {
     r: [] Attr;
     if s == 0 return r;
     row := ir.attr_sets[s];
@@ -1378,11 +1383,11 @@ attr_set_items :: (s: u32) -> [] Attr {
     return r;
 }
 
-attr_set_has :: (s: u32, kind: Attr_Kind) -> bool {
+attr_set_has :: inline (s: u32, kind: Attr_Kind) -> bool {
     for attr_set_items(s) if it.kind == kind return true;
     return false;
 }
-attr_set_find :: (s: u32, kind: Attr_Kind) -> *Attr {
+attr_set_find :: inline (s: u32, kind: Attr_Kind) -> *Attr {
     items := attr_set_items(s);
     for * items if it.kind == kind return it;
     return null;
@@ -1424,7 +1429,7 @@ attr_list_get :: (fn: u32, ret: u32, params_in: [] u32) -> u32 {
     table_add(*ir.attr_list_map, key_copy(k), id);
     return id;
 }
-attr_list_fn  :: (l: u32) -> u32 { if l == 0 return 0; return ir.attr_lists[l].fn; }
+attr_list_fn  :: inline (l: u32) -> u32 { if l == 0 return 0; return ir.attr_lists[l].fn; }
 attr_list_ret :: (l: u32) -> u32 { if l == 0 return 0; return ir.attr_lists[l].ret; }
 attr_list_param :: (l: u32, i: u32) -> u32 {
     if l == 0 return 0;

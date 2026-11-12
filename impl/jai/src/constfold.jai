@@ -547,7 +547,7 @@ cf_unary :: (opc: Opcode, c: Value_Id) -> Value_Id {
     return NONE;
 }
 
-is_commutative_op :: (opc: Opcode) -> bool {
+is_commutative_op :: inline (opc: Opcode) -> bool {
     return opc == .ADD || opc == .MUL || opc == .AND || opc == .OR || opc == .XOR || opc == .FADD || opc == .FMUL;
 }
 is_associative_op :: (opc: Opcode) -> bool {

@@ -105,7 +105,7 @@ fn_iid :: (f: Value_Id) -> Intrinsic_Id {
     return id;
 }
 // dyn_cast<IntrinsicInst>(V)->getIntrinsicID(), NOT_INTRINSIC if V isn't an intrinsic call
-call_iid :: (v: Value_Id) -> Intrinsic_Id {
+call_iid :: inline (v: Value_Id) -> Intrinsic_Id {
     if !is_inst(v) return NOT_INTRINSIC;
     o := inst_op(v);
     if o != .CALL && o != .INVOKE && o != .CALLBR return NOT_INTRINSIC;

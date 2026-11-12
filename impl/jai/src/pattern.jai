@@ -59,7 +59,18 @@ get_splat_value :: (c: Value_Id, allow_poison := false) -> Value_Id {
 // a scalar ConstantInt (isa<ConstantInt> with a scalar type; vector-typed ConstantInt splats count as ConstantInt too)
 is_const_int :: inline (v: Value_Id) -> bool { return vkind(v) == .C_INT; }
 is_scalar_const_int :: inline (v: Value_Id) -> bool { return vkind(v) == .C_INT && !is_vector_type(vtype(v)); }
-const_ap :: (v: Value_Id) -> APInt { return ap_from_words(type_bits(scalar_type(vtype(v))), const_int_value(v)); }
+const_ap :: (v: Value_Id) -> APInt {
+    t := scalar_type(vtype(v));
+    tr := *ir.types[t];
+    if (tr.kind == .INT || tr.kind == .BYTE) && tr.a <= 64 {
+        // one word: the stored word is already normalized (ap_from_words would only mask it)
+        r: APInt;
+        r.bits = cast(u32) tr.a;
+        r.v = ir.words[ir.v_aux[v]] & ap_mask64(r.bits);
+        return r;
+    }
+    return ap_from_words(type_bits(t), const_int_value(v));
+}
 
 // m_APInt / m_APIntAllowPoison
 pm_apint :: (v: Value_Id, allow_poison := false) -> (bool, APInt) {
@@ -294,7 +305,7 @@ apf_is_exactly_one :: (f: APFloat) -> bool {
 
 // m_BinOp<Opc>(m_Value(A), m_Value(B)). LLVM 23's BinaryOp_match / BinOpPred_match / AnyBinaryOp_match only match
 // instructions (not constant expressions); OverflowingBinaryOp_match (m_NSWAdd, m_NSWNeg, ...) still does.
-pm_binop :: (v: Value_Id, opc: Opcode) -> (bool, Value_Id, Value_Id) {
+pm_binop :: inline (v: Value_Id, opc: Opcode) -> (bool, Value_Id, Value_Id) {
     if !is_inst(v) || inst_op(v) != opc return false, NONE, NONE;
     return true, op(v, 0), op(v, 1);
 }
@@ -307,9 +318,9 @@ pm_c_binop_with :: (v: Value_Id, opc: Opcode, x: Value_Id) -> (bool, Value_Id) {
     return false, NONE;
 }
 // isa<BinaryOperator> (instructions only)
-is_binary_operator :: (v: Value_Id) -> bool { return is_inst(v) && is_binary_op(inst_op(v)); }
+is_binary_operator :: inline (v: Value_Id) -> bool { return is_inst(v) && is_binary_op(inst_op(v)); }
 // m_Not(m_Value(X)): xor X, -1 / xor -1, X
-pm_not :: (v: Value_Id) -> (bool, Value_Id) {
+pm_not :: inline (v: Value_Id) -> (bool, Value_Id) {
     if !is_inst(v) || inst_op(v) != .XOR return false, NONE;
     a := op(v, 0); b := op(v, 1);
     if pm_all_ones(a) return true, b;

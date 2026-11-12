@@ -12,7 +12,7 @@
 DOM_CONDITIONS_MAX_USES :: 20;   // -dom-conditions-max-uses
 
 // getBitWidth(Ty, DL)
-vt_bit_width :: (t: Type_Id) -> u32 {
+vt_bit_width :: inline (t: Type_Id) -> u32 {
     st := scalar_type(t);
     b := type_bits(st);
     if b != 0 return b;

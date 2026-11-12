@@ -65,7 +65,7 @@ builder_cast :: (b: *Builder, op: Opcode, v: Value_Id, dt: Type_Id, name := "") 
 
 call_nargs :: (ci: Value_Id) -> u32 { return func_nparams(inst(ci).ty2); }
 call_arg :: (ci: Value_Id, i: u32) -> Value_Id { return op(ci, i); }
-call_callee :: (ci: Value_Id) -> Value_Id { return op(ci, nops(ci) - 1); }
+call_callee :: inline (ci: Value_Id) -> Value_Id { return op(ci, nops(ci) - 1); }
 
 // Value::takeName
 take_name :: (dst: Value_Id, src: Value_Id) {

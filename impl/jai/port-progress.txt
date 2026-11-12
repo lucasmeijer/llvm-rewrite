@@ -215,3 +215,5 @@ lib/Transforms/IPO/FunctionSpecialization.cpp 0.97  # all of it; fails loudly wh
 lib/IR/BundleAttributes.cpp 0.15  # getAssumeNonNullInfo only (PredicateInfo)
 lib/Transforms/Utils/SSAUpdaterBulk.cpp 0.75  # RewriteAllUses (inside pass_dfa_jump_threading.jai); not RewriteAndOptimizeAllUses / simplifyPass
 lib/Transforms/Scalar/DFAJumpThreading.cpp 0.97  # optimization remarks are not emitted
+lib/Analysis/Delinearization.cpp 0.9  # no getIndexExpressionsFromGEP / tryDelinearizeFixedSizeImpl (only LoopCacheAnalysis and LoopFuse use them)
+lib/Transforms/Scalar/LoopInterchange.cpp 0.95  # no CacheCostManager / the 'cache' rule (fails loudly: LoopCacheAnalysis.cpp not ported); remarks not emitted

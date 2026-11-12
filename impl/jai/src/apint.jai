@@ -138,7 +138,7 @@ ap_signed_min :: (bits: u32) -> APInt { return ap_one_bit_set(bits, bits - 1); }
 ap_signed_max :: (bits: u32) -> APInt { r := ap_all_ones(bits); ap_clear_bit(*r, bits - 1); return r; }
 ap_one :: (bits: u32) -> APInt { return ap_from_u64(bits, 1); }
 
-ap_is_zero :: (a: APInt) -> bool { if a.bits <= 64 return a.v == 0; for a.w if it != 0 return false; return true; }
+ap_is_zero :: inline (a: APInt) -> bool { if a.bits <= 64 return a.v == 0; for a.w if it != 0 return false; return true; }
 ap_is_all_ones :: (a: APInt) -> bool {
     if a.bits <= 64 return a.v == ap_mask64(a.bits);
     return ap_popcount(a) == a.bits;
@@ -297,12 +297,12 @@ ap_not :: (a: APInt) -> APInt {
     if a.bits <= 64 { r := a; r.v = (~a.v) & ap_mask64(a.bits); return r; }
     r := ap_alloc(a.bits); for a.w r.w[it_index] = ~it; ap_normalize(*r); return r;
 }
-ap_and :: (a: APInt, b: APInt) -> APInt {
+ap_and :: inline (a: APInt, b: APInt) -> APInt {
     assert(a.bits == b.bits);
     if a.bits <= 64 { r := a; r.v = a.v & b.v; return r; }
     r := ap_alloc(a.bits); for a.w r.w[it_index] = it & b.w[it_index]; return r;
 }
-ap_or :: (a: APInt, b: APInt) -> APInt {
+ap_or :: inline (a: APInt, b: APInt) -> APInt {
     assert(a.bits == b.bits);
     if a.bits <= 64 { r := a; r.v = a.v | b.v; return r; }
     r := ap_alloc(a.bits); for a.w r.w[it_index] = it | b.w[it_index]; return r;

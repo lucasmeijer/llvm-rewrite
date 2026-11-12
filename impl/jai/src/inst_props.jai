@@ -12,13 +12,13 @@ is_call_base :: inline (i: Value_Id) -> bool { op := inst_op(i); return op == .C
 call_num_args :: (i: Value_Id) -> u32 { return call_arg_count(i); }
 // call_arg / call_callee / strip_pointer_casts are in autoupgrade.jai
 // dyn_cast<Function>(getCalledOperand())
-call_called_operand_fn :: (i: Value_Id) -> Value_Id {
+call_called_operand_fn :: inline (i: Value_Id) -> Value_Id {
     c := call_callee(i);
     if c != NONE && vkind(c) == .FUNCTION return c;
     return NONE;
 }
 // CallBase::getCalledFunction: the callee if it is a Function with the call's function type
-call_called_function :: (i: Value_Id) -> Value_Id {
+call_called_function :: inline (i: Value_Id) -> Value_Id {
     c := call_callee(i);
     if c != NONE && vkind(c) == .FUNCTION && glob(c).value_type == inst(i).ty2 return c;
     return NONE;
@@ -44,7 +44,7 @@ intrinsic_id_of_call :: (i: Value_Id) -> string {
 
 call_fn_attrs :: inline (i: Value_Id) -> u32 { return attr_list_fn(inst(i).attrs); }
 // CallBase::hasFnAttr(Kind): call-site attributes, then the called function's (any Function callee)
-call_has_fn_attr :: (i: Value_Id, k: Attr_Kind) -> bool {
+call_has_fn_attr :: inline (i: Value_Id, k: Attr_Kind) -> bool {
     if attr_set_has(call_fn_attrs(i), k) return true;
     f := call_called_operand_fn(i);
     if f != NONE return attr_set_has(attr_list_fn(glob(f).attrs), k);

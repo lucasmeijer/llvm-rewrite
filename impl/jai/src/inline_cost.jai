@@ -287,7 +287,17 @@ X86_INLINE_IGNORE_FEATURES :: s64.[
 
 // TargetLibraryInfo::areInlineCompatible(CalleeTLI, AllowCallerSuperset)
 tli_are_inline_compatible :: (caller: *Tli, callee: *Tli, allow_superset: bool) -> bool {
-    for k: 0..NUM_LIB_FUNCS-1 {
+    if caller == callee return true;
+    // the bitset comparison, a word at a time (bools are 0/1 bytes)
+    W :: NUM_LIB_FUNCS / 8;
+    a := cast(*u64) caller.override_unavailable.data;
+    b := cast(*u64) callee.override_unavailable.data;
+    for w: 0..W-1 {
+        x := a[w]; y := b[w];
+        if !allow_superset { if x != y return false; }
+        else if y & ~x return false;
+    }
+    for k: W*8..NUM_LIB_FUNCS-1 {
         if !allow_superset { if caller.override_unavailable[k] != callee.override_unavailable[k] return false; }
         else if callee.override_unavailable[k] && !caller.override_unavailable[k] return false;
     }
@@ -470,7 +480,7 @@ cax_simplified_unchecked :: (ca: *Call_Analyzer, v: Value_Id) -> Value_Id {
     if found return s;
     return NONE;
 }
-cax_sroa_arg_for :: (ca: *Call_Analyzer, v: Value_Id) -> Value_Id {
+cax_sroa_arg_for :: inline (ca: *Call_Analyzer, v: Value_Id) -> Value_Id {
     found, a := table_find(*ca.sroa_arg_values, v);
     if !found || !table_contains(*ca.enabled_sroa, a) return NONE;
     return a;
