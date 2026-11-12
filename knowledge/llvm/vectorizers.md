@@ -215,3 +215,49 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - Debugging: `-debug-only=loop-vectorize` of the assertions opt prints "LV: Scalar loop costs", every recipe's
   "Cost of C for VF V", "Cost for VF V: C (Estimated cost per lane ...)", "LV: Selecting VF", "LV: IC is". The jai port
   prints the same lines with `JAI_LV_DEBUG=1`; `impl/jai/tools/lv_cost_compare.py` diffs them.
+- **Epilogue vectorization** (verified by the X86 LoopVectorize tests with AVX/AVX-512, where VF * IC >= 16 makes
+  `isEpilogueVectorizationProfitable` true): the epilogue plan is a `duplicate()` of the plan for the chosen VF
+  (`ProfitableVFs` from computeBestVF, skipping VFs > the main VF or > the remaining iterations), and both plans run
+  through `executePlan` in sequence. The main run skips `removeBranchOnConst(OnlyLatches=false)` and
+  `expandSCEVsToVPInstructions`; the epilogue reuses the main run's IR for every `EXPAND SCEV` (the SCEV -> Value map
+  `expandSCEVs` returns). The epilogue's canonical IV starts at `vec.epilog.resume.val` through an
+  `add(CanIV, resume)` that `simplifyRecipe`'s "phi(0, IVInc) + Y" fold turns into the phi's start value. Block names:
+  `iter.check` (the old preheader), `vector.main.loop.iter.check`, `vec.epilog.iter.check` / `vec.epilog.ph` /
+  `vec.epilog.vector.body` / `vec.epilog.middle.block` / `vec.epilog.scalar.ph`; `min.epilog.iters.check` gets
+  branch weights {min(main step, epi step), main step - that}. `hasUnsupportedHeaderPhiRecipe` disables it for
+  fixed-order recurrences, FMinNum/FMaxNum and FindLast reductions, and FindIV results with sunk expressions.
+- `VPTransformState::get` broadcasts an instruction after `getInsertionPointAfterDef()`: for an `invoke` that is the
+  first insertion point of the normal destination, not the end of the invoke's block.
+- `optimizeFindIVReductions` turns a FindLast reduction of an affine induction (or of `binop(IV, invariant)`, sunk to
+  the middle block when no sentinel exists for the expression itself) into a FindIV phi reduced with smax/umax (step >
+  0) or smin/umin and a sentinel outside the IV's signed (tried first) or unsigned range; without a sentinel but with
+  nsw/nuw it adds a boolean `or` reduction phi and `rdx.select`. `handleMultiUseReductions` then pairs a min/max
+  reduction with its FindIV user (strict predicates: `handleFirstArgMinOrMax` with a umin over a canonical wide IV).
+- `narrowInterleaveGroups` (VF-wide full interleave groups of a single-block loop storing loaded groups or matching
+  wide ops): the narrowed plan keeps only that VF, replaces VF by 1 and VFxUF by UF, and the un-narrowed copy for the
+  other VFs is pushed *before* it in VPlans. Epilogue selection uses the effective VF 1 for such plans.
+- `replaceSymbolicStrides` runs twice (before and after createHeaderPhiRecipes), only for strides PSE folds to a
+  constant, in blocks dominated by the vector preheader; it also rewrites sext/zext users and the entry's EXPAND SCEVs
+  (SCEVParameterRewriter).
+- **Uncountable early exits** (default: read-only loops only; loops with stores are rejected by processLoop unless
+  `-enable-early-exit-vectorization-with-side-effects`): legality accepts non-dereferenceable unit-stride loads, but
+  `handleEarlyExits` then requires every load to be dereferenceable for the maximum trip count
+  (`areAllLoadsDereferenceable`) or no plan is built. Every early exit (countable ones too) gets a `MaskedCond`, the
+  latch ends in `branch-on-two-conds(any-of(conds), latch cond)` with successors (dispatch, middle, header), and a
+  `vector.early.exit` block extracts exit values at `first-active-lane` (`cttz.elts`, costed through the type-based
+  intrinsic cost = scalarization). Interleaving is disabled (IC 1). Dispatch blocks get LoopInfo of the innermost loop
+  containing all their in-loop successors.
+- Vector-library calls: the legacy cost (`getVectorCallCost`) and `isScalarWithPredication` look only at the
+  call's `VFDatabase` mappings declared in the module with a matching VF (masked if required); the VPlan decision
+  (`findVectorVariant`) also checks `areVFParamsOk` (uniform / linear parameters) and prefers an intrinsic when it is
+  at least as cheap. A masked variant gets the block mask or `true` as an extra trailing argument.
+- Switches inside the loop: the plain CFG gives the block successors (default, case dests...) with duplicates, and
+  `createSwitchEdgeMasks` emits `icmp eq` per case in the first successor block visited (where the builder is), ORs
+  per destination and `not(or of all)` for the default.
+- `hoistPredicatedLoads` / `sinkPredicatedStores`: all predicated replicate loads (stores) of one address SCEV and
+  type form one group (sorted by dominance) when the first one's mask is the `not` of another's; they become one
+  unpredicated replicate (stores: a select chain of the values) when scoped-noalias metadata proves the blocks
+  between don't alias (stores also need an `!alias.scope` and skip group members and stores at a constant distance
+  >= maxVF * max store size).
+- With a module profile summary (`require<profile-summary>`), `shouldOptimizeForSize(Header, PSI, BFI)` (PGSO) can
+  make processLoop optimize for size; LoopVectorize/optsize.ll's `foo_pgso` is not vectorized.

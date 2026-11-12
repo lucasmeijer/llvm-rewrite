@@ -1132,7 +1132,7 @@ Still slow / known:
   CallAnalyzer::visitBinaryOperator (constant creation hashes a key per folded constant).
 
 
-## LoopVectorize (in progress; L1.vectorize.loop 285/468 opt, 468/468 roundtrip)
+## LoopVectorize (in progress; L1.vectorize.loop 383/468 opt, 468/468 roundtrip)
 
 - Files: `iv_descriptors.jai` (IVDescriptors.cpp), `lv_legality.jai` (LoopVectorizationLegality, LoopVectorizeHints,
   isDereferenceableAndAlignedInLoop), `lv_pass.jai` (runImpl / processLoop, computeMaxVF, collectValuesToIgnore, every
@@ -1152,13 +1152,22 @@ Still slow / known:
   checks), `vplan_cost.jai` (VPCostContext, every recipe's computeCost, VPlan / region / block cost, precomputeCosts,
   cost(), computeBestVF, isMoreProfitable, willGenerateVectors, calculateRegisterUsageForPlan, selectInterleaveCount),
   `vplan_exec_transforms.jai`, `vplan_execute.jai`, `vplan_print.jai`; the X86 interleaved-access costs are
-  `tti_interleaved.jai` (tables generated into gen_x86_tti.jai, keyed by the factor).
+  `tti_interleaved.jai` (tables generated into gen_x86_tti.jai, keyed by the factor). `lv_epilogue.jai`: epilogue
+  vectorization (selectBestEpiloguePlan, preparePlanForMain/EpilogueVectorLoop, connectEpilogueVectorLoop); the two
+  executePlan runs share `lvp_execute_plan` (its `kind` parameter is EpilogueVectorizationKind).
 - Done: the whole cost-model path for fixed VFs (legacy + VPlan costs, VF selection with isMoreProfitable and the
   trip-count tie breaks, interleave-count selection with register usage, the runtime-check / minimum-profitable
   trip-count gate), call widening (intrinsic vs. scalarized; vector library variants still loud), predicated
   scalarization with replicate regions, interleave groups (loads and stores, gaps without masks, reverse groups),
   tail folding by masking with the data-without-lane-mask style (header mask, masked loads / stores, tail-folded
-  reductions and live-outs, narrowed canonical IVs), plus everything listed for the forced-VF path before.
+  reductions and live-outs, narrowed canonical IVs), plus everything listed for the forced-VF path before. Then
+  (jai_loopvec4): epilogue vectorization incl. forced epilogue VFs, optimizeFindIVReductions (sentinel and AnyOf
+  forms), handleMultiUseReductions (+ handleFirstArgMinOrMax), replaceSymbolicStrides, the narrowInterleaveGroups
+  transform, vector-library / VFDatabase variants (VPWidenCallRecipe), read-only uncountable early exits (dispatch
+  blocks, FirstActiveLane / cttz.elts), LastActiveLane expansion, branch weights and estimated trip counts, final
+  invariant stores of reductions, switches in the loop (switch edge masks), hoistPredicatedLoads /
+  sinkPredicatedStores. `-passes=loop-vectorize` on the IR LLVM's -O2 pipeline feeds to LoopVectorize for every e2e /
+  function / -O2-imported / perf file (`tools/o2_lv_inputs.py`, 919 modules): all identical.
 - **Costs are fixed point**: LLVM 23's InstructionCost stores 4 * the cost (CostGranularity), so a block divided by a
   block-frequency divisor gives e.g. 8.5. The LV computes in that domain: `Lc` (= Cost scaled by 4; COST_INVALID is
   still invalid), `lcv` converts a TTI answer, `lt_*` wrap the tti_* queries, `lc_value` is getValue() (truncating),
@@ -1168,9 +1177,11 @@ Still slow / known:
   `tools/lv_cost_compare.py FILE...` (or `-l results.tsv`) runs the assertions opt and ours on each `; @opt:` line
   and prints the first differing decision line and the first differing per-recipe cost. Over all LoopVectorize tests
   only `optimal-epilog-vectorization.ll` (forced epilogue VF, loud anyway) differs. `JAI_VPLAN_DEBUG=1` dumps plans.
-- Sweeps `--passes loop-vectorize` (plain 7707 identical / 119 loud; `--with-test-flags` 483 loud;
-  `--with-test-flags --per-function` 2157 loud): 0 differs, 0 bad-ir. `sroa,loop-vectorize` on tests/perf/compile/*:
-  2 identical, 2 loud (an uncountable early exit, a switch in the loop). LV time is negligible next to sroa there.
+- Sweeps `--passes loop-vectorize` (plain 8065 identical / 14 loud; `--with-test-flags` 10260 / 183 loud;
+  `--with-test-flags --per-function` 97243 / 796 loud): 0 differs, 0 bad-ir. `sroa,loop-vectorize` on tests/perf/compile/*: 4/4
+  identical. LV time is negligible next to sroa there.
+- `tools/o2_lv_inputs.py OUT FILE...` collects (with LLVM's `-O2 -print-before=loop-vectorize`) the modules the -O2
+  pipeline hands to LoopVectorize; `--compare OUT` runs both opts on them. Useful to rank what -O2 needs.
 - Traps met: VPRegionValue is a VPSymbolicValue (m_LiveIn, getValueForPart, State.get accept it); int_pred_ty matchers
   look through Broadcast; m_Not also matches `xor x, -1`; GeneratedRTChecks treat a check folded to false as no
   check; handleFindLastReductions' `hasScalarVFOnly()` is false while building; a replicate clone is unnamed;
@@ -1180,23 +1191,27 @@ Still slow / known:
   the `true` constant); isUniformAfterVectorization returns true for VF 1 *before* the pseudo-probe check;
   supportsEfficientVectorElementLoadStore is false, so scalarized loads do pay the insert overhead; the
   interleave-group metadata (addMetadata) intersects the members in DenseMap<int32_t> order (bucket (k * 37) & 63).
+  `array_add(*vb(b).succs, vp_create_basic_block(...))` is a use-after-realloc: Jai evaluates `*vb(b).succs` (a
+  pointer into `vpl.blocks`) before the call grows the array; create the block into a local first (a switch with
+  four cases lost a successor this way). The same holds for `vr(r)` / `vv(v)` pointers across recipe / value creation.
 
 ### LoopVectorize next steps (each fails loudly with the quoted message today; counts are unit tests)
 
-1. Epilogue vectorization (~41: "epilogue vectorization", "-epilogue-vectorization-force-VF",
-   "hasUnsupportedHeaderPhiRecipe"): selectBestEpiloguePlan over ProfitableVFs (already collected by computeBestVF),
-   preparePlanForMainVectorLoop / preparePlanForEpilogueVectorLoop, addIterationCountCheckBlock, the two executePlan
-   runs and connectEpilogueVectorLoop. AVX targets reach it often (VF * IC >= 16).
-2. Reductions: FindLast reductions of inductions (optimizeFindIVReductions: the sentinel min/max / AnyOf rewrite;
-   its applicability check is ported and fails loudly; handleFindLastReductions itself is ported), in-loop / ordered
-   reductions (6: createInLoopReductionRecipes, VPReductionRecipe, getReductionPatternCost),
-   handleMultiUseReductions (10).
-3. Outer loops (18, VPlan-native path), scalable VFs (13), uncountable early exits (5), replaceSymbolicStrides (8),
-   convertToStridedAccesses (6), -force-partial-aliasing-vectorization (4), VFDatabase variants (8), -vector-library.
-4. Tail folding leftovers: active lane masks (-force-tail-folding-style=data*), EVL, m_HeaderMask on materialized
-   masks (3), masked div/rem intrinsics (4), complementary predicated loads/stores (hoistPredicatedLoads /
-   sinkPredicatedStores, 3), narrowInterleaveGroups (3), masked interleave groups.
-5. Branch weights (addBranchWeightToMiddleTerminator, estimated trip-count metadata), discriminators.
+1. Outer loops (18: "outer-loop vectorization (VPlan-native path)"): legality for loop nests, buildVPlan for outer
+   loops (nested regions), VPWidenPHIRecipe execution.
+2. convertToStridedAccesses (10: "non-consecutive widened loads"): strided loads as `vp.strided.load` only when the
+   target says legal (X86: never), so mostly the decision code plus gathers.
+3. Scalable VFs (14: "scalable -force-vector-width", "scalable vectorization"): X86 has no scalable vectors, these
+   tests force them; needs ElementCount arithmetic with vscale everywhere.
+4. In-loop / ordered reductions (6): createInLoopReductionRecipes, VPReductionRecipe execute/cost,
+   getReductionPatternCost; FMinNum/FMaxNum reductions (3: handleMaxMinNumReductions).
+5. Tail folding leftovers: masked div/rem intrinsics (5), m_HeaderMask on materialized masks (4), active lane masks
+   (1), masked interleave groups (1), unmasking uniform predicated stores (1); -force-partial-aliasing-vectorization
+   (4); uncountable exits with side effects (canUncountableExitConditionLoadBeMoved, only with
+   -enable-early-exit-vectorization-with-side-effects).
+6. Small ones: struct-typed values (3), replicating llvm.assume (2), extract-lane execution for some VF (2),
+   dereferenceable assumptions, constant-folding reduction intrinsics, PGSO (profile summary), discriminators,
+   operand bundles on widened intrinsics, histograms.
 
 ## IPO: GlobalOpt, GlobalDCE, ConstantMerge, Internalize, DeadArgElim, ArgumentPromotion (L2.globals 443/450, L2.ipo-args COMPLETE 206/206)
 
