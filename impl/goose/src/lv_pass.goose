@@ -43,6 +43,12 @@ import ivusers;
 import demandedbits;
 import iv_descriptors;
 import lv_legality;
+import lv_cm;
+import vplan;
+import vplan_construct;
+import vplan_transforms;
+import lv_plan;
+import lv_exec;
 
 // EpilogueLowering
 let CM_EPILOGUE_ALLOWED: i64 = 0;
@@ -82,36 +88,6 @@ fn lv_reset_loop() {
 
 // ---------------------------------------------------------------------------------------------
 // LoopBlocksDFS / containsIrreducibleCFG
-
-// LoopBlocksDFS::perform: the loop's blocks in post order (DFS from the header over in-loop successors)
-fn lv_loop_postorder(l: i32, out: i32[>..<]&) {
-    out.clear();
-    var visited = hm_new();
-    var st_b: i32[>..<] = [];
-    var st_k: i64[>..<] = [];
-    let h = loop_header(l);
-    hm_put(visited, h as u64, 1);
-    st_b.push(h);
-    st_k.push(0);
-    while st_b.len > 0 {
-        let top = st_b.len - 1;
-        let b = st_b[top];
-        let k = st_k[top];
-        if k < block_nsucc(b) {
-            st_k[top] = k + 1;
-            let s = block_succ(b, k);
-            if loop_contains(l, s) && !hm_has(visited, s as u64) {
-                hm_put(visited, s as u64, 1);
-                st_b.push(s);
-                st_k.push(0);
-            }
-            continue;
-        }
-        out.push(b);
-        st_b.pop();
-        st_k.pop();
-    }
-}
 
 // containsIrreducibleCFG(LoopBlocksRPO, LI)
 fn lv_contains_irreducible_cfg(l: i32) -> bool {
@@ -601,8 +577,7 @@ fn lv_process_loop(l: i32, interleave_only_when_forced: bool, vectorize_only_whe
         // is neither vectorized nor interleaved. Building the plan does not change the IR.
         return false;
     }
-    lvx_unported("VPlan construction and the cost model");
-    return false;
+    return lv_plan_and_execute(max_vf, user_vf, user_ic, sel);
 }
 
 fn lv_psi_cached() -> bool { false }
@@ -648,4 +623,50 @@ fn loop_vectorize_run(fv: i32, interleave_only_when_forced: bool, vectorize_only
     var pa = ((1 as u32) << A_LOOPS) | ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_SCEV);
     if !cfg_changed { pa = pa | PA_CFG; }
     return pa;
+}
+
+// LVP.plan(UserVF, UserIC) for a forced VF, computeBestVF, the processLoop tail and executePlan
+fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> bool {
+    if user_vf == 0 { lvx_unported("the cost model (VF selection)"); }
+    if lvl_rdx_desc.len != 0 { lvx_unported("reductions"); }
+    // Config.collectInLoopReductions: no reductions
+    if max_vf > 1 { lvl_collect_unit_stride_predicates(); }
+    lv_check_minimal_bitwidths();
+    vp_reset();
+    cm_reset(lv_l);
+    cm_fold_tail = cm_fold_tail_by_masking();
+    lvp_l = lv_l;
+    lvp_pse = lv_pse;
+    lvp_epilogue_allowed = cm_is_epilogue_allowed();
+    lvp_plans.clear();
+    let force = lvh_get_force() == FK_ENABLED;
+    let osz = cm_epilogue == CM_EPILOGUE_NOT_ALLOWED_OPT_SIZE || cm_epilogue == CM_EPILOGUE_NOT_ALLOWED_LOW_TRIP_LOOP;
+    if !lvp_try_to_build_vplan1(lvh_allow_reordering(), force, osz) { return lv_no_plan_result(user_ic); }
+    if cm_fold_tail { lvx_unported("tail folding"); }
+    if user_vf > max_vf { lvx_unported("a user VF larger than the maximal safe VF"); }
+    cm_collect_non_vectorized_and_set_widening_decisions(user_vf);
+    lvp_build_vplans(user_vf, user_vf);
+    if lvp_plans.len == 0 { return lv_no_plan_result(user_ic); }
+    // cost(Plan, UserVF) is assumed valid: no fixed-VF recipe of a supported plan has an invalid cost
+    vp_load(lvp_plans[lvp_plans.len - 1]);
+    if !vp_has_vf(user_vf) { lvx_unported("a plan without the user VF"); }
+    // computeBestVF: a single plan with a single VF; selectInterleaveCount only matters without a user IC
+    if user_ic == 0 { lvx_unported("the cost model (interleave count selection)"); }
+    let ic = user_ic;
+    lvx_setup(lv_l, lv_pse, lv_fv);
+    lvx_epilogue_allowed = cm_is_epilogue_allowed();
+    return lv_execute_best_plan(user_vf, ic);
+}
+fn lv_no_plan_result(user_ic: i64) -> bool { return false; }
+
+// computeMinimalBitwidths: MinBWs is empty unless the loop has an extension feeding a truncation or compare root
+fn lv_check_minimal_bitwidths() {
+    for b in loop_nblocks(lv_l) {
+        var i = block_first(loop_block(lv_l, b));
+        while i >= 0 {
+            let o = iop(i);
+            if o == OP_ZEXT || o == OP_SEXT { lvx_unported("computeMinimumValueSizes (minimal bitwidths)"); }
+            i = inst_next(i);
+        }
+    }
 }

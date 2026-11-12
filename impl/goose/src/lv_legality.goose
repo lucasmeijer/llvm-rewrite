@@ -502,11 +502,11 @@ fn lvu_contains_udiv(s: i32) -> bool {
     return false;
 }
 fn lvu_rewrite(s: i32, mult: i64, off: i64, l: i32) -> i32 {
-    if !lvu_contains_udiv(s) { return SC_CNC; }
+    if !lvu_contains_udiv(s) { return SCEV_CNC; }
     lvu_cannot = false;
     let r = lvu_visit(s, mult, off, l);
     if !lvu_cannot { return r; }
-    return SC_CNC;
+    return SCEV_CNC;
 }
 
 // isUniform(V, VF): vf = 0 for std::nullopt
@@ -918,3 +918,34 @@ fn lvl_prepare_to_fold_tail_by_masking() {
     var safe = hm_new();
     for k in loop_nblocks(lvl_l) { lvl_block_can_be_predicated(loop_block(lvl_l, k), safe, lvl_tail_ops); }
 }
+
+// LoopBlocksDFS::perform: the loop's blocks in post order (DFS from the header over in-loop successors)
+fn lv_loop_postorder(l: i32, out: i32[>..<]&) {
+    out.clear();
+    var visited = hm_new();
+    var st_b: i32[>..<] = [];
+    var st_k: i64[>..<] = [];
+    let h = loop_header(l);
+    hm_put(visited, h as u64, 1);
+    st_b.push(h);
+    st_k.push(0);
+    while st_b.len > 0 {
+        let top = st_b.len - 1;
+        let b = st_b[top];
+        let k = st_k[top];
+        if k < block_nsucc(b) {
+            st_k[top] = k + 1;
+            let s = block_succ(b, k);
+            if loop_contains(l, s) && !hm_has(visited, s as u64) {
+                hm_put(visited, s as u64, 1);
+                st_b.push(s);
+                st_k.push(0);
+            }
+            continue;
+        }
+        out.push(b);
+        st_b.pop();
+        st_k.pop();
+    }
+}
+

@@ -1516,3 +1516,15 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   SplitEdge's non-critical split names the new block `<old>.split` before DuplicateInstructionsInSplitBetween renames it
   (the second name bumps the function's unique counter: lua's `.split14` vs `.split13`).
 - Speed: not measured with `perf` (no @perf line times these passes); the sweeps over tests/perf/compile run in seconds.
+- Milestone 2 (VPlan construction and executePlan for a forced VF, in progress): vplan.goose (data model, archive
+  slots = plans, VPBuilder, VPDT), vplan_utils / vplan_props (matchers, vputils, the per-recipe queries),
+  vplan_construct (PlainCFGBuilder, skeleton, header phis, loop regions), lv_cm (widening / uniform / scalar
+  decisions), lv_plan (tryToBuildVPlan1 / buildVPlans / tryToBuildVPlan, recipe builder, mem-op / scalarization
+  decisions), vplan_transforms (simplifyRecipes, optimize() passes, live-out induction values),
+  vplan_exec_transforms (unroll UF 1, packs/broadcasts, replicateByVF, materialization, cse, SCEV expansion,
+  minimum iteration check), vplan_execute (VPTransformState, recipe execution, VPlan::execute incl. deleting the
+  scalar loop), lv_exec (processLoop tail, skeleton, loop metadata, legacyCSE). Straight-line loops with int
+  inductions, consecutive loads/stores, widened arithmetic/compares/selects/casts/GEPs vectorize identically to
+  LLVM with -force-vector-width and -force-vector-interleave=1 on NoTTI.
+- Goose trap: `vpr[f()]` where f() pushes into vpr evaluates the array before the call (index out of bounds);
+  bind the id first.
