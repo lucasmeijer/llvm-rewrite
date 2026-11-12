@@ -78,7 +78,7 @@ def select(tests, globs, unit_id, ratchet_only, passing):
 def run_one_check(job) -> checks.Outcome:
     impl, t, ch = job
     try:
-        return checks.CHECK_FNS[ch](impl, t)
+        return checks.run_check(ch, impl, t)
     except Exception as e:  # a harness bug; surface it loudly but keep going
         return checks.Outcome(f"{t.path}::{ch}", checks.FAIL, f"[harness exception] {type(e).__name__}: {e}")
 
@@ -140,6 +140,17 @@ def cmd_check(a):
     pairs = select(tests, a.globs, a.unit, a.ratchet_only, passing)
     print(c(BOLD, f"impl/{a.impl}: running {len(pairs)} checks"))
     outcomes = run_checks(a.impl, pairs, a.jobs)
+    # A ratchet test that timed out gets one more try before it counts as a regression: CPU limits make timeouts
+    # stable, but a test close to the limit (or a wall-clock backstop hit on a starved machine) can still flap.
+    retry = [i for i, o in enumerate(outcomes) if o.test_id in passing and o.status != checks.PASS and checks.is_timeout(o)]
+    if retry:
+        print(c(YELLOW, f"retrying {len(retry)} timed-out ratchet test(s) once: "
+                        + ", ".join(outcomes[i].test_id for i in retry[:5]) + (" ..." if len(retry) > 5 else "")))
+        again = run_checks(a.impl, [pairs[i] for i in retry], a.jobs, progress=False)
+        for i, o in zip(retry, again):
+            if o.status == checks.PASS:
+                print(c(DIM, f"  {o.test_id}: passed on retry"))
+            outcomes[i] = o
     write_artifacts(a.impl, outcomes)
     summarize(outcomes)
 
@@ -170,6 +181,12 @@ def cmd_check(a):
             print(f"  {i}")
         if len(new) > a.max_shown:
             print(f"  ... and {len(new) - a.max_shown} more")
+        slow = [o for o in outcomes if o.test_id in set(new) and o.cpu > config.TOOL_CPU_LIMIT / 2]
+        if slow:
+            print(c(YELLOW, f"\n{len(slow)} newly passing tests used more than half the CPU limit "
+                            f"({config.TOOL_CPU_LIMIT:g}s) in one tool run; a slowdown could push them over:"))
+            for o in slow[: a.max_shown]:
+                print(f"  {o.test_id}  ({o.cpu:.0f}s)")
     if stale:
         print(c(YELLOW, f"\n{len(stale)} entries in passing.txt no longer exist" + (" (removed)" if a.update else " (--update removes them)")))
 
@@ -345,7 +362,8 @@ def main(argv=None):
                    "(llvm-extract) and compare each piece separately")
     s.add_argument("--with-test-flags", action="store_true", help="run each file once per distinct set of extra flags in its "
                    "own @opt/@analysis directives (-mtriple, -mattr, -mcpu, -data-layout, pass cl::opts; not -passes/-O/-S/-o)")
-    s.add_argument("--timeout", type=float, default=60, help="seconds per run of the implementation's opt (default 60)")
+    s.add_argument("--timeout", type=float, default=60, help="CPU seconds per run of the implementation's opt (default 60; "
+                   f"wall-clock backstop {config.TOOL_WALL_FACTOR}x that)")
     s.add_argument("-j", "--jobs", type=int, default=os.cpu_count())
     s.add_argument("-v", "--verbose", action="store_true", help="print the diff of every silent mismatch shown")
     s.add_argument("--max-shown", type=int, default=25)

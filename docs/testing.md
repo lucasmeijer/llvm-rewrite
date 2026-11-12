@@ -107,6 +107,26 @@ with how loaded the machine is (other agents' sweeps). For every failing check i
 `from-c` rejects programs that are nondeterministic, time out (10 s), or behave differently between clang `-O0`,
 `-O2` and `-O1 -fsanitize=address,undefined`, because that indicates UB and the test would be meaningless.
 
+## Timeouts
+
+Our tools (`impl/<lang>/bin/opt`, `llc`, in `check` and `sweep`) are limited by **CPU time** (user+sys), not wall
+time: 240 CPU seconds per invocation in `check` (`LRH_CPU_LIMIT=<s>` overrides it), `--timeout` (default 60) in
+`sweep`. CPU time barely changes with machine load, so a slow but correct input passes or times out the same way at
+load 1 and at load 40; a wall-clock limit made such tests flap. The limit is `RLIMIT_CPU`, set before the tool starts
+and inherited by anything it starts (SIGXCPU at the limit, SIGKILL 5 s later). A **wall-clock backstop** of 4x the
+limit (960 s in `check`) kills a tool that hangs without computing (sleep, deadlock, blocked read). The tool runs in
+its own process group; a timeout kills the whole group. Messages say which limit hit, distinct from a failure:
+`opt timeout (cpu 240s)` or `opt timeout (wall 960s; cpu 3s used)` instead of `opt exited with N`; `sweep` groups
+them under `[timeout (cpu 60s)]`.
+
+A ratchet test (in `passing.txt`) that times out is **retried once** before it counts as a regression (`retrying N
+timed-out ratchet test(s) once`). A test that times out twice is a real regression: something got slower.
+`check` also lists newly passing tests whose slowest tool run used more than half the CPU limit (they are still
+recorded): a modest slowdown would turn them into regressions, so speed them up or keep an eye on them.
+
+LLVM's own tools (the oracle side, and `--impl llvm`), clang, and the compiled test programs (10 s) keep plain
+wall-clock limits; `perf` has no limit.
+
 ## Sweeps (one pipeline over the whole corpus; report only)
 
 A unit's exit tests are a few hundred files written for that pass. Running the pass over *every* file the
@@ -137,7 +157,7 @@ exactly like the `::opt` check (both canonicalized through `llvm-as | llvm-dis`,
 | `identical` | same output |
 | `differs` | **silent mismatch**: our opt exited 0 with different output. The worst kind; listed first, fix these first |
 | `bad-ir` | also silent: our opt exited 0 but its output fails `llvm-as` (parser or verifier) |
-| `failed` | loud: nonzero exit, crash or timeout (`--timeout`, default 60 s). Grouped by the first error line (file name and line numbers taken out), most frequent first |
+| `failed` | loud: nonzero exit, crash or timeout (`--timeout`, default 60 CPU seconds; see Timeouts). Grouped by the first error line (file name and line numbers taken out), most frequent first |
 | `llvm-failed` | LLVM's opt itself fails on the file with these arguments (or, in analysis mode, prints different output on two runs): skipped |
 
 Artifacts go to `.harness-out/sweep/<impl>/<args>/` (replaced on every run of the same arguments): `results.tsv`

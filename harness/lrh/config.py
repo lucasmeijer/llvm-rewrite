@@ -21,7 +21,13 @@ LOCAL_CACHE = REPO / ".cache" / "oracle"
 TRIPLE = "x86_64-unknown-linux-gnu"
 ISEL_PASS = "x86-isel"
 
-TOOL_TIMEOUT = 120  # seconds, for opt/llc/clang invocations
+TOOL_TIMEOUT = 120  # wall seconds, for LLVM's own tools and clang (the oracle side)
+# Our implementations' tools are limited by CPU time (user+sys), which load hardly changes, with a wall-clock backstop
+# of TOOL_WALL_FACTOR x that for tools that hang without computing. See proc.run_limited and docs/testing.md.
+# 240: jai's unoptimized check build needs ~115 CPU s for tests/perf/scaling/calls/n8000.ll -O2, and CPU time still
+# grows somewhat on a loaded machine (shared cores and caches).
+TOOL_CPU_LIMIT = float(os.environ.get("LRH_CPU_LIMIT", 240))
+TOOL_WALL_FACTOR = 4
 RUN_TIMEOUT = 10  # seconds, for running a compiled test program
 
 # The impl named "llvm" is LLVM itself; used to self-test the harness and corpus.

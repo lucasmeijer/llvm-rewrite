@@ -13,7 +13,7 @@ Per file the outcome is one of
   identical    same output
   differs      our opt exited 0 but the output differs from LLVM's: a silent mismatch, the worst kind
   bad-ir       our opt exited 0 but its output does not assemble / verify: also silent
-  failed       our opt exited nonzero (or timed out / crashed): a loud failure, grouped by its first error line
+  failed       our opt exited nonzero (or hit its CPU limit / crashed): a loud failure, grouped by its first error line
   llvm-failed  LLVM's opt fails on this file with these args (or is nondeterministic): skipped
 
 --per-function: every defined function is cut into its own module (llvm-extract) and compared separately; the
@@ -47,10 +47,10 @@ def slug(args: str) -> str:
     return s
 
 
-def error_key(stderr: str, path: str, rc: int, timed_out: bool, timeout: float) -> str:
+def error_key(stderr: str, path: str, rc: int, timeout_msg: str = "") -> str:
     """The first meaningful stderr line, with the file name and line/column numbers taken out, for grouping."""
-    if timed_out:
-        return f"[timed out after {timeout:g}s]"
+    if timeout_msg:
+        return f"[{timeout_msg.split(';')[0]}{')' if ';' in timeout_msg else ''}]"
     lines = [l.strip() for l in stderr.splitlines() if l.strip()]
     # Prefer the first line that says what went wrong over banners like "PLEASE submit a bug report".
     first = next((l for l in lines if re.search(r"error|not (yet )?(implemented|supported|ported)|unsupported|assert|panic|fatal", l, re.I)),
@@ -124,7 +124,7 @@ def run_impl(impl: str, args: str, in_arg: str, cwd, wd: Path, analysis: bool, t
         cmd = [opt, *shlex.split(args), "-disable-output", in_arg]
     else:
         cmd = [opt, *shlex.split(args), "-S", in_arg, "-o", str(wd / "out.ll")]
-    return proc.run(cmd, cwd=cwd, timeout=timeout)
+    return proc.run_limited(cmd, cwd=cwd, cpu_limit=timeout)
 
 
 def compare(impl: str, args: str, analysis: bool, unordered: bool, timeout: float, exp: dict,
@@ -135,8 +135,8 @@ def compare(impl: str, args: str, analysis: bool, unordered: bool, timeout: floa
         r = run_impl(impl, args, in_arg, cwd, wd, analysis, timeout)
         err = r.err.decode(errors="replace")
         if not r.ok:
-            res.update(status=FAILED, key=error_key(err, in_arg, r.rc, r.timed_out, timeout),
-                       message=f"opt exited with {r.rc}:\n{r.err_tail()}", artifacts={**res["artifacts"], "stderr.txt": r.err_tail(20000)})
+            res.update(status=FAILED, key=error_key(err, in_arg, r.rc, r.timeout_msg),
+                       message=f"{r.fail_msg('opt')}:\n{r.err_tail()}", artifacts={**res["artifacts"], "stderr.txt": r.err_tail(20000)})
             return res
         if not analysis:
             act = (wd / "out.ll").read_text(errors="replace") if (wd / "out.ll").exists() else ""

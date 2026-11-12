@@ -13,7 +13,9 @@
 """
 
 import difflib
+import re
 import shlex
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -28,6 +30,7 @@ class Outcome:
     test_id: str
     status: str
     message: str = ""
+    cpu: float = 0.0  # the most CPU seconds any one of the implementation's tool runs took in this check
     artifacts: dict = field(default_factory=dict)  # filename -> text, written for failures
 
 
@@ -76,16 +79,45 @@ def extract_ir(text: str) -> str:
     return "\n".join(out) + "\n"
 
 
+def run_tool(cmd: list[str], cwd=None) -> proc.Res:
+    """LLVM's tools (the oracle, and impl "llvm") get the plain wall-clock limit; an implementation's tools get the
+    load-independent CPU-time limit (proc.run_limited)."""
+    if Path(cmd[0]).parent == config.LLVM_BIN:
+        return proc.run(cmd, cwd=cwd)
+    r = proc.run_limited(cmd, cwd=cwd)
+    _cpu.max = max(getattr(_cpu, "max", 0.0), r.cpu or 0.0)
+    return r
+
+
+_cpu = threading.local()  # per check (run_one_check resets it): the largest Res.cpu of run_tool
+
+
+def run_check(ch: str, impl: str, t: TestFile) -> Outcome:
+    _cpu.max = 0.0
+    o = CHECK_FNS[ch](impl, t)
+    o.cpu = _cpu.max
+    return o
+
+
+def stage_msg(r: proc.Res) -> str:
+    return (r.timeout_msg + "\n" if r.timed_out else "") + r.err_tail()
+
+
+def is_timeout(o: "Outcome") -> bool:
+    """Did the implementation's tool hit its CPU limit or the wall-clock backstop (as opposed to failing)?"""
+    return o.status == FAIL and bool(re.search(r"\btimeout \((cpu|wall) ", o.message))
+
+
 def tool_opt(opt_bin: str, args: str, in_path: Path, out_path: Path, cwd) -> proc.Res:
-    return proc.run([opt_bin, *shlex.split(args), "-S", str(in_path), "-o", str(out_path)], cwd=cwd)
+    return run_tool([opt_bin, *shlex.split(args), "-S", str(in_path), "-o", str(out_path)], cwd=cwd)
 
 
 def tool_analysis(opt_bin: str, args: str, in_path: Path, cwd) -> proc.Res:
-    return proc.run([opt_bin, *shlex.split(args), "-disable-output", str(in_path)], cwd=cwd)
+    return run_tool([opt_bin, *shlex.split(args), "-disable-output", str(in_path)], cwd=cwd)
 
 
 def tool_isel(llc_bin: str, args: str, in_path: Path, out_path: Path) -> proc.Res:
-    return proc.run([llc_bin, *shlex.split(args), f"-stop-before={config.ISEL_PASS}", str(in_path), "-o", str(out_path)])
+    return run_tool([llc_bin, *shlex.split(args), f"-stop-before={config.ISEL_PASS}", str(in_path), "-o", str(out_path)])
 
 
 def build_and_run(opt_bin, llc_bin, t: TestFile, wd: Path) -> dict:
@@ -94,11 +126,11 @@ def build_and_run(opt_bin, llc_bin, t: TestFile, wd: Path) -> dict:
     if t.opt:
         r = tool_opt(opt_bin, t.opt[0], ir, wd / "opt.ll", config.REPO)
         if not r.ok:
-            return {"ok": False, "stage": "opt", "msg": r.err_tail()}
+            return {"ok": False, "stage": "opt", "msg": stage_msg(r)}
         ir = wd / "opt.ll"
-    r = proc.run([llc_bin, *shlex.split(t.llc), str(ir), "-o", str(wd / "out.s")])
+    r = run_tool([llc_bin, *shlex.split(t.llc), str(ir), "-o", str(wd / "out.s")])
     if not r.ok:
-        return {"ok": False, "stage": "llc", "msg": r.err_tail()}
+        return {"ok": False, "stage": "llc", "msg": stage_msg(r)}
     link = [config.llvm("clang"), "-no-pie", "-w", "-O1", str(wd / "out.s")]
     if t.driver:
         link.append(str(config.REPO / t.driver))
@@ -185,7 +217,7 @@ def check_roundtrip(impl: str, t: TestFile) -> Outcome:
     with proc.Workdir() as wd:
         r = tool_opt(config.impl_bin(impl, "opt"), "", Path(t.path), wd / "out.ll", config.REPO)
         if not r.ok:
-            return Outcome(tid, FAIL, f"opt exited with {r.rc}:\n{r.err_tail()}", {"stderr.txt": r.err_tail(20000)})
+            return Outcome(tid, FAIL, f"{r.fail_msg('opt')}:\n{r.err_tail()}", {"stderr.txt": r.err_tail(20000)})
         act = (wd / "out.ll").read_text(errors="replace")
     if act == exp["text"]:
         return Outcome(tid, PASS)
@@ -207,7 +239,7 @@ def check_opt(impl: str, t: TestFile) -> Outcome:
         with proc.Workdir() as wd:
             r = tool_opt(config.impl_bin(impl, "opt"), args, Path(t.path), wd / "out.ll", config.REPO)
             if not r.ok:
-                return Outcome(tid, FAIL, f"[{args}] opt exited with {r.rc}:\n{r.err_tail()}", {"stderr.txt": r.err_tail(20000)})
+                return Outcome(tid, FAIL, f"[{args}] {r.fail_msg('opt')}:\n{r.err_tail()}", {"stderr.txt": r.err_tail(20000)})
             act = (wd / "out.ll").read_text(errors="replace")
         ok, act_c = canon(act)
         if not ok:
@@ -230,7 +262,7 @@ def check_analysis(impl: str, t: TestFile) -> Outcome:
         act_out = analysis_canon(r.out.decode(errors="replace"), unordered)
         act_err = analysis_canon(r.err.decode(errors="replace"), unordered)
         if not r.ok:
-            return Outcome(tid, FAIL, f"[{args}] opt exited with {r.rc}:\n{r.err_tail()}", {"args.txt": args, "stderr.txt": r.err_tail(20000)})
+            return Outcome(tid, FAIL, f"[{args}] {r.fail_msg('opt')}:\n{r.err_tail()}", {"args.txt": args, "stderr.txt": r.err_tail(20000)})
         problems, arts = [], {"args.txt": args + (" (unordered: lines sorted)" if unordered else "")}
         for stream, e, a in (("stderr", exp["stderr"], act_err), ("stdout", exp["stdout"], act_out)):
             if e != a:
@@ -262,7 +294,7 @@ def check_isel_ir(impl: str, t: TestFile) -> Outcome:
         (wd / "input.ll").write_text(input_text)
         r = tool_isel(config.impl_bin(impl, "llc"), t.llc, wd / "input.ll", wd / "out.ll")
         if not r.ok:
-            return Outcome(tid, FAIL, f"llc exited with {r.rc}:\n{r.err_tail()}", {"input.ll": input_text, "stderr.txt": r.err_tail(20000)})
+            return Outcome(tid, FAIL, f"{r.fail_msg('llc')}:\n{r.err_tail()}", {"input.ll": input_text, "stderr.txt": r.err_tail(20000)})
         act = extract_ir((wd / "out.ll").read_text(errors="replace"))
     ok, act_c = canon(act)
     if not ok:

@@ -14,3 +14,4 @@
   serially before calling it a regression; or keeping tests whose runtime is within ~2x of the limit out of
   `passing.txt` (e.g. `--update` refusing to add a test that took more than half the limit).
 - **What you did instead:** waited for a quiet moment (load < 10) and re-ran `--update`.
+- **Resolution (harness):** our tools are now limited by CPU time (240 s, wall-clock backstop 4x), timed-out ratchet tests are retried once, and `check` lists newly passing tests that use more than half the limit; see docs/testing.md, "Timeouts".
