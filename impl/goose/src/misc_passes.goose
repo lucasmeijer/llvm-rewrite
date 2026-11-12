@@ -19,6 +19,7 @@ import tailcallelim;
 import callsite_splitting;
 import subtarget;
 import o2_small;
+import dfa_jump_threading;
 import loop_sink;
 import mergeicmps;
 import jump_table_to_switch;
@@ -51,6 +52,7 @@ let MP_LIBCALLS_SHRINKWRAP = 1418;
 let MP_JUMP_TABLE_TO_SWITCH = 1419;
 let MP_LOOP_SINK = 1420;
 let MP_MERGEICMPS = 1421;
+let MP_DFA_JUMP_THREADING = 1422;
 // module passes
 let MP_FORCEATTRS = 1500;
 let MP_MEMPROF_REMOVE_ATTRIBUTES = 1501;
@@ -149,6 +151,7 @@ fn mp_parse_function(name: const u8[:]) -> i32, i32, bool {
     if name == "jump-table-to-switch" { return MP_JUMP_TABLE_TO_SWITCH as i32, 0, false; }
     if name == "loop-sink" { return MP_LOOP_SINK as i32, 0, false; }
     if name == "mergeicmps" { return MP_MERGEICMPS as i32, 0, false; }
+    if name == "dfa-jump-threading" { return MP_DFA_JUMP_THREADING as i32, 0, false; }
     if name == "callsite-splitting" { return MP_CALLSITE_SPLITTING as i32, 0, false; }
     return -1, 0, false;
 }
@@ -226,6 +229,7 @@ fn mp_class_name(p: i64) -> const u8[:] {
         MP_JUMP_TABLE_TO_SWITCH => "JumpTableToSwitchPass",
         MP_LOOP_SINK => "LoopSinkPass",
         MP_MERGEICMPS => "MergeICmpsPass",
+        MP_DFA_JUMP_THREADING => "DFAJumpThreadingPass",
         MP_CALLED_VALUE_PROPAGATION => "CalledValuePropagationPass",
         MP_CG_PROFILE => "CGProfilePass",
         MP_REL_LOOKUP_TABLE_CONVERTER => "RelLookupTableConverterPass",
@@ -270,6 +274,7 @@ fn mp_run_function(p: i64, arg: i32, fv: i32) -> u32 {
         MP_JUMP_TABLE_TO_SWITCH => { return jump_table_to_switch_run(fv); },
         MP_LOOP_SINK => { return loop_sink_run(fv); },
         MP_MERGEICMPS => { st_touch(fv); return mergeicmps_run(fv); },
+        MP_DFA_JUMP_THREADING => { st_touch(fv); return dfa_jump_threading_run(fv); },
         _ => { fatal("internal: unknown misc function pass id"); return PA_ALL; },
     }
 }

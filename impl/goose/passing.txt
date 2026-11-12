@@ -3165,6 +3165,7 @@ tests/imported/llvm/Transforms/DFAJumpThreading/dfa-unfold-select.ll::roundtrip
 tests/imported/llvm/Transforms/DFAJumpThreading/equivalent-states.ll::roundtrip
 tests/imported/llvm/Transforms/DFAJumpThreading/max-outer-uses.ll::roundtrip
 tests/imported/llvm/Transforms/DFAJumpThreading/negative.ll::roundtrip
+tests/imported/llvm/Transforms/DFAJumpThreading/single-block-defs.ll::opt
 tests/imported/llvm/Transforms/DFAJumpThreading/single-block-defs.ll::roundtrip
 tests/imported/llvm/Transforms/DFAJumpThreading/single_succ_switch.ll::roundtrip
 tests/imported/llvm/Transforms/DeadArgElim/2006-06-27-struct-ret.ll::opt

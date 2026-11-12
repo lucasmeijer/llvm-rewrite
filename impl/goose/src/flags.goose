@@ -160,7 +160,7 @@ let KNOWN_FLAGS_MISC: const u8[:][] = [
     "likely-branch-weight", "unlikely-branch-weight",                      // lower-expect
     "spec-exec-max-speculation-cost", "spec-exec-max-not-hoisted", "spec-exec-only-if-divergent-target",
     "float2int-max-integer-bw", "tre-disable-entrycount-recompute", "callsite-splitting-duplication-threshold",
-    "move-auto-init-threshold", "disable-lower-comment-string", "cvp-max-functions-per-value",
+    "move-auto-init-threshold", "disable-lower-comment-string", "dfa-early-exit-heuristic", "cvp-max-functions-per-value",
     "jump-table-to-switch-size-threshold", "jump-table-to-switch-function-size-threshold",
     "force-specialization", "funcspec-max-clones", "funcspec-max-discovery-iterations", "funcspec-max-incoming-phi-values",
     "funcspec-max-block-predecessors", "funcspec-min-function-size", "funcspec-max-codesize-growth",

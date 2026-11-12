@@ -1502,7 +1502,10 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   cleanup/elide/split/annotation-elide, openmp-opt(-cgscc), alloc-token, annotation2metadata, annotation-remarks,
   inject-tli-mappings, lower-comment-string, cg-profile (any entry count: loud; 116 corpus files), rel-lookup-table-converter
   (x86-64 Darwin/Windows with a candidate table: loud; `-relocation-model` is not an opt option yet).
-- Not done (fail loudly): dfa-jump-threading, loop-interchange, expand-memcmp, dynamic llvm.objectsize
+- dfa-jump-threading: only the analysis is ported (candidate switches, AllSwitchPaths path enumeration); a candidate
+  with selects to unfold or with threading paths fails loudly. All four tests/perf/compile programs have one (and LLVM
+  transforms sqlite3 and lua), so `-O2` on them needs TransformDFA + SSAUpdaterBulk next.
+- Not done (fail loudly): loop-interchange, expand-memcmp, dynamic llvm.objectsize
   (ObjectSizeOffsetEvaluator), ObjectSizeVisitor::visitLoadInst, #dbg_assign remapping in callsite-splitting,
   FunctionSpecialization rounds with more than 8 specialized originals (LLVM iterates a SmallPtrSet in pointer order:
   sqlite3/oggenc/SPASS with -force-specialization hit it; the default thresholds don't).
