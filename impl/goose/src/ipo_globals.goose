@@ -192,7 +192,7 @@ recursive fn ig_destroy_constant(c: i32) {
         ig_destroy_constant(us);
     }
     if is_constant_data(c) { return; }   // never destroyed (ConstantData lives forever)
-    for m in mds { if m.kind == MK_VALUE && m.extra == c { ig_fail("destroying a constant used by metadata"); } }
+    if ig_find_vam(c) >= 0 { ig_fail("destroying a constant used by metadata"); }
     cst_remove(c);
     drop_all_refs(c);
     vals[c].kind = VK_DEAD;
@@ -838,17 +838,34 @@ fn gd_node(v: i32) -> i64 {
     vm_set(VM_PASS0, v, k);
     return k;
 }
+var gd_edge_set = hm_new();      // (from, to) pairs already in GVDependencies
 fn gd_add_dep(from: i32, to: i32) {
     let n = gd_node(from);
-    var e = gd_dep_head[n];
-    while e >= 0 { if gd_edges_to[e] == to { return; } e = gd_edges_next[e]; }
+    let k = hk2(from, to);
+    if hm_has(gd_edge_set, k) { return; }
+    hm_put(gd_edge_set, k, 1);
     gd_edges_to.push(to);
     gd_edges_next.push(gd_dep_head[n]);
     gd_dep_head[n] = (gd_edges_to.len - 1) as i32;
 }
+fn gd_tmp_release(base: i64) {
+    if gd_tmp.len - base >= 16 { var j = base; while j < gd_tmp.len { hm_del(gd_tmp_set, hk2(base as i32, gd_tmp[j])); j++; } }
+    gd_tmp.resize(base);
+}
+// a SmallPtrSet as a run of gd_tmp from base: a linear scan while small, a hash set keyed by (base, v) beyond
+var gd_tmp_set = hm_new();
 fn gd_tmp_add(base: i64, v: i32) {
-    var k = base;
-    while k < gd_tmp.len { if gd_tmp[k] == v { return; } k++; }
+    let n = gd_tmp.len - base;
+    if n < 16 {
+        var k = base;
+        while k < gd_tmp.len { if gd_tmp[k] == v { return; } k++; }
+        gd_tmp.push(v);
+        if gd_tmp.len - base == 16 { var j = base; while j < gd_tmp.len { hm_put(gd_tmp_set, hk2(base as i32, gd_tmp[j]), 1); j++; } }
+        return;
+    }
+    let key = hk2(base as i32, v);
+    if hm_has(gd_tmp_set, key) { return; }
+    hm_put(gd_tmp_set, key, 1);
     gd_tmp.push(v);
 }
 // ComputeDependencies(V, Deps): Deps is gd_tmp[base..]
@@ -867,7 +884,7 @@ recursive fn gd_compute_deps(v: i32, base: i64) {
         gd_ccache_n.push((gd_tmp.len - lb) as i32);
         var j = lb;
         while j < gd_tmp.len { gd_ccache_pool.push(gd_tmp[j]); j++; }
-        gd_tmp.resize(lb);
+        gd_tmp_release(lb);
         vm_set(VM_PASS1, v, ci);
     }
     let at = gd_ccache_at[ci] as i64;
@@ -889,7 +906,7 @@ fn gd_update_deps(gv: i32) {
         if vals[gv].kind == VK_FUNC && position(gd_vfe_safe, d) >= 0 { continue; }
         gd_add_dep(d, gv);
     }
-    gd_tmp.resize(base);
+    gd_tmp_release(base);
 }
 fn position(xs: i32[>..<]&, v: i32) -> i64 { for x, i in xs { if x == v { return i; } } return -1; }
 
@@ -901,14 +918,34 @@ fn gd_mark_live(gv: i32, wl: i32[>..<]&, m: i32) {
     let c = ig_comdat(gv);
     if c >= 0 { gd_mark_comdat(c, wl, m); }
 }
-fn gd_mark_comdat(c: i32, wl: i32[>..<]&, m: i32) {
-    // ComdatMembers: functions, variables and aliases whose own getComdat() is c
+// ComdatMembers: comdat -> members (functions, variables, aliases with getComdat() == C) in insertion order
+var gd_cm_head = hm_new();
+var gd_cm_tail = hm_new();
+var gd_cm_val: i32[>..<];
+var gd_cm_next: i32[>..<];
+fn gd_cm_add(c: i32, v: i32) {
+    gd_cm_val.push(v);
+    gd_cm_next.push(-1);
+    let e = (gd_cm_val.len - 1) as i64;
+    let t = hm_get(gd_cm_tail, c as u64, -1);
+    if t < 0 { hm_put(gd_cm_head, c as u64, e); } else { gd_cm_next[t] = e as i32; }
+    hm_put(gd_cm_tail, c as u64, e);
+}
+fn gd_build_comdat_members(m: i32) {
+    hm_clear(gd_cm_head);
+    hm_clear(gd_cm_tail);
+    gd_cm_val.clear();
+    gd_cm_next.clear();
     var f = modules[m].first_func;
-    while f >= 0 { if globs[glob_of(f)].comdat == c { gd_mark_live_nc(f, wl); } f = globs[glob_of(f)].next; }
+    while f >= 0 { let c = globs[glob_of(f)].comdat; if c >= 0 { gd_cm_add(c, f); } f = globs[glob_of(f)].next; }
     var g = modules[m].first_gvar;
-    while g >= 0 { if globs[glob_of(g)].comdat == c { gd_mark_live_nc(g, wl); } g = globs[glob_of(g)].next; }
+    while g >= 0 { let c = globs[glob_of(g)].comdat; if c >= 0 { gd_cm_add(c, g); } g = globs[glob_of(g)].next; }
     var a = modules[m].first_alias;
-    while a >= 0 { if ig_comdat(a) == c { gd_mark_live_nc(a, wl); } a = globs[glob_of(a)].next; }
+    while a >= 0 { let c = ig_comdat(a); if c >= 0 { gd_cm_add(c, a); } a = globs[glob_of(a)].next; }
+}
+fn gd_mark_comdat(c: i32, wl: i32[>..<]&, m: i32) {
+    var e = hm_get(gd_cm_head, c as u64, -1);
+    while e >= 0 { gd_mark_live_nc(gd_cm_val[e], wl); e = gd_cm_next[e] as i64; }
 }
 fn gd_mark_live_nc(gv: i32, wl: i32[>..<]&) {
     if !vs_add(VS_PASS0, gv) { return; }
@@ -1070,16 +1107,19 @@ fn globaldce_run(m: i32) -> bool {
     vm_clear(VM_PASS1);
     gd_alive_list.clear();
     gd_dep_head.clear();
+    hm_clear(gd_edge_set);
     gd_edges_to.clear();
     gd_edges_next.clear();
     gd_ccache_at.clear();
     gd_ccache_n.clear();
     gd_ccache_pool.clear();
     gd_tmp.clear();
+    hm_clear(gd_tmp_set);
     gd_vfe_safe.clear();
     gd_typeid_md.clear();
     gd_typeid_gv.clear();
     gd_typeid_off.clear();
+    gd_build_comdat_members(m);
     gd_add_virtual_function_dependencies(m);
     var wl: i32[>..<] = [];
     // global_objects(): functions, then variables

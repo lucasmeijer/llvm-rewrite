@@ -236,13 +236,13 @@ fn go_cleanup_constant_global_users(gv: i32) -> bool {
     let init = ig_init(gv);
     var wl: i32[>..<] = [];
     go_users(gv, wl);
-    var visited: i32[>..<] = [];
+    var visited = hm_new();
     var changed = false;
     var maybe_dead: i32[>..<] = [];
     while wl.len > 0 {
         let u = wl.pop();
-        if position(visited, u) >= 0 { continue; }
-        visited.push(u);
+        if hm_has(visited, u as u64) { continue; }
+        hm_put(visited, u as u64, 1);
         if is_dead(u) { continue; }
         let o = opcode_of(u);
         if o == OP_BITCAST { go_users(u, wl); }
@@ -298,7 +298,7 @@ var sra_stored: bool[>..<];
 fn go_collect_sra_types(gv: i32) -> bool {
     sra_off.clear(); sra_ty.clear(); sra_init.clear(); sra_loaded.clear(); sra_stored.clear();
     var wl: i32[>..<] = [];      // use ids
-    var visited: i32[>..<] = [];
+    var visited = hm_new();
     go_append_uses(gv, wl, visited);
     while wl.len > 0 {
         let u = wl.pop();
@@ -344,10 +344,10 @@ fn go_collect_sra_types(gv: i32) -> bool {
     }
     return true;
 }
-fn go_append_uses(v: i32, wl: i32[>..<]&, visited: i32[>..<]&) {
+fn go_append_uses(v: i32, wl: i32[>..<]&, visited: HMap&) {
     var u = first_use(v);
     while u >= 0 {
-        if position(visited, u) < 0 { visited.push(u); wl.push(u); }
+        if !hm_has(visited, u as u64) { hm_put(visited, u as u64, 1); wl.push(u); }
         u = use_next(u);
     }
 }
@@ -401,7 +401,7 @@ fn go_sra_global(gv: i32) -> i32 {
         globs[glob_of(ngv)].align = go_log2a(na);
     }
     var wl: i32[>..<] = [];
-    var visited: i32[>..<] = [];
+    var visited = hm_new();
     var dead: i32[>..<] = [];
     go_append_users_once(gv, wl, visited);
     while wl.len > 0 {
@@ -431,11 +431,11 @@ fn go_sra_global(gv: i32) -> i32 {
     // NewGlobals.begin(): DenseMap<uint64_t, ...> iteration order; only "non-null" matters to the caller
     return first;
 }
-fn go_append_users_once(v: i32, wl: i32[>..<]&, visited: i32[>..<]&) {
+fn go_append_users_once(v: i32, wl: i32[>..<]&, visited: HMap&) {
     var u = first_use(v);
     while u >= 0 {
         let us = uses[u].user;
-        if position(visited, us) < 0 { visited.push(us); wl.push(us); }
+        if !hm_has(visited, us as u64) { hm_put(visited, us as u64, 1); wl.push(us); }
         u = use_next(u);
     }
 }
@@ -686,13 +686,13 @@ fn go_optimize_global_address_of_allocation(gv: i32, ci: i32, alloc_size: i64, i
 fn c_bool_val(b: bool) -> i32 { if b { c_true() } else { c_false() } }
 // valueIsOnlyUsedLocallyOrStoredToOneGlobal(CI, GV)
 fn go_value_only_used_locally(ci: i32, gv: i32) -> bool {
-    var visited: i32[>..<] = [];
+    var visited = hm_new();
     var wl: i32[>..<] = [];
     wl.push(ci);
     while wl.len > 0 {
         let v = wl.pop();
-        if position(visited, v) >= 0 { continue; }
-        visited.push(v);
+        if hm_has(visited, v as u64) { continue; }
+        hm_put(visited, v as u64, 1);
         var u = first_use(v);
         while u >= 0 {
             let us = uses[u].user;
@@ -861,11 +861,12 @@ fn go_prepend_opcodes(e: i32, ops: i64[>..<]&, stack_value0: bool) -> i32 {
 
 // deleteIfDead(GV, NotDiscardableComdats, DeleteFnCallback)
 var go_not_discardable_comdats: i32[>..<];
+var go_ndc_set = hm_new();
 fn go_delete_if_dead(gv: i32) -> bool {
     sc_remove_dead_constant_users(gv);
     if !gv_is_discardable_if_unused(gv) && !ig_is_declaration(gv) { return false; }
     let c = ig_comdat(gv);
-    if c >= 0 && !gv_has_local_linkage(gv) && position(go_not_discardable_comdats, c) >= 0 { return false; }
+    if c >= 0 && !gv_has_local_linkage(gv) && hm_has(go_ndc_set, c as u64) { return false; }
     var dead = false;
     if vals[gv].kind == VK_FUNC {
         dead = (ig_is_declaration(gv) && ig_use_empty(gv)) || fn_is_def_trivially_dead(gv);
@@ -1097,26 +1098,16 @@ fn go_has_changeable_cc_impl(f: i32) -> bool {
     while b >= 0 { if dae_terminating_musttail(b) >= 0 { return false; } b = block_next(b); }
     return !ia_has_address_taken(f);
 }
-var go_ccc_fn: i32[>..<];
-var go_ccc_val: bool[>..<];
+var go_ccc = hm_new();      // ChangeableCCCache: function -> 0 / 1
 fn go_has_changeable_cc(f: i32) -> bool {
-    let p = position(go_ccc_fn, f);
-    if p >= 0 { return go_ccc_val[p]; }
-    go_ccc_fn.push(f);
-    go_ccc_val.push(false);
+    let c = hm_get(go_ccc, f as u64, -1);
+    if c >= 0 { return c == 1; }
+    hm_put(go_ccc, f as u64, 0);
     let r = go_has_changeable_cc_impl(f);
-    let q = position(go_ccc_fn, f);
-    go_ccc_val[q] = r;
+    hm_put(go_ccc, f as u64, if r { 1 } else { 0 });
     return r;
 }
-fn go_ccc_erase(f: i32) {
-    let p = position(go_ccc_fn, f);
-    if p < 0 { return; }
-    var k = p;
-    while k + 1 < go_ccc_fn.len { go_ccc_fn[k] = go_ccc_fn[k + 1]; go_ccc_val[k] = go_ccc_val[k + 1]; k++; }
-    go_ccc_fn.pop();
-    go_ccc_val.pop();
-}
+fn go_ccc_erase(f: i32) { hm_del(go_ccc, f as u64); }
 fn go_has_musttail_callers(f: i32) -> bool {
     var u = first_use(f);
     while u >= 0 { let cb = uses[u].user; if is_inst(cb) && iop(cb) == OP_CALL && dae_is_musttail(cb) { return true; } u = use_next(u); }
@@ -1157,8 +1148,7 @@ fn go_use_fast_cc_for_internal_call(f: i32) -> bool {
 // OptimizeFunctions(M)
 fn go_optimize_functions(m: i32) -> bool {
     var changed = false;
-    go_ccc_fn.clear();
-    go_ccc_val.clear();
+    hm_clear(go_ccc);
     let stress = flag_bool("enable-coldcc-stress-test", false);
     var f = modules[m].first_func;
     while f >= 0 {
@@ -1480,22 +1470,23 @@ fn globalopt_run(m: i32) -> bool {
     while local_change {
         local_change = false;
         go_not_discardable_comdats.clear();
+        hm_clear(go_ndc_set);
         var gv = modules[m].first_gvar;
         while gv >= 0 {
             let c = globs[glob_of(gv)].comdat;
-            if c >= 0 && (!gv_is_discardable_if_unused(gv) || first_use(gv) >= 0) { go_set_insert(go_not_discardable_comdats, c); }
+            if c >= 0 && (!gv_is_discardable_if_unused(gv) || first_use(gv) >= 0) { hm_put(go_ndc_set, c as u64, 1); }
             gv = globs[glob_of(gv)].next;
         }
         var f = modules[m].first_func;
         while f >= 0 {
             let c = globs[glob_of(f)].comdat;
-            if c >= 0 && !fn_is_def_trivially_dead(f) { go_set_insert(go_not_discardable_comdats, c); }
+            if c >= 0 && !fn_is_def_trivially_dead(f) { hm_put(go_ndc_set, c as u64, 1); }
             f = globs[glob_of(f)].next;
         }
         var ga = modules[m].first_alias;
         while ga >= 0 {
             let c = ig_comdat(ga);
-            if c >= 0 && (!gv_is_discardable_if_unused(ga) || first_use(ga) >= 0) { go_set_insert(go_not_discardable_comdats, c); }
+            if c >= 0 && (!gv_is_discardable_if_unused(ga) || first_use(ga) >= 0) { hm_put(go_ndc_set, c as u64, 1); }
             ga = globs[glob_of(ga)].next;
         }
         if go_optimize_functions(m) { local_change = true; }
