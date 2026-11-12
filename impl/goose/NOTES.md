@@ -32,10 +32,9 @@
 - L2.ipo-args COMPLETE (206/206: ArgumentPromotion 55/55, DeadArgElim 39/39, Internalize 9/9 roundtrip + opt).
   L2.globals 445/450 (all 225 roundtrip, 220/225 opt): the 5 left run `-O2`, `lto<O2>` or `default<O0>`
   pipelines. See "IPO over globals and arguments" below for the sweeps (0 differs everywhere).
-- L1.vectorize.slp: milestone 1 of 3 (the pass driver, slp.goose): 656/1300 (650 roundtrip, 6 opt). The driver
-  fails loudly at every entry into the unported parts, so it never changes IR; sweeps of `slp-vectorizer`:
-  whole-file 2400 identical / 0 differs, `--with-test-flags` 3146 / 0 differs, `--per-function` 23576 / 0 differs
-  (the rest loud). Next steps in "SLPVectorizer" below.
+- L1.vectorize.slp: milestone 2 (tree building, slp*.goose): 657/1300 (650 roundtrip, 7 opt). Trees are built and
+  verified line by line against LLVM's -debug-only=SLP trace (0 of 1326 runs differ); every tree that is not tiny
+  fails loudly before the reordering / cost model, so the pass still never changes IR. Sweeps: see "SLPVectorizer".
 
 - L1.vectorize.vector-combine COMPLETE (130/130: 65 roundtrip, 65 opt). Sweeps of `vector-combine`: whole-file
   8064 identical / 0 differs (16 loud: VP intrinsics, a 16-bit triple), `--with-test-flags` 9822 identical / 0 differs
@@ -290,7 +289,7 @@
 | `src/loop_idiom.goose`, `src/hash_recognize.goose` | LoopIdiomRecognize (memset/memcpy/memmove, CRC table, strlen/wcslen, popcount, ctlz/cttz, shift idioms); HashRecognize |
 | `src/laa.goose`, `src/pse.goose` | LoopAccessAnalysis + print<access-info>; PredicatedScalarEvolution |
 | `src/vector_combine.goose`, `src/vector_combine2.goose` | VectorCombine (VectorCombine.cpp, whole): worklist, IRBuilder<InstSimplifyFolder> `vcb_*`, every fold, the driver |
-| `src/slp.goose` | SLPVectorizer milestone 1: the pass driver up to BoUpSLP / HorizontalReduction (fails loudly there) |
+| `src/slp*.goose` | SLPVectorizer: driver, tree building, scheduling, reduction matching (fails loudly before the reordering / cost model) |
 | `src/tti_vec.goose` | the vectorizers' TTI front end `tv_*` (X86 or NoTTIImpl): shuffle / insert-extract / arith / cast / memory / scalarization / intrinsic / reduction costs, register queries |
 | `src/vecutils.goose` | VectorUtils + LoopUtils helpers `vu_*`: scalar-op / overload-type intrinsic args, splat values, mask narrowing/widening, reduction intrinsic mapping, copyIRFlags/andIRFlags/propagateIRFlags, getLosslessInvCast |
 | `tools/splitc.py` | used by build.sh: splits goose's generated C into parallel translation units ("Build") |
@@ -1381,47 +1380,93 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
 - Uses goose_loopmisc's loop_utils.goose (containsIrreducibleCFG, LoopBlocksRPO, RecursivelyDeleteTriviallyDead with
   MSSAU); unroll_utils.goose and loop_utils.goose both port LoopInfo::erase (written concurrently; merge later).
 
-## SLPVectorizer (slp.goose): state and next steps for a successor
+## SLPVectorizer (slp*.goose): state and next steps for a successor
 
-- **Done (milestone 1, the driver):** SLPVectorizerPass::run/runImpl (analyses, no-vector-register and
-  NoImplicitFloat bail-outs, DFS numbers, post_order over the blocks, EH-pad / unreachable blocks skipped),
-  collectSeedInstructions (Stores/GEPs MapVectors keyed by getUnderlyingObject / the GEP pointer),
-  vectorizeChainsInBlock (PHI pass, reduction PHIs via getReductionInstr, incoming values, roots without users,
-  the post-process sets: inserts, cmps, non-vectorizable instructions, stores; the late store-operand pass with its
-  scalarization-cost gate; isPoorThroughputOp with its opcode/intrinsic/callee cache and getVectorOpCost for
-  binops), vectorizeHorReduction's queue walk and PostponedInsts, tryToVectorize's early checks,
-  vectorizeInserts / vectorizeCmpInsts / vectorizeNonVectorizableInsts (isNonVectorizableInst,
-  forEachOperandChainCandidate), canMapToVector, getAggregateSize, isValidElementType, Type::getTypeID order.
-- **The boundary:** `slp_not_ported(...)` wherever LLVM would enter BoUpSLP, HorizontalReduction,
-  getSameOpcode/InstructionsState, StoreChainContext or canConvertToFMA. Some boundaries are conservative (they
-  fail when LLVM *might* enter: any store group of 2+ stores, any insert chain of 2+, any FAdd/FSub pair candidate
-  (canConvertToFMA), any reduction candidate in a root's operand tree). Loud failures by count over the corpus
-  (per-function): matchAssociativeReduction 37262, getRdxKind 2857, store chains 1942, PHI sequences 1838, insert
-  chains 874, poor-throughput calls 799, compare sequences 710, instruction pairs 575.
-- **Next steps, in LLVM's milestone order** (the jai port, impl/jai/src/slp_*.jai, took 5 sessions; read it for
-  structure and pitfalls, port from SLPVectorizer.cpp):
-  1. Helpers at the top of SLPVectorizer.cpp (lines 100-1980): getSameOpcode / InstructionsState,
-     isValidForAlternation, getElementIndex / getExtractIndex, isFixedVectorShuffle, the mask helpers,
-     getNumberOfParts / hasFullVectorsOrPowerOf2 / getFloorFullVectorNumberOfElements (TTI: tti_vec.goose).
-  2. BoUpSLP data: TreeEntry (scalars, operands, ReuseShuffleIndices, ReorderIndices, State, CombinedOp),
-     ScalarToTreeEntries, the ValueList pools (runs), DeletedInstructions; then buildTree / buildTreeRec /
-     getScalarsVectorizationState / InstructionsCompatibilityAnalysis (lines 9600-13660), the scheduler
-     (BlockScheduling, ScheduleBundle/ScheduleData, lines 25642-26866), canVectorizeLoads / LoadsState.
-     Verify trees with the assertions opt (`-debug-only=SLP` prints every tree: "SLP: Checking ...",
-     "SLP: added a vector of ...").
-  3. reorderTopToBottom / reorderBottomToTop / transformNodes / computeMinimumValueSizes.
-  4. The cost model: ShuffleCostEstimator, getEntryCost, getSpillCost, getTreeCost; compare with
-     `-debug-only=SLP` cost lines through a script like impl/jai/tools/slp_cost_compare.py. Knowledge facts in
-     knowledge/llvm/vectorizers.md (InstructionCost is fixed point; loop-trip-count scaling; per-lane gathers).
-  5. vectorizeTree / ShuffleInstructionBuilder / optimizeGatherSequence (codegen), then the driver parts that call
-     into it: StoreChainContext/vectorizeStores/vectorizeStoreChain, tryToVectorizeList, tryToVectorizeSequence
-     (stable_sort with PHICompare/compareCmp/StoreSorter), HorizontalReduction (matchAssociativeReduction,
-     tryToReduce, ordered reductions), findBestRootPair, canConvertToFMA.
-  Replace each `slp_not_ported` by the port as the pieces land; keep the sweeps at 0 differs.
+- **Done (milestone 2, tree building, 2026-11-12):** everything from the seeds to `isTreeTinyAndNotFullyVectorizable`,
+  verified against the assertions opt's `-debug-only=SLP` trace (below). Files, in data-flow order (each names its
+  LLVM functions in the header):
+  - `slp_util.goose`: SLPUtils.cpp and the helpers at the top of SLPVectorizer.cpp (BinOpSameOpcodeHelper,
+    InstructionsState as `SIS {main, alt, copy}`, getSameOpcode, convertTo, isCommutative, getNumberOfParts, the
+    mask/order helpers), the SLP scratch hash table `sh_*` (64 slots keyed by (slot, a, b), O(1) clear per slot) and
+    the `-debug-only=SLP` trace helpers.
+  - `slp_tree.goose`: BoUpSLP's state: TreeEntry rows `slp_te` with runs in `slp_vp` (values), `slp_ip` (ints) and
+    `slp_opl` (operand lists, each a run of `slp_vp`); newTreeEntry, TreeEntry::dump/isSame/findLaneForValue,
+    ScalarToTreeEntries / ValueToGatherNodes / ... as `SH_*` slots with link lists `slp_lk`, deleteTree, the
+    per-function constructor (`slp_r_begin`: EphValues, MaxVecRegSize/MinVecRegSize).
+  - `slp_ops.goose`: LookAheadHeuristics, findBestRootPair, VLOperands (locals of `slp_vlops_reorder`), and the
+    X86/NoTTI legality queries (`slp_tti_*`).
+  - `slp_sched.goose`: BlockScheduling without copyable elements: ScheduleData `slp_sd`, ScheduleBundle `slp_sb`
+    (an entity is an SD id >= 0 or `-(bundle + 1)`), ReadyInsts (`slp_ready`, a SetVector per block),
+    tryScheduleBundle (-2 = nullopt, -1 = nullptr), extendSchedulingRegion, initScheduleData, calculateDependencies,
+    schedule, resetSchedule, initialFillReadyList, isAliased (BatchAA = `aq_push(CA_SIMPLE)` per function).
+  - `slp_loads.goose`: canVectorizeLoads (+ CheckForShuffledLoads as a second non-recursive pass over
+    `slp_cvl_base`), isMaskedLoadCompress, isMaskedStoreCompress, getGEPCosts, getPointersChainCost,
+    getVectorCallCosts, the `::getShuffleCost` / `::getScalarizationOverhead` wrappers, llvm::sortPtrAccesses.
+  - `slp_build.goose`: buildTreeRec (a `recursive fn` over pool runs), getScalarsVectorizationLegality /
+    getScalarsVectorizationState, InstructionsCompatibilityAnalysis (incl. the copyable-element profitability
+    checks), tryToFindDuplicates, canBuildSplitNode / TrySplitNode, PHIHandler, the loop-nest bookkeeping,
+    getVectorElementSize, isFixedVectorShuffle, isFullyVectorizableTinyTree, isTreeTinyAndNotFullyVectorizable.
+  - `slp_stores.goose`: vectorizeStoreChains (StoreSorter, AreCompatibleStores), tryToVectorizeSequence for stores,
+    vectorizeStores (RelatedStoreInsts, ExtendContexts, StoreChainContext), vectorizeStoreChain, tryToVectorizeList.
+  - `slp_hr.goose`: HorizontalReduction matching (getRdxKind, matchAssociativeReduction with generateKeySubkey,
+    matchOrderedReduction, optimizeReducedVals) and tryToReduce up to the trees; `slp_phis.goose`: the PHI seeds
+    (PHIToOpcodes, PHICompare via libstdc++'s stable_sort, AreCompatiblePHIs). slp.goose: the driver, now with the
+    insertelement/insertvalue build vectors, instruction pairs (findBestRootPair) and canConvertToFMA.
+- **Verification:** `tools/slp_debug_compare.py LIST` runs the assertions opt (`/persistent/llvm-rewrite/llvm-23.1.5-
+  assert/bin/opt -debug-only=SLP`) and ours (`bin/opt -debug-only=SLP`, which prints the same LLVM_DEBUG lines on
+  stderr) and checks that our filtered trace is a prefix of LLVM's (ours stops at its first loud failure). Over the
+  1326 RUN lines of tests/imported/llvm/Transforms/SLPVectorizer (LIST built from each file's `; @opt:` flags):
+  0 differ, 136734 trace lines compared (every TreeEntry dump, every scheduler step, every gather decision).
+  Add new line kinds to its `KINDS` list as their LLVM_DEBUG lines get ported (e.g. "SLP: Found cost" with the cost
+  model).
+- **The boundary** (`slp_fail` / `slp_not_ported`), loud failures over those 1326 runs: after buildTree (a tree that
+  is not tiny: reordering, transformNodes, minbw, the cost model) 960; copyable elements in a bundle 132
+  (InstructionsState with `copy`: the scheduler's ScheduleCopyableData is not ported); struct-returning calls 67
+  (checkEVsForVecCalls, e.g. llvm.sadd.with.overflow; jai's frontier too); compare sequences 25; const.rdx 14;
+  vectorizeGEPIndices 10; vectorizeNonVectorizableInsts' sequence 8; tryToReduceOrdered 4; getVectorCallCosts
+  without a target 4; emitScaleForReusedOps 3; poor-throughput seeds 3; VFDatabase mappings 2. 90 run to the end.
+- **Next steps, in order:**
+  1. Copyable elements in the scheduler (ScheduleCopyableData and its four maps, the copyable branches of
+     tryScheduleBundle / buildBundle / calculateDependencies / schedule / areAllOperandsReplacedByCopyableData /
+     resetSchedule, SLPVectorizer.cpp 5500-6460 and 25642-26640); then drop the slp_fail in
+     `slp_vectorization_legality` and `slp_compatible_stores`. Verifiable now with the compare tool (132 runs).
+  2. The gather-shuffle analysis that reordering, the cost model and codegen share: getLastInstructionInBundle
+     (21654, with EntryToLastInstruction), tryToGatherExtractElements (20649), isGatherShuffledEntry /
+     isGatherShuffledSingleRegisterEntry (20786-21607; SmallPtrSet<TreeEntry*> iteration in UsedTEs is small-mode
+     insertion order). Then reorderTopToBottom / reorderBottomToTop (8194-9615: getReorderingData,
+     findReusedOrderedScalars, findPartiallyOrderedLoads + clusterSortPtrAccesses, findExternalStoreUsersReorderIndices
+     (collectUserStores iterates a pointer-keyed DenseMap: fail loudly when the order matters), reorderNodeWithReuses,
+     combineOrders, the PriorityQueue as libstdc++'s heap (domtree.goose / inliner.goose have ports)),
+     transformNodes (15111, with gatherPossiblyVectorizableLoads / tryToVectorizeGatheredLoads, matchesShlZExt,
+     matchesSelectOfBits, matchesInversedZExtSelect, reorderGatherNode), computeMinimumValueSizes (26866-27780;
+     ExtraBitWidthNodes is a DenseSet<unsigned>: `slp_extra_bw_nodes` keeps insertion order, emulate the bucket order
+     when iterating). These were not started in this session because none of them prints a trace of its own:
+     they are verifiable only through the cost model's per-entry dumps, so port them together with step 3.
+  3. The cost model (ShuffleCostEstimator 15729, getEntryCost 17029, getSpillCost, calculateTreeCostAndTrim-
+     NonProfitable, buildExternalUses, getTreeCost 19859; facts in knowledge/llvm/vectorizers.md). LLVM prints
+     "SLP: Adding cost ... for bundle" with each entry's dump and "SLP: Found cost = ..." per decision: add those
+     kinds to the compare tool. jai's impl/jai/tools/slp_cost_compare.py compares just the decisions.
+  4. Codegen (vectorizeTree, ShuffleInstructionBuilder, scheduleBlock, optimizeGatherSequence, ~BoUpSLP), then the
+     emission parts of HorizontalReduction (const.rdx, emitScaleForReusedOps, emitReduction, tryToReduceOrdered).
+  5. The remaining seeds: compareCmp + vectorizeCmpInsts' sequence, vectorizeNonVectorizableInsts' sequence,
+     vectorizeGEPIndices, poor-throughput seeds; struct-typed scalars (jai NOTES "SLPVectorizer" step 1).
+- **Design notes:** buildTreeRec can't hold growable locals across its recursion, so every list it passes down is a
+  run of the tree pools (appended, never shrunk until deleteTree); the operand lists built for a node *are* the node's
+  operands (TreeEntry::setOperands copies in LLVM, but nothing changes the local copy afterwards). Helpers it calls
+  are non-recursive and may use locals. The `SH_TMP*` slots are short-lived scratch: never hold one across a call
+  that can reach buildTree or the scheduler (the scheduler uses SH_TMP0..4); long-lived sets get their own slot.
+  generateKeySubkey's hash_codes are reproduced as 64-bit mixes of the same components (only equality matters).
 - Pass registration: P_SLP_VECTORIZER (421); accepted flags: vectorize-slp, slp-vectorize-hor(-store),
   slp-postprocess-stores-operands, slp-non-vectorizables-as-reductions, slp-vectorize-poor-throughput,
-  slp-threshold, slp-recursion-max-depth, slp-max-reg-size, slp-min-reg-size (all others are unknown options).
-
+  slp-threshold, slp-recursion-max-depth, slp-max-reg-size, slp-min-reg-size, debug-only (traces). The code also
+  reads (defaults only, the flags are still unknown options) slp-max-look-ahead-depth, slp-copyable-elements,
+  slp-split-alternate-instructions, slp-phi-vectorization-budget, slp-enable-masked-stores, slp-schedule-budget,
+  slp-cost-loop-trip-count, slp-min-tree-size, slp-max-vf, slp-vectorize-non-power-of-2: add them to KNOWN_FLAGS
+  once the cost model exists (their effects reach it).
+- Perf: no `@perf` benchmark times SLP; the pass fails loudly on tests/perf/compile (trees reach the cost model).
+- Goose traps met here: `slp_vp[x as i64..y]` parses `as i64..` as a type ("variable mode (..) applies only to ADT
+  type names"): write `slp_vp[(x as i64)..y]`. ic_common.goose's helpers are in `namespace ic` (unknown function
+  otherwise). A function that shrinks a pool can't be called while a slice of that pool is a live argument.
 ## VectorCombine and the vectorizer TTI layer (vector_combine.goose, vector_combine2.goose, tti_vec.goose, vecutils.goose)
 
 - vector_combine.goose: state, InstructionWorklist (vc_wl + VM_PASS0 as WorklistMap), replaceValue / eraseInstruction /

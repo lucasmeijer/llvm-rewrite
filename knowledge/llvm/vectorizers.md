@@ -124,6 +124,19 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
   `{}` fields; `vectorizeInsertValueInst` checks `canMapToVector` first, which rejects empty types
   (SLPVectorizer/empty-struct.ll).
 
+- `isUndefVector<IsPoisonOnly>(V)` with an empty UseMask builds a one-bit SmallBitVector, and `Res.reset(I)` for
+  I >= 1 is masked off (SmallBitVector::setSmallBits), so for a constant vector `.all()` is "lane 0 is undef/poison"
+  (SLPVectorizer.cpp 687; read from the source, the goose port relies on it and its traces match).
+- `isAlternateInstruction` for compares tries `isCmpSameOrSwapped(Main, I)` (false), then `isCmpSameOrSwapped(Alt,
+  I)` (true) before looking at predicates: two compares with the alternate predicate but compatible operands with
+  the main one count as main. Decides operand swapping of alternate compare nodes (found by the trace compare on
+  SLPVectorizer/X86/alternate-cmp-swapped-pred.ll).
+- NoTTIImpl's `getNumberOfParts` is 1 (TargetTransformInfoImpl.h), so without a target triple no VF is skipped by
+  tryToVectorizeList's "NumberOfParts == VF" check; NoTTI register width 32 limits the VFs instead.
+- The tree builder's decisions can be checked without the cost model: `-debug-only=SLP` prints every bundle check,
+  scheduler step and TreeEntry dump in buildTreeRec order (impl/goose/tools/slp_debug_compare.py compares those
+  lines; goose's port matches all 1326 SLPVectorizer RUN lines up to its first unported step).
+
 ### SLP code generation (verified by matching the whole corpus, sweeps with 0 differs)
 
 - BoUpSLP's Builder is an `IRBuilder<TargetFolder>` without fast-math flags; a horizontal reduction uses its own

@@ -13,7 +13,7 @@ lib/IR/Instruction.cpp 0.5
 lib/IR/Instructions.cpp 0.1  # + ShuffleVectorInst mask predicates (tti_x86_vec.goose)
 lib/IR/ProfDataUtils.cpp 0.4
 lib/IR/MDBuilder.cpp 0.12  # + createAnonymousAARoot (loop_versioning.goose)
-lib/Target/X86/X86TargetTransformInfo.cpp 0.85  # goose_tti: every cost function and table, legality queries; not getAddressComputationCost, getPointersChainCost, getIntImmCostIntrin, enableMemCmpExpansion, isLSRCostLess, isProfitableToSinkOperands, getCacheSize (areInlineCompatible/areTypesABICompatible are in inline_cost.goose)
+lib/Target/X86/X86TargetTransformInfo.cpp 0.85  # goose_tti: every cost function and table, legality queries (getPointersChainCost: slp_loads.goose); not getAddressComputationCost, getIntImmCostIntrin, enableMemCmpExpansion, isLSRCostLess, isProfitableToSinkOperands, getCacheSize (areInlineCompatible/areTypesABICompatible are in inline_cost.goose)
 lib/Target/X86/X86ISelLowering.cpp 0.04  # goose_tti: the constructor's actions (generated, gen_x86lower.goose), getPreferredVectorAction, isLegalAddressingMode, isTruncateFree/isZExtFree, isCheapToSpeculateCt*
 lib/Target/X86/X86Subtarget.cpp 0.4  # goose_tti: initSubtargetFeatures, classifyGlobalReference/classifyLocalReference
 lib/Target/X86/X86TargetMachine.cpp 0.25  # goose_tti: getSubtargetImpl, getEffectiveRelocModel, isNoopAddrSpaceCast
@@ -150,7 +150,7 @@ lib/Transforms/Utils/ScalarEvolutionExpander.cpp 0.9  # manual: predicate expans
 lib/Analysis/IVUsers.cpp 0.8  # manual: print<iv-users> path whole; not getExpr/getStride/findAddRecForLoop/IVStrideUse callbacks (LSR) (heuristic 0.95)
 lib/Analysis/ScalarEvolutionNormalization.cpp 1  # manual: NormalizeDenormalizeRewriter is scev_create.goose's RW_NORMALIZE (heuristic 0.6)
 lib/Analysis/HashRecognize.cpp 0.85  # all but the print<hash-recognize> printer
-lib/Analysis/LoopAccessAnalysis.cpp 0.9  # all but sortPtrAccesses, LoopAccessInfoManager caching/clear, getPointersDiff of vectors
+lib/Analysis/LoopAccessAnalysis.cpp 0.92  # + sortPtrAccesses (slp_loads.goose); all but LoopAccessInfoManager caching/clear, getPointersDiff of vectors
 lib/Transforms/Scalar/LoopLoadElimination.cpp 0.95  # all but PGSO with a cached ProfileSummaryInfo (loud)
 
 # --- L1.loop-unroll / L1.unswitch (2026-11)
@@ -195,7 +195,7 @@ lib/Analysis/TypeMetadataUtils.cpp 0.5  # getPointerAtOffset, getFunctionAtVTabl
 lib/Support/GlobPattern.cpp 0.6  # *, ?, [...], escapes; no brace expansion
 lib/Transforms/Utils/ModuleUtils.cpp 0.1  # filterDeadComdatFunctions, getUniqueModuleId (ipo_globals.goose)
 lib/Transforms/Vectorize/VectorCombine.cpp 0.95  # all folds and the driver; not ported (fail loudly): scalarizeVPIntrinsic's rewrite, foldBitcastOfVPLoad, foldSelectsFromBitcast with several condition groups (DenseMap order)
-lib/Transforms/Vectorize/SLPVectorizer.cpp 0.03  # the pass driver only (slp.goose); BoUpSLP, HorizontalReduction, getSameOpcode not ported
+lib/Transforms/Vectorize/SLPVectorizer.cpp 0.35  # driver (no compare/GEP/poor-throughput sequences), helpers, getSameOpcode, LookAhead/VLOperands, buildTree, BlockScheduling (no copyables), canVectorizeLoads, HorizontalReduction matching; not: reordering, transformNodes, minbw, cost model, codegen, gather-shuffle analysis
 # misc_passes.goose and its files (L1.scalar-misc, L1.o2-gaps, the small passes of default<O2>)
 lib/Transforms/Scalar/LowerExpectIntrinsic.cpp 0.95  # no MisExpect diagnostics
 lib/Transforms/Scalar/TailRecursionElimination.cpp 0.95  # no optimization remarks
