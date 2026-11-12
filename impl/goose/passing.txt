@@ -9504,11 +9504,15 @@ tests/imported/llvm/Transforms/LICM/licm-ci.ll::opt
 tests/imported/llvm/Transforms/LICM/licm-ci.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/lnicm-sink.ll::opt
 tests/imported/llvm/Transforms/LICM/lnicm-sink.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/loop-sink-phi-in-preheader.ll::opt
 tests/imported/llvm/Transforms/LICM/loop-sink-phi-in-preheader.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/loopsink-phi.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/loopsink-phi2.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/loopsink-pr38462.ll::opt
 tests/imported/llvm/Transforms/LICM/loopsink-pr38462.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/loopsink-pr39570.ll::opt
 tests/imported/llvm/Transforms/LICM/loopsink-pr39570.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/loopsink-pr39695.ll::opt
 tests/imported/llvm/Transforms/LICM/loopsink-pr39695.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/loopsink.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/min_max.ll::opt
