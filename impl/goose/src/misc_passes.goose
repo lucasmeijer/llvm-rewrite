@@ -1,5 +1,5 @@
 // Registration and dispatch of the small passes of L1.scalar-misc / L1.o2-gaps and the other small passes of
-// default<O2> (pass ids 400..599). passmgr.goose calls mp_parse_* while parsing a pipeline and mp_run_* for
+// default<O2> (pass ids 1400..1599). passmgr.goose calls mp_parse_* while parsing a pipeline and mp_run_* for
 // these ids, so the pass table there doesn't need a row per pass.
 import std;
 import ir;
@@ -19,6 +19,7 @@ import tailcallelim;
 import callsite_splitting;
 import subtarget;
 import o2_small;
+import mergeicmps;
 import jump_table_to_switch;
 import called_value_propagation;
 import alignment_from_assumptions;
@@ -27,45 +28,46 @@ import move_auto_init;
 import libcalls_shrinkwrap;
 import lcg;
 
-let MP_LOWER_EXPECT = 400;
-let MP_LOWER_CONSTANT_INTRINSICS = 401;
-let MP_SINK = 402;
-let MP_SPECULATIVE_EXECUTION = 403;    // arg: 1 = only-if-divergent-target
-let MP_DIV_REM_PAIRS = 404;
-let MP_FLOAT2INT = 405;
-let MP_INFER_ALIGNMENT = 406;
-let MP_MLDST_MOTION = 407;             // arg: 1 = split-footer-bb
-let MP_TAILCALLELIM = 408;
-let MP_CALLSITE_SPLITTING = 409;
-let MP_EE_INSTRUMENT = 410;            // arg: 1 = post-inline
-let MP_TRANSFORM_WARNING = 411;
-let MP_ANNOTATION_REMARKS = 412;
-let MP_CORO_ELIDE = 413;
-let MP_INJECT_TLI_MAPPINGS = 414;
-let MP_ALIGNMENT_FROM_ASSUMPTIONS = 415;
-let MP_DROP_UNNECESSARY_ASSUMES = 416;  // arg: 1 = drop-deref
-let MP_MOVE_AUTO_INIT = 417;
-let MP_LIBCALLS_SHRINKWRAP = 418;
-let MP_JUMP_TABLE_TO_SWITCH = 419;
-let MP_LOOP_SINK = 420;
+let MP_LOWER_EXPECT = 1400;
+let MP_LOWER_CONSTANT_INTRINSICS = 1401;
+let MP_SINK = 1402;
+let MP_SPECULATIVE_EXECUTION = 1403;    // arg: 1 = only-if-divergent-target
+let MP_DIV_REM_PAIRS = 1404;
+let MP_FLOAT2INT = 1405;
+let MP_INFER_ALIGNMENT = 1406;
+let MP_MLDST_MOTION = 1407;             // arg: 1 = split-footer-bb
+let MP_TAILCALLELIM = 1408;
+let MP_CALLSITE_SPLITTING = 1409;
+let MP_EE_INSTRUMENT = 1410;            // arg: 1 = post-inline
+let MP_TRANSFORM_WARNING = 1411;
+let MP_ANNOTATION_REMARKS = 1412;
+let MP_CORO_ELIDE = 1413;
+let MP_INJECT_TLI_MAPPINGS = 1414;
+let MP_ALIGNMENT_FROM_ASSUMPTIONS = 1415;
+let MP_DROP_UNNECESSARY_ASSUMES = 1416;  // arg: 1 = drop-deref
+let MP_MOVE_AUTO_INIT = 1417;
+let MP_LIBCALLS_SHRINKWRAP = 1418;
+let MP_JUMP_TABLE_TO_SWITCH = 1419;
+let MP_LOOP_SINK = 1420;
+let MP_MERGEICMPS = 1421;
 // module passes
-let MP_FORCEATTRS = 500;
-let MP_MEMPROF_REMOVE_ATTRIBUTES = 501;
-let MP_RECOMPUTE_GLOBALSAA = 502;
-let MP_LOWER_COMMENT_STRING = 503;
-let MP_ALLOC_TOKEN = 504;
-let MP_ANNOTATION2METADATA = 505;
-let MP_CORO_EARLY = 506;
-let MP_CORO_CLEANUP = 507;
-let MP_OPENMP_OPT = 508;
-let MP_CALLED_VALUE_PROPAGATION = 509;
-let MP_CG_PROFILE = 510;
-let MP_REL_LOOKUP_TABLE_CONVERTER = 511;
+let MP_FORCEATTRS = 1500;
+let MP_MEMPROF_REMOVE_ATTRIBUTES = 1501;
+let MP_RECOMPUTE_GLOBALSAA = 1502;
+let MP_LOWER_COMMENT_STRING = 1503;
+let MP_ALLOC_TOKEN = 1504;
+let MP_ANNOTATION2METADATA = 1505;
+let MP_CORO_EARLY = 1506;
+let MP_CORO_CLEANUP = 1507;
+let MP_OPENMP_OPT = 1508;
+let MP_CALLED_VALUE_PROPAGATION = 1509;
+let MP_CG_PROFILE = 1510;
+let MP_REL_LOOKUP_TABLE_CONVERTER = 1511;
 // CGSCC passes
-let MP_CORO_SPLIT = 550;
-let MP_CORO_ANNOTATION_ELIDE = 551;
-let MP_OPENMP_OPT_CGSCC = 552;
-let MP_NOOP_REQUIRE = 499;             // require<memdep> / invalidate<memdep>: nothing observable to compute
+let MP_CORO_SPLIT = 1550;
+let MP_CORO_ANNOTATION_ELIDE = 1551;
+let MP_OPENMP_OPT_CGSCC = 1552;
+let MP_NOOP_REQUIRE = 1499;             // require<memdep> / invalidate<memdep>: nothing observable to compute
 
 // A pass parameter list `name<a;b>` -> the parameters; `ok` false if the name has no parameter list
 fn mp_params(name: const u8[:], base: const u8[:]) -> const u8[:] {
@@ -145,6 +147,7 @@ fn mp_parse_function(name: const u8[:]) -> i32, i32, bool {
     if name == "libcalls-shrinkwrap" { return MP_LIBCALLS_SHRINKWRAP as i32, 0, false; }
     if name == "jump-table-to-switch" { return MP_JUMP_TABLE_TO_SWITCH as i32, 0, false; }
     if name == "loop-sink" { return MP_LOOP_SINK as i32, 0, false; }
+    if name == "mergeicmps" { return MP_MERGEICMPS as i32, 0, false; }
     if name == "callsite-splitting" { return MP_CALLSITE_SPLITTING as i32, 0, false; }
     return -1, 0, false;
 }
@@ -173,7 +176,7 @@ fn mp_parse_module(name: const u8[:]) -> i32, i32, bool {
     return -1, 0, false;
 }
 
-fn mp_is_ours(p: i64) -> bool { p >= 400 && p < 600 }
+fn mp_is_ours(p: i64) -> bool { p >= 1400 && p < 1600 }
 
 // A CGSCC pass name -> (pass id, arg, required); pass id -1 if not ours.
 fn mp_parse_cgscc(name: const u8[:]) -> i32, i32, bool {
@@ -221,6 +224,7 @@ fn mp_class_name(p: i64) -> const u8[:] {
         MP_LIBCALLS_SHRINKWRAP => "LibCallsShrinkWrapPass",
         MP_JUMP_TABLE_TO_SWITCH => "JumpTableToSwitchPass",
         MP_LOOP_SINK => "LoopSinkPass",
+        MP_MERGEICMPS => "MergeICmpsPass",
         MP_CALLED_VALUE_PROPAGATION => "CalledValuePropagationPass",
         MP_CG_PROFILE => "CGProfilePass",
         MP_REL_LOOKUP_TABLE_CONVERTER => "RelLookupTableConverterPass",
@@ -264,6 +268,7 @@ fn mp_run_function(p: i64, arg: i32, fv: i32) -> u32 {
         MP_LIBCALLS_SHRINKWRAP => { return libcalls_shrinkwrap_run(fv); },
         MP_JUMP_TABLE_TO_SWITCH => { return jump_table_to_switch_run(fv); },
         MP_LOOP_SINK => { return loop_sink_run(fv); },
+        MP_MERGEICMPS => { st_touch(fv); return mergeicmps_run(fv); },
         _ => { fatal("internal: unknown misc function pass id"); return PA_ALL; },
     }
 }

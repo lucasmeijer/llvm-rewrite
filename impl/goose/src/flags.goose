@@ -48,7 +48,7 @@ let KNOWN_FLAGS: const u8[:][] = [
     "print-all-alias-modref-info", "print-no-aliases", "print-may-aliases", "print-partial-aliases",
     "print-must-aliases", "print-no-modref", "print-ref", "print-mod", "print-modref",
     "evaluate-aa-metadata",                              // read by aa-eval
-    "use-dereferenceable-at-point-semantics",            // no-op for BasicAA (only affects canBeFreed queries)
+    "use-dereferenceable-at-point-semantics",            // Value::getPointerDereferenceableBytes CanBeFreed (speculate.goose)
     "basic-aa-recphi", "basic-aa-separate-storage", "enable-tbaa", "enable-scoped-noalias",
     "capture-tracking-max-uses-to-explore",
     "memssa-check-limit",                                // read by MemorySSA

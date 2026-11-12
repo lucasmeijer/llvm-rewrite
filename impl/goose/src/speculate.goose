@@ -6,6 +6,7 @@
 // available (callers that have one aren't ported yet: fail loudly where it would matter). TLI is null.
 import std;
 import ir;
+import flags;
 import irutil;
 import calls;
 import instinfo;
@@ -300,7 +301,7 @@ recursive fn spec_deref_aligned(v: i32, align: i64, size: AP, depth: i64) -> boo
     if known && cbn && !spec_known_nonzero(v) { known = false; }
     // CheckForFreed (use-dereferenceable-at-point-semantics): the object must not be freed between its
     // definition and the context
-    if known && !spec_ignore_free && bytes != 0 && !is_inst_op(v, OP_ALLOCA) && vals[v].kind != VK_GVAR && spec_can_be_freed(v) {
+    if known && !spec_ignore_free && bytes != 0 && flag_bool("use-dereferenceable-at-point-semantics", true) && !is_inst_op(v, OP_ALLOCA) && vals[v].kind != VK_GVAR && spec_can_be_freed(v) {
         var defi: i32 = -1;
         if is_inst(v) {
             if iop(v) == OP_INVOKE { defi = block_first(invoke_normal_dest(v)); }

@@ -87,6 +87,7 @@ import globalopt;
 // run_module_pass), and the analyses it preserves.
 
 let P_NONE = 0;
+// ids 1400..1599 belong to misc_passes.goose (mp_is_ours)
 // module passes
 let P_VERIFY_MODULE = 1;
 let P_NOOP_MODULE = 2;
