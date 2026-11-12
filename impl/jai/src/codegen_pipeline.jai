@@ -35,6 +35,9 @@ Cg_Pass :: enum u8 {
     STACK_PROTECTOR;
 }
 
+// TargetMachine::getOptLevel(): llc's -O level; opt creates its TargetMachine with -codegen-opt-level (default 0)
+cg_tm_opt_level: u64 = 0;
+
 llc_opts: struct {
     opt_level := 2;          // CodeGenOptLevel: 0 None, 1 Less, 2 Default, 3 Aggressive
     disable_lsr: bool;       // -disable-lsr
@@ -206,12 +209,6 @@ llc_main :: () {
             continue;
         }
         if a == "-mtriple" || a == "--mtriple" { if i >= args.count fatal("-mtriple needs a value"); opts.mtriple = args[i]; i += 1; continue; }
-        if a == "-disable-lsr" || a == "--disable-lsr" { llc_opts.disable_lsr = true; continue; }
-        if a == "-disable-cgp" || a == "--disable-cgp" { llc_opts.disable_cgp = true; continue; }
-        if a == "-disable-constant-hoisting" || a == "--disable-constant-hoisting" { llc_opts.disable_consthoist = true; continue; }
-        if a == "-disable-partial-libcall-inlining" || a == "--disable-partial-libcall-inlining" { llc_opts.disable_partial_libcall_inlining = true; continue; }
-        if a == "-disable-expand-reductions" || a == "--disable-expand-reductions" { llc_opts.disable_expand_reductions = true; continue; }
-        if a == "-disable-replace-with-veclib" || a == "--disable-replace-with-veclib" { llc_opts.disable_replace_with_veclib = true; continue; }
         if begins_with(a, "-") && a != "-" {
             if parse_cl_opt(a) continue;
             fatal("unsupported option '%'", a);
@@ -243,6 +240,7 @@ llc_main :: () {
     tti_create_target_machine();
     opt_set_function_attributes();
     if ir.source_filename.count == 0 && !saw_source_filename ir.source_filename = input;
+    cg_tm_opt_level = cast(u64) llc_opts.opt_level;
     passes: [..] Cg_Pass;
     cg_build_pipeline(*passes);
     cg_run_pipeline(passes);
@@ -254,4 +252,57 @@ llc_main :: () {
 triple_is_x86_64_elf :: (t: string) -> bool {
     tr := triple_parse(t);
     return tr.arch == .x86_64 && tr.obj == .ELF && tr.env != .GNUX32;
+}
+
+// cl::opts of the codegen IR passes (and llc's TargetPassConfig switches)
+cg_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
+    bool_opt :: (p: *bool) #expand {
+        if !`has_value || `value == "true" || `value == "1" || `value == "TRUE" || `value == "True" p.* = true;
+        else if `value == "false" || `value == "0" || `value == "FALSE" || `value == "False" p.* = false;
+        else fatal("invalid boolean value '%' for option -%", `value, `name);
+        `return true;
+    }
+    uint_opt :: (p: *u64) #expand {
+        if !`has_value fatal("option -% needs a value", `name);
+        v, ok := parse_c_uint(`value);
+        if !ok fatal("invalid unsigned value '%' for option -%", `value, `name);
+        p.* = cast(u64) v;
+        `return true;
+    }
+    if name == {
+        case "disable-cgp-branch-opts"; bool_opt(*cgp_cl.disable_branch_opts);
+        case "disable-cgp-gc-opts"; bool_opt(*cgp_cl.disable_gc_opts);
+        case "disable-cgp-select2branch"; bool_opt(*cgp_cl.disable_select_to_branch);
+        case "addr-sink-using-gep"; bool_opt(*cgp_cl.addr_sink_using_geps);
+        case "enable-andcmp-sinking"; bool_opt(*cgp_cl.enable_and_cmp_sinking);
+        case "disable-cgp-store-extract"; bool_opt(*cgp_cl.disable_store_extract);
+        case "stress-cgp-store-extract"; bool_opt(*cgp_cl.stress_store_extract);
+        case "disable-cgp-ext-ld-promotion"; bool_opt(*cgp_cl.disable_ext_ld_promotion);
+        case "stress-cgp-ext-ld-promotion"; bool_opt(*cgp_cl.stress_ext_ld_promotion);
+        case "disable-preheader-prot"; bool_opt(*cgp_cl.disable_preheader_protect);
+        case "cgp-freq-ratio-to-skip-merge"; uint_opt(*cgp_cl.freq_ratio_to_skip_merge);
+        case "force-split-store"; bool_opt(*cgp_cl.force_split_store);
+        case "cgp-type-promotion-merge"; bool_opt(*cgp_cl.enable_type_promotion_merge);
+        case "disable-complex-addr-modes"; bool_opt(*cgp_cl.disable_complex_addr_modes);
+        case "addr-sink-new-phis"; bool_opt(*cgp_cl.addr_sink_new_phis);
+        case "addr-sink-new-select"; bool_opt(*cgp_cl.addr_sink_new_selects);
+        case "addr-sink-combine-base-reg"; bool_opt(*cgp_cl.addr_sink_combine_base_reg);
+        case "addr-sink-combine-base-gv"; bool_opt(*cgp_cl.addr_sink_combine_base_gv);
+        case "addr-sink-combine-base-offs"; bool_opt(*cgp_cl.addr_sink_combine_base_offs);
+        case "addr-sink-combine-scaled-reg"; bool_opt(*cgp_cl.addr_sink_combine_scaled_reg);
+        case "cgp-split-large-offset-gep"; bool_opt(*cgp_cl.enable_gep_offset_split);
+        case "cgp-icmp-eq2icmp-st"; bool_opt(*cgp_cl.enable_icmp_eq_to_icmp_st);
+        case "cgp-optimize-phi-types"; bool_opt(*cgp_cl.optimize_phi_types);
+        case "cgpp-huge-func"; uint_opt(*cgp_cl.huge_func_threshold);
+        case "cgp-max-address-users-to-scan"; uint_opt(*cgp_cl.max_address_users_to_scan);
+        case "disable-cgp-delete-phis"; bool_opt(*cgp_cl.disable_delete_phis);
+        case "codegen-opt-level"; uint_opt(*cg_tm_opt_level);
+        case "disable-lsr"; bool_opt(*llc_opts.disable_lsr);
+        case "disable-cgp"; bool_opt(*llc_opts.disable_cgp);
+        case "disable-constant-hoisting"; bool_opt(*llc_opts.disable_consthoist);
+        case "disable-partial-libcall-inlining"; bool_opt(*llc_opts.disable_partial_libcall_inlining);
+        case "disable-expand-reductions"; bool_opt(*llc_opts.disable_expand_reductions);
+        case "disable-replace-with-veclib"; bool_opt(*llc_opts.disable_replace_with_veclib);
+    }
+    return false;
 }

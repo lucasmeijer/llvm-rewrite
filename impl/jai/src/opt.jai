@@ -252,6 +252,13 @@
 #load "cg_lowering_passes.jai";
 #load "cg_todo_passes.jai";
 #load "pass_expand_reductions.jai";
+#load "cgp_core.jai";
+#load "cgp_addr.jai";
+#load "cgp_ext.jai";
+#load "cgp_misc.jai";
+#load "bypass_slow_division.jai";
+#load "pass_consthoist.jai";
+#load "pass_partially_inline_libcalls.jai";
 
 main :: () {
     #if #exists(LLC_TOOL) llc_main();

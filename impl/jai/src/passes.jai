@@ -315,6 +315,8 @@ Pass_Kind :: enum u8 {
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
     MERGEICMPS; DFA_JUMP_THREADING;
+    // codegen IR passes (codegen_pipeline.jai, cg_*.jai, cgp_*.jai): also llc's pipeline
+    CODEGENPREPARE; EXPAND_REDUCTIONS; UNREACHABLEBLOCKELIM; PRE_ISEL_INTRINSIC_LOWERING; CONSTHOIST; PARTIALLY_INLINE_LIBCALLS;
     // the default pipelines (pass_builder_pipelines.jai): ModuleInlinerWrapperPass, ExtraLoopPassManager,
     // CoroConditionalWrapper; LoopInterchange (pass_loop_interchange.jai), ExpandMemCmp (pass_expand_memcmp.jai),
     // ControlHeightReduction (pass_chr.jai)
@@ -527,6 +529,12 @@ PASS_TABLE :: Pass_Info.[
     .{"loop-interchange", .LOOP, .LOOP_INTERCHANGE, false, .DOMTREE},   // a LoopNest pass
     .{"expand-memcmp", .FUNCTION, .EXPAND_MEMCMP, false, .DOMTREE},
     .{"chr", .FUNCTION, .CHR, false, .DOMTREE},
+    .{"codegenprepare", .FUNCTION, .CODEGENPREPARE, false, .DOMTREE},
+    .{"expand-reductions", .FUNCTION, .EXPAND_REDUCTIONS, false, .DOMTREE},
+    .{"unreachableblockelim", .FUNCTION, .UNREACHABLEBLOCKELIM, false, .DOMTREE},
+    .{"pre-isel-intrinsic-lowering", .MODULE, .PRE_ISEL_INTRINSIC_LOWERING, false, .DOMTREE},
+    .{"consthoist", .FUNCTION, .CONSTHOIST, false, .DOMTREE},
+    .{"partially-inline-libcalls", .FUNCTION, .PARTIALLY_INLINE_LIBCALLS, false, .DOMTREE},
 ];
 
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
@@ -1051,6 +1059,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if lv_parse_cl_opt(name, value, has_value) return true;   // lv_pass.jai (LoopVectorize, before the LAA list: -force-vector-*)
     if unroll_parse_cl_opt(name, value, has_value) return true;   // pass_loop_unroll.jai
     if unswitch_parse_cl_opt(name, value, has_value) return true;   // pass_simple_loop_unswitch.jai
+    if cg_parse_cl_opt(name, value, has_value) return true;   // codegen_pipeline.jai (CodeGenPrepare, LSR, llc's -disable-*)
     // -mattr is a cl::list (CommaSeparated): repeated options accumulate
     if name == "mattr" && has_value && tti_opts.mattr.count { tti_opts.mattr = sprint("%,%", tti_opts.mattr, value); return true; }
     if ipo_parse_cl_opt(name, value, has_value) return true;   // cgscc_pm.jai, pass_function_attrs.jai, inliner
@@ -1186,6 +1195,8 @@ run_module_pm :: (n: s32) {
             case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
             case .CALLED_VALUE_PROPAGATION; if should_run_pass(node, NONE) mam_invalidate(called_value_propagation_run());
             case .IPSCCP; if should_run_pass(node, NONE) mam_invalidate(ipsccp_run(node.name));
+            case .PRE_ISEL_INTRINSIC_LOWERING;
+                if should_run_pass(node, NONE) && pre_isel_intrinsic_lowering_run() mam_invalidate(PRESERVE_NONE);
             case; fatal("internal: '%' is not a module pass", node.name);
         }
         c = pipeline.nodes[c].next;
@@ -1268,6 +1279,17 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .SINK; return sink_run(f);
         case .TAILCALLELIM; return tailcallelim_run(f, !node.no_entry_count_update);
         case .EXPAND_MEMCMP; return expand_memcmp_run(f);
+        case .CODEGENPREPARE;
+            // CodeGenPreparePass::run needs the TargetMachine and a cached ProfileSummaryAnalysis
+            if tti_get(f).kind != .X86 fatal("codegenprepare: a target machine (x86 target triple) is required");
+            if psi_cached_or_null() == null fatal("this pass requires the profile-summary module analysis to be available");
+            pa := codegenprepare_run(f);
+            if pa.all return pa;
+            return PRESERVE_NONE;   // PA.preserve<TargetLibraryAnalysis>() / <TargetIRAnalysis>() only
+        case .EXPAND_REDUCTIONS; return expand_reductions_run(f);
+        case .UNREACHABLEBLOCKELIM; return unreachable_block_elim_run(f);
+        case .CONSTHOIST; return consthoist_run(f);
+        case .PARTIALLY_INLINE_LIBCALLS; return partially_inline_libcalls_run(f);
         case .CHR; return chr_run(f);
         case .MLDST_MOTION; return mldst_motion_run(f, node.name);
         case .SPECULATIVE_EXECUTION; return speculative_execution_run(f, node.name);

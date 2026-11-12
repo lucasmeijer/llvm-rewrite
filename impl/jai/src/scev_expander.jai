@@ -1761,7 +1761,7 @@ sx_expand_code_for_predicate :: (x: *Scev_Expander, pred: u32, ip: Value_Id) -> 
 
 // TargetTransformInfo::getIntImmCostInst (X86TTIImpl::getIntImmCostInst; NoTTIImpl: TCC_Free). The expander's
 // root work items have no parent opcode (LLVM's ~0U), which takes the default case.
-tti_int_imm_cost_inst :: (t: *Tti, opc: Opcode, has_parent: bool, idx_in: s32, imm: APInt, ty: Type_Id, kind: s64) -> Cost {
+tti_int_imm_cost_inst :: (t: *Tti, opc: Opcode, has_parent: bool, idx_in: s32, imm: APInt, ty: Type_Id, kind: s64, inst_v: Value_Id = NONE) -> Cost {
     if !t || t.kind != .X86 return TCC_FREE;
     st := *t.xl;
     idx: u32 = cast,no_check(u32) idx_in;
@@ -1779,6 +1779,12 @@ tti_int_imm_cost_inst :: (t: *Tti, opc: Opcode, has_parent: bool, idx_in: s32, i
             if idx == 1 && imm_bw == 64 {
                 v := ap_zext_value(imm);
                 if v == 0x1_0000_0000 || v == 0xffff_ffff return TCC_FREE;
+                // an equality compare whose operand is known to have 32 trailing zeros (computeKnownBits(Op0, DL))
+                if inst_v != NONE && is_inst(inst_v) && (inst_op(inst_v) == .ICMP || inst_op(inst_v) == .FCMP) && icmp_is_equality(inst_pred(inst_v)) {
+                    q: Simplify_Query;
+                    k := known_bits(op(inst_v, 0), q);
+                    if kb_count_min_trailing_zeros(k) >= 32 return TCC_FREE;
+                }
             }
             imm_idx = 1;
         case .AND;
