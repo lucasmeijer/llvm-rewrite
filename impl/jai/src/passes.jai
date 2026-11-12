@@ -1070,6 +1070,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if scalar_misc_parse_cl_opt(name, value, has_value) return true;   // scalar_misc_cl.jai (L1.scalar-misc passes)
     if pb_parse_cl_opt(name, value, has_value) return true;
     if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)
+    if expand_memcmp_parse_cl_opt(name, value, has_value) return true;   // pass_expand_memcmp.jai
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;

@@ -294,21 +294,34 @@ clone_and_prune_function_into :: (new_fn: Value_Id, old_fn: Value_Id, vm: *Value
             x := block_first(nb);
             while x != NONE && inst_op(x) == .PHI {
                 seen: Table(Value_Id, s64); seen.allocator = temp;
-                // removeIncomingValueIf(pred, DeletePHIIfEmpty = false)
-                idx: u32 = 0;
-                keep: [..] bool; keep.allocator = temp;
-                for k: 0..cast(s64) nops(x) - 1 {
-                    ib := phi_block(x, cast(u32) k);
+                // removeIncomingValueIf(pred, DeletePHIIfEmpty = false): backwards, each removal moves the last entry
+                // into the hole (so the predicate sees every original entry once, in decreasing index order)
+                n := cast(s64) nops(x);
+                idx := n;
+                while idx > 0 {
+                    idx -= 1;
+                    ib := phi_block(x, cast(u32) idx);
                     pc := table_find_pointer(*pred_count, ib);
                     rm := true;
                     if pc {
-                        s := table_find_pointer(*seen, ib);
-                        sc: s64 = ifx s then s.* else 0;
+                        sp := table_find_pointer(*seen, ib);
+                        sc: s64 = ifx sp then sp.* else 0;
                         if sc < pc.* { table_set(*seen, ib, sc + 1); rm = false; }
                     }
-                    array_add(*keep, !rm);
+                    if !rm {
+                        continue;
+                    }
+                    last := n - 1;
+                    if idx != last {
+                        set_op(x, cast(u32) idx, op(x, cast(u32) last));
+                        ir.u_aux[ir.v_ops[x] + cast(u32) idx] = ir.u_aux[ir.v_ops[x] + cast(u32) last];
+                    }
+                    set_op(x, cast(u32) last, NONE);
+                    ir.u_aux[ir.v_ops[x] + cast(u32) last] = NONE;
+                    n -= 1;
                 }
-                phi_remove_incoming_if_mask(x, keep);
+                ir.v_nops[x] = cast(u32) n;
+
                 x = inst(x).next;
             }
         }
@@ -398,22 +411,6 @@ clone_and_prune_function_into :: (new_fn: Value_Id, old_fn: Value_Id, vm: *Value
         if t != NONE && inst_op(t) == .RET array_add(returns, t);
         i = block(i).next;
     }
-}
-// PHINode::removeIncomingValueIf(Predicate, DeletePHIIfEmpty = false) with the kept entries given
-phi_remove_incoming_if_mask :: (pn: Value_Id, keep: [] bool) {
-    // removeIncomingValueIf compacts in place keeping the survivors' order
-    n := nops(pn);
-    w: u32 = 0;
-    for k: 0..cast(s64) n - 1 {
-        if !keep[k] continue;
-        if w != cast(u32) k {
-            set_op(pn, w, op(pn, cast(u32) k));
-            ir.u_aux[ir.v_ops[pn] + w] = ir.u_aux[ir.v_ops[pn] + cast(u32) k];
-        }
-        w += 1;
-    }
-    for k: cast(s64) w..cast(s64) n - 1 set_op(pn, cast(u32) k, NONE);
-    ir.v_nops[pn] = w;
 }
 // removeRetAttrs(AttributeFuncs::typeIncompatible(Ty, AS)) on a return attribute set
 attr_set_type_incompatible :: (ty: Type_Id, s: u32) -> u32 {

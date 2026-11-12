@@ -996,8 +996,9 @@ remove_switch_after_select_fold :: (s: *Scfg, si: Value_Id, phi: Value_Id, sv: V
     }
     irb_br(b, dbb);
     // removeIncomingValueIf(block == SelectBB)
-    k: u32 = 0;
-    while k < nops(phi) { if phi_block(phi, k) == sbb phi_remove_incoming(phi, k, false); else k += 1; }
+    // (backwards: each removal moves the last entry into the hole)
+    k := cast(s64) nops(phi);
+    while k > 0 { k -= 1; if phi_block(phi, cast(u32) k) == sbb phi_remove_incoming(phi, cast(u32) k, false); }
     phi_add_incoming(phi, sv, sbb);
     removed: [..] Value_Id; removed.allocator = temp;
     for j: 0..cast(s64) num_successors(si) - 1 {
@@ -1992,7 +1993,12 @@ merge_conditional_stores :: (s: *Scfg, pbi: Value_Id, qbi: Value_Id) -> bool {
     qa: [..] Value_Id; qa.allocator = temp;
     for bb: Value_Id.[ptb, pfb] { if bb == NONE continue; for i: block_insts(bb) if inst_op(i) == .STORE && !block_set_contains(pa, op(i, 1)) array_add(*pa, op(i, 1)); }
     for bb: Value_Id.[qtb, qfb] { if bb == NONE continue; for i: block_insts(bb) if inst_op(i) == .STORE && !block_set_contains(qa, op(i, 1)) array_add(*qa, op(i, 1)); }
-    if pa.count > 4 scfg_np("mergeConditionalStores with more than 4 store addresses (SmallPtrSet iteration order)");
+    if pa.count > 4 {
+        // a large SmallPtrSet iterates in pointer-hash order, which only matters with two or more common addresses
+        common := 0;
+        for pa if block_set_contains(qa, it) common += 1;
+        if common >= 2 scfg_np("mergeConditionalStores with more than 4 store addresses and 2+ common ones (SmallPtrSet iteration order)");
+    }
     // set_intersect -> SmallPtrSet::remove_if (small mode: the last element moves into the hole)
     k := 0;
     e := pa.count;

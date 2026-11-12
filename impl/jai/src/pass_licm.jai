@@ -661,6 +661,9 @@ licm_clone_instruction_in_exit_block :: (c: *Licm, i: Value_Id, exit: Value_Id, 
     }
     nw := ic_clone_inst(i);   // CallInst::Create(CI, OpBundles) + copyMetadata for calls: the same without funclets
     insert_at_position(nw, exit, block_first_insertion_pt(exit), true);
+    // CallInst::Create(CI, ...) names the clone CI's name; inserting it into the function uniquifies that name (one
+    // ++LastUnique in the symbol table) before the setName below (knowledge/llvm/scalar-misc.md "LICM naming")
+    if inst_op(i) == .CALL && vname(i).count set_name(nw, vname(i));
     if vname(i).count set_name(nw, tprint("%.le", vname(i)));
     if mssa_access_of(c.mssa, i) >= 0 {
         na := mssau_create_memory_access_in_bb(c.mssau, nw, -1, inst_block(nw), .BEGINNING, false);

@@ -66,6 +66,8 @@ Sink, TailCallElim, MergedLoadStoreMotion, SpeculativeExecution and CallSiteSpli
   table, e.g. `smax1`, `smax3`) before `setName(Name + ".le")`; other instructions are `clone()`d unnamed. So the
   second sunk copy of a call `%smax` is `%smax.le4`, not `%smax.le1` (SCCP/2003-06-24-OverdefinedPHIValue.ll after
   lcssa, `licm<allowspeculation>`).
+- The same naming effect decides `.lcssa` suffixes later in -O2 (SPASS.ll: `%.lcssa33` vs `%.lcssa32` after a sunk
+  `llvm.scmp` call); verified by the jai port (pass_licm.jai).
 
 ## More facts (verified by impl/goose ports: imported tests + corpus sweeps with 0 differences)
 

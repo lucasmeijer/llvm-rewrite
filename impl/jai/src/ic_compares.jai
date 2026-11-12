@@ -444,8 +444,8 @@ Common_Pointer_Base :: struct {
     ptr: Value_Id = NONE;
     lhs_geps: [..] Value_Id;
     rhs_geps: [..] Value_Id;
-    lhs_nw: u32;
-    rhs_nw: u32;
+    lhs_nw: u32 = cast(u32) (F_INBOUNDS | F_NUSW | F_GEP_NUW);   // GEPNoWrapFlags::all() when no GEP is collected
+    rhs_nw: u32 = cast(u32) (F_INBOUNDS | F_NUSW | F_GEP_NUW);
 }
 ic_common_pointer_base :: (lhs_in: Value_Id, rhs_in: Value_Id) -> Common_Pointer_Base {
     base: Common_Pointer_Base;

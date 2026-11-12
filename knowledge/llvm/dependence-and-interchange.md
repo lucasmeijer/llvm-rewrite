@@ -26,3 +26,20 @@ Transforms/LoopInterchange (62/63).
 - `SimplifyCFGPass::run` calls `F.renumberBlocks()` after any change (DT->updateBlockNumbers() too). Block numbers
   are otherwise creation order; mem2reg sorts PHI blocks by number, so the renumbering is visible in the `.N`
   suffixes of later SROA phis (tests/e2e/pipeline/.../fbench.ll at -O2).
+
+## Other pipeline-state facts found while matching -O2 on tests/perf/compile (jai, 2026-11)
+
+- `CloneAndPruneIntoFromInst` trims PHIs of blocks whose predecessors changed with `PHINode::removeIncomingValueIf`,
+  which walks the entries backwards and moves the last entry into each hole (it does not compact in order); the
+  predicate (a per-predecessor count) therefore sees the entries in decreasing index order (SPASS.ll, inliner).
+- `CommonPointerBase::compute` leaves `LHSNW`/`RHSNW` at `GEPNoWrapFlags::all()` when one side has no GEPs (the
+  other pointer is the base itself), so `foldGEPICmp`'s "(gep Ptr, OFFSET1) cmp (gep Ptr, OFFSET2)" fold applies to
+  `icmp ugt %a, (gep %a, %i)` and transformToIndexedCompare (which renames to `.ptr`) is not reached (lua.ll).
+- ExpandMemCmp finds memcmp/bcmp with `TargetLibraryInfo::getLibFunc(CallBase)`, which checks the name and the
+  prototype but not availability: `bcmp` is expanded on `x86_64-unknown-unknown` too. X86's options:
+  MaxNumLoads 2 (also at optsize), NumLoadsPerBlock 2, overlapping loads, load sizes 64/32/16 (zero-equality only,
+  by preferred vector width and AVX512/AVX/SSE2), 8 (64-bit), 4, 2, 1; no AllowedTailExpansions.
+  `optimiseLoadSequence` passes `emplace_back(PreLast.Offset, LoadSize)` to a (LoadSize, Offset) constructor
+  (swapped), harmless on X86 because the tail-expansion list is empty.
+- mergeConditionalStores iterates a `SmallPtrSet<Value *, 4>` of common store addresses; past 4 elements it is a
+  hash set iterated in pointer-hash order, which only matters when two or more addresses are common.
