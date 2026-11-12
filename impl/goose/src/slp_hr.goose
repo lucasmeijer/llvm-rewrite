@@ -110,14 +110,15 @@ fn hr_rdx_operand(i: i32, idx: i64) -> i32 {
     if hr_rdx_kind(i) == RK_OR && is_inst_op(i, OP_SELECT) && idx == 1 { return op(i, 2); }
     return op(i, idx);
 }
-// Instruction::isAssociative
+// Instruction::isAssociative (Instruction.cpp 1390; IntrinsicInst::isAssociative for intrinsics)
 fn hr_is_associative(i: i32) -> bool {
+    let id = inst_iid(i);
+    if id != 0 { return id == IID_smax || id == IID_smin || id == IID_umax || id == IID_umin; }
     let o = iop(i);
     if o == OP_ADD || o == OP_MUL || o == OP_AND || o == OP_OR || o == OP_XOR { return true; }
-    if o == OP_FMUL || o == OP_FADD {
-        let f = insts[inst_of(i)].fmf;
-        return (f & FMF_REASSOC) != 0 && (f & FMF_NSZ) != 0;
-    }
+    let f = insts[inst_of(i)].fmf;
+    if o == OP_FMUL { return (f & FMF_REASSOC) != 0; }
+    if o == OP_FADD { return (f & FMF_REASSOC) != 0 && (f & FMF_NSZ) != 0; }
     return false;
 }
 // isVectorizable(Kind, I, TwoElementReduction)
