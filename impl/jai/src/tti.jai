@@ -140,9 +140,12 @@ tti_is_x86_triple :: (t: string) -> bool {
 }
 
 // AM.getResult<TargetIRAnalysis>(F): NoTTIImpl without a target triple, X86TTIImpl for x86 triples.
+// The target machine's triple: the module's, or (llc only) the triple llc chose for a module without one.
+codegen_triple: string;
+tti_triple :: () -> string { return ifx ir.triple.count then ir.triple else codegen_triple; }
 tti_get :: (f: Value_Id) -> *Tti {
-    if ir.triple.count == 0 return *tti_none;
-    if !tti_is_x86_triple(ir.triple) fatal("TargetTransformInfo for target triple '%' is not supported", ir.triple);
+    if tti_triple().count == 0 return *tti_none;
+    if !tti_is_x86_triple(tti_triple()) fatal("TargetTransformInfo for target triple '%' is not supported", tti_triple());
     fa := attr_list_fn(glob(f).attrs);
     str_attr :: (fa: u32, key: string) -> (bool, string) {
         for attr_set_items(fa) if it.kind == .STRING_ATTR && it.key == key return true, it.val;
@@ -174,7 +177,7 @@ tti_get :: (f: Value_Id) -> *Tti {
     t.kind = .X86;
     full_fs := fs;
     if soft full_fs = ifx fs.count == 0 then "+soft-float" else tprint("+soft-float,%", fs);
-    x86_subtarget_init(*t.xl, ir.triple, cpu, tune, copy_string(full_fs), pvw, rvw);
+    x86_subtarget_init(*t.xl, tti_triple(), cpu, tune, copy_string(full_fs), pvw, rvw);
     table_set(*tti_cache, copy_string(k), t);
     return t;
 }
@@ -234,7 +237,7 @@ x86_find_cpu :: (name: string) -> s64 {
 // opt creates the TargetMachine (and its default subtarget, from -mcpu / -mattr) once after reading the module:
 // one round of diagnostics.
 tti_create_target_machine :: () {
-    if !tti_is_x86_triple(ir.triple) return;
+    if !tti_is_x86_triple(tti_triple()) return;
     cpu := ifx tti_opts.mcpu.count == 0 then "generic" else tti_opts.mcpu;
     if x86_find_cpu(cpu) < 0 print_stderr("'%' is not a recognized processor for this target (ignoring processor)\n", cpu);
     feat: [X86_FEATURE_WORDS] u64;
@@ -260,7 +263,7 @@ mattr_features_string :: () -> string {
 // function from -mcpu / -mattr
 opt_set_function_attributes :: () {
     // optdriver.cpp clears CPUStr / FeaturesStr when the module triple has no known architecture
-    if triple_parse(ir.triple).arch == .UnknownArch return;
+    if triple_parse(tti_triple()).arch == .UnknownArch return;
     cpu := tti_opts.mcpu;
     feats := mattr_features_string();
     if cpu.count == 0 && feats.count == 0 return;

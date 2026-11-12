@@ -247,7 +247,16 @@
 #load "vplan_interleave.jai";
 #load "lv_interleave.jai";
 
-main :: () { opt_main(); }
+#load "codegen_pipeline.jai";
+#load "cg_misc_passes.jai";
+#load "cg_lowering_passes.jai";
+#load "cg_todo_passes.jai";
+#load "pass_expand_reductions.jai";
+
+main :: () {
+    #if #exists(LLC_TOOL) llc_main();
+    else opt_main();
+}
 
 #import "Basic";
 #import "File";

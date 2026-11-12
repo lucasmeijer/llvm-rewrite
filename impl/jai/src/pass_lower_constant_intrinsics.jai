@@ -60,8 +60,9 @@ lci_replace_conditional_branches_on_constant :: (ii: Value_Id, new_value: Value_
     return has_dead_blocks;
 }
 
-lower_constant_intrinsics_run :: (f: Value_Id) -> Preserved {
-    dt := cached_domtree(f);
+// use_cached_dt = false: lowerConstantIntrinsics(F, TLI, /*DT=*/nullptr) as PreISelIntrinsicLowering calls it
+lower_constant_intrinsics_run :: (f: Value_Id, use_cached_dt := true) -> Preserved {
+    dt := ifx use_cached_dt then cached_domtree(f) else null;
     dtu: Dtu; dtu.dt = dt; dtu.lazy = true;
     dtu.pending.allocator = temp; dtu.deleted.allocator = temp; dtu.deleted_set.allocator = temp;
     pdtu := ifx dt then *dtu else null;   // std::optional<DomTreeUpdater>: only with a cached DominatorTree
