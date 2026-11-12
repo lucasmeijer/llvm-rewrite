@@ -186,6 +186,13 @@
 #load "scev_expander.jai";
 #load "simplify_indvar.jai";
 #load "pass_indvars.jai";
+#load "lsr_core.jai";
+#load "lsr_instance.jai";
+#load "lsr_chains.jai";
+#load "lsr_generate.jai";
+#load "lsr_rewrite.jai";
+#load "pass_canon_freeze.jai";
+#load "pass_loop_term_fold.jai";
 #load "pass_loop_deletion.jai";
 #load "pass_loop_instsimplify.jai";
 #load "pass_loop_simplifycfg.jai";
@@ -251,6 +258,8 @@
 #load "cg_misc_passes.jai";
 #load "cg_lowering_passes.jai";
 #load "cg_todo_passes.jai";
+#load "cg_interleaved_access.jai";
+#load "cg_x86_partial_reduction.jai";
 #load "pass_expand_reductions.jai";
 #load "cgp_core.jai";
 #load "cgp_addr.jai";

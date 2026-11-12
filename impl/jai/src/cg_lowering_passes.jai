@@ -51,9 +51,10 @@ pil_lower_load_relative :: (fn_v: Value_Id) -> bool {
 
 pil_lower_constant_intrinsic_call :: (ci: Value_Id) -> bool {
     // lowerConstantIntrinsics(*Parent, TLI, /*DT=*/nullptr)
-    pa := lower_constant_intrinsics_run(inst_fn(ci), use_cached_dt = false);
+    f := inst_fn(ci);
+    pa := lower_constant_intrinsics_run(f, use_cached_dt = false);
     changed := !pa.all;
-    if changed fam_invalidate(inst_fn(ci), PRESERVE_NONE);
+    if changed fam_invalidate(f, PRESERVE_NONE);
     return changed;
 }
 
@@ -161,7 +162,10 @@ atomic_expand_run :: (f: Value_Id) -> Preserved {
     cx16 := t.kind == .X86 && st_canUseCMPXCHG16B(*t.xl);
     avx := t.kind == .X86 && st_hasAVX(*t.xl);
     noimplicitfloat := fn_has_fn_attr(f, .NoImplicitFloat);
-    for i: fn_insts(f) {
+    changed := false;
+    insts: [..] Value_Id; insts.allocator = temp;
+    for i: fn_insts(f) array_add(*insts, i);
+    for i: insts {
         o := inst_op(i);
         if o == .LOAD || o == .STORE {
             if !inst_is_atomic(i) continue;
@@ -178,7 +182,7 @@ atomic_expand_run :: (f: Value_Id) -> Preserved {
             rop := inst(i).ord2;
             vt := vtype(op(i, 1));
             if rop == RMW_XCHG && (is_fp_type(vt) || type_kind(vt) == .PTR) ae_fail(i, "a floating-point / pointer atomicrmw xchg (cast to integer)");
-            if ae_is_idempotent(i) ae_fail(i, "an idempotent atomicrmw (fenced load)");
+            if ae_is_idempotent(i) && t.kind == .X86 && ae_lower_idempotent_rmw_into_fenced_load(i, *t.xl) { changed = true; continue; }
             if dl_type_size_bits(ty) > 64 { if cx16 ae_fail(i, "a 128-bit atomicrmw (cmpxchg16b loop)"); continue; }
             if rop == {
                 case RMW_XCHG;
@@ -202,7 +206,40 @@ atomic_expand_run :: (f: Value_Id) -> Preserved {
             if type_kind(ty) == .PTR ae_fail(i, "a pointer cmpxchg (cast to integer)");
         }
     }
+    if changed return PRESERVE_NONE;
     return PRESERVE_ALL;
+}
+
+AE_ORD_ACQ_REL :: 6; AE_ORD_SEQ_CST :: 7;
+MDK_PCSECTIONS :: 37;
+// X86TargetLowering::lowerIdempotentRMWIntoFencedLoad (llvm/lib/Target/X86/X86ISelLowering.cpp); the resulting
+// atomic load needs no further expansion (tryExpandAtomicLoad: shouldExpandAtomicLoadInIR is None up to the
+// native width)
+ae_lower_idempotent_rmw_into_fenced_load :: (ai: Value_Id, st: *X86_Lowering) -> bool {
+    native_width: u64 = ifx st_is64Bit(st) then cast(u64) 64 else 32;
+    mem_ty := vtype(ai);
+    if type_kind(mem_ty) != .INT || cast(u64) type_bits(mem_ty) > native_width return false;
+    c := op(ai, 1);
+    if vkind(c) == .C_INT && inst(ai).ord2 == RMW_OR && ap_is_zero(const_ap(c)) && !has_uses(ai) return false;
+    ssid := inst(ai).sync;
+    // AtomicCmpXchgInst::getStrongestFailureOrdering
+    order := inst(ai).ord1;
+    if order == ORD_RELEASE order = ORD_MONOTONIC;
+    else if order == AE_ORD_ACQ_REL order = ORD_ACQUIRE;
+    pcs := get_metadata(ai, MDK_PCSECTIONS);
+    fence := new_inst(.FENCE, ir.t_void, 0);
+    inst(fence).ord1 = AE_ORD_SEQ_CST; inst(fence).sync = ssid;
+    insert_at_position(fence, inst_block(ai), ai, false);
+    if pcs != NONE set_metadata(fence, MDK_PCSECTIONS, pcs);
+    ld := new_inst(.LOAD, mem_ty, 1);
+    set_op(ld, 0, op(ai, 0));
+    inst(ld).align = inst(ai).align;
+    inst(ld).ord1 = order; inst(ld).sync = ssid;
+    insert_at_position(ld, inst_block(ai), ai, false);
+    if pcs != NONE set_metadata(ld, MDK_PCSECTIONS, pcs);
+    rauw_with_metadata(ai, ld);
+    erase_inst_with_metadata(ai);
+    return true;
 }
 
 // isIdempotentRMW (integer only: "TODO: Add floating point support")

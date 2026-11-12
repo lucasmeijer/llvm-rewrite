@@ -257,7 +257,7 @@ Pass_Kind :: enum u8 {
     // loops (loop_info.jai, cycle_info.jai)
     PRINT_LOOPS; PRINT_CYCLES; LOOP_SIMPLIFY; LCSSA;
     // loop passes (loop_pm.jai)
-    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS; LOOP_DELETION; LOOP_INSTSIMPLIFY; LOOP_SIMPLIFYCFG; LOOP_IDIOM;
+    NO_OP_LOOP; LOOP_ROTATE; LICM; LNICM; INDVARS; LOOP_DELETION; LOOP_INSTSIMPLIFY; LOOP_SIMPLIFYCFG; LOOP_IDIOM; LOOP_REDUCE; CANON_FREEZE; LOOP_TERM_FOLD;
     // ScalarEvolution (scev_print.jai)
     PRINT_SCEV; VERIFY_SCEV; PRINT_LOOPNEST; PRINT_IV_USERS; REQUIRE_IV_USERS; PRINT_ACCESS_INFO; LOOP_LOAD_ELIM; LOOP_DISTRIBUTE;
     // TargetTransformInfo (tti.jai)
@@ -406,6 +406,9 @@ PASS_TABLE :: Pass_Info.[
     .{"licm", .LOOP, .LICM, false, .DOMTREE},
     .{"lnicm", .LOOP, .LNICM, false, .DOMTREE},   // a LoopNest pass
     .{"indvars", .LOOP, .INDVARS, false, .DOMTREE},
+    .{"loop-reduce", .LOOP, .LOOP_REDUCE, false, .DOMTREE},
+    .{"canon-freeze", .LOOP, .CANON_FREEZE, false, .DOMTREE},
+    .{"loop-term-fold", .LOOP, .LOOP_TERM_FOLD, false, .DOMTREE},
     .{"loop-deletion", .LOOP, .LOOP_DELETION, false, .DOMTREE},
     .{"loop-instsimplify", .LOOP, .LOOP_INSTSIMPLIFY, false, .DOMTREE},
     .{"loop-simplifycfg", .LOOP, .LOOP_SIMPLIFYCFG, false, .DOMTREE},

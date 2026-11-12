@@ -1393,3 +1393,36 @@ Still slow / known:
   queries, i.e. the x64 backend's per-call overhead on small helpers (no single hotspot). Inlining the hottest
   helpers (`const_ap`, `type_bits`, `scalar_type`, attribute lookups, `call_*`), a word-wise
   `tli_are_inline_compatible` and a hashed libfunc name set cut callgrind Ir on n500 by 18%.
+
+## llc's IR pipeline (L1.isel-ir-O0 COMPLETE; L1.codegen-ir: isel-ir 482/482, imported ::opt see below)
+
+- `bin/llc` is the opt program with another entry (`llc.jai` sets `LLC_TOOL` and loads `opt.jai`; `main` calls
+  `llc_main`). `codegen_pipeline.jai` builds TargetPassConfig's IR pass list (`Cg_Pass`, `cg_build_pipeline`) and
+  runs it with the legacy FPM ordering (`cg_run_pipeline`); llc's and CodeGenPrepare's cl::opts are parsed by
+  `cg_parse_cl_opt` (also reachable from opt). Every codegen IR pass also has its opt `-passes=` name
+  (codegenprepare, consthoist, partially-inline-libcalls, expand-reductions, unreachableblockelim,
+  pre-isel-intrinsic-lowering, loop-reduce, canon-freeze, loop-term-fold).
+- Files: `cgp_*.jai` + `bypass_slow_division.jai` (CodeGenPrepare), `pass_consthoist.jai`,
+  `pass_partially_inline_libcalls.jai`, `lsr_core.jai` / `lsr_instance.jai` / `lsr_chains.jai` / `lsr_generate.jai` /
+  `lsr_rewrite.jai` (LoopStrengthReduce, split in LLVM's source order), `pass_canon_freeze.jai`,
+  `pass_loop_term_fold.jai`, `cg_interleaved_access.jai`, `cg_x86_partial_reduction.jai`, `cg_lowering_passes.jai`
+  (PreISelIntrinsicLowering, AtomicExpand guards + the idempotent-RMW fenced load, ExpandIRInsts guard),
+  `cg_misc_passes.jai` (UnreachableBlockElim and passes that are no-ops for our inputs, each guarded),
+  `cg_todo_passes.jai` (what is left: ScalarizeMaskedMemIntrin as a no-op).
+- Guards: a pass that is not fully ported fails loudly exactly where LLVM would change the IR (e.g.
+  `interleaved-access: X86 lowering of an interleaved load ...` only for AVX factor-3/4 groups). Grep for
+  `is not supported yet` in those files for the list.
+- LSR state lives in the global `lsr` (one LSRInstance at a time); formulae are value types (`lf_copy` deep-copies
+  BaseRegs). Never keep a `*Lsr_Use` / `*Lsr_Formula` across an insertion into the same array. `JAI_LSR_DEBUG=1`
+  prints LLVM-style use/formula lists after each phase, the cross-use work items, the baseline cost and the chosen
+  solution (LLVM's release build has no -debug-only, so compare by reasoning from these lists).
+- Jai traps met here: `defer x += 1` inside a `while` body also runs on `break`; `cast(T) a >> b` parses as
+  `cast(T)(a >> b)` (parenthesise the cast); a named `for` iterator still makes the inner loop's `it_index` shadow
+  the outer one inside the inner loop.
+- Not ported (fail loudly): LSR's SCEV-based debug-value salvage (5 imported files hit it), vscale steps, landing-pad
+  predecessor splitting in RewriteForPHI; ExpandMemCmp's expansion; CGP makeBitReverse, optimizeGatherScatterInst,
+  statepoint relocations, -addr-sink-using-gep=false, profile-summary modules; PreISelIntrinsicLowering's VP
+  expansion, ObjC ARC calls, memset.pattern, non-constant-length memcpy/memset.inline; AtomicExpand's cmpxchg loops,
+  libcalls and casts.
+- Sweeps (`./harness/run sweep --impl jai --passes loop-reduce`, with and without `--extra=-mtriple=x86_64-unknown-linux-gnu`):
+  8048-8073 of 8079 identical, 0 silent mismatches; the loud failures are the items above.

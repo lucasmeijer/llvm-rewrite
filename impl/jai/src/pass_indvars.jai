@@ -1044,6 +1044,40 @@ can_loop_be_deleted :: (li: *Loop_Info, l: Loop_Id, set: [] Rewrite_Phi) -> bool
     return true;
 }
 
+// checkIsIndPhi: (ok, induction binop)
+rlev_check_is_ind_phi :: (li: *Loop_Info, l: Loop_Id, phi: Value_Id) -> (bool, Value_Id) {
+    if phi == NONE || !is_phi(phi) return false, NONE;
+    if li_loop_preheader(li, l) == NONE return false, NONE;
+    if inst_block(phi) != li_header(li, l) return false, NONE;
+    ok, start, step, bo := is_induction_phi(phi, l);
+    if !ok return false, NONE;
+    // InductionDescriptor::isInductionPHI: the step must be a constant or loop invariant
+    if !sc_is_const(step) && !sc_is_loop_invariant(step, l) return false, NONE;
+    return true, bo;
+}
+// rewriteLoopExitValues, ReplaceExitValue == UnusedIndVarInLoop: the instruction must be an induction PHI used only by
+// PHIs and its update, or the update of an induction PHI used only by that PHI and `pn`
+rlev_unused_indvar_ok :: (li: *Loop_Info, l: Loop_Id, pn: Value_Id, i: Value_Id) -> bool {
+    if is_phi(i) {
+        ok, bo := rlev_check_is_ind_phi(li, l, i);
+        if !ok return false;
+        for u: sx_users(i) {
+            if !is_phi(u) && !is_binary_operator(u) return false;
+            if is_binary_operator(u) && u != bo return false;
+        }
+        return true;
+    }
+    if !is_binary_operator(i) return false;
+    id_bo: Value_Id = NONE;
+    for u: sx_users(i) {
+        if u == pn continue;
+        ok, bo := rlev_check_is_ind_phi(li, l, ifx is_phi(u) then u else NONE);
+        if !ok return false;
+        id_bo = bo;
+    }
+    return i == id_bo;
+}
+
 // rewriteLoopExitValues: the number of replaced exit values
 rewrite_loop_exit_values :: (l: Loop_Id, li: *Loop_Info, tti: *Tti, rw: *Scev_Expander, dt: *Dom_Tree, mode: s64, dead: *[..] Vh) -> s64 {
     exits: [..] Value_Id; exits.allocator = temp;
@@ -1065,7 +1099,7 @@ rewrite_loop_exit_values :: (l: Loop_Id, li: *Loop_Info, tti: *Tti, rw: *Scev_Ex
                 if li_loop_for(li, phi_block(cur, cast(u32) i)) != l continue;
                 inst_v := in_val;
                 if !li_contains_inst(li, l, inst_v) continue;
-                if mode == REPL_UNUSED_INDVAR_IN_LOOP fatal("indvars: -replexitval=unusedindvarinloop is not supported yet");
+                if mode == REPL_UNUSED_INDVAR_IN_LOOP && !rlev_unused_indvar_ok(li, l, cur, inst_v) continue;
                 exit_value := sc_get_scev_at_scope_value(inst_v, li_parent(li, l));
                 if exit_value == SCEV_CNC || !sc_is_loop_invariant(exit_value, l) || !sx_is_safe_to_expand(rw, exit_value) {
                     exit_count := sc_get_exit_count(l, phi_block(cur, cast(u32) i));
