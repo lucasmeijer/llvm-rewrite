@@ -415,8 +415,10 @@ Ports of `MemoryLocation.cpp`, `AliasAnalysis.cpp`, `BasicAliasAnalysis.cpp`, `T
 - **GlobalsAA** (`require<globals-aa>` module pass, `gm_compute`/`gm_invalidate`): per-function FunctionInfo by
   value id with the per-global map as runs; the CallGraph is node/edge lists, SCCs by the ported Tarjan iterator
   (SCC order and SCC[0] matter). No deletion callbacks: valid while no tracked global/function is erased.
-- **MemorySSA** (`mssa_get(fv)`; one instance, for `mssa_fn`; invalidated unless the pass preserves `A_MEMORYSSA`,
-  the DT and `A_AA`): accesses are ids into `macc` (0 = liveOnEntry; `MAK_DEF/USE/PHI/LIVE`, printed `id`),
+- **MemorySSA** (`mssa_get(fv)`; the loaded instance is `mssa_fn`'s, other functions' results are archived
+  (§9.1) and swapped in by `mssa_get`/`mssa_valid`; invalidated unless the pass preserves `A_MEMORYSSA`, the DT and
+  `A_AA`; epochs come from a counter (`mssa_new_epoch`) and are never reused, so an archived result's block and value
+  stamps stay valid): accesses are ids into `macc` (0 = liveOnEntry; `MAK_DEF/USE/PHI/LIVE`, printed `id`),
   per-block access and defs lists are intrusive (`mb_first/mb_last`, `next/prev`, `dnext/dprev`), block and
   instruction -> access maps are value-id arrays stamped with a build epoch (`mssa_access_of(v)`). Operands are
   uses with LLVM's use-list order (`mssa_first_use/mssa_use_next/mssa_use_user/mssa_use_slot`); MemoryPhi operands
@@ -445,13 +447,11 @@ Ports of `MemoryLocation.cpp`, `AliasAnalysis.cpp`, `BasicAliasAnalysis.cpp`, `T
   runs (printer.goose); the annotation texts are computed first in printing order.
 
 ### 8.7 ScalarEvolution (scev*.goose)
-One ScalarEvolution instance exists at a time, for the function `sc_fv`: `scev_get(fv)` builds it (empty, as
-LLVM's constructor does), `scev_invalidate(fv)` drops it, and a different function resets every table. LLVM keeps
-one result per function across function adaptors; ours is lost when another function's replaces it. That only
-shows when the lost result had been kept up to date through an IR change (a pass changed the function and
-preserved SCEV, `scev_note_preserved_change` from passmgr's invalidate_function) and the function asks again before
-LLVM would have dropped it (`function(loop(indvars)),function(loop-unroll)`): `scev_get` then fails loudly
-(`sc_lost`) instead of answering from a fresh, differently cached analysis.
+The loaded ScalarEvolution is the one in the tables below, for the function `sc_fv`; every other function's
+result is a snapshot in scev_archive.goose (§9.1). `scev_get(fv)` returns fv's result: the loaded one, an archived
+one swapped in (the loaded one is archived first), or a new empty one (as LLVM's constructor builds it).
+`scev_valid(fv)` is getCachedResult (it loads an archived result), `scev_invalidate(fv)` drops fv's result wherever
+it is. A new persistent cache (anything `scev_reset*` clears) must be added to scev_archive.goose's table list.
 - **Nodes**: `scevs: Scev[>..]` (kind in `SCEVTypes` order, flags, expression size, type, operand run in
   `sc_ops`, value for constants/unknowns, loop for AddRecs). Uniquing is a chained hash table keyed exactly like
   LLVM's FoldingSetNodeIDs (kind, operands, value, loop; the type only for vscale/trunc/zext/sext/ptrtoaddr). Id 0
@@ -517,7 +517,8 @@ adaptor). Names are checked against `LLVM_PASS_NAMES` (gen_passes.goose, from `P
 doesn't know fails with "unknown pass", one LLVM knows but we don't fails with "not implemented yet". The module
 → function adaptor runs every child on each function definition in module order. `-opt-bisect-limit` counts every
 non-required pass run and prints LLVM's `BISECT:` lines. After each function pass, `invalidate_function` drops the
-analyses not in the returned preserved mask (`PA_ALL`, `PA_CFG`, `PA_NONE`, or bits `1 << A_*`).
+analyses not in the returned preserved mask (`PA_ALL`, `PA_CFG`, `PA_NONE`, or bits `1 << A_*`), following
+LLVM's per-analysis rules (§9.1).
 
 To add a function pass `foo`:
 1. Port it in `src/foo.goose` (header comment: the LLVM file), entry `fn foo_run(fv: i32) -> u32` returning the
@@ -526,8 +527,9 @@ To add a function pass `foo`:
    printers), a case in `run_function_pass`, its class name in `pass_class_name` (for bisect), and `import foo;`.
    Pass parameters (`foo<a;b>`) arrive as the full element name: parse them in `parse_function_elem`.
 3. cl::opt flags it reads: add the name to `KNOWN_FLAGS` (flags.goose) and read with `flag_bool/flag_int`.
-4. New analysis: an `A_*` bit in analyses.goose, `analysis_id` (for `require<>`/`invalidate<>`), invalidation in
-   `invalidate_function`, and decide whether it's in `PA_CFG` (LLVM's `CFGAnalyses` set).
+4. New analysis: an `A_*` bit in analyses.goose, `analysis_id` (for `require<>`/`invalidate<>`), one result per
+   function (§9.1), its invalidate() rule in `invalidate_function` and its drop in `fam_clear`, and its bit in
+   `PA_CFG` if its invalidate() accepts preserveSet<CFGAnalyses>.
 5. Printers write to `errs(...)` (flags.goose); `errs_operand`/`errs_inst` print values exactly as the IR printer
    does (they number the function with the printer's SlotTracker).
 Module passes: an `m:` row and a case in `run_module_node`. A module pass that changes the IR returns PreservedAnalyses
@@ -552,6 +554,48 @@ MemorySSA). A loop pass
 (`lpm_cur`, `lpm_mark_loop_as_deleted`, `lpm_add_child_loops`, `lpm_add_sibling_loops`, `lpm_revisit_current_loop`).
 Loop-nest passes are not ported. Bisect prints the pipeline name of the pass (`loop-simplify`, not the class name)
 and `[module]`, `<function>`, `loop %<header> in function <f>` as the IR unit.
+
+### 9.1 The analysis managers (passmgr.goose, archive.goose)
+
+LLVM's FunctionAnalysisManager keeps one result per (analysis, function) until `invalidate(F, PA)` drops it,
+across adaptors and passes. Goose has no manager object; each analysis keeps its own per-function results, and
+passmgr.goose applies LLVM's rules to them:
+
+- **Per-function tables.** DominatorTree / PostDominatorTree (`dt_heads` per function), LoopInfo and CycleInfo
+  (heads per glob), LazyValueInfo (`lv_fns`), BranchProbabilityInfo (edges keyed by block id, `bpi_has` per glob),
+  BlockFrequencyInfo (working state + stash), LastRunTracking, the AAManager's existence (`aa_res`: none / without /
+  with GlobalsAA).
+- **One loaded instance plus an archive** for the analyses whose state is a large set of global tables:
+  ScalarEvolution (scev_archive.goose), MemorySSA (memoryssa.goose) and the AssumptionCache (assume.goose). The
+  loaded instance lives in the tables the code uses; the other functions' results are snapshots: per table, a run
+  in a pool of the table's element type (archive.goose: a directory of (start, length) pairs per snapshot, runs
+  appended in (snapshot, table) order). Loading fv's result archives the loaded one first and copies fv's runs back
+  (O(size), once per function switch). A restored or dropped snapshot is dead; when dead snapshots outnumber live
+  ones, the pools are compacted in place and the directory renumbered. Scratch stacks that are empty between
+  queries are not saved; serial counters that key a saved map are.
+- **Which instance is loaded.** The getters (`scev_get`, `mssa_get`, `ac_build`) and the getCachedResult forms
+  (`scev_valid`, `mssa_valid`, `ac_load`) load. `fam_enter(fv)` runs before every function pass and loop adaptor
+  and loads fv's archived ScalarEvolution and AssumptionCache, so their value-handle callbacks (`scev_note_*` and
+  `ac_rauw` from ir.goose, which only reach the loaded instance) see every change to fv, as LLVM's live objects do.
+  MemorySSA has no callbacks (passes update it through the MemorySSAUpdater after getting it), so it loads lazily.
+  `ac_rauw` also loads the cache of the replaced value's function (the inliner changes callers that no pass runs on).
+- **`invalidate_function(fv, PA)`** is AnalysisManager::invalidate: every analysis's own `invalidate()`, with
+  Invalidator dependencies (ScalarEvolution goes with the DT or LoopInfo, MemorySSA with the DT or the AAManager,
+  the AAManager with the DT through BasicAA). PreservedAnalyses are bits; the sets are expanded into their
+  members' bits (`PA_CFG` = preserveSet<CFGAnalyses>: DT, PDT, LoopInfo, CycleInfo, BPI, BFI; `PA_FN` =
+  AllAnalysesOn<Function>), so `invalidate<X>` (PA_ALL without X's bit) beats a set as `abandon` does.
+  AssumptionCache::invalidate is always false: only `fam_clear(fv)` (FAM.clear) drops a cache, for a deleted function
+  and for every function when a module pass doesn't preserve FunctionAnalysisManagerModuleProxy (`A_FAM_MPROXY`;
+  `module_invalidate` / `invalidate_module_functions`). The function and CGSCC adaptors preserve the proxy, as do
+  IPSCCP and GlobalOpt; PreservedAnalyses::none(), the AlwaysInliner's AllAnalysesOn<Function> and debugify's CFG
+  set don't.
+- **Outer-analysis proxy.** An AAManager result records whether GlobalsAA was cached when it was created
+  (`aa_res`, getModuleAAResultImpl) and only then uses it; `globals_aa_invalidate(m)` abandons the AAManager of
+  exactly those functions (registerOuterAnalysisInvalidation), which takes their MemorySSA with it.
+- **Not modelled** (no pass keeps them across passes yet): DemandedBits (recomputed per pass), LoopAccessInfo
+  (one per pass), IVUsers and other LoopAnalysisManager results, MemoryDependenceAnalysis (GVN doesn't preserve it).
+- **A new analysis** with function-level state must say where its per-function results live (one of the two forms
+  above), get its `invalidate()` rule in `invalidate_function`, and drop its results in `fam_clear`.
 
 ## 10. Arbitrary-width integers (apint.goose)
 

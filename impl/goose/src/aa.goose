@@ -116,10 +116,17 @@ fn aa_pipeline_init() {
 }
 
 fn aa_kind_active(k: i64) -> bool {
-    // GlobalsAA is a module analysis: the AAManager uses it only when it is cached
-    if k == AAK_GLOBALS { return gm_valid; }
+    // GlobalsAA is a module analysis: an AAManager result has it only if it was cached when the result was
+    // created (getModuleAAResultImpl)
+    if k == AAK_GLOBALS { return gm_valid && (aa_cur_fn < 0 || aa_res_of(aa_cur_fn) == 2); }
     return true;
 }
+
+// The AAManager result of each function (FunctionAnalysisManager): 0 = none, 1 = without GlobalsAA, 2 = with it
+// (registered as an outer invalidation of GlobalsAA: passmgr's globals_aa_invalidate drops it).
+var aa_res: u8[>..];
+fn aa_res_of(fv: i32) -> i64 { let g = glob_of(fv) as i64; if g < aa_res.len { aa_res[g] as i64 } else { 0 } }
+fn aa_invalidate(fv: i32) { let g = glob_of(fv) as i64; if g < aa_res.len { aa_res[g] = 0; } }
 
 // AM.getResult<AAManager>(F): BasicAA needs TLI, the AssumptionCache and the DominatorTree.
 fn aa_begin(fv: i32) {
@@ -127,6 +134,9 @@ fn aa_begin(fv: i32) {
     aa_cur_fn = fv;
     tli_cur_fn = fv;
     dt_get(fv, DT_DOM);
+    let g = glob_of(fv) as i64;
+    while aa_res.len <= g { aa_res.push(0); }
+    if aa_res[g] == 0 { aa_res[g] = if gm_valid { 2 } else { 1 }; }
     bas_check_separate_storage(fv);
 }
 

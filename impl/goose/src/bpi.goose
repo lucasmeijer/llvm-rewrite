@@ -3,7 +3,7 @@
 // BranchProbability (llvm/include/llvm/Support/BranchProbability.h, llvm/lib/Support/BranchProbability.cpp).
 // The CFG scc_iterator (llvm/include/llvm/ADT/SCCIterator.h) is bpi_sccs.
 //
-// One result exists at a time (bpi_fn). Edge probabilities: bpi_start (block value id -> 1 + start in
+// One result per function (bpi_has; bpi_fn = the last computed, for printing). Edge probabilities: bpi_start (block value id -> 1 + start in
 // bpi_probs, 0 = no edges; LLVM's EdgeStarts by block number) and bpi_probs (u32 numerators over 1 << 31).
 import std;
 import ir;

@@ -1197,6 +1197,7 @@ fn invalidate_function(fv: i32, preserved: u32) {
     // bit), or a dependency invalidated: BasicAA (AssumptionCache: never; DominatorTree)
     let aa_inv = preserved == (PA_ALL & ~((1 as u32) << A_AA)) || dt_inv;
     // MemorySSAAnalysis::Result::invalidate: not preserved, or AAManager / DominatorTree invalidated
+    if aa_inv { aa_invalidate(fv); }
     if !pa_kept(preserved, A_MEMORYSSA) || aa_inv || dt_inv { mssa_invalidate(fv); }
     // ScalarEvolution::invalidate: not preserved, or AssumptionCache (never) / DominatorTree / LoopInfo invalidated
     if !pa_kept(preserved, A_SCEV) || dt_inv || li_inv { scev_invalidate(fv); }
@@ -1213,6 +1214,18 @@ fn invalidate_function(fv: i32, preserved: u32) {
 fn fam_clear(fv: i32) {
     invalidate_function(fv, PA_NONE);
     ac_clear(fv);
+}
+
+// GlobalsAA is invalidated: the outer invalidations registered by AAManager results that use it
+// (FunctionAnalysisManagerModuleProxy::Result::invalidate abandons AAManager for those functions)
+fn globals_aa_invalidate(m: i32) {
+    if !gm_valid { return; }
+    gm_invalidate();
+    var f = modules[m].first_func;
+    while f >= 0 {
+        if !func_is_decl(f) && aa_res_of(f) == 2 { invalidate_function(f, PA_ALL & ~((1 as u32) << A_AA)); }
+        f = globs[glob_of(f)].next;
+    }
 }
 
 // A pass is about to run on fv: load fv's archived results whose value-handle callbacks LLVM's live objects
@@ -1498,7 +1511,7 @@ recursive fn run_module_node(n: i32, m: i32) {
     }
     if k == PK_CGSCC {
         let pa = cg_run_adaptor(n, m);
-        if pa != PA_ALL { gm_invalidate(); }
+        if pa != PA_ALL { globals_aa_invalidate(m); }
         module_invalidate(m, pa);
         return;
     }
@@ -1520,7 +1533,7 @@ recursive fn run_module_node(n: i32, m: i32) {
     if p == P_INFERATTRS {
         if inferattrs_run(m) {
             module_invalidate(m, PA_NONE);
-            gm_invalidate();
+            globals_aa_invalidate(m);
         }
         ap_pool_reset();
         return;
@@ -1539,11 +1552,11 @@ recursive fn run_module_node(n: i32, m: i32) {
     if p == P_NORECURSE_LTO { let pa = norecurse_lto_run(m); module_invalidate(m, pa); ap_pool_reset(); return; }
     if p == P_DEBUGIFY { lcg_invalidate(); debugify_run(m); invalidate_module_functions(m, PA_CFG); return; }   // no FAM proxy: clears
     if p == P_CHECK_DEBUGIFY { check_debugify_run(m); return; }
-    if p == P_INVALIDATE_GLOBALS_AA { gm_invalidate(); return; }
+    if p == P_INVALIDATE_GLOBALS_AA { globals_aa_invalidate(m); return; }
     if p == P_ASSIGN_GUID { assign_guid_run(m); return; }
     if p == P_GLOBALOPT {
         if globalopt_run(m) {
-            gm_invalidate();
+            globals_aa_invalidate(m);
             // PreservedAnalyses::none() + FunctionAnalysisManagerModuleProxy + CFGAnalyses
             module_invalidate(m, PA_CFG | ((1 as u32) << A_FAM_MPROXY));
         }
@@ -1560,7 +1573,7 @@ recursive fn run_module_node(n: i32, m: i32) {
             if a >= 0 { for k in ints[a] as i64 { in_preserve_gv.push(ints[a + 1 + k]); } }
             changed = internalize_run(m);
         }
-        if changed { gm_invalidate(); module_invalidate(m, PA_NONE); }
+        if changed { globals_aa_invalidate(m); module_invalidate(m, PA_NONE); }
         ap_pool_reset();
         return;
     }
@@ -1570,13 +1583,13 @@ recursive fn run_module_node(n: i32, m: i32) {
         else if p == P_ELIM_AVAIL_EXTERN { changed = elim_avail_extern_run(m); }
         else if p == P_CONSTMERGE { changed = constmerge_run(m); }
         else { gd_in_lto_post_link = pnodes[n].arg != 0; changed = globaldce_run(m); }
-        if changed { gm_invalidate(); module_invalidate(m, PA_NONE); }
+        if changed { globals_aa_invalidate(m); module_invalidate(m, PA_NONE); }
         ap_pool_reset();
         return;
     }
     if mp_is_ours(p) {
         let pa = mp_run_module(p, pnodes[n].arg, m);
-        if pa != PA_ALL { gm_invalidate(); module_invalidate(m, pa); }
+        if pa != PA_ALL { globals_aa_invalidate(m); module_invalidate(m, pa); }
         ap_pool_reset();
         return;
     }

@@ -6,7 +6,8 @@
 // canReuseInstruction, getStrengthenedNoWrapFlagsFromBinOp, getWiderType, evaluatePredicate(At),
 // getMonotonicPredicateType(Impl), getLoopInvariantPredicate, getLoopInvariantExitCondDuringFirstIterations(Impl).
 //
-// The callbacks run from ir.goose (val_set_dead, rauw) while a ScalarEvolution is cached (sc_valid). LLVM only has
+// The callbacks run from ir.goose (val_set_dead, rauw) while a ScalarEvolution is loaded (sc_valid; passmgr's
+// fam_enter loads the archived result of the function a pass runs on). LLVM only has
 // a SCEVCallbackVH for values in ValueExprMap and a CallbackVH per SCEVUnknown, so a value without either costs a
 // hash lookup.
 import std;
