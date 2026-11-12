@@ -604,6 +604,7 @@ tests/e2e/pipeline/misc/complex_numbers.ll::opt
 tests/e2e/pipeline/misc/complex_numbers.ll::roundtrip
 tests/e2e/pipeline/misc/computed_goto.ll::opt
 tests/e2e/pipeline/misc/computed_goto.ll::roundtrip
+tests/e2e/pipeline/misc/crc32.ll::opt
 tests/e2e/pipeline/misc/crc32.ll::roundtrip
 tests/e2e/pipeline/misc/hash_table.ll::opt
 tests/e2e/pipeline/misc/hash_table.ll::roundtrip
@@ -750,6 +751,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2008-01-07-LongDouble.ll
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2008-01-07-LongDouble.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/ConstructorDestructorAttributes.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/ConstructorDestructorAttributes.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Regression/C/DuffsDevice.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/DuffsDevice.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/PR1386.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/PR1386.ll::roundtrip
@@ -10858,6 +10860,7 @@ tests/imported/llvm/Transforms/LoopVectorize/X86/uniform_load.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/uniform_load.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/uniform_mem_op.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/uniform_mem_op.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/X86/unroll-pm.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/unroll-pm.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/unroll-small-loops.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/unroll-small-loops.ll::roundtrip
@@ -11913,6 +11916,7 @@ tests/imported/llvm/Transforms/PhaseOrdering/X86/unsigned-multiply-overflow-chec
 tests/imported/llvm/Transforms/PhaseOrdering/X86/unsigned-multiply-overflow-check.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vdiv-nounroll.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vdiv-nounroll.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/X86/vdiv.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vdiv.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vec-load-combine.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vec-load-combine.ll::roundtrip
@@ -11920,10 +11924,12 @@ tests/imported/llvm/Transforms/PhaseOrdering/X86/vec-shift.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vec-shift.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-math.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-math.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reduction-known-first-value.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reduction-known-first-value.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions-expanded.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions-logical.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions-logical.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/assume-explosion.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/basic.ll::opt
@@ -14976,6 +14982,7 @@ tests/perf/scaling/calls/n2000.ll::opt
 tests/perf/scaling/calls/n2000.ll::roundtrip
 tests/perf/scaling/calls/n500.ll::opt
 tests/perf/scaling/calls/n500.ll::roundtrip
+tests/perf/scaling/calls/n8000.ll::opt
 tests/perf/scaling/calls/n8000.ll::roundtrip
 tests/perf/scaling/diamonds/n2000.ll::opt
 tests/perf/scaling/diamonds/n2000.ll::roundtrip
