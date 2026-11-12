@@ -648,6 +648,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/BenchmarkGame/spectral-nor
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/BenchmarkGame/spectral-norm.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/CoyoteBench/almabench.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/CoyoteBench/almabench.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/CoyoteBench/lpbench.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/CoyoteBench/lpbench.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Dhrystone/dry.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Dhrystone/dry.ll::roundtrip
@@ -658,6 +659,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/exptree.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/exptree.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/queens.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/queens.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/ReedSolomon.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/ReedSolomon.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/evalloop.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/evalloop.ll::roundtrip
@@ -691,6 +693,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/mandel.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/mandel.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/matmul_f64_4x4.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/matmul_f64_4x4.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/oourafft.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/oourafft.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/perlin.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/perlin.ll::roundtrip
@@ -791,6 +794,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Regression/C/float16-smoke.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/float16-smoke.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/globalrefs.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/globalrefs.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Regression/C/matrixTranspose.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/matrixTranspose.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/pointer_arithmetic.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/pointer_arithmetic.ll::roundtrip
@@ -12215,6 +12219,7 @@ tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions-logical.ll::o
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions-logical.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/vector-reductions.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/assume-explosion.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/assume-explosion.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/basic.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/basic.ll::roundtrip
