@@ -246,8 +246,11 @@ lvl_add_induction_phi :: (v: *Lvl, phi: Value_Id, d: Ind_Desc) {
     }
 }
 
-// isTLIScalarize: vector-library mappings are not ported (TLI.isFunctionVectorizable is always false)
-lv_is_tli_scalarize :: (c: Value_Id) -> bool { return false; }
+// isTLIScalarize: not ported yet; it can only be true for a function the -vector-library tables map (vfabi.jai)
+lv_is_tli_scalarize :: (c: Value_Id) -> bool {
+    if tli_is_function_vectorizable(vname(call_called_function(c))) fatal("loop-vectorize: vector-library functions (isTLIScalarize) are not supported yet");
+    return false;
+}
 
 // LoopVectorizationLegality::canVectorizeInstr
 lvl_can_vectorize_instr :: (v: *Lvl, i: Value_Id) -> bool {

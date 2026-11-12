@@ -192,7 +192,8 @@ bt_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
     // modf / sincos / sincospi: getMultipleResultIntrinsicVectorLibCallCost is nullopt unless the result is a
     // struct of vectors (isVectorizedStructTy); scalar results fall through to the default cost
     if n == "llvm.modf" || n == "llvm.sincos" || n == "llvm.sincospi" {
-        if type_kind(ret) == .STRUCT && type_nsub(ret) > 0 && is_vector_type(type_sub(ret, 0)) x86_np(tprint("getIntrinsicInstrCost of %", n));
+        has, c := bt_multiple_result_intrinsic_vector_lib_call_cost(t, ica, kind, ifx n == "llvm.modf" then 0 else -1);
+        if has return c;
     }
     if begins_with(n, "llvm.loop.dependence") x86_np(tprint("getIntrinsicInstrCost of %", n));
     scal := COST_INVALID;
@@ -752,4 +753,28 @@ x86_min_max_reduction_cost :: (t: *Tti, id: Intrinsic_Id, ty: Type_Id, fmf: u32,
     if !is_pow2_s64(xvec_n(ty)) || ssize != cast(s64) mvt_scalar_bits(mty) return bt_min_max_reduction_cost(t, id, ty, fmf, kind);
     mm = cost_add(mm, x86_reduction_levels(t, .ADD, id, ty, elt, ne, ssize, kind, fmf, *cur));
     return cost_add(mm, x86_vector_instr_cost(t, .EXTRACTELEMENT, cur, kind, 0, NONE, NONE));
+}
+
+// getMultipleResultIntrinsicVectorLibCallCost(ICA, CostKind, CallRetElementIndex) (-1: no element). The vector
+// libcalls RTLIB::getSINCOS / getSINCOSPI / getMODF select exist on X86 only with -vector-library=AMDLIBM
+// (RuntimeLibcallsInfo: amd_vrs{4,8,16}_sincosf, amd_vrd{2,4,8}_sincos; none of them takes a mask).
+bt_multiple_result_intrinsic_vector_lib_call_cost :: (t: *Tti, ica: *Ica, kind: s64, call_ret_element: s64) -> (bool, Cost) {
+    ret := ica.ret;
+    if type_kind(ret) != .STRUCT || !is_vectorized_ty(ret) return false, 0;
+    ty := contained_types(ret)[0];
+    if type_kind(ty) != .VECTOR return false, 0;
+    n := iid_name(ica.id);
+    elt := type_elem(ty); cnt := type_count(ty);
+    available := false;
+    if n == "llvm.sincos" && tli_vector_library == .AMDLIBM {
+        if type_kind(elt) == .FLOAT && (cnt == 4 || cnt == 8 || cnt == 16) available = true;
+        if type_kind(elt) == .DOUBLE && (cnt == 2 || cnt == 4 || cnt == 8) available = true;
+    }
+    if !available return false, 0;
+    c := tti_call_instr_cost(t);
+    for vt, idx: contained_types(ret) {
+        if idx == call_ret_element continue;
+        c = cost_add(c, tti_memory_op_cost(t, .LOAD, vt, dl_alignment(vt, true), 0, kind));
+    }
+    return true, c;
 }

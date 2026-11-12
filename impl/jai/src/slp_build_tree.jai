@@ -1153,8 +1153,9 @@ slp_get_scalars_vectorization_state :: (s: Inst_State, vl: [] Value_Id, is_scatt
         case .CALL;
             ci := vl0;
             id := get_vector_intrinsic_id_for_call(ci);
-            if call_has_vector_variants(ci) slp_fail("vector library calls (VFDatabase)");
-            if !is_trivially_vectorizable(id) return TE_NEED_TO_GATHER;
+            shape := vf_shape_get(inst(ci).ty2, cast(u32) vl.count, false, false);
+            vec_func := vfdb_get_vectorized_function(ci, *shape);
+            if vec_func == NONE && !is_trivially_vectorizable(id) return TE_NEED_TO_GATHER;
             if type_kind(vtype(ci)) == .STRUCT {
                 for v: vl {
                     if type_kind(vtype(v)) != .STRUCT continue;
@@ -1166,6 +1167,7 @@ slp_get_scalars_vectorization_state :: (s: Inst_State, vl: [] Value_Id, is_scatt
             n := cast(s64) call_num_args(ci);
             for v: vl {
                 if !is_inst(v) || inst_op(v) != .CALL || call_called_function(v) != f || get_vector_intrinsic_id_for_call(v) != id return TE_NEED_TO_GATHER;
+                if vec_func != NONE && vec_func != vfdb_get_vectorized_function(v, *shape) return TE_NEED_TO_GATHER;
                 if call_num_bundles(v) != call_num_bundles(ci) slp_fail("operand bundles on vectorized calls");
                 for j: 0..n-1 {
                     if vu_is_vector_intrinsic_with_scalar_op_at_arg(id, cast(u32) j) && call_arg(v, cast(u32) j) != call_arg(ci, cast(u32) j) return TE_NEED_TO_GATHER;

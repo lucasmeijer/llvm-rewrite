@@ -13619,7 +13619,9 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/simple-loop.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/simple-loop.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/simplebb.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/simplebb.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/sin-sqrt.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/sin-sqrt.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/sincos.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/sincos.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/sitofp-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/sitofp-inseltpoison.ll::roundtrip
@@ -13866,7 +13868,9 @@ tests/imported/llvm/Transforms/SLPVectorizer/slp-variable-insertelement.ll::roun
 tests/imported/llvm/Transforms/SLPVectorizer/struct-return-revec.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/test_intermediate_dual_use.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/test_intermediate_dual_use.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/vectorizable-functions-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/vectorizable-functions-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/vectorizable-functions.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/vectorizable-functions.ll::roundtrip
 tests/imported/llvm/Transforms/SROA/aarch64-sme-svcount.ll::opt
 tests/imported/llvm/Transforms/SROA/aarch64-sme-svcount.ll::roundtrip
@@ -14802,6 +14806,7 @@ tests/imported/llvm/Transforms/Util/PredicateInfo/unnamed-types.ll::analysis
 tests/imported/llvm/Transforms/Util/PredicateInfo/unnamed-types.ll::roundtrip
 tests/imported/llvm/Transforms/Util/PredicateInfo/unreachable.ll::analysis
 tests/imported/llvm/Transforms/Util/PredicateInfo/unreachable.ll::roundtrip
+tests/imported/llvm/Transforms/Util/add-TLI-mappings.ll::opt
 tests/imported/llvm/Transforms/Util/add-TLI-mappings.ll::roundtrip
 tests/imported/llvm/Transforms/Util/assume-builder-atomics.ll::roundtrip
 tests/imported/llvm/Transforms/Util/assume-builder.ll::roundtrip

@@ -23,6 +23,8 @@
 #load "gen_tli.jai";
 #load "gen_triple.jai";
 #load "tli.jai";
+#load "gen_vecfuncs.jai";
+#load "vfabi.jai";
 #load "print_util.jai";
 #load "domtree.jai";
 #load "analysis_base.jai";

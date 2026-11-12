@@ -1345,14 +1345,13 @@ slp_vectorize_call :: (te: Te_Id, sty: Type_Id, vec_ty: Type_Id, has_bw: bool, b
     arg_tys := slp_build_intrinsic_arg_types(ci, id, slp_num_elements(vec_ty), ifx has_bw then cast(u32) bw.bits else 0);
     int_cost, lib_cost := slp_vector_call_costs(ci, vec_ty, arg_tys);
     use_intrinsic := id != NOT_INTRINSIC && int_cost <= lib_cost;
-    if !use_intrinsic slp_fail("vector library calls (VFDatabase::getVectorizedFunction)");
     op_vecs: [..] Value_Id; op_vecs.allocator = temp;
     tys_for_decl: [..] Type_Id; tys_for_decl.allocator = temp;
-    if slp_overload_type_at_arg(id, -1) {
+    if use_intrinsic && slp_overload_type_at_arg(id, -1) {
         for ct, ci_: contained_types(vec_ty) if slp_struct_return_overload_at_field(id, cast(s32) ci_) array_add(*tys_for_decl, ct);
     }
     for i: 0..cast(s64) call_num_args(ci) - 1 {
-        if vu_is_vector_intrinsic_with_scalar_op_at_arg(id, cast(u32) i) {
+        if use_intrinsic && vu_is_vector_intrinsic_with_scalar_op_at_arg(id, cast(u32) i) {
             scalar_arg := call_arg(ci, cast(u32) i);
             if id == IID_ABS && has_bw && bw.bits < dl_type_size_bits(vtype(ci)) scalar_arg = const_int(ir.t_i1, 0);
             array_add(*op_vecs, scalar_arg);
@@ -1368,9 +1367,15 @@ slp_vectorize_call :: (te: Te_Id, sty: Type_Id, vec_ty: Type_Id, has_bw: bool, b
             op_vec = sgb_int_cast(op_vec, vec_ty, slp_operand_signedness(te, cast(u32) i));
         }
         array_add(*op_vecs, op_vec);
-        if slp_overload_type_at_arg(id, cast(s32) i) array_add(*tys_for_decl, vtype(op_vec));
+        if use_intrinsic && slp_overload_type_at_arg(id, cast(s32) i) array_add(*tys_for_decl, vtype(op_vec));
     }
-    cf := get_or_insert_intrinsic_declaration(id, tys_for_decl);
+    cf: Value_Id;
+    if !use_intrinsic {
+        shape := vf_shape_get(inst(ci).ty2, cast(u32) slp_num_elements(vec_ty), false, false);
+        cf = vfdb_get_vectorized_function(ci, *shape);
+    } else {
+        cf = get_or_insert_intrinsic_declaration(id, tys_for_decl);
+    }
     if call_num_bundles(ci) > 0 slp_fail("operand bundles on vectorized calls");
     fty := glob(cf).value_type;
     c := new_inst(.CALL, func_ret(fty), cast(u32) (op_vecs.count + 1));

@@ -821,10 +821,6 @@ get_vector_intrinsic_id_for_call :: (c: Value_Id) -> Intrinsic_Id {
        id == IID_EXPERIMENTAL_NOALIAS_SCOPE_DECL || id == IID_SIDEEFFECT || id == IID_PSEUDOPROBE return id;
     return NOT_INTRINSIC;
 }
-// VFDatabase(*CI).getMappings(*CI) is non-empty
-slp_check_no_vector_variants :: (c: Value_Id) {
-    if call_has_vector_variants(c) slp_fail("calls with vector-function-abi-variant mappings (VFDatabase)");
-}
 
 // getSameOpcode(VL, TLI)
 slp_get_same_opcode :: (vl: [] Value_Id) -> Inst_State {
@@ -860,10 +856,11 @@ slp_get_same_opcode :: (vl: [] Value_Id) -> Inst_State {
         if swapped_compatible swapped_compatible = uniq_ns.count > 2 && uniq.count == 2;
     }
     base_id: Intrinsic_Id = NOT_INTRINSIC;
+    base_mappings: [..] Vf_Info;
     if inst_op(main) == .CALL {
         base_id = get_vector_intrinsic_id_for_call(main);
-        slp_check_no_vector_variants(main);
-        if !is_trivially_vectorizable(base_id) return IS_INVALID;
+        base_mappings = vfdb_get_mappings(main);
+        if !is_trivially_vectorizable(base_id) && base_mappings.count == 0 return IS_INVALID;
     }
     any_poison := inst_cnt != vl.count;
     for k: first..vl.count-1 {
@@ -906,7 +903,14 @@ slp_get_same_opcode :: (vl: [] Value_Id) -> Inst_State {
                 if call_num_bundles(i) > 0 slp_fail("calls with operand bundles in getSameOpcode");
                 id := get_vector_intrinsic_id_for_call(i);
                 if id != base_id return IS_INVALID;
-                if id == NOT_INTRINSIC slp_fail("VFDatabase mappings in getSameOpcode");
+                if id == NOT_INTRINSIC {
+                    m := vfdb_get_mappings(i);
+                    if m.count != base_mappings.count return IS_INVALID;
+                    // Mappings.front() vs BaseMappings.front() (both non-empty here: the main call has mappings)
+                    a := *m[0]; b := *base_mappings[0];
+                    if a.isa != b.isa || a.scalar_name != b.scalar_name || a.vector_name != b.vector_name ||
+                       !vf_shape_equal(*a.shape, *b.shape) return IS_INVALID;
+                }
             }
             continue;
         }

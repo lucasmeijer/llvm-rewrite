@@ -1278,7 +1278,7 @@ laa_analyze_loop :: (a: *Laa) -> bool {
             if is_call && !call_is_no_builtin(i) && call_called_function(i) != NONE {
                 has_ptr_args := false;
                 for k: 0..cast(s64) call_num_args(i) - 1 if type_kind(vtype(call_arg(i, cast(u32) k))) == .PTR has_ptr_args = true;
-                if !has_ptr_args && call_has_vector_variants(i) fatal("loop-accesses: VFDatabase mappings (vector-function-abi-variant) are not supported yet");
+                if !has_ptr_args && call_has_vector_variants(i) continue;
             }
             if inst_op(i) != .LOAD { laa_record_analysis(a, "instruction cannot be vectorized"); has_complex = true; continue; }
             if !inst_is_simple(i) && !is_parallel { laa_record_analysis(a, "read with atomic ordering or volatile read"); has_complex = true; continue; }
@@ -1374,13 +1374,6 @@ laa_analyze_loop :: (a: *Laa) -> bool {
     if a.has_convergent_op { laa_record_analysis(a, "cannot add control dependency to convergent operation"); return false; }
     if deps_safe return true;
     laa_emit_unsafe_dependence_remark(a);
-    return false;
-}
-call_has_vector_variants :: (c: Value_Id) -> bool {
-    // CallBase::getFnAttr: the call site's attributes, then the called function's
-    for attr_set_items(attr_list_fn(inst(c).attrs)) if it.kind == .STRING_ATTR && it.key == "vector-function-abi-variant" return true;
-    f := call_called_function(c);
-    if f != NONE for attr_set_items(attr_list_fn(glob(f).attrs)) if it.kind == .STRING_ATTR && it.key == "vector-function-abi-variant" return true;
     return false;
 }
 

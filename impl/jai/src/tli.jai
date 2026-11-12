@@ -15,8 +15,7 @@
 //   getExtAttrForI32Param / Return          tli_ext_attr_for_i32_param(signed) / tli_ext_attr_for_i32_return(signed)
 //   isCallingConvCCompatible(CB / F)        tli_is_calling_conv_c_compatible_call(c) / _fn(f)
 //   hasOptimizedCodeGen                     tli_has_optimized_code_gen(t, lf)
-// Vector library mappings (VecFuncs.def, -vector-library) are not ported: opt's -vector-library is rejected as an
-// unknown flag, so no mapping can be asked for.
+// Vector library mappings (VecFuncs.def, -vector-library) are in vfabi.jai.
 
 // ---------------------------------------------------------------- Triple (TargetParser/Triple.cpp subset)
 
@@ -821,6 +820,10 @@ tli_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
         if !ok || v < 0 fatal("'%' value invalid for uint argument!", value);
         if v > 255 fatal("'%' value must be in the range [0, 255]!", value);
         return cast(u64) v;
+    }
+    if name == "vector-library" {
+        if !tli_parse_vector_library(value) fatal("for the --vector-library option: Cannot find option named '%'!", value);
+        return true;
     }
     if name == "disable-builtin" || name == "enable-builtin" {
         if !has_value fatal("option -% needs a value", name);

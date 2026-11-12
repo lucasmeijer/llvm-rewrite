@@ -1502,15 +1502,20 @@ slp_build_intrinsic_arg_types :: (ci: Value_Id, id: Intrinsic_Id, vf: u64, min_b
 }
 // getVectorCallCosts(CI, VecTy, TTI, TLI, ArgTys): (intrinsic cost, library cost)
 slp_vector_call_costs :: (ci: Value_Id, vec_ty: Type_Id, arg_tys: [] Type_Id) -> (Cost, Cost) {
-    if call_has_vector_variants(ci) slp_fail("vector library calls (VFDatabase::getVectorizedFunction)");
+    shape := vf_shape_get(inst(ci).ty2, cast(u32) slp_num_elements(vec_ty), false, false);
+    vec_func := vfdb_get_vectorized_function(ci, *shape);
     lib_cost := COST_INVALID;
+    // the cost of the vector library call (TTI::getCallInstrCost(nullptr, VecTy, ArgTys))
+    if !call_is_no_builtin(ci) && vec_func != NONE lib_cost = tti_call_instr_cost(slp.tti);
     id := get_vector_intrinsic_id_for_call(ci);
     fmf: u32 = 0;
     if is_fp_math_inst(ci) fmf = inst_fmf(ci);
     SCALAR_LIMIT :: 10000;
-    a := ica_types(id, vec_ty, arg_tys, fmf, NONE, SCALAR_LIMIT);
+    a := ica_types(id, vec_ty, arg_tys, fmf, NONE, ifx cost_valid(lib_cost) then lib_cost else SCALAR_LIMIT);
     ic := tti_intrinsic_cost(slp.tti, *a, TCK_RECIP_THROUGHPUT);
-    if ic > SCALAR_LIMIT {
+    if cost_valid(lib_cost) {
+        if ic > lib_cost ic = COST_INVALID;
+    } else if ic > SCALAR_LIMIT {
         args: [..] Value_Id; args.allocator = temp;
         for k: 0..cast(s64) call_num_args(ci) - 1 array_add(*args, call_arg(ci, cast(u32) k));
         b := ica_types(id, vec_ty, arg_tys, fmf, ifx call_iid(ci) != NOT_INTRINSIC then ci else NONE, SCALAR_LIMIT);
