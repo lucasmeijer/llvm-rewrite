@@ -11768,6 +11768,7 @@ tests/imported/llvm/Transforms/PhaseOrdering/X86/addsub-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/addsub-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/addsub.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/addsub.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/X86/avg.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/avg.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/blendv-select.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/blendv-select.ll::roundtrip
