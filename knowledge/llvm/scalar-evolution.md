@@ -128,3 +128,13 @@ passing 243/247 `print<scalar-evolution>` lines of `tests/analysis/scev` + `Anal
   of its SCEVUsers; forgetMemoizedResults' LoopDispositions.erase(S) erases every loop's entry for S.
 - `print<iv-users>` prints `getSCEV(operand)` (not the normalized expression) and the post-inc loops in
   insertion order; IVUsers reuses the normalized ISE for the next user of the same instruction.
+
+## One result per function, across adaptors
+
+- The FunctionAnalysisManager keeps a ScalarEvolution per function for as long as no pass on that function drops
+  it, also across separate `function(...)` adaptors. A result that a transform kept up to date (IndVarSimplify
+  widening an IV, LoopRotate) answers differently from a fresh one: in `function(loop(indvars,loop-deletion)),
+  function(loop-unroll<O2>)` the cached backedge-taken count is still in terms of the old i32 trip count, so the
+  runtime-unroll remainder computes in i32, while a recomputation (or `invalidate<scalar-evolution>` first) gives i64
+  `%wide.trip.count` (tests/function/O0/memory/buffers.ll). Within one adaptor both agree, since the function never
+  loses its result.

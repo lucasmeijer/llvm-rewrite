@@ -16,6 +16,9 @@ with the files' own flags, and through `print<memoryssa>`).
   name on the merge block via takeName and renames the cloned-from exit `<name>.split`), frozen conditions
   `<cond>.fr`, a select turned into a branch `unswitched.select`, guards `guarded` / `deopt` blocks, exit phis split
   for trivial unswitching `<phi>.split`, injected conditions `injected.cond` in `<bb>.check`.
+- The VMap is a `ValueMap`, which follows RAUW of its keys: after `I.replaceAllUsesWith(MergePN)` for an exit phi
+  the entry I -> ClonedI is re-keyed MergePN -> ClonedI, so the cloned exit block's debug records (which the RAUW
+  pointed at `.us-phi`) are remapped back to the cloned phi (`debugify` + nontrivial-unswitch-freeze.ll).
 - Partial (partially invariant) unswitching needs MemorySSA (hasPartialIVCondition walks MemoryUses' defining
   accesses); it adds `llvm.loop.unswitch.partial.disable` to the loop afterwards, injection adds
   `llvm.loop.unswitch.injection.disable`; otherwise the current loop is revisited.

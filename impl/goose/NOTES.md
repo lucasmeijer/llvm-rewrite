@@ -822,6 +822,58 @@ What they were:
 - After rebasing onto salvageDebugInfo (salvage.goose), `instsimplify` showed 1 new `differs`: zext salvaging
   wrote `DW_ATE_unsigned_char` (8) for `DW_ATE_unsigned` (7). Fixed.
 
+## Multi-pass pipeline sweeps (`tools/pipeline_sweeps.sh`, 2026-11-12)
+
+Single-pass sweeps miss bugs that need IR shaped by an earlier pass, or state kept between passes (analysis caches,
+symbol-table counters, debug records). `impl/goose/tools/pipeline_sweeps.sh [-k N]` runs 14 O2-like fragments over
+the corpus (whole file, and "split": every top-level pass in its own `function(...)` adaptor), tests/perf/compile
+(whole program and `--per-function`, `instcombine<no-verify-fixpoint>`), each also under `debugify`. Takes ~1.5 h.
+
+Silent mismatches (differs + bad-ir), first recorded run → now; every cell is 0 now. `before` is the first run of
+each cell (the crashed goose_pipeline_fix agent's journal), so cells first recorded later look cleaner than they were.
+
+| # | Pipeline (abridged) | corpus | split | perf-fn | dbg corpus | dbg perf-fn |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | sroa,early-cse<memssa>,instcombine,simplifycfg | 0 | 2 → 0 | 7 → 0 | 0 | 7 → 0 |
+| 2 | … gvn,sccp,instcombine,jump-threading,cvp,dse,adce,simplifycfg | 1 → 0 | 24 → 0 | 7 → 0 | 21 → 0 | 1 → 0 |
+| 3 | sroa,instcombine,loop-mssa(loop-rotate,licm) | 2 → 0 (eliminate-backedge.ll, lua.ll) | 0 | 0 | loud | loud |
+| 4-6 | loop-instsimplify/simplifycfg/licm/rotate, simple-loop-unswitch<nontrivial>, loop(idiom,indvars,deletion) | 0 | 0 | 0 | #5: 2 → 0 | 0 |
+| 7 | … loop(loop-idiom,indvars,loop-deletion,loop-unroll-full) | 17 → 0 | 0 | 16 → 0 | 4 → 0 | 3 → 0 |
+| 8 | ~O2 function simplification pipeline (28 passes) | 0 | 0 | 0 | 0 | 0 |
+| 9 | … loop(indvars),loop-distribute,loop-load-elim,… | 0 | 0 | 11 → 0 | 0 | 2 → 0 |
+| 10 | … constraint-elimination,instcombine,dse,adce | 2 → 0 | 0 | 0 | 2 → 0 | 0 |
+| 11 | cgscc(function-attrs),function(…),cgscc(function-attrs),function(gvn,instcombine) | 0 | 0 | 0 | 0 | 0 |
+| 12 | … loop(indvars,loop-deletion),loop-unroll<O2>,sroa,instcombine,licm<allowspeculation>,… (new) | 1 → 0 | 25 → 0 (loud) | 0 | 1 → 0 | 1 → 0 |
+| 13 | module(ipsccp<no-func-spec>),cgscc(inline,function-attrs,function(…)),function(gvn,…) (new) | 0 | 0 | 0 | 3 → 0 | 0 |
+| 14 | simplifycfg with the two O2 option sets (new) | 0 | 0 | 0 | 0 | 0 |
+
+Loud failures under debugify fell sharply once LoopRotate handled debug records: `dbg perf-fn` identical functions for
+the loop pipelines went from ~4860-5017 to ~6440-6528 of ~6540, `dbg corpus` from ~6630 to ~7180. Split sweeps of
+pipelines with a ScalarEvolution user after indvars/loop-rotate (#7, #8, #9, #12) now stop loudly on ~400-1000
+files (see below) where they used to be identical or silently wrong.
+
+Root causes fixed (all found only by multi-pass pipelines):
+- isGuaranteedNotToBePoison with no context also has no DominatorTree; constant uniquing probed past a parser
+  tombstone (a second `i32 35`); PHINode::removeIncomingValueIf is swap-with-last; LazyValueInfo is one result per
+  function; InstCombine's addToWorklist is a push; inbounds GEPs made by AggressiveInstCombine/SimplifyCFG lacked
+  nusw; swapOperands/commute are Use::swap; ComputeMaxSignificantBits uses UseInstrInfo=false; intersectWith drops
+  an empty nofpclass (commit c6b9e3d).
+- Head-bit iterators: mergeConditionalStores' predicate/split, SimpleLoopUnswitch's `SplitBlock(BB, BB->begin())`,
+  the inliner's static-alloca splice, byval alloca and byval memcpy.
+- LoopRotate debug records ported (it failed loudly in every function with records).
+- Records left in the trailing marker of an erased block stayed tracked (findDbgValues then saw dead blocks: LCSSA
+  crashed); LCSSA must accept records in a trailing marker (changeToUnreachable leaves them).
+- ValueMap follows RAUW of its keys (SimpleLoopUnswitch exit `.us-phi`): `vmm_follow_rauw`.
+- Peel-last guard branch and LoopPeel phi debug locations; LibCallSimplifier's isKnownNonZero is DL-only.
+- LICM: a sunk call's clone is first named like the original (CallInst::Create(CI, Bundles)), which bumps LastUnique.
+- getUnderlyingObject's default MaxLookup is 10 (LLVM 23), not 6, at 10 call sites.
+- A blockaddress is not a live use of its function (inliner's dead-callee check); erasing a function body drops its
+  BlockAddresses like ~BasicBlock.
+
+Known gap (loud, not silent): LLVM keeps a ScalarEvolution per function across adaptors; ours is one instance.
+`scev_get` fails loudly when a result kept up to date through an IR change would be reused (DESIGN §8.7). Porting
+per-function SCEV (and LoopInfo) caches would turn those ~1000 split-sweep failures back into comparisons.
+
 ## InstCombine calls, casts, libcalls (ic_calls, ic_casts2, ic_x86, simplify_libcalls, build_libcalls)
 
 - ic_calls.goose: visitCallInst (generic prologue, mem intrinsics, the whole intrinsic switch, the post-switch

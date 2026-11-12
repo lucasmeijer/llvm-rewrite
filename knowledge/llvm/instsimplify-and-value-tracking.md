@@ -14,6 +14,11 @@ Verified against LLVM 23.1.5 source and the imported InstSimplify tests.
   allow `fsub X, 0.0 → X`. Check: InstSimplify/strictfp-fsub.ll `*_ebmaytrap` functions keep the call.
 - **`MaxLookupSearchDepth` is 10** (ValueTracking.h:51). It is the default `MaxLookup` of
   getUnderlyingObject(s), used by InstSimplify's load folding and pointer compares.
+  Every getUnderlyingObject call without an explicit MaxLookup uses it: InlineFunction's
+  AddParamAndFnBasicAttributes (a chain of 7 launder/strip.invariant.group calls back to the argument still gets the
+  callee's `readnone`, Inline/launder.invariant.group.ll with `inline,function-attrs`), InstCombine's icmp/alloca
+  and call folds, AggressiveInstCombine, LoopIdiomRecognize's store grouping, getConstantDataArrayInfo,
+  FunctionSpecialization. (Goose had 6, LLVM 22's value, at 10 call sites.)
 - **`m_SMax`/`m_UMin`/`m_MaxOrMin` match only the min/max intrinsics in LLVM 23**, not select+icmp patterns.
 - **computeKnownFPClass of `poison`** is `fcNone` with `SignBit = false`. A `ConstantAggregateZero` is `fcPosZero`, sign
   false. Constant vectors use only the demanded, non-poison elements, and get a sign only if all of those agree.

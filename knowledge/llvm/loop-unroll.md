@@ -90,3 +90,6 @@ round-tripping corpus file, whole-file and `--per-function`, also with `-unroll-
   fmul + fadd costs (always for x86_fp80). insertvalue/extractvalue use TargetTransformInfoImplBase's
   getInsertExtractValueCost (not overridden by X86 or BasicTTI).
 - `-costmodel-reduxcost` is declared but unused in LLVM 23 (TargetTransformInfo.cpp).
+- Peeling the last iteration with a guard (`SE->isKnownNonZero(BTC)` false): `IRBuilder<> B(PreHeaderBR)` creates
+  both the `icmp ne` and the new conditional branch, so the branch also gets the old preheader branch's `!dbg`
+  (SPASS @clause_FPrintOtter under debugify).

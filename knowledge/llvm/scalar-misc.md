@@ -58,3 +58,11 @@ Sink, TailCallElim, MergedLoadStoreMotion, SpeculativeExecution and CallSiteSpli
   table's functions (a function's GUID is its !guid attachment, else MD5 of its PGO name = the global identifier).
 - LibCallsShrinkWrap in a strictfp function emits `llvm.experimental.constrained.fcmp(..., metadata !"<pred>",
   metadata !"fpexcept.strict")` calls with the strictfp attribute (IRBuilder setIsFPConstrained).
+
+## LICM naming
+
+- LICM's cloneInstructionInExitBlock clones a call with `CallInst::Create(CI, OpBundles)`, which names the clone
+  `CI->getName()`. Inserting it into the exit block uniquifies that name (one `++LastUnique` in the function's symbol
+  table, e.g. `smax1`, `smax3`) before `setName(Name + ".le")`; other instructions are `clone()`d unnamed. So the
+  second sunk copy of a call `%smax` is `%smax.le4`, not `%smax.le1` (SCCP/2003-06-24-OverdefinedPHIValue.ll after
+  lcssa, `licm<allowspeculation>`).

@@ -43,6 +43,9 @@ are identical to opt 23.1.5 on every round-tripping corpus file (also with each 
   recursive call (TailCallElim/inf-recursion.ll with `-passes=inline`).
 - A `blockaddress` is not a user of its function in LLVM 23 (it has no operands), so it does not count as a live use
   for isSoleCallToLocalFunction / the dead-function check.
+- Static allocas move with `Caller->getEntryBlock().splice(Caller->begin()->begin(), ...)` and byval copies are
+  inserted at `Caller->begin()->begin()`; the byval memcpy uses `IRBuilder(InsertBlock, InsertBlock->begin())`. All
+  three iterators carry the head bit: the instructions go in front of the debug records at the insertion point.
 - AddAlignmentAssumptions (`-preserve-alignment-assumptions-during-inlining`) emits
   `call void @llvm.assume(i1 true) [ "align"(ptr %p, i64 A) ]`: the alignment is always i64.
 
