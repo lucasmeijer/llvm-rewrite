@@ -37,6 +37,13 @@ import tti;
 import tti_x86;
 import tti_vec;
 import vecutils;
+import slp_util;
+import slp_tree;
+import slp_ops;
+import slp_sched;
+import slp_loads;
+import slp_build;
+import slp_stores;
 
 fn slp_not_ported(what: const u8[:]) { fatal(str("SLPVectorizer: ", what, " is not ported yet")); }
 
@@ -49,49 +56,9 @@ var slp_gep_keys: i32[>..<];
 var slp_gep_k: i32[>..<];
 var slp_gep_i: i32[>..<];
 
-// Type::getTypeID (Type.h enum order)
-fn slp_type_id(t: i32) -> i64 {
-    let k = ty_kind(t);
-    if k == TK_HALF { return 0; } if k == TK_BFLOAT { return 1; } if k == TK_FLOAT { return 2; } if k == TK_DOUBLE { return 3; }
-    if k == TK_X86_FP80 { return 4; } if k == TK_FP128 { return 5; } if k == TK_PPC_FP128 { return 6; } if k == TK_VOID { return 7; }
-    if k == TK_LABEL { return 8; } if k == TK_METADATA { return 9; } if k == TK_X86_AMX { return 10; } if k == TK_TOKEN { return 11; }
-    if k == TK_INT { return 12; } if k == TK_BYTE { return 13; } if k == TK_FUNC { return 14; } if k == TK_PTR { return 15; }
-    if k == TK_STRUCT { return 16; } if k == TK_ARRAY { return 17; } if k == TK_FVEC { return 18; } if k == TK_SVEC { return 19; }
-    return 21;
-}
-
 fn slp_recursion_max_depth() -> i64 { flag_int("slp-recursion-max-depth", 12) }
 
 // ---------------------------------------------------------------- static helpers
-
-// VectorType::isValidElementType
-fn slp_valid_vector_element(t: i32) -> bool {
-    let k = ty_kind(t);
-    if ty_is_int(t) || ty_is_fp(t) || k == TK_PTR || k == TK_BYTE { return true; }
-    if k == TK_TARGETEXT { slp_not_ported("TargetExtType::CanBeVectorElement"); }
-    return false;
-}
-// isValidElementType(Ty) (SLPReVec is off): canVectorizeTy(Ty) && !x86_fp80 && !ppc_fp128 && !void
-fn slp_is_valid_element_type(t: i32) -> bool {
-    var can = false;
-    if ty_is_struct(t) {
-        let n = ty_count(t);
-        can = n > 0 && (types[t].flags & TF_NAMED) == 0 && (types[t].flags & TF_PACKED) == 0;
-        if can { for k in n { if !slp_valid_vector_element(ty_field(t, k)) { can = false; } } }
-    } else {
-        can = ty_kind(t) == TK_VOID || slp_valid_vector_element(t);
-    }
-    let k = ty_kind(t);
-    return can && k != TK_X86_FP80 && k != TK_PPC_FP128 && k != TK_VOID;
-}
-
-// getValueType(V, LookThroughCmp)
-fn slp_value_type(v: i32, look_through_cmp: bool) -> i32 {
-    if is_inst_op(v, OP_STORE) { return vals[op(v, 0)].ty; }
-    if is_inst_op(v, OP_INSERTELEMENT) { return vals[op(v, 1)].ty; }
-    if look_through_cmp && is_inst(v) && (iop(v) == OP_ICMP || iop(v) == OP_FCMP) { return vals[op(v, 0)].ty; }
-    return vals[v].ty;
-}
 
 // matchRdxBop(I, V0, V1)
 fn slp_match_rdx_bop(i: i32) -> bool, i32, i32 {
@@ -182,17 +149,9 @@ fn slp_collect_seeds(bb: i32) {
 }
 fn ld_simple_slp(i: i32) -> bool { (insts[inst_of(i)].bits & 1) == 0 && insts[inst_of(i)].ord == 0 }
 
-// vectorizeStoreChains(R): a group of two or more stores of a vectorizable type enters tryToVectorizeSequence,
-// whose comparators and the store-chain search (StoreChainContext, BoUpSLP) are not ported
+// vectorizeStoreChains(R) (slp_stores.goose)
 fn slp_vectorize_store_chains() {
-    for k in slp_store_keys.len {
-        var n: i64 = 0;
-        var first: i32 = -1;
-        for j in slp_store_k.len { if slp_store_k[j] as i64 == k { n++; if first < 0 { first = slp_store_i[j]; } } }
-        if n < 2 { continue; }
-        if !slp_is_valid_element_type(vals[op(first, 0)].ty) { continue; }
-        slp_not_ported("vectorizeStoreChains (store chains: StoreChainContext / BoUpSLP)");
-    }
+    slp_vectorize_store_chains_r(slp_store_keys.len, slp_store_k, slp_store_i);
 }
 
 // vectorizeGEPIndices(BB, R): a list of two or more GEPs asks BoUpSLP::getVectorElementSize
@@ -207,11 +166,9 @@ fn slp_vectorize_gep_indices() {
 
 // ---------------------------------------------------------------- roots
 
-// tryToVectorizeList(VL, R, MaxVFOnly, LimitToRegisterVF)
+// tryToVectorizeList(VL, R, MaxVFOnly, LimitToRegisterVF) (slp_stores.goose)
 fn slp_try_to_vectorize_list(vl: const i32[:]) -> bool {
-    if vl.len < 2 { return false; }
-    slp_not_ported("tryToVectorizeList (getSameOpcode / BoUpSLP::buildTree)");
-    return false;
+    return slp_try_to_vectorize_list_r(vl, false, false);
 }
 
 // vectorizeHorReduction(P, Root, BB, R, PostponedInsts)
@@ -687,15 +644,26 @@ fn slp_vectorizer_run(fv: i32) -> u32 {
     if tv_number_of_registers(tv_register_class_for_type(true, -1)) == 0 { return PA_ALL; }
     if func_has_fn_attr(fv, AK_NoImplicitFloat) { return PA_ALL; }
     dt_update_dfs_numbers(fv, DT_DOM);
+    scev_get(fv);
+    slp_dbg_init();
+    slp_r_begin(fv);
+    slp_aaq = aq_push(CA_SIMPLE);
+    if slp_dbg_on { errs("SLP: Analyzing blocks in "); errs(sbytes(vals[fv].name)); errs(".\n"); slp_dbg_flush(); }
     var po: i32[>..<] = [];
     bpi_post_order(fv, po);
     for bb in po {
         let t = block_terminator(bb);
         if inst_is_eh_pad(first_non_phi(bb)) || (t >= 0 && iop(t) == OP_UNREACHABLE) { continue; }
         slp_collect_seeds(bb);
-        if slp_store_keys.len > 0 { slp_vectorize_store_chains(); }
+        if slp_store_keys.len > 0 {
+            if slp_dbg_on { errs("SLP: Found stores for "); errs_int(slp_store_keys.len); errs(" underlying objects.\n"); slp_dbg_flush(); }
+            slp_vectorize_store_chains();
+        }
         slp_vectorize_chains_in_block(bb);
         if slp_gep_keys.len > 0 { slp_vectorize_gep_indices(); }
     }
+    aq_pop(slp_aaq);
+    slp_aaq = -1;
+    slp_delete_tree();
     return PA_ALL;
 }
