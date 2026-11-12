@@ -52,6 +52,37 @@ vpp_set_edge_mask :: (p: *Vp_Predicator, s: Vp_Blk, d: Vp_Blk, m: Vp_Val) -> Vp_
     return m;
 }
 
+// VPPredicator::createSwitchEdgeMasks
+vpp_create_switch_edge_masks :: (p: *Vp_Predicator, si: Vp_Rec) {
+    src := vr(si).parent;
+    cond := vp_op(si, 0);
+    default_dst := vb(src).succs[0];
+    Dst_Cmps :: struct { dst: Vp_Blk; conds: [..] Vp_Val; }
+    d2c: [..] Dst_Cmps; d2c.allocator = temp;
+    for k: 1..vb(src).succs.count - 1 {
+        dst := vb(src).succs[k];
+        if dst == default_dst continue;
+        e: *Dst_Cmps = null;
+        for * d2c if it.dst == dst { e = it; break; }
+        if !e { n: Dst_Cmps; n.dst = dst; n.conds.allocator = temp; array_add(*d2c, n); e = *d2c[d2c.count - 1]; }
+        array_add(*e.conds, vr(vpb_icmp(*p.b, ICMP_EQ, cond, vp_op(si, k))).def);
+    }
+    src_mask := vpp_get_block_in_mask(p, src);
+    default_mask: Vp_Val = NONE;
+    for d: d2c {
+        m := d.conds[0];
+        for c: d.conds { if it_index == 0 continue; m = vr(vpb_or(*p.b, m, c)).def; }
+        if src_mask != NONE m = vr(vpb_logical_and(*p.b, src_mask, m)).def;
+        vpp_set_edge_mask(p, src, d.dst, m);
+        default_mask = ifx default_mask != NONE then vr(vpb_or(*p.b, default_mask, m)).def else m;
+    }
+    if default_mask != NONE {
+        default_mask = vr(vpb_not(*p.b, default_mask)).def;
+        if src_mask != NONE default_mask = vr(vpb_logical_and(*p.b, src_mask, default_mask)).def;
+    } else default_mask = src_mask;
+    vpp_set_edge_mask(p, src, default_dst, default_mask);
+}
+
 // VPPredicator::createEdgeMask
 vpp_create_edge_mask :: (p: *Vp_Predicator, src: Vp_Blk, dst: Vp_Blk) -> Vp_Val {
     k := vpp_edge_key(src, dst);
@@ -60,7 +91,11 @@ vpp_create_edge_mask :: (p: *Vp_Predicator, src: Vp_Blk, dst: Vp_Blk) -> Vp_Val 
     src_mask := vpp_get_block_in_mask(p, src);
     if vb(src).succs.count == 1 return vpp_set_edge_mask(p, src, dst, src_mask);
     term := vp_terminator(src);
-    if vr(term).opcode == vp_opc(.SWITCH) vp_unported("switch edge masks (createSwitchEdgeMasks)");
+    if vr(term).opcode == vp_opc(.SWITCH) {
+        vpp_create_switch_edge_masks(p, term);
+        _, m := table_find(*p.edge_mask, k);
+        return m;
+    }
     assert(vr(term).opcode == VPI_BRANCH_ON_COND, "Unsupported terminator");
     if vb(src).succs[0] == vb(src).succs[1] return vpp_set_edge_mask(p, src, dst, src_mask);
     em = vp_op(term, 0);

@@ -127,7 +127,11 @@ vpcb_create_instructions :: (c: *Vp_Cfg_Builder, vpbb: Vp_Blk, bb: Value_Id) {
         }
         if o == .SWITCH {
             if nops(i) <= 2 continue;
-            vp_unported("switch terminators inside the loop");
+            ops: [..] Vp_Val; ops.allocator = temp;
+            array_add(*ops, vpcb_operand(c, op(i, 0)));
+            for k: 0..switch_num_cases(i) - 1 array_add(*ops, vpcb_operand(c, switch_case_value(i, k)));
+            vpb_nary(*c.b, vp_opc(.SWITCH), ops, .{}, vp_metadata_to_propagate(i), inst_dl(i), "", NONE, i);
+            continue;
         }
         new_r: Vp_Rec;
         if o == .PHI {
@@ -190,7 +194,11 @@ vpcb_build_plain_cfg :: (c: *Vp_Cfg_Builder) {
         vpcb_set_preds_from_bb(c, vpbb, bb);
         vpcb_create_instructions(c, vpbb, bb);
         t := block_terminator(bb);
-        if inst_op(t) == .SWITCH vp_unported("switch terminators inside the loop");
+        if inst_op(t) == .SWITCH {
+            array_add(*vb(vpbb).succs, vpcb_get_or_create_vpbb(c, op(t, 1)));
+            for k: 0..switch_num_cases(t) - 1 array_add(*vb(vpbb).succs, vpcb_get_or_create_vpbb(c, op(t, 2 + k)));
+            continue;
+        }
         if inst_op(t) == .BR {
             array_add(*vb(vpbb).succs, vpcb_get_or_create_vpbb(c, get_successor(t, 0)));
             continue;

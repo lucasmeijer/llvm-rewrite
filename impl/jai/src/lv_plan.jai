@@ -288,9 +288,21 @@ lvp_make_mem_op_widening_decisions :: (lp: *Lv_Planner, range: *Vf_Range) {
     }
     // lowerMemoryIdioms
     remaining: [..] Vp_Rec; remaining.allocator = temp;
+    middle := vp_middle_block();
+    frs := vpb_at(middle, vp_first_non_phi(middle));   // FinalRedStoresBuilder
     for vpi: mem_ops {
-        if vr(vpi).opcode == vp_opc(.STORE) && lvl_is_invariant_address_of_reduction(lp.lvl, op(vp_underlying_instr(vpi), 1))
-            vp_unported("stores of reductions to invariant addresses");
+        // replaceWithFinalIfReductionStore
+        si := vp_underlying_instr(vpi);
+        if vr(vpi).opcode == vp_opc(.STORE) && lvl_is_invariant_address_of_reduction(lp.lvl, op(si, 1)) {
+            if lvl_is_invariant_store_of_reduction(lp.lvl, si) {
+                val := vp_op(vpi, 0); addr := vp_op(vpi, 1);
+                for u: vv(val).users if vr(u).kind == .BLEND { val = vr(u).def; break; }
+                rep := vp_new_replicate(si, .[val, addr], true, NONE, vr(vpi).flags, vr(vpi).md, vr(vpi).dl);
+                vpb_insert(*frs, rep);
+            }
+            vp_erase_recipe(vpi);
+            continue;
+        }
         array_add(*remaining, vpi);
     }
     mem_ops = remaining;
