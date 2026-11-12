@@ -423,9 +423,21 @@ vp_convert_to_concrete_recipes :: () {
                 continue;
             }
             if k == .EXPRESSION { vp_unported("VPExpressionRecipe::decompose"); continue; }
-            if vp_is_vpi(r, VPI_LAST_ACTIVE_LANE) { vp_unported("expanding LastActiveLane"); continue; }
+            if vp_is_vpi(r, VPI_LAST_ACTIVE_LANE) {
+                dl := vr(r).dl;
+                nots: [..] Vp_Val; nots.allocator = temp;
+                for o: vr(r).ops array_add(*nots, vr(vpb_not(*b, o, dl)).def);
+                fil := vr(vpb_nary(*b, VPI_FIRST_ACTIVE_LANE, nots, .{}, .[], dl, "first.inactive.lane", dl_index_type(type_ptr(0)))).def;
+                last := vpb_sub(*b, fil, vp_const_int(vp_scalar_type(fil), 1), dl, "last.active.lane");
+                vp_rauw(vr(r).def, vr(last).def);
+                vp_erase_recipe(r);
+                continue;
+            }
             if vp_is_vpi(r, VPI_MASKED_COND) {
-                vp_unported("lowering masked MaskedCond");
+                assert(vp_is_masked(r), "Unmasked MaskedCond should be simplified earlier");
+                la := vpb_nary(*b, VPI_LOGICAL_AND, .[vp_op(r, vp_nops(r) - 1), vp_op(r, 0)]);
+                vp_rauw(vr(r).def, vr(la).def);
+                vp_erase_recipe(r);
                 continue;
             }
             if vp_is_vpi(r, VPI_CANONICAL_IV_INCREMENT_FOR_PART) {

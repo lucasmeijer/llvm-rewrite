@@ -673,7 +673,9 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
     if !lvh_allow_vectorization(*hints, p.vectorize_only_when_forced) return false;
     pse: Pse;
     pse_init(*pse, l);
+    // llvm::shouldOptimizeForSize(Header, PSI, BFI): the function's optsize/minsize; PGSO needs a module profile
     opt_for_size := fn_has_opt_size(f);
+    if !opt_for_size psi_check("loop-vectorize");
     lvl: Lvl;
     lvl_init(*lvl);
     lvl.f = f; lvl.l = l; lvl.li = p.li; lvl.dt = p.dt; lvl.pse = *pse; lvl.tti = p.tti; lvl.tli = p.tli; lvl.ac = p.ac;
