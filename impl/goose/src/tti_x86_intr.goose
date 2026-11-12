@@ -403,8 +403,14 @@ recursive fn bt_intrinsic_cost(ic: i64, kind: i64) -> i64 {
         c = tc_add(c, x86_arith0(OP_SUB, net, kind));
         ica_release(m);
         return c;
-    } else if id == IID_modf || id == IID_sincos || id == IID_sincospi ||
-              id == IID_loop_dependence_war_mask || id == IID_loop_dependence_raw_mask {
+    } else if id == IID_modf || id == IID_sincos || id == IID_sincospi {
+        // getMultipleResultIntrinsicVectorLibCallCost needs a vectorized struct type (isVectorizedStructTy);
+        // otherwise the switch breaks to the default scalarization cost
+        let rt = ica_tab[ic].ret;
+        var vec = false;
+        if ty_is_struct(rt) { for k in ty_count(rt) { if ty_is_vector(ty_field(rt, k)) { vec = true; } } }
+        if vec { x86_np(str("getIntrinsicInstrCost of ", intr_name(id as i64), " on vectors")); }
+    } else if id == IID_loop_dependence_war_mask || id == IID_loop_dependence_raw_mask {
         x86_np(str("getIntrinsicInstrCost of ", intr_name(id as i64)));
     } else if id == IID_get_active_lane_mask || id == IID_experimental_vector_match ||
               id == IID_experimental_vector_histogram_add || id == IID_experimental_vector_histogram_uadd_sat ||

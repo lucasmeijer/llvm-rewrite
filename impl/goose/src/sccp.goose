@@ -7,8 +7,7 @@
 // Containers follow LLVM's: InstWorkList is a SetVector (array + in-list bit, pop from the back), BBWorkList a
 // vector, KnownFeasibleEdges a set of (from, to), TrackedRetVals / TrackedMultipleRetVals MapVectors
 // (insertion order), AdditionalUsers per value a SetVector (insertion order). Function specialization
-// (FunctionSpecialization.cpp) is not ported: it fails loudly when a candidate function is large enough to
-// be considered.
+// (FunctionSpecialization.cpp) is funcspec.goose.
 import std;
 import ir;
 import irutil;
@@ -36,6 +35,7 @@ import tli;
 import mem2reg;
 import implied;
 import analyses;
+import funcspec;
 
 fn sc_not_ported(what: const u8[:]) { fatal(str("SCCP: ", what, " is not ported yet")); }
 
@@ -50,7 +50,8 @@ let SB_ARGTRACK: u32 = 8;
 let SB_MUSTPRES: u32 = 16;
 let SB_HASPI: u32 = 32;
 let SB_INSERTED: u32 = 64;
-let SB_NUMBERED: u32 = 128;      // block: instruction order numbers (rec.ord) are valid
+let SB_NUMBERED: u32 = 128;
+let SB_INVAL: u32 = 256;         // funcspec.goose: in the solver's Invalidated set      // block: instruction order numbers (rec.ord) are valid
 
 var sc_recs: ScRec[>..];
 var sc_epoch: u32 = 0;
@@ -1020,6 +1021,7 @@ fn sc_solve() {
         while sc_iwl.len > 0 {
             let i = sc_iwl.pop();
             sc_clear_bit(i, SB_INWL);
+            sc_clear_bit(i, SB_INVAL);
             sc_visit(i);
         }
         while sc_bbwl.len > 0 {
@@ -1833,72 +1835,6 @@ fn sc_terminating_musttail_call(b: i32) -> i32 {
     return -1;
 }
 
-// FunctionSpecializer::run with its default options (FunctionSpecialization.cpp is not ported). A function is
-// specialized only if (1) isCandidateFunction holds, (2) its code size (CodeMetrics over TTI TCK_CodeSize
-// costs) reaches funcspec-min-function-size = 500, and (3) findSpecializations finds an executable direct
-// call site passing a candidate constant (getCandidateConstant) for an interesting argument
-// (isArgumentInteresting), or promoteConstantStackValues applies (recursive functions). We fail loudly when
-// (1) and (3) hold and a generous upper bound of the code size reaches 500.
-fn sc_spec_size_bound(f: i32) -> i64 {
-    var n: i64 = 0;
-    each_inst(f) { i =>
-        if is_callbase(i) { n += 4 + 2 * cb_nargs(i); }
-        else if ty_is_vector(vals[i].ty) || (nops(i) > 0 && op(i, 0) >= 0 && ty_is_vector(vals[op(i, 0)].ty)) { n += 64; }
-        else { n += 4; }
-    };
-    return n;
-}
-fn sc_arg_interesting(a: i32) -> bool {
-    if first_use(a) < 0 { return false; }
-    let t = vals[a].ty;
-    let k = ty_kind(t);
-    if k != TK_PTR && k != TK_INT && !ty_is_fp(t) && k != TK_STRUCT { return false; }
-    let f = args_parent[vals[a].sub];
-    if arg_has_attr(a, AK_ByVal) && !me_only_reads(aset_memory(alist_fn(globs[glob_of(f)].attrs))) { return false; }
-    if !sc_bit(f, SB_ARGTRACK) { return true; }
-    if sc_is_struct(a) {
-        for e in ty_count(t) { if sc_is_overdefined_lv(sc_gsv(a, e)) { return true; } }
-        return false;
-    }
-    return sc_is_overdefined_lv(sc_lattice(a));
-}
-fn sc_candidate_constant(v: i32) -> i32 {
-    if vals[v].kind == VK_POISON { return -1; }
-    var c = if is_constant(v) { v } else { sc_get_constant_or_null(v) };
-    if c >= 0 && ty_kind(vals[c].ty) == TK_PTR && !is_null_value(c) {
-        let u = get_underlying_object(c, 10);
-        if is_gvar(u) && globs[glob_of(u)].is_const == 0 { return -1; }
-    }
-    return c;
-}
-fn sc_check_func_spec(m: i32) {
-    var f = modules[m].first_func;
-    while f >= 0 {
-        let g = glob_of(f);
-        if !func_is_decl(f) && globs[g].nargs > 0 && !sc_is_interposable(f) && !func_has_fn_attr(f, AK_NoDuplicate) &&
-           !func_has_fn_attr(f, AK_OptimizeForSize) && !func_has_fn_attr(f, AK_MinSize) && sc_bit(func_entry(f), SB_EXEC) &&
-           !func_has_fn_attr(f, AK_AlwaysInline) {
-            var hit = false;
-            var recursive_ptr = false;
-            var u = first_use(f);
-            while u >= 0 {
-                let cs = uses[u].user;
-                if is_inst(cs) && (iop(cs) == OP_CALL || iop(cs) == OP_INVOKE) && called_function(cs) == f && sc_bit(inst_parent(cs), SB_EXEC) {
-                    for k in func_nargs(f) {
-                        if sc_arg_interesting(func_arg(f, k)) && sc_candidate_constant(cb_arg(cs, k)) >= 0 { hit = true; }
-                        if inst_func(cs) == f && ty_kind(vals[cb_arg(cs, k)].ty) == TK_PTR { recursive_ptr = true; }
-                    }
-                }
-                u = use_next(u);
-            }
-            if (hit || recursive_ptr) && sc_spec_size_bound(f) >= 500 {
-                sc_not_ported(str("function specialization (", val_name(f), " may be a specialization candidate)"));
-            }
-        }
-        f = globs[g].next;
-    }
-}
-
 fn sc_update_mem_attrs(al: i32) -> i32 {
     let s = alist_fn(al);
     let me = aset_memory(s);
@@ -1938,12 +1874,14 @@ fn ipsccp_run(m: i32, func_spec: bool) -> bool {
         f = modules[m].first_func;
         while f >= 0 { if sc_resolved_undefs_in(f) { again = true; } f = globs[glob_of(f)].next; }
     }
-    if func_spec { sc_check_func_spec(m); }
+    if func_spec { fs_run_iterations(m); }
     var changed = false;
     f = modules[m].first_func;
     while f >= 0 {
         let nf = globs[glob_of(f)].next;
         if func_is_decl(f) { f = nf; continue; }
+        // FunctionSpecializer::isDeadFunction: removed by the specializer's destructor
+        if func_spec && fs_is_dead_function(f) { changed = true; f = nf; continue; }
         tli_cur_fn = f;
         m2r_collect_records(f);
         var dead: i32[>..<] = [];
@@ -2047,6 +1985,7 @@ fn ipsccp_run(m: i32, func_spec: bool) -> bool {
         changed = true;
         sc_erase_global(gvv);
     }
+    if func_spec { fs_finish(); }
     vt_invalidate_assumes();
     return changed;
 }

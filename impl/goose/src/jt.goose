@@ -1700,7 +1700,8 @@ fn jt_split_edge(bb: i32, succ: i32) -> i32 {
     if is_critical_edge(t, sn, false) { return split_known_critical_edge(t, sn, o, ""); }
     let sp = single_pred(succ);
     if sp >= 0 { jt_not_ported("SplitEdge through splitBlockBefore"); }
-    return split_block(bb, t, "");
+    // SplitBlock(BB, BB->getTerminator()): an empty name becomes Old->getName() + ".split"
+    return split_block(bb, t, str(val_name(bb), ".split"));
 }
 
 // duplicateCondBranchOnPHIIntoPred

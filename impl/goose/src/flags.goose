@@ -161,6 +161,10 @@ let KNOWN_FLAGS_MISC: const u8[:][] = [
     "float2int-max-integer-bw", "tre-disable-entrycount-recompute", "callsite-splitting-duplication-threshold",
     "move-auto-init-threshold", "disable-lower-comment-string", "cvp-max-functions-per-value",
     "jump-table-to-switch-size-threshold", "jump-table-to-switch-function-size-threshold",
+    "force-specialization", "funcspec-max-clones", "funcspec-max-discovery-iterations", "funcspec-max-incoming-phi-values",
+    "funcspec-max-block-predecessors", "funcspec-min-function-size", "funcspec-max-codesize-growth",
+    "funcspec-min-codesize-savings", "funcspec-min-latency-savings", "funcspec-min-inlining-bonus", "funcspec-on-address",
+    "funcspec-for-literal-constant", "funcspec-max-iters",
 ];
 
 // Flags whose non-default value is not supported (checked before the pipeline runs).
