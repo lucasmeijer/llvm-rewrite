@@ -18,9 +18,9 @@
 
 ## Status
 
-- L2.inline 446/466 opt+roundtrip (all roundtrips). The 20 left need other units: `-O1/-O2/-O3`/`default<On>`
-  pipelines (11), `partial-inliner`, `mergefunc`, `globaldce`, `globalopt`, `scc-oz-module-inliner`
-  and `-inline-priority-mode=ml` (needs the ML model). L2.function-attrs 106/118:
+- L2.inline 449/466 opt+roundtrip (all roundtrips). The 17 left need other units: `-O1/-O2/-O3`/`default<On>`
+  pipelines (13, incl. devirtualize-4's second RUN line), `partial-inliner` (2; PartialInlining + CodeExtractor),
+  `mergefunc` (1) and `scc-oz-module-inliner` (1, the Oz inliner pipeline). L2.function-attrs 106/118:
   the 12 left are `attributor-light` (11) and `-O3`. Whole-file sweeps `inline`, `always-inline`, `module-inline`,
   `cgscc(function-attrs)`, `cgscc(devirt<4>(inline,function-attrs))`, plain and `--with-test-flags`, plus
   tests/perf/compile and tests/perf/scaling: 0 differs, 0 bad-ir; the only loud failures left are other passes'

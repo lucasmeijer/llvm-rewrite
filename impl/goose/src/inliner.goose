@@ -9,8 +9,8 @@
 // (llvm/lib/Transforms/Utils/ModuleUtils.cpp), tryPromoteCall / isLegalToPromote / promoteCall
 // (llvm/lib/Transforms/Utils/CallPromotionUtils.cpp) and getFunctionAtVTableOffset / getPointerAtOffset
 // (llvm/lib/Analysis/TypeMetadataUtils.cpp).
-// Not ported (fail loudly): replay / ML advisors, promoting a call whose types differ from the callee's,
-// contextual profiles, remarks.
+// Not ported (fail loudly): replay / ML advisors (the ML *priority* is ported), promoting a call whose types
+// differ from the callee's, contextual profiles, remarks.
 import std;
 import ir;
 import irutil;
@@ -43,7 +43,6 @@ fn inl_not_ported(what: const u8[:]) { fatal(str("Inliner: ", what, " is not por
 fn inl_check_flags() {
     if flag_str("cgscc-inline-replay").len > 0 { inl_not_ported("-cgscc-inline-replay"); }
     if flag_bool("enable-scc-inline-advisor-printing", false) { inl_not_ported("-enable-scc-inline-advisor-printing"); }
-    if flag_str("inline-priority-mode") == "ml" { inl_not_ported("-inline-priority-mode=ml"); }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -622,7 +621,7 @@ fn ai_try_inline(cb: i32, callee: i32, want_sites: bool) -> bool {
 var io_heap: i32[>..<];
 var io_prio = hm_new();
 var io_bonus = hm_new();
-var io_mode: i64 = 0;       // 0 size, 1 cost, 2 cost-benefit
+var io_mode: i64 = 0;       // 0 size, 1 cost (and ml), 2 cost-benefit
 var io_params: IParams;
 var io_with_psi: bool = false;
 
@@ -733,7 +732,9 @@ fn module_inliner_run(m: i32) -> u32 {
     inl_check_flags();
     let mode = flag_str("inline-priority-mode");
     io_mode = 0;
-    if mode == "cost" { io_mode = 1; } else if mode == "cost-benefit" { io_mode = 2; }
+    // MLPriority (InlineOrder.cpp) is CostPriority under another name: the cost of a variable InlineCost, else
+    // INT_MAX / INT_MIN, smaller first; no model is involved
+    if mode == "cost" || mode == "ml" { io_mode = 1; } else if mode == "cost-benefit" { io_mode = 2; }
     else if mode.len > 0 && mode != "size" { fatal(str("opt: for the --inline-priority-mode option: Cannot find option named '", mode, "'!")); }
     io_params = get_inline_params();
     io_with_psi = psi_cached();

@@ -5235,6 +5235,7 @@ tests/imported/llvm/Transforms/Inline/memprof_inline2.ll::opt
 tests/imported/llvm/Transforms/Inline/memprof_inline2.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/memprof_inline3.ll::opt
 tests/imported/llvm/Transforms/Inline/memprof_inline3.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/module-inliner-basic.ll::opt
 tests/imported/llvm/Transforms/Inline/module-inliner-basic.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/module-inliner-cba-crash.ll::opt
 tests/imported/llvm/Transforms/Inline/module-inliner-cba-crash.ll::roundtrip
