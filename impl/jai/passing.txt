@@ -729,6 +729,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Bubblesort.ll::op
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Bubblesort.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/FloatMM.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/FloatMM.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/IntMM.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/IntMM.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Oscar.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Oscar.ll::roundtrip
@@ -842,6 +843,7 @@ tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-10-12-StructureArgsSim
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-10-12-StructureArgsSimple.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-10-13-BadLoad.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-10-13-BadLoad.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-12-13-MishaTest.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-12-13-MishaTest.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2003-04-22-Switch.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2003-04-22-Switch.ll::roundtrip
@@ -11135,6 +11137,7 @@ tests/imported/llvm/Transforms/LoopVectorize/X86/reduction-fastmath.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/reduction-fastmath.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/register-assumption.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/register-assumption.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/X86/scatter_crash.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/scatter_crash.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/slm-no-vectorize.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/slm-no-vectorize.ll::roundtrip
@@ -11333,7 +11336,9 @@ tests/imported/llvm/Transforms/LoopVectorize/hoist-and-sink-mem-ops-with-invaria
 tests/imported/llvm/Transforms/LoopVectorize/hoist-and-sink-mem-ops-with-invariant-pointers.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/hoist-loads.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/hoist-loads.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/hoist-predicated-loads-with-predicated-stores.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/hoist-predicated-loads-with-predicated-stores.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/hoist-predicated-loads.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/hoist-predicated-loads.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/i8-induction.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/i8-induction.ll::roundtrip
@@ -11593,6 +11598,7 @@ tests/imported/llvm/Transforms/LoopVectorize/ptr_loops.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/ptr_loops.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/read-only.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/read-only.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/reduction-align.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/reduction-align.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction-inloop-cond.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction-inloop-min-max.ll::opt
@@ -11607,6 +11613,7 @@ tests/imported/llvm/Transforms/LoopVectorize/reduction-predselect.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction-ptr.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/reduction-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction-small-size.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/reduction-with-invariant-store.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/reduction-with-invariant-store.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/reduction.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/reduction.ll::roundtrip
@@ -12209,6 +12216,7 @@ tests/imported/llvm/Transforms/PhaseOrdering/X86/pr38280.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pr38280.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pr48223.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pr48223.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/X86/pr48844-br-to-switch-vectorization.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pr48844-br-to-switch-vectorization.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pr50392.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/X86/pr50392.ll::roundtrip
