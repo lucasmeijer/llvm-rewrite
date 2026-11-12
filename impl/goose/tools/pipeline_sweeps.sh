@@ -6,7 +6,7 @@
 #   impl/goose/tools/pipeline_sweeps.sh                 # all pipelines, corpus + perf, with and without debugify
 #   impl/goose/tools/pipeline_sweeps.sh -k 3            # only pipeline #3
 #   SWEEP_ARGS='--per-function' impl/goose/tools/pipeline_sweeps.sh -k 1
-#   NO_DEBUGIFY=1 / NO_PERF=1 / NO_CORPUS=1 / NO_SPLIT=1 to skip parts
+#   NO_DEBUGIFY=1 / NO_PERF=1 / NO_CORPUS=1 / NO_SPLIT=1 / NO_WHOLE=1 to skip parts (NO_WHOLE: only the split runs)
 #
 # Artifacts: .harness-out/sweep/goose/<args>/ as for every sweep (a copy per label: <dir>.<label>). Passes Goose
 # doesn't have yet (mldst-motion, the vectorizers, globalopt, ...) are left out. Results: impl/goose/NOTES.md
@@ -76,6 +76,7 @@ out.append(cur)
 print(",".join(x if x.startswith(("cgscc(","function(","module(")) else "function(%s)" % x for x in out))' "${P[$i]}")
     summary "split corpus" --passes "$sp"
   fi
+  [ -n "${NO_WHOLE:-}" ] && continue
   for dbg in "" "debugify,"; do
     [ -n "$dbg" ] && [ -n "${NO_DEBUGIFY:-}" ] && continue
     tag=${dbg:+dbg }

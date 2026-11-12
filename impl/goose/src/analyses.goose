@@ -1,8 +1,10 @@
 // Analysis ids and preserved-analysis sets (llvm/include/llvm/IR/PassManager.h PreservedAnalyses), shared by
-// the pass manager and every pass. Bit i of a preserved set = analysis A_i is preserved. PA_CFG is LLVM's
-// preserveSet<CFGAnalyses>: every analysis that only depends on the CFG (DominatorTree, PostDominatorTree,
-// LoopInfo, CycleInfo). A pass that changes the CFG but updates some trees returns those bits explicitly
-// (ADCE: dom | postdom, not loops).
+// the pass manager and every pass. Bit i of a preserved set = analysis A_i is preserved. Analysis sets are
+// expanded into their members' bits, so abandon<X> (invalidate<X>: PA_ALL without X's bit) beats any set, as in
+// PreservedAnalyses::getChecker. PA_CFG is LLVM's preserveSet<CFGAnalyses>: the bits of every analysis whose
+// invalidate() accepts that set (DominatorTree, PostDominatorTree, LoopInfo, CycleInfo, BranchProbabilityInfo,
+// BlockFrequencyInfo). A pass that changes the CFG but updates some trees returns those bits explicitly (ADCE:
+// dom | postdom, not loops). The invalidation rules themselves are fam.goose's.
 let A_DOMTREE = 0;
 let A_POSTDOMTREE = 1;
 let A_DEMANDED_BITS = 2;     // computed per query; listed so require<>/invalidate<> parse
@@ -24,7 +26,9 @@ let A_LCG = 27;              // LazyCallGraphAnalysis (module)
 let A_FAMPROXY = 28;         // FunctionAnalysisManagerCGSCCProxy
 let A_SCC_ALL = 29;          // AllAnalysesOn<LazyCallGraph::SCC>
 let A_NOOP_CGSCC = 30;       // NoOpCGSCCAnalysis
+let A_FAM_MPROXY = 31;       // FunctionAnalysisManagerModuleProxy: a module pass that doesn't preserve it clears
+                             // every function's results (FAM.clear(), the AssumptionCache too)
 let PA_FN: u32 = 0x07FFFFFF; // every function analysis (bits 0..26): AllAnalysesOn<Function>
 let PA_ALL: u32 = 0xFFFFFFFF;
 let PA_NONE: u32 = 0;
-let PA_CFG: u32 = 0x1B;      // domtree | postdomtree | loops | cycles
+let PA_CFG: u32 = 0x601B;    // domtree | postdomtree | loops | cycles | bpi | bfi

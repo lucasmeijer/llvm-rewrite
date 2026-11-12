@@ -15,6 +15,7 @@
 // scev_range.goose (ranges, nowrap inference), scev_btc.goose (backedge-taken counts, exit limits),
 // scev_pred.goose (isKnownPredicate / isImpliedCond), scev_print.goose (print<scalar-evolution>).
 import std;
+import scev_archive;
 import scev_eval;
 import scev_lt;
 import scev_guards;
@@ -416,22 +417,13 @@ recursive fn scev_reset() {
     sc_side_grow();
 }
 
-// LLVM keeps one ScalarEvolution per function in the FunctionAnalysisManager; we keep only the current one. A
-// result that a transform kept up to date (preserved it while changing the IR: indvars, loop-rotate, ...) is not
-// what a recomputation gives (cached trip counts in terms of the old values, inferred flags), so when another
-// function's result replaces such a result and the first function asks again while LLVM would still have it
-// cached (function(loop(indvars)),function(loop-unroll)), we fail loudly instead of answering from scratch.
-var sc_dirty: bool = false;           // the current result survived an IR change
-var sc_lost: i32[>..<];               // functions whose (dirty) result LLVM would still have
-fn scev_note_preserved_change(fv: i32) { if sc_valid && sc_fv == fv { sc_dirty = true; } }
-
+// LLVM keeps one ScalarEvolution per function in the FunctionAnalysisManager. The loaded one is in the tables
+// above (sc_fv); the others are archived (scev_archive.goose) and swapped in on use.
+// AM.getResult<ScalarEvolutionAnalysis>(F)
 recursive fn scev_get(fv: i32) {
     if sc_valid && sc_fv == fv { return; }
-    if sc_valid && sc_dirty { sc_lost.push(sc_fv); }
-    for x in sc_lost {
-        if x == fv { fatal("ScalarEvolution: this function's result was kept up to date by a transform and LLVM would reuse it across function adaptors; one ScalarEvolution per function is not ported yet"); }
-    }
-    sc_dirty = false;
+    scev_stash();
+    if scev_unstash(fv) { return; }
     sc_read_flags();
     scev_reset();
     sc_fv = fv;
@@ -440,11 +432,17 @@ recursive fn scev_get(fv: i32) {
     li_get(fv);
     sc_init_has_guards(fv);
 }
-recursive fn scev_valid(fv: i32) -> bool { sc_valid && sc_fv == fv }
+// AM.getCachedResult<ScalarEvolutionAnalysis>(F) != nullptr (loads it)
+recursive fn scev_valid(fv: i32) -> bool {
+    if sc_valid && sc_fv == fv { return true; }
+    if !scev_archived(fv) { return false; }
+    scev_get(fv);
+    return true;
+}
+// the FunctionAnalysisManager drops F's result
 recursive fn scev_invalidate(fv: i32) {
-    if sc_fv == fv { sc_valid = false; sc_dirty = false; }
-    var k: i64 = 0;
-    while k < sc_lost.len { if sc_lost[k] == fv { sc_lost[k] = sc_lost[sc_lost.len - 1]; sc_lost.pop(); } else { k++; } }
+    if sc_valid && sc_fv == fv { sc_valid = false; }
+    scev_archive_drop(fv);
 }
 
 // ---------------------------------------------------------------------------------------------

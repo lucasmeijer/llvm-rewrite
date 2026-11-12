@@ -16,6 +16,7 @@
 // functions are one recursive cycle and keep no growable locals.
 // Not ported: -print-instruction-comments / print<inline-cost> (fail loudly), optimization remarks.
 import std;
+import assume;
 import ir;
 import irutil;
 import calls;
@@ -1039,11 +1040,9 @@ fn ca_collect_ephemeral_values(f: i32) {
             if is_inst(o) && !inst_may_have_side_effects(o) && !is_terminator(o) { wl.push(o); }
         }
     }
-    var cell = ia_assumptions_first(f);
-    while cell >= 0 {
-        let a = ia_ac_val[cell];
-        cell = ia_ac_next[cell];
-        if is_dead(a) { continue; }
+    var asms: i32[>..<] = [];
+    ac_assumptions(f, asms);
+    for a in asms {
         if !ca_has(K_EPH, a) { ca_set(K_EPH, a, 1); append_ops(a); }
     }
     var k: i64 = 0;
@@ -1059,35 +1058,8 @@ fn ca_collect_ephemeral_values(f: i32) {
     }
 }
 
-// The AssumptionCache of a function: its assumption list in registration order (the scan order of the first
-// request, then the assumptions registered by the inliner). Lists are linked cells (head/tail per function).
-var ia_ac_head = hm_new();
-var ia_ac_tail = hm_new();
-var ia_ac_val: i32[>..];
-var ia_ac_next: i32[>..];
-fn ia_ac_append(f: i32, a: i32) {
-    let c = ia_ac_val.len as i32;
-    ia_ac_val.push(a);
-    ia_ac_next.push(-1);
-    let key = (f as i64) as u64;
-    let t = hm_get(ia_ac_tail, key, -1) as i32;
-    if t >= 0 { ia_ac_next[t] = c; } else { hm_put(ia_ac_head, key, c as i64); }
-    hm_put(ia_ac_tail, key, c as i64);
-}
-// the first cell of f's list (scanning the function on first use); -1 at the end
-fn ia_assumptions_first(f: i32) -> i32 {
-    let key = (f as i64) as u64;
-    if !hm_has(ia_ac_head, key) {
-        hm_put(ia_ac_head, key, -1);
-        each_inst(f) { i => if inst_iid(i) == IID_assume { ia_ac_append(f, i); } };
-    }
-    return hm_get(ia_ac_head, key, -1) as i32;
-}
-// AssumptionCache::registerAssumption (only once the cache exists)
-fn ia_register_assumption(f: i32, a: i32) {
-    if !hm_has(ia_ac_head, (f as i64) as u64) { return; }
-    ia_ac_append(f, a);
-}
+// The AssumptionCache of a function is assume.goose's (one per function, registration order).
+fn ia_register_assumption(f: i32, a: i32) { ac_register_assumption(a); }
 
 // ---------------------------------------------------------------------------------------------
 // The visitors (InstVisitor dispatch: Base::visitX delegates to the overridden visitBinaryOperator /

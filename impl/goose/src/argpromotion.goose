@@ -648,7 +648,7 @@ fn argpromotion_run_cgscc(c: i32) -> u32 {
             if nf < 0 { continue; }
             local = true;
             lcg_replace_node_function(n, nf);
-            invalidate_function(oldf, PA_NONE);
+            fam_clear(oldf);
             ig_erase_global(oldf, false);
             var u = first_use(nf);
             while u >= 0 {

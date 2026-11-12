@@ -48,7 +48,6 @@ fn du_add_affected_val(v: i32, out: i32[>..<]&) { if is_arg(v) || is_global(v) |
 fn drop_unnecessary_assumes_run(fv: i32, drop_deref: bool) -> u32 {
     tli_cur_fn = fv;
     vt_invalidate_assumes();
-    ac_invalidate();
     var asms: i32[>..<] = [];
     ac_assumptions(fv, asms);
     var changed = false;

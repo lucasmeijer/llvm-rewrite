@@ -431,7 +431,8 @@ fn cg_run_adaptor(n: i32, m: i32) -> u32 {
     for f in ur_dead_fns { func_erase_from_parent(f); }
     ur_dead_fns.resize(0);
     ur_vh_clear();
-    pa |= ((1 as u32) << A_SCC_ALL) | ((1 as u32) << A_LCG) | ((1 as u32) << A_FAMPROXY);
+    // ModuleToPostOrderCGSCCPassAdaptor also preserves FunctionAnalysisManagerModuleProxy
+    pa |= ((1 as u32) << A_SCC_ALL) | ((1 as u32) << A_LCG) | ((1 as u32) << A_FAMPROXY) | ((1 as u32) << A_FAM_MPROXY);
     return pa;
 }
 

@@ -180,7 +180,8 @@ fn mssa_build_loop(l: i32) {
     let fv = block_func(loop_header(l));
     aa_begin(fv);
     dt_get(fv, DT_DOM);
-    mssa_epoch++;
+    mssa_stash();       // the function's MemorySSA, if loaded, stays cached
+    mssa_new_epoch();
     mssa_fn = fv;
     mssa_optimized = false;
     macc.clear();

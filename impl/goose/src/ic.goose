@@ -896,7 +896,6 @@ fn instcombine_run(fv: i32, verify_fixpoint: bool, max_iter: i64) -> u32 {
     local_have_tli = true;
     dt_get(fv, DT_DOM);
     vt_invalidate_assumes();
-    ac_invalidate();
     ic_fn = fv;
     ic_aa_fn = -1;
     ic_experiment_lenient = flag_bool("goose-ic-lenient", false);

@@ -500,7 +500,7 @@ fn inl_run_cgscc(c: i32, only_mandatory: bool) -> u32 {
     for f in dead_fns {
         lcg_mark_dead_function(f);
         let dc = lcg_lookup_scc(lcg_lookup(f));
-        invalidate_function(f, PA_NONE);
+        fam_clear(f);
         ur_mark_invalid(dc);
         ur_dead_fns.push(f);
     }
@@ -546,7 +546,7 @@ fn always_inliner_run(m: i32) -> u32 {
         if fn_has(f, 0, AK_AlwaysInline) && fn_is_def_trivially_dead(f) {
             if globs[glob_of(f)].comdat >= 0 { comdat_fns.push(f); }
             else {
-                invalidate_function(f, PA_NONE);
+                fam_clear(f);
                 func_erase_from_parent(f);
                 changed = true;
             }
@@ -594,7 +594,7 @@ fn always_inliner_run(m: i32) -> u32 {
     if comdat_fns.len > 0 {
         filter_dead_comdat_functions(comdat_fns);
         for cf in comdat_fns {
-            invalidate_function(cf, PA_NONE);
+            fam_clear(cf);
             func_erase_from_parent(cf);
             changed = true;
         }
@@ -799,7 +799,7 @@ fn module_inliner_run(m: i32) -> u32 {
         }
     }
     for d in dead {
-        invalidate_function(d, PA_NONE);
+        fam_clear(d);
         func_erase_from_parent(d);
     }
     if !changed { return PA_ALL; }

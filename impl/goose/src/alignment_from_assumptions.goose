@@ -128,7 +128,6 @@ fn afa_process(a: i32, idx: i64) -> bool {
 fn alignment_from_assumptions_run(fv: i32) -> u32 {
     tli_cur_fn = fv;
     vt_invalidate_assumes();
-    ac_invalidate();
     dt_get(fv, DT_DOM);
     scev_get(fv);
     var asms: i32[>..<] = [];

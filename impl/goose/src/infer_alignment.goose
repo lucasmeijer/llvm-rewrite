@@ -151,7 +151,6 @@ fn ia_try_improve(i: i32) -> bool {
 fn infer_alignment_run(fv: i32) -> u32 {
     tli_cur_fn = fv;
     vt_invalidate_assumes();
-    ac_invalidate();
     dt_get(fv, DT_DOM);
     ia_mode = 0;
     var bb = func_first_block(fv);

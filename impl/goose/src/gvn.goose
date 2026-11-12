@@ -2575,7 +2575,6 @@ fn gvn_run(fv: i32, arg: i32) -> u32 {
     gv_scan_users_limit = flag_int("gvn-scan-users-limit", 100);
     dt_get(fv, DT_DOM);
     vt_invalidate_assumes();
-    ac_invalidate();
     aa_begin(fv);
     gv_md = gv_memdep;
     if gv_md { mdep_begin(fv); }

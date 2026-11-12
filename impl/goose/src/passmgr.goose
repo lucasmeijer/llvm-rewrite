@@ -1172,29 +1172,54 @@ fn should_run(n: i32, unit: const u8[:]) -> bool {
     return run;
 }
 
-// Drop analyses of fv that the pass didn't preserve.
+// ---------------------------------------------------------------------------------------------
+// The FunctionAnalysisManager (llvm/include/llvm/IR/PassManager.h, PassManagerImpl.h; DESIGN.md §9.1). Every
+// analysis keeps one result per function (each in its own module: per-function tables, or one loaded instance
+// plus an archive), so results persist across adaptors until these rules drop them.
+
+// AnalysisManager::invalidate(F, PA): each cached result's invalidate() as LLVM defines it, with Invalidator
+// dependencies (a result whose dependency is invalidated goes too). A bit of `preserved` = that analysis
+// preserved; preserveSet<CFGAnalyses> and AllAnalysesOn<Function> are expanded into bits (PA_CFG, PA_FN).
+fn pa_kept(pa: u32, a: i64) -> bool { (pa & ((1 as u32) << a)) != 0 }
 fn invalidate_function(fv: i32, preserved: u32) {
     if preserved == PA_ALL { return; }
-    // a pass that changed fv and kept its ScalarEvolution (see scev_get)
-    if (preserved & (1 << A_SCEV)) != 0 && (preserved & (1 << A_DOMTREE)) != 0 && (preserved & (1 << A_LOOPS)) != 0 { scev_note_preserved_change(fv); }
     if (preserved & PA_FN) == PA_FN { return; }
     slots_invalidate();
-    if (preserved & (1 << A_LRT)) == 0 { ic::ic_lrt_invalidate(fv); }
-    if (preserved & (1 << A_DOMTREE)) == 0 { dt_invalidate(fv, DT_DOM); }
-    if (preserved & (1 << A_POSTDOMTREE)) == 0 { dt_invalidate(fv, DT_POST); }
-    if (preserved & (1 << A_LOOPS)) == 0 { li_invalidate(fv); }
-    if (preserved & (1 << A_CYCLES)) == 0 { ci_invalidate(fv); }
-    // MemorySSAAnalysis::Result::invalidate: not preserved, or AAManager / DominatorTree invalidated. AAManager is
-    // stateless (preservedWhenStateless): only invalidate<aa> abandons it (PA_ALL without the A_AA bit).
-    let aa_abandoned = preserved == (PA_ALL & ~((1 as u32) << A_AA));
-    if (preserved & (1 << A_MEMORYSSA)) == 0 || (preserved & (1 << A_DOMTREE)) == 0 || aa_abandoned { mssa_invalidate(fv); }
-    // ScalarEvolution::invalidate: also when the domtree or loops go
-    if (preserved & (1 << A_SCEV)) == 0 || (preserved & (1 << A_DOMTREE)) == 0 || (preserved & (1 << A_LOOPS)) == 0 { scev_invalidate(fv); }
+    // DominatorTree, PostDominatorTree, LoopInfo, CycleInfo: preserved, AllAnalysesOn<Function> or CFGAnalyses
+    let dt_inv = !pa_kept(preserved, A_DOMTREE);
+    let li_inv = !pa_kept(preserved, A_LOOPS);
+    if !pa_kept(preserved, A_LRT) { ic::ic_lrt_invalidate(fv); }
+    if dt_inv { dt_invalidate(fv, DT_DOM); }
+    if !pa_kept(preserved, A_POSTDOMTREE) { dt_invalidate(fv, DT_POST); }
+    if li_inv { li_invalidate(fv); }
+    if !pa_kept(preserved, A_CYCLES) { ci_invalidate(fv); }
+    // AAResults::invalidate: abandoned (preservedWhenStateless fails only for invalidate<aa>: PA_ALL without the
+    // bit), or a dependency invalidated: BasicAA (AssumptionCache: never; DominatorTree)
+    let aa_inv = preserved == (PA_ALL & ~((1 as u32) << A_AA)) || dt_inv;
+    // MemorySSAAnalysis::Result::invalidate: not preserved, or AAManager / DominatorTree invalidated
+    if !pa_kept(preserved, A_MEMORYSSA) || aa_inv || dt_inv { mssa_invalidate(fv); }
+    // ScalarEvolution::invalidate: not preserved, or AssumptionCache (never) / DominatorTree / LoopInfo invalidated
+    if !pa_kept(preserved, A_SCEV) || dt_inv || li_inv { scev_invalidate(fv); }
     // LazyValueInfo::invalidate: only when not preserved (its AssumptionCache is never invalidated)
-    if (preserved & (1 << A_LVI)) == 0 { lvi_invalidate(fv); }
-    // BranchProbabilityInfo / BlockFrequencyInfo::invalidate: kept when preserved or when the CFG analyses are
-    if (preserved & (1 << A_BPI)) == 0 && (preserved & PA_CFG) != PA_CFG { bpi_invalidate(); }
-    if (preserved & (1 << A_BFI)) == 0 && (preserved & PA_CFG) != PA_CFG { bfi_invalidate(fv); }
+    if !pa_kept(preserved, A_LVI) { lvi_invalidate(fv); }
+    // BranchProbabilityInfo / BlockFrequencyInfo::invalidate: kept when preserved or CFGAnalyses are (PA_CFG has
+    // their bits)
+    if !pa_kept(preserved, A_BPI) { bpi_invalidate(fv); }
+    if !pa_kept(preserved, A_BFI) { bfi_invalidate(fv); }
+}
+
+// FAM.clear(F): every result of F goes, the AssumptionCache too (a deleted function; a module pass that doesn't
+// preserve FunctionAnalysisManagerModuleProxy clears every function)
+fn fam_clear(fv: i32) {
+    invalidate_function(fv, PA_NONE);
+    ac_clear(fv);
+}
+
+// A pass is about to run on fv: load fv's archived results whose value-handle callbacks LLVM's live objects
+// would receive while fv changes (ScalarEvolution; the AssumptionCache's AffectedValueCallbackVH).
+fn fam_enter(fv: i32) {
+    if scev_archived(fv) { scev_get(fv); }
+    ac_enter(fv);
 }
 
 fn require_analysis(fv: i32, a: i64) {
@@ -1378,6 +1403,7 @@ recursive fn run_loop_list(n: i32, l: i32, fv: i32) -> u32 {
 
 // FunctionToLoopPassAdaptor::run
 fn run_loop_adaptor(n: i32, fv: i32) {
+    fam_enter(fv);
     st_touch(fv);   // LoopStandardAnalysisResults (TTI, AC), requested even for a function without loops
     // the canonicalization pipeline (LoopSimplifyPass, LCSSAPass), a required function pass manager
     var pa = PA_ALL;
@@ -1436,6 +1462,7 @@ recursive fn run_function_node(n: i32, fv: i32) {
         return;
     }
     if pnodes[n].kind == PK_LOOP { run_loop_adaptor(n, fv); return; }
+    fam_enter(fv);
     if !should_run(n, val_name(fv)) { return; }
     // OptNoneInstrumentation::shouldRun (after OptBisect has counted the pass, as both callbacks run)
     if !pnodes[n].required && aset_has(alist_fn(globs[glob_of(fv)].attrs), AK_OptimizeNone) { return; }
@@ -1466,7 +1493,7 @@ recursive fn run_module_node(n: i32, m: i32) {
             f = nf;
         }
         // the adaptor preserves AllAnalysesOn<Function> and the proxy, not module analyses
-        module_invalidate(m, fn_pa_acc | PA_FN);
+        module_invalidate(m, fn_pa_acc | PA_FN | ((1 as u32) << A_FAM_MPROXY));
         return;
     }
     if k == PK_CGSCC {
@@ -1485,23 +1512,14 @@ recursive fn run_module_node(n: i32, m: i32) {
         if ipsccp_run(m, pnodes[n].arg != 0) {
             lcg_invalidate();
             // preserves DominatorTreeAnalysis, PostDominatorTreeAnalysis and the function analysis proxy
-            var f = modules[m].first_func;
-            while f >= 0 {
-                if !func_is_decl(f) { invalidate_function(f, (1 << A_DOMTREE) | (1 << A_POSTDOMTREE)); }
-                f = globs[glob_of(f)].next;
-            }
+            invalidate_module_functions(m, (1 << A_DOMTREE) | (1 << A_POSTDOMTREE) | ((1 as u32) << A_FAM_MPROXY));
         }
         ap_pool_reset();
         return;
     }
     if p == P_INFERATTRS {
         if inferattrs_run(m) {
-            lcg_invalidate();
-            var f = modules[m].first_func;
-            while f >= 0 {
-                if !func_is_decl(f) { invalidate_function(f, PA_NONE); }
-                f = globs[glob_of(f)].next;
-            }
+            module_invalidate(m, PA_NONE);
             gm_invalidate();
         }
         ap_pool_reset();
@@ -1519,7 +1537,7 @@ recursive fn run_module_node(n: i32, m: i32) {
     if p == P_INLINER_WRAPPER { let pa = inliner_wrapper_run(m, pnodes[n].arg != 0); module_invalidate(m, pa); ap_pool_reset(); return; }
     if p == P_RPO_FUNCTION_ATTRS { let pa = rpo_function_attrs_run(m); module_invalidate(m, pa); ap_pool_reset(); return; }
     if p == P_NORECURSE_LTO { let pa = norecurse_lto_run(m); module_invalidate(m, pa); ap_pool_reset(); return; }
-    if p == P_DEBUGIFY { lcg_invalidate(); debugify_run(m); invalidate_module_functions(m, PA_CFG); return; }
+    if p == P_DEBUGIFY { lcg_invalidate(); debugify_run(m); invalidate_module_functions(m, PA_CFG); return; }   // no FAM proxy: clears
     if p == P_CHECK_DEBUGIFY { check_debugify_run(m); return; }
     if p == P_INVALIDATE_GLOBALS_AA { gm_invalidate(); return; }
     if p == P_ASSIGN_GUID { assign_guid_run(m); return; }
@@ -1527,7 +1545,7 @@ recursive fn run_module_node(n: i32, m: i32) {
         if globalopt_run(m) {
             gm_invalidate();
             // PreservedAnalyses::none() + FunctionAnalysisManagerModuleProxy + CFGAnalyses
-            module_invalidate(m, PA_CFG);
+            module_invalidate(m, PA_CFG | ((1 as u32) << A_FAM_MPROXY));
         }
         ap_pool_reset();
         return;
@@ -1567,17 +1585,22 @@ recursive fn run_module_node(n: i32, m: i32) {
 
 // A module pass's PreservedAnalyses: module analyses (the call graph, the profile summary is immutable) and,
 // through FunctionAnalysisManagerModuleProxy, the function analyses of every definition.
+// FunctionAnalysisManagerModuleProxy::Result::invalidate: not preserved -> FAM.clear(); else every function is
+// invalidated with PA unless AllAnalysesOn<Function> is preserved.
 fn module_invalidate(m: i32, pa: u32) {
     if pa == PA_ALL { return; }
     if (pa & ((1 as u32) << A_LCG)) == 0 { lcg_invalidate(); }
-    if (pa & PA_FN) != PA_FN { invalidate_module_functions(m, pa); }
+    invalidate_module_functions(m, pa);
 }
 
-// invalidate the function analyses of every definition not in the preserved set (a module pass's result)
+// the function-analysis part of module_invalidate
 fn invalidate_module_functions(m: i32, pa: u32) {
+    if pa == PA_ALL { return; }
+    let clear = (pa & ((1 as u32) << A_FAM_MPROXY)) == 0;
+    if !clear && (pa & PA_FN) == PA_FN { return; }
     var f = modules[m].first_func;
     while f >= 0 {
-        if !func_is_decl(f) { invalidate_function(f, pa); }
+        if !func_is_decl(f) { if clear { fam_clear(f); } else { invalidate_function(f, pa); } }
         f = globs[glob_of(f)].next;
     }
 }

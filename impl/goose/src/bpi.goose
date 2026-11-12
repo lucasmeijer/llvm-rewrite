@@ -86,12 +86,24 @@ fn bp_normalize(ps: u32[>..<]&) {
 // ---------------------------------------------------------------------------------------------
 // The result: edge probabilities per block
 
-var bpi_fn: i32 = -1;
+// One result per function (BranchProbabilityAnalysis results in the FunctionAnalysisManager): blocks are global
+// ids, so every function's edges share bpi_start/bpi_probs; bpi_has[glob] says which functions have a result.
+var bpi_fn: i32 = -1;            // the function computed last (LastF, for printing)
 var bpi_probs: u32[>..<];
 var bpi_start = hm_new();
+var bpi_has: bool[>..];
+var bpi_count: i64 = 0;
 
-fn bpi_valid(fv: i32) -> bool { bpi_fn == fv && fv >= 0 }
-fn bpi_invalidate() { bpi_fn = -1; bpi_probs.clear(); hm_clear(bpi_start); }
+fn bpi_valid(fv: i32) -> bool { fv >= 0 && (glob_of(fv) as i64) < bpi_has.len && bpi_has[glob_of(fv)] }
+// the FunctionAnalysisManager drops fv's result
+fn bpi_invalidate(fv: i32) {
+    if !bpi_valid(fv) { return; }
+    bpi_has[glob_of(fv)] = false;
+    bpi_count--;
+    if bpi_count == 0 { bpi_probs.clear(); hm_clear(bpi_start); return; }
+    var bb = func_entry(fv);
+    while bb >= 0 { hm_del(bpi_start, bpi_key(bb)); bb = block_next(bb); }
+}
 fn bpi_key(bb: i32) -> u64 { (bb as i64) as u64 }
 fn bpi_nsucc(bb: i32) -> i64 { let t = block_terminator(bb); if t < 0 { 0 } else { term_nsucc(t) } }
 
@@ -748,9 +760,11 @@ fn bpi_compute(fv: i32) {
     tli_cur_fn = fv;
     dt_get(fv, DT_DOM);
     dt_get(fv, DT_POST);
+    bpi_invalidate(fv);
     bpi_fn = fv;
-    bpi_probs.clear();
-    hm_clear(bpi_start);
+    while bpi_has.len <= (glob_of(fv) as i64) { bpi_has.push(false); }
+    bpi_has[glob_of(fv)] = true;
+    bpi_count++;
     hm_clear(bc_block_weight);
     hm_clear(bc_loop_weight);
     bc_scc_info(fv);

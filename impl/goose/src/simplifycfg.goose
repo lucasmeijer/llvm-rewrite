@@ -1589,6 +1589,8 @@ fn fold_cond_branch_known_in_pred_impl(bi: i32) -> i64 {
                 while cursor != cur { inst_clone_debug_info_from(n, cursor, -1, false, nrecs); cursor = inst_next(cursor); }
                 cursor = inst_next(cur);
                 inst_clone_debug_info_from(n, cur, -1, false, nrecs);
+                // Register the new instruction with the assumption cache if necessary.
+                if inst_iid(n) == IID_assume { ac_register_assumption(n); }
             }
         }
         let eterm = block_terminator(edge);
@@ -1627,7 +1629,6 @@ fn fold_cond_branch_on_value_known_in_pred(bi: i32) -> bool {
 fn scf_simplify_with_ac(i: i32) -> i32 {
     let s1 = sq_no_dt; let s2 = sq_no_ac; let s3 = sq_no_tli;
     sq_no_dt = true; sq_no_ac = false; sq_no_tli = true;
-    ac_invalidate();
     let r = simplify_instruction(i);
     sq_no_dt = s1; sq_no_ac = s2; sq_no_tli = s3;
     return r;
@@ -2531,7 +2532,6 @@ fn simplify_branch_on_icmp_chain(bi: i32) -> bool {
         let save_ac = sq_no_ac;
         sq_no_dt = true;
         sq_no_ac = false;
-        ac_invalidate();
         if !is_guaranteed_not_to_be_undef_or_poison_no_dt(extra, bi) {
             extra = sb_freeze(extra, "");
         }
@@ -2998,8 +2998,8 @@ fn remove_undef_introducing_predecessor(bb: i32) -> bool {
             if iop(t) == OP_CONDBR {
                 block_remove_predecessor(bb, pred, false);
                 let c = br_cond(t);
-                if br_succ(t, 0) == bb { sb_assume(sb_not(c, "")); } else { sb_assume(c); }
-                ac_invalidate();
+                let asm = if br_succ(t, 0) == bb { sb_assume(sb_not(c, "")) } else { sb_assume(c) };
+                ac_register_assumption(asm);
                 sb_br(if br_succ(t, 0) == bb { br_succ(t, 1) } else { br_succ(t, 0) });
                 scf_erase(t);
                 cu_apply1(DT_DELETE, pred, bb);
@@ -3218,14 +3218,15 @@ fn simplify_unreachable(ui: i32) -> bool {
                 changed = true;
             } else {
                 let c = br_cond(ti);
+                var asm: i32 = -1;
                 if br_succ(ti, 0) == bb {
-                    sb_assume(sb_not(c, ""));
+                    asm = sb_assume(sb_not(c, ""));
                     sb_br(br_succ(ti, 1));
                 } else {
-                    sb_assume(c);
+                    asm = sb_assume(c);
                     sb_br(br_succ(ti, 0));
                 }
-                ac_invalidate();
+                ac_register_assumption(asm);
                 erase_terminator_and_dce_cond(ti);
                 changed = true;
             }
@@ -3591,7 +3592,6 @@ fn eliminate_dead_switch_cases(si: i32) -> bool {
     let cond = op(si, 0);
     let s1 = sq_no_dt; let s2 = sq_no_ac; let s3 = sq_no_tli;
     sq_no_dt = true; sq_no_ac = false; sq_no_tli = true;
-    ac_invalidate();
     let save = kb_cxt;
     kb_cxt = si;
     let known = kb_compute_all(cond, 0);
@@ -5309,7 +5309,6 @@ fn merge_compatible_invokes(bb: i32) -> bool {
 fn simplify_once(bb: i32) -> bool {
     var changed = false;
     let fv = block_func(bb);
-    ac_invalidate();
     vt_invalidate_assumes();
     if (cu_pred_empty(bb) && !cu_is_entry(bb)) || single_pred(bb) == bb {
         cu_delete_dead_block(bb);
@@ -5518,13 +5517,11 @@ fn simplifycfg_run(fv: i32, opts: SCOpts) -> u32 {
     cu_dtu = require_dt;
     cu_dead_ba.clear();
     dtu_begin(fv, require_dt, false, false);
-    ac_invalidate();
     vt_invalidate_assumes();
     let changed = simplify_function_cfg_impl(fv);
     dtu_end();
     cu_dtu = false;
     local_have_tli = save_tli;
-    ac_invalidate();
     vt_invalidate_assumes();
     scf_fn = -1;
     if !changed { return PA_ALL; }

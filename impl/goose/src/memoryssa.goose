@@ -9,6 +9,7 @@
 // a build epoch, so building for another function never clears memory. MemoryPhi operands are runs in
 // mphi_v/mphi_b (copied to a bigger run when full). One MemorySSA at a time (the function in mssa_fn).
 import std;
+import archive;
 import ir;
 import irutil;
 import calls;
@@ -88,8 +89,87 @@ var mssa_fn: i32 = -1;
 var mssa_next_id: i32 = 0;
 var mssa_optimized: bool = false;
 
-fn mssa_valid(fv: i32) -> bool { mssa_fn == fv && fv >= 0 }
-fn mssa_invalidate(fv: i32) { if mssa_fn == fv { mssa_fn = -1; } }
+var mssa_epoch_ctr: i32 = 0;      // epochs are never reused: archived results keep their block/value stamps
+fn mssa_new_epoch() { mssa_epoch_ctr++; mssa_epoch = mssa_epoch_ctr; }
+
+// One MemorySSA per function (MemorySSAAnalysis results in the FunctionAnalysisManager): the loaded one is in the
+// tables above (mssa_fn), the others are snapshots of macc/mphi_*/muses in this archive (archive.goose). The
+// block and value maps (mb, mv) are indexed by global value ids and stamped with the result's epoch, so they stay
+// in place: a function's blocks and instructions are its own.
+let MSA_NT: i64 = 6;
+var msa_own: i32[>..<];
+var msa_gl: i32[>..<];
+var msa_dir: i64[>..<];
+var msa_slot: i32[>..];
+var msa_dead: i64 = 0;
+var msa_acc: MAcc[>..<];
+var msa_i32: i32[>..<];
+var msa_use: MUse[>..<];
+var msa_i64: i64[>..<];
+fn msa_find(fv: i32) -> i64 {
+    let g = glob_of(fv) as i64;
+    if g >= msa_slot.len { return -1; }
+    return (msa_slot[g] as i64) - 1;
+}
+fn msa_kill(s: i64) { msa_slot[msa_gl[s]] = 0; msa_own[s] = -1; msa_dead++; }
+fn mssa_stash() {
+    if mssa_fn < 0 { return; }
+    let fv = mssa_fn;
+    mssa_fn = -1;
+    if msa_dead > 16 && msa_dead > msa_own.len - msa_dead {
+        ar_compact(msa_own, msa_dir, MSA_NT, [0], msa_acc);
+        ar_compact(msa_own, msa_dir, MSA_NT, [1, 2, 3], msa_i32);
+        ar_compact(msa_own, msa_dir, MSA_NT, [4], msa_use);
+        ar_compact(msa_own, msa_dir, MSA_NT, [5], msa_i64);
+        ar_drop_dead(msa_own, msa_dir, MSA_NT, msa_slot, msa_gl);
+        msa_dead = 0;
+    }
+    let old = msa_find(fv);
+    if old >= 0 { msa_kill(old); }
+    let s = ar_new(msa_own, msa_dir, MSA_NT, fv);
+    let g = glob_of(fv);
+    msa_gl.push(g);
+    while msa_slot.len <= (g as i64) { msa_slot.push(0); }
+    msa_slot[g] = (s + 1) as i32;
+    ar_put(msa_dir, MSA_NT, s, 0, msa_acc, macc);
+    ar_put(msa_dir, MSA_NT, s, 1, msa_i32, mphi_v);
+    ar_put(msa_dir, MSA_NT, s, 2, msa_i32, mphi_b);
+    ar_put(msa_dir, MSA_NT, s, 3, msa_i32, mphi_u);
+    ar_put(msa_dir, MSA_NT, s, 4, msa_use, muses);
+    var sc: i64[>..<] = [mssa_epoch as i64, mssa_next_id as i64, if mssa_optimized { 1 } else { 0 }];
+    ar_put(msa_dir, MSA_NT, s, 5, msa_i64, sc);
+}
+fn mssa_unstash(fv: i32) -> bool {
+    let s = msa_find(fv);
+    if s < 0 { return false; }
+    ar_get(msa_dir, MSA_NT, s, 0, msa_acc, macc);
+    ar_get(msa_dir, MSA_NT, s, 1, msa_i32, mphi_v);
+    ar_get(msa_dir, MSA_NT, s, 2, msa_i32, mphi_b);
+    ar_get(msa_dir, MSA_NT, s, 3, msa_i32, mphi_u);
+    ar_get(msa_dir, MSA_NT, s, 4, msa_use, muses);
+    var sc: i64[>..<] = [];
+    ar_get(msa_dir, MSA_NT, s, 5, msa_i64, sc);
+    mssa_epoch = sc[0] as i32;
+    mssa_next_id = sc[1] as i32;
+    mssa_optimized = sc[2] != 0;
+    msa_kill(s);
+    mssa_fn = fv;
+    return true;
+}
+// AM.getCachedResult<MemorySSAAnalysis>(F) != nullptr (loads it)
+fn mssa_valid(fv: i32) -> bool {
+    if fv < 0 { return false; }
+    if mssa_fn == fv { return true; }
+    if msa_find(fv) < 0 { return false; }
+    mssa_stash();
+    return mssa_unstash(fv);
+}
+fn mssa_invalidate(fv: i32) {
+    if mssa_fn == fv { mssa_fn = -1; }
+    let s = msa_find(fv);
+    if s >= 0 { msa_kill(s); }
+}
+// drops the loaded MemorySSA (loop-unroll's MemorySSA(Loop&), which no analysis manager holds)
 fn mssa_invalidate_all() { mssa_fn = -1; }
 
 fn mssa_max_check_limit() -> i64 { flag_int("memssa-check-limit", 100) }
@@ -444,7 +524,8 @@ fn mssa_mark_unreachable(bv: i32) {
 fn mssa_build(fv: i32) {
     aa_begin(fv);
     dt_get(fv, DT_DOM);
-    mssa_epoch++;
+    mssa_stash();
+    mssa_new_epoch();
     mssa_fn = fv;
     mssa_optimized = false;
     macc.clear();

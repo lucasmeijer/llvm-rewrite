@@ -1638,7 +1638,6 @@ fn dse_run(fv: i32) -> u32 {
     dt_get(fv, DT_POST);
     ci_get(fv);
     vt_invalidate_assumes();
-    ac_invalidate();
     ds_epoch = ds_new_tick();
     ds_q = aq_push(CA_EARLIEST);
     ea_begin(false, true);

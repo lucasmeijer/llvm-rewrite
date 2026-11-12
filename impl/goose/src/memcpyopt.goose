@@ -1411,7 +1411,6 @@ fn memcpyopt_run(fv: i32) -> u32 {
     mc_without_libcalls = flag_bool("enable-memcpyopt-without-libcalls", false);
     aa_begin(fv);
     vt_invalidate_assumes();
-    ac_invalidate();
     dt_get(fv, DT_DOM);
     dt_get(fv, DT_POST);
     mssa_get(fv);

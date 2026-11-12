@@ -97,7 +97,6 @@ fn loop_instsimplify_pass_run(l: i32, use_mssa: bool) -> u32 {
     tli_cur_fn = fv;
     local_have_tli = true;
     vt_invalidate_assumes();
-    ac_invalidate();
     if use_mssa {
         msu_reset();
         if flag_bool("verify-memoryssa", false) { mssa_verify(fv); }

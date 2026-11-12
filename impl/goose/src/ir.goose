@@ -7,6 +7,7 @@ import dinfo;
 import wvh;
 import scev;
 import scev_update;
+import assume;
 
 // ---------------------------------------------------------------------------------------------
 // Errors
@@ -478,6 +479,8 @@ fn rauw(old: i32, nv: i32) {
     // ValueHandleBase::ValueIsRAUWd, before the uses change (WeakTrackingVH/TrackingVH, ScalarEvolution)
     if wvh_live > 0 { wvh_value_rauwd(old, nv); }
     if sc_valid { scev_note_rauw(old, nv); }
+    // AssumptionCache::AffectedValueCallbackVH::allUsesReplacedWith
+    if ac_fn >= 0 || aca_own.len > aca_dead { ac_rauw(old, nv); }
     if old < val_vam.len && val_vam[old] >= 0 { vam_handle_rauw(old, nv); }
     while vals[old].first_use >= 0 {
         let u = vals[old].first_use;

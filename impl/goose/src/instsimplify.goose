@@ -4314,7 +4314,6 @@ fn instsimplify_run(fv: i32) -> u32 {
     local_have_tli = true;
     dt_get(fv, DT_DOM);
     vt_invalidate_assumes();
-    ac_invalidate();
     var changed = false;
     // debug records (VS_PASS1: values they mention) for RAUW and salvageDebugInfo
     m2r_collect_records(fv);

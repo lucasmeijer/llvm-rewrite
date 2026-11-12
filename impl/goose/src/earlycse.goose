@@ -1148,7 +1148,6 @@ fn early_cse_run(fv: i32, use_mssa: bool) -> u32 {
     ec_fn = fv;
     dt_get(fv, DT_DOM);
     vt_invalidate_assumes();
-    ac_invalidate();
     ec_use_mssa = use_mssa;
     if use_mssa {
         mssa_get(fv);

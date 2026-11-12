@@ -9,6 +9,7 @@
 // in registration order: ac_val[k] is affected by assume ac_asm[k] through operand bundle ac_idx[k]
 // (-1 = the condition, LLVM's ExprResultIdx).
 import std;
+import archive;
 import constrange;
 import apint;
 import ir;
@@ -30,7 +31,77 @@ var ac_idx: i32[>..<];
 var ac_has_any: bool = false;
 var ac_handles: i32[>..<];   // AssumeHandles (AssumptionCache::assumptions()), registration order
 
-fn ac_invalidate() { ac_fn = -1; }
+// One AssumptionCache per function (AssumptionAnalysis results in the FunctionAnalysisManager): the loaded one is
+// in the tables above (ac_fn = the function it scanned), the others are archived (archive.goose) and swapped in
+// on use. A cache exists once its function was scanned (LLVM scans lazily, on the first query; registerAssumption
+// before that is a no-op). AssumptionCache::invalidate is always false: only FAM.clear (ac_clear) drops one.
+let ACA_NT: i64 = 5;
+var aca_own: i32[>..<];
+var aca_gl: i32[>..<];
+var aca_dir: i64[>..<];
+var aca_slot: i32[>..];
+var aca_dead: i64 = 0;
+var aca_i32: i32[>..<];
+fn aca_find(fv: i32) -> i64 {
+    if fv < 0 { return -1; }
+    let g = glob_of(fv) as i64;
+    if g >= aca_slot.len { return -1; }
+    return (aca_slot[g] as i64) - 1;
+}
+fn aca_kill(s: i64) { aca_slot[aca_gl[s]] = 0; aca_own[s] = -1; aca_dead++; }
+fn ac_stash() {
+    if ac_fn < 0 { return; }
+    let fv = ac_fn;
+    ac_fn = -1;
+    if aca_dead > 16 && aca_dead > aca_own.len - aca_dead {
+        ar_compact(aca_own, aca_dir, ACA_NT, [0, 1, 2, 3, 4], aca_i32);
+        ar_drop_dead(aca_own, aca_dir, ACA_NT, aca_slot, aca_gl);
+        aca_dead = 0;
+    }
+    let old = aca_find(fv);
+    if old >= 0 { aca_kill(old); }
+    let s = ar_new(aca_own, aca_dir, ACA_NT, fv);
+    let g = glob_of(fv);
+    aca_gl.push(g);
+    while aca_slot.len <= (g as i64) { aca_slot.push(0); }
+    aca_slot[g] = (s + 1) as i32;
+    ar_put(aca_dir, ACA_NT, s, 0, aca_i32, ac_val);
+    ar_put(aca_dir, ACA_NT, s, 1, aca_i32, ac_asm);
+    ar_put(aca_dir, ACA_NT, s, 2, aca_i32, ac_idx);
+    ar_put(aca_dir, ACA_NT, s, 3, aca_i32, ac_handles);
+    var sc: i32[>..<] = [if ac_has_any { 1 } else { 0 }];
+    ar_put(aca_dir, ACA_NT, s, 4, aca_i32, sc);
+}
+fn ac_unstash(fv: i32) -> bool {
+    let s = aca_find(fv);
+    if s < 0 { return false; }
+    ar_get(aca_dir, ACA_NT, s, 0, aca_i32, ac_val);
+    ar_get(aca_dir, ACA_NT, s, 1, aca_i32, ac_asm);
+    ar_get(aca_dir, ACA_NT, s, 2, aca_i32, ac_idx);
+    ar_get(aca_dir, ACA_NT, s, 3, aca_i32, ac_handles);
+    var sc: i32[>..<] = [];
+    ar_get(aca_dir, ACA_NT, s, 4, aca_i32, sc);
+    ac_has_any = sc[0] != 0;
+    aca_kill(s);
+    ac_fn = fv;
+    return true;
+}
+// fv's cache, loaded, if it exists (scanned)
+fn ac_load(fv: i32) -> bool {
+    if fv < 0 { return false; }
+    if ac_fn == fv { return true; }
+    if aca_find(fv) < 0 { return false; }
+    ac_stash();
+    return ac_unstash(fv);
+}
+// a pass starts on fv (fam_enter): its cache must see the callbacks
+fn ac_enter(fv: i32) { ac_load(fv); }
+// FAM.clear(F)
+fn ac_clear(fv: i32) {
+    if ac_fn == fv { ac_fn = -1; }
+    let s = aca_find(fv);
+    if s >= 0 { aca_kill(s); }
+}
 
 // findValuesAffectedByCondition with a plain callback (DropUnnecessaryAssumes): ac_push appends to ac_coll
 var ac_collecting: bool = false;
@@ -127,8 +198,10 @@ fn ac_affected_by_condition(cond: i32, a: i32) {
     }
 }
 
+// AM.getResult<AssumptionAnalysis>(F) with the cache scanned (every query scans first)
 fn ac_build(fv: i32) {
-    if ac_fn == fv { return; }
+    if ac_load(fv) { return; }
+    ac_stash();
     ac_fn = fv;
     ac_val.clear();
     ac_asm.clear();
@@ -141,7 +214,7 @@ fn ac_build(fv: i32) {
 
 // AssumptionCache::registerAssumption(CI): only once the cache has scanned the function
 fn ac_register_assumption(a: i32) {
-    if ac_fn < 0 || ac_fn != inst_func(a) { return; }
+    if a < 0 || insts[inst_of(a)].parent < 0 || !ac_load(inst_func(a)) { return; }
     ac_handles.push(a);
     ac_update_affected(a);
 }
@@ -177,6 +250,9 @@ fn ac_assumptions(fv: i32, out: i32[>..<]&) {
 
 // AffectedValueCallbackVH::allUsesReplacedWith(NV)
 fn ac_rauw(old: i32, nv: i32) {
+    // the cache of old's function (AffectedValueCallbackVH); a global is affected only in the loaded cache
+    if is_arg(old) { ac_load(args_parent[vals[old].sub]); }
+    else if is_inst(old) && insts[inst_of(old)].parent >= 0 { ac_load(inst_func(old)); }
     if ac_fn < 0 { return; }
     if !is_inst(nv) && !is_arg(nv) { return; }
     let n = ac_val.len;

@@ -874,7 +874,7 @@ fn go_delete_if_dead(gv: i32) -> bool {
         dead = first_use(gv) < 0;
     }
     if !dead { return false; }
-    if vals[gv].kind == VK_FUNC { invalidate_function(gv, PA_NONE); }
+    if vals[gv].kind == VK_FUNC { fam_clear(gv); }
     ig_salvage_debug_info_global(gv);
     ig_erase_global(gv, true);
     return true;
