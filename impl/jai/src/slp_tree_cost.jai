@@ -776,10 +776,13 @@ slp_get_tree_cost :: (tree_cost: Cost, vectorized_vals: [] Value_Id = .[], reduc
         entry := eu.te;
         bwfound, bw := slp_min_bw_of(entry);
         indices: [] u32;
-        if type_kind(vec_ty) == .STRUCT slp_fail("external uses of struct-typed scalars");
+        if type_kind(vec_ty) == .STRUCT {
+            // the user is the ExtractValueInst of one struct field
+            indices = slp_ev_indices(eu.user);
+        }
         if !(eu.user != NONE && inst_op(eu.user) == .INSERTELEMENT) {
             dup := false;
-            for extract_calculated if it.scalar == eu.scalar && it.indices.count == indices.count { dup = true; break; }
+            for extract_calculated if it.scalar == eu.scalar && slp_u32_array_equal(it.indices, indices) { dup = true; break; }
             if dup continue;
             array_add(*extract_calculated, .{eu.scalar, indices});
         }
@@ -789,7 +792,9 @@ slp_get_tree_cost :: (tree_cost: Cost, vectorized_vals: [] Value_Id = .[], reduc
             vec_ty = slp_widened_type(min_ty, bundle_width);
             extra = slp_extract_with_extend_cost(ext, sty, vec_ty, eu.lane);
         } else {
-            extra = slp_vector_instr_cost(sty, .EXTRACTELEMENT, vec_ty, eu.lane);
+            extract_ty := vec_ty;
+            if type_kind(vec_ty) == .STRUCT extract_ty = slp_indexed_type(vec_ty, indices);   // ExtractValueInst::getIndexedType
+            extra = slp_vector_instr_cost(sty, .EXTRACTELEMENT, extract_ty, eu.lane);
         }
         if entry != 0 || te_opcode(entry) == .GEP || te_opcode(entry) == .LOAD {
             if !have_v2e {

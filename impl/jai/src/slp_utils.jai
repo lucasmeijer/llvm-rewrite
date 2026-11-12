@@ -114,7 +114,11 @@ slp_is_allowed_non_power_of_2_vf :: (n: u64) -> bool { return slp_cl.non_power_o
 vector_type_is_valid_element_type :: (t: Type_Id) -> bool {
     k := type_kind(t);
     if k == .INT || is_fp_type(t) || k == .PTR || k == .BYTE return true;
-    if k == .TARGET_EXT fatal("slp-vectorizer: target extension types as vector elements are not supported yet");
+    // TargetExtType::CanBeVectorElement: only the test type llvm.test.vectorelement has it (Type.cpp getTargetTypeInfo)
+    if k == .TARGET_EXT {
+        if ir.types[t].name == "llvm.test.vectorelement" fatal("vectors of target extension types (llvm.test.vectorelement) are not supported yet");
+        return false;
+    }
     return false;
 }
 // canVectorizeTy
@@ -153,8 +157,15 @@ slp_num_elements :: (t: Type_Id) -> u64 {
 }
 // getWidenedType(ScalarTy, VF)
 slp_widened_type :: (sty: Type_Id, vf: u64) -> Type_Id {
-    if type_kind(sty) == .STRUCT slp_fail("struct-typed scalars");
     if is_vector_type(sty) slp_fail("vector-typed scalars (REVEC)");
+    if type_kind(sty) == .STRUCT {
+        // toVectorizedTy(StructTy, VF): a literal struct of <VF x ElTy> (VF == 1 included)
+        if is_vectorized_ty(sty) slp_fail("vector-typed scalars (REVEC)");
+        n := cast(s64) type_nsub(sty);
+        e := NewArray(n, Type_Id,, temp);
+        for k: 0..n-1 e[k] = type_vector(vf, type_sub(sty, cast(u32) k), false);
+        return type_literal_struct(e, false);
+    }
     return type_vector(vf, sty, false);
 }
 // TTI::getNumberOfParts (BasicTTIImplBase: the legalization split count; 0 when invalid)
@@ -1029,4 +1040,22 @@ slp_does_not_need_to_schedule :: (vl: [] Value_Id) -> bool {
     if a return true;
     for vl if !slp_are_all_operands_non_insts(it) return false;
     return true;
+}
+
+// ExtractValueInst::getIndexedType(Agg, Idxs)
+slp_indexed_type :: (agg: Type_Id, idxs: [] u32) -> Type_Id {
+    t := agg;
+    for idxs t = ifx type_kind(t) == .STRUCT then type_sub(t, it) else type_elem(t);
+    return t;
+}
+slp_u32_array_equal :: (a: [] u32, b: [] u32) -> bool {
+    if a.count != b.count return false;
+    for a if it != b[it_index] return false;
+    return true;
+}
+// ExtractValueInst::getIndices()
+slp_ev_indices :: (ev: Value_Id) -> [] u32 {
+    ix := NewArray(cast(s64) inst(ev).nidx, u32,, temp);
+    for k: 0..ix.count-1 ix[k] = ir.u32_pool[inst(ev).idx + cast(u32) k];
+    return ix;
 }

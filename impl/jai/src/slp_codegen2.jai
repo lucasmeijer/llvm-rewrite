@@ -22,7 +22,8 @@ Shuffled_Insert :: struct {
     vm_keys: [..] Value_Id;                 // MapVector<Value *, SmallVector<int>> ValueMasks
     vm_masks: [..] [..] s32;
 }
-Slp_Ee_Entry :: struct { scalar: Value_Id; bb: Value_Id; ex: Value_Id; exv: Value_Id; }   // ScalarToEEs[Scalar][BB]
+Slp_Ee_Entry :: struct { scalar: Value_Id; indices: [] u32; bb: Value_Id; ex: Value_Id; exv: Value_Id; }   // ScalarToEEs[(Scalar, Indices)][BB]
+Slp_Field_Extract :: struct { vec: Value_Id; indices: [] u32; bb: Value_Id; field: Value_Id; }   // StructFieldExtracts[(Vec, Indices)][BB]
 
 // vectorizeTree(): ExternallyUsedValues empty, no reduction root
 slp_vectorize_tree :: () { slp_vectorize_tree_full(NONE, .[]); }
@@ -148,6 +149,7 @@ slp_vectorize_tree_full :: (rdx_root: Value_Id, vector_values: [] Value_Id) -> V
     // extract all of the elements with external uses
     shuffled_inserts: [..] Shuffled_Insert; shuffled_inserts.allocator = temp;
     scalar_to_ees: [..] Slp_Ee_Entry; scalar_to_ees.allocator = temp;
+    field_extracts: [..] Slp_Field_Extract; field_extracts.allocator = temp;
     used_inserts: [..] Value_Id; used_inserts.allocator = temp;
     Vec_Cast :: struct { vec: Value_Id; ty: Type_Id; res: Value_Id; }
     vector_casts: [..] Vec_Cast; vector_casts.allocator = temp;
@@ -175,7 +177,7 @@ slp_vectorize_tree_full :: (rdx_root: Value_Id, vector_values: [] Value_Id) -> V
             } else {
                 sgb_set_at(entry, block_first(entry), true);
             }
-            new_inst := slp_extract_and_extend(scalar, user, vec, eu.lane, *scalar_to_ees, *ignored_extracts);
+            new_inst := slp_extract_and_extend(scalar, user, vec, eu.lane, *scalar_to_ees, *field_extracts, *ignored_extracts);
             if scalar != new_inst replace_all_uses_with(scalar, new_inst);
             continue;
         }
@@ -230,17 +232,22 @@ slp_vectorize_tree_full :: (rdx_root: Value_Id, vector_values: [] Value_Id) -> V
                     term := block_terminator(phi_block(ph, i));
                     if inst_op(term) == .CATCHSWITCH sgb_set_at(inst_block(vec), inst_next(vec));
                     else sgb_set_before(term);
-                    new_inst := slp_extract_and_extend(scalar, user, vec, eu.lane, *scalar_to_ees, *ignored_extracts);
+                    new_inst := slp_extract_and_extend(scalar, user, vec, eu.lane, *scalar_to_ees, *field_extracts, *ignored_extracts);
                     phi_set_value(ph, i, new_inst);
                 }
             } else {
                 sgb_set_before(user);
-                new_inst := slp_extract_and_extend(scalar, user, vec, eu.lane, *scalar_to_ees, *ignored_extracts);
-                replace_uses_of_with(user, scalar, new_inst);
+                new_inst := slp_extract_and_extend(scalar, user, vec, eu.lane, *scalar_to_ees, *field_extracts, *ignored_extracts);
+                if type_kind(vtype(scalar)) == .STRUCT && is_inst(user) && inst_op(user) == .EXTRACTVALUE && type_kind(vtype(new_inst)) != .STRUCT {
+                    replace_all_uses_with(user, new_inst);
+                    slp_erase_instruction(user);
+                } else {
+                    replace_uses_of_with(user, scalar, new_inst);
+                }
             }
         } else {
             sgb_set_at(entry, block_first(entry), true);
-            new_inst := slp_extract_and_extend(scalar, user, vec, eu.lane, *scalar_to_ees, *ignored_extracts);
+            new_inst := slp_extract_and_extend(scalar, user, vec, eu.lane, *scalar_to_ees, *field_extracts, *ignored_extracts);
             replace_uses_of_with(user, scalar, new_inst);
         }
     }
@@ -408,17 +415,31 @@ inst_move_after_head :: (i: Value_Id, pos: Value_Id) {
 }
 
 // the ExtractAndExtendIfNeeded lambda of vectorizeTree
-slp_extract_and_extend :: (scalar: Value_Id, user: Value_Id, vec: Value_Id, lane: u32, scalar_to_ees: *[..] Slp_Ee_Entry, ignored_extracts: *[..] Value_Id) -> Value_Id {
+slp_extract_and_extend :: (scalar: Value_Id, user: Value_Id, vec_in: Value_Id, lane: u32, scalar_to_ees: *[..] Slp_Ee_Entry, field_extracts: *[..] Slp_Field_Extract, ignored_extracts: *[..] Value_Id) -> Value_Id {
+    vec := vec_in;
+    find_field :: (fe: *[..] Slp_Field_Extract, vec: Value_Id, indices: [] u32, bb: Value_Id) -> s64 {
+        for fe.* if it.vec == vec && it.bb == bb && slp_u32_array_equal(it.indices, indices) return it_index;
+        return -1;
+    }
     if is_inst(scalar) && inst_op(scalar) == .INSERTVALUE return vec;
     if vtype(scalar) != vtype(vec) {
         ex: Value_Id = NONE; exv: Value_Id = NONE;
         replace_inst := is_inst(scalar) && slp_has(slpx.external_uses_as_original_scalar, scalar);
-        if type_kind(vtype(scalar)) == .STRUCT slp_fail("external uses of struct-typed scalars");
+        indices: [] u32;
+        is_struct := type_kind(vtype(scalar)) == .STRUCT;
+        if is_struct indices = slp_ev_indices(user);
         bb := ifx replace_inst then inst_block(scalar) else slpg.b.bb;
         for * x: scalar_to_ees.* {
-            if x.scalar != scalar || x.bb != bb continue;
+            if x.scalar != scalar || x.bb != bb || !slp_u32_array_equal(x.indices, indices) continue;
             prev_v := x.ex;
             if is_inst(prev_v) && !replace_inst && slpg.b.pt != NONE && inst_block(prev_v) == slpg.b.bb && comes_before(slpg.b.pt, prev_v) {
+                if is_struct {
+                    fi := find_field(field_extracts, vec, indices, slpg.b.bb);
+                    if fi >= 0 {
+                        field_i := field_extracts.*[fi].field;
+                        if is_inst(field_i) && inst_block(field_i) == slpg.b.bb && comes_before(slpg.b.pt, field_i) inst_move_before_dbg(field_i, slpg.b.pt);
+                    }
+                }
                 inst_move_before_dbg(prev_v, slpg.b.pt);
                 if is_inst(x.exv) && x.exv != prev_v inst_move_after_head(x.exv, prev_v);
             }
@@ -446,15 +467,27 @@ slp_extract_and_extend :: (scalar: Value_Id, user: Value_Id, vec: Value_Id, lane
             } else if is_vector_type(vtype(scalar)) {
                 slp_fail("REVEC extracts");
             } else {
-                if type_kind(vtype(vec)) == .STRUCT slp_fail("external uses of struct-typed scalars");
+                if type_kind(vtype(vec)) == .STRUCT {
+                    ev_bb := slpg.b.bb;
+                    field_vec: Value_Id = NONE;
+                    fi := find_field(field_extracts, vec, indices, ev_bb);
+                    if fi >= 0 field_vec = field_extracts.*[fi].field;
+                    if field_vec == NONE {
+                        field_vec = sgb_extract_value(vec, indices);
+                        array_add(field_extracts, .{vec, indices, ev_bb, field_vec});
+                    } else if is_inst(field_vec) && slpg.b.pt != NONE && comes_before(slpg.b.pt, field_vec) {
+                        inst_move_before_dbg(field_vec, slpg.b.pt);
+                    }
+                    vec = field_vec;
+                }
                 ex = sgb_extract_element(vec, cast(u64) lane);
             }
             exv = ex;
-            if vtype(scalar) != vtype(ex) exv = sgb_int_cast(ex, vtype(scalar), !is_known_non_negative(scalar, slp_simple_query()));
+            if !is_struct && vtype(scalar) != vtype(ex) exv = sgb_int_cast(ex, vtype(scalar), !is_known_non_negative(scalar, slp_simple_query()));
             key_bb := ifx is_inst(ex) then inst_block(ex) else fn_entry(slp.f);
             dup := false;
-            for scalar_to_ees.* if it.scalar == scalar && it.bb == key_bb { dup = true; break; }
-            if !dup array_add(scalar_to_ees, .{scalar, key_bb, ex, exv});
+            for scalar_to_ees.* if it.scalar == scalar && it.bb == key_bb && slp_u32_array_equal(it.indices, indices) { dup = true; break; }
+            if !dup array_add(scalar_to_ees, .{scalar, indices, key_bb, ex, exv});
         }
         if is_inst(ex) && inst_op(ex) != .PHI && !may_have_non_def_use_dependency(ex) slpg_record(ex);
         return exv;

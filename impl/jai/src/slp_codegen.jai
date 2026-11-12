@@ -977,7 +977,15 @@ slp_vectorize_tree_entry :: (te: Te_Id) -> Value_Id {
         te_set_vv(te, v);
         return v;
     case .EXTRACTVALUE;
-        if e.struct_ev_indices.count slp_fail("vectorizeTree of struct-typed extractvalue nodes");
+        if e.struct_ev_indices.count {
+            slp_set_insert_point_after_bundle(te);
+            sv := slp_vectorize_operand(te, 0);
+            sv = sgb_extract_value(sv, e.struct_ev_indices);
+            if is_inst(sv) slp_propagate_metadata(sv, slp.entries[te].scalars);
+            sv = slp_final_shuffle(sv, te, sty);
+            te_set_vv(te, sv);
+            return sv;
+        }
         li := slp.entries[te].operands[0][0];
         sgb_set_before(li);
         ld := sgb_load(vec_ty, op(li, 0), inst(li).align);
@@ -1341,8 +1349,7 @@ slp_vectorize_call :: (te: Te_Id, sty: Type_Id, vec_ty: Type_Id, has_bw: bool, b
     op_vecs: [..] Value_Id; op_vecs.allocator = temp;
     tys_for_decl: [..] Type_Id; tys_for_decl.allocator = temp;
     if slp_overload_type_at_arg(id, -1) {
-        if type_kind(vec_ty) == .STRUCT slp_fail("struct-typed scalars");
-        if slp_struct_return_overload_at_field(id, 0) array_add(*tys_for_decl, vec_ty);
+        for ct, ci_: contained_types(vec_ty) if slp_struct_return_overload_at_field(id, cast(s32) ci_) array_add(*tys_for_decl, ct);
     }
     for i: 0..cast(s64) call_num_args(ci) - 1 {
         if vu_is_vector_intrinsic_with_scalar_op_at_arg(id, cast(u32) i) {

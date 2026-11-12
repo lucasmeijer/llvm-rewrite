@@ -12603,9 +12603,11 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-abs.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-abs.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-add-load.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-add-load.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-add-saddo.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-add-saddo.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-add-ssat.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-add-ssat.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-add-uaddo.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-add-uaddo.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-add-usat.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-add-usat.ll::roundtrip
@@ -12635,7 +12637,9 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-max-cost.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-max-cost.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-mul-load.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-mul-load.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-mul-smulo.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-mul-smulo.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-mul-umulo.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-mul-umulo.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-mul.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-mul.ll::roundtrip
@@ -12647,9 +12651,11 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-smin.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-smin.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-sub-ssat.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-sub-ssat.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-sub-ssubo.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-sub-ssubo.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-sub-usat.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-sub-usat.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-sub-usubo.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-sub-usubo.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-sub.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-sub.ll::roundtrip
@@ -13607,6 +13613,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/split-node-reused-and-reordered
 tests/imported/llvm/Transforms/SLPVectorizer/X86/split-node-reused-and-reordered-operand.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/split-node-reused-in-later-vector.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/split-node-reused-in-later-vector.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/split-node-struct-type.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/split-node-struct-type.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/split-node-throttled.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/split-node-throttled.ll::roundtrip
@@ -13640,7 +13647,9 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/stores_vectorize.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/stores_vectorize.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-different-bb.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-different-bb.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-extract-dominance.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-extract-dominance.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-ordering-stress.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/struct-return-ordering-stress.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/subvector-minbitwidth-unsigned-value.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/subvector-minbitwidth-unsigned-value.ll::roundtrip
@@ -13766,6 +13775,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/non-power-of-2-bswap.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/non-power-of-2-bswap.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/non-power-of-2-buildvector.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/non-power-of-2-buildvector.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/non-vect-loads.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/non-vect-loads.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/order-reduction-infinite-loop.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/order-reduction-infinite-loop.ll::roundtrip
@@ -13789,6 +13799,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/revec-fix-109835.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/revec-insertelement.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/revec-shufflevector.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/revec.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/sincos.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/sincos.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/slp-deleted-inst.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/slp-deleted-inst.ll::roundtrip
