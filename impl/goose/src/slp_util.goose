@@ -264,7 +264,8 @@ fn slp_widened_type(sty: i32, vf: i64) -> i32 {
 }
 // TTI::getNumberOfParts
 fn slp_tti_number_of_parts(vt: i32) -> i64 {
-    if tti_kind != TTI_X86 { slp_fail("TTI::getNumberOfParts without a target (BasicTTIImpl via NoTTIImpl)"); }
+    // NoTTIImpl (TargetTransformInfoImplBase): 1
+    if tti_kind != TTI_X86 { return 1; }
     return x86_number_of_parts(vt);
 }
 fn slp_full_vector_number_of_elements(ty: i32, sz: i64) -> i64 {
@@ -864,23 +865,15 @@ fn slp_same_opcode1(a: i32) -> SIS {
     return slp_get_same_opcode(p[..]);
 }
 
-// isMainInstruction / isAlternateInstruction (after getSameOpcode)
+// isMainInstruction / isAlternateInstruction (SLPVectorizer.cpp 14047)
 fn slp_is_alternate_instruction(i: i32, main: i32, alt: i32) -> bool {
     if slp_is_cmp(main) {
+        if slp_cmp_same_or_swapped(main, i) { return false; }
+        if slp_cmp_same_or_swapped(alt, i) { return true; }
         let p = inst_pred(i);
-        let mp = inst_pred(main);
-        let ap = inst_pred(alt);
         let sp = slp_swapped_pred(p);
-        if mp == p || mp == sp { return false; }
-        if ap == p || ap == sp { return true; }
-        // the operands decide
-        let s = SIS { main: main, alt: alt, copy: false };
-        let s1 = slp_cmp_same_or_swapped(main, i);
-        if s1 { return false; }
-        let s2 = slp_cmp_same_or_swapped(alt, i);
-        if s2 { return true; }
-        fatal("internal: SLP: isAlternateInstruction of an unmatched compare");
-        return s.copy;
+        let mp = inst_pred(main);
+        return mp != p && mp != sp;
     }
     let s = SIS { main: main, alt: alt, copy: false };
     return sis_matching(s, i) == alt;

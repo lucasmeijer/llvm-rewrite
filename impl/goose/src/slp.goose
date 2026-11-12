@@ -44,6 +44,8 @@ import slp_sched;
 import slp_loads;
 import slp_build;
 import slp_stores;
+import slp_hr;
+import slp_phis;
 
 fn slp_not_ported(what: const u8[:]) { fatal(str("SLPVectorizer: ", what, " is not ported yet")); }
 
@@ -95,7 +97,7 @@ fn slp_reduction_instr(p: i32, bb: i32) -> i32 {
 }
 
 // HorizontalReduction::getFirstOperandIndex(I): 1 for a select, 0 otherwise
-fn slp_first_operand_index(i: i32) -> i64 { if is_inst_op(i, OP_SELECT) { 1 } else { 0 } }
+fn slp_first_operand_index(i: i32) -> i64 { hr_first_operand_index(i) }
 // tryGetSecondaryReductionRoot(Phi, Root)
 fn slp_secondary_reduction_root(phi: i32, root: i32) -> i32 {
     let k = slp_first_operand_index(root);
@@ -177,9 +179,9 @@ fn slp_vectorize_hor_reduction(p: i32, root: i32, bb: i32, postponed: i32[>..<]&
     let try_ops_as_new_seeds = p >= 0 && is_inst(root) && is_binary_op(iop(root));
     if inst_parent(root) != bb || is_inst_op(root, OP_PHI) { return false; }
     var start = root;
-    if try_ops_as_new_seeds && slp_is_reduction_candidate(root) {
-        // HorizontalReduction::getRdxKind(Root) != RecurKind::None
-        slp_not_ported("HorizontalReduction::getRdxKind");
+    if try_ops_as_new_seeds && slp_is_reduction_candidate(root) && hr_rdx_kind(root) != RK_NONE {
+        let nr = slp_secondary_reduction_root(p, root);
+        if nr >= 0 { start = nr; }
     }
     // std::queue<std::pair<Instruction *, unsigned>> Stack
     var q_i: i32[>..<] = [];
@@ -193,9 +195,11 @@ fn slp_vectorize_hor_reduction(p: i32, root: i32, bb: i32, postponed: i32[>..<]&
         let inst = q_i[qh];
         var level = q_l[qh];
         qh++;
-        // TryToReduce(Inst): R.isAnalyzedReductionRoot is empty while nothing was reduced
-        if slp_is_reduction_candidate(inst) { slp_not_ported("HorizontalReduction::matchAssociativeReduction"); }
-        if iop(inst) == OP_FADD { slp_not_ported("HorizontalReduction::matchOrderedReduction"); }
+        if slp_is_deleted(inst) { continue; }
+        // TryToReduce(Inst): nothing is vectorized yet (a tree that is not tiny fails loudly), so it never returns
+        // a value
+        let red = slp_try_to_reduce_inst(inst);
+        if red >= 0 { fatal("internal: SLP: unexpected reduced value"); }
         // TryAppendToPostponedInsts(Inst)
         var seed = inst;
         if try_ops_as_new_seeds && seed == root {
@@ -226,17 +230,140 @@ fn slp_vectorize_hor_reduction(p: i32, root: i32, bb: i32, postponed: i32[>..<]&
 }
 
 // tryToVectorize(I, R, FMACandidates, AllowFMACandidates)
+var slp_fma_cands: i32[>..<];     // FMACandidates (SetVector, per block)
+// canConvertToFMA(VL, S, DT, DL, TTI, TLI): the FMA cost or TTI_INVALID
+fn slp_can_convert_to_fma(vl: const i32[:], s: SIS) -> i64 {
+    fn contractable(xs: const i32[:]) -> bool {
+        var fmf: u8 = FMF_FAST;
+        for v in xs {
+            if !is_inst(v) { continue; }
+            if sis_is_copyable_element(s, v) { continue; }
+            let m = sis_matching(s, v);
+            if s.main != m && s.alt != m { continue; }
+            if is_fp_math_operator(v) { fmf = fmf & insts[inst_of(v)].fmf; }
+        }
+        return (fmf & FMF_CONTRACT) != 0;
+    }
+    if !contractable(vl) { return TTI_INVALID; }
+    let opl, nopl = slp_build_operands(s, vl);
+    var front: i32[>..<] = [];
+    for k in vl.len { front.push(slp_vp[slp_opl[opl as i64].at as i64 + k]); }
+    let ops = slp_get_same_opcode(front);
+    if !sis_valid(ops) { return TTI_INVALID; }
+    if sis_is_alt_shuffle(ops) || sis_opcode(ops) != OP_FMUL { return TTI_INVALID; }
+    if !contractable(front) { return TTI_INVALID; }
+    var fmul_fadd: i64 = 0;
+    var fma: i64 = 0;
+    var fmf: u8 = FMF_FAST;
+    for v in vl {
+        if !is_inst(v) { continue; }
+        if !sis_is_copyable_element(s, v) && is_fp_math_operator(v) { fmf = fmf & insts[inst_of(v)].fmf; }
+        fmul_fadd = tc_add(fmul_fadd, tv_inst_cost(v, TCK_RECIP_THROUGHPUT));
+    }
+    var nops_: i64 = 0;
+    for k in vl.len {
+        let v = vl[k];
+        let o = front[k];
+        if sis_is_copyable_element(s, v) { continue; }
+        let oi = is_inst(o);
+        if !oi || !slp_has_one_use(o) || sis_is_copyable_element(ops, o) {
+            if is_inst(v) { fma = tc_add(fma, tv_inst_cost(v, TCK_RECIP_THROUGHPUT)); }
+            if oi { fma = tc_add(fma, tv_inst_cost(o, TCK_RECIP_THROUGHPUT)); }
+            continue;
+        }
+        nops_++;
+        if is_fp_math_operator(o) { fmf = fmf & insts[inst_of(o)].fmf; }
+        fmul_fadd = tc_add(fmul_fadd, tv_inst_cost(o, TCK_RECIP_THROUGHPUT));
+    }
+    let ty: i32 = vals[vl[0]].ty;
+    let tys: i32[3] = [ty, ty, ty];
+    fma = tc_add(fma, tc_mul(tv_intrinsic_types(IID_fmuladd, ty, tys[..], fmf, TCK_RECIP_THROUGHPUT), nops_));
+    return if fma < fmul_fadd { fma } else { TTI_INVALID };
+}
+// TryToReduce(Inst, Ops) of tryToVectorize(I, ...): HorizontalReduction(Inst, Ops)
+fn slp_try_to_reduce_pair(inst: i32, a: i32, b: i32) -> bool {
+    if !slp_is_reduction_candidate(inst) { return false; }
+    let ty: i32 = vals[inst].ty;
+    if !slp_is_valid_element_type(ty) || ty_kind(ty) == TK_PTR { return false; }
+    // HorizontalReduction(I, Ops): ReductionLimit 2
+    hr_reset();
+    hr_limit = 2;
+    hr_root = inst;
+    hr_kind = hr_rdx_kind(inst);
+    hr_nops_lists = 1;
+    hr_ops0.push(inst);
+    hr_new_group();
+    hr_group_push(a);
+    hr_group_push(b);
+    hr_r2o_add(a);
+    hr_r2o_add(b);
+    // matchReductionForOperands()
+    hr_rk = hr_is_vectorizable(hr_kind, inst, true);
+    if hr_rk == RO_NONE { return false; }
+    let vt = slp_widened_type(ty, 2);
+    var dem: bool[>..<] = [];
+    for k in slp_num_elements(vt) { dem.push(true); }
+    let sc = tc_add(tv_scalarization_overhead(vt, dem, false, true, TCK_RECIP_THROUGHPUT), tv_inst_cost(inst, TCK_RECIP_THROUGHPUT));
+    let k = hr_kind;
+    var rc: i64 = 0;
+    if k == RK_ADD || k == RK_MUL || k == RK_OR || k == RK_AND || k == RK_XOR || k == RK_FADD || k == RK_FMUL {
+        let fmf: u8 = if is_fp_math_operator(inst) { insts[inst_of(inst)].fmf } else { 0 };
+        rc = tv_arith_reduction(iop(inst), vt, (fmf & FMF_REASSOC) == 0, TCK_RECIP_THROUGHPUT);
+    } else {
+        return false;
+    }
+    if rc >= sc { return false; }
+    return hr_try_to_reduce() >= 0;
+}
+// tryToVectorize(I, R, FMACandidates, AllowFMACandidates)
 fn slp_try_to_vectorize(i: i32, allow_fma: bool) -> bool {
     if i < 0 || is_dead(i) { return false; }
     let o = iop(i);
     if !(is_binary_op(o) || o == OP_ICMP || o == OP_FCMP) || ty_is_vector(vals[i].ty) { return false; }
-    if !allow_fma && (o == OP_FADD || o == OP_FSUB) { slp_not_ported("canConvertToFMA (FMA candidates)"); }
+    if !allow_fma && (o == OP_FADD || o == OP_FSUB) {
+        let one: i32[1] = [i];
+        if tc_valid(slp_can_convert_to_fma(one[..], slp_same_opcode1(i))) {
+            var seen = false;
+            for x in slp_fma_cands { if x == i { seen = true; } }
+            if !seen { slp_fma_cands.push(i); }
+            return false;
+        }
+    }
     let p = inst_parent(i);
     let op0 = op(i, 0);
     let op1 = op(i, 1);
-    if !is_inst(op0) || !is_inst(op1) || inst_parent(op0) != p || inst_parent(op1) != p { return false; }
-    slp_not_ported("tryToVectorize of an instruction pair (HorizontalReduction / findBestRootPair / tryToVectorizeList)");
-    return false;
+    if !is_inst(op0) || !is_inst(op1) || inst_parent(op0) != p || inst_parent(op1) != p || slp_is_deleted(op0) || slp_is_deleted(op1) {
+        return false;
+    }
+    var ca: i32[>..<] = [];
+    var cb: i32[>..<] = [];
+    ca.push(op0); cb.push(op1);
+    let a_bo = slp_is_binop(op0);
+    let b_bo = slp_is_binop(op1);
+    if a_bo && b_bo && slp_has_one_use(op1) {
+        let b0 = op(op1, 0);
+        let b1 = op(op1, 1);
+        if slp_is_binop(b0) && inst_parent(b0) == p && !slp_is_deleted(b0) { ca.push(op0); cb.push(b0); }
+        if slp_is_binop(b1) && inst_parent(b1) == p && !slp_is_deleted(b1) { ca.push(op0); cb.push(b1); }
+    }
+    if b_bo && a_bo && slp_has_one_use(op0) {
+        let a0 = op(op0, 0);
+        let a1 = op(op0, 1);
+        if slp_is_binop(a0) && inst_parent(a0) == p && !slp_is_deleted(a0) { ca.push(a0); cb.push(op1); }
+        if slp_is_binop(a1) && inst_parent(a1) == p && !slp_is_deleted(a1) { ca.push(a1); cb.push(op1); }
+    }
+    if ca.len == 1 {
+        if slp_try_to_reduce_pair(i, op0, op1) { return true; }
+        if allow_fma { return false; }
+        let pr: i32[2] = [op0, op1];
+        return slp_try_to_vectorize_list_r(pr[..], false, false);
+    }
+    let best, score = slp_find_best_root_pair(ca, cb, LA_FAIL);
+    if best < 0 { return false; }
+    if best == 0 && slp_try_to_reduce_pair(i, ca[best], cb[best]) { return true; }
+    if allow_fma { return false; }
+    let pr2: i32[2] = [ca[best], cb[best]];
+    return slp_try_to_vectorize_list_r(pr2[..], false, false);
 }
 
 // vectorizeRootInstruction(P, Root, BB, R, FMACandidates)
@@ -311,26 +438,79 @@ fn slp_can_map_to_vector(t0: i32) -> i64 {
     return n;
 }
 
-// findBuildAggregate(LastInsertInst, ...) >= 2 operands: vectorizeInsert{Value,Element}Inst then reach
-// tryToVectorizeList (the shuffle check of insertelement chains needs isFixedVectorShuffle, not ported)
-fn slp_vectorize_insert(i: i32) -> bool {
-    if iop(i) == OP_INSERTVALUE && slp_can_map_to_vector(vals[i].ty) == 0 { return false; }
-    if slp_aggregate_size(i) < 0 { return false; }
-    // the chain walk: count the distinct operand slots filled by the insert chain
-    var n: i64 = 0;
-    var x = i;
-    while x >= 0 && (iop(x) == OP_INSERTELEMENT || iop(x) == OP_INSERTVALUE) {
-        n++;
-        let nx = op(x, 0);
-        if !is_inst(nx) || !(iop(nx) == OP_INSERTELEMENT || iop(nx) == OP_INSERTVALUE) || vals[nx].first_use < 0 { break; }
-        let u = vals[nx].first_use;
-        if uses[u].next >= 0 { break; }
-        x = nx;
+// findBuildAggregateRec(LastInsertInst, TTI, BuildVectorOpds, InsertElts, OperandOffset, R)
+recursive fn slp_find_build_aggregate_rec(last0: i32, opds: i32[>..<]&, elts: i32[>..<]&, offset: i64) {
+    var last = last0;
+    loop {
+        let ins = op(last, 1);
+        let idx = slp_element_index(last, offset);
+        if idx < 0 || slp_is_deleted(last) { return; }
+        if is_inst_op(ins, OP_INSERTELEMENT) || is_inst_op(ins, OP_INSERTVALUE) {
+            slp_find_build_aggregate_rec(ins, opds, elts, idx);
+        } else {
+            opds[idx] = ins;
+            elts[idx] = last;
+        }
+        let nx = op(last, 0);
+        if !(is_inst_op(nx, OP_INSERTVALUE) || is_inst_op(nx, OP_INSERTELEMENT)) || !slp_has_one_use(nx) { return; }
+        last = nx;
     }
-    if n >= 2 || is_inst_op(op(i, 1), OP_INSERTELEMENT) || is_inst_op(op(i, 1), OP_INSERTVALUE) {
-        slp_not_ported("vectorizeInsertElementInst / vectorizeInsertValueInst (findBuildAggregate, tryToVectorizeList)");
+}
+// findBuildAggregate(LastInsertInst, TTI, BuildVectorOpds, InsertElts, R)
+fn slp_find_build_aggregate(last: i32, opds: i32[>..<]&, elts: i32[>..<]&) -> bool {
+    let sz = slp_aggregate_size(last);
+    if sz < 0 { return false; }
+    var o: i32[>..<] = [];
+    var e: i32[>..<] = [];
+    for k in sz { o.push(-1); e.push(-1); }
+    slp_find_build_aggregate_rec(last, o, e, 0);
+    opds.clear();
+    elts.clear();
+    for x in o { if x >= 0 { opds.push(x); } }
+    for x in e { if x >= 0 { elts.push(x); } }
+    return opds.len >= 2;
+}
+// vectorizeInsertValueInst(IVI, BB, R, MaxVFOnly)
+fn slp_vectorize_insert_value(ivi: i32, max_vf_only: bool) -> bool {
+    if slp_can_map_to_vector(vals[ivi].ty) == 0 { return false; }
+    var opds: i32[>..<] = [];
+    var elts: i32[>..<] = [];
+    if !slp_find_build_aggregate(ivi, opds, elts) { return false; }
+    if max_vf_only && opds.len == 2 { return false; }
+    if slp_dbg_on { errs("SLP: array mappable to vector: "); slp_dv(ivi); errs("\n"); slp_dbg_flush(); }
+    let bvt: i32 = vals[elts[0]].ty;
+    // getContainedTypes(BVType): the elements of a struct, else the type itself
+    var nct: i64 = 1;
+    var ct0: i32 = bvt;
+    var same = true;
+    if ty_is_struct(bvt) {
+        nct = ty_count(bvt);
+        ct0 = ty_field(bvt, 0);
+        for k in nct { if ty_field(bvt, k) != ct0 { same = false; } }
     }
-    return false;
+    if nct == elts.len && slp_is_valid_element_type(ct0) && same {
+        if slp_try_to_vectorize_list_r(elts, max_vf_only, false) { return true; }
+    }
+    return slp_try_to_vectorize_list_r(opds, max_vf_only, false);
+}
+// vectorizeInsertElementInst(IEI, BB, R, MaxVFOnly)
+fn slp_vectorize_insert_element(iei: i32, max_vf_only: bool) -> bool {
+    var opds: i32[>..<] = [];
+    var elts: i32[>..<] = [];
+    if !slp_find_build_aggregate(iei, opds, elts) { return false; }
+    var all_ee = true;
+    for x in opds { if !(is_inst_op(x, OP_EXTRACTELEMENT) || is_undef_or_poison(x)) { all_ee = false; break; } }
+    if all_ee {
+        var m: i32[>..<] = [];
+        if slp_is_fixed_vector_shuffle(opds, m) >= 0 { return false; }
+    }
+    if max_vf_only && elts.len == 2 { return false; }
+    if slp_dbg_on { errs("SLP: array mappable to vector: "); slp_dv(iei); errs("\n"); slp_dbg_flush(); }
+    return slp_try_to_vectorize_list_r(elts, max_vf_only, false);
+}
+fn slp_vectorize_insert(i: i32, max_vf_only: bool) -> bool {
+    if iop(i) == OP_INSERTVALUE { return slp_vectorize_insert_value(i, max_vf_only); }
+    return slp_vectorize_insert_element(i, max_vf_only);
 }
 
 // vectorizeInserts(Instructions, BB, R, FMACandidates)
@@ -340,9 +520,12 @@ fn slp_vectorize_inserts(insts_: i32[>..<]&, bb: i32) -> bool {
     while k > 0 {
         k--;
         let i = insts_[k];
-        slp_vectorize_insert(i);
+        if slp_is_deleted(i) { continue; }
+        slp_vectorize_insert(i, true);
+        if slp_is_deleted(i) { continue; }
         slp_vectorize_hor_reduction(-1, i, bb, postponed);
-        slp_vectorize_insert(i);
+        if slp_is_deleted(i) { continue; }
+        slp_vectorize_insert(i, false);
     }
     for x in postponed { slp_try_to_vectorize(x, false); }
     insts_.clear();
@@ -505,8 +688,16 @@ fn slp_is_poor_throughput_op(i: i32) -> bool {
         let sc = tti_instruction_cost(i, TCK_RECIP_THROUGHPUT);
         if sc < TCC_EXPENSIVE { return false; }
         // getVectorOpCost(I, MinVF = 2, TTI, TLI)
-        if iop(i) == OP_CALL { slp_not_ported("isPoorThroughputOp of a call (getVectorOpCost: getVectorCallCosts)"); }
-        let vc = tv_arith0(iop(i), ty_vector(vals[i].ty, 2, false), TCK_RECIP_THROUGHPUT);
+        var vc: i64 = 0;
+        if iop(i) == OP_CALL {
+            let id = laa_vector_intrinsic_id_for_call(i);
+            var tys: i32[>..<] = [];
+            slp_intrinsic_arg_types(i, id, 2, 0, tys);
+            let ic, lc = slp_vector_call_costs(i, slp_widened_type(vals[i].ty, 2), tys);
+            vc = if ic < lc { ic } else { lc };
+        } else {
+            vc = tv_arith0(iop(i), ty_vector(vals[i].ty, 2, false), TCK_RECIP_THROUGHPUT);
+        }
         return vc < tc_mul(sc, 2);
     }
     fn check(kind: i64, a: i64, b: i64, i: i32) -> bool {
@@ -528,15 +719,9 @@ fn slp_is_poor_throughput_op(i: i32) -> bool {
 
 // vectorizeChainsInBlock(BB, R)
 fn slp_vectorize_chains_in_block(bb: i32) {
-    // the PHI pass: two or more vectorizable PHIs go to tryToVectorizeSequence (PHICompare uses getSameOpcode)
-    var nin: i64 = 0;
-    var x = block_first(bb);
-    while x >= 0 && iop(x) == OP_PHI {
-        if phi_nincoming(x) > 128 { break; }
-        if slp_is_valid_element_type(vals[x].ty) { nin++; }
-        x = inst_next(x);
-    }
-    if nin > 1 { slp_not_ported("vectorizeChainsInBlock's PHI sequence (PHICompare / getSameOpcode / tryToVectorizeList)"); }
+    slp_fma_cands.clear();
+    // the PHI pass (slp_phis.goose)
+    slp_vectorize_block_phis(bb);
     var p_inserts: i32[>..<] = [];
     var p_cmps: i32[>..<] = [];
     var p_insts: i32[>..<] = [];
@@ -626,6 +811,14 @@ fn slp_vectorize_chains_in_block(bb: i32) {
         }
         if tryv { slp_vectorize_non_vectorizable_insts(p_stores, bb); }
     }
+    // the FMA candidates, now with AllowFMACandidates
+    var fk: i64 = 0;
+    while fk < slp_fma_cands.len {
+        let fi = slp_fma_cands[fk];
+        fk++;
+        if slp_is_deleted(fi) { continue; }
+        slp_try_to_vectorize(fi, true);
+    }
     if poor >= 2 { slp_not_ported("vectorizeChainsInBlock's poor-throughput seeds (tryToVectorizeSequence)"); }
 }
 
@@ -654,6 +847,7 @@ fn slp_vectorizer_run(fv: i32) -> u32 {
     for bb in po {
         let t = block_terminator(bb);
         if inst_is_eh_pad(first_non_phi(bb)) || (t >= 0 && iop(t) == OP_UNREACHABLE) { continue; }
+        slp_clear_reduction_data();
         slp_collect_seeds(bb);
         if slp_store_keys.len > 0 {
             if slp_dbg_on { errs("SLP: Found stores for "); errs_int(slp_store_keys.len); errs(" underlying objects.\n"); slp_dbg_flush(); }

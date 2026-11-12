@@ -1854,7 +1854,6 @@ fn slp_build_tree(roots: const i32[:], has_uil: bool, uil: const i32[:]) {
         for v in uil { sh_add(SH_UIL, v as i64, 0); }
     }
     if !slp_all_same_type(roots) { return; }
-    if tti_kind != TTI_X86 { slp_fail("SLP tree building without a target (NoTTIImpl)"); }
     let at = slp_vrun(roots);
     slp_build_tree_rec(at, roots.len, 0, -1, -1, 0);
 }
