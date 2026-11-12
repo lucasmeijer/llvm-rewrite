@@ -209,31 +209,99 @@ vp_create_and_optimize_replicate_regions :: () {
 }
 
 // hoistPredicatedLoads / sinkPredicatedStores: groups of predicated replicated loads (stores) of one address with
-// complementary masks are not handled yet (collectComplementaryPredicatedMemOps finding a group fails loudly)
-vp_check_complementary_predicated_mem_ops :: (pse: *Pse, l: Loop_Id) {
-    for opc: Opcode.[.LOAD, .STORE] {
-        is_load := opc == .LOAD;
-        Group :: struct { addr: Scev_Id; ty: Type_Id; rs: [..] Vp_Rec; }
-        groups: [..] Group; groups.allocator = temp;
-        for bb: vp_blocks_only_basic(vp_depth_first_deep(vb(vp_vector_loop_region()).entry)) for r: vp_block_recipes(bb) {
-            if vr(r).kind != .REPLICATE || inst_op(vp_underlying_instr(r)) != opc || !vr(r).predicated continue;
-            a := vp_scev_for_value(vp_op(r, ifx is_load then 0 else 1), pse, l);
-            if sc_is_cnc(a) continue;
-            ty := ifx is_load then vp_scalar_type(vr(r).def) else vp_scalar_type(vp_op(r, 0));
-            g: *Group = null;
-            for * groups if it.addr == a && it.ty == ty { g = it; break; }
-            if !g { ng: Group; ng.addr = a; ng.ty = ty; ng.rs.allocator = temp; array_add(*groups, ng); g = *groups[groups.count - 1]; }
-            array_add(*g.rs, r);
-        }
-        for g: groups {
-            if g.rs.count < 2 continue;
-            for a: g.rs for b: g.rs {
-                okn, x := vpm_not(vp_replicate_mask(a));
-                if okn && x == vp_replicate_mask(b)
-                    vp_unported(ifx is_load then "hoisting predicated loads with complementary masks (hoistPredicatedLoads)"
-                                else "sinking predicated stores with complementary masks (sinkPredicatedStores)");
+// collectGroupedReplicateMemOps + collectComplementaryPredicatedMemOps
+vp_collect_complementary_predicated_mem_ops :: (opc: Opcode, pse: *Pse, l: Loop_Id) -> [..] [..] Vp_Rec {
+    is_load := opc == .LOAD;
+    Group :: struct { addr: Scev_Id; ty: Type_Id; rs: [..] Vp_Rec; }
+    groups: [..] Group; groups.allocator = temp;
+    for bb: vp_blocks_only_basic(vp_depth_first_deep(vb(vp_vector_loop_region()).entry)) for r: vp_block_recipes(bb) {
+        if vr(r).kind != .REPLICATE || inst_op(vp_underlying_instr(r)) != opc || !vr(r).predicated continue;
+        a := vp_scev_for_value(vp_op(r, ifx is_load then 0 else 1), pse, l);
+        if sc_is_cnc(a) continue;
+        ty := ifx is_load then vp_scalar_type(vr(r).def) else vp_scalar_type(vp_op(r, 0));
+        g: *Group = null;
+        for * groups if it.addr == a && it.ty == ty { g = it; break; }
+        if !g { ng: Group; ng.addr = a; ng.ty = ty; ng.rs.allocator = temp; array_add(*groups, ng); g = *groups[groups.count - 1]; }
+        array_add(*g.rs, r);
+    }
+    dt := vp_dt_build();
+    out: [..] [..] Vp_Rec; out.allocator = temp;
+    for * g: groups {
+        // stable_sort by dominance, the most dominating first
+        for i: 1..g.rs.count - 1 {
+            j := i;
+            while j > 0 && vp_dt_properly_dominates(*dt, g.rs[j], g.rs[j - 1]) {
+                t := g.rs[j]; g.rs[j] = g.rs[j - 1]; g.rs[j - 1] = t;
+                j -= 1;
             }
         }
+        if g.rs.count < 2 continue;
+        // every recipe of the address joins the first group; it is kept when two masks are complementary
+        group: [..] Vp_Rec; group.allocator = temp;
+        for g.rs array_add(*group, it);
+        mi := vp_replicate_mask(group[0]);
+        complementary := false;
+        for k: 1..group.count - 1 {
+            mj := vp_replicate_mask(group[k]);
+            ok1, x1 := vpm_not(mi);
+            ok2, x2 := vpm_not(mj);
+            if (ok1 && x1 == mj) || (ok2 && x2 == mi) complementary = true;
+        }
+        if complementary array_add(*out, group);
+    }
+    return out;
+}
+// getCommonMetadata
+vp_common_metadata :: (group: [] Vp_Rec) -> [..] Vp_Md {
+    md: [..] Vp_Md; md.allocator = temp;
+    for vr(group[0]).md array_add(*md, it);
+    for r: group { if it_index == 0 continue; vp_md_intersect(*md, vr(r).md); }
+    return md;
+}
+vp_find_recipe_with_min_align :: (group: [] Vp_Rec) -> Vp_Rec {
+    best := group[0];
+    for group if inst(vp_underlying_instr(it)).align < inst(vp_underlying_instr(best)).align best = it;
+    return best;
+}
+// VPlanTransforms::hoistPredicatedLoads
+vp_hoist_predicated_loads :: (pse: *Pse, l: Loop_Id) {
+    groups := vp_collect_complementary_predicated_mem_ops(.LOAD, pse, l);
+    for group: groups {
+        earliest := group[0];
+        first := vr(earliest).parent; last := vr(group[group.count - 1]).parent;
+        ok, loc := vp_memory_location(earliest);
+        si: Vp_Sink_Info;
+        if !ok || !vp_can_hoist_or_sink_with_no_alias_check_info(loc, first, last, false, *si) continue;
+        md := vp_common_metadata(group);
+        minal := vp_find_recipe_with_min_align(group);
+        single := vr(earliest).single_scalar;
+        ul := vp_new_replicate(vp_underlying_instr(minal), .[vp_op(earliest, 0)], single, NONE, vr(earliest).flags, md, NONE);
+        vp_insert_before(ul, earliest);
+        for r: group { vp_rauw(vr(r).def, vr(ul).def); vp_erase_recipe(r); }
+    }
+}
+// VPlanTransforms::sinkPredicatedStores
+vp_sink_predicated_stores :: (pse: *Pse, l: Loop_Id) {
+    groups := vp_collect_complementary_predicated_mem_ops(.STORE, pse, l);
+    for group: groups {
+        // canSinkStoreWithNoAliasCheck
+        ok, loc := vp_memory_location(group[0]);
+        if !ok || loc.tags.scope == NONE continue;
+        si := Vp_Sink_Info.{group, group[0], pse, l};
+        if !vp_can_hoist_or_sink_with_no_alias_check_info(loc, vr(group[0]).parent, vr(group[group.count - 1]).parent, true, *si) continue;
+        last := group[group.count - 1];
+        md := vp_common_metadata(group);
+        sel := vp_op(group[0], 0);
+        b := vpb_before(last);
+        single := vr(group[0]).single_scalar;
+        for i: 1..group.count - 1 {
+            v := vp_op(group[i], 0);
+            sel = vr(vpb_select(*b, vp_replicate_mask(group[i]), v, sel, vr(group[i]).dl, "", vp_default_flags(vp_opc(.SELECT), vp_scalar_type(v)))).def;
+        }
+        minal := vp_find_recipe_with_min_align(group);
+        us := vp_new_replicate(vp_underlying_instr(minal), .[sel, vp_op(last, 1)], single, NONE, vr(last).flags, md, NONE);
+        vp_insert_before(us, last);
+        for r: group vp_erase_recipe(r);
     }
 }
 

@@ -415,6 +415,42 @@ vpbu_blocks_in_single_successor_chain_between :: (first: Vp_Blk, last: Vp_Blk) -
     for vp_blocks_only_basic(vp_depth_first_deep(first)) { array_add(*out, it); if it == last break; }
     return out;
 }
+// SinkStoreInfo
+Vp_Sink_Info :: struct { exclude: [] Vp_Rec; leader: Vp_Rec = NONE; pse: *Pse; l: Loop_Id = NONE; }
+// SinkStoreInfo::isNoAliasViaDistance
+vp_no_alias_via_distance :: (si: *Vp_Sink_Info, a: Vp_Rec, b: Vp_Rec) -> bool {
+    if inst_op(vp_underlying_instr(a)) != .STORE || inst_op(vp_underlying_instr(b)) != .STORE return false;
+    if !si.pse || si.l == NONE return a == b;
+    sa := vp_scev_for_value(vp_op(a, 1), si.pse, si.l);
+    sb := vp_scev_for_value(vp_op(b, 1), si.pse, si.l);
+    if sc_is_cnc(sa) || sc_is_cnc(sb) return false;
+    d := sc_get_minus(sa, sb);
+    if !sc_is_const(d) return false;
+    dist := sc_ap(d);
+    size_a := dl_type_store_size(vp_scalar_type(vp_op(a, 0)));
+    size_b := dl_type_store_size(vp_scalar_type(vp_op(b, 0)));
+    max_size := max(size_a, size_b);
+    max_vf: Ec = vpl.vfs[0];
+    for vpl.vfs if ec_known_lt(max_vf, it) max_vf = it;
+    if max_vf.scalable return false;
+    abs := ifx ap_is_negative(dist) then ap_neg(dist) else dist;
+    return ap_uge(abs, ap_from_u64(abs.bits, max_vf.n * max_size));
+}
+// canHoistOrSinkWithNoAliasCheck with an optional SinkStoreInfo (sinking)
+vp_can_hoist_or_sink_with_no_alias_check_info :: (loc: Mem_Loc, first: Vp_Blk, last: Vp_Blk, sinking: bool, si: *Vp_Sink_Info) -> bool {
+    for bb: vpbu_blocks_in_single_successor_chain_between(first, last) {
+        r := vb(bb).first;
+        while r != NONE {
+            defer r = vr(r).next;
+            if sinking && vr(r).kind == .REPLICATE && (array_find(si.exclude, r) || vp_no_alias_via_distance(si, r, si.leader)) continue;
+            if !vp_may_write_to_memory(r) && !(sinking && vp_may_read_from_memory(r)) continue;
+            ok, l2 := vp_memory_location(r);
+            if !ok return false;
+            if scoped_noalias_alias(l2, loc).kind != AR_NO return false;
+        }
+    }
+    return true;
+}
 // canHoistOrSinkWithNoAliasCheck (with SinkStoreInfo(GroupLeader) when sinking)
 vp_can_hoist_or_sink_with_no_alias_check :: (loc: Mem_Loc, first: Vp_Blk, last: Vp_Blk, sinking: bool, leader: Vp_Rec) -> bool {
     check_reads := sinking;

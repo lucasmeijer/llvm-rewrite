@@ -93,7 +93,7 @@ vpp_create_edge_mask :: (p: *Vp_Predicator, src: Vp_Blk, dst: Vp_Blk) -> Vp_Val 
     term := vp_terminator(src);
     if vr(term).opcode == vp_opc(.SWITCH) {
         vpp_create_switch_edge_masks(p, term);
-        _, m := table_find(*p.edge_mask, k);
+        fnd, m := table_find(*p.edge_mask, k);
         return m;
     }
     assert(vr(term).opcode == VPI_BRANCH_ON_COND, "Unsupported terminator");
@@ -171,7 +171,8 @@ vpp_convert_phis_to_blends :: (p: *Vp_Predicator, bb: Vp_Blk) {
         ops: [..] Vp_Val; ops.allocator = temp;
         for k: 0..vp_nops(phir)-1 {
             array_add(*ops, vp_op(phir, k));
-            array_add(*ops, vpp_create_edge_mask(p, vp_phi_incoming_block(phir, k), bb));
+            em := vpp_create_edge_mask(p, vp_phi_incoming_block(phir, k), bb);
+            array_add(*ops, em);
         }
         blend := vp_new_blend(vp_uv(vr(phir).def), ops, vr(phir).flags, vr(phir).dl);
         vpb_insert(*p.b, blend);

@@ -195,12 +195,18 @@ vpcb_build_plain_cfg :: (c: *Vp_Cfg_Builder) {
         vpcb_create_instructions(c, vpbb, bb);
         t := block_terminator(bb);
         if inst_op(t) == .SWITCH {
-            array_add(*vb(vpbb).succs, vpcb_get_or_create_vpbb(c, op(t, 1)));
-            for k: 0..switch_num_cases(t) - 1 array_add(*vb(vpbb).succs, vpcb_get_or_create_vpbb(c, op(t, 2 + k)));
+            // (create the successor blocks before taking a pointer into the block rows)
+            d := vpcb_get_or_create_vpbb(c, op(t, 1));
+            array_add(*vb(vpbb).succs, d);
+            for k: 0..switch_num_cases(t) - 1 {
+                sb := vpcb_get_or_create_vpbb(c, op(t, 2 + k));
+                array_add(*vb(vpbb).succs, sb);
+            }
             continue;
         }
         if inst_op(t) == .BR {
-            array_add(*vb(vpbb).succs, vpcb_get_or_create_vpbb(c, get_successor(t, 0)));
+            s := vpcb_get_or_create_vpbb(c, get_successor(t, 0));
+            array_add(*vb(vpbb).succs, s);
             continue;
         }
         s0 := vpcb_get_or_create_vpbb(c, get_successor(t, 0));
@@ -216,7 +222,8 @@ vpcb_build_plain_cfg :: (c: *Vp_Cfg_Builder) {
         block_predecessors(inst_block(phi), *preds);
         for p: preds vp_add_operand(pr, vpcb_operand(c, phi_incoming_value_for_block(phi, p)));
     }
-    array_add(*vb(entry).succs, vpcb_get_or_create_vpbb(c, li_header(c.li, c.l)));
+    hdr := vpcb_get_or_create_vpbb(c, li_header(c.li, c.l));
+    array_add(*vb(entry).succs, hdr);
     for eb: vpl.exit_blocks {
         for r: vp_block_phis(eb) {
             phi := vr(r).ir_inst;
