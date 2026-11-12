@@ -12004,6 +12004,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/extract-with-undefs-shuffle.ll:
 tests/imported/llvm/Transforms/SLPVectorizer/X86/extract.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/extractcost.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/extractelement-multi-register-use.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/extractelement-phi-in-landingpad.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/extractelement-phi-in-landingpad.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/extractelement-single-use-many-nodes.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/extractelement-vecop-vectorized.ll::roundtrip
@@ -12058,6 +12059,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/icmp-altopcode-after-reordering
 tests/imported/llvm/Transforms/SLPVectorizer/X86/identity-match-splat-less-defined.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/identity-reuses-with-poisons.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/idiv-by-const.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/implicitfloat.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/implicitfloat.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/in-tree-user.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/insert-after-bundle.ll::roundtrip
@@ -12078,6 +12080,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/landing-pad-for-split-node.ll::
 tests/imported/llvm/Transforms/SLPVectorizer/X86/landing_pad.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/last-non-copyable-inst-used-outside-bb.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/lhs-constant-non-cummutative.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/load-bitcast-vec.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/load-bitcast-vec.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/load-merge-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/load-merge.ll::roundtrip
@@ -12256,6 +12259,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/reorder-reused-subvector.ll::ro
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reorder-vf-to-resize.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reorder_diamond_match.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reorder_phi.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/reorder_repeated_ops.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reorder_repeated_ops.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reorder_with_external_users.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/reorder_with_reordered_users.ll::roundtrip
@@ -12396,6 +12400,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/vect-gather-same-nodes.ll::roun
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vect_copyable_in_binops.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vector-like-instr-does-not-dominate.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vector.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/vector_gep.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vector_gep.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vectorize-cmps.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vectorize-pair-path.ll::roundtrip
@@ -12415,6 +12420,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/big-number-reduced-values.ll::round
 tests/imported/llvm/Transforms/SLPVectorizer/boolean-op-with-poisons.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/const-bool-logical-or-reduction.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/crash_extractelement_poison.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/empty-struct.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/empty-struct.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/ext-after-phi-node.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/fix-113880.ll::roundtrip
