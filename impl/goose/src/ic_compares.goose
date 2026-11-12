@@ -4073,9 +4073,9 @@ fn visit_icmp(i: i32) -> i32 {
         break;
     }
     if ty_kind(vals[o0].ty) == TK_PTR && icmp_is_equality(icc_pred(i)) {
-        let u0 = get_underlying_object(o0, 6);
+        let u0 = get_underlying_object(o0, 10);
         if is_inst_op(u0, OP_ALLOCA) { if fold_alloca_cmp(u0) { return -1; } }
-        let u1 = get_underlying_object(o1, 6);
+        let u1 = get_underlying_object(o1, 10);
         if is_inst_op(u1, OP_ALLOCA) { if fold_alloca_cmp(u1) { return -1; } }
     }
     r = fold_icmp_bitcast(i);
@@ -4285,7 +4285,7 @@ fn icc_decompose_linear_expression(ptr: i32) -> i32, i32, AP, AP, u8 {
 
 // foldCmpLoadFromIndexedGlobal(LI, GEP, ICI, AndCst)
 fn fold_cmp_load_from_indexed_global(li: i32, gep: i32, ici: i32, andc: i32) -> i32 {
-    let gv = get_underlying_object(gep, 6);
+    let gv = get_underlying_object(gep, 10);
     if (insts[inst_of(li)].bits & 1) != 0 || !is_gvar(gv) || globs[glob_of(gv)].is_const == 0 || !gv_has_definitive_initializer(gv) { return -1; }
     let ety = vals[li].ty;
     if ty_contains_scalable(ety) { return -1; }

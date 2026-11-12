@@ -446,7 +446,12 @@ Ports of `MemoryLocation.cpp`, `AliasAnalysis.cpp`, `BasicAliasAnalysis.cpp`, `T
 
 ### 8.7 ScalarEvolution (scev*.goose)
 One ScalarEvolution instance exists at a time, for the function `sc_fv`: `scev_get(fv)` builds it (empty, as
-LLVM's constructor does), `scev_invalidate(fv)` drops it, and a different function resets every table.
+LLVM's constructor does), `scev_invalidate(fv)` drops it, and a different function resets every table. LLVM keeps
+one result per function across function adaptors; ours is lost when another function's replaces it. That only
+shows when the lost result had been kept up to date through an IR change (a pass changed the function and
+preserved SCEV, `scev_note_preserved_change` from passmgr's invalidate_function) and the function asks again before
+LLVM would have dropped it (`function(loop(indvars)),function(loop-unroll)`): `scev_get` then fails loudly
+(`sc_lost`) instead of answering from a fresh, differently cached analysis.
 - **Nodes**: `scevs: Scev[>..]` (kind in `SCEVTypes` order, flags, expression size, type, operand run in
   `sc_ops`, value for constants/unknowns, loop for AddRecs). Uniquing is a chained hash table keyed exactly like
   LLVM's FoldingSetNodeIDs (kind, operands, value, loop; the type only for vscale/trunc/zext/sext/ptrtoaddr). Id 0

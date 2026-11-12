@@ -392,11 +392,11 @@ fn lir_collect_stores(bb: i32) {
         if iop(i) == OP_STORE {
             let k = lir_is_legal_store(i);
             if k == LSK_MEMSET {
-                let p = get_underlying_object(lir_store_ptr(i), 6);
+                let p = get_underlying_object(lir_store_ptr(i), 10);
                 lir_ms_key_of.push(lir_key_index(lir_ms_keys, p));
                 lir_ms_stores.push(i);
             } else if k == LSK_MEMSET_PATTERN {
-                let p = get_underlying_object(lir_store_ptr(i), 6);
+                let p = get_underlying_object(lir_store_ptr(i), 10);
                 lir_mp_key_of.push(lir_key_index(lir_mp_keys, p));
                 lir_mp_stores.push(i);
             } else if k == LSK_MEMCPY || k == LSK_UNORDERED_ATOMIC_MEMCPY {

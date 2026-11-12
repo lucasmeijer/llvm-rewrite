@@ -216,7 +216,7 @@ fn ct_captured(u: i32, c: UCI) -> i64 {
         return CTA_CONTINUE_IGNORING_RETURN;
     }
     if ct_kind == CTK_ICMP {
-        if is_inst_op(user, OP_ICMP) && (inst_pred(user) == 32 || inst_pred(user) == 33) && get_underlying_object(uses[u].val, 6) == ct_icmp_alloca {
+        if is_inst_op(user, OP_ICMP) && (inst_pred(user) == 32 || inst_pred(user) == 33) && get_underlying_object(uses[u].val, 10) == ct_icmp_alloca {
             let opno = (u - vals[user].ops) as i64;
             var found = false;
             for k in ct_icmps.len { if ct_icmps[k] == user { ct_icmp_bits[k] |= (1 as i64) << opno; found = true; } }

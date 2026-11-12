@@ -82,7 +82,7 @@ fn glob_has_definitive_initializer(gv: i32) -> bool {
 // getConstantDataArrayInfo(V, Slice, ElementSize, Offset)
 fn get_constant_data_array_info(v: i32, esize: i64, offset0: u64) -> bool {
     let esb = (esize / 8) as u64;
-    let gv = get_underlying_object(v, 6);
+    let gv = get_underlying_object(v, 10);
     if gv < 0 || vals[gv].kind != VK_GVAR || globs[glob_of(gv)].is_const == 0 || !glob_has_definitive_initializer(gv) { return false; }
     let base = strip_and_accumulate_offsets(v, true, false, false);
     if base != gv { return false; }

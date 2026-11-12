@@ -2658,7 +2658,7 @@ fn assume_bundle_fold(ii: i32, idx: i64) -> i32, bool {
             icb_alignment_assumption(op(ptr, 0), al, c_int(T_I64, off - ap_sext64(pv)));
             return assume_remove_bundle(ii, idx), true;
         }
-        let uo = get_underlying_object(ptr, 6);
+        let uo = get_underlying_object(ptr, 10);
         if uo < 0 || is_arg(uo) { return -1, false; }
         let am = al - 1;
         kb_cxt = ii;

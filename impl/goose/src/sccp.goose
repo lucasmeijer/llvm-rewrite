@@ -1866,7 +1866,7 @@ fn sc_candidate_constant(v: i32) -> i32 {
     if vals[v].kind == VK_POISON { return -1; }
     var c = if is_constant(v) { v } else { sc_get_constant_or_null(v) };
     if c >= 0 && ty_kind(vals[c].ty) == TK_PTR && !is_null_value(c) {
-        let u = get_underlying_object(c, 6);
+        let u = get_underlying_object(c, 10);
         if is_gvar(u) && globs[glob_of(u)].is_const == 0 { return -1; }
     }
     return c;

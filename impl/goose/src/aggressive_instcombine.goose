@@ -1229,7 +1229,7 @@ fn ai_stride_and_mod_offset(p0: i32) -> AP, AP {
 fn ai_fold_patterned_loads(i: i32) -> bool {
     if iop(i) != OP_LOAD || inst_is_volatile(i) { return false; }
     let p = op(i, 0);
-    let gv = get_underlying_object(p, 6);
+    let gv = get_underlying_object(p, 10);
     if !is_gvar(gv) || globs[glob_of(gv)].is_const == 0 || !ai_has_definitive_initializer(gv) { return false; }
     let c = op(gv, 0);
     let gsize = dl_alloc_size(vals[c].ty) as u64;
