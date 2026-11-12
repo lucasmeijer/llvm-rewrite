@@ -11953,6 +11953,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/arith-umin.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/ashr-main-opcode-copyables.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/ashr-node-with-poison.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/associate-copyable-non-copyable-op.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/atomics.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/atomics.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/bad-reduction.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/bad_types.ll::roundtrip
