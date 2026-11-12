@@ -32,7 +32,12 @@ var ac_handles: i32[>..<];   // AssumeHandles (AssumptionCache::assumptions()), 
 
 fn ac_invalidate() { ac_fn = -1; }
 
+// findValuesAffectedByCondition with a plain callback (DropUnnecessaryAssumes): ac_push appends to ac_coll
+var ac_collecting: bool = false;
+var ac_coll: i32[>..<];
+
 fn ac_push(v: i32, a: i32, idx: i64) {
+    if ac_collecting { ac_coll.push(v); return; }
     // updateAffectedValues: dedupe (assume, index) per value
     for k in ac_val.len { if ac_val[k] == v && ac_asm[k] == a && ac_idx[k] as i64 == idx { return; } }
     ac_val.push(v);
@@ -443,4 +448,12 @@ fn noundef_from_assume(v: i32, cx: i32) -> bool {
         if valid_assume_for_context(a, cx) { return true; }
     }
     return false;
+}
+
+// AssumptionCache::replaceAssumption(Handle, New)
+fn ac_replace_assumption(old: i32, nw: i32) {
+    if ac_fn < 0 { return; }
+    for k in ac_val.len { if ac_asm[k] == old { ac_val[k] = -1; } }
+    for k in ac_handles.len { if ac_handles[k] == old { ac_handles[k] = nw; } }
+    ac_update_affected(nw);
 }

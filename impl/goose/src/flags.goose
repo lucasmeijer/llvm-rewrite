@@ -156,6 +156,8 @@ let KNOWN_FLAGS_MISC: const u8[:][] = [
     "likely-branch-weight", "unlikely-branch-weight",                      // lower-expect
     "spec-exec-max-speculation-cost", "spec-exec-max-not-hoisted", "spec-exec-only-if-divergent-target",
     "float2int-max-integer-bw", "tre-disable-entrycount-recompute", "callsite-splitting-duplication-threshold",
+    "move-auto-init-threshold", "disable-lower-comment-string", "cvp-max-functions-per-value",
+    "jump-table-to-switch-size-threshold", "jump-table-to-switch-function-size-threshold",
 ];
 
 // Flags whose non-default value is not supported (checked before the pipeline runs).
@@ -166,6 +168,8 @@ fn flags_check_unsupported() {
 let VALUE_FLAGS_MISC: const u8[:][] = [
     "spec-exec-max-speculation-cost", "spec-exec-max-not-hoisted", "float2int-max-integer-bw",
     "callsite-splitting-duplication-threshold", "likely-branch-weight", "unlikely-branch-weight",
+    "move-auto-init-threshold", "cvp-max-functions-per-value",
+    "jump-table-to-switch-size-threshold", "jump-table-to-switch-function-size-threshold",
 ];
 fn flag_takes_value(name: const u8[:]) -> bool {
     for k in VALUE_FLAGS_MISC { if k == name { return true; } }

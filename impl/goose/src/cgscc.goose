@@ -25,6 +25,7 @@ import ivec;
 import wvh;
 import lcg;
 import passmgr;
+import misc_passes;
 import function_attrs;
 import inliner;
 import ipoutil;
@@ -273,6 +274,7 @@ recursive fn cg_run_pass(n: i32, c: i32) -> u32 {
     if p == P_FUNCTION_ATTRS { let pa = fa_run_cgscc(c, pnodes[n].arg != 0); ap_pool_reset(); return pa; }
     if p == P_INLINE { let pa = inl_run_cgscc(c, pnodes[n].arg != 0); ap_pool_reset(); return pa; }
     if p == P_ARGPROMOTION { let pa = argpromotion_run_cgscc(c); ap_pool_reset(); return pa; }
+    if mp_is_ours(p) { let pa = mp_run_cgscc(p, pnodes[n].arg, c); ap_pool_reset(); return pa; }
     fatal("internal: unknown CGSCC pass id");
     return PA_ALL;
 }

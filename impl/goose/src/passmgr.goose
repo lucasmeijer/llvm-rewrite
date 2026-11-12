@@ -938,6 +938,8 @@ recursive fn parse_cgscc_elem(e: i32) -> i32 {
     if name == "no-op-cgscc" { return new_pnode(PK_PASS, P_NOOP_CGSCC as i32, 0, false, pelems[e].name); }
     if name == "require<no-op-cgscc>" { return new_pnode(PK_PASS, P_NOOP_CGSCC as i32, 0, true, pelems[e].name); }
     if name == "invalidate<no-op-cgscc>" { return new_pnode(PK_PASS, P_CG_INVALIDATE as i32, 0, true, pelems[e].name); }
+    let cmid, cmarg, cmreq = mp_parse_cgscc(name);
+    if cmid >= 0 { return new_pnode(PK_PASS, cmid, cmarg, cmreq, pelems[e].name); }
     if llvm_knows(name, 'c') { not_implemented(name); }
     // a function or loop pass in a CGSCC pipeline gets its own adaptor (createCGSCCToFunctionPassAdaptor)
     if is_function_pass_name(name) || is_loop_pass_name(name) || starts_with(name, "require<") || starts_with(name, "invalidate<") {
