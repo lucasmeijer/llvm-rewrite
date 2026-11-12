@@ -16105,6 +16105,11 @@ tests/imported/llvm/Transforms/VectorCombine/pr197910.ll::opt
 tests/imported/llvm/Transforms/VectorCombine/pr197910.ll::roundtrip
 tests/imported/llvm/Transforms/VectorCombine/pr88796.ll::opt
 tests/imported/llvm/Transforms/VectorCombine/pr88796.ll::roundtrip
+tests/pass/pass-manager/bpi-kept-with-cfg.ll::analysis
+tests/pass/pass-manager/bpi-kept-with-cfg.ll::roundtrip
+tests/pass/pass-manager/mssa-cached-across-adaptors.ll::roundtrip
+tests/pass/pass-manager/scev-cached-across-adaptors.ll::opt
+tests/pass/pass-manager/scev-cached-across-adaptors.ll::roundtrip
 tests/perf/compile/SPASS.ll::roundtrip
 tests/perf/compile/lua.ll::roundtrip
 tests/perf/compile/oggenc.ll::roundtrip
