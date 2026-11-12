@@ -871,6 +871,7 @@ fn ic_visit(i: i32) -> i32 {
         OP_PTRTOADDR => { return visit_ptrtoaddr(i); },
         OP_BITCAST => { return visit_bitcast(i); },
         OP_ADDRSPACECAST => { return visit_addrspacecast(i); },
+        OP_VAARG => { return -1; },   // no visitVAArgInst: InstVisitor's visitInstruction (returns nullptr)
         _ => { return ic_visit_other(i); },
     }
 }

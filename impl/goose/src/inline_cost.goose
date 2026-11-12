@@ -378,8 +378,8 @@ fn ic_attrs_inline_compatible(caller: i32, callee: i32) -> bool {
     let dva: u64 = if da >= 0 { attrs[da].i1 } else { 0 };
     let dvb: u64 = if db >= 0 { attrs[db].i1 } else { 0 };
     if dva != dvb { return false; }
-    // checkStrictFP: a strictfp caller can't inline a non-strictfp callee
-    if fn_has(caller, 0, AK_StrictFP) && !fn_has(callee, 0, AK_StrictFP) { return false; }
+    // checkStrictFP: a strictfp callee can't be inlined into a non-strictfp caller
+    if fn_has(callee, 0, AK_StrictFP) && !fn_has(caller, 0, AK_StrictFP) { return false; }
     for key in ["sign-return-address", "sign-return-address-key", "branch-protection-pauth-lr"] {
         if !ic_fn_str_eq(caller, callee, key) { return false; }
     }

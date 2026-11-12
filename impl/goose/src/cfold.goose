@@ -694,7 +694,15 @@ recursive fn symbolic_gep(srcty: i32, rty: i32, flags0: u8, inr: i32, mark: i64,
         }
     }
     offset = sext64((offset as! u64) & wmask64(bw), bw);
-    if inr >= 0 { cfa_not_ported("inrange GEP folding"); }
+    // InRange (a [lo, hi) range of index width; only non-wrapping ranges are ported)
+    var has_inr = inr >= 0;
+    var inr_lo: i64 = 0;
+    var inr_hi: i64 = 0;
+    if has_inr {
+        if bw != 64 { cfa_not_ported("inrange GEP folding with an index width other than 64"); }
+        inr_lo = gep_inranges[2 * inr];
+        inr_hi = gep_inranges[2 * inr + 1];
+    }
     var nw = flags0;
     var overflow = false;
     while is_cexpr(ptr) && cexpr_op(ptr) == OP_GEP {
@@ -702,7 +710,19 @@ recursive fn symbolic_gep(srcty: i32, rty: i32, flags0: u8, inr: i32, mark: i64,
         var allci = true;
         for k in 1..nops(ptr) { let x = op(ptr, k); if vals[x].kind != VK_CINT || ty_is_vector(vals[x].ty) { allci = false; } }
         if !allci { break; }
-        if csts[vals[ptr].sub].inr >= 0 { cfa_not_ported("inrange GEP folding"); }
+        let gi = csts[vals[ptr].sub].inr;
+        if gi >= 0 {
+            // Adjust inrange offset and intersect inrange attributes
+            if bw != 64 { cfa_not_ported("inrange GEP folding with an index width other than 64"); }
+            let glo = ((gep_inranges[2 * gi] as! u64) - (offset as! u64)) as! i64;
+            let ghi = ((gep_inranges[2 * gi + 1] as! u64) - (offset as! u64)) as! i64;
+            if glo >= ghi { cfa_not_ported("inrange GEP folding with a wrapping range"); }
+            if has_inr {
+                inr_lo = max(inr_lo, glo);
+                inr_hi = min(inr_hi, ghi);
+                if inr_lo >= inr_hi { cfa_not_ported("inrange GEP folding with an empty range"); }
+            } else { has_inr = true; inr_lo = glo; inr_hi = ghi; }
+        }
         let st2 = csts[vals[ptr].sub].ty2;
         var o2: i64 = 0;
         var c2 = st2;
@@ -740,7 +760,7 @@ recursive fn symbolic_gep(srcty: i32, rty: i32, flags0: u8, inr: i32, mark: i64,
     if (nw & GEP_NUSW) != 0 && offset >= 0 { nw |= GEP_NUW; }
     // ConstantExpr::getPtrAdd(Ptr, Offset, NW, InRange)
     let oc = c_int_words(ty_int(bw), (offset as! u64) & wmask64(bw), 0);
-    return ce_gep(T_I8, ptr, [oc], nw, -1);
+    return ce_gep(T_I8, ptr, [oc], nw, if has_inr { inrange_id(inr_lo, inr_hi) } else { -1 });
 }
 // DL.isNonIntegralPointerType(LoadTy->getScalarType()) (FoldReinterpretLoadFromConst)
 fn must_not_introduce_inttoptr(t: i32) -> bool { cf_is_nonintegral_ptr_ty(t) }

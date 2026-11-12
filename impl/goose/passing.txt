@@ -962,6 +962,7 @@ tests/imported/llvm/Analysis/BasicAA/returned.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/returned.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/scalable-dse-aa.ll::opt
 tests/imported/llvm/Analysis/BasicAA/scalable-dse-aa.ll::roundtrip
+tests/imported/llvm/Analysis/BasicAA/separate_storage.ll::opt
 tests/imported/llvm/Analysis/BasicAA/separate_storage.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/sequential-gep.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/sequential-gep.ll::roundtrip
@@ -5010,6 +5011,7 @@ tests/imported/llvm/Transforms/Inline/cgscc-update.ll::opt
 tests/imported/llvm/Transforms/Inline/cgscc-update.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/comdat-ipo.ll::opt
 tests/imported/llvm/Transforms/Inline/comdat-ipo.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/convergence-inline.ll::opt
 tests/imported/llvm/Transforms/Inline/convergence-inline.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/crash-lifetime-marker.ll::opt
 tests/imported/llvm/Transforms/Inline/crash-lifetime-marker.ll::roundtrip
@@ -5097,11 +5099,13 @@ tests/imported/llvm/Transforms/Inline/inline-drop-attributes.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-drop-attributes.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-fast-math-flags.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-fast-math-flags.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-funclets.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-funclets.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-history-2.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-history-2.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-history-3.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-history-3.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-history-invoke.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-history-invoke.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-history.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-history.ll::roundtrip
@@ -5137,6 +5141,7 @@ tests/imported/llvm/Transforms/Inline/inline-ref-metadata.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-ref-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-remark.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-remark.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-retainRV-call.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-retainRV-call.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-scalable.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-scalable.ll::roundtrip
@@ -5150,6 +5155,7 @@ tests/imported/llvm/Transforms/Inline/inline-stack-probe-size.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-stack-probe-size.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-stacksize.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-stacksize.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-strictfp.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-strictfp.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-switch-default-2.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-switch-default-2.ll::roundtrip
@@ -5158,6 +5164,7 @@ tests/imported/llvm/Transforms/Inline/inline-switch-default.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-tail.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-tail.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-threshold.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-varargs.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-varargs.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-vla.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-vla.ll::roundtrip
@@ -5224,7 +5231,9 @@ tests/imported/llvm/Transforms/Inline/lifetime.ll::opt
 tests/imported/llvm/Transforms/Inline/lifetime.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/local-as-metadata-undominated-use.ll::opt
 tests/imported/llvm/Transforms/Inline/local-as-metadata-undominated-use.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/memprof_inline2.ll::opt
 tests/imported/llvm/Transforms/Inline/memprof_inline2.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/memprof_inline3.ll::opt
 tests/imported/llvm/Transforms/Inline/memprof_inline3.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/module-inliner-basic.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/module-inliner-cba-crash.ll::opt

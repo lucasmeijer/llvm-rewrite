@@ -7,10 +7,12 @@
 // hoisting, lifetime markers, stacksave/stackrestore, tail-call kinds, musttail varargs forwarding, the inline
 // history, updateCallerBFI / updateCallProfile / updateProfileCallee), CloneAndPruneFunctionInto with the
 // PruningFunctionCloner (llvm/lib/Transforms/Utils/CloneFunction.cpp), changeToInvokeAndSplitBasicBlock (Local.cpp),
-// AttributeFuncs::mergeAttributesForInlining (the MergeRules of Attributes.td) and MDNode::concatenate.
-// Not ported (fail loudly): funclet-based EH (HandleInlinedEHPad, getUnwindDestToken), deopt bundles and
-// experimental.deoptimize, ObjC ARC attached calls, convergence tokens, memprof metadata, assignment tracking,
-// strictfp callers (constrained intrinsics), GC strategies, no-inline-line-tables.
+// AttributeFuncs::mergeAttributesForInlining (the MergeRules of Attributes.td) and MDNode::concatenate;
+// funclet EH (getUnwindDestToken, HandleInlinedEHPad, PropagateOperandBundles), convergence control tokens,
+// ObjC ARC attached calls (inlineRetainOrClaimRVCalls with objcarc::GetRCIdentityRoot), strictfp callers
+// (PruningFunctionCloner::cloneInstruction with getConstrainedIntrinsicID, llvm/lib/IR/FPEnv.cpp), memprof
+// metadata (propagateMemProfMetadata with CallStackTrie, llvm/lib/Analysis/MemoryProfileInfo.cpp).
+// Not ported (fail loudly): assignment tracking, contextual profiles, -memprof-report-hinted-sizes output.
 import std;
 import ir;
 import irutil;
@@ -61,6 +63,14 @@ fn if_not_ported(what: const u8[:]) { fatal(str("InlineFunction: ", what, " is n
 var if_fail_reason: i32 = -1;
 var ifi_inlined_call_sites: i32[>..<];
 var ifi_static_allocas: i32[>..<];
+var ifi_convergence_token: i32 = -1;     // IFI.ConvergenceControlToken
+// getConvergenceEntry: the llvm.experimental.convergence.entry call in a block
+fn if_convergence_entry(bb: i32) -> i32 {
+    var i = first_non_phi(bb);
+    while i >= 0 { if inst_iid(i) == IID_experimental_convergence_entry { return i; } i = inst_next(i); }
+    return -1;
+}
+var ifi_callsite_ehpad: i32 = -1;        // IFI.CallSiteEHPad (the call site's "funclet" bundle ehp)
 
 fn mdk(name: const u8[:]) -> i32 { md_kind_id(name) }
 
@@ -69,6 +79,8 @@ fn mdk(name: const u8[:]) -> i32 { md_kind_id(name) }
 
 fn can_inline_call_site(cb: i32) -> bool {
     if_fail_reason = -1;
+    ifi_callsite_ehpad = -1;
+    ifi_convergence_token = -1;
     if iop(cb) == OP_CALLBR { if_fail_reason = intern("We don't inline callbr yet."); return false; }
     let callee = called_function(cb);
     if callee < 0 || func_is_decl(callee) { if_fail_reason = intern("external or indirect"); return false; }
@@ -82,10 +94,14 @@ fn can_inline_call_site(cb: i32) -> bool {
     let nb = cb_nbundles(cb);
     for k in nb {
         let t = sbytes(cb_bundle_tag(cb, k));
-        if t == "deopt" || t == "funclet" || t == "kcfi" { continue; }
-        if t == "clang.arc.attachedcall" { if_not_ported("inlining an ObjC ARC attached call"); }
-        if t == "convergencectrl" { if_not_ported("convergence control tokens"); }
+        if t == "deopt" || t == "funclet" || t == "clang.arc.attachedcall" || t == "kcfi" { continue; }
+        if t == "convergencectrl" { ifi_convergence_token = op(cb, cb_bundle_begin(cb, k)); continue; }
         if_fail_reason = intern("unsupported operand bundle");
+        return false;
+    }
+    // A convergent call without a token into a callee using controlled convergence (getConvergenceEntry)
+    if call_has_fn_attr(cb, AK_Convergent) && ifi_convergence_token < 0 && if_convergence_entry(func_entry(callee)) >= 0 {
+        if_fail_reason = intern("convergent call needs convergencectrl operand");
         return false;
     }
     let caller = inst_func(cb);
@@ -97,8 +113,31 @@ fn can_inline_call_site(cb: i32) -> bool {
     let cp = if globs[glob_of(callee)].has_personality != 0 { fa_strip_pointer_casts(op(callee, 0)) } else { -1 };
     let rp = if globs[glob_of(caller)].has_personality != 0 { fa_strip_pointer_casts(op(caller, 0)) } else { -1 };
     if cp >= 0 && rp >= 0 && cp != rp { if_fail_reason = intern("incompatible personality"); return false; }
+    // We need to figure out which funclet the callsite was in so that we may properly nest the callee.
     if rp >= 0 && if_is_scoped_eh(rp) {
-        for k in nb { if sbytes(cb_bundle_tag(cb, k)) == "funclet" { if_not_ported("inlining into a funclet"); } }
+        for k in nb { if sbytes(cb_bundle_tag(cb, k)) == "funclet" { ifi_callsite_ehpad = op(cb, cb_bundle_begin(cb, k)); break; } }
+        if ifi_callsite_ehpad >= 0 {
+            let pn = sbytes(vals[rp].name);
+            if pn == "__CxxFrameHandler3" {
+                // The MSVC personality cannot tolerate catches getting inlined into cleanup funclets.
+                if iop(ifi_callsite_ehpad) == OP_CLEANUPPAD {
+                    var b = func_first_block(callee);
+                    while b >= 0 {
+                        let f = first_non_phi(b);
+                        if f >= 0 && iop(f) == OP_CATCHSWITCH { if_fail_reason = intern("catch in cleanup funclet"); return false; }
+                        b = block_next(b);
+                    }
+                }
+            } else if pn == "_except_handler3" || pn == "_except_handler4" || pn == "__C_specific_handler" {
+                // SEH is even less tolerant, there may not be any sort of exceptional funclet in the callee.
+                var b = func_first_block(callee);
+                while b >= 0 {
+                    let f = first_non_phi(b);
+                    if f >= 0 && inst_is_eh_pad(f) { if_fail_reason = intern("SEH in cleanup funclet"); return false; }
+                    b = block_next(b);
+                }
+            }
+        }
     }
     return true;
 }
@@ -108,6 +147,137 @@ fn if_is_scoped_eh(p: i32) -> bool {
     let n = sbytes(vals[p].name);
     return n == "__CxxFrameHandler3" || n == "__C_specific_handler" || n == "_except_handler3" || n == "_except_handler4" ||
         n == "ProcessCLRException" || n == "__gxx_wasm_personality_v0";
+}
+
+// ---------------------------------------------------------------------------------------------
+// Funclet EH: getUnwindDestToken (a memo map from pads to their unwind destination token; -1 = nullptr)
+
+var uw_memo_k: i32[>..<];
+var uw_memo_v: i32[>..<];
+fn uw_memo_reset() { uw_memo_k.resize(0); uw_memo_v.resize(0); }
+fn uw_memo_find(p: i32) -> i64 { for k in uw_memo_k.len { if uw_memo_k[k] == p { return k; } } return -1; }
+fn uw_memo_has(p: i32) -> bool { uw_memo_find(p) >= 0 }
+fn uw_memo_get(p: i32) -> i32 { let k = uw_memo_find(p); if k < 0 { -1 } else { uw_memo_v[k] } }
+fn uw_memo_set(p: i32, v: i32) {
+    let k = uw_memo_find(p);
+    if k >= 0 { uw_memo_v[k] = v; return; }
+    uw_memo_k.push(p);
+    uw_memo_v.push(v);
+}
+fn token_none() -> i32 { c_simple(VK_CTOKENNONE, T_TOKEN) }
+fn is_token_none(v: i32) -> bool { v >= 0 && vals[v].kind == VK_CTOKENNONE }
+// FuncletPadInst::getParentPad (the last operand) / CatchSwitchInst::getParentPad (operand 0)
+fn eh_parent_pad(p: i32) -> i32 { if iop(p) == OP_CATCHSWITCH { op(p, 0) } else { op(p, nops(p) - 1) } }
+fn eh_set_parent_pad(p: i32, v: i32) { if iop(p) == OP_CATCHSWITCH { set_op(p, 0, v); } else { set_op(p, nops(p) - 1, v); } }
+fn catchswitch_first_handler(cs: i32) -> i64 { if catchswitch_unwinds_to_caller(cs) { 1 } else { 2 } }
+fn catchswitch_unwind_dest(cs: i32) -> i32 { if catchswitch_unwinds_to_caller(cs) { -1 } else { op(cs, 1) } }
+fn is_child_pad(u: i32) -> bool { is_inst(u) && (iop(u) == OP_CLEANUPPAD || iop(u) == OP_CATCHSWITCH) }
+
+// getUnwindDestTokenHelper: the descendant-ward part of the search
+fn uw_helper(ehpad: i32) -> i32 {
+    var wl: i32[>..<] = [ehpad];
+    while wl.len > 0 {
+        let cur = wl.pop();
+        var tok: i32 = -1;
+        if iop(cur) == OP_CATCHSWITCH {
+            if !catchswitch_unwinds_to_caller(cur) {
+                tok = first_non_phi(catchswitch_unwind_dest(cur));
+            } else {
+                var h = catchswitch_first_handler(cur);
+                while h < nops(cur) && tok < 0 {
+                    let cp = first_non_phi(op(cur, h));
+                    var u = first_use(cp);
+                    while u >= 0 {
+                        let child = use_user(u);
+                        u = use_next(u);
+                        if !is_child_pad(child) { continue; }
+                        if !uw_memo_has(child) { wl.push(child); continue; }
+                        let ct = uw_memo_get(child);
+                        if ct < 0 { continue; }
+                        if is_token_none(ct) { tok = ct; break; }
+                    }
+                    h++;
+                }
+            }
+        } else {
+            var u = first_use(cur);
+            while u >= 0 {
+                let us = use_user(u);
+                u = use_next(u);
+                if is_inst(us) && iop(us) == OP_CLEANUPRET {
+                    if !cleanupret_unwinds_to_caller(us) { tok = first_non_phi(op(us, 1)); } else { tok = token_none(); }
+                    break;
+                }
+                var ct: i32 = -1;
+                if is_inst(us) && iop(us) == OP_INVOKE {
+                    ct = first_non_phi(invoke_unwind_dest(us));
+                } else if is_child_pad(us) {
+                    if !uw_memo_has(us) { wl.push(us); continue; }
+                    ct = uw_memo_get(us);
+                    if ct < 0 { continue; }
+                } else { continue; }
+                if is_inst(ct) && eh_parent_pad(ct) == cur { continue; }
+                tok = ct;
+                break;
+            }
+        }
+        if tok < 0 { continue; }
+        let uparent = if is_inst(tok) { eh_parent_pad(tok) } else { -1 };
+        var exited_orig = false;
+        var ex = cur;
+        while ex >= 0 && ex != uparent {
+            if iop(ex) != OP_CATCHPAD {
+                uw_memo_set(ex, tok);
+                if ex == ehpad { exited_orig = true; }
+            }
+            let pp = eh_parent_pad(ex);
+            ex = if is_inst(pp) { pp } else { -1 };
+        }
+        if exited_orig { return tok; }
+    }
+    return -1;
+}
+
+// getUnwindDestToken: the ehp (or ConstantTokenNone for "unwinds to caller") EHPad unwinds to, -1 if unknown
+fn get_unwind_dest_token(pad0: i32) -> i32 {
+    var ehp = pad0;
+    if iop(ehp) == OP_CATCHPAD { ehp = eh_parent_pad(ehp); }
+    let mk = uw_memo_find(ehp);
+    if mk >= 0 { return uw_memo_v[mk]; }
+    var tok = uw_helper(ehp);
+    if tok >= 0 { return tok; }
+    uw_memo_set(ehp, -1);
+    var last_useless = ehp;
+    var anc = eh_parent_pad(ehp);
+    while is_inst(anc) {
+        if iop(anc) == OP_CATCHPAD { anc = eh_parent_pad(anc); continue; }
+        let am = uw_memo_find(anc);
+        if am < 0 { tok = uw_helper(anc); } else { tok = uw_memo_v[am]; }
+        if tok >= 0 { break; }
+        last_useless = anc;
+        uw_memo_set(last_useless, -1);
+        anc = eh_parent_pad(anc);
+    }
+    var wl: i32[>..<] = [last_useless];
+    while wl.len > 0 {
+        let up = wl.pop();
+        let m = uw_memo_find(up);
+        if m >= 0 && uw_memo_v[m] >= 0 { continue; }
+        uw_memo_set(up, tok);
+        if iop(up) == OP_CATCHSWITCH {
+            var h = catchswitch_first_handler(up);
+            while h < nops(up) {
+                let cp = first_non_phi(op(up, h));
+                var u = first_use(cp);
+                while u >= 0 { let us = use_user(u); u = use_next(u); if is_child_pad(us) { wl.push(us); } }
+                h++;
+            }
+        } else {
+            var u = first_use(up);
+            while u >= 0 { let us = use_user(u); u = use_next(u); if is_child_pad(us) { wl.push(us); } }
+        }
+    }
+    return tok;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -145,6 +315,94 @@ fn if_name_with(dst: i32, src: i32, suffix: const u8[:]) {
     set_name(dst, nm);
 }
 
+// PruningFunctionCloner::cloneInstruction: into a strictfp function, FP operations and their intrinsics become
+// constrained intrinsic calls with the default rounding mode and exception behavior (getConstrainedIntrinsicID,
+// llvm/lib/IR/FPEnv.cpp and llvm/IR/ConstrainedOps.def)
+var pfc_host_strictfp: bool = false;
+// the constrained intrinsic for an instruction (0 = none), whether it has a rounding mode operand, and its
+// overload kind (0: [ret], 1: [ret, arg0], 2: [ret, arg1], 3: [arg0])
+fn constrained_iid(i: i32) -> i64, bool, i64 {
+    let o = iop(i);
+    if o == OP_FCMP { return IID_experimental_constrained_fcmp, false, 3; }
+    if o == OP_FADD { return IID_experimental_constrained_fadd, true, 0; }
+    if o == OP_FSUB { return IID_experimental_constrained_fsub, true, 0; }
+    if o == OP_FMUL { return IID_experimental_constrained_fmul, true, 0; }
+    if o == OP_FDIV { return IID_experimental_constrained_fdiv, true, 0; }
+    if o == OP_FREM { return IID_experimental_constrained_frem, true, 0; }
+    if o == OP_FPEXT { return IID_experimental_constrained_fpext, false, 1; }
+    if o == OP_SITOFP { return IID_experimental_constrained_sitofp, true, 1; }
+    if o == OP_UITOFP { return IID_experimental_constrained_uitofp, true, 1; }
+    if o == OP_FPTOSI { return IID_experimental_constrained_fptosi, false, 1; }
+    if o == OP_FPTOUI { return IID_experimental_constrained_fptoui, false, 1; }
+    if o == OP_FPTRUNC { return IID_experimental_constrained_fptrunc, true, 1; }
+    if o != OP_CALL { return 0, false, 0; }
+    let id = inst_iid(i);
+    if id == IID_acos { return IID_experimental_constrained_acos, true, 0; }
+    if id == IID_asin { return IID_experimental_constrained_asin, true, 0; }
+    if id == IID_atan { return IID_experimental_constrained_atan, true, 0; }
+    if id == IID_atan2 { return IID_experimental_constrained_atan2, true, 0; }
+    if id == IID_ceil { return IID_experimental_constrained_ceil, false, 0; }
+    if id == IID_cos { return IID_experimental_constrained_cos, true, 0; }
+    if id == IID_cosh { return IID_experimental_constrained_cosh, true, 0; }
+    if id == IID_exp { return IID_experimental_constrained_exp, true, 0; }
+    if id == IID_exp2 { return IID_experimental_constrained_exp2, true, 0; }
+    if id == IID_floor { return IID_experimental_constrained_floor, false, 0; }
+    if id == IID_fma { return IID_experimental_constrained_fma, true, 0; }
+    if id == IID_log { return IID_experimental_constrained_log, true, 0; }
+    if id == IID_log10 { return IID_experimental_constrained_log10, true, 0; }
+    if id == IID_log2 { return IID_experimental_constrained_log2, true, 0; }
+    if id == IID_lrint { return IID_experimental_constrained_lrint, true, 1; }
+    if id == IID_llrint { return IID_experimental_constrained_llrint, true, 1; }
+    if id == IID_lround { return IID_experimental_constrained_lround, false, 1; }
+    if id == IID_llround { return IID_experimental_constrained_llround, false, 1; }
+    if id == IID_maxnum { return IID_experimental_constrained_maxnum, false, 0; }
+    if id == IID_minnum { return IID_experimental_constrained_minnum, false, 0; }
+    if id == IID_maximum { return IID_experimental_constrained_maximum, false, 0; }
+    if id == IID_minimum { return IID_experimental_constrained_minimum, false, 0; }
+    if id == IID_nearbyint { return IID_experimental_constrained_nearbyint, true, 0; }
+    if id == IID_pow { return IID_experimental_constrained_pow, true, 0; }
+    if id == IID_powi { return IID_experimental_constrained_powi, true, 0; }
+    if id == IID_ldexp { return IID_experimental_constrained_ldexp, true, 2; }
+    if id == IID_rint { return IID_experimental_constrained_rint, true, 0; }
+    if id == IID_round { return IID_experimental_constrained_round, false, 0; }
+    if id == IID_roundeven { return IID_experimental_constrained_roundeven, false, 0; }
+    if id == IID_sin { return IID_experimental_constrained_sin, true, 0; }
+    if id == IID_sinh { return IID_experimental_constrained_sinh, true, 0; }
+    if id == IID_sqrt { return IID_experimental_constrained_sqrt, true, 0; }
+    if id == IID_tan { return IID_experimental_constrained_tan, true, 0; }
+    if id == IID_tanh { return IID_experimental_constrained_tanh, true, 0; }
+    if id == IID_trunc { return IID_experimental_constrained_trunc, false, 0; }
+    if id == IID_fmuladd { return IID_experimental_constrained_fmuladd, true, 0; }
+    return 0, false, 0;
+}
+fn pfc_clone_instruction(ii: i32, nf: i32) -> i32 {
+    if !pfc_host_strictfp { return inst_clone(ii); }
+    let cid, rounding, ovk = constrained_iid(ii);
+    if cid == 0 { return inst_clone(ii); }
+    var args: i32[>..<] = [];
+    var n = nops(ii);
+    if iop(ii) == OP_CALL { n = nops(ii) - 1; }   // every operand but the callee
+    for k in n { args.push(op(ii, k)); }
+    if iop(ii) == OP_FCMP {
+        let names: const u8[:][] = ["false", "oeq", "ogt", "oge", "olt", "ole", "one", "ord", "uno", "ueq", "ugt", "uge", "ult", "ule", "une", "true"];
+        args.push(get_md_as_value(md_string(names[insts[inst_of(ii)].pred as i64])));
+    }
+    if rounding { args.push(get_md_as_value(md_string("round.tonearest"))); }
+    args.push(get_md_as_value(md_string("fpexcept.ignore")));
+    var ov: i32[>..<] = [];
+    if ovk == 0 { ov.push(vals[ii].ty); }
+    else if ovk == 1 { ov.push(vals[ii].ty); ov.push(vals[args[0]].ty); }
+    else if ovk == 2 { ov.push(vals[ii].ty); ov.push(vals[args[1]].ty); }
+    else { ov.push(vals[args[0]].ty); }
+    let f = au_get_declaration(cid, ov);
+    var opsv: i32[>..<] = [];
+    for a in args { opsv.push(a); }
+    opsv.push(f);
+    let ci = create_inst(OP_CALL, vals[ii].ty, opsv);
+    insts[inst_of(ci)].ty2 = globs[glob_of(f)].vty;
+    return ci;
+}
+
 // PruningFunctionCloner::CloneBlock; the worklist is to_clone
 fn pfc_clone_block(bb: i32, start: i32, nf: i32, m: i32, suffix: const u8[:], to_clone: i32[>..<]&) {
     if vmm_get(m, bb) >= 0 { return; }
@@ -168,8 +426,10 @@ fn pfc_clone_block(bb: i32, start: i32, nf: i32, m: i32, suffix: const u8[:], to
         let cur = ii;
         ii = inst_next(ii);
         if inst_iid(cur) == IID_fake_use { continue; }
-        let ni = inst_clone(cur);
+        let ni = pfc_clone_instruction(cur, nf);
         block_append_inst(nbb, ni);
+        // All function calls inlined into a strictfp function get 'strictfp'
+        if pfc_host_strictfp && iop(ni) == OP_CALL { cb_add_fn_attr_enum(ni, AK_StrictFP); }
         if iop(ni) != OP_PHI {
             remap_instruction(ni, m, RF_NO_MODULE_LEVEL_CHANGES);
             let v = ic::ic_constant_fold_instruction(ni);
@@ -231,6 +491,7 @@ fn pfc_clone_block(bb: i32, start: i32, nf: i32, m: i32, suffix: const u8[:], to
 
 // CloneAndPruneIntoFromInst(NewFunc, OldFunc, &OldFunc->front().front(), VMap, false, Returns, ".i", CodeInfo)
 fn clone_and_prune_function_into(nf: i32, of: i32, m: i32, returns: i32[>..<]&) {
+    pfc_host_strictfp = fn_has(nf, 0, AK_StrictFP);
     let suffix = ".i";
     let start_bb = func_entry(of);
     var wl: i32[>..<] = [];
@@ -407,6 +668,285 @@ fn if_simplify_instruction(i: i32) -> i32 {
     let r = simplify_instruction(i);
     sq_no_dt = sdt; sq_no_ac = sac; sq_no_tli = stli;
     return r;
+}
+
+// ---------------------------------------------------------------------------------------------
+// MemProf: propagateMemProfMetadata and CallStackTrie (llvm/lib/Analysis/MemoryProfileInfo.cpp)
+
+let AT_NOTCOLD = 1;
+let AT_COLD = 2;
+let AT_HOT = 4;
+struct TrieNode { types: u8, callers: i32, ncallers: i32 }
+var tr_nodes: TrieNode[>..<];
+var tr_ckey: u64[>..<];      // caller links: stack id, child node, next link (a list; sorted when walked)
+var tr_cchild: i32[>..<];
+var tr_cnext: i32[>..<];
+var tr_ctx_node: i32[>..<];  // ContextInfo entries: node, full stack id, total size, original alloc type
+var tr_ctx_id: u64[>..<];
+var tr_ctx_size: u64[>..<];
+var tr_ctx_at: i32[>..<];
+var tr_alloc: i32 = -1;
+var tr_alloc_id: u64 = 0;
+fn tr_reset() {
+    tr_nodes.resize(0); tr_ckey.resize(0); tr_cchild.resize(0); tr_cnext.resize(0);
+    tr_ctx_node.resize(0); tr_ctx_id.resize(0); tr_ctx_size.resize(0); tr_ctx_at.resize(0);
+    tr_alloc = -1; tr_alloc_id = 0;
+}
+fn tr_new(t: i64) -> i32 { tr_nodes.push(TrieNode { types: t as u8, callers: -1, ncallers: 0 }); return (tr_nodes.len - 1) as i32; }
+fn md_cint_u64(m: i32) -> u64 { cint_lo(mds[m].extra) }
+// getMIBAllocType
+fn mib_alloc_type(mib: i32) -> i64 {
+    let s = md_op(mib, 1);
+    if s >= 0 && mds[s].kind == MK_STRING {
+        let t = sbytes(mds[s].extra);
+        if t == "cold" { return AT_COLD; }
+        if t == "hot" { return AT_HOT; }
+    }
+    return AT_NOTCOLD;
+}
+fn at_string(t: i64) -> const u8[:] { if t == AT_COLD { "cold" } else if t == AT_HOT { "hot" } else { "notcold" } }
+fn single_alloc_type(t: i64) -> bool { t == 1 || t == 2 || t == 4 }
+// CallStackTrie::addCallStack(MIB)
+fn tr_add_call_stack(mib: i32) {
+    let at = mib_alloc_type(mib);
+    let st = md_op(mib, 0);
+    var cur: i32 = -1;
+    for k in mds[st].nops as i64 {
+        let id = md_cint_u64(md_op(st, k));
+        if k == 0 {
+            if tr_alloc >= 0 { tr_nodes[tr_alloc].types |= at as u8; } else { tr_alloc_id = id; tr_alloc = tr_new(at); }
+            cur = tr_alloc;
+            continue;
+        }
+        // the caller list is kept sorted by stack id (std::map order)
+        var prev: i32 = -1;
+        var l = tr_nodes[cur].callers;
+        while l >= 0 && tr_ckey[l] < id { prev = l; l = tr_cnext[l]; }
+        if l >= 0 && tr_ckey[l] == id { cur = tr_cchild[l]; tr_nodes[cur].types |= at as u8; continue; }
+        let nn = tr_new(at);
+        tr_ckey.push(id); tr_cchild.push(nn); tr_cnext.push(l);
+        let nl = (tr_ckey.len - 1) as i32;
+        if prev < 0 { tr_nodes[cur].callers = nl; } else { tr_cnext[prev] = nl; }
+        tr_nodes[cur].ncallers++;
+        cur = nn;
+    }
+    for k in 2..(mds[mib].nops as i64) {
+        let pr = md_op(mib, k);
+        tr_ctx_node.push(cur); tr_ctx_id.push(md_cint_u64(md_op(pr, 0))); tr_ctx_size.push(md_cint_u64(md_op(pr, 1))); tr_ctx_at.push(at as i32);
+    }
+}
+// collectContextInfo: the ContextInfo entries of a subtrie (indices, appended to tr_ctx_buf), the node's first,
+// then its callers' in stack id order
+var tr_ctx_buf: i32[>..<];
+recursive fn tr_collect_ctx(n: i32) {
+    for k in tr_ctx_node.len { if tr_ctx_node[k] == n { tr_ctx_buf.push(k as i32); } }
+    var l = tr_nodes[n].callers;
+    while l >= 0 { tr_collect_ctx(tr_cchild[l]); l = tr_cnext[l]; }
+}
+recursive fn tr_hot_to_notcold(n: i32) {
+    if (tr_nodes[n].types & (AT_HOT as u8)) != 0 { tr_nodes[n].types = (tr_nodes[n].types & ~(AT_HOT as u8)) | (AT_NOTCOLD as u8); }
+    var l = tr_nodes[n].callers;
+    while l >= 0 { tr_hot_to_notcold(tr_cchild[l]); l = tr_cnext[l]; }
+}
+fn mp_includes_all_ctx_size_info() -> bool {
+    return flag_bool("memprof-report-hinted-sizes", false) || flag_bool("memprof-keep-context-size-info", false) ||
+        flag_int("memprof-cloning-cold-threshold", 100) < 100;
+}
+fn md_i64(x: u64) -> i32 { md_value(c_int(T_I64, x as! i64)) }
+// createMIBNode (built from existing metadata: every cold context's size info is kept); the stack is tr_stack,
+// the context info tr_ctx_buf
+var tr_stack: u64[>..<];
+fn payload_finish(payload: i32[>..<]&, at: i64, total: u64&, cold: u64&) -> i32 {
+    if tr_ctx_buf.len == 0 { return md_get(MK_TUPLE, -1, payload, false); }
+    for k in tr_ctx_buf {
+        total += tr_ctx_size[k];
+        var large = false;
+        if at == AT_COLD { cold += tr_ctx_size[k]; large = true; }
+        if mp_includes_all_ctx_size_info() || large {
+            payload.push(md_get(MK_TUPLE, -1, [md_i64(tr_ctx_id[k]), md_i64(tr_ctx_size[k])], false));
+        }
+    }
+    return md_get(MK_TUPLE, -1, payload, false);
+}
+fn mp_report(what: const u8[:]) { if flag_bool("memprof-report-hinted-sizes", false) { if_not_ported(what); } }
+// saveFilteredNewMIBNodes (BuiltFromExistingMetadata: never "mostly cold"): the new nodes are tr_buf[mark..],
+// replaced by the saved ones
+var tr_buf: i32[>..<];
+fn tr_save_filtered(mark: i64, caller_len: i64) {
+    var newn: i32[>..<] = [];
+    for k in mark..tr_buf.len { newn.push(tr_buf[k]); }
+    tr_buf.resize(mark);
+    if flag_bool("memprof-keep-all-not-cold-contexts", false) { for x in newn { tr_buf.push(x); } return; }
+    var longer = false;
+    for x in newn {
+        if mib_alloc_type(x) == AT_COLD { continue; }
+        if (mds[md_op(x, 0)].nops as i64) > caller_len { longer = true; break; }
+    }
+    var keep_first = !longer;
+    for x in newn {
+        if mib_alloc_type(x) != AT_COLD {
+            if (mds[md_op(x, 0)].nops as i64) > caller_len { tr_buf.push(x); continue; }
+            if keep_first { keep_first = false; tr_buf.push(x); continue; }
+            mp_report("-memprof-report-hinted-sizes");
+            continue;
+        }
+        tr_buf.push(x);
+    }
+}
+// CallStackTrie::buildMIBNodes: appends the MIB nodes to tr_buf
+recursive fn tr_build_mib_nodes(n: i32, callee_ambiguous: bool, total: u64&, cold: u64&) -> bool {
+    if single_alloc_type(tr_nodes[n].types as i64) {
+        tr_ctx_buf.resize(0);
+        tr_collect_ctx(n);
+        tr_buf.push(tr_create_mib_ctx(tr_nodes[n].types as i64, total, cold));
+        return true;
+    }
+    if tr_nodes[n].callers >= 0 {
+        let ambiguous = tr_nodes[n].ncallers > 1;
+        var all = true;
+        let mark = tr_buf.len;
+        var ct: u64 = 0;
+        var cc: u64 = 0;
+        var l = tr_nodes[n].callers;
+        while l >= 0 {
+            tr_stack.push(tr_ckey[l]);
+            let r = tr_build_mib_nodes(tr_cchild[l], ambiguous, ct, cc);
+            all = all && r;
+            tr_stack.pop();
+            l = tr_cnext[l];
+        }
+        tr_save_filtered(mark, tr_stack.len + 1);
+        total += ct;
+        cold += cc;
+        if all { return true; }
+    }
+    if !callee_ambiguous { return false; }
+    tr_ctx_buf.resize(0);
+    tr_collect_ctx(n);
+    tr_buf.push(tr_create_mib_ctx(AT_NOTCOLD, total, cold));
+    return true;
+}
+// createMIBNode with the context info already in tr_ctx_buf
+fn tr_create_mib_ctx(at: i64, total: u64&, cold: u64&) -> i32 {
+    var sv: i32[>..<] = [];
+    for id in tr_stack { sv.push(md_i64(id)); }
+    var payload: i32[>..<] = [md_get(MK_TUPLE, -1, sv, false), md_string(at_string(at))];
+    return payload_finish(payload, at, total, cold);
+}
+// call-site string function attributes
+fn cb_fn_str_attr(c: i32, key: const u8[:]) -> i32 {
+    let l = insts[inst_of(c)].attrs;
+    if l == 0 { return -1; }
+    return aset_find_str(alist_fn(l), key);
+}
+fn cb_set_fn_attrs(c: i32, s: i32) {
+    let ii = inst_of(c);
+    let l = insts[ii].attrs;
+    let n = if l == 0 { 0 } else { alists[l].n as i64 };
+    var sets: i32[>..<] = [];
+    for j in 0..max(n, 1) {
+        var x: i32 = 0;
+        if j < n { x = alist_runs[alists[l].at + j]; }
+        if j == 0 { x = s; }
+        sets.push(x);
+    }
+    insts[ii].attrs = alist_get(sets);
+}
+fn cb_remove_fn_str_attr(c: i32, key: const u8[:]) {
+    let l = insts[inst_of(c)].attrs;
+    if l == 0 { return; }
+    let s = alist_fn(l);
+    var xs: i32[>..<] = [];
+    var changed = false;
+    for k in aset_n(s) { let x = aset_attr(s, k); if attrs[x].kind == 0 && sbytes(attrs[x].skey) == key { changed = true; continue; } xs.push(x); }
+    if changed { cb_set_fn_attrs(c, aset_get(xs)); }
+}
+fn cb_put_fn_str_attr(c: i32, key: const u8[:], val: const u8[:]) {
+    let l = insts[inst_of(c)].attrs;
+    let s = if l == 0 { 0 } else { alist_fn(l) };
+    var xs: i32[>..<] = [];
+    for k in aset_n(s) { let x = aset_attr(s, k); if attrs[x].kind == 0 && sbytes(attrs[x].skey) == key { continue; } xs.push(x); }
+    xs.push(attr_str(key, val, true));
+    cb_set_fn_attrs(c, aset_get(xs));
+}
+// addSingleAllocTypeAttribute (no remarks)
+fn tr_add_single_alloc_type_attribute(c: i32, at: i64) {
+    if cb_fn_str_attr(c, "memprof") >= 0 { cb_remove_fn_str_attr(c, "memprof"); }
+    cb_put_fn_str_attr(c, "memprof", at_string(at));
+    mp_report("-memprof-report-hinted-sizes");
+}
+// CallStackTrie::buildAndAttachMIBMetadata: true if !memprof was attached
+fn tr_build_and_attach(c: i32) -> bool {
+    if single_alloc_type(tr_nodes[tr_alloc].types as i64) { tr_add_single_alloc_type_attribute(c, tr_nodes[tr_alloc].types as i64); return false; }
+    if (tr_nodes[tr_alloc].types & (AT_HOT as u8)) != 0 {
+        tr_hot_to_notcold(tr_alloc);
+        if single_alloc_type(tr_nodes[tr_alloc].types as i64) { tr_add_single_alloc_type_attribute(c, tr_nodes[tr_alloc].types as i64); return false; }
+    }
+    tr_stack.resize(0);
+    tr_stack.push(tr_alloc_id);
+    tr_buf.resize(0);
+    var total: u64 = 0;
+    var cold: u64 = 0;
+    if tr_build_mib_nodes(tr_alloc, false, total, cold) {
+        inst_set_md(c, mdk("memprof"), md_get(MK_TUPLE, -1, tr_buf, false));
+        // addAmbiguousAttribute
+        if flag_bool("memprof-ambiguous-attributes", true) && cb_fn_str_attr(c, "memprof") < 0 { cb_put_fn_str_attr(c, "memprof", "ambiguous"); }
+        return true;
+    }
+    tr_add_single_alloc_type_attribute(c, AT_NOTCOLD);
+    return false;
+}
+// haveCommonPrefix
+fn mp_have_common_prefix(a: i32, b: i32) -> bool {
+    let n = min(mds[a].nops as i64, mds[b].nops as i64);
+    for k in n { if md_cint_u64(md_op(a, k)) != md_cint_u64(md_op(b, k)) { return false; } }
+    return true;
+}
+// propagateMemProfHelper
+fn propagate_memprof_helper(cc: i32, inlined_cs: i32) {
+    let kc = mdk("callsite");
+    let km = mdk("memprof");
+    let ocs = inst_get_md(cc, kc);
+    var ncs: i32 = -1;
+    if ocs >= 0 {
+        ncs = md_concatenate(ocs, inlined_cs);
+        inst_set_md(cc, kc, ncs);
+    }
+    let omp = inst_get_md(cc, km);
+    if omp < 0 { return; }
+    var mibs: i32[>..<] = [];
+    for k in mds[omp].nops as i64 {
+        let mib = md_op(omp, k);
+        if mp_have_common_prefix(md_op(mib, 0), ncs) { mibs.push(mib); }
+    }
+    if mibs.len == 0 { inst_erase_md(cc, km); inst_erase_md(cc, kc); return; }
+    if mibs.len < (mds[omp].nops as i64) {
+        // updateMemprofMetadata
+        inst_erase_md(cc, km);
+        tr_reset();
+        for x in mibs { tr_add_call_stack(x); }
+        if !tr_build_and_attach(cc) { inst_erase_md(cc, kc); }
+    }
+}
+// propagateMemProfMetadata: over the VMap's (original call -> cloned call) entries
+fn propagate_memprof_metadata(callee: i32, cb: i32, m: i32) {
+    let cs = inst_get_md(cb, mdk("callsite"));
+    if cs < 0 && !cci_contains_memprof { return; }
+    var b = func_first_block(callee);
+    while b >= 0 {
+        var i = block_first(b);
+        while i >= 0 {
+            if is_callbase(i) {
+                let c = vmm_get(m, i);
+                if c >= 0 && is_inst(c) && !is_dead(c) && is_callbase(c) {
+                    if cs < 0 { inst_erase_md(c, mdk("memprof")); inst_erase_md(c, mdk("callsite")); }
+                    else { propagate_memprof_helper(c, cs); }
+                }
+            }
+            i = inst_next(i);
+        }
+        b = block_next(b);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1217,7 +1757,7 @@ fn lp_forward_resume(ri: i32) {
     inst_erase_from_parent(ri);
 }
 // HandleCallsInBlockInlinedThroughInvoke
-fn handle_calls_through_invoke(bb: i32, unwind: i32) -> i32 {
+fn handle_calls_through_invoke(bb: i32, unwind: i32, funclet_map: bool) -> i32 {
     var i = block_first(bb);
     while i >= 0 {
         let ci = i;
@@ -1228,7 +1768,20 @@ fn handle_calls_through_invoke(bb: i32, unwind: i32) -> i32 {
             let id = func_iid(f);
             if id == IID_experimental_deoptimize || id == IID_experimental_guard { continue; }
         }
-        for k in cb_nbundles(ci) { if sbytes(cb_bundle_tag(ci, k)) == "funclet" { if_not_ported("funclet calls inlined through an invoke"); } }
+        if funclet_map {
+            // A call nested inside a funclet that has an unwind destination within the inlinee stays a call.
+            var skip = false;
+            for k in cb_nbundles(ci) {
+                if sbytes(cb_bundle_tag(ci, k)) == "funclet" {
+                    let t = get_unwind_dest_token(op(ci, cb_bundle_begin(ci, k)));
+                    skip = t >= 0 && !is_token_none(t);
+                    break;
+                }
+            }
+            if skip { continue; }
+        } else {
+            for k in cb_nbundles(ci) { if sbytes(cb_bundle_tag(ci, k)) == "funclet" { fatal("internal: a funclet call inlined through a landingpad invoke"); } }
+        }
         let was_indirect = cci_indirect_remove(ci);
         change_to_invoke_and_split(ci, unwind);
         if was_indirect { cci_orig_indirect.push(block_terminator(bb)); }
@@ -1261,7 +1814,7 @@ fn handle_inlined_landing_pad(ii: i32, first: i32) {
     b = first;
     while b >= 0 {
         if cci_contains_calls {
-            let nb = handle_calls_through_invoke(b, lp_outer_dest);
+            let nb = handle_calls_through_invoke(b, lp_outer_dest, false);
             if nb >= 0 { lp_add_incoming_into(nb, lp_outer_dest); }
         }
         let t = block_terminator(b);
@@ -1270,6 +1823,209 @@ fn handle_inlined_landing_pad(ii: i32, first: i32) {
     }
     block_remove_predecessor(invoke_dest, inst_parent(ii), false);
 }
+// HandleInlinedEHPad: the inlined code's "unwind to caller" edges go to the invoke's EH ehp destination
+fn eh_update_phis(ud: i32, pvals: const i32[:], src: i32) {
+    var i = block_first(ud);
+    for v in pvals { phi_add_incoming(i, v, src); i = inst_next(i); }
+}
+fn handle_inlined_eh_pad(ii: i32, first: i32) {
+    let ud = invoke_unwind_dest(ii);
+    let caller = block_func(first);
+    let invoke_bb = inst_parent(ii);
+    var pvals: i32[>..<] = [];
+    var i = block_first(ud);
+    while i >= 0 && iop(i) == OP_PHI { pvals.push(phi_value_for_block(i, invoke_bb)); i = inst_next(i); }
+    uw_memo_reset();
+    var b = first;
+    while b >= 0 {
+        let t = block_terminator(b);
+        if t >= 0 && iop(t) == OP_CLEANUPRET && cleanupret_unwinds_to_caller(t) {
+            let ehp = op(t, 0);
+            let ncr = create_inst(OP_CLEANUPRET, T_VOID, [ehp, ud]);
+            inst_insert_before(ncr, t);
+            inst_erase_from_parent(t);
+            eh_update_phis(ud, pvals, b);
+            uw_memo_set(ehp, token_none());
+        }
+        let fi = first_non_phi(b);
+        if fi < 0 || !inst_is_eh_pad(fi) { b = block_next(b); continue; }
+        var repl: i32 = -1;
+        if iop(fi) == OP_CATCHSWITCH {
+            if catchswitch_unwinds_to_caller(fi) {
+                var tok: i32 = -1;
+                var skip = false;
+                let pp = eh_parent_pad(fi);
+                if is_inst(pp) {
+                    tok = get_unwind_dest_token(pp);
+                    skip = tok >= 0 && !is_token_none(tok);
+                } else { tok = token_none(); }
+                if !skip {
+                    let first_h = catchswitch_first_handler(fi);
+                    let nh = nops(fi) - first_h;
+                    let ncs = new_inst(OP_CATCHSWITCH, T_TOKEN, nh + 2);
+                    set_op(ncs, 0, pp);
+                    set_op(ncs, 1, ud);
+                    insts[inst_of(ncs)].bits = 1;
+                    for k in nh { set_op(ncs, 2 + k, op(fi, first_h + k)); }
+                    inst_insert_before(ncs, fi);
+                    if vals[fi].name >= 0 { set_name_from(ncs, fi); }   // CatchSwitchInst::Create(..., getName(), ...)
+                    uw_memo_set(ncs, tok);
+                    repl = ncs;
+                }
+            }
+        } else if iop(fi) == OP_LANDINGPAD { fatal("internal: unexpected EHPad"); }
+        if repl >= 0 {
+            cu_take_name(repl, fi);
+            rauw(fi, repl);
+            inst_erase_from_parent(fi);
+            eh_update_phis(ud, pvals, b);
+        }
+        b = block_next(b);
+    }
+    if cci_contains_calls {
+        b = first;
+        while b >= 0 {
+            let nb = handle_calls_through_invoke(b, ud, true);
+            if nb >= 0 { eh_update_phis(ud, pvals, nb); }
+            b = block_next(b);
+        }
+    }
+    block_remove_predecessor(ud, invoke_bb, false);
+}
+
+// PropagateOperandBundles: inlined call sites get the call site's "funclet" bundle
+fn propagate_funclet_bundles(bb: i32, ehp: i32) {
+    var i = block_first(bb);
+    while i >= 0 {
+        let c = i;
+        i = inst_next(i);
+        if !is_callbase(c) { continue; }
+        var has = false;
+        for k in cb_nbundles(c) { if sbytes(cb_bundle_tag(c, k)) == "funclet" { has = true; } }
+        if has { continue; }
+        let cf = fa_strip_pointer_casts(cb_callee(c));
+        if is_func(cf) && if_is_intrinsic(cf) && call_has_fn_attr(c, AK_NoUnwind) && !if_may_lower_to_function_call(func_iid(cf)) { continue; }
+        var pairs: i32[>..<] = [];
+        var bops: i32[>..<] = [];
+        for k in cb_nbundles(c) {
+            let bb0 = cb_bundle_begin(c, k);
+            for j in cb_bundle_count(c, k) { bops.push(op(c, bb0 + j)); }
+            pairs.push(cb_bundle_tag(c, k));
+            pairs.push(cb_bundle_count(c, k) as i32);
+        }
+        pairs.push(intern("funclet"));
+        pairs.push(1);
+        bops.push(ehp);
+        let ni = if_recreate_with_bundles(c, pairs, bops);
+        cu_take_name(ni, c);
+        rauw(c, ni);
+        inst_erase_from_parent(c);
+    }
+}
+// IntrinsicInst::mayLowerToFunctionCall
+fn if_may_lower_to_function_call(id: i64) -> bool {
+    return id == IID_objc_autorelease || id == IID_objc_autoreleasePoolPop || id == IID_objc_autoreleasePoolPush ||
+        id == IID_objc_autoreleaseReturnValue || id == IID_objc_claimAutoreleasedReturnValue || id == IID_objc_copyWeak ||
+        id == IID_objc_destroyWeak || id == IID_objc_initWeak || id == IID_objc_loadWeak || id == IID_objc_loadWeakRetained ||
+        id == IID_objc_moveWeak || id == IID_objc_release || id == IID_objc_retain || id == IID_objc_retainAutorelease ||
+        id == IID_objc_retainAutoreleaseReturnValue || id == IID_objc_retainAutoreleasedReturnValue ||
+        id == IID_objc_retainBlock || id == IID_objc_storeStrong || id == IID_objc_storeWeak ||
+        id == IID_objc_unsafeClaimAutoreleasedReturnValue || id == IID_objc_retainedObject ||
+        id == IID_objc_unretainedObject || id == IID_objc_unretainedPointer || id == IID_objc_retain_autorelease ||
+        id == IID_objc_sync_enter || id == IID_objc_sync_exit;
+}
+
+// ---------------------------------------------------------------------------------------------
+// ObjC ARC: inlineRetainOrClaimRVCalls (llvm/Analysis/ObjCARCUtil.h, ObjCARCAnalysisUtils.h, ObjCARCInstKind.cpp)
+
+// objcarc::IsForwarding(GetBasicARCInstKind(V)): a direct call of a forwarding ARC runtime intrinsic
+fn arc_is_forwarding_call(v: i32) -> bool {
+    if !is_inst(v) || iop(v) != OP_CALL { return false; }
+    let f = called_function(v);
+    if f < 0 { return false; }
+    let id = func_iid(f);
+    return id == IID_objc_retain || id == IID_objc_retainAutoreleasedReturnValue ||
+        id == IID_objc_unsafeClaimAutoreleasedReturnValue || id == IID_objc_autorelease ||
+        id == IID_objc_autoreleaseReturnValue || id == IID_objc_retainedObject || id == IID_objc_unretainedObject ||
+        id == IID_objc_unretainedPointer;
+}
+// objcarc::GetRCIdentityRoot
+fn arc_rc_identity_root(v0: i32) -> i32 {
+    var v = v0;
+    loop {
+        v = fa_strip_pointer_casts(v);
+        if !arc_is_forwarding_call(v) { break; }
+        v = cb_arg(v, 0);
+    }
+    return v;
+}
+// objcarc::getAttachedARCFunction: the "clang.arc.attachedcall" operand (-1 without the bundle)
+fn arc_attached_function(c: i32) -> i32 {
+    for k in cb_nbundles(c) {
+        if sbytes(cb_bundle_tag(c, k)) == "clang.arc.attachedcall" {
+            if cb_bundle_count(c, k) == 0 { return -1; }
+            return op(c, cb_bundle_begin(c, k));
+        }
+    }
+    return -1;
+}
+// Instruction::copyMetadata(SrcInst): !dbg, then every other attachment
+fn if_copy_all_metadata(dst: i32, src: i32) {
+    let dl = inst_get_md(src, 0);
+    if dl >= 0 { inst_set_md(dst, 0, dl); }
+    let si = inst_of(src);
+    var kinds: i32[>..<] = [];
+    var nodes: i32[>..<] = [];
+    for k in insts[si].nmd { kinds.push(md_att[insts[si].md + 2 * k]); nodes.push(md_att[insts[si].md + 2 * k + 1]); }
+    for k in kinds.len { if kinds[k] != 0 { inst_set_md(dst, kinds[k], nodes[k]); } }
+}
+fn arc_has_attached_bundle(c: i32) -> bool {
+    for k in cb_nbundles(c) { if sbytes(cb_bundle_tag(c, k)) == "clang.arc.attachedcall" { return true; } }
+    return false;
+}
+fn inline_retain_or_claim_rv_calls(cb: i32, is_retain_rv: bool, returns: const i32[:]) {
+    for ri in returns {
+        let ret_opnd = arc_rc_identity_root(op(ri, 0));
+        var insert_retain = is_retain_rv;
+        var i = inst_prev(ri);
+        while i >= 0 {
+            let cur = i;
+            i = inst_prev(i);
+            if is_cast_op(iop(cur)) { continue; }
+            let id = inst_iid(cur);
+            if id != 0 {
+                if id != IID_objc_autoreleaseReturnValue || has_uses(cur) || arc_rc_identity_root(cb_arg(cur, 0)) != ret_opnd { break; }
+                if !is_retain_rv { if_intrinsic_call(IID_objc_release, [], [ret_opnd], "", cur, -1); }
+                inst_erase_from_parent(cur);
+                insert_retain = false;
+                break;
+            }
+            if iop(cur) != OP_CALL { break; }
+            if arc_rc_identity_root(cur) != ret_opnd || arc_has_attached_bundle(cur) { break; }
+            // An unannotated call that defines RetOpnd gets a "clang.arc.attachedcall" bundle
+            // (CallBase::addOperandBundle: CallBase::Create keeps the name, uniqued while the old call lives).
+            var pairs: i32[>..<] = [];
+            var bops: i32[>..<] = [];
+            for k in cb_nbundles(cur) {
+                let b0 = cb_bundle_begin(cur, k);
+                for j in cb_bundle_count(cur, k) { bops.push(op(cur, b0 + j)); }
+                pairs.push(cb_bundle_tag(cur, k));
+                pairs.push(cb_bundle_count(cur, k) as i32);
+            }
+            pairs.push(intern("clang.arc.attachedcall"));
+            pairs.push(1);
+            bops.push(arc_attached_function(cb));
+            let nc = if_recreate_with_bundles(cur, pairs, bops);
+            if_copy_all_metadata(nc, cur);
+            rauw(cur, nc);
+            inst_erase_from_parent(cur);
+            insert_retain = false;
+            break;
+        }
+        if insert_retain { if_intrinsic_call(IID_objc_retain, [], [ret_opnd], "", ri, -1); }
+    }
+}
+
 // LandingPadInst::addClause (growOperands: capacity (n + 1) * 2 when full, like the parser)
 fn if_lpad_add_clause(lp: i32, c: i32) {
     let e = nops(lp);
@@ -1513,9 +2269,14 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
     let orig_bb = inst_parent(cb);
     let caller = block_func(orig_bb);
     let callee = called_function(cb);
-    if fn_has(caller, 0, AK_StrictFP) { if_not_ported("inlining into a strictfp caller (constrained intrinsics)"); }
+    // Determine if we are dealing with a call in an EHPad which does not unwind to caller.
+    var ehpad_unwinds_locally = false;
+    if ifi_callsite_ehpad >= 0 && iop(cb) == OP_CALL {
+        uw_memo_reset();
+        let t = get_unwind_dest_token(ifi_callsite_ehpad);
+        ehpad_unwinds_locally = t >= 0 && !is_token_none(t);
+    }
     if tli_module_flag_int(globs[glob_of(caller)].module, "debug-info-assignment-tracking") > 0 { if_not_ported("assignment tracking"); }
-    if inst_get_md(cb, mdk("memprof")) >= 0 || inst_get_md(cb, mdk("callsite")) >= 0 { if_not_ported("memprof metadata"); }
     let last_block = func_last_block(caller);
     var returns: i32[>..<] = [];
     cci_contains_calls = false;
@@ -1557,6 +2318,9 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
         if flag_bool("enable-knowledge-retention", false) { salvage_knowledge(cb, true); }
         clone_and_prune_function_into(caller, callee, m, returns);
         first_new = block_next(last_block);
+        // Insert retainRV/claimRV runtime calls.
+        let arcf = arc_attached_function(cb);
+        if arcf >= 0 { inline_retain_or_claim_rv_calls(cb, is_func(arcf) && func_iid(arcf) == IID_objc_retainAutoreleasedReturnValue, returns); }
         // IFI.UpdateProfile (always set here)
         if with_bfi { if_update_caller_bfi(orig_bb, m, callee); }
         if callee_has_entry_count(callee) { if_update_profile(cb, callee, m, orig_bb, with_psi, with_bfi); }
@@ -1568,7 +2332,7 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
         add_alias_scope_metadata(cb, m, callee, aa_fn);
         add_return_attributes(cb, m, callee);
         add_param_and_fn_basic_attributes(cb, m, callee);
-        if cci_contains_memprof { if_not_ported("memprof metadata in the inlined function"); }
+        propagate_memprof_metadata(callee, cb, m);
         propagate_call_site_metadata(cb, first_new);
         propagate_alloc_token_metadata(callee, cb, m);
         let irk = mdk("implicit.ref");
@@ -1585,6 +2349,10 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
             while i >= 0 { if inst_iid(i) == IID_assume { ia_register_assumption(caller, i); } i = inst_next(i); }
             b = block_next(b);
         }
+    }
+    if ifi_convergence_token >= 0 {
+        let ic = if_convergence_entry(first_new);
+        if ic >= 0 { rauw(ic, ifi_convergence_token); inst_erase_from_parent(ic); }
     }
     // static allocas to the caller's entry block
     {
@@ -1688,7 +2456,23 @@ fn inline_function_impl(cb: i32, merge_attrs: bool, insert_lifetime: bool, track
         let ud = invoke_unwind_dest(cb);
         let fnp = first_non_phi(ud);
         if fnp >= 0 && iop(fnp) == OP_LANDINGPAD { handle_inlined_landing_pad(cb, first_new); }
-        else { if_not_ported("inlining an invoke with a funclet unwind destination"); }
+        else { handle_inlined_eh_pad(cb, first_new); }
+    }
+    // Update the lexical scopes of the new funclets and callsites: anything that had 'none' as its parent is now
+    // nested inside the callsite's EHPad.
+    if ifi_callsite_ehpad >= 0 {
+        var b = first_new;
+        while b >= 0 {
+            let nb = block_next(b);
+            propagate_funclet_bundles(b, ifi_callsite_ehpad);
+            let t = block_terminator(b);
+            if t >= 0 && iop(t) == OP_CLEANUPRET && cleanupret_unwinds_to_caller(t) && ehpad_unwinds_locally { change_to_unreachable(t, false); }
+            let fi = first_non_phi(b);
+            if fi >= 0 && inst_is_eh_pad(fi) && iop(fi) != OP_LANDINGPAD {
+                if is_token_none(eh_parent_pad(fi)) { eh_set_parent_pad(fi, ifi_callsite_ehpad); }
+            }
+            b = nb;
+        }
     }
     if inlined_deopt { rewrite_deoptimize_returns(cb, caller, returns); }
     if inlined_musttail {

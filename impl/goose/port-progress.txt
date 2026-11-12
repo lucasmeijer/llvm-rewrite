@@ -159,7 +159,7 @@ lib/Transforms/Utils/LoopUnroll.cpp 0.9  # all but parallel reduction phis (canP
 lib/Transforms/Utils/LoopUnrollRuntime.cpp 0.97  # all; breakLoopBackedge of an unconditional latch is loud
 lib/Transforms/Utils/LoopPeel.cpp 0.95  # all; -disable-advanced-peeling loud
 lib/Transforms/Utils/ValueMapper.cpp 0.3  # mapValue/remapInstruction/remapDbgRecord under RF_NoModuleLevelChanges; no MDNodeMapper, global/function remapping, type remapping
-lib/Transforms/Utils/CloneFunction.cpp 0.55  # (clone_function.goose; loop_versioning.goose has its own copy) CloneBasicBlock, remapInstructionsInBlocks, cloneLoopWithPreheader, the noalias-scope cloning; PruningFunctionCloner / CloneAndPruneIntoFromInst (inline_function.goose); no CloneFunctionInto / CloneFunction / CloneModule
+lib/Transforms/Utils/CloneFunction.cpp 0.55  # (clone_function.goose; loop_versioning.goose has its own copy) CloneBasicBlock, remapInstructionsInBlocks, cloneLoopWithPreheader, the noalias-scope cloning; PruningFunctionCloner incl. strictfp cloneInstruction / CloneAndPruneIntoFromInst (inline_function.goose); no CloneFunctionInto / CloneFunction / CloneModule
 lib/Transforms/Scalar/SimpleLoopUnswitch.cpp 0.97  # all; injected conditions over several compared values loud (DenseMap order)
 lib/Analysis/LoopIterator.cpp 0.8
 lib/Support/BranchProbability.cpp 0.8
@@ -169,8 +169,8 @@ lib/Analysis/LazyCallGraph.cpp 0.85  # build, RefSCC/SCC formation (Tarjan), pos
 lib/Analysis/CGSCCPassManager.cpp 0.8  # ModuleToPostOrderCGSCC adaptor, DevirtSCCRepeatedPass, CGSCC->function adaptor, updateCGAndAnalysisManagerForPass, proxies as preserved bits; no outer-analysis invalidation bookkeeping beyond what passes need
 lib/Transforms/IPO/FunctionAttrs.cpp 0.95  # PostOrder, ReversePostOrder and NoRecurseLTO passes: memory, argument (captures, access, returned, initializes), noalias/nonnull/noundef returns, convergent/nounwind/nofree/nosync, norecurse, noreturn, cold, willreturn, top-down norecurse/nofpclass; no thinLTOPropagateFunctionAttrs
 lib/Analysis/InlineCost.cpp 0.9  # InlineCostCallAnalyzer + cost-benefit, InlineCostFeaturesAnalyzer-free paths, getAttributeBasedInliningDecision, isInlineViable, getInliningCostEstimate; no -print-instruction-comments annotator, no ML features
-lib/Transforms/Utils/InlineFunction.cpp 0.8  # all of InlineFunction except funclet EH (HandleInlinedEHPad), memprof/callsite metadata, ObjC ARC attached calls, convergence tokens, strictfp callers, assignment tracking, contextual profiles (loud)
-lib/Transforms/IPO/Inliner.cpp 0.9  # InlinerPass::run; no tryPromoteCall, no remarks
+lib/Transforms/Utils/InlineFunction.cpp 0.93  # all of InlineFunction (incl. funclet EH, memprof, ObjC ARC attached calls, convergence tokens, strictfp callers) except assignment tracking and contextual profiles (loud)
+lib/Transforms/IPO/Inliner.cpp 0.95  # InlinerPass::run incl. tryPromoteCall; no remarks
 lib/Analysis/InlineAdvisor.cpp 0.45  # DefaultInlineAdvisor, mandatory advice, shouldInline/shouldBeDeferred, inline remark attribute; no replay/ML/plugin advisors, no ORE remarks
 lib/Analysis/InlineOrder.cpp 0.8  # size / cost / cost-benefit priorities; ml loud
 lib/Transforms/IPO/AlwaysInliner.cpp 0.95
@@ -181,3 +181,7 @@ lib/ProfileData/ProfileSummaryBuilder.cpp 0.1  # getEntryForPercentile only
 lib/Transforms/Utils/SizeOpts.cpp 0.7  # shouldOptimizeForSize(F/BB) with PGSO options
 lib/Transforms/Utils/ModuleUtils.cpp 0.05  # filterDeadComdatFunctions only
 lib/IR/Function.cpp 0.15  # eraseFromParent, dropAllReferences, getEntryCount/setEntryCount, isIntrinsic
+lib/Transforms/Utils/CallPromotionUtils.cpp 0.2  # tryPromoteCall, isLegalToPromote, promoteCall when the function types match (loud otherwise); no versionCallSite / promoteCallWithIfThenElse / ctxprof
+lib/Analysis/TypeMetadataUtils.cpp 0.3  # getPointerAtOffset, getFunctionAtVTableOffset; no devirt call/type-test helpers
+lib/Analysis/MemoryProfileInfo.cpp 0.6  # CallStackTrie built from existing MIB metadata (addCallStack, buildMIBNodes, saveFilteredNewMIBNodes, buildAndAttachMIBMetadata, attributes); no profile-time paths, -memprof-report-hinted-sizes loud
+lib/IR/FPEnv.cpp 0.3  # getConstrainedIntrinsicID

@@ -18,6 +18,16 @@
 
 ## Status
 
+- L2.inline 446/466 opt+roundtrip (all roundtrips). The 20 left need other units: `-O1/-O2/-O3`/`default<On>`
+  pipelines (11), `partial-inliner`, `mergefunc`, `globaldce`, `globalopt`, `scc-oz-module-inliner`
+  and `-inline-priority-mode=ml` (needs the ML model). L2.function-attrs 106/118:
+  the 12 left are `attributor-light` (11) and `-O3`. Whole-file sweeps `inline`, `always-inline`, `module-inline`,
+  `cgscc(function-attrs)`, `cgscc(devirt<4>(inline,function-attrs))`, plain and `--with-test-flags`, plus
+  tests/perf/compile and tests/perf/scaling: 0 differs, 0 bad-ir; the only loud failures left are other passes'
+  options (`--with-test-flags`) and one >64-bit pattern-match constant. Speed: `-passes=inline` on sqlite3 0.34 s vs
+  LLVM 0.56 s, lua 0.18 s vs 0.29 s; scaling/calls is linear (k 0.91 vs LLVM 0.97) but 2.3-2.9x LLVM's CPU time
+  (the per-call-site InlineCost walk; not profiled yet).
+
 - L1.loop-unroll 248/256 (all 128 roundtrip, 120/128 opt). The 8 left: `-O1`/`-O2` pipelines (3), `-pgso` with
   `require<profile-summary>` (1), X86 CPUs the TTI didn't know then (`nehalem`, `znver3`; 2; now known), X86 getIntrinsicInstrCost
   of `llvm.experimental.guard` (1), and one more pipeline/flag test. Sweeps (every round-tripping corpus file): `loop-unroll` whole-file (7687 identical, 0 differs) and
@@ -1264,4 +1274,24 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   (`ReservedRReg[X86::EDI]`); `isa<IntrinsicInst>` holds for calls of any `llvm.*` function, known or not.
 - Process: run the full check *after* every rebase. Twice the rebase pulled in other goose commits (L2.inline)
   that used the old TTI helpers; the first push broke the build until 32e6b80.
+
+## CGSCC, FunctionAttrs and the inliner (lcg, cgscc, function_attrs, inline_cost, inline_function, inliner, psi)
+
+- The inliner's state lives in globals that are reset per InlineFunction call (`ifi_*`, `cci_*`, the funclet unwind
+  memo `uw_memo_*`, the memprof trie `tr_*`); none of it survives a call, so nested users must not interleave.
+- Goose forbids growable locals live across a call into the same recursive cycle (§7.8): recursive walks (the memprof
+  trie, getUnwindDestToken) keep their worklists/buffers in globals with marks, or iterate linked lists in place
+  (the trie's caller lists are kept sorted on insertion to reproduce `std::map` order without sorting arrays).
+- `pad` is a Goose keyword (cost a build); EH pad variables are `ehp`.
+- Funclet EH: `eh_parent_pad` reads a funclet pad's parent from its *last* operand (the parser's layout) and a
+  catchswitch's from operand 0; a catchswitch has an unwind dest iff `bits & 1`. ConstantTokenNone is
+  `c_simple(VK_CTOKENNONE, T_TOKEN)`.
+- `checkStrictFP` had its direction reversed until 2026-11 (a strictfp *callee* can't go into a non-strictfp caller);
+  the sweeps did not notice because the corpus has a single strictfp inlining test. The expected output of that test
+  shows `nobuiltin` call-site attributes the pass never adds: the harness canonicalizes through llvm-as/llvm-dis and
+  the bitcode reader's UpgradeFunctionAttributes (StrictFPUpgradeVisitor) rewrites strictfp call sites in
+  non-strictfp functions.
+- tryPromoteCall needed ConstantFolding of GEPs with `inrange` (cfold.goose symbolic_gep: the ranges are shifted by
+  the accumulated offset and intersected; only non-wrapping 64-bit ranges, loud otherwise).
+- BasicAA now reads `separate_storage` assumptions (aa.goose bas_separate_storage) instead of refusing them.
 

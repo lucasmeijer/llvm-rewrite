@@ -115,6 +115,9 @@ let KNOWN_FLAGS: const u8[:][] = [
     "max-devirt-iterations",                             // no-op: only read by the default pipelines
     "enable-noalias-to-md-conversion", "use-noalias-intrinsic-during-inlining",   // InlineFunction
     "preserve-alignment-assumptions-during-inlining", "max-inst-checked-for-throw-during-inlining",
+    "memprof-report-hinted-sizes", "memprof-keep-all-not-cold-contexts", "memprof-cloning-cold-threshold",   // MemoryProfileInfo
+    "memprof-callsite-cold-threshold", "memprof-min-percent-max-cold-size", "memprof-keep-context-size-info",
+    "memprof-ambiguous-attributes",
     "profile-summary-cutoff-hot", "profile-summary-cutoff-cold", "profile-summary-hot-count",   // ProfileSummaryInfo
     "profile-summary-cold-count", "profile-summary-huge-working-set-size-threshold",
     "profile-summary-large-working-set-size-threshold", "partial-profile", "scale-partial-sample-profile-working-set-size",

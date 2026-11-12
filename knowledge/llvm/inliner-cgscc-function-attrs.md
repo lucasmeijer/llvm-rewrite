@@ -84,3 +84,24 @@ are identical to opt 23.1.5 on every round-tripping corpus file (also with each 
   argument/return types are vectors or aggregates: each ComputeValueVTs leaf must get the same
   `getRegisterTypeForCallingConv(callee CC)` under the caller's and the callee's subtargets
   (Inline/X86/call-abi-compatibility.ll).
+- Funclet EH (HandleInlinedEHPad): calls inside an inlined funclet whose unwind destination stays inside the inlinee
+  (getUnwindDestToken returns a pad, not ConstantTokenNone) remain calls; the cleanuprets/catchswitches that unwind
+  to caller are re-created with the invoke's unwind dest *before* the calls are converted, and their pads are
+  memoized as "unwind to caller" so later queries don't see the new edge (Inline/inline-funclets.ll).
+- PropagateOperandBundles re-creates every inlined call without a funclet bundle (except nounwind intrinsics that
+  can't lower to calls) with `CallBase::Create` + `takeName`: the name is uniqued once while the old call lives,
+  which bumps the symbol table's suffix counter.
+- CallBase::addOperandBundle (inlineRetainOrClaimRVCalls) does *not* takeName: the new call keeps the uniqued
+  `name1` style name.
+- A strictfp caller turns the inlinee's FP instructions and FP intrinsics into constrained intrinsics with
+  `round.tonearest` (only when the intrinsic has a rounding operand) and `fpexcept.ignore`; the new calls have no
+  metadata (no !dbg) and all inlined calls get `strictfp` (Inline/inline-strictfp.ll).
+- AttributeFuncs::areInlineCompatible's checkStrictFP rejects a strictfp *callee* in a non-strictfp caller
+  (Attributes.cpp:2599); the other direction is allowed (and is what the constrained cloning is for).
+- propagateMemProfMetadata walks the whole VMap; the per-entry updates are independent, so iterating the callee's
+  instructions in order gives the same result as LLVM's DenseMap order. The CallStackTrie rebuilt from existing
+  metadata keeps every cold context's size info (BuiltFromExistingMetadata) and never applies the "mostly cold"
+  pruning; caller nodes are visited in `std::map<uint64_t>` (unsigned stack id) order.
+- tryPromoteCall in the CGSCC inliner (not the module inliner, which only does it in ctxprof-specialized modules)
+  needs ConstantFolding of GEPs whose `inrange` gets re-based by the folded offset (Inline/devirtualize-4.ll).
+

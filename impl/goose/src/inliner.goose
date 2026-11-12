@@ -6,8 +6,11 @@
 // (DefaultInlineAdvisor, the mandatory advice, getDefaultInlineAdvice, shouldInline / shouldBeDeferred,
 // setInlineRemark / inlineCostStr), FindAvailableLoadedValue without AA (llvm/lib/Analysis/Loads.cpp:
 // findAvailablePtrLoadStore with areNonOverlapSameBaseLoadAndStore), filterDeadComdatFunctions
-// (llvm/lib/Transforms/Utils/ModuleUtils.cpp) and tryPromoteCall's preconditions (CallPromotionUtils.cpp).
-// Not ported (fail loudly): replay / ML advisors, promoteCall, contextual profiles, remarks.
+// (llvm/lib/Transforms/Utils/ModuleUtils.cpp), tryPromoteCall / isLegalToPromote / promoteCall
+// (llvm/lib/Transforms/Utils/CallPromotionUtils.cpp) and getFunctionAtVTableOffset / getPointerAtOffset
+// (llvm/lib/Analysis/TypeMetadataUtils.cpp).
+// Not ported (fail loudly): replay / ML advisors, promoting a call whose types differ from the callee's,
+// contextual profiles, remarks.
 import std;
 import ir;
 import irutil;
@@ -218,20 +221,109 @@ fn inl_non_overlap_same_base(lp: i32, lt: i32, stp: i32, st: i32) -> bool {
     return rg_is_empty(rg_intersect(lr, sr));
 }
 
-// tryPromoteCall(CB): the preconditions; a promotable call fails loudly
+// tryPromoteCall(CB) (llvm/lib/Transforms/Utils/CallPromotionUtils.cpp): a virtual call through a vtable
+// pointer the constructor stored into an alloca becomes a direct call
 fn try_promote_call(cb: i32) -> bool {
     let callee = cb_callee(cb);
     if !is_inst_op(callee, OP_LOAD) { return false; }
     let vbase = strip_and_accumulate_offsets(op(callee, 0), true, false, false);
+    let vtable_off = vt_off;
     if !is_inst_op(vbase, OP_LOAD) { return false; }
     let obase = strip_and_accumulate_offsets(op(vbase, 0), true, false, false);
     if !(is_inst_op(obase, OP_ALLOCA) && vt_off == 0) { return false; }
     let vp = inl_find_available_loaded_value(vbase, 0);
     if vp < 0 || ty_kind(vals[vp].ty) != TK_PTR { return false; }
     let gvb = strip_and_accumulate_offsets(vp, true, false, false);
-    if vals[gvb].kind != VK_GVAR || globs[glob_of(gvb)].is_const == 0 || nops(gvb) == 0 { return false; }
-    inl_not_ported("tryPromoteCall (devirtualizing a vtable call)");
+    let gv_off = vt_off;
+    if vals[gvb].kind != VK_GVAR || globs[glob_of(gvb)].is_const == 0 || !gv_has_definitive_initializer(gvb) { return false; }
+    let off = (gv_off + vtable_off) as! u64;
+    // getFunctionAtVTableOffset
+    let p = get_pointer_at_offset(op(gvb, 0), off, gvb);
+    if p < 0 { return false; }
+    let c = fa_strip_pointer_casts(p);
+    var f: i32 = -1;
+    if is_func(c) { f = c; }
+    else if vals[c].kind == VK_ALIAS { let a = op(c, 0); if is_func(a) { f = a; } }
+    if f < 0 { return false; }
+    if !is_legal_to_promote(cb, f) { return false; }
+    promote_call(cb, f);
+    return true;
+}
+// getPointerAtOffset (llvm/lib/Analysis/TypeMetadataUtils.cpp); -1 = nullptr
+recursive fn get_pointer_at_offset(i0: i32, off: u64, top: i32) -> i32 {
+    var i = i0;
+    if vals[i].kind == VK_DSOLOCAL { i = op(i, 0); }
+    let t = vals[i].ty;
+    if ty_kind(t) == TK_PTR { if off == 0 { return i; } return -1; }
+    if vals[i].kind == VK_CSTRUCT {
+        if off >= dl_struct_size(t) as u64 { return -1; }
+        // StructLayout::getElementContainingOffset
+        var k: i64 = 0;
+        while k + 1 < ty_count(t) && dl_struct_offset(t, k + 1) as u64 <= off { k++; }
+        return get_pointer_at_offset(op(i, k), off - dl_struct_offset(t, k) as u64, top);
+    }
+    if vals[i].kind == VK_CARRAY {
+        let es = dl_alloc_size(ty_elem(t)) as u64;
+        let k = off / es;
+        if k >= nops(i) as u64 { return -1; }
+        return get_pointer_at_offset(op(i, k as i64), off % es, top);
+    }
+    if vals[i].kind == VK_CINT { if off == 0 && cint_lo(i) == 0 && ty_bits(t) <= 64 { return i; } return -1; }
+    if vals[i].kind == VK_CEXPR {
+        let o = opcode_of(i);
+        if o == OP_TRUNC || o == OP_PTRTOINT { return get_pointer_at_offset(op(i, 0), off, top); }
+        if o == OP_SUB {
+            var t1 = get_pointer_at_offset(op(i, 1), 0, -1);
+            if t1 >= 0 && opcode_of(t1) == OP_GEP && vals[t1].kind == VK_CEXPR { t1 = op(t1, 0); }
+            if t1 != top { return -1; }
+            return get_pointer_at_offset(op(i, 0), off, top);
+        }
+        return -1;
+    }
+    return -1;
+}
+// isLegalToPromote
+fn is_legal_to_promote(cb: i32, f: i32) -> bool {
+    let fty = globs[glob_of(f)].vty;
+    if vals[cb].ty != ty_fn_ret(fty) { inl_not_ported("isLegalToPromote with a different return type"); }
+    let np = ty_fn_nparams(fty);
+    let na = cb_nargs(cb);
+    if na != np && !ty_fn_vararg(fty) { return false; }
+    for k in np {
+        if fn_has(f, k + 2, AK_ByVal) != aset_has(alist_param(insts[inst_of(cb)].attrs, k), AK_ByVal) { return false; }
+        if fn_has(f, k + 2, AK_InAlloca) != aset_has(alist_param(insts[inst_of(cb)].attrs, k), AK_InAlloca) { return false; }
+        if ty_fn_param(fty, k) != vals[cb_arg(cb, k)].ty { inl_not_ported("isLegalToPromote with different argument types"); }
+    }
+    for k in np..na { if call_param_has_attr(cb, k, AK_StructRet) { return false; } }
+    // target feature compatibility: every "+feature" of the callee is in the caller's string
+    let x = aset_find_str(alist_fn(func_attrs(f)), "target-features");
+    if x >= 0 && attrs[x].sval >= 0 {
+        let y = aset_find_str(alist_fn(func_attrs(inst_func(cb))), "target-features");
+        let cf = if y >= 0 && attrs[y].sval >= 0 { sbytes(attrs[y].sval) } else { "" };
+        let fs = sbytes(attrs[x].sval);
+        var st: i64 = 0;
+        for j in 0..fs.len + 1 {
+            if j == fs.len || fs[j] == ',' {
+                let feat = fs[st..j];
+                if feat.len > 0 && feat[0] == '+' && !str_contains(cf, feat) { return false; }
+                st = j + 1;
+            }
+        }
+    }
+    return true;
+}
+fn str_contains(h: const u8[:], n: const u8[:]) -> bool {
+    if n.len == 0 { return true; }
+    if n.len > h.len { return false; }
+    for i in 0..h.len - n.len + 1 { if h[i..i + n.len] == n { return true; } }
     return false;
+}
+// promoteCall: the call's function type equals the callee's here (isLegalToPromote fails loudly otherwise)
+fn promote_call(cb: i32, f: i32) {
+    set_op(cb, nops(cb) - 1, f);
+    inst_erase_md(cb, md_kind_id("prof"));
+    inst_erase_md(cb, md_kind_id("callees"));
+    if insts[inst_of(cb)].ty2 != globs[glob_of(f)].vty { inl_not_ported("promoteCall with a different function type"); }
 }
 
 // Function::isDefTriviallyDead

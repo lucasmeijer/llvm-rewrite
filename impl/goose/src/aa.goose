@@ -38,6 +38,7 @@ import aautil;
 import capture;
 import tbaa;
 import globalsaa;
+import assume;
 
 // ---------------------------------------------------------------------------------------------
 // AliasResult
@@ -707,17 +708,38 @@ let BAS_MAX_LOOKUP = 10;     // MaxLookupSearchDepth (ValueTracking.h)
 
 fn bas_enable_recphi() -> bool { flag_bool("basic-aa-recphi", true) }
 
-// AssumptionCache: separate_storage bundles are not ported; refuse functions that have them (the only
-// assumptions BasicAA's alias() reads).
-fn bas_check_separate_storage(fv: i32) {
-    if !flag_bool("basic-aa-separate-storage", true) { return; }
-    each_inst(fv) { i =>
-        if inst_iid(i) == IID_assume {
-            for b in cb_nbundles(i) {
-                if sbytes(cb_bundle_tag(i, b)) == "separate_storage" { fatal("BasicAA: separate_storage assumptions are not ported yet"); }
-            }
-        }
-    };
+// The separate_storage assumptions are read through the AssumptionCache (bas_separate_storage).
+fn bas_check_separate_storage(fv: i32) { }
+
+// EnableSeparateStorageAnalysis: an assume's "separate_storage"(Hint1, Hint2) bundle whose hints' underlying
+// objects are O1 and O2, valid at the context instruction or at V1 / V2 (an argument: the entry block's first
+// instruction), proves NoAlias
+fn bas_separate_storage(o1: i32, o2: i32, v1: i32, v2: i32, cxt: i32) -> bool {
+    if !flag_bool("basic-aa-separate-storage", true) { return false; }
+    ac_build(aa_cur_fn);
+    let n = ac_val.len;
+    for k in n {
+        if ac_val[k] != o1 || ac_idx[k] < 0 { continue; }
+        let a = ac_asm[k];
+        if is_dead(a) { continue; }
+        let bi = ac_idx[k] as i64;
+        if sbytes(cb_bundle_tag(a, bi)) != "separate_storage" { continue; }
+        let b = cb_bundle_begin(a, bi);
+        let h1 = get_underlying_object(op(a, b), 10);
+        let h2 = get_underlying_object(op(a, b + 1), 10);
+        if !((o1 == h1 && o2 == h2) || (o1 == h2 && o2 == h1)) { continue; }
+        let save = vt_allow_ephemerals;
+        vt_allow_ephemerals = true;
+        let ok = (cxt >= 0 && valid_assume_for_context(a, cxt)) || bas_valid_assume_for_ptr(a, v1) || bas_valid_assume_for_ptr(a, v2);
+        vt_allow_ephemerals = save;
+        if ok { return true; }
+    }
+    return false;
+}
+fn bas_valid_assume_for_ptr(a: i32, p: i32) -> bool {
+    if is_inst(p) { return valid_assume_for_context(a, p); }
+    if is_arg(p) { return valid_assume_for_context(a, block_first(func_entry(args_parent[vals[p].sub]))); }
+    return false;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1654,6 +1676,7 @@ recursive fn bas_alias_check(v1_0: i32, s1_0: u64, v2_0: i32, s2_0: u64, q: i32,
     let null_valid = bas_null_defined(0);
     if bas_object_smaller_than(o2, bas_minimal_extent(v1, s1, null_valid), null_valid) ||
        bas_object_smaller_than(o1, bas_minimal_extent(v2, s2, null_valid), null_valid) { return ar(AR_NO); }
+    if bas_separate_storage(o1, o2, v1, v2, cxt) { return ar(AR_NO); }
     if ls_may_be_before(s1) || ls_may_be_before(s2) { s1 = LS_AFTER; s2 = LS_AFTER; }
     if aqs[q].depth >= 512 { return ar(AR_MAY); }
     let cross = aqs[q].cross;
