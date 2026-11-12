@@ -876,9 +876,32 @@ Root causes fixed (all found only by multi-pass pipelines):
 - A blockaddress is not a live use of its function (inliner's dead-callee check); erasing a function body drops its
   BlockAddresses like ~BasicBlock.
 
-Known gap (loud, not silent): LLVM keeps a ScalarEvolution per function across adaptors; ours is one instance.
-`scev_get` fails loudly when a result kept up to date through an IR change would be reused (DESIGN §8.7). Porting
-per-function SCEV (and LoopInfo) caches would turn those ~1000 split-sweep failures back into comparisons.
+The cross-adaptor ScalarEvolution gap is closed. It used to fail loudly (`sc_lost`); see "Analysis manager" below.
+
+## Analysis manager: one result per function (2026-11-12, DESIGN §9.1)
+
+- Every function analysis now keeps one result per function across adaptors, invalidated only by LLVM's
+  per-analysis `invalidate()` rules (passmgr.goose `invalidate_function`, `fam_clear`, `module_invalidate`).
+  ScalarEvolution, MemorySSA and the AssumptionCache keep a loaded instance plus an archive of snapshots
+  (archive.goose, scev_archive.goose); BPI became per function; `PA_CFG` gained the BPI/BFI bits; the
+  AssumptionCache is never invalidated (only FAM.clear: deleted functions, module PAs without `A_FAM_MPROXY`);
+  `ac_invalidate()` is gone. The inliner's private AssumptionCache lists (inline_cost.goose) are now the real one.
+  AAManager results remember whether GlobalsAA was cached at creation (`aa_res`).
+- Traps: a new SCEV cache must be listed in scev_archive.goose (or it leaks between functions). Anything that keeps
+  a SCEV/MemorySSA/AC id must not outlive a function switch (one pass on one function is safe). `fam_enter(fv)` must
+  run before a pass changes fv (callbacks only reach the loaded instance).
+- Known divergence left: goose drops GlobalsAA (`globals_aa_invalidate`) after every IR-changing module/CGSCC
+  pass, while LLVM's is stateless and stays cached (with deletion callbacks, not ported) until `invalidate<globals-aa>`.
+  Not modelled: DemandedBits, LoopAccessInfo, IVUsers and other loop-analysis results across passes (no pass
+  preserves them across passes in our pipelines).
+- Tests: tests/pass/pass-manager/{scev-cached-across-adaptors,mssa-cached-across-adaptors,bpi-kept-with-cfg}.ll
+  (the old binary fails all three: one loudly, two silently).
+- Split pipeline sweeps (`NO_WHOLE=1 NO_PERF=1 NO_DEBUGIFY=1 tools/pipeline_sweeps.sh`; NO_WHOLE is new), before →
+  after, identical / failed (differs and bad-ir 0 in all): #1-#6, #10, #11, #13, #14 unchanged; #7 6793/1249 →
+  7598/444; #8 7032/1000 → 7472/560; #9 6499/1534 → 7577/456; #12 6744/1286 → 7581/449. All the whole-file, perf,
+  perf-fn and debugify cells are unchanged (0 silent), and so are the single-pass sweeps of the passes that lost
+  `ac_invalidate` (simplifycfg, instcombine, gvn, early-cse, dse, memcpyopt, instsimplify, infer-alignment, sroa,
+  mem2reg, inline, ...). Perf: a 3000-function loop module through 6 split loop adaptors runs in 0.62 s (LLVM 0.74 s).
 
 ## InstCombine calls, casts, libcalls (ic_calls, ic_casts2, ic_x86, simplify_libcalls, build_libcalls)
 
@@ -1278,9 +1301,10 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   returns (no recursion: unroll_loop is phase1 / runtime / remainder-unroll / phase2); same order as LLVM.
 - The AssumptionCache is never invalidated in LLVM (AssumptionCache::invalidate returns false): loop-unroll keeps
   the cache across loops and registers cloned assumes like LLVM; peeled clones are *not* registered (LLVM doesn't).
-  SCEV now reads AC.assumptions() (`ac_assumptions`, registration order) instead of scanning the function, and
-  every RAUW in these passes calls `ac_rauw` first (AffectedValueCallbackVH). Other goose passes call
-  `ac_invalidate()` at their start, which makes goose's cache fresher than LLVM's in pipelines: a known divergence.
+  SCEV now reads AC.assumptions() (`ac_assumptions`, registration order) instead of scanning the function.
+  Since the analysis-manager work (DESIGN §9.1) there is one cache per function, never invalidated (only
+  `fam_clear`), `ac_invalidate()` is gone, and ir.goose's `rauw` calls `ac_rauw` itself (the explicit calls left in
+  passes are harmless).
 - `vt_fn_has_assumes` caches "this function has an assume": code that inserts the first llvm.assume must call
   `vt_invalidate_assumes()` (ConnectEpilog does).
 - loadCSE builds the loop-scoped MemorySSA in the function's MemorySSA tables (`mssa_build_loop`) and invalidates
