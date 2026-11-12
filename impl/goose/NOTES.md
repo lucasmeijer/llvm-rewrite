@@ -31,6 +31,11 @@
 - L2.ipo-args COMPLETE (206/206: ArgumentPromotion 55/55, DeadArgElim 39/39, Internalize 9/9 roundtrip + opt).
   L2.globals 445/450 (all 225 roundtrip, 220/225 opt): the 5 left run `-O2`, `lto<O2>` or `default<O0>`
   pipelines. See "IPO over globals and arguments" below for the sweeps (0 differs everywhere).
+- L1.vectorize.slp: milestone 1 of 3 (the pass driver, slp.goose): 656/1300 (650 roundtrip, 6 opt). The driver
+  fails loudly at every entry into the unported parts, so it never changes IR; sweeps of `slp-vectorizer`:
+  whole-file 2400 identical / 0 differs, `--with-test-flags` 3146 / 0 differs, `--per-function` 23576 / 0 differs
+  (the rest loud). Next steps in "SLPVectorizer" below.
+
 - L1.vectorize.vector-combine COMPLETE (130/130: 65 roundtrip, 65 opt). Sweeps of `vector-combine`: whole-file
   8064 identical / 0 differs (16 loud: VP intrinsics, a 16-bit triple), `--with-test-flags` 9822 identical / 0 differs
   (the loud ones are other passes' options), `--per-function` 70741 identical / 0 differs (4 loud: ppc_fp128, x32),
@@ -283,6 +288,7 @@
 | `src/loop_idiom.goose`, `src/hash_recognize.goose` | LoopIdiomRecognize (memset/memcpy/memmove, CRC table, strlen/wcslen, popcount, ctlz/cttz, shift idioms); HashRecognize |
 | `src/laa.goose`, `src/pse.goose` | LoopAccessAnalysis + print<access-info>; PredicatedScalarEvolution |
 | `src/vector_combine.goose`, `src/vector_combine2.goose` | VectorCombine (VectorCombine.cpp, whole): worklist, IRBuilder<InstSimplifyFolder> `vcb_*`, every fold, the driver |
+| `src/slp.goose` | SLPVectorizer milestone 1: the pass driver up to BoUpSLP / HorizontalReduction (fails loudly there) |
 | `src/tti_vec.goose` | the vectorizers' TTI front end `tv_*` (X86 or NoTTIImpl): shuffle / insert-extract / arith / cast / memory / scalarization / intrinsic / reduction costs, register queries |
 | `src/vecutils.goose` | VectorUtils + LoopUtils helpers `vu_*`: scalar-op / overload-type intrinsic args, splat values, mask narrowing/widening, reduction intrinsic mapping, copyIRFlags/andIRFlags/propagateIRFlags, getLosslessInvCast |
 | `tools/gb.sh` | `tools/gb.sh src/opt.goose bin/opt` builds with warnings hidden (Goose has no `-w`) |
@@ -1299,6 +1305,47 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   compared value the order isn't reproducible, so that case fails loudly.
 - Uses goose_loopmisc's loop_utils.goose (containsIrreducibleCFG, LoopBlocksRPO, RecursivelyDeleteTriviallyDead with
   MSSAU); unroll_utils.goose and loop_utils.goose both port LoopInfo::erase (written concurrently; merge later).
+
+## SLPVectorizer (slp.goose): state and next steps for a successor
+
+- **Done (milestone 1, the driver):** SLPVectorizerPass::run/runImpl (analyses, no-vector-register and
+  NoImplicitFloat bail-outs, DFS numbers, post_order over the blocks, EH-pad / unreachable blocks skipped),
+  collectSeedInstructions (Stores/GEPs MapVectors keyed by getUnderlyingObject / the GEP pointer),
+  vectorizeChainsInBlock (PHI pass, reduction PHIs via getReductionInstr, incoming values, roots without users,
+  the post-process sets: inserts, cmps, non-vectorizable instructions, stores; the late store-operand pass with its
+  scalarization-cost gate; isPoorThroughputOp with its opcode/intrinsic/callee cache and getVectorOpCost for
+  binops), vectorizeHorReduction's queue walk and PostponedInsts, tryToVectorize's early checks,
+  vectorizeInserts / vectorizeCmpInsts / vectorizeNonVectorizableInsts (isNonVectorizableInst,
+  forEachOperandChainCandidate), canMapToVector, getAggregateSize, isValidElementType, Type::getTypeID order.
+- **The boundary:** `slp_not_ported(...)` wherever LLVM would enter BoUpSLP, HorizontalReduction,
+  getSameOpcode/InstructionsState, StoreChainContext or canConvertToFMA. Some boundaries are conservative (they
+  fail when LLVM *might* enter: any store group of 2+ stores, any insert chain of 2+, any FAdd/FSub pair candidate
+  (canConvertToFMA), any reduction candidate in a root's operand tree). Loud failures by count over the corpus
+  (per-function): matchAssociativeReduction 37262, getRdxKind 2857, store chains 1942, PHI sequences 1838, insert
+  chains 874, poor-throughput calls 799, compare sequences 710, instruction pairs 575.
+- **Next steps, in LLVM's milestone order** (the jai port, impl/jai/src/slp_*.jai, took 5 sessions; read it for
+  structure and pitfalls, port from SLPVectorizer.cpp):
+  1. Helpers at the top of SLPVectorizer.cpp (lines 100-1980): getSameOpcode / InstructionsState,
+     isValidForAlternation, getElementIndex / getExtractIndex, isFixedVectorShuffle, the mask helpers,
+     getNumberOfParts / hasFullVectorsOrPowerOf2 / getFloorFullVectorNumberOfElements (TTI: tti_vec.goose).
+  2. BoUpSLP data: TreeEntry (scalars, operands, ReuseShuffleIndices, ReorderIndices, State, CombinedOp),
+     ScalarToTreeEntries, the ValueList pools (runs), DeletedInstructions; then buildTree / buildTreeRec /
+     getScalarsVectorizationState / InstructionsCompatibilityAnalysis (lines 9600-13660), the scheduler
+     (BlockScheduling, ScheduleBundle/ScheduleData, lines 25642-26866), canVectorizeLoads / LoadsState.
+     Verify trees with the assertions opt (`-debug-only=SLP` prints every tree: "SLP: Checking ...",
+     "SLP: added a vector of ...").
+  3. reorderTopToBottom / reorderBottomToTop / transformNodes / computeMinimumValueSizes.
+  4. The cost model: ShuffleCostEstimator, getEntryCost, getSpillCost, getTreeCost; compare with
+     `-debug-only=SLP` cost lines through a script like impl/jai/tools/slp_cost_compare.py. Knowledge facts in
+     knowledge/llvm/vectorizers.md (InstructionCost is fixed point; loop-trip-count scaling; per-lane gathers).
+  5. vectorizeTree / ShuffleInstructionBuilder / optimizeGatherSequence (codegen), then the driver parts that call
+     into it: StoreChainContext/vectorizeStores/vectorizeStoreChain, tryToVectorizeList, tryToVectorizeSequence
+     (stable_sort with PHICompare/compareCmp/StoreSorter), HorizontalReduction (matchAssociativeReduction,
+     tryToReduce, ordered reductions), findBestRootPair, canConvertToFMA.
+  Replace each `slp_not_ported` by the port as the pieces land; keep the sweeps at 0 differs.
+- Pass registration: P_SLP_VECTORIZER (421); accepted flags: vectorize-slp, slp-vectorize-hor(-store),
+  slp-postprocess-stores-operands, slp-non-vectorizables-as-reductions, slp-vectorize-poor-throughput,
+  slp-threshold, slp-recursion-max-depth, slp-max-reg-size, slp-min-reg-size (all others are unknown options).
 
 ## VectorCombine and the vectorizer TTI layer (vector_combine.goose, vector_combine2.goose, tti_vec.goose, vecutils.goose)
 

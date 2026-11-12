@@ -195,3 +195,4 @@ lib/Analysis/TypeMetadataUtils.cpp 0.5  # getPointerAtOffset, getFunctionAtVTabl
 lib/Support/GlobPattern.cpp 0.6  # *, ?, [...], escapes; no brace expansion
 lib/Transforms/Utils/ModuleUtils.cpp 0.1  # filterDeadComdatFunctions, getUniqueModuleId (ipo_globals.goose)
 lib/Transforms/Vectorize/VectorCombine.cpp 0.95  # all folds and the driver; not ported (fail loudly): scalarizeVPIntrinsic's rewrite, foldBitcastOfVPLoad, foldSelectsFromBitcast with several condition groups (DenseMap order)
+lib/Transforms/Vectorize/SLPVectorizer.cpp 0.03  # the pass driver only (slp.goose); BoUpSLP, HorizontalReduction, getSameOpcode not ported

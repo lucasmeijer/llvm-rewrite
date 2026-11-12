@@ -69,6 +69,7 @@ import reassociate;
 import constraint_elimination;
 import aggressive_instcombine;
 import vector_combine2;
+import slp;
 import lcg;
 import cgscc;
 import inliner;
@@ -162,6 +163,7 @@ let P_REASSOCIATE = 260;
 let P_CONSTRAINT_ELIMINATION = 261;
 let P_AGGRESSIVE_INSTCOMBINE = 262;
 let P_VECTOR_COMBINE = 420;
+let P_SLP_VECTORIZER = 421;
 let P_PRINT_SCEV = 118;
 let P_PRINT_LVI = 180;
 let P_CVP = 181;
@@ -213,6 +215,7 @@ let PASS_TABLE: const u8[:][] = [
     "f:constraint-elimination:261:0",
     "f:aggressive-instcombine:262:0",
     "f:vector-combine:420:0",
+    "f:slp-vectorizer:421:0",
     "f:dce:100:0",
     "f:redundant-dbg-inst-elim:120:0",
     "f:adce:101:0",
@@ -290,6 +293,7 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_CONSTRAINT_ELIMINATION => "ConstraintEliminationPass",
         P_AGGRESSIVE_INSTCOMBINE => "AggressiveInstCombinePass",
         P_VECTOR_COMBINE => "VectorCombinePass",
+        P_SLP_VECTORIZER => "SLPVectorizerPass",
         P_IPSCCP => "IPSCCPPass",
         P_DEBUGIFY => "NewPMDebugifyPass",
         P_CHECK_DEBUGIFY => "NewPMCheckDebugifyPass",
@@ -1187,7 +1191,7 @@ fn pass_creates_subtarget(n: i32) -> bool {
         p == P_INSTCOMBINE || p == P_PRINT_DEMANDED_BITS || p == P_PRINT_COST_MODEL || p == P_LOOP_SIMPLIFY || p == P_AA_EVAL ||
         p == P_PRINT_MEMORYSSA || p == P_PRINT_MEMORYSSA_WALKER || p == P_VERIFY_MEMORYSSA || p == P_SCCP ||
         p == P_EARLY_CSE || p == P_VERIFY_SCEV || p == P_CVP || p == P_JUMP_THREADING || p == P_GVN || p == P_DSE || p == P_MEMCPYOPT ||
-        p == P_CONSTRAINT_ELIMINATION || p == P_AGGRESSIVE_INSTCOMBINE || p == P_LOOP_UNROLL || p == P_VECTOR_COMBINE;
+        p == P_CONSTRAINT_ELIMINATION || p == P_AGGRESSIVE_INSTCOMBINE || p == P_LOOP_UNROLL || p == P_VECTOR_COMBINE || p == P_SLP_VECTORIZER;
 }
 
 fn run_function_pass(n: i32, fv: i32) -> u32 {
@@ -1231,6 +1235,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_CONSTRAINT_ELIMINATION => { return constraint_elimination_run(fv); },
         P_AGGRESSIVE_INSTCOMBINE => { return aggressive_instcombine_run(fv); },
         P_VECTOR_COMBINE => { return vector_combine_run(fv); },
+        P_SLP_VECTORIZER => { return slp_vectorizer_run(fv); },
         P_PRINT_SCEV => { print_scev(fv); return PA_ALL; },
         P_PRINT_LVI => { lvi_print(fv); return PA_ALL; },
         P_LOOP_LOAD_ELIM => { let pa = loop_load_elim_run(fv); ap_pool_reset(); return pa; },

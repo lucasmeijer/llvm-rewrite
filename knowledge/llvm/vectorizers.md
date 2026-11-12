@@ -114,6 +114,16 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
   cost of vectorized lists/stores/reductions and of rejected lists. An assertions build of opt 23.1.5 (for
   `-debug-only=SLP`) is at /persistent/llvm-rewrite/llvm-23.1.5-assert/bin/opt (impl/jai/tools/build_llvm_assert.sh).
 
+- SLP's driver reaches BoUpSLP or HorizontalReduction for almost every function with arithmetic: every
+  instruction without users (stores, void calls, returns through the post-process sets) sends its operands to
+  vectorizeRootInstruction, whose queue walk calls HorizontalReduction::matchAssociativeReduction on every binop,
+  select or min/max intrinsic up to `-slp-recursion-max-depth` (12) levels deep in the same block. Over the corpus
+  only ~30% of files (33% of functions) never get there (measured with goose's driver-only port, which fails
+  loudly at those entries).
+- `getAggregateSize` reads `getElementType(0)` of an empty struct (out of bounds) for `insertvalue` chains of
+  `{}` fields; `vectorizeInsertValueInst` checks `canMapToVector` first, which rejects empty types
+  (SLPVectorizer/empty-struct.ll).
+
 ### SLP code generation (verified by matching the whole corpus, sweeps with 0 differs)
 
 - BoUpSLP's Builder is an `IRBuilder<TargetFolder>` without fast-math flags; a horizontal reduction uses its own
