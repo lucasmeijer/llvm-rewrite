@@ -144,9 +144,143 @@ fn slp_phis_compatible(v2: i32, v1: i32) -> bool {
     return true;
 }
 // tryToVectorizeSequence<Value>(Incoming, PHICompare, AreCompatiblePHIs, tryToVectorizeList, MaxVFOnly = true)
-fn slp_try_vectorize_phi_sequence(incoming: i32[>..<]&) -> bool {
+fn slp_try_vectorize_phi_sequence(incoming: i32[>..<]&) -> bool { return slp_try_vectorize_value_sequence(incoming, 0); }
+// compareCmp<IsCompatibility>(V, V2, TLI, DT)
+fn slp_compare_cmp(v: i32, v2: i32, compat: bool) -> bool {
+    if v == v2 { return compat; }
+    let t1 = slp_type_id(vals[op(v, 0)].ty);
+    let t2 = slp_type_id(vals[op(v2, 0)].ty);
+    if t1 < t2 { return !compat; }
+    if t1 > t2 { return false; }
+    let s1 = tt_scalar_bits(vals[op(v, 0)].ty);
+    let s2 = tt_scalar_bits(vals[op(v2, 0)].ty);
+    if s1 < s2 { return !compat; }
+    if s1 > s2 { return false; }
+    let p1 = inst_pred(v);
+    let p2 = inst_pred(v2);
+    let sp1 = slp_swapped_pred(p1);
+    let sp2 = slp_swapped_pred(p2);
+    let b1 = if p1 < sp1 { p1 } else { sp1 };
+    let b2 = if p2 < sp2 { p2 } else { sp2 };
+    if b1 < b2 { return !compat; }
+    if b1 > b2 { return false; }
+    let c1p = p1 == b1;
+    let c2p = p2 == b1;
+    let e = nops(v);
+    for i in e {
+        let o1 = op(v, if c1p { i } else { e - i - 1 });
+        let o2 = op(v2, if c2p { i } else { e - i - 1 });
+        if o1 == o2 { continue; }
+        let d1 = slp_value_id(o1);
+        let d2 = slp_value_id(o2);
+        if d1 < d2 { return !compat; }
+        if d1 > d2 { return false; }
+        if is_inst(o1) && is_inst(o2) {
+            if compat {
+                if inst_parent(o1) != inst_parent(o2) { return false; }
+            } else {
+                let n1 = slp_dfs_node(inst_parent(o1));
+                let n2 = slp_dfs_node(inst_parent(o2));
+                if !n1 { return n2; }
+                if !n2 { return false; }
+                if inst_parent(o1) != inst_parent(o2) { return slp_dom_dfs_in(inst_parent(o1)) < slp_dom_dfs_in(inst_parent(o2)); }
+            }
+            let s = slp_same_opcode2(o1, o2);
+            if sis_valid(s) && (compat || !sis_is_alt_shuffle(s)) { continue; }
+            if compat { return false; }
+            if iop(o1) != iop(o2) { return iop(o1) < iop(o2); }
+        }
+    }
+    return compat;
+}
+// the OperandGroupKeys of vectorizeNonVectorizableInsts (kind 2): value -> key index
+var slp_nvk_v: i32[>..<];
+var slp_nvk_k: i64[>..<];
+var slp_nvk_id: i64[>..<];
+var slp_nvk_sub: i64[>..<];
+var slp_nvk_fn: i32[>..<];
+var slp_nvk_pos: i64[>..<];
+let SH_NVK: i64 = 29;
+fn slp_nv_keys_set(vs: const i32[:], k: const i64[:], id: const i64[:], sub: const i64[:], fnm: const i32[:], pos: const i64[:]) {
+    slp_nvk_v.clear(); slp_nvk_k.clear(); slp_nvk_id.clear(); slp_nvk_sub.clear(); slp_nvk_fn.clear(); slp_nvk_pos.clear();
+    sh_clear(SH_NVK);
+    for j in vs.len {
+        sh_set(SH_NVK, vs[j] as i64, 0, j);
+        slp_nvk_v.push(vs[j]); slp_nvk_k.push(k[j]); slp_nvk_id.push(id[j]); slp_nvk_sub.push(sub[j]); slp_nvk_fn.push(fnm[j]);
+        slp_nvk_pos.push(pos[j]);
+    }
+}
+fn slp_nvk_eq(a: i64, b: i64) -> bool {
+    return slp_nvk_k[a] == slp_nvk_k[b] && slp_nvk_id[a] == slp_nvk_id[b] && slp_nvk_sub[a] == slp_nvk_sub[b] &&
+           slp_fn_name_cmp(slp_nvk_fn[a], slp_nvk_fn[b]) == 0 && slp_nvk_pos[a] == slp_nvk_pos[b];
+}
+fn slp_fn_name_cmp(f1: i32, f2: i32) -> i64 {
+    let a: const u8[:] = if f1 >= 0 && vals[f1].name >= 0 { sbytes(vals[f1].name) } else { "" };
+    let b: const u8[:] = if f2 >= 0 && vals[f2].name >= 0 { sbytes(vals[f2].name) } else { "" };
+    let n = if a.len < b.len { a.len } else { b.len };
+    for k in n { if a[k] != b[k] { return if a[k] < b[k] { -1 } else { 1 }; } }
+    if a.len == b.len { return 0; }
+    return if a.len < b.len { -1 } else { 1 };
+}
+fn slp_nvk_less(a: i64, b: i64) -> bool {
+    if slp_nvk_k[a] != slp_nvk_k[b] { return slp_nvk_k[a] < slp_nvk_k[b]; }
+    if slp_nvk_id[a] != slp_nvk_id[b] { return slp_nvk_id[a] < slp_nvk_id[b]; }
+    if slp_nvk_sub[a] != slp_nvk_sub[b] { return slp_nvk_sub[a] < slp_nvk_sub[b]; }
+    let c = slp_fn_name_cmp(slp_nvk_fn[a], slp_nvk_fn[b]);
+    if c != 0 { return c < 0; }
+    return slp_nvk_pos[a] < slp_nvk_pos[b];
+}
+fn slp_seq_less(kind: i64, a: i32, b: i32) -> bool {
+    if kind == 0 { return slp_phi_less(a, b); }
+    if kind == 2 {
+        // OperandSorter
+        if a == b { return false; }
+        let ka = sh_get(SH_NVK, a as i64, 0, -1);
+        let kb = sh_get(SH_NVK, b as i64, 0, -1);
+        if !slp_nvk_eq(ka, kb) { return slp_nvk_less(ka, kb); }
+        let ta = slp_type_id(vals[a].ty);
+        let tb = slp_type_id(vals[b].ty);
+        if ta != tb { return ta < tb; }
+        let sa = tt_scalar_bits(vals[a].ty);
+        let sb = tt_scalar_bits(vals[b].ty);
+        if sa != sb { return sa < sb; }
+        if iop(a) != iop(b) { return iop(a) < iop(b); }
+        return slp_comes_before(a, b);
+    }
+    if a == b { return false; }
+    return slp_compare_cmp(a, b, false);
+}
+// AreCompatible(VL with back `v2` (-1: empty), V1)
+fn slp_seq_compatible(kind: i64, v2: i32, v1: i32) -> bool {
+    if kind == 0 { return slp_phis_compatible(v2, v1); }
+    if kind == 2 {
+        if v2 < 0 || v2 == v1 { return true; }
+        let kb = sh_get(SH_NVK, v2 as i64, 0, -1);
+        let k = sh_get(SH_NVK, v1 as i64, 0, -1);
+        if !slp_nvk_eq(kb, k) { return false; }
+        return vals[v2].ty as i32 == vals[v1].ty as i32 && iop(v2) == iop(v1);
+    }
+    if v2 < 0 || v2 == v1 { return true; }
+    return slp_compare_cmp(v1, v2, true);
+}
+// TryToVectorizeHelper(Candidates, MaxVFOnly)
+fn slp_seq_helper(kind: i64, cands: const i32[:], max_vf_only: bool) -> bool {
+    if kind == 1 {
+        for v in cands {
+            var u = vals[v].first_use;
+            while u >= 0 {
+                let usr = uses[u].user;
+                if is_inst_op(usr, OP_SELECT) && inst_parent(usr) != inst_parent(v) { return false; }
+                u = uses[u].next;
+            }
+        }
+    }
+    return slp_try_to_vectorize_list_r(cands, max_vf_only, false);
+}
+// tryToVectorizeSequence<Value>(Incoming, Comparator, AreCompatible, TryToVectorizeHelper, MaxVFOnly = true, R)
+fn slp_try_vectorize_value_sequence(incoming: i32[>..<]&, kind: i64) -> bool {
     var changed = false;
-    std_stable_sort(incoming, 0, incoming.len) { a, b => slp_phi_less(a, b) };
+    std_stable_sort(incoming, 0, incoming.len) { a, b => slp_seq_less(kind, a, b) };
     var cands: i32[>..<] = [];
     var vl: i32[>..<] = [];
     var it: i64 = 0;
@@ -159,13 +293,13 @@ fn slp_try_vectorize_phi_sequence(incoming: i32[>..<]&) -> bool {
         while st != e {
             let x = incoming[st];
             let back = if vl.len > 0 { vl[vl.len - 1] } else { -1 };
-            if !(!is_inst(x) || slp_is_deleted(x) || slp_phis_compatible(back, x)) { break; }
+            if !(!is_inst(x) || slp_is_deleted(x) || slp_seq_compatible(kind, back, x)) { break; }
             st++;
             if is_inst(x) && !slp_is_deleted(x) { vl.push(x); }
         }
         let n = vl.len;
         if slp_dbg_on { errs("SLP: Trying to vectorize starting at nodes ("); errs_int(n); errs(")\n"); slp_dbg_flush(); }
-        if n > 1 && slp_try_to_vectorize_list_r(vl, true, false) {
+        if n > 1 && slp_seq_helper(kind, vl, true) {
             changed = true;
             cands.clear();
             for v in vl { if is_inst(v) && !slp_is_deleted(v) { cands.push(v); } }
@@ -177,7 +311,7 @@ fn slp_try_vectorize_phi_sequence(incoming: i32[>..<]&) -> bool {
             }
         }
         if cands.len > 1 && (st == e || vals[incoming[st]].ty as i32 != vals[incoming[it]].ty as i32) {
-            if slp_try_to_vectorize_list_r(cands, false, false) {
+            if slp_seq_helper(kind, cands, false) {
                 changed = true;
             } else {
                 // MaxVFOnly: retry each compatible sub-sequence
@@ -191,11 +325,11 @@ fn slp_try_vectorize_phi_sequence(incoming: i32[>..<]&) -> bool {
                     var st2 = it2;
                     while st2 != e2 {
                         let y = cands[st2];
-                        if !(!is_inst(y) || slp_is_deleted(y) || slp_phis_compatible(y, cands[it2])) { break; }
+                        if !(!is_inst(y) || slp_is_deleted(y) || slp_seq_compatible(kind, y, cands[it2])) { break; }
                         st2++;
                         if is_inst(y) && !slp_is_deleted(y) { vl2.push(y); }
                     }
-                    if vl2.len > 1 && slp_try_to_vectorize_list_r(vl2, false, false) { changed = true; }
+                    if vl2.len > 1 && slp_seq_helper(kind, vl2, false) { changed = true; }
                     it2 = st2;
                 }
             }

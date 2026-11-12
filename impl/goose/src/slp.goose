@@ -538,14 +538,25 @@ fn slp_vectorize_cmp_insts(cmps: const i32[:], bb: i32) -> bool {
     while k > 0 {
         k--;
         let i = cmps[k];
-        for j in nops(i) { if is_inst(op(i, j)) { slp_vectorize_root_instruction(-1, op(i, j), bb); } }
+        if slp_is_deleted(i) { continue; }
+        for j in nops(i) {
+            if is_inst(op(i, j)) {
+                slp_vectorize_root_instruction(-1, op(i, j), bb);
+                if slp_is_deleted(i) { break; }
+            }
+        }
     }
     k = cmps.len;
-    while k > 0 { k--; slp_try_to_vectorize(cmps[k], false); }
-    var nvals: i64 = 0;
-    for c in cmps { if slp_is_valid_element_type(slp_value_type(c, true)) { nvals++; } }
-    if nvals > 1 { slp_not_ported("vectorizeCmpInsts (tryToVectorizeSequence of compares: compareCmp / getSameOpcode)"); }
-    return false;
+    while k > 0 { k--; if !slp_is_deleted(cmps[k]) { slp_try_to_vectorize(cmps[k], false); } }
+    var vals_: i32[>..<] = [];
+    k = cmps.len;
+    while k > 0 {
+        k--;
+        let c = cmps[k];
+        if !slp_is_deleted(c) && slp_is_valid_element_type(slp_value_type(c, true)) { vals_.push(c); }
+    }
+    if vals_.len <= 1 { return false; }
+    return slp_try_vectorize_value_sequence(vals_, 1);
 }
 
 // AnyMemIntrinsic
@@ -650,22 +661,44 @@ fn slp_vectorize_non_vectorizable_insts(range: const i32[:], bb: i32) -> bool {
         }
     }
     if insts_.len < 2 { return false; }
-    var nops_: i64 = 0;
+    // OperandGroupKey (RootKind, KindID, SubOp, FuncName, Position) per operand, as parallel arrays
+    var ops_: i32[>..<] = [];
+    var kk: i64[>..<] = [];
+    var kid: i64[>..<] = [];
+    var ksub: i64[>..<] = [];
+    var kfn: i32[>..<] = [];
+    var kpos: i64[>..<] = [];
     var seen2: i32[>..<] = [];
     for i in insts_ {
+        if slp_is_deleted(i) { continue; }
         slp_operand_chain_candidates(i, false, cands);
-        for x in cands {
-            if !is_inst(x) || inst_parent(x) != bb || iop(x) == OP_SHUFFLEVECTOR ||
+        for pos in cands.len {
+            let x = cands[pos];
+            if !is_inst(x) || inst_parent(x) != bb || slp_is_deleted(x) || iop(x) == OP_SHUFFLEVECTOR ||
                (!slp_is_valid_element_type(vals[x].ty) && !tti_is_intrinsic_inst(x)) { continue; }
             var s = false;
             for y in seen2 { if y == x { s = true; } }
             if s { continue; }
             seen2.push(x);
-            nops_++;
+            // BuildKey(I, Position)
+            var rk: i64 = 0;
+            var id: i64 = 0;
+            var sub: i64 = 0;
+            var fname: i32 = -1;
+            if is_callbase(i) {
+                if inst_iid(i) != 0 { rk = 1; id = inst_iid(i) as i64; }
+                else if called_function(i) >= 0 { rk = 2; fname = called_function(i); }
+                else { rk = 3; id = slp_value_id(cb_callee(i)); }
+            } else {
+                id = iop(i);
+                if iop(i) == OP_ATOMICRMW { sub = insts[inst_of(i)].pred as i64; }
+            }
+            ops_.push(x); kk.push(rk); kid.push(id); ksub.push(sub); kfn.push(fname); kpos.push(pos);
         }
     }
-    if nops_ > 1 { slp_not_ported("vectorizeNonVectorizableInsts (tryToVectorizeSequence of root operands)"); }
-    return false;
+    if ops_.len <= 1 { return false; }
+    slp_nv_keys_set(ops_, kk, kid, ksub, kfn, kpos);
+    return slp_try_vectorize_value_sequence(ops_, 2);
 }
 
 // isPoorThroughputOp's cache: (opcode or intrinsic id or callee, type key) pairs found cheap
