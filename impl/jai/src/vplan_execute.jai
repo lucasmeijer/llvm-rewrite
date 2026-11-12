@@ -69,15 +69,10 @@ vs_get :: (s: *Vp_State, d: Vp_Val, needs_scalar := false) -> Value_Id {
     last := vs_get_lane(s, d, s.vf.n - 1);
     saved := s.b;
     if is_inst(last) {
-        bb := inst_block(last);
-        if inst_op(last) == .PHI {
-            pt := block_first_insertion_pt(bb);
-            if pt != NONE irb_set_at(*s.b, bb, pt, false);
-        } else {
-            nx := inst(last).next;
-            if nx != NONE irb_set_at(*s.b, bb, nx, true);
-            else irb_set_end(*s.b, bb);
-        }
+        // getInsertionPointAfterDef (none: keep the insert point)
+        pt, bb, head := inst_insertion_point_after_def(last);
+        if inst_op(last) == .PHI || inst_op(last) == .INVOKE head = false;
+        if pt != NONE irb_set_at(*s.b, bb, pt, head);
     }
     vecv := scalar;
     if !ec_is_scalar(s.vf) vecv = irb_vector_splat(*s.b, s.vf.n, scalar, "broadcast");

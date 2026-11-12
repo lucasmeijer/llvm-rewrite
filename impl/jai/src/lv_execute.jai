@@ -247,34 +247,18 @@ lvp_process_best_plan :: (lp: *Lv_Planner, vf_in: Lv_Vf, plan: *Vp_Plan, user_ic
     if interleave_loop && lvl_has_uncountable_exit_with_side_effects(lp.lvl) { interleave_loop = false; ic = 1; }
     if !vectorize_loop && !interleave_loop { lv_rt_checks_destroy(*checks); return false; }
     lv_dbg("LV: Vectorizing with VF % and IC %\n", lv_ec_str(vf.width), ic);
-    if lvp_select_best_epilogue_plan(lp, vf.width, ic) vp_unported("epilogue vectorization");
+    epi_plan := lvp_select_best_epilogue_plan(lp, plan, vf.width, ic);
     latch := li_loop_latch(lp.li, lp.l);
     has_bw := prof_has_branch_weight_md(block_terminator(latch));
-    lvp_add_minimum_iteration_check(lp, vf.width, cast(u32) ic, vf.min_profitable_tc, has_bw);
-    lvp_attach_runtime_checks(lp, *checks, has_bw);
-    lvp_execute_plan(lp, vf.width, cast(u32) ic, *checks);
-    lv_rt_checks_destroy(*checks);
-    return true;
-}
-
-// selectBestEpiloguePlan: true when an epilogue plan would be chosen (not ported beyond the profitability gate)
-lvp_select_best_epilogue_plan :: (lp: *Lv_Planner, vf: Ec, ic: u64) -> bool {
-    if !lv_opts.enable_epilogue_vectorization return false;
-    if lp.cm.sel != .ALLOWED return false;
-    // CM.maskPartialAliasing is never set in the ported subset
-    if li_exiting_block(lp.li, lp.l) != li_loop_latch(lp.li, lp.l) return false;
-    // (hasUnsupportedHeaderPhiRecipe is checked last: the checks have no side effects, only the result matters)
-    if lv_opts.epilogue_force_vf.set && lv_opts.epilogue_force_vf.v > 1 vp_unported("-epilogue-vectorization-force-VF");
-    if fn_has_opt_size(lp.cm.f) return false;
-    // isEpilogueVectorizationProfitable: TTI.preferEpilogueVectorization = getMaxInterleaveFactor(VF * IC) > 1
-    iters := Ec.{vf.n * ic, vf.scalable};
-    if lv_tti_max_interleave_factor(lp.cm.tti, iters, false) <= 1 return false;
-    min_vf := ifx lv_opts.epilogue_min_vf.set then cast(u64) lv_opts.epilogue_min_vf.v else 16;
-    if vf.n * ic < min_vf return false;
-    for vp_block_phis(vp_entry_basic_block(vp_vector_loop_region())) {
-        k := vr(it).kind;
-        if k == .FIRST_ORDER_RECURRENCE_PHI || k == .REDUCTION_PHI vp_unported("hasUnsupportedHeaderPhiRecipe (epilogue vectorization)");
+    if epi_plan {
+        lvp_vectorize_with_epilogue(lp, plan, epi_plan, vf, ic, *checks, has_bw);
+    } else {
+        vp_use(plan);
+        lvp_add_minimum_iteration_check(lp, vf.width, cast(u32) ic, vf.min_profitable_tc, has_bw);
+        lvp_attach_runtime_checks(lp, *checks, has_bw);
+        lvp_execute_plan(lp, vf.width, cast(u32) ic, *checks);
     }
+    lv_rt_checks_destroy(*checks);
     return true;
 }
 
@@ -347,11 +331,12 @@ lv_add_runtime_unroll_disable_metadata :: (li: *Loop_Info, l: Loop_Id) {
 }
 
 // LoopVectorizationPlanner::updateLoopMetadataAndProfileInfo
-lvp_update_loop_metadata_and_profile_info :: (lp: *Lv_Planner, vector_loop: Loop_Id, header_vpbb: Vp_Blk, orig_loop_id: Md_Id,
-                                              has_avg_tc: bool, orig_avg_tc: u32, estimated_vfxuf: u64, disable_runtime_unroll: bool) {
+lvp_update_loop_metadata_and_profile_info :: (lp: *Lv_Planner, vector_loop: Loop_Id, header_vpbb: Vp_Blk, vectorizing_epilogue: bool,
+                                              orig_loop_id: Md_Id, has_avg_tc: bool, orig_avg_tc: u32, estimated_vfxuf: u64,
+                                              disable_runtime_unroll: bool) {
     li := lp.li; l := lp.l;
     sph := vp_scalar_preheader();
-    if sph != NONE {
+    if sph != NONE && !vectorizing_epilogue {
         has, rid := make_followup_loop_id(orig_loop_id, .[LV_FOLLOWUP_ALL, LV_FOLLOWUP_EPILOGUE]);
         if has li_set_loop_id(li, l, rid);
         else {
@@ -364,7 +349,7 @@ lvp_update_loop_metadata_and_profile_info :: (lp: *Lv_Planner, vector_loop: Loop
     if has li_set_loop_id(li, vector_loop, vid);
     else {
         if orig_loop_id != NONE li_set_loop_id(li, vector_loop, orig_loop_id);
-        lvh_set_already_vectorized(li, vector_loop);
+        if !vectorizing_epilogue lvh_set_already_vectorized(li, vector_loop);
     }
     // TTI.getUnrollingPreferences: UnrollVectorizedLoop is false for X86 and NoTTI
     lv_add_runtime_unroll_disable_metadata(li, vector_loop);
@@ -392,8 +377,9 @@ lv_legacy_cse :: (bb: Value_Id) {
     }
 }
 
-// LoopVectorizationPlanner::executePlan (EpilogueVecKind = None)
-lvp_execute_plan :: (lp: *Lv_Planner, vf: Ec, uf: u32, checks: *Lv_Rt_Checks) {
+// LoopVectorizationPlanner::executePlan (on the current plan); returns the SCEVs expanded by expandSCEVs
+lvp_execute_plan :: (lp: *Lv_Planner, vf: Ec, uf: u32, checks: *Lv_Rt_Checks, kind := Lv_Epilogue_Kind.NONE) -> Table(Scev_Id, Value_Id) {
+    expanded: Table(Scev_Id, Value_Id); expanded.allocator = temp;
     pse := lp.pse;
     vp_replace_wide_canonical_iv_with_wide_iv(vf, uf, lp.cm.tti, lp.cm.cost_kind, *lp.cm.values_to_ignore);
     vp_unroll_by_uf(uf);
@@ -407,8 +393,8 @@ lvp_execute_plan :: (lp: *Lv_Planner, vf: Ec, uf: u32, checks: *Lv_Rt_Checks) {
     vp_optimize_for_vf_and_uf(vf, uf, pse);
     vp_simplify_recipes();
     requires_scalar_epilogue := lvp_requires_scalar_epilogue();
-    vp_remove_branch_on_const(false);
-    if vp_single_succ(vpl.entry) == vp_scalar_preheader() return;   // the vector loop never executes
+    if kind == .NONE vp_remove_branch_on_const(false);
+    if vp_single_succ(vpl.entry) == vp_scalar_preheader() return expanded;   // the vector loop never executes
     vp_remove_dead_recipes();
     vp_convert_to_concrete_recipes();
     has_tail_folded := vp_has_tail_folded();
@@ -420,14 +406,14 @@ lvp_execute_plan :: (lp: *Lv_Planner, vf: Ec, uf: u32, checks: *Lv_Rt_Checks) {
     vp_materialize_vector_trip_count(vector_ph, has_tail_folded, requires_scalar_epilogue, vpl.vfxuf, has_mrs, mvs * vf.n * uf);
     vp_materialize_factors(vector_ph, vf);
     vp_print_plan("after materializeFactors");
-    vp_expand_scevs_to_vp_instructions();
+    if kind == .NONE vp_expand_scevs_to_vp_instructions();
     vp_print_plan("after expandSCEVsToVPInstructions");
     vp_cse();
     vp_simplify_recipes();
     vp_print_plan("after cse+simplify");
-    if vp_remove_branch_on_const(false) vp_simplify_recipes();
+    if vp_remove_branch_on_const(kind != .NONE) vp_simplify_recipes();
     entry_irbb := vb(vpl.entry).irbb;
-    vp_expand_scevs(entry_irbb);
+    vp_expand_scevs(entry_irbb, *expanded);
 
     st: Vp_State;
     st.vf = vf; st.uf = uf; st.li = lp.li; st.ac = lp.p.ac; st.f = lp.cm.f;
@@ -437,8 +423,22 @@ lvp_execute_plan :: (lp: *Lv_Planner, vf: Ec, uf: u32, checks: *Lv_Rt_Checks) {
     st.cur_parent_loop = li_parent(lp.li, lp.l);
     // createVectorizedLoopSkeleton: createScalarPreheader("")
     ph := li_loop_preheader(lp.li, lp.l);
-    scalar_ph_bb := split_block(ph, block_terminator(ph), lp.p.dt, lp.li, null, "scalar.ph");
+    scalar_ph_bb := split_block(ph, block_terminator(ph), lp.p.dt, lp.li, null, ifx kind == .EPILOGUE then "vec.epilog.scalar.ph" else "scalar.ph");
     st.prev_bb = block_single_predecessor(scalar_ph_bb);
+    if kind == .EPILOGUE {
+        // EpilogueVectorizerEpilogueLoop::createVectorizedLoopSkeleton
+        set_name(st.prev_bb, "vec.epilog.iter.check");
+        new_entry := vp_create_ir_basic_block(st.prev_bb);
+        old_entry := vpl.entry;
+        r := vb(old_entry).first;
+        while r != NONE {
+            nx := vr(r).next;
+            if vr(r).kind != .IR_INSTRUCTION vp_move_before(r, new_entry, NONE);
+            r = nx;
+        }
+        vpbu_reassociate_blocks(old_entry, new_entry);
+        vpl.entry = new_entry;
+    }
     sph := vp_scalar_preheader();
     if sph != NONE vp_replace_vpbb_with_irvpbb(sph, block_get_single_successor(st.prev_bb));
     vp_remove_dead_recipes();
@@ -456,10 +456,11 @@ lvp_execute_plan :: (lp: *Lv_Planner, vf: Ec, uf: u32, checks: *Lv_Rt_Checks) {
     disable_runtime_unroll := !lv_rt_checks_has_checks(checks) && !ec_is_scalar(vf);
     vloop: Loop_Id = NONE;
     if header_vpbb != NONE { _, hbb := table_find(*st.vpbb2irbb, header_vpbb); vloop = li_loop_for(lp.li, hbb); }
-    lvp_update_loop_metadata_and_profile_info(lp, vloop, header_vpbb, lid, has_avg, avg, vf.n * uf, disable_runtime_unroll);
+    lvp_update_loop_metadata_and_profile_info(lp, vloop, header_vpbb, kind == .EPILOGUE, lid, has_avg, avg, vf.n * uf, disable_runtime_unroll);
     // fixVectorizedLoop
     if header_vpbb != NONE {
         _, hbb := table_find(*st.vpbb2irbb, header_vpbb);
         lv_legacy_cse(hbb);
     }
+    return expanded;
 }

@@ -700,7 +700,7 @@ vp_cse :: () {
 
 // VPlanTransforms::expandSCEVs: the remaining VPExpandSCEVRecipes become IR in the entry block (SCEVExpander with
 // name "induction"), and IR instructions added to the entry block get VPIRInstructions.
-vp_expand_scevs :: (entry_irbb: Value_Id) {
+vp_expand_scevs :: (entry_irbb: Value_Id, expanded: *Table(Scev_Id, Value_Id)) {
     x: Scev_Expander;
     sx_init(*x, "induction", false);
     entry := vpl.entry;
@@ -708,6 +708,7 @@ vp_expand_scevs :: (entry_irbb: Value_Id) {
         if vr(r).kind != .EXPAND_SCEV continue;
         e := vr(r).expr;
         res := sx_expand_code_for_at(*x, e, sc_type(e), block_terminator(entry_irbb));
+        table_set(expanded, e, res);
         exp := vp_live_in(res);
         vp_rauw(vr(r).def, exp);
         if vpl.trip_count == vr(r).def vpl.trip_count = exp;
