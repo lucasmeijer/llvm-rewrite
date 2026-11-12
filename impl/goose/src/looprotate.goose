@@ -6,8 +6,9 @@
 // PredecessorWithTwoSuccessors (llvm/lib/Transforms/Utils/BasicBlockUtils.cpp), Loop::setLoopID and
 // LoopInfo::replacementPreservesLCSSAForm (llvm/lib/Analysis/LoopInfo.cpp).
 //
-// Not ported (fail loudly): functions with debug records (cloneDebugInfoFrom / RemapDbgRecordRange / the
-// duplicate-record hashes, findDbgValues rewriting, insertDebugValuesForPHIs, RemoveRedundantDbgInstrs),
+// Debug records: cloneDebugInfoFrom with the NextDbgInsts start position, RemapDbgRecordRange, the duplicate-record
+// hashes, findDbgValues rewriting in RewriteUsesOfClonedInstructions, insertDebugValuesForPHIs (Local.cpp) and
+// RemoveRedundantDbgInstrs after the final merge. Not ported (fail loudly): #dbg_assign records in the rotated header,
 // llvm.experimental.noalias.scope.decl in the header (cloneAndAdaptNoAliasScopes), key-instruction atoms
 // (mapAtomInstance), metadata-as-value operands of cloned instructions, vectorize hints of minsize functions.
 // ScalarEvolution::forgetTopmostLoop / forgetValue are not ported: the whole ScalarEvolution is dropped instead
@@ -41,6 +42,8 @@ import scev;
 import scev_btc;
 import scev_eval;
 import scev_update;
+import salvage;
+import dbgutil;
 
 var lr_mssau: bool = false;
 var lr_fv: i32 = -1;
@@ -141,20 +144,129 @@ fn lr_simplify_loop_latch(l: i32) -> bool {
     let lt = iop(block_terminator(last_exit));
     if lt != OP_BR && lt != OP_CONDBR { return false; }
     if !lr_should_speculate_instrs(block_first(latch), jmp, l) { return false; }
-    lr_check_no_debug_records();
     lr_merge_block_into_predecessor(latch, true);
     if scev_valid(lr_fv) { sc_forget_block_and_loop_dispositions_all(); }
     if lr_mssau && flag_bool("verify-memoryssa", false) { mssa_verify(lr_fv); }
     return true;
 }
 
-fn lr_check_no_debug_records() {
+// #dbg_assign records in the header would need RemapDbgRecord's DIAssignID handling (fail loudly)
+fn lr_check_no_assign_records(oh: i32) {
     if dbgrecs.len == 0 { return; }
-    var b = func_entry(lr_fv);
-    while b >= 0 {
-        var i = block_first(b);
-        while i >= 0 { if inst_first_dbg(i) >= 0 { lr_not_ported("rotating loops in functions with debug records"); } i = inst_next(i); }
-        b = block_next(b);
+    var i = block_first(oh);
+    while i >= 0 {
+        var r = inst_first_dbg(i);
+        while r >= 0 { if dbgrecs[r].kind as i64 == DR_ASSIGN { lr_not_ported("rotating a header with #dbg_assign records"); } r = dbgrecs[r].next; }
+        i = inst_next(i);
+    }
+}
+
+// The duplicate-record hashes (DbgHash: location ops, variable, expression) of the records attached to the
+// preheader's terminator before rotation, flattened: [var, expr, nops, ops...] per record.
+var lr_dbg_hashes: i32[>..<];
+fn lr_dbg_hash_build(t: i32) {
+    lr_dbg_hashes.clear();
+    var r = inst_first_dbg(t);
+    while r >= 0 {
+        if dbgrecs[r].kind as i64 != DR_LABEL {
+            var ops: i32[>..<] = [];
+            dbg_location_ops(r, ops);
+            lr_dbg_hashes.push(dbgrecs[r].dvar);
+            lr_dbg_hashes.push(dbgrecs[r].expr);
+            lr_dbg_hashes.push(ops.len as i32);
+            for o in ops { lr_dbg_hashes.push(o); }
+        }
+        r = dbgrecs[r].next;
+    }
+}
+fn lr_dbg_hash_seen(r: i32) -> bool {
+    var ops: i32[>..<] = [];
+    dbg_location_ops(r, ops);
+    var k: i64 = 0;
+    while k < lr_dbg_hashes.len {
+        let n = lr_dbg_hashes[k + 2] as i64;
+        if lr_dbg_hashes[k] == dbgrecs[r].dvar && lr_dbg_hashes[k + 1] == dbgrecs[r].expr && n == ops.len {
+            var same = true;
+            for j in n { if lr_dbg_hashes[k + 3 + j] != ops[j] { same = false; } }
+            if same { return true; }
+        }
+        k += 3 + n;
+    }
+    return false;
+}
+
+// to->cloneDebugInfoFrom(from, from_here), RemapDbgRecordRange(M, Range, ValueMap, RF_NoModuleLevelChanges |
+// RF_IgnoreMissingLocals), then erase the clones the preheader's terminator already had
+fn lr_clone_dbg(to: i32, from: i32, from_here: i32) {
+    var cl: i32[>..<] = [];
+    inst_clone_debug_info_from(to, from, from_here, false, cl);
+    for r in cl {
+        // RemapDbgRecord: the location and variable metadata are module-level (unchanged without module-level
+        // changes); location operands found in the value map are replaced, missing locals stay
+        if dbgrecs[r].kind as i64 == DR_LABEL { continue; }
+        if dbgrecs[r].kind as i64 == DR_ASSIGN { lr_not_ported("remapping #dbg_assign records"); }
+        var ops: i32[>..<] = [];
+        dbg_location_ops(r, ops);
+        for j in ops.len {
+            let m = lr_vmap_get(ops[j]);
+            if m >= 0 && m != ops[j] { dbg_replace_location_op_idx(r, j, m); }
+        }
+    }
+    for r in cl {
+        if dbgrecs[r].kind as i64 != DR_LABEL && lr_dbg_hash_seen(r) { dbg_delete_record(r); }
+    }
+}
+
+// insertDebugValuesForPHIs(BB, InsertedPHIs) (llvm/lib/Transforms/Utils/Local.cpp)
+fn lr_insert_debug_values_for_phis(bb: i32, inserted: i32[>..<]&) {
+    if inserted.len == 0 { return; }
+    // DbgValueMap: PHI -> first record of BB using it
+    var mk: i32[>..<] = [];
+    var mv: i32[>..<] = [];
+    var i = block_first(bb);
+    while i >= 0 {
+        var r = inst_first_dbg(i);
+        while r >= 0 {
+            if dbgrecs[r].kind as i64 != DR_LABEL {
+                var ops: i32[>..<] = [];
+                dbg_location_ops(r, ops);
+                for v in ops { if is_inst(v) && iop(v) == OP_PHI && position(mk, v) < 0 { mk.push(v); mv.push(r); } }
+            }
+            r = dbgrecs[r].next;
+        }
+        i = inst_next(i);
+    }
+    if mk.len == 0 { return; }
+    // NewDbgValueMap: (Parent, old record) -> new record, in insertion order
+    var nb: i32[>..<] = [];
+    var no: i32[>..<] = [];
+    var nn: i32[>..<] = [];
+    for phi in inserted {
+        let parent = inst_parent(phi);
+        var fnp = block_first(parent);
+        while fnp >= 0 && iop(fnp) == OP_PHI { fnp = inst_next(fnp); }
+        if fnp >= 0 && inst_is_eh_pad(fnp) { continue; }
+        for k in nops(phi) {
+            let vi = op(phi, k);
+            let at = position(mk, vi);
+            if at < 0 { continue; }
+            let old = mv[at];
+            var e: i64 = -1;
+            for x in nb.len { if nb[x] == parent && no[x] == old { e = x; } }
+            if e < 0 { e = nb.len; nb.push(parent); no.push(old); nn.push(dbg_clone_record(old)); }
+            let nr = nn[e];
+            var ops: i32[>..<] = [];
+            dbg_location_ops(nr, ops);
+            if position(ops, vi) >= 0 { sv_replace_location_op(nr, vi, phi); }
+        }
+    }
+    for x in nb.len {
+        let parent = nb[x];
+        var pt = block_first(parent);
+        while pt >= 0 && (iop(pt) == OP_PHI || inst_is_eh_pad(pt)) { pt = inst_next(pt); }
+        if pt < 0 { fatal("internal: LoopRotate: ill-formed basic block"); }
+        // insertDbgRecordBefore(DR, getFirstInsertionPt()): the iterator has the head bit
+        marker_absorb(parent, pt, nn[x], true);
     }
 }
 
@@ -454,7 +566,7 @@ fn lr_vmap_set(k: i32, v: i32) {
 }
 
 // RewriteUsesOfClonedInstructions(OrigHeader, OrigPreheader, ValueMap, SE, InsertedPHIs)
-fn lr_rewrite_uses_of_cloned(oh: i32, oph: i32) {
+fn lr_rewrite_uses_of_cloned(oh: i32, oph: i32, inserted: i32[>..<]&) {
     var p = block_first(oh);
     while p >= 0 && iop(p) == OP_PHI {
         let k = phi_block_index(p, oph);
@@ -491,6 +603,19 @@ fn lr_rewrite_uses_of_cloned(oh: i32, oph: i32) {
             ssa_rewrite_use(u);
             u = nu;
         }
+        // replace the debug records' uses of OrigHeaderVal (findDbgValues)
+        var dvrs: i32[>..<] = [];
+        find_dbg_values(ohv, dvrs);
+        for r in dvrs {
+            let o = dbgrecs[r].owner;
+            let ub = if o >= 0 { inst_parent(o) } else { -2 - o };
+            if ub == oh { continue; }
+            let nv = if ub == oph { ophv }
+                     else if ssa_has_value_for_block(ub) { ssa_get_value_in_middle_of_block(ub) }
+                     else { c_poison(vals[ohv].ty) };
+            sv_replace_location_op(r, ohv, nv);
+        }
+        for pn in ssa_inserted { inserted.push(pn); }
     }
 }
 
@@ -514,7 +639,7 @@ fn lr_rotate_loop(l: i32, simplified_latch: bool, threshold: i64, prepare_for_lt
     }
     let oph = loop_preheader(l);
     if oph < 0 || !loop_has_dedicated_exits(l) { return false; }
-    lr_check_no_debug_records();
+    lr_check_no_assign_records(oh);
     lr_forget_scev(l);
     if lr_mssau && flag_bool("verify-memoryssa", false) { mssa_verify(lr_fv); }
     var exit = term_succ(bi, 0);
@@ -531,13 +656,18 @@ fn lr_rotate_loop(l: i32, simplified_latch: bool, threshold: i64, prepare_for_lt
         i = inst_next(i);
     }
     let entry_br = block_terminator(oph);
+    lr_dbg_hash_build(entry_br);
     var j = i;
+    // NextDbgInsts: the first record of the next instruction to clone records from (-1: an empty range)
+    var next_dbg = if j >= 0 { inst_first_dbg(j) } else { -1 };
     while j >= 0 {
         let inst = j;
         j = inst_next(j);
         if inst_iid(inst) == IID_experimental_noalias_scope_decl { lr_not_ported("noalias scope declarations in the rotated header"); }
         if lr_invariant_operands(l, inst) && !inst_may_read_memory(inst) && !inst_may_write_memory(inst) &&
            !is_terminator(inst) && iop(inst) != OP_ALLOCA && !func_has_fn_attr(lr_fv, AK_PresplitCoroutine) {
+            if next_dbg >= 0 { lr_clone_dbg(entry_br, inst, next_dbg); }
+            next_dbg = if j >= 0 { inst_first_dbg(j) } else { -1 };
             inst_move_before(inst, entry_br);
             continue;
         }
@@ -545,6 +675,10 @@ fn lr_rotate_loop(l: i32, simplified_latch: bool, threshold: i64, prepare_for_lt
         let dl = inst_get_md(c, MDK_DBG_SC);
         if dl >= 0 && mds[dl].kind == MK_DI && (di_int(dl, "atomGroup") != 0) { lr_not_ported("mapAtomInstance (key instructions)"); }
         inst_insert_before(c, entry_br);
+        if next_dbg >= 0 {
+            lr_clone_dbg(c, inst, next_dbg);
+            next_dbg = -1;
+        }
         // RemapInstruction(C, ValueMap, RF_NoModuleLevelChanges | RF_IgnoreMissingLocals)
         for k in nops(c) {
             let o = op(c, k);
@@ -585,11 +719,18 @@ fn lr_rotate_loop(l: i32, simplified_latch: bool, threshold: i64, prepare_for_lt
         }
     }
     inst_erase_from_parent(entry_br);
+    // OrigPreheader->flushTerminatorDbgRecords()
+    if block_has_trailing(oph) {
+        let tl = marker_take(oph, -1);
+        marker_absorb(oph, block_terminator(oph), tl, false);
+    }
     if lr_mssau {
         vm_set(VM_PASS1, oh, oph as i64);
         msu_update_for_cloned_block_into_pred(oh, oph, VM_PASS1);
     }
-    lr_rewrite_uses_of_cloned(oh, oph);
+    var inserted_phis: i32[>..<] = [];
+    lr_rewrite_uses_of_cloned(oh, oph, inserted_phis);
+    lr_insert_debug_values_for_phis(oh, inserted_phis);
     loop_move_to_header(l, nh);
     var ups: DTUpdate[>..<] = [];
     ups.push(DTUpdate { kind: DT_INSERT, from: oph, to: exit });
@@ -647,7 +788,8 @@ fn lr_rotate_loop(l: i32, simplified_latch: bool, threshold: i64, prepare_for_lt
         if lr_mssau { msu_remove_edge(oph, exit); }
     }
     if lr_mssau && flag_bool("verify-memoryssa", false) { mssa_verify(lr_fv); }
-    lr_merge_block_into_predecessor(oh, false);
+    let pred_bb = cu_unique_pred(oh);
+    if lr_merge_block_into_predecessor(oh, false) && dbgrecs.len > 0 { remove_redundant_dbg_instrs(pred_bb); }
     if lr_mssau && flag_bool("verify-memoryssa", false) { mssa_verify(lr_fv); }
     return true;
 }

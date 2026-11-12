@@ -438,6 +438,11 @@ fn block_erase(bv: i32) {
         i = p;
     }
     if vals[bv].first_use >= 0 { fatal("internal: erasing a block that still has uses"); }
+    // ~BasicBlock deletes the trailing records (where the erased instructions' records ended up), so they no longer
+    // use any value (findDbgValues must not see them)
+    if dbgrecs.len > 0 {
+        loop { let r = marker_first(bv, -1); if r < 0 { break; } dbg_delete_record(r); }
+    }
     if vals[bv].name >= 0 { let st = symtab_for(bv); if st >= 0 { symtab_remove(st, bv); } }
     func_remove_block(bv);
     vals[bv].kind = VK_DEAD;

@@ -27,8 +27,10 @@ fn lcssa_rewrite_dbg_values(iv: i32, ibb: i32, l: i32, added: const i32[:]) {
     find_dbg_values(iv, recs);
     for r in recs {
         let owner = dbgrecs[r].owner;
-        if owner < 0 { fatal("LCSSA: a debug record without a marker uses a rewritten value"); }
-        let ubb = inst_parent(owner);
+        if owner == -1 { fatal("LCSSA: a debug record without a marker uses a rewritten value"); }
+        // DVR->getMarker()->getParent(): a block's trailing marker too (changeToUnreachable leaves the erased
+        // terminator's records there)
+        let ubb = if owner >= 0 { inst_parent(owner) } else { -2 - owner };
         if ibb == ubb || loop_contains(l, ubb) { continue; }
         let v = if added.len == 1 { added[0] } else { ssa_find_value_for_block(ubb) };
         if v < 0 { continue; }

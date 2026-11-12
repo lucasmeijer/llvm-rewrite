@@ -26,6 +26,9 @@ P=(
   'sroa,instcombine,simplifycfg,loop-mssa(loop-rotate,licm),loop(indvars),loop-distribute,loop-load-elim,instcombine,simplifycfg'
   'sroa,instcombine,simplifycfg,constraint-elimination,instcombine,dse,adce'
   'cgscc(function-attrs),function(sroa,instcombine,simplifycfg),cgscc(function-attrs),function(gvn,instcombine)'
+  'sroa,instcombine,simplifycfg,loop-mssa(loop-rotate,licm),loop(indvars,loop-deletion),loop-unroll<O2>,sroa,instcombine,loop-mssa(licm<allowspeculation>),simplifycfg,instcombine'
+  'module(ipsccp<no-func-spec>),cgscc(inline,function-attrs,function(sroa,early-cse<memssa>,simplifycfg,instcombine)),function(gvn,instcombine,simplifycfg)'
+  'sroa,early-cse<memssa>,simplifycfg<bonus-inst-threshold=1;no-forward-switch-cond;switch-range-to-icmp;no-switch-to-lookup;keep-loops;no-hoist-common-insts;no-sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine,simplifycfg<bonus-inst-threshold=1;forward-switch-cond;switch-range-to-icmp;switch-to-lookup;no-keep-loops;hoist-common-insts;sink-common-insts;speculate-blocks;simplify-cond-branch>,instcombine'
 )
 
 only=""
@@ -78,7 +81,7 @@ print(",".join(x if x.startswith(("cgscc(","function(","module(")) else "functio
     tag=${dbg:+dbg }
     p=${P[$i]}
     # debugify is a module pass: a function pipeline after it needs function(...)
-    if [ -n "$dbg" ]; then case "$p" in cgscc\(*|function\(*) p="debugify,$p" ;; *) p="debugify,function($p)" ;; esac; fi
+    if [ -n "$dbg" ]; then case "$p" in cgscc\(*|function\(*|module\(*) p="debugify,$p" ;; *) p="debugify,function($p)" ;; esac; fi
     [ -z "${NO_CORPUS:-}" ] && summary "${tag}corpus" --passes "$p"
     # LLVM's opt stops at InstCombine's fixpoint verification on 3 of the 4 programs. Whole programs mostly stop
     # loudly somewhere (one unported corner per program is enough), so they are also compared per function.

@@ -327,14 +327,18 @@ fn loop_is_safe_to_clone(l: i32) -> bool {
 }
 
 // SplitBlock(Old, SplitPt, DT, LI) (Before = false)
-fn lp_split_block(old: i32, at0: i32) -> i32 {
+fn lp_split_block(old: i32, at0: i32) -> i32 { return lp_split_block_it(old, at0, false); }
+// SplitBlock(Old, It, ...) where It may carry the head bit (Old->begin()): `++SplitIt` past phis/EH pads clears it;
+// with it set, the debug records in front of the split point move to the new block
+fn lp_split_block_it(old: i32, at0: i32, head0: bool) -> i32 {
     let fv = block_func(old);
     var at = at0;
-    while iop(at) == OP_PHI || inst_is_eh_pad(at) { at = inst_next(at); }
+    var head = head0;
+    while iop(at) == OP_PHI || inst_is_eh_pad(at) { at = inst_next(at); head = false; }
     var nm: u8[>..] = [];
     nm.append(val_name(old));
     nm.append(".split");
-    let nb = split_block(old, at, nm);
+    let nb = if head { split_block_head(old, at, nm) } else { split_block(old, at, nm) };
     let l = li_loop_for(old);
     if l >= 0 { loop_add_basic_block_to_loop(l, nb); }
     if dt_has_node(DT_DOM, old) {

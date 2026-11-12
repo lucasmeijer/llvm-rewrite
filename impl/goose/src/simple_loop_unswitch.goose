@@ -268,7 +268,8 @@ fn slu_has_side_effects_or_convergent(i: i32) -> bool {
 
 // SplitEdge / SplitBlock with the updater flag set
 fn slu_split_edge(a: i32, b: i32) -> i32 { uu_mssau = slu_mssau; let r = lp_split_edge(a, b); uu_mssau = false; return r; }
-fn slu_split_block(old: i32, at: i32) -> i32 { uu_mssau = slu_mssau; let r = lp_split_block(old, at); uu_mssau = false; return r; }
+// SplitBlock(BB, BB->begin(), ...): every caller passes begin(), an iterator with the head bit
+fn slu_split_block(old: i32, at: i32) -> i32 { uu_mssau = slu_mssau; let r = lp_split_block_it(old, at, at == block_first(old)); uu_mssau = false; return r; }
 
 // unswitchTrivialBranch(L, BI, DT, LI, SE, MSSAU)
 fn unswitch_trivial_branch(l: i32, bi: i32) -> bool {
