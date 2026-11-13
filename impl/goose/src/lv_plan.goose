@@ -157,8 +157,8 @@ fn lvp_build_vplans(min_vf: i64, max_vf: i64) {
         let ok = lvp_try_to_build_vplan();
         vf = lvp_range_end;
         if !ok { continue; }
-        vpt_hoist_predicated_loads();
-        vpt_sink_predicated_stores();
+        vpt_hoist_predicated_loads(lvp_pse, lvp_l);
+        vpt_sink_predicated_stores(lvp_pse, lvp_l);
         vpt_truncate_to_minimal_bitwidths();
         vpt_optimize();
         if cm_fold_tail_with_evl() { vp_unported("EVL tail folding"); }

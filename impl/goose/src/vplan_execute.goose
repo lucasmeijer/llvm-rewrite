@@ -300,9 +300,22 @@ fn vpi_generate(r: i32) -> i32 {
         return res;
     }
     if o == VPI_REVERSE { return vxb_vector_reverse(vts_get(vp_op(r, 0), false), "reverse"); }
+    if o == OP_INSERTELEMENT as i32 {
+        let vec = vts_get(vp_op(r, 0), false);
+        let elt = vts_get(vp_op(r, 1), true);
+        let idx = vts_get(vp_op(r, 2), true);
+        return vxb_insert_elt(vec, elt, idx, name);
+    }
+    if o == VPI_LOGICAL_AND || o == VPI_LOGICAL_OR {
+        let a = vts_get(vp_op(r, 0), false);
+        let b = vts_get(vp_op(r, 1), false);
+        // CreateLogicalAnd / CreateLogicalOr: select a, b, false / select a, true, b
+        if o == VPI_LOGICAL_AND { return vxb_select(a, b, c_null(vals[b].ty as i32), name); }
+        return vxb_select(a, c_all_ones_v(vals[b].ty as i32), b, name);
+    }
     if o == VPI_NOT {
         let a = vts_get(vp_op(r, 0), vp_only_first_lane_used(vpr[r].def));
-        return vxb_binop(OP_XOR, a, c_int(vals[a].ty as i32, -1), name);
+        return vxb_binop(OP_XOR, a, c_all_ones_v(vals[a].ty as i32), name);
     }
     if o == OP_ICMP as i32 || o == OP_FCMP as i32 {
         let ofl = vp_only_first_lane_used(vpr[r].def);
@@ -863,4 +876,14 @@ fn vp_widen_intrinsic_execute(r: i32) {
     vp_apply_flags(r, ci);
     vp_apply_metadata(r, ci);
     if vals[ci].ty as i32 != T_VOID { vts_set(vpr[r].def, ci, false); }
+}
+
+fn c_all_ones_v(t: i32) -> i32 {
+    if ty_is_vector(t) {
+        var es: i32[>..<] = [];
+        let one = c_int(ty_elem(t), -1);
+        for k in ty_count(t) { es.push(one); }
+        return c_aggregate(t, es);
+    }
+    return c_int(t, -1);
 }

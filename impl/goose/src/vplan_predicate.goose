@@ -14,6 +14,10 @@ import vplan;
 import vplan_utils;
 import vplan_props;
 import vplan_transforms;
+import memloc;
+import scev;
+import apint;
+import tbaa;
 
 // ---------------------------------------------------------------------------------------------
 // blocks
@@ -669,4 +673,184 @@ fn vpt_materialize_header_mask(use_alm: bool, use_alm_cf: bool) {
     vpb_insert(w);
     let m = vpb_icmp(37, vpr[w].def, vp_or_create_backedge_taken_count(), -1, "");
     vp_rauw(hm, vpr[m].def);
+}
+
+// ---------------------------------------------------------------------------------------------
+// hoistPredicatedLoads / sinkPredicatedStores
+
+// collectGroupedReplicateMemOps + collectComplementaryPredicatedMemOps: groups (runs in out / at) of predicated
+// replicate loads (stores) with the same address SCEV and type, sorted by dominance, that contain a complementary mask
+fn vpt_collect_complementary_mem_ops(opc: i64, pse: i32, l: i32, out: i32[>..<]&, at: i32[>..<]&) {
+    out.clear();
+    at.clear();
+    let is_load = opc == OP_LOAD;
+    var keys_s: i32[>..<] = [];
+    var keys_t: i32[>..<] = [];
+    var mem: i32[>..<] = [];
+    var memk: i32[>..<] = [];
+    var bs: i32[>..<] = [];
+    vp_depth_first(vpb[vp_vector_loop_region()].entry, true, bs);
+    vp_only_basic(bs);
+    for b in bs {
+        var r = vpb[b].first;
+        while r >= 0 {
+            if vpr[r].kind == VPR_REPLICATE && vpr[r].opcode == opc as i32 && vpr[r].predicated {
+                let addr = vp_op(r, if is_load { 0 } else { 1 });
+                let ty = if is_load { vpv[vpr[r].def].ty } else { vp_scalar_type(vp_op(r, 0)) };
+                let sc = vp_scev_for_value(addr, pse, l);
+                if !sc_is_cnc(sc) {
+                    var k: i64 = -1;
+                    for j in keys_s.len { if keys_s[j] == sc && keys_t[j] == ty { k = j; } }
+                    if k < 0 { keys_s.push(sc); keys_t.push(ty); k = keys_s.len - 1; }
+                    mem.push(r);
+                    memk.push(k as i32);
+                }
+            }
+            r = vpr[r].next;
+        }
+    }
+    vp_dt_build();
+    for k in keys_s.len {
+        var g: i32[>..<] = [];
+        for j in mem.len { if memk[j] == k as i32 { g.push(mem[j]); } }
+        // stable_sort by VPDT.properlyDominates
+        for a in 1..g.len {
+            let x = g[a];
+            var b = a - 1;
+            while b >= 0 && vp_dt_properly_dominates(x, g[b]) { g[b + 1] = g[b]; b--; }
+            g[b + 1] = x;
+        }
+        if g.len < 2 { continue; }
+        let mi = vp_replicate_mask(g[0]);
+        var comp = false;
+        for j in 1..g.len {
+            let mj = vp_replicate_mask(g[j]);
+            if vpm_not(mi) == mj || vpm_not(mj) == mi { comp = true; }
+        }
+        if !comp { continue; }
+        at.push(out.len as i32);
+        for x in g { out.push(x); }
+    }
+    at.push(out.len as i32);
+}
+// getCommonMetadata(Recipes) applied to recipe `dst`
+fn vpt_common_metadata_to(dst: i32, g: const i32[:]) {
+    var md: i32[>..<] = [];
+    let h = vpr[g[0]].md;
+    if h >= 0 { for k in xv_len(h) { md.push(xv_get(h, k)); } }
+    for j in 1..g.len {
+        var out: i32[>..<] = [];
+        var k: i64 = 0;
+        while k < md.len {
+            if vp_md_get(g[j], md[k]) == md[k + 1] { out.push(md[k]); out.push(md[k + 1]); }
+            k += 2;
+        }
+        md.clear();
+        for x in out { md.push(x); }
+    }
+    vpr[dst].md = -1;
+    var k: i64 = 0;
+    while k < md.len { vp_md_set(dst, md[k], md[k + 1]); k += 2; }
+}
+// findRecipeWithMinAlign (min_element: the first minimum)
+fn vpt_min_align_recipe(g: const i32[:]) -> i32 {
+    var best = g[0];
+    for x in g { if insts[inst_of(vp_underlying_instr(x))].align < insts[inst_of(vp_underlying_instr(best))].align { best = x; } }
+    return best;
+}
+// canHoistOrSinkWithNoAliasCheck(MemLoc, FirstBB, LastBB, SinkInfo) with SinkStoreInfo(Exclude, Leader, PSE, L)
+fn vpt_no_alias_between(loc: ML, first: i32, last: i32, sink: bool, exclude: const i32[:], leader: i32, pse: i32, l: i32) -> bool {
+    var bs: i32[>..<] = [];
+    vp_depth_first(first, true, bs);
+    vp_only_basic(bs);
+    for b in bs {
+        var r = vpb[b].first;
+        while r >= 0 {
+            let nx = vpr[r].next;
+            if sink && vpr[r].kind == VPR_REPLICATE {
+                var ex = false;
+                for x in exclude { if x == r { ex = true; } }
+                if ex || vpt_no_alias_via_distance(r, leader, pse, l) { r = nx; continue; }
+            }
+            if !vp_may_write_to_memory(r) && !(sink && vp_may_read_from_memory(r)) { r = nx; continue; }
+            if !vpt_is_ir_metadata_recipe(r) { return false; }
+            if sna_alias_may(vpt_memory_location(r), loc) { return false; }
+            r = nx;
+        }
+        if b == last { break; }
+    }
+    return true;
+}
+// SinkStoreInfo::isNoAliasViaDistance(A, B)
+fn vpt_no_alias_via_distance(a: i32, b: i32, pse: i32, l: i32) -> bool {
+    if vpr[a].opcode != OP_STORE as i32 || vpr[b].opcode != OP_STORE as i32 { return false; }
+    let sa = vp_scev_for_value(vp_op(a, 1), pse, l);
+    let sb = vp_scev_for_value(vp_op(b, 1), pse, l);
+    if sc_is_cnc(sa) || sc_is_cnc(sb) { return false; }
+    let d = sc_minus(sa, sb);
+    if !sc_is_const(d) { return false; }
+    let za = dl_store_size(vp_scalar_type(vp_op(a, 0)));
+    let zb = dl_store_size(vp_scalar_type(vp_op(b, 0)));
+    let mx = if za > zb { za } else { zb };
+    var maxvf: i64 = 0;
+    for j in xv_len(vph.vfs) { let v = xv_get(vph.vfs, j) as i64; if v > maxvf { maxvf = v; } }
+    var dv = sc_ap(d);
+    if ap_is_neg(dv) { dv = ap_neg(dv); }
+    return !ap_ult_u64(dv, (maxvf * mx) as u64);
+}
+
+fn vpt_hoist_predicated_loads(pse: i32, l: i32) {
+    var all: i32[>..<] = [];
+    var at: i32[>..<] = [];
+    vpt_collect_complementary_mem_ops(OP_LOAD, pse, l, all, at);
+    for gi in at.len - 1 {
+        var g: i32[>..<] = [];
+        for k in at[gi]..at[gi + 1] { g.push(all[k]); }
+        let earliest = g[0];
+        let first = vpr[earliest].parent;
+        let last = vpr[g[g.len - 1]].parent;
+        if !vpt_no_alias_between(vpt_memory_location(earliest), first, last, false, [], -1, pse, l) { continue; }
+        let ma = vpt_min_align_recipe(g);
+        let ui = vp_underlying_instr(ma);
+        let nl = vp_new_single_def(VPR_REPLICATE, [vp_op(earliest, 0)], vals[ui].ty as i32, ui, -1);
+        vpr[nl].single_scalar = vpr[earliest].single_scalar;
+        vpr[nl].opcode = OP_LOAD as i32;
+        vpr[nl].f = vpr[earliest].f;
+        vpt_common_metadata_to(nl, g);
+        vp_insert_before(nl, earliest);
+        for x in g { vp_rauw(vpr[x].def, vpr[nl].def); vp_erase_recipe(x); }
+    }
+}
+
+fn vpt_sink_predicated_stores(pse: i32, l: i32) {
+    var all: i32[>..<] = [];
+    var at: i32[>..<] = [];
+    vpt_collect_complementary_mem_ops(OP_STORE, pse, l, all, at);
+    for gi in at.len - 1 {
+        var g: i32[>..<] = [];
+        for k in at[gi]..at[gi + 1] { g.push(all[k]); }
+        // canSinkStoreWithNoAliasCheck
+        let loc = vpt_memory_location(g[0]);
+        if loc.scope < 0 { continue; }
+        if !vpt_no_alias_between(loc, vpr[g[0]].parent, vpr[g[g.len - 1]].parent, true, g, g[0], pse, l) { continue; }
+        let last = g[g.len - 1];
+        let ib = vpr[last].parent;
+        var sel = vp_op(g[0], 0);
+        vpb_set_at(ib, last);
+        for i in 1..g.len {
+            let m = vp_replicate_mask(g[i]);
+            let v = vp_op(g[i], 0);
+            let sr = vpb_nary(OP_SELECT as i32, [m, v, sel], vp_default_flags(OP_SELECT as i32, vp_scalar_type(v)), vpr[g[i]].dl, "", -1);
+            sel = vpr[sr].def;
+        }
+        let ms = vpt_min_align_recipe(g);
+        let ui = vp_underlying_instr(ms);
+        let ns = vp_new_single_def(VPR_REPLICATE, [sel, vp_op(last, 1)], vals[ui].ty as i32, ui, -1);
+        vpr[ns].single_scalar = vpr[g[0]].single_scalar;
+        vpr[ns].opcode = OP_STORE as i32;
+        vpr[ns].f = vpr[last].f;
+        vpt_common_metadata_to(ns, g);
+        vp_insert_recipe(ns, ib, last);
+        for x in g { vp_erase_recipe(x); }
+    }
 }

@@ -1243,8 +1243,6 @@ fn vpt_convert_to_strided_accesses() {
         while r >= 0 { if vpr[r].kind == VPR_WIDEN_LOAD && !vpr[r].consecutive { vp_unported("gathers (convertToStridedAccesses)"); } r = vpr[r].next; }
     }
 }
-fn vpt_hoist_predicated_loads() {}
-fn vpt_sink_predicated_stores() {}
 fn vpt_truncate_to_minimal_bitwidths() {}
 
 

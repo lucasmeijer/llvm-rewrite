@@ -236,6 +236,63 @@ fn vpu_unroll_recipe(r: i32) {
     if k == VPR_WIDEN_CANONICAL_IV { vp_add_operand(r, vpu_const_int(0)); }
 }
 
+// VPBlockUtils::cloneFrom(Entry): (new entry, new exiting); the cloned recipes keep their operands
+fn vp_clone_from(entry: i32) -> i32, i32 {
+    var bs: i32[>..<] = [];
+    vp_depth_first(entry, false, bs);
+    var m = hm_new();
+    let in_region = vpb[entry].parent >= 0;
+    var exiting: i32 = -1;
+    for b in bs {
+        if !vp_is_basic(b) { vp_unported("cloning nested regions"); }
+        let nb = vp_create_basic_block(sbytes(vpb[b].name));
+        var r = vpb[b].first;
+        while r >= 0 { vp_append_recipe(nb, vp_clone(r)); r = vpr[r].next; }
+        hm_put(m, b as u64, nb as i64);
+        if in_region && vp_nsuccs(b) == 0 { exiting = b; }
+    }
+    for b in bs {
+        let nb = hm_get(m, b as u64, -1) as i32;
+        for k in vp_npreds(b) { xv_push(vpb[nb].preds, hm_get(m, vp_pred(b, k) as u64, -1) as i32); }
+        for k in vp_nsuccs(b) { xv_push(vpb[nb].succs, hm_get(m, vp_succ(b, k) as u64, -1) as i32); }
+    }
+    let ne = hm_get(m, entry as u64, -1) as i32;
+    let nx = if exiting >= 0 { hm_get(m, exiting as u64, -1) as i32 } else { -1 };
+    return ne, nx;
+}
+// VPRegionBlock::clone for a replicate region
+fn vp_clone_replicate_region(reg: i32) -> i32 {
+    let ne, nx = vp_clone_from(vpb[reg].entry);
+    let nr = vp_create_replicate_region(ne, nx, sbytes(vpb[reg].name));
+    var bs: i32[>..<] = [];
+    vp_depth_first(ne, false, bs);
+    for b in bs { vpb[b].parent = nr; }
+    return nr;
+}
+// UnrollState::unrollReplicateRegionByUF(VPR)
+fn vpu_unroll_replicate_region(reg: i32) {
+    let insert_pt = vp_single_succ(reg);
+    for part in 1..vpu_uf {
+        let c = vp_clone_replicate_region(reg);
+        vpbu_insert_block_before(c, insert_pt);
+        var pi: i32[>..<] = [];
+        var p0: i32[>..<] = [];
+        vp_depth_first(vpb[c].entry, false, pi);
+        vp_depth_first(vpb[reg].entry, false, p0);
+        for j in pi.len {
+            var ri = vpb[pi[j]].first;
+            var r0 = vpb[p0[j]].first;
+            while ri >= 0 && r0 >= 0 {
+                vpu_remap_operands(ri, part);
+                if vpr[ri].kind == VPR_SCALAR_IV_STEPS { vpu_add_start_index_for_scalar_steps(ri, part); }
+                vpu_add_recipe_for_part(r0, ri, part);
+                ri = vpr[ri].next;
+                r0 = vpr[r0].next;
+            }
+        }
+    }
+}
+
 // UnrollState::unrollBlock for a basic block
 fn vpu_unroll_basic_block(b: i32) {
     let insert_pt = vp_first_non_phi(b);
@@ -295,11 +352,15 @@ fn vpx_unroll_by_uf(uf: i64) {
         vp_rpo(vph.entry, false, top);
         for b in top {
             if vp_is_region(b) {
-                if vp_is_replicator(b) { vp_unported("unrolling replicate regions"); }
+                if vp_is_replicator(b) { vpu_unroll_replicate_region(b); continue; }
                 var inner: i32[>..<] = [];
                 vp_rpo(vpb[b].entry, false, inner);
                 for ib in inner {
-                    if vp_is_region(ib) { vp_unported("unrolling replicate regions"); }
+                    if vp_is_region(ib) {
+                        if !vp_is_replicator(ib) { vp_unported("unrolling nested loop regions"); }
+                        vpu_unroll_replicate_region(ib);
+                        continue;
+                    }
                     vpu_unroll_basic_block(ib);
                 }
             } else {
@@ -471,8 +532,7 @@ fn vpx_replicate_by_vf(vf: i64) {
     let region = vp_vector_loop_region();
     var bs: i32[>..<] = [];
     vp_depth_first(vpb[region].entry, false, bs);
-    for b in bs { if vp_is_region(b) && vp_is_replicator(b) { vp_unported("replicate regions (replicateByVF)"); } }
-    if vp_has_scalar_vf_only() { return; }
+    if vp_has_scalar_vf_only() { vpx_replicate_regions_by_vf(vf, idx_ty); return; }
     var blocks: i32[>..<] = [];
     vp_depth_first(vph.entry, false, blocks);
     vp_only_basic(blocks);
@@ -513,6 +573,164 @@ fn vpx_replicate_by_vf(vf: i64) {
     }
     var k = to_remove.len - 1;
     while k >= 0 { vp_erase_recipe(to_remove[k]); k--; }
+    vpx_replicate_regions_by_vf(vf, idx_ty);
+}
+
+// replicateReplicateRegionsByVF(Plan, VF, IdxTy)
+fn vpx_replicate_regions_by_vf(vf: i64, idx_ty: i32) {
+    var bs: i32[>..<] = [];
+    vp_depth_first(vpb[vp_vector_loop_region()].entry, false, bs);
+    var regs: i32[>..<] = [];
+    for b in bs { if vp_is_region(b) && vp_is_replicator(b) { regs.push(b); } }
+    var k = regs.len - 1;
+    while k >= 0 { vpx_dissolve_replicate_region(regs[k], vf, idx_ty); k--; }
+    vpt_merge_blocks_into_predecessors();
+}
+
+// convertRecipesInRegionBlocksToSingleScalar(Plan, IdxTy, Entry, VF)
+fn vpx_convert_region_recipes_to_single_scalar(idx_ty: i32, entry: i32, vf: i64) {
+    let idx0 = vp_const_int(idx_ty, 0);
+    var bs: i32[>..<] = [];
+    vp_depth_first(entry, false, bs);
+    for b in bs {
+        var rs: i32[>..<] = [];
+        vp_block_recipes(b, rs);
+        for r in rs {
+            vpb_set_before(r);
+            let odl = vpr[r].dl;
+            if vf > 1 {
+                for i in vp_nops(r) {
+                    let o = vp_op(r, i);
+                    let d = vp_def(o);
+                    if (d >= 0 && vpr[d].kind == VPR_SCALAR_IV_STEPS && vpr[d].parent == b) || vp_is_single_scalar(o) { continue; }
+                    let ex = vpb_nary(OP_EXTRACTELEMENT as i32, [o, idx0], vpf_none(), odl, "", -1);
+                    vp_set_operand(r, i, vpr[ex].def);
+                }
+            }
+            let k = vpr[r].kind;
+            if k == VPR_REPLICATE {
+                var ops: i32[>..<] = [];
+                xv_to(vpr[r].ops, ops);
+                let ui = vp_underlying_instr(r);
+                let nr = vp_create_single_scalar_op(vpr[r].opcode, ops, -1, vpr[r].f, r, odl, ui);
+                vp_insert_before(nr, r);
+                vp_rauw(vpr[r].def, vpr[nr].def);
+                vp_erase_recipe(r);
+            } else if k == VPR_BRANCH_ON_MASK {
+                vpb_nary(VPI_BRANCH_ON_COND, [vp_op(r, 0)], vpf_none(), odl, "", -1);
+                vp_erase_recipe(r);
+            } else if k == VPR_PRED_INST_PHI {
+                let po = vp_op(r, 0);
+                let ph = vpb_scalar_phi([vp_poison(vp_scalar_type(po)), po], odl, "", vpf_none(), -1);
+                vp_rauw(vpr[r].def, vpr[ph].def);
+                vp_erase_recipe(r);
+            }
+        }
+    }
+}
+
+// processLaneForReplicateRegion(Plan, IdxTy, Lane, OldEntry, NewEntry)
+fn vpx_process_lane_for_replicate_region(idx_ty: i32, lane: i64, old_entry: i32, new_entry: i32) {
+    var m = hm_new();
+    let il = vp_const_int(idx_ty, lane as u64);
+    var ob: i32[>..<] = [];
+    var nb: i32[>..<] = [];
+    vp_depth_first(old_entry, false, ob);
+    vp_depth_first(new_entry, false, nb);
+    for j in ob.len {
+        var o = vpb[ob[j]].first;
+        var n = vpb[nb[j]].first;
+        while o >= 0 && n >= 0 {
+            for d in vp_num_defined_values(o) { hm_put(m, vp_defined_value(o, d) as u64, vp_defined_value(n, d) as i64); }
+            for i in vp_nops(n) {
+                let x = hm_get(m, vp_op(n, i) as u64, -1);
+                if x >= 0 { vp_set_operand(n, i, x as i32); }
+            }
+            if vpr[n].kind == VPR_SCALAR_IV_STEPS {
+                vpx_add_lane_to_start_index(n, lane, n);
+            } else if vpm_vpi_r(n, OP_EXTRACTELEMENT as i32, 2) {
+                vp_set_operand(n, 1, il);
+            } else if vp_is_vp_phi(n) {
+                let u = vp_single_user(vpr[o].def);
+                if u >= 0 && (vp_is_vpi(u, VPI_BUILD_VECTOR) || vp_is_vpi(u, VPI_BUILD_STRUCT_VECTOR)) {
+                    vp_set_operand(u, lane, vpr[n].def);
+                }
+            }
+            o = vpr[o].next;
+            n = vpr[n].next;
+        }
+    }
+}
+
+// dissolveReplicateRegion(Region, VF, Plan, IdxTy)
+fn vpx_dissolve_replicate_region(reg: i32, vf: i64, idx_ty: i32) {
+    let fe = vpb[reg].entry;
+    let fx = vpb[reg].exiting;
+    let pred = vp_single_pred(reg);
+    let succ = vp_single_succ(reg);
+    vpbu_disconnect(pred, reg);
+    vpbu_disconnect(reg, succ);
+    let parent = vpb[reg].parent;
+    var bs: i32[>..<] = [];
+    vp_depth_first(fe, false, bs);
+    for b in bs { vpb[b].parent = parent; }
+    vpb[reg].dead = true;
+    vpx_convert_region_recipes_to_single_scalar(idx_ty, fe, vf);
+    if vf == 1 {
+        vpbu_connect(pred, fe);
+        vpbu_connect(fx, succ);
+        return;
+    }
+    var bvs: i32[>..<] = [];
+    var phis: i32[>..<] = [];
+    vp_block_phis(fx, phis);
+    for p in phis {
+        if vp_only_first_lane_used(vpr[p].def) { continue; }
+        let sty = vpv[vpr[p].def].ty;
+        if ty_is_struct(sty) { vp_unported("struct build vectors of replicate regions"); }
+        let pz = vp_poison(sty);
+        var ops: i32[>..<] = [];
+        for k in vf { ops.push(pz); }
+        let bv = vp_new_instruction(VPI_BUILD_VECTOR, ops, vpf_none(), -1, "", -1);
+        bvs.push(bv);
+        vp_rauw(vpr[p].def, vpr[bv].def);
+        vp_set_operand(bv, 0, vpr[p].def);
+        vp_insert_recipe(bv, succ, vp_first_non_phi(succ));
+    }
+    var next = succ;
+    var lane = vf - 1;
+    while lane > 0 {
+        let ce, cx = vp_clone_from(fe);
+        var cbs: i32[>..<] = [];
+        vp_depth_first(ce, false, cbs);
+        for b in cbs { vpb[b].parent = parent; }
+        vpx_process_lane_for_replicate_region(idx_ty, lane, fe, ce);
+        vpbu_connect(cx, next);
+        next = ce;
+        lane--;
+    }
+    vpbu_connect(pred, fe);
+    vpbu_connect(fx, next);
+    // fold the build vectors fed by scalar phis into widen phis with an insertelement per lane
+    for bv in bvs {
+        for idx in vp_nops(bv) {
+            let sp = vp_def(vp_op(bv, idx));
+            let dl = vpr[sp].dl;
+            let pv = vp_op(sp, 1);
+            let pr = vp_def(pv);
+            let poison = vp_op(sp, 0);
+            let prev = if idx == 0 { poison } else { vp_op(bv, idx - 1) };
+            vpb_set_after(pr);
+            let ins = vpb_nary(OP_INSERTELEMENT as i32, [prev, pv, vp_const_int(T_I64, idx as u64)], vpf_none(), dl, "", -1);
+            vpb_set_before(sp);
+            let wp = vp_new_single_def(VPR_WIDEN_PHI, [prev, vpr[ins].def], vp_scalar_type(prev), -1, dl);
+            vpb_insert(wp);
+            vp_rauw(vpr[sp].def, vpr[wp].def);
+            vp_erase_recipe(sp);
+        }
+        vp_rauw(vpr[bv].def, vp_op(bv, vp_nops(bv) - 1));
+        vp_erase_recipe(bv);
+    }
 }
 
 // materializeConstantVectorTripCount
