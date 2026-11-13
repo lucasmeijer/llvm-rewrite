@@ -599,7 +599,8 @@ fn vp_replicate_execute(r: i32) {
     let ui = vp_underlying_instr(r);
     let c = inst_clone(ui);
     let rty = vpv[vpr[r].def].ty;
-    if rty != T_VOID && rty != vals[c].ty as i32 { vp_unported("replicating with a changed type"); }
+    // the operands may have been narrowed: mutateType to the recipe's type
+    if rty != T_VOID && rty != vals[c].ty as i32 { vals[c].ty = rty as TyId; }
     vp_apply_flags(r, c);
     vp_apply_metadata(r, c);
     let ot = vpr[r].f.ot;

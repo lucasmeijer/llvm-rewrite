@@ -680,6 +680,12 @@ fn vpt_legalize_and_optimize_inductions() {
         else { vp_replace_uses_with_if(def, sv) { u, i => vp_uses_scalars(u, def) }; }
     }
 }
+// VPReplicateRecipe::computeScalarType(I, Operands)
+fn vp_replicate_scalar_type(i: i32, ops: const i32[:]) -> i32 {
+    let o = iop(i);
+    if is_cast_op(o) || o == OP_EXTRACTVALUE || o == OP_LOAD || o == OP_ALLOCA || vals[i].ty as i32 == T_VOID || ops.len == 0 { return vals[i].ty as i32; }
+    return vp_compute_scalar_type_for_instruction(o as i32, ops);
+}
 fn vp_create_single_scalar_op(opc: i32, ops: const i32[:], mask: i32, f: VPF, md_from: i32, dl: i32, uv: i32) -> i32 {
     if vp_opcode_is_cast(opc) {
         let r = vp_new_instruction(opc, ops, f, dl, val_name(uv), vals[uv].ty as i32);
@@ -688,7 +694,7 @@ fn vp_create_single_scalar_op(opc: i32, ops: const i32[:], mask: i32, f: VPF, md
         if md_from >= 0 { vp_md_copy(r, md_from); }
         return r;
     }
-    let r = vp_new_single_def(VPR_REPLICATE, ops, vals[uv].ty as i32, uv, dl);
+    let r = vp_new_single_def(VPR_REPLICATE, ops, vp_replicate_scalar_type(uv, ops), uv, dl);
     if mask >= 0 { vp_add_operand(r, mask); vpr[r].predicated = true; }
     vpr[r].single_scalar = true;
     vpr[r].opcode = iop(uv) as i32;
@@ -710,7 +716,27 @@ fn vpt_narrow_to_single_scalar_recipes() {
             if k != VPR_WIDEN && k != VPR_WIDEN_GEP && k != VPR_REPLICATE && k != VPR_WIDEN_INTRINSIC { r = prev; continue; }
             if k == VPR_REPLICATE && (vpr[r].single_scalar || vpr[r].predicated) { r = prev; continue; }
             if k == VPR_REPLICATE && vpr[r].opcode == OP_STORE as i32 && vp_is_single_scalar(vp_op(r, 1)) {
-                vp_unported("narrowing replicated stores to a single-scalar address");
+                // a single-scalar store of the last lane (of the last part when the address is uniform across UFs)
+                var ops: i32[>..<] = [];
+                xv_to(vpr[r].ops, ops);
+                let ui = vp_underlying_instr(r);
+                let cl = vp_new_single_def(VPR_REPLICATE, ops, vals[ui].ty as i32, ui, vpr[r].dl);
+                vpr[cl].single_scalar = true;
+                vpr[cl].opcode = vpr[r].opcode;
+                vpr[cl].f = vpr[r].f;
+                vp_md_copy(cl, r);
+                vp_insert_before(cl, r);
+                vpb_set_before(cl);
+                var ex = vp_op(cl, 0);
+                if vp_is_uniform_across_vfs_and_ufs(vp_op(r, 1)) {
+                    let lp = vpb_nary(VPI_EXTRACT_LAST_PART, [ex], vpf_none(), -1, "", -1);
+                    ex = vpr[lp].def;
+                }
+                let ll = vpb_nary(VPI_EXTRACT_LAST_LANE, [ex], vpf_none(), -1, "", -1);
+                vp_set_operand(cl, 0, vpr[ll].def);
+                vp_erase_recipe(r);
+                r = prev;
+                continue;
             }
             if k == VPR_WIDEN_INTRINSIC {
                 // only llvm.masked.{u,s}{div,rem} with a first-lane-only use are narrowed

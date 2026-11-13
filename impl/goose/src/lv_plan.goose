@@ -233,7 +233,7 @@ fn vp_new_widen_store(si: i32, addr: i32, val: i32, mask: i32, consecutive: bool
 }
 // VPReplicateRecipe(I, Operands, IsSingleScalar, Mask, Flags, Metadata, DL)
 fn vp_new_replicate(i: i32, ops: const i32[:], single: bool, mask: i32, f: VPF, md_from: i32, dl: i32) -> i32 {
-    let r = vp_new_single_def(VPR_REPLICATE, ops, vals[i].ty as i32, i, dl);
+    let r = vp_new_single_def(VPR_REPLICATE, ops, vp_replicate_scalar_type(i, ops), i, dl);
     if mask >= 0 { vp_add_operand(r, mask); vpr[r].predicated = true; }
     vpr[r].single_scalar = single;
     vpr[r].opcode = iop(i) as i32;
