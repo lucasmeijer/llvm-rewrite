@@ -552,6 +552,11 @@ in flat tables of one `Vp_Plan` struct; every entity is a u32 row index:
 - **InterleavedAccessInfo** (`Iai`, lv_interleave.jai): groups are rows of a table (`Ig`, members as parallel
   key/value arrays = the DenseMap), released groups stay as dead rows; InterleaveGroups is the ordered list of live
   ids.
+- **VPExpressionRecipe** (vplan_expression.jai): member recipes stay rows of the plan, unlinked from any block, in
+  `expr_recipes` (duplicates allowed); its LiveInPlaceholders are symbolic values in `expr_placeholders`, one per
+  operand. `vp_duplicate` re-adds the members' users (they only use each other and the placeholders).
+- **Lanes** (VPLane) are u64: a plain lane index, or `LANE_SCALABLE_LAST | k` for lane k of the last vscale chunk
+  (the cache index is VF.min + k, the runtime index `vscale * VF.min - (VF.min - k)`).
 - Everything not ported yet fails loudly (`vp_unported("...")`) at the point where LLVM would act.
 
 ### Cloning: ValueMapper, CloneBasicBlock, LoopUnroll (value_mapper.jai, clone_function.jai, loop_unroll*.jai, loop_peel.jai)

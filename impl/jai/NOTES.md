@@ -1174,7 +1174,7 @@ Still slow / known:
   prints the outlining costs and the module before the partial inlining, JAI_IC_DEBUG prints the CallAnalyzer
   counters LLVM's `-debug-only=inline-cost` prints.
 
-## LoopVectorize (in progress; L1.vectorize.loop 383/468 opt, 468/468 roundtrip)
+## LoopVectorize (L1.vectorize.loop 463/468 opt, 468/468 roundtrip; .outer/.reductions/.tail-folding/.epilogue COMPLETE)
 
 - Files: `iv_descriptors.jai` (IVDescriptors.cpp), `lv_legality.jai` (LoopVectorizationLegality, LoopVectorizeHints,
   isDereferenceableAndAlignedInLoop), `lv_pass.jai` (runImpl / processLoop, computeMaxVF, collectValuesToIgnore, every
@@ -1237,23 +1237,46 @@ Still slow / known:
   pointer into `vpl.blocks`) before the call grows the array; create the block into a local first (a switch with
   four cases lost a successor this way). The same holds for `vr(r)` / `vv(v)` pointers across recipe / value creation.
 
-### LoopVectorize next steps (each fails loudly with the quoted message today; counts are unit tests)
+- jai_loopvec5 added: in-loop and ordered reductions (createInLoopReductionRecipes, VPReductionRecipe execute,
+  getReductionPatternCost in the legacy model), VPExpressionRecipe + convertToAbstractRecipes (`vplan_expression.jai`:
+  member recipes are unlinked rows in `expr_recipes`, placeholders are symbolic values; `vp_duplicate` rebuilds the
+  members' user lists), handleMaxMinNumReductions, masked div/rem intrinsics, active lane masks (both styles, the
+  ALM phi), masked interleave groups, -force-partial-aliasing-vectorization (alias mask check block), outer-loop
+  vectorization (VPlan-native path; the recipe/execution code was already there, the gates were legality, the outer
+  VF heuristic, nested regions with a null-typed canonical IV and tryToConvertVPInstructionsToVPRecipes), scalable VFs
+  (forced `vscale x N` widths, `-scalable-vectorization` on NoTTI: scalable max VFs, vscale expansion, ScalableLast
+  lanes encoded as `LANE_SCALABLE_LAST | k` in vs_get_lane, splats/step vectors/splices/reverses/interleaves via
+  intrinsics), struct-typed values (sincos-style intrinsics, extractvalue widening, BuildStructVector), discriminators
+  (cloneByMultiplyingDuplicationFactor, also in LoopUnroll), replicated assumes registered in the AssumptionCache,
+  operand bundles on widened calls, dereferenceable assumptions, X86 reg usage of extended vector types.
+- Traps met (jai_loopvec5): the VPTransformState and epilogue-resume builders are `IRBuilder<>` (ConstantFolder):
+  never use InstSimplify-folding helpers (`isf_*`) there (`icmp eq (xor x, true), false` must stay); ConstantFolder
+  does not fold intrinsic calls either; `int Stride = getPtrStride(...)` truncates (INT64_MAX is -1, so such
+  accesses are reverse-consecutive); isOutsideLoopWorkProfitable receives processLoop's *local* SEL, not the CM's
+  (which changes when tail folding fails); a NumActiveLanes VPInstruction does not name its call; outer loops get no
+  computeMinimalBitwidths and no LoopAccessInfo (laa is null); a scalable forced width makes supportsScalableVectors
+  true even without -force-target-supports-scalable-vectors; for scalable VFs collectLoopScalars only copies the
+  uniforms and assume/lifetime replicates become single scalars; X86 getRegisterBitWidth(scalable) is 0, NoTTI's is
+  `vscale x 32`. Never push from the middle of a rebase (HEAD is detached there; `git status` first).
+- Sweeps at the end of jai_loopvec5: plain, `--with-test-flags`, `--with-test-flags --per-function` (0 differs),
+  `sroa,loop-vectorize` on tests/perf/compile, the 919 + 76 -O2 inputs (`tools/o2_lv_inputs.py --compare`): all
+  identical; plus extra-flag sweeps that found real bugs: `-prefer-inloop-reductions`, `-force-ordered-reductions`,
+  tail folding styles `data` / `data-and-control` with `-tail-folding-policy=prefer-fold-tail`,
+  `-force-partial-aliasing-vectorization`, masked interleaving, `-enable-vplan-native-path`,
+  `-vplan-build-outerloop-stress-test`, `-force-vector-width=vscale x 4`, `-scalable-vectorization=on
+  -force-target-supports-scalable-vectors`, avx2 / avx512 triples, epilogue-forced VFs: all 0 differs.
 
-1. Outer loops (18: "outer-loop vectorization (VPlan-native path)"): legality for loop nests, buildVPlan for outer
-   loops (nested regions), VPWidenPHIRecipe execution.
-2. convertToStridedAccesses (10: "non-consecutive widened loads"): strided loads as `vp.strided.load` only when the
-   target says legal (X86: never), so mostly the decision code plus gathers.
-3. Scalable VFs (14: "scalable -force-vector-width", "scalable vectorization"): X86 has no scalable vectors, these
-   tests force them; needs ElementCount arithmetic with vscale everywhere.
-4. In-loop / ordered reductions (6): createInLoopReductionRecipes, VPReductionRecipe execute/cost,
-   getReductionPatternCost; FMinNum/FMaxNum reductions (3: handleMaxMinNumReductions).
-5. Tail folding leftovers: masked div/rem intrinsics (5), m_HeaderMask on materialized masks (4), active lane masks
-   (1), masked interleave groups (1), unmasking uniform predicated stores (1); -force-partial-aliasing-vectorization
-   (4); uncountable exits with side effects (canUncountableExitConditionLoadBeMoved, only with
-   -enable-early-exit-vectorization-with-side-effects).
-6. Small ones: struct-typed values (3), replicating llvm.assume (2), extract-lane execution for some VF (2),
-   dereferenceable assumptions, constant-folding reduction intrinsics, PGSO (profile summary), discriminators,
-   operand bundles on widened intrinsics, histograms.
+### LoopVectorize next steps (each fails loudly with the quoted message today)
+
+1. Histograms (`-enable-histogram-loop-vectorization`, 1 test): LAA histogram detection, VPHistogramRecipe.
+2. EVL tail folding (`-force-tail-folding-style=data-with-evl`; needs a target with active vector length, so only
+   forced): VPWidenLoadEVL / StoreEVL / ReductionEVL / InterleaveEVL recipes, addExplicitVectorLength.
+3. A cached ProfileSummaryInfo (`require<profile-summary>`, optsize.ll: PGSO), `--pass-remarks` output, the
+   `replace-with-veclib` and `pseudo-probe` passes (other units' tests that run LV).
+4. Uncountable exits with side effects (-enable-early-exit-vectorization-with-side-effects).
+5. Scalable leftovers: epilogue vectorization of scalable main loops, scalable epilogue VFs, scalable masks for gaps.
+6. `-enable-wide-lane-mask` (tryToReplaceALMWithWideALM), partial reductions (only reachable on targets with
+   partial-reduction costs), willGenerateVectors with an EXPRESSION recipe (llvm_unreachable in LLVM).
 
 ## IPO: GlobalOpt, GlobalDCE, ConstantMerge, Internalize, DeadArgElim, ArgumentPromotion (L2.globals 443/450, L2.ipo-args COMPLETE 206/206)
 

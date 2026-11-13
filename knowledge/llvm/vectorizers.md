@@ -317,6 +317,33 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
   tags (`!alias.scope`, `!noalias`), so without them every write in the loop region aliases; `SinkStoreInfo(R)`
   without a PSE only skips R itself.
 
+- The VPTransformState builder and the epilogue resume-value builder in preparePlanForEpilogueVectorLoop are plain
+  `IRBuilder<>` (ConstantFolder): `icmp eq (xor %m, true), false` in FirstActiveLane for VF 1 and
+  `icmp ne %bc.merge.rdx, 0` of a resume phi with identical incomings are kept as instructions, and intrinsic calls
+  with constant operands are never folded (ConstantFolder::FoldIntrinsic returns null). Only GeneratedRTChecks and
+  addDiffRuntimeChecks use InstSimplifyFolder (verified: first-order-recurrence-tail-folding.ll, the avx2 sweep of
+  select-cmp-blend-chain.ll).
+- `LoopVectorizationLegality::isConsecutivePtr` stores getPtrStride's int64_t in an `int`: a stride of INT64_MAX
+  becomes -1 and the access is widened as reverse-consecutive (DependenceAnalysis/rdiv-minor-algebra.ll under
+  prefer-fold-tail).
+- isOutsideLoopWorkProfitable gets processLoop's local EpilogueLowering, not the cost model's: with
+  `-tail-folding-policy=prefer-fold-tail` on a loop that cannot fold its tail, the minimum profitable trip count is
+  not rounded up to a multiple of VF (X86/cost-model.ll `multi_exit`: 23, not 24).
+- In-loop reductions: createInLoopReductionRecipes places each VPReductionRecipe at the end of its block (before the
+  latch's last two recipes); with tail folding, reduce(mul) chains become VPExpressionRecipes (MulAcc) when
+  getMulAccReductionCost (BasicTTI: red + mul + 2 ext) beats the widened mul + reduction cost, which moves the mul
+  next to its reduction at execution (reduction-inloop-pred.ll).
+- usePredicatedReductionSelect is forced with alias masking: the header-mask select of a reduction stays in the loop.
+- A scalable `-force-vector-width=vscale x N` alone makes supportsScalableVectors true. For scalable VFs
+  collectLoopScalars only copies the uniforms, assume / lifetime calls become single-scalar replicates, the last lane
+  is `vscale * N - 1` (i32 arithmetic), the FOR init lane is `vscale * N - 1`, and splices / reverses / interleaves /
+  step vectors are intrinsics. TTIImplBase::getRegisterBitWidth(RGK_ScalableVector) is `vscale x 32`; X86's is 0.
+- Outer loops (VPlan-native path): computeMaxVF returns bit_floor(register width / widest type) (or the user VF);
+  nested loop regions get a null-typed canonical IV; introduceMasksAndLinearize is skipped; computeBestVF returns the
+  single plan; no IC selection or runtime checks; `-vplan-build-outerloop-stress-test` bails after computeBestVF.
+- getScalarizationOverhead (legacy and VPCostContext) sums the insert overhead over each contained type of a struct
+  result (`{<8 x float>, <8 x float>}` for sincos), which is what makes widening llvm.sincos win over scalarizing.
+
 ## SLP cost model facts (verified with the -debug-only=SLP trace compare, impl/goose/tools/slp_debug_compare.py)
 
 - `getSpillCost()` is always 0 on X86 and without a target: it only sums `TTI::getCostOfKeepingLiveOverCall`, which
