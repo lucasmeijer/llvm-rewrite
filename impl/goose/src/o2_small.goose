@@ -17,6 +17,10 @@
 // - InjectTLIMappings (llvm/lib/Transforms/Utils/InjectTLIMappings.cpp): only with -vector-library (unknown option).
 // - WarnMissedTransformationsPass (llvm/lib/Transforms/Scalar/WarnMissedTransforms.cpp): warnings only.
 import std;
+import psi;
+import tti;
+import subtarget;
+import debugify;
 import os;
 import ir;
 import irutil;
@@ -399,17 +403,67 @@ fn os_has_profile_data(f: i32) -> bool {
     return n == "function_entry_count" || n == "synthetic_function_entry_count";
 }
 
-// CGProfilePass: only functions with a (non-synthetic) entry count
+// CGProfilePass (llvm/lib/Transforms/Instrumentation/CGProfile.cpp): call edge counts of functions with an entry
+// count, from BlockFrequencyInfo, as the "CG Profile" module flag (Append). Indirect calls with value-profile data
+// fail loudly (InstrProfSymtab is not ported).
 fn cg_profile_run(m: i32) -> u32 {
+    var from: i32[>..<] = [];
+    var to: i32[>..<] = [];
+    var cnt: u64[>..<] = [];
     var f = modules[m].first_func;
     while f >= 0 {
         if !func_is_decl(f) {
-            let has, c = bf_entry_count(f);
-            if has { os_not_ported("cg-profile (functions with entry counts)"); }
+            let has, ec = bf_entry_count(f);
+            if has {
+                bfi_get(f);
+                if bfi_freq(func_entry(f)) != 0 {
+                    st_touch(f);
+                    var bb = func_first_block(f);
+                    while bb >= 0 {
+                        let ok, bc = bfi_block_profile_count(bb);
+                        if ok {
+                            var i = block_first(bb);
+                            while i >= 0 {
+                                if is_callbase(i) {
+                                    let callee = called_function(i);
+                                    if callee < 0 && vals[cb_callee(i)].kind != VK_FUNC {
+                                        if os_has_vp_icall(i) { os_not_ported("cg-profile of indirect calls with value-profile data"); }
+                                    } else if bc != 0 && callee >= 0 && tti_is_lowered_to_call(callee) && globs[glob_of(callee)].dll != 1 {
+                                        var k: i64 = -1;
+                                        for j in from.len { if from[j] == f && to[j] == callee { k = j; } }
+                                        if k < 0 { from.push(f); to.push(callee); cnt.push(0); k = from.len - 1; }
+                                        let sum = cnt[k] + bc;
+                                        cnt[k] = if sum < cnt[k] { 0xFFFFFFFFFFFFFFFF } else { sum };
+                                    }
+                                }
+                                i = inst_next(i);
+                            }
+                        }
+                        bb = block_next(bb);
+                    }
+                }
+            }
         }
         f = globs[glob_of(f)].next;
     }
+    if from.len == 0 { return PA_ALL; }
+    var nodes: i32[>..<] = [];
+    for j in from.len {
+        nodes.push(md_get(MK_TUPLE, -1, [md_value(from[j]), md_value(to[j]), md_value(c_int(T_I64, cnt[j] as! i64))], false));
+    }
+    let lst = md_get(MK_TUPLE, -1, nodes, true);
+    // M.addModuleFlag(Module::Append, "CG Profile", MDTuple::getDistinct(...))
+    let k = dbgify_named_md_get_or_insert(m, "llvm.module.flags");
+    dbgify_named_md_add(k, md_get(MK_TUPLE, -1, [md_value(c_int(T_I32, 5)), md_string("CG Profile"), lst], false));
     return PA_ALL;
+}
+// getValueProfDataFromInst(CB, IPVK_IndirectCallTarget, ...) is non-empty: a !prof !{!"VP", i32 0, ...}
+fn os_has_vp_icall(i: i32) -> bool {
+    let p = inst_get_md(i, md_kind_id("prof"));
+    if p < 0 || mds[p].nops < 2 { return false; }
+    let s = md_op(p, 0);
+    if s < 0 || mds[s].kind != MK_STRING || sbytes(mds[s].extra) != "VP" { return false; }
+    return true;
 }
 
 // RelLookupTableConverterPass: shouldBuildRelLookupTables needs a 64-bit PIC target (opt's default relocation

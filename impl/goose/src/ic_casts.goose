@@ -1041,8 +1041,12 @@ fn fold_vec_trunc_to_ext_elt(tr: i32) -> i32 {
     if ew == 0 { ic_not_ported("foldVecTruncToExtElt of a pointer vector"); }
     let vw = ew * (types[vt].cnt as i64);
     let dw = ty_bits(dt);
-    if sh >= 0 && types[vals[sh].ty].n > 64 { ic_not_ported("foldVecTruncToExtElt with a wide shift amount"); }
-    let amt: i64 = if sh >= 0 { cint_lo(sh) as i64 } else { 0 };
+    var amt: i64 = 0;
+    if sh >= 0 {
+        let a = ci_ap(sh);
+        if !ap_fits_u64(a) || (a.lo >> 62) != 0 { ic_not_ported("foldVecTruncToExtElt with a shift amount of 2^62 or more"); }
+        amt = a.lo as i64;
+    }
     if vw % dw != 0 || amt % dw != 0 { return -1; }
     let n = vw / dw;
     var v = vec;

@@ -225,9 +225,26 @@ recursive fn ng_visit_inner(i: i32, nsw0: bool, depth: i64, bw: i64) -> i32 {
         if n2 < 0 { return -1; }
         return ng_nm(icb_select(op(i, 0), n1, n2, "", i), i);
     }
-    if o == OP_SHUFFLEVECTOR || o == OP_EXTRACTELEMENT || o == OP_INSERTELEMENT {
-        ic_not_ported("Negator through vector element operations");
-        return -1;
+    if o == OP_SHUFFLEVECTOR {
+        let n0 = ng_negate(op(i, 0), nsw, depth + 1);
+        if n0 < 0 { return -1; }
+        let n1 = ng_negate(op(i, 1), nsw, depth + 1);
+        if n1 < 0 { return -1; }
+        var mask: i32[>..<] = [];
+        shuf_mask_copy(i, mask);
+        return ng_nm(icb_shuffle(n0, n1, mask, ""), i);
+    }
+    if o == OP_EXTRACTELEMENT {
+        let nv = ng_negate(op(i, 0), nsw, depth + 1);
+        if nv < 0 { return -1; }
+        return ng_nm(icb_extract_element(nv, op(i, 1), ""), i);
+    }
+    if o == OP_INSERTELEMENT {
+        let nv = ng_negate(op(i, 0), nsw, depth + 1);
+        if nv < 0 { return -1; }
+        let ne = ng_negate(op(i, 1), nsw, depth + 1);
+        if ne < 0 { return -1; }
+        return ng_nm(icb_insert_element(nv, ne, op(i, 2), ""), i);
     }
     if o == OP_TRUNC {
         let n = ng_negate(op(i, 0), false, depth + 1);
