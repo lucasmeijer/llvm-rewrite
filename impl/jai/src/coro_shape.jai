@@ -2,7 +2,9 @@
 // Ported from llvm/lib/Transforms/Coroutines/Coroutines.cpp (coro::Shape::analyze / invalidateCoroutine /
 // cleanCoroutine, the ABI init()s, emitAlloc / emitDealloc, the checkWellFormed checks, declaresIntrinsics,
 // elideCoroFree, suppressCoroAllocs, LowererBase::makeSubFnCall), llvm/include/llvm/Transforms/Coroutines/CoroShape.h
-// and CoroInstr.h (the accessors of the coroutine intrinsics).
+// and llvm/include/llvm/Transforms/Coroutines/CoroInstr.h (the accessors of the coroutine intrinsics), and
+// llvm/lib/Transforms/Coroutines/CoroConditionalWrapper.cpp (coro_declares_any_intrinsic; the wrapper itself is the
+// CORO_COND node of passes.jai).
 //
 // coro::Shape is `Coro_Shape` (temp arrays); the C++ union of the per-ABI lowering storages is flattened into
 // fields prefixed sw_ / rc_ / as_. coro::BaseABI and its subclasses are just the `abi` tag (switches at the virtual

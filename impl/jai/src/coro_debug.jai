@@ -1,9 +1,10 @@
 // Debug info for coroutine frames: the artificial "__coro_frame" variable and its DICompositeType describing the
 // frame layout, and the __coro_resume_N labels of the switch ABI's resume points.
 // Ported from llvm/lib/Transforms/Coroutines/CoroFrame.cpp (cacheDIVar, solveTypeName, solveDIType,
-// buildFrameDebugInfo), CoroSplit.cpp (the labels in createResumeEntryBlock) and the DIBuilder methods they use
-// (llvm/lib/IR/DIBuilder.cpp: createBasicType, createPointerType, createMemberType, createStructType,
-// createArrayType, getOrCreateSubrange, createAutoVariable, createLabel, replaceArrays, insertLabel).
+// buildFrameDebugInfo), llvm/lib/Transforms/Coroutines/CoroSplit.cpp (the labels in createResumeEntryBlock) and the
+// DIBuilder methods they use (llvm/lib/IR/DIBuilder.cpp: createBasicType, createPointerType, createMemberType,
+// createStructType, createArrayType, getOrCreateSubrange, createAutoVariable, createLabel, replaceArrays,
+// insertLabel).
 //
 // Integer size / offset operands follow the parser's convention (0 = no operand, else an i64 ConstantAsMetadata),
 // so nodes built here unique with equal nodes read from the input.

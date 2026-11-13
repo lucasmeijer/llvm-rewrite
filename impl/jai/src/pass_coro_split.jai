@@ -1,8 +1,10 @@
 // CoroSplit: splits a pre-split coroutine into the ramp function and its resume / destroy / cleanup clones (switch
 // ABI) or one continuation per suspend point (retcon, retcon.once, async ABIs), and adds the new functions to the
 // LazyCallGraph. Also CoroAnnotationElide (calls marked coro_elide_safe to a ".noalloc" variant, then inlined).
-// Ported from llvm/lib/Transforms/Coroutines/CoroSplit.cpp, CoroCloner.h (BaseCloner / SwitchCloner as one struct
-// with a `kind`) and CoroAnnotationElide.cpp. Frame building is in coro_frame.jai / coro_spill.jai.
+// Ported from llvm/lib/Transforms/Coroutines/CoroSplit.cpp, llvm/lib/Transforms/Coroutines/CoroCloner.h (BaseCloner
+// / SwitchCloner as one struct with a `kind`) and llvm/lib/Transforms/Coroutines/CoroAnnotationElide.cpp. Frame
+// building is in coro_frame.jai / coro_spill.jai, frame debug info in coro_debug.jai. Optimization remarks are not
+// emitted (no -pass-remarks support).
 
 Coro_Clone_Kind :: enum u8 { SWITCH_RESUME; SWITCH_UNWIND; SWITCH_CLEANUP; CONTINUATION; ASYNC; }
 

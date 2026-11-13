@@ -137,8 +137,11 @@ src/
   pass_move_auto_init.jai, pass_alignment_from_assumptions.jai, pass_libcalls_shrinkwrap.jai,
   pass_called_value_propagation.jai (+ its SparseSolver), pass_rel_lookup_table_converter.jai, pass_cg_profile.jai,
   pass_ee_instrument.jai, pass_inject_tli_mappings.jai, pass_misc_module.jai (forceattrs, memprof-remove-attributes,
-  recompute-globalsaa, lower-comment-string, alloc-token), pass_remark_only.jai, pass_coroutines.jai,
+  recompute-globalsaa, lower-comment-string, alloc-token), pass_remark_only.jai,
   pass_openmp_opt.jai (early exits)
+  coro_shape.jai, pass_coro_early.jai, pass_coro_cleanup.jai, pass_coro_elide.jai, coro_spill.jai, coro_frame.jai,
+  coro_debug.jai, stack_lifetime.jai, pass_coro_split.jai   the coroutine passes (coro::Shape = `Coro_Shape`, the
+                  BaseABI subclasses = its `abi` tag, BaseCloner / SwitchCloner = `Coro_Cloner` with a `kind`)
   pass_lto_misc.jai (the LTO pipelines' module passes), pass_merge_functions.jai (MergeFunctions, FunctionComparator)
   linker.jai      llvm-link: ModuleLinker, IRMover (IRLinker, TypeMapTy), its ValueMapper (see "llvm-link" below)
   opt.jai                             CLI entry point (one binary: opt, llc, llvm-link by argv[0])

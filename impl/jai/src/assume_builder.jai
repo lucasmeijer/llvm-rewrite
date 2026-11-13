@@ -19,6 +19,8 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     // IPO passes that never call salvageKnowledge (GlobalOpt.cpp, GlobalDCE.cpp, ConstantMerge.cpp, ...)
     if kind == .GLOBAL_OPT || kind == .GLOBAL_DCE || kind == .CONSTANT_MERGE || kind == .STRIP_DEAD_PROTOTYPES ||
        kind == .ELIM_AVAIL_EXTERN || kind == .INTERNALIZE || kind == .DEAD_ARG_ELIM || kind == .ASSIGN_GUID || kind == .ARG_PROMOTION return;
+    // the coroutine passes never call salvageKnowledge (their InlineFunction calls fail loudly in inline_function.jai)
+    if kind == .CORO_EARLY || kind == .CORO_CLEANUP || kind == .CORO_ELIDE || kind == .CORO_SPLIT || kind == .CORO_ANNOTATION_ELIDE || kind == .CORO_COND return;
     fatal("-enable-knowledge-retention is not supported with pass '%' yet", name);
 }
 

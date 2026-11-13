@@ -1485,9 +1485,7 @@ Still slow / next:
   `called-value-propagation` (+ a SparseSolver specialized to its lattice; prefix `clv_`, `cvp_` is
   CorrelatedValuePropagation), `rel-lookup-table-converter`, `cg-profile` (indirect calls with VP data fail
   loudly), `ee-instrument<[post-inline]>`, `memprof-remove-attributes`, `recompute-globalsaa`.
-- Early exits that are exact for every module without the feature (and fail loudly otherwise): `coro-early`,
-  `coro-cleanup`, `coro-elide`, `coro-split`, `coro-annotation-elide` (no coroutine intrinsics / presplit
-  functions / `.noalloc` callees), `openmp-opt`, `openmp-opt-cgscc` (no "openmp" module flag), `alloc-token` (no
+- Early exits that are exact for every module without the feature (and fail loudly otherwise): `openmp-opt`, `openmp-opt-cgscc` (no "openmp" module flag), `alloc-token` (no
   sanitize_alloc_token, no llvm.alloc.token.id), `lower-comment-string` (non-AIX), `forceattrs` (its flags are
   rejected), `annotation2metadata` / `annotation-remarks` (remarks are never enabled), `inject-tli-mappings` (no
   vector library).
@@ -1826,3 +1824,46 @@ Still slow / next:
   gen_intrinsics.jai entry (llvm.asan.check.memaccess).
 - Perf (x64 build, sqlite3 with forceattrs,sroa,asan): +1.1 s over forceattrs,sroa (LLVM's whole run: 0.5 s); no
   @perf benchmark times asan.
+
+## Coroutines (L1.extra.coroutines 298/310: roundtrip 155/155, opt 143/155; /root/jai_coro)
+
+Files: coro_shape.jai (Coroutines.cpp, CoroShape.h / CoroInstr.h accessors as `coro_*` procedures on the
+intrinsic calls), pass_coro_early.jai, pass_coro_cleanup.jai (+ Function::createWithDefaultAttr), pass_coro_elide.jai,
+coro_spill.jai (SuspendCrossingInfo `Sci`, MaterializationUtils, SpillUtils, libstdc++ `std_sort_by`), coro_frame.jai
+(CoroFrame.cpp + performOptimizedStructLayout), coro_debug.jai (frame debug info, resume labels, DIBuilder pieces),
+stack_lifetime.jai (StackLifetime for `coro-split<reuse-storage>`), pass_coro_split.jai (CoroSplit, the cloner,
+CoroAnnotationElide).
+
+- The 12 failing `::opt` tests all need `pgo-instr-gen` / `instrprof` / `sample-profile` (another unit). Run on
+  LLVM's `pgo-instr-gen` output, the ten `coro-split-musttail*` pipelines give identical output.
+- Sweeps (whole file, `--with-test-flags`): coro-early, coro-cleanup, coro-elide, `cgscc(coro-split)`,
+  `cgscc(coro-split<reuse-storage>)`, `cgscc(coro-annotation-elide)`: 0 differs, 0 bad-ir; the failures are flag
+  groups of other units. `module(coro-early),cgscc(coro-split<reuse-storage>,coro-annotation-elide),function(coro-elide),module(coro-cleanup)`:
+  10808/10808 identical. `default<O2>` / `default<O0>` on Transforms/Coroutines: 0 differs (1 SROA dbg_assign loud).
+- `coro-split` is a CGSCC pass that takes the `Cgscc_Ur` (cgscc_pm.jai dispatch): the clones go through
+  `lcg_add_split_function` / `lcg_add_split_ref_recursive_functions`, then `update_cg_and_am_for_pass` (CGSCC, then
+  function pass after `removeUnreachableBlocks` of the ramp), and the SCCs are pushed on `ur.cwl` like LLVM.
+- OptimizeFrame: `coro-split<reuse-storage>` by name, or `Pass_Node.opt_level > 0`, which pass_builder_pipelines.jai
+  sets on the coro-split nodes of non-O0 pipelines (the printed name stays `coro-split`, like LLVM's).
+- Cloning reuses CloneFunctionInto from function_specialization.jai's metadata mapper (`coro_clone_function_into`),
+  with a tracking Value_Map (VMap values follow RAUW like WeakTrackingVHs). The arguments map to unlinked
+  `freeze poison` dummies that are RAUW'd to poison and dropped afterwards (metadata users become `poison`).
+- Pointer-order traps: `sinkLifetimeStartMarkers` iterates a SmallPtrSet<BB, 4>: with more than 3 suspends the order
+  is a pointer hash; we pick the unique valid block and fail loudly when several qualify. The AllocaUseVisitor's
+  alias map (DenseMap) is iterated in insertion order (LLVM: pointer order; only matters with 2+ aliases created
+  before coro.begin). `sinkSpillUsesAfterCoroBegin` sorts with `dominates` (not a strict weak order): std_sort_by is
+  libstdc++'s introsort (fails loudly if it would fall back to heap sort).
+- Fixed on the way (shared code): fs_map_md wrote a distinct clone's operand into a stale `ir.md_ops` slot when
+  mapping the operand grew the array (Jai evaluates the assignment target before the call); erasing the last
+  instruction of a block with debug records now leaves them as the block's trailing records
+  (`trailing_dbg_records`, adopted by the next `block_append_inst`, like BasicBlock::flushTerminatorDbgRecords /
+  adoptDbgRecords); `dbgr_replace_variable_location_op` replaces a #dbg_assign's address too; the ValueMapper remaps
+  #dbg_assign addresses and DIAssignIDs.
+- Not ported / loud: custom ABIs (`llvm.coro.begin.custom.abi` → "Custom ABI not found"), optimization remarks,
+  `-coro-elide-branch-ratio` / `-coro-elide-info-output-file`, giving an unwind destination to a catchswitch /
+  cleanupret that unwinds to the caller (rewritePHIsForCleanupPad), a coro.await.suspend invoke with operand bundles.
+- Perf: not measured beyond the unit (no tests/perf shape contains coroutines).
+
+### Coroutines next steps
+- Enable the 12 pgo tests once `pgo-instr-gen` / `instrprof` / `sample-profile` land (nothing coroutine-specific).
+

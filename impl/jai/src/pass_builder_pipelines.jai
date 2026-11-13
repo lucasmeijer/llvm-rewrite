@@ -191,6 +191,10 @@ pb_add :: (pm: s32, last: *s32, text_in: string) -> s32 {
     }
     return cast(s32) (pipeline.nodes.count - 1);
 }
+// CoroSplitPass(Level != OptimizationLevel::O0): OptimizeFrame (the textual name stays "coro-split")
+pb_coro_split_reuse_storage :: (n: s32, level: Opt_Level) {
+    if pipeline.nodes[n].kind == .CORO_SPLIT && (level.speed != 0 || level.size != 0) pipeline.nodes[n].opt_level = cast(s8) max(level.speed, 1);
+}
 pb_node :: (pm: s32, last: *s32, kind: Pass_Kind, name: string) -> s32 {
     n := new_node(kind, null, name);
     link_child(pm, last, n);
@@ -431,7 +435,8 @@ build_inliner_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     pb_add(cg, *cglast, "function-attrs");
     pb_add(cg, *cglast, "function(require<should-not-run-function-passes>)");
     if pb_phase != .THIN_PRE_LINK {
-        pb_add(cg, *cglast, "coro-split");
+        n := pb_add(cg, *cglast, "coro-split");
+        pb_coro_split_reuse_storage(n, level);
         pb_add(cg, *cglast, "coro-annotation-elide");
     }
 
@@ -448,7 +453,9 @@ build_module_inliner_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     falast: s32 = -1;
     build_function_simplification_pipeline(fa, *falast, level);
     if pb_phase != .THIN_PRE_LINK {
+        first := cast(s32) pipeline.nodes.count;
         pb_add(mpm, last, "cgscc(coro-split)");
+        for k: first..cast(s32) pipeline.nodes.count - 1 pb_coro_split_reuse_storage(k, level);
         pb_add(mpm, last, "cgscc(coro-annotation-elide)");
     }
 }
@@ -752,7 +759,11 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
     pb_add(mpm, *last, "globalopt");
     pb_add(mpm, *last, "openmp-opt");
     pb_add(mpm, *last, "globaldce<vfe-linkage-unit-visibility>");
-    pb_add(mpm, *last, "cgscc(argpromotion,coro-split,coro-annotation-elide)");
+    {
+        first := cast(s32) pipeline.nodes.count;
+        pb_add(mpm, *last, "cgscc(argpromotion,coro-split,coro-annotation-elide)");
+        for k: first..cast(s32) pipeline.nodes.count - 1 pb_coro_split_reuse_storage(k, level);
+    }
     {
         fa := pb_function_adaptor(mpm, *last, pto.eagerly_invalidate_analyses);
         fl: s32 = -1;

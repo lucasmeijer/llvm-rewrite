@@ -1,9 +1,10 @@
 // Which values a coroutine must keep in its frame: the suspend-crossing analysis, rematerialization of cheap
 // values instead of spilling them, and the collection of spills and frame allocas.
 // Ported from llvm/lib/Transforms/Coroutines/SuspendCrossingInfo.cpp (+ SuspendCrossingInfo.h),
-// MaterializationUtils.cpp (RematGraph, rewriteMaterializableInstructions, defaultMaterializable,
-// doRematerializations) and SpillUtils.cpp (AllocaUseVisitor as an explicit PtrUseVisitor walk, collectFrameAlloca,
-// collectSpillsFromArgs / AndAllocasFromInsts / FromDbgInfo, sinkSpillUsesAfterCoroBegin, getSpillInsertionPt).
+// llvm/lib/Transforms/Coroutines/MaterializationUtils.cpp (RematGraph, rewriteMaterializableInstructions,
+// defaultMaterializable, doRematerializations) and llvm/lib/Transforms/Coroutines/SpillUtils.cpp (AllocaUseVisitor as
+// an explicit PtrUseVisitor walk, collectFrameAlloca, collectSpillsFromArgs / AndAllocasFromInsts / FromDbgInfo,
+// sinkSpillUsesAfterCoroBegin, getSpillInsertionPt), and libstdc++'s std::sort (std_sort_by).
 
 // ---------------------------------------------------------------- SuspendCrossingInfo
 

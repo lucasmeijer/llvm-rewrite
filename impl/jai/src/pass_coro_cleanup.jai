@@ -262,9 +262,13 @@ coro_cleanup_run :: () -> Preserved {
         if vkind(f) != .FUNCTION continue;
         if coro_cleanup_lower(*l, f) {
             fam_invalidate(f, preserved_cfg());
-            node: Pass_Node; node.name = "simplifycfg";
-            pa := simplifycfg_run(*node, f);
-            fam_invalidate(f, pa);
+            // FPM.run(F, FAM) with a SimplifyCFGPass: the pass instrumentation skips optnone functions (and counts
+            // for -opt-bisect-limit)
+            node: Pass_Node; node.name = "simplifycfg"; node.info = lookup_pass("simplifycfg");
+            if should_run_pass(*node, f) {
+                pa := simplifycfg_run(*node, f);
+                fam_invalidate(f, pa);
+            }
         }
     }
     return PRESERVE_NONE;

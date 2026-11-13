@@ -108,7 +108,7 @@ lib/Transforms/IPO/InferFunctionAttrs.cpp 1
 lib/Analysis/FloatingPointPredicateUtils.cpp 1  # manual: renamed: fcmp_to_class_test & co in fpclass.jai (heuristic 0.00)
 lib/Analysis/PtrUseVisitor.cpp 1
 lib/Analysis/DomConditionCache.cpp 1
-lib/IR/DIBuilder.cpp 0.15
+lib/IR/DIBuilder.cpp 0.25  # + the type / variable / label builders of the coroutine frame debug info (coro_debug.jai)
 lib/Transforms/Utils/Debugify.cpp 0.45  # synthetic mode (debugify, check-debugify, -enable-debugify); no original-debuginfo mode, -debugify-each, stats export
 lib/IR/DIExpressionOptimizer.cpp 1
 lib/Transforms/Scalar/LICM.cpp 0.97  # all of LICM/LNICM incl. ControlFlowHoister; no optimization remarks, no funclet-bundle call sinking
@@ -195,14 +195,13 @@ lib/Transforms/IPO/ArgumentPromotion.cpp 0.95  # no optimization remarks; X86 ar
 lib/Transforms/Utils/AssignGUID.cpp 1  # manual
 lib/Analysis/TypeMetadataUtils.cpp 0.35  # getPointerAtOffset, replaceRelativePointerUsersWithZero
 lib/IR/Globals.cpp 0.35
-lib/IR/Function.cpp 0.17  # deleteBody, copyAttributesFrom, splice, createWithDefaultAttr
+lib/IR/Function.cpp 0.2  # deleteBody, copyAttributesFrom, splice, createWithDefaultAttr
 lib/IR/Module.cpp 0.1  # getGlobalVariable, getFunction, global_values order
 lib/Support/MD5.cpp 0.8  # update / final / stringifyResult / MD5Hash
 lib/Transforms/Scalar/TailRecursionElimination.cpp 0.95  # no optimization remarks (ORE)
 # -O2 pipeline passes that are early exits or partial (jai_scalar_misc)
 lib/Transforms/IPO/OpenMPOpt.cpp 0  # only the containsOpenMP early exit (pass_openmp_opt.jai)
 lib/Transforms/IPO/MemProfContextDisambiguation.cpp 0.01  # MemProfRemoveInfo only
-lib/Transforms/Coroutines/CoroEarly.cpp 0.05  # declaresCoroEarlyIntrinsics early exit (also CoroCleanup/CoroElide/CoroSplit/CoroAnnotationElide early exits)
 lib/Transforms/IPO/ForceFunctionAttrs.cpp 0.05  # no -force-attribute / -force-remove-attribute / CSV support
 lib/Transforms/Utils/InjectTLIMappings.cpp 0.1  # no vector-library mappings
 lib/Transforms/IPO/Annotation2Metadata.cpp 0.2  # allowExtraAnalysis is always false (no remark support)
@@ -248,9 +247,13 @@ lib/Transforms/Scalar/GVNSink.cpp 0.95  # jai_newgvn: complete except the addres
 lib/Transforms/Scalar/GVNHoist.cpp 0.97  # jai_newgvn: all but rank() and the (output-neutral) rank sort of the VNs
 lib/Transforms/Instrumentation/AddressSanitizer.cpp 0.9  # no AMDGPU paths, no Android ifunc shadow, no LLVM_DEBUG
 lib/Analysis/StackSafetyAnalysis.cpp 0.7  # no ModuleSummaryIndex (ThinLTO) paths, no printers / param summaries
-lib/Analysis/StackLifetime.cpp 0.6  # LivenessType::Must only, no printer
 lib/Transforms/Utils/ModuleUtils.cpp 0.55  # appendTo*, ctors, kcfi; not transformGlobal*, removeFromUsedLists, embedBuffer, lowerGlobalIFunc
 lib/Transforms/Utils/Instrumentation.cpp 0.8  # not PrepareToSplitEntryBlock
 lib/Demangle/Demangle.cpp 0.3  # with a small subset of the Itanium / Microsoft demanglers (headers)
 lib/Transforms/Instrumentation/InstrProfiling.cpp 0.85  # jai_pgo: all but the GPU (offload) paths and vtable value profiling
 lib/ProfileData/InstrProf.cpp 0.2  # jai_pgo: names, name vars, section names, name blob (zlib), comdat rules; no records / symtab / value data
+# L1.extra.coroutines (no optimization remarks; no -pass-remarks support)
+lib/Transforms/Coroutines/CoroSplit.cpp 0.97
+lib/Transforms/Coroutines/CoroElide.cpp 0.9  # remarks, -coro-elide-info-output-file
+lib/Transforms/Coroutines/CoroAnnotationElide.cpp 0.9  # remarks, -coro-elide-branch-ratio flag
+lib/Analysis/StackLifetime.cpp 0.75  # May (coro_frame) and Must (asan) liveness; no printer
