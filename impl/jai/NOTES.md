@@ -1911,6 +1911,17 @@ Still slow / next:
   Traps: moveFastMathFlags ORs the flags in (`setFastMathFlags` is `|=`); a splat FP vector constant is one C_FP of
   vector type (convert the scalar words); a scalable non-FT store uses the known-minimum store size (LLVM release).
   -check-functions-filter (a Regex) fails loudly.
+- **sancov-module** (`pass_sancov.jai`, SanitizerCoverage + PrepareToSplitEntryBlock): all 59 SanitizerCoverage RUN
+  lines identical; sweeps 0 differs / 0 bad-ir / 0 failed over the corpus with level 3 + trace-compares/divs/geps +
+  pc-table + control-flow, level 4 + 8-bit counters + bool flags + stack-depth + loads/stores + entry-exit, level 2 +
+  gated callbacks + stack-depth-callback-min, level 1 + no pruning on x86_64-windows-msvc. Traps: `Align(n)` of a
+  store size that is not a power of two (40-bit pointers) is 1 << Log2(n) in a release build; CreateLoad/Store
+  without an alignment use the ABI alignment (i1 can be 4); isa<IntrinsicInst> is any callee named llvm.*
+  (an unknown `llvm.convergent` too); SplitAllCriticalEdges' IgnoreUnreachableDests is now in pass_dce.jai.
+  With inline-bool-flag + stack-depth together LLVM's IRBuilder keeps inserting into the split-off head block
+  (LLVM's opt crashes on most files: llvm-failed in the sweep).
+- **sanmd-module** (`pass_sanmd.jai`, SanitizerBinaryMetadata): all 4 RUN lines identical; sweeps 0 differs with
+  atomics+uar and covered+uar+weak-callbacks=0+nosanitize-attr=0.
 
 ## Coroutines (L1.extra.coroutines 298/310: roundtrip 155/155, opt 143/155; /root/jai_coro)
 

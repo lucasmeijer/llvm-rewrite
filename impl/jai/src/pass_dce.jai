@@ -74,7 +74,10 @@ split_known_critical_edge :: (t: Value_Id, succ: u32, o: *Crit_Edge_Options, nam
     tibb := inst_block(t);
     dest := get_successor(t, succ);
     if block_is_eh_pad(dest) || inst_op(t) == .INDIRECTBR return NONE;
-    if o.ignore_unreachable_dests fatal("split_known_critical_edge: IgnoreUnreachableDests is not supported yet");
+    if o.ignore_unreachable_dests {
+        fi := block_first_non_phi_or_dbg_or_lifetime(dest);
+        if fi != NONE && inst_op(fi) == .UNREACHABLE return NONE;
+    }
     li := o.li;
     loop_preds: [..] Value_Id; loop_preds.allocator = temp;
     if li {

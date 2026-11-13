@@ -251,7 +251,7 @@ lib/Transforms/Scalar/GVNHoist.cpp 0.97  # jai_newgvn: all but rank() and the (o
 lib/Transforms/Instrumentation/AddressSanitizer.cpp 0.9  # no AMDGPU paths, no Android ifunc shadow, no LLVM_DEBUG
 lib/Analysis/StackSafetyAnalysis.cpp 0.7  # no ModuleSummaryIndex (ThinLTO) paths, no printers / param summaries
 lib/Transforms/Utils/ModuleUtils.cpp 0.55  # appendTo*, ctors, kcfi; not transformGlobal*, removeFromUsedLists, embedBuffer, lowerGlobalIFunc
-lib/Transforms/Utils/Instrumentation.cpp 0.8  # not PrepareToSplitEntryBlock
+lib/Transforms/Utils/Instrumentation.cpp 1.0  # PrepareToSplitEntryBlock in pass_sancov.jai
 lib/Demangle/Demangle.cpp 0.3  # with a small subset of the Itanium / Microsoft demanglers (headers)
 lib/Transforms/Instrumentation/InstrProfiling.cpp 0.85  # jai_pgo: all but the GPU (offload) paths and vtable value profiling
 lib/ProfileData/InstrProf.cpp 0.2  # jai_pgo: names, name vars, section names, name blob (zlib), comdat rules; no records / symtab / value data
@@ -268,3 +268,5 @@ lib/Transforms/Instrumentation/ThreadSanitizer.cpp 1.0
 lib/Transforms/Utils/EscapeEnumerator.cpp 0.9  # no scoped-EH (funclet) personalities: fails loudly like LLVM's report_fatal_error
 lib/Transforms/Instrumentation/RealtimeSanitizer.cpp 1.0  # demangling limited by demangle.jai
 lib/Transforms/Instrumentation/TypeSanitizer.cpp 1.0
+lib/Transforms/Instrumentation/SanitizerCoverage.cpp 0.97  # no allow/block lists (SpecialCaseList; constructor arguments only)
+lib/Transforms/Instrumentation/SanitizerBinaryMetadata.cpp 0.97  # no ignore list (SpecialCaseList)
