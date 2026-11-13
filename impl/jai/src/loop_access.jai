@@ -57,7 +57,8 @@ is_consecutive_access :: (a: Value_Id, b: Value_Id, check_type := true) -> bool 
 // ---------------------------------------------------------------- options (VectorizerParams and LAA cl::opts)
 
 laa_opts: struct {
-    force_vector_width: s64;               // -force-vector-width (VectorizerParams::VectorizationFactor)
+    force_vector_width: s64;               // -force-vector-width (VectorizerParams::VectorizationFactor: known minimum)
+    force_vector_width_scalable: bool;     // -force-vector-width=vscale x N
     force_vector_interleave: s64;          // -force-vector-interleave
     runtime_memory_check_threshold: s64 = 8;   // -runtime-memory-check-threshold
     memory_check_merge_threshold: s64 = 100;   // -memory-check-merge-threshold

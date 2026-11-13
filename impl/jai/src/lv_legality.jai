@@ -91,6 +91,7 @@ lvh_init :: (h: *Lv_Hints, li: *Loop_Info, l: Loop_Id, interleave_only_when_forc
         if h.width != 0 h.scalable = SK_FIXED_WIDTH_ONLY;
     }
     if lvl_opts.scalable_vectorization != SK_UNSPECIFIED h.scalable = lvl_opts.scalable_vectorization;
+    if laa_opts.force_vector_width_scalable h.scalable = SK_ALWAYS_SCALABLE;
     if h.scalable == SK_UNSPECIFIED h.scalable = SK_FIXED_WIDTH_ONLY;
     if h.is_vectorized != 1 h.is_vectorized = ifx lvh_width(h) == 1 && !lvh_width_scalable(h) && lvh_interleave(h) == 1 then 1 else 0;
 }

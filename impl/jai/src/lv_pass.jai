@@ -80,7 +80,17 @@ lv_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
         return true;
     }
     if name == "force-vector-width" {
-        if has_value && begins_with(value, "vscale") fatal("loop-vectorize: scalable -force-vector-width is not supported yet");
+        // parseFixedOrScalableQuantity: "N" or "vscale x N"
+        v := trim(value);
+        if has_value && begins_with(v, "vscale") {
+            v = trim(advance(v, 6));
+            if !begins_with(v, "x") fatal("opt: '%' value invalid for force-vector-width argument!", value);
+            v = trim(advance(v, 1));
+            pint(*laa_opts.force_vector_width, name, v, true);
+            laa_opts.force_vector_width_scalable = true;
+            return true;
+        }
+        laa_opts.force_vector_width_scalable = false;
         pint(*laa_opts.force_vector_width, name, value, has_value);
         return true;
     }
@@ -442,7 +452,7 @@ lv_smallest_and_widest_types :: (cm: *Lv_Cm) -> (u64, u64) {
 }
 
 // VFSelectionContext::supportsScalableVectors
-lv_supports_scalable_vectors :: () -> bool { return lv_opts.force_target_supports_scalable_vectors; }
+lv_supports_scalable_vectors :: () -> bool { return lv_opts.force_target_supports_scalable_vectors || laa_opts.force_vector_width_scalable; }
 
 // VFSelectionContext::useMaxBandwidth
 lv_use_max_bandwidth :: (cm: *Lv_Cm, scalable: bool) -> bool {
