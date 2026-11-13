@@ -887,3 +887,92 @@ vp_fold_tail_by_masking :: () {
     }
     vp_set_operand(vp_terminator(middle), 0, vp_true());
 }
+
+// VPReductionRecipe constructor: operands {ChainOp, VecOp, [CondOp]}; flags are VPIRFlags(FMFs)
+vp_new_reduction :: (kind: Recur_Kind, fmf: u32, i: Value_Id, chain: Vp_Val, vec: Vp_Val, cond: Vp_Val, style: Vp_Rdx_Style, dl: Md_Id) -> Vp_Rec {
+    r := vp_new_single_def(.REDUCTION, .[chain, vec], vp_scalar_type(chain), i, dl);
+    vr(r).rdx_kind = kind; vr(r).rdx_style = style; vr(r).rdx_scale = 1;
+    vr(r).flags = vpf_fmf(fmf);
+    if cond != NONE { vr(r).is_conditional = true; vp_add_operand(r, cond); }
+    return r;
+}
+vp_reduction_cond_op :: (r: Vp_Rec) -> Vp_Val { if vr(r).is_conditional return vp_op(r, vp_nops(r) - 1); return NONE; }
+
+// VPlanTransforms::createInLoopReductionRecipes
+vp_create_in_loop_reduction_recipes :: (min_vf: Ec) {
+    header := vp_entry_basic_block(vp_vector_loop_region());
+    to_delete: [..] Vp_Rec; to_delete.allocator = temp;
+    for phir: vp_block_phis(header) {
+        if vr(phir).kind != .REDUCTION_PHI || vr(phir).rdx_style == .UNORDERED || (ec_is_scalar(min_vf) && vr(phir).rdx_style != .ORDERED) continue;
+        kind := vr(phir).rdx_kind;
+        assert(!rk_is_find_last(kind) && !rk_is_any_of(kind) && !rk_is_find_iv(kind), "AnyOf and Find reductions are not allowed for in-loop reductions");
+        is_fp := rk_is_floating_point(kind);
+        fmfs: u32 = ifx is_fp then cast(u32) FMF_ALL else 0;
+        worklist: [..] Vp_Rec; worklist.allocator = temp;
+        array_add(*worklist, phir);
+        i := 0;
+        while i < worklist.count {
+            cur := worklist[i]; i += 1;
+            for u: vv(vr(cur).def).users {
+                if vp_enclosing_loop_region(vr(u).parent) == NONE continue;
+                if vp_is_vpi(u, vp_opc(.STORE)) continue;
+                array_add_if_unique(*worklist, u);
+            }
+        }
+        previous := phir;
+        for k: 1..worklist.count-1 {
+            cur := worklist[k];
+            if vr(cur).kind == .BLEND {
+                assert(vp_blend_num_incoming(cur) == 2, "Blend must have 2 incoming values");
+                idx := ifx vp_blend_incoming(cur, 0) == vr(phir).def then 0 else 1;
+                assert(vp_blend_incoming(cur, idx) == vr(phir).def, "PhiR must be an operand of the blend");
+                vp_rauw(vr(cur).def, vp_blend_incoming(cur, 1 - idx));
+                continue;
+            }
+            if is_fp {
+                cur_fmf := vp_fmf_or_none(cur);
+                ok, c, _, _ := vpm_select(vr(cur).def);
+                if ok { cd := vp_def(c); if cd != NONE && vp_is_with_ir_flags_kind(vr(cd).kind) cur_fmf |= vp_fmf_or_none(cd); }
+                fmfs &= cur_fmf;
+            }
+            link_i := vp_underlying_instr(cur);
+            link_bb := vr(cur).parent;
+            vec_op: Vp_Val;
+            if kind == .FMULADD {
+                assert(vp_op(cur, 2) == vr(previous).def, "expected a call where the previous link is the added operand");
+                fmul := vp_new_instruction(vp_opc(.FMUL), .[vp_op(cur, 0), vp_op(cur, 1)], vpf_fmf(inst_fmf(link_i)));
+                vp_insert_recipe(fmul, link_bb, cur);
+                vec_op = vr(fmul).def;
+            } else if kind == .ADD_CHAIN_WITH_SUBS && vpm_binary_r(cur, vp_opc(.SUB)) {
+                phi_ty := vp_scalar_type(vr(phir).def);
+                b := vpb_before(cur);
+                sub := vpb_sub(*b, vp_const_int(phi_ty, 0), vp_op(cur, 1), inst_dl(link_i));
+                vp_set_underlying(vr(sub).def, link_i);
+                vec_op = vr(sub).def;
+            } else {
+                first := 0;
+                if rk_is_min_max(kind) {
+                    if vpm_cmp(vr(cur).def) continue;
+                    ok, _, _, _ := vpm_select(vr(cur).def);
+                    assert(ok, "must be a select recipe");
+                    first = 1;
+                }
+                vec_id := ifx vp_op(cur, first) == vr(previous).def then first + 1 else first;
+                vec_op = vp_op(cur, vec_id);
+            }
+            assert(vr(phir).rdx_scale == 1, "inloop reductions must be unscaled");
+            cond := vp_mask_of(cur);
+            red := vp_new_reduction(kind, fmfs, link_i, vr(previous).def, vec_op, cond, vp_reduction_style(true, vr(phir).rdx_style == .ORDERED), inst_dl(link_i));
+            if vb(link_bb).succs.count == 0 vp_insert_recipe(red, link_bb, vr(vb(link_bb).last).prev);
+            else vp_append_recipe(link_bb, red);
+            vp_rauw(vr(cur).def, vr(red).def);
+            for u: vp_users_snapshot(vr(red).def) {
+                if vr(u).parent != link_bb || !vp_is_vpi(u, vp_opc(.STORE)) continue;
+                vp_move_after(u, red);
+            }
+            array_add(*to_delete, cur);
+            previous = red;
+        }
+    }
+    for to_delete vp_erase_recipe(it);
+}

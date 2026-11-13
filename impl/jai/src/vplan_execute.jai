@@ -361,6 +361,8 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
 }
 
 // createMinMaxOp (LoopUtils.cpp)
+// (IRBuilder<ConstantFolder>: CreateBinaryIntrinsic / CreateUnaryIntrinsic never fold intrinsics, so constant
+// operands still produce calls)
 vs_create_min_max_op :: (s: *Vp_State, rk: Recur_Kind, l: Value_Id, r: Value_Id) -> Value_Id {
     ty := vtype(l);
     if type_kind(scalar_type(ty)) == .INT || rk == .FMINNUM || rk == .FMAXNUM || rk == .FMINIMUM || rk == .FMAXIMUM ||
@@ -373,7 +375,6 @@ vs_create_min_max_op :: (s: *Vp_State, rk: Recur_Kind, l: Value_Id, r: Value_Id)
             case .FMINIMUM; name = "llvm.minimum"; case .FMAXIMUM; name = "llvm.maximum";
             case .FMINIMUMNUM; name = "llvm.minimumnum"; case .FMAXIMUMNUM; name = "llvm.maximumnum";
         }
-        if is_const(l) && is_const(r) vp_unported("constant-folding min/max intrinsics");
         c := irb_intrinsic(*s.b, name, .[ty], .[l, r]);
         if is_fp_math_operator(c) set_fmf(c, s.fmf);
         set_name(c, "rdx.minmax");
@@ -402,7 +403,6 @@ vs_create_simple_reduction :: (s: *Vp_State, src: Value_Id, rk: Recur_Kind) -> V
         c = irb_intrinsic(*s.b, name, .[vty], .[iden, src]);
     } else {
         if rk_is_any_of(rk) || rk_is_find(rk) fatal("internal: unhandled recurrence kind in createSimpleReduction");
-        if is_const(src) vp_unported("constant-folding reduction intrinsics");
         c = irb_intrinsic(*s.b, name, .[vty], .[src]);
     }
     if is_fp_math_operator(c) set_fmf(c, s.fmf);
@@ -589,6 +589,7 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
         case .WIDEN_INTRINSIC; vp_widen_intrinsic_execute(s, r);
         case .WIDEN_CALL; vp_widen_call_execute(s, r);
         case .INTERLEAVE; vp_interleave_execute(s, r);
+        case .REDUCTION; vp_reduction_execute(s, r);
         case .WIDEN_LOAD;
             sty := vp_scalar_type(vr(r).def);
             dty := type_vector(s.vf.n, sty, s.vf.scalable);
@@ -880,4 +881,39 @@ vp_widen_intrinsic_execute :: (s: *Vp_State, r: Vp_Rec) {
     vp_apply_flags(r, v);
     vp_apply_metadata(r, v);
     if type_kind(vtype(v)) != .VOID vs_set(s, vr(r).def, v);
+}
+
+// VPReductionRecipe::execute (in-loop and ordered reductions; partial reductions are never formed on X86)
+vp_reduction_execute :: (s: *Vp_State, r: Vp_Rec) {
+    rk := vr(r).rdx_kind;
+    assert(!rk_is_any_of(rk), "In-loop AnyOf reductions aren't currently supported");
+    saved := s.fmf; defer s.fmf = saved;
+    s.fmf = vp_fmf_or_none(r);
+    vec := vs_get(s, vp_op(r, 1));
+    cond := vp_reduction_cond_op(r);
+    if cond != NONE {
+        nc := vs_get(s, cond, ec_is_scalar(s.vf));
+        vt := vtype(vec);
+        elt := ifx is_vector_type(vt) then type_elem(vt) else vt;
+        start := lv_recurrence_identity(rk, elt, s.fmf);
+        if ec_is_vector(s.vf) start = irb_vector_splat(*s.b, type_count(vt), start, "");
+        vec = vs_select(s, nc, vec, start, s.fmf);
+    }
+    assert(vr(r).rdx_scale <= 1, "partial reductions are not formed on X86");
+    next: Value_Id;
+    prev := vs_get(s, vp_op(r, 0), true);
+    if vr(r).rdx_style == .ORDERED {
+        if ec_is_vector(s.vf) {
+            assert(rk == .FADD || rk == .FMULADD, "Unexpected reduction kind");
+            c := irb_intrinsic(*s.b, "llvm.vector.reduce.fadd", .[vtype(vec)], .[prev, vec]);
+            if is_fp_math_operator(c) set_fmf(c, s.fmf);
+            next = c;
+        } else next = vs_binop(s, rk_opcode(rk), prev, vec);
+    } else {
+        assert(vr(r).rdx_style == .IN_LOOP, "The reduction must either be ordered, partial or in-loop");
+        red := vs_create_simple_reduction(s, vec, rk);
+        if rk_is_min_max(rk) next = vs_create_min_max_op(s, rk, red, prev);
+        else next = vs_binop(s, rk_opcode(rk), prev, red);
+    }
+    vs_set(s, vr(r).def, next, true);
 }

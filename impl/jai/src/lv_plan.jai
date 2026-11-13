@@ -450,7 +450,6 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
         vp_drop_poison_generating_flags(vp_def(iv_inc));
         vb(region).can_iv_nuw = false;
     }
-    for lp.lvl.reductions if lv_use_ordered_reductions(lp.cm, *it.d) || lp.in_loop_reductions.count vp_unported("in-loop reductions");
     igs: [..] s32; igs.allocator = temp;
     for gid: lp.cm.iai.order {
         if !lp.cm.iai.groups[gid].alive continue;
@@ -460,6 +459,7 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
         if !lvp_decision_and_clamp_range(range, apply, *ic) continue;
         array_add(*igs, gid);
     }
+    vp_create_in_loop_reduction_recipes(range.start);
     lvp_make_mem_op_widening_decisions(lp, range);
     lvp_make_scalarization_decisions(range);
     lvp_make_call_widening_decisions(lp, range);
@@ -496,9 +496,11 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
     }
     if !vp_handle_find_last_reductions() return false;
     vp_remove_branch_on_const(false);
+    // createPartialReductions: X86 has no partial-reduction costs, so no partial reductions are formed
+    if !lv_cm_fold_tail_with_evl(lp.cm) vp_convert_to_abstract_recipes(lp, range);
     vp_create_interleave_groups(igs, lp.cm.sel == .ALLOWED);
-    for bb: vp_blocks_only_basic(vp_depth_first_shallow(vb(vp_vector_loop_region()).entry))
-        for r: vp_block_recipes(bb) if vr(r).kind == .WIDEN_LOAD && !vr(r).consecutive vp_unported("non-consecutive widened loads (convertToStridedAccesses)");
+    // convertToStridedAccesses: a no-op on X86 (TTI::isLegalStridedLoadStore is false, so IsProfitable is false
+    // for every VF and getDecisionAndClampRange leaves the range as it is)
     if ec_is_scalar(range.start) range.end = Ec.{range.start.n * 2, range.start.scalable};
     vf = range.start;
     while vf.n < range.end.n { vp_add_vf(vf); vf.n *= 2; }
@@ -706,7 +708,18 @@ lv_recurrence_identity :: (k: Recur_Kind, ty: Type_Id, fmf: u32) -> Value_Id {
         else if k == .UMAX a = ap_zero(bw); else a = ap_all_ones(bw);
         return const_int_ap(ty, a);
     }
-    if rk_is_min_max(k) || rk_is_any_of(k) || rk_is_find(k) vp_unported(tprint("recurrence identities of % reductions", k));
+    if rk_is_fp_min_max(k) {
+        // vector_reduce_fmin/fmax/fminimum/fmaximum (FMinimumNum/FMaximumNum map to fmin/fmax)
+        neg := k == .FMAX || k == .FMAXNUM || k == .FMAXIMUM || k == .FMAXIMUMNUM;
+        propagates_nan := k == .FMINIMUM || k == .FMAXIMUM;
+        fk := type_kind(scalar_type(ty));
+        w: [] u64;
+        if !(fmf & FMF_NNAN) && !propagates_nan w = fp_with_sign(fk, fp_default_nan(fk), neg);
+        else if !(fmf & FMF_NINF) w = fp_inf(fk, neg);
+        else w = fp_largest(fk, neg);
+        return const_fp_words(ty, w);
+    }
+    if rk_is_any_of(k) || rk_is_find(k) vp_unported(tprint("recurrence identities of % reductions", k));
     opc := rk_opcode(k);
     if k == .SUB || k == .ADD_CHAIN_WITH_SUBS opc = .ADD;
     if k == .FSUB || k == .FADD_CHAIN_WITH_SUBS || k == .FMULADD opc = .FADD;
@@ -1090,8 +1103,10 @@ lvp_collect_in_loop_reductions :: (lp: *Lv_Planner) {
         ops := rdx_get_reduction_op_chain(rd, phi);
         if ops.count {
             array_add(*lp.in_loop_reductions, phi);
-            vp_unported("in-loop reductions");
+            last := phi;
+            for ops { table_set(*lp.cm.in_loop_chains, it, last); last = it; }
         }
+        if lv_debug_enabled() lv_dbg("LV: Using % reduction for phi: %\n", ifx ops.count then "inloop" else "out of loop", lv_inst_str(phi));
     }
 }
 

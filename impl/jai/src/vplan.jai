@@ -143,7 +143,8 @@ Vp_Recipe_Row :: struct {
     expr: Scev_Id;                    // EXPAND_SCEV
     variant: Value_Id = NONE;         // WIDEN_CALL: the vector function
     expr_type: u8;                    // EXPRESSION: ExpressionTypes
-    expr_recipes: [..] Vp_Rec;        // EXPRESSION
+    expr_recipes: [..] Vp_Rec;        // EXPRESSION (unlinked member recipes, possibly with duplicates)
+    expr_placeholders: [..] Vp_Val;   // EXPRESSION: LiveInPlaceholders (symbolic values), one per operand
     dead: bool;
 }
 Vp_Rdx_Style :: enum u8 { UNORDERED; IN_LOOP; ORDERED; }
@@ -241,6 +242,11 @@ vp_has_more_than_one_unique_user :: (v: Vp_Val) -> bool {
     while k < u.count && u[0] == u[k] k += 1;
     return k != u.count;
 }
+vp_users_snapshot :: (v: Vp_Val) -> [..] Vp_Rec {   // make_early_inc_range(V->users())
+    out: [..] Vp_Rec; out.allocator = temp;
+    for vv(v).users array_add(*out, it);
+    return out;
+}
 vp_add_user :: (v: Vp_Val, r: Vp_Rec) { array_add(*vv(v).users, r); }
 vp_remove_user :: (v: Vp_Val, r: Vp_Rec) {
     u := *vv(v).users;
@@ -296,7 +302,7 @@ vp_defined_value :: (r: Vp_Rec, i: s64) -> Vp_Val { if vr(r).def != NONE return 
 vp_new_recipe :: (kind: Vp_Kind, ops: [] Vp_Val, dl: Md_Id = NONE) -> Vp_Rec {
     row: Vp_Recipe_Row;
     row.kind = kind; row.dl = dl;
-    row.ops.allocator = temp; row.defs.allocator = temp; row.md.allocator = temp; row.expr_recipes.allocator = temp;
+    row.ops.allocator = temp; row.defs.allocator = temp; row.md.allocator = temp; row.expr_recipes.allocator = temp; row.expr_placeholders.allocator = temp;
     array_add(*vpl.recipes, row);
     r := cast(Vp_Rec) (vpl.recipes.count - 1);
     for ops vp_add_operand(r, it);
@@ -748,13 +754,23 @@ vp_duplicate :: (src: *Vp_Plan) -> *Vp_Plan {
     p.live_ins = lt;
     for *p.blocks { copy(*it.preds); copy(*it.succs); }
     for *p.values { copy(*it.users); it.users.count = 0; }
-    for *p.recipes { copy(*it.ops); copy(*it.defs); copy(*it.md); copy(*it.expr_recipes); }
+    for *p.recipes { copy(*it.ops); copy(*it.defs); copy(*it.md); copy(*it.expr_recipes); copy(*it.expr_placeholders); }
     vp_use(p);
     reachable: Table(Vp_Rec, bool); reachable.allocator = temp;
     for b: vp_blocks_only_basic(vp_rpo(p.entry, true)) {
         r := vb(b).first;
         while r != NONE {
             table_set(*reachable, r, true);
+            if vr(r).kind == .EXPRESSION {
+                // the clone's member recipes (cloned and re-internalized by VPExpressionRecipe::clone) only use
+                // each other and the placeholders
+                seen: [..] Vp_Rec; seen.allocator = temp;
+                for x: vr(r).expr_recipes {
+                    if array_find(seen, x) continue;
+                    array_add(*seen, x);
+                    for o: vr(x).ops vp_add_user(o, x);
+                }
+            }
             for o: vr(r).ops vp_add_user(o, r);
             r = vr(r).next;
         }

@@ -290,6 +290,7 @@ Lv_Cm :: struct {
     bfi: *Bfi;                                 // getBFI() (computed on first use)
     min_bws: *Table(Value_Id, u64);            // VFSelectionContext::MinBWs (computeMinimalBitwidths)
     has_in_loop_reductions: bool;              // !Config.getInLoopReductions().empty()
+    in_loop_chains: Table(Value_Id, Value_Id); // VFSelectionContext::InLoopReductionImmediateChains
 }
 
 // requiresScalarEpilogue

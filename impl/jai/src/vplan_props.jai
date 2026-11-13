@@ -44,7 +44,7 @@ vpi_opcode_may_read_or_write_memory :: (r: Vp_Rec) -> bool {
 vp_may_write_to_memory :: (r: Vp_Rec) -> bool {
     k := vr(r).kind;
     if k == {
-        case .EXPRESSION; vp_unported("VPExpressionRecipe::mayReadOrWriteMemory"); return true;
+        case .EXPRESSION; return vp_expression_may_read_or_write_memory(r);
         case .INSTRUCTION;
             if vr(r).opcode == vp_opc(.LOAD) return false;
             return vpi_opcode_may_read_or_write_memory(r);
@@ -66,7 +66,7 @@ vp_may_write_to_memory :: (r: Vp_Rec) -> bool {
 vp_may_read_from_memory :: (r: Vp_Rec) -> bool {
     k := vr(r).kind;
     if k == {
-        case .EXPRESSION; vp_unported("VPExpressionRecipe::mayReadOrWriteMemory"); return true;
+        case .EXPRESSION; return vp_expression_may_read_or_write_memory(r);
         case .INSTRUCTION; return vpi_opcode_may_read_or_write_memory(r);
         case .WIDEN_LOAD_EVL; #through; case .WIDEN_LOAD; return true;
         case .REPLICATE; return may_read_from_memory(vp_underlying_instr(r));
@@ -86,7 +86,7 @@ vp_may_read_or_write_memory :: (r: Vp_Rec) -> bool { return vp_may_read_from_mem
 vp_may_have_side_effects :: (r: Vp_Rec) -> bool {
     k := vr(r).kind;
     if k == {
-        case .EXPRESSION; vp_unported("VPExpressionRecipe::mayHaveSideEffects"); return true;
+        case .EXPRESSION; return false;
         case .ACTIVE_LANE_MASK_PHI; #through; case .DERIVED_IV; #through; case .CURRENT_ITERATION_PHI; #through;
         case .FIRST_ORDER_RECURRENCE_PHI; #through; case .REDUCTION_PHI; #through; case .PRED_INST_PHI; #through;
         case .VECTOR_END_POINTER; return false;
@@ -260,7 +260,7 @@ vp_is_single_scalar :: (v: Vp_Val) -> bool {
     if k == .INSTRUCTION return vpi_is_single_scalar(r) || vpi_is_vector_to_scalar(r) || (vp_preserves_uniformity(vr(r).opcode) && all_ops(r));
     if k == .REDUCTION return vr(r).rdx_scale <= 1;
     if k == .VECTOR_POINTER || k == .VECTOR_END_POINTER || k == .DERIVED_IV return true;
-    if k == .EXPRESSION { vp_unported("VPExpressionRecipe::isVectorToScalar"); return false; }
+    if k == .EXPRESSION return vp_expression_is_vector_to_scalar(r);
     return k == .EXPAND_SCEV;
 }
 // vputils::isUniformAcrossVFsAndUFs
@@ -321,13 +321,14 @@ vp_copy_payload :: (dst: Vp_Rec, src: Vp_Rec) {
     d.has_uses_outside_chain = s.has_uses_outside_chain; d.is_conditional = s.is_conditional;
     d.single_scalar = s.single_scalar; d.predicated = s.predicated; d.align = s.align; d.consecutive = s.consecutive;
     d.masked = s.masked; d.needs_mask_for_gaps = s.needs_mask_for_gaps; d.ig = s.ig; d.expr = s.expr;
-    d.variant = s.variant; d.expr_type = s.expr_type;
+    d.variant = s.variant; d.expr_type = s.expr_type;   // expr_recipes / expr_placeholders: vp_clone_expression
     for s.md array_add(*d.md, it);
 }
 // VPRecipeBase::clone: a new unlinked recipe of the same class with the same operands (and underlying value)
 vp_clone :: (r: Vp_Rec) -> Vp_Rec {
     k := vr(r).kind;
-    if k == .EXPRESSION || k == .INTERLEAVE_EVL || k == .REDUCTION_EVL || k == .WIDEN_LOAD_EVL || k == .WIDEN_STORE_EVL ||
+    if k == .EXPRESSION return vp_clone_expression(r);
+    if k == .INTERLEAVE_EVL || k == .REDUCTION_EVL || k == .WIDEN_LOAD_EVL || k == .WIDEN_STORE_EVL ||
        k == .CURRENT_ITERATION_PHI
         vp_unported(tprint("cloning % recipes", k));
     ops: [..] Vp_Val; ops.allocator = temp;

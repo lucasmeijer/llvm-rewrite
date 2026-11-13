@@ -303,7 +303,7 @@ vp_compute_cost :: (c: *Vp_Cost_Ctx, r: Vp_Rec, vf: Ec) -> Cost {
     case .INTERLEAVE; return vp_interleave_cost(c, r, vf);
     case .INTERLEAVE_EVL; vp_unported("EVL interleave group costs");
     case .HISTOGRAM; vp_unported("histogram costs");
-    case .EXPRESSION; vp_unported("VPExpressionRecipe::computeCost");
+    case .EXPRESSION; return vp_expression_cost(c, r, vf);
     case .REDUCTION_EVL; vp_unported("EVL reduction costs");
     }
     fatal("internal: computeCost of %", k);
@@ -930,7 +930,7 @@ vp_calculate_register_usage :: (vfs: [] Ec, t: *Tti, values_to_ignore: *Iset) ->
                 } else {
                     scale: u64 = 1;
                     if d != NONE && (vr(d).kind == .REDUCTION_PHI || vr(d).kind == .REDUCTION) scale = vr(d).rdx_scale;
-                    if d != NONE && vr(d).kind == .EXPRESSION vp_unported("VPExpressionRecipe::getVFScaleFactor");
+                    if d != NONE && vr(d).kind == .EXPRESSION scale = vp_expression_vf_scale_factor(d);
                     rvf := vf;
                     if scale > 1 rvf.n = vf.n / scale;
                     sty := vp_scalar_type(v);

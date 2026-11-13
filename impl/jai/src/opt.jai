@@ -245,6 +245,7 @@
 #load "lv_plan.jai";
 #load "lv_cm.jai";
 #load "vplan_transforms.jai";
+#load "vplan_expression.jai";
 #load "vplan_print.jai";
 #load "vplan_unroll.jai";
 #load "vplan_predicator.jai";

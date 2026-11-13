@@ -422,7 +422,7 @@ vp_convert_to_concrete_recipes :: () {
                 if vp_nops(r) < 3 vp_materialize_end_pointer_offset(r, 0);
                 continue;
             }
-            if k == .EXPRESSION { vp_unported("VPExpressionRecipe::decompose"); continue; }
+            if k == .EXPRESSION { vp_decompose_expression(r); vp_erase_recipe(r); continue; }
             if vp_is_vpi(r, VPI_LAST_ACTIVE_LANE) {
                 dl := vr(r).dl;
                 nots: [..] Vp_Val; nots.allocator = temp;

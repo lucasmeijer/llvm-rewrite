@@ -583,7 +583,7 @@ lv_cm_arith_instruction_cost :: (cm: *Lv_Cm, i: Value_Id, vf: Ec, vec_ty: Type_I
            (li_is_loop_invariant(cm.li, cm.l, b) && sc_is_one(pse_get_scev(cm.pse, b)))
             return 0;
     }
-    if cm.has_in_loop_reductions && ec_is_vector(vf) vp_unported("in-loop reduction costs (getReductionPatternCost)");
+    { ok, rc := lv_cm_reduction_pattern_cost(cm, i, vf, vec_ty); if ok return rc; }
     op2 := op(i, 1);
     if !is_const(op2) && li_is_loop_invariant(cm.li, cm.l, op2) && sc_is_scevable(vtype(op2)) {
         s := pse_get_scev(cm.pse, op2);
@@ -622,7 +622,7 @@ lv_cm_cast_instruction_cost :: (cm: *Lv_Cm, i: Value_Id, vf: Ec, vec_ty: Type_Id
         if is_inst(src) && inst_op(src) == .LOAD cch = compute_cch(cm, src, vf);
     }
     if lv_cm_is_optimizable_iv_truncate(cm, i, vf) return lt_cast_cost(t, .TRUNC, vtype(i), vtype(op(i, 0)), cch, kind, i);
-    if cm.has_in_loop_reductions && ec_is_vector(vf) vp_unported("in-loop reduction costs (getReductionPatternCost)");
+    { ok, rc := lv_cm_reduction_pattern_cost(cm, i, vf, vec_ty); if ok return rc; }
     src_scalar := vtype(op(i, 0));
     op0 := op(i, 0);
     if is_inst(op0) && lv_cm_can_truncate_to_minimal_bitwidth(cm, op0, vf) { _, bw := lv_cm_min_bw(cm, op0); src_scalar = type_int(bw); }
@@ -771,4 +771,91 @@ lv_cm_interleave_group_cost :: (cm: *Lv_Cm, i: Value_Id, vf: Ec) -> Lc {
                                             lv_cm_is_mask_required(cm, i), use_mask_for_gaps));
     if g.reverse c = lc_add(c, lc_mul(lv_tti_shuffle(cm.tti, SK_REVERSE, vty, cm.cost_kind, 0), g.keys.count));
     return c;
+}
+
+// ---------------------------------------------------------------- getReductionPatternCost
+
+// LoopVectorizationCostModel::getReductionPatternCost: (true, cost) when I is part of an in-loop reduction pattern
+lv_cm_reduction_pattern_cost :: (cm: *Lv_Cm, i: Value_Id, vf: Ec, ty: Type_Id) -> (bool, Lc) {
+    if !cm.has_in_loop_reductions || ec_is_scalar(vf) || !is_vector_type(ty) return false, 0;
+    t := cm.tti; kind := cm.cost_kind;
+    is_ext :: (v: Value_Id) -> bool { return is_inst(v) && (inst_op(v) == .ZEXT || inst_op(v) == .SEXT); }
+    first_user :: (v: Value_Id) -> Value_Id { return ir.u_user[ir.v_first_use[v]]; }
+    ret := i;
+    if is_ext(ret) {
+        if !has_one_user(ret) return false, 0;
+        ret = first_user(ret);
+    }
+    if inst_op(ret) == .MUL && has_one_use(ret) && inst_op(first_user(ret)) == .ADD ret = first_user(ret);
+    found, last_chain := table_find(*cm.in_loop_chains, ret);
+    if !found return false, 0;
+    phi := last_chain;
+    while !is_phi(phi) { _, phi = table_find(*cm.in_loop_chains, phi); }
+    rd := lvl_find_reduction(cm.lvl, phi);
+    rk := rd.kind;
+    vec_ty := ty;
+    base: Lc;
+    if rk_is_min_max(rk) base = lt_min_max_reduction_cost(t, lv_min_max_reduction_intrinsic(rk), vec_ty, rd.fmf, kind);
+    else base = lt_arithmetic_reduction_cost(t, rk_opcode(rk), vec_ty, true, rd.fmf, kind);
+    if rk == .FMULADD base = lc_add(base, lt_arith_cost(t, .FMUL, vec_ty, kind));
+    if lv_use_ordered_reductions(cm, rd) return true, base;
+    red_op := ifx op(ret, 1) == last_chain then op(ret, 0) else op(ret, 1);
+    if !is_inst(red_op) red_op = NONE;
+    vec_ty = vector_with_elt(vec_ty, vtype(op(i, 0)));
+    is_mul :: (v: Value_Id) -> (bool, Value_Id, Value_Id) {
+        if !is_inst(v) || inst_op(v) != .MUL return false, NONE, NONE;
+        a := op(v, 0); b := op(v, 1);
+        if !is_inst(a) || !is_inst(b) return false, NONE, NONE;
+        return true, a, b;
+    }
+    invariant :: (cm: *Lv_Cm, v: Value_Id) -> bool { return li_is_loop_invariant(cm.li, cm.l, v); }
+    rdx_opc := rk_opcode(rk);
+    ok0 := false; op0: Value_Id = NONE; op1: Value_Id = NONE;
+    if red_op != NONE && is_ext(red_op) ok0, op0, op1 = is_mul(op(red_op, 0));
+    if red_op != NONE && rdx_opc == .ADD && ok0 && is_ext(op0) && inst_op(op0) == inst_op(op1) &&
+       vtype(op(op0, 0)) == vtype(op(op1, 0)) && !invariant(cm, op0) && !invariant(cm, op1) &&
+       (inst_op(op0) == inst_op(red_op) || op0 == op1) {
+        is_unsigned := inst_op(op0) == .ZEXT;
+        ext_type := vector_with_elt(vec_ty, vtype(op(op0, 0)));
+        mul_type := vector_with_elt(vec_ty, vtype(op0));
+        ext_cost := lt_cast_cost(t, inst_op(op0), mul_type, ext_type, CCH_NONE, kind, op0);
+        mul_cost := lt_arith_cost(t, .MUL, mul_type, kind);
+        ext2_cost := lt_cast_cost(t, inst_op(red_op), vec_ty, mul_type, CCH_NONE, kind, red_op);
+        red_cost := lcv(tti_mul_acc_reduction_cost(t, is_unsigned, rdx_opc, rd.recur_type, ext_type, kind));
+        if cost_valid(red_cost) && red_cost < lc_add(lc_add(lc_add(lc_mul(ext_cost, 2), mul_cost), ext2_cost), base)
+            return true, ifx i == ret then red_cost else 0;
+    } else if red_op != NONE && is_ext(red_op) && !invariant(cm, red_op) {
+        is_unsigned := inst_op(red_op) == .ZEXT;
+        ext_type := vector_with_elt(vec_ty, vtype(op(red_op, 0)));
+        red_cost := lcv(tti_extended_reduction_cost(t, rdx_opc, is_unsigned, rd.recur_type, ext_type, true, rd.fmf, kind));
+        ext_cost := lt_cast_cost(t, inst_op(red_op), vec_ty, ext_type, CCH_NONE, kind, red_op);
+        if cost_valid(red_cost) && red_cost < lc_add(base, ext_cost) return true, ifx i == ret then red_cost else 0;
+    } else if red_op != NONE && rdx_opc == .ADD {
+        okm, m0, m1 := is_mul(red_op);
+        if okm {
+            if is_ext(m0) && inst_op(m0) == inst_op(m1) && !invariant(cm, m0) && !invariant(cm, m1) {
+                is_unsigned := inst_op(m0) == .ZEXT;
+                t0 := vtype(op(m0, 0)); t1 := vtype(op(m1, 0));
+                largest := ifx type_bits(t0) < type_bits(t1) then t1 else t0;
+                ext_type := vector_with_elt(vec_ty, largest);
+                ext0 := lt_cast_cost(t, inst_op(m0), vec_ty, vector_with_elt(vec_ty, t0), CCH_NONE, kind, m0);
+                ext1 := lt_cast_cost(t, inst_op(m1), vec_ty, vector_with_elt(vec_ty, t1), CCH_NONE, kind, m1);
+                mul_cost := lt_arith_cost(t, .MUL, vec_ty, kind);
+                red_cost := lcv(tti_mul_acc_reduction_cost(t, is_unsigned, rdx_opc, rd.recur_type, ext_type, kind));
+                extra: Lc = 0;
+                if t0 != largest || t1 != largest {
+                    eo := ifx t0 != largest then m0 else m1;
+                    extra = lt_cast_cost(t, inst_op(eo), ext_type, vector_with_elt(vec_ty, vtype(op(eo, 0))), CCH_NONE, kind, eo);
+                }
+                if cost_valid(red_cost) && lc_add(red_cost, extra) < lc_add(lc_add(lc_add(ext0, ext1), mul_cost), base)
+                    return true, ifx i == ret then red_cost else 0;
+            } else if !is_ext(i) {
+                mul_cost := lt_arith_cost(t, .MUL, vec_ty, kind);
+                red_cost := lcv(tti_mul_acc_reduction_cost(t, true, rdx_opc, rd.recur_type, vec_ty, kind));
+                if cost_valid(red_cost) && red_cost < lc_add(mul_cost, base) return true, ifx i == ret then red_cost else 0;
+            }
+        }
+    }
+    if i == ret return true, base;
+    return false, 0;
 }
