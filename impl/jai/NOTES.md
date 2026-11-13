@@ -1095,7 +1095,7 @@ Still slow / known:
 - Every `[..]` with `allocator = temp` costs an allocator call on its first add (~100 instructions with
   array_reserve); in SCEV that's 6-8% of the time.
 
-## CGSCC, FunctionAttrs, inliner (L2.function-attrs 106/118: roundtrip 59/59, opt 47/59; L2.inline 438/466: roundtrip 233/233, opt 205/233)
+## CGSCC, FunctionAttrs, inliner (L2.function-attrs COMPLETE 118/118; L2.inline 438/466: roundtrip 233/233, opt 205/233)
 
 - Files: `lazy_call_graph.jai` (LazyCallGraph.cpp + print-lcg), `cgscc_pm.jai` (CGSCCPassManager.cpp, the
   `cgscc(...)` / `devirt<N>(...)` adaptors), `pass_function_attrs.jai` (FunctionAttrs.cpp, ConstantRangeList),
@@ -1122,7 +1122,7 @@ Still slow / known:
   features, `!memprof` / `!callsite`, strictfp callers, ObjC ARC attached calls, assignment tracking, the replay / ML
   advisors, `promoteCall` (devirtualising an indirect call with a known callee), the MDNodeMapper. Remaining L2.inline
   failures are those plus `-O<n>` / `default<O<n>>`, mergefunc, partial-inliner, scc-oz-module-inliner, globalopt,
-  globaldce, early-cse, verify<domtree>. L2.function-attrs: attributor-light, `-O3` and inline pipelines.
+  globaldce, early-cse, verify<domtree>.
 - Trap: InstCombine's transformConstExprCastCall must call `value_is_rauwd(call, new_call)` when the old call has no
   uses: the CGSCC devirt wrapper's WeakVH on the call follows it, otherwise devirt<N> sees a "new" direct call and
   repeats (Inline/inline-indirect-chain.ll).
@@ -1131,6 +1131,30 @@ Still slow / known:
   simplifyBinOp calls as LLVM (454,972); ~90% of the time is the shared InstSimplify / ConstantFold code called by
   CallAnalyzer::visitBinaryOperator (constant creation hashes a key per folded constant).
 
+
+## AttributorLight (`attributor-light`, `attributor-light-cgscc`; L2.function-attrs COMPLETE)
+
+- Files: `attributor.jai` (the framework: IRPosition as `Irp{enc, v}` with LLVM's encoding bits, the integer states
+  as `Bstate{known, assumed, best}`, `Abs_Attr` rows on the heap indexed by u32, getOrCreateAAFor = `atr_get_aa`,
+  runTillFixpoint, manifest + AttrsMap, hasAttr / getAttrs / manifestAttrs / removeAttrs, SubsumingPositionIterator,
+  InformationCache, MustBeExecutedContextExplorer = `mbe_*`, fillMapFromAssume / getKnowledgeFromUse) and
+  `attributor_aas.jai` (the 17 allowed AAs; their virtual methods are `aa_initialize` / `aa_update_impl` /
+  `aa_manifest`, switches on (kind, position kind)). knowledge/llvm/attributor.md has the behaviour that matters.
+- No closures in Jai: the checkForAll* helpers return the instruction / call-site lists (`atr_insts`,
+  `atr_call_sites` with a `complete` flag for "the walk stopped with a failure after these"), and checkForAllUses is
+  an explicit walk (`atr_uses_begin` / `atr_uses_next` / `atr_uses_follow`). The predicates are the loops at the
+  call sites, in LLVM's order (AA creation order and dependences depend on it).
+- Only the light configuration: liveness, AAPotentialValues, AAPointerInfo, cleanupIR, signature rewriting and the
+  full `attributor` / `attributor-cgscc` passes are not ported. `!callback` metadata anywhere in the module fails
+  loudly (AbstractCallSite callback calls are not ported): 4 corpus files.
+- Trap: a pointer into `atr.aas[i]` is stable (heap rows), but follow-ups that create AAs can reach the AA being
+  initialized through the map: update its state in place (`*aa(i).s`), never a local copy.
+- Sweeps (0 differs, 4 loud `!callback` failures each): `attributor-light`, `attributor-light-cgscc`, both with
+  `--with-test-flags` (failures there are other passes' flags), `function(require<domtree>,require<loops>,
+  require<postdomtree>,require<assumptions>,require<scalar-evolution>),attributor-light` (cached analyses), and
+  `tests/perf/compile/*`.
+- Compile time: x64 build, SPASS.ll: 3.9 s for `-passes=attributor-light` (parse + print 1.0 s) vs LLVM 1.0 s in
+  total; not measured with the optimized build (no perf benchmark runs this pass).
 
 ## LoopVectorize (in progress; L1.vectorize.loop 383/468 opt, 468/468 roundtrip)
 

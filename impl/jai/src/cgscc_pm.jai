@@ -213,6 +213,7 @@ run_cgscc_pass :: (n: s32, c: s32, ur: *Cgscc_Ur) -> Preserved {
         case .CGSCC_FN_ADAPTOR; return run_cgscc_fn_adaptor(n, c, ur);
         case .NO_OP_CGSCC; return PRESERVE_ALL;
         case .FUNCTION_ATTRS; return function_attrs_run_scc(node, c);
+        case .ATTRIBUTOR_LIGHT_CGSCC; return attributor_light_cgscc_run(c);
         case .INLINE; return inliner_run(node, c, ur);
         case .ARG_PROMOTION; return arg_promotion_run_scc(node, c);
         case .CORO_SPLIT; return coro_split_run_scc(c);

@@ -5259,11 +5259,13 @@ tests/imported/llvm/Transforms/FunctionAttrs/2010-10-30-volatile.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/2010-10-30-volatile.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/arg_returned.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/arg_returned.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/argmemonly.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/argmemonly.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/assume.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/assume.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/atomic.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/atomic.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/cold.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/cold.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/comdat-ipo.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/comdat-ipo.ll::roundtrip
@@ -5277,7 +5279,9 @@ tests/imported/llvm/Transforms/FunctionAttrs/naked_functions.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/naked_functions.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/noalias.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/noalias.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/nocapture.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/nocapture.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/nofpclass-callsite-prop.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/nofpclass-callsite-prop.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/nofpclass-issue182834.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/nofpclass-issue182834.ll::roundtrip
@@ -5289,7 +5293,9 @@ tests/imported/llvm/Transforms/FunctionAttrs/nofree.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/nofree.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/nonnull-global.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/nonnull-global.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/nonnull.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/nonnull.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/norecurse.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/norecurse.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/norecurse_libfunc_address_taken.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/norecurse_libfunc_address_taken.ll::roundtrip
@@ -5311,6 +5317,7 @@ tests/imported/llvm/Transforms/FunctionAttrs/nosync.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/nosync.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/noundef.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/noundef.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/nounwind.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/nounwind.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/operand-bundles-scc.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/operand-bundles-scc.ll::roundtrip
@@ -5324,7 +5331,9 @@ tests/imported/llvm/Transforms/FunctionAttrs/phi_cycle.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/phi_cycle.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/read-write-scc.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/read-write-scc.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/readattrs.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/readattrs.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/readnone.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/readnone.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/returned.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/returned.ll::roundtrip
@@ -5332,7 +5341,9 @@ tests/imported/llvm/Transforms/FunctionAttrs/vector-of-pointers-getunderlyingobj
 tests/imported/llvm/Transforms/FunctionAttrs/vector-of-pointers-getunderlyingobject-crash.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionAttrs/willreturn-callsites.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/willreturn-callsites.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/willreturn.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/willreturn.ll::roundtrip
+tests/imported/llvm/Transforms/FunctionAttrs/writeonly.ll::opt
 tests/imported/llvm/Transforms/FunctionAttrs/writeonly.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionSpecialization/bug52821-use-after-free.ll::opt
 tests/imported/llvm/Transforms/FunctionSpecialization/bug52821-use-after-free.ll::roundtrip
