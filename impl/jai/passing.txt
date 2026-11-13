@@ -5818,7 +5818,9 @@ tests/imported/llvm/Transforms/Coroutines/coro-padding.ll::opt
 tests/imported/llvm/Transforms/Coroutines/coro-padding.ll::roundtrip
 tests/imported/llvm/Transforms/Coroutines/coro-param-copy.ll::opt
 tests/imported/llvm/Transforms/Coroutines/coro-param-copy.ll::roundtrip
+tests/imported/llvm/Transforms/Coroutines/coro-readnone-02.ll::opt
 tests/imported/llvm/Transforms/Coroutines/coro-readnone-02.ll::roundtrip
+tests/imported/llvm/Transforms/Coroutines/coro-readnone.ll::opt
 tests/imported/llvm/Transforms/Coroutines/coro-readnone.ll::roundtrip
 tests/imported/llvm/Transforms/Coroutines/coro-resume-destroy.ll::opt
 tests/imported/llvm/Transforms/Coroutines/coro-resume-destroy.ll::roundtrip
