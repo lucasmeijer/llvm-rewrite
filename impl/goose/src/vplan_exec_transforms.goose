@@ -38,10 +38,234 @@ fn vpx_replace_wide_canonical_iv_with_wide_iv() {
     }
 }
 
-// unrollByUF
+// unrollByUF (VPlanUnroll.cpp, UnrollState)
+var vpu_uf: i64 = 1;
+var vpu_parts = hm_new();       // VPV2Parts: value of part 0 -> index of a run of UF-1 values in vpu_pool
+var vpu_pool: i32[>..<];
+var vpu_skip = hm_new();        // ToSkip
+
+fn vpu_part(v: i32, part: i64) -> i32 {
+    if part == 0 || vp_is_ir_value(v) || vp_is_symbolic(v) { return v; }
+    let at = hm_get(vpu_parts, v as u64, -1);
+    if at < 0 { fatal("internal: loop-vectorize: unrollByUF: accessed value does not exist"); }
+    return vpu_pool[at + part - 1];
+}
+fn vpu_run(v: i32) -> i64 {
+    var at = hm_get(vpu_parts, v as u64, -1);
+    if at < 0 {
+        at = vpu_pool.len;
+        for k in vpu_uf - 1 { vpu_pool.push(-1); }
+        hm_put(vpu_parts, v as u64, at);
+    }
+    return at;
+}
+// addRecipeForPart(OrigR, CopyR, Part)
+fn vpu_add_recipe_for_part(orig: i32, copy: i32, part: i64) {
+    for k in vp_num_defined_values(orig) {
+        let at = vpu_run(vp_defined_value(orig, k));
+        vpu_pool[at + part - 1] = vp_defined_value(copy, k);
+    }
+}
+// addUniformForAllParts(R)
+fn vpu_add_uniform(r: i32) {
+    let d = vpr[r].def;
+    if hm_has(vpu_parts, d as u64) { fatal("internal: loop-vectorize: uniform value already added"); }
+    let at = vpu_run(d);
+    for k in vpu_uf - 1 { vpu_pool[at + k] = d; }
+}
+fn vpu_remap_operand(r: i32, k: i64, part: i64) { vp_set_operand(r, k, vpu_part(vp_op(r, k), part)); }
+fn vpu_remap_operands(r: i32, part: i64) { for k in vp_nops(r) { vpu_remap_operand(r, k, part); } }
+fn vpu_const_int(part: i64) -> i32 { vp_const_int(vpv[vpb[vp_vector_loop_region()].can_iv].ty, part as u64) }
+
+// addStartIndexForScalarSteps(Steps, Part, Plan)
+fn vpu_add_start_index_for_scalar_steps(steps: i32, part: i64) {
+    if part == 0 { return; }
+    vpb_set_before(steps);
+    let base_ty = vp_scalar_type(vp_op(steps, 0));
+    let int_ty = ty_int(ty_bits(ty_scalar(base_ty)));
+    var si = vp_op(steps, 2);
+    if part > 1 {
+        si = vp_val(vpb_nary(OP_MUL as i32, [si, vp_const_int(vp_scalar_type(si), part as u64)], vpf_wrap(false, false), -1, "", -1));
+    }
+    si = vpb_scalar_sext_or_trunc(si, int_ty, vp_scalar_type(si), vpr[steps].dl);
+    if ty_is_fp(base_ty) { si = vp_val(vpb_scalar_cast(OP_SITOFP, si, base_ty, vpr[steps].dl, vpf_none())); }
+    if vp_nops(steps) == 4 { vp_set_operand(steps, 3, si); } else { vp_add_operand(steps, si); }
+}
+
+// unrollWidenInductionByUF(IV, InsertPtForPhi)
+fn vpu_unroll_widen_induction(iv: i32, insert_pt: i32) {
+    if vpr[iv].kind != VPR_WIDEN_INT_OR_FP_INDUCTION { vp_unported("unrolling pointer inductions"); }
+    let ph = vp_single_pred(vp_enclosing_loop_region(vpr[iv].parent));
+    let ivty = vpv[vpr[iv].def].ty;
+    let d = vpr[iv].ind;
+    var fmf: u8 = 0;
+    if vpr[iv].f.ot == VOT_FMF { fmf = vpr[iv].f.fmf; }
+    var wrap = vpf_wrap(false, false);
+    if vpr[iv].f.ot == VOT_OVERFLOWING { wrap = vpf_wrap(vpr[iv].f.nuw, vpr[iv].f.nsw); }
+    let sstep = vp_op(iv, 1);
+    vpb_set_at_end(ph);
+    let vsty = if ty_kind(ivty) == TK_PTR { vp_scalar_type(sstep) } else { ivty };
+    let vstep = vpb_nary(VPI_WIDE_IV_STEP, [vph.vf, sstep], vpf_fmf(fmf), vpr[iv].dl, "", vsty);
+    hm_put(vpu_skip, vstep as u64, 1);
+    var prev = vpr[iv].def;
+    if insert_pt >= 0 { vpb_set_before(insert_pt); } else { vpb_set_at_end(vpr[iv].parent); }
+    var add_opc = OP_ADD as i32;
+    var add_flags = wrap;
+    if ty_is_fp(ivty) {
+        add_opc = ind_opcode(d) as i32;
+        add_flags = vpf_fmf(fmf);
+    } else {
+        let region = vp_vector_loop_region();
+        let canonical = vpm_zero_int(vp_op(iv, 0)) && vpm_one(vp_op(iv, 1)) && ivty == vpv[vpb[region].can_iv].ty;
+        if canonical { add_flags = vpf_wrap(true, false); }
+    }
+    for part in 1..vpu_uf {
+        let nm = if part > 1 { str("step.add.", part) } else { str("step.add") };
+        let add = vpb_nary(add_opc, [prev, vpr[vstep].def], add_flags, vpr[iv].dl, nm, -1);
+        hm_put(vpu_skip, add as u64, 1);
+        vpu_add_recipe_for_part(iv, add, part);
+        prev = vpr[add].def;
+    }
+    vp_add_operand(iv, vpr[vstep].def);
+    vp_add_operand(iv, prev);
+}
+
+// unrollHeaderPHIByUF(R, InsertPtForPhi)
+fn vpu_unroll_header_phi(r: i32, insert_pt: i32) {
+    let k = vpr[r].kind;
+    if k == VPR_FIRST_ORDER_RECURRENCE_PHI { return; }
+    if vp_is_widen_induction_kind(k) { vpu_unroll_widen_induction(r, insert_pt); return; }
+    if k == VPR_REDUCTION_PHI { vp_unported("unrolling reduction phis"); }
+    if k != VPR_ACTIVE_LANE_MASK_PHI { fatal("internal: loop-vectorize: unexpected header phi recipe not needing unrolled part"); }
+    vp_unported("unrolling active-lane-mask phis");
+}
+
+// unrollRecipeByUF(R)
+fn vpu_unroll_recipe(r: i32) {
+    if vpm_vpi_r(r, VPI_BRANCH_ON_COND, 1) || vpm_vpi_r(r, VPI_BRANCH_ON_COUNT, 2) { return; }
+    if vpr[r].kind == VPR_INSTRUCTION && vp_only_first_part_used(vpr[r].def) { vpu_add_uniform(r); return; }
+    if vpr[r].kind == VPR_REPLICATE {
+        let ui = vp_underlying_instr(r);
+        if iop(ui) == OP_STORE && vp_is_defined_outside_loop_regions(vp_op(r, 1)) { vpu_remap_operands(r, vpu_uf - 1); return; }
+        if inst_iid(ui) == IID_experimental_noalias_scope_decl { vpu_add_uniform(r); return; }
+    }
+    let k = vpr[r].kind;
+    if k == VPR_VECTOR_END_POINTER { vp_unported("unrolling vector end pointers (reverse accesses)"); }
+    if k == VPR_REDUCTION { vp_unported("unrolling reductions"); }
+    let next = vpr[r].next;
+    let bb = vpr[r].parent;
+    for part in 1..vpu_uf {
+        let c = vp_clone(r);
+        if next >= 0 { vp_insert_before(c, next); } else { vp_append_recipe(bb, c); }
+        vpu_add_recipe_for_part(r, c, part);
+        if vpr[c].kind == VPR_WIDEN_PHI { continue; }
+        if vpm_vpi_r(r, VPI_FIRST_ORDER_RECURRENCE_SPLICE, 2) {
+            let o = vp_op(r, 1);
+            vp_set_operand(c, 0, vpu_part(o, part - 1));
+            vp_set_operand(c, 1, vpu_part(o, part));
+            continue;
+        }
+        if k == VPR_VECTOR_POINTER || k == VPR_WIDEN_CANONICAL_IV {
+            vpb_set_before(r);
+            let idx_ty = if k == VPR_WIDEN_CANONICAL_IV { vpv[vpb[vp_vector_loop_region()].can_iv].ty } else { ty_int(dl_ptr(types[ty_scalar(vp_scalar_type(vpr[r].def))].n as i64).idx) };
+            let vfty = vp_scalar_type(vph.vf);
+            let vfv = vpb_scalar_zext_or_trunc(vph.vf, idx_ty, vfty, -1);
+            let m = vpb_nary(OP_MUL as i32, [vfv, vp_const_int(idx_ty, part as u64)], vpf_wrap(true, true), -1, "", -1);
+            vp_add_operand(c, vpr[m].def);
+            continue;
+        }
+        vpu_remap_operands(c, part);
+        if vpr[c].kind == VPR_SCALAR_IV_STEPS { vpu_add_start_index_for_scalar_steps(c, part); }
+        if vp_is_vpi(c, VPI_CANONICAL_IV_INCREMENT_FOR_PART) {
+            vpb_set_before(c);
+            let m = vpb_nary(OP_MUL as i32, [vp_op(c, 1), vpu_const_int(part)], vpf_wrap(false, false), -1, "", -1);
+            vp_set_operand(c, 1, vpr[m].def);
+        }
+    }
+    if k == VPR_WIDEN_CANONICAL_IV { vp_add_operand(r, vpu_const_int(0)); }
+}
+
+// UnrollState::unrollBlock for a basic block
+fn vpu_unroll_basic_block(b: i32) {
+    let insert_pt = vp_first_non_phi(b);
+    var rs: i32[>..<] = [];
+    vp_block_recipes(b, rs);
+    for r in rs {
+        if hm_has(vpu_skip, r as u64) || vpr[r].kind == VPR_IR_INSTRUCTION { continue; }
+        if vpr[r].kind == VPR_INSTRUCTION {
+            let o = vpr[r].opcode;
+            if (o == VPI_ANY_OF || o == VPI_FIRST_ACTIVE_LANE || o == VPI_LAST_ACTIVE_LANE || o == VPI_COMPUTE_REDUCTION_RESULT) && vp_nops(r) == 1 {
+                vpu_add_uniform(r);
+                let x = vp_op(r, 0);
+                for part in 1..vpu_uf { vp_add_operand(r, vpu_part(x, part)); }
+                continue;
+            }
+            if o == VPI_EXTRACT_LANE && vp_nops(r) == 2 {
+                vpu_add_uniform(r);
+                let x = vp_op(r, 1);
+                for part in 1..vpu_uf { vp_add_operand(r, vpu_part(x, part)); }
+                continue;
+            }
+            if o == VPI_EXTRACT_LAST_ACTIVE && vp_nops(r) == 3 {
+                vpu_add_uniform(r);
+                let x1 = vp_op(r, 1);
+                let x2 = vp_op(r, 2);
+                for part in 1..vpu_uf { vp_add_operand(r, vpu_part(x1, part)); vp_add_operand(r, vpu_part(x2, part)); }
+                continue;
+            }
+            if vp_has_scalar_vf_only() && ((o == VPI_EXTRACT_LAST_PART || o == VPI_EXTRACT_PENULTIMATE_ELEMENT) && vp_nops(r) == 1) {
+                let pi = if o == VPI_EXTRACT_PENULTIMATE_ELEMENT { vpu_uf - 2 } else { vpu_uf - 1 };
+                vp_rauw(vpr[r].def, vpu_part(vp_op(r, 0), pi));
+                continue;
+            }
+            var is_last_of_last = false;
+            if o == VPI_EXTRACT_LAST_LANE && vp_nops(r) == 1 {
+                let d = vp_def(vp_op(r, 0));
+                if vpm_vpi_r(d, VPI_EXTRACT_LAST_PART, 1) { is_last_of_last = true; }
+            }
+            if is_last_of_last || (o == VPI_EXTRACT_PENULTIMATE_ELEMENT && vp_nops(r) == 1) {
+                vpu_add_uniform(r);
+                vp_set_operand(r, 0, vpu_part(vp_op(r, 0), vpu_uf - 1));
+                continue;
+            }
+        }
+        if vpr[r].def >= 0 && vp_is_uniform_across_vfs_and_ufs(vpr[r].def) { vpu_add_uniform(r); continue; }
+        if vp_is_header_phi(r) { vpu_unroll_header_phi(r, insert_pt); continue; }
+        vpu_unroll_recipe(r);
+    }
+}
+
 fn vpx_unroll_by_uf(uf: i64) {
     vp_set_uf(uf);
-    if uf != 1 { vp_unported("interleaving (unrollByUF with UF > 1)"); }
+    if uf != 1 {
+        vpu_uf = uf;
+        hm_clear(vpu_parts); vpu_pool.clear(); hm_clear(vpu_skip);
+        var top: i32[>..<] = [];
+        vp_rpo(vph.entry, false, top);
+        for b in top {
+            if vp_is_region(b) {
+                if vp_is_replicator(b) { vp_unported("unrolling replicate regions"); }
+                var inner: i32[>..<] = [];
+                vp_rpo(vpb[b].entry, false, inner);
+                for ib in inner {
+                    if vp_is_region(ib) { vp_unported("unrolling replicate regions"); }
+                    vpu_unroll_basic_block(ib);
+                }
+            } else {
+                vpu_unroll_basic_block(b);
+            }
+        }
+        var part: i64 = 1;
+        var phis: i32[>..<] = [];
+        vp_block_phis(vp_entry_basic_block(vp_vector_loop_region()), phis);
+        for h in phis {
+            if vpr[h].kind == VPR_FIRST_ORDER_RECURRENCE_PHI { vpu_remap_operand(h, 1, uf - 1); continue; }
+            if hm_has(vpu_parts, vpr[h].def as u64) { part = 1; continue; }
+            vpu_remap_operands(h, part);
+            part++;
+        }
+        vpt_remove_dead_recipes();
+    }
     var bs: i32[>..<] = [];
     vp_all_basic_blocks_deep(bs);
     for b in bs {
@@ -439,7 +663,21 @@ fn vpx_convert_to_concrete_recipes() {
                 vp_erase_recipe(r);
                 continue;
             }
-            if vpm_vpi_r(r, VPI_WIDE_IV_STEP, 2) { vp_unported("wide-iv-step"); }
+            if vpm_vpi_r(r, VPI_WIDE_IV_STEP, 2) {
+                vpb_set_before(r);
+                var vstep = vp_op(r, 0);
+                var sstep = vp_op(r, 1);
+                let ivty = vpv[vpr[r].def].ty;
+                if vp_scalar_type(vstep) != ivty { vstep = vpr[vpx_widen_cast(if ty_is_fp(ivty) { OP_UITOFP } else { OP_TRUNC }, vstep, ivty)].def; }
+                if vp_scalar_type(sstep) != ivty { sstep = vpr[vpx_widen_cast(OP_TRUNC, sstep, ivty)].def; }
+                var mf = vp_default_flags(OP_MUL as i32, -1);
+                var mo = OP_MUL as i32;
+                if ty_is_fp(ivty) { mo = OP_FMUL as i32; mf = vpf_fmf(if vpr[r].f.ot == VOT_FMF { vpr[r].f.fmf } else { 0 }); }
+                let m = vpb_nary(mo, [vstep, sstep], mf, vpr[r].dl, "", -1);
+                vp_rauw(vpr[r].def, vpr[m].def);
+                vp_erase_recipe(r);
+                continue;
+            }
         }
     }
 }

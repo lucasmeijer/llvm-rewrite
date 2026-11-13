@@ -514,7 +514,7 @@ fn vpc_replicate_cost(r: i32, vf: i64) -> i64 {
         let as_ = lv_ptr_as(spty);
         let oi = tti_operand_info(op(ui, 0));
         let pva = lt_prefers_vectorized_addressing();
-        let used_by_addr = !pva && vpc_is_used_by_load_store_address(vpr[r].def);
+        let used_by_addr = !pva && vp_is_used_by_load_store_address(vpr[r].def);
         let mem = lt_mem(o, vt, align, as_, oi, if used_by_addr { ui } else { -1 });
         let pty = if single { spty } else { lv_vec_ty(spty, vf) };
         let sc = lc_add(mem, lt_address_computation(pty, !used_by_addr, ps));
@@ -544,51 +544,6 @@ fn vpc_replicate_cost(r: i32, vf: i64) -> i64 {
     }
     if o == OP_EXTRACTVALUE || o == OP_INSERTVALUE { return lcv(tti_insert_extract_value_cost(o, LV_KIND)); }
     return vpc_legacy_cost(ui, vf);
-}
-
-// vputils::isUsedByLoadStoreAddress(V)
-fn vpc_is_used_by_load_store_address(v: i32) -> bool {
-    var seen = hm_new();
-    var wl: i32[>..<] = [];
-    wl.push(v);
-    while wl.len > 0 {
-        let cur = wl.pop();
-        if hm_has(seen, cur as u64) { continue; }
-        hm_put(seen, cur as u64, 1);
-        let cd = vp_def(cur);
-        let blend = cd >= 0 && vpr[cd].kind == VPR_BLEND;
-        if blend {
-            var any = false;
-            let n = vp_nops(cd);
-            let nin = if n % 2 == 1 { (n + 1) / 2 } else { n / 2 };
-            for k in nin {
-                let iv = if n % 2 == 1 { if k == 0 { vp_op(cd, 0) } else { vp_op(cd, 2 * k - 1) } } else { vp_op(cd, 2 * k) };
-                if hm_has(seen, iv as u64) { any = true; }
-            }
-            if !any { continue; }
-        }
-        for j in vp_num_users(cur) {
-            let u = vp_user(cur, j);
-            let k = vpr[u].kind;
-            if (k == VPR_INTERLEAVE || k == VPR_INTERLEAVE_EVL) && vp_op(u, 0) == cur { return true; }
-            let uo = vpm_opcode(u, false);
-            if uo == OP_LOAD as i32 && vpm_arity_ok(u, 1) && vp_op(u, 0) == cur { return true; }
-            if uo == OP_STORE as i32 && vpm_arity_ok(u, 2) && vp_op(u, 1) == cur { return true; }
-            if vp_is_widen_memory_kind(k) && vp_op(u, 0) == cur && vpr[u].consecutive { return true; }
-        }
-        if blend { continue; }
-        for j in vp_num_users(cur) {
-            let u = vp_user(cur, j);
-            if vpr[u].kind == VPR_INSTRUCTION && vp_mask_of(u) == cur {
-                var other = false;
-                for x in vp_nops(u) - 1 { if vp_op(u, x) == cur { other = true; } }
-                if !other { continue; }
-            }
-            if vp_is_vpi(u, OP_LOAD as i32) { continue; }
-            if vpr[u].def >= 0 { wl.push(vpr[u].def); }
-        }
-    }
-    return false;
 }
 
 // VPWidenMemoryRecipe::computeCost

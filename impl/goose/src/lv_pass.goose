@@ -748,7 +748,7 @@ fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> boo
     if cm_mask_partial_aliasing() { interleave = false; ic = 1; }
     if interleave && lvl_has_uncountable_exit_with_side_effects() { interleave = false; ic = 1; }
     if !vectorize && !interleave { return false; }
-    if !vectorize { lvx_unported("interleaving without vectorizing"); }
+
     if !interleave { ic = 1; }
     return lv_execute_best_plan(best_vf, ic, min_profitable_tc);
 }

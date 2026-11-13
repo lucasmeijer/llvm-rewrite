@@ -72,6 +72,13 @@ fn vpt_try_to_fold_live_ins(r: i32) -> i32 {
 fn c_all_ones_lv(t: i32) -> i32 { c_int(t, -1) }
 
 fn vpt_replace_all(r: i32, v: i32) { vp_rauw(vpr[r].def, v); }
+// VPBuilder::createWidenCast at the builder's insert point
+fn vpt_widen_cast(o: i64, v: i32, ty: i32) -> i32 {
+    let r = vp_new_single_def(VPR_WIDEN_CAST, [v], ty, -1, -1);
+    vpr[r].opcode = o as i32;
+    vpr[r].f = vp_default_flags(o as i32, ty);
+    return vpb_insert(r);
+}
 
 // simplifyRecipe(Def)
 fn vpt_simplify_recipe(r: i32) {
@@ -158,7 +165,13 @@ fn vpt_simplify_recipe(r: i32) {
             return;
         }
     }
-    if opc == VPI_WIDE_IV_STEP { vp_unported("simplifying wide-iv-step"); }
+    if opc == VPI_WIDE_IV_STEP && vpm_arity_ok(r, 2) && vpm_one(vp_op(r, 1)) {
+        var x = vp_op(r, 0);
+        let wty = vpv[def].ty;
+        if vp_scalar_type(x) != wty { vpb_set_before(r); x = vpr[vpt_widen_cast(OP_TRUNC, x, wty)].def; }
+        vpt_replace_all(r, x);
+        return;
+    }
     if opc == VPI_MASKED_COND { vp_unported("simplifying masked-cond"); }
     if opc == VPI_EXTRACT_LAST_LANE && vpm_arity_ok(r, 1) {
         let a = vp_op(r, 0);

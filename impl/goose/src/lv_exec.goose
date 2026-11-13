@@ -45,7 +45,7 @@ fn lv_execute_best_plan(vf: i64, ic: i64, min_profitable_tc: i64) -> bool {
     if !su_always_true(pse_union(lvx_pse)) { vp_unported("SCEV runtime checks (GeneratedRTChecks)"); }
     // isOutsideLoopWorkProfitable: the scalar cost of a user VF is 0 -> profitable
     if vf == 1 && ic <= 1 { return false; }
-    if vf == 1 { vp_unported("interleaving without vectorizing"); }
+
     // selectBestEpiloguePlan: preferEpilogueVectorization is getMaxInterleaveFactor(VF * IC) > 1
     if lvx_epilogue_candidate(vf, ic) { vp_unported("epilogue vectorization"); }
     let latch = loop_latch(lvx_l);
