@@ -486,7 +486,8 @@ fn vpi_with_type_execute(r: i32) {
     let o = vpr[r].opcode;
     if vp_opcode_is_cast(o) {
         let a = vts_get_lane(vp_op(r, 0), 0);
-        let c = vxb_cast(o as i64, a, rty, vp_name(r));
+        // CreateCast without a name
+        let c = vxb_cast(o as i64, a, rty, "");
         if is_inst(c) && c != a { vp_apply_flags(r, c); vp_apply_metadata(r, c); }
         vts_set_lane(vpr[r].def, c, 0);
         return;

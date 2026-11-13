@@ -762,14 +762,22 @@ fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> boo
 }
 fn lv_no_plan_result(user_ic: i64) -> bool { return false; }
 
-// computeMinimalBitwidths: MinBWs is empty unless the loop has an extension feeding a truncation or compare root
+// computeMinimalBitwidths: computeMinimumValueSizes(TheLoop->getBlocks(), DB, &TTI) up to its early exit; a loop
+// that gets past it fails loudly
 fn lv_check_minimal_bitwidths() {
+    var seen_ext_from_illegal = false;
+    var have_root = false;
     for b in loop_nblocks(lv_l) {
         var i = block_first(loop_block(lv_l, b));
         while i >= 0 {
             let o = iop(i);
-            if o == OP_ZEXT || o == OP_SEXT { lvx_unported("computeMinimumValueSizes (minimal bitwidths)"); }
+            if (o == OP_ZEXT || o == OP_SEXT) && !tti_is_type_legal(vals[op(i, 0)].ty as i32) { seen_ext_from_illegal = true; }
+            if (o == OP_TRUNC || o == OP_ICMP) && !ty_is_vector(vals[i].ty) && (!ty_is_int(ty_scalar(vals[op(i, 0)].ty)) || ty_bits(ty_scalar(vals[op(i, 0)].ty)) <= 64) {
+                if !(o == OP_TRUNC && tti_is_type_legal(vals[i].ty as i32)) { have_root = true; }
+            }
             i = inst_next(i);
         }
     }
+    if !have_root || !seen_ext_from_illegal { return; }
+    lvx_unported("computeMinimumValueSizes (minimal bitwidths)");
 }

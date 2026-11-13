@@ -828,7 +828,15 @@ recursive fn vpsx_try_to_expand(s: i32) -> i32 {
     if !sc_is_const(s) && !sc_is_unknown(s) {
         var vs: i32[>..<] = [];
         sc_get_scev_values(s, vs);
-        if vs.len > 0 { vp_unported("VPSCEVExpander reusing IR values"); }
+        let ph = vpb[vph.entry].irbb;
+        for v in vs {
+            if !is_inst(v) { return vp_live_in(v); }
+            if !dt_dominates_block(DT_DOM, inst_parent(v), ph) { continue; }
+            var drop: i32[>..<] = [];
+            if !sc_can_reuse_instruction(s, v, drop) { continue; }
+            for di in drop { sx_drop_poison_annotations_and_reinfer(di); }
+            return vp_live_in(v);
+        }
     }
     let k = sc_kind(s);
     if k == SC_CONST || k == SC_UNKNOWN { return vp_live_in(sc_value(s)); }
