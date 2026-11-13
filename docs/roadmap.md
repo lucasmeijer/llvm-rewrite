@@ -284,6 +284,157 @@ unit yet.
 - deps: L0.print-clang
 - exit: tests/e2e/O0/*::isel-ir, tests/function/O0/*::isel-ir
 
+## Layer 1b: passes outside the default pipelines (exact IR)
+
+The goal is every LLVM middle-end pass, not only those `default<O2>` and `llc -O2` run. These units cover the rest:
+instrumentation (sanitizers, coverage, PGO and sample profiles), alternative or experimental optimizations (NewGVN,
+GVNHoist/GVNSink, LoopFusion, IRCE, the Attributor, …), language-runtime support (coroutines, ObjC ARC, GC
+statepoints, CFI), passes other targets' codegen pipelines use (StructurizeCFG, LoadStoreVectorizer, …) and utility
+passes. Each is checked exactly like an L1 pass, with `opt -passes=<pass> -S` on LLVM's own tests (the x86-64 and
+target-independent ones; `SKIPPED.md` in each directory lists what was left out and why). None of them blocks
+L2.pipeline-O2; pick them up after the L1 unit they depend on. Tests that read a profile or summary file reference a
+copy under the test directory's `Inputs/` by a path relative to the repository (the tools' working directory).
+
+### L1.extra.attributor — Attributor (the fixpoint IPO attribute deducer, not in default<O2>)
+- deps: L2.function-attrs, L2.ipo-args
+- exit: tests/imported/llvm/Transforms/Attributor/*::roundtrip, tests/imported/llvm/Transforms/Attributor/*::opt, tests/imported/llvm/Transforms/Attributor/*::analysis
+
+### L1.extra.coroutines — Coroutine lowering: coro-early, coro-split, coro-elide, coro-cleanup, coro-annotation-elide
+- deps: L1.sroa, L1.simplifycfg, L2.inline
+- exit: tests/imported/llvm/Transforms/Coroutines/*::roundtrip, tests/imported/llvm/Transforms/Coroutines/*::opt
+
+### L1.extra.newgvn — NewGVN (MemorySSA-based global value numbering)
+- deps: L1.analysis.memoryssa, L1.instsimplify
+- exit: tests/imported/llvm/Transforms/NewGVN/*::roundtrip, tests/imported/llvm/Transforms/NewGVN/*::opt
+
+### L1.extra.gvn-hoist-sink — GVNHoist and GVNSink
+- deps: L1.analysis.memoryssa, L1.gvn
+- exit: tests/imported/llvm/Transforms/GVNHoist/*::roundtrip, tests/imported/llvm/Transforms/GVNHoist/*::opt, tests/imported/llvm/Transforms/GVNSink/*::roundtrip, tests/imported/llvm/Transforms/GVNSink/*::opt, tests/imported/llvm/Transforms/GVNSink/*::analysis
+
+### L1.extra.sanitizers.msan — MemorySanitizer instrumentation (x86-64 parts)
+- deps: L1.instsimplify
+- exit: tests/imported/llvm/Instrumentation/MemorySanitizer/*::roundtrip, tests/imported/llvm/Instrumentation/MemorySanitizer/*::opt
+
+### L1.extra.sanitizers.asan — AddressSanitizer instrumentation (x86-64 parts)
+- deps: L1.instsimplify
+- exit: tests/imported/llvm/Instrumentation/AddressSanitizer/*::roundtrip, tests/imported/llvm/Instrumentation/AddressSanitizer/*::opt
+
+### L1.extra.sanitizers.dfsan — DataFlowSanitizer instrumentation
+- deps: L1.instsimplify
+- exit: tests/imported/llvm/Instrumentation/DataFlowSanitizer/*::roundtrip, tests/imported/llvm/Instrumentation/DataFlowSanitizer/*::opt
+
+### L1.extra.sanitizers.tsan-misc — ThreadSanitizer, TypeSanitizer, NumericalStabilitySanitizer, RealtimeSanitizer
+- deps: L1.instsimplify
+- exit: tests/imported/llvm/Instrumentation/ThreadSanitizer/*::roundtrip, tests/imported/llvm/Instrumentation/ThreadSanitizer/*::opt, tests/imported/llvm/Instrumentation/TypeSanitizer/*::roundtrip, tests/imported/llvm/Instrumentation/TypeSanitizer/*::opt, tests/imported/llvm/Instrumentation/NumericalStabilitySanitizer/*::roundtrip, tests/imported/llvm/Instrumentation/NumericalStabilitySanitizer/*::opt, tests/imported/llvm/Instrumentation/RealtimeSanitizer/*::roundtrip, tests/imported/llvm/Instrumentation/RealtimeSanitizer/*::opt
+
+### L1.extra.sanitizers.hwasan — HWAddressSanitizer instrumentation (x86-64 parts: aliasing mode, no tagged pointers in hardware)
+- deps: L1.extra.sanitizers.asan
+- exit: tests/imported/llvm/Instrumentation/HWAddressSanitizer/*::roundtrip, tests/imported/llvm/Instrumentation/HWAddressSanitizer/*::opt
+
+### L1.extra.instrumentation.coverage — SanitizerCoverage, SanitizerBinaryMetadata, GCOVProfiling, JustMyCode, Instrumentor
+- deps: L1.instsimplify
+- exit: tests/imported/llvm/Instrumentation/SanitizerCoverage/*::roundtrip, tests/imported/llvm/Instrumentation/SanitizerCoverage/*::opt, tests/imported/llvm/Instrumentation/SanitizerBinaryMetadata/*::roundtrip, tests/imported/llvm/Instrumentation/SanitizerBinaryMetadata/*::opt, tests/imported/llvm/Transforms/GCOVProfiling/*::roundtrip, tests/imported/llvm/Transforms/GCOVProfiling/*::opt, tests/imported/llvm/Instrumentation/JustMyCode/*::roundtrip, tests/imported/llvm/Instrumentation/JustMyCode/*::opt, tests/imported/llvm/Instrumentation/Instrumentor/*::roundtrip, tests/imported/llvm/Instrumentation/Instrumentor/*::opt
+
+### L1.extra.hardening — Run-time checks and hardening: BoundsChecking, AllocToken, LowerAllowCheck, KCFI, SafeStack, StackProtector
+- deps: L1.instsimplify, L1.analysis.scev
+- exit: tests/imported/llvm/Instrumentation/BoundsChecking/*::roundtrip, tests/imported/llvm/Instrumentation/BoundsChecking/*::opt, tests/imported/llvm/Instrumentation/AllocToken/*::roundtrip, tests/imported/llvm/Instrumentation/AllocToken/*::opt, tests/imported/llvm/Transforms/LowerAllowCheck/*::roundtrip, tests/imported/llvm/Transforms/LowerAllowCheck/*::opt, tests/imported/llvm/Transforms/KCFI/*::roundtrip, tests/imported/llvm/Transforms/KCFI/*::opt, tests/imported/llvm/Transforms/SafeStack/*::roundtrip, tests/imported/llvm/Transforms/SafeStack/*::opt, tests/imported/llvm/Transforms/StackProtector/*::roundtrip, tests/imported/llvm/Transforms/StackProtector/*::opt
+
+### L1.extra.pgo.instr — IR PGO: pgo-instr-gen / pgo-instr-use, indirect-call promotion, memop optimization (PGOProfile)
+- deps: L1.analysis.bfi, L2.inline
+- exit: tests/imported/llvm/Transforms/PGOProfile/*::roundtrip, tests/imported/llvm/Transforms/PGOProfile/*::opt
+
+### L1.extra.pgo.instrprof — InstrProfiling lowering (instrprof), PGOForceFunctionAttrs
+- deps: L1.extra.pgo.instr
+- exit: tests/imported/llvm/Instrumentation/InstrProfiling/*::roundtrip, tests/imported/llvm/Instrumentation/InstrProfiling/*::opt, tests/imported/llvm/Instrumentation/PGOForceFunctionAttrs/*::roundtrip, tests/imported/llvm/Instrumentation/PGOForceFunctionAttrs/*::opt
+
+### L1.extra.memprof — Heap profiling instrumentation (memprof) and MemProfContextDisambiguation
+- deps: L2.inline
+- exit: tests/imported/llvm/Instrumentation/HeapProfiler/*::roundtrip, tests/imported/llvm/Instrumentation/HeapProfiler/*::opt, tests/imported/llvm/Transforms/MemProfContextDisambiguation/*::roundtrip, tests/imported/llvm/Transforms/MemProfContextDisambiguation/*::opt
+
+### L1.extra.sample-profile — SampleProfile loader (profiles copied to `Inputs/`), AddDiscriminators
+- deps: L1.analysis.bfi, L2.inline
+- exit: tests/imported/llvm/Transforms/SampleProfile/*::roundtrip, tests/imported/llvm/Transforms/SampleProfile/*::opt, tests/imported/llvm/Transforms/SampleProfile/*::analysis, tests/imported/llvm/Transforms/AddDiscriminators/*::roundtrip, tests/imported/llvm/Transforms/AddDiscriminators/*::opt
+
+### L1.extra.lowertypetests — Control-flow integrity: LowerTypeTests, CrossDSOCFI, SimplifyTypeTests, GlobalSplit
+- deps: L2.globals
+- exit: tests/imported/llvm/Transforms/LowerTypeTests/*::roundtrip, tests/imported/llvm/Transforms/LowerTypeTests/*::opt, tests/imported/llvm/Transforms/CrossDSOCFI/*::roundtrip, tests/imported/llvm/Transforms/CrossDSOCFI/*::opt, tests/imported/llvm/Transforms/SimplifyTypeTests/*::roundtrip, tests/imported/llvm/Transforms/SimplifyTypeTests/*::opt, tests/imported/llvm/Transforms/GlobalSplit/*::roundtrip, tests/imported/llvm/Transforms/GlobalSplit/*::opt
+
+### L1.extra.wholeprogramdevirt — WholeProgramDevirt (summaries copied to `Inputs/`)
+- deps: L1.extra.lowertypetests
+- exit: tests/imported/llvm/Transforms/WholeProgramDevirt/*::roundtrip, tests/imported/llvm/Transforms/WholeProgramDevirt/*::opt
+
+### L1.extra.ir-outliner — IROutliner and the IRSimilarityIdentifier analysis
+- deps: L1.simplifycfg
+- exit: tests/imported/llvm/Transforms/IROutliner/*::roundtrip, tests/imported/llvm/Transforms/IROutliner/*::opt, tests/imported/llvm/Analysis/IRSimilarityIdentifier/*::roundtrip, tests/imported/llvm/Analysis/IRSimilarityIdentifier/*::analysis
+
+### L1.extra.code-extraction — CodeExtractor, HotColdSplitting, PartialInlining
+- deps: L1.analysis.bfi, L1.simplifycfg
+- exit: tests/imported/llvm/Transforms/CodeExtractor/*::roundtrip, tests/imported/llvm/Transforms/CodeExtractor/*::opt, tests/imported/llvm/Transforms/CodeExtractor/*::analysis, tests/imported/llvm/Transforms/HotColdSplit/*::roundtrip, tests/imported/llvm/Transforms/HotColdSplit/*::opt, tests/imported/llvm/Transforms/PartialInlining/*::roundtrip, tests/imported/llvm/Transforms/PartialInlining/*::opt
+
+### L1.extra.gc-statepoints — RewriteStatepointsForGC and PlaceSafepoints
+- deps: L1.analysis.loops, L1.simplifycfg
+- exit: tests/imported/llvm/Transforms/RewriteStatepointsForGC/*::roundtrip, tests/imported/llvm/Transforms/RewriteStatepointsForGC/*::opt, tests/imported/llvm/Transforms/PlaceSafepoints/*::roundtrip, tests/imported/llvm/Transforms/PlaceSafepoints/*::opt
+
+### L1.extra.objcarc — ObjCARC optimizations (objc-arc, objc-arc-contract, objc-arc-expand, objc-arc-apelim)
+- deps: L1.analysis.aa
+- exit: tests/imported/llvm/Transforms/ObjCARC/*::roundtrip, tests/imported/llvm/Transforms/ObjCARC/*::opt, tests/imported/llvm/Transforms/ObjCARC/*::analysis
+
+### L1.extra.lower-matrix — LowerMatrixIntrinsics
+- deps: L1.instcombine
+- exit: tests/imported/llvm/Transforms/LowerMatrixIntrinsics/*::roundtrip, tests/imported/llvm/Transforms/LowerMatrixIntrinsics/*::opt
+
+### L1.extra.scalarizer — Scalarizer and ScalarizeMaskedMemIntrin
+- deps: L1.instsimplify
+- exit: tests/imported/llvm/Transforms/Scalarizer/*::roundtrip, tests/imported/llvm/Transforms/Scalarizer/*::opt, tests/imported/llvm/Transforms/ScalarizeMaskedMemIntrin/*::roundtrip, tests/imported/llvm/Transforms/ScalarizeMaskedMemIntrin/*::opt
+
+### L1.extra.irce — InductiveRangeCheckElimination
+- deps: L1.indvars, L1.loop-canonical
+- exit: tests/imported/llvm/Transforms/IRCE/*::roundtrip, tests/imported/llvm/Transforms/IRCE/*::opt
+
+### L1.extra.guards — Guards and widenable conditions: LoopPredication, GuardWidening, LowerGuardIntrinsic, MakeGuardsExplicit, LowerWidenableCondition
+- deps: L1.indvars, L1.loop-canonical
+- exit: tests/imported/llvm/Transforms/LoopPredication/*::roundtrip, tests/imported/llvm/Transforms/LoopPredication/*::opt, tests/imported/llvm/Transforms/GuardWidening/*::roundtrip, tests/imported/llvm/Transforms/GuardWidening/*::opt, tests/imported/llvm/Transforms/LowerGuardIntrinsic/*::roundtrip, tests/imported/llvm/Transforms/LowerGuardIntrinsic/*::opt, tests/imported/llvm/Transforms/MakeGuardsExplicit/*::roundtrip, tests/imported/llvm/Transforms/MakeGuardsExplicit/*::opt, tests/imported/llvm/Transforms/LowerWidenableCondition/*::roundtrip, tests/imported/llvm/Transforms/LowerWidenableCondition/*::opt
+
+### L1.extra.loop-fusion-flatten — LoopFusion and LoopFlatten
+- deps: L1.indvars, L1.o2-gaps
+- exit: tests/imported/llvm/Transforms/LoopFusion/*::roundtrip, tests/imported/llvm/Transforms/LoopFusion/*::opt, tests/imported/llvm/Transforms/LoopFlatten/*::roundtrip, tests/imported/llvm/Transforms/LoopFlatten/*::opt
+
+### L1.extra.loop-misc — LoopUnrollAndJam, LoopVersioning, LoopVersioningLICM, LoopBoundSplit, CanonicalizeFreezeInLoops, HardwareLoops, transform warnings
+- deps: L1.loop-unroll, L1.licm, L1.analysis.laa
+- exit: tests/imported/llvm/Transforms/LoopUnrollAndJam/*::roundtrip, tests/imported/llvm/Transforms/LoopUnrollAndJam/*::opt, tests/imported/llvm/Transforms/LoopUnrollAndJam/*::analysis, tests/imported/llvm/Transforms/LoopVersioning/*::roundtrip, tests/imported/llvm/Transforms/LoopVersioning/*::opt, tests/imported/llvm/Transforms/LoopVersioningLICM/*::roundtrip, tests/imported/llvm/Transforms/LoopVersioningLICM/*::opt, tests/imported/llvm/Transforms/LoopBoundSplit/*::roundtrip, tests/imported/llvm/Transforms/LoopBoundSplit/*::opt, tests/imported/llvm/Transforms/CanonicalizeFreezeInLoops/*::roundtrip, tests/imported/llvm/Transforms/CanonicalizeFreezeInLoops/*::opt, tests/imported/llvm/Transforms/HardwareLoops/*::roundtrip, tests/imported/llvm/Transforms/HardwareLoops/*::opt, tests/imported/llvm/Transforms/LoopTransformWarning/*::roundtrip, tests/imported/llvm/Transforms/LoopTransformWarning/*::analysis
+
+### L1.extra.strength-reduction — NaryReassociate, StraightLineStrengthReduce, SeparateConstOffsetFromGEP
+- deps: L1.reassociate, L1.analysis.scev
+- exit: tests/imported/llvm/Transforms/NaryReassociate/*::roundtrip, tests/imported/llvm/Transforms/NaryReassociate/*::opt, tests/imported/llvm/Transforms/StraightLineStrengthReduce/*::roundtrip, tests/imported/llvm/Transforms/StraightLineStrengthReduce/*::opt, tests/imported/llvm/Transforms/SeparateConstOffsetFromGEP/*::roundtrip, tests/imported/llvm/Transforms/SeparateConstOffsetFromGEP/*::opt
+
+### L1.extra.cfg-structurize — StructurizeCFG, FixIrreducible, UnifyLoopExits, LowerSwitch, RegionInfo
+- deps: L1.analysis.loops, L1.analysis.domtree
+- exit: tests/imported/llvm/Transforms/StructurizeCFG/*::roundtrip, tests/imported/llvm/Transforms/StructurizeCFG/*::opt, tests/imported/llvm/Transforms/FixIrreducible/*::roundtrip, tests/imported/llvm/Transforms/FixIrreducible/*::opt, tests/imported/llvm/Transforms/FixIrreducible/*::analysis, tests/imported/llvm/Transforms/UnifyLoopExits/*::roundtrip, tests/imported/llvm/Transforms/UnifyLoopExits/*::opt, tests/imported/llvm/Transforms/LowerSwitch/*::roundtrip, tests/imported/llvm/Transforms/LowerSwitch/*::opt, tests/imported/llvm/Analysis/RegionInfo/*::roundtrip, tests/imported/llvm/Analysis/RegionInfo/*::analysis
+
+### L1.extra.load-store-vectorizer — LoadStoreVectorizer (x86 parts)
+- deps: L1.analysis.aa, L1.analysis.cost-model
+- exit: tests/imported/llvm/Transforms/LoadStoreVectorizer/*::roundtrip, tests/imported/llvm/Transforms/LoadStoreVectorizer/*::opt
+
+### L1.extra.sandbox-vectorizer — SandboxVectorizer (x86 parts)
+- deps: L1.vectorize.slp
+- exit: tests/imported/llvm/Transforms/SandboxVectorizer/*::roundtrip, tests/imported/llvm/Transforms/SandboxVectorizer/*::opt
+
+### L1.extra.openmp-opt — OpenMPOpt (host-side x86-64 parts)
+- deps: L2.inline, L1.extra.attributor
+- exit: tests/imported/llvm/Transforms/OpenMP/*::roundtrip, tests/imported/llvm/Transforms/OpenMP/*::opt
+
+### L1.extra.codegen-ir-misc — Further IR passes llc and targets run: ConstantHoisting, InterleavedAccess, ExpandIRInsts, GlobalMerge, IndirectBrExpand, InferAddressSpaces, LowerInvoke, LowerAtomic
+- deps: L1.codegen-ir
+- exit: tests/imported/llvm/Transforms/ConstantHoisting/*::roundtrip, tests/imported/llvm/Transforms/ConstantHoisting/*::opt, tests/imported/llvm/Transforms/InterleavedAccess/*::roundtrip, tests/imported/llvm/Transforms/InterleavedAccess/*::opt, tests/imported/llvm/Transforms/ExpandIRInsts/*::roundtrip, tests/imported/llvm/Transforms/ExpandIRInsts/*::opt, tests/imported/llvm/Transforms/GlobalMerge/*::roundtrip, tests/imported/llvm/Transforms/GlobalMerge/*::opt, tests/imported/llvm/Transforms/IndirectBrExpand/*::roundtrip, tests/imported/llvm/Transforms/IndirectBrExpand/*::opt, tests/imported/llvm/Transforms/InferAddressSpaces/*::roundtrip, tests/imported/llvm/Transforms/InferAddressSpaces/*::opt, tests/imported/llvm/Transforms/LowerInvoke/*::roundtrip, tests/imported/llvm/Transforms/LowerInvoke/*::opt, tests/imported/llvm/Transforms/LowerAtomic/*::roundtrip, tests/imported/llvm/Transforms/LowerAtomic/*::opt
+
+### L1.extra.utility — Utility and module passes: StripSymbols, MetaRenamer, InstNamer, Reg2Mem, IRNormalizer, LowerGlobalDestructors, LowerIFunc, AssignGUID, FatLTOCleanup, StripConvergenceIntrinsics, HipStdPar
+- deps: L0.print-clang
+- exit: tests/imported/llvm/Transforms/StripSymbols/*::roundtrip, tests/imported/llvm/Transforms/StripSymbols/*::opt, tests/imported/llvm/Transforms/MetaRenamer/*::roundtrip, tests/imported/llvm/Transforms/MetaRenamer/*::opt, tests/imported/llvm/Transforms/InstNamer/*::roundtrip, tests/imported/llvm/Transforms/InstNamer/*::opt, tests/imported/llvm/Transforms/Reg2Mem/*::roundtrip, tests/imported/llvm/Transforms/Reg2Mem/*::opt, tests/imported/llvm/Transforms/IRNormalizer/*::roundtrip, tests/imported/llvm/Transforms/IRNormalizer/*::opt, tests/imported/llvm/Transforms/LowerGlobalDestructors/*::roundtrip, tests/imported/llvm/Transforms/LowerGlobalDestructors/*::opt, tests/imported/llvm/Transforms/LowerIFunc/*::roundtrip, tests/imported/llvm/Transforms/LowerIFunc/*::opt, tests/imported/llvm/Transforms/AssignGUID/*::roundtrip, tests/imported/llvm/Transforms/AssignGUID/*::opt, tests/imported/llvm/Transforms/FatLTOCleanup/*::roundtrip, tests/imported/llvm/Transforms/FatLTOCleanup/*::opt, tests/imported/llvm/Transforms/StripConvergenceIntrinsics/*::roundtrip, tests/imported/llvm/Transforms/StripConvergenceIntrinsics/*::opt, tests/imported/llvm/Transforms/HipStdPar/*::roundtrip, tests/imported/llvm/Transforms/HipStdPar/*::opt
+
+### L1.extra.analysis-misc — Analysis printers outside the pipelines: Lint, IR2Vec, StackSafety, AliasSet, CtxProf, FunctionProperties, HashRecognize, ProfileSummary, SCEV division, StructuralHash
+- deps: L1.analysis.scev
+- exit: tests/imported/llvm/Analysis/Lint/*::roundtrip, tests/imported/llvm/Analysis/Lint/*::opt, tests/imported/llvm/Analysis/Lint/*::analysis, tests/imported/llvm/Analysis/IR2Vec/*::roundtrip, tests/imported/llvm/Analysis/IR2Vec/*::analysis, tests/imported/llvm/Analysis/StackSafetyAnalysis/*::roundtrip, tests/imported/llvm/Analysis/StackSafetyAnalysis/*::analysis, tests/imported/llvm/Analysis/AliasSet/*::roundtrip, tests/imported/llvm/Analysis/AliasSet/*::opt, tests/imported/llvm/Analysis/CtxProfAnalysis/*::roundtrip, tests/imported/llvm/Analysis/CtxProfAnalysis/*::opt, tests/imported/llvm/Analysis/FunctionPropertiesAnalysis/*::roundtrip, tests/imported/llvm/Analysis/FunctionPropertiesAnalysis/*::analysis, tests/imported/llvm/Analysis/HashRecognize/*::roundtrip, tests/imported/llvm/Analysis/HashRecognize/*::analysis, tests/imported/llvm/Analysis/ProfileSummary/*::roundtrip, tests/imported/llvm/Analysis/ProfileSummary/*::analysis, tests/imported/llvm/Analysis/ScalarEvolutionDivision/*::roundtrip, tests/imported/llvm/Analysis/ScalarEvolutionDivision/*::analysis, tests/imported/llvm/Analysis/StructuralHash/*::roundtrip, tests/imported/llvm/Analysis/StructuralHash/*::analysis
+
 ## Layer 2: interprocedural and whole-program optimization (exact IR)
 
 ### L2.function-attrs — FunctionAttrs, InferFunctionAttrs
