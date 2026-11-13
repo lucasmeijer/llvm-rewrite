@@ -196,6 +196,8 @@ vpi_add_mask :: (r: Vp_Rec, m: Vp_Val) {
 
 // VPlanTransforms::introduceMasksAndLinearize
 vp_introduce_masks_and_linearize :: () {
+    // nested loop regions (outer-loop vectorization) are not supported yet
+    if vp_is_outer_loop() return;
     region := vp_vector_loop_region();
     header := vp_entry_basic_block(region);
     rpo := vp_rpo(header, false);

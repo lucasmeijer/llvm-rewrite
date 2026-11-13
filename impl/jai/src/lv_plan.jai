@@ -74,15 +74,19 @@ vp_get_or_create_vp_value_for_scev_expr :: (e: Scev_Id) -> Vp_Val {
 lvp_try_to_build_vplan1 :: (lp: *Lv_Planner) -> *Vp_Plan {
     lvl := lp.lvl;
     laa := lvl.laa;
-    lver := New(Lv_Noalias,, allocator = temp);
-    if laa.rt.checks.count && !laa.rt.can_use_diff_check lv_prepare_no_alias_metadata(lver, *laa.rt);
+    // loop versioning (noalias metadata) only for inner loops: outer loops have no LoopAccessInfo
+    lver: *Lv_Noalias = null;
+    if laa {
+        lver = New(Lv_Noalias,, allocator = temp);
+        if laa.rt.checks.count && !laa.rt.can_use_diff_check lv_prepare_no_alias_metadata(lver, *laa.rt);
+    }
     plan := vp_build_vplan0(lp.li, lp.l, lvl.widest_ind_ty, lp.pse, lver);
     dt := vp_dt_build();
-    vp_replace_symbolic_strides(lp.pse, *laa.symbolic_strides, *dt);
+    if laa vp_replace_symbolic_strides(lp.pse, *laa.symbolic_strides, *dt);
     vp_simplify_recipes();
     vp_remove_dead_recipes();
     if !vp_create_header_phi_recipes(lp.pse, lp.li, lp.l, *dt, lvl, lp.in_loop_reductions, lvh_allow_reordering(lp.hints)) return null;
-    vp_replace_symbolic_strides(lp.pse, *laa.symbolic_strides, *dt);
+    if laa vp_replace_symbolic_strides(lp.pse, *laa.symbolic_strides, *dt);
     force := lvh_force(lp.hints) == FK_ENABLED;
     opt_for_size := !force && (lp.cm.sel == .NOT_ALLOWED_OPT_SIZE || lp.cm.sel == .NOT_ALLOWED_LOW_TRIP_LOOP);
     threshold := ifx force then lv_opts.pragma_scev_check_threshold else lv_opts.scev_check_threshold;
@@ -443,6 +447,14 @@ lvp_make_scalarization_decisions :: (range: *Vf_Range) {
 
 // LoopVectorizationPlanner::tryToBuildVPlan
 lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
+    // outer loops: only the basic recipe conversion and induction live-out optimization
+    if vp_is_outer_loop() {
+        vf := range.start;
+        while vf.n < range.end.n { vp_add_vf(vf); vf.n *= 2; }
+        if !vp_try_to_convert_vp_instructions_to_vp_recipes() return false;
+        lvp_optimize_induction_live_out_users(lp);
+        return true;
+    }
     ctx := Lvp_Vf_Ctx.{lp, NONE};
     no_epi :: (vf: Ec, d: *void) -> bool { c := cast(*Lvp_Vf_Ctx) d; return !lv_cm_requires_scalar_epilogue(c.lp.cm, ec_is_vector(vf)); }
     requires_check := lvp_decision_and_clamp_range(range, no_epi, *ctx);
@@ -911,6 +923,11 @@ lvp_build_vplans :: (lp: *Lv_Planner, vplan1: *Vp_Plan, min_vf: Ec, max_vf: Ec) 
 }
 // VFSelectionContext::computeMinimalBitwidths (computeMinimumValueSizes): only the empty result is ported
 lvp_minimal_bitwidths :: (lp: *Lv_Planner) -> *Table(Value_Id, u64) {
+    if !li_is_innermost(lp.li, lp.l) && !lp.cm.min_bws {   // computeMinimalBitwidths is not run for outer loops
+        e := New(Table(Value_Id, u64),, allocator = temp);
+        e.allocator = temp;
+        lp.cm.min_bws = e;
+    }
     if !lp.cm.min_bws lp.cm.min_bws = lv_compute_minimum_value_sizes(li_blocks(lp.li, lp.l), lp.p.db, lp.cm.tti);
     return lp.cm.min_bws;
 }
@@ -1054,7 +1071,11 @@ lv_tti_is_type_legal :: (t: *Tti, ty: Type_Id) -> bool {
 lvp_plan_and_vectorize :: (lp: *Lv_Planner, user_vf: Ec, user_ic: u64, max_factors: Vf_Pair) -> bool {
     if ec_is_vector(max_factors.fixed) || ec_is_vector(max_factors.scalable) lvl_collect_unit_stride_predicates(lp.lvl);
     vplan1 := lvp_try_to_build_vplan1(lp);
-    if vplan1 {
+    if vplan1 && !li_is_innermost(lp.li, lp.l) {
+        // outer loops: computeMaxVF returned a single non-scalar VF; build a plan for that VF only
+        vf := ifx max_factors.fixed.n then max_factors.fixed else max_factors.scalable;
+        lvp_build_vplans(lp, vplan1, vf, vf);
+    } else if vplan1 {
         lp.cm.min_bws = lv_compute_minimum_value_sizes(li_blocks(lp.li, lp.l), lp.p.db, lp.cm.tti);
         if lv_cm_block_needs_predication_for_any_reason(lp.cm, li_header(lp.li, lp.l)) && !lv_use_masked_interleaved_accesses(lp.cm.tti) {
             if iai_invalidate_groups(lp.cm.iai) {   // invalidateCostModelingDecisions
@@ -1090,6 +1111,8 @@ lvp_plan_and_vectorize :: (lp: *Lv_Planner, user_vf: Ec, user_ic: u64, max_facto
         }
     }
     best, plan := lvp_compute_best_vf(lp);
+    // VPlan build stress testing of outer loops bails after plan construction
+    if !li_is_innermost(lp.li, lp.l) && lv_opts.vplan_build_outerloop_stress_test return false;
     return lvp_process_best_plan(lp, best, plan, user_ic);
 }
 vp_plan_single_vf :: (p: *Vp_Plan) -> Ec { assert(p.vfs.count == 1); return p.vfs[0]; }

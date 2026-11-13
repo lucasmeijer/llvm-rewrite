@@ -231,6 +231,48 @@ lvl_collect_unit_stride_predicates :: (v: *Lvl) {
     }
 }
 
+// isUniformLoop
+lv_is_uniform_loop :: (li: *Loop_Info, lp: Loop_Id, outer: Loop_Id) -> bool {
+    if lp == outer return true;
+    iv := li_canonical_induction_variable(li, lp);
+    if iv == NONE return false;
+    latch := li_loop_latch(li, lp);
+    t := block_terminator(latch);
+    if inst_op(t) != .CONDBR return false;
+    c := op(t, 0);
+    if !is_inst(c) || (inst_op(c) != .ICMP && inst_op(c) != .FCMP) return false;
+    c0 := op(c, 0); c1 := op(c, 1);
+    upd := phi_incoming_value_for_block(iv, latch);
+    if !(c0 == upd && li_is_loop_invariant(li, outer, c1)) && !(c1 == upd && li_is_loop_invariant(li, outer, c0)) return false;
+    return true;
+}
+// isUniformLoopNest
+lv_is_uniform_loop_nest :: (li: *Loop_Info, lp: Loop_Id, outer: Loop_Id) -> bool {
+    if !lv_is_uniform_loop(li, lp, outer) return false;
+    for li_subloops(li, lp) if !lv_is_uniform_loop_nest(li, it, outer) return false;
+    return true;
+}
+// LoopVectorizationLegality::canVectorizeOuterLoop
+lvl_can_vectorize_outer_loop :: (v: *Lvl) -> bool {
+    li := v.li; l := v.l;
+    for bb: li_blocks(li, l) {
+        t := block_terminator(bb);
+        if inst_op(t) != .BR && inst_op(t) != .CONDBR return false;
+        if inst_op(t) == .CONDBR && !li_is_loop_invariant(li, l, op(t, 0)) &&
+           !li_is_loop_header(li, get_successor(t, 0)) && !li_is_loop_header(li, get_successor(t, 1)) return false;
+    }
+    if !lv_is_uniform_loop_nest(li, l, l) return false;
+    // setupOuterLoopInductions: every header phi must be an integer induction
+    header := li_header(li, l);
+    for phi: block_insts(header) {
+        if !is_phi(phi) break;
+        id: Ind_Desc;
+        if ind_is_induction_phi(phi, li, l, v.pse, *id) && id.kind == .INT { lvl_add_induction_phi(v, phi, id); continue; }
+        return false;
+    }
+    return true;
+}
+
 // LoopVectorizationLegality::addInductionPhi
 lvl_add_induction_phi :: (v: *Lvl, phi: Value_Id, d: Ind_Desc) {
     e := lvl_find_induction(v, phi);
@@ -606,7 +648,10 @@ lvl_can_vectorize_loop_nest_cfg :: (v: *Lvl, lp: Loop_Id) -> bool {
 // LoopVectorizationLegality::canVectorize
 lvl_can_vectorize :: (v: *Lvl, use_vplan_native_path: bool) -> bool {
     if !lvl_can_vectorize_loop_nest_cfg(v, v.l) return false;
-    if !li_is_innermost(v.li, v.l) fatal("loop-vectorize: outer-loop vectorization (VPlan-native path) is not supported yet");
+    if !li_is_innermost(v.li, v.l) {
+        assert(use_vplan_native_path, "VPlan-native path is not enabled.");
+        return lvl_can_vectorize_outer_loop(v);
+    }
     if li_blocks(v.li, v.l).count != 1 && !lvl_can_vectorize_with_if_convert(v) return false;
     if !lvl_can_vectorize_instrs(v) return false;
     if sc_is_cnc(pse_get_backedge_taken_count(v.pse)) {

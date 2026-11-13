@@ -745,3 +745,66 @@ vp_materialize_alias_mask_check_block :: (diff_checks: [] Rt_Diff_Check, has_bra
     vp_rauw(vpl.vf, clamped);
     vp_rauw(vpl.vfxuf, clamped);
 }
+
+// VPlan::isOuterLoop: the vector loop region contains a (non-replicate) loop region
+vp_is_outer_loop :: () -> bool {
+    region := vp_vector_loop_region();
+    for vp_depth_first_shallow(vb(region).entry) if vp_is_region(it) && !vp_is_replicator(it) return true;
+    return false;
+}
+
+// VPlanTransforms::tryToConvertVPInstructionsToVPRecipes (the VPlan-native path for outer loops)
+vp_try_to_convert_vp_instructions_to_vp_recipes :: () -> bool {
+    for bb: vp_blocks_only_basic(vp_rpo(vp_vector_loop_region(), true)) {
+        if vb(bb).parent == NONE break;
+        term := vp_terminator(bb);
+        for ing: vp_block_recipes(bb) {
+            if ing == term break;
+            vpv := vr(ing).def;
+            if vpv == NONE || vv(vpv).uv == NONE continue;
+            i := vv(vpv).uv;
+            o := inst_op(i);
+            if o == .ATOMICRMW || o == .CMPXCHG || o == .FENCE return false;
+            nr: Vp_Rec = NONE;
+            if vp_is_vp_phi(ing) {
+                nr = vp_new_single_def(.WIDEN_PHI, vr(ing).ops, vp_scalar_type(vpv), NONE, vr(ing).dl);
+                vr(nr).name = ir.v_name[i];
+            } else if vr(ing).kind == .INSTRUCTION {
+                if o == .LOAD {
+                    nr = vp_new_widen_load(i, vp_op(ing, 0), NONE, false, vr(ing).md, vr(ing).dl);
+                } else if o == .STORE {
+                    nr = vp_new_widen_store(i, vp_op(ing, 1), vp_op(ing, 0), NONE, false, vr(ing).md, vr(ing).dl);
+                } else if o == .GEP {
+                    nr = vp_new_single_def(.WIDEN_GEP, vr(ing).ops, vp_scalar_type(vp_op(ing, 0)), i, vr(ing).dl);
+                    vr(nr).src_elt_ty = gep_source_type(i); vr(nr).flags = vr(ing).flags;
+                } else if o == .CALL {
+                    id := get_vector_intrinsic_id_for_call(i);
+                    if id == NOT_INTRINSIC return false;
+                    if id == IID_EXPERIMENTAL_NOALIAS_SCOPE_DECL return false;
+                    if id == IID_ASSUME || id == IID_LIFETIME_END || id == IID_LIFETIME_START || id == IID_SIDEEFFECT || id == IID_PSEUDOPROBE {
+                        single := id != IID_ASSUME && id != IID_PSEUDOPROBE;
+                        nr = vp_new_replicate(i, vr(ing).ops, single, NONE, vr(ing).flags, vr(ing).md, vr(ing).dl);
+                    } else {
+                        ops: [..] Vp_Val; ops.allocator = temp;
+                        for k: 0..vp_nops(ing)-2 array_add(*ops, vp_op(ing, k));
+                        nr = vp_new_widen_intrinsic(i, id, ops, vtype(i), vp_flags_from_inst(i), vr(ing).md, inst_dl(i));
+                    }
+                } else if is_cast_op(o) {
+                    nr = vp_new_widen_cast(o, vp_op(ing, 0), vtype(i), i, vp_flags_from_inst(i), vp_metadata_to_propagate(i));
+                } else {
+                    nr = vp_new_single_def(.WIDEN, vr(ing).ops, vp_compute_scalar_type_for_instruction(vp_opc(o), vr(ing).ops), i, vr(ing).dl);
+                    vr(nr).opcode = vp_opc(o); vr(nr).flags = vr(ing).flags;
+                    for vr(ing).md array_add(*vr(nr).md, it);
+                }
+            } else {
+                assert(vr(ing).kind == .WIDEN_INT_OR_FP_INDUCTION, "inductions must be created earlier");
+                continue;
+            }
+            vp_insert_before(nr, ing);
+            if vp_num_defined_values(nr) == 1 vp_rauw(vpv, vp_defined_value(nr, 0));
+            else assert(vp_num_defined_values(nr) == 0, "Only recpies with zero or one defined values expected");
+            vp_erase_recipe(ing);
+        }
+    }
+    return true;
+}

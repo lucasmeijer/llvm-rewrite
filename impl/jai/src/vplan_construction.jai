@@ -263,13 +263,17 @@ vp_create_loop_region_for :: (header: Vp_Blk, dl_in: Md_Id) {
     vpbu_disconnect(latch, header);
     is_outermost := header == outermost_header;
     dl := dl_in;
-    if !is_outermost vp_unported("nested loop regions (outer-loop vectorization)");
-    r := vp_create_loop_region(vv(vpl.vector_trip_count).ty, dl);
+    // only the outermost loop has a canonical IV; nested loops get one of null type and an unknown location
+    can_ty: Type_Id = NONE;
+    if is_outermost can_ty = vv(vpl.vector_trip_count).ty;
+    else dl = NONE;
+    r := vp_create_loop_region(can_ty, dl);
     vpbu_transfer_successors(latch, r);
     vpbu_connect(ph, r);
     vp_region_set_entry(r, header);
     vp_region_set_exiting(r, latch);
     for vp_depth_first_shallow(header) vb(it).parent = r;
+    if !is_outermost return;
     term := vp_terminator(latch);
     b := vpb_before(term);
     inc := vpb_add(*b, vb(r).can_iv, vpl.vfxuf, dl, "index.next", true, false);

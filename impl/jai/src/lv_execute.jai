@@ -223,7 +223,7 @@ lvp_process_best_plan :: (lp: *Lv_Planner, vf_in: Lv_Vf, plan: *Vp_Plan, user_ic
     vf := vf_in;
     ic: u64 = 1;
     checks: Lv_Rt_Checks;
-    if plan {
+    if plan && li_is_innermost(lp.li, lp.l) {
         vp_use(plan);
         vp_print_plan("chosen");
         ic = lvp_select_interleave_count(lp, plan, vf.width, vf.cost);

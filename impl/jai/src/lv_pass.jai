@@ -557,10 +557,31 @@ lv_cm_try_to_enable_partial_alias_masking :: (cm: *Lv_Cm) {
 }
 lv_cm_mask_partial_aliasing :: (cm: *Lv_Cm) -> bool { return cm.alias_masking == .ENABLED; }
 
+// VFSelectionContext::computeVPlanOuterloopVF: a type-based heuristic VF (no cost model for outer loops)
+lv_compute_vplan_outerloop_vf :: (cm: *Lv_Cm, user_vf: Ec) -> Vf_Pair {
+    if user_vf.scalable return vfp_none();   // X86 does not support scalable vectors
+    vf := user_vf;
+    if vf.n == 0 {
+        _, widest := lv_smallest_and_widest_types(cm);
+        reg := cast(u64) tti_register_bit_width(cm.tti, RGK_FIXED_WIDTH_VECTOR);
+        q := reg / widest;
+        n: u64 = 1;
+        while n * 2 <= q n *= 2;   // bit_floor
+        vf = ec_fixed(max(n, 1));
+        lv_dbg("LV: VPlan computed VF %.\n", lv_ec_str(vf));
+        if lv_opts.vplan_build_outerloop_stress_test && ec_is_scalar(vf) vf = ec_fixed(4);
+    }
+    if ec_is_scalar(vf) return vfp_none();
+    lv_dbg("LV: Using %VF % to build VPlans.\n", ifx user_vf.n != 0 then "user " else "", lv_ec_str(vf));
+    r: Vf_Pair; r.fixed = vf;
+    return r;
+}
+
 // LoopVectorizationCostModel::computeMaxVF
 lv_cm_compute_max_vf :: (cm: *Lv_Cm, user_vf: Ec, user_ic: u64) -> Vf_Pair {
     defer if cm.alias_masking == .NOT_DECIDED cm.alias_masking = .DISABLED;
     li := cm.li; l := cm.l;
+    if !li_is_innermost(li, l) return lv_compute_vplan_outerloop_vf(cm, user_vf);
     // TTI.hasBranchDivergence() is false for X86 and NoTTI
     tc := lv_small_constant_trip_count(l);
     max_tc := lv_pse_small_constant_max_trip_count(cm);
@@ -691,7 +712,8 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
     lvl.db = p.db; lvl.hints = *hints; lvl.allow_runtime_scev_checks = !opt_for_size;
     if !lvl_can_vectorize(*lvl, lv_opts.enable_vplan_native_path) return false;
     is_inner := li_is_innermost(p.li, l);
-    if !is_inner lv_unported("outer-loop vectorization");
+    // outer loops require a computable trip count
+    if !is_inner && sc_is_cnc(pse_get_backedge_taken_count(*pse)) return false;
     if lvl_has_uncountable_early_exit(*lvl) {
         if !lv_opts.enable_early_exit return false;
         if lvl_has_uncountable_exit_with_side_effects(*lvl) && !lv_opts.enable_early_exit_with_side_effects return false;
@@ -727,7 +749,8 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
     // getEpilogueTailLowering only produces a remark here
     user_vf := Ec.{lvh_width(*hints), lvh_width_scalable(*hints)};
     user_ic := lvh_interleave(*hints);
-    if user_ic > 1 && !lvl_is_safe_for_any_vector_width(*lvl) user_ic = 1;
+    if !is_inner user_ic = 0;   // outer loops: no LoopAccessInfo and no interleaving
+    else if user_ic > 1 && !lvl_is_safe_for_any_vector_width(*lvl) user_ic = 1;
 
     // LoopVectorizationPlanner::plan
     lv_cm_collect_values_to_ignore(*cm);
