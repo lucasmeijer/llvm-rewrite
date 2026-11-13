@@ -318,6 +318,10 @@ unit yet.
 - deps: L2.pipeline-O2, L2.link
 - exit: tests/lto/*::roundtrip, tests/lto/*::link, tests/lto/*::opt
 
+### L2.lto-passes — The module passes only the LTO and phase-ordering pipelines use: mergefunc, forceattrs, canonicalize-aliases, name-anon-globals
+- deps: L2.lto
+- exit: tests/imported/llvm/Transforms/MergeFunc/*, tests/imported/llvm/Transforms/ForcedFunctionAttrs/*, tests/imported/llvm/Transforms/CanonicalizeAliases/*, tests/imported/llvm/Transforms/NameAnonGlobals/*
+
 ### L2.perf-corpus — Correct output on the compile-time performance corpus (real programs, scaling shapes)
 - deps: L2.pipeline-O2
 - exit: tests/perf/*::roundtrip, tests/perf/*::opt

@@ -325,7 +325,7 @@ Pass_Kind :: enum u8 {
     PRINT_DA; PRINT_DELINEARIZATION; PRINT_SCEV_DIVISION;
     // the LTO pipelines' module passes (pass_lto_misc.jai), MergeFunctions (pass_merge_functions.jai)
     CROSS_DSO_CFI; GLOBAL_SPLIT; WHOLE_PROGRAM_DEVIRT; LOWER_TYPE_TESTS; DROP_TYPE_TESTS; SIMPLIFY_TYPE_TESTS;
-    EXPAND_VARIADICS; PGO_ICALL_PROM; CANONICALIZE_ALIASES; NAME_ANON_GLOBALS; MERGE_FUNCTIONS;
+    EXPAND_VARIADICS; PGO_ICALL_PROM; CANONICALIZE_ALIASES; NAME_ANON_GLOBALS; MERGE_FUNCTIONS; PGO_FORCE_FUNCTION_ATTRS;
 }
 
 Pass_Info :: struct {
@@ -377,6 +377,9 @@ PASS_TABLE :: Pass_Info.[
     .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},
     .{"simplifycfg", .FUNCTION, .SIMPLIFYCFG, false, .DOMTREE},   // also simplifycfg<...> (lookup_pass)   // also instcombine<...> (lookup_pass)
     .{"verify", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},   // VerifierPass (module & function): nothing to report on valid IR
+    .{"verify-module", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // MODULE_PASS("verify"): parsed by parse_module_pass
+    // ModuleSummaryIndexAnalysis: building the summary changes no IR
+    .{"require<module-summary>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},
     .{"require<assumptions>", .FUNCTION, .REQUIRE, true, .ASSUMPTIONS},
     .{"invalidate<assumptions>", .FUNCTION, .INVALIDATE, true, .ASSUMPTIONS},
     .{"print<domtree>", .FUNCTION, .PRINT_DOMTREE, true, .DOMTREE},
@@ -500,6 +503,7 @@ PASS_TABLE :: Pass_Info.[
     .{"canonicalize-aliases", .MODULE, .CANONICALIZE_ALIASES, false, .DOMTREE},
     .{"name-anon-globals", .MODULE, .NAME_ANON_GLOBALS, false, .DOMTREE},
     .{"mergefunc", .MODULE, .MERGE_FUNCTIONS, false, .DOMTREE},
+    .{"pgo-force-function-attrs", .MODULE, .PGO_FORCE_FUNCTION_ATTRS, false, .DOMTREE},
     // L1.scalar-misc
     .{"lower-expect", .FUNCTION, .LOWER_EXPECT, false, .DOMTREE},
     .{"lower-constant-intrinsics", .FUNCTION, .LOWER_CONSTANT_INTRINSICS, false, .DOMTREE},
@@ -682,7 +686,7 @@ parse_pipeline_text :: (text: string) -> s32 {
 is_module_pass_name :: (name: string) -> bool {
     if name == "module" return true;
     if name == "function" || begins_with(name, "function<") return true;   // still a module-level element
-    if name == "cgscc" || name == "coro-cond" return true;
+    if name == "cgscc" || name == "coro-cond" || name == "verify" return true;
     if begins_with(name, "default<") || pb_is_unsupported_alias(name) return true;
     for string.["thinlto-pre-link<", "thinlto<", "lto-pre-link<", "lto<"] if begins_with(name, it) return true;
     if name == "loop" || name == "loop-mssa" return false;
@@ -903,6 +907,7 @@ parse_module_pass :: (mpm: s32, last: *s32, e: s32) {
     if pb_parse_lto_pipeline(mpm, last, el.name) return;   // thinlto-pre-link<O#>, thinlto<O#>, lto-pre-link<O#>, lto<O#>
     if pb_is_unsupported_alias(el.name) fatal("pass pipeline '%': the FatLTO pipeline is not implemented yet", el.name);
     if el.name == "coro-cond" pipeline_error("invalid use of 'coro-cond' pass as module pipeline");
+    if el.name == "verify" { link_child(mpm, last, new_node(.NO_OP_MODULE, lookup_pass("verify-module"), "verify")); return; }
     p := lookup_pass(el.name);
     if p == null unknown_pass(el.name);
     if p.level == .MODULE { link_child(mpm, last, new_node(p.kind, p, el.name)); return; }
@@ -1090,6 +1095,8 @@ parse_cl_opt :: (arg: string) -> bool {
     if globals_parse_cl_opt(name, value, has_value) return true;   // pass_global_opt.jai, internalize, globaldce, ...
     if scalar_misc_parse_cl_opt(name, value, has_value) return true;   // scalar_misc_cl.jai (L1.scalar-misc passes)
     if pb_parse_cl_opt(name, value, has_value) return true;
+    if forceattrs_parse_cl_opt(name, value, has_value) return true;   // pass_misc_module.jai
+    if pgo_parse_cl_opt(name, value, has_value) return true;   // pass_lto_misc.jai
     if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)
     if expand_memcmp_parse_cl_opt(name, value, has_value) return true;   // pass_expand_memcmp.jai
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
@@ -1218,6 +1225,7 @@ run_module_pm :: (n: s32) {
             case .CANONICALIZE_ALIASES; if should_run_pass(node, NONE) mam_invalidate(canonicalize_aliases_run());
             case .NAME_ANON_GLOBALS; if should_run_pass(node, NONE) mam_invalidate(name_anon_globals_run());
             case .MERGE_FUNCTIONS; if should_run_pass(node, NONE) mam_invalidate(merge_functions_run());
+            case .PGO_FORCE_FUNCTION_ATTRS; if should_run_pass(node, NONE) mam_invalidate(pgo_force_function_attrs_run());
             case .DEAD_ARG_ELIM; if should_run_pass(node, NONE) mam_invalidate(dead_arg_elim_run());
             case .CORO_EARLY; if should_run_pass(node, NONE) mam_invalidate(coro_early_run());
             case .CORO_CLEANUP; if should_run_pass(node, NONE) mam_invalidate(coro_cleanup_run());
@@ -1425,7 +1433,8 @@ opt_main :: () {
         // cl::list / value-required options also take their value from the next argument
         if a == "-disable-builtin" || a == "--disable-builtin" || a == "-enable-builtin" || a == "--enable-builtin" ||
            a == "-internalize-public-api-list" || a == "--internalize-public-api-list" ||
-           a == "-internalize-public-api-file" || a == "--internalize-public-api-file" {
+           a == "-internalize-public-api-file" || a == "--internalize-public-api-file" ||
+           a == "-force-attribute" || a == "--force-attribute" || a == "-force-remove-attribute" || a == "--force-remove-attribute" {
             if i >= args.count fatal("option % needs a value", a);
             if !parse_cl_opt(tprint("%=%", a, args[i])) fatal("unsupported option '%'", a);
             i += 1;

@@ -198,6 +198,27 @@ make_followup_loop_id :: (orig: Md_Id, followups: [] string, inherit_except_pref
 li_has_disable_all_transforms_hint :: (li: *Loop_Info, l: Loop_Id) -> bool {
     return li_get_boolean_loop_attribute(li, l, "llvm.loop.disable_nonforced");
 }
+// hasVectorizeTransformation
+li_has_vectorize_transformation :: (li: *Loop_Info, l: Loop_Id) -> s64 {
+    has_enable, enable := li_optional_bool_loop_attribute(li, l, "llvm.loop.vectorize.enable");
+    if has_enable && !enable return TM_SUPPRESSED_BY_USER;
+    // getOptionalElementCountLoopAttribute
+    has_width, width := li_optional_int_loop_attribute(li, l, "llvm.loop.vectorize.width");
+    scalable := false;
+    if has_width { hs, sv := li_optional_int_loop_attribute(li, l, "llvm.loop.vectorize.scalable.enable"); scalable = hs && sv != 0; }
+    w := cast,trunc(s32) width;
+    width_scalar := has_width && w == 1 && !scalable;
+    width_vector := has_width && ((!scalable && cast(u32) w > 1) || (scalable && w != 0));
+    has_ic, ic := li_optional_int_loop_attribute(li, l, "llvm.loop.interleave.count");
+    ic32 := cast,trunc(s32) ic;
+    if has_enable && enable && width_scalar && has_ic && ic32 == 1 return TM_SUPPRESSED_BY_USER;
+    if li_get_boolean_loop_attribute(li, l, "llvm.loop.isvectorized") return TM_DISABLE;
+    if has_enable && enable return TM_FORCED_BY_USER;
+    if width_scalar && has_ic && ic32 == 1 return TM_DISABLE;
+    if width_vector || (has_ic && ic32 > 1) return TM_ENABLE;
+    if li_has_disable_all_transforms_hint(li, l) return TM_DISABLE;
+    return TM_UNSPECIFIED;
+}
 // hasUnrollTransformation
 li_has_unroll_transformation :: (li: *Loop_Info, l: Loop_Id) -> s64 {
     if li_get_boolean_loop_attribute(li, l, "llvm.loop.unroll.disable") return TM_SUPPRESSED_BY_USER;

@@ -1,12 +1,66 @@
 // Small module passes of the -O2 pipeline.
-// - ForceFunctionAttrsPass (llvm/lib/Transforms/IPO/ForceFunctionAttrs.cpp): changes nothing without
-//   -force-attribute / -force-remove-attribute / -forceattrs-csv-path, which our opt rejects as unsupported.
+// - ForceFunctionAttrsPass (llvm/lib/Transforms/IPO/ForceFunctionAttrs.cpp): -force-attribute /
+//   -force-remove-attribute (-forceattrs-csv-path is rejected as unsupported).
 // - MemProfRemoveInfo (llvm/lib/Transforms/IPO/MemProfContextDisambiguation.cpp): drops the "memprof" call-site
 //   attribute and !memprof / !callsite metadata.
 // - RecomputeGlobalsAAPass (llvm/lib/Analysis/GlobalsModRef.cpp): recomputes a cached GlobalsAA result.
 // - LowerCommentStringPass (llvm/lib/Transforms/Utils/LowerCommentStringPass.cpp): AIX only.
 
-forceattrs_run :: () -> Preserved { return PRESERVE_ALL; }
+// ForceFunctionAttrsPass (llvm/lib/Transforms/IPO/ForceFunctionAttrs.cpp): -force-attribute / -force-remove-attribute
+// (-forceattrs-csv-path fails loudly)
+forceattrs_opts: struct {
+    add: [..] string;      // -force-attribute (cl::list)
+    removes: [..] string;   // -force-remove-attribute
+};
+forceattrs_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
+    if name == "force-attribute" { if !has_value fatal("option -force-attribute needs a value"); array_add(*forceattrs_opts.add, copy_string(value)); return true; }
+    if name == "force-remove-attribute" { if !has_value fatal("option -force-remove-attribute needs a value"); array_add(*forceattrs_opts.removes, copy_string(value)); return true; }
+    if name == "forceattrs-csv-path" fatal("unsupported option '-forceattrs-csv-path'");
+    return false;
+}
+forceattrs_run :: () -> Preserved {
+    if forceattrs_opts.add.count == 0 && forceattrs_opts.removes.count == 0 return PRESERVE_ALL;
+    has :: (f: Value_Id, k: Attr_Kind) -> bool { return fn_has_fn_attr(f, k); }
+    conflicting :: (k: Attr_Kind, f: Value_Id) -> bool {
+        if k == {
+            case .AlwaysInline; return has(f, .NoInline) || has(f, .OptimizeNone);
+            case .NoInline; return has(f, .AlwaysInline);
+            case .OptimizeNone; return has(f, .AlwaysInline) || has(f, .MinSize) || has(f, .OptimizeForSize) || has(f, .OptimizeForDebugging);
+            case .MinSize; return has(f, .OptimizeNone) || has(f, .OptimizeForDebugging);
+            case .OptimizeForSize; return has(f, .OptimizeNone) || has(f, .OptimizeForDebugging);
+            case .OptimizeForDebugging; return has(f, .OptimizeNone) || has(f, .MinSize) || has(f, .OptimizeForSize);
+        }
+        return false;
+    }
+    // ParseFunctionAndAttr
+    parse :: (s: string, f: Value_Id) -> Attr_Kind {
+        text := s;
+        c := find_index_from_left(s, #char ":");
+        if c >= 0 {
+            if slice(s, 0, c) != vname(f) return .NONE_ATTR;
+            text = slice(s, c + 1, s.count - c - 1);
+        }
+        k := attr_kind_from_name(text);
+        if k != .NONE_ATTR && k > .LAST_ENUM fatal("forceattrs: forcing the attribute '%' (it takes an argument) is not supported", text);
+        return k;
+    }
+    for f: ir.m_functions {
+        for s: forceattrs_opts.add {
+            k := parse(s, f);
+            if k == .NONE_ATTR || has(f, k) || conflicting(k, f) continue;
+            if k == .OptimizeNone && !has(f, .NoInline) fn_add_fn_attr_kind(f, .NoInline);
+            fn_add_fn_attr_kind(f, k);
+        }
+        for s: forceattrs_opts.removes {
+            k := parse(s, f);
+            if k == .NONE_ATTR || !has(f, k) || (k == .NoInline && has(f, .OptimizeNone)) continue;
+            l := glob(f).attrs;
+            glob(f).attrs = attr_list_with_fn(l, attr_set_remove(attr_list_fn(l), k));
+        }
+    }
+    printer_note_ir_changed();
+    return PRESERVE_NONE;
+}
 
 memprof_remove_info_run :: () -> Preserved {
     changed := false;

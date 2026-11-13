@@ -612,7 +612,10 @@ add_required_lto_pre_link_passes :: (mpm: s32, last: *s32) {
     pb_add(mpm, last, "assign-guid");
 }
 
+pb_check_pgo :: () { if pgo_options_present() pb_unsupported("PGO options (-pgo-kind) in a default pipeline"); }
+
 build_per_module_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Level) {
+    pb_check_pgo();
     // the result is one ModulePassManager added to the outer one (a pass manager is required: not counted)
     mpm := pb_node(mpm_outer, last_outer, .MODULE_PM, "module");
     last: s32 = -1;
@@ -629,6 +632,7 @@ build_per_module_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: O
 
 // buildThinLTOPreLinkDefaultPipeline
 build_thinlto_pre_link_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Level) {
+    pb_check_pgo();
     pb_phase = .THIN_PRE_LINK;
     mpm := pb_node(mpm_outer, last_outer, .MODULE_PM, "module");
     last: s32 = -1;
@@ -644,6 +648,7 @@ build_thinlto_pre_link_default_pipeline :: (mpm_outer: s32, last_outer: *s32, le
 
 // buildThinLTODefaultPipeline(Level, ImportSummary = nullptr)
 build_thinlto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Level) {
+    pb_check_pgo();
     pb_phase = .THIN_POST_LINK;
     mpm := pb_node(mpm_outer, last_outer, .MODULE_PM, "module");
     last: s32 = -1;
@@ -674,6 +679,7 @@ pb_add_coro_wrapper :: (mpm: s32, last: *s32) {
 
 // buildLTODefaultPipeline(Level, ExportSummary = nullptr)
 build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Level) {
+    pb_check_pgo();
     pb_phase = .FULL_POST_LINK;
     mpm := pb_node(mpm_outer, last_outer, .MODULE_PM, "module");
     last: s32 = -1;

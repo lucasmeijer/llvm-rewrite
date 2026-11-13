@@ -908,9 +908,9 @@ loop_rotate_run :: (node: *Pass_Node, l: Loop_Id, lar: *Loop_Std_Results, u: *Lp
     }
     f := lar.fn;
     minsize := fn_has_fn_attr(f, .MinSize);
-    if minsize && li_loop_id(lar.li, l) != NONE fatal("loop-rotate: hasVectorizeTransformation on a minsize function is not implemented yet");
     threshold: s64 = 0;
-    if header_dup && (!minsize || lr_opts.enable_header_dup_at_minsize) threshold = lr_opts.rotation_max_header_size;
+    if header_dup && (!minsize || lr_opts.enable_header_dup_at_minsize || li_has_vectorize_transformation(lar.li, l) == TM_FORCED_BY_USER)
+        threshold = lr_opts.rotation_max_header_size;
     mssau_storage: Mssa_Updater;
     lr: Loop_Rotate;
     lr.max_header_size = threshold;

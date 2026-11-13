@@ -167,3 +167,66 @@ name_anon_globals_run :: () -> Preserved {
     printer_note_ir_changed();
     return PRESERVE_NONE;
 }
+
+// PGOForceFunctionAttrsPass (llvm/lib/Transforms/Instrumentation/PGOForceFunctionAttrs.cpp), with opt's PGO options
+// (llvm/tools/opt/NewPMDriver.cpp: -pgo-kind creates the PGOOptions, -pgo-cold-func-opt its ColdOptType)
+Pgo_Kind :: enum u8 { NO_PGO; INSTR_GEN; INSTR_USE; SAMPLE_USE; }
+Cold_Func_Opt :: enum u8 { DEFAULT; OPT_SIZE; MIN_SIZE; OPT_NONE; }
+pgo_opts: struct {
+    kind: Pgo_Kind;
+    cold_opt: Cold_Func_Opt;
+};
+pgo_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
+    if name == "pgo-kind" {
+        if value == {
+            case "nopgo"; pgo_opts.kind = .NO_PGO;
+            case "pgo-instr-gen-pipeline"; pgo_opts.kind = .INSTR_GEN;
+            case "pgo-instr-use-pipeline"; pgo_opts.kind = .INSTR_USE;
+            case "pgo-sample-use-pipeline"; pgo_opts.kind = .SAMPLE_USE;
+            case; fatal("invalid value '%' for option -pgo-kind", value);
+        }
+        return true;
+    }
+    if name == "pgo-cold-func-opt" {
+        if value == {
+            case "default"; pgo_opts.cold_opt = .DEFAULT;
+            case "optsize"; pgo_opts.cold_opt = .OPT_SIZE;
+            case "minsize"; pgo_opts.cold_opt = .MIN_SIZE;
+            case "optnone"; pgo_opts.cold_opt = .OPT_NONE;
+            case; fatal("invalid value '%' for option -pgo-cold-func-opt", value);
+        }
+        return true;
+    }
+    if name == "profile-file" || name == "cspgo-kind" || name == "memory-profile-file" || name == "profile-remapping-file"
+        fatal("unsupported option '-%'", name);
+    return false;
+}
+// Is there a PGOOptions? (only -pgo-kind creates one here; -debug-info-for-profiling and the like are rejected)
+pgo_options_present :: () -> bool { return pgo_opts.kind != .NO_PGO; }
+
+pgo_force_function_attrs_run :: () -> Preserved {
+    cold := ifx pgo_options_present() then pgo_opts.cold_opt else .DEFAULT;
+    if cold == .DEFAULT return PRESERVE_ALL;
+    psi := psi_require();
+    changed := false;
+    for f: ir.m_functions {
+        if is_declaration(f) continue;
+        if fn_has_fn_attr(f, .OptimizeNone) || fn_has_opt_size(f) continue;
+        if !fn_has_fn_attr(f, .Cold) {
+            if !psi.has_summary continue;
+            if !psi_is_function_cold_in_call_graph(psi, f, get_bfi(f)) continue;
+        }
+        if cold == {
+            case .OPT_SIZE; fn_add_fn_attr_kind(f, .OptimizeForSize);
+            case .MIN_SIZE; fn_add_fn_attr_kind(f, .MinSize);
+            case .OPT_NONE;
+                if fn_has_fn_attr(f, .AlwaysInline) continue;
+                fn_add_fn_attr_kind(f, .OptimizeNone);
+                fn_add_fn_attr_kind(f, .NoInline);
+        }
+        changed = true;
+    }
+    if !changed return PRESERVE_ALL;
+    printer_note_ir_changed();
+    return PRESERVE_NONE;
+}
