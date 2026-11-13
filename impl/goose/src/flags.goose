@@ -161,6 +161,8 @@ let KNOWN_FLAGS_MISC: const u8[:][] = [
     "spec-exec-max-speculation-cost", "spec-exec-max-not-hoisted", "spec-exec-only-if-divergent-target",
     "float2int-max-integer-bw", "tre-disable-entrycount-recompute", "callsite-splitting-duplication-threshold",
     "move-auto-init-threshold", "disable-lower-comment-string", "dfa-early-exit-heuristic", "cvp-max-functions-per-value",
+    "dfa-max-path-length", "dfa-max-num-visited-paths", "dfa-max-num-paths", "dfa-cost-threshold", "dfa-max-cloned-rate",
+    "dfa-max-out-use-blocks",
     "jump-table-to-switch-size-threshold", "jump-table-to-switch-function-size-threshold",
     "force-specialization", "funcspec-max-clones", "funcspec-max-discovery-iterations", "funcspec-max-incoming-phi-values",
     "funcspec-max-block-predecessors", "funcspec-min-function-size", "funcspec-max-codesize-growth",
@@ -192,6 +194,8 @@ let VALUE_FLAGS_MISC: const u8[:][] = [
     "callsite-splitting-duplication-threshold", "likely-branch-weight", "unlikely-branch-weight",
     "move-auto-init-threshold", "cvp-max-functions-per-value",
     "jump-table-to-switch-size-threshold", "jump-table-to-switch-function-size-threshold",
+    "dfa-max-path-length", "dfa-max-num-visited-paths", "dfa-max-num-paths", "dfa-cost-threshold", "dfa-max-cloned-rate",
+    "dfa-max-out-use-blocks",
 ];
 fn flag_takes_value(name: const u8[:]) -> bool {
     for k in VALUE_FLAGS_MISC { if k == name { return true; } }

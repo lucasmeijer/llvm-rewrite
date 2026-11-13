@@ -462,7 +462,12 @@ fn lex() {
             te = lpos;
             return;
         }
-        if c == '.' && ch(lpos) == '.' && ch(lpos + 1) == '.' { lpos += 2; tk = T_DOTS; te = lpos; return; }
+        if c == '.' && ch(lpos) == '.' && ch(lpos + 1) == '.' {
+            // LLLexer: a label tail ("..._crit_edge:") wins over `...`
+            var e = lpos;
+            while is_label_char(ch(e)) { e++; }
+            if !(ch(e) == ':' && !ignore_colon) { lpos += 2; tk = T_DOTS; te = lpos; return; }
+        }
         if is_digit(c) || c == '-' { lex_number(); return; }
         if c == '+' {
             if !is_digit(ch(lpos)) { lex_float_str(); return; }

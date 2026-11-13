@@ -217,4 +217,5 @@ lib/Transforms/IPO/OpenMPOpt.cpp 0.0  # early exit only
 lib/Transforms/Utils/InjectTLIMappings.cpp 0.1  # no -vector-library
 lib/Transforms/Instrumentation/CGProfile.cpp 0.1  # early exit only
 lib/Transforms/Utils/RelLookupTableConverter.cpp 0.1  # early exit only
-lib/Transforms/Scalar/DFAJumpThreading.cpp 0.3  # MainSwitch + AllSwitchPaths path enumeration; no unfold / TransformDFA
+lib/Transforms/Scalar/DFAJumpThreading.cpp 0.97  # all but optimization remarks and -dfa-jump-view-cfg-before
+lib/Transforms/Utils/SSAUpdaterBulk.cpp 0.6  # AddVariable/AddAvailableValue/AddUse/RewriteAllUses; no RewriteAndOptimizeAllUses, EliminateNewDuplicatePHINodes

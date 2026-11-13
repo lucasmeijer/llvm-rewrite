@@ -88,3 +88,27 @@ Sink, TailCallElim, MergedLoadStoreMotion, SpeculativeExecution and CallSiteSpli
   (`function_entry_count` or `synthetic_function_entry_count`).
 - **libcalls-shrinkwrap** builds its conditions before the call with the call's debug location; `createOrCond` creates the
   second condition first.
+
+## DFAJumpThreading and SSAUpdaterBulk
+
+Verified by impl/goose (dfa_jump_threading.goose, ssa_updater_bulk.goose): Transforms/DFAJumpThreading 10/10, the
+corpus sweep (also with `-dfa-cost-threshold=100000 -dfa-early-exit-heuristic=false -dfa-max-cloned-rate=1000
+-dfa-max-out-use-blocks=100000` and with `,print<domtree>`) and the IR the -O2 pipeline hands the pass in the four
+tests/perf/compile programs (`-opt-bisect-limit=<index of dfa-jump-threading - 1>`): 0 differences.
+
+- At `-O2`, LLVM threads `sqlite3AffinityType` (sqlite3) and `dfg_lex` / `ia_lex` (SPASS); lua and oggenc have
+  candidates the cost model rejects. `function(sroa),dfa-jump-threading` threads nothing in any of the four: test
+  the pass on the pipeline's real input (`-pass-remarks=dfa-jump-threading` names the functions, `-opt-bisect-limit`
+  gives the module just before).
+- SSAUpdaterBulk::RewriteAllUses creates each new PHI with `IRBuilder<> B(BB, BB->begin())`, so the PHI goes in front
+  of the existing PHIs and takes the **DebugLoc of the block's first instruction** (SetInsertPoint copies
+  `IP->getStableDebugLoc()`); it is named after the rewritten instruction. IDF blocks come out in the priority-queue
+  order of (dom-tree level, DFS-in), the dom-tree children walk follows the DT's child order, so the incrementally
+  updated DT (lazy DTU, flushed by `DTU->getDomTree()`) must match LLVM's child order.
+- `PHINode::removeIncomingValueIf` (cleanPhiNodes) walks backwards and moves the current last entry into each removed
+  slot (not stable); `removeIncomingValue(BB)` does the same swap.
+- `DFAJumpThreading::run` does `LI->verify(DTU->getDomTree())` under `#ifdef NDEBUG`: in a release build its only
+  effect is the DTU flush. The pass requests AC, DT, LoopInfo and TTI before the optsize/minsize early exit.
+- Cloned blocks are named `<bb>.jt<state>` with `APInt::getLimitedValue()` (an `i32 -1` state gives `.jt4294967295`);
+  RemapInstruction does not remap the clones' debug records (they keep the original values) and cloned PHIs are not
+  remapped at all (cleanPhiNodes and SSAUpdaterBulk fix them).

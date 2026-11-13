@@ -258,6 +258,7 @@
 | `src/loopsimplify_pass.goose` | LoopSimplify's driver (simplifyOneLoop, simplifyLoop, LoopSimplifyPass::run), split off so its exit merging can call simplifycfg.goose's foldBranchToCommonDest |
 | `src/looprotate.goose` | LoopRotate (LoopRotation.cpp, LoopRotationUtils.cpp), CodeMetrics for the header, MergeBlockIntoPredecessor with LoopInfo/MemorySSA/two successors |
 | `src/value_mapper.goose`, `src/clone_function.goose` | ValueToValueMapTy (`vmm_*`) + ValueMapper (RemapInstruction, RemapDbgRecord, MapValue); CloneBasicBlock, cloneLoopWithPreheader, remapInstructionsInBlocks, noalias-scope cloning |
+| `src/dfa_jump_threading.goose`, `src/ssa_updater_bulk.goose` | DFAJumpThreading (dfa-jump-threading); SSAUpdaterBulk (`sbu_*`, RewriteAllUses with its IDF) |
 | `src/loop_md.goose`, `src/unroll_utils.goose` | loop metadata (unroll/followup IDs, estimated trip counts, loop probabilities); LoopInfo::erase, LoopBlocksDFS, Merge/Split helpers with DT+LI(+MSSAU), cloneLoop |
 | `src/loop_unroll_pass.goose`, `src/loop_unroll.goose`, `src/loop_unroll_runtime.goose`, `src/loop_peel.goose` | LoopUnrollPass + LoopUnrollAnalyzer + CodeMetrics(loop); UnrollLoop + loadCSE (+ MemorySSA(Loop&)); runtime remainder; LoopPeel |
 | `src/simple_loop_unswitch.goose`, `src/simple_loop_unswitch_ntc.goose`, `src/simple_loop_unswitch_nt.goose` | SimpleLoopUnswitch: trivial; cloning and loop rebuilding; non-trivial + the pass |
@@ -1526,9 +1527,17 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   cleanup/elide/split/annotation-elide, openmp-opt(-cgscc), alloc-token, annotation2metadata, annotation-remarks,
   inject-tli-mappings, lower-comment-string, cg-profile (any entry count: loud; 116 corpus files), rel-lookup-table-converter
   (x86-64 Darwin/Windows with a candidate table: loud; `-relocation-model` is not an opt option yet).
-- dfa-jump-threading: only the analysis is ported (candidate switches, AllSwitchPaths path enumeration); a candidate
-  with selects to unfold or with threading paths fails loudly. All four tests/perf/compile programs have one (and LLVM
-  transforms sqlite3 and lua), so `-O2` on them needs TransformDFA + SSAUpdaterBulk next.
+- dfa-jump-threading (dfa_jump_threading.goose, ssa_updater_bulk.goose): the whole pass (select unfolding, path
+  enumeration, cost checks with CodeMetrics + getEstimatedNumberOfCaseClusters, TransformDFA, SSAUpdaterBulk with a
+  live-in-pruned IDF, lazy DTU). 10/10 imported tests. Sweeps: whole corpus (plain, stressed with
+  `-dfa-cost-threshold=100000 -dfa-early-exit-heuristic=false -dfa-max-cloned-rate=1000 -dfa-max-out-use-blocks=100000`,
+  and `,print<domtree>`), `--with-test-flags`, `function(sroa),dfa-jump-threading` on tests/perf/compile: 0 differs;
+  plus the modules LLVM's -O2 hands the pass in sqlite3/SPASS/lua/oggenc (`-opt-bisect-limit=<dfa index - 1>`, the
+  only inputs where it threads anything: sqlite3AffinityType, dfg_lex, ia_lex): identical, also stressed.
+  TTI is initialised only at the cost check (x32 triples fail loudly in tti_init_function, and LLVM's
+  TargetIRAnalysis is harmless there). No optimization remarks.
+- The lexer took `...` in `..._crit_edge_crit_edge.i_crit_edge:` (a label lua gets at -O2) for the varargs token;
+  LLLexer checks isLabelTail first (fixed).
 - Not done (fail loudly): loop-interchange, expand-memcmp, dynamic llvm.objectsize
   (ObjectSizeOffsetEvaluator), ObjectSizeVisitor::visitLoadInst, #dbg_assign remapping in callsite-splitting,
   FunctionSpecialization rounds with more than 8 specialized originals (LLVM iterates a SmallPtrSet in pointer order:
