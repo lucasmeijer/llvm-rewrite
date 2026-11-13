@@ -19363,6 +19363,7 @@ tests/imported/llvm/Verifier/diexpression-valid-entry-value.ll::roundtrip
 tests/imported/llvm/Verifier/diglobalvariable.ll::analysis
 tests/imported/llvm/Verifier/diglobalvariable.ll::roundtrip
 tests/imported/llvm/Verifier/dilocation-in-wrong-place.ll::error
+tests/imported/llvm/Verifier/disubprogram-declaration-within-struct-2.ll::analysis
 tests/imported/llvm/Verifier/disubprogram-declaration-within-struct-2.ll::opt
 tests/imported/llvm/Verifier/disubprogram-declaration-within-struct-2.ll::roundtrip
 tests/imported/llvm/Verifier/disubprogram-declaration-within-struct.ll::analysis
@@ -19383,6 +19384,8 @@ tests/imported/llvm/Verifier/errno-tbaa-metadata-2.ll::error
 tests/imported/llvm/Verifier/fnarg-debuginfo.ll::analysis
 tests/imported/llvm/Verifier/fnarg-debuginfo.ll::roundtrip
 tests/imported/llvm/Verifier/force-opaque-ptr.ll::error
+tests/imported/llvm/Verifier/fp-intrinsics-pass.ll::analysis
+tests/imported/llvm/Verifier/fp-intrinsics-pass.ll::roundtrip
 tests/imported/llvm/Verifier/fp-intrinsics.ll::error
 tests/imported/llvm/Verifier/fpmath.ll::error
 tests/imported/llvm/Verifier/fragment.ll::analysis
@@ -19520,6 +19523,8 @@ tests/imported/llvm/Verifier/noalias-addrspace.ll::error
 tests/imported/llvm/Verifier/nofpclass-metadata.ll::error
 tests/imported/llvm/Verifier/nofpclass.ll::error
 tests/imported/llvm/Verifier/nofree_metadata.ll::error
+tests/imported/llvm/Verifier/non-integral-pointers.ll::analysis
+tests/imported/llvm/Verifier/non-integral-pointers.ll::roundtrip
 tests/imported/llvm/Verifier/nonnull-metadata.ll::error
 tests/imported/llvm/Verifier/noundef-metadata.ll::error
 tests/imported/llvm/Verifier/noundef.ll::error
@@ -19605,6 +19610,8 @@ tests/imported/llvm/Verifier/vp-intrinsics-bad.ll::error
 tests/imported/llvm/Verifier/vp-intrinsics.ll::opt
 tests/imported/llvm/Verifier/vp-intrinsics.ll::roundtrip
 tests/imported/llvm/Verifier/vscale_range.ll::error
+tests/imported/llvm/Verifier/weak-dllimport.ll::analysis
+tests/imported/llvm/Verifier/weak-dllimport.ll::roundtrip
 tests/imported/llvm/Verifier/writable-attr.ll::error
 tests/imported/llvm/Verifier/x86_amx5.ll::error
 tests/imported/llvm/Verifier/x86_amx6.ll::error

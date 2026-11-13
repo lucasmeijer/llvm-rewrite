@@ -136,15 +136,17 @@ vf_is_callable_cc :: (cc: u32) -> bool {
         cc == VCC_AMDGPU_PS || cc == VCC_AMDGPU_VS || cc == VCC_SPIR_KERNEL || cc == VCC_PTX_KERNEL);
 }
 
-// IntrinsicInst::mayLowerToFunctionCall
+// IntrinsicInst::mayLowerToFunctionCall: the ObjC ARC runtime calls
 intrinsic_may_lower_to_function_call :: (iid: Intrinsic_Id) -> bool {
     if iid == NOT_INTRINSIC return false;
     n := intrinsic_name(iid);
-    if begins_with(n, "llvm.objc.") return true;
-    for string.["llvm.memcpy", "llvm.memmove", "llvm.memset", "llvm.memcpy.inline", "llvm.memset.inline",
-        "llvm.memcpy.element.unordered.atomic", "llvm.memmove.element.unordered.atomic", "llvm.memset.element.unordered.atomic",
-        "llvm.experimental.memset.pattern"]
-        if n == it return true;
+    if !begins_with(n, "llvm.objc.") return false;
+    for string.["autorelease", "autoreleasePoolPop", "autoreleasePoolPush", "autoreleaseReturnValue",
+        "claimAutoreleasedReturnValue", "copyWeak", "destroyWeak", "initWeak", "loadWeak", "loadWeakRetained", "moveWeak",
+        "release", "retain", "retainAutorelease", "retainAutoreleaseReturnValue", "retainAutoreleasedReturnValue",
+        "retainBlock", "storeStrong", "storeWeak", "unsafeClaimAutoreleasedReturnValue", "retainedObject",
+        "unretainedObject", "unretainedPointer", "retain.autorelease", "sync.enter", "sync.exit"]
+        if slice(n, 10, n.count - 10) == it return true;
     return false;
 }
 
