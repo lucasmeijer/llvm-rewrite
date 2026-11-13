@@ -76,6 +76,7 @@
 #load "pass_coro_elide.jai";
 #load "coro_spill.jai";
 #load "coro_frame.jai";
+#load "coro_debug.jai";
 #load "stack_lifetime.jai";
 #load "pass_coro_split.jai";
 #load "pass_openmp_opt.jai";

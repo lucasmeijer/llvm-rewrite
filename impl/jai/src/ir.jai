@@ -765,7 +765,15 @@ new_block :: (fnv: Value_Id) -> Value_Id {
 }
 block :: inline (b: Value_Id) -> *Block_Row { return *ir.blocks[ir.v_aux[b]]; }
 
+// BasicBlock trailing debug records (left by erasing the last instruction), keyed by block: 1 + record index
+trailing_dbg_records: Table(Value_Id, u32);
+
 block_append_inst :: (b: Value_Id, i: Value_Id) {
+    defer if trailing_dbg_records.count {
+        // Instruction::insertInto(BB, end()): adoptDbgRecords of the trailing marker
+        found, first := table_find(*trailing_dbg_records, b);
+        if found { table_remove(*trailing_dbg_records, b); attach_records_before(i, first); }
+    }
     br := block(b);
     ir_ := inst(i);
     ir_.parent = b;
@@ -815,7 +823,25 @@ erase_inst :: (i: Value_Id) {
     // instruction's records
     if inst(i).records {
         nx := inst(i).next;
-        if nx == NONE fatal("erasing a terminator that has debug records attached is not supported yet");
+        if nx == NONE {
+            // the block's last instruction: the records become the block's trailing records
+            // (BasicBlock::setTrailingDbgRecords), adopted by the next instruction inserted at the end
+            b := inst(i).parent;
+            if b == NONE fatal("internal: erasing an unlinked instruction that has debug records attached");
+            first := inst(i).records;
+            x := first;
+            while x != 0 { ir.dbg_records[x - 1].owner = NONE; if ir.dbg_records[x - 1].next == 0 break; x = ir.dbg_records[x - 1].next; }
+            found, old := table_find(*trailing_dbg_records, b);
+            if found {
+                y := old;
+                while ir.dbg_records[y - 1].next != 0 y = ir.dbg_records[y - 1].next;
+                ir.dbg_records[y - 1].next = first;
+            } else table_set(*trailing_dbg_records, b, first);
+            inst(i).records = 0;
+        }
+    }
+    if inst(i).records {
+        nx := inst(i).next;
         first := inst(i).records;
         x := first;
         ir.dbg_records[x - 1].owner = nx;

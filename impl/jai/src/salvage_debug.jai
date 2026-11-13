@@ -306,12 +306,18 @@ dbgr_set_raw_location :: (r: u32, loc: Md_Id) {
 
 // DbgVariableRecord::replaceVariableLocationOp(OldValue, NewValue, AllowEmpty)
 dbgr_replace_variable_location_op :: (r: u32, old: Value_Id, new: Value_Id, allow_empty := false) {
+    // a #dbg_assign whose address is the old value gets the new one too
+    addr_replaced := false;
+    if dbgr(r).kind == .ASSIGN {
+        a := dbgr(r).addr;
+        if a != NONE && ir.mds[a].kind == .VALUE && ir.mds[a].value == old { dbgr(r).addr = md_value(new); addr_replaced = true; }
+    }
     vals: [..] Value_Id; vals.allocator = temp;
     dbgr_location_ops(r, *vals);
     found := false;
     for vals if it == old { found = true; break; }
     if !found {
-        if allow_empty return;
+        if allow_empty || addr_replaced return;
         fatal("internal: replaceVariableLocationOp: the value is not a location operand");
     }
     loc := dbgr(r).loc;

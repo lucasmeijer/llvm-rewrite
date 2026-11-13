@@ -596,7 +596,8 @@ cc_create :: (c: *Coro_Cloner) {
             ops[3] = nl;
             ints: [] u64; ints.data = ir.md_ints.data + r.ints; ints.count = r.nints;
             ints_copy := array_copy(ints,, allocator = temp);
-            ir.md_ops[ir.mds[sp].ops + 6] = di_get(.SUBPROGRAM, false, ops, ints_copy);
+            nd := di_get(.SUBPROGRAM, false, ops, ints_copy);   // may grow ir.md_ops: index after the call
+            ir.md_ops[ir.mds[sp].ops + 6] = nd;
         }
     }
     gv_set_linkage(nf, saved_link);
@@ -869,8 +870,7 @@ coro_create_resume_entry_block :: (f: Value_Id, shape: *Coro_Shape) {
         coro_rauw(susp, pn);
         phi_add_incoming(pn, const_int(ir.t_i8, 0xFF), susp_bb);
         phi_add_incoming(pn, susp, resume_bb);
-        if add_debug_labels && get_metadata(susp, MDK_DBG) != NONE
-            fatal("coro-split: the __coro_resume_N debug labels are not implemented yet");
+        if add_debug_labels coro_add_resume_label(f, susp, k, resume_bb);
     }
     irb_set_end(*b, unreach);
     irb_insert(*b, new_inst(.UNREACHABLE, ir.t_void, 0));
@@ -1220,10 +1220,88 @@ coro_split_run_scc :: (node: *Pass_Node, c: s32, ur: *Cgscc_Ur) -> Preserved {
 
 // ---------------------------------------------------------------- CoroAnnotationElide
 
-coro_annotation_elide_run_scc :: (c: s32) -> Preserved {
-    for n: lcg.sccs[c].nodes {
-        if module_get_function(tconcat(vname(lcg_fn(n)), ".noalloc")) != NONE
-            fatal("coro-annotation-elide: eliding coroutine allocations is not implemented yet");
+coro_annotation_elide_cl: struct { branch_ratio: float32 = 0.55; };   // -coro-elide-branch-ratio
+
+// allocateFrameInCaller
+coro_allocate_frame_in_caller :: (caller: Value_Id, size: u64, align: u64) -> Value_Id {
+    pt := coro_first_non_alloca_in_entry(caller);
+    fr := new_inst(.ALLOCA, ir.t_ptr, 1);
+    inst(fr).ty2 = type_array(size, ir.t_i8);
+    set_op(fr, 0, const_int(ir.t_i32, 1));
+    inst(fr).addrspace = dl_alloca_addrspace();
+    inst(fr).align = align;
+    insert_at_position(fr, inst_block(pt), pt, false);
+    return fr;
+}
+
+// processCall
+coro_annotation_process_call :: (cb: Value_Id, caller: Value_Id, new_callee: Value_Id, size: u64, align: u64) {
+    fp := coro_allocate_frame_in_caller(caller, size, align);
+    if call_num_bundles(cb) != 0 fatal("coro-annotation-elide: a call with operand bundles is not supported yet");
+    args: [..] Value_Id; args.allocator = temp;
+    for k: 0..cast(s64) call_arg_count(cb) - 1 array_add(*args, call_arg(cb, cast(u32) k));
+    array_add(*args, fp);
+    ncb: Value_Id;
+    if inst_op(cb) == .CALL {
+        fty := glob(new_callee).value_type;
+        ncb = new_inst(.CALL, func_ret(fty), cast(u32)(args.count + 1));
+        inst(ncb).ty2 = fty;
+        for args set_op(ncb, cast(u32) it_index, it);
+        set_op(ncb, cast(u32) args.count, new_callee);
+        insert_at_position(ncb, inst_block(cb), cb, false);
+        call_set_tail_kind(ncb, call_tail_kind(cb));
+    } else if inst_op(cb) == .INVOKE {
+        ncb = coro_create_invoke(new_callee, get_successor(cb, 0), get_successor(cb, 1), args, cb);
+        insert_at_position(ncb, inst_block(cb), cb, false);
+    } else fatal("CallBase should either be Call or Invoke!");
+    inst(ncb).cc = inst(cb).cc;
+    inst(ncb).attrs = inst(cb).attrs;
+    set_metadata(ncb, MDK_DBG, get_metadata(cb, MDK_DBG));
+    call_remove_fn_attr(ncb, .CoroElideSafe);
+    coro_rauw(cb, ncb);
+    ifi: Inline_Function_Info; ifi_reset(*ifi);
+    r := inline_function(ncb, *ifi, false, null, true, false);
+    if r.ok coro_erase(cb);
+    else { coro_rauw(ncb, cb); coro_erase(ncb); }
+}
+
+// CoroAnnotationElidePass::run
+coro_annotation_elide_run_scc :: (c: s32, ur: *Cgscc_Ur) -> Preserved {
+    changed := false;
+    nodes: [..] s32; nodes.allocator = temp;
+    for lcg.sccs[c].nodes array_add(*nodes, it);
+    for n: nodes {
+        callee := lcg_fn(n);
+        new_callee := module_get_function(tconcat(vname(callee), ".noalloc"));
+        if new_callee == NONE continue;
+        users: [..] Value_Id; users.allocator = temp;
+        u := ir.v_first_use[callee];
+        while u != NONE {
+            usr := ir.u_user[u];
+            u = ir.u_next[u];
+            if is_inst(usr) && is_call_base(usr) && call_called_function(usr) == callee array_add(*users, usr);
+        }
+        fpa := glob(new_callee).nargs - 1;
+        size := coro_fn_param_deref_bytes(new_callee, fpa);
+        al := fn_param_align(new_callee, fpa);
+        if al == 0 al = 1;
+        for cb: users {
+            caller := inst_parent_fn(cb);
+            if caller == NONE continue;
+            if fn_has_fn_attr(caller, .PresplitCoroutine) && call_has_fn_attr(cb, .CoroElideSafe) {
+                bfi := get_bfi(caller);
+                block_freq := bfi_get_block_freq(bfi, inst_block(cb));
+                entry_freq := bfi.entry_freq;
+                min_freq := cast(u64)(cast(float32) entry_freq * coro_annotation_elide_cl.branch_ratio);
+                if block_freq < min_freq continue;
+                caller_n := lcg_lookup(caller);
+                caller_c := ifx caller_n >= 0 then lcg_lookup_scc(caller_n) else -1;
+                coro_annotation_process_call(cb, caller, new_callee, size, al);
+                fam_invalidate(caller, PRESERVE_NONE);
+                changed = true;
+                if caller_c >= 0 update_cg_and_am_for_pass(caller_c, caller_n, ur, false);
+            }
+        }
     }
-    return PRESERVE_ALL;
+    return ifx changed then PRESERVE_NONE else PRESERVE_ALL;
 }

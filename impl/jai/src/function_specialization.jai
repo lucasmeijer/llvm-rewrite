@@ -692,7 +692,8 @@ fs_map_md :: (c: *Fs_Md_Mapper, m: Md_Id) -> Md_Id {
         table_set(*c.vm.md, m, nm);
         for k: 0..cast(s64) n - 1 {
             o := ir.md_ops[r.ops + cast(u32) k];
-            ir.md_ops[ir.mds[nm].ops + cast(u32) k] = fs_map_md(c, o);
+            mapped := fs_map_md(c, o);   // may grow ir.md_ops: index after the call
+            ir.md_ops[ir.mds[nm].ops + cast(u32) k] = mapped;
         }
         return nm;
     }
@@ -736,8 +737,8 @@ fs_premap_metadata :: (c: *Fs_Md_Mapper, f: Value_Id, nf: Value_Id) {
         r := inst(i).records;
         while r != 0 {
             rec := dbgr(r);
-            if rec.kind == .ASSIGN fatal("function specialization: cloning #dbg_assign records is not supported yet");
             for m: Md_Id.[rec.dbg, rec.var, rec.expr] if m != NONE fs_map_md(c, m);
+            if rec.kind == .ASSIGN for m: Md_Id.[rec.assign_id, rec.addr_expr] if m != NONE fs_map_md(c, m);
             if rec.kind == .LABEL && rec.loc != NONE fs_map_md(c, rec.loc);
             r = rec.next;
         }

@@ -226,7 +226,7 @@ run_cgscc_pass_inner :: (n: s32, c: s32, ur: *Cgscc_Ur) -> Preserved {
         case .INLINE; return inliner_run(node, c, ur);
         case .ARG_PROMOTION; return arg_promotion_run_scc(node, c);
         case .CORO_SPLIT; return coro_split_run_scc(node, c, ur);
-        case .CORO_ANNOTATION_ELIDE; return coro_annotation_elide_run_scc(c);
+        case .CORO_ANNOTATION_ELIDE; return coro_annotation_elide_run_scc(c, ur);
         case .OPENMP_OPT_CGSCC; return openmp_opt_cgscc_run(c);
     }
     fatal("internal: '%' is not a cgscc pass", node.name);

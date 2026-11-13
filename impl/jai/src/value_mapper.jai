@@ -286,7 +286,17 @@ remap_dbg_record :: (vm: *Value_Map, r: u32, flags: u32) {
     }
     if dbgr(r).var != NONE dbgr(r).var = map_metadata(vm, dbgr(r).var, flags);
     ignore_missing := (flags & RF_IGNORE_MISSING_LOCALS) != 0;
-    if dbgr(r).kind == .ASSIGN fatal("ValueMapper: remapping #dbg_assign records is not implemented yet");
+    if dbgr(r).kind == .ASSIGN {
+        // the address and the DIAssignID of a #dbg_assign
+        a := dbgr(r).addr;
+        if a != NONE && ir.mds[a].kind == .VALUE {
+            av := ir.mds[a].value;
+            na := map_value(vm, av, flags);
+            if !ignore_missing && na == NONE dbgr(r).addr = md_value(const_poison(vtype(av)));   // setKillAddress
+            else if na != NONE && na != av dbgr(r).addr = md_value(na);
+        } else if a != NONE fatal("ValueMapper: a #dbg_assign address that is not a ValueAsMetadata is not supported yet");
+        if dbgr(r).assign_id != NONE dbgr(r).assign_id = map_metadata(vm, dbgr(r).assign_id, flags);
+    }
     vals: [..] Value_Id; vals.allocator = temp;
     dbgr_values_of_loc(dbgr(r).loc, *vals);
     new_vals: [..] Value_Id; new_vals.allocator = temp;

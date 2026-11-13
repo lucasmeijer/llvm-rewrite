@@ -330,7 +330,10 @@ coro_build_frame_layout :: (f: Value_Id, dt: *Dom_Tree, shape: *Coro_Shape, fd: 
         if promise != NONE table_set(*fd.field_index, promise, ftb_add_field_for_alloca(*b, promise, true));
         bits: u32 = 1;
         ns := cast(u64) shape.coro_suspends.count;
-        lg: u32 = 0; while ((cast(u64) 1) << lg) < ns lg += 1;   // Log2_64_Ceil
+        // Log2_64_Ceil(N) = 64 - countl_zero(N - 1): 64 for N = 0
+        lg: u32 = 64;
+        x := ns - 1;   // wraps for N = 0
+        while lg > 0 && (x >> cast(u64)(lg - 1)) & 1 == 0 lg -= 1;
         if lg > bits bits = lg;
         switch_index_type = type_int(bits);
         switch_index_field = ftb_add_field_type(*b, switch_index_type, 0);
@@ -1029,10 +1032,14 @@ coro_sink_lifetime_start_markers :: (f: Value_Id, shape: *Coro_Shape, sci: *Sci,
         for dom_set if it == s { found = true; break; }
         if !found array_add(*dom_set, s);
     }
-    if dom_set.count > 4 fatal("coro-split: sinking lifetime markers with more than 3 suspend points (SmallPtrSet iteration order) is not supported yet");
+    // With more than 4 blocks the SmallPtrSet iterates in pointer-hash order, which cannot be reproduced: then the
+    // result must not depend on the order (at most one candidate block is valid for each alloca), else fail loudly.
+    hashed := dom_set.count > 4;
     lifetimes: [..] Value_Id; lifetimes.allocator = temp;
+    chosen_lifetimes: [..] Value_Id; chosen_lifetimes.allocator = temp;
     for ai: fn_insts(f) {
         if inst_op(ai) != .ALLOCA continue;
+        chosen: Value_Id = NONE;
         for dom_bb: dom_set {
             valid := true;
             lifetimes.count = 0;
@@ -1052,12 +1059,18 @@ coro_sink_lifetime_start_markers :: (f: Value_Id, shape: *Coro_Shape, sci: *Sci,
                 }
             }
             if valid && lifetimes.count {
-                nl := inst_clone(lifetimes[0]);
-                replace_uses_of_with(nl, op(nl, 0), ai);
-                insert_at_position(nl, dom_bb, block_terminator(dom_bb), false);
-                for lifetimes coro_erase(it);
-                break;
+                if chosen != NONE fatal("coro-split: sinking lifetime markers when several blocks qualify and there are more than 3 suspend points (SmallPtrSet pointer order) is not supported");
+                chosen = dom_bb;
+                chosen_lifetimes.count = 0;
+                for lifetimes array_add(*chosen_lifetimes, it);
+                if !hashed break;
             }
+        }
+        if chosen != NONE {
+            nl := inst_clone(chosen_lifetimes[0]);
+            replace_uses_of_with(nl, op(nl, 0), ai);
+            insert_at_position(nl, chosen, block_terminator(chosen), false);
+            for chosen_lifetimes coro_erase(it);
         }
     }
 }
@@ -1117,12 +1130,3 @@ coro_build_coroutine_frame :: (f: Value_Id, shape: *Coro_Shape, optimize_frame: 
     for dead coro_erase(it);
 }
 
-// buildFrameDebugInfo
-coro_build_frame_debug_info :: (f: Value_Id, shape: *Coro_Shape, fd: *Frame_Data) {
-    sp := get_metadata(f, MDK_DBG);
-    if sp == NONE return;
-    cu := di_op(sp, 5);
-    if cu == NONE return;
-    if !coro_di_lang_is_cplusplus(cu) || di_int(cu, 6) != 1 return;   // FullDebug
-    fatal("coro-split: building the coroutine frame's debug info is not implemented yet");
-}
