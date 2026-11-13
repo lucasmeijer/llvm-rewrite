@@ -28,6 +28,7 @@ import slp_ops;
 import slp_sched;
 import slp_loads;
 import slp_build;
+import slp_gather;
 
 fn slp_after_tree() { slp_fail("BoUpSLP after buildTree (reorderTopToBottom / transformNodes / computeMinimumValueSizes / the cost model)"); }
 fn slp_max_vf_opt() -> i64 { if flag_given("slp-max-vf") { flag_int("slp-max-vf", 0) } else { 0 } }
@@ -604,7 +605,6 @@ fn slp_compatible_stores(vl: const i32[:], v1: i32) -> bool {
         for s in vl { nvl.push(op(s, 0)); }
         nvl.push(a);
         let s = slp_build_instructions_state(nvl, true, !slp_same_parent);
-        if s.copy { slp_fail("copyable elements (AreCompatibleStores)"); }
         if sis_valid(s) { return true; }
         if !slp_same_parent { return false; }
     }

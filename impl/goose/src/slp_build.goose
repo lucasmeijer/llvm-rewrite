@@ -9,9 +9,8 @@
 // growable local is live at a recursive call. The operand lists built for a node become the node's operands
 // (TreeEntry::setOperands copies them in LLVM; nothing modifies the local copy afterwards).
 //
-// Copyable elements (VectorizeCopyableElements) are analysed (buildInstructionsState decides with the same
-// profitability checks) but a node with copyable elements fails loudly: the scheduling of copyable data is not
-// ported yet.
+// Copyable elements (VectorizeCopyableElements): buildInstructionsState decides with the same profitability checks;
+// the scheduler models them as ScheduleCopyableData (slp_sched.goose).
 import std;
 import ir;
 import irutil;
@@ -1259,7 +1258,6 @@ fn slp_can_build_split_node(vl: const i32[:], ls: SIS) -> bool, i32, i64, i32, i
 // getScalarsVectorizationLegality(VL, Depth, UserTreeIdx): (S, IsLegal, TryToFindDuplicates, TrySplitVectorize)
 fn slp_vectorization_legality(vl: const i32[:], depth: i64, ui_te: i32) -> SIS, bool, bool, bool {
     var s = slp_build_instructions_state(vl, true, false);
-    if s.copy { slp_fail("copyable elements (InstructionsState with copyables)"); }
     var scatter_gep = false;
     if !sis_valid(s) {
         let scatter_user = ui_te >= 0 && slp_te[ui_te].state == TE_SCATTER;
@@ -1550,10 +1548,14 @@ recursive fn slp_build_tree_rec(vat0: i32, vn0: i64, depth: i64, ui_te: i32, ui_
     let vl0 = s.main;
     let bs = slp_get_bs(inst_parent(vl0));
     let uat, un = slp_unique_values(slp_vl(vat, vn));
-    let bundle = slp_try_schedule_bundle(bs, slp_vl(uat, un), s, ui_te);
+    let bundle = slp_try_schedule_bundle(bs, slp_vl(uat, un), s, ui_te, ui_edge);
     if bundle == -2 {
         if slp_dbg_on { errs("SLP: We are not able to schedule this bundle!\n"); slp_dbg_flush(); }
         if sis_is_alt_shuffle(s) && rn == 0 && slp_try_split_node(vat, vn, s, depth, ui_te, ui_edge) { return; }
+        if s.copy && rn == 0 {
+            let alts = slp_get_same_opcode(slp_vl(vat, vn));
+            if sis_valid(alts) && sis_is_alt_shuffle(alts) && slp_try_split_node(vat, vn, alts, depth, ui_te, ui_edge) { return; }
+        }
         slp_new_gather(slp_vl(vat, vn), s, ui_te, ui_edge, slp_il(rat, rn));
         sh_add(SH_NSF, slp_vp[vat as i64] as i64, 0);
         if sis_opcode(s) == OP_LOAD && slp_bs[bs].region_size < slp_bs[bs].region_limit { slp_register_nonvect_loads(slp_vl(vat, vn)); }

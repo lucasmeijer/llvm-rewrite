@@ -88,6 +88,14 @@ let SH_UIL: i64 = 19;       // *UserIgnoreList
 let SH_ANRR: i64 = 20;      // AnalyzedReductionsRoots (per function)
 let SH_ANRV: i64 = 21;      // AnalyzedReductionVals (per function)
 let SH_ANMBW: i64 = 22;     // AnalyzedMinBWVals (per function)
+// 23..29: slp_hr.goose, slp_phis.goose
+let SH_CDMAP: i64 = 30;     // BlockScheduling::ScheduleCopyableDataMap: (EI, value) -> copyable data
+let SH_CDINST: i64 = 31;    // ScheduleCopyableDataMapByInst: inst -> link list
+let SH_CDIU: i64 = 32;      // ScheduleCopyableDataMapByInstUser: ((user, op idx), value) -> link list
+let SH_CDUSERS: i64 = 33;   // ScheduleCopyableDataMapByUsers: inst -> link list (a SetVector)
+let SH_CDTMP: i64 = 34;     // calculateDependencies' UserToNumOps
+let SH_CDTMP2: i64 = 35;    // tryScheduleBundle's UserOpToNumOps
+let SH_E2LI: i64 = 36;      // EntryToLastInstruction (per tree): entry -> instruction
 let SH_TMP0: i64 = 40;      // short-lived local sets/maps
 let SH_TMP1: i64 = 41;
 let SH_TMP2: i64 = 42;
@@ -444,7 +452,7 @@ fn slp_delete_tree() {
     slp_lk.clear();
     sh_clear(SH_S2TE); sh_clear(SH_SPLIT); sh_clear(SH_V2G); sh_clear(SH_MUSTG); sh_clear(SH_NSF);
     sh_clear(SH_OP2TE); sh_clear(SH_COPYABLE); sh_clear(SH_DELNODES); sh_clear(SH_T2G); sh_clear(SH_LANE);
-    sh_clear(SH_INSTRSZ); sh_clear(SH_UIL);
+    sh_clear(SH_INSTRSZ); sh_clear(SH_UIL); sh_clear(SH_E2LI);
     slp_load_entries.clear();
     slp_graph_transform_mode = false;
     slp_gathered_loads_first = -1;
