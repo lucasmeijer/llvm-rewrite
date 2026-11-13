@@ -326,7 +326,7 @@ pi_do_single_region_function_outlining :: (c: *Pi_Cloner) -> Value_Id {
         c.outlined_region_cost = cost_add(c.outlined_region_cost, pi_compute_bb_inline_cost(b, t));
     }
     cache := ce_cache_new(cf);
-    ce := ce_new(to_extract, dt, c.bfi, c.bpi, cached_assumption_cache(cf), true, false);
+    ce := ce_new(to_extract, dt, c.bfi, c.bpi, cached_assumption_cache(cf), true, false, "", false);
     outlined := ce_extract_code_region(*ce, *cache);
     if outlined != NONE {
         users := pi_fn_users(outlined);

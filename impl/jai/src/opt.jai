@@ -262,6 +262,8 @@
 #load "attributor_mem.jai";
 #load "code_extractor.jai";
 #load "pass_partial_inliner.jai";
+#load "pass_hot_cold_split.jai";
+#load "pass_loop_extract.jai";
 #load "lower_mem_intrinsics.jai";
 #load "gen_vp.jai";
 #load "vp_expand.jai";

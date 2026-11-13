@@ -16,6 +16,8 @@ Code_Extractor :: struct {
     bpi: *Bpi;
     ac: *Assumption_Cache;
     allow_varargs: bool;
+    suffix: string;                    // Suffix ("" = the header's name, or "extracted")
+    void_return_with_single_output: bool;   // VoidReturnWithSingleOutput
     blocks: [..] Value_Id;             // SetVector<BasicBlock *> Blocks
     in_blocks: Table(Value_Id, bool);
     func_ret_val: Value_Id = NONE;
@@ -105,8 +107,28 @@ ce_is_block_valid :: (ce: *Code_Extractor, bb: Value_Id, allow_varargs: bool, al
         o := inst_op(i);
         if o == .ALLOCA { if !allow_alloca return false; continue; }
         if o == .INVOKE { if !ce_contains(ce, op(i, nops(i) - 2)) return false; continue; }
-        if o == .CATCHSWITCH || o == .CATCHPAD || o == .CLEANUPPAD || o == .CLEANUPRET
-            fatal("code extractor: funclet-based EH in an extracted region is not supported yet");
+        if o == .CATCHSWITCH {
+            // unwind destination and every handler must be in the region
+            for s: ce_terminator_successors(i) if !ce_contains(ce, s) return false;
+            continue;
+        }
+        if o == .CATCHPAD || o == .CLEANUPPAD {
+            // the blocks of the catchret / cleanupret users must be in the region
+            u := ir.v_first_use[i];
+            while u != NONE {
+                usr := ir.u_user[u];
+                u = ir.u_next[u];
+                if !is_inst(usr) continue;
+                uo := inst_op(usr);
+                if (o == .CATCHPAD && uo == .CATCHRET) || (o == .CLEANUPPAD && uo == .CLEANUPRET)
+                    if !ce_contains(ce, inst_block(usr)) return false;
+            }
+            continue;
+        }
+        if o == .CLEANUPRET {
+            for s: ce_terminator_successors(i) if !ce_contains(ce, s) return false;
+            continue;
+        }
         if o == .CALL {
             if ((inst(i).flags >> TAIL_SHIFT) & 3) == 2 return false;   // musttail
             f := call_called_function(i);
@@ -120,10 +142,18 @@ ce_is_block_valid :: (ce: *Code_Extractor, bb: Value_Id, allow_varargs: bool, al
     return true;
 }
 
+ce_terminator_successors :: (t: Value_Id) -> [..] Value_Id {
+    r: [..] Value_Id; r.allocator = temp;
+    for k: 0..cast(s64) num_successors(t) - 1 array_add(*r, get_successor(t, cast(u32) k));
+    return r;
+}
+
 // CodeExtractor::CodeExtractor (buildExtractionBlockSet)
-ce_new :: (bbs: [] Value_Id, dt: *Dom_Tree, bfi: *Bfi, bpi: *Bpi, ac: *Assumption_Cache, allow_varargs: bool, allow_alloca: bool) -> Code_Extractor {
+ce_new :: (bbs: [] Value_Id, dt: *Dom_Tree, bfi: *Bfi, bpi: *Bpi, ac: *Assumption_Cache, allow_varargs: bool, allow_alloca: bool,
+           suffix := "", void_return_with_single_output := true) -> Code_Extractor {
     ce: Code_Extractor;
     ce.dt = dt; ce.bfi = bfi; ce.bpi = bpi; ce.ac = ac; ce.allow_varargs = allow_varargs;
+    ce.suffix = suffix; ce.void_return_with_single_output = void_return_with_single_output;
     for bb: bbs {
         if dt && !dt_is_reachable_from_entry(dt, bb) continue;
         if !ce_insert(*ce, bb) fatal("internal: code extractor: repeated basic blocks in extraction input");
@@ -420,13 +450,14 @@ ce_find_allocas :: (ce: *Code_Extractor, cache: *Ce_Cache, sink: *Value_Set, hoi
 }
 
 // findInputsOutputs
-ce_find_inputs_outputs :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Value_Set, sink: *Value_Set) {
+ce_find_inputs_outputs :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Value_Set, sink: *Value_Set, collect_global_inputs := false) {
     for bb: ce.blocks for i: block_insts(bb) {
         n := nops(i);
         for k: 0..cast(s64) n - 1 {
             v := op(i, cast(u32) k);
             if v == NONE continue;
-            if !vset_contains(sink, v) && ce_defined_in_caller(ce, v) vset_insert(inputs, v);
+            if !vset_contains(sink, v) && (ce_defined_in_caller(ce, v) || (collect_global_inputs && vkind(v) == .GLOBAL_VAR))
+                vset_insert(inputs, v);
         }
         u := ir.v_first_use[i];
         while u != NONE {
@@ -435,7 +466,7 @@ ce_find_inputs_outputs :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Va
         }
     }
     ce.func_ret_val = NONE;
-    if outputs.list.count == 1 && ce_common_exit_block(ce) != NONE {
+    if !ce.void_return_with_single_output && outputs.list.count == 1 && ce_common_exit_block(ce) != NONE {
         ce.func_ret_val = outputs.list[0];
         outputs.list.count = 0;
         table_reset(*outputs.member);
@@ -552,7 +583,7 @@ ce_construct_function_declaration :: (ce: *Code_Extractor, inputs: *Value_Set, o
     for v, k: inputs.list {
         a := fn_arg(nf, cast(u32) k);
         if vname(v).count set_name(a, vname(v));
-        if vkind(v) == .ARGUMENT && arg_has_attr(v, .SwiftError) fatal("code extractor: swifterror inputs are not supported yet");
+        if is_swift_error(v) fn_add_param_attr_kind(nf, cast(u32) k, .SwiftError);
     }
     for v, k: outputs.list set_name(fn_arg(nf, cast(u32) (inputs.list.count + k)), tconcat(vname(v), ".out"));
     if ce.bfi {
@@ -579,13 +610,13 @@ ce_emit_function_body :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Val
     }
     stubs: [..] Value_Id; stubs.allocator = temp;
     n := ce.exits.count;
-    if n > 2 fatal("code extractor: more than two exit blocks (an i16 switch on the outlined call) is not supported yet");
     for old_target, k: ce.exits {
         nt := create_block(nf, tconcat(vname(old_target), ".exitStub"));
         array_add(*stubs, nt);
         brv: Value_Id = NONE;
         if n == 1 { if ce.func_ret_val != NONE brv = ce.func_ret_val; }
         else if n == 2 brv = const_int(ir.t_i1, ifx k == 0 then cast(u64) 1 else 0);
+        else brv = const_int(type_int(16), cast(u64) k);
         ret := new_inst(.RET, ir.t_void, ifx brv != NONE then cast(u32) 1 else 0);
         if brv != NONE set_op(ret, 0, brv);
         block_append_inst(nt, ret);
@@ -648,6 +679,7 @@ ce_emit_replacer_call :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Val
     for params set_op(call, cast(u32) it_index, it);
     set_op(call, cast(u32) params.count, nf);
     insert_at_end_named(call, code_replacer, ifx ce.exits.count > 1 then "targetBlock" else "");
+    for v, k: inputs.list if is_swift_error(v) call_add_param_attr_kind(call, cast(u32) k, .SwiftError);
     for v, k: outputs.list {
         t := vtype(v);
         ld := new_inst(.LOAD, t, 1);
@@ -668,8 +700,13 @@ ce_emit_replacer_call :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Val
         block_append_inst(code_replacer, term);
     } else if n == 1 {
         block_append_inst(code_replacer, create_br(ce.exits[0]));
-    } else {
+    } else if n == 2 {
         block_append_inst(code_replacer, create_cond_br(call, ce.exits[0], ce.exits[1]));
+    } else {
+        // SwitchInst on the call: the default destination is the last exit, whose case is removed
+        sw := create_switch(call, ce.exits[n - 1], cast(u32) (n - 1));
+        for k: 0..n - 2 sw_add_case(sw, const_int(type_int(16), cast(u64) k), ce.exits[k]);
+        block_append_inst(code_replacer, sw);
     }
     // insertLifetimeMarkersSurroundingCall (outputs), then for the inputs' lifetime starts
     term := block_terminator(code_replacer);
@@ -775,7 +812,7 @@ ce_extract_code_region :: (ce: *Code_Extractor, cache: *Ce_Cache) -> Value_Id {
         while i != NONE {
             next := inst_next(i);
             if inst_op(i) == .CALL && call_iid(i) == IID_ASSUME {
-                if ce.ac fatal("code extractor: updating an assumption cache is not supported yet");
+                if ce.ac ac_unregister_assumption(ce.ac, i);
                 erase_inst(i);
             }
             i = next;
@@ -816,7 +853,8 @@ ce_extract_code_region :: (ce: *Code_Extractor, cache: *Ce_Cache) -> Value_Id {
     }
     repl_ip := header;
     while repl_ip != NONE && ce_contains(ce, repl_ip) repl_ip = block(repl_ip).next;
-    suffix := ifx vname(header).count then vname(header) else "extracted";
+    suffix := ce.suffix;
+    if !suffix.count suffix = ifx vname(header).count then vname(header) else "extracted";
     nf := ce_construct_function_declaration(ce, *inputs, *outputs, entry_freq, tconcat(vname(old), ".", suffix));
     ce_emit_function_body(ce, *inputs, *outputs, nf, header, *sink);
     call := ce_emit_replacer_call(ce, *inputs, *outputs, nf, old, repl_ip, entry_freq, lifetimes_start.list);

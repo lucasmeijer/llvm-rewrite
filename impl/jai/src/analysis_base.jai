@@ -454,6 +454,25 @@ find_values_affected_by_condition :: (cond: Value_Id, is_assume: bool, out: *[..
     }
 }
 
+// unregisterAssumption: the assume's affected-value entries become null handles (a list left with only null
+// handles is erased) and the assume leaves AssumeHandles
+ac_unregister_assumption :: (ac: *Assumption_Cache, ci: Value_Id) {
+    aff: [..] Affected; aff.allocator = temp;
+    ac_find_affected_values(ci, *aff);
+    for a: aff {
+        p := table_find_pointer(*ac.affected, a.v);
+        if !p continue;
+        found := false; has_nonnull := false;
+        for * e: p.* {
+            if e.assume == ci { found = true; e.assume = NONE; }
+            has_nonnull |= e.assume != NONE;
+            if has_nonnull && found break;
+        }
+        if !has_nonnull { array_free(p.*); table_remove(*ac.affected, a.v); }
+    }
+    for ac.assumes if it == ci { array_ordered_remove_by_index(*ac.assumes, it_index); break; }
+}
+
 // The function's AssumptionCache: fam-cached (AssumptionAnalysis); see passes.jai get_assumption_cache.
 // replace_all_uses_with calls this so cached caches follow RAUW like the callback handles do.
 ac_note_rauw :: (old: Value_Id, new: Value_Id) {
