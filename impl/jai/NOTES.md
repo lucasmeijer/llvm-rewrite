@@ -1357,7 +1357,7 @@ Still slow / known:
   -dfa-max-cloned-rate=1000` (also `,print<domtree>`); `function(sroa),<pass>` on tests/perf/compile 4/4 for both.
 - LoopInterchange, DependenceAnalysis and Delinearization: see "Default pipelines (L2.pipeline-O2)" below.
 
-## Default pipelines, DependenceAnalysis, LoopInterchange (L2.pipeline-O2 234/241, L2.phase-ordering 127/144, L1.o2-gaps 379/380)
+## Default pipelines, DependenceAnalysis, LoopInterchange, ExpandMemCmp (L2.pipeline-O2 240/241, L2.phase-ordering 130/144, L1.o2-gaps 379/380, L2.perf-corpus 54/56)
 
 - Files: `pass_builder_pipelines.jai` (PassBuilderPipelines.cpp: `-O#`, `default<O#>`; built as Pass_Node rows,
   `-jai-print-pipeline` diffs against `opt -print-pipeline-passes`), `dependence_analysis.jai` (DependenceAnalysis.cpp,
@@ -1384,10 +1384,17 @@ Still slow / known:
   current loop is the new inner loop and the rest of the LPM runs on it (LLVM does the same). `cache` profitability
   (LoopCacheAnalysis) fails loudly; -loop-interchange-reduction-to-mem is ported. `is_constant` is a Jai builtin
   (compile-time constness), not isa<Constant>: use `is_const`.
-- Remaining -O2 failures (2026-11-12): 5 blocked only by LoopVectorize (uncountable early exits x3, stores of
-  reductions to invariant addresses x2), 1 linpack-pc (ExprValueMap order above), 1 SLP/inliner-independent.
-  Phase-ordering: LTO pipelines (4), mergefunc (3), PGO options (2), -force-attribute, expand-reductions,
-  expand-memcmp, knowledge retention in loop passes, ptrauth protected.field.ptr, LoopVectorize (3).
+- Remaining failures (2026-11-13): pipeline-O2 only linpack-pc (ExprValueMap order above). perf-corpus: oggenc
+  (mergeConditionalStores with 5+ store addresses and 2+ common ones: SmallPtrSet hash order) and sqlite3 (SLP:
+  several external store groups, DenseMap order). Phase-ordering: LTO / ThinLTO pipelines (5), mergefunc (3), PGO
+  options (2), -force-attribute, knowledge retention in loop passes, ptrauth protected.field.ptr, LoopVectorize
+  convertToStridedAccesses. L1.o2-gaps: the `cache` profitability rule (LoopCacheAnalysis).
+- More pipeline-state fixes (each found with bisect + standalone rerun): the inliner's PHI trimming follows
+  removeIncomingValueIf (backwards, last into the hole); LICM's call clones take the original name first (one
+  LastUnique bump); CommonPointerBase's NW flags default to all(); ExpandMemCmp ported (pass_expand_memcmp.jai,
+  X86 options; it finds memcmp/bcmp without an availability check). knowledge/llvm/dependence-and-interchange.md.
+- -O2 compile time, optimized build (user s, jai vs LLVM): SPASS 8.2 vs 5.0, lua 2.3 vs 1.2, sqlite3 (up to the
+  SLP failure) 5.3 vs 3.5, scaling/calls/n8000 10.0 vs 5.1, scaling/diamonds/n8000 9.3 vs 1.3 (SLP).
 - Perf: tests/perf/scaling/calls/n8000 -O2 takes ~115-130 s on the x64 build (harness limit 120 s; LLVM 4.8 s):
   the inliner's cost analysis (46k CallAnalyzer runs on n500, the same count as LLVM) and instcombine's known-bits
   queries, i.e. the x64 backend's per-call overhead on small helpers (no single hotspot). Inlining the hottest
