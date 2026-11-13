@@ -7,6 +7,9 @@ Directives are comment lines `; @key: value` in the file's leading comment block
                         stdout and stderr compared
   @analysis-unordered: <opt args>   the same, but lines are compared as sorted multisets: for printers that iterate
                         in pointer order (e.g. print<demanded-bits>; LLVM's own tests use CHECK-DAG for them)
+  @error: <opt args>    expected-failure check `::error` (repeatable): `opt <args> -disable-output` must fail like
+                        LLVM's (nonzero exit) with the same stderr (tool path and crash backtrace normalized).
+                        A file with @error has no `::roundtrip` (LLVM rejects it)
   @llc: <llc args>      enables `::isel-ir` and `::run`
   @driver: <path.c>     C driver linked with the compiled IR for `::run` (function tests)
   @source: <path.c>     C file the IR was generated from (informational, used for UB validation)
@@ -14,7 +17,7 @@ Directives are comment lines `; @key: value` in the file's leading comment block
   @perf-size: <n>       problem size of a tests/perf/scaling/ file, for fitting how cost grows with n
   @origin / @generated  provenance (informational)
 
-Every file also has `::roundtrip`. A test ID is `<repo-relative path>::<check>`.
+Every file also has `::roundtrip`, except files with @error. A test ID is `<repo-relative path>::<check>`.
 
 Multi-module (LTO) tests: a directory under tests/lto/ that contains a manifest `test.lto` (same `; @key: value` lines)
 is one test whose path is the directory. Its modules are .ll files in that directory, which are ordinary test files
@@ -37,7 +40,7 @@ from pathlib import Path
 from . import config
 
 DIRECTIVE = re.compile(r"^;\s*@([a-z][a-z-]*):\s*(.*?)\s*$")
-CHECKS = ("roundtrip", "link", "opt", "analysis", "isel-ir", "run")
+CHECKS = ("roundtrip", "link", "opt", "analysis", "error", "isel-ir", "run")
 LTO_MANIFEST = "test.lto"
 
 
@@ -46,6 +49,7 @@ class TestFile:
     path: str  # repo-relative
     opt: list[str] = field(default_factory=list)
     analysis: list[tuple[str, bool]] = field(default_factory=list)  # (opt args, unordered)
+    error: list[str] = field(default_factory=list)  # opt args that must fail like LLVM (::error)
     llc: str | None = None
     driver: str | None = None
     source: str | None = None
@@ -61,11 +65,13 @@ class TestFile:
     def checks(self) -> list[str]:
         if self.is_lto:
             return ["link"] + (["opt"] if self.opt else []) + (["run"] if self.llc is not None else [])
-        out = ["roundtrip"]
+        out = [] if self.error else ["roundtrip"]
         if self.opt:
             out.append("opt")
         if self.analysis:
             out.append("analysis")
+        if self.error:
+            out.append("error")
         if self.llc is not None:
             out += ["isel-ir", "run"]
         return out
@@ -92,6 +98,8 @@ def parse(path: Path) -> TestFile:
                 t.opt.append(val)
             elif key in ("analysis", "analysis-unordered"):
                 t.analysis.append((val, key == "analysis-unordered"))
+            elif key == "error":
+                t.error.append(val)
             elif key == "llc":
                 t.llc = val
             elif key == "driver":

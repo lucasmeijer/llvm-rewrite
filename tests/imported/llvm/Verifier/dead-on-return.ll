@@ -1,0 +1,15 @@
+; @origin: llvm/test/Verifier/dead-on-return.ll (llvmorg-23.1.5)
+; @error: -passes=verify
+; RUN: not llvm-as -disable-output %s 2>&1 | FileCheck %s
+
+; CHECK: Attribute 'dead_on_return' applied to incompatible type!
+; CHECK-NEXT: ptr @arg_not_pointer
+define void @arg_not_pointer(i32 dead_on_return %arg) {
+  ret void
+}
+
+; CHECK: Attribute 'dead_on_return(4)' applied to incompatible type!
+; CHECK-NEXT: ptr @arg_not_pointer2
+define void @arg_not_pointer2(i32 dead_on_return(4) %arg) {
+  ret void
+}

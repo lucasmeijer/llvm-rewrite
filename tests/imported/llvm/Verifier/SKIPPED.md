@@ -1,0 +1,215 @@
+# Skipped while importing llvm/test/Verifier (llvmorg-23.1.5)
+
+312 of 408 files imported. Regenerate with `./harness/run import-llvm Verifier`.
+
+- `2002-04-13-RetTypes.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `2002-04-13-RetTypes.ll`: llvm opt rejects the file
+- `2002-11-05-GetelementptrPointers.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `2002-11-05-GetelementptrPointers.ll`: llvm opt rejects the file
+- `2004-05-21-SwitchConstantMismatch.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `2004-05-21-SwitchConstantMismatch.ll`: llvm opt rejects the file
+- `2008-03-01-AllocaSized.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `2008-03-01-AllocaSized.ll`: llvm opt rejects the file
+- `2008-11-15-RetVoid.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `2008-11-15-RetVoid.ll`: llvm opt rejects the file
+- `intrinsic-immarg.ll`: in a AArch64 target directory
+- `alloca.ll`: in a AMDGPU target directory
+- `intrinsic-amdgcn-call-whole-wave.ll`: in a AMDGPU target directory
+- `intrinsic-amdgpu-cs-chain.ll`: in a AMDGPU target directory
+- `intrinsic-amdgpu-init-exec-from-input.ll`: in a AMDGPU target directory
+- `intrinsic-immarg.ll`: in a AMDGPU target directory
+- `intrinsic-load-to-lds.ll`: in a AMDGPU target directory
+- `intrinsic-prefetch.ll`: in a AMDGPU target directory
+- `intrinsic-sponentry.ll`: in a AMDGPU target directory
+- `intrinsics-av.ll`: in a AMDGPU target directory
+- `llvm.amdgcn.cooperative.atomic.ll`: in a AMDGPU target directory
+- `mfma-scale.ll`: in a AMDGPU target directory
+- `module-flag-oob-mode.ll`: in a AMDGPU target directory
+- `reqd-work-group-size.ll`: in a AMDGPU target directory
+- `test-cvt-fp4f6f8-immarg-ranges.ll`: in a AMDGPU target directory
+- `wmma-f8f6f4.ll`: in a AMDGPU target directory
+- `intrinsic-immarg.ll`: in a ARM target directory
+- `DILocation-parents.ll` RUN `llvm-as -disable-output %s -o - 2>&1 | FileCheck %s`: llvm-as option -
+- `DILocation-scope.ll` RUN `llvm-as -disable-output %s -o - 2>&1 | FileCheck %s`: llvm-as option -
+- `intrinsic-immarg.ll`: in a LoongArch target directory
+- `fence-proxy.tensormap.ll`: in a NVPTX target directory
+- `setmaxnreg.ll`: in a NVPTX target directory
+- `tensormap-replace.ll`: in a NVPTX target directory
+- `di-subroutine-localvar.ll` RUN `opt %s -passes=verify 2>&1 | FileCheck %s`: redirects or chains commands
+- `fnarg-nodebug.ll` RUN `llvm-as < %s -o %t`: writes to a file
+- `fnarg-nodebug.ll` RUN `llvm-dis < %t -o - | FileCheck %s`: not an opt invocation
+- `invalid-dbg-declare-operands.ll` RUN `llvm-as %s -o - 2>&1 | FileCheck %s`: llvm-as option -
+- `llvm.dbg.declare-expression.ll` @analysis `-passes=verify`: nondeterministic output
+- `llvm.dbg.declare-expression.ll`: no working RUN lines
+- `llvm.dbg.value-expression.ll` @analysis `-passes=verify`: nondeterministic output
+- `llvm.dbg.value-expression.ll`: no working RUN lines
+- `intrinsic-immarg.ll`: in a SystemZ target directory
+- `aarch64-ldstxr.ll`: uses non-x86 target intrinsic @llvm.aarch64.
+- `alloc-size-failedparse.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `alloc-size-failedparse.ll`: llvm opt rejects the file
+- `amdgpu-stridemark-tokenlike.ll`: uses split-file
+- `arbitrary-fp-convert.ll`: uses split-file
+- `arm-intrinsics.ll`: uses non-x86 target intrinsic @llvm.arm.
+- `bitcast-address-space-nested-global-cycle.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-address-space-nested-global-cycle.ll`: llvm opt rejects the file
+- `bitcast-address-space-nested-global.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-address-space-nested-global.ll`: llvm opt rejects the file
+- `bitcast-address-space-through-constant-inttoptr-inside-gep-instruction.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-address-space-through-constant-inttoptr-inside-gep-instruction.ll`: llvm opt rejects the file
+- `bitcast-address-space-through-constant-inttoptr.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-address-space-through-constant-inttoptr.ll`: llvm opt rejects the file
+- `bitcast-address-space-through-gep-2.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-address-space-through-gep-2.ll`: llvm opt rejects the file
+- `bitcast-address-space-through-gep.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-address-space-through-gep.ll`: llvm opt rejects the file
+- `bitcast-address-space-through-inttoptr.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-address-space-through-inttoptr.ll`: llvm opt rejects the file
+- `bitcast-address-spaces.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-address-spaces.ll`: llvm opt rejects the file
+- `bitcast-alias-address-space.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-alias-address-space.ll`: llvm opt rejects the file
+- `bitcast-pointer-vector-neg.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-pointer-vector-neg.ll`: llvm opt rejects the file
+- `bitcast-vector-pointer-as-neg.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-vector-pointer-as-neg.ll`: llvm opt rejects the file
+- `bitcast-vector-pointer-as.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-vector-pointer-as.ll`: llvm opt rejects the file
+- `bitcast-vector-pointer-neg.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `bitcast-vector-pointer-neg.ll`: llvm opt rejects the file
+- `branch-weight.ll`: uses split-file
+- `callbr-intrinsic.ll`: uses non-x86 target intrinsic @llvm.amdgcn.
+- `callsite-dbgloc.ll` RUN `llvm-as %s -o %t 2>&1 | FileCheck %s`: writes to a file
+- `comdat2.ll` RUN `opt -mtriple=x86_64-unknown-linux -o /dev/null`: writes to a file
+- `comdat2.ll`: has @error lines; its 1 passing RUN line(s) are dropped
+- `dbg-orphaned-compileunit.ll` @error `-passes=verify`: llvm opt -passes=verify -disable-output: llvm opt succeeds (an @error line must fail):
+- `dbg-orphaned-compileunit.ll`: no working RUN lines
+- `di-subroutine-localvar.ll` RUN `opt %s -passes=verify 2>&1 | FileCheck %s`: redirects or chains commands
+- `disubprogram-declaration-within-struct-2.ll` RUN `opt -passes=verify -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `fnarg-nodebug.ll` RUN `llvm-as < %s -o %t`: writes to a file
+- `fnarg-nodebug.ll` RUN `llvm-dis < %t -o - | FileCheck %s`: not an opt invocation
+- `fp-intrinsics-pass.ll` RUN `opt -passes=verify -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `immarg-param-attribute-invalid.ll` RUN `not llvm-as -use-constant-int-for-fixed-length-splat < %s -o /dev/null 2>&1 | FileCheck %s`: llvm-as option -use-constant-int-for-fixed-length-splat
+- `initializes-attr.ll`: uses split-file
+- `insert-extract-intrinsics-invalid.ll` RUN `not opt -passes=verify -S < %s 2>&1 >/dev/null | FileCheck %s`: redirects or chains commands
+- `intrinsic-arg-overloading-struct-ret.ll`: uses non-x86 target intrinsic @llvm.aarch64.
+- `intrinsic-bad-arg-type1.ll`: uses split-file
+- `invalid-eh.ll` RUN `sed -e s/.T1:// %s | not llvm-as -disable-output 2>&1 | FileCheck --check-prefix=CHECK1 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T2:// %s | not llvm-as -disable-output 2>&1 | FileCheck --check-prefix=CHECK2 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T3:// %s | not llvm-as -disable-output 2>&1 | FileCheck --check-prefix=CHECK3 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T4:// %s | not llvm-as -disable-output 2>&1 | FileCheck --check-prefix=CHECK4 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T5:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK5 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T6:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK6 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T7:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK7 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T8:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK8 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T9:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK9 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T10:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK10 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T11:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK11 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T12:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK12 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T13:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK13 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T14:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK14 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T15:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK15 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T16:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK16 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T17:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK17 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T18:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK18 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T19:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK19 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T20:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK20 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T21:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK21 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T22:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK22 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T23:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK23 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T24:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK24 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T25:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK25 %s`: not an opt invocation
+- `invalid-eh.ll` RUN `sed -e s/.T26:// %s | not opt -passes=verify -disable-output 2>&1 | FileCheck --check-prefix=CHECK26 %s`: not an opt invocation
+- `invalid-label-param.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `invalid-label-param.ll`: llvm opt rejects the file
+- `llvm.loop-cu-strip-followup.ll` RUN `llvm-as < %s -o - | llvm-dis - | FileCheck %s`: llvm-as option -
+- `llvm.loop-cu-strip-indirect.ll` RUN `llvm-as < %s -o - | llvm-dis - | FileCheck %s --check-prefix=CHECK-STRIP`: llvm-as option -
+- `llvm.loop-cu-strip.ll` RUN `llvm-as < %s -o - | llvm-dis - | FileCheck %s --check-prefix=CHECK-STRIP`: llvm-as option -
+- `llvm.loop.estimated_trip_count.ll` RUN `cp %s %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `chmod u+w %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `echo '!1 = !{!"llvm.loop.estimated_trip_count"}' >> %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `not %{RUN} TOO-FEW`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `cp %s %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `chmod u+w %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `echo '!1 = !{!"llvm.loop.estimated_trip_count", i16 5}' >> %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `%{RUN} GOOD`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `cp %s %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `chmod u+w %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `echo '!1 = !{!"llvm.loop.estimated_trip_count", i32 5}' >> %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `%{RUN} GOOD`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `cp %s %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `chmod u+w %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `echo '!1 = !{!"llvm.loop.estimated_trip_count", i32 1}' >> %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `%{RUN} GOOD`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `cp %s %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `chmod u+w %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `echo '!1 = !{!"llvm.loop.estimated_trip_count", i32 0}' >> %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `%{RUN} GOOD`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `cp %s %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `chmod u+w %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `echo '!1 = !{!"llvm.loop.estimated_trip_count", i64 5}' >> %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `not %{RUN} BAD-VALUE`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `cp %s %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `chmod u+w %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `echo '!1 = !{!"llvm.loop.estimated_trip_count", !"5"}' >> %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `not %{RUN} BAD-VALUE`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `cp %s %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `chmod u+w %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `echo '!1 = !{!"llvm.loop.estimated_trip_count", !2}' >> %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `echo '!2 = !{i32 5}' >> %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `not %{RUN} BAD-VALUE`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `cp %s %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `chmod u+w %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `echo '!1 = !{!"llvm.loop.estimated_trip_count", i32 5, i32 5}' >> %t`: not an opt invocation
+- `llvm.loop.estimated_trip_count.ll` RUN `not %{RUN} TOO-MANY`: not an opt invocation
+- `memcpy-inline.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `memcpy-inline.ll`: llvm opt rejects the file
+- `memcpy.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `memcpy.ll`: llvm opt rejects the file
+- `memset-inline.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `memset-inline.ll`: llvm opt rejects the file
+- `memset-pattern.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `memset-pattern.ll`: llvm opt rejects the file
+- `module-flags-note-gnu-property-elf-pauthabi.ll`: uses split-file
+- `noalias_scope_decl.ll` RUN `not llvm-as -disable-output --verify-noalias-scope-decl-dom < %s 2>&1 | FileCheck %s`: llvm-as option --verify-noalias-scope-decl-dom
+- `non-integer-gep-index.ll` RUN `not opt -verify %s.bc -disable-output`: uses lit substitution %s.bc
+- `non-integral-pointers.ll` RUN `opt -passes=verify -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `param-attr-align.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `param-attr-align.ll`: llvm opt rejects the file
+- `scalable-vector-struct-alloca.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `scalable-vector-struct-alloca.ll`: llvm opt rejects the file
+- `scalable-vector-struct-gep.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `scalable-vector-struct-gep.ll`: llvm opt rejects the file
+- `scalable-vector-struct-load.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `scalable-vector-struct-load.ll`: llvm opt rejects the file
+- `scalable-vector-struct-store.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `scalable-vector-struct-store.ll`: llvm opt rejects the file
+- `swifterror2.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `swifterror2.ll`: llvm opt rejects the file
+- `swifterror3.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `swifterror3.ll`: llvm opt rejects the file
+- `target-ext-vector-invalid.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `target-ext-vector-invalid.ll`: llvm opt rejects the file
+- `tbaa-allowed.ll` RUN `opt -S < %s`: no -passes / -O pipeline
+- `tbaa.ll` RUN `llvm-as -disable-verify < %s | opt -passes=verify -S | FileCheck %s  --check-prefix=STRIP`: llvm-as option -disable-verify
+- `token2.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `token2.ll`: llvm opt rejects the file
+- `token3.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `token3.ll`: llvm opt rejects the file
+- `token4.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `token4.ll`: llvm opt rejects the file
+- `unsized-types-alloca.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `unsized-types-alloca.ll`: llvm opt rejects the file
+- `unsized-types-load.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `unsized-types-load.ll`: llvm opt rejects the file
+- `unsized-types-store.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `unsized-types-store.ll`: llvm opt rejects the file
+- `value-profile.ll`: uses split-file
+- `weak-dllimport.ll` RUN `opt -passes=verify < %s 2>&1 | FileCheck %s`: redirects or chains commands
+- `x86_amx1.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `x86_amx1.ll`: llvm opt rejects the file
+- `x86_amx2.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `x86_amx2.ll`: llvm opt rejects the file
+- `x86_amx3.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `x86_amx3.ll`: llvm opt rejects the file
+- `x86_amx4.ll` @error `-passes=verify`: fails in the parser, not in the verifier
+- `x86_amx4.ll`: llvm opt rejects the file

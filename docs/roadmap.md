@@ -61,6 +61,16 @@ Analyses (dominator tree, loop info, alias analysis, ScalarEvolution, MemorySSA,
 The last two units are llc's IR-level passes (everything before instruction selection): IR in, IR out, matched
 exactly, so they belong here and not with the backend.
 
+### L1.verifier — The IR Verifier (`verify`, and opt's implicit verification of its input and output) with LLVM's messages
+- deps: L0.print-clang
+- exit: tests/imported/llvm/Verifier/*::error, tests/imported/llvm/Verifier/*::analysis, tests/imported/llvm/Verifier/*::opt, tests/imported/llvm/Verifier/*::roundtrip
+
+A port of lib/IR/Verifier.cpp including the debug-info checks (a module whose only problems are in its debug info
+loses the debug info with `warning: ignoring invalid debug info in <file>`, like UpgradeDebugInfo does), the
+intrinsic signature checks, dominance, the convergence-control verifier and the TBAA verifier. Diagnostics go to
+stderr byte-identical to LLVM's (`::error`, `docs/testing.md`), which means printing values and metadata with
+the verifier's ModuleSlotTracker numbering. A `--passes verify` sweep over the corpus must stay identical.
+
 ### L1.harness-analysis — Every hand-written analysis-printer test in `tests/analysis` (the harness support is done)
 - deps: L1.analysis.domtree, L1.analysis.loops, L1.analysis.scev, L1.analysis.aa, L1.analysis.memoryssa, L1.analysis.demanded-bits, L1.analysis.lvi, L1.analysis.bfi, L1.analysis.laa, L1.analysis.cost-model
 - exit: tests/analysis/*::analysis

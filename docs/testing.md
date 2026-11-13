@@ -11,6 +11,7 @@ A test is any `.ll` file under `tests/` (or a directory with a `test.lto` manife
 ; @opt: -passes=instcombine     IR->IR check (repeatable for imported tests: all must match)
 ; @analysis: -passes='print<domtree>'               analysis-printer check (repeatable: all must match)
 ; @analysis-unordered: -passes='print<demanded-bits>'   the same, comparing lines as a sorted multiset
+; @error: -passes=verify         expected failure: opt must fail with LLVM's stderr (repeatable; no ::roundtrip then)
 ; @llc: -O0                     enables ::isel-ir and ::run
 ; @driver: tests/function/src/abi/x.driver.c    C file linked in for ::run (function tests)
 ; @source: tests/e2e/src/arith/x.c              the C the IR came from (informational)
@@ -24,6 +25,7 @@ A test ID is `<repo-relative path>::<check>`, e.g. `tests/e2e/O0/calls/varargs.l
 | `roundtrip` | yes | `opt -S in.ll` with no passes: our printed text is **byte-identical** to LLVM's. Tests the parser and printer. |
 | `opt` | if `@opt` | `opt <args> -S`: both outputs canonicalized via `llvm-as \| llvm-dis` (so value numbering etc. can't cause false failures), then identical. Our output must also pass LLVM's verifier. |
 | `analysis` | if `@analysis` | `opt <args> -disable-output in.ll`: exit status 0, and stdout and stderr **byte-identical** to LLVM's (see below). |
+| `error` | if `@error` | `opt <args> -disable-output in.ll` **fails** (nonzero exit, like LLVM) and stderr is byte-identical to LLVM's after two normalizations (see below). A file with `@error` has no `::roundtrip`. |
 | `isel-ir` | if `@llc` | The IR that reaches instruction selection, `llc <args> -stop-before=x86-isel`. Input is LLVM's opt output, so this is isolated from `opt`. Canonicalized and identical. |
 | `run` | if `@llc` | Full pipeline with *our* tools (our opt if `@opt`, then our llc), linked by clang with `-no-pie`, executed: stdout and exit code identical to the LLVM-built program. |
 | `link` | LTO tests | See "Multi-module (LTO) tests" below. |
@@ -93,6 +95,26 @@ analysis test for a new printer, run LLVM's opt on it a few times yourself. `imp
 times and picks `@analysis`, `@analysis-unordered` or (when the content itself changes, e.g. printed addresses as in
 `print<alias-sets>` or `print-callgraph`) skips it.
 
+### Expected failures (`::error`)
+
+For IR that LLVM rejects: the verifier's diagnostics (`opt` verifies its input unless `-disable-verify`, prints the
+failed checks and `opt: in.ll: error: input module is broken!`, exits 1), `verify` passes that abort with
+`LLVM ERROR: Broken module found, compilation aborted!`, and the like. The check runs
+`opt <args> -disable-output in.ll`; both tools must exit nonzero and stderr must be identical after:
+
+- the tool name at the start of a line, `<any path>/opt: `, becomes `opt: ` (LLVM prints its `argv[0]`);
+- everything from a line starting `PLEASE submit a bug report` or `Stack dump:` on is dropped (the crash report
+  `report_fatal_error` ends with; its addresses change from run to run). The exit status itself is not compared
+  beyond being nonzero (an abort is 134, a plain error 1).
+
+LLVM's stderr is computed twice; if the runs differ (the verifier prints metadata that has no slot as its address,
+`<0x...>`), the test is `invalid`. `import-llvm` turns `not opt ...` and `not llvm-as ...` RUN lines into `@error`
+lines (`llvm-as` lines become `opt -passes=verify`, which is the same parse + verify; a line without a pipeline gets
+`-passes=verify`), and keeps only those that fail in the verifier: a failure that is a parse error
+(`opt: file:line:col: error: ...`) is a parser test and is listed in `SKIPPED.md` instead. `llvm-as` lines that
+succeed become `@analysis: -passes=verify` lines, so warnings on stderr (`warning: ignoring invalid debug info in
+...`) are compared too.
+
 ## Corpus layout
 
 ```
@@ -110,6 +132,7 @@ tests/imported/llvm/Linker/<test>/   LLVM's linker tests, one directory per llvm
 tests/imported/llvm/Transforms/<Pass>/*.ll    LLVM's regression tests, original paths kept; SKIPPED.md per dir
 tests/imported/llvm/Analysis/<Dir>/*.ll       LLVM's analysis tests: @analysis for printer RUN lines, @opt for the rest
 tests/imported/llvm/Instrumentation/<Dir>/*.ll  LLVM's instrumentation tests (sanitizers, coverage, profiling)
+tests/imported/llvm/Verifier/*.ll    LLVM's verifier tests: @error for RUN lines expecting failure, @analysis for llvm-as
 tests/perf/compile/<program>.ll      whole llvm-test-suite programs, one linked module each; @opt -O2, @perf
 tests/perf/scaling/<shape>/n<N>.ll   synthetic IR of one shape at three sizes; @opt per pass, @perf, @perf-size
 ```
@@ -144,6 +167,7 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/`, `imported/` and `perf/` are genera
 ./harness/run from-c tests/e2e/src/<area>/x.c            # C -> three .ll tests, with UB validation
 ./harness/run import-llvm Transforms/LICM                # import LLVM's tests for a pass
 ./harness/run import-llvm Analysis/ScalarEvolution       # or for an analysis (printer RUN lines become @analysis)
+./harness/run import-llvm Verifier                       # LLVM's verifier tests (`not opt`/`not llvm-as` -> @error)
 ./harness/run import-test-suite SingleSource/UnitTests   # import llvm-test-suite programs
 
 ./harness/run perf --impl rust                           # compile-time report vs LLVM, ~25 s (see Performance)

@@ -284,6 +284,39 @@ def oracle_analysis(t: TestFile, args: str, unordered: bool) -> dict:
     return proc.cached(["analysis", t.path, read(t.path), args, unordered], compute)
 
 
+# ::error: LLVM's tools name themselves by argv[0] ("/opt/llvm-23.1.5/bin/opt: x.ll: error: input module is broken!"),
+# an implementation by its own path or plain "opt"; and report_fatal_error ends in abort() with a backtrace whose
+# addresses change from run to run. Both sides are compared after these two normalizations only.
+TOOL_PREFIX = re.compile(r"^(?:\S*/)?opt: ", re.M)
+CRASH_TAIL = re.compile(r"^(PLEASE submit a bug report|Stack dump:)", re.M)
+
+
+def error_canon(text: str) -> str:
+    m = CRASH_TAIL.search(text)
+    if m:
+        text = text[:m.start()]
+    return TOOL_PREFIX.sub("opt: ", text)
+
+
+def oracle_error(t: TestFile, args: str) -> dict:
+    """LLVM's stderr for an @error line: must fail (nonzero exit), deterministically (two runs)."""
+
+    def compute():
+        runs = [tool_analysis(config.llvm("opt"), args, Path(t.path), config.REPO) for _ in range(2)]
+        r = runs[0]
+        if r.ok:
+            return {"ok": False, "text": "llvm opt succeeds (an @error line must fail):\n" + r.err_tail()}
+        if r.timed_out:
+            return {"ok": False, "text": r.err_tail()}
+        errs = [error_canon(x.err.decode(errors="replace")) for x in runs]
+        if errs[0] != errs[1]:
+            return {"ok": False, "text": "stderr is nondeterministic (differs between two runs of LLVM's opt):\n"
+                    + diff(errs[0], errs[1], 20)}
+        return {"ok": True, "stderr": errs[0]}
+
+    return proc.cached(["error", t.path, read(t.path), args], compute)
+
+
 def oracle_isel(input_text: str, llc_args: str) -> dict:
     def compute():
         with proc.Workdir() as wd:
@@ -438,6 +471,28 @@ def check_analysis(impl: str, t: TestFile) -> Outcome:
     return Outcome(tid, PASS)
 
 
+def check_error(impl: str, t: TestFile) -> Outcome:
+    tid = f"{t.path}::error"
+    for args in t.error:
+        exp = oracle_error(t, args)
+        if not exp["ok"]:
+            return Outcome(tid, INVALID, f"llvm opt {args} -disable-output: " + exp["text"])
+        if impl == config.REFERENCE_IMPL:
+            continue
+        r = tool_analysis(config.impl_bin(impl, "opt"), args, Path(t.path), config.REPO)
+        if r.timed_out:
+            return Outcome(tid, FAIL, f"[{args}] {r.fail_msg('opt')}:\n{r.err_tail()}", {"args.txt": args, "stderr.txt": r.err_tail(20000)})
+        act = error_canon(r.err.decode(errors="replace"))
+        if r.rc == 0:
+            return Outcome(tid, FAIL, f"[{args}] opt succeeded, LLVM fails with:\n" + exp["stderr"][-2000:],
+                           {"args.txt": args, "expected.stderr": exp["stderr"], "actual.stderr": act})
+        if act != exp["stderr"]:
+            return Outcome(tid, FAIL, f"[{args}] stderr differs:\n" + diff(exp["stderr"], act),
+                           {"args.txt": args, "expected.stderr": exp["stderr"], "actual.stderr": act,
+                            "diff.stderr.txt": full_diff(exp["stderr"], act)})
+    return Outcome(tid, PASS)
+
+
 def check_isel_ir(impl: str, t: TestFile) -> Outcome:
     tid = f"{t.path}::isel-ir"
     if t.opt:
@@ -498,4 +553,4 @@ def check_run(impl: str, t: TestFile) -> Outcome:
                     "exit-codes.txt": f"expected {exp['rc']}\nactual {act['rc']}\n"})
 
 
-CHECK_FNS = {"roundtrip": check_roundtrip, "link": check_link, "opt": check_opt, "analysis": check_analysis, "isel-ir": check_isel_ir, "run": check_run}
+CHECK_FNS = {"roundtrip": check_roundtrip, "link": check_link, "opt": check_opt, "analysis": check_analysis, "error": check_error, "isel-ir": check_isel_ir, "run": check_run}

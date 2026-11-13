@@ -230,11 +230,14 @@ INPUT_FILE_ARG = re.compile(r"^(--?[\w.-]+=)%[pS]/(Inputs/[\w.+-]+)$")
 
 
 def convert_run(run: str, inputs: dict | None = None, inputs_rel: str = "") -> tuple[str | None, str, str]:
-    """Returns (kind, opt args, '') with kind "opt" or "analysis", or (None, '', reason).
+    """Returns (kind, opt args, '') with kind "opt", "analysis" or "error", or (None, '', reason).
 
-    "analysis" (an @analysis line): the pipeline contains an analysis printer, or the RUN line has both
-    -disable-output and 2>&1 (so FileCheck reads stderr). Everything else is an @opt line, which may not redirect
-    (except `2>&1`, which is dropped: the check compares the IR, stderr is ignored).
+    "analysis" (an @analysis line): the pipeline contains an analysis printer, or the RUN line has 2>&1 and either
+    -disable-output or no pipeline (so FileCheck reads stderr). "error" (an @error line): the RUN line expects the
+    tool to fail (`not opt ...`, `not llvm-as ...`). Everything else is an @opt line, which may not redirect (except
+    `2>&1`, which is dropped: the check compares the IR, stderr is ignored).
+    `llvm-as` RUN lines (parse + verify) become `opt -passes=verify` lines: an @error line when they expect failure,
+    else an @analysis line (exit status 0 and identical stderr, e.g. the "ignoring invalid debug info" warning).
 
     With `inputs` (a dict), `-flag=%S/Inputs/x` becomes `-flag=<inputs_rel>/Inputs/x` (a path relative to the repo,
     the tools' working directory) and `inputs` gets `Inputs/x` -> the same; the caller copies the files.
@@ -244,8 +247,22 @@ def convert_run(run: str, inputs: dict | None = None, inputs_rel: str = "") -> t
         toks = shlex.split(first)
     except ValueError as e:
         return None, "", f"cannot tokenize: {e}"
-    if not toks or toks[0] != "opt":
+    expect_fail = False
+    if toks and toks[0] == "not":
+        expect_fail = True
+        toks = toks[1:]
+        if toks and toks[0] == "--crash":
+            return None, "", "expects a crash (not --crash)"
+    if not toks or toks[0] not in ("opt", "llvm-as"):
         return None, "", "not an opt invocation"
+    as_tool = toks[0] == "llvm-as"
+    if as_tool:
+        rest = []
+        for t in toks[1:]:
+            if t.startswith("-") and t not in ("-disable-output", "--disable-output", "-o"):
+                return None, "", f"llvm-as option {t}"
+            rest.append(t)
+        toks = ["opt", "-passes=verify", *rest]
     # `-p X` / `-p=X` is opt's short alias of -passes=X: write it in the long form
     norm, k = [toks[0]], 1
     while k < len(toks):
@@ -268,7 +285,9 @@ def convert_run(run: str, inputs: dict | None = None, inputs_rel: str = "") -> t
     if any(re.search(r"(^|[,(])(dot|view)-", p) for p in passes) or any(t.startswith(("-dot-", "--dot-")) for t in toks):
         return None, "", "writes .dot files"
     disable_output = any(t in ("-disable-output", "--disable-output") for t in toks)
-    analysis = any(PRINTER_PASS.search(p) for p in passes) or (disable_output and "2>&1" in toks)
+    analysis = (not expect_fail) and (as_tool or any(PRINTER_PASS.search(p) for p in passes)
+                                      or ("2>&1" in toks and (disable_output or not passes)))
+    stderr_ok = analysis or expect_fail  # stderr is compared: the redirection to FileCheck is part of the check
     out, i = [], 1
     while i < len(toks):
         t = toks[i]
@@ -276,7 +295,7 @@ def convert_run(run: str, inputs: dict | None = None, inputs_rel: str = "") -> t
         if t in ("<", "-o") and nxt in ("%s", "-"):
             i += 2
             continue
-        if analysis and t == "-o" and nxt == "/dev/null":
+        if stderr_ok and t in ("-o", ">") and (nxt == "/dev/null" or (expect_fail and t == "-o" and nxt and nxt.startswith("%t"))):
             i += 2
             continue
         if t in ("%s", "<%s", "-S", "-disable-output", "--disable-output") or t == "2>&1":
@@ -307,7 +326,12 @@ def convert_run(run: str, inputs: dict | None = None, inputs_rel: str = "") -> t
         out.append(t)
         i += 1
     if not any(t.startswith(("-passes", "--passes", "-O")) for t in out):
-        return None, "", "no -passes / -O pipeline"
+        if not stderr_ok:
+            return None, "", "no -passes / -O pipeline"
+        # `not opt -S < %s`, `opt -S < %s 2>&1 | FileCheck`: what is checked is the input verifier's output
+        out.insert(0, "-passes=verify")
+    if expect_fail:
+        return "error", shlex.join(out), ""
     return ("analysis" if analysis else "opt"), shlex.join(out), ""
 
 
@@ -333,6 +357,8 @@ def file_skip_reason(text: str) -> str | None:
 
 
 DETERMINISM_RUNS = 6
+# an @error line whose failure is a parse error (`opt: file:line:col: error: ...`): a parser test, not imported
+PARSE_ERROR = re.compile(r"^opt: [^\n]*:\d+:\d+: error: ", re.M)
 
 
 def printer_order(t: corpus.TestFile, args: str) -> str | None:
@@ -369,7 +395,7 @@ def import_one(src: Path, dst: Path) -> list[str]:
     reason = file_skip_reason(text)
     if reason:
         return [f"- `{name}`: {reason}"]
-    notes, lines = [], {"opt": [], "analysis": []}
+    notes, lines = [], {"opt": [], "analysis": [], "error": []}
     inputs: dict[str, str] = {}
     for run in run_lines(text):
         kind, args, why = convert_run(run, inputs, str(dst.parent.relative_to(config.REPO)))
@@ -377,7 +403,7 @@ def import_one(src: Path, dst: Path) -> list[str]:
             notes.append(f"- `{name}` RUN `{run}`: {why}")
         elif args not in lines[kind]:
             lines[kind].append(args)
-    if not lines["opt"] and not lines["analysis"]:
+    if not lines["opt"] and not lines["analysis"] and not lines["error"]:
         return notes or [f"- `{name}`: no RUN lines"]
     origin = src.relative_to(config.LLVM_SRC)
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -391,17 +417,36 @@ def import_one(src: Path, dst: Path) -> list[str]:
 
     def write(ls):
         head = ([f"; @origin: {origin} (llvmorg-{config.LLVM_VERSION})"] + [f"; @opt: {x}" for x in ls["opt"]]
-                + [f"; @analysis: {x}" for x in ls["analysis"]] + [f"; @analysis-unordered: {x}" for x in ls["analysis-unordered"]])
+                + [f"; @analysis: {x}" for x in ls["analysis"]] + [f"; @analysis-unordered: {x}" for x in ls["analysis-unordered"]]
+                + [f"; @error: {x}" for x in ls["error"]])
         dst.write_text("\n".join(head) + "\n" + text)
 
     lines["analysis-unordered"] = []
     write(lines)
     t = corpus.parse(dst)
-    rt = checks.check_roundtrip(config.REFERENCE_IMPL, t)
-    if rt.status != checks.PASS:
-        dst.unlink()
-        return notes + [f"- `{name}`: llvm opt rejects the file"]
-    good = {"opt": [], "analysis": [], "analysis-unordered": []}
+    good = {"opt": [], "analysis": [], "analysis-unordered": [], "error": []}
+    for x in lines["error"]:
+        t.error = [x]
+        o = checks.check_error(config.REFERENCE_IMPL, t)
+        if o.status != checks.PASS:
+            notes.append(f"- `{name}` @error `{x}`: {o.message.splitlines()[0] if o.message else 'oracle fails'}")
+            continue
+        err = checks.oracle_error(t, x)["stderr"]
+        if PARSE_ERROR.search(err):
+            notes.append(f"- `{name}` @error `{x}`: fails in the parser, not in the verifier")
+            continue
+        good["error"].append(x)
+    t.error = []
+    if good["error"]:
+        # LLVM rejects the file: no ::roundtrip, and no other checks (they could only be `invalid`)
+        if lines["opt"] or lines["analysis"]:
+            notes.append(f"- `{name}`: has @error lines; its {len(lines['opt']) + len(lines['analysis'])} passing RUN line(s) are dropped")
+        lines["opt"], lines["analysis"] = [], []
+    else:
+        rt = checks.check_roundtrip(config.REFERENCE_IMPL, t)
+        if rt.status != checks.PASS:
+            dst.unlink()
+            return notes + [f"- `{name}`: llvm opt rejects the file"]
     for x in lines["opt"]:
         t.opt, t.analysis = [x], []
         if writes_files(t, x):
