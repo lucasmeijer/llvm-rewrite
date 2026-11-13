@@ -109,9 +109,20 @@ tests/lto/link/<name>/               hand-written multi-module IR for linker fea
 tests/imported/llvm/Linker/<test>/   LLVM's linker tests, one directory per llvm-link RUN line
 tests/imported/llvm/Transforms/<Pass>/*.ll    LLVM's regression tests, original paths kept; SKIPPED.md per dir
 tests/imported/llvm/Analysis/<Dir>/*.ll       LLVM's analysis tests: @analysis for printer RUN lines, @opt for the rest
+tests/imported/llvm/Instrumentation/<Dir>/*.ll  LLVM's instrumentation tests (sanitizers, coverage, profiling)
 tests/perf/compile/<program>.ll      whole llvm-test-suite programs, one linked module each; @opt -O2, @perf
 tests/perf/scaling/<shape>/n<N>.ll   synthetic IR of one shape at three sizes; @opt per pass, @perf, @perf-size
 ```
+
+How `import-llvm` turns a RUN line into an `@opt` line: `opt … -S < %s | FileCheck` keeps the opt arguments;
+`2>&1` is dropped (the check compares the IR; stderr is ignored); legacy pass flags (`-safe-stack`, `-structurizecfg`,
+`-lowerswitch`, …, list in `harness/lrh/gen.py`) become `-passes=` when the line has none; `-flag=%S/Inputs/<file>`
+(sample profiles, devirtualization summaries, IR2Vec vocabularies) points at a copy in the test's directory,
+`-flag=tests/imported/llvm/<Dir>/Inputs/<file>`, a path relative to the repository, which is the tools' working
+directory. Lines that need `%t` files, other tools, other targets, or `REQUIRES: asserts` are skipped, and so are lines
+whose oracle run creates files in its working directory (GCOVProfiling's `.gcno`): the checks run in the repository.
+Every kept line is run through LLVM's opt first; one that fails is listed in `SKIPPED.md` as `oracle fails`.
+Re-importing a directory imported before these rules existed can add `@opt` lines to files already in a `passing.txt`.
 
 The `.ll` files in `O0/`, `O2/`, `pipeline/`, `imported/` and `perf/` are generated (`perf/` by `gen-perf`). Regenerate them, never edit them by hand.
 

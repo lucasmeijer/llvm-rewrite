@@ -219,11 +219,25 @@ PRINTER_FLAG = re.compile(r"^--?print-(all-alias-modref-info|no-aliases|may-alia
                           r"no-modref|ref|mod|modref|must|mustref|mustmod|mustmodref)$")
 
 
-def convert_run(run: str) -> tuple[str | None, str, str]:
+# Legacy-PM pass flags (`opt -safe-stack`) still used by some RUN lines, mostly for llc's IR passes; when a RUN line
+# has no -passes, they become `-passes=<new-PM name>,…` in their order.
+LEGACY_PASS_FLAGS = {"safe-stack": "safe-stack", "global-merge": "global-merge", "expand-ir-insts": "expand-ir-insts",
+                     "fix-irreducible": "fix-irreducible", "structurizecfg": "structurizecfg",
+                     "interleaved-access": "interleaved-access", "unify-loop-exits": "unify-loop-exits",
+                     "lowerswitch": "lower-switch", "indirectbr-expand": "indirectbr-expand"}
+# A read-only input file of an opt flag, `-sample-profile-file=%S/Inputs/x.prof`: copied next to the test.
+INPUT_FILE_ARG = re.compile(r"^(--?[\w.-]+=)%[pS]/(Inputs/[\w.+-]+)$")
+
+
+def convert_run(run: str, inputs: dict | None = None, inputs_rel: str = "") -> tuple[str | None, str, str]:
     """Returns (kind, opt args, '') with kind "opt" or "analysis", or (None, '', reason).
 
     "analysis" (an @analysis line): the pipeline contains an analysis printer, or the RUN line has both
-    -disable-output and 2>&1 (so FileCheck reads stderr). Everything else is an @opt line, which may not redirect.
+    -disable-output and 2>&1 (so FileCheck reads stderr). Everything else is an @opt line, which may not redirect
+    (except `2>&1`, which is dropped: the check compares the IR, stderr is ignored).
+
+    With `inputs` (a dict), `-flag=%S/Inputs/x` becomes `-flag=<inputs_rel>/Inputs/x` (a path relative to the repo,
+    the tools' working directory) and `inputs` gets `Inputs/x` -> the same; the caller copies the files.
     """
     first = run.split("|", 1)[0].strip()
     try:
@@ -245,6 +259,11 @@ def convert_run(run: str) -> tuple[str | None, str, str]:
             norm.append(toks[k])
         k += 1
     toks = norm
+    if not any(t.startswith(("-passes", "--passes", "-O")) for t in toks):
+        legacy = [LEGACY_PASS_FLAGS[t.lstrip("-")] for t in toks if t.startswith("-") and t.lstrip("-") in LEGACY_PASS_FLAGS]
+        if legacy:
+            toks = [t for t in toks if not (t.startswith("-") and t.lstrip("-") in LEGACY_PASS_FLAGS)]
+            toks.insert(1, "-passes=" + ",".join(legacy))
     passes = [t.split("=", 1)[1] for t in toks if t.startswith(("-passes=", "--passes="))]
     if any(re.search(r"(^|[,(])(dot|view)-", p) for p in passes) or any(t.startswith(("-dot-", "--dot-")) for t in toks):
         return None, "", "writes .dot files"
@@ -260,7 +279,13 @@ def convert_run(run: str) -> tuple[str | None, str, str]:
         if analysis and t == "-o" and nxt == "/dev/null":
             i += 2
             continue
-        if t in ("%s", "<%s", "-S", "-disable-output", "--disable-output") or (analysis and t == "2>&1"):
+        if t in ("%s", "<%s", "-S", "-disable-output", "--disable-output") or t == "2>&1":
+            i += 1
+            continue
+        m = INPUT_FILE_ARG.match(t)
+        if m and inputs is not None:
+            inputs[m.group(2)] = f"{inputs_rel}/{m.group(2)}"
+            out.append(m.group(1) + f"{inputs_rel}/{m.group(2)}")
             i += 1
             continue
         if t == "-o":
@@ -324,6 +349,16 @@ def printer_order(t: corpus.TestFile, args: str) -> str | None:
     return "unordered" if len(texts) == 1 else None
 
 
+def writes_files(t: corpus.TestFile, args: str) -> bool:
+    """Does LLVM's opt create files in its working directory (GCOVProfiling's a.gcno)? The checks run the tools in
+    the repository, in parallel, so such a line would litter the tree."""
+    with proc.Workdir() as wd:
+        run = wd / "cwd"
+        run.mkdir()
+        checks.tool_opt(config.llvm("opt"), args, Path(t.path).resolve(), wd / "out.ll", run)
+        return any(run.iterdir())
+
+
 def import_one(src: Path, dst: Path) -> list[str]:
     """Writes dst if anything is importable. Returns skip notes."""
     name = src.name
@@ -335,8 +370,9 @@ def import_one(src: Path, dst: Path) -> list[str]:
     if reason:
         return [f"- `{name}`: {reason}"]
     notes, lines = [], {"opt": [], "analysis": []}
+    inputs: dict[str, str] = {}
     for run in run_lines(text):
-        kind, args, why = convert_run(run)
+        kind, args, why = convert_run(run, inputs, str(dst.parent.relative_to(config.REPO)))
         if kind is None:
             notes.append(f"- `{name}` RUN `{run}`: {why}")
         elif args not in lines[kind]:
@@ -345,6 +381,13 @@ def import_one(src: Path, dst: Path) -> list[str]:
         return notes or [f"- `{name}`: no RUN lines"]
     origin = src.relative_to(config.LLVM_SRC)
     dst.parent.mkdir(parents=True, exist_ok=True)
+    for rel in inputs:
+        if not (src.parent / rel).is_file():
+            return notes + [f"- `{name}`: input file {rel} does not exist"]
+        if rel.endswith(".ll"):
+            return notes + [f"- `{name}`: input file {rel} is IR (would become a test itself)"]
+        (dst.parent / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src.parent / rel, dst.parent / rel)
 
     def write(ls):
         head = ([f"; @origin: {origin} (llvmorg-{config.LLVM_VERSION})"] + [f"; @opt: {x}" for x in ls["opt"]]
@@ -361,7 +404,9 @@ def import_one(src: Path, dst: Path) -> list[str]:
     good = {"opt": [], "analysis": [], "analysis-unordered": []}
     for x in lines["opt"]:
         t.opt, t.analysis = [x], []
-        if checks.check_opt(config.REFERENCE_IMPL, t).status == checks.PASS:
+        if writes_files(t, x):
+            notes.append(f"- `{name}` @opt `{x}`: writes files into the working directory")
+        elif checks.check_opt(config.REFERENCE_IMPL, t).status == checks.PASS:
             good["opt"].append(x)
         else:
             notes.append(f"- `{name}` @opt `{x}`: oracle fails")
@@ -542,6 +587,19 @@ def cmd_import_llvm_linker(d: str):
     print(f"{d}: {made} link tests from {len(files)} files, {len(flat)} skip notes -> {(dst_dir / 'SKIPPED.md').relative_to(config.REPO)}")
 
 
+def prune_inputs(dst_dir: Path):
+    """Removes copied input files (see INPUT_FILE_ARG) that no imported test references any more."""
+    if not dst_dir.exists():
+        return
+    copies = [p for p in dst_dir.rglob("*") if p.is_file() and p.parent.name == "Inputs" and p.suffix != ".ll"]
+    if not copies:
+        return
+    text = "\n".join(p.read_text(errors="replace") for p in dst_dir.rglob("*.ll") if "Inputs" not in p.parts)
+    for p in copies:
+        if str(p.relative_to(config.REPO)) not in text:
+            p.unlink()
+
+
 def cmd_import_llvm(a):
     for d in a.dirs:
         if d.rstrip("/") == "Linker":
@@ -555,6 +613,7 @@ def cmd_import_llvm(a):
         with ThreadPoolExecutor(max_workers=16) as ex:
             notes = list(ex.map(lambda f: import_one(f, dst_dir / f.relative_to(src_dir)), files))
         flat = [n for ns in notes for n in ns]
+        prune_inputs(dst_dir)
         imported = len(list(dst_dir.rglob("*.ll"))) if dst_dir.exists() else 0
         dst_dir.mkdir(parents=True, exist_ok=True)
         (dst_dir / "SKIPPED.md").write_text(
