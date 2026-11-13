@@ -1,12 +1,10 @@
 // Module passes of the LTO pipelines (pass_builder_pipelines.jai). Most of them only act on constructs the C corpus
 // never has (CFI type tests, devirtualization intrinsics, value profiles, variadic lowering for GPU targets); they
 // are ported up to their early exit and fail loudly when the input has what they would transform.
-// - CrossDSOCFIPass (llvm/lib/Transforms/IPO/CrossDSOCFI.cpp): only with the "Cross-DSO CFI" module flag.
-// - GlobalSplitPass (llvm/lib/Transforms/IPO/GlobalSplit.cpp): only with used llvm.type.test / type.checked.load.
+// - CrossDSOCFIPass, GlobalSplitPass, SimplifyTypeTestsPass: pass_cfi_misc.jai.
 // - WholeProgramDevirtPass (llvm/lib/Transforms/IPO/WholeProgramDevirt.cpp, DevirtModule::run without summaries).
-// - LowerTypeTestsPass (llvm/lib/Transforms/IPO/LowerTypeTests.cpp, LowerTypeTestsModule::lower without summaries).
+// - LowerTypeTestsPass: pass_lower_type_tests.jai.
 // - DropTypeTestsPass (LowerTypeTests.cpp dropTypeTests): ported.
-// - SimplifyTypeTestsPass (LowerTypeTests.cpp): only with __typeid_*_global_addr globals.
 // - ExpandVariadicsPass (llvm/lib/Transforms/IPO/ExpandVariadics.cpp): no VariadicABIInfo for x86.
 // - PGOIndirectCallPromotion (llvm/lib/Transforms/Instrumentation/IndirectCallPromotion.cpp): only with value
 //   profile (!prof "VP") metadata.
@@ -18,29 +16,11 @@ lto_used_decl :: (name: string) -> bool {
     return f != NONE && vkind(f) == .FUNCTION && has_uses(f);
 }
 
-cross_dso_cfi_run :: () -> Preserved {
-    if module_flag("Cross-DSO CFI") != NONE fatal("cross-dso-cfi: modules with the \"Cross-DSO CFI\" flag are not supported yet");
-    return PRESERVE_ALL;
-}
-
-global_split_run :: () -> Preserved {
-    if !lto_used_decl("llvm.type.test") && !lto_used_decl("llvm.type.checked.load") && !lto_used_decl("llvm.type.checked.load.relative")
-        return PRESERVE_ALL;
-    fatal("globalsplit: splitting globals used by type tests is not supported yet");
-    return PRESERVE_NONE;
-}
-
-whole_program_devirt_run :: () -> Preserved {
+whole_program_devirt_run :: (use_cl := true) -> Preserved {
     // DevirtModule::run without an export summary (DevirtSpeculatively off: public type tests are not looked at)
     no_tests := !lto_used_decl("llvm.type.test") || !lto_used_decl("llvm.assume");
     if no_tests && !lto_used_decl("llvm.type.checked.load") && !lto_used_decl("llvm.type.checked.load.relative") return PRESERVE_ALL;
     fatal("wholeprogramdevirt: devirtualization (type tests / type.checked.load) is not supported yet");
-    return PRESERVE_NONE;
-}
-
-lower_type_tests_run :: () -> Preserved {
-    if !lto_used_decl("llvm.type.test") && !lto_used_decl("llvm.icall.branch.funnel") return PRESERVE_ALL;
-    fatal("lowertypetests: lowering type tests (CFI) is not supported yet");
     return PRESERVE_NONE;
 }
 
@@ -77,14 +57,6 @@ drop_type_tests_run :: () -> Preserved {
     for g: ir.m_globals while get_metadata(g, vk) != NONE set_metadata(g, vk, NONE);
     printer_note_ir_changed();
     return PRESERVE_NONE;
-}
-
-simplify_type_tests_run :: () -> Preserved {
-    for g: ir.m_globals {
-        n := vname(g);
-        if begins_with(n, "__typeid_") && ends_with(n, "_global_addr") fatal("simplify-type-tests: lowered type tests (__typeid_*_global_addr) are not supported yet");
-    }
-    return PRESERVE_ALL;
 }
 
 expand_variadics_run :: () -> Preserved {

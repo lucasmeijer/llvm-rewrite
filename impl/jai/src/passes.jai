@@ -679,6 +679,7 @@ Pass_Node :: struct {
     early_folds_only: bool;        // vector-combine: TryEarlyFoldsOnly
     in_lto: bool;                  // jump-table-to-switch: InLTO = isLTOPostLink(Phase)
     no_func_spec: bool;            // ipsccp: AllowFuncSpec = !isLTOPreLink(Phase)
+    no_cl: bool;                   // lowertypetests / wholeprogramdevirt: built with (summary) arguments, not UseCommandLine
     late_first: s32 = -1;          // INLINER_WRAPPER_PM: the first of its late module passes (not printed)
 }
 
@@ -1174,6 +1175,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if pb_parse_cl_opt(name, value, has_value) return true;
     if forceattrs_parse_cl_opt(name, value, has_value) return true;   // pass_misc_module.jai
     if pgo_parse_cl_opt(name, value, has_value) return true;   // pass_lto_misc.jai
+    if ltt_parse_cl_opt(name, value, has_value) return true;   // pass_lower_type_tests.jai
     if profile_parse_cl_opt(name, value, has_value) return true;   // profile_cl.jai (sample profile, PGO, memprof)
     if merge_functions_parse_cl_opt(name, value, has_value) return true;   // pass_merge_functions.jai
     if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)
@@ -1322,8 +1324,8 @@ run_module_pm :: (n: s32) {
             case .PGO_INSTR_GEN; if should_run_pass(node, NONE) mam_invalidate(pgo_instr_gen_run());
             case .CROSS_DSO_CFI; if should_run_pass(node, NONE) mam_invalidate(cross_dso_cfi_run());
             case .GLOBAL_SPLIT; if should_run_pass(node, NONE) mam_invalidate(global_split_run());
-            case .WHOLE_PROGRAM_DEVIRT; if should_run_pass(node, NONE) mam_invalidate(whole_program_devirt_run());
-            case .LOWER_TYPE_TESTS; if should_run_pass(node, NONE) mam_invalidate(lower_type_tests_run());
+            case .WHOLE_PROGRAM_DEVIRT; if should_run_pass(node, NONE) mam_invalidate(whole_program_devirt_run(!node.no_cl));
+            case .LOWER_TYPE_TESTS; if should_run_pass(node, NONE) mam_invalidate(lower_type_tests_run(!node.no_cl));
             case .DROP_TYPE_TESTS; if should_run_pass(node, NONE) mam_invalidate(drop_type_tests_run());
             case .SIMPLIFY_TYPE_TESTS; if should_run_pass(node, NONE) mam_invalidate(simplify_type_tests_run());
             case .EXPAND_VARIADICS; if should_run_pass(node, NONE) mam_invalidate(expand_variadics_run());

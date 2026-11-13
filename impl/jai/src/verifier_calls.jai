@@ -584,7 +584,7 @@ vf_visit_call_base :: (call: Value_Id) {
     vcheck(!attr_set_has(fns, .DenormalFPEnv), "denormal_fpenv attribute may not apply to call sites", vq_val(call));
     is_inline_asm := vkind(callee) == .INLINE_ASM;
     // verifyFunctionAttrs depends on the call only for its messages: a (list, type, kind) that passed once passes again
-    akey := (cast(u64) attrs << 34) | (cast(u64) fty << 2) | (ifx is_intrinsic then cast(u64) 1 else 0) | (ifx is_inline_asm then cast(u64) 2 else 0);
+    akey := ((cast(u64) attrs) << 34) | ((cast(u64) fty) << 2) | (ifx is_intrinsic then cast(u64) 1 else 0) | (ifx is_inline_asm then cast(u64) 2 else 0);
     if attrs != 0 && !table_contains(*vf.attrs_ok, akey) {
         before := vf.fail_count;
         vf_verify_function_attrs(fty, attrs, call, is_intrinsic, is_inline_asm);

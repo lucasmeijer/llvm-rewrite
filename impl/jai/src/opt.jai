@@ -321,6 +321,10 @@
 
 #load "linker.jai";
 #load "pass_lto_misc.jai";
+#load "module_summary.jai";
+#load "replace_constant.jai";
+#load "pass_lower_type_tests.jai";
+#load "pass_cfi_misc.jai";
 #load "pass_merge_functions.jai";
 #load "codegen_pipeline.jai";
 #load "cg_misc_passes.jai";

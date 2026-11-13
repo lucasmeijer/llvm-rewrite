@@ -696,8 +696,8 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
     pb_add(mpm, *last, "memprof-remove-attributes");
     pb_add(mpm, *last, "cross-dso-cfi");
     if level.speed == 0 {
-        pb_add(mpm, *last, "wholeprogramdevirt");
-        pb_add(mpm, *last, "lowertypetests");
+        pipeline.nodes[pb_add(mpm, *last, "wholeprogramdevirt")].no_cl = true;   // WholeProgramDevirtPass(ExportSummary = nullptr, ImportSummary = nullptr)
+        pipeline.nodes[pb_add(mpm, *last, "lowertypetests")].no_cl = true;   // LowerTypeTestsPass(nullptr, nullptr)
         pb_add(mpm, *last, "drop-type-tests<assume>");
         pb_add_coro_wrapper(mpm, *last);
         pb_add(mpm, *last, "alloc-token");
@@ -718,10 +718,10 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
     }
     pb_add(mpm, *last, "rpo-function-attrs");
     pb_add(mpm, *last, "globalsplit");
-    pb_add(mpm, *last, "wholeprogramdevirt");
+    pipeline.nodes[pb_add(mpm, *last, "wholeprogramdevirt")].no_cl = true;   // WholeProgramDevirtPass(ExportSummary = nullptr, ImportSummary = nullptr)
     pb_add(mpm, *last, "norecurse-lto-inference");
     if level.speed == 1 {
-        pb_add(mpm, *last, "lowertypetests");
+        pipeline.nodes[pb_add(mpm, *last, "lowertypetests")].no_cl = true;   // LowerTypeTestsPass(nullptr, nullptr)
         pb_add(mpm, *last, "drop-type-tests<assume>");
         pb_add_coro_wrapper(mpm, *last);
         pb_add(mpm, *last, "alloc-token");
@@ -803,7 +803,7 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
     pb_add(main_fa, *ml, "loop-distribute");
     add_vector_passes(main_fa, *ml, level);
     pb_add(main_fa, *ml, "jump-threading");
-    pb_add(mpm, *last, "lowertypetests");
+    pipeline.nodes[pb_add(mpm, *last, "lowertypetests")].no_cl = true;   // LowerTypeTestsPass(nullptr, nullptr)
     pb_add(mpm, *last, "drop-type-tests<assume>");
     if pb_cl.enable_hot_cold_split pb_add(mpm, *last, "hotcoldsplit");
     {
