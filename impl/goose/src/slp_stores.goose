@@ -29,8 +29,8 @@ import slp_sched;
 import slp_loads;
 import slp_build;
 import slp_gather;
+import slp_pipeline;
 
-fn slp_after_tree() { slp_fail("BoUpSLP after buildTree (reorderTopToBottom / transformNodes / computeMinimumValueSizes / the cost model)"); }
 fn slp_max_vf_opt() -> i64 { if flag_given("slp-max-vf") { flag_int("slp-max-vf", 0) } else { 0 } }
 // getMaximumVF(ElemWidth, Opcode): X86 and the base TTI answer 0
 fn slp_maximum_vf(ew: i64, o: i64) -> i64 {
@@ -94,7 +94,7 @@ fn slp_vectorize_store_chain(chain: const i32[:], idx: i64, minvf: i64) -> i64, 
         size = slp_base_graph_size;
         return 0, size;
     }
-    slp_after_tree();
+    slp_after_tree_store();
     return 0, size;
 }
 
@@ -741,7 +741,7 @@ fn slp_try_to_vectorize_list_r(vl: const i32[:], max_vf_only: bool, limit_reg_vf
             let none_: i32[1] = [0];
             slp_build_tree(ops, false, none_[..0]);
             if slp_is_tree_tiny_and_not_fully_vectorizable(false) { i++; continue; }
-            slp_after_tree();
+            slp_after_tree_list(ops[0]);
             i++;
         }
         vf = slp_floor_full_vector_number_of_elements(vals[i0].ty, vf - 1);

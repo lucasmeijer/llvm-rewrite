@@ -1500,7 +1500,7 @@ fn slp_update_loop_nest(s: SIS, vl: const i32[:], ui_te: i32) -> bool {
 }
 fn scev_is_cnc(s: i32) -> bool { s == 0 }
 // the ExtraBitWidthNodes insertion (a DenseSet<unsigned>; the order of insertion is kept, minbw decides)
-fn slp_extra_bw_insert(idx: i32) { for x in slp_extra_bw_nodes { if x == idx { return; } } slp_extra_bw_nodes.push(idx); }
+fn slp_extra_bw_insert(idx: i32) { ebw_insert(idx as i64); }
 // buildTreeRec(VL, Depth, UserTreeIdx, InterleaveFactor)
 recursive fn slp_build_tree_rec(vat0: i32, vn0: i64, depth: i64, ui_te: i32, ui_edge: i64, interleave: i64) {
     var vat = vat0;
@@ -1853,7 +1853,7 @@ fn slp_build_tree(roots: const i32[:], has_uil: bool, uil: const i32[:]) {
     if has_uil {
         slp_uil_on = true;
         slp_uil_n = uil.len;
-        for v in uil { sh_add(SH_UIL, v as i64, 0); }
+        for v in uil { if sh_add(SH_UIL, v as i64, 0) { slp_uil_vals.push(v); } }
     }
     if !slp_all_same_type(roots) { return; }
     let at = slp_vrun(roots);

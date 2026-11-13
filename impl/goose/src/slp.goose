@@ -46,6 +46,7 @@ import slp_build;
 import slp_stores;
 import slp_hr;
 import slp_phis;
+import slp_transform;
 
 fn slp_not_ported(what: const u8[:]) { fatal(str("SLPVectorizer: ", what, " is not ported yet")); }
 
@@ -231,55 +232,6 @@ fn slp_vectorize_hor_reduction(p: i32, root: i32, bb: i32, postponed: i32[>..<]&
 
 // tryToVectorize(I, R, FMACandidates, AllowFMACandidates)
 var slp_fma_cands: i32[>..<];     // FMACandidates (SetVector, per block)
-// canConvertToFMA(VL, S, DT, DL, TTI, TLI): the FMA cost or TTI_INVALID
-fn slp_can_convert_to_fma(vl: const i32[:], s: SIS) -> i64 {
-    fn contractable(xs: const i32[:]) -> bool {
-        var fmf: u8 = FMF_FAST;
-        for v in xs {
-            if !is_inst(v) { continue; }
-            if sis_is_copyable_element(s, v) { continue; }
-            let m = sis_matching(s, v);
-            if s.main != m && s.alt != m { continue; }
-            if is_fp_math_operator(v) { fmf = fmf & insts[inst_of(v)].fmf; }
-        }
-        return (fmf & FMF_CONTRACT) != 0;
-    }
-    if !contractable(vl) { return TTI_INVALID; }
-    let opl, nopl = slp_build_operands(s, vl);
-    var front: i32[>..<] = [];
-    for k in vl.len { front.push(slp_vp[slp_opl[opl as i64].at as i64 + k]); }
-    let ops = slp_get_same_opcode(front);
-    if !sis_valid(ops) { return TTI_INVALID; }
-    if sis_is_alt_shuffle(ops) || sis_opcode(ops) != OP_FMUL { return TTI_INVALID; }
-    if !contractable(front) { return TTI_INVALID; }
-    var fmul_fadd: i64 = 0;
-    var fma: i64 = 0;
-    var fmf: u8 = FMF_FAST;
-    for v in vl {
-        if !is_inst(v) { continue; }
-        if !sis_is_copyable_element(s, v) && is_fp_math_operator(v) { fmf = fmf & insts[inst_of(v)].fmf; }
-        fmul_fadd = tc_add(fmul_fadd, tv_inst_cost(v, TCK_RECIP_THROUGHPUT));
-    }
-    var nops_: i64 = 0;
-    for k in vl.len {
-        let v = vl[k];
-        let o = front[k];
-        if sis_is_copyable_element(s, v) { continue; }
-        let oi = is_inst(o);
-        if !oi || !slp_has_one_use(o) || sis_is_copyable_element(ops, o) {
-            if is_inst(v) { fma = tc_add(fma, tv_inst_cost(v, TCK_RECIP_THROUGHPUT)); }
-            if oi { fma = tc_add(fma, tv_inst_cost(o, TCK_RECIP_THROUGHPUT)); }
-            continue;
-        }
-        nops_++;
-        if is_fp_math_operator(o) { fmf = fmf & insts[inst_of(o)].fmf; }
-        fmul_fadd = tc_add(fmul_fadd, tv_inst_cost(o, TCK_RECIP_THROUGHPUT));
-    }
-    let ty: i32 = vals[vl[0]].ty;
-    let tys: i32[3] = [ty, ty, ty];
-    fma = tc_add(fma, tc_mul(tv_intrinsic_types(IID_fmuladd, ty, tys[..], fmf, TCK_RECIP_THROUGHPUT), nops_));
-    return if fma < fmul_fadd { fma } else { TTI_INVALID };
-}
 // TryToReduce(Inst, Ops) of tryToVectorize(I, ...): HorizontalReduction(Inst, Ops)
 fn slp_try_to_reduce_pair(inst: i32, a: i32, b: i32) -> bool {
     if !slp_is_reduction_candidate(inst) { return false; }

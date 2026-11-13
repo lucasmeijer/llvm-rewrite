@@ -11,6 +11,8 @@ import irutil;
 import calls;
 import instinfo;
 import constfold;
+import apint;
+import tti;
 import domtree;
 import tti_vec;
 import tti_x86;
@@ -861,4 +863,31 @@ fn slp_scalarization_overhead_vl(sty: i32, ty: i32, dem: const bool[:], insert: 
         return c;
     }
     return slp_scalarization_overhead(sty, ty, dem, insert, extract, for_poison);
+}
+
+// BoUpSLP::getOperandInfo(Ops): an OperandValueInfo (kind * 4 + properties, as tti.goose encodes it)
+fn slp_operand_info(ops: const i32[:]) -> i64 {
+    let op0 = ops[0];
+    var is_const = true;
+    var is_uniform = true;
+    var is_pow2 = true;
+    var is_neg_pow2 = true;
+    for v in ops {
+        if !(slp_is_constant(v) && !is_undef_or_poison(v)) { is_const = false; }
+        if v != op0 { is_uniform = false; }
+        if vals[v].kind == VK_CINT && ty_kind(vals[v].ty) != TK_FVEC {
+            let a = ci_ap(v);
+            if !ap_is_pow2(a) { is_pow2 = false; }
+            if !ap_is_neg_pow2(a) { is_neg_pow2 = false; }
+        } else {
+            is_pow2 = false;
+            is_neg_pow2 = false;
+        }
+    }
+    var k = OK_ANY;
+    if is_const && is_uniform { k = OK_UNIFORM_CONST; } else if is_const { k = OK_NONUNIFORM_CONST; } else if is_uniform { k = OK_UNIFORM; }
+    var p = 0;
+    if is_pow2 { p = 1; }
+    if is_neg_pow2 { p = 2; }
+    return k * 4 + p;
 }

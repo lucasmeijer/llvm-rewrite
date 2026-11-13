@@ -56,6 +56,7 @@ struct STE {
     comb: i32, ncomb: i32,
     ncopyable: i32,
     vv: i32,
+    mbw: i32, mbw_s: bool,   // MinBWs: (width, signed); width 0 = not in the map
 }
 var slp_te: STE[>..];
 var slp_vp: i32[>..];
@@ -113,10 +114,15 @@ var slp_base_graph_size: i64 = 1;
 var slp_reduction_bw: i64 = 0;
 var slp_uil_on: bool = false;               // UserIgnoreList != nullptr
 var slp_uil_n: i64 = 0;
+var slp_uil_vals: i32[>..<];                // *UserIgnoreList's values (order is irrelevant: only any_of / all_of)
 var slp_loop_nest: i32[>..<];               // CurrentLoopNest
 var slp_merged_btcs: i32[>..<];             // MergedLoopBTCs (-1 = null)
 var slp_load_entries: i32[>..<];            // LoadEntriesToVectorize (SetVector<unsigned>)
-var slp_extra_bw_nodes: i32[>..<];          // ExtraBitWidthNodes (insertion order; see minbw for the DenseSet order)
+// ExtraBitWidthNodes: a DenseSet<unsigned>, emulated bucket by bucket (its begin() decides computeMinimumValueSizes'
+// order); it lives in BoUpSLP, so its bucket array persists across the trees of a function
+var ebw_b: i64[>..<];                       // buckets: -1 empty, -2 tombstone, else the key
+var ebw_n: i64 = 0;
+var ebw_tomb: i64 = 0;
 // per-function state
 var slp_fn: i32 = -1;
 var slp_max_vreg: i64 = 128;
@@ -125,6 +131,89 @@ var slp_nvl_runs: i32[>..];                 // the sequences of ListOfKnonwnNonV
 var slp_has_eph: bool = false;
 
 fn slp_tree_size() -> i64 { slp_te.len }
+
+// ---------------------------------------------------------------- DenseSet<unsigned> (ExtraBitWidthNodes)
+fn ebw_hash(k: i64) -> i64 { (((k as u64) * 37) & 0xFFFFFFFF) as i64 }
+// LookupBucketFor: (found, bucket)
+fn ebw_lookup(k: i64) -> bool, i64 {
+    let nb = ebw_b.len;
+    if nb == 0 { return false, -1; }
+    let mask = nb - 1;
+    var b = ebw_hash(k) & mask;
+    var probe: i64 = 1;
+    var tomb: i64 = -1;
+    loop {
+        let x = ebw_b[b];
+        if x == k { return true, b; }
+        if x == -1 { return false, if tomb >= 0 { tomb } else { b }; }
+        if x == -2 && tomb < 0 { tomb = b; }
+        b = (b + probe) & mask;
+        probe++;
+    }
+    return false, -1;
+}
+fn ebw_grow(at_least: i64) {
+    // NumBuckets = max(64, NextPowerOf2(AtLeast - 1)) (unsigned)
+    let a = ((at_least - 1) as u64) & 0xFFFFFFFF;
+    var p: u64 = 1;
+    while p <= a && p != 0 { p = p << 1; }
+    p = p & 0xFFFFFFFF;
+    var nb: i64 = p as i64;
+    if nb < 64 { nb = 64; }
+    var old: i64[>..<] = [];
+    for x in ebw_b { old.push(x); }
+    ebw_b.clear();
+    for k in nb { ebw_b.push(-1); }
+    ebw_n = 0;
+    ebw_tomb = 0;
+    for x in old {
+        if x < 0 { continue; }
+        let f, b = ebw_lookup(x);
+        ebw_b[b] = x;
+        ebw_n++;
+    }
+}
+fn ebw_insert(k: i64) {
+    var f, b = ebw_lookup(k);
+    if f { return; }
+    let nb = ebw_b.len;
+    let ne = ebw_n + 1;
+    if ne * 4 >= nb * 3 { ebw_grow(nb * 2); let f2, b2 = ebw_lookup(k); b = b2; }
+    else if nb - (ne + ebw_tomb) <= nb / 8 { ebw_grow(nb); let f2, b2 = ebw_lookup(k); b = b2; }
+    if ebw_b[b] == -2 { ebw_tomb--; }
+    ebw_b[b] = k;
+    ebw_n++;
+}
+fn ebw_erase(k: i64) {
+    let f, b = ebw_lookup(k);
+    if !f { return; }
+    ebw_b[b] = -2;
+    ebw_n--;
+    ebw_tomb++;
+}
+fn ebw_begin() -> i64 { for x in ebw_b { if x >= 0 { return x; } } return -1; }
+fn ebw_clear() {
+    if ebw_n == 0 && ebw_tomb == 0 { return; }
+    if ebw_n * 4 < ebw_b.len && ebw_b.len > 64 {
+        // shrink_and_clear
+        let old_n = ebw_n;
+        var nnb: i64 = 0;
+        if old_n > 0 {
+            var lg: i64 = 0;
+            while ((1 as i64) << lg) < old_n { lg++; }
+            nnb = (1 as i64) << (lg + 1);
+            if nnb < 64 { nnb = 64; }
+        }
+        ebw_b.clear();
+        for k in nnb { ebw_b.push(-1); }
+        ebw_n = 0;
+        ebw_tomb = 0;
+        return;
+    }
+    for k in ebw_b.len { ebw_b[k] = -1; }
+    ebw_n = 0;
+    ebw_tomb = 0;
+}
 
 // ---------------------------------------------------------------- link lists
 fn slp_lk_push_tail(slot: i64, key: i64, x: i32) {
@@ -410,6 +499,7 @@ fn slp_r_begin(fv: i32) {
     slp_max_vreg = if flag_given("slp-max-reg-size") { flag_int("slp-max-reg-size", 128) } else { tv_register_bit_width(1) };
     slp_min_vreg = if flag_given("slp-min-reg-size") { flag_int("slp-min-reg-size", 128) } else { tv_min_vector_register_bit_width() };
     slp_sched_function_begin();
+    ebw_b.clear(); ebw_n = 0; ebw_tomb = 0;
     slp_delete_tree();
 }
 // CodeMetrics::collectEphemeralValues(F, AC, EphValues)
@@ -460,9 +550,10 @@ fn slp_delete_tree() {
     slp_reduction_bw = 0;
     slp_base_graph_size = 1;
     slp_cast_bw_valid = false;
-    slp_extra_bw_nodes.clear();
+    ebw_clear();
     slp_uil_on = false;
     slp_uil_n = 0;
+    slp_uil_vals.clear();
     slp_loop_nest.clear();
     slp_merged_btcs.clear();
 }
@@ -477,7 +568,7 @@ fn slp_new_tree_entry(vl: const i32[:], state: i32, bundle: i32, s: SIS, ui_te: 
     let te = slp_te.len as i32;
     slp_te.push(STE { state: state, cop: CO_NONE, sc: 0, nsc: 0, reuse: 0, nreuse: 0, reord: 0, nreord: 0, ops: 0, nops: 0,
                       ui_te: -1, ui_edge: -1, s_main: -1, s_alt: -1, s_copy: false, inter: 0, no_sched: false,
-                      comb: 0, ncomb: 0, ncopyable: 0, vv: -1 });
+                      comb: 0, ncomb: 0, ncopyable: 0, vv: -1, mbw: 0, mbw_s: false });
     if ui_te >= 0 && !sh_has(SH_OP2TE, ui_te as i64, ui_edge) { sh_set(SH_OP2TE, ui_te as i64, ui_edge, te as i64); }
     te_set_reuse(te, reuse);
     if reorder.len == 0 {
