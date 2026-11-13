@@ -1922,6 +1922,10 @@ Still slow / next:
   (LLVM's opt crashes on most files: llvm-failed in the sweep).
 - **sanmd-module** (`pass_sanmd.jai`, SanitizerBinaryMetadata): all 4 RUN lines identical; sweeps 0 differs with
   atomics+uar and covered+uar+weak-callbacks=0+nosanitize-attr=0.
+- **jmc-instrumenter** (`pass_jmc.jai`, CodeGen/JMCInstrumenter.cpp; `sys_path.jai` = the sys::path subset it needs:
+  posix and windows_backslash styles): both RUN lines identical; sweeps 0 differs on x86_64-linux, x86_64-msvc and
+  i686-msvc (fastcall). Trap (fixed in 4 places): `ir.md_ops[ir.mds[n].ops + k] = md_tuple(...)` takes the address
+  before md_tuple grows `ir.md_ops`; the write lands in the freed buffer. Build the node into a local first.
 
 ## Coroutines (L1.extra.coroutines 298/310: roundtrip 155/155, opt 143/155; /root/jai_coro)
 

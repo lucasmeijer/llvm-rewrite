@@ -270,3 +270,5 @@ lib/Transforms/Instrumentation/RealtimeSanitizer.cpp 1.0  # demangling limited b
 lib/Transforms/Instrumentation/TypeSanitizer.cpp 1.0
 lib/Transforms/Instrumentation/SanitizerCoverage.cpp 0.97  # no allow/block lists (SpecialCaseList; constructor arguments only)
 lib/Transforms/Instrumentation/SanitizerBinaryMetadata.cpp 0.97  # no ignore list (SpecialCaseList)
+lib/CodeGen/JMCInstrumenter.cpp 1.0  # the legacy pass wrapper aside
+lib/Support/Path.cpp 0.15  # sys_path.jai: root_name/root_path, filename, remove_filename, append, native, remove_dots

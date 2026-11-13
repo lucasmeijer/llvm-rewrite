@@ -1198,7 +1198,7 @@ ce_fixup_debug_info_post_extraction :: (old: Value_Id, nf: Value_Id, the_call: V
     }
     for to_delete dbgr_erase(it);
     // DIBuilder::finalizeSubprogram: retainedNodes = !{} once the subprogram is tracked
-    if tracked ir.md_ops[ir.mds[new_sp].ops + 7] = md_tuple(.[], false);
+    if tracked { t := md_tuple(.[], false); ir.md_ops[ir.mds[new_sp].ops + 7] = t; }   // md_tuple can grow ir.md_ops: build first
 
     assign_map: Table(Md_Id, Md_Id); assign_map.allocator = temp;
     for b: fn_blocks(nf) for i: block_insts(b) {

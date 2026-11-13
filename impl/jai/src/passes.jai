@@ -325,7 +325,7 @@ Pass_Kind :: enum u8 {
     // EarlyCSE (pass_early_cse.jai)
     EARLY_CSE;
     // sanitizers (pass_asan.jai, pass_msan.jai, ...)
-    ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN; TYSAN; NSAN; SANCOV; SANMD;
+    ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN; TYSAN; NSAN; SANCOV; SANMD; JMC;
     // SCCP, IPSCCP (pass_sccp.jai)
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
@@ -589,6 +589,7 @@ PASS_TABLE :: Pass_Info.[
     .{"nsan", .MODULE, .NSAN, true, .DOMTREE},
     .{"sancov-module", .MODULE, .SANCOV, true, .DOMTREE},
     .{"sanmd-module", .MODULE, .SANMD, true, .DOMTREE},
+    .{"jmc-instrumenter", .MODULE, .JMC, false, .DOMTREE},
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<should-not-run-function-passes>", .FUNCTION, .REQUIRE, true, .SHOULD_NOT_RUN},
@@ -1337,6 +1338,7 @@ run_module_pm :: (n: s32) {
             case .NSAN; if should_run_pass(node, NONE) mam_invalidate(nsan_run());
             case .SANCOV; if should_run_pass(node, NONE) mam_invalidate(sancov_run());
             case .SANMD; if should_run_pass(node, NONE) mam_invalidate(sanmd_run());
+            case .JMC; if should_run_pass(node, NONE) mam_invalidate(jmc_run());
             case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
             case .CALLED_VALUE_PROPAGATION; if should_run_pass(node, NONE) mam_invalidate(called_value_propagation_run());
             case .IPSCCP; if should_run_pass(node, NONE) mam_invalidate(ipsccp_run(node.name, node.no_func_spec));

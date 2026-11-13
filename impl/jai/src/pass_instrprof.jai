@@ -711,7 +711,8 @@ il_add_correlation_debug_info :: (gv: Value_Id, sp: Md_Id, type_name: string, an
     old := di_op(sp, 7);
     if old != NONE for k: 0..cast(s64) md_nops(old)-1 { n := md_op(old, cast(u32) k); if !array_find(retained, n) array_add(*retained, n); }
     if !array_find(retained, gve) array_add(*retained, gve);
-    ir.md_ops[ir.mds[sp].ops + 7] = md_tuple(retained, false);
+    retained_t := md_tuple(retained, false);   // md_tuple can grow ir.md_ops: build it before indexing
+    ir.md_ops[ir.mds[sp].ops + 7] = retained_t;
 }
 
 // createRegionCounters

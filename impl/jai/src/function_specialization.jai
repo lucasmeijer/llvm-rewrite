@@ -762,7 +762,8 @@ fs_cleanup_retained_nodes :: (new_sp: Md_Id) {
         array_add(*kept, n);
     }
     if !changed return;
-    ir.md_ops[ir.mds[new_sp].ops + 7] = md_tuple(kept, false);
+    kept_t := md_tuple(kept, false);   // md_tuple can grow ir.md_ops: build it before indexing
+    ir.md_ops[ir.mds[new_sp].ops + 7] = kept_t;
 }
 
 // CloneFunction(F, VMap) + setName(F->getName() + ".specialized." + N) + removeSSACopy
