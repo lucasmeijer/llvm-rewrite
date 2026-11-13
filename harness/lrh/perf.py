@@ -23,6 +23,7 @@ import json
 import math
 import os
 import re
+import threading
 import shlex
 import subprocess
 import sys
@@ -132,10 +133,19 @@ int main(int argc, char **argv) {
 }
 """
 _rss_helper: list[str] = []
+_rss_helper_lock = threading.Lock()
 
 
 def rss_helper() -> str:
-    """Path of the compiled helper (built once per source version, with LLVM's clang)."""
+    """Path of the compiled helper (built once per source version, with LLVM's clang).
+
+    Serialized: timed() runs in parallel threads, and a thread must never exec the helper while another thread's
+    clang still has the (renamed) output open for writing (ETXTBSY, "text file busy")."""
+    with _rss_helper_lock:
+        return _rss_helper_build()
+
+
+def _rss_helper_build() -> str:
     if _rss_helper:
         return _rss_helper[0]
     d = config.OUT / "perf"
