@@ -7413,6 +7413,7 @@ tests/imported/llvm/Transforms/InstCombine/2008-01-06-VoidCast.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2008-01-06-VoidCast.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2008-01-13-AndCmpCmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2008-01-13-AndCmpCmp.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/2008-01-14-VarArgTrampoline.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2008-01-14-VarArgTrampoline.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2008-01-21-MulTrunc.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2008-01-21-MulTrunc.ll::roundtrip
@@ -7530,6 +7531,7 @@ tests/imported/llvm/Transforms/InstCombine/2011-05-13-InBoundsGEP.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2011-05-13-InBoundsGEP.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2011-05-28-swapmulsub.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2011-05-28-swapmulsub.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/2011-09-03-Trampoline.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2011-09-03-Trampoline.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/2012-01-11-OpaqueBitcastCrash.ll::opt
 tests/imported/llvm/Transforms/InstCombine/2012-01-11-OpaqueBitcastCrash.ll::roundtrip
@@ -8143,6 +8145,7 @@ tests/imported/llvm/Transforms/InstCombine/compare-signs.ll::opt
 tests/imported/llvm/Transforms/InstCombine/compare-signs.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/compare-udiv.ll::opt
 tests/imported/llvm/Transforms/InstCombine/compare-udiv.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/compare-unescaped.ll::opt
 tests/imported/llvm/Transforms/InstCombine/compare-unescaped.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/compute-sign-bits-bitcast.ll::opt
 tests/imported/llvm/Transforms/InstCombine/compute-sign-bits-bitcast.ll::roundtrip
@@ -8509,6 +8512,7 @@ tests/imported/llvm/Transforms/InstCombine/fwrite-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fwrite-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/gc.relocate-verify.ll::opt
 tests/imported/llvm/Transforms/InstCombine/gc.relocate-verify.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/gc.relocate.ll::opt
 tests/imported/llvm/Transforms/InstCombine/gc.relocate.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/gep-addrspace.ll::opt
 tests/imported/llvm/Transforms/InstCombine/gep-addrspace.ll::roundtrip
@@ -10006,8 +10010,11 @@ tests/imported/llvm/Transforms/InstCombine/stacksave-debuginfo.ll::opt
 tests/imported/llvm/Transforms/InstCombine/stacksave-debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stacksaverestore.ll::opt
 tests/imported/llvm/Transforms/InstCombine/stacksaverestore.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/statepoint-cleanup.ll::opt
 tests/imported/llvm/Transforms/InstCombine/statepoint-cleanup.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/statepoint-iter.ll::opt
 tests/imported/llvm/Transforms/InstCombine/statepoint-iter.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/statepoint.ll::opt
 tests/imported/llvm/Transforms/InstCombine/statepoint.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/stdio-custom-dl.ll::opt
 tests/imported/llvm/Transforms/InstCombine/stdio-custom-dl.ll::roundtrip
