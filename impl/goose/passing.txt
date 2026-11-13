@@ -556,6 +556,7 @@ tests/e2e/pipeline/control/break_continue_goto.ll::opt
 tests/e2e/pipeline/control/break_continue_goto.ll::roundtrip
 tests/e2e/pipeline/control/if_else.ll::opt
 tests/e2e/pipeline/control/if_else.ll::roundtrip
+tests/e2e/pipeline/control/nested_loops.ll::opt
 tests/e2e/pipeline/control/nested_loops.ll::roundtrip
 tests/e2e/pipeline/control/short_circuit.ll::opt
 tests/e2e/pipeline/control/short_circuit.ll::roundtrip
