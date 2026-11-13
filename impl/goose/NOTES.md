@@ -1423,8 +1423,9 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   tryToVectorizeGatheredLoads 86; struct-returning calls 67; const.rdx 16; strided/compressed load costs 14;
   vectorizeGEPIndices 11; getWidenedType of a struct 7; matchesShlZExt 4; tryToReduceOrdered 4;
   emitScaleForReusedOps 4; getVectorCallCosts without a target 4; poor-throughput seeds 3; 137 run to the end.
-- **Sweeps** `--passes slp-vectorizer` (0 differs / 0 bad-ir everywhere; the rest loud): whole-file 7078 identical
-  of 8593, `--per-function` 66409 of 71562, `--with-test-flags` 8338 of 10973, tests/perf/compile 4/4 loud.
+- **Sweeps** `--passes slp-vectorizer` (0 differs / 0 bad-ir everywhere; the rest loud): whole-file 7233 identical
+  of 8594, `--per-function` 67526 of 71571, `--with-test-flags` 8495 of 10974, tests/perf/compile 4/4 loud; no
+  failure group other than "not ported" / "not supported".
 - **Next steps, in order:**
   1. Codegen: vectorizeTree() (24621-25490: scheduleBlock is ported (slp_schedule_block, verified by the trace: the
      "SLP:   schedule" lines of the real scheduling; slot numbers must be invalidated after moving instructions), then the gather entries with external uses, the
