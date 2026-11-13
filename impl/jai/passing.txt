@@ -3899,7 +3899,9 @@ tests/imported/llvm/Instrumentation/Instrumentor/alloca_and_function.ll::roundtr
 tests/imported/llvm/Instrumentation/Instrumentor/cast_crash.ll::roundtrip
 tests/imported/llvm/Instrumentation/Instrumentor/module_and_globals.ll::roundtrip
 tests/imported/llvm/Instrumentation/Instrumentor/unreachable.ll::roundtrip
+tests/imported/llvm/Instrumentation/JustMyCode/jmc-instrument-elf.ll::opt
 tests/imported/llvm/Instrumentation/JustMyCode/jmc-instrument-elf.ll::roundtrip
+tests/imported/llvm/Instrumentation/JustMyCode/jmc-instrument.ll::opt
 tests/imported/llvm/Instrumentation/JustMyCode/jmc-instrument.ll::roundtrip
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx-intrinsics-x86.ll::opt
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx-intrinsics-x86.ll::roundtrip
