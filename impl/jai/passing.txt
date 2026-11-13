@@ -3793,10 +3793,12 @@ tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx10_2_512ni-intrinsics
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx10_2ni-intrinsics.ll::roundtrip
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx2-intrinsics-x86.ll::roundtrip
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx512-gfni-intrinsics.ll::roundtrip
+tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx512-intrinsics-upgrade.ll::roundtrip
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx512-intrinsics.ll::roundtrip
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx512bf16-intrinsics.ll::roundtrip
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx512bf16-mov.ll::roundtrip
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx512bf16-vl-intrinsics.ll::roundtrip
+tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx512bw-intrinsics-upgrade.ll::roundtrip
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx512bw-intrinsics.ll::roundtrip
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx512fp16-arith-intrinsics.ll::roundtrip
 tests/imported/llvm/Instrumentation/MemorySanitizer/X86/avx512fp16-arith-vl-intrinsics.ll::roundtrip
@@ -19974,6 +19976,9 @@ tests/imported/llvm/Verifier/invalid-warn-stack-size.ll::error
 tests/imported/llvm/Verifier/invariant-load-metadata-invalid.ll::error
 tests/imported/llvm/Verifier/invariant.group.ll::error
 tests/imported/llvm/Verifier/invoke.ll::error
+tests/imported/llvm/Verifier/issue176674.ll::error
+tests/imported/llvm/Verifier/issue176674_1.ll::error
+tests/imported/llvm/Verifier/issue176674_2.ll::error
 tests/imported/llvm/Verifier/jumptable.ll::error
 tests/imported/llvm/Verifier/kcfi-operand-bundles.ll::error
 tests/imported/llvm/Verifier/llvm.compiler_used-invalid-type.ll::error
@@ -20363,6 +20368,7 @@ tests/roundtrip/intrinsics/pass-created-loop-vectorize.ll::roundtrip
 tests/roundtrip/intrinsics/pass-created.ll::roundtrip
 tests/roundtrip/intrinsics/reloc-none.ll::roundtrip
 tests/roundtrip/intrinsics/verifier-decls.ll::roundtrip
+tests/roundtrip/intrinsics/x86-upgrade-targets.ll::roundtrip
 tests/roundtrip/metadata/named_and_attached.ll::roundtrip
 tests/roundtrip/types/aggregates.ll::roundtrip
 tests/roundtrip/types/scalar_types.ll::roundtrip

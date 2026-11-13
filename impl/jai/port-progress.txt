@@ -21,7 +21,7 @@ lib/Analysis/ScalarEvolution.cpp 0.95  # + PredicatedScalarEvolution, SCEVUnionP
 lib/AsmParser/LLParser.cpp 0.7  # manual: own parser structure; all IR constructs, no summary-index parsing (~19% of LLParser) (heuristic 0.38)
 lib/Analysis/ValueTracking.cpp 0.9
 lib/Transforms/InstCombine/InstCombineCompares.cpp 0.95
-lib/IR/AutoUpgrade.cpp 0.3
+lib/IR/AutoUpgrade.cpp 0.5  # + all x86 (declarations and call rewrites); no NVVM/AArch64/ARM/AMDGCN upgrades
 lib/Target/X86/X86TargetTransformInfo.cpp 0.8
 lib/Transforms/Utils/SimplifyCFG.cpp 0.97
 lib/Analysis/InstructionSimplify.cpp 0.95

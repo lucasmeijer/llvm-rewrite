@@ -74,9 +74,14 @@
   for every function (functions appended meanwhile are visited), UpgradeDebugInfo, UpgradeModuleFlags.
 - AutoUpgrade: the generic upgradeIntrinsicFunction1 cases, remangling, named/packed struct returns, and the call
   rewrites for lifetime/memcpy/memset/masked.*/objectsize/ctlz/cttz/annotations/coro.end/convert.*/dbg.*.
-  x86: shouldUpgradeX86Intrinsic is a mechanical translation (all names), but only the call rewrites the corpus
-  needs are ported (scalar sse arith/sqrt, pmul(u)dq, vcvtph2ps, xop vpcom, bmi pdep/pext); every other x86
-  rewrite, and x86 declarations with an old signature, fail loudly. Other targets' intrinsics are unknown names.
+  x86 (`autoupgrade_x86.jai`): shouldUpgradeX86Intrinsic, upgradeX86IntrinsicFunction (old-signature
+  declarations: rdtscp, ptest, 8-bit immediates, masked fp compares, vpdp*, bf16, xop) with their NewFn call
+  rewrites, and all of upgradeX86IntrinsicCall with its helpers, in LLVM's if/else order. Checked: every
+  llvm/test/CodeGen/X86/*-upgrade.ll (41 files) prints identically with `opt -S`. The intrinsics the upgrades create
+  need entries in gen_intrinsics.jai: tests/roundtrip/intrinsics/x86-upgrade-targets.ll declares the ones no other
+  test declares (an upgrade that creates another unknown one fails loudly with the generator hint). C++ argument
+  evaluation order (e.g. `CreateAnd(CreateBitCast(a), CreateBitCast(b))`) turned out left to right in the oracle
+  binary (avx512dqvl-intrinsics-upgrade.ll mask.and.ps etc. match); the port creates instructions in that order. Other targets' intrinsics are unknown names.
 - Debug info: every specialized node kind of LLParser (debuginfo.jai `DI_Kind`, incl. DIEnumerator, DIGenericSubrange,
   DIModule, DIMacro(File), DICommonBlock, DIObjCProperty, DIStringType, DISubrangeType, DIFixedPointType,
   GenericDINode) with the verifier's visit for each; checked against llvm/test/Assembler/{DICommonBlock,DIEnumerator,
@@ -1720,8 +1725,7 @@ Still slow / next:
   doubt.
 - Still failing loudly (my units): SROA with
   scalable vectors and a known vscale (canConvertValue/convertValue/isVectorPromotionViable with VScale),
-  LowerTypeTests CFI lowering, LoopCacheAnalysis (loop-interchange `cache`), the ~380 avx512 auto-upgrades of
-  MemorySanitizer/X86/avx512{,bw}-intrinsics-upgrade.ll.
+  LowerTypeTests CFI lowering, LoopCacheAnalysis (loop-interchange `cache`).
 - Sweeps after these changes (0 differs everywhere): instcombine 8538/8550 identical (12 loud), instcombine
   --with-test-flags 10868/10927 (59 loud), simplifycfg, loop-rotate, make-guards-explicit, function(loop-mssa(licm)),
   dce/licm with --enable-knowledge-retention all 100%, slp-vectorizer --with-test-flags 10926/10982 (56 loud).

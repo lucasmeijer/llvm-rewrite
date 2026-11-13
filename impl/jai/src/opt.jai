@@ -12,6 +12,7 @@
 #load "intrinsics.jai";
 #load "gen_iit.jai";
 #load "autoupgrade.jai";
+#load "autoupgrade_x86.jai";
 #load "constfold.jai";
 #load "debuginfo.jai";
 #load "verifier.jai";

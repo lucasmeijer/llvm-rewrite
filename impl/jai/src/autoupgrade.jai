@@ -3,7 +3,7 @@
 // upgradeX86IntrinsicFunction (declaration part), UpgradeIntrinsicCall (generic cases), UpgradeCallsToIntrinsic)
 // and the call-building parts of llvm/lib/IR/IRBuilder.cpp that those use.
 // Target-specific upgrades for targets other than x86 are not ported: their intrinsic names are unknown here
-// (gen_iit.jai has only Intrinsics.td and IntrinsicsX86.td). x86 upgrades that rewrite calls fail loudly.
+// (gen_iit.jai has only Intrinsics.td and IntrinsicsX86.td). x86 call rewrites: autoupgrade_x86.jai.
 
 // ---------------------------------------------------------------- small IR building helpers (IRBuilder)
 
@@ -133,35 +133,7 @@ x86_multiply_add_input_elt_bits :: (name: string) -> u32 {
     return 0;
 }
 
-upgrade_x86_intrinsic_function :: (f: Value_Id, name_in: string) -> Upgrade_Result {
-    name := name_in;
-    res: Upgrade_Result;
-    if !consume_front(*name, "x86.") return res;
-    if should_upgrade_x86_intrinsic(f, name) { res.upgraded = true; return res; }   // calls are rewritten
-    // The remaining x86 declaration upgrades (rdtscp, ptest, 8-bit immediates, masked compares, vpdp*, bf16,
-    // xop vpermil2/vfrcz) all replace a known intrinsic declared with its old signature; their call rewrites are
-    // not ported, so refuse those loudly.
-    // upgradeX86MultiplyAddBytes / upgradeX86MultiplyAddWords (vpdp*: i32-vector inputs became i8 / i16 vectors)
-    elt := x86_multiply_add_input_elt_bits(name);
-    if elt {
-        ft := glob(f).value_type;
-        a1 := func_param(ft, 1); a2 := func_param(ft, 2);
-        ok_ty :: (t: Type_Id, bits: u32) -> bool { return is_vector_type(t) && type_bits(type_elem(t)) == bits && is_int_type(type_elem(t)); }
-        if ok_ty(a1, elt) && ok_ty(a2, elt) return res;
-        full := tprint("llvm.x86.%", name);
-        rename_old(f);
-        res.upgraded = true; res.new_fn = decl(full);
-        return res;
-    }
-    id := function_intrinsic_id(f);
-    otys: [..] Type_Id; otys.allocator = temp;
-    if id != NOT_INTRINSIC && !intrinsic_signature_valid(id, glob(f).value_type, *otys)
-        fatal("auto-upgrade of x86 intrinsic '%' (old signature) is not supported yet", vname(f));
-    if name == "seh.recoverfp" {
-        res.upgraded = true; res.new_fn = decl("llvm.eh.recoverfp");
-    }
-    return res;
-}
+// upgradeX86IntrinsicFunction: autoupgrade_x86.jai
 
 upgrade_intrinsic_function1 :: (f: Value_Id) -> Upgrade_Result {
     res: Upgrade_Result;
@@ -585,6 +557,7 @@ upgrade_intrinsic_call :: (ci: Value_Id, new_fn: Value_Id) {
       case "llvm.dbg.value";
         fatal("upgrade of the old 4-operand llvm.dbg.value is not supported yet");
       case;
+        if f != new_fn && upgrade_x86_call_to_new_fn(ci, f, new_fn, *b) return;
         if begins_with(nname, "llvm.x86.") && f != new_fn && x86_multiply_add_input_elt_bits(slice(nname, 9, nname.count - 9)) {
             // the vpdp* cases: bitcast the two inputs to the new element type
             elt := x86_multiply_add_input_elt_bits(slice(nname, 9, nname.count - 9));
@@ -1232,199 +1205,4 @@ builder_intrinsic :: (b: *Builder, name: string, otys: [] Type_Id, args: [] Valu
     return builder_call(b, decl(name, otys), args);
 }
 
-// ---------------------------------------------------------------- upgradeX86IntrinsicCall (subset)
-
-// Returns the replacement value (NONE = none); fails loudly for unported x86 upgrades.
-upgrade_x86_intrinsic_call :: (name_in: string, ci: Value_Id, b: *Builder) -> Value_Id {
-    name := name_in;
-    na := call_nargs(ci);
-    a :: (i: u32) -> Value_Id #expand { return call_arg(`ci, i); }
-    if name == "sse.sqrt.ss" || name == "sse2.sqrt.sd" {
-        vec := a(0);
-        e0 := builder_extract_element(b, vec, const_int(ir.t_i64, 0));
-        e0 = builder_intrinsic(b, "llvm.sqrt", .[vtype(e0)], .[e0]);
-        return builder_insert_element(b, vec, e0, const_int(ir.t_i64, 0));
-    }
-    if name == "sse.add.ss" || name == "sse2.add.sd" || name == "sse.sub.ss" || name == "sse2.sub.sd" ||
-       name == "sse.mul.ss" || name == "sse2.mul.sd" || name == "sse.div.ss" || name == "sse2.div.sd" {
-        z := const_int(ir.t_i32, 0);
-        e0 := builder_extract_element(b, a(0), z);
-        e1 := builder_extract_element(b, a(1), z);
-        opc: Opcode;
-        if contains(name, ".add.") opc = .FADD;
-        else if contains(name, ".sub.") opc = .FSUB;
-        else if contains(name, ".mul.") opc = .FMUL;
-        else opc = .FDIV;
-        r := builder_binop(b, opc, e0, e1);
-        return builder_insert_element(b, a(0), r, z);
-    }
-    if name == "sse2.pmulu.dq" || name == "avx2.pmulu.dq" || name == "avx512.pmulu.dq.512" ||
-       name == "sse41.pmuldq" || name == "avx2.pmul.dq" || name == "avx512.pmul.dq.512" {
-        // upgradePMULDQ
-        signed := !contains(name, "pmulu");
-        ty := vtype(ci);
-        lhs := builder_cast(b, .BITCAST, a(0), ty);
-        rhs := builder_cast(b, .BITCAST, a(1), ty);
-        if signed {
-            sh := const_int(ty, 32);
-            lhs = builder_binop(b, .SHL, lhs, sh); lhs = builder_binop(b, .ASHR, lhs, sh);
-            rhs = builder_binop(b, .SHL, rhs, sh); rhs = builder_binop(b, .ASHR, rhs, sh);
-        } else {
-            m := const_int(ty, 0xffffffff);
-            lhs = builder_binop(b, .AND, lhs, m);
-            rhs = builder_binop(b, .AND, rhs, m);
-        }
-        if na == 4 fatal("auto-upgrade of masked x86 intrinsic '%' is not supported yet", name);
-        return builder_binop(b, .MUL, lhs, rhs);
-    }
-    if begins_with(name, "vcvtph2ps.") {
-        dt := vtype(ci);
-        rep := a(0);
-        st := vtype(rep);
-        n := type_count(dt);
-        if n != type_count(st) rep = builder_shuffle(b, rep, rep, .[0, 1, 2, 3]);
-        rep = builder_cast(b, .BITCAST, rep, type_vector(n, type_simple(.HALF), false));
-        rep = builder_cast(b, .FPEXT, rep, dt, "cvtph2ps");
-        if vkind(rep) == .INST builder_set_fmf(b, rep);
-        if na >= 3 fatal("auto-upgrade of masked x86 intrinsic '%' is not supported yet", name);
-        return rep;
-    }
-    if begins_with(name, "xop.vpcom") {
-        signed: bool;
-        if ends_with(name, "ub") || ends_with(name, "uw") || ends_with(name, "ud") || ends_with(name, "uq") signed = false;
-        else if ends_with(name, "b") || ends_with(name, "w") || ends_with(name, "d") || ends_with(name, "q") signed = true;
-        else fatal("Intrinsic has unknown suffix");
-        imm: u64;
-        if na == 3 imm = const_int_zext(a(2));
-        else {
-            s := slice(name, 9, name.count - 9);
-            if begins_with(s, "lt") imm = 0; else if begins_with(s, "le") imm = 1;
-            else if begins_with(s, "gt") imm = 2; else if begins_with(s, "ge") imm = 3;
-            else if begins_with(s, "eq") imm = 4; else if begins_with(s, "ne") imm = 5;
-            else if begins_with(s, "false") imm = 6; else if begins_with(s, "true") imm = 7;
-            else fatal("Unknown condition");
-        }
-        // upgradeX86vpcom
-        ty := vtype(ci);
-        pred: u8;
-        if imm == {
-            case 0; pred = ifx signed then cast(u8) ICMP_SLT else ICMP_ULT;
-            case 1; pred = ifx signed then cast(u8) ICMP_SLE else ICMP_ULE;
-            case 2; pred = ifx signed then cast(u8) ICMP_SGT else ICMP_UGT;
-            case 3; pred = ifx signed then cast(u8) ICMP_SGE else ICMP_UGE;
-            case 4; pred = ICMP_EQ;
-            case 5; pred = ICMP_NE;
-            case 6; return const_null_value(ty);
-            case 7; return cf_all_ones(ty);
-            case; fatal("Unknown XOP vpcom/vpcomu predicate");
-        }
-        c := builder_icmp(b, pred, a(0), a(1));
-        return builder_cast(b, .SEXT, c, ty);
-    }
-    if begins_with(name, "bmi.pdep.") || begins_with(name, "bmi.pext.") {
-        iid := ifx begins_with(name, "bmi.pdep.") then "llvm.pdep" else "llvm.pext";
-        if na == 4 fatal("auto-upgrade of masked x86 intrinsic '%' is not supported yet", name);
-        return builder_intrinsic(b, iid, .[vtype(ci)], .[a(0), a(1)]);
-    }
-    if begins_with(name, "sse4a.movnt.") {
-        // nontemporal (unaligned) store of element 0
-        ex := builder_extract_element(b, a(1), const_int(ir.t_i64, 0));
-        if vkind(ex) == .INST set_name(ex, "extractelement");
-        si := builder_store(b, ex, a(0), 1);
-        set_metadata(si, md_kind_id("nontemporal"), md_tuple(.[md_value(const_int(ir.t_i32, 1))], false));
-        return NONE;
-    }
-    if begins_with(name, "avx.movnt.") || begins_with(name, "avx512.storent.") {
-        sz, _ := prim_size_bits(vtype(a(1)));
-        si := builder_store(b, a(1), a(0), sz / 8);
-        set_metadata(si, md_kind_id("nontemporal"), md_tuple(.[md_value(const_int(ir.t_i32, 1))], false));
-        return NONE;
-    }
-    if name == "sse2.storel.dq" {
-        bc := builder_cast(b, .BITCAST, a(1), type_vector(2, ir.t_i64, false), "cast");
-        el := builder_extract_element(b, bc, const_int(ir.t_i64, 0));
-        builder_store(b, el, a(0), 1);
-        return NONE;
-    }
-    if begins_with(name, "sse.storeu.") || begins_with(name, "sse2.storeu.") || begins_with(name, "avx.storeu.") {
-        builder_store(b, a(1), a(0), 1);
-        return NONE;
-    }
-    if name == "sse41.pblendw" || begins_with(name, "sse41.blendp") || begins_with(name, "avx.blend.p") ||
-       name == "avx2.pblendw" || begins_with(name, "avx2.pblendd.") {
-        imm := const_int_zext(a(2));
-        n := cast(u32) type_count(vtype(ci));
-        idxs: [..] u32; idxs.allocator = temp;
-        for i: 0..n-1 array_add(*idxs, ifx ((imm >> (i % 8)) & 1) != 0 then i + n else i);
-        return builder_shuffle(b, a(0), a(1), idxs);
-    }
-    if begins_with(name, "avx512.kunpck") {
-        n := type_bits(vtype(ci));
-        lhs := x86_mask_vec(b, a(0), n);
-        rhs := x86_mask_vec(b, a(1), n);
-        half: [..] u32; half.allocator = temp;
-        for i: 0..n/2-1 array_add(*half, i);
-        full: [..] u32; full.allocator = temp;
-        for i: 0..n-1 array_add(*full, i);
-        lhs = builder_shuffle(b, lhs, lhs, half);
-        rhs = builder_shuffle(b, rhs, rhs, half);
-        r := builder_shuffle(b, rhs, lhs, full);   // operands swapped to match the intrinsic definition
-        return builder_cast(b, .BITCAST, r, vtype(ci));
-    }
-    for fam: string.["vpdpbusd", "vpdpwssd"] {
-        if !(begins_with(name, tprint("avx512.mask.%.", fam)) || begins_with(name, tprint("avx512.maskz.%.", fam)) ||
-             begins_with(name, tprint("avx512.mask.%s.", fam)) || begins_with(name, tprint("avx512.maskz.%s.", fam))) continue;
-        zero_mask := name[11] == #char "z";
-        saturating := name[ifx zero_mask then 21 else 20] == #char "s";
-        w64, _ := prim_size_bits(vtype(ci));
-        w := cast(u32) w64;
-        if w != 128 && w != 256 && w != 512 fatal("Unexpected intrinsic");
-        iname := tprint("llvm.x86.avx512.%0%.%", fam, ifx saturating then "s" else "", w);
-        elt: u32 = ifx fam == "vpdpbusd" then cast(u32) 8 else 16;
-        args := Value_Id.[a(0), a(1), a(2)];
-        is_i32_vec :: (t: Type_Id) -> bool { return is_vector_type(t) && type_elem(t) == ir.t_i32; }
-        if is_i32_vec(vtype(args[1])) && is_i32_vec(vtype(args[2])) {
-            nt := type_vector(w / elt, type_int(elt), false);
-            args[1] = builder_cast(b, .BITCAST, args[1], nt);
-            args[2] = builder_cast(b, .BITCAST, args[2], nt);
-        }
-        r := builder_call(b, decl(iname), args);
-        pass := ifx zero_mask then const_null_value(vtype(ci)) else a(0);
-        return emit_x86_select(b, a(3), r, pass);
-    }
-    fatal("auto-upgrade of x86 intrinsic call 'llvm.x86.%' is not supported yet", name);
-    return NONE;
-}
-// StoreInst through the builder (CreateAlignedStore)
-builder_store :: (b: *Builder, v: Value_Id, p: Value_Id, align: u64) -> Value_Id {
-    i := new_inst(.STORE, ir.t_void, 2);
-    set_op(i, 0, v); set_op(i, 1, p);
-    inst(i).align = align;
-    builder_insert(b, i);
-    return i;
-}
-// getX86MaskVec
-x86_mask_vec :: (b: *Builder, mask: Value_Id, n: u32) -> Value_Id {
-    mt := type_vector(type_bits(vtype(mask)), ir.t_i1, false);
-    m := builder_cast(b, .BITCAST, mask, mt);
-    if n <= 4 {
-        idx: [..] u32; idx.allocator = temp;
-        for i: 0..n-1 array_add(*idx, i);
-        m = builder_shuffle(b, m, m, idx);
-        if vkind(m) == .INST set_name(m, "extract");
-    }
-    return m;
-}
-// emitX86Select
-emit_x86_select :: (b: *Builder, mask: Value_Id, op0: Value_Id, op1: Value_Id) -> Value_Id {
-    if is_constant_kind(vkind(mask)) && cf_is_all_ones(mask) return op0;
-    m := x86_mask_vec(b, mask, cast(u32) type_count(vtype(op0)));
-    if is_constant_kind(vkind(m)) && is_constant_kind(vkind(op0)) && is_constant_kind(vkind(op1)) {
-        f := cf_select(m, op0, op1);
-        if f != NONE return f;
-    }
-    i := new_inst(.SELECT, vtype(op0), 3);
-    set_op(i, 0, m); set_op(i, 1, op0); set_op(i, 2, op1);
-    builder_insert(b, i);
-    return i;
-}
+// upgradeX86IntrinsicCall: autoupgrade_x86.jai
