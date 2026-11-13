@@ -23,6 +23,7 @@ import iv_descriptors;
 import vplan;
 import vplan_utils;
 import vplan_props;
+import vplan_interleave;
 
 // ---------------------------------------------------------------------------------------------
 // the IRBuilder<> (ConstantFolder) of the state
@@ -653,6 +654,7 @@ fn vp_execute_recipe(r: i32) {
         vp_apply_metadata(r, st);
         return;
     }
+    if k == VPR_INTERLEAVE { vp_interleave_execute(r); return; }
     if k == VPR_WIDEN_PHI { vts_execute_phi(r, false, vp_name(r)); return; }
     if k == VPR_REDUCTION_PHI {
         let in_loop = vpr[r].rdx_style != VRS_UNORDERED;

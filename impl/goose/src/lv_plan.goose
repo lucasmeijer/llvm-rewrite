@@ -31,6 +31,7 @@ import vplan_utils;
 import vplan_props;
 import vplan_construct;
 import vplan_transforms;
+import vplan_interleave;
 
 var lvp_plans: i32[>..<];        // VPlans (archive slots)
 var lvp_plan1: i32 = -1;         // VPlan1's slot
@@ -515,7 +516,14 @@ fn lvp_try_to_build_vplan() -> bool {
     if cm_fold_tail { vp_unported("tail folding (canonical IV NUW)"); }
     let region = vp_vector_loop_region();
     let header = vpb[region].entry;
-    if iai_has_groups() { vp_unported("interleave groups"); }
+    // the interleave groups relevant for this (possibly trimmed) range
+    var igs: i32[>..<] = [];
+    for gi in iai_groups.len {
+        let g = gi as i32;
+        if !iai_groups[g].alive { continue; }
+        let apply = lvp_decide() { vf => vf > 1 && cm_get_widening_decision(ig_insert_pos(g), vf) == CM_INTERLEAVE };
+        if apply { igs.push(g); }
+    }
     vpt_create_in_loop_reduction_recipes(lvp_range_start);
     lvp_make_mem_op_widening_decisions();
     lvp_make_scalarization_decisions();
@@ -558,6 +566,7 @@ fn lvp_try_to_build_vplan() -> bool {
     vpt_remove_branch_on_const(false);
     vpt_create_partial_reductions();
     vpt_convert_to_abstract_recipes();
+    vpt_create_interleave_groups(igs, lvp_epilogue_allowed);
     vpt_convert_to_strided_accesses();
     if lvp_range_start == 1 { lvp_range_end = 2; }
     var vf = lvp_range_start;

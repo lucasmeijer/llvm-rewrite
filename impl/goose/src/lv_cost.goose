@@ -38,6 +38,7 @@ import iv_descriptors;
 import lv_legality;
 import lv_interleave;
 import lv_cm;
+import lv_pass;
 
 let LC_INVALID: i64 = 0x7FFFFFFFFFFFFFFF;
 let LC_MAX: i64 = 0x7FFFFFFFFFFFFFFE;    // InstructionCost::getMax()
@@ -653,11 +654,33 @@ fn cm_set_cost_based_widening_decision(vf: i64) {
                 i = inst_next(i);
                 continue;
             }
-            if iai_is_interleaved(i) { vp_unported_cm("interleave groups (getInterleaveGroupCost)"); }
-            let gs = if cfg_is_legal_gather_or_scatter(i, vf) { cm_gather_scatter_cost(i, vf) } else { LC_INVALID };
-            let sc = cm_mem_inst_scalarization_cost(i, vf);
-            if gs < sc { cm_set_widening_decision(i, vf, CM_GATHER_SCATTER, gs); }
-            else { cm_set_widening_decision(i, vf, CM_SCALARIZE, sc); }
+            // Choose between Interleaving, Gather/Scatter or Scalarization.
+            var icost = LC_INVALID;
+            var nacc: i64 = 1;
+            let grp = iai_group_of(i);
+            if grp >= 0 {
+                if cm_get_widening_decision(i, vf) != CM_UNKNOWN { i = inst_next(i); continue; }
+                nacc = ig_num_members(grp);
+                if cm_interleaved_access_can_be_widened(i, vf) { icost = cm_interleave_group_cost(i, vf); }
+            }
+            let gs = if cfg_is_legal_gather_or_scatter(i, vf) { lc_mul(cm_gather_scatter_cost(i, vf), nacc) } else { LC_INVALID };
+            let sc = lc_mul(cm_mem_inst_scalarization_cost(i, vf), nacc);
+            var dec = CM_SCALARIZE;
+            var cost = sc;
+            if icost <= gs && icost < sc { dec = CM_INTERLEAVE; cost = icost; }
+            else if gs < sc { dec = CM_GATHER_SCATTER; cost = gs; }
+            if grp >= 0 {
+                if dec == CM_SCALARIZE {
+                    for x in ig_factor(grp) {
+                        let m = ig_member(grp, x);
+                        if m >= 0 { cm_set_widening_decision(m, vf, dec, cm_mem_inst_scalarization_cost(m, vf)); }
+                    }
+                } else {
+                    cm_set_group_widening_decision(grp, vf, dec, cost);
+                }
+            } else {
+                cm_set_widening_decision(i, vf, dec, cost);
+            }
             i = inst_next(i);
         }
     }
@@ -700,7 +723,15 @@ fn cm_set_cost_based_widening_decision(vf: i64) {
                 cm_set_widening_decision(x, vf, CM_SCALARIZE, lc_mul(cm_memory_instruction_cost(x, 1), vf));
                 update_mem_op_user_cost(x);
             } else if iai_is_interleaved(x) {
-                vp_unported_cm("interleave groups used as addresses (setCostBasedWideningDecision)");
+                // Scalarize all members of this interleaved group when any member is used as an address.
+                let grp = iai_group_of(x);
+                for xi in ig_factor(grp) {
+                    let m = ig_member(grp, xi);
+                    if m < 0 { continue; }
+                    let c = if hm_has(addr_set, m as u64) { lc_mul(cm_memory_instruction_cost(m, 1), vf) } else { cm_mem_inst_scalarization_cost(m, vf) };
+                    cm_set_widening_decision(m, vf, CM_SCALARIZE, c);
+                    update_mem_op_user_cost(m);
+                }
             }
         } else {
             if iop(x) == OP_PHI && lvl_is_fixed_order_recurrence(x) { continue; }
@@ -708,6 +739,71 @@ fn cm_set_cost_based_widening_decision(vf: i64) {
             hm_put(cm_forced, cm_key(vf, x), 1);
         }
     }
+}
+
+// setWideningDecision(Grp, VF, W, Cost): the insert position gets the whole cost when interleaving
+fn cm_set_group_widening_decision(g: i32, vf: i64, w: i64, cost: i64) {
+    var ip_cost = cost;
+    var other: i64 = 0;
+    if w != CM_INTERLEAVE { ip_cost = lc_div(cost, ig_num_members(g)); other = ip_cost; }
+    for x in ig_factor(g) {
+        let m = ig_member(g, x);
+        if m < 0 { continue; }
+        cm_set_widening_decision(m, vf, w, if ig_insert_pos(g) == m { ip_cost } else { other });
+    }
+}
+// interleavedAccessCanBeWidened(I, VF)
+fn cm_interleaved_access_can_be_widened(i: i32, vf: i64) -> bool {
+    let g = iai_group_of(i);
+    let st = laa_ldst_type(i);
+    if cm_has_irregular_type(st) { return false; }
+    fn is_ni(t: i32) -> bool { ty_kind(t) == TK_PTR && dl_is_nonintegral_as(types[t].n as i64) }
+    let sni = is_ni(st);
+    for x in ig_factor(g) {
+        let m = ig_member(g, x);
+        if m < 0 { continue; }
+        let mt = laa_ldst_type(m);
+        let mni = is_ni(mt);
+        if mni != sni { return false; }
+        if mni && sni && types[st].n != types[mt].n { return false; }
+    }
+    let pred_mask = cm_block_needs_predication_for_any_reason(inst_parent(i)) && cm_is_mask_required(i);
+    let load_gaps = iop(i) == OP_LOAD && ig_requires_scalar_epilogue(g) && !cm_is_epilogue_allowed();
+    let store_gaps = iop(i) == OP_STORE && !ig_is_full(g);
+    if !pred_mask && !load_gaps && !store_gaps { return true; }
+    if ig_is_reverse(g) { return false; }
+    return cfg_is_legal_masked_load_or_store(i, vf);
+}
+// getInterleaveGroupCost(I, VF)
+fn cm_interleave_group_cost(i: i32, vf: i64) -> i64 {
+    let g = iai_group_of(i);
+    let ip = ig_insert_pos(g);
+    let vt = laa_ldst_type(ip);
+    let vty = lv_vec_ty(vt, vf);
+    let as_ = lv_ptr_as(vals[laa_ldst_ptr(ip)].ty as i32);
+    let f = ig_factor(g);
+    let wide = ty_vector(vt, vf * f, false);
+    var idx: i64[>..<] = [];
+    for x in f { if ig_member(g, x) >= 0 { idx.push(x); } }
+    let gaps = (ig_requires_scalar_epilogue(g) && !cm_is_epilogue_allowed()) || (iop(i) == OP_STORE && !ig_is_full(g));
+    var c = lt_interleaved(iop(ip), wide, f, idx, ig_align(g), as_, cm_is_mask_required(i), gaps);
+    if ig_is_reverse(g) {
+        if cm_is_mask_required(i) { fatal("internal: Reverse masked interleaved access not supported."); }
+        c = lc_add(c, lc_mul(lt_shuffle(SK_REVERSE, vty, 0), ig_num_members(g)));
+    }
+    return c;
+}
+// TTI.getInterleavedMemoryOpCost(Opcode, WideVecTy, Factor, Indices, Alignment, AS, CostKind, UseMaskForCond, UseMaskForGaps)
+fn lt_interleaved(o: i64, wide: i32, factor: i64, idx: const i64[:], align: i64, as_: i64, mask_cond: bool, mask_gaps: bool) -> i64 {
+    if tti_kind != TTI_X86 { return lcv(1); }
+    let m = mk_mark();
+    let im = ica_mark();
+    let is = mk_pool.len;
+    for x in idx { mk_pool.push(x as i32); }
+    let c = x86_interleaved_memory_op_cost(o, wide, factor, is, idx.len, align, as_, LV_KIND, mask_cond, mask_gaps);
+    mk_release(m);
+    ica_release(im);
+    return lcv(c);
 }
 
 // isScalarWithPredication with the division cost (lv_cm's version fails loudly for divisions)

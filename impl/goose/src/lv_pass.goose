@@ -37,6 +37,7 @@ import laa;
 import aa;
 import tli;
 import tti;
+import gen_x86target;
 import tti_vec;
 import tti_x86_vec;
 import ivusers;
@@ -553,7 +554,7 @@ fn lv_process_loop(l: i32, interleave_only_when_forced: bool, vectorize_only_whe
         if lvl_has_uncountable_exit_with_side_effects() && !flag_bool("enable-early-exit-vectorization-with-side-effects", false) { return false; }
     }
     // InterleavedAccessInfo: TTI->enableInterleavedAccessVectorization() is true on X86
-    var use_interleaved = inner && tti_kind == TTI_X86;
+    var use_interleaved = inner && tti_kind == TTI_X86 && !xst_isAtom();   // enableInterleavedAccessVectorization
     if flag_given("enable-interleaved-mem-accesses") { use_interleaved = inner && flag_bool("enable-interleaved-mem-accesses", false); }
     iai_reset();
     if use_interleaved { iai_analyze_interleaving(l, lv_pse, lv_opt_for_size, lv_use_masked_interleaved_accesses()); }

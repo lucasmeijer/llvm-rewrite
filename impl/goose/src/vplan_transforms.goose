@@ -94,7 +94,30 @@ fn vpt_simplify_recipe(r: i32) {
     if opc == OP_TRUNC as i32 && vpm_arity_ok(r, 1) {
         let s = vp_def(vp_op(r, 0));
         let so = vpm_opcode(s, true);
-        if (so == OP_ZEXT as i32 || so == OP_SEXT as i32) && vpm_arity_ok(s, 1) { vp_unported("simplifying trunc(ext)"); }
+        if (so == OP_ZEXT as i32 || so == OP_SEXT as i32) && vpm_arity_ok(s, 1) {
+            let a = vp_op(s, 0);
+            let tty = vpv[def].ty;
+            let aty = vp_scalar_type(a);
+            if tty == aty {
+                vpt_replace_all(r, a);
+            } else if k == VPR_WIDEN_CAST {
+                let ab = ty_bits(ty_scalar(aty));
+                let tb = ty_bits(ty_scalar(tty));
+                vpb_set_before(r);
+                if ab < tb {
+                    let eo = if so == OP_SEXT as i32 { OP_SEXT } else { OP_ZEXT };
+                    let ext = vpt_widen_cast(eo, a, tty);
+                    let ue = vpv[vp_op(r, 0)].uv;
+                    if ue >= 0 && vpv[vp_op(r, 0)].kind != VVK_IR { vpv[vpr[ext].def].uv = ue; }
+                    vpt_replace_all(r, vpr[ext].def);
+                } else if ab > tb {
+                    let tr = vpt_widen_cast(OP_TRUNC, a, tty);
+                    vpt_replace_all(r, vpr[tr].def);
+                }
+            } else {
+                return;
+            }
+        }
     }
     // simplifyLogicalRecipe
     if vpt_simplify_logical_recipe(r, can_create) { return; }
@@ -106,23 +129,55 @@ fn vpt_simplify_recipe(r: i32) {
         if vpm_one(vp_op(r, 1)) { vpt_replace_all(r, vp_op(r, 0)); return; }
         if vpm_one(vp_op(r, 0)) { vpt_replace_all(r, vp_op(r, 1)); return; }
         if vpm_zero_int(vp_op(r, 1)) || vpm_zero_int(vp_op(r, 0)) { vpt_replace_all(r, vp_const_int(vpv[def].ty, 0)); return; }
-        if can_create && (vpm_all_ones(vp_op(r, 0)) || vpm_all_ones(vp_op(r, 1))) { vp_unported("simplifying mul by -1"); }
+        if can_create && (vpm_all_ones(vp_op(r, 0)) || vpm_all_ones(vp_op(r, 1))) {
+            let a = if vpm_all_ones(vp_op(r, 1)) { vp_op(r, 0) } else { vp_op(r, 1) };
+            let nsw = vpr[r].f.ot == VOT_OVERFLOWING && vpr[r].f.nsw;
+            vpb_set_before(r);
+            let sub = vpb_sub(vp_const_int(vp_scalar_type(a), 0), a, vpr[r].dl, "", false, nsw);
+            vpt_replace_all(r, vpr[sub].def);
+            return;
+        }
     }
     if can_create && opc == OP_ADD as i32 && vpm_arity_ok(r, 2) {
         for j in 2 {
             let ok, a, b = vpm_binary(vp_op(r, j), OP_SUB);
-            if ok && vpm_zero_int(a) { vp_unported("simplifying x + (0 - y)"); }
+            if ok && vpm_zero_int(a) {
+                let x = vp_op(r, 1 - j);
+                let subr = vp_def(vp_op(r, j));
+                let nsw = vpr[r].f.ot == VOT_OVERFLOWING && vpr[r].f.nsw && vpr[subr].f.ot == VOT_OVERFLOWING && vpr[subr].f.nsw;
+                vpb_set_before(r);
+                let sub = vpb_sub(x, b, vpr[r].dl, "", false, nsw);
+                vpt_replace_all(r, vpr[sub].def);
+                return;
+            }
         }
     }
     if can_create && opc == OP_MUL as i32 && vpm_arity_ok(r, 2) {
         for j in 2 {
             let c = vp_op(r, j);
-            if vp_is_constant_int(c) && ap_is_pow2(ci_ap(vp_ir(c))) { vp_unported("simplifying mul by a power of two"); }
+            if vp_is_constant_int(c) && ap_is_pow2(ci_ap(vp_ir(c))) {
+                let a = vp_op(r, 1 - j);
+                let ap = ci_ap(vp_ir(c));
+                let bw = ap.w as i64;
+                let sh = ap_log2(ap);
+                let nuw = vpr[r].f.ot == VOT_OVERFLOWING && vpr[r].f.nuw;
+                let nsw = vpr[r].f.ot == VOT_OVERFLOWING && vpr[r].f.nsw && sh != bw - 1;
+                vpb_set_before(r);
+                let shl = vpb_nary(OP_SHL as i32, [a, vp_const_int(ty_int(bw), sh as u64)], vpf_wrap(nuw, nsw), vpr[r].dl, "", -1);
+                vpt_replace_all(r, vpr[shl].def);
+                return;
+            }
         }
     }
     if can_create && opc == OP_UDIV as i32 && vpm_arity_ok(r, 2) {
         let c = vp_op(r, 1);
-        if vp_is_constant_int(c) && ap_is_pow2(ci_ap(vp_ir(c))) { vp_unported("simplifying udiv by a power of two"); }
+        if vp_is_constant_int(c) && ap_is_pow2(ci_ap(vp_ir(c))) {
+            let ap = ci_ap(vp_ir(c));
+            vpb_set_before(r);
+            let ls = vpb_nary(OP_LSHR as i32, [vp_op(r, 0), vp_const_int(ty_int(ap.w as i64), ap_log2(ap) as u64)], vpr[r].f, vpr[r].dl, "", -1);
+            vpt_replace_all(r, vpr[ls].def);
+            return;
+        }
     }
     let not_a = vpm_not(def);
     if not_a >= 0 {
@@ -181,8 +236,30 @@ fn vpt_simplify_recipe(r: i32) {
         if ad >= 0 && (vpr[ad].kind == VPR_INSTRUCTION || vpr[ad].kind == VPR_REPLICATE) && vp_is_single_scalar(a) { vpt_replace_all(r, a); return; }
         if vp_has_scalar_vf_only() { vpt_replace_all(r, a); return; }
     }
-    if opc == VPI_EXTRACT_PENULTIMATE_ELEMENT && vp_is_vpi(vp_def(vp_op(r, 0)), VPI_BUILD_VECTOR) { vp_unported("simplifying extract-penultimate(build-vector)"); }
-    if opc == VPI_BUILD_VECTOR { vp_unported("simplifying build-vector"); }
+    if opc == VPI_EXTRACT_PENULTIMATE_ELEMENT && vpm_arity_ok(r, 1) && vp_is_vpi(vp_def(vp_op(r, 0)), VPI_BUILD_VECTOR) {
+        let bv = vp_def(vp_op(r, 0));
+        vpt_replace_all(r, vp_op(bv, vp_nops(bv) - 2));
+        return;
+    }
+    if opc == OP_EXTRACTELEMENT as i32 && vpm_arity_ok(r, 2) && vp_is_vpi(vp_def(vp_op(r, 0)), VPI_BUILD_VECTOR) {
+        let ok, idx = vpm_constant_int(vp_op(r, 1));
+        if ok {
+            vpt_replace_all(r, vp_op(vp_def(vp_op(r, 0)), idx as i64));
+            return;
+        }
+    }
+    if opc == VPI_BUILD_VECTOR {
+        var eq = true;
+        for j in vp_nops(r) { if vp_op(r, j) != vp_op(r, 0) { eq = false; } }
+        if eq {
+            vpb_set_before(r);
+            let b = vpb_nary0(VPI_BROADCAST, [vp_op(r, 0)]);
+            vpt_replace_all(r, vpr[b].def);
+            return;
+        }
+        let x0 = vp_op(r, 0);
+        vp_replace_uses_with_if(def, x0) { u, i => vp_uses_first_lane_only(u, def) };
+    }
     if opc == OP_SELECT as i32 && vpm_arity_ok(r, 3) && vp_is_vpi(vp_def(vp_op(r, 0)), VPI_BROADCAST) {
         vp_set_operand(r, 0, vp_op(vp_def(vp_op(r, 0)), 0));
         return;
@@ -199,7 +276,20 @@ fn vpt_simplify_recipe(r: i32) {
     }
     if opc == VPI_COMPUTE_REDUCTION_RESULT && vp_nops(r) == 1 && vp_is_ir_value(vp_op(r, 0)) { vpt_replace_all(r, vp_op(r, 0)); return; }
     if !vp_is_unrolled() { return; }
-    if opc == VPI_EXTRACT_LANE { vp_unported("simplifying extract-lane"); }
+    if opc == VPI_EXTRACT_LANE && vpm_arity_ok(r, 2) {
+        let lane = vp_op(r, 0);
+        let a = vp_op(r, 1);
+        if vp_is_single_scalar(a) { vpt_replace_all(r, a); return; }
+        let ad = vp_def(a);
+        if vpm_zero_int(lane) && ad >= 0 && vp_is_canonical_widen_iv(ad) {
+            vpt_replace_all(r, vpb[vp_vector_loop_region()].can_iv);
+            return;
+        }
+        vpb_set_before(r);
+        let ee = vpb_nary(OP_EXTRACTELEMENT as i32, [a, lane], vp_default_flags(OP_EXTRACTELEMENT as i32, -1), vpr[r].dl, "", -1);
+        vpt_replace_all(r, vpr[ee].def);
+        return;
+    }
     // phi(0, IVInc) + Y fold
     if opc == OP_ADD as i32 && vpm_arity_ok(r, 2) {
         let ok, x, step = vpm_binary(vp_op(r, 0), OP_ADD);
@@ -207,7 +297,23 @@ fn vpt_simplify_recipe(r: i32) {
         if ok && vp_is_ir_value(y) {
             let xd = vp_def(x);
             if vp_is_vp_phi(xd) && vp_nops(xd) == 2 && vpm_zero_int(vp_op(xd, 0)) && vp_op(xd, 1) == vp_op(r, 0) {
-                vp_unported("folding phi(0, IVInc) + Y");
+                let ivinc = vp_op(r, 0);
+                if vp_num_users(ivinc) == 2 {
+                    // findUserOf(Phi, m_Add(m_Specific(Phi), m_Specific(Y)))
+                    var inc: i32 = -1;
+                    for j in vp_num_users(x) {
+                        let u = vp_user(x, j);
+                        if vpr[u].def < 0 { continue; }
+                        let oku, ua, ub = vpm_binary(vpr[u].def, OP_ADD);
+                        if oku && ua == x && ub == y { inc = u; break; }
+                    }
+                    if vp_num_users(x) == 1 || (vp_num_users(x) == 2 && inc >= 0) {
+                        vpt_replace_all(r, ivinc);
+                        if inc >= 0 { vp_rauw(vpr[inc].def, x); }
+                        vp_set_operand(xd, 0, y);
+                        return;
+                    }
+                }
             }
         }
     }
@@ -888,9 +994,10 @@ fn vpt_optimize_induction_live_out_users(pse: i32) {
     let resume_tc = if vp_has_tail_folded() { vph.trip_count } else { vph.vtc };
     var phis: i32[>..<] = [];
     vp_block_phis(vpb[region].entry, phis);
+    // one VPBuilder(VectorPH, VectorPH->begin()): the end values are inserted in phi order before the first recipe
+    vpb_set_at(vph_, vpb[vph_].first);
     for p in phis {
         if !vp_is_widen_induction_kind(vpr[p].kind) { continue; }
-        vpb_set_at(vph_, vpb[vph_].first);
         let e = vpt_end_value_for_induction(p, resume_tc);
         if e >= 0 { hm_put(ends, p as u64, e as i64); }
     }
@@ -1015,7 +1122,8 @@ fn vpt_drop_poison_generating_recipes() {
                 if mask >= 0 { vp_unported("dropPoisonGeneratingRecipes with masks"); }
                 if ad >= 0 && vpr[r].consecutive && mask >= 0 { collect(ad); }
             } else if k == VPR_INTERLEAVE {
-                vp_unported("dropPoisonGeneratingRecipes of interleave groups");
+                // IsNotHeaderMask(nullptr) is false: unmasked groups keep their address flags
+                if vpr[r].masked { vp_unported("dropPoisonGeneratingRecipes of masked interleave groups"); }
             }
             r = vpr[r].next;
         }

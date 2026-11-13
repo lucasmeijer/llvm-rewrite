@@ -223,6 +223,7 @@ fn vp_gep_source_element_type(r: i32) -> i32 {
 var vps_ops: i32[>..<];     // scratch for getSCEVExprForVPValue's operand SCEVs (stack discipline)
 
 // getSCEVExprForVPValue(V, PSE, L); l = -1 for no loop
+fn ty_scalar_bits_vp(t: i32) -> i64 { ty_bits(ty_scalar(t)) as i64 }
 recursive fn vp_scev_for_value(v: i32, pse: i32, l: i32) -> i32 {
     let kind = vpv[v].kind;
     if kind == VVK_REGION {
@@ -256,11 +257,46 @@ recursive fn vp_scev_for_value(v: i32, pse: i32, l: i32) -> i32 {
             }
             return pse_get_predicated_scev(pse, e);
         }
-        if o == OP_SHL || o == OP_LSHR || o == OP_AND {
-            vp_unported("getSCEVExprForVPValue of shl / lshr / and");
+        // shl by a constant: x * (1 << c); lshr by a constant: x udiv (1 << c)
+        if o == OP_SHL || o == OP_LSHR {
+            let ok, amt = vpm_constant_int(vp_op(r, 1));
+            let lhs = vp_op(r, 0);
+            let bits = if o == OP_SHL { ty_scalar_bits_vp(vp_scalar_type(lhs)) } else { sc_type_bits(vp_scalar_type(v)) };
+            if ok && amt < bits as u64 {
+                let a = vp_scev_for_value(lhs, pse, l);
+                if sc_is_cnc(a) { return SCEV_CNC; }
+                let p2 = sc_get_power_of_two(if o == OP_SHL { sc_ty(a) } else { vp_scalar_type(v) }, amt as i64);
+                let e = if o == OP_SHL { sc_mul(a, p2) } else { sc_get_udiv(a, p2) };
+                return pse_get_predicated_scev(pse, e);
+            }
+        }
+        // and with a constant mask 2^n - 1: x urem 2^n (commutative)
+        if o == OP_AND && vpm_opcode(r, false) == OP_AND as i32 {
+            var lhs: i32 = -1;
+            var mask: i32 = -1;
+            if vp_is_constant_int(vp_op(r, 1)) { lhs = vp_op(r, 0); mask = vp_op(r, 1); }
+            else if vp_is_constant_int(vp_op(r, 0)) { lhs = vp_op(r, 1); mask = vp_op(r, 0); }
+            if mask >= 0 {
+                let m1 = ap_inc(ci_ap(vp_ir(mask)));
+                if ap_is_pow2(m1) {
+                    let a = vp_scev_for_value(lhs, pse, l);
+                    if sc_is_cnc(a) { return SCEV_CNC; }
+                    return pse_get_predicated_scev(pse, sc_get_urem(a, sc_get_constant(m1)));
+                }
+            }
         }
     }
-    if opc == VPI_NOT { vp_unported("getSCEVExprForVPValue of not"); }
+    // not X = xor X, -1 = -1 - X (VPInstruction::Not or a commutative xor with all-ones)
+    var not_x: i32 = -1;
+    if r >= 0 && vpm_vpi_r(r, VPI_NOT, 1) { not_x = vp_op(r, 0); }
+    else if r >= 0 && vpm_opcode(r, false) == OP_XOR as i32 && vpm_arity_ok(r, 2) {
+        if vpm_all_ones(vp_op(r, 0)) { not_x = vp_op(r, 1); } else if vpm_all_ones(vp_op(r, 1)) { not_x = vp_op(r, 0); }
+    }
+    if not_x >= 0 {
+        let a = vp_scev_for_value(not_x, pse, l);
+        if sc_is_cnc(a) { return SCEV_CNC; }
+        return pse_get_predicated_scev(pse, sc_minus(sc_get_minus_one(sc_ty(a)), a));
+    }
     if opc >= 0 && vpm_arity_ok(r, 1) && (opc as i64 == OP_TRUNC || opc as i64 == OP_ZEXT || opc as i64 == OP_SEXT) {
         if opc as i64 == OP_SEXT {
             let s0 = vp_def(vp_op(r, 0));

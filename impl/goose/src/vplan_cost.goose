@@ -36,6 +36,7 @@ import lv_cost;
 import vplan;
 import vplan_utils;
 import vplan_props;
+import vplan_interleave;
 import vplan_transforms;
 import lv_plan;
 
@@ -313,7 +314,7 @@ fn vpc_compute_cost(r: i32, vf: i64) -> i64 {
     }
     if k == VPR_WIDEN_CALL { return lt_call(); }
     if k == VPR_REDUCTION { vp_unported("VPReductionRecipe::computeCost"); }
-    if k == VPR_INTERLEAVE { vp_unported("VPInterleaveRecipe::computeCost"); }
+    if k == VPR_INTERLEAVE { return vpc_interleave_cost(r, vf); }
     if k == VPR_EXPRESSION { vp_unported("VPExpressionRecipe::computeCost"); }
     if k == VPR_HISTOGRAM { vp_unported("VPHistogramRecipe::computeCost"); }
     vp_unported("the cost of an EVL recipe");
