@@ -48,7 +48,7 @@ lib/IR/Attributes.cpp 0.2
 lib/Analysis/MemorySSA.cpp 0.8  # + the mutation API and verifier, the loop constructor (loop_unroll.goose mssa_build_loop); no DOT output
 lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95  # manual: all but visitFDiv's sin/cos -> tan (emitUnaryFloatFnCall, loud)
 lib/Transforms/Utils/SCCPSolver.cpp 0.75  # + the FunctionSpecializer entry points (funcspec.goose)
-lib/Transforms/Utils/LoopUtils.cpp 0.5  # + estimated trip count / loop probability API, hasUnrollTransformation, hasPartialIVCondition, cloneLoop (loop_md.goose, simple_loop_unswitch_nt.goose, unroll_utils.goose); + addRuntimeChecks, expandBounds, findDefsUsedOutsideOfLoop (loop_versioning.goose); makeFollowupLoopID, addStringMetadataToLoop (loop_distribute.goose); deleteDeadLoop, breakLoopBackedge, getBooleanLoopAttribute, isMustProgress (loop_utils.goose); + rewriteLoopExitValues, hasHardUserWithinLoop, canLoopBeDeleted, isAlmostDeadIV (indvars.goose)
+lib/Transforms/Utils/LoopUtils.cpp 0.52  # + addDiffRuntimeChecks (lv_rtchecks.goose), hoisted expandBounds; + estimated trip count / loop probability API, hasUnrollTransformation, hasPartialIVCondition, cloneLoop (loop_md.goose, simple_loop_unswitch_nt.goose, unroll_utils.goose); + addRuntimeChecks, expandBounds, findDefsUsedOutsideOfLoop (loop_versioning.goose); makeFollowupLoopID, addStringMetadataToLoop (loop_distribute.goose); deleteDeadLoop, breakLoopBackedge, getBooleanLoopAttribute, isMustProgress (loop_utils.goose); + rewriteLoopExitValues, hasHardUserWithinLoop, canLoopBeDeleted, isAlmostDeadIV (indvars.goose)
 lib/IR/ConstantRange.cpp 0.7
 lib/IR/Metadata.cpp 0.5  # + MDNode::concatenate (loop_versioning.goose)
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
@@ -105,7 +105,7 @@ lib/Analysis/ValueLatticeUtils.cpp 1  # manual: renamed: sc_can_track_* in sccp.
 lib/Analysis/DomConditionCache.cpp 1
 lib/Transforms/InstCombine/InstCombineSelect.cpp 0.95
 lib/Transforms/InstCombine/InstCombinePHI.cpp 0.9
-lib/Analysis/VectorUtils.cpp 0.35  # + InterleavedAccessInfo (lv_interleave.goose), getVectorIntrinsicIDForCall (laa.goose), processShuffleMasks (tti_x86_vec.goose), isVectorIntrinsicWith*AtArg, get/isSplatValue, narrow/widenShuffleMaskElts (vecutils.goose)
+lib/Analysis/VectorUtils.cpp 0.45  # + InterleavedAccessInfo (lv_interleave.goose), computeMinimumValueSizes (lv_minbw.goose), propagateMetadata / concatenateVectors / masks (vplan_interleave.goose), getVectorIntrinsicIDForCall (laa.goose), processShuffleMasks (tti_x86_vec.goose), isVectorIntrinsicWith*AtArg, get/isSplatValue, narrow/widenShuffleMaskElts (vecutils.goose)
 lib/Analysis/MemoryBuiltins.cpp 0.55
 lib/Transforms/InstCombine/InstCombineLoadStoreAlloca.cpp 0.97
 lib/Transforms/InstCombine/InstCombineVectorOps.cpp 0.99
@@ -220,14 +220,14 @@ lib/Transforms/Utils/RelLookupTableConverter.cpp 0.1  # early exit only
 lib/Transforms/Scalar/DFAJumpThreading.cpp 0.97  # all but optimization remarks and -dfa-jump-view-cfg-before
 lib/Transforms/Utils/SSAUpdaterBulk.cpp 0.6  # AddVariable/AddAvailableValue/AddUse/RewriteAllUses; no RewriteAndOptimizeAllUses, EliminateNewDuplicatePHINodes
 lib/Transforms/Vectorize/LoopVectorizationLegality.cpp 0.85  # inner loops (lv_legality.goose); no outer loops, histograms, side-effect early exits
-lib/Transforms/Vectorize/LoopVectorize.cpp 0.45  # driver, hints, max VF, widening/uniform/scalar decisions, legacy cost model (no in-loop reduction / interleave-group costs, vector variants), precomputeCosts / cost / computeBestVF, selectInterleaveCount, plan building, addReductionResultComputation (plain reductions), processLoop tail, executePlan; no GeneratedRTChecks, epilogue vectorization, outer loops
-lib/Transforms/Vectorize/LoopVectorizationPlanner.cpp 0.5  # VFSelectionContext max-VF parts, masked/gather legality, isMoreProfitable; no minimal bitwidths, reg-pressure spill costs
+lib/Transforms/Vectorize/LoopVectorize.cpp 0.6  # driver, hints, max VF, widening/uniform/scalar decisions (incl. interleave groups), legacy cost model (minimal bitwidths, calls via intrinsics; no in-loop reduction costs, vector variants), precomputeCosts / cost / computeBestVF, selectInterleaveCount, plan building, addReductionResultComputation (plain reductions, header-mask blends), GeneratedRTChecks (lv_rtchecks.goose), processLoop tail, executePlan; no epilogue vectorization, outer loops
+lib/Transforms/Vectorize/LoopVectorizationPlanner.cpp 0.6  # VFSelectionContext max-VF parts, masked/gather legality, isMoreProfitable, computeMinimalBitwidths; no reg-pressure spill costs
 lib/Transforms/Vectorize/VPlan.cpp 0.55  # blocks, values, duplicate, VPBuilder, VPTransformState, VPlan::execute, dissolveToCFGLoop, loop metadata and profile, block / region / plan costs, VPCostContext; no printing
-lib/Transforms/Vectorize/VPlanConstruction.cpp 0.5  # PlainCFGBuilder, skeleton, header phis, loop regions, SCEV predicates, middle check; no tail folding, early exits, epilogue checks
-lib/Transforms/Vectorize/VPlanTransforms.cpp 0.3  # simplifyRecipes, optimize() subset, licm (with scoped-noalias checks), clearReductionWrapFlags, executePlan transforms (unroll prep, packs/broadcasts, materialization, cse, convertToConcreteRecipes); no predication, replicate regions, interleave groups, minimal bitwidths, EVL
-lib/Transforms/Vectorize/VPlanUtils.cpp 0.5  # matchers, getSCEVExprForVPValue, isUsedByLoadStoreAddress, VPSCEVExpander (no pointer adds)
-lib/Transforms/Vectorize/VPlanRecipes.cpp 0.4  # property queries, execute() of the ported recipes, computeCost() of every recipe but interleave / reduction / expression / histogram / EVL
-lib/Transforms/Vectorize/VPlanUnroll.cpp 0.65  # unrollByUF (no replicate regions, end pointers, in-loop reductions), replicateByVF
+lib/Transforms/Vectorize/VPlanConstruction.cpp 0.65  # PlainCFGBuilder (+ LoopVersioning noalias metadata), skeleton, header phis, loop regions, SCEV predicates, middle check, foldTailByMasking, attachCheckBlock, minimum iteration check; no early exits, epilogue checks
+lib/Transforms/Vectorize/VPlanTransforms.cpp 0.5  # simplifyRecipes (most folds), optimize(), licm, blends, replicate regions, hoist/sink predicated mem ops, interleave groups + narrowInterleaveGroups, replaceSymbolicStrides, truncateToMinimalBitwidths, simplifyReverses, materializeHeaderMask, executePlan transforms; no in-loop/partial reductions, FindIV, early exits, EVL, strided accesses
+lib/Transforms/Vectorize/VPlanUtils.cpp 0.6  # matchers, getSCEVExprForVPValue (incl. shl/lshr/and/not), isUsedByLoadStoreAddress, VPSCEVExpander (incl. pointer adds, min/max)
+lib/Transforms/Vectorize/VPlanRecipes.cpp 0.5  # property queries, execute() of the ported recipes (incl. interleave groups, widened intrinsics, end pointers, replicate-region recipes), computeCost() of every recipe but reduction / expression / histogram / EVL
+lib/Transforms/Vectorize/VPlanUnroll.cpp 0.85  # unrollByUF (incl. replicate regions, end pointers; no in-loop reductions), replicateByVF (incl. replicate-region dissolution)
 lib/Transforms/Vectorize/VPlanAnalysis.cpp 0.6  # VPTypeAnalysis, calculateRegisterUsageForPlan, collectEphemeralRecipesForVPlan; no spillCost
 lib/Analysis/DependenceAnalysis.cpp 0.95  # all of depends() and its tests, the printer; no legacy wrapper pass, debug dumps
 lib/Analysis/Delinearization.cpp 0.95  # all but the legacy printer wrapper
@@ -236,3 +236,5 @@ lib/Transforms/Scalar/LoopInterchange.cpp 0.97  # all but optimization remarks
 lib/Analysis/LoopCacheAnalysis.cpp 0.95  # all but the debug dumps / operator<< of IndexedReference
 lib/Passes/PassBuilderPipelines.cpp 0.55  # default<O0..O3> (per-module, inliner/MIWP, simplification, optimization, vector passes); not LTO/ThinLTO/FatLTO/PGO pipelines
 lib/Transforms/Instrumentation/ControlHeightReduction.cpp 0.02  # the no-profile-summary early exit only (pipelines.goose)
+
+lib/Transforms/Vectorize/VPlanPredicator.cpp 0.85  # VPPredicator, introduceMasksAndLinearize (vplan_predicate.goose); no switch edge masks

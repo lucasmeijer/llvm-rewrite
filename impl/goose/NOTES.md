@@ -1594,81 +1594,54 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
 
 - Files: iv_descriptors (RecurrenceDescriptor / InductionDescriptor), lv_legality (hints, legality, LAA glue),
   lv_interleave (InterleavedAccessInfo), lv_cm (widening / uniform / scalar decisions), lv_cost (the legacy
-  LoopVectorizationCostModel costs), lv_plan (tryToBuildVPlan1 / buildVPlans / tryToBuildVPlan, recipe builder,
+  LoopVectorizationCostModel costs, incl. interleave groups and minimal-bitwidth truncation), lv_minbw
+  (computeMinimumValueSizes + EquivalenceClasses), lv_rtchecks (GeneratedRTChecks, addDiffRuntimeChecks), lv_plan
+  (tryToBuildVPlan1 / buildVPlans / tryToBuildVPlan, recipe builder, call widening decisions, replaceSymbolicStrides,
   addReductionResultComputation), vplan / vplan_utils / vplan_props (data model, matchers, recipe queries),
-  vplan_construct, vplan_transforms, vplan_exec_transforms (incl. unrollByUF), vplan_execute, vplan_cost (recipe
-  costs, precomputeCosts, computeBestVF pieces, register usage, selectInterleaveCount, isOutsideLoopWorkProfitable),
-  lv_exec (processLoop tail, loop metadata + profile weights), lv_pass (driver, computeMaxVF, plan()/computeBestVF).
-- Milestone 1 (legality, no-vectorize decisions): done. A loop whose MaxVF is none or 1 (and no forced IC) is decided
-  without building VPlans: computeBestVF then returns the scalar VF and selectInterleaveCount 1.
-- Milestone 2 (VPlan construction, executePlan): straight-line inner loops with int/fp inductions, consecutive loads /
-  stores, uniform and scalarized (replicated) accesses, widened arithmetic / compares / selects / casts / GEPs.
-- Milestone 3 (cost model): legacy getInstructionCost (all opcodes; calls via intrinsic costs), expectedCost,
-  setCostBasedWideningDecision with gather/scatter / scalarization costs, collectInstsToScalarize; VPlan recipe
-  costs; computeBestVF, isMoreProfitable, willGenerateVectors, hasReplicatorRegion under optsize;
-  selectInterleaveCount with calculateRegisterUsageForPlan; isOutsideLoopWorkProfitable (no runtime checks).
-  Costs are fixed point (InstructionCost's CostGranularity 4, lv_cost.goose's lc_* helpers).
-- Milestone 4 (partly): out-of-loop reductions (add/sub/mul/and/or/xor, int min/max, fast fadd/fmul),
-  interleaving (unrollByUF incl. widened inductions with WideIVStep, unrolled reduction phis), scalar interleaving
-  (VF 1, IC > 1), the loop profile (estimated trip counts / branch weights of vector and remainder loops).
-- Verification: `GOOSE_LV_DEBUG=1 bin/opt ...` prints the `-debug-only=loop-vectorize` decision and cost lines
-  (`LV: Scalar loop costs`, `Cost for VF`, `LV: Selecting VF`, `LV: Loop cost is`, `LV: IC is`, the per-recipe and
-  per-instruction `Cost of` lines with their costs). Compare with
-  `GOOSE_LV_DEBUG=1 JAI_OPT=impl/goose/bin/opt python3 impl/jai/tools/lv_cost_compare.py -l LIST` (the assert opt is
-  /persistent/llvm-rewrite/llvm-23.1.5-assert/bin/opt). The -O2 inputs of loop-vectorize: `impl/jai/tools/o2_lv_inputs.py`
-  (collect into a directory, then `--compare DIR impl/goose/bin/opt`): 808 of 919 identical, 0 differ (2026-11-13).
-- Next steps (each fails loudly today, rough -O2 / imported-test counts in parentheses):
-  1. interleave groups: getInterleaveGroupCost, VPInterleaveRecipe (22 / 19);
-  2. runtime memory checks: GeneratedRTChecks, LoopVersioning noalias metadata, memcheck blocks (18 / 58);
-  3. calls: makeCallWideningDecisions, VFDatabase variants (12 / 18);
-  4. tail folding by masking and if-conversion (VPPredicator, blends, replicate regions) (18 / 89);
-  5. computeMinimumValueSizes + truncateToMinimalBitwidths past the early exit (5 / 37, mostly NoTTI tests);
-  6. epilogue vectorization (selectBestEpiloguePlan) (2 / 28);
-  7. AnyOf / FindIV / FindLast / in-loop / ordered reductions, fixed-order recurrences, pointer inductions;
-  8. uncountable early exits, outer loops, scalable VFs.
+  vplan_construct, vplan_predicate (VPPredicator, foldTailByMasking, blends, replicate regions, hoist/sink of
+  predicated memory ops, header masks), vplan_interleave (createInterleaveGroups, VPInterleaveRecipe,
+  narrowInterleaveGroups), vplan_transforms, vplan_exec_transforms (unrollByUF incl. replicate regions,
+  replicateByVF incl. region dissolution, convertToConcreteRecipes), vplan_execute, vplan_cost (recipe costs,
+  precomputeCosts, computeBestVF pieces, register usage, selectInterleaveCount, isOutsideLoopWorkProfitable), lv_exec
+  (processLoop tail, attachRuntimeChecks, loop metadata + profile weights), lv_pass (driver, computeMaxVF,
+  plan()/computeBestVF).
+- Done: legality; VPlan construction/execution of straight-line and if-converted inner loops; the legacy and VPlan
+  cost models; plain out-of-loop reductions (incl. through header-mask blends); interleaving and scalar interleaving;
+  interleave groups (no masks, no reverse groups) and narrowInterleaveGroups; runtime memory checks (diff checks,
+  pointer-bound checks with hoisting, LoopVersioning noalias metadata) and SCEV predicate checks; widened intrinsic
+  calls; symbolic strides; tail folding by masking (DataWithoutLaneMask) and predication with replicate regions;
+  reverse accesses; minimal bitwidths; scalarized pointer inductions.
+- Verification: `GOOSE_LV_DEBUG=1 bin/opt ...` prints the `-debug-only=loop-vectorize` decision and cost lines.
+  Compare with `OURS_OPT=impl/goose/bin/opt scripts/lv_cost_compare.py -l LIST` (the assert opt is
+  /persistent/llvm-rewrite/llvm-23.1.5-assert/bin/opt). The -O2 inputs of loop-vectorize: `scripts/o2_lv_inputs.py`
+  (collect into a directory, then `--compare DIR impl/goose/bin/opt`): 887 of 919 identical, 0 differ (2026-11-13);
+  imported LoopVectorize `::opt` 192 of 468.
+- Next steps (each fails loudly today; rough -O2 / imported-test counts in parentheses):
+  1. epilogue vectorization: selectBestEpiloguePlan (ProfitableVFs), preparePlanForMain/EpilogueVectorLoop,
+     addMinimumVectorEpilogueIterationCheck, EpilogueVectorizerEpilogueLoop skeleton, connectEpilogueVectorLoop
+     (15 / 29 + 9 forced-VF);
+  2. uncountable early exits (10 / 3);
+  3. vector-library variants (VFDatabase, findVectorVariant; legality fails loudly on mappings) (0 / 8);
+  4. AnyOf / FindIV / FindLast / in-loop / ordered reductions, fixed-order recurrences, stores of reductions to
+     invariant addresses (3 / 45);
+  5. optimizeVectorInductionWidthForTCAndVFUF (2 / 12), a new wide IV for the wide canonical IV (needs the spill
+     cost of calculateRegisterUsageForPlan) (0 / 13), masked interleave groups and masked/gathered memory recipes,
+     active lane masks, widened pointer inductions, switches, outer loops, scalable VFs.
 - Speed: no `@perf` line times loop-vectorize. On the 919 -O2 loop-vectorize inputs (one process each), goose takes
-  1.4 s user against LLVM's 4.0 s (sys time dominates both: process start-up); no scaling problem seen.
+  about a third of LLVM's user time (process start-up dominates both); no scaling problem seen.
 - Debug builds (`goose build --debug --stack-reserve 2G --cc /opt/llvm-23.1.5/bin/clang`, ~1 min instead of ~4.5 min)
   catch `as` range errors that release builds wrap. Build into /tmp, copy to bin/opt and sweep with `--no-build`;
   remove bin/opt before the real check so build.sh rebuilds the release binary.
-- Goose traps: `vpr[f()]` where f() pushes into vpr evaluates the array before the call (index out of bounds); bind
-  the id first. A `recursive fn` cycle may not call back while a growable local is in scope (vpc_region_cost
-  iterates the loop region's blocks itself instead of recursing). Mutual imports work (lv_cm <-> lv_cost).
+- Goose traps: `vpr[f()]` (or `lec_val[f(g())]`) where f() pushes into the indexed table evaluates the array before the
+  call (index out of bounds); bind the id first. A `recursive fn` cycle may not call back while a growable local is in
+  scope: pass runs of a global scratch stack instead (vig_stk in vplan_interleave.goose). Mutual imports work (lv_cm <->
+  lv_cost, lv_plan <-> vplan_interleave). Phi incoming blocks are not operands: replacing a block's uses
+  (BasicBlock::replaceAllUsesWith) needs `block_replace_phi_uses_with` on its successors too (lv_rtchecks).
+- One SCEVExpander at a time: GeneratedRTChecks' two expanders (SCEVExp, MemCheckExp) run one after the other; each
+  phase snapshots the inserted instructions and original poison flags for the destructor's cleanup.
 - IRBuilder::SetInsertPoint(Instruction) also takes the instruction's debug location: VPIRBasicBlock::execute sets
-  vxb_dl from the IR block's terminator, which the next created block's `unreachable` (and so its branch) inherits.
-
-## Default pipelines (L2.pipeline-O2: pipelines.goose, expand_memcmp.goose; DESIGN §9)
-
-- `-O0`..`-O3` / `default<On>` build LLVM's pipelines as PNode trees; `opt -passes='default<O2>' -goose-print-pipeline`
-  must equal `opt -print-pipeline-passes` (checked for O0..O3 and with the PassBuilderPipelines cl::opts; diff it
-  after changing pipelines.goose). Non-default cl::opts that add passes we don't build fail loudly
-  (pb_check_cl_opts). LTO / ThinLTO / FatLTO pipelines are still "not implemented yet".
-- Debugging a mismatch: `tools/obisect.py FILE -- -O2 [flags]` bisects any opt arguments (not only a test's @opt
-  line) against LLVM and leaves the input of the first diverging pass in /tmp/obisect/llvm.before.ll; rerun that pass
-  standalone on it. Every divergence found so far reproduced standalone (no pass-manager state bug left), except the
-  first two below. Comparing with vectorizers off on both sides (`-vectorize-slp=false -vectorize-loops=false
-  -interleave-loops=false`) separates vectorizer blockers from the rest.
-- Pipeline-state fixes: GlobalsAA is no longer dropped after IR-changing module/CGSCC passes; the CGSCC->function
-  adaptor checks the *accumulated* PA for LazyCallGraphAnalysis (one non-preserving pass makes every later function
-  update the call graph); RecomputeGlobalsAA keeps UnknownFunctionsWithLocalLinkage (no move constructor);
-  ShouldNotRunFunctionPasses / no-rerun / eager-inv adaptors; ExtraLoopPassManager marker.
-- Pass bugs found by -O2 bisects (each reproduced standalone, all in shared code): GlobalsAA isDefinitionExact ignored
-  noipa; removeDeadConstantUsers destroyed BlockAddresses (LLVM 23's BlockAddress has no operands, so it is never a
-  constant user of its function); the inliner's CloneAndPrune PHI trimming must be removeIncomingValueIf (backwards,
-  last entry into the hole); AddReturnAttributes' throw window scanned one instruction too many; foldSelectCmpXchg
-  compared an FP constant's width wrongly; ConstantFPRange infinity for x86_fp80 (exponent above the 64-bit
-  significand). Loud blockers ported: isSafeToSpeculateStore from a load, SoleWriteToDeadLocal, atomicrmw,
-  foldVec(Ext)TruncToExtElt, AliasScopeTracker, isIdenticalTo, DemandedBits on APInts (wide values are stored as IR
-  constants, the cache outlives the APInt pool), strdup getAllocSize, computePointerICmp's capture tracker,
-  OptimizePointerDifference, CondContext in phi recursions, stripAndAccumulateConstantOffsets through inttoptr,
-  ComputeNumSignBits of clamps, ExpandMemCmp, CGProfile, Negator vector ops, EH/cmpxchg/indirectbr (no visitors).
-- Speed, `-O2` with vectorizers off, user+sys s goose vs LLVM (peak RSS): SPASS 6.8 vs 4.6 (431 vs 95 MB), lua 1.6
-  vs 1.3, oggenc 1.7 vs 1.3, sqlite3 4.2 vs 3.0 (264 vs 78 MB). `perf` on tests/perf/scaling: every `opt -O2` row
-  passes; 0.3x-4x LLVM, worst scaling/switch (n32000 3.98x, k 1.45 vs LLVM 1.17; simplifycfg alone k 1.59 vs 1.16:
-  a superlinear SimplifyCFG path on big switches, not profiled yet) and calls (2.1x, the inliner's cost walk).
-- Remaining phase-ordering failures outside the vectorizers: LTO/ThinLTO pipelines (6), -enable-merge-functions (3),
-  expand-reductions, SimplifyCFG conditional-faulting hoists (APX cf), isImpliedCondition with vector logical
-  and/or, ptrauth protected.field.ptr, -pgo-kind options.
+  vxb_dl from the IR block's terminator, and VPIRInstruction::execute from the next instruction (SetInsertPoint(BB,
+  IP) takes IP's location), which the next created block's `unreachable` (and so its branch) inherits.
 
 ## Small passes of default<O2>, FunctionSpecialization, MergeICmps (misc_passes.goose and friends)
 

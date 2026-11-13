@@ -251,7 +251,7 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - Debugging: `-debug-only=loop-vectorize` of the assertions opt prints "LV: Scalar loop costs", every recipe's
   "Cost of C for VF V", "Cost for VF V: C (Estimated cost per lane ...)", "LV: Selecting VF", "LV: IC is". The jai port
   prints the same lines with `JAI_LV_DEBUG=1`, the goose port with `GOOSE_LV_DEBUG=1`;
-  `impl/jai/tools/lv_cost_compare.py` diffs them (`JAI_OPT=impl/goose/bin/opt` for goose).
+  `scripts/lv_cost_compare.py` diffs them (`OURS_OPT=impl/<lang>/bin/opt`; also in impl/jai/tools).
 - **Epilogue vectorization** (verified by the X86 LoopVectorize tests with AVX/AVX-512, where VF * IC >= 16 makes
   `isEpilogueVectorizationProfitable` true): the epilogue plan is a `duplicate()` of the plan for the chosen VF
   (`ProfitableVFs` from computeBestVF, skipping VFs > the main VF or > the remaining iterations), and both plans run
@@ -334,3 +334,26 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - `ExtraBitWidthNodes` is a `DenseSet<unsigned>`; computeMinimumValueSizes takes `*begin()`, i.e. bucket order
   (hash `k * 37`, quadratic probing, at least 64 buckets), and the set lives as long as BoUpSLP (one function).
 - `getExtractWithExtendCost` is 1 without a target (TargetTransformInfoImplBase), extract + cast on X86 (BasicTTIImpl).
+- X86 `enableInterleavedAccessVectorization()` is `!isAtom()`: with `-mcpu=atom` no interleave groups are formed
+  (LoopVectorize/X86/interleaving.ll's atom run scalarizes the strided loads).
+- `optimizeInductionLiveOutUsers` creates every induction end value with one `VPBuilder(VectorPH, VectorPH->begin())`:
+  they appear in header-phi order before the preheader's first recipe (X86/consecutive-ptr-cg-bug.ll).
+- `narrowInterleaveGroups` compares `GroupElementTy->getScalarSizeInBits() * VF` with the fixed-width register size;
+  for pointers getScalarSizeInBits is 0, so groups of pointers are never narrowed. It runs before costing, so the
+  narrowed plan (VF-wide full groups become plain wide loads/stores, VF 1, step UF) is what computeBestVF costs
+  (an -O2 sweep found the difference: InstCombine/assume-redundant.ll's loop).
+- `simplifyRecipe` folds `mul x, 2^k` to `shl` and `udiv x, 2^k` to `lshr` only for recipes without an underlying
+  value (`CanCreateNewRecipe`), keeping nsw only when k != bitwidth - 1.
+- `VPIRInstruction::execute` is `SetInsertPoint(BB, next(I))`, which also sets the builder's debug location to the
+  next instruction's: after the plan entry's last VPIRInstruction it is the entry terminator's, which vector.ph's
+  `br` then carries (LoopVectorize/i8-induction.ll with debugify).
+- `hoistPredicatedLoads` / `sinkPredicatedStores` run before `optimize` on every plan; with predication they turn
+  complementary-masked accesses of one address SCEV into one unpredicated replicate (SimplifyCFG/X86/
+  combine-parallel-mem-md.ll vectorizes only because of it).
+- Replicate recipes carry `computeScalarType(I, Operands)`: after truncateToMinimalBitwidths a single-scalar select
+  can produce `i16` from an `i32` select, and `VPReplicateRecipe::execute` mutates the clone's type
+  (LoopVectorize/single-scalar-cast-minbw.ll).
+- Tail folding at -O2 is mostly unrolled remainder loops (`epil`) whose trip count is below the unroll factor:
+  `CM_EpilogueNotAllowedLowTripLoop` makes the planner fold the tail, the stores become predicated replicates in
+  `pred.store` regions on SSE (no masked stores), and the cost model then rejects vectorization. Getting these right
+  needs the whole predication / replicate-region / header-mask path, even though nothing is emitted.

@@ -860,4 +860,13 @@ one set of module globals for the loop being vectorized, reset when `processLoop
 - Recursion: the plan walks (RPO, dominator tree over VP blocks, region nesting) use explicit stacks; the only
   `recursive fn`s are the mutually recursive VPTransformState getters, isConditionTrueViaVFAndUF, the legacy
   getInstructionCost (forced scalars recurse once with VF 1) and calls into SCEV / the TTI.
+- Region values: the canonical IV and the abstract header mask are `VVK_REGION` values whose `region` is the loop
+  region (`vpb.can_iv`, `vpb.header_mask`); `vp_is_header_mask` is m_HeaderMask.
+- Interleave groups are rows of `iai_groups` (lv_interleave.goose); a VPInterleaveRecipe stores the group id in
+  `vpr.ig`, NeedsMaskForGaps in `vpr.gaps`, HasMask in `vpr.masked`.
+- Analyses outside VPlan that the transforms consult are globals too: MinBWs (`lmb_map`, lv_minbw.goose), the
+  runtime-check blocks of GeneratedRTChecks (`lrt_*`, lv_rtchecks.goose), the predicator's block / edge masks
+  (`vpp_*`, vplan_predicate.goose, reset per call).
+- Recursion over operand trees that must collect operand lists (narrowInterleaveGroups) passes runs of a global
+  scratch stack (`vig_stk`) instead of growable locals, which a `recursive fn` cycle may not hold across calls.
 - Unported paths fail loudly with `loop-vectorize: <what> is not supported yet` at the point where LLVM would act.
