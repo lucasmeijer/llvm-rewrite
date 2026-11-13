@@ -287,7 +287,7 @@ def oracle_analysis(t: TestFile, args: str, unordered: bool) -> dict:
 # ::error: LLVM's tools name themselves by argv[0] ("/opt/llvm-23.1.5/bin/opt: x.ll: error: input module is broken!"),
 # an implementation by its own path or plain "opt"; and report_fatal_error ends in abort() with a backtrace whose
 # addresses change from run to run. Both sides are compared after these two normalizations only.
-TOOL_PREFIX = re.compile(r"^(?:\S*/)?opt: ", re.M)
+TOOL_PREFIX = re.compile(r"(?<![\w/])(?:[\w./-]*/)?opt: ")  # also mid-line (after a type printed without '\n')
 CRASH_TAIL = re.compile(r"^(PLEASE submit a bug report|Stack dump:)", re.M)
 
 
@@ -308,13 +308,16 @@ def oracle_error(t: TestFile, args: str) -> dict:
             return {"ok": False, "text": "llvm opt succeeds (an @error line must fail):\n" + r.err_tail()}
         if r.timed_out:
             return {"ok": False, "text": r.err_tail()}
-        errs = [error_canon(x.err.decode(errors="replace")) for x in runs]
+        raw = [x.err.decode(errors="replace") for x in runs]
+        errs = [error_canon(x) for x in raw]
         if errs[0] != errs[1]:
             return {"ok": False, "text": "stderr is nondeterministic (differs between two runs of LLVM's opt):\n"
                     + diff(errs[0], errs[1], 20)}
-        return {"ok": True, "stderr": errs[0]}
+        return {"ok": True, "raw": raw[0]}
 
-    return proc.cached(["error", t.path, read(t.path), args], compute)
+    r = proc.cached(["error-v2", t.path, read(t.path), args], compute)
+    # the normalization is applied after the cache, so changing it needs no cache wipe
+    return {**r, "stderr": error_canon(r["raw"])} if r["ok"] else r
 
 
 def oracle_isel(input_text: str, llc_args: str) -> dict:
