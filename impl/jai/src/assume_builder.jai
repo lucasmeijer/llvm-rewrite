@@ -14,6 +14,8 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     if !knowledge_retention.enabled return;
     if kind == .DSE || kind == .EARLY_CSE || kind == .SCCP || kind == .IPSCCP || kind == .REQUIRE || kind == .INVALIDATE || kind == .NO_OP_FUNCTION || kind == .NO_OP_MODULE ||
        kind == .MODULE_PM || kind == .FUNCTION_ADAPTOR || kind == .VERIFY_MEMORYSSA || kind == .PRINT_MEMORYSSA return;
+    // DCE.cpp and LICM.cpp call salvageKnowledge(I) (no AC); the loop adaptor, LoopRotate and InstCombine never do
+    if kind == .DCE || kind == .LICM || kind == .LOOP_ADAPTOR || kind == .LOOP_ROTATE || kind == .INSTCOMBINE || kind == .LOOP_SIMPLIFY || kind == .LCSSA return;
     // IPO passes that never call salvageKnowledge (GlobalOpt.cpp, GlobalDCE.cpp, ConstantMerge.cpp, ...)
     if kind == .GLOBAL_OPT || kind == .GLOBAL_DCE || kind == .CONSTANT_MERGE || kind == .STRIP_DEAD_PROTOTYPES ||
        kind == .ELIM_AVAIL_EXTERN || kind == .INTERNALIZE || kind == .DEAD_ARG_ELIM || kind == .ASSIGN_GUID || kind == .ARG_PROMOTION return;

@@ -94,14 +94,21 @@ ic_visit_fmul :: (i: Value_Id) -> Value_Id {
     v = ic_simplify_selects_feeding_binop(i, op0, op1);
     if v != NONE return ic_replace_inst_uses_with(i, v);
     if has_fmf(i, FMF_REASSOC) { rr := ic_fold_fmul_reassoc(i); if rr != NONE return rr; }
+    // log2(X * 0.5) * Y = log2(X) * Y - Y
     if (get_fmf(i) & FMF_ALL) == FMF_ALL {
+        found := false; lx: Value_Id = NONE; ly: Value_Id = NONE;
         for side: 0..1 {
             l := op(i, cast(u32) side);
-            if call_iid(l) == IID_LOG2 && has_one_use(l) {
+            if is_inst(l) && call_iid(l) == IID_LOG2 && has_one_use(l) {
                 m := op(l, 0);
                 okm, mx, half := pm_fbin(m, .FMUL);
-                if okm && has_one_use(m) && pm_specific_fp(half, 0.5) fatal("instcombine: log2(X * 0.5) * Y is not supported yet");
+                if okm && has_one_use(m) && pm_specific_fp(half, 0.5) { found = true; lx = mx; ly = op(i, cast(u32) (1 - side)); }
             }
+        }
+        if found {
+            lg := icb_unary_intrinsic(IID_LOG2, lx, "", i);
+            lxy := icb_fmul_fmf(lg, ly, i);
+            return create_fop(.FSUB, lxy, ly, i);
         }
     }
     {
@@ -238,14 +245,9 @@ ic_visit_fdiv :: (i: Value_Id) -> Value_Id {
     op0 := op(i, 0); op1 := op(i, 1);
     ty := vtype(i);
     // isFSqrtDivToFMulLegal / convertFSqrtDivIntoFMul
-    if (pm_fp_one(op0) || pm_specific_fp(op0, -1.0)) && call_iid(op1) == IID_SQRT {
-        a := op(op1, 0);
-        has_r1 := false; has_r2 := false;
-        u := ir.v_first_use[i];
-        while u != NONE { us := ir.u_user[u]; ok, m0, m1 := pm_fbin(us, .FMUL); if ok && m0 == i && m1 == i has_r1 = true; u = ir.u_next[u]; }
-        u = ir.v_first_use[op1];
-        while u != NONE { us := ir.u_user[u]; ok, d0, d1 := pm_fbin(us, .FDIV); if ok && d0 == a && d1 == op1 has_r2 = true; u = ir.u_next[u]; }
-        if has_r1 && has_r2 fatal("instcombine: convertFSqrtDivIntoFMul is not supported yet");
+    if (pm_fp_one(op0) || pm_specific_fp(op0, -1.0)) && is_inst(op1) && call_iid(op1) == IID_SQRT {
+        r := ic_fsqrt_div_into_fmul(i, op1);
+        if r != NONE return r;
     }
     if is_const(op0) && is_inst(op1) && inst_op(op1) == .SELECT { rr := ic_fold_op_into_select(i, op1); if rr != NONE return rr; }
     if is_const(op1) && is_inst(op0) && inst_op(op0) == .SELECT { rr := ic_fold_op_into_select(i, op0); if rr != NONE return rr; }
@@ -509,4 +511,70 @@ ic_fold_powi_reassoc :: (i: Value_Id) -> Value_Id {
         }
     }
     return NONE;
+}
+
+// getFSqrtDivOptPattern + isFSqrtDivToFMulLegal + convertFSqrtDivIntoFMul (InstCombineMulDivRem.cpp):
+//   x = 1.0/sqrt(a); r1 = x * x; r2 = a/sqrt(a)  -->  r1 = 1/a; r2 = sqrt(a); x = r1 * r2
+// R1 and R2 are SmallPtrSet<Instruction *, 2>: insertion order while small; a third element switches to pointer-hash
+// order, which fails loudly.
+ic_fsqrt_div_into_fmul :: (x: Value_Id, ci: Value_Id) -> Value_Id {
+    a := op(ci, 0);
+    r1: [..] Value_Id; r1.allocator = temp;
+    r2: [..] Value_Id; r2.allocator = temp;
+    u := ir.v_first_use[x];
+    while u != NONE {
+        us := ir.u_user[u];
+        ok, m0, m1 := pm_fbin(us, .FMUL);
+        if ok && m0 == x && m1 == x array_add_if_unique(*r1, us);
+        u = ir.u_next[u];
+    }
+    u = ir.v_first_use[ci];
+    while u != NONE {
+        us := ir.u_user[u];
+        ok, d0, d1 := pm_fbin(us, .FDIV);
+        if ok && d0 == a && is_inst(d1) && call_iid(d1) == IID_SQRT && op(d1, 0) == a array_add_if_unique(*r2, us);
+        u = ir.u_next[u];
+    }
+    if r1.count == 0 || r2.count == 0 return NONE;
+    if r1.count > 2 || r2.count > 2 fatal("instcombine: convertFSqrtDivIntoFMul with more than two r1/r2 instructions (SmallPtrSet iteration order) is not supported yet");
+    bbx := inst_block(x); bbr1 := inst_block(r1[0]); bbr2 := inst_block(r2[0]);
+    need :: FMF_REASSOC | FMF_NNAN | FMF_NSZ | FMF_NINF;
+    if (get_fmf(ci) & need) != need return NONE;
+    if !has_fmf(x, FMF_REASSOC) || !has_fmf(x, FMF_ARCP) || !has_fmf(x, FMF_NINF) return NONE;
+    if bbx != bbr1 && bbx != bbr2 return NONE;
+    for r1 if inst_block(it) != bbr1 || !has_fmf(it, FMF_REASSOC) return NONE;
+    for r2 if inst_block(it) != bbr2 || !has_fmf(it, FMF_REASSOC) return NONE;
+
+    icb_set_insert_point(x);
+    fpmath := md_kind_id("fpmath");
+    saved := ic.b_fmf; ic.b_fmf = 0; defer ic.b_fmf = saved;
+    fdiv := icb_binop(.FDIV, lcs_const_fp_f64(vtype(x), 1.0), a);
+    r1md := get_metadata(r1[0], fpmath);
+    r1fmf := get_fmf(r1[0]);
+    for r1 {
+        r1md = md_most_generic_fpmath(r1md, get_metadata(it, fpmath));
+        r1fmf &= get_fmf(it);
+        ic_replace_inst_uses_with(it, fdiv);
+        ic_erase_inst(it);
+    }
+    set_metadata(fdiv, fpmath, r1md);
+    set_fmf(fdiv, r1fmf);
+    fsqrt := ic_clone_inst(ci);
+    ic_link_before(fsqrt, ci);
+    r2md := get_metadata(r2[0], fpmath);
+    r2fmf := get_fmf(r2[0]);
+    for r2 {
+        r2md = md_most_generic_fpmath(r2md, get_metadata(it, fpmath));
+        r2fmf &= get_fmf(it);
+        ic_replace_inst_uses_with(it, fsqrt);
+        ic_erase_inst(it);
+    }
+    set_metadata(fsqrt, fpmath, r2md);
+    set_fmf(fsqrt, r2fmf);
+    fmul: Value_Id;
+    if pm_specific_fp(op(x, 0), -1.0) fmul = icb_fneg(icb_binop(.FMUL, fdiv, fsqrt));
+    else fmul = icb_binop(.FMUL, fdiv, fsqrt);
+    copy_metadata(fmul, x);
+    set_fmf(fmul, fmf_intersect_rewrite(r1fmf, r2fmf) | fmf_union_value(r1fmf, r2fmf));
+    return ic_replace_inst_uses_with(x, fmul);
 }

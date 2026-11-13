@@ -1370,7 +1370,7 @@ collect_ephemeral_values_fn :: (f: Value_Id, ac: *Assumption_Cache, eph: *Table(
             if is_inst(o) && !may_have_side_effects(o) && !is_terminator(inst_op(o)) array_add(work, o);
         }
     }
-    for a: ac.assumes {
+    for a: ac_assumptions(ac).* {
         if vkind(a) != .INST continue;
         if table_contains(eph, a) continue;
         table_set(eph, a, true);

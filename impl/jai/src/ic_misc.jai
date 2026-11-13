@@ -357,7 +357,15 @@ ic_visit_cond_br :: (i: Value_Id) -> Value_Id {
             if okn2 {
                 notx := icb_not(lx, tprint("not.%", vname(lx)));
                 or := icb_select(notx, get_true(vtype(notx)), y);
-                if is_inst(or) && get_metadata(cond, md_kind_id("prof")) != NONE fatal("instcombine: branch weights of a canonicalized logical and are not supported yet");
+                // set weights for the new OR select too (swapped)
+                if is_inst(or) && is_inst(cond) {
+                    okw, w := extract_branch_weights_any(cond);
+                    if okw {
+                        assert(w.count == 2, "Unexpected number of branch weights!");
+                        sw := u32.[w[1], w[0]];
+                        set_branch_weights(or, sw);
+                    }
+                }
                 swap_successors(i);
                 return ic_replace_operand(i, 0, or);
             }

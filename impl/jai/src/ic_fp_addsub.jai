@@ -171,7 +171,15 @@ ic_hoist_fneg_above_fmul_fdiv :: (fnop: Value_Id, src: Value_Id) -> Value_Id {
         if is_inst(fd) copy_metadata(fd, fnop);
         return fd;
     }
-    if call_iid(fnop) == IID_LDEXP fatal("instcombine: hoisting fneg above llvm.ldexp is not supported yet");
+    if is_inst(fnop) && call_iid(fnop) == IID_LDEXP {
+        // preserve flags and metadata on the call
+        fmf := get_fmf(src) | get_fmf(fnop);
+        neg := icb_fneg_fmf(call_arg(fnop, 0), fmf);
+        nc := icb_call_fn(call_called_function(fnop), .[neg, call_arg(fnop, 1)]);
+        set_fmf(nc, fmf);
+        copy_metadata(nc, fnop);
+        return nc;
+    }
     return NONE;
 }
 
@@ -230,7 +238,9 @@ ic_visit_fneg :: (i: Value_Id) -> Value_Id {
     }
     oksh, sx, sp, mask := pm_shuffle(o);
     if oksh && pm_poison(sp) return create_shuffle(icb_fneg(sx, "", i), NONE, mask);
-    if call_iid(o) == IID_VECTOR_REVERSE fatal("instcombine: fneg of llvm.vector.reverse is not supported yet");
+    // fneg (reverse x) --> reverse (fneg x)
+    if is_inst(o) && call_iid(o) == IID_VECTOR_REVERSE
+        return ic_replace_inst_uses_with(i, icb_vector_reverse(icb_fneg(call_arg(o, 0), "", i)));
     return NONE;
 }
 
@@ -463,7 +473,12 @@ ic_visit_fadd :: (i: Value_Id) -> Value_Id {
             okr, st, x := pm_intrinsic2(lhs, IID_VECTOR_REDUCE_FADD);
             oksc, sc := pm_apfloat(st);
             okc, c := pm_apfloat(rhs);
-            if okr && has_one_use(lhs) && oksc && okc fatal("instcombine: fadd of a reduction start constant (APFloat add) is not supported yet");
+            if okr && has_one_use(lhs) && oksc && okc {
+                // fadd (rdx StartC, X), C --> rdx (C + StartC), X
+                sum := fp_add_sub(c.k, c.w, sc.w, false);
+                nsc := const_fp_words(vtype(i), sum);
+                return ic_replace_inst_uses_with(i, icb_intrinsic(IID_VECTOR_REDUCE_FADD, .[vtype(x)], .[nsc, x], "", i));
+            }
         }
         for side: 0..1 {
             m := op(i, cast(u32) side); x := op(i, cast(u32) (1 - side));

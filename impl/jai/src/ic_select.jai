@@ -2797,7 +2797,7 @@ ic_visit_select :: (si: Value_Id) -> Value_Id {
         }
     }
     r = ic_fold_vector_select(si); if r != NONE return r;
-    if !is_vector_type(vtype(cond_val)) && ic.ac && ic.ac.assumes.count > 0 {
+    if !is_vector_type(vtype(cond_val)) && ic.ac && ac_assumptions(ic.ac).count > 0 {
         k := ic_known_bits(cond_val, si);
         if ap_is_one(k.one) return ic_replace_inst_uses_with(si, true_val);
         if ap_is_one(k.zero) return ic_replace_inst_uses_with(si, false_val);

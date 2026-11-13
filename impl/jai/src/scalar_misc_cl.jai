@@ -34,6 +34,8 @@ scalar_misc_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
         case "instcombine-code-sinking"; opts.instcombine_code_sinking = smisc_bool(name, value, has_value);
         case "instcombine-simplify-vector-elts-depth"; ic_simplify_demanded_vector_elts_depth_limit = cast(u32) smisc_int(name, value, has_value);
         case "instcombine-verify-known-bits"; ic_verify_known_bits = smisc_bool(name, value, has_value);
+        case "denormal-fp-math"; denormal_fp_math_cl = parse_denormal_mode_kind(name, value);
+        case "denormal-fp-math-f32"; denormal_fp32_math_cl = parse_denormal_mode_kind(name, value);
         case "relocation-model";
             if value == {
                 case "static"; reloc_model_cl.model = RELOC_STATIC;

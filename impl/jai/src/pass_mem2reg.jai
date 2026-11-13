@@ -308,7 +308,7 @@ add_assume_non_null :: (li: Value_Id) {
     set_op(ci, 0, c); set_op(ci, 1, assume);
     inst_insert_after(ci, c);
     // AC->registerAssumption
-    if m2r_cur_ac { array_add(*m2r_cur_ac.assumes, ci); ac_update_affected_values(m2r_cur_ac, ci); }
+    if m2r_cur_ac ac_register_assumption(m2r_cur_ac, ci);
 }
 
 convert_metadata_to_assumes :: (li: Value_Id, val: Value_Id) {

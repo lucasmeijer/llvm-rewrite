@@ -1027,13 +1027,12 @@ icb_or_list :: (ops: [] Value_Id) -> Value_Id {
     return accum;
 }
 // shouldOptimizeForSize(BB, PSI, BFI, PGSOQueryType::IRPass)
+// (InstCombinePass::run takes PSI = MAM.getCachedResult<ProfileSummaryAnalysis> and BFI when PSI has a summary:
+// lcs_psi / lcs_bfi, set by ic_combine_function)
+lcs_psi: *Psi;
+lcs_bfi: *Bfi;
 lcs_should_optimize_for_size :: (bb: Value_Id) -> bool {
-    f := block_fn(bb);
-    if fn_has_opt_size(f) return true;
-    psi_check("instcombine (LibCallSimplifier)");
-    // PSI is MAM.getCachedResult<ProfileSummaryAnalysis>: only present after require<profile-summary>; without a
-    // module profile summary shouldOptimizeForSizeImpl is false (psi_check fails loudly in the other case)
-    return false;
+    return should_optimize_for_size_bb(bb, lcs_psi, lcs_bfi);
 }
 
 // optimizeMemCmpVarSize(CI, LHS, RHS, Size, StrNCmp, B, DL)

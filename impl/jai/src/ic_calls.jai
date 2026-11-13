@@ -1588,7 +1588,7 @@ ic_visit_intrinsic_switch :: (ii: Value_Id, iid: Intrinsic_Id) -> Ic_Switch_Resu
     case IID_LDEXP;
         return ic_visit_ldexp(ii);
     case IID_PTRAUTH_AUTH; #through; case IID_PTRAUTH_RESIGN;
-        fatal("instcombine: ptrauth intrinsics are not supported yet");
+        return ic_visit_ptrauth_auth(ii);
     case IID_STACKRESTORE;
         return ic_visit_stackrestore(ii);
     case IID_LIFETIME_END;
@@ -1623,7 +1623,20 @@ ic_visit_intrinsic_switch :: (ii: Value_Id, iid: Intrinsic_Id) -> Ic_Switch_Resu
     case IID_VECTOR_EXTRACT;
         return ic_visit_vector_extract(ii);
     case IID_EXPERIMENTAL_VP_REVERSE;
-        fatal("instcombine: llvm.experimental.vp.reverse is not supported yet");
+        vec := call_arg(ii, 0);
+        evl := call_arg(ii, 2);
+        // rev(unop rev(X)) --> unop X
+        if pm_all_ones(call_arg(ii, 1)) && is_inst(vec) && inst_op(vec) == .FNEG && has_one_use(vec) {
+            inner := op(vec, 0);
+            if is_inst(inner) && call_iid(inner) == IID_EXPERIMENTAL_VP_REVERSE && pm_all_ones(call_arg(inner, 1)) && call_arg(inner, 2) == evl {
+                nu := new_inst(.FNEG, vtype(vec), 1);   // UnaryOperator::CreateWithCopiedFlags(.., II->getIterator())
+                set_op(nu, 0, call_arg(inner, 0));
+                set_fmf(nu, get_fmf(vec));
+                set_name_unlinked(nu, vname(vec));
+                ic_link_before(nu, ii);
+                return done(ic_replace_inst_uses_with(ii, nu));
+            }
+        }
     case IID_VECTOR_REDUCE_OR; #through; case IID_VECTOR_REDUCE_AND; #through; case IID_VECTOR_REDUCE_ADD; #through;
     case IID_VECTOR_REDUCE_XOR; #through; case IID_VECTOR_REDUCE_MUL; #through; case IID_VECTOR_REDUCE_UMIN; #through;
     case IID_VECTOR_REDUCE_UMAX; #through; case IID_VECTOR_REDUCE_SMIN; #through; case IID_VECTOR_REDUCE_SMAX; #through;
@@ -2649,12 +2662,16 @@ ic_visit_call_base :: (call: Value_Id) -> Value_Id {
         ic_create_non_terminator_unreachable(call);
         return ic_erase_inst(call);
     }
-    if call_iid(strip_pointer_casts(callee)) == IID_ADJUST_TRAMPOLINE fatal("instcombine: transformCallThroughTrampoline is not supported yet");
-    if call_has_bundle(call, "ptrauth") {
-        // foldPtrAuthIntrinsicCallee / foldPtrAuthConstantCallee
-        c := callee;
-        if (opr_code(c) == .INTTOPTR && is_inst(c) && (call_iid(op(c, 0)) == IID_PTRAUTH_RESIGN || call_iid(op(c, 0)) == IID_PTRAUTH_SIGN)) || vkind(c) == .C_PTRAUTH
-            fatal("instcombine: ptrauth call bundles are not supported yet");
+    {
+        it := ic_find_init_trampoline(callee);
+        if it != NONE return ic_transform_call_through_trampoline(call, it);
+    }
+    {
+        // combine calls involving pointer authentication intrinsics / ptrauth constants
+        nc := ic_fold_ptrauth_intrinsic_callee(call);
+        if nc != NONE return nc;
+        nc = ic_fold_ptrauth_constant_callee(call);
+        if nc != NONE return nc;
     }
     if vkind(callee) == .INLINE_ASM && !call_does_not_throw(call) {
         if !ic_inline_asm_can_throw(callee) { call_add_fn_attr(call, .NoUnwind); changed = true; }
@@ -2675,7 +2692,7 @@ ic_visit_call_base :: (call: Value_Id) -> Value_Id {
         for k: 0..nb-1 if call_bundle_tag(call, k) == "kcfi" return ic_call_remove_bundle_at(call, k);
     }
     if is_removable_alloc(call) return ic_visit_alloc_site(call);
-    if call_iid(call) == IID_EXPERIMENTAL_GC_STATEPOINT fatal("instcombine: gc.statepoint is not supported yet");
+    if call_iid(call) == IID_EXPERIMENTAL_GC_STATEPOINT return ic_visit_gc_statepoint(call, changed);
     return ifx changed then call else NONE;
 }
 // tryOptimizeCall: LibCallSimplifier (simplify_lib_calls.jai), then optimizeModularFormat

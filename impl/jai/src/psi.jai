@@ -318,6 +318,14 @@ psi_is_function_cold_in_call_graph :: (p: *Psi, f: Value_Id, bfi: *Bfi) -> bool 
     return true;
 }
 
+// What a function pass gets from `PSI = MAMProxy.getCachedResult<ProfileSummaryAnalysis>(M);
+// BFI = (PSI && PSI->hasProfileSummary()) ? &AM.getResult<BlockFrequencyAnalysis>(F) : nullptr`
+psi_pass_bfi :: (f: Value_Id) -> (*Psi, *Bfi) {
+    p := psi_cached_or_null();
+    if !p || !p.has_summary return p, null;
+    return p, get_bfi(f);
+}
+
 // SizeOpts.h isPGSOColdCodeOnly
 psi_is_pgso_cold_code_only :: (p: *Psi) -> bool {
     o := *psi_opts;

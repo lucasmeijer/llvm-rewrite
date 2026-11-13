@@ -98,7 +98,7 @@ alignment_from_assumptions_run :: (f: Value_Id) -> Preserved {
     get_scev(f);
     get_domtree(f);
     changed := false;
-    for a: ac.assumes {
+    for a: ac_assumptions(ac).* {
         if a == NONE || vkind(a) == .DEAD continue;
         n := call_num_bundles(a);
         for k: 0..cast(s64) n - 1 if afa_process_assumption(a, cast(u32) k) changed = true;

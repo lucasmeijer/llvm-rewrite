@@ -261,18 +261,38 @@ mattr_features_string :: () -> string {
 }
 // codegen::setFunctionAttributes(M, CPU, Features, TuneCPU): opt adds "target-cpu" / "target-features" to every
 // function from -mcpu / -mattr
+// (and denormal_fpenv from -denormal-fp-math / -denormal-fp-math-f32)
+denormal_fp_math_cl: s8 = -1;       // -denormal-fp-math (cl::init(IEEE); -1 = not given)
+denormal_fp32_math_cl: s8 = -1;     // -denormal-fp-math-f32 (cl::init(Invalid); -1 = not given)
+parse_denormal_mode_kind :: (name: string, v: string) -> s8 {
+    if v == {
+        case "ieee"; return 0;
+        case "preserve-sign"; return 1;
+        case "positive-zero"; return 2;
+        case "dynamic"; return 3;
+    }
+    fatal(tprint("opt: for the -% option: Cannot find option named '%'!", name, v));
+    return -1;
+}
 opt_set_function_attributes :: () {
     // optdriver.cpp clears CPUStr / FeaturesStr when the module triple has no known architecture
-    if triple_parse(tti_triple()).arch == .UnknownArch return;
     cpu := tti_opts.mcpu;
     feats := mattr_features_string();
-    if cpu.count == 0 && feats.count == 0 return;
+    if triple_parse(tti_triple()).arch == .UnknownArch { cpu = ""; feats = ""; }
+    denormal := denormal_fp_math_cl >= 0 || denormal_fp32_math_cl >= 0;
+    if cpu.count == 0 && feats.count == 0 && !denormal return;
+    // DenormalFPEnv(DenormalMode{Kind, Kind}, DenormalMode{KindF32, KindF32}); an Invalid F32 mode takes the base one
+    dk: u64 = ifx denormal_fp_math_cl >= 0 then cast(u64) denormal_fp_math_cl else 0;
+    dk32: u64 = ifx denormal_fp32_math_cl >= 0 then cast(u64) denormal_fp32_math_cl else dk;
+    denv := (dk | (dk << 4)) | ((dk32 | (dk32 << 4)) << 8);
     for f: ir.m_functions {
         fa := attr_list_fn(glob(f).attrs);
         items: [..] Attr; items.allocator = temp;
         old_feats := "";
         has_cpu := false;
+        has_denv := false;
         for attr_set_items(fa) {
+            if it.kind == .DenormalFPEnv has_denv = true;
             if it.kind == .STRING_ATTR && it.key == "target-cpu" has_cpu = true;
             if it.kind == .STRING_ATTR && it.key == "target-features" { old_feats = it.val; continue; }
             array_add(*items, it);
@@ -292,6 +312,10 @@ opt_set_function_attributes :: () {
         } else if old_feats.count {
             a: Attr; a.kind = .STRING_ATTR; a.key = "target-features"; a.val = old_feats;
             array_add(*items, a);
+        }
+        if denormal && !has_denv {
+            array_add(*items, attr_enum(.DenormalFPEnv, denv));
+            changed = true;
         }
         if changed glob(f).attrs = attr_list_with_fn(glob(f).attrs, attr_set_get(items));
     }

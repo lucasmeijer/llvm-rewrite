@@ -84,6 +84,7 @@ inst_clone :: (i: Value_Id) -> Value_Id { return ic_clone_inst(i); }   // ic_cor
 
 // AssumptionCache::registerAssumption
 ac_register_assumption :: (ac: *Assumption_Cache, ci: Value_Id) {
+    if !ac.scanned return;   // found when the function is scanned later
     array_add(*ac.assumes, ci);
     ac_update_affected_values(ac, ci);
 }
@@ -159,7 +160,7 @@ collect_ephemeral_values :: (li: *Loop_Info, l: Loop_Id, ac: *Assumption_Cache, 
             if is_inst(o) && !may_have_side_effects(o) && !is_terminator(inst_op(o)) array_add(work, o);
         }
     }
-    for a: ac.assumes {
+    for a: ac_assumptions(ac).* {
         if vkind(a) != .INST continue;   // a null handle (erased)
         if !li_contains(li, l, inst_block(a)) continue;
         if table_contains(eph, a) continue;

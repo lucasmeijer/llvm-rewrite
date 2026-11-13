@@ -425,7 +425,7 @@ icb_insert :: (i_in: Value_Id, name: string = "") -> Value_Id {
     if ic.annotation_src != NONE {
         k := md_kind_id("annotation");
         a := get_metadata(ic.annotation_src, k);
-        if a != NONE fatal("instcombine: !annotation metadata is not supported yet");
+        if a != NONE set_metadata(i, k, a);   // I->copyMetadata(*AnnotationMetadataSource, MD_annotation)
     }
     return i;
 }
@@ -455,8 +455,7 @@ call_with_default_bundles :: (i: Value_Id, src: Value_Id) -> Value_Id {
 }
 ic_register_assumption :: (i: Value_Id) {
     if !ic.ac return;
-    array_add(*ic.ac.assumes, i);
-    ac_update_affected_values(ic.ac, i);
+    ac_register_assumption(ic.ac, i);
 }
 icb_set_insert_point :: (i: Value_Id) { irb_set_before(*ic.b, i); }
 icb_set_insert_point_after :: (i: Value_Id) {   // SetInsertPoint(I->getNextNode()) style: before the next instruction
@@ -974,7 +973,8 @@ ic_run_worklist :: () -> bool {
         if result != i {
             if get_metadata(result, 0) == NONE { d := get_metadata(i, 0); if d != NONE set_metadata(result, 0, d); }
             ann := md_kind_id("annotation");
-            if get_metadata(i, ann) != NONE fatal("instcombine: !annotation metadata is not supported yet");
+            am := get_metadata(i, ann);
+            if am != NONE set_metadata(result, ann, am);   // Result->copyMetadata(*I, MD_annotation)
             rauw_with_metadata(i, result);
             ic_take_name(result, i);
             parent := inst_block(i);
@@ -1187,6 +1187,9 @@ ic_combine_function :: (f: Value_Id, icopts: Ic_Options) -> bool {
     cfg_post_order(fn_entry(f), *po);
     for < k: 0..po.count-1 array_add(*rpo, po[k]);
     made := false;
+    lcs_psi, lcs_bfi = psi_pass_bfi(f);   // InstCombinePass::run
+    ic_aar_state.f = NONE;   // AM.getResult<AAManager>(F) once per run (the cached one may hold freed analyses)
+    defer { lcs_psi = null; lcs_bfi = null; }
     // LowerDbgDeclare (-instcombine-lower-dbg-declare)
     if opts.instcombine_lower_dbg_declare made = lower_dbg_declare(f);
     iteration: u32 = 0;

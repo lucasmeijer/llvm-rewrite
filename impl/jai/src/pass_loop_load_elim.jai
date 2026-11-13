@@ -19,6 +19,8 @@ Lel :: struct {          // LoadEliminationForLoop
     li: *Loop_Info;
     lai: *Laa;
     dt: *Dom_Tree;
+    psi: *Psi;
+    bfi: *Bfi;
     pse: Pse;            // a copy of LAI.getPSE()
     inst_order: Table(Value_Id, u32);
 }
@@ -200,9 +202,8 @@ lel_process_loop :: (c: *Lel) -> bool {
     if !li_is_loop_simplify_form(c.li, c.l) return false;
     if checks.count != 0 || !sc_union_is_always_true(c.lai.pse.preds) {
         if c.lai.has_convergent_op return false;
-        // shouldOptimizeForSize(Header, PSI, BFI): the function's optsize/minsize, else false without a PSI
-        if fn_has_opt_size(c.li.fn) return false;
-        psi_check("loop-load-elim");
+        // shouldOptimizeForSize(HeaderBB, PSI, BFI, PGSOQueryType::IRPass)
+        if should_optimize_for_size_bb(li_header(c.li, c.l), c.psi, c.bfi) return false;
         if !li_is_recursively_lcssa_form(c.li, c.l, c.dt) form_lcssa_recursively(c.li, c.l, c.dt);
         lv: Lver;
         lv.versioned = c.l; lv.lai = c.lai; lv.checks = checks; lv.li = c.li; lv.dt = c.dt;
@@ -228,8 +229,7 @@ loop_load_elim_run :: (f: Value_Id) -> Preserved {
     s := get_scev(f);
     dt := get_domtree(f);
     ac := get_assumption_cache(f);
-    // MAMProxy.getCachedResult<ProfileSummaryAnalysis>: PSI is only consulted with a module profile summary, which
-    // fails loudly (psi_check); otherwise BFI is null and shouldOptimizeForSize is false
+    psi, bfi := psi_pass_bfi(f);
     se = s;
     saved := scev_pass_se;
     scev_pass_se = s;
@@ -257,7 +257,7 @@ loop_load_elim_run :: (f: Value_Id) -> Preserved {
         if !li_is_rotated_form(li, l) || li_exiting_block(li, l) == NONE continue;
         lai := laa_cached_info(f, l, li, dt, ac, false);
         c: Lel;
-        c.l = l; c.li = li; c.lai = lai; c.dt = dt;
+        c.l = l; c.li = li; c.lai = lai; c.dt = dt; c.psi = psi; c.bfi = bfi;
         c.inst_order.allocator = temp;
         pse_copy(*c.pse, *lai.pse);
         changed |= lel_process_loop(*c);

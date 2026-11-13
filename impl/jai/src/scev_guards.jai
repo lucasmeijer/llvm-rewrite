@@ -269,7 +269,7 @@ Guard_Cond :: struct { pred: u8; lhs: Scev_Id; rhs: Scev_Id; }
 lg_collect_from_block :: (g: *Loop_Guards, blk: Value_Id, pred_bb: Value_Id, visited: *Table(Value_Id, bool), depth: u32) {
     exprs_to_rewrite: [..] Scev_Id; exprs_to_rewrite.allocator = temp;
     terms: [..] Guard_Term; terms.allocator = temp;
-    if se.ac for ci: se.ac.assumes {
+    if se.ac for ci: ac_assumptions(se.ac).* {
         if vkind(ci) == .DEAD continue;
         if !dt_dominates_inst_block(se.dt, ci, blk) continue;
         array_add(*terms, .{op(ci, 0), true});

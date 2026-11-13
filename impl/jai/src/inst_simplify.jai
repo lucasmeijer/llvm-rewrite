@@ -1333,8 +1333,8 @@ determine_use_capture_kind :: (u: Use_Id, base: Value_Id) -> (u8, u8) {
                     }
                 }
             } else {
-                if call_iid(i) == IID_ASSUME { oth = CC_NONE; ret = CC_NONE; }
-                else fatal("capture tracking through operand bundles is not supported yet");
+                // bundles on assumes and deopt bundles are captures(none), every other bundle captures(all)
+                oth, ret = call_capture_info(i, opno);
             }
             mask: u8 = CC_ALL;
             if call_only_reads_memory(i) && type_kind(vtype(i)) == .VOID mask = CC_ADDRESS;

@@ -80,6 +80,7 @@ drop_unnecessary_assumes_run :: (f: Value_Id, name: string) -> Preserved {
     else if name != "drop-unnecessary-assumes" && name != "drop-unnecessary-assumes<>" fatal("invalid pass pipeline: invalid DropUnnecessaryAssumes parameter in '%'", name);
     ac := get_assumption_cache(f);
     changed := false;
+    ac_scan(ac);
     for idx: 0..ac.assumes.count - 1 {
         assume := ac.assumes[idx];
         if assume == NONE || vkind(assume) == .DEAD || call_iid(assume) != IID_ASSUME continue;

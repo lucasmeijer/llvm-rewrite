@@ -376,7 +376,7 @@ predicate_info_build :: (f: Value_Id, dt: *Dom_Tree, ac: *Assumption_Cache) -> *
             pi_process_switch(*b, t, bb, *ops);
         }
     }
-    for a: ac.assumes {
+    for a: ac_assumptions(ac).* {
         if a == NONE || vkind(a) == .DEAD continue;
         if dt_is_reachable_from_entry(dt, inst_block(a)) pi_process_assume(*b, a, *ops);
     }

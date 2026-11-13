@@ -791,8 +791,20 @@ ic_visit_load :: (li: Value_Id) -> Value_Id {
         v := ic_simplify_non_null_operand(o, true);
         if v != NONE return ic_replace_operand(li, 0, v);
     }
-    if is_ptr_type(vtype(li)) && call_iid(o) == IID_PROTECTED_FIELD_PTR
-        fatal("instcombine: load of llvm.protected.field.ptr (ptrauth) is not supported yet");
+    // load(llvm.protected.field.ptr(ptr)) -> llvm.ptrauth.auth(load(ptr))
+    if is_ptr_type(vtype(li)) && is_inst(o) && call_iid(o) == IID_PROTECTED_FIELD_PTR {
+        ds := ic_deactivation_symbol_bundle(o);
+        saved := ic.b; defer ic.b = saved;   // InsertPointGuard
+        icb_set_insert_point(li);
+        nli := ic_clone_inst(li);
+        set_op(nli, 0, op(o, 0));
+        icb_insert(nli);
+        auth_fn := get_or_insert_intrinsic_declaration(IID_PTRAUTH_AUTH);
+        li_int := icb_cast(.PTRTOINT, nli, ir.t_i64);
+        auth := icb_call_fn_bundle(auth_fn, .[li_int, const_int(ir.t_i32, 2), op(o, 1)], "deactivation-symbol", ds);   // AArch64PACKey::DA
+        auth = icb_cast(.INTTOPTR, auth, type_ptr_as(0));
+        return ic_replace_inst_uses_with(li, auth);
+    }
     return NONE;
 }
 // copyMetadata(LI, Metadata::PoisonGeneratingIDs) (also the debug location: WL doesn't contain MD_dbg, so no)
@@ -976,8 +988,19 @@ ic_visit_store :: (si: Value_Id) -> Value_Id {
         v := ic_simplify_non_null_operand(ptr, true);
         if v != NONE return ic_replace_operand(si, 1, v);
     }
-    if is_ptr_type(vtype(val)) && call_iid(ptr) == IID_PROTECTED_FIELD_PTR
-        fatal("instcombine: store to llvm.protected.field.ptr (ptrauth) is not supported yet");
+    // store(ptr1, llvm.protected.field.ptr(ptr2)) -> store(llvm.ptrauth.sign(ptr1), ptr2)
+    if is_ptr_type(vtype(val)) && is_inst(ptr) && call_iid(ptr) == IID_PROTECTED_FIELD_PTR {
+        ds := ic_deactivation_symbol_bundle(ptr);
+        saved := ic.b; defer ic.b = saved;   // InsertPointGuard
+        icb_set_insert_point(si);
+        sign_fn := get_or_insert_intrinsic_declaration(IID_PTRAUTH_SIGN);
+        val_int := icb_cast(.PTRTOINT, val, ir.t_i64);
+        sign := icb_call_fn_bundle(sign_fn, .[val_int, const_int(ir.t_i32, 2), op(ptr, 1)], "deactivation-symbol", ds);
+        sign = icb_cast(.INTTOPTR, sign, type_ptr_as(0));
+        ic_replace_operand(si, 0, sign);
+        ic_replace_operand(si, 1, op(ptr, 0));
+        return si;
+    }
     return NONE;
 }
 
@@ -1082,4 +1105,33 @@ aa_merge :: (a: AA_Tags, b: AA_Tags) -> AA_Tags {
         fatal("instcombine: MDNode::getMostGenericNoaliasAddrspace is not supported yet");
     r.noalias_as = ifx a.noalias_as == b.noalias_as then a.noalias_as else NONE;
     return r;
+}
+
+// II->getOperandBundle(OB_deactivation_symbol): its inputs (the global), empty when absent
+ic_deactivation_symbol_bundle :: (ii: Value_Id) -> [] Value_Id {
+    nb := call_num_bundles(ii);
+    if nb > 0 for k: 0..nb-1 {
+        if call_bundle_tag(ii, cast(u32) k) != "deactivation-symbol" continue;
+        b0 := ir.u32_pool[inst(ii).idx + 3 * cast(u32) k + 1];
+        r := NewArray(1, Value_Id,, allocator = temp);
+        r[0] = op(ii, b0);
+        return r;
+    }
+    return .[];
+}
+// Builder.CreateCall(F, Args, {OperandBundleDef(Tag, Inputs)}) (no bundle when Inputs is empty)
+icb_call_fn_bundle :: (f: Value_Id, args: [] Value_Id, tag: string, inputs: [] Value_Id) -> Value_Id {
+    if inputs.count == 0 return icb_call_fn(f, args);
+    fty := glob(f).value_type;
+    i := new_inst(.CALL, func_ret(fty), cast(u32)(args.count + inputs.count + 1));
+    r := inst(i);
+    r.ty2 = fty;
+    r.idx = cast(u32) ir.u32_pool.count; r.nidx = 1;
+    array_add(*ir.u32_pool, bundle_tag_id(tag));
+    array_add(*ir.u32_pool, cast(u32) args.count);
+    array_add(*ir.u32_pool, cast(u32)(args.count + inputs.count));
+    for args set_op(i, cast(u32) it_index, it);
+    for inputs set_op(i, cast(u32)(args.count + it_index), it);
+    set_op(i, cast(u32)(args.count + inputs.count), f);
+    return icb_insert(i);
 }

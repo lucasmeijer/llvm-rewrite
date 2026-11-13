@@ -10,7 +10,7 @@
 IID_START_LOOP_ITERATIONS :: #run iid_by_name("llvm.start.loop.iterations");
 IID_LOOP_DECREMENT_REG :: #run iid_by_name("llvm.loop.decrement.reg");
 
-ac_has_assumptions :: (ac: *Assumption_Cache) -> bool { return ac != null && ac.assumes.count > 0; }
+ac_has_assumptions :: (ac: *Assumption_Cache) -> bool { return ac != null && ac_assumptions(ac).count > 0; }
 
 // ---------------------------------------------------------------- memoization bookkeeping
 

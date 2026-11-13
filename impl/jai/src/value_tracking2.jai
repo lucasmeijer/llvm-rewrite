@@ -1353,7 +1353,25 @@ compute_constant_range :: (v: Value_Id, for_signed: bool, q: Simplify_Query, dep
             okr, cr := call_range(v);
             if okr r = cr_intersect(r, cr);
         } else if inst_op(v) == .EXTRACTVALUE && inst(v).nidx == 1 && ir.u32_pool[inst(v).idx] == 1 && call_iid(op(v, 0)) == IID_FREXP {
-            fatal("computeConstantRange of a frexp exponent is not supported yet");
+            src := call_arg(op(v, 0), 0);
+            sk := type_kind(scalar_type(vtype(src)));
+            // only for IEEE-like types (standard subnormal handling)
+            if sk == .HALF || sk == .BFLOAT || sk == .FLOAT || sk == .DOUBLE || sk == .FP128 {
+                known_src := compute_known_fp_class(src, FC_SUBNORMAL | FC_ZERO | FC_NAN | FC_INF, q, depth + 1);
+                // the exponent of frexp(NaN) and frexp(Inf) is unspecified
+                if kfpc_is_known_never_inf_or_nan(known_src) {
+                    prec, max_e, min_e, _ := fp_semantics(sk);
+                    min_exp: s64 = min_e + 1;
+                    if !kfpc_is_known_never_subnormal(known_src) min_exp -= prec - 1;
+                    max_exp: s64 = max_e + 1;
+                    adj_min, adj_max, adj_max_nz := known_exponent_range_from_context(src, q);
+                    mode := dm_of_fn(block_fn(inst_block(v)), scalar_type(vtype(src)));
+                    never_logical_zero := kfpc_is_known_never_logical_zero(known_src, mode);
+                    min_exp = max(adj_min, min_exp);
+                    max_exp = min(ifx never_logical_zero then adj_max_nz else adj_max, max_exp);
+                    r = cr_non_empty(ap_from_s64(bw, min_exp), ap_from_s64(bw, max_exp + 1));
+                }
+            }
         }
     }
     if q.cxt != NONE && q.ac {
@@ -2072,4 +2090,40 @@ is_bytewise_value :: (v: Value_Id) -> Value_Id {
         return val;
     }
     return NONE;
+}
+
+// computeKnownExponentRangeFromContext (ValueTracking.cpp): {min, max, max-assuming-nonzero} of the frexp exponent of
+// V from the dominating `fcmp fabs(V), K` conditions
+known_exponent_range_from_context :: (v: Value_Id, q: Simplify_Query) -> (s64, s64, s64) {
+    if q.cxt == NONE || !q.dc || !q.dt return IEK_NAN, IEK_INF, IEK_INF;
+    max_exp: s64 = IEK_INF;
+    max_exp_nz: s64 = IEK_INF;
+    for bi: dc_conditions_for(q.dc, v) {
+        okc, pred, l, r := pm_fcmp(op(bi, 0));
+        if !okc continue;
+        okf, fx := pm_fabs(l);
+        if !okf || fx != v continue;
+        okk, limit := pm_apfloat(r, true);
+        if !okk || !apf_is_finite(limit) continue;
+        if pred == FCMP_ORD || pred == FCMP_UNO || pred == FCMP_TRUE || pred == FCMP_FALSE continue;
+        is_less_equal := pred == FCMP_OLT || pred == FCMP_OLE || pred == FCMP_ULT || pred == FCMP_ULE || pred == FCMP_OEQ || pred == FCMP_UEQ;
+        known_strictly_less := pred == FCMP_OLT || pred == FCMP_ULT || pred == FCMP_OGE || pred == FCMP_UGE;
+        succ := get_successor(bi, ifx is_less_equal then cast(u32) 0 else 1);
+        if dt_dominates_edge_block(q.dt, inst_block(bi), succ, inst_block(q.cxt)) {
+            lw := limit;
+            exp := fp_ilogb(limit.k, apf_words(*lw)) + 1;   // frexp returns an exponent one greater than ilogb
+            if known_strictly_less && apf_exact_log2_abs_is_valid(limit) exp -= 1;
+            max_exp_nz = min(max_exp_nz, exp);
+            max_exp = min(max_exp, max(exp, 0));
+        }
+    }
+    return IEK_NAN, max_exp, max_exp_nz;
+}
+// getExactLog2Abs() != INT_MIN: a finite nonzero power of two (up to sign)
+apf_exact_log2_abs_is_valid :: (f: APFloat) -> bool {
+    if f.k == .PPC_FP128 fatal("getExactLog2Abs of ppc_fp128 is not supported yet");
+    g := f;
+    d := fp_decode(f.k, apf_words(*g));
+    if d.cat != .NORMAL return false;
+    return !big_any_below(d.sig, big_bitlen(d.sig) - 1);
 }

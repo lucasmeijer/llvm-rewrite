@@ -30,7 +30,7 @@ print_assumptions_run :: (f: Value_Id) -> Preserved {
     sb: String_Builder; sb.allocator = temp;
     ac := get_assumption_cache(f);
     print_to_builder(*sb, "Cached assumptions for function: %\n", vname(f));
-    for a: ac.assumes {
+    for a: ac_assumptions(ac).* {
         if a == NONE || vkind(a) == .DEAD continue;
         nb := call_num_bundles(a);
         if nb == 0 {

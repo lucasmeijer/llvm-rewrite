@@ -364,7 +364,7 @@ sc_is_loop_backedge_guarded_by_cond :: (l: Loop_Id, pred: u8, lhs: Scev_Id, rhs:
         loop_counter := sc_get_add_rec(sc_get_zero(ty), sc_get_one(ty), l, SF_NUW | SF_NW);
         if sc_is_implied_cond(pred, lhs, rhs, ICMP_ULT, false, loop_counter, latch_be_count) return true;
     }
-    if se.ac for ci: se.ac.assumes {
+    if se.ac for ci: ac_assumptions(se.ac).* {
         if vkind(ci) == .DEAD continue;
         if !dt_dominates_inst(se.dt, ci, block_terminator(latch)) continue;
         if sc_is_implied_cond_value(pred, lhs, rhs, op(ci, 0), false) return true;
@@ -433,7 +433,7 @@ sc_is_basic_block_entry_guarded_by_cond :: (bb: Value_Id, pred: u8, lhs: Scev_Id
         }
         first, second = sc_get_predecessor_with_unique_successor(first);
     }
-    if se.ac for ci: se.ac.assumes {
+    if se.ac for ci: ac_assumptions(se.ac).* {
         if vkind(ci) == .DEAD continue;
         if !dt_dominates_inst_block(se.dt, ci, bb) continue;
         if prove_via_cond(*c, op(ci, 0), false) return true;

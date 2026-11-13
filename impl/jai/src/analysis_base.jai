@@ -261,17 +261,29 @@ AC_EXPR_RESULT_IDX :: 0xFFFF_FFFF;   // AssumptionCache::ExprResultIdx
 Ac_Elem :: struct { assume: Value_Id; index: u32; }
 Assumption_Cache :: struct {
     fn: Value_Id;
+    scanned: bool;                                // Scanned: scanFunction runs on the first query (lazily)
     assumes: [..] Value_Id;                       // AssumeHandles (DEAD rows are null handles)
     affected: Table(Value_Id, [..] Ac_Elem);      // AffectedValues
 }
 
-// AssumptionAnalysis::run (the affected-value lists are filled by scanFunction)
+// AssumptionAnalysis::run: the cache is empty until its first query scans the function (scanFunction), so
+// assumes a pass inserts before that query are found by the scan, in function order.
 ac_build :: (f: Value_Id) -> *Assumption_Cache {
     ac := New(Assumption_Cache);
     ac.fn = f;
-    for fn_insts(f) if is_intrinsic_call(it, IID_ASSUME) array_add(*ac.assumes, it);
-    for ac.assumes ac_update_affected_values(ac, it);
     return ac;
+}
+// scanFunction
+ac_scan :: (ac: *Assumption_Cache) {
+    if ac.scanned return;
+    ac.scanned = true;
+    for fn_insts(ac.fn) if is_intrinsic_call(it, IID_ASSUME) array_add(*ac.assumes, it);
+    for ac.assumes ac_update_affected_values(ac, it);
+}
+// assumptions(): AssumeHandles, scanning first
+ac_assumptions :: (ac: *Assumption_Cache) -> *[..] Value_Id {
+    ac_scan(ac);
+    return *ac.assumes;
 }
 ac_free :: (ac: *Assumption_Cache) {
     for * ac.affected array_free(it.*);
@@ -280,6 +292,7 @@ ac_free :: (ac: *Assumption_Cache) {
     free(ac);
 }
 ac_assumptions_for :: (ac: *Assumption_Cache, v: Value_Id) -> [] Ac_Elem {
+    ac_scan(ac);
     p := table_find_pointer(*ac.affected, v);
     if !p return .[];
     return p.*;
@@ -326,6 +339,7 @@ ac_update_affected_values :: (ac: *Assumption_Cache, ci: Value_Id) {
 }
 // AffectedValueCallbackVH::allUsesReplacedWith -> transferAffectedValuesInCache
 ac_transfer :: (ac: *Assumption_Cache, old: Value_Id, new: Value_Id) {
+    if !ac.scanned return;
     nk := vkind(new);
     if nk != .INST && nk != .ARGUMENT return;
     p := table_find_pointer(*ac.affected, old);

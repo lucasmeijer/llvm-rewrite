@@ -22,6 +22,7 @@ ssv_pop :: (s: *Small_Set_Vector) -> Value_Id {
 dce_instruction :: (i: Value_Id, wl: *Small_Set_Vector) -> bool {
     if !is_instruction_trivially_dead(i) return false;
     salvage_debug_info(i);
+    salvage_knowledge(i);
     n := nops(i);
     if n > 0 for k: 0..n-1 {
         opv := op(i, k);

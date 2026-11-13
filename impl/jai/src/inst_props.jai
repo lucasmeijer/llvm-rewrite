@@ -395,7 +395,8 @@ is_math_lib_call_noop :: (i: Value_Id) -> bool {
             case "remainder"; return nan0 || nan1 || (!inf0 && !zero1);
             case "atan2"; return !zero0 || !zero1;
             case "nextafter"; #through;
-            case "nexttoward"; fatal("isMathLibCallNoop: nextafter/nexttoward constant folding is not supported yet");
+            case "nexttoward";
+                return cfc_next_toward(type_kind(vtype(c0)), const_fp_value(c0), type_kind(vtype(c1)), const_fp_value(c1), func_ret(glob(f).value_type)) != NONE;
         }
     }
     return false;

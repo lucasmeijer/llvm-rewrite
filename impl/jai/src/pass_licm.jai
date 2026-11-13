@@ -236,6 +236,7 @@ licm_sink_region :: (c: *Licm, n: s32) -> bool {
             i := cur;
             saved_prev := inst_prev(i);
             if is_instruction_trivially_dead(i) {
+                if salvage_knowledge(i) saved_prev = inst_prev(i);   // the new assume is visited next
                 salvage_debug_info(i);
                 licm_erase_instruction(c, i);
                 changed = true;

@@ -205,8 +205,8 @@ tti_get_peeling_preferences :: (t: *Tti, pp: *Peel_Prefs) {
     pp.peel_profiled_iterations = true;
 }
 
-// gatherUnrollingPreferences (a cached PSI with a module profile summary fails loudly: psi_check)
-gather_unrolling_preferences :: (li: *Loop_Info, l: Loop_Id, t: *Tti, opt_level: s64, o: *Unroll_Options) -> Unroll_Prefs {
+// gatherUnrollingPreferences
+gather_unrolling_preferences :: (li: *Loop_Info, l: Loop_Id, t: *Tti, opt_level: s64, o: *Unroll_Options, psi: *Psi = null, bfi: *Bfi = null) -> Unroll_Prefs {
     up: Unroll_Prefs;
     up.threshold = ifx opt_level > 2 then lu_u32(lu_cl.unroll_threshold_aggressive) else lu_u32(lu_cl.unroll_threshold_default);
     up.max_percent_threshold_boost = 400;
@@ -236,8 +236,9 @@ gather_unrolling_preferences :: (li: *Loop_Info, l: Loop_Id, t: *Tti, opt_level:
     tti_get_unrolling_preferences(t, li, l, *up);
 
     f := li.fn;
-    opt_for_size := fn_has_opt_size(f);   // || shouldOptimizeForSize(Header, PSI = null, BFI = null) = false
-    if !opt_for_size psi_check("loop-unroll");
+    // unroll hints / pragmas take precedence over PGSO
+    opt_for_size := fn_has_opt_size(f) ||
+                    (li_has_unroll_transformation(li, l) != TM_FORCED_BY_USER && should_optimize_for_size_bb(li_header(li, l), psi, bfi));
     if opt_for_size {
         up.threshold = up.opt_size_threshold;
         up.partial_threshold = up.partial_opt_size_threshold;
@@ -888,6 +889,8 @@ Unroll_Ctx :: struct {
     ac: *Assumption_Cache;
     t: *Tti;
     aa: bool;                    // AAResults passed (loadCSE runs)
+    psi: *Psi;                   // LoopUnrollPass: the cached PSI; LoopFullUnrollPass passes null
+    bfi: *Bfi;
 }
 
 try_to_unroll_loop :: (c: *Unroll_Ctx, l: Loop_Id, preserve_lcssa: bool, opt_level: s64, only_full_unroll: bool, only_when_forced: bool,
@@ -904,7 +907,7 @@ try_to_unroll_loop :: (c: *Unroll_Ctx, l: Loop_Id, preserve_lcssa: bool, opt_lev
     if only_when_forced && !(tm & TM_ENABLE) return .UNMODIFIED;
 
     opt_for_size := fn_has_opt_size(c.f);
-    up := gather_unrolling_preferences(li, l, c.t, opt_level, o);
+    up := gather_unrolling_preferences(li, l, c.t, opt_level, o, c.psi, c.bfi);
     pp := gather_peeling_preferences(li, l, c.t, o.has_peeling, o.peeling, o.has_profile_peeling, o.profile_peeling, true);
 
     if up.threshold == 0 && (!up.partial || up.partial_threshold == 0) && !opt_for_size return .UNMODIFIED;
@@ -1053,6 +1056,7 @@ loop_unroll_run :: (node: *Pass_Node, f: Value_Id) -> Preserved {
     t := tti_get(f);
     dt := get_domtree(f);
     ac := get_assumption_cache(f);
+    psi, bfi := psi_pass_bfi(f);
     saved_se := scev_pass_se;
     scev_pass_se = s;
     defer scev_pass_se = saved_se;
@@ -1070,10 +1074,12 @@ loop_unroll_run :: (node: *Pass_Node, f: Value_Id) -> Preserved {
     w: Loop_Worklist; lwl_init(*w);
     append_loops_to_worklist_li(li, *w);
     c: Unroll_Ctx;
-    c.f = f; c.dt = dt; c.li = li; c.ac = ac; c.t = t; c.aa = true;
+    c.f = f; c.dt = dt; c.li = li; c.ac = ac; c.t = t; c.aa = true; c.psi = psi; c.bfi = bfi;
     while !lwl_empty(*w) {
         l := lwl_pop(*w);
         o := opts.o;
+        // a profile with a huge working set size disables peeling
+        if psi && psi.has_huge && psi.huge { o.has_peeling = true; o.peeling = false; }
         se = s;
         r := try_to_unroll_loop(*c, l, true, opts.opt_level, false, opts.only_when_forced, opts.forget_scev, *o);
         changed |= r != .UNMODIFIED;
