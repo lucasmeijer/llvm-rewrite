@@ -1599,19 +1599,52 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   stripAndAccumulateConstantOffsets handles addrspacecasts between index widths (GEP offsets at the GEP's own width,
   stop when they don't fit).
 
-## LoopVectorize (in progress: iv_descriptors.goose, lv_legality.goose, lv_pass.goose; DESIGN.md §17)
+## LoopVectorize (in progress; DESIGN.md §17)
 
-- Milestone 1 (legality and the no-vectorize decisions): runImpl (simplifyLoop, collectSupportedLoops with
-  containsIrreducibleCFG, LCSSA), LoopVectorizeHints, the whole of LoopVectorizationLegality for inner loops
-  (IVDescriptors, if-conversion with isDereferenceableAndAlignedInLoop, LAA, read-only early-exit loops),
-  processLoop up to plan(), collectValuesToIgnore, collectElementTypesForWidening and computeMaxVF. A loop whose
-  MaxVF is none or 1 (and no forced interleave count) is decided without building VPlans: computeBestVF then
-  returns the scalar VF and selectInterleaveCount 1 (getMaxInterleaveFactor(VF=1) is 1 on X86 and NoTTI).
-  Everything past that fails loudly ("VPlan construction and the cost model").
-- Debug builds (`goose build --debug`, ~1 min instead of ~4.5 min for the release build) catch `as` range errors that
-  release builds wrap: scev.goose's proveNoWrapByVaryingStart had two `(d as u64)` of negative deltas (now `as!`).
-  For quick iteration: build `--debug` into /tmp, copy it to bin/opt and sweep with `--no-build`; remove bin/opt
-  before the real check so build.sh rebuilds the release binary.
+- Files: iv_descriptors (RecurrenceDescriptor / InductionDescriptor), lv_legality (hints, legality, LAA glue),
+  lv_interleave (InterleavedAccessInfo), lv_cm (widening / uniform / scalar decisions), lv_cost (the legacy
+  LoopVectorizationCostModel costs), lv_plan (tryToBuildVPlan1 / buildVPlans / tryToBuildVPlan, recipe builder,
+  addReductionResultComputation), vplan / vplan_utils / vplan_props (data model, matchers, recipe queries),
+  vplan_construct, vplan_transforms, vplan_exec_transforms (incl. unrollByUF), vplan_execute, vplan_cost (recipe
+  costs, precomputeCosts, computeBestVF pieces, register usage, selectInterleaveCount, isOutsideLoopWorkProfitable),
+  lv_exec (processLoop tail, loop metadata + profile weights), lv_pass (driver, computeMaxVF, plan()/computeBestVF).
+- Milestone 1 (legality, no-vectorize decisions): done. A loop whose MaxVF is none or 1 (and no forced IC) is decided
+  without building VPlans: computeBestVF then returns the scalar VF and selectInterleaveCount 1.
+- Milestone 2 (VPlan construction, executePlan): straight-line inner loops with int/fp inductions, consecutive loads /
+  stores, uniform and scalarized (replicated) accesses, widened arithmetic / compares / selects / casts / GEPs.
+- Milestone 3 (cost model): legacy getInstructionCost (all opcodes; calls via intrinsic costs), expectedCost,
+  setCostBasedWideningDecision with gather/scatter / scalarization costs, collectInstsToScalarize; VPlan recipe
+  costs; computeBestVF, isMoreProfitable, willGenerateVectors, hasReplicatorRegion under optsize;
+  selectInterleaveCount with calculateRegisterUsageForPlan; isOutsideLoopWorkProfitable (no runtime checks).
+  Costs are fixed point (InstructionCost's CostGranularity 4, lv_cost.goose's lc_* helpers).
+- Milestone 4 (partly): out-of-loop reductions (add/sub/mul/and/or/xor, int min/max, fast fadd/fmul),
+  interleaving (unrollByUF incl. widened inductions with WideIVStep, unrolled reduction phis), scalar interleaving
+  (VF 1, IC > 1), the loop profile (estimated trip counts / branch weights of vector and remainder loops).
+- Verification: `GOOSE_LV_DEBUG=1 bin/opt ...` prints the `-debug-only=loop-vectorize` decision and cost lines
+  (`LV: Scalar loop costs`, `Cost for VF`, `LV: Selecting VF`, `LV: Loop cost is`, `LV: IC is`, the per-recipe and
+  per-instruction `Cost of` lines with their costs). Compare with
+  `GOOSE_LV_DEBUG=1 JAI_OPT=impl/goose/bin/opt python3 impl/jai/tools/lv_cost_compare.py -l LIST` (the assert opt is
+  /persistent/llvm-rewrite/llvm-23.1.5-assert/bin/opt). The -O2 inputs of loop-vectorize: `impl/jai/tools/o2_lv_inputs.py`
+  (collect into a directory, then `--compare DIR impl/goose/bin/opt`): 808 of 919 identical, 0 differ (2026-11-13).
+- Next steps (each fails loudly today, rough -O2 / imported-test counts in parentheses):
+  1. interleave groups: getInterleaveGroupCost, VPInterleaveRecipe (22 / 19);
+  2. runtime memory checks: GeneratedRTChecks, LoopVersioning noalias metadata, memcheck blocks (18 / 58);
+  3. calls: makeCallWideningDecisions, VFDatabase variants (12 / 18);
+  4. tail folding by masking and if-conversion (VPPredicator, blends, replicate regions) (18 / 89);
+  5. computeMinimumValueSizes + truncateToMinimalBitwidths past the early exit (5 / 37, mostly NoTTI tests);
+  6. epilogue vectorization (selectBestEpiloguePlan) (2 / 28);
+  7. AnyOf / FindIV / FindLast / in-loop / ordered reductions, fixed-order recurrences, pointer inductions;
+  8. uncountable early exits, outer loops, scalable VFs.
+- Speed: no `@perf` line times loop-vectorize. On the 919 -O2 loop-vectorize inputs (one process each), goose takes
+  1.4 s user against LLVM's 4.0 s (sys time dominates both: process start-up); no scaling problem seen.
+- Debug builds (`goose build --debug --stack-reserve 2G --cc /opt/llvm-23.1.5/bin/clang`, ~1 min instead of ~4.5 min)
+  catch `as` range errors that release builds wrap. Build into /tmp, copy to bin/opt and sweep with `--no-build`;
+  remove bin/opt before the real check so build.sh rebuilds the release binary.
+- Goose traps: `vpr[f()]` where f() pushes into vpr evaluates the array before the call (index out of bounds); bind
+  the id first. A `recursive fn` cycle may not call back while a growable local is in scope (vpc_region_cost
+  iterates the loop region's blocks itself instead of recursing). Mutual imports work (lv_cm <-> lv_cost).
+- IRBuilder::SetInsertPoint(Instruction) also takes the instruction's debug location: VPIRBasicBlock::execute sets
+  vxb_dl from the IR block's terminator, which the next created block's `unreachable` (and so its branch) inherits.
 
 ## Small passes of default<O2>, FunctionSpecialization, MergeICmps (misc_passes.goose and friends)
 
@@ -1653,15 +1686,3 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   SplitEdge's non-critical split names the new block `<old>.split` before DuplicateInstructionsInSplitBetween renames it
   (the second name bumps the function's unique counter: lua's `.split14` vs `.split13`).
 - Speed: not measured with `perf` (no @perf line times these passes); the sweeps over tests/perf/compile run in seconds.
-- Milestone 2 (VPlan construction and executePlan for a forced VF, in progress): vplan.goose (data model, archive
-  slots = plans, VPBuilder, VPDT), vplan_utils / vplan_props (matchers, vputils, the per-recipe queries),
-  vplan_construct (PlainCFGBuilder, skeleton, header phis, loop regions), lv_cm (widening / uniform / scalar
-  decisions), lv_plan (tryToBuildVPlan1 / buildVPlans / tryToBuildVPlan, recipe builder, mem-op / scalarization
-  decisions), vplan_transforms (simplifyRecipes, optimize() passes, live-out induction values),
-  vplan_exec_transforms (unroll UF 1, packs/broadcasts, replicateByVF, materialization, cse, SCEV expansion,
-  minimum iteration check), vplan_execute (VPTransformState, recipe execution, VPlan::execute incl. deleting the
-  scalar loop), lv_exec (processLoop tail, skeleton, loop metadata, legacyCSE). Straight-line loops with int
-  inductions, consecutive loads/stores, widened arithmetic/compares/selects/casts/GEPs vectorize identically to
-  LLVM with -force-vector-width and -force-vector-interleave=1 on NoTTI.
-- Goose trap: `vpr[f()]` where f() pushes into vpr evaluates the array before the call (index out of bounds);
-  bind the id first.

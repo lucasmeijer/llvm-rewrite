@@ -183,7 +183,9 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - Legality's `canVectorizeWithIfConvert` computes "safe pointers" with `isDereferenceableAndAlignedInLoop`, but the
   answer only decides which loads of predicated blocks are masked; it never makes legality fail.
 - `computeMinimumValueSizes(Blocks, DB, &TTI)`: with NoTTI `isTypeLegal` is false for every type, so a loop with any
-  zext/sext and a trunc/icmp root is analysed; without a zext/sext the result is empty.
+  zext/sext and a trunc/icmp root is analysed; without a zext/sext the result is empty. On X86 i8..i64 are legal, so only a zext/sext
+  *from* an illegal type (i1, odd widths) gets past the early exit, and a trunc to a legal type is no root
+  (verified: the -O2 loop-vectorize inputs of the corpus, 25 of which zext/sext legal types without MinBWs).
 - **VPlan user lists are ordered**: `VPValue::Users` is a SmallVector (push_back on addOperand, erase of the first
   match on removeUser). `VPlan::duplicate()` clones the blocks and then `remapOperands` re-points every operand in deep
   RPO / recipe / operand order, so the copy's user lists are in that order, not the original's.
@@ -245,7 +247,8 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
   Reductions drop the header-mask select from the backedge unless `-prefer-predicated-reduction-select`.
 - Debugging: `-debug-only=loop-vectorize` of the assertions opt prints "LV: Scalar loop costs", every recipe's
   "Cost of C for VF V", "Cost for VF V: C (Estimated cost per lane ...)", "LV: Selecting VF", "LV: IC is". The jai port
-  prints the same lines with `JAI_LV_DEBUG=1`; `impl/jai/tools/lv_cost_compare.py` diffs them.
+  prints the same lines with `JAI_LV_DEBUG=1`, the goose port with `GOOSE_LV_DEBUG=1`;
+  `impl/jai/tools/lv_cost_compare.py` diffs them (`JAI_OPT=impl/goose/bin/opt` for goose).
 - **Epilogue vectorization** (verified by the X86 LoopVectorize tests with AVX/AVX-512, where VF * IC >= 16 makes
   `isEpilogueVectorizationProfitable` true): the epilogue plan is a `duplicate()` of the plan for the chosen VF
   (`ProfitableVFs` from computeBestVF, skipping VFs > the main VF or > the remaining iterations), and both plans run
@@ -292,3 +295,21 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
   >= maxVF * max store size).
 - With a module profile summary (`require<profile-summary>`), `shouldOptimizeForSize(Header, PSI, BFI)` (PGSO) can
   make processLoop optimize for size; LoopVectorize/optsize.ll's `foo_pgso` is not vectorized.
+- `processLoop`'s OptForSize is `shouldOptimizeForSize(Header, PSI, BFI)`, which is true for any `optsize` / `minsize`
+  function before PSI is looked at: legality then gets `AllowRuntimeSCEVChecks = false` (no stride predicates from
+  isConsecutivePtr, so `cm_array[zext(i16 a + iv)]` is scalarized) and computeBestVF skips plans with replicate
+  regions (LoopVectorize/optsize.ll @pr43371).
+- `VPInstructionWithType::execute` creates scalar casts with `CreateCast(Op, Ty)` and no name, although the
+  VPInstruction carries the underlying instruction's name (the EMIT-SCALAR trunc of a truncated induction).
+- `VPLane::getAsRuntimeExpr` gives fixed lanes as `i64` constants: extracts of lane k are `extractelement ..., i64 k`
+  (LoopVectorize/step-vector-i1-wrapping.ll).
+- `VPIRBasicBlock::execute` sets the builder with `SetInsertPoint(IRBB->getTerminator())`, which also takes the
+  terminator's debug location; the next VPBasicBlock's placeholder `unreachable` (and the `br` replacing it) gets that
+  location (vector.ph's `br` carries the preheader branch's `!dbg`, LoopVectorize/dbg.value.ll).
+- Profile after vectorizing (`updateLoopMetadataAndProfileInfo`): without an estimated trip count on the original
+  loop but with a non-zero function entry count, the vector loop gets `llvm.loop.estimated_trip_count` =
+  SE.getSmallConstantTripCount of the *new* vector loop and latch weights {TC - 1, 1} (invocation weight 1); the
+  remainder loop gets TC % (VF * UF) (LoopVectorize/exact.ll).
+- licm's `cannotHoistOrSinkRecipe` for replicated memory recipes: getMemoryLocation only carries the scoped-noalias
+  tags (`!alias.scope`, `!noalias`), so without them every write in the loop region aliases; `SinkStoreInfo(R)`
+  without a PSE only skips R itself.

@@ -815,8 +815,10 @@ one set of module globals for the loop being vectorized, reset when `processLoop
   fixed-size record in a table (`rdx_descs`, `ind_descs`); their variable parts (cast instructions, no-wrap
   predicates) are runs in shared pools.
 - **VPlan entities are rows of three global tables** (`vpb` blocks, `vpv` values, `vpr` recipes), addressed by `i32`
-  ids. All plans of a loop live in the same tables (a plan is a `vpp` row: entry block, scalar header, symbolic
-  values, VF list, live-in map); `VPlan::duplicate()` appends copies and remaps ids. Each row is fixed-size; every
+  ids. One plan is loaded in the tables at a time (`vph` holds its own scalars: entry, symbolic values, VF / UF
+  lists, live-in order); the others are archived slots (`vp_save` / `vp_load` copy a plan out and in, keeping every
+  id), so `VPlan::duplicate()` is "load the source, save it as a new slot" plus the user-list rebuild of
+  remapOperands, and computeBestVF loads each candidate plan in turn. Each row is fixed-size; every
   SmallVector a row owns in LLVM (block preds/succs, value users, recipe operands, defined values, metadata,
   expression recipes) is a handle into the VPlan's own growable-vector pool (`xv_*`, ivec.goose's scheme: a record
   (start, len, cap) + a run in one i32 pool, copied to the end when it grows), so list order is LLVM's: users are
@@ -825,12 +827,16 @@ one set of module globals for the loop being vectorized, reset when `processLoop
 - **Kinds instead of classes.** `VPR_*` recipe kinds are numbered in VPRecipeTy order (so the phi / header-phi
   ranges are integer ranges); VPInstruction opcodes extend the IR opcode space (`VPI_*` = 1000 + n). A recipe row
   is the union of the per-class payload fields (commented with the kinds that use them). Virtual methods are
-  functions with a `match` on the kind (`vp_execute`, `vp_compute_cost`, `vp_clone`, `vp_may_read_from_memory`, ...),
+  functions with a branch on the kind (`vp_execute_recipe`, `vpc_compute_cost`, `vp_clone`, `vp_may_read_from_memory`, ...),
   so a recipe kind's behaviour can be read per method, as in LLVM's VPlanRecipes.cpp.
-- **Costs** are LLVM 23's fixed-point InstructionCost: i64 = 4 x the cost (`LC_INVALID` for invalid); TTI answers stay
-  plain integers and are scaled where the cost model receives them.
+- **Costs** are LLVM 23's fixed-point InstructionCost: i64 = 4 x the cost (`LC_INVALID` = i64 max compares above every
+  valid cost, saturating `lc_add` / `lc_mul`, `lc_div` on the raw value, `lc_str` prints like InstructionCost::print);
+  TTI answers stay plain integers and are scaled (`lcv`) where lv_cost.goose's `lt_*` wrappers receive them. The cost
+  model's per-VF maps are HMaps keyed (VF << 32 | instruction); ForcedScalars / InstsToScalarize also keep their
+  insertion order in lists, because precomputeCosts iterates them.
 - **VPTransformState** maps VPValue ids to IR values (`vts_*` HMaps keyed by (value, lane)); recipes emit IR through
-  one builder (`vib_*`, IRBuilder with the InstSimplifyFolder / ConstantFolder distinction made per call site).
-- Recursion: the plan walks (RPO, dominator tree over VP blocks, region nesting) use explicit stacks; nothing in the
-  vectorizer is a `recursive fn` except calls into SCEV / the TTI.
+  one builder (`vxb_*`, IRBuilder with the folding done per call site; `vxb_dl` is the current debug location).
+- Recursion: the plan walks (RPO, dominator tree over VP blocks, region nesting) use explicit stacks; the only
+  `recursive fn`s are the mutually recursive VPTransformState getters, isConditionTrueViaVFAndUF, the legacy
+  getInstructionCost (forced scalars recurse once with VF 1) and calls into SCEV / the TTI.
 - Unported paths fail loudly with `loop-vectorize: <what> is not supported yet` at the point where LLVM would act.
