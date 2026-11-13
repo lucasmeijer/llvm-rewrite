@@ -3907,8 +3907,11 @@ tests/imported/llvm/Transforms/EliminateAvailableExternally/visibility.ll::round
 tests/imported/llvm/Transforms/EntryExitInstrumenter/debug-info.ll::opt
 tests/imported/llvm/Transforms/EntryExitInstrumenter/debug-info.ll::roundtrip
 tests/imported/llvm/Transforms/EntryExitInstrumenter/pre-inliner-instrumentation.ll::roundtrip
+tests/imported/llvm/Transforms/ExpandMemCmp/X86/bcmp.ll::opt
 tests/imported/llvm/Transforms/ExpandMemCmp/X86/bcmp.ll::roundtrip
+tests/imported/llvm/Transforms/ExpandMemCmp/X86/memcmp.ll::opt
 tests/imported/llvm/Transforms/ExpandMemCmp/X86/memcmp.ll::roundtrip
+tests/imported/llvm/Transforms/ExpandMemCmp/X86/sanitizer-skip.ll::opt
 tests/imported/llvm/Transforms/ExpandMemCmp/X86/sanitizer-skip.ll::roundtrip
 tests/imported/llvm/Transforms/Float2Int/basic.ll::opt
 tests/imported/llvm/Transforms/Float2Int/basic.ll::roundtrip
@@ -4830,6 +4833,7 @@ tests/imported/llvm/Transforms/GlobalOpt/localize-constexpr-debuginfo.ll::opt
 tests/imported/llvm/Transforms/GlobalOpt/localize-constexpr-debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/localize-constexpr.ll::opt
 tests/imported/llvm/Transforms/GlobalOpt/localize-constexpr.ll::roundtrip
+tests/imported/llvm/Transforms/GlobalOpt/long-compilation-global-sra.ll::opt
 tests/imported/llvm/Transforms/GlobalOpt/long-compilation-global-sra.ll::roundtrip
 tests/imported/llvm/Transforms/GlobalOpt/malloc-promote-1-no-null-opt.ll::opt
 tests/imported/llvm/Transforms/GlobalOpt/malloc-promote-1-no-null-opt.ll::roundtrip
