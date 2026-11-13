@@ -1629,7 +1629,7 @@ fn sl_compare_same_as_value(cmpv: i32, selv: i32) -> bool {
     if vals[cmpv].kind == VK_CINT && !ty_is_vector(vals[cmpv].ty) && vals[selv].kind == VK_CFP && !ty_is_vector(vals[selv].ty) {
         let iv = ci_ap(cmpv);
         let w = iv.w as i64;
-        if w != ty_bits(vals[selv].ty) { return false; }
+        if w != ty_prim_bits(vals[selv].ty) { return false; }
         let fb = ap_from_words(w, [cint_lo(selv), cint_hi(selv)]);
         return ap_eq(iv, fb);
     }

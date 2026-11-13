@@ -1485,8 +1485,9 @@ fn may_contain_throwing_after(b: i32, e: i32) -> bool {
     var n: i64 = 0;
     var i = inst_next(b);
     while i >= 0 && i != e {
+        // isGuaranteedToTransferExecutionToSuccessor(Range, ScanLimit): `if (--ScanLimit == 0) return false`
         n++;
-        if n > lim { return true; }
+        if n >= lim { return true; }
         if !guaranteed_to_transfer(i) { return true; }
         i = inst_next(i);
     }

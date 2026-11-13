@@ -928,6 +928,7 @@ fn ic_visit(i: i32) -> i32 {
         OP_ATOMICRMW => { return visit_atomicrmw(i); },
         // InstCombinerImpl has no visitIndirectBrInst: InstVisitor's visitTerminator -> visitInstruction (nullptr)
         OP_INDIRECTBR => { return -1; },
+        OP_CMPXCHG => { return -1; },   // no visitAtomicCmpXchgInst either
         OP_VAARG => { return -1; },   // no visitVAArgInst: InstVisitor's visitInstruction (returns nullptr)
         _ => { return ic_visit_other(i); },
     }

@@ -330,7 +330,15 @@ recursive fn spec_deref_aligned(v: i32, align: i64, size: AP, depth: i64) -> boo
             }
         } else if aset_has(alist_fn(insts[inst_of(v)].attrs), AK_AllocSize) || (f >= 0 && func_has_fn_attr(f, AK_AllocSize)) {
             // getObjectSize with TLI = null: only allocsize-attributed calls have a size.
-            spec_not_ported("getObjectSize of allocsize calls");
+            let save = sq_no_tli;
+            sq_no_tli = true;
+            let ok, osz = mb_get_object_size(v, OSM_EXACT_SIZE_FROM_OFFSET, false, true, false);
+            sq_no_tli = save;
+            if ok {
+                if osz != 0 && !ap_ugt_u64(size, osz) && spec_known_nonzero(v) && !spec_can_be_freed(v) {
+                    return pointer_alignment(v) >= align;
+                }
+            }
         }
     }
     if inst_iid(v) == IID_experimental_gc_relocate { spec_not_ported("gc.relocate"); }

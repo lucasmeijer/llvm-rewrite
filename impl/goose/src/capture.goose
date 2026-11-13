@@ -121,6 +121,7 @@ let CTK_BEFORE = 1;
 let CTK_EARLIEST = 2;
 let CTK_ICMP = 3;              // InstCombine's CmpCaptureTracker (foldAllocaCmp)
 let CTK_ARGUSES = 4;           // FunctionAttrs' ArgumentUsesTracker
+let CTK_IS_PTR_ICMP = 5;       // InstSimplify's CustomCaptureTracker (computePointerICmp)
 
 let CT_STOP_ANY = 0;            // capturesAnything
 let CT_STOP_FULL_PROV = 1;      // capturesFullProvenance
@@ -156,7 +157,7 @@ fn ct_stop_fn(cc: i64) -> bool {
 }
 
 fn ct_too_many_uses() {
-    if ct_kind == CTK_ICMP { ct_icmp_captured = true; return; }
+    if ct_kind == CTK_ICMP || ct_kind == CTK_IS_PTR_ICMP { ct_icmp_captured = true; return; }
     if ct_kind == CTK_ARGUSES { ct_cc = CC_ALL; ct_cc_ret = CC_ALL; return; }
     if ct_kind == CTK_SIMPLE { ct_cc = ct_mask; ct_cc_ret = ct_mask; }
     else if ct_kind == CTK_BEFORE { ct_cc = ct_mask; }
@@ -222,6 +223,15 @@ fn ct_captured(u: i32, c: UCI) -> i64 {
             for k in ct_icmps.len { if ct_icmps[k] == user { ct_icmp_bits[k] |= (1 as i64) << opno; found = true; } }
             if !found { ct_icmps.push(user); ct_icmp_bits.push((1 as i64) << opno); }
             return CTA_CONTINUE;
+        }
+        ct_icmp_captured = true;
+        return CTA_STOP;
+    }
+    if ct_kind == CTK_IS_PTR_ICMP {
+        // comparison against a value loaded from a global variable
+        if is_inst_op(user, OP_ICMP) {
+            let other = op(user, 1 - ((u - vals[user].ops) as i64));
+            if is_inst_op(other, OP_LOAD) && vals[op(other, 0)].kind == VK_GVAR { return CTA_CONTINUE; }
         }
         ct_icmp_captured = true;
         return CTA_STOP;
@@ -343,5 +353,13 @@ fn ct_alloca_cmp_tracker(a: i32) -> bool {
     ct_icmp_bits.resize(0);
     ct_walk(a, 0);
     ct_kind = CTK_SIMPLE;
+    return ct_icmp_captured;
+}
+
+// PointerMayBeCaptured(MI, &CustomCaptureTracker) of InstSimplify's computePointerICmp: true if captured
+fn ct_captured_for_pointer_icmp(v: i32) -> bool {
+    ct_kind = CTK_IS_PTR_ICMP;
+    ct_icmp_captured = false;
+    ct_walk(v, 0);
     return ct_icmp_captured;
 }

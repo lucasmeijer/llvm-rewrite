@@ -12,6 +12,7 @@
 // The SimplifyQuery is SQ { cxt, undef } (context instruction, CanUseUndef); DT/TLI/AC are global
 // (dt_get, tli_cur_fn, assumptions fail loudly in vt.goose). RecursionLimit = 3 as in LLVM.
 import std;
+import capture;
 import speculate;
 import ir;
 import irutil;
@@ -1549,8 +1550,7 @@ fn is_alloc_like_value(v: i32) -> bool { is_callbase(v) && is_alloc_like_fn(v) }
 
 // PointerMayBeCaptured with the CustomCaptureTracker of computePointerICmp
 fn alloc_captured_for_icmp(mi: i32) -> bool {
-    is_not_ported("capture tracking (PointerMayBeCaptured)");
-    return true;
+    return ct_captured_for_pointer_icmp(mi);
 }
 
 recursive fn simplify_icmp_of_bools(p: i64, l: i32, r: i32, q: SQ) -> i32 {
