@@ -37,6 +37,12 @@ PassManagerImpl.h, lib/IR/PassManager.cpp) that change optimized output, for imp
   `registerAssumption` (loop peeling, JumpThreading's cloning) is never seen by later passes. Passes that register:
   InstCombine (builder callback), SimplifyCFG (3 sites), PromoteMemToReg, InlineFunction, LoopRotate, LoopUnroll,
   UnrollRuntime, SimpleLoopUnswitch, AssumeBundleBuilder, VPlan.
+- **The AssumptionCache scans lazily**: `AssumptionAnalysis::run` returns an empty cache; `scanFunction` runs on the
+  first `assumptions()` / `assumptionsFor()` query, and `registerAssumption` is a no-op before that. So assumes a
+  pass inserts before anyone queries (e.g. `salvageKnowledge(I)` without AC in LICM with
+  `-enable-knowledge-retention`) are found by the scan, in function order, and then help later queries in the same
+  pass (GVN/pr64598.ll under `licm --enable-knowledge-retention`: the salvaged deref assume lets LICM promote).
+  Verified with impl/jai (ac_scan in analysis_base.jai).
 - GlobalsAA (a module analysis) is stateless too: only an explicit abandon (`invalidate<globals-aa>`) drops it
   (GlobalsModRef.cpp:824).
 

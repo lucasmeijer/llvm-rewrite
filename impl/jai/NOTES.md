@@ -1413,11 +1413,10 @@ Still slow / known:
   - **Block numbers.** `SimplifyCFGPass::run` calls `F.renumberBlocks()` after any change (and
     `DT->updateBlockNumbers()`); mem2reg orders PHI blocks by number, so the renumbering decides the `.N` version
     suffixes of SROA's phis later (fbench.ll). `fn_renumber_blocks` in domtree.jai; nothing else renumbers IR blocks.
-  - **ExprValueMap order** (open, linpack-pc.ll): SCEV keeps every value with the same SCEV in insertion order and
-    SCEVExpander reuses the first dominating one. slp-vectorizer + loop-unroll on dgefa reproduces it standalone:
-    our SLP/SCEV registers `%wide.trip.count` before `%9` (both `zext nneg i32 %2`), LLVM `%9` first. The first
-    registration comes from strengthenNoWrapFlags -> getSignedRange -> getConstantMaxBackedgeTakenCount inside a
-    getGEPExpr reached from SLP's getPointersDiff; the query order up to there differs somewhere.
+  - **ExprValueMap order** (fixed, linpack-pc.ll): SCEV keeps every value with the same SCEV in insertion order and
+    SCEVExpander reuses the first dominating one. get_pointers_diff created getSCEV(PtrB) before getSCEV(PtrA)
+    (`f(scev(b), scev(a))`); LLVM creates A first. Found by tracing createSCEV in LLVM with gdb against
+    `-jai-trace-create-scev` (knowledge/llvm/scalar-evolution.md, "Creation order matters downstream").
 - DependenceAnalysis is a per-query object (`da_new`): LoopInterchange builds one per run, `print<da>` one per
   function. `Da_Dependence` is one struct for Dependence and FullDependence (`confused`). Loop levels are u64 masks
   (more than 62 levels fails loudly). `findArrayDimensions` sorts terms by SCEV pointer in LLVM; we use Scev_Id
@@ -1426,11 +1425,10 @@ Still slow / known:
   current loop is the new inner loop and the rest of the LPM runs on it (LLVM does the same). `cache` profitability
   (LoopCacheAnalysis) fails loudly; -loop-interchange-reduction-to-mem is ported. `is_constant` is a Jai builtin
   (compile-time constness), not isa<Constant>: use `is_const`.
-- Remaining failures (2026-11-13): pipeline-O2 only linpack-pc (ExprValueMap order above). perf-corpus: oggenc
-  (mergeConditionalStores with 5+ store addresses and 2+ common ones: SmallPtrSet hash order) and sqlite3 (SLP:
-  several external store groups, DenseMap order). Phase-ordering: see "llvm-link, LTO pipelines, MergeFunctions"
-  (LTO pipelines, mergefunc, PGO options and -force-attribute are done). L1.o2-gaps: the `cache` profitability rule
-  (LoopCacheAnalysis).
+- L2.pipeline-O2 and L2.perf-corpus are COMPLETE (2026-11-13). oggenc's mergeConditionalStores and sqlite3's SLP
+  external store groups were hash-order spots that provably (resp. checked by permutation) cannot change LLVM's
+  output; see knowledge/llvm/simplifycfg.md and vectorizers.md. L1.o2-gaps: the `cache` profitability rule
+  (LoopCacheAnalysis) still fails loudly.
 - More pipeline-state fixes (each found with bisect + standalone rerun): the inliner's PHI trimming follows
   removeIncomingValueIf (backwards, last into the hole); LICM's call clones take the original name first (one
   LastUnique bump); CommonPointerBase's NW flags default to all(); ExpandMemCmp ported (pass_expand_memcmp.jai,
@@ -1529,3 +1527,28 @@ Still slow / known:
   in LLVM (UB in a release build) and fail loudly here.
 - Sweeps (`./harness/run sweep --impl jai --passes loop-reduce`, with and without `--extra=-mtriple=x86_64-unknown-linux-gnu`):
   8048-8073 of 8079 identical, 0 silent mismatches; the loud failures are the items above.
+
+## Sweep-up of L0-L2 remainders (2026-11-13, /root/jai_sweepup)
+
+- New files: `analysis_printers_misc.jai` (print<assumptions>, print-callgraph-sccs, print<phi-values>,
+  print<mem-derefs>, print<must-execute> with SimpleLoopSafetyInfo, print-must-be-executed-contexts using
+  attributor.jai's explorer with a fresh `atr`), `ic_ptrauth.jai` (ptrauth intrinsics and callees, trampolines,
+  gc.statepoint, `ic_call_with_bundles` = CallBase::Create(CB, Bundles)), `pass_make_guards_explicit.jai`.
+  The printer has a third annotation hook, `print_annot_info` (printInfoComment).
+- **AssumptionCache is lazily scanned** like LLVM's (ac_scan on the first query; registration before that is a
+  no-op). Code must read `ac_assumptions(ac)` / `ac_assumptions_for`, never `ac.assumes` before a scan.
+- InstCombine's cached AAResults (`ic_aar_state`) is reset at every run: it used to keep the DT/AC pointers of an
+  earlier run on the same function (freed meanwhile; the lazy AC turned that into heap corruption on lua.ll).
+- PSI: `psi_pass_bfi(f)` gives a pass the (PSI, BFI) LLVM's passes take (BFI only with a module profile summary);
+  used by loop-unroll, loop-load-elim and the LibCallSimplifier. LoopVectorize still uses psi_check (loopvec agent).
+- `-enable-knowledge-retention` is honoured by dce, licm (and allowed for loop-simplify, lcssa, loop-rotate,
+  instcombine, the loop adaptor, which never salvage).
+- `-denormal-fp-math[-f32]` add `denormal_fpenv` to every function without one (opt_set_function_attributes, which
+  now also runs for an unknown-arch triple, with CPU/features cleared).
+- `-verify-scev-strict` is accepted: our verify<scalar-evolution> does not recompute (it could only abort).
+- Still failing loudly (my units): ppc_fp128 arithmetic (DoubleAPFloat not ported: 6 InstCombine tests), scalable
+  vectors in load folding / masked scatter / SROA with known vscale, optimizeModularFormat, VP intrinsic costs,
+  LowerTypeTests CFI lowering, ADCE `--preserve-ll-uselistorder`, LoopCacheAnalysis.
+- Sweeps after these changes (0 differs everywhere): instcombine 8538/8550 identical (12 loud), instcombine
+  --with-test-flags 10868/10927 (59 loud), simplifycfg, loop-rotate, make-guards-explicit, function(loop-mssa(licm)),
+  dce/licm with --enable-knowledge-retention all 100%, slp-vectorizer --with-test-flags 10926/10982 (56 loud).

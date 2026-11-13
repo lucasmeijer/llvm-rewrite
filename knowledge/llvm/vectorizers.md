@@ -89,7 +89,10 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - Order-sensitive containers: `reorderBottomToTop`'s PriorityQueue (equal user indices: libstdc++ heap order decides
   OrdersUses' insertion order and so ties), `computeMinimumValueSizes`' `ExtraBitWidthNodes` (DenseSet<unsigned>:
   begin() is bucket order, hash = key * 37 in 64 buckets), `collectUserStores` (DenseMap keyed by pointers: hash
-  order; the jai port fails loudly when it matters).
+  order). The collectUserStores order is only read by reorderTopToBottom's OrdersUses (ExternalUserReorderMap), so
+  the jai port picks an order and recomputes the chosen best order for every permutation of each ambiguous list,
+  failing loudly only if the choice differs (sqlite3.ll -O2 has several groups but one answer; LLVM's output is the
+  same with very different heap layouts, e.g. `GLIBC_TUNABLES=glibc.malloc.mmap_threshold=4096`).
 - VectorInstrContext hints only reach BasicTTI's getVectorInstrCost, which ignores them: on X86 they do not change
   any cost.
 

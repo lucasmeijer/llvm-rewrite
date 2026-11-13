@@ -654,8 +654,10 @@ scev_simplify_query :: () -> Simplify_Query {
     return q;
 }
 
+scev_trace_create := false;   // -jai-trace-create-scev: print every createSCEV (compare with gdb on LLVM, see NOTES.md)
 // createSCEV
 sc_create_scev :: (v: Value_Id) -> Scev_Id {
+    if scev_trace_create print("createSCEV %\n", vname(v));
     if !sc_is_scevable(vtype(v)) return sc_get_unknown(v);
     k := vkind(v);
     if k == .INST {

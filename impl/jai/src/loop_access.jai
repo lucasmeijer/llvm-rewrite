@@ -31,7 +31,10 @@ get_pointers_diff :: (elem_a: Type_Id, ptr_a: Value_Id, elem_b: Type_Id, ptr_b: 
         if ap_min_signed_bits(off_b) > 64 return false, 0;   // trySExtValue
         val = ap_sext_value(off_b);
     } else {
-        ok, diff := sc_compute_constant_difference(sc_get_scev(ptr_b), sc_get_scev(ptr_a));
+        // getSCEV(PtrA) before getSCEV(PtrB): the creation order decides ExprValueMap's order (SCEVExpander reuse)
+        sa := sc_get_scev(ptr_a);
+        sb := sc_get_scev(ptr_b);
+        ok, diff := sc_compute_constant_difference(sb, sa);
         if !ok return false, 0;
         if ap_min_signed_bits(diff) > 64 return false, 0;
         val = ap_sext_value(diff);

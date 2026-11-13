@@ -138,3 +138,18 @@ passing 243/247 `print<scalar-evolution>` lines of `tests/analysis/scev` + `Anal
   runtime-unroll remainder computes in i32, while a recomputation (or `invalidate<scalar-evolution>` first) gives i64
   `%wide.trip.count` (tests/function/O0/memory/buffers.ll). Within one adaptor both agree, since the function never
   loses its result.
+
+## Creation order matters downstream (verified with the Jai port, linpack-pc.ll -O2)
+
+- `ExprValueMap` keeps, per SCEV, the values that map to it in **insertion order** (a SetVector), and
+  `SCEVExpander::FindValueInExprValueMap` reuses the first dominating one. Two values with the same SCEV (e.g. two
+  `zext nneg i32 %n to i64` in different blocks) are therefore told apart by which `getSCEV` ran first, possibly in a
+  much earlier pass that left SCEV cached: in linpack-pc's dgefa, SLP's `getPointersDiff` queries decide which zext
+  `loop-unroll`'s runtime trip count reuses.
+- `getPointersDiff` calls `getSCEV(PtrA)` then `getSCEV(PtrB)` (separate statements) and only then
+  `computeConstantDifference(B, A)`; a port that writes `diff(scev(b), scev(a))` creates them in the wrong order.
+  More generally the oracle binary is built by clang (`readelf -p .comment`), which evaluates call arguments left to
+  right, so `f(getSCEV(X), getSCEV(Y))` in LLVM source creates X first.
+- How to find such an order difference: LLVM's `opt` has symbols, so gdb can trace creation without a debug build:
+  `break llvm::ScalarEvolution::createSCEV` with `printf "%s\n", (char*)((char*(*)(void*))'llvm::Value::getName() const')($rsi)`
+  (run `instnamer` first so every value has a name), against impl/jai's `-jai-trace-create-scev`.

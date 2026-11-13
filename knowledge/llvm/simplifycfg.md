@@ -68,6 +68,10 @@ Facts verified while porting `llvm/lib/Transforms/Utils/SimplifyCFG.cpp` (LLVM 2
 - `dropUnknownNonDebugMetadata` (hence `dropUBImplyingAttrsAndMetadata`) never drops `!DIAssignID`
   (Metadata.cpp:1713). Conditional-faulting hoisting then deletes the store's `#dbg_assign` markers and the
   attachment itself (hoistConditionalLoadsStores, hoist-loads-stores-with-cf.ll `debug_metadata_diassign`).
+- mergeConditionalStores iterates `CommonAddresses` (a SmallPtrSet: pointer-hash order above 4 elements), but the
+  order cannot matter: mergeConditionalStoreToAddress first requires a *unique* store in PTB/PFB and in QTB/QFB
+  (findUniqueStoreInBlocks, any address) and changes nothing when that fails, so with two or more common addresses
+  every call is a no-op (oggenc.ll -O2).
 - mergeConditionalStoreToAddress builds the merged condition with `QB` at `PostBB->getFirstInsertionPt()`
   (head bit set): the new xor/or go in front of PostBB's leading records, and SplitBlockAndInsertIfThen at that
   iterator keeps the records with the tail block.

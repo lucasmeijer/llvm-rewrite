@@ -354,3 +354,26 @@ Verified by the goose port (per-function sweep of the imported InstCombine tests
   push).
 - SoleWriteToDeadLocal lets tryToSinkInstruction sink a call that writes only to an alloca (getForDest) whose users
   are, through GEPs and addrspacecasts, only that call.
+
+## Smaller facts (verified with impl/jai, InstCombine tests listed)
+
+- `!annotation` is copied by the IRBuilder inserter onto every instruction created while visiting I
+  (`copyMetadata(*AnnotationMetadataSource, MD_annotation)`) and onto the result that replaces I (annotations.ll,
+  new-inst-dbgloc-overwrite.ll).
+- PSI/BFI: InstCombinePass::run takes `PSI = getCachedResult<ProfileSummaryAnalysis>` and computes BFI *before* the
+  combine loop when PSI has a summary; LibCallSimplifier's shouldOptimizeForSize(BB) uses them (fputs-opt-size.ll).
+  LoopUnrollPass and LoopLoadElimination do the same before simplifying loops; unroll pragmas override PGSO
+  (`hasUnrollTransformation(L) != TM_ForcedByUser && shouldOptimizeForSize(...)`), and a huge working set turns peeling
+  off. LoopFullUnrollPass passes null PSI/BFI.
+- transformCallThroughTrampoline: with a `nest` parameter the new call is `CallInst::Create(NewFTy, NestF, ...)`
+  (tail kind, cc, attributes with the nest attribute spliced in, debug location only); without one the call's
+  callee is just replaced (`setCalledFunction(FTy, NestF)`).
+- gc.statepoint: the relocates are the statepoint's users then its landing pad's; dead relocates are erased,
+  undef/null derived pointers fold, `nonnull` is added; the `gc-live` bundle is shrunk to the live values with
+  `CallBase::Create(&Call, NewBundle)` (other bundles first, gc-live last) and the relocate indices rewritten.
+- ptrauth: `auth(sign(p,k,d),k,d) -> p` and the resign combinations, `auth(ptrtoint(ptrauth const))` via
+  `isKnownCompatibleWith`; a call through `inttoptr(ptrauth.sign/resign)` or a `ptrauth` constant with a matching
+  `"ptrauth"` bundle becomes a direct call (`CallBase::Create(CI, Bundles)`: no metadata but the debug location).
+  `load/store` through `llvm.protected.field.ptr` become `ptrauth.auth/sign` with key 2 (AArch64 DA) even on x86.
+- `-instcombine-verify-known-bits` aborts on a mismatch only; `-instcombine-code-sinking=0` disables
+  getOptionalSinkBlockForInst; `-disable-i2p-p2i-opt` is CastInst::isEliminableCastPair's case 7.

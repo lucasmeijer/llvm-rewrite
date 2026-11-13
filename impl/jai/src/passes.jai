@@ -1520,6 +1520,7 @@ opt_main :: () {
             continue;
         }
         if a == "-jai-print-pipeline" { jai_print_pipeline = true; continue; }
+        if a == "-jai-trace-create-scev" { scev_trace_create = true; continue; }
         if begins_with(a, "-") && a != "-" {
             if parse_cl_opt(a) continue;
             fatal("unsupported option '%'", a);

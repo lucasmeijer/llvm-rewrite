@@ -29,3 +29,23 @@ What the `::analysis` check compares (see `docs/testing.md`). Verified with opt 
   has an access; the header is `MemorySSA for function: f` / `MemorySSA (walker) for function: f`. The function is
   printed like the module printer prints it (attribute-group references `#N`; metadata numbered like a single-function print: module-level slots, then this function's;
   numbered struct types). Details: `knowledge/llvm/alias-analysis-and-memoryssa.md`.
+- **Small printers** (verified with impl/jai/src/analysis_printers_misc.jai, Analysis/{AssumptionCache,CallGraph,
+  MustExecute,PhiValues} and ValueTracking/*deref*):
+  - `print<assumptions>` (AssumptionCache.cpp): `Cached assumptions for function: f`, then per assume in
+    AssumeHandles order: `  ` + `*Cond` (an instruction prints with its own two leading spaces, so 4 in total), or
+    for a bundle-only assume `  [ "tag"(ty %v, ...), ... ]` (inputs with `printAsOperand(OS)` = with type).
+  - `print-callgraph-sccs`: `SCCs for the program in PostOrder:` then `\nSCC #N: f, g` (scc_iterator from the
+    external calling node, nodes in SCC order, `external node` for the null-function nodes), ` (Has self-loop).` for
+    a single-node SCC with a self edge; one final newline.
+  - `print<phi-values>`: getValuesForPhi on every phi in block order first, then `PHI %p has values:` and the non-phi
+    reachable values in SmallSetVector (insertion) order: instructions as `*I`, other values as `  ` + `*V` (so a
+    global prints its whole definition line `@X = common global i32 0`); `  NONE` / `  UNKNOWN`.
+  - `print<mem-derefs>`: for each load in order, isDereferenceablePointer and isDereferenceableAndAlignedPointer with
+    `SimplifyQuery(DL, LI)` (no TLI/DT/AC); one line per load (duplicates kept): `  ` + `V->print` + `\t(aligned)` or
+    `\t(unaligned)`. Looks through gc.relocate (getDerivedPtr).
+  - `print<must-execute>` prints the function (`F.print` with an annotation writer) with ` ; (mustexec in: H)` or
+    ` ; (mustexec in N loops: H1, H2)` after the metadata of each instruction (printInfoComment, after the gc.relocate
+    comment), innermost loop first; the test per loop is **SimpleLoopSafetyInfo** (blockMayThrow = any block of the
+    loop may throw) or isGuaranteedToExecuteForEveryIteration, not the ICF variant LICM uses.
+  - `print-must-be-executed-contexts`: `-- Explore context of: *I` then `  [F: f] *CI` for the explorer's range
+    (ExploreInterBlock/CFGForward/CFGBackward all true, LI/DT/PDT getters always compute).
