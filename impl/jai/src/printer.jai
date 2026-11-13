@@ -890,7 +890,7 @@ write_attribute :: (a: *Attr, in_group: bool) {
         case .Initializes;
             out("initializes(");
             for a.lo {
-                if it_index > 0 outc(#char ",");
+                if it_index > 0 out(", ");   // ConstantRangeList::print: interleaveComma
                 outc(#char "("); out_s64(cast,no_check(s64) it); out(", "); out_s64(cast,no_check(s64) a.hi[it_index]); outc(#char ")");
             }
             outc(#char ")");

@@ -1097,6 +1097,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if pb_parse_cl_opt(name, value, has_value) return true;
     if forceattrs_parse_cl_opt(name, value, has_value) return true;   // pass_misc_module.jai
     if pgo_parse_cl_opt(name, value, has_value) return true;   // pass_lto_misc.jai
+    if merge_functions_parse_cl_opt(name, value, has_value) return true;   // pass_merge_functions.jai
     if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)
     if expand_memcmp_parse_cl_opt(name, value, has_value) return true;   // pass_expand_memcmp.jai
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)

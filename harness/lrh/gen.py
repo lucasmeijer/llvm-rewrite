@@ -232,6 +232,19 @@ def convert_run(run: str) -> tuple[str | None, str, str]:
         return None, "", f"cannot tokenize: {e}"
     if not toks or toks[0] != "opt":
         return None, "", "not an opt invocation"
+    # `-p X` / `-p=X` is opt's short alias of -passes=X: write it in the long form
+    norm, k = [toks[0]], 1
+    while k < len(toks):
+        if toks[k] in ("-p", "--p") and k + 1 < len(toks):
+            norm.append("-passes=" + toks[k + 1])
+            k += 2
+            continue
+        if toks[k].startswith(("-p=", "--p=")):
+            norm.append("-passes=" + toks[k].split("=", 1)[1])
+        else:
+            norm.append(toks[k])
+        k += 1
+    toks = norm
     passes = [t.split("=", 1)[1] for t in toks if t.startswith(("-passes=", "--passes="))]
     if any(re.search(r"(^|[,(])(dot|view)-", p) for p in passes) or any(t.startswith(("-dot-", "--dot-")) for t in toks):
         return None, "", "writes .dot files"
