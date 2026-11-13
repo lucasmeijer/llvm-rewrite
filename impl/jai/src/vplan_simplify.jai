@@ -218,7 +218,15 @@ vp_simplify_recipe :: (def: Vp_Rec) {
     if k == .REPLICATE && vr(def).predicated && inst_op(vp_underlying_instr(def)) == .STORE {
         all := true;
         for i: 0..vpm_num_ops_without_mask(def)-1 if !vp_is_uniform_across_vfs_and_ufs(vp_op(def, i)) all = false;
-        if all && vp_is_header_mask(vp_op(def, vp_nops(def) - 1)) vp_unported("unmasking uniform predicated stores (simplifyRecipe)");
+        if all && vp_is_header_mask(vp_op(def, vp_nops(def) - 1)) {
+            ops: [..] Vp_Val; ops.allocator = temp;
+            for i: 0..vpm_num_ops_without_mask(def)-1 array_add(*ops, vp_op(def, i));
+            un := vp_new_replicate(vp_underlying_instr(def), ops, vr(def).single_scalar, NONE, vr(def).flags, vr(def).md, vr(def).dl);
+            vp_insert_before(un, def);
+            if d != NONE && vr(un).def != NONE vp_rauw(d, vr(un).def);
+            vp_erase_recipe(def);
+            return;
+        }
     }
     b := vpb_before(def);
     can_create := k != .INSTRUCTION || vv(d).uv == NONE;
@@ -464,8 +472,9 @@ vp_simplify_any_of :: (def: Vp_Rec, b: *Vp_Builder) {
 }
 // m_HeaderMask
 vp_is_header_mask :: (v: Vp_Val) -> bool {
+    // header_mask_match: only the abstract VPRegionValue matches; a materialized mask (icmp, active-lane-mask, ...)
+    // is an ordinary recipe value and does not
     if vv(v).kind == .REGION { return v == vb(vv(v).region).header_mask; }
-    vp_unported("m_HeaderMask on materialized masks");
     return false;
 }
 // VPBuilder::createWidenCast

@@ -388,8 +388,7 @@ vs_create_min_max_op :: (s: *Vp_State, rk: Recur_Kind, l: Value_Id, r: Value_Id)
     }
     c := vs_cmp(s, pred, l, r, "rdx.minmax.cmp");
     sel := vs_select(s, c, l, r, s.fmf, "rdx.minmax.select");
-    ok_ec, ec := fn_entry_count(s.f);
-    if is_inst(sel) && inst_op(sel) == .SELECT && ok_ec vp_unported("setExplicitlyUnknownBranchWeightsIfProfiled on profiled functions");
+    if is_inst(sel) && inst_op(sel) == .SELECT set_explicitly_unknown_branch_weights_if_profiled(sel, "loop-utils");
     return sel;
 }
 // createSimpleReduction (LoopUtils.cpp)

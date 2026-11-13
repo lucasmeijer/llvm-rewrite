@@ -50,6 +50,19 @@ from concurrent.futures import ThreadPoolExecutor
 with ThreadPoolExecutor(max_workers=os.cpu_count() or 8) as ex:
     outputs = list(ex.map(run_file, sorted(files)))
 
+# Intrinsics that passes create but that no test input mentions (LoopVectorize's masked div/rem): declared in a
+# scratch module so their attributes are read the same way.
+EXTRA_DECLS = '''
+declare <4 x i32> @llvm.masked.udiv.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
+declare <4 x i32> @llvm.masked.sdiv.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
+declare <4 x i32> @llvm.masked.urem.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
+declare <4 x i32> @llvm.masked.srem.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
+'''
+with tempfile.NamedTemporaryFile('w', suffix='.ll', delete=False) as _t:
+    _t.write(EXTRA_DECLS)
+outputs.append(run_file(_t.name))
+os.unlink(_t.name)
+
 def split_params(s):
     out, depth, cur = [], 0, ''
     for c in s:

@@ -259,7 +259,14 @@ lvp_try_to_create_widen_non_phi_recipe :: (lp: *Lv_Planner, r: Vp_Rec, range: *V
     if !vp_is_ir_opcode(o) return NONE;
     io := vp_ir_opcode(o);
     if io == .SDIV || io == .UDIV || io == .SREM || io == .UREM {
-        if lv_cm_is_predicated_inst(lp.cm, instr) vp_unported("masked div/rem intrinsics");
+        if lv_cm_is_predicated_inst(lp.cm, instr) {
+            name: string;
+            if io == {
+                case .UDIV; name = "llvm.masked.udiv"; case .SDIV; name = "llvm.masked.sdiv";
+                case .UREM; name = "llvm.masked.urem"; case .SREM; name = "llvm.masked.srem";
+            }
+            return vp_new_widen_intrinsic_no_call(iidn(name), vr(r).ops, vtype(instr), .{}, .[], vr(r).dl);
+        }
     }
     if io == .SDIV || io == .UDIV || io == .SREM || io == .UREM || io == .ADD || io == .AND || io == .ASHR || io == .FADD ||
        io == .FCMP || io == .FDIV || io == .FMUL || io == .FNEG || io == .FREM || io == .FSUB || io == .ICMP || io == .LSHR ||
@@ -491,9 +498,7 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
     lvp_optimize_induction_live_out_users(lp);
     if !vp_handle_multi_use_reductions() return false;
     // handleMultiUseReductions, handleMaxMinNumReductions, handleFindLastReductions
-    for vp_block_phis(header) if vr(it).kind == .REDUCTION_PHI {
-        if rk_is_fp_min_max_num(vr(it).rdx_kind) vp_unported("FP minnum/maxnum reductions (handleMaxMinNumReductions)");
-    }
+    if !vp_handle_max_min_num_reductions() return false;
     if !vp_handle_find_last_reductions() return false;
     vp_remove_branch_on_const(false);
     // createPartialReductions: X86 has no partial-reduction costs, so no partial reductions are formed
@@ -1222,7 +1227,103 @@ vp_new_widen_intrinsic :: (ci: Value_Id, id: Intrinsic_Id, ops: [] Vp_Val, ty: T
     return r;
 }
 
+// VPWidenIntrinsicRecipe(ID, CallArguments, Ty, Flags, Metadata, DL): memory effects from the intrinsic's attributes
+vp_new_widen_intrinsic_no_call :: (id: Intrinsic_Id, ops: [] Vp_Val, ty: Type_Id, flags: Vp_Flags, md: [] Vp_Md, dl: Md_Id) -> Vp_Rec {
+    r := vp_new_widen_intrinsic(NONE, id, ops, ty, flags, md, dl);
+    attrs := intrinsic_fn_attr_set(id);
+    me := attr_set_memory(attrs);
+    vr(r).may_read = !mem_only_writes(me);
+    vr(r).may_write = !mem_only_reads(me);
+    vr(r).may_side_effects = vr(r).may_write || !attr_set_has(attrs, .NoUnwind) || !attr_set_has(attrs, .WillReturn);
+    return r;
+}
 // VPlanTransforms::handleFindLastReductions (VPlanConstruction.cpp)
+// VPlanTransforms::handleMaxMinNumReductions
+vp_handle_max_min_num_reductions :: () -> bool {
+    min_or_max_compare_value :: (phir: Vp_Rec) -> Vp_Val {
+        r := vp_def(vp_op(phir, 1));
+        if r == NONE || !vp_is_with_ir_flags_kind(vr(r).kind) return NONE;
+        expected := lv_min_max_reduction_intrinsic(vr(phir).rdx_kind);
+        if !vp_is_intrinsic_match_kind(r) || vp_intrinsic_id(r) != expected return NONE;
+        if vp_op(r, 0) == vr(phir).def return vp_op(r, 1);
+        assert(vp_op(r, 1) == vr(phir).def, "Reduction phi operand expected");
+        return vp_op(r, 0);
+    }
+    region := vp_vector_loop_region();
+    Pair :: struct { phi: Vp_Rec; op: Vp_Val; }
+    todo: [..] Pair; todo.allocator = temp;
+    unsupported := false;
+    for r: vp_block_phis(vp_entry_basic_block(region)) {
+        if vr(r).kind == .WIDEN_INT_OR_FP_INDUCTION continue;
+        if vr(r).kind != .REDUCTION_PHI { unsupported = true; continue; }
+        if !rk_is_fp_min_max_num(vr(r).rdx_kind) { unsupported = true; continue; }
+        mo := min_or_max_compare_value(r);
+        if mo == NONE return false;
+        array_add(*todo, .{r, mo});
+    }
+    if todo.count == 0 return true;
+    if unsupported || !vp_has_scalar_tail() return false;
+    for bb: vp_depth_first_shallow(vp_entry_basic_block(region)) {
+        assert(vp_is_basic(bb), "expected an early VPlan without nested regions");
+        for r: vp_block_recipes(bb) if vp_may_write_to_memory(r) && !vpm_branch_on_count(r) return false;
+    }
+    latch := vp_exiting_basic_block(region);
+    lb := vpb_before(vp_terminator(latch));
+    all_nan: Vp_Val = NONE;
+    for todo {
+        nan := vr(vpb_fcmp(*lb, FCMP_UNO, it.op, it.op)).def;
+        all_nan = ifx all_nan != NONE then vr(vpb_or(*lb, all_nan, nan)).def else nan;
+    }
+    any_nan := vr(vpb_nary(*lb, VPI_ANY_OF, .[all_nan])).def;
+    middle := vp_middle_block();
+    mb := vpb_at(middle, vb(middle).first);
+    rdx_results: [..] Vp_Rec; rdx_results.allocator = temp;
+    for todo {
+        rr := vp_find_compute_reduction_result(it.phi);
+        assert(rr != NONE, "must find a ComputeReductionResult");
+        sel := vpb_select(*mb, any_nan, vr(it.phi).def, vp_op(rr, 0));
+        vp_set_operand(rr, 0, vr(sel).def);
+        assert(!array_find(rdx_results, rr), "RdxResult already used");
+        array_add(*rdx_results, rr);
+    }
+    term := vp_terminator(latch);
+    ok, a, b := vpm_branch_on_count(term);
+    assert(ok, "Unexpected terminator");
+    taken := vpb_icmp(*lb, ICMP_EQ, vp_op(term, 0), vp_op(term, 1));
+    any_exit := vpb_or(*lb, any_nan, vr(taken).def);
+    vpb_nary(*lb, VPI_BRANCH_ON_COND, .[vr(any_exit).def]);
+    vp_erase_recipe(term);
+    is_tc :: (v: Vp_Val) -> bool { return v == vpl.vector_trip_count || v == vpl.trip_count; }
+    for r: vp_block_phis(vp_scalar_preheader()) {
+        assert(vp_is_vp_phi(r), "expected VPPhi resume values");
+        vec_v := vp_op(r, 0);
+        d := vp_def(vec_v);
+        if d != NONE && array_find(rdx_results, d) continue;
+        if d != NONE && vr(d).kind == .DERIVED_IV {
+            divtc := vp_op(d, 1);
+            if vp_has_one_use(vec_v) && is_tc(divtc) {
+                sel := vpb_select(*mb, any_nan, vb(region).can_iv, divtc);
+                vp_move_after(d, mb.ip);
+                vp_set_operand(d, 1, vr(sel).def);
+                continue;
+            }
+        }
+        if !is_tc(vec_v) {
+            lv_dbg("Found resume phi we cannot update for VPlan with FMaxNum/FMinNum reduction.\n");
+            return false;
+        }
+        sel := vpb_select(*mb, any_nan, vb(region).can_iv, vec_v);
+        vp_set_operand(r, 0, vr(sel).def);
+    }
+    mterm := vp_terminator(middle);
+    mb = vpb_before(mterm);
+    mcond := vp_op(mterm, 0);
+    nt := vpb_not(*mb, any_nan);
+    nc := vpb_and(*mb, mcond, vr(nt).def);
+    vp_set_operand(mterm, 0, vr(nc).def);
+    return true;
+}
+
 vp_handle_find_last_reductions :: () -> bool {
     if vp_has_scalar_vf_only() return false;
     region := vp_vector_loop_region();
