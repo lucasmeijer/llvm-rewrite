@@ -115,6 +115,8 @@ drop_unnecessary_assumes_run :: (f: Value_Id, name: string) -> Preserved {
                         while k < a.count { if a.*[k].assume == assume array_ordered_remove_by_index(a, k); else k += 1; }
                     }
                     ac.assumes[idx] = na;
+                    vp := table_find_pointer(*ac_virtual, ac.fn);   // LLVM's long-lived cache holds the new one
+                    if vp table_set(*vp.registered, na, true);
                     ac_update_affected_values(ac, na);
                     erase_inst_with_metadata(assume);
                 }
