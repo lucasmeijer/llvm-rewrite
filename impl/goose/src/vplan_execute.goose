@@ -24,6 +24,7 @@ import vplan;
 import vplan_utils;
 import vplan_props;
 import vplan_interleave;
+import vecutils;
 
 // ---------------------------------------------------------------------------------------------
 // the IRBuilder<> (ConstantFolder) of the state
@@ -500,6 +501,15 @@ fn vpi_with_type_execute(r: i32) {
         vts_set(vpr[r].def, c_aggregate(vty, elts), false);
         return;
     }
+    if o == VPI_INTRINSIC {
+        var args: i32[>..<] = [];
+        for k in vp_nops(r) - 1 { args.push(vts_get(vp_op(r, k), true)); }
+        let id = vp_intrinsic_id(r);
+        if id != IID_umax && id != IID_smax && id != IID_umin && id != IID_smin { vp_unported("executing scalar intrinsics other than min/max"); }
+        let c = vxb_intrinsic(id as i64, [rty], args, vp_name(r));
+        vts_set(vpr[r].def, c, true);
+        return;
+    }
     vp_unported(str("executing VPInstructionWithType opcode ", o));
 }
 
@@ -655,6 +665,7 @@ fn vp_execute_recipe(r: i32) {
         return;
     }
     if k == VPR_INTERLEAVE { vp_interleave_execute(r); return; }
+    if k == VPR_WIDEN_INTRINSIC { vp_widen_intrinsic_execute(r); return; }
     if k == VPR_WIDEN_PHI { vts_execute_phi(r, false, vp_name(r)); return; }
     if k == VPR_REDUCTION_PHI {
         let in_loop = vpr[r].rdx_style != VRS_UNORDERED;
@@ -812,3 +823,35 @@ fn vts_execute_plan() {
     }
 }
 fn vts_single_succ_bb(bb: i32) -> i32 { if block_nsucc(bb) == 1 { block_succ(bb, 0) } else { -1 } }
+
+// VPWidenIntrinsicRecipe::execute (createVectorCall)
+fn vp_widen_intrinsic_execute(r: i32) {
+    let id = vpr[r].iid;
+    var tys: i32[>..<] = [];
+    let sty = vpv[vpr[r].def].ty;
+    if vu_overload_type_at_arg(id, -1, true) {
+        if ty_is_struct(sty) { vp_unported("struct-returning vector intrinsics"); }
+        tys.push(ty_vector(sty, vts_vf, false));
+    }
+    var args: i32[>..<] = [];
+    for k in vp_nops(r) {
+        let o = vp_op(r, k);
+        var a: i32 = -1;
+        if vu_scalar_op_at_arg(id, k, true) { a = vts_get_lane(o, 0); }
+        else { a = vts_get(o, vp_uses_first_lane_only(r, o)); }
+        if vu_overload_type_at_arg(id, k, true) { tys.push(vals[a].ty as i32); }
+        args.push(a);
+    }
+    let f = au_get_declaration(id as i64, tys);
+    let fty = globs[glob_of(f)].vty;
+    var opsv: i32[>..<] = [];
+    for a in args { opsv.push(a); }
+    opsv.push(f);
+    let ci = create_inst(OP_CALL, ty_fn_ret(fty), opsv);
+    insts[inst_of(ci)].ty2 = fty;
+    if is_fp_math_operator(ci) { insts[inst_of(ci)].fmf = vxb_fmf; }
+    vxb_insert(ci, "");
+    vp_apply_flags(r, ci);
+    vp_apply_metadata(r, ci);
+    if vals[ci].ty as i32 != T_VOID { vts_set(vpr[r].def, ci, false); }
+}

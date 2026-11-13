@@ -841,9 +841,16 @@ recursive fn vpsx_try_to_expand(s: i32) -> i32 {
     let k = sc_kind(s);
     if k == SC_CONST || k == SC_UNKNOWN { return vp_live_in(sc_value(s)); }
     if k == SC_ADD || k == SC_MUL {
-        if ty_kind(sc_ty(s)) == TK_PTR { vp_unported("VPSCEVExpander pointer adds"); }
         let nuw = sc_has_nuw(s);
         let nsw = sc_has_nsw(s);
+        if ty_kind(sc_ty(s)) == TK_PTR {
+            // a ptradd of the pointer base and the integer offset, matching SCEVExpander
+            let base = vpsx_try_to_expand(sc_get_pointer_base(s));
+            if base < 0 { return -1; }
+            let off = vpsx_try_to_expand(sc_remove_pointer_base(s));
+            if off < 0 { return -1; }
+            return vp_val(vpb_nary(VPI_PTR_ADD, [base, off], vpf_gep(if nuw { GEP_NUW } else { 0 }), vpsx_dl, "", -1));
+        }
         let o = if k == SC_ADD { OP_ADD } else { OP_MUL };
         let mark = vpsx_stack.len;
         var j = sc_nops(s) - 1;
@@ -873,7 +880,24 @@ recursive fn vpsx_try_to_expand(s: i32) -> i32 {
         let opc = if k == SC_TRUNC { OP_TRUNC } else if k == SC_ZEXT { OP_ZEXT } else { OP_SEXT };
         return vp_val(vpb_scalar_cast(opc, o, sc_ty(s), vpsx_dl, vp_default_flags(opc as i32, sc_ty(s))));
     }
-    if k == SC_UMAX || k == SC_SMAX || k == SC_UMIN || k == SC_SMIN { vp_unported("VPSCEVExpander min/max"); }
+    if k == SC_UMAX || k == SC_SMAX || k == SC_UMIN || k == SC_SMIN {
+        let id = if k == SC_UMAX { IID_umax } else if k == SC_SMAX { IID_smax } else if k == SC_UMIN { IID_umin } else { IID_smin };
+        let mark = vpsx_stack.len;
+        var j = sc_nops(s) - 1;
+        while j >= 0 {
+            let ov = vpsx_try_to_expand(sc_op(s, j));
+            if ov < 0 { vpsx_stack.resize(mark); return -1; }
+            vpsx_stack.push(ov);
+            j--;
+        }
+        var res = vpsx_stack[mark];
+        // createScalarIntrinsic: the intrinsic id is a trailing i32 operand
+        for i in mark + 1..vpsx_stack.len {
+            res = vp_val(vpb_nary(VPI_INTRINSIC, [res, vpsx_stack[i], vp_const_int(T_I32, id as u64)], vpf_none(), vpsx_dl, "", sc_ty(s)));
+        }
+        vpsx_stack.resize(mark);
+        return res;
+    }
     return -1;
 }
 var vpsx_stack: i32[>..<];

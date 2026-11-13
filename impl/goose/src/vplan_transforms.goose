@@ -664,7 +664,15 @@ fn vpt_narrow_to_single_scalar_recipes() {
             if k == VPR_REPLICATE && vpr[r].opcode == OP_STORE as i32 && vp_is_single_scalar(vp_op(r, 1)) {
                 vp_unported("narrowing replicated stores to a single-scalar address");
             }
-            if k == VPR_WIDEN_INTRINSIC { vp_unported("narrowing widened intrinsics"); }
+            if k == VPR_WIDEN_INTRINSIC {
+                // only llvm.masked.{u,s}{div,rem} with a first-lane-only use are narrowed
+                let id = vpr[r].iid;
+                if vp_only_first_lane_used(vpr[r].def) && (id == IID_masked_udiv || id == IID_masked_sdiv || id == IID_masked_urem || id == IID_masked_srem) {
+                    vp_unported("narrowing masked division intrinsics");
+                }
+                r = prev;
+                continue;
+            }
             if !vp_is_single_scalar(vpr[r].def) { r = prev; continue; }
             let def = vpr[r].def;
             fn intro_bcast(opv: i32, u: i32) -> bool {

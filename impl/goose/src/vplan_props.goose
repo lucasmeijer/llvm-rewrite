@@ -47,7 +47,12 @@ fn vpi_opcode_may_read_or_write_memory(r: i32) -> bool {
         }
         return true;
     }
-    if o == VPI_INTRINSIC { vp_unported("VPInstruction::Intrinsic memory effects"); }
+    if o == VPI_INTRINSIC {
+        // !Intrinsic::getFnAttributes(ID).getMemoryEffects().doesNotAccessMemory()
+        let id = vp_intrinsic_id(r);
+        if id == IID_umax || id == IID_smax || id == IID_umin || id == IID_smin || id == IID_vscale { return false; }
+        vp_unported("VPInstruction::Intrinsic memory effects");
+    }
     if o == VPI_COMPUTE_REDUCTION_RESULT || o == VPI_RESUME_FOR_EPILOGUE || o == VPI_NUM_ACTIVE_LANES { return true; }
     return false;
 }

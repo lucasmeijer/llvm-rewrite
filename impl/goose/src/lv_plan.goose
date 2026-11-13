@@ -32,6 +32,10 @@ import vplan_props;
 import vplan_construct;
 import vplan_transforms;
 import vplan_interleave;
+import delinearization;
+import apint;
+import lv_cost;
+import vplan_cost;
 import loop_versioning;
 
 var lvp_plans: i32[>..<];        // VPlans (archive slots)
@@ -64,10 +68,11 @@ fn lvp_try_to_build_vplan1(allow_reordering: bool, force: bool, epilogue_status_
     if rpc_checks.len != 0 && !rpc_can_diff { lver_prepare_noalias_metadata(); lv_noalias_prepared = true; }
     vp_build_vplan0(lvp_l, lvl_widest_ind_ty, lvp_pse);
     vp_dt_build();
-    if lai_strides_k.len != 0 { vp_unported("replaceSymbolicStrides"); }
+    vpt_replace_symbolic_strides(lvp_pse);
     vpt_simplify_recipes();
     vpt_remove_dead_recipes();
     if !vp_create_header_phi_recipes(lvp_pse, allow_reordering) { return false; }
+    vpt_replace_symbolic_strides(lvp_pse);
     let opt_for_size = !force && epilogue_status_opt_size;
     let thr = if force { flag_int("pragma-vectorize-scev-check-threshold", 128) } else { flag_int("vectorize-scev-check-threshold", 16) };
     if !vp_finalize_scev_predicates(lvp_pse, opt_for_size, thr) { return false; }
@@ -89,6 +94,51 @@ fn lvp_try_to_build_vplan1(allow_reordering: bool, force: bool, epilogue_status_
     vp_introduce_masks_and_linearize();
     lvp_plan1 = vp_save();
     return true;
+}
+
+// VPlanTransforms::replaceSymbolicStrides(Plan, PSE, StridesMap, VPDT) (VPDT: built after buildVPlan0)
+fn vpt_replace_symbolic_strides(pse: i32) {
+    if lai_strides_k.len == 0 { return; }
+    let ph = vp_succ(vph.entry, 1);
+    fn can_use(u: i32, i: i64) -> bool { vp_dt_dominates(ph, vpr[u].parent) }
+    var rw_from: i32[>..<] = [];
+    var rw_to: i32[>..<] = [];
+    for st in lai_strides_v {
+        let sv = sc_value(st);
+        let ps = pse_get_scev(pse, sv);
+        if !sc_is_const(ps) { continue; }
+        let ap = sc_ap(ps);
+        let ci = vp_live_in(sc_value(ps));
+        let svp = vp_get_live_in(sv);
+        if svp >= 0 { vp_replace_uses_with_if(svp, ci) { u, i => can_use(u, i) }; }
+        var us: i32[>..<] = [];
+        var u = vals[sv].first_use;
+        while u >= 0 { us.push(uses[u].user); u = uses[u].next; }
+        for x in us {
+            if !is_inst(x) || (iop(x) != OP_SEXT && iop(x) != OP_ZEXT) { continue; }
+            let xvp = vp_get_live_in(x);
+            if xvp < 0 { continue; }
+            let bw = ty_bits(vals[x].ty as i32);
+            let c = if iop(x) == OP_SEXT { ap_sext(ap, bw) } else { ap_zext(ap, bw) };
+            let cv = vp_live_in(ap_to_cint(vals[x].ty as i32, c));
+            vp_replace_uses_with_if(xvp, cv) { uu, ii => can_use(uu, ii) };
+        }
+        rw_from.push(sv);
+        rw_to.push(ps);
+    }
+    var rs: i32[>..<] = [];
+    vp_block_recipes(vph.entry, rs);
+    for r in rs {
+        if vpr[r].kind != VPR_EXPAND_SCEV { continue; }
+        let e = vpr[r].expr;
+        var ne = e;
+        for k in rw_from.len { ne = dl_rewrite_param(ne, rw_from[k], rw_to[k]); }
+        if ne != e {
+            let nv = vp_get_or_create_value_for_scev(ne);
+            vp_rauw(vpr[r].def, nv);
+            if vph.trip_count == vpr[r].def { vph.trip_count = nv; }
+        }
+    }
 }
 
 // buildVPlans(VPlan1, MinVF, MaxVF)
@@ -494,16 +544,66 @@ fn lvp_make_scalarization_decisions() {
     }
 }
 
+// CallWideningDecision::KindTy
+let CWD_SCALARIZE: i64 = 0; let CWD_INTRINSIC: i64 = 1; let CWD_VARIANT: i64 = 2;
+// VPCostContext::willBeScalarized(I, VF)
+fn lvp_will_be_scalarized(i: i32, vf: i64) -> bool {
+    return cm_is_scalar_with_predication_c(i, vf) || cm_is_uniform_after_vectorization(i, vf) || cm_is_forced_scalar(i, vf) ||
+           (vf > 1 && cm_is_profitable_to_scalarize(i, vf));
+}
+// decideCallWidening(VPI, Ops, VF, CostCtx) (no vector-library variants: legality fails loudly on mappings)
+fn lvp_decide_call_widening(vpi: i32, ops: const i32[:], vf: i64) -> i64 {
+    let ci = vp_underlying_instr(vpi);
+    if vf == 1 || lvp_will_be_scalarized(ci, vf) { return CWD_SCALARIZE; }
+    let called = vp_ir(vp_op(vpi, vpm_num_ops_without_mask(vpi) - 1));
+    let rty = vpv[vpr[vpi].def].ty;
+    let id = laa_vector_intrinsic_id_for_call(ci);
+    if id != 0 && vpc_is_free_scalar_intrinsic(id) { return CWD_SCALARIZE; }
+    let sc = vpc_replicate_call_cost(called, rty, ops, false, vf);
+    if id != 0 {
+        let fmf = if vpr[vpi].f.ot == VOT_FMF || vpr[vpi].f.ot == VOT_FCMP { vpr[vpi].f.fmf } else { 0 };
+        let ic = vpc_widen_intrinsic_call_cost(id, rty, ci, ops, fmf, vf);
+        if lc_valid(ic) && sc >= ic { return CWD_INTRINSIC; }
+    }
+    return CWD_SCALARIZE;
+}
+// VPWidenIntrinsicRecipe(CI, ID, Ops, Ty, Flags, MD, DL)
+fn vp_new_widen_intrinsic(ci: i32, id: i32, ops: const i32[:], ty: i32, from: i32, dl: i32) -> i32 {
+    let r = vp_new_single_def(VPR_WIDEN_INTRINSIC, ops, ty, ci, dl);
+    vpr[r].iid = id;
+    vpr[r].may_read = inst_may_read_memory(ci);
+    vpr[r].may_write = inst_may_write_memory(ci);
+    vpr[r].may_se = inst_may_have_side_effects(ci);
+    vpr[r].f = vpr[from].f;
+    vp_md_copy(r, from);
+    return r;
+}
+
 fn lvp_make_call_widening_decisions() {
     let region = vp_vector_loop_region();
     var blocks: i32[>..<] = [];
     vp_depth_first(vpb[region].entry, false, blocks);
     vp_only_basic(blocks);
     for b in blocks {
-        var r = vpb[b].first;
-        while r >= 0 {
-            if vpr[r].kind == VPR_INSTRUCTION && vpr[r].opcode == OP_CALL as i32 { vp_unported("calls in the loop (makeCallWideningDecisions)"); }
-            r = vpr[r].next;
+        var rs: i32[>..<] = [];
+        vp_block_recipes(b, rs);
+        for vpi in rs {
+            if vpr[vpi].kind != VPR_INSTRUCTION || vpr[vpi].opcode != OP_CALL as i32 || vpv[vpr[vpi].def].uv < 0 { continue; }
+            let ci = vp_underlying_instr(vpi);
+            var ops: i32[>..<] = [];
+            for k in cb_nargs(ci) { ops.push(vp_op(vpi, k)); }
+            let d = lvp_decide_call_widening(vpi, ops, lvp_range_start);
+            let same = lvp_decide() { vf => lvp_decide_call_widening(vpi, ops, vf) == d };
+            var nr: i32 = -1;
+            if d == CWD_INTRINSIC {
+                if cb_nbundles(ci) != 0 { vp_unported("widening intrinsic calls with operand bundles"); }
+                nr = vp_new_widen_intrinsic(ci, laa_vector_intrinsic_id_for_call(ci), ops, vpv[vpr[vpi].def].ty, vpi, vpr[vpi].dl);
+            } else {
+                nr = lvp_handle_replication(vpi);
+            }
+            vp_insert_before(nr, vpi);
+            vp_rauw(vpr[vpi].def, vpr[nr].def);
+            vp_erase_recipe(vpi);
         }
     }
 }

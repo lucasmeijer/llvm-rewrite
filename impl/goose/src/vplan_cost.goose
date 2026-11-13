@@ -571,15 +571,19 @@ fn vpc_widen_memory_cost(r: i32, vf: i64) -> i64 {
 
 // VPWidenIntrinsicRecipe::computeCallCost
 fn vpc_widen_intrinsic_cost(r: i32, vf: i64) -> i64 {
-    let id = vpr[r].iid;
-    let sret = vp_scalar_type(vpr[r].def);
+    var ops: i32[>..<] = [];
+    xv_to(vpr[r].ops, ops);
+    let fmf = if vpr[r].f.ot == VOT_FMF || vpr[r].f.ot == VOT_FCMP { vpr[r].f.fmf } else { 0 };
+    return vpc_widen_intrinsic_call_cost(vpr[r].iid, vp_scalar_type(vpr[r].def), vp_uv(vpr[r].def), ops, fmf, vf);
+}
+// VPWidenIntrinsicRecipe::computeCallCost(ID, Operands, R, VF, Ctx): R's scalar type, underlying value and FMF
+fn vpc_widen_intrinsic_call_cost(id: i32, sret: i32, uv: i32, opv: const i32[:], fmf: u8, vf: i64) -> i64 {
     if id == IID_experimental_vp_reverse && ty_is_int(sret) && ty_bits(sret) == 1 { return 0; }
-    let uv = vp_uv(vpr[r].def);
-    let n = vp_nops(r);
+    let n = opv.len;
     var args: i32[>..<] = [];
     var have_args = true;
     for k in n {
-        let v = vp_uv(vp_op(r, k));
+        let v = vp_uv(opv[k]);
         if v < 0 {
             if uv >= 0 && is_inst(uv) && iop(uv) == OP_CALL { args.push(cb_arg(uv, k)); continue; }
             have_args = false;
@@ -592,10 +596,9 @@ fn vpc_widen_intrinsic_cost(r: i32, vf: i64) -> i64 {
     let m = mk_mark();
     let im = ica_mark();
     let ii = if uv >= 0 && is_inst(uv) && call_iid(uv) != 0 { uv } else { -1 };
-    let fmf = if vpr[r].f.ot == VOT_FMF || vpr[r].f.ot == VOT_FCMP { vpr[r].f.fmf } else { 0 };
     let ic = ica_new(id as i64, rt, fmf, ii, TTI_INVALID);
     if have_args { for a in args { ica_add_arg(ic, a); } }
-    for k in n { ica_add_type(ic, lv_vec_ty(vp_scalar_type(vp_op(r, k)), vf)); }
+    for k in n { ica_add_type(ic, lv_vec_ty(vp_scalar_type(opv[k]), vf)); }
     let c = x86_intrinsic_cost(ic, LV_KIND);
     mk_release(m);
     ica_release(im);
