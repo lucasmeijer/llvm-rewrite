@@ -210,9 +210,37 @@ vp_interleave_execute :: (s: *Vp_State, r: Vp_Rec) {
     if s.vf.scalable vp_unported("scalable interleave groups");
     vecty := type_vector(cast(u64) (vf * factor), sty, false);
     res_addr := vs_get_lane(s, vp_op(r, 0), 0);
-    if vr(r).masked || vr(r).needs_mask_for_gaps vp_unported("masked interleave groups");
+    block_in_mask := vp_interleave_mask(r);
+    // createBitMaskForGaps
+    bit_mask_for_gaps :: (g: *Ig, vf: u32) -> Value_Id {
+        if ig_is_full(g) return NONE;
+        assert(!g.reverse, "Reversed group not supported.");
+        elts: [..] Value_Id; elts.allocator = temp;
+        for i: 0..vf-1 for j: 0..g.factor-1 array_add(*elts, const_int(ir.t_i1, ifx ig_get_member(g, j) != NONE then cast(u64) 1 else 0));
+        return const_vector_of(elts);
+    }
+    create_group_mask :: (s: *Vp_State, block_in_mask: Vp_Val, factor: u32, vf: u32, mask_for_gaps: Value_Id) -> Value_Id {
+        if block_in_mask == NONE return mask_for_gaps;
+        bm := vs_get(s, block_in_mask);
+        rep := NewArray(vf * factor, u32,, allocator = temp);
+        for i: 0..vf-1 for j: 0..factor-1 rep[i * factor + j] = i;   // createReplicatedMask
+        sh := irb_shuffle(*s.b, bm, NONE, rep, "interleaved.mask");
+        if mask_for_gaps != NONE return irb_binop(*s.b, .AND, sh, mask_for_gaps, "");
+        return sh;
+    }
     if inst_op(ip) == .LOAD {
-        ld := irb_load(*s.b, vecty, res_addr, g.align, false, "wide.vec");
+        mask_for_gaps: Value_Id = NONE;
+        if vr(r).needs_mask_for_gaps {
+            mask_for_gaps = bit_mask_for_gaps(g, vf);
+            assert(mask_for_gaps != NONE, "Mask for Gaps is required but it is null");
+        }
+        ld: Value_Id;
+        if block_in_mask != NONE || mask_for_gaps != NONE {
+            gm := create_group_mask(s, block_in_mask, factor, vf, mask_for_gaps);
+            f := get_or_insert_intrinsic_declaration(iidn("llvm.masked.load"), .[vecty, vtype(res_addr)]);
+            ld = irb_call(*s.b, f, .[res_addr, gm, const_poison(vecty)], "wide.masked.vec");
+            add_param_align(ld, 0, g.align);
+        } else ld = irb_load(*s.b, vecty, res_addr, g.align, false, "wide.vec");
         vp_apply_metadata(r, ld);
         vp_ig_add_metadata(g, ld);
         j := 0;
@@ -230,6 +258,8 @@ vp_interleave_execute :: (s: *Vp_State, r: Vp_Rec) {
         return;
     }
     sub_vt := type_vector(cast(u64) vf, sty, false);
+    store_mask_for_gaps := bit_mask_for_gaps(g, vf);
+    assert((store_mask_for_gaps != NONE) == vr(r).needs_mask_for_gaps, "Mismatch between NeedsMaskForGaps and MaskForGaps");
     stored := vp_interleave_stored_values(r);
     vecs: [..] Value_Id; vecs.allocator = temp;
     si := 0;
@@ -246,7 +276,13 @@ vp_interleave_execute :: (s: *Vp_State, r: Vp_Rec) {
     imask := NewArray(vf * factor, u32,, allocator = temp);
     for i: 0..vf - 1 for jj: 0..factor - 1 imask[i * factor + jj] = jj * vf + i;
     ivec := irb_shuffle(*s.b, wide, NONE, imask, "interleaved.vec");
-    st := irb_store(*s.b, ivec, res_addr, g.align);
+    st: Value_Id;
+    if block_in_mask != NONE || store_mask_for_gaps != NONE {
+        gm := create_group_mask(s, block_in_mask, factor, vf, store_mask_for_gaps);
+        f := get_or_insert_intrinsic_declaration(iidn("llvm.masked.store"), .[vtype(ivec), vtype(res_addr)]);
+        st = irb_call(*s.b, f, .[ivec, res_addr, gm]);
+        add_param_align(st, 1, g.align);
+    } else st = irb_store(*s.b, ivec, res_addr, g.align);
     vp_apply_metadata(r, st);
     vp_ig_add_metadata(g, st);
 }
