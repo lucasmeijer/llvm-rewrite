@@ -269,6 +269,42 @@ delin_find_array_dimensions_rec :: (terms: *[..] Scev_Id, sizes: *[..] Scev_Id) 
     return true;
 }
 
+// Ours, not LLVM's. Terms with the same number of factors keep their array_pod_sort order, i.e. SCEV pointer order
+// (heap layout; creation order is only a guess for it). findArrayDimensionsRec divides by the last term, so the result
+// can depend on that order: rerun it with every group of equal-count terms reversed and fail loudly if the outcome
+// differs. -delinearize-guess-address-order (ours) skips the check and keeps creation order.
+delin_guess_address_order := false;
+delinearization_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
+    if name == "delinearize-guess-address-order" { delin_guess_address_order = true; return true; }
+    return false;
+}
+delin_check_address_order :: (new_terms: [..] Scev_Id, counts: [..] s64) {
+    if new_terms.count < 2 return;
+    tie := false;
+    for 1..new_terms.count - 1 if counts[it] == counts[it - 1] && new_terms[it] != new_terms[it - 1] { tie = true; break; }
+    if !tie return;
+    a: [..] Scev_Id; a.allocator = temp;
+    b: [..] Scev_Id; b.allocator = temp;
+    for new_terms array_add(*a, it);
+    i := 0;
+    while i < new_terms.count {
+        j := i;
+        while j + 1 < new_terms.count && counts[j + 1] == counts[i] j += 1;
+        for < k: i..j array_add(*b, new_terms[k]);
+        i = j + 1;
+    }
+    sa: [..] Scev_Id; sa.allocator = temp;
+    sb: [..] Scev_Id; sb.allocator = temp;
+    ra := delin_find_array_dimensions_rec(*a, *sa);
+    rb := delin_find_array_dimensions_rec(*b, *sb);
+    same := ra == rb;
+    if same && ra {
+        if sa.count != sb.count same = false;
+        else for sa if it != sb[it_index] { same = false; break; }
+    }
+    if !same fatal("delinearization: the array dimensions depend on the SCEV pointer order (heap layout) of terms with the same number of factors; not reproducible (-delinearize-guess-address-order guesses creation order)");
+}
+
 // findArrayDimensions(SE, Terms, Sizes, ElementSize)
 delin_find_array_dimensions :: (terms: *[..] Scev_Id, sizes: *[..] Scev_Id, element_size: Scev_Id) {
     if terms.count < 1 || element_size == SCEV_NULL return;
@@ -289,15 +325,20 @@ delin_find_array_dimensions :: (terms: *[..] Scev_Id, sizes: *[..] Scev_Id, elem
         terms.*[j] = x;
     }
     if terms.count > 16 fatal("delinearization: sorting more than 16 parametric terms (std::sort's unstable introsort) is not supported yet");
+    // the terms before the division, for delin_check_address_order
+    sorted_terms: [..] Scev_Id; sorted_terms.allocator = temp;
+    for terms.* array_add(*sorted_terms, it);
     // divide by the element size
     for * t: terms.* {
         q, r := sc_divide(t.*, element_size);
         if !sc_is_zero(q) t.* = q;
     }
     new_terms: [..] Scev_Id; new_terms.allocator = temp;
+    counts: [..] s64; counts.allocator = temp;   // numberOfTerms of the term each new term came from (ours)
     for t: terms.* {
         // removeConstantFactors
         if sc_is_const(t) continue;
+        array_add(*counts, delin_number_of_terms(sorted_terms[it_index]));
         if sc_is_unknown(t) { array_add(*new_terms, t); continue; }
         if sc_is_mul(t) {
             factors: [..] Scev_Id; factors.allocator = temp;
@@ -307,6 +348,7 @@ delin_find_array_dimensions :: (terms: *[..] Scev_Id, sizes: *[..] Scev_Id, elem
         }
         array_add(*new_terms, t);
     }
+    if !delin_guess_address_order delin_check_address_order(new_terms, counts);
     if new_terms.count == 0 || !delin_find_array_dimensions_rec(*new_terms, sizes) {
         sizes.count = 0;
         return;

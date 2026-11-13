@@ -17,8 +17,13 @@ build's `-debug-only=gvn-sink`.
 - The order in which the VN maps are walked (`DenseMap` iteration, then an unstable `llvm::sort` by `rank`) does not
   reach the output: each VN's CHI args in a block are pushed contiguously and later `stable_sort`ed by VN. The
   hoisting list is however built by iterating `OutValue`, a `DenseMap<BasicBlock *, ...>` (block address order);
-  hoists into different blocks are independent in every test we have (no sweep difference with creation order).
-- Load keys are `(VN of the pointer, Type *)`, so two loads of different types from one address sort by type address.
+  hoists into different blocks are independent in every test we have (no sweep difference with creation order),
+  but not in general: `hoist()` checks operand availability when it gets to an entry ("The order in which hoistings
+  are done may influence the availability of operands"), so an instruction whose operand is hoisted into another
+  block in the same round depends on that order.
+- Load keys are `(VN of the pointer, Type *)`, so two loads of different types from one address sort by type address
+  (and are hoisted into a common block in that order). Primitive types live inside LLVMContextImpl, derived types
+  in its BumpPtrAllocator, so creation order is not their address order.
 - `Repl->moveBefore(Terminator)` adopts the terminator's debug records; `dropLocation()` follows.
 - Under `-O2 -enable-gvn-hoist` the pass runs right after `early-cse<memssa>` (and after `assume-simplify` with
   knowledge retention); `-enable-gvn-sink` adds `gvn-sink` and `simplifycfg<switch-range-to-icmp>` there.

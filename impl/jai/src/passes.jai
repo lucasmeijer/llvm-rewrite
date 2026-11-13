@@ -1119,6 +1119,8 @@ parse_cl_opt :: (arg: string) -> bool {
     if newgvn_parse_cl_opt(name, value, has_value) return true;   // pass_newgvn.jai
     if gvn_hoist_parse_cl_opt(name, value, has_value) return true;   // pass_gvn_hoist.jai
     if gvn_sink_parse_cl_opt(name, value, has_value) return true;   // pass_gvn_sink.jai
+    if delinearization_parse_cl_opt(name, value, has_value) return true;   // delinearization.jai
+    if loop_simplifycfg_parse_cl_opt(name, value, has_value) return true;   // pass_loop_simplifycfg.jai
     if fs_parse_cl_opt(name, value, has_value) return true;   // function_specialization.jai
     if dfa_parse_cl_opt(name, value, has_value) return true;   // pass_dfa_jump_threading.jai
     if constraint_elimination_parse_cl_opt(name, value, has_value) return true;   // pass_constraint_elimination.jai

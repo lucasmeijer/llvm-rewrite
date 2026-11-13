@@ -213,6 +213,30 @@
   printer prints `+Inf`/`-Inf` for (inf, -0) like LLVM (toString, then an equal value converts back).
 - Erased values keep their rows (`v_kind = DEAD`); nothing is compacted.
 
+## Heap/pointer address order: fail loudly, guess only behind our flags
+
+Policy (decided by /root): where LLVM's output depends on heap or pointer address order (DenseMap/SmallPtrSet
+iteration over pointers, sorts by pointer, `std::less<T *>` tie-breaks), impl/jai fails loudly by default and guesses
+(usually creation order) only behind an explicit flag of ours, `-<pass>-guess-address-order`. LLVM does not know
+these flags, so they cannot be swept against the oracle; they exist to look at what the guess would print.
+
+| Where | Fails when | Flag |
+| --- | --- | --- |
+| gvn-sink (`InstructionUseExpr` users sorted by address) | two candidates have the same users as a multiset in a different order | `-gvn-sink-guess-address-order` |
+| newgvn (`shouldSwapOperands` rank tie, predicate copy of an equality of two different equal-rank operands) | some predicate copy saw such a tie and a second iteration with the ties broken the other way reaches a different fixpoint (reachability, leaders, phi-of-ops temporaries) | `-newgvn-guess-address-order` |
+| gvn-hoist (`OutValue` is a `DenseMap<BasicBlock *>`; load keys contain the `Type *`) | an instruction hoisted into one block uses (also through GEPs) one hoisted into another block in the same round; or two loads of different types from one address hoist into one block | `-gvn-hoist-guess-address-order` |
+| delinearization (`array_pod_sort` of the terms by SCEV pointer) | findArrayDimensionsRec gives another result with every group of equal-factor-count terms reversed | `-delinearize-guess-address-order` |
+| loop-simplifycfg (`SmallPtrSet<BasicBlock *, 2>` of dead successors) | more than two dead successors (DT update order) | `-loop-simplifycfg-guess-address-order` |
+| codegenprepare, function-specialization, InstCombine fsqrt, attributor, SLP reorder | already fail loudly or check order independence where they meet pointer order (see their sections) | none |
+
+Audited and order-independent (no flag): memdep's NonLocalDepEntry sort (GVN only materializes unnamed values in
+that order), LazyCallGraph::removeDeadFunctions (RefSCCs split independently), getMinMaxRecurrence's chain (equivalent
+early returns), LoopSimplifyCFG/DSE/SimplifyCFG switch sets read for membership only, ScalarEvolution guards
+(membership), the verifier's phi sort (only the message order on invalid IR). Sweeps after the change: newgvn 10789
+identical, 0 differs, 12 loud (address order) of 10804; gvn-hoist 10809/10809; print<delinearization> 10809/10809;
+print<da> 10806/10807 (the 1 differs is stderr interleaving of a `+mpx` warning, not DA); loop-mssa(loop-simplifycfg)
+10805/10809 (4 loud).
+
 ## mem2reg and SROA (L1.mem2reg 29/30, L1.sroa 57/61)
 
 - Files: `pass_mem2reg.jai` (PromoteMemToReg; `promote_mem_to_reg(allocas, dt, ac)` is shared with SROA),
@@ -1718,6 +1742,8 @@ Still slow / next:
 - Sweeps: `newgvn` 10448/10452 identical, 1 differs (SCCP/pr27712.ll: an equality of two different constants on a
   dead edge is ordered by heap address in LLVM; see knowledge), 3 loud (ppc_fp128, x86 hadd known bits);
   `--per-function` 80898/80918, 2 differs (pr27712 and InstCombine/assume.ll @debug_interference, same cause);
+  since the address-order policy (section above) these fail loudly: `newgvn` 10789/10804 identical, 0 differs,
+  12 loud on the address order (`-newgvn-guess-address-order` restores the old guess);
   `--with-test-flags` 12044/13234, 0 differs (loud = other passes' options); `-enable-store-refinement`,
   `-enable-phi-of-ops=false`: same as plain; tests/perf/compile `newgvn`, `function(sroa),newgvn` and
   `default<O2> -enable-newgvn` 4/4 identical.

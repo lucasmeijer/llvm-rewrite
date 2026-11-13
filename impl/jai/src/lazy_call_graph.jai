@@ -767,8 +767,9 @@ lcg_mark_dead_function :: (f: Value_Id) {
 // removeDeadFunctions
 lcg_remove_dead_functions :: (dead_fs: [] Value_Id) {
     if dead_fs.count == 0 return;
-    // DenseMap<RefSCC *, SmallVector<Node *, 1>>: iteration order is by pointer; the RefSCCs here are in creation
-    // order, which is what a bump allocator's increasing addresses give
+    // DenseMap<RefSCC *, SmallVector<Node *, 1>>: LLVM iterates it in pointer-hash order. The order does not reach
+    // the result: each RefSCC is split independently (removeInternalRefEdges inserts the pieces at that RefSCC's own
+    // position in PostOrderRefSCCs) and the dead RefSCCs are only cleared. Any fixed order works; we use RefSCC ids.
     rcs: [..] s32; rcs.allocator = temp;
     groups: [..] [..] s32; groups.allocator = temp;
     for f: dead_fs {
@@ -784,7 +785,7 @@ lcg_remove_dead_functions :: (dead_fs: [] Value_Id) {
         }
         array_add(*groups[pos], n);
     }
-    // sort by RefSCC id (pointer order of bump-allocated RefSCCs)
+    // sort by RefSCC id
     for i: 1..rcs.count-1 {
         j := i;
         while j > 0 && rcs[j - 1] > rcs[j] {

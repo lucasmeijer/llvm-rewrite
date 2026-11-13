@@ -18,6 +18,40 @@ gh_opts: struct {
     max_chain_length: s64 = 10;      // -gvn-hoist-max-chain-length
 };
 
+gh_guess_address_order := false;   // -gvn-hoist-guess-address-order (ours): skip gh_check_address_order
+
+// Ours, not LLVM's. The hoisting list of one computeInsertionPoints call is ordered across hoist points by the
+// DenseMap<BasicBlock *> OutValue, i.e. by block address (here: creation order). hoist() checks operand availability
+// at hoisting time ("The order in which hoistings are done may influence the availability of operands"), so when an
+// instruction to hoist into one block uses (directly or through GEPs) an instruction to hoist into another block, the
+// result can depend on the address order: fail loudly.
+// Also, load VN keys are (VN of the pointer, Type *): two loads of different types from the same address hoisted
+// into the same block are hoisted (and so ordered in it) in Type pointer order (typed_keys).
+gh_check_address_order :: (hpl: [] Gh_Hoist_Point, typed_keys := false) {
+    if gh_guess_address_order || hpl.count < 2 return;
+    if typed_keys for p: 0..hpl.count - 1 for q: p + 1..hpl.count - 1 {
+        if hpl[p].bb == hpl[q].bb && hpl[p].vn.a == hpl[q].vn.a && hpl[p].vn.b != hpl[q].vn.b
+            fatal("gvn-hoist: loads of different types from one address are hoisted into one block in Type pointer order (heap layout); not reproducible (-gvn-hoist-guess-address-order guesses creation order)");
+    }
+    multi := false;
+    for 1..hpl.count - 1 if hpl[it].bb != hpl[0].bb { multi = true; break; }
+    if !multi return;
+    owner: Table(Value_Id, s64); owner.allocator = temp;
+    for hp, idx: hpl for hp.insts table_set(*owner, it, idx);
+    uses_other :: (v: Value_Id, bb: Value_Id, hpl: [] Gh_Hoist_Point, owner: *Table(Value_Id, s64), depth: s64) -> bool {
+        for o: 0..cast(s64) nops(v) - 1 {
+            x := op(v, cast(u32) o);
+            if !is_inst(x) continue;
+            found, e := table_find(owner, x);
+            if found && hpl[e].bb != bb return true;
+            if inst_op(x) == .GEP && depth < 64 && uses_other(x, bb, hpl, owner, depth + 1) return true;
+        }
+        return false;
+    }
+    for hp: hpl for i: hp.insts if uses_other(i, hp.bb, hpl, *owner, 0)
+        fatal("gvn-hoist: the order of hoistings into different blocks (LLVM: block address order) decides operand availability; not reproducible (-gvn-hoist-guess-address-order guesses creation order)");
+}
+
 gvn_hoist_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
     p :: (name: string, value: string, has_value: bool, dst: *s64) -> bool {
         if !has_value fatal(tprint("opt: -% needs a value", name));
@@ -30,6 +64,7 @@ gvn_hoist_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool
     if name == "gvn-hoist-max-bbs" return p(name, value, has_value, *gh_opts.max_bbs_in_path);
     if name == "gvn-hoist-max-depth" return p(name, value, has_value, *gh_opts.max_depth_in_bb);
     if name == "gvn-hoist-max-chain-length" return p(name, value, has_value, *gh_opts.max_chain_length);
+    if name == "gvn-hoist-guess-address-order" { gh_guess_address_order = true; return true; }
     return false;
 }
 
@@ -62,7 +97,7 @@ gh_map_add :: (m: *Gh_Vn_Map, vn: Gh_Vn, i: Value_Id) {
 
 Gh_Chi :: struct { vn: Gh_Vn; dest: Value_Id = NONE; i: Value_Id = NONE; }
 
-Gh_Hoist_Point :: struct { bb: Value_Id; insts: [..] Value_Id; }
+Gh_Hoist_Point :: struct { bb: Value_Id; insts: [..] Value_Id; vn: Gh_Vn; }
 
 Gh_Kind :: enum u8 { UNKNOWN; SCALAR; LOAD; STORE; }
 
@@ -373,7 +408,7 @@ gh_compute_insertion_points :: (g: *Gvn_Hoist, mp: *Gh_Vn_Map, hpl: *[..] Gh_Hoi
             safe: [..] Gh_Chi; safe.allocator = temp;
             gh_check_safety(g, range, bb, k, *safe);
             if gh_value_anticipable(safe, ti) {
-                hp: Gh_Hoist_Point; hp.bb = bb; hp.insts.allocator = temp;
+                hp: Gh_Hoist_Point; hp.bb = bb; hp.insts.allocator = temp; hp.vn = chis.*[prev].vn;
                 for safe array_add(*hp.insts, it.i);
                 array_add(hpl, hp);
             }
@@ -590,12 +625,13 @@ gh_hoist_expressions :: (g: *Gvn_Hoist) -> (u32, u32) {
         }
     }
     hpl: [..] Gh_Hoist_Point; hpl.allocator = temp;
-    gh_compute_insertion_points(g, *ii, *hpl, .SCALAR);
-    gh_compute_insertion_points(g, *li, *hpl, .LOAD);
-    gh_compute_insertion_points(g, *si, *hpl, .STORE);
-    gh_compute_insertion_points(g, *ci_scalars, *hpl, .SCALAR);
-    gh_compute_insertion_points(g, *ci_loads, *hpl, .LOAD);
-    gh_compute_insertion_points(g, *ci_stores, *hpl, .STORE);
+    seg := 0;
+    gh_compute_insertion_points(g, *ii, *hpl, .SCALAR);  gh_check_address_order(array_view(hpl, seg, hpl.count - seg)); seg = hpl.count;
+    gh_compute_insertion_points(g, *li, *hpl, .LOAD);    gh_check_address_order(array_view(hpl, seg, hpl.count - seg), typed_keys = true); seg = hpl.count;
+    gh_compute_insertion_points(g, *si, *hpl, .STORE);   gh_check_address_order(array_view(hpl, seg, hpl.count - seg)); seg = hpl.count;
+    gh_compute_insertion_points(g, *ci_scalars, *hpl, .SCALAR); gh_check_address_order(array_view(hpl, seg, hpl.count - seg)); seg = hpl.count;
+    gh_compute_insertion_points(g, *ci_loads, *hpl, .LOAD);     gh_check_address_order(array_view(hpl, seg, hpl.count - seg)); seg = hpl.count;
+    gh_compute_insertion_points(g, *ci_stores, *hpl, .STORE);   gh_check_address_order(array_view(hpl, seg, hpl.count - seg));
     a, b := gh_hoist(g, hpl);
     return a, b;
 }

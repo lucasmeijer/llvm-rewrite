@@ -20,7 +20,9 @@ Transforms/LoopInterchange (62/63).
 - `findArrayDimensions` first sorts the parametric terms by SCEV pointer value (`array_pod_sort`), then
   `llvm::sort`s them by number of factors. Pointer order is creation order within a BumpPtrAllocator slab, so an
   implementation can approximate it by SCEV creation order; with libstdc++ the second sort is an insertion sort
-  (stable) up to 16 elements.
+  (stable) up to 16 elements. Slabs are malloc'd, so across slabs the order is not creation order. The order among
+  terms with the same factor count only matters through findArrayDimensionsRec dividing by the last term: in the
+  corpus (`print<delinearization>`, `print<da>` sweeps) reversing every such group never changed the result.
 - `printDelinearization` stops the whole function at the first access whose pointer base is not a SCEVUnknown
   (`break`, not `continue`) and prints no newline after the last instruction.
 - `SimplifyCFGPass::run` calls `F.renumberBlocks()` after any change (DT->updateBlockNumbers() too). Block numbers

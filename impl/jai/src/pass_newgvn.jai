@@ -8,7 +8,8 @@
 // `ng.eops`), congruence classes are rows of `ng.classes`, and every DenseMap/SmallPtrSet of the pass is a Table or an
 // ordered array. SmallPtrSet iteration is modelled as small-mode order (insertion order, erase moves the last element
 // into the hole); LLVM's large-mode (pointer-hash) order cannot be reproduced. Pointer comparisons used as tie-breaks
-// (shouldSwapOperands, ValueDFS) use value ids / use ids (creation order). Assertion-only verification
+// (shouldSwapOperands, ValueDFS) use value ids / use ids (creation order); where a predicate copy's value depends on
+// such a tie, the pass fails loudly (ng_address_order_tie, newgvn_run) unless -newgvn-guess-address-order (ours). Assertion-only verification
 // (verifyMemoryCongruency, verifyIterationSettled, verifyStoreExpressions) and statistics are not ported; the debug
 // counters always execute.
 
@@ -16,6 +17,8 @@ ng_opts: struct {
     enable_store_refinement := false;   // -enable-store-refinement
     enable_phi_of_ops := true;          // -enable-phi-of-ops
     trace := false;                     // -newgvn-trace (ours: a subset of LLVM's -debug-only=newgvn on stderr)
+    guess_address_order := false;       // -newgvn-guess-address-order (ours): guess creation order for LLVM's heap
+                                        // address order instead of failing loudly (ng_address_order_dependent)
 };
 
 newgvn_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
@@ -27,6 +30,7 @@ newgvn_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
     }
     if name == "enable-store-refinement" { ng_opts.enable_store_refinement = b(name, value, has_value); return true; }
     if name == "newgvn-trace" { ng_opts.trace = true; return true; }
+    if name == "newgvn-guess-address-order" { ng_opts.guess_address_order = b(name, value, has_value); return true; }
     if name == "enable-phi-of-ops" { ng_opts.enable_phi_of_ops = b(name, value, has_value); return true; }
     return false;
 }
@@ -145,6 +149,8 @@ Ng :: struct {
     mphi_dfs: Table(s32, u32);
     dfs_to_instr: [..] Ng_Item;
     to_erase: Ng_Value_Set;
+    address_order_ties: [..] Value_Id;   // ng_address_order_tie candidates (ours)
+    reverse_ties: bool;                  // break rank ties in reverse creation order (ours)
 
     // TarjanSCC
     scc_dfs_num: u32;
@@ -797,6 +803,43 @@ ng_perform_symbolic_load_evaluation :: (i: Value_Id) -> s32 {
     return le;
 }
 
+// Our check, not LLVM's: shouldSwapOperands breaks a rank tie by pointer value (heap layout), so for an equality of two
+// different operands of equal rank, which one becomes the copy's value depends on LLVM's address order
+// (knowledge/llvm/newgvn.md, "PredicateInfo copies"). Ties seen while iterating are recorded; newgvn_run then
+// iterates again with the ties broken the other way and fails loudly if the outcome differs.
+ng_address_order_tie :: (first: Value_Id, second: Value_Id, pred: u8) -> bool {
+    if first == second || ng_get_rank(first) != ng_get_rank(second) return false;
+    fp_ok :: (v: Value_Id) -> bool { return vkind(v) == .C_FP && !pm_any_zero_fp(v); }
+    return pred == ICMP_EQ || (pred == FCMP_OEQ && (fp_ok(first) || fp_ok(second)));
+}
+// The iteration's outcome as elimination sees it: reachable blocks and edges, and every instruction's class leader
+// (temporaries by their incoming values) and phi-of-ops temporary.
+ng_outcome_snapshot :: () -> string {
+    sb: String_Builder; sb.allocator = temp;
+    rep :: (sb: *String_Builder, v: Value_Id) {
+        if v != NONE && is_inst(v) && table_contains(*ng.all_temps, v) {
+            print_to_builder(sb, "T(");
+            for k: 0..nops(v) - 1 print_to_builder(sb, "%,", op(v, k));
+            print_to_builder(sb, ")");
+        } else print_to_builder(sb, "%", v);
+    }
+    edges: [..] u64; edges.allocator = temp;
+    for ng.reachable_edge_list array_add(*edges, it);
+    quick_sort(edges, (a: u64, b: u64) -> s64 { return ifx a < b then -1 else ifx a > b then 1 else 0; });
+    for edges print_to_builder(*sb, "e%,", it);
+    for b: fn_blocks(ng.f) {
+        print_to_builder(*sb, "\nb%:%", b, ng_block_reachable(b));
+        for i: block_insts(b) {
+            print_to_builder(*sb, " ");
+            found, c := table_find(*ng.value_to_class, i);
+            if found { rep(*sb, ng.classes[c].leader); print_to_builder(*sb, "/%/", ng.classes[c].stored); }
+            found2, t := table_find(*ng.real_to_temp, i);
+            if found2 rep(*sb, t);
+        }
+    }
+    return builder_to_string(*sb,, temp);
+}
+
 // performSymbolicPredicateInfoEvaluation
 ng_perform_symbolic_predicate_info_evaluation :: (i: Value_Id) -> Ng_Result {
     r: Ng_Result;
@@ -811,6 +854,7 @@ ng_perform_symbolic_predicate_info_evaluation :: (i: Value_Id) -> Ng_Result {
     first := ng_lookup_operand_leader(cmp_op0);
     second := ng_lookup_operand_leader(cmp_op1);
     additionally_used := cmp_op0;
+    if !ng_opts.guess_address_order && ng_address_order_tie(first, second, pred) array_add(*ng.address_order_ties, i);
     if ng_should_swap_operands_for_predicate(first, second, i) {
         tmp := first; first = second; second = tmp;
         pred = swapped_predicate(pred);
@@ -2327,7 +2371,9 @@ ng_should_swap_operands :: (a: Value_Id, b: Value_Id) -> bool {
     ra := ng_get_rank(a); rb := ng_get_rank(b);
     if ra != rb return ra > rb;
     // equal-rank constants (and unranked values) are ordered by address in LLVM; creation order (value id) is
-    // the closest reproducible stand-in (knowledge/llvm/newgvn.md)
+    // the closest reproducible stand-in (knowledge/llvm/newgvn.md); ng.reverse_ties is the second order newgvn_run
+    // tries to see whether the outcome depends on it
+    if ng.reverse_ties return a < b;
     return a > b;
 }
 // shouldSwapOperandsForPredicate
@@ -2390,7 +2436,7 @@ ng_init_tables :: (s: *Ng) {
     s.leader_changes.allocator = temp; s.reachable_edges.allocator = temp; s.reachable_edge_list.allocator = temp;
     s.reachable_blocks.allocator = temp; s.touched.allocator = temp; s.block_inst_range.allocator = temp;
     s.predicate_swap_choice.allocator = temp; s.instr_dfs.allocator = temp; s.mphi_dfs.allocator = temp;
-    s.dfs_to_instr.allocator = temp;
+    s.dfs_to_instr.allocator = temp; s.address_order_ties.allocator = temp;
     s.scc_in_component.allocator = temp; s.scc_root.allocator = temp; s.scc_stack.allocator = temp;
     s.scc_components.allocator = temp; s.scc_value_to_component.allocator = temp;
 }
@@ -2419,9 +2465,8 @@ ng_sort_domtree_children :: (rpo: [] Value_Id) {
     }
 }
 
-// runGVN
-ng_run_gvn :: () -> bool {
-    changed := false;
+// runGVN, up to the end of the iteration
+ng_run_gvn_iterate :: () {
     ng.num_func_args = func_nparams(glob(ng.f).value_type);
     ng.dead_expr = ng_new_expr(.DEAD);
     icount: u32 = 1;
@@ -2468,7 +2513,20 @@ ng_run_gvn :: () -> bool {
     ng.cache_idx = 0;
 
     ng_iterate_touched_instructions();
-
+}
+// cleanupTables: delete the temporaries that never became real
+ng_cleanup_temps :: () {
+    temps: [..] Value_Id; temps.allocator = temp;
+    for v, k: ng.all_temps array_add(*temps, k);
+    for temps drop_all_references(it);
+    for temps {
+        if has_uses(it) fatal("newgvn: internal: a temporary instruction still has uses");
+        erase_inst(it);
+    }
+}
+// runGVN, from elimination on
+ng_run_gvn_finish :: () -> bool {
+    changed := false;
     changed |= ng_eliminate_instructions();
 
     for ng.to_erase.list {
@@ -2483,14 +2541,7 @@ ng_run_gvn :: () -> bool {
         changed = true;
     }
 
-    // cleanupTables: delete the temporaries that never became real
-    temps: [..] Value_Id; temps.allocator = temp;
-    for v, k: ng.all_temps array_add(*temps, k);
-    for temps drop_all_references(it);
-    for temps {
-        if has_uses(it) fatal("newgvn: internal: a temporary instruction still has uses");
-        erase_inst(it);
-    }
+    ng_cleanup_temps();
     return changed;
 }
 
@@ -2509,7 +2560,31 @@ newgvn_run :: (f: Value_Id) -> Preserved {
     s.pi = predicate_info_build(f, s.dt, s.ac);
     s.sq.dt = s.dt; s.sq.ac = s.ac; s.sq.use_instr_info = false; s.sq.can_use_undef = false;
     s.to_erase.list.allocator = temp; s.to_erase.has.allocator = temp;
-    changed := ng_run_gvn();
+    fresh :: (old: *Ng) -> *Ng {
+        n := New(Ng,, allocator = temp);
+        ng_init_tables(n);
+        n.f = old.f; n.ac = old.ac; n.dt = old.dt; n.aar = old.aar; n.m = old.m; n.pi = old.pi; n.sq = old.sq;
+        n.to_erase.list.allocator = temp; n.to_erase.has.allocator = temp;
+        return n;
+    }
+    ng_run_gvn_iterate();
+    if !ng_opts.guess_address_order && ng.address_order_ties.count {
+        // Fail loudly (ours): a predicate copy compared two operands whose order is LLVM's heap address order
+        // (ng_address_order_tie). Iterate again with the rank ties broken the other way; if the outcome differs, the
+        // output depends on the address order. Otherwise iterate once more in creation order and go on.
+        snap_a := ng_outcome_snapshot();
+        ng_cleanup_temps();
+        ng = fresh(ng);
+        ng.reverse_ties = true;
+        ng_run_gvn_iterate();
+        snap_b := ng_outcome_snapshot();
+        ng_cleanup_temps();
+        if snap_a != snap_b
+            fatal("newgvn: the value of a predicate copy (an equality of two operands of equal rank) depends on LLVM's heap address order; not reproducible (-newgvn-guess-address-order guesses creation order)");
+        ng = fresh(ng);
+        ng_run_gvn_iterate();
+    }
+    changed := ng_run_gvn_finish();
     if !changed return PRESERVE_ALL;
     pa: Preserved;
     preserve(*pa, .DOMTREE);

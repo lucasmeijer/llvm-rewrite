@@ -29,6 +29,11 @@ of the assertions build (`-debug-only=newgvn`, see tools-and-flags.md).
   layout, not on creation order (pr27712.ll: `i1 true` is created first but has the higher address). This decides
   reachability in rare cases: SCCP/pr27712.ll and InstCombine/assume.ll `@debug_interference` (per-function) differ;
   ordering such constants by creation order matches LLVM on 38 of the 39 corpus files where it happens.
+- Such a tie is often only transient: in NewGVN/completeness.ll `@test10` the optimistic iteration briefly sees
+  `inttoptr (i64 4 to ptr) == inttoptr (i64 32 to ptr)`, but the fixpoint does not depend on which wins. In
+  pr27712.ll the tie is gone at the fixpoint and still decided it, so checking only the final state is not enough;
+  impl/jai iterates a second time with all rank ties broken the other way and compares the fixpoints (12 corpus files
+  differ that way).
 - Copies that survive are always congruent to their operand, so elimination replaces and deletes them all.
 
 ## Things that look like they should not matter, but do

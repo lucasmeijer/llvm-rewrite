@@ -242,9 +242,19 @@ ctf_fold_terminators :: (c: *Ctf) {
         irb_insert(*b, create_br(only));
         erase_inst(term);
         // LLVM iterates a SmallPtrSet<BasicBlock *, 2>: insertion order up to two entries, pointer-hash order beyond
-        // (not reproducible); we keep insertion order. The DT result is the same tree, only child order can differ.
+        // (heap layout, not reproducible). The DT result is the same tree, but the order of the deletions can change
+        // its child order, which later passes walk: fail loudly (ours), or keep insertion order with
+        // -loop-simplifycfg-guess-address-order (ours).
+        if dead_succs.count > 2 && !lscfg_guess_address_order
+            fatal("loop-simplifycfg: the order of the dominator tree updates for more than two dead successors is SmallPtrSet pointer-hash order (heap layout); not reproducible (-loop-simplifycfg-guess-address-order keeps insertion order)");
         for dead_succs array_add(*c.dt_updates, .{false, bb, it});
     }
+}
+
+lscfg_guess_address_order := false;
+loop_simplifycfg_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
+    if name == "loop-simplifycfg-guess-address-order" { lscfg_guess_address_order = true; return true; }
+    return false;
 }
 
 ctf_run :: (c: *Ctf) -> bool {
