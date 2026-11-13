@@ -161,6 +161,7 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/`, `imported/` and `perf/` are genera
 ./harness/run show tests/e2e/O0/calls/varargs.ll --impl rust     # one file (or one ::check), full details
 ./harness/run bisect tests/e2e/pipeline/misc/sieve.ll --impl rust  # first pass where an @opt pipeline diverges
 ./harness/run status                                     # unit x implementation scoreboard (runs nothing)
+./harness/run jobs [--watch 1]                           # machine-wide job slots in use (see Job slots)
 ./harness/run sweep --impl rust --passes sroa            # one pipeline over the whole corpus, vs LLVM (see Sweeps)
 ./harness/run check --impl llvm                          # self-test: LLVM against itself; finds invalid tests
 
@@ -177,7 +178,7 @@ The `.ll` files in `O0/`, `O2/`, `pipeline/`, `imported/` and `perf/` are genera
 ```
 
 `check` runs `impl/<lang>/build.sh` first (skip with `--no-build`), then the checks in `-j` worker processes (default:
-all cores). Timing, 16 cores, warm oracle cache: the goose ratchet (`--ratchet-only`, ~10700 checks) takes 10-20 s and
+all cores), every tool run holding one of the machine-wide job slots (see Job slots). Timing, 16 cores, warm oracle cache: the goose ratchet (`--ratchet-only`, ~10700 checks) takes 10-20 s and
 the whole goose check (`--update`, ~16500) under a minute; with a cold cache (after a cache wipe, or where many
 outputs changed) under a minute too. The build is usually the larger part (goose ~2 min from scratch), and both scale
 with how loaded the machine is (other agents' sweeps). For every failing check it writes artifacts to
@@ -207,6 +208,46 @@ recorded): a modest slowdown would turn them into regressions, so speed them up 
 
 LLVM's own tools (the oracle side, and `--impl llvm`), clang, and the compiled test programs (10 s) keep plain
 wall-clock limits; `perf` has no limit.
+
+## Job slots (a machine-wide limit shared by all harness instances)
+
+Several agents share one machine, and each `check`/`sweep` defaults to `-j` = all cores; without a shared limit six
+of them put the load at ~200, which makes every check slow and CPU-time limits and `perf` numbers noisy. So, like
+make's jobserver, every harness process takes a **job slot** around each process it starts: our tools
+(`proc.run_limited`), LLVM's tools on the oracle side, clang, valgrind and the compiled test programs (`proc.run`).
+There are `LRH_MAX_JOBS` slots (default: `nproc`; `0` turns the limit off), so all harness instances on the machine
+together run about one tool per core; `-j` still bounds a single instance (how many workers it has queueing for
+slots). `impl/<lang>/build.sh` and `git` don't take a slot (a build runs its own parallel jobs).
+
+- **Mechanism:** a slot is a file `/tmp/lrh-jobs/slot-<i>` (`i < LRH_MAX_JOBS`; `LRH_JOBS_DIR` moves the directory)
+  held with `flock`. `/tmp` and not `/persistent`, because the limit is per machine and `/persistent` is shared with
+  workspaces on other machines. Each thread opens its own descriptors, since flock locks belong to the open file
+  description. Waiting is polling (2-50 ms, randomized); an uncontended slot costs a few syscalls.
+- **No deadlocks, no leaks:** a thread never waits for a slot while holding one (a nested acquire is a no-op), and the
+  kernel releases a flock when its process dies, so a killed harness (Ctrl-C, SIGKILL) frees its slots at once.
+  The time spent waiting for a slot is not counted against any timeout: the slot is taken before the tool starts.
+  If the harness dies while a tool runs, the orphaned tool no longer holds a slot.
+- **`perf`** takes **two slots per timed run** (its own and an idle one), so while it times, the machine stays at
+  about half load (where CPU time is within a few percent of a solo run; it grows once both hyperthreads of a core
+  are busy). With the default `-j` (half the cores) a running `perf` therefore holds all slots, and other agents'
+  checks wait for the ~10-30 s it takes; that is the price of usable numbers. Multi-slot requests are gathered one
+  slot at a time under a machine-wide `gather` lock (one gatherer at a time), so they can't deadlock and aren't
+  starved by single-slot takers. `--instr` (valgrind) runs take one slot: instruction counts don't depend on load.
+- `./harness/run jobs` prints how many slots are held right now and the load; `--watch 1` repeats it every second.
+
+Measured (16 cores, other agents also busy; `procs_running` sampled every 0.5 s, 2026-11-13):
+
+| Scenario | runnable tasks, mean / max | wall |
+| --- | --- | --- |
+| 3 x goose `--ratchet-only` at once, `LRH_MAX_JOBS=0` (no limit) | 54 / 100, 49 / 85 | 122 s, 112 s |
+| the same with job slots | 28 / 59, 21 / 48 | 172 s, 120 s |
+| `perf --impl llvm 'tests/perf/compile/*'` during 2 goose ratchets, no limit | 50-53 / 71 | 15 s; LLVM CPU +13-20% |
+| the same with job slots | 23-26 / 39 | 9-10 s; LLVM CPU +0-5% |
+
+(The "LLVM CPU" column is the summed minimum CPU time over the 12 benchmarks against the same run on the quiet
+machine, 20.9-22.2 s.) Wall time for checks is about the same either way (the work is CPU-bound and the machine is
+saturated in both cases; the 172 s run overlapped other agents' load); what the slots buy is a load near the core
+count instead of several times it, steadier CPU times under the CPU limits, and `perf` numbers that mean something.
 
 ## Sweeps (one pipeline over the whole corpus; report only)
 
@@ -335,7 +376,8 @@ means there was too little work above process startup to measure. LLVM's own k i
 sequential loops is about 2).
 
 **Speed and noise.** Runs go in parallel on half the cores (`-j`), LLVM and implementations in the same batch, biggest
-first; each benchmark repeats until it has about a second of samples (at most 15 runs, `--reps N` to fix it), and
+first, each holding two machine-wide job slots so that other harness instances can't load the machine past half
+while it times (see Job slots); each benchmark repeats until it has about a second of samples (at most 15 runs, `--reps N` to fix it), and
 the minimum counts. The whole corpus takes about 25 s (6 s for `tests/perf/compile/*` with stub implementations).
 Measured with LLVM against itself: half the rows are within 3% of 1.00x, 90% within 10%, the worst about 20%. So
 read single-row differences under ~15% as noise; the geomean is good to a few percent.

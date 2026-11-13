@@ -5,6 +5,7 @@ import os
 import shlex
 import shutil
 import sys
+import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
@@ -52,7 +53,7 @@ def build(impl: str, env: dict | None = None):
         raise SystemExit(f"impl/{impl}/build.sh is missing")
     extra = "".join(f" {k}={v}" for k, v in (env or {}).items())
     print(c(DIM, f"building impl/{impl}{extra} ..."), flush=True)
-    r = proc.run(["bash", str(script)], cwd=d, timeout=3600, env=env)
+    r = proc.run(["bash", str(script)], cwd=d, timeout=3600, env=env, slot=False)  # builds run their own -j
     if not r.ok:
         sys.stdout.write(r.out.decode(errors="replace")[-5000:])
         sys.stdout.write(r.err_tail(5000))
@@ -129,6 +130,17 @@ def summarize(outcomes):
 def first_lines(msg, n):
     lines = msg.splitlines()
     return "\n".join("      " + l for l in lines[:n]) + ("\n      ..." if len(lines) > n else "")
+
+
+def cmd_jobs(a):
+    while True:
+        busy, n = proc.slots_in_use()
+        load = open("/proc/loadavg").read().split()[0]
+        print(f"{busy}/{n} job slots held in {config.JOBS_DIR}, load {load}" if n
+              else "job slots disabled (LRH_MAX_JOBS=0)", flush=True)
+        if not a.watch:
+            return
+        time.sleep(a.watch)
 
 
 def cmd_check(a):
@@ -341,6 +353,10 @@ def main(argv=None):
     s.add_argument("-v", "--verbose", action="store_true", help="print failure details")
     s.add_argument("--max-shown", type=int, default=25)
     s.set_defaults(fn=cmd_check)
+
+    s = sub.add_parser("jobs", help="machine-wide job slots: how many are held right now (by every harness instance)")
+    s.add_argument("--watch", type=float, metavar="SECONDS", help="print a line every SECONDS until interrupted")
+    s.set_defaults(fn=cmd_jobs)
 
     s = sub.add_parser("status", help="unit x implementation scoreboard (from passing.txt files; runs nothing)")
     s.set_defaults(fn=cmd_status)

@@ -4,8 +4,9 @@ For every `@perf: <tool> <args>` line of every selected file it measures, for LL
 
   cpu    user+system CPU time of the process, the minimum over a few runs. Runs go in parallel (half the cores by
          default; CPU time stays within a few percent of a solo run up to that point on this VM), with LLVM and the
-         implementations in the same batch, so they see the same load. Each benchmark is repeated until it has
-         about a second of samples (at most 5 runs); --reps fixes the count instead.
+         implementations in the same batch, so they see the same load. Each run holds PERF_SLOTS machine-wide
+         job slots (proc.job_slot), which keeps other harness instances from loading the machine past half. Each
+         benchmark is repeated until it has about a second of samples (at most 5 runs); --reps fixes the count.
   rss    peak resident memory of the tool itself (measured through a small fork+wait4 helper; see timed()).
   instr  only with --instr: instructions executed (valgrind --tool=cachegrind). Exact and repeatable, but valgrind
          is ~40x slower; cached by (tool binary, args, input), so LLVM's numbers and unchanged binaries are free.
@@ -40,6 +41,7 @@ EMPTY = "<empty>"
 IREFS = re.compile(r"I\s+refs:\s+([\d,]+)")
 SAMPLE_TARGET = 1.0  # seconds of CPU samples to collect per benchmark and tool
 MAX_REPS = 15
+PERF_SLOTS = 2  # job slots per timed run: its own and an idle sibling, so the machine stays at about half load
 MIN_WORK = {"cpu": 0.03, "instr": 50e6}  # below this (minus startup) at the largest size, a scaling exponent is noise
 
 TTY = sys.stdout.isatty()
@@ -167,7 +169,15 @@ def _rss_helper_build() -> str:
 
 
 def timed(cmd: list[str], cwd: Path, env: dict | None = None) -> dict:
-    """One run: CPU seconds (user+sys), wall seconds, peak RSS in KiB, exit code, stderr tail on failure."""
+    """One run: CPU seconds (user+sys), wall seconds, peak RSS in KiB, exit code, stderr tail on failure.
+
+    Holds PERF_SLOTS machine-wide job slots while it runs (proc.job_slot), so other harness instances can't push the
+    machine past half load while we time (CPU time grows once both hyperthreads of a core are busy)."""
+    with proc.job_slot(PERF_SLOTS):
+        return _timed(cmd, cwd, env)
+
+
+def _timed(cmd: list[str], cwd: Path, env: dict | None) -> dict:
     with tempfile.TemporaryFile() as err:
         rfd, wfd = os.pipe()
         t0 = time.perf_counter()
@@ -244,7 +254,7 @@ def correctness(t: corpus.TestFile, perf_line: str, passing: set[str]) -> str:
 
 def git_state(impl: str) -> dict:
     def g(*a):
-        r = proc.run(["git", *a], cwd=config.REPO)
+        r = proc.run(["git", *a], cwd=config.REPO, slot=False)
         return r.out.decode().strip() if r.ok else ""
     return {"commit": g("rev-parse", "HEAD"), "dirty": bool(g("status", "--porcelain", "--", f"impl/{impl}", "harness", "tests/perf"))}
 

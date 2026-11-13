@@ -1,9 +1,12 @@
 """Subprocess helpers and the content-addressed oracle cache."""
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import math
 import os
+import random
 import signal
 import shutil
 import subprocess
@@ -37,9 +40,129 @@ class Res:
         return f"{tool} {self.timeout_msg}" if self.timed_out else f"{tool} exited with {self.rc}"
 
 
+# ---------------------------------------------------------------- machine-wide job slots
+
+_slot_state = threading.local()
+
+
+def max_jobs() -> int:
+    """Machine-wide limit on concurrent tool processes over all harness instances (LRH_MAX_JOBS; 0 = no limit)."""
+    v = os.environ.get("LRH_MAX_JOBS", "")
+    return int(v) if v.strip() else (os.cpu_count() or 1)
+
+
+def _slot_fds(n: int) -> list[int]:
+    """This thread's descriptors for slot-0..n-1 plus the gather lock (index n), opened once per thread and process.
+
+    flock() locks belong to an open file description: two threads (or a parent and its forked worker) sharing one
+    descriptor would both "hold" the same slot. So every thread opens its own (O_CLOEXEC: tools don't inherit them).
+    """
+    st = getattr(_slot_state, "fds", None)
+    if st is None or st[0] != os.getpid() or len(st[1]) != n + 1:
+        d = config.JOBS_DIR
+        if not d.is_dir():
+            d.mkdir(parents=True, exist_ok=True)
+            try:
+                os.chmod(d, 0o1777)
+            except OSError:
+                pass
+        names = [f"slot-{i}" for i in range(n)] + ["gather"]
+        old_umask = os.umask(0)
+        try:
+            fds = [os.open(d / nm, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o666) for nm in names]
+        finally:
+            os.umask(old_umask)
+        st = (os.getpid(), fds)
+        _slot_state.fds = st
+    return st[1]
+
+
+@contextlib.contextmanager
+def job_slot(count: int = 1):
+    """Hold `count` of the machine-wide job slots (a jobserver shared by every harness process on the machine).
+
+    Slots are flock()ed files config.JOBS_DIR/slot-<i>, i < max_jobs(). The kernel drops a flock when its holder
+    dies, so a killed harness never leaks a slot. Deadlock-free: a thread holding a slot never waits for another one
+    (nested job_slot() calls in one thread are no-ops), except while gathering count > 1 slots, which only one
+    thread on the machine does at a time (the `gather` lock); single-slot holders always finish without waiting, and
+    finished gatherers too, so the gatherer always gets its slots. Waiting is polling (2-50 ms, randomised).
+    """
+    n = max_jobs()
+    if n <= 0 or count <= 0 or getattr(_slot_state, "held", False):
+        yield
+        return
+    count = min(count, n)
+    fds = _slot_fds(n)
+    held: list[int] = []
+    gathering = False
+    _slot_state.held = True
+    try:
+        if count > 1:
+            fcntl.flock(fds[n], fcntl.LOCK_EX)
+            gathering = True
+        delay = 0.002
+        while len(held) < count:
+            start = random.randrange(n)
+            for k in range(n):
+                i = (start + k) % n
+                if i in held:
+                    continue
+                try:
+                    fcntl.flock(fds[i], fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                held.append(i)
+                if len(held) == count:
+                    break
+            if len(held) < count:
+                time.sleep(delay * (0.5 + random.random()))
+                delay = min(delay * 1.5, 0.05)
+        if gathering:
+            fcntl.flock(fds[n], fcntl.LOCK_UN)
+            gathering = False
+        yield
+    finally:
+        for i in held:
+            fcntl.flock(fds[i], fcntl.LOCK_UN)
+        if gathering:
+            fcntl.flock(fds[n], fcntl.LOCK_UN)
+        _slot_state.held = False
+
+
+def slots_in_use() -> tuple[int, int]:
+    """(slots currently held by anyone, max_jobs()), for `harness/run jobs`."""
+    n = max_jobs()
+    if n <= 0:
+        return 0, 0
+    busy = 0
+    for i in range(n):
+        try:
+            fd = os.open(config.JOBS_DIR / f"slot-{i}", os.O_RDWR | os.O_CLOEXEC)
+        except FileNotFoundError:
+            continue
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except BlockingIOError:
+            busy += 1
+        finally:
+            os.close(fd)
+    return busy, n
+
+
+# ---------------------------------------------------------------- running processes
+
 def run(cmd: list[str], *, cwd=None, stdin: bytes | None = None, timeout: float = config.TOOL_TIMEOUT,
-        env: dict | None = None) -> Res:
-    """Wall-clock limited run (LLVM's tools, clang, test programs). env: extra variables on top of the harness's."""
+        env: dict | None = None, slot: bool = True) -> Res:
+    """Wall-clock limited run (LLVM's tools, clang, test programs). env: extra variables on top of the harness's.
+
+    slot: hold a machine-wide job slot while it runs (job_slot()); False for things that aren't one CPU's worth of
+    work (an impl's build.sh runs its own parallel build; git)."""
+    with job_slot() if slot else contextlib.nullcontext():
+        return _run(cmd, cwd=cwd, stdin=stdin, timeout=timeout, env=env)
+
+
+def _run(cmd, *, cwd, stdin, timeout, env) -> Res:
     try:
         p = subprocess.run(
             cmd,
@@ -59,7 +182,8 @@ def run(cmd: list[str], *, cwd=None, stdin: bytes | None = None, timeout: float 
 
 def run_limited(cmd: list[str], *, cwd=None, stdin: bytes | None = None, cpu_limit: float | None = None,
                 env: dict | None = None) -> Res:
-    """Run one of an implementation's tools under a CPU-time limit (default config.TOOL_CPU_LIMIT).
+    """Run one of an implementation's tools under a CPU-time limit (default config.TOOL_CPU_LIMIT), holding a
+    machine-wide job slot (job_slot()) while it runs.
 
     CPU time (user+sys) barely moves with machine load, so a test that passes at load 1 also passes at load 40; wall
     time doesn't (see docs/testing.md, "Timeouts"). The limit is RLIMIT_CPU (set by a /bin/sh shim that then execs
@@ -67,6 +191,11 @@ def run_limited(cmd: list[str], *, cwd=None, stdin: bytes | None = None, cpu_lim
     config.TOOL_WALL_FACTOR x the limit for a tool that hangs without using CPU (sleep, deadlock, blocked read).
     The child runs in its own process group so a timeout kills everything it started.
     """
+    with job_slot():
+        return _run_limited(cmd, cwd=cwd, stdin=stdin, cpu_limit=cpu_limit, env=env)
+
+
+def _run_limited(cmd, *, cwd, stdin, cpu_limit, env) -> Res:
     limit = cpu_limit if cpu_limit is not None else config.TOOL_CPU_LIMIT
     wall = limit * config.TOOL_WALL_FACTOR
     soft = max(1, math.ceil(limit))

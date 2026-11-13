@@ -28,6 +28,9 @@ TOOL_TIMEOUT = 120  # wall seconds, for LLVM's own tools and clang (the oracle s
 # grows somewhat on a loaded machine (shared cores and caches).
 TOOL_CPU_LIMIT = float(os.environ.get("LRH_CPU_LIMIT", 240))
 TOOL_WALL_FACTOR = 4
+# Machine-wide job slots shared by every harness process (proc.job_slot; LRH_MAX_JOBS sets how many, default nproc).
+# /tmp, not /persistent: the limit is per machine, and /persistent is shared between workspaces on other machines.
+JOBS_DIR = Path(os.environ.get("LRH_JOBS_DIR", "/tmp/lrh-jobs"))
 RUN_TIMEOUT = 10  # seconds, for running a compiled test program
 
 # The impl named "llvm" is LLVM itself; used to self-test the harness and corpus.
