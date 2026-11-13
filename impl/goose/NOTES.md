@@ -293,6 +293,7 @@
 | `src/slp.goose` | SLPVectorizer milestone 1: the pass driver up to BoUpSLP / HorizontalReduction (fails loudly there) |
 | `src/tti_vec.goose` | the vectorizers' TTI front end `tv_*` (X86 or NoTTIImpl): shuffle / insert-extract / arith / cast / memory / scalarization / intrinsic / reduction costs, register queries |
 | `src/vecutils.goose` | VectorUtils + LoopUtils helpers `vu_*`: scalar-op / overload-type intrinsic args, splat values, mask narrowing/widening, reduction intrinsic mapping, copyIRFlags/andIRFlags/propagateIRFlags, getLosslessInvCast |
+| `tools/splitc.py` | used by build.sh: splits goose's generated C into parallel translation units ("Build") |
 | `tools/gb.sh` | `tools/gb.sh src/opt.goose bin/opt` builds with warnings hidden (Goose has no `-w`) |
 
 ## Build (build.sh, tools/splitc.py; 2026-11-13)
