@@ -274,4 +274,6 @@ lib/Transforms/Instrumentation/TypeSanitizer.cpp 1.0
 lib/Transforms/Instrumentation/SanitizerCoverage.cpp 0.97  # no allow/block lists (SpecialCaseList; constructor arguments only)
 lib/Transforms/Instrumentation/SanitizerBinaryMetadata.cpp 0.97  # no ignore list (SpecialCaseList)
 lib/CodeGen/JMCInstrumenter.cpp 1.0  # the legacy pass wrapper aside
+lib/Transforms/Instrumentation/HWAddressSanitizer.cpp 0.85  # no AArch64/RISC-V outlined checks or traps, no Android/Darwin slots, no -hwasan-random-rate, no DomTreeUpdater (analyses dropped)
+lib/Transforms/Utils/MemoryTaggingSupport.cpp 0.85  # no getDarwinSlotPtr / getAndroidSlotPtr, no AArch64 getPC
 lib/Support/Path.cpp 0.15  # sys_path.jai: root_name/root_path, filename, remove_filename, append, native, remove_dots

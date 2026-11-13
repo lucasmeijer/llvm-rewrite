@@ -1963,6 +1963,18 @@ Still slow / next:
   posix and windows_backslash styles): both RUN lines identical; sweeps 0 differs on x86_64-linux, x86_64-msvc and
   i686-msvc (fastcall). Trap (fixed in 4 places): `ir.md_ops[ir.mds[n].ops + k] = md_tuple(...)` takes the address
   before md_tuple grows `ir.md_ops`; the write lands in the freed buffer. Build the node into a local first.
+- **hwasan** (`pass_hwasan.jai`: HWAddressSanitizer + memtag:: MemoryTaggingSupport + CFG.cpp isReachableImpl with
+  LoopInfo and exclusion sets; `san_inline_asm` makes InlineAsm values): all 30 RUN lines of HWAddressSanitizer/ and
+  X86/ identical. Sweeps 0 differs / 0 bad-ir on x86_64-linux: `hwasan` whole corpus, `forceattrs,hwasan
+  -force-attribute=sanitize_hwaddress` with callbacks (the x86-64 default), inline checks
+  (-hwasan-instrument-with-calls=0), kernel+recover, page aliases, generate-tags-with-calls + libcall frame records +
+  match-all-tag, ifunc/global shadow + no frame record + no use-after-scope + landing pads, no short granules +
+  all-globals + tag-bits=5 (1 loud: StackSafety on pointers whose index width differs from their size).
+  Not ported, loud: AArch64/RISC-V outlined checks and traps, Android/Darwin thread slots, -hwasan-random-rate.
+  Traps: `ConstantInt::get(i32, ~(0x3F << 57))` keeps the high bits in a release build (no implicitTrunc), so the
+  "-1" is not the canonical identity and `and %p, -1` stays an instruction (`hwasan_binop_wide_const`); for i128 it
+  zero-extends. GlobalVariable::copyAttributesFrom does not copy the comdat. LLVM keeps DT/PDT/LoopInfo updated
+  through a DomTreeUpdater; here every instrumented function's analyses are dropped (fam_invalidate) instead.
 
 ## Coroutines (L1.extra.coroutines 298/310: roundtrip 155/155, opt 143/155; /root/jai_coro)
 

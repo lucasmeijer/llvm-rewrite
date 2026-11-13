@@ -99,6 +99,7 @@
 #load "pass_sanmd.jai";
 #load "sys_path.jai";
 #load "pass_jmc.jai";
+#load "pass_hwasan.jai";
 #load "pass_loop_sink.jai";
 #load "pass_transform_warning.jai";
 #load "pass_drop_unnecessary_assumes.jai";

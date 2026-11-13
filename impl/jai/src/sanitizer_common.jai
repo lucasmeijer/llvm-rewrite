@@ -517,6 +517,8 @@ SAN_VALUED_OPTS :: string.[
     "asan-destructor-kind", "asan-instrument-address-spaces", "asan-debug", "asan-debug-stack", "asan-debug-func",
     "asan-debug-min", "asan-debug-max", "nsan-shadow-type-mapping", "check-functions-filter",
     "sanitizer-coverage-level", "sanitizer-coverage-stack-depth-callback-min",
+    "hwasan-memory-access-callback-prefix", "hwasan-max-lifetimes-for-alloca", "hwasan-match-all-tag", "hwasan-mapping-offset",
+    "hwasan-mapping-offset-dynamic", "hwasan-percentile-cutoff-hot", "hwasan-random-rate", "hwasan-record-stack-history", "hwasan-tag-bits",
     "msan-track-origins", "msan-poison-stack-pattern", "msan-switch-precision", "msan-instrumentation-with-call-threshold",
     "msan-and-mask", "msan-xor-mask", "msan-shadow-base", "msan-origin-base", "msan-disambiguate-warning-threshold",
 ];

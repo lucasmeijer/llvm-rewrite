@@ -325,7 +325,7 @@ Pass_Kind :: enum u8 {
     // EarlyCSE (pass_early_cse.jai)
     EARLY_CSE;
     // sanitizers (pass_asan.jai, pass_msan.jai, ...)
-    ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN; TYSAN; NSAN; SANCOV; SANMD; JMC;
+    ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN; TYSAN; NSAN; SANCOV; SANMD; JMC; HWASAN;
     // SCCP, IPSCCP (pass_sccp.jai)
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
@@ -592,6 +592,7 @@ PASS_TABLE :: Pass_Info.[
     .{"sancov-module", .MODULE, .SANCOV, true, .DOMTREE},
     .{"sanmd-module", .MODULE, .SANMD, true, .DOMTREE},
     .{"jmc-instrumenter", .MODULE, .JMC, false, .DOMTREE},
+    .{"hwasan", .MODULE, .HWASAN, true, .DOMTREE},   // also hwasan<kernel;recover>
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<should-not-run-function-passes>", .FUNCTION, .REQUIRE, true, .SHOULD_NOT_RUN},
@@ -641,6 +642,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "drop-unnecessary-assumes<") && name[name.count - 1] == #char ">" return lookup_pass("drop-unnecessary-assumes");
     if begins_with(name, "ee-instrument<") && name[name.count - 1] == #char ">" return lookup_pass("ee-instrument");
     if begins_with(name, "asan<") && name[name.count - 1] == #char ">" return lookup_pass("asan");
+    if begins_with(name, "hwasan<") && name[name.count - 1] == #char ">" return lookup_pass("hwasan");
     if begins_with(name, "msan<") && name[name.count - 1] == #char ">" return lookup_pass("msan");
     if begins_with(name, "loop-extract<") && name[name.count - 1] == #char ">" return lookup_pass("loop-extract");
     return null;
@@ -1180,6 +1182,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if nsan_parse_cl_opt(name, value, has_value) return true;    // pass_nsan.jai (-nsan-*)
     if sancov_parse_cl_opt(name, value, has_value) return true;  // pass_sancov.jai (-sanitizer-coverage-*)
     if sanmd_parse_cl_opt(name, value, has_value) return true;   // pass_sanmd.jai (-sanitizer-metadata-*)
+    if hwasan_parse_cl_opt(name, value, has_value) return true;  // pass_hwasan.jai (-hwasan-*)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1345,6 +1348,7 @@ run_module_pm :: (n: s32) {
             case .SANCOV; if should_run_pass(node, NONE) mam_invalidate(sancov_run());
             case .SANMD; if should_run_pass(node, NONE) mam_invalidate(sanmd_run());
             case .JMC; if should_run_pass(node, NONE) mam_invalidate(jmc_run());
+            case .HWASAN; if should_run_pass(node, NONE) mam_invalidate(hwasan_run(node.name));
             case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
             case .CALLED_VALUE_PROPAGATION; if should_run_pass(node, NONE) mam_invalidate(called_value_propagation_run());
             case .IPSCCP; if should_run_pass(node, NONE) mam_invalidate(ipsccp_run(node.name, node.no_func_spec));
