@@ -18,7 +18,7 @@ lib/TargetParser/Triple.cpp 0.25
 # in part). Legacy-PM wrappers and print/dump are left out. fraction = matched function lines / all function lines,
 # rounded down to 0.05. "manual" lines were spot-checked by hand where the port does not follow LLVM's structure.
 lib/Analysis/ScalarEvolution.cpp 0.95  # + PredicatedScalarEvolution, SCEVUnionPredicate, rewriteUsingPredicate (scev_pred.jai)
-lib/AsmParser/LLParser.cpp 0.7  # manual: own parser structure; all IR constructs, no summary-index parsing (~19% of LLParser) (heuristic 0.38)
+lib/AsmParser/LLParser.cpp 0.72  # manual: own parser structure; all IR constructs and DI node kinds, no summary-index parsing (~19% of LLParser) (heuristic 0.38)
 lib/Analysis/ValueTracking.cpp 0.9
 lib/Transforms/InstCombine/InstCombineCompares.cpp 0.95
 lib/IR/AutoUpgrade.cpp 0.5  # + all x86 (declarations and call rewrites); no NVVM/AArch64/ARM/AMDGCN upgrades
@@ -33,7 +33,7 @@ lib/Transforms/InstCombine/InstCombineAndOrXor.cpp 1
 lib/Transforms/InstCombine/InstCombineSelect.cpp 0.95
 lib/IR/Instructions.cpp 0.65
 lib/Target/X86/X86InstCombineIntrinsic.cpp 1
-lib/IR/Constants.cpp 0.6
+lib/IR/Constants.cpp 0.62  # + handleOperandChangeImpl / replaceOperandsInPlace
 lib/Transforms/InstCombine/InstCombineSimplifyDemanded.cpp 0.95
 lib/Transforms/InstCombine/InstCombineAddSub.cpp 0.9
 lib/Transforms/InstCombine/InstCombineCasts.cpp 0.95
@@ -241,7 +241,7 @@ lib/Transforms/IPO/ForceFunctionAttrs.cpp 0.85  # no -forceattrs-csv-path
 lib/Transforms/IPO/PartialInlining.cpp 0.7  # single-region partial inlining; no multi-region (cold region) outlining
 lib/Transforms/Utils/CodeExtractor.cpp 0.75  # no aggregate args, alloca/dealloc blocks, >2 exits, debug-info fixup
 lib/Transforms/Utils/GuardUtils.cpp 0.5  # makeGuardControlFlowExplicit (pass_make_guards_explicit.jai); no widenWidenableBranch / setWidenableBranchCond
-lib/IR/Verifier.cpp 0.9  # all checks; not the DI kinds our parser rejects, -verify-noalias-scope-decl-dom, target intrinsics outside our tables, the legacy pass
+lib/IR/Verifier.cpp 0.92  # all checks incl. every DI node kind; not -verify-noalias-scope-decl-dom, target intrinsics outside our tables, the legacy pass
 lib/IR/ConvergenceVerifier.cpp 1.0  # with GenericConvergenceVerifierImpl.h
 lib/Transforms/Scalar/NewGVN.cpp 0.93  # jai_newgvn: all of NewGVN; not the assertion-only verify* functions, statistics, debug printing
 lib/Transforms/Scalar/GVNSink.cpp 0.95  # jai_newgvn: complete except the address order of InstructionUseExpr users (fails loudly when it decides)
