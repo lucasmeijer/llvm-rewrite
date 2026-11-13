@@ -91,18 +91,20 @@ lv_rt_checks_create :: (c: *Lv_Rt_Checks, lp: *Lv_Planner, vf: Ec, ic: u64) {
 
 // GeneratedRTChecks::getCost
 lv_rt_checks_get_cost :: (c: *Lv_Rt_Checks, lp: *Lv_Planner) -> Lc {
+    if c.scev_block != NONE || c.mem_block != NONE lv_dbg("Calculating cost of runtime checks:\n");
     if c.cost_too_high return COST_INVALID;
     kind := ifx fn_has_min_size(lp.cm.f) then TCK_CODE_SIZE else TCK_RECIP_THROUGHPUT;
+    dbg_cost :: (i: Value_Id, cc: Lc) { if lv_debug_enabled() lv_dbg("  %  for %\n", lc_str(cc), lv_inst_str(i)); }
     t := lp.cm.tti;
     total: Cost = 0;
     if c.scev_block != NONE {
         term := block_terminator(c.scev_block);
-        for i: block_insts(c.scev_block) if i != term total = lc_add(total, lt_instruction_cost(t, i, kind));
+        for i: block_insts(c.scev_block) if i != term { cc := lt_instruction_cost(t, i, kind); dbg_cost(i, cc); total = lc_add(total, cc); }
     }
     if c.mem_block != NONE {
         mc: Cost = 0;
         term := block_terminator(c.mem_block);
-        for i: block_insts(c.mem_block) if i != term mc = lc_add(mc, lt_instruction_cost(t, i, kind));
+        for i: block_insts(c.mem_block) if i != term { cc := lt_instruction_cost(t, i, kind); dbg_cost(i, cc); mc = lc_add(mc, cc); }
         if c.outer_loop != NONE {
             cond := sc_get_scev(c.mem_cond);
             if sc_is_loop_invariant(cond, c.outer_loop) {
@@ -114,6 +116,7 @@ lv_rt_checks_get_cost :: (c: *Lv_Rt_Checks, lp: *Lv_Planner) -> Lc {
         }
         total = lc_add(total, mc);
     }
+    lv_dbg("Total cost of runtime checks: %\n", lc_str(total));
     return total;
 }
 
@@ -136,7 +139,7 @@ lv_is_outside_loop_work_profitable :: (c: *Lv_Rt_Checks, lp: *Lv_Planner, vf: *L
     min_tc1: u64 = ifx div == 0 then 0 else (cast(u64) lc_value(total) * int_vf + div - 1) / div;
     min_tc2 := (cast(u64) lc_value(rtc) * 10 + cast(u64) scalar_c - 1) / cast(u64) scalar_c;
     min_tc := max(min_tc1, min_tc2);
-    if lp.cm.sel == .ALLOWED min_tc = (min_tc + int_vf - 1) / int_vf * int_vf;
+    if lp.cm.sel_local == .ALLOWED min_tc = (min_tc + int_vf - 1) / int_vf * int_vf;
     vf.min_profitable_tc = ec_fixed(min_tc);
     lv_dbg("LV: Minimum required TC for runtime checks to be profitable:%\n", min_tc);
     known, etc := lv_small_best_known_tc(lp.cm, lp.l);

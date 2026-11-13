@@ -273,6 +273,7 @@ Lv_Cm :: struct {
     ac: *Assumption_Cache;
     opt_for_size: bool;
     sel: Epilogue_Lowering;
+    sel_local: Epilogue_Lowering;              // processLoop's local SEL (isOutsideLoopWorkProfitable gets it; the CM's copy changes)
     tail_folding_style: Tail_Folding_Style;
     alias_masking: Alias_Masking_Status;
     values_to_ignore: Iset;
@@ -711,6 +712,7 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
     if known && !etc.scalable && etc.n < cast(u64) lv_opts.tiny_trip_count_threshold {
         if lvh_force(*hints) != FK_ENABLED && cm.sel != .NOT_NEEDED_FOLD_TAIL cm.sel = .NOT_ALLOWED_LOW_TRIP_LOOP;
     }
+    cm.sel_local = cm.sel;
     if fn_has_fn_attr(f, .NoImplicitFloat) return false;
     // TTI.isFPVectorizationPotentiallyUnsafe() is false for X86 and NoTTI
     allow_ordered := ifx lv_opts.force_ordered_reductions.set then lv_opts.force_ordered_reductions.v != 0 else false;

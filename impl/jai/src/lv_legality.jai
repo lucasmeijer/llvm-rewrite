@@ -217,6 +217,8 @@ lvl_is_consecutive_ptr :: (v: *Lvl, access_ty: Type_Id, ptr: Value_Id) -> s64 {
     strides := ifx v.laa && v.allow_runtime_scev_checks then *v.laa.symbolic_strides else *empty;
     ok, stride := laa_get_ptr_stride_assume(v.pse, v.li, access_ty, ptr, v.l, v.dt, strides, v.allow_runtime_scev_checks, false);
     if !ok stride = 0;
+    // `int Stride = getPtrStride(...).value_or(0)`: the int64_t stride is truncated to int (INT64_MAX becomes -1)
+    stride = cast(s64) cast,trunc(s32) stride;
     if stride == 1 || stride == -1 return stride;
     return 0;
 }

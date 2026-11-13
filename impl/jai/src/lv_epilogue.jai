@@ -319,12 +319,12 @@ lv_prepare_plan_for_epilogue_vector_loop :: (lp: *Lv_Planner, main_plan: *Vp_Pla
                 b: Irb;
                 irb_set_before(*b, block_first_non_phi(inst(resume_v).parent));
                 if rk_is_any_of(rk) {
-                    resume_v = isf_icmp(*b, ICMP_NE, resume_v, start_v);
+                    resume_v = irb_icmp(*b, ICMP_NE, resume_v, start_v);   // IRBuilder<> (ConstantFolder)
                     if is_inst(resume_v) array_add(*insts_to_move, resume_v);
                 } else {
                     assert(sentinel != NONE, "expected to find icmp using RdxResult");
                     if is_inst(start_v) && inst_op(start_v) == .FREEZE table_set(*to_frozen, op(start_v, 0), start_v);
-                    cmp := isf_icmp(*b, ICMP_EQ, resume_v, start_v);
+                    cmp := irb_icmp(*b, ICMP_EQ, resume_v, start_v);
                     if is_inst(cmp) array_add(*insts_to_move, cmp);
                     resume_v = irb_select(*b, cmp, vp_ir(sentinel), resume_v);
                     if is_inst(resume_v) array_add(*insts_to_move, resume_v);
