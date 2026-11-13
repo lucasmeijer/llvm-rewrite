@@ -1975,6 +1975,17 @@ Still slow / next:
   "-1" is not the canonical identity and `and %p, -1` stays an instruction (`hwasan_binop_wide_const`); for i128 it
   zero-extends. GlobalVariable::copyAttributesFrom does not copy the comdat. LLVM keeps DT/PDT/LoopInfo updated
   through a DomTreeUpdater; here every instrumented function's analyses are dropped (fam_invalidate) instead.
+- **Next steps (sanitizers / instrumentation)**, by value:
+  1. DataFlowSanitizer (L1.extra.sanitizers.dfsan, 45 files): DataFlowSanitizer.cpp is ~2500 lines without comments,
+     about msan's size; it needs a SpecialCaseList port first (llvm/lib/Support/SpecialCaseList.cpp +
+     GlobPattern.cpp: v2 default = globs with `*`, `?`, `[..]`, `\`, `{a,b}`; v1 = regexes; `inSection` is "any glob
+     of (section matching, prefix, category) matches"), read from `-dfsan-abilist=<file>` (a cl::list). Reuse
+     msan's shape (one state per function, shadow/origin maps, PHI fixups) and `escape_enumerator`, `san_callee`.
+  2. L1.extra.instrumentation.coverage leftovers: Instrumentor (IPO/Instrumentor*.cpp, ~3000 lines with the JSON
+     config; 4 tests, all `-passes=instrumentor` with the default config) and GCOVProfiling (1 test, modules.ll:
+     a split-DWARF CU, so nothing is emitted; a faithful port also writes .gcno files).
+  3. asan: the 3 RUN lines that need win-eh-prepare / require<basic-aa>; msan: ARM SIMD handlers.
+  None of these passes is timed by a tests/perf benchmark.
 
 ## Coroutines (L1.extra.coroutines 298/310: roundtrip 155/155, opt 143/155; /root/jai_coro)
 
