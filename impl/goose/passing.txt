@@ -12676,6 +12676,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/non-scheduled-inst-reused-as-la
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-vectorizable-inst-operand.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/num-uses-for-copyable-elements.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/odd_store.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/opaque-ptr-2.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/opaque-ptr-2.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/opaque-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/operand-reorder-with-copyables.ll::roundtrip
@@ -12716,6 +12717,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/powi-regression.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/powi.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/powof2div.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/powof2mul.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/pr16628.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr16628.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr176906.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr19657.ll::roundtrip
@@ -12739,6 +12741,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/pr52275.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr52275.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr59867.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr63668.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/pr98978.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr98978.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/propagate-mmra.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/propagate_ir_flags.ll::roundtrip

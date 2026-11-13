@@ -32,8 +32,8 @@
 - L2.ipo-args COMPLETE (206/206: ArgumentPromotion 55/55, DeadArgElim 39/39, Internalize 9/9 roundtrip + opt).
   L2.globals 445/450 (all 225 roundtrip, 220/225 opt): the 5 left run `-O2`, `lto<O2>` or `default<O0>`
   pipelines. See "IPO over globals and arguments" below for the sweeps (0 differs everywhere).
-- L1.vectorize.slp: milestone 2 (tree building, slp*.goose): 657/1300 (650 roundtrip, 7 opt). Trees are built and
-  verified line by line against LLVM's -debug-only=SLP trace (0 of 1326 runs differ); every tree that is not tiny
+- L1.vectorize.slp: milestone 2 (tree building, slp*.goose): 676/1300 (650 roundtrip, 26 opt). Trees are built and
+  verified line by line against LLVM's -debug-only=SLP trace (0 of 1326 runs differ, 141006 lines); every tree that is not tiny
   fails loudly before the reordering / cost model, so the pass still never changes IR. Sweeps: see "SLPVectorizer".
 
 - L1.vectorize.vector-combine COMPLETE (130/130: 65 roundtrip, 65 opt). Sweeps of `vector-combine`: whole-file
@@ -1420,11 +1420,16 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   Add new line kinds to its `KINDS` list as their LLVM_DEBUG lines get ported (e.g. "SLP: Found cost" with the cost
   model).
 - **The boundary** (`slp_fail` / `slp_not_ported`), loud failures over those 1326 runs: after buildTree (a tree that
-  is not tiny: reordering, transformNodes, minbw, the cost model) 960; copyable elements in a bundle 132
-  (InstructionsState with `copy`: the scheduler's ScheduleCopyableData is not ported); struct-returning calls 67
-  (checkEVsForVecCalls, e.g. llvm.sadd.with.overflow; jai's frontier too); compare sequences 25; const.rdx 14;
-  vectorizeGEPIndices 10; vectorizeNonVectorizableInsts' sequence 8; tryToReduceOrdered 4; getVectorCallCosts
-  without a target 4; emitScaleForReusedOps 3; poor-throughput seeds 3; VFDatabase mappings 2. 90 run to the end.
+  is not tiny: reordering, transformNodes, minbw, the cost model) 982; copyable elements in a bundle 137
+  (InstructionsState with `copy`: the scheduler's ScheduleCopyableData is not ported); struct-returning calls 74
+  (checkEVsForVecCalls / getWidenedType of a struct, e.g. llvm.sadd.with.overflow; jai's frontier too); const.rdx 14;
+  vectorizeGEPIndices 10; tryToReduceOrdered 4; getVectorCallCosts without a target 4; emitScaleForReusedOps 3;
+  poor-throughput seeds 3; VFDatabase mappings 2. 93 run to the end. The trace compare covers 141006 lines.
+- **Sweeps** `--passes slp-vectorizer` (0 differs / 0 bad-ir everywhere; the rest loud): whole-file 6082 identical
+  of 8083, `--per-function` 62418 of 70751, `--with-test-flags` 6585 of 10449 (before the compare sequences),
+  tests/perf/compile 4/4 loud. The
+  per-function sweep caught Instruction::isAssociative (fmul needs only `reassoc`), which decides whether a
+  reduction is ordered.
 - **Next steps, in order:**
   1. Copyable elements in the scheduler (ScheduleCopyableData and its four maps, the copyable branches of
      tryScheduleBundle / buildBundle / calculateDependencies / schedule / areAllOperandsReplacedByCopyableData /
@@ -1448,8 +1453,9 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
      kinds to the compare tool. jai's impl/jai/tools/slp_cost_compare.py compares just the decisions.
   4. Codegen (vectorizeTree, ShuffleInstructionBuilder, scheduleBlock, optimizeGatherSequence, ~BoUpSLP), then the
      emission parts of HorizontalReduction (const.rdx, emitScaleForReusedOps, emitReduction, tryToReduceOrdered).
-  5. The remaining seeds: compareCmp + vectorizeCmpInsts' sequence, vectorizeNonVectorizableInsts' sequence,
-     vectorizeGEPIndices, poor-throughput seeds; struct-typed scalars (jai NOTES "SLPVectorizer" step 1).
+  5. The remaining seeds: vectorizeGEPIndices, poor-throughput seeds (both small, traceable); struct-typed scalars
+     (jai NOTES "SLPVectorizer" step 1). Compare sequences and the non-vectorizable roots' operand sequence are done
+     (slp_phis.goose: tryToVectorizeSequence<Value> with kind 0 PHIs, 1 compares, 2 OperandGroupKeys).
 - **Design notes:** buildTreeRec can't hold growable locals across its recursion, so every list it passes down is a
   run of the tree pools (appended, never shrunk until deleteTree); the operand lists built for a node *are* the node's
   operands (TreeEntry::setOperands copies in LLVM, but nothing changes the local copy afterwards). Helpers it calls
