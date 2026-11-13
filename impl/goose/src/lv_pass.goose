@@ -671,8 +671,13 @@ fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> boo
     let osz = cm_epilogue == CM_EPILOGUE_NOT_ALLOWED_OPT_SIZE || cm_epilogue == CM_EPILOGUE_NOT_ALLOWED_LOW_TRIP_LOOP;
     if !lvp_try_to_build_vplan1(lvh_allow_reordering(), force, osz) { lv_dbg("LV: tryToBuildVPlan1 failed\n"); return lv_no_plan_result(user_ic); }
     lv_check_minimal_bitwidths();
-    // invalidating interleave groups for a predicated header: tail folding fails loudly below
-    if cm_fold_tail { lvx_unported("tail folding"); }
+    // invalidate interleave groups if all blocks of the loop will be predicated
+    if cm_block_needs_predication_for_any_reason(loop_header(lv_l)) && !lv_use_masked_interleaved_accesses() {
+        lv_dbg("LV: Invalidate all interleaved groups due to fold-tail by masking which requires masked-interleaved support.\n");
+        // invalidateCostModelingDecisions: WideningDecisions, Uniforms, Scalars
+        if iai_invalidate_groups() { hm_clear(cm_wd); hm_clear(cm_wd_cost); cm_uni_vfs.clear(); hm_clear(cm_uni); hm_clear(cm_scal); }
+    }
+    if cm_fold_tail { lvl_prepare_to_fold_tail_by_masking(); }
     let tc = lv_small_constant_trip_count(lv_l);
     var have_user_plan = false;
     if user_vf != 0 && user_vf <= max_vf {

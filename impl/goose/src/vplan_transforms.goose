@@ -23,6 +23,7 @@ import lv_legality;
 import vplan;
 import vplan_utils;
 import vplan_props;
+import vplan_predicate;
 import memloc;
 import tbaa;
 
@@ -86,8 +87,27 @@ fn vpt_simplify_recipe(r: i32) {
     if fv >= 0 { vpt_replace_all(r, fv); return; }
     let k = vpr[r].kind;
     let def = vpr[r].def;
-    if k == VPR_PRED_INST_PHI { vp_unported("simplifying VPPredInstPHIRecipe"); }
-    if k == VPR_REPLICATE && vpr[r].predicated && iop(vp_underlying_instr(r)) == OP_STORE { vp_unported("simplifying predicated stores"); }
+    // fold PredPHI LiveIn -> LiveIn
+    if k == VPR_PRED_INST_PHI && vp_is_ir_value(vp_op(r, 0)) { vpt_replace_all(r, vp_op(r, 0)); }
+    // drop the header mask of a predicated store whose stored value and address are uniform across VF and UF
+    if k == VPR_REPLICATE && vpr[r].predicated && vpr[r].opcode == OP_STORE as i32 {
+        var uni = true;
+        for j in vp_nops(r) - 1 { if !vp_is_uniform_across_vfs_and_ufs(vp_op(r, j)) { uni = false; } }
+        if uni && vp_is_header_mask(vp_op(r, vp_nops(r) - 1)) {
+            var ops: i32[>..<] = [];
+            for j in vp_nops(r) - 1 { ops.push(vp_op(r, j)); }
+            let ui = vp_underlying_instr(r);
+            let nr = vp_new_single_def(VPR_REPLICATE, ops, vals[ui].ty as i32, ui, vpr[r].dl);
+            vpr[nr].single_scalar = vpr[r].single_scalar;
+            vpr[nr].opcode = vpr[r].opcode;
+            vpr[nr].f = vpr[r].f;
+            vp_md_copy(nr, r);
+            vp_insert_before(nr, r);
+            vp_rauw(vpr[r].def, vpr[nr].def);
+            vp_erase_recipe(r);
+            return;
+        }
+    }
     let can_create = k != VPR_INSTRUCTION || vpv[def].uv < 0;
     let opc = vpm_opcode(r, true);
     // trunc (zext/sext A)
@@ -909,32 +929,7 @@ fn vpt_can_hoist_or_sink_with_no_alias_check(loc: ML, first: i32, last: i32, lea
     return true;
 }
 
-// createAndOptimizeReplicateRegions
-fn vpt_create_and_optimize_replicate_regions() {
-    var bs: i32[>..<] = [];
-    vp_all_basic_blocks_deep(bs);
-    for b in bs {
-        var r = vpb[b].first;
-        while r >= 0 {
-            if vpr[r].kind == VPR_REPLICATE && vpr[r].predicated { vp_unported("replicate regions (predicated scalarization)"); }
-            r = vpr[r].next;
-        }
-    }
-    // sinkScalarOperands and mergeReplicateRegionsIntoSuccessors only act on replicate regions
-    while vpt_merge_blocks_into_predecessors() {}
-}
 
-fn vpt_reassociate_header_mask() {
-    if vpb[vp_vector_loop_region()].header_mask >= 0 { vp_unported("reassociateHeaderMask"); }
-}
-fn vpt_simplify_blends() {
-    var bs: i32[>..<] = [];
-    vp_all_basic_blocks_deep(bs);
-    for b in bs {
-        var r = vpb[b].first;
-        while r >= 0 { if vpr[r].kind == VPR_BLEND { vp_unported("blends (simplifyBlends)"); } r = vpr[r].next; }
-    }
-}
 fn vpt_simplify_reverses() {
     var bs: i32[>..<] = [];
     vp_all_basic_blocks_deep(bs);
@@ -1173,7 +1168,6 @@ fn vpt_hoist_predicated_loads() {}
 fn vpt_sink_predicated_stores() {}
 fn vpt_truncate_to_minimal_bitwidths() {}
 
-fn vpt_materialize_header_mask() { if vpb[vp_vector_loop_region()].header_mask >= 0 { vp_unported("materializeHeaderMask"); } }
 
 fn pred_inverse_vpt(p: i64) -> i64 {
     if p == 32 { return 33; } if p == 33 { return 32; }

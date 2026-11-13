@@ -21,6 +21,7 @@ import lv_legality;
 import loop_versioning;
 import vplan;
 import vplan_utils;
+import vplan_predicate;
 
 // ---------------------------------------------------------------------------------------------
 // PlainCFGBuilder
@@ -502,12 +503,3 @@ fn vp_create_loop_regions(dl: i32) {
     vpb[vp_entry_basic_block(top)].name = intern("vector.body");
 }
 
-// introduceMasksAndLinearize (VPlanPredicator.cpp)
-fn vp_introduce_masks_and_linearize() {
-    let region = vp_vector_loop_region();
-    let header = vp_entry_basic_block(region);
-    var rpo: i32[>..<] = [];
-    vp_rpo(header, false, rpo);
-    if rpo.len > 1 { vp_unported("if-conversion (VPPredicator, more than one block in the loop)"); }
-    if vpb[region].header_mask >= 0 { vp_unported("masked header blocks (tail folding)"); }
-}

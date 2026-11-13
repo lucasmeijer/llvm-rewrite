@@ -18,9 +18,12 @@ import loopinfo;
 import scev;
 import scev_create;
 import scev_lt;
+import scev_eval;
 import pse;
 import laa;
 import tti;
+import tti_x86_vec;
+import lv_pass;
 import iv_descriptors;
 import lv_legality;
 import lv_interleave;
@@ -32,6 +35,7 @@ import vplan_props;
 import vplan_construct;
 import vplan_transforms;
 import vplan_interleave;
+import vplan_predicate;
 import delinearization;
 import apint;
 import lv_cost;
@@ -90,7 +94,7 @@ fn lvp_try_to_build_vplan1(allow_reordering: bool, force: bool, epilogue_status_
         }
     }
     vp_create_loop_regions(dl);
-    if cm_fold_tail { vp_unported("tail folding by masking (foldTailByMasking)"); }
+    if cm_fold_tail { vp_fold_tail_by_masking(); }
     vp_introduce_masks_and_linearize();
     lvp_plan1 = vp_save();
     return true;
@@ -160,7 +164,7 @@ fn lvp_build_vplans(min_vf: i64, max_vf: i64) {
         if cm_fold_tail_with_evl() { vp_unported("EVL tail folding"); }
         let np = vpt_narrow_interleave_groups();
         if np >= 0 { lvp_plans.push(np); }
-        vpt_materialize_header_mask();
+        vpt_materialize_header_mask(false, false);
         lvp_plans.push(vp_save());
     }
 }
@@ -421,7 +425,11 @@ fn lvp_make_mem_op_widening_decisions() {
             let i = vp_underlying_instr(vpi);
             let is_load = vpr[vpi].opcode == OP_LOAD as i32;
             if cm_is_predicated_inst(i) || !is_load || !vp_is_used_by_load_store_address(vpr[vpi].def) { rem.push(vpi); continue; }
-            vp_unported("scalarized address loads (makeVPlanMemOpDecision)");
+            // scalarize loads used as addresses: single-scalar when the pointer is loop-invariant
+            let ptr = vp_op(vpi, 0);
+            let ps = vp_scev_for_value(ptr, lvp_pse, lvp_l);
+            let single = !sc_is_cnc(ps) && sc_is_loop_invariant(ps, lvp_l);
+            replace_with(vpi, vp_new_replicate(i, [ptr], single, -1, vpr[vpi].f, vpi, vpr[vpi].dl));
         }
         memops.clear(); for x in rem { memops.push(x); } rem.clear();
     }
@@ -618,9 +626,17 @@ fn lvp_try_to_build_vplan() -> bool {
         let br = vp_terminator(middle);
         vp_set_operand(br, 0, vp_false());
     }
-    // IVUpdateMayOverflow over the range: with the tail not folded, the increment keeps NUW anyway
-    if cm_fold_tail { vp_unported("tail folding (canonical IV NUW)"); }
+    // IVUpdateMayOverflow over the range; with the tail not folded the increment keeps NUW anyway
     let region = vp_vector_loop_region();
+    var may_overflow = false;
+    var ovf = lvp_range_start;
+    while ovf < lvp_range_end { if !lvp_is_indvar_overflow_check_known_false(ovf) { may_overflow = true; } ovf *= 2; }
+    if may_overflow && cm_fold_tail {
+        // clearCanonicalIVNUW(IVInc)
+        let inc = vp_def(vp_op(vp_terminator(vpb[region].exiting), 0));
+        vp_drop_poison_generating_flags(inc);
+        vpb[region].can_iv_nuw = false;
+    }
     let header = vpb[region].entry;
     // the interleave groups relevant for this (possibly trimmed) range
     var igs: i32[>..<] = [];
@@ -680,6 +696,18 @@ fn lvp_try_to_build_vplan() -> bool {
     vph.name = intern("Initial VPlan");
     vpt_drop_poison_generating_recipes();
     return true;
+}
+
+// isIndvarOverflowCheckKnownFalse(Cost, VF) (UF unknown: the maximum interleave factor)
+fn lvp_is_indvar_overflow_check_known_false(vf: i64) -> bool {
+    let max_uf = if tti_kind == TTI_X86 { x86_max_interleave_factor(vf) } else { 1 };
+    let w = ty_bits(lvl_widest_ind_ty);
+    let tc = lv_small_best_known_tc(true, false, true);
+    if tc == 0 { return false; }
+    // (MaxUIntTripCount - MaxTC).ugt(MaxVF * MaxUF) at the induction's width (MaxTC, MaxVF: unsigned)
+    let d = ap_sub(ap_ones(w), ap_u64((tc as u64) & 0xFFFFFFFF, w));
+    let p = ap_u64(((vf as u64) * (max_uf as u64)) & 0xFFFFFFFF, w);
+    return ap_ugt(d, p);
 }
 
 // requiresScalarEpilogue(IsVectorizing) of the cost model (lv_pass.goose keeps the epilogue status)

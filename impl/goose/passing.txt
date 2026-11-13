@@ -690,6 +690,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/IntMM.ll::roundtr
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Oscar.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Perm.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Puzzle.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Queens.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Queens.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Quicksort.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/RealMM.ll::opt
@@ -749,6 +750,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Regression/C/globalrefs.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/matrixTranspose.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/pointer_arithmetic.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/pointer_arithmetic.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Regression/C/sumarray2d.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/sumarray2d.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/sumarraymalloc.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/test_indvars.ll::opt
@@ -11294,6 +11296,7 @@ tests/imported/llvm/Transforms/LoopVectorize/X86/outer-loop-non-power-of-2-type.
 tests/imported/llvm/Transforms/LoopVectorize/X86/outer_loop_test1_no_explicit_vect_width.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/parallel-loops-after-reg2mem.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/parallel-loops-after-reg2mem.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/X86/parallel-loops.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/parallel-loops.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/X86/powof2div.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/X86/powof2div.ll::roundtrip
@@ -11524,6 +11527,7 @@ tests/imported/llvm/Transforms/LoopVectorize/load-deref-pred-neg-off.ll::roundtr
 tests/imported/llvm/Transforms/LoopVectorize/load-of-struct-deref-pred.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/loop-form.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/loop-scalars.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/loop-with-constant-exit-condition.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/loop-with-constant-exit-condition.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/make-followup-loop-id.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/memdep-fold-tail.ll::roundtrip
@@ -11614,6 +11618,7 @@ tests/imported/llvm/Transforms/LoopVectorize/pr45525.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr45679-fold-tail-by-masking.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr46525-expander-insertpoint.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr47343-expander-lcssa-after-cfg-update.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/pr48832.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/pr48832.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/pr50686.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/pr50686.ll::roundtrip
@@ -11752,6 +11757,7 @@ tests/imported/llvm/Transforms/LoopVectorize/unroll-novec-memcheck-metadata.ll::
 tests/imported/llvm/Transforms/LoopVectorize/unroll-novec-memcheck-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/unroll.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/unroll.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/unroll_nonlatch.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/unroll_nonlatch.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/unroll_novec.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/unroll_novec.ll::roundtrip
