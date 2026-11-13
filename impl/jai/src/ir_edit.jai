@@ -412,6 +412,7 @@ split_basic_block :: (old: Value_Id, at: Value_Id, name: string, head := false) 
     f := block(old).parent;
     nb := create_block(f, name, block(old).next);
     loc := get_metadata(at, 0);
+    if loc != NONE loc = diloc_get_without_atom(loc);   // Loc->getWithoutAtom()
     left: u32 = 0;
     if !head && inst(at).records {
         left = inst(at).records;
@@ -431,6 +432,12 @@ split_basic_block :: (old: Value_Id, at: Value_Id, name: string, head := false) 
     if loc != NONE set_metadata(br, 0, loc);
     block_replace_successors_phi_uses_with(nb, old, nb);
     return nb;
+}
+
+// DILocation::getWithoutAtom: the same location with atomGroup / atomRank 0
+diloc_get_without_atom :: (l: Md_Id) -> Md_Id {
+    if di_int(l, 3) == 0 && di_int(l, 4) == 0 return l;
+    return di_location_get(diloc_line(l), diloc_col(l), diloc_scope(l), diloc_inlined_at(l), di_int(l, 2), 0, 0);
 }
 
 // Replace the terminator of `b` with `new_term` (created, unlinked); the old one is erased.

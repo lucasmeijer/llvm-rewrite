@@ -195,7 +195,7 @@ lib/Transforms/IPO/ArgumentPromotion.cpp 0.95  # no optimization remarks; X86 ar
 lib/Transforms/Utils/AssignGUID.cpp 1  # manual
 lib/Analysis/TypeMetadataUtils.cpp 0.35  # getPointerAtOffset, replaceRelativePointerUsersWithZero
 lib/IR/Globals.cpp 0.35
-lib/IR/Function.cpp 0.15  # deleteBody, copyAttributesFrom, splice
+lib/IR/Function.cpp 0.17  # deleteBody, copyAttributesFrom, splice, createWithDefaultAttr
 lib/IR/Module.cpp 0.1  # getGlobalVariable, getFunction, global_values order
 lib/Support/MD5.cpp 0.8  # update / final / stringifyResult / MD5Hash
 lib/Transforms/Scalar/TailRecursionElimination.cpp 0.95  # no optimization remarks (ORE)
@@ -246,3 +246,9 @@ lib/IR/ConvergenceVerifier.cpp 1.0  # with GenericConvergenceVerifierImpl.h
 lib/Transforms/Scalar/NewGVN.cpp 0.93  # jai_newgvn: all of NewGVN; not the assertion-only verify* functions, statistics, debug printing
 lib/Transforms/Scalar/GVNSink.cpp 0.95  # jai_newgvn: complete except the address order of InstructionUseExpr users (fails loudly when it decides)
 lib/Transforms/Scalar/GVNHoist.cpp 0.97  # jai_newgvn: all but rank() and the (output-neutral) rank sort of the VNs
+lib/Transforms/Instrumentation/AddressSanitizer.cpp 0.9  # no AMDGPU paths, no Android ifunc shadow, no LLVM_DEBUG
+lib/Analysis/StackSafetyAnalysis.cpp 0.7  # no ModuleSummaryIndex (ThinLTO) paths, no printers / param summaries
+lib/Analysis/StackLifetime.cpp 0.6  # LivenessType::Must only, no printer
+lib/Transforms/Utils/ModuleUtils.cpp 0.55  # appendTo*, ctors, kcfi; not transformGlobal*, removeFromUsedLists, embedBuffer, lowerGlobalIFunc
+lib/Transforms/Utils/Instrumentation.cpp 0.8  # not PrepareToSplitEntryBlock
+lib/Demangle/Demangle.cpp 0.3  # with a small subset of the Itanium / Microsoft demanglers (headers)

@@ -23,7 +23,7 @@ mu_append_to_global_array :: (array_name: string, f: Value_Id, priority: s64, da
     vals: [3] Value_Id;
     vals[0] = const_int(ir.t_i32, cast(u64) priority);
     vals[1] = f;
-    vals[2] = ifx data != NONE then ce_pointer_cast(data, type_ptr(0)) else const_null_value(type_ptr(0));
+    vals[2] = ifx data != NONE then san_ce_pointer_cast(data, type_ptr(0)) else const_null_value(type_ptr(0));
     n := type_nsub(elt_ty);
     array_add(*current, const_aggregate(.C_STRUCT, elt_ty, array_view(vals, 0, n)));
     at := type_array(cast(u64) current.count, elt_ty);
@@ -77,9 +77,9 @@ declare_sanitizer_init_function :: (init_name: string, arg_types: [] Type_Id, we
 
 // createSanitizerCtor(M, CtorName)
 create_sanitizer_ctor :: (ctor_name: string) -> Value_Id {
-    ctor := fn_create_with_default_attr(type_func(ir.t_void, .[], false), .INTERNAL, ctor_name);
+    ctor := fn_create_with_default_attr(type_func(ir.t_void, .[], false), .INTERNAL, ctor_name, dl.program_as);
     fn_add_fn_attr_kind(ctor, .NoUnwind);
-    if module_flag("kcfi") != NONE fatal("createSanitizerCtor: setKCFIType (the kcfi module flag) is not supported");
+    san_set_kcfi_type(ctor, "_ZTSFvvE");   // sanitizer_common.jai
     bb := create_block(ctor, "");
     block_append_inst(bb, new_inst(.RET, ir.t_void, 0));
     append_to_used(ctor);

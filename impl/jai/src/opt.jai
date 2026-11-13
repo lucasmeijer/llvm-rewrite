@@ -81,6 +81,10 @@
 #load "pass_misc_module.jai";
 #load "pass_inject_tli_mappings.jai";
 #load "pass_ee_instrument.jai";
+#load "sanitizer_common.jai";
+#load "demangle.jai";
+#load "stack_safety.jai";
+#load "pass_asan.jai";
 #load "pass_loop_sink.jai";
 #load "pass_transform_warning.jai";
 #load "pass_drop_unnecessary_assumes.jai";

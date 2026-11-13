@@ -1788,3 +1788,32 @@ Still slow / next:
   default globals address space (`dl.globals_as`), like `new GlobalVariable(M, ...)`.
 - Trap: `fn_add_fn_attr` with a string attribute goes through `attr_set_with`, which removes *every* string
   attribute (attr_set_remove by kind); use `fn_add_fn_str_attr` for string attributes.
+## Sanitizers (L1.extra.sanitizers.*; jai_sanitizers, 2026-11)
+
+- Files: `sanitizer_common.jai` (ModuleUtils.cpp / Instrumentation.cpp helpers, Function::createWithDefaultAttr,
+  setKCFIType + KCFIHash, SplitBlockAndInsertIfThen/Else without DTU (`sbi_if_then`, `sbi_if_then_else`),
+  SplitBlockAndInsertSimpleForLoop, ASanStackFrameLayout, replaceDbgDeclare, maybeMarkSanitizerLibraryCallNoBuiltin,
+  `San_Callee` = FunctionCallee + `san_call`, `irb_alloca`, `irb_pointer_cast`, `san_takes_value` for `-opt value`
+  options), `demangle.jai` (llvm::demangle subset), `stack_safety.jai` (StackSafetyGlobalInfo + StackLifetime Must),
+  `pass_asan.jai`.
+- **asan** (L1.extra.sanitizers.asan): 146/151 exit RUN lines identical; the rest need win-eh-prepare,
+  require<basic-aa> or coro-early/coro-cleanup (not sanitizer code). Sweeps, 0 differs / 0 bad-ir: `asan` whole
+  corpus; `forceattrs,asan -force-attribute=sanitize_address` (instruments every function: the real test of the
+  function pass) plain, --with-test-flags, with -asan-use-after-scope/-asan-use-stack-safety=0, with
+  -asan-instrumentation-with-call-threshold=0/-asan-use-after-return=always/-asan-stack-dynamic-alloca=0, with
+  -asan-use-after-return=never/-asan-recover/-asan-detect-invalid-pointer-pair/-asan-max-inline-poisoning-size=0, and
+  `forceattrs,sroa,asan` on tests/perf/compile. Loud leftovers: Itanium templates/substitutions and MSVC names other
+  than plain variables and string literals in the demangler, a static alloca whose size overflows u64 (LLVM
+  dereferences an empty optional: UB), StackSafety on pointers whose index width differs from their size.
+- Traps found: `new GlobalVariable(M, ...)` without an address space uses the DataLayout's default globals address
+  space (`dl.globals_as`), not 0; `ConstantExpr::getPointerCast` addrspacecasts (`san_ce_pointer_cast`); the stack
+  shadow constants depend on endianness; every RAUW of an instruction/argument must be `rauw_with_metadata` (debug
+  records); `moveBefore` is `inst_move_before_dbg`; BasicBlock::splitBasicBlock gives the new branch the split
+  point's location **without its atom group** (fixed in ir_edit.jai `split_basic_block`, affects every pass);
+  StackSafety's getInfo is lazy (computed on the first isSafe query, on the IR at that moment).
+- Intrinsics LLVM knows but gen_iit.jai does not (llvm.amdgcn.is.shared/private, declared by every asan run) get
+  their attributes from `san_set_foreign_intrinsic_attributes` and no "; Unknown intrinsic" comment
+  (`san_is_foreign_known_intrinsic`, printer.jai); `san_intrinsic_with_attrs` declares an intrinsic that has no
+  gen_intrinsics.jai entry (llvm.asan.check.memaccess).
+- Perf (x64 build, sqlite3 with forceattrs,sroa,asan): +1.1 s over forceattrs,sroa (LLVM's whole run: 0.5 s); no
+  @perf benchmark times asan.

@@ -321,6 +321,8 @@ Pass_Kind :: enum u8 {
     INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING; DROP_UNNECESSARY_ASSUMES; JUMP_TABLE_TO_SWITCH; MOVE_AUTO_INIT; ALIGNMENT_FROM_ASSUMPTIONS; LIBCALLS_SHRINKWRAP; CALLED_VALUE_PROPAGATION;
     // EarlyCSE (pass_early_cse.jai)
     EARLY_CSE;
+    // sanitizers (pass_asan.jai, ...)
+    ASAN;
     // SCCP, IPSCCP (pass_sccp.jai)
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
@@ -570,6 +572,7 @@ PASS_TABLE :: Pass_Info.[
     .{"libcalls-shrinkwrap", .FUNCTION, .LIBCALLS_SHRINKWRAP, false, .DOMTREE},
     .{"called-value-propagation", .MODULE, .CALLED_VALUE_PROPAGATION, false, .DOMTREE},
     .{"ee-instrument", .FUNCTION, .EE_INSTRUMENT, true, .DOMTREE},   // also ee-instrument<...>
+    .{"asan", .MODULE, .ASAN, true, .DOMTREE},   // also asan<kernel;use-after-scope>
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<should-not-run-function-passes>", .FUNCTION, .REQUIRE, true, .SHOULD_NOT_RUN},
@@ -618,6 +621,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if name == "drop-type-tests<assume>" || name == "drop-type-tests<all>" return lookup_pass("drop-type-tests");
     if begins_with(name, "drop-unnecessary-assumes<") && name[name.count - 1] == #char ">" return lookup_pass("drop-unnecessary-assumes");
     if begins_with(name, "ee-instrument<") && name[name.count - 1] == #char ">" return lookup_pass("ee-instrument");
+    if begins_with(name, "asan<") && name[name.count - 1] == #char ">" return lookup_pass("asan");
     return null;
 }
 
@@ -1144,6 +1148,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if merge_functions_parse_cl_opt(name, value, has_value) return true;   // pass_merge_functions.jai
     if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)
     if expand_memcmp_parse_cl_opt(name, value, has_value) return true;   // pass_expand_memcmp.jai
+    if asan_parse_cl_opt(name, value, has_value) return true;   // pass_asan.jai (-asan-*)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1293,6 +1298,7 @@ run_module_pm :: (n: s32) {
             case .LOWER_COMMENT_STRING; if should_run_pass(node, NONE) mam_invalidate(lower_comment_string_run());
             case .REL_LOOKUP_TABLE_CONVERTER; if should_run_pass(node, NONE) mam_invalidate(rel_lookup_table_converter_run());
             case .CG_PROFILE; if should_run_pass(node, NONE) mam_invalidate(cg_profile_run());
+            case .ASAN; if should_run_pass(node, NONE) mam_invalidate(asan_run(node.name));
             case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
             case .CALLED_VALUE_PROPAGATION; if should_run_pass(node, NONE) mam_invalidate(called_value_propagation_run());
             case .IPSCCP; if should_run_pass(node, NONE) mam_invalidate(ipsccp_run(node.name, node.no_func_spec));
@@ -1529,6 +1535,12 @@ opt_main :: () {
            a == "-internalize-public-api-list" || a == "--internalize-public-api-list" ||
            a == "-internalize-public-api-file" || a == "--internalize-public-api-file" ||
            a == "-force-attribute" || a == "--force-attribute" || a == "-force-remove-attribute" || a == "--force-remove-attribute" {
+            if i >= args.count fatal("option % needs a value", a);
+            if !parse_cl_opt(tprint("%=%", a, args[i])) fatal("unsupported option '%'", a);
+            i += 1;
+            continue;
+        }
+        if san_takes_value(a) {   // sanitizer_common.jai: sanitizer options with a value written `-name value`
             if i >= args.count fatal("option % needs a value", a);
             if !parse_cl_opt(tprint("%=%", a, args[i])) fatal("unsupported option '%'", a);
             i += 1;

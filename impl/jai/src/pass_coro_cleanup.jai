@@ -15,8 +15,8 @@ coro_cleanup_lower_subfn :: (subfn: Value_Id) {
 }
 
 // Function::createWithDefaultAttr
-fn_create_with_default_attr :: (ft: Type_Id, linkage: Linkage, name: string) -> Value_Id {
-    f := new_function(ft, "", 0);
+fn_create_with_default_attr :: (ft: Type_Id, linkage: Linkage, name: string, as: u32 = 0) -> Value_Id {
+    f := new_function(ft, "", as);
     gv_set_linkage(f, linkage);
     array_add(*ir.m_functions, f);
     if name.count set_name(f, name);

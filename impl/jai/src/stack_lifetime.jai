@@ -1,7 +1,7 @@
 // StackLifetime: live ranges of allocas from their lifetime markers (May or Must liveness), as instruction-number
 // bit sets. Ported from llvm/lib/Analysis/StackLifetime.cpp (collectMarkers, calculateLocalLiveness,
-// calculateLiveIntervals, run, getLiveRange / overlaps). Only what CoroFrame's storage reuse needs; the
-// stack-lifetime printer is not ported.
+// calculateLiveIntervals, run, getLiveRange / overlaps, isReachable, isAliveAfter): what CoroFrame's storage reuse
+// and StackSafetyAnalysis need; the stack-lifetime printer is not ported.
 
 Stack_Lifetime :: struct {
     n_allocas: s64;
@@ -20,7 +20,7 @@ Stack_Lifetime :: struct {
     interesting: [..] bool;
     ranges: [..] [..] bool;             // LiveRanges
 }
-Sl_Marker :: struct { inst_no: s64; alloca_no: s32; is_start: bool; }
+Sl_Marker :: struct { inst_no: s64; alloca_no: s32; is_start: bool; inst: Value_Id; }
 
 // depth_first(&F): preorder, successors in order
 sl_depth_first :: (f: Value_Id, out: *[..] Value_Id) {
@@ -83,7 +83,7 @@ stack_lifetime_run :: (f: Value_Id, allocas: [] Value_Id, may_liveness: bool) ->
             if !found continue;
             is_start := id == IID_LIFETIME_START;
             if is_start sl.interesting[no] = true;
-            array_add(*sl.markers[bi], .{sl.n_insts, no, is_start});
+            array_add(*sl.markers[bi], .{sl.n_insts, no, is_start, i});
             sl.n_insts += 1;
             if is_start { sl.end[bi][no] = false; sl.begin[bi][no] = true; }
             else { sl.begin[bi][no] = false; sl.end[bi][no] = true; }
@@ -142,6 +142,23 @@ stack_lifetime_run :: (f: Value_Id, allocas: [] Value_Id, may_liveness: bool) ->
         for k: 0..na - 1 if started[k] for x: start[k]..be - 1 sl.ranges[k][x] = true;
     }
     return sl;
+}
+
+// isReachable(I)
+stack_lifetime_is_reachable :: (sl: *Stack_Lifetime, i: Value_Id) -> bool { return table_contains(*sl.block_index, inst(i).parent); }
+
+// isAliveAfter(AI, I): the live range bit of the last marker at or before I in its block (the block's slot if none)
+stack_lifetime_is_alive_after :: (sl: *Stack_Lifetime, ai: Value_Id, i: Value_Id) -> bool {
+    found, bi := table_find(*sl.block_index, inst(i).parent);
+    assert(found, "Unreachable is not expected");
+    num := sl.inst_start[bi];
+    for m: sl.markers[bi] {
+        if m.inst != i && !comes_before(m.inst, i) break;
+        num = m.inst_no;
+    }
+    fa, no := table_find(*sl.numbering, ai);
+    assert(fa);
+    return sl.ranges[no][num];
 }
 
 // getLiveRange(AI1).overlaps(getLiveRange(AI2))

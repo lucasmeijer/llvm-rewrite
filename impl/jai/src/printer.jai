@@ -1076,7 +1076,7 @@ print_function :: (f: Value_Id) {
             outc(#char "\n");
         }
     }
-    if g.intrinsic && intrinsic_lookup(vname(f)).count == 0 out("; Unknown intrinsic\n");
+    if g.intrinsic && intrinsic_lookup(vname(f)).count == 0 && !san_is_foreign_known_intrinsic(vname(f)) out("; Unknown intrinsic\n");
     process_function(f);
     current_function = f;
     decl := g.first_block == NONE;
