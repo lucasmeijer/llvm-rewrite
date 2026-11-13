@@ -285,6 +285,39 @@ psi_is_cold_call_site :: (p: *Psi, call: Value_Id, bfi: *Bfi) -> bool {
     return ok2;
 }
 
+// ProfileSummaryInfo::getTotalCallCount<Function>: sample profiles only
+psi_total_call_count :: (p: *Psi, f: Value_Id) -> (bool, u64) {
+    if !psi_has_sample_profile(p) return false, 0;
+    total: u64 = 0;
+    for bb: fn_blocks(f) for i: block_insts(bb) {
+        o := inst_op(i);
+        if o != .CALL && o != .INVOKE continue;
+        ok, c := psi_profile_count(p, i, null);
+        if ok total += c;
+    }
+    return true, total;
+}
+// isFunctionHotInCallGraph(F, BFI)
+psi_is_function_hot_in_call_graph :: (p: *Psi, f: Value_Id, bfi: *Bfi) -> bool {
+    if f == NONE || !p.has_summary return false;
+    ok, c := function_entry_count(f);
+    if ok && psi_is_hot_count(p, c) return true;
+    ok2, t := psi_total_call_count(p, f);
+    if ok2 && psi_is_hot_count(p, t) return true;
+    for bb: fn_blocks(f) { okb, cb := bfi_block_profile_count(bfi, bb); if okb && psi_is_hot_count(p, cb) return true; }
+    return false;
+}
+// isFunctionColdInCallGraph(F, BFI)
+psi_is_function_cold_in_call_graph :: (p: *Psi, f: Value_Id, bfi: *Bfi) -> bool {
+    if f == NONE || !p.has_summary return false;
+    ok, c := function_entry_count(f);
+    if ok && !psi_is_cold_count(p, c) return false;
+    ok2, t := psi_total_call_count(p, f);
+    if ok2 && !psi_is_cold_count(p, t) return false;
+    for bb: fn_blocks(f) { okb, cb := bfi_block_profile_count(bfi, bb); if !(okb && psi_is_cold_count(p, cb)) return false; }
+    return true;
+}
+
 // SizeOpts.h isPGSOColdCodeOnly
 psi_is_pgso_cold_code_only :: (p: *Psi) -> bool {
     o := *psi_opts;

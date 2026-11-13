@@ -219,7 +219,7 @@ lib/Analysis/Delinearization.cpp 0.9  # no getIndexExpressionsFromGEP / tryDelin
 lib/Transforms/Scalar/LoopInterchange.cpp 0.95  # no CacheCostManager / the 'cache' rule (fails loudly: LoopCacheAnalysis.cpp not ported); remarks not emitted
 # --- jai_codegen_ir (2026-11): llc's IR passes
 lib/Transforms/Scalar/LoopStrengthReduce.cpp 0.88   # all but the SCEV debug-value salvage (DbgGatherSalvagableDVI/SalvageDVI/SCEVDbgValueBuilder: fails loudly) and vscale steps
-lib/CodeGen/CodeGenPrepare.cpp 0.85   # missing optimizeGatherScatterInst, statepoint relocations, -addr-sink-using-gep=false, profile-summary paths, BFI verification
+lib/CodeGen/CodeGenPrepare.cpp 0.93   # missing statepoint relocations (simplifyOffsetableRelocate), BFI verification, incremental BFI updates
 lib/CodeGen/InterleavedAccessPass.cpp 0.75   # getMask and the (de)interleave-intrinsic paths are no-ops on X86 and not ported
 lib/Target/X86/X86InterleavedAccess.cpp 0.05   # isSupported only; lowerIntoOptimizedSequence fails loudly
 lib/CodeGen/PreISelIntrinsicLowering.cpp 0.5   # missing VP expansion, ObjC ARC calls, memset.pattern, non-constant memcpy/memset.inline

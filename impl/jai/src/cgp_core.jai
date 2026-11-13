@@ -50,6 +50,7 @@ cgp_cl: struct {
     disable_gc_opts := false;              // -disable-cgp-gc-opts
     disable_select_to_branch := false;     // -disable-cgp-select2branch
     addr_sink_using_geps := true;          // -addr-sink-using-gep
+    verify_bfi_updates := false;           // -cgp-verify-bfi-updates
     enable_and_cmp_sinking := true;        // -enable-andcmp-sinking
     disable_store_extract := false;        // -disable-cgp-store-extract
     stress_store_extract := false;         // -stress-cgp-store-extract
@@ -194,23 +195,30 @@ cgp_is_fresh :: (b: Value_Id) -> bool { return table_contains(*cgp.fresh_bbs, b)
 cgp_fresh_insert :: (b: Value_Id) { table_set(*cgp.fresh_bbs, b, true); }
 cgp_fresh_erase :: (b: Value_Id) { table_remove(*cgp.fresh_bbs, b); }
 
+// llvm::shouldOptimizeForSize(BB, PSI, BFI). BFI is only needed with a profile summary; it is the function's
+// BlockFrequencyInfo as computed when first asked (CGP's own incremental BFI updates are not mirrored).
+cgp_should_optimize_for_size :: (bb: Value_Id) -> bool {
+    p := psi_get();
+    if !p.has_summary return fn_has_opt_size(block_fn(bb));
+    return should_optimize_for_size_bb(bb, p, cgp_bfi());
+}
+cgp_bfi :: () -> *Bfi { if !psi_get().has_summary return null; return get_bfi(cgp.f); }
+
 // CodeGenPrepare::_run
 cgp_run :: (f: Value_Id) -> bool {
     ever_made_change := false;
-    cgp.opt_size = fn_has_fn_attr(f, .OptimizeForSize);
-    // ProfileGuidedSectionPrefix (no basic-block-sections profile reader): without a profile summary PSI's
-    // isFunction{Hot,Cold}InCallGraph are false, so only the hot / cold attributes decide
-    if psi_get().has_summary fatal("codegenprepare: modules with a profile summary are not supported yet");
-    if fn_has_fn_attr(f, .Hot) cgp_set_section_prefix(f, "hot");
-    else if fn_has_fn_attr(f, .Cold) cgp_set_section_prefix(f, "unlikely");
+    cgp.opt_size = fn_has_opt_size(f);
+    // ProfileGuidedSectionPrefix (no basic-block-sections profile reader); -profile-unknown-in-special-section is off
+    p := psi_get();
+    if fn_has_fn_attr(f, .Hot) || psi_is_function_hot_in_call_graph(p, f, cgp_bfi()) cgp_set_section_prefix(f, "hot");
+    else if psi_is_function_cold_in_call_graph(p, f, cgp_bfi()) || fn_has_fn_attr(f, .Cold) cgp_set_section_prefix(f, "unlikely");
 
     // bypassSlowDivision (!OptSize, !PSI->hasHugeWorkingSetSize(), TLI->isSlowDivBypassed())
-    if !cgp.opt_size && cgp_is_slow_div_bypassed() {
+    if !cgp.opt_size && !(p.has_huge && p.huge) && cgp_is_slow_div_bypassed() {
         bb := fn_entry(f);
         while bb != NONE {
             next := block(bb).next;
-            // shouldOptimizeForSize(BB, PSI, BFI): false without a profile (and without optsize / minsize)
-            if !fn_has_fn_attr(f, .MinSize) ever_made_change |= bypass_slow_division(bb);
+            if !cgp_should_optimize_for_size(bb) ever_made_change |= bypass_slow_division(bb);
             bb = next;
         }
     }
@@ -1258,7 +1266,7 @@ cgp_optimize_call_inst :: (ci: Value_Id, modified: *Cgp_Modify_Dt) -> bool {
             if src_cur == 0 || src_align > src_cur add_param_align(ci, 1, src_align);
         }
     }
-    if call_has_fn_attr(ci, .Cold) && !fn_has_fn_attr(cgp.f, .MinSize) && !fn_has_fn_attr(cgp.f, .OptimizeForSize) {
+    if call_has_fn_attr(ci, .Cold) && !cgp_should_optimize_for_size(inst_block(ci)) {
         n := call_num_args(ci);
         for k: 0..cast(s64) n - 1 {
             arg := call_arg(ci, cast(u32) k);
@@ -1589,9 +1597,13 @@ cgp_make_bit_reverse :: (i: Value_Id) -> bool {
     if type_kind(vtype(i)) != .INT return false;
     vt := cgp_evt(vtype(i), true);
     if !cgp_is_operation_legal_or_custom(ISD_BITREVERSE, vt) return false;
-    // X86: BITREVERSE is legal/custom only with GFNI / XOP; recognizeBSwapOrBitReverseIdiom(&I, false, true, Insts)
-    fatal("codegenprepare: makeBitReverse (bit-reverse idiom recognition) is not supported yet");
-    return false;
+    // X86: BITREVERSE is custom for i8..i64 with GFNI and for i128 with SSSE3
+    insts := ic_recognize_bswap_or_bit_reverse_idiom(i, false, true);
+    if insts.count == 0 return false;
+    last := insts[insts.count - 1];
+    cgp_rauw(i, last);
+    recursively_delete_trivially_dead_value_tli(i);
+    return true;
 }
 
 // optimizeBlock
@@ -1630,7 +1642,7 @@ cgp_optimize_block :: (bb: Value_Id, modified: *Cgp_Modify_Dt) -> bool {
     return made_change;
 }
 cgp_bitreverse_possible :: () -> bool {
-    for m: u32.[MVT_i8, MVT_i16, MVT_i32, MVT_i64] if cgp_is_operation_legal_or_custom(ISD_BITREVERSE, evt_simple(m)) return true;
+    for m: u32.[MVT_i8, MVT_i16, MVT_i32, MVT_i64, MVT_i128] if cgp_is_operation_legal_or_custom(ISD_BITREVERSE, evt_simple(m)) return true;
     return false;
 }
 

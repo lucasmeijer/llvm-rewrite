@@ -1426,10 +1426,14 @@ Still slow / known:
 - Jai traps met here: `defer x += 1` inside a `while` body also runs on `break`; `cast(T) a >> b` parses as
   `cast(T)(a >> b)` (parenthesise the cast); a named `for` iterator still makes the inner loop's `it_index` shadow
   the outer one inside the inner loop.
+- ExpandMemCmp (`pass_expand_memcmp.jai`) was ported under L2.pipeline-O2 (two of us ported it the same day; the
+  rebase kept that version).
+- CodeGenPrepare with a profile summary: `cgp_should_optimize_for_size` / `cgp_bfi` use the function's BFI as first
+  computed; LLVM updates its BFI incrementally (setBlockFreq in dupRetToEnableTailCallOpts / select-to-branch), which
+  we do not mirror: a profiled function whose CFG CGP changed before a later size query could differ.
 - Not ported (fail loudly): LSR's SCEV-based debug-value salvage (5 imported files hit it), vscale steps, landing-pad
-  predecessor splitting in RewriteForPHI; ExpandMemCmp's expansion; CGP makeBitReverse, optimizeGatherScatterInst,
-  statepoint relocations, -addr-sink-using-gep=false, profile-summary modules; PreISelIntrinsicLowering's VP
-  expansion, ObjC ARC calls, memset.pattern, non-constant-length memcpy/memset.inline; AtomicExpand's cmpxchg loops,
-  libcalls and casts.
+  predecessor splitting in RewriteForPHI; CGP statepoint relocations; PreISelIntrinsicLowering's VP expansion, ObjC
+  ARC calls, memset.pattern, non-constant-length memcpy/memset.inline (LowerMemIntrinsics); AtomicExpand's
+  cmpxchg loops, libcalls and integer casts (expand-atomic-non-integer.ll).
 - Sweeps (`./harness/run sweep --impl jai --passes loop-reduce`, with and without `--extra=-mtriple=x86_64-unknown-linux-gnu`):
   8048-8073 of 8079 identical, 0 silent mismatches; the loud failures are the items above.

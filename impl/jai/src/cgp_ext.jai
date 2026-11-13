@@ -5,14 +5,72 @@
 
 // optimizeGatherScatterInst: rewrites the GEP feeding a masked gather / scatter
 cgp_optimize_gather_scatter_inst :: (mi: Value_Id, ptr: Value_Id) -> bool {
+    new_addr: Value_Id;
+    pty := vtype(ptr);
+    num_elts := type_count(pty);
+    scalable := type_kind(pty) == .SVECTOR;
+    b: Irb; irb_set_before(*b, mi);
     if is_inst(ptr) && inst_op(ptr) == .GEP {
-        if nops(ptr) <= 1 return false;
-        if inst_block(mi) != inst_block(ptr) return false;
-    } else {
-        if !is_inst(ptr) && !is_const(ptr) return false;   // getSplatValue(Ptr) of an argument is null
-    }
-    fatal("codegenprepare: optimizeGatherScatterInst is not supported yet");
-    return false;
+        gep := ptr;
+        if nops(gep) <= 1 return false;
+        if inst_block(mi) != inst_block(gep) return false;
+        ops: [..] Value_Id; ops.allocator = temp;
+        for k: 0..cast(s64) nops(gep) - 1 array_add(*ops, op(gep, cast(u32) k));
+        rewrite_gep := false;
+        if is_vector_type(vtype(ops[0])) {
+            ops[0] = vt_get_splat_value(ops[0]);
+            if ops[0] == NONE return false;
+            rewrite_gep = true;
+        }
+        final_index := ops.count - 1;
+        for i: 1..final_index-1 {
+            c := ops[i];
+            if !is_const(c) return false;
+            if is_vector_type(vtype(c)) c = get_splat_value(c);
+            if c == NONE || vkind(c) != .C_INT || !ap_is_zero(const_ap(c)) return false;
+            ops[i] = c;
+        }
+        if is_vector_type(vtype(ops[final_index])) {
+            v := vt_get_splat_value(ops[final_index]);
+            if v != NONE {
+                if !(vkind(v) == .C_INT && ap_is_zero(const_ap(v))) {
+                    ops[final_index] = v;
+                    rewrite_gep = true;
+                }
+            }
+        }
+        if !rewrite_gep && ops.count == 2 return false;
+        source_ty := inst(gep).ty2;
+        scalar_index_ty := dl_index_type(scalar_type(vtype(ops[0])));
+        idxs: [] Value_Id; idxs.data = ops.data + 1; idxs.count = ops.count - 1;
+        if !is_vector_type(vtype(ops[final_index])) {
+            new_addr = irb_gep(*b, source_ty, ops[0], idxs);
+            index_ty := type_vector(num_elts, scalar_index_ty, scalable);
+            second_ty := gep_indexed_type_n(source_ty, idxs);
+            new_addr = irb_gep(*b, second_ty, new_addr, .[const_null_value(index_ty)]);
+        } else {
+            base := ops[0];
+            index := ops[final_index];
+            if ops.count != 2 {
+                ops[final_index] = const_null_value(scalar_type(vtype(ops[final_index])));
+                base = irb_gep(*b, source_ty, base, idxs);
+                source_ty = gep_indexed_type_n(source_ty, idxs);
+            }
+            new_addr = irb_gep(*b, source_ty, base, .[index]);
+        }
+    } else if !is_const(ptr) {
+        v := vt_get_splat_value(ptr);
+        if v == NONE return false;
+        scalar_index_ty := dl_index_type(scalar_type(vtype(v)));
+        index_ty := type_vector(num_elts, scalar_index_ty, scalable);
+        scalar_ty: Type_Id;
+        if call_iid(mi) == IID_MASKED_GATHER scalar_ty = scalar_type(vtype(mi));
+        else scalar_ty = scalar_type(vtype(op(mi, 0)));
+        new_addr = irb_gep(*b, scalar_ty, v, .[const_null_value(index_ty)]);
+    } else return false;
+    replace_uses_of_with(mi, ptr, new_addr);
+    if !has_uses(ptr) recursively_delete_trivially_dead_value_tli(ptr);
+    return true;
 }
 
 // optimizeMulWithOverflow: TLI->shouldOptimizeMulOverflowWithZeroHighBits is false (base; X86 has no override)

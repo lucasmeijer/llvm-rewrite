@@ -274,6 +274,7 @@ cg_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
         case "disable-cgp-gc-opts"; bool_opt(*cgp_cl.disable_gc_opts);
         case "disable-cgp-select2branch"; bool_opt(*cgp_cl.disable_select_to_branch);
         case "addr-sink-using-gep"; bool_opt(*cgp_cl.addr_sink_using_geps);
+        case "cgp-verify-bfi-updates"; bool_opt(*cgp_cl.verify_bfi_updates);   // verification only: no output change
         case "enable-andcmp-sinking"; bool_opt(*cgp_cl.enable_and_cmp_sinking);
         case "disable-cgp-store-extract"; bool_opt(*cgp_cl.disable_store_extract);
         case "stress-cgp-store-extract"; bool_opt(*cgp_cl.stress_store_extract);

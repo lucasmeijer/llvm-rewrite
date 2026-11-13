@@ -158,7 +158,7 @@ cgp_optimize_select_inst :: (si: Value_Id) -> bool {
     vector_cond := !(type_kind(vtype(cond)) == .INT && type_bits(vtype(cond)) == 1);
     if vector_cond || get_metadata(si, md_kind_id("unpredictable")) != NONE return false;
     // TLI->isSelectSupported(Kind): true (base)
-    if !cgp_is_forming_branch_from_select_profitable(si) || fn_has_fn_attr(cgp.f, .OptimizeForSize) || fn_has_fn_attr(cgp.f, .MinSize) return false;
+    if !cgp_is_forming_branch_from_select_profitable(si) || cgp_should_optimize_for_size(inst_block(si)) return false;
 
     true_instrs: [..] Value_Id; true_instrs.allocator = temp;
     false_instrs: [..] Value_Id; false_instrs.allocator = temp;

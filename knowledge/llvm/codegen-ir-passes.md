@@ -64,3 +64,12 @@ diffing our output against `llc -stop-before=x86-isel` (the `::isel-ir` check) o
   (`<name>.frozen`), drops poison flags of the step instruction and removes the freeze.
 - **PreISelIntrinsicLowering** lowers `llvm.objectsize`/`llvm.is.constant` by calling `lowerConstantIntrinsics` on
   the whole caller once per call site visited (`forEachCall`); unreachable blocks keep their calls.
+- **ExpandMemCmp** (opt -O2 runs it after mergeicmps): candidate calls are found with
+  `TLI->getLibFunc(*CI, Func)`, which checks the name and prototype but **not** availability (`TLI.has`), so `bcmp`
+  is expanded on triples where TLI marks it unavailable (ExpandMemCmp/X86/bcmp.ll, x86_64-unknown-unknown). x86 allows
+  2 loads (also at -Os), 2 loads per block for zero-equality uses (`-memcmp-num-loads-per-block` overrides),
+  overlapping loads, and 16/32/64-byte vector loads only for zero-equality comparisons. After any expansion every
+  block gets `SimplifyInstructionsInBlock` (no TLI).
+- **CodeGenPrepare makeBitReverse** fires only when ISD::BITREVERSE is legal or custom for the instruction's own
+  (simple) integer type: on x86 i8..i64 with GFNI, i128 with SSSE3 (X86ISelLowering.cpp constructor). It reuses
+  `recognizeBSwapOrBitReverseIdiom(I, false, true)` from Local.cpp.

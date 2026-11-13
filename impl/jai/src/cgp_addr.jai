@@ -1108,8 +1108,7 @@ cgp_find_all_memory_uses :: (i: Value_Id, uses: *[..] Cgp_Mem_Use, considered: *
         }
         if o == .CALL {
             if call_has_fn_attr(user, .Cold) {
-                // shouldOptimizeForSize(CI->getParent(), PSI, BFI): false without a profile / size attributes
-                if !fn_has_fn_attr(cgp.f, .MinSize) && !fn_has_fn_attr(cgp.f, .OptimizeForSize) continue;
+                if !cgp_should_optimize_for_size(inst_block(user)) continue;
             }
             if vkind(call_callee(user)) != .INLINE_ASM return true;
             fatal("codegenprepare: inline asm memory operands (IsOperandAMemoryOperand) are not supported yet");
@@ -1343,7 +1342,49 @@ cgp_optimize_memory_inst :: (mi: Value_Id, addr: Value_Id, access_ty: Type_Id, a
             }
         }
     } else {
-        fatal("codegenprepare: -addr-sink-using-gep=false is not supported yet");
+        // -addr-sink-using-gep=false: ptrtoint / integer arithmetic / inttoptr
+        base_ty := ifx am.base_reg != NONE then vtype(am.base_reg) else NONE;
+        scale_ty := ifx am.scale != 0 then vtype(am.scaled_reg) else NONE;
+        if dl_is_non_integral_pointer_type(vtype(addr)) ||
+           (base_ty != NONE && type_kind(base_ty) == .PTR && dl_is_non_integral_pointer_type(base_ty)) ||
+           (scale_ty != NONE && type_kind(scale_ty) == .PTR && dl_is_non_integral_pointer_type(scale_ty)) ||
+           (am.base_gv != NONE && dl_is_non_integral_pointer_type(vtype(am.base_gv))) return modified;
+        result: Value_Id = NONE;
+        if am.base_reg != NONE {
+            v := am.base_reg;
+            if type_kind(vtype(v)) == .PTR v = irb_cast(*b, .PTRTOINT, v, int_ptr_ty, "sunkaddr");
+            if vtype(v) != int_ptr_ty v = irb_int_cast(*b, v, int_ptr_ty, true, "sunkaddr");
+            result = v;
+        }
+        if am.scale != 0 {
+            v := am.scaled_reg;
+            if vtype(v) == int_ptr_ty {
+            } else if type_kind(vtype(v)) == .PTR {
+                v = irb_cast(*b, .PTRTOINT, v, int_ptr_ty, "sunkaddr");
+            } else if type_bits(int_ptr_ty) < type_bits(vtype(v)) {
+                v = irb_cast(*b, .TRUNC, v, int_ptr_ty, "sunkaddr");
+            } else {
+                if result != NONE && is_inst(result) && result != am.base_reg erase_inst_with_metadata(result);
+                return modified;
+            }
+            if am.scale != 1 v = irb_binop(*b, .MUL, v, const_int_signed(int_ptr_ty, am.scale), "sunkaddr");
+            if result != NONE result = irb_binop(*b, .ADD, result, v, "sunkaddr");
+            else result = v;
+        }
+        base_gv := am.base_gv;
+        if base_gv != NONE {
+            base_gv_ptr := ifx gv_is_thread_local(base_gv) then cgp_create_thread_local_address(*b, base_gv) else base_gv;
+            v := irb_cast(*b, .PTRTOINT, base_gv_ptr, int_ptr_ty, "sunkaddr");
+            if result != NONE result = irb_binop(*b, .ADD, result, v, "sunkaddr");
+            else result = v;
+        }
+        if am.base_offs != 0 {
+            v := const_int_signed(int_ptr_ty, am.base_offs);
+            if result != NONE result = irb_binop(*b, .ADD, result, v, "sunkaddr");
+            else result = v;
+        }
+        if result == NONE sunk_addr = const_null_value(vtype(addr));
+        else sunk_addr = irb_cast(*b, .INTTOPTR, result, vtype(addr), "sunkaddr");
     }
     replace_uses_of_with(mi, repl, sunk_addr);
     h := vh_new(sunk_addr);
