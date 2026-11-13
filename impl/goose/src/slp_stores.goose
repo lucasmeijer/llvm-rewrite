@@ -303,8 +303,8 @@ fn scx_check_tree_sizes(c: i32, start: i64, vf: i64) -> bool {
         let f = scx_rs1(c, k);
         let p = if f == SCC_UNVEC { 0 } else { slp_range_sizes_by_idx[f] };
         if p == 1 { continue; }
-        // (P - Mean) * (P - Mean) in unsigned arithmetic
-        let d = ((p as u64) - (mean as u64)) & 0xFFFFFFFF;
+        // (P - Mean) * (P - Mean) in uint64_t arithmetic (P is promoted): the square of the distance
+        let d: u64 = if p >= mean { (p - mean) as u64 } else { (mean - p) as u64 };
         dev = dev + d * d;
     }
     dev = dev / (num as u64);

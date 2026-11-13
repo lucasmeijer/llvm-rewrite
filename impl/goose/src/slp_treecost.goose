@@ -545,6 +545,7 @@ fn slp_calculate_tree_cost_and_trim(vvals: const i32[:], rdx_root: i32) -> i64 {
         if wl[tk] == 0 || wl[tk] == 1 { return cost; }
     }
     var changed = false;
+    var prefer_trimmed = false;
     while wl.len > 0 {
         let tk = wl_top();
         let t = wl[tk];
@@ -576,10 +577,109 @@ fn slp_calculate_tree_cost_and_trim(vvals: const i32[:], rdx_root: i32) -> i64 {
             }
         }
         if tsc < 0 || tsc < te_nscalars(t) { wl_pop(tk); continue; }
-        slp_fail("calculateTreeCostAndTrimNonProfitable: trimming a subtree (the gather cost of the root)");
+        let evf = te_vector_factor(t);
+        var dem: bool[>..<] = [];
+        for k in evf { dem.push(false); }
+        for k in te_nscalars(t) { if !slp_is_constant(te_scalar(t, k)) { dem[k] = true; } }
+        var gsty = slp_value_type(te_scalar(t, 0), false);
+        if slp_te[t].mbw > 0 { gsty = ty_int(slp_te[t].mbw as i64); }
+        let gvt = slp_widened_type(gsty, evf);
+        var gc = slp_scalarization_overhead(gsty, gvt, dem, true, false, true);
+        var mask: i32[>..<] = [];
+        let st = slp_te[t].state;
+        if slp_te[t].nreord > 0 && st != TE_COMPRESS && (st != TE_STRIDED || !slp_is_reverse_order(te_reorder(t))) {
+            var nm: i32[>..<] = [];
+            if te_opcode(t) == OP_STORE { slp_copy_list(te_reorder(t), nm); } else { slp_inverse_permutation(te_reorder(t), nm); }
+            slp_add_mask(mask, nm, false);
+        }
+        if slp_te[t].nreuse > 0 { slp_add_mask(mask, te_reuse(t), false); }
+        if mask.len > 0 && !slp_is_identity_mask(mask, evf) { gc = tc_add(gc, slp_shuffle_cost(SK_PERMUTESINGLESRC, gvt, mask, 0, -1)); }
+        if !te_has_state(t) || !te_is_alt_shuffle(t) {
+            var all = true;
+            for v in te_scalars(t) {
+                if !((te_has_copyable_elements(t) && te_is_copyable_element(t, v)) || slp_is_constant(v) || sh_has(SH_MUSTG, v as i64, 0) ||
+                     slp_lk_count(SH_S2TE, v as i64) > 1) { all = false; break; }
+            }
+            if all { gc = tc_mul(gc, 2); }
+        }
+        var eq_alt = tsc == gc && te_has_state(t) && te_is_alt_shuffle(t) && is_binary_op(te_opcode(t));
+        if eq_alt {
+            for x in nodes { if te_has_state(x) && te_opcode(x) == OP_EXTRACTELEMENT { eq_alt = false; break; } }
+        }
+        var npow2 = false;
+        for x in nodes { if !slp_is_pow2(te_nscalars(x)) { npow2 = true; } }
+        let margin: i64 = if npow2 { 1 } else { 0 };
+        if tsc > tc_add(gc, margin) || eq_alt {
+            prefer_trimmed = prefer_trimmed || tsc == gc;
+            if te_has_state(0) && te_opcode(0) == OP_INSERTELEMENT && t == 1 {
+                if cost < -thr {
+                    if slp_dbg_on { errs("SLP: Skipping trim of node "); errs_int(t as i64); errs(" - tree already profitable with cost "); slp_errs_cost(cost); errs(".\n"); slp_dbg_flush(); }
+                    wl_pop(tk);
+                    continue;
+                }
+                return TTI_INVALID;
+            }
+            if slp_dbg_on {
+                errs("SLP: Trimming unprofitable subtree at node "); errs_int(t as i64); errs(" with cost "); slp_errs_cost(st_total[t as i64]);
+                errs(" and gather cost "); slp_errs_cost(gc); errs(".\n"); slp_dbg_flush();
+            }
+            if slp_te[t].ui_te >= 0 {
+                sh_set(SH_T2G, t as i64, 0, gc);
+                slp_nodes_cost[t as i64] = SLP_NC_NONE;
+            } else {
+                sh_add(SH_DELNODES, t as i64, 0);
+                sh_del(SH_T2G, t as i64, 0);
+                slp_nodes_cost[t as i64] = SLP_NC_NONE;
+            }
+            for x in nodes {
+                sh_add(SH_DELNODES, x as i64, 0);
+                sh_del(SH_T2G, x as i64, 0);
+                slp_nodes_cost[x as i64] = SLP_NC_NONE;
+            }
+            changed = true;
+        }
+        wl_pop(tk);
     }
     if !changed { return st_cost[0]; }
-    return cost;
+    for t in gl_nodes {
+        if slp_is_deleted_node(t) || slp_is_transformed_to_gather(t) { continue; }
+        slp_fail("calculateTreeCostAndTrimNonProfitable: trimming gathered-loads nodes");
+    }
+    for t0 in slp_te.len {
+        let t = t0 as i32;
+        if slp_te[t].ui_te < 0 && slp_is_transformed_to_gather(t) { continue; }
+        if slp_is_deleted_node(t) { continue; }
+        if slp_nodes_cost[t0] == SLP_NC_NONE {
+            var c = slp_entry_cost(t, vvals);
+            if !tc_valid(c) || c == 0 { slp_nodes_cost[t0] = c; continue; }
+            var sc = scale_of[t0];
+            if sc == 0 {
+                let gl = te_is_gather(t) || slp_te[t].state == TE_SPLIT;
+                sc = if gl { slp_gather_node_effective_scale(t, -1) } else { slp_scale_to_loop_iterations(t, -1, -1) };
+            }
+            slp_nodes_cost[t0] = slp_cost_scale(c, sc);
+        }
+    }
+    if slp_dbg_on { errs("SLP: Recalculate costs after tree trimming.\n"); slp_dbg_flush(); }
+    var ncost: i64 = 0;
+    for t0 in slp_te.len {
+        if slp_nodes_cost[t0] == SLP_NC_NONE { continue; }
+        ncost = tc_add(ncost, slp_nodes_cost[t0]);
+        if slp_dbg_on {
+            errs("SLP: Adding cost "); slp_errs_cost(slp_nodes_cost[t0]); errs(" for bundle "); slp_short_bundle_name(te_scalars(t0 as i32), t0 as i32); errs(".\n");
+            errs("SLP: Current total cost = "); slp_errs_cost(ncost); errs("\n"); slp_dbg_flush();
+        }
+    }
+    if ncost > cost || (!prefer_trimmed && ncost == cost) {
+        sh_clear(SH_DELNODES);
+        sh_clear(SH_T2G);
+        ncost = cost;
+    } else {
+        if slp_te.len >= 2 && te_has_state(0) && te_opcode(0) == OP_INSERTELEMENT && slp_is_transformed_to_gather(1) { return TTI_INVALID; }
+        if slp_te.len >= 3 && te_has_state(0) && te_opcode(0) == OP_INSERTELEMENT && te_has_state(1) && slp_te[1].state == TE_VECTORIZE &&
+           (te_opcode(1) == OP_ZEXT || te_opcode(1) == OP_SEXT || te_opcode(1) == OP_TRUNC) && slp_is_transformed_to_gather(2) { return TTI_INVALID; }
+    }
+    return ncost;
 }
 fn slp_t2g_count() -> i64 {
     var n: i64 = 0;
