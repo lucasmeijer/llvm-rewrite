@@ -256,6 +256,7 @@ IR :: struct {
     type_map:   Table(string, Type_Id);
     named_types: Table(string, Type_Id);     // identified struct names in the context (parser.jai ctx_set_struct_name)
     named_struct_uid: u32;                   // LLVMContextImpl::NamedStructTypesUniqueID
+    next_atom_group: u64 = 1;                // LLVMContextImpl::NextAtomGroup (key-instruction atom groups)
     t_void, t_label, t_metadata, t_i1, t_i8, t_i32, t_i64, t_ptr, t_token: Type_Id;
 
     // values (struct of arrays)

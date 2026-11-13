@@ -538,7 +538,7 @@ unroll_loop :: (li: *Loop_Info, l_in: Loop_Id, ulo_in: Unroll_Loop_Options, dt_i
         nlm_set(*new_loops, l, l);
         for bb: rpo {
             vm: Value_Map; vmap_init(*vm);
-            nb := clone_basic_block(bb, *vm, tprint(".%", it_num));
+            nb := clone_basic_block(bb, *vm, tprint(".%", it_num), map_atoms = true);
             fn_insert_detached_block_before(f, block_insert_pt, nb);
             old_loop := add_cloned_block_to_loop_info(li, bb, nb, *new_loops);
             if old_loop != NONE add_loop_to_simplify(*loops_to_simplify, nlm_lookup(*new_loops, old_loop));
@@ -556,7 +556,9 @@ unroll_loop :: (li: *Loop_Info, l_in: Loop_Id, ulo_in: Unroll_Loop_Options, dt_i
                     vmap_erase(*vm, ulo.heart);
                 }
             }
-            // RemapSourceAtom (AtomMap is empty: clone_basic_block fails loudly on atom groups)
+            // remap the source atoms now (remapInstructionsInBlocks runs later with LastValueMap, whose AtomMap is
+            // empty, so all clones would otherwise share the atom group)
+            if vm.atoms.count for i: block_insts(nb) atom_remap_source(vm.atoms, i);
             vmap_set(*last_value_map, bb, nb);
             for v, k: vm.map vmap_set(*last_value_map, k, v);
             // add phi entries for newly created values to all exit blocks

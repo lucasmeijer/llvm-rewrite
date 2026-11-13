@@ -15,7 +15,9 @@
 //   fn_splice_blocks(f, before, first)                          F->splice(Before, F, First, F->end())
 
 // CloneBasicBlock(BB, VMap, NameSuffix, F, CodeInfo = nullptr, MapAtoms = true)
-clone_basic_block :: (bb: Value_Id, vm: *Value_Map, suffix: string, f: Value_Id = NONE) -> Value_Id {
+// map_atoms: the caller remaps source atoms as LLVM does (explicit RemapSourceAtom or remap_instruction with this
+// map); for the other callers an atom group still fails loudly
+clone_basic_block :: (bb: Value_Id, vm: *Value_Map, suffix: string, f: Value_Id = NONE, map_atoms := false) -> Value_Id {
     nb: Value_Id;
     if f != NONE nb = create_block(f, "");
     else nb = new_block(NONE);
@@ -28,15 +30,16 @@ clone_basic_block :: (bb: Value_Id, vm: *Value_Map, suffix: string, f: Value_Id 
         if f != NONE ic_reinsert_name(c);
         if inst(i).records clone_debug_info_from(c, i, inst(i).records, *recs);
         vmap_set(vm, i, c);
-        map_atom_instance(c);
+        if map_atoms atom_map_instance(*vm.atoms, get_metadata(c, 0));   // mapAtomInstance(DL, VMap)
+        else map_atom_instance(c);
     }
     return nb;
 }
 
-// mapAtomInstance: key-instruction atom groups are not ported
+// mapAtomInstance for the callers that do not remap atoms yet: fail loudly on an atom group
 map_atom_instance :: (i: Value_Id) {
     dl := get_metadata(i, 0);
-    if dl != NONE && di_int(dl, 3) != 0 fatal("cloning: key-instruction atom groups (mapAtomInstance) are not implemented yet");
+    if dl != NONE && di_int(dl, 3) != 0 fatal("cloning: key-instruction atom groups (mapAtomInstance) are not implemented yet for this pass");
 }
 
 // Function::insert(Before, BB) for a block made by clone_basic_block(..., f = NONE): link it into f, then

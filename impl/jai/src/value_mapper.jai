@@ -34,8 +34,9 @@ Value_Map :: struct {
     // replace_all_uses_with and become NONE when the value is erased. `rev` = value -> keys mapped to it.
     tracking: bool;
     rev: Table(Value_Id, [..] Value_Id);
+    atoms: [..] Atom_Entry;   // ValueToValueMapTy::AtomMap
 }
-vmap_init :: (vm: *Value_Map) { vm.map.allocator = temp; vm.md.allocator = temp; vm.rev.allocator = temp; }
+vmap_init :: (vm: *Value_Map) { vm.map.allocator = temp; vm.md.allocator = temp; vm.rev.allocator = temp; vm.atoms.allocator = temp; }
 vmap_set :: (vm: *Value_Map, k: Value_Id, v: Value_Id) {
     if vm.tracking {
         found, old := table_find(*vm.map, k);
@@ -237,10 +238,10 @@ map_metadata :: (vm: *Value_Map, md: Md_Id, flags: u32) -> Md_Id {
     return NONE;
 }
 
-// RemapSourceAtom: only an empty AtomMap is supported (CloneBasicBlock's mapAtomInstance fails loudly first)
+// RemapSourceAtom (VM.AtomMap: mapAtomInstance in clone_basic_block still fails loudly, so only loop-rotate's own
+// map is ever non-empty; an empty map leaves the location alone, as in LLVM)
 remap_source_atom :: (vm: *Value_Map, i: Value_Id) {
-    dl := get_metadata(i, 0);
-    if dl != NONE && di_int(dl, 3) != 0 fatal("ValueMapper: key-instruction atom groups (RemapSourceAtom) are not implemented yet");
+    atom_remap_source(vm.atoms, i);
 }
 
 // Mapper::remapInstruction

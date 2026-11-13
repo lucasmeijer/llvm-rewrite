@@ -1443,7 +1443,7 @@ Still slow / known:
   helpers (`const_ap`, `type_bits`, `scalar_type`, attribute lookups, `call_*`), a word-wise
   `tli_are_inline_compatible` and a hashed libfunc name set cut callgrind Ir on n500 by 18%.
 
-## llvm-link, LTO pipelines, MergeFunctions (L2.link COMPLETE 574/574, L2.lto 142/144, L2.lto-passes 159/160, L2.phase-ordering 285/288)
+## llvm-link, LTO pipelines, MergeFunctions (L2.link COMPLETE 574/574, L2.lto COMPLETE 144/144, L2.lto-passes 159/160, L2.phase-ordering 285/288)
 
 - Files: `linker.jai` (llvm-link: llvm-link.cpp's main/linkFiles, ModuleLinker, IRMover/IRLinker, TypeMapTy,
   IdentifiedStructTypeSet and the IRMover half of ValueMapper), `llvm_link.jai` (entry point; opt's program like
@@ -1470,9 +1470,14 @@ Still slow / known:
   knowledge/llvm/linker-and-lto.md). Its Deferred WeakTrackingVHs follow RAUW through `mf.fwd`.
 - `verify` is now also a module pass name (`verify,forceattrs` is a module pipeline, as in LLVM); before, such a
   pipeline was wrapped into one function adaptor.
-- Remaining: tests/lto/ipo/debug_info (clang -g emits key-instruction atom groups; loop-rotate's mapAtomInstance and
-  ValueMapper's RemapSourceAtom fail loudly, and so do clone_function, jump-threading, foldBranchToCommonDest);
-  MergeFunc/cfi-thunk-merging (lowertypetests CFI); phase-ordering: knowledge retention in loop passes,
+- Key-instruction atom groups (clang -g emits them): `ir.next_atom_group` is the context's NextAtomGroup (raised
+  by every new DILocation, debuginfo.jai `di_get`), `Value_Map.atoms` is ValueToValueMapTy::AtomMap,
+  `atom_map_instance` / `atom_remap_source` are mapAtomInstance / RemapSourceAtom. Wired into loop-rotate, full /
+  partial unrolling (`clone_basic_block(..., map_atoms = true)` plus the explicit remap) and remap_instruction; the
+  other cloners (peeling, runtime unrolling, unswitch, loop versioning, DFA jump threading, function
+  specialization, CodeGenPrepare, jump-threading, SimplifyCFG's foldBranchToCommonDest) still fail loudly on an atom
+  group until each is checked against where LLVM remaps.
+- Remaining: MergeFunc/cfi-thunk-merging (lowertypetests CFI); phase-ordering: knowledge retention in loop passes,
   ptrauth protected.field.ptr, LoopVectorize convertToStridedAccesses (preserve-access-group).
 
 ## llc's IR pipeline (L1.isel-ir-O0 COMPLETE; L1.codegen-ir: isel-ir 482/482, imported ::opt see below)

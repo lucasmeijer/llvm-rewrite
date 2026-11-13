@@ -63,7 +63,36 @@ di_get :: (sub: DI_Kind, distinct: bool, ops: [] Md_Id, ints: [] u64) -> Md_Id {
     id := cast(Md_Id) ir.mds.count;
     array_add(*ir.mds, row);
     if !distinct table_add(*ir.md_map, key_copy(k), id);
+    // DILocation::DILocation: updateDILocationAtomGroupWaterline(AtomGroup + 1)
+    if sub == .LOCATION && ints.count > 3 && ints[3] != 0 && ints[3] + 1 > ir.next_atom_group ir.next_atom_group = ints[3] + 1;
     return id;
+}
+
+// ValueToValueMapTy::AtomMap: (inlinedAt, atom group) -> the group of the new instance
+Atom_Entry :: struct { ia: Md_Id; group: u64; new: u64; }
+// mapAtomInstance(DL, VMap)
+atom_map_instance :: (atoms: *[..] Atom_Entry, dl: Md_Id) {
+    if dl == NONE return;
+    g := di_int(dl, 3);
+    if g == 0 return;
+    ia := di_op(dl, 1);
+    for atoms.* if it.ia == ia && it.group == g return;
+    n := ir.next_atom_group;   // LLVMContext::incNextDILocationAtomGroup
+    ir.next_atom_group += 1;
+    array_add(atoms, .{ia, g, n});
+}
+// RemapSourceAtom(I, VM)
+atom_remap_source :: (atoms: [] Atom_Entry, i: Value_Id) {
+    if atoms.count == 0 return;
+    dl := get_metadata(i, 0);
+    if dl == NONE return;
+    g := di_int(dl, 3);
+    if g == 0 return;
+    ia := di_op(dl, 1);
+    for atoms if it.ia == ia && it.group == g {
+        set_metadata(i, 0, di_location_get(di_int(dl, 0), di_int(dl, 1), di_op(dl, 0), ia, di_int(dl, 2), it.new, di_int(dl, 4)));
+        return;
+    }
 }
 
 md_node_key :: (m: Md_Id) -> string {

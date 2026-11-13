@@ -701,6 +701,7 @@ lr_rotate_loop :: (lr: *Loop_Rotate, l: Loop_Id, simplified_latch: bool) -> bool
     q.dt = lr.dt; q.ac = lr.ac;
     next_dbg: u32 = ifx i != NONE then inst(i).records else 0;
     cloned: [..] u32; cloned.allocator = temp;
+    atoms: [..] Atom_Entry; atoms.allocator = temp;   // ValueMap.AtomMap
     erase_seen :: (cloned: [] u32, seen: *Table(string, bool)) {
         for cloned if dbgr(it).kind != .LABEL && table_contains(seen, dbg_record_hash(it)) dbgr_erase(it);
     }
@@ -719,8 +720,7 @@ lr_rotate_loop :: (lr: *Loop_Rotate, l: Loop_Id, simplified_latch: bool) -> bool
             continue;
         }
         c := inst_clone(cur);
-        dl := get_metadata(c, 0);
-        if dl != NONE && di_int(dl, 3) != 0 fatal("loop-rotate: key-instruction atom groups (mapAtomInstance) are not implemented yet");
+        atom_map_instance(*atoms, get_metadata(c, 0));   // mapAtomInstance(C->getDebugLoc(), ValueMap)
         insert_at_position(c, orig_ph, leb, false);
         if next_dbg != 0 {
             clone_debug_info_from(c, cur, next_dbg, *cloned);
@@ -742,6 +742,7 @@ lr_rotate_loop :: (lr: *Loop_Rotate, l: Loop_Id, simplified_latch: bool) -> bool
             found, nv := table_find(*vm, o);
             if found set_op(c, k, nv);
         }
+        atom_remap_source(atoms, c);   // RemapInstruction's RemapSourceAtom
         v := simplify_instruction(c, q);
         if v != NONE && li_replacement_preserves_lcssa_form(li, c, v) {
             table_set(*vm, cur, v);
