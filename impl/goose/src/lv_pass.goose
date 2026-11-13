@@ -542,9 +542,9 @@ fn lv_process_loop(l: i32, interleave_only_when_forced: bool, vectorize_only_whe
     if !lvh_allow_vectorization(vectorize_only_when_forced) { return false; }
     lv_pse = pse_new(l);
     lv_pse_max_tc = -1;
-    // shouldOptimizeForSize(Header, PSI, BFI): PSI is only cached with require<profile-summary>
-    lv_opt_for_size = false;
-    if lv_psi_cached() { lvx_unported("profile-guided size optimization (a cached ProfileSummaryAnalysis)"); }
+    // shouldOptimizeForSize(Header, PSI, BFI): F->hasOptSize(), then PSI (only cached with require<profile-summary>)
+    lv_opt_for_size = func_has_fn_attr(lv_fv, AK_OptimizeForSize) || func_has_fn_attr(lv_fv, AK_MinSize);
+    if !lv_opt_for_size && lv_psi_cached() { lvx_unported("profile-guided size optimization (a cached ProfileSummaryAnalysis)"); }
     lvl_reset(l, lv_pse, !lv_opt_for_size);
     if !lvl_can_vectorize() { return false; }
     let inner = loop_is_innermost(l);
@@ -585,6 +585,7 @@ fn lv_process_loop(l: i32, interleave_only_when_forced: bool, vectorize_only_whe
     cm_collect_values_to_ignore();
     cfg_collect_element_types_for_widening();
     let max_vf = cm_compute_max_vf(user_vf, user_ic);
+    if lv_dbg_on() { var s: u8[>..] = []; s.append("LV: MaxVF "); format(s, max_vf); s.push('\n'); write_stderr(s); }
     if max_vf == 0 {
         // no plans: computeBestVF returns the scalar VF without a plan; nothing is vectorized or interleaved
         return false;
@@ -666,7 +667,7 @@ fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> boo
     lvp_plans.clear();
     let force = lvh_get_force() == FK_ENABLED;
     let osz = cm_epilogue == CM_EPILOGUE_NOT_ALLOWED_OPT_SIZE || cm_epilogue == CM_EPILOGUE_NOT_ALLOWED_LOW_TRIP_LOOP;
-    if !lvp_try_to_build_vplan1(lvh_allow_reordering(), force, osz) { return lv_no_plan_result(user_ic); }
+    if !lvp_try_to_build_vplan1(lvh_allow_reordering(), force, osz) { lv_dbg("LV: tryToBuildVPlan1 failed\n"); return lv_no_plan_result(user_ic); }
     lv_check_minimal_bitwidths();
     // invalidating interleave groups for a predicated header: tail folding fails loudly below
     if cm_fold_tail { lvx_unported("tail folding"); }
@@ -691,7 +692,7 @@ fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> boo
         lvp_build_vplans(1, max_vf);
     }
     // computeBestVF
-    if lvp_plans.len == 0 { return lv_no_plan_result(user_ic); }
+    if lvp_plans.len == 0 { lv_dbg("LV: no VPlans built\n"); return lv_no_plan_result(user_ic); }
     var best_vf: i64 = 1;
     var best_cost: i64 = 0;
     var best_scalar: i64 = 0;
@@ -717,7 +718,10 @@ fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> boo
                     lv_dbg("LV: Not considering vector loop because it will not generate any vector instructions.\n");
                     continue;
                 }
-                if lv_opt_for_size && !force { lvx_unported("optimizing for size (hasReplicatorRegion)"); }
+                if lv_opt_for_size && !force && lv_has_replicator_region() {
+                    lv_dbg("LV: Not considering vector loop because it would cause replicated blocks to be generated.\n");
+                    continue;
+                }
                 let c = vpc_cost(v, tc);
                 let has_tail = vp_has_scalar_tail();
                 if vpc_is_more_profitable(c, v, scalar_cost, best_cost, best_vf, best_scalar, max_tc, has_tail) {
@@ -761,6 +765,13 @@ fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> boo
     return lv_execute_best_plan(best_vf, ic, min_profitable_tc);
 }
 fn lv_no_plan_result(user_ic: i64) -> bool { return false; }
+// hasReplicatorRegion(Plan)
+fn lv_has_replicator_region() -> bool {
+    var bs: i32[>..<] = [];
+    vp_depth_first(vpb[vp_vector_loop_region()].entry, false, bs);
+    for b in bs { if vp_is_region(b) && vp_is_replicator(b) { return true; } }
+    return false;
+}
 
 // computeMinimalBitwidths: computeMinimumValueSizes(TheLoop->getBlocks(), DB, &TTI) up to its early exit; a loop
 // that gets past it fails loudly
