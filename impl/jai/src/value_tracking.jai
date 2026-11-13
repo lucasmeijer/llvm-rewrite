@@ -104,7 +104,7 @@ known_bits_de :: (v: Value_Id, de: APInt, q: Simplify_Query, depth: u32) -> Know
     if k == .INST || k == .C_EXPR {
         known = kb_from_operator(v, de, known, q, depth);
     } else if is_global_value(k) {
-        if get_metadata(v, md_kind_id("absolute_symbol")) != NONE fatal("known bits of an !absolute_symbol global are not supported yet");
+        if get_metadata(v, md_fixed("absolute_symbol")) != NONE fatal("known bits of an !absolute_symbol global are not supported yet");
     }
     if is_ptr_type(vtype(v)) {
         a := pointer_alignment(v);
@@ -155,7 +155,7 @@ pointer_alignment :: (v: Value_Id) -> u64 {
             return 1;
         }
         if o == .LOAD {
-            m := inst_md(v, "align");
+            m := get_metadata(v, md_fixed("align"));
             if m != NONE return ap_limited(const_ap(ir.mds[md_op(m, 0)].value));
         }
         return 1;
@@ -1874,7 +1874,7 @@ is_known_non_zero_de :: (v: Value_Id, de: APInt, q: Simplify_Query, depth_in: u3
         }
         if k == .C_PTRAUTH return is_known_non_zero_de(op(v, 0), de, q, depth);
         if is_global_value(k) {
-            if get_metadata(v, md_kind_id("absolute_symbol")) == NONE && glob(v).linkage != .EXTERN_WEAK && ir.types[vtype(v)].a == 0 return true;
+            if get_metadata(v, md_fixed("absolute_symbol")) == NONE && glob(v).linkage != .EXTERN_WEAK && ir.types[vtype(v)].a == 0 return true;
         }
         if k != .C_EXPR return false;
     }

@@ -531,8 +531,11 @@ tli_get_baseline :: () -> *Tli_Impl {
 
 // TargetLibraryAnalysis::run(F): TargetLibraryInfo(*BaselineInfoImpl, &F)
 tli_for :: (f: Value_Id) -> *Tli {
+    // dense front cache over value ids (index 0: NONE) of the same results (a Table lookup per query was ~1%)
+    di := ifx f == NONE then 0 else cast(s64) f + 1;
+    if di < tli_dense.count && tli_dense[di] return tli_dense[di];
     p := table_find_pointer(*tli_results, f);
-    if p return p.*;
+    if p { tli_dense_set(di, p.*); return p.*; }
     t := New(Tli);
     t.impl = tli_get_baseline();
     if f != NONE {
@@ -547,7 +550,18 @@ tli_for :: (f: Value_Id) -> *Tli {
         }
     }
     table_set(*tli_results, f, t);
+    tli_dense_set(di, t);
     return t;
+}
+tli_dense: [..] *Tli;
+tli_dense_set :: (di: s64, t: *Tli) {
+    if di >= tli_dense.count {
+        tli_dense.allocator = context.default_allocator;
+        old := tli_dense.count;
+        array_resize(*tli_dense, max(di + 1, 2 * old, 1024), initialize = false);
+        memset(tli_dense.data + old, 0, (tli_dense.count - old) * size_of(*Tli));
+    }
+    tli_dense[di] = t;
 }
 // A TargetLibraryInfo without a function (TargetLibraryInfo(Impl) with F = nullopt)
 tli_module_only :: () -> *Tli { return tli_for(NONE); }
@@ -567,7 +581,23 @@ tli_func_name :: (t: *Tli, f: Lib_Func) -> string {
 tli_standard_name :: (f: Lib_Func) -> string { return LIB_FUNC_NAMES[cast(int) f]; }
 
 // sanitizeFunctionName + getLibFunc(StringRef)
+// A direct-mapped cache in front of the lookup, keyed by the name's storage and verified by content (function
+// names are interned; hashing the name per query was ~2% of -O2 on scaling/calls)
+Tli_Name_Cache_Entry :: struct { data: *u8; key: string; found: bool; lf: Lib_Func; }
+tli_name_cache: [512] Tli_Name_Cache_Entry;
 tli_lookup_name :: (name_in: string) -> (bool, Lib_Func) {
+    if name_in.count == 0 return false, .NotLibFunc;
+    h := (((cast(u64) name_in.data) >> 3) ^ cast(u64) name_in.count) & 511;
+    e := *tli_name_cache[h];
+    if e.data == name_in.data && e.key.count == name_in.count && memcmp(e.key.data, name_in.data, name_in.count) == 0
+        return e.found, e.lf;
+    found, lf := tli_lookup_name_uncached(name_in);
+    if e.key.count free(e.key.data,, allocator = context.default_allocator);
+    e.key = copy_string(name_in,, allocator = context.default_allocator);
+    e.data = name_in.data; e.found = found; e.lf = lf;
+    return found, lf;
+}
+tli_lookup_name_uncached :: (name_in: string) -> (bool, Lib_Func) {
     name := name_in;
     if name.count == 0 return false, .NotLibFunc;
     for 0..name.count-1 if name[it] == 0 return false, .NotLibFunc;

@@ -64,13 +64,13 @@ Ae_Md :: struct { pcs: Md_Id = NONE; mmra: Md_Id = NONE; mark: Value_Id; }
 ae_md_begin :: (i: Value_Id) -> Ae_Md {
     m: Ae_Md;
     m.pcs = get_metadata(i, MDK_PCSECTIONS);
-    m.mmra = get_metadata(i, md_kind_id("mmra"));
+    m.mmra = get_metadata(i, md_fixed("mmra"));
     m.mark = cast(Value_Id) ir.v_kind.count;
     return m;
 }
 ae_md_end :: (m: *Ae_Md) {
     if m.pcs != NONE || m.mmra != NONE {
-        k_mmra := md_kind_id("mmra");
+        k_mmra := md_fixed("mmra");
         for v: m.mark..cast(Value_Id) ir.v_kind.count - 1 {
             if vkind(v) != .INST || inst(v).parent == NONE continue;
             o := inst_op(v);
@@ -219,7 +219,7 @@ ae_copy_metadata_for_atomic :: (dst: Value_Id, src: Value_Id) {
     for all {
         k := it.kind;
         if k == MDK_DBG || k == MDK_TBAA || k == MDK_TBAA_STRUCT || k == MDK_ALIAS_SCOPE || k == MDK_NOALIAS ||
-           k == MDK_NOALIAS_ADDRSPACE || k == md_kind_id("llvm.access.group") || k == md_kind_id("mmra") ||
+           k == MDK_NOALIAS_ADDRSPACE || k == md_fixed("llvm.access.group") || k == md_fixed("mmra") ||
            k == md_kind_id("amdgpu.no.remote.memory") || k == md_kind_id("amdgpu.no.fine.grained.memory")
             set_metadata(dst, k, it.md);
     }

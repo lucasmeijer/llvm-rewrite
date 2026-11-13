@@ -25,7 +25,7 @@ sink_is_safe_to_move :: (i: Value_Id, aar: *Aa_Results, st: *Sink_Stores) -> boo
 sink_is_acceptable_target :: (i: Value_Id, succ: Value_Id, li: *Loop_Info) -> bool {
     if block_is_eh_pad(succ) return false;
     if block_unique_predecessor(succ) != inst_block(i) {
-        if may_read_from_memory(i) && get_metadata(i, md_kind_id("invariant.load")) == NONE return false;
+        if may_read_from_memory(i) && get_metadata(i, md_fixed("invariant.load")) == NONE return false;
         sl := li_loop_for(li, succ);
         cl := li_loop_for(li, inst_block(i));
         if sl != NONE && sl != cl return false;

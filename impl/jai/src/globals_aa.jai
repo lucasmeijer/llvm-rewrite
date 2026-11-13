@@ -31,7 +31,7 @@ cg_get_or_insert :: (cg: *Call_Graph, f: Value_Id) -> s32 {
     return n;
 }
 
-fn_has_callback_md :: (f: Value_Id) -> bool { return get_metadata(f, md_kind_id("callback")) != NONE; }
+fn_has_callback_md :: (f: Value_Id) -> bool { return get_metadata(f, md_fixed("callback")) != NONE; }
 
 // Function::hasAddressTaken(nullptr, IgnoreCallbackUses = true, IgnoreAssumeLikeCalls = true, IgnoreLLVMUsed = false)
 fn_has_address_taken_for_cg :: (f: Value_Id) -> bool {

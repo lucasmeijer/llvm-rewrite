@@ -823,8 +823,8 @@ extract_integer :: (b: *Irb, v_in: Value_Id, ty: Type_Id, offset: u64, name: str
     int_ty := vtype(v);
     sh := 8 * offset;
     if dl.big_endian sh = 8 * (dl_type_store_size(int_ty) - dl_type_store_size(ty) - offset);
-    if sh v = irb_binop(b, .LSHR, v, const_int(int_ty, sh), tprint("%.shift", name));
-    if ty != int_ty v = irb_cast(b, .TRUNC, v, ty, tprint("%.trunc", name));
+    if sh v = irb_binop(b, .LSHR, v, const_int(int_ty, sh), tconcat(name, ".shift"));
+    if ty != int_ty v = irb_cast(b, .TRUNC, v, ty, tconcat(name, ".trunc"));
     return v;
 }
 
@@ -833,17 +833,17 @@ insert_integer :: (b: *Irb, old_in: Value_Id, v_in: Value_Id, offset: u64, name:
     old := old_in; v := v_in;
     int_ty := vtype(old);
     ty := vtype(v);
-    if ty != int_ty v = irb_cast(b, .ZEXT, v, int_ty, tprint("%.ext", name));
+    if ty != int_ty v = irb_cast(b, .ZEXT, v, int_ty, tconcat(name, ".ext"));
     sh := 8 * offset;
     if dl.big_endian sh = 8 * (dl_type_store_size(int_ty) - dl_type_store_size(ty) - offset);
-    if sh v = irb_binop(b, .SHL, v, const_int(int_ty, sh), tprint("%.shift", name));
+    if sh v = irb_binop(b, .SHL, v, const_int(int_ty, sh), tconcat(name, ".shift"));
     if sh || type_int_width(ty) < type_int_width(int_ty) {
         // ~Ty->getMask().zext(IntTy->getBitWidth()).shl(ShAmt)
         iw := type_int_width(int_ty);
         m := ap_zext(ap_all_ones(type_int_width(ty)), iw);
         m = ap_not(ap_shl(m, cast(u32) sh));
-        old = irb_binop(b, .AND, old, cf_int(int_ty, m), tprint("%.mask", name));
-        v = irb_binop(b, .OR, old, v, tprint("%.insert", name));
+        old = irb_binop(b, .AND, old, cf_int(int_ty, m), tconcat(name, ".mask"));
+        v = irb_binop(b, .OR, old, v, tconcat(name, ".insert"));
     }
     return v;
 }
@@ -859,25 +859,25 @@ POISON_MASK :: 0xFFFF_FFFF;
 extract_vector :: (b: *Irb, v: Value_Id, begin: u64, end: u64, name: string) -> Value_Id {
     n := end - begin;
     if n == type_count(vtype(v)) return v;
-    if n == 1 return irb_extract_element(b, v, begin, tprint("%.extract", name));
-    return irb_shuffle(b, v, NONE, seq_mask(begin, n), tprint("%.extract", name));
+    if n == 1 return irb_extract_element(b, v, begin, tconcat(name, ".extract"));
+    return irb_shuffle(b, v, NONE, seq_mask(begin, n), tconcat(name, ".extract"));
 }
 
 // insertVector
 insert_vector :: (b: *Irb, old: Value_Id, v_in: Value_Id, begin: u64, name: string) -> Value_Id {
     v := v_in;
     vt := vtype(old);
-    if !is_vector_type(vtype(v)) return irb_insert_element(b, old, v, begin, tprint("%.insert", name));
+    if !is_vector_type(vtype(v)) return irb_insert_element(b, old, v, begin, tconcat(name, ".insert"));
     nsub := type_count(vtype(v));
     n := type_count(vt);
     if nsub == n return v;
     end := begin + nsub;
     mask := NewArray(cast(s64) n, u32,, allocator = temp);
     for i: 0..cast(s64) n - 1 { idx := cast(u64) i; mask[i] = ifx idx >= begin && idx < end then cast(u32)(idx - begin) else POISON_MASK; }
-    v = irb_shuffle(b, v, NONE, mask, tprint("%.expand", name));
+    v = irb_shuffle(b, v, NONE, mask, tconcat(name, ".expand"));
     mask2 := NewArray(cast(s64) n, u32,, allocator = temp);
     for i: 0..cast(s64) n - 1 { idx := cast(u64) i; mask2[i] = ifx idx >= begin && idx < end then cast(u32) idx else cast(u32)(idx + n); }
-    return irb_shuffle(b, v, old, mask2, tprint("%blend", name));
+    return irb_shuffle(b, v, old, mask2, tconcat(name, "blend"));
 }
 
 // mergeTwoVectors (an IRBuilder<> without name prefix)
@@ -952,7 +952,7 @@ sroa_pointer_alignment :: (v: Value_Id) -> u64 {
             return 1;
         }
         if o == .LOAD {
-            m := get_metadata(v, md_kind_id("align"));
+            m := get_metadata(v, md_fixed("align"));
             if m != NONE fatal("SROA: !align metadata is not supported yet");
         }
         return 1;
@@ -984,7 +984,7 @@ sroa_pointer_dereferenceable_bytes :: (v: Value_Id) -> (bytes: u64, can_be_null:
             fatal("SROA: dereferenceability of call results is not supported yet");
         }
         if o == .LOAD || o == .INTTOPTR {
-            if get_metadata(v, md_kind_id("dereferenceable")) != NONE || get_metadata(v, md_kind_id("dereferenceable_or_null")) != NONE
+            if get_metadata(v, md_fixed("dereferenceable")) != NONE || get_metadata(v, md_fixed("dereferenceable_or_null")) != NONE
                 fatal("SROA: !dereferenceable metadata is not supported yet");
             return 0, true;
         }
@@ -1229,7 +1229,7 @@ copy_metadata_for_load :: (dst: Value_Id, src: Value_Id) {
                 // copyNonnullMetadata: !range [ptrtoint(null) + 1, ptrtoint(null))
                 null_int := ce_cast(.PTRTOINT, const_null_value(vtype(op(src, 0))), nt);
                 nonnull := ce_binop(.ADD, null_int, const_int(nt, 1), 0);
-                set_metadata(dst, md_kind_id("range"), md_tuple(.[md_value(nonnull), md_value(null_int)], false));
+                set_metadata(dst, md_fixed("range"), md_tuple(.[md_value(nonnull), md_value(null_int)], false));
             }
         } else if name == "align" || name == "dereferenceable" || name == "dereferenceable_or_null" {
             if is_ptr_type(nt) set_metadata(dst, it.kind, it.md);
@@ -1238,7 +1238,7 @@ copy_metadata_for_load :: (dst: Value_Id, src: Value_Id) {
             else if is_ptr_type(nt) {
                 // copyRangeMetadata: !nonnull when the range excludes 0
                 if dl_type_size_bits(nt) == type_int_width(scalar_type(vtype(src))) && !md_range_contains_zero(it.md)
-                    set_metadata(dst, md_kind_id("nonnull"), md_tuple(.[], false));
+                    set_metadata(dst, md_fixed("nonnull"), md_tuple(.[], false));
             }
         } else if name == "nofpclass" {
             if scalar_type(nt) == scalar_type(vtype(src)) set_metadata(dst, it.kind, it.md);
@@ -1252,7 +1252,7 @@ speculate_phi_node_loads :: (b: *Irb, pn: Value_Id) {
     lty := vtype(some);
     irb_set_before(b, pn);
     b.head = true;   // inserting a phi before a phi: never adopt debug records
-    new_pn := irb_phi(b, lty, nops(pn), tprint("%.sroa.speculated", vname(pn)));
+    new_pn := irb_phi(b, lty, nops(pn), tconcat(vname(pn), ".sroa.speculated"));
     tags := get_aa_metadata(some);
     al := inst(some).align;
     while has_uses(pn) {
@@ -1321,11 +1321,11 @@ speculate_select_inst_loads :: (b: *Irb, si: Value_Id, li: Value_Id) {
     tv := op(si, 1); fv := op(si, 2);
     irb_set_before(b, li);
     al := inst(li).align;
-    tl := irb_load(b, vtype(li), tv, al, false, tprint("%.sroa.speculate.load.true", vname(li)));
-    fl := irb_load(b, vtype(li), fv, al, false, tprint("%.sroa.speculate.load.false", vname(li)));
+    tl := irb_load(b, vtype(li), tv, al, false, tconcat(vname(li), ".sroa.speculate.load.true"));
+    fl := irb_load(b, vtype(li), fv, al, false, tconcat(vname(li), ".sroa.speculate.load.false"));
     tags := get_aa_metadata(li);
     if aa_any(tags) { set_aa_metadata(tl, tags); set_aa_metadata(fl, tags); }
-    v := irb_select(b, op(si, 0), tl, fl, tprint("%.sroa.speculated", vname(li)), si);
+    v := irb_select(b, op(si, 0), tl, fl, tconcat(vname(li), ".sroa.speculated"), si);
     rauw_with_metadata(li, v);
 }
 
@@ -1440,7 +1440,7 @@ rw_new_alloca_slice_ptr :: (r: *Sroa_Rewriter, b: *Irb, ptr_ty: Type_Id) -> Valu
     }
     q := find_first(name, ".sroa_");
     if q >= 0 name = slice(name, 0, q);
-    return get_adjusted_ptr(b, r.new_ai, offset, dl_index_type_size_bits(ptr_ty), ptr_ty, tprint("%.", name));
+    return get_adjusted_ptr(b, r.new_ai, offset, dl_index_type_size_bits(ptr_ty), ptr_ty, tconcat(name, "."));
 }
 find_last :: (s: string, pat: string) -> s64 {
     if pat.count > s.count return -1;
@@ -1721,7 +1721,7 @@ rw_visit_memtransfer :: (r: *Sroa_Rewriter, ii: Value_Id) -> bool {
     if other_align == 0 other_align = 1;
     other_align = common_alignment(other_align, other_offset);
     if emit_memcpy {
-        other_ptr = get_adjusted_ptr(*r.irb, other_ptr, other_offset, ow, other_ptr_ty, tprint("%.", vname(other_ptr)));
+        other_ptr = get_adjusted_ptr(*r.irb, other_ptr, other_offset, ow, other_ptr_ty, tconcat(vname(other_ptr), "."));
         our := rw_new_alloca_slice_ptr(r, *r.irb, vtype(r.old_ptr));
         size := const_int(vtype(mem_length(ii)), r.nend - r.nbegin);
         dst, src: Value_Id; da, sa: u64;
@@ -1741,7 +1741,7 @@ rw_visit_memtransfer :: (r: *Sroa_Rewriter, ii: Value_Id) -> bool {
     if r.vec_ty != NONE && !whole other_ty = ifx n == 1 then type_elem(r.vec_ty) else fixed_vec(type_elem(r.vec_ty), n);
     else if r.int_ty != NONE && !whole other_ty = sub_int_ty;
     else other_ty = r.na_ty;
-    adj := get_adjusted_ptr(*r.irb, other_ptr, other_offset, ow, other_ptr_ty, tprint("%.", vname(other_ptr)));
+    adj := get_adjusted_ptr(*r.irb, other_ptr, other_offset, ow, other_ptr_ty, tconcat(vname(other_ptr), "."));
     src_align := other_align; dst_align := slice_align;
     if !is_dest { t := src_align; src_align = dst_align; dst_align = t; }
     src_ptr, dst_ptr: Value_Id;
@@ -1893,7 +1893,7 @@ rw_tree_structured_merge :: (r: *Sroa_Rewriter, P: *Sroa_Part, deleted: *[..] Va
     replace_full_load :: (r: *Sroa_Rewriter, ld: Value_Id, merged: Value_Id, deleted: *[..] Value_Id) {
         b: Irb;
         irb_set_before(*b, ld);
-        nl := irb_load(*b, vtype(merged), r.new_ai, rw_slice_align(r), (inst(ld).flags & F_VOLATILE) != 0, tprint("%.sroa.new.load", vname(ld)));
+        nl := irb_load(*b, vtype(merged), r.new_ai, rw_slice_align(r), (inst(ld).flags & F_VOLATILE) != 0, tconcat(vname(ld), ".sroa.new.load"));
         if vtype(nl) != vtype(ld) nl = irb_bitcast(*b, nl, vtype(ld));
         rauw_with_metadata(ld, nl);
         array_add(deleted, ld);
@@ -2028,16 +2028,16 @@ emit_split_ops :: (s: *Op_Splitter, ty: Type_Id, agg: *Value_Id, name: string) {
         off := cast(u64) sv_indexed_offset_in_type(s.base_ty, s.gep_indices);
         al := common_alignment(s.base_align, off);
         if s.is_store {
-            ev := irb_extract_value(s.irb, agg.*, s.indices, tprint("%.extract", name));
-            gep := irb_gep(s.irb, s.base_ty, s.ptr, s.gep_indices, tprint("%.gep", name), F_INBOUNDS);
+            ev := irb_extract_value(s.irb, agg.*, s.indices, tconcat(name, ".extract"));
+            gep := irb_gep(s.irb, s.base_ty, s.ptr, s.gep_indices, tconcat(name, ".gep"), F_INBOUNDS);
             st := irb_store(s.irb, ev, gep, al);
             if aa_any(s.tags) set_aa_metadata(st, aa_adjust_for_access_ty(s.tags, off, vtype(ev)));
         } else {
-            gep := irb_gep(s.irb, s.base_ty, s.ptr, s.gep_indices, tprint("%.gep", name), F_INBOUNDS);
-            ld := irb_load(s.irb, ty, gep, al, false, tprint("%.load", name));
+            gep := irb_gep(s.irb, s.base_ty, s.ptr, s.gep_indices, tconcat(name, ".gep"), F_INBOUNDS);
+            ld := irb_load(s.irb, ty, gep, al, false, tconcat(name, ".load"));
             if aa_any(s.tags) set_aa_metadata(ld, aa_adjust_for_access_ty(s.tags, off, vtype(ld)));
             array_add(*s.components, ld);
-            agg.* = irb_insert_value(s.irb, agg.*, ld, s.indices, tprint("%.insert", name));
+            agg.* = irb_insert_value(s.irb, agg.*, ld, s.indices, tconcat(name, ".insert"));
         }
         return;
     }
@@ -2067,7 +2067,7 @@ agg_visit_load :: (a: *Agg_Rw, li: Value_Id) -> bool {
     u := ir.v_first_use[li];
     while u != NONE { if call_intrinsic(ir.u_user[u]) == "llvm.fake.use" array_add(*fake, ir.u_user[u]); u = ir.u_next[u]; }
     v := const_poison(vtype(li));
-    emit_split_ops(*s, vtype(li), *v, tprint("%.fca", vname(li)));
+    emit_split_ops(*s, vtype(li), *v, tconcat(vname(li), ".fca"));
     // emitFakeUses
     for fu: fake {
         irb_set_before(a.irb, fu);
@@ -2090,7 +2090,7 @@ agg_visit_store :: (a: *Agg_Rw, si: Value_Id) -> bool {
     s.tags = get_aa_metadata(si);
     s.agg_store = si;
     vv := v;
-    emit_split_ops(*s, vtype(v), *vv, tprint("%.fca", vname(v)));
+    emit_split_ops(*s, vtype(v), *vv, tconcat(vname(v), ".fca"));
     table_remove(*a.visited, si);
     erase_inst_with_metadata(si);
     return true;
@@ -2138,16 +2138,16 @@ agg_unfold_gep_select :: (a: *Agg_Rw, g: Value_Id) -> bool {
     ty := inst(g).ty2;
     tidx: [] Value_Id; tidx.data = tops.data + 1; tidx.count = tops.count - 1;
     fidx: [] Value_Id; fidx.data = fops.data + 1; fidx.count = fops.count - 1;
-    nt := irb_gep(a.irb, ty, tops[0], tidx, tprint("%.sroa.gep", vname(tv)), nw);
-    nf := irb_gep(a.irb, ty, fops[0], fidx, tprint("%.sroa.gep", vname(fv)), nw);
+    nt := irb_gep(a.irb, ty, tops[0], tidx, tconcat(vname(tv), ".sroa.gep"), nw);
+    nf := irb_gep(a.irb, ty, fops[0], fidx, tconcat(vname(fv), ".sroa.gep"), nw);
     nsel: Value_Id;
-    if md_from != NONE nsel = irb_select(a.irb, cond, nt, nf, tprint("%.sroa.sel", vname(sel)), md_from);
+    if md_from != NONE nsel = irb_select(a.irb, cond, nt, nf, tconcat(vname(sel), ".sroa.sel"), md_from);
     else {
         // CreateSelectWithUnknownProfile(Cond, T, F, DEBUG_TYPE, Name)
-        nsel = irb_select(a.irb, cond, nt, nf, tprint("%.sroa.sel", vname(sel)));
+        nsel = irb_select(a.irb, cond, nt, nf, tconcat(vname(sel), ".sroa.sel"));
         if is_inst(nsel) && inst_op(nsel) == .SELECT {
             ec_ok, ec := function_entry_count(block_fn(inst(nsel).parent));
-            if ec_ok && ec > 0 set_metadata(nsel, md_kind_id("prof"), md_tuple(.[md_string("unknown"), md_string("sroa")], false));
+            if ec_ok && ec > 0 set_metadata(nsel, md_fixed("prof"), md_tuple(.[md_string("unknown"), md_string("sroa")], false));
         }
     }
     table_remove(*a.visited, g);
@@ -2186,7 +2186,7 @@ agg_unfold_gep_phi :: (a: *Agg_Rw, g: Value_Id) -> bool {
     if phi == NONE return false;
     irb_set_before(a.irb, phi);
     a.irb.head = true;   // phi insertion
-    new_phi := irb_phi(a.irb, vtype(g), nops(phi), tprint("%.sroa.phi", vname(phi)));
+    new_phi := irb_phi(a.irb, vtype(g), nops(phi), tconcat(vname(phi), ".sroa.phi"));
     src_ty := inst(g).ty2;
     entry := fn_entry(block_fn(inst(g).parent));
     irb_set_before(a.irb, block_terminator(entry));
@@ -2201,7 +2201,7 @@ agg_unfold_gep_phi :: (a: *Agg_Rw, g: Value_Id) -> bool {
             ops: [..] Value_Id; ops.allocator = temp;
             for k: 0..n-1 { x := op(g, k); array_add(*ops, ifx x == phi then o else x); }
             idx: [] Value_Id; idx.data = ops.data + 1; idx.count = ops.count - 1;
-            ng = irb_gep(a.irb, src_ty, ops[0], idx, tprint("%.sroa.gep", vname(phi)), inst(g).flags);
+            ng = irb_gep(a.irb, src_ty, ops[0], idx, tconcat(vname(phi), ".sroa.gep"), inst(g).flags);
         }
         phi_add_incoming(new_phi, ng, bb);
     }
@@ -2472,7 +2472,7 @@ presplit_loads_and_stores :: (pass: *Sroa, ai: Value_Id, as: *Sroa_Slices) -> bo
         while true {
             pty := type_int(part_size * 8);
             as_ := ptr_as(base_ptr);
-            pl := irb_load(*b, pty, get_adjusted_ptr(*b, base_ptr, part_off, dl_index_size_bits(as_), vtype(base_ptr), tprint("%.", vname(base_ptr))),
+            pl := irb_load(*b, pty, get_adjusted_ptr(*b, base_ptr, part_off, dl_index_size_bits(as_), vtype(base_ptr), tconcat(vname(base_ptr), ".")),
                            common_alignment(load_store_align(li), part_off), false, vname(li));
             copy_loop_metadata(pl, li);
             array_add(*split_loads, pl);
@@ -2494,11 +2494,11 @@ presplit_loads_and_stores :: (pass: *Sroa, ai: Value_Id, as: *Sroa_Slices) -> bo
             for pl, pi: split_loads {
                 po: u64 = ifx pi == 0 then 0 else so.splits[pi - 1];
                 as_ := ptr_as(sbase);
-                ps := irb_store(*b, pl, get_adjusted_ptr(*b, sbase, po, dl_index_size_bits(as_), vtype(sbase), tprint("%.", vname(sbase))),
+                ps := irb_store(*b, pl, get_adjusted_ptr(*b, sbase, po, dl_index_size_bits(as_), vtype(sbase), tconcat(vname(sbase), ".")),
                                 common_alignment(load_store_align(si), po));
                 copy_loop_metadata(ps, si);
-                dai := get_metadata(si, md_kind_id("DIAssignID"));
-                if dai != NONE set_metadata(ps, md_kind_id("DIAssignID"), dai);
+                dai := get_metadata(si, md_fixed("DIAssignID"));
+                if dai != NONE set_metadata(ps, md_fixed("DIAssignID"), dai);
                 if aa_any(tags) set_aa_metadata(ps, aa_adjust_for_access_ty(tags, po, vtype(pl)));
             }
             if is_inst(sbase) && inst_op(sbase) == .ALLOCA { table_set(*resplit, sbase, true); svec_insert(*pass.worklist, sbase); }
@@ -2531,13 +2531,13 @@ presplit_loads_and_stores :: (pass: *Sroa, ai: Value_Id, as: *Sroa_Slices) -> bo
             else {
                 irb_set_before(*b, li);
                 as_ := ptr_as(lbase);
-                pl = irb_load(*b, pty, get_adjusted_ptr(*b, lbase, part_off, dl_index_size_bits(as_), vtype(lbase), tprint("%.", vname(lbase))),
+                pl = irb_load(*b, pty, get_adjusted_ptr(*b, lbase, part_off, dl_index_size_bits(as_), vtype(lbase), tconcat(vname(lbase), ".")),
                               common_alignment(load_store_align(li), part_off), false, vname(li));
                 copy_loop_metadata(pl, li);
             }
             irb_set_before(*b, si);
             as_ := ptr_as(sbase);
-            ps := irb_store(*b, pl, get_adjusted_ptr(*b, sbase, part_off, dl_index_size_bits(as_), vtype(sbase), tprint("%.", vname(sbase))),
+            ps := irb_store(*b, pl, get_adjusted_ptr(*b, sbase, part_off, dl_index_size_bits(as_), vtype(sbase), tconcat(vname(sbase), ".")),
                             common_alignment(load_store_align(si), part_off));
             copy_loop_metadata(ps, si);
             array_add(*new_slices, .{base_off + part_off, base_off + part_off + part_size, op_use(ps, 1), false});
@@ -3119,7 +3119,7 @@ use_swap :: (a: Use_Id, b: Use_Id) {
 condbr_swap_successors :: (br: Value_Id) {
     use_swap(op_use(br, 1), op_use(br, 2));
     // Instruction::swapProfMetadata
-    k := md_kind_id("prof");
+    k := md_fixed("prof");
     m := get_metadata(br, k);
     if m == NONE || ir.mds[m].kind != .TUPLE || ir.mds[m].nops == 0 return;
     o0 := md_op(m, 0);
@@ -3187,7 +3187,7 @@ split_block_and_insert_if_then_else :: (cond: Value_Id, split_before: Value_Id, 
     if want_else { fb = mk(f, tail, dl); else_edge = true; }
     old := block_terminator(head);
     nt := create_cond_br(cond, tb, fb);
-    if weights != NONE set_metadata(nt, md_kind_id("prof"), weights);
+    if weights != NONE set_metadata(nt, md_fixed("prof"), weights);
     // ReplaceInstWithInst
     if get_metadata(nt, 0) == NONE { d := get_metadata(old, 0); if d != NONE set_metadata(nt, 0, d); }
     insert_at_position(nt, head, old, false);   // insertInto(BB, BI): adopts the old terminator's records
@@ -3206,7 +3206,7 @@ split_block_and_insert_if_then_else :: (cond: Value_Id, split_before: Value_Id, 
 // rewriteMemOpOfSelect
 rewrite_mem_op_of_select :: (sel: Value_Id, i: Value_Id, spec: u8) {
     head := inst(i).parent;
-    prof := get_metadata(sel, md_kind_id("prof"));
+    prof := get_metadata(sel, md_fixed("prof"));
     if spec == 0 {
         split_block_and_insert_if_then_else(op(sel, 0), i, true, true, prof);
     } else {
@@ -3215,7 +3215,7 @@ rewrite_mem_op_of_select :: (sel: Value_Id, i: Value_Id, spec: u8) {
     }
     head_br := block_terminator(head);
     tail := inst(i).parent;
-    set_name(tail, tprint("%.cont", vname(head)));
+    set_name(tail, tconcat(vname(head), ".cont"));
     is_load := inst_op(i) == .LOAD;
     pn: Value_Id = NONE;
     if is_load {
@@ -3249,7 +3249,7 @@ rewrite_mem_op_of_select :: (sel: Value_Id, i: Value_Id, spec: u8) {
 
 // Function::getEntryCount
 function_entry_count :: (f: Value_Id) -> (bool, u64) {
-    m := get_metadata(f, md_kind_id("prof"));
+    m := get_metadata(f, md_fixed("prof"));
     if m == NONE || ir.mds[m].kind != .TUPLE || ir.mds[m].nops < 2 return false, 0;
     o0 := md_op(m, 0);
     if o0 == NONE || ir.mds[o0].kind != .STRING || ir.mds[o0].str != "function_entry_count" return false, 0;

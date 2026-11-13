@@ -98,12 +98,20 @@ inst_md :: (i: Value_Id, kind_name: string) -> Md_Id {
 iid_cache: Table(Value_Id, Intrinsic_Id);
 fn_iid :: (f: Value_Id) -> Intrinsic_Id {
     if f == NONE || vkind(f) != .FUNCTION || !glob(f).intrinsic return NOT_INTRINSIC;
+    // dense front cache over value ids (-1: not computed) of the iid_cache results (a hash lookup per query)
+    if cast(s64) f < iid_dense.count { d := iid_dense[f]; if d >= 0 return d; }
     found, id := table_find(*iid_cache, f);
-    if found return id;
-    id = function_intrinsic_id(f);
-    table_set(*iid_cache, f, id);
+    if !found { id = function_intrinsic_id(f); table_set(*iid_cache, f, id); }
+    if cast(s64) f >= iid_dense.count {
+        iid_dense.allocator = context.default_allocator;
+        old := iid_dense.count;
+        array_resize(*iid_dense, max(cast(s64) f + 1, 2 * old, 1024), initialize = false);
+        memset(iid_dense.data + old, 0xFF, (iid_dense.count - old) * size_of(Intrinsic_Id));
+    }
+    iid_dense[f] = id;
     return id;
 }
+iid_dense: [..] Intrinsic_Id;
 // dyn_cast<IntrinsicInst>(V)->getIntrinsicID(), NOT_INTRINSIC if V isn't an intrinsic call
 call_iid :: inline (v: Value_Id) -> Intrinsic_Id {
     if !is_inst(v) return NOT_INTRINSIC;
@@ -161,11 +169,18 @@ is_possibly_exact_op :: (v: Value_Id) -> bool {
 // ---------------------------------------------------------------- order and dominance
 
 // Instruction::comesBefore (same block)
+// Instruction::comesBefore: compares the lazily renumbered Instruction::Order (BasicBlock::renumberInstructions)
 comes_before :: (a: Value_Id, b: Value_Id) -> bool {
-    assert(inst(a).parent == inst(b).parent, "comesBefore across blocks");
-    x := inst(a).next;
-    while x != NONE { if x == b return true; x = inst(x).next; }
-    return false;
+    bb := inst(a).parent;
+    assert(bb == inst(b).parent, "comesBefore across blocks");
+    br := block(bb);
+    if !br.order_valid {
+        n: u32 = 0;
+        x := br.first;
+        while x != NONE { inst(x).order = n; n += 1; x = inst(x).next; }
+        br.order_valid = true;
+    }
+    return inst(a).order < inst(b).order;
 }
 
 // DominatorTree::dominates(const Instruction *Def, const BasicBlock *UseBB)

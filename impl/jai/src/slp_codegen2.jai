@@ -589,7 +589,7 @@ slp_perform_extracts_shuffle_ir :: (keys: [] Value_Id, masks: [] [..] s32, base:
 
 // Instruction::mergeDIAssignID(SourceInstructions)
 slp_merge_di_assign_id :: (i: Value_Id, sources: [] Value_Id) {
-    kind := md_kind_id("DIAssignID");
+    kind := md_fixed("DIAssignID");
     ids: [..] Md_Id; ids.allocator = temp;
     for sources { m := get_metadata(it, kind); if m != NONE array_add(*ids, m); }
     m := get_metadata(i, kind); if m != NONE array_add(*ids, m);

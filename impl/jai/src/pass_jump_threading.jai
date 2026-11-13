@@ -1764,8 +1764,8 @@ jt_unfold_select_instr :: (j: *Jt, pred: Value_Id, bb: Value_Id, si: Value_Id, s
     block_append_inst(pred, bi);
     if trailing attach_records_before(bi, trailing);
     set_metadata(bi, 0, merged_location(get_metadata(pred_term, 0), get_metadata(si, 0)));
-    prof := get_metadata(si, md_kind_id("prof"));
-    if prof != NONE set_metadata(bi, md_kind_id("prof"), prof);
+    prof := get_metadata(si, md_fixed("prof"));
+    if prof != NONE set_metadata(bi, md_fixed("prof"), prof);
     phi_set_value(si_use, idx, op(si, 2));
     phi_add_incoming(si_use, op(si, 1), new_bb);
     tw: u64 = 1; fw: u64 = 1;
@@ -1924,7 +1924,7 @@ jt_split_block_and_insert_if_then :: (cond: Value_Id, split_before: Value_Id, we
     head_old_term := block_terminator(head);
     cbr := create_cond_br(cond, then_bb, tail);
     insert_at_position(cbr, head, head_old_term, false);
-    if weights != NONE set_metadata(cbr, md_kind_id("prof"), weights);
+    if weights != NONE set_metadata(cbr, md_fixed("prof"), weights);
     set_metadata(cbr, 0, get_metadata(split_before, 0));
     erase_inst_with_metadata(head_old_term);
     return br;

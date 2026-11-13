@@ -1451,7 +1451,7 @@ unswitch_nontrivial_invariants :: (l: Loop_Id, ti: Value_Id, invariants: [] Valu
         return NONE;
     }
 
-    mi := md_kind_id("make.implicit");
+    mi := md_fixed("make.implicit");
     if get_metadata(ti, mi) != NONE {
         if slu_opts.drop_non_trivial_implicit_null_checks set_metadata(ti, mi, NONE);
         else {

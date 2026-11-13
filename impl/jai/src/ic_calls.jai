@@ -162,15 +162,15 @@ ic_simplify_any_mem_transfer :: (mi: Value_Id) -> Value_Id {
     src := call_arg(mi, 1); dest := call_arg(mi, 0);
     l := icb_load_raw(int_ty, src, copy_src_align);
     ic_mem_aa_copy_md(mi, l, cast(u64) size);
-    lmp := get_metadata(mi, md_kind_id("llvm.mem.parallel_loop_access"));
-    if lmp != NONE set_metadata(l, md_kind_id("llvm.mem.parallel_loop_access"), lmp);
-    ag := get_metadata(mi, md_kind_id("llvm.access.group"));
-    if ag != NONE set_metadata(l, md_kind_id("llvm.access.group"), ag);
+    lmp := get_metadata(mi, md_fixed("llvm.mem.parallel_loop_access"));
+    if lmp != NONE set_metadata(l, md_fixed("llvm.mem.parallel_loop_access"), lmp);
+    ag := get_metadata(mi, md_fixed("llvm.access.group"));
+    if ag != NONE set_metadata(l, md_fixed("llvm.access.group"), ag);
     s := icb_store_raw(l, dest, copy_dst_align);
     ic_mem_aa_copy_md(mi, s, cast(u64) size);
-    if lmp != NONE set_metadata(s, md_kind_id("llvm.mem.parallel_loop_access"), lmp);
-    if ag != NONE set_metadata(s, md_kind_id("llvm.access.group"), ag);
-    da := get_metadata(mi, md_kind_id("DIAssignID"));
+    if lmp != NONE set_metadata(s, md_fixed("llvm.mem.parallel_loop_access"), lmp);
+    if ag != NONE set_metadata(s, md_fixed("llvm.access.group"), ag);
+    da := get_metadata(mi, md_fixed("DIAssignID"));
     if da != NONE fatal("instcombine: SimplifyAnyMemTransfer with DIAssignID is not supported yet");
     if !atomic {
         vol := ic_mem_is_volatile(mi);
@@ -203,7 +203,7 @@ ic_simplify_any_mem_set :: (mi: Value_Id) -> Value_Id {
         for k: 0..cast(s64) len - 1 fill = ap_or(fill, ap_shl(ap_from_u64(cast(u32) (len * 8), b), cast(u32) (k * 8)));
         fill_val := const_int_ap(type_int(cast(u32) (len * 8)), fill);
         s := icb_store_raw(fill_val, dest, alignment, ic_mem_is_volatile(mi));
-        if get_metadata(mi, md_kind_id("DIAssignID")) != NONE fatal("instcombine: SimplifyAnyMemSet with DIAssignID is not supported yet");
+        if get_metadata(mi, md_fixed("DIAssignID")) != NONE fatal("instcombine: SimplifyAnyMemSet with DIAssignID is not supported yet");
         if atomic inst(s).ord1 = ORD_UNORDERED;
         ic_mem_set_length(mi, 0);
         return mi;
@@ -455,7 +455,7 @@ ic_fold_cttz_ctlz :: (ii: Value_Id) -> Value_Id {
         if !pm_one(call_arg(ii, 1)) return create_call_fn(f, .[op0, get_true(ir.t_i1)]);
     }
     bw := scalar_bits(op0);
-    if bw != 1 && !call_has_ret_attr(ii, .Range) && get_metadata(ii, md_kind_id("range")) == NONE {
+    if bw != 1 && !call_has_ret_attr(ii, .Range) && get_metadata(ii, md_fixed("range")) == NONE {
         call_add_range_ret_attr(ii, cr_new(ap_from_u64(bw, cast(u64) definite), ap_from_u64(bw, cast(u64) possible + 1)));
         return ii;
     }
@@ -2284,8 +2284,8 @@ ic_visit_assume :: (ii: Value_Id) -> Ic_Switch_Result {
                 if is_known_non_zero(ptr, ic_q(ii)) return remove_bundle(ii, idx);
                 if is_inst(ptr) && inst_op(ptr) == .LOAD && is_valid_assume_for_context(ii, ptr, ic.dt, true) {
                     md := md_tuple(.[], false);
-                    set_metadata(ptr, md_kind_id("nonnull"), md);
-                    set_metadata(ptr, md_kind_id("noundef"), md);
+                    set_metadata(ptr, md_fixed("nonnull"), md);
+                    set_metadata(ptr, md_fixed("noundef"), md);
                     return remove_bundle(ii, idx);
                 }
                 if is_gep_operator(ptr) && (gep_nw_bits(ptr) & F_INBOUNDS) != 0 && !null_pointer_is_defined(inst_fn(ii), cast(u64) type_addrspace(vtype(ptr))) {
@@ -2296,7 +2296,7 @@ ic_visit_assume :: (ii: Value_Id) -> Ic_Switch_Result {
                 v := op(ii, b);
                 if is_guaranteed_not_to_be_undef_or_poison(v, ic.ac, ii, ic.dt) return remove_bundle(ii, idx);
                 if is_inst(v) && inst_op(v) == .LOAD && is_valid_assume_for_context(ii, v, ic.dt, true) {
-                    set_metadata(v, md_kind_id("noundef"), md_tuple(.[], false));
+                    set_metadata(v, md_fixed("noundef"), md_tuple(.[], false));
                     return remove_bundle(ii, idx);
                 }
             case "separate_storage";
@@ -2532,7 +2532,10 @@ ic_target_inst_combine_intrinsic :: (ii: Value_Id) -> (Value_Id, bool) {
     t := ir.triple;
     arch_of :: (name: string) -> string {
         prefixes :: string.["x86", "aarch64", "arm", "amdgcn", "r600", "nvvm", "riscv", "ppc", "hexagon", "wasm", "s390", "mips", "loongarch", "spv", "dx", "systemz", "ve", "bpf", "xcore"];
-        for prefixes if begins_with(name, tprint("llvm.%.", it)) return it;
+        // begins_with(name, "llvm.<prefix>.") without building the string (tprint was 3% of -O2)
+        if !begins_with(name, "llvm.") return "";
+        rest := slice(name, 5, name.count - 5);
+        for prefixes if rest.count > it.count && begins_with(rest, it) && rest[it.count] == #char "." return it;
         return "";
     }
     arch := arch_of(name);
@@ -2689,7 +2692,7 @@ ic_visit_call_base :: (call: Value_Id) -> Value_Id {
         if ra != NONE && can_losslessly_bitcast_to(vtype(ra), vtype(call))
             return ic_replace_inst_uses_with(call, icb_bit_or_pointer_cast(ra, vtype(call)));
     }
-    ct := md_kind_id("callee_type");
+    ct := md_fixed("callee_type");
     if get_metadata(call, ct) != NONE && !call_is_indirect(call) { set_metadata(call, ct, NONE); changed = true; }
     if call_has_bundle(call, "kcfi") && !call_is_indirect(call) {
         nb := call_num_bundles(call);
@@ -2901,8 +2904,8 @@ ic_transform_const_expr_cast_call :: (call: Value_Id) -> bool {
     ic_take_name(nc_i, call);
     inst(nc_i).cc = inst(call).cc;
     inst(nc_i).attrs = new_pal;
-    prof := get_metadata(call, md_kind_id("prof"));
-    if prof != NONE set_metadata(nc_i, md_kind_id("prof"), prof);
+    prof := get_metadata(call, md_fixed("prof"));
+    if prof != NONE set_metadata(nc_i, md_fixed("prof"), prof);
     nv: Value_Id = nc_i;
     if old_ret != vtype(nv) && has_uses(call) {
         cst := ic_create_bit_or_pointer_cast(nc_i, old_ret);

@@ -231,7 +231,7 @@ tbaa_mod_ref_mask :: (aar: *Aa_Results, loc: Mem_Loc) -> u8 {
 // TypeBasedAAResult::getMemoryEffects(Call)
 tbaa_memory_effects_call :: (aar: *Aa_Results, call: Value_Id) -> u64 {
     if !tbaa_should_use(aar) return MEM_UNKNOWN;
-    m := get_metadata(call, md_kind_id("tbaa"));
+    m := get_metadata(call, md_fixed("tbaa"));
     if m != NONE && tbaa_tag_is_type_immutable(m) return 0;
     return MEM_UNKNOWN;
 }
@@ -240,7 +240,7 @@ tbaa_mod_ref_call_loc :: (aar: *Aa_Results, call: Value_Id, loc: Mem_Loc) -> u8 
     if !tbaa_should_use(aar) return MR_MODREF;
     l := loc.tags.tbaa;
     if l != NONE {
-        m := get_metadata(call, md_kind_id("tbaa"));
+        m := get_metadata(call, md_fixed("tbaa"));
         if m != NONE && !tbaa_aliases(l, m) return MR_NO;
     }
     return MR_MODREF;
@@ -248,9 +248,9 @@ tbaa_mod_ref_call_loc :: (aar: *Aa_Results, call: Value_Id, loc: Mem_Loc) -> u8 
 // TypeBasedAAResult::getModRefInfo(Call1, Call2)
 tbaa_mod_ref_call_call :: (aar: *Aa_Results, c1: Value_Id, c2: Value_Id) -> u8 {
     if !tbaa_should_use(aar) return MR_MODREF;
-    m1 := get_metadata(c1, md_kind_id("tbaa"));
+    m1 := get_metadata(c1, md_fixed("tbaa"));
     if m1 != NONE {
-        m2 := get_metadata(c2, md_kind_id("tbaa"));
+        m2 := get_metadata(c2, md_fixed("tbaa"));
         if m2 != NONE && !tbaa_aliases(m1, m2) return MR_NO;
     }
     return MR_MODREF;

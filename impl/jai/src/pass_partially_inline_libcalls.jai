@@ -65,7 +65,7 @@ pilc_optimize_sqrt :: (call: Value_Id, curr_bb: Value_Id, t: *Tti, ups: *[..] Do
     set_op(curr_term, 0, fcmp);
     // the quick path is presumed frequent: MDBuilder::createLikelyBranchWeights() = {(1 << 20) - 1, 1}
     ok, ec := ic_fn_entry_count(inst_fn(curr_term));
-    if ok set_metadata(curr_term, md_kind_id("prof"), md_branch_weights(.[(1 << 20) - 1, 1], false));
+    if ok set_metadata(curr_term, md_fixed("prof"), md_branch_weights(.[(1 << 20) - 1, 1], false));
     phi_add_incoming(phi, call, curr_bb);
     phi_add_incoming(phi, lib_call, lib_bb);
     return join;

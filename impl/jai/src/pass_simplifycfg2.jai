@@ -522,13 +522,19 @@ sink_common_code_from_predecessors :: (s: *Scfg, bb: Value_Id) -> bool {
     phi_ops: Phi_Ops; phi_ops.use_keys.allocator = temp; phi_ops.vals.allocator = temp;
     for pn: block_insts(bb) {
         if inst_op(pn) != .PHI break;
-        // IncomingVals: the first use per incoming block
-        first_use :: (pn: Value_Id, b: Value_Id) -> Use_Id {
-            for k: 0..cast(s64) nops(pn) - 1 if phi_block(pn, cast(u32) k) == b return op_use(pn, cast(u32) k);
+        // IncomingVals: the first use per incoming block (a DenseMap; a scan per predecessor was quadratic)
+        incoming_vals: Table(Value_Id, Use_Id); incoming_vals.allocator = temp;
+        for k: 0..cast(s64) nops(pn) - 1 {
+            b := phi_block(pn, cast(u32) k);
+            if !table_contains(*incoming_vals, b) table_add(*incoming_vals, b, op_use(pn, cast(u32) k));
+        }
+        first_use :: (t: *Table(Value_Id, Use_Id), b: Value_Id) -> Use_Id {
+            found, u := table_find(t, b);
+            if found return u;
             return NONE;
         }
-        l := phi_ops_get(*phi_ops, first_use(pn, uncond[0]));
-        for p: uncond array_add(l, ir.u_val[first_use(pn, p)]);
+        l := phi_ops_get(*phi_ops, first_use(*incoming_vals, uncond[0]));
+        for p: uncond array_add(l, ir.u_val[first_use(*incoming_vals, p)]);
     }
     // LockstepReverseIterator<true>
     Lri :: struct { insts: [..] Value_Id; fail: bool; }
@@ -1436,10 +1442,10 @@ hoist_conditional_loads_stores :: (bi: Value_Id, lss: [] Value_Id, invert: s64, 
         if rng != NONE call_add_range_ret_attr(mls, cr_from_range_md(rng));
         drop_ub_implying_attrs_and_unknown_metadata(i, false, MD_ANNOTATION_KIND);
         // at::deleteAssignmentMarkers(I), then drop the DIAssignID attachment
-        aid := get_metadata(i, md_kind_id("DIAssignID"));
+        aid := get_metadata(i, md_fixed("DIAssignID"));
         if aid != NONE {
             for * rec, ri: ir.dbg_records if rec.kind == .ASSIGN && rec.assign_id == aid && rec.owner != NONE dbgr_erase(cast(u32) (ri + 1));
-            set_metadata(i, md_kind_id("DIAssignID"), NONE);
+            set_metadata(i, md_fixed("DIAssignID"), NONE);
         }
         copy_metadata(mls, i);
         erase_inst_with_metadata(i);

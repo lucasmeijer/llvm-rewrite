@@ -222,7 +222,7 @@ lvi_get_from_range_metadata :: (i: Value_Id) -> Vle {
         if ok return vle_get_range(r);
     }
     if o == .CALL || o == .INVOKE || o == .LOAD {
-        m := get_metadata(i, md_kind_id("range"));
+        m := get_metadata(i, md_fixed("range"));
         if m != NONE && type_kind(vtype(i)) == .INT return vle_get_range(cr_from_range_md(m));
     }
     return vle_get_overdefined();

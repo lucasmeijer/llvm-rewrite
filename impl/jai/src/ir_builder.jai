@@ -197,10 +197,10 @@ irb_select :: (b: *Irb, c: Value_Id, t: Value_Id, f: Value_Id, name: string = ""
     i := new_inst(.SELECT, vtype(t), 3);
     set_op(i, 0, c); set_op(i, 1, t); set_op(i, 2, f);
     if md_from != NONE {
-        prof := get_metadata(md_from, md_kind_id("prof"));
-        unpred := get_metadata(md_from, md_kind_id("unpredictable"));
-        if prof != NONE set_metadata(i, md_kind_id("prof"), prof);
-        if unpred != NONE set_metadata(i, md_kind_id("unpredictable"), unpred);
+        prof := get_metadata(md_from, md_fixed("prof"));
+        unpred := get_metadata(md_from, md_fixed("unpredictable"));
+        if prof != NONE set_metadata(i, md_fixed("prof"), prof);
+        if unpred != NONE set_metadata(i, md_fixed("unpredictable"), unpred);
     }
     return irb_insert(b, i, name);
 }

@@ -699,4 +699,4 @@ ap_sqrt :: (a: APInt) -> APInt {
 ap_to_string_unsigned :: (a: APInt) -> string { return apint_to_unsigned_decimal(ap_words(a)); }
 ap_to_string_signed :: (a: APInt) -> string { return apint_to_signed_decimal(ap_words(a), a.bits); }
 
-#import "Basic";
+// (Basic: imported once, in ir.jai)

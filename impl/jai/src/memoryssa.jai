@@ -453,7 +453,7 @@ inst_is_ordered :: (i: Value_Id) -> bool {
 
 // isUseTriviallyOptimizableToLiveOnEntry
 is_use_trivially_optimizable_to_live_on_entry :: (q: *Aa_Query, i: Value_Id) -> bool {
-    if get_metadata(i, md_kind_id("invariant.load")) != NONE return true;
+    if get_metadata(i, md_fixed("invariant.load")) != NONE return true;
     if inst_op(i) == .LOAD return (aa_mod_ref_mask(q, mloc_get(i)) & MR_MOD) == 0;
     return false;
 }
@@ -1059,7 +1059,7 @@ cw_find_clobber :: (m: *Memory_SSA, aa: *Aa_Query, start: s32, q: *Upwards_Query
 
 // getInvariantGroupClobberingInstruction
 invariant_group_clobbering_instruction :: (i: Value_Id, dt: *Dom_Tree) -> Value_Id {
-    k := md_kind_id("invariant.group");
+    k := md_fixed("invariant.group");
     if get_metadata(i, k) == NONE || is_volatile(i) return NONE;
     p := load_store_pointer_operand(i);
     if p == NONE return NONE;

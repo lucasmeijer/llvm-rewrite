@@ -73,7 +73,7 @@ drop_type_tests_run :: () -> Preserved {
     if ptt != NONE && vkind(ptt) != .FUNCTION ptt = NONE;
     if ptt != NONE drop(ptt);
     if tt == NONE && ptt == NONE return PRESERVE_ALL;
-    vk := md_kind_id("vcall_visibility");
+    vk := md_fixed("vcall_visibility");
     for g: ir.m_globals while get_metadata(g, vk) != NONE set_metadata(g, vk, NONE);
     printer_note_ir_changed();
     return PRESERVE_NONE;
@@ -95,7 +95,7 @@ expand_variadics_run :: () -> Preserved {
 }
 
 pgo_icall_prom_run :: () -> Preserved {
-    prof := md_kind_id("prof");
+    prof := md_fixed("prof");
     for f: ir.m_functions {
         if is_declaration(f) || fn_has_fn_attr(f, .OptimizeNone) continue;
         for i: fn_insts(f) {

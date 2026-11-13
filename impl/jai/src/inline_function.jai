@@ -119,7 +119,7 @@ pfc_clone_block :: (p: *Pruning_Cloner, bb: Value_Id, starting: Value_Id, to_clo
     existing := vmap_lookup(p.vm, bb);
     if existing != NONE return;
     nb := create_block(p.new_fn, "");
-    if vname(bb).count set_name(nb, tprint("%0%", vname(bb), p.suffix));
+    if vname(bb).count set_name(nb, tconcat(vname(bb), p.suffix));
     vmap_set(p.vm, bb, nb);
     if block_has_address_taken_any(bb) {
         old_ba := const_blockaddr(p.old_fn, bb);
@@ -156,12 +156,12 @@ pfc_clone_block :: (p: *Pruning_Cloner, bb: Value_Id, starting: Value_Id, to_clo
             }
         }
         if is_call_base(ii) && call_is_indirect(ii) cci_indirect_insert(p.info, nw);
-        if vname(ii).count set_name(nw, tprint("%0%", vname(ii), p.suffix));
+        if vname(ii).count set_name(nw, tconcat(vname(ii), p.suffix));
         vmap_set(p.vm, ii, nw);
         if inst_op(ii) == .CALL && !is_debug_or_pseudo_inst(ii) {
             has_calls = true;
-            has_memprof |= get_metadata(ii, md_kind_id("memprof")) != NONE;
-            has_memprof |= get_metadata(ii, md_kind_id("callsite")) != NONE;
+            has_memprof |= get_metadata(ii, md_fixed("memprof")) != NONE;
+            has_memprof |= get_metadata(ii, md_fixed("callsite")) != NONE;
         }
         clone_dbg_to_here(nw, ii, *dbg_cursor);
         table_set(*p.info.orig_vmap, ii, nw);
@@ -209,7 +209,7 @@ pfc_clone_block :: (p: *Pruning_Cloner, bb: Value_Id, starting: Value_Id, to_clo
     }
     if !done {
         nw := inst_clone(old_ti);
-        if vname(old_ti).count set_name_unlinked(nw, tprint("%0%", vname(old_ti), p.suffix));
+        if vname(old_ti).count set_name_unlinked(nw, tconcat(vname(old_ti), p.suffix));
         block_append_inst(nb, nw);
         if vname(nw).count ic_reinsert_name(nw);
         clone_dbg_to_here(nw, old_ti, *dbg_cursor);
@@ -452,14 +452,14 @@ lpi_add_incoming_phi_values_for_into :: (l: *Lpad_Info, src: Value_Id, dest: Val
 lpi_get_inner_resume_dest :: (l: *Lpad_Info) -> Value_Id {
     if l.inner_resume_dest != NONE return l.inner_resume_dest;
     split_point := inst(l.caller_lpad).next;
-    l.inner_resume_dest = split_basic_block(l.outer_resume_dest, split_point, tprint("%.body", vname(l.outer_resume_dest)));
+    l.inner_resume_dest = split_basic_block(l.outer_resume_dest, split_point, tconcat(vname(l.outer_resume_dest), ".body"));
     insert_point := block_first(l.inner_resume_dest);
     x := block_first(l.outer_resume_dest);
     for 0..l.unwind_dest_phi_values.count-1 {
         outer := x;
         inner := create_phi(vtype(outer), 2);
         inst_insert_before(inner, insert_point);
-        set_name(inner, tprint("%.lpad-body", vname(outer)));
+        set_name(inner, tconcat(vname(outer), ".lpad-body"));
         replace_all_uses_with(outer, inner);
         phi_add_incoming(inner, outer, l.outer_resume_dest);
         x = inst(x).next;
@@ -621,7 +621,7 @@ catchswitch_handlers :: (cs: Value_Id) -> [..] Value_Id {
 // changeToInvokeAndSplitBasicBlock(CI, UnwindEdge, DTU = nullptr)
 change_to_invoke_and_split_basic_block :: (ci: Value_Id, unwind_edge: Value_Id) -> Value_Id {
     bb := inst_block(ci);
-    split := split_basic_block(bb, ci, tprint("%.noexc", vname(ci)));
+    split := split_basic_block(bb, ci, tconcat(vname(ci), ".noexc"));
     erase_inst(block_last(bb));
     n := nops(ci);   // [args, bundle inputs, callee]
     ii := new_inst(.INVOKE, vtype(ci), n + 2);
@@ -636,7 +636,7 @@ change_to_invoke_and_split_basic_block :: (ci: Value_Id, unwind_edge: Value_Id) 
     block_append_inst(bb, ii);
     if vname(ci).count set_name(ii, vname(ci));
     copy_debug_loc(ii, ci);
-    prof := md_kind_id("prof");
+    prof := md_fixed("prof");
     set_metadata(ii, prof, get_metadata(ci, prof));
     rauw_with_metadata(ci, ii);
     erase_inst_with_metadata(block_first(split));
@@ -785,10 +785,10 @@ handle_inlined_eh_pad :: (ii: Value_Id, first_new_block: Value_Id, info: *Cloned
 
 // PropagateCallSiteMetadata
 propagate_call_site_metadata :: (cb: Value_Id, start: Value_Id) {
-    k_mpla := md_kind_id("llvm.mem.parallel_loop_access");
-    k_ag := md_kind_id("llvm.access.group");
-    k_as := md_kind_id("alias.scope");
-    k_na := md_kind_id("noalias");
+    k_mpla := md_fixed("llvm.mem.parallel_loop_access");
+    k_ag := md_fixed("llvm.access.group");
+    k_as := md_fixed("alias.scope");
+    k_na := md_fixed("noalias");
     mpla := get_metadata(cb, k_mpla);
     ag := get_metadata(cb, k_ag);
     as := get_metadata(cb, k_as);
@@ -900,8 +900,8 @@ Sa_Cloner :: struct { md: [..] Md_Id; map: Table(Md_Id, Md_Id); }
 sa_cloner_init :: (s: *Sa_Cloner, f: Value_Id) {
     s.md.allocator = temp; s.map.allocator = temp;
     ins :: (s: *Sa_Cloner, m: Md_Id) -> bool { for s.md if it == m return false; array_add(*s.md, m); return true; }
-    k_as := md_kind_id("alias.scope");
-    k_na := md_kind_id("noalias");
+    k_as := md_fixed("alias.scope");
+    k_na := md_fixed("noalias");
     for i: fn_insts(f) {
         m := get_metadata(i, k_as); if m != NONE ins(s, m);
         m = get_metadata(i, k_na); if m != NONE ins(s, m);
@@ -962,8 +962,8 @@ sa_cloner_clone :: (s: *Sa_Cloner) {
 }
 sa_cloner_remap :: (s: *Sa_Cloner, start: Value_Id) {
     if s.map.count == 0 return;
-    k_as := md_kind_id("alias.scope");
-    k_na := md_kind_id("noalias");
+    k_as := md_fixed("alias.scope");
+    k_na := md_fixed("noalias");
     b := start;
     while b != NONE {
         for i: block_insts(b) {
@@ -1018,8 +1018,8 @@ add_alias_scope_metadata :: (cb: Value_Id, vm: *Value_Map, callee_aar: *Aa_Resul
             irb_call(*b, f, .[md_as_value(list)]);
         }
     }
-    k_na := md_kind_id("noalias");
-    k_as := md_kind_id("alias.scope");
+    k_na := md_fixed("noalias");
+    k_as := md_fixed("alias.scope");
     for nv, i: vm.map {
         if vkind(i) != .INST continue;
         if nv == NONE continue;
@@ -1322,7 +1322,7 @@ update_profile_callee :: (callee: Value_Id, entry_delta: s64, vm: *Value_Map) {
 }
 // Function::setEntryCount(Count): MDBuilder::createFunctionEntryCount with the import GUIDs kept (sorted)
 fn_set_entry_count :: (f: Value_Id, count: u64) {
-    kind := md_kind_id("prof");
+    kind := md_fixed("prof");
     old := get_metadata(f, kind);
     guids: [..] u64; guids.allocator = temp;
     if old != NONE && md_nops(old) > 0 {
@@ -1360,7 +1360,7 @@ try_get_vtable_instruction :: (cb: Value_Id) -> Value_Id {
 }
 // scaleProfData(I, S, T)
 scale_prof_data :: (i: Value_Id, s: u64, t: u64) {
-    kind := md_kind_id("prof");
+    kind := md_fixed("prof");
     pd := get_metadata(i, kind);
     if pd == NONE || md_nops(pd) == 0 return;
     nm := md_op(pd, 0);
@@ -1406,18 +1406,20 @@ add_alignment_assumptions :: (cb: Value_Id, ifi: *Inline_Function_Info) {
     for k: 0..cast(s64) glob(called).nargs - 1 {
         a := fn_arg(called, cast(u32) k);
         if !is_ptr_type(vtype(a)) || arg_has_pass_pointee_by_value_copy(a) || !has_uses(a) continue;
-        al := attr_set_find(arg_attrs(a), .Alignment);
-        if !al continue;
+        alp := attr_set_find(arg_attrs(a), .Alignment);
+        if !alp continue;
+        // a copy: the pointer into ir.attr_pool dangles once the assume declaration below adds attribute sets
+        al_ival := alp.ival;
         if !dt { dt = dt_new(false); dt_recalculate(dt, caller); }
         av := call_arg(cb, arg_no(a));
-        if get_known_alignment(av, cb, ac, dt) >= al.ival continue;
+        if get_known_alignment(av, cb, ac, dt) >= al_ival continue;
         // IRBuilder<>(&CB).CreateAlignmentAssumption(DL, ArgVal, Alignment)
         f := get_or_insert_intrinsic_declaration(IID_ASSUME, .[]);
         i := new_inst(.CALL, ir.t_void, 4);
         inst(i).ty2 = glob(f).value_type;
         set_op(i, 0, get_true(ir.t_i1));
         set_op(i, 1, av);
-        set_op(i, 2, const_int(ir.t_i64, al.ival));
+        set_op(i, 2, const_int(ir.t_i64, al_ival));
         set_op(i, 3, f);
         r := inst(i);
         r.idx = cast(u32) ir.u32_pool.count; r.nidx = 1;
@@ -1517,7 +1519,7 @@ inline_debug_loc :: (dl: Md_Id, inlined_at: Md_Id, cache: *Table(Md_Id, Md_Id)) 
 }
 // updateLoopMetadataDebugLocations(I, Updater = inlineDebugLoc of DILocations)
 update_loop_metadata_debug_locations :: (i: Value_Id, inlined_at: Md_Id, cache: *Table(Md_Id, Md_Id)) {
-    k_loop := md_kind_id("llvm.loop");
+    k_loop := md_fixed("llvm.loop");
     orig := get_metadata(i, k_loop);
     if orig == NONE return;
     updater :: (m: Md_Id, inlined_at: Md_Id, cache: *Table(Md_Id, Md_Id)) -> Md_Id {
@@ -1655,7 +1657,7 @@ can_inline_call_site :: (cb: Value_Id, ifi: *Inline_Function_Info) -> Inline_Res
     ifi_reset(ifi);
     called := call_called_function(cb);
     if called == NONE || is_declaration(called) return ir_failure("external or indirect");
-    ih := get_metadata(cb, md_kind_id("inline_history"));
+    ih := get_metadata(cb, md_fixed("inline_history"));
     if ih != NONE {
         for k: 0..cast(s64) md_nops(ih) - 1 {
             o := md_op(ih, cast(u32) k);
@@ -1791,11 +1793,11 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
         add_alias_scope_metadata(cb, *vm, callee_aar, *info);
         add_return_attributes(cb, *vm, *info);
         add_param_and_fn_basic_attributes(cb, *vm, *info);
-        if get_metadata(cb, md_kind_id("callsite")) != NONE || info.contains_memprof fatal("inline: memprof metadata propagation is not implemented yet");
+        if get_metadata(cb, md_fixed("callsite")) != NONE || info.contains_memprof fatal("inline: memprof metadata propagation is not implemented yet");
         propagate_call_site_metadata(cb, first_new_block);
         propagate_alloc_token_metadata(called, cb, *vm, *info);
         {
-            k_ir := md_kind_id("implicit.ref");
+            k_ir := md_fixed("implicit.ref");
             mds: [..] Md_Id; mds.allocator = temp;
             a := ir.v_md[called];
             while a != NONE { if ir.attaches[a].kind == k_ir array_add(*mds, ir.attaches[a].md); a = ir.attaches[a].next; }
@@ -2001,7 +2003,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
             b = block(b).next;
         }
     }
-    k_ih := md_kind_id("inline_history");
+    k_ih := md_fixed("inline_history");
     for icb: ifi.inlined_call_sites {
         if track_inline_history || cci_indirect_contains(*info, icb) {
             hist: [..] Md_Id; hist.allocator = temp;
@@ -2038,9 +2040,9 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
     if inst_op(cb) == .INVOKE {
         created_br = create_br(invoke_normal_dest(cb));
         inst_insert_before(created_br, cb);
-        after_call_bb = split_basic_block(orig_bb, created_br, tprint("%.exit", vname(called)));
+        after_call_bb = split_basic_block(orig_bb, created_br, tconcat(vname(called), ".exit"));
     } else {
-        after_call_bb = split_basic_block(orig_bb, cb, tprint("%.exit", vname(called)));
+        after_call_bb = split_basic_block(orig_bb, cb, tconcat(vname(called), ".exit"));
     }
     if ifi.caller_bfi bfi_set_block_freq(ifi.caller_bfi, after_call_bb, bfi_get_block_freq(ifi.caller_bfi, orig_bb));
     br := block_terminator(orig_bb);
@@ -2172,7 +2174,7 @@ irb_lifetime :: (b: *Irb, id: Intrinsic_Id, ptr: Value_Id) -> Value_Id {
 
 // propagateAllocTokenMetadata
 propagate_alloc_token_metadata :: (called: Value_Id, cb: Value_Id, vm: *Value_Map, info: *Cloned_Code_Info) {
-    k := md_kind_id("alloc_token");
+    k := md_fixed("alloc_token");
     m := get_metadata(cb, k);
     if m == NONE return;
     calls: [..] Value_Id; calls.allocator = temp;
@@ -2233,7 +2235,9 @@ fn_attrs_inline_compatible :: (caller: Value_Id, callee: Value_Id) -> bool {
     return true;
 }
 fn_find_str_attr :: (f: Value_Id, key: string) -> *Attr {
-    items := attr_set_items(attr_list_fn(glob(f).attrs));
+    fs := attr_list_fn(glob(f).attrs);
+    if !attr_set_has(fs, .STRING_ATTR) return null;
+    items := attr_set_items(fs);
     for * items if it.kind == .STRING_ATTR && it.key == key return it;
     return null;
 }

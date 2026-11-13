@@ -648,7 +648,7 @@ dense_set_u32_order :: (keys: [] u32) -> [] u32 {
 }
 // BasicBlock::getIrrLoopHeaderWeight
 block_irr_loop_header_weight :: (bb: Value_Id) -> (bool, u64) {
-    m := get_metadata(block_terminator(bb), md_kind_id("irr_loop"));
+    m := get_metadata(block_terminator(bb), md_fixed("irr_loop"));
     if m == NONE return false, 0;
     s := md_op(m, 0);
     if s == NONE || ir.mds[s].kind != .STRING || ir.mds[s].str != "loop_header_weight" return false, 0;

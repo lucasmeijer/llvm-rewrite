@@ -22,13 +22,13 @@ Dom_Node :: struct {
     dfs_out: u32 = 0xFFFF_FFFF;
 }
 
+Dt_Slot :: struct { b: Value_Id = NONE; n: s32 = -1; }
 Dom_Tree :: struct {
     post: bool;
     fn: Value_Id = NONE;
     nodes: [..] Dom_Node;
-    node_of: Table(Value_Id, s32);   // blocks whose row (ir.v_aux) is below dense_base, and the virtual root NONE
-    node_dense: [..] s32;            // node of the block with row dense_base + i (-1 = none)
-    dense_base: s64 = 0x7FFF_FFFF_FFFF_FFFF;
+    node_of: Table(Value_Id, s32);   // blocks without a slot of their own in node_dense, and the virtual root NONE
+    node_dense: [..] Dt_Slot;        // indexed by BasicBlock::Number (DomTreeNodes); the slot names its block
     roots: [..] Value_Id;
     root_node: s32 = -1;
     dfs_valid: bool;
@@ -86,37 +86,54 @@ fn_renumber_blocks :: (f: Value_Id) {
     n: u32 = 0;
     for b: fn_blocks(f) { block(b).number = n; n += 1; }
     glob(f).next_block_num = n;
+    // the cached trees index their nodes by block number
+    e := table_find_pointer(*fam, f);
+    if e { if e.dt dt_note_renumbered(e.dt); if e.pdt dt_note_renumbered(e.pdt); }
 }
 // Function::getMaxBlockNumber (after ensure_block_numbers)
 fn_max_block_number :: (f: Value_Id) -> u32 { return cast(u32) glob(f).next_block_num; }
 
 // ---------------------------------------------------------------- node API
 
-// The block -> node map is a dense array over block rows from dense_base (the function's first row when the tree
-// was computed; blocks are appended to ir.blocks as they are created), the Table for anything else.
+// The block -> node map is a vector indexed by the block's number (like DomTreeNodes): each slot records its block,
+// so a block whose slot is taken (another function's block with the same number) or that has no number goes to
+// the node_of Table. (It used to be indexed by the block's row in ir.blocks, from the function's lowest row: after
+// inlining a function's rows span much of the module, and filling that range per tree was 5% of -O2 on SPASS.)
+// Function::renumberBlocks moves the slots: fn_renumber_blocks calls dt_note_renumbered for the cached trees.
 dt_node :: inline (dt: *Dom_Tree, b: Value_Id) -> s32 {
     if b != NONE && ir.v_kind[b] == .BLOCK {
-        r := cast(s64) ir.v_aux[b] - dt.dense_base;
-        if r >= 0 { if r < dt.node_dense.count return dt.node_dense[r]; return -1; }
+        num := cast(s64) block(b).number;
+        if num < dt.node_dense.count { sl := dt.node_dense[num]; if sl.b == b return sl.n; }
     }
+    if dt.node_of.count == 0 return -1;
     found, n := table_find(*dt.node_of, b);
     if found return n;
     return -1;
 }
 dt_map_set :: (dt: *Dom_Tree, b: Value_Id, n: s32) {
-    if b != NONE && ir.v_kind[b] == .BLOCK {
-        r := cast(s64) ir.v_aux[b] - dt.dense_base;
-        if r >= 0 {
-            if r >= dt.node_dense.count {
-                old := dt.node_dense.count;
-                array_resize(*dt.node_dense, r + 1, initialize = false);
-                for i: old..r dt.node_dense[i] = -1;
-            }
-            dt.node_dense[r] = n;
+    if b != NONE && ir.v_kind[b] == .BLOCK && block(b).number != BLOCK_NUMBER_NONE {
+        num := cast(s64) block(b).number;
+        if num >= dt.node_dense.count {
+            old := dt.node_dense.count;
+            if num + 1 > dt.node_dense.allocated array_reserve(*dt.node_dense, max(num + 1, 2 * dt.node_dense.allocated, 16));
+            dt.node_dense.count = num + 1;
+            for i: old..num dt.node_dense[i] = .{};
+        }
+        sl := *dt.node_dense[num];
+        if sl.b == b || sl.b == NONE {
+            if n < 0 { sl.b = NONE; sl.n = -1; } else { sl.b = b; sl.n = n; }
+            if dt.node_of.count table_remove(*dt.node_of, b);
             return;
         }
     }
     if n < 0 table_remove(*dt.node_of, b); else table_set(*dt.node_of, b, n);
+}
+// DominatorTreeBase::updateBlockNumbers: the blocks were renumbered; move every slot to its block's new number
+dt_note_renumbered :: (dt: *Dom_Tree) {
+    moved: [..] Dt_Slot; moved.allocator = temp;
+    for dt.node_dense if it.b != NONE array_add(*moved, it);
+    for * dt.node_dense it.* = .{};
+    for moved dt_map_set(dt, it.b, it.n);
 }
 dt_level :: inline (dt: *Dom_Tree, n: s32) -> u32 { return dt.nodes[n].level; }
 dt_idom :: inline (dt: *Dom_Tree, n: s32) -> s32 { return dt.nodes[n].idom; }
@@ -178,9 +195,9 @@ dt_create_node :: (dt: *Dom_Tree, b: Value_Id, idom: s32 = -1) -> s32 {
     nd.level = ifx idom >= 0 then dt.nodes[idom].level + 1 else 0;
     id := cast(s32) dt.nodes.count;
     array_add(*dt.nodes, nd);
-    dt_map_set(dt, b, id);
     // getNodeIndexForInsert: resize to max(getMaxBlockNumber(), Idx + 1) when Idx doesn't fit
     ensure_block_numbers(dt.fn);
+    dt_map_set(dt, b, id);
     idx: u32 = ifx b == NONE then 0 else block_number(b) + 1;
     if idx >= dt.vec_size {
         dt.vec_size = max(fn_max_block_number(dt.fn), idx + 1);
@@ -209,8 +226,6 @@ dt_reset :: (dt: *Dom_Tree) {
     dt.nodes.count = 0;
     table_reset(*dt.node_of);
     dt.node_dense.count = 0;
-    dt.dense_base = 0x7FFF_FFFF_FFFF_FFFF;
-    if dt.fn != NONE for b: fn_blocks(dt.fn) dt.dense_base = min(dt.dense_base, cast(s64) ir.v_aux[b]);
     dt.roots.count = 0;
     dt.root_node = -1;
     dt.dfs_valid = false;

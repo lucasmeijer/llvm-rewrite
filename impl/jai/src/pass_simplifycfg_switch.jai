@@ -433,7 +433,9 @@ simplify_duplicate_predecessors :: (s: *Scfg, bb: Value_Id) -> bool {
     preds: [..] Value_Id; preds.allocator = temp;
     block_predecessors(bb, *preds);
     f: [..] Value_Id; f.allocator = temp;
-    for preds if ebw_can_be_merged(it) && !block_set_contains(f, it) array_add(*f, it);
+    // SmallSetVector: a hash set beside the vector (a linear contains was quadratic in the predecessors)
+    in_f: Table(Value_Id, bool); in_f.allocator = temp;
+    for preds if ebw_can_be_merged(it) && !table_contains(*in_f, it) { table_add(*in_f, it, true); array_add(*f, it); }
     return merge_identical_bbs(s, f);
 }
 
@@ -2130,7 +2132,7 @@ simplify_cond_branch_to_cond_branch :: (s: *Scfg, pbi: Value_Id, bi: Value_Id) -
 
 // for (DVR : at::getDVRAssignmentMarkers(I)) if (is_contained(DVR->location_ops(), Old)) DVR->replaceVariableLocationOp(Old, New)
 dbg_assign_replace_location :: (i: Value_Id, old: Value_Id, new: Value_Id) {
-    aid := get_metadata(i, md_kind_id("DIAssignID"));
+    aid := get_metadata(i, md_fixed("DIAssignID"));
     if aid == NONE return;
     ops: [..] Value_Id; ops.allocator = temp;
     for * rec, ri: ir.dbg_records {

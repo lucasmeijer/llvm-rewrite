@@ -68,6 +68,7 @@ slp_init :: (f: Value_Id, tti: *Tti, aar: Aa_Results, li: *Loop_Info, dt: *Dom_T
     slp.analyzed_reduction_roots.allocator = temp;
     slpx = .{};
     slpx.f = f; slpx.aar = aar; slpx.db = db;
+    slp_pools_reset();
     slpx.eph_values.allocator = temp;
     slpx.instr_element_size.allocator = temp;
     slpx.analyzed_reduction_vals.allocator = temp;
@@ -235,3 +236,31 @@ slp_delete_tree_later_state :: () {   // the deleteTree members of later stages
     table_reset(*slpg.last_inst_to_pos);
 }
 
+
+// ---------------------------------------------------------------- memory reuse across trees (performance only)
+// tryToVectorizeList builds one tree per window of a seed list; on a long list (diamonds/n8000: thousands of windows
+// of up to 4096 compares) the per-tree containers allocated from temp storage grew it to 2.7 GB, since temp is only
+// reset between passes. LLVM reuses its containers (DenseMap::clear, SmallVector). Here deleteTree hands the
+// per-value Te_Id lists back to a pool, and the stale Tree_Entry slots past slp.entries.count lend their scalars
+// buffers to new entries. Everything pooled lives in temp: slp_init resets the pools for each pass run.
+slp_te_list_pool: [..] [..] Te_Id;
+slp_entries_high_water: s64;
+slp_scratch_seen: Table(Value_Id, bool);
+slp_scratch_pos: Table(Value_Id, s32);
+slp_scratch_seen_busy: bool;
+slp_scratch_pos_busy: bool;
+slp_pools_reset :: () {
+    empty: [..] [..] Te_Id; slp_te_list_pool = empty; slp_te_list_pool.allocator = temp;
+    slp_entries_high_water = 0;
+    slp_scratch_seen = .{}; slp_scratch_seen.allocator = temp; slp_scratch_seen_busy = false;
+    slp_scratch_pos = .{}; slp_scratch_pos.allocator = temp; slp_scratch_pos_busy = false;
+}
+slp_new_te_list :: () -> [..] Te_Id {
+    if slp_te_list_pool.count { l := pop(*slp_te_list_pool); l.count = 0; return l; }
+    l: [..] Te_Id; l.allocator = temp;
+    return l;
+}
+slp_harvest_te_lists :: (t: *Table(Value_Id, [..] Te_Id)) {
+    if t.count == 0 return;
+    for t.* if it.allocated > 0 array_add(*slp_te_list_pool, it);
+}

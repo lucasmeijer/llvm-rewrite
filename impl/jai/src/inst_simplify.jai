@@ -1345,7 +1345,7 @@ determine_use_capture_kind :: (u: Use_Id, base: Value_Id) -> (u8, u8) {
         case .VAARG; return CC_NONE, CC_NONE;
         case .STORE;
             if opno == 0 {
-                if inst_md(i, "captures") != NONE fatal("!captures metadata is not supported yet");
+                if get_metadata(i, md_fixed("captures")) != NONE fatal("!captures metadata is not supported yet");
                 return CC_ALL, CC_NONE;
             }
             if (inst(i).flags & F_VOLATILE) != 0 return CC_ADDRESS, CC_NONE;

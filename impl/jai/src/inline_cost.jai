@@ -124,7 +124,8 @@ ic_cost_delta :: (c: Inline_Cost) -> s64 { return c.threshold - c.cost; }
 // getStringFnAttrAsInt(CB, Kind): the call site's string attribute, else the callee's
 call_str_fn_attr_as_int :: (cb: Value_Id, key: string) -> (bool, s64) {
     a: *Attr = null;
-    for * attr_set_items(attr_list_fn(inst(cb).attrs)) if it.kind == .STRING_ATTR && it.key == key { a = it; break; }
+    cs := attr_list_fn(inst(cb).attrs);
+    if attr_set_has(cs, .STRING_ATTR) for * attr_set_items(cs) if it.kind == .STRING_ATTR && it.key == key { a = it; break; }
     if !a {
         f := call_called_operand_fn(cb);
         if f != NONE a = fn_find_str_attr(f, key);
@@ -906,7 +907,7 @@ cax_visit_cmp :: (ca: *Call_Analyzer, i: Value_Id) -> bool {
         }
     }
     is_implicit_null_check_cmp :: (i: Value_Id) -> bool {
-        k := md_kind_id("make.implicit");
+        k := md_fixed("make.implicit");
         u := ir.v_first_use[i];
         while u != NONE {
             usr := ir.u_user[u];
@@ -1230,7 +1231,7 @@ cax_visit :: (ca: *Call_Analyzer, i: Value_Id) -> bool {
         case .CALL; #through; case .INVOKE; #through; case .CALLBR; return cax_visit_call_base(ca, i);
         case .RET; free := !ca.has_return; ca.has_return = true; return free;
         case .BR; return true;
-        case .CONDBR; return cax_direct_or_simplified(ca, op(i, 0), .CONSTANT_INT) != NONE || get_metadata(i, md_kind_id("make.implicit")) != NONE;
+        case .CONDBR; return cax_direct_or_simplified(ca, op(i, 0), .CONSTANT_INT) != NONE || get_metadata(i, md_fixed("make.implicit")) != NONE;
         case .SELECT; return cax_visit_select(ca, i);
         case .SWITCH; return cax_visit_switch(ca, i);
         case .INDIRECTBR; ca.has_indirect_br = true; return false;

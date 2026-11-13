@@ -553,7 +553,7 @@ ic_unpack_load_to_aggregate :: (li: Value_Id) -> Value_Id {
     k := type_kind(t);
     if k != .STRUCT && k != .ARRAY return NONE;
     name := vname(li);
-    inv := md_kind_id("invariant.load");
+    inv := md_fixed("invariant.load");
     if k == .STRUCT {
         n := type_nsub(t);
         if n == 1 {
@@ -1066,7 +1066,7 @@ ic_merge_store_into_successor :: (si: Value_Id) -> bool {
     } else return false;
     for k: 0..1 {
         s := ifx k == 0 then si else other;
-        if get_metadata(s, md_kind_id("DIAssignID")) != NONE
+        if get_metadata(s, md_fixed("DIAssignID")) != NONE
             fatal("instcombine: mergeStoreIntoSuccessor with DIAssignID is not supported yet");
     }
     merged_val := op(other, 0);

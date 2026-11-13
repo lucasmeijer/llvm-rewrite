@@ -747,10 +747,10 @@ sc_get_value_from_metadata :: (i: Value_Id) -> Vle {
         if is_ptr_type(t) && call_is_return_non_null(i) return vle_get_not(const_null(t));
     }
     if is_int_or_int_vector(t) {
-        m := get_metadata(i, md_kind_id("range"));
+        m := get_metadata(i, md_fixed("range"));
         if m != NONE return vle_get_range(cr_from_range_md(m));
     }
-    if get_metadata(i, md_kind_id("nonnull")) != NONE return vle_get_not(const_null(t));
+    if get_metadata(i, md_fixed("nonnull")) != NONE return vle_get_not(const_null(t));
     return vle_get_overdefined();
 }
 
@@ -1045,7 +1045,7 @@ sc_try_to_replace_with_constant :: (s: *Sccp, v: Value_Id) -> bool {
 sc_propagate_implicit_ref_from_call :: (cb: Value_Id) {
     callee := call_called_function(cb);
     if callee == NONE return;
-    k := md_kind_id("implicit.ref");
+    k := md_fixed("implicit.ref");
     all: [..] Kind_Md; all.allocator = temp;
     get_all_metadata(callee, *all);
     caller := inst_fn(cb);

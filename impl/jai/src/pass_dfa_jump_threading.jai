@@ -118,7 +118,7 @@ dfa_unfold :: (d: *Dfa, sel: Dfa_Select, new_sis: *[..] Dfa_Select, new_bbs: *[.
         block_append_inst(start, bi);
         attach_records_before(bi, recs);
         set_metadata(bi, 0, loc);
-        set_metadata(bi, md_kind_id("prof"), get_metadata(si, md_kind_id("prof")));
+        set_metadata(bi, md_fixed("prof"), get_metadata(si, md_fixed("prof")));
         dtu_apply1(d.dtu, true, start, nb);
     } else {
         end_bb := inst_block(si_use);
@@ -132,7 +132,7 @@ dfa_unfold :: (d: *Dfa, sel: Dfa_Select, new_sis: *[..] Dfa_Select, new_bbs: *[.
         loc := get_metadata(si, 0);
         set_metadata(f_to_end, 0, loc);
         set_metadata(bi, 0, loc);
-        set_metadata(bi, md_kind_id("prof"), get_metadata(si, md_kind_id("prof")));
+        set_metadata(bi, md_fixed("prof"), get_metadata(si, md_fixed("prof")));
         ups := Dom_Update.[.{true, nbt, nbf}, .{true, nbt, end_bb}, .{true, nbf, end_bb}];
         dtu_apply(d.dtu, ups);
         tv := op(si, 1); fv := op(si, 2);

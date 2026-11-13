@@ -612,7 +612,7 @@ fc_operations :: (c: *Fn_Cmp, l: Value_Id, r: Value_Id) -> (s32, bool) {
                 y := fc_num(e1 - b1, e2 - b2); if y return y, true;
             }
             if ol == .CALL { x = fc_num((a.flags >> TAIL_SHIFT) & 3, (b.flags >> TAIL_SHIFT) & 3); if x return x, true; }
-            rk := md_kind_id("range");
+            rk := md_fixed("range");
             return fc_md_node(c, get_metadata(l, rk), get_metadata(r, rk)), true;
         case .SWITCH;
             nc := min(switch_num_cases(l), switch_num_cases(r));
@@ -797,9 +797,10 @@ mf_replace_direct_callers :: (old: Value_Id, new: Value_Id) {
 
 // Function::Create(Ty, Linkage, AddrSpace, "", M): appended to the module
 mf_new_function :: (like: Value_Id) -> Value_Id {
-    g := glob(like);
-    nf := new_function(g.value_type, "", g.addrspace);
-    gv_set_linkage(nf, g.linkage);
+    // values, not glob(like): new_function grows the global table (the row pointer would dangle)
+    vt := glob(like).value_type; as := glob(like).addrspace; lk := glob(like).linkage;
+    nf := new_function(vt, "", as);
+    gv_set_linkage(nf, lk);
     array_add(*ir.m_functions, nf);
     return nf;
 }
@@ -986,12 +987,13 @@ mf_write_thunk :: (f: Value_Id, g: Value_Id) {
 
 // MergeFunctions::writeAlias
 mf_write_alias :: (f: Value_Id, g: Value_Id) {
-    gg := glob(g);
-    ga := new_global(.ALIAS, gg.value_type, gg.addrspace, 1);
-    gv_set_linkage(ga, gg.linkage);
+    // values, not glob(g): new_global grows the global table (the row pointer would dangle)
+    g_vt := glob(g).value_type; g_as := glob(g).addrspace; g_lk := glob(g).linkage; g_align := glob(g).align;
+    ga := new_global(.ALIAS, g_vt, g_as, 1);
+    gv_set_linkage(ga, g_lk);
     set_op(ga, 0, f);
     array_add(*ir.m_aliases, ga);
-    mf_set_align(f, glob(f).align, gg.align);
+    mf_set_align(f, glob(f).align, g_align);
     gv_take_name(ga, g);
     gv_set_visibility(ga, glob(g).visibility);
     glob(ga).unnamed_addr = 2;

@@ -773,7 +773,7 @@ debug_variable_eq :: (a: Debug_Variable, b: Debug_Variable) -> bool {
 dbg_assign_has_linked_insts :: (r: u32) -> bool {
     id := dbgr(r).assign_id;
     if id == NONE return false;
-    k := md_kind_id("DIAssignID");
+    k := md_fixed("DIAssignID");
     o := dbgr(r).owner;
     if o == NONE return false;
     for b: fn_blocks(inst_fn(o)) for i: block_insts(b) if get_metadata(i, k) == id return true;

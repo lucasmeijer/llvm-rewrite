@@ -545,7 +545,7 @@ amc_insert_placeholders :: (c: *Cgp_Am_Combiner, map: *Table(Value_Id, Value_Id)
             s := create_select(op(cur, 0), dummy, dummy);
             insert_at_position(s, inst_block(cur), cur, false);
             set_name(s, vname(cur));
-            copy_metadata_kinds(s, cur, .[md_kind_id("prof"), md_kind_id("unpredictable")]);
+            copy_metadata_kinds(s, cur, .[md_fixed("prof"), md_fixed("unpredictable")]);
             table_set(map, cur, s);
             array_add(*st.all_selects, s);
             array_add(*worklist, op(cur, 1));

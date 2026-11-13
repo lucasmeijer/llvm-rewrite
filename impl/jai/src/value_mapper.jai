@@ -256,7 +256,7 @@ remap_instruction :: (vm: *Value_Map, i: Value_Id, flags: u32) {
         else if !(flags & RF_IGNORE_MISSING_LOCALS) fatal("ValueMapper: referenced value not in value map");
     }
     if is_call_base(i) {
-        ct := md_kind_id("callee_type");
+        ct := md_fixed("callee_type");
         if get_metadata(i, ct) != NONE && call_called_function(i) != NONE set_metadata(i, ct, NONE);
     }
     if is_phi_i {

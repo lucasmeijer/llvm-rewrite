@@ -262,7 +262,7 @@ called_value_propagation_run :: () -> Preserved {
     s.bb_wl.allocator = temp; s.value_wl.allocator = temp; s.indirect_calls.allocator = temp; s.indirect_set.allocator = temp;
     for f: ir.m_functions if !is_declaration(f) && !clv_can_track_arguments(f) clv_mark_block_executable(*s, fn_entry(f));
     clv_solve(*s);
-    callees := md_kind_id("callees");
+    callees := md_fixed("callees");
     for c: s.indirect_calls {
         found, lv := table_find(*s.states, clv_key(call_callee(c), CLV_REGISTER));   // getExistingValueState
         if !found || lv.state != CLV_FUNCTION_SET || lv.funcs.count == 0 continue;

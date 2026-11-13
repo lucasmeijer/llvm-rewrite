@@ -64,8 +64,8 @@ forceattrs_run :: () -> Preserved {
 
 memprof_remove_info_run :: () -> Preserved {
     changed := false;
-    memprof := md_kind_id("memprof");
-    callsite := md_kind_id("callsite");
+    memprof := md_fixed("memprof");
+    callsite := md_fixed("callsite");
     for f: ir.m_functions {
         if is_declaration(f) continue;
         for i: fn_insts(f) {

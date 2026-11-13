@@ -12,23 +12,35 @@
 
 ## Build modes and compile-time performance
 
-- **`JAI_BUILD=x64`** (default, what `check` builds): the x64 backend, ~3 s. Its binaries are 5-8x slower than the
-  optimized build (parse+print sqlite3.ll 1.2 s vs 0.15 s; `-passes=gvn` 4.9 s vs 0.6 s).
-- **`JAI_BUILD=optimized`** (`impl/jai/perf.env` sets it for `harness/run perf`): `build_optimized.jai`, a metaprogram
-  with the `-o` settings (LLVM backend, VERY_OPTIMIZED, no stack traces, **no bounds checks**). ~2 min under load (one
-  thread per tool; the three tools build in parallel). Splitting into LLVM modules (`enable_split_modules`) builds
-  5x faster but the binary is 2.4x slower (no cross-module inlining), and stack traces on cost another 2x, so neither
-  is used. The full ratchet passes with the optimized binary too (`check --no-build` after a `JAI_BUILD=optimized`
-  build), but keep `check` on x64: bounds checks turn silent memory bugs into loud failures.
-- Both are cached in `bin/.cache/<mode>-<hash of build.sh, build_optimized.jai, src/, compiler version>/` (4 newest
+- **One binary, three names.** `build.sh` compiles `src/opt.jai` once and copies it to `bin/llc` and
+  `bin/llvm-link`; `main` (opt.jai) picks the tool from the base name of argv[0]. (Until 2026-11 three programs were
+  compiled, in parallel; three optimized compiles at once got OOM-killed.)
+- Both modes go through the metaprogram `build.jai` (`jai build.jai - <x64|optimized> <src> <exe> <outdir>`), which
+  puts `impl/jai/modules` first in the import path: its `Default_Allocator` (glibc malloc, no trimming) replaces
+  Jai's stripped rpmalloc, which decommitted every empty span (madvise) and re-faulted it on the next allocation
+  (~1M page faults, 3 s of system time on -O2 SPASS.ll). See "Performance" for what that exposed.
+- **`JAI_BUILD=x64`** (default, what `check` builds): the x64 backend, the command line's defaults (bounds checks,
+  stack traces), ~3-5 s. Its binaries are 5-8x slower than the optimized build.
+- **`JAI_BUILD=optimized`** (`impl/jai/perf.env` sets it for `harness/run perf`): LLVM backend, **OPTIMIZED** (O2),
+  no stack traces, **no bounds checks**, no debug info (binary 12 MB instead of 54; callgrind still shows function
+  names, without file names). ~3.5 min, peak ~3.7 GB. VERY_OPTIMIZED (what this used to be, = the command line's `-o`)
+  executes ~3.5% fewer instructions but its compile peaks at ~12.7 GB (it idles at 3.6 GB and spikes to 12 GB several
+  times in LLVM's O3 pipeline); on the shared machine it was OOM-killed more often than not (cgroup `oom_kill`
+  counter), so 2026-11 switched to OPTIMIZED. `build.sh` still retries a compile killed with exit 137 (OOM killer, or
+  another agent's pkill) up to 3 times. Splitting into LLVM modules (`enable_split_modules`) builds 5x faster but the
+  binary is 2.4x slower (no cross-module inlining), and stack traces cost another 2x, so neither is used. The full
+  ratchet passes with the optimized binary too (`check --no-build` after a `JAI_BUILD=optimized` build), but keep
+  `check` on x64: bounds checks turn silent memory bugs into loud failures.
+- Both are cached in `bin/.cache/<mode>-<hash of build.sh, build.jai, modules/, src/, compiler version>/` (4 newest
   per mode); `bin/.stamp` names the installed one. Switching modes (perf, then check) is a copy. The optimized build
-  compiles a snapshot of `src/` so edits during the two minutes can't end up under the wrong hash; each build has its
-  own `.build` directory (a concurrent build's cleanup used to delete the other's object files).
-- Decision (2026-11): keep x64 for `check` (the harness rebuilds before every check; 2 min would dominate an edit/check
-  loop) and time the optimized build in `perf`. `perf` after a source change therefore costs ~2 min extra once.
-- Profiling: `valgrind --tool=callgrind` works on both builds (perf(1) has no hardware counters in this VM); profile
-  the optimized build (the x64 build's hotspots are mostly backend artefacts). Function names come out as
-  `file.jai:proc_<hash>`; with `--tree=caller` you get call counts per caller.
+  compiles a snapshot of `src/` so edits during the compile can't end up under the wrong hash.
+- Decision (2026-11): keep x64 for `check` and time the optimized build in `perf`.
+- Profiling: `-time-passes` (time_passes.jai: CPU seconds per pass name, nested passes excluded, analyses charged to
+  the pass that asked, plus the peak scratch memory of one run) gives the per-pass split to compare with LLVM's
+  `opt -time-passes`; then `valgrind --tool=callgrind` (perf(1) has no hardware counters in this VM) on the optimized
+  build, `--toggle-collect='<pass entry>*'` for one pass (e.g. `slp_run_impl*`, `instcombine_run*`), `--tree=caller`
+  for call counts per caller. `MALLOC_PERTURB_=165 ./harness/run check --impl jai` (glibc fills freed memory) finds
+  stale-pointer bugs (see "Performance").
 
 ## Layout of the code
 
@@ -36,8 +48,8 @@
   APFloat decimal printing/parsing, IEEE arithmetic/compare/conversions), `apint.jai`, `datalayout.jai`,
   `lexer.jai`, `parser.jai`, `printer.jai`, `intrinsics.jai` (intrinsic IDs, signature matching, mangling,
   declarations), `autoupgrade.jai` (AutoUpgrade.cpp + a small constant-folding IRBuilder), `constfold.jai`
-  (ConstantFold.cpp), `debuginfo.jai` (DI* nodes, debug records, StripDebugInfo). `llc.jai` and `llvm_link.jai`
-  `#load` opt.jai and only change the entry point.
+  (ConstantFold.cpp), `debuginfo.jai` (DI* nodes, debug records, StripDebugInfo). opt.jai's `main` also runs
+  `llc_main` / `llvm_link_main` when the binary is called as llc / llvm-link.
 - Generated tables (do not edit, rerun the script):
   - `gen_attrs.jai` (`gen/gen_attrs.py`: attribute kinds in TableGen order from Attributes.td),
   - `gen_cc.jai` (`gen/gen_cc.py`: calling conventions),
@@ -1059,7 +1071,7 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   results.tsv after every change; DEBUG_SLP also dumps the module after each vectorizeTree ("DBG IR after
   vectorizeTree") and the CheckForShuffledLoads costs ("DBG cfsl").
 - Compile time (x64 debug build): `-passes=slp-vectorizer` on tests/perf/compile costs ~2.5 s over parse+print for
-  SPASS.ll / sqlite3.ll (LLVM: ~1 s total); no `@perf` benchmark times SLP. `comes_before` is a linear walk.
+  SPASS.ll / sqlite3.ll (LLVM: ~1 s total); no `@perf` benchmark times SLP. (`comes_before` was a linear walk; it uses the lazily renumbered `Inst_Row.order` since jai_perf2.)
 - Sorting: LLVM `stable_sort`s go through `gnu_stable_sort` (scev.jai, libstdc++'s algorithm) when the comparator
   may not be a strict weak order (PHICompare, compareCmp); insertion sort elsewhere. Hash-ordered containers that
   decide results fail loudly when the order matters (collectUserStores with several store groups).
@@ -1138,6 +1150,61 @@ Still slow / known:
   inside SCEV is unsafe (wide APInts and ranges in caches may live in temp); fixing it means pooled operand lists.
 - Every `[..]` with `allocator = temp` costs an allocator call on its first add (~100 instructions with
   array_reserve); in SCEV that's 6-8% of the time.
+
+## Performance, round 2 (jai_perf2, 2026-11): -O2
+
+`./harness/run perf --impl jai --instr`, optimized build, before (origin/main 1a141d81, VERY_OPTIMIZED build) ->
+after (this round, OPTIMIZED build). Ratios to LLVM; geomean over all rows: cpu 0.99x -> 0.78x, instr 1.02x ->
+0.93x, rss 0.97x -> 0.78x.
+
+| `opt -O2` on | cpu | instr | rss |
+| --- | ---: | ---: | ---: |
+| compile/SPASS.ll | 2.17x -> 1.38x | 2.79x -> 2.22x | 5.52x -> 3.91x |
+| compile/lua.ll | 2.19x -> 1.54x | 2.63x -> 2.19x | 1.73x -> 1.84x |
+| scaling/calls/n8000 | 2.75x -> 1.69x | 2.86x -> 2.26x | 5.09x -> 5.13x |
+| scaling/diamonds/n8000 | 9.29x -> 2.46x | 3.11x -> 2.25x | 44.1x -> 8.84x |
+| scaling/allocas/n8000 | 4.13x -> 1.53x | 2.71x -> 2.38x | 4.94x -> 2.39x |
+| scaling/switch/n32000 | 3.29x -> 3.01x | 3.34x -> 3.83x | 2.01x -> 2.18x |
+| scaling/straightline/n64000 | 9.26x -> 1.25x | 5.30x -> 1.37x | 1.64x -> 1.62x |
+
+(The switch row was measured before the simplifycfg/GVN/PredicateInfo switch fixes below landed in the binary;
+`-time-passes` on switch/n32000 then had gvn 11x and simplifycfg 12x LLVM's time.) Not at LLVM's speed yet: most
+-O2 rows still execute 2-2.5x LLVM's instructions, spread over every pass (InstCombine ~3x, inline cost analysis
+~2.5x, GVN ~2x, LVI/ConstantRange in CVP ~3x); the CPU ratio is lower than the instruction ratio (LLVM's code has
+more cache misses).
+
+What changed (behaviour unchanged: full ratchet, also under `MALLOC_PERTURB_=165`; sweeps of default<O2>,
+default<O3>, instcombine, slp-vectorizer, inline, function-attrs,inline, mergefunc, simplifycfg,
+constraint-elimination, gvn show no new differs or failures; L2.pipeline-O2 unchanged at 240/241):
+- System time: `modules/Default_Allocator` (glibc malloc) instead of Jai's rpmalloc, which madvise'd every empty
+  span away; temp storage gets an 8 MB base block and keeps its overflow pages (temp_pages.jai). SPASS: 1.26M -> 93K
+  page faults, 3.2 s -> 0.3 s of system time.
+- `temp` is our own bump allocator (ptemp.jai; ir.jai imports Basic `using,except(temp, reset_temporary_storage)`):
+  the most recent allocation grows in place, blocks are kept across passes. ~2% of instructions.
+- Quadratic or per-call costs: Instruction::comesBefore with lazily renumbered `Inst_Row.order` (was a list walk;
+  ConstraintElimination's fact sort on diamonds), the DominatorTree node map indexed by block number with slots that
+  name their block (was by block row from the function's lowest row: after inlining that range spans the module, and
+  filling it was 5.6% of SPASS), SLP containers reused across the trees of one seed list (2.7 GB -> ~0.3 GB of temp
+  on diamonds/n8000; Processed sets as "list ends with this entry"), GVN's and PredicateInfo's switch edge counts and
+  SimplifyCFG's IncomingVals / duplicate-predecessor sets as hash maps, InstCombine's worklist map and deferred set as
+  stamped dense arrays.
+- String building on hot paths: arch_of in instCombineIntrinsic (tprint per call, 3.4% of lua), the inliner's
+  inline-remark message (built for every call site even without -inline-remark-attribute), SLP's libm-name check,
+  `tconcat` for value names; `md_fixed("kind")` resolves fixed metadata kinds at compile time.
+- Lookups: TTI per attribute set id, TLI per function and a name cache in front of the libfunc table, intrinsic ids
+  and base names in dense arrays, attribute sets carry a bitmask of their kinds (hasAttribute without a scan).
+- Use-after-free bugs that the allocator switch exposed (with rpmalloc freed memory stayed intact): InstCombine's
+  cached AAResults outlived the DominatorTree / AssumptionCache of an earlier run on the same function;
+  AddAlignmentAssumptions, MergeFunctions (new function / alias) and InstCombine's call_with_default_bundles held a
+  pointer into a table (`*Attr`, `glob()`, `inst()`) across an append that moved it. Rule: never hold `inst(x)`,
+  `glob(x)`, `block(x)` or attribute pointers across code that creates values, globals or attribute sets.
+
+Still slow / next:
+- InstCombine (2-4x LLVM's instructions): no single hotspot; known bits, pattern matching, attribute and TLI queries.
+- Inline cost analysis (calls/*): `simplify_binop` on every binary operator is ~4x LLVM's simplifyBinOp.
+- diamonds/n8000 RSS: SLP still allocates per-tree arrays (horizontal-reduction operand lists, vl copies,
+  scheduling dependencies) from temp, which is only reset between passes.
+- CVP/LVI: ConstantRange multiply and the LVI cache (~3x).
 
 ## CGSCC, FunctionAttrs, inliner (L2.function-attrs COMPLETE 118/118; L2.inline 456/466: roundtrip 233/233, opt 223/233)
 
@@ -1511,8 +1578,7 @@ Still slow / known:
 ## llvm-link, LTO pipelines, MergeFunctions (L2.link COMPLETE 574/574, L2.lto COMPLETE 144/144, L2.lto-passes 159/160, L2.phase-ordering 285/288)
 
 - Files: `linker.jai` (llvm-link: llvm-link.cpp's main/linkFiles, ModuleLinker, IRMover/IRLinker, TypeMapTy,
-  IdentifiedStructTypeSet and the IRMover half of ValueMapper), `llvm_link.jai` (entry point; opt's program like
-  llc.jai), `pass_builder_pipelines.jai` (the four LTO aliases at O0-O3 next to `default<O#>`; the phase is the
+  IdentifiedStructTypeSet and the IRMover half of ValueMapper), `llvm_link_main` (opt's program called as llvm-link), `pass_builder_pipelines.jai` (the four LTO aliases at O0-O3 next to `default<O#>`; the phase is the
   global `pb_phase`), `pass_lto_misc.jai` (the LTO pipelines' module passes, pgo-force-function-attrs with
   `-pgo-kind` / `-pgo-cold-func-opt`), `pass_merge_functions.jai` (MergeFunctions, FunctionComparator,
   StructuralHash, xxh3_64bits), `pass_misc_module.jai` (`-force-attribute` / `-force-remove-attribute`).
@@ -1547,8 +1613,7 @@ Still slow / known:
 
 ## llc's IR pipeline (L1.isel-ir-O0 COMPLETE; L1.codegen-ir COMPLETE)
 
-- `bin/llc` is the opt program with another entry (`llc.jai` sets `LLC_TOOL` and loads `opt.jai`; `main` calls
-  `llc_main`). `codegen_pipeline.jai` builds TargetPassConfig's IR pass list (`Cg_Pass`, `cg_build_pipeline`) and
+- `bin/llc` is the opt binary under another name (`main` calls `llc_main` when argv[0] is llc). `codegen_pipeline.jai` builds TargetPassConfig's IR pass list (`Cg_Pass`, `cg_build_pipeline`) and
   runs it with the legacy FPM ordering (`cg_run_pipeline`); llc's and CodeGenPrepare's cl::opts are parsed by
   `cg_parse_cl_opt` (also reachable from opt). Every codegen IR pass also has its opt `-passes=` name
   (codegenprepare, consthoist, partially-inline-libcalls, expand-reductions, unreachableblockelim,

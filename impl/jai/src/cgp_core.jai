@@ -667,9 +667,9 @@ cgp_eliminate_mostly_empty_block :: (bb: Value_Id) -> bool {
             }
         }
     }
-    loop_md := get_metadata(bi, md_kind_id("llvm.loop"));
+    loop_md := get_metadata(bi, md_fixed("llvm.loop"));
     if loop_md != NONE {
-        for bb_preds set_metadata(block_terminator(it), md_kind_id("llvm.loop"), loop_md);
+        for bb_preds set_metadata(block_terminator(it), md_fixed("llvm.loop"), loop_md);
     }
     updates: [..] Dom_Update; updates.allocator = temp;
     dest_preds: [..] Value_Id; dest_preds.allocator = temp;
@@ -1524,7 +1524,7 @@ cgp_optimize_inst :: (i: Value_Id, modified: *Cgp_Modify_Dt) -> bool {
         if cgp_fold_urem_of_loop_increment(i) return true;
     }
     if o == .LOAD {
-        set_metadata(i, md_kind_id("invariant.group"), NONE);
+        set_metadata(i, md_fixed("invariant.group"), NONE);
         m := cgp_optimize_load_ext(i);
         as := ptr_addrspace(vtype(op(i, 0)));
         m |= cgp_optimize_memory_inst(i, op(i, 0), vtype(i), as);
@@ -1532,7 +1532,7 @@ cgp_optimize_inst :: (i: Value_Id, modified: *Cgp_Modify_Dt) -> bool {
     }
     if o == .STORE {
         if cgp_split_merged_val_store(i) return true;
-        set_metadata(i, md_kind_id("invariant.group"), NONE);
+        set_metadata(i, md_fixed("invariant.group"), NONE);
         as := ptr_addrspace(vtype(op(i, 1)));
         return cgp_optimize_memory_inst(i, op(i, 1), vtype(op(i, 0)), as);
     }
@@ -1869,7 +1869,7 @@ cgp_dbgr_insert_at_head :: (r: u32, i: Value_Id) {
 
 // GlobalObject::setSectionPrefix(Prefix): !section_prefix !{!"section_prefix", !"<prefix>"}
 cgp_set_section_prefix :: (f: Value_Id, prefix: string) {
-    k := md_kind_id("section_prefix");
+    k := md_fixed("section_prefix");
     old := get_metadata(f, k);
     if old != NONE && ir.mds[old].nops >= 2 {
         p := md_op(old, 1);

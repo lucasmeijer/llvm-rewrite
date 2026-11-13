@@ -140,6 +140,7 @@ Inst_Row :: struct {
     sync:    u32;      // syncscope string id (0 = system)
     records: u32;      // first debug record attached before this instruction: 1 + index into ir.dbg_records, 0 = none
     addrspace: u32;    // alloca addrspace
+    order:   u32;      // Instruction::Order: position in the block, valid while the block's order_valid is set
 }
 
 Block_Row :: struct {
@@ -149,6 +150,7 @@ Block_Row :: struct {
     prev:   Value_Id;
     next:   Value_Id;
     number: u32 = 0xFFFF_FFFF;   // BasicBlock::Number, assigned once (domtree.jai block_number)
+    order_valid: bool;           // BasicBlock::isInstrOrderValid (analysis_base.jai comes_before)
 }
 
 Linkage :: enum u8 {
@@ -239,7 +241,9 @@ Attr :: struct {
 Attr_Set_Row :: struct {
     start: u32;     // in ir.attr_pool
     count: u32;
+    kinds: [2] u64; // bit k: an attribute of kind k (STRING_ATTR: any string attribute) is in the set (AvailableAttrs)
 }
+#run assert(cast(s64) Attr_Kind.STRING_ATTR < 128);
 
 Attr_List_Row :: struct {
     fn:  u32;
@@ -762,7 +766,14 @@ block_append_inst :: (b: Value_Id, i: Value_Id) {
     ir_.parent = b;
     ir_.prev = br.last;
     ir_.next = NONE;
-    if br.last != NONE inst(br.last).next = i; else br.first = i;
+    if br.last != NONE {
+        // appending keeps a valid order valid (the new instruction is last)
+        ir_.order = inst(br.last).order + 1;
+        inst(br.last).next = i;
+    } else {
+        ir_.order = 0;
+        br.first = i;
+    }
     br.last = i;
 }
 
@@ -775,6 +786,7 @@ inst_insert_before :: (i: Value_Id, pos: Value_Id) {
     r.prev = p; r.next = pos;
     inst(pos).prev = i;
     if p != NONE inst(p).next = i; else br.first = i;
+    br.order_valid = false;   // BasicBlock::invalidateOrders (removal keeps the order valid: it stays monotonic)
 }
 
 inst_unlink :: (i: Value_Id) {
@@ -1368,7 +1380,7 @@ attr_set_get :: (attrs_in: [] Attr) -> u32 {
     for * attrs attr_key(k, it);
     found, id := table_find(*ir.attr_set_map, key_view(k));
     if found return id;
-    if ir.attr_sets.count == 0 array_add(*ir.attr_sets, .{0, 0});
+    if ir.attr_sets.count == 0 array_add(*ir.attr_sets, .{start = 0, count = 0});
     row: Attr_Set_Row; row.start = cast(u32) ir.attr_pool.count; row.count = cast(u32) attrs.count;
     for attrs {
         a := it;
@@ -1376,6 +1388,7 @@ attr_set_get :: (attrs_in: [] Attr) -> u32 {
         if a.lo.count { lo := NewArray(a.lo.count, u64); for a.lo lo[it_index] = it; a.lo = lo; }
         if a.hi.count { hi := NewArray(a.hi.count, u64); for a.hi hi[it_index] = it; a.hi = hi; }
         array_add(*ir.attr_pool, a);
+        { k := cast(u32) a.kind; row.kinds[k >> 6] |= (cast(u64) 1) << (k & 63); }
     }
     id = cast(u32) ir.attr_sets.count;
     array_add(*ir.attr_sets, row);
@@ -1393,10 +1406,12 @@ attr_set_items :: inline (s: u32) -> [] Attr {
 }
 
 attr_set_has :: inline (s: u32, kind: Attr_Kind) -> bool {
-    for attr_set_items(s) if it.kind == kind return true;
-    return false;
+    if s == 0 return false;
+    k := cast(u32) kind;
+    return (ir.attr_sets[s].kinds[k >> 6] & ((cast(u64) 1) << (k & 63))) != 0;
 }
 attr_set_find :: inline (s: u32, kind: Attr_Kind) -> *Attr {
+    if !attr_set_has(s, kind) return null;
     items := attr_set_items(s);
     for * items if it.kind == kind return it;
     return null;
@@ -1481,7 +1496,7 @@ ir_init :: () {
     ir.t_i32 = type_int(32);
     ir.t_i64 = type_int(64);
     ir.t_ptr = type_ptr(0);
-    array_add(*ir.attr_sets, .{0, 0});
+    array_add(*ir.attr_sets, .{start = 0, count = 0});
     e: Attr_List_Row; array_add(*ir.attr_lists, e);
     array_add(*ir.sync_scopes, "");          // system
     array_add(*ir.sync_scopes, "singlethread");
@@ -1508,6 +1523,16 @@ FIXED_MD_KINDS :: string.[
     "block.uniformity.profile", "callgraph",
 ];
 
+// md_kind_id of a fixed kind, resolved at compile time (md_kind_id(literal) is a cache lookup per call)
+md_fixed :: ($name: string) -> u32 #expand {
+    #insert #run tprint("return %;", fixed_md_kind_index(name));
+}
+fixed_md_kind_index :: (name: string) -> s64 {
+    for FIXED_MD_KINDS if it == name return it_index;
+    assert(false, "md_fixed: '%' is not a fixed metadata kind", name);
+    return -1;
+}
+
 // ---------------------------------------------------------------- small helpers
 
 append_u64 :: (sb: *String_Builder, x: u64) {
@@ -1530,6 +1555,10 @@ fatal :: (fmt: string, args: .. Any) {
 
 tool_name := "opt";
 
-#import "Basic";
+// Basic without `temp` and reset_temporary_storage: ptemp.jai redefines both (a faster scratch allocator under the
+// same name; Basic's own procedures such as tprint keep using Basic's temporary storage). The other files of the
+// program rely on this import; they must not `#import "Basic"` themselves (that would bring Basic's `temp` back).
+Basic :: #import "Basic";
+using,except(temp, reset_temporary_storage) Basic;
 #import "String";
 #import "Hash_Table";

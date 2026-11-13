@@ -13,47 +13,82 @@
 
 Ic_Worklist :: struct {
     list: [..] Value_Id;                 // NONE = removed slot
-    map: Table(Value_Id, s64);
     deferred: [..] Value_Id;             // SmallSetVector
-    deferred_set: Table(Value_Id, bool);
 }
+
+// The worklist's map (instruction -> index in `list`) and the deferred set are dense arrays over value ids with a
+// generation stamp (a Table here was ~5% of InstCombine): an entry is present iff its stamp is the current
+// generation; wl_sets_clear starts a new generation. They live outside `ic` (reset per iteration) and are reused.
+Wl_Sets :: struct {
+    pos: [..] s64;
+    stamp: [..] u32;       // stamp of the map entry
+    dstamp: [..] u32;      // stamp of the deferred-set entry
+    gen: u32 = 1;
+}
+wl_sets: Wl_Sets;
+wl_sets_clear :: () {
+    wl_sets.gen += 1;
+    if wl_sets.gen == 0 {
+        memset(wl_sets.stamp.data, 0, wl_sets.stamp.count * size_of(u32));
+        memset(wl_sets.dstamp.data, 0, wl_sets.dstamp.count * size_of(u32));
+        wl_sets.gen = 1;
+    }
+}
+wl_sets_ensure :: inline (v: Value_Id) {
+    if cast(s64) v < wl_sets.stamp.count return;
+    wl_sets_grow(v);
+}
+wl_sets_grow :: (v: Value_Id) {
+    n := max(cast(s64) v + 1, 2 * wl_sets.stamp.count, 1024);
+    old := wl_sets.stamp.count;
+    wl_sets.pos.allocator = context.default_allocator; wl_sets.stamp.allocator = context.default_allocator; wl_sets.dstamp.allocator = context.default_allocator;
+    array_resize(*wl_sets.pos, n, initialize = false);
+    array_resize(*wl_sets.stamp, n, initialize = false);
+    array_resize(*wl_sets.dstamp, n, initialize = false);
+    memset(wl_sets.stamp.data + old, 0, (n - old) * size_of(u32));
+    memset(wl_sets.dstamp.data + old, 0, (n - old) * size_of(u32));
+}
+wl_map_has :: inline (i: Value_Id) -> bool { return cast(s64) i < wl_sets.stamp.count && wl_sets.stamp[i] == wl_sets.gen; }
+wl_deferred_has :: inline (i: Value_Id) -> bool { return cast(s64) i < wl_sets.dstamp.count && wl_sets.dstamp[i] == wl_sets.gen; }
 
 wl_is_empty :: () -> bool { return ic.wl.list.count == 0 && ic.wl.deferred.count == 0; }
 // add: deferred, visited in the order added
 wl_add :: (i: Value_Id) {
-    if table_contains(*ic.wl.deferred_set, i) return;
-    table_set(*ic.wl.deferred_set, i, true);
+    if wl_deferred_has(i) return;
+    wl_sets_ensure(i);
+    wl_sets.dstamp[i] = wl_sets.gen;
     array_add(*ic.wl.deferred, i);
 }
 wl_add_value :: (v: Value_Id) { if is_inst(v) wl_add(v); }
 // push: visited last-in first-out
 wl_push :: (i: Value_Id) {
-    if table_contains(*ic.wl.map, i) return;
-    table_set(*ic.wl.map, i, ic.wl.list.count);
+    if wl_map_has(i) return;
+    wl_sets_ensure(i);
+    wl_sets.stamp[i] = wl_sets.gen;
+    wl_sets.pos[i] = ic.wl.list.count;
     array_add(*ic.wl.list, i);
 }
 wl_push_value :: (v: Value_Id) { if is_inst(v) wl_push(v); }
 wl_pop_deferred :: () -> Value_Id {
     if ic.wl.deferred.count == 0 return NONE;
     i := pop(*ic.wl.deferred);
-    table_remove(*ic.wl.deferred_set, i);
+    wl_sets.dstamp[i] = 0;
     return i;
 }
 wl_remove :: (i: Value_Id) {
-    found, idx := table_find(*ic.wl.map, i);
-    if found {
-        ic.wl.list[idx] = NONE;
-        table_remove(*ic.wl.map, i);
+    if wl_map_has(i) {
+        ic.wl.list[wl_sets.pos[i]] = NONE;
+        wl_sets.stamp[i] = 0;
     }
-    if table_contains(*ic.wl.deferred_set, i) {
-        table_remove(*ic.wl.deferred_set, i);
+    if wl_deferred_has(i) {
+        wl_sets.dstamp[i] = 0;
         for ic.wl.deferred if it == i { array_ordered_remove_by_index(*ic.wl.deferred, it_index); break; }
     }
 }
 wl_remove_one :: () -> Value_Id {
     if ic.wl.list.count == 0 return NONE;
     i := pop(*ic.wl.list);
-    if i != NONE table_remove(*ic.wl.map, i);
+    if i != NONE wl_sets.stamp[i] = 0;
     return i;
 }
 // pushUsersToWorkList: users in use-list order
@@ -194,7 +229,7 @@ replace_uses_of_with :: (user: Value_Id, from: Value_Id, to: Value_Id) {
 drop_unknown_non_debug_metadata :: (i: Value_Id, keep: [] u32) {
     all: [..] Kind_Md; all.allocator = temp;
     get_all_metadata(i, *all);
-    assign := md_kind_id("DIAssignID");   // a DIAssignID attachment is debug metadata, never dropped
+    assign := md_fixed("DIAssignID");   // a DIAssignID attachment is debug metadata, never dropped
     for all {
         if it.kind == 0 || it.kind == assign continue;
         kept := false;
@@ -205,9 +240,9 @@ drop_unknown_non_debug_metadata :: (i: Value_Id, keep: [] u32) {
 // Instruction::dropUBImplyingAttrsAndMetadata
 drop_ub_implying_attrs_and_metadata :: (i: Value_Id) {
     keep: [8] u32;
-    keep[0] = md_kind_id("annotation"); keep[1] = md_kind_id("range"); keep[2] = md_kind_id("nonnull");
-    keep[3] = md_kind_id("align"); keep[4] = md_kind_id("fpmath"); keep[5] = md_kind_id("prof");
-    keep[6] = md_kind_id("mem.cache_hint"); keep[7] = md_kind_id("nofpclass");
+    keep[0] = md_fixed("annotation"); keep[1] = md_fixed("range"); keep[2] = md_fixed("nonnull");
+    keep[3] = md_fixed("align"); keep[4] = md_fixed("fpmath"); keep[5] = md_fixed("prof");
+    keep[6] = md_fixed("mem.cache_hint"); keep[7] = md_fixed("nofpclass");
     drop_unknown_non_debug_metadata(i, keep);
     if is_call_base(i) && inst(i).attrs != 0 {
         // AttributeFuncs::getUBImplyingAttributes: noundef, dereferenceable, dereferenceable_or_null
@@ -423,7 +458,7 @@ icb_insert :: (i_in: Value_Id, name: string = "") -> Value_Id {
     wl_add(i);
     if is_intrinsic_call(i, IID_ASSUME) ic_register_assumption(i);
     if ic.annotation_src != NONE {
-        k := md_kind_id("annotation");
+        k := md_fixed("annotation");
         a := get_metadata(ic.annotation_src, k);
         if a != NONE set_metadata(i, k, a);   // I->copyMetadata(*AnnotationMetadataSource, MD_annotation)
     }
@@ -437,6 +472,7 @@ call_with_default_bundles :: (i: Value_Id, src: Value_Id) -> Value_Id {
     sa := call_arg_count(src);
     nbo := nops(src) - 1 - sa;
     c := new_inst(.CALL, vtype(i), na + nbo + 1);
+    sr = inst(src);   // new_inst may have moved the instruction table
     keep := inst(i).*;
     r := inst(c);
     r.* = keep;
@@ -589,14 +625,14 @@ create_select :: (c: Value_Id, t: Value_Id, f: Value_Id) -> Value_Id {
     return i;
 }
 copy_prof_unpredictable :: (dst: Value_Id, src: Value_Id) {
-    prof := get_metadata(src, md_kind_id("prof"));
-    unpred := get_metadata(src, md_kind_id("unpredictable"));
-    if prof != NONE set_metadata(dst, md_kind_id("prof"), prof);
-    if unpred != NONE set_metadata(dst, md_kind_id("unpredictable"), unpred);
+    prof := get_metadata(src, md_fixed("prof"));
+    unpred := get_metadata(src, md_fixed("unpredictable"));
+    if prof != NONE set_metadata(dst, md_fixed("prof"), prof);
+    if unpred != NONE set_metadata(dst, md_fixed("unpredictable"), unpred);
 }
 // Function::getEntryCount: !prof !{!"function_entry_count" | !"synthetic_function_entry_count", i64 N}
 ic_fn_entry_count :: (f: Value_Id) -> (bool, u64) {
-    m := get_metadata(f, md_kind_id("prof"));
+    m := get_metadata(f, md_fixed("prof"));
     if m == NONE || ir.mds[m].kind != .TUPLE || ir.mds[m].nops < 2 return false, 0;
     tag := md_op(m, 0);
     if tag == NONE || ir.mds[tag].kind != .STRING return false, 0;
@@ -614,7 +650,7 @@ ic_set_unknown_profile_if_profiled :: (i: Value_Id) {
     if !ok || ec == 0 return;
     ops: [2] Md_Id;
     ops[0] = md_string("unknown"); ops[1] = md_string("instcombine");
-    set_metadata(i, md_kind_id("prof"), md_tuple(ops, false));
+    set_metadata(i, md_fixed("prof"), md_tuple(ops, false));
 }
 // createSelectInstWithUnknownProfile (an unlinked select)
 ic_create_select_unknown_profile :: (c: Value_Id, t: Value_Id, f: Value_Id) -> Value_Id {
@@ -751,7 +787,7 @@ ic_try_to_sink :: (i: Value_Id, dest: Value_Id) -> bool {
     if o == .CALL && call_has_fn_attr(i, .Convergent) return false;
     if o == .CALL && fn_has_fn_attr(ic.f, .Convergent) && false return false;
     if may_write_to_memory(i) && !sole_write_to_dead_local(i) return false;
-    if may_read_from_memory(i) && get_metadata(i, md_kind_id("invariant.load")) == NONE {
+    if may_read_from_memory(i) && get_metadata(i, md_fixed("invariant.load")) == NONE {
         if block_unique_predecessor(dest) != src_block return false;
         s := inst(i).next;
         while s != NONE {
@@ -972,7 +1008,7 @@ ic_run_worklist :: () -> bool {
         if result == NONE continue;
         if result != i {
             if get_metadata(result, 0) == NONE { d := get_metadata(i, 0); if d != NONE set_metadata(result, 0, d); }
-            ann := md_kind_id("annotation");
+            ann := md_fixed("annotation");
             am := get_metadata(i, ann);
             if am != NONE set_metadata(result, ann, am);   // Result->copyMetadata(*I, MD_annotation)
             rauw_with_metadata(i, result);
@@ -997,7 +1033,7 @@ ic_run_worklist :: () -> bool {
         }
         ic.made_ir_change = true;
     }
-    table_reset(*ic.wl.map);
+    wl_sets_clear();
     return ic.made_ir_change;
 }
 
@@ -1049,8 +1085,8 @@ ast_analyse :: (t: *Alias_Scope_Tracker, i: Value_Id) {
             if x != NONE && ir.mds[x].kind != .STRING && ir.mds[x].kind != .VALUE table_set(c, x, true);
         }
     }
-    track(get_metadata(i, md_kind_id("alias.scope")), *t.used_alias);
-    track(get_metadata(i, md_kind_id("noalias")), *t.used_noalias);
+    track(get_metadata(i, md_fixed("alias.scope")), *t.used_alias);
+    track(get_metadata(i, md_fixed("noalias")), *t.used_noalias);
 }
 ast_is_noalias_scope_decl_dead :: (t: *Alias_Scope_Tracker, i: Value_Id) -> bool {
     if !is_intrinsic_call(i, IID_EXPERIMENTAL_NOALIAS_SCOPE_DECL) return false;
@@ -1201,7 +1237,8 @@ ic_combine_function :: (f: Value_Id, icopts: Ic_Options) -> bool {
         // a fresh InstCombinerImpl per iteration
         ic = .{};
         ic.f = f; ic.dt = dt; ic.ac = ac;
-        ic.wl.list.allocator = temp; ic.wl.map.allocator = temp; ic.wl.deferred.allocator = temp; ic.wl.deferred_set.allocator = temp;
+        ic.wl.list.allocator = temp; ic.wl.deferred.allocator = temp;
+        wl_sets_clear();
         ic.dc.affected.allocator = temp;
         ic.dead_edges.allocator = temp; ic.back_edges.allocator = temp; ic.pred_order.allocator = temp;
         ic.rpot = rpo;
@@ -1220,6 +1257,10 @@ ic_combine_function :: (f: Value_Id, icopts: Ic_Options) -> bool {
 
 // InstCombinePass::run with the parameters of `instcombine<...>` (PassBuilder parseInstCombineOptions)
 instcombine_run :: (f: Value_Id, name: string) -> Preserved {
+    // AM.getResult<AAManager>(F) once per pass run: a result cached by an earlier run on the same function points
+    // at a DominatorTree / AssumptionCache that later passes may have freed (a use-after-free that went unnoticed
+    // while the allocator left freed memory intact)
+    ic_aar_state.f = NONE;
     icopts: Ic_Options;
     if name != "instcombine" {
         if !begins_with(name, "instcombine<") || name[name.count - 1] != #char ">" fatal("invalid pass name '%'", name);

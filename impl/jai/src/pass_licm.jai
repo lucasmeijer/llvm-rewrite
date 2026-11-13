@@ -461,8 +461,8 @@ cfh_get_or_create_hoisted_block :: (c: *Licm, bb: Value_Id) -> Value_Id {
     nbi := create_cond_br(op(bi, 0), htd, hfd);
     insert_at_position(nbi, hoist_target, old_t, false);
     erase_inst_with_metadata(old_t);
-    prof := get_metadata(bi, md_kind_id("prof"));
-    if prof != NONE set_metadata(nbi, md_kind_id("prof"), prof);
+    prof := get_metadata(bi, md_fixed("prof"));
+    if prof != NONE set_metadata(nbi, md_fixed("prof"), prof);
     for c.cfh_dest if it.a == bb return it.b;
     return NONE;
 }
@@ -529,12 +529,12 @@ licm_can_hoist_load :: (c: *Licm, ld: Value_Id, target_executes_once_per_loop: b
     if !is_unordered(ld) return false;
     q := aa_query_new(*c.aar);
     if (aa_mod_ref_mask(q, mloc_before_or_after(op(ld, 0))) & MR_MOD) == 0 return true;
-    if get_metadata(ld, md_kind_id("invariant.load")) != NONE return true;
+    if get_metadata(ld, md_fixed("invariant.load")) != NONE return true;
     if inst(ld).ord1 != 0 && !target_executes_once_per_loop return false;   // isAtomic
     if licm_is_load_invariant_in_loop(c, ld) return true;
     mu := mssa_access_of(c.mssa, ld);
     assert(mu >= 0 && ma_is_use(c.mssa, mu));
-    inv_group := get_metadata(ld, md_kind_id("invariant.group")) != NONE;
+    inv_group := get_metadata(ld, md_fixed("invariant.group")) != NONE;
     return !licm_pointer_invalidated_by_loop(c, mu, ld, inv_group);
 }
 
@@ -624,7 +624,7 @@ licm_is_not_used_or_foldable_in_loop :: (c: *Licm, i: Value_Id, foldable_in_loop
 
 // Instruction::mergeDIAssignID(SourceInstructions)
 licm_merge_di_assign_id :: (k: Value_Id, sources: [] Value_Id) {
-    kind := md_kind_id("DIAssignID");
+    kind := md_fixed("DIAssignID");
     ids: [..] Md_Id; ids.allocator = temp;
     for sources { a := get_metadata(it, kind); if a != NONE array_add(*ids, a); }
     b := get_metadata(k, kind); if b != NONE array_add(*ids, b);
@@ -855,7 +855,7 @@ licm_maybe_insert_lcssa_phi :: (p: *Licm_Promoter, v: Value_Id, bb: Value_Id) ->
 // insertStoresInLoopExitBlocks
 licm_insert_stores_in_loop_exit_blocks :: (p: *Licm_Promoter) {
     new_id: Md_Id = NONE;
-    kind := md_kind_id("DIAssignID");
+    kind := md_fixed("DIAssignID");
     for exit, idx: p.exits.* {
         live_in := ssa_value_in_middle(p.ssa, exit);
         live_in = licm_maybe_insert_lcssa_phi(p, live_in, exit);

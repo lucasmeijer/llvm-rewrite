@@ -1489,7 +1489,7 @@ has_poison_generating_annotations :: (v: Value_Id) -> bool {
         if n > 0 for a: 0..n-1 if has(attr_list_param(inst(v).attrs, a)) return true;
     }
     // Metadata::PoisonGeneratingIDs
-    return inst_md(v, "range") != NONE || inst_md(v, "nonnull") != NONE || inst_md(v, "align") != NONE || inst_md(v, "nofpclass") != NONE;
+    return get_metadata(v, md_fixed("range")) != NONE || get_metadata(v, md_fixed("nonnull")) != NONE || get_metadata(v, md_fixed("align")) != NONE || get_metadata(v, md_fixed("nofpclass")) != NONE;
 }
 // Operator::hasPoisonGeneratingFlags
 has_poison_generating_flags :: (v: Value_Id) -> bool {
@@ -1988,7 +1988,7 @@ is_guaranteed_not_to_be_undef_or_poison_kind :: (v: Value_Id, ac: *Assumption_Ca
         }
     }
     if is_inst(v) && inst_op(v) == .LOAD {
-        if inst_md(v, "noundef") != NONE || inst_md(v, "dereferenceable") != NONE || inst_md(v, "dereferenceable_or_null") != NONE return true;
+        if get_metadata(v, md_fixed("noundef")) != NONE || get_metadata(v, md_fixed("dereferenceable")) != NONE || get_metadata(v, md_fixed("dereferenceable_or_null")) != NONE return true;
     }
     if program_undefined_if_undef_or_poison(v, !includes_undef(kind)) return true;
     if cxt == NONE || inst(cxt).parent == NONE || !dt return false;

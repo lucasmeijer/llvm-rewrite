@@ -156,7 +156,7 @@ cgp_optimize_select_inst :: (si: Value_Id) -> bool {
     for k: 1..asi.count - 1 cgp_fixup_dbg_variable_records_on_inst(asi[k]);
     cond := op(si, 0);
     vector_cond := !(type_kind(vtype(cond)) == .INT && type_bits(vtype(cond)) == 1);
-    if vector_cond || get_metadata(si, md_kind_id("unpredictable")) != NONE return false;
+    if vector_cond || get_metadata(si, md_fixed("unpredictable")) != NONE return false;
     // TLI->isSelectSupported(Kind): true (base)
     if !cgp_is_forming_branch_from_select_profitable(si) || cgp_should_optimize_for_size(inst_block(si)) return false;
 
@@ -198,7 +198,7 @@ cgp_optimize_select_inst :: (si: Value_Id) -> bool {
     }
     bfi_set_block_freq(cgp.bfi, end_block, bfi_get_block_freq(cgp.bfi, start));
     // copyMetadata(*SI, {prof, unpredictable, make.implicit, dbg}): the debug location is copied even when empty
-    copy_metadata_kinds(block_terminator(start), si, .[md_kind_id("prof"), md_kind_id("unpredictable"), md_kind_id("make.implicit")]);
+    copy_metadata_kinds(block_terminator(start), si, .[md_fixed("prof"), md_fixed("unpredictable"), md_fixed("make.implicit")]);
     set_metadata(block_terminator(start), 0, get_metadata(si, 0));
     for true_instrs inst_move_before_dbg(it, true_branch);
     for false_instrs inst_move_before_dbg(it, false_branch);

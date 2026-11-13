@@ -1212,6 +1212,7 @@ run_module_pm :: (n: s32) {
     while c >= 0 {
         node := *pipeline.nodes[c];
         knowledge_retention_check(node.kind, node.name);
+        if time_passes tp_begin(node.name);
         if node.kind == {
             case .MODULE_PM; run_module_pm(c);
             case .FUNCTION_ADAPTOR; run_function_adaptor(c);
@@ -1282,6 +1283,7 @@ run_module_pm :: (n: s32) {
                 if should_run_pass(node, NONE) && pre_isel_intrinsic_lowering_run() mam_invalidate(PRESERVE_NONE);
             case; fatal("internal: '%' is not a module pass", node.name);
         }
+        if time_passes tp_end();
         // -verify-each (VerifyInstrumentation): after every module pass; pass managers / adaptors and the
         // VerifierPass itself are skipped (the passes inside them are verified where they run)
         if opt_verify_each && node.kind != .MODULE_PM && node.kind != .FUNCTION_ADAPTOR && node.kind != .CGSCC_ADAPTOR &&
@@ -1332,6 +1334,14 @@ run_function_adaptor :: (n: s32) {
 stderr_builder: String_Builder;
 
 run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
+    if !time_passes return run_function_pass_inner(node, f);
+    tp_begin(node.name);
+    pa := run_function_pass_inner(node, f);
+    tp_end();
+    return pa;
+}
+
+run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
     knowledge_retention_check(node.kind, node.name);
     if node.kind == {
         case .NO_OP_FUNCTION; return PRESERVE_ALL;
@@ -1544,6 +1554,7 @@ opt_main :: () {
         }
         if a == "-jai-print-pipeline" { jai_print_pipeline = true; continue; }
         if a == "-jai-trace-create-scev" { scev_trace_create = true; continue; }
+        if a == "-time-passes" || a == "--time-passes" { time_passes = true; continue; }   // time_passes.jai
         if begins_with(a, "-") && a != "-" {
             if parse_cl_opt(a) continue;
             fatal("unsupported option '%'", a);
@@ -1589,6 +1600,7 @@ opt_main :: () {
     if !opt_disable_verify run_verifier_pass_module();
     if dbgify_opts.enable check_debugify_metadata("", "CheckModuleDebugify");
     defer aa_eval_print_reports();
+    tp_report();
     if disable_output return;
     text := print_module_fresh();
     if output == "-" write_string(text);

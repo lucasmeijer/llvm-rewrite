@@ -125,7 +125,7 @@ x86_classify_local_reference :: (st: *X86_Lowering, gv: Value_Id) -> s64 {
 }
 // X86Subtarget::classifyGlobalReference (small code model)
 x86_classify_global_reference :: (st: *X86_Lowering, gv: Value_Id) -> s64 {
-    abs := get_metadata(gv, md_kind_id("absolute_symbol"));
+    abs := get_metadata(gv, md_fixed("absolute_symbol"));
     if abs != NONE {
         // getAbsoluteSymbolRange: [lo, hi) from the node; only a full set means "no range"
         lo := md_const_int_op(abs, 0); hi := md_const_int_op(abs, 1);

@@ -1066,7 +1066,7 @@ upgrade_tbaa_node :: (m: Md_Id) -> Md_Id {
 }
 
 upgrade_tbaa_tags :: () {
-    tbaa := md_kind_id("tbaa");
+    tbaa := md_fixed("tbaa");
     for f: ir.m_functions {
         b := glob(f).first_block;
         while b != NONE {

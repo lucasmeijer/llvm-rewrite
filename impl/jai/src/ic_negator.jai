@@ -35,7 +35,7 @@ neg_visit_impl :: (n: *Negator, v: Value_Id, is_nsw_in: bool, depth: u32) -> Val
     saved := ic.b;
     defer ic.b = saved;
     irb_set_before(*ic.b, i);
-    nm := tprint("%.neg", vname(i));
+    nm := tconcat(vname(i), ".neg");
     o := inst_op(i);
     if o == {
         case .ADD;

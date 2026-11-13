@@ -804,6 +804,9 @@ slp_try_to_vectorize_list :: (vl: [] Value_Id, max_vf_only := false, limit_to_re
     changed := false;
     next_inst: u64 = 0; max_inst := cast(u64) vl.count;
     vf := max_vf;
+    // one buffer for every attempt's operand list (a NewArray per attempt grew temp storage by ~60 MB on
+    // diamonds/n2000); the tree built from it is deleted at the next attempt's buildTree
+    ops_buf := NewArray(cast(s64) max(max_vf, min(max_inst, vf)), Value_Id,, temp);
     while next_inst + 1 < max_inst && vf >= min_vf {
         defer vf = slp_floor_full_vector_number_of_elements(slp.tti, vtype(i0), vf - 1);
         vec_ty := slp_widened_type(sty, vf);
@@ -815,7 +818,8 @@ slp_try_to_vectorize_list :: (vl: [] Value_Id, max_vf_only := false, limit_to_re
             if !slp_has_full_vectors_or_power_of_2(slp.tti, sty, actual_vf) continue;
             if max_vf_only && actual_vf < max_vf break;
             if (vf > min_vf && actual_vf < vf) || (vf == min_vf && actual_vf < 2) break;
-            ops := NewArray(cast(s64) actual_vf, Value_Id,, temp);
+            if cast(s64) actual_vf > ops_buf.count ops_buf = NewArray(cast(s64) actual_vf, Value_Id,, temp);
+            ops: [] Value_Id; ops.data = ops_buf.data; ops.count = cast(s64) actual_vf;
             idx: u64 = 0;
             for k: cast(s64) i..vl.count-1 {
                 v := vl[k];

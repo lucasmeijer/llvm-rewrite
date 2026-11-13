@@ -63,14 +63,14 @@ scoped_noalias_alias :: (a: Mem_Loc, b: Mem_Loc) -> Alias_Result {
 // ScopedNoAliasAAResult::getModRefInfo(Call, Loc) and (Fence, Loc)
 scoped_noalias_mod_ref_inst_loc :: (i: Value_Id, loc: Mem_Loc) -> u8 {
     if !scoped_noalias_opts.enable return MR_MODREF;
-    if !may_alias_in_scopes(loc.tags.scope, get_metadata(i, md_kind_id("noalias"))) return MR_NO;
-    if !may_alias_in_scopes(get_metadata(i, md_kind_id("alias.scope")), loc.tags.noalias) return MR_NO;
+    if !may_alias_in_scopes(loc.tags.scope, get_metadata(i, md_fixed("noalias"))) return MR_NO;
+    if !may_alias_in_scopes(get_metadata(i, md_fixed("alias.scope")), loc.tags.noalias) return MR_NO;
     return MR_MODREF;
 }
 // ScopedNoAliasAAResult::getModRefInfo(Call1, Call2)
 scoped_noalias_mod_ref_call_call :: (c1: Value_Id, c2: Value_Id) -> u8 {
     if !scoped_noalias_opts.enable return MR_MODREF;
-    sk := md_kind_id("alias.scope"); nk := md_kind_id("noalias");
+    sk := md_fixed("alias.scope"); nk := md_fixed("noalias");
     if !may_alias_in_scopes(get_metadata(c1, sk), get_metadata(c2, nk)) return MR_NO;
     if !may_alias_in_scopes(get_metadata(c2, sk), get_metadata(c1, nk)) return MR_NO;
     return MR_MODREF;

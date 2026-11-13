@@ -367,11 +367,11 @@ lvl_can_vectorize_instr :: (v: *Lvl, i: Value_Id) -> bool {
     if o == .STORE {
         t := vtype(op(i, 0));
         if !vector_type_is_valid_element_type(t) return false;
-        if get_metadata(i, md_kind_id("nontemporal")) != NONE {
+        if get_metadata(i, md_fixed("nontemporal")) != NONE {
             if !lv_tti_is_legal_nt(v.tti, type_vector(2, t, false), inst(i).align, true) return false;
         }
     } else if o == .LOAD {
-        if get_metadata(i, md_kind_id("nontemporal")) != NONE {
+        if get_metadata(i, md_fixed("nontemporal")) != NONE {
             if !lv_tti_is_legal_nt(v.tti, type_vector(2, vtype(i), false), inst(i).align, false) return false;
         }
     } else if is_fp_type(vtype(i)) && (is_call || is_binary_op(o)) && !ivd_is_fast(i) {

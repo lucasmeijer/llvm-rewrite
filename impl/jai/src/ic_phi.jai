@@ -1156,7 +1156,7 @@ md_merged_prof :: (a: Md_Id, b: Md_Id, ai: Value_Id, bi: Value_Id) -> Md_Id {
 // intersectAccessGroups (VectorUtils.cpp)
 intersect_access_groups :: (i1: Value_Id, i2: Value_Id) -> Md_Id {
     m1 := may_read_or_write_memory(i1); m2 := may_read_or_write_memory(i2);
-    ag := md_kind_id("llvm.access.group");
+    ag := md_fixed("llvm.access.group");
     if !m1 && !m2 return NONE;
     if !m1 return get_metadata(i2, ag);
     if !m2 return get_metadata(i1, ag);
@@ -1220,7 +1220,7 @@ md_from_capture_components :: (cc: u8) -> Md_Id {
 // Instruction::mergeDIAssignID({J}) with at::RAUW: one DIAssignID replaces the others on attachments and dbg_assign
 // records
 inst_merge_di_assign_id :: (k: Value_Id, j: Value_Id) {
-    kind := md_kind_id("DIAssignID");
+    kind := md_fixed("DIAssignID");
     ids: [..] Md_Id; ids.allocator = temp;
     a := get_metadata(j, kind); if a != NONE array_add(*ids, a);
     b := get_metadata(k, kind); if b != NONE array_add(*ids, b);

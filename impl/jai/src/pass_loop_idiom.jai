@@ -128,7 +128,7 @@ lir_mem_set_pattern_value :: (v: Value_Id) -> Value_Id {
 lir_is_legal_store :: (c: *Lir, si: Value_Id) -> Lir_Store_Kind {
     if (inst(si).flags & F_VOLATILE) != 0 return .NONE;
     if !is_unordered(si) return .NONE;
-    if get_metadata(si, md_kind_id("nontemporal")) != NONE return .NONE;
+    if get_metadata(si, md_fixed("nontemporal")) != NONE return .NONE;
     stored := op(si, 0);
     ptr := op(si, 1);
     if dl_has_unstable_representation(vtype(stored)) return .NONE;
@@ -409,11 +409,11 @@ tbaa_extend_to :: (md: Md_Id, len: s64) -> Md_Id {
 
 lir_set_aa_metadata :: (call: Value_Id, tags: AA_Tags) {
     // IRBuilder::CreateMem*(..., AAInfo) -> CallInst::setAAMetadata
-    if tags.tbaa != NONE set_metadata(call, md_kind_id("tbaa"), tags.tbaa);
-    if tags.tbaa_struct != NONE set_metadata(call, md_kind_id("tbaa.struct"), tags.tbaa_struct);
-    if tags.scope != NONE set_metadata(call, md_kind_id("alias.scope"), tags.scope);
-    if tags.noalias != NONE set_metadata(call, md_kind_id("noalias"), tags.noalias);
-    if tags.noalias_as != NONE set_metadata(call, md_kind_id("noalias.addrspace"), tags.noalias_as);
+    if tags.tbaa != NONE set_metadata(call, md_fixed("tbaa"), tags.tbaa);
+    if tags.tbaa_struct != NONE set_metadata(call, md_fixed("tbaa.struct"), tags.tbaa_struct);
+    if tags.scope != NONE set_metadata(call, md_fixed("alias.scope"), tags.scope);
+    if tags.noalias != NONE set_metadata(call, md_fixed("noalias"), tags.noalias);
+    if tags.noalias_as != NONE set_metadata(call, md_fixed("noalias.addrspace"), tags.noalias_as);
 }
 
 // processLoopStridedStore

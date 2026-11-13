@@ -552,7 +552,7 @@ bs_new_data :: (bs: *Block_Sched, i: Value_Id) -> s32 {
 bs_init_schedule_data :: (bs: *Block_Sched, from: Value_Id, to: Value_Id, prev_ls: s32, next_ls: s32) {
     cur_ls := prev_ls;
     i := from;
-    inv_load := md_kind_id("invariant.load");
+    inv_load := md_fixed("invariant.load");
     while i != to {
         defer i = inst_next(i);
         if inst_op(i) == .PHI continue;

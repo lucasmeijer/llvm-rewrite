@@ -1004,7 +1004,7 @@ fpc_compute_op :: (v: Value_Id, de: APInt, interested: u32, known: *Known_FP_Cla
             known.* = kfpc_intersect_with(arm(v, op(v, 1), false, de, interested, q, depth), arm(v, op(v, 2), true, de, interested, q, depth));
         case .LOAD;
             if !is_inst(v) return;
-            md := inst_md(v, "nofpclass");
+            md := get_metadata(v, md_fixed("nofpclass"));
             if md == NONE return;
             mv := ir.mds[md_op(md, 0)].value;
             kfpc_known_not(known, cast(u32) ap_zext_value(cf_ap(mv)));

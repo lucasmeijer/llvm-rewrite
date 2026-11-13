@@ -313,7 +313,7 @@ add_assume_non_null :: (li: Value_Id) {
 
 convert_metadata_to_assumes :: (li: Value_Id, val: Value_Id) {
     k := vkind(val);
-    has_noundef := get_metadata(li, md_kind_id("noundef")) != NONE;
+    has_noundef := get_metadata(li, md_fixed("noundef")) != NONE;
     if (k == .C_UNDEF || k == .C_POISON) && has_noundef {
         s := new_inst(.STORE, ir.t_void, 2);
         inst(s).align = 1;
@@ -322,7 +322,7 @@ convert_metadata_to_assumes :: (li: Value_Id, val: Value_Id) {
         insert_at_position(s, inst(li).parent, li, false);   // new StoreInst(..., LI->getIterator()): adopts LI's records
         return;
     }
-    if get_metadata(li, md_kind_id("nonnull")) != NONE && has_noundef && !m2r_known_non_zero(val, li)
+    if get_metadata(li, md_fixed("nonnull")) != NONE && has_noundef && !m2r_known_non_zero(val, li)
         add_assume_non_null(li);
 }
 

@@ -185,6 +185,14 @@ run_loop_pm :: (n: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater) -> 
 }
 
 run_loop_pass :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater) -> Preserved {
+    if !time_passes return run_loop_pass_inner(idx, l, lar, u);
+    tp_begin(pipeline.nodes[idx].name);
+    pa := run_loop_pass_inner(idx, l, lar, u);
+    tp_end();
+    return pa;
+}
+
+run_loop_pass_inner :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater) -> Preserved {
     node := *pipeline.nodes[idx];
     knowledge_retention_check(node.kind, node.name);
     saved_se := scev_pass_se;

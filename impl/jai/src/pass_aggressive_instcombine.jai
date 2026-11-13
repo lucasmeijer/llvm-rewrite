@@ -1023,7 +1023,7 @@ aic_merge_consecutive_part_stores :: (parts: [] Aic_Part_Store, width: u64, tti:
     st := irb_store(*b, val, op(first.store, 1), inst(first.store).align);
     tags := get_aa_metadata(first.store);
     dbg := get_metadata(first.store, 0);
-    k_assign := md_kind_id("DIAssignID");
+    k_assign := md_fixed("DIAssignID");
     for p, k: parts {
         if k > 0 {
             tags = aa_tags_concat(tags, get_aa_metadata(p.store));
@@ -1299,7 +1299,7 @@ aic_set_explicitly_unknown_branch_weights :: (i: Value_Id, pass_name: string) {
     ops: [2] Md_Id;
     ops[0] = md_string("unknown");
     ops[1] = md_string(pass_name);
-    set_metadata(i, md_kind_id("prof"), md_tuple(ops, false));
+    set_metadata(i, md_fixed("prof"), md_tuple(ops, false));
 }
 
 // foldMemChr

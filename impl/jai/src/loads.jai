@@ -69,7 +69,7 @@ value_can_be_freed :: (v: Value_Id) -> bool {
         s := arg_attrs(v);
         if (attr_set_has(s, .NoFree) || arg_only_reads_memory(v)) && attr_set_has(s, .NoAlias) return false;
     }
-    if is_inst(v) && inst_op(v) == .INTTOPTR && get_metadata(v, md_kind_id("nofree")) != NONE return false;
+    if is_inst(v) && inst_op(v) == .INTTOPTR && get_metadata(v, md_fixed("nofree")) != NONE return false;
     if is_inst(v) f = value_function(v);
     if f == NONE return true;
     if glob(f).gc.count == 0 return true;

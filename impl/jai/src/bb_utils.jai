@@ -174,7 +174,7 @@ update_phi_nodes :: (orig_bb: Value_Id, new_bb: Value_Id, preds: [] Value_Id, bi
             continue;
         }
         np := create_phi(vtype(pn), cast(u32) preds.count);
-        insert_before_named(np, bi, tprint("%.ph", vname(pn)));
+        insert_before_named(np, bi, tconcat(vname(pn), ".ph"));
         k := cast(s64) nops(pn) - 1;
         while k >= 0 {
             ib := phi_block(pn, cast(u32) k);
@@ -195,12 +195,12 @@ split_block_predecessors :: (bb: Value_Id, preds: [] Value_Id, suffix: string, d
     if block_is_landing_pad(bb) {
         if use_dtu fatal("SplitLandingPadPredecessors with a DomTreeUpdater is not implemented yet");
         nbs: [..] Value_Id; nbs.allocator = temp;
-        split_landing_pad_predecessors(bb, preds, suffix, tprint("%.split-lp", suffix), *nbs, dt, li, mssau, preserve_lcssa);
+        split_landing_pad_predecessors(bb, preds, suffix, tconcat(suffix, ".split-lp"), *nbs, dt, li, mssau, preserve_lcssa);
         return nbs[0];
     }
     f := block_fn(bb);
     // BasicBlock::Create(Ctx, Name, Parent, InsertBefore = BB)
-    nb := create_block(f, tprint("%1%2", vname(bb), suffix), bb);
+    nb := create_block(f, tconcat(vname(bb), suffix), bb);
     bi := create_br(bb);
     block_append_inst(nb, bi);
     l: Loop_Id = NONE;
@@ -262,7 +262,7 @@ split_block :: (old: Value_Id, split_pt: Value_Id, dt: *Dom_Tree, li: *Loop_Info
     h := head;
     while inst_op(it) == .PHI || is_eh_pad(it) { it = inst_next(it); h = false; }
     nm := name;
-    if nm.count == 0 nm = tprint("%.split", vname(old));
+    if nm.count == 0 nm = tconcat(vname(old), ".split");
     nb := split_basic_block(old, it, nm, h);
     if li {
         l := li_loop_for(li, old);
@@ -286,7 +286,7 @@ split_block :: (old: Value_Id, split_pt: Value_Id, dt: *Dom_Tree, li: *Loop_Info
 split_landing_pad_predecessors :: (orig: Value_Id, preds: [] Value_Id, suffix1: string, suffix2: string, out: *[..] Value_Id,
                                    dt: *Dom_Tree, li: *Loop_Info, mssau: *Mssa_Updater, preserve_lcssa: bool) {
     f := block_fn(orig);
-    nb1 := create_block(f, tprint("%1%2", vname(orig), suffix1), orig);
+    nb1 := create_block(f, tconcat(vname(orig), suffix1), orig);
     array_add(out, nb1);
     bi1 := create_br(orig);
     block_append_inst(nb1, bi1);
@@ -306,7 +306,7 @@ split_landing_pad_predecessors :: (orig: Value_Id, preds: [] Value_Id, suffix1: 
     }
     nb2: Value_Id = NONE;
     if rest.count {
-        nb2 = create_block(f, tprint("%1%2", vname(orig), suffix2), orig);
+        nb2 = create_block(f, tconcat(vname(orig), suffix2), orig);
         array_add(out, nb2);
         bi2 := create_br(orig);
         block_append_inst(nb2, bi2);

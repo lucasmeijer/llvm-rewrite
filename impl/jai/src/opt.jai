@@ -45,6 +45,9 @@
 #load "inst_simplify.jai";
 #load "demanded_bits.jai";
 #load "passes.jai";
+#load "time_passes.jai";
+#load "temp_pages.jai";
+#load "ptemp.jai";
 #load "pass_dce.jai";
 #load "pass_adce.jai";
 #load "pass_bdce.jai";
@@ -295,12 +298,19 @@
 #load "pass_consthoist.jai";
 #load "pass_partially_inline_libcalls.jai";
 
+// One binary for all three tools (build.sh copies bin/opt to bin/llc and bin/llvm-link): the tool is the base name
+// of argv[0]. Building one binary instead of three makes the optimized build 3x cheaper in time and memory.
 main :: () {
-    #if #exists(LLC_TOOL) llc_main();
-    else #if #exists(LLVM_LINK_TOOL) llvm_link_main();
+    temp_pages_setup();
+    args := get_command_line_arguments();
+    exe := ifx args.count then args[0] else "opt";
+    slash := find_index_from_right(exe, #char "/");
+    if slash >= 0 exe = slice(exe, slash + 1, exe.count - slash - 1);
+    if exe == "llc" llc_main();
+    else if exe == "llvm-link" llvm_link_main();
     else opt_main();
 }
 
-#import "Basic";
+// (Basic: imported once, in ir.jai)
 #import "File";
 #import "String";

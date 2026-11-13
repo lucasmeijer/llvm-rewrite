@@ -147,6 +147,19 @@ tti_get :: (f: Value_Id) -> *Tti {
     if tti_triple().count == 0 return *tti_none;
     if !tti_is_x86_triple(tti_triple()) fatal("TargetTransformInfo for target triple '%' is not supported", tti_triple());
     fa := attr_list_fn(glob(f).attrs);
+    // Attribute sets are interned and immutable, so the subtarget of a function is a function of its attribute
+    // set (and of the triple and -mcpu/-mattr, fixed for the run): cache it per set id in front of tti_cache
+    // (building the key below zeroes a 4 KB String_Builder; this was 1.6% of -O2).
+    if tti_fa_cache_triple != tti_triple() { array_reset(*tti_fa_cache); tti_fa_cache_triple = copy_string(tti_triple(),, allocator = context.default_allocator); }
+    if fa < tti_fa_cache.count && tti_fa_cache[fa] return tti_fa_cache[fa];
+    t := tti_get_uncached(fa);
+    if fa >= tti_fa_cache.count { tti_fa_cache.allocator = context.default_allocator; old := tti_fa_cache.count; array_resize(*tti_fa_cache, fa + 1); for old..tti_fa_cache.count - 1 tti_fa_cache[it] = null; }
+    tti_fa_cache[fa] = t;
+    return t;
+}
+tti_fa_cache: [..] *Tti;
+tti_fa_cache_triple: string;
+tti_get_uncached :: (fa: u32) -> *Tti {
     str_attr :: (fa: u32, key: string) -> (bool, string) {
         for attr_set_items(fa) if it.kind == .STRING_ATTR && it.key == key return true, it.val;
         return false, "";

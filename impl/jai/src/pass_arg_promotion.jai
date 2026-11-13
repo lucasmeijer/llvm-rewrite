@@ -408,7 +408,7 @@ ap_do_promotion :: (f: Value_Id, to_promote: [] Ap_Promote) -> Value_Id {
                             m := get_metadata(me, kk);
                             if m != NONE set_metadata(li, kk, m);
                         }
-                        if get_metadata(li, md_kind_id("noundef")) != NONE {
+                        if get_metadata(li, md_fixed("noundef")) != NONE {
                             for kn: string.["range", "nonnull", "align", "nofpclass"] {
                                 kk := md_kind_id(kn);
                                 set_metadata(li, kk, get_metadata(me, kk));

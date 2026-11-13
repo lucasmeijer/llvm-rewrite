@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Builds bin/{opt,llc,llvm-link}. Called by the harness before every check; keep it incremental and quick.
+# Builds bin/{opt,llc,llvm-link}: one binary under three names (the tool is argv[0]'s base name, src/opt.jai `main`).
+# Called by the harness before every check; keep it incremental and quick.
 # The compiler is installed on demand from $JAI_COMPILER_URL by scripts/ensure-jai.sh (never commit that URL).
 #
 # JAI_BUILD selects the backend (NOTES.md "Build modes"):
-#   x64 (default)  Jai's x64 backend, bounds checks and stack traces on; ~3 s. Used by `check`.
-#   optimized      LLVM backend with -o settings (build_optimized.jai), ~2 min, binaries ~5-8x faster.
+#   x64 (default)  Jai's x64 backend, bounds checks and stack traces on; ~2 s. Used by `check`.
+#   optimized      LLVM backend, O2 (build.jai), ~3.5 min, peak ~3.7 GB, binaries ~5-8x faster.
 #                  impl/jai/perf.env selects it for `harness/run perf`.
 # Every build is cached in bin/.cache/<mode>-<hash of the sources>/, so switching modes (perf, then check) only
 # copies a binary unless the sources changed. The optimized build compiles a snapshot of src/ taken when the hash
-# is computed, so editing sources during the two minutes can't put a stale binary under a newer hash.
+# is computed, so editing sources during the compile can't put a stale binary under a newer hash.
 set -euo pipefail
 cd "$(dirname "$0")"
 JAI="$(../../scripts/ensure-jai.sh)"
@@ -28,7 +29,7 @@ if [ "$MODE" = optimized ]; then
 else
   SRC="$PWD/src"
 fi
-HASH="$( (cat build.sh build_optimized.jai; cd "$SRC" && find . -name '*.jai' -print0 | sort -z | xargs -0 cat; "$JAI" -version 2>&1) | sha1sum | cut -c1-16)"
+HASH="$( (cat build.sh build.jai modules/Default_Allocator/module.jai; cd "$SRC" && find . -name '*.jai' -print0 | sort -z | xargs -0 cat; "$JAI" -version 2>&1) | sha1sum | cut -c1-16)"
 KEY="$MODE-$HASH"
 installed=1
 for tool in $TOOLS; do [ -x "bin/$tool" ] || installed=0; done
@@ -38,17 +39,19 @@ fi
 CACHE="$PWD/bin/.cache/$KEY"
 if [ ! -f "$CACHE/.complete" ]; then
   rm -rf "$CACHE" && mkdir -p "$CACHE"
-  pids=()
-  for tool in $TOOLS; do
-    src="$SRC/${tool//-/_}.jai"
-    if [ "$MODE" = x64 ]; then
-      "$JAI" -quiet -x64 "$src" -exe "$tool" -output_path "$CACHE/" &
-    else
-      "$JAI" -quiet build_optimized.jai - "$src" "$tool" "$CACHE/" &
-    fi
-    pids+=($!)
+  # One multi-call binary (src/opt.jai `main` dispatches on the base name of argv[0]), copied to every tool name:
+  # one compile instead of three (three optimized compiles in parallel got OOM-killed).
+  # The optimized compile peaks at ~12 GB; on a shared machine the OOM killer sometimes takes it (exit 137):
+  # retry a killed compile (a compile error fails at once).
+  for attempt in 1 2 3; do
+    rc=0
+    "$JAI" -quiet build.jai - "$MODE" "$SRC/opt.jai" opt "$CACHE/" || rc=$?
+    [ "$rc" = 137 ] && [ "$attempt" != 3 ] && { echo "build.sh: the $MODE compile was killed (out of memory?); retrying" >&2; rm -rf "$CACHE/.build"; continue; }
+    [ "$rc" = 0 ] || exit "$rc"
+    break
   done
-  for p in "${pids[@]}"; do wait "$p"; done
+  [ -x "$CACHE/opt" ] || { echo "build.sh: opt was not built" >&2; exit 1; }
+  for tool in $TOOLS; do [ "$tool" = opt ] || cp -f "$CACHE/opt" "$CACHE/$tool"; done
   for tool in $TOOLS; do [ -x "$CACHE/$tool" ] || { echo "build.sh: $tool was not built" >&2; exit 1; }; done
   rm -rf "$CACHE/.build"
   touch "$CACHE/.complete"

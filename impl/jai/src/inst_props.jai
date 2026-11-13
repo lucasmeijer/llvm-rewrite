@@ -29,12 +29,22 @@ call_called_function :: inline (i: Value_Id) -> Value_Id {
 intrinsic_cache: Table(Value_Id, string);
 function_intrinsic_base :: (f: Value_Id) -> string {
     if !glob(f).intrinsic return "";
+    // dense front cache over value ids of the intrinsic_cache results
+    if cast(s64) f < intrinsic_base_dense.count && intrinsic_base_known[f] return intrinsic_base_dense[f];
     found, s := table_find(*intrinsic_cache, f);
-    if found return s;
-    s = intrinsic_lookup(vname(f));
-    table_set(*intrinsic_cache, f, s);
+    if !found { s = intrinsic_lookup(vname(f)); table_set(*intrinsic_cache, f, s); }
+    if cast(s64) f >= intrinsic_base_dense.count {
+        intrinsic_base_dense.allocator = context.default_allocator; intrinsic_base_known.allocator = context.default_allocator;
+        old := intrinsic_base_dense.count;
+        n := max(cast(s64) f + 1, 2 * old, 1024);
+        array_resize(*intrinsic_base_dense, n);
+        array_resize(*intrinsic_base_known, n);
+    }
+    intrinsic_base_dense[f] = s; intrinsic_base_known[f] = true;
     return s;
 }
+intrinsic_base_dense: [..] string;
+intrinsic_base_known: [..] bool;
 intrinsic_id_of_call :: (i: Value_Id) -> string {
     if !is_inst(i) || !is_call_base(i) return "";
     f := call_called_function(i);

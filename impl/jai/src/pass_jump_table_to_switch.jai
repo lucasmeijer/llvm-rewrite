@@ -100,7 +100,7 @@ jtts_expand_to_switch :: (cb: Value_Id, index: Value_Id, funcs: [] Value_Id, d: 
         b: Irb; irb_set_before(*b, cb);
         phi = irb_phi(*b, vtype(cb), cast(u32) funcs.count);
     }
-    prof := get_metadata(cb, md_kind_id("prof"));
+    prof := get_metadata(cb, md_fixed("prof"));
     had_profile := false;   // isValueProfileMD
     if prof != NONE && md_nops(prof) > 0 {
         s := md_op(prof, 0);
@@ -131,7 +131,7 @@ jtts_expand_to_switch :: (cb: Value_Id, index: Value_Id, funcs: [] Value_Id, d: 
         array_add(*ups, .{true, bb, b});
         array_add(*ups, .{true, b, tail});
         call := ic_clone_inst(cb);
-        set_metadata(call, md_kind_id("prof"), NONE);
+        set_metadata(call, md_fixed("prof"), NONE);
         call_set_called_function(call, fn);
         block_append_inst(b, call);
         sw_add_case(sw, const_int(vtype(index), cast(u64) it_index), b);

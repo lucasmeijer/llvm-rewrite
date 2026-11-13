@@ -206,6 +206,14 @@ fn_drop_all_references :: (f: Value_Id) {
 }
 
 run_cgscc_pass :: (n: s32, c: s32, ur: *Cgscc_Ur) -> Preserved {
+    if !time_passes return run_cgscc_pass_inner(n, c, ur);
+    tp_begin(pipeline.nodes[n].name);
+    pa := run_cgscc_pass_inner(n, c, ur);
+    tp_end();
+    return pa;
+}
+
+run_cgscc_pass_inner :: (n: s32, c: s32, ur: *Cgscc_Ur) -> Preserved {
     node := *pipeline.nodes[n];
     if node.kind == {
         case .CGSCC_PM; return run_cgscc_pm(n, c, ur);

@@ -132,8 +132,8 @@ ic_visit_fmul :: (i: Value_Id) -> Value_Id {
             okc, cx := pm_intrinsic1(c, IID_COS);
             if okt && has_one_use(t) && okc && has_one_use(c) && cx == x {
                 sin := icb_unary_intrinsic(IID_SIN, x, "", i);
-                md := get_metadata(i, md_kind_id("fpmath"));
-                if md != NONE && is_inst(sin) set_metadata(sin, md_kind_id("fpmath"), md);
+                md := get_metadata(i, md_fixed("fpmath"));
+                if md != NONE && is_inst(sin) set_metadata(sin, md_fixed("fpmath"), md);
                 return ic_replace_inst_uses_with(i, sin);
             }
         }

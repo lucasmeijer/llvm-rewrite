@@ -882,9 +882,9 @@ strip_debug_info :: () -> bool {
         i += 1;
     }
     dbg := cast(u32) 0;
-    loop_kind := md_kind_id("llvm.loop");
+    loop_kind := md_fixed("llvm.loop");
     heap := md_kind_id("heapallocsite");
-    assign := md_kind_id("DIAssignID");
+    assign := md_fixed("DIAssignID");
     loop_map: Table(Md_Id, Md_Id); loop_map.allocator = temp;
     for f: ir.m_functions {
         if get_metadata(f, dbg) != NONE changed = true;

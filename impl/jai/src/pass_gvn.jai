@@ -784,9 +784,9 @@ gvn_materialize_adjusted_value :: (av: Gvn_Av, load: Value_Id, insert_pt: Value_
                 combine_metadata_for_cse(cl, load, false);
             } else {
                 res = vnc_get_value_for_load(cl, av.offset, load_ty, insert_pt, inst_fn(load));
-                if get_metadata(cl, md_kind_id("noundef")) == NONE {
-                    keep := u32.[md_kind_id("dereferenceable"), md_kind_id("dereferenceable_or_null"), md_kind_id("invariant.load"),
-                                 md_kind_id("invariant.group"), md_kind_id("alias.scope"), md_kind_id("noalias")];
+                if get_metadata(cl, md_fixed("noundef")) == NONE {
+                    keep := u32.[md_fixed("dereferenceable"), md_fixed("dereferenceable_or_null"), md_fixed("invariant.load"),
+                                 md_fixed("invariant.group"), md_fixed("alias.scope"), md_fixed("noalias")];
                     drop_unknown_non_debug_metadata(cl, keep);
                 }
             }
@@ -1260,7 +1260,7 @@ gvn_find_invariant_group_value :: (l: Value_Id, dt: *Dom_Tree) -> Value_Id {
     queue: [..] Value_Id; queue.allocator = temp;
     array_add(*queue, ptr_op);
     most := l;
-    ig := md_kind_id("invariant.group");
+    ig := md_fixed("invariant.group");
     while queue.count {
         p := pop(*queue);
         u := ir.v_first_use[p];
@@ -1448,10 +1448,10 @@ gvn_find_reaching_values_for_load :: (g: *Gvn, l: Value_Id, values: *[..] Gvn_Me
     m := g.mssa;
     q := aa_query_new_earliest_escape(*g.aar, g.dt);   // EarliestEscapeAnalysis(DT, LI): no LoopInfo here
     start_block := inst_block(l);
-    is_invariant_load := get_metadata(l, md_kind_id("invariant.load")) != NONE;
+    is_invariant_load := get_metadata(l, md_fixed("invariant.load")) != NONE;
     clobber_ma := ma_defining(m, mssa_access_of(m, l));
     loc := mloc_get(l);
-    if get_metadata(l, md_kind_id("invariant.group")) != NONE {
+    if get_metadata(l, md_fixed("invariant.group")) != NONE {
         gi := gvn_find_invariant_group_value(l, g.dt);
         if gi != NONE {
             p := ifx inst_op(gi) == .LOAD then op(gi, 0) else op(gi, 1);
@@ -1765,11 +1765,13 @@ gvn_process_instruction :: (g: *Gvn, i: Value_Id) -> bool {
         changed := false;
         succs: [..] Value_Id; succs.allocator = temp;
         block_successors(parent, *succs);
+        // SmallDenseMap<BasicBlock *, unsigned> SwitchEdges (a scan of succs per case was quadratic in the cases)
+        edges: Table(Value_Id, s32); edges.allocator = temp;
+        for succs { p := table_find_pointer(*edges, it); if p p.* += 1; else table_add(*edges, it, 1); }
         n := switch_num_cases(i);
         for k: 0..cast(s64) n - 1 {
             dst := op(i, cast(u32) (2 + k));
-            cnt := 0;
-            for succs if it == dst cnt += 1;
+            _, cnt := table_find(*edges, dst);
             if cnt == 1 changed = gvn_propagate_equality(g, cond, switch_case_value(i, cast(u32) k), parent, dst, NONE) || changed;
         }
         return changed;

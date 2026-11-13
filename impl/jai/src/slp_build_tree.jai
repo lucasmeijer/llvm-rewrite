@@ -125,7 +125,11 @@ slp_table_clear :: (t: *$T/Table) {
 }
 
 slp_delete_tree :: () {
+    slp_entries_high_water = max(slp_entries_high_water, slp.entries.count);
     array_reset_keeping_memory(*slp.entries);
+    slp_harvest_te_lists(*slp.scalar_to_tree_entries);
+    slp_harvest_te_lists(*slpx.scalars_in_split_nodes);
+    slp_harvest_te_lists(*slpx.value_to_gather_nodes);
     slp_table_clear(*slp.scalar_to_tree_entries);
     slp_table_clear(*slp.deleted_nodes);
     slp_table_clear(*slp.transformed_to_gather_nodes);
@@ -180,6 +184,8 @@ slp_new_tree_entry_state :: (vl: [] Value_Id, state: s32, bundle: s32, s: Inst_S
     if slpx.gathered_loads_first >= 0 && state == TE_NEED_TO_GATHER && is_valid(s) && is_opcode(s) == .LOAD &&
        ei.edge == EDGE_NONE && ei.user == TE_NONE return TE_NONE;
     ne: Tree_Entry;
+    // reuse the scalars buffer of the stale entry in this slot (a tree deleted since)
+    if slp.entries.count < slp_entries_high_water { ne.scalars = slp.entries.data[slp.entries.count].scalars; ne.scalars.count = 0; }
     ne.scalars.allocator = temp; ne.reuse_shuffle_indices.allocator = temp; ne.reorder_indices.allocator = temp;
     ne.combined_entries_with_indices.allocator = temp; ne.struct_ev_indices.allocator = temp;
     ne.operands.allocator = temp; ne.copyable_elements.allocator = temp; ne.value_to_lane.allocator = temp;
@@ -207,17 +213,15 @@ slp_new_tree_entry_state :: (vl: [] Value_Id, state: s32, bundle: s32, s: Inst_S
     }
     if state == TE_SPLIT_VECTORIZE {
         e.s = s;
-        processed: [..] Value_Id; processed.allocator = temp;
+        // SmallPtrSet Processed: v was processed by this call iff its list ends with `last` (the newest entry)
         for v: vl {
             if !is_inst(v) continue;
             p := table_find_pointer(*slpx.scalars_in_split_nodes, v);
             if !p {
-                l: [..] Te_Id; l.allocator = temp; array_add(*l, last);
+                l := slp_new_te_list(); array_add(*l, last);
                 table_set(*slpx.scalars_in_split_nodes, v, l);
-                array_add(*processed, v);
             } else {
-                dup := false; for processed if it == v { dup = true; break; }
-                if !dup { array_add(*processed, v); array_add(p, last); }
+                if !(p.count > 0 && p.*[p.count - 1] == last) array_add(p, last);
             }
         }
     } else if state != TE_NEED_TO_GATHER {
@@ -226,18 +230,16 @@ slp_new_tree_entry_state :: (vl: [] Value_Id, state: s32, bundle: s32, s: Inst_S
         if inst_op(s.main) == .PHI || slp_is_vector_like_inst_with_const_ops(s.main) ||
            (!s.has_copyables && slp_does_not_need_to_schedule(vl)) || all_non_sched
             e.does_not_need_to_schedule = true;
-        processed: [..] Value_Id; processed.allocator = temp;
+        // SmallPtrSet Processed: v was processed by this call iff its list ends with `last` (the newest entry)
         for v: vl {
             if pm_poison(v) continue;
             if is_copyable_element(s, v) { array_add(*e.copyable_elements, v); continue; }
             p := table_find_pointer(*slp.scalar_to_tree_entries, v);
             if !p {
-                l: [..] Te_Id; l.allocator = temp; array_add(*l, last);
+                l := slp_new_te_list(); array_add(*l, last);
                 table_set(*slp.scalar_to_tree_entries, v, l);
-                array_add(*processed, v);
             } else {
-                dup := false; for processed if it == v { dup = true; break; }
-                if !dup { array_add(*processed, v); array_add(p, last); }
+                if !(p.count > 0 && p.*[p.count - 1] == last) array_add(p, last);
             }
         }
         if bundle >= 0 {
@@ -252,7 +254,7 @@ slp_new_tree_entry_state :: (vl: [] Value_Id, state: s32, bundle: s32, s: Inst_S
                 all_consts_or_casts &= is_inst(v) && is_cast_op(inst_op(v)) && type_kind(vtype(v)) == .INT;
                 if ei.edge != EDGE_NONE || ei.user == TE_NONE || !te_is_gather(ei.user) {
                     p := table_find_pointer(*slpx.value_to_gather_nodes, v);
-                    if !p { l: [..] Te_Id; l.allocator = temp; table_set(*slpx.value_to_gather_nodes, v, l); p = table_find_pointer(*slpx.value_to_gather_nodes, v); }
+                    if !p { l := slp_new_te_list(); table_set(*slpx.value_to_gather_nodes, v, l); p = table_find_pointer(*slpx.value_to_gather_nodes, v); }
                     dup := false; for p.* if it == last { dup = true; break; }
                     if !dup array_add(p, last);
                 }
@@ -409,22 +411,37 @@ slp_get_scalars_vectorization_legality :: (vl: [] Value_Id, depth: u32, ei: Edge
 slp_try_to_find_duplicates :: (vl: *[..] Value_Id, reuse: *[..] s32, s: Inst_State, ei: Edge_Info, build_gather_only := true) -> bool {
     if type_kind(slp_get_value_type(vl.*[0])) == .STRUCT { array_reset_keeping_memory(reuse); return true; }
     uniques: [..] Value_Id; uniques.allocator = temp;
-    pos: Table(Value_Id, s32); pos.allocator = temp;
+    pos_local: Table(Value_Id, s32); pos_local.allocator = temp;
+    pos := *pos_local;
+    // a long list uses the pass-wide scratch table (kept memory) unless a caller up the stack holds it
+    pos_scratch := vl.count > 32 && !slp_scratch_pos_busy;
+    if pos_scratch { pos = *slp_scratch_pos; table_reset_keeping_memory(pos); slp_scratch_pos_busy = true; }
+    defer if pos_scratch slp_scratch_pos_busy = false;
+    pos_keys: [32] Value_Id = ---; pos_vals: [32] s32 = ---; npos := 0;
     for v: vl.* {
         if slp_is_constant(v) {
             array_add(reuse, ifx pm_poison(v) then cast(s32) PoisonMaskElem else cast(s32) uniques.count);
             array_add(*uniques, v);
             continue;
         }
-        found, p := table_find(*pos, v);
+        // SmallDenseMap<Value *, unsigned, 16>: a linear scan of the non-constant uniques for short lists (most;
+        // a temp Table per call was most of SLP's temp-storage growth on diamonds/n8000)
+        found := false; p: s32 = -1;
+        if vl.count <= 32 {
+            for k: 0..npos - 1 if pos_keys[k] == v { found = true; p = pos_vals[k]; break; }
+        } else {
+            found, p = table_find(pos, v);
+        }
         if found { array_add(reuse, p); continue; }
-        table_set(*pos, v, cast(s32) uniques.count);
+        if vl.count <= 32 { pos_keys[npos] = v; pos_vals[npos] = cast(s32) uniques.count; npos += 1; }
+        else table_set(pos, v, cast(s32) uniques.count);
         array_add(reuse, cast(s32) uniques.count);
         array_add(*uniques, v);
     }
+    pos_count := ifx vl.count <= 32 then npos else pos.count;
     require_scheduling := is_valid(s) && is_opcode(s) != .PHI && !slp_is_vector_like_inst_with_const_ops(s.main) &&
                           (s.has_copyables || !slp_does_not_need_to_schedule(uniques));
-    are_all_non_const := pos.count == uniques.count;
+    are_all_non_const := pos_count == uniques.count;
     if require_scheduling {
         end := uniques.count;
         while end > 0 && pm_poison(uniques[end - 1]) end -= 1;
@@ -500,7 +517,8 @@ slp_try_to_find_duplicates :: (vl: *[..] Value_Id, reuse: *[..] s32, s: Inst_Sta
         keep := !build_gather_only && !require_scheduling;
         return keep, keep;
     }
-    pack_profitable, use_original := estimate(vl.*, uniques, reuse.*, *pos, s, ei, build_gather_only, require_scheduling, are_all_non_const);
+    if vl.count <= 32 for k: 0..npos - 1 table_set(pos, pos_keys[k], pos_vals[k]);   // the map estimate() reads
+    pack_profitable, use_original := estimate(vl.*, uniques, reuse.*, pos, s, ei, build_gather_only, require_scheduling, are_all_non_const);
     if pack_profitable {
         if use_original array_reset_keeping_memory(reuse);
         else { array_reset_keeping_memory(vl); for uniques array_add(vl, it); }
@@ -1326,7 +1344,13 @@ slp_build_tree_rec :: (vl_ref: [] Value_Id, depth: u32, ei: Edge_Info, interleav
     bs := slp_block_sched(bb);
     uniques: [..] Value_Id; uniques.allocator = temp;
     seen_u: Table(Value_Id, bool); seen_u.allocator = temp;
-    for v: vl { if !table_contains(*seen_u, v) { table_set(*seen_u, v, true); array_add(*uniques, v); } }
+    if vl.count <= 32 {   // SetVector of a short list: linear scan instead of a temp Table per call
+        for v: vl { dup := false; for uniques if it == v { dup = true; break; } if !dup array_add(*uniques, v); }
+    } else {
+        seen := *seen_u;
+        if !slp_scratch_seen_busy { seen = *slp_scratch_seen; table_reset_keeping_memory(seen); }
+        for v: vl { if !table_contains(seen, v) { table_set(seen, v, true); array_add(*uniques, v); } }
+    }
     has_bundle, bundle := bs_try_schedule_bundle(bs, uniques, s, ei);
     if !has_bundle {
         if is_alt_shuffle(s) && reuse.count == 0 && try_split_node(vl, s, depth, ei) return;

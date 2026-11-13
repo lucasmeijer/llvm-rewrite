@@ -362,7 +362,7 @@ lver_annotate_loop_with_no_alias :: (v: *Lver) {
     }
     lists := NewArray(rt.groups.count, Md_Id,, allocator = temp);
     for k: 0..rt.groups.count-1 lists[k] = ifx has_list[k] then md_tuple(non_aliasing[k], false) else NONE;
-    scope_kind := md_kind_id("alias.scope"); noalias_kind := md_kind_id("noalias");
+    scope_kind := md_fixed("alias.scope"); noalias_kind := md_fixed("noalias");
     for i: v.lai.dc.inst_map {
         ptr := ifx inst_op(i) == .LOAD then op(i, 0) else op(i, 1);
         found, gi := table_find(*ptr_to_group, ptr);

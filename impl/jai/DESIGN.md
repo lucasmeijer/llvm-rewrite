@@ -141,7 +141,7 @@ src/
   pass_openmp_opt.jai (early exits)
   pass_lto_misc.jai (the LTO pipelines' module passes), pass_merge_functions.jai (MergeFunctions, FunctionComparator)
   linker.jai      llvm-link: ModuleLinker, IRMover (IRLinker, TypeMapTy), its ValueMapper (see "llvm-link" below)
-  opt.jai / llc.jai / llvm_link.jai    CLI entry points
+  opt.jai                             CLI entry point (one binary: opt, llc, llvm-link by argv[0])
 ```
 
 ## 1. Ids and the world

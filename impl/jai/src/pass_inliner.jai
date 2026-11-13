@@ -107,7 +107,7 @@ default_inline_advice :: (cb: Value_Id, params: Inline_Params) -> (bool, Inline_
     ic := get_inline_cost(cb, params, true);
     if ic_is_always(ic) return true, ic;
     if !ic_bool(ic) {
-        set_inline_remark(cb, inline_cost_str(ic));
+        if inl_opts.inline_remark_attribute set_inline_remark(cb, inline_cost_str(ic));   // (building the message is costly)
         return false, ic;
     }
     enable_deferral := ifx params.has_enable_deferral then params.enable_deferral else inl_opts.enable_inline_deferral;
@@ -287,7 +287,7 @@ inline_one :: (cb: Value_Id, callee: Value_Id, callee_n: s32, callee_scc: s32, c
     aar := aa_results_for(caller);
     r := inline_function(cb, ifi, true, *aar, true, track);
     if !r.ok {
-        set_inline_remark(cb, tprint("%; %", r.reason, inline_cost_str(ic)));
+        if inl_opts.inline_remark_attribute set_inline_remark(cb, tprint("%; %", r.reason, inline_cost_str(ic)));   // (building the message is costly)
         return false;
     }
     eph_clear(f);
@@ -598,7 +598,7 @@ module_inliner_run :: () -> Preserved {
         aar := aa_results_for(inst_fn(cb));
         r := inline_function(cb, *ifi, true, *aar, true, true);
         if !r.ok {
-            set_inline_remark(cb, tprint("%; %", r.reason, inline_cost_str(ic)));
+            if inl_opts.inline_remark_attribute set_inline_remark(cb, tprint("%; %", r.reason, inline_cost_str(ic)));   // (building the message is costly)
             continue;
         }
         changed = true;

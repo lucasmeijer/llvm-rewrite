@@ -69,9 +69,9 @@ lv_no_alias_metadata_for :: (n: *Lv_Noalias, i: Value_Id) -> (Md_Id, Md_Id) {
     ptr := ifx inst_op(i) == .LOAD then op(i, 0) else op(i, 1);
     found, gi := table_find(*n.ptr_to_group, ptr);
     if !found return NONE, NONE;
-    scope := md_concatenate(get_metadata(i, md_kind_id("alias.scope")), md_tuple(Md_Id.[n.group_scope[gi]], false));
+    scope := md_concatenate(get_metadata(i, md_fixed("alias.scope")), md_tuple(Md_Id.[n.group_scope[gi]], false));
     na: Md_Id = NONE;
-    if n.lists[gi] != NONE na = md_concatenate(get_metadata(i, md_kind_id("noalias")), n.lists[gi]);
+    if n.lists[gi] != NONE na = md_concatenate(get_metadata(i, md_fixed("noalias")), n.lists[gi]);
     return scope, na;
 }
 
@@ -154,8 +154,8 @@ vpcb_create_instructions :: (c: *Vp_Cfg_Builder, vpbb: Vp_Blk, bb: Value_Id) {
             md := vp_metadata_to_propagate(i);
             if (o == .LOAD || o == .STORE) && c.lver {
                 scope, na := lv_no_alias_metadata_for(c.lver, i);
-                if scope != NONE set_vp_md_list(*md, md_kind_id("alias.scope"), scope);
-                if na != NONE set_vp_md_list(*md, md_kind_id("noalias"), na);
+                if scope != NONE set_vp_md_list(*md, md_fixed("alias.scope"), scope);
+                if na != NONE set_vp_md_list(*md, md_fixed("noalias"), na);
             }
             ops: [..] Vp_Val; ops.allocator = temp;
             for k: 0..cast(s64) nops(i) - 1 array_add(*ops, vpcb_operand(c, op(i, cast(u32) k)));

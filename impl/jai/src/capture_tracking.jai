@@ -203,7 +203,7 @@ ct_use_capture_kind :: (u: Use_Id, base: Value_Id) -> (use_cc: u8, result_cc: u8
             return CC_NONE, CC_NONE;
         case .VAARG; return CC_NONE, CC_NONE;
         case .STORE;
-            if opno == 0 return md_to_capture_components(inst_md(i, "captures")), CC_NONE;
+            if opno == 0 return md_to_capture_components(get_metadata(i, md_fixed("captures"))), CC_NONE;
             if (inst(i).flags & F_VOLATILE) != 0 return CC_ADDRESS, CC_NONE;
             return CC_NONE, CC_NONE;
         case .ATOMICRMW;

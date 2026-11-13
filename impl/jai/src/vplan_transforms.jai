@@ -409,8 +409,8 @@ vp_has_ir_metadata :: (r: Vp_Rec) -> bool {
 vp_memory_location :: (r: Vp_Rec) -> (bool, Mem_Loc) {
     loc: Mem_Loc;
     if !vp_has_ir_metadata(r) return false, loc;
-    loc.tags.noalias = vp_get_md(r, md_kind_id("noalias"));
-    loc.tags.scope = vp_get_md(r, md_kind_id("alias.scope"));
+    loc.tags.noalias = vp_get_md(r, md_fixed("noalias"));
+    loc.tags.scope = vp_get_md(r, md_fixed("alias.scope"));
     return true, loc;
 }
 // VPBlockUtils::blocksInSingleSuccessorChainBetween

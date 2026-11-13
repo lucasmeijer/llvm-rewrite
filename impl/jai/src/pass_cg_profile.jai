@@ -29,7 +29,7 @@ cg_profile_run :: () -> Preserved {
             for i: block_insts(bb) {
                 if !is_call_base(i) continue;
                 if call_is_indirect(i) {
-                    prof := get_metadata(i, md_kind_id("prof"));
+                    prof := get_metadata(i, md_fixed("prof"));
                     if prof != NONE && md_nops(prof) > 0 && md_str_of(md_op(prof, 0)) == "VP"
                         fatal("cg-profile: value-profile data of indirect calls is not supported yet");
                     continue;

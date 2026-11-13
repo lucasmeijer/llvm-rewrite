@@ -601,7 +601,7 @@ ipo_create_call_like :: (cb: Value_Id, fty: Type_Id, callee: Value_Id, args: [] 
 }
 // copyMetadata(CB, {MD_prof, MD_dbg})
 ipo_copy_prof_dbg :: (dst: Value_Id, src: Value_Id) {
-    k := md_kind_id("prof");
+    k := md_fixed("prof");
     m := get_metadata(src, k);
     if m != NONE set_metadata(dst, k, m);
     d := get_metadata(src, MDK_DBG);

@@ -141,7 +141,7 @@ sc_get_min_trailing_zeros :: (s: Scev_Id, cxt: Value_Id = NONE) -> u32 {
 get_range_from_metadata :: (v: Value_Id) -> (bool, Const_Range) {
     none: Const_Range;
     if is_inst(v) {
-        md := inst_md(v, "range");
+        md := get_metadata(v, md_fixed("range"));
         if md != NONE return true, cr_from_range_md(md);
         if inst_op(v) == .CALL || inst_op(v) == .INVOKE || inst_op(v) == .CALLBR {
             ok, r := call_range(v);

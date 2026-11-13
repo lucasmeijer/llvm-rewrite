@@ -804,7 +804,10 @@ get_intrinsic_for_call_site :: (c: Value_Id) -> Intrinsic_Id {
     ok, lf := tli_lookup_call(c);
     if !ok || !call_only_reads_memory(c) return NOT_INTRINSIC;
     n := tli_standard_name(lf);   // getLibFunc matches the standard name; the custom (__exp10) name does not matter
-    map :: (n: string, base: string) -> bool { return n == base || n == tprint("%f", base) || n == tprint("%l", base); }
+    map :: (n: string, base: string) -> bool {   // n is base, base+"f" or base+"l" (no tprint: 0.8% of -O2)
+        if n == base return true;
+        return n.count == base.count + 1 && begins_with(n, base) && (n[base.count] == #char "f" || n[base.count] == #char "l");
+    }
     for b: string.["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh", "tanh", "exp", "exp2", "exp10",
                    "log", "log10", "log2", "fabs", "copysign", "floor", "ceil", "trunc", "rint", "nearbyint", "round",
                    "roundeven", "pow", "sqrt"]

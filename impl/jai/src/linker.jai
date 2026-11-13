@@ -530,7 +530,7 @@ lk_remap_instruction :: (i: Value_Id) {
         if v != NONE set_op(i, k, v);
     }
     if is_call_base(i) {
-        ct := md_kind_id("callee_type");
+        ct := md_fixed("callee_type");
         if get_metadata(i, ct) != NONE && call_called_function(i) != NONE set_metadata(i, ct, NONE);
     }
     all: [..] Kind_Md; all.allocator = temp;

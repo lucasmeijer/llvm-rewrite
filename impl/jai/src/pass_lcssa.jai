@@ -80,7 +80,7 @@ form_lcssa_for_instructions :: (worklist: *[..] Value_Id, dt: *Dom_Tree, li: *Lo
             block_predecessors(exit_bb, *preds);
             pn := create_phi(vtype(i), cast(u32) preds.count);
             insert_at_position(pn, exit_bb, block_first(exit_bb), true);
-            set_name(pn, tprint("%.lcssa", vname(i)));
+            set_name(pn, tconcat(vname(i), ".lcssa"));
             if inserted_phis array_add(inserted_phis, pn);
             copy_debug_loc(pn, i);
             for p: preds {

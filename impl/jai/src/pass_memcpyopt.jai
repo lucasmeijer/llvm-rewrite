@@ -372,7 +372,7 @@ mco_process_store_of_load :: (s: *Mco, si: Value_Id, li: Value_Id, bbi: *Value_I
 // processStore
 mco_process_store :: (s: *Mco, si: Value_Id, bbi: *Value_Id) -> bool {
     if !is_simple_load_store(si) return false;
-    if get_metadata(si, md_kind_id("nontemporal")) != NONE return false;
+    if get_metadata(si, md_fixed("nontemporal")) != NONE return false;
     sv := op(si, 0);
     if dl_is_non_integral_pointer_type(vtype(sv)) return false;
     if is_inst(sv) && inst_op(sv) == .LOAD return mco_process_store_of_load(s, si, sv, bbi);
@@ -781,10 +781,10 @@ mco_perform_stack_move_optzn :: (s: *Mco, load: Value_Id, store: Value_Id, dest_
     drop_unknown_non_debug_metadata(src_alloca, .[]);
     for lifetime_markers mco_erase_instruction(s, it);
     for aa_md_instrs {
-        set_metadata(it, md_kind_id("alias.scope"), NONE);
-        set_metadata(it, md_kind_id("noalias"), NONE);
-        set_metadata(it, md_kind_id("tbaa"), NONE);
-        set_metadata(it, md_kind_id("tbaa.struct"), NONE);
+        set_metadata(it, md_fixed("alias.scope"), NONE);
+        set_metadata(it, md_fixed("noalias"), NONE);
+        set_metadata(it, md_fixed("tbaa"), NONE);
+        set_metadata(it, md_fixed("tbaa.struct"), NONE);
     }
     return true;
 }

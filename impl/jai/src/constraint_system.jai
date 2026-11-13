@@ -198,6 +198,8 @@ cs_is_condition_implied :: (cs: *Constraint_System, r_in: [] s64) -> bool {
     // Everything the solver allocates is dropped again: only the answer escapes.
     mark := get_temporary_storage_mark();
     defer set_temporary_storage_mark(mark);
+    pmark := ptemp_get_mark();
+    defer ptemp_set_mark(pmark);
     r := cs_negate(r_in);
     if r.count == 0 return false;
     s: Cs_Solver;

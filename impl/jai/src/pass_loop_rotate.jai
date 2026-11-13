@@ -558,7 +558,7 @@ profitable_to_rotate_loop_exiting_latch :: (li: *Loop_Info, l: Loop_Id, check_ex
 // getBranchWeightMDNode + extractFromBranchWeightMD32 (isBranchWeightMD: >= 3 operands, "branch_weights" first,
 // an optional "expected" origin)
 branch_weights_of :: (t: Value_Id) -> (md: Md_Id, w: [] u32) {
-    m := get_metadata(t, md_kind_id("prof"));
+    m := get_metadata(t, md_fixed("prof"));
     if m == NONE || !md_is_node(m) || md_nops(m) < 3 return NONE, .[];
     s := md_op(m, 0);
     if s == NONE || ir.mds[s].kind != .STRING || ir.mds[s].str != "branch_weights" return NONE, .[];
@@ -580,7 +580,7 @@ set_branch_weights :: (t: Value_Id, w: [] u32) {
     array_add(*ops, md_string("branch_weights"));
     i32 := type_int(32);
     for w array_add(*ops, md_value(const_int(i32, it)));
-    set_metadata(t, md_kind_id("prof"), md_tuple(ops, false));
+    set_metadata(t, md_fixed("prof"), md_tuple(ops, false));
 }
 
 // updateBranchWeights

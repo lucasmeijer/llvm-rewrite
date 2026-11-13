@@ -261,7 +261,7 @@ swap_successors :: (br: Value_Id) {
     swap_prof_metadata(br);
 }
 swap_prof_metadata :: (i: Value_Id) {
-    k := md_kind_id("prof");
+    k := md_fixed("prof");
     m := get_metadata(i, k);
     if m == NONE return;
     if ir.mds[m].kind != .TUPLE || ir.mds[m].nops < 1 return;

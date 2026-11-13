@@ -90,8 +90,8 @@ gdce_add_comdat_member :: (s: *Gdce, c: s32, g: Value_Id) {
 
 // ScanVTables
 gdce_scan_vtables :: (s: *Gdce) {
-    k_type := md_kind_id("type");
-    k_vis := md_kind_id("vcall_visibility");
+    k_type := md_fixed("type");
+    k_vis := md_fixed("vcall_visibility");
     for gv: ir.m_globals {
         types: [..] Md_Id; types.allocator = temp;
         a := ir.v_md[gv];

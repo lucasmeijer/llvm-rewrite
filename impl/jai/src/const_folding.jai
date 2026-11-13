@@ -717,11 +717,11 @@ pointer_dereferenceable_bytes :: (v: Value_Id) -> (bool, u64) {
             return true, ifx a2 then a2.ival else 0;
         }
         if o == .LOAD || o == .INTTOPTR {
-            m := inst_md(v, "dereferenceable");
+            m := get_metadata(v, md_fixed("dereferenceable"));
             d: u64 = 0;
             if m != NONE d = ap_limited(const_ap(ir.mds[md_op(m, 0)].value));
             if d == 0 {
-                m2 := inst_md(v, "dereferenceable_or_null");
+                m2 := get_metadata(v, md_fixed("dereferenceable_or_null"));
                 if m2 != NONE d = ap_limited(const_ap(ir.mds[md_op(m2, 0)].value));
                 return true, d;
             }

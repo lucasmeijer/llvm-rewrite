@@ -167,11 +167,14 @@ pi_process_switch :: (b: *Pi_Builder, si: Value_Id, branch_bb: Value_Id, ops: *[
     if (!is_inst(o) && vkind(o) != .ARGUMENT) || has_one_use(o) return;
     succs: [..] Value_Id; succs.allocator = temp;
     block_successors(branch_bb, *succs);
-    edge_count :: (succs: [] Value_Id, t: Value_Id) -> s64 { n := 0; for succs if it == t n += 1; return n; }
+    // SmallDenseMap<BasicBlock *, unsigned> SwitchEdges (counting per case was quadratic in the cases)
+    edges: Table(Value_Id, s32); edges.allocator = temp;
+    for succs { p := table_find_pointer(*edges, it); if p p.* += 1; else table_add(*edges, it, 1); }
     n := sw_num_cases(si);
     if n > 0 for k: 0..n - 1 {
         target := sw_case_dest(si, k);
-        if edge_count(succs, target) == 1 {
+        _, cnt := table_find(*edges, target);
+        if cnt == 1 {
             p: Pred_Info; p.kind = .SWITCH; p.original_op = o; p.from = inst_block(si); p.to = target;
             p.condition = sw_cond(si); p.case_value = sw_case_value(si, k);
             pi_add_info_for(b, ops, o, p);

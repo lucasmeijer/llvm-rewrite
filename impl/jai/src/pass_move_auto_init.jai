@@ -5,7 +5,7 @@
 mai_cl: struct { threshold: s64 = 128; };   // -move-auto-init-threshold
 
 mai_has_auto_init_metadata :: (i: Value_Id) -> bool {
-    m := get_metadata(i, md_kind_id("annotation"));
+    m := get_metadata(i, md_fixed("annotation"));
     if m == NONE return false;
     for k: 0..cast(s64) md_nops(m) - 1 {
         o := md_op(m, cast(u32) k);

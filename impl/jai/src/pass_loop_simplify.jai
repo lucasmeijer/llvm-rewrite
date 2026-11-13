@@ -373,7 +373,7 @@ li_make_loop_invariant :: (li: *Loop_Info, l: Loop_Id, v: Value_Id, changed: *bo
 
 // Function::getEntryCount(): the "function_entry_count" of the function's !prof (-1 = none)
 fn_entry_count :: (f: Value_Id) -> (bool, u64) {
-    md := get_metadata(f, md_kind_id("prof"));
+    md := get_metadata(f, md_fixed("prof"));
     if md == NONE || md_nops(md) < 1 return false, 0;
     s := md_op(md, 0);
     if s == NONE || ir.mds[s].kind != .STRING || ir.mds[s].str != "function_entry_count" return false, 0;
@@ -389,7 +389,7 @@ set_explicitly_unknown_branch_weights_if_profiled :: (i: Value_Id, pass_name: st
     ops: [2] Md_Id;
     ops[0] = md_string("unknown");
     ops[1] = md_string(pass_name);
-    set_metadata(i, md_kind_id("prof"), md_tuple(ops, false));
+    set_metadata(i, md_fixed("prof"), md_tuple(ops, false));
 }
 // extractBranchWeights(I, TrueVal, FalseVal)
 extract_branch_weights_2 :: (i: Value_Id) -> (bool, u64, u64) {
@@ -409,7 +409,7 @@ set_fitted_branch_weights :: (i: Value_Id, w: [] u64) {
     } else for w fit[it_index] = cast(u32) it;
     all_zero := true;
     for fit if it != 0 all_zero = false;
-    if all_zero { set_metadata(i, md_kind_id("prof"), NONE); return; }   // ElideAllZeroBranchWeights
+    if all_zero { set_metadata(i, md_fixed("prof"), NONE); return; }   // ElideAllZeroBranchWeights
     set_branch_weights(i, fit);
 }
 
@@ -417,8 +417,8 @@ set_fitted_branch_weights :: (i: Value_Id, w: [] u64) {
 drop_ub_implying_attrs_and_unknown_metadata :: (i: Value_Id, keep_prof: bool, keep_kind: u32 = 0) {
     all: [..] Kind_Md; all.allocator = temp;
     get_all_metadata(i, *all);
-    prof := md_kind_id("prof");
-    assign := md_kind_id("DIAssignID");
+    prof := md_fixed("prof");
+    assign := md_fixed("DIAssignID");
     for all {
         if it.kind == 0 || it.kind == assign continue;
         if keep_prof && it.kind == prof continue;
@@ -654,7 +654,7 @@ perform_branch_to_common_dest_folding :: (bi: Value_Id, pbi: Value_Id, mssau: *M
     _, common, opc, invert := should_fold_cond_branches_to_common_destination(bi, pbi);
     b: Irb;
     irb_set_before(*b, pbi);
-    annotation := get_metadata(block_terminator(bb), md_kind_id("annotation"));
+    annotation := get_metadata(block_terminator(bb), md_fixed("annotation"));
     if annotation != NONE fatal("foldBranchToCommonDest with !annotation metadata is not implemented yet");
     if invert {
         // InvertBranch(PBI, Builder)
@@ -696,7 +696,7 @@ perform_branch_to_common_dest_folding :: (bi: Value_Id, pbi: Value_Id, mssau: *M
             }
             have_weights = true;
             set_fitted_branch_weights(pbi, md_weights);
-        } else set_metadata(pbi, md_kind_id("prof"), NONE);
+        } else set_metadata(pbi, md_fixed("prof"), NONE);
     }
     set_successor(pbi, ifx get_successor(pbi, 0) != bb then cast(u32) 1 else 0, unique_succ);
     loop_md := get_metadata(bi, MD_LOOP_KIND);
