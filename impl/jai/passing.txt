@@ -16940,10 +16940,12 @@ tests/lto/ipo/dead_args/main.ll::opt
 tests/lto/ipo/dead_args/main.ll::roundtrip
 tests/lto/ipo/dead_args::link
 tests/lto/ipo/dead_args::opt
+tests/lto/ipo/debug_info/main.ll::opt
 tests/lto/ipo/debug_info/main.ll::roundtrip
 tests/lto/ipo/debug_info/util.ll::opt
 tests/lto/ipo/debug_info/util.ll::roundtrip
 tests/lto/ipo/debug_info::link
+tests/lto/ipo/debug_info::opt
 tests/lto/ipo/recursion_attrs/even.ll::opt
 tests/lto/ipo/recursion_attrs/even.ll::roundtrip
 tests/lto/ipo/recursion_attrs/fib.ll::opt
