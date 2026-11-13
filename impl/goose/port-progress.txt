@@ -232,4 +232,5 @@ lib/Transforms/Vectorize/VPlanAnalysis.cpp 0.6  # VPTypeAnalysis, calculateRegis
 lib/Analysis/DependenceAnalysis.cpp 0.95  # all of depends() and its tests, the printer; no legacy wrapper pass, debug dumps
 lib/Analysis/Delinearization.cpp 0.95  # all but the legacy printer wrapper
 lib/Analysis/ScalarEvolutionDivision.cpp 1
-lib/Transforms/Scalar/LoopInterchange.cpp 0.9  # all but the `cache` rule (CacheCostManager / LoopCacheAnalysis, loud) and remarks
+lib/Transforms/Scalar/LoopInterchange.cpp 0.97  # all but optimization remarks
+lib/Analysis/LoopCacheAnalysis.cpp 0.95  # all but the debug dumps / operator<< of IndexedReference

@@ -58,3 +58,11 @@ Transforms/LoopInterchange (62/63).
 - LoopInterchange uses `InductionDescriptor::isInductionPHI(Phi, L, SE, D)`, the overload without FP inductions; an
   `fadd reassoc` accumulator is a reduction there (debug-record-after-phi.ll), not an FP induction.
 - The MoveInstructions clones are unnamed (Instruction::clone); SplitBlock names the new latch `<latch>.split`.
+- **InstructionCost is fixed point** (Support/InstructionCost.h: CostGranularity = 4; the stored Value is 4 x the
+  cost, `*` divides the product by 4, `/ CostType` divides the stored value, comparisons with a CostType scale it).
+  LoopCacheAnalysis prints it with fractions (`2305843009213693951.75` for a saturated cost,
+  interchange-refcost-overflow.ll), and DFAJumpThreading's `NumInsts / CondBranches > CostThreshold` is
+  `floor(4*N/cb) > 4*T`, not `floor(N/cb) > T`.
+- X86TTIImpl has no cache model: TTI::getCacheLineSize() is 0 on x86-64 unless `-cache-line-size` is given, so
+  LoopCacheAnalysis never finds consecutive accesses there and spatial reuse means a negative last-subscript
+  difference. CacheCost loops print as `<unnamed loop>` when the header has no name.

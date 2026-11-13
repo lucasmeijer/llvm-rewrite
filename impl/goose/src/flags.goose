@@ -175,7 +175,7 @@ let KNOWN_FLAGS_MISC: const u8[:][] = [
     "dfa-max-out-use-blocks", "delinearize-use-fixed-size-array-heuristic",
     "da-delinearize", "da-disable-delinearization-checks", "loop-interchange-threshold", "loop-interchange-max-mem-instr-ratio",
     "loop-interchange-min-loop-nest-depth", "loop-interchange-max-loop-nest-depth", "loop-interchange-profitabilities",
-    "loop-interchange-reduction-to-mem", "cache-line-size", "da-miv-max-level-threshold", "da-enable-dependence-test",
+    "loop-interchange-reduction-to-mem", "cache-line-size", "default-trip-count", "temporal-reuse-threshold", "da-miv-max-level-threshold", "da-enable-dependence-test",
     "jump-table-to-switch-size-threshold", "jump-table-to-switch-function-size-threshold",
     "force-specialization", "funcspec-max-clones", "funcspec-max-discovery-iterations", "funcspec-max-incoming-phi-values",
     "funcspec-max-block-predecessors", "funcspec-min-function-size", "funcspec-max-codesize-growth",
@@ -211,6 +211,7 @@ let VALUE_FLAGS_MISC: const u8[:][] = [
     "dfa-max-out-use-blocks", "da-miv-max-level-threshold", "da-enable-dependence-test",
     "loop-interchange-threshold", "loop-interchange-max-mem-instr-ratio", "loop-interchange-min-loop-nest-depth",
     "loop-interchange-max-loop-nest-depth", "loop-interchange-profitabilities", "cache-line-size",
+    "default-trip-count", "temporal-reuse-threshold",
 ];
 fn flag_takes_value(name: const u8[:]) -> bool {
     for k in VALUE_FLAGS_MISC { if k == name { return true; } }

@@ -637,17 +637,21 @@ fn dj_is_legal_and_profitable() -> bool {
     if (ncloned as f64) / (norig as f64) > dj_max_cloned_rate() { return false; }
     if nouter > flag_int("dfa-max-out-use-blocks", 40) { return false; }
     let clusters, jts = tti_case_clusters(sw, false, false);
+    // InstructionCost is fixed point (CostGranularity 4): `NumInsts / N` divides the scaled value, and the
+    // comparison with the threshold scales the threshold
+    var scaled: i64 = cm.num_insts * 4;
+    if cm.num_insts > 0x1fffffffffffffff { scaled = 0x7fffffffffffffff; }
     var cost: i64 = 0;
     if jts == 0 {
         // APInt(32, NumSuccessors).ceilLogBase2()
         let n = term_nsucc(sw);
         var cb: i64 = 0;
         while ((1 as i64) << cb) < n { cb++; }
-        cost = cm.num_insts / cb;
+        cost = scaled / cb;
     } else {
-        cost = cm.num_insts / jts;
+        cost = scaled / jts;
     }
-    if cost > flag_int("dfa-cost-threshold", 50) { return false; }
+    if cost > flag_int("dfa-cost-threshold", 50) * 4 { return false; }
     return true;
 }
 

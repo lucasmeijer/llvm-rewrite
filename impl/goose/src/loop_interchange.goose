@@ -1,7 +1,6 @@
 // LoopInterchange: port of llvm/lib/Transforms/Scalar/LoopInterchange.cpp (LoopInterchangePass::run on a LoopNest,
 // populateDependencyMatrix, isLegalToInterChangeLoops, LoopInterchangeLegality, LoopInterchangeProfitability
-// (instorder, vectorize; the `cache` rule needs LoopCacheAnalysis, which is not ported: it fails loudly when it is
-// reached), LoopInterchangeTransform incl. reduction2Memory). Dependences come from dependence_analysis.goose.
+// (cache with LoopCacheAnalysis (loop_cache_analysis.goose), instorder, vectorize), LoopInterchangeTransform incl. reduction2Memory). Dependences come from dependence_analysis.goose.
 // Optimization remarks are not emitted.
 //
 // The dependency matrix is a flat char array of rows of width depth + 1. LoopInterchangeLegality's sets are
@@ -31,6 +30,7 @@ import iv_descriptors;
 import unroll_utils;
 import sroa;
 import dependence_analysis;
+import loop_cache_analysis;
 
 let LI_RULE_CACHE = 0;
 let LI_RULE_INSTORDER = 1;
@@ -42,6 +42,8 @@ var li_dm: u8[>..<];            // DepMatrix rows, li_dm_w wide
 var li_dm_w: i64 = 0;
 var li_loops: i32[>..<];        // LoopList
 var li_fv: i32 = -1;
+var li_cc_root: i32 = -1;       // CacheCostManager
+var li_cc_done: bool = false;
 
 // LoopInterchangeLegality state
 var lil_ind: i32[>..<];         // InnerLoopInductions
@@ -585,8 +587,18 @@ fn li_is_profitable(ol: i32, il: i32, inner_id: i64, outer_id: i64) -> bool {
     if li_rules.len == 1 && li_rules[0] == LI_RULE_IGNORE { return true; }
     var r: i64 = -1;   // std::optional<bool>: -1 = none, 0 / 1
     for rule in li_rules {
-        if rule == LI_RULE_CACHE { fatal("loop-interchange: the `cache` profitability rule (LoopCacheAnalysis / CacheCost) is not ported yet"); }
-        if rule == LI_RULE_INSTORDER {
+        if rule == LI_RULE_CACHE {
+            // CacheCostManager: computed once per loop list, for the outermost loop it was created with
+            if !li_cc_done { lcc_compute(li_cc_root); li_cc_done = true; }
+            let ii = lcc_index_of(il);
+            let oi = lcc_index_of(ol);
+            if ii < 0 || oi < 0 { r = -1; }
+            else {
+                let a = lcc_loop_cost(ol);
+                let b = lcc_loop_cost(il);
+                if lcost_eq(a, b) { r = -1; } else { r = if ii < oi { 1 } else { 0 }; }
+            }
+        } else if rule == LI_RULE_INSTORDER {
             let cost = li_instr_order_cost(ol, il);
             r = if cost < 0 && cost < flag_int("loop-interchange-threshold", 0) { 1 } else { -1 };
         } else if rule == LI_RULE_VECTORIZE {
@@ -909,6 +921,8 @@ fn li_process_loop_list() -> bool {
     let outermost = li_loops[0];
     if !li_populate_dependency_matrix(depth, outermost) { return false; }
     if ln_exit_block(outermost, false) < 0 { return false; }
+    li_cc_root = li_loops[0];
+    li_cc_done = false;
     let sel = depth - 1;
     var j = sel;
     while j > 0 {
