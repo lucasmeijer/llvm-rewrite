@@ -313,3 +313,21 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - licm's `cannotHoistOrSinkRecipe` for replicated memory recipes: getMemoryLocation only carries the scoped-noalias
   tags (`!alias.scope`, `!noalias`), so without them every write in the loop region aliases; `SinkStoreInfo(R)`
   without a PSE only skips R itself.
+
+## SLP cost model facts (verified with the -debug-only=SLP trace compare, impl/goose/tools/slp_debug_compare.py)
+
+- `getSpillCost()` is always 0 on X86 and without a target: it only sums `TTI::getCostOfKeepingLiveOverCall`, which
+  neither X86TTIImpl nor the base implementation overrides (TargetTransformInfoImpl.h returns 0). "SLP: Spill Cost"
+  prints 0 when the tree is profitable and `<skipped>` otherwise.
+- `slp-vectorize-poor-throughput` defaults to true; besides the seeds it lets getTreeCost bypass the VF=2
+  instruction-count check ("SLP: Inst count check") when a vectorized entry is an fdiv/frem/sqrt-like op.
+- The "SLP: Adding cost" lines after "SLP: Recalculate costs after tree trimming." iterate `NodesCosts`, a
+  pointer-keyed SmallDenseMap: their order is not reproducible (the sum is).
+- `StoreChainContext::checkTreeSizes` computes `(P - Mean) * (P - Mean)` with P promoted to uint64_t: the square of
+  the distance, not of a 32-bit wrapped difference.
+- `TreeEntry::CombinedOpcode` values start above `Instruction::OtherOpsEnd`; getEntryCost switches over opcodes and
+  combined opcodes together, so an implementation must keep them disjoint from opcode numbers (a collision with
+  Freeze sent freeze nodes to the MinMax cost).
+- `ExtraBitWidthNodes` is a `DenseSet<unsigned>`; computeMinimumValueSizes takes `*begin()`, i.e. bucket order
+  (hash `k * 37`, quadratic probing, at least 64 buckets), and the set lives as long as BoUpSLP (one function).
+- `getExtractWithExtendCost` is 1 without a target (TargetTransformInfoImplBase), extract + cast on X86 (BasicTTIImpl).

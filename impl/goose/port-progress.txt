@@ -195,7 +195,7 @@ lib/Analysis/TypeMetadataUtils.cpp 0.5  # getPointerAtOffset, getFunctionAtVTabl
 lib/Support/GlobPattern.cpp 0.6  # *, ?, [...], escapes; no brace expansion
 lib/Transforms/Utils/ModuleUtils.cpp 0.1  # filterDeadComdatFunctions, getUniqueModuleId (ipo_globals.goose)
 lib/Transforms/Vectorize/VectorCombine.cpp 0.95  # all folds and the driver; not ported (fail loudly): scalarizeVPIntrinsic's rewrite, foldBitcastOfVPLoad, foldSelectsFromBitcast with several condition groups (DenseMap order)
-lib/Transforms/Vectorize/SLPVectorizer.cpp 0.35  # driver (no compare/GEP/poor-throughput sequences), helpers, getSameOpcode, LookAhead/VLOperands, buildTree, BlockScheduling (no copyables), canVectorizeLoads, HorizontalReduction matching; not: reordering, transformNodes, minbw, cost model, codegen, gather-shuffle analysis
+lib/Transforms/Vectorize/SLPVectorizer.cpp 0.62  # all analysis up to the cost decision for stores/lists (buildTree, copyable scheduling, reordering, transformNodes w/o gathered loads, minbw, cost model, external uses); not: codegen (vectorizeTree, ShuffleInstructionBuilder, scheduleBlock, optimizeGatherSequence), HR cost/emission, gathered loads, GEP/poor-throughput seeds
 # misc_passes.goose and its files (L1.scalar-misc, L1.o2-gaps, the small passes of default<O2>)
 lib/Transforms/Scalar/LowerExpectIntrinsic.cpp 0.95  # no MisExpect diagnostics
 lib/Transforms/Scalar/TailRecursionElimination.cpp 0.95  # no optimization remarks
