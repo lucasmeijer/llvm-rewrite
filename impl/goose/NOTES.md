@@ -9,9 +9,10 @@
   compiler-managed data stacks, with at most one growable value on top of each stack, freed at scope exit.
   Recursive functions can't keep growable data across a recursive call. See `DESIGN.md` for how the IR lives in
   global id-indexed tables because of this.
-- `build.sh` runs `goose build --cc /opt/llvm-23.1.5/bin/clang -o bin/<tool> src/<tool>.goose`. Build products live
-  under `~/.goose` (`GOOSE_HOME`). `goose build --debug` turns on overflow, range and tag checks. Use it when
-  chasing a crash.
+- `build.sh` builds `bin/<tool>` from `src/<tool>.goose`: by default goose writes the C and `tools/splitc.py` splits it
+  into parallel ThinLTO translation units; `GOOSE_BUILD=whole` (what perf.env sets) runs plain `goose build`. See
+  "Build" below. `goose build --debug` (or `tools/gb.sh src/opt.goose /tmp/opt --debug`) turns on overflow, range
+  and tag checks. Use it when chasing a crash.
 - `llc` and `llvm-link` are still placeholders that exit with "not implemented yet". `opt` runs `-passes=`
   pipelines (DESIGN.md §9) with dce, adce, bdce and the domtree/postdomtree/demanded-bits printers; `-O<n>` and
   unported passes exit 1 with "not implemented yet".
@@ -293,6 +294,54 @@
 | `src/tti_vec.goose` | the vectorizers' TTI front end `tv_*` (X86 or NoTTIImpl): shuffle / insert-extract / arith / cast / memory / scalarization / intrinsic / reduction costs, register queries |
 | `src/vecutils.goose` | VectorUtils + LoopUtils helpers `vu_*`: scalar-op / overload-type intrinsic args, splat values, mask narrowing/widening, reduction intrinsic mapping, copyIRFlags/andIRFlags/propagateIRFlags, getLosslessInvCast |
 | `tools/gb.sh` | `tools/gb.sh src/opt.goose bin/opt` builds with warnings hidden (Goose has no `-w`) |
+
+## Build (build.sh, tools/splitc.py; 2026-11-13)
+
+Where a build of `opt` goes (measured on the shared 16-core box, load 10-20 from other agents):
+
+| step | time |
+| --- | --- |
+| goose frontend (`goose -o opt.c`; `goose check` alone is 45 s of it), single-threaded | 45-55 s |
+| clang -O2 of the one 64 MB / 1.74 M-line `opt.c` (`goose build`), single-threaded | ~255 s |
+| same file at -O1 / -O0 | 150 s / 16 s |
+| 16 split parts, clang -O2 in parallel | 27 s |
+| 16 split parts, clang -O2 -flto=thin in parallel + lld ThinLTO link (16 threads) | 7 s + 17 s |
+
+So the old `goose build` path cost ~5.5 min cold (331 s measured), and every source edit paid it again. The
+frontend has no knob that matters (-O0/-O1 change goose's inlining but not its speed, and its typecheck is most
+of it). `build.sh` now:
+
+- **Splits the C** (`GOOSE_BUILD=split`, the default). goose v2026.4's C has a fixed layout: runtime header, types,
+  data (string and `gs_loc` constants, the globals struct), `/* ---- prototypes ---- */` (one line per program
+  function), `/* ---- code ---- */` (one function definition after another, `main` last). `tools/splitc.py`
+  gives every part the prelude, the prototypes and every `GS_INLINE` definition; the other definitions are cut
+  into contiguous ranges of equal size. Prototyped functions lose `static` (hidden visibility, so ThinLTO
+  internalizes them again), and the 5 mutable file-scope statics (`gs_stks`, `gs_nstks`, `gs_gl`,
+  `gs_program_initialized`, `gs_globals_main`) are defined in part 0 and `extern` elsewhere. Everything it
+  doesn't recognise (another mutable static, found by a small tokenizer independent of the rewrite; a local
+  static in a `GS_INLINE` function; an unexpected top-level line) makes it exit 3 and build.sh compiles the file
+  whole, with a message. A goose upgrade that changes the layout therefore costs speed, not correctness.
+- **ThinLTO**: plain split -O2 objects made `-passes=instcombine` on scaling/straightline 25-30% slower (calls
+  between parts can't inline; geomean over tests/perf +1.6%). With ThinLTO the gap on that benchmark is ~9%
+  (0.51 s whole vs 0.56 s split), elsewhere noise. perf.env sets `GOOSE_BUILD=whole` so `perf` keeps timing
+  the single-TU build, comparable with the history.
+- **Hash-based up-to-date check**: a SHA-256 over all of `src/` (`.goose`, `opt.build`, `hostmath.c`, ...),
+  `build.sh`, `tools/splitc.py`, the goose and clang versions, the mode and the reserve, taken before the build
+  and again after it. The old `find src -name '*.goose' -newer bin/opt` missed edits saved while a build ran
+  (binary newer than the edit, reported twice) and ignored `opt.build`/`hostmath.c`. A build whose inputs
+  changed while it ran isn't stamped, so the next call rebuilds.
+- **Caches** in `$GOOSE_BUILD_CACHE` (default `~/.cache/llvm-rewrite-goose`, shared by all worktrees in the
+  container, pruned after 2 days): finished binaries by input hash (switching check ↔ perf reserve, `whole` ↔
+  `split`, or back to a source state some worktree already built is a copy), part objects by content hash,
+  and lld's ThinLTO cache. Part objects rarely hit after a real edit: goose renumbers strings and `gs_loc`s
+  (which hold line numbers) in the prelude every part includes.
+- `bin/.lock` (flock) serializes concurrent builds in one worktree.
+
+Timings after (same box, load ~10): cold (empty caches) **72 s** (was 331 s); after an edit that changes the C
+**~70 s** (was ~5.5 min); no change **0 s**; revert to an already built state or switch check ↔ perf reserve
+**0 s** when cached. `GOOSE_BUILD_JOBS` caps the parallel clang processes (default nproc). llc and llvm-link are
+placeholders whose builds take ~1 s; when they grow real, they will import most of `src/` and pay the same
+frontend cost each: then consider one multi-call binary dispatching on `argv[0]` (one frontend run instead of three).
 
 ## Goose traps (cost me time)
 
