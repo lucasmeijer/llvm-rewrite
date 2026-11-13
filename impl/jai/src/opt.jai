@@ -56,6 +56,8 @@
 #load "pass_lower_expect.jai";
 #load "profile_cl.jai";
 #load "pass_add_discriminators.jai";
+#load "module_utils.jai";
+#load "pass_memprof.jai";
 #load "pass_lower_constant_intrinsics.jai";
 #load "pass_infer_alignment.jai";
 #load "pass_div_rem_pairs.jai";

@@ -1748,3 +1748,13 @@ Still slow / next:
 - `add-discriminators` (pass_add_discriminators.jai): complete, 12/12 tests; sweep 10809/10809 identical.
   `diloc_clone_with_base_discriminator` leaves pseudo-probe discriminators alone (LLVM 23).
   `-enable-fs-discriminator` fails loudly.
+- `memprof` / `memprof-module` (pass_memprof.jai, MemProfInstrumentation.cpp): complete, 11/11 HeapProfiler tests;
+  sweep `function(memprof),memprof-module` 10776/10783 identical (0 differs; loud: scalable masked accesses,
+  `kcfi` module flag = setKCFIType/xxHash64 not ported), `--with-test-flags` 0 differs, tests/perf/compile 4/4.
+  Both passes are RequiredPassInfoMixin (they run on optnone functions); so is add-discriminators.
+- `module_utils.jai`: ModuleUtils.cpp (append_to_global_ctors/dtors, append_to_used / append_to_compiler_used,
+  create_sanitizer_ctor_and_init_functions, declare_sanitizer_init_function), fn_create_with_default_attr,
+  module_get_or_insert_global, mu_split_block_and_insert_if_then (no DTU). New globals use the DataLayout's
+  default globals address space (`dl.globals_as`), like `new GlobalVariable(M, ...)`.
+- Trap: `fn_add_fn_attr` with a string attribute goes through `attr_set_with`, which removes *every* string
+  attribute (attr_set_remove by kind); use `fn_add_fn_str_attr` for string attributes.
