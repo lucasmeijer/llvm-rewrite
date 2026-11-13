@@ -6827,6 +6827,7 @@ tests/imported/llvm/Transforms/Inline/2009-05-07-CallUsingSelfCrash.ll::opt
 tests/imported/llvm/Transforms/Inline/2009-05-07-CallUsingSelfCrash.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/2010-05-12-ValueMap.ll::opt
 tests/imported/llvm/Transforms/Inline/2010-05-12-ValueMap.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/PR4909.ll::opt
 tests/imported/llvm/Transforms/Inline/PR4909.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/X86/always-inline-features.ll::opt
 tests/imported/llvm/Transforms/Inline/X86/always-inline-features.ll::roundtrip
@@ -7183,6 +7184,7 @@ tests/imported/llvm/Transforms/Inline/parallel-loop-md-merge.ll::opt
 tests/imported/llvm/Transforms/Inline/parallel-loop-md-merge.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/parallel-loop-md.ll::opt
 tests/imported/llvm/Transforms/Inline/parallel-loop-md.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/partial-inline-act.ll::opt
 tests/imported/llvm/Transforms/Inline/partial-inline-act.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/pr21206.ll::opt
 tests/imported/llvm/Transforms/Inline/pr21206.ll::roundtrip

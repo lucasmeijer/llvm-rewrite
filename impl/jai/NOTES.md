@@ -1095,7 +1095,7 @@ Still slow / known:
 - Every `[..]` with `allocator = temp` costs an allocator call on its first add (~100 instructions with
   array_reserve); in SCEV that's 6-8% of the time.
 
-## CGSCC, FunctionAttrs, inliner (L2.function-attrs COMPLETE 118/118; L2.inline 438/466: roundtrip 233/233, opt 205/233)
+## CGSCC, FunctionAttrs, inliner (L2.function-attrs COMPLETE 118/118; L2.inline 456/466: roundtrip 233/233, opt 223/233)
 
 - Files: `lazy_call_graph.jai` (LazyCallGraph.cpp + print-lcg), `cgscc_pm.jai` (CGSCCPassManager.cpp, the
   `cgscc(...)` / `devirt<N>(...)` adaptors), `pass_function_attrs.jai` (FunctionAttrs.cpp, ConstantRangeList),
@@ -1121,8 +1121,7 @@ Still slow / known:
 - Fail loudly: `--enable-knowledge-retention` under `cgscc`, X86TTIImpl::areTypesABICompatible with differing
   features, `!memprof` / `!callsite`, strictfp callers, ObjC ARC attached calls, assignment tracking, the replay / ML
   advisors, `promoteCall` (devirtualising an indirect call with a known callee), the MDNodeMapper. Remaining L2.inline
-  failures are those plus `-O<n>` / `default<O<n>>`, mergefunc, partial-inliner, scc-oz-module-inliner, globalopt,
-  globaldce, early-cse, verify<domtree>.
+  failures are those plus mergefunc and scc-oz-module-inliner.
 - Trap: InstCombine's transformConstExprCastCall must call `value_is_rauwd(call, new_call)` when the old call has no
   uses: the CGSCC devirt wrapper's WeakVH on the call follows it, otherwise devirt<N> sees a "new" direct call and
   repeats (Inline/inline-indirect-chain.ll).
@@ -1155,6 +1154,25 @@ Still slow / known:
   `tests/perf/compile/*`.
 - Compile time: x64 build, SPASS.ll: 3.9 s for `-passes=attributor-light` (parse + print 1.0 s) vs LLVM 1.0 s in
   total; not measured with the optimized build (no perf benchmark runs this pass).
+
+## PartialInliner and CodeExtractor (`partial-inliner`; L2.inline)
+
+- Files: `pass_partial_inliner.jai` (PartialInlining.cpp, single-region outlining), `code_extractor.jai`
+  (CodeExtractor.cpp). `clone_function(f, *vm)` (function_specialization.jai) is LLVM's CloneFunction, shared with
+  FunctionSpecialization. `bpi_calculate(..., no_tli = true)` is BranchProbabilityInfo(F, LI) without a TLI (the
+  zero heuristics then see no libcalls), as PartialInliner builds it for the clone.
+- Trap (verified against the assertions opt): computeOutliningInfo's `HasNonEntryPred` lambda captures the `Entries`
+  set *by value* before the peeling loop, so a block whose predecessor was only peeled in that loop stops the
+  peeling (Inline/inline-byval-bonus.ll: 2 entries, not 4).
+- Moving blocks/instructions into the outlined function drops their names from the old function's symbol table and
+  re-adds them in the new one (instructions, then the block), like BasicBlock::setParent.
+- Not ported (fail loudly): multi-region outlining (instrumentation profile), vararg forwarding into the outlined
+  function, functions referenced by a blockaddress, extraction from functions with debug info / debug records /
+  `!dbg`, more than two region exits, aggregate arguments, funclet EH in the region.
+- Sweeps (0 differs): `partial-inliner` 8507/8516 identical, with `-skip-partial-inlining-cost-analysis` 8507/8516
+  (111 files outline and inline a region); the 9 loud failures are the items above. Debugging aids: JAI_PI_DEBUG
+  prints the outlining costs and the module before the partial inlining, JAI_IC_DEBUG prints the CallAnalyzer
+  counters LLVM's `-debug-only=inline-cost` prints.
 
 ## LoopVectorize (in progress; L1.vectorize.loop 383/468 opt, 468/468 roundtrip)
 

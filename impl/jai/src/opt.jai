@@ -216,6 +216,8 @@
 #load "pass_function_attrs.jai";
 #load "attributor.jai";
 #load "attributor_aas.jai";
+#load "code_extractor.jai";
+#load "pass_partial_inliner.jai";
 #load "pass_inliner.jai";
 #load "inline_function.jai";
 #load "psi.jai";

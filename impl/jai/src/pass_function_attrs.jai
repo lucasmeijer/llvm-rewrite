@@ -1401,5 +1401,6 @@ ipo_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
     if name == "disable-nounwind-inference" { fa_opts.disable_nounwind_inference = parse_bool(name, value, has_value); return true; }
     if name == "disable-nofree-inference" { fa_opts.disable_nofree_inference = parse_bool(name, value, has_value); return true; }
     if name == "abort-on-max-devirt-iterations-reached" { cgscc_opts.abort_on_max_devirt = parse_bool(name, value, has_value); return true; }
+    if partial_inliner_parse_cl_opt(name, value, has_value) return true;
     return inliner_parse_cl_opt(name, value, has_value);
 }

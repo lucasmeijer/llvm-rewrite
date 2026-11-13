@@ -767,6 +767,14 @@ fs_cleanup_retained_nodes :: (new_sp: Md_Id) {
 // CloneFunction(F, VMap) + setName(F->getName() + ".specialized." + N) + removeSSACopy
 fs_clone_candidate_function :: (f: Value_Id, n: s64) -> Value_Id {
     vm: Value_Map; vmap_init(*vm);
+    nf := clone_function(f, *vm);
+    set_name(nf, tprint("%.specialized.%", vname(f), n));
+    fs_remove_ssa_copy(nf);
+    return nf;
+}
+// CloneFunction(F, VMap): a new function with F's name (uniqued) at the end of the module, the body cloned with
+// CloneFunctionInto(LocalChangesOnly); `vm` maps F's arguments and blocks (and instructions) to the clone's
+clone_function :: (f: Value_Id, vm: *Value_Map) -> Value_Id {
     ft := glob(f).value_type;
     nf := new_function(ft, "", glob(f).addrspace);
     gv_set_linkage(nf, glob(f).linkage);
@@ -775,21 +783,21 @@ fs_clone_candidate_function :: (f: Value_Id, n: s64) -> Value_Id {
     na := glob(f).nargs;
     if na > 0 for k: 0..na - 1 {
         if vname(fn_arg(f, k)).count set_name(fn_arg(nf, k), vname(fn_arg(f, k)));
-        vmap_set(*vm, fn_arg(f, k), fn_arg(nf, k));
+        vmap_set(vm, fn_arg(f, k), fn_arg(nf, k));
     }
     // CloneFunctionAttributesInto
     ipo_fn_copy_attributes_from(nf, f);
-    if glob(f).has_personality set_op(nf, 0, map_value(*vm, op(f, 0), RF_NONE));
-    if glob(f).has_prefix set_op(nf, 1, map_value(*vm, op(f, 1), RF_NONE));
-    if glob(f).has_prologue set_op(nf, 2, map_value(*vm, op(f, 2), RF_NONE));
+    if glob(f).has_personality set_op(nf, 0, map_value(vm, op(f, 0), RF_NONE));
+    if glob(f).has_prefix set_op(nf, 1, map_value(vm, op(f, 1), RF_NONE));
+    if glob(f).has_prologue set_op(nf, 2, map_value(vm, op(f, 2), RF_NONE));
     glob(nf).attrs = glob(f).attrs;
     // CloneFunctionBodyInto's block cloning first (the metadata mapping needs the value map of the body)
     for bb: fn_blocks(f) {
-        cbb := clone_basic_block(bb, *vm, "", nf);
-        vmap_set(*vm, bb, cbb);
-        if block_has_address_taken(bb) vmap_set(*vm, const_blockaddr(f, bb), const_blockaddr(nf, cbb));
+        cbb := clone_basic_block(bb, vm, "", nf);
+        vmap_set(vm, bb, cbb);
+        if block_has_address_taken(bb) vmap_set(vm, const_blockaddr(f, bb), const_blockaddr(nf, cbb));
     }
-    mm: Fs_Md_Mapper; mm.vm = *vm; mm.in_progress.allocator = temp;
+    mm: Fs_Md_Mapper; mm.vm = vm; mm.in_progress.allocator = temp;
     mm.sp = get_metadata(f, MDK_DBG);
     vm.has_md = true;
     fs_premap_metadata(*mm, f, nf);
@@ -798,12 +806,10 @@ fs_clone_candidate_function :: (f: Value_Id, n: s64) -> Value_Id {
     get_all_metadata(f, *all);
     for all add_metadata(nf, it.kind, fs_map_md(*mm, it.md));
     for bb: fn_blocks(nf) for i: block_insts(bb) {
-        remap_instruction(*vm, i, RF_NONE);
-        remap_dbg_record_range(*vm, i, RF_NONE);
+        remap_instruction(vm, i, RF_NONE);
+        remap_dbg_record_range(vm, i, RF_NONE);
     }
     fs_cleanup_retained_nodes(get_metadata(nf, MDK_DBG));
-    set_name(nf, tprint("%.specialized.%", vname(f), n));
-    fs_remove_ssa_copy(nf);
     return nf;
 }
 

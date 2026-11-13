@@ -125,6 +125,7 @@ src/
   evaluator.jai, pass_global_opt.jai, pass_global_dce.jai, pass_constant_merge.jai, pass_internalize.jai,
   pass_strip_dead_prototypes.jai, pass_elim_avail_extern.jai, pass_assign_guid.jai, md5.jai   IPO module passes
   pass_dead_arg_elim.jai, pass_arg_promotion.jai   DeadArgumentElimination (module), ArgumentPromotion (CGSCC)
+  pass_partial_inliner.jai, code_extractor.jai   PartialInliner (single region) and CodeExtractor
   attributor.jai, attributor_aas.jai   AttributorLight (module + CGSCC): the Attributor framework (`Irp` positions,
                   `Abs_Attr` rows, fixpoint, AttrsMap, MustBeExecutedContextExplorer) and its 17 abstract attributes
   pass_lower_expect.jai, pass_lower_constant_intrinsics.jai, pass_infer_alignment.jai, pass_div_rem_pairs.jai,

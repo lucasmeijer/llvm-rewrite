@@ -1590,6 +1590,12 @@ get_inline_cost :: (call: Value_Id, params: Inline_Params, use_eph_cache := fals
     if ic_opts.inline_all_viable_calls && is_inline_viable(callee).ok return inline_cost_always("Inlining forced by -inline-all-viable-calls");
     ca := cax_new(callee, call, params, true, false, use_eph_cache);
     should := cax_analyze(ca);
+    if getenv("JAI_IC_DEBUG") != null {
+        // the counters LLVM's -debug-only=inline-cost prints (a debugging aid)
+        print("IC % -> %: cost % threshold % NumConstantArgs % NumConstantOffsetPtrArgs % NumAllocaArgs % NumInstructionsSimplified % NumInstructions % SROACostSavings % SROACostSavingsLost %\n",
+              vname(inst_fn(call)), vname(callee), ca.cost, ca.threshold, ca.num_constant_args, ca.num_constant_offset_ptr_args,
+              ca.num_alloca_args, ca.num_instructions_simplified, ca.num_instructions, ca.sroa_cost_savings, ca.sroa_cost_savings_lost);
+    }
     if ca.decided_by_cost_benefit {
         if should.ok return inline_cost_always("benefit over cost");
         return inline_cost_never(should.reason);

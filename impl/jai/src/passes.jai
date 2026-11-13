@@ -295,7 +295,7 @@ Pass_Kind :: enum u8 {
     // CGSCC pass manager (cgscc_pm.jai), LazyCallGraph (lazy_call_graph.jai)
     CGSCC_ADAPTOR; CGSCC_PM; CGSCC_FN_ADAPTOR; DEVIRT; NO_OP_CGSCC; PRINT_LCG; REQUIRE_LCG; INVALIDATE_LCG;
     // FunctionAttrs (pass_function_attrs.jai)
-    FUNCTION_ATTRS; RPO_FUNCTION_ATTRS; NORECURSE_LTO_INFERENCE; ATTRIBUTOR_LIGHT; ATTRIBUTOR_LIGHT_CGSCC;
+    FUNCTION_ATTRS; RPO_FUNCTION_ATTRS; NORECURSE_LTO_INFERENCE; ATTRIBUTOR_LIGHT; ATTRIBUTOR_LIGHT_CGSCC; PARTIAL_INLINER;
     // Inliner (pass_inliner.jai), AlwaysInliner (pass_always_inliner.jai)
     INLINE; ALWAYS_INLINE; MODULE_INLINE; INLINER_WRAPPER;
     // ProfileSummaryAnalysis (require<profile-summary>)
@@ -478,6 +478,7 @@ PASS_TABLE :: Pass_Info.[
     .{"rpo-function-attrs", .MODULE, .RPO_FUNCTION_ATTRS, false, .DOMTREE},
     .{"norecurse-lto-inference", .MODULE, .NORECURSE_LTO_INFERENCE, false, .DOMTREE},
     .{"attributor-light", .MODULE, .ATTRIBUTOR_LIGHT, false, .DOMTREE},
+    .{"partial-inliner", .MODULE, .PARTIAL_INLINER, false, .DOMTREE},
     .{"attributor-light-cgscc", .CGSCC, .ATTRIBUTOR_LIGHT_CGSCC, false, .DOMTREE},
     .{"inline", .CGSCC, .INLINE, false, .DOMTREE},   // also inline<only-mandatory>
     .{"always-inline", .MODULE, .ALWAYS_INLINE, true, .DOMTREE},   // RequiredPassInfoMixin
@@ -1200,6 +1201,7 @@ run_module_pm :: (n: s32) {
             case .RPO_FUNCTION_ATTRS; if should_run_pass(node, NONE) mam_invalidate(rpo_function_attrs_run());
             case .NORECURSE_LTO_INFERENCE; if should_run_pass(node, NONE) mam_invalidate(norecurse_lto_inference_run());
             case .ATTRIBUTOR_LIGHT; if should_run_pass(node, NONE) mam_invalidate(attributor_light_module_run());
+            case .PARTIAL_INLINER; if should_run_pass(node, NONE) mam_invalidate(partial_inliner_run());
             case .ALWAYS_INLINE; if should_run_pass(node, NONE) mam_invalidate(always_inliner_run(!node.no_lifetime));
             case .MODULE_INLINE; if should_run_pass(node, NONE) mam_invalidate(module_inliner_run());
             case .INLINER_WRAPPER; if should_run_pass(node, NONE) inliner_wrapper_run();

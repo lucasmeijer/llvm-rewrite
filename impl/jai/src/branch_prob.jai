@@ -203,6 +203,7 @@ Bpi_Build :: struct {
     scc_blocks: [..] [..] [2] Value_Id;   // per SCC: (block, type) in insertion order (DenseMap order, see NOTES)
     est_block: Table(Value_Id, u32);      // EstimatedBlockWeight
     est_loop: Table(u64, u32);            // EstimatedLoopWeight, key = loop data
+    no_tli: bool;                         // calculate(..., TLI = nullptr): calcZeroHeuristics does not see libcalls
 }
 
 // LoopBlock: (innermost loop, SCC number when not in a loop)
@@ -583,7 +584,7 @@ bb_calc_zero_heuristics :: (c: *Bpi_Build, bb: Value_Id) -> bool {
         callee := call_called_function(lhs);
         // TLI->getLibFunc(*CalledFn, Func) with the result ignored: Func is set from the name before the
         // prototype check fails
-        if callee != NONE && !glob(callee).intrinsic { ok, lf := tli_lookup_name(vname(callee)); if ok func = lf; }
+        if !c.no_tli && callee != NONE && !glob(callee).intrinsic { ok, lf := tli_lookup_name(vname(callee)); if ok func = lf; }
     }
     pred := inst_pred(ci);
     likely: bool;
@@ -629,12 +630,19 @@ bb_calc_floating_point_heuristics :: (c: *Bpi_Build, bb: Value_Id) -> bool {
 }
 
 // BranchProbabilityInfo::calculate
-bpi_calculate :: (f: Value_Id, li: *Loop_Info, dt: *Dom_Tree, pdt: *Dom_Tree) -> *Bpi {
+bpi_calculate :: (f: Value_Id, li: *Loop_Info, dt_in: *Dom_Tree, pdt_in: *Dom_Tree, no_tli := false) -> *Bpi {
     b := New(Bpi);
     b.f = f;
     c: Bpi_Build;
     c.bpi = b;
     c.li = li;
+    c.no_tli = no_tli;
+    // BPIConstruction::calculate builds its own trees when none are given
+    dt := dt_in; pdt := pdt_in;
+    own_dt, own_pdt: *Dom_Tree;
+    if !dt { own_dt = dt_new(false); dt_recalculate(own_dt, f); dt = own_dt; }
+    if !pdt { own_pdt = dt_new(true); dt_recalculate(own_pdt, f); pdt = own_pdt; }
+    defer { if own_dt dt_free(own_dt); if own_pdt dt_free(own_pdt); }
     c.scc_nums.allocator = temp; c.scc_blocks.allocator = temp; c.est_block.allocator = temp; c.est_loop.allocator = temp;
     bb_scc_info(*c, f);
     bb_estimate_block_weights(*c, f, dt, pdt);
