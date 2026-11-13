@@ -1893,6 +1893,14 @@ Still slow / next:
   so copy them before building; doesNotAccessMemory of a call counts operand bundles (`call_memory_effects`);
   `PA.abandon<GlobalsAA>()` is `Preserved.abandon_globals_aa` (passes.jai, mam_invalidate drops the cached
   GlobalsAA).
+- **tsan / tsan-module / rtsan** (L1.extra.sanitizers.tsan-misc): `pass_tsan.jai` (ThreadSanitizer,
+  EscapeEnumerator, RealtimeSanitizer). All 29 ThreadSanitizer and 4 RealtimeSanitizer RUN lines identical. Sweeps
+  0 differs: `tsan-module,function(tsan)`, the same after `forceattrs -force-attribute=sanitize_thread`, with
+  -tsan-distinguish-volatile -tsan-compound-read-before-write -tsan-omit-by-pointer-capturing=0, and `forceattrs,rtsan`
+  with sanitize_realtime / sanitize_realtime_blocking (107 loud: C++ names beyond the demangler subset). Every
+  sanitizer pass is a RequiredPassInfoMixin (`required` = true in PASS_TABLE: they run on optnone functions);
+  EscapeEnumerator's default personality is __gcc_personality_v0 (__gxx_personality_v0 only on PS5);
+  CreateGlobalString aligns to the preferred alignment of i8 in address space 0.
 
 ## Coroutines (L1.extra.coroutines 298/310: roundtrip 155/155, opt 143/155; /root/jai_coro)
 

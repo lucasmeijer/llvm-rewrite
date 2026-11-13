@@ -92,6 +92,7 @@
 #load "pass_msan.jai";
 #load "msan_intrinsics.jai";
 #load "gen_msan_switch.jai";
+#load "pass_tsan.jai";
 #load "pass_loop_sink.jai";
 #load "pass_transform_warning.jai";
 #load "pass_drop_unnecessary_assumes.jai";
