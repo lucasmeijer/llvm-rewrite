@@ -8,6 +8,7 @@ import irutil;
 import instinfo;
 import slp_util;
 import slp_tree;
+import slp_sched;
 import slp_reorder;
 import slp_transform;
 import slp_minbw;
@@ -16,7 +17,12 @@ import slp_entrycost;
 import slp_treecost;
 
 fn slp_cost_model_not_ported() { slp_fail("BoUpSLP's cost model (calculateTreeCostAndTrimNonProfitable / getTreeCost)"); }
-fn slp_vectorize_tree_not_ported() { slp_fail("BoUpSLP::vectorizeTree (codegen)"); }
+// vectorizeTree(): the blocks get scheduled first (verified by the trace), the rest is not ported
+fn slp_vectorize_tree_not_ported() {
+    sh_clear(SH_E2LI);
+    for b in slp_bs.len { slp_schedule_block(b as i32); }
+    slp_fail("BoUpSLP::vectorizeTree (codegen)");
+}
 fn slp_print_found_cost(c: i64, vf: i64) {
     if slp_dbg_on { errs("SLP: Found cost = "); slp_errs_cost(c); errs(" for VF="); errs_int(vf); errs("\n"); slp_dbg_flush(); }
 }

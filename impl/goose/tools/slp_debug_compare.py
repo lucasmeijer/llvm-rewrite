@@ -41,7 +41,7 @@ KINDS = [
     "SLP: \tInternal user will be removed", "SLP: Inst count check", "SLP: Rejecting tree:", "SLP: Found cost",
     "SLP: Decided to vectorize", "SLP: Vectorizing list at cost", "SLP: rejecting tree with buildvector struct",
     "SLP: Trimming unprofitable", "SLP: Skipping trim", "SLP: Computing cost for external use", "SLP: Extract scale",
-    "SLP: Spill Cost", "SLP: Extract Cost", "SLP: Total Cost", "SLP:  Reduction Cost",
+    "SLP: Spill Cost", "SLP: Extract Cost", "SLP: Total Cost", "SLP:  Reduction Cost", "SLP: schedule block",
 ]
 # blocks whose order LLVM takes from a pointer-keyed DenseMap: skipped in both traces
 SKIP_AFTER = "SLP: Recalculate costs after tree trimming."

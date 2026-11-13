@@ -31,8 +31,8 @@ struct SBS { bb: i32, start: i32, end: i32, first_ls: i32, last_ls: i32, stack_s
              region_limit: i64, region_id: i32, cd_n: i64 }
 // a ScheduleData, or (cd) a ScheduleCopyableData of edge (ei_te, ei_edge) in bundle cb
 struct SSD { inst: i32, next_ls: i32, region: i32, deps: i32, unsched: i32, sched: bool,
-             mem_h: i32, mem_t: i32, ctl_h: i32, ctl_t: i32, cd: bool, ei_te: i32, ei_edge: i64, cb: i32, bs: i32 }
-struct SSB { m_at: i32, m_n: i32, te: i32, sched: bool, bs: i32 }
+             mem_h: i32, mem_t: i32, ctl_h: i32, ctl_t: i32, cd: bool, ei_te: i32, ei_edge: i64, cb: i32, bs: i32, prio: i32 }
+struct SSB { m_at: i32, m_n: i32, te: i32, sched: bool, bs: i32, prio: i32 }
 struct SReady { bs: i32, ent: i32, alive: bool }
 var slp_bs: SBS[>..];            // BlocksSchedules (MapVector order = creation order)
 var slp_sd: SSD[>..];
@@ -271,7 +271,7 @@ fn slp_add_cd(bs: i32, te: i32, edge: i64, i: i32, b: i32) -> i32 {
     let cd = slp_sd.len as i32;
     slp_sd.push(SSD { inst: i, next_ls: -1, region: slp_bs[bs].region_id, deps: SLP_INVALID_DEPS, unsched: SLP_INVALID_DEPS,
                       sched: false, mem_h: -1, mem_t: -1, ctl_h: -1, ctl_t: -1, cd: true, ei_te: te, ei_edge: edge, cb: b,
-                      bs: bs });
+                      bs: bs, prio: 0 });
     sh_set(SH_CDMAP, key, i as i64, cd as i64);
     slp_bs[bs].cd_n += 1;
     cd_lk_push(SH_CDINST, i as i64, 0, cd);
@@ -372,7 +372,17 @@ fn slp_recalc_insert(bs: i32, sd: i32) {
 }
 
 // ---------------------------------------------------------------- ReadyInsts (SetVector)
+// scheduleBlock's ReadyInsts: a std::set ordered by descending SchedulingPriority (equal priorities are one key)
+var slp_prio_mode: bool = false;
+var slp_prio_set: i32[>..<];
+fn ent_prio(e: i32) -> i32 { if ent_is_bundle(e) { slp_sb[ent_bundle(e)].prio } else { slp_sd[e].prio } }
 fn slp_ready_insert(bs: i32, e: i32) {
+    if slp_prio_mode {
+        let p = ent_prio(e);
+        for x in slp_prio_set { if ent_prio(x) == p { return; } }
+        slp_prio_set.push(e);
+        return;
+    }
     if !sh_add(SH_READY, bs as i64, e as i64) { return; }
     slp_ready.push(SReady { bs: bs, ent: e, alive: true });
     slp_ready_alive++;
@@ -675,7 +685,7 @@ fn slp_initial_fill_ready_list(bs: i32) {
 // buildBundle(VL, S, EI)
 fn slp_build_bundle(bs: i32, vl: const i32[:], s: SIS, ei_te: i32, ei_edge: i64) -> i32 {
     let b = slp_sb.len as i32;
-    slp_sb.push(SSB { m_at: slp_sbm.len as i32, m_n: 0, te: -1, sched: false, bs: bs });
+    slp_sb.push(SSB { m_at: slp_sbm.len as i32, m_n: 0, te: -1, sched: false, bs: bs, prio: 0 });
     for v in vl {
         if sis_is_non_schedulable(s, v) { continue; }
         if sis_is_copyable_element(s, v) {
@@ -711,7 +721,7 @@ fn slp_init_schedule_data(bs: i32, from: i32, to: i32, prev_ls: i32, next_ls: i3
         if sd < 0 {
             sd = slp_sd.len as i32;
             slp_sd.push(SSD { inst: i, next_ls: -1, region: 0, deps: SLP_INVALID_DEPS, unsched: SLP_INVALID_DEPS, sched: false,
-                              mem_h: -1, mem_t: -1, ctl_h: -1, ctl_t: -1, cd: false, ei_te: -1, ei_edge: -1, cb: -1, bs: bs });
+                              mem_h: -1, mem_t: -1, ctl_h: -1, ctl_t: -1, cd: false, ei_te: -1, ei_edge: -1, cb: -1, bs: bs, prio: 0 });
             sh_set(SH_SDMAP, i as i64, 0, sd as i64);
         }
         // ScheduleData::init
@@ -1329,3 +1339,126 @@ fn slp_try_schedule_bundle(bs: i32, vl: const i32[:], s: SIS, ei_te: i32, ei_edg
     return bundle;
 }
 fn slp_block_name(bb: i32) -> const u8[:] { if vals[bb].name >= 0 { sbytes(vals[bb].name) } else { "" } }
+
+// scheduleBlock(R, BS)
+fn slp_schedule_block(bs: i32) {
+    if slp_bs[bs].start < 0 { return; }
+    if slp_dbg_on { errs("SLP: schedule block "); errs(slp_block_name(slp_bs[bs].bb)); errs("\n"); slp_dbg_flush(); }
+    slp_reset_schedule(bs);
+    var idx: i32 = 0;
+    let end = slp_bs[bs].end;
+    var i = slp_bs[bs].start;
+    while i >= 0 && i != end {
+        let c0 = slp_bundles_head(i);
+        if c0 >= 0 {
+            let sd = slp_get_sd(bs, i);
+            if sd >= 0 && sd_valid_deps(sd) && slp_has_cds_of_inst(bs, i) { sd_clear_direct_deps(sd); }
+            var c = c0;
+            while c >= 0 {
+                let b = slp_lk[c].x;
+                c = slp_lk[c].next;
+                slp_sb[b].prio = idx;
+                idx++;
+                let te = slp_sb[b].te;
+                if te >= 0 && sb_valid_deps(b) && slp_te[te].ui_te >= 0 {
+                    let u = slp_te[te].ui_te;
+                    var hit = false;
+                    if slp_te[u].state == TE_VECTORIZE && slp_te[u].no_sched {
+                        for v in te_scalars(u) { if te_is_expanded_binop(u, v) { hit = true; break; } }
+                    }
+                    if slp_te[te].ui_edge < 0 && te_is_gather(u) { hit = true; }
+                    if hit { for k in sb_n(b) { let m = sb_member(b, k); if !slp_sd[m].cd { sd_clear_direct_deps(m); } } }
+                }
+                if !sb_valid_deps(b) { sh_clear(SH_TMP4); slp_calculate_dependencies(bs, b, false, slp_no_ctl()); }
+            }
+            var cds: i32[>..<] = [];
+            slp_cds_of_inst(bs, i, cds);
+            var k = cds.len;
+            while k > 0 {
+                k--;
+                let b = slp_sd[cds[k]].cb;
+                slp_sb[b].prio = idx;
+                idx++;
+                if !sb_valid_deps(b) { sh_clear(SH_TMP4); slp_calculate_dependencies(bs, b, false, slp_no_ctl()); }
+            }
+            i = inst_next(i);
+            continue;
+        }
+        var cdu: i32[>..<] = [];
+        slp_cd_users(bs, i, cdu);
+        let sd = slp_get_sd(bs, i);
+        if sd >= 0 {
+            slp_sd[sd].prio = idx;
+            idx++;
+            var need = cdu.len > 0;
+            if !need {
+                var c = slp_lk_head(SH_V2G, i as i64);
+                while c >= 0 {
+                    let t = slp_lk[c].x;
+                    c = slp_lk[c].next;
+                    if te_has_state(t) && te_has_copyable_elements(t) && te_is_copyable_element(t, i) { need = true; break; }
+                }
+            }
+            if need {
+                sd_clear_direct_deps(sd);
+                var one: i32[1] = [sd];
+                sh_clear(SH_TMP4);
+                slp_calculate_dependencies(bs, -1, false, one[..]);
+            }
+        }
+        var k = cdu.len;
+        while k > 0 {
+            k--;
+            let b = slp_sd[cdu[k]].cb;
+            slp_sb[b].prio = idx;
+            idx++;
+            if !sb_valid_deps(b) { sh_clear(SH_TMP4); slp_calculate_dependencies(bs, b, false, slp_no_ctl()); }
+        }
+        i = inst_next(i);
+    }
+    slp_prio_mode = true;
+    slp_prio_set.clear();
+    slp_initial_fill_ready_list(bs);
+    var last = end;
+    sh_clear(SH_TMP5);   // Scheduled
+    while slp_prio_set.len > 0 {
+        var bi: i64 = 0;
+        for k in slp_prio_set.len { if ent_prio(slp_prio_set[k]) > ent_prio(slp_prio_set[bi]) { bi = k; } }
+        let picked = slp_prio_set[bi];
+        for k in (bi + 1)..slp_prio_set.len { slp_prio_set[k - 1] = slp_prio_set[k]; }
+        slp_prio_set.pop();
+        if ent_is_bundle(picked) {
+            let b = ent_bundle(picked);
+            let te = slp_sb[b].te;
+            for k in sb_n(b) {
+                let pi = slp_sd[sb_member(b, k)].inst;
+                let is_cp = te_is_copyable_element(te, pi);
+                if is_cp && slp_get_sd(bs, pi) >= 0 { continue; }
+                if !is_cp && !sh_add(SH_TMP5, pi as i64, 0) { continue; }
+                if inst_next(pi) != last { inst_move_after(pi, inst_prev(last)); slots_invalidate(); }
+                last = pi;
+            }
+            if te_has_copyable_elements(te) {
+                let m = te_main(te);
+                for v in te_scalars(te) {
+                    if !is_inst(v) { continue; }
+                    if !slp_has_one_use(v) && te_is_copyable_element(te, v) && inst_parent(v) == inst_parent(m) &&
+                       slp_does_not_need_to_be_scheduled(v) && !sis_is_non_schedulable(te_s(te), v) {
+                        inst_move_before_preserving(v, last);
+                        slots_invalidate();
+                    }
+                }
+            }
+            if sh_get(SH_E2LI, te as i64, 0, -1) < 0 { sh_set(SH_E2LI, te as i64, 0, last as i64); }
+        } else {
+            let pi = slp_sd[picked].inst;
+            if inst_next(pi) != last { inst_move_after(pi, inst_prev(last)); slots_invalidate(); }
+            last = pi;
+        }
+        slp_schedule_entity(bs, sis_invalid(), picked);
+    }
+    slp_prio_mode = false;
+    slp_bs[bs].start = -1;
+}
+var slp_no_ctl_buf: i32[1];
+fn slp_no_ctl() -> const i32[:] { slp_no_ctl_buf[..0] }
