@@ -136,6 +136,8 @@ src/
   pass_ee_instrument.jai, pass_inject_tli_mappings.jai, pass_misc_module.jai (forceattrs, memprof-remove-attributes,
   recompute-globalsaa, lower-comment-string, alloc-token), pass_remark_only.jai, pass_coroutines.jai,
   pass_openmp_opt.jai (early exits)
+  pass_lto_misc.jai (the LTO pipelines' module passes), pass_merge_functions.jai (MergeFunctions, FunctionComparator)
+  linker.jai      llvm-link: ModuleLinker, IRMover (IRLinker, TypeMapTy), its ValueMapper (see "llvm-link" below)
   opt.jai / llc.jai / llvm_link.jai    CLI entry points
 ```
 
@@ -155,7 +157,9 @@ noisy. The names still document intent.)
 
 There is one global `IR` struct per process (the equivalent of `LLVMContext` + `Module`s). It owns every table.
 Modules (for `llvm-link`) are lists of global-value ids inside the same world, so types and constants are shared
-exactly like in an `LLVMContext`. Entities are never moved: an id stays valid until the entity is erased, and erased
+exactly like in an `LLVMContext`: `ir` holds the module-level state (global lists, symbol table, comdats, named
+metadata, target strings, module asm) of the *current* module, and `linker.jai`'s `Module_State` holds another
+module's (see "llvm-link"). Entities are never moved: an id stays valid until the entity is erased, and erased
 ids are not reused within a run (erasure marks the row dead, see §5). That keeps every order deterministic and
 makes `id` comparisons meaningless for semantics, which is deliberate: **order always comes from explicit lists,
 never from id values**, except where LLVM itself orders by creation (§6).
@@ -737,3 +741,23 @@ swapped one). Keep LLVM's instruction-vs-operator distinction (pattern.jai heade
   IrreducibleGraph) is temp and discarded, like LLVM's `cleanup`.
 - JumpThreading keeps `bpi`/`bfi` in `Jt` (getBPI/getBFI = own or cached result, getOrCreate* through
   `jt_run_external_analysis`).
+
+## llvm-link (linker.jai)
+
+Port of llvm-link.cpp, LinkModules.cpp (ModuleLinker) and IRMover.cpp (IRLinker) with the parts of ValueMapper.cpp
+IRMover uses. The world is the LLVMContext; modules differ only in their module-level state:
+
+- `Module_State` has every module-level field of `IR`; `lk_swap_module(*s)` exchanges them with `ir`. Loading a file
+  swaps the composite out, parses into fresh state (types, constants and metadata interned into the shared tables,
+  struct names uniqued per context: parser.jai `ctx_set_struct_name`), and swaps back: the source module ends up in
+  a `Module_State`, the composite in `ir`, so everything that creates globals (set_name, gv_create, new_function)
+  works on the destination as in IRMover.
+- `lk.owner[global row]`: DST / SRC / GONE, for `GlobalValue::getParent()` checks (the materializer only links
+  globals of the current source module).
+- Moving, not cloning: `lk_link_function_body` gives the new destination function the source function's argument
+  rows (`arg_parents`), blocks and local symbol table (`Function::stealArgumentListFrom` + `splice`), then the
+  scheduled REMAP_FUNCTION work item rewrites operands, metadata attachments and types in place (`RF_IgnoreMissingLocals`:
+  moved locals have no map entry and stay). Constants are rebuilt when an operand or the type maps differently.
+- The mapper's state (two value maps for the two mapping contexts, MD maps, the LIFO worklist of global initializers /
+  appending variables / aliases / function bodies, flushed after each top-level map call) and the IRMover state
+  that lives across files (IdentifiedStructTypeSet, SharedMDs, NamedMDNodes) are in the global `lk`.

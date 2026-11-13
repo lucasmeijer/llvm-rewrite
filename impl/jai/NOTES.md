@@ -37,7 +37,7 @@
   `lexer.jai`, `parser.jai`, `printer.jai`, `intrinsics.jai` (intrinsic IDs, signature matching, mangling,
   declarations), `autoupgrade.jai` (AutoUpgrade.cpp + a small constant-folding IRBuilder), `constfold.jai`
   (ConstantFold.cpp), `debuginfo.jai` (DI* nodes, debug records, StripDebugInfo). `llc.jai` and `llvm_link.jai`
-  are still stubs; they should `#load` the same files.
+  `#load` opt.jai and only change the entry point.
 - Generated tables (do not edit, rerun the script):
   - `gen_attrs.jai` (`gen/gen_attrs.py`: attribute kinds in TableGen order from Attributes.td),
   - `gen_cc.jai` (`gen/gen_cc.py`: calling conventions),
@@ -1410,9 +1410,9 @@ Still slow / known:
   (compile-time constness), not isa<Constant>: use `is_const`.
 - Remaining failures (2026-11-13): pipeline-O2 only linpack-pc (ExprValueMap order above). perf-corpus: oggenc
   (mergeConditionalStores with 5+ store addresses and 2+ common ones: SmallPtrSet hash order) and sqlite3 (SLP:
-  several external store groups, DenseMap order). Phase-ordering: LTO / ThinLTO pipelines (5), mergefunc (3), PGO
-  options (2), -force-attribute, knowledge retention in loop passes, ptrauth protected.field.ptr, LoopVectorize
-  convertToStridedAccesses. L1.o2-gaps: the `cache` profitability rule (LoopCacheAnalysis).
+  several external store groups, DenseMap order). Phase-ordering: see "llvm-link, LTO pipelines, MergeFunctions"
+  (LTO pipelines, mergefunc, PGO options and -force-attribute are done). L1.o2-gaps: the `cache` profitability rule
+  (LoopCacheAnalysis).
 - More pipeline-state fixes (each found with bisect + standalone rerun): the inliner's PHI trimming follows
   removeIncomingValueIf (backwards, last into the hole); LICM's call clones take the original name first (one
   LastUnique bump); CommonPointerBase's NW flags default to all(); ExpandMemCmp ported (pass_expand_memcmp.jai,
@@ -1424,6 +1424,38 @@ Still slow / known:
   queries, i.e. the x64 backend's per-call overhead on small helpers (no single hotspot). Inlining the hottest
   helpers (`const_ap`, `type_bits`, `scalar_type`, attribute lookups, `call_*`), a word-wise
   `tli_are_inline_compatible` and a hashed libfunc name set cut callgrind Ir on n500 by 18%.
+
+## llvm-link, LTO pipelines, MergeFunctions (L2.link COMPLETE 574/574, L2.lto 142/144, L2.lto-passes 159/160, L2.phase-ordering 285/288)
+
+- Files: `linker.jai` (llvm-link: llvm-link.cpp's main/linkFiles, ModuleLinker, IRMover/IRLinker, TypeMapTy,
+  IdentifiedStructTypeSet and the IRMover half of ValueMapper), `llvm_link.jai` (entry point; opt's program like
+  llc.jai), `pass_builder_pipelines.jai` (the four LTO aliases at O0-O3 next to `default<O#>`; the phase is the
+  global `pb_phase`), `pass_lto_misc.jai` (the LTO pipelines' module passes, pgo-force-function-attrs with
+  `-pgo-kind` / `-pgo-cold-func-opt`), `pass_merge_functions.jai` (MergeFunctions, FunctionComparator,
+  StructuralHash, xxh3_64bits), `pass_misc_module.jai` (`-force-attribute` / `-force-remove-attribute`).
+- Design (DESIGN.md "llvm-link"): one world = one LLVMContext. While linking, the composite's module state is in `ir`
+  and the source module's in a `Module_State` (`lk_swap_module` exchanges them; parsing a file swaps the composite
+  out). `lk.owner` (by global row) says which module a global belongs to (IRLinker::materialize needs
+  `SGV->getParent()`). Function bodies are moved: the new function takes the old one's argument rows
+  (`arg_parents`), blocks and local symbol table, then the linker's mapper rewrites operands and types in place.
+- The parser now keeps LLParser's per-module `NamedTypes` in `P.named_types`; `ir.named_types` is the context's
+  table (`ctx_set_struct_name`, with `ir.named_struct_uid`). Only parser-created and linker-created structs are
+  registered there; a pass that creates a named struct with `type_named_struct` would not be uniqued.
+- llvm-link fails loudly on: `-override`, `-import`, ARM/AArch64 module attributes (copyModuleAttrToFunctions),
+  two-field `llvm.global_ctors`, blockaddress of a function whose body is not linked yet (DelayedBBs), intrinsics
+  whose name mangles a struct type (remangleIntrinsicFunction), uniqued metadata cycles that change, inline asm whose
+  type changes, `#dbg_assign`.
+- The LTO module passes (cross-dso-cfi, globalsplit, wholeprogramdevirt, lowertypetests, simplify-type-tests,
+  expand-variadics, pgo-icall-prom) are ported up to their early exits and fail loudly on CFI / devirtualization /
+  value-profile input; drop-type-tests, canonicalize-aliases and name-anon-globals are complete.
+- MergeFunctions' FnTree is a list searched for an equal node (only equality decides merges; see
+  knowledge/llvm/linker-and-lto.md). Its Deferred WeakTrackingVHs follow RAUW through `mf.fwd`.
+- `verify` is now also a module pass name (`verify,forceattrs` is a module pipeline, as in LLVM); before, such a
+  pipeline was wrapped into one function adaptor.
+- Remaining: tests/lto/ipo/debug_info (clang -g emits key-instruction atom groups; loop-rotate's mapAtomInstance and
+  ValueMapper's RemapSourceAtom fail loudly, and so do clone_function, jump-threading, foldBranchToCommonDest);
+  MergeFunc/cfi-thunk-merging (lowertypetests CFI); phase-ordering: knowledge retention in loop passes,
+  ptrauth protected.field.ptr, LoopVectorize convertToStridedAccesses (preserve-access-group).
 
 ## llc's IR pipeline (L1.isel-ir-O0 COMPLETE; L1.codegen-ir: isel-ir 482/482, imported ::opt see below)
 

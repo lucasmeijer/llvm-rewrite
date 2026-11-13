@@ -151,7 +151,7 @@ lib/Transforms/Utils/LoopUnroll.cpp 0.85  # no parallel-reduction accumulators (
 lib/Transforms/Utils/LoopUnrollRuntime.cpp 0.98
 lib/Transforms/Utils/LoopPeel.cpp 0.98
 lib/Analysis/LoopUnrollAnalyzer.cpp 1
-lib/Transforms/Utils/ValueMapper.cpp 0.35  # mapValue, mapBlockAddress, remapInstruction, remapDbgRecord, mapSimpleMetadata (+ WeakTrackingVH maps for the inliner); not the MDNodeMapper, global/alias/appending remapping, TypeMapper
+lib/Transforms/Utils/ValueMapper.cpp 0.75  # value_mapper.jai (cloning) + linker.jai (TypeMapper, materializer, two mapping contexts, MDNodeMapper with ReuseAndMutateDistinctMDs (uniqued cycles that change fail), appending variables, aliases, the global worklist); not DelayedBBs, IdentityMD
 lib/Transforms/Utils/CloneFunction.cpp 0.8  # + CloneAndPruneFunctionInto (PruningFunctionCloner) for the inliner, CloneFunction/CloneFunctionInto(LocalChangesOnly) for function specialization (function_specialization.jai); not CloneModule / the module-level variants
 lib/Transforms/Scalar/SimpleLoopUnswitch.cpp 0.97  # jai_unswitch: all of the pass; not ShouldRunExtraSimpleLoopUnswitch / extra-simple-loop-unswitch-passes (O3 pipeline), printPipeline, statistics; TTI.hasBranchDivergence is false (X86 / no target only)
 lib/Transforms/Vectorize/VectorCombine.cpp 0.97  # all folds; the VP-intrinsic paths (scalarizeVPIntrinsic, foldBitcastOfVPLoad) only match and fail loudly
@@ -227,3 +227,13 @@ lib/CodeGen/AtomicExpandPass.cpp 0.1   # guards + simplifyIdempotentRMW; the exp
 lib/Transforms/IPO/Attributor.cpp 0.35  # the light configuration only: fixpoint, manifest, AttrsMap, seeding, checkForAll*, InformationCache; no liveness, cleanupIR, signature rewrites, wrappers, full attributor passes
 lib/Transforms/IPO/AttributorAttributes.cpp 0.2  # the 17 AAs AttributorLight allows (simplified where AAPotentialValues / AAIsDead / AAPointerInfo would be queried)
 lib/Analysis/AssumeBundleQueries.cpp 0.4  # fillMapFromAssume, getKnowledgeFromUse / getKnowledgeFromBundle
+# L2.lto / L2.lto-passes (jai_lto, 2026-11)
+lib/Transforms/IPO/MergeFunctions.cpp 0.95  # no doFunctionalCheck (debug only), runOnFunctions
+lib/Transforms/Utils/FunctionComparator.cpp 0.95  # equality is exact; the order between unequal functions only approximately LLVM's (unused)
+lib/IR/StructuralHash.cpp 0.3  # StructuralHash(F) without DetailedHash
+lib/Transforms/IPO/CrossDSOCFI.cpp 0.1  # early exit only
+lib/Transforms/IPO/GlobalSplit.cpp 0.1  # early exit only
+lib/Transforms/IPO/WholeProgramDevirt.cpp 0.02  # DevirtModule::run's early exit only
+lib/Transforms/IPO/LowerTypeTests.cpp 0.05  # dropTypeTests, the early exits of lower() and SimplifyTypeTests
+lib/Transforms/IPO/ExpandVariadics.cpp 0.03  # no VariadicABIInfo for x86: early exit
+lib/Transforms/IPO/ForceFunctionAttrs.cpp 0.85  # no -forceattrs-csv-path
