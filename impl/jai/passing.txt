@@ -2689,6 +2689,11 @@ tests/imported/llvm/Analysis/LoopAccessAnalysis/wide-pointer-index-distance.ll::
 tests/imported/llvm/Analysis/LoopAccessAnalysis/wide-pointer-index-distance.ll::roundtrip
 tests/imported/llvm/Analysis/LoopAccessAnalysis/wrapping-pointer-versioning.ll::analysis
 tests/imported/llvm/Analysis/LoopAccessAnalysis/wrapping-pointer-versioning.ll::roundtrip
+tests/imported/llvm/Analysis/LoopCacheAnalysis/compute-cost.ll::roundtrip
+tests/imported/llvm/Analysis/LoopCacheAnalysis/crash-after-pr164798.ll::roundtrip
+tests/imported/llvm/Analysis/LoopCacheAnalysis/interchange-cost-beneficial.ll::roundtrip
+tests/imported/llvm/Analysis/LoopCacheAnalysis/interchange-refcost-overflow.ll::roundtrip
+tests/imported/llvm/Analysis/LoopCacheAnalysis/partially-perfect-nest.ll::roundtrip
 tests/imported/llvm/Analysis/LoopInfo/2003-02-19-LoopInfoNestingBug.ll::analysis
 tests/imported/llvm/Analysis/LoopInfo/2003-02-19-LoopInfoNestingBug.ll::roundtrip
 tests/imported/llvm/Analysis/LoopInfo/2003-05-15-NestingProblem.ll::analysis
