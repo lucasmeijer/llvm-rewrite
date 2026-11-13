@@ -1480,19 +1480,22 @@ Still slow / known:
 - Remaining: MergeFunc/cfi-thunk-merging (lowertypetests CFI); phase-ordering: knowledge retention in loop passes,
   ptrauth protected.field.ptr, LoopVectorize convertToStridedAccesses (preserve-access-group).
 
-## llc's IR pipeline (L1.isel-ir-O0 COMPLETE; L1.codegen-ir: isel-ir 482/482, imported ::opt see below)
+## llc's IR pipeline (L1.isel-ir-O0 COMPLETE; L1.codegen-ir COMPLETE)
 
 - `bin/llc` is the opt program with another entry (`llc.jai` sets `LLC_TOOL` and loads `opt.jai`; `main` calls
   `llc_main`). `codegen_pipeline.jai` builds TargetPassConfig's IR pass list (`Cg_Pass`, `cg_build_pipeline`) and
   runs it with the legacy FPM ordering (`cg_run_pipeline`); llc's and CodeGenPrepare's cl::opts are parsed by
   `cg_parse_cl_opt` (also reachable from opt). Every codegen IR pass also has its opt `-passes=` name
   (codegenprepare, consthoist, partially-inline-libcalls, expand-reductions, unreachableblockelim,
-  pre-isel-intrinsic-lowering, loop-reduce, canon-freeze, loop-term-fold).
+  pre-isel-intrinsic-lowering, atomic-expand, loop-reduce, canon-freeze, loop-term-fold). `atomic-expand` and the
+  real pipeline need `require<libcall-lowering-info>` first (a no-op that only marks the module analysis cached).
 - Files: `cgp_*.jai` + `bypass_slow_division.jai` (CodeGenPrepare), `pass_consthoist.jai`,
   `pass_partially_inline_libcalls.jai`, `lsr_core.jai` / `lsr_instance.jai` / `lsr_chains.jai` / `lsr_generate.jai` /
   `lsr_rewrite.jai` (LoopStrengthReduce, split in LLVM's source order), `pass_canon_freeze.jai`,
   `pass_loop_term_fold.jai`, `cg_interleaved_access.jai`, `cg_x86_partial_reduction.jai`, `cg_lowering_passes.jai`
-  (PreISelIntrinsicLowering, AtomicExpand guards + the idempotent-RMW fenced load, ExpandIRInsts guard),
+  (PreISelIntrinsicLowering, the idempotent-RMW fenced load, ExpandIRInsts guard), `atomic_expand.jai`
+  (AtomicExpand), `lower_mem_intrinsics.jai` (LowerMemIntrinsics' unknown-size and memset.pattern loops),
+  `vp_expand.jai` + generated `gen_vp.jai` (ExpandVectorPredication; `gen/gen_vp.py` reads VPIntrinsics.def),
   `cg_misc_passes.jai` (UnreachableBlockElim and passes that are no-ops for our inputs, each guarded),
   `cg_todo_passes.jai` (what is left: ScalarizeMaskedMemIntrin as a no-op).
 - Guards: a pass that is not fully ported fails loudly exactly where LLVM would change the IR (e.g.
@@ -1511,8 +1514,18 @@ Still slow / known:
   computed; LLVM updates its BFI incrementally (setBlockFreq in dupRetToEnableTailCallOpts / select-to-branch), which
   we do not mirror: a profiled function whose CFG CGP changed before a later size query could differ.
 - Not ported (fail loudly): LSR's SCEV-based debug-value salvage (5 imported files hit it), vscale steps, landing-pad
-  predecessor splitting in RewriteForPHI; CGP statepoint relocations; PreISelIntrinsicLowering's VP expansion, ObjC
-  ARC calls, memset.pattern, non-constant-length memcpy/memset.inline (LowerMemIntrinsics); AtomicExpand's
-  cmpxchg loops, libcalls and integer casts (expand-atomic-non-integer.ll).
+  predecessor splitting in RewriteForPHI; VP expansion of constrained-FP VP intrinsics; AtomicExpand's x86
+  bit-test / compare-arithmetic RMW intrinsics (`llvm.x86.atomic.bt*`, `*.cc`), Windows' i128 libcalls.
+- AtomicExpand: ReplacementIRBuilder is an InstSimplifyFolder builder (`ae_binop`/`ae_cast`/... fold through
+  InstSimplify: `atomicrmw fsub x, 0.0` builds no `fsub`), and its inserter tags every new instruction with the
+  replaced one's `!pcsections` / `!mmra` (`ae_md_begin`/`ae_md_end` use the monotonic Value_Id watermark). The
+  libcall paths use a plain IRBuilder (no folding beyond constants, no metadata). x86's
+  `shouldIssueAtomicLoadForAtomicEmulationLoop` is false: the loop's initial load is non-atomic.
+- PreISelIntrinsicLowering: x86 uses the default TTI VP legalization (EVL discard, op convert); LowerMemIntrinsics'
+  loop type is always i8 on x86 (no getMemcpyLoopLoweringType override), so only the unknown-size / pattern paths
+  were needed.
+- Sweeps (atomic-expand with `-mtriple=x86_64-linux-gnu`, with `-mattr=+cx16`, and `--with-test-flags`;
+  pre-isel-intrinsic-lowering; codegenprepare): 0 differs. CGP's llvm.objectsize / is.constant are llvm_unreachable
+  in LLVM (UB in a release build) and fail loudly here.
 - Sweeps (`./harness/run sweep --impl jai --passes loop-reduce`, with and without `--extra=-mtriple=x86_64-unknown-linux-gnu`):
   8048-8073 of 8079 identical, 0 silent mismatches; the loud failures are the items above.

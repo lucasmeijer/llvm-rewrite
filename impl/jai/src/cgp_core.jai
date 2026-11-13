@@ -307,8 +307,9 @@ cgp_run :: (f: Value_Id) -> bool {
     }
 
     if !cgp_cl.disable_gc_opts {
-        for i: fn_insts(f) if call_iid(i) == IID_EXPERIMENTAL_GC_STATEPOINT
-            fatal("codegenprepare: gc.statepoint relocations (simplifyOffsetableRelocate) are not supported yet");
+        statepoints: [..] Value_Id; statepoints.allocator = temp;
+        for i: fn_insts(f) if call_iid(i) == IID_EXPERIMENTAL_GC_STATEPOINT array_add(*statepoints, i);
+        for statepoints ever_made_change |= cgp_simplify_offsetable_relocate(it);
     }
 
     ever_made_change |= cgp_place_dbg_values(f);
@@ -1883,4 +1884,109 @@ cgp_set_section_prefix :: (f: Value_Id, prefix: string) {
 cgp_has_one_use :: (v: Value_Id) -> bool {
     if cgp_is_constant_data(v) return false;
     return has_one_use(v);
+}
+
+// ---------------------------------------------------------------- gc.relocate simplification
+// CodeGenPrepare::simplifyOffsetableRelocate, computeBaseDerivedRelocateMap, getGEPSmallConstantIntOffsetV and
+// simplifyRelocatesOffABase; GCProjectionInst::getStatepoint and GCRelocateInst::getBasePtr/getDerivedPtr
+// (llvm/lib/IR/IntrinsicInst.cpp).
+
+cgp_relocate_base_index :: (r: Value_Id) -> u64 { return ap_zext_value(const_ap(call_arg(r, 1))); }
+cgp_relocate_derived_index :: (r: Value_Id) -> u64 { return ap_zext_value(const_ap(call_arg(r, 2))); }
+// GCProjectionInst::getStatepoint: NONE for an undef / none token
+cgp_relocate_statepoint :: (r: Value_Id) -> Value_Id {
+    t := call_arg(r, 0);
+    if !is_inst(t) return NONE;
+    if inst_op(t) != .LANDINGPAD return t;
+    pred := block_unique_predecessor(inst_block(t));
+    return block_last(pred);
+}
+cgp_relocate_ptr :: (r: Value_Id, idx: u64) -> Value_Id {
+    sp := cgp_relocate_statepoint(r);
+    if sp == NONE return const_undef(vtype(call_arg(r, 0)));
+    k := call_bundle_index(sp, "gc-live");
+    if k >= 0 {
+        b, e := call_bundle_range(sp, cast(u32) k);
+        if idx > e - b return NONE;
+        return op(sp, b + cast(u32) idx);
+    }
+    if idx > call_num_args(sp) return NONE;
+    return call_arg(sp, cast(u32) idx);
+}
+
+cgp_simplify_offsetable_relocate :: (sp: Value_Id) -> bool {
+    all: [..] Value_Id; all.allocator = temp;
+    u := ir.v_first_use[sp];
+    while u != NONE {
+        usr := ir.u_user[u];
+        if call_iid(usr) == IID_EXPERIMENTAL_GC_RELOCATE array_add(*all, usr);
+        u = ir.u_next[u];
+    }
+    if all.count < 2 return false;
+    // computeBaseDerivedRelocateMap: RelocateIdxMap keeps the first relocate per (base, derived) pair
+    Key :: struct { b: u64; d: u64; r: Value_Id; }
+    idx_map: [..] Key; idx_map.allocator = temp;
+    for r: all {
+        bi := cgp_relocate_base_index(r); di := cgp_relocate_derived_index(r);
+        found := false;
+        for idx_map if it.b == bi && it.d == di { found = true; break; }
+        if !found array_add(*idx_map, .{bi, di, r});
+    }
+    Group :: struct { base: Value_Id; targets: [..] Value_Id; }
+    groups: [..] Group; groups.allocator = temp;
+    for item: idx_map {
+        if item.b == item.d continue;
+        base: Value_Id = NONE;
+        for idx_map if it.b == item.b && it.d == item.b { base = it.r; break; }
+        if base == NONE continue;
+        g: *Group = null;
+        for * groups if it.base == base { g = it; break; }
+        if !g { g = array_add(*groups); g.base = base; g.targets.allocator = temp; }
+        array_add(*g.targets, item.r);
+    }
+    if !groups.count return false;
+    made_change := false;
+    for groups made_change = cgp_simplify_relocates_off_a_base(it.base, it.targets);   // sic: `=`, not `|=`
+    return made_change;
+}
+
+cgp_simplify_relocates_off_a_base :: (rbase: Value_Id, targets: [] Value_Id) -> bool {
+    made_change := false;
+    r := block_first_insertion_pt(inst_block(rbase));
+    while r != rbase {
+        if call_iid(r) == IID_EXPERIMENTAL_GC_RELOCATE && cgp_relocate_statepoint(r) == cgp_relocate_statepoint(rbase) &&
+           cgp_relocate_base_index(r) == cgp_relocate_base_index(rbase) {
+            inst_move_before_dbg(rbase, r);
+            made_change = true;
+            break;
+        }
+        r = inst_next(r);
+    }
+    for to_replace: targets {
+        if cgp_relocate_base_index(to_replace) == cgp_relocate_derived_index(to_replace) continue;
+        if inst_block(rbase) != inst_block(to_replace) continue;
+        base := cgp_relocate_ptr(to_replace, cgp_relocate_base_index(to_replace));
+        derived := cgp_relocate_ptr(to_replace, cgp_relocate_derived_index(to_replace));
+        if derived == NONE || !is_inst(derived) || inst_op(derived) != .GEP || op(derived, 0) != base continue;
+        offs: [..] Value_Id; offs.allocator = temp;
+        ok := true;
+        for k: 1..nops(derived) - 1 {
+            o := op(derived, k);
+            if vkind(o) != .C_INT || ap_zext_value(const_ap(o)) > 20 { ok = false; break; }
+            array_add(*offs, o);
+        }
+        if !ok continue;
+        b: Irb; irb_set_before(*b, inst_next(rbase));
+        b.dbg = get_metadata(to_replace, MDK_DBG);
+        actual_base := rbase;
+        if vtype(rbase) != vtype(base) actual_base = irb_bitcast(*b, rbase, vtype(base));
+        repl := irb_gep(*b, gep_source_type(derived), actual_base, offs);
+        take_name(repl, to_replace);
+        actual := repl;
+        if vtype(repl) != vtype(to_replace) actual = irb_bitcast(*b, repl, vtype(to_replace));
+        replace_all_uses_with(to_replace, actual);
+        erase_inst(to_replace);
+        made_change = true;
+    }
+    return made_change;
 }

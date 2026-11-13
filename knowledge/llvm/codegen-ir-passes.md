@@ -56,6 +56,23 @@ diffing our output against `llc -stop-before=x86-isel` (the `::isel-ir` check) o
   `fence seq_cst` + `load atomic` with `getStrongestFailureOrdering` (release -> monotonic, acq_rel -> acquire),
   the RMW's align and syncscope, unless it is wider than 64 bits or is an unused `or 0` (X86ISelLowering.cpp
   lowerIdempotentRMWIntoFencedLoad; tests/e2e/O2/misc/thread_local_atomics.ll).
+- **AtomicExpand on x86-64** (AtomicExpandPass.cpp + X86ISelLowering.cpp; verified by
+  Transforms/AtomicExpand/X86/expand-atomic-non-integer.ll and a full-corpus sweep with and without `+cx16`):
+  - as an opt pass it needs `require<libcall-lowering-info>` first, else it emits "'LibcallLoweringModuleAnalysis'
+    analysis required" and changes nothing.
+  - max atomic size is 128 bits with cx16, else 64; a too-big or under-aligned access becomes an `__atomic_*`
+    libcall (sized `_1.._16` variant only when align >= size; i128 values passed directly, others through
+    allocas with lifetime markers; orders in C ABI numbering, seq_cst = 5). An atomicrmw with no libcall (min/max,
+    fp ops, a generic size for add etc.) becomes a cmpxchg loop whose cmpxchg is then turned into
+    `__atomic_compare_exchange[_N]`.
+  - FP atomic loads/stores and FP/pointer `xchg` are cast to the same-size integer first; pointer cmpxchg goes
+    through ptrtoint/inttoptr + insertvalue rebuild. Vectors are not cast.
+  - 128-bit loads become `cmpxchg 0, 0` and stores become `xchg` (then a cmpxchg loop) when cx16 is available and
+    *not* (AVX && !noimplicitfloat && !soft-float); with AVX the 128-bit access stays atomic as is.
+  - RMW ops other than xchg/add/sub/or/and/xor become cmpxchg loops (`atomicrmw.start` / `atomicrmw.end`, initial
+    load non-atomic); or/and/xor with a used result too unless it is a single-bit test (`llvm.x86.atomic.bt*`) or
+    `xor` with the sign mask. The builder is InstSimplifyFolder-based: `atomicrmw fsub x, 0.0` builds no `fsub`.
+    Every instruction it creates gets the original's `!pcsections` and (memory ops) `!mmra`.
 - **X86PartialReduction** rewrites the leaves of an `extractelement 0` of a log2(n)-stage add/shuffle pyramid:
   `mul` of shrinkable operands into even/odd shuffles + add + zero-concat (pmaddwd shape), `abs(sub(zext <N x i8>,
   zext))` into `llvm.x86.sse2.psad.bw` calls (AVX2 / AVX512BW variants for wide vectors).
@@ -64,6 +81,15 @@ diffing our output against `llc -stop-before=x86-isel` (the `::isel-ir` check) o
   (`<name>.frozen`), drops poison flags of the step instruction and removes the freeze.
 - **PreISelIntrinsicLowering** lowers `llvm.objectsize`/`llvm.is.constant` by calling `lowerConstantIntrinsics` on
   the whole caller once per call site visited (`forEachCall`); unreachable blocks keep their calls.
+  On x86 it also expands every `llvm.vp.*` call (default TTI: EVL folded into the mask, ops converted to
+  unpredicated ones, `-expandvp-override-*` honoured), lowers non-constant-length `memcpy.inline`/`memset.inline`
+  to byte loops, `memset.pattern` to `memset_pattern16` (Darwin-only TLI) or a loop, and ObjC ARC intrinsics to
+  `objc_*` calls carrying the intrinsic's tail kind (PreISelIntrinsicLowering.cpp; the PreISelIntrinsicLowering/
+  tests).
+- **CodeGenPrepare simplifyOffsetableRelocate**: for each gc.statepoint, a derived `gc.relocate` whose derived
+  pointer is a GEP off the base with all-constant indices <= 20 is rewritten as the same GEP off the base's
+  relocate (in the same block; the base relocate is moved up first). The result of the loop is `MadeChange =`,
+  not `|=` (CodeGenPrepare.cpp; CodeGenPrepare/X86/statepoint-relocate.ll).
 - **ExpandMemCmp** (opt -O2 runs it after mergeicmps): candidate calls are found with
   `TLI->getLibFunc(*CI, Func)`, which checks the name and prototype but **not** availability (`TLI.has`), so `bcmp`
   is expanded on triples where TLI marks it unavailable (ExpandMemCmp/X86/bcmp.ll, x86_64-unknown-unknown). x86 allows

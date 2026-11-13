@@ -1,12 +1,11 @@
 // Early lowering passes of llc's IR pipeline:
-//   PreISelIntrinsicLowering   llvm/lib/CodeGen/PreISelIntrinsicLowering.cpp (lowerIntrinsics; the memory-intrinsic,
-//                              VP, ObjC, scalable-vector math, ptrauth, protected-field and memset.pattern
-//                              expansions are not ported and fail loudly where LLVM would expand)
+//   PreISelIntrinsicLowering   llvm/lib/CodeGen/PreISelIntrinsicLowering.cpp (lowerIntrinsics with the memory
+//                              intrinsics (lower_mem_intrinsics.jai), memset.pattern, VP (vp_expand.jai) and ObjC
+//                              ARC lowerings; the scalable-vector math loops, ptrauth and protected-field expansions
+//                              are not ported and fail loudly where LLVM would expand)
 //   ExpandIRInsts (guard)      llvm/lib/CodeGen/ExpandIRInsts.cpp: on x86-64 only integer div/rem and int<->fp
 //                              conversions wider than 128 bits are expanded (frem is a libcall); those fail loudly
-//   AtomicExpand (guard)       llvm/lib/CodeGen/AtomicExpandPass.cpp with the X86TargetLowering hooks
-//                              (X86ISelLowering.cpp shouldExpandAtomic*InIR): atomics LLVM leaves alone pass, every
-//                              instruction it would rewrite fails loudly
+//   AtomicExpand               atomic_expand.jai (this file keeps the idempotent-RMW lowering and the guards)
 
 // ---------------------------------------------------------------- PreISelIntrinsicLowering
 
@@ -58,9 +57,172 @@ pil_lower_constant_intrinsic_call :: (ci: Value_Id) -> bool {
     return changed;
 }
 
+// expandMemIntrinsicUses for llvm.memcpy.inline / llvm.memset.inline (only non-constant lengths are expanded) and
+// llvm.experimental.memset.pattern (memset_pattern16 where the target has it, else a loop)
+pil_expand_mem_intrinsic_uses :: (f: Value_Id, id: Intrinsic_Id, cmap: *Table(Value_Id, Value_Id)) -> bool {
+    changed := false;
+    users: [..] Value_Id; users.allocator = temp;
+    u := ir.v_first_use[f];
+    while u != NONE { array_add(*users, ir.u_user[u]); u = ir.u_next[u]; }
+    for mi: users {
+        if !is_inst(mi) fatal("pre-isel-intrinsic-lowering: a non-call use of %", vname(f));
+        if id == IID_MEMCPY_INLINE {
+            if vkind(call_arg(mi, 2)) == .C_INT continue;
+            lmi_expand_memcpy_unknown_size(mi);
+            erase_inst(mi);
+            changed = true;
+        } else if id == IID_MEMSET_INLINE {
+            if vkind(call_arg(mi, 2)) == .C_INT continue;
+            lmi_expand_memset_unknown_size(mi);
+            erase_inst(mi);
+            changed = true;
+        } else {
+            t := tli_for(inst_fn(mi));
+            pattern := pil_memset_pattern16_value(mi, t);
+            if pattern == NONE {
+                lmi_expand_memset_pattern(mi);
+                erase_inst(mi);
+                changed = true;
+                continue;
+            }
+            b: Irb; irb_set_before(*b, mi);
+            dest := call_arg(mi, 0);
+            size_t := type_int(tli_size_t_bits());
+            msp := get_or_insert_lib_func_types(t, .memset_pattern16, 0, ir.t_void, vtype(dest), ir.t_ptr, size_t);
+            infer_non_mandatory_lib_func_attrs_name("memset_pattern16", t);
+            found, gv := table_find(cmap, pattern);
+            if !found {
+                gv = gv_create(vtype(pattern), true, .PRIVATE, pattern, ".memset_pattern", NONE, 0, 0);
+                glob(gv).unnamed_addr = 2;
+                glob(gv).align = 16;
+                table_set(cmap, pattern, gv);
+            }
+            len := call_arg(mi, 2);
+            lz := irb_zext_or_trunc(*b, len, size_t);
+            nbytes := irb_binop(*b, .MUL, const_int(size_t, dl_type_alloc_size(vtype(call_arg(mi, 1)))), lz);
+            call := irb_call(*b, msp, .[dest, gv, nbytes]);
+            set_aa_metadata(call, get_aa_metadata(mi));
+            ps := attr_list_param(inst(mi).attrs, 0);
+            if ps != 0 inst(call).attrs = attr_list_with_param(inst(call).attrs, 0, attr_set_merge(attr_list_param(inst(call).attrs, 0), ps));
+            erase_inst(mi);
+            changed = true;
+        }
+    }
+    return changed;
+}
+// getMemSetPattern16Value
+pil_memset_pattern16_value :: (mi: Value_Id, t: *Tli) -> Value_Id {
+    if ptr_addrspace(vtype(call_arg(mi, 0))) != 0 return NONE;
+    v := call_arg(mi, 1);
+    vt := vtype(v);
+    if !is_lib_func_emittable(t, .memset_pattern16) return NONE;
+    k := vkind(v);
+    if !is_constant_kind(k) || k == .C_EXPR return NONE;
+    size := dl_type_size_bits(vt);
+    if size != dl_type_store_size(vt) * 8 || (size & (size - 1)) != 0 || size == 0 return NONE;
+    size /= 8;
+    if size > 16 return NONE;
+    if size == 16 return v;
+    n := 16 / size;
+    elts := NewArray(cast(s64) n, Value_Id,, temp);
+    for * elts it.* = v;
+    return const_array_of(type_array(n, vt), elts);
+}
+
+// The RTLIB::impl_objc_* runtime function of an llvm.objc.* intrinsic lowered by lowerIntrinsics, and whether it
+// gets nonlazybind ("" for llvm.objc.clang.arc.use and the annotations, which are left alone)
+pil_objc_runtime_function :: (name: string) -> (string, bool) {
+    if name == {
+        case "llvm.objc.autorelease"; return "objc_autorelease", false;
+        case "llvm.objc.autoreleasePoolPop"; return "objc_autoreleasePoolPop", false;
+        case "llvm.objc.autoreleasePoolPush"; return "objc_autoreleasePoolPush", false;
+        case "llvm.objc.autoreleaseReturnValue"; return "objc_autoreleaseReturnValue", false;
+        case "llvm.objc.copyWeak"; return "objc_copyWeak", false;
+        case "llvm.objc.destroyWeak"; return "objc_destroyWeak", false;
+        case "llvm.objc.initWeak"; return "objc_initWeak", false;
+        case "llvm.objc.loadWeak"; return "objc_loadWeak", false;
+        case "llvm.objc.loadWeakRetained"; return "objc_loadWeakRetained", false;
+        case "llvm.objc.moveWeak"; return "objc_moveWeak", false;
+        case "llvm.objc.release"; return "objc_release", true;
+        case "llvm.objc.retain"; return "objc_retain", true;
+        case "llvm.objc.retainAutorelease"; return "objc_retainAutorelease", false;
+        case "llvm.objc.retainAutoreleaseReturnValue"; return "objc_retainAutoreleaseReturnValue", false;
+        case "llvm.objc.retainAutoreleasedReturnValue"; return "objc_retainAutoreleasedReturnValue", false;
+        case "llvm.objc.claimAutoreleasedReturnValue"; return "objc_claimAutoreleasedReturnValue", false;
+        case "llvm.objc.retainBlock"; return "objc_retainBlock", false;
+        case "llvm.objc.storeStrong"; return "objc_storeStrong", false;
+        case "llvm.objc.storeWeak"; return "objc_storeWeak", false;
+        case "llvm.objc.unsafeClaimAutoreleasedReturnValue"; return "objc_unsafeClaimAutoreleasedReturnValue", false;
+        case "llvm.objc.retainedObject"; return "objc_retainedObject", false;
+        case "llvm.objc.unretainedObject"; return "objc_unretainedObject", false;
+        case "llvm.objc.unretainedPointer"; return "objc_unretainedPointer", false;
+        case "llvm.objc.retain.autorelease"; return "objc_retain_autorelease", false;
+        case "llvm.objc.sync.enter"; return "objc_sync_enter", false;
+        case "llvm.objc.sync.exit"; return "objc_sync_exit", false;
+    }
+    return "", false;
+}
+// getOverridingTailCallKind: objcarc::GetFunctionClass, then IsAlwaysTail (tail) / IsNeverTail (notail)
+pil_objc_overriding_tail_kind :: (name: string) -> u32 {
+    if name == "llvm.objc.retain" || name == "llvm.objc.retainAutoreleasedReturnValue" ||
+       name == "llvm.objc.unsafeClaimAutoreleasedReturnValue" || name == "llvm.objc.autoreleaseReturnValue" return 1;
+    if name == "llvm.objc.autorelease" return 3;
+    return 0;
+}
+// lowerObjCCall
+pil_lower_objc_call :: (f: Value_Id, new_name: string, set_non_lazy_bind: bool, name: string) -> bool {
+    if !has_uses(f) return false;
+    ft := glob(f).value_type;
+    nf := module_get_or_insert_function(new_name, ft);
+    if vkind(nf) == .FUNCTION {
+        gv_set_linkage(nf, glob(f).linkage);
+        if set_non_lazy_bind && !gv_is_weak_for_linker(nf) fn_add_fn_attr_kind(nf, .NonLazyBind);
+    }
+    otck := pil_objc_overriding_tail_kind(name);
+    returned_idx := -1;
+    for k: 0..cast(s64) fn_nargs(f) - 1 if arg_has_attr(fn_arg(f, cast(u32) k), .Returned) { returned_idx = k; break; }
+    uses: [..] Use_Id; uses.allocator = temp;
+    u := ir.v_first_use[f];
+    while u != NONE { array_add(*uses, u); u = ir.u_next[u]; }
+    for uu: uses {
+        cb := ir.u_user[uu];
+        if !is_inst(cb) || !is_call_base(cb) fatal("pre-isel-intrinsic-lowering: a non-call use of %", name);
+        if call_called_function(cb) != f {
+            // the argument of a "clang.arc.attachedcall" operand bundle
+            use_set(uu, nf);
+            continue;
+        }
+        if inst_op(cb) != .CALL fatal("pre-isel-intrinsic-lowering: an invoke of % is not supported", name);
+        args: [..] Value_Id; args.allocator = temp;
+        for k: 0..cast(s64) call_num_args(cb) - 1 array_add(*args, call_arg(cb, cast(u32) k));
+        nc := ipo_create_call_like(cb, ft, nf, args, cb);
+        if vname(cb).count set_name(nc, vname(cb));
+        tck := call_tail_kind(cb);
+        call_set_tail_kind(nc, max(tck, otck));
+        if returned_idx >= 0 add_param_attr_kind_call(nc, cast(u32) returned_idx, .Returned);
+        if has_uses(cb) replace_all_uses_with(cb, nc);
+        erase_inst(cb);
+    }
+    return true;
+}
+add_param_attr_kind_call :: (c: Value_Id, k: u32, kind: Attr_Kind) {
+    l := inst(c).attrs;
+    inst(c).attrs = attr_list_with_param(l, k, attr_set_add_kind(attr_list_param(l, k), kind));
+}
+
+// expandVectorPredicationIntrinsic through forEachCall: Changed tracks any IR change, the result whether the call was
+// replaced
+pil_vp_changed: bool;
+pil_expand_vp_call :: (ci: Value_Id) -> bool {
+    changed, removed := vp_expand_vector_predication(ci);
+    pil_vp_changed |= changed;
+    return removed;
+}
+
 // PreISelIntrinsicLowering::lowerIntrinsics (module pass)
 pre_isel_intrinsic_lowering_run :: () -> bool {
     changed := false;
+    pattern_globals: Table(Value_Id, Value_Id); pattern_globals.allocator = temp;   // CMap
     fns: [..] Value_Id; fns.allocator = temp;
     for ir.m_functions array_add(*fns, it);
     for f: fns {
@@ -73,17 +235,8 @@ pre_isel_intrinsic_lowering_run :: () -> bool {
             // memmove and memset, so every call that should be expanded is left for the libcall
             continue;
         }
-        if id == IID_MEMCPY_INLINE || id == IID_MEMSET_INLINE {
-            u := ir.v_first_use[f];
-            while u != NONE {
-                c := ir.u_user[u];
-                if is_inst(c) && vkind(call_arg(c, 2)) != .C_INT fatal("pre-isel-intrinsic-lowering: expanding % with a non-constant length is not supported yet", name);
-                u = ir.u_next[u];
-            }
-            continue;
-        }
-        if id == IID_EXPERIMENTAL_MEMSET_PATTERN {
-            if has_uses(f) fatal("pre-isel-intrinsic-lowering: llvm.experimental.memset.pattern is not supported yet");
+        if id == IID_MEMCPY_INLINE || id == IID_MEMSET_INLINE || id == IID_EXPERIMENTAL_MEMSET_PATTERN {
+            changed |= pil_expand_mem_intrinsic_uses(f, id, *pattern_globals);
             continue;
         }
         if id == IID_LOAD_RELATIVE { changed |= pil_lower_load_relative(f); continue; }
@@ -92,11 +245,15 @@ pre_isel_intrinsic_lowering_run :: () -> bool {
             continue;
         }
         if begins_with(name, "llvm.vp.") || begins_with(name, "llvm.experimental.vp.") {
-            if has_uses(f) fatal("pre-isel-intrinsic-lowering: vector-predication intrinsics (%) are not supported yet", name);
+            pil_vp_changed = false;
+            pil_for_each_call(f, pil_expand_vp_call);
+            changed |= pil_vp_changed;
             continue;
         }
         if begins_with(name, "llvm.objc.") {
-            if has_uses(f) fatal("pre-isel-intrinsic-lowering: ObjC ARC intrinsics (%) are not supported yet", name);
+            lib, set_non_lazy_bind := pil_objc_runtime_function(name);
+            if lib.count == 0 continue;   // llvm.objc.clang.arc.use / noop.use / the annotations are not lowered
+            changed |= pil_lower_objc_call(f, lib, set_non_lazy_bind, name);
             continue;
         }
         if name == "llvm.acos" || name == "llvm.asin" || name == "llvm.atan" || name == "llvm.cos" || name == "llvm.cosh" ||
@@ -156,59 +313,6 @@ ae_fail :: (i: Value_Id, what: string) {
 
 // getAtomicOpSize / atomicSizeSupported: x86-64 supports up to 16 bytes, naturally aligned
 ae_size_supported :: (i: Value_Id, size: u64, align: u64) -> bool { return align >= size && size <= 16; }
-
-atomic_expand_run :: (f: Value_Id) -> Preserved {
-    t := tti_get(f);
-    cx16 := t.kind == .X86 && st_canUseCMPXCHG16B(*t.xl);
-    avx := t.kind == .X86 && st_hasAVX(*t.xl);
-    noimplicitfloat := fn_has_fn_attr(f, .NoImplicitFloat);
-    changed := false;
-    insts: [..] Value_Id; insts.allocator = temp;
-    for i: fn_insts(f) array_add(*insts, i);
-    for i: insts {
-        o := inst_op(i);
-        if o == .LOAD || o == .STORE {
-            if !inst_is_atomic(i) continue;
-            ty := ifx o == .LOAD then vtype(i) else vtype(op(i, 0));
-            size := dl_type_store_size(ty);
-            if !ae_size_supported(i, size, inst(i).align) ae_fail(i, "an atomic access of an unsupported size or alignment (libcall)");
-            if is_fp_type(ty) ae_fail(i, "an atomic floating-point load/store (cast to integer)");
-            bits := dl_type_size_bits(ty);
-            if bits == 128 && !(avx && !noimplicitfloat) && cx16 ae_fail(i, "a 128-bit atomic load/store (cmpxchg16b)");
-        } else if o == .ATOMICRMW {
-            ty := vtype(i);
-            size := dl_type_store_size(ty);
-            if !ae_size_supported(i, size, inst(i).align) ae_fail(i, "an atomicrmw of an unsupported size or alignment (libcall)");
-            rop := inst(i).ord2;
-            vt := vtype(op(i, 1));
-            if rop == RMW_XCHG && (is_fp_type(vt) || type_kind(vt) == .PTR) ae_fail(i, "a floating-point / pointer atomicrmw xchg (cast to integer)");
-            if ae_is_idempotent(i) && t.kind == .X86 && ae_lower_idempotent_rmw_into_fenced_load(i, *t.xl) { changed = true; continue; }
-            if dl_type_size_bits(ty) > 64 { if cx16 ae_fail(i, "a 128-bit atomicrmw (cmpxchg16b loop)"); continue; }
-            if rop == {
-                case RMW_XCHG;
-                case RMW_ADD; #through;
-                case RMW_SUB;
-                    if ae_cmp_arith_user(i) ae_fail(i, "an atomicrmw whose result is only compared (x86 cc intrinsic)");
-                case RMW_OR; #through;
-                case RMW_AND; #through;
-                case RMW_XOR;
-                    if ae_cmp_arith_user(i) ae_fail(i, "an atomicrmw whose result is only compared (x86 cc intrinsic)");
-                    if !has_uses(i) continue;
-                    if rop == RMW_XOR && vkind(op(i, 1)) == .C_INT && ap_is_sign_mask(const_ap(op(i, 1))) continue;
-                    ae_fail(i, "an atomic or/and/xor with a used result (cmpxchg loop or bit-test intrinsic)");
-                case;
-                    ae_fail(i, "this atomicrmw operation (cmpxchg loop)");
-            }
-        } else if o == .CMPXCHG {
-            ty := vtype(op(i, 1));
-            size := dl_type_store_size(ty);
-            if !ae_size_supported(i, size, inst(i).align) ae_fail(i, "a cmpxchg of an unsupported size or alignment (libcall)");
-            if type_kind(ty) == .PTR ae_fail(i, "a pointer cmpxchg (cast to integer)");
-        }
-    }
-    if changed return PRESERVE_NONE;
-    return PRESERVE_ALL;
-}
 
 AE_ORD_ACQ_REL :: 6; AE_ORD_SEQ_CST :: 7;
 MDK_PCSECTIONS :: 37;

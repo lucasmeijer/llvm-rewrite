@@ -219,6 +219,9 @@
 #load "attributor_aas.jai";
 #load "code_extractor.jai";
 #load "pass_partial_inliner.jai";
+#load "lower_mem_intrinsics.jai";
+#load "gen_vp.jai";
+#load "vp_expand.jai";
 #load "pass_inliner.jai";
 #load "inline_function.jai";
 #load "psi.jai";
@@ -266,6 +269,7 @@
 #load "codegen_pipeline.jai";
 #load "cg_misc_passes.jai";
 #load "cg_lowering_passes.jai";
+#load "atomic_expand.jai";
 #load "cg_todo_passes.jai";
 #load "cg_interleaved_access.jai";
 #load "cg_x86_partial_reduction.jai";

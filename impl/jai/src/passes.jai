@@ -301,7 +301,7 @@ Pass_Kind :: enum u8 {
     // Inliner (pass_inliner.jai), AlwaysInliner (pass_always_inliner.jai)
     INLINE; ALWAYS_INLINE; MODULE_INLINE; INLINER_WRAPPER;
     // ProfileSummaryAnalysis (require<profile-summary>)
-    REQUIRE_PROFILE_SUMMARY;
+    REQUIRE_PROFILE_SUMMARY; REQUIRE_LIBCALL_LOWERING_INFO;
     // IPO: GlobalOpt, GlobalDCE, ConstantMerge, StripDeadPrototypes, EliminateAvailableExternally, Internalize,
     // DeadArgumentElimination, ArgumentPromotion (pass_global_opt.jai, pass_global_dce.jai, ...)
     GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
@@ -318,7 +318,7 @@ Pass_Kind :: enum u8 {
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
     MERGEICMPS; DFA_JUMP_THREADING;
     // codegen IR passes (codegen_pipeline.jai, cg_*.jai, cgp_*.jai): also llc's pipeline
-    CODEGENPREPARE; EXPAND_REDUCTIONS; UNREACHABLEBLOCKELIM; PRE_ISEL_INTRINSIC_LOWERING; CONSTHOIST; PARTIALLY_INLINE_LIBCALLS;
+    CODEGENPREPARE; EXPAND_REDUCTIONS; UNREACHABLEBLOCKELIM; PRE_ISEL_INTRINSIC_LOWERING; ATOMIC_EXPAND_OPT; CONSTHOIST; PARTIALLY_INLINE_LIBCALLS;
     // the default pipelines (pass_builder_pipelines.jai): ModuleInlinerWrapperPass, ExtraLoopPassManager,
     // CoroConditionalWrapper; LoopInterchange (pass_loop_interchange.jai), ExpandMemCmp (pass_expand_memcmp.jai),
     // ControlHeightReduction (pass_chr.jai)
@@ -399,6 +399,7 @@ PASS_TABLE :: Pass_Info.[
     .{"aa-eval", .FUNCTION, .AA_EVAL, false, .DOMTREE},
     .{"require<globals-aa>", .MODULE, .REQUIRE_GLOBALS_AA, true, .DOMTREE},
     .{"require<profile-summary>", .MODULE, .REQUIRE_PROFILE_SUMMARY, true, .DOMTREE},
+    .{"require<libcall-lowering-info>", .MODULE, .REQUIRE_LIBCALL_LOWERING_INFO, true, .DOMTREE},
     .{"inferattrs", .MODULE, .INFERATTRS, false, .DOMTREE},
     .{"print<memoryssa>", .FUNCTION, .PRINT_MEMORYSSA, true, .DOMTREE},
     .{"print<memoryssa><no-ensure-optimized-uses>", .FUNCTION, .PRINT_MEMORYSSA_NO_OPT, true, .DOMTREE},
@@ -565,6 +566,7 @@ PASS_TABLE :: Pass_Info.[
     .{"expand-reductions", .FUNCTION, .EXPAND_REDUCTIONS, false, .DOMTREE},
     .{"unreachableblockelim", .FUNCTION, .UNREACHABLEBLOCKELIM, false, .DOMTREE},
     .{"pre-isel-intrinsic-lowering", .MODULE, .PRE_ISEL_INTRINSIC_LOWERING, false, .DOMTREE},
+    .{"atomic-expand", .FUNCTION, .ATOMIC_EXPAND_OPT, false, .DOMTREE},
     .{"consthoist", .FUNCTION, .CONSTHOIST, false, .DOMTREE},
     .{"partially-inline-libcalls", .FUNCTION, .PARTIALLY_INLINE_LIBCALLS, false, .DOMTREE},
 ];
@@ -1201,6 +1203,9 @@ run_module_pm :: (n: s32) {
             case .CHECK_DEBUGIFY; if should_run_pass(node, NONE) { check_debugify_metadata("", "CheckModuleDebugify"); lcg_invalidate(); }
             case .REQUIRE_GLOBALS_AA; should_run_pass(node, NONE); if !globals_aa globals_aa = globals_aa_compute();
             case .REQUIRE_PROFILE_SUMMARY; should_run_pass(node, NONE); psi_cached = true;
+            // LibcallLoweringModuleAnalysis: the RuntimeLibcalls of the target, which AtomicExpand and
+            // PreISelIntrinsicLowering consult; it carries no state here
+            case .REQUIRE_LIBCALL_LOWERING_INFO; should_run_pass(node, NONE); libcall_lowering_info_cached = true;
             case .INFERATTRS; if should_run_pass(node, NONE) inferattrs_run_module();
             case .CGSCC_ADAPTOR; mam_invalidate(run_cgscc_adaptor(c));
             case .PRINT_LCG; should_run_pass(node, NONE); lcg_printer_run();
@@ -1337,6 +1342,11 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .SINK; return sink_run(f);
         case .TAILCALLELIM; return tailcallelim_run(f, !node.no_entry_count_update);
         case .EXPAND_MEMCMP; return expand_memcmp_run(f);
+        case .ATOMIC_EXPAND_OPT;
+            // AtomicExpandPass::run: the cached LibcallLoweringModuleAnalysis is required
+            if !libcall_lowering_info_cached fatal("'LibcallLoweringModuleAnalysis' analysis required");
+            if tti_get(f).kind != .X86 fatal("atomic-expand: a target machine (x86 target triple) is required");
+            return atomic_expand_run(f);
         case .CODEGENPREPARE;
             // CodeGenPreparePass::run needs the TargetMachine and a cached ProfileSummaryAnalysis
             if tti_get(f).kind != .X86 fatal("codegenprepare: a target machine (x86 target triple) is required");

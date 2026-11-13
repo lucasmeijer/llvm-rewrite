@@ -219,11 +219,13 @@ lib/Analysis/Delinearization.cpp 0.9  # no getIndexExpressionsFromGEP / tryDelin
 lib/Transforms/Scalar/LoopInterchange.cpp 0.95  # no CacheCostManager / the 'cache' rule (fails loudly: LoopCacheAnalysis.cpp not ported); remarks not emitted
 # --- jai_codegen_ir (2026-11): llc's IR passes
 lib/Transforms/Scalar/LoopStrengthReduce.cpp 0.88   # all but the SCEV debug-value salvage (DbgGatherSalvagableDVI/SalvageDVI/SCEVDbgValueBuilder: fails loudly) and vscale steps
-lib/CodeGen/CodeGenPrepare.cpp 0.93   # missing statepoint relocations (simplifyOffsetableRelocate), BFI verification, incremental BFI updates
+lib/CodeGen/CodeGenPrepare.cpp 0.95   # missing BFI verification, incremental BFI updates
 lib/CodeGen/InterleavedAccessPass.cpp 0.75   # getMask and the (de)interleave-intrinsic paths are no-ops on X86 and not ported
 lib/Target/X86/X86InterleavedAccess.cpp 0.05   # isSupported only; lowerIntoOptimizedSequence fails loudly
-lib/CodeGen/PreISelIntrinsicLowering.cpp 0.5   # missing VP expansion, ObjC ARC calls, memset.pattern, non-constant memcpy/memset.inline
-lib/CodeGen/AtomicExpandPass.cpp 0.1   # guards + simplifyIdempotentRMW; the expansions fail loudly
+lib/CodeGen/PreISelIntrinsicLowering.cpp 0.85   # x86 only; missing protected.field.ptr lowering, scalable-vector exp2/exp10
+lib/CodeGen/AtomicExpandPass.cpp 0.55   # the x86 paths (casts, cmpxchg loops, cmpxchg16b, libcalls); no LL/SC, partword, masked-intrinsic or fence-insertion paths
+lib/CodeGen/ExpandVectorPredication.cpp 0.85   # missing constrained-FP VP expansion
+lib/Transforms/Utils/LowerMemIntrinsics.cpp 0.3   # unknown-size memcpy/memset loops and memset.pattern only
 lib/Transforms/IPO/Attributor.cpp 0.35  # the light configuration only: fixpoint, manifest, AttrsMap, seeding, checkForAll*, InformationCache; no liveness, cleanupIR, signature rewrites, wrappers, full attributor passes
 lib/Transforms/IPO/AttributorAttributes.cpp 0.2  # the 17 AAs AttributorLight allows (simplified where AAPotentialValues / AAIsDead / AAPointerInfo would be queried)
 lib/Analysis/AssumeBundleQueries.cpp 0.4  # fillMapFromAssume, getKnowledgeFromUse / getKnowledgeFromBundle
