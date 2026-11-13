@@ -423,6 +423,7 @@ write_operand :: (v: Value_Id, with_type: bool) {
         return;
     }
     if k == .MD_VALUE { write_md_operand(ir.v_aux[v], true); return; }
+    vst_lazy();   // the verifier's lazily processed slot tracker (verifier.jai)
     if is_global_value(k) {
         s := ifx v < W.mslot.count then W.mslot[v] else -1;
         if s >= 0 { outc(#char "@"); out_s64(s); } else out("<badref>");
@@ -632,6 +633,7 @@ write_constant :: (v: Value_Id) {
 
 write_block_ref :: (bb: Value_Id) {
     if vname(bb).count { print_llvm_name(vname(bb), #char "%"); return; }
+    vst_lazy();
     s := ifx bb < W.fslot.count then W.fslot[bb] else -1;
     if s >= 0 && block_in_current_function(bb) { outc(#char "%"); out_s64(s); return; }
     // number the block within its own function (createSlotTracker)
@@ -739,6 +741,7 @@ write_md_operand :: (m: Md_Id, from_value: bool) {
     r := ir.mds[m];
     if is_inline_md(m) { write_di_node(m); return; }
     if r.kind == .TUPLE || r.kind == .DI || r.kind == .SPECIAL {
+        vst_lazy();
         found, s := table_find(*W.md_slot, m);
         if found { outc(#char "!"); out_s64(s); }
         else out("<badref>");
@@ -1258,6 +1261,7 @@ print_instruction :: (i: Value_Id) {
     out("  ");
     if vname(i).count { print_llvm_name(vname(i), #char "%"); out(" = "); }
     else if vtype(i) != ir.t_void {
+        vst_lazy();
         s := W.fslot[i];
         if s < 0 out("<badref> = "); else { outc(#char "%"); out_s64(s); out(" = "); }
     }
@@ -1372,7 +1376,7 @@ print_instruction :: (i: Value_Id) {
             }
             outc(#char ")");
             fa := attr_list_fn(r.attrs);
-            if fa != 0 { found, s := table_find(*W.as_slot, fa); out(" #"); out_s64(s); }
+            if fa != 0 { vst_lazy(); found, s := table_find(*W.as_slot, fa); out(" #"); out_s64(s); }
             write_operand_bundles(i);
             if r.op == .INVOKE {
                 out("\n          to "); write_operand(op(i, n - 3), true);
@@ -1564,6 +1568,7 @@ print_module :: () -> string {
         out(" = !{");
         for nm.ops {
             if it_index > 0 out(", ");
+            if is_di(it, .EXPRESSION) { write_di_node(it); continue; }   // DIExpressions are written inline
             found, s := table_find(*W.md_slot, it);
             if found { outc(#char "!"); out_s64(s); } else out("<badref>");
         }

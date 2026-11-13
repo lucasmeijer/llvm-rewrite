@@ -250,6 +250,8 @@ Pass_Kind :: enum u8 {
     MODULE_PM; FUNCTION_ADAPTOR; LOOP_ADAPTOR; LOOP_PM;
     // analysis utilities (required: they run on optnone functions and don't count for -opt-bisect-limit)
     REQUIRE; INVALIDATE; PRINT_DOMTREE; PRINT_POSTDOMTREE; PRINT_DEMANDED_BITS; NO_OP_FUNCTION; NO_OP_MODULE;
+    VERIFY_MODULE; VERIFY_FUNCTION; REQUIRE_VERIFY;   // VerifierPass, RequireAnalysisPass<VerifierAnalysis> (verifier.jai)
+   
     // transforms
     DCE; ADCE; BDCE; BREAK_CRIT_EDGES; MEM2REG; INSTSIMPLIFY; SROA; INSTCOMBINE;
     // alias analysis (aa.jai)
@@ -365,7 +367,7 @@ PASS_TABLE :: Pass_Info.[
     .{"debugify", .MODULE, .DEBUGIFY, false, .DOMTREE},
     .{"check-debugify", .MODULE, .CHECK_DEBUGIFY, false, .DOMTREE},
     .{"redundant-dbg-inst-elim", .FUNCTION, .REDUNDANT_DBG_INST_ELIM, false, .DOMTREE},
-    .{"require<verify>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // the verifier finds nothing on valid IR
+    .{"require<verify>", .MODULE, .REQUIRE_VERIFY, true, .DOMTREE},   // VerifierAnalysis: verifies and keeps the result
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
     .{"gvn", .FUNCTION, .GVN, false, .DOMTREE},   // also gvn<...> (lookup_pass)
     .{"early-cse", .FUNCTION, .EARLY_CSE, false, .DOMTREE},
@@ -380,8 +382,8 @@ PASS_TABLE :: Pass_Info.[
     .{"memcpyopt", .FUNCTION, .MEMCPYOPT, false, .DOMTREE},
     .{"instcombine", .FUNCTION, .INSTCOMBINE, false, .DOMTREE},
     .{"simplifycfg", .FUNCTION, .SIMPLIFYCFG, false, .DOMTREE},   // also simplifycfg<...> (lookup_pass)   // also instcombine<...> (lookup_pass)
-    .{"verify", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},   // VerifierPass (module & function): nothing to report on valid IR
-    .{"verify-module", .MODULE, .NO_OP_MODULE, true, .DOMTREE},   // MODULE_PASS("verify"): parsed by parse_module_pass
+    .{"verify", .FUNCTION, .VERIFY_FUNCTION, true, .DOMTREE},   // FUNCTION_PASS("verify"): VerifierPass::run(Function &)
+    .{"verify-module", .MODULE, .VERIFY_MODULE, true, .DOMTREE},   // MODULE_PASS("verify"): parsed by parse_module_pass
     // ModuleSummaryIndexAnalysis: building the summary changes no IR
     .{"require<module-summary>", .MODULE, .NO_OP_MODULE, true, .DOMTREE},
     .{"require<assumptions>", .FUNCTION, .REQUIRE, true, .ASSUMPTIONS},
@@ -930,7 +932,7 @@ parse_module_pass :: (mpm: s32, last: *s32, e: s32) {
     if pb_parse_lto_pipeline(mpm, last, el.name) return;   // thinlto-pre-link<O#>, thinlto<O#>, lto-pre-link<O#>, lto<O#>
     if pb_is_unsupported_alias(el.name) fatal("pass pipeline '%': the FatLTO pipeline is not implemented yet", el.name);
     if el.name == "coro-cond" pipeline_error("invalid use of 'coro-cond' pass as module pipeline");
-    if el.name == "verify" { link_child(mpm, last, new_node(.NO_OP_MODULE, lookup_pass("verify-module"), "verify")); return; }
+    if el.name == "verify" { link_child(mpm, last, new_node(.VERIFY_MODULE, lookup_pass("verify-module"), "verify")); return; }
     p := lookup_pass(el.name);
     if p == null unknown_pass(el.name);
     if p.level == .MODULE { link_child(mpm, last, new_node(p.kind, p, el.name)); return; }
@@ -1211,6 +1213,8 @@ run_module_pm :: (n: s32) {
             case .MODULE_PM; run_module_pm(c);
             case .FUNCTION_ADAPTOR; run_function_adaptor(c);
             case .NO_OP_MODULE; should_run_pass(node, NONE);
+            case .VERIFY_MODULE; if should_run_pass(node, NONE) run_verifier_pass_module();
+            case .REQUIRE_VERIFY; if should_run_pass(node, NONE) verifier_module_result();
             case .DEBUGIFY; if should_run_pass(node, NONE) { run_debugify_pass(); lcg_invalidate(); }
             case .CHECK_DEBUGIFY; if should_run_pass(node, NONE) { check_debugify_metadata("", "CheckModuleDebugify"); lcg_invalidate(); }
             case .REQUIRE_GLOBALS_AA; should_run_pass(node, NONE); if !globals_aa globals_aa = globals_aa_compute();
@@ -1317,6 +1321,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
     knowledge_retention_check(node.kind, node.name);
     if node.kind == {
         case .NO_OP_FUNCTION; return PRESERVE_ALL;
+        case .VERIFY_FUNCTION; run_verifier_pass_function(f); return PRESERVE_ALL;
         case .REQUIRE; fam_require(f, node.info.analysis); return PRESERVE_ALL;
         case .INVALIDATE; fam_invalidate_one(f, node.info.analysis); return PRESERVE_ALL;
         case .PRINT_DOMTREE;
@@ -1453,6 +1458,9 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
 opt_level_flag: string;      // opt -O0 .. -O3 (-Os / -Oz are rejected by parseOptLevel)
 jai_print_pipeline := false;   // -jai-print-pipeline: print the parsed pipeline like -print-pipeline-passes and stop
 
+opt_disable_verify := false;   // -disable-verify
+opt_verify_each := false;      // -verify-each
+
 opt_main :: () {
     tool_name = "opt";
     args := get_command_line_arguments();
@@ -1502,13 +1510,14 @@ opt_main :: () {
             continue;
         }
         if a == "-aa-pipeline" || a == "--aa-pipeline" { if i >= args.count fatal("-aa-pipeline needs a value"); aa_parse_pipeline(args[i]); i += 1; continue; }
-        // -verify-each runs the verifier after every pass; on the valid IR our passes must produce it reports nothing
-        // (the harness verifies our output separately)
-        if a == "-verify-each" || a == "--verify-each" continue;
+        // -verify-each: VerifyInstrumentation verifies the IR after every pass (verifier.jai)
+        if a == "-verify-each" || a == "--verify-each" { opt_verify_each = true; continue; }
         // -run-twice only acts in the legacy PM path of optdriver.cpp; with -passes / -O# (NewPMDriver) it is ignored
         if a == "-run-twice" || a == "--run-twice" continue;
-        // -disable-verify: opt does not verify its input and output; we never verify
-        if a == "-disable-verify" || a == "--disable-verify" continue;
+        // -disable-verify: opt does not verify its input and output
+        if a == "-disable-verify" || a == "--disable-verify" { opt_disable_verify = true; continue; }
+        // optdriver.cpp: "if (!DisableDITypeMap) Context.enableDebugTypeODRUniquing()"
+        if a == "-disable-debug-info-type-map" || a == "--disable-debug-info-type-map" { odr_uniquing_debug_types = false; continue; }
         if begins_with(a, "-aa-pipeline=") || begins_with(a, "--aa-pipeline=") {
             aa_parse_pipeline(slice(a, find_index_from_left(a, #char "=") + 1, a.count - find_index_from_left(a, #char "=") - 1));
             continue;
@@ -1553,6 +1562,8 @@ opt_main :: () {
     // -march only selects the target of the TargetMachine, which opt creates only for a module with a target triple
     if opt_march.count && ir.triple.count fatal("unsupported option '-march=%' (with a target triple)", opt_march);
     if opt_strip_debug strip_debug_info();   // "Strip debug info before running the verifier"
+    // optdriver.cpp: "Immediately run the verifier to catch any problems before starting up the pass pipelines"
+    if !opt_disable_verify opt_verify_input(input);
     tti_create_target_machine();
     opt_set_function_attributes();
     if ir.source_filename.count == 0 && !saw_source_filename ir.source_filename = input;
@@ -1560,6 +1571,8 @@ opt_main :: () {
     dbgify_check_level();
     if dbgify_opts.enable run_debugify_pass();
     if root >= 0 run_module_pm(root);
+    // NewPMDriver.cpp: the VerifierPass at the end of the pipeline (unless -disable-verify)
+    if !opt_disable_verify run_verifier_pass_module();
     if dbgify_opts.enable check_debugify_metadata("", "CheckModuleDebugify");
     defer aa_eval_print_reports();
     if disable_output return;

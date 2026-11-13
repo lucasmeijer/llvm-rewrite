@@ -14,6 +14,10 @@
 #load "autoupgrade.jai";
 #load "constfold.jai";
 #load "debuginfo.jai";
+#load "verifier.jai";
+#load "verifier_md.jai";
+#load "verifier_calls.jai";
+#load "verifier_intrinsics.jai";
 #load "gen_dwarf.jai";
 
 #load "apint.jai";

@@ -9,6 +9,7 @@ import re, sys
 TD = '/opt/llvm-project-23.1.5/llvm/include/llvm/IR/Attributes.td'
 src = open(TD).read()
 # join "def X\n    : EnumAttr<..." forms
+src = re.sub(r'\n\s+:', ' :', src)  # join "def X\n    : EnumAttr<..." forms
 defs = re.findall(r'^def\s+([A-Za-z0-9_]+)\s*:\s*(EnumAttr|TypeAttr|IntAttr|ConstantRangeAttr|ConstantRangeListAttr)<"([^"]+)"', src, re.M)
 order = ['EnumAttr', 'TypeAttr', 'IntAttr', 'ConstantRangeAttr', 'ConstantRangeListAttr']
 out = []
@@ -35,4 +36,17 @@ for rec, name in names:
     if p != 'IntersectPreserve':
         out.append('        case .%s; return .%s;\n' % (rec, {'IntersectAnd':'AND','IntersectMin':'MIN','IntersectCustom':'CUSTOM'}[p]))
 out.append('    }\n    return .PRESERVE;\n}\n')
+# AttrProperty lists (FnAttr / ParamAttr / RetAttr) for Attribute::canUseAsFnAttr / ParamAttr / RetAttr (Verifier)
+plist = {d[0]: d[1] for d in re.findall(r'^def\s+([A-Za-z0-9_]+)\s*:\s*(?:EnumAttr|TypeAttr|IntAttr|ConstantRangeAttr|ConstantRangeListAttr)<"[^"]+",\s*Intersect[A-Za-z]+,\s*\[([^\]]*)\]>', src, re.M)}
+out.append('\nATTR_PROP_FN :: 1; ATTR_PROP_PARAM :: 2; ATTR_PROP_RET :: 4;\n')
+out.append('attr_kind_props :: (k: Attr_Kind) -> u8 {\n    if k == {\n')
+for rec, name in names:
+    ps = [x.strip() for x in plist[rec].split(',') if x.strip()]
+    bits = (1 if 'FnAttr' in ps else 0) | (2 if 'ParamAttr' in ps else 0) | (4 if 'RetAttr' in ps else 0)
+    if bits:
+        out.append('        case .%s; return %d;\n' % (rec, bits))
+out.append('    }\n    return 0;\n}\n')
+# string attributes whose value must be "", "true" or "false" (StrBoolAttr)
+strbool = re.findall(r'^def\s+[A-Za-z0-9_]+\s*:\s*StrBoolAttr<"([^"]+)">', src, re.M)
+out.append('\nSTRBOOL_ATTRS :: string.[%s];\n' % ', '.join('"%s"' % x for x in strbool))
 sys.stdout.write(''.join(out))

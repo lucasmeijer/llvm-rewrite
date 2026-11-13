@@ -14,7 +14,7 @@ print_state: struct {
     module_as_count: s64;
 };
 
-printer_note_ir_changed :: () { print_state.dirty = true; }
+printer_note_ir_changed :: () { print_state.dirty = true; verifier_analysis.valid = false; }
 
 printer_reset :: () {
     W = .{};

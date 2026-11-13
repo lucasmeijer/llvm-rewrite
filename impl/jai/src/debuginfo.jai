@@ -462,8 +462,9 @@ parse_di_node :: (k: DI_Kind, distinct: bool) -> Md_Id {
         ops := Md_Id.[v[2].md, v[4].md, v[1].md, or_md_value(v[6]), or_md_value(v[8]), v[5].md, v[10].md, v[13].md, v[14].md,
               v[15].md, v[16].md, v[17].md, v[18].md, v[19].md, rank, v[21].md, v[23].md, v[24].md];
         ints := u64.[v[0].u, v[3].u, v[11].u, v[7].u, v[22].u, v[12].u, v[9].u];
-        if v[15].md != NONE {
-            // DICompositeType::buildODRType: opt enables ODR uniquing of debug types (LLVMContext DITypeMap)
+        if v[15].md != NONE && odr_uniquing_debug_types {
+            // DICompositeType::buildODRType: opt enables ODR uniquing of debug types (LLVMContext DITypeMap) unless
+            // --disable-debug-info-type-map
             found, ct := table_find(*odr_types, v[15].str);
             if !found {
                 ct = di_get(k, true, ops, ints);
@@ -539,6 +540,7 @@ DW_TAG_LLVM_PTRAUTH_TYPE :: 0x4300;
 SPFLAG_LOCAL_TO_UNIT :: 4; SPFLAG_DEFINITION :: 8; SPFLAG_OPTIMIZED :: 16;
 
 new_distinct_sps: [..] Md_Id;
+odr_uniquing_debug_types := true;   // LLVMContext::isODRUniquingDebugTypes (opt: enableDebugTypeODRUniquing)
 odr_types: Table(string, Md_Id);
 
 // LLParser::parseDIArgList (inside a function): !DIArgList(i32 7, i64 %0)
@@ -692,15 +694,24 @@ call_md_arg :: (ci: Value_Id, i: u32) -> Md_Id {
     return ir.v_aux[v];
 }
 
-// upgradeDbgIntrinsicToDbgRecord
+// unwrapMAVOp: the metadata of a `metadata` argument if it is an MDNode (NONE otherwise: a broken record that the
+// verifier reports)
+call_md_node_arg :: (ci: Value_Id, i: u32) -> Md_Id {
+    if i >= call_nargs(ci) return NONE;
+    m := call_md_arg(ci, i);
+    if !is_md_node(m) return NONE;
+    return m;
+}
+
+// upgradeDbgIntrinsicToDbgRecord (locations and addresses: unwrapMAVMetadataOp, the rest: unwrapMAVOp)
 upgrade_dbg_intrinsic_to_record :: (name: string, ci: Value_Id) {
     r: Dbg_Record;
-    if name == "label" { r.kind = .LABEL; r.loc = call_md_arg(ci, 0); }
+    if name == "label" { r.kind = .LABEL; r.loc = call_md_node_arg(ci, 0); }
     else if name == "assign" {
-        r.kind = .ASSIGN; r.loc = call_md_arg(ci, 0); r.var = call_md_arg(ci, 1); r.expr = call_md_arg(ci, 2);
-        r.assign_id = call_md_arg(ci, 3); r.addr = call_md_arg(ci, 4); r.addr_expr = call_md_arg(ci, 5);
+        r.kind = .ASSIGN; r.loc = call_md_arg(ci, 0); r.var = call_md_node_arg(ci, 1); r.expr = call_md_node_arg(ci, 2);
+        r.assign_id = call_md_node_arg(ci, 3); r.addr = call_md_arg(ci, 4); r.addr_expr = call_md_node_arg(ci, 5);
     } else if name == "declare" {
-        r.kind = .DECLARE; r.loc = call_md_arg(ci, 0); r.var = call_md_arg(ci, 1); r.expr = call_md_arg(ci, 2);
+        r.kind = .DECLARE; r.loc = call_md_arg(ci, 0); r.var = call_md_node_arg(ci, 1); r.expr = call_md_node_arg(ci, 2);
     } else if name == "addr" {
         fatal("upgrade of llvm.dbg.addr is not supported yet");
     } else if name == "value" {
@@ -710,15 +721,16 @@ upgrade_dbg_intrinsic_to_record :: (name: string, ci: Value_Id) {
             if !(is_constant_kind(vkind(off)) && is_null_value(off)) return;
             var_op = 2; expr_op = 3;
         }
-        r.kind = .VALUE; r.loc = call_md_arg(ci, 0); r.var = call_md_arg(ci, var_op); r.expr = call_md_arg(ci, expr_op);
+        r.kind = .VALUE; r.loc = call_md_arg(ci, 0); r.var = call_md_node_arg(ci, var_op); r.expr = call_md_node_arg(ci, expr_op);
     } else fatal("internal: unknown debug intrinsic llvm.dbg.%", name);
     r.dbg = get_metadata(ci, 0);
     array_add(*ir.dbg_records, r);
     attach_records_before(ci, cast(u32) ir.dbg_records.count);
 }
 
-// llvm::UpgradeDebugInfo: without "Debug Info Version" 3 the module's debug info is stripped. (With version 3,
-// LLVM runs the verifier and strips broken debug info; we assume the debug info is well formed.)
+// llvm::UpgradeDebugInfo: without "Debug Info Version" 3 the module's debug info is stripped. With version 3 the
+// module is verified (verifier.jai): a module that is broken beyond its debug info is a fatal error; broken debug
+// info is reported, then stripped with a warning.
 upgrade_debug_info :: () {
     version: u64 = 0;
     for nm: ir.named_md {
@@ -732,37 +744,17 @@ upgrade_debug_info :: () {
             break;
         }
     }
-    if version == 3 { if debug_info_broken() strip_debug_info(); return; }
-    // DiagnosticInfoIgnoringInvalidDebugMetadata when StripDebugInfo changed something
-    if strip_debug_info() print("warning: ignoring debug info with an invalid version (%) in %\n", version, P.lx.file, to_standard_error = true);
-}
-
-// The part of the Verifier's debug-info checks (Verifier.cpp, BrokenDebugInfo) that is ported: inlinable calls
-// in a function with a subprogram must have a !dbg location (Verifier::visitCallBase).
-debug_info_broken :: () -> bool {
-    for f: ir.m_functions {
-        if get_metadata(f, 0) == NONE continue;
-        b := glob(f).first_block;
-        while b != NONE {
-            i := block(b).first;
-            while i != NONE {
-                opc := inst_op(i);
-                if opc == .CALL || opc == .INVOKE || opc == .CALLBR {
-                    c := op(i, nops(i) - 1);
-                    if vkind(c) == .FUNCTION && glob(c).value_type == inst(i).ty2 && !gv_is_interposable(c) &&
-                       !is_declaration(c) && get_metadata(c, 0) != NONE && get_metadata(i, 0) == NONE {
-                        print("inlinable function call in a function with debug info must have a !dbg location\n", to_standard_error = true);
-                        print("%\n", inst_to_string(i), to_standard_error = true);   // CheckFailed writes the call
-                        print("warning: ignoring invalid debug info in %\n", P.lx.file, to_standard_error = true);
-                        return true;
-                    }
-                }
-                i = inst(i).next;
-            }
-            b = block(b).next;
-        }
+    if version == 3 {
+        broken, broken_di := verify_module(want_broken_di = true);
+        if broken verifier_fatal("Broken module found, compilation aborted!");
+        if !broken_di return;
+        // DiagnosticInfoIgnoringInvalidDebugMetadata
+        print("warning: ignoring invalid debug info in %\n", P.lx.file, to_standard_error = true);
+        strip_debug_info();
+        return;
     }
-    return false;
+    // DiagnosticInfoDebugMetadataVersion when StripDebugInfo changed something
+    if strip_debug_info() print("warning: ignoring debug info with an invalid version (%) in %\n", version, P.lx.file, to_standard_error = true);
 }
 
 // llvm::StripDebugInfo(Module &)

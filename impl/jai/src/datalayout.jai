@@ -193,7 +193,7 @@ dl_alignment :: (t: Type_Id, abi: bool) -> u64 {
             return power_of_2_ceil(bits / 8);
         case .VECTOR; #through;
         case .SVECTOR;
-            bits := cast(u32) dl_type_size_bits(t);
+            bits := dl_type_size_bits(t);   // u64: a huge vector (the verifier rejects its alignment) must not wrap
             for dl.vec_specs if it.bits == bits return ifx abi then it.abi else it.pref;
             return power_of_2_ceil(dl_type_store_size(t));
         case .X86_AMX; return 64;

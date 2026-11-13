@@ -1269,18 +1269,23 @@ md_op :: inline (m: Md_Id, i: u32) -> Md_Id { return ir.md_ops[ir.mds[m].ops + i
 
 // Instruction::setMetadata / GlobalObject::setMetadata: one attachment per kind, insertion order kept.
 set_metadata :: (v: Value_Id, kind: u32, md: Md_Id) {
+    // Value::setMetadata: MDAttachments::set erases every attachment of the kind (a global object can have several,
+    // e.g. two parsed !dbg) and adds the new one; the first one is updated in place here (the order of attachments
+    // of one kind is all that is observable, and only one is left)
     a := ir.v_md[v];
     prev: u32 = NONE;
+    kept := false;
     while a != NONE {
+        nx := ir.attaches[a].next;
         if ir.attaches[a].kind == kind {
-            if md == NONE {
-                if prev == NONE ir.v_md[v] = ir.attaches[a].next; else ir.attaches[prev].next = ir.attaches[a].next;
-            } else ir.attaches[a].md = md;
-            return;
+            if md != NONE && !kept { ir.attaches[a].md = md; kept = true; prev = a; a = nx; continue; }
+            if prev == NONE ir.v_md[v] = nx; else ir.attaches[prev].next = nx;
+            a = nx;
+            continue;
         }
-        prev = a; a = ir.attaches[a].next;
+        prev = a; a = nx;
     }
-    if md == NONE return;
+    if md == NONE || kept return;
     row: Attach_Row; row.kind = kind; row.md = md; row.next = NONE;
     id := cast(u32) ir.attaches.count;
     array_add(*ir.attaches, row);
