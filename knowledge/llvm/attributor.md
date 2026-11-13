@@ -1,4 +1,4 @@
-# Attributor (AttributorLight: `attributor-light`, `attributor-light-cgscc`)
+# Attributor (`attributor`, `attributor-cgscc`, `attributor-light`, `attributor-light-cgscc`)
 
 Facts that decide the output of the light Attributor. Verified with impl/jai's port (src/attributor.jai,
 src/attributor_aas.jai): all 11 attributor-light RUN lines of Transforms/FunctionAttrs and sweeps of both passes over
@@ -55,3 +55,49 @@ the corpus (0 differs), unless another source is named.
 - Dependences are `SmallSetVector<PointerIntPair<AA *, 1>>` (DepClassTy REQUIRED = 0, OPTIONAL = 1, NONE = 2); the
   worklist is a SetVector in insertion order; query AAs (the two reachability AAs) are re-run through
   `QueryAAsAwaitingUpdate` when a temporary query answered "not reachable".
+
+## The full Attributor (`attributor`, `attributor-cgscc`)
+
+Verified with impl/jai's port (src/attributor*.jai): 290 of the 301 `@opt` lines of Transforms/Attributor and sweeps of
+both passes over the corpus (0 differs, also `--with-test-flags` and tests/perf/compile), unless another source is
+named.
+
+- Call sites are `AbstractCallSite`s. A use of `@cb` as argument `k` of a call to a broker declared with
+  `!callback !{!{i64 k, i64 a0, i64 a1, ..., i1 vararg}}` is a *callback call* of `@cb` whose argument `j` is the
+  broker's operand `a_j` (`-1`: none, the position is invalid). `IRPosition::getAssociatedArgument` of a call-site
+  argument prefers the unique callback-callee argument that operand is passed to over the broker's own parameter,
+  so the broker's call-site-argument AAs reason about the callback callee (thread_local_acs.ll: the broker's
+  operands become `undef` after the callee's arguments are replaced by the globals).
+- `checkForAllCallSites`: with `RequireAllCallSites = false` a use that is not a callee is skipped, with `true` it
+  fails; a use through a single-use cast constant expression always fails (the "effective use" is the use in the
+  constant expression, not the call's callee operand). Uses in pointer-typed cast expressions are expanded first.
+- Callback calls block: signature rewrites (`CallSiteCanBeChanged`), `AAIsDead` for returned values, and
+  `AANoAliasArgument` when the function is neither nosync nor the argument read-only.
+- AAIndirectCallInfo manifest: no callee → the call becomes unreachable; one known callee that `isLegalToPromote`
+  → `promoteCall` in place (operand bit/pointer casts, a return cast after the call, incompatible attributes
+  dropped); otherwise per callee `%c = icmp eq ptr %fp, @f` + `SplitBlockAndInsertIfThen`, the clone of the call in
+  the then-block (promoted) or a fresh `call` without attributes named like the original, the merge PHI
+  `%<name>.phi` at the start of the original block; if all callees are known the last compare becomes `true` and the
+  fallback block ends in `unreachable`, else a clone of the indirect call (with `!callees` of the skipped callees)
+  stays as the fallback. `-attributor-max-specializations-per-call-base` limits it per call (0: none, only `!callees`).
+- `-attributor-assume-closed-world`: the indirectly callable functions are those with
+  `hasAddressTaken(IgnoreCallbackUses=false, IgnoreAssumeLikeCalls, IgnoreLLVMUsed, IgnoreCastedDirectCall)`.
+- `-attributor-allow-shallow-wrappers`: every function that is not IPO-amendable (non-exact definitions) gets a
+  wrapper with its name, linkage, comdat, metadata and attributes, whose body is `tail call @<anon>(args) #noinline`;
+  the original becomes internal and unnamed (`@0`).
+- `-attributor-allow-deep-wrappers`: a non-exact, non-interposable definition with uses is cloned into
+  `private dso_local @<name>.internalized` (inserted before it); call uses outside the function itself move to the
+  clone, then `CallGraphUpdater::replaceFunctionWith` deletes the original's body and erases it at the end (remaining
+  non-call uses become poison), even in the module pass (internalize.ll).
+- `rewriteFunctionSignatures` walks `ArgumentReplacementMap`, a `DenseMap<Function *, ...>` (pointer-hash order).
+  It only shows when two privatizing rewrites name new values in the same caller (`%x.b8` vs `%x.b81`): not
+  reproducible (ArgumentPromotion/byval.ll, IPConstantProp/2009-09-24-byval-ptr.ll).
+- `nofpclass` is valid on FP and FP-vector types, arrays of them (any depth) and *literal* structs of one repeated
+  FP type (`FPMathOperator::isSupportedFloatingPointType`); a named struct `%struct.S = type { double }` is not
+  (DeadArgElim/musttail-verifier.ll).
+- `ppc_fp128` constants: `DoubleAPFloat::isDenormal` is "either half denormal or (double)(hi + lo) != hi", so
+  `0xM3FF00000000000000000000000000000` (1.0) is normal and gets `nofpclass(... sub nnorm)`
+  (InstSimplify/canonicalize.ll, ConstProp/convert-from-fp16.ll).
+- A call whose callee is declared with another return type (`declare i1 @f(i1)` called as `call i32 @f(i32 ...)`)
+  gives AAValueConstantRange call-site states of two widths; the callee's range is the full set (a declaration), so
+  the call-site-returned position goes pessimistic (MemorySSA/call-bitcast.ll).

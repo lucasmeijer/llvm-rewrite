@@ -5071,10 +5071,13 @@ tests/imported/llvm/Transforms/Attributor/IPConstantProp/deadarg.ll::opt
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/deadarg.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/global.ll::opt
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/global.ll::roundtrip
+tests/imported/llvm/Transforms/Attributor/IPConstantProp/multiple_callbacks.ll::opt
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/multiple_callbacks.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/musttail-call.ll::opt
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/musttail-call.ll::roundtrip
+tests/imported/llvm/Transforms/Attributor/IPConstantProp/openmp_parallel_for.ll::opt
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/openmp_parallel_for.ll::roundtrip
+tests/imported/llvm/Transforms/Attributor/IPConstantProp/pthreads.ll::opt
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/pthreads.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/recursion.ll::opt
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/recursion.ll::roundtrip
@@ -5088,6 +5091,7 @@ tests/imported/llvm/Transforms/Attributor/IPConstantProp/return-constants.ll::op
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/return-constants.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/solve-after-each-resolving-undefs-for-function.ll::opt
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/solve-after-each-resolving-undefs-for-function.ll::roundtrip
+tests/imported/llvm/Transforms/Attributor/IPConstantProp/thread_local_acs.ll::opt
 tests/imported/llvm/Transforms/Attributor/IPConstantProp/thread_local_acs.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/align-atomic.ll::opt
 tests/imported/llvm/Transforms/Attributor/align-atomic.ll::roundtrip
@@ -5095,6 +5099,7 @@ tests/imported/llvm/Transforms/Attributor/align-ptrmask.ll::opt
 tests/imported/llvm/Transforms/Attributor/align-ptrmask.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/align.ll::opt
 tests/imported/llvm/Transforms/Attributor/align.ll::roundtrip
+tests/imported/llvm/Transforms/Attributor/allocator.ll::opt
 tests/imported/llvm/Transforms/Attributor/allocator.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/alwaysinline.ll::opt
 tests/imported/llvm/Transforms/Attributor/alwaysinline.ll::roundtrip
@@ -5102,6 +5107,7 @@ tests/imported/llvm/Transforms/Attributor/assumes_info.ll::opt
 tests/imported/llvm/Transforms/Attributor/assumes_info.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/call-simplify-pointer-info.ll::opt
 tests/imported/llvm/Transforms/Attributor/call-simplify-pointer-info.ll::roundtrip
+tests/imported/llvm/Transforms/Attributor/callbacks.ll::opt
 tests/imported/llvm/Transforms/Attributor/callbacks.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/callbr.ll::opt
 tests/imported/llvm/Transforms/Attributor/callbr.ll::roundtrip
@@ -5132,6 +5138,7 @@ tests/imported/llvm/Transforms/Attributor/heap_to_stack.ll::opt
 tests/imported/llvm/Transforms/Attributor/heap_to_stack.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/internal-noalias.ll::opt
 tests/imported/llvm/Transforms/Attributor/internal-noalias.ll::roundtrip
+tests/imported/llvm/Transforms/Attributor/internalize.ll::opt
 tests/imported/llvm/Transforms/Attributor/internalize.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/issue87856.ll::opt
 tests/imported/llvm/Transforms/Attributor/issue87856.ll::roundtrip
@@ -5245,9 +5252,11 @@ tests/imported/llvm/Transforms/Attributor/noreturn_sync.ll::opt
 tests/imported/llvm/Transforms/Attributor/noreturn_sync.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/nosync.ll::opt
 tests/imported/llvm/Transforms/Attributor/nosync.ll::roundtrip
+tests/imported/llvm/Transforms/Attributor/noundef.ll::opt
 tests/imported/llvm/Transforms/Attributor/noundef.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/nounwind.ll::opt
 tests/imported/llvm/Transforms/Attributor/nounwind.ll::roundtrip
+tests/imported/llvm/Transforms/Attributor/openmp_parallel.ll::opt
 tests/imported/llvm/Transforms/Attributor/openmp_parallel.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/pointer-info.ll::opt
 tests/imported/llvm/Transforms/Attributor/pointer-info.ll::roundtrip
@@ -5309,6 +5318,7 @@ tests/imported/llvm/Transforms/Attributor/value-simplify.ll::opt
 tests/imported/llvm/Transforms/Attributor/value-simplify.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/willreturn.ll::opt
 tests/imported/llvm/Transforms/Attributor/willreturn.ll::roundtrip
+tests/imported/llvm/Transforms/Attributor/wrapper.ll::opt
 tests/imported/llvm/Transforms/Attributor/wrapper.ll::roundtrip
 tests/imported/llvm/Transforms/BDCE/binops-multiuse.ll::opt
 tests/imported/llvm/Transforms/BDCE/binops-multiuse.ll::roundtrip

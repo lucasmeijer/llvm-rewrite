@@ -3,7 +3,7 @@
 // getAssumedConstant, translateArgumentToCallSiteContent, and the AA:: helpers (isNoSyncInst, isDynamicallyUnique,
 // getInitialValueForObj, isValidInScope, isValidAtPosition, getWithType, combineOptionalValuesInAAValueLatice,
 // getPotentialCopiesOfMemoryValue, isAssumedReadOnly / ReadNone, isPotentiallyReachable,
-// isAssumedThreadLocalObject). The framework is attributor.jai.
+// isAssumedThreadLocalObject), and llvm/lib/IR/AbstractCallSite.cpp (Acs). The framework is attributor.jai.
 
 AA_INTRA :: cast(u8) 1;
 AA_INTER :: cast(u8) 2;

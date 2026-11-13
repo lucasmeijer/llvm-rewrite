@@ -1,8 +1,9 @@
 // The manifest/cleanup side of llvm/lib/Transforms/IPO/Attributor.cpp: changeUseAfterManifest / changeAfterManifest
 // and the other after-manifest registrations, cleanupIR, identifyDeadInternalFunctions,
 // isValidFunctionSignatureRewrite / registerFunctionSignatureRewrite / rewriteFunctionSignatures,
-// createShallowWrapper, internalizeFunctions, the dependency graph printers and the CallGraphUpdater
-// (llvm/lib/Transforms/Utils/CallGraphUpdater.cpp) steps the passes need.
+// createShallowWrapper, internalizeFunctions, the CallGraphUpdater (llvm/lib/Transforms/Utils/CallGraphUpdater.cpp)
+// steps the passes need, and AAIndirectCallInfo's specialization with isLegalToPromote / promoteCall
+// (llvm/lib/Transforms/Utils/CallPromotionUtils.cpp).
 
 // changeUseAfterManifest
 atr_change_use_after_manifest :: (u: Use_Id, nv: Value_Id) -> bool {

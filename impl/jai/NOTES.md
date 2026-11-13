@@ -232,7 +232,7 @@ these flags, so they cannot be swept against the oracle; they exist to look at w
 | gvn-hoist (`OutValue` is a `DenseMap<BasicBlock *>`; load keys contain the `Type *`) | an instruction hoisted into one block uses (also through GEPs) one hoisted into another block in the same round; or two loads of different types from one address hoist into one block | `-gvn-hoist-guess-address-order` |
 | delinearization (`array_pod_sort` of the terms by SCEV pointer) | findArrayDimensionsRec gives another result with every group of equal-factor-count terms reversed | `-delinearize-guess-address-order` |
 | loop-simplifycfg (`SmallPtrSet<BasicBlock *, 2>` of dead successors) | more than two dead successors (DT update order) | `-loop-simplifycfg-guess-address-order` |
-| codegenprepare, function-specialization, InstCombine fsqrt, attributor, SLP reorder | already fail loudly or check order independence where they meet pointer order (see their sections) | none |
+| codegenprepare, function-specialization, InstCombine fsqrt, attributor (signature rewrites), SLP reorder | already fail loudly or check order independence where they meet pointer order (see their sections) | none |
 
 Audited and order-independent (no flag): memdep's NonLocalDepEntry sort (GVN only materializes unnamed values in
 that order), LazyCallGraph::removeDeadFunctions (RefSCCs split independently), getMinMaxRecurrence's chain (equivalent
@@ -1280,29 +1280,55 @@ Still slow / next:
   CallAnalyzer::visitBinaryOperator (constant creation hashes a key per folded constant).
 
 
-## AttributorLight (`attributor-light`, `attributor-light-cgscc`; L2.function-attrs COMPLETE)
+## Attributor (`attributor`, `attributor-cgscc`, `attributor-light`, `attributor-light-cgscc`; L1.extra.attributor)
 
-- Files: `attributor.jai` (the framework: IRPosition as `Irp{enc, v}` with LLVM's encoding bits, the integer states
-  as `Bstate{known, assumed, best}`, `Abs_Attr` rows on the heap indexed by u32, getOrCreateAAFor = `atr_get_aa`,
-  runTillFixpoint, manifest + AttrsMap, hasAttr / getAttrs / manifestAttrs / removeAttrs, SubsumingPositionIterator,
-  InformationCache, MustBeExecutedContextExplorer = `mbe_*`, fillMapFromAssume / getKnowledgeFromUse) and
-  `attributor_aas.jai` (the 17 allowed AAs; their virtual methods are `aa_initialize` / `aa_update_impl` /
-  `aa_manifest`, switches on (kind, position kind)). knowledge/llvm/attributor.md has the behaviour that matters.
-- No closures in Jai: the checkForAll* helpers return the instruction / call-site lists (`atr_insts`,
-  `atr_call_sites` with a `complete` flag for "the walk stopped with a failure after these"), and checkForAllUses is
-  an explicit walk (`atr_uses_begin` / `atr_uses_next` / `atr_uses_follow`). The predicates are the loops at the
-  call sites, in LLVM's order (AA creation order and dependences depend on it).
-- Only the light configuration: liveness, AAPotentialValues, AAPointerInfo, cleanupIR, signature rewriting and the
-  full `attributor` / `attributor-cgscc` passes are not ported. `!callback` metadata anywhere in the module fails
-  loudly (AbstractCallSite callback calls are not ported): 4 corpus files.
-- Trap: a pointer into `atr.aas[i]` is stable (heap rows), but follow-ups that create AAs can reach the AA being
-  initialized through the map: update its state in place (`*aa(i).s`), never a local copy.
-- Sweeps (0 differs, 4 loud `!callback` failures each): `attributor-light`, `attributor-light-cgscc`, both with
-  `--with-test-flags` (failures there are other passes' flags), `function(require<domtree>,require<loops>,
-  require<postdomtree>,require<assumptions>,require<scalar-evolution>),attributor-light` (cached analyses), and
-  `tests/perf/compile/*`.
-- Compile time: x64 build, SPASS.ll: 3.9 s for `-passes=attributor-light` (parse + print 1.0 s) vs LLVM 1.0 s in
-  total; not measured with the optimized build (no perf benchmark runs this pass).
+- Files (Attributor.cpp + AttributorAttributes.cpp, about 9.8k lines):
+  - `attributor.jai`: the framework. IRPosition as `Irp{enc, v}` with LLVM's encoding bits, the integer states as
+    `Bstate{known, assumed, best}`, `Abs_Attr` rows indexed by u32 with a per-kind extension `x` (`*_ext(i)`
+    accessors), getOrCreateAAFor = `atr_get_aa`, runTillFixpoint, manifest + AttrsMap, seeding, the
+    InformationCache, the MustBeExecutedContextExplorer (`mbe_*`), the cl::opts (`atr_parse_cl_opt`), the passes.
+  - `attributor_aas.jai`: the dispatch (`aa_construct` / `aa_initialize` / `aa_update_impl` / `aa_manifest`,
+    switches on (kind, position kind)) and the 17 light AAs.
+  - `attributor_query.jai`: liveness queries, the checkForAll* iterators, AbstractCallSite (`Acs`, `acs_*`),
+    checkForAllUses, getAssumedSimplifiedValues, potential copies, reachability.
+  - `attributor_dead.jai` (AAIsDead, AAUndefinedBehavior), `attributor_values.jai` (AAPotentialValues,
+    AAPotentialConstantValues, AAValueConstantRange, the generic clamps), `attributor_ptrinfo.jai` (AAPointerInfo),
+    `attributor_misc.jai` (NoAlias, Dereferenceable, Align, NoUndef, InstanceInfo, AssumptionInfo, GlobalValueInfo,
+    IndirectCallInfo, InvariantLoadPointer, AddressSpace, AllocationInfo, NonConvergent), `attributor_mem.jai`
+    (HeapToStack, PrivatizablePtr), `attributor_cleanup.jai` (changeAfterManifest, cleanupIR, signature rewrites,
+    indirect call specialization / promoteCall, wrappers, internalization, the CallGraphUpdater steps).
+  - knowledge/llvm/attributor.md has the behaviour that matters.
+- No closures in Jai: the checkForAll* walks are `for_expansion` iterators (`atr_insts`, `atr_call_like_insts`,
+  `atr_rw_insts`, `atr_call_sites` with `it` the call and `acs` the AbstractCallSite) that keep LLVM's interleaving of
+  liveness checks and predicate; the body clears `ok` and breaks when the predicate fails. checkForAllUses is an
+  explicit walk (`atr_uses_begin` / `atr_uses_next` / `atr_uses_follow`, the EquivalentUseCB as an `EQU_*` kind).
+- `optional<Value *>`: `OV_NOVAL` is std::nullopt, `NONE` is nullptr.
+- Memory: one run's AAs, extensions, information cache and bookkeeping live in `atr_pool` (a Flat_Pool reset by
+  `atr_reset`). Allocate AA state with `atr_new(T)`, which also points every [..] array and Table *directly inside*
+  T at the pool. Arrays created later (locals stored into the state, table values) keep their allocator and leak
+  per run; that is small. Without the pool the CGSCC pass grew by ~40 MB/s on SPASS.ll (every run's 1-2k AAs kept,
+  OOM-killed after 3 min); with it SPASS peaks at 730 MB.
+- Trap: `Mbec_State` and followUsesInMBEC hold pointers into an AA's state; follow-ups that create AAs can reach the
+  AA being initialized through the map: update its state in place, never a local copy.
+- Trap: `md_node_op` returns only MDNode operands; the integer operands of `!callback` encodings need `md_op`.
+- Unsupported, fails loudly: `-attributor-enable-call-site-specific-deduction` (IRPositions with a CallBaseContext),
+  `-attributor-print-call-graph` / `-attributor-print-dep` / `-attributor-dump-dep-graph` (pointer-valued DOT output),
+  several privatizing signature rewrites with call sites in one caller (DenseMap pointer order, see knowledge),
+  GPU address spaces (AAAddressSpace / AANoAliasAddrSpace are pessimistic on x86), deep wrappers in the CGSCC pass,
+  promoting a call with a byval/inalloca argument of another type or an invoke with another return type.
+- Status: 290 of the 301 `@opt` lines of tests/imported/llvm/Transforms/Attributor match (the rest: 4
+  call-site-specific, 4 openmp-opt, 2 DenseMap order, 1 print-call-graph). Sweeps `attributor` and
+  `attributor-cgscc`, plain, `--with-test-flags` and over tests/perf/compile: 0 differs, 0 bad-ir; loud: the DenseMap
+  order (4 files), knownbits-x86-hadd-hsub (ValueTracking), and redundant-left-shift-input-masking-no-widen.ll
+  (`i5754496`: LLVM needs 2 min; we get OOM-killed in the APInt code).
+- Compile time, x64 build, SPASS.ll: `attributor` 38 s vs LLVM 4.9 s; `attributor-cgscc` 190 s vs LLVM 18 s.
+  The ratio (8-10x) is the x64 build's usual one; no perf benchmark runs these passes.
+- Next steps:
+  1. Call-site-specific deduction: an `Irp` needs a CallBaseContext (part of the AA map key), passed through
+     `aa_callee_to_call_site` / the returned-value clamps (cb_liveness_enabled.ll, cb_range_enabled.ll).
+  2. The privatizing-rewrite name order is a DenseMap<Function *> walk: only reachable by guessing allocation
+     addresses; keep it loud.
+  3. Profile the CGSCC pass with the optimized build (`harness/run perf` has no benchmark for it yet).
 
 ## PartialInliner and CodeExtractor (`partial-inliner`; L2.inline)
 

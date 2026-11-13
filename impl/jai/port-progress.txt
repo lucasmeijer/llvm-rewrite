@@ -224,8 +224,9 @@ lib/CodeGen/PreISelIntrinsicLowering.cpp 0.85   # x86 only; missing protected.fi
 lib/CodeGen/AtomicExpandPass.cpp 0.55   # the x86 paths (casts, cmpxchg loops, cmpxchg16b, libcalls); no LL/SC, partword, masked-intrinsic or fence-insertion paths
 lib/CodeGen/ExpandVectorPredication.cpp 0.85   # missing constrained-FP VP expansion
 lib/Transforms/Utils/LowerMemIntrinsics.cpp 0.3   # unknown-size memcpy/memset loops and memset.pattern only
-lib/Transforms/IPO/Attributor.cpp 0.35  # the light configuration only: fixpoint, manifest, AttrsMap, seeding, checkForAll*, InformationCache; no liveness, cleanupIR, signature rewrites, wrappers, full attributor passes
-lib/Transforms/IPO/AttributorAttributes.cpp 0.2  # the 17 AAs AttributorLight allows (simplified where AAPotentialValues / AAIsDead / AAPointerInfo would be queried)
+lib/Transforms/IPO/Attributor.cpp 0.85  # full and light configurations, module + CGSCC: fixpoint, liveness, manifest, cleanupIR, signature rewrites, AbstractCallSite callbacks, closed world, shallow/deep wrappers; missing: call-site-specific deduction (CallBaseContext), call graph / dependency graph printing
+lib/Transforms/IPO/AttributorAttributes.cpp 0.8  # every AA the attributor passes seed, incl. indirect call specialization; missing: call-base-context paths, GPU address-space AAs (pessimistic on x86), AAValueSimplify / OpenMP-only AAs
+lib/Transforms/Utils/CallPromotionUtils.cpp 0.35  # isLegalToPromote, promoteCall, createRetBitCast (attributor_cleanup.jai); not versionCallSite / promoteCallWithIfThenElse / tryPromoteCall
 lib/Analysis/AssumeBundleQueries.cpp 0.4  # fillMapFromAssume, getKnowledgeFromUse / getKnowledgeFromBundle
 # L2.lto / L2.lto-passes (jai_lto, 2026-11)
 lib/Transforms/IPO/MergeFunctions.cpp 0.95  # no doFunctionalCheck (debug only), runOnFunctions

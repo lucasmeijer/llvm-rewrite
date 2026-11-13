@@ -128,8 +128,11 @@ src/
   pass_strip_dead_prototypes.jai, pass_elim_avail_extern.jai, pass_assign_guid.jai, md5.jai   IPO module passes
   pass_dead_arg_elim.jai, pass_arg_promotion.jai   DeadArgumentElimination (module), ArgumentPromotion (CGSCC)
   pass_partial_inliner.jai, code_extractor.jai   PartialInliner (single region) and CodeExtractor
-  attributor.jai, attributor_aas.jai   AttributorLight (module + CGSCC): the Attributor framework (`Irp` positions,
-                  `Abs_Attr` rows, fixpoint, AttrsMap, MustBeExecutedContextExplorer) and its 17 abstract attributes
+  attributor.jai, attributor_aas.jai, attributor_query.jai, attributor_dead.jai, attributor_values.jai,
+  attributor_ptrinfo.jai, attributor_misc.jai, attributor_mem.jai, attributor_cleanup.jai
+                  the Attributor and AttributorLight (module + CGSCC): the framework (`Irp` positions, `Abs_Attr`
+                  rows with per-kind extensions in a per-run pool, fixpoint, AttrsMap, AbstractCallSite,
+                  MustBeExecutedContextExplorer), all abstract attributes, manifest and cleanupIR
   pass_lower_expect.jai, pass_lower_constant_intrinsics.jai, pass_infer_alignment.jai, pass_div_rem_pairs.jai,
   pass_float2int.jai, pass_sink.jai, pass_tailcallelim.jai, pass_mldst_motion.jai, pass_speculative_execution.jai,
   pass_callsite_splitting.jai (L1.scalar-misc; their cl::opts: scalar_misc_cl.jai), and the small -O2 passes:
