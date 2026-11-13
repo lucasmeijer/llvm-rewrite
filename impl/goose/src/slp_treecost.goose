@@ -31,6 +31,7 @@ import tti_x86;
 import tti_vec;
 import tti_x86_vec;
 import gen_x86target;
+import printer;
 import slp_util;
 import slp_tree;
 import slp_loads;
@@ -752,8 +753,541 @@ fn slp_get_tree_cost_rest(tree_cost: i64, vvals: const i32[:], rdx_cost0: i64, r
     var any_ie = false;
     for x in slp_eu { if x.user >= 0 && is_inst_op(x.user, OP_INSERTELEMENT) { any_ie = true; } }
     if cost >= -thr && !any_ie { return cost; }
-    slp_fail("getTreeCost: the extract costs of the external uses");
+    return slp_get_tree_cost_extracts(cost, vvals, rdx_cost, rdx_root);
+}
+// areTwoInsertFromSameBuildVector(VU, V, GetBaseOperand) with getTreeCost's GetBaseOperand
+fn slp_tc_base_operand(ii: i32) -> i32 {
+    let o0 = op(ii, 0);
+    if slp_is_vectorized(ii) && !slp_is_vectorized(o0) { return -1; }
+    return o0;
+}
+fn slp_two_inserts_same_bv(vu: i32, v: i32) -> bool {
+    if inst_parent(vu) != inst_parent(v) { return false; }
+    if vals[vu].ty as i32 != vals[v].ty as i32 { return false; }
+    if !slp_has_one_use(vu) && !slp_has_one_use(v) { return false; }
+    var ie1 = vu;
+    var ie2 = v;
+    let idx1 = slp_element_index(ie1, 0);
+    let idx2 = slp_element_index(ie2, 0);
+    if idx1 < 0 || idx2 < 0 { return false; }
+    var reused: bool[>..<] = [];
+    for k in ty_count(vals[vu].ty) { reused.push(false); }
+    var is_reused = false;
+    loop {
+        if ie2 == vu && ie1 < 0 { return slp_has_one_use(vu); }
+        if ie1 == v && ie2 < 0 { return slp_has_one_use(v); }
+        if ie1 >= 0 && ie1 != v {
+            var i1 = slp_element_index(ie1, 0);
+            if i1 < 0 { i1 = idx2; }
+            is_reused = is_reused || reused[i1];
+            reused[i1] = true;
+            if (ie1 != vu && !slp_has_one_use(ie1)) || is_reused { ie1 = -1; }
+            else { let b = slp_tc_base_operand(ie1); ie1 = if is_inst_op(b, OP_INSERTELEMENT) { b } else { -1 }; }
+        }
+        if ie2 >= 0 && ie2 != vu {
+            var i2 = slp_element_index(ie2, 0);
+            if i2 < 0 { i2 = idx1; }
+            is_reused = is_reused || reused[i2];
+            reused[i2] = true;
+            if (ie2 != v && !slp_has_one_use(ie2)) || is_reused { ie2 = -1; }
+            else { let b = slp_tc_base_operand(ie2); ie2 = if is_inst_op(b, OP_INSERTELEMENT) { b } else { -1 }; }
+        }
+        if is_reused || (ie1 < 0 && ie2 < 0) { break; }
+    }
+    return false;
+}
+// isFirstInsertElement(IE1, IE2)
+fn slp_is_first_insert_element(ie1: i32, ie2: i32) -> bool {
+    if ie1 == ie2 { return false; }
+    var i1 = ie1;
+    var i2 = ie2;
+    let idx1 = slp_element_index(ie1, 0);
+    let idx2 = slp_element_index(ie2, 0);
+    loop {
+        if i2 == ie1 { return true; }
+        if i1 == ie2 { return false; }
+        let p1 = i1;
+        let p2 = i2;
+        if i1 >= 0 && (i1 == ie1 || slp_has_one_use(i1)) {
+            var e = slp_element_index(i1, 0);
+            if e < 0 { e = idx2; }
+            if e != idx2 { let o = op(i1, 0); i1 = if is_inst_op(o, OP_INSERTELEMENT) { o } else { -1 }; }
+        }
+        if i2 >= 0 && (i2 == ie2 || slp_has_one_use(i2)) {
+            var e = slp_element_index(i2, 0);
+            if e < 0 { e = idx1; }
+            if e != idx1 { let o = op(i2, 0); i2 = if is_inst_op(o, OP_INSERTELEMENT) { o } else { -1 }; }
+        }
+        if !((i1 >= 0 && p1 != i1) || (i2 >= 0 && p2 != i2)) { break; }
+    }
+    fatal("internal: SLP: two different buildvectors not expected");
+    return false;
+}
+// the extract-cost part of getTreeCost
+fn slp_get_tree_cost_extracts(cost0: i64, vvals: const i32[:], rdx_cost: i64, rdx_root: i32) -> i64 {
+    let thr = slp_threshold();
+    var cost = cost0;
+    // ScaleCost(C, TE, Scalar, U) with the EntryToScale cache
+    var sc_te: i32[>..<] = [];
+    var sc_s: i32[>..<] = [];
+    var sc_u: i32[>..<] = [];
+    var sc_v: u64[>..<] = [];
+    fn scale_cost(c: i64, t: i32, scalar: i32, u: i32) -> i64 {
+        if !tc_valid(c) || c == 0 { return c; }
+        var sv: u64 = 0;
+        var found = false;
+        for k in sc_te.len { if sc_te[k] == t && sc_s[k] == scalar && sc_u[k] == u { sv = sc_v[k]; found = true; break; } }
+        if !found || sv == 0 {
+            sv = slp_scale_to_loop_iterations(t, scalar, u);
+            if !found { sc_te.push(t); sc_s.push(scalar); sc_u.push(u); sc_v.push(sv); }
+        }
+        if slp_dbg_on { errs("Scale "); errs_int(sv as i64); errs(" For entry "); errs_int(t as i64); errs("\n"); slp_dbg_flush(); }
+        return slp_cost_scale(c, sv);
+    }
+    var ext_cost: i64 = 0;
+    // ShuffledInserts: per buildvector: first insert, then (entry, mask) pairs in a MapVector; DemandedElts
+    var si_first: i32[>..<] = [];
+    var si_dem_at: i64[>..<] = [];
+    var si_dem: bool[>..<] = [];
+    var vm_si: i64[>..<] = [];
+    var vm_te: i32[>..<] = [];
+    var vm_at: i64[>..<] = [];
+    var vm_pool: i32[>..<] = [];
+    var used_inserts: i32[>..<] = [];
+    var vcasts_te: i32[>..<] = [];
+    var vcasts_ty: i32[>..<] = [];
+    var vte_k: i32[>..<] = [];      // ValueToExtUses: scalar -> index (computed lazily)
+    var vte_i: i64[>..<] = [];
+    var vte_ready = false;
+    var ec_te: i32[>..<] = [];      // ExtractsCount: entry -> set of instructions
+    var ec_i: i32[>..<] = [];
+    var ops_from_casts: i32[>..<] = [];
+    // AllUsersGEPSWithStoresLoads
+    var all_gep_users = true;
+    var pointers: i32[>..<] = [];
+    var user_sty: i32 = -1;
+    for x in slp_eu {
+        var usr = x.user;
+        if usr >= 0 && (is_inst_op(usr, OP_ZEXT) || is_inst_op(usr, OP_SEXT)) && slp_has_one_use(usr) { usr = slp_user_back(usr); }
+        var acc: i32 = -1;
+        if usr >= 0 && is_inst_op(usr, OP_GEP) && slp_has_one_use(usr) {
+            let ub = slp_user_back(usr);
+            if is_inst_op(ub, OP_LOAD) || is_inst_op(ub, OP_STORE) { acc = slp_value_type(ub, false); }
+        }
+        if acc >= 0 && ty_kind(acc) != TK_SVEC && (user_sty < 0 || user_sty == acc) { user_sty = acc; pointers.push(usr); }
+        else { all_gep_users = false; break; }
+    }
+    // ScalarToExtractBlock
+    var s2b_s: i32[>..<] = [];
+    var s2b_b: i32[>..<] = [];
+    for x in slp_eu {
+        if x.user < 0 || is_inst_op(x.user, OP_INSERTELEMENT) { continue; }
+        if slp_is_ephemeral(x.user) { continue; }
+        let up = inst_parent(x.user);
+        let term = block_terminator(up);
+        if !slp_reachable(up) || inst_is_eh_pad(first_non_phi(up)) || (term >= 0 && iop(term) == OP_UNREACHABLE) { continue; }
+        var ub: i32 = -1;
+        if is_inst_op(x.user, OP_PHI) {
+            if li_loop_for(inst_parent(x.user)) >= 0 {
+                for k in phi_nincoming(x.user) {
+                    if op(x.user, k) != x.scalar { continue; }
+                    let inbb = phi_block(x.user, k);
+                    ub = if ub >= 0 { dt_find_ncd(DT_DOM, ub, inbb) } else { inbb };
+                }
+            }
+            if ub < 0 { ub = inst_parent(x.user); }
+        } else {
+            ub = inst_parent(x.user);
+        }
+        var found = false;
+        for k in s2b_s.len {
+            if s2b_s[k] == x.scalar { found = true; if s2b_b[k] >= 0 && ub >= 0 { s2b_b[k] = dt_find_ncd(DT_DOM, s2b_b[k], ub); } break; }
+        }
+        if !found { s2b_s.push(x.scalar); s2b_b.push(ub); }
+    }
+    var csu_s: i32[>..<] = [];      // CheckedScalarUser
+    var csu_u: i32[>..<] = [];
+    fn csu_has(a: i32, b: i32) -> bool { for k in csu_s.len { if csu_s[k] == a && csu_u[k] == b { return true; } } return false; }
+    var ecc: i32[>..<] = [];        // ExtractCostCalculated (scalar; struct indices are not supported)
+    fn is_phi_in_loop(eu: SEU) -> bool {
+        if eu.user >= 0 && is_inst_op(eu.user, OP_PHI) {
+            let l = li_loop_for(inst_parent(eu.user));
+            return l >= 0 && (inst_parent(eu.user) == inst_parent(eu.scalar) || l == li_loop_for(inst_parent(eu.scalar)));
+        }
+        return false;
+    }
+    fn vte_find(v: i32) -> i64 { for k in vte_k.len { if vte_k[k] == v { return vte_i[k]; } } return -1; }
+    var ei: i64 = 0;
+    while ei < slp_eu.len {
+        let x = slp_eu[ei];
+        let this_ei = ei;
+        ei++;
+        if slp_dbg_on {
+            errs("SLP: Computing cost for external use of TreeEntry "); errs_int(x.te as i64); errs(" in lane "); errs_int(x.lane); errs("\n");
+            if x.user >= 0 { errs("  User:"); slp_dv(x.user); errs("\n"); } else { errs("  User: nullptr\n"); }
+            errs("  Use: "); slp_name_or_as_operand(x.scalar); errs("\n");
+            slp_dbg_flush();
+        }
+        if x.user >= 0 && slp_is_ephemeral(x.user) { continue; }
+        if csu_has(x.scalar, x.user) || (x.user >= 0 && csu_has(x.scalar, -1)) { continue; }
+        csu_s.push(x.scalar); csu_u.push(x.user);
+        if x.user >= 0 {
+            let up = inst_parent(x.user);
+            let term = block_terminator(up);
+            if !slp_reachable(up) || inst_is_eh_pad(first_non_phi(up)) || (term >= 0 && iop(term) == OP_UNREACHABLE) { continue; }
+        }
+        if ty_is_vector(vals[x.scalar].ty) || ty_is_struct_of_vectors(vals[x.scalar].ty) { continue; }
+        if is_inst_op(x.scalar, OP_INSERTVALUE) { continue; }
+        if x.user >= 0 && is_inst_op(x.user, OP_INSERTELEMENT) && op(x.user, 1) == x.scalar && ty_kind(vals[x.user].ty) == TK_FVEC {
+            let vu = x.user;
+            if slp_contains(used_inserts, vu) { continue; }
+            used_inserts.push(vu);
+            let iidx = slp_element_index(vu, 0);
+            if iidx >= 0 {
+                let ste = x.te;
+                var vec_id: i64 = -1;
+                for k in si_first.len { if slp_two_inserts_same_bv(vu, si_first[k]) { vec_id = k; break; } }
+                let fty: i32 = vals[vu].ty;
+                if vec_id < 0 {
+                    si_first.push(vu);
+                    si_dem_at.push(si_dem.len);
+                    for k in ty_count(fty) { si_dem.push(false); }
+                    vec_id = si_first.len - 1;
+                    var seen = false;
+                    for k in vcasts_te.len { if vcasts_te[k] == ste && vcasts_ty[k] == ty_scalar(fty) { seen = true; } }
+                    if slp_te[ste].mbw > 0 && !seen {
+                        vcasts_te.push(ste); vcasts_ty.push(ty_scalar(fty));
+                        let bwsz = slp_te[ste].mbw as i64;
+                        let dsz = slp_dl_bits(ty_scalar(fty));
+                        let vo = if dsz < bwsz { OP_TRUNC } else if slp_te[ste].mbw_s { OP_SEXT } else { OP_ZEXT };
+                        let c = tv_cast(vo, fty, slp_widened_type(ty_int(bwsz), ty_count(fty)), 0, TCK_RECIP_THROUGHPUT, -1);
+                        if slp_dbg_on { errs("SLP: Adding cost "); slp_errs_cost(c); errs(" for extending externally used vector with non-equal minimum bitwidth.\n"); slp_dbg_flush(); }
+                        cost = tc_add(cost, c);
+                    }
+                } else {
+                    if slp_is_first_insert_element(vu, si_first[vec_id]) { si_first[vec_id] = vu; }
+                }
+                var mi: i64 = -1;
+                for k in vm_si.len { if vm_si[k] == vec_id && vm_te[k] == ste { mi = k; break; } }
+                if mi < 0 {
+                    mi = vm_si.len;
+                    vm_si.push(vec_id); vm_te.push(ste); vm_at.push(vm_pool.len);
+                    for k in ty_count(fty) { vm_pool.push(-1); }
+                }
+                vm_pool[vm_at[mi] + iidx] = x.lane as i32;
+                si_dem[si_dem_at[vec_id] + iidx] = true;
+                continue;
+            }
+        }
+        let sty: i32 = vals[x.scalar].ty;
+        let bw = te_vector_factor(x.te);
+        var vecty = slp_widened_type(sty, bw);
+        let entry = x.te;
+        if ty_is_struct(vecty) { slp_fail("getTreeCost: extracts of struct-typed scalars"); }
+        if !(x.user >= 0 && is_inst_op(x.user, OP_INSERTELEMENT)) {
+            if slp_contains(ecc, x.scalar) { continue; }
+            ecc.push(x.scalar);
+        }
+        var extra: i64 = 0;
+        if slp_te[entry].mbw > 0 {
+            let mint = ty_int(slp_te[entry].mbw as i64);
+            let ext = if mb_known_non_negative(x.scalar) { OP_ZEXT } else { OP_SEXT };
+            vecty = slp_widened_type(mint, bw);
+            extra = tv_extract_with_extend(ext, sty, vecty, x.lane);
+            if slp_dbg_on { errs("  ExtractExtend or ExtractSubvec cost: "); slp_errs_cost(extra); errs("\n"); slp_dbg_flush(); }
+        } else {
+            extra = tv_vec_inst(OP_EXTRACTELEMENT, vecty, x.lane, -1, -1, TCK_RECIP_THROUGHPUT);
+            if slp_dbg_on { errs("  ExtractElement cost for "); slp_errs_type(sty); errs(" from "); slp_errs_type(vecty); errs(": "); slp_errs_cost(extra); errs("\n"); slp_dbg_flush(); }
+        }
+        if entry != 0 || te_opcode(entry) == OP_GEP || te_opcode(entry) == OP_LOAD {
+            if !vte_ready {
+                vte_ready = true;
+                for k in slp_eu.len {
+                    if is_phi_in_loop(slp_eu[k]) { continue; }
+                    if vte_find(slp_eu[k].scalar) < 0 { vte_k.push(slp_eu[k].scalar); vte_i.push(k); }
+                }
+            }
+            let inst = x.scalar;
+            var scost = tv_inst_cost(inst, TCK_RECIP_THROUGHPUT);
+            fn operand_is_scalar(v: i32) -> bool {
+                if !slp_is_vectorized(v) {
+                    if is_inst_op(v, OP_EXTRACTELEMENT) { return !slp_has_one_use(v) || !sh_has(SH_MUSTG, v as i64, 0); }
+                    return true;
+                }
+                if ty_is_struct(vals[v].ty) { return false; }
+                return vte_find(v) >= 0;
+            }
+            var as_scalar = true;
+            for k in nops(inst) { if !operand_is_scalar(op(inst, k)) { as_scalar = false; break; } }
+            var as_scalar_cast = false;
+            if is_cast_op(iop(inst)) && !as_scalar {
+                let o = op(inst, 0);
+                if is_inst(o) {
+                    var all = true;
+                    for k in nops(o) { if !operand_is_scalar(op(o, k)) { all = false; break; } }
+                    if all {
+                        let oc: i64 = if slp_is_vectorized(o) && vte_find(o) < 0 { tv_inst_cost(o, TCK_RECIP_THROUGHPUT) } else { 0 };
+                        if tc_add(scost, oc) <= extra { as_scalar = true; as_scalar_cast = true; scost = tc_add(scost, oc); }
+                    }
+                }
+            }
+            if as_scalar {
+                var keep = scost <= extra;
+                var phi_user = (keep || (tc_sub(scost, extra) <= TCC_BASIC && te_nscalars(0) > 2)) && te_has_state(0) && te_opcode(0) == OP_PHI &&
+                               !slp_has_n_uses_or_more(inst, SLP_USES_LIMIT);
+                if phi_user {
+                    var u = vals[inst].first_use;
+                    while u >= 0 {
+                        let usr = uses[u].user;
+                        u = uses[u].next;
+                        if (!is_inst_op(usr, OP_PHI) || inst_parent(usr) != inst_parent(te_main(0))) && !slp_is_vectorized(usr) { phi_user = false; break; }
+                    }
+                }
+                if phi_user {
+                    var cnt: i64 = 0;
+                    for v in te_scalars(entry) { if vte_find(v) >= 0 { cnt++; } }
+                    phi_user = cnt <= 2;
+                }
+                if phi_user {
+                    keep = true;
+                } else if keep && scost != 0 && tc_sub(extra, scost) <= TCC_BASIC &&
+                          (slp_gathered_loads_first < 0 || (entry as i64) < slp_gathered_loads_first) {
+                    var cnt: i64 = 0;
+                    for v in te_scalars(entry) { if vte_find(v) >= 0 { cnt++; } }
+                    var nec: i64 = 0;
+                    for k in ec_te.len { if ec_te[k] == entry { nec++; } }
+                    cnt -= nec;
+                    keep = cnt <= 1 || !slp_is_pow2(cnt);
+                }
+                if keep {
+                    sh_add(SH_EUORIG, x.scalar as i64, 0);
+                    for k in nops(inst) {
+                        let v = op(inst, k);
+                        if ty_is_struct(vals[v].ty) { continue; }
+                        let j = vte_find(v);
+                        if j >= 0 { slp_eu[j].user = -1; }
+                    }
+                    extra = scost;
+                    if !is_phi_in_loop(x) {
+                        var have = false;
+                        for k in ec_te.len { if ec_te[k] == entry && ec_i[k] == inst { have = true; } }
+                        if !have { ec_te.push(entry); ec_i.push(inst); }
+                    }
+                    if as_scalar_cast {
+                        let o0 = op(inst, 0);
+                        if !slp_contains(ops_from_casts, o0) { ops_from_casts.push(o0); }
+                        if is_inst(o0) {
+                            for k in nops(o0) {
+                                let v = op(o0, k);
+                                if ty_is_struct(vals[v].ty) { continue; }
+                                let j = vte_find(v);
+                                if j >= 0 { slp_eu[j].user = -1; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let cur_user = slp_eu[this_ei].user;
+        if !sh_has(SH_EUORIG, x.scalar as i64, 0) {
+            if tc_valid(extra) && extra != 0 {
+                if cur_user < 0 {
+                    extra = scale_cost(extra, entry, x.scalar, -1);
+                } else {
+                    var eb: i32 = -1;
+                    for k in s2b_s.len { if s2b_s[k] == x.scalar { eb = s2b_b[k]; } }
+                    let l = if eb >= 0 { li_loop_for(eb) } else { -1 };
+                    if l >= 0 {
+                        var one: i32[1] = [x.scalar];
+                        let sc = slp_loop_nest_scale(slp_innermost_noninvariant_loop(l, one[..]));
+                        if slp_dbg_on { errs("SLP: Extract scale "); errs_int(sc as i64); errs(" (NCD block) for "); slp_name_or_as_operand(x.scalar); errs("\n"); slp_dbg_flush(); }
+                        extra = slp_cost_scale(extra, sc);
+                    }
+                }
+            }
+        } else {
+            extra = scale_cost(extra, entry, x.scalar, cur_user);
+        }
+        ext_cost = tc_add(ext_cost, extra);
+    }
+    if all_gep_users && pointers.len > 0 {
+        let base = get_underlying_object(pointers[0], 6);
+        var all = true;
+        for p in pointers { if get_underlying_object(p, 6) != base { all = false; break; } }
+        if all {
+            let vecty = slp_widened_type(user_sty, te_nscalars(0));
+            let sg = slp_pointers_chain_cost(pointers, base, 0, user_sty);
+            let vg = slp_pointers_chain_cost(pointers, base, 2, vecty);
+            ext_cost = tc_add(ext_cost, scale_cost(tc_sub(vg, sg), 0, -1, -1));
+        }
+    }
+    for v in ops_from_casts {
+        sh_add(SH_EUORIG, v as i64, 0);
+        var c = slp_tree_entries_head(v);
+        while c >= 0 {
+            let t = slp_lk[c].x;
+            c = slp_lk[c].next;
+            if slp_is_transformed_to_gather(t) || slp_is_deleted_node(t) { continue; }
+            slp_eu.push(SEU { scalar: v, user: -1, te: t, lane: te_find_lane(t, v) });
+            break;
+        }
+    }
+    if vvals.len > 0 && slp_te[0].mbw > 0 { slp_fail("getTreeCost: the reduced value resize cost"); }
+    if thr < 0 && slp_te.len > 1 && is_inst_op(te_scalar(0, 0), OP_INSERTELEMENT) && te_has_state(1) && slp_te[1].state == TE_VECTORIZE {
+        var all = true;
+        for v in te_scalars(1) { if !sh_has(SH_EUORIG, v as i64, 0) { all = false; break; } }
+        if all { return TTI_INVALID; }
+    }
+    cost = tc_add(cost, ext_cost);
+    for si in si_first.len {
+        let first = si_first[si];
+        let base = op(first, 0);
+        var ents: i32[>..<] = [];
+        var masks_at: i64[>..<] = [];
+        for k in vm_si.len { if vm_si[k] == si as i64 { ents.push(vm_te[k]); masks_at.push(vm_at[k]); } }
+        let fty: i32 = vals[first].ty;
+        let n = ty_count(fty);
+        var vf: i64 = 0;
+        // ResizeToVF(TE, Mask, ForSingleMask): (entry, identity-found)
+        fn resize_to_vf(t: i32, m: const i32[:], single: bool) -> bool {
+            var c: i64 = 0;
+            let mvf = m.len;
+            let vecvf = te_vector_factor(t);
+            var large = false;
+            for x in m { if x as i64 >= mvf { large = true; } }
+            if (mvf != vecvf && large) || !slp_is_identity_mask(m, mvf) {
+                if large {
+                    var om: i32[>..<] = [];
+                    for k in vecvf { om.push(-1); }
+                    let lim = if mvf < vecvf { mvf } else { vecvf };
+                    for k in lim { om[k] = m[k]; }
+                    c = slp_shuffle_cost(SK_PERMUTESINGLESRC, slp_widened_type(vals[te_main(t)].ty, vecvf), om, 0, -1);
+                    if slp_dbg_on { errs("SLP: Adding cost "); slp_errs_cost(c); errs(" for final shuffle of insertelement external users.\n"); slp_dump_te(t); errs("SLP: Current total cost = "); slp_errs_cost(cost); errs("\n"); slp_dbg_flush(); }
+                    cost = tc_add(cost, c);
+                    return true;
+                }
+                if !single {
+                    var rm: i32[>..<] = [];
+                    for k in mvf { rm.push(-1); }
+                    for k in mvf { if m[k] != -1 { rm[m[k] as i64] = m[k]; } }
+                    if !slp_is_identity_mask(rm, mvf) { c = slp_shuffle_cost(SK_PERMUTESINGLESRC, slp_widened_type(vals[te_main(t)].ty, vecvf), rm, 0, -1); }
+                    if slp_dbg_on { errs("SLP: Adding cost "); slp_errs_cost(c); errs(" for final shuffle of insertelement external users.\n"); slp_dump_te(t); errs("SLP: Current total cost = "); slp_errs_cost(cost); errs("\n"); slp_dbg_flush(); }
+                    cost = tc_add(cost, c);
+                }
+            }
+            return false;
+        }
+        // EstimateShufflesCost(Mask, TEs): t1 -1 = a single entry
+        fn estimate(m: const i32[:], t0: i32, t1: i32) -> i32 {
+            if t1 < 0 {
+                if vf == 0 { vf = te_vector_factor(t0); }
+                let fty2 = slp_widened_type(vals[te_scalar(t0, 0)].ty, vf);
+                var trivial = true;
+                for k in m.len { if !(m[k] == -1 || ((k as i64) < vf && m[k] as i64 == k)) { trivial = false; break; } }
+                if !slp_is_identity_mask(m, vf) && !trivial {
+                    var c = slp_shuffle_cost(SK_PERMUTESINGLESRC, fty2, m, 0, -1);
+                    c = scale_cost(c, t0, -1, -1);
+                    if slp_dbg_on { errs("SLP: Adding cost "); slp_errs_cost(c); errs(" for final shuffle of insertelement external users.\n"); slp_dump_te(t0); errs("SLP: Current total cost = "); slp_errs_cost(cost); errs("\n"); slp_dbg_flush(); }
+                    cost = tc_add(cost, c);
+                }
+                vf = m.len;
+                return t0;
+            }
+            if vf == 0 {
+                if t0 >= 0 && te_vector_factor(t0) == te_vector_factor(t1) { vf = te_vector_factor(t0); } else { vf = m.len; }
+            }
+            let fty2 = slp_widened_type(vals[te_scalar(t1, 0)].ty, vf);
+            var c = slp_shuffle_cost(SK_PERMUTETWOSRC, fty2, m, 0, -1);
+            c = scale_cost(c, t1, -1, -1);
+            if slp_dbg_on {
+                errs("SLP: Adding cost "); slp_errs_cost(c); errs(" for final shuffle of vector node and external insertelement users.\n");
+                if t0 >= 0 { slp_dump_te(t0); } slp_dump_te(t1); errs("SLP: Current total cost = "); slp_errs_cost(cost); errs("\n"); slp_dbg_flush();
+            }
+            cost = tc_add(cost, c);
+            vf = m.len;
+            return t1;
+        }
+        // performExtractsShuffleAction(ShuffleMask = (ents, masks), Base, GetVF, ResizeToVF, EstimateShufflesCost)
+        var mask: i32[>..<] = [];
+        for k in n { mask.push(vm_pool[masks_at[0] + k]); }
+        var vmi: i64 = 1;
+        var prev: i32 = -1;
+        var um: bool[>..<] = [];
+        slp_build_use_mask(mask.len, mask, 2, um);
+        var bu: bool[>..<] = [];
+        slp_undef_vector_mask(base, false, um, bu);
+        var base_undef = true;
+        for b in bu { if !b { base_undef = false; } }
+        if !base_undef {
+            let r = resize_to_vf(ents[0], mask, false);
+            var bp: bool[>..<] = [];
+            slp_undef_vector_mask(base, true, um, bp);
+            let mvf = mask.len;
+            for i in mvf {
+                if mask[i] == -1 { mask[i] = if bp[i] { -1 } else { i as i32 }; }
+                else { mask[i] = ((if r { i as i64 } else { mask[i] as i64 }) + mvf) as i32; }
+            }
+            prev = estimate(mask, -1, ents[0]);
+        } else if ents.len == 1 {
+            let r = resize_to_vf(ents[0], mask, true);
+            if r { prev = ents[0]; } else { prev = estimate(mask, ents[0], -1); }
+        } else {
+            let v1 = te_vector_factor(ents[0]);
+            let v2 = te_vector_factor(ents[1]);
+            var sec: i32[>..<] = [];
+            for k in n { sec.push(vm_pool[masks_at[1] + k]); }
+            if v1 == v2 {
+                for i in mask.len { if sec[i] != -1 { mask[i] = (sec[i] as i64 + v1) as i32; } }
+                prev = estimate(mask, ents[0], ents[1]);
+            } else {
+                let r1 = resize_to_vf(ents[0], mask, false);
+                let r2 = resize_to_vf(ents[1], sec, false);
+                let mvf = mask.len;
+                for i in mvf {
+                    if mask[i] != -1 { if r1 { mask[i] = i as i32; } }
+                    else if sec[i] != -1 { mask[i] = ((if r2 { i as i64 } else { sec[i] as i64 }) + mvf) as i32; }
+                }
+                prev = estimate(mask, ents[0], ents[1]);
+            }
+            vmi = 2;
+        }
+        while vmi < ents.len {
+            var sec: i32[>..<] = [];
+            for k in n { sec.push(vm_pool[masks_at[vmi] + k]); }
+            let r = resize_to_vf(ents[vmi], sec, false);
+            let mvf = mask.len;
+            for i in mvf {
+                if sec[i] != -1 { mask[i] = ((if r { i as i64 } else { sec[i] as i64 }) + mvf) as i32; }
+                else if mask[i] != -1 { mask[i] = i as i32; }
+            }
+            prev = estimate(mask, prev, ents[vmi]);
+            vmi++;
+        }
+        let ic = tv_scalarization_overhead(fty, si_dem[si_dem_at[si]..(si_dem_at[si] + n)], true, false, TCK_RECIP_THROUGHPUT);
+        cost = tc_sub(cost, ic);
+    }
+    if slp_reduction_bw != 0 && slp_te[0].mbw > 0 && slp_te[0].mbw as i64 != slp_reduction_bw {
+        slp_fail("getTreeCost: the reduced value resize cost (ReductionBitWidth)");
+    }
+    var spill: i64 = -1;
+    if cost < -thr {
+        spill = 0;   // getSpillCost: getCostOfKeepingLiveOverCall is 0 on X86 and without a target
+        cost = tc_add(cost, spill);
+    }
+    if slp_dbg_on {
+        errs("SLP: Spill Cost = "); if spill >= 0 { slp_errs_cost(spill); } else { errs("<skipped>"); }
+        errs(".\nSLP: Extract Cost = "); slp_errs_cost(ext_cost); errs(".\n");
+        if rdx_root >= 0 { errs("SLP:  Reduction Cost = "); slp_errs_cost(rdx_cost); errs(".\n"); }
+        errs("SLP: Total Cost = "); slp_errs_cost(cost); errs(".\n");
+        slp_dbg_flush();
+    }
     return cost;
+}
+fn slp_errs_type(t: i32) { let s = type_str(t); errs(s[..]); }
+// Value::getNameOrAsOperand()
+fn slp_name_or_as_operand(v: i32) {
+    if vals[v].name >= 0 && sbytes(vals[v].name).len > 0 { errs(sbytes(vals[v].name)); return; }
+    errs_operand(v, slp_cur_fn, false);
 }
 
 // ---------------------------------------------------------------- isPoorThroughputOp (PoorThroughputOpCache: slp_cheap_*)

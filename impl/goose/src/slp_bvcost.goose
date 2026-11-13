@@ -765,6 +765,7 @@ fn ce_adjust_extracts(e: i32, mask: i32[>..<]&, kinds: const i64[:], nparts: i64
 }
 // getExtractWithExtendCost(Opcode, Dst, VecTy, Index): BasicTTIImpl's (X86 does not override it)
 fn tv_extract_with_extend(o: i64, dst: i32, vecty: i32, idx: i64) -> i64 {
+    if tti_kind != TTI_X86 { return 1; }   // TargetTransformInfoImplBase
     return tc_add(tv_vec_inst(OP_EXTRACTELEMENT, vecty, idx, -1, -1, TCK_RECIP_THROUGHPUT),
                   tv_cast(o, dst, ty_scalar(vecty), 0, TCK_RECIP_THROUGHPUT, -1));
 }
