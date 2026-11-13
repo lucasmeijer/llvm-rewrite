@@ -1901,6 +1901,11 @@ Still slow / next:
   sanitizer pass is a RequiredPassInfoMixin (`required` = true in PASS_TABLE: they run on optnone functions);
   EscapeEnumerator's default personality is __gcc_personality_v0 (__gxx_personality_v0 only on PS5);
   CreateGlobalString aligns to the preferred alignment of i8 in address space 0.
+- **tysan** (`pass_tysan.jai`): all 28 TypeSanitizer RUN lines identical; sweeps 0 differs: `tysan`,
+  `forceattrs,tysan -force-attribute=sanitize_type` with -tysan-outline-instrumentation=0 (the inline checks),
+  -tysan-writes-always-set-type, -tysan-verify-outlined-instrumentation. Traps: MemIntrinsic::getDest/getSource
+  strip pointer casts; `SetInstDebugLocation(AI)` after moving the builder puts the *next* instruction's !dbg on the
+  alloca; PtrShift is countr_zero(pointer bytes) (0 for 40-bit pointers); `Hash.update("\0")` hashes nothing.
 
 ## Coroutines (L1.extra.coroutines 298/310: roundtrip 155/155, opt 143/155; /root/jai_coro)
 

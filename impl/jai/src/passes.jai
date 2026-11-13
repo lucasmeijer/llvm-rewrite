@@ -325,7 +325,7 @@ Pass_Kind :: enum u8 {
     // EarlyCSE (pass_early_cse.jai)
     EARLY_CSE;
     // sanitizers (pass_asan.jai, pass_msan.jai, ...)
-    ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN;
+    ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN; TYSAN;
     // SCCP, IPSCCP (pass_sccp.jai)
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
@@ -585,6 +585,7 @@ PASS_TABLE :: Pass_Info.[
     .{"tsan", .FUNCTION, .TSAN, true, .DOMTREE},
     .{"tsan-module", .MODULE, .TSAN_MODULE, true, .DOMTREE},
     .{"rtsan", .MODULE, .RTSAN, true, .DOMTREE},
+    .{"tysan", .MODULE, .TYSAN, true, .DOMTREE},
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<should-not-run-function-passes>", .FUNCTION, .REQUIRE, true, .SHOULD_NOT_RUN},
@@ -1167,6 +1168,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if asan_parse_cl_opt(name, value, has_value) return true;   // pass_asan.jai (-asan-*)
     if msan_parse_cl_opt(name, value, has_value) return true;   // pass_msan.jai (-msan-*)
     if tsan_parse_cl_opt(name, value, has_value) return true;   // pass_tsan.jai (-tsan-*)
+    if tysan_parse_cl_opt(name, value, has_value) return true;   // pass_tysan.jai (-tysan-*)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1325,6 +1327,7 @@ run_module_pm :: (n: s32) {
             case .MSAN; if should_run_pass(node, NONE) mam_invalidate(msan_run(node.name));
             case .TSAN_MODULE; if should_run_pass(node, NONE) mam_invalidate(tsan_module_run());
             case .RTSAN; if should_run_pass(node, NONE) mam_invalidate(rtsan_run());
+            case .TYSAN; if should_run_pass(node, NONE) mam_invalidate(tysan_run());
             case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
             case .CALLED_VALUE_PROPAGATION; if should_run_pass(node, NONE) mam_invalidate(called_value_propagation_run());
             case .IPSCCP; if should_run_pass(node, NONE) mam_invalidate(ipsccp_run(node.name, node.no_func_spec));
