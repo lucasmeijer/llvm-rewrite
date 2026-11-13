@@ -1501,6 +1501,14 @@ print_module :: () -> string {
         outc(#char "\n");
         for ir.module_asm {
             out("module asm");
+            feat := ir.module_asm_features[it_index]; cpu := ir.module_asm_cpu[it_index];
+            if feat.count || cpu.count {
+                outc(#char "(");
+                if feat.count { out("target_features: \""); print_escaped_string(feat); out("\""); }
+                if feat.count && cpu.count out(", ");
+                if cpu.count { out("target_cpu: \""); print_escaped_string(cpu); out("\""); }
+                outc(#char ")");
+            }
             outc(#char "\n");
             parts := split(it, "\n",, allocator = temp);
             for p: parts {

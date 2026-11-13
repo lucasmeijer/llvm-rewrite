@@ -1048,6 +1048,7 @@ upgrade_module_flags :: () {
     for * ir.named_md if it.name == "llvm.module.flags" { nm = it; break; }
     if !nm return;
     has_objc := false; has_class_props := false;
+    has_swift := false; swift_abi: u64; swift_major: u64; swift_minor: u64;
     for i: 0..nm.ops.count-1 {
         op := nm.ops[i];
         if op == NONE || ir.mds[op].kind != .TUPLE || ir.mds[op].nops != 3 continue;
@@ -1083,7 +1084,14 @@ upgrade_module_flags :: () {
             if vm != NONE && ir.mds[vm].kind == .VALUE {
                 v := ir.mds[vm].value;
                 if vtype(v) == ir.t_i8 continue;
-                fatal("auto-upgrade of the i32 \"Objective-C Garbage Collection\" module flag is not supported yet");
+                val := const_int_zext(v) & 0xFFFF_FFFF;
+                if (val & 0xff) != val {
+                    has_swift = true;
+                    swift_abi = (val & 0xff00) >> 8;
+                    swift_major = (val & 0xff000000) >> 24;
+                    swift_minor = (val & 0xff0000) >> 16;
+                }
+                nm.ops[i] = md_tuple(.[md_value(const_int(ir.t_i32, MOD_ERROR)), idm, md_value(const_int(ir.t_i8, val & 0xff))], false);
             }
         }
         if id == "amdgpu_code_object_version"
@@ -1092,6 +1100,11 @@ upgrade_module_flags :: () {
     if has_objc && !has_class_props {
         array_add(*nm.ops, md_tuple(.[md_value(const_int(ir.t_i32, MOD_OVERRIDE)), md_string("Objective-C Class Properties"),
                                      md_value(const_int(ir.t_i32, 0))], false));
+    }
+    if has_swift {
+        array_add(*nm.ops, md_tuple(.[md_value(const_int(ir.t_i32, MOD_ERROR)), md_string("Swift ABI Version"), md_value(const_int(ir.t_i32, swift_abi))], false));
+        array_add(*nm.ops, md_tuple(.[md_value(const_int(ir.t_i32, MOD_ERROR)), md_string("Swift Major Version"), md_value(const_int(ir.t_i8, swift_major))], false));
+        array_add(*nm.ops, md_tuple(.[md_value(const_int(ir.t_i32, MOD_ERROR)), md_string("Swift Minor Version"), md_value(const_int(ir.t_i8, swift_minor))], false));
     }
 }
 

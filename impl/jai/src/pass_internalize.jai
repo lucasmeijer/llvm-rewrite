@@ -78,11 +78,14 @@ Internalize :: struct {
     preserve_names: [..] string;   // internalize<preserve-gv=...>
     use_names: bool;
     is_wasm: bool;
+    // llvm-link -internalize: internalizeModule(M, [&](GV) { return !GV.hasName() || !GVS.count(GV.getName()); })
+    link_names: *Table(string, bool);
 }
 Int_Comdat_Info :: struct { size: u32; external: bool; }
 
 // MustPreserveGV: PreserveAPIList, or the preserve-gv name list
 int_must_preserve :: (s: *Internalize, gv: Value_Id) -> bool {
+    if s.link_names return vname(gv).count == 0 || !table_contains(s.link_names, vname(gv));
     if s.use_names { for s.preserve_names if vname(gv) == it return true; return false; }
     for s.patterns if glob_match(it, vname(gv)) return true;
     return false;
@@ -163,15 +166,22 @@ internalize_run :: (node: *Pass_Node) -> Preserved {
         for internalize_opts.api_list array_add(*s.patterns, it);
     }
 
+    if internalize_module(*s) { printer_note_ir_changed(); return PRESERVE_NONE; }
+    return PRESERVE_ALL;
+}
+
+// InternalizePass::internalizeModule
+internalize_module :: (s: *Internalize) -> bool {
+    s.always_preserved.allocator = temp;
     changed := false;
     used: [..] Value_Id; used.allocator = temp;
     collect_used_global_variables(*used, false);
 
     cmap: Table(s32, Int_Comdat_Info); cmap.allocator = temp;
     if ir.comdats.count {
-        for ir.m_functions int_check_comdat(*s, it, *cmap);
-        for ir.m_globals int_check_comdat(*s, it, *cmap);
-        for ir.m_aliases int_check_comdat(*s, it, *cmap);
+        for ir.m_functions int_check_comdat(s, it, *cmap);
+        for ir.m_globals int_check_comdat(s, it, *cmap);
+        for ir.m_aliases int_check_comdat(s, it, *cmap);
     }
     for used array_add(*s.always_preserved, vname(it));
     for string.["llvm.used", "llvm.compiler.used", "llvm.global_ctors", "llvm.global_dtors", "llvm.global.annotations", "__stack_chk_fail"]
@@ -182,9 +192,8 @@ internalize_run :: (node: *Pass_Node) -> Preserved {
     if tt.arch == .nvptx || tt.arch == .nvptx64 array_add(*s.always_preserved, "__llvm_rpc_client");
     s.is_wasm = tt.arch == .wasm32 || tt.arch == .wasm64 || tt.obj == .Wasm;
 
-    for ir.m_functions if int_maybe_internalize(*s, it, *cmap) changed = true;
-    for ir.m_globals if int_maybe_internalize(*s, it, *cmap) changed = true;
-    for ir.m_aliases if int_maybe_internalize(*s, it, *cmap) changed = true;
-    if changed { printer_note_ir_changed(); return PRESERVE_NONE; }
-    return PRESERVE_ALL;
+    for ir.m_functions if int_maybe_internalize(s, it, *cmap) changed = true;
+    for ir.m_globals if int_maybe_internalize(s, it, *cmap) changed = true;
+    for ir.m_aliases if int_maybe_internalize(s, it, *cmap) changed = true;
+    return changed;
 }

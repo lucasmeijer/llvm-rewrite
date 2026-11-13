@@ -254,6 +254,7 @@
 #load "vplan_interleave.jai";
 #load "lv_interleave.jai";
 
+#load "linker.jai";
 #load "codegen_pipeline.jai";
 #load "cg_misc_passes.jai";
 #load "cg_lowering_passes.jai";
@@ -271,6 +272,7 @@
 
 main :: () {
     #if #exists(LLC_TOOL) llc_main();
+    else #if #exists(LLVM_LINK_TOOL) llvm_link_main();
     else opt_main();
 }
 

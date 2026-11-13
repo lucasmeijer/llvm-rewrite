@@ -254,7 +254,8 @@ IR :: struct {
     types:      [..] Type_Row;
     type_list:  [..] u32;
     type_map:   Table(string, Type_Id);
-    named_types: Table(string, Type_Id);     // identified struct names
+    named_types: Table(string, Type_Id);     // identified struct names in the context (parser.jai ctx_set_struct_name)
+    named_struct_uid: u32;                   // LLVMContextImpl::NamedStructTypesUniqueID
     t_void, t_label, t_metadata, t_i1, t_i8, t_i32, t_i64, t_ptr, t_token: Type_Id;
 
     // values (struct of arrays)
@@ -290,7 +291,9 @@ IR :: struct {
     source_filename: string;
     datalayout:    string;
     triple:        string;
-    module_asm:    [..] string;
+    module_asm:    [..] string;    // Module::GlobalAsmFragment: Asm, and its properties in the two arrays below
+    module_asm_features: [..] string;
+    module_asm_cpu: [..] string;
     m_globals:   [..] Value_Id;
     m_functions: [..] Value_Id;
     m_aliases:   [..] Value_Id;
@@ -1441,6 +1444,21 @@ attr_list_with_fn :: (l: u32, fn: u32) -> u32 {
     if l == 0 return attr_list_get(fn, 0, .[]);
     r := ir.attr_lists[l];
     return attr_list_get(fn, r.ret, r.params);
+}
+
+// Module::appendModuleInlineAsm: a fragment with the same properties as the last one is merged into it
+append_module_asm :: (text: string, features: string, cpu: string) {
+    if text.count == 0 return;
+    t := text;
+    if t[t.count - 1] != #char "\n" t = tconcat(t, "\n");
+    n := ir.module_asm.count;
+    if n && ir.module_asm_features[n - 1] == features && ir.module_asm_cpu[n - 1] == cpu {
+        ir.module_asm[n - 1] = intern_str(tconcat(ir.module_asm[n - 1], t));
+        return;
+    }
+    array_add(*ir.module_asm, intern_str(t));
+    array_add(*ir.module_asm_features, intern_str(features));
+    array_add(*ir.module_asm_cpu, intern_str(cpu));
 }
 
 // ---------------------------------------------------------------- init

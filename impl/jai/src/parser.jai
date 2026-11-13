@@ -13,6 +13,7 @@ Parser :: struct {
     fwd_global_order: [..] Value_Id;
 
     numbered_types: Table(u32, Type_Id);
+    named_types: Table(string, Type_Id);   // LLParser::NamedTypes (textual name -> type; the context names may differ)
 
     attr_groups: Table(u32, [..] Attr);
     fwd_attr_refs: [..] Fwd_Attr_Ref;
@@ -86,7 +87,7 @@ parse_module :: (src: string, file: string) {
     }
     // opt's SetDataLayout callback: -data-layout wins, then the IR's, then the default of -mtriple / the IR triple
     if cl_data_layout.count ir.datalayout = cl_data_layout;
-    else if ir.datalayout.count == 0 {
+    else if ir.datalayout.count == 0 && !parse_without_dl_callback {
         tt := ifx opts.mtriple.count then normalize_triple(opts.mtriple) else ir.triple;
         if tt.count {
             d, ok := compute_default_datalayout(tt);
@@ -134,17 +135,27 @@ parse_top_level :: () {
 // LLParser::parseModuleAsm + Module::appendModuleInlineAsm (fragments with the same properties merge)
 parse_module_asm :: () {
     next(); expect_kw("asm");
-    if P.tok.kind == .LPAREN perr("module asm properties are not supported yet");
+    features := ""; cpu := "";
+    if eat(.LPAREN) {
+        while true {
+            if P.tok.kind != .LABEL_STR perr("expected property name followed by ':'");
+            key := P.tok.text;
+            next();
+            val := parse_string();
+            if key == "target_features" features = val;
+            else if key == "target_cpu" cpu = val;
+            else perr("unknown property name");
+            if eat(.RPAREN) break;
+            expect(.COMMA, "',' or ')'");
+        }
+    }
     sb: String_Builder; sb.allocator = temp;
     while true {
         append(*sb, parse_string()); append(*sb, "\n");
         if P.tok.kind != .STRING break;
     }
     s := builder_to_string(*sb,, allocator = temp);
-    if ir.module_asm.count {
-        last := *ir.module_asm[ir.module_asm.count - 1];
-        last.* = intern_str(tprint("%1%2", last.*, s));
-    } else array_add(*ir.module_asm, intern_str(s));
+    append_module_asm(s, features, cpu);
 }
 
 // LLParser::parseUseListOrder + parseUseListOrderIndexes + sortUseListOrder (Value::sortUseList is a stable sort
@@ -190,12 +201,43 @@ parse_use_list_order :: () {
 }
 
 get_named_type :: (name: string) -> Type_Id {
-    found, t := table_find(*ir.named_types, name);
+    found, t := table_find(*P.named_types, name);
     if found return t;
     s := intern_str(name);
-    t = type_named_struct(s);
-    table_add(*ir.named_types, s, t);
+    // StructType::create(Context, Name): the name is uniqued in the context (llvm-link parses several modules
+    // into one context, so the second module's %struct.S becomes %struct.S.0)
+    t = type_named_struct("");
+    ctx_set_struct_name(t, s);
+    table_add(*P.named_types, s, t);
     return t;
+}
+
+// StructType::setName: struct type names are unique per LLVMContext (LLVMContextImpl::NamedStructTypes, with the
+// context-wide counter NamedStructTypesUniqueID for clashes)
+ctx_set_struct_name :: (t: Type_Id, name: string) {
+    old := ir.types[t].name;
+    if old == name return;
+    if old.count {
+        found, cur := table_find(*ir.named_types, old);
+        if found && cur == t table_remove(*ir.named_types, old);
+    }
+    if name.count == 0 { ir.types[t].name = ""; return; }
+    if !table_contains(*ir.named_types, name) {
+        s := intern_str(name);
+        table_add(*ir.named_types, s, t);
+        ir.types[t].name = s;
+        return;
+    }
+    while true {
+        cand := tconcat(name, ".", tdec(ir.named_struct_uid));
+        ir.named_struct_uid += 1;
+        if !table_contains(*ir.named_types, cand) {
+            s := intern_str(cand);
+            table_add(*ir.named_types, s, t);
+            ir.types[t].name = s;
+            return;
+        }
+    }
 }
 
 parse_named_type :: () {
@@ -219,7 +261,7 @@ parse_struct_definition :: (name: string, numbered: bool, id: u32) {
         found, t := table_find(*P.numbered_types, id);
         if found existing = t;
     } else {
-        found, t := table_find(*ir.named_types, name);
+        found, t := table_find(*P.named_types, name);
         if found existing = t;
     }
     if is_kw("opaque") {
@@ -260,7 +302,7 @@ parse_struct_definition :: (name: string, numbered: bool, id: u32) {
     // non-struct type: the name is an alias for the type
     ty := parse_type();
     if numbered table_add(*P.numbered_types, id, ty);
-    else table_set(*ir.named_types, intern_str(name), ty);
+    else table_set(*P.named_types, intern_str(name), ty);
 }
 
 parse_type :: (allow_void := false) -> Type_Id {
@@ -3082,9 +3124,6 @@ validate_end_of_module :: () {
         }
     }
     if P.blockaddr_fwd.count perr("expected function name in blockaddress");
-    for ir.named_types {
-        // types referenced but never defined stay opaque in LLVM only if defined as opaque; otherwise error
-    }
     // Forward-referenced intrinsics are auto-declared (with the mangling suffix the call's type needs);
     // ForwardRefVals is a std::map, so this goes in name order. Other forward refs are errors.
     names: [..] string; names.allocator = temp;
@@ -3148,6 +3187,7 @@ auto_declare_intrinsic :: (name: string, fw: Value_Id) {
 #import "File";
 #import "Sort";
 saw_source_filename := false;
+parse_without_dl_callback := false;   // llvm-link: parseIR without opt's SetDataLayout callback (no default layout)
 
 // Triple::normalize: tli.jai triple_normalize
 normalize_triple :: (t: string) -> string { return triple_normalize(t); }
