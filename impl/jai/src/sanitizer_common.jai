@@ -85,8 +85,9 @@ san_call_before :: (c: San_Callee, args: [] Value_Id, before: Value_Id) -> Value
 }
 
 // IRBuilder::CreateAlloca(Ty, ArraySize, Name): the DataLayout's alloca address space, preferred alignment
-irb_alloca :: (b: *Irb, ty: Type_Id, size: Value_Id, name: string = "") -> Value_Id {
-    as := dl.alloca_as;
+// (CreateAlloca(Ty, AddrSpace, ArraySize, Name) with `as`)
+irb_alloca :: (b: *Irb, ty: Type_Id, size: Value_Id, name: string = "", as_in: s64 = -1) -> Value_Id {
+    as := ifx as_in >= 0 then cast(u32) as_in else dl.alloca_as;
     a := new_inst(.ALLOCA, type_ptr(as), 1);
     set_op(a, 0, ifx size == NONE then const_int(ir.t_i32, 1) else size);
     inst(a).ty2 = ty;
@@ -515,6 +516,8 @@ SAN_VALUED_OPTS :: string.[
     "asan-constructor-kind", "asan-mapping-scale", "asan-mapping-offset", "asan-force-experiment",
     "asan-destructor-kind", "asan-instrument-address-spaces", "asan-debug", "asan-debug-stack", "asan-debug-func",
     "asan-debug-min", "asan-debug-max",
+    "msan-track-origins", "msan-poison-stack-pattern", "msan-switch-precision", "msan-instrumentation-with-call-threshold",
+    "msan-and-mask", "msan-xor-mask", "msan-shadow-base", "msan-origin-base", "msan-disambiguate-warning-threshold",
 ];
 san_takes_value :: (a: string) -> bool {
     n := a;

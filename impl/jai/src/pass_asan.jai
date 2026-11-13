@@ -649,10 +649,7 @@ asan_instrument_masked_load_or_store :: (a: *Asan, mask: Value_Id, evl_in: Value
 
 // IRBuilder::CreateExtractElement(Vec, Idx (a Value))
 irb_extract_element_v :: (b: *Irb, v: Value_Id, idx: Value_Id, name: string = "") -> Value_Id {
-    if irb_is_const(v) && irb_is_const(idx) {
-        r := cf_extract_element(v, idx);
-        if r != NONE return r;
-    }
+    if irb_is_const(v) && irb_is_const(idx) return ce_extract_element(v, idx);
     e := new_inst(.EXTRACTELEMENT, type_elem(vtype(v)), 2);
     set_op(e, 0, v); set_op(e, 1, idx);
     return irb_insert(b, e, name);
@@ -1960,5 +1957,6 @@ asan_run :: (name: string) -> Preserved {
     if asan_instrument_module(*m) modified = true;
     printer_note_ir_changed();
     if !modified return PRESERVE_ALL;
-    return PRESERVE_NONE;
+    pa: Preserved; pa.abandon_globals_aa = true;   // PreservedAnalyses::none() + abandon<GlobalsAA>()
+    return pa;
 }

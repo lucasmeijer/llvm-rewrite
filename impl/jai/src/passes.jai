@@ -22,6 +22,7 @@ Preserved :: struct {
     all_fn: bool;    // preserveSet<AllAnalysesOn<Function>>
     all_scc: bool;   // preserveSet<AllAnalysesOn<LazyCallGraph::SCC>>
     lcg: bool;       // preserve<LazyCallGraphAnalysis>
+    abandon_globals_aa: bool;   // PA.abandon<GlobalsAA>() (sanitizers)
 }
 PRESERVE_ALL :: Preserved.{all = true};
 PRESERVE_NONE :: Preserved.{};
@@ -321,8 +322,8 @@ Pass_Kind :: enum u8 {
     INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING; DROP_UNNECESSARY_ASSUMES; JUMP_TABLE_TO_SWITCH; MOVE_AUTO_INIT; ALIGNMENT_FROM_ASSUMPTIONS; LIBCALLS_SHRINKWRAP; CALLED_VALUE_PROPAGATION;
     // EarlyCSE (pass_early_cse.jai)
     EARLY_CSE;
-    // sanitizers (pass_asan.jai, ...)
-    ASAN;
+    // sanitizers (pass_asan.jai, pass_msan.jai, ...)
+    ASAN; MSAN;
     // SCCP, IPSCCP (pass_sccp.jai)
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
@@ -575,6 +576,7 @@ PASS_TABLE :: Pass_Info.[
     .{"called-value-propagation", .MODULE, .CALLED_VALUE_PROPAGATION, false, .DOMTREE},
     .{"ee-instrument", .FUNCTION, .EE_INSTRUMENT, true, .DOMTREE},   // also ee-instrument<...>
     .{"asan", .MODULE, .ASAN, true, .DOMTREE},   // also asan<kernel;use-after-scope>
+    .{"msan", .MODULE, .MSAN, true, .DOMTREE},   // also msan<recover;kernel;eager-checks;track-origins=N>
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<should-not-run-function-passes>", .FUNCTION, .REQUIRE, true, .SHOULD_NOT_RUN},
@@ -624,6 +626,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "drop-unnecessary-assumes<") && name[name.count - 1] == #char ">" return lookup_pass("drop-unnecessary-assumes");
     if begins_with(name, "ee-instrument<") && name[name.count - 1] == #char ">" return lookup_pass("ee-instrument");
     if begins_with(name, "asan<") && name[name.count - 1] == #char ">" return lookup_pass("asan");
+    if begins_with(name, "msan<") && name[name.count - 1] == #char ">" return lookup_pass("msan");
     return null;
 }
 
@@ -1151,6 +1154,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)
     if expand_memcmp_parse_cl_opt(name, value, has_value) return true;   // pass_expand_memcmp.jai
     if asan_parse_cl_opt(name, value, has_value) return true;   // pass_asan.jai (-asan-*)
+    if msan_parse_cl_opt(name, value, has_value) return true;   // pass_msan.jai (-msan-*)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1303,6 +1307,7 @@ run_module_pm :: (n: s32) {
             case .REL_LOOKUP_TABLE_CONVERTER; if should_run_pass(node, NONE) mam_invalidate(rel_lookup_table_converter_run());
             case .CG_PROFILE; if should_run_pass(node, NONE) mam_invalidate(cg_profile_run());
             case .ASAN; if should_run_pass(node, NONE) mam_invalidate(asan_run(node.name));
+            case .MSAN; if should_run_pass(node, NONE) mam_invalidate(msan_run(node.name));
             case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
             case .CALLED_VALUE_PROPAGATION; if should_run_pass(node, NONE) mam_invalidate(called_value_propagation_run());
             case .IPSCCP; if should_run_pass(node, NONE) mam_invalidate(ipsccp_run(node.name, node.no_func_spec));
@@ -1330,6 +1335,7 @@ mam_invalidate :: (pa: Preserved) {
     if !pa.all_fn for f: ir.m_functions fam_invalidate(f, pa);
     // GlobalsAAResult::invalidate: stateless, only an explicit abandon<GlobalsAA>() (sanitizers, LowerEmuTLS)
     // invalidates it, so the result computed by require<globals-aa> lives on (recompute-globalsaa refreshes it)
+    if pa.abandon_globals_aa globals_aa = null;
 }
 
 // ModuleToFunctionPassAdaptor::run: every defined function in module order
