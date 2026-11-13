@@ -2029,3 +2029,14 @@ CoroAnnotationElide).
 ### Coroutines next steps
 - Enable the 12 pgo tests once `pgo-instr-gen` / `instrprof` / `sample-profile` land (nothing coroutine-specific).
 
+
+## Layer-1b loop passes: IRCE, guards, fusion/flatten, loop-misc extras, strength reduction (/root/jai_loopextras)
+
+Facts that decide output: knowledge/llvm/loop-extras.md.
+
+- **IRCE** (L1.extra.irce COMPLETE 82/82): `pass_irce.jai` = InductiveRangeCheckElimination.cpp +
+  LoopConstrainer.cpp (`Loop_Structure`, `Loop_Constrainer`), plus isKnown{Negative,NonNegative,...}InLoop /
+  cannotBe{Min,Max}InLoop (LoopUtils.cpp), InvertBranch and BPI swapSuccEdgesProbabilities. The `-irce-*` options are
+  parsed by `irce_parse_cl_opt`. The range check's `Use` is kept as (user, operand number): use ids move when a phi
+  grows. Sweeps: `irce` 10812/10812 identical, `-irce-skip-profitability-checks` 10812/10812, `--with-test-flags`
+  12774/13628 (0 differs; the loud ones are other passes' options), tests/perf/compile `sroa,irce` 4/4.

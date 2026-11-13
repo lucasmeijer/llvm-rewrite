@@ -285,6 +285,8 @@ Pass_Kind :: enum u8 {
     PRINT_ASSUMPTIONS; PRINT_CALLGRAPH_SCCS; PRINT_PHI_VALUES; PRINT_MEM_DEREFS; PRINT_MUST_EXECUTE; PRINT_MUST_BE_EXECUTED_CONTEXTS;
     // pass_make_guards_explicit.jai
     MAKE_GUARDS_EXPLICIT;
+    // L1.extra loop passes (pass_irce.jai, ...)
+    IRCE;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -494,6 +496,7 @@ PASS_TABLE :: Pass_Info.[
     .{"print<must-execute>", .FUNCTION, .PRINT_MUST_EXECUTE, true, .DOMTREE},
     .{"print-must-be-executed-contexts", .MODULE, .PRINT_MUST_BE_EXECUTED_CONTEXTS, true, .DOMTREE},
     .{"make-guards-explicit", .FUNCTION, .MAKE_GUARDS_EXPLICIT, false, .DOMTREE},
+    .{"irce", .FUNCTION, .IRCE, false, .DOMTREE},
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -1183,6 +1186,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if sancov_parse_cl_opt(name, value, has_value) return true;  // pass_sancov.jai (-sanitizer-coverage-*)
     if sanmd_parse_cl_opt(name, value, has_value) return true;   // pass_sanmd.jai (-sanitizer-metadata-*)
     if hwasan_parse_cl_opt(name, value, has_value) return true;  // pass_hwasan.jai (-hwasan-*)
+    if irce_parse_cl_opt(name, value, has_value) return true;   // pass_irce.jai (-irce-*)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1552,6 +1556,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .PRINT_MEM_DEREFS; return print_mem_derefs_run(f);
         case .PRINT_MUST_EXECUTE; return print_must_execute_run(f);
         case .MAKE_GUARDS_EXPLICIT; return make_guards_explicit_run(f);
+        case .IRCE; return irce_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

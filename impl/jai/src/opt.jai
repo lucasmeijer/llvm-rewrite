@@ -186,6 +186,7 @@
 #load "must_execute.jai";
 #load "analysis_printers_misc.jai";
 #load "pass_make_guards_explicit.jai";
+#load "pass_irce.jai";
 #load "print_uselistorder.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";
