@@ -125,26 +125,38 @@ triple_supports_comdat :: () -> bool {
     return !(t.obj == .MachO || t.obj == .XCOFF || t.obj == .DXContainer);
 }
 
-// SplitBlockAndInsertIfThen(Cond, SplitBefore, Unreachable, BranchWeights) without DTU / LoopInfo: the new
-// block's terminator
-mu_split_block_and_insert_if_then :: (cond: Value_Id, split_before: Value_Id, unreachable: bool, weights: Md_Id = NONE) -> Value_Id {
+// SplitBlockAndInsertIfThenElse(Cond, SplitBefore, ThenBlock?, ElseBlock?, UnreachableThen, UnreachableElse,
+// BranchWeights) without DTU / LoopInfo: the terminators of the new then / else blocks (NONE when not requested)
+mu_split_block_and_insert_if_then_else :: (cond: Value_Id, split_before: Value_Id, want_then: bool, want_else: bool, unreachable_then := false, unreachable_else := false, weights: Md_Id = NONE) -> (Value_Id, Value_Id) {
     head := inst(split_before).parent;
     f := block_fn(head);
     tail := split_basic_block(head, split_before, "");
     dl_ := get_metadata(split_before, 0);
-    then_bb := create_block(f, "", tail);
-    term: Value_Id;
-    if unreachable term = new_inst(.UNREACHABLE, ir.t_void, 0);
-    else term = create_br(tail);
-    block_append_inst(then_bb, term);
-    if dl_ != NONE set_metadata(term, 0, dl_);
+    mk :: (f: Value_Id, tail: Value_Id, unreachable: bool, dl_: Md_Id) -> (Value_Id, Value_Id) {
+        bb := create_block(f, "", tail);
+        term: Value_Id;
+        if unreachable term = new_inst(.UNREACHABLE, ir.t_void, 0);
+        else term = create_br(tail);
+        block_append_inst(bb, term);
+        if dl_ != NONE set_metadata(term, 0, dl_);
+        return bb, term;
+    }
+    tb := tail; fb := tail;
+    then_term: Value_Id = NONE; else_term: Value_Id = NONE;
+    if want_then tb, then_term = mk(f, tail, unreachable_then, dl_);
+    if want_else fb, else_term = mk(f, tail, unreachable_else, dl_);
     old := block_terminator(head);
-    nt := create_cond_br(cond, then_bb, tail);
+    nt := create_cond_br(cond, tb, fb);
     if weights != NONE set_metadata(nt, md_fixed("prof"), weights);
     // ReplaceInstWithInst
     if get_metadata(nt, 0) == NONE { d := get_metadata(old, 0); if d != NONE set_metadata(nt, 0, d); }
     insert_at_position(nt, head, old, false);
     drop_all_references(old);
     erase_inst(old);
-    return term;
+    return then_term, else_term;
+}
+// SplitBlockAndInsertIfThen(Cond, SplitBefore, Unreachable, BranchWeights): the new block's terminator
+mu_split_block_and_insert_if_then :: (cond: Value_Id, split_before: Value_Id, unreachable: bool, weights: Md_Id = NONE) -> Value_Id {
+    t, _ := mu_split_block_and_insert_if_then_else(cond, split_before, true, false, unreachable, false, weights);
+    return t;
 }

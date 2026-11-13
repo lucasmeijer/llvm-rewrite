@@ -252,3 +252,5 @@ lib/Analysis/StackLifetime.cpp 0.6  # LivenessType::Must only, no printer
 lib/Transforms/Utils/ModuleUtils.cpp 0.55  # appendTo*, ctors, kcfi; not transformGlobal*, removeFromUsedLists, embedBuffer, lowerGlobalIFunc
 lib/Transforms/Utils/Instrumentation.cpp 0.8  # not PrepareToSplitEntryBlock
 lib/Demangle/Demangle.cpp 0.3  # with a small subset of the Itanium / Microsoft demanglers (headers)
+lib/Transforms/Instrumentation/InstrProfiling.cpp 0.85  # jai_pgo: all but the GPU (offload) paths and vtable value profiling
+lib/ProfileData/InstrProf.cpp 0.2  # jai_pgo: names, name vars, section names, name blob (zlib), comdat rules; no records / symtab / value data

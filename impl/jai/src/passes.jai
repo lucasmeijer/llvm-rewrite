@@ -313,7 +313,7 @@ Pass_Kind :: enum u8 {
     GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
     // L1.scalar-misc (pass_lower_expect.jai, ...; options in scalar_misc_cl.jai)
     // the profile family (pass_add_discriminators.jai, profile_cl.jai, ...)
-    ADD_DISCRIMINATORS; MEMPROF; MEMPROF_MODULE;
+    ADD_DISCRIMINATORS; MEMPROF; MEMPROF_MODULE; INSTRPROF;
     LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT; DIV_REM_PAIRS; FLOAT2INT; SINK; TAILCALLELIM; MLDST_MOTION; SPECULATIVE_EXECUTION; CALLSITE_SPLITTING;
     // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
@@ -536,6 +536,7 @@ PASS_TABLE :: Pass_Info.[
     .{"add-discriminators", .FUNCTION, .ADD_DISCRIMINATORS, true, .DOMTREE},   // RequiredPassInfoMixin
     .{"memprof", .FUNCTION, .MEMPROF, true, .DOMTREE},
     .{"memprof-module", .MODULE, .MEMPROF_MODULE, true, .DOMTREE},
+    .{"instrprof", .MODULE, .INSTRPROF, false, .DOMTREE},
     .{"lower-expect", .FUNCTION, .LOWER_EXPECT, false, .DOMTREE},
     .{"lower-constant-intrinsics", .FUNCTION, .LOWER_CONSTANT_INTRINSICS, false, .DOMTREE},
     .{"infer-alignment", .FUNCTION, .INFER_ALIGNMENT, false, .DOMTREE},
@@ -1275,6 +1276,7 @@ run_module_pm :: (n: s32) {
             case .INTERNALIZE; if should_run_pass(node, NONE) mam_invalidate(internalize_run(node));
             case .ASSIGN_GUID; if should_run_pass(node, NONE) mam_invalidate(assign_guid_run());
             case .MEMPROF_MODULE; if should_run_pass(node, NONE) mam_invalidate(memprof_module_run());
+            case .INSTRPROF; if should_run_pass(node, NONE) mam_invalidate(instrprof_run());
             case .CROSS_DSO_CFI; if should_run_pass(node, NONE) mam_invalidate(cross_dso_cfi_run());
             case .GLOBAL_SPLIT; if should_run_pass(node, NONE) mam_invalidate(global_split_run());
             case .WHOLE_PROGRAM_DEVIRT; if should_run_pass(node, NONE) mam_invalidate(whole_program_devirt_run());

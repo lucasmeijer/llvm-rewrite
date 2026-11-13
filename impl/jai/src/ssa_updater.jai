@@ -338,13 +338,15 @@ ssa_equivalent_phi :: (phi: Value_Id, pvs: [] $T) -> bool {
 // acts as a store of undef of `zero_ty`) and LICM's LoopPromoter (pass_licm.jai: stores are deleted when it can insert
 // stores in the exit blocks, which it does in doExtraRewritesBeforeFinalDeletion; instructionDeleted updates
 // MemorySSA and the loop safety info).
-Lsp_Kind :: enum u8 { SROA_BASIC; LICM; }
-Lsp_Hooks :: struct { kind: Lsp_Kind; licm: *Licm_Promoter; }
+// INSTRPROF: InstrProfiling's PGOCounterPromoterHelper (pass_instrprof.jai: adds the counter update in the exit blocks).
+Lsp_Kind :: enum u8 { SROA_BASIC; LICM; INSTRPROF; }
+Lsp_Hooks :: struct { kind: Lsp_Kind; licm: *Licm_Promoter; instrprof: *Ip_Promoter; instrprof_store: Value_Id; }
 
 lsp_should_delete :: (h: Lsp_Hooks, i: Value_Id) -> bool {
     if #complete h.kind == {
         case .SROA_BASIC; o := inst_op(i); return o != .STORE && o != .ALLOCA;
         case .LICM; return licm_promoter_should_delete(h.licm, i);
+        case .INSTRPROF; return true;
     }
     return true;
 }
@@ -409,6 +411,7 @@ load_and_store_promote :: (insts: [] Value_Id, s: *Ssa_Updater, zero_ty: Type_Id
     }
     // doExtraRewritesBeforeFinalDeletion
     if hooks.kind == .LICM licm_promoter_extra_rewrites(hooks.licm);
+    if hooks.kind == .INSTRPROF ip_helper_extra_rewrites(hooks.instrprof, s, hooks.instrprof_store);
     for u: insts {
         if !lsp_should_delete(hooks, u) continue;
         if has_uses(u) {

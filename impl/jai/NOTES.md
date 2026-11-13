@@ -1788,6 +1788,15 @@ Still slow / next:
   default globals address space (`dl.globals_as`), like `new GlobalVariable(M, ...)`.
 - Trap: `fn_add_fn_attr` with a string attribute goes through `attr_set_with`, which removes *every* string
   attribute (attr_set_remove by kind); use `fn_add_fn_str_attr` for string attributes.
+- `instrprof` (pass_instrprof.jai, InstrProfiling.cpp; helpers of InstrProf.cpp in instrprof_common.jai): 19/19
+  InstrProfiling tests (L1.extra.pgo.instrprof complete with PGOForceFunctionAttrs); sweep 10808/10808 identical,
+  `--with-test-flags` 0 differs. Not ported (loud): GPU profile targets, -enable-vtable-value-profiling,
+  -profile-correlate=binary. Counter promotion uses LoadAndStorePromoter's new `.INSTRPROF` hook kind.
+- **New dependency: the system zlib** (`#system_library "libz.so.1"` in instrprof_common.jai). The PGO name blob
+  (`__llvm_prf_nm`) is zlib-compressed at level 9 (compression::zlib::compress, BestSizeCompression); LLVM's opt
+  links the same /usr/lib/x86_64-linux-gnu/libz.so.1 dynamically, so calling it gives byte-identical output.
+  Porting deflate bit-exactly would be ~2000 lines of zlib, not LLVM code.
+
 ## Sanitizers (L1.extra.sanitizers.*; jai_sanitizers, 2026-11)
 
 - Files: `sanitizer_common.jai` (ModuleUtils.cpp / Instrumentation.cpp helpers, Function::createWithDefaultAttr,
