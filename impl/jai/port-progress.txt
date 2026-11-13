@@ -127,7 +127,6 @@ lib/Transforms/Scalar/MemCpyOptimizer.cpp 0.98  # all but DIAssignID merging/cop
 lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.5  # salvageKnowledge / buildAssumeFromInst (with or without an AssumptionCache, DT = null); no assume-simplify / assume-builder passes
 lib/Transforms/Scalar/GVN.cpp 0.95  # jai_gvn: all of GVNPass incl. the MemorySSA load analysis; no optimization remarks (findMayClobberedPtrAccess/reportMayClobberedLoad/reportLoadElim), no legacy pass
 lib/Analysis/MemoryDependenceAnalysis.cpp 0.95  # no debug-only verifyRemoved/AssertSorted, no legacy wrapper; invalidate() n/a (per-run result)
-lib/Transforms/Utils/VNCoercion.cpp 0.85  # no getConstantValueForLoad / getConstantMemInstValueForLoad (NewGVN only)
 lib/Transforms/Utils/ScalarEvolutionExpander.cpp 0.97  # manual: the SCEVPredicate expansions are in loop_versioning.jai (sx_expand_union_predicate etc.); the single-predicate entry point sx_expand_code_for_predicate still fails loudly
 lib/Transforms/Scalar/IndVarSimplify.cpp 0.98  # all; ShouldRunExtraSimpleLoopUnswitch is not modelled (no loop analyses)
 lib/Transforms/Utils/SimplifyIndVar.cpp 0.99
@@ -244,3 +243,4 @@ lib/Transforms/Utils/CodeExtractor.cpp 0.75  # no aggregate args, alloca/dealloc
 lib/Transforms/Utils/GuardUtils.cpp 0.5  # makeGuardControlFlowExplicit (pass_make_guards_explicit.jai); no widenWidenableBranch / setWidenableBranchCond
 lib/IR/Verifier.cpp 0.9  # all checks; not the DI kinds our parser rejects, -verify-noalias-scope-decl-dom, target intrinsics outside our tables, the legacy pass
 lib/IR/ConvergenceVerifier.cpp 1.0  # with GenericConvergenceVerifierImpl.h
+lib/Transforms/Scalar/NewGVN.cpp 0.93  # jai_newgvn: all of NewGVN; not the assertion-only verify* functions, statistics, debug printing

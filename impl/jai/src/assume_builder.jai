@@ -12,7 +12,7 @@ knowledge_retention: struct {
 // the passes that honour -enable-knowledge-retention here (the others call salvageKnowledge in ways not ported)
 knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     if !knowledge_retention.enabled return;
-    if kind == .DSE || kind == .EARLY_CSE || kind == .SCCP || kind == .IPSCCP || kind == .REQUIRE || kind == .INVALIDATE || kind == .NO_OP_FUNCTION || kind == .NO_OP_MODULE ||
+    if kind == .DSE || kind == .EARLY_CSE || kind == .NEWGVN || kind == .SCCP || kind == .IPSCCP || kind == .REQUIRE || kind == .INVALIDATE || kind == .NO_OP_FUNCTION || kind == .NO_OP_MODULE ||
        kind == .MODULE_PM || kind == .FUNCTION_ADAPTOR || kind == .VERIFY_MEMORYSSA || kind == .PRINT_MEMORYSSA return;
     // DCE.cpp and LICM.cpp call salvageKnowledge(I) (no AC); the loop adaptor, LoopRotate and InstCombine never do
     if kind == .DCE || kind == .LICM || kind == .LOOP_ADAPTOR || kind == .LOOP_ROTATE || kind == .INSTCOMBINE || kind == .LOOP_SIMPLIFY || kind == .LCSSA return;

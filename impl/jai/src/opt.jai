@@ -125,6 +125,7 @@
 #load "memdep.jai";
 #load "vn_coercion.jai";
 #load "pass_gvn.jai";
+#load "pass_newgvn.jai";
 #load "pass_early_cse.jai";
 #load "predicate_info.jai";
 #load "sccp_solver.jai";

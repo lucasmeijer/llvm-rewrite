@@ -358,8 +358,8 @@ build_function_simplification_pipeline :: (fpm: s32, last: *s32, level: Opt_Leve
     vcn := pb_add(fpm, last, "vector-combine");   // VectorCombinePass(TryEarlyFoldsOnly = true)
     pipeline.nodes[vcn].early_folds_only = true;
     pb_add(fpm, last, "mldst-motion<no-split-footer-bb>");
-    if pb_cl.enable_newgvn pb_unsupported("newgvn (-enable-newgvn)");
-    pb_add(fpm, last, "gvn<>");
+    if pb_cl.enable_newgvn pb_add(fpm, last, "newgvn");
+    else pb_add(fpm, last, "gvn<>");
     pb_add(fpm, last, "sccp");
     pb_add(fpm, last, "bdce");
     pb_add(fpm, last, INSTCOMBINE);
@@ -772,8 +772,8 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
         ll: s32 = -1;
         pb_add(pb_loop_adaptor(main_fa, *ml, true), *ll, pb_licm(true));
     }
-    if pb_cl.enable_newgvn pb_unsupported("newgvn (-enable-newgvn)");
-    pb_add(main_fa, *ml, "gvn<>");
+    if pb_cl.enable_newgvn pb_add(main_fa, *ml, "newgvn");
+    else pb_add(main_fa, *ml, "gvn<>");
     pb_add(main_fa, *ml, "memcpyopt");
     pb_add(main_fa, *ml, "dse");
     pb_add(main_fa, *ml, "move-auto-init");

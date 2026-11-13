@@ -1,7 +1,7 @@
 // VNCoercion: port of llvm/lib/Transforms/Utils/VNCoercion.cpp (canCoerceMustAliasedValueToLoad,
 // coerceAvailableValueToLoadType, analyzeLoadFromClobberingWrite / Store / Load / MemInst,
-// getStoreValueForLoadHelper, getValueForLoad, getMemInstValueForLoad). getConstantValueForLoad and
-// getConstantMemInstValueForLoad are NewGVN-only and not ported. The builder is IRBuilder<> (ConstantFolder): Irb.
+// getStoreValueForLoadHelper, getValueForLoad, getMemInstValueForLoad). The NewGVN-only getConstantValueForLoad and
+// getConstantMemInstValueForLoad are in pass_newgvn.jai. The builder is IRBuilder<> (ConstantFolder): Irb.
 
 vnc_is_first_class_aggregate_or_scalable :: (t: Type_Id) -> bool {
     k := type_kind(t);

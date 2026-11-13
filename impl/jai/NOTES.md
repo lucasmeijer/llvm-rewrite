@@ -1692,3 +1692,27 @@ Still slow / next:
 - Sweeps after these changes (0 differs everywhere): instcombine 8538/8550 identical (12 loud), instcombine
   --with-test-flags 10868/10927 (59 loud), simplifycfg, loop-rotate, make-guards-explicit, function(loop-mssa(licm)),
   dce/licm with --enable-knowledge-retention all 100%, slp-vectorizer --with-test-flags 10926/10982 (56 loud).
+
+## NewGVN (L1.extra.newgvn COMPLETE 296/296; /root/jai_newgvn)
+
+- One file, `pass_newgvn.jai` (NewGVN.cpp + GVNExpression.h + VNCoercion's getConstantValueForLoad /
+  getConstantMemInstValueForLoad). Expressions are `Ng_Expr` rows (`et` = the GVNExpression class), congruence classes
+  `Ng_Class` rows, the expression-keyed DenseMaps are `Ng_Emap` (hash chains; equality = DenseMapInfo::isEqual, exact
+  equality for the `find_as(ExactEqualsExpression)` erasures). The global `ng` is the NewGVN object of the running pass.
+  Facts that decide output: knowledge/llvm/newgvn.md.
+- `-newgvn-trace` (ours, not an LLVM flag) prints "Processing instruction" and each class move to stderr, to diff
+  against the assertions build's `-debug-only=newgvn`.
+- TarjanSCC is iterative (same visiting order as the recursive FindSCC).
+- `-enable-newgvn` now selects NewGVN in default<O*> and the LTO pipeline. `-enable-knowledge-retention` is allowed
+  with newgvn (salvageKnowledge(I, AC) in deleteInstructionsInBlock).
+- Regenerated gen_intrinsics.jai (commute.ll needs llvm.sdiv.fix; 400 roundtrips of other directories came with it).
+- Sweeps: `newgvn` 10448/10452 identical, 1 differs (SCCP/pr27712.ll: an equality of two different constants on a
+  dead edge is ordered by heap address in LLVM; see knowledge), 3 loud (ppc_fp128, x86 hadd known bits);
+  `--per-function` 80898/80918, 2 differs (pr27712 and InstCombine/assume.ll @debug_interference, same cause);
+  `--with-test-flags` 12044/13234, 0 differs (loud = other passes' options); `-enable-store-refinement`,
+  `-enable-phi-of-ops=false`: same as plain; tests/perf/compile `newgvn`, `function(sroa),newgvn` and
+  `default<O2> -enable-newgvn` 4/4 identical.
+- Perf (x64 build, `-passes=newgvn -disable-output`): sqlite3.ll 3.9 s (LLVM 0.49 s; parse 0.7 s); diamonds
+  n2000/n8000 0.27/1.10 s (LLVM 0.08/0.27); loops-many n2000/n8000 0.81/16.2 s (LLVM 0.10/1.30). loops-many is
+  quadratic in LLVM too (k ~1.9; ours ~2.2): the time is the number of re-evaluations of the touched instructions
+  (InstSimplify of the re-numbered adds, hash lookups); no tests/perf benchmark times newgvn.
