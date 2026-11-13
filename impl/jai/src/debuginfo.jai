@@ -778,13 +778,14 @@ strip_debug_info :: () -> bool {
         while b != NONE {
             x := block(b).first;
             while x != NONE {
-                if get_metadata(x, dbg) != NONE || inst(x).records != 0 || get_metadata(x, assign) != NONE changed = true;
+                // dropping debug records or !DIAssignID does not count as a change (stripDebugInfo(Function &))
+                if get_metadata(x, dbg) != NONE changed = true;
                 set_metadata(x, dbg, NONE);
                 lid := get_metadata(x, loop_kind);
                 if lid != NONE {
                     found, nl := table_find(*loop_map, lid);
                     if !found { nl = strip_debug_loc_from_loop_id(lid); table_add(*loop_map, lid, nl); }
-                    if nl != lid { set_metadata(x, loop_kind, nl); changed = true; }
+                    if nl != lid set_metadata(x, loop_kind, nl);   // not counted as a change either
                 }
                 set_metadata(x, heap, NONE);
                 set_metadata(x, assign, NONE);

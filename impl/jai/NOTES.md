@@ -109,6 +109,9 @@
   VerifierAMDGPU.cpp, target intrinsics outside our tables (aarch64/arm/nvvm/wasm cases), the
   `-verify-noalias-scope-decl-dom` dominance check (off by default; fails silently), "in another module" checks (one
   module per process).
+- Sweeps (every round-tripping file, 10803): `--passes verify --analysis` (stderr compared), `--passes verify`
+  (IR) and `--passes 'function(verify)' --analysis`: all identical (the 3 earlier differences were StripDebugInfo
+  counting dropped debug records as a change, which printed a spurious "invalid version" warning; fixed).
 - Remaining Verifier test failures: DIGenericSubrange (2) and DIEnumerator (4 files) are parser gaps, 3 need x86
   auto-upgrades (`llvm.x86.sse2.pshuf*`) that fail loudly.
 - Cost (x64 build, sqlite3.ll, `-disable-output`): parse 0.74 s, input + output verification +0.34 s (LLVM's whole
