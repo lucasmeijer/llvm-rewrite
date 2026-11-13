@@ -104,7 +104,7 @@ dead_are_all_uses_assumed_dead :: (i: u32, v: Value_Id) -> bool {
 }
 // isAssumedSideEffectFree
 dead_is_assumed_side_effect_free :: (i: u32, x: Value_Id) -> bool {
-    if x == NONE || would_instruction_be_trivially_dead(x) return true;
+    if x == NONE || would_instruction_be_trivially_dead(x, false) return true;
     if !is_terminator(inst_op(x)) && !may_have_side_effects(x) return true;
     if !is_call_base(x) || call_is_intrinsic(x) return false;
     cpos := irp_cs_function(x);

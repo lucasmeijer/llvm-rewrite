@@ -363,7 +363,7 @@ atr_cleanup_ir :: () -> bool {
         use_set(u, nv);
         if is_inst(old) {
             atr_set_insert(*atr.cg_modified, inst_fn(old));
-            if !is_phi(old) && !is_to_be_deleted(old) && is_instruction_trivially_dead(old) array_add(dead_insts, old);
+            if !is_phi(old) && !is_to_be_deleted(old) && atr_is_trivially_dead(old) array_add(dead_insts, old);
         }
         if is_undef_value(nv) && irp_is_call(user) {
             if call_is_arg_operand(user, u) {
@@ -428,14 +428,14 @@ atr_cleanup_ir :: () -> bool {
         if !atr_alive_inst(x) continue;
         drop_droppable_uses(x);
         atr_set_insert(*atr.cg_modified, inst_fn(x));
-        if type_kind(vtype(x)) != .VOID replace_all_uses_with(x, const_undef(vtype(x)));
-        if !is_phi(x) && is_instruction_trivially_dead(x) array_add(*dead_insts, x);
+        if type_kind(vtype(x)) != .VOID rauw_with_metadata(x, const_undef(vtype(x)));
+        if !is_phi(x) && atr_is_trivially_dead(x) array_add(*dead_insts, x);
         else erase_inst_with_metadata(x);
     }
     live_dead: [..] Value_Id; live_dead.allocator = temp;
     for dead_insts if atr_alive_inst(it) array_add(*live_dead, it);
     had_dead_insts := live_dead.count != 0;
-    recursively_delete_trivially_dead_instructions(live_dead);
+    atr_recursively_delete_trivially_dead_instructions(*live_dead);
     if atr.deleted_blocks.count {
         bbs: [..] Value_Id; bbs.allocator = temp;
         for bb: atr.deleted_blocks {
@@ -443,7 +443,7 @@ atr_cleanup_ir :: () -> bool {
             if table_contains(*atr.manifest_added_blocks, bb) continue;
             array_add(*bbs, bb);
         }
-        detach_dead_blocks(bbs, null, false);
+        atr_detach_dead_blocks(bbs);
     }
     atr_identify_dead_internal_functions();
     changed := atr_rewrite_function_signatures(*atr.cg_modified);
@@ -520,4 +520,59 @@ replace_non_metadata_uses_with :: (v: Value_Id, nv: Value_Id) {
     u := ir.v_first_use[v];
     while u != NONE { array_add(*us, u); u = ir.u_next[u]; }
     for us use_set(it, nv);
+}
+
+// isInstructionTriviallyDead(I) without a TargetLibraryInfo
+atr_is_trivially_dead :: (i: Value_Id) -> bool { return !has_uses(i) && would_instruction_be_trivially_dead(i, false); }
+// RecursivelyDeleteTriviallyDeadInstructions(DeadInsts) (TLI = nullptr): every listed instruction is deleted
+atr_recursively_delete_trivially_dead_instructions :: (dead: *[..] Value_Id) {
+    while dead.count {
+        i := pop(dead);
+        if !atr_alive_inst(i) continue;
+        salvage_debug_info(i);
+        n := nops(i);
+        for k: 0..cast(s64) n - 1 {
+            o := op(i, cast(u32) k);
+            set_op(i, cast(u32) k, NONE);
+            if o == NONE || has_uses(o) continue;
+            if is_inst(o) && atr_is_trivially_dead(o) array_add(dead, o);
+        }
+        erase_inst_with_metadata(i);
+    }
+}
+
+// detachDeadBlocks(BBs, nullptr, false) keeping the debug records of the erased instructions (eraseFromParent moves
+// them to the next instruction, finally to the new unreachable)
+atr_detach_dead_blocks :: (bbs: [] Value_Id) {
+    for bb: bbs {
+        f := block_first_non_phi(bb);
+        if f != NONE && (inst_op(f) == .CATCHPAD || inst_op(f) == .CLEANUPPAD) {
+            rets: [..] Value_Id; rets.allocator = temp;
+            u := ir.v_first_use[f];
+            while u != NONE {
+                user := ir.u_user[u];
+                if is_inst(user) && (inst_op(user) == .CATCHRET || inst_op(user) == .CLEANUPRET) atr_set_insert(*rets, inst_block(user));
+                u = ir.u_next[u];
+            }
+            for rets atr_empty_and_detach_block(it);
+        }
+        atr_empty_and_detach_block(bb);
+    }
+}
+atr_empty_and_detach_block :: (bb: Value_Id) {
+    succs: [..] Value_Id; succs.allocator = temp;
+    block_successors(bb, *succs);
+    for s: succs block_remove_predecessor(s, bb, false);
+    recs: [..] u32; recs.allocator = temp;
+    while block_last(bb) != NONE {
+        i := block_last(bb);
+        r := inst(i).records;
+        inst(i).records = 0;
+        if r != 0 array_add(*recs, r);
+        if has_uses(i) rauw_with_metadata(i, const_poison(vtype(i)));
+        erase_inst_with_metadata(i);
+    }
+    u := new_inst(.UNREACHABLE, ir.t_void, 0);
+    block_append_inst(bb, u);
+    for < recs attach_records_before(u, it);
 }

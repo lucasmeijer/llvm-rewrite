@@ -474,6 +474,8 @@ priv_construct_pointer :: (ptr: Value_Id, offset: s64, pos: Value_Id) -> Value_I
     set_op(g, 0, ptr);
     set_op(g, 1, const_int(ir.t_i64, cast(u64) offset));
     insert_before_named(g, pos, tprint("%.b%", vname(ptr), offset));
+    d := get_metadata(pos, MDK_DBG);   // the IRBuilder's debug location (SetInsertPoint)
+    if d != NONE set_metadata(g, MDK_DBG, d);
     return g;
 }
 // createInitialization: stores of the new arguments into the private copy, before `pos`

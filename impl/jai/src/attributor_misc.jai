@@ -106,10 +106,16 @@ atr_minimal_base_of_pointer :: (q: u32, ptr: Value_Id, allow_non_inbounds := fal
 
 // ---------------------------------------------------------------- followUsesInMBEC
 
-// the StateType of the AAs that follow uses (BooleanState, IncIntegerState, BitIntegerState, DerefState)
-Mbec_State :: struct { s: Bstate; g: Bstate; accessed: [..] [2] s64; }
-mbec_state_of :: (i: u32) -> Mbec_State { r: Mbec_State; r.s = aa(i).s; r.g = aa(i).g; r.accessed.allocator = temp; return r; }
-mbec_default :: (like: *Mbec_State) -> Mbec_State { r: Mbec_State; r.s = bs_best_of(like.s); r.g = bs_best_of(like.g); r.accessed.allocator = temp; return r; }
+// the StateType of the AAs that follow uses (BooleanState, IncIntegerState, BitIntegerState, DerefState); the
+// fields point at the AA's own state (followUsesInMBEC works on getState()) or at a branch's local state
+Mbec_State :: struct { s: *Bstate; g: *Bstate; accessed: *[..] [2] s64; }
+mbec_state_of :: (i: u32) -> Mbec_State {
+    r: Mbec_State;
+    r.s = *aa(i).s; r.g = *aa(i).g;
+    if aa(i).kind == .DEREFERENCEABLE r.accessed = *deref_ext(i).accessed;
+    else { r.accessed = New([..] [2] s64,, allocator = temp); r.accessed.allocator = temp; }
+    return r;
+}
 
 // DerefState::computeKnownDerefBytesFromAccessedMap / addAccessedBytes / takeKnownDerefBytesMaximum
 deref_compute_known_from_map :: (s: *Bstate, m: *[..] [2] s64) {
@@ -118,7 +124,7 @@ deref_compute_known_from_map :: (s: *Bstate, m: *[..] [2] s64) {
         if kb < it[0] break;
         kb = max(kb, it[0] + it[1]);
     }
-    bs_take_known_max(s, cast(u64) kb);
+    bs_take_known_max(s, (cast,no_check(u64) kb) & 0xFFFF_FFFF);
 }
 deref_add_accessed_bytes :: (s: *Bstate, m: *[..] [2] s64, off: s64, size: u64) {
     pos := 0;
@@ -127,7 +133,7 @@ deref_add_accessed_bytes :: (s: *Bstate, m: *[..] [2] s64, off: s64, size: u64) 
     else array_insert_at(m, .[off, cast(s64) size], pos);
     deref_compute_known_from_map(s, m);
 }
-deref_take_known_max :: (s: *Bstate, m: *[..] [2] s64, b: u64) { bs_take_known_max(s, b); deref_compute_known_from_map(s, m); }
+deref_take_known_max :: (s: *Bstate, m: *[..] [2] s64, b: u64) { bs_take_known_max(s, b & 0xFFFF_FFFF); deref_compute_known_from_map(s, m); }
 
 // followUsesInMBEC
 aa_follow_uses_in_mbec :: (i: u32, ctx: Value_Id, st: *Mbec_State) {
@@ -138,7 +144,7 @@ aa_follow_uses_in_mbec :: (i: u32, ctx: Value_Id, st: *Mbec_State) {
     u := ir.v_first_use[v];
     while u != NONE { uset_insert(*uses, u); u = ir.u_next[u]; }
     aa_follow_uses_in_context(i, ctx, *uses, st);
-    fix := ifx aa(i).kind == .DEREFERENCEABLE then (!bs_is_valid(st.s) || (bs_is_fix(st.s) && bs_is_fix(st.g))) else bs_is_fix(st.s);
+    fix := ifx aa(i).kind == .DEREFERENCEABLE then (!bs_is_valid(st.s.*) || (bs_is_fix(st.s.*) && bs_is_fix(st.g.*))) else bs_is_fix(st.s.*);
     if fix return;
     brs: [..] Value_Id; brs.allocator = temp;
     it := mbe_begin(ctx);
@@ -147,21 +153,23 @@ aa_follow_uses_in_mbec :: (i: u32, ctx: Value_Id, st: *Mbec_State) {
         mbe_advance(*it);
     }
     for br: brs {
-        parent := mbec_default(st);
-        bs_optimistic(*parent.s);
-        bs_optimistic(*parent.g);
+        ps := bs_best_of(st.s.*); pg := bs_best_of(st.g.*);
+        bs_optimistic(*ps);
+        bs_optimistic(*pg);
         for k: 0..cast(s64) num_successors(br) - 1 {
             bb := get_successor(br, cast(u32) k);
-            child := mbec_default(st);
+            cs := bs_best_of(st.s.*); cg := bs_best_of(st.g.*);
+            cacc: [..] [2] s64; cacc.allocator = temp;
+            child := Mbec_State.{*cs, *cg, *cacc};
             before := uses.list.count;
             aa_follow_uses_in_context(i, block_first(bb), *uses, *child);
             for x: before..uses.list.count - 1 table_remove(*uses.member, uses.list[x]);
             uses.list.count = before;
-            bs_join_and(*parent.s, child.s);
-            bs_join_and(*parent.g, child.g);
+            bs_join_and(*ps, cs);
+            bs_join_and(*pg, cg);
         }
-        bs_add_known_of(*st.s, parent.s);
-        bs_add_known_of(*st.g, parent.g);
+        bs_add_known_of(st.s, ps);
+        bs_add_known_of(st.g, pg);
     }
 }
 // followUsesInContext
@@ -190,36 +198,35 @@ aa_follow_use_in_mbec :: (i: u32, u: Use_Id, user: Value_Id, st: *Mbec_State) ->
     if k == {
         case .NON_NULL;
             _, non_null, track := nn_known_non_null_and_deref_bytes_for_use(i, av, u, user);
-            bs_set_known(*st.s, non_null);
+            bs_set_known(st.s, non_null);
             return track;
         case .DEREFERENCEABLE;
             deref, _, track := nn_known_non_null_and_deref_bytes_for_use(i, av, u, user);
             deref_add_accessed_bytes_for_use(i, u, user, st);
-            deref_take_known_max(*st.s, *st.accessed, cast(u64) deref);
+            deref_take_known_max(st.s, st.accessed, cast(u64) deref);
             return track;
         case .ALIGN;
             ka, track := align_known_for_use(i, av, u, user);
-            bs_take_known_max(*st.s, ka);
+            bs_take_known_max(st.s, ka);
             return track;
         case .NO_UNDEF;
             f := irp_anchor_scope(aa(i).pos);
             dt: *Dom_Tree = null;
             ac: *Assumption_Cache = null;
             if f != NONE { dt = atr_dt(f); ac = atr_ac(f); }
-            bs_set_known(*st.s, is_guaranteed_not_to_be_undef_or_poison(ir.u_val[u], ac, user, dt));
+            bs_set_known(st.s, is_guaranteed_not_to_be_undef_or_poison(ir.u_val[u], ac, user, dt));
             o := inst_op(user);
             return is_cast_op(o) || o == .GEP;
         case .NO_FPCLASS;
             if !is_call_base(user) || !call_is_arg_operand(user, u) return false;
             o := atr_get_aa(.NO_FPCLASS, irp_cs_argument(user, use_arg_no(u)), i, DEP_NONE);
-            if o != NONE bs_add_known(*st.s, aa(o).s.known);
+            if o != NONE bs_add_known(st.s, aa(o).s.known);
             return false;
     }
     fatal("internal: attributor: followUseInMBEC for %", aa_kind_name(k));
     return false;
 }
 // write a followed state back into the AA
-mbec_store :: (i: u32, st: *Mbec_State) { aa(i).s = st.s; aa(i).g = st.g; }
 
 // getKnownNonNullAndDerefBytesForUse: (deref bytes, IsNonNull, TrackUse)
 nn_known_non_null_and_deref_bytes_for_use :: (q: u32, assoc: Value_Id, u: Use_Id, i: Value_Id) -> (s64, bool, bool) {
@@ -401,11 +408,7 @@ deref_initialize :: (i: u32) {
     ctx := irp_ctx_i(p);
     if ctx != NONE {
         st := mbec_state_of(i);
-        for e.accessed array_add(*st.accessed, it);
         aa_follow_uses_in_mbec(i, ctx, *st);
-        mbec_store(i, *st);
-        e.accessed.count = 0;
-        for st.accessed array_add(*e.accessed, it);
     }
 }
 // addAccessedBytesForUse
@@ -415,7 +418,7 @@ deref_add_accessed_bytes_for_use :: (i: u32, u: Use_Id, x: Value_Id, st: *Mbec_S
     ok, loc := mloc_get_or_none(x);
     if !ok || loc.ptr != use_v || !ls_has_value(loc.size) || !ls_is_precise(loc.size) || is_volatile(x) return;
     base, off := get_pointer_base_with_constant_offset(loc.ptr);
-    if base != NONE && base == irp_assoc_value(aa(i).pos) deref_add_accessed_bytes(*st.s, *st.accessed, off, ls_value(loc.size));
+    if base != NONE && base == irp_assoc_value(aa(i).pos) deref_add_accessed_bytes(st.s, st.accessed, off, ls_value(loc.size));
 }
 deref_update :: (i: u32) -> bool {
     pk := aa(i).pk;
@@ -457,10 +460,10 @@ deref_floating_update :: (i: u32) -> bool {
         }
         os := ap_sext_value(offset);
         if os < 0 os = 0;
-        bs_take_assumed_min(*t.s, cast(u64) max(0, deref - os));
+        bs_take_assumed_min(*t.s, (cast(u64) max(0, deref - os)) & 0xFFFF_FFFF);
         if i == o {
             if !stripped {
-                bs_take_known_max(*t.s, cast(u64) max(0, deref - os));
+                bs_take_known_max(*t.s, (cast(u64) max(0, deref - os)) & 0xFFFF_FFFF);
                 bs_pessimistic(*t.s); bs_pessimistic(*t.g);
             } else if os > 0 {
                 bs_pessimistic(*t.s); bs_pessimistic(*t.g);
@@ -536,7 +539,6 @@ align_initialize :: (i: u32) {
     if ctx != NONE {
         st := mbec_state_of(i);
         aa_follow_uses_in_mbec(i, ctx, *st);
-        mbec_store(i, *st);
     }
 }
 align_update :: (i: u32) -> bool {
@@ -676,8 +678,7 @@ nu_undef_initialize :: (i: u32) {
         if ctx != NONE {
             st := mbec_state_of(i);
             aa_follow_uses_in_mbec(i, ctx, *st);
-            mbec_store(i, *st);
-        }
+            }
     }
 }
 nu_undef_update :: (i: u32) -> bool {

@@ -220,8 +220,7 @@ aa_initialize :: (i: u32) {
             if ctx != NONE {
                 st := mbec_state_of(i);
                 aa_follow_uses_in_mbec(i, ctx, *st);
-                mbec_store(i, *st);
-            }
+                    }
         case .NO_CAPTURE;
             if pk == .RETURNED fatal("internal: attributor: NoCapture is not applicable to function returns");
             if pk == .CALL_SITE_RETURNED nc_determine_function_capture_capabilities(p, irp_anchor_scope(p), *aa(i).s);
@@ -347,7 +346,6 @@ fpc_initialize :: (i: u32) {
     if ctx != NONE {
         st := mbec_state_of(i);
         aa_follow_uses_in_mbec(i, ctx, *st);
-        mbec_store(i, *st);
     }
 }
 
