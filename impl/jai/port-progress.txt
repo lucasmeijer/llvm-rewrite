@@ -258,3 +258,5 @@ lib/Transforms/Coroutines/CoroSplit.cpp 0.97
 lib/Transforms/Coroutines/CoroElide.cpp 0.9  # remarks, -coro-elide-info-output-file
 lib/Transforms/Coroutines/CoroAnnotationElide.cpp 0.9  # remarks, -coro-elide-branch-ratio flag
 lib/Analysis/StackLifetime.cpp 0.75  # May (coro_frame) and Must (asan) liveness; no printer
+lib/Transforms/Instrumentation/PGOInstrumentation.cpp 0.4  # jai_pgo: pgo-instr-gen (FDO) complete but block coverage and ctx-instr-gen; no pgo-instr-use (PGOUseFunc, indexed profile reader)
+lib/Support/CRC.cpp 0.3  # jai_pgo: JamCRC

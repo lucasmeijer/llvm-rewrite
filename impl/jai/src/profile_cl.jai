@@ -54,6 +54,23 @@ profile_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
         case "sampled-instrumentation"; instrprof_lower_cl.sampled_instr = smisc_bool(name, value, has_value); instrprof_lower_cl.sampled_instr_set = true;
         case "sampled-instr-period"; instrprof_lower_cl.sampled_period = smisc_int(name, value, has_value);
         case "sampled-instr-burst-duration"; instrprof_lower_cl.sampled_burst = smisc_int(name, value, has_value);
+        // PGOInstrumentation.cpp
+        case "jai-debug-cfgmst"; pgo_debug_mst = true;
+        case "disable-vp"; pgo_gen_cl.disable_vp = smisc_bool(name, value, has_value);
+        case "do-comdat-renaming"; pgo_gen_cl.do_comdat_renaming = smisc_bool(name, value, has_value);
+        case "pgo-instr-select"; pgo_gen_cl.instr_select = smisc_bool(name, value, has_value);
+        case "pgo-instr-memop"; pgo_gen_cl.instr_memop = smisc_bool(name, value, has_value);
+        case "pgo-instrument-entry"; pgo_gen_cl.instrument_entry = smisc_bool(name, value, has_value);
+        case "pgo-instrument-loop-entries"; pgo_gen_cl.instrument_loop_entries = smisc_bool(name, value, has_value);
+        case "pgo-function-entry-coverage"; pgo_gen_cl.function_entry_coverage = smisc_bool(name, value, has_value);
+        case "pgo-block-coverage"; pgo_gen_cl.block_coverage = smisc_bool(name, value, has_value);
+        case "pgo-temporal-instrumentation"; pgo_gen_cl.temporal_instrumentation = smisc_bool(name, value, has_value);
+        case "pgo-function-size-threshold"; pgo_gen_cl.function_size_threshold = smisc_int(name, value, has_value);
+        case "pgo-critical-edge-threshold"; pgo_gen_cl.critical_edge_threshold = smisc_int(name, value, has_value);
+        case "pgo-cold-instrument-entry-threshold"; pgo_gen_cl.cold_instrument_entry_threshold = smisc_int(name, value, has_value);
+        case "pgo-treat-unknown-as-cold"; pgo_gen_cl.treat_unknown_as_cold = smisc_bool(name, value, has_value);
+        case "pgo-instrument-cold-function-only"; pgo_gen_cl.instrument_cold_function_only = smisc_bool(name, value, has_value);
+        case "pgo-memop-optimize-memcmp-bcmp"; pgo_gen_cl.memop_optimize_memcmp_bcmp = smisc_bool(name, value, has_value);
         case; return false;
     }
     return true;
@@ -72,6 +89,7 @@ profile_takes_value :: (a: string) -> bool {
                 "memprof-debug-func", "memprof-debug-min", "memprof-debug-max", "memprof-runtime-default-options",
                 "static-func-strip-dirname-prefix", "vp-counters-per-site", "max-counter-promotions-per-loop",
                 "max-counter-promotions", "speculative-counter-promotion-max-exiting", "sampled-instr-period",
-                "sampled-instr-burst-duration"] if n == it return true;
+                "sampled-instr-burst-duration", "pgo-function-size-threshold", "pgo-critical-edge-threshold",
+                "pgo-cold-instrument-entry-threshold"] if n == it return true;
     return false;
 }

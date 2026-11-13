@@ -1821,6 +1821,16 @@ Still slow / next:
   links the same /usr/lib/x86_64-linux-gnu/libz.so.1 dynamically, so calling it gives byte-identical output.
   Porting deflate bit-exactly would be ~2000 lines of zlib, not LLVM code.
 
+- `pgo-instr-gen` (pass_pgo_instr_gen.jai: PGOInstrumentation.cpp gen side, CFGMST.h, ValueProfileCollector,
+  JamCRC, SplitIndirectBrCriticalEdges with IgnoreBlocksWithoutPHI=false and BPI/BFI updates, funclet bundles):
+  sweep `pgo-instr-gen` and `pgo-instr-gen,instrprof` 10810/10811 identical. The one differ
+  (SampleProfile/profile-correlation-irreducible-loops.ll) is a **BFI bug on irreducible loops** (block_freq.jai):
+  `print<block-freq>` already differs there (b3/b8 masses), so the MST weights differ. Not ported (loud):
+  -pgo-block-coverage (BlockCoverageInference.cpp), ctx-instr-gen, vtable value profiling.
+  `-jai-debug-cfgmst` prints the MST edges (jai-only debugging aid).
+- Jai trap: an untyped constant `0xFFFF_FFFF_FFFF_FFFF :: ` is an s64 -1 in arithmetic (`X / 1000` = 0); give
+  such constants an explicit `: u64 :` type.
+
 ## Sanitizers (L1.extra.sanitizers.*; jai_sanitizers, 2026-11)
 
 - Files: `sanitizer_common.jai` (ModuleUtils.cpp / Instrumentation.cpp helpers, Function::createWithDefaultAttr,
