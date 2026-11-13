@@ -14054,6 +14054,7 @@ tests/imported/llvm/Transforms/LoopVectorize/dont-fold-tail-for-const-TC.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/dont-fold-tail-for-const-TC.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/dont-fold-tail-for-divisible-TC.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/dont-fold-tail-for-divisible-TC.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/early-exit-calls.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/early-exit-calls.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/early-exit-minmax-trip-count.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/early-exit-minmax-trip-count.ll::roundtrip
@@ -14273,6 +14274,7 @@ tests/imported/llvm/Transforms/LoopVectorize/multiple-argmin-argmax.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/multiple-argmin-argmax.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/multiple-exits-versioning.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/multiple-exits-versioning.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/multiple-result-intrinsics.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/multiple-result-intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/multiple-strides-vectorization.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/multiple-strides-vectorization.ll::roundtrip
@@ -14565,6 +14567,7 @@ tests/imported/llvm/Transforms/LoopVectorize/strict-fadd-interleave-only.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/strict-fadd-interleave-only.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/strided-accesses-interleave-only.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/strided-accesses-interleave-only.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/struct-return-replicate.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/struct-return-replicate.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/struct_access.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/struct_access.ll::roundtrip
