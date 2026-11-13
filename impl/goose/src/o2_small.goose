@@ -103,7 +103,7 @@ fn os_alist_set_fn(l: i32, fs: i32) -> i32 {
 }
 
 fn recompute_globalsaa_run(m: i32) -> u32 {
-    if gm_valid { gm_compute(m); }
+    if gm_valid { gm_recompute(m); }
     return PA_ALL;
 }
 

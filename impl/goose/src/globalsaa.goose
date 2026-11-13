@@ -22,6 +22,7 @@ import memloc;
 var gm_valid: bool = false;
 var gm_module: i32 = -1;
 var gm_unknown_local_fns: bool = false;
+var gm_unknown_computed: bool = false;   // the value AnalyzeGlobals computed
 var gm_nonaddr: bool[>..];        // NonAddressTakenGlobals, by value id
 var gm_indirect: bool[>..];       // IndirectGlobals
 var gm_alloc_for: i32[>..];       // AllocsForIndirectGlobals: value -> global variable (-1)
@@ -476,6 +477,7 @@ fn gm_compute(m: i32) {
     cg_compute_sccs();
     gm_analyze_globals(m);
     gm_analyze_call_graph();
+    gm_unknown_computed = gm_unknown_local_fns;
     // GlobalsAA::run returns the result by value into the analysis manager, and the move constructor of
     // GlobalsAAResult does not move UnknownFunctionsWithLocalLinkage: the cached result always has it false
     // (verified with opt 23.1.5: an escaping internal function does not disable the mod/ref refinement).
@@ -484,6 +486,13 @@ fn gm_compute(m: i32) {
     gm_module = m;
 }
 fn gm_invalidate() { gm_valid = false; }
+
+// RecomputeGlobalsAAPass::run on the cached result: everything is cleared and recomputed in place, so
+// UnknownFunctionsWithLocalLinkage keeps what AnalyzeGlobals computed (no move constructor in between).
+fn gm_recompute(m: i32) {
+    gm_compute(m);
+    gm_unknown_local_fns = gm_unknown_computed;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Queries

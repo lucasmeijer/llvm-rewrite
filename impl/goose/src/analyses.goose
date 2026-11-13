@@ -19,6 +19,7 @@ let A_BPI = 13;              // BranchProbabilityAnalysis
 let A_BFI = 14;              // BlockFrequencyAnalysis
 let A_VERIFY = 20;
 let A_TARGET_IR = 21;        // TargetIRAnalysis: require<target-ir> creates the function's subtarget
+let A_SNR = 24;              // ShouldNotRunFunctionPassesAnalysis: a marker (default invalidate: dropped unless preserved)
 let A_PHI_VALUES = 23;       // PhiValuesAnalysis: computed lazily by its users; nothing reads it any more
 let A_ORE = 22;              // OptimizationRemarkEmitterAnalysis: no state without -pass-remarks-with-hotness           // VerifierAnalysis: require<verify> is accepted; no verifier yet (the harness verifies our output)
 // Analyses beyond the function level (bits above PA_FN): the call graph and the CGSCC proxies

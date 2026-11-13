@@ -150,7 +150,17 @@ let KNOWN_FLAGS: const u8[:][] = [
     "cost-kind", "intrinsic-cost-strategy",               // read by print<cost-model> (tti.goose)
     "costmodel-reduxcost",                               // no-op: declared but unused in TargetTransformInfo.cpp
     "disable-verify",                                    // no-op: opt only skips its own input/output verification
-    "disable-loop-unrolling",                            // no-op for -passes= (PipelineTuningOptions of -O<n>)
+    "disable-loop-unrolling",                            // PipelineTuningOptions of -O<n> (pipelines.goose)
+    // PassBuilderPipelines.cpp / PipelineTuningOptions cl::opts (pipelines.goose; non-default values that add
+    // passes we don't build fail loudly there)
+    "enable-loopinterchange", "enable-loopfusion", "enable-merge-functions", "eagerly-invalidate-analyses",
+    "enable-devirtualize-speculatively", "enable-module-inliner", "mandatory-inlining-first", "enable-global-analyses",
+    "enable-partial-inlining", "extra-vectorizer-passes", "enable-newgvn", "enable-unroll-and-jam", "enable-loop-flatten",
+    "enable-instrumentor", "enable-dfa-jump-thread", "hot-cold-split", "ir-outliner", "enable-gvn-hoist", "enable-gvn-sink",
+    "enable-jump-table-to-switch", "enable-chr", "enable-matrix", "enable-mergeicmps", "enable-constraint-elimination",
+    "attributor-enable", "enable-loop-versioning-licm", "opt-pipeline-trigger-crash", "max-devirt-iterations",
+    "goose-print-pipeline",
+    "memcmp-num-loads-per-block", "max-loads-per-memcmp", "max-loads-per-memcmp-opt-size",   // expand-memcmp
     "goose-ic-lenient",
     "goose-scev-trace",                                  // development only: ScalarEvolution value map events                                  // development only: unported InstCombine visitors do nothing
 ];

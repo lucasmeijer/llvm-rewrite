@@ -2501,14 +2501,14 @@ fn vc_fold_inst(i: i32) -> bool {
 }
 
 // VectorCombinePass::run(F, FAM) with TryEarlyFoldsOnly = false (the registry's "vector-combine")
-fn vector_combine_run(fv: i32) -> u32 {
+fn vector_combine_run(fv: i32, early_only: bool) -> u32 {
     if flag_bool("disable-vector-combine", false) { return PA_ALL; }
     tti_init_function(fv, globs[glob_of(fv)].module);
     dt_get(fv, DT_DOM);
     aa_begin(fv);
     tli_cur_fn = fv;
     vc_fv = fv;
-    vc_early_only = false;
+    vc_early_only = early_only;
     vc_kind = if vc_has_opt_size(fv) { TCK_CODE_SIZE } else { TCK_RECIP_THROUGHPUT };
     if tv_number_of_registers(tv_register_class_for_type(true, -1)) == 0 { return PA_ALL; }
     let save_tli = local_have_tli;

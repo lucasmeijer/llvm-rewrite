@@ -373,9 +373,15 @@ fn filter_dead_comdat_functions(fs: i32[>..<]&) {
 // ---------------------------------------------------------------------------------------------
 // InlinerPass::run
 
+// The ModuleInlinerWrapperPass's InlineAdvisor level (-1: none, InlinerPass's own DefaultInlineAdvisor with
+// getInlineParams()); set by the pass manager while a ModuleInlinerWrapperPass runs.
+var inl_advisor_level: i64 = -1;
+// AlwaysInlinerPass(InsertLifetimeIntrinsics)
+var ai_insert_lifetime: bool = true;
+
 fn inl_run_cgscc(c: i32, only_mandatory: bool) -> u32 {
     inl_check_flags();
-    let p = get_inline_params();
+    let p = if inl_advisor_level >= 0 { get_inline_params_from_opt_level(inl_advisor_level) } else { get_inline_params() };
     let m = globs[glob_of(lcg_fn(lcg_scc_node(c, 0)))].module;
     let with_psi = psi_cached();
     var calls: i32[>..<] = [];
@@ -608,7 +614,7 @@ fn ai_try_inline(cb: i32, callee: i32, want_sites: bool) -> bool {
     let caller = inst_func(cb);
     let d, why = get_attribute_based_inlining_decision(cb, callee);
     if d != 1 { return false; }
-    if !inline_function(cb, true, true, want_sites, true, false, callee) { return false; }
+    if !inline_function(cb, true, ai_insert_lifetime, want_sites, true, false, callee) { return false; }
     invalidate_function(caller, PA_NONE);
     if !want_sites { ifi_inlined_call_sites.resize(0); }
     return true;

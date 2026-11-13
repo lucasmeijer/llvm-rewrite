@@ -81,6 +81,9 @@ import simple_loop_unswitch_nt;
 import ipo_globals;
 import ipo_args;
 import globalopt;
+import pipelines;
+import expand_memcmp;
+import psi;
 
 // ---------------------------------------------------------------------------------------------
 // Pass ids. Add a new pass: an id here, a row in PASS_TABLE, a case in run_function_pass (or
@@ -175,6 +178,8 @@ let P_PRINT_BPI = 183;
 let P_PRINT_BFI = 184;
 let P_PRINT_COST_MODEL = 185;
 let P_VERIFY_SCEV = 119;
+let P_EXPAND_MEMCMP = 127;
+let P_CHR = 126;            // ControlHeightReductionPass: only with a profile summary (fails loudly then)
 // loop passes
 let P_PRINT_LOOPNEST = 200;
 let P_NOOP_LOOP = 201;
@@ -256,6 +261,8 @@ let PASS_TABLE: const u8[:][] = [
     "f:loop-load-elim:196:0",
     "f:loop-versioning:197:0",
     "f:loop-distribute:198:0",
+    "f:chr:126:0",
+    "f:expand-memcmp:127:0",
     "l:print<loopnest>:200:1",
     "l:no-op-loop:201:0",
     "l:indvars:207:0",
@@ -325,6 +332,8 @@ fn pass_class_name(p: i64) -> const u8[:] {
         P_ASSIGN_GUID => "AssignGUIDPass",
         P_PRINT_LCG => "LazyCallGraphPrinterPass",
         P_LOOP_UNROLL => "LoopUnrollPass",
+        P_CHR => "ControlHeightReductionPass",
+        P_EXPAND_MEMCMP => "ExpandMemCmpPass",
         _ => mp_class_name(p),
     }
 }
@@ -347,6 +356,7 @@ fn analysis_id(name: const u8[:]) -> i64 {
     if name == "branch-prob" { return A_BPI; }
     if name == "block-freq" { return A_BFI; }
     if name == "phi-values" { return A_PHI_VALUES; }
+    if name == "should-not-run-function-passes" { return A_SNR; }
     return -1;
 }
 
@@ -361,6 +371,8 @@ let PK_PASS = 4;
 let PK_LPM = 5;         // a nested loop(...) inside a loop pipeline (LoopPassManager)
 let PK_CGSCC_PM = 6;    // a nested cgscc(...) CGSCC pass manager
 let PK_DEVIRT = 7;      // devirt<N>(...): arg = N, children = the nested CGSCC pass manager
+let PK_EXTRA = 9;       // ExtraLoopPassManager<ShouldRunExtraSimpleLoopUnswitch>: children run when indvars left the marker
+let PK_CORO_COND = 10;  // CoroConditionalWrapper: children run when the module declares a coroutine intrinsic
 let PK_CGFN = 8;        // CGSCCToFunctionPassAdaptor: arg bit 0 eager-inv, bit 1 no-rerun; pass 1 = a function(...) manager
 
 struct PNode { kind: u8, pass: i32, arg: i32, required: bool, name: i32, first: i32, next: i32 }
@@ -813,6 +825,8 @@ recursive fn parse_loop_elem(e: i32) -> i32 {
         }
         perr_pipeline(str("invalid use of '", name, "' pass as loop pipeline"));
     }
+    // parsed from text, ExtraLoopPassManager<ShouldRunExtraSimpleLoopUnswitch> has no passes (scalar-misc.md)
+    if name == "extra-simple-loop-unswitch-passes" { return new_pnode(PK_EXTRA, 0, 0, true, pelems[e].name); }
     if name == "require<iv-users>" { return new_pnode(PK_PASS, P_LREQUIRE as i32, 1, true, pelems[e].name); }
     if starts_with(name, "require<") || starts_with(name, "invalidate<") {
         if llvm_knows(name, 'l') { not_implemented(name); }
@@ -946,7 +960,6 @@ recursive fn parse_cgscc_elem(e: i32) -> i32 {
         }
         let fp = parse_function_pipeline_params(name);
         if fp >= 0 {
-            if (fp & 2) != 0 { not_implemented("function<no-rerun>"); }
             let ad = new_pnode(PK_CGFN, 1, fp, true, pelems[e].name);
             parse_function_list(ad, pelems[e].first);
             return ad;
@@ -1005,8 +1018,10 @@ recursive fn parse_module_elem(e: i32) -> i32 {
             parse_module_list(mpm, pelems[e].first);
             return mpm;
         }
-        if name_no_bracket(name) == "function" {
-            let fpm = new_pnode(PK_FUNCTION, 0, 0, true, pelems[e].name);
+        let fp = parse_function_pipeline_params(name);
+        if fp >= 0 {
+            // createModuleToFunctionPassAdaptor(FPM, EagerlyInvalidate); no-rerun has no effect there
+            let fpm = new_pnode(PK_FUNCTION, 0, fp & 1, true, pelems[e].name);
             parse_function_list(fpm, pelems[e].first);
             return fpm;
         }
@@ -1015,10 +1030,20 @@ recursive fn parse_module_elem(e: i32) -> i32 {
             parse_cgscc_list(ad, pelems[e].first);
             return ad;
         }
-        if name == "coro-cond" { not_implemented(name); }
+        if name == "coro-cond" {
+            let cw = new_pnode(PK_CORO_COND, 0, 0, true, pelems[e].name);
+            parse_module_list(cw, pelems[e].first);
+            return cw;
+        }
         perr_pipeline(str("invalid use of '", name, "' pass as module pipeline"));
     }
-    if starts_with(name, "default<") || starts_with(name, "thinlto") || starts_with(name, "lto") || starts_with(name, "fatlto") {
+    if starts_with(name, "default<") && name[name.len - 1] == '>' {
+        // a placeholder module pass manager, built by parse_pass_pipeline once parsing is done (pipelines.goose)
+        let ph = new_pnode(PK_MODULE, 0, 0, true, pelems[e].name);
+        pb_pending.push(ph);
+        return ph;
+    }
+    if starts_with(name, "thinlto") || starts_with(name, "lto") || starts_with(name, "fatlto") {
         not_implemented(name);
     }
     if is_param_name(name, "ipsccp") {
@@ -1124,6 +1149,8 @@ recursive fn parse_module_list(parent: i32, first: i32) {
     }
 }
 
+var pb_pending: i32[>..];   // `default<On>` placeholders
+
 // PassBuilder::parsePassPipeline(MPM, Text): returns the root module pass manager node.
 fn parse_pass_pipeline(text: const u8[:]) -> i32 {
     let first = parse_pipeline_text(text);
@@ -1153,6 +1180,12 @@ fn parse_pass_pipeline(text: const u8[:]) -> i32 {
     }
     let root = new_pnode(PK_MODULE, 0, 0, true, intern("module"));
     parse_module_list(root, top);
+    for ph in pb_pending {
+        let built = pb_default_pipeline(sbytes(pnodes[ph].name));
+        pnodes[ph].first = pnodes[built].first;
+        pnodes[ph].name = intern("module");
+    }
+    pb_pending.clear();
     return root;
 }
 
@@ -1181,6 +1214,15 @@ fn should_run(n: i32, unit: const u8[:]) -> bool {
 // dependencies (a result whose dependency is invalidated goes too). A bit of `preserved` = that analysis
 // preserved; preserveSet<CFGAnalyses> and AllAnalysesOn<Function> are expanded into bits (PA_CFG, PA_FN).
 fn pa_kept(pa: u32, a: i64) -> bool { (pa & ((1 as u32) << a)) != 0 }
+
+// ShouldNotRunFunctionPassesAnalysis results (a marker per function, by value id)
+var snr_cached: bool[>..];
+fn snr_has(fv: i32) -> bool { (fv as i64) < snr_cached.len && snr_cached[fv] }
+fn snr_set(fv: i32, v: bool) {
+    if !v && (fv as i64) >= snr_cached.len { return; }
+    while snr_cached.len <= (fv as i64) { snr_cached.push(false); }
+    snr_cached[fv] = v;
+}
 fn invalidate_function(fv: i32, preserved: u32) {
     if preserved == PA_ALL { return; }
     if (preserved & PA_FN) == PA_FN { return; }
@@ -1189,6 +1231,7 @@ fn invalidate_function(fv: i32, preserved: u32) {
     let dt_inv = !pa_kept(preserved, A_DOMTREE);
     let li_inv = !pa_kept(preserved, A_LOOPS);
     if !pa_kept(preserved, A_LRT) { ic::ic_lrt_invalidate(fv); }
+    if !pa_kept(preserved, A_SNR) { snr_set(fv, false); }
     if dt_inv { dt_invalidate(fv, DT_DOM); }
     if !pa_kept(preserved, A_POSTDOMTREE) { dt_invalidate(fv, DT_POST); }
     if li_inv { li_invalidate(fv); }
@@ -1216,7 +1259,10 @@ fn fam_clear(fv: i32) {
     ac_clear(fv);
 }
 
-// GlobalsAA is invalidated: the outer invalidations registered by AAManager results that use it
+// GlobalsAAResult::invalidate: only when abandoned explicitly (invalidate<globals-aa>). The result is stateless
+// otherwise and stays cached across IR-changing module and CGSCC passes; its DeletionCallbackHandles only drop
+// the entries of erased globals, which no later query can name (value ids are never reused), so they need no
+// port. GlobalsAA is invalidated: the outer invalidations registered by AAManager results that use it
 // (FunctionAnalysisManagerModuleProxy::Result::invalidate abandons AAManager for those functions)
 fn globals_aa_invalidate(m: i32) {
     if !gm_valid { return; }
@@ -1246,6 +1292,7 @@ fn require_analysis(fv: i32, a: i64) {
     else if a == A_LVI { lvi_get(fv); }
     else if a == A_BPI { bpi_get(fv); }
     else if a == A_BFI { bfi_get(fv); }
+    else if a == A_SNR { snr_set(fv, true); }
 }
 
 // Passes whose LLVM counterpart asks for TargetIRAnalysis (directly or through AssumptionAnalysis) before it
@@ -1303,7 +1350,7 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_REASSOCIATE => { return reassociate_run(fv); },
         P_CONSTRAINT_ELIMINATION => { return constraint_elimination_run(fv); },
         P_AGGRESSIVE_INSTCOMBINE => { return aggressive_instcombine_run(fv); },
-        P_VECTOR_COMBINE => { return vector_combine_run(fv); },
+        P_VECTOR_COMBINE => { return vector_combine_run(fv, pnodes[n].arg != 0); },
         P_SLP_VECTORIZER => { return slp_vectorizer_run(fv); },
         P_LOOP_VECTORIZE => {
             let a = pnodes[n].arg as i64;
@@ -1321,6 +1368,13 @@ fn run_function_pass(n: i32, fv: i32) -> u32 {
         P_PRINT_BFI => { bfi_print(fv); return PA_ALL; },
         P_CVP => { return cvp_run(fv); },
         P_JUMP_THREADING => { return jump_threading_run(fv, (pnodes[n].arg as i64) - 1); },
+        P_EXPAND_MEMCMP => { return expand_memcmp_run(fv); },
+        P_CHR => {
+            // ControlHeightReductionPass::run: nothing without a cached profile summary
+            if !psi_cached() || !psi_has_summary { return PA_ALL; }
+            fatal("opt: chr (ControlHeightReduction) with a profile summary is not implemented yet in the Goose opt");
+            return PA_ALL;
+        },
         P_VERIFY_SCEV => { scev_get(fv); return PA_ALL; },     // ScalarEvolution::verify reports only mismatches
         P_LOOP_UNROLL => { let pa = loop_unroll_pass_run(fv, lu_opt_table[pnodes[n].arg]); ap_pool_reset(); return pa; },
         _ => {
@@ -1362,13 +1416,18 @@ fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
             return pa;
         },
         P_LOOP_UNROLL_FULL => {
-            let pa = loop_full_unroll_pass_run(l, 2, false, false);
+            // arg 0: LoopFullUnrollPass() (-passes=loop-unroll-full); else 0x100 | level | OnlyWhenForced << 4
+            let a = pnodes[n].arg;
+            let lvl: i64 = if a == 0 { 2 } else { (a & 0xF) as i64 };
+            let pa = loop_full_unroll_pass_run(l, lvl, (a & 0x10) != 0, false);
             ap_pool_reset();
             return pa;
         },
         P_INDVARS => {
             let pa = indvars_pass_run(l, lpm_use_mssa);
             ap_pool_reset();
+            // IVS.runUnswitching(): AM.getResult<ShouldRunExtraSimpleLoopUnswitch>(L) and preserved
+            if pa != PA_ALL && ivs_unswitch { lpm_extra_marker = l; }
             return pa;
         },
         P_LICM => {
@@ -1393,6 +1452,10 @@ fn loop_single_pass(n: i32, l: i32, fv: i32) -> u32, bool {
     return run_loop_pass(n, l, fv), true;
 }
 
+// ShouldRunExtraSimpleLoopUnswitch: the loop whose marker is cached (only indvars creates one; the
+// ExtraLoopPassManager right after it abandons it)
+var lpm_extra_marker: i32 = -1;
+
 // LoopPassManager::runWithoutLoopNestPasses over the children of node n (an adaptor or a nested loop(...)).
 recursive fn run_loop_list(n: i32, l: i32, fv: i32) -> u32 {
     var pa = PA_ALL;
@@ -1404,6 +1467,11 @@ recursive fn run_loop_list(n: i32, l: i32, fv: i32) -> u32 {
         var ppa = PA_ALL;
         var ran = true;
         if pnodes[c].kind == PK_LPM { ppa = run_loop_list(c, l, fv); }
+        else if pnodes[c].kind == PK_EXTRA {
+            // ExtraLoopPassManager::run: the inner passes only when the marker is cached; abandons it
+            if lpm_extra_marker == l { ppa = run_loop_list(c, l, fv); }
+            lpm_extra_marker = -1;
+        }
         else { let r, ok = loop_single_pass(c, l, fv); ppa = r; ran = ok; }
         if ran {
             pa &= ppa;
@@ -1489,19 +1557,33 @@ recursive fn run_function_node(n: i32, fv: i32) {
 recursive fn run_module_node(n: i32, m: i32) {
     let k = pnodes[n].kind;
     if k == PK_MODULE {
+        // a nested ModulePassManager (required); arg > 0: a ModuleInlinerWrapperPass (counted by bisect; its
+        // InlineAdvisor's params are getInlineParamsFromOptLevel(arg - 1))
+        if !pnodes[n].required && !should_run(n, "[module]") { return; }
+        let save = inl_advisor_level;
+        if pnodes[n].arg > 0 { inl_advisor_level = (pnodes[n].arg - 1) as i64; }
         var c = pnodes[n].first;
         while c >= 0 { run_module_node(c, m); c = pnodes[c].next; }
+        inl_advisor_level = save;
+        return;
+    }
+    if k == PK_CORO_COND {
+        // CoroConditionalWrapper::run: coro::declaresAnyIntrinsic(M)
+        if pm_declares_coro_intrinsic(m) { fatal("opt: coro-cond on a module with coroutine intrinsics is not implemented yet in the Goose opt"); }
         return;
     }
     if k == PK_FUNCTION {
         // ModuleToFunctionPassAdaptor: every function definition in module order
         fn_pa_acc = PA_ALL;
+        let eager = (pnodes[n].arg & 1) != 0;
         var f = modules[m].first_func;
         while f >= 0 {
             let nf = globs[glob_of(f)].next;
             if !func_is_decl(f) {
                 var c = pnodes[n].first;
                 while c >= 0 { run_function_node(c, f); c = pnodes[c].next; }
+                // FAM.invalidate(F, EagerlyInvalidate ? PreservedAnalyses::none() : PassPA)
+                if eager { invalidate_function(f, PA_NONE); }
             }
             f = nf;
         }
@@ -1511,7 +1593,6 @@ recursive fn run_module_node(n: i32, m: i32) {
     }
     if k == PK_CGSCC {
         let pa = cg_run_adaptor(n, m);
-        if pa != PA_ALL { globals_aa_invalidate(m); }
         module_invalidate(m, pa);
         return;
     }
@@ -1533,7 +1614,6 @@ recursive fn run_module_node(n: i32, m: i32) {
     if p == P_INFERATTRS {
         if inferattrs_run(m) {
             module_invalidate(m, PA_NONE);
-            globals_aa_invalidate(m);
         }
         ap_pool_reset();
         return;
@@ -1545,7 +1625,7 @@ recursive fn run_module_node(n: i32, m: i32) {
     if p == P_INVALIDATE_LCG { lcg_invalidate(); return; }
     if p == P_REQUIRE_PSI { psi_get(m); return; }
     if p == P_INVALIDATE_PSI { psi_invalidate(); return; }
-    if p == P_ALWAYS_INLINE { let pa = always_inliner_run(m); module_invalidate(m, pa); ap_pool_reset(); return; }
+    if p == P_ALWAYS_INLINE { ai_insert_lifetime = pnodes[n].arg == 0; let pa = always_inliner_run(m); ai_insert_lifetime = true; module_invalidate(m, pa); ap_pool_reset(); return; }
     if p == P_MODULE_INLINE { let pa = module_inliner_run(m); module_invalidate(m, pa); ap_pool_reset(); return; }
     if p == P_INLINER_WRAPPER { let pa = inliner_wrapper_run(m, pnodes[n].arg != 0); module_invalidate(m, pa); ap_pool_reset(); return; }
     if p == P_RPO_FUNCTION_ATTRS { let pa = rpo_function_attrs_run(m); module_invalidate(m, pa); ap_pool_reset(); return; }
@@ -1556,7 +1636,6 @@ recursive fn run_module_node(n: i32, m: i32) {
     if p == P_ASSIGN_GUID { assign_guid_run(m); return; }
     if p == P_GLOBALOPT {
         if globalopt_run(m) {
-            globals_aa_invalidate(m);
             // PreservedAnalyses::none() + FunctionAnalysisManagerModuleProxy + CFGAnalyses
             module_invalidate(m, PA_CFG | ((1 as u32) << A_FAM_MPROXY));
         }
@@ -1573,7 +1652,7 @@ recursive fn run_module_node(n: i32, m: i32) {
             if a >= 0 { for k in ints[a] as i64 { in_preserve_gv.push(ints[a + 1 + k]); } }
             changed = internalize_run(m);
         }
-        if changed { globals_aa_invalidate(m); module_invalidate(m, PA_NONE); }
+        if changed { module_invalidate(m, PA_NONE); }
         ap_pool_reset();
         return;
     }
@@ -1583,13 +1662,13 @@ recursive fn run_module_node(n: i32, m: i32) {
         else if p == P_ELIM_AVAIL_EXTERN { changed = elim_avail_extern_run(m); }
         else if p == P_CONSTMERGE { changed = constmerge_run(m); }
         else { gd_in_lto_post_link = pnodes[n].arg != 0; changed = globaldce_run(m); }
-        if changed { globals_aa_invalidate(m); module_invalidate(m, PA_NONE); }
+        if changed { module_invalidate(m, PA_NONE); }
         ap_pool_reset();
         return;
     }
     if mp_is_ours(p) {
         let pa = mp_run_module(p, pnodes[n].arg, m);
-        if pa != PA_ALL { globals_aa_invalidate(m); module_invalidate(m, pa); }
+        if pa != PA_ALL { module_invalidate(m, pa); }
         ap_pool_reset();
         return;
     }
@@ -1600,6 +1679,26 @@ recursive fn run_module_node(n: i32, m: i32) {
 // through FunctionAnalysisManagerModuleProxy, the function analyses of every definition.
 // FunctionAnalysisManagerModuleProxy::Result::invalidate: not preserved -> FAM.clear(); else every function is
 // invalidated with PA unless AllAnalysesOn<Function> is preserved.
+// coro::declaresAnyIntrinsic (Coroutines.cpp NonOverloadedCoroIntrinsics)
+let CORO_INTRINSICS: const u8[:][] = [
+    "llvm.coro.alloc", "llvm.coro.async.context.alloc", "llvm.coro.async.context.dealloc", "llvm.coro.async.resume",
+    "llvm.coro.async.size.replace", "llvm.coro.await.suspend.bool", "llvm.coro.await.suspend.handle",
+    "llvm.coro.await.suspend.void", "llvm.coro.begin", "llvm.coro.begin.custom.abi", "llvm.coro.destroy", "llvm.coro.done",
+    "llvm.coro.end", "llvm.coro.end.async", "llvm.coro.frame", "llvm.coro.free", "llvm.coro.id", "llvm.coro.id.async",
+    "llvm.coro.id.retcon", "llvm.coro.id.retcon.once", "llvm.coro.noop", "llvm.coro.prepare.async",
+    "llvm.coro.prepare.retcon", "llvm.coro.promise", "llvm.coro.resume", "llvm.coro.save", "llvm.coro.subfn.addr",
+    "llvm.coro.suspend", "llvm.coro.is.in.ramp",
+];
+fn pm_declares_coro_intrinsic(m: i32) -> bool {
+    var f = modules[m].first_func;
+    while f >= 0 {
+        let nm = val_name(f);
+        for c in CORO_INTRINSICS { if nm == c { return true; } }
+        f = globs[glob_of(f)].next;
+    }
+    return false;
+}
+
 fn module_invalidate(m: i32, pa: u32) {
     if pa == PA_ALL { return; }
     if (pa & ((1 as u32) << A_LCG)) == 0 { lcg_invalidate(); }

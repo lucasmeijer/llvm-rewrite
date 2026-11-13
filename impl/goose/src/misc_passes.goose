@@ -260,7 +260,8 @@ fn mp_run_function(p: i64, arg: i32, fv: i32) -> u32 {
         MP_FLOAT2INT => { return float2int_run(fv); },
         MP_INFER_ALIGNMENT => { st_touch(fv); return infer_alignment_run(fv); },
         MP_MLDST_MOTION => { st_touch(fv); return mldst_motion_run(fv, arg != 0); },
-        MP_TAILCALLELIM => { st_touch(fv); return tailcallelim_run(fv, true); },
+        // arg 1: TailCallElimPass(UpdateFunctionEntryCount = false), as the default pipelines construct it
+        MP_TAILCALLELIM => { st_touch(fv); return tailcallelim_run(fv, arg == 0); },
         MP_CALLSITE_SPLITTING => { st_touch(fv); return callsite_splitting_run(fv); },
         MP_EE_INSTRUMENT => { return ee_instrument_run(fv, arg != 0); },
         MP_TRANSFORM_WARNING => { return transform_warning_run(fv); },

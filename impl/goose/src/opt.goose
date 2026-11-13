@@ -9,6 +9,7 @@ import passmgr;
 import layoutstats;
 import tli;
 import triple;
+import pipelines;
 
 fn main() {
     let av = args();
@@ -20,6 +21,8 @@ fn main() {
     var disable_output = false;
     var layout_stats = false;
     var march: u8[>..] = [];
+    var olevel: u8[>..] = [];
+    var print_pipeline = false;
     var i = 1;
     while i < av.len {
         var a = av[i];
@@ -37,9 +40,11 @@ fn main() {
             have_pipeline = true;
         }
         else if a == "-O0" || a == "-O1" || a == "-O2" || a == "-O3" || a == "-Os" || a == "-Oz" {
-            write_stderr(str("opt: optimization pipelines are not implemented yet (", a, ")\n"));
-            exit(1);
+            // optdriver.cpp: -O# is -passes="default<O#>"
+            if olevel.len > 0 { write_stderr("Cannot specify multiple -O#\n"); exit(1); }
+            olevel.append(a[1..]);
         }
+        else if a == "-goose-print-pipeline" { print_pipeline = true; }
         else if starts_with(a, "-data-layout=") { cl_datalayout.append(a[13..]); }
         else if a == "-data-layout" { i++; if i < av.len { cl_datalayout.clear(); cl_datalayout.append(av[i]); } }
         // codegen's -march: only read when opt creates a TargetMachine (the module triple names an architecture)
@@ -89,6 +94,17 @@ fn main() {
         }
         else { input.clear(); input.append(a); }
         i++;
+    }
+    if olevel.len > 0 {
+        if have_pipeline { write_stderr("Cannot specify -O# and --passes=/--foo-pass, use -passes='default<O#>,other-pass'\n"); exit(1); }
+        pipeline.append(str("default<", olevel, ">"));
+        have_pipeline = true;
+    }
+    if print_pipeline {
+        if !have_pipeline { write_stderr("opt: -goose-print-pipeline needs -passes or -O#\n"); exit(1); }
+        init_ir();
+        pb_print_pipeline(parse_pass_pipeline(pipeline));
+        return;
     }
     if !emit_text && !disable_output { write_stderr("opt: only textual output (-S) is supported\n"); exit(1); }
     if input.len == 0 { write_stderr("opt: no input file\n"); exit(1); }

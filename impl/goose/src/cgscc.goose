@@ -272,7 +272,7 @@ recursive fn cg_run_pass(n: i32, c: i32) -> u32 {
     if p == P_NOOP_CGSCC { return PA_ALL; }
     if p == P_CG_INVALIDATE { return PA_ALL & ~((1 as u32) << A_NOOP_CGSCC); }
     if p == P_FUNCTION_ATTRS { let pa = fa_run_cgscc(c, pnodes[n].arg != 0); ap_pool_reset(); return pa; }
-    if p == P_INLINE { let pa = inl_run_cgscc(c, pnodes[n].arg != 0); ap_pool_reset(); return pa; }
+    if p == P_INLINE { let pa = inl_run_cgscc(c, (pnodes[n].arg & 1) != 0); ap_pool_reset(); return pa; }
     if p == P_ARGPROMOTION { let pa = argpromotion_run_cgscc(c); ap_pool_reset(); return pa; }
     if mp_is_ours(p) { let pa = mp_run_cgscc(p, pnodes[n].arg, c); ap_pool_reset(); return pa; }
     fatal("internal: unknown CGSCC pass id");
@@ -363,6 +363,8 @@ recursive fn cg_run_fn_adaptor(n: i32, c: i32) -> u32 {
         k++;
         if lcg_lookup_scc(nd) != cur { continue; }
         let f = lcg_fn(nd);
+        // NoRerun: skip a function whose ShouldNotRunFunctionPassesAnalysis result is cached
+        if (pnodes[n].arg & 2) != 0 && snr_has(f) { continue; }
         // the function pipeline (a FunctionPassManager: its PA preserves AllAnalysesOn<Function>)
         fn_pa_acc = PA_ALL;
         var ch = pnodes[n].first;
@@ -371,7 +373,8 @@ recursive fn cg_run_fn_adaptor(n: i32, c: i32) -> u32 {
         if pnodes[n].pass != 0 { ppa |= PA_FN; }    // wrapped in a FunctionPassManager
         if eager { invalidate_function(f, PA_NONE); } else { invalidate_function(f, ppa); }
         pa &= ppa;
-        if (ppa & ((1 as u32) << A_LCG)) == 0 {
+        // the accumulated PA's checker: once a pass didn't preserve the call graph, every later node is updated
+        if (pa & ((1 as u32) << A_LCG)) == 0 {
             cur = cg_update_for_pass(cur, nd, true);
         }
     }
