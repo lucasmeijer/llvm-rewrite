@@ -1,0 +1,54 @@
+# Skipped while importing llvm/test/Transforms/WholeProgramDevirt (llvmorg-23.1.5)
+
+33 of 55 files imported. Regenerate with `./harness/run import-llvm Transforms/WholeProgramDevirt`.
+
+- `devirt-bad-index.ll`: no RUN lines
+- `devirt-single-impl2-index.ll`: no RUN lines
+- `branch-funnel-profile.ll` RUN `sed -e 's,+retpoline,-retpoline,g' %s | opt -S -passes=wholeprogramdevirt -whole-program-visibility | FileCheck --check-prefixes=NORETP %s`: not an opt invocation
+- `branch-funnel-profile.ll` RUN `opt -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -S -o - %s | FileCheck --check-prefixes=RETP %s`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `branch-funnel-profile.ll` RUN `opt -passes='wholeprogramdevirt,default<O3>' -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t  -S -o - %s | FileCheck --check-prefixes=O3 %s`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `branch-funnel-threshold.ll` RUN `opt -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -wholeprogramdevirt-branch-funnel-threshold=1 -S -o - %s | not grep @llvm.icall.branch.funnel | count 0`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `branch-funnel-threshold.ll` RUN `opt -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -wholeprogramdevirt-branch-funnel-threshold=10 -S -o - %s | grep @llvm.icall.branch.funnel | count 4`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `branch-funnel-threshold.ll` RUN `opt -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -wholeprogramdevirt-branch-funnel-threshold=100 -S -o - %s | grep @llvm.icall.branch.funnel | count 5`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `branch-funnel.ll` RUN `sed -e 's,+retpoline,-retpoline,g' %s | opt -S -passes=wholeprogramdevirt -whole-program-visibility | FileCheck --check-prefixes=CHECK,NORETP %s`: not an opt invocation
+- `branch-funnel.ll` RUN `opt -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -S -o - %s | FileCheck --check-prefixes=CHECK,RETP %s`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `branch-funnel.ll` RUN `opt -passes='wholeprogramdevirt,default<O3>' -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -S -o - %s | FileCheck %s`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `branch-funnel.ll` RUN `FileCheck --check-prefix=SUMMARY %s < %t`: not an opt invocation
+- `calls-to-devirt.ll` RUN `opt -S -passes=wholeprogramdevirt -wholeprogramdevirt-summary-action=import -pass-remarks=wholeprogramdevirt -wholeprogramdevirt-read-summary=%S/Inputs/import-single-impl.yaml -print-debug-counter-queries < %s  2>&1 | grep "remark" | count 3`: diagnostic output flag -pass-remarks=wholeprogramdevirt
+- `calls-to-devirt.ll` RUN `opt -S -passes=wholeprogramdevirt -wholeprogramdevirt-summary-action=import -pass-remarks=wholeprogramdevirt -debug-counter=calls-to-devirt=0 -wholeprogramdevirt-read-summary=%S/Inputs/import-single-impl.yaml -print-debug-counter-queries < %s  2>&1 | FileCheck --check-prefix=CHECK-SINGLE %s`: diagnostic output flag -pass-remarks=wholeprogramdevirt
+- `calls-to-devirt.ll` RUN `opt -S -passes=wholeprogramdevirt -wholeprogramdevirt-summary-action=import -pass-remarks=wholeprogramdevirt -debug-counter=calls-to-devirt=9999 -wholeprogramdevirt-read-summary=%S/Inputs/import-single-impl.yaml -print-debug-counter-queries < %s 2>&1 | FileCheck -implicit-check-not="remark" --check-prefix=CHECK-NONE %s`: diagnostic output flag -pass-remarks=wholeprogramdevirt
+- `devirt-single-impl-check-ptrauth.ll` RUN `opt -S -passes=wholeprogramdevirt,verify -whole-program-visibility -pass-remarks=wholeprogramdevirt %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=wholeprogramdevirt
+- `devirt-single-impl-check-relative.ll` RUN `opt -S -passes=wholeprogramdevirt -whole-program-visibility -pass-remarks=wholeprogramdevirt %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=wholeprogramdevirt
+- `devirt-single-impl-check.ll` RUN `opt -S -passes=wholeprogramdevirt -whole-program-visibility -pass-remarks=wholeprogramdevirt %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=wholeprogramdevirt
+- `devirt-single-impl.ll`: REQUIRES asserts
+- `devirt-single-impl2.ll` RUN `llvm-as %s -o %t.bc`: not an opt invocation
+- `devirt-single-impl2.ll` RUN `llvm-as %p/Inputs/devirt-single-impl2-index.ll -o %t.index.bc`: not an opt invocation
+- `devirt-single-impl2.ll` RUN `opt %s -S -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-read-summary=%t.index.bc -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-write-summary=%t2.index.bc -o /dev/null`: uses lit substitution -wholeprogramdevirt-read-summary=%t.index.bc
+- `devirt-single-impl2.ll` RUN `llvm-dis %t2.index.bc -o - | FileCheck %s`: not an opt invocation
+- `devirt-single-impl2.ll` RUN `llvm-as %p/Inputs/devirt-bad-index.ll -o %t-bad.index.bc`: not an opt invocation
+- `devirt-single-impl2.ll` RUN `not opt %s -S -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-read-summary=%t-bad.index.bc -wholeprogramdevirt-summary-action=export -o /dev/null 2>&1 | FileCheck %s --check-prefix=MISSING-MODULE`: not an opt invocation
+- `devirt_single_after_filtering_unreachable_function.ll` RUN `opt -S -passes=wholeprogramdevirt -whole-program-visibility -pass-remarks=wholeprogramdevirt %s 2>&1 | FileCheck %s  --implicit-check-not="single-impl"`: diagnostic output flag -pass-remarks=wholeprogramdevirt
+- `devirt_single_after_filtering_unreachable_function.ll` RUN `opt -S -passes=wholeprogramdevirt -whole-program-visibility -pass-remarks=wholeprogramdevirt -wholeprogramdevirt-keep-unreachable-function=false %s 2>&1 | FileCheck %s --check-prefix=DEVIRT`: diagnostic output flag -pass-remarks=wholeprogramdevirt
+- `export-nothing.ll` RUN `opt -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-write-summary=%t -o /dev/null %s`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `export-nothing.ll` RUN `FileCheck %s < %t`: not an opt invocation
+- `export-single-impl.ll` RUN `opt -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -S -o - %s | FileCheck %s`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `export-single-impl.ll` RUN `FileCheck --check-prefix=SUMMARY %s < %t`: not an opt invocation
+- `export-uniform-ret-val.ll` RUN `opt -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -S -o - %s | FileCheck %s`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `export-uniform-ret-val.ll` RUN `FileCheck --check-prefix=SUMMARY %s < %t`: not an opt invocation
+- `export-unique-ret-val.ll` RUN `opt -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -S -o - %s | FileCheck %s`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `export-unique-ret-val.ll` RUN `FileCheck --check-prefix=SUMMARY %s < %t`: not an opt invocation
+- `export-unsuccessful-checked.ll` RUN `opt -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -o /dev/null %s`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `export-unsuccessful-checked.ll` RUN `FileCheck %s < %t`: not an opt invocation
+- `export-vcp.ll` RUN `opt -mtriple=x86_64-unknown-linux-gnu -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -S -o - %s | FileCheck --check-prefixes=CHECK,X86 %s`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `export-vcp.ll` RUN `FileCheck --check-prefixes=SUMMARY,SUMMARY-X86 %s < %t`: not an opt invocation
+- `export-vcp.ll` RUN `opt -mtriple=armv7-unknown-linux-gnu -passes=wholeprogramdevirt -whole-program-visibility -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -S -o - %s | FileCheck --check-prefixes=CHECK,ARM %s`: non-x86_64 target armv7-unknown-linux-gnu
+- `export-vcp.ll` RUN `FileCheck --check-prefixes=SUMMARY,SUMMARY-ARM %s < %t`: not an opt invocation
+- `import-indir.ll` RUN `opt -S -passes=wholeprogramdevirt -wholeprogramdevirt-summary-action=import -wholeprogramdevirt-read-summary=%S/Inputs/import-indir.yaml -wholeprogramdevirt-write-summary=%t < %s | FileCheck %s`: uses lit substitution -wholeprogramdevirt-write-summary=%t
+- `import-indir.ll` RUN `FileCheck --check-prefix=SUMMARY %s < %t`: not an opt invocation
+- `import.ll` RUN `opt -S -passes=wholeprogramdevirt -wholeprogramdevirt-summary-action=import -wholeprogramdevirt-read-summary=%S/Inputs/import-vcp.yaml -mtriple=i686-unknown-linux -data-layout=e-p:32:32 < %s | FileCheck --check-prefixes=CHECK,VCP,VCP-X86,VCP32 %s`: non-x86_64 target i686-unknown-linux
+- `import.ll` RUN `opt -S -passes=wholeprogramdevirt -wholeprogramdevirt-summary-action=import -wholeprogramdevirt-read-summary=%S/Inputs/import-vcp.yaml -mtriple=armv7-unknown-linux -data-layout=e-p:32:32 < %s | FileCheck --check-prefixes=CHECK,VCP,VCP-ARM %s`: non-x86_64 target armv7-unknown-linux
+- `non-constant-vtable.ll` RUN `opt -S -passes=wholeprogramdevirt -whole-program-visibility -pass-remarks=wholeprogramdevirt %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=wholeprogramdevirt
+- `speculative-devirt-single-impl.ll`: REQUIRES asserts
+- `uniform-retval.ll`: REQUIRES asserts
+- `unique-retval.ll`: REQUIRES asserts
+- `virtual-const-prop-check.ll`: REQUIRES asserts

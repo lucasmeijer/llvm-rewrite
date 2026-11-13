@@ -1,0 +1,72 @@
+# Skipped while importing llvm/test/Transforms/GCOVProfiling (llvmorg-23.1.5)
+
+1 of 17 files imported. Regenerate with `./harness/run import-llvm Transforms/GCOVProfiling`.
+
+- `atomic-counter.ll` RUN `mkdir -p %t && cd %t`: not an opt invocation
+- `atomic-counter.ll` @opt `-passes=insert-gcov-profiling -gcov-atomic-counter`: writes files into the working directory
+- `atomic-counter.ll`: no working RUN lines
+- `exit-block.ll` RUN `rm -rf %t && mkdir -p %t`: not an opt invocation
+- `exit-block.ll` RUN `echo '!19 = !{!"%/t/exit-block.ll", !0}' > %t/1`: not an opt invocation
+- `exit-block.ll` RUN `cat %s %t/1 > %t/2`: not an opt invocation
+- `exit-block.ll` RUN `opt -passes=insert-gcov-profiling -disable-output %t/2`: uses lit substitution %t/2
+- `exit-block.ll` RUN `llvm-cov gcov -n -dump %t/exit-block.gcno 2>&1 | FileCheck %s`: not an opt invocation
+- `function-numbering.ll`: REQUIRES mips-registered-target, systemz-registered-target
+- `global-ctor.ll` RUN `mkdir -p %t && cd %t`: not an opt invocation
+- `global-ctor.ll` @opt `-passes=insert-gcov-profiling`: writes files into the working directory
+- `global-ctor.ll`: no working RUN lines
+- `kcfi-normalize.ll` RUN `mkdir -p %t && cd %t`: not an opt invocation
+- `kcfi-normalize.ll` RUN `opt < %s -S -passes=insert-gcov-profiling -mtriple=powerpc64-ibm-aix | FileCheck --check-prefixes=CHECK,CHECK-RT-INIT %s`: non-x86_64 target powerpc64-ibm-aix
+- `kcfi-normalize.ll` @opt `-passes=insert-gcov-profiling -mtriple=x86_64-unknown-linux-gnu`: writes files into the working directory
+- `kcfi-normalize.ll`: no working RUN lines
+- `kcfi.ll` RUN `mkdir -p %t && cd %t`: not an opt invocation
+- `kcfi.ll` RUN `opt < %s -S -passes=insert-gcov-profiling -mtriple=powerpc64-ibm-aix | FileCheck --check-prefixes=CHECK,CHECK-RT-INIT %s`: non-x86_64 target powerpc64-ibm-aix
+- `kcfi.ll` @opt `-passes=insert-gcov-profiling -mtriple=x86_64-unknown-linux-gnu`: writes files into the working directory
+- `kcfi.ll`: no working RUN lines
+- `linezero.ll` RUN `rm -rf %t && mkdir -p %t`: not an opt invocation
+- `linezero.ll` RUN `sed -e 's|PATTERN|%/t|g' %s | opt -passes=insert-gcov-profiling -disable-output`: cannot tokenize: No closing quotation
+- `linkagename.ll` RUN `rm -rf %t && mkdir -p %t`: not an opt invocation
+- `linkagename.ll` RUN `echo '!9 = !{!"%/t/linkagename.ll", !0}' > %t/1`: not an opt invocation
+- `linkagename.ll` RUN `cat %s %t/1 > %t/2`: not an opt invocation
+- `linkagename.ll` RUN `rm -f %t/linkagename.gcno`: not an opt invocation
+- `linkagename.ll` RUN `opt -passes=insert-gcov-profiling -disable-output < %t/2`: uses lit substitution %t/2
+- `linkagename.ll` RUN `grep _Z3foov %t/linkagename.gcno`: not an opt invocation
+- `module-flags.ll` RUN `mkdir -p %t && cd %t`: not an opt invocation
+- `module-flags.ll` RUN `opt < %s -S -passes=insert-gcov-profiling -mtriple=powerpc64-ibm-aix | FileCheck --check-prefixes=CHECK,CHECK-RT-INIT %s`: non-x86_64 target powerpc64-ibm-aix
+- `module-flags.ll` @opt `-passes=insert-gcov-profiling -mtriple=x86_64-unknown-linux-gnu`: writes files into the working directory
+- `module-flags.ll`: no working RUN lines
+- `noprofile.ll` RUN `mkdir -p %t && cd %t`: not an opt invocation
+- `noprofile.ll` @opt `-passes=insert-gcov-profiling`: writes files into the working directory
+- `noprofile.ll`: no working RUN lines
+- `nosanitize.ll` RUN `rm -rf %t && mkdir %t && cd %t`: not an opt invocation
+- `nosanitize.ll` @opt `-passes=insert-gcov-profiling`: writes files into the working directory
+- `nosanitize.ll` @opt `-passes=insert-gcov-profiling -gcov-atomic-counter`: writes files into the working directory
+- `nosanitize.ll`: no working RUN lines
+- `ptrauth-module-flags-aarch64.ll`: REQUIRES aarch64-registered-target
+- `reset.ll` RUN `mkdir -p %t && cd %t`: not an opt invocation
+- `reset.ll` @opt `-passes=insert-gcov-profiling`: writes files into the working directory
+- `reset.ll`: no working RUN lines
+- `split-indirectbr-critical-edges.ll` RUN `mkdir -p %t && cd %t`: not an opt invocation
+- `split-indirectbr-critical-edges.ll` @opt `-passes=insert-gcov-profiling`: writes files into the working directory
+- `split-indirectbr-critical-edges.ll`: no working RUN lines
+- `three-element-mdnode.ll` RUN `rm -rf %t && mkdir -p %t`: not an opt invocation
+- `three-element-mdnode.ll` RUN `echo '!10 = !{!"%/t/aaa.gcno", !"%/t/bbb.gcda", !0}' > %t/1`: not an opt invocation
+- `three-element-mdnode.ll` RUN `cat %s %t/1 > %t/2`: not an opt invocation
+- `three-element-mdnode.ll` RUN `opt -passes=insert-gcov-profiling -S -o %t/3 < %t/2`: writes to a file
+- `three-element-mdnode.ll` RUN `grep _Z3foov %t/aaa.gcno`: not an opt invocation
+- `three-element-mdnode.ll` RUN `grep bbb.gcda %t/3`: not an opt invocation
+- `three-element-mdnode.ll` RUN `rm %t/aaa.gcno`: not an opt invocation
+- `version.ll` RUN `rm -rf %t && mkdir -p %t`: not an opt invocation
+- `version.ll` RUN `echo 'target datalayout = "e"' > %t/little.txt`: not an opt invocation
+- `version.ll` RUN `echo 'target datalayout = "E"' > %t/big.txt`: not an opt invocation
+- `version.ll` RUN `echo '!9 = !{!"%/t/version.ll", !0}' > %t/version.txt`: not an opt invocation
+- `version.ll` RUN `cat %t/little.txt %s %t/version.txt > %t/2`: not an opt invocation
+- `version.ll` RUN `opt -passes=insert-gcov-profiling -disable-output < %t/2`: uses lit substitution %t/2
+- `version.ll` RUN `head -c8 %t/version.gcno | grep '^oncg.11B'`: not an opt invocation
+- `version.ll` RUN `rm %t/version.gcno`: not an opt invocation
+- `version.ll` RUN `not opt -passes=insert-gcov-profiling -default-gcov-version=asdfasdf -disable-output < %t/2`: not an opt invocation
+- `version.ll` RUN `opt -passes=insert-gcov-profiling -default-gcov-version='B21*' -disable-output < %t/2`: uses lit substitution %t/2
+- `version.ll` RUN `head -c8 %t/version.gcno | grep '^oncg.12B'`: not an opt invocation
+- `version.ll` RUN `rm %t/version.gcno`: not an opt invocation
+- `version.ll` RUN `cat %t/big.txt %s %t/version.txt > %t/big.ll`: not an opt invocation
+- `version.ll` RUN `opt -passes=insert-gcov-profiling -disable-output < %t/big.ll`: uses lit substitution %t/big.ll
+- `version.ll` RUN `head -c8 %t/version.gcno | grep '^gcnoB11.'`: not an opt invocation

@@ -1,0 +1,68 @@
+# Skipped while importing llvm/test/Instrumentation/HWAddressSanitizer (llvmorg-23.1.5)
+
+14 of 57 files imported. Regenerate with `./harness/run import-llvm Instrumentation/HWAddressSanitizer`.
+
+- `alloca-with-calls.ll`: in a RISCV target directory
+- `alloca.ll`: in a RISCV target directory
+- `atomic.ll`: in a RISCV target directory
+- `basic.ll`: in a RISCV target directory
+- `exception-lifetime.ll`: in a RISCV target directory
+- `use-after-scope-setjmp.ll`: in a RISCV target directory
+- `with-calls.ll`: in a RISCV target directory
+- `alloca-array.ll`: target triple aarch64--linux-android
+- `alloca-compat.ll`: target triple aarch64--linux-android
+- `alloca-uninteresting.ll`: target triple aarch64--linux-android10000
+- `alloca-with-calls.ll`: target triple aarch64--linux-android
+- `alloca.ll`: target triple aarch64--linux-android10000
+- `atomic.ll`: target triple aarch64--linux-android
+- `basic-compat.ll`: target triple aarch64--linux-android
+- `basic.ll`: target triple aarch64--linux-android10000
+- `dbg-assign-tag-offset.ll`: target triple aarch64--linux-android
+- `dbg-declare-tag-offset.ll`: target triple aarch64--linux-android
+- `dbg-value-tag-offset-nopad.ll`: target triple aarch64-unknown-linux-android24
+- `dbg-value-tag-offset.ll`: target triple aarch64-unknown-linux-android24
+- `exception-lifetime.ll`: target triple aarch64--linux-android
+- `fixed-shadow.ll`: target triple aarch64--linux-android9001
+- `fuchsia.ll` RUN `opt -passes=hwasan -S -mtriple=aarch64-unknown-fuchsia < %s | FileCheck %s`: non-x86_64 target aarch64-unknown-fuchsia
+- `globals-access.ll` RUN `opt < %s -S -passes=hwasan -mtriple=aarch64-linux-gnu -hwasan-globals=0 | FileCheck %s --check-prefixes=NOGLOB`: non-x86_64 target aarch64-linux-gnu
+- `globals-access.ll` RUN `opt < %s -S -passes=hwasan -mtriple=aarch64-linux-gnu -hwasan-globals=1 | FileCheck %s`: non-x86_64 target aarch64-linux-gnu
+- `globals-tag.ll` RUN `opt < %s -S -passes=hwasan -mtriple=aarch64-unknown-linux | FileCheck %s --implicit-check-not '\00\00\00\00\00\00\00'`: non-x86_64 target aarch64-unknown-linux
+- `globals.ll` RUN `opt < %s -S -passes=hwasan -mtriple=aarch64--linux-android29 | FileCheck --check-prefixes=CHECK,CHECK29,NOALLGLOBALS %s`: non-x86_64 target aarch64--linux-android29
+- `globals.ll` RUN `opt < %s -S -passes=hwasan -mtriple=aarch64--linux-android29 -hwasan-static-linking=1 | FileCheck --check-prefixes=CHECK29,STATICLINKING %s`: non-x86_64 target aarch64--linux-android29
+- `globals.ll` RUN `opt < %s -S -passes=hwasan -mtriple=aarch64--linux-android30 | FileCheck --check-prefixes=CHECK,CHECK30,NOALLGLOBALS %s`: non-x86_64 target aarch64--linux-android30
+- `globals.ll` RUN `opt < %s -S -passes=hwasan -mtriple=riscv64-unknown-elf -hwasan-globals=1 -hwasan-all-globals=1 | FileCheck --check-prefixes=CHECK,CHECK30,ALLGLOBALS %s`: non-x86_64 target riscv64-unknown-elf
+- `kernel-alloca.ll`: target triple aarch64--linux-android
+- `kernel.ll`: target triple aarch64--linux-android
+- `landingpad.ll`: target triple aarch64-unknown-linux-android
+- `mapping-override.ll`: target triple aarch64--linux-android
+- `mem-attr.ll`: target triple aarch64-unknown-linux-android30
+- `memaccess-clobber.ll`: target triple aarch64--linux-android10000
+- `musttail.ll`: target triple aarch64
+- `personality-bti.ll` RUN `opt < %s -mtriple aarch64-linux-android29 -passes=hwasan -S | FileCheck %s --check-prefix=NOPERS`: non-x86_64 target aarch64-linux-android29
+- `personality-bti.ll` RUN `opt < %s -mtriple aarch64-linux-android30 -passes=hwasan -S | FileCheck %s --check-prefix=PERS`: non-x86_64 target aarch64-linux-android30
+- `personality.ll` RUN `opt < %s -mtriple aarch64-linux-android29 -passes=hwasan -S | FileCheck %s --check-prefix=NOPERS`: non-x86_64 target aarch64-linux-android29
+- `personality.ll` RUN `opt < %s -mtriple aarch64-linux-android30 -passes=hwasan -S | FileCheck %s --check-prefix=PERS`: non-x86_64 target aarch64-linux-android30
+- `pgo-opt-out.ll` RUN `opt < %s -passes='require<profile-summary>,hwasan' -pass-remarks=hwasan -pass-remarks-missed=hwasan -S -hwasan-percentile-cutoff-hot=700000 2>&1 | FileCheck %s --check-prefix=ALL`: diagnostic output flag -pass-remarks=hwasan
+- `pgo-opt-out.ll` RUN `opt < %s -passes='require<profile-summary>,hwasan' -pass-remarks=hwasan -pass-remarks-missed=hwasan -S -hwasan-percentile-cutoff-hot=990000 2>&1 | FileCheck %s --check-prefix=NONE`: diagnostic output flag -pass-remarks=hwasan
+- `pgo-opt-out.ll` RUN `opt < %s -passes='require<profile-summary>,hwasan' -pass-remarks=hwasan -pass-remarks-missed=hwasan -S -hwasan-random-rate=1.0 2>&1 | FileCheck %s --check-prefix=ALL`: diagnostic output flag -pass-remarks=hwasan
+- `pgo-opt-out.ll` RUN `opt < %s -passes='require<profile-summary>,hwasan' -pass-remarks=hwasan -pass-remarks-missed=hwasan -S -hwasan-random-rate=0.0 2>&1 | FileCheck %s --check-prefix=NONE`: diagnostic output flag -pass-remarks=hwasan
+- `pgo-opt-out.ll` RUN `opt < %s -passes='require<profile-summary>,hwasan' -pass-remarks=hwasan -pass-remarks-missed=hwasan -S -hwasan-random-rate=1.0 -hwasan-percentile-cutoff-hot=700000 2>&1 | FileCheck %s --check-prefix=ALL`: diagnostic output flag -pass-remarks=hwasan
+- `pgo-opt-out.ll` RUN `opt < %s -passes='require<profile-summary>,hwasan' -pass-remarks=hwasan -pass-remarks-missed=hwasan -S -hwasan-random-rate=1.0 -hwasan-percentile-cutoff-hot=990000 2>&1 | FileCheck %s --check-prefix=NONE`: diagnostic output flag -pass-remarks=hwasan
+- `pgo-opt-out.ll` RUN `opt < %s -passes='require<profile-summary>,hwasan' -pass-remarks=hwasan -pass-remarks-missed=hwasan -S -hwasan-random-rate=0.0 -hwasan-percentile-cutoff-hot=700000 2>&1 | FileCheck %s --check-prefix=NONE`: diagnostic output flag -pass-remarks=hwasan
+- `pgo-opt-out.ll` RUN `opt < %s -passes='require<profile-summary>,hwasan' -pass-remarks=hwasan -pass-remarks-missed=hwasan -S -hwasan-random-rate=0.0 -hwasan-percentile-cutoff-hot=990000 2>&1 | FileCheck %s --check-prefix=NONE`: diagnostic output flag -pass-remarks=hwasan
+- `prologue.ll`: target triple aarch64--linux-android22
+- `stack-coloring.ll`: REQUIRES aarch64-registered-target
+- `stack-safety-analysis.ll` RUN `opt -pass-remarks-output=%t.pass-remarks -mtriple=aarch64-unknown-linux-gnu -passes=hwasan -hwasan-instrument-with-calls -hwasan-use-stack-safety=1 -hwasan-generate-tags-with-calls -S < %s | FileCheck %s --check-prefixes=SAFETY,CHECK`: uses lit substitution -pass-remarks-output=%t.pass-remarks
+- `stack-safety-analysis.ll` RUN `cat %t.pass-remarks | FileCheck %s --check-prefixes=SAFETY-REMARKS`: not an opt invocation
+- `stack-safety-analysis.ll` RUN `opt -mtriple=aarch64-unknown-linux-gnu -passes=hwasan -hwasan-instrument-with-calls -hwasan-use-stack-safety=0 -hwasan-generate-tags-with-calls -S < %s | FileCheck %s --check-prefixes=NOSAFETY,CHECK`: non-x86_64 target aarch64-unknown-linux-gnu
+- `stack-safety-analysis.ll` RUN `opt -mtriple=aarch64-unknown-linux-gnu -passes=hwasan -hwasan-instrument-with-calls -hwasan-generate-tags-with-calls -S < %s | FileCheck %s --check-prefixes=SAFETY,CHECK`: non-x86_64 target aarch64-unknown-linux-gnu
+- `stack-safety-analysis.ll` RUN `opt -mtriple=aarch64-unknown-linux-gnu -passes=hwasan -hwasan-instrument-stack=0 -hwasan-instrument-with-calls -hwasan-generate-tags-with-calls -S < %s | FileCheck %s --check-prefixes=NOSTACK,CHECK`: non-x86_64 target aarch64-unknown-linux-gnu
+- `stack-safety-analysis.ll` RUN `opt -mtriple=riscv64-unknown-linux -passes=hwasan -hwasan-instrument-with-calls -hwasan-use-stack-safety=1 -hwasan-generate-tags-with-calls -S < %s | FileCheck %s --check-prefixes=SAFETY,CHECK`: non-x86_64 target riscv64-unknown-linux
+- `stack-safety-analysis.ll` RUN `opt -mtriple=riscv64-unknown-linux -passes=hwasan -hwasan-instrument-with-calls -hwasan-use-stack-safety=0 -hwasan-generate-tags-with-calls -S < %s | FileCheck %s --check-prefixes=NOSAFETY,CHECK`: non-x86_64 target riscv64-unknown-linux
+- `stack-safety-analysis.ll` RUN `opt -mtriple=riscv64-unknown-linux -passes=hwasan -hwasan-instrument-with-calls -hwasan-generate-tags-with-calls -S < %s | FileCheck %s --check-prefixes=SAFETY,CHECK`: non-x86_64 target riscv64-unknown-linux
+- `stack-safety-analysis.ll` RUN `opt -mtriple=riscv64-unknown-linux -passes=hwasan -hwasan-instrument-stack=0 -hwasan-instrument-with-calls -hwasan-generate-tags-with-calls -S < %s | FileCheck %s --check-prefixes=NOSTACK,CHECK`: non-x86_64 target riscv64-unknown-linux
+- `use-after-scope-setjmp.ll`: target triple aarch64-unknown-linux-android29
+- `use-after-scope.ll`: REQUIRES aarch64-registered-target
+- `vector-load-store.ll`: target triple aarch64--linux-android10000
+- `with-calls.ll`: target triple aarch64--linux-android
+- `zero-ptr.ll`: target triple aarch64--linux-android10000

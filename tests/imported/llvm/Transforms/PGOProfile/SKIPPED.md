@@ -1,0 +1,244 @@
+# Skipped while importing llvm/test/Transforms/PGOProfile (llvmorg-23.1.5)
+
+93 of 177 files imported. Regenerate with `./harness/run import-llvm Transforms/PGOProfile`.
+
+- `cspgo_bar_sample.ll`: no RUN lines
+- `indirect-call-vp-zeros.ll`: no RUN lines
+- `thinlto_cspgo_bar_gen.ll`: no RUN lines
+- `thinlto_cspgo_bar_use.ll`: no RUN lines
+- `thinlto_samplepgo_icp.ll`: no RUN lines
+- `thinlto_samplepgo_icp2a.ll`: no RUN lines
+- `thinlto_samplepgo_icp2b.ll`: no RUN lines
+- `thinlto_samplepgo_icp3.ll`: no RUN lines
+- `PR28219.ll` RUN `llvm-profdata merge %S/Inputs/PR28219.proftext -o %t.profdata`: not an opt invocation
+- `PR28219.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `PR41279.ll` RUN `llvm-profdata merge %S/Inputs/PR41279.proftext -o %t.profdata`: not an opt invocation
+- `PR41279.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `PR41279_2.ll` RUN `llvm-profdata merge %S/Inputs/PR41279_2.proftext -o %t.profdata`: not an opt invocation
+- `PR41279_2.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `amdgpu-disable-value-profiling.ll`: target triple amdgcn-amd-amdhsa
+- `bfi_verification.ll` RUN `llvm-profdata merge %S/Inputs/bfi_verification.proftext -o %t.profdata`: not an opt invocation
+- `bfi_verification.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S -pgo-verify-bfi-ratio=2 -pgo-verify-bfi=true -pgo-fix-entry-count=false -pass-remarks-analysis=pgo 2>&1 | FileCheck %s --check-prefix=THRESHOLD-CHECK`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `bfi_verification.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S -pgo-verify-hot-bfi=true -pgo-fix-entry-count=false -pass-remarks-analysis=pgo 2>&1 | FileCheck %s --check-prefix=HOTONLY-CHECK`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `branch1.ll` RUN `llvm-profdata merge %S/Inputs/branch1.proftext -o %t.profdata`: not an opt invocation
+- `branch1.ll` RUN `llvm-profdata merge %S/Inputs/branch1_large_count.proftext -o %t.l.profdata`: not an opt invocation
+- `branch1.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `branch1.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.l.profdata -S | FileCheck %s --check-prefix=USE-LARGE`: uses lit substitution -pgo-test-profile-file=%t.l.profdata
+- `branch1.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -pass-remarks=pgo-instrumentation -pgo-emit-branch-prob -S 2>&1| FileCheck %s --check-prefix=ANALYSIS`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `branch2.ll` RUN `llvm-profdata merge %S/Inputs/branch2.proftext -o %t.profdata`: not an opt invocation
+- `branch2.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=false -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `branch2.ll` RUN `llvm-profdata merge %S/Inputs/branch2_entry.proftext -o %t.profdata`: not an opt invocation
+- `branch2.ll` RUN `opt < %s -passes=pgo-instr-use  -pgo-instrument-entry=true -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `callbr.ll` RUN `llvm-profdata merge %S/Inputs/callbr.proftext -o %t.profdata`: not an opt invocation
+- `callbr.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `consecutive-zeros-metadata.ll` RUN `llvm-profdata merge %S/Inputs/consecutive-zeros-metadata.proftext -o %t.profdata`: not an opt invocation
+- `consecutive-zeros-metadata.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `coverage.ll` RUN `llvm-profdata merge %S/Inputs/coverage.proftext -o %t.profdata`: not an opt invocation
+- `coverage.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefixes=CHECK,USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `criticaledge.ll` RUN `llvm-profdata merge %S/Inputs/criticaledge.proftext -o %t.profdata`: not an opt invocation
+- `criticaledge.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=false -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `criticaledge.ll` RUN `llvm-profdata merge %S/Inputs/criticaledge_entry.proftext -o %t2.profdata`: not an opt invocation
+- `criticaledge.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=true -pgo-test-profile-file=%t2.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t2.profdata
+- `cspgo_profile_summary.ll` RUN `llvm-profdata merge %S/Inputs/cspgo.proftext -o %t.profdata`: not an opt invocation
+- `cspgo_profile_summary.ll` RUN `opt < %s -passes='default<O2>' -disable-preinline -pgo-instrument-entry=false -pgo-kind=pgo-instr-use-pipeline -profile-file=%t.profdata -S | FileCheck %s --check-prefix=PGOSUMMARY`: uses lit substitution -profile-file=%t.profdata
+- `cspgo_profile_summary.ll` RUN `opt < %s -O2 -disable-preinline -pgo-instrument-entry=false -pgo-kind=pgo-instr-use-pipeline -profile-file=%t.profdata -S | FileCheck %s --check-prefix=PGOSUMMARY`: uses lit substitution -profile-file=%t.profdata
+- `cspgo_profile_summary.ll` RUN `opt < %s -O2 -disable-preinline -pgo-instrument-entry=false -pgo-kind=pgo-instr-use-pipeline -profile-file=%t.profdata -S -cspgo-kind=cspgo-instr-use-pipeline| FileCheck %s --check-prefix=CSPGOSUMMARY`: uses lit substitution -profile-file=%t.profdata
+- `cspgo_sample.ll` RUN `opt -module-summary %s -o %t1.bc`: writes to a file
+- `cspgo_sample.ll` RUN `opt -module-summary %S/Inputs/cspgo_bar_sample.ll -o %t2.bc`: uses lit substitution %S/Inputs/cspgo_bar_sample.ll
+- `cspgo_sample.ll` RUN `llvm-lto2 run -lto-cspgo-profile-file=alloc -enable-sampled-instrumentation -lto-cspgo-gen -save-temps -o %t %t1.bc %t2.bc -r=%t1.bc,foo,pl -r=%t1.bc,bar,l -r=%t1.bc,main,plx -r=%t1.bc,__llvm_profile_filename,plx -r=%t1.bc,__llvm_profile_raw_version,plx -r=%t1.bc,__llvm_profile_sampling,pl -r=%t2.bc,bar,pl -r=%t2.bc,odd,pl -r=%t2.bc,even,pl -r=%t2.bc,__llvm_profile_filename,x -r=%t2.bc,__llvm_profile_raw_version,x -r=%t2.bc,__llvm_profile_sampling,`: not an opt invocation
+- `cspgo_sample.ll` RUN `llvm-dis %t.1.4.opt.bc -o - | FileCheck %s --check-prefix=CSGEN`: not an opt invocation
+- `ctx-instrumentation-aliases.ll` RUN `opt -passes=ctx-instr-gen,assign-guid,ctx-instr-lower -profile-context-root=an_entrypoint -profile-context-root=another_entrypoint_no_callees -S %s -o %t.ll`: writes to a file
+- `ctx-instrumentation-aliases.ll` RUN `llc < %t.ll | FileCheck %s`: not an opt invocation
+- `ctx-instrumentation-invalid-roots.ll`: uses split-file
+- `ctx-instrumentation-optin.ll`: REQUIRES linux
+- `data-access-profile.ll`: REQUIRES asserts
+- `diag_FE_profile.ll` RUN `llvm-profdata merge %S/Inputs/diag_FE.proftext -o %t.profdata`: not an opt invocation
+- `diag_FE_profile.ll` RUN `not opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S  2>&1 | FileCheck %s`: not an opt invocation
+- `diag_mismatch.ll` RUN `llvm-profdata merge %S/Inputs/diag.proftext -o %t.profdata`: not an opt invocation
+- `diag_mismatch.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S 2>&1 | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `diag_no_funcprofdata.ll` RUN `llvm-profdata merge %S/Inputs/diag.proftext -o %t.profdata`: not an opt invocation
+- `diag_no_funcprofdata.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-warn-missing-function=true -pgo-test-profile-file=%t.profdata -S 2>&1 | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `diag_no_funcprofdata.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S 2>&1 | FileCheck %s --check-prefix=DEFAULT`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `diag_no_funcprofdata_cs.ll` RUN `llvm-profdata merge %S/Inputs/cs_vs_nocs.proftext -o %t.profdata`: not an opt invocation
+- `diag_no_funcprofdata_cs.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-warn-missing-function=true -pgo-test-profile-file=%t.profdata -S 2>&1 | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `diag_no_profile.ll` RUN `not opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S  2>&1`: not an opt invocation
+- `diag_no_value_sites.ll` RUN `llvm-profdata merge %S/Inputs/diag_no_value_sites.proftext -o %t.profdata`: not an opt invocation
+- `diag_no_value_sites.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S 2>&1 | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `fix_bfi.ll` RUN `llvm-profdata merge %S/Inputs/fix_bfi.proftext -o %t.profdata`: not an opt invocation
+- `fix_bfi.ll` RUN `opt -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S -pgo-fix-entry-count=true < %s 2>&1 | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `fix_entry_count.ll` RUN `llvm-profdata merge %S/Inputs/fix_entry_count.proftext -o %t.profdata`: not an opt invocation
+- `fix_entry_count.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=true -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `fix_entry_count_sampled.ll`: uses split-file
+- `func_entry.ll` RUN `llvm-profdata merge %S/Inputs/func_entry.proftext -o %t.profdata`: not an opt invocation
+- `func_entry.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `hash_mismatch_metadata.ll` RUN `llvm-profdata merge %S/Inputs/hash_mismatch_metadata.proftext -o %t.profdata`: not an opt invocation
+- `hash_mismatch_metadata.ll` RUN `opt < %s -mtriple=x86_64-linux-gnu -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `icp_mismatch_msg.ll` RUN `opt < %s -passes=pgo-icall-prom -pass-remarks-missed=pgo-icall-prom -S 2>& 1 | FileCheck %s`: diagnostic output flag -pass-remarks-missed=pgo-icall-prom
+- `icp_vtable_cmp.ll` RUN `opt < %s -passes='pgo-icall-prom' -pass-remarks=pgo-icall-prom -enable-vtable-profile-use -icp-max-num-vtable-last-candidate=2 -S 2>&1 | FileCheck %s --check-prefixes=VTABLE-COMMON,VTABLE-CMP`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `icp_vtable_cmp.ll` RUN `opt < %s -passes='pgo-icall-prom' -pass-remarks=pgo-icall-prom -enable-vtable-profile-use -icp-max-num-vtable-last-candidate=1 -S 2>&1 | FileCheck %s --check-prefixes=VTABLE-COMMON,FUNC-CMP`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `icp_vtable_cmp.ll` RUN `opt < %s -passes='pgo-icall-prom' -pass-remarks=pgo-icall-prom -enable-vtable-profile-use -icp-max-num-vtable-last-candidate=2 -icp-ignored-base-types='Base1' -S 2>&1 | FileCheck %s --check-prefixes=VTABLE-COMMON,FUNC-CMP`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `icp_vtable_tail_call.ll` RUN `opt < %s -passes='pgo-icall-prom' -pass-remarks=pgo-icall-prom -enable-vtable-profile-use -S 2>&1 | FileCheck %s --check-prefixes=VTABLE,REMARK`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect-call-vp-zeros.ll` RUN `llvm-profdata merge %S/Inputs/indirect-call-vp-zeros.ll -o %t.profdata`: not an opt invocation
+- `indirect-call-vp-zeros.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `indirect_call_annotation.ll` RUN `llvm-profdata merge %S/Inputs/indirect_call.proftext -o %t.profdata`: not an opt invocation
+- `indirect_call_annotation.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=VP-ANNOTATION`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `indirect_call_promotion.ll` RUN `opt < %s -passes=pgo-icall-prom -S -pass-remarks=pgo-icall-prom -icp-remaining-percent-threshold=0 -icp-total-percent-threshold=0 -icp-max-prom=4 2>&1 | FileCheck %s --check-prefix=PASS-REMARK`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect_call_promotion.ll` RUN `opt < %s -passes=pgo-icall-prom -S -pass-remarks=pgo-icall-prom -icp-remaining-percent-threshold=0 -icp-total-percent-threshold=20 -icp-max-prom=4 2>&1 | FileCheck %s --check-prefix=PASS2-REMARK`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect_call_promotion.ll` RUN `opt < %s -passes=pgo-icall-prom -S -pass-remarks=pgo-icall-prom -icp-minimum-count-threshold=15 -icp-remaining-percent-threshold=0 -icp-total-percent-threshold=0 -icp-max-prom=4 2>&1 | FileCheck %s --check-prefix=MIN-COUNT-15`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect_call_promotion.ll` RUN `opt < %s -passes=pgo-icall-prom -S -pass-remarks=pgo-icall-prom -icp-minimum-count-threshold=10 -icp-remaining-percent-threshold=0 -icp-total-percent-threshold=0 -icp-max-prom=4 2>&1 | FileCheck %s --check-prefix=MIN-COUNT-10`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect_call_promotion2.ll` RUN `opt < %s -passes=pgo-icall-prom -icp-allow-decls=false -icp-allow-hot-only=true -icp-allow-candidate-skip=false -S -pass-remarks=pgo-icall-prom 2>&1 | FileCheck %s --check-prefix=REMARK1`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect_call_promotion2.ll` RUN `opt < %s -passes=pgo-icall-prom -icp-allow-decls=true -icp-allow-hot-only=true -icp-allow-candidate-skip=false -S -pass-remarks=pgo-icall-prom 2>&1 | FileCheck %s --check-prefixes=REMARK1,REMARK2`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect_call_promotion2.ll` RUN `opt < %s -passes=pgo-icall-prom -icp-allow-decls=false -icp-allow-hot-only=true -icp-allow-candidate-skip=false -S -pass-remarks=pgo-icall-prom 2>&1 | FileCheck %s --check-prefix=REMARK1`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect_call_promotion2.ll` RUN `opt < %s -passes=pgo-icall-prom -icp-allow-decls=false -icp-allow-hot-only=false -icp-allow-candidate-skip=false -S -pass-remarks=pgo-icall-prom 2>&1 | FileCheck %s --check-prefixes=REMARK1`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect_call_promotion2.ll` RUN `opt < %s -passes=pgo-icall-prom -icp-allow-decls=false -icp-allow-hot-only=false -icp-allow-candidate-skip=true -S -pass-remarks=pgo-icall-prom 2>&1 | FileCheck %s --check-prefixes=REMARK1,REMARK3`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect_call_promotion2.ll` RUN `opt < %s -passes=pgo-icall-prom -icp-allow-decls=true -icp-allow-hot-only=false -icp-allow-candidate-skip=true -S -pass-remarks=pgo-icall-prom 2>&1 | FileCheck %s --check-prefixes=REMARK1,REMARK2,REMARK4,REMARK5`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect_call_promotion2.ll` RUN `opt < %s -passes=pgo-icall-prom -icp-allow-decls=false -icp-allow-hot-only=false -icp-allow-candidate-skip=true -S -pass-remarks=pgo-icall-prom 2>&1 | FileCheck %s --check-prefixes=REMARK6,REMARK1,REMARK3`: diagnostic output flag -pass-remarks=pgo-icall-prom
+- `indirect_call_promotion_byval.ll`: target triple i686-unknown-linux-gnu
+- `indirectbr.ll` RUN `llvm-profdata merge %S/Inputs/indirectbr.proftext -o %t.profdata`: not an opt invocation
+- `indirectbr.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=false -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `indirectbr.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=false -pgo-test-profile-file=%t.profdata -S | opt -S -passes='print<branch-prob>' 2>&1 | FileCheck %s --check-prefix=BRANCHPROB`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `indirectbr.ll` RUN `llvm-profdata merge %S/Inputs/indirectbr_entry.proftext -o %t2.profdata`: not an opt invocation
+- `indirectbr.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=true -pgo-test-profile-file=%t2.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t2.profdata
+- `indirectbr.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=true -pgo-test-profile-file=%t2.profdata -S | opt -S -passes='print<branch-prob>' 2>&1 | FileCheck %s --check-prefix=BRANCHPROB`: uses lit substitution -pgo-test-profile-file=%t2.profdata
+- `instr_entry_bb.ll` RUN `llvm-profdata merge %S/Inputs/branch2.proftext -o %t.profdata`: not an opt invocation
+- `instr_entry_bb.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -pgo-instrument-entry -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `irreducible.ll` RUN `llvm-profdata merge %S/Inputs/irreducible.proftext -o %t.profdata`: not an opt invocation
+- `irreducible.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=false -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `irreducible.ll` RUN `llvm-profdata merge %S/Inputs/irreducible_entry.proftext -o %t2.profdata`: not an opt invocation
+- `irreducible.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=true -pgo-test-profile-file=%t2.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t2.profdata
+- `landingpad.ll` RUN `llvm-profdata merge %S/Inputs/landingpad.proftext -o %t.profdata`: not an opt invocation
+- `landingpad.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=false -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `landingpad.ll` RUN `llvm-profdata merge %S/Inputs/landingpad_entry.proftext -o %t2.profdata`: not an opt invocation
+- `landingpad.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=true -pgo-test-profile-file=%t2.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t2.profdata
+- `large_count_remarks.ll` RUN `llvm-profdata merge %S/Inputs/large_count_remarks.proftext -o %t.profdata`: not an opt invocation
+- `large_count_remarks.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -pass-remarks=pgo-instrumentation -pgo-emit-branch-prob -S 2>&1| FileCheck %s --check-prefix=ANALYSIS`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `loop1.ll` RUN `llvm-profdata merge %S/Inputs/loop1.proftext -o %t.profdata`: not an opt invocation
+- `loop1.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=false -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `loop1.ll` RUN `llvm-profdata merge %S/Inputs/loop1_entry.proftext -o %t.profdata`: not an opt invocation
+- `loop1.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=true -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `loop2.ll` RUN `llvm-profdata merge %S/Inputs/loop2.proftext -o %t.profdata`: not an opt invocation
+- `loop2.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=false -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `loop2.ll` RUN `llvm-profdata merge %S/Inputs/loop2_entry.proftext -o %t.profdata`: not an opt invocation
+- `loop2.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=true -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `loop_entries_use.ll`: uses split-file
+- `lto_cspgo_gen.ll` RUN `opt -passes='thinlto-pre-link<O2>' --cs-profilegen-file=alloc -cspgo-kind=cspgo-instr-gen-pipeline -module-summary %s -o %t.bc`: writes to a file
+- `lto_cspgo_gen.ll` RUN `llvm-dis %t.bc -o - | FileCheck %s --check-prefix=IRPGOPRE`: not an opt invocation
+- `lto_cspgo_gen.ll` RUN `llvm-lto2 run -lto-cspgo-profile-file=alloc -lto-cspgo-gen -save-temps -o %t %t.bc -r=%t.bc,f,px -r=%t.bc,__llvm_profile_filename,x -r=%t.bc,__llvm_profile_raw_version,x`: not an opt invocation
+- `lto_cspgo_gen.ll` RUN `llvm-dis %t.0.0.preopt.bc -o - | FileCheck %s --check-prefix=IRPGOBE`: not an opt invocation
+- `maxcountzero.ll` RUN `llvm-profdata merge %S/Inputs/maxcountzero.proftext -o %t.profdata`: not an opt invocation
+- `maxcountzero.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=false -pgo-test-profile-file=%t.profdata -S 2>&1 | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `memop_profile_funclet_wasm.ll`: uses non-x86 target intrinsic @llvm.wasm.
+- `memop_size_annotation.ll` RUN `llvm-profdata merge %S/Inputs/memop_size_annotation.proftext -o %t.profdata`: not an opt invocation
+- `memop_size_annotation.ll` RUN `opt < %s -passes=pgo-instr-use -memop-max-annotations=9 -pgo-test-profile-file=%t.profdata -pgo-memop-optimize-memcmp-bcmp -S | FileCheck %s --check-prefixes=MEMOP_ANNOTATION,MEMOP_ANNOTATION9`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `memop_size_annotation.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -pgo-memop-optimize-memcmp-bcmp -S | FileCheck %s --check-prefixes=MEMOP_ANNOTATION,MEMOP_ANNOTATION4`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `memop_size_opt.ll` RUN `opt < %s -passes=pgo-memop-opt -verify-dom-info -pgo-memop-count-threshold=90 -pgo-memop-percent-threshold=15 -pgo-memop-optimize-memcmp-bcmp -pass-remarks-with-hotness -pass-remarks-output=%t.opt.yaml -S | FileCheck %s --check-prefix=MEMOP_OPT`: diagnostic output flag -pass-remarks-with-hotness
+- `memop_size_opt.ll` RUN `FileCheck %s -input-file=%t.opt.yaml --check-prefix=YAML`: not an opt invocation
+- `memop_size_opt.ll` RUN `FileCheck %s -input-file=%t.opt.yaml --check-prefix=YAML`: not an opt invocation
+- `memprof-call-site-at-alloc-site.ll`: uses split-file
+- `memprof-dump-matched-alloc-site.ll`: uses split-file
+- `memprof-dump-matched-call-sites.ll`: uses split-file
+- `memprof-inline-call-stacks.ll` RUN `llvm-profdata merge %S/Inputs/memprof.memprofraw --profiled-binary %S/Inputs/memprof.exe -o %t.memprofdata`: not an opt invocation
+- `memprof-inline-call-stacks.ll` RUN `opt < %s -passes='memprof-use<profile-filename=%t.memprofdata>' -pass-remarks-analysis=memprof -S 2>&1 | FileCheck %s`: uses lit substitution -passes=memprof-use<profile-filename=%t.memprofdata>
+- `memprof.ll`: REQUIRES zlib
+- `memprof_diff_inline.ll`: uses split-file
+- `memprof_discard_threshold.ll`: uses split-file
+- `memprof_internal_linkage.ll` RUN `llvm-profdata merge %S/Inputs/memprof_internal_linkage.memprofraw --profiled-binary %S/Inputs/memprof_internal_linkage.exe -o %t.memprofdata`: not an opt invocation
+- `memprof_internal_linkage.ll` RUN `opt < %s -passes='memprof-use<profile-filename=%t.memprofdata>' -S | FileCheck %s`: uses lit substitution -passes=memprof-use<profile-filename=%t.memprofdata>
+- `memprof_loop_unroll.ll`: uses split-file
+- `memprof_match_hot_cold_new_calls.ll`: uses split-file
+- `memprof_missing_leaf.ll`: uses split-file
+- `memprof_undrift_missing_leaf.ll`: uses split-file
+- `memprofmissingfunc.ll` RUN `llvm-profdata merge %S/Inputs/memprof.memprofraw --profiled-binary %S/Inputs/memprof.exe -o %t.memprofdata`: not an opt invocation
+- `memprofmissingfunc.ll` RUN `opt < %s -passes='memprof-use<profile-filename=%t.memprofdata>' -pgo-warn-missing-function -S 2>&1 | FileCheck %s`: uses lit substitution -passes=memprof-use<profile-filename=%t.memprofdata>
+- `misexpect-branch-correct.ll` RUN `llvm-profdata merge %S/Inputs/misexpect-branch-correct.proftext -o %t.profdata`: not an opt invocation
+- `misexpect-branch-correct.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -pass-remarks=misexpect -S  2>&1 | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-branch-overflow.ll` RUN `llvm-profdata merge %S/Inputs/misexpect-branch-overflow.proftext -o %t.profdata`: not an opt invocation
+- `misexpect-branch-overflow.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -pass-remarks=misexpect -unlikely-branch-weight=2147483648 -likely-branch-weight=2147483648 -S 2>&1 | FileCheck %s --check-prefix=OVERFLOW`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-branch-stripped.ll` RUN `llvm-profdata merge %S/Inputs/misexpect-branch.proftext -o %t.profdata`: not an opt invocation
+- `misexpect-branch-stripped.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -S 2>&1 | FileCheck %s --check-prefix=WARNING`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-branch-stripped.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pass-remarks=misexpect -S 2>&1 | FileCheck %s --check-prefix=REMARK`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-branch-stripped.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -pass-remarks=misexpect -S 2>&1 | FileCheck %s --check-prefix=BOTH`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-branch-stripped.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -S 2>&1 | FileCheck %s --check-prefix=DISABLED`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-branch-unpredictable.ll` RUN `llvm-profdata merge %S/Inputs/misexpect-branch-correct.proftext -o %t.profdata`: not an opt invocation
+- `misexpect-branch-unpredictable.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -pass-remarks=misexpect -S  2>&1 | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-branch.ll` RUN `llvm-profdata merge %S/Inputs/misexpect-branch.proftext -o %t.profdata`: not an opt invocation
+- `misexpect-branch.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -S 2>&1 | FileCheck %s --check-prefix=WARNING`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-branch.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pass-remarks=misexpect -S 2>&1 | FileCheck %s --check-prefix=REMARK`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-branch.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -pass-remarks=misexpect -S 2>&1 | FileCheck %s --check-prefix=BOTH`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-branch.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -S 2>&1 | FileCheck %s --check-prefix=DISABLED`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-branch.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -misexpect-tolerance=81 -pass-remarks=misexpect -S 2>&1 | FileCheck %s --check-prefix=THRESHOLD`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-switch-default.ll` RUN `llvm-profdata merge %S/Inputs/misexpect-switch.proftext -o %t.profdata`: not an opt invocation
+- `misexpect-switch-default.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -S 2>&1 | FileCheck %s --check-prefix=WARNING`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-switch-default.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pass-remarks=misexpect -S 2>&1 | FileCheck %s --check-prefix=REMARK`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-switch-default.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -pass-remarks=misexpect -S 2>&1 | FileCheck %s --check-prefix=BOTH`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-switch-default.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -S 2>&1 | FileCheck %s --check-prefix=DISABLED`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-switch.ll` RUN `llvm-profdata merge %S/Inputs/misexpect-switch.proftext -o %t.profdata`: not an opt invocation
+- `misexpect-switch.ll` RUN `llvm-profdata merge %S/Inputs/misexpect-switch-correct.proftext -o %t.c.profdata`: not an opt invocation
+- `misexpect-switch.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -S 2>&1 | FileCheck %s --check-prefix=WARNING`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-switch.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pass-remarks=misexpect -S 2>&1 | FileCheck %s --check-prefix=REMARK`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-switch.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -pgo-warn-misexpect -pass-remarks=misexpect -S 2>&1 | FileCheck %s --check-prefix=BOTH`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-switch.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.profdata -S 2>&1 | FileCheck %s --check-prefix=DISABLED`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `misexpect-switch.ll` RUN `opt < %s -passes="function(lower-expect),pgo-instr-use" -pgo-test-profile-file=%t.c.profdata -pgo-warn-misexpect -pass-remarks=misexpect -S 2>&1 | FileCheck %s --check-prefix=CORRECT`: uses lit substitution -pgo-test-profile-file=%t.c.profdata
+- `mismatched-byval.ll` RUN `opt -passes=pgo-icall-prom -profile-summary-hot-count=10 -S < %s -pass-remarks-output=- | FileCheck %s`: diagnostic output flag -pass-remarks-output=-
+- `mismatched-inalloca.ll` RUN `opt -passes=pgo-icall-prom -profile-summary-hot-count=10 -S < %s -pass-remarks-output=- | FileCheck %s`: diagnostic output flag -pass-remarks-output=-
+- `multiple_hash_profile.ll` RUN `llvm-profdata merge %S/Inputs/multiple_hash_profile.proftext -o %t.profdata`: not an opt invocation
+- `multiple_hash_profile.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `noreturncall.ll`: REQUIRES asserts
+- `ppc-prevent-mma-types.ll` RUN `opt --vec-extabi=true -passes='default<O3>' -mcpu=pwr10 -pgo-kind=pgo-instr-gen-pipeline -mtriple=powerpc-ibm-aix -S < %s | FileCheck %s`: non-x86_64 target powerpc-ibm-aix
+- `ppc-prevent-mma-types.ll` RUN `opt -passes='default<O3>' -mcpu=pwr10 -pgo-kind=pgo-instr-gen-pipeline -mtriple=powerpc64le-unknown-linux-gnu -S < %s | FileCheck %s`: non-x86_64 target powerpc64le-unknown-linux-gnu
+- `prof-verify-no-entrycount.ll` RUN `not opt -passes=prof-verify %s -o - 2>&1 | FileCheck %s`: not an opt invocation
+- `prof-verify.ll` RUN `not opt -passes=prof-verify %s -S -o - 2>&1 | FileCheck %s --check-prefix=VERIFY`: not an opt invocation
+- `prof-verify.ll` RUN `opt -enable-profcheck %s -S -o - | FileCheck %s --check-prefix=INJECT`: no -passes / -O pipeline
+- `profcheck-select.ll`: uses split-file
+- `remap.ll` RUN `llvm-profdata merge %S/Inputs/remap.proftext -o %t.profdata`: not an opt invocation
+- `remap.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -pgo-test-profile-remapping-file=%S/Inputs/remap.map -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `select1.ll` RUN `llvm-profdata merge %S/Inputs/select1.proftext -o %t.profdata`: not an opt invocation
+- `select1.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -pgo-instr-select=true -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `select2.ll` RUN `llvm-profdata merge %S/Inputs/select2.proftext -o %t.profdata`: not an opt invocation
+- `select2.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -pgo-instr-select=true -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `select_hash_conflict.ll` RUN `llvm-profdata merge %S/Inputs/select_hash_conflict.proftext -o %t.profdata`: not an opt invocation
+- `select_hash_conflict.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -pgo-instr-select=true -S | FileCheck %s`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `suppl-profile.ll` RUN `llvm-profdata merge -instr -suppl-min-size-threshold=0 -supplement-instr-with-sample=%p/Inputs/sample-profile-hot.proftext %S/Inputs/suppl-profile.proftext -o %t.profdata`: not an opt invocation
+- `suppl-profile.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=HOT`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `suppl-profile.ll` RUN `llvm-profdata merge -instr -suppl-min-size-threshold=0 -supplement-instr-with-sample=%p/Inputs/sample-profile-warm.proftext %S/Inputs/suppl-profile.proftext -o %t1.profdata`: not an opt invocation
+- `suppl-profile.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t1.profdata -S | FileCheck %s --check-prefix=WARM`: uses lit substitution -pgo-test-profile-file=%t1.profdata
+- `switch.ll` RUN `llvm-profdata merge %S/Inputs/switch.proftext -o %t.profdata`: not an opt invocation
+- `switch.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=false -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `switch.ll` RUN `llvm-profdata merge %S/Inputs/switch_entry.proftext -o %t.profdata`: not an opt invocation
+- `switch.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-instrument-entry=true -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `thinlto_cspgo_gen.ll` RUN `opt -passes='thinlto-pre-link<O2>' --cs-profilegen-file=alloc -cspgo-kind=cspgo-instr-gen-pipeline -module-summary %s -o %t1.bc`: writes to a file
+- `thinlto_cspgo_gen.ll` RUN `opt -passes='thinlto-pre-link<O2>' --cs-profilegen-file=alloc -cspgo-kind=cspgo-instr-gen-pipeline -module-summary %S/Inputs/thinlto_cspgo_bar_gen.ll -o %t2.bc`: uses lit substitution %S/Inputs/thinlto_cspgo_bar_gen.ll
+- `thinlto_cspgo_gen.ll` RUN `llvm-lto2 run -lto-cspgo-profile-file=alloc -lto-cspgo-gen -save-temps -o %t %t1.bc %t2.bc -r=%t1.bc,foo,pl -r=%t1.bc,bar,l -r=%t1.bc,main,plx -r=%t1.bc,__llvm_profile_filename,plx -r=%t1.bc,__llvm_profile_raw_version,plx -r=%t2.bc,bar,pl -r=%t2.bc,odd,pl -r=%t2.bc,even,pl -r=%t2.bc,__llvm_profile_filename,x -r=%t2.bc,__llvm_profile_raw_version,x`: not an opt invocation
+- `thinlto_cspgo_gen.ll` RUN `llvm-dis %t.1.4.opt.bc -o - | FileCheck %s --check-prefixes=CSGEN,PREVAILING`: not an opt invocation
+- `thinlto_cspgo_gen.ll` RUN `llvm-dis %t.2.4.opt.bc -o - | FileCheck %s --check-prefixes=CSGEN,NOPREVAILING`: not an opt invocation
+- `thinlto_cspgo_use.ll` RUN `opt -module-summary %s -o %t1.bc`: writes to a file
+- `thinlto_cspgo_use.ll` RUN `opt -module-summary %S/Inputs/thinlto_cspgo_bar_use.ll -o %t2.bc`: uses lit substitution %S/Inputs/thinlto_cspgo_bar_use.ll
+- `thinlto_cspgo_use.ll` RUN `llvm-profdata merge %S/Inputs/thinlto_cs.proftext -o %t3.profdata`: not an opt invocation
+- `thinlto_cspgo_use.ll` RUN `llvm-lto2 run -lto-cspgo-profile-file=%t3.profdata -pgo-instrument-entry=false -save-temps -o %t %t1.bc %t2.bc -r=%t1.bc,foo,pl -r=%t1.bc,bar,l -r=%t1.bc,main,plx -r=%t2.bc,bar,pl -r=%t2.bc,clobber,pl -r=%t2.bc,odd,pl -r=%t2.bc,even,pl`: not an opt invocation
+- `thinlto_cspgo_use.ll` RUN `llvm-dis %t.1.4.opt.bc -o - | FileCheck %s --check-prefix=CSUSE`: not an opt invocation
+- `thinlto_indirect_call_promotion.ll`: REQUIRES zlib
+- `thinlto_samplepgo_icp.ll` RUN `opt -module-summary %s -o %t.bc`: writes to a file
+- `thinlto_samplepgo_icp.ll` RUN `opt -module-summary %p/Inputs/thinlto_samplepgo_icp.ll -o %t2.bc`: uses lit substitution %p/Inputs/thinlto_samplepgo_icp.ll
+- `thinlto_samplepgo_icp.ll` RUN `llvm-lto -thinlto -o %t3 %t.bc %t2.bc`: not an opt invocation
+- `thinlto_samplepgo_icp.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -o %t4.bc -print-imports 2>&1 | FileCheck %s --check-prefix=IMPORTS`: uses lit substitution %t3.thinlto.bc
+- `thinlto_samplepgo_icp.ll` RUN `opt %t4.bc -icp-lto -passes=pgo-icall-prom -S | FileCheck %s --check-prefix=ICALL-PROM`: uses lit substitution %t4.bc
+- `thinlto_samplepgo_icp2.ll` RUN `opt -module-summary %s -o %t.bc`: writes to a file
+- `thinlto_samplepgo_icp2.ll` RUN `opt -module-summary %p/Inputs/thinlto_samplepgo_icp2a.ll -o %t2a.bc`: uses lit substitution %p/Inputs/thinlto_samplepgo_icp2a.ll
+- `thinlto_samplepgo_icp2.ll` RUN `opt -module-summary %p/Inputs/thinlto_samplepgo_icp2b.ll -o %t2b.bc`: uses lit substitution %p/Inputs/thinlto_samplepgo_icp2b.ll
+- `thinlto_samplepgo_icp2.ll` RUN `llvm-lto2 run -save-temps -import-instr-limit=5 -o %t3 %t.bc %t2a.bc %t2b.bc -r %t.bc,fptr,plx -r %t.bc,main,plx -r %t2a.bc,_ZL3barv,l -r %t2b.bc,_ZL3barv,pl -print-imports 2>&1 | FileCheck %s --check-prefix=IMPORTS2`: not an opt invocation
+- `thinlto_samplepgo_icp2.ll` RUN `llvm-nm %t3.2 | FileCheck %s --check-prefix=NM`: not an opt invocation
+- `thinlto_samplepgo_icp2.ll` RUN `llvm-dis < %t3.3.2.internalize.bc | FileCheck %s --check-prefix=INTERNALIZE`: not an opt invocation
+- `thinlto_samplepgo_icp3.ll` RUN `opt -module-summary %s -o %t.bc`: writes to a file
+- `thinlto_samplepgo_icp3.ll` RUN `opt -module-summary %p/Inputs/thinlto_samplepgo_icp3.ll -o %t2.bc`: uses lit substitution %p/Inputs/thinlto_samplepgo_icp3.ll
+- `thinlto_samplepgo_icp3.ll` RUN `llvm-lto2 run -thinlto-threads=1 -save-temps -o %t3 %t.bc %t2.bc -r %t.bc,fptr,plx -r %t.bc,main,plx -r %t2.bc,_Z6updatei,pl -r %t2.bc,fptr,l`: not an opt invocation
+- `thinlto_samplepgo_icp3.ll` RUN `llvm-dis %t3.1.3.import.bc -o - | FileCheck %s --check-prefix=IMPORTS`: not an opt invocation
+- `thinlto_samplepgo_icp3.ll` RUN `llvm-dis %t3.2.4.opt.bc -o - | FileCheck %s --check-prefix=ICALL-PROM`: not an opt invocation
+- `thinlto_samplepgo_icp_droppeddead.ll` RUN `opt -module-summary %s -o %t.bc`: writes to a file
+- `thinlto_samplepgo_icp_droppeddead.ll` RUN `llvm-lto2 run -save-temps -o %t2 %t.bc -r %t.bc,fptr,plx -r %t.bc,main,plx -r %t.bc,_ZL3foov,l`: not an opt invocation
+- `thinlto_samplepgo_icp_droppeddead.ll` RUN `llvm-dis < %t2.1.4.opt.bc | FileCheck %s --check-prefix=OPT`: not an opt invocation
+- `thinlto_samplepgo_icp_droppeddead.ll` RUN `llvm-lto2 run -save-temps -o %t2 %t.bc -r %t.bc,fptr,plx -r %t.bc,main,plx -r %t.bc,_ZL3foov,l -compute-dead=false`: not an opt invocation
+- `thinlto_samplepgo_icp_droppeddead.ll` RUN `llvm-dis < %t2.1.4.opt.bc | FileCheck %s --check-prefix=OPT-NODEAD`: not an opt invocation
+- `unreachable_bb.ll` RUN `llvm-profdata merge %S/Inputs/unreachable_bb.proftext -o %t.profdata`: not an opt invocation
+- `unreachable_bb.ll` RUN `opt < %s -passes=pgo-instr-use -pgo-test-profile-file=%t.profdata -S | FileCheck %s --check-prefix=USE`: uses lit substitution -pgo-test-profile-file=%t.profdata
+- `unreachable_bb2.ll`: uses split-file
+- `vtable_prof_unsupported.ll`: target triple arm64-apple-macosx14.0.0

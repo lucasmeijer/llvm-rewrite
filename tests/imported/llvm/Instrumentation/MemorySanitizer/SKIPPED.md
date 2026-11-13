@@ -1,0 +1,87 @@
+# Skipped while importing llvm/test/Instrumentation/MemorySanitizer (llvmorg-23.1.5)
+
+106 of 185 files imported. Regenerate with `./harness/run import-llvm Instrumentation/MemorySanitizer`.
+
+- `aarch64-bf16-dotprod-intrinsics.ll`: in a AArch64 target directory
+- `aarch64-matmul-fp16.ll`: in a AArch64 target directory
+- `aarch64-matmul-fp32.ll`: in a AArch64 target directory
+- `aarch64-matmul.ll`: in a AArch64 target directory
+- `arm64-cvt.ll`: in a AArch64 target directory
+- `arm64-fminv.ll`: in a AArch64 target directory
+- `arm64-ld1.ll`: in a AArch64 target directory
+- `arm64-smaxv.ll`: in a AArch64 target directory
+- `arm64-sminv.ll`: in a AArch64 target directory
+- `arm64-st1.ll`: in a AArch64 target directory
+- `arm64-st1_lane.ll`: in a AArch64 target directory
+- `arm64-st1_origins.ll`: in a AArch64 target directory
+- `arm64-tbl.ll`: in a AArch64 target directory
+- `arm64-umaxv.ll`: in a AArch64 target directory
+- `arm64-uminv.ll`: in a AArch64 target directory
+- `arm64-vadd.ll`: in a AArch64 target directory
+- `arm64-vaddlv.ll`: in a AArch64 target directory
+- `arm64-vaddv.ll`: in a AArch64 target directory
+- `arm64-vcmp.ll`: in a AArch64 target directory
+- `arm64-vcvt.ll`: in a AArch64 target directory
+- `arm64-vcvt_f32_su32.ll`: in a AArch64 target directory
+- `arm64-vcvt_n.ll`: in a AArch64 target directory
+- `arm64-vmax.ll`: in a AArch64 target directory
+- `arm64-vmovn.ll`: in a AArch64 target directory
+- `arm64-vmul.ll`: in a AArch64 target directory
+- `arm64-vshift.ll`: in a AArch64 target directory
+- `module-flags-aarch64.ll`: in a AArch64 target directory
+- `neon-dot-product.ll`: in a AArch64 target directory
+- `neon_vst_float.ll`: in a AArch64 target directory
+- `qshrn.ll`: in a AArch64 target directory
+- `sme-aarch64-svcount-mini.ll`: in a AArch64 target directory
+- `sme-aarch64-svcount.ll`: in a AArch64 target directory
+- `sme2-intrinsics-add-mini.ll`: in a AArch64 target directory
+- `sme2-intrinsics-add.ll`: in a AArch64 target directory
+- `sve-fmmla-f32f16.ll`: in a AArch64 target directory
+- `sve-intrinsics-bfloat.ll`: in a AArch64 target directory
+- `sve-intrinsics-matmul-fp32.ll`: in a AArch64 target directory
+- `sve-intrinsics-matmul-fp64.ll`: in a AArch64 target directory
+- `sve-intrinsics-matmul-int8.ll`: in a AArch64 target directory
+- `sve2-fmmla-f16mf8.ll`: in a AArch64 target directory
+- `sve2-fmmla-f32mf8.ll`: in a AArch64 target directory
+- `vararg-kmsan.ll`: in a AArch64 target directory
+- `vararg.ll`: in a AArch64 target directory
+- `vararg_shadow.ll`: in a AArch64 target directory
+- `vararg-arm32.ll`: target triple arm--linux
+- `hexagon.ll`: in a Hexagon target directory
+- `vararg-hexagon.ll`: in a Hexagon target directory
+- `vararg-loongarch64.ll`: in a LoongArch target directory
+- `vararg.ll`: in a LoongArch target directory
+- `vararg-mips64.ll`: in a Mips target directory
+- `vararg-mips64el.ll`: in a Mips target directory
+- `vararg-mips.ll`: target triple mips--linux
+- `vararg-mipsel.ll`: target triple mipsel--linux
+- `kernel-ppc64le.ll`: in a PowerPC target directory
+- `vararg-ppc64.ll`: in a PowerPC target directory
+- `vararg-ppc64le.ll`: in a PowerPC target directory
+- `kernel-ppcle.ll`: target triple powerpcle--linux
+- `vararg-ppc.ll`: target triple powerpc--linux
+- `vararg-ppcle.ll`: target triple powerpcle--linux
+- `vararg-riscv32.ll`: target triple riscv32--linux
+- `basic-kernel.ll`: in a SystemZ target directory
+- `vararg-kernel.ll`: in a SystemZ target directory
+- `vararg.ll`: in a SystemZ target directory
+- `atomics.ll`: REQUIRES systemz-registered-target
+- `avx-intrinsics-i386.ll`: target triple i386-unknown-linux-gnu
+- `avx2-intrinsics-i386.ll`: target triple i386-unknown-linux-gnu
+- `mmx-intrinsics.ll`: target triple i386-unknown-linux-gnu
+- `msan_i386_bts_asm.ll`: target triple i386-unknown-linux-gnu
+- `msan_i386intrinsics.ll`: target triple i386-unknown-linux-gnu
+- `sse-intrinsics-i386.ll`: target triple i386-unknown-linux-gnu
+- `sse2-intrinsics-i386.ll`: target triple i386-unknown-linux-gnu
+- `sse41-intrinsics-i386.ll`: target triple i386-unknown-linux-gnu
+- `vararg-too-large.ll`: target triple i386-unknown-linux-gnu
+- `vararg.ll`: target triple i386-unknown-linux-gnu
+- `vararg_call.ll`: target triple i386-unknown-linux-gnu
+- `vararg_shadow.ll`: target triple i386-unknown-linux-gnu
+- `invalidate_global_aa.ll` RUN `opt < %s -S -passes='require<globals-aa>,module(msan)' -debug-pass-manager 2>&1 | FileCheck %s`: diagnostic output flag -debug-pass-manager
+- `invalidate_global_aa.ll` RUN `opt < %s -S -passes='require<globals-aa>,module(dfsan)' -debug-pass-manager 2>&1 | FileCheck %s`: diagnostic output flag -debug-pass-manager
+- `invalidate_global_aa.ll` RUN `opt < %s -S -passes='require<globals-aa>,module(sancov-module)' -sanitizer-coverage-level=2 -debug-pass-manager 2>&1 | FileCheck %s`: diagnostic output flag -debug-pass-manager
+- `invalidate_global_aa.ll` RUN `opt < %s -S -passes='require<globals-aa>,module(hwasan)' -debug-pass-manager 2>&1 | FileCheck %s`: diagnostic output flag -debug-pass-manager
+- `invalidate_global_aa.ll` RUN `opt < %s -S -passes='require<globals-aa>,module(asan)' -debug-pass-manager 2>&1 | FileCheck %s`: diagnostic output flag -debug-pass-manager
+- `origin-array.ll`: target triple aarch64-unknown-linux-gnu
+- `vector-track-origins-neon.ll`: target triple aarch64-grtev4-linux-gnu

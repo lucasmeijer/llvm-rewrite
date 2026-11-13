@@ -1,0 +1,11 @@
+# Skipped while importing llvm/test/Transforms/LowerAllowCheck (llvmorg-23.1.5)
+
+2 of 4 files imported. Regenerate with `./harness/run import-llvm Transforms/LowerAllowCheck`.
+
+- `lower-builtin-allow-check-pipeline.ll` RUN `opt < %s -passes='require<profile-summary>,function(lower-allow-check<cutoffs[7]=0;cutoffs[8]=1>)' -S -o - -print-pipeline-passes | FileCheck %s`: diagnostic output flag -print-pipeline-passes
+- `lower-builtin-allow-check-remarks.ll` RUN `opt < %s -passes='require<profile-summary>,function(lower-allow-check)' -lower-allow-check-random-rate=1 -pass-remarks=lower-allow-check -pass-remarks-missed=lower-allow-check -S 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=lower-allow-check
+- `lower-builtin-allow-check-remarks.ll` RUN `opt < %s -passes='require<profile-summary>,function(lower-allow-check)' -lower-allow-check-random-rate=0 -pass-remarks=lower-allow-check -pass-remarks-missed=lower-allow-check -S 2>&1 | FileCheck %s --check-prefixes=REMOVE`: diagnostic output flag -pass-remarks=lower-allow-check
+- `lower-builtin-allow-check-remarks.ll` RUN `opt < %s -passes='require<profile-summary>,function(lower-allow-check)' -lower-allow-check-percentile-cutoff-hot=0 -pass-remarks=lower-allow-check -pass-remarks-missed=lower-allow-check -S 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=lower-allow-check
+- `lower-builtin-allow-check-remarks.ll` RUN `opt < %s -passes='require<profile-summary>,function(lower-allow-check)' -lower-allow-check-percentile-cutoff-hot=1000000 -pass-remarks=lower-allow-check -pass-remarks-missed=lower-allow-check -S 2>&1 | FileCheck %s --check-prefixes=REMOVE`: diagnostic output flag -pass-remarks=lower-allow-check
+- `lower-builtin-allow-check-remarks.ll` RUN `opt < %s -passes='require<profile-summary>,function(lower-allow-check<cutoffs[7]=0;runtime_check=1000000>)' -pass-remarks=lower-allow-check -pass-remarks-missed=lower-allow-check -S 2>&1 | FileCheck %s --check-prefixes=MIXED`: diagnostic output flag -pass-remarks=lower-allow-check
+- `lower-builtin-allow-check-remarks.ll` RUN `opt < %s -passes='require<profile-summary>,function(lower-allow-check<cutoffs[7]=1000000;runtime_check=0>)' -pass-remarks=lower-allow-check -pass-remarks-missed=lower-allow-check -S 2>&1 | FileCheck %s --check-prefixes=MIXED2`: diagnostic output flag -pass-remarks=lower-allow-check

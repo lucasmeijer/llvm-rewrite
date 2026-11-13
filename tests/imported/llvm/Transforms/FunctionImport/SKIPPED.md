@@ -1,0 +1,93 @@
+# Skipped while importing llvm/test/Transforms/FunctionImport (llvmorg-23.1.5)
+
+0 of 39 files imported. Regenerate with `./harness/run import-llvm Transforms/FunctionImport`.
+
+- `adjustable_threshold.ll`: no RUN lines
+- `attr_fixup_dae_noundef.ll`: no RUN lines
+- `cg_profile.ll`: no RUN lines
+- `comdat.ll`: no RUN lines
+- `funcimport-debug-retained-nodes.ll`: no RUN lines
+- `funcimport.ll`: no RUN lines
+- `funcimport_alias.ll`: no RUN lines
+- `funcimport_cutoff.ll`: no RUN lines
+- `funcimport_debug.ll`: no RUN lines
+- `funcimport_forcecold.ll`: no RUN lines
+- `funcimport_resolved1.ll`: no RUN lines
+- `funcimport_resolved2.ll`: no RUN lines
+- `funcimport_var2.ll`: no RUN lines
+- `hotness_based_import.ll`: no RUN lines
+- `import_stats.ll`: no RUN lines
+- `inline-history.ll`: no RUN lines
+- `inlineasm.ll`: no RUN lines
+- `noinline.ll`: no RUN lines
+- `not-prevailing.ll`: no RUN lines
+- `adjustable_threshold.ll` RUN `opt -module-summary %s -o %t.bc`: writes to a file
+- `adjustable_threshold.ll` RUN `opt -module-summary %p/Inputs/adjustable_threshold.ll -o %t2.bc`: uses lit substitution %p/Inputs/adjustable_threshold.ll
+- `adjustable_threshold.ll` RUN `llvm-lto -thinlto -o %t3 %t.bc %t2.bc`: not an opt invocation
+- `adjustable_threshold.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=10 -S | FileCheck %s --check-prefix=INSTLIM-DEFAULT`: uses lit substitution %t3.thinlto.bc
+- `adjustable_threshold.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=10 -import-instr-evolution-factor=0.5 -S | FileCheck %s --check-prefix=INSTLIM-PROGRESSIVE`: uses lit substitution %t3.thinlto.bc
+- `adjustable_threshold.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=1 -force-import-all -S | FileCheck %s --check-prefix=IMPORTALL`: uses lit substitution %t3.thinlto.bc
+- `attr_fixup_dae_noundef.ll` RUN `opt -module-summary %p/Inputs/attr_fixup_dae_noundef.ll -o %t.inputs.attr_fixup_dae_noundef.bc`: uses lit substitution %p/Inputs/attr_fixup_dae_noundef.ll
+- `attr_fixup_dae_noundef.ll` RUN `opt -module-summary %s -o %t.main.bc`: writes to a file
+- `attr_fixup_dae_noundef.ll` RUN `llvm-lto -thinlto -o %t.summary %t.main.bc %t.inputs.attr_fixup_dae_noundef.bc`: not an opt invocation
+- `attr_fixup_dae_noundef.ll` RUN `opt -passes=function-import -summary-file %t.summary.thinlto.bc %t.main.bc -S 2>&1 | FileCheck %s`: uses lit substitution %t.summary.thinlto.bc
+- `cg_profile.ll` RUN `opt -passes=cg-profile -module-summary %s -o %t.bc`: writes to a file
+- `cg_profile.ll` RUN `opt -module-summary %p/Inputs/cg_profile.ll -o %t2.bc`: uses lit substitution %p/Inputs/cg_profile.ll
+- `cg_profile.ll` RUN `llvm-lto -thinlto -o %t3 %t.bc %t2.bc`: not an opt invocation
+- `cg_profile.ll` RUN `opt -passes=function-import -print-imports -summary-file %t3.thinlto.bc %t.bc -S 2>&1 | FileCheck %s`: diagnostic output flag -print-imports
+- `comdat.ll` RUN `opt -thinlto-bc -o %t1.bc %s`: writes to a file
+- `comdat.ll` RUN `opt -thinlto-bc -o %t2.bc %S/Inputs/comdat.ll`: writes to a file
+- `comdat.ll` RUN `llvm-lto2 run -save-temps -o %t3 %t1.bc %t2.bc -r %t1.bc,lwt_fun,plx -r %t2.bc,main,plx -r %t2.bc,lwt_fun,`: not an opt invocation
+- `comdat.ll` RUN `llvm-dis -o - %t3.1.3.import.bc | FileCheck %s`: not an opt invocation
+- `funcimport-debug-retained-nodes.ll`: REQUIRES asserts
+- `funcimport.ll`: REQUIRES asserts
+- `funcimport_alias.ll` RUN `opt -module-summary %s -o %t.bc`: writes to a file
+- `funcimport_alias.ll` RUN `opt -module-summary %p/Inputs/funcimport_alias.ll -o %t2.bc`: uses lit substitution %p/Inputs/funcimport_alias.ll
+- `funcimport_alias.ll` RUN `llvm-lto -thinlto -o %t3 %t.bc %t2.bc`: not an opt invocation
+- `funcimport_alias.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -S | FileCheck %s`: uses lit substitution %t3.thinlto.bc
+- `funcimport_cutoff.ll`: REQUIRES asserts
+- `funcimport_debug.ll` RUN `opt -module-summary %s -o %t.bc`: writes to a file
+- `funcimport_debug.ll` RUN `opt -module-summary %p/Inputs/funcimport_debug.ll -o %t2.bc`: uses lit substitution %p/Inputs/funcimport_debug.ll
+- `funcimport_debug.ll` RUN `llvm-lto -thinlto -o %t3 %t.bc %t2.bc`: not an opt invocation
+- `funcimport_debug.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -S | FileCheck %s`: uses lit substitution %t3.thinlto.bc
+- `funcimport_forcecold.ll`: REQUIRES asserts
+- `funcimport_forcecold_samplepgo.ll`: REQUIRES asserts
+- `funcimport_resolved.ll`: REQUIRES asserts
+- `funcimport_var.ll` RUN `opt -module-summary %s -o %t.bc`: writes to a file
+- `funcimport_var.ll` RUN `opt -module-summary %p/Inputs/funcimport_var2.ll -o %t2.bc`: uses lit substitution %p/Inputs/funcimport_var2.ll
+- `funcimport_var.ll` RUN `llvm-lto -thinlto -thinlto-action=thinlink -o %t3 %t.bc %t2.bc`: not an opt invocation
+- `funcimport_var.ll` RUN `llvm-lto -thinlto -thinlto-action=import -thinlto-index=%t3 %t.bc %t2.bc`: not an opt invocation
+- `funcimport_var.ll` RUN `llvm-lto -thinlto -thinlto-action=run %t.bc %t2.bc -exported-symbol=_Z4LinkPKcS0_`: not an opt invocation
+- `funcimport_var.ll` RUN `llvm-nm %t.bc.thinlto.o | FileCheck %s --implicit-check-not=globalvar`: not an opt invocation
+- `funcimport_var.ll` RUN `llvm-lto2 run %t.bc %t2.bc -o %t.out -r %t.bc,_Z4LinkPKcS0_,plx -r %t.bc,link,l -r %t2.bc,globalvar,plx -r %t2.bc,get_link,plx`: not an opt invocation
+- `funcimport_var.ll` RUN `llvm-nm %t.out.1 | FileCheck %s --implicit-check-not=globalvar`: not an opt invocation
+- `hotness_based_import.ll` RUN `opt -module-summary %s -o %t.bc`: writes to a file
+- `hotness_based_import.ll` RUN `opt -module-summary %p/Inputs/hotness_based_import.ll -o %t2.bc`: uses lit substitution %p/Inputs/hotness_based_import.ll
+- `hotness_based_import.ll` RUN `llvm-lto -thinlto -o %t3 %t.bc %t2.bc`: not an opt invocation
+- `hotness_based_import.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=1 --S | FileCheck %s --check-prefix=HOT-DEFAULT`: uses lit substitution %t3.thinlto.bc
+- `hotness_based_import.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=1 --S -import-hot-multiplier=3.0 -import-cold-multiplier=0.0 | FileCheck %s --check-prefix=HOT-DEFAULT`: uses lit substitution %t3.thinlto.bc
+- `hotness_based_import.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=1 --S -import-hot-multiplier=3.0 | FileCheck %s --check-prefix=HOT-DEFAULT`: uses lit substitution %t3.thinlto.bc
+- `hotness_based_import.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=1 --S -import-hot-multiplier=3.0 -import-instr-evolution-factor=0.0 | FileCheck %s --check-prefix=HOT-DEFAULT`: uses lit substitution %t3.thinlto.bc
+- `hotness_based_import.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=1 --S -import-hot-multiplier=3.0 -import-hot-evolution-factor=1.0 | FileCheck %s --check-prefix=HOT-DEFAULT`: uses lit substitution %t3.thinlto.bc
+- `hotness_based_import.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=1 --S -import-hot-multiplier=3.0 -import-hot-evolution-factor=0.0 | FileCheck %s --check-prefix=HOT-EVOLUTION`: uses lit substitution %t3.thinlto.bc
+- `hotness_based_import.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=1 -import-hot-multiplier=1.0 --S | FileCheck %s --check-prefix=HOT-ONE`: uses lit substitution %t3.thinlto.bc
+- `hotness_based_import.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=1 -import-hot-multiplier=1.0 -import-cold-multiplier=1.0 --S | FileCheck %s --check-prefix=HOT-COLD-ONE`: uses lit substitution %t3.thinlto.bc
+- `hotness_based_import.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -import-instr-limit=10 -import-hot-multiplier=0.0 -import-cold-multiplier=1.0 --S | FileCheck %s --check-prefix=HOT-ZERO`: uses lit substitution %t3.thinlto.bc
+- `import_stats.ll`: REQUIRES asserts
+- `inline-history.ll` RUN `opt -module-summary %s -o %t.bc`: writes to a file
+- `inline-history.ll` RUN `opt -module-summary %p/Inputs/inline-history.ll -o %t2.bc`: uses lit substitution %p/Inputs/inline-history.ll
+- `inline-history.ll` RUN `llvm-lto -thinlto -o %t3 %t.bc %t2.bc`: not an opt invocation
+- `inline-history.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -S | FileCheck %s --implicit-check-not=inline_history`: uses lit substitution %t3.thinlto.bc
+- `inlineasm.ll` RUN `opt -module-summary %s -o %t.bc`: writes to a file
+- `inlineasm.ll` RUN `opt -module-summary %p/Inputs/inlineasm.ll -o %t2.bc`: uses lit substitution %p/Inputs/inlineasm.ll
+- `inlineasm.ll` RUN `llvm-lto -thinlto -o %t3 %t.bc %t2.bc`: not an opt invocation
+- `inlineasm.ll` RUN `opt -passes=function-import -summary-file %t3.thinlto.bc %t.bc -S 2>&1 | FileCheck %s`: uses lit substitution %t3.thinlto.bc
+- `module-flags.ll`: uses split-file
+- `noinline.ll` RUN `opt -module-summary %s -o %t.main.bc`: writes to a file
+- `noinline.ll` RUN `opt -module-summary %p/Inputs/noinline.ll -o %t.inputs.noinline.bc`: uses lit substitution %p/Inputs/noinline.ll
+- `noinline.ll` RUN `llvm-lto -thinlto -o %t.summary %t.main.bc %t.inputs.noinline.bc`: not an opt invocation
+- `noinline.ll` RUN `opt -passes=function-import -summary-file %t.summary.thinlto.bc %t.main.bc -S 2>&1 | FileCheck -check-prefix=NOIMPORT %s`: uses lit substitution %t.summary.thinlto.bc
+- `noinline.ll` RUN `opt -passes=function-import -force-import-all -summary-file %t.summary.thinlto.bc %t.main.bc -S 2>&1 | FileCheck -check-prefix=IMPORT %s`: uses lit substitution %t.summary.thinlto.bc
+- `not-prevailing.ll` RUN `opt -module-summary %s -o %t1.bc`: writes to a file
+- `not-prevailing.ll` RUN `opt -module-summary -o %t2.bc %S/Inputs/not-prevailing.ll`: writes to a file
+- `not-prevailing.ll` RUN `not --crash llvm-lto2 run -o %t3.bc %t1.bc %t2.bc -r %t1.bc,bar,px -r %t1.bc,foo,x -r %t2.bc,foo,x -save-temps 2>&1 | FileCheck %s`: not an opt invocation

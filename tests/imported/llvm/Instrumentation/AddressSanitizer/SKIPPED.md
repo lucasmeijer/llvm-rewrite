@@ -1,0 +1,50 @@
+# Skipped while importing llvm/test/Instrumentation/AddressSanitizer (llvmorg-23.1.5)
+
+93 of 125 files imported. Regenerate with `./harness/run import-llvm Instrumentation/AddressSanitizer`.
+
+- `adaptive_constant_global_redzones.ll`: in a AMDGPU target directory
+- `adaptive_global_redzones.ll`: in a AMDGPU target directory
+- `asan_do_not_instrument_lds.ll`: in a AMDGPU target directory
+- `asan_do_not_instrument_scratch.ll`: in a AMDGPU target directory
+- `asan_do_not_internalize.ll`: in a AMDGPU target directory
+- `asan_instrument_constant_address_space.ll`: in a AMDGPU target directory
+- `asan_instrument_generic_address_space.ll`: in a AMDGPU target directory
+- `asan_instrument_global_address_space.ll`: in a AMDGPU target directory
+- `asan_instrument_mem_intrinsics.ll`: in a AMDGPU target directory
+- `global_metadata_addrspacecasts.ll`: in a AMDGPU target directory
+- `instrument-stack.ll`: in a AMDGPU target directory
+- `no_redzones_in_lds_globals.ll`: in a AMDGPU target directory
+- `no_redzones_in_scratch_globals.ll`: in a AMDGPU target directory
+- `asan-rvv-intrinsics.ll`: in a RISCV target directory
+- `asm_cpuid.ll`: target triple i386-pc-windows-msvc
+- `asm_more_registers_than_available.ll` RUN `opt < %s -passes=asan -S -o %t.ll`: writes to a file
+- `asm_more_registers_than_available.ll` RUN `FileCheck %s < %t.ll`: not an opt invocation
+- `bug_11395.ll`: target triple i386-unknown-linux-gnu
+- `aarch64be.ll`: REQUIRES aarch64-registered-target
+- `basic-msvc64.ll` RUN `opt -passes=asan -mtriple=aarch64-pc-windows-msvc -S < %s | FileCheck %s`: non-x86_64 target aarch64-pc-windows-msvc
+- `calls-only-smallfn.ll`: target triple arm64-apple-macosx13.0.0
+- `calls-only.ll`: target triple arm64-apple-macosx13.0.0
+- `do-not-touch-comdat-global.ll`: target triple i686-pc-windows-msvc
+- `dynamic-shadow-darwin.ll` RUN `opt -passes=asan -mtriple=arm64_32-apple-watchos --data-layout="e-m:o-p:32:32-i64:64-i128:128-n32:64-S128" -S < %s | FileCheck %s --check-prefixes=CHECK,CHECK-DYNAMIC -DPTR_SIZE=32`: non-x86_64 target arm64_32-apple-watchos
+- `dynamic-shadow-darwin.ll` RUN `opt -passes=asan -mtriple=armv7k-apple-watchos --data-layout="e-m:o-p:32:32-Fi8-i64:64-a:0:32-n32-S128" -S < %s | FileCheck %s --check-prefixes=CHECK,CHECK-DYNAMIC -DPTR_SIZE=32`: non-x86_64 target armv7k-apple-watchos
+- `dynamic-shadow-darwin.ll` RUN `opt -passes=asan -mtriple=arm64-apple-ios --data-layout="e-m:o-i64:64-i128:128-n32:64-S128" -S < %s | FileCheck %s --check-prefixes=CHECK,CHECK-DYNAMIC -DPTR_SIZE=64`: non-x86_64 target arm64-apple-ios
+- `dynamic-shadow-darwin.ll` RUN `opt -passes=asan -mtriple=armv7s-apple-ios --data-layout="e-m:o-p:32:32-Fi8-f64:32:64-v64:32:64-v128:32:128-a:0:32-n32-S32" -S < %s | FileCheck %s --check-prefixes=CHECK,CHECK-DYNAMIC -DPTR_SIZE=32`: non-x86_64 target armv7s-apple-ios
+- `dynamic-shadow-darwin.ll` RUN `opt -passes=asan -mtriple=i386-apple-watchos-simulator --data-layout="e-m:o-p:32:32-f64:32:64-f80:128-n8:16:32-S128" -S < %s | FileCheck %s --check-prefixes=CHECK,CHECK-DYNAMIC -DPTR_SIZE=32`: non-x86_64 target i386-apple-watchos-simulator
+- `dynamic-shadow-darwin.ll` RUN `opt -passes=asan -mtriple=i386-apple-ios-simulator --data-layout="e-m:o-p:32:32-f64:32:64-f80:128-n8:16:32-S128" -S < %s | FileCheck %s --check-prefixes=CHECK,CHECK-DYNAMIC -DPTR_SIZE=32`: non-x86_64 target i386-apple-ios-simulator
+- `dynamic-shadow-darwin.ll` RUN `opt -passes=asan -mtriple=arm64-apple-macosx --data-layout="e-m:o-i64:64-i128:128-n32:64-S128" -S < %s | FileCheck %s --check-prefixes=CHECK,CHECK-DYNAMIC -DPTR_SIZE=64`: non-x86_64 target arm64-apple-macosx
+- `experiment.ll`: REQUIRES loongarch-registered-target, mips-registered-target, systemz-registered-target
+- `freebsd.ll` RUN `opt < %s -passes=asan -S -mtriple=i386-unknown-freebsd -data-layout="e-m:e-p:32:32-f64:32:64-f80:32-n8:16:32-S128" | FileCheck --check-prefix=CHECK-32 %s`: non-x86_64 target i386-unknown-freebsd
+- `freebsd.ll` RUN `opt < %s -passes=asan -S -mtriple=aarch64-unknown-freebsd -data-layout="e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128" | FileCheck --check-prefix=CHECK-AARCH64 %s`: non-x86_64 target aarch64-unknown-freebsd
+- `freebsd.ll` RUN `opt < %s -passes=asan -S -mtriple=mips64-unknown-freebsd -data-layout="E-m:e-i64:64-n32:64-S128" | FileCheck --check-prefix=CHECK-MIPS64 %s`: non-x86_64 target mips64-unknown-freebsd
+- `fuchsia.ll` RUN `opt -passes=asan -S -mtriple=aarch64-unknown-fuchsia < %s | FileCheck %s`: non-x86_64 target aarch64-unknown-fuchsia
+- `global-metadata-code-model-medium.ll` RUN `opt < %s -mtriple=ppc64-unknown-linux-gnu -passes=asan -S | FileCheck %s --check-prefixes=CHECK,PPC`: non-x86_64 target ppc64-unknown-linux-gnu
+- `global_metadata_array.ll`: uses split-file
+- `global_with_comdat.ll`: uses split-file
+- `localescape.ll`: target triple i686-pc-windows-msvc18.0.0
+- `mem-intrinsics.ll`: REQUIRES loongarch-registered-target, mips-registered-target, systemz-registered-target
+- `module-flags-aarch64.ll`: REQUIRES aarch64-registered-target
+- `ptrauth-module-flags-aarch64.ll`: REQUIRES aarch64-registered-target
+- `stack-poisoning-and-lifetime-be.ll`: target triple powerpc64-unknown-linux-gnu
+- `wasm.ll` RUN `opt -passes=asan -S -mtriple=wasm32-unknown-emscripten < %s | FileCheck %s --check-prefixes=WASM32`: non-x86_64 target wasm32-unknown-emscripten
+- `wasm.ll` RUN `opt -passes=asan -S -mtriple=wasm64-unknown-emscripten < %s | FileCheck %s --check-prefixes=WASM64`: non-x86_64 target wasm64-unknown-emscripten
+- `with-ifunc.ll`: target triple armv7--linux-android

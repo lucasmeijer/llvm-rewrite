@@ -1,0 +1,212 @@
+# Skipped while importing llvm/test/Transforms/SampleProfile (llvmorg-23.1.5)
+
+82 of 134 files imported. Regenerate with `./harness/run import-llvm Transforms/SampleProfile`.
+
+- `profile-symbol-list.ll`: no RUN lines
+- `compressed-profile-symbol-list.ll`: REQUIRES zlib
+- `cov-zero-samples.ll` RUN `opt %s -passes='function(instcombine),sample-profile' -sample-profile-file=%S/Inputs/cov-zero-samples.prof -sample-profile-check-record-coverage=100 -pass-remarks=sample-profile -pass-remarks-analysis=sample-profile -o /dev/null 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=sample-profile
+- `cov-zero-samples.ll` RUN `opt %s -passes="function(instcombine),sample-profile" -sample-profile-file=%S/Inputs/cov-zero-samples.prof -sample-profile-check-record-coverage=100 -pass-remarks=sample-profile -pass-remarks-analysis=sample-profile -o /dev/null 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=sample-profile
+- `coverage-warning.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/coverage-warning.prof -sample-profile-check-record-coverage=90 -sample-profile-check-sample-coverage=100 -o /dev/null 2>&1 | FileCheck %s`: writes to a file
+- `csspgo-import-list.ll` RUN `llvm-profdata merge --sample --extbinary %S/Inputs/csspgo-import-list.prof -o %t.prof`: not an opt invocation
+- `csspgo-import-list.ll` RUN `opt < %s -passes='thinlto-pre-link<O2>' -pgo-kind=pgo-sample-use-pipeline -sample-profile-file=%t.prof --sample-profile-even-flow-distribution=0 -S | FileCheck %s`: uses lit substitution -sample-profile-file=%t.prof
+- `csspgo-import-list.ll` RUN `llvm-profdata show --sample -show-sec-info-only %t.prof | FileCheck %s --check-prefix=CHECK-ORDERED`: not an opt invocation
+- `csspgo-import-list.ll` RUN `llvm-profdata merge --sample --extbinary --use-md5 %S/Inputs/csspgo-import-list.prof -o %t.md5`: not an opt invocation
+- `csspgo-import-list.ll` RUN `opt < %s -passes='thinlto-pre-link<O2>' -pgo-kind=pgo-sample-use-pipeline -sample-profile-file=%t.md5 --sample-profile-even-flow-distribution=0 -S | FileCheck %s`: uses lit substitution -sample-profile-file=%t.md5
+- `csspgo-import-list.ll` RUN `llvm-profdata show --sample -show-sec-info-only %t.md5 | FileCheck %s --check-prefix=CHECK-ORDERED`: not an opt invocation
+- `csspgo-inline-debug.ll`: REQUIRES asserts
+- `csspgo-inline-icall.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/indirect-call-csspgo.prof -sample-profile-icp-relative-hotness=1  -pass-remarks=sample-profile -S -o /dev/null 2>&1 | FileCheck -check-prefix=ICP-ALL %s`: diagnostic output flag -pass-remarks=sample-profile
+- `csspgo-inline-icall.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/indirect-call-csspgo.prof -sample-profile-icp-relative-hotness=1  -pass-remarks=sample-profile -sample-profile-inline-size=0 -S -o /dev/null 2>&1 | FileCheck -check-prefix=ICP-HOT %s`: diagnostic output flag -pass-remarks=sample-profile
+- `csspgo-inline-icall.ll` RUN `llvm-profdata merge --sample --extbinary --use-md5 %S/Inputs/indirect-call-csspgo.prof -o %t.md5`: not an opt invocation
+- `csspgo-inline-icall.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t.md5 -sample-profile-icp-relative-hotness=1  -pass-remarks=sample-profile -sample-profile-inline-size=0 -S -o /dev/null 2>&1 | FileCheck -check-prefix=ICP-HOT %s`: uses lit substitution -sample-profile-file=%t.md5
+- `csspgo-inline.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/profile-context-tracker.prof -sample-profile-inline-size -sample-profile-prioritized-inline=0 -profile-sample-accurate -S -pass-remarks=inline -o /dev/null 2>&1 | FileCheck %s --check-prefix=INLINE-BASE`: diagnostic output flag -pass-remarks=inline
+- `csspgo-inline.ll` RUN `llvm-profdata merge --sample --extbinary --use-md5 %S/Inputs/profile-context-tracker.prof -o %t.md5`: not an opt invocation
+- `csspgo-inline.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t.md5 -sample-profile-inline-size -sample-profile-prioritized-inline=0 -profile-sample-accurate -S -pass-remarks=inline -o /dev/null 2>&1 | FileCheck %s --check-prefix=INLINE-BASE`: uses lit substitution -sample-profile-file=%t.md5
+- `csspgo-inline.ll` RUN `llvm-profdata merge --sample --text --convert-sample-profile-layout=nest  %S/Inputs/profile-context-tracker.prof -o %t.prof`: not an opt invocation
+- `csspgo-inline.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t.prof -sample-profile-inline-size -sample-profile-prioritized-inline=0 -profile-sample-accurate -S -pass-remarks=inline -o /dev/null 2>&1 | FileCheck %s --check-prefix=INLINE-BASE`: uses lit substitution -sample-profile-file=%t.prof
+- `csspgo-inline.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/profile-context-tracker.prof -sample-profile-inline-size -profile-sample-accurate -S -pass-remarks=inline -o /dev/null 2>&1 | FileCheck %s --check-prefix=INLINE-NEW`: diagnostic output flag -pass-remarks=inline
+- `csspgo-inline.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t.prof -sample-profile-prioritized-inline -sample-profile-inline-size -profile-sample-accurate -S -pass-remarks=inline -o /dev/null 2>&1 | FileCheck %s --check-prefix=INLINE-NEW`: uses lit substitution -sample-profile-file=%t.prof
+- `csspgo-inline.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/profile-context-tracker.prof -sample-profile-inline-size -profile-summary-cutoff-hot=999990 -profile-sample-accurate -S -pass-remarks=inline -o /dev/null 2>&1 | FileCheck %s --check-prefix=INLINE-BASE`: diagnostic output flag -pass-remarks=inline
+- `csspgo-inline.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/profile-context-tracker.prof -sample-profile-inline-size -sample-profile-cold-inline-threshold=200 -profile-sample-accurate -S -pass-remarks=inline -o /dev/null 2>&1 | FileCheck %s --check-prefix=INLINE-BASE`: diagnostic output flag -pass-remarks=inline
+- `csspgo-inline.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/profile-context-tracker.prof -sample-profile-inline-size -profile-summary-cutoff-hot=999990 -sample-profile-inline-limit-min=0 -sample-profile-inline-growth-limit=1 -profile-sample-accurate -S -pass-remarks=inline -o /dev/null 2>&1 | FileCheck %s --allow-empty --check-prefix=INLINE-NEW-LIMIT1`: diagnostic output flag -pass-remarks=inline
+- `csspgo-inline.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/profile-context-tracker.prof -sample-profile-inline-size -profile-summary-cutoff-hot=999990 -sample-profile-inline-limit-min=10 -sample-profile-inline-growth-limit=1 -profile-sample-accurate -S -pass-remarks=inline -o /dev/null 2>&1 | FileCheck %s --check-prefix=INLINE-NEW-LIMIT2`: diagnostic output flag -pass-remarks=inline
+- `csspgo-profile-checksum-mismatch-attr.ll`: REQUIRES asserts
+- `csspgo-summary.ll` @analysis `-passes=sample-profile,print-profile-summary -sample-profile-use-profi=0 -sample-profile-file=tests/imported/llvm/Transforms/SampleProfile/Inputs/profile-context-tracker.prof -profile-summary-cutoff-hot=999900 -profile-sample-accurate -profile-summary-contextless=1`: nondeterministic output
+- `csspgo-use-preinliner.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/csspgo-use-preinliner.prof -pass-remarks=inline -sample-profile-prioritized-inline -profile-sample-accurate -sample-profile-use-preinliner=0 -S 2>&1 | FileCheck %s --check-prefix=DEFAULT`: diagnostic output flag -pass-remarks=inline
+- `csspgo-use-preinliner.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/csspgo-use-preinliner.prof -pass-remarks=inline -sample-profile-prioritized-inline -profile-sample-accurate -sample-profile-use-preinliner=1 -S 2>&1 | FileCheck %s --check-prefix=PREINLINE`: diagnostic output flag -pass-remarks=inline
+- `csspgo-use-preinliner.ll` RUN `llvm-profdata merge --sample --text --convert-sample-profile-layout=nest  -generate-merged-base-profiles=0 %S/Inputs/csspgo-use-preinliner.prof -o %t.prof`: not an opt invocation
+- `csspgo-use-preinliner.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t.prof -pass-remarks=inline -sample-profile-prioritized-inline -profile-sample-accurate -sample-profile-use-preinliner=0 -S 2>&1 | FileCheck %s --check-prefix=DEFAULT`: uses lit substitution -sample-profile-file=%t.prof
+- `csspgo-use-preinliner.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t.prof -pass-remarks=inline -sample-profile-prioritized-inline -profile-sample-accurate -sample-profile-use-preinliner=1 -S 2>&1 | FileCheck %s --check-prefix=PREINLINE`: uses lit substitution -sample-profile-file=%t.prof
+- `inline-coverage.ll` RUN `opt %s -passes='function(instcombine),sample-profile' -sample-profile-file=%S/Inputs/inline-coverage.prof -sample-profile-check-record-coverage=100 -sample-profile-check-sample-coverage=110 -pass-remarks=sample-profile -pass-remarks-analysis=sample-profile -o /dev/null 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=sample-profile
+- `inline-coverage.ll` RUN `opt %s -passes="function(instcombine),sample-profile" -sample-profile-file=%S/Inputs/inline-coverage.prof -sample-profile-check-record-coverage=100 -sample-profile-check-sample-coverage=110 -pass-remarks=sample-profile -pass-remarks-analysis=sample-profile -o /dev/null 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=sample-profile
+- `inline-hot-callsite-threshold.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-hot-callsite-threshold.prof -S -pass-remarks=sample-profile -sample-profile-hot-inline-threshold=100 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=sample-profile
+- `inline-hot-callsite-threshold.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-hot-callsite-threshold.prof -S -pass-remarks=sample-profile -sample-profile-hot-inline-threshold=1 2>&1 | FileCheck %s --check-prefix=COST`: diagnostic output flag -pass-remarks=sample-profile
+- `inline-mergeprof-dup.ll` @opt `'-passes=function(callsite-splitting),sample-profile' -sample-profile-file=tests/imported/llvm/Transforms/SampleProfile/Inputs/inline-mergeprof.prof -sample-profile-merge-inlinee=true`: oracle fails
+- `inline-mergeprof-dup.ll`: no working RUN lines
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=DEFAULT %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-inline-replay=%S/Inputs/inline-replay.txt -sample-profile-inline-replay-scope=Module -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-MODULE-ORIGINAL %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown-missing.prof -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=DEFAULT-NOINLINING -allow-empty %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown-missing.prof -sample-profile-inline-replay=%S/Inputs/inline-replay.txt -sample-profile-inline-replay-scope=Module -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-MODULE-MISSING %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -profile-summary-hot-count=500000 -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=DEFAULT-NOINLINING -allow-empty %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -profile-summary-hot-count=500000 -sample-profile-inline-replay=%S/Inputs/inline-replay.txt -sample-profile-inline-replay-scope=Module -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-MODULE-ORIGINAL -allow-empty %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-inline-replay=%S/Inputs/inline-replay.txt -sample-profile-inline-replay-scope=Module -sample-profile-inline-replay-fallback=Original -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-MODULE-ORIGINAL %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-inline-replay=%S/Inputs/inline-replay-line.txt -sample-profile-inline-replay-scope=Module -sample-profile-inline-replay-fallback=Original -sample-profile-inline-replay-format=Line -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-MODULE-ORIGINAL %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-inline-replay=%S/Inputs/inline-replay-linecolumn.txt -sample-profile-inline-replay-scope=Module -sample-profile-inline-replay-fallback=Original -sample-profile-inline-replay-format=LineColumn -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-MODULE-ORIGINAL %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-inline-replay=%S/Inputs/inline-replay-linediscriminator.txt -sample-profile-inline-replay-scope=Module -sample-profile-inline-replay-fallback=Original -sample-profile-inline-replay-format=LineDiscriminator -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-MODULE-ORIGINAL %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-inline-replay=%S/Inputs/inline-replay.txt -sample-profile-inline-replay-scope=Module -sample-profile-inline-replay-fallback=AlwaysInline -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-MODULE-ALWAYS %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-inline-replay=%S/Inputs/inline-replay.txt -sample-profile-inline-replay-scope=Module -sample-profile-inline-replay-fallback=NeverInline -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-MODULE-NEVER %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown-inline-all.prof -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=DEFAULT-ALL %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown-inline-all.prof -sample-profile-inline-replay=%S/Inputs/inline-replay-function.txt -sample-profile-inline-replay-scope=Function -sample-profile-inline-replay-fallback=NeverInline -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-ALL-FUNCTION-NEVER %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown-inline-all.prof -sample-profile-inline-replay=%S/Inputs/inline-replay-function.txt -sample-profile-inline-replay-scope=Function -sample-profile-inline-replay-fallback=Original -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-ALL-FUNCTION-ORIGINAL %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown-inline-all.prof -sample-profile-inline-replay=%S/Inputs/inline-replay-function.txt -sample-profile-inline-replay-scope=Function -sample-profile-inline-replay-fallback=AlwaysInline -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-ALL-FUNCTION-ALWAYS %s`: diagnostic output flag -pass-remarks=inline
+- `inline-replay.ll` RUN `not opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-inline-replay=%S/non-existent-dummy.txt -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-ERROR %s`: not an opt invocation
+- `inline-replay.ll` RUN `not opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-inline-replay=%S/Inputs/inline-replay.txt -sample-profile-inline-replay-scope=function -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-ERROR-SCOPE %s`: not an opt invocation
+- `inline-replay.ll` RUN `not opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-inline-replay=%S/Inputs/inline-replay.txt -sample-profile-inline-replay-fallback=original -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-ERROR-FALLBACK %s`: not an opt invocation
+- `inline-replay.ll` RUN `not opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/inline-topdown.prof -sample-profile-inline-replay=%S/Inputs/inline-replay.txt -sample-profile-inline-replay-format=line -sample-profile-merge-inlinee -sample-profile-top-down-load -pass-remarks=inline --disable-output 2>&1 | FileCheck -check-prefix=REPLAY-ERROR-FORMAT %s`: not an opt invocation
+- `inline-stats.ll`: REQUIRES asserts
+- `nolocinfo.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/nolocinfo.prof -S -pass-remarks=sample-profile 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=sample-profile
+- `non-probe-stale-profile-matching.ll`: REQUIRES asserts
+- `profile-context-tracker-debug.ll`: REQUIRES asserts
+- `profile-context-tracker.ll` RUN `llvm-profdata merge --sample --extbinary %S/Inputs/profile-context-tracker.prof -o %t`: not an opt invocation
+- `profile-context-tracker.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t -sample-profile-inline-size -sample-profile-prioritized-inline=0 -profile-sample-accurate -sample-profile-even-flow-distribution=0 -S | FileCheck %s --check-prefix=INLINE-ALL`: uses lit substitution -sample-profile-file=%t
+- `profile-context-tracker.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t -sample-profile-inline-size -sample-profile-cold-inline-threshold=200 -profile-sample-accurate -sample-profile-even-flow-distribution=0 -S | FileCheck %s --check-prefix=INLINE-ALL`: uses lit substitution -sample-profile-file=%t
+- `profile-context-tracker.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t -sample-profile-inline-size -sample-profile-prioritized-inline=0 -profile-sample-accurate -disable-sample-loader-inlining -S | FileCheck %s --check-prefix=INLINE-NONE`: uses lit substitution -sample-profile-file=%t
+- `profile-context-tracker.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t -sample-profile-inline-size -sample-profile-cold-inline-threshold=200 -profile-sample-accurate -disable-sample-loader-inlining -S | FileCheck %s --check-prefix=INLINE-NONE`: uses lit substitution -sample-profile-file=%t
+- `profile-format-compress.ll`: REQUIRES zlib
+- `profile-format.ll` RUN `not opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/bad.extbinary.afdo -S 2>&1 | FileCheck %s -check-prefix=BAD-PROFILE`: not an opt invocation
+- `profile-inference-islands.ll` RUN `opt < %s -passes=pseudo-probe,sample-profile -sample-profile-use-profi -sample-profile-file=%S/Inputs/profile-inference-islands.prof -S -o %t`: writes to a file
+- `profile-inference-islands.ll` RUN `FileCheck %s < %t -check-prefix=CHECK-ENTRY-COUNT`: not an opt invocation
+- `profile-inference-islands.ll` RUN `opt < %t -passes='print<block-freq>' -disable-output 2>&1 | FileCheck %s`: uses lit substitution %t
+- `profile-mismatch.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/profile-mismatch.prof -report-profile-staleness -persist-profile-staleness -S 2>%t -o %t.ll`: uses lit substitution 2>%t
+- `profile-mismatch.ll` RUN `FileCheck %s --input-file %t`: not an opt invocation
+- `profile-mismatch.ll` RUN `FileCheck %s --input-file %t.ll -check-prefix=CHECK-MD`: not an opt invocation
+- `profile-mismatch.ll` RUN `llc < %t.ll -filetype=obj -o %t.obj`: not an opt invocation
+- `profile-mismatch.ll` RUN `llvm-objdump --section-headers %t.obj | FileCheck %s --check-prefix=CHECK-OBJ`: not an opt invocation
+- `profile-mismatch.ll` RUN `llc < %t.ll -filetype=asm -o - | FileCheck %s --check-prefix=CHECK-ASM`: not an opt invocation
+- `profile-sample-accurate.ll` RUN `llvm-profdata merge -sample -extbinary -prof-sym-list=%S/Inputs/profile-symbol-list.text %S/Inputs/profsampleacc.extbinary.afdo -o %t.symlist.afdo`: not an opt invocation
+- `profile-sample-accurate.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t.symlist.afdo -profile-summary-cutoff-hot=600000 -profile-accurate-for-symsinlist -S | FileCheck %s --check-prefix=PROFSYMLIST`: uses lit substitution -sample-profile-file=%t.symlist.afdo
+- `profile-sample-accurate.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t.symlist.afdo -profile-accurate-for-symsinlist -profile-symbol-list-cutoff=2 -S | FileCheck %s --check-prefix=PSLCUTOFF2`: uses lit substitution -sample-profile-file=%t.symlist.afdo
+- `profile-sample-accurate.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%t.symlist.afdo -profile-accurate-for-symsinlist -profile-symbol-list-cutoff=3 -S | FileCheck %s --check-prefix=PSLCUTOFF3`: uses lit substitution -sample-profile-file=%t.symlist.afdo
+- `pseudo-probe-callee-profile-mismatch.ll`: REQUIRES asserts
+- `pseudo-probe-coro-debug-fix.ll` RUN `opt < %s -passes='pseudo-probe,cgscc(coro-split),coro-cleanup,always-inline' -mtriple=x86_64 -pass-remarks=inline -S -o %t.ll`: diagnostic output flag -pass-remarks=inline
+- `pseudo-probe-coro-debug-fix.ll` RUN `llc -mtriple=x86_64 -stop-after=pseudo-probe-inserter < %t.ll --filetype=asm -o - | FileCheck -check-prefix=MIR %s`: not an opt invocation
+- `pseudo-probe-coro-debug-fix.ll` RUN `llc -mtriple=x86_64 < %t.ll --filetype=obj -o %t.obj`: not an opt invocation
+- `pseudo-probe-coro-debug-fix.ll` RUN `obj2yaml %t.obj | FileCheck -check-prefix=OBJ --match-full-lines %s`: not an opt invocation
+- `pseudo-probe-dangle.ll` RUN `opt < %s -passes='pseudo-probe,jump-threading' -S -o %t`: writes to a file
+- `pseudo-probe-dangle.ll` RUN `FileCheck %s < %t --check-prefix=JT`: not an opt invocation
+- `pseudo-probe-dangle.ll` RUN `llc -mtriple=x86_64-unknown-linux-gnu -function-sections <%t -filetype=asm | FileCheck %s --check-prefix=ASM`: not an opt invocation
+- `pseudo-probe-dangle.ll` RUN `llc -mtriple=x86_64-unknown-windows-msvc -function-sections <%t -filetype=asm | FileCheck %s --check-prefix=ASM`: not an opt invocation
+- `pseudo-probe-dangle.ll` RUN `opt < %s -passes='pseudo-probe' -S -o %t1`: writes to a file
+- `pseudo-probe-dangle.ll` RUN `llc -mtriple=x86_64-- -stop-after=tailduplication <%t1 | FileCheck %s --check-prefix=MIR-tail`: not an opt invocation
+- `pseudo-probe-dangle2.ll` RUN `opt < %s -passes=simplifycfg -S -o %t`: writes to a file
+- `pseudo-probe-dangle2.ll` RUN `FileCheck %s < %t`: not an opt invocation
+- `pseudo-probe-discriminator.ll` RUN `opt < %s -passes='default<O2>' -debug-info-for-profiling -S | FileCheck %s --check-prefix=DEBUG`: diagnostic output flag -debug-info-for-profiling
+- `pseudo-probe-discriminator.ll` RUN `opt < %s -passes='default<O2>' -debug-info-for-profiling -pseudo-probe-for-profiling -S | FileCheck %s --check-prefix=PROBE`: diagnostic output flag -debug-info-for-profiling
+- `pseudo-probe-discriminator.ll` RUN `opt < %s -passes='thinlto-pre-link<O2>' -debug-info-for-profiling -pseudo-probe-for-profiling -S | FileCheck %s --check-prefix=PROBE`: diagnostic output flag -debug-info-for-profiling
+- `pseudo-probe-emit-inline.ll` RUN `opt < %s -passes='pseudo-probe,cgscc(inline)' -function-sections -S -o %t`: writes to a file
+- `pseudo-probe-emit-inline.ll` RUN `FileCheck %s < %t --check-prefix=CHECK-IL`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llc -function-sections -mtriple=x86_64-unknown-linux-gnu <%t -filetype=asm -o %t1`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `FileCheck %s < %t1 --check-prefixes=CHECK-ASM,CHECK-ASM-ELF`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llc -function-sections -mtriple=x86_64-unknown-linux-gnu <%t -filetype=obj -o %t2`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llvm-objdump --section-headers %t2 | FileCheck %s --check-prefix=CHECK-OBJ`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llvm-mc -triple=x86_64-unknown-linux-gnu -filetype=asm <%t1 -o %t3`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `FileCheck %s < %t3 --check-prefixes=CHECK-ASM,CHECK-ASM-ELF`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llvm-mc -triple=x86_64-unknown-linux-gnu -filetype=obj <%t1 -o %t4`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llvm-objdump --section-headers %t4 | FileCheck %s --check-prefix=CHECK-OBJ`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llc -function-sections -mtriple=x86_64-unknown-windows-msvc <%t -filetype=asm -o %t1`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `FileCheck %s < %t1 --check-prefixes=CHECK-ASM,CHECK-ASM-COFF`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llc -function-sections -mtriple=x86_64-unknown-windows-msvc <%t -filetype=obj -o %t2`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llvm-objdump --section-headers %t2 | FileCheck %s --check-prefixes=CHECK-OBJ`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llvm-mc -triple=x86_64-unknown-windows-msvc -filetype=asm <%t1 -o %t3`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `FileCheck %s < %t3 --check-prefixes=CHECK-ASM,CHECK-ASM-COFF`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llvm-mc -triple=x86_64-unknown-windows-msvc -filetype=obj <%t1 -o %t4`: not an opt invocation
+- `pseudo-probe-emit-inline.ll` RUN `llvm-objdump --section-headers %t4 | FileCheck %s --check-prefixes=CHECK-OBJ`: not an opt invocation
+- `pseudo-probe-emit-macho.ll`: REQUIRES aarch64-registered-target
+- `pseudo-probe-emit.ll` RUN `opt < %s -passes=pseudo-probe -function-sections -S -o %t`: writes to a file
+- `pseudo-probe-emit.ll` RUN `FileCheck %s < %t --check-prefix=CHECK-IL`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llc %t -mtriple=x86_64-- -stop-after=pseudo-probe-inserter -o - | FileCheck %s --check-prefix=CHECK-MIR`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llc %t -function-sections -mtriple=x86_64-unknown-linux-gnu -filetype=asm -o %t1`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `FileCheck %s < %t1 --check-prefixes=CHECK-ASM,CHECK-ASM-ELF`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llc %t -function-sections -mtriple=x86_64-unknown-linux-gnu -filetype=obj -o %t2`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llvm-readelf -S -g %t2 | FileCheck %s --check-prefix=CHECK-SEC-ELF`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llvm-mc %t1 -triple=x86_64-unknown-linux-gnu -filetype=obj -o %t3`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llvm-readelf -S -g %t3 | FileCheck %s --check-prefix=CHECK-SEC-ELF`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llc %t -function-sections -mtriple=x86_64-unknown-linux-gnu -unique-section-names=0 -filetype=obj -o %t4`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llvm-readelf -S %t4 | FileCheck %s --check-prefix=CHECK-SEC2-ELF`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llc %t -function-sections -mtriple=x86_64-unknown-windows-msvc -filetype=asm -o %t1`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `FileCheck %s < %t1 --check-prefixes=CHECK-ASM,CHECK-ASM-COFF`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llc %t -function-sections -mtriple=x86_64-unknown-windows-msvc -filetype=obj -o %t2`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llvm-readobj -Ss %t2 | FileCheck %s --check-prefix=CHECK-SEC-COFF`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llvm-mc %t1 -triple=x86_64-unknown-windows-msvc -filetype=obj -o %t3`: not an opt invocation
+- `pseudo-probe-emit.ll` RUN `llvm-readobj -Ss %t3 | FileCheck %s --check-prefix=CHECK-SEC-COFF`: not an opt invocation
+- `pseudo-probe-inline.ll` RUN `opt < %s -passes=pseudo-probe,sample-profile  -sample-profile-file=%S/Inputs/pseudo-probe-inline.prof -S -pass-remarks=sample-profile -sample-profile-prioritized-inline=0 -pass-remarks-output=%t.opt.yaml 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=sample-profile
+- `pseudo-probe-inline.ll` RUN `FileCheck %s -check-prefixes=YAML,YAML-NO-ANNOTATE < %t.opt.yaml`: not an opt invocation
+- `pseudo-probe-inline.ll` RUN `llvm-profdata merge --sample --extbinary %S/Inputs/pseudo-probe-inline.prof -o %t2`: not an opt invocation
+- `pseudo-probe-inline.ll` RUN `opt < %s -passes=pseudo-probe,sample-profile  -sample-profile-file=%t2 -S -pass-remarks=sample-profile -sample-profile-prioritized-inline=0 -pass-remarks-output=%t2.opt.yaml 2>&1 | FileCheck %s`: uses lit substitution -sample-profile-file=%t2
+- `pseudo-probe-inline.ll` RUN `FileCheck %s -check-prefixes=YAML,YAML-NO-ANNOTATE < %t2.opt.yaml`: not an opt invocation
+- `pseudo-probe-inline.ll` RUN `opt < %s -passes=pseudo-probe,sample-profile -annotate-sample-profile-inline-phase=true -sample-profile-file=%S/Inputs/pseudo-probe-inline.prof -S -pass-remarks=sample-profile -sample-profile-prioritized-inline=0 -pass-remarks-output=%t3.opt.yaml 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=sample-profile
+- `pseudo-probe-inline.ll` RUN `FileCheck %s -check-prefixes=YAML,YAML-ANNOTATE < %t3.opt.yaml`: not an opt invocation
+- `pseudo-probe-inline.ll` RUN `opt < %s -passes=pseudo-probe,sample-profile -annotate-sample-profile-inline-phase=true -sample-profile-file=%t2 -S -pass-remarks=sample-profile -sample-profile-prioritized-inline=0 -pass-remarks-output=%t4.opt.yaml 2>&1 | FileCheck %s`: uses lit substitution -sample-profile-file=%t2
+- `pseudo-probe-inline.ll` RUN `FileCheck %s -check-prefixes=YAML,YAML-ANNOTATE < %t4.opt.yaml`: not an opt invocation
+- `pseudo-probe-instsched.ll` RUN `llc < %s -mcpu=generic -mtriple=x86_64-unknown-linux-gnu -O3 | FileCheck %s`: not an opt invocation
+- `pseudo-probe-instsched.ll` RUN `llc < %s -mcpu=generic -mtriple=x86_64-unknown-windows-msvc -O3 | FileCheck %s`: not an opt invocation
+- `pseudo-probe-peep.ll` RUN `llc -mtriple=x86_64-- -stop-after=peephole-opt -o - %s | FileCheck %s`: not an opt invocation
+- `pseudo-probe-profile-metadata-2.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/pseudo-probe-profile.prof -pass-remarks=sample-profile -S | FileCheck %s`: diagnostic output flag -pass-remarks=sample-profile
+- `pseudo-probe-profile-metadata-2.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/pseudo-probe-profile.prof -pass-remarks=sample-profile -overwrite-existing-weights=1 -S | FileCheck %s -check-prefix=OVW`: diagnostic output flag -pass-remarks=sample-profile
+- `pseudo-probe-profile-mismatch-error.ll` RUN `not opt < %S/pseudo-probe-profile-mismatch.ll -passes=sample-profile -sample-profile-file=%S/Inputs/pseudo-probe-profile-mismatch.prof  -min-functions-for-staleness-error=1  -precent-mismatch-for-staleness-error=1 -S 2>&1 | FileCheck %s`: not an opt invocation
+- `pseudo-probe-profile-mismatch-error.ll` RUN `opt < %S/pseudo-probe-profile-mismatch.ll -passes=sample-profile -sample-profile-file=%S/Inputs/pseudo-probe-profile-mismatch.prof  -min-functions-for-staleness-error=3  -precent-mismatch-for-staleness-error=70 -S 2>&1`: uses lit substitution %S/pseudo-probe-profile-mismatch.ll
+- `pseudo-probe-profile-mismatch-error.ll` RUN `opt < %S/pseudo-probe-profile-mismatch.ll -passes=sample-profile -sample-profile-file=%S/Inputs/pseudo-probe-profile-mismatch.prof  -min-functions-for-staleness-error=4  -precent-mismatch-for-staleness-error=1 -S 2>&1`: uses lit substitution %S/pseudo-probe-profile-mismatch.ll
+- `pseudo-probe-profile-mismatch-thinlto.ll` RUN `opt < %S/pseudo-probe-stale-profile-matching-lto.ll -passes='thinlto<O2>' -pgo-kind=pgo-sample-use-pipeline  --salvage-unused-profile=false -sample-profile-file=%S/Inputs/pseudo-probe-stale-profile-matching-lto.prof -report-profile-staleness -persist-profile-staleness  -S 2>%t -o %t.ll`: uses lit substitution %S/pseudo-probe-stale-profile-matching-lto.ll
+- `pseudo-probe-profile-mismatch-thinlto.ll` RUN `FileCheck %s --input-file %t`: not an opt invocation
+- `pseudo-probe-profile-mismatch-thinlto.ll` RUN `FileCheck %s --input-file %t.ll -check-prefix=CHECK-MD`: not an opt invocation
+- `pseudo-probe-profile-mismatch.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/pseudo-probe-profile-mismatch.prof --salvage-unused-profile=false -report-profile-staleness -persist-profile-staleness -S 2>%t -o %t.ll`: uses lit substitution 2>%t
+- `pseudo-probe-profile-mismatch.ll` RUN `FileCheck %s --input-file %t`: not an opt invocation
+- `pseudo-probe-profile-mismatch.ll` RUN `FileCheck %s --input-file %t.ll -check-prefix=CHECK-MD`: not an opt invocation
+- `pseudo-probe-profile-mismatch.ll` RUN `llc < %t.ll -filetype=obj -o %t.obj`: not an opt invocation
+- `pseudo-probe-profile-mismatch.ll` RUN `llvm-objdump --section-headers %t.obj | FileCheck %s --check-prefix=CHECK-OBJ`: not an opt invocation
+- `pseudo-probe-profile-mismatch.ll` RUN `llc < %t.ll -filetype=asm -o - | FileCheck %s --check-prefix=CHECK-ASM`: not an opt invocation
+- `pseudo-probe-profile.ll` RUN `opt < %s -passes=pseudo-probe,sample-profile -sample-profile-file=%S/Inputs/pseudo-probe-profile.prof -pass-remarks=sample-profile -pass-remarks-output=%t.opt.yaml -sample-profile-use-profi=0 -S -o %t`: diagnostic output flag -pass-remarks=sample-profile
+- `pseudo-probe-profile.ll` RUN `FileCheck %s --input-file %t`: not an opt invocation
+- `pseudo-probe-profile.ll` RUN `FileCheck %s -check-prefix=YAML --input-file %t.opt.yaml`: not an opt invocation
+- `pseudo-probe-profile.ll` RUN `opt < %t -passes=sample-profile -sample-profile-file=%S/Inputs/pseudo-probe-profile.prof -sample-profile-remove-probe -S | FileCheck %s -check-prefix=REMOVE-PROBE`: uses lit substitution %t
+- `pseudo-probe-selectionDAG.ll` RUN `opt < %s -codegenprepare -mtriple=x86_64 -S -o %t`: writes to a file
+- `pseudo-probe-selectionDAG.ll` RUN `FileCheck %s < %t --check-prefix=IR`: not an opt invocation
+- `pseudo-probe-selectionDAG.ll` RUN `llc -mtriple=x86_64-- -stop-after=finalize-isel %t -o - | FileCheck %s --check-prefix=MIR`: not an opt invocation
+- `pseudo-probe-slotindex.ll` RUN `llc -print-after=slotindexes -stop-after=slotindexes -mtriple=x86_64-unknown-linux-gnu %s -filetype=asm -o %t 2>&1 | FileCheck %s`: not an opt invocation
+- `pseudo-probe-slotindex.ll` RUN `llc -print-after=slotindexes -stop-after=slotindexes -mtriple=x86_64-unknown-windows-msvc %s -filetype=asm -o %t 2>&1 | FileCheck %s`: not an opt invocation
+- `pseudo-probe-stale-profile-backward-matching.ll`: REQUIRES asserts
+- `pseudo-probe-stale-profile-direct-basename.ll`: REQUIRES asserts
+- `pseudo-probe-stale-profile-flatten-helper.ll`: REQUIRES asserts
+- `pseudo-probe-stale-profile-matching-LCS.ll`: REQUIRES asserts
+- `pseudo-probe-stale-profile-matching-lto.ll`: REQUIRES asserts
+- `pseudo-probe-stale-profile-matching.ll`: REQUIRES asserts
+- `pseudo-probe-stale-profile-name-similarity.ll`: REQUIRES asserts
+- `pseudo-probe-stale-profile-orphan-conflict.ll`: REQUIRES asserts
+- `pseudo-probe-stale-profile-renaming-recursive.ll`: REQUIRES asserts
+- `pseudo-probe-stale-profile-renaming.ll`: REQUIRES asserts
+- `pseudo-probe-stale-profile-toplev-func.ll`: REQUIRES asserts
+- `pseudo-probe-stale-profile-unused-probe-desc.ll`: REQUIRES asserts
+- `pseudo-probe-twoaddr.ll` RUN `llc -stop-after=twoaddressinstruction -mtriple=x86_64-- -o - %s | FileCheck %s`: not an opt invocation
+- `pseudo-probe-verify.ll` RUN `opt < %s -passes='pseudo-probe,loop-unroll-full' -verify-pseudo-probe -S -o %t 2>&1 | FileCheck %s --check-prefix=VERIFY`: writes to a file
+- `pseudo-probe-verify.ll` RUN `FileCheck %s < %t`: not an opt invocation
+- `remap.ll` RUN `llvm-profdata merge -sample -extbinary %S/Inputs/remap.prof -o %t.extbinary.afdo`: not an opt invocation
+- `remap.ll` RUN `opt %s -passes=sample-profile -sample-profile-file=%t.extbinary.afdo -sample-profile-remapping-file=%S/Inputs/remap.map | opt -passes='print<branch-prob>' -disable-output 2>&1 | FileCheck %s`: uses lit substitution -sample-profile-file=%t.extbinary.afdo
+- `remarks-hotness.ll` RUN `rm -f %t.yaml %t.hot.yaml`: not an opt invocation
+- `remarks-hotness.ll` RUN `opt %s --passes='sample-profile,cgscc(inline)' --sample-profile-file=%S/Inputs/remarks-hotness.prof -S --pass-remarks-filter=inline --pass-remarks-output=%t.yaml -pass-remarks-with-hotness --disable-output`: uses lit substitution --pass-remarks-output=%t.yaml
+- `remarks-hotness.ll` RUN `FileCheck %s -check-prefix=YAML-PASS < %t.yaml`: not an opt invocation
+- `remarks-hotness.ll` RUN `FileCheck %s -check-prefix=YAML-MISS < %t.yaml`: not an opt invocation
+- `remarks-hotness.ll` RUN `opt %s --passes='sample-profile,cgscc(inline)' --sample-profile-file=%S/Inputs/remarks-hotness.prof -S --pass-remarks-filter=inline --pass-remarks-output=%t.hot.yaml --pass-remarks-with-hotness --pass-remarks-hotness-threshold=auto --disable-output`: uses lit substitution --pass-remarks-output=%t.hot.yaml
+- `remarks-hotness.ll` RUN `FileCheck %s -check-prefix=YAML-PASS < %t.hot.yaml`: not an opt invocation
+- `remarks-hotness.ll` RUN `not FileCheck %s -check-prefix=YAML-MISS < %t.hot.yaml`: not an opt invocation
+- `remarks.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/remarks.prof -S -pass-remarks=sample-profile -pass-remarks-output=%t.opt.yaml 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=sample-profile
+- `remarks.ll` RUN `FileCheck %s -check-prefixes=YAML,YAML-NO-ANNOTATE < %t.opt.yaml`: not an opt invocation
+- `remarks.ll` RUN `opt < %s -passes=sample-profile -annotate-sample-profile-inline-phase -sample-profile-file=%S/Inputs/remarks.prof -S -pass-remarks=sample-profile -pass-remarks-output=%t.opt.yaml 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=sample-profile
+- `remarks.ll` RUN `FileCheck %s -check-prefixes=YAML,YAML-ANNOTATE < %t.opt.yaml`: not an opt invocation
+- `syntax.ll` RUN `not opt < %s -passes=sample-profile -sample-profile-file=missing.prof 2>&1 | FileCheck -check-prefix=MISSING-FILE %s`: not an opt invocation
+- `syntax.ll` RUN `not opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/bad_fn_header.prof 2>&1 | FileCheck -check-prefix=BAD-FN-HEADER %s`: not an opt invocation
+- `syntax.ll` RUN `not opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/bad_sample_line.prof 2>&1 | FileCheck -check-prefix=BAD-SAMPLE-LINE %s`: not an opt invocation
+- `syntax.ll` RUN `not opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/bad_line_values.prof 2>&1 | FileCheck -check-prefix=BAD-LINE-VALUES %s`: not an opt invocation
+- `syntax.ll` RUN `not opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/bad_discriminator_value.prof 2>&1 | FileCheck -check-prefix=BAD-DISCRIMINATOR-VALUE %s`: not an opt invocation
+- `syntax.ll` RUN `not opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/bad_samples.prof 2>&1 | FileCheck -check-prefix=BAD-SAMPLES %s`: not an opt invocation
+- `syntax.ll` RUN `opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/bad_mangle.prof 2>&1 >/dev/null`: redirects or chains commands
+- `uncompressed-profile-symbol-list.ll` RUN `llvm-profdata merge --sample --prof-sym-list=%S/Inputs/profile-symbol-list.text --compress-all-sections=false --extbinary %S/Inputs/inline.prof --output=%t.profdata`: not an opt invocation
+- `uncompressed-profile-symbol-list.ll` RUN `opt < %S/Inputs/profile-symbol-list.ll -passes=sample-profile -profile-accurate-for-symsinlist -sample-profile-file=%t.profdata -S | FileCheck %S/Inputs/profile-symbol-list.ll`: uses lit substitution %S/Inputs/profile-symbol-list.ll

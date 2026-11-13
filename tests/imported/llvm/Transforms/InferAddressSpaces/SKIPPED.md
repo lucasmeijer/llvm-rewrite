@@ -1,0 +1,49 @@
+# Skipped while importing llvm/test/Transforms/InferAddressSpaces (llvmorg-23.1.5)
+
+5 of 50 files imported. Regenerate with `./harness/run import-llvm Transforms/InferAddressSpaces`.
+
+- `address-space-id-funcs.ll`: in a AMDGPU target directory
+- `assumed-addrspace.ll`: in a AMDGPU target directory
+- `basic.ll`: in a AMDGPU target directory
+- `builtin-assumed-addrspace.ll`: in a AMDGPU target directory
+- `debug-info.ll`: in a AMDGPU target directory
+- `global-atomicrmw-fadd.ll`: in a AMDGPU target directory
+- `icmp.ll`: in a AMDGPU target directory
+- `infer-address-space.ll`: in a AMDGPU target directory
+- `infer-addrspacecast.ll`: in a AMDGPU target directory
+- `infer-getelementptr.ll`: in a AMDGPU target directory
+- `insert-pos-assert.ll`: in a AMDGPU target directory
+- `int2ptr.ll`: in a AMDGPU target directory
+- `intrinsics.ll`: in a AMDGPU target directory
+- `is.constant.ll`: in a AMDGPU target directory
+- `issue110433.ll`: in a AMDGPU target directory
+- `issue53665.ll`: in a AMDGPU target directory
+- `lifetime.ll`: in a AMDGPU target directory
+- `masked-load-store.ll`: in a AMDGPU target directory
+- `mem-intrinsics.ll`: in a AMDGPU target directory
+- `multiple-uses-of-val.ll`: in a AMDGPU target directory
+- `no-flat-addrspace.ll`: in a AMDGPU target directory
+- `noop-ptrint-pair.ll`: in a AMDGPU target directory
+- `old-pass-regressions.ll`: in a AMDGPU target directory
+- `phi-poison.ll`: in a AMDGPU target directory
+- `phinode-address-infer.ll`: in a AMDGPU target directory
+- `prefetch.ll`: in a AMDGPU target directory
+- `preserving-debugloc-addrspacecast.ll`: in a AMDGPU target directory
+- `ptrmask.ll`: in a AMDGPU target directory
+- `redundant-addrspacecast.ll`: in a AMDGPU target directory
+- `select.ll`: in a AMDGPU target directory
+- `self-phi.ll`: in a AMDGPU target directory
+- `store-pointer-to-self.ll`: in a AMDGPU target directory
+- `unreachable-code-assert.ll`: in a AMDGPU target directory
+- `volatile.ll`: in a AMDGPU target directory
+- `alloca.ll`: in a NVPTX target directory
+- `arguments.ll`: in a NVPTX target directory
+- `bug31948.ll`: in a NVPTX target directory
+- `builtin-assumed-addrspace.ll`: in a NVPTX target directory
+- `clone_constexpr.ll`: in a NVPTX target directory
+- `int2ptr.ll`: in a NVPTX target directory
+- `isspacep.ll`: in a NVPTX target directory
+- `lifetime.ll`: in a NVPTX target directory
+- `nullptr.ll`: in a NVPTX target directory
+- `phinode-address-infer.ll`: in a NVPTX target directory
+- `generic-cast-explicit.ll`: in a SPIRV target directory

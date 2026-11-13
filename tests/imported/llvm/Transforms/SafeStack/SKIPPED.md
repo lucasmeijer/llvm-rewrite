@@ -1,0 +1,150 @@
+# Skipped while importing llvm/test/Transforms/SafeStack (llvmorg-23.1.5)
+
+46 of 62 files imported. Regenerate with `./harness/run import-llvm Transforms/SafeStack`.
+
+- `abi.ll`: in a AArch64 target directory
+- `abi_ssp.ll`: in a AArch64 target directory
+- `safestack.ll`: in a AArch64 target directory
+- `unreachable.ll`: in a AArch64 target directory
+- `abi.ll`: in a ARM target directory
+- `debug.ll`: in a ARM target directory
+- `setjmp.ll`: in a ARM target directory
+- `safestack-libcall-error.ll`: in a NVPTX target directory
+- `safestack-pointer-address-libcall-error.ll`: in a NVPTX target directory
+- `safestack.ll` RUN `opt -S -mtriple=sparc-- -passes='require<libcall-lowering-info>,safe-stack' %s | FileCheck %s`: non-x86_64 target sparc--
+- `abi.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s --check-prefix=TLS`: non-x86_64 target i386-pc-linux-gnu
+- `abi.ll` RUN `opt -safe-stack -S -mtriple=i686-linux-android < %s -o - | FileCheck %s --check-prefix=DIRECT-TLS32`: non-x86_64 target i686-linux-android
+- `abi.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s --check-prefix=TLS`: non-x86_64 target i386-pc-linux-gnu
+- `abi.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i686-linux-android < %s -o - | FileCheck %s --check-prefix=DIRECT-TLS32`: non-x86_64 target i686-linux-android
+- `abi.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `abi.ll` @opt `-passes=safe-stack -mtriple=x86_64-linux-android`: oracle fails
+- `abi_ssp.ll` RUN `opt -safe-stack -S -mtriple=i686-pc-linux-gnu < %s -o - | FileCheck --check-prefixes=COMMON,TLS32 %s`: non-x86_64 target i686-pc-linux-gnu
+- `abi_ssp.ll` RUN `opt -safe-stack -S -mtriple=i686-linux-android < %s -o - | FileCheck --check-prefixes=COMMON,TLS32 %s`: non-x86_64 target i686-linux-android
+- `abi_ssp.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i686-pc-linux-gnu < %s -o - | FileCheck --check-prefixes=COMMON,TLS32 %s`: non-x86_64 target i686-pc-linux-gnu
+- `abi_ssp.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i686-linux-android < %s -o - | FileCheck --check-prefixes=COMMON,TLS32 %s`: non-x86_64 target i686-linux-android
+- `abi_ssp.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `abi_ssp.ll` @opt `-passes=safe-stack -mtriple=x86_64-linux-android`: oracle fails
+- `abi_ssp.ll` @opt `-passes=safe-stack -mtriple=x86_64-unknown-fuchsia`: oracle fails
+- `addr-taken.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `addr-taken.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `addr-taken.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `alloca-addrspace-wrong-addrspace-error.ll` RUN `not --crash opt -passes='require<libcall-lowering-info>,safe-stack' -mtriple=x86_64-pc-linux-gnu -disable-output %s 2>&1 | FileCheck %s`: not an opt invocation
+- `array-aligned.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `array-aligned.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `array-aligned.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `array.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `array.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `array.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `byval.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `byval.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `byval.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `call.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `call.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `call.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `cast.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `cast.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `cast.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `coloring-ssp.ll` @opt `-passes=safe-stack -safe-stack-coloring=1 -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `coloring.ll` RUN `opt -safe-stack -safe-stack-coloring=1 -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `coloring.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -safe-stack-coloring=1 -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `coloring.ll` @opt `-passes=safe-stack -safe-stack-coloring=1 -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `coloring2.ll` RUN `opt -safe-stack -safe-stack-coloring=1 -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `coloring2.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -safe-stack-coloring=1 -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `coloring2.ll` @opt `-passes=safe-stack -safe-stack-coloring=1 -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `constant-gep-call.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `constant-gep-call.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `constant-gep-call.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `constant-gep.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `constant-gep.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `constant-gep.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `constant-geps.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `constant-geps.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `constant-geps.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `debug-loc-dynamic.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `debug-loc-dynamic.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `debug-loc.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `debug-loc.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `debug-loc2.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `debug-loc2.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `dynamic-alloca.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `dynamic-alloca.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `dynamic-alloca.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-addr-pointer.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-addr-pointer.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-addr-pointer.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-bitcast-store.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-bitcast-store.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-bitcast-store.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-bitcast-store2.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-bitcast-store2.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-bitcast-store2.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-call.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-call.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-call.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-casted-pointer.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-casted-pointer.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-casted-pointer.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-gep-call.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-gep-call.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-gep-call.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-gep-invoke.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-gep-invoke.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-gep-invoke.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-gep-negative.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-gep-negative.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-gep-negative.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-gep-ptrtoint.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-gep-ptrtoint.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-gep-ptrtoint.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-gep-store.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-gep-store.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-gep-store.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-phi-call.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-phi-call.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-phi-call.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-select-call.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-select-call.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-select-call.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `escape-vector.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-vector.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `escape-vector.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `invoke.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `invoke.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `invoke.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `layout-frag.ll` @opt `-passes=safe-stack -safe-stack-coloring=1 -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `layout-region-split.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `memintrinsic-oob-read.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `memintrinsic-oob-read.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `memintrinsic-oob-read.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `missing-analysis.ll` RUN `not opt -mtriple=x86_64-- -passes=safe-stack -disable-output %s 2>&1 | FileCheck %s`: not an opt invocation
+- `musttail.ll` @opt `-passes=safe-stack`: oracle fails
+- `no-attr.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `no-attr.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `no-crash-on-lifetime.ll` RUN `opt -safe-stack -S -mtriple=x86_64-pc-linux-gnu %s -o /dev/null`: writes to a file
+- `no-crash-on-lifetime.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=x86_64-pc-linux-gnu %s -o /dev/null`: writes to a file
+- `phi-cycle.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `phi-cycle.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `phi-cycle.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `phi.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `phi.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `phi.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `pr54784.ll` @opt `-passes=safe-stack`: oracle fails
+- `ret.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `ret.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `ret.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `setjmp.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `setjmp.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `setjmp.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `setjmp2.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s --check-prefix=I386`: non-x86_64 target i386-pc-linux-gnu
+- `setjmp2.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s --check-prefix=I386`: non-x86_64 target i386-pc-linux-gnu
+- `setjmp2.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `sink-to-use.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `sink-to-use.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `sink-to-use.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `ssp.ll` @opt `-passes=safe-stack -mtriple=x86_64-unknown`: oracle fails
+- `store.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `store.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `store.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails
+- `struct.ll` RUN `opt -safe-stack -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `struct.ll` RUN `opt -passes='require<libcall-lowering-info>,safe-stack' -S -mtriple=i386-pc-linux-gnu < %s -o - | FileCheck %s`: non-x86_64 target i386-pc-linux-gnu
+- `struct.ll` @opt `-passes=safe-stack -mtriple=x86_64-pc-linux-gnu`: oracle fails

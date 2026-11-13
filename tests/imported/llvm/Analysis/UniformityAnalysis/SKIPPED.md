@@ -1,0 +1,46 @@
+# Skipped while importing llvm/test/Analysis/UniformityAnalysis (llvmorg-23.1.5)
+
+0 of 42 files imported. Regenerate with `./harness/run import-llvm Analysis/UniformityAnalysis`.
+
+- `addrspacecast.ll`: in a AMDGPU target directory
+- `always_uniform.ll`: in a AMDGPU target directory
+- `atomics.ll`: in a AMDGPU target directory
+- `b42473-r1-crash.ll`: in a AMDGPU target directory
+- `branch-after-join.ll`: in a AMDGPU target directory
+- `control-flow-intrinsics.ll`: in a AMDGPU target directory
+- `hidden_diverge.ll`: in a AMDGPU target directory
+- `hidden_loopdiverge.ll`: in a AMDGPU target directory
+- `inline-asm.ll`: in a AMDGPU target directory
+- `interp_f16.ll`: in a AMDGPU target directory
+- `intrinsics.ll`: in a AMDGPU target directory
+- `branch-outside.ll`: in a AMDGPU target directory
+- `diverged-entry-basic.ll`: in a AMDGPU target directory
+- `diverged-entry-headers-nested.ll`: in a AMDGPU target directory
+- `diverged-entry-headers.ll`: in a AMDGPU target directory
+- `exit-divergence.ll`: in a AMDGPU target directory
+- `hidden-post-dom.ll`: in a AMDGPU target directory
+- `irreducible-1.ll`: in a AMDGPU target directory
+- `irreducible-2.ll`: in a AMDGPU target directory
+- `reducible-headers.ll`: in a AMDGPU target directory
+- `reducible-subgraph.ll`: in a AMDGPU target directory
+- `join-at-loop-exit.ll`: in a AMDGPU target directory
+- `kernel-args.ll`: in a AMDGPU target directory
+- `llvm.amdgcn.buffer.atomic.ll`: in a AMDGPU target directory
+- `llvm.amdgcn.image.atomic.ll`: in a AMDGPU target directory
+- `no-return-blocks.ll`: in a AMDGPU target directory
+- `nodivergencesource.ll`: in a AMDGPU target directory
+- `phi-undef.ll`: in a AMDGPU target directory
+- `phi_div_branch.ll`: in a AMDGPU target directory
+- `phi_div_loop.ll`: in a AMDGPU target directory
+- `propagate-loop-live-out.ll`: in a AMDGPU target directory
+- `temporal_diverge.ll`: in a AMDGPU target directory
+- `trivial-join-at-loop-exit.ll`: in a AMDGPU target directory
+- `uniform_intrinsic.ll`: in a AMDGPU target directory
+- `unreachable-loop-block.ll`: in a AMDGPU target directory
+- `unstructured-branch.ll`: in a AMDGPU target directory
+- `workitem-intrinsics.ll`: in a AMDGPU target directory
+- `daorder.ll`: in a NVPTX target directory
+- `diverge.ll`: in a NVPTX target directory
+- `hidden_diverge.ll`: in a NVPTX target directory
+- `irreducible.ll`: in a NVPTX target directory
+- `non-header-join.ll`: in a NVPTX target directory

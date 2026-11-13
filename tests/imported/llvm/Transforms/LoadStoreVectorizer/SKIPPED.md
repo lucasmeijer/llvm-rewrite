@@ -1,0 +1,53 @@
+# Skipped while importing llvm/test/Transforms/LoadStoreVectorizer (llvmorg-23.1.5)
+
+22 of 71 files imported. Regenerate with `./harness/run import-llvm Transforms/LoadStoreVectorizer`.
+
+- `pr37865.ll`: in a AArch64 target directory
+- `aa-metadata.ll`: in a AMDGPU target directory
+- `addrspace-7.ll`: in a AMDGPU target directory
+- `adjust-alloca-alignment.ll`: in a AMDGPU target directory
+- `complex-index.ll`: in a AMDGPU target directory
+- `dont-adjust-globalobj-alignment.ll`: in a AMDGPU target directory
+- `extended-index.ll`: in a AMDGPU target directory
+- `fence-noalias-metadata.ll`: in a AMDGPU target directory
+- `gep-bitcast.ll`: in a AMDGPU target directory
+- `insertion-point.ll`: in a AMDGPU target directory
+- `interleaved-mayalias-store.ll`: in a AMDGPU target directory
+- `invariant-load.ll`: in a AMDGPU target directory
+- `load-i1-misaligned.ll`: in a AMDGPU target directory
+- `merge-stores-private.ll`: in a AMDGPU target directory
+- `merge-stores.ll`: in a AMDGPU target directory
+- `merge-vectors-complex.ll`: in a AMDGPU target directory
+- `merge-vectors.ll`: in a AMDGPU target directory
+- `missing-alignment.ll`: in a AMDGPU target directory
+- `multiple_tails.ll`: in a AMDGPU target directory
+- `no-implicit-float.ll`: in a AMDGPU target directory
+- `opaque_ptr.ll`: in a AMDGPU target directory
+- `optnone.ll`: in a AMDGPU target directory
+- `pointer-elements.ll`: in a AMDGPU target directory
+- `selects-inseltpoison.ll`: in a AMDGPU target directory
+- `selects.ll`: in a AMDGPU target directory
+- `store_with_aliasing_load.ll`: in a AMDGPU target directory
+- `unaligned-buffer.ll`: in a AMDGPU target directory
+- `vect-ptr-ptr-size-mismatch.ll`: in a AMDGPU target directory
+- `vectorize-redund-loads.ll`: in a AMDGPU target directory
+- `weird-type-accesses.ll`: in a AMDGPU target directory
+- `4x2xhalf.ll`: in a NVPTX target directory
+- `extend-chain.ll`: in a NVPTX target directory
+- `gap-fill-cleanup.ll`: in a NVPTX target directory
+- `gap-fill-invariant.ll`: in a NVPTX target directory
+- `gap-fill-vectors.ll`: in a NVPTX target directory
+- `gap-fill-with-redundant-elements.ll`: in a NVPTX target directory
+- `gap-fill.ll`: in a NVPTX target directory
+- `load-store-256-bit.ll`: in a NVPTX target directory
+- `many_loads_stores.ll`: in a NVPTX target directory
+- `masked-store.ll`: in a NVPTX target directory
+- `merge-across-side-effects.ll`: in a NVPTX target directory
+- `non-instr-bitcast.ll`: in a NVPTX target directory
+- `overlapping_chains.ll`: in a NVPTX target directory
+- `propagate-invariance-metadata.ll`: in a NVPTX target directory
+- `vectorize_i1.ll`: in a NVPTX target directory
+- `vectorize_i16.ll`: in a NVPTX target directory
+- `vectorize_i24.ll`: in a NVPTX target directory
+- `vectorize_i8.ll`: in a NVPTX target directory
+- `vectorize_vectors.ll`: in a NVPTX target directory

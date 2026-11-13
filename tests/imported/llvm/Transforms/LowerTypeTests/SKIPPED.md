@@ -1,0 +1,64 @@
+# Skipped while importing llvm/test/Transforms/LowerTypeTests (llvmorg-23.1.5)
+
+41 of 58 files imported. Regenerate with `./harness/run import-llvm Transforms/LowerTypeTests`.
+
+- `aarch64-jumptable-dbg.ll` RUN `opt -S -passes=lowertypetests -mtriple=aarch64-unknown-linux-gnu %s | FileCheck --check-prefixes=AARCH64 %s`: non-x86_64 target aarch64-unknown-linux-gnu
+- `aarch64-jumptable-dbg.ll` RUN `opt -S -passes=lowertypetests -lowertypetests-jump-table-debug-info=0 -mtriple=aarch64-unknown-linux-gnu %s | FileCheck --check-prefixes=AARCH64-OFF %s`: non-x86_64 target aarch64-unknown-linux-gnu
+- `aarch64-jumptable.ll` RUN `opt -S -passes=lowertypetests -mtriple=aarch64-unknown-linux-gnu %s | FileCheck --check-prefixes=AARCH64 %s`: non-x86_64 target aarch64-unknown-linux-gnu
+- `cfi-annotation.ll`: REQUIRES aarch64-registered-target
+- `cfi-icall-alias.ll`: uses split-file
+- `export-allones.ll` RUN `opt -mtriple=x86_64-unknown-linux -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/use-typeid1-typeid2.yaml -lowertypetests-write-summary=%t %s | FileCheck --check-prefixes=CHECK,X86 %s`: uses lit substitution -lowertypetests-write-summary=%t
+- `export-allones.ll` RUN `FileCheck --check-prefixes=SUMMARY,SUMMARY-X86 %s < %t`: not an opt invocation
+- `export-allones.ll` RUN `opt -mtriple=aarch64-unknown-linux -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/use-typeid1-typeid2.yaml -lowertypetests-write-summary=%t %s | FileCheck --check-prefixes=CHECK,ARM %s`: non-x86_64 target aarch64-unknown-linux
+- `export-allones.ll` RUN `FileCheck --check-prefixes=SUMMARY,SUMMARY-ARM %s < %t`: not an opt invocation
+- `export-bytearray.ll` RUN `opt -mtriple=x86_64-unknown-linux -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/use-typeid1-typeid2.yaml -lowertypetests-write-summary=%t %s | FileCheck --check-prefixes=CHECK,X86 %s`: uses lit substitution -lowertypetests-write-summary=%t
+- `export-bytearray.ll` RUN `FileCheck --check-prefixes=SUMMARY,SUMMARY-X86 %s < %t`: not an opt invocation
+- `export-bytearray.ll` RUN `opt -mtriple=aarch64-unknown-linux -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/use-typeid1-typeid2.yaml -lowertypetests-write-summary=%t %s | FileCheck --check-prefixes=CHECK,ARM %s`: non-x86_64 target aarch64-unknown-linux
+- `export-bytearray.ll` RUN `FileCheck --check-prefixes=SUMMARY,SUMMARY-ARM %s < %t`: not an opt invocation
+- `export-cross-dso-cfi.ll` RUN `grep -v "llvm.module.flags" %s | opt -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/exported-funcs.yaml | FileCheck --check-prefixes=CHECK,NORMAL %s`: not an opt invocation
+- `export-dead.ll` RUN `opt -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/use-typeid1-dead.yaml -lowertypetests-write-summary=%t %s | FileCheck %s`: uses lit substitution -lowertypetests-write-summary=%t
+- `export-dead.ll` RUN `FileCheck --check-prefix=SUMMARY %s < %t`: not an opt invocation
+- `export-icall.ll` RUN `opt -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/export-icall.yaml -lowertypetests-write-summary=%t %s | FileCheck %s`: uses lit substitution -lowertypetests-write-summary=%t
+- `export-icall.ll` RUN `FileCheck --check-prefix=SUMMARY %s < %t`: not an opt invocation
+- `export-inline.ll` RUN `opt -mtriple=i686-unknown-linux -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/use-typeid1-typeid2.yaml -lowertypetests-write-summary=%t %s | FileCheck --check-prefixes=CHECK,CHECK-X86-32 %s`: non-x86_64 target i686-unknown-linux
+- `export-inline.ll` RUN `FileCheck --check-prefixes=SUMMARY,SUMMARY-X86,SUMMARY-X86-32 %s < %t`: not an opt invocation
+- `export-inline.ll` RUN `opt -mtriple=x86_64-unknown-linux -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/use-typeid1-typeid2.yaml -lowertypetests-write-summary=%t %s | FileCheck --check-prefixes=CHECK,CHECK-64 %s`: uses lit substitution -lowertypetests-write-summary=%t
+- `export-inline.ll` RUN `FileCheck --check-prefixes=SUMMARY,SUMMARY-X86,SUMMARY-64 %s < %t`: not an opt invocation
+- `export-inline.ll` RUN `opt -mtriple=aarch64-unknown-linux -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/use-typeid1-typeid2.yaml -lowertypetests-write-summary=%t %s | FileCheck --check-prefixes=CHECK,CHECK-64 %s`: non-x86_64 target aarch64-unknown-linux
+- `export-inline.ll` RUN `FileCheck --check-prefixes=SUMMARY,SUMMARY-64,SUMMARY-ARM %s < %t`: not an opt invocation
+- `export-nothing.ll` RUN `opt -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-write-summary=%t -o /dev/null %s`: uses lit substitution -lowertypetests-write-summary=%t
+- `export-nothing.ll` RUN `FileCheck %s < %t`: not an opt invocation
+- `export-single.ll` RUN `opt -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/use-typeid1-typeid2.yaml -lowertypetests-write-summary=%t %s | FileCheck %s`: uses lit substitution -lowertypetests-write-summary=%t
+- `export-single.ll` RUN `FileCheck --check-prefix=SUMMARY %s < %t`: not an opt invocation
+- `function-arm-thumb.ll`: REQUIRES arm-registered-target
+- `function-disjoint.ll` RUN `opt -S -passes=lowertypetests -mtriple=wasm32-unknown-unknown %s | FileCheck --check-prefix=WASM32 %s`: non-x86_64 target wasm32-unknown-unknown
+- `function-ext.ll` RUN `opt -S -passes=lowertypetests -mtriple=wasm32-unknown-unknown %s | FileCheck --check-prefixes=CHECK,WASM32 %s`: non-x86_64 target wasm32-unknown-unknown
+- `function-thumb-bti.ll`: REQUIRES arm-registered-target
+- `function-weak.ll` RUN `opt -S -passes=lowertypetests -mtriple=i686-unknown-linux-gnu %s | FileCheck --check-prefixes=CHECK,X86 %s`: non-x86_64 target i686-unknown-linux-gnu
+- `function-weak.ll` RUN `opt -S -passes=lowertypetests -mtriple=arm-unknown-linux-gnu %s | FileCheck --check-prefixes=CHECK,ARM %s`: non-x86_64 target arm-unknown-linux-gnu
+- `function-weak.ll` RUN `opt -S -passes=lowertypetests -mtriple=aarch64-unknown-linux-gnu %s | FileCheck --check-prefixes=CHECK,ARM %s`: non-x86_64 target aarch64-unknown-linux-gnu
+- `function-weak.ll` RUN `opt -S -passes=lowertypetests -mtriple=riscv32-unknown-linux-gnu %s | FileCheck --check-prefixes=CHECK,RISCV %s`: non-x86_64 target riscv32-unknown-linux-gnu
+- `function-weak.ll` RUN `opt -S -passes=lowertypetests -mtriple=riscv64-unknown-linux-gnu %s | FileCheck --check-prefixes=CHECK,RISCV %s`: non-x86_64 target riscv64-unknown-linux-gnu
+- `function-weak.ll` RUN `opt -S -passes=lowertypetests -mtriple=loongarch64-unknown-linux-gnu %s | FileCheck --check-prefixes=CHECK,LOONGARCH64 %s`: non-x86_64 target loongarch64-unknown-linux-gnu
+- `function-weak.ll` RUN `opt -S -passes=lowertypetests -mtriple=hexagon-unknown-linux-musl %s | FileCheck --check-prefixes=CHECK,HEXAGON %s`: non-x86_64 target hexagon-unknown-linux-musl
+- `function.ll` RUN `opt -S -passes=lowertypetests -mtriple=i686-unknown-linux-gnu %s | FileCheck --check-prefixes=X86,NATIVE,JT8 %s`: non-x86_64 target i686-unknown-linux-gnu
+- `function.ll` RUN `opt -S -passes=lowertypetests -mtriple=i686-pc-win32 %s | FileCheck --check-prefixes=X86,NATIVE,JT8 %s`: non-x86_64 target i686-pc-win32
+- `function.ll` RUN `opt -S -passes=lowertypetests -mtriple=riscv32-unknown-linux-gnu %s | FileCheck --check-prefixes=RISCV,NATIVE,JT8 %s`: non-x86_64 target riscv32-unknown-linux-gnu
+- `function.ll` RUN `opt -S -passes=lowertypetests -mtriple=riscv64-unknown-linux-gnu %s | FileCheck --check-prefixes=RISCV,NATIVE,JT8 %s`: non-x86_64 target riscv64-unknown-linux-gnu
+- `function.ll` RUN `opt -S -passes=lowertypetests -mtriple=wasm32-unknown-unknown %s | FileCheck --check-prefix=WASM32 %s`: non-x86_64 target wasm32-unknown-unknown
+- `function.ll` RUN `opt -S -passes=lowertypetests -mtriple=loongarch64-unknown-linux-gnu %s | FileCheck --check-prefixes=LOONGARCH64,NATIVE,JT8 %s`: non-x86_64 target loongarch64-unknown-linux-gnu
+- `function.ll` RUN `%if arm-registered-target %{ opt -S -passes=lowertypetests -mtriple=arm-unknown-linux-gnu %s | FileCheck --check-prefixes=ARM,NATIVE,JT4 %s %}`: not an opt invocation
+- `function.ll` RUN `%if arm-registered-target %{ opt -S -passes=lowertypetests -mtriple=thumbv7m-unknown-linux-gnu %s | FileCheck --check-prefixes=THUMB,NATIVE,JT4 %s %}`: not an opt invocation
+- `function.ll` RUN `%if arm-registered-target %{ opt -S -passes=lowertypetests -mtriple=thumbv8m.base-unknown-linux-gnu %s | FileCheck --check-prefixes=THUMB,NATIVE,JT4 %s %}`: not an opt invocation
+- `function.ll` RUN `%if arm-registered-target %{ opt -S -passes=lowertypetests -mtriple=thumbv6m-unknown-linux-gnu %s | FileCheck --check-prefixes=THUMBV6M,NATIVE,JT16 %s %}`: not an opt invocation
+- `function.ll` RUN `%if arm-registered-target %{ opt -S -passes=lowertypetests -mtriple=thumbv5-unknown-linux-gnu %s | FileCheck --check-prefixes=ARM,NATIVE,JT4 %s %}`: not an opt invocation
+- `function.ll` RUN `%if arm-registered-target %{ opt -S -passes=lowertypetests -mtriple=aarch64-unknown-linux-gnu %s | FileCheck --check-prefixes=ARM,NATIVE,JT4 %s %}`: not an opt invocation
+- `function.ll` RUN `opt -S -passes=lowertypetests -mtriple=hexagon-unknown-linux-musl %s | FileCheck --check-prefixes=HEXAGON,NATIVE,JT4 %s`: non-x86_64 target hexagon-unknown-linux-musl
+- `import-32bit.ll` RUN `opt -mtriple=i686-unknown-linux -S -passes=lowertypetests -lowertypetests-summary-action=import -lowertypetests-read-summary=%S/Inputs/import.yaml %s | FileCheck %s`: non-x86_64 target i686-unknown-linux
+- `import-unsat.ll` RUN `opt -S -passes=lowertypetests -lowertypetests-summary-action=import -lowertypetests-read-summary=%S/Inputs/import-unsat.yaml -lowertypetests-write-summary=%t %s | FileCheck %s`: uses lit substitution -lowertypetests-write-summary=%t
+- `import-unsat.ll` RUN `FileCheck --check-prefix=SUMMARY %s < %t`: not an opt invocation
+- `import.ll` RUN `opt -mtriple=aarch64-unknown-linux -S -passes=lowertypetests -lowertypetests-summary-action=import -lowertypetests-read-summary=%S/Inputs/import.yaml %s | FileCheck --check-prefixes=CHECK,ARM %s`: non-x86_64 target aarch64-unknown-linux
+- `pr25902.ll` RUN `opt -mtriple=i686-pc -S -passes=lowertypetests < %s`: non-x86_64 target i686-pc
+- `pr37625.ll` RUN `opt -S -passes=lowertypetests -lowertypetests-summary-action=export -lowertypetests-read-summary=%S/Inputs/exported-funcs.yaml -lowertypetests-write-summary=%t %s | FileCheck %s`: uses lit substitution -lowertypetests-write-summary=%t
+- `x86-jumptable-dbg.ll` RUN `opt -S -passes=lowertypetests -mtriple=i686 %s | FileCheck --check-prefixes=X86_32 %s`: non-x86_64 target i686
+- `x86-jumptable.ll` RUN `opt -S -passes=lowertypetests -mtriple=i686 %s | FileCheck --check-prefixes=X86_32 %s`: non-x86_64 target i686

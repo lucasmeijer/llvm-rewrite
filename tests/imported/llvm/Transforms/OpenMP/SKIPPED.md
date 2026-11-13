@@ -1,0 +1,59 @@
+# Skipped while importing llvm/test/Transforms/OpenMP (llvmorg-23.1.5)
+
+21 of 60 files imported. Regenerate with `./harness/run import-llvm Transforms/OpenMP`.
+
+- `add_attributes.ll`: REQUIRES mips-registered-target, riscv-registered-target, systemz-registered-target
+- `add_attributes_amdgcn.ll`: target triple amdgcn-amd-amdhsa
+- `barrier_removal.ll`: REQUIRES amdgpu-registered-target
+- `bug66687.ll`: target triple nvptx64-nvidia-cuda
+- `custom_state_machines.ll` RUN `opt --mtriple=amdgpu-amd-amdhsa --data-layout=A5 -S -passes=openmp-opt < %s | FileCheck %s --check-prefixes=AMDGPU`: non-x86_64 target amdgpu-amd-amdhsa
+- `custom_state_machines.ll` RUN `opt --mtriple=nvptx64--         -S -passes=openmp-opt < %s | FileCheck %s --check-prefixes=NVPTX`: non-x86_64 target nvptx64--
+- `custom_state_machines.ll` RUN `opt --mtriple=amdgpu-amd-amdhsa --data-layout=A5 -openmp-opt-disable-state-machine-rewrite -S -passes=openmp-opt < %s | FileCheck %s --check-prefixes=AMDGPU-DISABLED`: non-x86_64 target amdgpu-amd-amdhsa
+- `custom_state_machines.ll` RUN `opt --mtriple=nvptx64--         -openmp-opt-disable-state-machine-rewrite -S -passes=openmp-opt < %s | FileCheck %s --check-prefixes=NVPTX-DISABLED`: non-x86_64 target nvptx64--
+- `custom_state_machines_pre_lto.ll` RUN `opt --mtriple=amdgpu-amd-amdhsa -S -passes=openmp-opt < %s | FileCheck %s --check-prefix=AMDGPU1`: non-x86_64 target amdgpu-amd-amdhsa
+- `custom_state_machines_pre_lto.ll` RUN `opt --mtriple=nvptx64--         -S -passes=openmp-opt < %s | FileCheck %s --check-prefix=NVPTX1`: non-x86_64 target nvptx64--
+- `custom_state_machines_pre_lto.ll` RUN `opt --mtriple=amdgpu-amd-amdhsa -openmp-opt-disable-state-machine-rewrite -S -passes=openmp-opt < %s | FileCheck %s --check-prefix=AMDGPU2`: non-x86_64 target amdgpu-amd-amdhsa
+- `custom_state_machines_pre_lto.ll` RUN `opt --mtriple=amdgpu-amd-amdhsa -S -passes=openmp-opt-postlink < %s | FileCheck %s --check-prefix=AMDGPU3`: non-x86_64 target amdgpu-amd-amdhsa
+- `custom_state_machines_pre_lto.ll` RUN `opt --mtriple=nvptx64--         -openmp-opt-disable-state-machine-rewrite -S -passes=openmp-opt < %s | FileCheck %s --check-prefix=NVPTX2`: non-x86_64 target nvptx64--
+- `custom_state_machines_pre_lto.ll` RUN `opt --mtriple=nvptx64--         -S -passes=openmp-opt-postlink < %s | FileCheck %s --check-prefix=NVPTX3`: non-x86_64 target nvptx64--
+- `custom_state_machines_remarks.ll`: target triple nvptx64
+- `deduplication_remarks.ll` RUN `opt -passes=openmp-opt-cgscc -pass-remarks=openmp-opt -disable-output < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=openmp-opt
+- `deduplication_target.ll`: target triple nvptx64
+- `get_hardware_num_threads_in_block_fold.ll`: target triple nvptx64
+- `get_hardware_num_threads_in_block_fold_optnone.ll`: target triple nvptx64
+- `globalization_remarks.ll`: target triple nvptx64
+- `gpu_kernel_detection_remarks.ll` RUN `opt -passes=openmp-opt-cgscc -pass-remarks-analysis=openmp-opt -openmp-print-gpu-kernels -disable-output < %s 2>&1 | FileCheck %s --implicit-check-not=non_kernel`: diagnostic output flag -pass-remarks-analysis=openmp-opt
+- `gpu_state_machine_function_ptr_replacement.ll` RUN `opt -S -passes=openmp-opt -openmp-ir-builder-optimistic-attributes -pass-remarks=openmp-opt -openmp-print-gpu-kernels < %s | FileCheck %s`: diagnostic output flag -pass-remarks=openmp-opt
+- `gpu_state_machine_function_ptr_replacement.ll` RUN `opt -S -passes=openmp-opt -pass-remarks=openmp-opt -openmp-print-gpu-kernels < %s | FileCheck %s`: diagnostic output flag -pass-remarks=openmp-opt
+- `heap-to-shared-missing-declarations.ll`: REQUIRES amdgpu-registered-target
+- `icv_remarks.ll` RUN `opt -passes=openmp-opt-cgscc -pass-remarks-analysis=openmp-opt -openmp-print-icv-values -disable-output < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks-analysis=openmp-opt
+- `indirect_call_kernel_info_crash.ll`: target triple amdgcn-amd-amdhsa
+- `is_spmd_exec_mode_fold.ll`: target triple nvptx64
+- `nested_parallelism.ll`: REQUIRES nvptx-registered-target
+- `parallel_deletion_cg_update.ll` @analysis `'-passes=function(instcombine),cgscc(attributor-cgscc),print-callgraph'`: nondeterministic output
+- `parallel_deletion_cg_update.ll`: no working RUN lines
+- `parallel_deletion_remarks.ll` RUN `opt -S -pass-remarks=openmp-opt -passes='attributor,cgscc(openmp-opt-cgscc)' -disable-output < %s 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=openmp-opt
+- `parallel_level_fold.ll`: target triple nvptx64
+- `reduced_pointer_info_assertion.ll`: target triple nvptx64-nvidia-cuda
+- `remove_globalization.ll`: REQUIRES nvptx-registered-target
+- `replace_globalization.ll`: uses non-x86 target intrinsic @llvm.nvvm.
+- `rtf_type_checking.ll`: REQUIRES asserts
+- `single_threaded_execution.ll`: REQUIRES asserts
+- `spirv_ctor.ll`: target triple spirv64-intel
+- `spmdization.ll` RUN `opt --mtriple=amdgpu-amd-amdhsa --data-layout=A5 -S -passes=openmp-opt < %s | FileCheck %s --check-prefixes=AMDGPU`: non-x86_64 target amdgpu-amd-amdhsa
+- `spmdization.ll` RUN `opt --mtriple=nvptx64-- -S -passes=openmp-opt < %s | FileCheck %s --check-prefixes=NVPTX`: non-x86_64 target nvptx64--
+- `spmdization.ll` RUN `opt --mtriple=amdgpu-amd-amdhsa --data-layout=A5 -S -passes=openmp-opt -openmp-opt-disable-spmdization < %s | FileCheck %s --check-prefix=AMDGPU-DISABLED1`: non-x86_64 target amdgpu-amd-amdhsa
+- `spmdization.ll` RUN `opt --mtriple=amdgpu-amd-amdhsa --data-layout=A5 -S -passes=openmp-opt-postlink < %s | FileCheck %s --check-prefix=AMDGPU-DISABLED2`: non-x86_64 target amdgpu-amd-amdhsa
+- `spmdization.ll` RUN `opt --mtriple=nvptx64-- -S -passes=openmp-opt -openmp-opt-disable-spmdization < %s | FileCheck %s --check-prefix=NVPTX-DISABLED1`: non-x86_64 target nvptx64--
+- `spmdization.ll` RUN `opt --mtriple=nvptx64-- -S -passes=openmp-opt-postlink < %s | FileCheck %s --check-prefix=NVPTX-DISABLED2`: non-x86_64 target nvptx64--
+- `spmdization_assumes.ll`: target triple nvptx64
+- `spmdization_constant_prop.ll`: uses non-x86 target intrinsic @llvm.amdgcn.
+- `spmdization_guarding.ll`: REQUIRES nvptx-registered-target
+- `spmdization_guarding_two_reaching_kernels.ll`: REQUIRES nvptx-registered-target
+- `spmdization_indirect.ll` RUN `opt --mtriple=amdgpu-amd-amdhsa -S -passes=openmp-opt < %s | FileCheck %s --check-prefixes=AMDGPU`: non-x86_64 target amdgpu-amd-amdhsa
+- `spmdization_indirect.ll` RUN `opt --mtriple=nvptx64-- -S -passes=openmp-opt < %s | FileCheck %s --check-prefixes=NVPTX`: non-x86_64 target nvptx64--
+- `spmdization_kernel_env_dep.ll`: uses non-x86 target intrinsic @llvm.amdgcn.
+- `spmdization_no_guarding_two_reaching_kernels.ll`: REQUIRES nvptx-registered-target
+- `spmdization_remarks.ll`: target triple nvptx64
+- `value-simplify-openmp-opt.ll`: target triple amdgcn-amd-amdhsa
+- `values_in_offload_arrays.ll`: REQUIRES asserts

@@ -1,0 +1,51 @@
+# Skipped while importing llvm/test/Transforms/MemProfContextDisambiguation (llvmorg-23.1.5)
+
+5 of 29 files imported. Regenerate with `./harness/run import-llvm Transforms/MemProfContextDisambiguation`.
+
+- `aliased-location1.ll`: REQUIRES asserts
+- `aliased-location2.ll`: REQUIRES asserts
+- `basic.ll`: REQUIRES asserts
+- `dot.ll` RUN `not --crash opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-export-to-dot -memprof-dot-file-path-prefix=%t. -memprof-dot-scope=alloc %s -S 2>&1 | FileCheck %s --check-prefix=ERRMISSINGALLOCID`: not an opt invocation
+- `dot.ll` RUN `not --crash opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-export-to-dot -memprof-dot-file-path-prefix=%t. -memprof-dot-scope=context %s -S 2>&1 | FileCheck %s --check-prefix=ERRMISSINGCONTEXTID`: not an opt invocation
+- `dot.ll` RUN `not --crash opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-export-to-dot -memprof-dot-file-path-prefix=%t. -memprof-dot-alloc-id=0 -memprof-dot-context-id=2 %s -S 2>&1 | FileCheck %s --check-prefix=ERRBOTH`: not an opt invocation
+- `dot.ll` RUN `opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-export-to-dot -memprof-dot-file-path-prefix=%t. %s -S 2>&1 | FileCheck %s --check-prefix=IR`: uses lit substitution -memprof-dot-file-path-prefix=%t.
+- `dot.ll` RUN `cat %t.ccg.postbuild.dot | FileCheck %s -check-prefix=DOTCOMMON --check-prefix=DOTALLANDALLOC0 --check-prefix=DOTALL --check-prefix=DOTALLNONE`: not an opt invocation
+- `dot.ll` RUN `opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-export-to-dot -memprof-dot-file-path-prefix=%t. -memprof-dot-alloc-id=0 %s -S 2>&1 | FileCheck %s --check-prefix=IR`: uses lit substitution -memprof-dot-file-path-prefix=%t.
+- `dot.ll` RUN `cat %t.ccg.postbuild.dot | FileCheck %s --check-prefix=DOTCOMMON --check-prefix=DOTALLANDALLOC0 --check-prefix=DOTALL --check-prefix=DOTALLALLOC0`: not an opt invocation
+- `dot.ll` RUN `opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-export-to-dot -memprof-dot-file-path-prefix=%t. -memprof-dot-context-id=1 %s -S 2>&1 | FileCheck %s --check-prefix=IR`: uses lit substitution -memprof-dot-file-path-prefix=%t.
+- `dot.ll` RUN `cat %t.ccg.postbuild.dot | FileCheck %s --check-prefix=DOTCOMMON --check-prefix=DOTALLANDALLOC0 --check-prefix=DOTALL --check-prefix=DOTALLCONTEXT1`: not an opt invocation
+- `dot.ll` RUN `opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-export-to-dot -memprof-dot-file-path-prefix=%t. -memprof-dot-scope=alloc -memprof-dot-alloc-id=0 %s -S 2>&1 | FileCheck %s --check-prefix=IR`: uses lit substitution -memprof-dot-file-path-prefix=%t.
+- `dot.ll` RUN `cat %t.ccg.postbuild.dot | FileCheck %s --check-prefix=DOTCOMMON --check-prefix=DOTALLANDALLOC0 --check-prefix=DOTALLOC0NONE`: not an opt invocation
+- `dot.ll` RUN `opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-export-to-dot -memprof-dot-file-path-prefix=%t. -memprof-dot-scope=alloc -memprof-dot-alloc-id=0 -memprof-dot-context-id=1 %s -S 2>&1 | FileCheck %s --check-prefix=IR`: uses lit substitution -memprof-dot-file-path-prefix=%t.
+- `dot.ll` RUN `cat %t.ccg.postbuild.dot | FileCheck %s --check-prefix=DOTCOMMON --check-prefix=DOTALLANDALLOC0 --check-prefix=DOTALLOC0CONTEXT1`: not an opt invocation
+- `dot.ll` RUN `opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-export-to-dot -memprof-dot-file-path-prefix=%t. -memprof-dot-scope=context -memprof-dot-context-id=1 %s -S 2>&1 | FileCheck %s --check-prefix=IR`: uses lit substitution -memprof-dot-file-path-prefix=%t.
+- `dot.ll` RUN `cat %t.ccg.postbuild.dot | FileCheck %s --check-prefix=DOTCOMMON --check-prefix=DOTCONTEXT1`: not an opt invocation
+- `duplicate-context-ids.ll`: REQUIRES asserts
+- `duplicate-context-ids2.ll` RUN `opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-verify-ccg -memprof-verify-nodes -memprof-dump-ccg -memprof-export-to-dot -memprof-dot-file-path-prefix=%t. %s -S 2>&1 | FileCheck %s --check-prefix=DUMP`: uses lit substitution -memprof-dot-file-path-prefix=%t.
+- `fix_clone_checking.ll` RUN `opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-verify-ccg -memprof-verify-nodes -pass-remarks=memprof-context-disambiguation %s -S 2>&1 | FileCheck %s`: diagnostic output flag -pass-remarks=memprof-context-disambiguation
+- `fixup.ll`: REQUIRES asserts
+- `func_assign_fix.ll`: REQUIRES asserts
+- `funcassigncloning.ll`: REQUIRES asserts
+- `funcassigncloning2.ll` RUN `opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-verify-ccg -memprof-verify-nodes -pass-remarks=memprof-context-disambiguation %s -S 2>&1 | FileCheck %s --check-prefix=IR --check-prefix=REMARKS`: diagnostic output flag -pass-remarks=memprof-context-disambiguation
+- `funcassigncloningrecursion.ll` RUN `opt -passes=memprof-context-disambiguation -supports-hot-cold-new -memprof-verify-ccg -memprof-verify-nodes -stats -pass-remarks=memprof-context-disambiguation %s -S 2>&1 | FileCheck %s --check-prefix=REMARKS`: diagnostic output flag -stats
+- `indirectcall.ll`: REQUIRES asserts
+- `inlined.ll`: REQUIRES asserts
+- `inlined3.ll`: REQUIRES asserts
+- `inlined4.ll`: REQUIRES asserts
+- `iterative_merge.ll`: REQUIRES asserts
+- `mergenodes.ll` RUN `-memprof-merge-iteration=false -memprof-verify-ccg -memprof-dump-ccg %s -S 2>&1 | FileCheck %s --check-prefix=IR --check-prefix=DUMP`: not an opt invocation
+- `mergenodes2.ll` RUN `-memprof-merge-iteration=false -memprof-verify-ccg -memprof-dump-ccg %s -S 2>&1 | FileCheck %s --check-prefix=IR --check-prefix=DUMP`: not an opt invocation
+- `overlapping-contexts.ll`: REQUIRES asserts
+- `pass-pipeline.ll` RUN `opt -debug-pass-manager -passes='lto<O0>' -S %s 2>&1 | FileCheck %s --implicit-check-not="Running pass: MemProfContextDisambiguation"`: diagnostic output flag -debug-pass-manager
+- `pass-pipeline.ll` RUN `opt -debug-pass-manager -passes='lto<O1>' -S %s 2>&1 | FileCheck %s --implicit-check-not="Running pass: MemProfContextDisambiguation"`: diagnostic output flag -debug-pass-manager
+- `pass-pipeline.ll` RUN `opt -debug-pass-manager -passes='lto<O2>' -S %s 2>&1 | FileCheck %s --implicit-check-not="Running pass: MemProfContextDisambiguation"`: diagnostic output flag -debug-pass-manager
+- `pass-pipeline.ll` RUN `opt -debug-pass-manager -passes='lto<O3>' -S %s 2>&1 | FileCheck %s --implicit-check-not="Running pass: MemProfContextDisambiguation"`: diagnostic output flag -debug-pass-manager
+- `pass-pipeline.ll` RUN `opt -debug-pass-manager -passes='lto<O0>' -S %s -enable-memprof-context-disambiguation 2>&1 | FileCheck %s --implicit-check-not="Running pass: MemProfContextDisambiguation"`: diagnostic output flag -debug-pass-manager
+- `pass-pipeline.ll` RUN `opt -debug-pass-manager -passes='lto<O1>' -S %s -enable-memprof-context-disambiguation 2>&1 | FileCheck %s --implicit-check-not="Running pass: MemProfContextDisambiguation"`: diagnostic output flag -debug-pass-manager
+- `pass-pipeline.ll` RUN `opt -debug-pass-manager -passes='lto<O2>' -S %s -enable-memprof-context-disambiguation 2>&1 | FileCheck %s --check-prefix=ENABLED`: diagnostic output flag -debug-pass-manager
+- `pass-pipeline.ll` RUN `opt -debug-pass-manager -passes='lto<O3>' -S %s -enable-memprof-context-disambiguation 2>&1 | FileCheck %s --check-prefix=ENABLED`: diagnostic output flag -debug-pass-manager
+- `recursive.ll`: REQUIRES asserts
+- `tailcall-aliased-location1.ll`: REQUIRES asserts
+- `tailcall-aliased-location2.ll`: REQUIRES asserts
+- `tailcall-nonunique.ll`: REQUIRES asserts
+- `tailcall.ll`: REQUIRES asserts
