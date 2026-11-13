@@ -223,6 +223,13 @@
 #load "pass_function_attrs.jai";
 #load "attributor.jai";
 #load "attributor_aas.jai";
+#load "attributor_query.jai";
+#load "attributor_cleanup.jai";
+#load "attributor_values.jai";
+#load "attributor_ptrinfo.jai";
+#load "attributor_dead.jai";
+#load "attributor_misc.jai";
+#load "attributor_mem.jai";
 #load "code_extractor.jai";
 #load "pass_partial_inliner.jai";
 #load "lower_mem_intrinsics.jai";

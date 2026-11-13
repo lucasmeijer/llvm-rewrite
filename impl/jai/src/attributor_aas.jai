@@ -1,42 +1,43 @@
-// The abstract attributes AttributorLight allows: a port of their parts of
+// The function-level and memory abstract attributes and the AA dispatch: a port of their parts of
 // llvm/lib/Transforms/IPO/AttributorAttributes.cpp (AANoUnwind, AANoSync, AANoFree, AANonNull, AAMustProgress,
 // AANoRecurse, AAWillReturn, AAIntraFnReachability, AANoReturn, AANoCapture, AAMemoryBehavior, AAMemoryLocation,
-// AADenormalFPMath, AANoFPClass, AACallEdges, AAInterFnReachability, AAUnderlyingObjects; the generic helpers
-// clampReturnedValueStates, clampCallSiteArgumentStates, AACalleeToCallSite, followUsesInMBEC) and their
-// isImpliedByIR from llvm/include/llvm/Transforms/IPO/Attributor.h. The framework is attributor.jai.
+// AADenormalFPMath, AANoFPClass, AACallEdges, AAInterFnReachability, AAUnderlyingObjects and the IRAttribute
+// manifests) and their isImpliedByIR from llvm/include/llvm/Transforms/IPO/Attributor.h. The framework is
+// attributor.jai; the other AAs are in attributor_values.jai, attributor_ptrinfo.jai, attributor_dead.jai,
+// attributor_misc.jai and attributor_mem.jai.
 //
 // The class of an AA (e.g. AANoFreeFloating vs. AANoFreeCallSiteArgument) is its (kind, position kind) pair; the
-// virtual methods are the switches aa_initialize / aa_update_impl / aa_manifest below.
+// virtual methods are the switches aa_construct / aa_initialize / aa_update_impl / aa_manifest below.
 
 // AANoCapture
-NC_NOT_CAPTURED_IN_MEM :: cast(u32) 1;
-NC_NOT_CAPTURED_IN_INT :: cast(u32) 2;
-NC_NOT_CAPTURED_IN_RET :: cast(u32) 4;
-NC_NO_CAPTURE_MAYBE_RETURNED :: cast(u32) 3;
-NC_NO_CAPTURE :: cast(u32) 7;
+NC_NOT_CAPTURED_IN_MEM :: cast(u64) 1;
+NC_NOT_CAPTURED_IN_INT :: cast(u64) 2;
+NC_NOT_CAPTURED_IN_RET :: cast(u64) 4;
+NC_NO_CAPTURE_MAYBE_RETURNED :: cast(u64) 3;
+NC_NO_CAPTURE :: cast(u64) 7;
 nc_maybe_returned :: (i: u32) -> bool { return bs_is_assumed(aa(i).s, NC_NO_CAPTURE_MAYBE_RETURNED); }
 
 // AAMemoryBehavior
-MB_NO_READS :: cast(u32) 1;
-MB_NO_WRITES :: cast(u32) 2;
-MB_NO_ACCESSES :: cast(u32) 3;
+MB_NO_READS :: cast(u64) 1;
+MB_NO_WRITES :: cast(u64) 2;
+MB_NO_ACCESSES :: cast(u64) 3;
 
 // AAMemoryLocation
-ML_NO_LOCAL_MEM :: cast(u32) 1;
-ML_NO_CONST_MEM :: cast(u32) 2;
-ML_NO_GLOBAL_INTERNAL_MEM :: cast(u32) 4;
-ML_NO_GLOBAL_EXTERNAL_MEM :: cast(u32) 8;
-ML_NO_GLOBAL_MEM :: cast(u32) 12;
-ML_NO_ARGUMENT_MEM :: cast(u32) 16;
-ML_NO_INACCESSIBLE_MEM :: cast(u32) 32;
-ML_NO_MALLOCED_MEM :: cast(u32) 64;
-ML_NO_UNKOWN_MEM :: cast(u32) 128;
-ML_NO_LOCATIONS :: cast(u32) 255;
-ML_VALID_STATE :: cast(u32) 256;
-ML_BEST_STATE :: cast(u32) 511;
+ML_NO_LOCAL_MEM :: cast(u64) 1;
+ML_NO_CONST_MEM :: cast(u64) 2;
+ML_NO_GLOBAL_INTERNAL_MEM :: cast(u64) 4;
+ML_NO_GLOBAL_EXTERNAL_MEM :: cast(u64) 8;
+ML_NO_GLOBAL_MEM :: cast(u64) 12;
+ML_NO_ARGUMENT_MEM :: cast(u64) 16;
+ML_NO_INACCESSIBLE_MEM :: cast(u64) 32;
+ML_NO_MALLOCED_MEM :: cast(u64) 64;
+ML_NO_UNKOWN_MEM :: cast(u64) 128;
+ML_NO_LOCATIONS :: cast(u64) 255;
+ML_VALID_STATE :: cast(u64) 256;
+ML_BEST_STATE :: cast(u64) 511;
 ML_NONE :: cast(u8) 0; ML_READ :: cast(u8) 1; ML_WRITE :: cast(u8) 2; ML_READ_WRITE :: cast(u8) 3;
 
-ml_inverse_location :: (loc: u32, and_local: bool, and_const: bool) -> u32 {
+ml_inverse_location :: (loc: u64, and_local: bool, and_const: bool) -> u64 {
     m := loc;
     if and_local m |= ML_NO_LOCAL_MEM;
     if and_const m |= ML_NO_CONST_MEM;
@@ -84,20 +85,6 @@ aa_no_sync_implied_by_ir :: (p: Irp, ign: bool) -> bool {
     atr_manifest_attrs(p, .[attr_enum(.NoSync)]);
     return true;
 }
-// AANoAlias::isImpliedByIR
-aa_no_alias_implied_by_ir :: (p: Irp, ign_in: bool) -> bool {
-    ign := ign_in;
-    v := irp_assoc_value(p);
-    if irp_kind(p) != .CALL_SITE_ARGUMENT {
-        if is_inst(v) && inst_op(v) == .ALLOCA return true;
-    } else {
-        ign = true;
-    }
-    k := vkind(v);
-    if k == .C_UNDEF || k == .C_POISON return true;
-    if k == .C_NULL && !null_pointer_is_defined(irp_anchor_scope(p), ptr_addrspace(vtype(v))) return true;
-    return atr_has_attr(p, .[.ByVal, .NoAlias], ign, .NoAlias);
-}
 // AANonNull::isImpliedByIR
 aa_non_null_implied_by_ir :: (p: Irp, ign: bool) -> bool {
     kinds: [2] Attr_Kind;
@@ -116,9 +103,9 @@ aa_non_null_implied_by_ir :: (p: Irp, ign: bool) -> bool {
         array_add(*vals, irp_assoc_value(p));
         array_add(*ctxs, irp_ctx_i(p));
     } else {
-        ok, rets := atr_insts(irp_assoc_fn(p), .[.RET]);
-        if !ok return false;
-        for rets { array_add(*vals, op(it, 0)); array_add(*ctxs, it); }
+        rf := irp_assoc_fn(p);
+        if rf == NONE || is_declaration(rf) return false;
+        for atr_opcode_insts(rf, .[.RET]) { array_add(*vals, op(it, 0)); array_add(*ctxs, it); }
     }
     for v: vals {
         q: Simplify_Query;
@@ -194,166 +181,26 @@ call_is_bundle_operand :: (cb: Value_Id, u: Use_Id) -> bool {
 }
 use_arg_no :: inline (u: Use_Id) -> u32 { return u - ir.v_ops[ir.u_user[u]]; }
 
-// AACalleeToCallSite::updateImpl; `ak` is the IR attribute kind (NONE_ATTR: not an enum attribute, clamp states)
-aa_callee_to_call_site :: (i: u32, ak: Attr_Kind) -> bool {
-    p := aa(i).pos;
-    pk := aa(i).pk;
-    kind := aa(i).kind;
-    cb := irp_anchor(p);
-    ok, callees := atr_callees(i, cb);
-    if !ok return aa_pessimistic(i);
-    changed := ATR_UNCHANGED;
-    for callee: callees {
-        fpos := ifx pk == .CALL_SITE_RETURNED then irp_returned(callee) else irp_function(callee);
-        if ak != .NONE_ATTR {
-            has, _ := atr_has_assumed_ir_attr(ak, i, fpos, DEP_REQUIRED);
-            if !has return aa_pessimistic(i);
-            continue;
-        }
-        o := atr_get_aa(kind, fpos, i, DEP_REQUIRED);
-        if o == NONE return aa_pessimistic(i);
-        changed |= bs_clamp_and_indicate(*aa(i).s, aa(o).s);
-        if bs_is_fix(aa(i).s) {
-            if bs_is_valid(aa(i).s) return changed;
-            return aa_pessimistic(i);
-        }
-    }
-    return changed;
-}
+// ---------------------------------------------------------------- construction and initialize
 
-// clampCallSiteArgumentStates into a fresh best state, then clampStateAndIndicateChange (AAArgumentFromCallSiteArguments)
-aa_argument_from_call_site_arguments :: (i: u32, ak: Attr_Kind) -> bool {
-    p := aa(i).pos;
-    kind := aa(i).kind;
-    s := bs_new(aa(i).s.best);
-    t: Bstate;
-    have_t := false;
-    argno := cast(u32) irp_cs_arg_no(p);
-    sites, complete := atr_call_sites(irp_assoc_fn(p), true);
-    failed := !complete;
-    for cb: sites {
-        if call_num_args(cb) <= argno { failed = true; break; }
-        cpos := irp_cs_argument(cb, argno);
-        if ak != .NONE_ATTR {
-            has, _ := atr_has_assumed_ir_attr(ak, i, cpos, DEP_REQUIRED);
-            if !has { failed = true; break; }
-            continue;
-        }
-        o := atr_get_aa(kind, cpos, i, DEP_REQUIRED);
-        if o == NONE { failed = true; break; }
-        if !have_t { t = bs_new(aa(o).s.best); have_t = true; }
-        bs_join_and(*t, aa(o).s);
-        if !bs_is_valid(t) { failed = true; break; }
-    }
-    if failed bs_pessimistic(*s);
-    else if have_t bs_clamp(*s, t);
-    return bs_clamp_and_indicate(*aa(i).s, s);
-}
-
-// AAReturnedFromReturnedValues: checkForAllReturnedValues fails without AAPotentialValues, so the clamped state is
-// the pessimistic one
-aa_returned_from_returned_values :: (i: u32) -> bool {
-    s := bs_new(aa(i).s.best);
-    bs_pessimistic(*s);
-    return bs_clamp_and_indicate(*aa(i).s, s);
-}
-
-// followUsesInMBEC
-Use_Set :: struct { list: [..] Use_Id; member: Table(Use_Id, bool); }
-uset_insert :: (s: *Use_Set, u: Use_Id) { if table_contains(*s.member, u) return; table_set(*s.member, u, true); array_add(*s.list, u); }
-
-aa_follow_uses_in_mbec :: (i: u32, ctx: Value_Id, st: *Bstate) {
-    v := irp_assoc_value(aa(i).pos);
-    if is_constant_data(v) return;
-    uses: Use_Set;
-    uses.list.allocator = temp; uses.member.allocator = temp;
-    u := ir.v_first_use[v];
-    while u != NONE { uset_insert(*uses, u); u = ir.u_next[u]; }
-    aa_follow_uses_in_context(i, ctx, *uses, st);
-    if bs_is_fix(st.*) return;
-    brs: [..] Value_Id; brs.allocator = temp;
-    it := mbe_begin(ctx);
-    while !mbe_at_end(*it) {
-        if inst_op(it.cur) == .CONDBR array_add(*brs, it.cur);
-        mbe_advance(*it);
-    }
-    for br: brs {
-        parent := bs_new(st.best);
-        bs_optimistic(*parent);
-        for k: 0..cast(s64) num_successors(br) - 1 {
-            bb := get_successor(br, cast(u32) k);
-            child := bs_new(st.best);
-            before := uses.list.count;
-            aa_follow_uses_in_context(i, block_first(bb), *uses, *child);
-            for x: before..uses.list.count - 1 table_remove(*uses.member, uses.list[x]);
-            uses.list.count = before;
-            bs_join_and(*parent, child);
-        }
-        bs_add_known_of(st, parent);
+// the constructors: the extension state of the kinds that have one
+aa_construct :: (i: u32) {
+    if aa(i).kind == {
+        case .IS_DEAD; // created in dead_initialize (it depends on the position)
+        case .UNDEFINED_BEHAVIOR; aa(i).x = New(Ub_Ext);
+        case .HEAP_TO_STACK; h2s_construct(i);
+        case .PRIVATIZABLE_PTR; priv_construct(i);
+        case .VALUE_CONSTANT_RANGE; vcr_construct(i);
+        case .POTENTIAL_CONSTANT_VALUES; pcv_construct(i);
+        case .POTENTIAL_VALUES; pv_construct(i);
+        case .POINTER_INFO; pi_construct(i);
+        case .ASSUMPTION_INFO; asi_construct(i);
+        case .DEREFERENCEABLE; deref_construct(i);
+        case .GLOBAL_VALUE_INFO; aa(i).x = New(Gvi_Ext);
+        case .INDIRECT_CALL_INFO; ici_construct(i);
+        case .ALLOCATION_INFO; alloc_info_construct(i);
     }
 }
-// followUsesInContext
-aa_follow_uses_in_context :: (i: u32, ctx: Value_Id, uses: *Use_Set, st: *Bstate) {
-    it := mbe_begin(ctx);
-    u := 0;
-    while u < uses.list.count {
-        cu := uses.list[u];
-        u += 1;
-        user := ir.u_user[cu];
-        if !is_inst(user) continue;
-        found := mbe_find_in_context_of(user, *it);
-        if found && aa_follow_use_in_mbec(i, cu, user, st) {
-            x := ir.v_first_use[user];
-            while x != NONE { uset_insert(uses, x); x = ir.u_next[x]; }
-        }
-    }
-}
-aa_follow_use_in_mbec :: (i: u32, u: Use_Id, user: Value_Id, st: *Bstate) -> bool {
-    if aa(i).kind == .NON_NULL {
-        _, non_null, track := nn_known_non_null_and_deref_bytes_for_use(i, irp_assoc_value(aa(i).pos), u, user);
-        if non_null bs_add_known(st, 1);
-        return track;
-    }
-    // AANoFPClassImpl::followUseInMBEC
-    if !is_call_base(user) || !call_is_arg_operand(user, u) return false;
-    o := atr_get_aa(.NO_FPCLASS, irp_cs_argument(user, use_arg_no(u)), i, DEP_NONE);
-    if o != NONE bs_add_known(st, aa(o).s.known);
-    return false;
-}
-
-// getKnownNonNullAndDerefBytesForUse: (deref bytes, IsNonNull, TrackUse)
-nn_known_non_null_and_deref_bytes_for_use :: (q: u32, assoc: Value_Id, u: Use_Id, i: Value_Id) -> (s64, bool, bool) {
-    use_v := ir.u_val[u];
-    if !is_ptr_type(vtype(use_v)) return 0, false, false;
-    o := inst_op(i);
-    if is_cast_op(o) || o == .GEP return 0, false, true;
-    npid := null_pointer_is_defined(inst_fn(i), ptr_addrspace(vtype(use_v)));
-    if is_call_base(i) {
-        if call_is_bundle_operand(i, u) {
-            found, kind, arg := atr_knowledge_from_use(u);
-            if found return cast(s64) arg, kind == .NonNull || !npid, false;
-            return 0, false, false;
-        }
-        if call_is_callee_use(i, u) return 0, !npid, false;
-        _, known := atr_has_assumed_ir_attr(.NonNull, q, irp_cs_argument(i, use_arg_no(u)), DEP_NONE);
-        return 0, known, false;   // AADereferenceable is not allowed
-    }
-    ok, loc := mloc_get_or_none(i);
-    if !ok || loc.ptr != use_v || !ls_has_value(loc.size) || !ls_is_precise(loc.size) || ls_is_scalable(loc.size) || is_volatile(i)
-        return 0, false, false;
-    // getMinimalBaseOfPointer (the AAValueConstantRange external analysis is not allowed)
-    off := ap_zero(dl_index_type_size_bits(vtype(loc.ptr)));
-    base, offset := strip_and_accumulate_constant_offsets(loc.ptr, off, false, true);
-    if base != NONE && base == assoc {
-        deref := cast(s64) ls_value(loc.size) + ap_sext_value(offset);
-        return max(0, deref), !npid, false;
-    }
-    base2, off2 := get_pointer_base_with_constant_offset(loc.ptr);
-    if base2 != NONE && base2 == assoc && off2 == 0 return cast(s64) ls_value(loc.size), !npid, false;
-    return 0, false, false;
-}
-
-// ---------------------------------------------------------------- initialize
 
 aa_initialize :: (i: u32) {
     a := aa(i);
@@ -370,9 +217,16 @@ aa_initialize :: (i: u32) {
             v := strip_pointer_casts(irp_assoc_value(p));
             if vkind(v) == .C_NULL { aa_pessimistic(i); return; }
             ctx := irp_ctx_i(p);
-            if ctx != NONE aa_follow_uses_in_mbec(i, ctx, *aa(i).s);
+            if ctx != NONE {
+                st := mbec_state_of(i);
+                aa_follow_uses_in_mbec(i, ctx, *st);
+                mbec_store(i, *st);
+            }
         case .NO_CAPTURE;
+            if pk == .RETURNED fatal("internal: attributor: NoCapture is not applicable to function returns");
             if pk == .CALL_SITE_RETURNED nc_determine_function_capture_capabilities(p, irp_anchor_scope(p), *aa(i).s);
+        case .NO_FREE;
+            if pk == .RETURNED fatal("internal: attributor: NoFree is not applicable to function returns");
         case .MEM_BEHAVIOR;
             if pk == .ARGUMENT { mb_argument_initialize(i); return; }
             if pk == .CALL_SITE_ARGUMENT {
@@ -401,6 +255,22 @@ aa_initialize :: (i: u32) {
             if at m = cast(u32) at.ival;
             aa(i).dn_mode = m;
             if dn_is_mode_fixed(m) aa(i).dn_fix = true;
+        case .IS_DEAD; dead_initialize(i);
+        case .HEAP_TO_STACK; h2s_initialize(i);
+        case .PRIVATIZABLE_PTR; priv_initialize(i);
+        case .VALUE_CONSTANT_RANGE; vcr_initialize(i);
+        case .POTENTIAL_CONSTANT_VALUES; pcv_initialize(i);
+        case .POTENTIAL_VALUES; pv_initialize(i);
+        case .NO_UNDEF; nu_undef_initialize(i);
+        case .DEREFERENCEABLE; deref_initialize(i);
+        case .ALIGN; align_initialize(i);
+        case .INSTANCE_INFO; ii_initialize(i);
+        case .ASSUMPTION_INFO; asi_initialize(i);
+        case .INDIRECT_CALL_INFO; ici_initialize(i);
+        case .INVARIANT_LOAD_POINTER; ilp_initialize(i);
+        case .ADDRESS_SPACE; as_initialize(i);
+        case .NO_ALIAS_ADDR_SPACE; as_initialize(i);
+        case .ALLOCATION_INFO; alloc_info_initialize(i);
     }
 }
 
@@ -474,7 +344,11 @@ fpc_initialize :: (i: u32) {
         kfc := compute_known_fp_class(v, FC_ALL_FLAGS, q);
         bs_add_known(*aa(i).s, (~cast(u32) kfc.known_fp_classes) & FC_ALL_FLAGS);   // FPClassTest operator~ masks to fcAllFlags
     }
-    if ctx != NONE aa_follow_uses_in_mbec(i, ctx, *aa(i).s);
+    if ctx != NONE {
+        st := mbec_state_of(i);
+        aa_follow_uses_in_mbec(i, ctx, *st);
+        mbec_store(i, *st);
+    }
 }
 
 // mayContainUnboundedCycle
@@ -504,6 +378,7 @@ wr_may_contain_unbounded_cycle :: (f: Value_Id) -> bool {
 se_current_swap :: (s: *Scev_State) -> *Scev_State { old := se; se = s; return old; }
 
 // ---------------------------------------------------------------- updateImpl
+// ---------------------------------------------------------------- updateImpl
 
 aa_update_impl :: (i: u32) -> bool {
     a := aa(i);
@@ -528,7 +403,7 @@ aa_update_impl :: (i: u32) -> bool {
             return nf_floating_update(i);
         case .NON_NULL;
             if pk == .ARGUMENT return aa_argument_from_call_site_arguments(i, .NonNull);
-            if pk == .RETURNED return aa_returned_from_returned_values(i);
+            if pk == .RETURNED return aa_returned_from_returned_values(i, .NonNull, false);
             if pk == .CALL_SITE_RETURNED return aa_callee_to_call_site(i, .NonNull);
             return nn_floating_update(i);
         case .MUST_PROGRESS;
@@ -547,8 +422,10 @@ aa_update_impl :: (i: u32) -> bool {
             return wr_update(i);
         case .NO_RETURN;
             if pk == .CALL_SITE return aa_callee_to_call_site(i, .NoReturn);
-            ok, rets := atr_aa_insts(i, .[.RET]);
-            if !ok || rets.count > 0 return aa_pessimistic(i);
+            uai := false;
+            ok := true;
+            for x: atr_insts(i, .[.RET], *uai, *ok) { ok = false; break; }
+            if !ok return aa_pessimistic(i);
             return ATR_UNCHANGED;
         case .NO_CAPTURE;
             if pk == .CALL_SITE_ARGUMENT {
@@ -574,7 +451,7 @@ aa_update_impl :: (i: u32) -> bool {
             if pk == .FUNCTION return ml_function_update(i);
             return ml_call_site_update(i);
         case .NO_FPCLASS;
-            if pk == .RETURNED return aa_returned_from_returned_values(i);
+            if pk == .RETURNED return aa_returned_from_returned_values(i, .NONE_ATTR, false);
             if pk == .ARGUMENT return aa_argument_from_call_site_arguments(i, .NONE_ATTR);
             if pk == .CALL_SITE_RETURNED return aa_callee_to_call_site(i, .NONE_ATTR);
             return fpc_floating_update(i);
@@ -583,55 +460,67 @@ aa_update_impl :: (i: u32) -> bool {
         case .CALL_EDGES;
             if pk == .CALL_SITE return ce_call_site_update(i);
             return ce_function_update(i);
-        case .INTRA_REACH; #through;
+        case .INTRA_REACH;
+            return intra_update(i);
         case .INTER_REACH;
-            // CachedReachabilityAA::updateImpl (AAIsDead is not allowed, so the intra-procedural one has no dead
-            // edges or blocks to check first)
-            changed := ATR_UNCHANGED;
-            e := aa(i).queries.count;
-            for u: 0..e - 1 {
-                r := aa(i).queries[u];
-                if aa(i).rq[r].reachable continue;
-                res: bool;
-                if aa(i).kind == .INTRA_REACH res = intra_is_reachable_impl(i, r, false);
-                else res = inter_is_reachable_impl(i, r, false);
-                if res changed = ATR_CHANGED;
-            }
-            return changed;
+            return rq_update(i);
         case .UNDERLYING_OBJECTS;
             return uo_update(i);
+        case .IS_DEAD; return dead_update(i);
+        case .UNDEFINED_BEHAVIOR; return ub_update(i);
+        case .HEAP_TO_STACK; return h2s_update(i);
+        case .NON_CONVERGENT; return nconv_update(i);
+        case .NO_ALIAS; return na_update(i);
+        case .DEREFERENCEABLE; return deref_update(i);
+        case .ALIGN; return align_update(i);
+        case .INSTANCE_INFO; return ii_update(i);
+        case .PRIVATIZABLE_PTR; return priv_update(i);
+        case .VALUE_CONSTANT_RANGE; return vcr_update(i);
+        case .POTENTIAL_CONSTANT_VALUES; return pcv_update(i);
+        case .POTENTIAL_VALUES; return pv_update(i);
+        case .NO_UNDEF; return nu_undef_update(i);
+        case .POINTER_INFO; return pi_update(i);
+        case .ASSUMPTION_INFO; return asi_update(i);
+        case .INVARIANT_LOAD_POINTER; return ilp_update(i);
+        case .ADDRESS_SPACE; return aa_pessimistic(i);
+        case .NO_ALIAS_ADDR_SPACE; return aa_pessimistic(i);
+        case .ALLOCATION_INFO; return alloc_info_update(i);
+        case .INDIRECT_CALL_INFO; return ici_update(i);
+        case .GLOBAL_VALUE_INFO; return gvi_update(i);
     }
     return ATR_UNCHANGED;
 }
 
 // AANoUnwindImpl::updateImpl
 nu_update :: (i: u32) -> bool {
-    ok, insts := atr_aa_insts(i, .[.INVOKE, .CALLBR, .CALL, .CLEANUPRET, .CATCHSWITCH, .RESUME]);
-    if !ok return aa_pessimistic(i);
-    for x: insts {
+    uai := false;
+    ok := true;
+    for x: atr_insts(i, .[.INVOKE, .CALLBR, .CALL, .CLEANUPRET, .CATCHSWITCH, .RESUME], *uai, *ok) {
         if !may_throw(x, true) continue;
         if is_call_base(x) {
             has, _ := atr_has_assumed_ir_attr(.NoUnwind, i, irp_cs_function(x), DEP_REQUIRED);
             if has continue;
         }
-        return aa_pessimistic(i);
+        ok = false;
+        break;
     }
+    if !ok return aa_pessimistic(i);
     return ATR_UNCHANGED;
 }
 
 // AANoSyncImpl::updateImpl
 ns_update :: (i: u32) -> bool {
-    ok, rw := atr_rw_insts(i);
+    uai := false;
+    ok := true;
+    for x: atr_rw_insts(i, *uai, *ok) if !atr_is_no_sync_inst(x, i) { ok = false; break; }
     if !ok return aa_pessimistic(i);
-    for x: rw if !atr_is_no_sync_inst(x, i) return aa_pessimistic(i);
-    ok2, calls := atr_call_like_insts(i);
-    if !ok2 return aa_pessimistic(i);
-    for cb: calls {
+    for cb: atr_call_like_insts(i, *uai, *ok) {
         if may_read_or_write_memory(cb) continue;
         has, _ := atr_has_assumed_ir_attr(.NoSync, i, irp_cs_function(cb), DEP_OPTIONAL);
         if has continue;
-        if call_has_fn_attr(cb, .Convergent) return aa_pessimistic(i);
+        if call_has_fn_attr(cb, .Convergent) { ok = false; break; }
     }
+    if !ok return aa_pessimistic(i);
     return ATR_UNCHANGED;
 }
 
@@ -644,12 +533,12 @@ nf_function_update :: (i: u32) -> bool {
         }
         return atr_is_no_sync_inst(x, i);
     }
-    ok, rw := atr_rw_insts(i);
+    uai := false;
+    ok := true;
+    for x: atr_rw_insts(i, *uai, *ok) if !check(i, x) { ok = false; break; }
     if !ok return aa_pessimistic(i);
-    for x: rw if !check(i, x) return aa_pessimistic(i);
-    ok2, calls := atr_call_like_insts(i);
-    if !ok2 return aa_pessimistic(i);
-    for x: calls if !check(i, x) return aa_pessimistic(i);
+    for x: atr_call_like_insts(i, *uai, *ok) if !check(i, x) { ok = false; break; }
+    if !ok return aa_pessimistic(i);
     return ATR_UNCHANGED;
 }
 
@@ -690,32 +579,45 @@ nf_floating_update :: (i: u32) -> bool {
         if !good return aa_pessimistic(i);
         if follow atr_uses_follow(*w, u);
     }
+    if w.failed return aa_pessimistic(i);
     return ATR_UNCHANGED;
 }
 
-// AANonNullFloating::updateImpl (getAssumedSimplifiedValues yields the value itself: nothing is stripped)
+// AANonNullFloating::updateImpl
 nn_floating_update :: (i: u32) -> bool {
     p := aa(i).pos;
     v := irp_assoc_value(p);
-    if is_phi(v) {
-        all := true;
-        for k: 0..cast(s64) nops(v) - 1 {
-            has, _ := atr_has_assumed_ir_attr(.NonNull, i, irp_value(op(v, cast(u32) k)), DEP_OPTIONAL);
-            if !has { all = false; break; }
+    uai := false;
+    vals: [..] Vac; vals.allocator = temp;
+    stripped: bool;
+    if !atr_get_assumed_simplified_values(p, i, *vals, AA_ANY, *uai) stripped = false;
+    else stripped = vals.count != 1 || vals[0].v != v;
+    if !stripped {
+        if is_phi(v) {
+            all := true;
+            for k: 0..cast(s64) nops(v) - 1 {
+                has, _ := atr_has_assumed_ir_attr(.NonNull, i, irp_value(op(v, cast(u32) k)), DEP_OPTIONAL);
+                if !has { all = false; break; }
+            }
+            if all return ATR_UNCHANGED;
         }
-        if all return ATR_UNCHANGED;
-    }
-    if is_inst(v) && inst_op(v) == .SELECT {
-        h1, _ := atr_has_assumed_ir_attr(.NonNull, i, irp_value(op(v, 2)), DEP_OPTIONAL);
-        if h1 {
-            h2, _ := atr_has_assumed_ir_attr(.NonNull, i, irp_value(op(v, 1)), DEP_OPTIONAL);
-            if h2 return ATR_UNCHANGED;
+        if is_inst(v) && inst_op(v) == .SELECT {
+            h1, _ := atr_has_assumed_ir_attr(.NonNull, i, irp_value(op(v, 2)), DEP_OPTIONAL);
+            if h1 {
+                h2, _ := atr_has_assumed_ir_attr(.NonNull, i, irp_value(op(v, 1)), DEP_OPTIONAL);
+                if h2 return ATR_UNCHANGED;
+            }
         }
+        av := irp_value(v);
+        if irp_eq(av, p) return aa_pessimistic(i);
+        has, _ := atr_has_assumed_ir_attr(.NonNull, i, av, DEP_OPTIONAL);
+        if !has return aa_pessimistic(i);
+        return ATR_UNCHANGED;
     }
-    av := irp_value(v);
-    if irp_eq(av, p) return aa_pessimistic(i);
-    has, _ := atr_has_assumed_ir_attr(.NonNull, i, av, DEP_OPTIONAL);
-    if !has return aa_pessimistic(i);
+    for vals {
+        has, _ := atr_has_assumed_ir_attr(.NonNull, i, irp_value(it.v), DEP_OPTIONAL);
+        if !has return aa_pessimistic(i);
+    }
     return ATR_UNCHANGED;
 }
 
@@ -727,26 +629,27 @@ mp_function_update :: (i: u32) -> bool {
         if known return aa_optimistic(i);
         return ATR_UNCHANGED;
     }
-    sites, complete := atr_call_sites(irp_assoc_fn(p), true);
-    for cb: sites {
+    uai := false;
+    ok := true;
+    for cb: atr_call_sites(i, true, *uai, *ok) {
         h, _ := atr_has_assumed_ir_attr(.MustProgress, i, irp_cs_function(cb), DEP_REQUIRED, true);
-        if !h return aa_pessimistic(i);
+        if !h { ok = false; break; }
     }
-    if !complete return aa_pessimistic(i);
+    if !ok return aa_pessimistic(i);
     return ATR_UNCHANGED;
 }
 
 // AANoRecurseFunction::updateImpl
 nr_function_update :: (i: u32) -> bool {
     p := aa(i).pos;
-    sites, complete := atr_call_sites(irp_assoc_fn(p), true);
-    all := complete;
-    for cb: sites {
+    uai := false;
+    ok := true;
+    for cb: atr_call_sites(i, true, *uai, *ok) {
         has, known := atr_has_assumed_ir_attr(.NoRecurse, i, irp_function(inst_fn(cb)), DEP_NONE);
-        if !has || !known { all = false; break; }
+        if !has || !known { ok = false; break; }
     }
-    if all {
-        aa_optimistic(i);   // liveness is off: no assumed information was used
+    if ok {
+        if !uai aa_optimistic(i);
         return ATR_UNCHANGED;
     }
     er := atr_get_aa(.INTER_REACH, p, i, DEP_REQUIRED);
@@ -765,19 +668,19 @@ wr_implied_by_mustprogress_and_readonly :: (i: u32, known_only: bool) -> bool {
 // AAWillReturnImpl::updateImpl
 wr_update :: (i: u32) -> bool {
     if wr_implied_by_mustprogress_and_readonly(i, false) return ATR_UNCHANGED;
-    ok, calls := atr_call_like_insts(i);
-    if !ok return aa_pessimistic(i);
-    for cb: calls {
+    uai := false;
+    ok := true;
+    for cb: atr_call_like_insts(i, *uai, *ok) {
         ipos := irp_cs_function(cb);
         has, known := atr_has_assumed_ir_attr(.WillReturn, i, ipos, DEP_REQUIRED);
-        if !has return aa_pessimistic(i);
+        if !has { ok = false; break; }
         if known continue;
         h2, _ := atr_has_assumed_ir_attr(.NoRecurse, i, ipos, DEP_REQUIRED);
-        if !h2 return aa_pessimistic(i);
+        if !h2 { ok = false; break; }
     }
-    ok2, mem := atr_aa_insts(i, .[.LOAD, .STORE, .CMPXCHG, .ATOMICRMW]);
-    if !ok2 return aa_pessimistic(i);
-    for mem if is_volatile(it) return aa_pessimistic(i);
+    if !ok return aa_pessimistic(i);
+    for x: atr_insts(i, .[.LOAD, .STORE, .CMPXCHG, .ATOMICRMW], *uai, *ok) if is_volatile(x) { ok = false; break; }
+    if !ok return aa_pessimistic(i);
     return ATR_UNCHANGED;
 }
 
@@ -796,14 +699,27 @@ nc_update :: (i: u32) -> bool {
         bs_add_known(*t, NC_NOT_CAPTURED_IN_MEM);
         if ro_known bs_add_known(*aa(i).s, NC_NOT_CAPTURED_IN_MEM);
     }
+    check_returned_args :: (i: u32, f: Value_Id, uai: *bool) -> bool {
+        vals: [..] Vac; vals.allocator = temp;
+        if !atr_get_assumed_simplified_values(irp_returned(f), i, *vals, AA_INTRA, uai) return false;
+        seen_constant := false;
+        aarg := irp_assoc_arg(aa(i).pos);
+        for vals {
+            if is_constant_kind(vkind(it.v)) {
+                if seen_constant return false;
+                seen_constant = true;
+            } else if vkind(it.v) != .ARGUMENT || it.v == aarg return false;
+        }
+        return true;
+    }
     nu, nu_known := atr_has_assumed_ir_attr(.NoUnwind, i, fpos, DEP_OPTIONAL);
     if nu {
         is_void := type_kind(fn_ret_type(f)) == .VOID;
-        // CheckReturnedArgs: getAssumedSimplifiedValues of the returned position fails
-        if is_void {
+        uai := false;
+        if is_void || check_returned_args(i, f, *uai) {
             bs_add_known(*t, NC_NOT_CAPTURED_IN_RET);
             if bs_is_known(t, NC_NOT_CAPTURED_IN_MEM) return ATR_UNCHANGED;
-            if nu_known {
+            if nu_known && (is_void || !uai) {
                 bs_add_known(*aa(i).s, NC_NOT_CAPTURED_IN_RET);
                 if bs_is_known(aa(i).s, NC_NOT_CAPTURED_IN_MEM) return aa_optimistic(i);
             }
@@ -823,6 +739,7 @@ nc_update :: (i: u32) -> bool {
         if !good return aa_pessimistic(i);
         if follow atr_uses_follow(*w, u);
     }
+    if w.failed return aa_pessimistic(i);
     old := aa(i).s.assumed;
     bs_intersect_assumed(*aa(i).s, t.assumed);
     if !nc_maybe_returned(i) return aa_pessimistic(i);
@@ -858,21 +775,22 @@ nc_check_use :: (i: u32, t: *Bstate, u: Use_Id, follow: *bool) -> bool {
 // AAMemoryBehaviorFunction::updateImpl
 mb_function_update :: (i: u32) -> bool {
     old := aa(i).s.assumed;
-    ok, rw := atr_rw_insts(i);
-    if !ok return aa_pessimistic(i);
-    for x: rw {
+    uai := false;
+    ok := true;
+    for x: atr_rw_insts(i, *uai, *ok) {
         if is_call_base(x) {
             o := atr_get_aa(.MEM_BEHAVIOR, irp_cs_function(x), i, DEP_REQUIRED);
             if o != NONE {
                 bs_intersect_assumed(*aa(i).s, aa(o).s.assumed);
-                if bs_is_fix(aa(i).s) return aa_pessimistic(i);
+                if bs_is_fix(aa(i).s) { ok = false; break; }
                 continue;
             }
         }
         if may_read_from_memory(x) bs_remove_assumed(*aa(i).s, MB_NO_READS);
         if may_write_to_memory(x) bs_remove_assumed(*aa(i).s, MB_NO_WRITES);
-        if bs_is_fix(aa(i).s) return aa_pessimistic(i);
+        if bs_is_fix(aa(i).s) { ok = false; break; }
     }
+    if !ok return aa_pessimistic(i);
     return old != aa(i).s.assumed;
 }
 
@@ -881,7 +799,7 @@ mb_floating_update :: (i: u32) -> bool {
     p := aa(i).pos;
     fpos := irp_function_scope(p);
     arg := irp_assoc_arg(p);
-    fn_assumed: u32 = 0;
+    fn_assumed: u64 = 0;
     if arg == NONE || !arg_has_attr(arg, .ByVal) {
         fm := atr_get_aa(.MEM_BEHAVIOR, fpos, i, DEP_OPTIONAL);
         if fm != NONE {
@@ -908,6 +826,7 @@ mb_floating_update :: (i: u32) -> bool {
         if bs_is_fix(aa(i).s) return aa_pessimistic(i);
         if follow atr_uses_follow(*w, u);
     }
+    if w.failed return aa_pessimistic(i);
     return old != aa(i).s.assumed;
 }
 mb_follow_users_of_use_in :: (i: u32, u: Use_Id, user: Value_Id) -> bool {
@@ -929,24 +848,20 @@ mb_analyze_use_in :: (i: u32, u: Use_Id, user: Value_Id) {
         return;
     }
     if o == .CALL || o == .CALLBR || o == .INVOKE {
-        generic := false;
         if call_is_bundle_operand(user, u) { aa_pessimistic(i); return; }
         if call_is_callee_use(user, u) {
             bs_remove_assumed(*aa(i).s, MB_NO_READS);
-            generic = true;
         } else {
             pos: Irp;
             if is_ptr_type(vtype(ir.u_val[u])) pos = irp_cs_argument(user, use_arg_no(u));
             else pos = irp_cs_function(user);
             mb := atr_get_aa(.MEM_BEHAVIOR, pos, i, DEP_OPTIONAL);
-            if mb == NONE generic = true;
-            else { bs_intersect_assumed(*aa(i).s, aa(mb).s.assumed); return; }
+            if mb != NONE { bs_intersect_assumed(*aa(i).s, aa(mb).s.assumed); return; }
         }
     }
     if may_read_from_memory(user) bs_remove_assumed(*aa(i).s, MB_NO_READS);
     if may_write_to_memory(user) bs_remove_assumed(*aa(i).s, MB_NO_WRITES);
 }
-
 // ---------------------------------------------------------------- AAMemoryLocation
 
 ml_access_kind_from_inst :: (x: Value_Id) -> u8 {
@@ -957,9 +872,9 @@ ml_access_kind_from_inst :: (x: Value_Id) -> u8 {
     return k;
 }
 // updateStateAndAccessesMap (the accesses map is always i's; the state may be a local)
-ml_update_state_and_accesses :: (i: u32, st: *Bstate, mlk_in: u32, x: Value_Id, ptr: Value_Id, changed: *bool, kind: u8) {
+ml_update_state_and_accesses :: (i: u32, st: *Bstate, mlk_in: u64, x: Value_Id, ptr: Value_Id, changed: *bool, kind: u8) {
     mlk := mlk_in;
-    list := *aa(i).accesses[log2_u32(mlk)];
+    list := *aa(i).accesses[log2_u32(cast(u32) mlk)];
     found := false;
     for list.* if it.i == x && it.ptr == ptr && it.kind == kind { found = true; break; }
     if !found { array_add(list, .{x, ptr, kind}); changed.* = true; }
@@ -972,19 +887,19 @@ ml_pessimistic_accesses :: (i: u32) {
     known := aa(i).s.known;
     v := irp_assoc_value(aa(i).pos);
     x := ifx is_inst(v) then v else NONE;
-    mlk: u32 = 1;
+    mlk: u64 = 1;
     while mlk < ML_NO_LOCATIONS {
         if !(mlk & known) ml_update_state_and_accesses(i, *aa(i).s, mlk, x, NONE, *changed, ml_access_kind_from_inst(x));
         mlk *= 2;
     }
 }
 // checkForAllAccessesToMemoryKind: the accesses (with their location kind) not in `requested`; false if invalid
-Ml_Access_Loc :: struct { a: Ml_Access; mlk: u32; }
-ml_accesses :: (i: u32, requested: u32, out: *[..] Ml_Access_Loc) -> bool {
+Ml_Access_Loc :: struct { a: Ml_Access; mlk: u64; }
+ml_accesses :: (i: u32, requested: u64, out: *[..] Ml_Access_Loc) -> bool {
     if !aa_is_valid(i) return false;
     if aa(i).s.assumed == ML_NO_LOCATIONS return true;
     idx := 0;
-    mlk: u32 = 1;
+    mlk: u64 = 1;
     while mlk < ML_NO_LOCATIONS {
         if !(mlk & requested) for aa(i).accesses[idx] array_add(out, .{it, mlk});
         mlk *= 2;
@@ -1036,7 +951,7 @@ ml_categorize_argument_pointer_locations :: (i: u32, cb: Value_Id, st: *Bstate, 
     }
 }
 // categorizeAccessedLocations
-ml_categorize_accessed_locations :: (i: u32, x: Value_Id, changed: *bool) -> u32 {
+ml_categorize_accessed_locations :: (i: u32, x: Value_Id, changed: *bool) -> u64 {
     accessed := bs_new(ML_BEST_STATE);
     bs_intersect_assumed(*accessed, ML_NO_LOCATIONS);
     if is_call_base(x) {
@@ -1053,7 +968,7 @@ ml_categorize_accessed_locations :: (i: u32, x: Value_Id, changed: *bool) -> u32
         }
         cb_not := cs.assumed;
         cb_not_no_arg := cb_not | ML_NO_ARGUMENT_MEM | ML_NO_GLOBAL_MEM;
-        mlk: u32 = 1;
+        mlk: u64 = 1;
         while mlk < ML_NO_LOCATIONS {
             if !(cb_not_no_arg & mlk) ml_update_state_and_accesses(i, *accessed, mlk, x, NONE, changed, ml_access_kind_from_inst(x));
             mlk *= 2;
@@ -1086,13 +1001,14 @@ ml_function_update :: (i: u32) -> bool {
     }
     old := aa(i).s.assumed;
     changed := false;
-    ok, rw := atr_rw_insts(i);
-    if !ok return aa_pessimistic(i);
-    for x: rw {
+    uai := false;
+    ok := true;
+    for x: atr_rw_insts(i, *uai, *ok) {
         mlk := ml_categorize_accessed_locations(i, x, *changed);
         bs_remove_assumed(*aa(i).s, ml_inverse_location(mlk, false, false));
-        if aa(i).s.assumed == ML_VALID_STATE return aa_pessimistic(i);
+        if aa(i).s.assumed == ML_VALID_STATE { ok = false; break; }
     }
+    if !ok return aa_pessimistic(i);
     changed |= old != aa(i).s.assumed;
     return changed;
 }
@@ -1109,16 +1025,21 @@ ml_call_site_update :: (i: u32) -> bool {
 }
 
 // ---------------------------------------------------------------- AANoFPClass, AADenormalFPMath
+// ---------------------------------------------------------------- AANoFPClass, AADenormalFPMath
 
 // AANoFPClassFloating::updateImpl
 fpc_floating_update :: (i: u32) -> bool {
     p := aa(i).pos;
-    v := irp_assoc_value(p);
+    uai := false;
+    vals: [..] Vac; vals.allocator = temp;
+    if !atr_get_assumed_simplified_values(p, i, *vals, AA_ANY, *uai) array_add(*vals, .{irp_assoc_value(p), irp_ctx_i(p)});
     t := bs_new(FC_ALL_FLAGS);
-    o := atr_get_aa(.NO_FPCLASS, irp_value(v), i, DEP_REQUIRED);
-    if o == NONE || o == i bs_pessimistic(*t);
-    else bs_clamp(*t, aa(o).s);
-    if !bs_is_valid(t) return aa_pessimistic(i);
+    for vac: vals {
+        o := atr_get_aa(.NO_FPCLASS, irp_value(vac.v), i, DEP_REQUIRED);
+        if o == NONE || o == i bs_pessimistic(*t);
+        else bs_clamp(*t, aa(o).s);
+        if !bs_is_valid(t) return aa_pessimistic(i);
+    }
     return bs_clamp_and_indicate(*aa(i).s, t);
 }
 
@@ -1151,15 +1072,16 @@ dn_union :: (callee: u32, caller: u32) -> u32 {
 // AADenormalFPMathFunction::updateImpl
 dn_update :: (i: u32) -> bool {
     change := ATR_UNCHANGED;
-    sites, complete := atr_call_sites(irp_assoc_fn(aa(i).pos), true);
-    for cb: sites {
+    uai := false;
+    ok := true;
+    for cb: atr_call_sites(i, true, *uai, *ok) {
         ci := atr_get_aa(.DENORMAL_FP, irp_function(inst_fn(cb)), i, DEP_REQUIRED);
-        if ci == NONE return aa_pessimistic(i);
+        if ci == NONE { ok = false; break; }
         old := aa(i).dn_mode;
         aa(i).dn_mode = dn_union(aa(i).dn_mode, aa(ci).dn_mode);
         if old != aa(i).dn_mode change = ATR_CHANGED;
     }
-    if !complete return aa_pessimistic(i);
+    if !ok return aa_pessimistic(i);
     if change && dn_is_mode_fixed(aa(i).dn_mode) aa(i).dn_fix = true;
     return change;
 }
@@ -1202,103 +1124,210 @@ ce_call_site_update :: (i: u32) -> bool {
         if side_effects && !has_no_call_asm ce_set_has_unknown_callee(i, false, *change);
         return change;
     }
-    // AAIndirectCallInfo is not allowed; getAssumedSimplifiedValues yields the called operand itself
-    if vkind(callee) == .FUNCTION ce_add_called_function(i, callee, *change);
-    else ce_set_has_unknown_callee(i, true, *change);
+    if atr_call_is_indirect(cb) {
+        ici := atr_get_aa(.INDIRECT_CALL_INFO, aa(i).pos, i, DEP_OPTIONAL);
+        if ici != NONE {
+            ok, cs := ici_all_callees(ici);
+            if ok {
+                for cs ce_add_called_function(i, it, *change);
+                return change;
+            }
+        }
+    }
+    // ProcessCalledOperand
+    if is_constant_kind(vkind(callee)) {
+        if vkind(callee) == .FUNCTION ce_add_called_function(i, callee, *change);
+        else ce_set_has_unknown_callee(i, true, *change);
+        return change;
+    }
+    uai := false;
+    vals: [..] Vac; vals.allocator = temp;
+    if !atr_get_assumed_simplified_values(irp_value(callee), i, *vals, AA_ANY, *uai) array_add(*vals, .{callee, cb});
+    for vals {
+        if vkind(it.v) == .FUNCTION ce_add_called_function(i, it.v, *change);
+        else ce_set_has_unknown_callee(i, true, *change);
+    }
     return change;
 }
 // AACallEdgesFunction::updateImpl
 ce_function_update :: (i: u32) -> bool {
     change := false;
-    ok, calls := atr_call_like_insts(i);
-    if !ok { ce_set_has_unknown_callee(i, true, *change); return change; }
-    for cb: calls {
+    uai := false;
+    ok := true;
+    for cb: atr_call_like_insts(i, *uai, *ok, true) {
         e := atr_get_aa(.CALL_EDGES, irp_cs_function(cb), i, DEP_REQUIRED);
-        if e == NONE { ce_set_has_unknown_callee(i, true, *change); return change; }
+        if e == NONE { ok = false; break; }
         if aa(e).unknown_callee_non_asm ce_set_has_unknown_callee(i, true, *change);
         if aa(e).unknown_callee ce_set_has_unknown_callee(i, false, *change);
         for f: aa(e).callees ce_add_called_function(i, f, *change);
     }
+    if !ok ce_set_has_unknown_callee(i, true, *change);
     return change;
 }
 
 // ---------------------------------------------------------------- reachability (CachedReachabilityAA)
 
 rq_key :: inline (from: Value_Id, to: Value_Id) -> u64 { return ((cast(u64) from) << 32) | cast(u64) to; }
-rq_new :: (i: u32, from: Value_Id, to: Value_Id, reachable: bool) -> s32 {
+rq_new :: (i: u32, from: Value_Id, to: Value_Id, es: s32, reachable: bool) -> s32 {
     r := cast(s32) aa(i).rq.count;
-    array_add(*aa(i).rq, .{from, to, reachable});
+    array_add(*aa(i).rq, .{from, to, es, reachable});
     return r;
 }
+// QueryCache lookup (DenseSet<RQITy *> with the (From, To, ExclusionSet) equality); -1 if absent
+rq_cache_find :: (i: u32, from: Value_Id, to: Value_Id, es: s32) -> s32 {
+    l := table_find_pointer(*aa(i).rq_cache, rq_key(from, to));
+    if !l return -1;
+    for l.* if aa(i).rq[it].es == es return it;
+    return -1;
+}
+rq_cache_insert :: (i: u32, r: s32) {
+    q := aa(i).rq[r];
+    key := rq_key(q.from, q.to);
+    l := table_find_pointer(*aa(i).rq_cache, key);
+    if !l { n: [..] s32; table_set(*aa(i).rq_cache, key, n); l = table_find_pointer(*aa(i).rq_cache, key); }
+    array_add(l, r);
+}
+rq_cache_erase :: (i: u32, r: s32) {
+    q := aa(i).rq[r];
+    l := table_find_pointer(*aa(i).rq_cache, rq_key(q.from, q.to));
+    if !l return;
+    for l.* if it == r { array_ordered_remove_by_index(l, it_index); return; }
+    for l.* if aa(i).rq[it].es == q.es { array_ordered_remove_by_index(l, it_index); return; }
+}
+// The exclusion set of a query: the unique set, or -1 for none / empty (a temporary query keeps it non-unique,
+// which the set comparison makes the same)
+rq_exclusion_set :: (es: [] Value_Id) -> s32 {
+    if es.count == 0 return -1;
+    return atr_unique_exclusion_set(es);
+}
+rq_es_contains :: (es: s32, x: Value_Id) -> bool {
+    if es < 0 return false;
+    for atr.exclusion_sets[es] if it == x return true;
+    return false;
+}
 // checkQueryCache: (answered, reachable, stack RQI index if not answered)
-rq_check_query_cache :: (i: u32, from: Value_Id, to: Value_Id) -> (bool, bool, s32) {
+rq_check_query_cache :: (i: u32, from: Value_Id, to: Value_Id, es: s32) -> (bool, bool, s32) {
     if !aa_is_valid(i) return true, true, -1;
-    found, r := table_find(*aa(i).rq_cache, rq_key(from, to));
-    if found return true, aa(i).rq[r].reachable, -1;
-    s := rq_new(i, from, to, false);   // the temporary (stack) RQI
-    table_set(*aa(i).rq_cache, rq_key(from, to), s);
+    if es >= 0 {
+        pr := rq_cache_find(i, from, to, -1);
+        if pr >= 0 && !aa(i).rq[pr].reachable return true, false, -1;
+    }
+    r := rq_cache_find(i, from, to, es);
+    if r >= 0 return true, aa(i).rq[r].reachable, -1;
+    s := rq_new(i, from, to, es, false);   // the temporary (stack) RQI
+    rq_cache_insert(i, s);
     return false, false, s;
 }
 // rememberResult
 rq_remember_result :: (i: u32, r: s32, reachable: bool, used_exclusion_set: bool, temporary: bool) -> bool {
     aa(i).rq[r].reachable = reachable;
-    from := aa(i).rq[r].from;
-    to := aa(i).rq[r].to;
-    key := rq_key(from, to);
-    if temporary table_remove(*aa(i).rq_cache, key);
+    q := aa(i).rq[r];
+    if temporary rq_cache_erase(i, r);
     if reachable || !used_exclusion_set {
-        if !table_contains(*aa(i).rq_cache, key) {
-            n := rq_new(i, from, to, reachable);
+        if rq_cache_find(i, q.from, q.to, -1) < 0 {
+            n := rq_new(i, q.from, q.to, -1, reachable);
             array_add(*aa(i).queries, n);
-            table_set(*aa(i).rq_cache, key, n);
+            rq_cache_insert(i, n);
         }
     }
     if temporary && !reachable && used_exclusion_set {
-        n := rq_new(i, from, to, reachable);
+        n := rq_new(i, q.from, q.to, q.es, reachable);
         array_add(*aa(i).queries, n);
-        table_set(*aa(i).rq_cache, key, n);
+        rq_cache_insert(i, n);
     }
     if !reachable && temporary atr_register_for_update(i);
     return reachable;
 }
+// CachedReachabilityAA::updateImpl
+rq_update :: (i: u32) -> bool {
+    changed := ATR_UNCHANGED;
+    e := aa(i).queries.count;
+    for u: 0..e - 1 {
+        r := aa(i).queries[u];
+        if aa(i).rq[r].reachable continue;
+        res: bool;
+        if aa(i).kind == .INTRA_REACH res = intra_is_reachable_impl(i, r, false);
+        else res = inter_is_reachable_impl(i, r, false);
+        if res changed = ATR_CHANGED;
+    }
+    return changed;
+}
+// AAIntraFnReachabilityFunction::updateImpl
+intra_update :: (i: u32) -> bool {
+    lv := atr_get_aa(.IS_DEAD, aa(i).pos, i, DEP_OPTIONAL);
+    if lv != NONE {
+        all := true;
+        for aa(i).dead_edges if !dead_is_edge_dead(lv, cast(Value_Id) (it >> 32), cast(Value_Id) (it & 0xFFFF_FFFF)) { all = false; break; }
+        if all for aa(i).dead_blocks if !dead_is_assumed_dead_bb(lv, it) { all = false; break; }
+        if all return ATR_UNCHANGED;
+    }
+    aa(i).dead_edges.count = 0;
+    aa(i).dead_blocks.count = 0;
+    return rq_update(i);
+}
 // AAIntraFnReachabilityFunction::isAssumedReachable
-intra_is_assumed_reachable :: (i: u32, from: Value_Id, to: Value_Id) -> bool {
+intra_is_assumed_reachable :: (i: u32, from: Value_Id, to: Value_Id, es: [] Value_Id = .[]) -> bool {
     if from == to return true;
-    answered, res, s := rq_check_query_cache(i, from, to);
+    answered, res, s := rq_check_query_cache(i, from, to, rq_exclusion_set(es));
     if answered return res;
     return intra_is_reachable_impl(i, s, true);
 }
-intra_will_reach_in_block :: (from: Value_Id, to: Value_Id) -> bool {
-    ip := from;
-    while ip != NONE && ip != to ip = inst_next(ip);
-    return ip == to;
-}
-// AAIntraFnReachabilityFunction::isReachableImpl (no exclusion sets, no liveness)
+// AAIntraFnReachabilityFunction::isReachableImpl
 intra_is_reachable_impl :: (i: u32, r: s32, temporary: bool) -> bool {
-    from := aa(i).rq[r].from;
-    to := aa(i).rq[r].to;
-    from_bb := inst_block(from);
-    to_bb := inst_block(to);
-    if from_bb == to_bb && intra_will_reach_in_block(from, to) return rq_remember_result(i, r, true, false, temporary);
-    if !intra_will_reach_in_block(block_first(to_bb), to) return rq_remember_result(i, r, false, false, temporary);
-    dt := atr_dt(irp_assoc_fn(aa(i).pos));
+    q := aa(i).rq[r];
+    origin := q.from;
+    used_es := false;
+    will_reach_in_block :: (from: Value_Id, to: Value_Id, es: s32, origin: Value_Id, used: *bool) -> bool {
+        ip := from;
+        while ip != NONE && ip != to {
+            if es >= 0 && ip != origin && rq_es_contains(es, ip) { used.* = true; break; }
+            ip = inst_next(ip);
+        }
+        return ip == to;
+    }
+    from_bb := inst_block(q.from);
+    to_bb := inst_block(q.to);
+    if from_bb == to_bb && will_reach_in_block(q.from, q.to, q.es, origin, *used_es) return rq_remember_result(i, r, true, used_es, temporary);
+    if !will_reach_in_block(block_first(to_bb), q.to, q.es, origin, *used_es) return rq_remember_result(i, r, false, used_es, temporary);
+    f := block_fn(from_bb);
+    excl_blocks: Table(Value_Id, bool); excl_blocks.allocator = temp;
+    if q.es >= 0 for atr.exclusion_sets[q.es] if inst_fn(it) == f table_set(*excl_blocks, inst_block(it), true);
+    if table_contains(*excl_blocks, from_bb) && !will_reach_in_block(q.from, block_terminator(from_bb), q.es, origin, *used_es)
+        return rq_remember_result(i, r, false, true, temporary);
+    lv := atr_get_aa(.IS_DEAD, aa(i).pos, i, DEP_OPTIONAL);
+    if lv != NONE && dead_is_assumed_dead_bb(lv, to_bb) {
+        atr_set_insert(*aa(i).dead_blocks, to_bb);
+        return rq_remember_result(i, r, false, used_es, temporary);
+    }
+    dt := atr_dt(f);
     visited: Table(Value_Id, bool); visited.allocator = temp;
     work: [..] Value_Id; work.allocator = temp;
     succs: [..] Value_Id; succs.allocator = temp;
+    local_dead: [..] u64; local_dead.allocator = temp;
     array_add(*work, from_bb);
     while work.count {
         bb := pop(*work);
         if table_contains(*visited, bb) continue;
         table_set(*visited, bb, true);
-        succs.count = 0;
         block_successors(bb, *succs);
         for s: succs {
-            if s == to_bb return rq_remember_result(i, r, true, false, temporary);
-            if dt && dt_dominates(dt, bb, to_bb) return rq_remember_result(i, r, true, false, temporary);
+            if lv != NONE && dead_is_edge_dead(lv, bb, s) {
+                k := dead_edge_key(bb, s);
+                found := false; for local_dead if it == k { found = true; break; }
+                if !found array_add(*local_dead, k);
+                continue;
+            }
+            if s == to_bb return rq_remember_result(i, r, true, used_es, temporary);
+            if dt && excl_blocks.count == 0 && dt_dominates(dt, bb, to_bb) return rq_remember_result(i, r, true, used_es, temporary);
+            if table_contains(*excl_blocks, s) { used_es = true; continue; }
             array_add(*work, s);
         }
     }
-    return rq_remember_result(i, r, false, false, temporary);
+    for k: local_dead {
+        found := false; for aa(i).dead_edges if it == k { found = true; break; }
+        if !found array_add(*aa(i).dead_edges, k);
+    }
+    return rq_remember_result(i, r, false, used_es, temporary);
 }
 
 // AAInterFnReachability::canReach
@@ -1308,29 +1337,32 @@ inter_can_reach :: (i: u32, f: Value_Id) -> bool {
     return inter_instruction_can_reach(i, block_first(fn_entry(scope)), f);
 }
 // AAInterFnReachabilityFunction::instructionCanReach
-inter_instruction_can_reach :: (i: u32, from: Value_Id, to: Value_Id) -> bool {
-    answered, res, s := rq_check_query_cache(i, from, to);
+inter_instruction_can_reach :: (i: u32, from: Value_Id, to: Value_Id, es: [] Value_Id = .[]) -> bool {
+    answered, res, s := rq_check_query_cache(i, from, to, rq_exclusion_set(es));
     if answered return res;
     return inter_is_reachable_impl(i, s, true);
 }
 // AAInterFnReachabilityFunction::isReachableImpl
 inter_is_reachable_impl :: (i: u32, r: s32, temporary: bool) -> bool {
-    from := aa(i).rq[r].from;
-    to := aa(i).rq[r].to;
-    entry := block_first(fn_entry(inst_fn(from)));
-    if entry != from && !inter_instruction_can_reach(i, entry, to) return rq_remember_result(i, r, false, false, temporary);
-    intra := atr_get_aa(.INTRA_REACH, irp_function(inst_fn(from)), i, DEP_OPTIONAL);
-    ok, calls := atr_call_like_insts(i);
-    if !ok return rq_remember_result(i, r, true, true, temporary);
-    for cb: calls {
-        if inter_check_reachable_call_base(i, cb, from, to, entry) continue;
-        if intra != NONE && !intra_is_assumed_reachable(intra, from, cb) continue;
-        return rq_remember_result(i, r, true, true, temporary);
+    q := aa(i).rq[r];
+    entry := block_first(fn_entry(inst_fn(q.from)));
+    if entry != q.from && !inter_instruction_can_reach(i, entry, q.to) return rq_remember_result(i, r, false, false, temporary);
+    esv: [] Value_Id;
+    if q.es >= 0 esv = atr.exclusion_sets[q.es];
+    intra := atr_get_aa(.INTRA_REACH, irp_function(inst_fn(q.from)), i, DEP_OPTIONAL);
+    uai := false;
+    ok := true;
+    for cb: atr_call_like_insts(i, *uai, *ok, true) {
+        if inter_check_reachable_call_base(i, cb, q.from, q.to, entry, esv) continue;
+        if intra != NONE && !intra_is_assumed_reachable(intra, q.from, cb, esv) continue;
+        ok = false;
+        break;
     }
+    if !ok return rq_remember_result(i, r, true, true, temporary);
     return rq_remember_result(i, r, false, true, temporary);
 }
 // CheckReachableCallBase: true if the call cannot reach `to`
-inter_check_reachable_call_base :: (i: u32, cb: Value_Id, from: Value_Id, to: Value_Id, entry: Value_Id) -> bool {
+inter_check_reachable_call_base :: (i: u32, cb: Value_Id, from: Value_Id, to: Value_Id, entry: Value_Id, es: [] Value_Id) -> bool {
     e := atr_get_aa(.CALL_EDGES, irp_cs_function(cb), i, DEP_OPTIONAL);
     if e == NONE || !aa_is_valid(e) return false;
     if aa(e).unknown_callee return false;
@@ -1348,7 +1380,7 @@ inter_check_reachable_call_base :: (i: u32, cb: Value_Id, from: Value_Id, to: Va
         }
         ir2 := atr_get_aa(.INTER_REACH, irp_function(fnv), i, DEP_OPTIONAL);
         first := block_first(fn_entry(fnv));
-        if ir2 == NONE || inter_instruction_can_reach(ir2, first, to) return false;
+        if ir2 == NONE || inter_instruction_can_reach(ir2, first, to, es) return false;
     }
     return true;
 }
@@ -1377,13 +1409,14 @@ uo_update :: (i: u32) -> bool {
 }
 uo_do_update :: (i: u32, intra: bool, used_assumed: *bool) -> bool {
     ptr := irp_assoc_value(aa(i).pos);
+    scope := ifx intra then AA_INTRA else AA_INTER;
     seen: Table(Value_Id, bool); seen.allocator = temp;
-    values: [..] Value_Id; values.allocator = temp;
-    array_add(*values, ptr);
+    values: [..] Vac; values.allocator = temp;
+    if !atr_get_assumed_simplified_values(irp_value(ptr), i, *values, scope, used_assumed) return uo_insert(i, intra, ptr);
     changed := false;
     k := 0;
     while k < values.count {
-        obj := values[k];
+        obj := values[k].v;
         k += 1;
         uo := get_underlying_object(obj);
         key := ifx uo != NONE then uo else obj;
@@ -1400,7 +1433,7 @@ uo_do_update :: (i: u32, intra: bool, used_assumed: *bool) -> bool {
             uo_objects(other, intra, *objs);
             for v: objs {
                 if v == uo changed |= uo_insert(i, intra, uo);
-                else array_add(*values, v);
+                else array_add(*values, .{v, NONE});
             }
             used_assumed.* |= !aa_is_fix(other);
             continue;
@@ -1432,22 +1465,38 @@ uo_handle_indirect :: (i: u32, v: Value_Id, intra: bool, used_assumed: *bool) ->
 
 aa_manifest :: (i: u32) -> bool {
     a := aa(i);
-    p := a.pos;
     pk := a.pk;
     if a.kind == {
         case .CALL_EDGES; #through;
         case .INTRA_REACH; #through;
         case .INTER_REACH; #through;
-        case .UNDERLYING_OBJECTS;
+        case .UNDERLYING_OBJECTS; #through;
+        case .POINTER_INFO; #through;
+        case .GLOBAL_VALUE_INFO; #through;
+        case .ADDRESS_SPACE; #through;
+        case .NO_ALIAS_ADDR_SPACE;
             return ATR_UNCHANGED;
         case .NO_FREE;
             if pk == .CALL_SITE_RETURNED return ATR_UNCHANGED;
-        case .MEM_BEHAVIOR;
-            return mb_manifest(i);
-        case .MEM_LOCATION;
-            return ml_manifest(i);
-        case .DENORMAL_FP;
-            return dn_manifest(i);
+        case .MEM_BEHAVIOR; return mb_manifest(i);
+        case .MEM_LOCATION; return ml_manifest(i);
+        case .DENORMAL_FP; return dn_manifest(i);
+        case .IS_DEAD; return dead_manifest(i);
+        case .UNDEFINED_BEHAVIOR; return ub_manifest(i);
+        case .HEAP_TO_STACK; return h2s_manifest(i);
+        case .NON_CONVERGENT; return nconv_manifest(i);
+        case .DEREFERENCEABLE; return deref_manifest(i);
+        case .ALIGN; return align_manifest(i);
+        case .INSTANCE_INFO; return ATR_UNCHANGED;
+        case .PRIVATIZABLE_PTR; return priv_manifest(i);
+        case .VALUE_CONSTANT_RANGE; return vcr_manifest(i);
+        case .POTENTIAL_CONSTANT_VALUES; return ATR_UNCHANGED;
+        case .POTENTIAL_VALUES; return pv_manifest(i);
+        case .NO_UNDEF; return nu_undef_manifest(i);
+        case .ASSUMPTION_INFO; return asi_manifest(i);
+        case .INVARIANT_LOAD_POINTER; return ilp_manifest(i);
+        case .ALLOCATION_INFO; return alloc_info_manifest(i);
+        case .INDIRECT_CALL_INFO; return ici_manifest(i);
     }
     return aa_ir_attribute_manifest(i);
 }
@@ -1473,11 +1522,21 @@ aa_deduced_attributes :: (i: u32, out: *[..] Attr) {
         case .NO_RECURSE; array_add(out, attr_enum(.NoRecurse));
         case .WILL_RETURN; array_add(out, attr_enum(.WillReturn));
         case .NO_RETURN; array_add(out, attr_enum(.NoReturn));
+        case .NO_ALIAS; array_add(out, attr_enum(.NoAlias));
+        case .NO_UNDEF; array_add(out, attr_enum(.NoUndef));
         case .NO_CAPTURE;
             if !nc_maybe_returned(i) return;
-            if irp_is_argument_position(a.pos) && bs_is_assumed(a.s, NC_NO_CAPTURE) array_add(out, attr_enum(.Captures, 0));
-            // -attributor-manifest-internal is off: no "no-capture-maybe-returned"
+            if irp_is_argument_position(a.pos) {
+                if bs_is_assumed(a.s, NC_NO_CAPTURE) array_add(out, attr_enum(.Captures, 0));
+                else if atr_manifest_internal array_add(out, attr_str("no-capture-maybe-returned", ""));
+            }
         case .NO_FPCLASS; array_add(out, attr_enum(.NoFPClass, a.s.assumed));
+        case .DEREFERENCEABLE;
+            nn, _ := atr_has_assumed_ir_attr(.NonNull, i, a.pos, DEP_NONE);
+            if nn array_add(out, attr_enum(.Dereferenceable, a.s.assumed));
+            else array_add(out, attr_enum(.DereferenceableOrNull, a.s.assumed));
+        case .ALIGN;
+            if a.s.assumed > 1 array_add(out, attr_enum(.Alignment, a.s.assumed));
         case .MEM_BEHAVIOR;
             if bs_is_assumed(a.s, MB_NO_ACCESSES) array_add(out, attr_enum(.ReadNone));
             else if bs_is_assumed(a.s, MB_NO_WRITES) array_add(out, attr_enum(.ReadOnly));

@@ -301,7 +301,7 @@ Pass_Kind :: enum u8 {
     // CGSCC pass manager (cgscc_pm.jai), LazyCallGraph (lazy_call_graph.jai)
     CGSCC_ADAPTOR; CGSCC_PM; CGSCC_FN_ADAPTOR; DEVIRT; NO_OP_CGSCC; PRINT_LCG; REQUIRE_LCG; INVALIDATE_LCG;
     // FunctionAttrs (pass_function_attrs.jai)
-    FUNCTION_ATTRS; RPO_FUNCTION_ATTRS; NORECURSE_LTO_INFERENCE; ATTRIBUTOR_LIGHT; ATTRIBUTOR_LIGHT_CGSCC; PARTIAL_INLINER;
+    FUNCTION_ATTRS; RPO_FUNCTION_ATTRS; NORECURSE_LTO_INFERENCE; ATTRIBUTOR_LIGHT; ATTRIBUTOR_LIGHT_CGSCC; ATTRIBUTOR; ATTRIBUTOR_CGSCC; PARTIAL_INLINER;
     // Inliner (pass_inliner.jai), AlwaysInliner (pass_always_inliner.jai)
     INLINE; ALWAYS_INLINE; MODULE_INLINE; INLINER_WRAPPER;
     // ProfileSummaryAnalysis (require<profile-summary>)
@@ -494,8 +494,10 @@ PASS_TABLE :: Pass_Info.[
     .{"rpo-function-attrs", .MODULE, .RPO_FUNCTION_ATTRS, false, .DOMTREE},
     .{"norecurse-lto-inference", .MODULE, .NORECURSE_LTO_INFERENCE, false, .DOMTREE},
     .{"attributor-light", .MODULE, .ATTRIBUTOR_LIGHT, false, .DOMTREE},
+    .{"attributor", .MODULE, .ATTRIBUTOR, false, .DOMTREE},
     .{"partial-inliner", .MODULE, .PARTIAL_INLINER, false, .DOMTREE},
     .{"attributor-light-cgscc", .CGSCC, .ATTRIBUTOR_LIGHT_CGSCC, false, .DOMTREE},
+    .{"attributor-cgscc", .CGSCC, .ATTRIBUTOR_CGSCC, false, .DOMTREE},
     .{"inline", .CGSCC, .INLINE, false, .DOMTREE},   // also inline<only-mandatory>
     .{"always-inline", .MODULE, .ALWAYS_INLINE, true, .DOMTREE},   // RequiredPassInfoMixin
     .{"module-inline", .MODULE, .MODULE_INLINE, false, .DOMTREE},
@@ -1116,6 +1118,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if cg_parse_cl_opt(name, value, has_value) return true;   // codegen_pipeline.jai (CodeGenPrepare, LSR, llc's -disable-*)
     // -mattr is a cl::list (CommaSeparated): repeated options accumulate
     if name == "mattr" && has_value && tti_opts.mattr.count { tti_opts.mattr = sprint("%,%", tti_opts.mattr, value); return true; }
+    if atr_parse_cl_opt(name, value, has_value) return true;   // attributor.jai
     if ipo_parse_cl_opt(name, value, has_value) return true;   // cgscc_pm.jai, pass_function_attrs.jai, inliner
     if globals_parse_cl_opt(name, value, has_value) return true;   // pass_global_opt.jai, internalize, globaldce, ...
     if scalar_misc_parse_cl_opt(name, value, has_value) return true;   // scalar_misc_cl.jai (L1.scalar-misc passes)
@@ -1232,6 +1235,7 @@ run_module_pm :: (n: s32) {
             case .RPO_FUNCTION_ATTRS; if should_run_pass(node, NONE) mam_invalidate(rpo_function_attrs_run());
             case .NORECURSE_LTO_INFERENCE; if should_run_pass(node, NONE) mam_invalidate(norecurse_lto_inference_run());
             case .ATTRIBUTOR_LIGHT; if should_run_pass(node, NONE) mam_invalidate(attributor_light_module_run());
+            case .ATTRIBUTOR; if should_run_pass(node, NONE) mam_invalidate(attributor_module_run());
             case .PARTIAL_INLINER; if should_run_pass(node, NONE) mam_invalidate(partial_inliner_run());
             case .ALWAYS_INLINE; if should_run_pass(node, NONE) mam_invalidate(always_inliner_run(!node.no_lifetime));
             case .MODULE_INLINE; if should_run_pass(node, NONE) mam_invalidate(module_inliner_run());

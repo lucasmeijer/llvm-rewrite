@@ -1,30 +1,30 @@
-// The Attributor framework, restricted to what AttributorLight (`attributor-light`, `attributor-light-cgscc`) uses:
-// a port of llvm/lib/Transforms/IPO/Attributor.cpp (runAttributorLightOnFunctions, Attributor::run,
-// runTillFixpoint, updateAA, manifestAttributes, identifyDefaultAbstractAttributes, hasAttr / getAttrs /
-// manifestAttrs / removeAttrs on the AttrsMap, SubsumingPositionIterator, getAssumedSimplifiedValues,
-// checkForAllUses / CallSites / Callees / Instructions / ReadWriteInstructions, isAssumedReadOnly/ReadNone,
-// isNoSyncInst, InformationCache::initializeInformationCache, recordDependence), of the templates in
+// The Attributor framework: a port of llvm/lib/Transforms/IPO/Attributor.cpp (runAttributorOnFunctions,
+// runAttributorLightOnFunctions, Attributor::run, runTillFixpoint, updateAA, manifestAttributes,
+// identifyDefaultAbstractAttributes, hasAttr / getAttrs / manifestAttrs / removeAttrs on the AttrsMap,
+// SubsumingPositionIterator, InformationCache::initializeInformationCache, recordDependence) and of the templates in
 // llvm/include/llvm/Transforms/IPO/Attributor.h (IRPosition, the integer states, getOrCreateAAFor, lookupAAFor,
 // shouldInitialize / shouldUpdateAA, IRAttribute::isImpliedByIR / manifest, AA::hasAssumedIRAttr), of
 // MustBeExecutedContextExplorer from llvm/lib/Analysis/MustExecute.cpp (+ MustExecute.h) and of fillMapFromAssume /
 // getKnowledgeFromUse from llvm/lib/Analysis/AssumeBundleQueries.cpp.
 //
-// The abstract attributes themselves are in attributor_aas.jai.
-//
-// AttributorLight's configuration (AC.Allowed = 17 AA kinds, UseLiveness = false, DeleteFns = false) makes several
-// parts of the framework inert, and they are not ported: liveness (every isAssumedDead query is false), AAIsDead /
-// AAPotentialValues / AAPointerInfo / AAValueSimplify (not allowed, so getOrCreateAAFor returns null for them: with
-// no AAPotentialValues, getAssumedSimplifiedValues yields the value itself, or fails for a returned position),
-// cleanupIR (nothing is ever registered for deletion or replacement), signature rewriting, function deletion,
-// call-base contexts (-attributor-enable-call-site-specific-deduction is off), shallow/deep wrappers. `!callback`
-// metadata (AbstractCallSite callback calls) fails loudly.
+// The rest of Attributor.cpp is in attributor_query.jai (liveness, checkForAll*, simplification, the AA:: helpers)
+// and attributor_cleanup.jai (cleanupIR, signature rewriting, wrappers, internalization). The abstract attributes
+// are attributor_aas.jai (function-level and memory AAs), attributor_values.jai (AAPotentialValues,
+// AAPotentialConstantValues, AAValueConstantRange), attributor_ptrinfo.jai (AAPointerInfo),
+// attributor_dead.jai (AAIsDead, AAUndefinedBehavior), attributor_misc.jai (the other value AAs) and
+// attributor_mem.jai (AAHeapToStack, AAPrivatizablePtr).
 //
 // Design: every abstract attribute is a heap `Abs_Attr` row with a kind tag; LLVM's virtual initialize / updateImpl /
-// manifest / indicatePessimisticFixpoint are switches on (kind, position kind) in attributor_aas.jai. Lambdas passed
-// to the checkForAll* helpers become loops over the lists these helpers return.
+// manifest / indicatePessimisticFixpoint are switches on (kind, position kind) in attributor_aas.jai. Kind-specific
+// state that is not an integer state lives in a per-kind extension struct behind `x` (see the *_ext accessors).
+// Lambdas passed to the checkForAll* helpers become for_expansion iterators (the liveness checks stay interleaved
+// with the predicate, as in LLVM) or explicit walks (checkForAllUses).
 
 ATR_UNCHANGED :: false;
 ATR_CHANGED :: true;
+
+// std::optional<Value *>: NONE is nullptr ("unknown"), OV_NOVAL is std::nullopt ("no value yet")
+OV_NOVAL :: cast(Value_Id) 0xFFFF_FFFE;
 
 // ---------------------------------------------------------------- IRPosition
 
@@ -35,10 +35,12 @@ IRP_ENC_FLOATING_FUNCTION :: cast(u8) 2;
 IRP_ENC_CSARG :: cast(u8) 3;
 
 Irp :: struct { enc: u8 = IRP_ENC_VALUE; v: u32 = NONE; }
+IRP_INVALID :: Irp.{IRP_ENC_VALUE, NONE};
 
 Irp_Kind :: enum u8 { INVALID; FLOAT; RETURNED; CALL_SITE_RETURNED; FUNCTION; CALL_SITE; ARGUMENT; CALL_SITE_ARGUMENT; }
 
 irp_eq :: inline (a: Irp, b: Irp) -> bool { return a.enc == b.enc && a.v == b.v; }
+irp_key :: inline (p: Irp) -> u64 { return ((cast(u64) p.enc) << 32) | cast(u64) p.v; }
 irp_is_call :: inline (v: Value_Id) -> bool { return v != NONE && vkind(v) == .INST && is_call_base(v); }
 
 // IRPosition::value / inst / function / returned / argument / callsite_*
@@ -58,6 +60,11 @@ irp_argument :: (a: Value_Id) -> Irp { return .{IRP_ENC_VALUE, a}; }
 irp_cs_function :: (cb: Value_Id) -> Irp { return .{IRP_ENC_VALUE, cb}; }
 irp_cs_returned :: (cb: Value_Id) -> Irp { return .{IRP_ENC_RETURNED, cb}; }
 irp_cs_argument :: (cb: Value_Id, k: u32) -> Irp { return .{IRP_ENC_CSARG, op_use(cb, k)}; }
+// IRPosition::callsite_argument(AbstractCallSite, ArgNo) for a direct call site
+irp_acs_argument :: (cb: Value_Id, k: u32) -> Irp {
+    if call_num_args(cb) <= k return IRP_INVALID;
+    return irp_cs_argument(cb, k);
+}
 
 irp_kind :: (p: Irp) -> Irp_Kind {
     if p.enc == IRP_ENC_CSARG return .CALL_SITE_ARGUMENT;
@@ -94,6 +101,7 @@ irp_callee_arg_no :: (p: Irp) -> s64 {
 }
 irp_anchor_scope :: (p: Irp) -> Value_Id {
     v := irp_anchor(p);
+    if v == NONE return NONE;
     k := vkind(v);
     if k == .FUNCTION return v;
     if k == .ARGUMENT return arg_parent(v);
@@ -113,6 +121,7 @@ irp_assoc_fn :: (p: Irp) -> Value_Id {
 }
 irp_ctx_i :: (p: Irp) -> Value_Id {
     v := irp_anchor(p);
+    if v == NONE return NONE;
     k := vkind(v);
     if k == .INST return v;
     f: Value_Id = NONE;
@@ -174,23 +183,44 @@ attr_list_with_set_at :: (l: u32, idx: s64, s: u32) -> u32 {
 
 // ---------------------------------------------------------------- states
 
-// The integer states (IntegerStateBase / BitIntegerState / BooleanState; worst state 0 for all of them).
-Bstate :: struct { known: u32; assumed: u32; best: u32; }
-bs_new :: (best: u32) -> Bstate { s: Bstate; s.known = 0; s.assumed = best; s.best = best; return s; }
-bs_is_valid :: inline (s: Bstate) -> bool { return s.assumed != 0; }
+// The integer states (IntegerStateBase with BitIntegerState / BooleanState / IncIntegerState semantics).
+BS_BIT :: cast(u8) 0;   // BitIntegerState and BooleanState
+BS_INC :: cast(u8) 1;   // IncIntegerState
+Bstate :: struct { known: u64; assumed: u64; best: u64; worst: u64; mode: u8; }
+bs_new :: (best: u64) -> Bstate { s: Bstate; s.known = 0; s.assumed = best; s.best = best; s.worst = 0; return s; }
+bs_new_inc :: (best: u64, worst: u64) -> Bstate { s: Bstate; s.known = worst; s.assumed = best; s.best = best; s.worst = worst; s.mode = BS_INC; return s; }
+bs_best_of :: (s: Bstate) -> Bstate { r := s; r.known = s.worst; r.assumed = s.best; return r; }
+bs_is_valid :: inline (s: Bstate) -> bool { return s.assumed != s.worst; }
 bs_is_fix :: inline (s: Bstate) -> bool { return s.assumed == s.known; }
 bs_optimistic :: inline (s: *Bstate) { s.known = s.assumed; }
 bs_pessimistic :: inline (s: *Bstate) -> bool { s.assumed = s.known; return ATR_CHANGED; }
-bs_is_known :: inline (s: Bstate, bits: u32) -> bool { return (s.known & bits) == bits; }
-bs_is_assumed :: inline (s: Bstate, bits: u32) -> bool { return (s.assumed & bits) == bits; }
-bs_add_known :: inline (s: *Bstate, bits: u32) { s.assumed |= bits; s.known |= bits; }
-bs_intersect_assumed :: inline (s: *Bstate, bits: u32) { s.assumed = (s.assumed & bits) | s.known; }
-bs_remove_assumed :: inline (s: *Bstate, bits: u32) { bs_intersect_assumed(s, ~bits); }
-bs_remove_known :: inline (s: *Bstate, bits: u32) { s.known &= ~bits; }
-// operator^= (handleNewAssumedValue), operator&= (joinAND), operator+= (handleNewKnownValue)
-bs_clamp :: inline (s: *Bstate, r: Bstate) { bs_intersect_assumed(s, r.assumed); }
-bs_join_and :: inline (s: *Bstate, r: Bstate) { s.known &= r.known; s.assumed &= r.assumed; }
-bs_add_known_of :: inline (s: *Bstate, r: Bstate) { bs_add_known(s, r.known); }
+bs_is_known :: inline (s: Bstate, bits: u64) -> bool { return (s.known & bits) == bits; }
+bs_is_assumed :: inline (s: Bstate, bits: u64) -> bool { return (s.assumed & bits) == bits; }
+bs_add_known :: inline (s: *Bstate, bits: u64) { s.assumed |= bits; s.known |= bits; }
+bs_intersect_assumed :: inline (s: *Bstate, bits: u64) { s.assumed = (s.assumed & bits) | s.known; }
+bs_remove_assumed :: inline (s: *Bstate, bits: u64) { bs_intersect_assumed(s, ~bits); }
+bs_remove_known :: inline (s: *Bstate, bits: u64) { s.known &= ~bits; }
+// BooleanState::setKnown / setAssumed
+bs_set_known :: inline (s: *Bstate, v: bool) { if v { s.known |= 1; s.assumed |= 1; } }
+bs_set_assumed :: inline (s: *Bstate, v: bool) { s.assumed &= (s.known | cast(u64) v); }
+// IncIntegerState::takeAssumedMinimum / takeKnownMaximum
+bs_take_assumed_min :: (s: *Bstate, v: u64) { s.assumed = max(min(s.assumed, v), s.known); }
+bs_take_known_max :: (s: *Bstate, v: u64) { s.assumed = max(v, s.assumed); s.known = max(v, s.known); }
+// operator^= (handleNewAssumedValue)
+bs_clamp :: (s: *Bstate, r: Bstate) {
+    if s.mode == BS_INC bs_take_assumed_min(s, r.assumed);
+    else bs_intersect_assumed(s, r.assumed);
+}
+// operator&= (joinAND)
+bs_join_and :: (s: *Bstate, r: Bstate) {
+    if s.mode == BS_INC { s.known = min(s.known, r.known); s.assumed = min(s.assumed, r.assumed); }
+    else { s.known &= r.known; s.assumed &= r.assumed; }
+}
+// operator+= (handleNewKnownValue)
+bs_add_known_of :: (s: *Bstate, r: Bstate) {
+    if s.mode == BS_INC bs_take_known_max(s, r.known);
+    else bs_add_known(s, r.known);
+}
 // clampStateAndIndicateChange
 bs_clamp_and_indicate :: (s: *Bstate, r: Bstate) -> bool { old := s.assumed; bs_clamp(s, r); return old != s.assumed; }
 
@@ -199,6 +229,33 @@ bs_clamp_and_indicate :: (s: *Bstate, r: Bstate) -> bool { old := s.assumed; bs_
 Atr_Kind :: enum u8 {
     NO_UNWIND; NO_SYNC; NO_FREE; NON_NULL; MUST_PROGRESS; NO_RECURSE; WILL_RETURN; INTRA_REACH; NO_RETURN;
     NO_CAPTURE; MEM_BEHAVIOR; MEM_LOCATION; DENORMAL_FP; NO_FPCLASS; CALL_EDGES; INTER_REACH; UNDERLYING_OBJECTS;
+    // not allowed by AttributorLight
+    IS_DEAD; UNDEFINED_BEHAVIOR; HEAP_TO_STACK; NON_CONVERGENT; NO_ALIAS; DEREFERENCEABLE; ALIGN; INSTANCE_INFO;
+    PRIVATIZABLE_PTR; VALUE_CONSTANT_RANGE; POTENTIAL_CONSTANT_VALUES; POTENTIAL_VALUES; NO_UNDEF; POINTER_INFO;
+    ASSUMPTION_INFO; INVARIANT_LOAD_POINTER; ADDRESS_SPACE; NO_ALIAS_ADDR_SPACE; ALLOCATION_INFO; INDIRECT_CALL_INFO;
+    GLOBAL_VALUE_INFO;
+}
+ATR_LIGHT_LAST :: Atr_Kind.UNDERLYING_OBJECTS;
+
+aa_kind_name :: (k: Atr_Kind) -> string {
+    if k == {
+        case .NO_UNWIND; return "AANoUnwind"; case .NO_SYNC; return "AANoSync"; case .NO_FREE; return "AANoFree";
+        case .NON_NULL; return "AANonNull"; case .MUST_PROGRESS; return "AAMustProgress"; case .NO_RECURSE; return "AANoRecurse";
+        case .WILL_RETURN; return "AAWillReturn"; case .INTRA_REACH; return "AAIntraFnReachability"; case .NO_RETURN; return "AANoReturn";
+        case .NO_CAPTURE; return "AANoCapture"; case .MEM_BEHAVIOR; return "AAMemoryBehavior"; case .MEM_LOCATION; return "AAMemoryLocation";
+        case .DENORMAL_FP; return "AADenormalFPMath"; case .NO_FPCLASS; return "AANoFPClass"; case .CALL_EDGES; return "AACallEdges";
+        case .INTER_REACH; return "AAInterFnReachability"; case .UNDERLYING_OBJECTS; return "AAUnderlyingObjects";
+        case .IS_DEAD; return "AAIsDead"; case .UNDEFINED_BEHAVIOR; return "AAUndefinedBehavior"; case .HEAP_TO_STACK; return "AAHeapToStack";
+        case .NON_CONVERGENT; return "AANonConvergent"; case .NO_ALIAS; return "AANoAlias"; case .DEREFERENCEABLE; return "AADereferenceable";
+        case .ALIGN; return "AAAlign"; case .INSTANCE_INFO; return "AAInstanceInfo"; case .PRIVATIZABLE_PTR; return "AAPrivatizablePtr";
+        case .VALUE_CONSTANT_RANGE; return "AAValueConstantRange"; case .POTENTIAL_CONSTANT_VALUES; return "AAPotentialConstantValues";
+        case .POTENTIAL_VALUES; return "AAPotentialValues"; case .NO_UNDEF; return "AANoUndef"; case .POINTER_INFO; return "AAPointerInfo";
+        case .ASSUMPTION_INFO; return "AAAssumptionInfo"; case .INVARIANT_LOAD_POINTER; return "AAInvariantLoadPointer";
+        case .ADDRESS_SPACE; return "AAAddressSpace"; case .NO_ALIAS_ADDR_SPACE; return "AANoAliasAddrSpace";
+        case .ALLOCATION_INFO; return "AAAllocationInfo"; case .INDIRECT_CALL_INFO; return "AAIndirectCallInfo";
+        case .GLOBAL_VALUE_INFO; return "AAGlobalValueInfo";
+    }
+    return "AA?";
 }
 
 DEP_REQUIRED :: cast(u8) 0;
@@ -207,15 +264,17 @@ DEP_NONE :: cast(u8) 2;
 
 // AAMemoryLocation::AccessInfo
 Ml_Access :: struct { i: Value_Id; ptr: Value_Id; kind: u8; }
-// ReachabilityQueryInfo (exclusion sets are never used by the light AAs)
-Rqi :: struct { from: Value_Id; to: Value_Id; reachable: bool; }
+// ReachabilityQueryInfo: the exclusion set is an index into atr.exclusion_sets (-1: none)
+Rqi :: struct { from: Value_Id; to: Value_Id; es: s32; reachable: bool; }
 
 Abs_Attr :: struct {
     kind: Atr_Kind;
     pos: Irp;
     pk: Irp_Kind;
-    s: Bstate;
+    s: Bstate;                 // the integer / boolean state (for DerefState: DerefBytesState)
+    g: Bstate;                 // DerefState::GlobalState
     deps: [..] u32;            // AADepGraphNode::Deps: SetVector of (aa << 1) | dep class
+    x: *void;                  // the kind's extension state (see the *_ext accessors)
     // AAMemoryLocation
     accesses: [8] [..] Ml_Access;
     // AAUnderlyingObjects
@@ -228,7 +287,10 @@ Abs_Attr :: struct {
     // CachedReachabilityAA
     queries: [..] s32;         // QueryVector (indices into rq)
     rq: [..] Rqi;
-    rq_cache: Table(u64, s32); // QueryCache: (from, to) -> RQI index
+    rq_cache: Table(u64, [..] s32); // QueryCache: (from, to) -> RQI indices (distinguished by exclusion set)
+    // AAIntraFnReachability: DeadEdges, DeadBlocks
+    dead_edges: [..] u64;
+    dead_blocks: [..] Value_Id;
     // DenormalFPMathState
     dn_mode: u32;              // DenormalFPEnv-like packing: Mode output/input, ModeF32 output/input (4 bits each)
     dn_fix: bool;
@@ -249,11 +311,30 @@ Atr_Fn_Info :: struct {
 
 Atr_Knowledge :: struct { assume: Value_Id; min: u64; max: u64; }
 
+// Attributor::ArgumentReplacementInfo; the repair callbacks are kinds (PRIV: AAPrivatizablePtrArgument's)
+Arg_Replacement :: struct {
+    present: bool;
+    types: [..] Type_Id;
+    repair: u8;                // 0: none (dead argument), 1: AAPrivatizablePtr
+    priv_ty: Type_Id;
+    priv_arg: Value_Id;
+    priv_align: u64;
+    tail_calls: [..] Value_Id;
+}
+ARI_NONE :: cast(u8) 0;
+ARI_PRIV :: cast(u8) 1;
+
 Attributor_State :: struct {
     functions: [..] Value_Id;
     fn_set: Table(Value_Id, bool);
+    // AttributorConfig
     is_module_pass: bool;
     cached_only: bool;             // AnalysisGetter(FAM, CachedOnly)
+    light: bool;                   // AC.Allowed = the AttributorLight set
+    use_liveness: bool;
+    delete_fns: bool;
+    rewrite_signatures: bool;
+    closed_world: bool;
     aas: [..] *Abs_Attr;
     aa_map: Table(u64, u32);
     root: [..] u32;                // DG.SyntheticRoot.Deps (all REQUIRED)
@@ -263,54 +344,172 @@ Attributor_State :: struct {
     query_awaiting: [..] u32;      // QueryAAsAwaitingUpdate (SetVector)
     attrs_map: Table(Value_Id, u32);
     visited_functions: Table(Value_Id, bool);
+    simplification_cbs: Table(u64, bool);   // SimplificationCallbacks (only H2S's "return nullptr" callbacks)
+    // cleanup bookkeeping
+    to_be_changed_uses: [..] [2] u32;       // SmallMapVector<Use *, Value *>: (use, value)
+    to_be_changed_uses_idx: Table(Use_Id, s64);
+    to_be_changed_values: [..] [3] u32;     // SmallMapVector<Value *, {Value *, bool}>: (old, new, change droppable)
+    to_be_changed_values_idx: Table(Value_Id, s64);
+    to_unreachable: [..] Value_Id;          // ToBeChangedToUnreachableInsts (SetVector of WeakVH)
+    invoke_dead_succ: [..] Value_Id;        // InvokeWithDeadSuccessor
+    deleted_fns: [..] Value_Id;             // ToBeDeletedFunctions
+    deleted_blocks: [..] Value_Id;          // ToBeDeletedBlocks
+    deleted_insts: [..] Value_Id;           // ToBeDeletedInsts
+    manifest_added_blocks: Table(Value_Id, bool);
+    cg_modified: [..] Value_Id;             // CGModifiedFunctions
+    arg_replacements: Table(Value_Id, [..] Arg_Replacement);   // ArgumentReplacementMap
+    arg_replacement_order: [..] Value_Id;
     // InformationCache
     fn_info: Table(Value_Id, *Atr_Fn_Info);
     knowledge: Table(u64, [..] Atr_Knowledge);
     assume_only: Table(Value_Id, bool);
     inlineable: Table(Value_Id, bool);
+    indirectly_callable: [..] Value_Id;
+    exclusion_sets: [..] [..] Value_Id;     // getOrCreateUniqueBlockExecutionSet (sorted members)
     // MustBeExecutedContextExplorer caches
     block_transfer: Table(Value_Id, bool);
     irreducible: Table(Value_Id, bool);
+    // -attributor-max-specializations-per-call-base tracking
+    specialized: Table(Value_Id, [..] Value_Id);
 }
 atr: Attributor_State;
 
+// cl::opts
 atr_max_iterations: u32 = 32;      // -attributor-max-iterations
 atr_max_init_chain: u32 = 1024;    // -attributor-max-initialization-chain-length
+atr_annotate_decl_cs := false;     // -attributor-annotate-decl-cs
+atr_enable_heap_to_stack := true;  // -enable-heap-to-stack-conversion
+atr_allow_shallow_wrappers := false; // -attributor-allow-shallow-wrappers
+atr_allow_deep_wrappers := false;  // -attributor-allow-deep-wrappers
+atr_print_dep := false;            // -attributor-print-dep
+atr_dump_dep_graph := false;       // -attributor-dump-dep-graph
+atr_depgraph_prefix := "";         // -attributor-depgraph-dot-filename-prefix
+atr_call_site_specific := false;   // -attributor-enable-call-site-specific-deduction
+atr_print_call_graph := false;     // -attributor-print-call-graph
+atr_simplify_all_loads := true;    // -attributor-simplify-all-loads
+atr_closed_world_given := false;   // -attributor-assume-closed-world (getNumOccurrences)
+atr_closed_world_opt := false;
+atr_max_spec_per_cb: u32 = 0xFFFF_FFFF;   // -attributor-max-specializations-per-call-base
+atr_max_spec_given := false;
+atr_manifest_internal := false;    // -attributor-manifest-internal
+atr_max_heap_to_stack_size: s64 = 128;   // -max-heap-to-stack-size
+atr_max_potential_values: u32 = 7; // -attributor-max-potential-values
+atr_max_potential_values_iterations: s64 = 64;   // -attributor-max-potential-values-iterations
+
+atr_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
+    int_opt :: (name: string, value: string, has_value: bool) -> s64 {
+        if !has_value fatal("option -% needs a value", name);
+        v, ok, rest := string_to_int(value);
+        if !ok || rest.count fatal("invalid integer value '%' for option -%", value, name);
+        return v;
+    }
+    bool_opt :: (name: string, value: string, has_value: bool) -> bool {
+        if !has_value || value == "true" || value == "1" || value == "TRUE" || value == "True" return true;
+        if value == "false" || value == "0" || value == "FALSE" || value == "False" return false;
+        fatal("invalid boolean value '%' for option -%", value, name);
+        return false;
+    }
+    if name == {
+        case "attributor-max-iterations"; atr_max_iterations = cast(u32) int_opt(name, value, has_value);
+        case "attributor-max-initialization-chain-length"; atr_max_init_chain = cast(u32) int_opt(name, value, has_value);
+        case "attributor-annotate-decl-cs"; atr_annotate_decl_cs = bool_opt(name, value, has_value);
+        case "enable-heap-to-stack-conversion"; atr_enable_heap_to_stack = bool_opt(name, value, has_value);
+        case "attributor-allow-shallow-wrappers"; atr_allow_shallow_wrappers = bool_opt(name, value, has_value);
+        case "attributor-allow-deep-wrappers"; atr_allow_deep_wrappers = bool_opt(name, value, has_value);
+        case "attributor-print-dep"; atr_print_dep = bool_opt(name, value, has_value);
+        case "attributor-dump-dep-graph"; atr_dump_dep_graph = bool_opt(name, value, has_value);
+        case "attributor-depgraph-dot-filename-prefix"; atr_depgraph_prefix = copy_string(value);
+        case "attributor-enable-call-site-specific-deduction"; atr_call_site_specific = bool_opt(name, value, has_value);
+        case "attributor-print-call-graph"; atr_print_call_graph = bool_opt(name, value, has_value);
+        case "attributor-simplify-all-loads"; atr_simplify_all_loads = bool_opt(name, value, has_value);
+        case "attributor-assume-closed-world"; atr_closed_world_given = true; atr_closed_world_opt = bool_opt(name, value, has_value);
+        case "attributor-max-specializations-per-call-base"; atr_max_spec_given = true; atr_max_spec_per_cb = cast(u32) int_opt(name, value, has_value);
+        case "attributor-manifest-internal"; atr_manifest_internal = bool_opt(name, value, has_value);
+        case "max-heap-to-stack-size"; atr_max_heap_to_stack_size = int_opt(name, value, has_value);
+        case "attributor-max-potential-values"; atr_max_potential_values = cast(u32) int_opt(name, value, has_value);
+        case "attributor-max-potential-values-iterations"; atr_max_potential_values_iterations = int_opt(name, value, has_value);
+        case; return false;
+    }
+    return true;
+}
 
 aa_key :: inline (k: Atr_Kind, p: Irp) -> u64 { return ((cast(u64) k) << 40) | ((cast(u64) p.enc) << 32) | cast(u64) p.v; }
 aa :: inline (i: u32) -> *Abs_Attr { return atr.aas[i]; }
 atr_is_run_on :: (f: Value_Id) -> bool { return atr.functions.count == 0 || table_contains(*atr.fn_set, f); }
+atr_fn_in_set :: (f: Value_Id) -> bool { return f != NONE && table_contains(*atr.fn_set, f); }
 
 // The AbstractAttribute static properties per kind.
-aa_best_state :: (k: Atr_Kind) -> u32 {
-    if k == .NO_CAPTURE return 7;
-    if k == .MEM_BEHAVIOR return 3;
-    if k == .MEM_LOCATION return 511;
-    if k == .NO_FPCLASS return 1023;
-    return 1;
+aa_initial_state :: (k: Atr_Kind) -> Bstate {
+    if k == {
+        case .NO_CAPTURE; return bs_new(7);
+        case .MEM_BEHAVIOR; return bs_new(3);
+        case .MEM_LOCATION; return bs_new(511);
+        case .NO_FPCLASS; return bs_new(1023);
+        case .IS_DEAD; return bs_new(3);
+        case .INVARIANT_LOAD_POINTER; return bs_new(15);
+        case .ALIGN; return bs_new_inc(1 << 32, 1);
+        case .DEREFERENCEABLE; return bs_new_inc(0xFFFF_FFFF, 0);
+    }
+    return bs_new(1);
 }
+// IRAttribute::hasTrivialInitializer (isEnumAttrKind(AK)) and the overrides
 aa_has_trivial_initializer :: (k: Atr_Kind) -> bool {
     return k == .NO_UNWIND || k == .NO_SYNC || k == .NO_FREE || k == .MUST_PROGRESS || k == .NO_RECURSE ||
-           k == .WILL_RETURN || k == .NO_RETURN;
+           k == .WILL_RETURN || k == .NO_RETURN || k == .NO_ALIAS || k == .NO_UNDEF;
 }
 aa_is_query :: (k: Atr_Kind) -> bool { return k == .INTRA_REACH || k == .INTER_REACH; }
+aa_requires_callers_for_arg_or_function :: (k: Atr_Kind) -> bool {
+    return k == .NO_ALIAS || k == .PRIVATIZABLE_PTR || k == .VALUE_CONSTANT_RANGE || k == .POTENTIAL_CONSTANT_VALUES ||
+           k == .POTENTIAL_VALUES || k == .UNDERLYING_OBJECTS || k == .ADDRESS_SPACE || k == .NO_ALIAS_ADDR_SPACE;
+}
 aa_is_valid_for_init :: (k: Atr_Kind, p: Irp) -> bool {
+    t := irp_assoc_type(p);
     if k == {
         case .NO_SYNC; #through;
         case .NO_FREE; #through;
         case .MEM_LOCATION;
-            if !irp_is_function_scope(p) && !is_ptr_or_ptr_vector(irp_assoc_type(p)) return false;
-        case .NON_NULL; #through;
-        case .UNDERLYING_OBJECTS;
-            if !is_ptr_or_ptr_vector(irp_assoc_type(p)) return false;
-        case .NO_CAPTURE;
-            if !is_ptr_type(irp_assoc_type(p)) return false;
+            if !irp_is_function_scope(p) && !is_ptr_or_ptr_vector(t) return false;
         case .MEM_BEHAVIOR;
-            if !irp_is_function_scope(p) && !is_ptr_type(irp_assoc_type(p)) return false;
+            if !irp_is_function_scope(p) && !is_ptr_type(t) return false;
+        case .NON_NULL; #through;
+        case .ALIGN; #through;
+        case .PRIVATIZABLE_PTR; #through;
+        case .POINTER_INFO; #through;
+        case .UNDERLYING_OBJECTS; #through;
+        case .ADDRESS_SPACE; #through;
+        case .NO_ALIAS_ADDR_SPACE; #through;
+        case .ALLOCATION_INFO;
+            if !is_ptr_or_ptr_vector(t) return false;
+        case .NO_ALIAS; #through;
+        case .DEREFERENCEABLE; #through;
+        case .NO_CAPTURE; #through;
+        case .INVARIANT_LOAD_POINTER;
+            if !is_ptr_type(t) return false;
         case .NO_FPCLASS;
-            return is_fp_math_type(irp_assoc_type(p));
+            return is_fp_math_type(t);
+        case .VALUE_CONSTANT_RANGE; #through;
+        case .POTENTIAL_CONSTANT_VALUES;
+            if !is_int_type(t) return false;
+        case .IS_DEAD;
+            if irp_kind(p) == .FUNCTION return vkind(irp_anchor(p)) == .FUNCTION && !is_declaration(irp_anchor(p));
+        case .GLOBAL_VALUE_INFO;
+            if irp_kind(p) != .FLOAT return false;
+            v := irp_anchor(p);
+            if !is_global_value(vkind(v)) return false;
+            return gv_has_local_linkage(v);
+        case .INDIRECT_CALL_INFO;
+            if irp_kind(p) != .CALL_SITE return false;
+            cb := irp_ctx_i(p);
+            return inst_op(cb) == .CALL && atr_call_is_indirect(cb) && !call_is_must_tail(cb);
     }
     return true;
+}
+// CallBase::isIndirectCall: the called operand is not a Function or other Constant
+atr_call_is_indirect :: (cb: Value_Id) -> bool {
+    c := call_callee(cb);
+    if vkind(c) == .FUNCTION return false;
+    if vkind(c) == .INLINE_ASM return false;
+    return !is_constant_kind(vkind(c));
 }
 // Attributor::isFunctionIPOAmendable
 atr_is_ipo_amendable :: (f: Value_Id) -> bool {
@@ -324,7 +523,7 @@ atr_should_update :: (k: Atr_Kind, p: Irp) -> bool {
         if afn == NONE && k == .MEM_LOCATION return false;                                // requiresCalleeForCallBase
         if k != .CALL_EDGES && vkind(call_callee(irp_anchor(p))) == .INLINE_ASM return false;   // requiresNonAsmForCallBase
     }
-    if k == .UNDERLYING_OBJECTS {                                                          // requiresCallersForArgOrFunction
+    if aa_requires_callers_for_arg_or_function(k) {
         pk := irp_kind(p);
         if (pk == .FUNCTION || pk == .ARGUMENT) && !gv_has_local_linkage(afn) return false;
     }
@@ -332,9 +531,11 @@ atr_should_update :: (k: Atr_Kind, p: Irp) -> bool {
     if irp_is_fn_interface(p) && !atr_is_ipo_amendable(afn) return false;
     return afn == NONE || atr.is_module_pass || atr_is_run_on(afn) || atr_is_run_on(irp_anchor_scope(p));
 }
+atr_is_allowed :: (k: Atr_Kind) -> bool { return !atr.light || k <= ATR_LIGHT_LAST; }
 // Attributor::shouldInitialize
 atr_should_initialize :: (k: Atr_Kind, p: Irp) -> (bool, bool) {
     if !aa_is_valid_for_init(k, p) return false, false;
+    if !atr_is_allowed(k) return false, false;
     anchor_fn := irp_anchor_scope(p);
     if anchor_fn != NONE && (fn_has_fn_attr(anchor_fn, .Naked) || fn_has_fn_attr(anchor_fn, .OptimizeNone)) return false, false;
     if atr.init_chain > atr_max_init_chain return false, false;
@@ -342,33 +543,57 @@ atr_should_initialize :: (k: Atr_Kind, p: Irp) -> (bool, bool) {
     return !aa_has_trivial_initializer(k) || should_update, should_update;
 }
 
+// the AbstractState virtuals: isValidState / isAtFixpoint / indicateOptimisticFixpoint / indicatePessimisticFixpoint
 aa_is_valid :: (i: u32) -> bool {
     a := aa(i);
-    if a.kind == .DENORMAL_FP return dn_state_is_valid(a.dn_mode);
+    if a.kind == {
+        case .DENORMAL_FP; return dn_state_is_valid(a.dn_mode);
+        case .VALUE_CONSTANT_RANGE; return vcr_is_valid(i);
+        case .ASSUMPTION_INFO; return asi_is_valid(i);
+    }
     return bs_is_valid(a.s);
 }
 aa_is_fix :: (i: u32) -> bool {
     a := aa(i);
-    if a.kind == .DENORMAL_FP return a.dn_fix;
+    if a.kind == {
+        case .DENORMAL_FP; return a.dn_fix;
+        case .VALUE_CONSTANT_RANGE; return vcr_is_fix(i);
+        case .ASSUMPTION_INFO; return asi_ext(i).fix;
+        case .DEREFERENCEABLE; return !bs_is_valid(a.s) || (bs_is_fix(a.s) && bs_is_fix(a.g));
+    }
     return bs_is_fix(a.s);
 }
 aa_optimistic :: (i: u32) -> bool {
     a := aa(i);
-    if a.kind == .DENORMAL_FP { ch := !a.dn_fix; a.dn_fix = true; return ch; }
+    if a.kind == {
+        case .DENORMAL_FP; ch := !a.dn_fix; a.dn_fix = true; return ch;
+        case .VALUE_CONSTANT_RANGE; vcr_optimistic(i); return ATR_CHANGED;
+        case .ASSUMPTION_INFO; asi_optimistic(i); return ATR_UNCHANGED;
+        case .DEREFERENCEABLE; bs_optimistic(*a.s); bs_optimistic(*a.g); return ATR_UNCHANGED;
+    }
     bs_optimistic(*a.s);
     return ATR_UNCHANGED;
 }
-// indicatePessimisticFixpoint (AAMemoryLocationImpl overrides it)
+// indicatePessimisticFixpoint (with the AA overrides)
 aa_pessimistic :: (i: u32) -> bool {
     a := aa(i);
-    if a.kind == .DENORMAL_FP { ch := !a.dn_fix; a.dn_fix = true; return ch; }
-    if a.kind == .MEM_LOCATION ml_pessimistic_accesses(i);
+    if a.kind == {
+        case .DENORMAL_FP; ch := !a.dn_fix; a.dn_fix = true; return ch;
+        case .MEM_LOCATION; ml_pessimistic_accesses(i);
+        case .VALUE_CONSTANT_RANGE; vcr_pessimistic(i); return ATR_CHANGED;
+        case .ASSUMPTION_INFO; asi_pessimistic(i); return ATR_CHANGED;
+        case .DEREFERENCEABLE; bs_pessimistic(*a.s); bs_pessimistic(*a.g); return ATR_CHANGED;
+        case .PRIVATIZABLE_PTR; bs_pessimistic(*a.s); priv_ext(i).ty = NONE; return ATR_CHANGED;
+        case .POTENTIAL_VALUES;
+            if a.pk != .RETURNED && a.pk != .CALL_SITE_RETURNED { pv_impl_pessimistic(i); return ATR_CHANGED; }
+    }
     return bs_pessimistic(*aa(i).s);
 }
 
 // Attributor::recordDependence
 atr_record_dependence :: (from: u32, to: u32, cls: u8) {
     if cls == DEP_NONE return;
+    if from == NONE || to == NONE return;
     if atr.dep_stack.count == 0 return;
     if aa_is_fix(from) return;
     array_add(atr.dep_stack[atr.dep_stack.count - 1], .{from, to, cls});
@@ -379,8 +604,8 @@ aa_add_dep :: (from: u32, dep: u32) {
     array_add(*a.deps, dep);
 }
 
-// Attributor::lookupAAFor (AllowInvalidState: getOrCreateAAFor passes true)
-atr_lookup :: (k: Atr_Kind, p: Irp, q: u32, cls: u8, allow_invalid := true) -> u32 {
+// Attributor::lookupAAFor
+atr_lookup :: (k: Atr_Kind, p: Irp, q: u32, cls: u8, allow_invalid := false) -> u32 {
     found, i := table_find(*atr.aa_map, aa_key(k, p));
     if !found return NONE;
     if cls != DEP_NONE && q != NONE && aa_is_valid(i) atr_record_dependence(i, q, cls);
@@ -389,18 +614,24 @@ atr_lookup :: (k: Atr_Kind, p: Irp, q: u32, cls: u8, allow_invalid := true) -> u
 }
 
 // Attributor::getOrCreateAAFor (getAAFor is the same with a querying AA)
-atr_get_aa :: (k: Atr_Kind, p: Irp, q: u32, cls: u8, update_after_init := true) -> u32 {
-    existing := atr_lookup(k, p, q, cls);
-    if existing != NONE return existing;
+atr_get_aa :: (k: Atr_Kind, p: Irp, q: u32, cls: u8, force_update := false, update_after_init := true) -> u32 {
+    existing := atr_lookup(k, p, q, cls, true);
+    if existing != NONE {
+        if force_update && atr.phase == .UPDATE atr_update_aa(existing);
+        return existing;
+    }
     ok, should_update := atr_should_initialize(k, p);
     if !ok return NONE;
     a := New(Abs_Attr);
     a.kind = k; a.pos = p; a.pk = irp_kind(p);
-    a.s = bs_new(aa_best_state(k));
+    aa_check_position(k, a.pk);
+    a.s = aa_initial_state(k);
+    if k == .DEREFERENCEABLE a.g = bs_new(1);
     i := cast(u32) atr.aas.count;
     array_add(*atr.aas, a);
     table_set(*atr.aa_map, aa_key(k, p), i);
     if atr.phase == .SEEDING || atr.phase == .UPDATE array_add(*atr.root, i);
+    aa_construct(i);
     atr.init_chain += 1;
     aa_initialize(i);
     atr.init_chain -= 1;
@@ -415,17 +646,41 @@ atr_get_aa :: (k: Atr_Kind, p: Irp, q: u32, cls: u8, update_after_init := true) 
     return i;
 }
 
+// createForPosition: the positions each AA class exists for (llvm_unreachable otherwise)
+aa_check_position :: (k: Atr_Kind, pk: Irp_Kind) {
+    ok := true;
+    if k == {
+        case .NO_UNWIND; #through; case .NO_SYNC; #through; case .NO_RECURSE; #through; case .WILL_RETURN; #through;
+        case .NO_RETURN; #through; case .MEM_LOCATION; #through; case .CALL_EDGES; #through; case .ASSUMPTION_INFO; #through;
+        case .MUST_PROGRESS;
+            ok = pk == .FUNCTION || pk == .CALL_SITE;
+        case .HEAP_TO_STACK; #through; case .UNDEFINED_BEHAVIOR; #through; case .NON_CONVERGENT; #through;
+        case .INTRA_REACH; #through; case .INTER_REACH; #through; case .DENORMAL_FP;
+            ok = pk == .FUNCTION;
+        case .INDIRECT_CALL_INFO; ok = pk == .CALL_SITE;
+        case .GLOBAL_VALUE_INFO; ok = pk == .FLOAT;
+        case .MEM_BEHAVIOR; ok = pk != .INVALID && pk != .RETURNED;
+        case .NO_FREE; #through; case .IS_DEAD; #through; case .UNDERLYING_OBJECTS;
+            ok = pk != .INVALID;
+        case;
+            ok = pk != .INVALID && pk != .FUNCTION && pk != .CALL_SITE;
+    }
+    if !ok fatal("internal: attributor: cannot create % for position kind %", aa_kind_name(k), pk);
+}
+
 // AbstractAttribute::update
 aa_update :: (i: u32) -> bool {
     if aa_is_fix(i) return ATR_UNCHANGED;
     return aa_update_impl(i);
 }
 
-// Attributor::updateAA (UseLiveness is off: the AA is never assumed dead)
+// Attributor::updateAA
 atr_update_aa :: (i: u32) -> bool {
     dv := New([..] Atr_Dep_Info);
     array_add(*atr.dep_stack, dv);
-    cs := aa_update(i);
+    cs := ATR_UNCHANGED;
+    uai := false;
+    if !atr_is_assumed_dead_aa(i, NONE, *uai, true) cs = aa_update(i);
     if !aa_is_query(aa(i).kind) && dv.count == 0 && !aa_is_fix(i) {
         rerun := ATR_UNCHANGED;
         if cs rerun = aa_update(i);
@@ -524,6 +779,8 @@ atr_manifest_attributes :: () -> bool {
         if !aa_is_valid(i) continue;
         p := aa(i).pos;
         if irp_ctx_i(p) != NONE && !atr_is_run_on(irp_anchor_scope(p)) continue;
+        uai := false;
+        if atr_is_assumed_dead_aa(i, NONE, *uai, true) continue;
         if aa_manifest(i) change = ATR_CHANGED;
     }
     if num_final != atr.root.count fatal("internal: attributor: abstract attributes were created during the manifest");
@@ -604,6 +861,7 @@ atr_subsuming_positions :: (p: Irp, out: *[..] Irp) {
 }
 
 attr_enum :: (k: Attr_Kind, v: u64 = 0) -> Attr { a: Attr; a.kind = k; a.ty = NONE; a.ival = v; return a; }
+attr_str :: (key: string, val: string) -> Attr { a: Attr; a.kind = .STRING_ATTR; a.ty = NONE; a.key = key; a.val = val; return a; }
 
 // Attributor::getAttrsFromAssumes
 atr_attrs_from_assumes :: (p: Irp, k: Attr_Kind, out: *[..] Attr) -> bool {
@@ -660,6 +918,17 @@ atr_remove_attrs :: (p: Irp, kinds: [] Attr_Kind) -> bool {
     atr_set_attr_set(p, ns);
     return ATR_CHANGED;
 }
+// Attributor::removeAttrs (string attributes)
+atr_remove_str_attrs :: (p: Irp, keys: [] string) -> bool {
+    ok, s := atr_attr_set(p);
+    if !ok return ATR_UNCHANGED;
+    changed := false;
+    ns := s;
+    for key: keys if attr_set_has_str(ns, key) { ns = attr_set_remove_str(ns, key); changed = true; }
+    if !changed return ATR_UNCHANGED;
+    atr_set_attr_set(p, ns);
+    return ATR_CHANGED;
+}
 // Attributor::manifestAttrs with addIfNotExistent
 atr_manifest_attrs :: (p: Irp, attrs: [] Attr, force_replace := false) -> bool {
     if attrs.count == 0 return ATR_UNCHANGED;
@@ -673,7 +942,11 @@ atr_manifest_attrs :: (p: Irp, attrs: [] Attr, force_replace := false) -> bool {
             array_add(*add, at);
             continue;
         }
-        if k == .STRING_ATTR fatal("internal: attributor: string attributes are not manifested by the light AAs");
+        if k == .STRING_ATTR {
+            if attr_set_has_str(s, at.key) && !force_replace continue;
+            array_add(*add, at);
+            continue;
+        }
         if k > .LAST_TYPE && k < .LAST_INT {
             if !force_replace && k == .Memory {
                 old := attr_set_memory(s);
@@ -684,6 +957,11 @@ atr_manifest_attrs :: (p: Irp, attrs: [] Attr, force_replace := false) -> bool {
             }
             old := attr_set_find(s, k);
             if old && !force_replace && old.ival >= at.ival continue;   // isEqualOrWorse
+            array_add(*add, at);
+            continue;
+        }
+        if k == .Range {
+            if !force_replace && attr_set_has(s, k) continue;
             array_add(*add, at);
             continue;
         }
@@ -756,6 +1034,35 @@ atr_initialize_information_cache :: (f: Value_Id, fi: *Atr_Fn_Info) {
     }
     if fn_has_fn_attr(f, .AlwaysInline) && is_inline_viable(f).ok table_set(*atr.inlineable, f, true);
 }
+// InformationCache::isInvolvedInMustTailCall
+atr_is_involved_in_must_tail_call :: (a: Value_Id) -> bool {
+    fi := atr_fn_info(arg_parent(a));
+    return fi.called_via_must_tail || fi.contains_must_tail;
+}
+atr_is_kernel :: (f: Value_Id) -> bool { return atr_fn_info(f).is_kernel; }
+atr_is_only_used_by_assume :: (i: Value_Id) -> bool { return table_contains(*atr.assume_only, i); }
+// InformationCache::IsTargetGPU / stackIsAccessibleByOtherThreads / getFlatAddressSpace
+atr_is_target_gpu :: () -> bool { return triple_is_gpu(ir.triple); }
+triple_is_gpu :: (t: string) -> bool {
+    return begins_with(t, "amdgcn") || begins_with(t, "nvptx") || begins_with(t, "spirv") || begins_with(t, "r600");
+}
+
+// getOrCreateUniqueBlockExecutionSet: exclusion sets are compared as sets
+atr_unique_exclusion_set :: (es: [] Value_Id) -> s32 {
+    sorted: [..] Value_Id; sorted.allocator = temp;
+    for es array_add(*sorted, it);
+    quick_sort(sorted, (a: Value_Id, b: Value_Id) -> s64 { return cast(s64) a - cast(s64) b; });
+    for x, xi: atr.exclusion_sets {
+        if x.count != sorted.count continue;
+        same := true;
+        for x if it != sorted[it_index] { same = false; break; }
+        if same return cast(s32) xi;
+    }
+    n: [..] Value_Id;
+    for sorted array_add(*n, it);
+    array_add(*atr.exclusion_sets, n);
+    return cast(s32) (atr.exclusion_sets.count - 1);
+}
 
 // fillMapFromAssume
 atr_fill_map_from_assume :: (assume: Value_Id) {
@@ -823,13 +1130,15 @@ atr_knowledge_from_use :: (u: Use_Id) -> (bool, Attr_Kind, u64) {
 }
 min_align :: (a: u64, b: u64) -> u64 { x := a | b; return x & (~x + 1); }
 
-// AnalysisGetter: cached results only for the module pass, computed ones for the CGSCC pass
+// AnalysisGetter: cached results only for AttributorLightPass, computed ones otherwise
 atr_dt :: (f: Value_Id) -> *Dom_Tree { if atr.cached_only return cached_domtree(f); return get_domtree(f); }
 atr_pdt :: (f: Value_Id) -> *Dom_Tree { if atr.cached_only return cached_postdomtree(f); return get_postdomtree(f); }
 atr_li :: (f: Value_Id) -> *Loop_Info { if atr.cached_only return cached_loop_info(f); return get_loop_info(f); }
 atr_ac :: (f: Value_Id) -> *Assumption_Cache { if atr.cached_only return cached_assumption_cache(f); return get_assumption_cache(f); }
 atr_se :: (f: Value_Id) -> *Scev_State { if atr.cached_only return cached_scev(f); return get_scev(f); }
-// TargetLibraryAnalysis is never cached before the pass runs when opt starts with it; the CGSCC pass computes it.
+atr_ci :: (f: Value_Id) -> *Cycle_Info { if atr.cached_only return cached_cycle_info(f); return get_cycle_info(f); }
+atr_lvi :: (f: Value_Id) -> *Lvi { if atr.cached_only return null; return get_lvi(f); }
+// TargetLibraryAnalysis is never cached before the pass runs when opt starts with it; the other passes compute it.
 atr_have_tli :: () -> bool { return !atr.cached_only; }
 
 // ---------------------------------------------------------------- MustBeExecutedContextExplorer
@@ -878,6 +1187,11 @@ mbe_find_in_context_of :: (i: Value_Id, it: *Mbe_Iter) -> bool {
         found = it.cur == i;
     }
     return found;
+}
+// findInContextOf(I, PP)
+mbe_find_in_context_of_pp :: (i: Value_Id, pp: Value_Id) -> bool {
+    it := mbe_begin(pp);
+    return mbe_find_in_context_of(i, *it);
 }
 
 mbe_maybe_endless_loop :: (f: Value_Id) -> bool { return !fn_has_fn_attr(f, .WillReturn); }
@@ -1016,209 +1330,12 @@ mbe_prev_instruction :: (pp: Value_Id) -> Value_Id {
     return NONE;
 }
 
-// ---------------------------------------------------------------- queries over the IR
-
-// The instructions of `f` with the given opcodes, in checkForAllInstructionsImpl order (opcode by opcode).
-// Returns false where checkForAllInstructions would fail before calling its predicate (no definition).
-atr_insts :: (f: Value_Id, opcodes: [] Opcode) -> (bool, [..] Value_Id) {
-    r: [..] Value_Id; r.allocator = temp;
-    if f == NONE || is_declaration(f) return false, r;
-    fi := atr_fn_info(f);
-    for o: opcodes {
-        l := table_find_pointer(*fi.by_opcode, cast(u8) o);
-        if l for l.* array_add(*r, it);
-    }
-    return true, r;
-}
-CALL_LIKE_OPCODES :: Opcode.[.INVOKE, .CALLBR, .CALL];
-// checkForAllCallLikeInstructions / checkForAllInstructions with the querying AA's associated function
-atr_call_like_insts :: (q: u32) -> (bool, [..] Value_Id) { ok, r := atr_insts(irp_assoc_fn(aa(q).pos), CALL_LIKE_OPCODES); return ok, r; }
-atr_aa_insts :: (q: u32, opcodes: [] Opcode) -> (bool, [..] Value_Id) { ok, r := atr_insts(irp_assoc_fn(aa(q).pos), opcodes); return ok, r; }
-// checkForAllReadWriteInstructions
-atr_rw_insts :: (q: u32) -> (bool, [..] Value_Id) {
-    r: [..] Value_Id; r.allocator = temp;
-    f := irp_assoc_fn(aa(q).pos);
-    if f == NONE return false, r;
-    for atr_fn_info(f).rw_insts array_add(*r, it);
-    return true, r;
-}
-
-// checkForAllCallSites: the call sites the predicate is applied to, in order; `complete` is false if the walk stops
-// (after those) with a failure.
-atr_call_sites :: (f: Value_Id, require_all: bool) -> (sites: [..] Value_Id, complete: bool) {
-    sites: [..] Value_Id; sites.allocator = temp;
-    if require_all && !gv_has_local_linkage(f) return sites, false;
-    uses: [..] Use_Id; uses.allocator = temp;
-    // a blockaddress has no operands in LLVM 23 (here it uses its function): not a use of the function
-    u := ir.v_first_use[f];
-    while u != NONE { if vkind(ir.u_user[u]) != .C_BLOCKADDR array_add(*uses, u); u = ir.u_next[u]; }
-    k := 0;
-    while k < uses.count {
-        cu := uses[k];
-        k += 1;
-        user := ir.u_user[cu];
-        if vkind(user) == .C_EXPR && is_cast_op(cexpr(user).op) && is_ptr_type(vtype(user)) {
-            x := ir.v_first_use[user];
-            while x != NONE { array_add(*uses, x); x = ir.u_next[x]; }
-            continue;
-        }
-        // AbstractCallSite(&U)
-        eu := cu;
-        cb := user;
-        if !irp_is_call(cb) {
-            cb = NONE;
-            if vkind(user) == .C_EXPR && num_uses(user) == 1 && is_cast_op(cexpr(user).op) {
-                eu = ir.v_first_use[user];
-                if irp_is_call(ir.u_user[eu]) cb = ir.u_user[eu];
-            }
-            if cb == NONE return sites, false;
-        }
-        is_callee := eu == op_use(cb, nops(cb) - 1);
-        if !is_callee {
-            // a non-callee operand of a call with a known callee but no !callback: not a call site
-            if !require_all continue;
-            return sites, false;
-        }
-        n := min(cast(s64) call_num_args(cb), cast(s64) fn_nargs(f));
-        for a: 0..n - 1 if vtype(fn_arg(f, cast(u32) a)) != vtype(call_arg(cb, cast(u32) a)) return sites, false;
-        array_add(*sites, cb);
-    }
-    return sites, true;
-}
-
-// checkForAllCallees: the possible callees of `cb` (false: unknown)
-atr_callees :: (q: u32, cb: Value_Id) -> (bool, [..] Value_Id) {
-    r: [..] Value_Id; r.allocator = temp;
-    c := call_callee(cb);
-    if vkind(c) == .FUNCTION { array_add(*r, c); return true, r; }
-    e := atr_get_aa(.CALL_EDGES, irp_cs_function(cb), q, DEP_OPTIONAL);
-    if e == NONE || aa(e).unknown_callee return false, r;
-    for aa(e).callees array_add(*r, it);
-    return true, r;
-}
-
-// getAssumedSimplifiedValues without AAPotentialValues: the value itself, or failure for a returned position
-atr_simplified_values_ok :: (p: Irp) -> bool { return irp_kind(p) != .RETURNED; }
-
-// Attributor::checkForAllUses as an explicit walk: atr_uses_next returns the next use for the predicate (or NONE
-// when done); after the predicate, atr_uses_follow adds the users' uses when it asked to follow.
-Uses_Walk :: struct {
-    work: [..] Use_Id;
-    visited: Table(Use_Id, bool);
-    q: u32;
-}
-atr_uses_begin :: (q: u32, v: Value_Id) -> (bool, Uses_Walk) {
-    w: Uses_Walk;
-    w.work.allocator = temp;
-    w.visited.allocator = temp;
-    w.q = q;
-    if is_constant_data(v) return false, w;
-    atr_uses_add(*w, v);
-    return true, w;
-}
-atr_uses_add :: (w: *Uses_Walk, v: Value_Id) {
-    u := ir.v_first_use[v];
-    while u != NONE { array_add(*w.work, u); u = ir.u_next[u]; }
-}
-atr_uses_next :: (w: *Uses_Walk) -> Use_Id {
-    while w.work.count {
-        u := pop(*w.work);
-        user := ir.u_user[u];
-        can_mark := !is_inst(user) || inst_op(user) == .PHI;
-        if can_mark {
-            if table_contains(*w.visited, u) continue;
-            table_set(*w.visited, u, true);
-        }
-        if is_droppable_user(user) continue;
-        if is_inst(user) && inst_op(user) == .STORE && u == op_use(user, 0) {
-            if table_contains(*w.visited, u) continue;
-            table_set(*w.visited, u, true);
-            if atr_stored_value_has_no_copies(user, w.q) continue;   // all potential copies (none) visited
-        }
-        return u;
-    }
-    return NONE;
-}
-atr_uses_follow :: (w: *Uses_Walk, u: Use_Id) { atr_uses_add(w, ir.u_user[u]); }
-
-// AA::getPotentialCopiesOfStoredValue(OnlyExact) without AAPointerInfo: it succeeds (with no copies) only if every
-// underlying object of the pointer is undef, or null where null is not defined and the pointer is that null.
-atr_stored_value_has_no_copies :: (si: Value_Id, q: u32) -> bool {
-    ptr := op(si, 1);
-    uo := atr_get_aa(.UNDERLYING_OBJECTS, irp_value(ptr), q, DEP_OPTIONAL);
-    if uo == NONE return false;
-    objs: [..] Value_Id; objs.allocator = temp;
-    uo_objects(uo, false, *objs);
-    for obj: objs {
-        k := vkind(obj);
-        if k == .C_UNDEF || k == .C_POISON continue;
-        if k == .C_NULL {
-            if !null_pointer_is_defined(inst_fn(si), ptr_addrspace(vtype(ptr))) && ptr == obj continue;
-            return false;
-        }
-        return false;
-    }
-    return true;
-}
-
-// AA::isNoSyncInst
-atr_is_no_sync_inst :: (i: Value_Id, q: u32) -> bool {
-    if is_call_base(i) {
-        if call_has_fn_attr(i, .NoSync) return true;
-        if !call_has_fn_attr(i, .Convergent) && !may_read_or_write_memory(i) return true;
-        ok, _ := atr_has_assumed_ir_attr(.NoSync, q, irp_cs_function(i), DEP_OPTIONAL);
-        return ok;
-    }
-    if !may_read_or_write_memory(i) return true;
-    return !aa_is_non_relaxed_atomic(i);
-}
-// AANoSync::isNonRelaxedAtomic
-aa_is_non_relaxed_atomic :: (i: Value_Id) -> bool {
-    if !inst_is_atomic(i) return false;
-    r := inst(i);
-    if r.op == .FENCE return r.sync != SYNC_SCOPE_SINGLE_THREAD;
-    if r.op == .CMPXCHG return r.ord1 != ORD_MONOTONIC || r.ord2 != ORD_MONOTONIC;
-    if r.op == .ATOMICRMW || r.op == .STORE || r.op == .LOAD return r.ord1 != ORD_UNORDERED && r.ord1 != ORD_MONOTONIC;
-    fatal("internal: attributor: new atomic operation");
-    return true;
-}
-
-// isAssumedReadOnlyOrReadNone
-atr_is_assumed_read_only_or_none :: (p: Irp, q: u32, require_read_none: bool) -> (bool, bool) {
-    if require_read_none {
-        ok, known := atr_has_assumed_ir_attr(.ReadNone, q, p, DEP_OPTIONAL, true);
-        if ok return true, known;
-    } else {
-        ok, known := atr_has_assumed_ir_attr(.ReadOnly, q, p, DEP_OPTIONAL, true);
-        if ok return true, known;
-    }
-    k := irp_kind(p);
-    if k == .FUNCTION || k == .CALL_SITE {
-        ml := atr_get_aa(.MEM_LOCATION, p, q, DEP_NONE);
-        if ml != NONE && ml_is_assumed_read_none(aa(ml).s) {
-            known := ml_is_known_read_none(aa(ml).s);
-            if !known atr_record_dependence(ml, q, DEP_OPTIONAL);
-            return true, known;
-        }
-    }
-    mb := atr_get_aa(.MEM_BEHAVIOR, p, q, DEP_NONE);
-    if mb != NONE {
-        s := aa(mb).s;
-        if bs_is_assumed(s, MB_NO_ACCESSES) || (!require_read_none && bs_is_assumed(s, MB_NO_WRITES)) {
-            known := ifx require_read_none then bs_is_known(s, MB_NO_ACCESSES) else bs_is_known(s, MB_NO_WRITES);
-            if !known atr_record_dependence(mb, q, DEP_OPTIONAL);
-            return true, known;
-        }
-    }
-    return false, false;
-}
-atr_is_assumed_read_only :: (p: Irp, q: u32) -> (bool, bool) { a, k := atr_is_assumed_read_only_or_none(p, q, false); return a, k; }
-atr_is_assumed_read_none :: (p: Irp, q: u32) -> (bool, bool) { a, k := atr_is_assumed_read_only_or_none(p, q, true); return a, k; }
+// ---------------------------------------------------------------- AA::hasAssumedIRAttr and isImpliedByIR
 
 // AA::hasAssumedIRAttr: (assumed, known, the AA queried or NONE)
 atr_has_assumed_ir_attr :: (ak: Attr_Kind, q: u32, p: Irp, cls: u8, ignore_subsuming := false) -> (bool, bool, u32) {
     k: Atr_Kind;
-    bits: u32 = 1;
+    bits: u64 = 1;
     implied := false;
     if ak == {
         case .NoUnwind; k = .NO_UNWIND; implied = atr_default_implied_by_ir(p, ak, ignore_subsuming);
@@ -1228,11 +1345,10 @@ atr_has_assumed_ir_attr :: (ak: Attr_Kind, q: u32, p: Irp, cls: u8, ignore_subsu
         case .NoRecurse; k = .NO_RECURSE; implied = atr_default_implied_by_ir(p, ak, ignore_subsuming);
         case .NoReturn; k = .NO_RETURN; implied = atr_default_implied_by_ir(p, ak, ignore_subsuming);
         case .NoSync; k = .NO_SYNC; implied = aa_no_sync_implied_by_ir(p, ignore_subsuming);
-        case .NoAlias;
-            if aa_no_alias_implied_by_ir(p, ignore_subsuming) return true, true, NONE;
-            return false, false, NONE;   // AANoAlias is not allowed
+        case .NoAlias; k = .NO_ALIAS; implied = aa_no_alias_implied_by_ir(p, ignore_subsuming);
         case .NonNull; k = .NON_NULL; implied = aa_non_null_implied_by_ir(p, ignore_subsuming);
         case .MustProgress; k = .MUST_PROGRESS; implied = atr_has_attr(p, .[.MustProgress, .WillReturn], ignore_subsuming, .MustProgress);
+        case .NoUndef; k = .NO_UNDEF; implied = aa_no_undef_implied_by_ir(p, ignore_subsuming);
         case .ReadNone; k = .MEM_BEHAVIOR; bits = MB_NO_ACCESSES; implied = atr_default_implied_by_ir(p, ak, ignore_subsuming);
         case .ReadOnly; k = .MEM_BEHAVIOR; bits = MB_NO_WRITES; implied = atr_default_implied_by_ir(p, ak, ignore_subsuming);
         case .WriteOnly; k = .MEM_BEHAVIOR; bits = MB_NO_READS; implied = atr_default_implied_by_ir(p, ak, ignore_subsuming);
@@ -1252,43 +1368,19 @@ atr_default_implied_by_ir :: (p: Irp, ak: Attr_Kind, ignore_subsuming: bool) -> 
     return atr_has_attr(p, .[ak], ignore_subsuming, ak);
 }
 
-// ---------------------------------------------------------------- the driver
-
-// runAttributorLightOnFunctions
-attributor_light_run_on :: (functions: [] Value_Id, is_module_pass: bool, cached_only: bool) -> (bool, [..] Value_Id) {
-    atr = .{};
-    atr.is_module_pass = is_module_pass;
-    atr.cached_only = cached_only;
-    for functions { array_add(*atr.functions, it); table_set(*atr.fn_set, it, true); }
-    modified: [..] Value_Id; modified.allocator = temp;
-    if functions.count == 0 return false, modified;
-    // !callback metadata needs AbstractCallSite callback calls, which are not ported
-    for f: ir.m_functions if fn_has_callback_md(f) fatal("attributor-light: !callback metadata is not supported yet");
-    atr.phase = .SEEDING;
-    for f: functions {
-        if is_declaration(f) continue;
-        atr_identify_default_abstract_attributes(f);
-    }
-    atr.phase = .UPDATE;
-    atr_run_till_fixpoint();
-    atr.phase = .MANIFEST;
-    // modified functions: the anchors of the AttrsMap that changed (getModifiedFunctions is CGModifiedFunctions,
-    // which only cleanupIR fills; it stays empty here)
-    changed := atr_manifest_attributes();
-    atr.phase = .CLEANUP;
-    return changed, modified;
-}
-
-// Attributor::checkAndQueryIRAttr
+// checkAndQueryIRAttr: the AA kinds of the IR attributes it is used for
 atr_check_and_query :: (ak: Attr_Kind, k: Atr_Kind, p: Irp, s: u32, skip_has_attr_check := false) {
     if skip_has_attr_check || !attr_set_has(s, ak) {
-        ok, _ := atr_has_assumed_ir_attr(ak, NONE, p, DEP_NONE);
-        if !ok atr_get_aa(k, p, NONE, DEP_NONE);
+        if atr_is_allowed(k) {
+            ok, _ := atr_has_assumed_ir_attr(ak, NONE, p, DEP_NONE);
+            if !ok atr_get_aa(k, p, NONE, DEP_NONE);
+        }
     }
 }
 
-// Attributor::identifyDefaultAbstractAttributes, restricted to the allowed AAs (the others are never created, and
-// getAssumedSimplified / checkAndQueryIRAttr for not-allowed kinds have no effect)
+// ---------------------------------------------------------------- the driver
+
+// Attributor::identifyDefaultAbstractAttributes
 atr_identify_default_abstract_attributes :: (f: Value_Id) {
     if table_contains(*atr.visited_functions, f) return;
     table_set(*atr.visited_functions, f, true);
@@ -1305,6 +1397,10 @@ atr_identify_default_abstract_attributes :: (f: Value_Id) {
     ipo := atr_is_ipo_amendable(f);
     attrs := glob(f).attrs;
     fn_attrs := attr_list_fn(attrs);
+    uai := false;
+    atr_get_aa(.IS_DEAD, fpos, NONE, DEP_NONE);
+    atr_get_aa(.UNDEFINED_BEHAVIOR, fpos, NONE, DEP_NONE);
+    if atr_enable_heap_to_stack atr_get_aa(.HEAP_TO_STACK, fpos, NONE, DEP_NONE);
     atr_check_and_query(.MustProgress, .MUST_PROGRESS, fpos, fn_attrs);
     atr_check_and_query(.NoFree, .NO_FREE, fpos, fn_attrs);
     atr_check_and_query(.WillReturn, .WILL_RETURN, fpos, fn_attrs);
@@ -1313,16 +1409,24 @@ atr_identify_default_abstract_attributes :: (f: Value_Id) {
         atr_check_and_query(.NoUnwind, .NO_UNWIND, fpos, fn_attrs);
         atr_check_and_query(.NoReturn, .NO_RETURN, fpos, fn_attrs);
         atr_check_and_query(.NoRecurse, .NO_RECURSE, fpos, fn_attrs);
+        if attr_set_has(fn_attrs, .Convergent) atr_get_aa(.NON_CONVERGENT, fpos, NONE, DEP_NONE);
         atr_get_aa(.MEM_BEHAVIOR, fpos, NONE, DEP_NONE);
         atr_get_aa(.MEM_LOCATION, fpos, NONE, DEP_NONE);
+        atr_get_aa(.ASSUMPTION_INFO, fpos, NONE, DEP_NONE);
         // getDenormalMode(IEEEsingle): the f32 mode if set, else the default one
         if dn_f32_mode_is_dynamic(f) atr_get_aa(.DENORMAL_FP, fpos, NONE, DEP_NONE);
         rt := fn_ret_type(f);
         if type_kind(rt) != .VOID {
             rpos := irp_returned(f);
             ret_attrs := attr_list_ret(attrs);
+            atr_get_aa(.IS_DEAD, rpos, NONE, DEP_NONE);
+            atr_get_assumed_simplified(rpos, NONE, *uai, AA_INTRA);
+            atr_check_and_query(.NoUndef, .NO_UNDEF, rpos, ret_attrs);
             if is_ptr_type(rt) {
+                atr_get_aa(.ALIGN, rpos, NONE, DEP_NONE);
                 atr_check_and_query(.NonNull, .NON_NULL, rpos, ret_attrs);
+                atr_check_and_query(.NoAlias, .NO_ALIAS, rpos, ret_attrs);
+                atr_get_aa(.DEREFERENCEABLE, rpos, NONE, DEP_NONE);
             } else if is_fp_math_type(rt) {
                 atr_get_aa(.NO_FPCLASS, rpos, NONE, DEP_NONE);
             }
@@ -1336,27 +1440,47 @@ atr_identify_default_abstract_attributes :: (f: Value_Id) {
             if is_ptr_type(vtype(a)) atr_check_and_query(.NoFree, .NO_FREE, apos, arg_attrs);
             continue;
         }
+        atr_get_assumed_simplified(apos, NONE, *uai, AA_INTRA);
+        atr_get_aa(.IS_DEAD, apos, NONE, DEP_NONE);
+        atr_check_and_query(.NoUndef, .NO_UNDEF, apos, arg_attrs);
         if is_ptr_type(vtype(a)) {
             atr_check_and_query(.NonNull, .NON_NULL, apos, arg_attrs);
+            atr_check_and_query(.NoAlias, .NO_ALIAS, apos, arg_attrs);
+            atr_get_aa(.DEREFERENCEABLE, apos, NONE, DEP_NONE);
+            atr_get_aa(.ALIGN, apos, NONE, DEP_NONE);
             atr_check_and_query(.Captures, .NO_CAPTURE, apos, arg_attrs, true);
             atr_get_aa(.MEM_BEHAVIOR, apos, NONE, DEP_NONE);
             atr_check_and_query(.NoFree, .NO_FREE, apos, arg_attrs);
+            atr_get_aa(.PRIVATIZABLE_PTR, apos, NONE, DEP_NONE);
         } else if is_fp_math_type(vtype(a)) {
             atr_get_aa(.NO_FPCLASS, apos, NONE, DEP_NONE);
         }
     }
-    _, calls := atr_insts(f, CALL_LIKE_OPCODES);
+    // the instruction lists of the OpcodeInstMap (checkForAllInstructionsImpl without liveness)
+    calls := atr_opcode_insts(f, CALL_LIKE_OPCODES);
     for cb: calls {
+        ipos := irp_inst(cb);
+        cbfpos := irp_cs_function(cb);
+        atr_get_aa(.IS_DEAD, ipos, NONE, DEP_NONE);
         callee := call_callee(cb);
-        if vkind(callee) != .FUNCTION continue;   // AAIndirectCallInfo is not allowed
-        if is_declaration(callee) && !fn_has_callback_md(callee) continue;
-        if type_kind(fn_ret_type(callee)) != .VOID && has_uses(cb) {
-            if is_fp_math_type(fn_ret_type(callee)) atr_get_aa(.NO_FPCLASS, irp_inst(cb), NONE, DEP_NONE);
+        if vkind(callee) != .FUNCTION {
+            atr_get_aa(.INDIRECT_CALL_INFO, cbfpos, NONE, DEP_NONE);
+            continue;
         }
+        atr_get_aa(.ASSUMPTION_INFO, cbfpos, NONE, DEP_NONE);
+        if !atr_annotate_decl_cs && is_declaration(callee) && !fn_has_callback_md(callee) continue;
+        if type_kind(fn_ret_type(callee)) != .VOID && has_uses(cb) {
+            atr_get_assumed_simplified(irp_cs_returned(cb), NONE, *uai, AA_INTRA);
+            if is_fp_math_type(fn_ret_type(callee)) atr_get_aa(.NO_FPCLASS, ipos, NONE, DEP_NONE);
+        }
+        // CBFnPos.getAttrList() is read before the loop: the attributes manifested while seeding go to the AttrsMap
         cb_attrs := inst(cb).attrs;
         for k: 0..cast(s64) call_num_args(cb) - 1 {
             cpos := irp_cs_argument(cb, cast(u32) k);
             cs_attrs := attr_list_param(cb_attrs, cast(u32) k);
+            atr_get_aa(.IS_DEAD, cpos, NONE, DEP_NONE);
+            atr_get_assumed_simplified(cpos, NONE, *uai, AA_INTRA);
+            atr_check_and_query(.NoUndef, .NO_UNDEF, cpos, cs_attrs);
             at := vtype(call_arg(cb, cast(u32) k));
             if !is_ptr_type(at) {
                 if is_fp_math_type(at) atr_get_aa(.NO_FPCLASS, cpos, NONE, DEP_NONE);
@@ -1364,15 +1488,164 @@ atr_identify_default_abstract_attributes :: (f: Value_Id) {
             }
             atr_check_and_query(.NonNull, .NON_NULL, cpos, cs_attrs);
             atr_check_and_query(.Captures, .NO_CAPTURE, cpos, cs_attrs, true);
+            atr_check_and_query(.NoAlias, .NO_ALIAS, cpos, cs_attrs);
+            atr_get_aa(.DEREFERENCEABLE, cpos, NONE, DEP_NONE);
+            atr_get_aa(.ALIGN, cpos, NONE, DEP_NONE);
             if !attr_set_has(cs_attrs, .ReadNone) atr_get_aa(.MEM_BEHAVIOR, cpos, NONE, DEP_NONE);
             atr_check_and_query(.NoFree, .NO_FREE, cpos, cs_attrs);
         }
     }
-    // the load/store and alloca seeds only create AAs that are not allowed
+    mem := atr_opcode_insts(f, .[.LOAD, .STORE]);
+    for x: mem {
+        if inst_op(x) == .LOAD {
+            pv := irp_value(op(x, 0));
+            atr_get_aa(.ALIGN, pv, NONE, DEP_NONE);
+            if atr_simplify_all_loads atr_get_assumed_simplified(irp_value(x), NONE, *uai, AA_INTRA);
+            atr_get_aa(.INVARIANT_LOAD_POINTER, pv, NONE, DEP_NONE);
+            atr_get_aa(.ADDRESS_SPACE, pv, NONE, DEP_NONE);
+        } else {
+            atr_get_aa(.IS_DEAD, irp_inst(x), NONE, DEP_NONE);
+            atr_get_assumed_simplified(irp_value(op(x, 0)), NONE, *uai, AA_INTRA);
+            atr_get_aa(.ALIGN, irp_value(op(x, 1)), NONE, DEP_NONE);
+            atr_get_aa(.ADDRESS_SPACE, irp_value(op(x, 1)), NONE, DEP_NONE);
+        }
+    }
+    allocas := atr_opcode_insts(f, .[.ALLOCA]);
+    for allocas atr_get_aa(.ALLOCATION_INFO, irp_value(it), NONE, DEP_NONE);
+}
+
+// The OpcodeInstMap entries of `f` for the given opcodes, in checkForAllInstructionsImpl order (opcode by opcode).
+atr_opcode_insts :: (f: Value_Id, opcodes: [] Opcode) -> [..] Value_Id {
+    r: [..] Value_Id; r.allocator = temp;
+    fi := atr_fn_info(f);
+    for o: opcodes {
+        l := table_find_pointer(*fi.by_opcode, cast(u8) o);
+        if l for l.* array_add(*r, it);
+    }
+    return r;
+}
+CALL_LIKE_OPCODES :: Opcode.[.INVOKE, .CALLBR, .CALL];
+
+// Attributor::isClosedWorldModule
+atr_is_closed_world :: () -> bool {
+    if atr_closed_world_given return atr_closed_world_opt;
+    return atr.is_module_pass && atr.closed_world;
+}
+
+atr_reset :: (functions: [] Value_Id, is_module_pass: bool, cached_only: bool, light: bool) {
+    atr = .{};
+    atr.is_module_pass = is_module_pass;
+    atr.cached_only = cached_only;
+    atr.light = light;
+    atr.use_liveness = !light;
+    atr.delete_fns = false;
+    atr.rewrite_signatures = true;
+    for functions { array_add(*atr.functions, it); table_set(*atr.fn_set, it, true); }
+}
+
+// runAttributorOnFunctions
+attributor_run_on :: (functions: [] Value_Id, delete_fns: bool, is_module_pass: bool) -> bool {
+    if functions.count == 0 return false;
+    atr_reset(functions, is_module_pass, false, false);
+    atr.delete_fns = delete_fns;
+    // !callback metadata needs AbstractCallSite callback calls, which are not ported
+    for f: ir.m_functions if fn_has_callback_md(f) fatal("attributor: !callback metadata is not supported yet");
+    if atr_call_site_specific fatal("attributor: -attributor-enable-call-site-specific-deduction is not supported yet");
+    // the Attributor constructor: the indirectly callable functions of a closed world module
+    if atr_is_closed_world() {
+        for f: atr.functions if fn_has_address_taken_for_attributor(f) array_add(*atr.indirectly_callable, f);
+    }
+    atr.phase = .SEEDING;
+    if atr_allow_shallow_wrappers {
+        n := atr.functions.count;
+        for k: 0..n - 1 {
+            f := atr.functions[k];
+            if !atr_is_ipo_amendable(f) atr_create_shallow_wrapper(f);
+        }
+    }
+    if atr_allow_deep_wrappers atr_internalize_non_exact_functions();
+    for k: 0..atr.functions.count - 1 {
+        f := atr.functions[k];
+        if is_declaration(f) continue;
+        if gv_has_local_linkage(f) {
+            all_direct := true;
+            u := ir.v_first_use[f];
+            while u != NONE {
+                usr := ir.u_user[u];
+                if vkind(usr) == .C_BLOCKADDR { u = ir.u_next[u]; continue; }
+                if !irp_is_call(usr) || u != op_use(usr, nops(usr) - 1) || !atr_fn_in_set(inst_fn(usr)) { all_direct = false; break; }
+                u = ir.u_next[u];
+            }
+            if all_direct continue;
+        }
+        atr_identify_default_abstract_attributes(f);
+    }
+    return atr_run();
+}
+
+// Attributor::run
+atr_run :: () -> bool {
+    if atr_print_call_graph atr_call_graph_populate_all();
+    atr.phase = .UPDATE;
+    atr_run_till_fixpoint();
+    if atr_dump_dep_graph atr_dump_dependency_graph();
+    if atr_print_dep atr_print_dependencies();
+    atr.phase = .MANIFEST;
+    changed := atr_manifest_attributes();
+    atr.phase = .CLEANUP;
+    cleanup := atr_cleanup_ir();
+    if atr_print_call_graph atr_call_graph_print();
+    return changed || cleanup;
+}
+
+// runAttributorLightOnFunctions
+attributor_light_run_on :: (functions: [] Value_Id, is_module_pass: bool, cached_only: bool) -> (bool, [..] Value_Id) {
+    atr_reset(functions, is_module_pass, cached_only, true);
+    modified: [..] Value_Id; modified.allocator = temp;
+    if functions.count == 0 return false, modified;
+    for f: ir.m_functions if fn_has_callback_md(f) fatal("attributor-light: !callback metadata is not supported yet");
+    atr.phase = .SEEDING;
+    for f: functions {
+        if is_declaration(f) continue;
+        atr_identify_default_abstract_attributes(f);
+    }
+    atr.phase = .UPDATE;
+    atr_run_till_fixpoint();
+    atr.phase = .MANIFEST;
+    changed := atr_manifest_attributes();
+    atr.phase = .CLEANUP;
+    cleanup := atr_cleanup_ir();
+    for atr.cg_modified array_add(*modified, it);
+    return changed || cleanup, modified;
 }
 
 // ---------------------------------------------------------------- the passes
 
+// AttributorPass::run
+attributor_module_run :: () -> Preserved {
+    functions: [..] Value_Id; functions.allocator = temp;
+    for ir.m_functions array_add(*functions, it);
+    changed := attributor_run_on(functions, true, true);
+    atr_finish_deleted_functions();
+    if !changed return PRESERVE_ALL;
+    printer_note_ir_changed();
+    pa: Preserved;
+    return pa;
+}
+// AttributorCGSCCPass::run
+attributor_cgscc_run :: (c_in: s32, ur: *Cgscc_Ur) -> Preserved {
+    c := c_in;
+    functions: [..] Value_Id; functions.allocator = temp;
+    for lcg.sccs[c].nodes array_add(*functions, lcg_fn(it));
+    if functions.count == 0 return PRESERVE_ALL;
+    changed := attributor_run_on(functions, false, false);
+    if !changed return PRESERVE_ALL;
+    printer_note_ir_changed();
+    nc := atr_cgscc_update(c, ur);
+    if nc != c ur.updated_c = nc;
+    pa: Preserved;
+    return pa;
+}
 // AttributorLightPass::run
 attributor_light_module_run :: () -> Preserved {
     functions: [..] Value_Id; functions.allocator = temp;
@@ -1394,4 +1667,9 @@ attributor_light_preserved :: (changed: bool) -> Preserved {
     pa: Preserved;
     pa.all_fn = true;
     return pa;
+}
+
+attr_set_has_str :: (s: u32, key: string) -> bool {
+    for attr_set_items(s) if it.kind == .STRING_ATTR && it.key == key return true;
+    return false;
 }
