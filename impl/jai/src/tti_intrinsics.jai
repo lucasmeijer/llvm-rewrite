@@ -57,7 +57,77 @@ bt_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
     if base_intrinsic_cost(ica) == 0 return 0;
     n := iid_name(ica.id);
     if begins_with(n, "llvm.x86.") return TCC_BASIC;   // Intrinsic::isTargetIntrinsic
-    if begins_with(n, "llvm.vp.") || begins_with(n, "llvm.experimental.vp.") x86_np("getIntrinsicInstrCost of VP intrinsics");
+    vi: *Vp_Info = null;   // VPIntrinsic::isVPIntrinsic
+    for * VP_INFOS if it.name == n { vi = it; break; }
+    if vi {
+        // VP intrinsics cost like their non-vp counterparts
+        tb := ica_is_type_based(ica);
+        vp_align :: (ica: *Ica, pos: u32) -> u64 {   // VPI->getPointerAlignment().valueOrOne()
+            if ica.inst == NONE || !is_inst(ica.inst) return 1;
+            return max(call_param_align(ica.inst, pos), 1);
+        }
+        fop := vi.opcode;
+        if fop != .NONE_OP {
+            if n == "llvm.vp.load" {
+                as: u32 = 0;
+                if ica.tys.count > 1 && is_ptr_type(ica.tys[0]) as = ptr_addrspace(ica.tys[0]);
+                return x86_memory_op_cost(t, .LOAD, ica.ret, vp_align(ica, 0), as, kind);
+            }
+            if n == "llvm.vp.store" {
+                as: u32 = 0;
+                if ica.tys.count >= 2 && is_ptr_type(ica.tys[1]) as = ptr_addrspace(ica.tys[1]);
+                return x86_memory_op_cost(t, .STORE, ica.tys[0], vp_align(ica, 1), as, kind);
+            }
+            if vi.binop || n == "llvm.vp.fneg" return x86_arith_cost(t, fop, ica.ret, kind, OI_ANY, OI_ANY);
+            if vp_is_cast(vi) return x86_cast_cost(t, fop, ica.ret, ica.tys[0], CCH_NONE, kind);
+            if vp_is_cmp(vi) && ica.inst != NONE {
+                m := ir.v_aux[call_arg(ica.inst, 2)];
+                pred := vp_cmp_predicate(cast(Md_Id) m, n == "llvm.vp.fcmp");
+                return x86_cmp_sel_cost(t, fop, ica.tys[0], ica.ret, pred, kind);
+            }
+        }
+        if n == "llvm.vp.load.ff" {
+            m: Mica; m.id = ica.id; m.data_ty = type_sub(ica.ret, 0); m.align = vp_align(ica, 0);
+            return x86_mem_intrinsic_cost(t, *m, kind);
+        }
+        if n == "llvm.vp.scatter" || n == "llvm.vp.gather" {
+            fid := iidn(vi.intr);
+            if tb {
+                a := ica_types(fid, ica.ret, array_view(ica.tys, 0, ica.tys.count - 1), ica.fmf);
+                return bt_type_based_intrinsic_cost(t, *a, kind);
+            }
+            m: Mica; m.id = ica.id;
+            if n == "llvm.vp.scatter" {
+                m.data_ty = ica.tys[0]; m.ptr = args_of(ica)[1]; m.align = vp_align(ica, 1);
+                m.variable_mask = is_constant_kind(vkind(args_of(ica)[2]));   // LLVM: VarMask = isa<Constant>(mask)
+            } else {
+                m.data_ty = ica.ret; m.ptr = args_of(ica)[0]; m.align = vp_align(ica, 0);
+                m.variable_mask = is_constant_kind(vkind(args_of(ica)[1]));
+            }
+            return x86_mem_intrinsic_cost(t, *m, kind);
+        }
+        if n == "llvm.vp.select" || n == "llvm.vp.merge" {
+            ox := OI_ANY; oy := OI_ANY;
+            if !tb { ox = tti_operand_info(args_of(ica)[0]); oy = tti_operand_info(args_of(ica)[1]); }
+            return x86_cmp_sel_cost(t, .SELECT, ica.ret, ica.tys[0], BAD_ICMP_PREDICATE, kind, ox, oy);
+        }
+        fname := vi.intr;
+        if n == "llvm.experimental.vp.reverse" fname = "llvm.vector.reverse";   // close enough for cost modelling
+        if fname.count {
+            fid := iidn(fname);
+            assert(ica.tys.count >= 2, "Expected VPIntrinsic to have Mask and Vector Length args and types");
+            nargs: [] Value_Id = ica.args;
+            if !tb nargs = array_view(ica.args, 0, ica.args.count - 2);
+            ntys := array_view(ica.tys, 0, ica.tys.count - 2);
+            if vp_is_reduction(vi) && fname != "llvm.vector.reduce.fadd" && fname != "llvm.vector.reduce.fmul" {
+                if !tb nargs = array_view(nargs, 1, nargs.count - 1);
+                ntys = array_view(ntys, 1, ntys.count - 1);
+            }
+            na: Ica;
+            na.id = fid; na.ret = ica.ret; na.args = nargs; na.tys = ntys; na.fmf = ica.fmf;   // IntrinsicCostAttributes(ID, RTy, Args, Tys, Flags)
+            return x86_intrinsic_cost(t, *na, kind);
+        }
+    }
     if ica_is_type_based(ica) return bt_type_based_intrinsic_cost(t, ica, kind);
     ret := ica.ret;
     ret_vf: s64 = 1;
@@ -785,3 +855,5 @@ bt_multiple_result_intrinsic_vector_lib_call_cost :: (t: *Tti, ica: *Ica, kind: 
     }
     return true, c;
 }
+
+args_of :: inline (ica: *Ica) -> [] Value_Id { return ica.args; }

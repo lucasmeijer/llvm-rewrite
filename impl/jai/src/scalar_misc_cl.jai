@@ -38,6 +38,7 @@ scalar_misc_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
         case "denormal-fp-math-f32"; denormal_fp32_math_cl = parse_denormal_mode_kind(name, value);
         case "verify-scev-strict"; scev_opts.verify_scev_strict = smisc_bool(name, value, has_value);
         case "guards-predicate-pass-branch-weight"; mge_predicate_pass_branch_weight = cast(u32) smisc_int(name, value, has_value);
+        case "preserve-ll-uselistorder"; preserve_ll_uselistorder = smisc_bool(name, value, has_value);
         case "relocation-model";
             if value == {
                 case "static"; reloc_model_cl.model = RELOC_STATIC;

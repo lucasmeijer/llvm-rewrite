@@ -1138,6 +1138,7 @@ print_function :: (f: Value_Id) {
             print_basic_block(b, b == g.first_block);
             b = block(b).next;
         }
+        print_use_lists(f);   // the function's use-lists (--preserve-ll-uselistorder)
         out("}\n");
     }
     current_function = NONE;
@@ -1493,6 +1494,7 @@ print_gc_relocate_comment :: (i: Value_Id) {
 
 print_module :: () -> string {
     W.buf.count = 0;
+    ulo.computed = false;
     type_printing_init();
     process_module();
     if ir.module_id.count && !contains(ir.module_id, "\n") { out("; ModuleID = '"); out(ir.module_id); out("'\n"); }
@@ -1546,6 +1548,7 @@ print_module :: () -> string {
     if ir.m_ifuncs.count outc(#char "\n");
     for ir.m_ifuncs print_ifunc(it);
     for ir.m_functions { outc(#char "\n"); print_function(it); }
+    print_use_lists(NONE);   // global use-lists
     if W.as_order.count {
         outc(#char "\n");
         for W.as_order {
