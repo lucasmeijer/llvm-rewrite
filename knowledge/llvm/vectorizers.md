@@ -384,3 +384,6 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
   `CM_EpilogueNotAllowedLowTripLoop` makes the planner fold the tail, the stores become predicated replicates in
   `pred.store` regions on SSE (no masked stores), and the cost model then rejects vectorization. Getting these right
   needs the whole predication / replicate-region / header-mask path, even though nothing is emitted.
+- SLP: the reduced-bitcast combine of a `Shl` root (zext+shl+disjoint-or reduction to a bitcast/bswap/load) and
+  matchesSelectOfBits both return early on a big-endian DataLayout (SLPVectorizer.cpp:15047, 15608):
+  AggressiveInstCombine/X86/or-load.ll with `-data-layout=E-n64`, InstCombine/or-packed-int-vecs.ll with `-data-layout=E`.

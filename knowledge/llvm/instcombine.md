@@ -377,3 +377,12 @@ Verified by the goose port (per-function sweep of the imported InstCombine tests
   `load/store` through `llvm.protected.field.ptr` become `ptrauth.auth/sign` with key 2 (AArch64 DA) even on x86.
 - `-instcombine-verify-known-bits` aborts on a mismatch only; `-instcombine-code-sinking=0` disables
   getOptionalSinkBlockForInst; `-disable-i2p-p2i-opt` is CastInst::isEliminableCastPair's case 7.
+- foldPHIArgOpIntoPHI checks every incoming value with the full `Instruction::isSameOperationAs`
+  (haveSameSpecialState: cmp predicates, GEP source types, load/store attributes, ...), so a phi of `icmp ne %x, 0`
+  and `icmp eq %z, 0` is not folded (tests/pass/instcombine/phi-of-cmps-different-predicates.ll; ConstraintElimination/
+  and-implied-by-operands.ll at -O2). foldSelectOpOp uses the same check.
+- `Value::setName` on a constant is a no-op (getSymTab fails): unpackLoadToAggregate of a `[0 x T]`/`{}` load
+  replaces it with `poison` and the `V->setName(Name)` does nothing.
+- CastGEPIndices (ConstantFolding.cpp) keeps the GEP's inrange when it rewrites the indices, so
+  `getelementptr inrange(0, 16) ({...}, ptr @g, i32 0, i32 0, i32 0)` folds to `getelementptr inbounds nuw
+  inrange(0, 16) (i8, ptr @g, i64 0)`, not to `@g` (GlobalSplit/*.ll under instcombine).

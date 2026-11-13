@@ -112,3 +112,9 @@ tests/perf/compile programs (`-opt-bisect-limit=<index of dfa-jump-threading - 1
 - Cloned blocks are named `<bb>.jt<state>` with `APInt::getLimitedValue()` (an `i32 -1` state gives `.jt4294967295`);
   RemapInstruction does not remap the clones' debug records (they keep the original values) and cloned PHIs are not
   remapped at all (cleanPhiNodes and SSAUpdaterBulk fix them).
+- GlobalObject::canIncreaseAlignment (Globals.cpp:422; infer-alignment, InstCombine's getOrEnforceKnownAlignment):
+  a non-dso_local global is refused only on ELF (an empty triple counts as ELF); with `-mtriple=x86_64-apple-macosx`
+  or a Windows triple its alignment is raised (SLPVectorizer/X86/horizontal.ll at -O2: `@arr_float` gets align 32).
+- Globals created with local linkage are dso_local (GlobalValue::setLinkage -> maybeSetDsoLocal): SimplifyCFG's
+  `switch.table.*`, LoopIdiom's `.crctable`. rel-lookup-table-converter needs that (isDSOLocal), and on x86 Darwin
+  and AArch64 it clears unnamed_addr on every global the table points to (SimplifyCFG/X86/MagicPointer.ll at -O2).

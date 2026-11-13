@@ -106,3 +106,10 @@ on the imported tests named).
   (willreturn) to every declaration (inferAttributesFromOthers), also non-libfuncs.
 - canTransformToMemCmp: strcmp builds a full SimplifyQuery (DT, AC, CxtI) for isDereferenceablePointer, strncmp only
   `SimplifyQuery(DL)` (no context, no assumptions); strncmp/memchr's isKnownNonZero(Size, DL) has no context either.
+- `isMathLibCallNoop` (ConstantFolding.cpp:4749), which lets wouldInstructionBeTriviallyDead delete a constant-folded
+  libcall that may write errno, lists `LibFunc_ilogb` only: `ilogbf`/`ilogbl` calls with a constant stay after
+  their result is folded (InstCombine/ilogb.ll and InstSimplify/pr122582.ll at -O2: early-cse keeps
+  `call i32 @ilogbf(float 7.0)`; the other families list all three of f/l/plain). Verified with impl/jai.
+- LibCallSimplifier's remquo fold stores the quotient with `CreateAlignedStore(.., CI->getParamAlign(2))`; without a
+  param align that MaybeAlign is empty and IRBuilder uses the ABI alignment (`align 4`), which later passes
+  (infer-alignment) keep. InstCombine/remquo*.ll at -O2.
