@@ -285,7 +285,7 @@ get_freed_operand :: (i: Value_Id, use_tli := true) -> Value_Id {
     callee := mb_called_function(i);
     if use_tli && callee != NONE && mb_tli_knows(callee, value_function(i)) {
         ft := glob(callee).value_type;
-        name := vname(callee);
+        name := lib_func_name(callee);
         is_free_fn := false;   // isLibFreeFunction
         in_table := false;
         for FREE_FNS {

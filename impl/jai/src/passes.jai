@@ -276,6 +276,8 @@ Pass_Kind :: enum u8 {
     PRINT_LVI; CVP; JUMP_THREADING;
     // BranchProbabilityInfo (branch_prob.jai), BlockFrequencyInfo (block_freq.jai)
     PRINT_BPI; PRINT_BFI;
+    // analysis_printers_misc.jai
+    PRINT_ASSUMPTIONS; PRINT_CALLGRAPH_SCCS; PRINT_PHI_VALUES; PRINT_MEM_DEREFS; PRINT_MUST_EXECUTE; PRINT_MUST_BE_EXECUTED_CONTEXTS;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -468,6 +470,12 @@ PASS_TABLE :: Pass_Info.[
     .{"require<branch-prob>", .FUNCTION, .REQUIRE, true, .BPI},
     .{"invalidate<branch-prob>", .FUNCTION, .INVALIDATE, true, .BPI},
     .{"print<block-freq>", .FUNCTION, .PRINT_BFI, true, .BFI},
+    .{"print<assumptions>", .FUNCTION, .PRINT_ASSUMPTIONS, true, .DOMTREE},
+    .{"print-callgraph-sccs", .MODULE, .PRINT_CALLGRAPH_SCCS, true, .DOMTREE},
+    .{"print<phi-values>", .FUNCTION, .PRINT_PHI_VALUES, true, .DOMTREE},
+    .{"print<mem-derefs>", .FUNCTION, .PRINT_MEM_DEREFS, true, .DOMTREE},
+    .{"print<must-execute>", .FUNCTION, .PRINT_MUST_EXECUTE, true, .DOMTREE},
+    .{"print-must-be-executed-contexts", .MODULE, .PRINT_MUST_BE_EXECUTED_CONTEXTS, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
     .{"invalidate<block-freq>", .FUNCTION, .INVALIDATE, true, .BFI},
     .{"no-op-cgscc", .CGSCC, .NO_OP_CGSCC, false, .DOMTREE},
@@ -1196,6 +1204,8 @@ run_module_pm :: (n: s32) {
             case .INFERATTRS; if should_run_pass(node, NONE) inferattrs_run_module();
             case .CGSCC_ADAPTOR; mam_invalidate(run_cgscc_adaptor(c));
             case .PRINT_LCG; should_run_pass(node, NONE); lcg_printer_run();
+            case .PRINT_CALLGRAPH_SCCS; should_run_pass(node, NONE); print_callgraph_sccs_run();
+            case .PRINT_MUST_BE_EXECUTED_CONTEXTS; should_run_pass(node, NONE); print_must_be_executed_contexts_run();
             case .REQUIRE_LCG; should_run_pass(node, NONE); lcg_get();
             case .INVALIDATE_LCG; should_run_pass(node, NONE); lcg_invalidate();
             case .RPO_FUNCTION_ATTRS; if should_run_pass(node, NONE) mam_invalidate(rpo_function_attrs_run());
@@ -1406,6 +1416,10 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .JUMP_THREADING; return jump_threading_run(f);
         case .PRINT_BPI; return print_branch_prob_run(f);
         case .PRINT_BFI; return print_block_freq_run(f);
+        case .PRINT_ASSUMPTIONS; return print_assumptions_run(f);
+        case .PRINT_PHI_VALUES; return print_phi_values_run(f);
+        case .PRINT_MEM_DEREFS; return print_mem_derefs_run(f);
+        case .PRINT_MUST_EXECUTE; return print_must_execute_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

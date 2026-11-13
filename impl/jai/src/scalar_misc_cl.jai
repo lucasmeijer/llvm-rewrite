@@ -30,6 +30,10 @@ scalar_misc_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bo
         case "jump-table-to-switch-function-size-threshold"; jtts_cl.function_size_threshold = smisc_int(name, value, has_value);
         case "move-auto-init-threshold"; mai_cl.threshold = smisc_int(name, value, has_value);
         case "cvp-max-functions-per-value"; clv_cl.max_functions_per_value = smisc_int(name, value, has_value);
+        case "disable-i2p-p2i-opt"; disable_i2p_p2i_opt = smisc_bool(name, value, has_value);
+        case "instcombine-code-sinking"; opts.instcombine_code_sinking = smisc_bool(name, value, has_value);
+        case "instcombine-simplify-vector-elts-depth"; ic_simplify_demanded_vector_elts_depth_limit = cast(u32) smisc_int(name, value, has_value);
+        case "instcombine-verify-known-bits"; ic_verify_known_bits = smisc_bool(name, value, has_value);
         case "relocation-model";
             if value == {
                 case "static"; reloc_model_cl.model = RELOC_STATIC;

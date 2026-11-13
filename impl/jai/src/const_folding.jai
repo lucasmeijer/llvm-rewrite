@@ -1075,6 +1075,8 @@ cfo_fp_inst_operands :: (opc: Opcode, lhs: Value_Id, rhs: Value_Id, i: Value_Id,
     return cfo_binary_op_operands(opc, lhs, rhs);
 }
 
+disable_i2p_p2i_opt := false;   // -disable-i2p-p2i-opt (Instructions.cpp DisableI2pP2iOpt)
+
 // CastInst::isEliminableCastPair with a DataLayout (cases 7 and 11 need it; the rest is constfold.jai's)
 is_eliminable_cast_pair_dl :: (first: Opcode, second: Opcode, src: Type_Id, mid: Type_Id, dst: Type_Id) -> Opcode {
     first_bc := first == .BITCAST; second_bc := second == .BITCAST;
@@ -1082,6 +1084,7 @@ is_eliminable_cast_pair_dl :: (first: Opcode, second: Opcode, src: Type_Id, mid:
         if !(first_bc && second_bc) return .NONE_OP;
     c := CAST_RESULTS[(cast(s64) first - cast(s64) Opcode.TRUNC) * 14 + (cast(s64) second - cast(s64) Opcode.TRUNC)];
     if c == 7 {
+        if disable_i2p_p2i_opt return .NONE_OP;   // -disable-i2p-p2i-opt
         if src != dst return .NONE_OP;
         if type_bits(scalar_type(mid)) < dl_ptr_spec(cast(u32) ir.types[scalar_type(src)].a).bits return .NONE_OP;
         return .BITCAST;

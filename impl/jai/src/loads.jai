@@ -183,7 +183,11 @@ deref_aligned_rec :: (v: Value_Id, align: u64, size: APInt, q: Simplify_Query, i
                 return pointer_alignment(v) >= align;
         }
     }
-    if call_iid(v) == IID_EXPERIMENTAL_GC_RELOCATE fatal("isDereferenceableAndAlignedPointer through gc.relocate is not supported yet");
+    if call_iid(v) == IID_EXPERIMENTAL_GC_RELOCATE {   // look through relocations: getDerivedPtr
+        d := gc_relocate_ptr(v, 2);
+        if d == NONE fatal("isDereferenceableAndAlignedPointer: gc.relocate with an invalid derived pointer index");
+        return deref_aligned_rec(d, align, size, q, ignore_free, visited, max_depth);
+    }
     if o == .ADDRSPACECAST return deref_aligned_rec(op(v, 0), align, size, q, ignore_free, visited, max_depth);
     return q.ac != null && deref_aligned_via_assumption(v, align, q, ignore_free, size);
 }

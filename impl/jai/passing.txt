@@ -1741,6 +1741,7 @@ tests/function/pipeline/control/switches.ll::roundtrip
 tests/function/pipeline/memory/buffers.ll::isel-ir
 tests/function/pipeline/memory/buffers.ll::opt
 tests/function/pipeline/memory/buffers.ll::roundtrip
+tests/imported/llvm/Analysis/AssumptionCache/basic.ll::analysis
 tests/imported/llvm/Analysis/AssumptionCache/basic.ll::roundtrip
 tests/imported/llvm/Analysis/BasicAA/128-bit-ptr.ll::analysis
 tests/imported/llvm/Analysis/BasicAA/128-bit-ptr.ll::roundtrip
@@ -2011,6 +2012,7 @@ tests/imported/llvm/Analysis/BranchProbabilityInfo/unreachable.ll::roundtrip
 tests/imported/llvm/Analysis/BranchProbabilityInfo/zero_heuristics.ll::analysis
 tests/imported/llvm/Analysis/BranchProbabilityInfo/zero_heuristics.ll::roundtrip
 tests/imported/llvm/Analysis/CallGraph/do-nothing-intrinsic.ll::roundtrip
+tests/imported/llvm/Analysis/CallGraph/printer.ll::analysis
 tests/imported/llvm/Analysis/CallGraph/printer.ll::roundtrip
 tests/imported/llvm/Analysis/CostModel/X86/abs.ll::analysis
 tests/imported/llvm/Analysis/CostModel/X86/abs.ll::roundtrip
@@ -2809,14 +2811,23 @@ tests/imported/llvm/Analysis/MemorySSA/tbaa.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/update-remove-dead-blocks.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/volatile-clobber.ll::analysis
 tests/imported/llvm/Analysis/MemorySSA/volatile-clobber.ll::roundtrip
+tests/imported/llvm/Analysis/MustExecute/const-cond.ll::analysis
 tests/imported/llvm/Analysis/MustExecute/const-cond.ll::roundtrip
+tests/imported/llvm/Analysis/MustExecute/infinite_loops.ll::analysis
 tests/imported/llvm/Analysis/MustExecute/infinite_loops.ll::roundtrip
+tests/imported/llvm/Analysis/MustExecute/irreducible-cfg.ll::analysis
 tests/imported/llvm/Analysis/MustExecute/irreducible-cfg.ll::roundtrip
+tests/imported/llvm/Analysis/MustExecute/loop-header.ll::analysis
 tests/imported/llvm/Analysis/MustExecute/loop-header.ll::roundtrip
+tests/imported/llvm/Analysis/MustExecute/must_be_executed_context.ll::analysis
 tests/imported/llvm/Analysis/MustExecute/must_be_executed_context.ll::roundtrip
+tests/imported/llvm/Analysis/MustExecute/pr57780.ll::analysis
 tests/imported/llvm/Analysis/MustExecute/pr57780.ll::roundtrip
+tests/imported/llvm/Analysis/PhiValues/basic.ll::analysis
 tests/imported/llvm/Analysis/PhiValues/basic.ll::roundtrip
+tests/imported/llvm/Analysis/PhiValues/big_phi.ll::analysis
 tests/imported/llvm/Analysis/PhiValues/big_phi.ll::roundtrip
+tests/imported/llvm/Analysis/PhiValues/long_phi_chain.ll::analysis
 tests/imported/llvm/Analysis/PhiValues/long_phi_chain.ll::roundtrip
 tests/imported/llvm/Analysis/PostDominators/infinite-loop.ll::analysis
 tests/imported/llvm/Analysis/PostDominators/infinite-loop.ll::roundtrip
@@ -3414,6 +3425,7 @@ tests/imported/llvm/Analysis/ValueTracking/assume.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/assume.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/constant-ranges.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/constant-ranges.ll::roundtrip
+tests/imported/llvm/Analysis/ValueTracking/deref-abstract-gc.ll::analysis
 tests/imported/llvm/Analysis/ValueTracking/deref-abstract-gc.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/deref-bitcast-of-gep.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/deref-bitcast-of-gep.ll::roundtrip
@@ -3482,6 +3494,7 @@ tests/imported/llvm/Analysis/ValueTracking/knownzero-addrspacecast.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownzero-addrspacecast.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/knownzero-shift.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownzero-shift.ll::roundtrip
+tests/imported/llvm/Analysis/ValueTracking/memory-dereferenceable.ll::analysis
 tests/imported/llvm/Analysis/ValueTracking/memory-dereferenceable.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/monotonic-phi.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/monotonic-phi.ll::roundtrip
@@ -8733,6 +8746,7 @@ tests/imported/llvm/Transforms/InstCombine/insertelt-trunc.ll::opt
 tests/imported/llvm/Transforms/InstCombine/insertelt-trunc.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/instcombine-dominance-fixup.ll::opt
 tests/imported/llvm/Transforms/InstCombine/instcombine-dominance-fixup.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/instcombine-verify-known-bits.ll::opt
 tests/imported/llvm/Transforms/InstCombine/instcombine-verify-known-bits.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/int_sideeffect.ll::opt
 tests/imported/llvm/Transforms/InstCombine/int_sideeffect.ll::roundtrip
@@ -9110,12 +9124,14 @@ tests/imported/llvm/Transforms/InstCombine/new-delete-itanium-32.ll::opt
 tests/imported/llvm/Transforms/InstCombine/new-delete-itanium-32.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/new-delete-itanium.ll::opt
 tests/imported/llvm/Transforms/InstCombine/new-delete-itanium.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/new-delete-msvc.ll::opt
 tests/imported/llvm/Transforms/InstCombine/new-delete-msvc.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/new-inst-dbgloc-overwrite.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/no-unwind-inline-asm.ll::opt
 tests/imported/llvm/Transforms/InstCombine/no-unwind-inline-asm.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/no_cgscc_assert.ll::opt
 tests/imported/llvm/Transforms/InstCombine/no_cgscc_assert.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/no_sink_instruction.ll::opt
 tests/imported/llvm/Transforms/InstCombine/no_sink_instruction.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/noalias-scope-decl.ll::opt
 tests/imported/llvm/Transforms/InstCombine/noalias-scope-decl.ll::roundtrip
@@ -9227,6 +9243,7 @@ tests/imported/llvm/Transforms/InstCombine/phi-int-users.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-int-users.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/phi-int2ptr-different-addrspace.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-int2ptr-different-addrspace.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/phi-int2ptr-fold.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-int2ptr-fold.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/phi-known-bits-operand-order.ll::opt
 tests/imported/llvm/Transforms/InstCombine/phi-known-bits-operand-order.ll::roundtrip
@@ -9451,6 +9468,7 @@ tests/imported/llvm/Transforms/InstCombine/printf-puts-not-emittable.ll::roundtr
 tests/imported/llvm/Transforms/InstCombine/protected-field-ptr.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptr-int-cast.ll::opt
 tests/imported/llvm/Transforms/InstCombine/ptr-int-cast.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/ptr-int-ptr-icmp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/ptr-int-ptr-icmp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ptr-replace-alloca.ll::opt
 tests/imported/llvm/Transforms/InstCombine/ptr-replace-alloca.ll::roundtrip
@@ -10285,6 +10303,7 @@ tests/imported/llvm/Transforms/InstCombine/unreachable-dbg-info-modified.ll::opt
 tests/imported/llvm/Transforms/InstCombine/unreachable-dbg-info-modified.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/unrecognized_three-way-comparison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/unrecognized_three-way-comparison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/unshuffle-constant-poison-mask.ll::opt
 tests/imported/llvm/Transforms/InstCombine/unshuffle-constant-poison-mask.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/unsigned-add-lack-of-overflow-check-via-add.ll::opt
 tests/imported/llvm/Transforms/InstCombine/unsigned-add-lack-of-overflow-check-via-add.ll::roundtrip

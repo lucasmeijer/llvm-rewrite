@@ -2,7 +2,8 @@
 // (computeLoopSafetyInfo, allLoopPathsLeadToBlock, CanProveNotTakenFirstIteration, collectTransitivePredecessors,
 // isGuaranteedToExecute, doesNotWriteMemoryBefore, insertInstructionTo / removeInstruction) and of
 // llvm/lib/Analysis/InstructionPrecedenceTracking.cpp (ImplicitControlFlowTracking, MemoryWriteTracking).
-// SimpleLoopSafetyInfo, the must-execute printers and MustBeExecutedContextExplorer are not ported.
+// SimpleLoopSafetyInfo and the must-execute printers are in analysis_printers_misc.jai, MustBeExecutedContextExplorer
+// in attributor.jai.
 //
 // The two InstructionPrecedenceTracking subclasses are one struct with a `kind`; isSpecialInstruction switches on it.
 // The cache keeps LLVM's (possibly stale) semantics: an entry is only dropped by insertInstructionTo of a special
@@ -62,6 +63,7 @@ ipt_remove_instruction :: (t: *Instruction_Precedence_Tracking, i: Value_Id) {
 // ICFLoopSafetyInfo
 Loop_Safety_Info :: struct {
     may_throw: bool;
+    simple: bool;   // SimpleLoopSafetyInfo (analysis_printers_misc.jai): blockMayThrow = anyBlockMayThrow = may_throw
     icf: Instruction_Precedence_Tracking;
     mw: Instruction_Precedence_Tracking;
     li: *Loop_Info;
@@ -120,7 +122,7 @@ lsi_compute :: (s: *Loop_Safety_Info, li: *Loop_Info, l: Loop_Id) {
     s.block_colors.allocator = temp;
     if p != NONE && is_scoped_eh_personality(classify_eh_personality(p)) color_eh_funclets(f, *s.block_colors);
 }
-lsi_block_may_throw :: (s: *Loop_Safety_Info, bb: Value_Id) -> bool { return ipt_has_special(*s.icf, bb); }
+lsi_block_may_throw :: (s: *Loop_Safety_Info, bb: Value_Id) -> bool { if s.simple return s.may_throw; return ipt_has_special(*s.icf, bb); }
 lsi_insert_instruction_to :: (s: *Loop_Safety_Info, i: Value_Id, bb: Value_Id) {
     ipt_insert_instruction_to(*s.icf, i, bb);
     ipt_insert_instruction_to(*s.mw, i, bb);

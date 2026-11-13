@@ -535,8 +535,13 @@ ic_simplify_demanded_use_bits :: (i: Value_Id, demanded: APInt, known: *Known_Bi
         ap_set_low_bits(*known.zero, log2_u64(al));
     }
     if !is_ptr_type(vty) && ap_is_subset_of(demanded, ap_or(known.zero, known.one)) return const_integer_value(vty, known.one);
+    if ic_verify_known_bits {   // -instcombine-verify-known-bits
+        ref := known_bits(i, q, depth);
+        if !kb_eq_kb(known.*, ref) fatal("Mismatched known bits for % in %", vname(i), vname(block_fn(inst_block(i))));
+    }
     return NONE;
 }
+ic_verify_known_bits := false;   // -instcombine-verify-known-bits
 
 // SimplifyMultipleUseDemandedBits
 ic_simplify_multiple_use_demanded_bits :: (i: Value_Id, demanded: APInt, known: *Known_Bits, q: Simplify_Query, depth: u32) -> Value_Id {
@@ -671,7 +676,7 @@ ic_simplify_shift_selecting_packed_element :: (i: Value_Id, demanded: APInt, dep
 
 // ---------------------------------------------------------------- SimplifyDemandedVectorElts
 
-IC_SIMPLIFY_DEMANDED_VECTOR_ELTS_DEPTH_LIMIT :: 10;   // -instcombine-simplify-vector-elts-depth
+ic_simplify_demanded_vector_elts_depth_limit: u32 = 10;   // -instcombine-simplify-vector-elts-depth
 
 // canSkipDemandedEltsInInsertChain
 ic_can_skip_demanded_elts_in_insert_chain :: (ie: Value_Id, vwidth: u32, depth_limit: u32) -> bool {
@@ -728,7 +733,7 @@ ic_simplify_demanded_vector_elts :: (v: Value_Id, demanded_in: APInt, poison: *A
         ncv := cf_vector(vt, elts);
         return ifx ncv != v then ncv else NONE;
     }
-    if depth == IC_SIMPLIFY_DEMANDED_VECTOR_ELTS_DEPTH_LIMIT return NONE;
+    if depth == ic_simplify_demanded_vector_elts_depth_limit return NONE;
     if !allow_multiple_users && !has_one_use(v) {
         if depth != 0 return NONE;
         demanded = elt_mask;
@@ -763,8 +768,8 @@ ic_simplify_demanded_vector_elts :: (v: Value_Id, demanded_in: APInt, poison: *A
                 }
             }
         case .INSERTELEMENT;
-            if depth == 0 && ap_is_all_ones(demanded) && vwidth > IC_SIMPLIFY_DEMANDED_VECTOR_ELTS_DEPTH_LIMIT &&
-               ic_can_skip_demanded_elts_in_insert_chain(i, vwidth, IC_SIMPLIFY_DEMANDED_VECTOR_ELTS_DEPTH_LIMIT) return NONE;
+            if depth == 0 && ap_is_all_ones(demanded) && vwidth > ic_simplify_demanded_vector_elts_depth_limit &&
+               ic_can_skip_demanded_elts_in_insert_chain(i, vwidth, ic_simplify_demanded_vector_elts_depth_limit) return NONE;
             idx := op(i, 2);
             if vkind(idx) != .C_INT || is_vector_type(vtype(idx)) {
                 simplify_and_set_op(i, 0, demanded, *poison2, depth, *made_change);

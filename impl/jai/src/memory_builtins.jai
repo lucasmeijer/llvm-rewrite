@@ -15,11 +15,15 @@ AT_ANY :: AT_ALLOC_LIKE;
 
 // MallocFamily -> mangledNameForMallocFamily
 MF_MALLOC :: "malloc"; MF_NEW :: "_Znwm"; MF_NEW_ALIGNED :: "_ZnwmSt11align_val_t"; MF_NEW_ARRAY :: "_Znam";
-MF_NEW_ARRAY_ALIGNED :: "_ZnamSt11align_val_t";
+MF_NEW_ARRAY_ALIGNED :: "_ZnamSt11align_val_t"; MF_MSVC_NEW :: "??2@YAPAXI@Z"; MF_MSVC_ARRAY_NEW :: "??_U@YAPAXI@Z";
 
 Alloc_Fn :: struct { name: string; ty: u8; nparams: s32; fst: s32; snd: s32; align: s32; family: string; }
-// AllocationFnData (the MSVC entries are unavailable in TLI on x86_64-linux)
+// AllocationFnData (the MSVC entries are unavailable in TLI on x86_64-linux; available on windows triples)
 ALLOC_FNS :: Alloc_Fn.[
+    .{"??2@YAPAXI@Z", AT_OPNEW, 1, 0, -1, -1, MF_MSVC_NEW}, .{"??2@YAPAXIABUnothrow_t@std@@@Z", AT_MALLOC, 2, 0, -1, -1, MF_MSVC_NEW},
+    .{"??2@YAPEAX_K@Z", AT_OPNEW, 1, 0, -1, -1, MF_MSVC_NEW}, .{"??2@YAPEAX_KAEBUnothrow_t@std@@@Z", AT_MALLOC, 2, 0, -1, -1, MF_MSVC_NEW},
+    .{"??_U@YAPAXI@Z", AT_OPNEW, 1, 0, -1, -1, MF_MSVC_ARRAY_NEW}, .{"??_U@YAPAXIABUnothrow_t@std@@@Z", AT_MALLOC, 2, 0, -1, -1, MF_MSVC_ARRAY_NEW},
+    .{"??_U@YAPEAX_K@Z", AT_OPNEW, 1, 0, -1, -1, MF_MSVC_ARRAY_NEW}, .{"??_U@YAPEAX_KAEBUnothrow_t@std@@@Z", AT_MALLOC, 2, 0, -1, -1, MF_MSVC_ARRAY_NEW},
     .{"_Znwj", AT_OPNEW, 1, 0, -1, -1, MF_NEW}, .{"_ZnwjRKSt9nothrow_t", AT_MALLOC, 2, 0, -1, -1, MF_NEW},
     .{"_ZnwjSt11align_val_t", AT_OPNEW, 2, 0, -1, 1, MF_NEW_ALIGNED},
     .{"_ZnwjSt11align_val_tRKSt9nothrow_t", AT_MALLOC, 3, 0, -1, 1, MF_NEW_ALIGNED},
@@ -44,8 +48,14 @@ ALLOC_FNS :: Alloc_Fn.[
     .{"strndup", AT_STRDUP, 2, 1, -1, -1, MF_MALLOC}, .{"__strndup", AT_STRDUP, 2, 1, -1, -1, MF_MALLOC},
 ];
 Free_Fn :: struct { name: string; nparams: s32; family: string; }
-// FreeFnData (Itanium names)
+// FreeFnData
 FREE_FNS :: Free_Fn.[
+    .{"??3@YAXPAX@Z", 1, MF_MSVC_NEW}, .{"??3@YAXPEAX@Z", 1, MF_MSVC_NEW},
+    .{"??_V@YAXPAX@Z", 1, MF_MSVC_ARRAY_NEW}, .{"??_V@YAXPEAX@Z", 1, MF_MSVC_ARRAY_NEW},
+    .{"??3@YAXPAXI@Z", 2, MF_MSVC_NEW}, .{"??3@YAXPEAX_K@Z", 2, MF_MSVC_NEW},
+    .{"??3@YAXPAXABUnothrow_t@std@@@Z", 2, MF_MSVC_NEW}, .{"??3@YAXPEAXAEBUnothrow_t@std@@@Z", 2, MF_MSVC_NEW},
+    .{"??_V@YAXPAXI@Z", 2, MF_MSVC_ARRAY_NEW}, .{"??_V@YAXPEAX_K@Z", 2, MF_MSVC_ARRAY_NEW},
+    .{"??_V@YAXPAXABUnothrow_t@std@@@Z", 2, MF_MSVC_ARRAY_NEW}, .{"??_V@YAXPEAXAEBUnothrow_t@std@@@Z", 2, MF_MSVC_ARRAY_NEW},
     .{"_ZdlPv", 1, MF_NEW}, .{"_ZdaPv", 1, MF_NEW_ARRAY}, .{"_ZdlPvj", 2, MF_NEW}, .{"_ZdlPvm", 2, MF_NEW},
     .{"_ZdlPvRKSt9nothrow_t", 2, MF_NEW}, .{"_ZdlPvSt11align_val_t", 2, MF_NEW_ALIGNED},
     .{"_ZdaPvj", 2, MF_NEW_ARRAY}, .{"_ZdaPvm", 2, MF_NEW_ARRAY}, .{"_ZdaPvRKSt9nothrow_t", 2, MF_NEW_ARRAY},
@@ -57,6 +67,12 @@ FREE_FNS :: Free_Fn.[
 
 // TLI->getLibFunc(F) && TLI->has(F) for the functions of the tables above (their TLI prototypes are the checks
 // getAllocationDataForFunction / isLibFreeFunction make, which are at least as strict here) and for `free`.
+// the name TLI's getLibFunc looks up (sanitizeFunctionName: the \01 mangling escape dropped)
+lib_func_name :: (callee: Value_Id) -> string {
+    n := vname(callee);
+    if n.count && n[0] == 1 return slice(n, 1, n.count - 1);
+    return n;
+}
 mb_tli_knows :: (callee: Value_Id, caller: Value_Id) -> bool {
     ok, lf := tli_lookup_fn(callee);
     return ok && tli_func_has(tli_for(caller), lf);
@@ -68,7 +84,7 @@ mb_alloc_data_for_function :: (callee: Value_Id, caller: Value_Id, alloc_ty: u8)
     if !is_ptr_type(func_ret(ft)) return false, .{};
     if !mb_tli_knows(callee, caller) return false, .{};
     for ALLOC_FNS {
-        if it.name != vname(callee) continue;
+        if it.name != lib_func_name(callee) continue;
         if (it.ty & alloc_ty) != it.ty return false, .{};
         if func_nparams(ft) != cast(u32) it.nparams return false, .{};
         if it.fst >= 0 && !is_int32_or_64(func_param(ft, cast(u32) it.fst)) return false, .{};
@@ -149,7 +165,7 @@ get_allocation_family :: (i: Value_Id) -> string {
     if callee != NONE && mb_tli_knows(callee, value_function(i)) {
         ok, d := mb_alloc_data_for_function(callee, value_function(i), AT_ANY);
         if ok return d.family;
-        for FREE_FNS if it.name == vname(callee) return it.family;
+        for FREE_FNS if it.name == lib_func_name(callee) return it.family;
     }
     if is_inst(i) && is_call_base(i) && (call_alloc_kind(i) & (AFK_FREE | AFK_ALLOC | AFK_REALLOC)) != 0 {
         s := call_fn_str_attr(i, "alloc-family");

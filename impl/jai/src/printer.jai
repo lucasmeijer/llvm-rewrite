@@ -1147,6 +1147,7 @@ print_function :: (f: Value_Id) {
 // null = no annotation writer. Set them around a print_function call (memoryssa.jai).
 print_annot_block: (b: Value_Id) = null;
 print_annot_inst: (i: Value_Id) = null;
+print_annot_info: (i: Value_Id) = null;   // printInfoComment (after the instruction's metadata)
 
 print_basic_block :: (b: Value_Id, is_entry: bool) {
     if vname(b).count {
@@ -1438,6 +1439,7 @@ print_instruction :: (i: Value_Id) {
         cf := op(i, nops(i) - 1);
         if vkind(cf) == .FUNCTION && intrinsic_lookup(vname(cf)) == "llvm.experimental.gc.relocate" print_gc_relocate_comment(i);
     }
+    if print_annot_info print_annot_info(i);
 }
 
 // GCRelocateInst::getBasePtr/getDerivedPtr (llvm/lib/IR/IntrinsicInst.cpp); NONE = "invalid"
