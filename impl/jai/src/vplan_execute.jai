@@ -786,9 +786,11 @@ vs_execute_recipes :: (s: *Vp_State, b: Vp_Blk) {
     r := vb(b).first;
     while r != NONE {
         // setDebugLocFrom
-        if vr(r).dl != NONE && get_metadata(s.f, 0) != NONE && module_debug_info_for_profiling()
-            vp_unported("discriminators for debug-info-for-profiling (cloneByMultiplyingDuplicationFactor)");
-        s.b.dbg = vr(r).dl;
+        dl := vr(r).dl;
+        if dl != NONE && fn_should_emit_debug_info_for_profiling(s.f) {
+            nd := diloc_clone_by_multiplying_duplication_factor(dl, vpl.ufs[0] * cast(u32) s.vf.n);
+            if nd != NONE s.b.dbg = nd;   // otherwise the builder keeps its current location
+        } else s.b.dbg = dl;
         vp_execute_recipe(s, r);
         r = vr(r).next;
     }

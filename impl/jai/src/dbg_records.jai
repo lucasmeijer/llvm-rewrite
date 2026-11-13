@@ -559,3 +559,78 @@ convert_debug_declare_to_debug_value_phi :: (f: Value_Id, r: u32, phi: Value_Id)
     new_loc := debug_value_loc(r);
     if pt != NONE dbgr_insert_value_before(phi, var, expr, new_loc, pt);
 }
+
+// ---------------------------------------------------------------- discriminators (DILocation, Support/Discriminator.h)
+
+disc_prefix_encoding_from_unsigned :: (u_in: u32) -> u32 { u := u_in & 0xfff; return ifx u > 0x1f then (((u & 0xfe0) << 1) | (u & 0x1f) | 0x20) else u; }
+disc_unsigned_from_prefix_encoding :: (u_in: u32) -> u32 {
+    if u_in & 1 return 0;
+    u := u_in >> 1;
+    return ifx (u & 0x20) != 0 then (((u >> 1) & 0xfe0) | (u & 0x1f)) else (u & 0x1f);
+}
+disc_next_component :: (d: u32) -> u32 {
+    if (d & 1) == 0 return d >> (ifx (d & 0x40) != 0 then cast(u32) 14 else 7);
+    return d >> 1;
+}
+disc_encode_component :: (c: u32) -> u32 { return ifx c == 0 then cast(u32) 1 else (disc_prefix_encoding_from_unsigned(c) << 1); }
+disc_encoding_bits :: (c: u32) -> u32 { return ifx c == 0 then cast(u32) 1 else (ifx c > 0x1f then cast(u32) 14 else 7); }
+disc_is_pseudo_probe :: (d: u32) -> bool { return (d & 0x7) == 0x7 && (d & 0xFFFFFFF8) != 0; }
+disc_decode :: (d: u32) -> (u32, u32, u32) {
+    bd := disc_unsigned_from_prefix_encoding(d);
+    df := disc_unsigned_from_prefix_encoding(disc_next_component(d));
+    ci := disc_unsigned_from_prefix_encoding(disc_next_component(disc_next_component(d)));
+    return bd, df, ci;
+}
+// DILocation::encodeDiscriminator: (ok, encoded)
+disc_encode :: (bd: u32, df: u32, ci: u32) -> (bool, u32) {
+    comps := u32.[bd, df, ci];
+    remaining: u64 = cast(u64) bd + df + ci;
+    i := 0;
+    ret: u32 = 0;
+    next: u32 = 0;
+    while remaining > 0 {
+        c := comps[i]; i += 1;
+        remaining -= c;
+        ec := disc_encode_component(c);
+        if next < 32 ret |= ec << next;
+        next += disc_encoding_bits(c);
+    }
+    tbd, tdf, tci := disc_decode(ret);
+    if tbd == bd && tdf == df && tci == ci return true, ret;
+    return false, 0;
+}
+// DILocation::getDiscriminator
+diloc_discriminator :: (l: Md_Id) -> u32 {
+    s := diloc_scope(l);
+    if s != NONE && is_di(s, .LEXICAL_BLOCK_FILE) return cast(u32) di_int(s, 0);
+    return 0;
+}
+// DILocation::cloneWithDiscriminator
+diloc_clone_with_discriminator :: (l: Md_Id, d: u32) -> Md_Id {
+    scope := diloc_scope(l);
+    while scope != NONE && is_di(scope, .LEXICAL_BLOCK_FILE) && di_int(scope, 0) != 0 scope = di_op(scope, 1);
+    file := discope_file(diloc_scope(l));
+    ns := di_get(.LEXICAL_BLOCK_FILE, false, .[file, scope], .[cast(u64) d]);
+    return di_location_get(diloc_line(l), diloc_col(l), ns, diloc_inlined_at(l), di_int(l, 2), di_int(l, 3), di_int(l, 4));
+}
+// DILocation::cloneByMultiplyingDuplicationFactor (without FS discriminators): NONE when it cannot be encoded
+diloc_clone_by_multiplying_duplication_factor :: (l: Md_Id, df_in: u32) -> Md_Id {
+    d := diloc_discriminator(l);
+    if disc_is_pseudo_probe(d) return l;
+    cur := disc_unsigned_from_prefix_encoding(disc_next_component(d));   // getDuplicationFactor (0 means 1)
+    if cur == 0 cur = 1;
+    df := df_in * cur;
+    if df <= 1 return l;
+    bd := disc_unsigned_from_prefix_encoding(d);
+    ci := disc_unsigned_from_prefix_encoding(disc_next_component(disc_next_component(d)));
+    ok, enc := disc_encode(bd, df, ci);
+    if ok return diloc_clone_with_discriminator(l, enc);
+    return NONE;
+}
+// Function::shouldEmitDebugInfoForProfiling
+fn_should_emit_debug_info_for_profiling :: (f: Value_Id) -> bool {
+    sp := get_metadata(f, 0);
+    if sp == NONE || !is_di(sp, .SUBPROGRAM) return false;
+    cu := di_op(sp, 5);
+    return cu != NONE && is_di(cu, .COMPILE_UNIT) && di_int(cu, 9) != 0;
+}

@@ -110,6 +110,7 @@ scev_opts: struct {
     verify_scev: bool;                              // verify-scev
     verify_scev_strict: bool;                       // verify-scev-strict (only makes verify() abort on more deltas;
                                                     // the recomputation it tunes is not ported, see scev_verify)
+    verify_ir: bool;                                // scev-verify-ir (assertions only)
     mulops_inline_threshold: u64 = 32;             // scev-mulops-inline-threshold
     addops_inline_threshold: u64 = 500;            // scev-addops-inline-threshold
     max_scev_compare_depth: u64 = 32;              // scalar-evolution-max-scev-compare-depth

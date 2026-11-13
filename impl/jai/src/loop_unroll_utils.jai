@@ -524,8 +524,15 @@ unroll_loop :: (li: *Loop_Info, l_in: Loop_Id, ulo_in: Unroll_Loop_Options, dt_i
     add_loop_to_simplify :: (v: *[..] Loop_Id, x: Loop_Id) { for v.* if it == x return; array_add(v, x); }
     for li_subloops(li, l) add_loop_to_simplify(*loops_to_simplify, it);
 
-    if get_metadata(f, 0) != NONE && module_debug_info_for_profiling()
-        fatal("loop-unroll: discriminators for debug-info-for-profiling (cloneByMultiplyingDuplicationFactor) are not implemented yet");
+    if fn_should_emit_debug_info_for_profiling(f) {
+        for bb: li_blocks(li, l) for i: block_insts(bb) {
+            if is_debug_or_pseudo_inst(i) continue;
+            dil := get_metadata(i, 0);
+            if dil == NONE continue;
+            nd := diloc_clone_by_multiplying_duplication_factor(dil, cast(u32) ulo.count);
+            if nd != NONE set_metadata(i, 0, nd);
+        }
+    }
 
     no_alias_scopes: [..] Md_Id; no_alias_scopes.allocator = temp;
     identify_no_alias_scopes_to_clone(li_blocks(li, l), *no_alias_scopes);

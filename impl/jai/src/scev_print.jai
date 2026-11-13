@@ -299,7 +299,7 @@ scev_verify :: () {
     }
 }
 
-SCEV_CL_OPT_COUNT :: 18;
+SCEV_CL_OPT_COUNT :: 19;
 add_scev_cl_opts :: (list: [] Cl_Opt, start: s64) {
     o := *scev_opts;
     entries := Cl_Opt.[
@@ -340,4 +340,6 @@ add_scev_cl_opts :: (list: [] Cl_Opt, start: s64) {
     list[start + 15].b = *o.use_expensive_range_sharpening;
     list[start + 16].b = *o.use_context_for_no_wrap_flag_inference;
     list[start + 17] = .{"scev-debug-flags", .BOOL, *o.debug_flags, null, null};   // not an LLVM option: traces flag changes
+    // scev-verify-ir only guards assertions (verifyFunction before sensitive queries): no effect in a release build
+    list[start + 18] = .{"scev-verify-ir", .BOOL, *o.verify_ir, null, null};
 }
