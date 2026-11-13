@@ -339,7 +339,11 @@ lv_cm_collect_loop_uniforms :: (cm: *Lv_Cm, vf: Ec) {
 // collectLoopScalars
 lv_cm_collect_loop_scalars :: (cm: *Lv_Cm, vf: Ec) {
     st := lv_cm_vf_state(cm, vf, true);
-    if vf.scalable vp_unported("scalable VFs");
+    // scalable VFs: no REPLICATE recipes can be generated, so only the uniforms are scalar
+    if vf.scalable {
+        for _, k: st.uniforms iset_insert(*st.scalars, k);
+        return;
+    }
     li := cm.li; l := cm.l;
     wl: [..] Value_Id; wl.allocator = temp;
     inwl := iset_new();

@@ -597,11 +597,17 @@ vp_materialize_vector_trip_count :: (vector_ph: Vp_Blk, tail_by_masking: bool, r
     vp_rauw(vtc, vr(res).def);
 }
 
-// VPBuilder::createElementCount (fixed VFs)
+// VPBuilder::createElementCount
 vpb_element_count :: (b: *Vp_Builder, ty: Type_Id, ec: Ec) -> Vp_Val {
-    if ec.scalable vp_unported("scalable element counts (createVScale)");
-    return vp_const_int(ty, ec.n);
+    rec := vp_const_int(ty, ec.n);
+    if ec.scalable {
+        vs := vr(vpb_vscale(b, ty, NONE)).def;
+        rec = ifx ec.n == 1 then vs else vr(vpb_overflowing(b, .MUL, .[vs, rec], true, false)).def;
+    }
+    return rec;
 }
+// VPBuilder::createVScale: a scalar llvm.vscale call
+vpb_vscale :: (b: *Vp_Builder, ty: Type_Id, dl: Md_Id) -> Vp_Rec { return vpb_scalar_intrinsic(b, iidn("llvm.vscale"), .[], ty, dl); }
 
 // VPlanTransforms::materializeFactors
 vp_materialize_factors :: (vector_ph: Vp_Blk, vfec: Ec) {

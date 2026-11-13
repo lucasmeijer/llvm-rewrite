@@ -178,8 +178,19 @@ sc_rw_ptr_to_addr_visit :: (rw: *Sc_Rewriter, s: Scev_Id) -> (bool, Scev_Id) {
 }
 // SCEVPtrToAddrRewriter + addDiffRuntimeChecks (LoopUtils.cpp)
 lv_add_diff_runtime_checks :: (loc: Value_Id, checks: [] Rt_Diff_Check, x: *Scev_Expander, vf: Ec, ic: u64) -> Value_Id {
-    if vf.scalable vp_unported("diff runtime checks for scalable VFs");
     b: Irb;
+    runtime_vf: Value_Id = NONE;   // GetVF: computed once, with the type of the first check (like LLVM)
+    get_vf :: (b: *Irb, ty: Type_Id, vf: Ec, loc: Value_Id) -> Value_Id {
+        if !vf.scalable return const_int(ty, vf.n);
+        // CreateVScale through an InstSimplifyFolder: folds for vscale_range(N, N)
+        vs: Value_Id = NONE;
+        a := fn_get_fn_attr(block_fn(inst_block(loc)), .VScaleRange);
+        if a { mn := a.ival >> 32; mx := a.ival & 0xFFFF_FFFF; if mx && mn == mx vs = const_int(ty, mx); }
+        if vs == NONE vs = irb_intrinsic(b, "llvm.vscale", .[ty], .[]);
+        if vf.n == 1 return vs;
+        if is_const(vs) return isf_binop(b, .MUL, vs, const_int(ty, vf.n));
+        return irb_binop(b, .MUL, vs, const_int(ty, vf.n), "", F_NUW);
+    }
     irb_set_before(*b, loc);
     mem_check: Value_Id = NONE;
     Seen :: struct { diff: Value_Id; thr: Value_Id; cmp: Value_Id; }
@@ -195,7 +206,8 @@ lv_add_diff_runtime_checks :: (loc: Value_Id, checks: [] Rt_Diff_Check, x: *Scev
         thr: Value_Id = NONE;
         for thr_cache if it.ty == ty && it.n == n { thr = it.v; break; }
         if thr == NONE {
-            m := isf_binop(*b, .MUL, const_int(ty, vf.n), const_int(ty, n));
+            if runtime_vf == NONE runtime_vf = get_vf(*b, ty, vf, loc);
+            m := isf_binop(*b, .MUL, runtime_vf, const_int(ty, n));
             thr = isf_binop(*b, .SUB, m, one);
             array_add(*thr_cache, .{ty, n, thr});
         }

@@ -41,22 +41,54 @@ vs_set_lane :: (s: *Vp_State, d: Vp_Val, v: Value_Id, lane: u64) {
     p.*[lane] = v;
 }
 
+// VPLane: a lane counted from the start, or (LANE_SCALABLE_LAST | k) lane k of the last vscale chunk (scalable VFs)
+LANE_SCALABLE_LAST :: (cast(u64) 1) << 62;
+// VPLane::getLaneFromEnd / getLastLaneForVF
+vs_lane_from_end :: (vf: Ec, offset: u64) -> u64 {
+    if vf.scalable return LANE_SCALABLE_LAST | (vf.n - offset);
+    return vf.n - offset;
+}
+vs_last_lane :: (s: *Vp_State) -> u64 { return vs_lane_from_end(s.vf, 1); }
+// VPLane::mapToCacheIndex
+vs_lane_cache_index :: (s: *Vp_State, lane: u64) -> u64 {
+    if lane & LANE_SCALABLE_LAST return s.vf.n + (lane & ~LANE_SCALABLE_LAST);
+    return lane;
+}
+// getRuntimeVF (IRBuilder::CreateElementCount)
+vs_runtime_vf :: (s: *Vp_State, ty: Type_Id, vf: Ec) -> Value_Id {
+    if !vf.scalable return const_int(ty, vf.n);
+    vs := irb_intrinsic(*s.b, "llvm.vscale", .[ty], .[]);
+    if vf.n == 1 return vs;
+    return irb_binop(*s.b, .MUL, vs, const_int(ty, vf.n), "", F_NUW);
+}
+// VPLane::getAsRuntimeExpr
+vs_lane_runtime_expr :: (s: *Vp_State, lane: u64) -> Value_Id {
+    if lane & LANE_SCALABLE_LAST {
+        l := lane & ~LANE_SCALABLE_LAST;
+        return vs_binop(s, .SUB, vs_runtime_vf(s, ir.t_i32, s.vf), const_int(ir.t_i32, s.vf.n - l));
+    }
+    return const_int(ir.t_i64, lane);
+}
+
 // VPTransformState::get(Def, Lane)
-vs_get_lane :: (s: *Vp_State, d: Vp_Val, lane: u64) -> Value_Id {
+vs_get_lane :: (s: *Vp_State, d: Vp_Val, lane_in: u64) -> Value_Id {
+    lane := vs_lane_cache_index(s, lane_in);
+    first_kind := (lane_in & LANE_SCALABLE_LAST) == 0;
     k := vv(d).kind;
     if k == .IR || k == .SYMBOLIC || k == .REGION {
         assert(vv(d).uv != NONE, "symbolic VPValue used before it is materialized");
         return vv(d).uv;
     }
     if vs_has_scalar(s, d, lane) return table_find_pointer(*s.scal, d).*[lane];
-    if lane != 0 && vp_is_single_scalar(d) && vs_has_scalar(s, d, 0) return table_find_pointer(*s.scal, d).*[0];
-    if vp_val_is_vpi(d, VPI_BUILD_VECTOR) return vs_get(s, vp_op(vp_def(d), cast(s64) lane), true);
+    if lane_in != 0 && vp_is_single_scalar(d) && vs_has_scalar(s, d, 0) return table_find_pointer(*s.scal, d).*[0];
+    if first_kind && vp_val_is_vpi(d, VPI_BUILD_VECTOR) return vs_get(s, vp_op(vp_def(d), cast(s64) lane), true);
     found, vecp := table_find(*s.vec, d);
     assert(found, "VPValue has no generated value");
     if !is_vector_type(vtype(vecp)) {
-        assert(lane == 0, "cannot get lane > 0 for scalar");
+        assert(lane_in == 0, "cannot get lane > 0 for scalar");
         return vecp;
     }
+    if !first_kind return vs_extract_element(s, vecp, vs_lane_runtime_expr(s, lane_in));
     return irb_extract_element(*s.b, vecp, lane);
 }
 
@@ -66,7 +98,7 @@ vs_get :: (s: *Vp_State, d: Vp_Val, needs_scalar := false) -> Value_Id {
     found, v := table_find(*s.vec, d);
     if found return v;
     scalar := vs_get_lane(s, d, 0);
-    last := vs_get_lane(s, d, s.vf.n - 1);
+    last := vs_get_lane(s, d, vs_last_lane(s));
     saved := s.b;
     if is_inst(last) {
         // getInsertionPointAfterDef (none: keep the insert point)
@@ -75,7 +107,7 @@ vs_get :: (s: *Vp_State, d: Vp_Val, needs_scalar := false) -> Value_Id {
         if pt != NONE irb_set_at(*s.b, bb, pt, head);
     }
     vecv := scalar;
-    if !ec_is_scalar(s.vf) vecv = irb_vector_splat(*s.b, s.vf.n, scalar, "broadcast");
+    if !ec_is_scalar(s.vf) vecv = irb_vector_splat(*s.b, s.vf.n, scalar, "broadcast", s.vf.scalable);
     s.b = saved;
     vs_set(s, d, vecv);
     return vecv;
@@ -123,8 +155,14 @@ vs_extract_element :: (s: *Vp_State, v: Value_Id, idx: Value_Id, name := "") -> 
 }
 // IRBuilder::CreateStepVector (fixed VFs: a constant <0, 1, ..., VF-1>)
 vs_step_vector :: (s: *Vp_State, vty: Type_Id) -> Value_Id {
-    if type_kind(vty) == .SVECTOR vp_unported("scalable step vectors");
     ety := type_elem(vty);
+    if type_kind(vty) == .SVECTOR {
+        svt := vty;
+        if type_bits(ety) < 8 svt = type_vector(type_count(vty), ir.t_i8, true);
+        res := irb_intrinsic(*s.b, "llvm.stepvector", .[svt], .[]);
+        if svt != vty res = irb_cast(*s.b, .TRUNC, res, vty);
+        return res;
+    }
     n := type_count(vty);
     elts: [..] Value_Id; elts.allocator = temp;
     for i: 0..n-1 array_add(*elts, const_int(ety, i));
@@ -240,7 +278,7 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             vp_apply_metadata(r, br);
             return br;
         case VPI_BROADCAST;
-            return irb_vector_splat(*s.b, s.vf.n, vs_get(s, vp_op(r, 0), true), "broadcast");
+            return irb_vector_splat(*s.b, s.vf.n, vs_get(s, vp_op(r, 0), true), "broadcast", s.vf.scalable);
         case VPI_BUILD_VECTOR;
             sty := vp_scalar_type(vp_op(r, 0));
             res := const_poison(type_vector(cast(u64) vp_nops(r), sty, false));
@@ -250,7 +288,7 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
         case VPI_EXTRACT_PENULTIMATE_ELEMENT;
             off: u64 = ifx o == VPI_EXTRACT_PENULTIMATE_ELEMENT then cast(u64) 2 else 1;
             res: Value_Id;
-            if ec_is_vector(s.vf) res = vs_get_lane(s, vp_op(r, 0), s.vf.n - off);
+            if ec_is_vector(s.vf) res = vs_get_lane(s, vp_op(r, 0), vs_lane_from_end(s.vf, off));
             else res = vs_get(s, vp_op(r, 0));
             if is_inst(res) && inst_op(res) == .EXTRACTELEMENT && name.count set_name(res, name);
             return res;
@@ -346,7 +384,11 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             v1 := vs_get(s, vp_op(r, 0));
             if !is_vector_type(vtype(v1)) return v1;
             v2 := vs_get(s, vp_op(r, 1));
-            if type_kind(vtype(v1)) == .SVECTOR vp_unported("splicing scalable vectors");
+            if type_kind(vtype(v1)) == .SVECTOR {   // CreateVectorSpliceRight with a scalable type: the intrinsic
+                c := irb_intrinsic(*s.b, "llvm.vector.splice.right", .[vtype(v1)], .[v1, v2, const_int(ir.t_i32, 1)]);
+                if name.count set_name(c, name);
+                return c;
+            }
             n := type_count(vtype(v1));
             mask: [..] u32; mask.allocator = temp;
             for k: 0..n-1 array_add(*mask, cast(u32) (n - 1 + k));
@@ -354,7 +396,11 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
         case VPI_REVERSE;
             v := vs_get(s, vp_op(r, 0));
             vt := vtype(v);
-            if type_kind(vt) == .SVECTOR vp_unported("reversing scalable vectors");
+            if type_kind(vt) == .SVECTOR {   // CreateVectorReverse with a scalable type
+                c := irb_intrinsic(*s.b, "llvm.vector.reverse", .[vt], .[v]);
+                set_name(c, "reverse");
+                return c;
+            }
             n := type_count(vt);
             mask: [..] u32; mask.allocator = temp;
             for k: 0..n-1 array_add(*mask, cast(u32) (n - 1 - k));
@@ -364,7 +410,7 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             saved := s.fmf; defer s.fmf = saved;
             s.fmf = vp_fmf_or_none(r);
             scale := ap_zext_value(vp_const_int_value(vp_op(r, 2)));
-            iden := irb_vector_splat(*s.b, s.vf.n / scale, vs_get(s, vp_op(r, 1), true), "");
+            iden := irb_vector_splat(*s.b, s.vf.n / scale, vs_get(s, vp_op(r, 1), true), "", s.vf.scalable);
             return vs_insert_element(s, iden, vs_get(s, vp_op(r, 0), true), const_int(ir.t_i32, 0));
         case VPI_COMPUTE_REDUCTION_RESULT;
             f := vr(r).flags;
@@ -472,7 +518,7 @@ vpi_with_type_execute :: (s: *Vp_State, r: Vp_Rec) {
         args: [..] Value_Id; args.allocator = temp;
         for k: 0..vp_nops(r)-2 array_add(*args, vs_get(s, vp_op(r, k), true));
         id := vp_intrinsic_id(r);
-        if !(id == IID_UMAX || id == IID_SMAX || id == IID_UMIN || id == IID_SMIN) vp_unported(tprint("executing scalar intrinsic %", intrinsic_name(id)));
+        if !(id == IID_UMAX || id == IID_SMAX || id == IID_UMIN || id == IID_SMIN || id == iidn("llvm.vscale")) vp_unported(tprint("executing scalar intrinsic %", intrinsic_name(id)));
         c := irb_intrinsic(*s.b, intrinsic_name(id), .[rty], args);
         if vr(r).name.count set_name(c, vr(r).name);
         vs_set(s, vr(r).def, c, true);
@@ -572,7 +618,7 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
             i := vr(r).ir_inst;
             if is_phi(i) {
                 for o, idx: vr(r).ops {
-                    lane := ifx vp_is_single_scalar(o) then cast(u64) 0 else s.vf.n - 1;
+                    lane := ifx vp_is_single_scalar(o) then cast(u64) 0 else vs_last_lane(s);
                     pred := vb(vr(r).parent).preds[idx];
                     pbb := vp_exiting_basic_block(pred);
                     _, pred_bb := table_find(*s.vpbb2irbb, pbb);
@@ -668,7 +714,7 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
             if ec_is_vector(s.vf) {
                 saved := s.b;
                 irb_set_before(*s.b, block_terminator(vector_ph));
-                last := const_int(ir.t_i32, s.vf.n - 1);
+                last := vs_binop(s, .SUB, vs_runtime_vf(s, ir.t_i32, s.vf), const_int(ir.t_i32, 1));
                 init = vs_insert_element(s, const_poison(vty), init, last, "vector.recur.init");
                 s.b = saved;
             }
@@ -939,7 +985,7 @@ vp_reduction_execute :: (s: *Vp_State, r: Vp_Rec) {
         vt := vtype(vec);
         elt := ifx is_vector_type(vt) then type_elem(vt) else vt;
         start := lv_recurrence_identity(rk, elt, s.fmf);
-        if ec_is_vector(s.vf) start = irb_vector_splat(*s.b, type_count(vt), start, "");
+        if ec_is_vector(s.vf) start = irb_vector_splat(*s.b, type_count(vt), start, "", s.vf.scalable);
         vec = vs_select(s, nc, vec, start, s.fmf);
     }
     assert(vr(r).rdx_scale <= 1, "partial reductions are not formed on X86");

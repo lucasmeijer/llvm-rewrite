@@ -165,14 +165,36 @@ vs_bit_or_pointer_cast :: (s: *Vp_State, v: Value_Id, dst: Type_Id) -> Value_Id 
         return irb_cast(*s.b, .BITCAST, v, dst);
     }
     if is_bit_or_noop_pointer_castable(se, de) return one(s, v, dst);
-    it := type_vector(type_count(dst), type_int(dl_type_size_bits(se)), false);
+    it := type_vector(type_count(dst), type_int(dl_type_size_bits(se)), type_kind(dst) == .SVECTOR);
     return one(s, one(s, v, it), dst);
 }
 vs_vector_reverse :: (s: *Vp_State, v: Value_Id) -> Value_Id {
+    if type_kind(vtype(v)) == .SVECTOR {   // CreateVectorReverse: the intrinsic for scalable vectors
+        c := irb_intrinsic(*s.b, "llvm.vector.reverse", .[vtype(v)], .[v]);
+        set_name(c, "reverse");
+        return c;
+    }
     n := type_count(vtype(v));
     mask := NewArray(cast(s64) n, u32,, allocator = temp);
     for k: 0..n - 1 mask[k] = cast(u32) (n - 1 - k);
     return irb_shuffle(*s.b, v, NONE, mask, "reverse");
+}
+// interleaveVectors
+vs_interleave_vectors :: (s: *Vp_State, vals: [] Value_Id, name: string) -> Value_Id {
+    factor := cast(u32) vals.count;
+    vt := vtype(vals[0]);
+    if type_kind(vt) == .SVECTOR {   // CreateVectorInterleave
+        assert(factor <= 8, "Unsupported interleave factor for scalable vectors");
+        dst := type_vector(type_count(vt) * factor, type_elem(vt), true);
+        c := irb_intrinsic(*s.b, tprint("llvm.vector.interleave%", factor), .[dst], vals);
+        if name.count set_name(c, name);
+        return c;
+    }
+    wide := vs_concatenate_vectors(s, vals);
+    n := cast(u32) type_count(vt);
+    imask := NewArray(n * factor, u32,, allocator = temp);
+    for i: 0..n - 1 for jj: 0..factor - 1 imask[i * factor + jj] = jj * n + i;
+    return irb_shuffle(*s.b, wide, NONE, imask, name);
 }
 // concatenateVectors
 vs_concatenate_vectors :: (s: *Vp_State, vecs: [] Value_Id) -> Value_Id {
@@ -207,8 +229,9 @@ vp_interleave_execute :: (s: *Vp_State, r: Vp_Rec) {
     sty := load_store_type(ip);
     factor := g.factor;
     vf := cast(u32) s.vf.n;
-    if s.vf.scalable vp_unported("scalable interleave groups");
-    vecty := type_vector(cast(u64) (vf * factor), sty, false);
+    scal := s.vf.scalable;
+    assert(!vr(r).needs_mask_for_gaps || !scal, "Masking gaps for scalable vectors is not yet supported.");
+    vecty := type_vector(cast(u64) (vf * factor), sty, scal);
     res_addr := vs_get_lane(s, vp_op(r, 0), 0);
     block_in_mask := vp_interleave_mask(r);
     // createBitMaskForGaps
@@ -220,6 +243,13 @@ vp_interleave_execute :: (s: *Vp_State, r: Vp_Rec) {
         return const_vector_of(elts);
     }
     create_group_mask :: (s: *Vp_State, block_in_mask: Vp_Val, factor: u32, vf: u32, mask_for_gaps: Value_Id) -> Value_Id {
+        if s.vf.scalable {
+            assert(mask_for_gaps == NONE, "Interleaved groups with gaps are not supported.");
+            bm := vs_get(s, block_in_mask);
+            ops := NewArray(factor, Value_Id,, allocator = temp);
+            for * ops it.* = bm;
+            return vs_interleave_vectors(s, ops, "interleaved.mask");
+        }
         if block_in_mask == NONE return mask_for_gaps;
         bm := vs_get(s, block_in_mask);
         rep := NewArray(vf * factor, u32,, allocator = temp);
@@ -243,21 +273,31 @@ vp_interleave_execute :: (s: *Vp_State, r: Vp_Rec) {
         } else ld = irb_load(*s.b, vecty, res_addr, g.align, false, "wide.vec");
         vp_apply_metadata(r, ld);
         vp_ig_add_metadata(g, ld);
+        if scal {
+            assert(factor <= 8, "Unsupported deinterleave factor for scalable vectors");
+            // CreateIntrinsicWithoutFolding(deinterleaveN, ...): overloaded on the wide vector
+            f := get_or_insert_intrinsic_declaration(iidn(tprint("llvm.vector.deinterleave%", factor)), .[vecty]);
+            ld = irb_call(*s.b, f, .[ld], "strided.vec");
+        }
         j := 0;
         for k: 0..factor - 1 {
             m := ig_get_member(g, k);
             if m == NONE continue;
-            mask := NewArray(vf, u32,, allocator = temp);
-            for e: 0..vf - 1 mask[e] = k + e * factor;
-            sv := irb_shuffle(*s.b, ld, NONE, mask, "strided.vec");
-            if vtype(m) != sty sv = vs_bit_or_pointer_cast(s, sv, type_vector(cast(u64) vf, vtype(m), false));
+            sv: Value_Id;
+            if scal sv = irb_extract_value(*s.b, ld, .[k]);
+            else {
+                mask := NewArray(vf, u32,, allocator = temp);
+                for e: 0..vf - 1 mask[e] = k + e * factor;
+                sv = irb_shuffle(*s.b, ld, NONE, mask, "strided.vec");
+            }
+            if vtype(m) != sty sv = vs_bit_or_pointer_cast(s, sv, type_vector(cast(u64) vf, vtype(m), scal));
             if g.reverse sv = vs_vector_reverse(s, sv);
             vs_set(s, vr(r).defs[j], sv);
             j += 1;
         }
         return;
     }
-    sub_vt := type_vector(cast(u64) vf, sty, false);
+    sub_vt := type_vector(cast(u64) vf, sty, scal);
     store_mask_for_gaps := bit_mask_for_gaps(g, vf);
     assert((store_mask_for_gaps != NONE) == vr(r).needs_mask_for_gaps, "Mismatch between NeedsMaskForGaps and MaskForGaps");
     stored := vp_interleave_stored_values(r);
@@ -272,10 +312,7 @@ vp_interleave_execute :: (s: *Vp_State, r: Vp_Rec) {
         if vtype(sv) != sub_vt sv = vs_bit_or_pointer_cast(s, sv, sub_vt);
         array_add(*vecs, sv);
     }
-    wide := vs_concatenate_vectors(s, vecs);
-    imask := NewArray(vf * factor, u32,, allocator = temp);
-    for i: 0..vf - 1 for jj: 0..factor - 1 imask[i * factor + jj] = jj * vf + i;
-    ivec := irb_shuffle(*s.b, wide, NONE, imask, "interleaved.vec");
+    ivec := vs_interleave_vectors(s, vecs, "interleaved.vec");
     st: Value_Id;
     if block_in_mask != NONE || store_mask_for_gaps != NONE {
         gm := create_group_mask(s, block_in_mask, factor, vf, store_mask_for_gaps);
@@ -419,7 +456,6 @@ vp_narrow_interleave_groups :: (t: *Tti) -> *Vp_Plan {
     middle := vp_middle_block();
     req_epi := vb(middle).succs.count == 1 && vp_single_succ(middle) == vp_scalar_preheader();
     if vb(middle).succs.count != 2 && !req_epi return null;
-    if vf_to_opt.scalable vp_unported("narrowInterleaveGroups for scalable VFs");
     new_plan: *Vp_Plan = null;
     if vpl.vfs.count != 1 {
         plan := vpl;
@@ -442,7 +478,12 @@ vp_narrow_interleave_groups :: (t: *Tti) -> *Vp_Plan {
     can_ty := vv(vb(region).can_iv).ty;
     vector_ph := vp_vector_preheader();
     step := vpl.uf;
-    vp_rauw(vpl.vf, vp_const_int(can_ty, 1));
+    if vf_to_opt.scalable {
+        phb := vpb_at(vector_ph, vb(vector_ph).first);
+        vs := vpb_element_count(*phb, can_ty, ec_scalable(1));
+        step = vr(vpb_overflowing(*phb, .MUL, .[vs, vpl.uf], true, false)).def;
+        vp_rauw(vpl.vf, vs);
+    } else vp_rauw(vpl.vf, vp_const_int(can_ty, 1));
     vp_materialize_vector_trip_count(vector_ph, false, req_epi, step, false, 0);
     vp_set_operand(inc, 1, step);
     vp_rauw(vpl.vfxuf, step);
@@ -464,9 +505,8 @@ vp_is_consecutive_interleave_group :: (r: Vp_Rec, vfs: [] Ec, t: *Tti) -> (bool,
     g := vp_ig(r);
     if g.factor != cast(u32) g.keys.count return false, .{};
     for vf: vfs {
-        if vf.scalable continue;
         size := cast(u64) type_bits(scalar_type(elt_ty)) * vf.n;
-        if cast(u64) g.factor == vf.n && size == tti_register_bit_width(t, RGK_FIXED_WIDTH_VECTOR) return true, vf;
+        if cast(u64) g.factor == vf.n && size == tti_register_bit_width(t, ifx vf.scalable then RGK_SCALABLE_VECTOR else RGK_FIXED_WIDTH_VECTOR) return true, vf;
     }
     return false, .{};
 }

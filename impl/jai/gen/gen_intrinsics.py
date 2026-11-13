@@ -58,6 +58,10 @@ declare <4 x i32> @llvm.masked.sdiv.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
 declare <4 x i32> @llvm.masked.urem.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
 declare <4 x i32> @llvm.masked.srem.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
 declare <4 x i1> @llvm.loop.dependence.war.mask.v4i1.i64(i64, i64, i64)
+declare <vscale x 4 x i32> @llvm.vector.splice.right.nxv4i32(<vscale x 4 x i32>, <vscale x 4 x i32>, i32)
+declare <vscale x 4 x i32> @llvm.vector.splice.left.nxv4i32(<vscale x 4 x i32>, <vscale x 4 x i32>, i32)
+declare <vscale x 4 x i32> @llvm.vector.interleave2.nxv4i32(<vscale x 2 x i32>, <vscale x 2 x i32>)
+declare { <vscale x 2 x i32>, <vscale x 2 x i32> } @llvm.vector.deinterleave2.nxv4i32(<vscale x 4 x i32>)
 '''
 with tempfile.NamedTemporaryFile('w', suffix='.ll', delete=False) as _t:
     _t.write(EXTRA_DECLS)

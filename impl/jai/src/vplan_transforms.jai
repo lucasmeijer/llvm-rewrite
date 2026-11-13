@@ -227,11 +227,15 @@ vp_legalize_and_optimize_inductions :: () {
         if !only_vector vp_rauw(vr(phi).def, vr(steps).def);
         else {
             scal :: (r: Vp_Rec, idx: s64, data: *void) -> bool { return vp_uses_scalars(r, << cast(*Vp_Val) data); }
+            first :: (r: Vp_Rec, idx: s64, data: *void) -> bool { return vp_uses_first_lane_only(r, << cast(*Vp_Val) data); }
             iv := vr(phi).def;
-            vp_replace_uses_with_if(iv, vr(steps).def, scal, *iv);
+            if vp_has_scalable_vf() vp_replace_uses_with_if(iv, vr(steps).def, first, *iv);
+            else vp_replace_uses_with_if(iv, vr(steps).def, scal, *iv);
         }
     }
 }
+// VPlan::hasScalableVF
+vp_has_scalable_vf :: () -> bool { for vpl.vfs if it.scalable return true; return false; }
 // VPWidenPointerInductionRecipe::onlyScalarsGenerated
 vp_ptr_iv_only_scalars_generated :: (r: Vp_Rec) -> bool {
     scalable := false;

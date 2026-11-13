@@ -186,6 +186,11 @@ lvp_handle_replication :: (lp: *Lv_Planner, vpi: Vp_Rec, range: *Vf_Range) -> Vp
     uni :: (vf: Ec, d: *void) -> bool { c := cast(*Lvp_Vf_Ctx) d; return lv_cm_is_uniform_after_vectorization(c.lp.cm, c.i, vf); }
     is_uniform := lvp_decision_and_clamp_range(range, uni, *ctx);
     is_pred := lv_cm_is_predicated_inst(lp.cm, i);
+    // for scalable VFs, assume / lifetime intrinsics with variant operands still only get lane 0
+    if !is_uniform && range.start.scalable && call_iid(i) != NOT_INTRINSIC {
+        id := call_iid(i);
+        if id == IID_ASSUME || id == IID_LIFETIME_START || id == IID_LIFETIME_END is_uniform = true;
+    }
     mask: Vp_Val = NONE;
     if is_pred mask = vp_mask_of(vpi);
     if is_uniform return vp_create_single_scalar_op(vr(vpi).opcode, vp_ops_without_mask(vpi), mask, vr(vpi).flags, vr(vpi).md, vr(vpi).dl, i);
@@ -1104,10 +1109,12 @@ lvp_plan_and_vectorize :: (lp: *Lv_Planner, user_vf: Ec, user_ic: u64, max_facto
             }
         }
         if !done {
-            if max_factors.scalable.n vp_unported("scalable vectorization");
             vf := ec_fixed(1);
             while ec_known_le(vf, max_factors.fixed) { lv_cm_collect_non_vectorized_and_set_widening_decisions(lp.cm, vf); vf.n *= 2; }
+            svf := ec_scalable(1);
+            while ec_known_le(svf, max_factors.scalable) { lv_cm_collect_non_vectorized_and_set_widening_decisions(lp.cm, svf); svf.n *= 2; }
             lvp_build_vplans(lp, vplan1, ec_fixed(1), max_factors.fixed);
+            lvp_build_vplans(lp, vplan1, ec_scalable(1), max_factors.scalable);
         }
     }
     best, plan := lvp_compute_best_vf(lp);

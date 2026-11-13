@@ -2879,6 +2879,8 @@ INTRINSIC_ATTRS :: Intrinsic_Attrs.[
     .{"llvm.vector.reduce.umin", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
     .{"llvm.vector.reduce.xor", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
     .{"llvm.vector.reverse", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
+    .{"llvm.vector.splice.left", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .["", "", ""]},
+    .{"llvm.vector.splice.right", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .["", "", ""]},
     .{"llvm.vp.add", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .["", "", "", ""]},
     .{"llvm.vp.and", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .["", "", "", ""]},
     .{"llvm.vp.ashr", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .["", "", "", ""]},

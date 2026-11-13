@@ -419,9 +419,16 @@ vp_find_canonical_iv_increment :: () -> Vp_Rec {
     vfxuf := vpl.vfxuf;
     is_step :: (step: Vp_Val) -> bool {
         if !vv(vpl.vfxuf).materialized return step == vpl.vfxuf;
+        is_vscale :: (v: Vp_Val) -> bool { d := vp_def(v); return d != NONE && vp_is_intrinsic_match_kind(d) && vp_intrinsic_id(d) == iidn("llvm.vscale"); }
+        mul_with_vscale :: (v: Vp_Val, other: (Vp_Val) -> bool) -> bool {
+            ok, a, b := vpm_binary(v, vp_opc(.MUL));
+            if !ok return false;
+            return (other(a) && is_vscale(b)) || (other(b) && is_vscale(a));
+        }
         if !vv(vpl.uf).materialized {
             if step == vpl.uf return true;
-            vp_unported("findCanonicalIVIncrement with a vscale step");
+            is_uf :: (v: Vp_Val) -> bool { return v == vpl.uf; }
+            return mul_with_vscale(step, is_uf);
         }
         okz, x := vpm_unary(step, vp_opc(.ZEXT));
         if !okz { okz, x = vpm_unary(step, vp_opc(.TRUNC)); }
@@ -429,6 +436,14 @@ vp_find_canonical_iv_increment :: () -> Vp_Rec {
         if vp_val_is_vpi(x, VPI_NUM_ACTIVE_LANES) return true;
         uf := vpl.ufs[0];
         if vpm_specific_int(step, uf) return true;
+        if uf == 1 return is_vscale(step);
+        is_cuf :: (v: Vp_Val) -> bool { return vpm_specific_int(v, vpl.ufs[0]); }
+        if mul_with_vscale(step, is_cuf) return true;
+        if (uf & (uf - 1)) == 0 {
+            ok, a, b := vpm_binary(step, vp_opc(.SHL));
+            lg: u64 = 0; while ((cast(u64) 1) << lg) < uf lg += 1;
+            return ok && is_vscale(a) && vpm_specific_int(b, lg);
+        }
         return false;
     }
     inc: Vp_Rec = NONE;
@@ -463,7 +478,7 @@ vpsx_try_to_expand :: (x: *Vp_Scev_Expander, s: Scev_Id) -> Vp_Val {
     if reuse != NONE return reuse;
     k := sc_kind(s);
     if k == .CONSTANT || k == .UNKNOWN return vp_live_in(sc_value(s));
-    if k == .VSCALE { vp_unported("VPSCEVExpander of vscale"); return NONE; }
+    if k == .VSCALE return vr(vpb_vscale(x.b, sc_type(s), x.dl)).def;
     if k == .ADD || k == .MUL {
         nuw := sc_has_nuw(s); nsw := sc_has_nsw(s);
         if type_kind(sc_type(s)) == .PTR {

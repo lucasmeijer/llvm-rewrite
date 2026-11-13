@@ -163,8 +163,8 @@ irb_shuffle :: (b: *Irb, v1: Value_Id, v2_in: Value_Id, mask: [] u32, name: stri
     return irb_insert(b, i, name);
 }
 // CreateVectorSplat
-irb_vector_splat :: (b: *Irb, n: u64, v: Value_Id, name: string) -> Value_Id {
-    poison := const_poison(type_vector(n, vtype(v), false));
+irb_vector_splat :: (b: *Irb, n: u64, v: Value_Id, name: string, scalable := false) -> Value_Id {
+    poison := const_poison(type_vector(n, vtype(v), scalable));
     x := irb_insert_element(b, poison, v, 0, tprint("%.splatinsert", name));
     zeros := NewArray(cast(s64) n, u32,, allocator = temp);
     return irb_shuffle(b, x, NONE, zeros, tprint("%.splat", name));

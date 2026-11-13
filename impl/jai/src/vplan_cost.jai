@@ -786,7 +786,7 @@ lv_should_consider_reg_pressure_for_vf :: (cm: *Lv_Cm, vf: Ec) -> bool {
     if lv_opts.consider_reg_pressure.set return lv_opts.consider_reg_pressure.v != 0;
     // TTI.shouldConsiderVectorizationRegPressure() is false for X86 and the base implementation
     if !lv_use_max_bandwidth(cm, vf.scalable) return false;
-    return ec_known_gt(vf, ifx vf.scalable then Ec.{0, true} else cm.max_permissible_fixed);
+    return ec_known_gt(vf, ifx vf.scalable then cm.max_permissible_scalable else cm.max_permissible_fixed);
 }
 
 // VectorizationFactor
@@ -795,17 +795,23 @@ Lv_Vf :: struct { width: Ec; cost: Cost; scalar_cost: Cost; min_profitable_tc: E
 // LoopVectorizationPlanner::isMoreProfitable
 lvp_is_more_profitable :: (lp: *Lv_Planner, a: Lv_Vf, b: Lv_Vf, max_tc: u64, has_tail: bool) -> bool {
     ca := a.cost; cb := b.cost;
+    if lp.hints.scalable == SK_ALWAYS_SCALABLE   // isScalableVectorizationAlwaysPreferred
+        if a.width.scalable && cost_valid(ca) && !b.width.scalable && !ec_is_scalar(b.width) return true;
     wa := cast(s64) a.width.n; wb := cast(s64) b.width.n;
+    ok_vs, vs := lv_vscale_for_tuning(lp.cm);
+    if ok_vs { if a.width.scalable wa *= cast(s64) vs; if b.width.scalable wb *= cast(s64) vs; }
     if lp.cm.cost_kind == TCK_CODE_SIZE return ca < cb || (ca == cb && wa > wb);
-    // preferFixedOverScalableIfEqualCost: no scalable VFs are formed
-    lower_without_tc := lc_mul(ca, wb) < lc_mul(cb, wa);
+    // TTI.preferFixedOverScalableIfEqualCost is false for X86 and NoTTI
+    prefer_scalable := a.width.scalable && !b.width.scalable;
+    cmp :: (l: Cost, r: Cost, ps: bool) -> bool { if ps return !(r < l); return l < r; }
+    lower_without_tc := cmp(lc_mul(ca, wb), lc_mul(cb, wa), prefer_scalable);
     if !max_tc return lower_without_tc;
     cost_for_tc :: (vf: s64, vc: Cost, sc: Cost, max_tc: u64, has_tail: bool) -> Cost {
         m := cast(s64) max_tc;
         if has_tail return lc_add(lc_mul(vc, m / vf), lc_mul(sc, m % vf));
         return lc_mul(vc, (m + vf - 1) / vf);
     }
-    return cost_for_tc(wa, ca, a.scalar_cost, max_tc, has_tail) < cost_for_tc(wb, cb, b.scalar_cost, max_tc, has_tail);
+    return cmp(cost_for_tc(wa, ca, a.scalar_cost, max_tc, has_tail), cost_for_tc(wb, cb, b.scalar_cost, max_tc, has_tail), prefer_scalable);
 }
 
 // collectEphemeralRecipesForVPlan
@@ -1167,4 +1173,15 @@ lv_min_max_reduction_intrinsic :: (k: Recur_Kind) -> Intrinsic_Id {
     }
     fatal("internal: getMinMaxReductionIntrinsicOp of %", k);
     return NOT_INTRINSIC;
+}
+
+// VFSelectionContext::initializeVScaleForTuning / getVScaleForTuning (TTI.getVScaleForTuning is unknown for X86 and NoTTI)
+lv_vscale_for_tuning :: (cm: *Lv_Cm) -> (bool, u64) {
+    if !lv_supports_scalable_vectors() return false, 0;
+    a := fn_get_fn_attr(cm.f, .VScaleRange);
+    if a {
+        mn := a.ival >> 32; mx := a.ival & 0xFFFF_FFFF;
+        if mx && mn == mx return true, mx;
+    }
+    return false, 0;
 }

@@ -291,6 +291,7 @@ Lv_Cm :: struct {
     element_types: [..] Type_Id;               // VFSelectionContext::ElementTypesInLoop
     max_safe_elements: u64;                    // 0 = none
     max_permissible_fixed: Ec;                 // MaxPermissibleVFWithoutMaxBW.FixedVF
+    max_permissible_scalable: Ec = .{0, true};  // MaxPermissibleVFWithoutMaxBW.ScalableVF
     has_small_constant_max_tc: bool;
     small_constant_max_tc: u32;
     iai: *Iai;                                 // InterleaveInfo
@@ -301,6 +302,8 @@ Lv_Cm :: struct {
     bfi: *Bfi;                                 // getBFI() (computed on first use)
     min_bws: *Table(Value_Id, u64);            // VFSelectionContext::MinBWs (computeMinimalBitwidths)
     has_in_loop_reductions: bool;              // !Config.getInLoopReductions().empty()
+    scalable_allowed_known: bool;              // VFSelectionContext::IsScalableVectorizationAllowed (std::optional)
+    scalable_allowed: bool;
     in_loop_chains: Table(Value_Id, Value_Id); // VFSelectionContext::InLoopReductionImmediateChains
 }
 
@@ -462,9 +465,12 @@ lv_use_max_bandwidth :: (cm: *Lv_Cm, scalable: bool) -> bool {
 }
 
 // VFSelectionContext::clampVFByMaxTripCount
-lv_clamp_vf_by_max_trip_count :: (vf: Ec, max_tc_in: u32, user_ic: u64, fold_tail: bool, req_epi: bool) -> Ec {
+lv_clamp_vf_by_max_trip_count :: (cm: *Lv_Cm, vf: Ec, max_tc_in: u32, user_ic: u64, fold_tail: bool, req_epi: bool) -> Ec {
     est := vf.n;
-    if vf.scalable fatal("loop-vectorize: scalable VFs are not supported yet");
+    if vf.scalable {
+        a := fn_get_fn_attr(cm.f, .VScaleRange);
+        if a est *= (a.ival >> 32);   // getVScaleRangeMin
+    }
     max_tc := max_tc_in;
     if max_tc > 0 && req_epi max_tc -= 1;
     ic := ifx user_ic > 0 then user_ic else 1;
@@ -478,28 +484,46 @@ lv_clamp_vf_by_max_trip_count :: (vf: Ec, max_tc_in: u32, user_ic: u64, fold_tai
 
 // VFSelectionContext::getMaximizedVFForTarget
 lv_maximized_vf_for_target :: (cm: *Lv_Cm, max_tc: u32, smallest: u64, widest: u64, max_safe: Ec, user_ic: u64, fold_tail: bool, req_epi: bool) -> Ec {
-    if max_safe.scalable return ec_fixed(1);   // RGK_ScalableVector register width is 0 for X86 and NoTTI
-    widest_reg := tti_register_bit_width(cm.tti, RGK_FIXED_WIDTH_VECTOR);
-    mvec := ec_fixed(bit_floor(widest_reg / widest));
+    scal := max_safe.scalable;
+    // RGK_ScalableVector: 0 for X86, 32 (scalable) for NoTTI
+    widest_reg := tti_register_bit_width(cm.tti, ifx scal then RGK_SCALABLE_VECTOR else RGK_FIXED_WIDTH_VECTOR);
+    mvec := Ec.{bit_floor(widest_reg / widest), scal};
     if !ec_known_lt(mvec, max_safe) mvec = max_safe;
     if mvec.n == 0 return ec_fixed(1);
-    max_vf := lv_clamp_vf_by_max_trip_count(mvec, max_tc, user_ic, fold_tail, req_epi);
+    max_vf := lv_clamp_vf_by_max_trip_count(cm, mvec, max_tc, user_ic, fold_tail, req_epi);
     if !ec_eq(max_vf, mvec) return max_vf;
-    cm.max_permissible_fixed = max_vf;
-    if lv_use_max_bandwidth(cm, false) {
-        bw := ec_fixed(bit_floor(widest_reg / smallest));
+    if scal cm.max_permissible_scalable = max_vf; else cm.max_permissible_fixed = max_vf;
+    if lv_use_max_bandwidth(cm, scal) {
+        bw := Ec.{bit_floor(widest_reg / smallest), scal};
         max_vf = ifx ec_known_lt(bw, max_safe) then bw else max_safe;
         // TTI.getMinimumVF is 0 for X86 and NoTTI
-        max_vf = lv_clamp_vf_by_max_trip_count(max_vf, max_tc, user_ic, fold_tail, req_epi);
+        max_vf = lv_clamp_vf_by_max_trip_count(cm, max_vf, max_tc, user_ic, fold_tail, req_epi);
     }
     return max_vf;
 }
 
 // VFSelectionContext::isScalableVectorizationAllowed / getMaxLegalScalableVF
+// getMaxVScale: TTI.getMaxVScale() is unknown for X86 and NoTTI, so only vscale_range
+lv_get_max_vscale :: (f: Value_Id) -> (bool, u64) { a, b := ic_vscale_range_max(f); return a, b; }
+// VFSelectionContext::isScalableVectorizationAllowed (cached)
+lv_is_scalable_vectorization_allowed :: (cm: *Lv_Cm) -> bool {
+    if cm.scalable_allowed_known return cm.scalable_allowed;
+    cm.scalable_allowed_known = true;
+    cm.scalable_allowed = false;
+    if !lv_supports_scalable_vectors() return false;
+    if cm.hints.scalable == SK_FIXED_WIDTH_ONLY return false;   // isScalableVectorizationDisabled
+    // TTI.isLegalToVectorizeReduction and isElementTypeLegalForScalableVector are true for X86 and NoTTI
+    ok, _ := lv_get_max_vscale(cm.f);
+    if !lvl_is_safe_for_any_vector_width(cm.lvl) && !ok return false;
+    cm.scalable_allowed = true;
+    return true;
+}
+// VFSelectionContext::getMaxLegalScalableVF
 lv_max_legal_scalable_vf :: (cm: *Lv_Cm, max_safe_elements: u64) -> Ec {
-    if !lv_supports_scalable_vectors() return ec_scalable(0);
-    fatal("loop-vectorize: scalable vectorization is not supported yet");
-    return ec_scalable(0);
+    if !lv_is_scalable_vectorization_allowed(cm) return ec_scalable(0);
+    if lvl_is_safe_for_any_vector_width(cm.lvl) return ec_scalable(0xFFFF_FFFF);
+    _, mvs := lv_get_max_vscale(cm.f);
+    return ec_scalable(max_safe_elements / mvs);
 }
 
 // VFSelectionContext::computeFeasibleMaxVF
@@ -770,13 +794,12 @@ lv_process_loop :: (p: *Lv_Pass, l: Loop_Id) -> bool {
         // no VPlan: computeBestVF gives VF 1 without a plan, so neither vectorization nor interleaving happens
         return false;
     }
-    if max_factors.scalable.n lv_unported("scalable vectorization");
     max_user_vf := ifx user_vf.scalable then max_factors.scalable else max_factors.fixed;
     // Only VF 1 is a candidate and the user did not ask for an interleave count: LLVM builds a scalar VPlan, and
     // computeBestVF returns it without costing; selectInterleaveCount then clamps the count by
     // TTI.getMaxInterleaveFactor(VF=1), which is 1 for X86 and NoTTI. So the loop is neither vectorized nor
     // interleaved and building the plan would not change the IR.
-    only_scalar := !((user_vf.n && ec_known_le(user_vf, max_user_vf) && !ec_is_scalar(user_vf)) || ec_is_vector(max_factors.fixed));
+    only_scalar := !((user_vf.n && ec_known_le(user_vf, max_user_vf) && !ec_is_scalar(user_vf)) || ec_is_vector(max_factors.fixed) || ec_is_vector(max_factors.scalable));
     if only_scalar && user_ic <= 1 && !(lv_opts.force_target_max_scalar_interleave.set && lv_opts.force_target_max_scalar_interleave.v > 1) &&
        lv_tti_max_interleave_factor(p.tti, ec_fixed(1), false) <= 1
         return false;
