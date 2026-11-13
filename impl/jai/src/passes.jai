@@ -306,7 +306,7 @@ Pass_Kind :: enum u8 {
     // FunctionAttrs (pass_function_attrs.jai)
     FUNCTION_ATTRS; RPO_FUNCTION_ATTRS; NORECURSE_LTO_INFERENCE; ATTRIBUTOR_LIGHT; ATTRIBUTOR_LIGHT_CGSCC; ATTRIBUTOR; ATTRIBUTOR_CGSCC; PARTIAL_INLINER;
     // pass_hot_cold_split.jai, pass_loop_extract.jai
-    HOT_COLD_SPLIT; LOOP_EXTRACT; EXTRACT_BLOCKS;
+    HOT_COLD_SPLIT; LOOP_EXTRACT; EXTRACT_BLOCKS; PRINT_IR_SIMILARITY; IR_OUTLINER;
     // Inliner (pass_inliner.jai), AlwaysInliner (pass_always_inliner.jai)
     INLINE; ALWAYS_INLINE; MODULE_INLINE; INLINER_WRAPPER;
     // ProfileSummaryAnalysis (require<profile-summary>)
@@ -509,6 +509,8 @@ PASS_TABLE :: Pass_Info.[
     .{"attributor", .MODULE, .ATTRIBUTOR, false, .DOMTREE},
     .{"partial-inliner", .MODULE, .PARTIAL_INLINER, false, .DOMTREE},
     .{"hotcoldsplit", .MODULE, .HOT_COLD_SPLIT, false, .DOMTREE},
+    .{"print-ir-similarity", .MODULE, .PRINT_IR_SIMILARITY, true, .DOMTREE},
+    .{"iroutliner", .MODULE, .IR_OUTLINER, false, .DOMTREE},
     .{"loop-extract", .MODULE, .LOOP_EXTRACT, false, .DOMTREE},   // also loop-extract<single> (lookup_pass)
     .{"extract-blocks", .MODULE, .EXTRACT_BLOCKS, false, .DOMTREE},
     .{"attributor-light-cgscc", .CGSCC, .ATTRIBUTOR_LIGHT_CGSCC, false, .DOMTREE},
@@ -1145,6 +1147,8 @@ parse_cl_opt :: (arg: string) -> bool {
     if delinearization_parse_cl_opt(name, value, has_value) return true;   // delinearization.jai
     if loop_simplifycfg_parse_cl_opt(name, value, has_value) return true;   // pass_loop_simplifycfg.jai
     if hot_cold_split_parse_cl_opt(name, value, has_value) return true;   // pass_hot_cold_split.jai
+    if irsim_parse_cl_opt(name, value, has_value) return true;   // ir_similarity.jai
+    if ir_outliner_parse_cl_opt(name, value, has_value) return true;   // pass_ir_outliner.jai
     if block_extractor_parse_cl_opt(name, value, has_value) return true;   // pass_loop_extract.jai
     if fs_parse_cl_opt(name, value, has_value) return true;   // function_specialization.jai
     if dfa_parse_cl_opt(name, value, has_value) return true;   // pass_dfa_jump_threading.jai
@@ -1287,6 +1291,8 @@ run_module_pm :: (n: s32) {
             case .ATTRIBUTOR; if should_run_pass(node, NONE) mam_invalidate(attributor_module_run());
             case .PARTIAL_INLINER; if should_run_pass(node, NONE) mam_invalidate(partial_inliner_run());
             case .HOT_COLD_SPLIT; if should_run_pass(node, NONE) mam_invalidate(hot_cold_split_run());
+            case .PRINT_IR_SIMILARITY; should_run_pass(node, NONE); print_ir_similarity_run();
+            case .IR_OUTLINER; if should_run_pass(node, NONE) mam_invalidate(ir_outliner_run());
             case .LOOP_EXTRACT; if should_run_pass(node, NONE) mam_invalidate(loop_extract_run(node.name));
             case .EXTRACT_BLOCKS; if should_run_pass(node, NONE) mam_invalidate(block_extractor_run());
             case .ALWAYS_INLINE; if should_run_pass(node, NONE) mam_invalidate(always_inliner_run(!node.no_lifetime));

@@ -32,6 +32,10 @@ Ce_Cache :: struct {
     allocas: [..] Value_Id;
     side_effecting: Table(Value_Id, bool);
     base_addrs: Table(u64, bool);      // (block, base alloca)
+    // lazy: the block information is computed on the first query (ce_cache_lazy; equivalent to the eager
+    // constructor as long as the IR does not change between the construction and the queries)
+    lazy: bool;
+    scanned: Table(Value_Id, bool);
 }
 
 ce_contains :: inline (ce: *Code_Extractor, b: Value_Id) -> bool { return table_contains(*ce.in_blocks, b); }
@@ -55,9 +59,28 @@ ce_defined_in_caller :: (ce: *Code_Extractor, v: Value_Id) -> bool {
 // CodeExtractorAnalysisCache::CodeExtractorAnalysisCache
 ce_cache_new :: (f: Value_Id) -> Ce_Cache {
     c: Ce_Cache;
+    c.allocas.allocator = temp; c.side_effecting.allocator = temp; c.base_addrs.allocator = temp; c.scanned.allocator = temp;
     for bb: fn_blocks(f) {
         for i: block_insts(bb) if inst_op(i) == .ALLOCA array_add(*c.allocas, i);
-        // findSideEffectInfoForBlock
+        ce_cache_scan_block(*c, bb);
+    }
+    return c;
+}
+// the allocas of f in order (CodeExtractorAnalysisCache::Allocas)
+ce_function_allocas :: (f: Value_Id) -> [..] Value_Id {
+    r: [..] Value_Id; r.allocator = temp;
+    for bb: fn_blocks(f) for i: block_insts(bb) if inst_op(i) == .ALLOCA array_add(*r, i);
+    return r;
+}
+ce_cache_lazy :: (allocas: [] Value_Id) -> Ce_Cache {
+    c: Ce_Cache;
+    c.allocas.allocator = temp; c.side_effecting.allocator = temp; c.base_addrs.allocator = temp; c.scanned.allocator = temp;
+    for allocas array_add(*c.allocas, it);
+    c.lazy = true;
+    return c;
+}
+// findSideEffectInfoForBlock
+ce_cache_scan_block :: (c: *Ce_Cache, bb: Value_Id) {
         for i: block_insts(bb) {
             o := inst_op(i);
             if o == .STORE || o == .LOAD {
@@ -76,10 +99,9 @@ ce_cache_new :: (f: Value_Id) -> Ce_Cache {
             }
             if may_have_side_effects(i) { table_set(*c.side_effecting, bb, true); break; }
         }
-    }
-    return c;
 }
 ce_cache_block_clobbers_addr :: (c: *Ce_Cache, bb: Value_Id, addr: Value_Id) -> bool {
+    if c.lazy && !table_contains(*c.scanned, bb) { table_set(*c.scanned, bb, true); ce_cache_scan_block(c, bb); }
     if table_contains(*c.side_effecting, bb) return true;
     return table_contains(*c.base_addrs, ((cast(u64) bb) << 32) | addr);
 }
@@ -826,7 +848,7 @@ ce_calculate_new_call_terminator_weights :: (ce: *Code_Extractor, code_replacer:
 }
 
 // CodeExtractor::extractCodeRegion
-ce_extract_code_region :: (ce: *Code_Extractor, cache: *Ce_Cache) -> Value_Id {
+ce_extract_code_region :: (ce: *Code_Extractor, cache: *Ce_Cache, inputs_out: *[..] Value_Id = null, outputs_out: *[..] Value_Id = null) -> Value_Id {
     if !ce_is_eligible(ce) return NONE;
     header := ce.blocks[0];
     old := block_fn(header);
@@ -849,6 +871,8 @@ ce_extract_code_region :: (ce: *Code_Extractor, cache: *Ce_Cache) -> Value_Id {
     inputs: Value_Set; vset_init(*inputs);
     outputs: Value_Set; vset_init(*outputs);
     ce_find_inputs_outputs(ce, *inputs, *outputs, *sink);
+    if inputs_out for inputs.list array_add(inputs_out, it);
+    if outputs_out for outputs.list array_add(outputs_out, it);
     lifetimes_start: Value_Set; vset_init(*lifetimes_start);
     ce_erase_lifetime_markers_on_inputs(ce, *sink, *lifetimes_start);
     if hoist.list.count {

@@ -232,6 +232,8 @@ these flags, so they cannot be swept against the oracle; they exist to look at w
 | gvn-hoist (`OutValue` is a `DenseMap<BasicBlock *>`; load keys contain the `Type *`) | an instruction hoisted into one block uses (also through GEPs) one hoisted into another block in the same round; or two loads of different types from one address hoist into one block | `-gvn-hoist-guess-address-order` |
 | delinearization (`array_pod_sort` of the terms by SCEV pointer) | findArrayDimensionsRec gives another result with every group of equal-factor-count terms reversed | `-delinearize-guess-address-order` |
 | loop-simplifycfg (`SmallPtrSet<BasicBlock *, 2>` of dead successors) | more than two dead successors (DT update order) | `-loop-simplifycfg-guess-address-order` |
+| ir-similarity (CheckLargerCands: `DenseSet<IRSimilarityCandidate *>`, colliding group numbers) | the canonical numberings of the possible choices differ (all are computed; never on the corpus) | none |
+| iroutliner (the exits of a region: `SmallPtrSet<BasicBlock *, 1>`) | two or more exit blocks contribute PHINode outputs | none |
 | codegenprepare, function-specialization, InstCombine fsqrt, attributor (signature rewrites), SLP reorder | already fail loudly or check order independence where they meet pointer order (see their sections) | none |
 
 Audited and order-independent (no flag): memdep's NonLocalDepEntry sort (GVN only materializes unnamed values in
@@ -1363,6 +1365,41 @@ Still slow / next:
   `hotcoldsplit -hotcoldsplit-threshold=-1`, `function(loop-simplify),loop-extract`, `partial-inliner` 4/4.
   Debugging aids: JAI_PI_DEBUG prints the outlining costs and the module before the partial inlining, JAI_IC_DEBUG
   prints the CallAnalyzer counters LLVM's `-debug-only=inline-cost` prints.
+
+## IRSimilarityIdentifier, IROutliner (L1.extra.ir-outliner COMPLETE 188/188; /root/jai_outline_r)
+
+- Files: `ir_similarity.jai` (IRSimilarityIdentifier.cpp, SuffixTree.cpp, `print-ir-similarity`),
+  `pass_ir_outliner.jai` (IROutliner.cpp, `iroutliner`; also reachable through `-ir-outliner` in default<O*>).
+  Facts: knowledge/llvm/ir-outliner.md.
+- `Dm32` (ir_similarity.jai) is a bucket-exact model of LLVM 23's `DenseMap<unsigned, unsigned>` / `DenseSet`
+  (linear probing, Algorithm R erase, clear/shrink, remove_if rehash, copy): use it wherever LLVM iterates a map with
+  integer keys and the order shows. `dm32_alloc` must give the map fresh buffers: `grow` keeps reading the old ones.
+- The IRInstructionDataList is rows of `irsim.data` with simple_ilist's exact link updates (row 0 = sentinel), because
+  populateMapper links a row to itself and the outliner then inserts/erases around it (knowledge file).
+- Address order: CheckLargerCands computes the canonical numbering for every larger-candidate choice LLVM could make
+  (pointer-order DenseSets) and fails loudly only if they differ; the outliner fails loudly for a region with two or
+  more exit blocks that contribute PHINode outputs (SmallPtrSet order). Neither fires on the corpus.
+- Traps met: `fn_add_fn_attr` replaces by kind, and every string attribute is one kind (`.STRING_ATTR`): adding a
+  string attribute with it drops the others; use `fn_add_fn_str_attr`. `attr_set_items` is a view into the attribute
+  pool, which adding attributes can move: copy the items first. `inst_insert_before` does not move the position's
+  debug records; LLVM's insert at an `Instruction *` (no head bit) makes the new instruction adopt them.
+- `ce_extract_code_region(ce, cache, inputs_out, outputs_out)` hands back the inputs/outputs (the
+  extractCodeRegion(CEAC, Inputs, Outputs) overload).
+- Not ported: optimization remarks (`-pass-remarks*` are unknown options here), the multi-module
+  findSimilarity(ArrayRef<Module>), SuffixTree's OutlinerLeafDescendants mode (MachineOutliner only).
+- Debugging aid: JAI_IOR_DEBUG prints the module before and after each extraction and after the reattach.
+- Sweeps (0 differs everywhere): `print-ir-similarity` 10812/10812 identical, `--with-test-flags` 13008/13628 (loud
+  = other passes' options); `iroutliner -ir-outlining-no-cost` 10702/10702 (110 LLVM failures skipped), `iroutliner`
+  (cost model) 10805/10805, `--with-test-flags` with and without the cost model 0 differs (loud = other options),
+  `-no-ir-sim-branch-matching`, `-ir-sim-calls-by-name -enable-linkonceodr-ir-outlining`,
+  `-no-ir-sim-intrinsics -no-ir-sim-indirect-calls` 0 differs; tests/perf/compile `iroutliner` with and without the
+  cost model and `print-ir-similarity` 4/4; `-O2 -ir-outliner` 2/4 (sqlite3.ll: the PHINode-exit address order, loud;
+  SPASS.ll: -O2 alone is over the CPU limit).
+- Perf (x64 build, `-passes=iroutliner -disable-output`): SPASS.ll 13.5 s (LLVM 2.5 s), sqlite3.ll 10.4 s (LLVM 5.5 s
+  with -ir-outlining-no-cost, 3.7 s with the cost model), lua.ll 2.4 s (0.7 s). Most of SPASS.ll's time is
+  findCandidates computing the canonical numbering for every possible larger-candidate choice (354k choices);
+  the CodeExtractorAnalysisCache of the analysis phase is lazy (`ce_cache_lazy`) because building it per region
+  over the whole function dominated sqlite3.ll. JAI_IRSIM_TIME prints the suffix tree / findCandidates times.
 
 ## LoopVectorize (L1.vectorize.loop 463/468 opt, 468/468 roundtrip; .outer/.reductions/.tail-folding/.epilogue COMPLETE)
 

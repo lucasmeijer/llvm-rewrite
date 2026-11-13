@@ -129,6 +129,9 @@ src/
   pass_dead_arg_elim.jai, pass_arg_promotion.jai   DeadArgumentElimination (module), ArgumentPromotion (CGSCC)
   pass_partial_inliner.jai, code_extractor.jai   PartialInliner (single and multi region) and CodeExtractor
   pass_hot_cold_split.jai, pass_loop_extract.jai   HotColdSplitting; LoopExtractor and BlockExtractor
+  ir_similarity.jai, pass_ir_outliner.jai   IRSimilarityIdentifier + SuffixTree (`Dm32`: LLVM's DenseMap<unsigned>
+                  bucket layout; the IRInstructionDataList as linked rows) and IROutliner (`Ior`, regions and groups
+                  as rows of `Ior_Region` / `Ior_Group`)
   attributor.jai, attributor_aas.jai, attributor_query.jai, attributor_dead.jai, attributor_values.jai,
   attributor_ptrinfo.jai, attributor_misc.jai, attributor_mem.jai, attributor_cleanup.jai
                   the Attributor and AttributorLight (module + CGSCC): the framework (`Irp` positions, `Abs_Attr`

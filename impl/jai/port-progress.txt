@@ -242,6 +242,9 @@ lib/Transforms/IPO/PartialInlining.cpp 0.95  # single- and multi-region; no opti
 lib/Transforms/Utils/CodeExtractor.cpp 0.9  # no aggregate args (StructValues), alloca/dealloc blocks, LifetimeBitcastUsers, verifyAssumptionCache
 lib/Transforms/IPO/HotColdSplitting.cpp 0.95  # no optimization remarks
 lib/Transforms/IPO/BlockExtractor.cpp 0.95  # no API-provided groups (only -extract-blocks-file)
+lib/Analysis/IRSimilarityIdentifier.cpp 0.97  # no findSimilarity(ArrayRef<Module>) (multi-module), legacy wrapper pass
+lib/Support/SuffixTree.cpp 0.8  # no OutlinerLeafDescendants (setLeafNodes and its iterator mode; MachineOutliner only)
+lib/Transforms/IPO/IROutliner.cpp 0.95  # no optimization remarks
 lib/Transforms/Utils/GuardUtils.cpp 0.5  # makeGuardControlFlowExplicit (pass_make_guards_explicit.jai); no widenWidenableBranch / setWidenableBranchCond
 lib/IR/Verifier.cpp 0.92  # all checks incl. every DI node kind; not -verify-noalias-scope-decl-dom, target intrinsics outside our tables, the legacy pass
 lib/IR/ConvergenceVerifier.cpp 1.0  # with GenericConvergenceVerifierImpl.h

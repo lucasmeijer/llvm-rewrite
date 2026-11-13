@@ -583,8 +583,8 @@ build_module_optimization_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
 
     if !is_lto_pre_link() pb_add(mpm, last, "alloc-token");
     if pb_cl.enable_instrumentor pb_unsupported("instrumentor (-enable-instrumentor)");
-    if pb_cl.enable_hot_cold_split && !is_lto_pre_link() pb_unsupported("hotcoldsplit (-hot-cold-split)");
-    if pb_cl.enable_ir_outliner pb_unsupported("iroutliner (-ir-outliner)");
+    if pb_cl.enable_hot_cold_split && !is_lto_pre_link() pb_add(mpm, last, "hotcoldsplit");
+    if pb_cl.enable_ir_outliner pb_add(mpm, last, "iroutliner");
     pb_add(mpm, last, "globaldce");
     pb_add(mpm, last, "constmerge");
     if pto.merge_functions pb_add(mpm, last, "mergefunc");
@@ -805,7 +805,7 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
     pb_add(main_fa, *ml, "jump-threading");
     pb_add(mpm, *last, "lowertypetests");
     pb_add(mpm, *last, "drop-type-tests<assume>");
-    if pb_cl.enable_hot_cold_split pb_unsupported("hotcoldsplit (-hot-cold-split)");
+    if pb_cl.enable_hot_cold_split pb_add(mpm, *last, "hotcoldsplit");
     {
         fa := pb_function_adaptor(mpm, *last, false);
         fl: s32 = -1;
