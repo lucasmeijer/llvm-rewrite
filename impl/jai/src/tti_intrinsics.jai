@@ -317,9 +317,16 @@ bt_type_based_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
         case "llvm.vector.reduce.fminimum"; return x86_min_max_reduction_cost(t, iidn("llvm.minimum"), vec_op, fmf, kind);
         case "llvm.experimental.vector.match"; #through;
         case "llvm.experimental.vector.histogram.add"; #through; case "llvm.experimental.vector.histogram.uadd.sat"; #through;
-        case "llvm.experimental.vector.histogram.umax"; #through; case "llvm.experimental.vector.histogram.umin"; #through;
-        case "llvm.get.active.lane.mask";
+        case "llvm.experimental.vector.histogram.umax"; #through; case "llvm.experimental.vector.histogram.umin";
             x86_np(tprint("getTypeBasedIntrinsicInstrCost of %", n));
+        case "llvm.get.active.lane.mask";
+            // TargetLoweringBase::shouldExpandGetActiveLaneMask is true (X86 does not override it): the cost of the
+            // uadd_sat + icmp ult expansion
+            arg_ty := tys[0];
+            exp_ret := type_vector(type_count(ret), arg_ty, type_kind(ret) == .SVECTOR);
+            a := ica_types(iidn("llvm.uadd.sat"), exp_ret, .[], fmf);
+            c := bt_type_based_intrinsic_cost(t, *a, kind);
+            return cost_add(c, x86_cmp_sel_cost(t, .ICMP, exp_ret, ret, ICMP_ULT, kind));
         case "llvm.vector.reverse";
             return x86_shuffle_cost(t, SK_REVERSE, ret, tys[0], .[], kind, 0, ret, .[], NONE);
         case "llvm.experimental.memset.pattern"; return TCC_BASIC * 4;

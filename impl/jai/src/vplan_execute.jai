@@ -274,6 +274,31 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             for k: 1..vp_nops(r)-1 res = vs_binop(s, .OR, res, irb_freeze(*s.b, vs_get(s, vp_op(r, k))));
             if ec_is_scalar(s.vf) return res;
             return irb_intrinsic(*s.b, "llvm.vector.reduce.or", .[vtype(res)], .[res]);
+        case VPI_ACTIVE_LANE_MASK;
+            viv0 := vs_get_lane(s, vp_op(r, 0), 0);
+            stc := vs_get_lane(s, vp_op(r, 1), 0);
+            if ec_is_scalar(s.vf) return irb_icmp(*s.b, ICMP_ULT, viv0, stc, name);
+            mult := ap_zext_value(vp_const_int_value(vp_op(r, 2)));
+            pred_ty := type_vector(s.vf.n * mult, type_int(1), s.vf.scalable);
+            f := get_or_insert_intrinsic_declaration(iidn("llvm.get.active.lane.mask"), .[pred_ty, vtype(stc)]);
+            return irb_call(*s.b, f, .[viv0, stc], name);
+        case VPI_EXTRACT_LANE;
+            assert(vp_nops(r) != 2, "ExtractLane from single source should be simplified to ExtractElement.");
+            lane := vs_get(s, vp_op(r, 0), true);
+            idx_ty := vp_scalar_type(vp_op(r, 0));
+            assert(!s.vf.scalable, "scalable VFs are not supported");
+            rvf := const_int(idx_ty, s.vf.n);   // getRuntimeVF
+            res: Value_Id = NONE;
+            for idx: 1..vp_nops(r)-1 {
+                start := vs_binop(s, .MUL, rvf, const_int(idx_ty, cast(u64) (idx - 1)));
+                vidx := ifx idx == 1 then lane else vs_binop(s, .SUB, lane, start);
+                ext := ifx ec_is_scalar(s.vf) then vs_get(s, vp_op(r, idx)) else vs_extract_element(s, vs_get(s, vp_op(r, idx)), vidx);
+                if res != NONE {
+                    c := irb_icmp(*s.b, ICMP_UGE, lane, start);
+                    res = vs_select(s, c, ext, res, s.fmf);
+                } else res = ext;
+            }
+            return res;
         case VPI_FIRST_ACTIVE_LANE;
             ty := vp_scalar_type(vr(r).def);
             cttz :: (s: *Vp_State, ty: Type_Id, m: Value_Id, name: string) -> Value_Id {
@@ -286,11 +311,11 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             idx := vp_nops(r) - 1;
             while idx >= 0 {
                 tz: Value_Id;
-                if ec_is_scalar(s.vf) tz = irb_cast(*s.b, .ZEXT, isf_icmp_b(s, ICMP_EQ, vs_get(s, vp_op(r, idx)), const_int(ir.t_i1, 0)), ty);
+                if ec_is_scalar(s.vf) tz = irb_cast(*s.b, .ZEXT, irb_icmp(*s.b, ICMP_EQ, vs_get(s, vp_op(r, idx)), const_int(ir.t_i1, 0)), ty);
                 else tz = cttz(s, ty, vs_get(s, vp_op(r, idx)), name);
                 cur := vs_binop(s, .ADD, vs_binop(s, .MUL, rvf, const_int(ty, cast(u64) idx)), tz);
                 if res != NONE {
-                    c := isf_icmp_b(s, ICMP_NE, tz, rvf);
+                    c := irb_icmp(*s.b, ICMP_NE, tz, rvf);
                     res = irb_select(*s.b, c, cur, res);
                 } else res = cur;
                 idx -= 1;
@@ -645,6 +670,13 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
             set_name(phi, "vector.recur");
             phi_add_incoming(phi, init, vector_ph);
             vs_set(s, vr(r).def, phi);
+        case .ACTIVE_LANE_MASK_PHI;
+            _, vector_ph := table_find(*s.vpbb2irbb, vp_cfg_predecessor(vr(r).parent, 0));
+            start := vs_get(s, vp_op(r, 0));
+            phi := create_phi(vtype(start), 2);
+            irb_insert(*s.b, phi, "active.lane.mask");   // State.Builder.CreatePHI
+            phi_add_incoming(phi, start, vector_ph);
+            vs_set(s, vr(r).def, phi);
         case .REDUCTION_PHI;
             _, vector_ph := table_find(*s.vpbb2irbb, vp_cfg_predecessor(vr(r).parent, 0));
             scalar_phi := ec_is_scalar(s.vf) || vr(r).rdx_style != .UNORDERED;
@@ -833,7 +865,6 @@ is_vector_intrinsic_with_overload_type_at_arg :: (id: Intrinsic_Id, idx: s64) ->
     if n == "llvm.powi" || n == "llvm.ldexp" return idx == -1 || idx == 1;
     return idx == -1;
 }
-isf_icmp_b :: (s: *Vp_State, pred: u8, a: Value_Id, b: Value_Id) -> Value_Id { return isf_icmp(*s.b, pred, a, b); }
 // VPWidenCallRecipe::execute
 vp_widen_call_execute :: (s: *Vp_State, r: Vp_Rec) {
     assert(ec_is_vector(s.vf), "not widening");

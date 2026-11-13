@@ -249,8 +249,10 @@ vp_optimize_vector_induction_width_for_tc_and_vf_uf :: (vf: Ec, uf: u32) -> bool
 
 // VPlanTransforms::optimizeForVFAndUF
 vp_optimize_for_vf_and_uf :: (vf: Ec, uf: u32, pse: *Pse) {
-    for vp_block_phis(vp_entry_basic_block(vp_vector_loop_region())) if vr(it).kind == .ACTIVE_LANE_MASK_PHI
-        vp_unported("active lane masks (tryToReplaceALMWithWideALM)");
+    // tryToReplaceALMWithWideALM: only with -enable-wide-lane-mask
+    if lv_opts.enable_wide_lane_mask && ec_is_vector(vf) && uf > 1
+        for vp_block_phis(vp_entry_basic_block(vp_vector_loop_region())) if vr(it).kind == .ACTIVE_LANE_MASK_PHI
+            vp_unported("active lane masks (tryToReplaceALMWithWideALM)");
     changed := vp_simplify_branch_condition_for_vf_and_uf(vf, uf, pse);
     changed |= vp_optimize_vector_induction_width_for_tc_and_vf_uf(vf, uf);
     if changed vp_set_vf(vf);

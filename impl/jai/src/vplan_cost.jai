@@ -357,7 +357,12 @@ vp_instruction_cost :: (c: *Vp_Cost_Ctx, r: Vp_Rec, vf: Ec) -> Cost {
     case VPI_FIRST_ORDER_RECURRENCE_SPLICE;
         vty := lv_to_vector_ty(vp_scalar_type(vr(r).def), vf);
         return lv_tti_shuffle(t, SK_SPLICE, vty, kind, -1);
-    case VPI_ACTIVE_LANE_MASK; vp_unported("active lane mask costs");
+    case VPI_ACTIVE_LANE_MASK;
+        arg_ty := vp_scalar_type(vp_op(r, 0));
+        mult := ap_zext_value(vp_const_int_value(vp_op(r, 2)));
+        ret_ty := lv_to_vector_ty(type_int(1), Ec.{vf.n * mult, vf.scalable});
+        a := ica_types(iidn("llvm.get.active.lane.mask"), ret_ty, .[arg_ty, arg_ty], 0);
+        return lt_intrinsic_cost(t, *a, kind);
     case VPI_EXPLICIT_VECTOR_LENGTH; vp_unported("EVL costs");
     case VPI_REVERSE;
         ety := vp_scalar_type(vr(r).def);

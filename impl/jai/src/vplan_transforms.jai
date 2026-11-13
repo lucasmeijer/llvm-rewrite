@@ -635,12 +635,42 @@ vp_drop_poison_generating_recipes :: () {
     }
 }
 
+// addVPLaneMaskPhiAndUpdateExitBranch
+vp_add_lane_mask_phi_and_update_exit_branch :: () -> Vp_Rec {
+    top := vp_vector_loop_region();
+    eb := vp_exiting_basic_block(top);
+    can_ty := vv(vb(top).can_iv).ty;
+    start_v := vp_const_int(can_ty, 0);
+    inc := vp_region_get_or_create_can_iv_increment(top);
+    vp_drop_poison_generating_flags(inc);   // clearCanonicalIVNUW
+    vb(top).can_iv_nuw = false;
+    dl := vr(inc).dl;
+    vph := vp_vector_preheader();
+    b := vpb_at_end(vph);
+    tc := vpl.trip_count;
+    entry_inc := vpb_nary(*b, VPI_CANONICAL_IV_INCREMENT_FOR_PART, .[start_v, vpl.vf], vpf_wrap(false, false), .[], dl, "index.part.next");
+    mult := vp_const_int(can_ty, 1);
+    entry_alm := vpb_nary(*b, VPI_ACTIVE_LANE_MASK, .[vr(entry_inc).def, tc, mult], .{}, .[], dl, "active.lane.mask.entry");
+    phi := vp_new_single_def(.ACTIVE_LANE_MASK_PHI, .[vr(entry_alm).def], type_int(1));
+    header := vp_entry_basic_block(top);
+    vp_insert_recipe(phi, header, vb(header).first);
+    term := vp_terminator(eb);
+    b = vpb_before(term);
+    in_inc := vpb_nary(*b, VPI_CANONICAL_IV_INCREMENT_FOR_PART, .[vr(inc).def, vpl.vf], vpf_wrap(false, false), .[], dl);
+    alm := vpb_nary(*b, VPI_ACTIVE_LANE_MASK, .[vr(in_inc).def, tc, mult], .{}, .[], dl, "active.lane.mask.next");
+    vp_add_operand(phi, vr(alm).def);
+    nm := vpb_not(*b, vr(alm).def, dl);
+    vpb_nary(*b, VPI_BRANCH_ON_COND, .[vr(nm).def], .{}, .[], dl);
+    vp_erase_recipe(term);
+    return phi;
+}
+
 // VPlanTransforms::materializeHeaderMask
 vp_materialize_header_mask :: (use_alm: bool, use_alm_cf: bool) {
     region := vp_vector_loop_region();
     hm := vb(region).header_mask;
     if hm == NONE || vp_num_users(hm) == 0 return;
-    if use_alm_cf vp_unported("active lane masks for control flow (addVPLaneMaskPhiAndUpdateExitBranch)");
+    if use_alm_cf { vp_rauw(hm, vr(vp_add_lane_mask_phi_and_update_exit_branch()).def); return; }
     header := vp_entry_basic_block(region);
     b := vpb_at(header, vp_first_non_phi(header));
     can_iv := vb(region).can_iv;
@@ -648,7 +678,9 @@ vp_materialize_header_mask :: (use_alm: bool, use_alm_cf: bool) {
     vr(w).flags = vpf_wrap(true, false);
     vpb_insert(*b, w);
     mask: Vp_Val;
-    if use_alm vp_unported("active lane masks (materializeHeaderMask)");
-    mask = vr(vpb_icmp(*b, ICMP_ULE, vr(w).def, vp_or_create_backedge_taken_count())).def;
+    if use_alm {
+        mult := vp_const_int(vv(can_iv).ty, 1);
+        mask = vr(vpb_nary(*b, VPI_ACTIVE_LANE_MASK, .[vr(w).def, vpl.trip_count, mult], .{}, .[], NONE, "active.lane.mask")).def;
+    } else mask = vr(vpb_icmp(*b, ICMP_ULE, vr(w).def, vp_or_create_backedge_taken_count())).def;
     vp_rauw(hm, mask);
 }
