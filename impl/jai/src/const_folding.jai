@@ -635,7 +635,7 @@ symbolically_evaluate_gep :: (gep: Value_Id, ops: [] Value_Id) -> Value_Id {
     res_ty := vtype(gep);
     if !type_is_sized(src) || type_kind(src) == .SVECTOR return NONE;
     has_ir, ir_range := gep_inrange(gep);
-    c := cast_gep_indices(src, ops, res_ty, gep_flags_of(opr_flags(gep)), inrange_extra(has_ir, ir_range));
+    c := cast_gep_indices(src, ops, res_ty, gep_flags_of(opr_flags(gep)) | ifx has_ir then cast(u32) F_INRANGE else 0, inrange_extra(has_ir, ir_range));
     if c != NONE return c;
     ptr := ops[0];
     if !is_ptr_type(vtype(ptr)) return NONE;

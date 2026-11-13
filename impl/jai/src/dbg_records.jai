@@ -191,7 +191,9 @@ dbgr_erase :: (r: u32) {
 }
 
 // new DbgVariableRecord(ValueAsMetadata::get(V), Var, Expr, DL) inserted with BasicBlock::insertDbgRecordBefore(.., I)
-dbgr_insert_value_before :: (v: Value_Id, var: Md_Id, expr: Md_Id, dbg: Md_Id, before: Value_Id) -> u32 {
+// at_head: the iterator has its head bit set (getFirstInsertionPt), so DbgMarker::insertDbgRecord puts the record
+// in front of the ones already attached to `before`
+dbgr_insert_value_before :: (v: Value_Id, var: Md_Id, expr: Md_Id, dbg: Md_Id, before: Value_Id, at_head := false) -> u32 {
     r: Dbg_Record;
     r.kind = .VALUE;
     r.loc = md_value(v);
@@ -199,7 +201,11 @@ dbgr_insert_value_before :: (v: Value_Id, var: Md_Id, expr: Md_Id, dbg: Md_Id, b
     array_add(*ir.dbg_records, r);
     id := cast(u32) ir.dbg_records.count;
     dbgr_restamp(id);
-    attach_records_before(before, id);
+    if at_head {
+        dbgr(id).next = inst(before).records;
+        dbgr(id).owner = before;
+        inst(before).records = id;
+    } else attach_records_before(before, id);
     if dbg_index.fn != NONE dbgr_index_record(id);
     return id;
 }
@@ -557,7 +563,7 @@ convert_debug_declare_to_debug_value_phi :: (f: Value_Id, r: u32, phi: Value_Id)
     b := inst(phi).parent;
     pt := block_first_insertion_pt(b);
     new_loc := debug_value_loc(r);
-    if pt != NONE dbgr_insert_value_before(phi, var, expr, new_loc, pt);
+    if pt != NONE dbgr_insert_value_before(phi, var, expr, new_loc, pt, at_head = true);   // getFirstInsertionPt has the head bit
 }
 
 // ---------------------------------------------------------------- discriminators (DILocation, Support/Discriminator.h)

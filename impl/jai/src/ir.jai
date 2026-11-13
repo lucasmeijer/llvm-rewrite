@@ -716,6 +716,8 @@ make_unique_name :: (tab: *Table(string, Value_Id), last: *u32, base: string, v:
 
 // Value::setName: inserts into the symbol table, uniquing on conflict.
 set_name :: (v: Value_Id, name: string) {
+    // Value::setNameImpl: getSymTab fails for constants (other than GlobalValues), so their name never changes
+    if ir.v_kind[v] >= .C_INT && ir.v_kind[v] <= .INLINE_ASM return;
     old := ir.v_name[v];
     if old == name return;
     // Function::HasLLVMReservedName follows the name
