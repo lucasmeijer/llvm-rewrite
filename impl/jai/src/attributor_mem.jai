@@ -28,7 +28,7 @@ H2s_Ext :: struct {
     dealloc_idx: Table(Value_Id, s64);
 }
 h2s_ext :: inline (i: u32) -> *H2s_Ext { return cast(*H2s_Ext) aa(i).x; }
-h2s_construct :: (i: u32) { aa(i).x = New(H2s_Ext); }
+h2s_construct :: (i: u32) { aa(i).x = atr_new(H2s_Ext); }
 h2s_alloc_of :: (e: *H2s_Ext, cb: Value_Id) -> *H2s_Alloc { found, k := table_find(*e.alloc_idx, cb); if !found return null; return e.allocs[k]; }
 h2s_dealloc_of :: (e: *H2s_Ext, cb: Value_Id) -> *H2s_Dealloc { found, k := table_find(*e.dealloc_idx, cb); if !found return null; return e.deallocs[k]; }
 h2s_is_globalized_local :: (cb: Value_Id) -> bool {
@@ -44,7 +44,7 @@ h2s_initialize :: (i: u32) {
         fo := get_freed_operand(cb);
         if fo != NONE {
             if !table_contains(*e.dealloc_idx, cb) {
-                d := New(H2s_Dealloc);
+                d := atr_new(H2s_Dealloc);
                 d.cb = cb; d.freed_op = fo;
                 array_add(*e.deallocs, d);
                 table_set(*e.dealloc_idx, cb, e.deallocs.count - 1);
@@ -56,7 +56,7 @@ h2s_initialize :: (i: u32) {
         }
         if is_removable_alloc(cb) {
             if get_initial_value_of_allocation(cb, ir.t_i8) != NONE {
-                a := New(H2s_Alloc);
+                a := atr_new(H2s_Alloc);
                 a.cb = cb;
                 a.globalized_local = h2s_is_globalized_local(cb);
                 if !table_contains(*e.alloc_idx, cb) {
@@ -322,7 +322,7 @@ h2s_manifest :: (i: u32) -> bool {
 
 Priv_Ext :: struct { ty: Value_Id = OV_NOVAL; }   // PrivatizableType: OV_NOVAL nullopt, NONE nullptr, else a Type_Id
 priv_ext :: inline (i: u32) -> *Priv_Ext { return cast(*Priv_Ext) aa(i).x; }
-priv_construct :: (i: u32) { aa(i).x = New(Priv_Ext); }
+priv_construct :: (i: u32) { aa(i).x = atr_new(Priv_Ext); }
 // combineTypes
 priv_combine_types :: (t0: Value_Id, t1: Value_Id) -> Value_Id {
     if t0 == OV_NOVAL return t1;

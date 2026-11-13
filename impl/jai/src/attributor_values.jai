@@ -116,7 +116,7 @@ pv_impl_pessimistic :: (i: u32) {
     pv_union_item(*aa(i).s, st, .{irp_assoc_value(p), irp_ctx_i(p), AA_ANY});
     bs_optimistic(*aa(i).s);
 }
-pv_construct :: (i: u32) { aa(i).x = New(Pv_Ext); }
+pv_construct :: (i: u32) { aa(i).x = atr_new(Pv_Ext); }
 
 // recurseForValue
 pv_recurse_for_value :: (i: u32, p: Irp, s: u8) -> bool {
@@ -605,7 +605,7 @@ atr_may_be_in_cycle :: (ci: *Cycle_Info, x: Value_Id, header_only: bool, cptr: *
 
 Pcv_Ext :: struct { set: [..] APInt; undef: bool; }
 pcv_ext :: inline (i: u32) -> *Pcv_Ext { return cast(*Pcv_Ext) aa(i).x; }
-pcv_construct :: (i: u32) { aa(i).x = New(Pcv_Ext); }
+pcv_construct :: (i: u32) { aa(i).x = atr_new(Pcv_Ext); }
 
 // a PotentialConstantIntValuesState value (for the clamping helpers and the update functions)
 Pcv_State :: struct { bs: Bstate; set: [..] APInt; undef: bool; }
@@ -868,7 +868,7 @@ pcv_update :: (i: u32) -> bool {
 Vcr_Ext :: struct { bw: u32; known: Const_Range; assumed: Const_Range; num_changes: s32; }
 vcr_ext :: inline (i: u32) -> *Vcr_Ext { return cast(*Vcr_Ext) aa(i).x; }
 vcr_construct :: (i: u32) {
-    e := New(Vcr_Ext);
+    e := atr_new(Vcr_Ext);
     e.bw = type_bits(irp_assoc_type(aa(i).pos));
     e.known = cr_heap(cr_full(e.bw));
     e.assumed = cr_heap(cr_empty(e.bw));

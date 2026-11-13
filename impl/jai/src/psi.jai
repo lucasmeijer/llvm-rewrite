@@ -67,8 +67,8 @@ psi_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
         case "profile-summary-cutoff-cold"; o.cutoff_cold = cast(u64) int_opt(name, value, has_value);
         case "profile-summary-huge-working-set-size-threshold"; o.huge_wss_threshold = cast(u64) int_opt(name, value, has_value);
         case "profile-summary-large-working-set-size-threshold"; o.large_wss_threshold = cast(u64) int_opt(name, value, has_value);
-        case "profile-summary-hot-count"; o.hot_count_given = true; o.hot_count = cast(u64) int_opt(name, value, has_value);
-        case "profile-summary-cold-count"; o.cold_count_given = true; o.cold_count = cast(u64) int_opt(name, value, has_value);
+        case "profile-summary-hot-count"; o.hot_count_given = true; o.hot_count = cast,no_check(u64) int_opt(name, value, has_value);
+        case "profile-summary-cold-count"; o.cold_count_given = true; o.cold_count = cast,no_check(u64) int_opt(name, value, has_value);
         case "partial-profile"; o.partial_profile = bool_opt(name, value, has_value);
         case "scale-partial-sample-profile-working-set-size"; o.scale_partial_wss = bool_opt(name, value, has_value);
         case "partial-sample-profile-working-set-size-scale-factor";

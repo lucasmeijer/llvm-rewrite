@@ -395,7 +395,7 @@ na_cs_argument_update :: (i: u32) -> bool {
 
 Deref_Ext :: struct { accessed: [..] [2] s64; }   // AccessedBytesMap (std::map: sorted by offset)
 deref_ext :: inline (i: u32) -> *Deref_Ext { return cast(*Deref_Ext) aa(i).x; }
-deref_construct :: (i: u32) { aa(i).x = New(Deref_Ext); }
+deref_construct :: (i: u32) { aa(i).x = atr_new(Deref_Ext); }
 
 deref_initialize :: (i: u32) {
     p := aa(i).pos;
@@ -856,7 +856,7 @@ assumptions_of_set :: (s: u32, out: *[..] string) {
 }
 sc_list_contains :: (l: [] string, k: string) -> bool { for l if it == k return true; return false; }
 asi_construct :: (i: u32) {
-    e := New(Asi_Ext);
+    e := atr_new(Asi_Ext);
     aa(i).x = e;
     e.assumed.universal = true;
     p := aa(i).pos;
@@ -980,7 +980,7 @@ Ici_Ext :: struct {
     all_known: bool;
 }
 ici_ext :: inline (i: u32) -> *Ici_Ext { return cast(*Ici_Ext) aa(i).x; }
-ici_construct :: (i: u32) { e := New(Ici_Ext); e.all_known = true; aa(i).x = e; }
+ici_construct :: (i: u32) { e := atr_new(Ici_Ext); e.all_known = true; aa(i).x = e; }
 ici_initialize :: (i: u32) {
     cb := irp_ctx_i(aa(i).pos);
     md := inst_md(cb, "callees");
@@ -1252,7 +1252,7 @@ as_initialize :: (i: u32) {
 
 Alloc_Info_Ext :: struct { size: s64 = -2; }   // AssumedAllocatedSize in bits (-2: HasNoAllocationSize)
 alloc_info_ext :: inline (i: u32) -> *Alloc_Info_Ext { return cast(*Alloc_Info_Ext) aa(i).x; }
-alloc_info_construct :: (i: u32) { aa(i).x = New(Alloc_Info_Ext); }
+alloc_info_construct :: (i: u32) { aa(i).x = atr_new(Alloc_Info_Ext); }
 alloc_info_initialize :: (i: u32) {
     pk := aa(i).pk;
     if pk == .RETURNED || pk == .CALL_SITE_ARGUMENT aa_pessimistic(i);

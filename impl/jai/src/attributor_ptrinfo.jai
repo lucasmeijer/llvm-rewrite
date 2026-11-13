@@ -229,7 +229,7 @@ Pi_Ext :: struct {
     returned: Offset_Info;                   // ReturnedOffsets
 }
 pi_ext :: inline (i: u32) -> *Pi_Ext { return cast(*Pi_Ext) aa(i).x; }
-pi_construct :: (i: u32) { aa(i).x = New(Pi_Ext); }
+pi_construct :: (i: u32) { aa(i).x = atr_new(Pi_Ext); }
 pi_reaches_return :: (i: u32) -> bool { return !oi_is_unassigned(*pi_ext(i).returned); }
 pi_num_offset_bins :: (i: u32) -> s64 { return pi_ext(i).bins.keys.count; }
 

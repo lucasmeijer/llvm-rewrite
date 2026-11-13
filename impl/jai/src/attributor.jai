@@ -394,6 +394,41 @@ Attributor_State :: struct {
 }
 atr: Attributor_State;
 
+// The memory of one Attributor run: the AAs, their extension states, the information cache and the bookkeeping
+// live in atr_pool (a bump allocator reset by atr_reset), so the CGSCC pass, which runs the Attributor once per
+// SCC, does not keep every earlier run's state. atr_new allocates there and points the allocator of every
+// resizable array and hash table directly inside the new object at the pool (arrays created later, e.g. table
+// values built in locals, keep their own allocator).
+Flat_Pool_Module :: #import "Flat_Pool";
+atr_pool: Flat_Pool_Module.Flat_Pool;
+ATR_POOL_RESERVE :: 8 * 1024 * 1024 * 1024;
+atr_allocator :: () -> Allocator { return .{Flat_Pool_Module.flat_pool_allocator_proc, *atr_pool}; }
+atr_new :: ($T: Type) -> *T {
+    p := New(T,, allocator = atr_allocator());
+    atr_init_allocators(p, type_info(T));
+    return p;
+}
+atr_init_allocators :: (p: *void, ti: *Type_Info) {
+    if ti.type == .STRUCT {
+        st := cast(*Type_Info_Struct) ti;
+        if st.name == "Table" {
+            for m: st.members if m.name == "allocator" { (cast(*Allocator)(cast(*u8) p + m.offset_in_bytes)).* = atr_allocator(); break; }
+            return;
+        }
+        for m: st.members {
+            if m.flags & .CONSTANT continue;
+            atr_init_allocators(cast(*u8) p + m.offset_in_bytes, m.type);
+        }
+    } else if ti.type == .ARRAY {
+        at := cast(*Type_Info_Array) ti;
+        if at.array_type == .RESIZABLE {
+            (cast(*Resizable_Array) p).allocator = atr_allocator();
+        } else if at.array_type == .FIXED {
+            for k: 0..at.array_count - 1 atr_init_allocators(cast(*u8) p + k * at.element_type.runtime_size, at.element_type);
+        }
+    }
+}
+
 // cl::opts
 atr_max_iterations: u32 = 32;      // -attributor-max-iterations
 atr_max_init_chain: u32 = 1024;    // -attributor-max-initialization-chain-length
@@ -642,7 +677,7 @@ atr_get_aa :: (k: Atr_Kind, p: Irp, q: u32, cls: u8, force_update := false, upda
     }
     ok, should_update := atr_should_initialize(k, p);
     if !ok return NONE;
-    a := New(Abs_Attr);
+    a := atr_new(Abs_Attr);
     a.kind = k; a.pos = p; a.pk = irp_kind(p);
     aa_check_position(k, a.pk);
     a.s = aa_initial_state(k);
@@ -696,7 +731,7 @@ aa_update :: (i: u32) -> bool {
 
 // Attributor::updateAA
 atr_update_aa :: (i: u32) -> bool {
-    dv := New([..] Atr_Dep_Info);
+    dv := atr_new([..] Atr_Dep_Info);
     array_add(*atr.dep_stack, dv);
     cs := ATR_UNCHANGED;
     uai := false;
@@ -1002,7 +1037,7 @@ atr_knowledge_key :: (v: Value_Id, k: Attr_Kind) -> u64 { return ((cast(u64) v) 
 atr_fn_info :: (f: Value_Id) -> *Atr_Fn_Info {
     found, fi := table_find(*atr.fn_info, f);
     if found return fi;
-    fi = New(Atr_Fn_Info);
+    fi = atr_new(Atr_Fn_Info);
     table_set(*atr.fn_info, f, fi);
     atr_initialize_information_cache(f, fi);
     return fi;
@@ -1553,7 +1588,11 @@ atr_is_closed_world :: () -> bool {
 }
 
 atr_reset :: (functions: [] Value_Id, is_module_pass: bool, cached_only: bool, light: bool) {
+    // everything the previous run allocated through atr_new (or in the arrays and tables it reaches) goes at once
     atr = .{};
+    if !atr_pool.memory_base Flat_Pool_Module.init(*atr_pool, ATR_POOL_RESERVE);
+    Flat_Pool_Module.reset(*atr_pool);
+    atr_init_allocators(*atr, type_info(Attributor_State));
     atr.is_module_pass = is_module_pass;
     atr.cached_only = cached_only;
     atr.light = light;

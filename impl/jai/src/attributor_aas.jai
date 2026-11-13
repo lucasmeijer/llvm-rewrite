@@ -187,7 +187,7 @@ use_arg_no :: inline (u: Use_Id) -> u32 { return u - ir.v_ops[ir.u_user[u]]; }
 aa_construct :: (i: u32) {
     if aa(i).kind == {
         case .IS_DEAD; // created in dead_initialize (it depends on the position)
-        case .UNDEFINED_BEHAVIOR; aa(i).x = New(Ub_Ext);
+        case .UNDEFINED_BEHAVIOR; aa(i).x = atr_new(Ub_Ext);
         case .HEAP_TO_STACK; h2s_construct(i);
         case .PRIVATIZABLE_PTR; priv_construct(i);
         case .VALUE_CONSTANT_RANGE; vcr_construct(i);
@@ -196,7 +196,7 @@ aa_construct :: (i: u32) {
         case .POINTER_INFO; pi_construct(i);
         case .ASSUMPTION_INFO; asi_construct(i);
         case .DEREFERENCEABLE; deref_construct(i);
-        case .GLOBAL_VALUE_INFO; aa(i).x = New(Gvi_Ext);
+        case .GLOBAL_VALUE_INFO; aa(i).x = atr_new(Gvi_Ext);
         case .INDIRECT_CALL_INFO; ici_construct(i);
         case .ALLOCATION_INFO; alloc_info_construct(i);
     }

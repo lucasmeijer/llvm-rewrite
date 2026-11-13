@@ -124,12 +124,12 @@ fn_is_intrinsic_name :: (f: Value_Id) -> bool { return glob(f).intrinsic; }
 dead_initialize :: (i: u32) {
     pk := aa(i).pk;
     if pk == .FUNCTION || pk == .CALL_SITE {
-        aa(i).x = New(Dead_Fn_Ext);
+        aa(i).x = atr_new(Dead_Fn_Ext);
         if pk == .CALL_SITE fatal("internal: attributor: AAIsDead for a call site");
         dead_fn_initialize(i);
         return;
     }
-    aa(i).x = New(Dead_Val_Ext);
+    aa(i).x = atr_new(Dead_Val_Ext);
     v := irp_assoc_value(aa(i).pos);
     if pk == .CALL_SITE_ARGUMENT || pk == .RETURNED {
         if pk == .CALL_SITE_ARGUMENT && is_undef_value(v) aa_pessimistic(i);
