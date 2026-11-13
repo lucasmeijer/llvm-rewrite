@@ -1278,6 +1278,13 @@ run_module_pm :: (n: s32) {
                 if should_run_pass(node, NONE) && pre_isel_intrinsic_lowering_run() mam_invalidate(PRESERVE_NONE);
             case; fatal("internal: '%' is not a module pass", node.name);
         }
+        // -verify-each (VerifyInstrumentation): after every module pass; pass managers / adaptors and the
+        // VerifierPass itself are skipped (the passes inside them are verified where they run)
+        if opt_verify_each && node.kind != .MODULE_PM && node.kind != .FUNCTION_ADAPTOR && node.kind != .CGSCC_ADAPTOR &&
+           node.kind != .VERIFY_MODULE {
+            b, d := verify_module();
+            if b verifier_fatal(tprint("Broken module found after pass \"%\", compilation aborted!", node.name));
+        }
         c = pipeline.nodes[c].next;
     }
 }
@@ -1306,6 +1313,9 @@ run_function_adaptor :: (n: s32) {
                 pa := run_function_pass(node, f);
                 if !pa.all { printer_note_ir_changed(); lcg_invalidate(); }
                 fam_invalidate(f, pa);
+                // -verify-each: LLVM names the pass by its class ("InstCombinePass"); we print the pipeline name
+                if opt_verify_each && node.kind != .VERIFY_FUNCTION && verify_function(f)
+                    verifier_fatal(tprint("Broken function found after pass \"%\", compilation aborted!", node.name));
             }
             reset_temporary_storage();
             c = pipeline.nodes[c].next;

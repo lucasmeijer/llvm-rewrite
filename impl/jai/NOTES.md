@@ -69,8 +69,8 @@
   parameters); others fail loudly. Operands are kept in LLVM's operand order (it decides `!N` numbering), ints
   in a per-kind layout documented next to `parse_di_node`. DICompositeType with an identifier goes through
   buildODRType (opt enables the DITypeMap, so such nodes are distinct and merged by identifier).
-  UpgradeDebugInfo strips debug info without "Debug Info Version" 3; of the Verifier's debug-info checks only
-  "inlinable call without !dbg" is ported (a module that breaks other checks keeps its debug info, unlike LLVM).
+  UpgradeDebugInfo strips debug info without "Debug Info Version" 3; with version 3 it runs the verifier
+  (verifier.jai) and strips broken debug info with LLVM's warning ("Verifier" below).
 - `uselistorder` directives reorder use lists at parse time (stable sort by index).
 
 ## Debug records and metadata uses (for passes)
@@ -80,6 +80,42 @@
 - ValueAsMetadata does not create uses. The parser updates it when a forward-reference placeholder is resolved
   (`md_value_rauw`), but `replace_all_uses_with` does not (LLVM's ValueAsMetadata::handleRAUW): a pass that
   RAUWs values referenced by `#dbg_value` must call md_value_rauw too (or ir.jai should do it).
+
+## Verifier (L1.verifier: 224/229 ::error, Verifier dir 395/408; DESIGN.md "Verifier")
+
+- Files: verifier.jai (state, diagnostics, the verifier's ModuleSlotTracker `vst`, drivers, globals, functions,
+  blocks, non-call instructions, EH pads, dominance), verifier_md.jai (generic metadata, DI nodes, debug records,
+  module flags, instruction/function attachments, TBAAVerifier), verifier_calls.jai (calls, attributes, musttail,
+  inline asm), verifier_intrinsics.jai (visitIntrinsicCall, VP / constrained FP, statepoints, isSignatureValid with
+  LLVM's messages, the convergence verifier). knowledge/llvm/verifier.md has the facts the messages depend on.
+- opt runs it like LLVM: in UpgradeDebugInfo (debug info not an error; broken IR is `LLVM ERROR: Broken module
+  found, compilation aborted!` and exit 134, broken debug info is stripped with `warning: ignoring invalid debug
+  info in <file>`), on the input unless `-disable-verify` (`opt: <file>: error: input module is broken!`, exit 1),
+  at the end of the pipeline (VerifierPass), for `verify` / `function(verify)` / `require<verify>`, and after every
+  pass with `-verify-each` (we print the pipeline name of the pass where LLVM prints its class name).
+- `vcheck` / `vcheck_di` are `#expand` macros whose message and values are `Code`: they are evaluated only when the
+  check fails, like the C++ macro's Twine (eager evaluation formatted attribute strings for every call and indexed
+  out of range in the phi checks). Trap: an argument with a `,,` named-argument call (`builder_to_string(*s,,
+  allocator = temp)`) does not survive the `#insert`: compute it into a variable first.
+- Printing goes through printer.jai with `vst_lazy()` hooks at every slot lookup (a no-op outside the verifier):
+  module slots and *all* metadata at the first lookup, a function's local slots at the first lookup after an
+  instruction of it was printed. The printer state is reset after each run (`vst_end`).
+- Representation gaps the port works around: jai doesn't keep `dso_local` for implicitly dso_local values (that
+  check is left out; it can't fire in LLVM either); FuncletPadInst keeps the parent pad last (inline_function.jai's
+  `eh_parent_pad` reads operand 0, which is wrong for catchpad/cleanuppad); `set_metadata` now removes every
+  attachment of the kind (LLVM's MDAttachments::set), which StripDebugInfo needs for a function with two `!dbg`.
+- Not ported (unreachable here): checks of DI node kinds our parser rejects (DIEnumerator, DIGenericSubrange,
+  DIStringType, DISubrangeType, DIFixedPointType, DIModule, DIMacro*, DICommonBlock, DIObjCProperty, GenericDINode),
+  VerifierAMDGPU.cpp, target intrinsics outside our tables (aarch64/arm/nvvm/wasm cases), the
+  `-verify-noalias-scope-decl-dom` dominance check (off by default; fails silently), "in another module" checks (one
+  module per process).
+- Remaining Verifier test failures: DIGenericSubrange (2) and DIEnumerator (4 files) are parser gaps, 3 need x86
+  auto-upgrades (`llvm.x86.sse2.pshuf*`) that fail loudly.
+- Cost (x64 build, sqlite3.ll, `-disable-output`): parse 0.74 s, input + output verification +0.34 s (LLVM's whole
+  run 0.73 s). Caches that keep it there: per-run module flag and md-kind lookups, intrinsic ids per function
+  (`vf.iid_cache`), access tags whose TBAA walk passed (`vf.tbaa_ok`), call-site (attribute list, function type)
+  pairs that passed verifyFunctionAttrs (`vf.attrs_ok`), one scan of an instruction's attachments
+  (`vf_visit_instruction_metadata`), the DominatorTree built on first use.
 
 ## Pass infrastructure status (see DESIGN.md §9-10)
 
@@ -735,7 +771,7 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   `range` (CallBase::getRange); `contains_undef_element` no longer counts poison; `block_terminating_deoptimize_call`
   matches LLVM (no extra "returns the call" check); fam_invalidate keeps the AssumptionCache while a surviving LVI
   holds it (LLVM never invalidates the AC; see knowledge/llvm/lazy-value-info-and-jump-threading.md);
-  `-verify-each` (no-op) and `-aa-pipeline X` (space form) are accepted.
+  `-verify-each` (verifier.jai) and `-aa-pipeline X` (space form) are accepted.
 - Fail loudly: `-lvi-per-pred-ranges` (unknown flag), JumpThreading's SplitEdge through splitBlockBefore, `#dbg_assign`
   remapping, key-instruction atom groups, trailing debug records after duplicating a block into its predecessor,
   ScaledNumber printing of numbers below 2^-120 (toStringAPFloat), `-use-iterative-bfi-inference` (unknown flag).
@@ -891,7 +927,8 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   `merge_block_into_predecessor` got the DT (no DTU) mode (`direct_dt`); `tti_instruction_cost` now delegates to
   `tti_instruction_cost_ops` (constant-expression users get at least 3 operand slots so the old reads stay
   identical — callers pass ConstantExprs, whose `inst_op` is garbage: a latent bug in compute_speculation_cost's use);
-  `X86_Lowering.tune_cpu`; opt accepts `-disable-verify` and `-disable-loop-unrolling` (no effect on -passes runs).
+  `X86_Lowering.tune_cpu`; opt accepts `-disable-verify` (no input/output verification, see "Verifier") and `-disable-loop-unrolling` (no
+  effect on -passes runs).
 - Sweeps (whole-file and `--per-function`): `loop-unroll`, `loop(loop-unroll-full)`: 0 differs, 0 bad-ir; loud only
   ppc_fp128 literals and LoopUnroll/pr77842.ll timing out (below). Also 0 differs with `--extra` `-unroll-runtime`,
   `-unroll-runtime -unroll-runtime-epilog=false`, `-unroll-force-peel-count=2`, `-unroll-count=3`,

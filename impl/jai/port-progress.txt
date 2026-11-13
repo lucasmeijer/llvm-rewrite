@@ -50,7 +50,7 @@ lib/Analysis/BasicAliasAnalysis.cpp 0.95
 lib/Analysis/TargetTransformInfo.cpp 0.3
 lib/Transforms/Utils/BasicBlockUtils.cpp 0.75
 lib/Analysis/VectorUtils.cpp 0.7  # + InterleavedAccessInfo::analyzeInterleaving / invalidation, computeMinimumValueSizes, getMetadataToPropagate, isVectorIntrinsicWithOverloadTypeAtArg
-lib/IR/Intrinsics.cpp 0.75
+lib/IR/Intrinsics.cpp 0.8  # + isSignatureValid / matchIntrinsicType messages (verifier_intrinsics.jai)
 lib/IR/Instruction.cpp 0.7
 lib/IR/IRBuilder.cpp 0.25
 lib/AsmParser/LLLexer.cpp 0.7  # manual: own lexer structure, lexes all IR tokens (heuristic 0.72)
@@ -242,3 +242,5 @@ lib/Transforms/IPO/ForceFunctionAttrs.cpp 0.85  # no -forceattrs-csv-path
 lib/Transforms/IPO/PartialInlining.cpp 0.7  # single-region partial inlining; no multi-region (cold region) outlining
 lib/Transforms/Utils/CodeExtractor.cpp 0.75  # no aggregate args, alloca/dealloc blocks, >2 exits, debug-info fixup
 lib/Transforms/Utils/GuardUtils.cpp 0.5  # makeGuardControlFlowExplicit (pass_make_guards_explicit.jai); no widenWidenableBranch / setWidenableBranchCond
+lib/IR/Verifier.cpp 0.9  # all checks; not the DI kinds our parser rejects, -verify-noalias-scope-decl-dom, target intrinsics outside our tables, the legacy pass
+lib/IR/ConvergenceVerifier.cpp 1.0  # with GenericConvergenceVerifierImpl.h

@@ -484,7 +484,8 @@ lpi_forward_resume :: (l: *Lpad_Info, ri: Value_Id) {
 }
 
 // getParentPad
-eh_parent_pad :: (pad: Value_Id) -> Value_Id { return op(pad, 0); }
+// getParentPad: operand 0 of a catchswitch, the last operand of a catchpad / cleanuppad (FuncletPadInst)
+eh_parent_pad :: (pad: Value_Id) -> Value_Id { if inst_op(pad) == .CATCHSWITCH return op(pad, 0); return op(pad, nops(pad) - 1); }
 
 Unwind_Memo :: struct { map: Table(Value_Id, Value_Id); }   // DenseMap<Instruction *, Value *>; NONE = nullptr
 um_find :: (m: *Unwind_Memo, k: Value_Id) -> (bool, Value_Id) { f, v := table_find(*m.map, k); return f, v; }

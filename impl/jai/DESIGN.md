@@ -24,7 +24,9 @@ src/
   intrinsics.jai  intrinsic IDs (gen_iit.jai), signature matching, name mangling, getOrInsertDeclaration, attributes
   autoupgrade.jai AutoUpgrade (intrinsics, TBAA, module flags) and a constant-folding IRBuilder subset
   constfold.jai   ConstantFold.cpp port (cf_* fold or NONE, ce_* = ConstantExpr::get*)
-  debuginfo.jai   DI* nodes, DIArgList, debug records, debug-intrinsic upgrade, StripDebugInfo
+  debuginfo.jai   DI* nodes, DIArgList, debug records, debug-intrinsic upgrade, StripDebugInfo, UpgradeDebugInfo
+  verifier.jai, verifier_md.jai, verifier_calls.jai, verifier_intrinsics.jai   the IR Verifier (Verifier.cpp,
+                  TBAAVerifier, the convergence verifier) and opt's input/output verification (see "Verifier" in §8)
   apint.jai       APInt (arbitrary width, words in temp) and KnownBits arithmetic
   ir_edit.jai     mutation/CFG API for passes: iterators, successors/predecessors, phi edits, builders, split block
   inst_props.jai  mayHaveSideEffects, willReturn, wouldInstructionBeTriviallyDead
@@ -333,6 +335,18 @@ APFloat values print the way `AsmWriter`'s `writeAPFloatInternal` does: `double`
 Every unsupported construct (token, instruction, attribute, flag) makes the tool print
 `<tool>: <file>:<line>:<col>: error: …` to stderr and exit 1. Output is only written once the whole module has been
 processed, so a failure never leaves partial IR behind.
+
+### Verifier (verifier*.jai)
+
+The IR Verifier is one global state struct `vf` (`Verifier_State`), reset per run: LLVM's pointer sets are u32
+stamp arrays indexed by Value_Id / Md_Id with a generation counter (`vf.gen` per run, `vf.bb_gen` per block), maps
+are Tables. Each `visitX` of Verifier.cpp is a procedure `vf_visit_x`, the InstVisitor is a `switch` on the opcode
+(`vf_visit`), the C++ `Check` / `CheckDI` macros are the `vcheck` / `vcheck_di` macros (message and values passed as
+`Code`, evaluated only on failure; `` `return `` leaves the calling visit procedure exactly like the C++ macro).
+Values to print are a small tagged struct (`VArg`: value, metadata, type, record, ...). Diagnostics are written
+to stderr as they happen, through the AsmWriter of printer.jai driven by the verifier's own lazily processed
+ModuleSlotTracker (`vst`, hooked into the printer's slot lookups by `vst_lazy`). Entry points: `verify_module`,
+`verify_function`, `opt_verify_input`, `run_verifier_pass_module/function`.
 
 ## 9. Pass infrastructure (passes.jai)
 
