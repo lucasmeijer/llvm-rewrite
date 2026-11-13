@@ -526,6 +526,7 @@ tests/e2e/pipeline/arith/add_sub.ll::opt
 tests/e2e/pipeline/arith/add_sub.ll::roundtrip
 tests/e2e/pipeline/arith/bitwise.ll::opt
 tests/e2e/pipeline/arith/bitwise.ll::roundtrip
+tests/e2e/pipeline/arith/compare.ll::opt
 tests/e2e/pipeline/arith/compare.ll::roundtrip
 tests/e2e/pipeline/arith/int128.ll::opt
 tests/e2e/pipeline/arith/int128.ll::roundtrip
@@ -577,6 +578,7 @@ tests/e2e/pipeline/intrinsics/builtins.ll::opt
 tests/e2e/pipeline/intrinsics/builtins.ll::roundtrip
 tests/e2e/pipeline/intrinsics/rotates_minmax.ll::opt
 tests/e2e/pipeline/intrinsics/rotates_minmax.ll::roundtrip
+tests/e2e/pipeline/intrinsics/struct_copy_memset.ll::opt
 tests/e2e/pipeline/intrinsics/struct_copy_memset.ll::roundtrip
 tests/e2e/pipeline/libc/hello_puts.ll::opt
 tests/e2e/pipeline/libc/hello_puts.ll::roundtrip
@@ -601,6 +603,7 @@ tests/e2e/pipeline/misc/complex_numbers.ll::roundtrip
 tests/e2e/pipeline/misc/computed_goto.ll::opt
 tests/e2e/pipeline/misc/computed_goto.ll::roundtrip
 tests/e2e/pipeline/misc/crc32.ll::roundtrip
+tests/e2e/pipeline/misc/hash_table.ll::opt
 tests/e2e/pipeline/misc/hash_table.ll::roundtrip
 tests/e2e/pipeline/misc/setjmp_longjmp.ll::opt
 tests/e2e/pipeline/misc/setjmp_longjmp.ll::roundtrip
@@ -636,6 +639,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Dhrystone/dry.ll::roundtri
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Dhrystone/fldry.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Linpack/linpack-pc.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/exptree.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/queens.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/queens.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/ReedSolomon.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Misc/evalloop.ll::opt
@@ -680,6 +684,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Shootout/strcat.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Shootout/strcat.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Bubblesort.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Bubblesort.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/FloatMM.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/FloatMM.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/IntMM.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Oscar.ll::roundtrip
@@ -687,7 +692,9 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Perm.ll::roundtri
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Puzzle.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Queens.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Quicksort.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/RealMM.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/RealMM.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Towers.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Stanford/Towers.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2003-05-14-initialize-string.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/2003-05-14-initialize-string.ll::roundtrip
@@ -737,6 +744,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Regression/C/compare.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/compare.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/float16-smoke.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/float16-smoke.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/Regression/C/globalrefs.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/globalrefs.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/matrixTranspose.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Regression/C/pointer_arithmetic.ll::opt
@@ -762,6 +770,7 @@ tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-05-02-CastTest3.ll::op
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-05-02-CastTest3.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-05-02-ManyArguments.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-05-02-ManyArguments.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-05-03-NotTest.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-05-03-NotTest.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-05-19-DivTest.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2002-05-19-DivTest.ll::roundtrip
@@ -815,7 +824,9 @@ tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2005-05-12-Int64ToFP.ll::op
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2005-05-12-Int64ToFP.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2005-05-13-SDivTwo.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2005-05-13-SDivTwo.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2005-07-15-Bitfield-ABI.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2005-07-15-Bitfield-ABI.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2005-11-29-LongSwitch.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2005-11-29-LongSwitch.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2006-01-23-UnionInit.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2006-01-23-UnionInit.ll::roundtrip
@@ -860,6 +871,7 @@ tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2020-01-06-coverage-006.ll:
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2020-01-06-coverage-006.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2020-01-06-coverage-007.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2020-01-06-coverage-007.ll::roundtrip
+tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2020-01-06-coverage-008.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2020-01-06-coverage-008.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2020-01-06-coverage-009.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/UnitTests/2020-01-06-coverage-010.ll::opt
@@ -12319,6 +12331,7 @@ tests/imported/llvm/Transforms/PhaseOrdering/lifetime-sanitizer.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/lifetime-sanitizer.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/load-store-sameval.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/load-store-sameval.ll::roundtrip
+tests/imported/llvm/Transforms/PhaseOrdering/loop-access-checks.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/loop-access-checks.ll::roundtrip
 tests/imported/llvm/Transforms/PhaseOrdering/loop-rotation-vs-common-code-hoisting.ll::opt
 tests/imported/llvm/Transforms/PhaseOrdering/loop-rotation-vs-common-code-hoisting.ll::roundtrip
@@ -12926,12 +12939,14 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/BinOpSameOpcodeHelper.ll::round
 tests/imported/llvm/Transforms/SLPVectorizer/X86/InstructionsState-is-invalid-1.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/InstructionsState-is-invalid-1.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR32086.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/PR34635.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR34635.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35628_1.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35628_2.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35777.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35865-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR35865.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/PR36280.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR36280.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR39774.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/PR40310.ll::roundtrip
@@ -13065,6 +13080,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_bullet.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_bullet3.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_cmpop.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_dequeue.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_flop7.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_flop7.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_gep.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/crash_getpointersdiff-nullopt.ll::roundtrip
@@ -13163,6 +13179,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/gathered-shuffle-resized.ll::ro
 tests/imported/llvm/Transforms/SLPVectorizer/X86/gep-nodes-with-non-gep-inst.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/gep-nonconst-idx-transformed-to-const.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/gep.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/gep_mismatch.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/gep_mismatch.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/geps-non-pow-2.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/hadd-inseltpoison.ll::roundtrip
@@ -13205,6 +13222,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/load-merge-inseltpoison.ll::rou
 tests/imported/llvm/Transforms/SLPVectorizer/X86/load-merge.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/load-partial-vector-shuffle.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/long-full-reg-stores.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/long-pointer-distance.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/long-pointer-distance.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/long_chains.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/lookahead.ll::roundtrip
@@ -13234,6 +13252,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/minbw-multiused-from-gather.ll:
 tests/imported/llvm/Transforms/SLPVectorizer/X86/minbw-node-used-twice.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/minbw-user-non-sizable.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/minimum-sizes.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/minmax-main-opcode-copyables-cost.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/minmax-main-opcode-copyables-cost.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/minmax-main-opcode-copyables.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/mul-shl-nsw-intmin.ll::roundtrip
@@ -13267,6 +13286,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-before-main.ll:
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-instructions-become-schedulable.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-node-with-non-schedulable-parent.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-parent-multi-copyables.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-recalculate-deps.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-recalculate-deps.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-split-node.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/non-schedulable-user-different-bb.ll::roundtrip
@@ -13341,6 +13361,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/pr49933.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr52275.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr52275.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr59867.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/pr63668.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr63668.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr98978.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/pr98978.ll::roundtrip
@@ -13445,6 +13466,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/shift-lshr.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shift-shl.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-compatible-with-add.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation2.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation2.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation3.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/shl-to-add-transformation4.ll::roundtrip
@@ -13531,8 +13553,10 @@ tests/imported/llvm/Transforms/SLPVectorizer/X86/vector.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vector.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vector_gep.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vector_gep.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/vectorize-cmps.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vectorize-cmps.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vectorize-pair-path.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/X86/vectorize-reorder-reuse.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vectorize-reorder-reuse.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/vectorize-widest-phis.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/X86/whole-registers-compare.ll::roundtrip
@@ -13571,10 +13595,12 @@ tests/imported/llvm/Transforms/SLPVectorizer/non-power-of-2-buildvector.ll::roun
 tests/imported/llvm/Transforms/SLPVectorizer/non-vect-loads.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/order-reduction-infinite-loop.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/order-reduction-infinite-loop.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/orig-btiwidth-les-projected.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/orig-btiwidth-les-projected.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/partial-register-extract.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/phi-not-ordered.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/phi-not-ordered.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/rdar128092379.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/rdar128092379.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/reduction-root-node-with-no-state-but-gathered-loads.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/reschedule.ll::roundtrip
@@ -13589,6 +13615,7 @@ tests/imported/llvm/Transforms/SLPVectorizer/slp-deleted-inst.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/slp-hr-with-reuse.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/slp-max-phi-size.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/slp-max-reg-size.ll::roundtrip
+tests/imported/llvm/Transforms/SLPVectorizer/slp-non-pow-2-insertelement.ll::opt
 tests/imported/llvm/Transforms/SLPVectorizer/slp-non-pow-2-insertelement.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/slp-umax-rdx-matcher-crash.ll::roundtrip
 tests/imported/llvm/Transforms/SLPVectorizer/slp-variable-insertelement.ll::roundtrip
@@ -14785,7 +14812,9 @@ tests/perf/scaling/loops/n500.ll::opt
 tests/perf/scaling/loops/n500.ll::roundtrip
 tests/perf/scaling/loops/n8000.ll::opt
 tests/perf/scaling/loops/n8000.ll::roundtrip
+tests/perf/scaling/straightline/n16000.ll::opt
 tests/perf/scaling/straightline/n16000.ll::roundtrip
+tests/perf/scaling/straightline/n4000.ll::opt
 tests/perf/scaling/straightline/n4000.ll::roundtrip
 tests/perf/scaling/straightline/n64000.ll::roundtrip
 tests/perf/scaling/switch/n2000.ll::opt
