@@ -17099,6 +17099,8 @@ tests/lto/split/struct_by_value/main.ll::opt
 tests/lto/split/struct_by_value/main.ll::roundtrip
 tests/lto/split/struct_by_value::link
 tests/lto/split/struct_by_value::opt
+tests/pass/instsimplify/fcmp-ranges-fp80-fp128.ll::opt
+tests/pass/instsimplify/fcmp-ranges-fp80-fp128.ll::roundtrip
 tests/pass/pass-manager/bpi-kept-with-cfg.ll::analysis
 tests/pass/pass-manager/bpi-kept-with-cfg.ll::roundtrip
 tests/pass/pass-manager/mssa-cached-across-adaptors.ll::roundtrip
