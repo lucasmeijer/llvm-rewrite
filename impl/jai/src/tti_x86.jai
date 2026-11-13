@@ -63,7 +63,8 @@ x86_reg_usage_for_type :: (st: *X86_Lowering, ty: Type_Id) -> s64 {
         while !xl_is_type_legal(st, reg) reg = xl_type_to_transform_to(st, reg);
         return (evt_bits(e) + evt_bits(reg) - 1) / evt_bits(reg);
     }
-    x86_np("getRegUsageForType of an extended vector type");
+    n, _ := xl_vector_type_breakdown_evt(st, e);
+    return n;
     return 0;
 }
 
@@ -776,4 +777,35 @@ x86_tm_pointer_bits :: (st: *X86_Lowering, as: u32) -> u32 {
     if as == 270 || as == 271 return 32;
     if as == 272 return 64;
     return st_ptr_bits(st);
+}
+
+// TargetLoweringBase::getVectorTypeBreakdown for an extended fixed-length vector EVT: (NumRegisters, RegisterVT)
+xl_vector_type_breakdown_evt :: (st: *X86_Lowering, vt: Evt) -> (s64, u32) {
+    if evt_is_simple(vt) { n, r := xl_vector_type_breakdown_mvt(st, vt.m); return n, r; }
+    if evt_scalable(vt) x86_np("getVectorTypeBreakdown of an extended scalable vector");
+    ec := evt_n(vt);
+    ta := xl_type_action(st, vt);
+    if ec > 1 && (ta == TA_WIDEN_VECTOR || ta == TA_PROMOTE_INTEGER) {
+        reg := xl_type_to_transform_to(st, vt);
+        if xl_is_type_legal(st, reg) return 1, reg.m;
+    }
+    elt := evt_elt(vt);
+    nregs: s64 = 1;
+    if (ec & (ec - 1)) != 0 { nregs = ec; ec = 1; }
+    while ec > 1 && !xl_is_type_legal(st, evt_vec(elt, ec, false)) { ec /= 2; nregs <<= 1; }
+    nvt := evt_vec(elt, ec, false);
+    if !xl_is_type_legal(st, nvt) nvt = elt;
+    dest := xl_register_type_evt(st, nvt);
+    nbits := evt_bits(nvt);
+    if mvt_bits(dest) < nbits {
+        p: u32 = 1; while p < nbits p *= 2;
+        return nregs * (p / mvt_bits(dest)), dest;
+    }
+    return nregs, dest;
+}
+// TargetLoweringBase::getRegisterType(Context, EVT)
+xl_register_type_evt :: (st: *X86_Lowering, vt: Evt) -> u32 {
+    if evt_is_simple(vt) return st.register_type[xl_ord(vt.m)];
+    if evt_is_vector(vt) { _, r := xl_vector_type_breakdown_evt(st, vt); return r; }
+    return xl_register_type_evt(st, xl_type_to_transform_to(st, vt));
 }

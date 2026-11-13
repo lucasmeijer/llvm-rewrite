@@ -219,6 +219,31 @@ irb_call :: (b: *Irb, callee: Value_Id, args: [] Value_Id, name: string = "") ->
     set_op(i, cast(u32) args.count, callee);
     return irb_insert(b, i, name);
 }
+// CreateCall(Callee, Args, OpBundles) with `from`'s bundles (CallBase::getOperandBundlesAsDefs)
+irb_call_with_bundles_of :: (b: *Irb, callee: Value_Id, args: [] Value_Id, from: Value_Id, name: string = "") -> Value_Id {
+    nb := call_num_bundles(from);
+    if nb == 0 return irb_call(b, callee, args, name);
+    nbops: u32 = 0;
+    for k: 0..nb-1 { bb, ee := call_bundle_range(from, k); nbops += ee - bb; }
+    fty := glob(callee).value_type;
+    i := new_inst(.CALL, func_ret(fty), cast(u32) args.count + nbops + 1);
+    inst(i).ty2 = fty;
+    for args set_op(i, cast(u32) it_index, it);
+    at := cast(u32) args.count;
+    r := inst(i);
+    pool_start := cast(u32) ir.u32_pool.count;
+    for k: 0..nb-1 {
+        bb, ee := call_bundle_range(from, k);
+        tag := ir.u32_pool[inst(from).idx + 3 * k];
+        begin := at;
+        for x: bb..ee-1 { set_op(i, at, op(from, x)); at += 1; }
+        array_add(*ir.u32_pool, tag); array_add(*ir.u32_pool, begin); array_add(*ir.u32_pool, at);
+    }
+    r = inst(i);
+    r.idx = pool_start; r.nidx = nb;
+    set_op(i, at, callee);
+    return irb_insert(b, i, name);
+}
 // CreateIntrinsic(ID, OverloadTypes, Args)
 irb_intrinsic :: (b: *Irb, name: string, otys: [] Type_Id, args: [] Value_Id) -> Value_Id {
     f := get_or_insert_intrinsic_declaration(intrinsic_id_by_name(name), otys);

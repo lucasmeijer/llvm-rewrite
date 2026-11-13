@@ -554,7 +554,7 @@ vp_replicate_execute :: (s: *Vp_State, r: Vp_Rec) {
     for o, k: vr(r).ops set_op(c, cast(u32) k, vs_get(s, o, true));
     irb_insert(*s.b, c);
     vs_set(s, vr(r).def, c, true);
-    if call_iid(c) == IID_ASSUME vp_unported("replicating llvm.assume (AssumptionCache::registerAssumption)");
+    if call_iid(c) == IID_ASSUME && s.ac != null ac_register_assumption(s.ac, c);
 }
 
 vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
@@ -879,8 +879,9 @@ vp_widen_call_execute :: (s: *Vp_State, r: Vp_Rec) {
         array_add(*args, a);
     }
     ci := vp_uv(vr(r).def);
-    if ci != NONE && is_inst(ci) && call_num_bundles(ci) > 0 vp_unported("operand bundles on widened vector-variant calls");
-    v := irb_call(*s.b, variant, args);
+    v: Value_Id;
+    if ci != NONE && is_inst(ci) v = irb_call_with_bundles_of(*s.b, variant, args, ci);
+    else v = irb_call(*s.b, variant, args);
     vp_apply_flags(r, v);
     vp_apply_metadata(r, v);
     inst(v).cc = glob(variant).cc;
@@ -905,8 +906,9 @@ vp_widen_intrinsic_execute :: (s: *Vp_State, r: Vp_Rec) {
     }
     f := get_or_insert_intrinsic_declaration(id, tys);
     ci := vp_uv(vr(r).def);
-    if ci != NONE && is_inst(ci) && call_num_bundles(ci) > 0 vp_unported("operand bundles on widened intrinsic calls");
-    v := irb_call(*s.b, f, args);
+    v: Value_Id;
+    if ci != NONE && is_inst(ci) v = irb_call_with_bundles_of(*s.b, f, args, ci);
+    else v = irb_call(*s.b, f, args);
     if is_fp_math_operator(v) set_fmf(v, s.fmf);
     vp_apply_flags(r, v);
     vp_apply_metadata(r, v);
