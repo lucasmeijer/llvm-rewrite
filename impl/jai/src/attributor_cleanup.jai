@@ -66,9 +66,9 @@ atr_is_valid_function_signature_rewrite :: (arg: Value_Id, types: [] Type_Id) ->
     uai := false;
     ok := true;
     for cb: atr_call_sites_of(f, true, NONE, *uai, *ok, true) {
-        callee := call_callee(cb);
-        // ACS.getCalledFunction() and its return type, the called operand type, the argument count, must-tail
-        if vtype(cb) != fn_ret_type(f) || vtype(callee) != vtype(f) || call_num_args(cb) != fn_nargs(f) || call_is_must_tail(cb) { ok = false; break; }
+        // CallSiteCanBeChanged
+        cf := acs_called_function(acs);
+        if cf == NONE || vtype(cb) != fn_ret_type(cf) || vtype(call_callee(cb)) != vtype(f) || acs_num_args(acs) != fn_nargs(f) || acs_is_callback(acs) || call_is_must_tail(cb) { ok = false; break; }
     }
     if !ok return false;
     for ci: atr_opcode_insts(f, .[.CALL]) if call_is_must_tail(ci) return false;
@@ -501,9 +501,119 @@ atr_cgscc_update :: (c_in: s32, ur: *Cgscc_Ur) -> s32 {
 
 // ---------------------------------------------------------------- wrappers and internalization
 
-atr_create_shallow_wrapper :: (f: Value_Id) { fatal("attributor: -attributor-allow-shallow-wrappers is not supported yet"); }
-atr_internalize_non_exact_functions :: () { fatal("attributor: -attributor-allow-deep-wrappers is not supported yet"); }
-fn_has_address_taken_for_attributor :: (f: Value_Id) -> bool { fatal("attributor: -attributor-assume-closed-world is not supported yet"); return true; }
+// Attributor::createShallowWrapper
+atr_create_shallow_wrapper :: (f: Value_Id) {
+    if is_declaration(f) fatal("attributor: cannot create a shallow wrapper around a declaration");
+    ft := glob(f).value_type;
+    name := copy_string(vname(f),, temp);
+    set_name(f, "");   // the inside function becomes anonymous
+    w := new_function(ft, "", glob(f).addrspace);
+    glob(w).linkage = glob(f).linkage;
+    ipo_fn_insert_before(w, f);
+    set_name(w, name);
+    gv_set_linkage(f, .INTERNAL);
+    replace_all_uses_with(f, w);
+    glob(w).comdat = glob(f).comdat;
+    glob(f).comdat = -1;
+    mds: [..] Kind_Md; mds.allocator = temp;
+    get_all_metadata(f, *mds);
+    for mds add_metadata(w, it.kind, it.md);
+    glob(w).attrs = glob(f).attrs;
+    entry := create_block(w, "entry");
+    args: [..] Value_Id; args.allocator = temp;
+    for k: 0..cast(s64) fn_nargs(w) - 1 {
+        a := fn_arg(w, cast(u32) k);
+        array_add(*args, a);
+        if vname(fn_arg(f, cast(u32) k)).count set_name(a, vname(fn_arg(f, cast(u32) k)));
+    }
+    ci := create_call_fn(f, args);
+    block_append_inst(entry, ci);
+    call_set_tail_kind(ci, TCK_TAIL);
+    call_add_fn_attr(ci, Attr_Kind.NoInline);
+    ret: Value_Id;
+    if vtype(ci) == ir.t_void ret = new_inst(.RET, ir.t_void, 0);
+    else { ret = new_inst(.RET, ir.t_void, 1); set_op(ret, 0, ci); }
+    block_append_inst(entry, ret);
+}
+// CallGraphUpdater::reanalyzeFunction (a no-op without a lazy call graph)
+atr_cg_reanalyze_function :: (f: Value_Id) {
+    if !atr.is_module_pass fatal("attributor: -attributor-allow-deep-wrappers in the CGSCC pass is not supported yet");
+}
+// runAttributorOnFunctions' AllowDeepWrapper step: internalize the non-exact definitions
+atr_internalize_non_exact_functions :: () {
+    is_interposable_linkage :: (l: Linkage) -> bool { return l == .WEAK_ANY || l == .LINKONCE_ANY || l == .COMMON || l == .EXTERN_WEAK; }
+    n := atr.functions.count;
+    for k: 0..n - 1 {
+        f := atr.functions[k];
+        if is_declaration(f) || gv_is_definition_exact(f) || !has_uses(f) || is_interposable_linkage(glob(f).linkage) continue;
+        // internalizeFunction(F): isInternalizable
+        if gv_has_local_linkage(f) fatal("attributor: could not internalize function");
+        vm: Value_Map; vmap_init(*vm);
+        nf := clone_function(f, *vm, tprint("%.internalized", vname(f)), f);
+        gv_set_visibility(nf, 0);
+        gv_set_linkage(nf, .PRIVATE);
+        glob(nf).dso_local = true;
+        // replaceUsesWithIf(not a call from an internalized function)
+        us: [..] Use_Id; us.allocator = temp;
+        u := ir.v_first_use[f];
+        while u != NONE {
+            usr := ir.u_user[u];
+            if is_inst(usr) && is_call_base(usr) && inst_fn(usr) != f array_add(*us, u);
+            u = ir.u_next[u];
+        }
+        for us use_set(it, nf);
+        array_add(*atr.functions, nf);
+        table_set(*atr.fn_set, nf, true);
+        atr_replace_function_with(f, nf);
+        // CGUpdater.reanalyzeFunction of the callers
+        u = ir.v_first_use[nf];
+        while u != NONE {
+            usr := ir.u_user[u];
+            if is_inst(usr) && is_call_base(usr) atr_cg_reanalyze_function(inst_fn(usr));
+            u = ir.u_next[u];
+        }
+    }
+}
+// Function::hasAddressTaken(nullptr, IgnoreCallbackUses=false, IgnoreAssumeLikeCalls=true, IgnoreLLVMUsed=true,
+// IgnoreARCAttachedCall=false, IgnoreCastedDirectCall=true)
+fn_has_address_taken_for_attributor :: (f: Value_Id) -> bool {
+    u := ir.v_first_use[f];
+    while u != NONE {
+        defer u = ir.u_next[u];
+        usr := ir.u_user[u];
+        if vkind(usr) == .C_BLOCKADDR continue;   // a blockaddress has no operands in LLVM 23: not a use of its function
+        if !(is_inst(usr) && is_call_base(usr)) {
+            o := opr_code(usr);
+            is_cast := o == .BITCAST || o == .ADDRSPACECAST;
+            if is_cast {
+                all_assume_like := true;
+                x := ir.v_first_use[usr];
+                while x != NONE {
+                    uu := ir.u_user[x];
+                    if !(is_inst(uu) && is_assume_like_intrinsic(uu)) { all_assume_like = false; break; }
+                    x = ir.u_next[x];
+                }
+                if all_assume_like continue;
+            }
+            if has_uses(usr) {
+                fuu := usr;
+                if is_cast && num_uses(usr) == 1 && has_uses(ir.u_user[ir.v_first_use[usr]]) fuu = ir.u_user[ir.v_first_use[usr]];
+                all_used := true;
+                x := ir.v_first_use[fuu];
+                while x != NONE {
+                    uu := ir.u_user[x];
+                    if !(vkind(uu) == .GLOBAL_VAR && (vname(uu) == "llvm.compiler.used" || vname(uu) == "llvm.used")) { all_used = false; break; }
+                    x = ir.u_next[x];
+                }
+                if all_used continue;
+            }
+            return true;
+        }
+        if is_assume_like_intrinsic(usr) continue;
+        if opno_of(u) != nops(usr) - 1 return true;
+    }
+    return false;
+}
 
 // ---------------------------------------------------------------- printers
 

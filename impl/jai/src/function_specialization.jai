@@ -775,12 +775,14 @@ fs_clone_candidate_function :: (f: Value_Id, n: s64) -> Value_Id {
 }
 // CloneFunction(F, VMap): a new function with F's name (uniqued) at the end of the module, the body cloned with
 // CloneFunctionInto(LocalChangesOnly); `vm` maps F's arguments and blocks (and instructions) to the clone's
-clone_function :: (f: Value_Id, vm: *Value_Map) -> Value_Id {
+// (`new_name`/`before`: Function::Create(F->getName() + suffix) inserted before `before`, as Attributor::internalizeFunctions)
+clone_function :: (f: Value_Id, vm: *Value_Map, new_name := "", before: Value_Id = NONE) -> Value_Id {
     ft := glob(f).value_type;
     nf := new_function(ft, "", glob(f).addrspace);
     gv_set_linkage(nf, glob(f).linkage);
-    array_add(*ir.m_functions, nf);
-    set_name(nf, vname(f));
+    if before != NONE ipo_fn_insert_before(nf, before);
+    else array_add(*ir.m_functions, nf);
+    set_name(nf, ifx new_name.count then new_name else vname(f));
     na := glob(f).nargs;
     if na > 0 for k: 0..na - 1 {
         if vname(fn_arg(f, k)).count set_name(fn_arg(nf, k), vname(fn_arg(f, k)));

@@ -376,7 +376,7 @@ priv_arg_identify_type :: (i: u32) -> Value_Id {
     argno := cast(u32) irp_cs_arg_no(p);
     ok := true;
     for cb: atr_call_sites(i, true, *uai, *ok) {
-        cp := irp_acs_argument(cb, argno);
+        cp := irp_acs_argument(acs, argno);
         if irp_kind(cp) == .INVALID { ok = false; break; }
         o := atr_get_aa(.PRIVATIZABLE_PTR, cp, i, DEP_REQUIRED);
         if o == NONE { ok = false; break; }
@@ -435,11 +435,51 @@ priv_update :: (i: u32) -> bool {
     if !ok return aa_pessimistic(i);
     arg := irp_assoc_arg(p);
     if !atr_is_valid_function_signature_rewrite(arg, repl) return aa_pessimistic(i);
-    // IsCompatiblePrivArgOfOtherCallSite: only direct calls (no callbacks), and they have no callback uses
+    argno := arg_no(arg);
+    // IsCompatiblePrivArgOfOtherCallSite
     ok = true;
-    for cb: atr_call_sites(i, true, *uai, *ok) {}
+    for cb: atr_call_sites(i, true, *uai, *ok) {
+        good := false;
+        if !acs_is_callback(acs) && !atr_call_is_indirect(cb) good = priv_compatible_of_callback(i, cb, argno);
+        else if acs_is_callback(acs) good = priv_compatible_of_direct_cs(i, acs, argno);
+        if !good { ok = false; break; }
+    }
     if !ok return aa_pessimistic(i);
     return ATR_UNCHANGED;
+}
+// IsCompatiblePrivArgOfCallback
+priv_compatible_of_callback :: (i: u32, cb: Value_Id, argno: s64) -> bool {
+    cbu: [..] Use_Id; cbu.allocator = temp;
+    acs_callback_uses(cb, *cbu);
+    for u: cbu {
+        a := acs_from_use(u);
+        cf := acs_called_function(a);
+        for k: 0..cast(s64) fn_nargs(cf) - 1 {
+            if acs_arg_no(a, cast(u32) k) != argno continue;
+            o := atr_get_aa(.PRIVATIZABLE_PTR, irp_value(fn_arg(cf, cast(u32) k)), i, DEP_REQUIRED);
+            if o != NONE && aa_is_valid(o) {
+                t := priv_ext(o).ty;
+                if t == OV_NOVAL continue;
+                if t == priv_ext(i).ty continue;
+            }
+            return false;
+        }
+    }
+    return true;
+}
+// IsCompatiblePrivArgOfDirectCS
+priv_compatible_of_direct_cs :: (i: u32, a: Acs, argno: s64) -> bool {
+    dc_argno := acs_arg_no(a, cast(u32) argno);
+    callee := call_callee(a.cb);
+    if vkind(callee) == .FUNCTION && dc_argno < cast(s64) fn_nargs(callee) {
+        o := atr_get_aa(.PRIVATIZABLE_PTR, irp_value(fn_arg(callee, cast(u32) dc_argno)), i, DEP_REQUIRED);
+        if o != NONE && aa_is_valid(o) {
+            t := priv_ext(o).ty;
+            if t == OV_NOVAL return true;
+            if t == priv_ext(i).ty return true;
+        }
+    }
+    return false;
 }
 
 priv_manifest :: (i: u32) -> bool {

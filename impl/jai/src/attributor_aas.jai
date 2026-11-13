@@ -1132,20 +1132,27 @@ ce_call_site_update :: (i: u32) -> bool {
             }
         }
     }
-    // ProcessCalledOperand
-    if is_constant_kind(vkind(callee)) {
-        if vkind(callee) == .FUNCTION ce_add_called_function(i, callee, *change);
-        else ce_set_has_unknown_callee(i, true, *change);
-        return change;
+    ce_process_called_operand(i, callee, cb, *change);
+    // the callback callees
+    cbu: [..] Use_Id; cbu.allocator = temp;
+    acs_callback_uses(cb, *cbu);
+    for cbu ce_process_called_operand(i, ir.u_val[it], cb, *change);
+    return change;
+}
+// ProcessCalledOperand
+ce_process_called_operand :: (i: u32, v: Value_Id, ctx: Value_Id, change: *bool) {
+    if is_constant_kind(vkind(v)) {
+        if vkind(v) == .FUNCTION ce_add_called_function(i, v, change);
+        else ce_set_has_unknown_callee(i, true, change);
+        return;
     }
     uai := false;
     vals: [..] Vac; vals.allocator = temp;
-    if !atr_get_assumed_simplified_values(irp_value(callee), i, *vals, AA_ANY, *uai) array_add(*vals, .{callee, cb});
+    if !atr_get_assumed_simplified_values(irp_value(v), i, *vals, AA_ANY, *uai) array_add(*vals, .{v, ctx});
     for vals {
-        if vkind(it.v) == .FUNCTION ce_add_called_function(i, it.v, *change);
-        else ce_set_has_unknown_callee(i, true, *change);
+        if vkind(it.v) == .FUNCTION ce_add_called_function(i, it.v, change);
+        else ce_set_has_unknown_callee(i, true, change);
     }
-    return change;
 }
 // AACallEdgesFunction::updateImpl
 ce_function_update :: (i: u32) -> bool {

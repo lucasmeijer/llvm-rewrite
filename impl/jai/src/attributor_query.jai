@@ -155,15 +155,97 @@ atr_rw_insts :: (q: u32, uai: *bool, ok: *bool) -> Atr_Insts {
     return r;
 }
 
+// ---------------------------------------------------------------- AbstractCallSite (llvm/lib/IR/AbstractCallSite.cpp)
+
+// A direct/indirect call (enc empty) or a callback call through a broker's !callback encoding (enc[0]: the
+// broker operand of the callback callee, enc[1 + k]: the broker operand passed as callback argument k, -1: none).
+Acs :: struct { cb: Value_Id = NONE; enc: [..] s32; }
+acs_md_int :: (m: Md_Id) -> s64 { ok, v := md_const_int_value(m); return cast,no_check(s64) v; }
+// AbstractCallSite::getCallbackUses
+acs_callback_uses :: (cb: Value_Id, out: *[..] Use_Id) {
+    callee := call_callee(cb);
+    if vkind(callee) != .FUNCTION return;
+    md := get_metadata(callee, md_fixed("callback"));
+    if md == NONE return;
+    for k: 0..cast(s64) md_nops(md) - 1 {
+        idx := acs_md_int(md_op(md_node_op(md, cast(u32) k), 0));
+        if idx >= 0 && idx < cast(s64) call_num_args(cb) array_add(out, op_use(cb, cast(u32) idx));
+    }
+}
+// AbstractCallSite(const Use *U)
+acs_from_use :: (use: Use_Id) -> Acs {
+    a: Acs;
+    a.enc.allocator = temp;
+    u := use;
+    usr := ir.u_user[u];
+    if !irp_is_call(usr) {
+        if vkind(usr) == .C_EXPR && num_uses(usr) == 1 && is_cast_op(cexpr(usr).op) {
+            u = ir.v_first_use[usr];
+            usr = ir.u_user[u];
+        }
+        if !irp_is_call(usr) return a;
+    }
+    a.cb = usr;
+    if u == op_use(usr, nops(usr) - 1) return a;
+    callee := call_callee(usr);
+    if vkind(callee) != .FUNCTION { a.cb = NONE; return a; }
+    md := get_metadata(callee, md_fixed("callback"));
+    if md == NONE { a.cb = NONE; return a; }
+    use_idx := cast(s64) use_arg_no(u);
+    enc: Md_Id = NONE;
+    for k: 0..cast(s64) md_nops(md) - 1 {
+        om := md_node_op(md, cast(u32) k);
+        if acs_md_int(md_op(om, 0)) != use_idx continue;
+        enc = om;
+        break;
+    }
+    if enc == NONE { a.cb = NONE; return a; }
+    for k: 0..cast(s64) md_nops(enc) - 2 array_add(*a.enc, cast(s32) acs_md_int(md_op(enc, cast(u32) k)));
+    if !func_vararg(glob(callee).value_type) return a;
+    ok, flag := md_const_int_value(md_op(enc, md_nops(enc) - 1));
+    if flag == 0 return a;
+    na := call_num_args(usr);
+    for k: fn_nargs(callee)..na - 1 array_add(*a.enc, cast(s32) k);
+    return a;
+}
+acs_is_callback :: inline (a: Acs) -> bool { return a.enc.count != 0; }
+acs_num_args :: (a: Acs) -> s64 { if !acs_is_callback(a) return call_num_args(a.cb); return a.enc.count - 1; }
+acs_arg_no :: (a: Acs, k: u32) -> s64 { if !acs_is_callback(a) return k; return a.enc[k + 1]; }
+acs_arg :: (a: Acs, k: u32) -> Value_Id {
+    if !acs_is_callback(a) return call_arg(a.cb, k);
+    n := a.enc[k + 1];
+    return ifx n >= 0 then call_arg(a.cb, cast(u32) n) else NONE;
+}
+acs_called_operand :: (a: Acs) -> Value_Id {
+    if !acs_is_callback(a) return call_callee(a.cb);
+    return call_arg(a.cb, cast(u32) a.enc[0]);
+}
+acs_called_function :: (a: Acs) -> Value_Id {
+    v := acs_called_operand(a);
+    if v == NONE return NONE;
+    f := strip_pointer_casts(v);
+    return ifx vkind(f) == .FUNCTION then f else NONE;
+}
+// isCallee(U)
+acs_is_callee :: (a: Acs, use: Use_Id) -> bool {
+    if !acs_is_callback(a) return use == op_use(a.cb, nops(a.cb) - 1);
+    u := use;
+    usr := ir.u_user[u];
+    if vkind(usr) == .C_EXPR && num_uses(usr) == 1 && is_cast_op(cexpr(usr).op) u = ir.v_first_use[usr];
+    if ir.u_user[u] != a.cb return false;
+    return cast(s64) use_arg_no(u) == a.enc[0];
+}
+
 // ---------------------------------------------------------------- checkForAllCallSites
 
-// The direct call sites of `f` (the body runs for each, with `it` the call); `ok` is cleared when the walk fails
-// (not all call sites known, a non-call use, an argument type mismatch). The body clears `ok` and breaks when its
-// predicate fails.
+// The abstract call sites of `f` (the body runs for each, with `it` the call instruction and `acs` the
+// AbstractCallSite); `ok` is cleared when the walk fails (not all call sites known, a non-call use, an argument
+// type mismatch). The body clears `ok` and breaks when its predicate fails.
 Atr_Call_Sites :: struct { f: Value_Id; require_all: bool; q: u32 = NONE; uai: *bool; pot_dead: bool; ok: *bool; }
 for_expansion :: (r: Atr_Call_Sites, body: Code, flags: For_Flags) #expand {
     `it_index := 0;
     `it: Value_Id = NONE;
+    `acs: Acs;
     _uses: [..] Use_Id; _uses.allocator = temp;
     if r.require_all && !gv_has_local_linkage(r.f) r.ok.* = false;
     else {
@@ -181,22 +263,21 @@ for_expansion :: (r: Atr_Call_Sites, body: Code, flags: For_Flags) #expand {
                 while _x != NONE { array_add(*_uses, _x); _x = ir.u_next[_x]; }
                 continue;
             }
-            // AbstractCallSite(&U): without !callback metadata only a callee use makes a call site
-            _eu := _cu;
-            _cb := _user;
-            if !irp_is_call(_cb) {
-                _cb = NONE;
-                if vkind(_user) == .C_EXPR && num_uses(_user) == 1 && is_cast_op(cexpr(_user).op) {
-                    _eu = ir.v_first_use[_user];
-                    if irp_is_call(ir.u_user[_eu]) _cb = ir.u_user[_eu];
-                }
+            acs = acs_from_use(_cu);
+            if acs.cb == NONE { r.ok.* = false; break; }
+            _eu := ifx acs_is_callback(acs) then op_use(acs.cb, cast(u32) acs.enc[0]) else _cu;
+            if !acs_is_callee(acs, _eu) {
+                if !r.require_all continue;
+                r.ok.* = false; break;
             }
-            if _cb == NONE || _eu != op_use(_cb, nops(_cb) - 1) { r.ok.* = false; break; }
-            _n := min(cast(s64) call_num_args(_cb), cast(s64) fn_nargs(r.f));
+            _n := min(acs_num_args(acs), cast(s64) fn_nargs(r.f));
             _mismatch := false;
-            for _a: 0.._n - 1 if vtype(fn_arg(r.f, cast(u32) _a)) != vtype(call_arg(_cb, cast(u32) _a)) { _mismatch = true; break; }
+            for _a: 0.._n - 1 {
+                _o := acs_arg(acs, cast(u32) _a);
+                if _o != NONE && vtype(fn_arg(r.f, cast(u32) _a)) != vtype(_o) { _mismatch = true; break; }
+            }
             if _mismatch { r.ok.* = false; break; }
-            it = _cb;
+            it = acs.cb;
             #insert body;
         }
     }

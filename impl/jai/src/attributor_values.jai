@@ -447,7 +447,7 @@ pv_argument_update :: (i: u32) -> bool {
     vals: [..] Vac; vals.allocator = temp;
     ok := true;
     for cb: atr_call_sites(i, true, *uai, *ok) {
-        cp := irp_acs_argument(cb, argno);
+        cp := irp_acs_argument(acs, argno);
         if irp_kind(cp) == .INVALID { ok = false; break; }
         if !atr_get_assumed_simplified_values(cp, i, *vals, AA_INTER, *uai) { ok = false; break; }
         if !aa_is_valid(i) { ok = false; break; }
@@ -1268,7 +1268,7 @@ aa_argument_from_call_site_arguments :: (i: u32, ak: Attr_Kind) -> bool {
     uai := false;
     ok := true;
     for cb: atr_call_sites(i, true, *uai, *ok) {
-        cpos := irp_acs_argument(cb, argno);
+        cpos := irp_acs_argument(acs, argno);
         if irp_kind(cpos) == .INVALID { ok = false; break; }
         if ak != .NONE_ATTR {
             has, _ := atr_has_assumed_ir_attr(ak, i, cpos, DEP_REQUIRED);

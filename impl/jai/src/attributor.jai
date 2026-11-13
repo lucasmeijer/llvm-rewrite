@@ -61,9 +61,11 @@ irp_cs_function :: (cb: Value_Id) -> Irp { return .{IRP_ENC_VALUE, cb}; }
 irp_cs_returned :: (cb: Value_Id) -> Irp { return .{IRP_ENC_RETURNED, cb}; }
 irp_cs_argument :: (cb: Value_Id, k: u32) -> Irp { return .{IRP_ENC_CSARG, op_use(cb, k)}; }
 // IRPosition::callsite_argument(AbstractCallSite, ArgNo) for a direct call site
-irp_acs_argument :: (cb: Value_Id, k: u32) -> Irp {
-    if call_num_args(cb) <= k return IRP_INVALID;
-    return irp_cs_argument(cb, k);
+// IRPosition::callsite_argument(ACS, ArgNo)
+irp_acs_argument :: (a: Acs, k: u32) -> Irp {
+    n := acs_arg_no(a, k);
+    if n < 0 || call_num_args(a.cb) <= n return IRP_INVALID;
+    return irp_cs_argument(a.cb, cast(u32) n);
 }
 
 irp_kind :: (p: Irp) -> Irp_Kind {
@@ -84,12 +86,30 @@ irp_cs_arg_no :: (p: Irp) -> s64 {
     if k == .CALL_SITE_ARGUMENT return cast(s64) (p.v - ir.v_ops[ir.u_user[p.v]]);
     return -1;
 }
-// getAssociatedArgument (callbacks fail loudly at the start of the run)
+// getAssociatedArgument: a unique callback callee argument the call site operand is passed to, else the direct
+// callee's argument
 irp_assoc_arg :: (p: Irp) -> Value_Id {
     if irp_kind(p) == .ARGUMENT return p.v;
     argno := irp_cs_arg_no(p);
     if argno < 0 return NONE;
-    callee := call_callee(irp_anchor(p));
+    cb := irp_anchor(p);
+    cbu: [..] Use_Id; cbu.allocator = temp;
+    acs_callback_uses(cb, *cbu);
+    have_cand := false;
+    cand: Value_Id = NONE;
+    for u: cbu {
+        a := acs_from_use(u);
+        cf := acs_called_function(a);
+        if cf == NONE continue;
+        for k: 0..acs_num_args(a) - 1 {
+            if acs_arg_no(a, cast(u32) k) != argno continue;
+            if have_cand { cand = NONE; break; }
+            have_cand = true;
+            cand = fn_arg(cf, cast(u32) k);
+        }
+    }
+    if have_cand && cand != NONE return cand;
+    callee := call_callee(cb);
     if callee != NONE && vkind(callee) == .FUNCTION && cast(s64) fn_nargs(callee) > argno return fn_arg(callee, cast(u32) argno);
     return NONE;
 }
@@ -1548,8 +1568,6 @@ attributor_run_on :: (functions: [] Value_Id, delete_fns: bool, is_module_pass: 
     if functions.count == 0 return false;
     atr_reset(functions, is_module_pass, false, false);
     atr.delete_fns = delete_fns;
-    // !callback metadata needs AbstractCallSite callback calls, which are not ported
-    for f: ir.m_functions if fn_has_callback_md(f) fatal("attributor: !callback metadata is not supported yet");
     if atr_call_site_specific fatal("attributor: -attributor-enable-call-site-specific-deduction is not supported yet");
     // the Attributor constructor: the indirectly callable functions of a closed world module
     if atr_is_closed_world() {
@@ -1603,7 +1621,6 @@ attributor_light_run_on :: (functions: [] Value_Id, is_module_pass: bool, cached
     atr_reset(functions, is_module_pass, cached_only, true);
     modified: [..] Value_Id; modified.allocator = temp;
     if functions.count == 0 return false, modified;
-    for f: ir.m_functions if fn_has_callback_md(f) fatal("attributor-light: !callback metadata is not supported yet");
     atr.phase = .SEEDING;
     for f: functions {
         if is_declaration(f) continue;

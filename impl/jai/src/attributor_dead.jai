@@ -196,7 +196,7 @@ dead_update :: (i: u32) -> bool {
         for x: atr_insts(i, .[.RET], *uai, *ok) {}
         ok = true;
         for cb: atr_call_sites(i, true, *uai, *ok) {
-            if !dead_are_all_uses_assumed_dead(i, cb) { ok = false; break; }
+            if acs_is_callback(acs) || !dead_are_all_uses_assumed_dead(i, cb) { ok = false; break; }
         }
         if !ok return aa_pessimistic(i);
         return ATR_UNCHANGED;

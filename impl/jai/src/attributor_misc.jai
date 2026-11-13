@@ -287,7 +287,9 @@ na_update :: (i: u32) -> bool {
         ro, _ := atr_is_assumed_read_only(p, i);
         if ro return aa_argument_from_call_site_arguments(i, .NoAlias);
         uai := false;
-        if atr_all_call_sites_known(i, *uai) return aa_argument_from_call_site_arguments(i, .NoAlias);
+        ok := true;
+        for cb: atr_call_sites(i, true, *uai, *ok) if acs_is_callback(acs) { ok = false; break; }
+        if ok return aa_argument_from_call_site_arguments(i, .NoAlias);
         return aa_pessimistic(i);
     }
     if pk == .CALL_SITE_ARGUMENT return na_cs_argument_update(i);
