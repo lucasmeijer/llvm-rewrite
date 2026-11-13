@@ -272,8 +272,8 @@ Pass_Kind :: enum u8 {
     DEBUGIFY; CHECK_DEBUGIFY; REDUNDANT_DBG_INST_ELIM;
     // GVN (pass_gvn.jai)
     GVN;
-    // NewGVN (pass_newgvn.jai)
-    NEWGVN;
+    // NewGVN (pass_newgvn.jai), GVNSink (pass_gvn_sink.jai), GVNHoist (pass_gvn_hoist.jai)
+    NEWGVN; GVN_SINK; GVN_HOIST;
     // DeadStoreElimination (pass_dse.jai), MemCpyOpt (pass_memcpyopt.jai)
     DSE; MEMCPYOPT;
     // LazyValueInfo (lazy_value_info.jai), CorrelatedValuePropagation (pass_cvp.jai), JumpThreading (pass_jump_threading.jai)
@@ -373,6 +373,8 @@ PASS_TABLE :: Pass_Info.[
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
     .{"gvn", .FUNCTION, .GVN, false, .DOMTREE},   // also gvn<...> (lookup_pass)
     .{"newgvn", .FUNCTION, .NEWGVN, false, .DOMTREE},
+    .{"gvn-sink", .FUNCTION, .GVN_SINK, false, .DOMTREE},
+    .{"gvn-hoist", .FUNCTION, .GVN_HOIST, false, .DOMTREE},
     .{"early-cse", .FUNCTION, .EARLY_CSE, false, .DOMTREE},
     .{"early-cse<memssa>", .FUNCTION, .EARLY_CSE, false, .DOMTREE},
     .{"early-cse<>", .FUNCTION, .EARLY_CSE, false, .DOMTREE},
@@ -1110,6 +1112,8 @@ parse_cl_opt :: (arg: string) -> bool {
     if reassociate_parse_cl_opt(name, value, has_value) return true;   // pass_reassociate.jai
     if early_cse_parse_cl_opt(name, value, has_value) return true;   // pass_early_cse.jai
     if newgvn_parse_cl_opt(name, value, has_value) return true;   // pass_newgvn.jai
+    if gvn_hoist_parse_cl_opt(name, value, has_value) return true;   // pass_gvn_hoist.jai
+    if gvn_sink_parse_cl_opt(name, value, has_value) return true;   // pass_gvn_sink.jai
     if fs_parse_cl_opt(name, value, has_value) return true;   // function_specialization.jai
     if dfa_parse_cl_opt(name, value, has_value) return true;   // pass_dfa_jump_threading.jai
     if constraint_elimination_parse_cl_opt(name, value, has_value) return true;   // pass_constraint_elimination.jai
@@ -1433,6 +1437,8 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .SROA; return sroa_run(f, node.name);
         case .GVN; return gvn_run(f, node.name);
         case .NEWGVN; return newgvn_run(f);
+        case .GVN_SINK; return gvn_sink_run(f);
+        case .GVN_HOIST; return gvn_hoist_run(f);
         case .EARLY_CSE; return early_cse_run(f, node.name);
         case .SCCP; return sccp_run(f);
         case .MERGEICMPS; return mergeicmps_run(f);

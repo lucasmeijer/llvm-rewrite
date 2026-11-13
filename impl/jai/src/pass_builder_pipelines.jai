@@ -308,8 +308,11 @@ build_function_simplification_pipeline :: (fpm: s32, last: *s32, level: Opt_Leve
     pb_add(fpm, last, "sroa<modify-cfg>");
     pb_add(fpm, last, "early-cse<memssa>");
     if knowledge_retention.enabled pb_unsupported("assume-simplify (-enable-knowledge-retention)");
-    if pb_cl.enable_gvn_hoist pb_unsupported("gvn-hoist (-enable-gvn-hoist)");
-    if pb_cl.enable_gvn_sink pb_unsupported("gvn-sink (-enable-gvn-sink)");
+    if pb_cl.enable_gvn_hoist pb_add(fpm, last, "gvn-hoist");
+    if pb_cl.enable_gvn_sink {
+        pb_add(fpm, last, "gvn-sink");
+        pb_add(fpm, last, pb_simplifycfg(SCFG_RANGE));
+    }
     pb_add(fpm, last, "speculative-execution<only-if-divergent-target>");
     pb_add(fpm, last, "jump-threading");
     pb_add(fpm, last, "correlated-propagation");

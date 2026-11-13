@@ -244,3 +244,5 @@ lib/Transforms/Utils/GuardUtils.cpp 0.5  # makeGuardControlFlowExplicit (pass_ma
 lib/IR/Verifier.cpp 0.9  # all checks; not the DI kinds our parser rejects, -verify-noalias-scope-decl-dom, target intrinsics outside our tables, the legacy pass
 lib/IR/ConvergenceVerifier.cpp 1.0  # with GenericConvergenceVerifierImpl.h
 lib/Transforms/Scalar/NewGVN.cpp 0.93  # jai_newgvn: all of NewGVN; not the assertion-only verify* functions, statistics, debug printing
+lib/Transforms/Scalar/GVNSink.cpp 0.95  # jai_newgvn: complete except the address order of InstructionUseExpr users (fails loudly when it decides)
+lib/Transforms/Scalar/GVNHoist.cpp 0.97  # jai_newgvn: all but rank() and the (output-neutral) rank sort of the VNs

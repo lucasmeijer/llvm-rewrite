@@ -1716,3 +1716,19 @@ Still slow / next:
   n2000/n8000 0.27/1.10 s (LLVM 0.08/0.27); loops-many n2000/n8000 0.81/16.2 s (LLVM 0.10/1.30). loops-many is
   quadratic in LLVM too (k ~1.9; ours ~2.2): the time is the number of re-evaluations of the touched instructions
   (InstSimplify of the re-numbered adds, hash lookups); no tests/perf benchmark times newgvn.
+
+## GVNHoist, GVNSink (L1.extra.gvn-hoist-sink COMPLETE 106/106; /root/jai_newgvn)
+
+- `pass_gvn_hoist.jai` (GVNHoist.cpp; uses pass_gvn.jai's ValueTable through a `Gvn` with only DT / AA / MemDep set,
+  memdep.jai, mssa_updater.jai, the post-dominator IDF), `pass_gvn_sink.jai` (GVNSink.cpp + LockstepReverseIterator.h).
+  `-enable-gvn-hoist` / `-enable-gvn-sink` are supported in default<O*>. Facts: knowledge/llvm/gvn-hoist-sink.md.
+- gvn-sink fails loudly ("depend on the address order of their users") when two candidates have the same users as a
+  multiset but LLVM would compare their value numbers in user-address order; `-gvn-sink-guess-address-order` (our
+  flag, not LLVM's) uses creation order instead (right on 18/27 corpus files, wrong after default<O2> on
+  tests/perf/compile). A decision is only flagged if the chosen candidate includes the ambiguous step.
+- Sweeps: `gvn-hoist` 10803/10803 identical; `gvn-sink` 10778/10802 (0 differs, 24 loud = the address order);
+  `--per-function`: 2 differs each, both a parser/printer issue outside the passes (x86_fp80 `+snan(0x0)` from the
+  per-function split reparses to `+snan(0x1)`, LLVM gives `0x2000000000000000`); `--with-test-flags` 0 differs;
+  `function(sroa),gvn-hoist` on tests/perf/compile 4/4; `default<O2> -enable-gvn-hoist` 3/4 (SPASS.ll exceeds the
+  60 s CPU limit: our x64-build default<O2> alone takes 53 s there, gvn-hoist adds ~3 s), `-enable-gvn-sink` 4 loud.
+- Perf (x64 build): `function(sroa),gvn-hoist` on SPASS.ll 2.0 s vs sroa alone 1.7 s.
