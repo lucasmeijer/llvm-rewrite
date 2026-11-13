@@ -741,10 +741,22 @@ fn lvp_add_reduction_result_computation() {
         let phi = vp_underlying_instr(phir);
         let rd = lvl_rdx_of(phi);
         let phi_ty = vpv[vpr[phir].def].ty;
-        if vpb[region].header_mask >= 0 { vp_unported("reductions with a header mask"); }
+        let hm = vpb[region].header_mask;
+        // convert a VPBlendRecipe backedge (masked by the header mask) to a select
+        let bd0 = vp_def(vp_op(phir, 1));
+        if bd0 >= 0 && vpr[bd0].kind == VPR_BLEND && vp_blend_num_incoming(bd0) == 2 && hm >= 0 && vp_blend_mask(bd0, 0) == hm {
+            vpb_set_before(bd0);
+            let sel = vpb_nary(OP_SELECT as i32, [vp_blend_mask(bd0, 0), vp_blend_incoming(bd0, 0), vp_blend_incoming(bd0, 1)],
+                               vpr[bd0].f, -1, "", -1);
+            vp_rauw(vpr[bd0].def, vpr[sel].def);
+            vp_erase_recipe(bd0);
+        }
+        // remove the predicated select unless the target wants it (usePredicatedReductionSelect: false on X86)
+        if hm >= 0 && !rk_is_find_last(rk) && !flag_bool("prefer-predicated-reduction-select", false) {
+            let oks, c, t, f = vpm_select(vp_op(phir, 1));
+            if oks && c == hm && f == vpr[phir].def { vp_set_operand(phir, 1, t); }
+        }
         let be = vp_op(phir, 1);
-        let bd = vp_def(be);
-        if bd >= 0 && vpr[bd].kind == VPR_BLEND { vp_unported("reductions through blends"); }
         if rk_is_any_of(rk) { vp_unported("any-of reductions"); }
         if lvp_range_start > 1 && phi_ty != rdx_descs[rd].rty { vp_unported("truncated reductions"); }
         if ip >= 0 { vpb_set_before(ip); } else { vpb_set_at_end(middle); }

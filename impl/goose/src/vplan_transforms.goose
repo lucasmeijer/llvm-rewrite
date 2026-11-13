@@ -57,15 +57,35 @@ fn vpt_try_to_fold_live_ins(r: i32) -> i32 {
         if v < 0 { return -1; }
         ops.push(v);
     }
-    if is_iid { vp_unported("folding live-in intrinsic operands (FoldIntrinsic)"); }
     var res: i32 = -1;
     let o = oc as i64;
+    if is_iid {
+        // VPInstructions store the called intrinsic as the last operand
+        if vpr[r].kind == VPR_INSTRUCTION { ops.pop(); }
+        let fmf = if vpr[r].f.ot == VOT_FMF || vpr[r].f.ot == VOT_FCMP { vpr[r].f.fmf } else { 0 };
+        let q = sxf_begin();
+        let mark = is_ops.len;
+        for x in ops { is_ops.push(x); }
+        res = simplify_intrinsic_args(oc, vpv[vpr[r].def].ty, mark, ops.len, fmf, q, -1, EB_IGNORE, RM_NEAREST);
+        is_ops.resize(mark);
+        sxf_end();
+        if res >= 0 { return vp_live_in(res); }
+        return -1;
+    }
     if o >= OP_ADD && o <= OP_XOR { res = sxf_binop(o, ops[0], ops[1]); }
     else if is_cast_op(o) && oc < 1000 { res = sxf_cast(o, ops[0], vpv[vpr[r].def].ty); }
     else if oc == VPI_NOT { res = sxf_binop(OP_XOR, ops[0], c_all_ones_lv(vals[ops[0]].ty as i32)); }
     else if o == OP_SELECT { res = sxf_select(ops[0], ops[1], ops[2]); }
     else if o == OP_ICMP || o == OP_FCMP { res = sxf_cmp(vpr[r].f.pred as i64, ops[0], ops[1]); }
-    else if o == OP_GEP || oc == VPI_PTR_ADD || oc == VPI_WIDE_PTR_ADD { vp_unported("folding live-in GEP operands (FoldGEP)"); }
+    else if o == OP_GEP || oc == VPI_PTR_ADD || oc == VPI_WIDE_PTR_ADD {
+        let srcty = if o == OP_GEP { insts[inst_of(vp_underlying_instr(r))].ty2 } else { T_I8 };
+        let q = sxf_begin();
+        let mark = is_ops.len;
+        for x in ops { is_ops.push(x); }
+        res = simplify_gep(srcty, ops[0], mark + 1, ops.len - 1, vpr[r].f.gep, q, RECURSION_LIMIT);
+        is_ops.resize(mark);
+        sxf_end();
+    }
     else if o == OP_EXTRACTELEMENT { res = ops[0]; }
     if res >= 0 { return vp_live_in(res); }
     return -1;
@@ -634,7 +654,13 @@ fn vpt_legalize_and_optimize_inductions() {
     vpb_set_at(header, vp_first_non_phi(header));
     for p in wide {
         if vpr[p].kind == VPR_WIDEN_POINTER_INDUCTION {
-            vp_unported("pointer inductions (legalizeAndOptimizeInductions)");
+            // only scalar values used: PtrAdd(IndStart, ScalarIVSteps(0, Step)) (scalarizeVPWidenPointerInduction)
+            if !vp_has_scalar_vf_only() && !vp_only_scalar_values_used(vpr[p].def) { continue; }
+            let d = vpr[p].ind;
+            let zero = vp_live_in(c_null(sc_ty(ind_descs[d].step)));
+            let steps = vp_create_scalar_iv_steps(IK_INT, OP_ADD, -1, -1, zero, vp_op(p, 1), vpr[p].dl);
+            let pa = vpb_nary(VPI_PTR_ADD, [vp_op(p, 0), vpr[steps].def], vpf_gep(0), vpr[p].dl, "next.gep", -1);
+            vp_rauw(vpr[p].def, vpr[pa].def);
             continue;
         }
         let def = vpr[p].def;
