@@ -309,13 +309,20 @@ fp_decode :: (k: Type_Kind, w: [] u64) -> Fp_Decoded {
         se := w[1] & 0xFFFF;
         d.neg = (se & 0x8000) != 0;
         e := cast(s64)(se & 0x7FFF);
+        int_bit := (mant >> 63) != 0;
         if e == 0x7FFF {
+            // initFromIEEEAPInt (explicit integer bit): infinity needs the integer bit; a pseudo-infinity is a NaN
             frac := mant & 0x7FFF_FFFF_FFFF_FFFF;
-            if frac == 0 d.cat = .INF; else d.cat = .NAN;
+            if frac == 0 && int_bit d.cat = .INF; else d.cat = .NAN;
             d.sig = big_from_u64(mant);
             return d;
         }
         if e == 0 && mant == 0 { d.cat = .ZERO; return d; }
+        if e != 0 && !int_bit {   // an unnormal is a NaN
+            d.cat = .NAN;
+            d.sig = big_from_u64(mant);
+            return d;
+        }
         d.cat = .NORMAL;
         d.sig = big_from_u64(mant);
         if e == 0 d.exp = emin; else d.exp = e - 16383;
