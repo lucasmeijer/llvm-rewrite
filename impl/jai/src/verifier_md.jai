@@ -36,13 +36,15 @@ vf_md_nops :: inline (m: Md_Id) -> u32 { return ir.mds[m].nops; }
 vf_di_is_type :: (m: Md_Id) -> bool {
     if m == NONE || ir.mds[m].kind != .SPECIAL return false;
     k := di_kind(m);
-    return k == .BASIC_TYPE || k == .DERIVED_TYPE || k == .COMPOSITE_TYPE || k == .SUBROUTINE_TYPE;
+    return k == .BASIC_TYPE || k == .DERIVED_TYPE || k == .COMPOSITE_TYPE || k == .SUBROUTINE_TYPE || k == .STRING_TYPE ||
+        k == .SUBRANGE_TYPE || k == .FIXED_POINT_TYPE;
 }
 di_is_scope :: (m: Md_Id) -> bool {
     if m == NONE || ir.mds[m].kind != .SPECIAL return false;
     if vf_di_is_type(m) return true;
     k := di_kind(m);
-    return k == .FILE || k == .COMPILE_UNIT || k == .SUBPROGRAM || k == .LEXICAL_BLOCK || k == .LEXICAL_BLOCK_FILE || k == .NAMESPACE;
+    return k == .FILE || k == .COMPILE_UNIT || k == .SUBPROGRAM || k == .LEXICAL_BLOCK || k == .LEXICAL_BLOCK_FILE || k == .NAMESPACE ||
+        k == .COMMON_BLOCK || k == .MODULE;
 }
 di_is_local_scope :: (m: Md_Id) -> bool {
     if m == NONE || ir.mds[m].kind != .SPECIAL return false;
@@ -52,7 +54,8 @@ di_is_local_scope :: (m: Md_Id) -> bool {
 di_is_node :: (m: Md_Id) -> bool {
     if m == NONE || ir.mds[m].kind != .SPECIAL return false;
     k := di_kind(m);
-    return !(k == .LOCATION || k == .EXPRESSION || k == .GLOBAL_VARIABLE_EXPRESSION || k == .ASSIGN_ID || k == .ARG_LIST);
+    // DINode::classof (DIMacroNode, DILocation, DIExpression, DIGlobalVariableExpression, DIArgList are not DINodes)
+    return !(k == .LOCATION || k == .EXPRESSION || k == .GLOBAL_VARIABLE_EXPRESSION || k == .ARG_LIST || k == .MACRO || k == .MACRO_FILE);
 }
 di_is_variable :: (m: Md_Id) -> bool { return is_di(m, .LOCAL_VARIABLE) || is_di(m, .GLOBAL_VARIABLE); }
 // isType / isScope / isDINode / isMDTuple: null or of that class
@@ -78,13 +81,19 @@ DI_FLAG_TYPE_PASS_BY_REFERENCE :: 1 << 23; DI_FLAG_ALL_CALLS_DESCRIBED :: 1 << 2
 
 di_type_tag :: (m: Md_Id) -> u64 {
     k := di_kind(m);
-    if k == .BASIC_TYPE || k == .DERIVED_TYPE || k == .COMPOSITE_TYPE || k == .IMPORTED_ENTITY || k == .TEMPLATE_VALUE_PARAMETER return di_int(m, 0);
+    if k == .BASIC_TYPE || k == .DERIVED_TYPE || k == .COMPOSITE_TYPE || k == .IMPORTED_ENTITY || k == .TEMPLATE_VALUE_PARAMETER ||
+       k == .STRING_TYPE || k == .SUBRANGE_TYPE || k == .FIXED_POINT_TYPE || k == .GENERIC_DINODE return di_int(m, 0);
     if k == .SUBROUTINE_TYPE return VDW_TAG_SUBROUTINE_TYPE;
+    if k == .ENUMERATOR return 0x28;
+    if k == .GENERIC_SUBRANGE return 0x45;
+    if k == .MODULE return 0x1e;
+    if k == .COMMON_BLOCK return 0x1a;
+    if k == .OBJC_PROPERTY return 0x4200;
     return 0;
 }
 di_type_line :: (m: Md_Id) -> u64 {
     k := di_kind(m);
-    if k == .BASIC_TYPE || k == .DERIVED_TYPE || k == .COMPOSITE_TYPE return di_int(m, 1);
+    if k == .BASIC_TYPE || k == .DERIVED_TYPE || k == .COMPOSITE_TYPE || k == .SUBRANGE_TYPE || k == .FIXED_POINT_TYPE return di_int(m, 1);
     return 0;
 }
 di_type_flags :: (m: Md_Id) -> u64 {
@@ -93,6 +102,8 @@ di_type_flags :: (m: Md_Id) -> u64 {
     if k == .DERIVED_TYPE return di_int(m, 4);
     if k == .COMPOSITE_TYPE return di_int(m, 6);
     if k == .SUBROUTINE_TYPE return di_int(m, 0);
+    if k == .SUBRANGE_TYPE return di_int(m, 3);
+    if k == .FIXED_POINT_TYPE return di_int(m, 4);
     return 0;
 }
 di_has_conflicting_reference_flags :: (f: u64) -> bool {
@@ -231,6 +242,31 @@ vf_visit_di_node :: (n: Md_Id) {
       case .IMPORTED_ENTITY; vf_visit_di_imported_entity(n);
       case .TEMPLATE_TYPE_PARAMETER; vf_visit_di_template_parameter(n);   // tag is always DW_TAG_template_type_parameter
       case .TEMPLATE_VALUE_PARAMETER; vf_visit_di_template_value_parameter(n);
+      case .ENUMERATOR;   // visitDIEnumerator: the tag is always DW_TAG_enumerator
+      case .GENERIC_SUBRANGE; vf_visit_di_generic_subrange(n);
+      case .MODULE; vcheck_di(md_str_of(di_op(n, 2)).count > 0, "anonymous module", vq_md(n));
+      case .MACRO;
+        t := di_int(n, 0);
+        vcheck_di(t == 1 || t == 2, "invalid macinfo type", vq_md(n));   // DW_MACINFO_define / undef
+        vcheck_di(md_str_of(di_op(n, 0)).count > 0, "anonymous macro", vq_md(n));
+      case .MACRO_FILE; vf_visit_di_macro_file(n);
+      case .COMMON_BLOCK;
+        sc := di_op(n, 0);
+        if sc != NONE vcheck_di(di_is_scope(sc), "invalid scope ref", vq_md(n), vq_md(sc));
+        d := di_op(n, 1);
+        if d != NONE vcheck_di(is_di(d, .GLOBAL_VARIABLE), "invalid declaration", vq_md(n), vq_md(d));
+      case .OBJC_PROPERTY;
+        t := di_op(n, 4);
+        if t != NONE vcheck_di(vf_is_type(t), "invalid type ref", vq_md(n), vq_md(t));
+        f := di_op(n, 1);
+        if f != NONE vcheck_di(is_di(f, .FILE), "invalid file", vq_md(n), vq_md(f));
+      case .STRING_TYPE;
+        vf_visit_di_type(n);
+        vcheck_di(di_int(n, 0) == VDW_TAG_STRING_TYPE, "invalid tag", vq_md(n));
+        // isBigEndian && isLittleEndian: a DIStringType has no flags
+      case .SUBRANGE_TYPE; vf_visit_di_subrange_type(n);
+      case .FIXED_POINT_TYPE; vf_visit_di_fixed_point_type(n);
+      case .GENERIC_DINODE; vcheck_di(di_int(n, 0) != 0, "invalid tag", vq_md(n));
     }
 }
 
@@ -269,6 +305,59 @@ vf_visit_di_subrange :: (n: Md_Id) {
     vcheck_di(valid(stride), "Stride must be signed constant or DIVariable or DIExpression", vq_md(n));
 }
 
+vf_visit_di_generic_subrange :: (n: Md_Id) {
+    count := di_op(n, 0); lb := di_op(n, 1); ub := di_op(n, 2); stride := di_op(n, 3);
+    vcheck_di(count == NONE || ub == NONE, "GenericSubrange can have any one of count or upperBound", vq_md(n));
+    valid :: (m: Md_Id) -> bool { return di_is_variable(m) || is_di(m, .EXPRESSION); }
+    vcheck_di(count == NONE || valid(count), "Count must be signed constant or DIVariable or DIExpression", vq_md(n));
+    vcheck_di(lb != NONE, "GenericSubrange must contain lowerBound", vq_md(n));
+    vcheck_di(valid(lb), "LowerBound must be signed constant or DIVariable or DIExpression", vq_md(n));
+    vcheck_di(ub == NONE || valid(ub), "UpperBound must be signed constant or DIVariable or DIExpression", vq_md(n));
+    vcheck_di(stride != NONE, "GenericSubrange must contain stride", vq_md(n));
+    vcheck_di(valid(stride), "Stride must be signed constant or DIVariable or DIExpression", vq_md(n));
+}
+
+vf_visit_di_macro_file :: (n: Md_Id) {
+    vcheck_di(di_int(n, 0) == DW_MACINFO_START_FILE, "invalid macinfo type", vq_md(n));
+    f := di_op(n, 0);
+    if f != NONE vcheck_di(is_di(f, .FILE), "invalid file", vq_md(n), vq_md(f));
+    arr := di_op(n, 1);
+    if arr != NONE {
+        vcheck_di(md_is_tuple(arr), "invalid macro list", vq_md(n), vq_md(arr));
+        for k: 0..cast(s64) vf_md_nops(arr) - 1 {
+            o := md_op(arr, cast(u32) k);
+            vcheck_di(is_di(o, .MACRO) || is_di(o, .MACRO_FILE), "invalid macro ref", vq_md(n), vq_md(o));
+        }
+    }
+}
+
+vf_visit_di_subrange_type :: (n: Md_Id) {
+    vf_visit_di_type(n);
+    vcheck_di(di_int(n, 0) == VDW_TAG_SUBRANGE_TYPE, "invalid tag", vq_md(n));
+    base := di_op(n, 5);
+    vcheck_di(base == NONE || vf_di_is_type(base), "BaseType must be a type");
+    bound_ok :: (m: Md_Id, derived_ok: bool) -> bool {
+        return m == NONE || md_is_constant(m) || di_is_variable(m) || is_di(m, .EXPRESSION) || (derived_ok && is_di(m, .DERIVED_TYPE));
+    }
+    vcheck_di(bound_ok(di_op(n, 6), true), "LowerBound must be signed constant or DIVariable or DIExpression or DIDerivedType", vq_md(n));
+    vcheck_di(bound_ok(di_op(n, 7), true), "UpperBound must be signed constant or DIVariable or DIExpression or DIDerivedType", vq_md(n));
+    vcheck_di(bound_ok(di_op(n, 8), false), "Stride must be signed constant or DIVariable or DIExpression", vq_md(n));
+    vcheck_di(bound_ok(di_op(n, 9), false), "Bias must be signed constant or DIVariable or DIExpression", vq_md(n));
+    sz := di_op(n, 3);
+    vcheck_di(sz == NONE || md_is_constant(sz), "SizeInBits must be a constant");
+}
+
+vf_visit_di_fixed_point_type :: (n: Md_Id) {
+    vf_visit_di_basic_type(n);
+    vcheck_di(di_int(n, 0) == DW_TAG_BASE_TYPE, "invalid tag", vq_md(n));
+    e := di_int(n, 3);
+    vcheck_di(e == DW_ATE_SIGNED_FIXED || e == 0x0e, "invalid encoding", vq_md(n));   // DW_ATE_unsigned_fixed
+    kind := di_int(n, 5);
+    vcheck_di(kind <= 2, "invalid kind", vq_md(n));
+    vcheck_di(kind != 2 || di_int(n, 6) == 0, "factor should be 0 for rationals", vq_md(n));
+    vcheck_di(kind == 2 || (di_int(n, 7) == 0 && di_int(n, 9) == 0), "numerator and denominator should be 0 for non-rationals", vq_md(n));
+}
+
 vf_visit_di_basic_type :: (n: Md_Id) {
     vf_visit_di_type(n);
     tag := di_int(n, 0);
@@ -294,7 +383,7 @@ vf_visit_di_derived_type :: (n: Md_Id) {
     } else if tag == VDW_TAG_INHERITANCE || tag == VDW_TAG_MEMBER || tag == VDW_TAG_VARIABLE {
         valid := true;
         if extra != NONE {
-            valid = md_is_constant(extra) || md_is_string(extra);
+            valid = md_is_constant(extra) || md_is_string(extra) || is_di(extra, .OBJC_PROPERTY);
             if !valid && md_is_tuple(extra) valid = vf_md_nops(extra) == 1 && md_is_constant(md_op(extra, 0));
         }
         vcheck_di(valid, "extraData must be ConstantAsMetadata, MDString, DIObjCProperty, or MDTuple with single ConstantAsMetadata operand", vq_md(n), vq_md(extra));
@@ -303,7 +392,8 @@ vf_visit_di_derived_type :: (n: Md_Id) {
     if tag == VDW_TAG_SET_TYPE && base != NONE {
         ok := false;
         if is_di(base, .COMPOSITE_TYPE) ok = di_int(base, 0) == VDW_TAG_ENUMERATION_TYPE;
-        if is_di(base, .BASIC_TYPE) { e := di_int(base, 3); ok = e == VDW_ATE_UNSIGNED || e == VDW_ATE_SIGNED || e == VDW_ATE_UNSIGNED_CHAR || e == VDW_ATE_SIGNED_CHAR || e == VDW_ATE_BOOLEAN; }
+        if is_di(base, .SUBRANGE_TYPE) ok = true;   // its tag is always DW_TAG_subrange_type
+        if is_di(base, .BASIC_TYPE) || is_di(base, .FIXED_POINT_TYPE) { e := di_int(base, 3); ok = e == VDW_ATE_UNSIGNED || e == VDW_ATE_SIGNED || e == VDW_ATE_UNSIGNED_CHAR || e == VDW_ATE_SIGNED_CHAR || e == VDW_ATE_BOOLEAN; }
         vcheck_di(ok, "invalid set base type", vq_md(n), vq_md(base));
     }
     vcheck_di(vf_is_type(base), "invalid base type", vq_md(n), vq_md(base));
@@ -434,7 +524,7 @@ vf_visit_di_compile_unit :: (n: Md_Id) {
         vcheck_di(md_is_tuple(macros), "invalid macro list", vq_md(n), vq_md(macros));
         for k: 0..cast(s64) vf_md_nops(macros) - 1 {
             o := md_op(macros, cast(u32) k);
-            vcheck_di(false, "invalid macro ref", vq_md(n), vq_md(o));   // DIMacroNode is not supported by our parser
+            vcheck_di(is_di(o, .MACRO) || is_di(o, .MACRO_FILE), "invalid macro ref", vq_md(n), vq_md(o));
         }
     }
     for vf.cu_visited if it == n return;

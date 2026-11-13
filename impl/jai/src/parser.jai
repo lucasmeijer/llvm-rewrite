@@ -30,6 +30,7 @@ Parser :: struct {
 
     blockaddr_fwd: [..] Blockaddr_Fwd;
     insts_with_tbaa: [..] Value_Id;
+    dbg_attachments: [..] struct { pos: s64; i: Value_Id; };   // PendingDbgInsts: checked to be DILocations at the end
     pending_arg_ids: [..] u32;
     callee_fty: Type_Id = NONE;
 }
@@ -1091,6 +1092,7 @@ parse_instruction_metadata :: (i: Value_Id) {
     while eat(.COMMA) {
         if P.tok.kind != .METADATA_VAR perr("expected metadata after comma");
         k := md_kind_id(P.tok.text);
+        if k == 0 array_add(*P.dbg_attachments, .{P.tok.pos, i});
         next();
         m := parse_md_node_ref();
         set_metadata(i, k, m);
@@ -2791,6 +2793,7 @@ parse_instruction_metadata_after_comma :: (i: Value_Id) {
     // we already consumed one comma and sit on a METADATA_VAR
     while true {
         k := md_kind_id(P.tok.text);
+        if k == 0 array_add(*P.dbg_attachments, .{P.tok.pos, i});
         next();
         m := parse_md_node_ref();
         set_metadata(i, k, m);
@@ -3139,6 +3142,14 @@ validate_end_of_module :: () {
     for P.fwd_global_ids perr("use of undefined value '@%'", it_index);
     resolve_all_metadata();
     resolve_record_metadata();
+    for P.dbg_attachments {
+        m := md_final_of(get_metadata(it.i, 0));
+        if !is_di(m, .LOCATION) {
+            line, col := line_col(P.lx.src, it.pos);
+            fatal("%:%:%: invalid !dbg metadata", P.lx.file, line, col);
+        }
+    }
+    P.dbg_attachments.count = 0;
     cleanup_retained_nodes();
     upgrade_tbaa_tags();
     // UpgradeCallsToIntrinsic for every function (make_early_inc_range: functions appended meanwhile are visited)

@@ -16,6 +16,8 @@ DI_Kind :: enum u8 {
     BASIC_TYPE; DERIVED_TYPE; COMPOSITE_TYPE; LOCAL_VARIABLE; GLOBAL_VARIABLE; LEXICAL_BLOCK; LEXICAL_BLOCK_FILE;
     NAMESPACE; SUBRANGE; LABEL; ASSIGN_ID; ARG_LIST; IMPORTED_ENTITY; TEMPLATE_TYPE_PARAMETER;
     TEMPLATE_VALUE_PARAMETER;
+    ENUMERATOR; GENERIC_SUBRANGE; MODULE; MACRO; MACRO_FILE; COMMON_BLOCK; OBJC_PROPERTY; STRING_TYPE; SUBRANGE_TYPE;
+    FIXED_POINT_TYPE; GENERIC_DINODE;
 }
 
 DI_NAMES :: string.[
@@ -23,6 +25,8 @@ DI_NAMES :: string.[
     "DISubroutineType", "DIBasicType", "DIDerivedType", "DICompositeType", "DILocalVariable", "DIGlobalVariable",
     "DILexicalBlock", "DILexicalBlockFile", "DINamespace", "DISubrange", "DILabel", "DIAssignID", "DIArgList",
     "DIImportedEntity", "DITemplateTypeParameter", "DITemplateValueParameter",
+    "DIEnumerator", "DIGenericSubrange", "DIModule", "DIMacro", "DIMacroFile", "DICommonBlock", "DIObjCProperty",
+    "DIStringType", "DISubrangeType", "DIFixedPointType", "GenericDINode",
 ];
 
 is_di :: inline (m: Md_Id, k: DI_Kind) -> bool { return m != NONE && ir.mds[m].kind == .SPECIAL && ir.mds[m].sub == cast(u8) k; }
@@ -114,10 +118,11 @@ md_str_of :: (m: Md_Id) -> string { if m == NONE return ""; return ir.mds[m].str
 Field_Type :: enum u8 {
     MD; MD_NONNULL; STR; STR_EMPTY; STR_NONEMPTY; UINT; SINT; BOOL; TAG; ATE; LANG; LNAME; VIRT; CC; MACINFO;
     ENUM_KIND; DIALECT; EMISSION; NAMETABLE; CHECKSUM; FLAGS; SPFLAGS; SIGNED_OR_MD; UNSIGNED_OR_MD; APSINT;
+    MD_LIST; FIXED_POINT_KIND;
 }
 
 Field_Spec :: struct { name: string; ty: Field_Type; required: bool; dflt: u64; max: u64 = 0xFFFF_FFFF_FFFF_FFFF; }
-Field_Val :: struct { seen: bool; is_md: bool; md: Md_Id = NONE; u: u64; s: s64; str: string; }
+Field_Val :: struct { seen: bool; is_md: bool; md: Md_Id = NONE; u: u64; s: s64; str: string; neg: bool; list: [] Md_Id; }
 
 DW_TAG_HI_USER :: 0xffff;
 U64MAX :: 0xFFFF_FFFF_FFFF_FFFF;
@@ -232,7 +237,25 @@ parse_one_field :: (spec: Field_Spec, val: *Field_Val) {
         case .APSINT;
             if P.tok.kind != .APSINT perr("expected integer");
             neg, u, s := apsint_tok_value();
-            val.s = s; val.u = u;
+            val.s = s; val.u = u; val.neg = neg;
+        case .MD_LIST;
+            // parseMDNodeVector
+            expect(.LBRACE, "'{'");
+            l: [..] Md_Id; l.allocator = temp;
+            if P.tok.kind != .RBRACE {
+                while true {
+                    if is_kw("null") { next(); array_add(*l, NONE); }
+                    else array_add(*l, parse_metadata_operand());
+                    if !eat(.COMMA) break;
+                }
+            }
+            expect(.RBRACE, "'}'");
+            val.list = l;
+        case .FIXED_POINT_KIND;
+            // DIFixedPointType::getFixedPointKind
+            ok, v := dwarf_lookup(FIXED_POINT_KIND_NAMES, P.tok.text);
+            if P.tok.kind != .KW || !ok perr("expected fixed-point kind");
+            val.u = v; next();
         case .BOOL;
             if is_kw("true") val.u = 1; else if is_kw("false") val.u = 0; else perr("expected 'true' or 'false'");
             next();
@@ -281,6 +304,7 @@ parse_one_field :: (spec: Field_Spec, val: *Field_Val) {
 
 EMISSION_KIND_NAMES :: Dwarf_Name.[ .{0, "NoDebug"}, .{1, "FullDebug"}, .{2, "LineTablesOnly"}, .{3, "DebugDirectivesOnly"} ];
 NAME_TABLE_KIND_NAMES :: Dwarf_Name.[ .{0, "Default"}, .{1, "GNU"}, .{2, "None"}, .{3, "Apple"} ];
+FIXED_POINT_KIND_NAMES :: Dwarf_Name.[ .{0, "Binary"}, .{1, "Decimal"}, .{2, "Rational"} ];
 CHECKSUM_KIND_NAMES :: Dwarf_Name.[ .{1, "CSK_MD5"}, .{2, "CSK_SHA1"}, .{3, "CSK_SHA256"} ];
 
 // LLParser::parseMDFieldsImpl: '(' field (',' field)* ')' with each field at most once
@@ -529,6 +553,82 @@ parse_di_node :: (k: DI_Kind, distinct: bool) -> Md_Id {
         v := parse_di_fields(.[.{"tag", .TAG, false, DW_TAG_TEMPLATE_VALUE_PARAMETER, U64MAX}, .{"name", .STR, false, 0, U64MAX},
             .{"type", .MD, false, 0, U64MAX}, .{"defaulted", .BOOL, false, 0, U64MAX}, .{"value", .MD, true, 0, U64MAX}]);
         return di_get(k, distinct, .[v[1].md, v[2].md, v[4].md], .[v[0].u, v[3].u]);
+      case .ENUMERATOR;
+        // ints: value (two's complement, 64 bits), isUnsigned, value is negative. LLVM keeps an APSInt whose width
+        // follows from the literal (APSInt(StringRef)), so (value, negative) determines it; wider values fail loudly.
+        v := parse_di_fields(.[.{"name", .STR, true, 0, U64MAX}, .{"value", .APSINT, true, 0, U64MAX}, .{"isUnsigned", .BOOL, false, 0, U64MAX}]);
+        if v[2].u && v[1].neg perr("unsigned enumerator with negative value");
+        bits := ifx v[1].neg then cast,no_check(u64) v[1].s else v[1].u;
+        neg: u64 = ifx v[1].neg && v[1].s < 0 then cast(u64) 1 else 0;
+        return di_get(k, distinct, .[v[0].md], .[bits, v[2].u, neg]);
+      case .GENERIC_SUBRANGE;
+        v := parse_di_fields(.[.{"count", .SIGNED_OR_MD, false, 0, U64MAX}, .{"lowerBound", .SIGNED_OR_MD, false, 0, U64MAX},
+            .{"upperBound", .SIGNED_OR_MD, false, 0, U64MAX}, .{"stride", .SIGNED_OR_MD, false, 0, U64MAX}]);
+        // a signed constant becomes !DIExpression(DW_OP_consts, C)
+        conv :: (f: Field_Val) -> Md_Id {
+            if !f.seen return NONE;
+            if f.is_md return f.md;
+            return di_get(.EXPRESSION, false, .[], .[DW_OP_CONSTS, f.u]);
+        }
+        return di_get(k, distinct, .[conv(v[0]), conv(v[1]), conv(v[2]), conv(v[3])], .[]);
+      case .MODULE;
+        v := parse_di_fields(.[.{"scope", .MD, true, 0, U64MAX}, .{"name", .STR, true, 0, U64MAX}, .{"configMacros", .STR, false, 0, U64MAX},
+            .{"includePath", .STR, false, 0, U64MAX}, .{"apinotes", .STR, false, 0, U64MAX}, .{"file", .MD, false, 0, U64MAX},
+            .{"line", .UINT, false, 0, U32}, .{"isDecl", .BOOL, false, 0, U64MAX}]);
+        return di_get(k, distinct, .[v[5].md, v[0].md, v[1].md, v[2].md, v[3].md, v[4].md], .[v[6].u, v[7].u]);
+      case .MACRO;
+        v := parse_di_fields(.[.{"type", .MACINFO, true, 0, U64MAX}, .{"line", .UINT, false, 0, U32}, .{"name", .STR, true, 0, U64MAX},
+            .{"value", .STR, false, 0, U64MAX}]);
+        return di_get(k, distinct, .[v[2].md, v[3].md], .[v[0].u, v[1].u]);
+      case .MACRO_FILE;
+        v := parse_di_fields(.[.{"type", .MACINFO, false, DW_MACINFO_START_FILE, U64MAX}, .{"line", .UINT, false, 0, U32},
+            .{"file", .MD, true, 0, U64MAX}, .{"nodes", .MD, false, 0, U64MAX}]);
+        return di_get(k, distinct, .[v[2].md, v[3].md], .[v[0].u, v[1].u]);
+      case .COMMON_BLOCK;
+        v := parse_di_fields(.[.{"scope", .MD, true, 0, U64MAX}, .{"declaration", .MD, false, 0, U64MAX}, .{"name", .STR, false, 0, U64MAX},
+            .{"file", .MD, false, 0, U64MAX}, .{"line", .UINT, false, 0, U32}]);
+        return di_get(k, distinct, .[v[0].md, v[1].md, v[2].md, v[3].md], .[v[4].u]);
+      case .OBJC_PROPERTY;
+        v := parse_di_fields(.[.{"name", .STR, false, 0, U64MAX}, .{"file", .MD, false, 0, U64MAX}, .{"line", .UINT, false, 0, U32},
+            .{"setter", .STR, false, 0, U64MAX}, .{"getter", .STR, false, 0, U64MAX}, .{"attributes", .UINT, false, 0, U32},
+            .{"type", .MD, false, 0, U64MAX}]);
+        return di_get(k, distinct, .[v[0].md, v[1].md, v[4].md, v[3].md, v[6].md], .[v[2].u, v[5].u]);
+      case .STRING_TYPE;
+        // DIType layout (file, scope, name, size, offset) + stringLength, stringLengthExpression, stringLocationExpression
+        v := parse_di_fields(.[.{"tag", .TAG, false, DW_TAG_STRING_TYPE, U64MAX}, .{"name", .STR, false, 0, U64MAX},
+            .{"stringLength", .MD, false, 0, U64MAX}, .{"stringLengthExpression", .MD, false, 0, U64MAX},
+            .{"stringLocationExpression", .MD, false, 0, U64MAX}, .{"size", .UNSIGNED_OR_MD, false, 0, U64MAX},
+            .{"align", .UINT, false, 0, U32}, .{"encoding", .ATE, false, 0, U64MAX}]);
+        return di_get(k, distinct, .[NONE, NONE, v[1].md, or_md_value(v[5]), NONE, v[2].md, v[3].md, v[4].md], .[v[0].u, v[6].u, v[7].u]);
+      case .SUBRANGE_TYPE;
+        // ints: tag (always DW_TAG_subrange_type), line, align, flags
+        v := parse_di_fields(.[.{"name", .STR, false, 0, U64MAX}, .{"file", .MD, false, 0, U64MAX}, .{"line", .UINT, false, 0, U32},
+            .{"scope", .MD, false, 0, U64MAX}, .{"baseType", .MD, false, 0, U64MAX}, .{"size", .UNSIGNED_OR_MD, false, 0, U64MAX},
+            .{"align", .UINT, false, 0, U32}, .{"flags", .FLAGS, false, 0, U64MAX}, .{"lowerBound", .SIGNED_OR_MD, false, 0, U64MAX},
+            .{"upperBound", .SIGNED_OR_MD, false, 0, U64MAX}, .{"stride", .SIGNED_OR_MD, false, 0, U64MAX}, .{"bias", .SIGNED_OR_MD, false, 0, U64MAX}]);
+        return di_get(k, distinct, .[v[1].md, v[3].md, v[0].md, or_md_value(v[5]), NONE, v[4].md, or_md_value(v[8]), or_md_value(v[9]),
+            or_md_value(v[10]), or_md_value(v[11])], .[VDW_TAG_SUBRANGE_TYPE, v[2].u, v[6].u, v[7].u]);
+      case .FIXED_POINT_TYPE;
+        // ints: tag, line, align, encoding, flags, kind, factor, numerator, numerator < 0, denominator, denominator < 0
+        // (numerator/denominator: APInts of the literal's width in LLVM; wider than 64 bits fails loudly)
+        v := parse_di_fields(.[.{"tag", .TAG, false, DW_TAG_BASE_TYPE, U64MAX}, .{"name", .STR, false, 0, U64MAX}, .{"file", .MD, false, 0, U64MAX},
+            .{"line", .UINT, false, 0, U32}, .{"scope", .MD, false, 0, U64MAX}, .{"size", .UNSIGNED_OR_MD, false, 0, U64MAX},
+            .{"align", .UINT, false, 0, U32}, .{"encoding", .ATE, false, 0, U64MAX}, .{"flags", .FLAGS, false, 0, U64MAX},
+            .{"kind", .FIXED_POINT_KIND, false, 0, U64MAX}, .{"factor", .SINT, false, 0, U64MAX}, .{"numerator", .APSINT, false, 0, U64MAX},
+            .{"denominator", .APSINT, false, 0, U64MAX}]);
+        nb := ifx v[11].neg then cast,no_check(u64) v[11].s else v[11].u;
+        db := ifx v[12].neg then cast,no_check(u64) v[12].s else v[12].u;
+        nn: u64 = ifx v[11].neg && v[11].s < 0 then cast(u64) 1 else 0;
+        dn: u64 = ifx v[12].neg && v[12].s < 0 then cast(u64) 1 else 0;
+        return di_get(k, distinct, .[v[2].md, v[4].md, v[1].md, or_md_value(v[5]), NONE],
+            .[v[0].u, v[3].u, v[6].u, v[7].u, v[8].u, v[9].u, v[10].u, nb, nn, db, dn]);
+      case .GENERIC_DINODE;
+        // ops: header, then the DWARF operands; ints: tag
+        v := parse_di_fields(.[.{"tag", .TAG, true, 0, U64MAX}, .{"header", .STR, false, 0, U64MAX}, .{"operands", .MD_LIST, false, 0, U64MAX}]);
+        ops: [..] Md_Id; ops.allocator = temp;
+        array_add(*ops, v[1].md);
+        for v[2].list array_add(*ops, it);
+        return di_get(k, distinct, ops, .[v[0].u]);
     }
     perr("specialized metadata (!%) is not supported yet", DI_NAMES[k]);
     return NONE;
@@ -536,6 +636,20 @@ parse_di_node :: (k: DI_Kind, distinct: bool) -> Md_Id {
 
 DW_TAG_BASE_TYPE :: 0x24;
 DW_TAG_TEMPLATE_VALUE_PARAMETER :: 0x30;
+DW_TAG_STRING_TYPE :: 0x12; DW_MACINFO_START_FILE :: 3; DW_ATE_SIGNED_FIXED :: 0x0d;
+
+// APInt::print of an APSInt(StringRef) literal: its width is the active bits (non-negative) or the significant bits
+// (negative) of the value, at least 1; `bits` is the 64-bit two's complement value
+print_literal_apint :: (bits: u64, neg: bool, signed_print: bool) {
+    w: s64 = 1;
+    if neg { x := ~bits; for b: 0..63 if (x >> cast(u64) b) & 1 w = b + 2; }
+    else { for b: 0..63 if (bits >> cast(u64) b) & 1 w = b + 1; }
+    if w >= 64 { if signed_print out_s64(cast,no_check(s64) bits); else out_u64(bits); return; }
+    mask := (cast(u64) 1 << cast(u64) w) - 1;
+    v := bits & mask;
+    if signed_print && (v >> cast(u64) (w - 1)) & 1 { out_s64(cast,no_check(s64) (v | ~mask)); return; }
+    out_u64(v);
+}
 DW_TAG_LLVM_PTRAUTH_TYPE :: 0x4300;
 SPFLAG_LOCAL_TO_UNIT :: 4; SPFLAG_DEFINITION :: 8; SPFLAG_OPTIMIZED :: 16;
 
@@ -673,7 +787,8 @@ cleanup_retained_nodes :: () {
 di_is_type :: (m: Md_Id) -> bool {
     if m == NONE || ir.mds[m].kind != .SPECIAL return false;
     k := di_kind(m);
-    return k == .BASIC_TYPE || k == .DERIVED_TYPE || k == .COMPOSITE_TYPE || k == .SUBROUTINE_TYPE;
+    return k == .BASIC_TYPE || k == .DERIVED_TYPE || k == .COMPOSITE_TYPE || k == .SUBROUTINE_TYPE || k == .STRING_TYPE ||
+        k == .SUBRANGE_TYPE || k == .FIXED_POINT_TYPE;
 }
 // DILocalScope::getSubprogram (NONE if the scope is not a local scope)
 di_local_scope_subprogram :: (s: Md_Id) -> Md_Id {
@@ -1143,6 +1258,102 @@ write_di_node :: (m: Md_Id) {
         pf_md(*p, "type", O(1));
         pf_bool(*p, "defaulted", I(1) != 0, true, false);
         pf_md(*p, "value", O(2), false);
+      case .ENUMERATOR;
+        pf_string(*p, "name", S(0), false);
+        fp_sep(*p); out("value: ");
+        if I(2) out_s64(cast,no_check(s64) I(0)); else out_u64(I(0));
+        if I(1) pf_bool(*p, "isUnsigned", true);
+      case .GENERIC_SUBRANGE;
+        // a DIExpression that isConstant() as a SignedConstant prints as its value
+        names :: string.["count", "lowerBound", "upperBound", "stride"];
+        for nm, i: names {
+            b := O(cast(u32) i);
+            if is_di(b, .EXPRESSION) && ir.mds[b].nints == 2 && di_int(b, 0) == DW_OP_CONSTS pf_sint(*p, nm, cast,no_check(s64) di_int(b, 1), false);
+            else pf_md(*p, nm, b);
+        }
+      case .MODULE;
+        pf_md(*p, "scope", O(1), false);
+        pf_string(*p, "name", S(2));
+        pf_string(*p, "configMacros", S(3));
+        pf_string(*p, "includePath", S(4));
+        pf_string(*p, "apinotes", S(5));
+        pf_md(*p, "file", O(0));
+        pf_uint(*p, "line", I(0));
+        pf_bool(*p, "isDecl", I(1) != 0, true, false);
+      case .MACRO;
+        fp_sep(*p); out("type: ");
+        { s := dwarf_name(DW_MACINFO_NAMES, I(0)); if s.count out(s); else out_u64(I(0)); }
+        pf_uint(*p, "line", I(1));
+        pf_string(*p, "name", S(0));
+        pf_string(*p, "value", S(1));
+      case .MACRO_FILE;
+        pf_uint(*p, "line", I(1));
+        pf_md(*p, "file", O(0), false);
+        pf_md(*p, "nodes", O(1));
+      case .COMMON_BLOCK;
+        pf_md(*p, "scope", O(0), false);
+        pf_md(*p, "declaration", O(1), false);
+        pf_string(*p, "name", S(2));
+        pf_md(*p, "file", O(3));
+        pf_uint(*p, "line", I(0));
+      case .OBJC_PROPERTY;
+        pf_string(*p, "name", S(0));
+        pf_md(*p, "file", O(1));
+        pf_uint(*p, "line", I(0));
+        pf_string(*p, "setter", S(3));
+        pf_string(*p, "getter", S(2));
+        pf_uint(*p, "attributes", I(1));
+        pf_md(*p, "type", O(4));
+      case .STRING_TYPE;
+        if I(0) != DW_TAG_STRING_TYPE pf_tag(*p, I(0));
+        pf_string(*p, "name", S(2));
+        pf_md(*p, "stringLength", O(5));
+        pf_md(*p, "stringLengthExpression", O(6));
+        pf_md(*p, "stringLocationExpression", O(7));
+        pf_md_or_int(*p, "size", O(3), true);
+        pf_uint(*p, "align", I(1));
+        pf_dwarf(*p, "encoding", I(2), DW_ATE_NAMES);
+      case .SUBRANGE_TYPE;
+        pf_string(*p, "name", S(2));
+        pf_md(*p, "scope", O(1));
+        pf_md(*p, "file", O(0));
+        pf_uint(*p, "line", I(1));
+        pf_md_or_int(*p, "size", O(3), true);
+        pf_uint(*p, "align", I(2));
+        pf_di_flags(*p, "flags", I(3));
+        pf_md(*p, "baseType", O(5), false);
+        pf_md(*p, "lowerBound", O(6));
+        pf_md(*p, "upperBound", O(7));
+        pf_md(*p, "stride", O(8));
+        pf_md(*p, "bias", O(9));
+      case .FIXED_POINT_TYPE;
+        if I(0) != DW_TAG_BASE_TYPE pf_tag(*p, I(0));
+        pf_string(*p, "name", S(2));
+        pf_md(*p, "scope", O(1));
+        pf_md(*p, "file", O(0));
+        pf_uint(*p, "line", I(1));
+        pf_md_or_int(*p, "size", O(3), true);
+        pf_uint(*p, "align", I(2));
+        pf_dwarf(*p, "encoding", I(3), DW_ATE_NAMES);
+        pf_di_flags(*p, "flags", I(4));
+        fp_sep(*p); out("kind: "); out(dwarf_name(FIXED_POINT_KIND_NAMES, I(5)));
+        if I(5) == 2 {
+            // printAPInt(..., IsUnsigned = !isSigned()) of the literal's APInt (no widening, unlike DIEnumerator)
+            sgn := I(3) == DW_ATE_SIGNED_FIXED;
+            fp_sep(*p); out("numerator: "); print_literal_apint(I(7), I(8) != 0, sgn);
+            fp_sep(*p); out("denominator: "); print_literal_apint(I(9), I(10) != 0, sgn);
+        } else pf_sint(*p, "factor", cast,no_check(s64) I(6));
+      case .GENERIC_DINODE;
+        pf_tag(*p, I(0));
+        pf_string(*p, "header", S(0));
+        if ir.mds[m].nops > 1 {
+            fp_sep(*p); out("operands: {");
+            for i: 1..cast(s64) ir.mds[m].nops - 1 {
+                if i > 1 out(", ");
+                write_md_as_operand(md_op(m, cast(u32) i));
+            }
+            outc(#char "}");
+        }
     }
     outc(#char ")");
 }

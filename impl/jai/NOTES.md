@@ -65,8 +65,12 @@
   x86: shouldUpgradeX86Intrinsic is a mechanical translation (all names), but only the call rewrites the corpus
   needs are ported (scalar sse arith/sqrt, pmul(u)dq, vcvtph2ps, xop vpcom, bmi pdep/pext); every other x86
   rewrite, and x86 declarations with an old signature, fail loudly. Other targets' intrinsics are unknown names.
-- Debug info: DI node kinds in debuginfo.jai `DI_Kind` (those in the corpus plus imported entity and template
-  parameters); others fail loudly. Operands are kept in LLVM's operand order (it decides `!N` numbering), ints
+- Debug info: every specialized node kind of LLParser (debuginfo.jai `DI_Kind`, incl. DIEnumerator, DIGenericSubrange,
+  DIModule, DIMacro(File), DICommonBlock, DIObjCProperty, DIStringType, DISubrangeType, DIFixedPointType,
+  GenericDINode) with the verifier's visit for each; checked against llvm/test/Assembler/{DICommonBlock,DIEnumerator,
+  DIMacroFile,dimodule,diobjcproperty,generic-debug-node,debug-info}.ll. DIEnumerator/DIFixedPointType values wider
+  than 64 bits (DIEnumeratorBig.ll) fail loudly. A `!dbg` attachment that is not a DILocation is LLParser's
+  "invalid !dbg metadata" error. Operands are kept in LLVM's operand order (it decides `!N` numbering), ints
   in a per-kind layout documented next to `parse_di_node`. DICompositeType with an identifier goes through
   buildODRType (opt enables the DITypeMap, so such nodes are distinct and merged by identifier).
   UpgradeDebugInfo strips debug info without "Debug Info Version" 3; with version 3 it runs the verifier

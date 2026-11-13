@@ -5658,6 +5658,7 @@ tests/imported/llvm/Transforms/Coroutines/coro-alloca-with-addrspace.ll::roundtr
 tests/imported/llvm/Transforms/Coroutines/coro-async-addr-lifetime-infinite-loop-bug.ll::roundtrip
 tests/imported/llvm/Transforms/Coroutines/coro-async-addr-lifetime-start-bug.ll::roundtrip
 tests/imported/llvm/Transforms/Coroutines/coro-async-coro-id-async-bug.ll::roundtrip
+tests/imported/llvm/Transforms/Coroutines/coro-async-declaration.ll::roundtrip
 tests/imported/llvm/Transforms/Coroutines/coro-async-dyn-align.ll::roundtrip
 tests/imported/llvm/Transforms/Coroutines/coro-async-end-bug.ll::roundtrip
 tests/imported/llvm/Transforms/Coroutines/coro-async-no-cse-swift-async-context-addr.ll::roundtrip
@@ -19380,6 +19381,8 @@ tests/imported/llvm/Verifier/RemoveDI/blockbyref.ll::analysis
 tests/imported/llvm/Verifier/RemoveDI/blockbyref.ll::roundtrip
 tests/imported/llvm/Verifier/RemoveDI/dbg-invalid-vector.ll::analysis
 tests/imported/llvm/Verifier/RemoveDI/dbg-invalid-vector.ll::roundtrip
+tests/imported/llvm/Verifier/RemoveDI/di-subroutine-localvar.ll::analysis
+tests/imported/llvm/Verifier/RemoveDI/di-subroutine-localvar.ll::roundtrip
 tests/imported/llvm/Verifier/RemoveDI/diexpression-entry-value-llvm-ir.ll::analysis
 tests/imported/llvm/Verifier/RemoveDI/diexpression-entry-value-llvm-ir.ll::roundtrip
 tests/imported/llvm/Verifier/RemoveDI/fnarg-debuginfo.ll::analysis
@@ -19396,6 +19399,8 @@ tests/imported/llvm/Verifier/RemoveDI/llvm.dbg.value-value.ll::analysis
 tests/imported/llvm/Verifier/RemoveDI/llvm.dbg.value-value.ll::roundtrip
 tests/imported/llvm/Verifier/RemoveDI/llvm.dbg.value-variable.ll::analysis
 tests/imported/llvm/Verifier/RemoveDI/llvm.dbg.value-variable.ll::roundtrip
+tests/imported/llvm/Verifier/RemoveDI/set1.ll::analysis
+tests/imported/llvm/Verifier/RemoveDI/set1.ll::roundtrip
 tests/imported/llvm/Verifier/SelfReferential.ll::error
 tests/imported/llvm/Verifier/absolute_symbol.ll::error
 tests/imported/llvm/Verifier/access_group.ll::error
@@ -19474,6 +19479,8 @@ tests/imported/llvm/Verifier/deoptimize-intrinsic.ll::error
 tests/imported/llvm/Verifier/dereferenceable-md-inttoptr.ll::analysis
 tests/imported/llvm/Verifier/dereferenceable-md-inttoptr.ll::roundtrip
 tests/imported/llvm/Verifier/dereferenceable-md.ll::error
+tests/imported/llvm/Verifier/di-subroutine-localvar.ll::analysis
+tests/imported/llvm/Verifier/di-subroutine-localvar.ll::roundtrip
 tests/imported/llvm/Verifier/diassignid-vector-stores.ll::analysis
 tests/imported/llvm/Verifier/diassignid-vector-stores.ll::roundtrip
 tests/imported/llvm/Verifier/dicompositetype-elements-null.ll::error
@@ -19496,6 +19503,8 @@ tests/imported/llvm/Verifier/diexpression-entry-value.ll::error
 tests/imported/llvm/Verifier/diexpression-swap.ll::error
 tests/imported/llvm/Verifier/diexpression-valid-entry-value.ll::analysis
 tests/imported/llvm/Verifier/diexpression-valid-entry-value.ll::roundtrip
+tests/imported/llvm/Verifier/digenericsubrange-count-upperBound.ll::error
+tests/imported/llvm/Verifier/digenericsubrange-missing-stride.ll::error
 tests/imported/llvm/Verifier/diglobalvariable.ll::analysis
 tests/imported/llvm/Verifier/diglobalvariable.ll::roundtrip
 tests/imported/llvm/Verifier/dilocation-in-wrong-place.ll::error
@@ -19697,6 +19706,8 @@ tests/imported/llvm/Verifier/rtsan-attrs.ll::error
 tests/imported/llvm/Verifier/sat-intrinsics.ll::error
 tests/imported/llvm/Verifier/scalable-global-vars.ll::error
 tests/imported/llvm/Verifier/scatter_gather.ll::error
+tests/imported/llvm/Verifier/set1.ll::analysis
+tests/imported/llvm/Verifier/set1.ll::roundtrip
 tests/imported/llvm/Verifier/sme-attributes.ll::error
 tests/imported/llvm/Verifier/speculatable-callsite-invalid.ll::error
 tests/imported/llvm/Verifier/speculatable-callsite.ll::analysis

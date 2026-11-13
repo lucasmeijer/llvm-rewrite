@@ -267,7 +267,7 @@ divar_size_bits :: (var: Md_Id) -> (bool, u64) {
     t := di_op(var, 3);
     while t != NONE && ir.mds[t].kind == .SPECIAL {
         k := di_kind(t);
-        is_type := k == .BASIC_TYPE || k == .DERIVED_TYPE || k == .COMPOSITE_TYPE || k == .SUBROUTINE_TYPE;
+        is_type := di_is_type(t);
         if is_type && k != .SUBROUTINE_TYPE {
             sz := ditype_size_bits(t);
             if sz return true, sz;
