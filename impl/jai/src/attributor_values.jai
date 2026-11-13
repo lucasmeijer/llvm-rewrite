@@ -192,7 +192,7 @@ pv_initialize :: (i: u32) {
     }
     if pk == .RETURNED { pv_returned_initialize(i); return; }
     if atr_has_simplification_callback(p) { aa_pessimistic(i); return; }
-    stripped := strip_pointer_casts(irp_assoc_value(p));
+    stripped := atr_strip_pointer_casts(irp_assoc_value(p));
     if is_constant_kind(vkind(stripped)) && vkind(stripped) != .C_EXPR {
         pv_add(i, stripped, irp_ctx_i(p), AA_ANY);
         aa_optimistic(i);
@@ -409,7 +409,7 @@ pv_generic_value_traversal :: (i: u32, initial: Value_Id) {
         }
         nv: Value_Id = NONE;
         if is_ptr_type(vtype(v)) {
-            nv = atr_get_with_type(strip_pointer_casts(v), vtype(v));
+            nv = atr_get_with_type(atr_strip_pointer_casts(v), vtype(v));
         } else if irp_is_call(v) {
             callee := call_callee(v);
             if vkind(callee) == .FUNCTION {

@@ -214,7 +214,7 @@ aa_initialize :: (i: u32) {
             }
         case .NON_NULL;
             if pk == .RETURNED return;   // AANonNullReturned derives from AANonNull, not AANonNullImpl
-            v := strip_pointer_casts(irp_assoc_value(p));
+            v := atr_strip_pointer_casts(irp_assoc_value(p));
             if vkind(v) == .C_NULL { aa_pessimistic(i); return; }
             ctx := irp_ctx_i(p);
             if ctx != NONE {

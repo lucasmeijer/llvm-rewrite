@@ -113,7 +113,7 @@ irp_assoc_fn :: (p: Irp) -> Value_Id {
     if irp_is_call(a) {
         arg := irp_assoc_arg(p);
         if arg != NONE return arg_parent(arg);
-        c := strip_pointer_casts(call_callee(a));
+        c := atr_strip_pointer_casts(call_callee(a));
         if vkind(c) == .FUNCTION return c;
         return NONE;
     }

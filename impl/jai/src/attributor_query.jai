@@ -310,7 +310,7 @@ atr_equivalent_use :: (w: *Uses_Walk, old: Use_Id, nu: Use_Id) -> bool {
         case EQU_INSTANCE_INFO;
             si := ir.u_user[old];
             if is_inst(si) && inst_op(si) == .STORE {
-                ptr := strip_pointer_casts(op(si, 1));
+                ptr := atr_strip_pointer_casts(op(si, 1));
                 if ((is_inst(ptr) && inst_op(ptr) == .ALLOCA) || is_no_alias_call(ptr)) && atr_is_dynamically_unique(w.q, ptr) return true;
             }
             return false;
@@ -764,3 +764,7 @@ atr_get_potentially_loaded_values :: (li: Value_Id, values: *[..] Value_Id, orig
 atr_get_potential_copies_of_stored_value :: (si: Value_Id, copies: *[..] Value_Id, q: u32, uai: *bool, only_exact := false) -> bool {
     return atr_get_potential_copies_of_memory_value(false, si, copies, null, q, uai, only_exact);
 }
+
+// Value::stripPointerCasts (PSK_ZeroIndices, through `returned` arguments; the autoupgrade helper does not look
+// through calls)
+atr_strip_pointer_casts :: (v: Value_Id) -> Value_Id { return strip_pointer_casts_kind(v, .ZERO_INDICES); }

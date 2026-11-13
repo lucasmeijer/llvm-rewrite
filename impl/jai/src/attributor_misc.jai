@@ -390,7 +390,7 @@ deref_construct :: (i: u32) { aa(i).x = New(Deref_Ext); }
 
 deref_initialize :: (i: u32) {
     p := aa(i).pos;
-    v := strip_pointer_casts(irp_assoc_value(p));
+    v := atr_strip_pointer_casts(irp_assoc_value(p));
     attrs: [..] Attr; attrs.allocator = temp;
     atr_get_attrs(p, .[.Dereferenceable, .DereferenceableOrNull], *attrs);
     e := deref_ext(i);
@@ -530,7 +530,7 @@ align_initialize :: (i: u32) {
     attrs: [..] Attr; attrs.allocator = temp;
     atr_get_attrs(p, .[.Alignment], *attrs);
     for attrs bs_take_known_max(*aa(i).s, it.ival);
-    v := strip_pointer_casts(irp_assoc_value(p));
+    v := atr_strip_pointer_casts(irp_assoc_value(p));
     bs_take_known_max(*aa(i).s, pointer_alignment(v));
     ctx := irp_ctx_i(p);
     if ctx != NONE {

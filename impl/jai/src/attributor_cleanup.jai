@@ -9,7 +9,7 @@ atr_change_use_after_manifest :: (u: Use_Id, nv: Value_Id) -> bool {
     found, k := table_find(*atr.to_be_changed_uses_idx, u);
     if found {
         v := atr.to_be_changed_uses[k][1];
-        if v != NONE && (strip_pointer_casts(v) == strip_pointer_casts(nv) || is_undef_value(v)) return false;
+        if v != NONE && (atr_strip_pointer_casts(v) == atr_strip_pointer_casts(nv) || is_undef_value(v)) return false;
         atr.to_be_changed_uses[k][1] = nv;
         return true;
     }
@@ -27,7 +27,7 @@ atr_change_after_manifest :: (p: Irp, nv: Value_Id, change_droppable := true) ->
     found, k := table_find(*atr.to_be_changed_values_idx, v);
     if found {
         cur := atr.to_be_changed_values[k][1];
-        if cur != NONE && (strip_pointer_casts(cur) == strip_pointer_casts(nv) || is_undef_value(cur)) return false;
+        if cur != NONE && (atr_strip_pointer_casts(cur) == atr_strip_pointer_casts(nv) || is_undef_value(cur)) return false;
         atr.to_be_changed_values[k][1] = nv;
         atr.to_be_changed_values[k][2] = cast(u32) change_droppable;
         return true;
@@ -107,7 +107,7 @@ atr_register_function_signature_rewrite_ari :: (arg: Value_Id, ari: Arg_Replacem
 // rewriteFunctionSignatures
 atr_rewrite_function_signatures :: (modified: *[..] Value_Id) -> bool {
     changed := ATR_UNCHANGED;
-    if atr.arg_replacement_order.count > 1 fatal("attributor: signature rewrites of several functions (DenseMap order) are not supported yet");
+    atr_check_rewrite_order_independent();
     for old_fn: atr.arg_replacement_order {
         if !atr_fn_in_set(old_fn) continue;
         dead := false;
@@ -200,6 +200,17 @@ atr_rewrite_function_signatures :: (modified: *[..] Value_Id) -> bool {
             rauw_with_metadata(pr[0], pr[1]);
             erase_inst_with_metadata(pr[0]);
         }
+        // the blockaddresses of the moved blocks follow them (BlockAddress::getFunction is the block's parent)
+        ba: [..] Use_Id; ba.allocator = temp;
+        u := ir.v_first_use[old_fn];
+        while u != NONE { if vkind(ir.u_user[u]) == .C_BLOCKADDR array_add(*ba, u); u = ir.u_next[u]; }
+        if ba.count {
+            all_ba := true;
+            u = ir.v_first_use[old_fn];
+            while u != NONE { if vkind(ir.u_user[u]) != .C_BLOCKADDR all_ba = false; u = ir.u_next[u]; }
+            if !all_ba fatal("attributor: a rewritten function with blockaddresses and other uses is not supported yet");
+            replace_all_uses_with(old_fn, new_fn);
+        }
         // CGUpdater.replaceFunctionWith(*OldFn, *NewFn)
         atr_replace_function_with(old_fn, new_fn);
         for modified.* if it == old_fn { array_ordered_remove_by_index(modified, it_index); atr_set_insert(modified, new_fn); break; }
@@ -207,6 +218,30 @@ atr_rewrite_function_signatures :: (modified: *[..] Value_Id) -> bool {
     }
     return changed;
 }
+// ArgumentReplacementMap is a DenseMap<Function *, ...> iterated in pointer-hash order. The order only shows when
+// two privatizing rewrites create the "<ptr>.b<offset>" pointers in the same caller (name uniquing).
+atr_check_rewrite_order_independent :: () {
+    if atr.arg_replacement_order.count < 2 return;
+    callers: Table(Value_Id, Value_Id); callers.allocator = temp;
+    for f: atr.arg_replacement_order {
+        aris := table_find_pointer(*atr.arg_replacements, f).*;
+        priv := false;
+        for aris if it.present && it.repair == ARI_PRIV && it.types.count > 1 priv = true;
+        if !priv continue;
+        u := ir.v_first_use[f];
+        while u != NONE {
+            usr := ir.u_user[u];
+            if is_inst(usr) {
+                c := inst_fn(usr);
+                found, other := table_find(*callers, c);
+                if found && other != f fatal("attributor: several signature rewrites with call sites in one function (DenseMap order) are not supported yet");
+                table_set(*callers, c, f);
+            }
+            u = ir.u_next[u];
+        }
+    }
+}
+
 // AAPrivatizablePtrArgument's FnRepairCB
 priv_callee_repair :: (ari: *Arg_Replacement, new_fn: Value_Id, argno: u32) {
     entry := fn_entry(new_fn);
@@ -318,7 +353,7 @@ atr_cleanup_ir :: () -> bool {
         user := ir.u_user[u];
         ui := ifx is_inst(user) then user else NONE;
         if ui != NONE && inst_op(ui) == .RET {
-            ci := strip_pointer_casts(old);
+            ci := atr_strip_pointer_casts(old);
             if is_inst(ci) && inst_op(ci) == .CALL && call_is_must_tail(ci) && !is_to_be_deleted(ci) return;
             if vkind(nv) != .ARGUMENT {
                 f := inst_fn(ui);
