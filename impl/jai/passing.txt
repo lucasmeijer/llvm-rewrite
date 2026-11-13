@@ -16,6 +16,7 @@ tests/analysis/cost-model/globals.ll::analysis
 tests/analysis/cost-model/globals.ll::roundtrip
 tests/analysis/cost-model/misc.ll::analysis
 tests/analysis/cost-model/misc.ll::roundtrip
+tests/analysis/cost-model/vp-intrinsics.ll::analysis
 tests/analysis/cost-model/vp-intrinsics.ll::roundtrip
 tests/analysis/cycles/irreducible.ll::analysis
 tests/analysis/cycles/irreducible.ll::roundtrip
@@ -4596,6 +4597,7 @@ tests/imported/llvm/Transforms/ADCE/basictest1.ll::opt
 tests/imported/llvm/Transforms/ADCE/basictest1.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/basictest2.ll::opt
 tests/imported/llvm/Transforms/ADCE/basictest2.ll::roundtrip
+tests/imported/llvm/Transforms/ADCE/blocks-with-dead-term-nondeterministic.ll::opt
 tests/imported/llvm/Transforms/ADCE/blocks-with-dead-term-nondeterministic.ll::roundtrip
 tests/imported/llvm/Transforms/ADCE/broken-loop-info.ll::opt
 tests/imported/llvm/Transforms/ADCE/broken-loop-info.ll::roundtrip
