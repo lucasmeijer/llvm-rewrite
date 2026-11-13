@@ -59,3 +59,6 @@ PassManagerImpl.h, lib/IR/PassManager.cpp) that change optimized output, for imp
   (AAManager::getModuleAAResultImpl), and then registers an outer invalidation: when GlobalsAA is invalidated, the
   module proxy abandons that function's AAManager (and so its MemorySSA). A function whose AA result was created
   before `require<globals-aa>` doesn't use GlobalsAA until its AA result is recomputed.
+
+- GlobalsAA is stateless for the analysis manager: only `invalidate<globals-aa>` drops it, so the AAManager results
+  that registered the outer invalidation stay valid through the whole -O2 pipeline (default-pipelines.md).

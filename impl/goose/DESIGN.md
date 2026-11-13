@@ -540,6 +540,22 @@ symbol table uniques), and erased with `ig_erase_global`, which applies ValueAsM
 (ipo_globals.goose). A CGSCC pass is a case in `cg_run_pass` (cgscc.goose) returning its preserved set; replacing a
 function in the call graph is `lcg_replace_node_function`.
 
+**Default pipelines** (pipelines.goose, PassBuilderPipelines.cpp): `-O#` is `-passes=default<O#>`; a `default<On>`
+element parses to a placeholder PK_MODULE that `parse_pass_pipeline` fills after parsing (building it calls the
+parse_* functions, which must not recurse into the builder). The builder adds leaf passes through the textual
+parser (`pb_add(parent, "<LLVM's printed name>")`), so `-goose-print-pipeline` prints exactly what
+`opt -print-pipeline-passes` prints; constructor arguments the text doesn't carry go in the node's arg afterwards
+(loop-unroll-full level / OnlyWhenForced, tailcallelim's UpdateFunctionEntryCount, vector-combine's
+TryEarlyFoldsOnly, always-inline's InsertLifetimeIntrinsics). Structures without a textual form are node kinds:
+the ModuleInlinerWrapperPass is a PK_MODULE with `required = false` (bisect counts it as
+`inliner-ml-advisor-release`; arg = level + 1 selects the InlineAdvisor's getInlineParamsFromOptLevel; its last child
+is the late `function(invalidate<should-not-run-function-passes>)`), PK_EXTRA is
+ExtraLoopPassManager<ShouldRunExtraSimpleLoopUnswitch> (runs its children when indvars on the same loop left the
+marker, `lpm_extra_marker`), PK_CORO_COND is CoroConditionalWrapper. A module `function<eager-inv>(...)` adaptor
+(PK_FUNCTION arg bit 0) invalidates each function with PreservedAnalyses::none() after its pipeline; a CGSCC
+`function<...;no-rerun>` adaptor (PK_CGFN arg bit 1) skips functions whose ShouldNotRunFunctionPassesAnalysis
+marker (`snr_cached`, analysis bit A_SNR, dropped by any PA that doesn't preserve it) is cached.
+
 **Loop passes** (lpm.goose, passmgr.goose): `loop(...)`/`loop-mssa(...)` and a loop pass in a function pipeline
 become a `PK_LOOP` node (FunctionToLoopPassAdaptor) whose `pass` field links its two canonicalization nodes
 (loop-simplify, lcssa: run like a function pass manager, counted by bisect); a nested `loop(...)` is a `PK_LPM`
@@ -592,6 +608,11 @@ passmgr.goose applies LLVM's rules to them:
 - **Outer-analysis proxy.** An AAManager result records whether GlobalsAA was cached when it was created
   (`aa_res`, getModuleAAResultImpl) and only then uses it; `globals_aa_invalidate(m)` abandons the AAManager of
   exactly those functions (registerOuterAnalysisInvalidation), which takes their MemorySSA with it.
+- **GlobalsAA stays cached** across IR-changing module and CGSCC passes (GlobalsAAResult::invalidate only gives up
+  on an explicit `invalidate<globals-aa>`), exactly like LLVM's stateless result: after `require<globals-aa>` in the
+  inliner wrapper, the whole CGSCC walk and the rest of the pipeline query the result computed before inlining.
+  Its DeletionCallbackHandles only remove entries of erased globals, which no later query can name since value ids
+  are never reused. `recompute-globalsaa` recomputes it in place (`gm_recompute`).
 - **Not modelled** (no pass keeps them across passes yet): DemandedBits (recomputed per pass), LoopAccessInfo
   (one per pass), IVUsers and other LoopAnalysisManager results, MemoryDependenceAnalysis (GVN doesn't preserve it).
 - **A new analysis** with function-level state must say where its per-function results live (one of the two forms

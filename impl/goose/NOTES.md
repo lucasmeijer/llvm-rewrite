@@ -19,6 +19,11 @@
 
 ## Status
 
+- L2.pipeline-O2 176/241 (2026-11-13), L2.phase-ordering 245/288, L2.perf-corpus 52/56. With
+  `-vectorize-slp=false -vectorize-loops=false -interleave-loops=false` (both opts) all 241 pipeline-O2 tests and all
+  27 tests/perf files are identical, so the 65 pipeline-O2 tests left are blocked only by LoopVectorize / SLPVectorizer
+  (none by DFAJumpThreading). Corpus sweeps `-O0`/`-O1`/`-O2`/`-O3`: 0 differs, 0 bad-ir. See "Default pipelines".
+
 - L2.inline 449/466 opt+roundtrip (all roundtrips). The 17 left need other units: `-O1/-O2/-O3`/`default<On>`
   pipelines (13, incl. devirtualize-4's second RUN line), `partial-inliner` (2; PartialInlining + CodeExtractor),
   `mergefunc` (1) and `scc-oz-module-inliner` (1, the Oz inliner pipeline). L2.function-attrs 106/118:
@@ -236,6 +241,9 @@
 | `src/loopinfo.goose`, `src/cycleinfo.goose` | LoopInfo (+ update API, loop metadata), CycleInfo |
 | `src/breakcrit.goose`, `src/loopsimplify.goose`, `src/lcssa.goose` | SplitCriticalEdge/break-crit-edges, SplitBlockPredecessors + LoopSimplify, LCSSA |
 | `src/lpm.goose` | Loop pass manager worklist (SmallPriorityWorklist) and LPMUpdater; the adaptor runs in passmgr.goose |
+| `src/pipelines.goose` | PassBuilderPipelines.cpp: `-O#` / `default<On>` pipelines, PipelineTuningOptions, `-goose-print-pipeline` |
+| `src/expand_memcmp.goose` | ExpandMemCmp.cpp + X86TTIImpl::enableMemCmpExpansion |
+| `tools/obisect.py` | bisect any opt arguments between LLVM and goose on one file (-opt-bisect-limit) |
 | `src/scev.goose` | ScalarEvolution nodes, uniquing, folding constructors (add/mul/udiv/addrec/min/max/casts), complexity order, printing |
 | `src/scev_create.goose` | getSCEV/createSCEV, AddRecs from PHIs, selects, GEPs, value maps, forgetMemoizedResults, rewriters |
 | `src/scev_range.goose` | Constant multiples, ranges, isKnown* sign queries |
@@ -941,9 +949,8 @@ The cross-adaptor ScalarEvolution gap is closed. It used to fail loudly (`sc_los
 - Traps: a new SCEV cache must be listed in scev_archive.goose (or it leaks between functions). Anything that keeps
   a SCEV/MemorySSA/AC id must not outlive a function switch (one pass on one function is safe). `fam_enter(fv)` must
   run before a pass changes fv (callbacks only reach the loaded instance).
-- Known divergence left: goose drops GlobalsAA (`globals_aa_invalidate`) after every IR-changing module/CGSCC
-  pass, while LLVM's is stateless and stays cached (with deletion callbacks, not ported) until `invalidate<globals-aa>`.
-  Not modelled: DemandedBits, LoopAccessInfo, IVUsers and other loop-analysis results across passes (no pass
+- GlobalsAA now stays cached like LLVM's stateless result (L2.pipeline-O2, DESIGN §9.1); only
+  `invalidate<globals-aa>` drops it. Not modelled: DemandedBits, LoopAccessInfo, IVUsers and other loop-analysis results across passes (no pass
   preserves them across passes in our pipelines).
 - Tests: tests/pass/pass-manager/{scev-cached-across-adaptors,mssa-cached-across-adaptors,bpi-kept-with-cfg}.ll
   (the old binary fails all three: one loudly, two silently).
@@ -1629,6 +1636,39 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   iterates the loop region's blocks itself instead of recursing). Mutual imports work (lv_cm <-> lv_cost).
 - IRBuilder::SetInsertPoint(Instruction) also takes the instruction's debug location: VPIRBasicBlock::execute sets
   vxb_dl from the IR block's terminator, which the next created block's `unreachable` (and so its branch) inherits.
+
+## Default pipelines (L2.pipeline-O2: pipelines.goose, expand_memcmp.goose; DESIGN §9)
+
+- `-O0`..`-O3` / `default<On>` build LLVM's pipelines as PNode trees; `opt -passes='default<O2>' -goose-print-pipeline`
+  must equal `opt -print-pipeline-passes` (checked for O0..O3 and with the PassBuilderPipelines cl::opts; diff it
+  after changing pipelines.goose). Non-default cl::opts that add passes we don't build fail loudly
+  (pb_check_cl_opts). LTO / ThinLTO / FatLTO pipelines are still "not implemented yet".
+- Debugging a mismatch: `tools/obisect.py FILE -- -O2 [flags]` bisects any opt arguments (not only a test's @opt
+  line) against LLVM and leaves the input of the first diverging pass in /tmp/obisect/llvm.before.ll; rerun that pass
+  standalone on it. Every divergence found so far reproduced standalone (no pass-manager state bug left), except the
+  first two below. Comparing with vectorizers off on both sides (`-vectorize-slp=false -vectorize-loops=false
+  -interleave-loops=false`) separates vectorizer blockers from the rest.
+- Pipeline-state fixes: GlobalsAA is no longer dropped after IR-changing module/CGSCC passes; the CGSCC->function
+  adaptor checks the *accumulated* PA for LazyCallGraphAnalysis (one non-preserving pass makes every later function
+  update the call graph); RecomputeGlobalsAA keeps UnknownFunctionsWithLocalLinkage (no move constructor);
+  ShouldNotRunFunctionPasses / no-rerun / eager-inv adaptors; ExtraLoopPassManager marker.
+- Pass bugs found by -O2 bisects (each reproduced standalone, all in shared code): GlobalsAA isDefinitionExact ignored
+  noipa; removeDeadConstantUsers destroyed BlockAddresses (LLVM 23's BlockAddress has no operands, so it is never a
+  constant user of its function); the inliner's CloneAndPrune PHI trimming must be removeIncomingValueIf (backwards,
+  last entry into the hole); AddReturnAttributes' throw window scanned one instruction too many; foldSelectCmpXchg
+  compared an FP constant's width wrongly; ConstantFPRange infinity for x86_fp80 (exponent above the 64-bit
+  significand). Loud blockers ported: isSafeToSpeculateStore from a load, SoleWriteToDeadLocal, atomicrmw,
+  foldVec(Ext)TruncToExtElt, AliasScopeTracker, isIdenticalTo, DemandedBits on APInts (wide values are stored as IR
+  constants, the cache outlives the APInt pool), strdup getAllocSize, computePointerICmp's capture tracker,
+  OptimizePointerDifference, CondContext in phi recursions, stripAndAccumulateConstantOffsets through inttoptr,
+  ComputeNumSignBits of clamps, ExpandMemCmp, CGProfile, Negator vector ops, EH/cmpxchg/indirectbr (no visitors).
+- Speed, `-O2` with vectorizers off, user+sys s goose vs LLVM (peak RSS): SPASS 6.8 vs 4.6 (431 vs 95 MB), lua 1.6
+  vs 1.3, oggenc 1.7 vs 1.3, sqlite3 4.2 vs 3.0 (264 vs 78 MB). `perf` on tests/perf/scaling: every `opt -O2` row
+  passes; 0.3x-4x LLVM, worst scaling/switch (n32000 3.98x, k 1.45 vs LLVM 1.17; simplifycfg alone k 1.59 vs 1.16:
+  a superlinear SimplifyCFG path on big switches, not profiled yet) and calls (2.1x, the inliner's cost walk).
+- Remaining phase-ordering failures outside the vectorizers: LTO/ThinLTO pipelines (6), -enable-merge-functions (3),
+  expand-reductions, SimplifyCFG conditional-faulting hoists (APX cf), isImpliedCondition with vector logical
+  and/or, ptrauth protected.field.ptr, -pgo-kind options.
 
 ## Small passes of default<O2>, FunctionSpecialization, MergeICmps (misc_passes.goose and friends)
 

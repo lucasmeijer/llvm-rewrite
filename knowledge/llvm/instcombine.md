@@ -343,3 +343,14 @@ Verified by the goose port (per-function sweep of the imported InstCombine tests
   `vscale_range` attribute. `APFloat::hasSignBitInMSB` is true for ppc_fp128 too.
 - `DataLayout::getTypeAllocSize` of an array is `N * getTypeAllocSize(elt)` in bytes; computing it through bits
   wraps for `[2^63 x i8]` (LowerConstantIntrinsics/objectsize_basic.ll large_alloca).
+
+## Visitors InstCombine doesn't have (verified by impl/goose -O2 sweeps)
+
+- InstCombinerImpl has no visitor for resume, catchswitch, catchpad, cleanuppad, catchret, cleanupret, indirectbr,
+  cmpxchg or va_arg: InstVisitor falls back to visitInstruction, which returns nullptr (only the generic worklist
+  DCE / constant folding applies). atomicrmw has visitAtomicRMWInst (InstCombineAtomicRMW.cpp).
+- The prepare-worklist AliasScopeTracker erases an `llvm.experimental.noalias.scope.decl` whose scope is not used by
+  both some `!alias.scope` and some `!noalias` list of the reachable instructions (walked in RPO before the reverse
+  push).
+- SoleWriteToDeadLocal lets tryToSinkInstruction sink a call that writes only to an alloca (getForDest) whose users
+  are, through GEPs and addrspacecasts, only that call.

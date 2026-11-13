@@ -133,3 +133,7 @@ Facts verified while porting `llvm/lib/Transforms/Utils/SimplifyCFG.cpp` (LLVM 2
   X86Subtarget getter (`hasCMOV()` = `HasCMOV`; `TuningPreferNoGather` sets `PreferGather = false`, so
   `preferGather()` defaults to true).
 
+- isSafeToSpeculateStore (SpeculativelyExecuteBB) accepts a preceding simple load of the same pointer/type/alignment
+  only if the underlying object is writable (alloca, byval, noalias+writable argument, noalias call), not captured
+  (PointerMayBeCaptured with CaptureComponents::Provenance, without return captures), and, for writable arguments,
+  dereferenceable with IgnoreFree; the load itself then becomes the select's other value (impl/goose, -O2 corpus).

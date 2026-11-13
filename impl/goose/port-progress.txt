@@ -64,14 +64,14 @@ lib/Analysis/MemorySSAUpdater.cpp 1  # manual: all of it (updateForClonedLoop / 
 lib/Support/KnownBits.cpp 0.7
 lib/Analysis/LoopInfo.cpp 0.6  # + LoopInfo::erase / UnloopUpdater (loop_utils.goose), setLoopID, getOptionalBoolLoopAttribute (loop_distribute.goose)
 lib/IR/DataLayout.cpp 0.2
-lib/Analysis/GlobalsModRef.cpp 0.85
+lib/Analysis/GlobalsModRef.cpp 0.9  # + RecomputeGlobalsAAPass; deletion callbacks unneeded (ids never reused)
 lib/Analysis/AliasAnalysis.cpp 0.9
 lib/Transforms/Utils/PredicateInfo.cpp 0.6
 lib/IR/ConstantFPRange.cpp 0.35
 lib/Transforms/Utils/LoopSimplify.cpp 0.9
 lib/Analysis/TypeBasedAliasAnalysis.cpp 0.85
 lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.5
-lib/Analysis/DemandedBits.cpp 0.95
+lib/Analysis/DemandedBits.cpp 0.97  # APInts of any width since L2.pipeline-O2
 lib/Transforms/InstCombine/InstCombineNegator.cpp 0.75
 lib/Transforms/Scalar/ADCE.cpp 0.85
 lib/Transforms/Utils/SSAUpdater.cpp 0.9  # + LoadAndStorePromoter::run (licm.goose)
@@ -215,7 +215,7 @@ lib/Transforms/Coroutines/CoroSplit.cpp 0.01
 lib/Transforms/Coroutines/CoroAnnotationElide.cpp 0.1
 lib/Transforms/IPO/OpenMPOpt.cpp 0.0  # early exit only
 lib/Transforms/Utils/InjectTLIMappings.cpp 0.1  # no -vector-library
-lib/Transforms/Instrumentation/CGProfile.cpp 0.1  # early exit only
+lib/Transforms/Instrumentation/CGProfile.cpp 0.85  # all but indirect calls with value-profile data (InstrProfSymtab): loud
 lib/Transforms/Utils/RelLookupTableConverter.cpp 0.1  # early exit only
 lib/Transforms/Scalar/DFAJumpThreading.cpp 0.97  # all but optimization remarks and -dfa-jump-view-cfg-before
 lib/Transforms/Utils/SSAUpdaterBulk.cpp 0.6  # AddVariable/AddAvailableValue/AddUse/RewriteAllUses; no RewriteAndOptimizeAllUses, EliminateNewDuplicatePHINodes
@@ -234,3 +234,5 @@ lib/Analysis/Delinearization.cpp 0.95  # all but the legacy printer wrapper
 lib/Analysis/ScalarEvolutionDivision.cpp 1
 lib/Transforms/Scalar/LoopInterchange.cpp 0.97  # all but optimization remarks
 lib/Analysis/LoopCacheAnalysis.cpp 0.95  # all but the debug dumps / operator<< of IndexedReference
+lib/Passes/PassBuilderPipelines.cpp 0.55  # default<O0..O3> (per-module, inliner/MIWP, simplification, optimization, vector passes); not LTO/ThinLTO/FatLTO/PGO pipelines
+lib/Transforms/Instrumentation/ControlHeightReduction.cpp 0.02  # the no-profile-summary early exit only (pipelines.goose)

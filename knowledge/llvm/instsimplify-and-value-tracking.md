@@ -199,3 +199,13 @@ Verified against LLVM 23.1.5 source and the imported InstSimplify tests.
   allocas count (InstSimplify/compare.ll `scalar_vectors_are_non_empty`); globals use the *store* size.
 - `GEPOperator::accumulateConstantOffset` takes only scalar `ConstantInt` indices (a vector zero index fails), skips
   zero indices before looking at scalability, and has an `i8` fast path that reads only the first index.
+
+- ConstantFPRange works for every IEEE semantics, x86_fp80 included: keyed by sign-magnitude bit patterns, its
+  +infinity is exponent 0x7FFF *with the explicit integer bit set* (bits 64..78 and 63), and `next()` across a binade
+  changes the exponent (mantissa 0xFFFF... -> exponent + 1, mantissa 0x8000...; the smallest normal steps down to
+  exponent 0, mantissa 0x7FFF...). tests/pass/instsimplify/fcmp-ranges-fp80-fp128.ll (impl/goose).
+- Every phi recursion in isKnownNonZero, isKnownToBeAPowerOfTwo, isKnownNonEqual (PHIs) and ComputeNumSignBits uses
+  `Q.getWithoutCondContext()`; isSignedMinMaxIntrinsicClamp requires CLow <= CHigh (signed) and ComputeNumSignBits of
+  a clamp is min(numSignBits(CLow), numSignBits(CHigh)).
+- stripAndAccumulateConstantOffsets(LookThroughIntToPtr) accumulates `inttoptr (add (ptrtoint p), C)` only with
+  AllowNonInbounds, a ConstantInt C and an add of exactly the index width.

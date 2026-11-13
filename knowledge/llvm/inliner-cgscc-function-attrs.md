@@ -42,7 +42,13 @@ are identical to opt 23.1.5 on every round-tripping corpus file (also with each 
   library function (`fabsf(2.0)`) is *not* folded; only intrinsics are. A recursive call to such a function stays a
   recursive call (TailCallElim/inf-recursion.ll with `-passes=inline`).
 - A `blockaddress` is not a user of its function in LLVM 23 (it has no operands), so it does not count as a live use
-  for isSoleCallToLocalFunction / the dead-function check.
+  for isSoleCallToLocalFunction / the dead-function check, and `Value::removeDeadConstantUsers` on the function never
+  destroys it: a blockaddress left dead by GlobalOpt erasing its global keeps the block address-taken (SimplifyCFG
+  then won't merge it) until GlobalDCE destroys the initializer (GlobalDCE/deadblockaddr.ll at -O2).
+- AddReturnAttributes' MayContainThrowingOrExitingCallAfterCB scans with ScanLimit =
+  `-max-inst-checked-for-throw-during-inlining` (4) + 1 and `--ScanLimit == 0` fails first: at most 4 instructions
+  between the returned call and the `ret`, a 5th makes it give up (Shootout/lists.ll at -O2: no `noundef` on the
+  inlined malloc). CallBase::hasRetAttr also looks at the callee's return attributes.
 - Static allocas move with `Caller->getEntryBlock().splice(Caller->begin()->begin(), ...)` and byval copies are
   inserted at `Caller->begin()->begin()`; the byval memcpy uses `IRBuilder(InsertBlock, InsertBlock->begin())`. All
   three iterators carry the head bit: the instructions go in front of the debug records at the insertion point.

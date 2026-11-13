@@ -148,3 +148,6 @@ Verified with the jai port (`sweep --passes dse|memcpyopt`, whole-file and per-f
 - BasicAA's aliasGEP computes an index's range with `computeConstantRange` at the index *value's* width and only
   then truncates it to the index width (`CastedValue::evaluateWith(ConstantRange)`), so an `i128` GEP index needs
   an any-width ConstantRange (`MemCpyOpt/memset-memcpy-redundant-memset.ll`, `test_different_types_i32_i128`).
+
+- GlobalsAA stays cached across IR-changing module and CGSCC passes and its isDefinitionExact excludes `noipa`
+  definitions: see default-pipelines.md (verified by impl/goose -O2 sweeps).
