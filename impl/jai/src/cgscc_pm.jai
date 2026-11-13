@@ -169,7 +169,7 @@ run_cgscc_adaptor :: (n: s32) -> Preserved {
 
 // Function::eraseFromParent for a function whose body was made unreachable
 erase_function :: (f: Value_Id) {
-    table_remove(*fam, f);
+    { table_remove(*fam, f); ac_virtual_clear(f); }
     fn_drop_all_references(f);
     md_global_value_deleted(f);
     erase_global(f);

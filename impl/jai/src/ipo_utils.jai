@@ -187,7 +187,7 @@ fn_delete_body :: (f: Value_Id) {
     }
     g.has_prefix = false; g.has_prologue = false; g.has_personality = false;
     ir.v_md[f] = NONE;
-    table_remove(*fam, f);
+    { table_remove(*fam, f); ac_virtual_clear(f); }
     gv_set_linkage(f, .EXTERNAL);
 }
 
@@ -555,8 +555,8 @@ ipo_fn_splice_body :: (nf: Value_Id, f: Value_Id) {
     for b: fn_blocks(nf) block(b).parent = nf;
     ng.next_block_num = -1;
     for vals set_name(it, names[it_index]);
-    table_remove(*fam, f);
-    table_remove(*fam, nf);
+    { table_remove(*fam, f); ac_virtual_clear(f); }
+    { table_remove(*fam, nf); ac_virtual_clear(nf); }
 }
 // the parameter attribute sets of a list, as an array
 ipo_param_attrs :: (l: u32, n: u32) -> [..] u32 {

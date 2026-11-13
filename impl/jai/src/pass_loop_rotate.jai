@@ -84,6 +84,8 @@ inst_clone :: (i: Value_Id) -> Value_Id { return ic_clone_inst(i); }   // ic_cor
 
 // AssumptionCache::registerAssumption
 ac_register_assumption :: (ac: *Assumption_Cache, ci: Value_Id) {
+    vp := table_find_pointer(*ac_virtual, ac.fn);
+    if vp table_set(*vp.registered, ci, true);
     if !ac.scanned return;   // found when the function is scanned later
     array_add(*ac.assumes, ci);
     ac_update_affected_values(ac, ci);

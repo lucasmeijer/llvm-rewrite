@@ -492,7 +492,7 @@ atr_cgscc_update :: (c_in: s32, ur: *Cgscc_Ur) -> s32 {
         remove_dead_constant_users(f);
         md_as_value_deleted(f, false);
         replace_non_metadata_uses_with(f, const_poison(vtype(f)));
-        table_remove(*fam, f);
+        { table_remove(*fam, f); ac_virtual_clear(f); }
         gv_erase_from_parent(f);
     }
     atr_cg_dead_functions.count = 0;

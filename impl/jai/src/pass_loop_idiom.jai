@@ -693,6 +693,7 @@ lir_optimize_crc_loop :: (c: *Lir, info: *Hr_Poly) -> bool {
     glob(gv).has_init = true;
     glob(gv).is_const = true;
     glob(gv).linkage = .PRIVATE;
+    glob(gv).dso_local = true;   // maybeSetDsoLocal
     li := c.li; l := c.l;
     iv := li_canonical_induction_variable(li, l);
     cleanup: [..] Value_Id; cleanup.allocator = temp;

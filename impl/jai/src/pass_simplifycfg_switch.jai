@@ -1170,6 +1170,7 @@ sr_replace_switch :: (s: *Scfg, r: *Switch_Replacement, index_in: Value_Id, b: *
             set_op(table, 0, r.initializer); g.has_init = true;
             g.is_const = true;
             g.linkage = .PRIVATE;
+            g.dso_local = true;   // GlobalValue::setLinkage -> maybeSetDsoLocal (implicitly dso_local)
             g.unnamed_addr = 2;
             g.align = dl_pref_align(r.value_type);
             idx_ty := type_int(cast(u64) dl_index_size_bits(0));

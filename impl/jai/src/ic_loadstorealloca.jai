@@ -56,7 +56,7 @@ copy_load_store_properties :: (dst: Value_Id, src: Value_Id) {
 icb_aligned_load :: (ty: Type_Id, ptr: Value_Id, align: u64, name: string = "") -> Value_Id {
     i := new_inst(.LOAD, ty, 1);
     set_op(i, 0, ptr);
-    inst(i).align = align;
+    inst(i).align = ifx align then align else dl_abi_align(ty);   // MaybeAlign: none = the ABI alignment
     return icb_insert(i, name);
 }
 // CreateStore(V, Ptr, Properties)
@@ -70,7 +70,7 @@ icb_store_props :: (v: Value_Id, ptr: Value_Id, props: Value_Id) -> Value_Id {
 icb_aligned_store :: (v: Value_Id, ptr: Value_Id, align: u64) -> Value_Id {
     i := new_inst(.STORE, ir.t_void, 2);
     set_op(i, 0, v); set_op(i, 1, ptr);
-    inst(i).align = align;
+    inst(i).align = ifx align then align else dl_abi_align(vtype(v));   // MaybeAlign: none = the ABI alignment
     return icb_insert(i);
 }
 // CreateAlloca(Ty, AddrSpace, ArraySize = nullptr, Name): align = DL.getPrefTypeAlign(Ty)
@@ -146,7 +146,10 @@ try_enforce_alignment :: (v_in: Value_Id, pref_in: u64) -> u64 {
 gv_can_increase_alignment :: (g: Value_Id) -> bool {
     if !gv_is_strong_definition_for_linker(g) return false;
     if glob(g).section.count > 0 && glob(g).align != 0 return false;
-    if !glob(g).dso_local return false;
+    // only ELF (also the default for an unknown triple) can't increase the alignment of a non-dso_local global
+    obj := triple_parse(ir.triple).obj;
+    if obj == .ELF && !glob(g).dso_local return false;
+    if obj == .XCOFF fatal("canIncreaseAlignment: XCOFF (the toc-data attribute) is not supported yet");
     return true;
 }
 // getOrEnforceKnownAlignment(V, PrefAlign, DL, CxtI, AC, DT); pref_align 0 = none (getKnownAlignment)

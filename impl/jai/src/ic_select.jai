@@ -19,10 +19,8 @@ ic_binop_identity_nsz :: (opc: Opcode, t: Type_Id, allow_rhs: bool, nsz: bool) -
 }
 // Instruction::isSameOperationAs for the binary operators and GEPs that foldSelectOpOp compares
 ic_is_same_operation_as :: (a: Value_Id, b: Value_Id) -> bool {
-    if inst_op(a) != inst_op(b) || vtype(a) != vtype(b) || nops(a) != nops(b) return false;
-    for k: 0..nops(a) - 1 if vtype(op(a, k)) != vtype(op(b, k)) return false;
-    if inst_op(a) == .GEP && inst(a).ty2 != inst(b).ty2 return false;
-    return true;
+    // Instruction::isSameOperationAs, including haveSameSpecialState (cmp predicates, GEP source types, ...)
+    return is_same_operation_as(a, b);
 }
 // GEPNoWrapFlags of a GEP in LLVM's form (inbounds implies nusw), intersected, back in this port's encoding
 ic_gep_nw_intersect :: (a: Value_Id, b: Value_Id) -> u32 {

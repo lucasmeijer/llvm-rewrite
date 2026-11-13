@@ -22,7 +22,7 @@ rltc_should_convert :: (info: *Rltc_Info, gv: Value_Id) -> bool {
     t := ir.triple;
     should_drop_unnamed_addr := begins_with(t, "aarch64") || begins_with(t, "arm64") ||
         ((begins_with(t, "x86_64") || begins_with(t, "i386") || begins_with(t, "i686")) && (find_index_from_left(t, "darwin") >= 0 || find_index_from_left(t, "macos") >= 0 || find_index_from_left(t, "ios") >= 0));
-    if should_drop_unnamed_addr fatal("rel-lookup-table-converter: dropping unnamed_addr (AArch64 / x86 Darwin) is not implemented yet");
+    gv_ops: [..] Value_Id; gv_ops.allocator = temp;
     offset := ap_zero(iw);
     size := dl_type_alloc_size(g.value_type);   // getGlobalSize
     init := op(gv, 0);
@@ -33,9 +33,11 @@ rltc_should_convert :: (info: *Rltc_Info, gv: Value_Id) -> bool {
         if !okg return false;
         if vkind(gvop) != .GLOBAL_VAR || !glob(gvop).is_const return false;
         if !gv_has_local_linkage(gvop) || !glob(gvop).dso_local || !gv_is_implicit_dso_local(gvop) return false;
+        if should_drop_unnamed_addr array_add(*gv_ops, gvop);
         array_add(*info.ptrs, c);
         offset = ap_add(offset, stride);
     }
+    if should_drop_unnamed_addr for gv_ops glob(it).unnamed_addr = 0;   // UnnamedAddr::None
     return true;
 }
 

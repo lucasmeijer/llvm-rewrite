@@ -889,7 +889,7 @@ ce_extract_code_region :: (ce: *Code_Extractor, cache: *Ce_Cache) -> Value_Id {
     new_values: [..] Value_Id; new_values.allocator = temp;
     for v, k: inputs.list array_add(*new_values, fn_arg(nf, cast(u32) k));
     ce_fixup_debug_info_post_extraction(old, nf, call, inputs.list, new_values);
-    table_remove(*fam, old);
+    { table_remove(*fam, old); ac_virtual_clear(old); }
     return nf;
 }
 // BlockFrequency::operator+= (saturating)

@@ -1059,7 +1059,7 @@ fs_run :: (fs: *Func_Spec) -> bool {
 // ~FunctionSpecializer: removeDeadFunctions, cleanUpSSA
 fs_finish :: (fs: *Func_Spec) {
     for f: fs.dead_functions {
-        table_remove(*fam, f);   // FAM->clear(*F)
+        { table_remove(*fam, f); ac_virtual_clear(f); }   // FAM->clear(*F)
         while ir.v_first_use[f] != NONE {
             cs := ir.u_user[ir.v_first_use[f]];
             if !is_inst(cs) || (inst_op(cs) != .CALL && inst_op(cs) != .INVOKE) fatal("function specialization: internal: a dead function has a user that is not a call");

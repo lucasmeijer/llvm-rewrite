@@ -367,7 +367,7 @@ is_math_lib_call_noop :: (i: Value_Id) -> bool {
             case "log"; #through;
             case "log2"; #through;
             case "log10"; return nan || (!zero && !neg);
-            case "ilogb"; return !nan && !zero && !inf;
+            case "ilogb"; return vname(f) == "ilogb" && !nan && !zero && !inf;   // only LibFunc_ilogb (not ilogbf/ilogbl)
             case "exp";
                 if k == .DOUBLE return !(lt(have, nan, x, -745.0) || gt(have, nan, x, 709.0));
                 if k == .FLOAT return !(lt(have, nan, x, -103.0) || gt(have, nan, x, 88.0));

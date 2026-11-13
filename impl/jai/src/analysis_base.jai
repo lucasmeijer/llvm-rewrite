@@ -288,11 +288,36 @@ ac_build :: (f: Value_Id) -> *Assumption_Cache {
     ac.fn = f;
     return ac;
 }
+// LLVM's AssumptionCache is never invalidated (AssumptionCache::invalidate returns false); it goes away only with
+// FAM.clear (FunctionAnalysisManagerModuleProxy not preserved, a deleted or replaced function). Ours is rebuilt
+// whenever it isn't preserved, so this records what LLVM's long-lived cache would hold: every assume that existed
+// when it first scanned the function (value ids only grow) plus the ones registered since. An assume cloned
+// without registerAssumption afterwards (loop peeling, jump threading, ...) stays out of LLVM's cache, and so out of
+// our rebuilt ones.
+Ac_Virtual :: struct { epoch: Value_Id; registered: Table(Value_Id, bool); }
+ac_virtual: Table(Value_Id, Ac_Virtual);
+// FAM.clear(F) / InnerAM->clear(): LLVM's cache is gone, the next one scans afresh
+ac_virtual_clear :: (f: Value_Id) {
+    p := table_find_pointer(*ac_virtual, f);
+    if !p return;
+    deinit(*p.registered);
+    table_remove(*ac_virtual, f);
+}
+ac_virtual_clear_all :: () {
+    for * ac_virtual deinit(*it.registered);
+    deinit(*ac_virtual);
+    ac_virtual = .{};
+}
 // scanFunction
 ac_scan :: (ac: *Assumption_Cache) {
     if ac.scanned return;
     ac.scanned = true;
-    for fn_insts(ac.fn) if is_intrinsic_call(it, IID_ASSUME) array_add(*ac.assumes, it);
+    vp := table_find_pointer(*ac_virtual, ac.fn);
+    if !vp {
+        vp = table_set(*ac_virtual, ac.fn, .{});
+        vp.epoch = cast(Value_Id) ir.v_kind.count;
+    }
+    for fn_insts(ac.fn) if is_intrinsic_call(it, IID_ASSUME) && (it < vp.epoch || table_contains(*vp.registered, it)) array_add(*ac.assumes, it);
     for ac.assumes ac_update_affected_values(ac, it);
 }
 // assumptions(): AssumeHandles, scanning first

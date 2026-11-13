@@ -1827,7 +1827,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
             ai := i;
             i = inst(i).next;
             if inst_op(ai) != .ALLOCA continue;
-            if !has_uses(ai) { erase_inst(ai); continue; }
+            if !has_uses(ai) { erase_inst_with_metadata(ai); continue; }   // ~Value: ValueAsMetadata::handleDeletion
             if !alloca_would_be_static_in_entry(ai) continue;
             array_add(*ifi.static_allocas, ai);
             while i != NONE && inst_op(i) == .ALLOCA && has_uses(i) && alloca_would_be_static_in_entry(i) {

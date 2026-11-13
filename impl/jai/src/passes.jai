@@ -1361,7 +1361,7 @@ run_module_pm :: (n: s32) {
 mam_invalidate :: (pa: Preserved) {
     if pa.all return;
     if !pa.lcg lcg_invalidate();
-    if !pa.all_fn for f: ir.m_functions fam_invalidate(f, pa);
+    if !pa.all_fn { ac_virtual_clear_all(); for f: ir.m_functions fam_invalidate(f, pa); }
     // GlobalsAAResult::invalidate: stateless, only an explicit abandon<GlobalsAA>() (sanitizers, LowerEmuTLS)
     // invalidates it, so the result computed by require<globals-aa> lives on (recompute-globalsaa refreshes it)
     if pa.abandon_globals_aa globals_aa = null;

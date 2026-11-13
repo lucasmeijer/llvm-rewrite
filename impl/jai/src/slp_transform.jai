@@ -362,7 +362,7 @@ slp_transform_nodes :: () {
             fm := slp_get_operand_entry(t, 0);
             if slp.entries[fm].user_tree_index.user != TE_NONE && slp.entries[fm].state == TE_VECTORIZE slp.entries[fm].state = TE_COMBINED_VECTORIZE;
         } else if o == .SHL {
-            if e.idx != 0 || !slpx.has_user_ignore_list continue;
+            if e.idx != 0 || dl.big_endian || !slpx.has_user_ignore_list continue;
             all_disjoint := true;
             for v: slpx.user_ignore_list if !(is_inst(v) && inst_op(v) == .OR && (inst(v).flags & F_EXACT) != 0) { all_disjoint = false; break; }
             if !all_disjoint continue;
@@ -564,6 +564,7 @@ slp_matches_select_of_bits :: (te: Te_Id) -> bool {
     e := *slp.entries[te];
     t := slp.tti;
     K :: TCK_RECIP_THROUGHPUT;
+    if dl.big_endian return false;
     if e.reorder_indices.count || e.reuse_shuffle_indices.count return false;
     if !slpx.has_user_ignore_list || e.idx != 0 return false;
     if !slp_all_one_use(e.scalars) return false;

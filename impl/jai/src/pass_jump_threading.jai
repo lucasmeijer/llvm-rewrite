@@ -102,7 +102,7 @@ remove_dead_constant_users :: (c: Value_Id) {
         if is_global_value(vkind(c)) return false;
         while ir.v_first_use[c] != NONE {
             usr := ir.u_user[ir.v_first_use[c]];
-            if !is_constant_kind(vkind(usr)) || is_global_value(vkind(usr)) return false;
+            if !is_constant_kind(vkind(usr)) || is_global_value(vkind(usr)) || vkind(usr) == .C_BLOCKADDR return false;
             if !is_dead(usr) return false;
         }
         destroy_constant(c);
@@ -113,7 +113,8 @@ remove_dead_constant_users :: (c: Value_Id) {
     u := ir.v_first_use[c];
     while u != NONE {
         usr := ir.u_user[u];
-        if !is_constant_kind(vkind(usr)) || is_global_value(vkind(usr)) || !is_dead(usr) { last_live = u; u = ir.u_next[u]; continue; }
+        // a blockaddress is not a user of its function in LLVM 23 (only ~BasicBlock destroys it), so it stays
+        if !is_constant_kind(vkind(usr)) || is_global_value(vkind(usr)) || vkind(usr) == .C_BLOCKADDR || !is_dead(usr) { last_live = u; u = ir.u_next[u]; continue; }
         u = ifx last_live == NONE then ir.v_first_use[c] else ir.u_next[last_live];
     }
 }

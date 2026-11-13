@@ -532,7 +532,7 @@ arg_promotion_run_scc :: (node: *Pass_Node, c: s32) -> Preserved {
             if new_f == NONE continue;
             local_change = true;
             lcg_replace_node_function(n, new_f);
-            table_remove(*fam, old_f);
+            { table_remove(*fam, old_f); ac_virtual_clear(old_f); }
             gv_erase_from_parent(old_f);
             func_pa := preserved_cfg();
             for u: ap_fn_users(new_f) fam_invalidate(inst_fn(u), func_pa);

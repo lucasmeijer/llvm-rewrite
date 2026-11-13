@@ -266,7 +266,7 @@ inliner_run :: (node: *Pass_Node, initial_c: s32, ur: *Cgscc_Ur) -> Preserved {
         lcg_mark_dead_function(df);
         dn := lcg_lookup(df);
         dead_c := lcg_lookup_scc(dn);
-        table_remove(*fam, df);
+        { table_remove(*fam, df); ac_virtual_clear(df); }
         table_set(*ur.invalidated, dead_c, true);
         array_add(*ur.dead_functions, df);
     }
@@ -396,7 +396,7 @@ always_inliner_run :: (insert_lifetime := true) -> Preserved {
         if fn_has_fn_attr(f, .AlwaysInline) && fn_is_def_trivially_dead(f) {
             if glob(f).comdat >= 0 array_add(*inlined_comdat, f);
             else {
-                table_remove(*fam, f);
+                { table_remove(*fam, f); ac_virtual_clear(f); }
                 erase_function(f);
                 changed = true;
             }
@@ -436,7 +436,7 @@ always_inliner_run :: (insert_lifetime := true) -> Preserved {
     }
     if inlined_comdat.count {
         filter_dead_comdat_functions(*inlined_comdat);
-        for f: inlined_comdat { table_remove(*fam, f); erase_function(f); changed = true; }
+        for f: inlined_comdat { { table_remove(*fam, f); ac_virtual_clear(f); } erase_function(f); changed = true; }
     }
     if !changed return PRESERVE_ALL;
     pa: Preserved;
@@ -621,7 +621,7 @@ module_inliner_run :: () -> Preserved {
             }
         }
     }
-    for dead { table_remove(*fam, it); erase_function(it); }
+    for dead { { table_remove(*fam, it); ac_virtual_clear(it); } erase_function(it); }
     if !changed return PRESERVE_ALL;
     return PRESERVE_NONE;
 }
