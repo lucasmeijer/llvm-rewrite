@@ -1606,9 +1606,17 @@ Still slow / known:
 - `-denormal-fp-math[-f32]` add `denormal_fpenv` to every function without one (opt_set_function_attributes, which
   now also runs for an unknown-arch triple, with CPU/features cleared).
 - `-verify-scev-strict` is accepted: our verify<scalar-evolution> does not recompute (it could only abort).
-- Still failing loudly (my units): ppc_fp128 arithmetic (DoubleAPFloat not ported: 6 InstCombine tests), scalable
-  vectors in load folding / masked scatter / SROA with known vscale, optimizeModularFormat, VP intrinsic costs,
-  LowerTypeTests CFI lowering, ADCE `--preserve-ll-uselistorder`, LoopCacheAnalysis.
+- Also: `print_uselistorder.jai` (`--preserve-ll-uselistorder`: function-level directives are exact over the
+  corpus; directives for globals/constants fail loudly because our parser orders their uses differently from LLVM's
+  when forward references are involved: 4592 files fail loudly, 0 differ), VP intrinsic costs (BasicTTI's VP
+  branch in tti_intrinsics.jai), optimizeModularFormat, x86 auto-upgrades for movnt/storeu/blend/kunpck/vpdp*,
+  x87 pseudo-infinities and unnormals decode as NaN (they printed as an endless loop before).
+- `harness check --no-build` after a manual `build.sh` can report stale results; run `check` (it builds) when in
+  doubt.
+- Still failing loudly (my units): ppc_fp128 arithmetic (DoubleAPFloat not ported: 6 InstCombine tests), SROA with
+  scalable vectors and a known vscale (canConvertValue/convertValue/isVectorPromotionViable with VScale),
+  LowerTypeTests CFI lowering, LoopCacheAnalysis (loop-interchange `cache`), the ~380 avx512 auto-upgrades of
+  MemorySanitizer/X86/avx512{,bw}-intrinsics-upgrade.ll, `!DIModule` (one coroutine roundtrip).
 - Sweeps after these changes (0 differs everywhere): instcombine 8538/8550 identical (12 loud), instcombine
   --with-test-flags 10868/10927 (59 loud), simplifycfg, loop-rotate, make-guards-explicit, function(loop-mssa(licm)),
   dce/licm with --enable-knowledge-retention all 100%, slp-vectorizer --with-test-flags 10926/10982 (56 loud).
