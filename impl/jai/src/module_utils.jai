@@ -1,7 +1,7 @@
 // Module-level helpers used by the instrumentation passes (memprof, instrprof, pgo-instr-gen).
 // Ported from llvm/lib/Transforms/Utils/ModuleUtils.cpp (appendToGlobalCtors, appendToUsed / appendToCompilerUsed,
-// declareSanitizerInitFunction, createSanitizerCtor, createSanitizerCtorAndInitFunctions), Function::
-// createWithDefaultAttr (llvm/lib/IR/Function.cpp), Module::getOrInsertGlobal (llvm/lib/IR/Module.cpp) and
+// declareSanitizerInitFunction, createSanitizerCtor, createSanitizerCtorAndInitFunctions),
+// Module::getOrInsertGlobal (llvm/lib/IR/Module.cpp) and
 // SplitBlockAndInsertIfThen without a DomTreeUpdater (llvm/lib/Transforms/Utils/BasicBlockUtils.cpp).
 
 // appendToGlobalArray (appendToGlobalCtors / appendToGlobalDtors)
@@ -64,35 +64,7 @@ mu_module_flag_int :: (key: string) -> (bool, u64) {
     return true, const_int_zext(v);
 }
 
-// Function::createWithDefaultAttr(Ty, Linkage, AddrSpace, Name, M): appended to the module's function list
-fn_create_with_default_attr :: (ft: Type_Id, linkage: Linkage, name: string) -> Value_Id {
-    f := new_function(ft, name, dl.program_as);
-    array_add(*ir.m_functions, f);
-    gv_set_linkage(f, linkage);
-    attrs: [..] Attr; attrs.allocator = temp;
-    ok, uw := mu_module_flag_int("uwtable");
-    if ok && uw != 0 array_add(*attrs, attr_enum(.UWTable, uw));
-    ok2, fp := mu_module_flag_int("frame-pointer");
-    if ok2 && fp != 0 {
-        names :: string.["none", "non-leaf", "all", "reserved", "non-leaf-no-reserve"];   // FramePointerKind
-        if fp >= cast(u64) names.count fatal("unknown frame-pointer module flag value %", fp);
-        array_add(*attrs, attr_str("frame-pointer", names[fp]));
-    }
-    if module_flag("function_return_thunk_extern") != NONE array_add(*attrs, attr_enum(.FnRetThunkExtern));
-    is_set :: (key: string) -> bool { ok, v := mu_module_flag_int(key); return ok && v != 0; }
-    sign := "none";
-    if is_set("sign-return-address") sign = "non-leaf";
-    if is_set("sign-return-address-all") sign = "all";
-    if sign != "none" {
-        array_add(*attrs, attr_str("sign-return-address", sign));
-        array_add(*attrs, attr_str("sign-return-address-key", ifx is_set("sign-return-address-with-bkey") then "b_key" else "a_key"));
-    }
-    for string.["branch-target-enforcement", "branch-protection-pauth-lr", "guarded-control-stack", "ptrauth-returns",
-                "ptrauth-auth-traps", "ptrauth-indirect-gotos", "aarch64-jump-table-hardening"]
-        if is_set(it) array_add(*attrs, attr_str(it, ""));
-    for attrs { if it.kind == .STRING_ATTR fn_add_fn_str_attr(f, it.key, it.val); else fn_add_fn_attr(f, it); }
-    return f;
-}
+// Function::createWithDefaultAttr: fn_create_with_default_attr in pass_coro_cleanup.jai
 
 // declareSanitizerInitFunction(M, InitName, InitArgTypes, Weak)
 declare_sanitizer_init_function :: (init_name: string, arg_types: [] Type_Id, weak := false) -> Value_Id {
