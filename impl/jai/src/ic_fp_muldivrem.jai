@@ -28,7 +28,17 @@ const_fp_all :: (c: Value_Id, pred: (APFloat) -> bool) -> bool {
 }
 const_is_normal_fp :: (c: Value_Id) -> bool { return const_fp_all(c, apf_is_normal); }
 apf_has_exact_inverse :: (f: APFloat) -> bool {
-    if f.k == .PPC_FP128 fatal("instcombine: getExactInverse of ppc_fp128 is not supported yet");
+    if f.k == .PPC_FP128 {
+        // APFloat::getExactInverse: a power of two whose reciprocal (scalbn of +-1) is still exact and normal
+        g := f;
+        w := apf_words(*g);
+        if d_cat(w[0]) != .NORMAL || dd_is_denormal(w) return false;
+        e := dd_exact_log2_abs(w);
+        if e == INT_MIN32 return false;
+        rec := fp_scalbn(.PPC_FP128, dd_make(D_ONE | (w[0] & DD_SIGN), 0), -e, RM_TOWARD_ZERO);
+        if dd_exact_log2_abs(rec) != -e return false;
+        return !dd_is_denormal(rec);
+    }
     if !apf_is_normal(f) return false;
     g := f;
     one := fp_from_integer(g.k, .[1], 64, false);

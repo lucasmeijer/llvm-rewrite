@@ -14,7 +14,7 @@ fp_exact :: (k: Type_Kind, d: Fp_Decoded) -> (sig: Big, e2: s64) {
 
 // IEEEFloat::fusedMultiplyAdd: a * b + c, rounded once
 fp_fma :: (k: Type_Kind, a: [] u64, b: [] u64, c: [] u64, rm: u8 = RM_NEAREST_TIES_TO_EVEN) -> [] u64, Fp_Status {
-    fp_check_kind(k);
+    if k == .PPC_FP128 { w, st := dd_fma(a, b, c, rm); return w, st; }
     da := fp_decode(k, a); db := fp_decode(k, b); dc := fp_decode(k, c);
     pneg := da.neg != db.neg;
     if da.cat == .NORMAL && db.cat == .NORMAL && (dc.cat == .NORMAL || dc.cat == .ZERO) {
@@ -49,7 +49,7 @@ fp_fma :: (k: Type_Kind, a: [] u64, b: [] u64, c: [] u64, rm: u8 = RM_NEAREST_TI
 
 // IEEEFloat::roundToIntegral
 fp_round_to_integral :: (k: Type_Kind, w: [] u64, rm: u8) -> [] u64, Fp_Status {
-    fp_check_kind(k);
+    if k == .PPC_FP128 { r, st := dd_round_to_integral(w, rm); return r, st; }
     d := fp_decode(k, w);
     if d.cat == .INF || d.cat == .ZERO return w, 0;
     if d.cat == .NAN {
@@ -81,7 +81,7 @@ fp_round_to_integral :: (k: Type_Kind, w: [] u64, rm: u8) -> [] u64, Fp_Status {
 
 // IEEEFloat::next
 fp_next :: (k: Type_Kind, w: [] u64, down: bool) -> [] u64, Fp_Status {
-    fp_check_kind(k);
+    if k == .PPC_FP128 { r, st := dd_next(w, down); return r, st; }
     if down {
         // nextDown(x) = -nextUp(-x)
         r, st := fp_next(k, fp_neg(k, w), false);
@@ -120,7 +120,7 @@ fp_next :: (k: Type_Kind, w: [] u64, down: bool) -> [] u64, Fp_Status {
 
 // IEEEFloat::remainder (IEEE 754 remainder: x - n*y with n = x/y rounded to nearest even)
 fp_remainder :: (k: Type_Kind, a: [] u64, b: [] u64) -> [] u64, Fp_Status {
-    fp_check_kind(k);
+    if k == .PPC_FP128 { r, st := dd_remainder(a, b); return r, st; }
     da := fp_decode(k, a); db := fp_decode(k, b);
     if da.cat == .NAN || db.cat == .NAN { r, s := fp_nan_result(k, a, da, b, db); return r, s; }
     if db.cat == .ZERO || da.cat == .INF return fp_default_nan(k), .INVALID;
@@ -149,7 +149,7 @@ IEK_INF :: 2147483647;
 
 // ilogb(IEEEFloat)
 fp_ilogb :: (k: Type_Kind, w: [] u64) -> s64 {
-    if k == .PPC_FP128 { h := NewArray(1, u64,, allocator = temp); h[0] = w[0]; return fp_ilogb(.DOUBLE, h); }   // the first double's
+    if k == .PPC_FP128 return dd_ilogb(w);
     d := fp_decode(k, w);
     if d.cat == .NAN return IEK_NAN;
     if d.cat == .ZERO return IEK_ZERO;
@@ -180,6 +180,7 @@ fp_scalbn :: (k: Type_Kind, w: [] u64, exp: s64, rm: u8) -> [] u64 {
 
 // frexp(IEEEFloat, int&, roundingMode)
 fp_frexp :: (k: Type_Kind, w: [] u64, rm: u8) -> ([] u64, s64) {
+    if k == .PPC_FP128 { r, e := dd_frexp(w, rm); return r, e; }
     e := fp_ilogb(k, w);
     if e == IEK_NAN return fp_quiet(k, w), e;
     if e == IEK_INF return w, e;
@@ -189,7 +190,7 @@ fp_frexp :: (k: Type_Kind, w: [] u64, rm: u8) -> ([] u64, s64) {
 
 // IEEEFloat::convertToInteger: words (deterministic saturated values on invalid), status, isExact
 fp_to_integer_rm :: (k: Type_Kind, w: [] u64, width: u32, is_signed: bool, rm: u8) -> (words: [] u64, st: Fp_Status, is_exact: bool) {
-    fp_check_kind(k);
+    if k == .PPC_FP128 { r, st, ex := dd_to_integer_rm(w, width, is_signed, rm); return r, st, ex; }
     d := fp_decode(k, w);
     nw := words_for_bits(width);
     res := NewArray(nw, u64,, allocator = temp);

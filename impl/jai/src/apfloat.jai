@@ -371,6 +371,7 @@ fp_decode :: (k: Type_Kind, w: [] u64) -> Fp_Decoded {
 
 // Encode (neg, biased fields) to words.
 fp_encode :: (k: Type_Kind, neg: bool, cat: Fp_Category, exp: s64, sig: Big) -> [] u64 {
+    if k == .PPC_FP128 fatal("internal: fp_encode of ppc_fp128");
     p, emax, emin, bits := fp_semantics(k);
     nw := words_for_bits(cast(u32) bits);
     w := NewArray(nw, u64,, allocator = temp);
@@ -419,6 +420,7 @@ RM_TOWARD_ZERO :: 0; RM_NEAREST_TIES_TO_EVEN :: 1; RM_TOWARD_POSITIVE :: 2; RM_T
 // Correctly rounded in mode `rm`; status as APFloat reports it (underflow only for inexact tiny results;
 // overflow to the largest finite value reports only inexact).
 fp_round_rm :: (k: Type_Kind, neg: bool, num: Big, den: Big, e2: s64, rm: u8) -> (w: [] u64, st: Fp_Status, zero: bool) {
+    if k == .PPC_FP128 { w, st, zr := dd_round_rm(neg, num, den, e2, rm); return w, st, zr; }
     p, emax, emin, bits := fp_semantics(k);
     kshift := cast(s64)(p + 3) + max(0, big_bitlen(den) - big_bitlen(num));
     q, r := big_divmod(big_shl(num, kshift), den);
@@ -475,6 +477,7 @@ fp_round_rm :: (k: Type_Kind, neg: bool, num: Big, den: Big, e2: s64, rm: u8) ->
 
 // APFloat::getLargest
 fp_largest :: (k: Type_Kind, neg: bool) -> [] u64 {
+    if k == .PPC_FP128 return dd_largest(neg);
     p, emax, emin, bits := fp_semantics(k);
     sig: Big; sig.allocator = temp;
     for i: 0..p-1 { big_mul_small(*sig, 2); big_add_small(*sig, 1); }
@@ -483,6 +486,7 @@ fp_largest :: (k: Type_Kind, neg: bool) -> [] u64 {
 
 // APFloat::convertFromString for decimal and hexadecimal (0x...p...) literals and inf/nan forms.
 fp_from_string :: (k: Type_Kind, s_in: string) -> (w: [] u64, ok: bool, overflow: bool, zero: bool) {
+    if k == .PPC_FP128 { w, ok, of, zr := dd_from_string(s_in); return w, ok, of, zr; }
     s := s_in;
     neg := false;
     if s.count && (s[0] == #char "-" || s[0] == #char "+") { neg = s[0] == #char "-"; s = slice(s, 1, s.count - 1); }
@@ -580,22 +584,10 @@ fp_from_string :: (k: Type_Kind, s_in: string) -> (w: [] u64, ok: bool, overflow
 
 // APFloat::convert between formats (round to nearest even). Returns words and whether it was exact.
 fp_convert :: (from: Type_Kind, to: Type_Kind, w: [] u64) -> (w: [] u64, exact: bool) {
-    // ppc_fp128 (double-double): only values that are exactly a double (second double +0) are handled
-    if to == .PPC_FP128 {
-        if from == .PPC_FP128 return w, true;
-        if from != .HALF && from != .BFLOAT && from != .FLOAT && from != .DOUBLE
-            fatal("conversion to ppc_fp128 from this type is not supported yet");
-        dw, ex := fp_convert(from, .DOUBLE, w);
-        r := NewArray(2, u64,, allocator = temp);
-        r[0] = dw[0];
-        return r, true;
-    }
-    if from == .PPC_FP128 {
-        if w[1] != 0 fatal("conversion of a ppc_fp128 that is not exactly a double is not supported yet");
-        hw := NewArray(1, u64,, allocator = temp); hw[0] = w[0];
-        cw, cx := fp_convert(.DOUBLE, to, hw);
-        return cw, cx;
-    }
+    // APFloat::convert: to ppc_fp128 through semPPCDoubleDoubleLegacy, from ppc_fp128 by converting the first double
+    if from == to return w, true;
+    if to == .PPC_FP128 { r, ex := dd_convert_from_ieee(from, w); return r, ex; }
+    if from == .PPC_FP128 { r, ex := dd_convert_to_ieee(to, w); return r, ex; }
     d := fp_decode(from, w);
     pf, ef, mf, bf := fp_semantics(from);
     pt, et, mt, bt := fp_semantics(to);
@@ -689,6 +681,7 @@ array_erase_front :: (b: *[..] u8, n: s64) {
 // Returns the string APFloat::toString(FormatPrecision=6, FormatMaxPadding=0, TruncateZero=false) produces
 // for a finite value.
 fp_to_string_e6 :: (k: Type_Kind, w: [] u64) -> string {
+    if k == .PPC_FP128 return dd_to_string_e6(w);
     d := fp_decode(k, w);
     sb: String_Builder; sb.allocator = temp;
     prec: s64 = 6;
@@ -736,35 +729,13 @@ fp_to_string_e6 :: (k: Type_Kind, w: [] u64) -> string {
     return builder_to_string(*sb,, allocator = temp);
 }
 
-// ---------------------------------------------------------------- ppc_fp128 (double-double)
-// A ppc_fp128 is a pair of doubles (words [hi, lo]); value = hi + lo. Only values whose decimal text is exactly a
-// double (lo = +0) are converted from decimal; others fail loudly (DoubleAPFloat::convertFromString would need the
-// 106-bit legacy semantics).
-
-// exactness check: the decimal string and the double denote the same real number (compared at fp128 precision)
-ppc_decimal_is_double :: (s: string, hi: u64) -> bool {
-    q, ok, of, zr := fp_from_string(.FP128, s);
-    if !ok return false;
-    hw := NewArray(1, u64,, allocator = temp); hw[0] = hi;
-    q2, exact := fp_convert(.DOUBLE, .FP128, hw);
-    return q[0] == q2[0] && q[1] == q2[1];
-}
-
-ppc_from_decimal :: (s: string) -> (w: [] u64, ok: bool, overflow: bool) {
-    d, ok, of, zr := fp_from_string(.DOUBLE, s);
-    w := NewArray(2, u64,, allocator = temp);
-    if !ok return w, false, false;
-    w[0] = d[0]; w[1] = 0;
-    if of return w, true, true;
-    if !ppc_decimal_is_double(s, d[0]) fatal("ppc_fp128 decimal literal '%' is not exactly a double (not supported yet)", s);
-    return w, true, false;
-}
+// ppc_fp128 (double-double): apfloat_dd.jai
 
 // ---------------------------------------------------------------- IEEEFloat arithmetic (nearest-even)
 // Ported from llvm/lib/Support/APFloat.cpp (IEEEFloat::add/subtract/multiply/divide/mod, the *Specials tables,
 // makeNaN/makeQuiet, compare, convertToInteger (rmTowardZero), convertFromAPInt). Values are exact rationals
 // sig * 2^(exp - (p-1)) rounded once with fp_round, which is what IEEE round-to-nearest-even requires.
-// ppc_fp128 (double-double) arithmetic is not supported and fails loudly.
+// ppc_fp128 (double-double) dispatches to apfloat_dd.jai.
 
 Fp_Status :: enum_flags u8 { INVALID; DIV_BY_ZERO; OVERFLOW; UNDERFLOW; INEXACT; }
 
@@ -784,11 +755,13 @@ big_add :: (a: Big, b: Big) -> Big {
     return r;
 }
 
+// ppc_fp128 operations dispatch to apfloat_dd.jai before reaching IEEE-only code
 fp_check_kind :: (k: Type_Kind) {
-    if k == .PPC_FP128 fatal("ppc_fp128 arithmetic constant folding is not supported yet");
+    if k == .PPC_FP128 fatal("internal: ppc_fp128 reached IEEE-only APFloat code");
 }
 
-fp_frac_bits :: (k: Type_Kind) -> s64 { p, mx, mn, b := fp_semantics(k); return ifx k == .X86_FP80 then 63 else p - 1; }
+// (ppc_fp128: the first double's, which holds a double-double's NaN)
+fp_frac_bits :: (k: Type_Kind) -> s64 { if k == .PPC_FP128 return 52; p, mx, mn, b := fp_semantics(k); return ifx k == .X86_FP80 then 63 else p - 1; }
 
 fp_is_signaling :: (k: Type_Kind, d: Fp_Decoded) -> bool {
     if d.cat != .NAN return false;
@@ -806,6 +779,7 @@ fp_quiet :: (k: Type_Kind, w: [] u64) -> [] u64 {
 
 // makeNaN(): positive quiet NaN, zero payload
 fp_default_nan :: (k: Type_Kind) -> [] u64 {
+    if k == .PPC_FP128 return dd_make(d_qnan(false), 0);
     s: Big; s.allocator = temp;
     s = big_shl(big_from_u64(1), fp_frac_bits(k) - 1);
     if k == .X86_FP80 s = big_add(s, big_shl(big_from_u64(1), 63));
@@ -856,7 +830,7 @@ fp_round_status :: (k: Type_Kind, neg: bool, num: Big, den: Big, e2: s64, rm: u8
 
 // IEEEFloat::addOrSubtract
 fp_add_sub :: (k: Type_Kind, a: [] u64, b: [] u64, subtract: bool, rm: u8 = RM_NEAREST_TIES_TO_EVEN) -> [] u64, Fp_Status {
-    fp_check_kind(k);
+    if k == .PPC_FP128 { w, st := dd_add_sub(a, b, subtract, rm); return w, st; }
     da := fp_decode(k, a); db := fp_decode(k, b);
     if da.cat == .NAN || db.cat == .NAN { rr_, ss_ := fp_nan_result(k, a, da, b, db); return rr_, ss_; }
     bneg := db.neg != subtract;
@@ -883,7 +857,7 @@ fp_add_sub :: (k: Type_Kind, a: [] u64, b: [] u64, subtract: bool, rm: u8 = RM_N
 
 // IEEEFloat::multiply
 fp_mul :: (k: Type_Kind, a: [] u64, b: [] u64, rm: u8 = RM_NEAREST_TIES_TO_EVEN) -> [] u64, Fp_Status {
-    fp_check_kind(k);
+    if k == .PPC_FP128 { w, st := dd_mul(a, b, rm); return w, st; }
     da := fp_decode(k, a); db := fp_decode(k, b);
     if da.cat == .NAN || db.cat == .NAN { rr_, ss_ := fp_nan_result(k, a, da, b, db); return rr_, ss_; }
     neg := da.neg != db.neg;
@@ -896,7 +870,7 @@ fp_mul :: (k: Type_Kind, a: [] u64, b: [] u64, rm: u8 = RM_NEAREST_TIES_TO_EVEN)
 
 // IEEEFloat::divide
 fp_div :: (k: Type_Kind, a: [] u64, b: [] u64, rm: u8 = RM_NEAREST_TIES_TO_EVEN) -> [] u64, Fp_Status {
-    fp_check_kind(k);
+    if k == .PPC_FP128 { w, st := dd_div(a, b, rm); return w, st; }
     da := fp_decode(k, a); db := fp_decode(k, b);
     if da.cat == .NAN || db.cat == .NAN { rr_, ss_ := fp_nan_result(k, a, da, b, db); return rr_, ss_; }
     neg := da.neg != db.neg;
@@ -910,7 +884,7 @@ fp_div :: (k: Type_Kind, a: [] u64, b: [] u64, rm: u8 = RM_NEAREST_TIES_TO_EVEN)
 
 // IEEEFloat::mod (fmod: a - trunc(a/b)*b, exact, sign of a)
 fp_mod :: (k: Type_Kind, a: [] u64, b: [] u64) -> [] u64, Fp_Status {
-    fp_check_kind(k);
+    if k == .PPC_FP128 { w, st := dd_mod(a, b); return w, st; }
     da := fp_decode(k, a); db := fp_decode(k, b);
     if da.cat == .NAN || db.cat == .NAN { rr_, ss_ := fp_nan_result(k, a, da, b, db); return rr_, ss_; }
     if db.cat == .ZERO || da.cat == .INF return fp_default_nan(k), .INVALID;
@@ -928,7 +902,7 @@ Fp_Cmp :: enum u8 { LESS; EQUAL; GREATER; UNORDERED; }
 
 // IEEEFloat::compare
 fp_compare :: (k: Type_Kind, a: [] u64, b: [] u64) -> Fp_Cmp {
-    fp_check_kind(k);
+    if k == .PPC_FP128 return dd_compare(a, b);
     da := fp_decode(k, a); db := fp_decode(k, b);
     if da.cat == .NAN || db.cat == .NAN return .UNORDERED;
     if da.cat == .ZERO && db.cat == .ZERO return .EQUAL;
@@ -954,7 +928,7 @@ fp_compare :: (k: Type_Kind, a: [] u64, b: [] u64) -> Fp_Cmp {
 
 // IEEEFloat::convertToInteger(rmTowardZero): ok = false for opInvalidOp (NaN, inf, out of range)
 fp_to_integer :: (k: Type_Kind, w: [] u64, bits: u32, is_signed: bool) -> (words: [] u64, ok: bool) {
-    fp_check_kind(k);
+    if k == .PPC_FP128 { r, st, ex := dd_to_integer_rm(w, bits, is_signed, RM_TOWARD_ZERO); return r, !(st & .INVALID); }
     d := fp_decode(k, w);
     res := NewArray(words_for_bits(bits), u64,, allocator = temp);
     if d.cat == .NAN || d.cat == .INF return res, false;
@@ -985,7 +959,7 @@ fp_to_integer :: (k: Type_Kind, w: [] u64, bits: u32, is_signed: bool) -> (words
 
 // IEEEFloat::convertFromAPInt (nearest-even)
 fp_from_integer :: (k: Type_Kind, words: [] u64, bits: u32, is_signed: bool) -> [] u64 {
-    fp_check_kind(k);
+    if k == .PPC_FP128 { r, st := dd_from_integer_rm(words, bits, is_signed, RM_NEAREST_TIES_TO_EVEN); return r; }
     w := NewArray(words.count, u64,, allocator = temp);
     for words w[it_index] = it;
     neg := is_signed && bits > 0 && ((w[(bits - 1) / 64] >> cast(u64)((bits - 1) % 64)) & 1) != 0;

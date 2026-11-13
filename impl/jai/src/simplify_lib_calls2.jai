@@ -32,6 +32,7 @@ lcs_binary_intrinsic :: (id: Intrinsic_Id, l: Value_Id, r: Value_Id, fmf: u32, n
 // APFloat::isInteger: finite and equal to itself rounded toward zero
 apf_is_integer :: (f: APFloat) -> bool {
     g := f;
+    if g.k == .PPC_FP128 return dd_is_integer(apf_words(*g));
     if !apf_is_finite(g) return false;
     r, st := fp_round_to_integral(g.k, apf_words(*g), RM_TOWARD_ZERO);
     w := apf_words(*g);
@@ -1119,6 +1120,8 @@ const_fp_qnan_fill :: (ty: Type_Id, fill: APInt) -> Value_Id {
 }
 // APFloat::getQNaN(Sem, Negative, &payload): IEEEFloat::makeNaN(SNaN = false, Negative, fill)
 fp_qnan_with_payload :: (k: Type_Kind, neg: bool, fill: APInt) -> [] u64 {
+    // DoubleAPFloat::makeNaN: the first double's NaN, second +0
+    if k == .PPC_FP128 return dd_make(fp_qnan_with_payload(.DOUBLE, neg, fill)[0], 0);
     if k != .FLOAT && k != .DOUBLE && k != .HALF && k != .BFLOAT && k != .FP128 && k != .X86_FP80
         fatal("LibCallSimplifier: nan() for this floating-point type is not supported yet");
     p, mx, mn, b := fp_semantics(k);

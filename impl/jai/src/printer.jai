@@ -435,14 +435,20 @@ write_operand :: (v: Value_Id, with_type: bool) {
 
 write_ap_float :: (k: Type_Kind, w: [] u64) {
     if k == .PPC_FP128 {
-        // ForceBitwiseOutput unless the second double is +0.0; otherwise it prints like its first double, but
-        // the decimal form only when it denotes exactly that double
-        if w[1] == 0 {
-            hw := NewArray(1, u64,, allocator = temp); hw[0] = w[0];
-            hd := fp_decode(.DOUBLE, hw);
-            if hd.cat == .INF || hd.cat == .NAN { write_ap_float(.DOUBLE, hw); return; }
-            s := fp_to_string_e6(.DOUBLE, hw);
-            if ppc_decimal_is_double(s, w[0]) { out(s); return; }
+        // ForceBitwiseOutput unless the second double is +0.0 (then inf/NaN print like the first double's); the
+        // decimal form when it converts back to an equal value (DoubleAPFloat::toString/convertFromString go through
+        // semPPCDoubleDoubleLegacy)
+        hw := NewArray(1, u64,, allocator = temp); hw[0] = w[0];
+        hd := fp_decode(.DOUBLE, hw);
+        if w[1] == 0 && (hd.cat == .INF || hd.cat == .NAN) { write_ap_float(.DOUBLE, hw); return; }
+        if hd.cat == .INF && (w[1] & ~DD_SIGN) == 0 {
+            // toString gives "+Inf"/"-Inf", which converts back to (inf, +0): equal to (inf, -0)
+            out(ifx hd.neg then "-Inf" else "+Inf"); return;
+        }
+        if hd.cat == .ZERO || hd.cat == .NORMAL {
+            s := dd_to_string_e6(w);
+            w2, ok, of, zr := dd_from_string(s);
+            if ok && dd_compare(w2, w) == .EQUAL { out(s); return; }
         }
         out("f"); write_full_hex(w, 128);
         return;

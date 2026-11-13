@@ -159,8 +159,12 @@ Facts needed to make a parse+print round trip byte-identical. Sources: `llvm/lib
 - **`alloca` without `addrspace(N)` is in address space 0**, not the DataLayout's `A` (LLParser::parseAlloc).
 - **Consecutive `module asm` lines merge** into one fragment (Module::appendModuleInlineAsm), printed as one
   `module asm` followed by one indented string per line; comdats are separated by blank lines.
-- **ppc_fp128 constants** print bitwise (`f0x` + 32 hex digits, second double first) unless the second double is
-  +0.0; then they print like that double, but decimal only if the 6-digit string denotes exactly that double.
+- **ppc_fp128 constants** (AsmWriter writeAPFloatInternal): a nonzero second double forces bitwise output only in
+  the sense that inf/NaN are not special-cased; the decimal attempt still runs: `toString(6)` of the value (through
+  semPPCDoubleDoubleLegacy, so it sees Hi+Lo), and if converting that string back gives a value that *compares*
+  equal it is printed (e.g. `0.1` parsed as ppc_fp128 has Lo != 0 and prints `1.000000e-01`). Otherwise `f0x` + 32
+  hex digits, second double first. (inf, -0.0) prints `+Inf` / `-Inf` (IEEEFloat::toString's spelling, which
+  converts back to (inf, +0), equal under compare). Verified with random ppc_fp128 folds against opt 23.1.5.
 - **Inline asm callees always have type `ptr`** (addrspace 0), so `call addrspace(0)` is printed in modules whose
   program address space is not 0; functions and calls default to the DataLayout's program address space `P`.
 - **Target extension types take size/alignment from their layout type** (Type.cpp getTargetTypeInfo:

@@ -26,7 +26,7 @@ lib/Target/X86/X86TargetTransformInfo.cpp 0.8
 lib/Transforms/Utils/SimplifyCFG.cpp 0.97
 lib/Analysis/InstructionSimplify.cpp 0.95
 lib/IR/AsmWriter.cpp 0.75  # manual: own printer structure; no summary-index printing or use-list-order prediction (~17%) (heuristic 0.40)
-lib/Support/APFloat.cpp 0.4
+lib/Support/APFloat.cpp 0.55  # + DoubleAPFloat (apfloat_dd.jai); not hex string output, APFloat::Storage plumbing, E8M0/FP8/FP6/FP4 formats
 lib/Transforms/Scalar/SROA.cpp 0.8
 lib/Analysis/ConstantFolding.cpp 0.9
 lib/Transforms/InstCombine/InstCombineAndOrXor.cpp 1

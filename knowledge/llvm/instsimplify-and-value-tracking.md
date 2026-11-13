@@ -87,8 +87,12 @@ Verified against LLVM 23.1.5 source and the imported InstSimplify tests.
   one for `2^a - 2^b` shapes. add/multiply are custom double-double algorithms, while divide, remainder, mod,
   fusedMultiplyAdd, toString and convertToHexString go through `semPPCDoubleDoubleLegacy = {1023, -969, 106, 128}`
   (an IEEE-like 106-bit format: Hi+Lo rounded). So a port needs both a double-double and a 106-bit IEEE path; a
-  "decompose as one IEEE number" shortcut gets denormals, isInteger and next() wrong. Goose and Jai fail loudly on
-  ppc_fp128 arithmetic/classification (only parsing, printing and a few bit operations work).
+  "decompose as one IEEE number" shortcut gets denormals, isInteger and next() wrong. More traps: `APFloat::convert`
+  from ppc_fp128 to another format converts only Hi; to ppc_fp128 it rounds to the legacy format and splits
+  (convertPPCDoubleDoubleLegacyAPFloatToAPInt, renormalizing against double's minExponent first); add with a zero
+  operand returns the *other* operand unchanged (so +0 + -0 = -0), and multiply by zero/inf returns that operand
+  without combining signs; convertFromAPInt is its own Hi/Error algorithm, not legacy rounding. Goose fails loudly;
+  Jai ports all of it (impl/jai/src/apfloat_dd.jai).
 - **`Constant::getSplatValue` of a shufflevector expression** needs `shufflevector (insertelement undef|poison, X, 0),
   undef|poison, zeroinitializer` (Constants.cpp:1866); only that form prints as `splat (X)` (AsmWriter.cpp:1828).
 - **ConstantFoldCompareInstruction with an undef operand** returns undef only for `icmp eq/ne` (or icmp of

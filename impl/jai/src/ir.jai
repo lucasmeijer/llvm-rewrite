@@ -14,6 +14,9 @@ Type_Kind :: enum u8 {
     VOID; HALF; BFLOAT; FLOAT; DOUBLE; X86_FP80; FP128; PPC_FP128;
     LABEL; METADATA; X86_AMX; TOKEN;
     INT; BYTE; FUNC; PTR; STRUCT; ARRAY; VECTOR; SVECTOR; TARGET_EXT;
+    // not IR types: APFloat's internal semPPCDoubleDoubleLegacy (an IEEE format with 106 bits of precision and
+    // minExponent -969) and its variant with double's minExponent (apfloat_dd.jai)
+    PPC_LEGACY; PPC_LEGACY_EXT;
 }
 
 TYF_PACKED  :: 1;
@@ -497,6 +500,8 @@ fp_semantics :: (k: Type_Kind) -> (precision: s32, max_exp: s32, min_exp: s32, b
         case .X86_FP80; return 64, 16383, -16382, 80;
         case .FP128;    return 113, 16383, -16382, 128;
         case .PPC_FP128; return 106, 1023, -1022, 128;
+        case .PPC_LEGACY; return 106, 1023, -1022 + 53, 128;
+        case .PPC_LEGACY_EXT; return 106, 1023, -1022, 128;
     }
     return 0, 0, 0, 0;
 }

@@ -765,7 +765,13 @@ ic_sign_bit_must_be_the_same :: (op0: Value_Id, op1: Value_Id, q: Simplify_Query
 ic_ldexp_saturating_add_is_safe :: (fp_ty: Type_Id, exp_ty: Type_Id) -> bool {
     k := type_kind(scalar_type(fp_ty));
     p, emax, emin, bits := fp_semantics(k);
-    if k == .PPC_FP128 fatal("instcombine: ldexpSaturatingAddIsSafe for ppc_fp128 is not supported yet");
+    if k == .PPC_FP128 {
+        // scalbn(getSmallest, SignedMax).isInfinity() && scalbn(getLargest, SignedMin).isZero(), on the doubles
+        eb := min(type_bits(scalar_type(exp_ty)), 32);
+        up := fp_scalbn(k, dd_smallest(false), (cast(s64) 1 << (eb - 1)) - 1, RM_NEAREST_TIES_TO_EVEN);
+        down := fp_scalbn(k, dd_largest(false), -(cast(s64) 1 << (eb - 1)), RM_NEAREST_TIES_TO_EVEN);
+        return fp_decode(k, up).cat == .INF && fp_decode(k, down).cat == .ZERO;
+    }
     exp_bits := min(type_bits(scalar_type(exp_ty)), 32);
     smax := (cast(s64) 1 << (exp_bits - 1)) - 1;
     smin := -(cast(s64) 1 << (exp_bits - 1));
@@ -2082,7 +2088,11 @@ ic_visit_matrix_multiply :: (ii: Value_Id, iid: Intrinsic_Id) -> Ic_Switch_Resul
 // APFloat::clearSign
 apf_clear_sign :: (f: APFloat) -> APFloat {
     g := f;
-    if g.k == .PPC_FP128 fatal("instcombine: clearSign of ppc_fp128 is not supported yet");
+    if g.k == .PPC_FP128 {
+        // if (isNegative()) changeSign(): flips both doubles
+        if apf_is_negative(g) apf_set_words(*g, dd_chs(apf_words(*g)));
+        return g;
+    }
     bits := cast(u32) fp_type_bits(g.k);
     w := (bits - 1) / 64;
     g.w[w] &= ~((cast(u64) 1) << ((bits - 1) % 64));

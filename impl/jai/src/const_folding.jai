@@ -974,6 +974,7 @@ inst_denormal_mode :: (i: Value_Id, t: Type_Id) -> (u8, u8) {
 }
 apf_is_denormal :: (f: APFloat) -> bool {
     g := f;
+    if g.k == .PPC_FP128 return dd_is_denormal(apf_words(*g));
     d := fp_decode(g.k, apf_words(*g));
     if d.cat != .NORMAL return false;
     if g.k == .PPC_FP128 {

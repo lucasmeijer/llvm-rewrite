@@ -698,6 +698,7 @@ fcmp_implies_class_mask :: (pred: u8, f: Value_Id, lhs: Value_Id, rhs_class_in: 
 // APFloat::isSmallestNormalized
 apf_is_smallest_normalized :: (c: APFloat) -> bool {
     g := c;
+    if g.k == .PPC_FP128 return dd_is_smallest_normalized(apf_words(*g));
     d := fp_decode(c.k, apf_words(*g));
     if d.cat != .NORMAL || apf_is_denormal(c) return false;
     p, emax, emin, b := fp_semantics(c.k);

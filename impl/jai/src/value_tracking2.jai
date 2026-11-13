@@ -2121,8 +2121,8 @@ known_exponent_range_from_context :: (v: Value_Id, q: Simplify_Query) -> (s64, s
 }
 // getExactLog2Abs() != INT_MIN: a finite nonzero power of two (up to sign)
 apf_exact_log2_abs_is_valid :: (f: APFloat) -> bool {
-    if f.k == .PPC_FP128 fatal("getExactLog2Abs of ppc_fp128 is not supported yet");
     g := f;
+    if g.k == .PPC_FP128 return dd_exact_log2_abs(apf_words(*g)) != INT_MIN32;
     d := fp_decode(f.k, apf_words(*g));
     if d.cat != .NORMAL return false;
     return !big_any_below(d.sig, big_bitlen(d.sig) - 1);

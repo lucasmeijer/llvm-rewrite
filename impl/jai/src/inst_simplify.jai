@@ -3444,6 +3444,7 @@ optimize_const_min_max :: (c: Value_Id, id: Intrinsic_Id, fmf: u32) -> (Min_Max_
 apf_is_largest :: (f: APFloat) -> bool {
     if !apf_is_finite_non_zero(f) return false;
     g := f;
+    if g.k == .PPC_FP128 return dd_is_largest(apf_words(*g));
     big := fp_largest(g.k, apf_is_negative(g));
     for apf_words(*g) if it != big[it_index] return false;
     return true;

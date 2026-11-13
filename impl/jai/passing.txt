@@ -9602,6 +9602,7 @@ tests/imported/llvm/Transforms/InstCombine/constant-fold-nextafter.ll::opt
 tests/imported/llvm/Transforms/InstCombine/constant-fold-nextafter.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/constant-fold-nexttoward-fp128.ll::opt
 tests/imported/llvm/Transforms/InstCombine/constant-fold-nexttoward-fp128.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/constant-fold-nexttoward-ppc-fp128.ll::opt
 tests/imported/llvm/Transforms/InstCombine/constant-fold-nexttoward-ppc-fp128.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/constant-fold-nexttoward-x86-fp80.ll::opt
 tests/imported/llvm/Transforms/InstCombine/constant-fold-nexttoward-x86-fp80.ll::roundtrip
@@ -9845,6 +9846,7 @@ tests/imported/llvm/Transforms/InstCombine/fold-ext-eq-c-with-op.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fold-ext-eq-c-with-op.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fold-fadd-with-zero-gh154238.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fold-fadd-with-zero-gh154238.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fold-fcmp-trunc.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fold-fcmp-trunc.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fold-fops-into-selects.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fold-fops-into-selects.ll::roundtrip
@@ -9902,6 +9904,7 @@ tests/imported/llvm/Transforms/InstCombine/fprintf-1.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fprintf-1.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fprintf-wrong-sig.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fprintf-wrong-sig.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/fptoui-of-fdiv.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fptoui-of-fdiv.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/fptrunc.ll::opt
 tests/imported/llvm/Transforms/InstCombine/fptrunc.ll::roundtrip
@@ -10275,6 +10278,7 @@ tests/imported/llvm/Transforms/InstCombine/known_align.ll::opt
 tests/imported/llvm/Transforms/InstCombine/known_align.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/ldexp-ext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/ldexp-ext.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/ldexp.ll::opt
 tests/imported/llvm/Transforms/InstCombine/ldexp.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/lib-call-exit.ll::opt
 tests/imported/llvm/Transforms/InstCombine/lib-call-exit.ll::roundtrip
@@ -10558,6 +10562,7 @@ tests/imported/llvm/Transforms/InstCombine/nanl-fp128.ll::opt
 tests/imported/llvm/Transforms/InstCombine/nanl-fp128.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/nanl-fp80.ll::opt
 tests/imported/llvm/Transforms/InstCombine/nanl-fp80.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/nanl-ppc-fp128.ll::opt
 tests/imported/llvm/Transforms/InstCombine/nanl-ppc-fp128.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/narrow-math.ll::opt
 tests/imported/llvm/Transforms/InstCombine/narrow-math.ll::roundtrip
@@ -11021,6 +11026,7 @@ tests/imported/llvm/Transforms/InstCombine/remquol-fp128.ll::opt
 tests/imported/llvm/Transforms/InstCombine/remquol-fp128.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/remquol-fp80.ll::opt
 tests/imported/llvm/Transforms/InstCombine/remquol-fp80.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/remquol-ppc-fp128.ll::opt
 tests/imported/llvm/Transforms/InstCombine/remquol-ppc-fp128.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/repack-ints-thru-zext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/repack-ints-thru-zext.ll::roundtrip

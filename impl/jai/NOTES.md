@@ -200,8 +200,17 @@
   doubles as the number of indirect destinations of a `callbr`.
 - MetadataAsValue rows are interned by metadata id at creation; canonicalizeMetadataForValue at resolution time
   rewrites `v_aux` without re-interning, so two MD_VALUE constants can denote the same metadata.
-- constfold.jai: the `and (ptrtoint @g), C` alignment fold (needs DataLayout) fails loudly; ppc_fp128 arithmetic
-  and conversions of non-double values fail loudly.
+- constfold.jai: the `and (ptrtoint @g), C` alignment fold (needs DataLayout) fails loudly.
+- ppc_fp128 (`apfloat_dd.jai`, DoubleAPFloat): words [hi, lo]. add/sub/mul/compare/next/roundToIntegral/
+  convertToInteger/convertFromAPInt/ilogb/scalbn/frexp/isDenormal/... are LLVM's double-double algorithms on two
+  doubles; divide/remainder/mod/fma, string conversion (parser, printer's toString round trip) and conversion from
+  other IEEE formats go through semPPCDoubleDoubleLegacy, which is the internal `Type_Kind.PPC_LEGACY` (an IEEE
+  format, p=106, minExponent -969; `PPC_LEGACY_EXT` has double's minExponent) handled by the generic IEEE code.
+  Conversion to another format converts only the first double (APFloat::convert). The IEEE-level functions in
+  apfloat*.jai dispatch on `.PPC_FP128` first; `fp_encode`/`fp_check_kind` abort if a ppc value reaches IEEE-only
+  code. Checked with random ppc_fp128 folds (fadd/fsub/fmul/fdiv/frem/fcmp/fpto[su]i/[su]itofp/fptrunc/fpext,
+  rounding intrinsics, fma, ldexp, frexp, min/max, literals) under instsimplify and instcombine: 0 diffs. The
+  printer prints `+Inf`/`-Inf` for (inf, -0) like LLVM (toString, then an equal value converts back).
 - Erased values keep their rows (`v_kind = DEAD`); nothing is compacted.
 
 ## mem2reg and SROA (L1.mem2reg 29/30, L1.sroa 57/61)
@@ -553,7 +562,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - `-vector-library=` is not ported (unknown flag, fails loudly); nothing in InstCombine asks for mappings.
 - `build_lib_calls.jai` = BuildLibCalls.cpp (complete); `simplify_lib_calls.jai` + `simplify_lib_calls2.jai` =
   SimplifyLibCalls.cpp (LibCallSimplifier + FortifiedLibCallSimplifier, complete except: the iprintf /
-  __small_printf `CI->clone()` rewrites (XCore/TCE/Emscripten triples only) and `nan()` of ppc_fp128 fail loudly;
+  __small_printf `CI->clone()` rewrites (XCore/TCE/Emscripten triples only) fail loudly;
   optimization remarks are dropped). `value_tracking_strings.jai`: getConstantDataArrayInfo, getConstantStringInfo,
   GetStringLength, isOnlyUsedInZero(Equality)Comparison (the single copy: memory_builtins.jai had a second one).
   Wired in as `ic_try_optimize_call` (ic_calls.jai, tryOptimizeCall). `optimizeModularFormat` fails loudly.
@@ -571,7 +580,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - Sweep `--passes instcombine` vs main before this work: identical 6724 -> 7470, differs 804 -> 81, no
   identical->differs. Every remaining silent InstCombine-directory diff is outside the libcall code (fmul/fpext
   flag inference = SimplifyDemandedInstructionFPClass, is.fpclass canonicalization, vector folds, ...). Libcall
-  tests that still fail loudly: nanl-ppc-fp128, remquol-ppc-fp128 (ppc_fp128 folding), modular-format,
+  tests that still fail loudly: modular-format,
   fputs-opt-size (`require<profile-summary>`), constant-fold-next* (isMathLibCallNoop of nextafter).
 - Perf: no benchmark has library calls; straightline instcombine unchanged.
 
@@ -1685,10 +1694,10 @@ Still slow / next:
   x87 pseudo-infinities and unnormals decode as NaN (they printed as an endless loop before).
 - `harness check --no-build` after a manual `build.sh` can report stale results; run `check` (it builds) when in
   doubt.
-- Still failing loudly (my units): ppc_fp128 arithmetic (DoubleAPFloat not ported: 6 InstCombine tests), SROA with
+- Still failing loudly (my units): SROA with
   scalable vectors and a known vscale (canConvertValue/convertValue/isVectorPromotionViable with VScale),
   LowerTypeTests CFI lowering, LoopCacheAnalysis (loop-interchange `cache`), the ~380 avx512 auto-upgrades of
-  MemorySanitizer/X86/avx512{,bw}-intrinsics-upgrade.ll, `!DIModule` (one coroutine roundtrip).
+  MemorySanitizer/X86/avx512{,bw}-intrinsics-upgrade.ll.
 - Sweeps after these changes (0 differs everywhere): instcombine 8538/8550 identical (12 loud), instcombine
   --with-test-flags 10868/10927 (59 loud), simplifycfg, loop-rotate, make-guards-explicit, function(loop-mssa(licm)),
   dce/licm with --enable-knowledge-retention all 100%, slp-vectorizer --with-test-flags 10926/10982 (56 loud).

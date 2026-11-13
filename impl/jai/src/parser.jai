@@ -1235,12 +1235,6 @@ parse_fp_literal :: (ty: Type_Id) -> Value_Id {
     k := type_kind(ty);
     if !is_fp_kind(k) perr("floating point constant invalid for type");
     next();
-    if t.kind == .FLOAT_LIT && k == .PPC_FP128 {
-        w, ok, overflow := ppc_from_decimal(t.text);
-        if !ok perr("invalid floating-point literal");
-        if overflow perr("floating-point constant overflowed type");
-        return const_fp_words(ty, w);
-    }
     if t.kind == .FLOAT_LIT {
         w, ok, overflow, zero := fp_from_string(k, t.text);
         if !ok perr("invalid floating-point literal");
