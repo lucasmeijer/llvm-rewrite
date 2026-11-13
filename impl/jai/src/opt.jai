@@ -65,7 +65,14 @@
 #load "pass_mldst_motion.jai";
 #load "pass_speculative_execution.jai";
 #load "pass_callsite_splitting.jai";
-#load "pass_coroutines.jai";
+#load "coro_shape.jai";
+#load "pass_coro_early.jai";
+#load "pass_coro_cleanup.jai";
+#load "pass_coro_elide.jai";
+#load "coro_spill.jai";
+#load "coro_frame.jai";
+#load "stack_lifetime.jai";
+#load "pass_coro_split.jai";
 #load "pass_openmp_opt.jai";
 #load "pass_remark_only.jai";
 #load "pass_misc_module.jai";
