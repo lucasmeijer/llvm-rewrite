@@ -238,8 +238,10 @@ lib/Transforms/IPO/WholeProgramDevirt.cpp 0.02  # DevirtModule::run's early exit
 lib/Transforms/IPO/LowerTypeTests.cpp 0.05  # dropTypeTests, the early exits of lower() and SimplifyTypeTests
 lib/Transforms/IPO/ExpandVariadics.cpp 0.03  # no VariadicABIInfo for x86: early exit
 lib/Transforms/IPO/ForceFunctionAttrs.cpp 0.85  # no -forceattrs-csv-path
-lib/Transforms/IPO/PartialInlining.cpp 0.7  # single-region partial inlining; no multi-region (cold region) outlining
-lib/Transforms/Utils/CodeExtractor.cpp 0.75  # no aggregate args, alloca/dealloc blocks, >2 exits, debug-info fixup
+lib/Transforms/IPO/PartialInlining.cpp 0.95  # single- and multi-region; no optimization remarks, blockaddress users fail loudly
+lib/Transforms/Utils/CodeExtractor.cpp 0.9  # no aggregate args (StructValues), alloca/dealloc blocks, LifetimeBitcastUsers, verifyAssumptionCache
+lib/Transforms/IPO/HotColdSplitting.cpp 0.95  # no optimization remarks
+lib/Transforms/IPO/BlockExtractor.cpp 0.95  # no API-provided groups (only -extract-blocks-file)
 lib/Transforms/Utils/GuardUtils.cpp 0.5  # makeGuardControlFlowExplicit (pass_make_guards_explicit.jai); no widenWidenableBranch / setWidenableBranchCond
 lib/IR/Verifier.cpp 0.92  # all checks incl. every DI node kind; not -verify-noalias-scope-decl-dom, target intrinsics outside our tables, the legacy pass
 lib/IR/ConvergenceVerifier.cpp 1.0  # with GenericConvergenceVerifierImpl.h

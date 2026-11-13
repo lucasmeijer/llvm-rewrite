@@ -4,10 +4,11 @@
 // computeOutliningCosts, getOutliningCallBBRelativeFreq, computeCallsiteToProfCountMap). The outlining is
 // code_extractor.jai.
 //
-// Not ported (fails loudly): the multi-region (cold region) outlining that needs an instrumentation profile
-// (computeOutliningColdRegionsInfo / doMultiRegionFunctionOutlining), forwarding varargs to the outlined function
-// when inlining a vararg function (InlineFunction's ForwardVarArgsTo), functions referenced by a blockaddress.
-// Optimization remarks are not emitted.
+// Also the multi-region (cold region) outlining with an instrumentation profile (computeOutliningColdRegionsInfo,
+// the multi-region FunctionCloner, doMultiRegionFunctionOutlining) and the vararg forwarding to the outlined function
+// (InlineFunction's ForwardVarArgsTo, inline_function.jai).
+//
+// Not ported (fails loudly): functions referenced by a blockaddress. Optimization remarks are not emitted.
 
 pi_cl: struct {
     disable := false;                    // -disable-partial-inlining
@@ -19,6 +20,9 @@ pi_cl: struct {
     max_partial_inlining: s64 = -1;      // -max-partial-inlining
     outline_region_freq_percent: s64 = 75;   // -outline-region-freq-percent
     extra_penalty: s64 = 0;              // -partial-inlining-extra-penalty
+    min_region_size_ratio: float32 = 0.1;    // -min-region-size-ratio
+    min_block_execution: u32 = 100;          // -min-block-execution
+    cold_branch_ratio: float32 = 0.1;        // -cold-branch-ratio
 };
 pi_num_partial_inlining: s64;
 pi_debug := false;
@@ -44,8 +48,14 @@ partial_inliner_parse_cl_opt :: (name: string, value: string, has_value: bool) -
     if name == "max-partial-inlining" { pi_cl.max_partial_inlining = parse_int(name, value); return true; }
     if name == "outline-region-freq-percent" { pi_cl.outline_region_freq_percent = parse_int(name, value); return true; }
     if name == "partial-inlining-extra-penalty" { pi_cl.extra_penalty = parse_int(name, value); return true; }
-    if name == "min-region-size-ratio" || name == "min-block-execution" || name == "cold-branch-ratio"
-        fatal("partial-inliner: -% (multi-region outlining) is not supported yet", name);
+    parse_float :: (name: string, value: string) -> float32 {
+        v, ok := string_to_float64(value);
+        if !ok fatal("invalid floating-point value '%' for option -%", value, name);
+        return cast(float32) v;
+    }
+    if name == "min-region-size-ratio" { pi_cl.min_region_size_ratio = parse_float(name, value); return true; }
+    if name == "min-block-execution" { pi_cl.min_block_execution = cast(u32) parse_int(name, value); return true; }
+    if name == "cold-branch-ratio" { pi_cl.cold_branch_ratio = parse_float(name, value); return true; }
     return false;
 }
 
@@ -58,8 +68,18 @@ Pi_Outlining_Info :: struct {
 }
 pi_num_inlined_blocks :: (oi: *Pi_Outlining_Info) -> u32 { return cast(u32) oi.entries.count + 1; }
 
+// FunctionOutliningMultiRegionInfo::OutlineRegionInfo
+Pi_Region :: struct {
+    region: [..] Value_Id;
+    entry: Value_Id;
+    exit: Value_Id;
+    ret: Value_Id;   // the block after the outlined call (NONE: none)
+}
+
 // FunctionCloner
 Pi_Cloner :: struct {
+    multi: bool;                       // ClonedOMRI (multi-region) instead of ClonedOI
+    regions: [..] Pi_Region;           // ClonedOMRI->ORI
     orig: Value_Id;
     cloned: Value_Id;
     outlined: [..] [2] Value_Id;       // (outlined function, the block calling it)
@@ -117,8 +137,18 @@ pi_unswitch_function :: (f: Value_Id, psi: *Psi) -> (bool, Value_Id) {
     if fn_has_fn_attr(f, .NoInline) return false, NONE;
     if psi_is_function_entry_cold(psi, f) return false, NONE;
     if !pi_fn_has_uses(f) return false, NONE;
-    if psi.has_summary && function_entry_count_present(f) && !pi_cl.disable_multi_region && psi_has_instrumentation_profile(psi)
-        fatal("partial-inliner: multi-region (cold region) outlining with an instrumentation profile is not supported yet");
+    if psi.has_summary && function_entry_count_present(f) && !pi_cl.disable_multi_region {
+        found, regions := pi_compute_outlining_cold_regions_info(f, psi);
+        if found {
+            u := ir.v_first_use[f];
+            while u != NONE { if vkind(ir.u_user[u]) == .C_BLOCKADDR fatal("partial-inliner: a function referenced by a blockaddress is not supported yet"); u = ir.u_next[u]; }
+            mc: Pi_Cloner;
+            pi_cloner_init_multi(*mc, f, regions);
+            did := pi_do_multi_region_function_outlining(*mc);
+            if did && pi_try_partial_inline(*mc, psi) { pi_cloner_destroy(*mc); return true, NONE; }
+            pi_cloner_destroy(*mc);
+        }
+    }
     ok, oi := pi_compute_outlining_info(f);
     if !ok return false, NONE;
     // a blockaddress would be redirected by the RAUW to the clone (it is not a use in LLVM)
@@ -233,6 +263,152 @@ pi_cloner_init :: (c: *Pi_Cloner, f: Value_Id, oi: *Pi_Outlining_Info) {
     for oi.return_block_preds array_add(*c.oi.return_block_preds, vmap_get(*vm, it));
     ipo_rauw(f, c.cloned);
 }
+// FunctionCloner::FunctionCloner (multi region)
+pi_cloner_init_multi :: (c: *Pi_Cloner, f: Value_Id, regions: [] Pi_Region) {
+    c.orig = f;
+    c.multi = true;
+    c.outlined.allocator = temp;
+    c.regions.allocator = temp;
+    vm: Value_Map; vmap_init(*vm);
+    c.cloned = clone_function(f, *vm);
+    for r: regions {
+        m: Pi_Region; m.region.allocator = temp;
+        for r.region array_add(*m.region, vmap_get(*vm, it));
+        m.entry = vmap_get(*vm, r.entry);
+        m.exit = vmap_get(*vm, r.exit);
+        m.ret = ifx r.ret != NONE then vmap_get(*vm, r.ret) else NONE;
+        array_add(*c.regions, m);
+    }
+    ipo_rauw(f, c.cloned);
+}
+
+// DominatorTree::getDescendants
+pi_dt_descendants :: (dt: *Dom_Tree, r: Value_Id, out: *[..] Value_Id) {
+    out.count = 0;
+    rn := dt_node(dt, r);
+    if rn < 0 return;
+    wl: [..] s32; wl.allocator = temp;
+    array_add(*wl, rn);
+    while wl.count {
+        n := pop(*wl);
+        array_add(out, dt.nodes[n].block);
+        c := dt.nodes[n].first_child;
+        while c >= 0 { array_add(*wl, c); c = dt.nodes[c].sibling; }
+    }
+}
+
+// computeOutliningColdRegionsInfo
+pi_compute_outlining_cold_regions_info :: (f: Value_Id, psi: *Psi) -> (bool, [..] Pi_Region) {
+    regions: [..] Pi_Region; regions.allocator = temp;
+    entry := fn_entry(f);
+    dt := dt_new(false);
+    dt_recalculate(dt, f);
+    defer dt_free(dt);
+    li := li_new(f);
+    li_analyze(li, dt);
+    defer li_free(li);
+    bpi := bpi_calculate(f, li, null, null, no_tli = true);
+    defer bpi_free(bpi);
+    bfi := get_bfi(f);   // GetBFI: the function analysis manager's
+    if !psi_has_instrumentation_profile(psi) return false, regions;
+    is_single_exit :: (blocks: [] Value_Id) -> Value_Id {
+        exit: Value_Id = NONE;
+        succs: [..] Value_Id; succs.allocator = temp;
+        for b: blocks {
+            succs.count = 0;
+            block_successors(b, *succs);
+            for s: succs {
+                inside := false;
+                for blocks if it == s { inside = true; break; }
+                if inside continue;
+                if exit != NONE return NONE;
+                exit = b;
+            }
+        }
+        return exit;
+    }
+    bb_profile_count :: (bfi: *Bfi, b: Value_Id) -> u64 { ok, c := bfi_block_profile_count(bfi, b); return ifx ok then c else 0; }
+    t := tti_get(f);
+    overall: Cost = 0;
+    for b: fn_blocks(f) overall = cost_add(overall, pi_compute_bb_inline_cost(b, t));
+    // InstructionCost::map(Cost * MinRegionSizeRatio): float arithmetic, truncated back
+    min_outline_region_cost: Cost = cast(Cost) (cast(float32) overall * pi_cl.min_region_size_ratio);
+    min_branch_prob := bp_make(cast(u64) cast(s32) (pi_cl.cold_branch_ratio * cast(float32) pi_cl.min_block_execution), cast(u64) pi_cl.min_block_execution);
+    found := false;
+    dfs: [..] Value_Id; dfs.allocator = temp;
+    visited: Table(Value_Id, bool); visited.allocator = temp;
+    array_add(*dfs, entry);
+    table_set(*visited, entry, true);
+    succs: [..] Value_Id; succs.allocator = temp;
+    dom: [..] Value_Id; dom.allocator = temp;
+    preds: [..] Value_Id; preds.allocator = temp;
+    while dfs.count {
+        this_bb := pop(*dfs);
+        okc, cnt := bfi_block_profile_count(bfi, this_bb);
+        if (okc && psi_is_cold_count(psi, cnt)) || bb_profile_count(bfi, this_bb) < pi_cl.min_block_execution continue;
+        succs.count = 0;
+        block_successors(this_bb, *succs);
+        for si: succs {
+            if table_contains(*visited, si) continue;
+            table_set(*visited, si, true);
+            array_add(*dfs, si);
+            if bpi_edge_probability(bpi, this_bb, si) > min_branch_prob continue;
+            pi_dt_descendants(dt, si, *dom);
+            preds.count = 0;
+            block_predecessors(dom[0], *preds);
+            if preds.count != 1 continue;   // hasNPredecessors(1)
+            exit := is_single_exit(dom);
+            if exit == NONE continue;
+            region_cost: Cost = 0;
+            for b: dom region_cost = cost_add(region_cost, pi_compute_bb_inline_cost(b, tti_get(block_fn(b))));
+            if !pi_cl.skip_cost_analysis && region_cost < min_outline_region_cost continue;
+            for dom table_set(*visited, it, true);
+            r: Pi_Region; r.region.allocator = temp;
+            for dom array_add(*r.region, it);
+            r.entry = dom[0];
+            r.exit = exit;
+            r.ret = block_single_successor_of(exit);
+            array_add(*regions, r);
+            found = true;
+        }
+    }
+    return found, regions;
+}
+
+// FunctionCloner::doMultiRegionFunctionOutlining
+pi_do_multi_region_function_outlining :: (c: *Pi_Cloner) -> bool {
+    if c.regions.count == 0 return false;
+    cf := c.cloned;
+    dt := dt_new(false);
+    dt_recalculate(dt, cf);
+    li := li_new(cf);
+    li_analyze(li, dt);
+    c.bpi = bpi_calculate(cf, li, null, null, no_tli = true);
+    c.bfi = bfi_calculate(cf, c.bpi, li);
+    cache := ce_cache_new(cf);
+    inputs: Value_Set; vset_init(*inputs);
+    outputs: Value_Set; vset_init(*outputs);
+    sinks: Value_Set; vset_init(*sinks);
+    for r: c.regions {
+        cost: Cost = 0;
+        for b: r.region cost = cost_add(cost, pi_compute_bb_inline_cost(b, tti_get(block_fn(b))));
+        ce := ce_new(r.region, dt, c.bfi, c.bpi, cached_assumption_cache(block_fn(r.entry)), false, false, "", false);
+        // the sets are shared by all regions (declared outside the loop)
+        ce_find_inputs_outputs(*ce, *inputs, *outputs, *sinks);
+        if outputs.list.count > 0 && !pi_cl.force_live_exit continue;
+        outlined := ce_extract_code_region(*ce, *cache);
+        if outlined == NONE continue;
+        users := pi_fn_users(outlined);
+        ocs := pi_supported_call_base(users[0]);
+        array_add(*c.outlined, .[outlined, inst_block(ocs)]);
+        c.outlined_region_cost = cost_add(c.outlined_region_cost, cost);
+        if pi_cl.mark_cold_cc { glob(outlined).cc = CC_COLD; inst(ocs).cc = CC_COLD; }
+    }
+    dt_free(dt);
+    li_free(li);
+    return c.outlined.count > 0;
+}
+
 // FunctionCloner::~FunctionCloner
 pi_cloner_destroy :: (c: *Pi_Cloner) {
     ipo_rauw(c.cloned, c.orig);
@@ -394,7 +570,8 @@ pi_should_partial_inline :: (cb: Value_Id, c: *Pi_Cloner, weighted_rcost: u64) -
 pi_try_partial_inline :: (c: *Pi_Cloner, psi: *Psi) -> bool {
     if c.outlined.count == 0 return false;
     size_cost, non_weighted_rcost := pi_compute_outlining_costs(c);
-    rel := pi_outlining_call_bb_relative_freq(c);
+    // multi-region: BranchProbability(0, 1) (the outlined calls are assumed never executed)
+    rel: u32 = ifx c.multi then cast(u32) 0 else pi_outlining_call_bb_relative_freq(c);
     weighted_rcost := bp_scale(rel, cast,no_check(u64) non_weighted_rcost);
     if pi_debug { print("PI: size_cost=% rcost=% rel=% weighted=% region=%\n", size_cost, non_weighted_rcost, rel, weighted_rcost, c.outlined_region_cost); print("%", print_module_fresh()); }
     if !pi_cl.skip_cost_analysis && c.outlined_region_cost < size_cost return false;
@@ -408,13 +585,13 @@ pi_try_partial_inline :: (c: *Pi_Cloner, psi: *Psi) -> bool {
         cb := pi_supported_call_base(usr);
         if pi_cl.max_partial_inlining != -1 && pi_num_partial_inlining >= pi_cl.max_partial_inlining continue;
         if !pi_should_partial_inline(cb, c, weighted_rcost) continue;
-        if func_vararg(glob(c.cloned).value_type)
-            fatal("partial-inliner: forwarding varargs to the outlined function (InlineFunction ForwardVarArgsTo) is not supported yet");
         ifi: Inline_Function_Info;
         ifi_reset(*ifi);
         ifi.use_assumption_cache = true;
         ifi.psi = psi;
-        r := inline_function(cb, *ifi, false, null, true, true);
+        // the varargs are forwarded only for single-region outlining
+        fwd := ifx c.multi then NONE else c.outlined[c.outlined.count - 1][0];
+        r := inline_function(cb, *ifi, false, null, true, true, fwd);
         if !r.ok continue;
         if count_v {
             found, n := table_find(*count_map, usr);

@@ -127,7 +127,8 @@ src/
   evaluator.jai, pass_global_opt.jai, pass_global_dce.jai, pass_constant_merge.jai, pass_internalize.jai,
   pass_strip_dead_prototypes.jai, pass_elim_avail_extern.jai, pass_assign_guid.jai, md5.jai   IPO module passes
   pass_dead_arg_elim.jai, pass_arg_promotion.jai   DeadArgumentElimination (module), ArgumentPromotion (CGSCC)
-  pass_partial_inliner.jai, code_extractor.jai   PartialInliner (single region) and CodeExtractor
+  pass_partial_inliner.jai, code_extractor.jai   PartialInliner (single and multi region) and CodeExtractor
+  pass_hot_cold_split.jai, pass_loop_extract.jai   HotColdSplitting; LoopExtractor and BlockExtractor
   attributor.jai, attributor_aas.jai, attributor_query.jai, attributor_dead.jai, attributor_values.jai,
   attributor_ptrinfo.jai, attributor_misc.jai, attributor_mem.jai, attributor_cleanup.jai
                   the Attributor and AttributorLight (module + CGSCC): the framework (`Irp` positions, `Abs_Attr`

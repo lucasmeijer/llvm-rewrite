@@ -1330,24 +1330,39 @@ Still slow / next:
      addresses; keep it loud.
   3. Profile the CGSCC pass with the optimized build (`harness/run perf` has no benchmark for it yet).
 
-## PartialInliner and CodeExtractor (`partial-inliner`; L2.inline)
+## Code extraction: CodeExtractor, PartialInliner, HotColdSplitting, LoopExtractor, BlockExtractor (L1.extra.code-extraction COMPLETE 194/194)
 
-- Files: `pass_partial_inliner.jai` (PartialInlining.cpp, single-region outlining), `code_extractor.jai`
-  (CodeExtractor.cpp). `clone_function(f, *vm)` (function_specialization.jai) is LLVM's CloneFunction, shared with
-  FunctionSpecialization. `bpi_calculate(..., no_tli = true)` is BranchProbabilityInfo(F, LI) without a TLI (the
-  zero heuristics then see no libcalls), as PartialInliner builds it for the clone.
+- Files: `code_extractor.jai` (CodeExtractor.cpp incl. the debug-info fixup), `pass_partial_inliner.jai`
+  (PartialInlining.cpp, single- and multi-region), `pass_hot_cold_split.jai` (HotColdSplitting.cpp),
+  `pass_loop_extract.jai` (LoopExtractor.cpp and BlockExtractor.cpp). `clone_function(f, *vm)`
+  (function_specialization.jai) is LLVM's CloneFunction. `bpi_calculate(..., no_tli = true)` is
+  BranchProbabilityInfo(F, LI) without a TLI, as PartialInliner builds it for the clone. Facts:
+  knowledge/llvm/code-extraction.md.
+- `ce_new(..., suffix, void_return_with_single_output = true)`: the default matches LLVM's constructor; PI and
+  HotColdSplit pass false.
 - Trap (verified against the assertions opt): computeOutliningInfo's `HasNonEntryPred` lambda captures the `Entries`
   set *by value* before the peeling loop, so a block whose predecessor was only peeled in that loop stops the
   peeling (Inline/inline-byval-bonus.ll: 2 entries, not 4).
 - Moving blocks/instructions into the outlined function drops their names from the old function's symbol table and
   re-adds them in the new one (instructions, then the block), like BasicBlock::setParent.
-- Not ported (fail loudly): multi-region outlining (instrumentation profile), vararg forwarding into the outlined
-  function, functions referenced by a blockaddress, extraction from functions with debug info / debug records /
-  `!dbg`, more than two region exits, aggregate arguments, funclet EH in the region.
-- Sweeps (0 differs): `partial-inliner` 8507/8516 identical, with `-skip-partial-inlining-cost-analysis` 8507/8516
-  (111 files outline and inline a region); the 9 loud failures are the items above. Debugging aids: JAI_PI_DEBUG
-  prints the outlining costs and the module before the partial inlining, JAI_IC_DEBUG prints the CallAnalyzer
-  counters LLVM's `-debug-only=inline-cost` prints.
+- `ce_extract_code_region` drops the old function's cached analyses (`table_remove(*fam, old)`); LoopExtractor keeps
+  using the DT / LoopInfo pointers it already holds, but a later pass recomputes LoopInfo where LLVM keeps the
+  preserved (erased-loop) one.
+- `inline_function(..., forward_var_args_to)` is InlineFunction's ForwardVarArgsTo (only partial inlining uses it).
+- Findings outside these passes: x86_fp80 `+snan(0x0)` from the per-function split reparses to `+snan(0x1)` (the
+  only per-function differences); `print<da>` interleaves a `+mpx` target warning differently on stderr.
+- Not ported (fail loudly): aggregate arguments, explicit allocation/deallocation blocks, out-of-region lifetime
+  markers on in-region casts of an alloca; partial inlining of a function referenced by a blockaddress.
+  Optimization remarks are not emitted.
+- Sweeps (0 differs everywhere): `hotcoldsplit` 10807/10807, `-hotcoldsplit-threshold=-1` 10790/10791 whole-file and
+  83347/83350 per function (the x86_fp80 parse issue), `--with-test-flags` (also with threshold -1) 0 differs, loud =
+  other passes' options; `loop-extract` 10803/10803, `function(loop-simplify),loop-extract` 10804/10804 and per
+  function 83444/83446 (x86_fp80); `extract-blocks` 10809/10809; `partial-inliner` 10806/10807 with and without
+  `-skip-partial-inlining-cost-analysis`, `-min-block-execution=1`, `-pi-force-live-exit-outline` (1 loud:
+  blockaddress), `--with-test-flags` 0 differs; tests/perf/compile `function(sroa),hotcoldsplit`,
+  `hotcoldsplit -hotcoldsplit-threshold=-1`, `function(loop-simplify),loop-extract`, `partial-inliner` 4/4.
+  Debugging aids: JAI_PI_DEBUG prints the outlining costs and the module before the partial inlining, JAI_IC_DEBUG
+  prints the CallAnalyzer counters LLVM's `-debug-only=inline-cost` prints.
 
 ## LoopVectorize (L1.vectorize.loop 463/468 opt, 468/468 roundtrip; .outer/.reductions/.tail-folding/.epilogue COMPLETE)
 

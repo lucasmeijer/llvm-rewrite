@@ -4,10 +4,13 @@
 // constructFunctionDeclaration, emitFunctionBody, emitReplacerCall, insertReplacerCall,
 // calculateNewCallTerminatorWeights).
 //
+// Debug info: applyFirstDebugLoc, the replacer call's location, fixupDebugInfoPostExtraction (new DISubprogram,
+// DIBuilder records for inputs, variable / label / scope cloning with cloneScopeForSubprogram,
+// replaceInlinedAtSubprogram, loop metadata locations, remapAssignID), stripDebugInfo(Function) and
+// eraseDebugIntrinsicsWithNonLocalRefs.
+//
 // Not ported (fail loudly): aggregate arguments (-aggregate-extracted-args / AggregateArgs; no caller asks for
-// them), explicit allocation/deallocation blocks, more than two exit blocks (the i16 switch), debug info in the
-// function being extracted from (fixupDebugInfoPostExtraction with a DISubprogram, or debug records / !dbg
-// attachments to strip), swifterror inputs, and the out-of-region lifetime markers on in-region casts of an
+// them), explicit allocation/deallocation blocks, and the out-of-region lifetime markers on in-region casts of an
 // alloca (findAllocas' LifetimeBitcastUsers).
 
 Code_Extractor :: struct {
@@ -273,7 +276,7 @@ ce_sever_split_phi_nodes_of_entry :: (ce: *Code_Extractor, header_in: Value_Id) 
         }
         if outside <= 1 return header;
     }
-    nb := split_block(header, block_first_non_phi(header), ce.dt, null);
+    nb := split_block(header, block_first_non_phi(header), ce.dt, null, head = true);   // getFirstNonPHIIt: head bit
     old_pred := header;
     ce_remove(ce, old_pred);
     ce_insert(ce, nb);
@@ -501,7 +504,7 @@ ce_find_or_create_block_for_hoisting :: (ce: *Code_Extractor, common_exit: Value
         else if single != p { single = NONE; multiple = true; break; }
     }
     if single != NONE return single;
-    nb := split_basic_block(common_exit, block_first_non_phi(common_exit), "");
+    nb := split_basic_block(common_exit, block_first_non_phi(common_exit), "", head = true);   // getFirstNonPHIIt
     preds.count = 0;
     block_predecessors(common_exit, *preds);
     for p: preds {
@@ -517,6 +520,13 @@ ce_find_or_create_block_for_hoisting :: (ce: *Code_Extractor, common_exit: Value
 ce_move_inst_to_front :: (i: Value_Id, bb: Value_Id) {
     name := vname(i);
     if name.count set_name(i, "");
+    // moveBefore(BB, getFirstInsertionPt()): the iterator has the head bit, so i's records stay behind (they fall
+    // onto the next instruction) and none are adopted at the destination
+    if inst(i).records {
+        nx := inst_next(i);
+        if nx == NONE fatal("code extractor: moving a terminator with debug records");
+        records_prepend(nx, records_take(i));
+    }
     inst_unlink(i);
     pt := block_first_insertion_pt(bb);
     if pt != NONE inst_insert_before(i, pt); else block_append_inst(bb, i);
@@ -637,7 +647,19 @@ ce_emit_function_body :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Val
         for k: 0..cast(s64) nops(p) - 1 if !ce_contains(ce, phi_block(p, cast(u32) k)) phi_set_block(p, cast(u32) k, root);
         p = inst_next(p);
     }
-    block_append_inst(root, create_br(header));
+    br := create_br(header);
+    block_append_inst(root, br);
+    // applyFirstDebugLoc
+    if get_metadata(old, MDK_DBG) != NONE {
+        done := false;
+        for b: ce.blocks {
+            for i: block_insts(b) {
+                dl := get_metadata(i, MDK_DBG);
+                if dl != NONE { set_metadata(br, MDK_DBG, dl); done = true; break; }
+            }
+            if done break;
+        }
+    }
     for v, k: outputs.list {
         a := fn_arg(nf, cast(u32) (inputs.list.count + k));
         pt: Value_Id = NONE;
@@ -649,6 +671,8 @@ ce_emit_function_body :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Val
         set_op(st, 0, v); set_op(st, 1, a);
         inst(st).align = dl_alignment(vtype(v), true);
         inst_insert_before(st, pt);
+        // inserting at std::next(Output) (no head bit) adopts the records attached there
+        if o != .INVOKE && o != .PHI && inst(pt).records records_append(st, records_take(pt));
     }
     if n == 0 {
         any_ret := false;
@@ -679,6 +703,10 @@ ce_emit_replacer_call :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Val
     for params set_op(call, cast(u32) it_index, it);
     set_op(call, cast(u32) params.count, nf);
     insert_at_end_named(call, code_replacer, ifx ce.exits.count > 1 then "targetBlock" else "");
+    if get_metadata(old, MDK_DBG) != NONE {
+        dl := get_metadata(block_terminator(fn_entry(nf)), MDK_DBG);
+        if dl != NONE set_metadata(call, MDK_DBG, dl);
+    }
     for v, k: inputs.list if is_swift_error(v) call_add_param_attr_kind(call, cast(u32) k, .SwiftError);
     for v, k: outputs.list {
         t := vtype(v);
@@ -803,9 +831,6 @@ ce_extract_code_region :: (ce: *Code_Extractor, cache: *Ce_Cache) -> Value_Id {
     header := ce.blocks[0];
     old := block_fn(header);
     // fixupDebugInfoPostExtraction / stripDebugInfo: not ported
-    if get_metadata(old, MDK_DBG) != NONE fatal("code extractor: extracting from a function with debug info is not supported yet");
-    for i: fn_insts(old) if inst(i).records != 0 || get_metadata(i, MDK_DBG) != NONE
-        fatal("code extractor: extracting from a function with debug records or locations is not supported yet");
     header = ce_normalize_cfg(ce, header);
     for b: ce.blocks {
         i := block_first(b);
@@ -829,7 +854,7 @@ ce_extract_code_region :: (ce: *Code_Extractor, cache: *Ce_Cache) -> Value_Id {
     if hoist.list.count {
         hb := ce_find_or_create_block_for_hoisting(ce, common_exit);
         t := block_terminator(hb);
-        for hoist.list inst_move_before(it, t);
+        for hoist.list inst_move_before_dbg(it, t);
         ce_compute_exits(ce);
     }
     entry_freq: u64 = 0;
@@ -861,8 +886,333 @@ ce_extract_code_region :: (ce: *Code_Extractor, cache: *Ce_Cache) -> Value_Id {
     reloads: [..] Value_Id; reloads.allocator = temp;
     for i: block_insts(inst_block(call)) if inst_op(i) == .LOAD array_add(*reloads, i);
     ce_insert_replacer_call(ce, old, header, call, *outputs, reloads, *exit_weights);
+    new_values: [..] Value_Id; new_values.allocator = temp;
+    for v, k: inputs.list array_add(*new_values, fn_arg(nf, cast(u32) k));
+    ce_fixup_debug_info_post_extraction(old, nf, call, inputs.list, new_values);
     table_remove(*fam, old);
     return nf;
 }
 // BlockFrequency::operator+= (saturating)
 freq_add :: (a: u64, b: u64) -> u64 { s := a + b; if s < a return 0xFFFF_FFFF_FFFF_FFFF; return s; }
+
+// ---------------------------------------------------------------- debug info
+
+// findDbgUsers(V) over the whole module: the records of `fs` whose location (or dbg_assign address) refers to v,
+// direct users first, in reverse tracking order (find_dbg_users per function, merged)
+ce_find_dbg_users_in :: (fs: [] Value_Id, v: Value_Id) -> [..] u32 {
+    all: [..] u32; all.allocator = temp;
+    one: [..] u32; one.allocator = temp;
+    for f: fs {
+        find_dbg_users(f, v, *one);
+        for one array_add(*all, it);
+    }
+    is_direct :: (r: u32, v: Value_Id) -> bool {
+        rec := dbgr(r);
+        return (rec.loc != NONE && ir.mds[rec.loc].kind == .VALUE && ir.mds[rec.loc].value == v) ||
+               (rec.kind == .ASSIGN && rec.addr != NONE && ir.mds[rec.addr].kind == .VALUE && ir.mds[rec.addr].value == v);
+    }
+    // order: direct users by stamp (descending), then the arg-list users by (list stamp, stamp) descending
+    before :: (a: u32, b: u32, v: Value_Id) -> bool {
+        da := is_direct(a, v); db := is_direct(b, v);
+        if da != db return da;
+        if da return dbgr_stamp(a) > dbgr_stamp(b);
+        la := arglist_stamp(dbgr(a).loc); lb := arglist_stamp(dbgr(b).loc);
+        if la != lb return la > lb;
+        return dbgr_stamp(a) > dbgr_stamp(b);
+    }
+    for i: 1..all.count - 1 {
+        x := all[i];
+        j := i - 1;
+        while j >= 0 && before(x, all[j], v) { all[j + 1] = all[j]; j -= 1; }
+        all[j + 1] = x;
+    }
+    return all;
+}
+
+// stripDebugInfo(Function &)
+ce_strip_debug_info_function :: (f: Value_Id) {
+    set_metadata(f, MDK_DBG, NONE);
+    loop_kind := md_fixed("llvm.loop");
+    heap := md_kind_id("heapallocsite");
+    assign := md_fixed("DIAssignID");
+    loop_map: Table(Md_Id, Md_Id); loop_map.allocator = temp;
+    for b: fn_blocks(f) for i: block_insts(b) {
+        set_metadata(i, MDK_DBG, NONE);
+        lid := get_metadata(i, loop_kind);
+        if lid != NONE {
+            found, nl := table_find(*loop_map, lid);
+            if !found { nl = strip_debug_loc_from_loop_id(lid); table_add(*loop_map, lid, nl); }
+            if nl != lid set_metadata(i, loop_kind, nl);
+        }
+        set_metadata(i, heap, NONE);
+        set_metadata(i, assign, NONE);
+        // dropDbgRecords
+        while inst(i).records dbgr_erase(inst(i).records);
+    }
+}
+
+// eraseDebugIntrinsicsWithNonLocalRefs(F): records outside F that refer to an instruction of F (only the function the
+// code was extracted from can have them)
+ce_erase_debug_records_with_non_local_refs :: (nf: Value_Id, old: Value_Id) {
+    doomed: [..] u32; doomed.allocator = temp;
+    vals: [..] Value_Id; vals.allocator = temp;
+    for b: fn_blocks(old) for i: block_insts(b) {
+        r := inst(i).records;
+        while r != 0 {
+            vals.count = 0;
+            rec := dbgr(r);
+            dbgr_values_of_loc(rec.loc, *vals);
+            if rec.kind == .ASSIGN dbgr_values_of_loc(rec.addr, *vals);
+            for vals if is_inst(it) && inst_fn(it) == nf { array_add(*doomed, r); break; }
+            r = rec.next;
+        }
+    }
+    for doomed dbgr_erase(it);
+    if doomed.count dbgr_index_reset();
+}
+
+// DILocalScope::cloneScopeForSubprogram
+ce_clone_scope_for_subprogram :: (root: Md_Id, new_sp: Md_Id, cache: *Table(Md_Id, Md_Id)) -> Md_Id {
+    chain: [..] Md_Id; chain.allocator = temp;
+    cached: Md_Id = NONE;
+    sc := root;
+    while !is_di(sc, .SUBPROGRAM) {
+        found, c := table_find(cache, sc);
+        if found { cached = c; break; }
+        array_add(*chain, sc);
+        sc = di_op(sc, 1);   // DILexicalBlockBase::getScope
+    }
+    updated := ifx cached != NONE then cached else new_sp;
+    for < x: chain {
+        // cloneAndReplaceParentScope: clone, replace the scope, replaceWithUniqued
+        ops: [..] Md_Id; ops.allocator = temp;
+        for k: 0..cast(s64) ir.mds[x].nops - 1 array_add(*ops, md_op(x, cast(u32) k));
+        ops[1] = updated;
+        ints: [..] u64; ints.allocator = temp;
+        for k: 0..cast(s64) ir.mds[x].nints - 1 array_add(*ints, di_int(x, cast(u32) k));
+        updated = di_get(di_kind(x), false, ops, ints);
+        table_set(cache, x, updated);
+    }
+    return updated;
+}
+
+// DebugLoc::replaceInlinedAtSubprogram
+ce_replace_inlined_at_subprogram :: (root: Md_Id, new_sp: Md_Id, cache: *Table(Md_Id, Md_Id)) -> Md_Id {
+    chain: [..] Md_Id; chain.allocator = temp;
+    cached: Md_Id = NONE;
+    l := root;
+    while l != NONE {
+        found, c := table_find(cache, l);
+        if found { cached = c; break; }
+        array_add(*chain, l);
+        l = diloc_inlined_at(l);
+    }
+    updated := cached;
+    if updated == NONE {
+        last := pop(*chain);
+        ns := ce_clone_scope_for_subprogram(diloc_scope(last), new_sp, cache);
+        updated = di_location_get(diloc_line(last), diloc_col(last), ns, NONE);
+        table_set(cache, last, updated);
+    }
+    for < x: chain {
+        updated = di_location_get(diloc_line(x), diloc_col(x), diloc_scope(x), updated);
+        table_set(cache, x, updated);
+    }
+    return updated;
+}
+
+// updateLoopMetadataDebugLocations(I, replaceInlinedAtSubprogram of DILocations)
+ce_update_loop_metadata_debug_locations :: (i: Value_Id, new_sp: Md_Id, cache: *Table(Md_Id, Md_Id)) {
+    k_loop := md_fixed("llvm.loop");
+    orig := get_metadata(i, k_loop);
+    if orig == NONE return;
+    updater :: (m: Md_Id, new_sp: Md_Id, cache: *Table(Md_Id, Md_Id)) -> Md_Id {
+        if m != NONE && is_di(m, .LOCATION) return ce_replace_inlined_at_subprogram(m, new_sp, cache);
+        return m;
+    }
+    recursive :: (m: Md_Id, new_sp: Md_Id, cache: *Table(Md_Id, Md_Id)) -> Md_Id {
+        if m == NONE || ir.mds[m].kind != .TUPLE || md_nops(m) < 1 return m;
+        o0 := md_op(m, 0);
+        if o0 == NONE || ir.mds[o0].kind != .STRING return m;
+        updated := false;
+        ops: [..] Md_Id; ops.allocator = temp;
+        array_add(*ops, o0);
+        for k: 1..cast(s64) md_nops(m) - 1 {
+            x := md_op(m, cast(u32) k);
+            if x == NONE { array_add(*ops, NONE); continue; }
+            nx := updater(recursive(x, new_sp, cache), new_sp, cache);
+            if nx != NONE array_add(*ops, nx);
+            updated |= nx != x;
+        }
+        if updated return md_tuple(ops, false);
+        return m;
+    }
+    ops: [..] Md_Id; ops.allocator = temp;
+    array_add(*ops, NONE);
+    // LLVM's operand count: a DILocation has its inlinedAt operand only when there is one
+    n := cast(s64) md_nops(orig);
+    if is_di(orig, .LOCATION) && diloc_inlined_at(orig) == NONE n = 1;
+    for k: 1..n - 1 {
+        x := md_op(orig, cast(u32) k);
+        if x == NONE { array_add(*ops, NONE); continue; }
+        nx := updater(recursive(x, new_sp, cache), new_sp, cache);
+        if nx != NONE array_add(*ops, nx);
+    }
+    nl := md_tuple(ops, true);
+    ir.md_ops[ir.mds[nl].ops] = nl;
+    set_metadata(i, k_loop, nl);
+}
+
+// at::remapAssignID
+ce_remap_assign_id :: (map: *Table(Md_Id, Md_Id), i: Value_Id) {
+    get_new_id :: (map: *Table(Md_Id, Md_Id), old_id: Md_Id) -> Md_Id {
+        found, n := table_find(map, old_id);
+        if found && n != NONE return n;
+        n = di_get(.ASSIGN_ID, true, .[], .[]);
+        table_set(map, old_id, n);
+        return n;
+    }
+    r := inst(i).records;
+    while r != 0 {
+        rec := dbgr(r);
+        if rec.kind == .ASSIGN rec.assign_id = get_new_id(map, rec.assign_id);
+        r = rec.next;
+    }
+    k_assign := md_fixed("DIAssignID");
+    id := get_metadata(i, k_assign);
+    if id != NONE set_metadata(i, k_assign, get_new_id(map, id));
+}
+
+// new DbgVariableRecord of `kind` (value or declare) inserted before `before`
+ce_insert_record_before :: (kind: Dbg_Record_Kind, v: Value_Id, var: Md_Id, expr: Md_Id, dbg: Md_Id, before: Value_Id) {
+    r := dbgr_insert_value_before(v, var, expr, dbg, before);
+    dbgr(r).kind = kind;
+}
+
+// fixupDebugInfoPostExtraction
+ce_fixup_debug_info_post_extraction :: (old: Value_Id, nf: Value_Id, the_call: Value_Id, inputs: [] Value_Id, new_values: [] Value_Id) {
+    dbgr_index_reset();
+    old_sp := get_metadata(old, MDK_DBG);
+    if old_sp == NONE {
+        ce_strip_debug_info_function(nf);
+        ce_erase_debug_records_with_non_local_refs(nf, old);
+        dbgr_index_reset();
+        return;
+    }
+    // DIBuilder::createFunction(Unit, Name, Name, File, 0, createSubroutineType({}), 0, FlagZero,
+    // Definition | Optimized | LocalToUnit): distinct, scope null (getNonCompileUnitScope(CU)), no retained nodes yet
+    unit := di_op(old_sp, 5);
+    file := di_op(old_sp, 0);
+    sp_type := di_get(.SUBROUTINE_TYPE, false, .[NONE, NONE, NONE, NONE, NONE, md_tuple(.[], false)], .[0, 0]);
+    name := md_string(vname(nf));
+    sp_flags: u64 = SPFLAG_DEFINITION | SPFLAG_OPTIMIZED | SPFLAG_LOCAL_TO_UNIT;
+    new_sp := di_get(.SUBPROGRAM, true, .[file, NONE, name, name, sp_type, unit, NONE, NONE, NONE, NONE, NONE, NONE, NONE],
+                     .[0, 0, 0, 0, 0, sp_flags, 0]);
+    set_metadata(nf, MDK_DBG, new_sp);
+    tracked := false;   // DIBuilder::SubprogramTrackedNodes has an entry for new_sp (createAutoVariable was called)
+
+    empty_expr := di_get(.EXPRESSION, false, .[], .[]);
+    fs: [2] Value_Id = .[old, nf];
+    for input, k: inputs {
+        users := ce_find_dbg_users_in(fs, input);
+        nv := new_values[k];
+        for r: users {
+            rec := dbgr(r);
+            if inst_fn(rec.owner) == nf { dbgr_replace_variable_location_op(r, input, nv); continue; }
+            entry := fn_entry(nf);
+            if rec.kind == .DECLARE {
+                // insertDeclare(.., BasicBlock *InsertAtEnd): before the terminator
+                ce_insert_record_before(.DECLARE, nv, rec.var, empty_expr, rec.dbg, block_terminator(entry));
+                continue;
+            }
+            ce_insert_record_before(.VALUE, nv, rec.var, empty_expr, rec.dbg, block_terminator(entry));
+        }
+    }
+    dbgr_index_reset();
+
+    is_invalid_location :: (v: Value_Id, nf: Value_Id) -> bool {
+        if v == NONE return true;
+        k := vkind(v);
+        if k == .ARGUMENT return arg_parent(v) != nf;
+        if k == .INST return inst_fn(v) != nf;
+        return !is_constant_kind(k);
+    }
+    remapped: Table(Md_Id, Md_Id); remapped.allocator = temp;
+    cache: Table(Md_Id, Md_Id); cache.allocator = temp;
+    to_delete: [..] u32; to_delete.allocator = temp;
+    vals: [..] Value_Id; vals.allocator = temp;
+    for b: fn_blocks(nf) for i: block_insts(b) {
+        r := inst(i).records;
+        while r != 0 {
+            rec := dbgr(r);
+            defer r = rec.next;
+            if rec.kind == .LABEL {
+                if diloc_inlined_at(rec.dbg) != NONE continue;
+                old_label := rec.loc;
+                found, nl := table_find(*remapped, old_label);
+                if !found || nl == NONE {
+                    ns := ce_clone_scope_for_subprogram(di_op(old_label, 0), new_sp, *cache);
+                    ops: [3] Md_Id = .[ns, di_op(old_label, 1), di_op(old_label, 2)];
+                    ints: [..] u64; ints.allocator = temp;
+                    for x: 0..cast(s64) ir.mds[old_label].nints - 1 array_add(*ints, di_int(old_label, cast(u32) x));
+                    nl = di_get(.LABEL, false, ops, ints);
+                    table_set(*remapped, old_label, nl);
+                }
+                rec.loc = nl;
+                continue;
+            }
+            vals.count = 0;
+            invalid := false;
+            loc := rec.loc;
+            if loc != NONE && ir.mds[loc].kind == .VALUE {
+                invalid = is_invalid_location(ir.mds[loc].value, nf);
+            } else if is_di(loc, .ARG_LIST) {
+                n := ir.mds[loc].nops;
+                for x: 0..cast(s64) n - 1 {
+                    o := md_op(loc, cast(u32) x);
+                    if o == NONE || ir.mds[o].kind != .VALUE { invalid = true; break; }
+                    if is_invalid_location(ir.mds[o].value, nf) { invalid = true; break; }
+                }
+            }
+            if invalid { array_add(*to_delete, r); continue; }
+            if rec.kind == .ASSIGN {
+                a := rec.addr;
+                av: Value_Id = NONE;
+                if a != NONE && ir.mds[a].kind == .VALUE av = ir.mds[a].value;
+                if is_invalid_location(av, nf) { array_add(*to_delete, r); continue; }
+            }
+            if diloc_inlined_at(rec.dbg) == NONE {
+                old_var := rec.var;
+                found, nvar := table_find(*remapped, old_var);
+                if !found || nvar == NONE {
+                    ns := ce_clone_scope_for_subprogram(di_op(old_var, 0), new_sp, *cache);
+                    tracked = true;
+                    // createAutoVariable(Scope, Name, File, Line, Type, false, FlagZero, AlignInBits): ArgNo 0
+                    nvar = di_get(.LOCAL_VARIABLE, false, .[ns, di_op(old_var, 1), di_op(old_var, 2), di_op(old_var, 3), NONE],
+                                  .[di_int(old_var, 0), 0, 0, di_int(old_var, 3)]);
+                    table_set(*remapped, old_var, nvar);
+                }
+                rec.var = nvar;
+            }
+        }
+    }
+    for to_delete dbgr_erase(it);
+    // DIBuilder::finalizeSubprogram: retainedNodes = !{} once the subprogram is tracked
+    if tracked ir.md_ops[ir.mds[new_sp].ops + 7] = md_tuple(.[], false);
+
+    assign_map: Table(Md_Id, Md_Id); assign_map.allocator = temp;
+    for b: fn_blocks(nf) for i: block_insts(b) {
+        dl := get_metadata(i, MDK_DBG);
+        if dl != NONE set_metadata(i, MDK_DBG, ce_replace_inlined_at_subprogram(dl, new_sp, *cache));
+        r := inst(i).records;
+        while r != 0 {
+            if dbgr(r).dbg != NONE dbgr(r).dbg = ce_replace_inlined_at_subprogram(dbgr(r).dbg, new_sp, *cache);
+            r = dbgr(r).next;
+        }
+        ce_update_loop_metadata_debug_locations(i, new_sp, *cache);
+        ce_remap_assign_id(*assign_map, i);
+    }
+    if get_metadata(the_call, MDK_DBG) == NONE set_metadata(the_call, MDK_DBG, di_location_get(0, 0, old_sp, NONE));
+    ce_erase_debug_records_with_non_local_refs(nf, old);
+    dbgr_index_reset();
+}

@@ -1713,14 +1713,16 @@ get_convergence_entry :: (bb: Value_Id) -> Value_Id {
 }
 
 // InlineFunction(CB, IFI, MergeAttributes, CalleeAAR, InsertLifetime, TrackInlineHistory, ForwardVarArgsTo = null)
-inline_function :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attributes: bool, callee_aar: *Aa_Results, insert_lifetime: bool, track_inline_history: bool) -> Inline_Result {
+inline_function :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attributes: bool, callee_aar: *Aa_Results, insert_lifetime: bool, track_inline_history: bool,
+                    forward_var_args_to: Value_Id = NONE) -> Inline_Result {
     r := can_inline_call_site(cb, ifi);
-    if r.ok inline_function_impl(cb, ifi, merge_attributes, callee_aar, insert_lifetime, track_inline_history);
+    if r.ok inline_function_impl(cb, ifi, merge_attributes, callee_aar, insert_lifetime, track_inline_history, forward_var_args_to);
     return r;
 }
 
 // InlineFunctionImpl
-inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attributes: bool, callee_aar: *Aa_Results, insert_lifetime: bool, track_inline_history: bool) {
+inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attributes: bool, callee_aar: *Aa_Results, insert_lifetime: bool, track_inline_history: bool,
+                         forward_var_args_to: Value_Id = NONE) {
     orig_bb := inst_block(cb);
     caller := block_fn(orig_bb);
     called := call_called_function(cb);
@@ -1862,7 +1864,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
             for :early_inc ci_: block_insts(b) {
                 ci := ci_;
                 if inst_op(ci) != .CALL continue;
-                if vararg_vals.count && call_is_must_tail(ci) {
+                if vararg_vals.count && ((forward_var_args_to != NONE && call_called_function(ci) == forward_var_args_to) || call_is_must_tail(ci)) {
                     attrs := inst(ci).attrs;
                     arg_attrs: [..] u32; arg_attrs.allocator = temp;
                     if attrs != 0 || vararg_attrs.count {
