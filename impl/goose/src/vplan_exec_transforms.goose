@@ -135,9 +135,33 @@ fn vpu_unroll_header_phi(r: i32, insert_pt: i32) {
     let k = vpr[r].kind;
     if k == VPR_FIRST_ORDER_RECURRENCE_PHI { return; }
     if vp_is_widen_induction_kind(k) { vpu_unroll_widen_induction(r, insert_pt); return; }
-    if k == VPR_REDUCTION_PHI { vp_unported("unrolling reduction phis"); }
-    if k != VPR_ACTIVE_LANE_MASK_PHI { fatal("internal: loop-vectorize: unexpected header phi recipe not needing unrolled part"); }
-    vp_unported("unrolling active-lane-mask phis");
+    if k == VPR_REDUCTION_PHI && vpr[r].rdx_style == VRS_ORDERED { return; }
+    if k != VPR_REDUCTION_PHI {
+        if k != VPR_ACTIVE_LANE_MASK_PHI { fatal("internal: loop-vectorize: unexpected header phi recipe not needing unrolled part"); }
+        vp_unported("unrolling active-lane-mask phis");
+    }
+    let next = vpr[r].next;
+    for part in 1..vpu_uf {
+        let c = vp_clone(r);
+        if next >= 0 { vp_insert_before(c, next); } else { vp_append_recipe(vpr[r].parent, c); }
+        vpu_add_recipe_for_part(r, c, part);
+        let sv = vp_op(r, 0);
+        let svr = vp_def(sv);
+        if svr >= 0 && vpr[svr].kind == VPR_INSTRUCTION {
+            if vpr[svr].opcode != VPI_REDUCTION_START_VECTOR { fatal("internal: loop-vectorize: unexpected start VPInstruction"); }
+            if part != 1 { continue; }
+            var startv: i32 = -1;
+            if vpm_one(vp_op(svr, 2)) { startv = vp_op(svr, 1); }
+            else {
+                let cc = vp_clone(svr);
+                vp_set_operand(cc, 0, vp_op(cc, 1));
+                vp_insert_after(cc, svr);
+                startv = vpr[cc].def;
+            }
+            let at = vpu_run(sv);
+            for p2 in 1..vpu_uf { vpu_pool[at + p2 - 1] = startv; }
+        }
+    }
 }
 
 // unrollRecipeByUF(R)
@@ -668,8 +692,8 @@ fn vpx_convert_to_concrete_recipes() {
                 var vstep = vp_op(r, 0);
                 var sstep = vp_op(r, 1);
                 let ivty = vpv[vpr[r].def].ty;
-                if vp_scalar_type(vstep) != ivty { vstep = vpr[vpx_widen_cast(if ty_is_fp(ivty) { OP_UITOFP } else { OP_TRUNC }, vstep, ivty)].def; }
-                if vp_scalar_type(sstep) != ivty { sstep = vpr[vpx_widen_cast(OP_TRUNC, sstep, ivty)].def; }
+                if vp_scalar_type(vstep) != ivty { let wc = vpx_widen_cast(if ty_is_fp(ivty) { OP_UITOFP } else { OP_TRUNC }, vstep, ivty); vstep = vpr[wc].def; }
+                if vp_scalar_type(sstep) != ivty { let wc = vpx_widen_cast(OP_TRUNC, sstep, ivty); sstep = vpr[wc].def; }
                 var mf = vp_default_flags(OP_MUL as i32, -1);
                 var mo = OP_MUL as i32;
                 if ty_is_fp(ivty) { mo = OP_FMUL as i32; mf = vpf_fmf(if vpr[r].f.ot == VOT_FMF { vpr[r].f.fmf } else { 0 }); }

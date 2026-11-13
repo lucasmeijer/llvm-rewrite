@@ -25,6 +25,7 @@ import iv_descriptors;
 import lv_legality;
 import lv_interleave;
 import lv_cm;
+import constfold;
 import vplan;
 import vplan_utils;
 import vplan_props;
@@ -581,10 +582,82 @@ fn lvp_exiting_block(l: i32) -> i32 {
     return if ex.len == 1 { ex[0] } else { -1 };
 }
 
-// addReductionResultComputation (no reductions in this milestone)
+// addReductionResultComputation(Plan, RecipeBuilder, MinVF): the plain reductions (AnyOf, FindIV, FindLast, in-loop,
+// truncated and tail-folded reductions fail loudly before VPlans are built)
 fn lvp_add_reduction_result_computation() {
-    let header = vpb[vp_vector_loop_region()].entry;
+    let region = vp_vector_loop_region();
+    let header = vpb[region].entry;
+    let middle = vp_middle_block();
+    let ip = vp_first_non_phi(middle);
+    let exit_dl = inst_get_md(block_terminator(loop_latch(lvp_l)), 0);
     var phis: i32[>..<] = [];
     vp_block_phis(header, phis);
-    for r in phis { if vpr[r].kind == VPR_REDUCTION_PHI { vp_unported("reductions (addReductionResultComputation)"); } }
+    for phir in phis {
+        if vpr[phir].kind != VPR_REDUCTION_PHI { continue; }
+        let rk = vpr[phir].rdx_kind;
+        let phi = vp_underlying_instr(phir);
+        let rd = lvl_rdx_of(phi);
+        let phi_ty = vpv[vpr[phir].def].ty;
+        if vpb[region].header_mask >= 0 { vp_unported("reductions with a header mask"); }
+        let be = vp_op(phir, 1);
+        let bd = vp_def(be);
+        if bd >= 0 && vpr[bd].kind == VPR_BLEND { vp_unported("reductions through blends"); }
+        if rk_is_any_of(rk) { vp_unported("any-of reductions"); }
+        if lvp_range_start > 1 && phi_ty != rdx_descs[rd].rty { vp_unported("truncated reductions"); }
+        if ip >= 0 { vpb_set_before(ip); } else { vpb_set_at_end(middle); }
+        let fl = vpf_reduction(rk, vpr[phir].rdx_style == VRS_ORDERED, vpr[phir].rdx_style != VRS_UNORDERED, vp_fmf_of_flags(vpr[phir].f));
+        let fin = vpb_nary(VPI_COMPUTE_REDUCTION_RESULT, [be], fl, exit_dl, "", -1);
+        let finv = vpr[fin].def;
+        var users: i32[>..<] = [];
+        for j in vp_num_users(be) { users.push(vp_user(be, j)); }
+        for u0 in users {
+            var u = u0;
+            if u == fin || vpb[vpr[u].parent].parent >= 0 { continue; }
+            if vp_is_vpi(u, VPI_COMPUTE_REDUCTION_RESULT) || (rk_is_find_iv(rk) && vp_is_vpi(u, OP_ICMP as i32)) { continue; }
+            vp_replace_uses_of_with(u, be, finv);
+            if vpm_vpi_r(u, VPI_EXTRACT_LAST_PART, 1) { u = vp_single_user(vpr[u].def); }
+            if u >= 0 && (vpm_vpi_r(u, VPI_EXTRACT_LANE, 2) || vpm_vpi_r(u, VPI_EXTRACT_LAST_LANE, 1)) { vp_rauw(vpr[u].def, finv); }
+        }
+        if !rk_is_any_of(rk) && !rk_is_find_iv(rk) && !rk_is_minmax(rk) && !rk_is_find_last(rk) {
+            let ph = vp_vector_preheader();
+            vpb_set_at_end(ph);
+            let iden = vp_live_in(lvp_recurrence_identity(rk, phi_ty, vp_fmf_of_flags(vpr[phir].f)));
+            let sv = vpb_nary(VPI_REDUCTION_START_VECTOR, [vp_op(phir, 0), iden, vp_const_int(T_I32, 1)], vpr[phir].f, -1, "", -1);
+            vp_set_operand(phir, 0, vpr[sv].def);
+        }
+    }
+    vpt_clear_reduction_wrap_flags();
+}
+fn vp_fmf_of_flags(f: VPF) -> u8 { if f.ot == VOT_FMF || f.ot == VOT_FCMP || f.ot == VOT_REDUCTION { f.fmf } else { 0 } }
+// getRecurrenceIdentity(K, Tp, FMF) for the arithmetic kinds
+fn lvp_recurrence_identity(k: i32, ty: i32, fmf: u8) -> i32 {
+    var o = rk_opcode(k);
+    if k == RK_SUB || k == RK_ADD_CHAIN_WITH_SUBS { o = OP_ADD; }
+    if k == RK_FSUB || k == RK_FADD_CHAIN_WITH_SUBS || k == RK_FMULADD { o = OP_FADD; }
+    if o == OP_FADD && (fmf & FMF_NSZ) != 0 { return c_null(ty); }
+    return binop_identity(o, ty, false);
+}
+// clearReductionWrapFlags
+fn vpt_clear_reduction_wrap_flags() {
+    var phis: i32[>..<] = [];
+    vp_block_phis(vpb[vp_vector_loop_region()].entry, phis);
+    for phir in phis {
+        if vpr[phir].kind != VPR_REDUCTION_PHI { continue; }
+        let rk = vpr[phir].rdx_kind;
+        if rk != RK_ADD && rk != RK_MUL && rk != RK_SUB && rk != RK_ADD_CHAIN_WITH_SUBS { continue; }
+        var us: i32[>..<] = [];
+        var seen = hm_new();
+        let d = vpr[phir].def;
+        for j in vp_num_users(d) { let u = vp_user(d, j); if ivd_set_add(seen, u) { us.push(u); } }
+        var k: i64 = 0;
+        while k < us.len {
+            let cur = us[k];
+            k++;
+            for j in vp_num_defined_values(cur) {
+                let v = vp_defined_value(cur, j);
+                for jj in vp_num_users(v) { let u = vp_user(v, jj); if ivd_set_add(seen, u) { us.push(u); } }
+            }
+        }
+        for u in us { if vp_is_recipe_with_ir_flags(vpr[u].kind) { vp_drop_poison_generating_flags(u); } }
+    }
 }

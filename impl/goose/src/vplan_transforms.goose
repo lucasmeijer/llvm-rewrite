@@ -168,7 +168,7 @@ fn vpt_simplify_recipe(r: i32) {
     if opc == VPI_WIDE_IV_STEP && vpm_arity_ok(r, 2) && vpm_one(vp_op(r, 1)) {
         var x = vp_op(r, 0);
         let wty = vpv[def].ty;
-        if vp_scalar_type(x) != wty { vpb_set_before(r); x = vpr[vpt_widen_cast(OP_TRUNC, x, wty)].def; }
+        if vp_scalar_type(x) != wty { vpb_set_before(r); let wc = vpt_widen_cast(OP_TRUNC, x, wty); x = vpr[wc].def; }
         vpt_replace_all(r, x);
         return;
     }
@@ -197,7 +197,7 @@ fn vpt_simplify_recipe(r: i32) {
         if k == VPR_FIRST_ORDER_RECURRENCE_PHI { vp_unported("simplifying fixed-order recurrence phis"); }
         return;
     }
-    if opc == VPI_COMPUTE_REDUCTION_RESULT { vp_unported("simplifying compute-reduction-result"); }
+    if opc == VPI_COMPUTE_REDUCTION_RESULT && vp_nops(r) == 1 && vp_is_ir_value(vp_op(r, 0)) { vpt_replace_all(r, vp_op(r, 0)); return; }
     if !vp_is_unrolled() { return; }
     if opc == VPI_EXTRACT_LANE { vp_unported("simplifying extract-lane"); }
     // phi(0, IVInc) + Y fold
@@ -217,7 +217,16 @@ fn vpt_simplify_recipe(r: i32) {
     if k == VPR_SCALAR_IV_STEPS {
         if vp_nops(r) < 4 && vp_only_first_lane_used(def) { vpt_replace_all(r, vp_op(r, 0)); return; }
     }
-    if opc == VPI_REDUCTION_START_VECTOR { vp_unported("simplifying reduction-start-vector"); }
+    if opc == VPI_REDUCTION_START_VECTOR && vpm_arity_ok(r, 3) {
+        let sv = vp_op(r, 0);
+        var users: i32[>..<] = [];
+        for j in vp_num_users(def) { users.push(vp_user(def, j)); }
+        for u in users {
+            if vpr[u].kind != VPR_REDUCTION_PHI || vpr[u].rdx_style == VRS_UNORDERED { continue; }
+            for k in vp_nops(u) { if vp_op(u, k) == def { vp_set_operand(u, k, sv); } }
+        }
+        return;
+    }
     if xv_len(vph.ufs) == 1 && xv_get(vph.ufs, 0) == 1 && opc == VPI_EXTRACT_LAST_PART && vpm_arity_ok(r, 1) {
         vpt_replace_all(r, vp_op(r, 0));
         return;
@@ -1022,7 +1031,12 @@ fn vpt_header_has_kind(kind: u8) -> bool {
     for p in phis { if vpr[p].kind == kind { return true; } }
     return false;
 }
-fn vpt_create_in_loop_reduction_recipes(min_vf: i64) { if vpt_header_has_kind(VPR_REDUCTION_PHI) { vp_unported("reductions"); } }
+// adjustInLoopReductions: only out-of-loop (unordered) reductions are formed
+fn vpt_create_in_loop_reduction_recipes(min_vf: i64) {
+    var phis: i32[>..<] = [];
+    vp_block_phis(vp_header_bb(), phis);
+    for p in phis { if vpr[p].kind == VPR_REDUCTION_PHI && vpr[p].rdx_style != VRS_UNORDERED { vp_unported("in-loop reductions"); } }
+}
 fn vpt_adjust_first_order_recurrence_middle_users() { if vpt_header_has_kind(VPR_FIRST_ORDER_RECURRENCE_PHI) { vp_unported("fixed-order recurrences"); } }
 fn vpt_optimize_find_iv_reductions() {}
 fn vpt_handle_multi_use_reductions() -> bool { true }

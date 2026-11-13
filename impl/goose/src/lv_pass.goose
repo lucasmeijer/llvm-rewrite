@@ -645,8 +645,16 @@ fn loop_vectorize_run(fv: i32, interleave_only_when_forced: bool, vectorize_only
 
 // LVP.plan(UserVF, UserIC), computeBestVF, selectInterleaveCount and the processLoop tail up to executePlan
 fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> bool {
-    if lvl_rdx_desc.len != 0 { lvx_unported("reductions"); }
-    // Config.collectInLoopReductions: no reductions
+    // Config.collectInLoopReductions and the reduction kinds the plan transforms support
+    for d in lvl_rdx_desc {
+        let k = rdx_descs[d].kind;
+        if lv_prefer_in_loop_reductions() || cfg_use_ordered_reductions(d) { lvx_unported("in-loop reductions"); }
+        if rk_is_any_of(k) { lvx_unported("any-of reductions"); }
+        if rk_is_find_iv(k) || rk_is_find_last(k) { lvx_unported("find-iv / find-last reductions"); }
+        if rk_is_fp_minmax_num(k) { lvx_unported("fmaxnum / fminnum reductions (handleMaxMinNumReductions)"); }
+        if rdx_descs[d].multi_use { lvx_unported("multi-use reductions (handleMultiUseReductions)"); }
+        if rdx_descs[d].store >= 0 { lvx_unported("reductions stored to an invariant address"); }
+    }
     if max_vf > 1 { lvl_collect_unit_stride_predicates(); }
     vp_reset();
     cm_reset(lv_l);

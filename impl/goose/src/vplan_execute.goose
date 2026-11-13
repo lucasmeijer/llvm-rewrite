@@ -348,6 +348,34 @@ fn vpi_generate(r: i32) -> i32 {
         if is_inst(res) && iop(res) == OP_EXTRACTELEMENT && name.len > 0 { set_name(res, name); }
         return res;
     }
+    if o == VPI_REDUCTION_START_VECTOR {
+        if vts_vf == 1 { return vts_get(vp_op(r, 0), true); }
+        let scale = cint_lo(vp_ir(vp_op(r, 2))) as i64;
+        let iden = vxb_splat(vts_vf / scale, vts_get(vp_op(r, 1), true), "");
+        return vxb_insert_elt(iden, vts_get(vp_op(r, 0), true), c_int(T_I32, 0), name);
+    }
+    if o == VPI_COMPUTE_REDUCTION_RESULT {
+        let f = vpr[r].f;
+        let rk = f.rk;
+        if rk_is_find_iv(rk) { fatal("internal: loop-vectorize: FindIV should use min/max reduction kinds"); }
+        let n = vp_nops(r);
+        var parts: i32[>..<] = [];
+        for k in n { parts.push(vts_get(vp_op(r, k), f.inloop)); }
+        var red = parts[0];
+        if f.ordered { red = parts[n - 1]; }
+        else {
+            for k in 1..n {
+                if rk_is_minmax(rk) { red = vxb_min_max_op(rk, red, parts[k]); }
+                else {
+                    var o2 = rk_opcode(rk);
+                    if rk == RK_SUB { o2 = OP_ADD; } else if rk == RK_FSUB { o2 = OP_FADD; }
+                    red = vxb_binop(o2, parts[k], red, "bin.rdx");
+                }
+            }
+        }
+        if vts_vf > 1 && !f.inloop { red = vxb_simple_reduction(red, rk); }
+        return red;
+    }
     if o == VPI_PTR_ADD {
         let p = vts_get_lane(vp_op(r, 0), 0);
         let a = vts_get_lane(vp_op(r, 1), 0);
@@ -355,6 +383,80 @@ fn vpi_generate(r: i32) -> i32 {
     }
     vp_unported(str("executing VPInstruction opcode ", o));
     return -1;
+}
+// CreateIntrinsic(RetTy, ID, Args) at the insert point (FMF of the builder on FP results)
+fn vxb_intrinsic(id: i64, ov: const i32[:], args: const i32[:], name: const u8[:]) -> i32 {
+    let f = au_get_declaration(id, ov);
+    let fty = globs[glob_of(f)].vty;
+    var opsv: i32[>..<] = [];
+    for a in args { opsv.push(a); }
+    opsv.push(f);
+    let ci = create_inst(OP_CALL, ty_fn_ret(fty), opsv);
+    insts[inst_of(ci)].ty2 = fty;
+    if is_fp_math_operator(ci) { insts[inst_of(ci)].fmf = vxb_fmf; }
+    return vxb_insert(ci, name);
+}
+// createMinMaxOp(Builder, RK, Left, Right)
+fn vxb_min_max_op(rk: i32, l: i32, r: i32) -> i32 {
+    let ty = vals[l].ty as i32;
+    if ty_is_int(ty_scalar(ty)) || rk == RK_FMINNUM || rk == RK_FMAXNUM || rk == RK_FMINIMUM || rk == RK_FMAXIMUM ||
+       rk == RK_FMINIMUMNUM || rk == RK_FMAXIMUMNUM {
+        if is_constant(l) && is_constant(r) { vp_unported("constant-folding min/max intrinsics"); }
+        return vxb_intrinsic(vxb_min_max_intrinsic(rk) as i64, [ty], [l, r], "rdx.minmax");
+    }
+    vp_unported("FP min/max reductions combined with compare and select");
+    return -1;
+}
+// getMinMaxReductionIntrinsicOp(RecurKind)
+fn vxb_min_max_intrinsic(rk: i32) -> i32 {
+    if rk == RK_UMIN { return IID_umin; }
+    if rk == RK_UMAX { return IID_umax; }
+    if rk == RK_SMIN { return IID_smin; }
+    if rk == RK_SMAX { return IID_smax; }
+    if rk == RK_FMIN || rk == RK_FMINNUM { return IID_minnum; }
+    if rk == RK_FMAX || rk == RK_FMAXNUM { return IID_maxnum; }
+    if rk == RK_FMINIMUM { return IID_minimum; }
+    if rk == RK_FMAXIMUM { return IID_maximum; }
+    if rk == RK_FMINIMUMNUM { return IID_minimumnum; }
+    if rk == RK_FMAXIMUMNUM { return IID_maximumnum; }
+    fatal("internal: loop-vectorize: unknown min/max recurrence kind");
+    return 0;
+}
+// getReductionIntrinsicID(RecurKind)
+fn vxb_reduction_intrinsic(rk: i32) -> i32 {
+    if rk == RK_ADD_CHAIN_WITH_SUBS || rk == RK_SUB || rk == RK_ADD { return IID_vector_reduce_add; }
+    if rk == RK_MUL { return IID_vector_reduce_mul; }
+    if rk == RK_AND { return IID_vector_reduce_and; }
+    if rk == RK_OR { return IID_vector_reduce_or; }
+    if rk == RK_XOR { return IID_vector_reduce_xor; }
+    if rk == RK_FMULADD || rk == RK_FADD_CHAIN_WITH_SUBS || rk == RK_FSUB || rk == RK_FADD { return IID_vector_reduce_fadd; }
+    if rk == RK_FMUL { return IID_vector_reduce_fmul; }
+    if rk == RK_SMAX { return IID_vector_reduce_smax; }
+    if rk == RK_SMIN { return IID_vector_reduce_smin; }
+    if rk == RK_UMAX { return IID_vector_reduce_umax; }
+    if rk == RK_UMIN { return IID_vector_reduce_umin; }
+    if rk == RK_FMAX || rk == RK_FMAXNUM || rk == RK_FMAXIMUMNUM { return IID_vector_reduce_fmax; }
+    if rk == RK_FMIN || rk == RK_FMINNUM || rk == RK_FMINIMUMNUM { return IID_vector_reduce_fmin; }
+    if rk == RK_FMAXIMUM { return IID_vector_reduce_fmaximum; }
+    if rk == RK_FMINIMUM { return IID_vector_reduce_fminimum; }
+    fatal("internal: loop-vectorize: Unexpected recurrence kind");
+    return 0;
+}
+// createSimpleReduction(Builder, Src, RdxKind)
+fn vxb_simple_reduction(src: i32, rk: i32) -> i32 {
+    let vty = vals[src].ty as i32;
+    let elt = ty_elem(vty);
+    let id = vxb_reduction_intrinsic(rk) as i64;
+    if rk == RK_FMULADD || rk == RK_FADD_CHAIN_WITH_SUBS || rk == RK_FSUB || rk == RK_FADD || rk == RK_FMUL {
+        var iden: i32 = -1;
+        if rk == RK_FMUL { iden = binop_identity(OP_FMUL, elt, false); }
+        else if (vxb_fmf & FMF_NSZ) != 0 { iden = c_null(elt); }
+        else { iden = binop_identity(OP_FADD, elt, false); }
+        return vxb_intrinsic(id, [vty], [iden, src], "");
+    }
+    if rk_is_any_of(rk) || rk_is_find(rk) { fatal("internal: loop-vectorize: Unhandled opcode in createSimpleReduction"); }
+    if is_constant(src) { vp_unported("constant-folding reduction intrinsics"); }
+    return vxb_intrinsic(id, [vty], [src], "");
 }
 // the terminator of irbb other than `except` (the temporary unreachable)
 fn block_terminator_before(bb: i32, except: i32) -> i32 {
@@ -551,6 +653,19 @@ fn vp_execute_recipe(r: i32) {
         return;
     }
     if k == VPR_WIDEN_PHI { vts_execute_phi(r, false, vp_name(r)); return; }
+    if k == VPR_REDUCTION_PHI {
+        let in_loop = vpr[r].rdx_style != VRS_UNORDERED;
+        let scalar_phi = vts_vf == 1 || in_loop;
+        let vector_ph = vts_bb_of(vp_cfg_predecessor(vpr[r].parent, 0));
+        let start = vts_get(vp_op(r, 0), scalar_phi);
+        let header = vts_prev_bb;
+        let phi = create_inst(OP_PHI, vals[start].ty as i32, []);
+        inst_insert_at(phi, header, first_non_phi(header), false);
+        set_name(phi, "vec.phi");
+        vts_set(vpr[r].def, phi, in_loop);
+        phi_add_incoming(phi, start, vector_ph);
+        return;
+    }
     vp_unported(str("executing recipe kind ", k));
 }
 
