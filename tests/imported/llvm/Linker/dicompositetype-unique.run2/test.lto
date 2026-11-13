@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/dicompositetype-unique.ll (llvmorg-23.1.5)
+; @modules: Inputs/dicompositetype-unique.ll dicompositetype-unique.ll

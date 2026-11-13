@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/2003-11-18-TypeResolution.ll (llvmorg-23.1.5)
+; @modules: echo1.ll 2003-11-18-TypeResolution.ll

@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/func-attrs-a.ll (llvmorg-23.1.5)
+; @modules: func-attrs-a.ll func-attrs-b.ll

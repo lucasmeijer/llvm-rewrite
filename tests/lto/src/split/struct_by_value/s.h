@@ -1,0 +1,10 @@
+struct s1 { char c; };
+struct s8 { int a, b; };
+struct s16 { long a, b; };
+struct s24 { long a, b, c; };
+struct sf { float x, y; };
+struct sd { double x; long n; };
+struct s3 { char c[3]; };
+int f1(struct s1 s); int f8(struct s8 s); long f16(struct s16 s); long f24(struct s24 s);
+float ff(struct sf s); double fd(struct sd s); int f3(struct s3 s);
+struct s8 r8(int a); struct s16 r16(long a); struct s24 r24(long a); struct sf rf(float a); struct sd rd(double a);

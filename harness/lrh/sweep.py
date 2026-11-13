@@ -330,7 +330,7 @@ def label(r: dict) -> str:
 def select_files(a, tests, passing) -> tuple[list[str], int]:
     """Files to sweep, and how many tests/perf files were left out by default."""
     if a.all_files or a.impl == config.REFERENCE_IMPL:
-        files = [t.path for t in tests]
+        files = [t.path for t in tests if not t.is_lto]
     else:
         files = sorted({i.rsplit("::", 1)[0] for i in passing if i.endswith("::roundtrip")})
     if a.globs:

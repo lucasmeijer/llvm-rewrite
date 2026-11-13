@@ -28,9 +28,10 @@ NATIVE_VARIANTS = [
 ]
 
 
-def native_run(src: Path, driver: Path | None, flags: list[str], wd: Path, tag: str):
+def native_run(src: Path | list[Path], driver: Path | None, flags: list[str], wd: Path, tag: str):
     exe = wd / f"prog-{tag}"
-    cmd = [config.llvm("clang"), *CFLAGS, *flags, str(src)] + ([str(driver)] if driver else []) + ["-lm", "-o", str(exe)]
+    srcs = [str(x) for x in src] if isinstance(src, list) else [str(src)]
+    cmd = [config.llvm("clang"), *CFLAGS, *flags, *srcs] + ([str(driver)] if driver else []) + ["-lm", "-o", str(exe)]
     r = proc.run(cmd)
     if not r.ok:
         return None, f"compile {' '.join(flags)} failed:\n{r.err_tail(1500)}"
@@ -40,12 +41,12 @@ def native_run(src: Path, driver: Path | None, flags: list[str], wd: Path, tag: 
     return (r.rc, r.out), (r.err_tail(1500) if r.rc else "")
 
 
-def validate_c(src: Path, driver: Path | None) -> str | None:
+def validate_c(src: Path | list[Path], driver: Path | None, extra: list[str] = []) -> str | None:
     """Returns None if the program is deterministic and UB-free as far as we can tell, else a reason."""
     with proc.Workdir() as wd:
         results = []
         for i, flags in enumerate(NATIVE_VARIANTS):
-            res, err = native_run(src, driver, flags, wd, str(i))
+            res, err = native_run(src, driver, flags + extra, wd, str(i))
             if res is None:
                 return err
             results.append((flags, res, err))
@@ -77,10 +78,62 @@ def emit_ll(src_rel: str, flags: list[str], directives: dict, driver_rel: str | 
     return None
 
 
+# Multi-module (LTO) tests: each translation unit as clang -flto hands it to its pre-link pipeline (the pre-link
+# pipeline itself, lto-pre-link<O2>, is the module's own @opt line), and a test.lto manifest whose post-link pipeline
+# is what a linker's full LTO does for an executable: everything but main internalized, then lto<O2>.
+LTO_TU_FLAGS = ["-O2", "-flto", "-Xclang", "-disable-llvm-passes"]
+LTO_PRELINK = "-passes='lto-pre-link<O2>'"
+LTO_POSTLINK = "-passes='internalize,lto<O2>' -internalize-public-api-list=main"
+
+
+def from_c_lto(d: Path, force: bool) -> tuple[str, str | None]:
+    rel = d.relative_to(config.REPO)
+    out = config.TESTS / "lto" / Path(*rel.parts[3:])
+    srcs = sorted(d.glob("*.c"))
+    if len(srcs) < 2:
+        return str(rel), "an LTO test directory needs at least two .c translation units"
+    if not force and (out / corpus.LTO_MANIFEST).exists():
+        return str(rel), "exists"
+    # optional `cflags` file: extra clang flags for every TU (e.g. -g), also used for validation
+    extra = shlex.split((d / "cflags").read_text()) if (d / "cflags").exists() else []
+    tu_flags = LTO_TU_FLAGS + extra
+    why = validate_c(srcs, None, extra)
+    if why:
+        return str(rel), why
+    if out.exists():
+        shutil.rmtree(out)
+    names = []
+    for src in srcs:
+        src_rel = str(src.relative_to(config.REPO))
+        r = proc.run([config.llvm("clang"), *CFLAGS, *tu_flags, "-S", "-emit-llvm", src_rel, "-o", "-"], cwd=config.REPO)
+        if not r.ok:
+            return str(rel), f"emitting IR for {src_rel} failed:\n{r.err_tail()}"
+        name = src.with_suffix(".ll").name
+        names.append(name)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / name).write_text(f"; @source: {src_rel}\n; @opt: {LTO_PRELINK}\n; @generated: clang {' '.join(tu_flags)} "
+                                f"-S -emit-llvm (LLVM {config.LLVM_VERSION}) by harness/run from-c\n" + r.out.decode())
+    (out / corpus.LTO_MANIFEST).write_text(
+        f"; @modules: {' '.join(names)}\n; @opt: {LTO_POSTLINK}\n; @llc: -O2\n; @source: {rel}/\n"
+        f"; @generated: harness/run from-c (LLVM {config.LLVM_VERSION})\n")
+    tests = [corpus.parse(out / n) for n in names] + [corpus.parse(out)]
+    for t in tests:
+        for ch in t.checks():
+            res = checks.CHECK_FNS[ch](config.REFERENCE_IMPL, t)
+            if res.status != checks.PASS:
+                shutil.rmtree(out)
+                return str(rel), f"oracle rejects {res.test_id}:\n{res.message}"
+    return str(rel), None
+
+
 def from_c_one(src: Path, force: bool) -> tuple[str, str | None]:
     src = src.resolve()
     rel = src.relative_to(config.REPO)
     parts = rel.parts
+    if src.is_dir():
+        if len(parts) < 5 or parts[:3] != ("tests", "lto", "src"):
+            return str(rel), "a directory source must be tests/lto/src/<area>/<name>/"
+        return from_c_lto(src, force)
     if len(parts) < 4 or parts[0] != "tests" or parts[1] not in ("e2e", "function") or parts[2] != "src":
         return str(rel), "sources must live under tests/e2e/src/ or tests/function/src/"
     family = parts[1]
@@ -317,8 +370,170 @@ def import_one(src: Path, dst: Path) -> list[str]:
     return notes
 
 
+# ---------------------------------------------------------------- import LLVM's linker tests (multi-module)
+
+LINK_FLAGS = {"-internalize", "-only-needed"}  # llvm-link flags the importer keeps (no arguments)
+LINK_INPUT = re.compile(r"^%[pS]/((?:Inputs/)?[\w.+-]+\.ll)$")
+ECHO_AS = re.compile(r"^echo\s+(\"[^\"]*\"|'[^']*'|)\s*\|\s*(?:not\s+)?llvm-as\s*(?:-o\s+|>\s*)(%t[\w.-]*)\s*$")
+
+
+def link_assignments(runs: list[str]) -> dict[str, str]:
+    """%t files made from sources by other RUN lines: `llvm-as <src> -o %t.x` / `llvm-as < <src> > %t.x` -> source
+    (`%s`, `Inputs/x.ll`), `echo "..." | llvm-as > %t.x` -> `echo:<text>`, `llvm-as < /dev/null > %t.x` -> `echo:`."""
+    out = {}
+    for run in runs:
+        r = run.strip()
+        m = ECHO_AS.match(r)
+        if m:
+            body = m.group(1)[1:-1] if m.group(1) else ""
+            out[m.group(2)] = "echo:" + body.replace("%%", "%")
+            continue
+        try:
+            toks = shlex.split(r)
+        except ValueError:
+            continue
+        if not toks or toks[0] != "llvm-as" or len(toks) > 6:
+            continue
+        src = dst = None
+        i = 1
+        while i < len(toks):
+            t = toks[i]
+            if t in ("-o", ">") and i + 1 < len(toks):
+                dst = toks[i + 1]; i += 2; continue
+            if t == "<" and i + 1 < len(toks):
+                src = toks[i + 1]; i += 2; continue
+            if t.startswith(">"):
+                dst = t[1:]
+            elif not t.startswith("-"):
+                src = t
+            i += 1
+        if dst and dst.startswith("%t") and src:
+            if src == "%s":
+                out[dst] = "%s"
+            elif src == "/dev/null":
+                out[dst] = "echo:"
+            elif LINK_INPUT.match(src):
+                out[dst] = LINK_INPUT.match(src).group(1)
+    return out
+
+
+def convert_link_run(run: str, assigned: dict[str, str]) -> tuple[list[str] | None, list[str], str]:
+    """A RUN line `llvm-link [flags] <inputs>... [-S] [-o x] | FileCheck` -> (module sources, flags, ''). Inputs are
+    %s, %p/[Inputs/]x.ll, or %t files made by an earlier llvm-as line (see link_assignments)."""
+    first = run.split("|", 1)[0].strip()
+    try:
+        toks = shlex.split(first)
+    except ValueError as e:
+        return None, [], f"cannot tokenize: {e}"
+    if not toks or toks[0] != "llvm-link":
+        return None, [], "not an llvm-link invocation"
+    mods, flags = [], []
+    i = 1
+    while i < len(toks):
+        t = toks[i]
+        if t in ("-S", "2>&1", "-disable-lazy-loading"):
+            pass
+        elif t == "-o" and i + 1 < len(toks):
+            i += 1
+        elif t == "%s":
+            mods.append("%s")
+        elif LINK_INPUT.match(t):
+            mods.append(LINK_INPUT.match(t).group(1))
+        elif t in assigned:
+            mods.append(assigned[t])
+        elif t in LINK_FLAGS:
+            flags.append(t)
+        else:
+            return None, [], f"unsupported llvm-link argument `{t}`"
+        i += 1
+    if not mods:
+        return None, [], "no input files"
+    return mods, flags, ""
+
+
+def import_link_one(src: Path, dst_dir: Path) -> tuple[list[str], int]:
+    """One LLVM Linker test -> one multi-module test directory per usable llvm-link RUN line."""
+    name = src.name
+    text = src.read_text(errors="replace")
+    reason = file_skip_reason(text)
+    if reason:
+        return [f"- `{name}`: {reason}"], 0
+    notes, runs = [], []
+    all_runs = run_lines(text)
+    assigned = link_assignments(all_runs)
+    for run in all_runs:
+        mods, flags, why = convert_link_run(run, assigned)
+        if mods is None:
+            if "llvm-link" in run:
+                notes.append(f"- `{name}` RUN `{run}`: {why}")
+            continue
+        if (mods, flags) not in runs:
+            runs.append((mods, flags))
+    if not runs:
+        return notes or [f"- `{name}`: no llvm-link RUN lines"], 0
+    origin = src.relative_to(config.LLVM_SRC)
+    made = 0
+    for k, (mods, flags) in enumerate(runs):
+        d = dst_dir / (src.stem if k == 0 else f"{src.stem}.run{k + 1}")
+        if d.exists():
+            shutil.rmtree(d)
+        names = []
+        n_echo = 0
+        for m in mods:
+            if m.startswith("echo:"):
+                n_echo += 1
+                n = f"echo{n_echo}.ll"
+                (d / n).parent.mkdir(parents=True, exist_ok=True)
+                (d / n).write_text(f"; @origin: `echo ... | llvm-as` in a RUN line of {origin}\n" + m[5:] + "\n")
+                names.append(n)
+                continue
+            n = name if m == "%s" else m
+            f = src if m == "%s" else src.parent / m
+            if not f.is_file():
+                notes.append(f"- `{name}`: input {m} missing")
+                break
+            if n in names:  # the same file twice (llvm-link x.ll x.ll)
+                n = f"{Path(n).stem}.copy{names.count(n) + 1}.ll"
+            (d / n).parent.mkdir(parents=True, exist_ok=True)
+            body = f.read_text(errors="replace")
+            (d / n).write_text(f"; @origin: {f.relative_to(config.LLVM_SRC)} (llvmorg-{config.LLVM_VERSION})\n" + body)
+            names.append(n)
+        else:
+            (d / corpus.LTO_MANIFEST).write_text(
+                f"; @origin: {origin} (llvmorg-{config.LLVM_VERSION})\n; @modules: {' '.join(names)}\n"
+                + (f"; @link: {' '.join(flags)}\n" if flags else ""))
+            res = checks.check_link(config.REFERENCE_IMPL, corpus.parse(d))
+            if res.status == checks.PASS:
+                made += 1
+                continue
+            notes.append(f"- `{name}` RUN {k + 1}: oracle fails: {res.message.splitlines()[1] if len(res.message.splitlines()) > 1 else res.message}")
+        shutil.rmtree(d, ignore_errors=True)
+    return notes, made
+
+
+def cmd_import_llvm_linker(d: str):
+    src_dir = config.LLVM_SRC / "llvm" / "test" / d
+    dst_dir = config.TESTS / "imported" / "llvm" / d
+    files = sorted(f for f in src_dir.glob("*.ll"))
+    if dst_dir.exists():
+        shutil.rmtree(dst_dir)
+    dst_dir.mkdir(parents=True)
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        res = list(ex.map(lambda f: import_link_one(f, dst_dir), files))
+    flat = [n for ns, _ in res for n in ns]
+    made = sum(m for _, m in res)
+    (dst_dir / "SKIPPED.md").write_text(
+        f"# Skipped while importing llvm/test/{d} (llvmorg-{config.LLVM_VERSION})\n\n"
+        f"{made} multi-module tests (one per usable llvm-link RUN line) from {len(files)} files. "
+        f"Regenerate with `./harness/run import-llvm {d}`.\n\n" + "\n".join(flat) + "\n")
+    print(f"{d}: {made} link tests from {len(files)} files, {len(flat)} skip notes -> {(dst_dir / 'SKIPPED.md').relative_to(config.REPO)}")
+
+
 def cmd_import_llvm(a):
     for d in a.dirs:
+        if d.rstrip("/") == "Linker":
+            cmd_import_llvm_linker("Linker")
+            continue
         src_dir = config.LLVM_SRC / "llvm" / "test" / d
         if not src_dir.is_dir():
             raise SystemExit(f"{src_dir} does not exist")

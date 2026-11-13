@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/metadata-with-global-value-operand.ll (llvmorg-23.1.5)
+; @modules: metadata-with-global-value-operand.ll Inputs/metadata-with-global-value-operand.ll

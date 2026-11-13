@@ -60,8 +60,8 @@ different languages, all data-oriented, so they can be compared.
 ## Not decided yet (later lplan rounds)
 
 - Instruction-selection architecture for L3–L5 (SelectionDAG-like, GlobalISel-like, or our own).
-- Harness support for multi-module LTO tests (`L2.lto`) and measuring the speed of generated programs
-  (`L5.harness-perf`).
+- Measuring the speed of generated programs (`L5.harness-perf`). (Multi-module LTO tests: decided in `L2.lto`, see
+  docs/testing.md "Multi-module (LTO) tests".)
 - Whether compile-time performance should ever block a push (a ratchet on instruction counts is possible).
 - Fuzzing and automatic reduction (`llvm-reduce` with our tools as the interestingness test).
 - Alive2-based refinement checking for passes where we deliberately diverge.

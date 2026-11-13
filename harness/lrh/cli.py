@@ -275,6 +275,15 @@ def cmd_bisect(a):
     if not t.opt:
         raise SystemExit("bisect needs a test with @opt")
     args = t.opt[a.index]
+    if t.is_lto:  # bisect the post-link pipeline on LLVM's linked module
+        link = checks.oracle_link(t)
+        if not link["ok"]:
+            raise SystemExit("llvm-link fails:\n" + link["text"])
+        d = config.OUT / "bisect" / path
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "linked.ll").write_text(link["text"])
+        t = corpus.TestFile(str((d / "linked.ll").relative_to(config.REPO)), opt=t.opt)
+        print(f"bisecting on LLVM's linked module {t.path}")
 
     def outputs(n):
         res = {}
@@ -369,8 +378,9 @@ def main(argv=None):
     s.add_argument("--max-shown", type=int, default=25)
     s.set_defaults(fn=sweep.cmd_sweep)
 
-    s = sub.add_parser("from-c", help="generate e2e/function tests from C sources (with UB validation)")
-    s.add_argument("sources", nargs="+", help="tests/e2e/src/<area>/x.c or tests/function/src/<area>/x.c")
+    s = sub.add_parser("from-c", help="generate e2e/function/lto tests from C sources (with UB validation)")
+    s.add_argument("sources", nargs="+", help="tests/e2e/src/<area>/x.c, tests/function/src/<area>/x.c, or a "
+                   "directory tests/lto/src/<area>/<name>/ of translation units (one multi-module LTO test)")
     s.add_argument("--force", action="store_true", help="overwrite existing .ll files")
     s.set_defaults(fn=gen.cmd_from_c)
 

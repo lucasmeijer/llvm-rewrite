@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/debug-info-version-a.ll (llvmorg-23.1.5)
+; @modules: debug-info-version-a.ll debug-info-version-b.ll

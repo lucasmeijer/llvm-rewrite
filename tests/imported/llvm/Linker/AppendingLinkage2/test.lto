@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/AppendingLinkage2.ll (llvmorg-23.1.5)
+; @modules: AppendingLinkage2.ll echo1.ll

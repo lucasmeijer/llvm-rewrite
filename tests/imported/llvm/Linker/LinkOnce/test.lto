@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/LinkOnce.ll (llvmorg-23.1.5)
+; @modules: LinkOnce.ll echo1.ll

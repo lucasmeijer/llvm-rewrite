@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/module-asm.ll (llvmorg-23.1.5)
+; @modules: module-asm.ll Inputs/module-asm.ll

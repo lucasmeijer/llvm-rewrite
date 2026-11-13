@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/2004-02-17-WeakStrongLinkage.ll (llvmorg-23.1.5)
+; @modules: echo1.ll 2004-02-17-WeakStrongLinkage.ll

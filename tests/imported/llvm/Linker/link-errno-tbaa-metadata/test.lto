@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/link-errno-tbaa-metadata.ll (llvmorg-23.1.5)
+; @modules: Inputs/errno-tbaa-metadata.ll Inputs/errno-tbaa-cxx-metadata.ll

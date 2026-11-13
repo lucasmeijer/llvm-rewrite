@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/type-unique-unrelated.ll (llvmorg-23.1.5)
+; @modules: type-unique-unrelated.ll Inputs/type-unique-unrelated2.ll Inputs/type-unique-unrelated3.ll

@@ -1,0 +1,3 @@
+; @origin: llvm/test/Linker/link-flags.ll (llvmorg-23.1.5)
+; @modules: Inputs/linkage.b.ll Inputs/linkage.c.ll
+; @link: -only-needed

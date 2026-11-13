@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/pr21494.ll (llvmorg-23.1.5)
+; @modules: pr21494.ll

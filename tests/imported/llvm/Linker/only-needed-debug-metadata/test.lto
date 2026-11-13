@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/only-needed-debug-metadata.ll (llvmorg-23.1.5)
+; @modules: Inputs/only-needed-debug-metadata.ll only-needed-debug-metadata.ll

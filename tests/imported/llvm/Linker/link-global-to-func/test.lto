@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/link-global-to-func.ll (llvmorg-23.1.5)
+; @modules: echo1.ll link-global-to-func.ll

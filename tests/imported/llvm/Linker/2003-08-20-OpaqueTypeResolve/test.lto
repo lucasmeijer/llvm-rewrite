@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/2003-08-20-OpaqueTypeResolve.ll (llvmorg-23.1.5)
+; @modules: 2003-08-20-OpaqueTypeResolve.ll echo1.ll

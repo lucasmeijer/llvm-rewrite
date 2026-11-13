@@ -1,0 +1,5 @@
+; @modules: main.ll ops.ll table.ll
+; @opt: -passes='internalize,lto<O2>' -internalize-public-api-list=main
+; @llc: -O2
+; @source: tests/lto/src/split/function_pointers/
+; @generated: harness/run from-c (LLVM 23.1.5)

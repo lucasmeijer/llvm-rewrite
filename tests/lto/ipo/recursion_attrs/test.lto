@@ -1,0 +1,5 @@
+; @modules: even.ll fib.ll main.ll
+; @opt: -passes='internalize,lto<O2>' -internalize-public-api-list=main
+; @llc: -O2
+; @source: tests/lto/src/ipo/recursion_attrs/
+; @generated: harness/run from-c (LLVM 23.1.5)

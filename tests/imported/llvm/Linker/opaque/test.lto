@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/opaque.ll (llvmorg-23.1.5)
+; @modules: opaque.ll Inputs/opaque.ll

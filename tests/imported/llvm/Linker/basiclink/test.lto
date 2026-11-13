@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/basiclink.ll (llvmorg-23.1.5)
+; @modules: Inputs/basiclink.a.ll Inputs/basiclink.b.ll

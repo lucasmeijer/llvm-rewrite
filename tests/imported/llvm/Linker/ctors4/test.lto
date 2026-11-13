@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/ctors4.ll (llvmorg-23.1.5)
+; @modules: ctors4.ll

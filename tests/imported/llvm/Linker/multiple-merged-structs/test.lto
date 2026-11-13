@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/multiple-merged-structs.ll (llvmorg-23.1.5)
+; @modules: Inputs/PR11464.a.ll Inputs/PR11464.b.ll

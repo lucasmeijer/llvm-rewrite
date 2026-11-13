@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/objectivec-class-property-flag-mismatch.ll (llvmorg-23.1.5)
+; @modules: objectivec-class-property-flag-mismatch.ll Inputs/objectivec-class-property-flag-mismatch.ll

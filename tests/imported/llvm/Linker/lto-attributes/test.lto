@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/lto-attributes.ll (llvmorg-23.1.5)
+; @modules: lto-attributes.ll

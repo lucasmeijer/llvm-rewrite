@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/DbgDeclare.ll (llvmorg-23.1.5)
+; @modules: DbgDeclare.ll DbgDeclare2.ll

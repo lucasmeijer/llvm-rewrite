@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/2004-05-07-TypeResolution1.ll (llvmorg-23.1.5)
+; @modules: 2004-05-07-TypeResolution1.ll 2004-05-07-TypeResolution2.ll

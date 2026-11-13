@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/type-unique-alias.ll (llvmorg-23.1.5)
+; @modules: type-unique-alias.ll Inputs/type-unique-alias.ll

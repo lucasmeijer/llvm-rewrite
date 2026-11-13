@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/2003-01-30-LinkerRename.ll (llvmorg-23.1.5)
+; @modules: Inputs/2003-01-30-LinkerRename.ll 2003-01-30-LinkerRename.ll

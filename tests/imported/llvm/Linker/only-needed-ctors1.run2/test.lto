@@ -1,0 +1,3 @@
+; @origin: llvm/test/Linker/only-needed-ctors1.ll (llvmorg-23.1.5)
+; @modules: only-needed-ctors1.ll Inputs/only-needed-ctors.ll
+; @link: -internalize

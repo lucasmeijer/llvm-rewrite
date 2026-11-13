@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/linkage2.ll (llvmorg-23.1.5)
+; @modules: linkage2.ll Inputs/linkage2.ll

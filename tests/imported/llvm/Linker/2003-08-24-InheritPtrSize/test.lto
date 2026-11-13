@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/2003-08-24-InheritPtrSize.ll (llvmorg-23.1.5)
+; @modules: 2003-08-24-InheritPtrSize.ll echo1.ll

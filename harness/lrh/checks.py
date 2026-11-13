@@ -10,6 +10,13 @@
              Canonicalized and compared exactly.
   run        the full pipeline with the implementation's own tools (opt if @opt, then llc), linked by clang,
              executed; stdout and exit code must match the LLVM-built program.
+
+Multi-module (LTO) tests (corpus.TestFile.is_lto; a directory with a test.lto manifest):
+  link       `llvm-link <args> -S <modules>`: the inputs are LLVM's output of each module's own @opt line (the
+             pre-link pipeline, e.g. lto-pre-link<O2>), or the module itself if it has none. Canonicalized, identical.
+  opt        `opt <args> -S` on LLVM's linked module (isolated from ::link). Canonicalized, identical.
+  run        everything with the implementation's tools: pre-link opt per module, llvm-link, opt, llc; clang links,
+             runs; stdout and exit code must match the LLVM-built program.
 """
 
 import difflib
@@ -128,6 +135,10 @@ def build_and_run(opt_bin, llc_bin, t: TestFile, wd: Path) -> dict:
         if not r.ok:
             return {"ok": False, "stage": "opt", "msg": stage_msg(r)}
         ir = wd / "opt.ll"
+    return llc_link_run(llc_bin, t, ir, wd)
+
+
+def llc_link_run(llc_bin, t: TestFile, ir: Path, wd: Path) -> dict:
     r = run_tool([llc_bin, *shlex.split(t.llc), str(ir), "-o", str(wd / "out.s")])
     if not r.ok:
         return {"ok": False, "stage": "llc", "msg": stage_msg(r)}
@@ -141,6 +152,95 @@ def build_and_run(opt_bin, llc_bin, t: TestFile, wd: Path) -> dict:
     if r.timed_out:
         return {"ok": False, "stage": "run", "msg": f"timed out after {config.RUN_TIMEOUT}s"}
     return {"ok": True, "stage": "run", "rc": r.rc, "stdout": r.out.decode(errors="replace"), "msg": ""}
+
+
+def lto_name(t: TestFile, mt: TestFile) -> str:
+    """A module's name for llvm-link: its path relative to the test directory (e.g. a.ll, Inputs/a.ll)."""
+    return str(Path(mt.path).relative_to(t.path))
+
+
+def lto_modules(t: TestFile) -> list[TestFile]:
+    from .corpus import parse
+    return [parse(config.REPO / m) for m in t.modules]
+
+
+def tool_link(link_bin: str, args: str, names: list[str], out_path: Path, cwd) -> proc.Res:
+    return run_tool([link_bin, *shlex.split(args), "-S", *names, "-o", str(out_path)], cwd=cwd)
+
+
+def link_files(link_bin: str, t: TestFile, inputs: list[tuple[str, str]], wd: Path) -> proc.Res:
+    """Writes the (name, text) inputs to wd/in/ and links them there (relative names, so no paths leak into IR)."""
+    for name, text in inputs:
+        (wd / "in" / name).parent.mkdir(parents=True, exist_ok=True)
+        (wd / "in" / name).write_text(text)
+    return tool_link(link_bin, t.link, [n for n, _ in inputs], wd / "linked.ll", wd / "in")
+
+
+def oracle_lto_inputs(t: TestFile) -> dict:
+    """The modules as llvm-link gets them: LLVM's output of each module's first @opt (its pre-link pipeline)."""
+    inputs = []
+    for mt in lto_modules(t):
+        name = lto_name(t, mt)
+        if mt.opt:
+            o = oracle_opt(mt, mt.opt[0])
+            if not o["ok"]:
+                return {"ok": False, "text": f"llvm opt {mt.opt[0]} fails on {mt.path}:\n" + o["text"]}
+            inputs.append((name, o["text"]))
+        else:
+            inputs.append((name, read(mt.path)))
+    return {"ok": True, "inputs": inputs}
+
+
+def oracle_link(t: TestFile) -> dict:
+    inp = oracle_lto_inputs(t)
+    if not inp["ok"]:
+        return inp
+
+    def compute():
+        with proc.Workdir() as wd:
+            r = link_files(config.llvm("llvm-link"), t, inp["inputs"], wd)
+            if not r.ok:
+                return {"ok": False, "text": r.err_tail()}
+            return {"ok": True, "text": (wd / "linked.ll").read_text(errors="replace")}
+
+    return {**proc.cached(["link", inp["inputs"], t.link], compute), "inputs": inp["inputs"]}
+
+
+def oracle_lto_opt(linked: str, args: str) -> dict:
+    def compute():
+        with proc.Workdir() as wd:
+            (wd / "linked.ll").write_text(linked)
+            r = tool_opt(config.llvm("opt"), args, Path("linked.ll"), wd / "out.ll", wd)
+            if not r.ok:
+                return {"ok": False, "text": r.err_tail()}
+            return {"ok": True, "text": (wd / "out.ll").read_text(errors="replace")}
+
+    return proc.cached(["lto-opt", linked, args], compute)
+
+
+def build_and_run_lto(opt_bin, llc_bin, link_bin, t: TestFile, wd: Path) -> dict:
+    """Pre-link opt per module -> llvm-link -> opt -> llc -> clang -> run, all with one toolchain."""
+    names = []
+    for mt in lto_modules(t):
+        name = lto_name(t, mt)
+        names.append(name)
+        (wd / "in" / name).parent.mkdir(parents=True, exist_ok=True)
+        if mt.opt:
+            r = tool_opt(opt_bin, mt.opt[0], Path(mt.path), wd / "in" / name, config.REPO)
+            if not r.ok:
+                return {"ok": False, "stage": f"opt ({mt.path})", "msg": stage_msg(r)}
+        else:
+            (wd / "in" / name).write_text(read(mt.path))
+    r = tool_link(link_bin, t.link, names, wd / "linked.ll", wd / "in")
+    if not r.ok:
+        return {"ok": False, "stage": "llvm-link", "msg": stage_msg(r)}
+    ir = Path("linked.ll")
+    if t.opt:
+        r = tool_opt(opt_bin, t.opt[0], ir, wd / "opt.ll", wd)
+        if not r.ok:
+            return {"ok": False, "stage": "opt", "msg": stage_msg(r)}
+        ir = Path("opt.ll")
+    return llc_link_run(llc_bin, t, wd / ir, wd)
 
 
 def oracle_opt(t: TestFile, args: str) -> dict:
@@ -199,7 +299,13 @@ def oracle_isel(input_text: str, llc_args: str) -> dict:
 def oracle_run(t: TestFile) -> dict:
     def compute():
         with proc.Workdir() as wd:
+            if t.is_lto:
+                return build_and_run_lto(config.llvm("opt"), config.llvm("llc"), config.llvm("llvm-link"), t, wd)
             return build_and_run(config.llvm("opt"), config.llvm("llc"), t, wd)
+
+    if t.is_lto:
+        mods = [(m.path, read(m.path), m.opt[:1]) for m in lto_modules(t)]
+        return proc.cached(["run-lto", t.path, mods, t.link, t.opt[:1], t.llc], compute)
 
     driver = read(t.driver) if t.driver else ""
     return proc.cached(["run", t.path, read(t.path), t.opt[:1], t.llc, driver], compute)
@@ -225,7 +331,66 @@ def check_roundtrip(impl: str, t: TestFile) -> Outcome:
                    {"expected.ll": exp["text"], "actual.ll": act, "diff.txt": full_diff(exp["text"], act)})
 
 
+def check_link(impl: str, t: TestFile) -> Outcome:
+    tid = f"{t.path}::link"
+    exp = oracle_link(t)
+    if not exp["ok"]:
+        return Outcome(tid, INVALID, "llvm-link (or a module's pre-link opt) fails:\n" + exp["text"])
+    ok, exp_c = canon(exp["text"])
+    if not ok:
+        return Outcome(tid, INVALID, "llvm-link output does not re-assemble:\n" + exp_c)
+    if impl == config.REFERENCE_IMPL:
+        return Outcome(tid, PASS)
+    with proc.Workdir() as wd:
+        r = link_files(config.impl_bin(impl, "llvm-link"), t, exp["inputs"], wd)
+        if not r.ok:
+            return Outcome(tid, FAIL, f"{r.fail_msg('llvm-link')}:\n{r.err_tail()}", {"stderr.txt": r.err_tail(20000)})
+        act = (wd / "linked.ll").read_text(errors="replace")
+    inputs = {f"input-{n}": txt for n, txt in exp["inputs"]}
+    ok, act_c = canon(act)
+    if not ok:
+        return Outcome(tid, FAIL, f"output is not valid IR according to llvm-as:\n{act_c}", {**inputs, "actual.ll": act})
+    if act_c != exp_c:
+        return Outcome(tid, FAIL, "canonicalized linked IR differs:\n" + diff(exp_c, act_c),
+                       {**inputs, "expected.ll": exp_c, "actual.ll": act_c, "diff.txt": full_diff(exp_c, act_c)})
+    return Outcome(tid, PASS)
+
+
+def check_lto_opt(impl: str, t: TestFile) -> Outcome:
+    tid = f"{t.path}::opt"
+    link = oracle_link(t)
+    if not link["ok"]:
+        return Outcome(tid, INVALID, "llvm-link (or a module's pre-link opt) fails:\n" + link["text"])
+    for args in t.opt:
+        exp = oracle_lto_opt(link["text"], args)
+        if not exp["ok"]:
+            return Outcome(tid, INVALID, f"llvm opt {args} fails on the linked module:\n" + exp["text"])
+        ok, exp_c = canon(exp["text"])
+        if not ok:
+            return Outcome(tid, INVALID, f"llvm opt {args} output does not re-assemble:\n" + exp_c)
+        if impl == config.REFERENCE_IMPL:
+            continue
+        with proc.Workdir() as wd:
+            (wd / "linked.ll").write_text(link["text"])
+            r = tool_opt(config.impl_bin(impl, "opt"), args, Path("linked.ll"), wd / "out.ll", wd)
+            if not r.ok:
+                return Outcome(tid, FAIL, f"[{args}] {r.fail_msg('opt')}:\n{r.err_tail()}",
+                               {"input.ll": link["text"], "stderr.txt": r.err_tail(20000)})
+            act = (wd / "out.ll").read_text(errors="replace")
+        ok, act_c = canon(act)
+        if not ok:
+            return Outcome(tid, FAIL, f"[{args}] output is not valid IR according to llvm-as:\n{act_c}",
+                           {"input.ll": link["text"], "actual.ll": act})
+        if act_c != exp_c:
+            return Outcome(tid, FAIL, f"[{args}] canonicalized IR differs:\n" + diff(exp_c, act_c),
+                           {"args.txt": args, "input.ll": link["text"], "expected.ll": exp_c, "actual.ll": act_c,
+                            "diff.txt": full_diff(exp_c, act_c)})
+    return Outcome(tid, PASS)
+
+
 def check_opt(impl: str, t: TestFile) -> Outcome:
+    if t.is_lto:
+        return check_lto_opt(impl, t)
     tid = f"{t.path}::opt"
     for args in t.opt:
         exp = oracle_opt(t, args)
@@ -313,7 +478,11 @@ def check_run(impl: str, t: TestFile) -> Outcome:
     if impl == config.REFERENCE_IMPL:
         return Outcome(tid, PASS)
     with proc.Workdir() as wd:
-        act = build_and_run(config.impl_bin(impl, "opt"), config.impl_bin(impl, "llc"), t, wd)
+        if t.is_lto:
+            act = build_and_run_lto(config.impl_bin(impl, "opt"), config.impl_bin(impl, "llc"),
+                                    config.impl_bin(impl, "llvm-link"), t, wd)
+        else:
+            act = build_and_run(config.impl_bin(impl, "opt"), config.impl_bin(impl, "llc"), t, wd)
         asm = (wd / "out.s").read_text(errors="replace") if (wd / "out.s").exists() else ""
     if not act["ok"]:
         return Outcome(tid, FAIL, f"{act['stage']} failed:\n{act['msg']}", {"out.s": asm, "error.txt": act["msg"]})
@@ -329,4 +498,4 @@ def check_run(impl: str, t: TestFile) -> Outcome:
                     "exit-codes.txt": f"expected {exp['rc']}\nactual {act['rc']}\n"})
 
 
-CHECK_FNS = {"roundtrip": check_roundtrip, "opt": check_opt, "analysis": check_analysis, "isel-ir": check_isel_ir, "run": check_run}
+CHECK_FNS = {"roundtrip": check_roundtrip, "link": check_link, "opt": check_opt, "analysis": check_analysis, "isel-ir": check_isel_ir, "run": check_run}

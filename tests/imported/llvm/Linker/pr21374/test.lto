@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/pr21374.ll (llvmorg-23.1.5)
+; @modules: pr21374.ll Inputs/pr21374.ll

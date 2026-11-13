@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/alias.ll (llvmorg-23.1.5)
+; @modules: alias.ll Inputs/alias.ll

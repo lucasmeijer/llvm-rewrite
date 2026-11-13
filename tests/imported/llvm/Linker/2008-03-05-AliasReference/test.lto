@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/2008-03-05-AliasReference.ll (llvmorg-23.1.5)
+; @modules: 2008-03-05-AliasReference2.ll 2008-03-05-AliasReference.ll

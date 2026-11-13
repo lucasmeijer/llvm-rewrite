@@ -1,0 +1,5 @@
+; @modules: main.ll util.ll
+; @opt: -passes='internalize,lto<O2>' -internalize-public-api-list=main
+; @llc: -O2
+; @source: tests/lto/src/ipo/debug_info/
+; @generated: harness/run from-c (LLVM 23.1.5)

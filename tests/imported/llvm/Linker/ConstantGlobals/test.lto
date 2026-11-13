@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/ConstantGlobals.ll (llvmorg-23.1.5)
+; @modules: ConstantGlobals.ll Inputs/ConstantGlobals.ll

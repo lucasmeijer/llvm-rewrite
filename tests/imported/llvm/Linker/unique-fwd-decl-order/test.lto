@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/unique-fwd-decl-order.ll (llvmorg-23.1.5)
+; @modules: unique-fwd-decl-order.ll Inputs/unique-fwd-decl-order.ll

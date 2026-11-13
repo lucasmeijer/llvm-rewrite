@@ -1,0 +1,3 @@
+; @modules: a.ll b.ll
+; @opt: -passes='lto<O2>'
+; @generated: hand-written (link features)

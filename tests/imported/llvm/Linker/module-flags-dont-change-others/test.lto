@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/module-flags-dont-change-others.ll (llvmorg-23.1.5)
+; @modules: module-flags-dont-change-others.ll Inputs/module-flags-dont-change-others.ll

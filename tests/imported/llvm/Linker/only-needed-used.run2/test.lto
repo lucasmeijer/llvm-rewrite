@@ -1,0 +1,3 @@
+; @origin: llvm/test/Linker/only-needed-used.ll (llvmorg-23.1.5)
+; @modules: only-needed-used.ll Inputs/only-needed-used.ll
+; @link: -internalize

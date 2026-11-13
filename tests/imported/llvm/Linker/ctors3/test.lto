@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/ctors3.ll (llvmorg-23.1.5)
+; @modules: ctors3.ll Inputs/ctors3.ll

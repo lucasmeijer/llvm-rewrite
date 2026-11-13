@@ -310,9 +310,13 @@ unit yet.
 - deps: L2.phase-ordering
 - exit: tests/e2e/pipeline/*::opt, tests/function/pipeline/*::opt
 
-### L2.lto — Multi-module programs: our llvm-link, then `-passes='lto<O2>'`, exact IR (needs harness support for multi-file tests first)
-- deps: L2.pipeline-O2
-- exit: tests/lto/*::opt
+### L2.link — `llvm-link`: LLVM's own linker tests (type merging, comdats, linkage resolution, appending globals, metadata)
+- deps: L0.print-imported
+- exit: tests/imported/llvm/Linker/*::roundtrip, tests/imported/llvm/Linker/*::link
+
+### L2.lto — Multi-module programs: `lto-pre-link<O2>` per module, llvm-link, then `internalize,lto<O2>`, exact IR
+- deps: L2.pipeline-O2, L2.link
+- exit: tests/lto/*::roundtrip, tests/lto/*::link, tests/lto/*::opt
 
 ### L2.perf-corpus — Correct output on the compile-time performance corpus (real programs, scaling shapes)
 - deps: L2.pipeline-O2

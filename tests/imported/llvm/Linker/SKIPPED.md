@@ -1,0 +1,135 @@
+# Skipped while importing llvm/test/Linker (llvmorg-23.1.5)
+
+196 multi-module tests (one per usable llvm-link RUN line) from 243 files. Regenerate with `./harness/run import-llvm Linker`.
+
+- `2003-04-23-LinkOnceLost.ll` RUN `llvm-link %s %t.ll -S | FileCheck %s`: unsupported llvm-link argument `%t.ll`
+- `2004-05-07-TypeResolution2.ll`: no llvm-link RUN lines
+- `2006-01-19-ConstantPacked.ll`: target triple powerpc-apple-darwin7.7.0
+- `2008-03-05-AliasReference2.ll`: no llvm-link RUN lines
+- `2008-03-07-DroppedSection_a.ll`: target triple i686-pc-linux-gnu
+- `2008-03-07-DroppedSection_b.ll`: target triple i686-pc-linux-gnu
+- `2008-07-06-AliasFnDecl2.ll`: no llvm-link RUN lines
+- `2008-07-06-AliasWeakDest.ll`: target triple i386-pc-linux-gnu
+- `2008-07-06-AliasWeakDest2.ll`: target triple i386-pc-linux-gnu
+- `2009-09-03-mdnode2.ll`: no llvm-link RUN lines
+- `2011-08-04-DebugLoc2.ll`: no llvm-link RUN lines
+- `2011-08-04-Metadata2.ll`: no llvm-link RUN lines
+- `2011-08-18-unique-class-type2.ll`: no llvm-link RUN lines
+- `2011-08-18-unique-debug-type2.ll`: no llvm-link RUN lines
+- `DbgDeclare2.ll`: no llvm-link RUN lines
+- `amdgpu-triple-os-mismatch.ll`: target triple amdgpu9-amd-amdhsa
+- `amdgpu-triple-subarch.ll`: target triple amdgpu9-amd-amdhsa
+- `appending-global-err1.ll` RUN `not llvm-link %s %p/Inputs/appending-global.ll -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `appending-global-err1.ll` RUN `not llvm-link %p/Inputs/appending-global.ll %s -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `appending-global-err2.ll` RUN `not llvm-link %s %p/Inputs/appending-global.ll -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `appending-global-err2.ll` RUN `not llvm-link %p/Inputs/appending-global.ll %s -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `appending-global-err3.ll` RUN `not llvm-link %s %p/Inputs/appending-global.ll -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `appending-global-err3.ll` RUN `not llvm-link %p/Inputs/appending-global.ll %s -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `appending-global-err4.ll` RUN `not llvm-link %s %p/Inputs/appending-global.ll -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `appending-global-err4.ll` RUN `not llvm-link %p/Inputs/appending-global.ll %s -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `appending-global-err5.ll` RUN `not llvm-link %s %p/Inputs/appending-global.ll -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `appending-global-err5.ll` RUN `not llvm-link %p/Inputs/appending-global.ll %s -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `appending-global-err6.ll` RUN `not llvm-link %s %p/Inputs/appending-global.ll -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `appending-global-err6.ll` RUN `not llvm-link %p/Inputs/appending-global.ll %s -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `apple-version.ll` RUN `llvm-link %s %S/Inputs/apple-version/1.ll -S -o - 2>%t.err | FileCheck %s -check-prefix=CHECK1`: unsupported llvm-link argument `%S/Inputs/apple-version/1.ll`
+- `apple-version.ll` RUN `llvm-link %s %S/Inputs/apple-version/2.ll -S -o - 2>%t.err | FileCheck %s -check-prefix=CHECK2`: unsupported llvm-link argument `%S/Inputs/apple-version/2.ll`
+- `apple-version.ll` RUN `llvm-link %s %S/Inputs/apple-version/3.ll -S -o /dev/null 2>%t.err`: unsupported llvm-link argument `%S/Inputs/apple-version/3.ll`
+- `apple-version.ll` RUN `llvm-link %s %S/Inputs/apple-version/4.ll -S -o /dev/null 2>%t.err`: unsupported llvm-link argument `%S/Inputs/apple-version/4.ll`
+- `available_externally_b.ll`: no llvm-link RUN lines
+- `broken.ll` RUN `not llvm-link -disable-debug-info-type-map -o /dev/null %s 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `cfguard.ll`: uses split-file
+- `comdat-any.ll`: uses split-file
+- `comdat-incompatible-kinds.ll`: target triple i686-pc-windows-msvc
+- `comdat-largest.ll`: uses split-file
+- `comdat-nodeduplicate.ll`: uses split-file
+- `comdat-nonprevailing-decl.ll`: uses split-file
+- `comdat-refer-to-discarded.ll`: uses split-file
+- `comdat-rm-dst.ll`: target triple i686-pc-windows-msvc
+- `comdat-samesize.ll`: uses split-file
+- `comdat-size-err.ll`: uses split-file
+- `comdat.ll`: target triple i686-pc-windows-msvc
+- `cuda-libdevice.ll`: target triple nvptx64-nvidia-cuda
+- `darwin-target-variant.ll`: uses split-file
+- `datalayout.ll` RUN `llvm-link %s %S/Inputs/datalayout-a.ll -S -o - 2>>%t.a.err`: unsupported llvm-link argument `2>>%t.a.err`
+- `datalayout.ll` RUN `llvm-link %s %S/Inputs/datalayout-b.ll -S -o - 2>%t.b.err`: unsupported llvm-link argument `2>%t.b.err`
+- `debug-info-bad-enum.ll`: uses split-file
+- `debug-info-use-before-def.ll`: target triple spir64-unknown-unknown-intelfpga
+- `debug-info-version-b.ll`: no llvm-link RUN lines
+- `dicompositetype-unique.ll` RUN `llvm-link -disable-debug-info-type-map -S -o - %s %S/Inputs/dicompositetype-unique.ll | FileCheck %s -check-prefix NOMAP`: unsupported llvm-link argument `-disable-debug-info-type-map`
+- `dicompositetype-unique.ll` RUN `llvm-link -S -o - %t1.bc %t2.bc | FileCheck %s -check-prefix CHECK -check-prefix FORWARD`: unsupported llvm-link argument `%t1.bc`
+- `dicompositetype-unique.ll` RUN `llvm-link -S -o - %t2.bc %t1.bc | FileCheck %s -check-prefix CHECK -check-prefix REVERSE`: unsupported llvm-link argument `%t2.bc`
+- `dicompositetype-unique.ll` RUN `llvm-link -disable-debug-info-type-map -S -o - %t1.bc %t2.bc | FileCheck %s -check-prefix NOMAP`: unsupported llvm-link argument `-disable-debug-info-type-map`
+- `dllstorage-b.ll`: no llvm-link RUN lines
+- `drop-debug.ll` RUN `llvm-link %p/Inputs/drop-debug.bc -o %t 2>&1 | FileCheck %s`: unsupported llvm-link argument `%p/Inputs/drop-debug.bc`
+- `func-attrs-b.ll`: no llvm-link RUN lines
+- `funcimport.ll` RUN `llvm-link %t.bc -summary-index=%t.bc -S`: unsupported llvm-link argument `%t.bc`
+- `funcimport.ll` RUN `llvm-link %t.bc -summary-index=%t3.thinlto.bc -S | FileCheck %s --check-prefix=EXPORTSTATIC`: unsupported llvm-link argument `%t.bc`
+- `funcimport.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=globalfunc1:%t.bc -S | FileCheck %s --check-prefix=IMPORTGLOB1`: unsupported llvm-link argument `%t2.bc`
+- `funcimport.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=globalfunc2:%t.bc -S | FileCheck %s --check-prefix=IMPORTGLOB2`: unsupported llvm-link argument `%t2.bc`
+- `funcimport.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=globalfunc1:%t.bc -import=globalfunc2:%t.bc -S | FileCheck %s --check-prefix=IMPORTGLOB3`: unsupported llvm-link argument `%t2.bc`
+- `funcimport.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=globalfunc2:%t.bc -import=globalfunc1:%t.bc -S | FileCheck %s --check-prefix=IMPORTGLOB4`: unsupported llvm-link argument `%t2.bc`
+- `funcimport.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=linkoncefunc:%t.bc -S | FileCheck %s --check-prefix=IMPORTGLOB5`: unsupported llvm-link argument `%t2.bc`
+- `funcimport.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=referencestatics:%t.bc -S | FileCheck %s --check-prefix=IMPORTSTATIC`: unsupported llvm-link argument `%t2.bc`
+- `funcimport.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=referenceglobals:%t.bc -S | FileCheck %s --check-prefix=IMPORTGLOBALS`: unsupported llvm-link argument `%t2.bc`
+- `funcimport.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=referencecommon:%t.bc -S | FileCheck %s --check-prefix=IMPORTCOMMON`: unsupported llvm-link argument `%t2.bc`
+- `funcimport.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=callfuncptr:%t.bc -S | FileCheck %s --check-prefix=IMPORTFUNCPTR`: unsupported llvm-link argument `%t2.bc`
+- `funcimport.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=callweakfunc:%t.bc -import=weakfunc:%t.bc -S 2>&1 | FileCheck %s --check-prefix=IMPORTWEAKFUNC`: unsupported llvm-link argument `%t2.bc`
+- `funcimport2.ll` RUN `llvm-link -import=bar:%t2.bc %t1.bc -summary-index=%t3.thinlto.bc -S | FileCheck %s`: unsupported llvm-link argument `-import=bar:%t2.bc`
+- `funcimport_appending_global.ll` RUN `llvm-link %t.bc -summary-index=%t3.thinlto.bc -import=foo:%t2.bc -S | FileCheck %s`: unsupported llvm-link argument `%t.bc`
+- `funcimport_appending_global_used.ll` RUN `llvm-link %t.bc -summary-index=%t3.thinlto.bc -import=foo:%t2.bc -S | FileCheck %s`: unsupported llvm-link argument `%t.bc`
+- `funcimport_comdat.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=comdat1_func1:%t.bc -S | FileCheck %s --check-prefix=IMPORTCOMDAT`: unsupported llvm-link argument `%t2.bc`
+- `funcimport_comdat.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=comdat2_func1:%t.bc -S | FileCheck %s --check-prefix=IMPORTCOMDAT2`: unsupported llvm-link argument `%t2.bc`
+- `ifunc.ll`: uses split-file
+- `inlineasm.ll`: target triple i386-apple-macosx10.6.8
+- `intrinsics-with-unnamed-types.ll`: uses split-file
+- `link-arm-and-thumb-module-inline-asm.ll`: target triple armv7-linux-gnueabihf
+- `link-arm-and-thumb.ll`: target triple armv7-linux-gnueabihf
+- `link-type-names.ll` RUN `llvm-link %s %t.ll -S | FileCheck %s`: unsupported llvm-link argument `%t.ll`
+- `linkmdnode2.ll`: no llvm-link RUN lines
+- `linknamedmdnode2.ll`: no llvm-link RUN lines
+- `metadata-b.ll`: no llvm-link RUN lines
+- `module-flags-1-b.ll`: no llvm-link RUN lines
+- `module-flags-2-b.ll`: no llvm-link RUN lines
+- `module-flags-3-b.ll`: no llvm-link RUN lines
+- `module-flags-4-a.ll` RUN `not llvm-link %s %p/module-flags-4-b.ll -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `module-flags-4-b.ll`: no llvm-link RUN lines
+- `module-flags-5-a.ll` RUN `not llvm-link %s %p/module-flags-5-b.ll -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `module-flags-5-b.ll`: no llvm-link RUN lines
+- `module-flags-6-a.ll` RUN `not llvm-link %s %p/module-flags-6-b.ll -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `module-flags-6-b.ll`: no llvm-link RUN lines
+- `module-flags-7-a.ll` RUN `not llvm-link %s %p/module-flags-7-b.ll -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `module-flags-7-b.ll`: no llvm-link RUN lines
+- `module-flags-8-b.ll`: no llvm-link RUN lines
+- `module-flags-min.ll`: uses split-file
+- `override-different-linkage.ll` RUN `llvm-link %s -override %S/Inputs/override-different-linkage.ll -S | FileCheck %s`: unsupported llvm-link argument `-override`
+- `override-different-linkage.ll` RUN `llvm-link -override %S/Inputs/override-different-linkage.ll %s -S | FileCheck %s`: unsupported llvm-link argument `-override`
+- `override-with-internal-linkage-2.ll` RUN `llvm-link %s -override %S/Inputs/override-with-internal-linkage-2.ll -S | FileCheck %s`: unsupported llvm-link argument `-override`
+- `override-with-internal-linkage-2.ll` RUN `llvm-link -override %S/Inputs/override-with-internal-linkage-2.ll %s -S | FileCheck %s`: unsupported llvm-link argument `-override`
+- `override-with-internal-linkage.ll` RUN `llvm-link %s -override %S/Inputs/override-with-internal-linkage.ll -S | FileCheck %s`: unsupported llvm-link argument `-override`
+- `override-with-internal-linkage.ll` RUN `llvm-link -override %S/Inputs/override-with-internal-linkage.ll %s -S | FileCheck %s`: unsupported llvm-link argument `-override`
+- `override.ll` RUN `llvm-link %s -override %S/Inputs/override.ll -S | FileCheck %s`: unsupported llvm-link argument `-override`
+- `override.ll` RUN `llvm-link -override %S/Inputs/override.ll %s -S | FileCheck %s`: unsupported llvm-link argument `-override`
+- `partial-type-refinement-link.ll`: no llvm-link RUN lines
+- `redefinition.ll` RUN `not llvm-link %s %s -o %t.bc 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `redefinition.ll` RUN `not llvm-link %s %S/Inputs/redefinition.ll -o %t.bc 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `stack-alignment.ll`: uses split-file
+- `stack-protector-guard-module-attrs.ll`: uses split-file
+- `subprogram-linkonce-weak.ll`: REQUIRES object-emission
+- `targettriple.ll` RUN `llvm-link %s %S/Inputs/targettriple-a.ll -S -o - 2>%t.a.err | FileCheck %s`: unsupported llvm-link argument `2>%t.a.err`
+- `targettriple.ll` RUN `llvm-link %s %S/Inputs/targettriple-b.ll -S -o - 2>%t.b.err | FileCheck %s`: unsupported llvm-link argument `2>%t.b.err`
+- `targettriple.ll` RUN `llvm-link %s %S/Inputs/targettriple-c.ll -S -o - 2>%t.c.err | FileCheck %s`: unsupported llvm-link argument `2>%t.c.err`
+- `targettriple.ll` RUN `llvm-link -suppress-warnings %s %S/Inputs/targettriple-b.ll -S -o - 2>%t.no-warn.err | FileCheck %s`: unsupported llvm-link argument `-suppress-warnings`
+- `thinlto_funcimport_debug.ll` RUN `llvm-link %t2.bc -summary-index=%t3.thinlto.bc -import=func1:%t.bc -S | FileCheck %s`: unsupported llvm-link argument `%t2.bc`
+- `transitive-lazy-link.ll` RUN `llvm-link %t.1.bc %t.2.bc`: unsupported llvm-link argument `%t.1.bc`
+- `type-unique-odr-a.ll`: REQUIRES object-emission
+- `type-unique-odr-b.ll`: no llvm-link RUN lines
+- `type-unique-simple-a.ll`: REQUIRES object-emission
+- `type-unique-simple-b.ll`: no llvm-link RUN lines
+- `type-unique-simple2-a.ll`: REQUIRES object-emission
+- `type-unique-simple2-b.ll`: no llvm-link RUN lines
+- `type-unique-simple2.ll`: REQUIRES object-emission
+- `type-unique-type-array-a.ll`: REQUIRES object-emission
+- `type-unique-type-array-b.ll`: no llvm-link RUN lines
+- `unnamed-addr-err-a.ll` RUN `not llvm-link %s %p/unnamed-addr-err-b.ll -S -o - 2>&1 | FileCheck %s`: not an llvm-link invocation
+- `unnamed-addr-err-b.ll`: no llvm-link RUN lines
+- `unnamed-addr1-b.ll`: no llvm-link RUN lines

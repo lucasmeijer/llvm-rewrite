@@ -5,7 +5,7 @@ The harness compares an implementation against LLVM 23.1.5. All of it is `./harn
 
 ## Test files and checks
 
-A test is any `.ll` file under `tests/`. Directives in its leading comment block decide which checks it has:
+A test is any `.ll` file under `tests/` (or a directory with a `test.lto` manifest: multi-module tests, below). Directives in its leading comment block decide which checks it has:
 
 ```llvm
 ; @opt: -passes=instcombine     IR->IR check (repeatable for imported tests: all must match)
@@ -26,8 +26,50 @@ A test ID is `<repo-relative path>::<check>`, e.g. `tests/e2e/O0/calls/varargs.l
 | `analysis` | if `@analysis` | `opt <args> -disable-output in.ll`: exit status 0, and stdout and stderr **byte-identical** to LLVM's (see below). |
 | `isel-ir` | if `@llc` | The IR that reaches instruction selection, `llc <args> -stop-before=x86-isel`. Input is LLVM's opt output, so this is isolated from `opt`. Canonicalized and identical. |
 | `run` | if `@llc` | Full pipeline with *our* tools (our opt if `@opt`, then our llc), linked by clang with `-no-pie`, executed: stdout and exit code identical to the LLVM-built program. |
+| `link` | LTO tests | See "Multi-module (LTO) tests" below. |
 
 Outcomes: `pass`, `fail`, or `invalid`. `invalid` means LLVM itself fails on the test, so the test is broken.
+
+### Multi-module (LTO) tests (`::link`, and `::opt` / `::run` on the linked program)
+
+Whole-program optimization is LLVM's full LTO: every translation unit goes through the pre-link pipeline, the
+modules are linked, and the post-link pipeline runs on the result (docs/plan.md, decision 6). A multi-module test is a
+**directory** containing a manifest `test.lto` plus its modules; the test ID's path is the directory
+(`tests/lto/split/sieve::opt`). The manifest uses the same directive syntax:
+
+```llvm
+; @modules: main.ll sieve.ll        link order (required); paths relative to the directory (Inputs/x.ll is fine)
+; @link: -only-needed              extra llvm-link arguments (optional)
+; @opt: -passes='internalize,lto<O2>' -internalize-public-api-list=main     the post-link pipeline (repeatable)
+; @llc: -O2                         enables ::run
+; @source / @origin / @generated    provenance (informational)
+```
+
+The modules are ordinary test files as well: each has its own `::roundtrip`, and a C-generated module carries the
+pre-link pipeline as its `@opt` line (`-passes='lto-pre-link<O2>'`), so the pre-link pipeline is an ordinary `::opt`
+check of that file.
+
+| Check | When | What must match |
+| --- | --- | --- |
+| `link` | always | `llvm-link <@link> -S <modules>`, run in a scratch directory on relative names. Inputs: LLVM's `opt` output of each module's first `@opt` (its pre-link pipeline), or the module itself if it has none. Canonicalized, identical. |
+| `opt` | if `@opt` | `opt <args> -S` on **LLVM's** linked module (isolated from `::link`, like `::isel-ir`). Canonicalized, identical. |
+| `run` | if `@llc` | Everything with our tools: pre-link `opt` per module, our `llvm-link`, our `opt <@opt>`, our `llc`, then clang links and runs. Same stdout and exit code as the LLVM-built program. |
+
+Why the post-link line is `internalize,lto<O2>` with `-internalize-public-api-list=main`: a linker doing full LTO for
+an executable tells LLVM which symbols are visible outside the IR (only `main` here) and internalizes the rest
+(lib/LTO/LTO.cpp, `runRegularLTO`) before it runs `lto<O2>`; `opt -passes=lto<O2>` alone keeps every external
+symbol, so cross-module inlining could never delete the callee. Clang's `-O2 -flto` is
+`clang -O2 -flto -Xclang -disable-llvm-passes` followed by `lto-pre-link<O2>` (verified on the corpus: identical
+IR except two module flags, `ThinLTO` and `EnableSplitLTOUnit`, and the module summary clang appends when writing
+LTO output; the summary is ignored by full LTO and our parser has no summary support).
+
+Where they come from: `tests/lto/<area>/<name>/` from C (`./harness/run from-c tests/lto/src/<area>/<name>/`: a
+directory of at least two `.c` translation units plus headers, optional `cflags` file with extra clang flags such as
+`-g`; validated like every C test, compiled all together), `tests/lto/link/*` hand-written IR for linker features,
+and `tests/imported/llvm/Linker/<test>[.runN]/` from LLVM's own linker tests (`./harness/run import-llvm Linker`: one
+directory per usable `llvm-link` RUN line, inputs `%s`, `%p/Inputs/*.ll`, `%t` files made by `llvm-as` from those
+or from `echo "..." | llvm-as`; skipped RUN lines are listed in its `SKIPPED.md`). `bisect` on an LTO test bisects
+the post-link pipeline on LLVM's linked module.
 
 ### Analysis printers (`::analysis`)
 
@@ -61,6 +103,10 @@ tests/e2e/O2/<area>/*.ll             clang -O2;                              @ll
 tests/e2e/pipeline/<area>/*.ll       clang -O2 -Xclang -disable-llvm-passes; @opt -O2, @llc -O2
 tests/function/src/<area>/x.c + x.driver.c    same three configurations, with @driver
 tests/analysis/<printer>/*.ll        hand-written IR for analysis printers; @analysis
+tests/lto/src/<area>/<name>/*.c      multi-TU C programs (source of truth)
+tests/lto/<area>/<name>/             one multi-module test: test.lto + one .ll per TU (@opt lto-pre-link<O2>)
+tests/lto/link/<name>/               hand-written multi-module IR for linker features
+tests/imported/llvm/Linker/<test>/   LLVM's linker tests, one directory per llvm-link RUN line
 tests/imported/llvm/Transforms/<Pass>/*.ll    LLVM's regression tests, original paths kept; SKIPPED.md per dir
 tests/imported/llvm/Analysis/<Dir>/*.ll       LLVM's analysis tests: @analysis for printer RUN lines, @opt for the rest
 tests/perf/compile/<program>.ll      whole llvm-test-suite programs, one linked module each; @opt -O2, @perf
@@ -293,6 +339,7 @@ llc <args> -stop-before=x86-isel <in.ll> -o <out>   # write the module as textua
 llc <args> <in.ll> -o <out.s>                   # AT&T assembly for x86_64-unknown-linux-gnu
 opt <args> -opt-bisect-limit=<N> -S <in> -o <out>   # used by `bisect`; count passes exactly like LLVM
 opt <args> -disable-output <in.ll>              # ::analysis: printers write to stderr; no IR is written
+llvm-link <args> -S <a.ll> <b.ll> ... -o <out.ll>   # ::link, ::run of LTO tests; cwd = a scratch dir with the modules
 ```
 
 `<args>` come from `@opt`, `@analysis` and `@llc` lines and from LLVM's own RUN lines: `-passes=<pipeline>`, `-O0`…`-O3`,

@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/alias-3.ll (llvmorg-23.1.5)
+; @modules: alias-3.ll

@@ -1,0 +1,3 @@
+; @origin: llvm/test/Linker/only-needed-compiler-used.ll (llvmorg-23.1.5)
+; @modules: only-needed-compiler-used.ll Inputs/only-needed-compiler-used.ll
+; @link: -only-needed

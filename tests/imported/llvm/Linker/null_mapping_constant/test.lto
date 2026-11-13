@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/null_mapping_constant.ll (llvmorg-23.1.5)
+; @modules: null_mapping_constant.ll

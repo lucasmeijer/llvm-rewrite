@@ -15,6 +15,18 @@ Directives are comment lines `; @key: value` in the file's leading comment block
   @origin / @generated  provenance (informational)
 
 Every file also has `::roundtrip`. A test ID is `<repo-relative path>::<check>`.
+
+Multi-module (LTO) tests: a directory under tests/lto/ that contains a manifest `test.lto` (same `; @key: value` lines)
+is one test whose path is the directory. Its modules are .ll files in that directory, which are ordinary test files
+too (each has `::roundtrip`, and `::opt` for its pre-link @opt line). Manifest directives:
+
+  @modules: a.ll b.ll   link order (required); file names relative to the directory
+  @link: <args>         extra llvm-link arguments (optional)
+  @opt: <opt args>      the post-link pipeline, `::opt` (repeatable), e.g. -passes='internalize,lto<O2>' ...
+  @llc: <llc args>      enables `::run`
+  @source / @generated  provenance (informational)
+
+Checks: `::link` (always), `::opt` (if @opt), `::run` (if @llc). See docs/testing.md and checks.py.
 """
 
 import fnmatch
@@ -25,7 +37,8 @@ from pathlib import Path
 from . import config
 
 DIRECTIVE = re.compile(r"^;\s*@([a-z][a-z-]*):\s*(.*?)\s*$")
-CHECKS = ("roundtrip", "opt", "analysis", "isel-ir", "run")
+CHECKS = ("roundtrip", "link", "opt", "analysis", "isel-ir", "run")
+LTO_MANIFEST = "test.lto"
 
 
 @dataclass
@@ -38,8 +51,16 @@ class TestFile:
     source: str | None = None
     perf: list[str] = field(default_factory=list)
     perf_size: int | None = None
+    modules: list[str] | None = None  # LTO test (path = directory): repo-relative module paths in link order
+    link: str = ""  # LTO test: extra llvm-link arguments
+
+    @property
+    def is_lto(self) -> bool:
+        return self.modules is not None
 
     def checks(self) -> list[str]:
+        if self.is_lto:
+            return ["link"] + (["opt"] if self.opt else []) + (["run"] if self.llc is not None else [])
         out = ["roundtrip"]
         if self.opt:
             out.append("opt")
@@ -54,6 +75,8 @@ class TestFile:
 
 
 def parse(path: Path) -> TestFile:
+    if path.is_dir() or path.name == LTO_MANIFEST:
+        return parse_lto(path if path.is_dir() else path.parent)
     rel = str(path.relative_to(config.REPO))
     t = TestFile(rel)
     with open(path, encoding="utf-8", errors="replace") as f:
@@ -84,8 +107,38 @@ def parse(path: Path) -> TestFile:
     return t
 
 
+def parse_lto(d: Path) -> TestFile:
+    rel = str(d.relative_to(config.REPO))
+    t = TestFile(rel, modules=[])
+    for line in (d / LTO_MANIFEST).read_text(encoding="utf-8", errors="replace").splitlines():
+        m = DIRECTIVE.match(line.strip())
+        if not m:
+            continue
+        key, val = m.groups()
+        if key == "modules":
+            t.modules += [f"{rel}/{x}" for x in val.split()]
+        elif key == "link":
+            t.link = val
+        elif key == "opt":
+            t.opt.append(val)
+        elif key == "llc":
+            t.llc = val
+        elif key == "source":
+            t.source = val
+    if len(t.modules) < 1:
+        raise ValueError(f"{rel}/{LTO_MANIFEST}: needs a @modules line")
+    for mod in t.modules:
+        if not (config.REPO / mod).is_file():
+            raise ValueError(f"{rel}/{LTO_MANIFEST}: module {mod} does not exist")
+    if t.llc is not None and len(t.opt) > 1:
+        raise ValueError(f"{rel}: a test with @llc may have at most one @opt")
+    return t
+
+
 def discover() -> list[TestFile]:
-    return [parse(p) for p in sorted(config.TESTS.rglob("*.ll"))]
+    files = [parse(p) for p in sorted(config.TESTS.rglob("*.ll"))]
+    lto = [parse_lto(p.parent) for p in sorted(config.TESTS.rglob(LTO_MANIFEST))]
+    return files + lto
 
 
 def split_id(test_id: str) -> tuple[str, str]:

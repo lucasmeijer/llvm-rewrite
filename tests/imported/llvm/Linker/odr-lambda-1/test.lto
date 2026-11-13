@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/odr-lambda-1.ll (llvmorg-23.1.5)
+; @modules: odr-lambda-1.ll Inputs/odr-lambda-2.ll

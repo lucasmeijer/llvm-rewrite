@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/2005-02-12-ConstantGlobals-2.ll (llvmorg-23.1.5)
+; @modules: 2005-02-12-ConstantGlobals-2.ll echo1.ll

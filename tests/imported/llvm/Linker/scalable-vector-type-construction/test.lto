@@ -1,0 +1,2 @@
+; @origin: llvm/test/Linker/scalable-vector-type-construction.ll (llvmorg-23.1.5)
+; @modules: Inputs/fixed-vector-type-construction.ll scalable-vector-type-construction.ll
