@@ -284,11 +284,11 @@ cfo_load_through_bitcast :: (c_in: Value_Id, dt: Type_Id) -> Value_Id {
         ds := dl_type_size_bits(dt); ss := dl_type_size_bits(st);
         // TypeSize::isKnownGE(SrcSize, DestSize) is false for a scalable destination and a fixed source
         if type_is_scalable(dt) && !type_is_scalable(st) return NONE;
-        if type_is_scalable(st) fatal("load folding through scalable types is not supported yet");
+        // TypeSize::isKnownGE (sizes are known minimums for scalable types)
         if ss < ds return NONE;
         r := cfo_load_from_uniform_value(c, dt);
         if r != NONE return r;
-        if ss == ds && dl_is_non_integral_pointer_type(st) == dl_is_non_integral_pointer_type(dt) {
+        if ss == ds && type_is_scalable(st) == type_is_scalable(dt) && dl_is_non_integral_pointer_type(st) == dl_is_non_integral_pointer_type(dt) {
             opc := Opcode.BITCAST;
             if is_int_type(st) && is_ptr_type(dt) opc = .INTTOPTR;
             else if is_ptr_type(st) && is_int_type(dt) opc = .PTRTOINT;
@@ -305,6 +305,10 @@ cfo_load_through_bitcast :: (c_in: Value_Id, dt: Type_Id) -> Value_Id {
             c = ec;
         } else {
             if is_vector_type(st) && !dl_type_size_equals_store_size(type_elem(st)) return NONE;
+            // getAggregateElement(0): null for a scalable integer splat unless it is a ConstantInt
+            // (-use-constant-int-for-scalable-splat; ours always is one)
+            ck := vkind(c);
+            if type_kind(st) == .SVECTOR && ck == .C_INT && !opts.use_constant_int_for_scalable_splat return NONE;
             c = cf_elt(c, 0);
         }
     }

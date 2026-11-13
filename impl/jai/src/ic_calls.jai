@@ -305,8 +305,12 @@ ic_simplify_masked_scatter :: (ii: Value_Id) -> Value_Id {
         if cf_is_all_ones(cm) {
             alignment := call_param_align(ii, 1); if alignment == 0 alignment = 1;
             wt := vtype(call_arg(ii, 1));
-            if type_kind(wt) == .SVECTOR fatal("instcombine: simplifyMaskedScatter of a scalable vector is not supported yet");
-            vf := const_int(ir.t_i32, type_count(wt));
+            // CreateElementCount(i32, VF)
+            vf: Value_Id;
+            if type_kind(wt) == .SVECTOR {
+                vf = icb_vscale(ir.t_i32);
+                if type_count(wt) != 1 vf = icb_mul(vf, const_int(ir.t_i32, type_count(wt)), "", nuw = true);
+            } else vf = const_int(ir.t_i32, type_count(wt));
             last := icb_sub(vf, const_int(ir.t_i32, 1));
             ext := icb_extract_element(call_arg(ii, 0), last);
             s := create_store_raw(ext, splat_ptr, alignment);
@@ -2705,8 +2709,83 @@ ic_try_optimize_call :: (ci: Value_Id) -> Value_Id {
         if !has_uses(ci) return ci;
         return ic_replace_inst_uses_with(ci, with);
     }
-    if call_has_fn_str_attr(ci, "modular-format") || fn_has_str_attr(call_called_function(ci), "modular-format") fatal("instcombine: optimizeModularFormat is not supported yet");
+    w2 := ic_optimize_modular_format(ci);
+    if w2 != NONE {
+        if !has_uses(ci) return ci;
+        return ic_replace_inst_uses_with(ci, w2);
+    }
     return NONE;
+}
+// optimizeModularFormat
+ic_optimize_modular_format :: (ci: Value_Id) -> Value_Id {
+    if !call_has_fn_str_attr(ci, "modular-format") && !fn_has_str_attr(call_called_function(ci), "modular-format") return NONE;
+    args := split(call_fn_str_attr(ci, "modular-format"), ",",, allocator = temp);
+    if args.count < 5 return NONE;
+    fidx, ok1 := string_to_int(args[1]);
+    first, ok2 := string_to_int(args[2]);
+    assert(ok1 && ok2, "invalid modular-format indices");
+    fidx -= 1;
+    has_first := first > 0;
+    if has_first first -= 1;
+    fn_name := args[3];
+    impl_name := args[4];
+    aspects := array_view(args, 5, args.count - 5);
+    if aspects.count == 0 return NONE;
+    fmt := call_arg(ci, cast(u32) fidx);
+    okf, fstr := get_constant_string_info(fmt);
+    specs: [256] bool;
+    if okf {
+        // parseFormatStringSpecifiers
+        i := 0;
+        while i < fstr.count {
+            defer i += 1;
+            if fstr[i] != #char "%" continue;
+            if i + 1 < fstr.count && fstr[i + 1] == #char "%" { i += 1; continue; }
+            j := i + 1;
+            allowed :: "0123456789-+ #0$.*'hlLjztqwvI";
+            while j < fstr.count {
+                isa := false;
+                for k: 0..allowed.count-1 if allowed[k] == fstr[j] { isa = true; break; }
+                if !isa break;
+                j += 1;
+            }
+            if j >= fstr.count break;
+            specs[fstr[j]] = true;
+            i = j;
+        }
+    }
+    needed: [..] string; needed.allocator = temp;
+    for asp: aspects {
+        need := true;   // unknown aspects are always needed
+        if asp == "float" {
+            if okf need = specs[#char "f"] || specs[#char "F"] || specs[#char "e"] || specs[#char "E"] || specs[#char "g"] || specs[#char "G"] || specs[#char "a"] || specs[#char "A"];
+            else if !has_first need = true;
+            else {
+                need = false;
+                na := call_arg_count(ci);
+                if cast(u32) first < na for k: cast(u32) first..na-1 if is_fp_type(vtype(call_arg(ci, k))) need = true;
+            }
+        } else if asp == "fixed" {
+            if okf need = specs[#char "r"] || specs[#char "R"] || specs[#char "k"] || specs[#char "K"];
+        }
+        if need array_add(*needed, asp);
+    }
+    if needed.count == aspects.count return NONE;
+    callee := call_called_function(ci);
+    fattrs := glob(callee).attrs;
+    fattrs = attr_list_with_fn(fattrs, attr_set_remove_str(attr_list_fn(fattrs), "modular-format"));
+    mf := module_get_or_insert_function(fn_name, glob(callee).value_type, fattrs);
+    nc := ic_clone_inst(ci);
+    set_op(nc, nops(nc) - 1, mf);   // setCalledFunction
+    inst(nc).attrs = attr_list_with_fn(inst(nc).attrs, attr_set_remove_str(attr_list_fn(inst(nc).attrs), "modular-format"));
+    icb_insert(nc);
+    // llvm::sort(NeededAspects)
+    for i: 1..needed.count-1 { x := needed[i]; j := i; while j > 0 && compare(x, needed[j-1]) < 0 { needed[j] = needed[j-1]; j -= 1; } needed[j] = x; }
+    for needed {
+        reloc := get_or_insert_intrinsic_declaration(intrinsic_id_by_name("llvm.reloc.none"));   // referenceAspect
+        icb_call_fn(reloc, .[md_as_value(md_string(tprint("%_%", impl_name, it)))]);
+    }
+    return nc;
 }
 // InlineAsm::canThrow
 ic_inline_asm_can_throw :: (ia: Value_Id) -> bool { return (inline_asms[ir.v_aux[ia]].flags & 8) != 0; }
