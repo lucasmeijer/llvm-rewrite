@@ -7,6 +7,7 @@
 // Deletion callbacks (value handles) are not ported: the result is only valid while no global or function
 // it tracks is erased.
 import std;
+import ipoutil;
 import ir;
 import irutil;
 import calls;
@@ -386,11 +387,9 @@ fn cg_compute_sccs() {
 
 // Function::isDefinitionExact (!mayBeDerefined)
 fn gm_definition_exact(f: i32) -> bool {
-    let l = globs[glob_of(f)].linkage as i64;
-    if l == LK_WEAK_ODR || l == LK_LINKONCE_ODR || l == LK_AVAILABLE_EXTERNALLY { return false; }
-    let interposable = l == LK_WEAK_ANY || l == LK_LINKONCE_ANY || l == LK_COMMON || l == LK_EXTERN_WEAK;
-    let nobuiltin_def = !func_is_decl(f) && func_has_fn_attr(f, AK_NoBuiltin);
-    return !(interposable || nobuiltin_def);
+    // GlobalValue::isDefinitionExact = !mayBeDerefined (isInterposable counts noipa definitions and semantic
+    // interposition)
+    return !gv_may_be_derefined(f);
 }
 
 // AnalyzeCallGraph

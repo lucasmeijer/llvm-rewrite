@@ -1735,7 +1735,9 @@ fn sc_remove_dead_constant_users(c: i32) {
     while u >= 0 {
         let us = uses[u].user;
         let nu = use_next(u);
-        if is_constant(us) && !is_global(us) && sc_constant_is_dead(us) {
+        // a BlockAddress has no operands in LLVM 23 (our operands to the function and block only model it): it
+        // is never a constant user of either, so removeDeadConstantUsers doesn't destroy it
+        if is_constant(us) && !is_global(us) && vals[us].kind != VK_BLOCKADDR && sc_constant_is_dead(us) {
             // users changed: restart from the head (equivalent to LLVM's restart after LastNonDeadUser)
             u = first_use(c);
             continue;
