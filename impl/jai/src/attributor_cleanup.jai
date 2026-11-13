@@ -513,7 +513,214 @@ atr_call_graph_populate_all :: () { fatal("attributor: -attributor-print-call-gr
 atr_call_graph_print :: () {}
 
 // AAIndirectCallInfo's specialization manifest
-ici_specialize :: (i: u32, cb: Value_Id) -> bool { fatal("attributor: indirect call specialization (AAIndirectCallInfo) is not supported yet"); return false; }
+// ---------------------------------------------------------------- indirect call specialization
+
+// isLegalToPromote (llvm/lib/Transforms/Utils/CallPromotionUtils.cpp)
+atr_is_legal_to_promote :: (cb: Value_Id, callee: Value_Id) -> bool {
+    fty := glob(callee).value_type;
+    if vtype(cb) != func_ret(fty) && !is_bit_or_noop_pointer_castable(func_ret(fty), vtype(cb)) return false;
+    np := func_nparams(fty);
+    na := call_arg_count(cb);
+    if na != np && !func_vararg(fty) return false;
+    k: u32 = 0;
+    while k < np {
+        if fn_has_param_attr(callee, k, .ByVal) != call_param_has_attr(cb, k, .ByVal) return false;
+        if fn_has_param_attr(callee, k, .InAlloca) != call_param_has_attr(cb, k, .InAlloca) return false;
+        formal := func_param(fty, k);
+        actual := vtype(op(cb, k));
+        if formal != actual {
+            if !is_bit_or_noop_pointer_castable(actual, formal) return false;
+            if call_is_must_tail(cb) {
+                if type_kind(formal) != .PTR || type_kind(actual) != .PTR || type_addrspace(formal) != type_addrspace(actual) return false;
+            }
+        }
+        k += 1;
+    }
+    while k < na {
+        if call_param_has_attr(cb, k, .StructRet) return false;
+        k += 1;
+    }
+    return true;
+}
+// promoteCall (CallPromotionUtils.cpp); returns the cast of the result (RetBitCast) or NONE
+atr_promote_call :: (cb: Value_Id, callee: Value_Id) -> Value_Id {
+    set_op(cb, nops(cb) - 1, callee);
+    set_metadata(cb, md_kind_id("prof"), NONE);
+    set_metadata(cb, md_kind_id("callees"), NONE);
+    fty := glob(callee).value_type;
+    if inst(cb).ty2 == fty return NONE;
+    cs_ret := vtype(cb);
+    callee_ret := func_ret(fty);
+    inst(cb).ty2 = fty;   // mutateFunctionType (also the call's type)
+    ir.v_type[cb] = callee_ret;
+    attrs := inst(cb).attrs;
+    np := func_nparams(fty);
+    new_args := NewArray(cast(s64) np, u32,, allocator = temp);
+    changed := false;
+    for k: 0..cast(s64) np - 1 {
+        a := op(cb, cast(u32) k);
+        formal := func_param(fty, cast(u32) k);
+        ps := attr_list_param(attrs, cast(u32) k);
+        if vtype(a) != formal {
+            c := create_bit_or_pointer_cast_inst(a, formal);
+            inst_insert_before(c, cb);
+            set_op(cb, cast(u32) k, c);
+            kinds: [..] Attr_Kind; kinds.allocator = temp;
+            type_incompatible_kinds(formal, ps, *kinds);
+            ps = attr_set_remove_kinds(ps, kinds);
+            if attr_set_has(ps, .ByVal) || attr_set_has(ps, .InAlloca) fatal("attributor: promoting a call with a byval/inalloca argument of another type is not supported yet");
+            changed = true;
+        }
+        new_args[k] = ps;
+    }
+    ra := attr_list_ret(attrs);
+    ret_bc: Value_Id = NONE;
+    if cs_ret != ir.t_void && cs_ret != callee_ret {
+        if inst_op(cb) != .CALL fatal("attributor: promoting an invoke with another return type is not supported yet");
+        // createRetBitCast
+        users: [..] Value_Id; users.allocator = temp;
+        u := ir.v_first_use[cb];
+        while u != NONE { us := ir.u_user[u]; dup := false; for users if it == us dup = true; if !dup array_add(*users, us); u = ir.u_next[u]; }
+        ret_bc = create_bit_or_pointer_cast_inst(cb, cs_ret);
+        inst_insert_after(ret_bc, cb);
+        for users replace_uses_of_with(it, cb, ret_bc);
+        kinds: [..] Attr_Kind; kinds.allocator = temp;
+        type_incompatible_kinds(callee_ret, ra, *kinds);
+        ra = attr_set_remove_kinds(ra, kinds);
+        changed = true;
+    }
+    if changed inst(cb).attrs = attr_list_get(attr_list_fn(attrs), ra, new_args);
+    return ret_bc;
+}
+// Attributor::shouldSpecializeCallSiteForCallee with the AttributorPass IndirectCalleeSpecializationCallback
+atr_should_specialize_call_site_for_callee :: (cb: Value_Id, callee: Value_Id) -> bool {
+    if !atr_max_spec_given return true;
+    if atr_max_spec_per_cb == 0 return false;
+    set := table_find_pointer(*atr.specialized, cb);
+    if !set { empty: [..] Value_Id; table_set(*atr.specialized, cb, empty); set = table_find_pointer(*atr.specialized, cb); }
+    if set.count >= cast(s64) atr_max_spec_per_cb { for set.* if it == callee return true; return false; }
+    for set.* if it == callee return true;
+    array_add(set, callee);
+    return true;
+}
+// a CallInst::Create(FunctionCallee(CSFT, Callee), CSArgs, Name, InsertBefore)
+atr_create_plain_call :: (fty: Type_Id, callee: Value_Id, args: [] Value_Id, name: string, before: Value_Id) -> Value_Id {
+    c := new_inst(.CALL, func_ret(fty), cast(u32)(args.count + 1));
+    inst(c).ty2 = fty;
+    for args set_op(c, cast(u32) it_index, it);
+    set_op(c, cast(u32) args.count, callee);
+    return insert_before_named(c, before, name);
+}
+// SplitBlockAndInsertIfThen(Cond, SplitBefore, /*Unreachable=*/false): the new then-block's terminator
+atr_split_block_and_insert_if_then :: (cond: Value_Id, split_before: Value_Id) -> Value_Id {
+    n := sroa_pending_dt_updates.count;
+    tb := split_block_and_insert_if_then_else(cond, split_before, true, false, NONE);
+    sroa_pending_dt_updates.count = n;   // no DomTreeUpdater here
+    return block_terminator(tb);
+}
+// AAIndirectCallInfoCallSite::manifest, from "Special handling for the single callee case" on
+ici_specialize :: (i: u32, cb: Value_Id) -> bool {
+    e := ici_ext(i);
+    fp := call_callee(cb);
+    if type_addrspace(vtype(fp)) != 0 {
+        c := create_cast(.ADDRSPACECAST, fp, type_ptr_as(0));
+        fp = insert_before_named(c, cb, tprint("%.as0", vname(call_callee(cb))));
+    }
+    cb_is_void := vtype(cb) == ir.t_void;
+    ip := cb;
+    csft := inst(cb).ty2;
+    cs_args: [..] Value_Id; cs_args.allocator = temp;
+    for k: 0..cast(s64) call_arg_count(cb) - 1 array_add(*cs_args, op(cb, cast(u32) k));
+    if e.all_known && e.assumed.count == 1 {
+        nc := e.assumed[0];
+        if atr_is_legal_to_promote(cb, nc) {
+            atr_promote_call(cb, nc);
+            return ATR_CHANGED;
+        }
+        if inst_op(cb) != .CALL fatal("attributor: specializing an indirect invoke is not supported yet");
+        new_call := atr_create_plain_call(csft, nc, cs_args, vname(cb), cb);
+        if !cb_is_void atr_change_after_manifest(irp_cs_returned(cb), new_call);
+        atr_delete_inst_after_manifest(cb);
+        return ATR_CHANGED;
+    }
+    if inst_op(cb) != .CALL fatal("attributor: specializing an indirect invoke is not supported yet");
+    any := false;
+    all := e.all_known;
+    last_cmp: Value_Id = NONE;
+    skipped: [..] Value_Id; skipped.allocator = temp;
+    New_Call :: struct { c: Value_Id; ret: Value_Id; }
+    new_calls: [..] New_Call; new_calls.allocator = temp;
+    for nc: e.assumed {
+        if !atr_should_specialize_call_site_for_callee(cb, nc) {
+            array_add(*skipped, nc);
+            all = false;
+            continue;
+        }
+        any = true;
+        last_cmp = insert_before_named(create_icmp(ICMP_EQ, fp, nc), ip, "");
+        then_ti := atr_split_block_and_insert_if_then(last_cmp, ip);
+        cbbb := inst(cb).parent;
+        atr_register_manifest_added_block(inst(then_ti).parent);
+        atr_register_manifest_added_block(inst(ip).parent);
+        split_ti := inst(last_cmp).next;
+        else_bb: Value_Id;
+        if ip == cb {
+            else_bb = create_block(block_fn(cbbb), "", cbbb);
+            atr_register_manifest_added_block(else_bb);
+            ip = create_br(cbbb);
+            block_append_inst(else_bb, ip);
+            replace_uses_of_with(split_ti, cbbb, else_bb);
+        } else {
+            else_bb = inst(ip).parent;
+            replace_uses_of_with(then_ti, else_bb, cbbb);
+        }
+        ret_bc: Value_Id = NONE;
+        new_call: Value_Id;
+        if atr_is_legal_to_promote(cb, nc) {
+            clone := ic_clone_inst(cb);
+            inst_insert_before(clone, then_ti);
+            ret_bc = atr_promote_call(clone, nc);
+            new_call = clone;
+        } else {
+            new_call = atr_create_plain_call(csft, nc, cs_args, vname(cb), then_ti);
+        }
+        array_add(*new_calls, .{new_call, ret_bc});
+    }
+    attach_callee_md :: (c: Value_Id, all_known: bool, skipped: [] Value_Id) -> bool {
+        if !all_known return ATR_UNCHANGED;
+        ops := NewArray(skipped.count, Md_Id,, allocator = temp);
+        for skipped ops[it_index] = md_value(it);
+        set_metadata(c, md_kind_id("callees"), md_tuple(ops, false));
+        return ATR_CHANGED;
+    }
+    if !any return attach_callee_md(cb, e.all_known, skipped);
+    if all {
+        replace_all_uses_with(last_cmp, const_int(ir.t_i1, 1));
+        erase_inst(last_cmp);
+        u := new_inst(.UNREACHABLE, ir.t_void, 0);
+        inst_insert_before(u, ip);
+        drop_all_references(ip);
+        erase_inst(ip);
+    } else {
+        clone := ic_clone_inst(cb);
+        insert_before_named(clone, ip, vname(cb));
+        array_add(*new_calls, .{clone, NONE});
+        attach_callee_md(clone, e.all_known, skipped);
+    }
+    if !cb_is_void {
+        phi := create_phi(vtype(cb), cast(u32) new_calls.count);
+        insert_before_named(phi, block_first_insertion_pt(inst(cb).parent), tprint("%.phi", vname(cb)));
+        for new_calls {
+            ret := ifx it.ret != NONE then it.ret else it.c;
+            if vtype(ret) == vtype(cb) phi_add_incoming(phi, ret, inst(ret).parent);
+            else if vtype(it.c) == ir.t_void phi_add_incoming(phi, const_poison(vtype(cb)), inst(it.c).parent);
+            else fatal("attributor: call return should match or be void");
+        }
+        atr_change_after_manifest(irp_cs_returned(cb), phi);
+    }
+    atr_delete_inst_after_manifest(cb);
+    return ATR_CHANGED;
+}
 // Value::replaceNonMetadataUsesWith
 replace_non_metadata_uses_with :: (v: Value_Id, nv: Value_Id) {
     us: [..] Use_Id; us.allocator = temp;

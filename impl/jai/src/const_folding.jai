@@ -976,6 +976,14 @@ apf_is_denormal :: (f: APFloat) -> bool {
     g := f;
     d := fp_decode(g.k, apf_words(*g));
     if d.cat != .NORMAL return false;
+    if g.k == .PPC_FP128 {
+        // DoubleAPFloat::isDenormal: either half denormal, or (double)(Hi + Lo) != Hi
+        w := apf_words(*g);
+        hi := w[0]; lo := w[1];
+        hd := (cast(*float64) *hi).*; ld := (cast(*float64) *lo).*;
+        is_den :: (x: u64) -> bool { return ((x >> 52) & 0x7FF) == 0 && (x & 0xF_FFFF_FFFF_FFFF) != 0; }
+        return is_den(hi) || is_den(lo) || hd != hd + ld;
+    }
     p, emax, emin, b := fp_semantics(g.k);
     return big_bitlen(d.sig) < p;   // fp_decode gives denormals exponent emin and a significand narrower than p
 }

@@ -23,13 +23,16 @@ builder_at :: (ci: Value_Id) -> Builder {
 
 // FPMathOperator::classof for calls: FP (vector of FP, or arrays/structs of those) result types
 is_fp_math_type :: (t: Type_Id) -> bool {
+    // FPMathOperator::isSupportedFloatingPointType: FP or FP vector, a literal struct of one repeated FP (vector)
+    // type, or a (nested) array of FP (vector) elements
     ty := t;
-    while type_kind(ty) == .ARRAY ty = type_elem(ty);
     if type_kind(ty) == .STRUCT {
-        if type_nsub(ty) == 0 return false;
+        if !(ir.types[ty].flags & TYF_LITERAL) || type_nsub(ty) == 0 return false;
         e := type_sub(ty, 0);
         for i: 1..cast(s64) type_nsub(ty) - 1 if type_sub(ty, cast(u32) i) != e return false;
         ty = e;
+    } else {
+        while type_kind(ty) == .ARRAY ty = type_elem(ty);
     }
     return is_fp_type(scalar_type(ty));
 }
