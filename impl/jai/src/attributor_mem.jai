@@ -460,7 +460,7 @@ priv_manifest :: (i: u32) -> bool {
     ari.repair = ARI_PRIV;
     ari.priv_ty = cast(Type_Id) e.ty;
     ari.priv_arg = arg;
-    ari.priv_align = ifx al != NONE then aa(al).s.assumed else 0;
+    ari.priv_align = ifx al != NONE then align_value(aa(al).s.assumed) else 0;
     ari.tail_calls = tail_calls;
     if atr_register_function_signature_rewrite_ari(arg, ari) return ATR_CHANGED;
     return ATR_UNCHANGED;

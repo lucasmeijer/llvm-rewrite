@@ -1534,7 +1534,7 @@ aa_deduced_attributes :: (i: u32, out: *[..] Attr) {
             if nn array_add(out, attr_enum(.Dereferenceable, a.s.assumed));
             else array_add(out, attr_enum(.DereferenceableOrNull, a.s.assumed));
         case .ALIGN;
-            if a.s.assumed > 1 array_add(out, attr_enum(.Alignment, a.s.assumed));
+            if align_value(a.s.assumed) > 1 array_add(out, attr_enum(.Alignment, align_value(a.s.assumed)));
         case .MEM_BEHAVIOR;
             if bs_is_assumed(a.s, MB_NO_ACCESSES) array_add(out, attr_enum(.ReadNone));
             else if bs_is_assumed(a.s, MB_NO_WRITES) array_add(out, attr_enum(.ReadOnly));

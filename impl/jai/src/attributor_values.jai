@@ -1204,6 +1204,12 @@ gs_clamp :: (t: *Gstate, r: Gstate) {
 aa_clamp_state_and_indicate :: (i: u32, r: Gstate) -> bool {
     k := aa(i).kind;
     if k == .VALUE_CONSTANT_RANGE {
+        if r.vcr.bw != vcr_ext(i).bw {
+            // a call whose callee returns another type (LLVM mixes the bit widths in a release build; the full
+            // range of the callee makes the state invalid): give up
+            if cr_is_full_set(r.vcr.assumed) { vcr_pessimistic(i); return ATR_CHANGED; }
+            fatal("attributor: value ranges of different bit widths are not supported");
+        }
         before := vcr_ext(i).assumed;
         vcr_union_assumed(i, r.vcr.assumed);
         return !cr_eq(before, vcr_ext(i).assumed);

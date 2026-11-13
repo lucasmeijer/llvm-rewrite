@@ -575,7 +575,7 @@ pi_collect_constants_for_gep :: (i: u32, usr_oi: *Offset_Info, ptr_oi: *Offset_I
         for c: pcv_ext(pc).set {
             cp := sset_copy(uni);
             cp.items.allocator = temp;
-            oi_add_to_all(*cp, ap_sext_value(c) * cast(s64) ap_zext_value(vi.scale));
+            oi_add_to_all(*cp, ap_sext_value(c) * cast,no_check(s64) ap_zext_value(vi.scale));
             oi_merge(*product, *cp);
         }
         uni = product;
@@ -656,7 +656,7 @@ pi_use_pred :: (i: u32, m: *Pi_Offset_Map, u: Use_Id, follow: *bool, av: Value_I
         if atr_may_be_in_cycle(ci, usr, true) {
             base_oi := sset_copy(pom_get(m, base).*);
             base_oi.items.allocator = temp;
-            oi_add_to_all(*base_oi, cast(s64) ap_zext_value(off2));
+            oi_add_to_all(*base_oi, cast,no_check(s64) ap_zext_value(off2));
             uo = pom_get(m, usr);
             if first || sset_eq(*base_oi, uo) return passthrough(m, usr, cur, follow);
             oi_set_unknown(uo);

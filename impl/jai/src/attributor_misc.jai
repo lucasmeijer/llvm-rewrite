@@ -501,27 +501,27 @@ align_known_for_use :: (i: u32, assoc: Value_Id, u: Use_Id, x: Value_Id) -> (u64
             if cv != NONE && aa_is_valid(cv) && aa_is_fix(cv) {
                 shift := min(pcv_assumed_min_trailing_zeros(cv), 32);
                 ca := (cast(u64) 1) << shift;
-                if ca >= aa(al).s.known return 1, false;
+                if ca >= align_value(aa(al).s.known) return 1, false;
             }
-            if al != NONE return aa(al).s.known, false;
+            if al != NONE return align_value(aa(al).s.known), false;
         }
     }
     ma: u64 = 0;
     if is_call_base(x) {
         if call_is_bundle_operand(x, u) || call_is_callee_use(x, u) return 0, false;
         a := atr_get_aa(.ALIGN, irp_cs_argument(x, use_arg_no(u)), i, DEP_NONE);
-        if a != NONE ma = aa(a).s.known;
+        if a != NONE ma = align_value(aa(a).s.known);
     }
     use_v := ir.u_val[u];
     if o == .STORE { if op(x, 1) == use_v ma = inst(x).align; }
     else if o == .LOAD { if op(x, 0) == use_v ma = inst(x).align; }
     else if o == .ATOMICRMW { if op(x, 0) == use_v ma = inst(x).align; }
     else if o == .CMPXCHG { if op(x, 0) == use_v ma = inst(x).align; }
-    if ma == 0 || ma <= aa(i).s.known return 0, false;
+    if ma == 0 || ma <= align_value(aa(i).s.known) return 0, false;
     alignment := cast,no_check(u32) ma;
     base, offset := get_pointer_base_with_constant_offset(use_v);
     if base != NONE && base == assoc {
-        g := gcd_u32(abs_s32_as_u32(cast,force(s32) offset), alignment);
+        g := gcd_u32(abs_s32_as_u32(cast,no_check(s32) offset), alignment);
         alignment = bit_floor_u32(g);
     }
     return cast(u64) alignment, false;
@@ -558,10 +558,10 @@ align_update :: (i: u32) -> bool {
                 valid = true;
             }
             al := atr_get_aa(.ALIGN, irp_value(op(cb, 0)), i, DEP_REQUIRED);
-            if al != NONE { alignment = max(aa(al).s.assumed, alignment); valid = true; }
+            if al != NONE { alignment = max(align_value(aa(al).s.assumed), alignment); valid = true; }
             if valid {
                 r := bs_new_inc(1 << 32, 1);
-                r.assumed = min(aa(i).s.assumed, alignment);
+                r.assumed = min(align_value(aa(i).s.assumed), alignment);
                 return bs_clamp_and_indicate(*aa(i).s, r);
             }
         }
@@ -572,7 +572,7 @@ align_update :: (i: u32) -> bool {
         arg := irp_assoc_arg(p);
         if arg != NONE {
             a := atr_get_aa(.ALIGN, irp_argument(arg), i, DEP_NONE);
-            if a != NONE bs_take_known_max(*aa(i).s, aa(a).s.known);
+            if a != NONE bs_take_known_max(*aa(i).s, align_value(aa(a).s.known));
         }
     }
     return changed;
@@ -599,11 +599,11 @@ align_floating_update :: (i: u32) -> bool {
             alignment: u32 = 1;
             base, offset := get_pointer_base_with_constant_offset(v);
             if base != NONE {
-                pa := cast(u32) pointer_alignment(base);
-                g := gcd_u32(abs_s32_as_u32(cast,force(s32) offset), pa);
+                pa := cast,no_check(u32) pointer_alignment(base);
+                g := gcd_u32(abs_s32_as_u32(cast,no_check(s32) offset), pa);
                 alignment = bit_floor_u32(g);
             } else {
-                alignment = cast(u32) pointer_alignment(v);
+                alignment = cast,no_check(u32) pointer_alignment(v);
             }
             bs_take_known_max(*t, alignment);
             bs_pessimistic(*t);
@@ -624,7 +624,7 @@ align_manifest :: (i: u32) -> bool {
         arg := irp_assoc_arg(p);
         if arg != NONE && atr_is_involved_in_must_tail_call(arg) return ATR_UNCHANGED;
         changed := align_impl_manifest(i);
-        if pointer_alignment(irp_assoc_value(p)) >= aa(i).s.assumed changed = ATR_UNCHANGED;
+        if pointer_alignment(irp_assoc_value(p)) >= align_value(aa(i).s.assumed) changed = ATR_UNCHANGED;
         return changed;
     }
     return align_impl_manifest(i);
@@ -635,7 +635,7 @@ align_impl_manifest :: (i: u32) -> bool {
     instr_changed := ATR_UNCHANGED;
     av := irp_assoc_value(p);
     if is_constant_data(av) return ATR_UNCHANGED;
-    assumed := aa(i).s.assumed;
+    assumed := align_value(aa(i).s.assumed);
     u := ir.v_first_use[av];
     while u != NONE {
         user := ir.u_user[u];
@@ -644,8 +644,8 @@ align_impl_manifest :: (i: u32) -> bool {
         o := inst_op(user);
         ptr_idx: u32 = ifx o == .STORE then cast(u32) 1 else 0;
         if o == .STORE || o == .LOAD || o == .ATOMICRMW || o == .CMPXCHG {
-            if op(user, ptr_idx) == av && inst(user).align < assumed {
-                inst(user).align = assumed;
+            if op(user, ptr_idx) == av && inst(user).align < align_value(assumed) {
+                inst(user).align = align_value(assumed);
                 instr_changed = ATR_CHANGED;
             }
         }
@@ -1281,7 +1281,7 @@ alloc_info_update :: (i: u32) -> bool {
     first := bins_order(*pi_ext(pi).bins)[0];
     r := pi_ext(pi).bins.keys[first];
     if r.offset != 0 return aa_pessimistic(i);
-    size_of_bin := cast(u64) (r.offset + r.size);
+    size_of_bin := cast,no_check(u64) (r.offset + r.size);
     if size_of_bin >= asize return aa_pessimistic(i);
     if !alloc_info_change(i, cast(s64) (size_of_bin * 8)) return ATR_UNCHANGED;
     return ATR_CHANGED;
@@ -1353,4 +1353,12 @@ md_op_value :: (md: Md_Id, k: u32) -> Value_Id {
     if o == NONE return NONE;
     if ir.mds[o].kind != .VALUE return NONE;
     return ir.mds[o].value;
+}
+
+// Align(Value): the alignment of an IncIntegerState value (Log2_64: a non power of two rounds down)
+align_value :: (v: u64) -> u64 {
+    if v == 0 return 1;
+    r: u64 = 1;
+    while r <= v / 2 r <<= 1;
+    return r;
 }
