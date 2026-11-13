@@ -575,8 +575,10 @@ lv_deref_aligned_via_assumption_scev :: (ptr: Value_Id, align: u64, q: Simplify_
         if !ok || rk.was_on != ptr continue;
         if !is_valid_assume_for_context(e.assume, q.cxt, q.dt) continue;
         if rk.kind == .Alignment { if !have_align || rk.arg > align_rk { align_rk = rk.arg; have_align = true; } }
-        if (!can_be_freed || will_not_free_between(e.assume, q.cxt)) && rk.kind == .Dereferenceable {
-            vp_unported("dereferenceable assumptions in isDereferenceableAndAlignedInLoop");
+        if rk.kind == .Dereferenceable && !have_deref && (!can_be_freed || will_not_free_between(e.assume, q.cxt)) {
+            // CheckSize: AccessSize <=u the assumed size, both with the loop guards applied
+            if rk.ir_arg != NONE && sc_is_known_predicate(ICMP_ULE, sc_apply_loop_guards_with(access_size, g), sc_apply_loop_guards_with(sc_get_scev(rk.ir_arg), g))
+                have_deref = true;
         }
         is_aligned |= have_align && align_rk >= align;
         if is_aligned && have_deref return true;

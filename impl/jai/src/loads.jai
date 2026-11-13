@@ -87,7 +87,7 @@ fn_does_not_free_memory :: (f: Value_Id) -> bool {
 }
 
 // getKnowledgeFromBundle for the "dereferenceable" / "align" tags: (kind found, was_on, arg value)
-Retained_Knowledge :: struct { kind: Attr_Kind; was_on: Value_Id = NONE; arg: u64; }
+Retained_Knowledge :: struct { kind: Attr_Kind; was_on: Value_Id = NONE; arg: u64; ir_arg: Value_Id = NONE; }
 knowledge_from_bundle :: (assume: Value_Id, k: u32) -> (bool, Retained_Knowledge) {
     rk: Retained_Knowledge;
     tag := call_bundle_tag(assume, k);
@@ -107,6 +107,7 @@ knowledge_from_bundle :: (assume: Value_Id, k: u32) -> (bool, Retained_Knowledge
         if rk.kind == .Alignment rk.arg = arg_or(assume, begin, end, 0, 1);
         else rk.arg = arg_or(assume, begin, end, 0, 0);
     }
+    if end - begin > 1 rk.ir_arg = op(assume, begin + 1);   // IRArgValue
     if rk.kind == .Alignment && end - begin > 2 {
         a := rk.arg | arg_or(assume, begin, end, 1, 1);
         rk.arg = a & (~a + 1);   // MinAlign
