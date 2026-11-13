@@ -110,8 +110,9 @@ al_remove_ret_attrs :: (l: u32, kinds: [] Attr_Kind) -> u32 {
 }
 
 // runIPSCCP
-ipsccp_run :: (name: string) -> Preserved {
+ipsccp_run :: (name: string, no_func_spec := false) -> Preserved {
     ipsccp_parse_params(name);
+    if no_func_spec ipsccp_allow_func_spec = false;   // IPSCCPOptions(AllowFuncSpec = !isLTOPreLink) from the pipeline
     s := sccp_new();
     for f: ir.m_functions {
         if is_declaration(f) continue;

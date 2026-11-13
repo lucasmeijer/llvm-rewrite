@@ -323,6 +323,9 @@ Pass_Kind :: enum u8 {
     INLINER_WRAPPER_PM; EXTRA_LOOP_UNSWITCH; CORO_COND; LOOP_INTERCHANGE; EXPAND_MEMCMP; CHR;
     // DependenceAnalysis (dependence_analysis.jai), Delinearization and SCEVDivision (delinearization.jai)
     PRINT_DA; PRINT_DELINEARIZATION; PRINT_SCEV_DIVISION;
+    // the LTO pipelines' module passes (pass_lto_misc.jai), MergeFunctions (pass_merge_functions.jai)
+    CROSS_DSO_CFI; GLOBAL_SPLIT; WHOLE_PROGRAM_DEVIRT; LOWER_TYPE_TESTS; DROP_TYPE_TESTS; SIMPLIFY_TYPE_TESTS;
+    EXPAND_VARIADICS; PGO_ICALL_PROM; CANONICALIZE_ALIASES; NAME_ANON_GLOBALS; MERGE_FUNCTIONS;
 }
 
 Pass_Info :: struct {
@@ -484,6 +487,17 @@ PASS_TABLE :: Pass_Info.[
     .{"deadargelim", .MODULE, .DEAD_ARG_ELIM, false, .DOMTREE},
     .{"argpromotion", .CGSCC, .ARG_PROMOTION, false, .DOMTREE},
     .{"assign-guid", .MODULE, .ASSIGN_GUID, false, .DOMTREE},
+    .{"cross-dso-cfi", .MODULE, .CROSS_DSO_CFI, false, .DOMTREE},
+    .{"globalsplit", .MODULE, .GLOBAL_SPLIT, false, .DOMTREE},
+    .{"wholeprogramdevirt", .MODULE, .WHOLE_PROGRAM_DEVIRT, false, .DOMTREE},
+    .{"lowertypetests", .MODULE, .LOWER_TYPE_TESTS, false, .DOMTREE},
+    .{"drop-type-tests", .MODULE, .DROP_TYPE_TESTS, false, .DOMTREE},   // also drop-type-tests<assume> / <all>
+    .{"simplify-type-tests", .MODULE, .SIMPLIFY_TYPE_TESTS, false, .DOMTREE},
+    .{"expand-variadics", .MODULE, .EXPAND_VARIADICS, false, .DOMTREE},
+    .{"pgo-icall-prom", .MODULE, .PGO_ICALL_PROM, false, .DOMTREE},
+    .{"canonicalize-aliases", .MODULE, .CANONICALIZE_ALIASES, false, .DOMTREE},
+    .{"name-anon-globals", .MODULE, .NAME_ANON_GLOBALS, false, .DOMTREE},
+    .{"mergefunc", .MODULE, .MERGE_FUNCTIONS, false, .DOMTREE},
     // L1.scalar-misc
     .{"lower-expect", .FUNCTION, .LOWER_EXPECT, false, .DOMTREE},
     .{"lower-constant-intrinsics", .FUNCTION, .LOWER_CONSTANT_INTRINSICS, false, .DOMTREE},
@@ -565,6 +579,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "speculative-execution<") && name[name.count - 1] == #char ">" return lookup_pass("speculative-execution");
     if name == "coro-split<reuse-storage>" || name == "coro-split<>" return lookup_pass("coro-split");
     if name == "cg-profile<in-lto-post-link>" || name == "cg-profile<>" return lookup_pass("cg-profile");
+    if name == "drop-type-tests<assume>" || name == "drop-type-tests<all>" return lookup_pass("drop-type-tests");
     if begins_with(name, "drop-unnecessary-assumes<") && name[name.count - 1] == #char ">" return lookup_pass("drop-unnecessary-assumes");
     if begins_with(name, "ee-instrument<") && name[name.count - 1] == #char ">" return lookup_pass("ee-instrument");
     return null;
@@ -596,6 +611,8 @@ Pass_Node :: struct {
     no_entry_count_update: bool;   // tailcallelim: UpdateFunctionEntryCount = false
     no_lifetime: bool;             // always-inline: InsertLifetimeIntrinsics = false
     early_folds_only: bool;        // vector-combine: TryEarlyFoldsOnly
+    in_lto: bool;                  // jump-table-to-switch: InLTO = isLTOPostLink(Phase)
+    no_func_spec: bool;            // ipsccp: AllowFuncSpec = !isLTOPreLink(Phase)
     late_first: s32 = -1;          // INLINER_WRAPPER_PM: the first of its late module passes (not printed)
 }
 
@@ -665,6 +682,7 @@ is_module_pass_name :: (name: string) -> bool {
     if name == "function" || begins_with(name, "function<") return true;   // still a module-level element
     if name == "cgscc" || name == "coro-cond" return true;
     if begins_with(name, "default<") || pb_is_unsupported_alias(name) return true;
+    for string.["thinlto-pre-link<", "thinlto<", "lto-pre-link<", "lto<"] if begins_with(name, it) return true;
     if name == "loop" || name == "loop-mssa" return false;
     p := lookup_pass(name);
     return p != null && p.level == .MODULE;
@@ -880,7 +898,8 @@ parse_module_pass :: (mpm: s32, last: *s32, e: s32) {
         unknown_pass(el.name);
     }
     if pb_parse_default_pipeline(mpm, last, el.name) return;   // default<O#> (pass_builder_pipelines.jai)
-    if pb_is_unsupported_alias(el.name) fatal("pass pipeline '%': the LTO pipelines are not implemented yet", el.name);
+    if pb_parse_lto_pipeline(mpm, last, el.name) return;   // thinlto-pre-link<O#>, thinlto<O#>, lto-pre-link<O#>, lto<O#>
+    if pb_is_unsupported_alias(el.name) fatal("pass pipeline '%': the FatLTO pipeline is not implemented yet", el.name);
     if el.name == "coro-cond" pipeline_error("invalid use of 'coro-cond' pass as module pipeline");
     p := lookup_pass(el.name);
     if p == null unknown_pass(el.name);
@@ -1185,6 +1204,17 @@ run_module_pm :: (n: s32) {
             case .ELIM_AVAIL_EXTERN; if should_run_pass(node, NONE) mam_invalidate(elim_avail_extern_run());
             case .INTERNALIZE; if should_run_pass(node, NONE) mam_invalidate(internalize_run(node));
             case .ASSIGN_GUID; if should_run_pass(node, NONE) mam_invalidate(assign_guid_run());
+            case .CROSS_DSO_CFI; if should_run_pass(node, NONE) mam_invalidate(cross_dso_cfi_run());
+            case .GLOBAL_SPLIT; if should_run_pass(node, NONE) mam_invalidate(global_split_run());
+            case .WHOLE_PROGRAM_DEVIRT; if should_run_pass(node, NONE) mam_invalidate(whole_program_devirt_run());
+            case .LOWER_TYPE_TESTS; if should_run_pass(node, NONE) mam_invalidate(lower_type_tests_run());
+            case .DROP_TYPE_TESTS; if should_run_pass(node, NONE) mam_invalidate(drop_type_tests_run());
+            case .SIMPLIFY_TYPE_TESTS; if should_run_pass(node, NONE) mam_invalidate(simplify_type_tests_run());
+            case .EXPAND_VARIADICS; if should_run_pass(node, NONE) mam_invalidate(expand_variadics_run());
+            case .PGO_ICALL_PROM; if should_run_pass(node, NONE) mam_invalidate(pgo_icall_prom_run());
+            case .CANONICALIZE_ALIASES; if should_run_pass(node, NONE) mam_invalidate(canonicalize_aliases_run());
+            case .NAME_ANON_GLOBALS; if should_run_pass(node, NONE) mam_invalidate(name_anon_globals_run());
+            case .MERGE_FUNCTIONS; if should_run_pass(node, NONE) mam_invalidate(merge_functions_run());
             case .DEAD_ARG_ELIM; if should_run_pass(node, NONE) mam_invalidate(dead_arg_elim_run());
             case .CORO_EARLY; if should_run_pass(node, NONE) mam_invalidate(coro_early_run());
             case .CORO_CLEANUP; if should_run_pass(node, NONE) mam_invalidate(coro_cleanup_run());
@@ -1198,7 +1228,7 @@ run_module_pm :: (n: s32) {
             case .CG_PROFILE; if should_run_pass(node, NONE) mam_invalidate(cg_profile_run());
             case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
             case .CALLED_VALUE_PROPAGATION; if should_run_pass(node, NONE) mam_invalidate(called_value_propagation_run());
-            case .IPSCCP; if should_run_pass(node, NONE) mam_invalidate(ipsccp_run(node.name));
+            case .IPSCCP; if should_run_pass(node, NONE) mam_invalidate(ipsccp_run(node.name, node.no_func_spec));
             case .PRE_ISEL_INTRINSIC_LOWERING;
                 if should_run_pass(node, NONE) && pre_isel_intrinsic_lowering_run() mam_invalidate(PRESERVE_NONE);
             case; fatal("internal: '%' is not a module pass", node.name);
@@ -1305,7 +1335,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .LOOP_SINK; return loop_sink_run(f);
         case .TRANSFORM_WARNING; return transform_warning_run(f);
         case .DROP_UNNECESSARY_ASSUMES; return drop_unnecessary_assumes_run(f, node.name);
-        case .JUMP_TABLE_TO_SWITCH; return jump_table_to_switch_run(f);
+        case .JUMP_TABLE_TO_SWITCH; jtts_in_lto = node.in_lto; return jump_table_to_switch_run(f);
         case .MOVE_AUTO_INIT; return move_auto_init_run(f);
         case .ALIGNMENT_FROM_ASSUMPTIONS; return alignment_from_assumptions_run(f);
         case .LIBCALLS_SHRINKWRAP; return libcalls_shrinkwrap_run(f);

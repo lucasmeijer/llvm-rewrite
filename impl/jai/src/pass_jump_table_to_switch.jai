@@ -19,8 +19,16 @@ jtts_function_guid :: (f: Value_Id) -> u64 {
         c := md_const_int_op(m, 0);
         if c != NONE return const_int_zext(c);
     }
+    if jtts_in_lto {
+        // getIRPGOFuncName(F, InLTO = true): the PGOFuncName metadata, else the name as if external
+        if get_metadata(f, md_kind_id("PGOFuncName")) != NONE fatal("jump-table-to-switch: PGOFuncName metadata in LTO mode is not supported yet");
+        n := vname(f);
+        if n.count && n[0] == 1 n = slice(n, 1, n.count - 1);
+        return md5_hash_u64(n);
+    }
     return md5_hash_u64(gv_global_identifier(f));
 }
+jtts_in_lto := false;   // JumpTableToSwitchPass(InLTO), set per run from the pass node
 
 fn_instruction_count :: (f: Value_Id) -> s64 { n := 0; for b: fn_blocks(f) n += block_size(b); return n; }
 

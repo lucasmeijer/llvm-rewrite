@@ -1,10 +1,14 @@
-// The default optimization pipelines (`-O1`/`-O2`/`-O3`, `-passes='default<O#>'`, `default<O0>`).
+// The default optimization pipelines (`-O1`/`-O2`/`-O3`, `-passes='default<O#>'`, `default<O0>`) and the LTO
+// pipelines (`lto-pre-link<O#>`, `lto<O#>`, `thinlto-pre-link<O#>`, `thinlto<O#>`).
 // Port of llvm/lib/Passes/PassBuilderPipelines.cpp: PipelineTuningOptions' defaults, buildPerModuleDefaultPipeline,
+// buildLTOPreLinkDefaultPipeline, buildLTODefaultPipeline, buildThinLTOPreLinkDefaultPipeline,
+// buildThinLTODefaultPipeline, addRequiredLTOPreLinkPasses,
 // buildModuleSimplificationPipeline, buildInlinerPipeline (ModuleInlinerWrapperPass), buildModuleInlinerPipeline,
 // buildFunctionSimplificationPipeline, buildO1FunctionSimplificationPipeline, buildModuleOptimizationPipeline,
 // addVectorPasses, buildO0DefaultPipeline (with buildCoroWrapper), and setupOptionsForPipelineAlias (PassBuilder.cpp).
-// Phase is always ThinOrFullLTOPhase::None, there is no PGOOptions, and every extension point is empty (opt
-// registers no callbacks without plugins / -passes-ep-* options).
+// The ThinOrFullLTOPhase is `pb_phase` (set by the entry point that builds the pipeline; LLVM passes it down as a
+// parameter), there is no PGOOptions, and every extension point is empty (opt registers no callbacks without
+// plugins / -passes-ep-* options).
 //
 // The pipeline is built as Pass_Node rows (DESIGN.md "Pass infrastructure"). Leaf passes are created from the name
 // LLVM's printPipeline prints for them (so `-jai-print-pipeline` can be diffed against `opt -print-pipeline-passes`);
@@ -15,6 +19,16 @@
 
 // OptimizationLevel (only O0..O3 can be named; Os/Oz were removed from the pass builder)
 Opt_Level :: struct { speed: s32; size: s32; }
+
+// ThinOrFullLTOPhase
+Lto_Phase :: enum u8 { NONE; THIN_PRE_LINK; THIN_POST_LINK; FULL_PRE_LINK; FULL_POST_LINK; }
+pb_phase: Lto_Phase;
+is_lto_pre_link :: () -> bool { return pb_phase == .THIN_PRE_LINK || pb_phase == .FULL_PRE_LINK; }
+is_lto_post_link :: () -> bool { return pb_phase == .THIN_POST_LINK || pb_phase == .FULL_POST_LINK; }
+pb_rotate :: (check_exit_count: bool) -> string {
+    return tprint("loop-rotate<header-duplication;%;%>", ifx is_lto_pre_link() then "prepare-for-lto" else "no-prepare-for-lto",
+                  ifx check_exit_count then "check-exit-count" else "no-check-exit-count");
+}
 
 // PipelineTuningOptions (PipelineTuningOptions::PipelineTuningOptions + opt's NewPMDriver overrides)
 Pipeline_Tuning :: struct {
@@ -124,14 +138,32 @@ pb_parse_default_pipeline :: (mpm: s32, last: *s32, name: string) -> bool {
     if !ok pipeline_error("invalid optimization level '%'", inner);
     pto.loop_vectorization = level.speed >= 2;
     pto.slp_vectorization = level.speed >= 2;
+    pb_phase = .NONE;
     build_per_module_default_pipeline(mpm, last, level);
     return true;
 }
-// The other per-module aliases of PassRegistry.def: LTO pipelines are not ported
+// The LTO aliases of PassRegistry.def: thinlto-pre-link<O#>, thinlto<O#>, lto-pre-link<O#>, lto<O#>
+pb_parse_lto_pipeline :: (mpm: s32, last: *s32, name: string) -> bool {
+    if name[name.count - 1] != #char ">" return false;
+    prefix: string;
+    for string.["thinlto-pre-link<", "thinlto<", "lto-pre-link<", "lto<"] if begins_with(name, it) { prefix = it; break; }
+    if !prefix.count return false;
+    inner := slice(name, prefix.count, name.count - prefix.count - 1);
+    ok, level := pb_parse_opt_level(inner);
+    if !ok pipeline_error("invalid optimization level '%'", inner);
+    pto.loop_vectorization = level.speed >= 2;
+    pto.slp_vectorization = level.speed >= 2;
+    if prefix == {
+        case "thinlto-pre-link<"; build_thinlto_pre_link_default_pipeline(mpm, last, level);
+        case "thinlto<"; build_thinlto_default_pipeline(mpm, last, level);
+        case "lto-pre-link<"; pb_phase = .FULL_PRE_LINK; build_per_module_default_pipeline(mpm, last, level);   // PTO.UnifiedLTO is off
+        case "lto<"; build_lto_default_pipeline(mpm, last, level);
+    }
+    pb_phase = .NONE;
+    return true;
+}
 pb_is_unsupported_alias :: (name: string) -> bool {
-    for string.["thinlto-pre-link<", "thinlto<", "lto-pre-link<", "lto<", "fatlto-pre-link<"]
-        if begins_with(name, it) return true;
-    return false;
+    return begins_with(name, "fatlto-pre-link<");
 }
 
 // ---------------------------------------------------------------- building blocks
@@ -245,7 +277,7 @@ build_o1_function_simplification_pipeline :: (fpm: s32, last: *s32, level: Opt_L
     pb_add(lpm1, *lpm1_last, "loop-instsimplify");
     pb_add(lpm1, *lpm1_last, "loop-simplifycfg");
     pb_add(lpm1, *lpm1_last, pb_licm(false));
-    pb_add(lpm1, *lpm1_last, "loop-rotate<header-duplication;no-prepare-for-lto;no-check-exit-count>");
+    pb_add(lpm1, *lpm1_last, pb_rotate(false));
     pb_add(lpm1, *lpm1_last, pb_licm(true));
     pb_add(lpm1, *lpm1_last, "simple-loop-unswitch<no-nontrivial;trivial>");
     if pb_cl.enable_loop_flatten pb_unsupported("loop-flatten (-enable-loop-flatten)");
@@ -281,7 +313,10 @@ build_function_simplification_pipeline :: (fpm: s32, last: *s32, level: Opt_Leve
     pb_add(fpm, last, "speculative-execution<only-if-divergent-target>");
     pb_add(fpm, last, "jump-threading");
     pb_add(fpm, last, "correlated-propagation");
-    if pb_cl.enable_jump_table_to_switch pb_add(fpm, last, "jump-table-to-switch");
+    if pb_cl.enable_jump_table_to_switch {
+        n := pb_add(fpm, last, "jump-table-to-switch");   // JumpTableToSwitchPass(InLTO = isLTOPostLink(Phase))
+        pipeline.nodes[n].in_lto = is_lto_post_link();
+    }
     pb_add(fpm, last, pb_simplifycfg(SCFG_RANGE));
     pb_add(fpm, last, INSTCOMBINE);
     pb_add(fpm, last, "aggressive-instcombine");
@@ -296,7 +331,7 @@ build_function_simplification_pipeline :: (fpm: s32, last: *s32, level: Opt_Leve
     pb_add(lpm1, *lpm1_last, "loop-instsimplify");
     pb_add(lpm1, *lpm1_last, "loop-simplifycfg");
     pb_add(lpm1, *lpm1_last, pb_licm(false));
-    pb_add(lpm1, *lpm1_last, "loop-rotate<header-duplication;no-prepare-for-lto;no-check-exit-count>");
+    pb_add(lpm1, *lpm1_last, pb_rotate(false));
     pb_add(lpm1, *lpm1_last, pb_licm(true));
     unswitch := ifx level.speed == 3 then "simple-loop-unswitch<nontrivial;trivial>" else "simple-loop-unswitch<no-nontrivial;trivial>";
     pb_add(lpm1, *lpm1_last, unswitch);
@@ -392,8 +427,10 @@ build_inliner_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
 
     pb_add(cg, *cglast, "function-attrs");
     pb_add(cg, *cglast, "function(require<should-not-run-function-passes>)");
-    pb_add(cg, *cglast, "coro-split");
-    pb_add(cg, *cglast, "coro-annotation-elide");
+    if pb_phase != .THIN_PRE_LINK {
+        pb_add(cg, *cglast, "coro-split");
+        pb_add(cg, *cglast, "coro-annotation-elide");
+    }
 
     // MIWP.addLateModulePass (not printed by printPipeline)
     pipeline.nodes[w].late_first = cast(s32) pipeline.nodes.count;   // the FUNCTION_ADAPTOR created next
@@ -407,13 +444,17 @@ build_module_inliner_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     fa := pb_function_adaptor(mpm, last, pto.eagerly_invalidate_analyses);
     falast: s32 = -1;
     build_function_simplification_pipeline(fa, *falast, level);
-    pb_add(mpm, last, "cgscc(coro-split)");
-    pb_add(mpm, last, "cgscc(coro-annotation-elide)");
+    if pb_phase != .THIN_PRE_LINK {
+        pb_add(mpm, last, "cgscc(coro-split)");
+        pb_add(mpm, last, "cgscc(coro-annotation-elide)");
+    }
 }
 
 // ---------------------------------------------------------------- module pipelines
 
 build_module_simplification_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
+    if pb_phase == .THIN_POST_LINK pb_add(mpm, last, "pgo-icall-prom");   // PGOIndirectCallPromotion(InLTO = true)
+    if pb_phase != .THIN_POST_LINK {
     pb_add(mpm, last, "inferattrs");
     pb_add(mpm, last, "coro-early");
     {
@@ -426,10 +467,14 @@ build_module_simplification_pipeline :: (mpm: s32, last: *s32, level: Opt_Level)
         pb_add(fa, *l, "early-cse<>");
         if level.speed == 3 pb_add(fa, *l, "callsite-splitting");
     }
+    }
     pb_add(mpm, last, "openmp-opt");
     if pb_cl.attributor_run == "module" || pb_cl.attributor_run == "full" pb_unsupported("attributor (-attributor-enable)");
     if pb_cl.attributor_run == "module-light" || pb_cl.attributor_run == "light" pb_unsupported("attributor-light (-attributor-enable)");
-    pb_add(mpm, last, "ipsccp");   // IPSCCPOptions(AllowFuncSpec = !isLTOPreLink)
+    if pb_phase == .THIN_POST_LINK pb_add(mpm, last, "drop-type-tests<assume>");
+    // IPSCCPOptions(AllowFuncSpec = !isLTOPreLink(Phase)); printPipeline does not show it
+    ipn := pb_add(mpm, last, "ipsccp");
+    pipeline.nodes[ipn].no_func_spec = is_lto_pre_link();
     pb_add(mpm, last, "called-value-propagation");
     pb_add(mpm, last, "globalopt");
     {
@@ -445,30 +490,45 @@ build_module_simplification_pipeline :: (mpm: s32, last: *s32, level: Opt_Level)
     if pb_cl.enable_module_inliner build_module_inliner_pipeline(mpm, last, level);
     else build_inliner_pipeline(mpm, last, level);
     pb_add(mpm, last, "deadargelim");
-    pb_add(mpm, last, "coro-cleanup");
+    if pb_phase == .THIN_POST_LINK pb_add(mpm, last, "simplify-type-tests");
+    if pb_phase != .THIN_PRE_LINK pb_add(mpm, last, "coro-cleanup");
     pb_add(mpm, last, "globalopt");
     pb_add(mpm, last, "globaldce");
 }
 
 add_vector_passes :: (fpm: s32, last: *s32, level: Opt_Level) {
+    full_post := pb_phase == .FULL_POST_LINK;
     pb_add(fpm, last, tprint("loop-vectorize<%interleave-forced-only;%vectorize-forced-only;>",
         ifx pto.loop_interleaving then "no-" else "", ifx pto.loop_vectorization then "no-" else ""));
-    pb_add(fpm, last, "drop-unnecessary-assumes<drop-deref>");
+    if !is_lto_pre_link() pb_add(fpm, last, "drop-unnecessary-assumes<drop-deref>");
     pb_add(fpm, last, "infer-alignment");
-    pb_add(fpm, last, "loop-load-elim");
+    if full_post {
+        if pb_cl.enable_unroll_and_jam && pto.loop_unrolling pb_unsupported("loop-unroll-and-jam (-enable-unroll-and-jam)");
+        pb_loop_unroll(fpm, last, level);
+        pb_add(fpm, last, "transform-warning");
+        pb_add(fpm, last, "sroa<preserve-cfg;aggregate-to-vector>");
+    }
+    if !full_post pb_add(fpm, last, "loop-load-elim");
     pb_add(fpm, last, INSTCOMBINE);
     if level.speed > 1 && pb_cl.extra_vectorizer_passes pb_unsupported("extra-vector-passes (-extra-vectorizer-passes)");
     o := SCFG_RANGE;
     o.forward_switch_cond = true; o.switch_to_arithmetic = true; o.switch_to_lookup = true; o.keep_loops = false;
     o.hoist_common_insts = true; o.sink_common_insts = true;
     pb_add(fpm, last, pb_simplifycfg(o));
+    if full_post {
+        pb_add(fpm, last, "sccp");
+        pb_add(fpm, last, INSTCOMBINE);
+        pb_add(fpm, last, "bdce");
+    }
     if pto.slp_vectorization pb_add(fpm, last, "slp-vectorizer");
     pb_add(fpm, last, "vector-combine");
-    pb_add(fpm, last, INSTCOMBINE);
-    if pb_cl.enable_unroll_and_jam && pto.loop_unrolling pb_unsupported("loop-unroll-and-jam (-enable-unroll-and-jam)");
-    pb_loop_unroll(fpm, last, level);
-    pb_add(fpm, last, "transform-warning");
-    pb_add(fpm, last, "sroa<preserve-cfg;aggregate-to-vector>");
+    if !full_post {
+        pb_add(fpm, last, INSTCOMBINE);
+        if pb_cl.enable_unroll_and_jam && pto.loop_unrolling pb_unsupported("loop-unroll-and-jam (-enable-unroll-and-jam)");
+        pb_loop_unroll(fpm, last, level);
+        pb_add(fpm, last, "transform-warning");
+        pb_add(fpm, last, "sroa<preserve-cfg;aggregate-to-vector>");
+    }
     pb_add(fpm, last, "infer-alignment");
     pb_add(fpm, last, INSTCOMBINE);
     l: s32 = -1;
@@ -478,13 +538,13 @@ add_vector_passes :: (fpm: s32, last: *s32, level: Opt_Level) {
 
 build_module_optimization_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     if pb_cl.enable_partial_inlining pb_unsupported("partial-inliner (-enable-partial-inlining)");
-    pb_add(mpm, last, "elim-avail-extern");
+    if !is_lto_pre_link() pb_add(mpm, last, "elim-avail-extern");
     pb_add(mpm, last, "rpo-function-attrs");
     if pb_cl.enable_global_analyses pb_add(mpm, last, "recompute-globalsaa");
 
     fa := pb_function_adaptor(mpm, last, pto.eagerly_invalidate_analyses);
     l: s32 = -1;
-    pb_add(fa, *l, "drop-unnecessary-assumes");
+    if !is_lto_pre_link() pb_add(fa, *l, "drop-unnecessary-assumes");
     if pb_cl.enable_loop_versioning_licm pb_unsupported("loop-versioning-licm (-enable-loop-versioning-licm)");
     pb_add(fa, *l, "float2int");
     pb_add(fa, *l, "lower-constant-intrinsics");
@@ -493,7 +553,7 @@ build_module_optimization_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     {
         ll: s32 = -1;
         la := pb_loop_adaptor(fa, *l, false);
-        pb_add(la, *ll, "loop-rotate<header-duplication;no-prepare-for-lto;check-exit-count>");
+        pb_add(la, *ll, pb_rotate(true));
         pb_add(la, *ll, "loop-deletion");
         if pto.loop_interchange pb_add(la, *ll, "loop-interchange");
     }
@@ -511,16 +571,16 @@ build_module_optimization_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     o.switch_to_arithmetic = true; o.speculate_unpredictables = true; o.hoist_loads_stores_with_cond_faulting = true;
     pb_add(fa, *l, pb_simplifycfg(o));
 
-    pb_add(mpm, last, "alloc-token");
+    if !is_lto_pre_link() pb_add(mpm, last, "alloc-token");
     if pb_cl.enable_instrumentor pb_unsupported("instrumentor (-enable-instrumentor)");
-    if pb_cl.enable_hot_cold_split pb_unsupported("hotcoldsplit (-hot-cold-split)");
+    if pb_cl.enable_hot_cold_split && !is_lto_pre_link() pb_unsupported("hotcoldsplit (-hot-cold-split)");
     if pb_cl.enable_ir_outliner pb_unsupported("iroutliner (-ir-outliner)");
     pb_add(mpm, last, "globaldce");
     pb_add(mpm, last, "constmerge");
-    if pto.merge_functions pb_unsupported("mergefunc (-enable-merge-functions)");
-    if pto.call_graph_profile pb_add(mpm, last, "cg-profile");
-    pb_add(mpm, last, "rel-lookup-table-converter");
-    if pto.devirtualize_speculatively pb_unsupported("wholeprogramdevirt (-enable-devirtualize-speculatively)");
+    if pto.merge_functions pb_add(mpm, last, "mergefunc");
+    if pto.call_graph_profile && !is_lto_pre_link() pb_add(mpm, last, "cg-profile");   // CGProfilePass(InLTOPostLink): only the symtab of value profiles differs
+    if !is_lto_pre_link() pb_add(mpm, last, "rel-lookup-table-converter");
+    if pto.devirtualize_speculatively && pb_phase == .NONE pb_unsupported("wholeprogramdevirt (-enable-devirtualize-speculatively)");
     pb_add(mpm, last, "lower-comment-string");
 }
 
@@ -528,7 +588,7 @@ build_o0_default_pipeline :: (mpm: s32, last: *s32) {
     pb_add(mpm, last, "function(ee-instrument<>)");
     n := pb_add(mpm, last, "always-inline");   // AlwaysInlinerPass(InsertLifetimeIntrinsics = false)
     pipeline.nodes[n].no_lifetime = true;
-    if pto.merge_functions pb_unsupported("mergefunc (-enable-merge-functions)");
+    if pto.merge_functions pb_add(mpm, last, "mergefunc");
     if pb_cl.enable_matrix pb_unsupported("lower-matrix-intrinsics (-enable-matrix)");
     // buildCoroWrapper
     cw := pb_node(mpm, last, .CORO_COND, "coro-cond");
@@ -538,10 +598,18 @@ build_o0_default_pipeline :: (mpm: s32, last: *s32) {
     pb_add(cw, *cl, "cgscc(coro-split)");
     pb_add(cw, *cl, "coro-cleanup");
     pb_add(cw, *cl, "globaldce");
-    pb_add(mpm, last, "alloc-token");
+    if !is_lto_pre_link() pb_add(mpm, last, "alloc-token");
     if pb_cl.enable_instrumentor pb_unsupported("instrumentor (-enable-instrumentor)");
     pb_add(mpm, last, "lower-comment-string");
+    if is_lto_pre_link() add_required_lto_pre_link_passes(mpm, last);
     pb_add(mpm, last, "function(annotation-remarks)");
+}
+
+// addRequiredLTOPreLinkPasses
+add_required_lto_pre_link_passes :: (mpm: s32, last: *s32) {
+    pb_add(mpm, last, "canonicalize-aliases");
+    pb_add(mpm, last, "name-anon-globals");
+    pb_add(mpm, last, "assign-guid");
 }
 
 build_per_module_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Level) {
@@ -549,13 +617,194 @@ build_per_module_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: O
     mpm := pb_node(mpm_outer, last_outer, .MODULE_PM, "module");
     last: s32 = -1;
     if level.speed == 0 { build_o0_default_pipeline(mpm, *last); return; }
-    pb_add(mpm, *last, "memprof-remove-attributes");
+    if pb_phase == .NONE pb_add(mpm, *last, "memprof-remove-attributes");
     pb_add(mpm, *last, "annotation2metadata");
     pb_add(mpm, *last, "forceattrs");
     if pb_cl.opt_pipeline_trigger_crash pb_unsupported("-opt-pipeline-trigger-crash");
     build_module_simplification_pipeline(mpm, *last, level);
     build_module_optimization_pipeline(mpm, *last, level);
     pb_add(mpm, *last, "function(annotation-remarks)");   // addAnnotationRemarksPass
+    if is_lto_pre_link() add_required_lto_pre_link_passes(mpm, *last);
+}
+
+// buildThinLTOPreLinkDefaultPipeline
+build_thinlto_pre_link_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Level) {
+    pb_phase = .THIN_PRE_LINK;
+    mpm := pb_node(mpm_outer, last_outer, .MODULE_PM, "module");
+    last: s32 = -1;
+    if level.speed == 0 { build_o0_default_pipeline(mpm, *last); return; }
+    pb_add(mpm, *last, "annotation2metadata");
+    pb_add(mpm, *last, "forceattrs");
+    build_module_simplification_pipeline(mpm, *last, level);
+    if pb_cl.enable_partial_inlining pb_unsupported("partial-inliner (-enable-partial-inlining)");
+    pb_add(mpm, *last, "function(annotation-remarks)");
+    pb_add(mpm, *last, "lower-comment-string");
+    add_required_lto_pre_link_passes(mpm, *last);
+}
+
+// buildThinLTODefaultPipeline(Level, ImportSummary = nullptr)
+build_thinlto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Level) {
+    pb_phase = .THIN_POST_LINK;
+    mpm := pb_node(mpm_outer, last_outer, .MODULE_PM, "module");
+    last: s32 = -1;
+    pb_add(mpm, *last, "memprof-remove-attributes");
+    if level.speed == 0 {
+        pb_add(mpm, *last, "drop-type-tests<assume>");
+        pb_add_coro_wrapper(mpm, *last);
+        pb_add(mpm, *last, "alloc-token");
+        pb_add(mpm, *last, "elim-avail-extern");
+        pb_add(mpm, *last, "globaldce");
+        return;
+    }
+    build_module_simplification_pipeline(mpm, *last, level);
+    build_module_optimization_pipeline(mpm, *last, level);
+    pb_add(mpm, *last, "function(annotation-remarks)");
+}
+
+// buildCoroWrapper
+pb_add_coro_wrapper :: (mpm: s32, last: *s32) {
+    cw := pb_node(mpm, last, .CORO_COND, "coro-cond");
+    pipeline.nodes[cw].info = lookup_pass("coro-cond");
+    cl: s32 = -1;
+    pb_add(cw, *cl, "coro-early");
+    pb_add(cw, *cl, "cgscc(coro-split)");
+    pb_add(cw, *cl, "coro-cleanup");
+    pb_add(cw, *cl, "globaldce");
+}
+
+// buildLTODefaultPipeline(Level, ExportSummary = nullptr)
+build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Level) {
+    pb_phase = .FULL_POST_LINK;
+    mpm := pb_node(mpm_outer, last_outer, .MODULE_PM, "module");
+    last: s32 = -1;
+    pb_add(mpm, *last, "memprof-remove-attributes");
+    pb_add(mpm, *last, "cross-dso-cfi");
+    if level.speed == 0 {
+        pb_add(mpm, *last, "wholeprogramdevirt");
+        pb_add(mpm, *last, "lowertypetests");
+        pb_add(mpm, *last, "drop-type-tests<assume>");
+        pb_add_coro_wrapper(mpm, *last);
+        pb_add(mpm, *last, "alloc-token");
+        pb_add(mpm, *last, "function(annotation-remarks)");
+        return;
+    }
+    pb_add(mpm, *last, "openmp-opt");   // OpenMPOptPass(FullLTOPostLink)
+    pb_add(mpm, *last, "globaldce<vfe-linkage-unit-visibility>");
+    pb_add(mpm, *last, "inferattrs");
+    if level.speed >= 2 {
+        fa := pb_function_adaptor(mpm, *last, pto.eagerly_invalidate_analyses);
+        fl: s32 = -1;
+        pb_add(fa, *fl, "callsite-splitting");
+        pb_add(mpm, *last, "pgo-icall-prom");
+        pb_add(mpm, *last, "cgscc(function-attrs,argpromotion,function(sroa<modify-cfg>))");
+        pb_add(mpm, *last, "ipsccp");   // AllowFuncSpec = true
+        pb_add(mpm, *last, "called-value-propagation");
+    }
+    pb_add(mpm, *last, "rpo-function-attrs");
+    pb_add(mpm, *last, "globalsplit");
+    pb_add(mpm, *last, "wholeprogramdevirt");
+    pb_add(mpm, *last, "norecurse-lto-inference");
+    if level.speed == 1 {
+        pb_add(mpm, *last, "lowertypetests");
+        pb_add(mpm, *last, "drop-type-tests<assume>");
+        pb_add_coro_wrapper(mpm, *last);
+        pb_add(mpm, *last, "alloc-token");
+        pb_add(mpm, *last, "function(annotation-remarks)");
+        return;
+    }
+    pb_add(mpm, *last, "coro-early");
+    pb_add(mpm, *last, "globalopt");
+    pb_add(mpm, *last, "function(mem2reg)");
+    pb_add(mpm, *last, "constmerge");
+    pb_add(mpm, *last, "deadargelim");
+    {
+        fa := pb_function_adaptor(mpm, *last, pto.eagerly_invalidate_analyses);
+        fl: s32 = -1;
+        pb_add(fa, *fl, INSTCOMBINE);
+        if level.speed >= 2 pb_add(fa, *fl, "aggressive-instcombine");
+    }
+    pb_add(mpm, *last, "expand-variadics");
+    if pb_cl.enable_module_inliner pb_unsupported("module-inline (-enable-module-inliner) in the LTO pipeline");
+    {
+        // ModuleInlinerWrapperPass(getInlineParamsFromOptLevel(Level), MandatoryFirst = true, ...): no module
+        // passes, no devirt wrapper (MaxDevirtIterations = 0)
+        w := pb_node(mpm, *last, .INLINER_WRAPPER_PM, "inliner-wrapper");
+        pipeline.nodes[w].info = lookup_pass("inliner-wrapper");
+        wlast: s32 = -1;
+        ad := pb_node(w, *wlast, .CGSCC_ADAPTOR, "cgscc");
+        adlast: s32 = -1;
+        cg := pb_node(ad, *adlast, .CGSCC_PM, "cgscc");
+        cglast: s32 = -1;
+        n := pb_add(cg, *cglast, "inline<only-mandatory>");
+        pipeline.nodes[n].opt_level = cast(s8) level.speed;
+        n = pb_add(cg, *cglast, "inline");
+        pipeline.nodes[n].opt_level = cast(s8) level.speed;
+    }
+    pb_add(mpm, *last, "globalopt");
+    pb_add(mpm, *last, "openmp-opt");
+    pb_add(mpm, *last, "globaldce<vfe-linkage-unit-visibility>");
+    pb_add(mpm, *last, "cgscc(argpromotion,coro-split,coro-annotation-elide)");
+    {
+        fa := pb_function_adaptor(mpm, *last, pto.eagerly_invalidate_analyses);
+        fl: s32 = -1;
+        pb_add(fa, *fl, INSTCOMBINE);
+        if pb_cl.enable_constraint_elimination pb_add(fa, *fl, "constraint-elimination");
+        pb_add(fa, *fl, "jump-threading");
+        pb_add(fa, *fl, "sroa<modify-cfg>");
+        pb_tailcallelim(fa, *fl);
+    }
+    pb_add(mpm, *last, "cgscc(function-attrs)");
+    if pb_cl.enable_global_analyses {
+        pb_add(mpm, *last, "require<globals-aa>");
+        pb_add(mpm, *last, "function(invalidate<aa>)");
+    }
+    // MainFPM is filled first, but cgscc(openmp-opt-cgscc) is added to the MPM before it
+    pb_add(mpm, *last, "cgscc(openmp-opt-cgscc)");
+    main_fa := pb_function_adaptor(mpm, *last, pto.eagerly_invalidate_analyses);
+    ml: s32 = -1;
+    {
+        ll: s32 = -1;
+        pb_add(pb_loop_adaptor(main_fa, *ml, true), *ll, pb_licm(true));
+    }
+    if pb_cl.enable_newgvn pb_unsupported("newgvn (-enable-newgvn)");
+    pb_add(main_fa, *ml, "gvn<>");
+    pb_add(main_fa, *ml, "memcpyopt");
+    pb_add(main_fa, *ml, "dse");
+    pb_add(main_fa, *ml, "move-auto-init");
+    pb_add(main_fa, *ml, "mldst-motion<no-split-footer-bb>");
+    {
+        ll: s32 = -1;
+        la := pb_loop_adaptor(main_fa, *ml, false);
+        if pb_cl.enable_loop_flatten pb_unsupported("loop-flatten (-enable-loop-flatten)");
+        pb_add(la, *ll, "indvars");
+        pb_add(la, *ll, "loop-deletion");
+        pb_loop_unroll_full(la, *ll, level);
+    }
+    pb_add(main_fa, *ml, "loop-distribute");
+    add_vector_passes(main_fa, *ml, level);
+    pb_add(main_fa, *ml, "jump-threading");
+    pb_add(mpm, *last, "lowertypetests");
+    pb_add(mpm, *last, "drop-type-tests<assume>");
+    if pb_cl.enable_hot_cold_split pb_unsupported("hotcoldsplit (-hot-cold-split)");
+    {
+        fa := pb_function_adaptor(mpm, *last, false);
+        fl: s32 = -1;
+        pb_add(fa, *fl, "loop-sink");
+        pb_add(fa, *fl, "div-rem-pairs");
+        if pb_cl.enable_merge_icmps pb_add(fa, *fl, "mergeicmps");
+        pb_add(fa, *fl, "expand-memcmp");
+        o := SCFG_RANGE;
+        o.switch_to_arithmetic = true; o.hoist_common_insts = true; o.speculate_unpredictables = true;
+        pb_add(fa, *fl, pb_simplifycfg(o));
+    }
+    pb_add(mpm, *last, "elim-avail-extern");
+    pb_add(mpm, *last, "globaldce<vfe-linkage-unit-visibility>");
+    if pto.merge_functions pb_add(mpm, *last, "mergefunc");
+    pb_add(mpm, *last, "rel-lookup-table-converter");
+    if pto.call_graph_profile pb_add(mpm, *last, "cg-profile");
+    pb_add(mpm, *last, "coro-cleanup");
+    pb_add(mpm, *last, "alloc-token");
+    pb_add(mpm, *last, "function(annotation-remarks)");
 }
 
 // ---------------------------------------------------------------- printing (-jai-print-pipeline)

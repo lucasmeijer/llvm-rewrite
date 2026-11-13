@@ -255,6 +255,8 @@
 #load "lv_interleave.jai";
 
 #load "linker.jai";
+#load "pass_lto_misc.jai";
+#load "pass_merge_functions.jai";
 #load "codegen_pipeline.jai";
 #load "cg_misc_passes.jai";
 #load "cg_lowering_passes.jai";
