@@ -278,6 +278,8 @@ Pass_Kind :: enum u8 {
     PRINT_BPI; PRINT_BFI;
     // analysis_printers_misc.jai
     PRINT_ASSUMPTIONS; PRINT_CALLGRAPH_SCCS; PRINT_PHI_VALUES; PRINT_MEM_DEREFS; PRINT_MUST_EXECUTE; PRINT_MUST_BE_EXECUTED_CONTEXTS;
+    // pass_make_guards_explicit.jai
+    MAKE_GUARDS_EXPLICIT;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -477,6 +479,9 @@ PASS_TABLE :: Pass_Info.[
     .{"print<mem-derefs>", .FUNCTION, .PRINT_MEM_DEREFS, true, .DOMTREE},
     .{"print<must-execute>", .FUNCTION, .PRINT_MUST_EXECUTE, true, .DOMTREE},
     .{"print-must-be-executed-contexts", .MODULE, .PRINT_MUST_BE_EXECUTED_CONTEXTS, true, .DOMTREE},
+    .{"make-guards-explicit", .FUNCTION, .MAKE_GUARDS_EXPLICIT, false, .DOMTREE},
+    // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
+    .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
     .{"invalidate<block-freq>", .FUNCTION, .INVALIDATE, true, .BFI},
     .{"no-op-cgscc", .CGSCC, .NO_OP_CGSCC, false, .DOMTREE},
@@ -698,7 +703,7 @@ is_module_pass_name :: (name: string) -> bool {
     if name == "module" return true;
     if name == "function" || begins_with(name, "function<") return true;   // still a module-level element
     if name == "cgscc" || name == "coro-cond" || name == "verify" return true;
-    if begins_with(name, "default<") || pb_is_unsupported_alias(name) return true;
+    if begins_with(name, "default<") || pb_is_unsupported_alias(name) || name == "scc-oz-module-inliner" return true;
     for string.["thinlto-pre-link<", "thinlto<", "lto-pre-link<", "lto<"] if begins_with(name, it) return true;
     if name == "loop" || name == "loop-mssa" return false;
     p := lookup_pass(name);
@@ -915,6 +920,13 @@ parse_module_pass :: (mpm: s32, last: *s32, e: s32) {
         unknown_pass(el.name);
     }
     if pb_parse_default_pipeline(mpm, last, el.name) return;   // default<O#> (pass_builder_pipelines.jai)
+    if el.name == "scc-oz-module-inliner" {   // PassRegistry.def: buildInlinerPipeline(O2, ThinOrFullLTOPhase::None)
+        ok, level := pb_parse_opt_level("O2");
+        saved := pb_phase; pb_phase = .NONE;
+        build_inliner_pipeline(mpm, last, level);
+        pb_phase = saved;
+        return;
+    }
     if pb_parse_lto_pipeline(mpm, last, el.name) return;   // thinlto-pre-link<O#>, thinlto<O#>, lto-pre-link<O#>, lto<O#>
     if pb_is_unsupported_alias(el.name) fatal("pass pipeline '%': the FatLTO pipeline is not implemented yet", el.name);
     if el.name == "coro-cond" pipeline_error("invalid use of 'coro-cond' pass as module pipeline");
@@ -1430,6 +1442,7 @@ run_function_pass :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .PRINT_PHI_VALUES; return print_phi_values_run(f);
         case .PRINT_MEM_DEREFS; return print_mem_derefs_run(f);
         case .PRINT_MUST_EXECUTE; return print_must_execute_run(f);
+        case .MAKE_GUARDS_EXPLICIT; return make_guards_explicit_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

@@ -694,8 +694,10 @@ lr_rotate_loop :: (lr: *Loop_Rotate, l: Loop_Id, simplified_latch: bool) -> bool
         x := inst(leb).records;
         while x != 0 { if dbgr(x).kind != .LABEL table_set(*seen_hashes, dbg_record_hash(x), true); x = dbgr(x).next; }
     }
-    for x: block_insts(orig_header) if call_iid(x) == IID_EXPERIMENTAL_NOALIAS_SCOPE_DECL
-        fatal("loop-rotate: cloning llvm.experimental.noalias.scope.decl scopes is not implemented yet");
+    // the local noalias scope declarations in the header: after the rotation they are duplicated and their scopes
+    // cloned
+    nads: [..] Value_Id; nads.allocator = temp;
+    for x: block_insts(orig_header) if call_iid(x) == IID_EXPERIMENTAL_NOALIAS_SCOPE_DECL array_add(*nads, x);
     f := block_fn(orig_header);
     presplit := fn_has_fn_attr(f, .PresplitCoroutine);
     q: Simplify_Query;
@@ -756,6 +758,28 @@ lr_rotate_loop :: (lr: *Loop_Rotate, l: Loop_Id, simplified_latch: bool) -> bool
             if vname(cur).count set_name(c, vname(cur));
             if is_intrinsic_call(c, IID_ASSUME) ac_register_assumption(lr.ac, c);
             if lr.mssau table_set(*vm_mssa, cur, c);
+        }
+    }
+
+    if nads.count {
+        // clone the llvm.experimental.noalias.scope.decl again for the new header
+        ip := block_first_non_phi(new_header);   // getFirstNonPHIIt (head bit set)
+        for nad: nads {
+            nn := inst_clone(nad);
+            insert_at_position(nn, new_header, ip, true);
+        }
+        // scopes are duplicated once for OrigHeader and once for (the inserted part of) OrigPreheader
+        scopes: [..] Md_Id; scopes.allocator = temp;
+        for nad: nads array_add(*scopes, cast(Md_Id) ir.v_aux[call_arg(nad, 0)]);
+        clone_and_adapt_no_alias_scopes(scopes, .[orig_header], "h.rot");
+        _, first_decl := table_find(*vm, nads[0]);
+        last := block_last(orig_ph);
+        m := clone_no_alias_scopes(scopes, "pre.rot");
+        x := first_decl;
+        while true {
+            adapt_no_alias_scopes(x, *m);
+            if x == last break;
+            x = inst_next(x);
         }
     }
 

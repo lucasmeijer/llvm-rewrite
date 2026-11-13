@@ -49,12 +49,12 @@ ptrauth_ds_input :: (c: Value_Id) -> Value_Id {
 }
 
 // CallInst::Create(F, Args, {OperandBundleDef(Tag, Inputs)}) (unlinked; no bundle when Inputs is empty)
-create_call_fn_bundle :: (f: Value_Id, args: [] Value_Id, tag: string, inputs: [] Value_Id) -> Value_Id {
+create_call_fn_bundle :: (f: Value_Id, args: [] Value_Id, tag: string, inputs: [] Value_Id, empty_bundle := false) -> Value_Id {
     fty := glob(f).value_type;
     i := new_inst(.CALL, func_ret(fty), cast(u32)(args.count + inputs.count + 1));
     r := inst(i);
     r.ty2 = fty;
-    if inputs.count {
+    if inputs.count || empty_bundle {
         r.idx = cast(u32) ir.u32_pool.count; r.nidx = 1;
         array_add(*ir.u32_pool, bundle_tag_id(tag));
         array_add(*ir.u32_pool, cast(u32) args.count);

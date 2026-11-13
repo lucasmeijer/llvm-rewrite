@@ -7157,6 +7157,7 @@ tests/imported/llvm/Transforms/Inline/module-inliner-cba-crash.ll::opt
 tests/imported/llvm/Transforms/Inline/module-inliner-cba-crash.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/module-inliner-cycle.ll::opt
 tests/imported/llvm/Transforms/Inline/module-inliner-cycle.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/module-inlining.ll::opt
 tests/imported/llvm/Transforms/Inline/module-inlining.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/monster_scc.ll::opt
 tests/imported/llvm/Transforms/Inline/monster_scc.ll::roundtrip
@@ -11289,7 +11290,9 @@ tests/imported/llvm/Transforms/LCSSA/pr28424.ll::opt
 tests/imported/llvm/Transforms/LCSSA/pr28424.ll::roundtrip
 tests/imported/llvm/Transforms/LCSSA/pr28608.ll::opt
 tests/imported/llvm/Transforms/LCSSA/pr28608.ll::roundtrip
+tests/imported/llvm/Transforms/LCSSA/pr44058.ll::opt
 tests/imported/llvm/Transforms/LCSSA/pr44058.ll::roundtrip
+tests/imported/llvm/Transforms/LCSSA/pr44320.ll::opt
 tests/imported/llvm/Transforms/LCSSA/pr44320.ll::roundtrip
 tests/imported/llvm/Transforms/LCSSA/rewrite-existing-dbg-values.ll::opt
 tests/imported/llvm/Transforms/LCSSA/rewrite-existing-dbg-values.ll::roundtrip
@@ -11385,6 +11388,7 @@ tests/imported/llvm/Transforms/LICM/debugloc-preserve-fmul-drop-fdiv.ll::opt
 tests/imported/llvm/Transforms/LICM/debugloc-preserve-fmul-drop-fdiv.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/dropped-tbaa.ll::opt
 tests/imported/llvm/Transforms/LICM/dropped-tbaa.ll::roundtrip
+tests/imported/llvm/Transforms/LICM/explicit_guards.ll::opt
 tests/imported/llvm/Transforms/LICM/explicit_guards.ll::roundtrip
 tests/imported/llvm/Transforms/LICM/expr-reassociate-int.ll::opt
 tests/imported/llvm/Transforms/LICM/expr-reassociate-int.ll::roundtrip
@@ -12009,6 +12013,7 @@ tests/imported/llvm/Transforms/LoopRotate/freeze-crash.ll::opt
 tests/imported/llvm/Transforms/LoopRotate/freeze-crash.ll::roundtrip
 tests/imported/llvm/Transforms/LoopRotate/indirectbr.ll::opt
 tests/imported/llvm/Transforms/LoopRotate/indirectbr.ll::roundtrip
+tests/imported/llvm/Transforms/LoopRotate/noalias.ll::opt
 tests/imported/llvm/Transforms/LoopRotate/noalias.ll::roundtrip
 tests/imported/llvm/Transforms/LoopRotate/phi-dbgvalue.ll::opt
 tests/imported/llvm/Transforms/LoopRotate/phi-dbgvalue.ll::roundtrip
@@ -12060,6 +12065,7 @@ tests/imported/llvm/Transforms/LoopSimplify/2004-04-12-LoopSimplify-SwitchBacked
 tests/imported/llvm/Transforms/LoopSimplify/2004-04-12-LoopSimplify-SwitchBackedges.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/2004-04-13-LoopSimplifyUpdateDomFrontier.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/2004-04-13-LoopSimplifyUpdateDomFrontier.ll::roundtrip
+tests/imported/llvm/Transforms/LoopSimplify/2010-07-15-IncorrectDomFrontierUpdate.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/2010-07-15-IncorrectDomFrontierUpdate.ll::roundtrip
 tests/imported/llvm/Transforms/LoopSimplify/2010-12-26-PHIInfiniteLoop.ll::opt
 tests/imported/llvm/Transforms/LoopSimplify/2010-12-26-PHIInfiniteLoop.ll::roundtrip
@@ -16113,6 +16119,7 @@ tests/imported/llvm/Transforms/SimpleLoopUnswitch/pr37888.ll::opt
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/pr37888.ll::roundtrip
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/pr58868-scev-invalidation-for-phis.ll::opt
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/pr58868-scev-invalidation-for-phis.ll::roundtrip
+tests/imported/llvm/Transforms/SimpleLoopUnswitch/pr59546.ll::opt
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/pr59546.ll::roundtrip
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/pr60736.ll::opt
 tests/imported/llvm/Transforms/SimpleLoopUnswitch/pr60736.ll::roundtrip
