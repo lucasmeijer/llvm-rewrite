@@ -1439,47 +1439,74 @@ recursive fn kfc_call(v: i32, de: AP, interested: u64, knot: u64, depth: i64) ->
 }
 
 // ---------------------------------------------------------------------------------------------
-// ConstantFPRange (IEEE formats of at most 64 bits). Values are ordered keys: +x -> bits, -x -> -(magnitude bits) - 1,
-// so -0 < +0 and the order matches strictCompare.
+// ConstantFPRange (half, bfloat, float, double, x86_fp80, fp128). Values are ordered keys, APInts one bit wider than
+// the format: +x -> bits, -x -> -(magnitude bits) - 1, so -0 < +0 and the order matches strictCompare.
 
-struct CFR { lo: i64, hi: i64, qnan: bool, snan: bool, kind: i64 }
+struct CFR { lo: AP, hi: AP, qnan: bool, snan: bool, kind: i64 }
 
 fn fpr_check_kind(kind: i64) {
-    if !(kind == TK_HALF || kind == TK_BFLOAT || kind == TK_FLOAT || kind == TK_DOUBLE) {
+    if !(kind == TK_HALF || kind == TK_BFLOAT || kind == TK_FLOAT || kind == TK_DOUBLE || kind == TK_X86_FP80 || kind == TK_FP128) {
         fp_not_ported("ConstantFPRange for this floating-point type");
     }
 }
-fn fpr_inf_key(kind: i64) -> i64 {
+fn fpr_w(kind: i64) -> i64 { fp_fmt(kind).total + 1 }
+fn fpr_inf_key(kind: i64) -> AP {
     let f = fp_fmt(kind);
-    return ((((1 as u64) << f.ebits) - 1) << (f.p - 1)) as! i64;
+    // exponent all ones, significand 0 (x86_fp80: the exponent above the 64-bit significand, integer bit set)
+    if f.explicit_int { return ap_or(ap_shl(ap_low_bits(fpr_w(kind), f.ebits), f.p), ap_one_bit(fpr_w(kind), f.p - 1)); }
+    return ap_shl(ap_low_bits(fpr_w(kind), f.ebits), f.p - 1);
 }
-fn fpr_pos_inf(kind: i64) -> i64 { fpr_inf_key(kind) }
-fn fpr_neg_inf(kind: i64) -> i64 { -fpr_inf_key(kind) - 1 }
-fn fpr_key_of(c: i32) -> i64 {
+fn fpr_pos_inf(kind: i64) -> AP { fpr_inf_key(kind) }
+fn fpr_neg_inf(kind: i64) -> AP { ap_not(fpr_inf_key(kind)) }   // -k - 1
+fn fpr_key_of(c: i32) -> AP {
     let kind = cfp_kind(c);
     let f = fp_fmt(kind);
-    let b = cint_lo(c);
-    let sb: u64 = (1 as u64) << (f.total - 1);
-    let mag = (b & (sb - 1)) as! i64;
-    if (b & sb) != 0 { return -mag - 1; }
+    let w = fpr_w(kind);
+    let bits = ap_zext(ap_from_words(f.total, [cint_lo(c), cint_hi(c)]), w);
+    let mag = ap_clear_bit(bits, f.total - 1);
+    if ap_get_bit(bits, f.total - 1) { return ap_not(mag); }
     return mag;
 }
 fn fpr_empty(kind: i64) -> CFR { CFR { lo: fpr_pos_inf(kind), hi: fpr_neg_inf(kind), qnan: false, snan: false, kind: kind } }
 fn fpr_full(kind: i64) -> CFR { CFR { lo: fpr_neg_inf(kind), hi: fpr_pos_inf(kind), qnan: true, snan: true, kind: kind } }
 fn fpr_non_nan(kind: i64) -> CFR { CFR { lo: fpr_neg_inf(kind), hi: fpr_pos_inf(kind), qnan: false, snan: false, kind: kind } }
 fn fpr_nan_only(kind: i64, q: bool, s: bool) -> CFR { CFR { lo: fpr_pos_inf(kind), hi: fpr_neg_inf(kind), qnan: q, snan: s, kind: kind } }
-fn fpr_is_nan_only(a: CFR) -> bool { a.lo == fpr_pos_inf(a.kind) && a.hi == fpr_neg_inf(a.kind) }
+fn fpr_is_nan_only(a: CFR) -> bool { ap_eq(a.lo, fpr_pos_inf(a.kind)) && ap_eq(a.hi, fpr_neg_inf(a.kind)) }
 fn fpr_contains_nan(a: CFR) -> bool { a.qnan || a.snan }
-fn fpr_next(k: i64, down: bool) -> i64 {
-    if down { return if k == 0 { -2 } else { k - 1 }; }
-    return if k == -1 { 1 } else { k + 1 };
+fn fpr_is_pos_zero(k: AP) -> bool { ap_is_zero(k) }
+fn fpr_is_neg_zero(k: AP) -> bool { ap_is_all_ones(k) }
+// APFloat::next(nextDown) on keys: one ulp towards -inf (down) or +inf; zeros step to the other zero's neighbour
+fn fpr_next(kind: i64, k: AP, down: bool) -> AP {
+    let w = fpr_w(kind);
+    if kind == TK_X86_FP80 && !fpr_is_pos_zero(k) && !fpr_is_neg_zero(k) {
+        // the explicit integer bit: crossing a binade (or the denormal boundary) is not a +-1 on the bits
+        let neg = ap_is_neg(k);
+        let m = if neg { ap_not(k) } else { k };
+        var e = ap_zext64(ap_lshr(m, 64)) as i64;
+        var mant = ap_trunc(m, 64);
+        let int_bit = ap_one_bit(64, 63);
+        let away = down == neg;
+        if away {
+            if ap_is_all_ones(mant) { e += 1; mant = int_bit; }
+            else if e == 0 && ap_eq(mant, ap_not(int_bit)) { e = 1; mant = int_bit; }
+            else { mant = ap_inc(mant); }
+        } else {
+            if e > 1 && ap_eq(mant, int_bit) { e -= 1; mant = ap_ones(64); }
+            else if e == 1 && ap_eq(mant, int_bit) { e = 0; mant = ap_not(int_bit); }
+            else { mant = ap_dec(mant); }
+        }
+        let nm = ap_or(ap_shl(ap_u64(e as u64, w), 64), ap_zext(mant, w));
+        return if neg { ap_not(nm) } else { nm };
+    }
+    if down { return if fpr_is_pos_zero(k) { ap_i64(-2, w) } else { ap_dec(k) }; }
+    return if fpr_is_neg_zero(k) { ap_u64(1, w) } else { ap_inc(k) };
 }
-fn fpr_canonical(lo: i64, hi: i64, q: bool, s: bool, kind: i64) -> CFR {
+fn fpr_canonical(lo: AP, hi: AP, q: bool, s: bool, kind: i64) -> CFR {
     let pinf = fpr_pos_inf(kind);
     let ninf = fpr_neg_inf(kind);
-    let lo_inf = lo == pinf || lo == ninf;
-    let hi_inf = hi == pinf || hi == ninf;
-    if lo > hi && !(lo_inf && hi_inf) { return CFR { lo: pinf, hi: ninf, qnan: q, snan: s, kind: kind }; }
+    let lo_inf = ap_eq(lo, pinf) || ap_eq(lo, ninf);
+    let hi_inf = ap_eq(hi, pinf) || ap_eq(hi, ninf);
+    if ap_sgt(lo, hi) && !(lo_inf && hi_inf) { return CFR { lo: pinf, hi: ninf, qnan: q, snan: s, kind: kind }; }
     return CFR { lo: lo, hi: hi, qnan: q, snan: s, kind: kind };
 }
 // ConstantFPRange(const APFloat &)
@@ -1493,27 +1520,27 @@ fn fpr_of_const(c: i32) -> CFR {
     let k = fpr_key_of(c);
     return CFR { lo: k, hi: k, qnan: false, snan: false, kind: kind };
 }
-fn fpr_make_less_than(v0: i64, p: i64, kind: i64) -> CFR {
+fn fpr_make_less_than(v0: AP, p: i64, kind: i64) -> CFR {
     var v = v0;
     if (p & 1) == 0 {
-        if v == fpr_neg_inf(kind) { return fpr_empty(kind); }
-        v = fpr_next(v, true);
+        if ap_eq(v, fpr_neg_inf(kind)) { return fpr_empty(kind); }
+        v = fpr_next(kind, v, true);
     }
     return fpr_canonical(fpr_neg_inf(kind), v, false, false, kind);
 }
-fn fpr_make_greater_than(v0: i64, p: i64, kind: i64) -> CFR {
+fn fpr_make_greater_than(v0: AP, p: i64, kind: i64) -> CFR {
     var v = v0;
     if (p & 1) == 0 {
-        if v == fpr_pos_inf(kind) { return fpr_empty(kind); }
-        v = fpr_next(v, false);
+        if ap_eq(v, fpr_pos_inf(kind)) { return fpr_empty(kind); }
+        v = fpr_next(kind, v, false);
     }
     return fpr_canonical(v, fpr_pos_inf(kind), false, false, kind);
 }
 fn fpr_extend_zero_if_equal(a: CFR, p: i64) -> CFR {
     if (p & 1) == 0 { return a; }
     var r = a;
-    if r.lo == 0 { r.lo = -1; }
-    if r.hi == -1 { r.hi = 0; }
+    if fpr_is_pos_zero(r.lo) { r.lo = ap_ones(r.lo.w as i64); }
+    if fpr_is_neg_zero(r.hi) { r.hi = ap_zero(r.hi.w as i64); }
     return r;
 }
 fn fpr_set_nan_field(a: CFR, p: i64) -> CFR {
@@ -1534,9 +1561,9 @@ fn fpr_make_satisfying(p: i64, o: CFR) -> CFR {
     if p == 7 { return fpr_non_nan(kind); }
     if p == 8 { return fpr_nan_only(kind, true, true); }
     if p == 1 || p == 9 {
-        let single = o.lo == o.hi;
+        let single = ap_eq(o.lo, o.hi);
         // (Other.classify() & ~fcNan) == fcZero: both bounds zeros
-        let zeros = (o.lo == 0 || o.lo == -1) && (o.hi == 0 || o.hi == -1);
+        let zeros = (fpr_is_pos_zero(o.lo) || fpr_is_neg_zero(o.lo)) && (fpr_is_pos_zero(o.hi) || fpr_is_neg_zero(o.hi));
         return fpr_set_nan_field(if single || zeros { fpr_extend_zero_if_equal(o, p) } else { fpr_empty(kind) }, p);
     }
     if p == 6 || p == 14 { return fpr_empty(kind); }
@@ -1551,15 +1578,15 @@ fn fpr_exact_fcmp_region(p: i64, c: i32) -> bool, CFR {
     return true, fpr_make_satisfying(p, fpr_of_const(c));
 }
 fn fpr_intersect(a: CFR, b: CFR) -> CFR {
-    let lo = if a.lo > b.lo { a.lo } else { b.lo };
-    let hi = if a.hi < b.hi { a.hi } else { b.hi };
+    let lo = if ap_sgt(a.lo, b.lo) { a.lo } else { b.lo };
+    let hi = if ap_slt(a.hi, b.hi) { a.hi } else { b.hi };
     return fpr_canonical(lo, hi, a.qnan && b.qnan, a.snan && b.snan, a.kind);
 }
-fn fpr_is_empty(a: CFR) -> bool { a.lo == fpr_pos_inf(a.kind) && a.hi == fpr_neg_inf(a.kind) && !a.qnan && !a.snan }
+fn fpr_is_empty(a: CFR) -> bool { ap_eq(a.lo, fpr_pos_inf(a.kind)) && ap_eq(a.hi, fpr_neg_inf(a.kind)) && !a.qnan && !a.snan }
 fn fpr_contains(a: CFR, b: CFR) -> bool {
     if b.qnan && !a.qnan { return false; }
     if b.snan && !a.snan { return false; }
-    return a.lo <= b.lo && b.hi <= a.hi;
+    return ap_sle(a.lo, b.lo) && ap_sle(b.hi, a.hi);
 }
 
 // isImpliedCondFCmps(LPred, L0, L1, RPred, R0, R1, LHSIsTrue): 1 true, 0 false, -1 unknown

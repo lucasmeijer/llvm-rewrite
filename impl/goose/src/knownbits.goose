@@ -621,13 +621,11 @@ fn kb_reduce_add(k: KB, n: i64) -> KB {
 // SimplifyQuery::CxtI: the context instruction (DemandedBits passes the user of the operand).
 var kb_cxt: i32 = -1;
 // SimplifyQuery::CC (CondContext): the injected condition (-1 = none), its Invert flag and AffectedValues.
-// Set only by InstCombine's visitSelectInst; every phi recursion runs without it (getWithoutCondContext).
+// Set by InstCombine's visitSelectInst; every phi recursion runs without it (getWithoutCondContext).
 var kb_cc_cond: i32 = -1;
 var kb_cc_invert: bool = false;
 var kb_cc_aff: i32[>..<];
 fn kb_cc_has(v: i32) -> bool { for a in kb_cc_aff { if a == v { return true; } } return false; }
-// the analyses whose phi handling is not yet wrapped fail loudly under a CondContext
-fn kb_cc_check_phi(what: const u8[:]) { if kb_cc_cond >= 0 { fatal(str("ValueTracking: CondContext through ", what, " of a phi is not ported yet")); } }
 
 fn not_ported(what: const u8[:]) { fatal(str("computeKnownBits: ", what, " is not ported yet")); }
 

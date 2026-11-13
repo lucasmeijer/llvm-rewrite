@@ -400,9 +400,17 @@ fn strip_and_accumulate_offsets(v0: i32, allow_non_inbounds: bool, allow_invaria
                 if id == IID_launder_invariant_group || id == IID_strip_invariant_group { v = cb_arg(v, 0); continue; }
             }
             return v;
-        } else if look_through_inttoptr && o == OP_INTTOPTR {
-            vt_not_ported("stripAndAccumulateConstantOffsets through inttoptr");
-            return v;
+        } else if o == OP_INTTOPTR {
+            // (inttoptr (add (ptrtoint p), off))
+            if !allow_non_inbounds || !look_through_inttoptr { return v; }
+            let a = op(v, 0);
+            if ty_bits(ty_scalar(vals[a].ty)) != bitw { return v; }
+            if opcode_of(a) != OP_ADD { return v; }
+            let p2i = op(a, 0);
+            let ci = op(a, 1);
+            if opcode_of(p2i) != OP_PTRTOINT || vals[ci].kind != VK_CINT || ty_is_vector(vals[ci].ty) { return v; }
+            vt_off = sext64(((vt_off + (cint_lo(ci) as! i64)) as! u64) & wmask64(bitw), bitw);
+            v = op(p2i, 0);
         } else {
             return v;
         }
@@ -752,8 +760,10 @@ recursive fn ikz_operator(i: i32, de: AP, depth: i64) -> bool {
     } else if o == OP_SELECT {
         if select_arm_nonzero(i, true, de, depth) && select_arm_nonzero(i, false, de, depth) { return true; }
     } else if o == OP_PHI {
-        kb_cc_check_phi("isKnownNonZero");
-        if !iiq_off && match_simple_recurrence(i) && is_non_zero_recurrence() { return true; }
+        // the phi recursion runs getWithoutCondContext()
+        let scc = kb_cc_cond;
+        kb_cc_cond = -1;
+        if !iiq_off && match_simple_recurrence(i) && is_non_zero_recurrence() { kb_cc_cond = scc; return true; }
         let nd = max(depth, VT_MAX_DEPTH - 1);
         let save = kb_cxt;
         for k in nops(i) {
@@ -778,9 +788,9 @@ recursive fn ikz_operator(i: i32, de: AP, depth: i64) -> bool {
                 }
             }
             if !ok { ok = ikz(iv, de, nd); }
-            if !ok { kb_cxt = save; return false; }
+            if !ok { kb_cxt = save; kb_cc_cond = scc; return false; }
         }
-        kb_cxt = save;
+        kb_cxt = save; kb_cc_cond = scc;
         return true;
     } else if o == OP_INSERTELEMENT {
         if is_scalable_vec(vals[i].ty) { return kb_nonzero_fallback(i, de, depth); }
@@ -1029,17 +1039,19 @@ recursive fn is_known_pow2(v: i32, or_zero: bool, depth0: i64) -> bool {
     }
     if o == OP_SELECT { return is_known_pow2(op(v, 1), or_zero, depth) && is_known_pow2(op(v, 2), or_zero, depth); }
     if o == OP_PHI {
-        kb_cc_check_phi("isKnownToBeAPowerOfTwo");
+        // the phi recursion runs getWithoutCondContext()
+        let scc = kb_cc_cond;
+        kb_cc_cond = -1;
         let save = kb_cxt;
-        if pow2_recurrence(v, or_zero, depth) { kb_cxt = save; return true; }
+        if pow2_recurrence(v, or_zero, depth) { kb_cxt = save; kb_cc_cond = scc; return true; }
         let nd = max(depth, VT_MAX_DEPTH - 1);
         for k in nops(v) {
             let iv = op(v, k);
             if iv == v { continue; }
             kb_cxt = block_terminator(phi_block(v, k));
-            if !is_known_pow2(iv, or_zero, nd) { kb_cxt = save; return false; }
+            if !is_known_pow2(iv, or_zero, nd) { kb_cxt = save; kb_cc_cond = scc; return false; }
         }
-        kb_cxt = save;
+        kb_cxt = save; kb_cc_cond = scc;
         return true;
     }
     if o == OP_CALL || o == OP_INVOKE {
@@ -1164,7 +1176,9 @@ recursive fn non_equal_shl(v1: i32, v2: i32, de: AP, depth: i64) -> bool {
 }
 recursive fn non_equal_phis(p1: i32, p2: i32, de: AP, depth: i64) -> bool {
     if inst_parent(p1) != inst_parent(p2) { return false; }
-    kb_cc_check_phi("isKnownNonEqual");
+    // the phi recursion runs getWithoutCondContext()
+    let scc = kb_cc_cond;
+    kb_cc_cond = -1;
     var used_full = false;
     let save = kb_cxt;
     for k in nops(p1) {
@@ -1178,12 +1192,12 @@ recursive fn non_equal_phis(p1: i32, p2: i32, de: AP, depth: i64) -> bool {
         let c1 = m_apint(iv1);
         let c2 = m_apint(iv2);
         if c1 >= 0 && c2 >= 0 && !ap_eq(ci_ap(c1), ci_ap(c2)) { continue; }
-        if used_full { kb_cxt = save; return false; }
+        if used_full { kb_cxt = save; kb_cc_cond = scc; return false; }
         kb_cxt = block_terminator(bb);
-        if !ikne(iv1, iv2, de, depth + 1) { kb_cxt = save; return false; }
+        if !ikne(iv1, iv2, de, depth + 1) { kb_cxt = save; kb_cc_cond = scc; return false; }
         used_full = true;
     }
-    kb_cxt = save;
+    kb_cxt = save; kb_cc_cond = scc;
     return true;
 }
 recursive fn non_equal_select(v1: i32, v2: i32, de: AP, depth: i64) -> bool {
@@ -1392,19 +1406,22 @@ recursive fn ncsb(v: i32, de: AP, depth: i64) -> i64 {
                 }
             }
         } else if o == OP_PHI {
-            kb_cc_check_phi("ComputeNumSignBits");
+            // the phi recursion runs getWithoutCondContext()
+            let scc = kb_cc_cond;
+            kb_cc_cond = -1;
             let n = nops(v);
             if n <= 4 && n != 0 {
                 let save = kb_cxt;
                 var t = tb;
                 for k in n {
-                    if t == 1 { kb_cxt = save; return t; }
+                    if t == 1 { kb_cxt = save; kb_cc_cond = scc; return t; }
                     kb_cxt = block_terminator(phi_block(v, k));
                     t = min(t, ncsb(op(v, k), de, depth + 1));
                 }
-                kb_cxt = save;
+                kb_cxt = save; kb_cc_cond = scc;
                 return t;
             }
+            kb_cc_cond = scc;
         } else if o == OP_TRUNC {
             let t = num_sign_bits(op(v, 0), depth + 1);
             let otb = ty_scalar_bits(vals[op(v, 0)].ty);
@@ -1428,7 +1445,8 @@ recursive fn ncsb(v: i32, de: AP, depth: i64) -> i64 {
                 let t = ncsb(op(v, 0), de, depth + 1);
                 if t != 1 { return t - 1; }
             } else if id == IID_smin || id == IID_smax {
-                if is_signed_minmax_intrinsic_clamp(v) { vt_not_ported("ComputeNumSignBits of a smin/smax clamp"); }
+                let ok, clo, chi = signed_minmax_intrinsic_clamp(v);
+                if ok { return min(ap_num_sign_bits(clo), ap_num_sign_bits(chi)); }
             }
         }
     }
@@ -1462,11 +1480,16 @@ fn is_signed_minmax_clamp_select(v: i32) -> bool {
     return (m_minmax(v, 0) || m_minmax(v, 1)) && (m_apint(t) >= 0 || m_apint(f) >= 0) &&
            (is_inst_op(t, OP_SELECT) || is_inst_op(f, OP_SELECT));
 }
-fn is_signed_minmax_intrinsic_clamp(v: i32) -> bool {
+// isSignedMinMaxIntrinsicClamp(II, CLow, CHigh)
+fn signed_minmax_intrinsic_clamp(v: i32) -> bool, AP, AP {
     let inner = op(v, 0);
     let id = call_iid(v);
     let inv = if id == IID_smin { IID_smax } else { IID_smin };
-    return inst_iid(inner) == inv && m_apint(op(v, 1)) >= 0 && m_apint(op(inner, 1)) >= 0;
+    if !is_inst(inner) || inst_iid(inner) != inv || m_apint(op(v, 1)) < 0 || m_apint(op(inner, 1)) < 0 { return false, ap_zero(1), ap_zero(1); }
+    var lo = ci_ap(m_apint(op(v, 1)));
+    var hi = ci_ap(m_apint(op(inner, 1)));
+    if id == IID_smin { let t = lo; lo = hi; hi = t; }
+    return ap_sle(lo, hi), lo, hi;
 }
 
 // MaskedValueIsZero(V, Mask)

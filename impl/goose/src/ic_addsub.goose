@@ -1553,23 +1553,34 @@ fn ic_elementwise_equal(a: i32, b: i32) -> bool {
 
 // OptimizePointerDifference(LHS, RHS, Ty, IsNUW)
 fn optimize_pointer_difference(l: i32, r: i32, ty: i32, nuw: bool) -> i32 {
-    if vals[l].ty != vals[r].ty { return -1; }
-    // CommonPointerBase::compute: does a common base exist?
-    var p = l;
-    var found = false;
-    var x = r;
-    loop {
-        var q = l;
-        loop {
-            if q == x { found = true; break; }
-            if is_op(q, OP_GEP) { q = op(q, 0); } else { break; }
+    common_pointer_base_compute(l, r);
+    if cpb_ptr < 0 || common_pointer_base_is_expensive() { return -1; }
+    let rewrite = cpb_lhs.len > 0 && cpb_rhs.len > 0;
+    let idxty = dl_index_type(vals[l].ty);
+    // EmitGEPOffsets may rewrite GEPs (and erase them): copy the lists first
+    var lg: i32[>..<] = [];
+    for g in cpb_lhs { lg.push(g); }
+    var rg: i32[>..<] = [];
+    for g in cpb_rhs { rg.push(g); }
+    let lnw = cpb_lnw;
+    let rnw = cpb_rnw;
+    var result = emit_gep_offsets(lg, lnw, idxty, rewrite);
+    let off2 = emit_gep_offsets(rg, rnw, idxty, rewrite);
+    // a single inbounds GEP and a nuw sub: the final multiplication is nuw too
+    if is_inst(result) && (iop(result) == OP_MUL || iop(result) == OP_SHL) {
+        let fl = insts[inst_of(result)].flags;
+        if nuw && m_zero(off2) && (lnw & GEP_INBOUNDS) != 0 && (use_empty(result) || has_one_use(result)) &&
+           (fl & FL_NSW) != 0 && (fl & FL_NUW) == 0 &&
+           ((iop(result) == OP_MUL && m_nonneg(op(result, 1))) || iop(result) == OP_SHL) {
+            insts[inst_of(result)].flags = fl | FL_NUW;
         }
-        if found { break; }
-        if is_op(x, OP_GEP) { x = op(x, 0); } else { break; }
     }
-    if !found { return -1; }
-    ic_not_ported("OptimizePointerDifference (EmitGEPOffsets)");
-    return -1;
+    if !m_zero(off2) {
+        let snuw = nuw && (lnw & GEP_NUW) != 0 && (rnw & GEP_NUW) != 0;
+        let snsw = (lnw & GEP_INBOUNDS) != 0 && (rnw & GEP_INBOUNDS) != 0;
+        result = icb_binop_fl(OP_SUB, result, off2, "gepdiff", nw_flags(snuw, snsw));
+    }
+    return icb_int_cast(result, ty, true, "");
 }
 
 // CommonPointerBase::compute(LHS, RHS) and isExpensive() (InstCombineAddSub.cpp): the result in cpb_*

@@ -554,21 +554,18 @@ fn clone_and_prune_function_into(nf: i32, of: i32, m: i32, returns: i32[>..<]&) 
             while i >= 0 && iop(i) == OP_PHI {
                 var seen: i64[>..<] = [];
                 for j in pb.len { seen.push(0); }
-                // removeIncomingValueIf(pred, DeletePHIIfEmpty = false): keeps the order of the survivors
-                var k: i64 = 0;
-                var keep_v: i32[>..<] = [];
-                var keep_b: i32[>..<] = [];
-                let n = nops(i);
-                for x in n {
+                // removeIncomingValueIf(pred, DeletePHIIfEmpty = false): walks backwards, the predicate sees the
+                // current entries, a removed slot gets the last entry
+                var x = nops(i) - 1;
+                while x >= 0 {
                     let ib = phi_block(i, x);
                     var j: i64 = -1;
                     for q in pb.len { if pb[q] == ib { j = q; } }
                     var rm = true;
                     if j >= 0 && seen[j] < pc[j] { seen[j] += 1; rm = false; }
-                    if !rm { keep_v.push(phi_value(i, x)); keep_b.push(ib); }
+                    if rm { phi_remove_incoming(i, x); }
+                    x--;
                 }
-                if keep_v.len != n { phi_remove_incoming_if_rebuild(i, keep_v, keep_b); }
-                k++;
                 i = inst_next(i);
             }
         }
@@ -652,14 +649,6 @@ fn clone_and_prune_function_into(nf: i32, of: i32, m: i32, returns: i32[>..<]&) 
     }
 }
 fn block_move_before_end(bb: i32, f: i32) { block_move_before(bb, -1); }
-// PHINode::removeIncomingValueIf: rebuild the incoming list keeping the survivors in order
-fn phi_remove_incoming_if_rebuild(p: i32, vs: i32[:], bs: i32[:]) {
-    let n = nops(p);
-    // remove from the back so the earlier slots keep their order, then rewrite the survivors
-    var k = n - 1;
-    while k >= vs.len { phi_remove_incoming(p, k); k--; }
-    for j in vs.len { set_op(p, j, vs[j]); phi_set_block(p, j, bs[j]); }
-}
 // simplifyInstruction(I, DL): only the DataLayout
 fn if_simplify_instruction(i: i32) -> i32 {
     let sdt = sq_no_dt; let sac = sq_no_ac; let stli = sq_no_tli;
