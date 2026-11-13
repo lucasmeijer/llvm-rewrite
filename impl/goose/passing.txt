@@ -1862,6 +1862,16 @@ tests/imported/llvm/Analysis/LoopAccessAnalysis/wide-pointer-index-distance.ll::
 tests/imported/llvm/Analysis/LoopAccessAnalysis/wide-pointer-index-distance.ll::roundtrip
 tests/imported/llvm/Analysis/LoopAccessAnalysis/wrapping-pointer-versioning.ll::analysis
 tests/imported/llvm/Analysis/LoopAccessAnalysis/wrapping-pointer-versioning.ll::roundtrip
+tests/imported/llvm/Analysis/LoopCacheAnalysis/compute-cost.ll::analysis
+tests/imported/llvm/Analysis/LoopCacheAnalysis/compute-cost.ll::roundtrip
+tests/imported/llvm/Analysis/LoopCacheAnalysis/crash-after-pr164798.ll::analysis
+tests/imported/llvm/Analysis/LoopCacheAnalysis/crash-after-pr164798.ll::roundtrip
+tests/imported/llvm/Analysis/LoopCacheAnalysis/interchange-cost-beneficial.ll::analysis
+tests/imported/llvm/Analysis/LoopCacheAnalysis/interchange-cost-beneficial.ll::roundtrip
+tests/imported/llvm/Analysis/LoopCacheAnalysis/interchange-refcost-overflow.ll::analysis
+tests/imported/llvm/Analysis/LoopCacheAnalysis/interchange-refcost-overflow.ll::roundtrip
+tests/imported/llvm/Analysis/LoopCacheAnalysis/partially-perfect-nest.ll::analysis
+tests/imported/llvm/Analysis/LoopCacheAnalysis/partially-perfect-nest.ll::roundtrip
 tests/imported/llvm/Analysis/LoopInfo/2003-02-19-LoopInfoNestingBug.ll::analysis
 tests/imported/llvm/Analysis/LoopInfo/2003-02-19-LoopInfoNestingBug.ll::roundtrip
 tests/imported/llvm/Analysis/LoopInfo/2003-05-15-NestingProblem.ll::analysis
@@ -10646,6 +10656,7 @@ tests/imported/llvm/Transforms/LoopInterchange/pr45743-move-from-inner-preheader
 tests/imported/llvm/Transforms/LoopInterchange/pr45743-move-from-inner-preheader.ll::roundtrip
 tests/imported/llvm/Transforms/LoopInterchange/pr48212.ll::opt
 tests/imported/llvm/Transforms/LoopInterchange/pr48212.ll::roundtrip
+tests/imported/llvm/Transforms/LoopInterchange/pr57148.ll::opt
 tests/imported/llvm/Transforms/LoopInterchange/pr57148.ll::roundtrip
 tests/imported/llvm/Transforms/LoopInterchange/profitability-instorder.ll::opt
 tests/imported/llvm/Transforms/LoopInterchange/profitability-instorder.ll::roundtrip
