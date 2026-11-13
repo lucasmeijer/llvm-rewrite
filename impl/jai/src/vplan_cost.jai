@@ -49,7 +49,8 @@ vpc_scalarization_overhead :: (c: *Vp_Cost_Ctx, result_ty: Type_Id, ops: [] Vp_V
     assert(!vf.scalable, "Scalarization overhead not supported for scalable vectors");
     sc: Cost = 0;
     if type_kind(result_ty) != .VOID
-        sc = lc_add(sc, lv_tti_scalarization_overhead_all(c.tti, lv_to_vectorized_ty(result_ty, vf), true, false, c.kind));
+        for vt: lv_contained_types(lv_to_vectorized_ty(result_ty, vf))
+            sc = lc_add(sc, lv_tti_scalarization_overhead_all(c.tti, vt, true, false, c.kind));
     seen: [..] Vp_Val; seen.allocator = temp;
     tys: [..] Type_Id; tys.allocator = temp;
     for o: ops {

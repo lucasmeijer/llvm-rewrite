@@ -144,12 +144,37 @@ lv_tti_is_legal_masked_scatter :: (t: *Tti, ty: Type_Id, align: u64) -> bool {
 lv_forced_cost :: () -> Lc { return lcv(lv_opts.force_target_instruction_cost.v); }
 
 // toVectorizedTy: vectors of the scalar (struct-typed values fail loudly)
-lv_to_vectorized_ty :: (t: Type_Id, vf: Ec) -> Type_Id { return lv_to_vector_ty(t, vf); }
-// canVectorizeTy (int, fp, pointer element types and literal structs of them)
+lv_to_vectorized_ty :: (t: Type_Id, vf: Ec) -> Type_Id {
+    if type_kind(t) == .STRUCT {   // toVectorizedStructTy
+        if ec_is_scalar(vf) return t;
+        assert(lv_is_unpacked_struct_literal(t), "expected unpacked struct literal");
+        elts := NewArray(type_nsub(t), Type_Id,, allocator = temp);
+        for k: 0..type_nsub(t)-1 elts[k] = type_vector(vf.n, type_sub(t, k), vf.scalable);
+        return type_literal_struct(elts, false);
+    }
+    return lv_to_vector_ty(t, vf);
+}
+lv_is_unpacked_struct_literal :: (t: Type_Id) -> bool { f := ir.types[t].flags; return (f & TYF_LITERAL) != 0 && (f & TYF_PACKED) == 0; }
+lv_is_valid_vector_element_type :: (t: Type_Id) -> bool { k := type_kind(t); return k == .INT || is_fp_type(t) || k == .PTR; }
+// getContainedTypes
+lv_contained_types :: (t: Type_Id) -> [] Type_Id {
+    if type_kind(t) == .STRUCT {
+        out := NewArray(type_nsub(t), Type_Id,, allocator = temp);
+        for k: 0..type_nsub(t)-1 out[k] = type_sub(t, k);
+        return out;
+    }
+    out := NewArray(1, Type_Id,, allocator = temp); out[0] = t;
+    return out;
+}
+// canVectorizeTy (int, fp, pointer element types and unpacked literal structs of them)
 lv_can_vectorize_ty :: (t: Type_Id) -> bool {
     k := type_kind(t);
     if k == .INT || is_fp_type(t) || k == .PTR return true;
-    if k == .STRUCT vp_unported("struct-typed values in canVectorizeTy");
+    if k == .STRUCT {   // canVectorizeStructTy
+        if type_nsub(t) == 0 || !lv_is_unpacked_struct_literal(t) return false;
+        for e: 0..type_nsub(t)-1 if !lv_is_valid_vector_element_type(type_sub(t, e)) return false;
+        return true;
+    }
     return false;
 }
 // maybeVectorizeType
@@ -244,7 +269,7 @@ lv_cm_scalarization_overhead :: (cm: *Lv_Cm, i: Value_Id, vf: Ec) -> Cost {
     ret_ty := lv_to_vectorized_ty(vtype(i), vf);
     o := inst_op(i);
     if type_kind(ret_ty) != .VOID   // (!isa<LoadInst> || !supportsEfficientVectorElementLoadStore): false for X86, base
-        c = lc_add(c, lv_tti_scalarization_overhead_all(t, ret_ty, true, false, kind));
+        for vt: lv_contained_types(ret_ty) c = lc_add(c, lv_tti_scalarization_overhead_all(t, vt, true, false, kind));
     if o == .LOAD && !lv_tti_prefers_vectorized_addressing(t) return c;
     ops := lv_inst_operands(i, o == .CALL);
     tys: [..] Type_Id; tys.allocator = temp;

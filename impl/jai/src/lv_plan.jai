@@ -286,7 +286,16 @@ lvp_try_to_create_widen_non_phi_recipe :: (lp: *Lv_Planner, r: Vp_Rec, range: *V
         for vr(r).md array_add(*vr(w).md, it);
         return w;
     }
-    if io == .EXTRACTVALUE vp_unported("widening extractvalue");
+    if io == .EXTRACTVALUE {
+        ops: [..] Vp_Val; ops.allocator = temp;
+        for vp_ops_without_mask(r) array_add(*ops, it);
+        assert(inst(instr).nidx == 1, "Expected one extractvalue index");
+        array_add(*ops, vp_const_int(ir.t_i32, ir.u32_pool[inst(instr).idx]));
+        w := vp_new_single_def(.WIDEN, ops, vp_compute_scalar_type_for_instruction(o, ops), instr, vr(r).dl);
+        vr(w).opcode = o; vr(w).flags = vr(r).flags;
+        for vr(r).md array_add(*vr(w).md, it);
+        return w;
+    }
     return NONE;
 }
 

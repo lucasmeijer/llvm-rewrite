@@ -279,6 +279,16 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             return br;
         case VPI_BROADCAST;
             return irb_vector_splat(*s.b, s.vf.n, vs_get(s, vp_op(r, 0), true), "broadcast", s.vf.scalable);
+        case VPI_BUILD_STRUCT_VECTOR;
+            st := vp_scalar_type(vp_op(r, 0));
+            res := const_poison(lv_to_vectorized_ty(st, s.vf));
+            for k: 0..vp_nops(r)-1 for fi: 0..type_nsub(st)-1 {
+                sv := irb_extract_value(*s.b, vs_get(s, vp_op(r, k), true), .[fi]);
+                vv_ := irb_extract_value(*s.b, res, .[fi]);
+                vv_ = vs_insert_element(s, vv_, sv, const_int(ir.t_i64, cast(u64) k));
+                res = irb_insert_value(*s.b, res, vv_, .[fi]);
+            }
+            return res;
         case VPI_BUILD_VECTOR;
             sty := vp_scalar_type(vp_op(r, 0));
             res := const_poison(type_vector(cast(u64) vp_nops(r), sty, false));
@@ -949,8 +959,13 @@ vp_widen_intrinsic_execute :: (s: *Vp_State, r: Vp_Rec) {
     tys: [..] Type_Id; tys.allocator = temp;
     sty := vp_scalar_type(vr(r).def);
     if is_vector_intrinsic_with_overload_type_at_arg(id, -1) {
-        if type_kind(sty) == .STRUCT vp_unported("struct-returning vector intrinsics");
-        array_add(*tys, lv_to_vectorized_ty(sty, s.vf));
+        rt := lv_to_vectorized_ty(sty, s.vf);
+        for ct, idx: lv_contained_types(rt) {
+            // isVectorIntrinsicWithStructReturnOverloadAtField
+            over := ifx id == iidn("llvm.frexp") then idx == 0 || idx == 1 else idx == 0;
+            if type_kind(rt) != .STRUCT over = true;   // getContainedTypes of a non-struct: the type itself (field 0)
+            if over array_add(*tys, ct);
+        }
     }
     args: [..] Value_Id; args.allocator = temp;
     for o, k: vr(r).ops {

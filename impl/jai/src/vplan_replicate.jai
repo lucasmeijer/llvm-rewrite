@@ -470,12 +470,12 @@ vp_dissolve_replicate_region :: (reg: Vp_Blk, vf: Ec, idx_ty: Type_Id) {
     for p: vp_block_phis(first_exiting) {
         if vp_only_first_lane_used(vr(p).def) continue;
         sty := vp_scalar_type(vr(p).def);
-        if type_kind(sty) == .STRUCT vp_unported("struct-typed predicated values (BuildStructVector)");
+        is_struct := type_kind(sty) == .STRUCT;
         poison := vp_poison(sty);
         ops: [..] Vp_Val; ops.allocator = temp;
         for 0..num_lanes - 1 array_add(*ops, poison);
-        bv := vp_new_instruction(VPI_BUILD_VECTOR, ops, .{}, .[], NONE, "");
-        array_add(*bvs, bv);
+        bv := vp_new_instruction(cast(u16) ifx is_struct then VPI_BUILD_STRUCT_VECTOR else VPI_BUILD_VECTOR, ops, .{}, .[], NONE, "");
+        if !is_struct array_add(*bvs, bv);
         vp_rauw(vr(p).def, vr(bv).def);
         vp_set_operand(bv, 0, vr(p).def);
         vp_insert_recipe(bv, succ, vp_first_non_phi(succ));
