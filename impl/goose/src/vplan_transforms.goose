@@ -25,6 +25,7 @@ import vplan;
 import vplan_utils;
 import vplan_props;
 import vplan_predicate;
+import lv_minbw;
 import memloc;
 import tbaa;
 
@@ -1243,7 +1244,70 @@ fn vpt_convert_to_strided_accesses() {
         while r >= 0 { if vpr[r].kind == VPR_WIDEN_LOAD && !vpr[r].consecutive { vp_unported("gathers (convertToStridedAccesses)"); } r = vpr[r].next; }
     }
 }
-fn vpt_truncate_to_minimal_bitwidths() {}
+// truncateToMinimalBitwidths(Plan, MinBWs)
+fn vpt_truncate_to_minimal_bitwidths() {
+    if vp_has_scalar_vf_only() || lmb_keys.len == 0 { return; }
+    var processed = hm_new();      // ProcessedTruncs: VPValue -> trunc recipe value
+    let ph = vp_vector_preheader();
+    var bs: i32[>..<] = [];
+    vp_depth_first(vp_vector_loop_region(), true, bs);
+    vp_only_basic(bs);
+    for b in bs {
+        var rs: i32[>..<] = [];
+        vp_block_recipes(b, rs);
+        for r in rs {
+            if vpr[r].dead { continue; }
+            let k = vpr[r].kind;
+            if k != VPR_WIDEN && k != VPR_WIDEN_CAST && k != VPR_REPLICATE && k != VPR_WIDEN_LOAD && k != VPR_WIDEN_INTRINSIC { continue; }
+            let res = vpr[r].def;
+            let ui = vpv[res].uv;
+            let nb = if ui >= 0 && is_inst(ui) { lmb_lookup(ui) } else { 0 };
+            if nb == 0 { continue; }
+            if k == VPR_REPLICATE || k == VPR_WIDEN_CAST { continue; }
+            let old_ty = vpv[res].ty;
+            let ob = ty_bits(ty_scalar(old_ty));
+            let nty = ty_int(nb);
+            vp_drop_poison_generating_flags(r);
+            if k == VPR_WIDEN_LOAD || k == VPR_WIDEN_INTRINSIC {
+                if ob != nb {
+                    vpb_set_after(r);
+                    let ext = vpt_widen_cast(OP_ZEXT, res, old_ty);
+                    vp_rauw(res, vpr[ext].def);
+                    vp_set_operand(ext, 0, res);
+                }
+                continue;
+            }
+            let start: i64 = if vpm_opcode(r, true) == OP_SELECT as i32 && vpm_arity_ok(r, 3) { 1 } else { 0 };
+            var nops_: i32[>..<] = [];
+            xv_to(vpr[r].ops, nops_);
+            for j in start..nops_.len {
+                let o = nops_[j];
+                if ty_bits(ty_scalar(vp_scalar_type(o))) == nb { continue; }
+                var t = hm_get(processed, o as u64, -1) as i32;
+                if t < 0 {
+                    if vp_is_ir_value(o) { vpb_set_at_end(ph); } else { vpb_set_before(r); }
+                    let tr = vpt_widen_cast(OP_TRUNC, o, nty);
+                    t = vpr[tr].def;
+                    hm_put(processed, o as u64, t as i64);
+                }
+                nops_[j] = t;
+            }
+            // VPWidenRecipe::cloneWithOperands
+            let nw = vp_clone(r);
+            for j in nops_.len { vp_set_operand(nw, j, nops_[j]); }
+            if vpm_opcode(r, true) != OP_ICMP as i32 { vpv[vpr[nw].def].ty = nty; }
+            vp_insert_before(nw, r);
+            var rep = vpr[nw].def;
+            if ob != nb {
+                vpb_set_after(nw);
+                let ext = vpt_widen_cast(OP_ZEXT, rep, old_ty);
+                rep = vpr[ext].def;
+            }
+            vp_rauw(res, rep);
+            vp_erase_recipe(r);
+        }
+    }
+}
 
 
 fn pred_inverse_vpt(p: i64) -> i64 {

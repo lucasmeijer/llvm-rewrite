@@ -39,6 +39,7 @@ import lv_legality;
 import lv_interleave;
 import lv_cm;
 import lv_pass;
+import lv_minbw;
 
 let LC_INVALID: i64 = 0x7FFFFFFFFFFFFFFF;
 let LC_MAX: i64 = 0x7FFFFFFFFFFFFFFE;    // InstructionCost::getMax()
@@ -384,6 +385,13 @@ fn cm_gather_scatter_cost(i: i32, vf: i64) -> i64 {
     let id = if iop(i) == OP_LOAD { IID_masked_gather } else { IID_masked_scatter };
     return lc_add(lt_address_computation(pty, false, -1), lt_mem_intrinsic(id as i32, vty, ptr, cm_is_mask_required(i), align, 0));
 }
+// canTruncateToMinimalBitwidth(I, VF) (i = -1: not an instruction)
+fn cm_can_truncate_to_minimal_bitwidth(i: i32, vf: i64) -> bool {
+    if i < 0 || !hm_has(lmb_map, i as u64) { return false; }
+    let mb = lmb_lookup(i);
+    if iop(i) == OP_TRUNC && ty_bits(ty_scalar(vals[i].ty)) < mb { return false; }
+    return vf > 1 && !cm_is_profitable_to_scalarize(i, vf) && !cm_is_scalar_after_vectorization(i, vf);
+}
 // getMemoryInstructionCost(I, VF)
 fn cm_memory_instruction_cost(i: i32, vf: i64) -> i64 {
     if vf == 1 {
@@ -472,8 +480,8 @@ recursive fn cm_instruction_cost(i: i32, vf0: i64) -> i64 {
     if cm_is_uniform_after_vectorization(i, vf) { vf = 1; }
     if vf > 1 && cm_is_profitable_to_scalarize(i, vf) { return hm_get(cm_its_cost, cm_key(vf, i), 0); }
     if vf > 1 && cm_is_forced_scalar(i, vf) { return lc_mul(cm_instruction_cost(i, 1), vf); }
-    // MinBWs is empty (computeMinimalBitwidths fails loudly when it would not be)
-    let rt = vals[i].ty as i32;
+    var rt = vals[i].ty as i32;
+    if cm_can_truncate_to_minimal_bitwidth(i, vf) { rt = ty_int(lmb_lookup(i)); }
     let vty = if cm_is_scalar_after_vectorization(i, vf) { rt } else { lv_vec_ty(rt, vf) };
     if vf > 1 && ty_is_vector(vty) && lt_number_of_parts(vty) == 0 { return LC_INVALID; }
     let o = iop(i);
@@ -548,7 +556,9 @@ recursive fn cm_instruction_cost(i: i32, vf0: i64) -> i64 {
         return lt_cmpsel(OP_SELECT, vty, cty, pred, 0, 0, i);
     }
     if o == OP_ICMP || o == OP_FCMP {
-        let vt = lv_vec_ty(vals[op(i, 0)].ty as i32, vf);
+        var valty = vals[op(i, 0)].ty as i32;
+        if cm_can_truncate_to_minimal_bitwidth(i, vf) { valty = ty_int(lmb_lookup(i)); }
+        let vt = lv_vec_ty(valty, vf);
         return lt_cmpsel(o, vt, lvc_cmp_result_type(vt), inst_pred(i), 0, 0, i);
     }
     if o == OP_LOAD || o == OP_STORE {
@@ -615,8 +625,15 @@ recursive fn cm_cast_instruction_cost(i: i32, vf: i64, vty: i32) -> i64 {
         if is_inst(s) && iop(s) == OP_LOAD { cch = cm_cast_cch(s, vf); }
     }
     if cm_is_optimizable_iv_truncate(i, vf) { return lt_cast(OP_TRUNC, vals[i].ty as i32, vals[op(i, 0)].ty as i32, cch, i); }
-    let src_scalar = vals[op(i, 0)].ty as i32;
+    var src_scalar = vals[op(i, 0)].ty as i32;
+    let op0 = op(i, 0);
+    let op0i = if is_inst(op0) { op0 } else { -1 };
+    if cm_can_truncate_to_minimal_bitwidth(op0i, vf) { src_scalar = ty_int(lmb_lookup(op0i)); }
     let src_vec = if ty_is_vector(vty) { lv_vec_ty(src_scalar, vf) } else { src_scalar };
+    if cm_can_truncate_to_minimal_bitwidth(i, vf) {
+        // no extend after truncating the users to the minimal bitwidth
+        if ty_bits(ty_scalar(vty)) <= ty_bits(ty_scalar(src_vec)) && (o == OP_ZEXT || o == OP_SEXT) { return 0; }
+    }
     return lt_cast(o, vty, src_vec, cch, i);
 }
 

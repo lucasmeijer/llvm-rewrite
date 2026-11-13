@@ -627,7 +627,8 @@ fn vp_execute_recipe(r: i32) {
             }
         }
         let nx = inst_next(i);
-        if nx >= 0 { vxb_bb = inst_parent(i); vxb_pos = nx; } else { vxb_set_end(inst_parent(i)); }
+        // IRBuilder::SetInsertPoint(BB, IP) also takes IP's debug location
+        if nx >= 0 { vxb_bb = inst_parent(i); vxb_pos = nx; vxb_dl = inst_get_md(nx, 0); } else { vxb_set_end(inst_parent(i)); }
         return;
     }
     if k == VPR_INSTRUCTION { vpi_execute(r); return; }
