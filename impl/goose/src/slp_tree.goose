@@ -34,14 +34,15 @@ let TE_GATHER: i32 = 5;
 let TE_COMBINED: i32 = 6;
 let TE_SPLIT: i32 = 7;
 // TreeEntry::CombinedOpcode
+// (above Instruction::OtherOpsEnd, as LLVM's CombinedOpcode: ShuffleOrOp mixes them with opcodes)
 let CO_NONE: i32 = -1;
-let CO_MINMAX: i32 = 69;
-let CO_FMULADD: i32 = 70;
-let CO_RBITCAST: i32 = 71;
-let CO_RBITCAST_BSWAP: i32 = 72;
-let CO_RBITCAST_LOADS: i32 = 73;
-let CO_RBITCAST_BSWAP_LOADS: i32 = 74;
-let CO_RCMP_BITCAST: i32 = 75;
+let CO_MINMAX: i32 = 1001;
+let CO_FMULADD: i32 = 1002;
+let CO_RBITCAST: i32 = 1003;
+let CO_RBITCAST_BSWAP: i32 = 1004;
+let CO_RBITCAST_LOADS: i32 = 1005;
+let CO_RBITCAST_BSWAP_LOADS: i32 = 1006;
+let CO_RCMP_BITCAST: i32 = 1007;
 
 struct SRun { at: i32, n: i32 }
 struct STE {
@@ -455,20 +456,20 @@ fn slp_operand_entry(te: i32, idx: i64) -> i32 {
 fn slp_vl_hash(vl: const i32[:]) -> i64 {
     var h: u64 = 0xcbf29ce484222325;
     for v in vl { h = (h ^ (v as u64)) * 0x100000001b3; }
-    return (h >> 2) as i64;
+    return (h >> 8) as i64;   // sh_* keys must stay below 2^57 (sh_k1 multiplies by 64)
 }
 fn slp_known_nonvect_loads(vl: const i32[:]) -> bool {
     let h = slp_vl_hash(vl);
-    var c = slp_lk_head(SH_NVL, h);
+    var c = slp_lk_head_nvl(h);
     while c >= 0 {
-        let at = slp_lk[c].x as i64;
+        let at = slp_nvl_lk[c].x as i64;
         let n = slp_nvl_runs[at] as i64;
         if n == vl.len {
             var eq = true;
             for k in n { if slp_nvl_runs[at + 1 + k] != vl[k] { eq = false; break; } }
             if eq { return true; }
         }
-        c = slp_lk[c].next;
+        c = slp_nvl_lk[c].next;
     }
     return false;
 }

@@ -34,7 +34,15 @@ KINDS = [
     "SLP: try schedule bundle", "SLP:       update deps of", "SLP:     gets ready on update", "SLP:   schedule ",
     "SLP:   check for readiness", "SLP:    gets ready:", "SLP:  reset schedule because",
     "SLP:    initially in ready list",
+    "SLP: Calculating cost for tree", "SLP: Adding cost", "SLP: Current total cost", "SLP: Calculated costs for Tree",
+    "SLP: Calculated GEPs cost for Tree", "SLP: Costs:", "SLP:     ReuseShuffleCost", "SLP:     VectorCost",
+    "SLP:     ScalarCost", "SLP: Skipping cost for combined", "SLP: perfect diamond match",
+    "SLP: diamond match for alternate", "SLP: alternate extension", "SLP: Need to extract", "SLP: Checking user:",
+    "SLP: \tInternal user will be removed", "SLP: Inst count check", "SLP: Rejecting tree:", "SLP: Found cost",
+    "SLP: Decided to vectorize", "SLP: Vectorizing list at cost", "SLP: rejecting tree with buildvector struct",
 ]
+# blocks whose order LLVM takes from a pointer-keyed DenseMap: skipped in both traces
+SKIP_AFTER = "SLP: Recalculate costs after tree trimming."
 
 def keep(line):
     return any(line.startswith(k) for k in KINDS)
@@ -42,7 +50,16 @@ def keep(line):
 def filt(text):
     out = []
     inblock = False
+    skipping = False
     for l in text.splitlines():
+        if l.startswith(SKIP_AFTER):
+            skipping = True
+            inblock = False
+            continue
+        if skipping:
+            if l.startswith("SLP: Adding cost") or l.startswith("SLP: Current total cost"):
+                continue
+            skipping = False
         if l.startswith("SLP:"):
             inblock = keep(l)
             if inblock:

@@ -22,6 +22,7 @@ import datalayout;
 import apint;
 import pm;
 import flags;
+import printer;
 import constfold;
 import cfold;
 import fpu;
@@ -85,7 +86,10 @@ fn sh_rehash() {
         sh_used++;
     }
 }
-fn sh_k1(s: i64, a: i64) -> i64 { (a + 1) * 64 + s }
+fn sh_k1(s: i64, a: i64) -> i64 {
+    if a < -1 || a >= 0x0100000000000000 { fatal("internal: SLP: scratch hash key out of range"); }
+    return (a + 1) * 64 + s;
+}
 fn sh_slot(s: i64, a: i64, b: i64) -> i64 {
     sh_init();
     let k1 = sh_k1(s, a);
@@ -143,6 +147,18 @@ fn slp_dv(v: i32) {
     // `OS << *V`: instructions print as their line, other values as operands with their type
     if is_inst(v) { errs_inst(v, inst_func(v)); return; }
     let f = slp_cur_fn;
+    if vals[v].kind == VK_GVAR {
+        // GlobalVariable::print: the definition line
+        slots_begin(f);
+        let mark = out.len;
+        print_global_var(v);
+        var end = out.len;
+        if end > mark && out[end - 1] == '\n' { end--; }
+        errbuf.append(out[mark..end]);
+        out.resize(mark);
+        return;
+    }
+    if vals[v].kind == VK_FUNC || vals[v].kind == VK_ALIAS || vals[v].kind == VK_IFUNC { slp_fail("printing a function or alias in a -debug-only=SLP trace"); }
     errs_operand(v, f, true);
 }
 var slp_cur_fn: i32 = -1;

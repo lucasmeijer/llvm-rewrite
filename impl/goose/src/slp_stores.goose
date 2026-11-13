@@ -94,8 +94,10 @@ fn slp_vectorize_store_chain(chain: const i32[:], idx: i64, minvf: i64) -> i64, 
         size = slp_base_graph_size;
         return 0, size;
     }
-    slp_after_tree_store();
-    return 0, size;
+    let done = slp_after_tree_store(vf);
+    size = slp_base_graph_size;
+    if sis_valid(s) && sis_opcode(s) == OP_LOAD { size = 2; }
+    return if done { 1 } else { 0 }, size;
 }
 
 // ---------------------------------------------------------------- StoreChainContext
@@ -741,7 +743,7 @@ fn slp_try_to_vectorize_list_r(vl: const i32[:], max_vf_only: bool, limit_reg_vf
             let none_: i32[1] = [0];
             slp_build_tree(ops, false, none_[..0]);
             if slp_is_tree_tiny_and_not_fully_vectorizable(false) { i++; continue; }
-            slp_after_tree_list(ops[0]);
+            slp_after_tree_list(ops[0], avf);
             i++;
         }
         vf = slp_floor_full_vector_number_of_elements(vals[i0].ty, vf - 1);

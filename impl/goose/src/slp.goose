@@ -47,6 +47,7 @@ import slp_stores;
 import slp_hr;
 import slp_phis;
 import slp_transform;
+import slp_treecost;
 
 fn slp_not_ported(what: const u8[:]) { fatal(str("SLPVectorizer: ", what, " is not ported yet")); }
 
@@ -654,54 +655,6 @@ fn slp_vectorize_non_vectorizable_insts(range: const i32[:], bb: i32) -> bool {
 }
 
 // isPoorThroughputOp's cache: (opcode or intrinsic id or callee, type key) pairs found cheap
-var slp_cheap_kind: i64[>..<];
-var slp_cheap_a: i64[>..<];
-var slp_cheap_b: i64[>..<];
-fn slp_cheap_has(kind: i64, a: i64, b: i64) -> bool {
-    for k in slp_cheap_kind.len { if slp_cheap_kind[k] == kind && slp_cheap_a[k] == a && slp_cheap_b[k] == b { return true; } }
-    return false;
-}
-// getPoorThroughputTypeKey(Ty): (TypeID << 16) | scalar size
-fn slp_type_key(t: i32) -> i64 { (slp_type_id(t) << 16) | tt_scalar_bits(t) }
-// isPoorThroughputOp(I, TTI, TLI, Cache)
-fn slp_is_poor_throughput_op(i: i32) -> bool {
-    let o = iop(i);
-    if !is_binary_op(o) && o != OP_CALL { return false; }
-    let ty = vals[i].ty as i32;
-    if ty_is_vector(ty) || ty_is_aggregate(ty) || !slp_is_valid_element_type(ty) { return false; }
-    fn analyze(i: i32) -> bool {
-        let sc = tti_instruction_cost(i, TCK_RECIP_THROUGHPUT);
-        if sc < TCC_EXPENSIVE { return false; }
-        // getVectorOpCost(I, MinVF = 2, TTI, TLI)
-        var vc: i64 = 0;
-        if iop(i) == OP_CALL {
-            let id = laa_vector_intrinsic_id_for_call(i);
-            var tys: i32[>..<] = [];
-            slp_intrinsic_arg_types(i, id, 2, 0, tys);
-            let ic, lc = slp_vector_call_costs(i, slp_widened_type(vals[i].ty, 2), tys);
-            vc = if ic < lc { ic } else { lc };
-        } else {
-            vc = tv_arith0(iop(i), ty_vector(vals[i].ty, 2, false), TCK_RECIP_THROUGHPUT);
-        }
-        return vc < tc_mul(sc, 2);
-    }
-    fn check(kind: i64, a: i64, b: i64, i: i32) -> bool {
-        if slp_cheap_has(kind, a, b) { return false; }
-        if analyze(i) { return true; }
-        slp_cheap_kind.push(kind); slp_cheap_a.push(a); slp_cheap_b.push(b);
-        return false;
-    }
-    if o == OP_CALL {
-        for k in cb_nargs(i) { if !slp_is_valid_element_type(vals[cb_arg(i, k)].ty) { return false; } }
-        let id = laa_vector_intrinsic_id_for_call(i);
-        if id != 0 { return check(1, id as i64, slp_type_key(ty), i); }
-        let f = called_function(i);
-        if f < 0 { return analyze(i); }
-        return check(2, f as i64, 0, i);
-    }
-    return check(0, o, slp_type_key(ty), i);
-}
-
 // vectorizeChainsInBlock(BB, R)
 fn slp_vectorize_chains_in_block(bb: i32) {
     slp_fma_cands.clear();

@@ -12,6 +12,7 @@
 // equal and the pop order decides OrdersUses' insertion order.
 import std;
 import ir;
+import flags;
 import irutil;
 import calls;
 import instinfo;
@@ -30,6 +31,7 @@ import slp_loads;
 import slp_build;
 import slp_gather;
 
+fn slp_rdbg() -> bool { flag_bool("slp-reorder-debug", false) }
 // ---------------------------------------------------------------- masks and orders
 fn slp_is_identity_order(o: const i32[:]) -> bool {
     let sz = o.len;
@@ -621,6 +623,7 @@ fn slp_get_reordering_data(te: i32, top: bool, ignore: bool, res: i32[>..<]&) ->
             var scc: i32[>..<] = [];
             slp_copy_list(te_scalars(te), scc);
             let r = slp_can_vectorize_loads(scc, scc[0], co, ptrs, false, true);
+            if slp_rdbg() { errs("REORDER cvl te "); errs_int(te as i64); errs(" -> "); errs_int(r); errs("\n"); slp_dbg_flush(); }
             if r == LS_VECTORIZE || r == LS_STRIDED || r == LS_COMPRESS { slp_copy_list(co, res); return true; }
         }
         if slp_find_reused_ordered_scalars(te, top, ignore, res) { return true; }
@@ -1015,7 +1018,9 @@ fn slp_reorder_top_to_bottom() {
             }
         }
         var cur: i32[>..<] = [];
-        if slp_get_reordering_data(t, true, ignore, cur) {
+        let rd = slp_get_reordering_data(t, true, ignore, cur);
+        if slp_rdbg() { errs("REORDER t2b te "); errs_int(t as i64); errs(" has "); errs_int(if rd { 1 } else { 0 }); errs(" ["); for x in cur { errs_int(x as i64); errs(","); } errs("]\n"); slp_dbg_flush(); }
+        if rd {
             var cnt: i64 = 0;
             var ut = t;
             var skip = false;
@@ -1097,6 +1102,7 @@ fn slp_reorder_top_to_bottom() {
         if ou.len == 0 { vf--; continue; }
         var best: i32[>..<] = [];
         sou_best(ou, oup, vf, true, best);
+        if slp_rdbg() { errs("REORDER t2b vf "); errs_int(vf); errs(" best ["); for x in best { errs_int(x as i64); errs(","); } errs("]\n"); slp_dbg_flush(); }
         if slp_is_identity_order(best) { vf--; continue; }
         slp_fixup_ordering_indices(best);
         var mask: i32[>..<] = [];

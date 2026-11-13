@@ -18,7 +18,7 @@ var cl_mcpu: u8[>..];      // -mcpu
 let KNOWN_FLAGS: const u8[:][] = [
     "vectorize-slp", "slp-vectorize-hor", "slp-vectorize-hor-store", "slp-postprocess-stores-operands",   // slp-vectorizer
     "slp-non-vectorizables-as-reductions", "slp-vectorize-poor-throughput", "slp-threshold", "slp-recursion-max-depth",
-    "slp-max-reg-size", "slp-min-reg-size",
+    "slp-max-reg-size", "slp-min-reg-size", "slp-reorder-debug",
     "debug-only",                                        // -debug-only=SLP: SLPVectorizer traces (release LLVM rejects it)
     "disable-vector-combine", "disable-binop-extract-shuffle", "vector-combine-max-scan-instrs",   // vector-combine
     "adce-remove-loops", "adce-remove-control-flow",
