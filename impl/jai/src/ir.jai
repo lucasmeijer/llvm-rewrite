@@ -1114,6 +1114,13 @@ data_compatible_elt :: (t: Type_Id) -> bool {
 // ConstantArray::get / ConstantVector::get / ConstantStruct::get with LLVM's canonicalizations
 // (llvm/lib/IR/Constants.cpp ConstantArray::getImpl, ConstantVector::getImpl, ConstantStruct::get).
 const_aggregate :: (kind: Value_Kind, type: Type_Id, ops: [] Value_Id) -> Value_Id {
+    f := const_aggregate_fold(kind, type, ops);
+    if f != NONE return f;
+    return const_aggregate_raw(kind, type, ops);
+}
+// The canonicalizations of const_aggregate (ConstantArray::getImpl / ConstantVector::getImpl / ConstantStruct::get
+// before creating a ConstantArray/Vector/Struct); NONE = a plain aggregate.
+const_aggregate_fold :: (kind: Value_Kind, type: Type_Id, ops: [] Value_Id) -> Value_Id {
     if kind == .C_STRUCT {
         is_zero := true; is_undef := false; is_poison := false;
         if ops.count {
@@ -1131,7 +1138,7 @@ const_aggregate :: (kind: Value_Kind, type: Type_Id, ops: [] Value_Id) -> Value_
         if is_zero return const_zero(type);
         if is_poison return const_poison(type);
         if is_undef return const_undef(type);
-        return const_aggregate_raw(kind, type, ops);
+        return NONE;
     }
     if ops.count == 0 return const_zero(type);   // ConstantArray::getImpl: an empty array is ConstantAggregateZero
     c := ops[0];
@@ -1169,15 +1176,19 @@ const_aggregate :: (kind: Value_Kind, type: Type_Id, ops: [] Value_Id) -> Value_
             return const_data(type, elts);
         }
     }
-    return const_aggregate_raw(kind, type, ops);
+    return NONE;
 }
 
 // Constant expression (getelementptr, casts, binary ops, ...). info carries op/flags/ty2/idx.
-const_expr :: (op: Opcode, type: Type_Id, flags: u32, ty2: Type_Id, ops: [] Value_Id, extra: [] u32 = .[]) -> Value_Id {
+const_expr_key :: (op: Opcode, type: Type_Id, flags: u32, ty2: Type_Id, ops: [] Value_Id, extra: [] u32) -> *Key {
     k := const_key_begin(.C_EXPR, type);
     key_u8(k, cast(u8) op); key_u32(k, flags); key_u32(k, ty2);
     key_u32(k, cast(u32) extra.count); for extra key_u32(k, it);
     for ops key_u32(k, it);
+    return k;
+}
+const_expr :: (op: Opcode, type: Type_Id, flags: u32, ty2: Type_Id, ops: [] Value_Id, extra: [] u32 = .[]) -> Value_Id {
+    k := const_expr_key(op, type, flags, ty2, ops, extra);
     found, v := table_find(*ir.const_map, key_view(k));
     if found return v;
     row: Inst_Row;
@@ -1200,28 +1211,62 @@ const_blockaddr :: (fnv: Value_Id, bb: Value_Id) -> Value_Id {
     return v;
 }
 
-// Constant::handleOperandChange: re-unique the constant with `from` replaced by `to`.
+// Constant::handleOperandChange with the classes' handleOperandChangeImpl (llvm/lib/IR/Constants.cpp): when the
+// changed constant folds to, or already exists as, another constant, every user moves to that one (RAUW, which
+// reverses the order of the moved uses) and this one is destroyed; otherwise the constant is updated in place
+// (ConstantUniqueMap::replaceOperandsInPlace), keeping its identity and use list.
 constant_handle_operand_change :: (c: Value_Id, from: Value_Id, to: Value_Id) {
     n := nops(c);
     newops: [..] Value_Id; newops.allocator = temp;
-    if n > 0 for i: 0..n-1 { o := op(c, i); array_add(*newops, ifx o == from then to else o); }
+    num_updated := 0; operand_no: u32 = 0;
+    all_same := true;
+    if n > 0 for i: 0..n-1 {
+        o := op(c, i);
+        if o == from { o = to; num_updated += 1; operand_no = i; }
+        array_add(*newops, o);
+        if o != to all_same = false;
+    }
     kind := vkind(c);
     type := vtype(c);
     repl: Value_Id = NONE;
+    k: *Key;
     if kind == .C_EXPR {
+        // getWithOperands(OnlyIfReduced = true) does not fold here (our constant expressions are built folded)
         e := cexpr(c);
         extra: [] u32; extra.data = ir.u32_pool.data + e.idx; extra.count = e.nidx;
-        repl = const_expr(e.op, type, e.flags, e.ty2, newops, extra);
+        k = const_expr_key(e.op, type, e.flags, e.ty2, newops, extra);
     } else if kind == .C_ARRAY || kind == .C_STRUCT || kind == .C_VECTOR {
-        repl = const_aggregate(kind, type, newops);
+        if kind != .C_VECTOR && all_same && is_null_value(to) repl = const_zero(type);
+        else if kind != .C_VECTOR && all_same && (vkind(to) == .C_UNDEF || vkind(to) == .C_POISON) repl = const_undef(type);
+        else if kind != .C_STRUCT repl = const_aggregate_fold(kind, type, newops);   // getImpl
+        if repl == NONE { k = const_key_begin(kind, type); for newops key_u32(k, it); }
     } else if kind == .C_BLOCKADDR {
-        repl = const_blockaddr(newops[0], newops[1]);
+        k = const_key_begin(.C_BLOCKADDR, ir.t_ptr); key_u32(k, newops[0]); key_u32(k, newops[1]);
     } else if kind == .C_DSO_EQUIV || kind == .C_NO_CFI {
-        k := const_key_begin(kind, type); key_u32(k, newops[0]);
-        repl = const_lookup_or_create(k, kind, type, newops, 0);
+        k = const_key_begin(kind, type); key_u32(k, newops[0]);
+    } else if kind == .C_PTRAUTH {
+        k = const_key_begin(kind, type); for newops key_u32(k, it);
     } else {
         // generic: just move the use
         if n > 0 for i: 0..n-1 if op(c, i) == from { set_op(c, i, to); }
+        return;
+    }
+    if repl == NONE {
+        found, existing := table_find(*ir.const_map, key_view(k));
+        if found repl = existing;
+    }
+    if repl == NONE {
+        // replaceOperandsInPlace: re-key the constant and update its operands
+        found, oldkey := table_find(*const_keys, c);
+        if found {
+            f2, cur := table_find(*ir.const_map, oldkey);
+            if f2 && cur == c table_remove(*ir.const_map, oldkey);
+        }
+        if num_updated == 1 set_op(c, operand_no, to);
+        else if n > 0 for i: 0..n-1 if op(c, i) == from set_op(c, i, to);
+        newkey := key_copy(k);
+        table_add(*ir.const_map, newkey, c);
+        const_keys_set(c, newkey);
         return;
     }
     if repl == c return;

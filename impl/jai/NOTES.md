@@ -1740,9 +1740,10 @@ Still slow / next:
 - `-denormal-fp-math[-f32]` add `denormal_fpenv` to every function without one (opt_set_function_attributes, which
   now also runs for an unknown-arch triple, with CPU/features cleared).
 - `-verify-scev-strict` is accepted: our verify<scalar-evolution> does not recompute (it could only abort).
-- Also: `print_uselistorder.jai` (`--preserve-ll-uselistorder`: function-level directives are exact over the
-  corpus; directives for globals/constants fail loudly because our parser orders their uses differently from LLVM's
-  when forward references are involved: 4592 files fail loudly, 0 differ), VP intrinsic costs (BasicTTI's VP
+- Also: `print_uselistorder.jai` (`--preserve-ll-uselistorder`: all directives, globals and constants included,
+  identical over the corpus with plain `opt -S` (10118 files) and 0 new differs in instcombine/simplifycfg/sroa sweeps
+  with the flag; this needed in-place constant updates in `constant_handle_operand_change`, end-of-module
+  dso_local_equivalent placeholders and per-clause landingpad parsing, see knowledge/llvm/textual-ir.md), VP intrinsic costs (BasicTTI's VP
   branch in tti_intrinsics.jai), optimizeModularFormat, x86 auto-upgrades for movnt/storeu/blend/kunpck/vpdp*,
   x87 pseudo-infinities and unnormals decode as NaN (they printed as an endless loop before).
 - `harness check --no-build` after a manual `build.sh` can report stale results; run `check` (it builds) when in

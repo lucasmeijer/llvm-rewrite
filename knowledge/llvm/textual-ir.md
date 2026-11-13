@@ -105,6 +105,18 @@ Facts needed to make a parse+print round trip byte-identical. Sources: `llvm/lib
 - **Growing a PHI or switch** (`User::growHungoffUses`) copies each `Use` with `Use::operator=`, i.e. `set()`, which
   pushes the new use at the head of its value's list in operand order, then destroys the old ones. Capacity grows
   to `n + n/2` (min 2) for PHIs and `n * 3` for switches. Only matters to passes (the parser reserves exactly).
+- **Use lists of globals and constants after parsing** (what `--preserve-ll-uselistorder` exposes; verified in
+  impl/jai: parse+print identical over the corpus):
+  - A forward-referenced global is a placeholder; at its definition `RAUW` walks the placeholder's uses head first.
+    A constant user is changed with `Constant::handleOperandChange`: if the changed constant folds or already
+    exists, its users move to that one (RAUW again, reversing them) and it is destroyed; otherwise it is updated
+    *in place* (`ConstantUniqueMap::replaceOperandsInPlace`: re-keyed, same object, its own use list untouched; one
+    operand updated, or all matching ones in operand order). Re-creating the constant instead reverses its uses.
+  - `dso_local_equivalent @f` before `@f` is defined (or while `@f` is only forward-referenced) uses a separate
+    placeholder per name/number; `validateEndOfModule` replaces them with `DSOLocalEquivalent::get` (numbered ones,
+    then names, in map order), so that constant's use of `@f` is created at the end of the module.
+  - `landingpad` adds each clause right after parsing it (`addClause`, growing with `growHungoffUses`), so a filter
+    array constant parsed after an earlier `catch` of the same global is created after that clause's use.
 - Constant expressions are folded when created (`getelementptr inbounds ([16 x i32], ptr @a, i32 0, i64 0)` prints
   as `@a`; `ConstantFold.cpp` via `ConstantExpr::get*`), the `"PIC Level"` module flag's behavior is upgraded from
   7 (Max) or 1 (Error) to 8 (Min), and `llvm.lifetime.start/end` calls lose their size argument (AutoUpgrade).

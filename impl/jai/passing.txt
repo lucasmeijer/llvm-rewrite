@@ -2806,6 +2806,7 @@ tests/imported/llvm/Analysis/MemorySSA/no-disconnected.ll::analysis
 tests/imported/llvm/Analysis/MemorySSA/no-disconnected.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/noalias-scope-decl.ll::analysis
 tests/imported/llvm/Analysis/MemorySSA/noalias-scope-decl.ll::roundtrip
+tests/imported/llvm/Analysis/MemorySSA/nondeterminism.ll::opt
 tests/imported/llvm/Analysis/MemorySSA/nondeterminism.ll::roundtrip
 tests/imported/llvm/Analysis/MemorySSA/optimize-use.ll::analysis
 tests/imported/llvm/Analysis/MemorySSA/optimize-use.ll::roundtrip

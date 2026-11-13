@@ -11,6 +11,9 @@ Parser :: struct {
     fwd_globals:     Table(string, Value_Id);
     fwd_global_ids:  Table(u32, Value_Id);
     fwd_global_order: [..] Value_Id;
+    // ForwardRefDSOLocalEquivalentIDs / Names: placeholders for `dso_local_equivalent @f` before @f is defined
+    dso_fwd_ids: Table(u32, Value_Id);
+    dso_fwd_names: Table(string, Value_Id);
 
     numbered_types: Table(u32, Type_Id);
     named_types: Table(string, Type_Id);   // LLParser::NamedTypes (textual name -> type; the context names may differ)
@@ -603,6 +606,14 @@ parse_global_def :: () {
         return;
     }
     parse_global(name, id, li, tls, ua);
+}
+
+// placeholder of a forward-referenced dso_local_equivalent (an internal unnamed i8 GlobalVariable)
+create_dso_fwd_ref :: () -> Value_Id {
+    g := new_global(.GLOBAL_VAR, ir.t_i8, 0, 1);
+    glob(g).linkage = .INTERNAL;
+    array_add(*ir.m_globals, g);
+    return g;
 }
 
 // Placeholder for a forward-referenced global (LLParser's createGlobalFwdRef: an unnamed i8 GlobalVariable
@@ -1425,7 +1436,34 @@ parse_constant_keyword :: (ty: Type_Id) -> Value_Id {
         expect(.RPAREN, "')'");
         return parse_blockaddress(ty, fn_tok, bb_tok);
     }
-    if s == "dso_local_equivalent" || s == "no_cfi" {
+    if s == "dso_local_equivalent" {
+        // LLParser: a function not defined yet (or only forward-referenced) gets a placeholder global, resolved to
+        // DSOLocalEquivalent::get at the end of the module
+        next();
+        gt := P.tok;
+        if gt.kind != .GLOBAL_VAR && gt.kind != .GLOBAL_ID perr("expected global value name in dso_local_equivalent");
+        gv: Value_Id = NONE;
+        if gt.kind == .GLOBAL_ID { found, v := table_find(*P.numbered_globals, cast(u32) gt.uval); if found gv = v; }
+        else if !table_contains(*P.fwd_globals, gt.text) gv = lookup_global(gt.text);
+        if gv == NONE {
+            next();
+            fw: Value_Id = NONE;
+            if gt.kind == .GLOBAL_ID {
+                found, f0 := table_find(*P.dso_fwd_ids, cast(u32) gt.uval);
+                if found fw = f0; else { fw = create_dso_fwd_ref(); table_add(*P.dso_fwd_ids, cast(u32) gt.uval, fw); }
+            } else {
+                found, f0 := table_find(*P.dso_fwd_names, gt.text);
+                if found fw = f0; else { fw = create_dso_fwd_ref(); table_add(*P.dso_fwd_names, intern_str(gt.text), fw); }
+            }
+            return fw;
+        }
+        next();
+        if type_kind(glob(gv).value_type) != .FUNC perr("expected a function, alias to function, or ifunc in dso_local_equivalent");
+        k := const_key_begin(.C_DSO_EQUIV, vtype(gv)); key_u32(k, gv);
+        v := const_lookup_or_create(k, .C_DSO_EQUIV, vtype(gv), .[gv], 0);
+        return v;
+    }
+    if s == "no_cfi" {
         next();
         gt := P.tok;
         gv := parse_constant(ir.t_ptr);
@@ -2516,15 +2554,15 @@ parse_instruction :: () -> Value_Id, bool {
         i := new_inst(.LANDINGPAD, ty, 0);   // LandingPadInst::Create(Ty, NumReservedClauses) + addClause
         if eat_kw("cleanup") inst(i).flags |= F_CLEANUP;
         kinds: [..] u32; kinds.allocator = temp;
-        clauses: [..] Value_Id; clauses.allocator = temp;
         while is_kw("catch") || is_kw("filter") {
             ik: u32 = ifx is_kw("catch") then cast(u32) 0 else 1;
             next();
-            array_add(*clauses, parse_type_and_value());
+            c := parse_type_and_value();
             array_add(*kinds, ik);
+            // LandingPadInst::addClause right after parsing each clause (add_op grows like growOperands(1), which
+            // reorders the use lists of the clauses already added)
+            add_op(i, c);
         }
-        grow_ops(i, cast(u32) clauses.count);
-        for clauses add_op(i, it);
         r := inst(i);
         r.idx = cast(u32) ir.u32_pool.count; r.nidx = cast(u32) kinds.count;
         for kinds array_add(*ir.u32_pool, it);
@@ -3121,6 +3159,33 @@ validate_end_of_module :: () {
         }
     }
     if P.blockaddr_fwd.count perr("expected function name in blockaddress");
+    // ResolveForwardRefDSOLocalEquivalents: IDs, then names (std::map order)
+    resolve_dso :: (gv: Value_Id, fw: Value_Id, what: string) {
+        if gv == NONE perr("unknown function '%' referenced by dso_local_equivalent", what);
+        if type_kind(glob(gv).value_type) != .FUNC perr("expected a function, alias to function, or ifunc in dso_local_equivalent");
+        k := const_key_begin(.C_DSO_EQUIV, vtype(gv)); key_u32(k, gv);
+        equiv := const_lookup_or_create(k, .C_DSO_EQUIV, vtype(gv), .[gv], 0);
+        replace_all_uses_with(fw, equiv);
+        erase_global(fw);
+    }
+    {
+        ids: [..] u32; ids.allocator = temp;
+        for v, id: P.dso_fwd_ids array_add(*ids, id);
+        quick_sort(ids, (a: u32, b: u32) -> s64 { return cast(s64) a - cast(s64) b; });
+        for id: ids {
+            _, fw := table_find(*P.dso_fwd_ids, id);
+            found, gv := table_find(*P.numbered_globals, id);
+            resolve_dso(ifx found then gv else NONE, fw, "");
+        }
+        names: [..] string; names.allocator = temp;
+        for v, n: P.dso_fwd_names array_add(*names, n);
+        quick_sort(names, (a: string, b: string) -> s64 { return compare(a, b); });
+        for n: names {
+            _, fw := table_find(*P.dso_fwd_names, n);
+            resolve_dso(lookup_global(n), fw, n);
+        }
+        table_reset(*P.dso_fwd_ids); table_reset(*P.dso_fwd_names);
+    }
     // Forward-referenced intrinsics are auto-declared (with the mangling suffix the call's type needs);
     // ForwardRefVals is a std::map, so this goes in name order. Other forward refs are errors.
     names: [..] string; names.allocator = temp;

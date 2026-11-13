@@ -165,12 +165,6 @@ ulo_compute :: () {
         uses: [..] Use_Id; uses.allocator = temp;
         ulo_uses(v, *uses);
         if uses.count < 2 continue;
-        sk := vkind(v);
-        if sk != .INST && sk != .ARGUMENT && sk != .BLOCK {
-            served := 0;
-            for uses if ulo_id(*om, ir.u_user[it]) != 0 served += 1;
-            if served >= 2 fatal("--preserve-ll-uselistorder: use-list orders of globals and constants (here %) are not supported yet: our parser orders their uses differently from LLVM's when forward references are involved", ifx vname(v).count then vname(v) else "a constant");
-        }
         sh := ulo_predict_value(v, cast(u32)(k + 1), *om);
         if sh.count == 0 continue;
         f: Value_Id = NONE;
