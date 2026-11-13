@@ -1,8 +1,7 @@
 // InstrProf helpers shared by the IR PGO passes (instrprof lowering, pgo-instr-gen, pgo-icall-prom, memprof):
 // section and variable names (llvm/include/llvm/ProfileData/InstrProfData.inc, InstrProf.h), PGO names, name
 // variables, comdat rules, the name-string blob with its zlib compression, value-profile metadata.
-// Ported from llvm/lib/ProfileData/InstrProf.cpp and setGlobalVariableLargeSection
-// (llvm/lib/Transforms/Utils/Instrumentation.cpp).
+// Ported from llvm/lib/ProfileData/InstrProf.cpp.
 //
 // The name blob is compressed with the system zlib (compression::zlib::compress at BestSizeCompression); LLVM's
 // opt links the same libz.so.1, so the bytes are identical (NOTES.md "The profile family").
@@ -182,14 +181,7 @@ create_profile_file_name_var :: (output: string) {
     }
 }
 
-// setGlobalVariableLargeSection(TT, GV): x86-64 ELF with the medium / large code model
-set_global_variable_large_section :: (gv: Value_Id) {
-    t := triple_parse(ir.triple);
-    if t.arch != .x86_64 || t.obj != .ELF return;
-    ok, cm := mu_module_flag_int("Code Model");   // Module::getCodeModel: CodeModel::Model (Tiny 0 .. Large 4)
-    if !ok || (cm != 3 && cm != 4) return;
-    glob(gv).code_model = 5;   // large
-}
+// setGlobalVariableLargeSection: set_global_variable_large_section in sanitizer_common.jai
 
 encode_uleb128 :: (sb: *String_Builder, v_in: u64) {
     v := v_in;
