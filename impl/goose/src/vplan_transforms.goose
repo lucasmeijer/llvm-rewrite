@@ -12,6 +12,7 @@ import irutil;
 import instinfo;
 import gen_iids;
 import pm;
+import datalayout;
 import apint;
 import instsimplify;
 import scev;
@@ -959,10 +960,62 @@ fn vpt_can_hoist_or_sink_with_no_alias_check(loc: ML, first: i32, last: i32, lea
 fn vpt_simplify_reverses() {
     var bs: i32[>..<] = [];
     vp_all_basic_blocks_deep(bs);
+    // pullOutPermutations: binop(reverse(x), reverse(y)) -> reverse(binop(x, y))
+    for b in bs {
+        var rs: i32[>..<] = [];
+        vp_block_recipes(b, rs);
+        for r in rs {
+            if vpr[r].dead || vpr[r].def < 0 { continue; }
+            let k = vpr[r].kind;
+            if k != VPR_INSTRUCTION && k != VPR_WIDEN { continue; }
+            let o = vpr[r].opcode;
+            if !(vpi_is_ir_opcode(o) && (o == OP_FNEG as i32 || vp_opcode_is_binary(o))) { continue; }
+            var any = false;
+            var all = true;
+            for j in vp_nops(r) {
+                let v = vp_op(r, j);
+                let isrev = vpm_vpi_r(vp_def(v), VPI_REVERSE, 1);
+                if isrev { any = true; }
+                if !((isrev && vp_num_users(v) == 1) || vp_is_ir_value(v)) { all = false; }
+            }
+            if !any || !all { continue; }
+            for j in vp_nops(r) {
+                let d = vp_def(vp_op(r, j));
+                if vpm_vpi_r(d, VPI_REVERSE, 1) { vp_set_operand(r, j, vp_op(d, 0)); }
+            }
+            let def = vpr[r].def;
+            let res = vp_new_instruction(VPI_REVERSE, [def], vpf_none(), -1, "", -1);
+            vp_insert_after(res, r);
+            let rv = vpr[res].def;
+            vp_replace_uses_with_if(def, rv) { u, i => u != res };
+        }
+    }
+    // reverse(reverse(x)) -> x
     for b in bs {
         var r = vpb[b].first;
-        while r >= 0 { if vp_is_vpi(r, VPI_REVERSE) { vp_unported("reverse accesses (simplifyReverses)"); } r = vpr[r].next; }
+        while r >= 0 {
+            if vpm_vpi_r(r, VPI_REVERSE, 1) {
+                let d = vp_def(vp_op(r, 0));
+                if vpm_vpi_r(d, VPI_REVERSE, 1) { vp_rauw(vpr[r].def, vp_op(d, 0)); }
+            }
+            r = vpr[r].next;
+        }
     }
+}
+// VPVectorEndPointerRecipe::materializeOffset(Part)
+fn vp_end_pointer_materialize_offset(r: i32, part: i64) {
+    vpb_set_before(r);
+    let vfv = vp_op(r, 1);
+    let ity = ty_int(dl_ptr(types[ty_scalar(vpv[vpr[r].def].ty)].n as i64).idx);
+    let st = vpr[r].stride;
+    let stride = vp_const_int(ity, st as u64);
+    let vf = vpb_scalar_zext_or_trunc(vfv, ity, vp_scalar_type(vfv), -1);
+    let vm1 = vpb_sub(vf, vp_const_int(ity, 1), -1, "", true, true);
+    let off0 = vpb_nary(OP_MUL as i32, [vpr[vm1].def, stride], vpf_wrap(false, false), -1, "", -1);
+    let pxs = vp_const_int(ity, (part * st) as u64);
+    let m = vpb_nary(OP_MUL as i32, [pxs, vf], vpf_wrap(false, false), -1, "", -1);
+    let off = vpb_add(vpr[off0].def, vpr[m].def, -1, "", false, false);
+    vp_add_operand(r, vpr[off].def);
 }
 
 // VPlanTransforms::optimize

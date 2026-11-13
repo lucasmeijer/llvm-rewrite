@@ -26,16 +26,37 @@ import iv_descriptors;
 import vplan;
 import vplan_utils;
 import vplan_props;
+import vplan_predicate;
 import vplan_transforms;
 
-// replaceWideCanonicalIVWithWideIV (the plans built so far have no VPWidenCanonicalIVRecipe without tail folding)
+// replaceWideCanonicalIVWithWideIV(Plan, SE, TTI, CostKind, VF, UF, ValuesToIgnore)
 fn vpx_replace_wide_canonical_iv_with_wide_iv() {
     let region = vp_vector_loop_region();
     if region < 0 { return; }
     let can_iv = vpb[region].can_iv;
-    for j in vp_num_users(can_iv) {
-        if vpr[vp_user(can_iv, j)].kind == VPR_WIDEN_CANONICAL_IV { vp_unported("replaceWideCanonicalIVWithWideIV"); }
+    var w: i32 = -1;
+    for j in vp_num_users(can_iv) { let u = vp_user(can_iv, j); if vpr[u].kind == VPR_WIDEN_CANONICAL_IV { w = u; break; } }
+    if w < 0 { return; }
+    let cty = vpv[can_iv].ty;
+    if vp_has_scalar_vf_only() || vp_only_first_lane_used(vpr[w].def) {
+        vpb_set_before(w);
+        let st = vp_create_scalar_iv_steps(IK_INT, OP_ADD, -1, -1, vp_const_int(cty, 0), vp_const_int(cty, 1), vpr[w].dl);
+        vp_rauw(vpr[w].def, vpr[st].def);
+        vp_erase_recipe(w);
+        return;
     }
+    if vp_only_scalar_values_used(vpr[w].def) { return; }
+    let header = vpb[region].entry;
+    var phis: i32[>..<] = [];
+    vp_block_phis(header, phis);
+    for p in phis {
+        if !vp_is_canonical_widen_iv(p) { continue; }
+        vp_drop_poison_generating_flags(p);
+        vp_rauw(vpr[w].def, vpr[p].def);
+        vp_erase_recipe(w);
+        return;
+    }
+    vp_unported("a new wide induction for the wide canonical IV (spill cost)");
 }
 
 // unrollByUF (VPlanUnroll.cpp, UnrollState)
@@ -174,7 +195,6 @@ fn vpu_unroll_recipe(r: i32) {
         if inst_iid(ui) == IID_experimental_noalias_scope_decl { vpu_add_uniform(r); return; }
     }
     let k = vpr[r].kind;
-    if k == VPR_VECTOR_END_POINTER { vp_unported("unrolling vector end pointers (reverse accesses)"); }
     if k == VPR_REDUCTION { vp_unported("unrolling reductions"); }
     let next = vpr[r].next;
     let bb = vpr[r].parent;
@@ -183,6 +203,12 @@ fn vpu_unroll_recipe(r: i32) {
         if next >= 0 { vp_insert_before(c, next); } else { vp_append_recipe(bb, c); }
         vpu_add_recipe_for_part(r, c, part);
         if vpr[c].kind == VPR_WIDEN_PHI { continue; }
+        if k == VPR_VECTOR_END_POINTER {
+            vp_set_operand(c, 0, vp_op(r, 0));
+            vp_set_operand(c, 1, vp_op(r, 1));
+            vp_end_pointer_materialize_offset(c, part);
+            continue;
+        }
         if vpm_vpi_r(r, VPI_FIRST_ORDER_RECURRENCE_SPLICE, 2) {
             let o = vp_op(r, 1);
             vp_set_operand(c, 0, vpu_part(o, part - 1));
@@ -206,6 +232,7 @@ fn vpu_unroll_recipe(r: i32) {
             vp_set_operand(c, 1, vpr[m].def);
         }
     }
+    if k == VPR_VECTOR_END_POINTER { vp_end_pointer_materialize_offset(r, 0); }
     if k == VPR_WIDEN_CANONICAL_IV { vp_add_operand(r, vpu_const_int(0)); }
 }
 
@@ -667,9 +694,39 @@ fn vpx_convert_to_concrete_recipes() {
             if k == VPR_WIDEN_INT_OR_FP_INDUCTION { vpx_expand_widen_int_or_fp_induction(r); vp_erase_recipe(r); continue; }
             if k == VPR_WIDEN_POINTER_INDUCTION { vp_unported("pointer inductions (convertToConcreteRecipes)"); }
             if k == VPR_DERIVED_IV { vpx_expand_derived_iv(r); vp_erase_recipe(r); continue; }
-            if k == VPR_WIDEN_CANONICAL_IV || k == VPR_BLEND || k == VPR_VECTOR_END_POINTER || k == VPR_EXPRESSION {
-                vp_unported("widen-canonical-IV / blend / end-pointer / expression recipes (convertToConcreteRecipes)");
+            if k == VPR_BLEND {
+                // expand a blend into a chain of selects
+                vpb_set_before(r);
+                var sel = vp_blend_incoming(r, 0);
+                for i in 1..vp_blend_num_incoming(r) {
+                    let sr = vpb_nary(OP_SELECT as i32, [vp_blend_mask(r, i), vp_blend_incoming(r, i), sel], vpr[r].f, vpr[r].dl, "predphi", -1);
+                    sel = vpr[sr].def;
+                }
+                vp_rauw(vpr[r].def, sel);
+                vp_erase_recipe(r);
+                continue;
             }
+            if k == VPR_VECTOR_END_POINTER {
+                if vp_nops(r) < 3 { vp_end_pointer_materialize_offset(r, 0); }
+                continue;
+            }
+            if k == VPR_WIDEN_CANONICAL_IV {
+                vpb_set_before(r);
+                let civ = vp_op(r, 0);
+                let cty = vp_scalar_type(civ);
+                var step = if vp_nops(r) > 1 { vp_op(r, 1) } else { vp_const_int(cty, 0) };
+                let bc = vpb_nary(VPI_BROADCAST, [civ], vpf_none(), -1, "", -1);
+                let bs = vpb_nary(VPI_BROADCAST, [step], vpf_none(), -1, "", -1);
+                let sv = vpb_nary(VPI_STEP_VECTOR, [], vpf_none(), -1, "", cty);
+                vpr[sv].with_type = true;
+                let st = vpb_add(vpr[bs].def, vpr[sv].def, -1, "", false, false);
+                let f = vpr[r].f;
+                let cv = vpb_add(vpr[bc].def, vpr[st].def, vpr[r].dl, "vec.iv", f.nuw, f.nsw);
+                vp_rauw(vpr[r].def, vpr[cv].def);
+                vp_erase_recipe(r);
+                continue;
+            }
+            if k == VPR_EXPRESSION { vp_unported("expression recipes (convertToConcreteRecipes)"); }
             if vp_is_vpi(r, VPI_LAST_ACTIVE_LANE) || vp_is_vpi(r, VPI_MASKED_COND) { vp_unported("last-active-lane / masked-cond"); }
             if vp_is_vpi(r, VPI_CANONICAL_IV_INCREMENT_FOR_PART) {
                 vpb_set_before(r);

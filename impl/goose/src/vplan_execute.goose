@@ -299,6 +299,7 @@ fn vpi_generate(r: i32) -> i32 {
         if is_inst(res) { vp_apply_flags(r, res); }
         return res;
     }
+    if o == VPI_REVERSE { return vxb_vector_reverse(vts_get(vp_op(r, 0), false), "reverse"); }
     if o == VPI_NOT {
         let a = vts_get(vp_op(r, 0), vp_only_first_lane_used(vpr[r].def));
         return vxb_binop(OP_XOR, a, c_int(vals[a].ty as i32, -1), name);
@@ -640,6 +641,14 @@ fn vp_execute_recipe(r: i32) {
         let p = vts_get_lane(vp_op(r, 0), 0);
         var off = vts_get(vp_op(r, 2), true);
         if !vpm_one(vp_op(r, 1)) { vp_unported("vector pointers with a non-unit stride"); }
+        let g = vxb_gep(vpr[r].src_elt_ty, p, [off], "", vpr[r].f.gep);
+        vts_set(vpr[r].def, g, true);
+        return;
+    }
+    if k == VPR_VECTOR_END_POINTER {
+        if vp_nops(r) < 3 { fatal("internal: Expected prior materialization of offset"); }
+        let p = vts_get(vp_op(r, 0), true);
+        let off = vts_get(vp_op(r, 2), true);
         let g = vxb_gep(vpr[r].src_elt_ty, p, [off], "", vpr[r].f.gep);
         vts_set(vpr[r].def, g, true);
         return;
