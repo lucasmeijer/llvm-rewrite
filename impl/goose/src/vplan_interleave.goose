@@ -19,6 +19,10 @@ import vplan;
 import vplan_utils;
 import vplan_props;
 import vplan_execute;
+import vplan_transforms;
+import vplan_exec_transforms;
+import tti_vec;
+import lv_plan;
 
 // a VPIRMetadata as a flat list of (kind, node) pairs
 fn vig_md_of_recipe(r: i32, out: i32[>..<]&) {
@@ -360,4 +364,213 @@ fn vp_interleave_execute(r: i32) {
     let st = vxb_store(iv, res_addr, ig_align(g));
     vp_apply_metadata(r, st);
     vig_add_metadata(g, st);
+}
+
+// ---------------------------------------------------------------------------------------------
+// VPlanTransforms::narrowInterleaveGroups
+
+// canNarrowLoad(WideMember0, OpIdx, OpV, Idx)
+fn vig_can_narrow_load(m0: i32, op_idx: i64, opv: i32, idx: i64) -> bool {
+    let m0op = vp_op(m0, op_idx);
+    if vp_is_defined_outside_loop_regions(m0op) {
+        if m0op == opv { return true; }
+        return vp_is_defined_outside_loop_regions(opv) && vp_scalar_type(opv) == vp_scalar_type(m0op);
+    }
+    let r = vp_def(m0op);
+    if vpr[r].kind == VPR_WIDEN_LOAD { return !vpr[r].masked && vpr[r].consecutive && m0op == opv; }
+    if vpr[r].kind == VPR_INTERLEAVE { return ig_is_full(vpr[r].ig) && vp_defined_value(r, idx) == opv; }
+    return false;
+}
+fn vig_has_predicate(r: i32) -> bool { vpr[r].f.ot == VOT_CMP || vpr[r].f.ot == VOT_FCMP }
+// canNarrowOps(Ops): the ops are vig_stk[at .. at + n] (a scratch stack: recursion only pushes beyond)
+var vig_stk: i32[>..<];
+recursive fn vig_can_narrow_ops(at: i64, n: i64) -> bool {
+    let m0 = vp_def(vig_stk[at]);
+    if m0 < 0 || !vp_is_recipe_with_ir_flags(vpr[m0].kind) { return false; }
+    for j in n {
+        let v = vig_stk[at + j];
+        let r = vp_def(v);
+        if r < 0 || (vpr[r].kind != VPR_WIDEN && vpr[r].kind != VPR_WIDEN_CAST) { return false; }
+        if vpr[r].opcode != vpr[m0].opcode || (vpr[m0].kind != VPR_WIDEN && vpr[m0].kind != VPR_WIDEN_CAST) { return false; }
+        if vp_scalar_type(v) != vp_scalar_type(vig_stk[at]) { return false; }
+        if vig_has_predicate(r) && (!vig_has_predicate(m0) || vpr[r].f.pred != vpr[m0].f.pred) { return false; }
+    }
+    for idx in vp_nops(m0) {
+        let b = vig_stk.len;
+        for j in n { let o = vp_op(vp_def(vig_stk[at + j]), idx); vig_stk.push(o); }
+        if vig_can_narrow_ops(b, n) { vig_stk.resize(b); continue; }
+        for k in n { if !vig_can_narrow_load(m0, idx, vig_stk[b + k], k) { vig_stk.resize(b); return false; } }
+        vig_stk.resize(b);
+    }
+    return true;
+}
+fn vig_can_narrow_ops_of(ops: const i32[:]) -> bool {
+    let b = vig_stk.len;
+    for v in ops { vig_stk.push(v); }
+    let r = vig_can_narrow_ops(b, ops.len);
+    vig_stk.resize(b);
+    return r;
+}
+// isConsecutiveInterleaveGroup(InterleaveR, VFs, TTI): the VF or 0
+fn vig_consecutive_group_vf(r: i32, vfs: const i64[:]) -> i64 {
+    if vpr[r].masked { return 0; }
+    var et: i32 = -1;
+    var stored: i32[>..<] = [];
+    vp_interleave_stored_values(r, stored);
+    if stored.len == 0 {
+        et = vp_scalar_type(vp_defined_value(r, 0));
+        for k in vp_num_defined_values(r) { if vp_scalar_type(vp_defined_value(r, k)) != et { return 0; } }
+    } else {
+        et = vp_scalar_type(stored[0]);
+        for v in stored { if vp_scalar_type(v) != et { return 0; } }
+    }
+    let g = vpr[r].ig;
+    if ig_factor(g) != ig_num_members(g) { return 0; }
+    let width = tv_register_bit_width(1);
+    for vf in vfs {
+        // getScalarSizeInBits: the primitive size (0 for pointers)
+        let st = ty_scalar(et);
+        let gs = (if ty_kind(st) == TK_PTR { 0 } else { dl_size_bits(st) }) * vf;
+        if ig_factor(g) == vf && gs == width { return vf; }
+    }
+    return 0;
+}
+// isAlreadyNarrow
+fn vig_is_already_narrow(v: i32) -> bool {
+    if vpv[v].kind == VVK_IR { return true; }
+    let r = vp_def(v);
+    return r >= 0 && vpr[r].kind == VPR_REPLICATE && vpr[r].single_scalar;
+}
+// narrowInterleaveGroupOp(Members, NarrowedOps, Preheader): the members are vig_stk[at .. at + n]
+var vig_narrowed: i32[>..<];
+recursive fn vig_narrow_op(at: i64, n: i64, preheader: i32) -> i32 {
+    let v = vig_stk[at];
+    for x in vig_narrowed { if x == v { return v; } }
+    if vp_is_defined_outside_loop_regions(v) {
+        var ms: i32[>..<] = [];
+        for j in n { ms.push(vig_stk[at + j]); }
+        let bv = vp_new_instruction(VPI_BUILD_VECTOR, ms, vpf_none(), -1, "", -1);
+        vp_append_recipe(preheader, bv);
+        vig_narrowed.push(vpr[bv].def);
+        return vpr[bv].def;
+    }
+    if vig_is_already_narrow(v) { return v; }
+    let r = vp_def(v);
+    let k = vpr[r].kind;
+    if k == VPR_WIDEN || k == VPR_WIDEN_CAST {
+        for j in 1..n { vpx_intersect_flags(r, vpr[vp_def(vig_stk[at + j])].f); }
+        for idx in vp_nops(r) {
+            let b = vig_stk.len;
+            for j in n { let o = vp_op(vp_def(vig_stk[at + j]), idx); vig_stk.push(o); }
+            let nv = vig_narrow_op(b, n, preheader);
+            vig_stk.resize(b);
+            vp_set_operand(r, idx, nv);
+        }
+        return v;
+    }
+    if k == VPR_INTERLEAVE {
+        let li = ig_insert_pos(vpr[r].ig);
+        let l = vp_new_widen_load(li, vp_op(r, 0), vp_interleave_mask(r), true, r, vpr[r].dl);
+        vp_insert_before(l, r);
+        vig_narrowed.push(vpr[l].def);
+        return vpr[l].def;
+    }
+    if k == VPR_REPLICATE {
+        vig_narrowed.push(v);
+        return v;
+    }
+    if k != VPR_WIDEN_LOAD { fatal("internal: narrowInterleaveGroupOp: expected a wide load"); }
+    var ptr = vp_op(r, 0);
+    let pr = vp_def(ptr);
+    if pr >= 0 && vpr[pr].kind == VPR_VECTOR_POINTER { ptr = vp_op(pr, 0); }
+    let nr = vp_new_replicate(vpr[r].ir_inst, [ptr], true, -1, vpf_none(), r, -1);
+    vp_insert_before(nr, r);
+    vig_narrowed.push(vpr[nr].def);
+    return vpr[nr].def;
+}
+
+// narrowInterleaveGroups(Plan, TTI): the loaded plan is narrowed in place; returns the archive slot of the
+// un-narrowed copy with the other VFs (-1 = none)
+fn vpt_narrow_interleave_groups() -> i32 {
+    let region = vp_vector_loop_region();
+    if region < 0 { return -1; }
+    let e = vpb[region].entry;
+    if e != vpb[region].exiting { return -1; }
+    if !vpm_vpi_r(vpb[e].last, VPI_BRANCH_ON_COUNT, 2) { return -1; }
+    var store_groups: i32[>..<] = [];
+    var vf_opt: i64 = 0;
+    var r = vpb[e].first;
+    while r >= 0 {
+        let cur = r;
+        r = vpr[r].next;
+        let k = vpr[cur].kind;
+        if (k == VPR_DERIVED_IV || k == VPR_SCALAR_IV_STEPS) && vp_only_first_lane_used(vpr[cur].def) { continue; }
+        if vp_is_phi_recipe(cur) { return -1; }
+        let is_ig = k == VPR_INTERLEAVE;
+        if vp_may_write_to_memory(cur) && !is_ig { return -1; }
+        for d in vp_num_defined_values(cur) {
+            let v = vp_defined_value(cur, d);
+            for j in vp_num_users(v) { if vpb[vpr[vp_user(v, j)].parent].parent != region { return -1; } }
+        }
+        if !is_ig { continue; }
+        var vfs: i64[>..<] = [];
+        if vf_opt != 0 { vfs.push(vf_opt); } else { for j in xv_len(vph.vfs) { vfs.push(xv_get(vph.vfs, j) as i64); } }
+        let nvf = vig_consecutive_group_vf(cur, vfs);
+        if nvf == 0 || (vf_opt != 0 && nvf != vf_opt) { return -1; }
+        vf_opt = nvf;
+        var stored: i32[>..<] = [];
+        vp_interleave_stored_values(cur, stored);
+        if stored.len == 0 { continue; }
+        let m0 = stored[0];
+        var all_eq = true;
+        for v in stored { if v != m0 { all_eq = false; } }
+        if vig_is_already_narrow(m0) && all_eq { store_groups.push(cur); continue; }
+        var all_loads = true;
+        for si in stored.len {
+            let dr = vp_def(stored[si]);
+            if dr < 0 || vpr[dr].kind != VPR_INTERLEAVE || !ig_is_full(vpr[dr].ig) || vp_defined_value(dr, si) != stored[si] { all_loads = false; break; }
+        }
+        if all_loads { store_groups.push(cur); continue; }
+        if !vig_can_narrow_ops_of(stored) { return -1; }
+        store_groups.push(cur);
+    }
+    if store_groups.len == 0 { return -1; }
+    let middle = vp_middle_block();
+    let rse = vp_nsuccs(middle) == 1 && vp_single_succ(middle) == vp_scalar_preheader();
+    if vp_nsuccs(middle) != 2 && !rse { return -1; }
+    var new_plan: i32 = -1;
+    if xv_len(vph.vfs) != 1 {
+        let orig = vp_save();
+        vp_duplicate_load(orig);
+        // NewPlan->removeVF(VFToOptimize)
+        let fi = xv_find(vph.vfs, vf_opt as i32);
+        if fi >= 0 { xv_erase(vph.vfs, fi); }
+        new_plan = vp_save();
+        vp_load(orig);
+        vp_set_vf(vf_opt);
+    }
+    vig_narrowed.clear();
+    let preheader = vp_vector_preheader();
+    for sg in store_groups {
+        var stored: i32[>..<] = [];
+        vp_interleave_stored_values(sg, stored);
+        let b = vig_stk.len;
+        for x in stored { vig_stk.push(x); }
+        let res = vig_narrow_op(b, stored.len, preheader);
+        vig_stk.resize(b);
+        let si = ig_insert_pos(vpr[sg].ig);
+        let s = vp_new_widen_store(si, vp_op(sg, 0), res, -1, true, sg, vpr[sg].dl);
+        vp_insert_before(s, sg);
+        vp_erase_recipe(sg);
+    }
+    let inc = vpx_find_canonical_iv_increment(region);
+    let can_ty = vpv[vpb[region].can_iv].ty;
+    let vector_ph = vp_vector_preheader();
+    let step = vph.uf;
+    vp_rauw(vph.vf, vp_const_int(can_ty, 1));
+    vpx_materialize_vector_trip_count(vector_ph, false, rse, step);
+    vp_set_operand(inc, 1, step);
+    vp_rauw(vph.vfxuf, step);
+    vpt_remove_dead_recipes();
+    return new_plan;
 }

@@ -18,6 +18,7 @@ import scev_lt;
 import pse;
 import iv_descriptors;
 import lv_legality;
+import loop_versioning;
 import vplan;
 import vplan_utils;
 
@@ -90,7 +91,6 @@ fn pcb_create_instructions(vpbb: i32, bb: i32) {
                 }
             }
         } else {
-            if (o == OP_LOAD || o == OP_STORE) && lv_noalias_prepared { vp_unported("LoopVersioning noalias metadata in VPlan"); }
             var ops: i32[>..<] = [];
             for k in nops(cur) { ops.push(pcb_operand(op(cur, k))); }
             if is_cast_op(o) {
@@ -104,6 +104,12 @@ fn pcb_create_instructions(vpbb: i32, bb: i32) {
                 vp_set_underlying(vpr[nr].def, cur);
             }
             vp_md_from_inst(nr, cur);
+            // loop versioning metadata for loads and stores
+            if (o == OP_LOAD || o == OP_STORE) && lv_noalias_prepared {
+                let sc, na = lver_noalias_md_for(cur);
+                if sc >= 0 { vp_md_set(nr, MDK_ALIAS_SCOPE, sc); }
+                if na >= 0 { vp_md_set(nr, MDK_NOALIAS, na); }
+            }
         }
         hm_put(pcb_irdef, cur as u64, vpr[nr].def as i64);
     }

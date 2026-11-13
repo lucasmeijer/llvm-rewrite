@@ -47,6 +47,7 @@ import lv_legality;
 import lv_interleave;
 import lv_cm;
 import lv_cost;
+import lv_rtchecks;
 import vplan_cost;
 import vplan;
 import vplan_construct;
@@ -741,15 +742,22 @@ fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> boo
                                          lv_small_best_known_tc(true, cm_is_epilogue_allowed(), false), tc, rse);
     vp_load(best_plan);
     let selected_ic = if ic > user_ic { ic } else { user_ic };
+    // GeneratedRTChecks: optimistically generate runtime checks if they are needed; drop them if they turn out not
+    // to be profitable
+    lrt_reset();
     if best_vf > 1 || selected_ic > 1 {
-        if !su_always_true(pse_union(lv_pse)) { lvx_unported("SCEV runtime checks (GeneratedRTChecks)"); }
+        lrt_create(lv_l, pse_union(lv_pse), best_vf, selected_ic);
+        let sc, sb = lrt_scev_checks();
+        let mc, mb = lrt_mem_checks();
+        if sc >= 0 && lrt_is_const_int(sc, 1) { lrt_destroy(); return false; }
+        if mc >= 0 && lrt_is_const_int(mc, 1) { lrt_destroy(); return false; }
     }
     var min_profitable_tc: i64 = 0;
-    if !force && best_vf > 1 {
+    if !force {
         let ok, m = vpc_is_outside_loop_work_profitable(best_vf, best_cost, best_scalar, sel == CM_EPILOGUE_ALLOWED,
-                                                       lv_small_best_known_tc(true, false, false));
+                                                       lv_small_best_known_tc(true, false, false), lrt_get_cost());
         vp_load(best_plan);
-        if !ok { return false; }
+        if !ok { lrt_destroy(); return false; }
         min_profitable_tc = m;
     }
     let vectorize = best_vf > 1;
@@ -760,10 +768,12 @@ fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> boo
     ic = if user_ic > 0 { user_ic } else { ic };
     if cm_mask_partial_aliasing() { interleave = false; ic = 1; }
     if interleave && lvl_has_uncountable_exit_with_side_effects() { interleave = false; ic = 1; }
-    if !vectorize && !interleave { return false; }
+    if !vectorize && !interleave { lrt_destroy(); return false; }
 
     if !interleave { ic = 1; }
-    return lv_execute_best_plan(best_vf, ic, min_profitable_tc);
+    let r = lv_execute_best_plan(best_vf, ic, min_profitable_tc);
+    lrt_destroy();
+    return r;
 }
 fn lv_no_plan_result(user_ic: i64) -> bool { return false; }
 // hasReplicatorRegion(Plan)

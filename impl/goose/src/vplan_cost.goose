@@ -1105,11 +1105,17 @@ fn vpc_select_interleave_count(vf: i64, loop_cost0: i64, ep_allowed: bool, best_
 
 // isOutsideLoopWorkProfitable without runtime checks (RtC = 0) for a vector VF; sel_allowed: SEL ==
 // CM_EpilogueAllowed, expected_tc = getSmallBestKnownTC(PSE, L) (0 = none). Returns (profitable, MinProfitableTC).
-fn vpc_is_outside_loop_work_profitable(vf: i64, vf_cost: i64, scalar_cost: i64, sel_allowed: bool, expected_tc: i64) -> bool, i64 {
+fn vpc_is_outside_loop_work_profitable(vf: i64, vf_cost: i64, scalar_cost: i64, sel_allowed: bool, expected_tc: i64, rtc: i64) -> bool, i64 {
+    if !lc_valid(rtc) { return false, 0; }
+    if vf == 1 {
+        // interleaving only: a hard threshold on the runtime checks
+        if rtc > lcv(flag_int("runtime-memory-check-threshold", 128)) { return false, 0; }
+        return true, 0;
+    }
     let sc = lc_value(scalar_cost) as u64;
     if sc == 0 { return true, 0; }
     vpc_reset();
-    var total: i64 = 0;
+    var total: i64 = rtc;
     for k in xv_len(vph.exit_blocks) {
         let eb = xv_get(vph.exit_blocks, k);
         for j in vp_npreds(eb) {
@@ -1122,7 +1128,9 @@ fn vpc_is_outside_loop_work_profitable(vf: i64, vf_cost: i64, scalar_cost: i64, 
     let div = sc * ivf - (lc_value(vf_cost) as u64);
     let tv = lc_value(total) as u64;
     let min1: u64 = if div == 0 { 0 } else { (tv * ivf + div - 1) / div };
-    var min_tc = min1;
+    let rv = lc_value(rtc) as u64;
+    let min2: u64 = (rv * 10 + sc - 1) / sc;
+    var min_tc = if min1 > min2 { min1 } else { min2 };
     if sel_allowed { min_tc = (min_tc + ivf - 1) / ivf * ivf; }
     if expected_tc != 0 && (expected_tc as u64) < min_tc { return false, min_tc as i64; }
     return true, min_tc as i64;

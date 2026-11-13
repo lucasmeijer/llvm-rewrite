@@ -998,7 +998,8 @@ fn vpx_add_minimum_iteration_check(vf: i64, uf: i64, min_profitable: i64, rse: b
     let tc_ty = sc_ty(tc);
     let vfxuf = sc_get_constant_ty(tc_ty, (vf * uf) as u64, false);
     var step = vfxuf;
-    if uf * vf < min_profitable { vp_unported("a minimum profitable trip count"); }
+    // max(MinProfitableTripCount, UF * VF): both constants, so the umax folds
+    if uf * vf < min_profitable { step = sc_get_constant_ty(tc_ty, min_profitable as u64, false); }
     let check = vph.entry;
     vpb_set_at_end(check);
     var tc_check = vp_false();

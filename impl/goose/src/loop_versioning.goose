@@ -25,6 +25,10 @@ import scev_create;
 import scev_update;
 import scev_lt;
 import scev_expander;
+import scev_range;
+import scev_guards;
+import scev_eval;
+import scev_btc;
 import pse;
 import laa;
 import loop_utils;
@@ -178,12 +182,31 @@ fn lvb_icmp(p: i64, a: i32, b: i32, name: const u8[:]) -> i32 {
     return lvb_insert(c, name);
 }
 
-// expandBounds(CG, TheLoop, Loc, Exp, HoistRuntimeChecks = false): start, end
-fn lver_expand_bounds(g: i64, loc: i32) -> i32, i32 {
+// expandBounds(CG, TheLoop, Loc, Exp, HoistRuntimeChecks): start, end, stride to check (-1 = none)
+fn lver_expand_bounds_h(g: i64, l: i32, loc: i32, hoist: bool) -> i32, i32, i32 {
     let grp = rpc_groups[g];
     let pty = ty_ptr(grp.as_);
-    var start = sx_expand_code_for_at(grp.low, pty, loc);
-    var end = sx_expand_code_for_at(grp.high, pty, loc);
+    var low = grp.low;
+    var high = grp.high;
+    var stride: i32 = -1;
+    if hoist && loop_parent(l) >= 0 && sc_is_addrec(high) && sc_is_addrec(low) {
+        let outer = loop_parent(l);
+        let recur = sc_get_step_recurrence(low);
+        if recur == sc_get_step_recurrence(high) && sc_loop(high) == outer && sc_loop(low) == outer {
+            let oec = sc_get_exit_count(outer, loop_latch(outer), BTC_EXACT, false);
+            if !sc_is_cnc(oec) && ty_is_int(sc_ty(oec)) {
+                let nh = sc_evaluate_at_iteration(high, oec);
+                if !sc_is_cnc(nh) {
+                    let hl = sc_loop(high);
+                    high = nh;
+                    low = sc_op(low, 0);
+                    if !sc_is_known_non_negative(sc_apply_loop_guards(recur, hl)) { stride = recur; }
+                }
+            }
+        }
+    }
+    var start = sx_expand_code_for_at(low, pty, loc);
+    var end = sx_expand_code_for_at(high, pty, loc);
     if grp.freeze {
         lvb_set_before(loc);
         var nm: u8[>..] = [];
@@ -195,27 +218,40 @@ fn lver_expand_bounds(g: i64, loc: i32) -> i32, i32 {
         nm2.append(".fr");
         end = lvb_insert(create_inst(OP_FREEZE, vals[end].ty, [end]), nm2);
     }
-    return start, end;
+    let sv = if stride >= 0 { sx_expand_code_for_at(stride, sc_ty(stride), loc) } else { -1 };
+    return start, end, sv;
 }
 
 // addRuntimeChecks(Loc, TheLoop, PointerChecks, Exp, HoistRuntimeChecks = false): -1 = nullptr
-fn lver_add_runtime_checks(loc: i32, checks: const i64[:]) -> i32 {
+fn lver_add_runtime_checks(loc: i32, checks: const i64[:]) -> i32 { lver_add_runtime_checks_h(loc, -1, checks, false) }
+// addRuntimeChecks(Loc, TheLoop, PointerChecks, Exp, HoistRuntimeChecks)
+fn lver_add_runtime_checks_h(loc: i32, l: i32, checks: const i64[:], hoist: bool) -> i32 {
     var bs: i32[>..<] = [];
     for c in checks {
-        let a_s, a_e = lver_expand_bounds(c / 4294967296, loc);
-        let b_s, b_e = lver_expand_bounds(c % 4294967296, loc);
-        bs.push(a_s); bs.push(a_e); bs.push(b_s); bs.push(b_e);
+        let a_s, a_e, a_st = lver_expand_bounds_h(c / 4294967296, l, loc, hoist);
+        let b_s, b_e, b_st = lver_expand_bounds_h(c % 4294967296, l, loc, hoist);
+        bs.push(a_s); bs.push(a_e); bs.push(a_st); bs.push(b_s); bs.push(b_e); bs.push(b_st);
     }
     lvb_set_before(loc);
     var mrc: i32 = -1;
     for k in checks.len {
-        let a_s = bs[4 * k];
-        let a_e = bs[4 * k + 1];
-        let b_s = bs[4 * k + 2];
-        let b_e = bs[4 * k + 3];
+        let a_s = bs[6 * k];
+        let a_e = bs[6 * k + 1];
+        let a_st = bs[6 * k + 2];
+        let b_s = bs[6 * k + 3];
+        let b_e = bs[6 * k + 4];
+        let b_st = bs[6 * k + 5];
         let c0 = lvb_icmp(P_ULT, a_s, b_e, "bound0");
         let c1 = lvb_icmp(P_ULT, b_s, a_e, "bound1");
         var conflict = lvb_binop(OP_AND, c0, c1, "found.conflict");
+        if a_st >= 0 {
+            let neg = lvb_icmp(P_SLT, a_st, c_int(vals[a_st].ty as i32, 0), "stride.check");
+            conflict = lvb_binop(OP_OR, conflict, neg, "");
+        }
+        if b_st >= 0 {
+            let neg = lvb_icmp(P_SLT, b_st, c_int(vals[b_st].ty as i32, 0), "stride.check");
+            conflict = lvb_binop(OP_OR, conflict, neg, "");
+        }
         if mrc >= 0 { conflict = lvb_binop(OP_OR, mrc, conflict, "conflict.rdx"); }
         mrc = conflict;
     }
@@ -428,6 +464,20 @@ fn lver_md_concatenate(a: i32, b: i32) -> i32 {
         }
     }
     return md_get(MK_TUPLE, -1, ops, false);
+}
+
+// getNoAliasMetadataFor(OrigInst): (alias.scope, noalias), -1 = nullptr
+fn lver_noalias_md_for(oi: i32) -> i32, i32 {
+    if !flag_bool("loop-version-annotate-no-alias", true) { return -1, -1; }
+    let ptr = if iop(oi) == OP_LOAD { op(oi, 0) } else { op(oi, 1) };
+    var g: i32 = -1;
+    for j in lver_ptr_key.len { if lver_ptr_key[j] == ptr { g = lver_ptr_grp[j]; } }
+    if g < 0 { return -1, -1; }
+    let one: i32[1] = [lver_group_scope[g]];
+    let scope = lver_md_concatenate(inst_get_md(oi, MDK_ALIAS_SCOPE), md_get(MK_TUPLE, -1, one, false));
+    var noalias: i32 = -1;
+    if lver_nonalias_list[g] >= 0 { noalias = lver_md_concatenate(inst_get_md(oi, MDK_NOALIAS), lver_nonalias_list[g]); }
+    return scope, noalias;
 }
 
 // annotateInstWithNoAlias(VersionedInst, OrigInst)

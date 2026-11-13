@@ -1164,7 +1164,7 @@ fn vpt_convert_to_strided_accesses() {
 fn vpt_hoist_predicated_loads() {}
 fn vpt_sink_predicated_stores() {}
 fn vpt_truncate_to_minimal_bitwidths() {}
-fn vpt_narrow_interleave_groups() {}
+
 fn vpt_materialize_header_mask() { if vpb[vp_vector_loop_region()].header_mask >= 0 { vp_unported("materializeHeaderMask"); } }
 
 fn pred_inverse_vpt(p: i64) -> i64 {

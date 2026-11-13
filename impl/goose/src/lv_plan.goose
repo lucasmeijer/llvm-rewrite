@@ -32,6 +32,7 @@ import vplan_props;
 import vplan_construct;
 import vplan_transforms;
 import vplan_interleave;
+import loop_versioning;
 
 var lvp_plans: i32[>..<];        // VPlans (archive slots)
 var lvp_plan1: i32 = -1;         // VPlan1's slot
@@ -56,7 +57,11 @@ fn lvp_decide<F>() -> bool {
 
 fn lvp_try_to_build_vplan1(allow_reordering: bool, force: bool, epilogue_status_opt_size: bool) -> bool {
     lvp_plan1 = -1;
-    if rpc_checks.len != 0 { vp_unported("loops with runtime memory checks (LoopVersioning, GeneratedRTChecks)"); }
+    // loop versioning for inner loops with memory runtime checks: noalias metadata only for checks that guarantee no
+    // overlap across all iterations
+    lv_noalias_prepared = false;
+    lver_init(lvp_l, rpc_checks);
+    if rpc_checks.len != 0 && !rpc_can_diff { lver_prepare_noalias_metadata(); lv_noalias_prepared = true; }
     vp_build_vplan0(lvp_l, lvl_widest_ind_ty, lvp_pse);
     vp_dt_build();
     if lai_strides_k.len != 0 { vp_unported("replaceSymbolicStrides"); }
@@ -103,7 +108,8 @@ fn lvp_build_vplans(min_vf: i64, max_vf: i64) {
         vpt_truncate_to_minimal_bitwidths();
         vpt_optimize();
         if cm_fold_tail_with_evl() { vp_unported("EVL tail folding"); }
-        vpt_narrow_interleave_groups();
+        let np = vpt_narrow_interleave_groups();
+        if np >= 0 { lvp_plans.push(np); }
         vpt_materialize_header_mask();
         lvp_plans.push(vp_save());
     }

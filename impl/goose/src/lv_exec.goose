@@ -23,6 +23,8 @@ import tti;
 import iv_descriptors;
 import lv_legality;
 import lv_cm;
+import lv_rtchecks;
+import loop_unroll;
 import vplan;
 import vplan_utils;
 import vplan_props;
@@ -41,10 +43,11 @@ fn lvx_requires_scalar_epilogue() -> bool { vp_single_succ(vp_middle_block()) ==
 
 // the processLoop tail for the loaded best plan with VF `vf` and interleave count `ic` (user-forced)
 fn lv_execute_best_plan(vf: i64, ic: i64, min_profitable_tc: i64) -> bool {
-    // GeneratedRTChecks: no runtime checks are supported yet (tryToBuildVPlan1 fails loudly on memory checks)
-    if !su_always_true(pse_union(lvx_pse)) { vp_unported("SCEV runtime checks (GeneratedRTChecks)"); }
-    // isOutsideLoopWorkProfitable: the scalar cost of a user VF is 0 -> profitable
     if vf == 1 && ic <= 1 { return false; }
+    // VPTransformState::setDebugLocFrom multiplies the duplication factor of the locations (DILocation discriminators)
+    if func_subprogram(lvx_fv) >= 0 && di_debug_info_for_profiling(func_subprogram(lvx_fv)) && !flag_bool("enable-fs-discriminator", false) {
+        vp_unported("duplication-factor discriminators (debug-info-for-profiling)");
+    }
 
     // selectBestEpiloguePlan: preferEpilogueVectorization is getMaxInterleaveFactor(VF * IC) > 1
     if lvx_epilogue_candidate(vf, ic) { vp_unported("epilogue vectorization"); }
@@ -53,8 +56,39 @@ fn lv_execute_best_plan(vf: i64, ic: i64, min_profitable_tc: i64) -> bool {
     let pred = loop_predecessor(lvx_l);
     vpx_add_minimum_iteration_check(vf, ic, min_profitable_tc, lvx_requires_scalar_epilogue(), vp_has_tail_folded(), lvx_l,
                                     inst_get_md(block_terminator(pred), 0), lvx_pse, has_bw);
+    lvx_attach_runtime_checks(has_bw);
     lvx_execute_plan(vf, ic);
     return true;
+}
+
+// attachRuntimeChecks(Plan, RTChecks, HasBranchWeights)
+fn lvx_attach_runtime_checks(has_bw: bool) {
+    let sc, sb = lrt_scev_checks();
+    if sb >= 0 && pred_count(sb) == 0 { lvx_attach_check_block(sc, sb, has_bw); }
+    let mc, mb = lrt_mem_checks();
+    if mb >= 0 && pred_count(mb) == 0 { lvx_attach_check_block(mc, mb, has_bw); }
+}
+// VPlanTransforms::attachCheckBlock: insertCheckBlockBeforeVectorLoop + addBypassBranch
+fn lvx_attach_check_block(cond: i32, bb: i32, has_bw: bool) {
+    let cv = vp_live_in(cond);
+    let cb = vp_create_ir_basic_block(bb);
+    let vector_ph = vp_vector_preheader();
+    let sph = vp_scalar_preheader();
+    let pre = vp_single_pred(vector_ph);
+    vpbu_insert_on_edge(pre, vector_ph, cb);
+    vpbu_connect(cb, sph);
+    vp_swap_succs(cb);
+    let np = vp_npreds(sph);
+    var phis: i32[>..<] = [];
+    vp_block_phis(sph, phis);
+    for r in phis {
+        if vp_nops(r) != np - 1 { fatal("internal: must have incoming values for all predecessors"); }
+        vp_add_operand(r, vp_op(r, np - 2));
+    }
+    let dl = vpv[vpb[vp_vector_loop_region()].can_iv].dl;
+    vpb_set_at_end(cb);
+    let t = vpb_nary(VPI_BRANCH_ON_COND, [cv], vpf_none(), dl, "", -1);
+    if has_bw { vp_unported("branch weights on runtime check blocks"); }
 }
 
 fn lvx_epilogue_candidate(vf: i64, ic: i64) -> bool {
@@ -272,7 +306,7 @@ fn lvx_execute_plan(vf: i64, uf: i64) {
     var sh: i32[>..<] = [];
     vp_depth_first(vph.entry, false, sh);
     for b in sh { if vp_is_header_block(b) { header_vpbb = b; break; } }
-    let disable_runtime_unroll = vf > 1;
+    let disable_runtime_unroll = !lrt_has_checks() && vf > 1;
     var vloop: i32 = -1;
     if header_vpbb >= 0 { vloop = li_loop_for(vts_bb_of(header_vpbb)); }
     lvx_update_loop_metadata(vloop, header_vpbb >= 0, lid, disable_runtime_unroll, has_avg, avg, weight, vf * uf);
