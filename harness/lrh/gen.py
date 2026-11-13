@@ -233,7 +233,7 @@ def convert_run(run: str, inputs: dict | None = None, inputs_rel: str = "") -> t
     """Returns (kind, opt args, '') with kind "opt", "analysis" or "error", or (None, '', reason).
 
     "analysis" (an @analysis line): the pipeline contains an analysis printer, or the RUN line has 2>&1 and either
-    -disable-output or no pipeline (so FileCheck reads stderr). "error" (an @error line): the RUN line expects the
+    -disable-output, no pipeline or only `verify` (so FileCheck reads stderr). "error" (an @error line): the RUN line expects the
     tool to fail (`not opt ...`, `not llvm-as ...`). Everything else is an @opt line, which may not redirect (except
     `2>&1`, which is dropped: the check compares the IR, stderr is ignored).
     `llvm-as` RUN lines (parse + verify) become `opt -passes=verify` lines: an @error line when they expect failure,
@@ -286,7 +286,7 @@ def convert_run(run: str, inputs: dict | None = None, inputs_rel: str = "") -> t
         return None, "", "writes .dot files"
     disable_output = any(t in ("-disable-output", "--disable-output") for t in toks)
     analysis = (not expect_fail) and (as_tool or any(PRINTER_PASS.search(p) for p in passes)
-                                      or ("2>&1" in toks and (disable_output or not passes)))
+                                      or ("2>&1" in toks and (disable_output or not passes or passes == ["verify"])))
     stderr_ok = analysis or expect_fail  # stderr is compared: the redirection to FileCheck is part of the check
     out, i = [], 1
     while i < len(toks):

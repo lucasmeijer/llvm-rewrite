@@ -1,5 +1,6 @@
 ; @origin: llvm/test/Verifier/disubprogram-declaration-within-struct-2.ll (llvmorg-23.1.5)
 ; @opt: -passes=verify --disable-debug-info-type-map
+; @analysis: -passes=verify
 ; RUN: opt -passes=verify -S < %s 2>&1 | FileCheck %s
 ; RUN: opt -passes=verify -S --disable-debug-info-type-map < %s | FileCheck --check-prefix=CHECK-NOT-ODR %s
 

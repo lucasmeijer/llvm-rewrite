@@ -1,6 +1,6 @@
 # Skipped while importing llvm/test/Verifier (llvmorg-23.1.5)
 
-312 of 408 files imported. Regenerate with `./harness/run import-llvm Verifier`.
+317 of 408 files imported. Regenerate with `./harness/run import-llvm Verifier`.
 
 - `2002-04-13-RetTypes.ll` @error `-passes=verify`: fails in the parser, not in the verifier
 - `2002-04-13-RetTypes.ll`: llvm opt rejects the file
@@ -35,7 +35,6 @@
 - `fence-proxy.tensormap.ll`: in a NVPTX target directory
 - `setmaxnreg.ll`: in a NVPTX target directory
 - `tensormap-replace.ll`: in a NVPTX target directory
-- `di-subroutine-localvar.ll` RUN `opt %s -passes=verify 2>&1 | FileCheck %s`: redirects or chains commands
 - `fnarg-nodebug.ll` RUN `llvm-as < %s -o %t`: writes to a file
 - `fnarg-nodebug.ll` RUN `llvm-dis < %t -o - | FileCheck %s`: not an opt invocation
 - `invalid-dbg-declare-operands.ll` RUN `llvm-as %s -o - 2>&1 | FileCheck %s`: llvm-as option -
@@ -83,11 +82,8 @@
 - `comdat2.ll`: has @error lines; its 1 passing RUN line(s) are dropped
 - `dbg-orphaned-compileunit.ll` @error `-passes=verify`: llvm opt -passes=verify -disable-output: llvm opt succeeds (an @error line must fail):
 - `dbg-orphaned-compileunit.ll`: no working RUN lines
-- `di-subroutine-localvar.ll` RUN `opt %s -passes=verify 2>&1 | FileCheck %s`: redirects or chains commands
-- `disubprogram-declaration-within-struct-2.ll` RUN `opt -passes=verify -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
 - `fnarg-nodebug.ll` RUN `llvm-as < %s -o %t`: writes to a file
 - `fnarg-nodebug.ll` RUN `llvm-dis < %t -o - | FileCheck %s`: not an opt invocation
-- `fp-intrinsics-pass.ll` RUN `opt -passes=verify -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
 - `immarg-param-attribute-invalid.ll` RUN `not llvm-as -use-constant-int-for-fixed-length-splat < %s -o /dev/null 2>&1 | FileCheck %s`: llvm-as option -use-constant-int-for-fixed-length-splat
 - `initializes-attr.ll`: uses split-file
 - `insert-extract-intrinsics-invalid.ll` RUN `not opt -passes=verify -S < %s 2>&1 >/dev/null | FileCheck %s`: redirects or chains commands
@@ -172,7 +168,6 @@
 - `module-flags-note-gnu-property-elf-pauthabi.ll`: uses split-file
 - `noalias_scope_decl.ll` RUN `not llvm-as -disable-output --verify-noalias-scope-decl-dom < %s 2>&1 | FileCheck %s`: llvm-as option --verify-noalias-scope-decl-dom
 - `non-integer-gep-index.ll` RUN `not opt -verify %s.bc -disable-output`: uses lit substitution %s.bc
-- `non-integral-pointers.ll` RUN `opt -passes=verify -S < %s 2>&1 | FileCheck %s`: redirects or chains commands
 - `param-attr-align.ll` @error `-passes=verify`: fails in the parser, not in the verifier
 - `param-attr-align.ll`: llvm opt rejects the file
 - `scalable-vector-struct-alloca.ll` @error `-passes=verify`: fails in the parser, not in the verifier
@@ -204,7 +199,6 @@
 - `unsized-types-store.ll` @error `-passes=verify`: fails in the parser, not in the verifier
 - `unsized-types-store.ll`: llvm opt rejects the file
 - `value-profile.ll`: uses split-file
-- `weak-dllimport.ll` RUN `opt -passes=verify < %s 2>&1 | FileCheck %s`: redirects or chains commands
 - `x86_amx1.ll` @error `-passes=verify`: fails in the parser, not in the verifier
 - `x86_amx1.ll`: llvm opt rejects the file
 - `x86_amx2.ll` @error `-passes=verify`: fails in the parser, not in the verifier
