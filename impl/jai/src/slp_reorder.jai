@@ -319,9 +319,8 @@ slp_find_external_store_users_reorder_indices :: (te: Te_Id) -> [..] [..] u32 {
         if !ok continue;
         array_add(*res, order);
     }
-    // PtrToStoresMap is a DenseMap keyed by pointers: with several qualifying groups the order of this list
-    // (and so the tie-break between equally used orders) depends on hash order
-    if res.count > 1 for res if !orders_equal(it, res[0]) slp_fail("several external store groups with different orders (DenseMap order)");
+    // PtrToStoresMap is a DenseMap keyed by pointers: with several qualifying groups the order of this list depends
+    // on hash order. reorderTopToBottom (the only reader) checks that its choice does not depend on it.
     return res;
 }
 
@@ -704,6 +703,25 @@ slp_reorder_node_with_reuses :: (te: Te_Id, mask: [] s32) {
 
 // ---------------------------------------------------------------- reorderTopToBottom
 
+Ext_Orders :: struct { te: Te_Id; orders: [..] [..] u32; }
+// reorderTopToBottom's OrdersUses (MapVector) from its items, then the most used order (on fresh copies: the
+// selection combines the orders in place). perms[e] is the order in which ext_map[e]'s orders are added.
+slp_best_order_of_items :: (items: [] $T, ext_map: [] Ext_Orders, perms: [] [..] s64, vf: s64) -> [..] u32 {
+    keys: [..] [..] u32; keys.allocator = temp;
+    cnts: [..] u32; cnts.allocator = temp;
+    add :: (keys: *[..] [..] u32, cnts: *[..] u32, o: [] u32, n: u32) {
+        for keys.* if orders_equal(it, o) { cnts.*[it_index] += n; return; }
+        array_add(keys, order_copy(o));
+        array_add(cnts, n);
+    }
+    for itm: items {
+        if itm.ext < 0 { add(*keys, *cnts, itm.ord, itm.n); continue; }
+        os := ext_map[itm.ext].orders;
+        for j: perms[itm.ext] add(*keys, *cnts, os[j], 1);
+    }
+    return slp_select_best_order(keys, cnts, vf, true);
+}
+
 slp_reorder_top_to_bottom :: () {
     // VFToOrderedEntries: DenseMap<unsigned, SetVector<TreeEntry *>> (only looked up by VF)
     vf_keys: [..] s64; vf_keys.allocator = temp;
@@ -722,7 +740,6 @@ slp_reorder_top_to_bottom :: () {
     gathers_to_orders: [..] Te_Order; gathers_to_orders.allocator = temp;
     phis_to_orders: [..] Te_Order; phis_to_orders.allocator = temp;
     alt_to_orders: [..] Te_Order; alt_to_orders.allocator = temp;
-    Ext_Orders :: struct { te: Te_Id; orders: [..] [..] u32; }
     ext_map: [..] Ext_Orders; ext_map.allocator = temp;
     find_order :: (l: [] Te_Order, te: Te_Id) -> *[..] u32 { for * l if it.te == te return *it.order; return null; }
     for te: 0..slp.entries.count-1 if slp.entries[te].state == TE_VECTORIZE && type_kind(slp_get_value_type(slp.entries[te].scalars[0])) == .STRUCT return;
@@ -778,14 +795,11 @@ slp_reorder_top_to_bottom :: () {
         ordered := vf_lists[ki];
         array_ordered_remove_by_index(*vf_keys, ki);
         array_ordered_remove_by_index(*vf_lists, ki);
-        // MapVector<OrdersType, unsigned> OrdersUses
-        uses_keys: [..] [..] u32; uses_keys.allocator = temp;
-        uses_cnt: [..] u32; uses_cnt.allocator = temp;
-        add_use :: (keys: *[..] [..] u32, cnts: *[..] u32, o: [] u32, n: u32) {
-            for keys.* if orders_equal(it, o) { cnts.*[it_index] += n; return; }
-            array_add(keys, order_copy(o));
-            array_add(cnts, n);
-        }
+        // MapVector<OrdersType, unsigned> OrdersUses, built from `items` in order (an `ext` item adds the external
+        // store orders of ext_map[ext] one by one)
+        Use_Item :: struct { ord: [] u32; n: u32; ext: s64 = -1; }
+        items: [..] Use_Item; items.allocator = temp;
+        add_use :: (items: *[..] Use_Item, o: [] u32, n: u32) { array_add(items, .{o, n, -1}); }
         for op_te: ordered {
             oe := *slp.entries[op_te];
             if oe.reuse_shuffle_indices.count && !find_order(gathers_to_orders, op_te) && oe.state != TE_SPLIT_VECTORIZE continue;
@@ -801,8 +815,8 @@ slp_reorder_top_to_bottom :: () {
             for ext_map if it.te == op_te { ext_i = it_index; break; }
             if ext_i >= 0 {
                 exts := ext_map[ext_i].orders;
-                if te_vector_factor(op_te) != oe.scalars.count add_use(*uses_keys, *uses_cnt, .[], cast(u32) exts.count);
-                else for x: exts add_use(*uses_keys, *uses_cnt, x, 1);
+                if te_vector_factor(op_te) != oe.scalars.count add_use(*items, .[], cast(u32) exts.count);
+                else array_add(*items, .{.[], 0, ext_i});
                 if ord.count == 0 continue;
             }
             if oe.state == TE_VECTORIZE && te_opcode(op_te) == .STORE && ord.count {
@@ -811,13 +825,57 @@ slp_reorder_top_to_bottom :: () {
                 cur := new_order();
                 for mask array_add(*cur, ifx it == PoisonMaskElem then e else cast(u32) it);
                 slp_fixup_ordering_indices(cur);
-                add_use(*uses_keys, *uses_cnt, cur, 1);
+                add_use(*items, cur, 1);
             } else {
-                add_use(*uses_keys, *uses_cnt, ord, 1);
+                add_use(*items, ord, 1);
             }
         }
-        if uses_keys.count == 0 continue;
-        best := slp_select_best_order(uses_keys, uses_cnt, vf, true);
+        if items.count == 0 continue;
+        // the external store orders come in DenseMap order: choose with the list order we have, then check that
+        // every other order of each list gives the same choice
+        perms: [..] [..] s64; perms.allocator = temp;   // per ext_map index: the order in which its list is added
+        for ext_map {
+            p: [..] s64; p.allocator = temp;
+            for 0..it.orders.count-1 array_add(*p, it);
+            array_add(*perms, p);
+        }
+        best := slp_best_order_of_items(items, ext_map, perms, vf);
+        ambiguous: [..] s64; ambiguous.allocator = temp;
+        for itm: items if itm.ext >= 0 {
+            os := ext_map[itm.ext].orders;
+            differ := false;
+            for os if !orders_equal(it, os[0]) differ = true;
+            if differ array_add(*ambiguous, itm.ext);
+        }
+        if ambiguous.count {
+            total := 1;
+            for ambiguous { n := ext_map[it].orders.count; f := 1; for 1..n f *= it; total *= f; if total > 5040 break; }
+            if total > 5040 slp_fail("reorderTopToBottom: too many external store group orders to check (DenseMap order)");
+            check_perms :: (k: s64, ambiguous: [] s64, perms: *[..] [..] s64, items: [] Use_Item, ext_map: [] Ext_Orders, vf: s64, best: [] u32) {
+                if k == ambiguous.count {
+                    b := slp_best_order_of_items(items, ext_map, perms.*, vf);
+                    if !orders_equal(b, best) slp_fail("reorderTopToBottom: the chosen order depends on the order of the external store groups (DenseMap order)");
+                    return;
+                }
+                p := *perms.*[ambiguous[k]];
+                // every permutation of p (Heap's algorithm, iterative)
+                n := p.count;
+                c: [..] s64; c.allocator = temp;
+                for 0..n-1 array_add(*c, 0);
+                check_perms(k + 1, ambiguous, perms, items, ext_map, vf, best);
+                i := 0;
+                while i < n {
+                    if c[i] < i {
+                        j := ifx i % 2 == 0 then 0 else c[i];
+                        t := p.*[j]; p.*[j] = p.*[i]; p.*[i] = t;
+                        check_perms(k + 1, ambiguous, perms, items, ext_map, vf, best);
+                        c[i] += 1;
+                        i = 0;
+                    } else { c[i] = 0; i += 1; }
+                }
+            }
+            check_perms(0, ambiguous, *perms, items, ext_map, vf, best);
+        }
         if slp_is_identity_order(best) continue;
         slp_fixup_ordering_indices(best);
         mask := slp_inverse_permutation(best);

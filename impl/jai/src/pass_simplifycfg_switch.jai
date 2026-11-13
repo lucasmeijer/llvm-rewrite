@@ -1993,12 +1993,10 @@ merge_conditional_stores :: (s: *Scfg, pbi: Value_Id, qbi: Value_Id) -> bool {
     qa: [..] Value_Id; qa.allocator = temp;
     for bb: Value_Id.[ptb, pfb] { if bb == NONE continue; for i: block_insts(bb) if inst_op(i) == .STORE && !block_set_contains(pa, op(i, 1)) array_add(*pa, op(i, 1)); }
     for bb: Value_Id.[qtb, qfb] { if bb == NONE continue; for i: block_insts(bb) if inst_op(i) == .STORE && !block_set_contains(qa, op(i, 1)) array_add(*qa, op(i, 1)); }
-    if pa.count > 4 {
-        // a large SmallPtrSet iterates in pointer-hash order, which only matters with two or more common addresses
-        common := 0;
-        for pa if block_set_contains(qa, it) common += 1;
-        if common >= 2 scfg_np("mergeConditionalStores with more than 4 store addresses and 2+ common ones (SmallPtrSet iteration order)");
-    }
+    // A SmallPtrSet with more than 4 elements iterates in pointer-hash order, but the order of CommonAddresses never
+    // matters: mergeConditionalStoreToAddress needs a unique store in PTB/PFB (findUniqueStoreInBlocks, checked before
+    // any change), so with two or more common addresses every call returns false without touching the IR, and with
+    // one there is nothing to order.
     // set_intersect -> SmallPtrSet::remove_if (small mode: the last element moves into the hole)
     k := 0;
     e := pa.count;

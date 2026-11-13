@@ -17175,7 +17175,9 @@ tests/perf/compile/SPASS.ll::opt
 tests/perf/compile/SPASS.ll::roundtrip
 tests/perf/compile/lua.ll::opt
 tests/perf/compile/lua.ll::roundtrip
+tests/perf/compile/oggenc.ll::opt
 tests/perf/compile/oggenc.ll::roundtrip
+tests/perf/compile/sqlite3.ll::opt
 tests/perf/compile/sqlite3.ll::roundtrip
 tests/perf/scaling/allocas/n2000.ll::opt
 tests/perf/scaling/allocas/n2000.ll::roundtrip
