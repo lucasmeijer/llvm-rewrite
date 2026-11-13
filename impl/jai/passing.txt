@@ -10234,6 +10234,7 @@ tests/imported/llvm/Transforms/InstCombine/load-no-aliasing.ll::opt
 tests/imported/llvm/Transforms/InstCombine/load-no-aliasing.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/load-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/load-select.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/load-store-forward.ll::opt
 tests/imported/llvm/Transforms/InstCombine/load-store-forward.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/load.ll::opt
 tests/imported/llvm/Transforms/InstCombine/load.ll::roundtrip
@@ -10289,6 +10290,7 @@ tests/imported/llvm/Transforms/InstCombine/masked-merge-xor.ll::opt
 tests/imported/llvm/Transforms/InstCombine/masked-merge-xor.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/masked_intrinsics-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/masked_intrinsics-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/masked_intrinsics.ll::opt
 tests/imported/llvm/Transforms/InstCombine/masked_intrinsics.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/masked_intrinsics_keep_metadata.ll::opt
 tests/imported/llvm/Transforms/InstCombine/masked_intrinsics_keep_metadata.ll::roundtrip
@@ -10444,6 +10446,7 @@ tests/imported/llvm/Transforms/InstCombine/minnum.ll::opt
 tests/imported/llvm/Transforms/InstCombine/minnum.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/misc-2002.ll::opt
 tests/imported/llvm/Transforms/InstCombine/misc-2002.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/modular-format.ll::opt
 tests/imported/llvm/Transforms/InstCombine/modular-format.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/modulo.ll::opt
 tests/imported/llvm/Transforms/InstCombine/modulo.ll::roundtrip
@@ -11823,6 +11826,7 @@ tests/imported/llvm/Transforms/InstCombine/vscale_insertelement-inseltpoison.ll:
 tests/imported/llvm/Transforms/InstCombine/vscale_insertelement-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vscale_insertelement.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vscale_insertelement.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/vscale_load.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vscale_load.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/vscale_sext_and_zext.ll::opt
 tests/imported/llvm/Transforms/InstCombine/vscale_sext_and_zext.ll::roundtrip
@@ -19968,6 +19972,7 @@ tests/roundtrip/instructions/casts_and_fp.ll::roundtrip
 tests/roundtrip/instructions/memory_ops.ll::roundtrip
 tests/roundtrip/intrinsics/pass-created-loop-vectorize.ll::roundtrip
 tests/roundtrip/intrinsics/pass-created.ll::roundtrip
+tests/roundtrip/intrinsics/reloc-none.ll::roundtrip
 tests/roundtrip/intrinsics/verifier-decls.ll::roundtrip
 tests/roundtrip/metadata/named_and_attached.ll::roundtrip
 tests/roundtrip/types/aggregates.ll::roundtrip
