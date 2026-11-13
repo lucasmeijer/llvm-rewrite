@@ -613,8 +613,10 @@ fn visit_trunc(tr: i32) -> i32 {
             ic_not_ported("trunc of a clamp select (smin/smax)");
         }
     }
-    if is_inst_op(src, OP_BITCAST) || (is_shr_inst(src) && is_inst_op(op(src, 0), OP_BITCAST)) { ic_not_ported("foldVecTruncToExtElt"); }
-    if is_inst_op(src, OP_EXTRACTELEMENT) || (is_shr_inst(src) && is_inst_op(op(src, 0), OP_EXTRACTELEMENT)) { ic_not_ported("foldVecExtTruncToExtElt"); }
+    let vte = fold_vec_trunc_to_ext_elt(tr);
+    if vte >= 0 { return vte; }
+    let vete = fold_vec_ext_trunc_to_ext_elt(tr);
+    if vete >= 0 { return vete; }
     if one_use(src) && inst_iid(src) == IID_ctlz && m_zext(op(src, 0)) >= 0 {
         let a = m_zext(op(src, 0));
         let aw = ty_sbits(a);
@@ -1017,4 +1019,74 @@ fn cc_prim_bits(t: i32) -> i64 {
     if k == TK_FP128 || k == TK_PPC_FP128 { return 128; }
     if k == TK_BYTE { return ty_bits(t); }
     return 0;
+}
+
+// foldVecTruncToExtElt (InstCombineCasts.cpp): trunc (lshr (bitcast <N x T> X to iW), C) -> extractelement
+fn fold_vec_trunc_to_ext_elt(tr: i32) -> i32 {
+    let top = op(tr, 0);
+    let dt = vals[tr].ty;
+    if !one_use(top) || !ty_is_int(dt) { return -1; }
+    var vec: i32 = -1;
+    var sh: i32 = -1;
+    if is_inst_op(top, OP_BITCAST) { vec = op(top, 0); }
+    else if is_inst_op(top, OP_LSHR) && is_inst_op(op(top, 0), OP_BITCAST) && m_constant_int(op(top, 1)) >= 0 {
+        vec = op(op(top, 0), 0);
+        sh = op(top, 1);
+    }
+    if vec < 0 || !ty_is_vector(vals[vec].ty) { return -1; }
+    let vt = vals[vec].ty;
+    if types[vt].kind == TK_SVEC { ic_not_ported("foldVecTruncToExtElt of a scalable vector"); }
+    let et = ty_elem(vt);
+    let ew = if ty_is_int(et) { ty_bits(et) } else if ty_is_fp(et) { ty_prim_bits(et) } else { 0 };
+    if ew == 0 { ic_not_ported("foldVecTruncToExtElt of a pointer vector"); }
+    let vw = ew * (types[vt].cnt as i64);
+    let dw = ty_bits(dt);
+    if sh >= 0 && types[vals[sh].ty].n > 64 { ic_not_ported("foldVecTruncToExtElt with a wide shift amount"); }
+    let amt: i64 = if sh >= 0 { cint_lo(sh) as i64 } else { 0 };
+    if vw % dw != 0 || amt % dw != 0 { return -1; }
+    let n = vw / dw;
+    var v = vec;
+    if et != dt {
+        v = icb_cast(OP_BITCAST, vec, ty_vector(dt, n, false), "bc");
+    }
+    var elt = amt / dw;
+    if dl_big_endian { elt = n - 1 - elt; }
+    return ic_new_extract_element(v, c_int(T_I32, elt));
+}
+
+// foldVecExtTruncToExtElt: trunc (lshr (extractelement X, C), S) -> extractelement (bitcast X), C'
+fn fold_vec_ext_trunc_to_ext_elt(tr: i32) -> i32 {
+    let src = op(tr, 0);
+    let st = vals[src].ty;
+    let dt = vals[tr].ty;
+    let sb = ty_bits(ty_scalar(st));
+    let db = ty_bits(ty_scalar(dt));
+    if db == 0 || sb % db != 0 { return -1; }
+    let ratio = sb / db;
+    var vec: i32 = -1;
+    var cst: i32 = -1;
+    var sh: i32 = -1;
+    if one_use(src) && is_inst_op(src, OP_EXTRACTELEMENT) && m_constant_int(op(src, 1)) >= 0 {
+        vec = op(src, 0); cst = op(src, 1);
+    } else if one_use(src) && is_inst_op(src, OP_LSHR) && is_inst_op(op(src, 0), OP_EXTRACTELEMENT) &&
+              m_constant_int(op(op(src, 0), 1)) >= 0 && m_apint(op(src, 1)) >= 0 {
+        vec = op(op(src, 0), 0); cst = op(op(src, 0), 1); sh = m_apint(op(src, 1));
+    }
+    if vec < 0 { return -1; }
+    let vt = vals[vec].ty;
+    if types[vals[cst].ty].n > 64 { ic_not_ported("foldVecExtTruncToExtElt with a wide index"); }
+    let idx = cint_lo(cst);
+    if idx >= 0xFFFFFFFFFFFFFFFF / (ratio as u64) { return -1; }
+    var nidx = if dl_big_endian { ((idx as i64) + 1) * ratio - 1 } else { (idx as i64) * ratio };
+    if sh >= 0 {
+        let a = ci_ap(sh);
+        if !ap_fits_u64(a) { return -1; }
+        let amt = a.lo as i64;
+        if amt >= sb || amt % db != 0 { return -1; }
+        nidx = if dl_big_endian { nidx - amt / db } else { nidx + amt / db };
+    }
+    let n = (types[vt].cnt as i64) * ratio;
+    let bt = ty_vector(dt, n, types[vt].kind == TK_SVEC);
+    let bc = icb_cast(OP_BITCAST, vec, bt, "");
+    return ic_new_extract_element(bc, c_int(T_I64, nidx));
 }

@@ -163,9 +163,8 @@ fn rdx_compute_recurrence_type(exit: i32) -> i32, bool {
     var signed = false;
     let tbits = dl_size_bits(vals[exit].ty);
     // DB->getDemandedBits(Exit)
-    if tbits > 64 { ivd_not_ported("demanded bits of a reduction wider than 64 bits"); }
-    let mask = db_demanded_bits(exit);
-    var maxbw: i64 = tbits - (if mask == 0 { tbits } else { ap_clz64(mask) - (64 - tbits) });
+    let mask = db_demanded_bits_ap(exit);
+    var maxbw: i64 = (mask.w as i64) - ap_countl_zero(mask);
     if maxbw == tbits {
         // ComputeNumSignBits(Exit, DL, AC, nullptr, DT)
         let sc = kb_cxt; let sdt = sq_no_dt; let sac = sq_no_ac;

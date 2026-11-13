@@ -1,5 +1,6 @@
 // BDCE: port of llvm/lib/Transforms/Scalar/BDCE.cpp (bitTrackingDCE, clearAssumptionsOfUsers).
 import std;
+import apint;
 import ir;
 import irutil;
 import salvage;
@@ -42,17 +43,17 @@ fn bdce_run(fv: i32) -> u32 {
             if inst_may_have_side_effects(i) && vals[i].first_use < 0 { break; }
             let isint = is_int_ty(vals[i].ty);
             local_have_tli = false;
-            let dead = db_is_instruction_dead(i) || (isint && db_demanded_bits(i) == 0 && would_be_trivially_dead(i));
+            let dead = db_is_instruction_dead(i) || (isint && ap_is_zero(db_demanded_bits_ap(i)) && would_be_trivially_dead(i));
             local_have_tli = true;
             if dead { wl.push(i); changed = true; break; }
             let o = iop(i);
             if o == OP_SEXT {
-                let demanded = db_demanded_bits(i);
+                let demanded = db_demanded_bits_ap(i);
                 let src = op(i, 0);
                 let sbits = ty_bits(ty_scalar(vals[src].ty));
                 let dt = vals[i].ty;
                 let dbits = ty_bits(ty_scalar(dt));
-                if i != src && clz_w(demanded, dbits) >= dbits - sbits {
+                if i != src && ap_countl_zero(demanded) >= dbits - sbits {
                     clear_assumptions_of_users(i);
                     if is_constant(src) { fatal("bdce: IRBuilder constant folding of zext is not ported yet"); }
                     let z = create_inst(OP_ZEXT, dt, [src]);
@@ -68,15 +69,14 @@ fn bdce_run(fv: i32) -> u32 {
                 }
             }
             if is_binary_op(o) {
-                let demanded = db_demanded_bits(i);
-                let w = ty_bits(ty_scalar(vals[i].ty));
-                if demanded != wmask(w) {
+                let demanded = db_demanded_bits_ap(i);
+                if !ap_is_all_ones(demanded) {
                     let mv = op(i, 1);
                     if match_apint(mv) {
-                        let mask = ap_lo64(apint_value(mv));
+                        let mask = apint_value(mv);
                         var can = false;
-                        if o == OP_OR || o == OP_XOR { can = (demanded & mask) == 0; }
-                        else if o == OP_AND { can = (demanded & ~mask) == 0; }
+                        if o == OP_OR || o == OP_XOR { can = !ap_intersects(demanded, mask); }
+                        else if o == OP_AND { can = ap_is_subset_of(demanded, mask); }
                         if can && i != op(i, 0) {
                             clear_assumptions_of_users(i);
                             rauw(i, op(i, 0));

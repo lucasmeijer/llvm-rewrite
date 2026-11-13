@@ -1,5 +1,5 @@
 // DemandedBits: port of llvm/lib/Analysis/DemandedBits.cpp (performAnalysis, determineLiveOperandBits,
-// getDemandedBits, isInstructionDead, isUseDead, print), for integers of at most 64 bits.
+// getDemandedBits, isInstructionDead, isUseDead, print) on APInts of any width.
 // State lives in scratch slots (irutil.goose): AliveBits = VM_ANA0 (value -> demanded mask), Visited = VS_ANA0,
 // DeadUses and worklist membership are private stamped sets (db_dead_*, db_wl_*): ValueTracking, which the
 // analysis calls through computeKnownBits, uses VS_ANA1 (poison.goose, vt.goose) and callers hold VS_PASS*.
@@ -35,53 +35,48 @@ fn db_wl_del(v: i32) { if (v as i64) < db_wl_stamp.len && db_wl_stamp[v] == db_w
 fn db_invalidate() { db_fn = -1; }
 
 fn is_int_ty(t: i32) -> bool { ty_is_int(ty_scalar(t)) }
-fn int_width(t: i32) -> i64 {
-    let w = ty_bits(ty_scalar(t));
-    if w > 64 { fatal("DemandedBits: integers wider than 64 bits are not supported yet"); }
-    return w;
-}
+fn int_width(t: i32) -> i64 { ty_bits(ty_scalar(t)) }
 
 fn db_always_live(i: i32) -> bool { is_terminator(i) || inst_is_eh_pad(i) || inst_may_have_side_effects(i) }
 
-fn shl_w(x: u64, s: i64, w: i64) -> u64 { if s >= w { 0 } else { (x << s) & wmask(w) } }
-fn lshr_w(x: u64, s: i64, w: i64) -> u64 { if s >= w { 0 } else { (x & wmask(w)) >> s } }
-fn active_bits(x: u64) -> i64 { 64 - clz(x) }
-fn is_mask_w(x: u64) -> bool { x != 0 && (x & (x + 1)) == 0 }
-fn byte_swap_w(x: u64, w: i64) -> u64 { ap_lo64(ap_byte_swap(ap_u64(x, w))) }
-fn reverse_bits_w(x: u64, w: i64) -> u64 { ap_lo64(ap_reverse_bits(ap_u64(x, w))) }
-// the analysis works on u64 masks (widths <= 64): KnownBits words
-struct KB64 { z: u64, o: u64, w: i32 }
-fn kb64(k: KB) -> KB64 { KB64 { z: ap_lo64(k.z), o: ap_lo64(k.o), w: k.z.w } }
+// AliveBits storage (VM_ANA0, value -> i64): the mask itself for widths <= 64; for wider integers the value id of
+// an IR constant holding it (APInt words don't outlive a pass, the cached analysis does)
+fn db_store(v: i32, a: AP) {
+    if a.w <= 64 { vm_set(VM_ANA0, v, a.lo as! i64); return; }
+    vm_set(VM_ANA0, v, ap_to_cint(ty_int(a.w as i64), a) as i64);
+}
+fn db_load(v: i32) -> AP {
+    let w = int_width(vals[v].ty);
+    let x = vm_get(VM_ANA0, v, 0);
+    if w <= 64 { return ap_u64(x as! u64, w); }
+    return ci_ap(x as i32);
+}
 
 // determineLiveOperandBitsAddCarry
-fn live_bits_add_carry(opno: i64, aout: u64, l0: KB, r0: KB, carry_zero: bool, carry_one: bool) -> u64 {
-    let l = kb64(l0);
-    let r = kb64(r0);
-    let w = l.w as i64;
-    let m = wmask(w);
-    let bound = (l.z & r.z) | (l.o & r.o);
-    let rbound = reverse_bits_w(bound, w);
-    let raout = reverse_bits_w(aout, w);
-    let rprop = (raout + (raout | (~rbound & m))) & m;
-    let racarry = (rprop ^ (~rbound & m)) & m;
-    let acarry = reverse_bits_w(racarry, w);
-    var nz: u64 = 0;
-    var no: u64 = 0;
-    if opno == 0 { nz = l.z | (~r.z & m); no = l.o | (~r.o & m); }
-    else { nz = r.z | (~l.z & m); no = r.o | (~l.o & m); }
-    let psz = ((~l.z & m) + (~r.z & m) + (if carry_zero { 0 } else { 1 })) & m;
-    let pso = (l.o + r.o + (if carry_one { 1 } else { 0 })) & m;
-    let need = ((~psz & m) | nz) & (pso | no);
-    return (aout | (acarry & need)) & m;
+fn live_bits_add_carry(opno: i64, aout: AP, l: KB, r: KB, carry_zero: bool, carry_one: bool) -> AP {
+    let w = aout.w as i64;
+    let bound = ap_or(ap_and(l.z, r.z), ap_and(l.o, r.o));
+    let rbound = ap_reverse_bits(bound);
+    let raout = ap_reverse_bits(aout);
+    let rprop = ap_add(raout, ap_or(raout, ap_not(rbound)));
+    let racarry = ap_xor(rprop, ap_not(rbound));
+    let acarry = ap_reverse_bits(racarry);
+    var nz = ap_zero(w);
+    var no = ap_zero(w);
+    if opno == 0 { nz = ap_or(l.z, ap_not(r.z)); no = ap_or(l.o, ap_not(r.o)); }
+    else { nz = ap_or(r.z, ap_not(l.z)); no = ap_or(r.o, ap_not(l.o)); }
+    let psz = ap_add(ap_add(ap_not(l.z), ap_not(r.z)), ap_u64(if carry_zero { 0 } else { 1 }, w));
+    let pso = ap_add(ap_add(l.o, r.o), ap_u64(if carry_one { 1 } else { 0 }, w));
+    let need = ap_and(ap_or(ap_not(psz), nz), ap_or(pso, no));
+    return ap_or(aout, ap_and(acarry, need));
 }
 
 // determineLiveOperandBits: the live bits of operand `opno` of `user` given the user's live output bits.
 // kc: known bits cache (Known, Known2, computed) shared between the operands of one user.
 struct KBCache { k1: KB, k2: KB, done: bool }
 
-fn determine_live_operand_bits(user: i32, val: i32, opno: i64, aout: u64, ab0: u64, bw: i64, kc: KBCache&) -> u64 {
+fn determine_live_operand_bits(user: i32, val: i32, opno: i64, aout: AP, ab0: AP, bw: i64, kc: KBCache&) -> AP {
     var ab = ab0;
-    let m = wmask(bw);
     fn compute(v1: i32, v2: i32) {
         if kc.done { return; }
         kc.done = true;
@@ -89,18 +84,18 @@ fn determine_live_operand_bits(user: i32, val: i32, opno: i64, aout: u64, ab0: u
         kc.k1 = kb_compute_all(v1, 0);
         if v2 >= 0 { kc.k2 = kb_compute_all(v2, 0); }
     }
-    fn shifted_range(mn: i64, mx: i64, left: bool) -> u64 {
-        fn sh(x: u64, s: i64) -> u64 { if left { shl_w(x, s, bw) } else { lshr_w(x, s, bw) } }
+    fn shifted_range(mn: i64, mx: i64, left: bool) -> AP {
+        fn sh(x: AP, s: i64) -> AP { if left { ap_shl(x, s) } else { ap_lshr(x, s) } }
         var range = mx - mn;
         var mask = aout;
         var shifted = aout;
         var amt: i64 = 1;
         while amt <= range {
             if (range & amt) != 0 {
-                mask |= sh(shifted, range - amt + 1);
+                mask = ap_or(mask, sh(shifted, range - amt + 1));
                 range -= amt;
             }
-            shifted |= sh(shifted, amt);
+            shifted = ap_or(shifted, sh(shifted, amt));
             amt = amt << 1;
         }
         return sh(mask, mn);
@@ -109,38 +104,38 @@ fn determine_live_operand_bits(user: i32, val: i32, opno: i64, aout: u64, ab0: u
     let fl = insts[inst_of(user)].flags;
     if o == OP_CALL || o == OP_INVOKE {
         let id = call_iid(user);
-        if id == IID_bswap { ab = byte_swap_w(aout, bw); }
-        else if id == IID_bitreverse { ab = reverse_bits_w(aout, bw); }
-        else if id == IID_clmul { ab = low_bits(active_bits(aout)); }
+        if id == IID_bswap { ab = ap_byte_swap(aout); }
+        else if id == IID_bitreverse { ab = ap_reverse_bits(aout); }
+        else if id == IID_clmul { ab = ap_low_bits(bw, ap_active_bits(aout)); }
         else if id == IID_ctlz {
-            if opno == 0 { compute(val, -1); ab = high_bits(bw, min(bw, kb_max_lz(kc.k1) + 1)); }
+            if opno == 0 { compute(val, -1); ab = ap_high_bits(bw, min(bw, kb_max_lz(kc.k1) + 1)); }
         } else if id == IID_cttz {
-            if opno == 0 { compute(val, -1); ab = low_bits(min(bw, kb_max_tz(kc.k1) + 1)); }
+            if opno == 0 { compute(val, -1); ab = ap_low_bits(bw, min(bw, kb_max_tz(kc.k1) + 1)); }
         } else if id == IID_fshl || id == IID_fshr {
             if opno == 2 {
-                if is_pow2_w(bw) { ab = (bw - 1) as u64; }
+                if is_pow2_w(bw) { ab = ap_u64((bw - 1) as u64, bw); }
             } else {
                 let sa = op(user, 2);
                 if match_apint(sa) {
                     var amt = ap_rot_amount(ap_zero(bw), apint_value(sa));
                     if id == IID_fshr { amt = bw - amt; }
-                    if opno == 0 { ab = lshr_w(aout, amt, bw); }
-                    else if opno == 1 { ab = shl_w(aout, bw - amt, bw); }
+                    if opno == 0 { ab = ap_lshr(aout, amt); }
+                    else if opno == 1 { ab = ap_shl(aout, bw - amt); }
                 }
             }
         } else if id == IID_umax || id == IID_umin || id == IID_smax || id == IID_smin {
-            ab = m & ~low_bits(ctz_w(aout, bw));
+            ab = ap_bits_from(bw, ap_countr_zero(aout));
         }
         return ab;
     }
     if o == OP_ADD || o == OP_SUB {
-        if is_mask_w(aout) { return aout; }
+        if ap_is_mask(aout) { return aout; }
         compute(op(user, 0), op(user, 1));
         if o == OP_ADD { return live_bits_add_carry(opno, aout, kc.k1, kc.k2, true, false); }
         let nr = kb_flip(kc.k2);
         return live_bits_add_carry(opno, aout, kc.k1, nr, false, true);
     }
-    if o == OP_MUL { return low_bits(active_bits(aout)); }
+    if o == OP_MUL { return ap_low_bits(bw, ap_active_bits(aout)); }
     if o == OP_SHL || o == OP_LSHR || o == OP_ASHR {
         if opno != 0 { return ab; }
         let s = op(user, 1);
@@ -148,13 +143,13 @@ fn determine_live_operand_bits(user: i32, val: i32, opno: i64, aout: u64, ab0: u
         if match_apint(s) {
             let sa = limited(apint_value(s), bw - 1);
             if o == OP_SHL {
-                ab = lshr_w(aout, sa, bw);
-                if (fl & FL_NSW) != 0 { ab |= high_bits(bw, sa + 1); }
-                else if (fl & FL_NUW) != 0 { ab |= high_bits(bw, sa); }
+                ab = ap_lshr(aout, sa);
+                if (fl & FL_NSW) != 0 { ab = ap_or(ab, ap_high_bits(bw, sa + 1)); }
+                else if (fl & FL_NUW) != 0 { ab = ap_or(ab, ap_high_bits(bw, sa)); }
             } else {
-                ab = shl_w(aout, sa, bw);
-                if o == OP_ASHR && (aout & high_bits(bw, sa)) != 0 { ab |= sbit(bw); }
-                if exact { ab |= low_bits(sa); }
+                ab = ap_shl(aout, sa);
+                if o == OP_ASHR && ap_intersects(aout, ap_high_bits(bw, sa)) { ab = ap_set_bit(ab, bw - 1); }
+                if exact { ab = ap_or(ab, ap_low_bits(bw, sa)); }
             }
             return ab;
         }
@@ -163,12 +158,12 @@ fn determine_live_operand_bits(user: i32, val: i32, opno: i64, aout: u64, ab0: u
         let mx = limited(kb_max(kc.k1), bw - 1);
         if o == OP_SHL {
             ab = shifted_range(mn, mx, false);
-            if (fl & FL_NSW) != 0 { ab |= high_bits(bw, mx + 1); }
-            else if (fl & FL_NUW) != 0 { ab |= high_bits(bw, mx); }
+            if (fl & FL_NSW) != 0 { ab = ap_or(ab, ap_high_bits(bw, mx + 1)); }
+            else if (fl & FL_NUW) != 0 { ab = ap_or(ab, ap_high_bits(bw, mx)); }
         } else {
             ab = shifted_range(mn, mx, true);
-            if o == OP_ASHR && mx != 0 && (aout & high_bits(bw, mx)) != 0 { ab |= sbit(bw); }
-            if exact { ab |= low_bits(mx); }
+            if o == OP_ASHR && mx != 0 && ap_intersects(aout, ap_high_bits(bw, mx)) { ab = ap_set_bit(ab, bw - 1); }
+            if exact { ab = ap_or(ab, ap_low_bits(bw, mx)); }
         }
         return ab;
     }
@@ -176,19 +171,19 @@ fn determine_live_operand_bits(user: i32, val: i32, opno: i64, aout: u64, ab0: u
         ab = aout;
         compute(op(user, 0), op(user, 1));
         if o == OP_AND {
-            if opno == 0 { ab &= ~ap_lo64(kc.k2.z); } else { ab &= ~(ap_lo64(kc.k1.z) & ~ap_lo64(kc.k2.z)); }
+            if opno == 0 { ab = ap_and(ab, ap_not(kc.k2.z)); } else { ab = ap_and(ab, ap_not(ap_and(kc.k1.z, ap_not(kc.k2.z)))); }
         } else {
-            if opno == 0 { ab &= ~ap_lo64(kc.k2.o); } else { ab &= ~(ap_lo64(kc.k1.o) & ~ap_lo64(kc.k2.o)); }
+            if opno == 0 { ab = ap_and(ab, ap_not(kc.k2.o)); } else { ab = ap_and(ab, ap_not(ap_and(kc.k1.o, ap_not(kc.k2.o)))); }
         }
-        return ab & m;
+        return ab;
     }
     if o == OP_XOR || o == OP_PHI { return aout; }
-    if o == OP_TRUNC { return aout; }                       // AOut.zext(BitWidth)
-    if o == OP_ZEXT { return aout & m; }                    // AOut.trunc(BitWidth)
+    if o == OP_TRUNC { return ap_zext(aout, bw); }        // AOut.zext(BitWidth)
+    if o == OP_ZEXT { return ap_trunc(aout, bw); }        // AOut.trunc(BitWidth)
     if o == OP_SEXT {
-        ab = aout & m;
-        let ow = int_width(vals[user].ty);
-        if (aout & high_bits(ow, ow - bw)) != 0 { ab |= sbit(bw); }
+        ab = ap_trunc(aout, bw);
+        let ow = aout.w as i64;
+        if ap_intersects(aout, ap_bits_from(ow, bw)) { ab = ap_set_bit(ab, bw - 1); }
         return ab;
     }
     if o == OP_SELECT { if opno != 0 { return aout; } return ab; }
@@ -210,12 +205,12 @@ fn db_analyze(fv: i32) {
     each_inst(fv) { i =>
         if db_always_live(i) {
             if is_int_ty(vals[i].ty) {
-                if !vm_has(VM_ANA0, i) { vm_set(VM_ANA0, i, 0); wl_insert(i); }
+                if !vm_has(VM_ANA0, i) { db_store(i, ap_zero(int_width(vals[i].ty))); wl_insert(i); }
             } else {
                 for k in nops(i) {
                     let j = op(i, k);
                     if !is_inst(j) { continue; }
-                    if is_int_ty(vals[j].ty) { vm_set(VM_ANA0, j, wmask(int_width(vals[j].ty)) as! i64); }
+                    if is_int_ty(vals[j].ty) { db_store(j, ap_ones(int_width(vals[j].ty))); }
                     else { vs_add(VS_ANA0, j); }
                     wl_insert(j);
                 }
@@ -225,11 +220,11 @@ fn db_analyze(fv: i32) {
     while wl.len > 0 {
         let user = wl.pop();
         db_wl_del(user);
-        var aout: u64 = 0;
+        var aout = ap_zero(1);
         var dead_in = false;
         if is_int_ty(vals[user].ty) {
-            aout = vm_get(VM_ANA0, user, 0) as! u64;
-            dead_in = aout == 0 && !db_always_live(user);
+            aout = db_load(user);
+            dead_in = ap_is_zero(aout) && !db_always_live(user);
         }
         var kc = KBCache { k1: kb_unknown(1), k2: kb_unknown(1), done: false };
         for k in nops(user) {
@@ -239,22 +234,22 @@ fn db_analyze(fv: i32) {
             let t = vals[ov].ty;
             if is_int_ty(t) {
                 let bw = int_width(t);
-                var ab = wmask(bw);
+                var ab = ap_ones(bw);
                 let u = vals[user].ops + k as i32;
                 if dead_in {
-                    ab = 0;
+                    ab = ap_zero(bw);
                 } else {
                     ab = determine_live_operand_bits(user, ov, k, aout, ab, bw, kc);
-                    if ab == 0 { db_dead_add(u); } else { db_dead_del(u); }
+                    if ap_is_zero(ab) { db_dead_add(u); } else { db_dead_del(u); }
                 }
                 if isi {
                     if !vm_has(VM_ANA0, ov) {
-                        vm_set(VM_ANA0, ov, ab as! i64);
+                        db_store(ov, ab);
                         wl_insert(ov);
                     } else {
-                        let old = vm_get(VM_ANA0, ov, 0) as! u64;
-                        let nw = ab | old;
-                        if nw != old { vm_set(VM_ANA0, ov, nw as! i64); wl_insert(ov); }
+                        let old = db_load(ov);
+                        let nw = ap_or(ab, old);
+                        if ap_ne(nw, old) { db_store(ov, nw); wl_insert(ov); }
                     }
                 }
             } else if isi && vs_add(VS_ANA0, ov) {
@@ -264,12 +259,18 @@ fn db_analyze(fv: i32) {
     }
 }
 
-fn db_demanded_bits(i: i32) -> u64 {
+// getDemandedBits(I)
+fn db_demanded_bits_ap(i: i32) -> AP {
     db_analyze(inst_func(i));
-    if vm_has(VM_ANA0, i) { return vm_get(VM_ANA0, i, 0) as! u64; }
-    return wmask(int_width(vals[i].ty));
+    if vm_has(VM_ANA0, i) { return db_load(i); }
+    return ap_ones(int_width(vals[i].ty));
 }
-fn db_is_all_ones(i: i32) -> bool { db_demanded_bits(i) == wmask(int_width(vals[i].ty)) }
+// getDemandedBits(I) for widths of at most 64 bits
+fn db_demanded_bits(i: i32) -> u64 {
+    if int_width(vals[i].ty) > 64 { fatal("internal: db_demanded_bits on an integer wider than 64 bits (use db_demanded_bits_ap)"); }
+    return ap_lo64(db_demanded_bits_ap(i));
+}
+fn db_is_all_ones(i: i32) -> bool { ap_is_all_ones(db_demanded_bits_ap(i)) }
 
 fn db_is_instruction_dead(i: i32) -> bool {
     db_analyze(inst_func(i));
@@ -283,24 +284,24 @@ fn db_is_use_dead(user: i32, k: i64) -> bool {
     if db_always_live(user) { return false; }
     db_analyze(inst_func(user));
     if db_dead_has(vals[user].ops + k as i32) { return true; }
-    if is_int_ty(vals[user].ty) && vm_has(VM_ANA0, user) && vm_get(VM_ANA0, user, 0) == 0 { return true; }
+    if is_int_ty(vals[user].ty) && vm_has(VM_ANA0, user) && ap_is_zero(db_load(user)) { return true; }
     return false;
 }
 
 // getDemandedBits(Use *)
-fn db_demanded_bits_use(user: i32, k: i64) -> u64 {
+fn db_demanded_bits_use(user: i32, k: i64) -> AP {
     let v = op(user, k);
     let t = vals[v].ty;
     if !is_int_ty(t) {
         let sz = ty_size_in_bits_for_print(t);
-        return wmask(sz);
+        return ap_ones(sz);
     }
     let bw = int_width(t);
-    if db_is_use_dead(user, k) { return 0; }
+    if db_is_use_dead(user, k) { return ap_zero(bw); }
     db_analyze(inst_func(user));
-    let aout = db_demanded_bits(user);
+    let aout = db_demanded_bits_ap(user);
     var kc = KBCache { k1: kb_unknown(1), k2: kb_unknown(1), done: false };
-    return determine_live_operand_bits(user, v, k, aout, wmask(bw), bw, kc);
+    return determine_live_operand_bits(user, v, k, aout, ap_ones(bw), bw, kc);
 }
 
 // DL.getTypeSizeInBits of a non-integer scalar type (pointer sizes come from the module's DataLayout); the printer
@@ -325,13 +326,13 @@ fn print_demanded_bits(fv: i32) {
     each_inst(fv) { i =>
         if vm_has(VM_ANA0, i) {
             errs("DemandedBits: 0x");
-            errs_hex(vm_get(VM_ANA0, i, 0) as! u64);
+            db_errs_hex(db_load(i));
             errs(" for ");
             errs_inst(i, fv);
             errs("\n");
             for k in nops(i) {
                 errs("DemandedBits: 0x");
-                errs_hex(db_demanded_bits_use(i, k));
+                db_errs_hex(db_demanded_bits_use(i, k));
                 errs(" for ");
                 errs_operand(op(i, k), fv, false);
                 errs(" in ");
@@ -341,3 +342,6 @@ fn print_demanded_bits(fv: i32) {
         }
     };
 }
+
+// the printer's Twine::utohexstr(A.getLimitedValue())
+fn db_errs_hex(a: AP) { errs_hex(ap_limited(a, 0xFFFFFFFFFFFFFFFF)); }

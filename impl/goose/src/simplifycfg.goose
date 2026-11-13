@@ -40,6 +40,9 @@ import flags;
 import tti;
 import profdata;
 import speculate;
+import capture;
+import aa;
+import memloc;
 import cfgutil;
 import mem2reg;
 import dinfo;
@@ -1262,7 +1265,12 @@ fn is_safe_to_speculate_store(i: i32, brbb: i32, storebb: i32, endbb: i32) -> i3
         }
         if iop(c) == OP_LOAD {
             if op(c, 0) == sp && vals[c].ty == sty && store_is_simple(c) && inst_align(c) >= inst_align(i) {
-                scf_not_ported("isSafeToSpeculateStore from a preceding load (isWritableObject / capture tracking)");
+                let obj = get_underlying_object(sp, 10);
+                let w, explicit_only = aa_is_writable_object(obj);
+                if w {
+                    let wo, wr = ct_pointer_may_be_captured(obj, CC_PROVENANCE, CT_STOP_ANY, 0);
+                    if cc_nothing(wo) && (!explicit_only || spec_deref_pointer_ignore_free(sp, sty)) { return c; }
+                }
             }
         }
     }

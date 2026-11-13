@@ -6,6 +6,7 @@
 // MemoryLocation::getForDest(CallBase) (llvm/lib/Analysis/MemoryLocation.cpp) for the pointer it returns.
 // isAllocLikeFn / isRemovableAlloc / getFreedOperand are in local.goose, the tables in gen_tli.goose.
 import std;
+import ic;
 import ir;
 import irutil;
 import calls;
@@ -248,8 +249,18 @@ fn mb_get_alloc_size(cb: i32, use_mapper: bool) -> bool, AP {
         return v;
     }
     if at == MB_STRDUP {
-        mb_not_ported("getAllocSize of strdup-like functions (GetStringLength)");
-        return false, ap_zero(bits);
+        // APInt Size(IntTyBits, GetStringLength(Mapper(arg 0)))
+        let len = ic::get_string_length(mapper(cb_arg(cb, 0)), 8);
+        var size = ap_u64(len, bits);
+        if ap_is_zero(size) { return false, size; }
+        // strndup limits strlen
+        if fst > 0 {
+            let a = mapper(cb_arg(cb, fst));
+            if vals[a].kind != VK_CINT { return false, ap_zero(bits); }
+            let mx = ap_zext_or_trunc(ci_ap(a), bits);
+            if ap_ugt(size, mx) { size = ap_add(mx, ap_u64(1, bits)); }
+        }
+        return true, size;
     }
     let a1 = mapper(cb_arg(cb, fst));
     if vals[a1].kind != VK_CINT { return false, ap_zero(bits); }

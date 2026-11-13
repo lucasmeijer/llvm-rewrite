@@ -12,6 +12,7 @@
 // switch in ic_visit. See DESIGN.md §10 for how to add a fold.
 namespace ic;
 import std;
+import memorybuiltins;
 import ir;
 import irutil;
 import calls;
@@ -441,8 +442,31 @@ fn ic_sink_block_for(i: i32) -> i32 {
 // SoleWriteToDeadLocal(I, TLI)
 fn ic_sole_write_to_dead_local(i: i32) -> bool {
     if !is_callbase(i) { return false; }
-    ic_not_ported("SoleWriteToDeadLocal (sinking a call that writes memory)");
-    return false;
+    // MemoryLocation::getForDest(CB, TLI): only the pointer matters here
+    let dest = mb_memloc_for_dest(i);
+    if dest < 0 { return false; }
+    let ai = get_underlying_object(dest, 10);
+    if !is_inst_op(ai, OP_ALLOCA) { return false; }
+    var wl: i32[>..<] = [];
+    var seen: i32[>..<] = [];
+    fn push_users(v: i32) {
+        var u = vals[v].first_use;
+        while u >= 0 {
+            let us = uses[u].user;
+            u = uses[u].next;
+            var dup = false;
+            for x in seen { if x == us { dup = true; break; } }
+            if !dup { seen.push(us); wl.push(us); }
+        }
+    }
+    push_users(ai);
+    while wl.len > 0 {
+        let ui = wl.pop();
+        if is_inst_op(ui, OP_GEP) || is_inst_op(ui, OP_ADDRSPACECAST) { push_users(ui); continue; }
+        if ui == i { continue; }
+        return false;
+    }
+    return true;
 }
 
 // tryToSinkInstruction(I, DestBlock)
@@ -607,8 +631,38 @@ fn is_debug_or_pseudo_inst(i: i32) -> bool {
     return id == IID_dbg_declare || id == IID_dbg_value || id == IID_dbg_label || id == IID_dbg_assign || id == IID_pseudoprobe;
 }
 
+// AliasScopeTracker: the scope (lists) used by !alias.scope and by !noalias
+var ic_ast_scopes = hm_new();
+var ic_ast_noalias = hm_new();
+fn ic_ast_track(l: i32, set: HMap&) {
+    if l < 0 || !md_is_node(l) { return; }
+    if hm_has(set, l as u64) { return; }
+    hm_put(set, l as u64, 1);
+    for k in mds[l].nops as i64 {
+        let o = md_op(l, k);
+        if o >= 0 && md_is_node(o) { hm_put(set, o as u64, 1); }
+    }
+}
+fn ic_ast_analyse(i: i32) {
+    ic_ast_track(inst_get_md(i, md_kind_id("alias.scope")), ic_ast_scopes);
+    ic_ast_track(inst_get_md(i, md_kind_id("noalias")), ic_ast_noalias);
+}
+// isNoAliasScopeDeclDead
+fn ic_ast_decl_dead(i: i32) -> bool {
+    if inst_iid(i) != IID_experimental_noalias_scope_decl { return false; }
+    let a = cb_arg(i, 0);
+    if vals[a].kind != VK_MDVAL { return true; }
+    let sl = vals[a].sub;
+    if mds[sl].nops != 1 { fatal("internal: llvm.experimental.noalias.scope.decl with a scope list of several scopes"); }
+    let md = md_op(sl, 0);
+    if md >= 0 && md_is_node(md) { return !hm_has(ic_ast_scopes, md as u64) || !hm_has(ic_ast_noalias, md as u64); }
+    return true;
+}
+
 fn ic_prepare_worklist(fv: i32) -> bool {
     ic_made_change = false;
+    hm_clear(ic_ast_scopes);
+    hm_clear(ic_ast_noalias);
     var live: i32[>..<] = [];          // LiveBlocks (membership through ic_live)
     var insts_for_wl: i32[>..<] = [];
     vs_clear(VS_PASS0);
@@ -642,7 +696,7 @@ fn ic_prepare_worklist(fv: i32) -> bool {
             }
             if !is_debug_or_pseudo_inst(inst) {
                 insts_for_wl.push(inst);
-                if inst_iid(inst) == IID_experimental_noalias_scope_decl { ic_not_ported("AliasScopeTracker (llvm.experimental.noalias.scope.decl)"); }
+                ic_ast_analyse(inst);
             }
         }
         let t = block_terminator(bb);
@@ -675,7 +729,7 @@ fn ic_prepare_worklist(fv: i32) -> bool {
     while k >= 0 {
         let inst = insts_for_wl[k];
         k--;
-        if is_instruction_trivially_dead(inst) {
+        if is_instruction_trivially_dead(inst) || ic_ast_decl_dead(inst) {
             salvage_debug_info(inst);
             inst_erase_from_parent(inst);
             ic_made_change = true;
@@ -871,6 +925,9 @@ fn ic_visit(i: i32) -> i32 {
         OP_PTRTOADDR => { return visit_ptrtoaddr(i); },
         OP_BITCAST => { return visit_bitcast(i); },
         OP_ADDRSPACECAST => { return visit_addrspacecast(i); },
+        OP_ATOMICRMW => { return visit_atomicrmw(i); },
+        // InstCombinerImpl has no visitIndirectBrInst: InstVisitor's visitTerminator -> visitInstruction (nullptr)
+        OP_INDIRECTBR => { return -1; },
         OP_VAARG => { return -1; },   // no visitVAArgInst: InstVisitor's visitInstruction (returns nullptr)
         _ => { return ic_visit_other(i); },
     }

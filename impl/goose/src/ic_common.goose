@@ -8,6 +8,7 @@
 // (getComplexity, AddOne/SubOne, shouldAvoidAbsorbingNotIntoSelect, canFreelyInvertAllUsersOf).
 namespace ic;
 import std;
+import instident;
 import ir;
 import dinfo;
 import mem2reg;
@@ -727,19 +728,12 @@ fn simplify_inst_with_phi(i: i32, pn: i32, inv: i32, inbb: i32) -> i32 {
     return -1;
 }
 
-// Instruction::isIdenticalTo
+// Instruction::isIdenticalTo: isIdenticalToWhenDefined and the same SubclassOptionalData (IR flags, FMF)
 fn is_identical_to(a: i32, b: i32) -> bool {
-    if iop(a) != iop(b) || vals[a].ty != vals[b].ty || nops(a) != nops(b) { return false; }
-    for k in nops(a) { if op(a, k) != op(b, k) { return false; } }
+    if !ii_is_identical_when_defined(a, b, false) { return false; }
     let x = insts[inst_of(a)];
     let y = insts[inst_of(b)];
-    if x.flags != y.flags || x.fmf != y.fmf || x.pred != y.pred { return false; }
-    if iop(a) == OP_PHI { for k in nops(a) { if phi_block(a, k) != phi_block(b, k) { return false; } } }
-    if iop(a) == OP_CALL || iop(a) == OP_LOAD || iop(a) == OP_STORE || iop(a) == OP_GEP || iop(a) == OP_ALLOCA ||
-       iop(a) == OP_EXTRACTVALUE || iop(a) == OP_INSERTVALUE || iop(a) == OP_SHUFFLEVECTOR {
-        ic_not_ported("isIdenticalTo for memory/call/aggregate instructions");
-    }
-    return true;
+    return x.flags == y.flags && x.fmf == y.fmf;
 }
 
 // foldOpIntoPhi(I, PN, AllowMultipleUses)

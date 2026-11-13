@@ -173,3 +173,73 @@ fn ic_maybe_libcall(f: i32) -> bool {
     if lf < 0 { return false; }
     return TLI_SIGS[lf][0] == '?' || starts_with(nm, "__size_returning_new");
 }
+
+// ---------------------------------------------------------------------------------------------
+// atomicrmw (llvm/lib/Transforms/InstCombine/InstCombineAtomicRMW.cpp). Operation ids are the parser's rmw_op
+// order: 0 xchg, 1 add, 2 sub, 3 and, 4 nand, 5 or, 6 xor, 7 max, 8 min, 9 umax, 10 umin, 11 fadd, 12 fsub,
+// 13 fmax, 14 fmin, ...
+
+fn rmw_scalar_cint(v: i32) -> bool { vals[v].kind == VK_CINT && !ty_is_vector(vals[v].ty) }
+fn rmw_scalar_cfp(v: i32) -> bool { vals[v].kind == VK_CFP && !ty_is_vector(vals[v].ty) }
+
+// isIdempotentRMW
+fn rmw_is_idempotent(i: i32, o: i64) -> bool {
+    let v = op(i, 1);
+    if rmw_scalar_cfp(v) {
+        if o == 11 { return cfp_is_zero(v) && cfp_is_neg(v); }
+        if o == 12 { return cfp_is_zero(v) && !cfp_is_neg(v); }
+        return false;
+    }
+    if !rmw_scalar_cint(v) { return false; }
+    let a = ci_ap(v);
+    if o == 1 || o == 2 || o == 5 || o == 6 { return ap_is_zero(a); }
+    if o == 3 { return ap_is_all_ones(a); }
+    if o == 8 { return ap_is_max_signed(a); }
+    if o == 7 { return ap_is_min_signed(a); }
+    if o == 10 { return ap_is_all_ones(a); }
+    if o == 9 { return ap_is_zero(a); }
+    return false;
+}
+// isSaturating
+fn rmw_is_saturating(i: i32, o: i64) -> bool {
+    let v = op(i, 1);
+    if rmw_scalar_cfp(v) {
+        if o == 13 { return !cfp_is_neg(v) && cfp_is_inf(v); }
+        if o == 14 { return cfp_is_neg(v) && cfp_is_inf(v); }
+        if o == 11 || o == 12 { return cfp_is_nan(v); }
+        return false;
+    }
+    if !rmw_scalar_cint(v) { return false; }
+    let a = ci_ap(v);
+    if o == 0 { return true; }
+    if o == 5 { return ap_is_all_ones(a); }
+    if o == 3 { return ap_is_zero(a); }
+    if o == 8 { return ap_is_min_signed(a); }
+    if o == 7 { return ap_is_max_signed(a); }
+    if o == 10 { return ap_is_zero(a); }
+    if o == 9 { return ap_is_all_ones(a); }
+    return false;
+}
+fn visit_atomicrmw(i: i32) -> i32 {
+    if inst_is_volatile(i) { return -1; }
+    let ii = inst_of(i);
+    let o = insts[ii].pred as i64;
+    if rmw_is_saturating(i, o) && o != 0 { insts[ii].pred = 0; return i; }
+    if o == 1 || o == 2 {
+        let x = m_neg(op(i, 1));
+        if x >= 0 {
+            insts[ii].pred = if o == 1 { 2 } else { 1 };
+            return ic_replace_operand(i, 1, x);
+        }
+    }
+    if !rmw_is_idempotent(i, o) { return -1; }
+    let t = vals[i].ty;
+    if ty_is_int(t) && o != 5 {
+        insts[ii].pred = 5;
+        return ic_replace_operand(i, 1, c_int(t, 0));
+    } else if ty_is_fp(t) && o != 11 {
+        insts[ii].pred = 11;
+        return ic_replace_operand(i, 1, c_fp_neg_zero(t));
+    }
+    return -1;
+}
