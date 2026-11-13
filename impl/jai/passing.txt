@@ -1189,6 +1189,7 @@ tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Dhrystone/fldry.ll::isel-i
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Dhrystone/fldry.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Dhrystone/fldry.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Linpack/linpack-pc.ll::isel-ir
+tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Linpack/linpack-pc.ll::opt
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/Linpack/linpack-pc.ll::roundtrip
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/exptree.ll::isel-ir
 tests/e2e/pipeline/test-suite/SingleSource/Benchmarks/McGill/exptree.ll::opt
