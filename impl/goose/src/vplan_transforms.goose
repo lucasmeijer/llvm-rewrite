@@ -23,6 +23,8 @@ import lv_legality;
 import vplan;
 import vplan_utils;
 import vplan_props;
+import memloc;
+import tbaa;
 
 // ---------------------------------------------------------------------------------------------
 // simplifyRecipes
@@ -730,7 +732,44 @@ fn vpt_cannot_hoist_or_sink(r: i32, sinking: bool) -> bool {
     if vpr[r].kind != VPR_REPLICATE || !vp_may_read_or_write_memory(r) || vp_intrinsic_id(r) == IID_assume {
         return vp_cannot_hoist_or_sink_recipe(r, sinking);
     }
-    vp_unported("hoisting / sinking replicated memory accesses (canHoistOrSinkWithNoAliasCheck)");
+    // !canHoistOrSinkWithNoAliasCheck(getMemoryLocation(R), loop entry, loop exiting, SinkStoreInfo(R) when sinking)
+    let region = vp_vector_loop_region();
+    return !vpt_can_hoist_or_sink_with_no_alias_check(vpt_memory_location(r), vp_entry_basic_block(region),
+                                                      vp_exiting_basic_block(region), if sinking { r } else { -1 });
+}
+// VPIRMetadata recipes (the ones vputils::getMemoryLocation gives a location for)
+fn vpt_is_ir_metadata_recipe(r: i32) -> bool {
+    let k = vpr[r].kind;
+    return k == VPR_INSTRUCTION || k == VPR_WIDEN || k == VPR_WIDEN_CAST || k == VPR_WIDEN_INTRINSIC || k == VPR_WIDEN_MEM_INTRINSIC ||
+           k == VPR_WIDEN_CALL || k == VPR_HISTOGRAM || k == VPR_INTERLEAVE || k == VPR_INTERLEAVE_EVL || k == VPR_REPLICATE ||
+           vp_is_widen_memory_kind(k);
+}
+// vputils::getMemoryLocation(R): only the scoped-noalias tags matter
+fn vpt_memory_location(r: i32) -> ML {
+    var m = ml_make(-1, 0);
+    m.noalias = vp_md_get(r, MDK_NOALIAS);
+    m.scope = vp_md_get(r, MDK_ALIAS_SCOPE);
+    return m;
+}
+// canHoistOrSinkWithNoAliasCheck(MemLoc, FirstBB, LastBB, SinkInfo): leader >= 0 is SinkStoreInfo(leader)
+fn vpt_can_hoist_or_sink_with_no_alias_check(loc: ML, first: i32, last: i32, leader: i32) -> bool {
+    let check_reads = leader >= 0;
+    var bs: i32[>..<] = [];
+    vp_depth_first(first, true, bs);
+    vp_only_basic(bs);
+    for b in bs {
+        var r = vpb[b].first;
+        while r >= 0 {
+            let nx = vpr[r].next;
+            // SinkStoreInfo::shouldSkip: isNoAliasViaDistance without PSE is "both stores and the same recipe"
+            if leader >= 0 && r == leader && vpr[r].kind == VPR_REPLICATE && vpr[r].opcode == OP_STORE as i32 { r = nx; continue; }
+            if !vp_may_write_to_memory(r) && !(check_reads && vp_may_read_from_memory(r)) { r = nx; continue; }
+            if !vpt_is_ir_metadata_recipe(r) { return false; }
+            if sna_alias_may(vpt_memory_location(r), loc) { return false; }
+            r = nx;
+        }
+        if b == last { break; }
+    }
     return true;
 }
 

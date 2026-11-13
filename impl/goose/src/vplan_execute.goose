@@ -185,7 +185,7 @@ recursive fn vts_get_lane(d: i32, lane: i64) -> i32 {
         if lane != 0 { fatal("internal: cannot get lane > 0 of a scalar"); }
         return v;
     }
-    return vxb_extract(v, c_int(T_I32, lane), "");
+    return vxb_extract(v, c_int(T_I64, lane), "");
 }
 // VPTransformState::get(Def, NeedsScalar)
 recursive fn vts_get(d: i32, needs_scalar: bool) -> i32 {

@@ -179,6 +179,7 @@ let KNOWN_FLAGS_LV: const u8[:][] = [
     "force-partial-aliasing-vectorization", "vectorizer-maximize-bandwidth", "vectorizer-maximize-bandwidth-for-vector-calls",
     "prefer-inloop-reductions", "force-target-max-scalar-interleave", "vplan-build-outerloop-stress-test",
     "enable-vplan-native-path", "max-interleave-group-factor",
+    "force-target-instruction-cost", "vectorize-num-stores-pred", "force-masked-divrem", "small-loop-cost", "enable-ind-var-register-heur", "enable-loadstore-runtime-interleave", "max-nested-scalar-reduction-interleave", "force-target-num-scalar-regs", "force-target-num-vector-regs", "force-target-max-vector-interleave", "epilogue-vectorization-minimum-VF", "enable-epilogue-vectorization",
 ];
 
 // Flags whose non-default value is not supported (checked before the pipeline runs).

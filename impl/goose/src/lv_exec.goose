@@ -16,6 +16,7 @@ import loop_md;
 import loop_utils;
 import loopsimplify;
 import profdata;
+import psi;
 import scev;
 import scev_update;
 import tti;
@@ -39,7 +40,7 @@ fn lvx_setup(l: i32, pse: i32, fv: i32) { lvx_l = l; lvx_pse = pse; lvx_fv = fv;
 fn lvx_requires_scalar_epilogue() -> bool { vp_single_succ(vp_middle_block()) == vp_scalar_preheader() }
 
 // the processLoop tail for the loaded best plan with VF `vf` and interleave count `ic` (user-forced)
-fn lv_execute_best_plan(vf: i64, ic: i64) -> bool {
+fn lv_execute_best_plan(vf: i64, ic: i64, min_profitable_tc: i64) -> bool {
     // GeneratedRTChecks: no runtime checks are supported yet (tryToBuildVPlan1 fails loudly on memory checks)
     if !su_always_true(pse_union(lvx_pse)) { vp_unported("SCEV runtime checks (GeneratedRTChecks)"); }
     // isOutsideLoopWorkProfitable: the scalar cost of a user VF is 0 -> profitable
@@ -50,7 +51,7 @@ fn lv_execute_best_plan(vf: i64, ic: i64) -> bool {
     let latch = loop_latch(lvx_l);
     let has_bw = inst_get_md(block_terminator(latch), md_kind_id("prof")) >= 0;
     let pred = loop_predecessor(lvx_l);
-    vpx_add_minimum_iteration_check(vf, ic, 0, lvx_requires_scalar_epilogue(), vp_has_tail_folded(), lvx_l,
+    vpx_add_minimum_iteration_check(vf, ic, min_profitable_tc, lvx_requires_scalar_epilogue(), vp_has_tail_folded(), lvx_l,
                                     inst_get_md(block_terminator(pred), 0), lvx_pse, has_bw);
     lvx_execute_plan(vf, ic);
     return true;
@@ -135,7 +136,8 @@ fn lvx_add_runtime_unroll_disable_metadata(l: i32) {
 }
 
 // updateLoopMetadataAndProfileInfo
-fn lvx_update_loop_metadata(vloop: i32, has_header: bool, orig_id: i32, disable_runtime_unroll: bool) {
+fn lvx_update_loop_metadata(vloop: i32, has_header: bool, orig_id: i32, disable_runtime_unroll: bool, has_avg: bool, avg0: u64,
+                            weight0: u64, vfxuf: i64) {
     let l = lvx_l;
     let sph = vp_scalar_preheader();
     let fu_all: const u8[:] = "llvm.loop.vectorize.followup_all";
@@ -157,9 +159,24 @@ fn lvx_update_loop_metadata(vloop: i32, has_header: bool, orig_id: i32, disable_
         lvx_set_already_vectorized(vloop);
     }
     lvx_add_runtime_unroll_disable_metadata(vloop);
-    // profile: no entry count / estimated trip count handling yet
-    let has_avg, avg = get_loop_estimated_trip_count(l);
-    if has_avg { vp_unported("estimated trip counts on vectorized loops (branch weights)"); }
+    // set/update profile weights for the vector and remainder loops
+    var avg_vtc: u64 = 0;
+    var rem_tc: u64 = 0;
+    var weight = weight0;
+    let has_ec, ec = fn_entry_count(lvx_fv);
+    let profiled = has_ec && ec != 0;
+    if !has_avg {
+        if !profiled { return; }
+        avg_vtc = (sc_get_small_constant_trip_count(vloop) as u64) & 0xFFFFFFFF;
+        if flag_bool("profcheck-disable-metadata-fixes", false) || avg_vtc == 0 { return; }
+        if sph >= 0 { rem_tc = ((sc_get_small_constant_trip_count(l) as u64) & 0xFFFFFFFF) % (vfxuf as u64); }
+        weight = 1;
+    } else {
+        avg_vtc = avg0 / (vfxuf as u64);
+        rem_tc = avg0 % (vfxuf as u64);
+    }
+    if has_header { let ok = set_loop_estimated_trip_count(vloop, avg_vtc, true, weight); }
+    if sph >= 0 { let ok = set_loop_estimated_trip_count(l, rem_tc, true, weight); }
 }
 fn lvx_make_followup_loop_id(orig: i32, opts: const u8[:][2]) -> bool, i32 {
     if orig < 0 { return false, -1; }
@@ -248,6 +265,7 @@ fn lvx_execute_plan(vf: i64, uf: i64) {
     sc_forget_loop(lvx_l);
     sc_forget_block_and_loop_dispositions_all();
     let lid = loop_id(lvx_l);
+    let has_avg, avg, weight = get_loop_estimated_trip_count_w(lvx_l, true);
     vts_execute_plan();
     dtu_end();
     var header_vpbb: i32 = -1;
@@ -257,7 +275,7 @@ fn lvx_execute_plan(vf: i64, uf: i64) {
     let disable_runtime_unroll = vf > 1;
     var vloop: i32 = -1;
     if header_vpbb >= 0 { vloop = li_loop_for(vts_bb_of(header_vpbb)); }
-    lvx_update_loop_metadata(vloop, header_vpbb >= 0, lid, disable_runtime_unroll);
+    lvx_update_loop_metadata(vloop, header_vpbb >= 0, lid, disable_runtime_unroll, has_avg, avg, weight, vf * uf);
     if header_vpbb >= 0 { lvx_legacy_cse(vts_bb_of(header_vpbb)); }
 }
 // removeBranchOnConst(Plan, OnlyLatches = true)

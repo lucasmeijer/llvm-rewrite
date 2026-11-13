@@ -45,6 +45,8 @@ import iv_descriptors;
 import lv_legality;
 import lv_interleave;
 import lv_cm;
+import lv_cost;
+import vplan_cost;
 import vplan;
 import vplan_construct;
 import vplan_transforms;
@@ -68,8 +70,6 @@ var lv_pse: i32 = -1;
 var cm_epilogue: i64 = 0;          // EpilogueLoweringStatus
 var cm_tfs: i64 = 0;               // ChosenTailFoldingStyle
 var cm_partial_alias: i64 = 0;     // 0 NotDecided, 1 Disabled, 2 Enabled
-var cm_vals_to_ignore = hm_new();
-var cm_vec_vals_to_ignore = hm_new();
 var cfg_elem_types: i32[>..<];     // ElementTypesInLoop
 var cfg_max_safe_elements: i64 = 0xFFFFFFFF;
 var cfg_max_bw_fixed: i64 = 0;     // MaxPermissibleVFWithoutMaxBW.FixedVF
@@ -643,15 +643,14 @@ fn loop_vectorize_run(fv: i32, interleave_only_when_forced: bool, vectorize_only
     return pa;
 }
 
-// LVP.plan(UserVF, UserIC) for a forced VF, computeBestVF, the processLoop tail and executePlan
+// LVP.plan(UserVF, UserIC), computeBestVF, selectInterleaveCount and the processLoop tail up to executePlan
 fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> bool {
-    if user_vf == 0 { lvx_unported("the cost model (VF selection)"); }
     if lvl_rdx_desc.len != 0 { lvx_unported("reductions"); }
     // Config.collectInLoopReductions: no reductions
     if max_vf > 1 { lvl_collect_unit_stride_predicates(); }
-    lv_check_minimal_bitwidths();
     vp_reset();
     cm_reset(lv_l);
+    lvc_reset(lv_pse, cm_is_epilogue_allowed());
     cm_fold_tail = cm_fold_tail_by_masking();
     lvp_l = lv_l;
     lvp_pse = lv_pse;
@@ -660,20 +659,98 @@ fn lv_plan_and_execute(max_vf: i64, user_vf: i64, user_ic: i64, sel: i64) -> boo
     let force = lvh_get_force() == FK_ENABLED;
     let osz = cm_epilogue == CM_EPILOGUE_NOT_ALLOWED_OPT_SIZE || cm_epilogue == CM_EPILOGUE_NOT_ALLOWED_LOW_TRIP_LOOP;
     if !lvp_try_to_build_vplan1(lvh_allow_reordering(), force, osz) { return lv_no_plan_result(user_ic); }
+    lv_check_minimal_bitwidths();
+    // invalidating interleave groups for a predicated header: tail folding fails loudly below
     if cm_fold_tail { lvx_unported("tail folding"); }
-    if user_vf > max_vf { lvx_unported("a user VF larger than the maximal safe VF"); }
-    cm_collect_non_vectorized_and_set_widening_decisions(user_vf);
-    lvp_build_vplans(user_vf, user_vf);
+    let tc = lv_small_constant_trip_count(lv_l);
+    var have_user_plan = false;
+    if user_vf != 0 && user_vf <= max_vf {
+        cm_collect_non_vectorized_and_set_widening_decisions(user_vf);
+        if flag_given("epilogue-vectorization-force-VF") && flag_int("epilogue-vectorization-force-VF", 1) > 1 &&
+           flag_int("epilogue-vectorization-force-VF", 1) < user_vf { lvx_unported("-epilogue-vectorization-force-VF"); }
+        lvp_build_vplans(user_vf, user_vf);
+        if lvp_plans.len != 0 {
+            vp_load(lvp_plans[lvp_plans.len - 1]);
+            if xv_len(vph.vfs) == 1 && vp_single_vf() == user_vf {
+                if user_vf == 1 || lc_valid(vpc_cost(user_vf, tc)) { have_user_plan = true; }
+            }
+        }
+        if !have_user_plan { lvp_plans.clear(); }
+    }
+    if !have_user_plan {
+        var vf: i64 = 1;
+        while vf <= max_vf { cm_collect_non_vectorized_and_set_widening_decisions(vf); vf *= 2; }
+        lvp_build_vplans(1, max_vf);
+    }
+    // computeBestVF
     if lvp_plans.len == 0 { return lv_no_plan_result(user_ic); }
-    // cost(Plan, UserVF) is assumed valid: no fixed-VF recipe of a supported plan has an invalid cost
-    vp_load(lvp_plans[lvp_plans.len - 1]);
-    if !vp_has_vf(user_vf) { lvx_unported("a plan without the user VF"); }
-    // computeBestVF: a single plan with a single VF; selectInterleaveCount only matters without a user IC
-    if user_ic == 0 { lvx_unported("the cost model (interleave count selection)"); }
-    let ic = user_ic;
+    var best_vf: i64 = 1;
+    var best_cost: i64 = 0;
+    var best_scalar: i64 = 0;
+    var best_plan = lvp_plans[0];
+    if lvp_plans.len == 1 {
+        vp_load(best_plan);
+        best_vf = vp_single_vf();
+    } else {
+        let scalar_cost = cm_expected_cost(1);
+        if lv_dbg_on() { var s: u8[>..] = []; s.append("LV: Scalar loop costs: "); lc_str(scalar_cost, s); s.append(".\n"); write_stderr(s); }
+        best_cost = if force { LC_MAX } else { scalar_cost };
+        best_scalar = scalar_cost;
+        let max_tc = lv_pse_small_constant_max_trip_count();
+        for p in lvp_plans {
+            vp_load(p);
+            var vfs: i32[>..<] = [];
+            xv_to(vph.vfs, vfs);
+            for vfi in vfs {
+                let v = vfi as i64;
+                if v == 1 { continue; }
+                vp_load(p);
+                if !force && !vpc_will_generate_vectors(v) {
+                    lv_dbg("LV: Not considering vector loop because it will not generate any vector instructions.\n");
+                    continue;
+                }
+                if lv_opt_for_size && !force { lvx_unported("optimizing for size (hasReplicatorRegion)"); }
+                let c = vpc_cost(v, tc);
+                let has_tail = vp_has_scalar_tail();
+                if vpc_is_more_profitable(c, v, scalar_cost, best_cost, best_vf, best_scalar, max_tc, has_tail) {
+                    best_vf = v; best_cost = c; best_scalar = scalar_cost; best_plan = p;
+                }
+            }
+        }
+        if lv_dbg_on() { var s: u8[>..] = []; s.append("LV: Selecting VF: "); format(s, best_vf); s.append(".\n"); write_stderr(s); }
+        vp_load(best_plan);
+    }
+    // hasPlanWithVF(VF.Width): the loaded plan has it
     lvx_setup(lv_l, lv_pse, lv_fv);
     lvx_epilogue_allowed = cm_is_epilogue_allowed();
-    return lv_execute_best_plan(user_vf, ic);
+    let rse = lvx_requires_scalar_epilogue();
+    var ic = vpc_select_interleave_count(best_vf, best_cost, cm_is_epilogue_allowed(),
+                                         lv_small_best_known_tc(true, cm_is_epilogue_allowed(), false), tc, rse);
+    vp_load(best_plan);
+    let selected_ic = if ic > user_ic { ic } else { user_ic };
+    if best_vf > 1 || selected_ic > 1 {
+        if !su_always_true(pse_union(lv_pse)) { lvx_unported("SCEV runtime checks (GeneratedRTChecks)"); }
+    }
+    var min_profitable_tc: i64 = 0;
+    if !force && best_vf > 1 {
+        let ok, m = vpc_is_outside_loop_work_profitable(best_vf, best_cost, best_scalar, sel == CM_EPILOGUE_ALLOWED,
+                                                       lv_small_best_known_tc(true, false, false));
+        vp_load(best_plan);
+        if !ok { return false; }
+        min_profitable_tc = m;
+    }
+    let vectorize = best_vf > 1;
+    var interleave = true;
+    if user_ic == 1 && lvh_get_interleave() > 1 { interleave = false; }
+    else if ic == 1 && user_ic <= 1 { interleave = false; }
+    else if ic > 1 && user_ic == 1 { interleave = false; }
+    ic = if user_ic > 0 { user_ic } else { ic };
+    if cm_mask_partial_aliasing() { interleave = false; ic = 1; }
+    if interleave && lvl_has_uncountable_exit_with_side_effects() { interleave = false; ic = 1; }
+    if !vectorize && !interleave { return false; }
+    if !vectorize { lvx_unported("interleaving without vectorizing"); }
+    if !interleave { ic = 1; }
+    return lv_execute_best_plan(best_vf, ic, min_profitable_tc);
 }
 fn lv_no_plan_result(user_ic: i64) -> bool { return false; }
 

@@ -248,8 +248,9 @@ fn lvp_try_to_optimize_induction_truncate(vpi: i32) -> i32 {
 }
 // TTI.isTruncateFree(toVectorTy(Src, VF), toVectorTy(Dst, VF))
 fn lvp_is_truncate_free(src: i32, dst: i32, vf: i64) -> bool {
-    if tti_kind == TTI_X86 { vp_unported("isTruncateFree on X86 (induction truncates)"); }
-    return false;
+    let s = if vf > 1 { ty_vector(src, vf, false) } else { src };
+    let d = if vf > 1 { ty_vector(dst, vf, false) } else { dst };
+    return tti_is_truncate_free(s, d);
 }
 
 // shouldWiden

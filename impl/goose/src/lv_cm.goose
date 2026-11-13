@@ -24,6 +24,7 @@ import tti_x86_vec;
 import iv_descriptors;
 import lv_legality;
 import lv_interleave;
+import lv_cost;
 
 // InstWidening
 let CM_UNKNOWN: i64 = 0; let CM_WIDEN: i64 = 1; let CM_WIDEN_REVERSE: i64 = 2; let CM_INTERLEAVE: i64 = 3;
@@ -38,6 +39,8 @@ var cm_uni = hm_new();              // Uniforms
 var cm_scal = hm_new();             // Scalars
 var cm_forced = hm_new();           // ForcedScalars
 var cm_to_scalarize = hm_new();     // InstsToScalarize
+var cm_vals_to_ignore = hm_new();   // ValuesToIgnore
+var cm_vec_vals_to_ignore = hm_new();   // VecValuesToIgnore
 
 fn cm_reset(l: i32) {
     cm_l = l;
@@ -121,7 +124,7 @@ fn cm_is_scalar_with_predication(i: i32, vf: i64) -> bool {
         return !(cons && cfg_is_legal_masked_load_or_store(i, vf)) && !cfg_is_legal_gather_or_scatter(i, vf);
     }
     if o == OP_UDIV || o == OP_SDIV || o == OP_SREM || o == OP_UREM {
-        vp_unported_cm("predicated division (getDivRemSpeculationCost)");
+        return cm_div_rem_is_scalar_with_predication(i, vf);
     }
     return true;
 }
@@ -137,61 +140,6 @@ fn cm_memory_instruction_can_be_widened(i: i32, vf: i64) -> i64 {
     if cm_is_scalar_with_predication(i, vf) { return CM_UNKNOWN; }
     if cm_has_irregular_type(laa_ldst_type(i)) { return CM_UNKNOWN; }
     return if stride == 1 { CM_WIDEN } else { CM_WIDEN_REVERSE };
-}
-
-// setCostBasedWideningDecision(VF) (decisions; costs are filled by the cost model)
-fn cm_set_cost_based_widening_decision(vf: i64) {
-    if vf == 1 { return; }
-    let l = cm_l;
-    for b in loop_nblocks(l) {
-        var i = block_first(loop_block(l, b));
-        while i >= 0 {
-            let ptr = laa_ldst_ptr(i);
-            if ptr < 0 { i = inst_next(i); continue; }
-            if lvl_is_uniform_mem_op(i, vf) {
-                if cfg_is_legal_gather_or_scatter(i, vf) { vp_unported_cm("gather/scatter cost of a uniform memory access"); }
-                cm_set_widening_decision(i, vf, CM_SCALARIZE, -1);
-                i = inst_next(i);
-                continue;
-            }
-            let d = cm_memory_instruction_can_be_widened(i, vf);
-            if d != CM_UNKNOWN { cm_set_widening_decision(i, vf, d, -1); i = inst_next(i); continue; }
-            if iai_is_interleaved(i) { vp_unported_cm("interleave groups (getInterleaveGroupCost)"); }
-            vp_unported_cm("non-consecutive memory accesses (gather/scatter or scalarization costs)");
-            i = inst_next(i);
-        }
-    }
-    // prefersVectorizedAddressing: true for NoTTI, supportsGather() on X86
-    if tti_kind != TTI_X86 || x86_supports_gather() { return; }
-    var addr_defs: i32[>..<] = [];
-    var addr_set = hm_new();
-    for b in loop_nblocks(l) {
-        var i = block_first(loop_block(l, b));
-        while i >= 0 {
-            let p = laa_ldst_ptr(i);
-            if p >= 0 && is_inst(p) && ivd_contains_inst(l, p) && cm_get_widening_decision(i, vf) != CM_GATHER_SCATTER {
-                if ivd_set_add(addr_set, p) { addr_defs.push(p); }
-            }
-            i = inst_next(i);
-        }
-    }
-    var wl: i32[>..<] = [];
-    for x in addr_defs { wl.push(x); }
-    while wl.len > 0 {
-        let x = wl.pop();
-        for k in nops(x) {
-            let o = op(x, k);
-            if is_inst(o) && ivd_contains_inst(l, o) && iop(o) != OP_PHI && ivd_set_add(addr_set, o) { addr_defs.push(o); wl.push(o); }
-        }
-    }
-    for x in addr_defs {
-        if iop(x) == OP_LOAD {
-            vp_unported_cm("scalarized address loads (prefersVectorizedAddressing)");
-        } else {
-            if iop(x) == OP_PHI && lvl_is_fixed_order_recurrence(x) { continue; }
-            hm_put(cm_forced, cm_key(vf, x), 1);
-        }
-    }
 }
 
 // collectLoopUniforms(VF)
@@ -400,28 +348,4 @@ fn cm_collect_loop_scalars(vf: i64) {
         wl_add(upd);
     }
     for x in wl { hm_put(cm_scal, cm_key(vf, x), 1); }
-}
-
-// collectInstsToScalarize(VF): only blocks needing predication contribute
-fn cm_collect_insts_to_scalarize(vf: i64) {
-    if vf == 1 { return; }
-    for b in loop_nblocks(cm_l) {
-        let bb = loop_block(cm_l, b);
-        if !(cm_fold_tail || lvl_block_needs_predication(bb)) { continue; }
-        var i = block_first(bb);
-        while i >= 0 {
-            if cm_is_scalar_with_predication(i, vf) { vp_unported_cm("collectInstsToScalarize (computePredInstDiscount)"); }
-            i = inst_next(i);
-        }
-    }
-}
-
-// collectNonVectorizedAndSetWideningDecisions(VF)
-fn cm_collect_non_vectorized_and_set_widening_decisions(vf: i64) {
-    if vf == 1 { return; }
-    for x in cm_uni_vfs { if x == vf { return; } }
-    cm_set_cost_based_widening_decision(vf);
-    cm_collect_loop_uniforms(vf);
-    cm_collect_loop_scalars(vf);
-    cm_collect_insts_to_scalarize(vf);
 }
