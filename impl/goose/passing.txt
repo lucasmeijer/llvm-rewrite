@@ -7451,6 +7451,7 @@ tests/imported/llvm/Transforms/InstCombine/get_vector_length.ll::opt
 tests/imported/llvm/Transforms/InstCombine/get_vector_length.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/getelementptr-folding.ll::opt
 tests/imported/llvm/Transforms/InstCombine/getelementptr-folding.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/getelementptr.ll::opt
 tests/imported/llvm/Transforms/InstCombine/getelementptr.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/high-bit-signmask-with-trunc.ll::opt
 tests/imported/llvm/Transforms/InstCombine/high-bit-signmask-with-trunc.ll::roundtrip
@@ -7832,6 +7833,7 @@ tests/imported/llvm/Transforms/InstCombine/max-min-canonicalize.ll::opt
 tests/imported/llvm/Transforms/InstCombine/max-min-canonicalize.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/max-of-nots.ll::opt
 tests/imported/llvm/Transforms/InstCombine/max-of-nots.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/max_known_bits.ll::opt
 tests/imported/llvm/Transforms/InstCombine/max_known_bits.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/maximum.ll::opt
 tests/imported/llvm/Transforms/InstCombine/maximum.ll::roundtrip
@@ -7976,6 +7978,7 @@ tests/imported/llvm/Transforms/InstCombine/misc-2002.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/modular-format.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/modulo.ll::opt
 tests/imported/llvm/Transforms/InstCombine/modulo.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/mul-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InstCombine/mul-inseltpoison.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/mul-masked-bits.ll::opt
 tests/imported/llvm/Transforms/InstCombine/mul-masked-bits.ll::roundtrip
@@ -7983,6 +7986,7 @@ tests/imported/llvm/Transforms/InstCombine/mul-min-max.ll::opt
 tests/imported/llvm/Transforms/InstCombine/mul-min-max.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/mul-pow2.ll::opt
 tests/imported/llvm/Transforms/InstCombine/mul-pow2.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/mul.ll::opt
 tests/imported/llvm/Transforms/InstCombine/mul.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/mul_fold.ll::opt
 tests/imported/llvm/Transforms/InstCombine/mul_fold.ll::roundtrip
@@ -8467,6 +8471,7 @@ tests/imported/llvm/Transforms/InstCombine/reuse-constant-from-select-in-icmp.ll
 tests/imported/llvm/Transforms/InstCombine/rotate.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sadd-with-overflow.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sadd-with-overflow.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/sadd_sat.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sadd_sat.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/saddo.ll::opt
 tests/imported/llvm/Transforms/InstCombine/saddo.ll::roundtrip
@@ -8562,6 +8567,7 @@ tests/imported/llvm/Transforms/InstCombine/select-icmp-and.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select-icmp-and.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select-icmp-xor.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select-icmp-xor.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/select-imm-canon.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select-imm-canon.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/select-load-call.ll::opt
 tests/imported/llvm/Transforms/InstCombine/select-load-call.ll::roundtrip
@@ -9059,6 +9065,7 @@ tests/imported/llvm/Transforms/InstCombine/sub-xor-or-neg-and.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sub-xor-or-neg-and.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/sub-xor.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sub-xor.ll::roundtrip
+tests/imported/llvm/Transforms/InstCombine/sub.ll::opt
 tests/imported/llvm/Transforms/InstCombine/sub.ll::roundtrip
 tests/imported/llvm/Transforms/InstCombine/subtract-from-one-hand-of-select.ll::opt
 tests/imported/llvm/Transforms/InstCombine/subtract-from-one-hand-of-select.ll::roundtrip
@@ -14799,6 +14806,8 @@ tests/lto/split/sieve/main.ll::roundtrip
 tests/lto/split/sieve/sieve.ll::roundtrip
 tests/lto/split/struct_by_value/callee.ll::roundtrip
 tests/lto/split/struct_by_value/main.ll::roundtrip
+tests/pass/instsimplify/fcmp-ranges-fp80-fp128.ll::opt
+tests/pass/instsimplify/fcmp-ranges-fp80-fp128.ll::roundtrip
 tests/pass/pass-manager/bpi-kept-with-cfg.ll::analysis
 tests/pass/pass-manager/bpi-kept-with-cfg.ll::roundtrip
 tests/pass/pass-manager/mssa-cached-across-adaptors.ll::analysis
