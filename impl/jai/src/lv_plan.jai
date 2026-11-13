@@ -511,6 +511,7 @@ lvp_try_to_build_vplan :: (lp: *Lv_Planner, range: *Vf_Range) -> bool {
     while vf.n < range.end.n { vp_add_vf(vf); vf.n *= 2; }
     vpl.name = "Initial VPlan";
     vp_drop_poison_generating_recipes();
+    if lv_cm_mask_partial_aliasing(lp.cm) vp_attach_alias_mask_to_header_mask();
     return true;
 }
 // VPlanTransforms::adjustFirstOrderRecurrenceMiddleUsers
@@ -565,9 +566,9 @@ lvp_add_reduction_result_computation :: (lp: *Lv_Planner, min_vf: Ec) {
         }
         orig_exiting := vp_op(phir, 1);
         new_exiting := orig_exiting;
-        // usePredicatedReductionSelect: always for FindLast (and EVL / alias masking, not ported), otherwise
+        // usePredicatedReductionSelect: always with EVL tail folding, alias masking and for FindLast, otherwise
         // -prefer-predicated-reduction-select (TTI.preferPredicatedReductionSelect is false)
-        use_pred_sel := rk_is_find_last(rk) || lv_opts.prefer_predicated_reduction_select;
+        use_pred_sel := lv_cm_fold_tail_with_evl(lp.cm) || lv_cm_mask_partial_aliasing(lp.cm) || rk_is_find_last(rk) || lv_opts.prefer_predicated_reduction_select;
         if !use_pred_sel && header_mask != NONE {
             oks, c, t, f := vpm_select(vp_op(phir, 1));
             if oks && c == header_mask && f == vr(phir).def vp_set_operand(phir, 1, t);

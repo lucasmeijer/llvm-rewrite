@@ -97,7 +97,7 @@ lvp_select_best_epilogue_plan :: (lp: *Lv_Planner, main_plan: *Vp_Plan, main_vf_
     defer vpl = saved;
     if !lv_opts.enable_epilogue_vectorization return null;
     if lp.cm.sel != .ALLOWED return null;
-    // CM.maskPartialAliasing is never set in the ported subset
+    if lv_cm_mask_partial_aliasing(lp.cm) { lv_dbg("LEV: Epilogue vectorization not supported with alias masking.\n"); return null; }
     // isCandidateForEpilogueVectorization
     vp_use(main_plan);
     if lv_has_unsupported_header_phi_recipe() return null;

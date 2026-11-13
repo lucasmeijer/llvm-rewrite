@@ -282,6 +282,14 @@ vpi_generate :: (s: *Vp_State, r: Vp_Rec) -> Value_Id {
             pred_ty := type_vector(s.vf.n * mult, type_int(1), s.vf.scalable);
             f := get_or_insert_intrinsic_declaration(iidn("llvm.get.active.lane.mask"), .[pred_ty, vtype(stc)]);
             return irb_call(*s.b, f, .[viv0, stc], name);
+        case VPI_NUM_ACTIVE_LANES;
+            op0 := vs_get(s, vp_op(r, 0));
+            vt := vtype(op0);
+            assert(type_bits(type_elem(vt)) == 1, "NumActiveLanes only implemented for i1 vectors");
+            ty := vp_scalar_type(vr(r).def);
+            z := irb_cast(*s.b, .ZEXT, op0, type_vector(type_count(vt), ty, type_kind(vt) == .SVECTOR));
+            f := get_or_insert_intrinsic_declaration(iidn("llvm.vector.reduce.add"), .[vtype(z)]);
+            return irb_call(*s.b, f, .[z]);   // CreateUnaryIntrinsic without the recipe's name
         case VPI_EXTRACT_LANE;
             assert(vp_nops(r) != 2, "ExtractLane from single source should be simplified to ExtractElement.");
             lane := vs_get(s, vp_op(r, 0), true);
@@ -899,7 +907,8 @@ vp_widen_intrinsic_execute :: (s: *Vp_State, r: Vp_Rec) {
     args: [..] Value_Id; args.allocator = temp;
     for o, k: vr(r).ops {
         a: Value_Id;
-        if is_vector_intrinsic_with_scalar_op_at_arg(id, cast(u32) k) a = vs_get_lane(s, o, 0);
+        if is_vector_intrinsic_with_scalar_op_at_arg(id, cast(u32) k) || id == IID_LOOP_DEPENDENCE_WAR_MASK ||
+           ((id == IID_VECTOR_SPLICE_LEFT || id == IID_VECTOR_SPLICE_RIGHT) && k == 2) a = vs_get_lane(s, o, 0);
         else a = vs_get(s, o, vp_uses_first_lane_only(r, o));
         if is_vector_intrinsic_with_overload_type_at_arg(id, k) array_add(*tys, vtype(a));
         array_add(*args, a);

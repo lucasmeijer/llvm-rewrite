@@ -2720,6 +2720,7 @@ INTRINSIC_ATTRS :: Intrinsic_Attrs.[
     .{"llvm.log10", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
     .{"llvm.log2", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
     .{"llvm.loop.decrement.reg", "nocallback noduplicate nofree nosync nounwind willreturn", "", .["", ""]},
+    .{"llvm.loop.dependence.war.mask", "nocallback nofree nosync nounwind willreturn memory(none)", "", .["", "", "immarg"]},
     .{"llvm.lrint", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
     .{"llvm.lround", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
     .{"llvm.masked.compressstore", "nocallback nofree nosync nounwind willreturn memory(argmem: write)", "", .["", "captures(none)", ""]},

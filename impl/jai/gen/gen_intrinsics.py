@@ -57,6 +57,7 @@ declare <4 x i32> @llvm.masked.udiv.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
 declare <4 x i32> @llvm.masked.sdiv.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
 declare <4 x i32> @llvm.masked.urem.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
 declare <4 x i32> @llvm.masked.srem.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
+declare <4 x i1> @llvm.loop.dependence.war.mask.v4i1.i64(i64, i64, i64)
 '''
 with tempfile.NamedTemporaryFile('w', suffix='.ll', delete=False) as _t:
     _t.write(EXTRA_DECLS)

@@ -684,3 +684,64 @@ vp_materialize_header_mask :: (use_alm: bool, use_alm_cf: bool) {
     } else mask = vr(vpb_icmp(*b, ICMP_ULE, vr(w).def, vp_or_create_backedge_taken_count())).def;
     vp_rauw(hm, mask);
 }
+
+// VPlanTransforms::attachAliasMaskToHeaderMask
+vp_attach_alias_mask_to_header_mask :: () {
+    region := vp_vector_loop_region();
+    hm := vb(region).header_mask;
+    b := vpb_at_end(vp_vector_preheader());
+    am := vpb_nary(*b, VPI_INCOMING_ALIAS_MASK, .[], .{}, .[], NONE, "incoming.alias.mask", type_int(1));
+    header := vp_entry_basic_block(region);
+    b = vpb_at(header, vp_first_non_phi(header));
+    clamped := vpb_and(*b, hm, vr(am).def);
+    not_clamped :: (u: Vp_Rec, idx: s64, data: *void) -> bool { return u != (cast(*Vp_Rec) data).*; }
+    vp_replace_uses_with_if(hm, vr(clamped).def, not_clamped, *clamped);
+}
+// vputils::findIncomingAliasMask
+vp_find_incoming_alias_mask :: () -> Vp_Val {
+    for vp_block_recipes(vp_vector_preheader()) if vpm_vpi_r(it, VPI_INCOMING_ALIAS_MASK, 0) return vr(it).def;
+    return NONE;
+}
+// VPlanTransforms::materializeAliasMask
+vp_materialize_alias_mask :: (check: Vp_Blk, diff_checks: [] Rt_Diff_Check) -> Vp_Val {
+    b := vpb_at_end(check);
+    i1 := type_int(1);
+    incoming := vp_find_incoming_alias_mask();
+    assert(incoming != NONE, "Expected an alias mask!");
+    am: Vp_Val = NONE;
+    for chk: diff_checks {
+        src := vp_get_or_create_vp_value_for_scev_expr(chk.src_start);
+        sink := vp_get_or_create_vp_value_for_scev_expr(chk.sink_start);
+        addr_ty := vp_scalar_type(src);
+        if chk.needs_freeze {
+            src = vr(vpb_nary(*b, vp_opc(.FREEZE), .[src], .{}, .[], NONE, "", addr_ty)).def;
+            sink = vr(vpb_nary(*b, vp_opc(.FREEZE), .[sink], .{}, .[], NONE, "", addr_ty)).def;
+        }
+        war := vp_new_widen_intrinsic_no_call(IID_LOOP_DEPENDENCE_WAR_MASK, .[src, sink, vp_const_int(addr_ty, chk.access_size)], i1, .{}, .[], NONE);
+        vpb_insert(*b, war);
+        am = ifx am != NONE then vr(vpb_and(*b, am, vr(war).def)).def else vr(war).def;
+    }
+    ivty := vv(vb(vp_vector_loop_region()).can_iv).ty;
+    idx_ty := dl_index_type(type_ptr(0));
+    na := vpb_nary(*b, VPI_NUM_ACTIVE_LANES, .[am], .{}, .[], NONE, "num.active.lanes", idx_ty);
+    clamped := vpb_scalar_zext_or_trunc(*b, vr(na).def, ivty, idx_ty, NONE);
+    vp_rauw(incoming, am);
+    return clamped;
+}
+// VPlanTransforms::materializeAliasMaskCheckBlock
+vp_materialize_alias_mask_check_block :: (diff_checks: [] Rt_Diff_Check, has_branch_weights: bool) {
+    check := vp_create_basic_block("vector.clamped.vf.check");
+    clamped := vp_materialize_alias_mask(check, diff_checks);
+    b := vpb_at_end(check);
+    tcty := vp_scalar_type(vpl.trip_count);
+    is_scalar := vpb_icmp(*b, ICMP_ULE, clamped, vp_const_int(tcty, 1), NONE, "vf.is.scalar");
+    max_tc := vp_const_int_ap(ap_all_ones(type_bits(tcty)));
+    dist := vpb_sub(*b, max_tc, vpl.trip_count);
+    tcc := vpb_icmp(*b, ICMP_ULT, vr(dist).def, clamped, NONE, "vf.step.overflow");
+    cond := vpb_or(*b, vr(is_scalar).def, vr(tcc).def);
+    vp_attach_vp_check_block(vr(cond).def, check, has_branch_weights);
+    vp_materialize_vector_trip_count(vp_vector_preheader(), true, false, vpl.vfxuf, false, 0);
+    assert(vpl.ufs.count == 1 && vpl.ufs[0] == 1, "Clamped VF not supported with interleaving");
+    vp_rauw(vpl.vf, clamped);
+    vp_rauw(vpl.vfxuf, clamped);
+}

@@ -56,7 +56,8 @@ lv_rt_checks_create :: (c: *Lv_Rt_Checks, lp: *Lv_Planner, vf: Ec, ic: u64) {
         if is_const(c.scev_cond) sx_cleanup(*c.scev_exp);
     }
     rt := *laa.rt;
-    if rt.need {
+    // with partial alias masking the alias mask (made later in VPlan) replaces the memory checks
+    if rt.need && !lv_cm_mask_partial_aliasing(lp.cm) {
         pred := ifx c.scev_block != NONE then c.scev_block else ph;
         c.mem_block = split_block(pred, block_terminator(pred), dt, li, null, "vector.memcheck");
         if rt.can_use_diff_check && rt.diff_checks.count {
@@ -247,6 +248,11 @@ lvp_process_best_plan :: (lp: *Lv_Planner, vf_in: Lv_Vf, plan: *Vp_Plan, user_ic
     else if ic > 1 && user_ic == 1 interleave_loop = false;
     // histograms are not supported (legality)
     ic = ifx user_ic > 0 then user_ic else ic;
+    if lv_cm_mask_partial_aliasing(lp.cm) {
+        lv_dbg("LV: Not interleaving due to partial aliasing vectorization.\n");
+        interleave_loop = false;
+        ic = 1;
+    }
     if interleave_loop && lvl_has_uncountable_exit_with_side_effects(lp.lvl) { interleave_loop = false; ic = 1; }
     if !vectorize_loop && !interleave_loop { lv_rt_checks_destroy(*checks); return false; }
     lv_dbg("LV: Vectorizing with VF % and IC %\n", lv_ec_str(vf.width), ic);
@@ -406,6 +412,10 @@ lvp_execute_plan :: (lp: *Lv_Planner, vf: Ec, uf: u32, checks: *Lv_Rt_Checks, ki
             step := vpl.ufs[0] * cast(u32) vf.n;
             vp_set_md(mt, md_kind_id(MD_PROF_NAME), md_branch_weights(.[1, step - 1], false));
         }
+    }
+    if lv_cm_mask_partial_aliasing(lp.cm) {
+        assert(vp_has_tail_folded(), "Expected tail folding to be enabled");
+        vp_materialize_alias_mask_check_block(lp.lvl.laa.rt.diff_checks, prof_has_branch_weight_md(block_terminator(latch)));
     }
     vector_ph := vp_vector_preheader();
     vp_materialize_constant_vector_trip_count(vf, uf, pse);

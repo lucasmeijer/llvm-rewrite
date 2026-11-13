@@ -547,8 +547,15 @@ lv_cm_try_to_enable_partial_alias_masking :: (cm: *Lv_Cm) {
     if !lv_opts.force_partial_aliasing || cm.lvl.fixed_order_recurrences.count return;
     rt := *cm.lvl.laa.rt;
     if !rt.can_use_diff_check || rt.diff_checks.count == 0 return;
-    fatal("loop-vectorize: -force-partial-aliasing-vectorization is not supported yet");
+    for bb: li_blocks(cm.li, cm.l) for i: block_insts(bb) {
+        o := inst_op(i);
+        if o != .LOAD && o != .STORE continue;
+        // alias masking in reverse is not handled
+        if lvl_is_consecutive_ptr(cm.lvl, load_store_type(i), load_store_pointer_operand(i)) == -1 return;
+    }
+    cm.alias_masking = .ENABLED;
 }
+lv_cm_mask_partial_aliasing :: (cm: *Lv_Cm) -> bool { return cm.alias_masking == .ENABLED; }
 
 // LoopVectorizationCostModel::computeMaxVF
 lv_cm_compute_max_vf :: (cm: *Lv_Cm, user_vf: Ec, user_ic: u64) -> Vf_Pair {
