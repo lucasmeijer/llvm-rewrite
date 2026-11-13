@@ -263,3 +263,8 @@ lib/Analysis/StackLifetime.cpp 0.75  # May (coro_frame) and Must (asan) liveness
 lib/Transforms/Instrumentation/PGOInstrumentation.cpp 0.4  # jai_pgo: pgo-instr-gen (FDO) complete but block coverage and ctx-instr-gen; no pgo-instr-use (PGOUseFunc, indexed profile reader)
 lib/Support/CRC.cpp 0.3  # jai_pgo: JamCRC
 lib/Transforms/Instrumentation/MemorySanitizer.cpp 0.75  # no ARM SIMD (NEON/SVE) handlers, no AArch64/PPC/SystemZ/i386/generic vararg helpers, no dumpInst
+lib/Transforms/Instrumentation/NumericalStabilitySanitizer.cpp 0.97  # not -check-functions-filter (Regex)
+lib/Transforms/Instrumentation/ThreadSanitizer.cpp 1.0
+lib/Transforms/Utils/EscapeEnumerator.cpp 0.9  # no scoped-EH (funclet) personalities: fails loudly like LLVM's report_fatal_error
+lib/Transforms/Instrumentation/RealtimeSanitizer.cpp 1.0  # demangling limited by demangle.jai
+lib/Transforms/Instrumentation/TypeSanitizer.cpp 1.0

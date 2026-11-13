@@ -515,7 +515,7 @@ SAN_VALUED_OPTS :: string.[
     "asan-realign-stack", "asan-instrumentation-with-call-threshold", "asan-memory-access-callback-prefix",
     "asan-constructor-kind", "asan-mapping-scale", "asan-mapping-offset", "asan-force-experiment",
     "asan-destructor-kind", "asan-instrument-address-spaces", "asan-debug", "asan-debug-stack", "asan-debug-func",
-    "asan-debug-min", "asan-debug-max",
+    "asan-debug-min", "asan-debug-max", "nsan-shadow-type-mapping", "check-functions-filter",
     "msan-track-origins", "msan-poison-stack-pattern", "msan-switch-precision", "msan-instrumentation-with-call-threshold",
     "msan-and-mask", "msan-xor-mask", "msan-shadow-base", "msan-origin-base", "msan-disambiguate-warning-threshold",
 ];

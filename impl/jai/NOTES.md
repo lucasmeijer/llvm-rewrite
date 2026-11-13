@@ -1906,6 +1906,11 @@ Still slow / next:
   -tysan-writes-always-set-type, -tysan-verify-outlined-instrumentation. Traps: MemIntrinsic::getDest/getSource
   strip pointer casts; `SetInstDebugLocation(AI)` after moving the builder puts the *next* instruction's !dbg on the
   alloca; PtrShift is countr_zero(pointer bytes) (0 for 40-bit pointers); `Hash.update("\0")` hashes nothing.
+- **nsan** (`pass_nsan.jai`, NumericalStabilitySanitizer): all 12 RUN lines identical; sweeps 0 differs:
+  `forceattrs,nsan -force-attribute=sanitize_numerical_stability` plain and --with-test-flags over every file.
+  Traps: moveFastMathFlags ORs the flags in (`setFastMathFlags` is `|=`); a splat FP vector constant is one C_FP of
+  vector type (convert the scalar words); a scalable non-FT store uses the known-minimum store size (LLVM release).
+  -check-functions-filter (a Regex) fails loudly.
 
 ## Coroutines (L1.extra.coroutines 298/310: roundtrip 155/155, opt 143/155; /root/jai_coro)
 
