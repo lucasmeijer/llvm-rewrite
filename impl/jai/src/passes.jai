@@ -312,6 +312,8 @@ Pass_Kind :: enum u8 {
     // DeadArgumentElimination, ArgumentPromotion (pass_global_opt.jai, pass_global_dce.jai, ...)
     GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
     // L1.scalar-misc (pass_lower_expect.jai, ...; options in scalar_misc_cl.jai)
+    // the profile family (pass_add_discriminators.jai, profile_cl.jai, ...)
+    ADD_DISCRIMINATORS;
     LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT; DIV_REM_PAIRS; FLOAT2INT; SINK; TAILCALLELIM; MLDST_MOTION; SPECULATIVE_EXECUTION; CALLSITE_SPLITTING;
     // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
@@ -529,6 +531,7 @@ PASS_TABLE :: Pass_Info.[
     .{"mergefunc", .MODULE, .MERGE_FUNCTIONS, false, .DOMTREE},
     .{"pgo-force-function-attrs", .MODULE, .PGO_FORCE_FUNCTION_ATTRS, false, .DOMTREE},
     // L1.scalar-misc
+    .{"add-discriminators", .FUNCTION, .ADD_DISCRIMINATORS, false, .DOMTREE},
     .{"lower-expect", .FUNCTION, .LOWER_EXPECT, false, .DOMTREE},
     .{"lower-constant-intrinsics", .FUNCTION, .LOWER_CONSTANT_INTRINSICS, false, .DOMTREE},
     .{"infer-alignment", .FUNCTION, .INFER_ALIGNMENT, false, .DOMTREE},
@@ -1133,6 +1136,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if pb_parse_cl_opt(name, value, has_value) return true;
     if forceattrs_parse_cl_opt(name, value, has_value) return true;   // pass_misc_module.jai
     if pgo_parse_cl_opt(name, value, has_value) return true;   // pass_lto_misc.jai
+    if profile_parse_cl_opt(name, value, has_value) return true;   // profile_cl.jai (sample profile, PGO, memprof)
     if merge_functions_parse_cl_opt(name, value, has_value) return true;   // pass_merge_functions.jai
     if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)
     if expand_memcmp_parse_cl_opt(name, value, has_value) return true;   // pass_expand_memcmp.jai
@@ -1383,6 +1387,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .DCE; return dce_run(f);
         case .ADCE; return adce_run(f);
         case .BDCE; return bdce_run(f);
+        case .ADD_DISCRIMINATORS; return add_discriminators_run(f);
         case .LOWER_EXPECT; return lower_expect_run(f);
         case .LOWER_CONSTANT_INTRINSICS; return lower_constant_intrinsics_run(f);
         case .INFER_ALIGNMENT; return infer_alignment_run(f);

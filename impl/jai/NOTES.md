@@ -1741,3 +1741,10 @@ Still slow / next:
   `function(sroa),gvn-hoist` on tests/perf/compile 4/4; `default<O2> -enable-gvn-hoist` 3/4 (SPASS.ll exceeds the
   60 s CPU limit: our x64-build default<O2> alone takes 53 s there, gvn-hoist adds ~3 s), `-enable-gvn-sink` 4 loud.
 - Perf (x64 build): `function(sroa),gvn-hoist` on SPASS.ll 2.0 s vs sroa alone 1.7 s.
+
+## The profile family (L1.extra.sample-profile, L1.extra.pgo.instr, L1.extra.pgo.instrprof, L1.extra.memprof)
+
+- Options of all these passes are parsed in `profile_cl.jai` (`profile_parse_cl_opt`).
+- `add-discriminators` (pass_add_discriminators.jai): complete, 12/12 tests; sweep 10809/10809 identical.
+  `diloc_clone_with_base_discriminator` leaves pseudo-probe discriminators alone (LLVM 23).
+  `-enable-fs-discriminator` fails loudly.
