@@ -684,9 +684,8 @@ fn rdx_is_fixed_order_recurrence(phi: i32, l: i32) -> bool {
 
 // isMinOrMax(matchSelectPattern(Cur).Flavor) for getReductionOpChain
 fn rdx_select_is_minmax(i: i32) -> bool {
-    if !is_inst(i) || iop(i) != OP_SELECT { return false; }
-    ivd_not_ported("getReductionOpChain of a select-based min/max (matchSelectPattern)");
-    return false;
+    // SelectPatternResult::isMinOrMax(matchSelectPattern(Cur, LHS, RHS).Flavor)
+    return spf_is_minmax(match_select_pattern_v(i, 0));
 }
 
 // getReductionOpChain: the chain into `out` (empty = none)

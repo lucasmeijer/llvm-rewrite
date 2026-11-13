@@ -229,3 +229,7 @@ lib/Transforms/Vectorize/VPlanUtils.cpp 0.5  # matchers, getSCEVExprForVPValue, 
 lib/Transforms/Vectorize/VPlanRecipes.cpp 0.4  # property queries, execute() of the ported recipes, computeCost() of every recipe but interleave / reduction / expression / histogram / EVL
 lib/Transforms/Vectorize/VPlanUnroll.cpp 0.65  # unrollByUF (no replicate regions, end pointers, in-loop reductions), replicateByVF
 lib/Transforms/Vectorize/VPlanAnalysis.cpp 0.6  # VPTypeAnalysis, calculateRegisterUsageForPlan, collectEphemeralRecipesForVPlan; no spillCost
+lib/Analysis/DependenceAnalysis.cpp 0.95  # all of depends() and its tests, the printer; no legacy wrapper pass, debug dumps
+lib/Analysis/Delinearization.cpp 0.95  # all but the legacy printer wrapper
+lib/Analysis/ScalarEvolutionDivision.cpp 1
+lib/Transforms/Scalar/LoopInterchange.cpp 0.9  # all but the `cache` rule (CacheCostManager / LoopCacheAnalysis, loud) and remarks

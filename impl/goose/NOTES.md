@@ -1672,7 +1672,24 @@ records end up `i8 0` instead of `poison`: InstCombine reaches the same IR throu
   TargetIRAnalysis is harmless there). No optimization remarks.
 - The lexer took `...` in `..._crit_edge_crit_edge.i_crit_edge:` (a label lua gets at -O2) for the varargs token;
   LLLexer checks isLabelTail first (fixed).
-- Not done (fail loudly): loop-interchange, expand-memcmp, dynamic llvm.objectsize
+- DependenceAnalysis (dependence_analysis.goose: `print<da>`, `print<da><normalized-results>`, `require<da>`; every
+  test incl. Banerjee; results in `da_res_*` globals, one query at a time), Delinearization + SCEVDivision
+  (delinearization.goose: `print<delinearization>`, `print<scev-division>`; SCEVParameterRewriter is the RW_PARAM
+  rewriter kind in scev_create.goose) and LoopInterchange (loop_interchange.goose; a LOOPNEST pass, id 1427
+  P_LOOP_INTERCHANGE in passmgr.goose, recognised by is_nest_pass_node like lnicm). Imported tests: DA 72/72,
+  Delinearization 23/23, LoopInterchange 61/62 (pr57148 uses `-loop-interchange-profitabilities=cache`:
+  LoopCacheAnalysis / CacheCost is not ported, fails loudly when that rule is reached; the default rules are
+  instorder,vectorize). Sweeps, 0 differs / 0 bad-ir: `print<da>` (plain, `--with-test-flags`,
+  `<normalized-results> -da-enable-dependence-test=all`), `print<delinearization>`, `print<scev-division>` (vector
+  sdivs fail loudly), `loop-interchange` (plain, `-loop-interchange-profitabilities=ignore`, + `-loop-interchange-
+  reduction-to-mem -da-disable-delinearization-checks`, `--with-test-flags`), and on the modules LLVM's -O2 hands
+  loop-interchange in the four tests/perf/compile programs (opt-bisect quartiles): identical. Loud left in the DA
+  sweep: SCEV of scalable aggregates/allocas (scev.goose).
+- Traps found: getUnderlyingObject's default MaxLookup is 10 (MaxLookupSearchDepth), not 6; the ScalarEvolution
+  overload of InductionDescriptor::isInductionPHI has no FP inductions (only the PSE one does); a failed fixed-size
+  delinearization can leave SrcSubscripts behind and computeAccessFunctions keeps them when it has no sizes.
+  iv_descriptors.goose: getReductionOpChain of select min/max now uses matchSelectPattern (was loud).
+- Not done (fail loudly): LoopCacheAnalysis, dynamic llvm.objectsize
   (ObjectSizeOffsetEvaluator), ObjectSizeVisitor::visitLoadInst, #dbg_assign remapping in callsite-splitting,
   FunctionSpecialization rounds with more than 8 specialized originals (LLVM iterates a SmallPtrSet in pointer order:
   sqlite3/oggenc/SPASS with -force-specialization hit it; the default thresholds don't).

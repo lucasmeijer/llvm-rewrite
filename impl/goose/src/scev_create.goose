@@ -619,6 +619,7 @@ let RW_LOOP_ADDREC = 4;   // SCEVLoopAddRecRewriter (map in sc_rw_map: loop -> v
 let RW_GUARDS = 5;        // applyLoopGuards' rewriter (scev_btc.goose)
 let RW_PREDICATE = 6;     // SCEVPredicateRewriter
 let RW_NORMALIZE = 7;     // NormalizeDenormalizeRewriter (ScalarEvolutionNormalization.cpp); pos = Denormalize
+let RW_PARAM = 8;         // SCEVParameterRewriter with one entry: the unknown of value `becond` becomes `l`
 
 struct RW { kind: i32, l: i32, serial: i32, seen_variant: bool, seen_other: bool, valid: bool, becond: i32, pos: bool }
 var sc_rw_cache = hm_new();
@@ -721,6 +722,7 @@ recursive fn sc_rw_visit_unknown(rw: RW&, s: i32) -> i32 {
         return s;
     }
     if kind == RW_LOOP_ADDREC || kind == RW_NORMALIZE { return s; }
+    if kind == RW_PARAM { return if sc_value(s) == rw.becond { rw.l } else { s }; }
     return sc_rw_visit_unknown_ext(rw, s);
 }
 

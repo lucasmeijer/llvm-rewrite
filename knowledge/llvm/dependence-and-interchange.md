@@ -43,3 +43,18 @@ Transforms/LoopInterchange (62/63).
   (swapped), harmless on X86 because the tail-expansion list is empty.
 - mergeConditionalStores iterates a `SmallPtrSet<Value *, 4>` of common store addresses; past 4 elements it is a
   hash set iterated in pointer-hash order, which only matters when two or more addresses are common.
+
+## Also verified by impl/goose (DA 72/72, Delinearization 23/23, LoopInterchange 61/62, corpus sweeps 0 differences)
+
+- DependenceAnalysis's underlyingObjectsAlias calls getUnderlyingObject with the default MaxLookup =
+  MaxLookupSearchDepth = 10 (ValueTracking.h:51); with 6, BasicAA/2014-03-18-Maxlookup-reached.ll prints `confused`
+  instead of `none`.
+- `print<da>` prints its header before the subtarget feature warnings ('+mpx' is not a recognized feature ...),
+  i.e. the target is first touched inside the dependence queries.
+- LocationSize::toRaw keeps the scalable bit: DA passes it as the element size to isKnownMultipleOf for scalable
+  accesses (no special case).
+- tryDelinearize: when tryDelinearizeFixedSize fails after the Src access delinearized, SrcSubscripts stays filled,
+  and computeAccessFunctions returns early without clearing it when Sizes is empty.
+- LoopInterchange uses `InductionDescriptor::isInductionPHI(Phi, L, SE, D)`, the overload without FP inductions; an
+  `fadd reassoc` accumulator is a reduction there (debug-record-after-phi.ll), not an FP induction.
+- The MoveInstructions clones are unnamed (Instruction::clone); SplitBlock names the new latch `<latch>.split`.

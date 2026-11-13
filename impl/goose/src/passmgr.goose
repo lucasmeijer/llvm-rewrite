@@ -53,6 +53,7 @@ import loop_versioning;
 import loop_distribute;
 import ivusers;
 import loopnest;
+import loop_interchange;
 import simplifycfg;
 import subtarget;
 import debugify;
@@ -196,7 +197,8 @@ let P_LOOP_IDIOM = 213;
 let P_PRINT_IV_USERS = 208;
 let P_LOOP_UNROLL = 290;      // function pass; arg: index into lu_opt_table
 let P_LOOP_UNROLL_FULL = 291; // loop pass
-let P_SIMPLE_LOOP_UNSWITCH = 292;  // loop pass; arg: bit 0 = nontrivial, bit 1 = trivial
+let P_SIMPLE_LOOP_UNSWITCH = 292;
+let P_LOOP_INTERCHANGE = 1427;  // loop-nest pass (loop_interchange.goose); in the misc_passes id range  // loop pass; arg: bit 0 = nontrivial, bit 1 = trivial
 
 // "<level>:<name>:<id>:<required>" — level m/f; required passes are not counted by -opt-bisect-limit
 // (PassInfoMixin::isRequired: printers, verifier, require/invalidate, adaptors).
@@ -804,7 +806,10 @@ fn new_loop_adaptor(mssa: bool, name: i32) -> i32 {
 }
 
 // A loop-nest pass (LOOPNEST_PASS: lnicm)
-fn is_nest_pass_node(c: i32) -> bool { pnodes[c].kind == PK_PASS as u8 && pnodes[c].pass == P_LICM as i32 && (pnodes[c].arg & 2) != 0 }
+fn is_nest_pass_node(c: i32) -> bool {
+    if pnodes[c].kind != PK_PASS as u8 { return false; }
+    return (pnodes[c].pass == P_LICM as i32 && (pnodes[c].arg & 2) != 0) || pnodes[c].pass == P_LOOP_INTERCHANGE as i32;
+}
 // createFunctionToLoopPassAdaptor(LPM): loop-nest mode if the LoopPassManager has no loop passes (a nested
 // loop(...) manager counts as a loop pass). Kept in the adaptor's arg bit 1.
 fn check_loop_nest_mode(ad: i32) {
@@ -901,6 +906,7 @@ recursive fn parse_loop_elem(e: i32) -> i32 {
         if nest { arg |= 2; }
         return new_pnode(PK_PASS, P_LICM as i32, arg, false, pelems[e].name);
     }
+    if name == "loop-interchange" { return new_pnode(PK_PASS, P_LOOP_INTERCHANGE as i32, 0, false, pelems[e].name); }
     let r = pass_row(name, 'l');
     if r >= 0 { return new_pnode(PK_PASS, row_id(r), 0, row_required(r), pelems[e].name); }
     if llvm_knows(name, 'l') || llvm_knows(name, 'n') || is_param_name(name, "licm") || is_param_name(name, "lnicm") { not_implemented(name); }
@@ -1440,6 +1446,12 @@ fn run_loop_pass(n: i32, l: i32, fv: i32) -> u32 {
             let pa = licm_pass_run(l, (a & 1) != 0, nest);
             ap_pool_reset();
             return pa;
+        },
+        P_LOOP_INTERCHANGE => {
+            let changed = loop_interchange_run(l, fv);
+            ap_pool_reset();
+            if !changed { return PA_ALL; }
+            return ((1 as u32) << A_DOMTREE) | ((1 as u32) << A_LOOPS) | ((1 as u32) << A_SCEV);
         },
         _ => { fatal("internal: unknown loop pass id"); return PA_ALL; },
     }

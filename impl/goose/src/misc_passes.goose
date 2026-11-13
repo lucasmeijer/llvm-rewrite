@@ -20,6 +20,8 @@ import callsite_splitting;
 import subtarget;
 import o2_small;
 import dfa_jump_threading;
+import delinearization;
+import dependence_analysis;
 import loop_sink;
 import mergeicmps;
 import jump_table_to_switch;
@@ -53,6 +55,10 @@ let MP_JUMP_TABLE_TO_SWITCH = 1419;
 let MP_LOOP_SINK = 1420;
 let MP_MERGEICMPS = 1421;
 let MP_DFA_JUMP_THREADING = 1422;
+let MP_PRINT_DELINEARIZATION = 1423;
+let MP_PRINT_SCEV_DIVISION = 1424;
+let MP_PRINT_DA = 1425;                 // arg: 1 = normalized-results
+let MP_REQUIRE_DA = 1426;               // require<da> / invalidate<da>: computed per query
 // module passes
 let MP_FORCEATTRS = 1500;
 let MP_MEMPROF_REMOVE_ATTRIBUTES = 1501;
@@ -152,6 +158,11 @@ fn mp_parse_function(name: const u8[:]) -> i32, i32, bool {
     if name == "loop-sink" { return MP_LOOP_SINK as i32, 0, false; }
     if name == "mergeicmps" { return MP_MERGEICMPS as i32, 0, false; }
     if name == "dfa-jump-threading" { return MP_DFA_JUMP_THREADING as i32, 0, false; }
+    if name == "print<delinearization>" { return MP_PRINT_DELINEARIZATION as i32, 0, true; }
+    if name == "print<scev-division>" { return MP_PRINT_SCEV_DIVISION as i32, 0, true; }
+    if name == "print<da>" { return MP_PRINT_DA as i32, 0, true; }
+    if name == "print<da><normalized-results>" { return MP_PRINT_DA as i32, 1, true; }
+    if name == "require<da>" || name == "invalidate<da>" { return MP_REQUIRE_DA as i32, 0, true; }
     if name == "callsite-splitting" { return MP_CALLSITE_SPLITTING as i32, 0, false; }
     return -1, 0, false;
 }
@@ -230,6 +241,10 @@ fn mp_class_name(p: i64) -> const u8[:] {
         MP_LOOP_SINK => "LoopSinkPass",
         MP_MERGEICMPS => "MergeICmpsPass",
         MP_DFA_JUMP_THREADING => "DFAJumpThreadingPass",
+        MP_PRINT_DELINEARIZATION => "DelinearizationPrinterPass",
+        MP_PRINT_SCEV_DIVISION => "SCEVDivisionPrinterPass",
+        MP_PRINT_DA => "DependenceAnalysisPrinterPass",
+        1427 => "LoopInterchangePass",
         MP_CALLED_VALUE_PROPAGATION => "CalledValuePropagationPass",
         MP_CG_PROFILE => "CGProfilePass",
         MP_REL_LOOKUP_TABLE_CONVERTER => "RelLookupTableConverterPass",
@@ -276,6 +291,10 @@ fn mp_run_function(p: i64, arg: i32, fv: i32) -> u32 {
         MP_LOOP_SINK => { return loop_sink_run(fv); },
         MP_MERGEICMPS => { st_touch(fv); return mergeicmps_run(fv); },
         MP_DFA_JUMP_THREADING => { st_touch(fv); return dfa_jump_threading_run(fv); },
+        MP_PRINT_DELINEARIZATION => { print_delinearization(fv); return PA_ALL; },
+        MP_PRINT_SCEV_DIVISION => { print_scev_division(fv); return PA_ALL; },
+        MP_PRINT_DA => { print_da(fv, arg != 0); return PA_ALL; },
+        MP_REQUIRE_DA => { return PA_ALL; },
         _ => { fatal("internal: unknown misc function pass id"); return PA_ALL; },
     }
 }
