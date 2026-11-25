@@ -9323,6 +9323,7 @@ tests/imported/llvm/Transforms/Inline/X86/always-inline-features.ll::opt
 tests/imported/llvm/Transforms/Inline/X86/always-inline-features.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/X86/always-inline-incompatible-target-features.ll::opt
 tests/imported/llvm/Transforms/Inline/X86/always-inline-incompatible-target-features.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/X86/call-abi-compatibility.ll::opt
 tests/imported/llvm/Transforms/Inline/X86/call-abi-compatibility.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/X86/inline-landing-pad.ll::opt
 tests/imported/llvm/Transforms/Inline/X86/inline-landing-pad.ll::roundtrip
@@ -9350,6 +9351,7 @@ tests/imported/llvm/Transforms/Inline/always-inline-bfi.ll::opt
 tests/imported/llvm/Transforms/Inline/always-inline-bfi.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/always-inline.ll::opt
 tests/imported/llvm/Transforms/Inline/always-inline.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/arg-attr-propagation.ll::opt
 tests/imported/llvm/Transforms/Inline/arg-attr-propagation.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/array-alloca.ll::opt
 tests/imported/llvm/Transforms/Inline/array-alloca.ll::roundtrip
@@ -9423,6 +9425,7 @@ tests/imported/llvm/Transforms/Inline/devirtualize-2.ll::opt
 tests/imported/llvm/Transforms/Inline/devirtualize-2.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/devirtualize-3.ll::opt
 tests/imported/llvm/Transforms/Inline/devirtualize-3.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/devirtualize-4.ll::opt
 tests/imported/llvm/Transforms/Inline/devirtualize-4.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/devirtualize-5.ll::opt
 tests/imported/llvm/Transforms/Inline/devirtualize-5.ll::roundtrip
@@ -9530,6 +9533,7 @@ tests/imported/llvm/Transforms/Inline/inline-ref-metadata.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-ref-metadata.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-remark.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-remark.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-retainRV-call.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-retainRV-call.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-scalable.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-scalable.ll::roundtrip
@@ -9543,6 +9547,7 @@ tests/imported/llvm/Transforms/Inline/inline-stack-probe-size.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-stack-probe-size.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-stacksize.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-stacksize.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/inline-strictfp.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-strictfp.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/inline-switch-default-2.ll::opt
 tests/imported/llvm/Transforms/Inline/inline-switch-default-2.ll::roundtrip
@@ -9656,6 +9661,7 @@ tests/imported/llvm/Transforms/Inline/noalias-escape-source.ll::opt
 tests/imported/llvm/Transforms/Inline/noalias-escape-source.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/noalias.ll::opt
 tests/imported/llvm/Transforms/Inline/noalias.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/noalias2.ll::opt
 tests/imported/llvm/Transforms/Inline/noalias2.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/noalias3.ll::opt
 tests/imported/llvm/Transforms/Inline/noalias3.ll::roundtrip
