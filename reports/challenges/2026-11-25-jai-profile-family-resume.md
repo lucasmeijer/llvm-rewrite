@@ -1,6 +1,6 @@
 # Resuming a crashed agent's large uncommitted profile-family work; a jai opt without -print-after-all
 
-- **Date / implementation / unit:** 2026-11-13 / jai / L1.extra.sample-profile, L1.extra.pgo.instr
+- **Date / implementation / unit:** 2026-11-25 / jai / L1.extra.sample-profile, L1.extra.pgo.instr
 - **What happened:** I resumed a worktree with ~4000 lines of uncommitted sample-profile work (8 new files), one
   of them (sample_profile_inference.jai) written but never `#load`ed, a stub with the same procedure name still
   active, and a `passing.txt` already modified by an earlier `--update` (to be discarded). Working out which files
