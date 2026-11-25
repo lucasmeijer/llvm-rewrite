@@ -780,7 +780,10 @@ dfa_ssa_rewrite_all_uses :: (vars: [] Dfa_Ssa_Var, dt: *Dom_Tree, inserted_phis:
         }
         for fb: idf {
             pn := create_phi(r.ty, 0);
-            insert_at_position(pn, fb, block(fb).first, true);
+            // IRBuilder<> B(FrontierBB, FrontierBB->begin()): the first instruction's debug location
+            first := block(fb).first;
+            if first != NONE { d := get_metadata(first, 0); if d != NONE set_metadata(pn, 0, d); }
+            insert_at_position(pn, fb, first, true);
             if r.name.count set_name(pn, r.name);
             if inserted_phis array_add(inserted_phis, pn);
             p := table_find_pointer(*infos, fb);
