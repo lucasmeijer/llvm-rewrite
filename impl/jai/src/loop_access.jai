@@ -1235,6 +1235,7 @@ laa_is_vector_intrinsic_call :: (c: Value_Id, tli: *Tli) -> bool {
     }
     else {
         if is_local_linkage(glob(f).linkage) return false;
+        if !tli return false;   // getIntrinsicForCallSite without a TLI
         ok, lf := tli_lookup_call(c);
         if !ok || !call_only_reads_memory(c) return false;
         n := tli_func_name(tli, lf);
@@ -1440,11 +1441,12 @@ li_find_string_metadata_operand :: (li: *Loop_Info, l: Loop_Id, name: string) ->
 }
 
 // LoopAccessInfo::LoopAccessInfo
-laa_compute :: (a: *Laa, l: Loop_Id, li: *Loop_Info, dt: *Dom_Tree, ac: *Assumption_Cache, allow_partial := false) {
+// no_tti / no_tli: a LoopAccessInfoManager built with TTI / TLI = nullptr (LoopVersioningLICM)
+laa_compute :: (a: *Laa, l: Loop_Id, li: *Loop_Info, dt: *Dom_Tree, ac: *Assumption_Cache, allow_partial := false, no_tti := false, no_tli := false) {
     f := li.fn;
     a.l = l; a.li = li; a.dt = dt; a.ac = ac;
     a.aar = aa_results_for(f);
-    a.tli = tli_for(f);
+    a.tli = ifx no_tli then null else tli_for(f);
     a.allow_partial = allow_partial;
     pse_init(*a.pse, l);
     a.symbolic_strides.allocator = temp;
@@ -1452,7 +1454,7 @@ laa_compute :: (a: *Laa, l: Loop_Id, li: *Loop_Info, dt: *Dom_Tree, ac: *Assumpt
     tti := tti_get(f);
     max_width: u64 = 0xFFFF_FFFF;
     // TTI->enableScalableVectorization() is false for X86 and NoTTI
-    max_width = tti_fixed_vector_register_bit_width(tti) * 2;
+    if !no_tti max_width = tti_fixed_vector_register_bit_width(tti) * 2;
     d := *a.dc;
     d.pse = *a.pse; d.ac = ac; d.dt = dt; d.l = l; d.symbolic_strides = *a.symbolic_strides;
     d.max_target_vector_width_in_bits = max_width;

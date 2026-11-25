@@ -293,6 +293,8 @@ Pass_Kind :: enum u8 {
     LOWER_GUARD_INTRINSIC; LOWER_WIDENABLE_CONDITION; GUARD_WIDENING; GUARD_WIDENING_LOOP; LOOP_PREDICATION;
     // pass_loop_flatten.jai, pass_loop_fuse.jai
     LOOP_FLATTEN; LOOP_FUSE;
+    // pass_loop_versioning.jai, ...
+    LOOP_VERSIONING; LOOP_BOUND_SPLIT; LOOP_VERSIONING_LICM;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -523,6 +525,9 @@ PASS_TABLE :: Pass_Info.[
     .{"loop-predication", .LOOP, .LOOP_PREDICATION, false, .DOMTREE},
     .{"loop-flatten", .LOOP, .LOOP_FLATTEN, false, .DOMTREE},   // a LoopNest pass
     .{"loop-fusion", .FUNCTION, .LOOP_FUSE, false, .DOMTREE},
+    .{"loop-versioning", .FUNCTION, .LOOP_VERSIONING, false, .DOMTREE},
+    .{"loop-bound-split", .LOOP, .LOOP_BOUND_SPLIT, false, .DOMTREE},
+    .{"loop-versioning-licm", .LOOP, .LOOP_VERSIONING_LICM, false, .DOMTREE},
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -1251,6 +1256,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if gw_parse_cl_opt(name, value, has_value) return true;     // pass_guard_widening.jai (-guard-widening-*)
     if lf_parse_cl_opt(name, value, has_value) return true;     // pass_loop_flatten.jai (-loop-flatten-*)
     if lfu_parse_cl_opt(name, value, has_value) return true;    // pass_loop_fuse.jai (-loop-fusion-*)
+    if lvlicm_parse_cl_opt(name, value, has_value) return true; // pass_loop_versioning_licm.jai (-licm-versioning-*)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1642,6 +1648,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .LOWER_WIDENABLE_CONDITION; return lower_widenable_condition_run(f);
         case .GUARD_WIDENING; return guard_widening_run(f);
         case .LOOP_FUSE; return loop_fuse_run(f);
+        case .LOOP_VERSIONING; return loop_versioning_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

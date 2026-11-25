@@ -218,6 +218,8 @@ run_loop_pass_inner :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Up
         case .LOOP_PREDICATION; return loop_predication_run(node, l, lar, u);
         case .GUARD_WIDENING_LOOP; return guard_widening_loop_run(node, l, lar, u);
         case .LOOP_FLATTEN; return loop_flatten_run(node, l, lar, u);
+        case .LOOP_BOUND_SPLIT; return loop_bound_split_run(node, l, lar, u);
+        case .LOOP_VERSIONING_LICM; return loop_versioning_licm_run(node, l, lar, u);
         case .LOOP_TERM_FOLD; return loop_term_fold_run(node, l, lar, u);
         case .LOOP_DELETION; return loop_deletion_run(node, l, lar, u);
         case .LOOP_INSTSIMPLIFY; return loop_instsimplify_run(node, l, lar, u);

@@ -223,6 +223,9 @@
 #load "pass_loop_flatten.jai";
 #load "code_mover_utils.jai";
 #load "pass_loop_fuse.jai";
+#load "pass_loop_versioning.jai";
+#load "pass_loop_bound_split.jai";
+#load "pass_loop_versioning_licm.jai";
 #load "print_uselistorder.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";
