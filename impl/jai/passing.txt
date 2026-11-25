@@ -22042,6 +22042,10 @@ tests/lto/split/struct_by_value/main.ll::opt
 tests/lto/split/struct_by_value/main.ll::roundtrip
 tests/lto/split/struct_by_value::link
 tests/lto/split/struct_by_value::opt
+tests/pass/cfguard/check.ll::opt
+tests/pass/cfguard/check.ll::roundtrip
+tests/pass/cfguard/dispatch.ll::opt
+tests/pass/cfguard/dispatch.ll::roundtrip
 tests/pass/drop-unnecessary-assumes/peeled-assume-not-in-cache.ll::opt
 tests/pass/drop-unnecessary-assumes/peeled-assume-not-in-cache.ll::roundtrip
 tests/pass/dwarf-eh-prepare/dwarf-eh-prepare-dbg.ll::opt
@@ -22052,6 +22056,8 @@ tests/pass/dwarf-eh-prepare/dwarf_eh_resume.ll::opt
 tests/pass/dwarf-eh-prepare/dwarf_eh_resume.ll::roundtrip
 tests/pass/gc-lowering/gc-lowering.ll::opt
 tests/pass/gc-lowering/gc-lowering.ll::roundtrip
+tests/pass/inline-asm-prepare/callbr.ll::opt
+tests/pass/inline-asm-prepare/callbr.ll::roundtrip
 tests/pass/insert-gcov-profiling/bad-version.ll::error
 tests/pass/insert-gcov-profiling/fork-exec-lines.ll::opt
 tests/pass/insert-gcov-profiling/fork-exec-lines.ll::roundtrip
