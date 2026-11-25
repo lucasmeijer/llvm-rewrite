@@ -57,7 +57,11 @@ fcfg_flatten_parallel_and_or :: (bb: Value_Id) -> bool {
     block_predecessors(bb, *preds_all);
     preds: [..] Value_Id; preds.allocator = temp;
     for p: preds_all array_add_if_unique(*preds, p);
-    if preds.count > 16 fatal("flatten-cfg: more than 16 predecessors: LLVM iterates its SmallPtrSet in pointer order");
+    // Beyond 16 elements the set iterates in pointer order. Every early `return false` below is a property of one
+    // predecessor or a count, so only the choice of LastCondBlock can depend on the order: fail loudly when more
+    // than one predecessor qualifies for it.
+    big := preds.count > 16;
+    last_cond_candidates := 0;
     contains :: (s: [] Value_Id, b: Value_Id) -> bool { for s if it == b return true; return false; }
     for pred: preds {
         pp := block_single_predecessor(pred);
@@ -86,9 +90,11 @@ fcfg_flatten_parallel_and_or :: (bb: Value_Id) -> bool {
         cidx := ifx ps1 == bb then 0 else 1;
         if idx == -1 idx = cidx;
         else if cidx != idx return false;
-        if !contains(preds, ps) last_cond = pred;
-        else if inst_op(block_terminator(ps)) == .BR last_cond = pred;
+        if !contains(preds, ps) { last_cond = pred; last_cond_candidates += 1; }
+        else if inst_op(block_terminator(ps)) == .BR { last_cond = pred; last_cond_candidates += 1; }
     }
+    if big && last_cond_candidates > 1 && first_cond != NONE
+        fatal("flatten-cfg: more than 16 predecessors and several LastCondBlock candidates: LLVM iterates its SmallPtrSet in pointer order");
     if first_cond == NONE || last_cond == NONE || first_cond == last_cond return false;
 
     tbb := block_terminator(last_cond);
