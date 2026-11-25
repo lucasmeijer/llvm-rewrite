@@ -35,7 +35,5 @@ sp_ctx_mark_context_samples_inlined :: (fs: *Fs) {}
 sp_ctx_find_external_inline_candidate :: (fs: *Fs, s: *[..] u64, threshold: u64) {}
 sp_ctx_add_profiled_calls :: (g: *Pcg) {}
 
-sp_matcher_init :: () { fatal("sample-profile: stale profile matching (SampleProfileMatcher) is not implemented yet"); }
-sp_matcher_run_on_module :: () {}
 
 

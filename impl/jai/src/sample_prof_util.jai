@@ -100,7 +100,7 @@ sp_extract_probe :: (i: Value_Id) -> (bool, Sp_Probe) {
 sp_set_probe_distribution_factor :: (i: Value_Id, factor: float32) {
     if call_iid(i) == IID_PSEUDOPROBE {
         int_factor := PSEUDO_PROBE_FULL_DISTRIBUTION_FACTOR;
-        if factor < 1 int_factor = f32_to_u64(cast(float32) int_factor * factor);
+        if factor < 1 int_factor = f32_to_u64(u64_to_f32(int_factor) * factor);   // IntFactor *= Factor (in float)
         orig := const_int_zext(call_arg(i, 3));
         if int_factor != orig set_op(i, 3, const_int(ir.t_i64, int_factor));
         return;

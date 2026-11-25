@@ -25,7 +25,11 @@ Spb :: struct {
     has_func_offset_table: bool;
     profile_has_attribute: bool;
     read_vtable_prof: bool;
-    profile_sec_start: s64;       // ProfileSecRange (in `data` of the section)
+    profile_sec_data: string;     // ProfileSecRange: the (decompressed) profile section
+    profile_sec_start: s64;
+    profile_sec_end: s64;
+    func_metadata_index: Table(u64, struct { data: string; start: s64; end: s64; });   // FuncMetadataIndex
+    func_metadata_data: string;
 }
 spb: Spb;
 
@@ -329,7 +333,9 @@ spb_read_func_metadata :: () {
     while spb.pos < spb.end {
         c, _ := spb_read_sample_context_from_table();
         fs := sp_profiles_find_ctx(r, *c);
+        start := spb.pos;
         spb_read_func_metadata_one(fs);
+        table_set(*spb.func_metadata_index, sp_ctx_hash_code(*c), .{spb.data, start, spb.pos});
     }
 }
 // ProfileSymbolList::read
@@ -362,7 +368,7 @@ spb_read_one_section :: (e: Sp_Sec_Hdr) {
       case SP_SEC_CS_NAME_TABLE;
         spb_read_cs_name_table_sec();
       case SP_SEC_LBR_PROFILE;
-        spb.profile_sec_start = spb.pos;
+        spb.profile_sec_data = spb.data; spb.profile_sec_start = spb.pos; spb.profile_sec_end = spb.end;
         // readFuncProfiles(): the module is set, so only the functions it uses are read
         spb_read_func_profiles_for_module();
         spb.pos = spb.end;
@@ -378,6 +384,30 @@ spb_read_one_section :: (e: Sp_Sec_Hdr) {
       case;
         spb.pos = spb.end;   // readCustomSection: skipped
     }
+}
+
+// SampleProfileReaderExtBinaryBase::read(FuncsToUse, Profiles): more profiles from the profile section, then their
+// function metadata
+spb_read_named_profiles :: (names: [] string) {
+    r := *sp_reader;
+    if names.count == 0 return;
+    if r.remapper_present || r.is_cs fatal("sample-profile: reading more ext-binary profiles with a remapper or a CS profile is not implemented yet");
+    if !spb.has_func_offset_table fatal("sample-profile: an ext-binary profile without a function offset table is not supported");
+    saved := spb;
+    spb.data = spb.profile_sec_data; spb.end = spb.profile_sec_end;
+    for name: names {
+        found, off := table_find(*spb.func_offset_table, md5_hash_u64(name));
+        if found spb_read_func_profile(spb.profile_sec_start + cast(s64) off);
+    }
+    for name: names {
+        fs := sp_profiles_find_name(r, name);
+        if !fs continue;
+        found, e := table_find(*spb.func_metadata_index, sp_ctx_hash_code(*fs.ctx));
+        if !found continue;
+        spb.data = e.data; spb.pos = e.start; spb.end = e.end;
+        spb_read_func_metadata_one(fs);
+    }
+    spb.data = saved.data; spb.pos = saved.pos; spb.end = saved.end;
 }
 
 zlib_uncompress :: (dest: *u8, dest_len: *u64, source: *u8, source_len: u64) -> s32 #foreign libz "uncompress";

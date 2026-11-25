@@ -68,6 +68,7 @@
 #load "sample_prof_util.jai";
 #load "sample_prof_stubs.jai";
 #load "sample_prof_binary.jai";
+#load "sample_profile_matcher.jai";
 #load "sample_profile_inference.jai";
 #load "pass_sample_profile.jai";
 #load "call_promotion.jai";
