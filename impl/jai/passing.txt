@@ -15271,6 +15271,7 @@ tests/imported/llvm/Transforms/LoopVectorize/optimal-epilog-vectorization-liveou
 tests/imported/llvm/Transforms/LoopVectorize/optimal-epilog-vectorization-liveout.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/optimal-epilog-vectorization.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/optimal-epilog-vectorization.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/optsize.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/optsize.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/outer-loop-atomic.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/outer-loop-atomic.ll::roundtrip

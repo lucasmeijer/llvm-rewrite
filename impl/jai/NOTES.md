@@ -277,8 +277,10 @@ print<da> 10806/10807 (the 1 differs is stderr interleaving of a `+mpx` warning,
   `aa-eval -print-all-alias-modref-info` (basic-aa, and default pipeline with `-evaluate-aa-metadata`),
   `require<globals-aa>,aa-eval`, `print<memoryssa>`, `print<memoryssa><no-ensure-optimized-uses>`,
   `print<memoryssa-walker>`, `-memssa-check-limit=3`: all identical except files where LLVM prints diagnostics
-  (invalid debug info, unknown CPU features) or `%"type 0x…"` addresses, and 4 SCCP files with `!callback`
-  (GlobalsAA's CallGraph fails loudly on callback calls). Sweep script:
+  (invalid debug info, unknown CPU features) or `%"type 0x…"` addresses. GlobalsAA's CallGraph handles `!callback`
+  brokers like CallGraph.cpp (callback uses are not address-taking; each callback callee is an extra edge of the
+  caller's node): `default<O2>` on the 17 corpus files with `!callback` 13 identical, 4 loud (OpenMP modules then).
+  Sweep script:
   same scheme as "Sweep beyond the unit's tests" above (compare stderr of `-disable-output` runs).
 - **For pass porters** (GVN, DSE, LICM, MemCpyOpt, EarlyCSE with MemorySSA):
   - `aar := aa_results_for(f)` once per pass run, then `q := aa_query_new(*aar)` per BatchAAResults (keep it for the
@@ -1009,9 +1011,7 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   (`-enable-nontrivial-unswitch`, `-unswitch-threshold`, `-freeze-loop-unswitch-cond`, ...) are parsed by
   `unswitch_parse_cl_opt`. TTI.hasBranchDivergence is false for every target we support.
 - The 4 failing tests need cgscc(inline), scc-oz-module-inliner, loop-interchange and `default<O1/2/3>`.
-- `require<profile-summary>` exists now (passes.jai `psi_cached`; ProfileSummaryInfo itself is not ported). The passes
-  that read a cached PSI (LoopUnroll, LoopLoadElimination, the LibCallSimplifier inside InstCombine) call `psi_check`,
-  which fails loudly when the module has a `ProfileSummary` flag; without one every PSI query answers like a null PSI.
+- `require<profile-summary>` exists (passes.jai `psi_cached`); ProfileSummaryInfo is psi.jai (`psi_pass_bfi`).
 - ValueToValueMapTy semantics that matter here: values are WeakTrackingVHs (an erased cloned block must read as
   absent: `slu_vlookup` treats DEAD values as missing), and the one key RAUW (exit-block phi -> `.us-phi`) moves the
   key like ValueMap's FollowRAUW. Nothing else RAUWs a key while the maps are used.
@@ -1267,8 +1267,7 @@ Still slow / next:
   `psi_require()`, `psi_is_hot_call_site`, `should_optimize_for_size_bb(bb, psi, bfi)`, `value_is_rauwd(old, new)`
   (ValueHandleBase::ValueIsRAUWd without moving uses), `vmap_track_begin/_end` (tracking Value_Maps).
 - ProfileSummaryInfo: `psi_cached` (passes.jai) = the module analysis exists; `require<profile-summary>` and
-  `always-inline` (MAM.getResult) set it. The other PSI users (loop-unroll, loop-load-elim, LibCallSimplifier) still
-  fail loudly through `psi_check` when a summary is cached; they can now use psi.jai instead.
+  `always-inline` (MAM.getResult) set it.
 - Fail loudly: `--enable-knowledge-retention` under `cgscc`, X86TTIImpl::areTypesABICompatible with differing
   features, `!memprof` / `!callsite`, strictfp callers, ObjC ARC attached calls, assignment tracking, the replay / ML
   advisors, `promoteCall` (devirtualising an indirect call with a known callee), the MDNodeMapper. Remaining L2.inline
@@ -1786,7 +1785,11 @@ Still slow / next:
 - InstCombine's cached AAResults (`ic_aar_state`) is reset at every run: it used to keep the DT/AC pointers of an
   earlier run on the same function (freed meanwhile; the lazy AC turned that into heap corruption on lua.ll).
 - PSI: `psi_pass_bfi(f)` gives a pass the (PSI, BFI) LLVM's passes take (BFI only with a module profile summary);
-  used by loop-unroll, loop-load-elim and the LibCallSimplifier. LoopVectorize still uses psi_check (loopvec agent).
+  used by loop-unroll, loop-load-elim, the LibCallSimplifier and LoopVectorize (processLoop's OptForSize =
+  shouldOptimizeForSize(header, PSI, BFI); the FAM-cached BFI is then the one getPredBlockCostDivisor reads too).
+  `default<O2>` on the 54 corpus files with a ProfileSummary: 46 identical, 0 differs, 6 loud (cg-profile value
+  profiles), 2 llvm-failed; `require<profile-summary>,function(loop-vectorize)` on them + Transforms/LoopVectorize:
+  519/519 identical.
 - `-enable-knowledge-retention` is honoured by dce, licm (and allowed for loop-simplify, lcssa, loop-rotate,
   instcombine, the loop adaptor, which never salvage).
 - `-denormal-fp-math[-f32]` add `denormal_fpenv` to every function without one (opt_set_function_attributes, which

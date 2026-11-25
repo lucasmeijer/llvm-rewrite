@@ -1239,8 +1239,7 @@ parse_cl_opt :: (arg: string) -> bool {
 bisect_count: s64 = 0;
 
 // ProfileSummaryAnalysis: the module result exists once require<profile-summary> ran (it is never invalidated).
-// ProfileSummaryInfo itself is not ported: a pass that would consult a cached PSI of a module that has a profile
-// summary fails loudly through psi_check (with no summary every PSI query answers like a null PSI).
+// ProfileSummaryInfo is psi.jai (psi_cached_or_null / psi_pass_bfi).
 psi_cached := false;
 psi_has_profile_summary :: () -> bool {
     if !psi_cached return false;
@@ -1253,9 +1252,6 @@ psi_has_profile_summary :: () -> bool {
         }
     }
     return false;
-}
-psi_check :: (pass_name: string) {
-    if psi_has_profile_summary() fatal("%: a cached ProfileSummaryInfo with a module profile summary (require<profile-summary>) is not implemented yet", pass_name);
 }
 
 // The name OptBisect prints: PIC->getPassNameForClassName(ClassName), the registered name without parameters
