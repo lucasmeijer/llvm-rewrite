@@ -734,7 +734,7 @@ dfa_clean_phi_nodes :: (bb: Value_Id) {
 // SSAUpdaterBulk::RewriteAllUses with the variables of updateSSA
 Dfa_Ssa_Var :: struct { name: string; ty: Type_Id; defs_bb: [..] Value_Id; defs_v: [..] Value_Id; uses: [..] Use_Id; }
 
-dfa_ssa_rewrite_all_uses :: (vars: [] Dfa_Ssa_Var, dt: *Dom_Tree) {
+dfa_ssa_rewrite_all_uses :: (vars: [] Dfa_Ssa_Var, dt: *Dom_Tree, inserted_phis: *[..] Value_Id = null) {
     pred_cache: Table(Value_Id, [..] Value_Id); pred_cache.allocator = temp;
     preds_of :: (cache: *Table(Value_Id, [..] Value_Id), bb: Value_Id) -> [] Value_Id {
         p := table_find_pointer(cache, bb);
@@ -782,6 +782,7 @@ dfa_ssa_rewrite_all_uses :: (vars: [] Dfa_Ssa_Var, dt: *Dom_Tree) {
             pn := create_phi(r.ty, 0);
             insert_at_position(pn, fb, block(fb).first, true);
             if r.name.count set_name(pn, r.name);
+            if inserted_phis array_add(inserted_phis, pn);
             p := table_find_pointer(*infos, fb);
             if !p { table_set(*infos, fb, .{}); p = table_find_pointer(*infos, fb); }
             p.live_in = pn;

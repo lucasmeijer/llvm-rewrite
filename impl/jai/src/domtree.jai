@@ -34,6 +34,9 @@ Dom_Tree :: struct {
     dfs_valid: bool;
     slow_queries: u32;
     vec_size: u32;       // DomTreeNodes.size()
+    // a pass made dominance queries in an order LLVM takes from pointer addresses (StructurizeCFG's DenseMap
+    // walks with early exits), so SlowQueries / DFSInfoValid may differ from LLVM's: printing them fails loudly
+    slow_queries_unknown: bool;
 }
 
 // ---------------------------------------------------------------- block numbers (Function::NextBlockNum)
@@ -1124,6 +1127,7 @@ dt_change_idom :: (dt: *Dom_Tree, b: Value_Id, new_idom: Value_Id) {
 dt_print :: (dt: *Dom_Tree, sb: *String_Builder) {
     append(sb, "=============================--------------------------------\n");
     append(sb, ifx dt.post then "Inorder PostDominator Tree: " else "Inorder Dominator Tree: ");
+    if dt.slow_queries_unknown && !dt.dfs_valid fatal("print<domtree>: the tree's slow-query count depends on pointer address order in an earlier pass (structurizecfg)");
     if !dt.dfs_valid print_to_builder(sb, "DFSNumbers invalid: % slow queries.", dt.slow_queries);
     append(sb, "\n");
     if dt.root_node >= 0 {

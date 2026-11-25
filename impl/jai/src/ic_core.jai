@@ -221,6 +221,7 @@ ic_clone_inst :: (i: Value_Id) -> Value_Id {
 
 // User::replaceUsesOfWith
 replace_uses_of_with :: (user: Value_Id, from: Value_Id, to: Value_Id) {
+    if from == to return;   // User::replaceUsesOfWith: "Duh what?" (no use moves to the front of its list)
     n := nops(user);
     for k: 0..cast(s64) n - 1 if op(user, cast(u32) k) == from set_op(user, cast(u32) k, to);
 }

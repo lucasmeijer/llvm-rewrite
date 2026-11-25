@@ -234,6 +234,9 @@ these flags, so they cannot be swept against the oracle; they exist to look at w
 | loop-simplifycfg (`SmallPtrSet<BasicBlock *, 2>` of dead successors) | more than two dead successors (DT update order) | `-loop-simplifycfg-guess-address-order` |
 | ir-similarity (CheckLargerCands: `DenseSet<IRSimilarityCandidate *>`, colliding group numbers) | the canonical numberings of the possible choices differ (all are computed; never on the corpus) | none |
 | iroutliner (the exits of a region: `SmallPtrSet<BasicBlock *, 1>`) | two or more exit blocks contribute PHINode outputs | none |
+| structurizecfg (SSAUpdaterBulk's deduplicatePass: a `SmallDenseMap<BasicBlock *, unsigned>` walk) | deduplicating one block's new phis changes whether another block's new phis are identical | `-structurizecfg-guess-address-order` |
+| structurizecfg (DenseMap walks with early exits in isPredictableTrue / dominatesPredicates) | only the dominator tree's slow-query count differs; `print<domtree>` of such a tree with invalid DFS numbers fails | none |
+| lower-switch (`SmallPtrSet<BasicBlock *, 8>` DeleteList) | more than 8 blocks to delete | none |
 | codegenprepare, function-specialization, InstCombine fsqrt, attributor (signature rewrites), SLP reorder | already fail loudly or check order independence where they meet pointer order (see their sections) | none |
 
 Audited and order-independent (no flag): memdep's NonLocalDepEntry sort (GVN only materializes unnamed values in
@@ -2173,3 +2176,32 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   0 differs (314 loud, all other passes' options); `--per-function` on the ObjCARC tests 375/375 for objc-arc,
   objc-arc-contract and the pair; tests/perf/compile objc-arc / objc-arc-contract / sroa,objc-arc 4/4. No perf
   benchmark contains ARC calls (perf not run).
+## CFG structurization and scalarization (L1.extra.cfg-structurize COMPLETE 109/109, L1.extra.scalarizer COMPLETE 88/88; /root/jai_extras_b)
+
+- Files: pass_lower_switch.jai, control_flow_utils.jai (ControlFlowHub, invertCondition, SplitCallBrEdge, the
+  CycleInfo update methods addBlockToCycle / getSmallestCommonCycle), pass_unify_loop_exits.jai,
+  pass_fix_irreducible.jai, region_info.jai (RegionInfo, RegionNode graph and iterators, DominanceFrontier,
+  `print<regions>` with `-print-region-style`), pass_structurizecfg.jai (+ SSAUpdaterBulk::RewriteAndOptimizeAllUses,
+  EliminateNewDuplicatePHINodes, SSAUpdater::RewriteUseAfterInsertions), pass_scalarizer.jai,
+  pass_scalarize_masked_mem_intrin.jai (also the legacy pass of llc's IR pipeline, which used to be a silent no-op
+  stub in cg_todo_passes.jai), extras_b_cl.jai (the cl::opts of these passes).
+- RegionInfo is computed per call of `ri_get` (not cached in the FAM; LLVM's result would be identical for the
+  same IR and trees). It keeps the function's DominatorTree pointer and reads it in `ri_contains`, like LLVM, so
+  StructurizeCFG's tree updates are seen by the regions. Regions and nodes are temp rows (`Region_Id`, `Rn_Id`).
+- `Dom_Tree.slow_queries_unknown` (domtree.jai) marks a tree whose slow-query count depends on pointer order;
+  dt_print fails loudly on it while the DFS numbers are invalid. A crossing of the 32-query threshold that happened
+  in our order but not in LLVM's is not detected (a residual, never seen on the corpus).
+- `-structurizecfg-trace` (ours) prints the function after each region; `-structurizecfg-guess-address-order`
+  (ours) dedups in creation order instead of failing.
+- Shared fixes: `replace_uses_of_with` (ic_core.jai) returns when From == To, as User::replaceUsesOfWith does
+  (otherwise the use moves to the front of its list); the parser's `snan(0x0)` payload is the bit below the quiet
+  bit (APFloat makeNaN), was bit 0 (x86_fp80 `+snan(0x0)` printed `+snan(0x1)`).
+- Sweeps (whole corpus, 0 differs / 0 bad-ir in all): lower-switch 10817 identical; unify-loop-exits 10610 (207
+  llvm-failed: LLVM asserts on switch terminators); fix-irreducible 10789; `require<loops>,fix-irreducible,
+  print<loops>,print<cycles>` 10789; lower-switch,unify-loop-exits / lower-switch,fix-irreducible identical;
+  print<regions> 10817; structurizecfg 10737 + 2 loud (dedup address order), per function 84168 + 2 loud;
+  structurizecfg,print<domtree> 10734 + 5 loud; --with-test-flags structurizecfg 13045 identical, rest loud (other
+  passes' cl::opts); sroa,structurizecfg on tests/perf/compile 4/4. scalarizer 10809 + 3 loud (untruncated
+  `ConstantInt::get` indices), `scalarizer<load-store;min-bits=32>` 10811, `scalarizer<load-store;min-bits=16>,dce`
+  10810, `--with-test-flags scalarizer<load-store>` 13119 (rest: other passes' flags), tests/perf/compile 4/4;
+  scalarize-masked-mem-intrin 10817, --with-test-flags 13129 (rest: other passes' flags).

@@ -48,7 +48,7 @@ lib/IR/Metadata.cpp 0.5
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.95
 lib/Analysis/TargetTransformInfo.cpp 0.3
-lib/Transforms/Utils/BasicBlockUtils.cpp 0.75
+lib/Transforms/Utils/BasicBlockUtils.cpp 0.78  # + SplitCallBrEdge, SplitBlockAndInsertIfThen with a lazy DTU (jai_extras_b)
 lib/Analysis/VectorUtils.cpp 0.7  # + InterleavedAccessInfo::analyzeInterleaving / invalidation, computeMinimumValueSizes, getMetadataToPropagate, isVectorIntrinsicWithOverloadTypeAtArg
 lib/IR/Intrinsics.cpp 0.8  # + isSignatureValid / matchIntrinsicType messages (verifier_intrinsics.jai)
 lib/IR/Instruction.cpp 0.7
@@ -211,7 +211,7 @@ lib/Transforms/Utils/RelLookupTableConverter.cpp 0.95  # dropping unnamed_addr (
 lib/Transforms/Utils/EntryExitInstrumenter.cpp 0.85  # AIX / RISC-V / AArch64 / LoongArch / SystemZ mcount variants fail loudly
 lib/Transforms/IPO/FunctionSpecialization.cpp 0.97  # all of it; fails loudly where the result depends on SmallPtrSet pointer order (>8 specialized functions in one round)
 lib/IR/BundleAttributes.cpp 0.15  # getAssumeNonNullInfo only (PredicateInfo)
-lib/Transforms/Utils/SSAUpdaterBulk.cpp 0.75  # RewriteAllUses (inside pass_dfa_jump_threading.jai); not RewriteAndOptimizeAllUses / simplifyPass
+lib/Transforms/Utils/SSAUpdaterBulk.cpp 1.0  # RewriteAllUses (pass_dfa_jump_threading.jai), RewriteAndOptimizeAllUses (pass_structurizecfg.jai)
 lib/Transforms/Scalar/DFAJumpThreading.cpp 0.97  # optimization remarks are not emitted
 lib/Analysis/Delinearization.cpp 0.9  # no getIndexExpressionsFromGEP / tryDelinearizeFixedSizeImpl (only LoopCacheAnalysis and LoopFuse use them)
 lib/Transforms/Scalar/LoopInterchange.cpp 0.95  # no CacheCostManager / the 'cache' rule (fails loudly: LoopCacheAnalysis.cpp not ported); remarks not emitted
@@ -283,3 +283,8 @@ lib/Transforms/Instrumentation/HWAddressSanitizer.cpp 0.85  # no AArch64/RISC-V 
 lib/Transforms/Utils/MemoryTaggingSupport.cpp 0.85  # no getDarwinSlotPtr / getAndroidSlotPtr, no AArch64 getPC
 lib/Support/Path.cpp 0.15  # sys_path.jai: root_name/root_path, filename, remove_filename, append, native, remove_dots
 lib/Transforms/ObjCARC/ObjCARCOpts.cpp 0.97  # not GatherStatistics / the BBState printer (debug only), no remark
+
+# jai_extras_b (Layer 1b: cfg-structurize, scalarizer, ...)
+lib/Transforms/Scalar/StructurizeCFG.cpp 0.95  # not skip-uniform-regions (UniformityInfo): fails loudly
+lib/Analysis/RegionInfo.cpp 0.8  # not verifyAnalysis / view; -verify-region-info is parsed and ignored
+lib/Transforms/Scalar/Scalarizer.cpp 0.98  # untruncated ConstantInt::get indices fail loudly

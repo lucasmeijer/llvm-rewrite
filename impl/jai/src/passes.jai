@@ -287,6 +287,8 @@ Pass_Kind :: enum u8 {
     MAKE_GUARDS_EXPLICIT;
     // L1.extra loop passes (pass_irce.jai, ...)
     IRCE;
+    // L1.extra.cfg-structurize / scalarizer / lower-matrix / utility / analysis-misc (jai_extras_b)
+    LOWER_SWITCH; UNIFY_LOOP_EXITS; FIX_IRREDUCIBLE; STRUCTURIZECFG; PRINT_REGIONS; SCALARIZER; SCALARIZE_MASKED_MEM_INTRIN_OPT;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -501,6 +503,15 @@ PASS_TABLE :: Pass_Info.[
     .{"print-must-be-executed-contexts", .MODULE, .PRINT_MUST_BE_EXECUTED_CONTEXTS, true, .DOMTREE},
     .{"make-guards-explicit", .FUNCTION, .MAKE_GUARDS_EXPLICIT, false, .DOMTREE},
     .{"irce", .FUNCTION, .IRCE, false, .DOMTREE},
+    // L1.extra.cfg-structurize / scalarizer / lower-matrix / utility / analysis-misc (jai_extras_b)
+    .{"lower-switch", .FUNCTION, .LOWER_SWITCH, false, .DOMTREE},
+    .{"unify-loop-exits", .FUNCTION, .UNIFY_LOOP_EXITS, true, .DOMTREE},   // RequiredPassInfoMixin
+    .{"fix-irreducible", .FUNCTION, .FIX_IRREDUCIBLE, false, .DOMTREE},
+    .{"structurizecfg", .FUNCTION, .STRUCTURIZECFG, true, .DOMTREE},   // RequiredPassInfoMixin
+    .{"structurizecfg<skip-uniform-regions>", .FUNCTION, .STRUCTURIZECFG, true, .DOMTREE},
+    .{"print<regions>", .FUNCTION, .PRINT_REGIONS, true, .DOMTREE},
+    .{"scalarizer", .FUNCTION, .SCALARIZER, false, .DOMTREE},
+    .{"scalarize-masked-mem-intrin", .FUNCTION, .SCALARIZE_MASKED_MEM_INTRIN_OPT, false, .DOMTREE},
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -643,6 +654,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "simplifycfg<") && name[name.count - 1] == #char ">" return lookup_pass("simplifycfg");
     // passes whose parameters are parsed by the pass itself (LOOP_PASS_WITH_PARAMS)
     if begins_with(name, "loop-rotate<") && name[name.count - 1] == #char ">" return lookup_pass("loop-rotate");
+    if begins_with(name, "scalarizer<") && name[name.count - 1] == #char ">" return lookup_pass("scalarizer");
     if begins_with(name, "licm<") && name[name.count - 1] == #char ">" return lookup_pass("licm");
     if begins_with(name, "print<access-info><") && name[name.count - 1] == #char ">" return lookup_pass("print<access-info>");
     if begins_with(name, "lnicm<") && name[name.count - 1] == #char ">" return lookup_pass("lnicm");
@@ -1193,6 +1205,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if ipo_parse_cl_opt(name, value, has_value) return true;   // cgscc_pm.jai, pass_function_attrs.jai, inliner
     if globals_parse_cl_opt(name, value, has_value) return true;   // pass_global_opt.jai, internalize, globaldce, ...
     if scalar_misc_parse_cl_opt(name, value, has_value) return true;   // scalar_misc_cl.jai (L1.scalar-misc passes)
+    if extras_b_parse_cl_opt(name, value, has_value) return true;   // extras_b_cl.jai (jai_extras_b's Layer-1b passes)
     if pb_parse_cl_opt(name, value, has_value) return true;
     if forceattrs_parse_cl_opt(name, value, has_value) return true;   // pass_misc_module.jai
     if pgo_parse_cl_opt(name, value, has_value) return true;   // pass_lto_misc.jai
@@ -1597,6 +1610,14 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .PRINT_MUST_EXECUTE; return print_must_execute_run(f);
         case .MAKE_GUARDS_EXPLICIT; return make_guards_explicit_run(f);
         case .IRCE; return irce_run(f);
+        // jai_extras_b
+        case .LOWER_SWITCH; return lower_switch_run(f);
+        case .UNIFY_LOOP_EXITS; return unify_loop_exits_run(f);
+        case .FIX_IRREDUCIBLE; return fix_irreducible_run(f);
+        case .STRUCTURIZECFG; return structurizecfg_run(f, node);
+        case .PRINT_REGIONS; return print_regions_run(f);
+        case .SCALARIZER; return scalarizer_run(f, node);
+        case .SCALARIZE_MASKED_MEM_INTRIN_OPT; return scalarize_masked_mem_intrin_opt_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

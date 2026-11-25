@@ -207,6 +207,15 @@
 #load "analysis_printers_misc.jai";
 #load "pass_make_guards_explicit.jai";
 #load "pass_irce.jai";
+#load "pass_lower_switch.jai";
+#load "control_flow_utils.jai";
+#load "pass_unify_loop_exits.jai";
+#load "pass_fix_irreducible.jai";
+#load "region_info.jai";
+#load "pass_structurizecfg.jai";
+#load "pass_scalarizer.jai";
+#load "pass_scalarize_masked_mem_intrin.jai";
+#load "extras_b_cl.jai";
 #load "print_uselistorder.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";

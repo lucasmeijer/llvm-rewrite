@@ -515,7 +515,7 @@ fp_from_string :: (k: Type_Kind, s_in: string) -> (w: [] u64, ok: bool, overflow
             while tr.count < q.count array_add(*tr, 0);
             for q tr[it_index] |= it;
         } else if big_is_zero(tr) {
-            tr = big_from_u64(1);
+            tr = big_shl(big_from_u64(1), qbit - 1);   // makeNaN: "the next bit down from the QNaN bit"
         }
         if k == .X86_FP80 {
             ib := big_shl(big_from_u64(1), 63);
