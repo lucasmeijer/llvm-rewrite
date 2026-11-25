@@ -2344,3 +2344,20 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   tests/perf/compile 4/4. `openmp-opt`, `openmp-opt-cgscc`, `openmp-opt-postlink` (plain and `--with-test-flags`)
   and `default<O2>`, `lto<O2>` on the 25 OpenMP corpus files and on tests/pass/openmp-opt: 0 differs.
 - Perf: no benchmark has OpenMP (the passes exit early).
+## LoadStoreVectorizer (L1.extra.load-store-vectorizer COMPLETE 44/44; /root/jai_extras_d)
+
+- `pass_load_store_vectorizer.jai`, a whole-file port (the Vectorizer object is `Lsv`, chains are `[..] Lsv_Elem`
+  in temp storage, the MapVector of equivalence classes is `Lsv_Class_Map` with erased flags, the MRU list of
+  gatherChains is an index-linked list). Flags in `extras_d_cl.jai`.
+- Address order: mergeEquivalenceClasses walks a `DenseMap<const Value *, const Value *>`; the only visible effect
+  is the position of newly created target classes, so we fail loudly when one reduced key creates two or more new
+  target classes (`-load-store-vectorizer-guess-address-order` guesses insertion order). deleteExtraElements walks a
+  `DenseSet<Instruction *>`, but the set of deleted instructions does not depend on the order (audited).
+- Shared fixes made here: `st_isUnalignedMem16Slow` (X86Subtarget clears the i586 tuning bit when SSE4.2/SSE4A is
+  available; the default TuneCPU is i586, so without this every `-mattr=+avx` module looked slow at 16-byte
+  unaligned accesses), and `tti_allows_misaligned_memory_accesses` now applies isMemoryAccessFast's isBitAligned
+  test. `-mcpu haswell` (value as the next argument) is accepted (`extras_d_takes_value`).
+- Sweeps: `load-store-vectorizer --with-test-flags` 13341 identical, 0 differs, 241 loud (none from this pass: other
+  passes' options/IR); plain 10772/10777 (5 loud); `sroa,instcombine,load-store-vectorizer -mattr=+avx512f` over
+  tests/perf/compile + tests/e2e 694/694. No perf shape exercises the pass (its cost is LLVM's: O(n^2) isSafeToMove
+  bounded by the 64-chain MRU).

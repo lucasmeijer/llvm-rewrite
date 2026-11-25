@@ -38,7 +38,8 @@ tti_allows_misaligned_memory_accesses :: (t: *Tti, bit_width: u64, as: u32, alig
     if t.kind != .X86 return false, 0;
     st := *t.xl;
     fast: u32 = 1;
-    if bit_width == 128 fast = ifx xs_has(st, X86FLD_IsUnalignedMem16Slow) then cast(u32) 0 else 1;
+    if (align * 8) % bit_width == 0 return true, 1;   // isMemoryAccessFast: isBitAligned
+    if bit_width == 128 fast = ifx st_isUnalignedMem16Slow(st) then cast(u32) 0 else 1;
     else if bit_width == 256 fast = ifx xs_has(st, X86FLD_IsUnalignedMem32Slow) then cast(u32) 0 else 1;
     return true, fast;
 }

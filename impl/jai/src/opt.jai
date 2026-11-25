@@ -236,6 +236,8 @@
 #load "pass_loop_versioning_licm.jai";
 #load "pass_hardware_loops.jai";
 #load "pass_loop_unroll_and_jam.jai";
+#load "extras_d_cl.jai";
+#load "pass_load_store_vectorizer.jai";
 #load "print_uselistorder.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";

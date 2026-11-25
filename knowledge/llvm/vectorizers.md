@@ -387,3 +387,18 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - SLP: the reduced-bitcast combine of a `Shl` root (zext+shl+disjoint-or reduction to a bitcast/bswap/load) and
   matchesSelectOfBits both return early on a big-endian DataLayout (SLPVectorizer.cpp:15047, 15608):
   AggressiveInstCombine/X86/or-load.ll with `-data-layout=E-n64`, InstCombine/or-packed-int-vecs.ll with `-data-layout=E`.
+
+## LoadStoreVectorizer (LoadStoreVectorizer.cpp of 23.1.5; verified by the imported tests and a full-corpus sweep with test flags, jai)
+
+- Without a target (`NoTTIImpl`) getLoadStoreVecRegBitWidth is 128, allowsMisalignedMemoryAccesses and
+  isLegalMaskedLoad/Store are false, so only accesses whose alignment is a multiple of the vector size are merged
+  and gaps are never filled. On x86 the register width is getRegisterBitWidth(fixed vector) (prefer-vector-width
+  applies), and misaligned vector accesses are allowed; whether they are "fast" comes from
+  X86TargetLowering::isMemoryAccessFast on the *integer* EVT of the access size.
+- With no `-mcpu`/`tune-cpu`, X86Subtarget's TuneCPU is "i586", which has TuningSlowUAMem16; initSubtargetFeatures
+  then clears IsUnalignedMem16Slow when SSE4.2 or SSE4A is available. So a plain x86-64 module does not merge two
+  8-byte-aligned i64 loads into a 16-byte vector, but the same module with `-mattr=+sse4.2` or `+avx` does
+  (SLPVectorizer/X86/ctpop.ll under `-passes=load-store-vectorizer` shows both).
+- Redundant chains (two loads at one offset) give NumElem == 1: the "vector" is a scalar load and each original
+  gets its own bitcast/inttoptr; the RAUW also retargets debug records (InstCombine/debuginfo-dce.ll).
+- The only heap-order dependence is mergeEquivalenceClasses' DenseMap walk (position of new target classes).

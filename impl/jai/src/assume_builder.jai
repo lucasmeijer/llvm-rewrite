@@ -44,6 +44,8 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     if kind == .REWRITE_STATEPOINTS || kind == .PLACE_SAFEPOINTS || kind == .VERIFY_SAFEPOINT_IR return;
     // OpenMPOpt.cpp, Attributor.cpp and OMPIRBuilder.cpp never call salvageKnowledge
     if kind == .OPENMP_OPT || kind == .OPENMP_OPT_CGSCC return;
+    // jai_extras_d's passes never call salvageKnowledge (LoadStoreVectorizer.cpp, ...)
+    if kind == .LOAD_STORE_VECTORIZER return;
     fatal("-enable-knowledge-retention is not supported with pass '%' yet", name);
 }
 

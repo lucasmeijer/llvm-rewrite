@@ -295,6 +295,8 @@ Pass_Kind :: enum u8 {
     LOOP_FLATTEN; LOOP_FUSE;
     // pass_loop_versioning.jai, ...
     LOOP_VERSIONING; LOOP_BOUND_SPLIT; LOOP_VERSIONING_LICM; HARDWARE_LOOPS; LOOP_UNROLL_AND_JAM;
+    // L1.extra.load-store-vectorizer / codegen-ir-misc / sandbox-vectorizer (jai_extras_d)
+    LOAD_STORE_VECTORIZER;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -532,6 +534,8 @@ PASS_TABLE :: Pass_Info.[
     .{"loop-versioning-licm", .LOOP, .LOOP_VERSIONING_LICM, false, .DOMTREE},
     .{"hardware-loops", .FUNCTION, .HARDWARE_LOOPS, false, .DOMTREE},   // also hardware-loops<...> (lookup_pass)
     .{"loop-unroll-and-jam", .LOOP, .LOOP_UNROLL_AND_JAM, false, .DOMTREE},   // a LoopNest pass
+    // jai_extras_d
+    .{"load-store-vectorizer", .FUNCTION, .LOAD_STORE_VECTORIZER, false, .DOMTREE},
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -1241,6 +1245,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if globals_parse_cl_opt(name, value, has_value) return true;   // pass_global_opt.jai, internalize, globaldce, ...
     if scalar_misc_parse_cl_opt(name, value, has_value) return true;   // scalar_misc_cl.jai (L1.scalar-misc passes)
     if extras_b_parse_cl_opt(name, value, has_value) return true;   // extras_b_cl.jai (jai_extras_b's Layer-1b passes)
+    if extras_d_parse_cl_opt(name, value, has_value) return true;   // extras_d_cl.jai (jai_extras_d's Layer-1b passes)
     if pb_parse_cl_opt(name, value, has_value) return true;
     if forceattrs_parse_cl_opt(name, value, has_value) return true;   // pass_misc_module.jai
     if pgo_parse_cl_opt(name, value, has_value) return true;   // pass_lto_misc.jai
@@ -1674,6 +1679,8 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .LOOP_FUSE; return loop_fuse_run(f);
         case .LOOP_VERSIONING; return loop_versioning_run(f);
         case .HARDWARE_LOOPS; return hardware_loops_run(node, f);
+        // jai_extras_d
+        case .LOAD_STORE_VECTORIZER; return load_store_vectorizer_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;
@@ -1720,7 +1727,7 @@ opt_main :: () {
             i += 1;
             continue;
         }
-        if scalar_misc_takes_value(a) || profile_takes_value(a) {   // scalar_misc_cl.jai, profile_cl.jai: options written `-name value`
+        if scalar_misc_takes_value(a) || profile_takes_value(a) || extras_d_takes_value(a) {   // scalar_misc_cl.jai, profile_cl.jai, extras_d_cl.jai: options written `-name value`
             if i >= args.count fatal("option % needs a value", a);
             if !parse_cl_opt(tprint("%=%", a, args[i])) fatal("unsupported option '%'", a);
             i += 1;

@@ -173,6 +173,8 @@ st_hasXOP :: (st: *X86_Lowering) -> bool { return xs_has(st, X86FLD_HasXOP); }
 st_hasCF :: (st: *X86_Lowering) -> bool { return xs_has(st, X86FLD_HasCF); }
 st_hasEGPR :: (st: *X86_Lowering) -> bool { return xs_has(st, X86FLD_HasEGPR); }
 st_hasSSE4A :: (st: *X86_Lowering) -> bool { return xs_has(st, X86FLD_HasSSE4A); }
+// X86Subtarget::isUnalignedMem16Slow: the tuning bit, cleared by initSubtargetFeatures when SSE4.2 or SSE4A is available
+st_isUnalignedMem16Slow :: (st: *X86_Lowering) -> bool { return xs_has(st, X86FLD_IsUnalignedMem16Slow) && !st_hasSSE42(st) && !st_hasSSE4A(st); }
 st_hasVNNI :: (st: *X86_Lowering) -> bool { return xs_has(st, X86FLD_HasVNNI); }
 st_isAtom :: (st: *X86_Lowering) -> bool { return xs_has(st, X86FLD_IsAtom); }
 st_isSHLDSlow :: (st: *X86_Lowering) -> bool { return xs_has(st, X86FLD_IsSHLDSlow); }
