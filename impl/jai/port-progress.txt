@@ -165,7 +165,7 @@ lib/Analysis/InlineAdvisor.cpp 0.5  # default advisor, shouldBeDeferred, inline-
 lib/Analysis/InlineOrder.cpp 0.7  # manual: size/cost/cost-benefit priorities with the libstdc++ heap order (heuristic 0.55); not ML priority / plugin
 lib/Transforms/IPO/Inliner.cpp 0.85
 lib/Transforms/IPO/AlwaysInliner.cpp 0.95
-lib/Transforms/Utils/InlineFunction.cpp 0.85  # not inlineRetainOrClaimRVCalls (ObjC ARC), memprof metadata, strictfp hosts, convergence edge cases (fail loudly)
+lib/Transforms/Utils/InlineFunction.cpp 0.95  # convergence edge cases, contextual profiles (fail loudly)
 lib/Transforms/IPO/ModuleInliner.cpp 0.9  # manual: ModuleInlinerPass::run as module_inliner_run (heuristic 0.03: renamed)
 lib/Analysis/ProfileSummaryInfo.cpp 0.85  # not the legacy wrapper
 lib/IR/ProfileSummary.cpp 0.6  # getFromMD, getMD (sp_summary_md); no printSummary
@@ -332,3 +332,4 @@ lib/Transforms/Scalar/InferAddressSpaces.cpp 0.85  # x86/NoTTI hooks only: no as
 lib/CodeGen/ExpandIRInsts.cpp 0.75  # no FRemExpander (frem is a libcall on x86)
 lib/Transforms/Utils/IntegerDivision.cpp 0.6  # expandDivision / expandRemainder; not the UpTo32/64Bits variants
 lib/Transforms/Instrumentation/PGOCtxProfLowering.cpp 0.95  # all but remarks
+lib/Analysis/MemoryProfileInfo.cpp 0.7  # no addCallStack from profile data callers beyond the trie, no remarks / hinted-size messages

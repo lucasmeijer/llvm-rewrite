@@ -114,3 +114,16 @@ are identical to opt 23.1.5 on every round-tripping corpus file (also with each 
 - tryPromoteCall in the CGSCC inliner (not the module inliner, which only does it in ctxprof-specialized modules)
   needs ConstantFolding of GEPs whose `inrange` gets re-based by the folded offset (Inline/devirtualize-4.ll).
 
+
+## InlineFunction details (verified on Transforms/Inline, 2026-11)
+- `salvageKnowledge(&CB, AC)` runs after AddAlignmentAssumptions and before cloning, with the caller's
+  AssumptionCache when the inliner has one (inline-noalias / arg-attr-propagation with `--enable-knowledge-retention`).
+- Strictfp host: PruningFunctionCloner turns FP instructions and the FP intrinsics of ConstrainedOps.def into
+  `llvm.experimental.constrained.*` calls (round.tonearest only when the intrinsic takes a rounding mode, always
+  fpexcept.ignore; fcmp becomes the quiet `constrained.fcmp`), and adds `strictfp` to every cloned call. The
+  `<name>.strict` name it creates is immediately replaced by CloneBlock's `<name><suffix>`.
+- tryPromoteCall (Inliner.cpp, on newly inlined indirect calls): vtable load from an alloca'd object whose vtable
+  pointer store is found by FindAvailableLoadedValue; then promoteCall (drops !prof and !callees).
+- propagateMemProfMetadata walks the ValueMap (DenseMap order), but each cloned call is updated independently, so
+  the output does not depend on it. MDNode::concatenate dedups operands (SetVector), and CallStackTrie callers are a
+  std::map (sorted by stack id).

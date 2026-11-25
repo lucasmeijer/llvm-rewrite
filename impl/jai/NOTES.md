@@ -1255,7 +1255,7 @@ Still slow / next:
   scheduling dependencies) from temp, which is only reset between passes.
 - CVP/LVI: ConstantRange multiply and the LVI cache (~3x).
 
-## CGSCC, FunctionAttrs, inliner (L2.function-attrs COMPLETE 118/118; L2.inline 456/466: roundtrip 233/233, opt 223/233)
+## CGSCC, FunctionAttrs, inliner (L2.function-attrs COMPLETE 118/118; L2.inline COMPLETE 466/466)
 
 - Files: `lazy_call_graph.jai` (LazyCallGraph.cpp + print-lcg), `cgscc_pm.jai` (CGSCCPassManager.cpp, the
   `cgscc(...)` / `devirt<N>(...)` adaptors), `pass_function_attrs.jai` (FunctionAttrs.cpp, ConstantRangeList),
@@ -1282,10 +1282,11 @@ Still slow / next:
   ap_are_types_abi_compatible_for), tryPromoteCall's promoteCall (wpd_function_at_vtable_offset + atr_promote_call),
   strictfp hosts (PruningFunctionCloner::cloneInstruction: constrained intrinsics with round.tonearest /
   fpexcept.ignore, `strictfp` on every cloned call; the `.strict` name is overwritten by CloneBlock's suffix rename),
-  inlineRetainOrClaimRVCalls. Sweeps: inline 10915/10923 (8 loud: memprof), --with-test-flags 0 differs,
-  --enable-knowledge-retention 10915/10923.
-- Fail loudly: `!memprof` / `!callsite` propagation (needs MemoryProfileInfo.cpp's CallStackTrie), assignment
-  tracking, the replay / ML advisors, the MDNodeMapper.
+  inlineRetainOrClaimRVCalls, propagateMemProfMetadata with memory_profile_info.jai (MemoryProfileInfo.cpp's
+  CallStackTrie built from existing MIB metadata; also for the profile passes). L2.inline COMPLETE 466/466.
+  Sweeps: inline 10923/10923, --with-test-flags 0 differs, --enable-knowledge-retention and
+  -memprof-callsite-cold-threshold=50 0 differs.
+- Fail loudly: the replay / ML advisors, the MDNodeMapper, -memprof-report-hinted-sizes messages.
 - Trap: InstCombine's transformConstExprCastCall must call `value_is_rauwd(call, new_call)` when the old call has no
   uses: the CGSCC devirt wrapper's WeakVH on the call follows it, otherwise devirt<N> sees a "new" direct call and
   repeats (Inline/inline-indirect-chain.ll).

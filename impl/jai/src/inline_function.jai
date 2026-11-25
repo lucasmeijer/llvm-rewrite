@@ -16,8 +16,7 @@
 // Also updateCallProfile / updateProfileCallee (ProfileSummaryInfo in psi.jai), scaleProfData (ProfDataUtils.cpp),
 // PGOIndirectCallVisitor::tryGetVTableInstruction and Function::setEntryCount.
 //
-// Not ported (fail loudly when reached): memprof metadata (!memprof / !callsite) propagation, PGO contextual
-// profiles.
+// Not ported (fail loudly when reached): PGO contextual profiles.
 
 if_opts: struct {
     enable_noalias_to_md_conversion := true;       // -enable-noalias-to-md-conversion
@@ -1833,7 +1832,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
         add_alias_scope_metadata(cb, *vm, callee_aar, *info);
         add_return_attributes(cb, *vm, *info);
         add_param_and_fn_basic_attributes(cb, *vm, *info);
-        if get_metadata(cb, md_fixed("callsite")) != NONE || info.contains_memprof fatal("inline: memprof metadata propagation is not implemented yet");
+        propagate_mem_prof_metadata(cb, *vm, info.contains_memprof);
         propagate_call_site_metadata(cb, first_new_block);
         propagate_alloc_token_metadata(called, cb, *vm, *info);
         {
@@ -2524,5 +2523,54 @@ inline_retain_or_claim_rv_calls :: (cb: Value_Id, rv_kind: Arc_Kind, returns: []
             irb_set_before(*b, ri);
             irb_call(*b, get_or_insert_intrinsic_declaration(IID_OBJC_RETAIN), .[ret_opnd]);
         }
+    }
+}
+
+// haveCommonPrefix
+have_common_prefix :: (mib_stack: Md_Id, callsite_stack: Md_Id) -> bool {
+    n := min(md_nops(mib_stack), md_nops(callsite_stack));
+    for k: 0..cast(s64) n - 1
+        if mpi_md_zext(md_op(mib_stack, cast(u32) k)) != mpi_md_zext(md_op(callsite_stack, cast(u32) k)) return false;
+    return true;
+}
+// updateMemprofMetadata
+update_memprof_metadata :: (ci: Value_Id, mibs: [] Md_Id) {
+    set_metadata(ci, md_fixed("memprof"), NONE);
+    t: Mpi_Trie; t.nodes.allocator = temp;
+    for mibs mpi_add_call_stack(*t, it);
+    if !mpi_build_and_attach_mib_metadata(*t, ci) set_metadata(ci, md_fixed("callsite"), NONE);
+}
+// propagateMemProfHelper
+propagate_mem_prof_helper :: (cloned: Value_Id, inlined_callsite: Md_Id) {
+    k_cs := md_fixed("callsite"); k_mp := md_fixed("memprof");
+    orig_cs := get_metadata(cloned, k_cs);
+    cloned_cs: Md_Id = NONE;
+    if orig_cs != NONE {
+        cloned_cs = md_concatenate(orig_cs, inlined_callsite);
+        set_metadata(cloned, k_cs, cloned_cs);
+    }
+    orig_mp := get_metadata(cloned, k_mp);
+    if orig_mp == NONE return;
+    if orig_cs == NONE fatal("internal: inline: !memprof without !callsite");
+    new_list: [..] Md_Id; new_list.allocator = temp;
+    for k: 0..cast(s64) md_nops(orig_mp) - 1 {
+        mib := md_op(orig_mp, cast(u32) k);
+        if have_common_prefix(mpi_mib_stack_node(mib), cloned_cs) array_add(*new_list, mib);
+    }
+    if new_list.count == 0 { set_metadata(cloned, k_mp, NONE); set_metadata(cloned, k_cs, NONE); return; }
+    if new_list.count < cast(s64) md_nops(orig_mp) update_memprof_metadata(cloned, new_list);
+}
+// propagateMemProfMetadata (every VMap entry is independent, so the DenseMap order does not matter)
+propagate_mem_prof_metadata :: (cb: Value_Id, vm: *Value_Map, contains_memprof: bool) {
+    callsite := get_metadata(cb, md_fixed("callsite"));
+    if callsite == NONE && !contains_memprof return;
+    for cloned, orig: vm.map {
+        if cloned == NONE || !is_inst(orig) || !is_call_base(orig) || !is_inst(cloned) || !is_call_base(cloned) continue;
+        if callsite == NONE {
+            set_metadata(cloned, md_fixed("memprof"), NONE);
+            set_metadata(cloned, md_fixed("callsite"), NONE);
+            continue;
+        }
+        propagate_mem_prof_helper(cloned, callsite);
     }
 }
