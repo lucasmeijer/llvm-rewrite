@@ -548,3 +548,138 @@ ssgc_get_frame_map :: (s: *Ssgc, f: Value_Id, frame_size_in_ptrs: u64) -> Value_
     fm := const_aggregate(.C_STRUCT, sty, .[base, arr]);
     return gv_create(sty, true, .INTERNAL, fm, tprint("__gc_%", vname(f)), NONE, 0, 0);
 }
+
+// ---------------------------------------------------------------- inline-asm-prepare
+// llvm/lib/CodeGen/InlineAsmPrepare.cpp (InlineAsmPreparePass::run, findCallBrs, splitCriticalEdges,
+// insertIntrinsicCalls, updateSSA): a callbr whose result is used gets llvm.callbr.landingpad calls in its indirect
+// destinations (critical edges split first) and SSAUpdater rewrites the uses.
+
+inline_asm_prepare_opt_run :: (f: Value_Id) -> Preserved {
+    cbrs: [..] Value_Id; cbrs.allocator = temp;
+    for bb: fn_blocks(f) {
+        t := block_terminator(bb);
+        if t != NONE && inst_op(t) == .CALLBR && vtype(t) != ir.t_void && has_uses(t) array_add(*cbrs, t);
+    }
+    if !cbrs.count return PRESERVE_ALL;
+    dt := get_domtree(f);
+    changed := false;
+    for cbr: cbrs {
+        // splitCriticalEdges
+        o: Crit_Edge_Options; o.dt = dt; o.merge_identical_edges = true;
+        n := num_successors(cbr);
+        for k: 1..cast(s64) n - 1 {
+            i := cast(u32) k;
+            if get_successor(cbr, i) == get_successor(cbr, 0) || is_critical_edge(cbr, i, true)
+                if split_known_critical_edge(cbr, i, *o) != NONE changed = true;
+        }
+        changed |= iap_insert_intrinsic_calls(cbr, dt);
+    }
+    if !changed return PRESERVE_ALL;
+    pa: Preserved;
+    preserve(*pa, .DOMTREE);
+    return pa;
+}
+
+// insertIntrinsicCalls
+iap_insert_intrinsic_calls :: (cbr: Value_Id, dt: *Dom_Tree) -> bool {
+    n := num_successors(cbr);
+    if n <= 1 return false;   // getNumIndirectDests() == 0
+    s: Ssa_Updater;
+    ssa_init(*s, vtype(cbr), vname(cbr));
+    ssa_add_available(*s, inst_block(cbr), cbr);
+    default_dest := get_successor(cbr, 0);
+    ssa_add_available(*s, default_dest, cbr);
+    visited: [..] Value_Id; visited.allocator = temp;
+    iid := iid_by_name("llvm.callbr.landingpad");
+    changed := false;
+    for k: 1..cast(s64) n - 1 {
+        ind := get_successor(cbr, cast(u32) k);
+        if array_find(visited, ind) continue;
+        array_add(*visited, ind);
+        // Builder.SetInsertPoint(&*IndDest->begin()); CreateIntrinsicWithoutFolding(RetTy, callbr_landingpad, {CBR})
+        b: Irb; irb_set_before(*b, block_first(ind));
+        decl := get_or_insert_intrinsic_declaration(iid, .[vtype(cbr)]);
+        lp := irb_call(*b, decl, .[cbr]);
+        ssa_add_available(*s, ind, lp);
+        iap_update_ssa(dt, cbr, lp, *s, default_dest, iid);
+        changed = true;
+    }
+    return changed;
+}
+
+// updateSSA
+iap_update_ssa :: (dt: *Dom_Tree, cbr: Value_Id, lp: Value_Id, s: *Ssa_Updater, default_dest: Value_Id, iid: Intrinsic_Id) {
+    uses: [..] Use_Id; uses.allocator = temp;
+    u := ir.v_first_use[cbr];
+    while u != NONE { array_add(*uses, u); u = ir.u_next[u]; }
+    landing := inst_block(lp);
+    for u: uses {
+        user := ir.u_user[u];
+        if inst_op(user) == .CALL && call_iid(user) == iid continue;
+        if is_inst(user) && inst_block(user) == landing { use_set(u, lp); continue; }
+        // DT.dominates(DefaultDest, U)
+        dom: bool;
+        if inst_op(user) == .PHI dom = dt_dominates(dt, default_dest, ir.u_aux[u]);
+        else dom = dt_properly_dominates(dt, default_dest, inst_block(user));
+        if dom continue;
+        ssa_rewrite_use(s, u);
+    }
+}
+
+// ---------------------------------------------------------------- cfguard
+// llvm/lib/Transforms/CFGuard/CFGuard.cpp (CFGuardPass::run, CFGuardImpl::doInitialization, runOnFunction,
+// insertCFGuardCheck, insertCFGuardDispatch)
+
+cfguard_run :: (f: Value_Id) -> Preserved {
+    // doInitialization: Module::getControlFlowGuardMode() == Enabled (2)
+    if module_flag_int("cfguard", 0) != 2 return PRESERVE_ALL;
+    mech := module_flag_int("cfguard-mechanism", 0);   // ControlFlowGuardMechanism: Automatic 0, Check 1, Dispatch 2
+    t := triple_parse(ifx opts.mtriple.count then opts.mtriple else ir.triple);
+    dispatch := ifx mech == 1 then false else ifx mech == 2 then true else t.arch == .x86_64;
+    name := ifx dispatch then "__guard_dispatch_icall_fptr" else "__guard_check_icall_fptr";
+    // M.getOrInsertGlobal(Name, ptr, create an external dso_local declaration)
+    g := lookup_global(name);
+    if g == NONE {
+        g = gv_create(ir.t_ptr, false, .EXTERNAL, NONE, name, NONE, 0, 0);
+        glob(g).dso_local = true;
+    } else if vkind(g) != .GLOBAL_VAR fatal("cfguard: '%' is not a global variable", name);
+    // runOnFunction
+    calls: [..] Value_Id; calls.allocator = temp;
+    for i: fn_insts(f) {
+        if !is_call_base(i) continue;
+        callee := call_callee(i);
+        indirect := vkind(callee) != .FUNCTION && !is_constant_kind(vkind(callee)) && vkind(callee) != .INLINE_ASM;
+        if indirect && !call_has_fn_str_attr(i, "guard_nocf") array_add(*calls, i);
+    }
+    for cb: calls {
+        if t.os != .Win32 fatal("cfguard: Control Flow Guard checks are only applicable for Windows targets");
+        callee := call_callee(cb);
+        b: Irb; irb_set_before(*b, cb);
+        if !dispatch {
+            // insertCFGuardCheck: load the check function and call it with the target (keeping a funclet bundle)
+            if call_num_bundles(cb) > 0 && call_bundle_index(cb, "funclet") >= 0 fatal("cfguard: funclet bundles are not supported yet");
+            ld := irb_load(*b, ir.t_ptr, g, dl_abi_align(ir.t_ptr));
+            fty := type_func(ir.t_void, .[ir.t_ptr], false);
+            c := new_inst(.CALL, ir.t_void, 2);
+            inst(c).ty2 = fty;
+            set_op(c, 0, callee); set_op(c, 1, ld);
+            irb_insert(*b, c);
+            inst(c).cc = 19;   // CallingConv::CFGuard_Check
+        } else {
+            // insertCFGuardDispatch: the call through the dispatch function with a "cfguardtarget" bundle
+            if inst_op(cb) != .CALL && inst_op(cb) != .INVOKE fatal("cfguard: unknown indirect call type");
+            ld := irb_load(*b, vtype(callee), g, dl_abi_align(vtype(callee)));
+            nc := call_add_bundle(cb, "cfguardtarget", .[callee]);
+            // CallInst::Create(CI, OpB) / InvokeInst::Create(II, OpB) keep only the debug location
+            mds: [..] Kind_Md; mds.allocator = temp;
+            get_all_metadata(nc, *mds);
+            for mds if it.kind != 0 set_metadata(nc, it.kind, NONE);
+            set_op(nc, nops(nc) - 1, ld);   // setCalledOperand (the callee is the last operand)
+            insert_at_position(nc, inst_block(cb), cb, false);
+            if vname(cb).count set_name(nc, vname(cb));   // the name is taken while CB still has it
+            replace_all_uses_with(cb, nc);
+            erase_inst_with_metadata(cb);
+        }
+    }
+    return PRESERVE_NONE;   // doInitialization created the guard global: Changed
+}

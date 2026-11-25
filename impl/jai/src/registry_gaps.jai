@@ -294,7 +294,7 @@ gap_run_function :: (node: *Pass_Node, f: Value_Id) -> Preserved {
             return PRESERVE_ALL;
         case .X86_LOWER_AMX_TYPE; gap_require_x86_target(node.name); return x86_lower_amx_check(f, false);
         case .GC_LOWERING; return gc_lowering_run(f);
-        case .INLINE_ASM_PREPARE; return inline_asm_prepare_run(f);
+        case .INLINE_ASM_PREPARE; return inline_asm_prepare_opt_run(f);
         case .ASSUME_SIMPLIFY; return assume_simplify_run(f);
         case .PRINT_DOMFRONTIER; return print_domfrontier_run(f);
         case .PRINT_INLINE_COST; return print_inline_cost_run(f);
@@ -311,10 +311,7 @@ gap_run_function :: (node: *Pass_Node, f: Value_Id) -> Preserved {
             // ComplexDeinterleaving::runOnFunction: X86TargetLowering::isComplexDeinterleavingSupported() is false
             gap_require_x86_target(node.name);
             return PRESERVE_ALL;
-        case .CFGUARD;
-            // CFGuardImpl::doInitialization: nothing unless the "cfguard" module flag is Enabled (2)
-            if module_flag_int("cfguard", 0) == 2 fatal("cfguard: modules with control-flow guard checks are not supported yet");
-            return PRESERVE_ALL;
+        case .CFGUARD; return cfguard_run(f);   // registry_small_passes.jai
         case .TRIGGER_CRASH; gap_abort();
         case .TRIGGER_VERIFIER_ERROR;
             // new UnreachableInst(Ctx, BB.getTerminator()->getIterator()) in the entry block
