@@ -24,3 +24,16 @@ whole-corpus sweeps.
 - Cloned blocks are RemapInstruction'ed only: their debug records keep referring to the original loop's values (as
   in LLVM, RemapInstruction does not touch DbgRecords).
 - `-irce-print-*` output goes to stderr and is not part of the `::opt` check.
+
+## Guards (`loop-predication`, `guard-widening`, `lower-guard-intrinsic`, `lower-widenable-condition`, `make-guards-explicit`)
+
+- `IRBuilder::CreateAnd(LHS, RHS)` only constant-folds when both operands are constants: `and %x, true` is *not*
+  folded (IRBuilder.h:1570). LoopPredication's `CreateAnd(FirstIterationCheck, LimitCheck)` with a `LimitCheck` that
+  `expandCheck` proved `true` keeps the `and ..., true` (sweep: IndVarSimplify/post-inc-range.ll).
+- LoopPredication's profitability threshold is `LatchExitProbability * ScaleFactor` with a `float` ScaleFactor: there
+  is no `BranchProbability * float`, so the float converts to `uint32_t` (`operator*(uint32_t)`, saturating at 1):
+  `-loop-predication-latch-probability-scale=1.9` scales by 1, the default 2.0 by 2.
+- `guard-widening` is both a FUNCTION_PASS and a LOOP_PASS (PassRegistry.def); inside `loop(...)`/`loop-mssa(...)`
+  the loop version runs (root = loop predecessor or header, blocks filtered to root + loop, no post-dominator tree).
+- None of these passes (nor IRCE / LoopConstrainer / SCEVExpander) call `salvageKnowledge`, so
+  `-enable-knowledge-retention` changes nothing for them.

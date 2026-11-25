@@ -217,6 +217,9 @@
 #load "pass_scalarizer.jai";
 #load "pass_scalarize_masked_mem_intrin.jai";
 #load "extras_b_cl.jai";
+#load "guard_utils.jai";
+#load "pass_loop_predication.jai";
+#load "pass_guard_widening.jai";
 #load "print_uselistorder.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";

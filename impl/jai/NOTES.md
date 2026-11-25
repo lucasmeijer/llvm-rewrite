@@ -2118,6 +2118,13 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   parsed by `irce_parse_cl_opt`. The range check's `Use` is kept as (user, operand number): use ids move when a phi
   grows. Sweeps: `irce` 10812/10812 identical, `-irce-skip-profitability-checks` 10812/10812, `--with-test-flags`
   12774/13628 (0 differs; the loud ones are other passes' options), tests/perf/compile `sroa,irce` 4/4.
+- **Guards** (L1.extra.guards COMPLETE 72/72): `guard_utils.jai` = Analysis/GuardUtils.cpp + Utils/GuardUtils.cpp
+  widen/setWidenableBranchCond + LowerGuardIntrinsic + LowerWidenableCondition; `pass_loop_predication.jai`,
+  `pass_guard_widening.jai` (function pass `GUARD_WIDENING` and loop pass `GUARD_WIDENING_LOOP`: `parse_loop_pass`
+  picks the LOOP row of a name registered at both levels). GuardWidening's `llvm::sort` of range checks goes through
+  `std_sort_by` on indices. Sweeps (whole corpus, plain and `--with-test-flags`): loop-predication,
+  guard-widening, loop-mssa(guard-widening), lower-guard-intrinsic, lower-widenable-condition, make-guards-explicit:
+  0 differs.
 
 ## CFI: LowerTypeTests, CrossDSOCFI, GlobalSplit, SimplifyTypeTests (L1.extra.lowertypetests COMPLETE; /root/jai_cfi)
 

@@ -289,6 +289,8 @@ Pass_Kind :: enum u8 {
     IRCE;
     // L1.extra.cfg-structurize / scalarizer / lower-matrix / utility / analysis-misc (jai_extras_b)
     LOWER_SWITCH; UNIFY_LOOP_EXITS; FIX_IRREDUCIBLE; STRUCTURIZECFG; PRINT_REGIONS; SCALARIZER; SCALARIZE_MASKED_MEM_INTRIN_OPT;
+    // guards (guard_utils.jai, pass_loop_predication.jai, pass_guard_widening.jai)
+    LOWER_GUARD_INTRINSIC; LOWER_WIDENABLE_CONDITION; GUARD_WIDENING; GUARD_WIDENING_LOOP; LOOP_PREDICATION;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -512,6 +514,11 @@ PASS_TABLE :: Pass_Info.[
     .{"print<regions>", .FUNCTION, .PRINT_REGIONS, true, .DOMTREE},
     .{"scalarizer", .FUNCTION, .SCALARIZER, false, .DOMTREE},
     .{"scalarize-masked-mem-intrin", .FUNCTION, .SCALARIZE_MASKED_MEM_INTRIN_OPT, false, .DOMTREE},
+    .{"lower-guard-intrinsic", .FUNCTION, .LOWER_GUARD_INTRINSIC, false, .DOMTREE},
+    .{"lower-widenable-condition", .FUNCTION, .LOWER_WIDENABLE_CONDITION, false, .DOMTREE},
+    .{"guard-widening", .FUNCTION, .GUARD_WIDENING, false, .DOMTREE},
+    .{"guard-widening", .LOOP, .GUARD_WIDENING_LOOP, false, .DOMTREE},   // LOOP_PASS of the same name (parse_loop_pass)
+    .{"loop-predication", .LOOP, .LOOP_PREDICATION, false, .DOMTREE},
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -942,6 +949,8 @@ parse_loop_pass :: (lpm: s32, last: *s32, e: s32) {
         fatal("invalid use of '%' pass as loop pipeline", el.name);
     }
     p := lookup_pass(el.name);
+    // a name registered both as FUNCTION_PASS and LOOP_PASS (guard-widening): the loop row
+    if p != null && p.level != .LOOP for * pass_table if it.name == el.name && it.level == .LOOP { p = it; break; }
     if p == null || p.level != .LOOP unknown_pass(el.name);
     link_child(lpm, last, new_node(p.kind, p, el.name));
 }
@@ -1234,6 +1243,8 @@ parse_cl_opt :: (arg: string) -> bool {
     if weh_parse_cl_opt(name, value, has_value) return true;     // pass_win_eh_prepare.jai
     if dfsan_parse_cl_opt(name, value, has_value) return true;   // pass_dfsan.jai (-dfsan-*)
     if gcov_parse_cl_opt(name, value, has_value) return true;    // pass_gcov.jai
+    if lp_parse_cl_opt(name, value, has_value) return true;     // pass_loop_predication.jai (-loop-predication-*)
+    if gw_parse_cl_opt(name, value, has_value) return true;     // pass_guard_widening.jai (-guard-widening-*)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1621,6 +1632,9 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .PRINT_REGIONS; return print_regions_run(f);
         case .SCALARIZER; return scalarizer_run(f, node);
         case .SCALARIZE_MASKED_MEM_INTRIN_OPT; return scalarize_masked_mem_intrin_opt_run(f);
+        case .LOWER_GUARD_INTRINSIC; return lower_guard_intrinsic_run(f);
+        case .LOWER_WIDENABLE_CONDITION; return lower_widenable_condition_run(f);
+        case .GUARD_WIDENING; return guard_widening_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;
