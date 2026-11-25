@@ -160,6 +160,9 @@ src/
   pass_rs4gc.jai, pass_place_safepoints.jai, safepoint_ir_verifier.jai   RewriteStatepointsForGC (MapVector /
                   SetVector = `Rs_Map` / `Rs_Set`, BDVState fixpoint in `Bdv_Map`), PlaceSafepoints,
                   verify<safepoint-ir>
+  pass_hardening.jai, hardening_target.jai, pass_stack_protector.jai, pass_safe_stack.jai   kcfi, lower-allow-check,
+                  bounds-checking, alloc-token (+ Module::createRNG's mt19937_64 and SipHash), the x86 stack guard /
+                  safestack target hooks, StackProtector (IR part), SafeStack + SafeStackLayout
   linker.jai      llvm-link: ModuleLinker, IRMover (IRLinker, TypeMapTy), its ValueMapper (see "llvm-link" below)
   opt.jai                             CLI entry point (one binary: opt, llc, llvm-link by argv[0])
 ```

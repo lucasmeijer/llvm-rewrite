@@ -442,7 +442,7 @@ os_compute_value :: (vis: *Os_Visitor, v: Value_Id) -> Offset_Span {
         return .{vis.zero, os_align(vis, ap_from_u64(vis.int_ty_bits, dl_type_alloc_size(mt)), ifx pa then pa.ival else 0)};
     }
     if k == .C_NULL {
-        if vis.opts.null_is_unknown_size || ir.types[vtype(v)].a != 0 return os_unknown();
+        if vis.opts.null_is_unknown_size || ptr_addrspace(vtype(v)) != 0 return os_unknown();
         return .{vis.zero, vis.zero};
     }
     if k == .ALIAS {
@@ -675,7 +675,7 @@ ose_compute_ :: (ev: *Os_Evaluator, v_in: Value_Id) -> Os_Size_Offset {
     vopts.mode = .EXACT_UNDERLYING_SIZE_AND_OFFSET;
     ok, size, offset := os_compute(vopts, v_in);
     if ok return .{const_int_ap(type_int(size.bits), size), const_int_ap(type_int(offset.bits), offset)};
-    v := strip_pointer_casts(v_in);
+    v := strip_pointer_casts_kind(v_in, .ZERO_INDICES);   // Value::stripPointerCasts (through `returned` arguments)
     found, c := table_find(*ev.cache, v);
     if found return c;
     saved := ev.b;
@@ -693,6 +693,14 @@ ose_compute_ :: (ev: *Os_Evaluator, v_in: Value_Id) -> Os_Size_Offset {
     }
     table_set(*ev.cache, v, result);
     return result;
+}
+
+// the cache holds WeakTrackingVHs: they follow replaceAllUsesWith
+ose_cache_rauw :: (ev: *Os_Evaluator, old: Value_Id, new: Value_Id) {
+    for * ev.cache {
+        if it.size == old it.size = new;
+        if it.offset == old it.offset = new;
+    }
 }
 
 ose_visit_gep :: (ev: *Os_Evaluator, g: Value_Id) -> Os_Size_Offset {
@@ -743,9 +751,9 @@ ose_visit_inst :: (ev: *Os_Evaluator, i: Value_Id) -> Os_Size_Offset {
         }
         size := size_phi; offset := off_phi;
         t := phi_has_constant_value(size_phi);
-        if t != NONE { size = t; replace_all_uses_with(size_phi, t); erase_inst(size_phi); }
+        if t != NONE { size = t; replace_all_uses_with(size_phi, t); ose_cache_rauw(ev, size_phi, t); erase_inst(size_phi); }
         t = phi_has_constant_value(off_phi);
-        if t != NONE { offset = t; replace_all_uses_with(off_phi, t); erase_inst(off_phi); }
+        if t != NONE { offset = t; replace_all_uses_with(off_phi, t); ose_cache_rauw(ev, off_phi, t); erase_inst(off_phi); }
         return .{size, offset};
     }
     if o == .SELECT {

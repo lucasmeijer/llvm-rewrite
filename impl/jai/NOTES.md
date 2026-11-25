@@ -2392,3 +2392,46 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   passes' options/IR); plain 10772/10777 (5 loud); `sroa,instcombine,load-store-vectorizer -mattr=+avx512f` over
   tests/perf/compile + tests/e2e 694/694. No perf shape exercises the pass (its cost is LLVM's: O(n^2) isSafeToMove
   bounded by the 64-chain MRU).
+
+## Hardening: BoundsChecking, AllocToken, LowerAllowCheck, KCFI, SafeStack, StackProtector (L1.extra.hardening COMPLETE 144/144; /root/jai_extras_c)
+
+- `pass_hardening.jai`: kcfi, lower-allow-check (`<cutoffs[..]=N;runtime_check=N>`), bounds-checking (`<trap|rt|rt-abort|
+  min-rt|min-rt-abort;merge;handler-preserve-all-regs;guard=N>`, the NoSanitizeInserter as "mark every instruction
+  created after this id"), alloc-token (all four modes, module-flag and cl::opt overrides), plus
+  `create_rng` = Module::createRNG (std::mt19937_64 seeded by std::seed_seq from `-rng-seed` and the salt
+  name + filename(ModuleID); libstdc++'s bernoulli_distribution is `generate_canonical<double,53>() < p`) and
+  `get_stable_sip_hash` (SipHash-2-4, the key of llvm/lib/Support/SipHash.cpp). The RNG is checked by
+  `alloc-token<mode=random>` (with and without -rng-seed) and `-lower-allow-check-random-rate=0.1/0.5/0.9`: identical.
+- `hardening_target.jai`: the x86 TargetLowering hooks (getIRStackGuard with the TLS slot of glibc/musl/Android/
+  Fuchsia, insertSSPDeclarations, getSafeStackPointerLocation, the stack-protector-guard* module flags) and the
+  stack-protector / safestack rows of the x86 runtime libcall table. Non-x86 triples fail loudly (LLVM needs a
+  TargetMachine; with no triple LLVM's opt stops with "pass '<name>' requires TargetMachine", as we do). The MSVC security cookie and -stack-protector-guard-symbol fail
+  loudly.
+- `pass_stack_protector.jai`: requiresStackProtector, InsertStackProtectors (SelectionDAG SP when the guard is not an
+  IR TLS slot: only the prologue), CreateFailBB; isInTailCallPosition for the tail call before a return (aggregate or
+  other returned values fail loudly). `pass_safe_stack.jai`: SafeStack + SafeStackLayout (regions as an array;
+  LLVM's `Regions.insert(&R, R0); continue;` re-examines the moved region, kept as is), May-liveness live ranges from
+  stack_lifetime.jai; inlining a defined __safestack_pointer_address fails loudly.
+- These are RequiredPassInfoMixin passes (they also run on optnone functions): bounds-checking, kcfi,
+  lower-allow-check, alloc-token, safe-stack, stack-protector, verify<safepoint-ir>.
+- Shared fixes: memory_builtins.jai's ObjectSizeOffsetEvaluator cache now follows RAUW like LLVM's WeakTrackingVH
+  (a size/offset phi folded to a constant left a dangling id in the cache: `<badref>` in BoundsChecking/phi.ll), it
+  strips with Value::stripPointerCasts (through `returned` arguments), and ConstantPointerNull of a vector of
+  pointers now has address space 0 (it read the vector's element count).
+- bounds-checking fails loudly when the object size, the offset and the pointer's index type have different widths
+  (an addrspacecast between address spaces of different index widths): LLVM asserts there (its release build
+  compares and folds APInts of mismatched widths).
+- Sweeps (whole-file, 10828 files): kcfi, lower-allow-check (+ `<cutoffs[0|1|2]=990000;runtime_check=1>`),
+  alloc-token (default, increment, typehash) identical; bounds-checking (trap, rt;merge, min-rt-abort;guard=3) 10825
+  identical, 0 differs, 1 loud (the index-width assertion above); stack-protector and safe-stack with -mtriple
+  x86_64-pc-linux-gnu / x86_64-unknown / x86_64-linux-android / x86_64-linux-musl / x86_64-apple-darwin /
+  x86_64-unknown-openbsd / x86_64-unknown-fuchsia / i386-pc-linux-gnu / x86_64-pc-windows-msvc: 0 differs (after
+  fixing Darwin's PIC relocation model for __stack_chk_guard's dso_local), safe-stack with -safe-stack-coloring=0,
+  -safe-stack-layout=0, -safestack-use-pointer-address: 0 differs; `--with-test-flags` kcfi / bounds-checking /
+  lower-allow-check / stack-protector / safe-stack: 0 differs; tests/perf/compile: identical. The AllocToken and
+  LowerAllowCheck tests with random modes / rates and -rng-seed: identical. Stress (/tmp script): sspstrong on every
+  function (x86_64 linux) 1186/1186, sspreq (darwin) 597/597, safestack 1194/1194, safestack+sspstrong 796/796,
+  bounds-checking<rt;guard=3> 800/800 (the rest LLVM rejects or fail loudly). No perf benchmark has these attributes.
+- SafeStack sizes and offsets are LLVM's `unsigned` (32-bit): huge allocas wrap exactly as there. StackLifetime's
+  constructor collects the markers, so -safe-stack-coloring=0 still erases them and the full live range has
+  Instructions.size() bits.

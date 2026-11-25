@@ -311,3 +311,13 @@ lib/Transforms/Scalar/NaryReassociate.cpp 0.95  # no legacy pass
 lib/Transforms/Scalar/SeparateConstOffsetFromGEP.cpp 0.95  # no legacy pass, no debug printing
 lib/Transforms/Scalar/StraightLineStrengthReduce.cpp 0.95  # no legacy pass, no -debug-counter slsr-counter, no debug printing
 lib/Transforms/Instrumentation/ControlHeightReduction.cpp 0.95  # jai_pgo_rest: all but the optimization remarks / debug dumps
+lib/Transforms/Instrumentation/LowerAllowCheckPass.cpp 0.95  # no optimization remarks
+lib/Transforms/Instrumentation/AllocToken.cpp 0.95  # no NoAllocToken remark
+lib/CodeGen/SafeStack.cpp 0.9  # legacy pass aside; inlining a defined __safestack_pointer_address fails loudly
+lib/CodeGen/StackProtector.cpp 0.75  # IR part: no SSP layout map / copyToMachineFrameInfo, the legacy pass aside; MSVC cookie fails loudly
+lib/CodeGen/Analysis.cpp 0.05  # isInTailCallPosition / attributesPermitTailCall for scalar returns
+lib/Support/RandomNumberGenerator.cpp 0.8  # not getRandomBytes
+lib/Support/SipHash.cpp 0.5  # 64-bit getStableSipHash only
+lib/Target/X86/X86ISelLoweringCall.cpp 0.02  # only the stack guard / safestack hooks (hardening_target.jai)
+lib/Target/X86/X86ISelLowering.cpp 0.001  # useStackGuardMixFP
+lib/CodeGen/TargetLoweringBase.cpp 0.03  # the stack protector / safestack defaults

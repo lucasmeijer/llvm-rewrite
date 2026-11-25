@@ -344,6 +344,8 @@ Pass_Kind :: enum u8 {
     OBJC_ARC; OBJC_ARC_CONTRACT; OBJC_ARC_EXPAND; PA_EVAL;
     // GC statepoints (pass_rs4gc.jai, pass_place_safepoints.jai)
     REWRITE_STATEPOINTS; PLACE_SAFEPOINTS; VERIFY_SAFEPOINT_IR;
+    // hardening (pass_hardening.jai, pass_stack_protector.jai, pass_safe_stack.jai)
+    KCFI; LOWER_ALLOW_CHECK; BOUNDS_CHECKING; STACK_PROTECTOR; SAFE_STACK;
     // SCCP, IPSCCP (pass_sccp.jai)
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
@@ -651,9 +653,14 @@ PASS_TABLE :: Pass_Info.[
     .{"sanmd-module", .MODULE, .SANMD, true, .DOMTREE},
     .{"jmc-instrumenter", .MODULE, .JMC, false, .DOMTREE},
     .{"hwasan", .MODULE, .HWASAN, true, .DOMTREE},
+    .{"kcfi", .FUNCTION, .KCFI, true, .DOMTREE},
+    .{"stack-protector", .FUNCTION, .STACK_PROTECTOR, true, .DOMTREE},
+    .{"safe-stack", .FUNCTION, .SAFE_STACK, true, .DOMTREE},
+    .{"lower-allow-check", .FUNCTION, .LOWER_ALLOW_CHECK, true, .DOMTREE},   // also lower-allow-check<...>
+    .{"bounds-checking", .FUNCTION, .BOUNDS_CHECKING, true, .DOMTREE},       // also bounds-checking<...>
     .{"rewrite-statepoints-for-gc", .MODULE, .REWRITE_STATEPOINTS, false, .DOMTREE},
     .{"place-safepoints", .FUNCTION, .PLACE_SAFEPOINTS, false, .DOMTREE},
-    .{"verify<safepoint-ir>", .FUNCTION, .VERIFY_SAFEPOINT_IR, false, .DOMTREE},
+    .{"verify<safepoint-ir>", .FUNCTION, .VERIFY_SAFEPOINT_IR, true, .DOMTREE},
     .{"objc-arc", .FUNCTION, .OBJC_ARC, false, .DOMTREE},
     .{"objc-arc-contract", .FUNCTION, .OBJC_ARC_CONTRACT, false, .DOMTREE},
     .{"objc-arc-expand", .FUNCTION, .OBJC_ARC_EXPAND, false, .DOMTREE},
@@ -714,6 +721,9 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "hwasan<") && name[name.count - 1] == #char ">" return lookup_pass("hwasan");
     if begins_with(name, "msan<") && name[name.count - 1] == #char ">" return lookup_pass("msan");
     if begins_with(name, "loop-extract<") && name[name.count - 1] == #char ">" return lookup_pass("loop-extract");
+    if begins_with(name, "lower-allow-check<") && name[name.count - 1] == #char ">" return lookup_pass("lower-allow-check");
+    if begins_with(name, "bounds-checking<") && name[name.count - 1] == #char ">" return lookup_pass("bounds-checking");
+    if begins_with(name, "alloc-token<") && name[name.count - 1] == #char ">" return lookup_pass("alloc-token");
     if begins_with(name, "hardware-loops<") && name[name.count - 1] == #char ">" return lookup_pass("hardware-loops");
     if begins_with(name, "separate-const-offset-from-gep<") && name[name.count - 1] == #char ">" return lookup_pass("separate-const-offset-from-gep");
     return null;
@@ -1296,6 +1306,8 @@ parse_cl_opt :: (arg: string) -> bool {
     if safepoint_ir_verifier_parse_cl_opt(name, value, has_value) return true;   // safepoint_ir_verifier.jai
     if scof_parse_cl_opt(name, value, has_value) return true;   // pass_separate_const_offset.jai
     if slsr_parse_cl_opt(name, value, has_value) return true;   // pass_slsr.jai
+    if hardening_parse_cl_opt(name, value, has_value) return true;   // pass_hardening.jai
+    if stack_protector_parse_cl_opt(name, value, has_value) return true;   // pass_stack_protector.jai (+ safe-stack)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1465,7 +1477,7 @@ run_module_pm :: (n: s32) {
             case .HWASAN; if should_run_pass(node, NONE) mam_invalidate(hwasan_run(node.name));
             case .DFSAN; if should_run_pass(node, NONE) mam_invalidate(dfsan_run());
             case .GCOV; if should_run_pass(node, NONE) mam_invalidate(gcov_run());
-            case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
+            case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run_impl(node.name));
             case .CALLED_VALUE_PROPAGATION; if should_run_pass(node, NONE) mam_invalidate(called_value_propagation_run());
             case .IPSCCP; if should_run_pass(node, NONE) mam_invalidate(ipsccp_run(node.name, node.no_func_spec));
             case .PRE_ISEL_INTRINSIC_LOWERING;
@@ -1608,6 +1620,11 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .OBJC_ARC_EXPAND; return objc_arc_expand_run(f);
         case .PA_EVAL; return pa_eval_run(f);
         case .PLACE_SAFEPOINTS; return place_safepoints_run(f);
+        case .KCFI; return kcfi_run(f);
+        case .STACK_PROTECTOR; return stack_protector_run(f);
+        case .SAFE_STACK; return safe_stack_run(f);
+        case .LOWER_ALLOW_CHECK; return lower_allow_check_run(f, node.name);
+        case .BOUNDS_CHECKING; return bounds_checking_run(f, node.name);
         case .VERIFY_SAFEPOINT_IR; return safepoint_ir_verifier_run(f);
         case .LOOP_SINK; return loop_sink_run(f);
         case .TRANSFORM_WARNING; return transform_warning_run(f);

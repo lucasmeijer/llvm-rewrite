@@ -105,17 +105,4 @@ lower_comment_string_run :: () -> Preserved {
 }
 triple_is_os_aix :: () -> bool { return find_index_from_left(ir.triple, "-aix") >= 0; }
 
-// AllocTokenPass (llvm/lib/Transforms/Instrumentation/AllocToken.cpp, AllocToken::instrumentFunction): a function
-// is instrumented only with sanitize_alloc_token (and without disable_sanitizer_instrumentation), and
-// llvm.alloc.token.id calls are always lowered; anything to do fails loudly (the instrumentation is not ported).
-alloc_token_run :: () -> Preserved {
-    for f: ir.m_functions {
-        if is_declaration(f) continue;
-        if fn_has_fn_attr(f, .Naked) || glob(f).linkage == .AVAILABLE_EXTERNALLY continue;
-        if fn_has_fn_attr(f, .SanitizeAllocToken) && !fn_has_fn_attr(f, .DisableSanitizerInstrumentation)
-            fatal("alloc-token: sanitize_alloc_token instrumentation is not implemented yet");
-        for i: fn_insts(f) if call_iid(i) == intrinsic_id_by_name("llvm.alloc.token.id")
-            fatal("alloc-token: lowering llvm.alloc.token.id is not implemented yet");
-    }
-    return PRESERVE_ALL;
-}
+// AllocTokenPass: pass_hardening.jai (alloc_token_run_impl)

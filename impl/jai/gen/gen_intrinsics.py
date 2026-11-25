@@ -83,6 +83,8 @@ declare i32 @llvm.start.loop.iterations.i32(i32)
 declare { i32, i1 } @llvm.test.start.loop.iterations.i32(i32)
 declare i1 @llvm.loop.decrement.i32(i32)
 declare i32 @llvm.loop.decrement.reg.i32(i32, i32)
+declare ptr @llvm.stackguard()
+declare void @llvm.stackprotector(ptr, ptr)
 '''
 with tempfile.NamedTemporaryFile('w', suffix='.ll', delete=False) as _t:
     _t.write(EXTRA_DECLS)

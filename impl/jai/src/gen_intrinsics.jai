@@ -2897,6 +2897,8 @@ INTRINSIC_ATTRS :: Intrinsic_Attrs.[
     .{"llvm.sshl.sat", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .["", ""]},
     .{"llvm.ssub.sat", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .["", ""]},
     .{"llvm.ssub.with.overflow", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .["", ""]},
+    .{"llvm.stackguard", "nocallback nofree nosync nounwind willreturn", "", .[]},
+    .{"llvm.stackprotector", "nocallback nofree nosync nounwind willreturn", "", .["", ""]},
     .{"llvm.stackrestore", "nocallback nofree nosync nounwind willreturn", "", .[""]},
     .{"llvm.stacksave", "nocallback nofree nosync nounwind willreturn", "", .[]},
     .{"llvm.start.loop.iterations", "nocallback noduplicate nofree nosync nounwind willreturn", "", .[""]},
