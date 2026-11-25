@@ -253,7 +253,7 @@ priv_callee_repair :: (ari: *Arg_Replacement, new_fn: Value_Id, argno: u32) {
     inst(ai).ty2 = ari.priv_ty;
     inst(ai).addrspace = as;
     inst(ai).align = dl_pref_align(ari.priv_ty);
-    insert_at_position(ai, entry, ip, false);
+    insert_at_position(ai, entry, ip, true);   // new AllocaInst(..., IP = getFirstInsertionPt()): the head bit is set
     set_name(ai, tconcat(vname(ari.priv_arg), ".priv"));
     priv_create_initialization(ari.priv_ty, ai, new_fn, argno, ip);
     repl := ai;
@@ -763,7 +763,10 @@ atr_create_plain_call :: (fty: Type_Id, callee: Value_Id, args: [] Value_Id, nam
     inst(c).ty2 = fty;
     for args set_op(c, cast(u32) it_index, it);
     set_op(c, cast(u32) args.count, callee);
-    return insert_before_named(c, before, name);
+    // CallInst::Create(..., Before->getIterator()): adopts the debug records attached there
+    insert_at_position(c, inst_block(before), before, false);
+    if name.count set_name(c, name);
+    return c;
 }
 // SplitBlockAndInsertIfThen(Cond, SplitBefore, /*Unreachable=*/false): the new then-block's terminator
 atr_split_block_and_insert_if_then :: (cond: Value_Id, split_before: Value_Id) -> Value_Id {
@@ -811,7 +814,8 @@ ici_specialize :: (i: u32, cb: Value_Id) -> bool {
             continue;
         }
         any = true;
-        last_cmp = insert_before_named(create_icmp(ICMP_EQ, fp, nc), ip, "");
+        last_cmp = create_icmp(ICMP_EQ, fp, nc);
+        insert_at_position(last_cmp, inst_block(ip), ip, false);   // new ICmpInst(IP, ...): adopts IP's debug records
         then_ti := atr_split_block_and_insert_if_then(last_cmp, ip);
         cbbb := inst(cb).parent;
         atr_register_manifest_added_block(inst(then_ti).parent);
@@ -852,12 +856,13 @@ ici_specialize :: (i: u32, cb: Value_Id) -> bool {
         replace_all_uses_with(last_cmp, const_int(ir.t_i1, 1));
         erase_inst(last_cmp);
         u := new_inst(.UNREACHABLE, ir.t_void, 0);
-        inst_insert_before(u, ip);
+        insert_at_position(u, inst_block(ip), ip, false);
         drop_all_references(ip);
         erase_inst(ip);
     } else {
         clone := ic_clone_inst(cb);
-        insert_before_named(clone, ip, vname(cb));
+        insert_at_position(clone, inst_block(ip), ip, false);
+        if vname(cb).count set_name(clone, vname(cb));
         array_add(*new_calls, .{clone, NONE});
         attach_callee_md(clone, e.all_known, skipped);
     }

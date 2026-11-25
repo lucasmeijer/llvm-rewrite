@@ -9,8 +9,9 @@
 // replaceInlinedAtSubprogram, loop metadata locations, remapAssignID), stripDebugInfo(Function) and
 // eraseDebugIntrinsicsWithNonLocalRefs.
 //
-// Not ported (fail loudly): aggregate arguments (-aggregate-extracted-args / AggregateArgs; no caller asks for
-// them), explicit allocation/deallocation blocks, and the out-of-region lifetime markers on in-region casts of an
+// Aggregate arguments (AggregateArgs, ExcludeArgsFromAggregate, ArgsInZeroAddressSpace) and an explicit
+// AllocationBlock exist for the OpenMPIRBuilder (pass_openmp_opt_merge.jai). Not ported (fail loudly):
+// -aggregate-extracted-args, deallocation blocks, and the out-of-region lifetime markers on in-region casts of an
 // alloca (findAllocas' LifetimeBitcastUsers).
 
 Code_Extractor :: struct {
@@ -25,6 +26,13 @@ Code_Extractor :: struct {
     in_blocks: Table(Value_Id, bool);
     func_ret_val: Value_Id = NONE;
     exits: [..] Value_Id;              // ExtractedFuncRetVals
+    aggregate_args: bool;              // AggregateArgs
+    allocation_block: Value_Id = NONE; // AllocationBlock
+    args_in_zero_as: bool;             // ArgsInZeroAddressSpace
+    exclude_from_aggregate: [..] Value_Id;   // ExcludeArgsFromAggregate (SetVector)
+    struct_values: Value_Set;          // StructValues of the extraction
+    struct_ty: Type_Id = NONE;         // StructTy
+    new_values: [..] Value_Id;         // emitFunctionBody's NewValues
 }
 
 // CodeExtractorAnalysisCache
@@ -581,8 +589,22 @@ ce_move_code_to_function :: (ce: *Code_Extractor, nf: Value_Id) {
 ce_construct_function_declaration :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Value_Set, entry_freq: u64, name: string) -> Value_Id {
     old := block_fn(ce.blocks[0]);
     params: [..] Type_Id; params.allocator = temp;
-    for inputs.list array_add(*params, vtype(it));
-    for outputs.list array_add(*params, type_ptr(dl_alloca_addrspace()));
+    agg: [..] Type_Id; agg.allocator = temp;
+    vset_init(*ce.struct_values);
+    ce.struct_ty = NONE;
+    excluded :: (ce: *Code_Extractor, v: Value_Id) -> bool { for ce.exclude_from_aggregate if it == v return true; return false; }
+    for v: inputs.list {
+        if ce.aggregate_args && !excluded(ce, v) { array_add(*agg, vtype(v)); vset_insert(*ce.struct_values, v); }
+        else array_add(*params, vtype(v));
+    }
+    for v: outputs.list {
+        if ce.aggregate_args && !excluded(ce, v) { array_add(*agg, vtype(v)); vset_insert(*ce.struct_values, v); }
+        else array_add(*params, type_ptr(dl_alloca_addrspace()));
+    }
+    if agg.count {
+        ce.struct_ty = type_literal_struct(agg, false);
+        array_add(*params, type_ptr(ifx ce.args_in_zero_as then cast(u32) 0 else dl_alloca_addrspace()));
+    }
     ret := ifx ce.func_ret_val != NONE then vtype(ce.func_ret_val) else ce_switch_type(ce);
     ft := type_func(ret, params, ce.allow_varargs && func_vararg(glob(old).value_type));
     nf := new_function(ft, "", glob(old).addrspace);
@@ -612,12 +634,19 @@ ce_construct_function_declaration :: (ce: *Code_Extractor, inputs: *Value_Set, o
         array_add(*fn_set, at);
     }
     if fn_set.count glob(nf).attrs = attr_list_with_fn(glob(nf).attrs, attr_set_get(fn_set));
-    for v, k: inputs.list {
-        a := fn_arg(nf, cast(u32) k);
+    scalar: u32 = 0;
+    for v: inputs.list {
+        if vset_contains(*ce.struct_values, v) continue;
+        a := fn_arg(nf, scalar);
         if vname(v).count set_name(a, vname(v));
-        if is_swift_error(v) fn_add_param_attr_kind(nf, cast(u32) k, .SwiftError);
+        if is_swift_error(v) fn_add_param_attr_kind(nf, scalar, .SwiftError);
+        scalar += 1;
     }
-    for v, k: outputs.list set_name(fn_arg(nf, cast(u32) (inputs.list.count + k)), tconcat(vname(v), ".out"));
+    for v: outputs.list {
+        if vset_contains(*ce.struct_values, v) continue;
+        set_name(fn_arg(nf, scalar), tconcat(vname(v), ".out"));
+        scalar += 1;
+    }
     if ce.bfi {
         ok, count := bfi_profile_count_from_freq(ce.bfi, old, entry_freq);
         if ok fn_set_entry_count(nf, count);
@@ -631,14 +660,42 @@ ce_emit_function_body :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Val
     root := create_block(nf, "newFuncRoot");
     for v: sink.list if !(is_inst(v) && inst_op(v) == .ALLOCA) ce_move_inst_to_front(v, root);
     for v: sink.list if is_inst(v) && inst_op(v) == .ALLOCA ce_move_inst_to_front(v, root);
-    new_values: [..] Value_Id; new_values.allocator = temp;
-    for v, k: inputs.list array_add(*new_values, fn_arg(nf, cast(u32) k));
+    new_values := *ce.new_values;
+    new_values.count = 0;
+    agg_arg: Value_Id = ifx ce.struct_values.list.count == 0 then NONE else fn_arg(nf, fn_nargs(nf) - 1);
+    i32 := type_int(32);
+    scalar: u32 = 0;
+    agg_idx: u64 = 0;
+    for v: inputs.list {
+        rv: Value_Id;
+        if vset_contains(*ce.struct_values, v) {
+            elt_ty := type_sub(ce.struct_ty, cast(u32) agg_idx);
+            gep := create_gep(ce.struct_ty, agg_arg, .[const_null_value(i32), const_int(i32, agg_idx)]);
+            insert_at_end_named(gep, root, tconcat("gep_", vname(v)));
+            ld := new_inst(.LOAD, elt_ty, 1);
+            set_op(ld, 0, gep);
+            inst(ld).align = dl_abi_align(elt_ty);
+            insert_at_end_named(ld, root, tconcat("loadgep_", vname(v)));
+            if is_ptr_type(elt_ty) {
+                // isAlignmentPreservedForAddrCast(TargetTriple): AMDGPU only
+                if triple_is_gpu(ir.triple) fatal("code extractor: aggregate arguments on GPU targets are not supported yet");
+                av := pointer_alignment(v);
+                set_metadata(ld, md_kind_id("align"), md_tuple(.[md_value(const_int(type_int(64), av))], false));
+            }
+            rv = ld;
+            agg_idx += 1;
+        } else {
+            rv = fn_arg(nf, scalar);
+            scalar += 1;
+        }
+        array_add(new_values, rv);
+    }
     ce_move_code_to_function(ce, nf);
     for v, k: inputs.list {
         users: [..] Value_Id; users.allocator = temp;
         u := ir.v_first_use[v];
         while u != NONE { array_add(*users, ir.u_user[u]); u = ir.u_next[u]; }
-        for usr: users if is_inst(usr) && ce_contains(ce, inst_block(usr)) replace_uses_of_with(usr, v, new_values[k]);
+        for usr: users if is_inst(usr) && ce_contains(ce, inst_block(usr)) replace_uses_of_with(usr, v, new_values.*[k]);
     }
     stubs: [..] Value_Id; stubs.allocator = temp;
     n := ce.exits.count;
@@ -682,13 +739,27 @@ ce_emit_function_body :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Val
             if done break;
         }
     }
+    // the argument / aggregate index after the inputs
+    out_scalar: u32 = 0;
+    out_agg: u64 = 0;
+    for v: inputs.list { if vset_contains(*ce.struct_values, v) out_agg += 1; else out_scalar += 1; }
     for v, k: outputs.list {
-        a := fn_arg(nf, cast(u32) (inputs.list.count + k));
         pt: Value_Id = NONE;
         o := inst_op(v);
         if o == .INVOKE pt = block_first_insertion_pt(op(v, nops(v) - 3));
         else if o == .PHI pt = block_first_insertion_pt(inst_block(v));
         else pt = inst_next(v);
+        a: Value_Id;
+        if vset_contains(*ce.struct_values, v) {
+            gep := create_gep(ce.struct_ty, agg_arg, .[const_null_value(i32), const_int(i32, out_agg)]);
+            insert_at_position(gep, inst_block(pt), pt, o == .INVOKE || o == .PHI);   // adopts the records at std::next(Output)
+            set_name(gep, tconcat("gep_", vname(v)));
+            a = gep;
+            out_agg += 1;
+        } else {
+            a = fn_arg(nf, out_scalar);
+            out_scalar += 1;
+        }
         st := new_inst(.STORE, ir.t_void, 2);
         set_op(st, 0, v); set_op(st, 1, a);
         inst(st).align = dl_alignment(vtype(v), true);
@@ -706,18 +777,46 @@ ce_emit_function_body :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Val
 // emitReplacerCall
 ce_emit_replacer_call :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Value_Set, nf: Value_Id, old: Value_Id, repl_ip: Value_Id, entry_freq: u64, lifetimes_start: [] Value_Id) -> Value_Id {
     code_replacer := create_block(old, "codeRepl", repl_ip);
-    alloca_block := fn_entry(old);
+    alloca_block := ifx ce.allocation_block != NONE then ce.allocation_block else fn_entry(old);
     if ce.bfi bfi_set_block_freq(ce.bfi, code_replacer, entry_freq);
     params: [..] Value_Id; params.allocator = temp;
-    for inputs.list array_add(*params, it);
+    for inputs.list if !vset_contains(*ce.struct_values, it) array_add(*params, it);
     reload_outputs: [..] Value_Id; reload_outputs.allocator = temp;
     for v: outputs.list {
+        if vset_contains(*ce.struct_values, v) continue;
         t := vtype(v);
         a := create_alloca_unlinked(t, dl_alloca_addrspace(), dl_pref_align(t));
         pt := block_first_insertion_pt(alloca_block);
         insert_before_named(a, pt, tconcat(vname(v), ".loc"));
         array_add(*params, a);
         array_add(*reload_outputs, a);
+    }
+    struct_alloca: Value_Id = NONE;
+    i32 := type_int(32);
+    if ce.struct_values.list.count {
+        // allocateVar(AllocaBlock's first insertion point, StructArgTy, "structArg", &StructSpaceCast)
+        st := ce.struct_ty;
+        struct_alloca = create_alloca_unlinked(st, dl_alloca_addrspace(), dl_pref_align(st));
+        insert_before_named(struct_alloca, block_first_insertion_pt(alloca_block), "structArg");
+        if ce.args_in_zero_as && dl_alloca_addrspace() != 0 {
+            c := create_cast(.ADDRSPACECAST, struct_alloca, type_ptr(0));
+            inst_insert_after(c, struct_alloca);
+            set_name(c, "structArg.ascast");
+            array_add(*params, c);
+        } else {
+            array_add(*params, struct_alloca);
+        }
+        agg_idx: u64 = 0;
+        for v: inputs.list {
+            if !vset_contains(*ce.struct_values, v) continue;
+            gep := create_gep(st, struct_alloca, .[const_null_value(i32), const_int(i32, agg_idx)]);
+            insert_at_end_named(gep, code_replacer, tconcat("gep_", vname(v)));
+            store := new_inst(.STORE, ir.t_void, 2);
+            set_op(store, 0, v); set_op(store, 1, gep);
+            inst(store).align = dl_abi_align(vtype(v));
+            insert_at_end_named(store, code_replacer, "");
+            agg_idx += 1;
+        }
     }
     fty := glob(nf).value_type;
     call := new_inst(.CALL, func_ret(fty), cast(u32) (params.count + 1));
@@ -729,11 +828,28 @@ ce_emit_replacer_call :: (ce: *Code_Extractor, inputs: *Value_Set, outputs: *Val
         dl := get_metadata(block_terminator(fn_entry(nf)), MDK_DBG);
         if dl != NONE set_metadata(call, MDK_DBG, dl);
     }
-    for v, k: inputs.list if is_swift_error(v) call_add_param_attr_kind(call, cast(u32) k, .SwiftError);
+    param_idx: u32 = 0;
+    agg_idx: u64 = 0;
+    for v: inputs.list {
+        if vset_contains(*ce.struct_values, v) { agg_idx += 1; continue; }
+        if is_swift_error(v) call_add_param_attr_kind(call, param_idx, .SwiftError);
+        param_idx += 1;
+    }
+    scalar_idx := 0;
     for v, k: outputs.list {
         t := vtype(v);
+        src: Value_Id;
+        if vset_contains(*ce.struct_values, v) {
+            gep := create_gep(ce.struct_ty, struct_alloca, .[const_null_value(i32), const_int(i32, agg_idx)]);
+            insert_at_end_named(gep, code_replacer, tconcat("gep_reload_", vname(v)));
+            src = gep;
+            agg_idx += 1;
+        } else {
+            src = reload_outputs[scalar_idx];
+            scalar_idx += 1;
+        }
         ld := new_inst(.LOAD, t, 1);
-        set_op(ld, 0, reload_outputs[k]);
+        set_op(ld, 0, src);
         inst(ld).align = dl_alignment(t, true);
         insert_at_end_named(ld, code_replacer, tconcat(vname(v), ".reload"));
     }
@@ -910,9 +1026,7 @@ ce_extract_code_region :: (ce: *Code_Extractor, cache: *Ce_Cache, inputs_out: *[
     reloads: [..] Value_Id; reloads.allocator = temp;
     for i: block_insts(inst_block(call)) if inst_op(i) == .LOAD array_add(*reloads, i);
     ce_insert_replacer_call(ce, old, header, call, *outputs, reloads, *exit_weights);
-    new_values: [..] Value_Id; new_values.allocator = temp;
-    for v, k: inputs.list array_add(*new_values, fn_arg(nf, cast(u32) k));
-    ce_fixup_debug_info_post_extraction(old, nf, call, inputs.list, new_values);
+    ce_fixup_debug_info_post_extraction(old, nf, call, inputs.list, ce.new_values);
     { table_remove(*fam, old); ac_virtual_clear(old); }
     return nf;
 }

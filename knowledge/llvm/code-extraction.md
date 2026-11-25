@@ -61,3 +61,15 @@ and `partial-inliner` (also `-skip-partial-inlining-cost-analysis`, `-min-block-
 - In `doMultiRegionFunctionOutlining` the Inputs/Outputs/Sinks sets live outside the region loop, so once one region
   has an output every later region is skipped (unless `-pi-force-live-exit-outline`).
 - Varargs are forwarded (InlineFunction's ForwardVarArgsTo) only for single-region outlining.
+
+## Aggregate arguments (the OpenMPIRBuilder's outliner)
+
+- With AggregateArgs every input and output not in ExcludeArgsFromAggregate goes into one literal struct
+  (`StructType::get` of their types, in input then output order) passed as the *last* parameter (address space 0
+  with ArgsInZeroAddressSpace, else the alloca address space); the excluded ones stay scalar parameters in front.
+  The caller gets `%structArg = alloca {...}` (preferred alignment) at the first insertion point of the
+  AllocationBlock (`.ascast` cast with ArgsInZeroAddressSpace and a non-zero alloca address space), then per input
+  `%gep_<v> = getelementptr {...}, ptr %structArg, i32 0, i32 k` + store at the end of `codeRepl`; the callee loads
+  each in the new entry (`%gep_<v>`, `%loadgep_<v>`), a pointer load carrying `!align !{i64 A}` with A the input's
+  getPointerAlignment (after stripPointerCasts on AMDGPU only). Verified: Transforms/OpenMP/parallel_region_merging.ll
+  (impl/jai).

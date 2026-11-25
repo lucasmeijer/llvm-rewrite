@@ -510,13 +510,16 @@ priv_manifest :: (i: u32) -> bool {
 }
 
 // constructPointer (IRBuilder<NoFolder>: a ptradd named "<ptr>.b<offset>")
-priv_construct_pointer :: (ptr: Value_Id, offset: s64, pos: Value_Id) -> Value_Id {
+priv_construct_pointer :: (ptr: Value_Id, offset: s64, pos: Value_Id, adopt := false) -> Value_Id {
     if offset == 0 return ptr;
     g := new_inst(.GEP, vtype(ptr), 2);
     inst(g).ty2 = ir.t_i8;
     set_op(g, 0, ptr);
     set_op(g, 1, const_int(ir.t_i64, cast(u64) offset));
-    insert_before_named(g, pos, tprint("%.b%", vname(ptr), offset));
+    // createReplacementValues' IRBuilder(IP) inserts at IP->getIterator() (adopting the debug records attached
+    // there); createInitialization's IRBuilder(BB, getFirstInsertionPt()) at the head
+    insert_at_position(g, inst_block(pos), pos, !adopt);
+    set_name(g, tprint("%.b%", vname(ptr), offset));
     d := get_metadata(pos, MDK_DBG);   // the IRBuilder's debug location (SetInsertPoint)
     if d != NONE set_metadata(g, MDK_DBG, d);
     return g;
@@ -527,7 +530,7 @@ priv_create_initialization :: (pt: Type_Id, base: Value_Id, f: Value_Id, argno: 
         s := new_inst(.STORE, ir.t_void, 2);
         set_op(s, 0, v); set_op(s, 1, ptr);
         inst(s).align = dl_abi_align(vtype(v));
-        inst_insert_before(s, pos);
+        inst_insert_before(s, pos);   // new StoreInst(..., IP) with IP = getFirstInsertionPt() (head bit)
     }
     k := type_kind(pt);
     if k == .STRUCT {
@@ -552,20 +555,20 @@ priv_create_replacement_values :: (alignment: u64, pt: Type_Id, cb: Value_Id, ba
         l := new_inst(.LOAD, ty, 1);
         set_op(l, 0, ptr);
         inst(l).align = ifx alignment != 0 then alignment else 1;
-        inst_insert_before(l, cb);
+        insert_at_position(l, inst_block(cb), cb, false);   // new LoadInst(..., IP->getIterator())
         return l;
     }
     k := type_kind(pt);
     if k == .STRUCT {
         for u: 0..cast(s64) type_nsub(pt) - 1 {
-            ptr := priv_construct_pointer(base, cast(s64) dl_struct_offset(pt, cast(u32) u), cb);
+            ptr := priv_construct_pointer(base, cast(s64) dl_struct_offset(pt, cast(u32) u), cb, true);
             array_add(out, load(type_sub(pt, cast(u32) u), ptr, alignment, cb));
         }
     } else if k == .ARRAY {
         et := type_elem(pt);
         sz := dl_type_store_size(et);
         for u: 0..cast(s64) type_count(pt) - 1 {
-            ptr := priv_construct_pointer(base, cast(s64) (cast(u64) u * sz), cb);
+            ptr := priv_construct_pointer(base, cast(s64) (cast(u64) u * sz), cb, true);
             array_add(out, load(et, ptr, alignment, cb));
         }
     } else {

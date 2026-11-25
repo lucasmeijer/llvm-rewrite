@@ -190,6 +190,14 @@ omp_recollect_uses_for_function :: (r: Omp_Rtl) {
 }
 omp_recollect_uses :: () { for k: 0..OMP_RTL_COUNT - 1 omp_recollect_uses_for_function(cast(Omp_Rtl) k); }
 
+// Insertion before an instruction's iterator (no head bit): the new instruction adopts the debug records attached
+// at that position (Instruction::insertBefore)
+omp_insert_before :: (i: Value_Id, pos: Value_Id, name := "") -> Value_Id {
+    insert_at_position(i, inst_block(pos), pos, false);
+    if name.count set_name(i, name);
+    return i;
+}
+
 // setCallingConvention: inherit the callee's calling convention
 omp_set_calling_convention :: (callee: Value_Id, ci: Value_Id) {
     if vkind(callee) == .FUNCTION inst(ci).cc = glob(callee).cc;
@@ -403,7 +411,7 @@ omp_deduplicate_runtime_calls_in :: (f: Value_Id, rfi: *Omp_Rfi, repl_in: Value_
             if repl == NONE repl = ci;
         }
         if repl == NONE return false;
-        if repl != ip inst_move_before(repl, ip);
+        if repl != ip inst_move_before_dbg(repl, ip);   // Instruction::moveBefore(IP->getIterator())
     }
     if is_inst(repl) && is_call_base(repl) {
         if call_num_args(repl) != 0 && vtype(call_arg(repl, 0)) == ir.t_ptr {
@@ -415,8 +423,8 @@ omp_deduplicate_runtime_calls_in :: (f: Value_Id, rfi: *Omp_Rfi, repl_in: Value_
     for u: omp_rfi_uses(rfi, oo.scc) {
         ci := omp_call_if_regular_call_use(u, rfi);
         if ci == NONE || ci == repl || f != use_fn continue;
-        replace_all_uses_with(ci, repl);
-        erase_inst(ci);
+        rauw_with_metadata(ci, repl);   // Value::replaceAllUsesWith also updates the debug records
+        erase_inst_with_metadata(ci);
         changed = true;
         delete_use = true;
     }
@@ -571,12 +579,12 @@ omp_split_target_data_begin_rtc :: (rc: Value_Id, wait_point: Value_Id) -> bool 
     for k: 0..cast(s64) call_num_args(rc) - 1 array_add(*args, call_arg(rc, cast(u32) k));
     array_add(*args, handle);
     issue_cs := create_call_fn(issue, args);
-    insert_before_named(issue_cs, rc, "");
+    omp_insert_before(issue_cs, rc);
     omp_set_calling_convention(issue, issue_cs);
     erase_inst(rc);
     wait := omp_get_or_create_runtime_function(.__tgt_target_data_begin_mapper_wait);
     wait_cs := create_call_fn(wait, .[call_arg(issue_cs, OA_DEVICE_ID_ARG_NUM), handle]);
-    insert_before_named(wait_cs, wait_point, "");
+    omp_insert_before(wait_cs, wait_point);
     omp_set_calling_convention(wait, wait_cs);
     return true;
 }

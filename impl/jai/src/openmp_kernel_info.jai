@@ -465,11 +465,11 @@ ki_insert_instruction_guards_helper :: (i: u32) {
             shared := gv_create(ty, false, .INTERNAL, const_undef(ty),
                                 omp_sanitize_for_global_name(tconcat(vname(x), ".guarded.output.alloc")), NONE, 0, OMP_AS_SHARED);
             st := create_store_raw(x, shared, dl_abi_align(ty));
-            insert_before_named(st, block_terminator(region_end_bb), "");
+            omp_insert_before(st, block_terminator(region_end_bb));
             ld := new_inst(.LOAD, ty, 1);
             set_op(ld, 0, shared);
             inst(ld).align = dl_abi_align(ty);
-            insert_before_named(ld, block_terminator(region_barrier_bb), tconcat(vname(x), ".guarded.output.load"));
+            omp_insert_before(ld, block_terminator(region_barrier_bb), tconcat(vname(x), ".guarded.output.load"));
             for outside atr_change_use_after_manifest(it, ld);
         }
         dl_md := get_metadata(block_terminator(parent_bb), MDK_DBG);
@@ -489,13 +489,13 @@ ki_insert_instruction_guards_helper :: (i: u32) {
         tid_check := irb_insert(*b, create_icmp(ICMP_EQ, tid, const_null_value(vtype(tid))));
         irb_insert(*b, create_cond_br(tid_check, region_start_bb, region_barrier_bb));
         barrier_fn := omp_get_or_create_runtime_function(.__kmpc_barrier_simple_spmd);
-        irb_set_at(*b, region_barrier_bb, block_first_insertion_pt(region_barrier_bb), false);
+        irb_set_at(*b, region_barrier_bb, block_first_insertion_pt(region_barrier_bb), true);
         b.dbg = dl_md;
         barrier := irb_call(*b, barrier_fn, .[ident, tid]);
         omp_set_calling_convention(barrier_fn, barrier);
         if has_broadcast_values {
             b2 := create_call_fn(barrier_fn, .[ident, tid]);
-            insert_before_named(b2, block_terminator(region_barrier_bb), "");
+            omp_insert_before(b2, block_terminator(region_barrier_bb));
             if dl_md != NONE set_metadata(b2, MDK_DBG, dl_md);
             omp_set_calling_convention(barrier_fn, b2);
         }
@@ -519,7 +519,7 @@ ki_insert_instruction_guards_helper :: (i: u32) {
             if last_effect != NONE array_add(*reorders, .[ip, last_effect]);
             last_effect = ip;
         }
-        for reorders inst_move_before(it[0], it[1]);
+        for reorders inst_move_before_dbg(it[0], it[1]);   // Instruction::moveBefore(iterator)
     }
     regions: [..] [2] Value_Id; regions.allocator = temp;
     for guarded_i: k.spmd.set {

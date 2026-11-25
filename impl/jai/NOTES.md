@@ -2313,13 +2313,15 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   gc.safepoint_poll: rewrite-statepoints-for-gc 4903/4903 identical (the rest LLVM rejects), place-safepoints
   1490/1490, function(place-safepoints),rewrite-statepoints-for-gc 796/796, + verify<safepoint-ir> 1058/1058. No perf
   benchmark has gc functions (perf not run).
-## OpenMPOpt (L1.extra.openmp-opt 41/42; /root/jai_openmp)
+## OpenMPOpt (L1.extra.openmp-opt COMPLETE 106/106; /root/jai_openmp)
 
 - Files: `pass_openmp_opt.jai` (the passes, OMPInformationCache = `omp_ic`, OpenMPOpt = `oo`, the host
   transformations), `openmp_aas.jai` (AAICVTracker, AAExecutionDomain, AAHeapToShared, AAFoldRuntimeCall,
   registerAAs / registerAAsForFunction, AA::isPotentiallyAffectedByBarrier, AANoSync::isAlignedBarrier),
   `openmp_kernel_info.jai` (KernelInfoState, AAKernelInfo, SPMDization, the custom state machine,
-  getUniqueKernelFor, rewriteDeviceCodeStateMachine), `omp_ir_builder.jai` (OpenMPIRBuilder pieces),
+  getUniqueKernelFor, rewriteDeviceCodeStateMachine), `pass_openmp_opt_merge.jai` (mergeParallelRegions with
+  createParallel / createMaster / createBarrier / finalize; the IRBuilder is `omb`), `omp_ir_builder.jai`
+  (OpenMPIRBuilder pieces),
   `gen_omp_kinds.jai` (generated from OMPKinds.def by `gen/gen_omp_kinds.py`: runtime functions with signatures,
   attribute sets in both OptimisticAttributes variants, ICVs). Facts: knowledge/llvm/openmp-opt.md.
 - Attributor hooks added for it (attributor*.jai): AttributorConfig fields on `atr` (`default_init_live_internals`,
@@ -2335,9 +2337,18 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
 - Fixed on the way: AAHeapToStack's isGlobalizedLocal read only the call-site `alloc-family` (LLVM's
   CB.getFnAttr also looks at the callee, where OpenMPOpt puts it); AbstractCallSite recognized a broker through the
   raw callee instead of getCalledFunction (type check).
-- Fails loudly: `-openmp-opt-enable-merging` (mergeParallelRegions: needs createParallel / createMaster /
-  finalize and CodeExtractor's aggregate arguments; one exit test), GPU triples (nvptx / amdgcn), a function named
-  `__last` matching OMPRTL___last. Remarks (`-pass-remarks=openmp-opt`) are not supported by opt here at all.
+- code_extractor.jai gained AggregateArgs (`structArg`, `gep_*` / `loadgep_*` with `!align`), ExcludeArgsFromAggregate,
+  AllocationBlock and ArgsInZeroAddressSpace for the parallel region outlining.
+- Debug records: an instruction created before another instruction's *iterator* (`Instr->getIterator()`, an
+  `Instruction *` insert position, `std::next`) adopts the records attached there; one created at `begin()`,
+  `getFirstInsertionPt()` or `getFirstNonPHIIt()` (head bit) does not. `omp_insert_before` / `insert_at_position(...,
+  false)` vs. a plain insert. The same rule fixed AAIndirectCallInfo's compare/clone/unreachable and
+  AAPrivatizablePtr's replacement loads and `.priv` alloca (`debugify,attributor[-cgscc]` over Transforms/Attributor
+  had 4 / 5 differs, now 0).
+- Fails loudly: GPU triples (nvptx / amdgcn), merging parallel regions of device code, merging regions of two or
+  more blocks of one SCC (BB2PRMap is pointer-ordered), more than 4 outside users of a sequential-region value
+  (a SmallPtrSet), a function named `__last` matching OMPRTL___last. Remarks (`-pass-remarks=openmp-opt`) are not
+  supported by opt here at all.
 - Tests: `tests/pass/openmp-opt/` (32 files) are LLVM's GPU-only OpenMP tests with the target triple and the
   `-mtriple` / remark flags removed (custom state machines, SPMDization with guards, deglobalization, kernel
   environment folding, `--data-layout=A5`, OptimisticAttributes): all pass. The GPU tests that use nvvm / amdgcn
@@ -2349,7 +2360,10 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   loop-rotate convergence tokens 2, 1 each: avoid-assume-hang timeout, inline strictfp, inline vtable promotion,
   x86 hadd known bits, loop-idiom store chain order. `default<O2> --with-test-flags` 13273 / 0 / 0 / 352 loud;
   tests/perf/compile 4/4. `openmp-opt`, `openmp-opt-cgscc`, `openmp-opt-postlink` (plain and `--with-test-flags`)
-  and `default<O2>`, `lto<O2>` on the 25 OpenMP corpus files and on tests/pass/openmp-opt: 0 differs.
+  and `default<O2>`, `lto<O2>`, `lto-pre-link<O2>`, `thinlto-pre-link<O2>` on the 25 OpenMP corpus files and on
+  tests/pass/openmp-opt: 0 differs; the same 57 files with `-openmp-opt-enable-merging` (openmp-opt-cgscc,
+  `attributor,cgscc(openmp-opt-cgscc)`, default<O2>, lto<O2>) and under `debugify,` (openmp-opt, openmp-opt-cgscc,
+  attributor, attributor-cgscc, default<O2>): 0 differs.
 - Perf: no benchmark has OpenMP (the passes exit early).
 ## LoadStoreVectorizer (L1.extra.load-store-vectorizer COMPLETE 44/44; /root/jai_extras_d)
 

@@ -16964,6 +16964,7 @@ tests/imported/llvm/Transforms/OpenMP/no-insert-nvvm-annotations.ll::opt
 tests/imported/llvm/Transforms/OpenMP/no-insert-nvvm-annotations.ll::roundtrip
 tests/imported/llvm/Transforms/OpenMP/parallel_deletion.ll::opt
 tests/imported/llvm/Transforms/OpenMP/parallel_deletion.ll::roundtrip
+tests/imported/llvm/Transforms/OpenMP/parallel_region_merging.ll::opt
 tests/imported/llvm/Transforms/OpenMP/parallel_region_merging.ll::roundtrip
 tests/imported/llvm/Transforms/OpenMP/remove_noinline_attributes.ll::opt
 tests/imported/llvm/Transforms/OpenMP/remove_noinline_attributes.ll::roundtrip

@@ -1,8 +1,7 @@
 # OpenMPOpt (`openmp-opt`, `openmp-opt-postlink`, `openmp-opt-cgscc`)
 
 Facts that decide the output of llvm/lib/Transforms/IPO/OpenMPOpt.cpp. Verified with impl/jai's port
-(src/pass_openmp_opt.jai, openmp_aas.jai, openmp_kernel_info.jai): Transforms/OpenMP (20 of 21 `@opt` files; the
-other needs `-openmp-opt-enable-merging`), the OpenMP files of Transforms/Attributor, tests/pass/openmp-opt (LLVM's
+(src/pass_openmp_opt.jai, openmp_aas.jai, openmp_kernel_info.jai): Transforms/OpenMP (all 21 `@opt` files), the OpenMP files of Transforms/Attributor, tests/pass/openmp-opt (LLVM's
 GPU tests without the triple) and `default<O2>` over the corpus, unless another source is named.
 
 ## When it runs and what it always does
@@ -74,9 +73,30 @@ GPU tests without the triple) and `default<O2>` over the corpus, unless another 
   %struct.ident_t {...}, align 8` / `[N x i8] c"...", align 1`; existing ones with the same initializer are reused
   (the *last* matching ident, the *first* matching string).
 
+## Parallel region merging (`-openmp-opt-enable-merging`, after deduplication; then deduplication runs again)
+
+- Candidates are runs of `__kmpc_fork_call`s in one block separated only by instructions that may run in parallel:
+  before the first call anything but a terminator or a call to `__kmpc_push_proc_bind` / `__kmpc_push_num_threads` /
+  an indirect callee; between calls anything but terminators and non-intrinsic calls. An unmergable instruction
+  also skips the next fork call.
+- Between two merged calls the code becomes a `seq.par.merged` region under `__kmpc_master` /
+  `__kmpc_end_master` + `__kmpc_barrier` (ident flags 66 = BARRIER_IMPL | KMPC); its values used later are
+  stored to `%<v>.seq.output.alloc` allocas at the top of the function and reloaded (`.seq.output.load`) before each
+  outside user. Every merged call becomes a direct call `void (ptr, ptr, ...)` of its microtask with the outlined
+  function's tid/zero arguments, keeping the fork call's parameter attributes (shifted by one), with a
+  `__kmpc_barrier` after all but the last.
+- OpenMPIRBuilder::createParallel builds `omp.par.entry` / `omp.par.region` / `omp.par.pre_finalize` /
+  `omp.par.exit` / `.fini`; `finalize` outlines with an aggregate-argument CodeExtractor (suffix `.omp_par`, so
+  `@<fn>..omp_par`, placed right after the function; inputs in a `%structArg = alloca { ... }` at the top of the
+  entry block, `!align` on the pointer loads in the callee; tid/zero addresses are scalar `noalias` parameters),
+  removes the extractor's entry block, renames the call block `omp_parallel` and calls
+  `__kmpc_fork_call(ident, n, @<fn>..omp_par, %structArg)`; non-array allocas of blocks post-dominating the entry
+  move to the entry. Verified: Transforms/OpenMP/parallel_region_merging.ll (also with `debugify,`).
+
 ## Order that does not show
 
 - `internalizeFunctions`' SmallPtrSet, AAExecutionDomain's barrier/assume SmallPtrSets and the BEDMap / CEDMap /
   UniqueKernelMap DenseMaps are only membership-tested, merged or looked up (deletion order of barriers does not
   change the output). `mergeParallelRegions` iterates a `SmallDenseMap<BasicBlock *, ...>`: with two or more blocks
-  that get merged in one SCC the outlining order is the address order (not ported in impl/jai).
+  that get merged in one SCC the outlining order is the address order (impl/jai fails loudly there); the outside
+  users of a sequential-region value are a `SmallPtrSet<Instruction *, 4>` (insertion order up to 4 elements).

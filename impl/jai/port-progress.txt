@@ -200,8 +200,8 @@ lib/IR/Module.cpp 0.1  # getGlobalVariable, getFunction, global_values order
 lib/Support/MD5.cpp 0.8  # update / final / stringifyResult / MD5Hash
 lib/Transforms/Scalar/TailRecursionElimination.cpp 0.95  # no optimization remarks (ORE)
 # -O2 pipeline passes that are early exits or partial (jai_scalar_misc)
-lib/Transforms/IPO/OpenMPOpt.cpp 0.9  # all but mergeParallelRegions (fails loudly) and the remark-only code (printICVs, printKernels, analysisGlobalization)
-lib/Frontend/OpenMP/OMPIRBuilder.cpp 0.02  # initializeTypes (lazy), addAttributes, getOrCreateRuntimeFunction, getOrCreateSrcLocStr / Ident, read*BoundsForKernel
+lib/Transforms/IPO/OpenMPOpt.cpp 0.97  # all but the remark-only code (printICVs, printKernels, analysisGlobalization)
+lib/Frontend/OpenMP/OMPIRBuilder.cpp 0.05  # initializeTypes (lazy), addAttributes, getOrCreateRuntimeFunction, getOrCreateSrcLocStr / Ident, read*BoundsForKernel, createParallel (host), createMaster, createBarrier, finalize
 lib/Transforms/IPO/MemProfContextDisambiguation.cpp 0.01  # MemProfRemoveInfo only
 lib/Transforms/IPO/ForceFunctionAttrs.cpp 0.05  # no -force-attribute / -force-remove-attribute / CSV support
 lib/Transforms/Utils/InjectTLIMappings.cpp 0.1  # no vector-library mappings
@@ -243,7 +243,7 @@ lib/IR/ModuleSummaryIndex.cpp 0.1  # only the queries LTT/WPD make on a YAML-rea
 lib/Transforms/IPO/ExpandVariadics.cpp 0.03  # no VariadicABIInfo for x86: early exit
 lib/Transforms/IPO/ForceFunctionAttrs.cpp 0.85  # no -forceattrs-csv-path
 lib/Transforms/IPO/PartialInlining.cpp 0.95  # single- and multi-region; no optimization remarks, blockaddress users fail loudly
-lib/Transforms/Utils/CodeExtractor.cpp 0.9  # no aggregate args (StructValues), alloca/dealloc blocks, LifetimeBitcastUsers, verifyAssumptionCache
+lib/Transforms/Utils/CodeExtractor.cpp 0.95  # + aggregate args (StructValues), AllocationBlock, ArgsInZeroAddressSpace; no dealloc blocks, LifetimeBitcastUsers, verifyAssumptionCache
 lib/Transforms/IPO/HotColdSplitting.cpp 0.95  # no optimization remarks
 lib/Transforms/IPO/BlockExtractor.cpp 0.95  # no API-provided groups (only -extract-blocks-file)
 lib/Analysis/IRSimilarityIdentifier.cpp 0.97  # no findSimilarity(ArrayRef<Module>) (multi-module), legacy wrapper pass
