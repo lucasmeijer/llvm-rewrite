@@ -318,18 +318,28 @@ pi_forall_interfering_accesses_for_inst :: (i: u32, q: u32, x: Value_Id, find_wr
     e := pi_ext(i);
     scope := inst_fn(x);
     no_sync, _ := atr_has_assumed_ir_attr(.NoSync, q, irp_function(scope), DEP_OPTIONAL);
+    // an AAExecutionDomain exists only if OpenMPOpt created it
+    exec_domain := atr_lookup(.EXECUTION_DOMAIN, irp_function(scope), q, DEP_NONE);
     all_in_same_no_sync_fn := no_sync;
-    // AAExecutionDomain only exists in OpenMPOpt
+    inst_initial_thread_only := exec_domain != NONE && ed_is_executed_by_initial_thread_only(exec_domain, inst_block(x));
+    inst_aligned := find_reads && exec_domain != NONE && ed_is_executed_in_aligned_region(exec_domain, x);
+    if inst_aligned || inst_initial_thread_only atr_record_dependence(exec_domain, q, DEP_OPTIONAL);
     is_thread_local_obj := atr_is_assumed_thread_local_object(irp_assoc_value(aa(i).pos), i);
     _, known_no_recurse := atr_has_assumed_ir_attr(.NoRecurse, i, irp_function(scope), DEP_OPTIONAL);
+    inst_in_kernel := atr_is_kernel(scope);
+    obj_has_kernel_lifetime := false;
     use_dominance := find_writes && known_no_recurse;
     dt := atr_dt(scope);
     gb: Go_Back;
     av := irp_assoc_value(aa(i).pos);
     if is_inst(av) && inst_op(av) == .ALLOCA {
         aifn := inst_fn(av);
+        obj_has_kernel_lifetime = atr_is_kernel(aifn);
         nr, _ := atr_has_assumed_ir_attr(.NoRecurse, i, irp_function(aifn), DEP_OPTIONAL);
         if nr gb = .{GOBACK_NOT_FN, aifn};
+    } else if is_global_value(vkind(av)) {
+        // HasKernelLifetime: only on AMD and NVIDIA GPUs
+        if atr_is_target_gpu() fatal("attributor: GPU address spaces are not supported");
     }
     exclusion: [..] Value_Id; exclusion.allocator = temp;
     dominating: [..] u32; dominating.allocator = temp;
@@ -350,6 +360,7 @@ pi_forall_interfering_accesses_for_inst :: (i: u32, q: u32, x: Value_Id, find_wr
             acc := *e.accesses[cd.acc];
             acc_scope := inst_fn(acc.remote);
             in_same := acc_scope == scope;
+            if inst_in_kernel && obj_has_kernel_lifetime && !in_same && atr_is_kernel(acc_scope) continue;
             if cd.exact && pi_acc_is_must(acc) && acc.remote != x {
                 if pi_acc_is_write(acc) || (inst_op(x) == .LOAD && pi_acc_is_write_or_assumption(acc)) copies_insert(*exclusion, acc.remote);
             }
@@ -367,17 +378,30 @@ pi_forall_interfering_accesses_for_inst :: (i: u32, q: u32, x: Value_Id, find_wr
         if least == NONE least = rem;
         else if dt_dominates_inst(dt, least, rem) least = rem;
     }
-    can_ignore_threading_for_inst :: (y: Value_Id, is_thread_local_obj: bool, all_in_same: bool) -> bool {
-        return is_thread_local_obj || all_in_same;
+    // CanIgnoreThreadingForInst
+    can_ignore_threading_for_inst :: (y: Value_Id, is_thread_local_obj: bool, all_in_same: bool, scope: Value_Id, exec_domain: u32,
+                                      q: u32, inst_aligned: bool, inst_initial_thread_only: bool, find_writes: bool) -> bool {
+        if is_thread_local_obj || all_in_same return true;
+        fed := ifx inst_fn(y) == scope then exec_domain else atr_lookup(.EXECUTION_DOMAIN, irp_function(inst_fn(y)), q, DEP_NONE);
+        if fed == NONE return false;
+        if inst_aligned || (find_writes && ed_is_executed_in_aligned_region(fed, y)) {
+            atr_record_dependence(fed, q, DEP_OPTIONAL);
+            return true;
+        }
+        if inst_initial_thread_only && ed_is_executed_by_initial_thread_only(fed, inst_block(y)) {
+            atr_record_dependence(fed, q, DEP_OPTIONAL);
+            return true;
+        }
+        return false;
     }
     for it: interfering {
         acc := *e.accesses[it.acc];
         skip := false;
-        if !(!all_in_same_no_sync_fn && !is_thread_local_obj) {
+        if !(!all_in_same_no_sync_fn && !is_thread_local_obj && exec_domain == NONE) {
             // CanSkipAccess
             if copies_skip(c, acc) skip = true;
-            else if !(can_ignore_threading_for_inst(acc.remote, is_thread_local_obj, all_in_same_no_sync_fn) ||
-                      (acc.remote != acc.local && can_ignore_threading_for_inst(acc.local, is_thread_local_obj, all_in_same_no_sync_fn))) skip = false;
+            else if !(can_ignore_threading_for_inst(acc.remote, is_thread_local_obj, all_in_same_no_sync_fn, scope, exec_domain, q, inst_aligned, inst_initial_thread_only, find_writes) ||
+                      (acc.remote != acc.local && can_ignore_threading_for_inst(acc.local, is_thread_local_obj, all_in_same_no_sync_fn, scope, exec_domain, q, inst_aligned, inst_initial_thread_only, find_writes))) skip = false;
             else {
                 read_checked := !find_reads;
                 write_checked := !find_writes;

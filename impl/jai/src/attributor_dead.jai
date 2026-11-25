@@ -175,8 +175,13 @@ dead_is_dead_store :: (i: u32, si: Value_Id, assume_only: *[..] Value_Id) -> boo
     }
     return true;
 }
-// AAIsDeadFloating::isDeadFence: no AAExecutionDomain outside OpenMPOpt
-dead_is_dead_fence :: (i: u32, fi: Value_Id) -> bool { return false; }
+// AAIsDeadFloating::isDeadFence (an AAExecutionDomain exists only if OpenMPOpt created it)
+dead_is_dead_fence :: (i: u32, fi: Value_Id) -> bool {
+    ed := atr_lookup(.EXECUTION_DOMAIN, irp_function(inst_fn(fi)), i, DEP_NONE);
+    if ed == NONE || !ed_is_no_op_fence(ed, fi) return false;
+    atr_record_dependence(ed, i, DEP_OPTIONAL);
+    return true;
+}
 
 dead_update :: (i: u32) -> bool {
     pk := aa(i).pk;
@@ -326,9 +331,10 @@ dead_fn_assume_live :: (i: u32, bb: Value_Id) -> bool {
     }
     return true;
 }
-// Attributor::markLiveInternalFunction (DefaultInitializeLiveInternals)
+// Attributor::markLiveInternalFunction (DefaultInitializeLiveInternals, InitializationCallback)
 atr_mark_live_internal_function :: (f: Value_Id) {
-    atr_identify_default_abstract_attributes(f);
+    if atr.default_init_live_internals atr_identify_default_abstract_attributes(f);
+    if atr.omp_init_callback omp_register_aas_for_function(f);
 }
 
 // identifyAliveSuccessors for calls: true if assumed information was used

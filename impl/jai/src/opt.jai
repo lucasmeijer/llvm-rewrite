@@ -96,6 +96,11 @@
 #load "stack_lifetime.jai";
 #load "pass_coro_split.jai";
 #load "pass_openmp_opt.jai";
+#load "openmp_aas.jai";
+#load "openmp_kernel_info.jai";
+#load "omp_ir_builder.jai";
+#load "gen_omp_kinds.jai";
+#load "pass_openmp_opt_merge.jai";
 #load "pass_remark_only.jai";
 #load "pass_misc_module.jai";
 #load "pass_inject_tli_mappings.jai";

@@ -431,7 +431,7 @@ copy under the test directory's `Inputs/` by a path relative to the repository (
 
 ### L1.extra.openmp-opt — OpenMPOpt (host-side x86-64 parts)
 - deps: L2.inline, L1.extra.attributor
-- exit: tests/imported/llvm/Transforms/OpenMP/*::roundtrip, tests/imported/llvm/Transforms/OpenMP/*::opt
+- exit: tests/imported/llvm/Transforms/OpenMP/*::roundtrip, tests/imported/llvm/Transforms/OpenMP/*::opt, tests/pass/openmp-opt/*::roundtrip, tests/pass/openmp-opt/*::opt
 
 ### L1.extra.codegen-ir-misc — Further IR passes llc and targets run: ConstantHoisting, InterleavedAccess, ExpandIRInsts, GlobalMerge, IndirectBrExpand, InferAddressSpaces, LowerInvoke, LowerAtomic
 - deps: L1.codegen-ir

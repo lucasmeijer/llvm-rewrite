@@ -31,8 +31,11 @@ h2s_ext :: inline (i: u32) -> *H2s_Ext { return cast(*H2s_Ext) aa(i).x; }
 h2s_construct :: (i: u32) { aa(i).x = atr_new(H2s_Ext); }
 h2s_alloc_of :: (e: *H2s_Ext, cb: Value_Id) -> *H2s_Alloc { found, k := table_find(*e.alloc_idx, cb); if !found return null; return e.allocs[k]; }
 h2s_dealloc_of :: (e: *H2s_Ext, cb: Value_Id) -> *H2s_Dealloc { found, k := table_find(*e.dealloc_idx, cb); if !found return null; return e.deallocs[k]; }
+// isGlobalizedLocal: CB.getFnAttr("alloc-family"): the call site's, else the called function's
 h2s_is_globalized_local :: (cb: Value_Id) -> bool {
     for attr_set_items(call_fn_attrs(cb)) if it.kind == .STRING_ATTR && it.key == "alloc-family" return it.val == "__kmpc_alloc_shared";
+    f := call_called_operand_fn(cb);
+    if f != NONE for attr_set_items(attr_list_fn(glob(f).attrs)) if it.kind == .STRING_ATTR && it.key == "alloc-family" return it.val == "__kmpc_alloc_shared";
     return false;
 }
 

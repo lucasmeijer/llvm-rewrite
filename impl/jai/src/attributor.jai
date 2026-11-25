@@ -254,6 +254,8 @@ Atr_Kind :: enum u8 {
     PRIVATIZABLE_PTR; VALUE_CONSTANT_RANGE; POTENTIAL_CONSTANT_VALUES; POTENTIAL_VALUES; NO_UNDEF; POINTER_INFO;
     ASSUMPTION_INFO; INVARIANT_LOAD_POINTER; ADDRESS_SPACE; NO_ALIAS_ADDR_SPACE; ALLOCATION_INFO; INDIRECT_CALL_INFO;
     GLOBAL_VALUE_INFO;
+    // the AAs of OpenMPOpt.cpp (openmp_aas.jai)
+    ICV_TRACKER; EXECUTION_DOMAIN; HEAP_TO_SHARED; KERNEL_INFO; FOLD_RUNTIME_CALL;
 }
 ATR_LIGHT_LAST :: Atr_Kind.UNDERLYING_OBJECTS;
 
@@ -274,6 +276,9 @@ aa_kind_name :: (k: Atr_Kind) -> string {
         case .ADDRESS_SPACE; return "AAAddressSpace"; case .NO_ALIAS_ADDR_SPACE; return "AANoAliasAddrSpace";
         case .ALLOCATION_INFO; return "AAAllocationInfo"; case .INDIRECT_CALL_INFO; return "AAIndirectCallInfo";
         case .GLOBAL_VALUE_INFO; return "AAGlobalValueInfo";
+        case .ICV_TRACKER; return "AAICVTracker"; case .EXECUTION_DOMAIN; return "AAExecutionDomain";
+        case .HEAP_TO_SHARED; return "AAHeapToShared"; case .KERNEL_INFO; return "AAKernelInfo";
+        case .FOLD_RUNTIME_CALL; return "AAFoldRuntimeCall";
     }
     return "AA?";
 }
@@ -355,6 +360,10 @@ Attributor_State :: struct {
     delete_fns: bool;
     rewrite_signatures: bool;
     closed_world: bool;
+    default_init_live_internals: bool;   // AC.DefaultInitializeLiveInternals
+    omp_init_callback: bool;             // AC.InitializationCallback = OpenMPOpt::registerAAsForFunction
+    omp_ipo_amendable_kernels: bool;     // AC.IPOAmendableCB = F.hasFnAttribute("kernel") (OpenMPOptPass)
+    max_fixpoint_iterations: s64 = -1;   // AC.MaxFixpointIterations (-1: -attributor-max-iterations)
     aas: [..] *Abs_Attr;
     aa_map: Table(u64, u32);
     root: [..] u32;                // DG.SyntheticRoot.Deps (all REQUIRED)
@@ -364,7 +373,9 @@ Attributor_State :: struct {
     query_awaiting: [..] u32;      // QueryAAsAwaitingUpdate (SetVector)
     attrs_map: Table(Value_Id, u32);
     visited_functions: Table(Value_Id, bool);
-    simplification_cbs: Table(u64, bool);   // SimplificationCallbacks (only H2S's "return nullptr" callbacks)
+    simplification_cbs: Table(u64, [..] Atr_Simpl_Cb);   // SimplificationCallbacks
+    gv_simplification_cbs: Table(Value_Id, u32);         // GlobalVariableSimplificationCallbacks (AAKernelInfo's)
+    virtual_use_cbs: Table(Value_Id, [..] Atr_Virtual_Use);   // VirtualUseCallbacks
     // cleanup bookkeeping
     to_be_changed_uses: [..] [2] u32;       // SmallMapVector<Use *, Value *>: (use, value)
     to_be_changed_uses_idx: Table(Use_Id, s64);
@@ -568,7 +579,8 @@ atr_call_is_indirect :: (cb: Value_Id) -> bool {
 }
 // Attributor::isFunctionIPOAmendable
 atr_is_ipo_amendable :: (f: Value_Id) -> bool {
-    return (!is_declaration(f) && gv_is_definition_exact(f)) || table_contains(*atr.inlineable, f);
+    return (!is_declaration(f) && gv_is_definition_exact(f)) || table_contains(*atr.inlineable, f) ||
+           (atr.omp_ipo_amendable_kernels && fn_has_str_attr(f, "kernel"));
 }
 // Attributor::shouldUpdateAA
 atr_should_update :: (k: Atr_Kind, p: Irp) -> bool {
@@ -605,6 +617,7 @@ aa_is_valid :: (i: u32) -> bool {
         case .DENORMAL_FP; return dn_state_is_valid(a.dn_mode);
         case .VALUE_CONSTANT_RANGE; return vcr_is_valid(i);
         case .ASSUMPTION_INFO; return asi_is_valid(i);
+        case .KERNEL_INFO; return true;
     }
     return bs_is_valid(a.s);
 }
@@ -615,6 +628,7 @@ aa_is_fix :: (i: u32) -> bool {
         case .VALUE_CONSTANT_RANGE; return vcr_is_fix(i);
         case .ASSUMPTION_INFO; return asi_ext(i).fix;
         case .DEREFERENCEABLE; return !bs_is_valid(a.s) || (bs_is_fix(a.s) && bs_is_fix(a.g));
+        case .KERNEL_INFO; return kis_ext(i).is_at_fixpoint;
     }
     return bs_is_fix(a.s);
 }
@@ -625,6 +639,7 @@ aa_optimistic :: (i: u32) -> bool {
         case .VALUE_CONSTANT_RANGE; vcr_optimistic(i); return ATR_CHANGED;
         case .ASSUMPTION_INFO; asi_optimistic(i); return ATR_UNCHANGED;
         case .DEREFERENCEABLE; bs_optimistic(*a.s); bs_optimistic(*a.g); return ATR_UNCHANGED;
+        case .KERNEL_INFO; kis_optimistic(kis_ext(i)); return ATR_UNCHANGED;
     }
     bs_optimistic(*a.s);
     return ATR_UNCHANGED;
@@ -641,6 +656,8 @@ aa_pessimistic :: (i: u32) -> bool {
         case .PRIVATIZABLE_PTR; bs_pessimistic(*a.s); priv_ext(i).ty = NONE; return ATR_CHANGED;
         case .POTENTIAL_VALUES;
             if a.pk != .RETURNED && a.pk != .CALL_SITE_RETURNED { pv_impl_pessimistic(i); return ATR_CHANGED; }
+        case .KERNEL_INFO; kis_pessimistic(kis_ext(i)); return ATR_CHANGED;
+        case .FOLD_RUNTIME_CALL; frc_ext(i).simplified = NONE;
     }
     return bs_pessimistic(*aa(i).s);
 }
@@ -714,6 +731,10 @@ aa_check_position :: (k: Atr_Kind, pk: Irp_Kind) {
             ok = pk == .FUNCTION;
         case .INDIRECT_CALL_INFO; ok = pk == .CALL_SITE;
         case .GLOBAL_VALUE_INFO; ok = pk == .FLOAT;
+        case .ICV_TRACKER; ok = pk == .RETURNED || pk == .CALL_SITE_RETURNED || pk == .CALL_SITE || pk == .FUNCTION;
+        case .EXECUTION_DOMAIN; #through; case .HEAP_TO_SHARED; ok = pk == .FUNCTION;
+        case .KERNEL_INFO; ok = pk == .CALL_SITE || pk == .FUNCTION;
+        case .FOLD_RUNTIME_CALL; ok = pk == .CALL_SITE_RETURNED;
         case .MEM_BEHAVIOR; ok = pk != .INVALID && pk != .RETURNED;
         case .NO_FREE; #through; case .IS_DEAD; #through; case .UNDERLYING_OBJECTS;
             ok = pk != .INVALID;
@@ -808,7 +829,8 @@ atr_run_till_fixpoint :: () {
         atr.query_awaiting.count = 0;
         if worklist.list.count == 0 break;
         iteration += 1;
-        if !(iteration - 1 < atr_max_iterations) break;
+        max_iterations := ifx atr.max_fixpoint_iterations >= 0 then cast(u32) atr.max_fixpoint_iterations else atr_max_iterations;
+        if !(iteration - 1 < max_iterations) break;
     }
     // Reset abstract attributes not settled in a sound fixpoint by now.
     visited: Table(u32, bool);
@@ -1599,7 +1621,15 @@ atr_reset :: (functions: [] Value_Id, is_module_pass: bool, cached_only: bool, l
     atr.use_liveness = !light;
     atr.delete_fns = false;
     atr.rewrite_signatures = true;
+    atr.default_init_live_internals = true;
     for functions { array_add(*atr.functions, it); table_set(*atr.fn_set, it, true); }
+}
+
+// the Attributor constructor: the indirectly callable functions of a closed world module
+atr_constructor :: () {
+    if atr_is_closed_world() {
+        for f: atr.functions if fn_has_address_taken_for_attributor(f) array_add(*atr.indirectly_callable, f);
+    }
 }
 
 // runAttributorOnFunctions
@@ -1608,10 +1638,7 @@ attributor_run_on :: (functions: [] Value_Id, delete_fns: bool, is_module_pass: 
     atr_reset(functions, is_module_pass, false, false);
     atr.delete_fns = delete_fns;
     if atr_call_site_specific fatal("attributor: -attributor-enable-call-site-specific-deduction is not supported yet");
-    // the Attributor constructor: the indirectly callable functions of a closed world module
-    if atr_is_closed_world() {
-        for f: atr.functions if fn_has_address_taken_for_attributor(f) array_add(*atr.indirectly_callable, f);
-    }
+    atr_constructor();
     atr.phase = .SEEDING;
     if atr_allow_shallow_wrappers {
         n := atr.functions.count;

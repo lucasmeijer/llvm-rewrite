@@ -23,6 +23,8 @@ Opt_Level :: struct { speed: s32; size: s32; }
 // ThinOrFullLTOPhase
 Lto_Phase :: enum u8 { NONE; THIN_PRE_LINK; THIN_POST_LINK; FULL_PRE_LINK; FULL_POST_LINK; }
 pb_phase: Lto_Phase;
+// OpenMPOpt's PostLink: FullLTOPostLink, ThinLTOPostLink or ThinLTOPreLink
+pb_omp_post_link :: () -> bool { return pb_phase == .FULL_POST_LINK || pb_phase == .THIN_POST_LINK || pb_phase == .THIN_PRE_LINK; }
 is_lto_pre_link :: () -> bool { return pb_phase == .THIN_PRE_LINK || pb_phase == .FULL_PRE_LINK; }
 is_lto_post_link :: () -> bool { return pb_phase == .THIN_POST_LINK || pb_phase == .FULL_POST_LINK; }
 pb_rotate :: (check_exit_count: bool) -> string {
@@ -424,7 +426,7 @@ build_inliner_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     if pb_cl.attributor_run == "cgscc-light" || pb_cl.attributor_run == "light" pb_unsupported("attributor-light-cgscc (-attributor-enable)");
     pb_add(cg, *cglast, "function-attrs<skip-non-recursive-function-attrs>");
     if level.speed == 3 pb_add(cg, *cglast, "argpromotion");
-    if level.speed == 2 || level.speed == 3 pb_add(cg, *cglast, "openmp-opt-cgscc");
+    if level.speed == 2 || level.speed == 3 { n := pb_add(cg, *cglast, "openmp-opt-cgscc"); pipeline.nodes[n].omp_post_link = pb_omp_post_link(); }   // OpenMPOptCGSCCPass(Phase)
 
     fa := pb_node(cg, *cglast, .CGSCC_FN_ADAPTOR, ifx pto.eagerly_invalidate_analyses then "function<eager-inv;no-rerun>" else "function<no-rerun>");
     pipeline.nodes[fa].eager_inv = pto.eagerly_invalidate_analyses;
@@ -478,7 +480,7 @@ build_module_simplification_pipeline :: (mpm: s32, last: *s32, level: Opt_Level)
         if level.speed == 3 pb_add(fa, *l, "callsite-splitting");
     }
     }
-    pb_add(mpm, last, "openmp-opt");
+    { n := pb_add(mpm, last, "openmp-opt"); pipeline.nodes[n].omp_post_link = pb_omp_post_link(); }   // OpenMPOptPass(Phase)
     if pb_cl.attributor_run == "module" || pb_cl.attributor_run == "full" pb_unsupported("attributor (-attributor-enable)");
     if pb_cl.attributor_run == "module-light" || pb_cl.attributor_run == "light" pb_unsupported("attributor-light (-attributor-enable)");
     if pb_phase == .THIN_POST_LINK pb_add(mpm, last, "drop-type-tests<assume>");
@@ -704,7 +706,7 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
         pb_add(mpm, *last, "function(annotation-remarks)");
         return;
     }
-    pb_add(mpm, *last, "openmp-opt");   // OpenMPOptPass(FullLTOPostLink)
+    { n := pb_add(mpm, *last, "openmp-opt"); pipeline.nodes[n].omp_post_link = true; }   // OpenMPOptPass(FullLTOPostLink)
     pb_add(mpm, *last, "globaldce<vfe-linkage-unit-visibility>");
     pb_add(mpm, *last, "inferattrs");
     if level.speed >= 2 {
@@ -757,7 +759,7 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
         pipeline.nodes[n].opt_level = cast(s8) level.speed;
     }
     pb_add(mpm, *last, "globalopt");
-    pb_add(mpm, *last, "openmp-opt");
+    { n := pb_add(mpm, *last, "openmp-opt"); pipeline.nodes[n].omp_post_link = true; }   // OpenMPOptPass(FullLTOPostLink)
     pb_add(mpm, *last, "globaldce<vfe-linkage-unit-visibility>");
     {
         first := cast(s32) pipeline.nodes.count;
@@ -779,7 +781,12 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
         pb_add(mpm, *last, "function(invalidate<aa>)");
     }
     // MainFPM is filled first, but cgscc(openmp-opt-cgscc) is added to the MPM before it
-    pb_add(mpm, *last, "cgscc(openmp-opt-cgscc)");
+    {
+        n := pb_add(mpm, *last, "cgscc(openmp-opt-cgscc)");   // OpenMPOptCGSCCPass(FullLTOPostLink)
+        while n >= 0 && pipeline.nodes[n].info == null n = pipeline.nodes[n].first_child;
+        assert(n >= 0 && pipeline.nodes[n].name == "openmp-opt-cgscc");
+        pipeline.nodes[n].omp_post_link = true;
+    }
     main_fa := pb_function_adaptor(mpm, *last, pto.eagerly_invalidate_analyses);
     ml: s32 = -1;
     {

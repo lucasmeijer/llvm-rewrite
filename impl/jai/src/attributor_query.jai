@@ -248,6 +248,7 @@ for_expansion :: (r: Atr_Call_Sites, body: Code, flags: For_Flags) #expand {
     `acs: Acs;
     _uses: [..] Use_Id; _uses.allocator = temp;
     if r.require_all && !gv_has_local_linkage(r.f) r.ok.* = false;
+    else if !atr_virtual_uses_ok(r.f, r.q) r.ok.* = false;
     else {
         // a blockaddress has no operands in LLVM 23 (here it uses its function): not a use of the function
         _u := ir.v_first_use[r.f];
@@ -341,6 +342,7 @@ atr_uses_begin :: (q: u32, v: Value_Id, bb_only := false, dep := DEP_OPTIONAL, i
     w.work.allocator = temp;
     w.visited.allocator = temp;
     w.q = q; w.bb_only = bb_only; w.dep = dep; w.ignore_droppable = ignore_droppable; w.equiv = equiv; w.equiv_ctx = equiv_ctx;
+    if !atr_virtual_uses_ok(v, q) return false, w;
     if is_constant_data(v) return false, w;
     if !has_uses(v) return true, w;
     atr_uses_add(*w, v, NONE);
@@ -411,8 +413,48 @@ atr_stack_is_accessible_by_other_threads :: () -> bool { return !atr_is_target_g
 
 // ---------------------------------------------------------------- simplification
 
-atr_has_simplification_callback :: (p: Irp) -> bool { return table_contains(*atr.simplification_cbs, irp_key(p)); }
-atr_register_simplification_callback :: (p: Irp) { table_set(*atr.simplification_cbs, irp_key(p), true); }
+// SimplificationCallbacks: the callbacks are kinds. SCB_NULL returns nullptr (AAHeapToStack's, AAHeapToShared's);
+// SCB_FOLD_RUNTIME_CALL is AAFoldRuntimeCallCallSiteReturned's (returns its SimplifiedValue).
+Atr_Simpl_Cb :: struct { kind: u8; aa: u32 = NONE; }
+SCB_NULL :: cast(u8) 0;
+SCB_FOLD_RUNTIME_CALL :: cast(u8) 1;
+atr_has_simplification_callback :: (p: Irp) -> bool {
+    l := table_find_pointer(*atr.simplification_cbs, irp_key(p));
+    return l != null && l.count > 0;
+}
+atr_register_simplification_callback :: (p: Irp, kind := SCB_NULL, a: u32 = NONE) {
+    l := table_find_pointer(*atr.simplification_cbs, irp_key(p));
+    if !l { e: [..] Atr_Simpl_Cb; e.allocator = atr_allocator(); table_set(*atr.simplification_cbs, irp_key(p), e); l = table_find_pointer(*atr.simplification_cbs, irp_key(p)); }
+    array_add(l, .{kind, a});
+}
+// CB(IRP, AA, UsedAssumedInformation): NONE is nullptr, OV_NOVAL std::nullopt
+atr_run_simplification_cb :: (cb: Atr_Simpl_Cb, q: u32, uai: *bool) -> Value_Id {
+    if cb.kind == SCB_NULL return NONE;
+    if !aa_is_fix(cb.aa) {
+        uai.* = true;
+        if q != NONE atr_record_dependence(cb.aa, q, DEP_OPTIONAL);
+    }
+    return frc_ext(cb.aa).simplified;
+}
+atr_first_simplification_cb :: (p: Irp) -> Atr_Simpl_Cb { return (table_find_pointer(*atr.simplification_cbs, irp_key(p))).*[0]; }
+
+// VirtualUseCallbacks (AAKernelInfoFunction's): CB(A, QueryingAA)
+Atr_Virtual_Use :: struct { kind: u8; aa: u32; }
+VU_CUSTOM_STATE_MACHINE :: cast(u8) 0;
+VU_HW_THREAD_ID :: cast(u8) 1;
+VU_SPMD_BARRIER :: cast(u8) 2;
+atr_register_virtual_use_callback :: (v: Value_Id, kind: u8, a: u32) {
+    l := table_find_pointer(*atr.virtual_use_cbs, v);
+    if !l { e: [..] Atr_Virtual_Use; e.allocator = atr_allocator(); table_set(*atr.virtual_use_cbs, v, e); l = table_find_pointer(*atr.virtual_use_cbs, v); }
+    array_add(l, .{kind, a});
+}
+// for (VirtualUseCallbackTy &CB : VirtualUseCallbacks.lookup(&V)) if (!CB(*this, QueryingAA)) return false;
+atr_virtual_uses_ok :: (v: Value_Id, q: u32) -> bool {
+    l := table_find_pointer(*atr.virtual_use_cbs, v);
+    if !l return true;
+    for l.* if !ki_virtual_use_cb(it.kind, it.aa, q) return false;
+    return true;
+}
 
 // Attributor::getAssumedSimplifiedValues
 atr_get_assumed_simplified_values :: (p0: Irp, q: u32, out: *[..] Vac, s: u8, uai: *bool, recurse := true) -> bool {
@@ -422,17 +464,24 @@ atr_get_assumed_simplified_values :: (p0: Irp, q: u32, out: *[..] Vac, s: u8, ua
     while work.count {
         p := pop(*work);
         nv := out.count;
-        if atr_has_simplification_callback(p) {
-            // the only callbacks (AAHeapToStack's) return nullptr
-            return false;
-        }
-        pv := atr_get_aa(.POTENTIAL_VALUES, p, q, DEP_OPTIONAL);
-        if pv != NONE && pv_get_assumed_simplified_values(pv, out, s, false) {
-            uai.* |= !aa_is_fix(pv);
-        } else if irp_kind(p) != .RETURNED {
-            array_add(out, .{irp_assoc_value(p), irp_ctx_i(p)});
+        cbs := table_find_pointer(*atr.simplification_cbs, irp_key(p));
+        if cbs && cbs.count {
+            for cb: cbs.* {
+                r := atr_run_simplification_cb(cb, q, uai);
+                if r == OV_NOVAL continue;
+                if r == NONE return false;
+                if (s & AA_INTER) || atr_is_valid_in_scope(r, irp_anchor_scope(p)) array_add(out, .{r, NONE});
+                else return false;
+            }
         } else {
-            return false;
+            pv := atr_get_aa(.POTENTIAL_VALUES, p, q, DEP_OPTIONAL);
+            if pv != NONE && pv_get_assumed_simplified_values(pv, out, s, false) {
+                uai.* |= !aa_is_fix(pv);
+            } else if irp_kind(p) != .RETURNED {
+                array_add(out, .{irp_assoc_value(p), irp_ctx_i(p)});
+            } else {
+                return false;
+            }
         }
         if !recurse break;
         k := nv;
@@ -453,7 +502,7 @@ atr_get_assumed_simplified_values :: (p0: Irp, q: u32, out: *[..] Vac, s: u8, ua
 
 // Attributor::getAssumedSimplified: NONE is nullptr, OV_NOVAL is std::nullopt
 atr_get_assumed_simplified :: (p: Irp, q: u32, uai: *bool, s: u8) -> Value_Id {
-    if atr_has_simplification_callback(p) return NONE;
+    if atr_has_simplification_callback(p) return atr_run_simplification_cb(atr_first_simplification_cb(p), q, uai);
     vals: [..] Vac; vals.allocator = temp;
     if !atr_get_assumed_simplified_values(p, q, *vals, s, uai) return irp_assoc_value(p);
     if vals.count == 0 return OV_NOVAL;
@@ -469,7 +518,12 @@ atr_get_assumed_simplified_value :: (v: Value_Id, q: u32, uai: *bool, s: u8) -> 
 
 // Attributor::getAssumedConstant
 atr_get_assumed_constant :: (p: Irp, q: u32, uai: *bool) -> Value_Id {
-    if atr_has_simplification_callback(p) return NONE;
+    if atr_has_simplification_callback(p) {
+        r := atr_run_simplification_cb(atr_first_simplification_cb(p), q, uai);
+        if r == OV_NOVAL return OV_NOVAL;
+        if r != NONE && is_constant_kind(vkind(r)) return r;
+        return NONE;
+    }
     v := irp_assoc_value(p);
     if is_constant_kind(vkind(v)) return v;
     vals: [..] Vac; vals.allocator = temp;
@@ -626,10 +680,19 @@ atr_get_initial_value_for_obj :: (q: u32, obj: Value_Id, ty: Type_Id, range: *Pi
     init := get_initial_value_of_allocation(obj, ty);
     if init != NONE return init;
     if vkind(obj) != .GLOBAL_VAR return NONE;
-    if !gv_has_local_linkage(obj) {
-        if !gv_has_definitive_initializer(obj) || !glob(obj).is_const return NONE;
+    initializer: Value_Id = NONE;
+    found, ki := table_find(*atr.gv_simplification_cbs, obj);
+    if found {
+        // getAssumedInitializerFromCallBack: AAKernelInfoFunction's KernelConfigurationSimplifyCB
+        uai := false;
+        initializer = ki_kernel_env_simplify_cb(ki, q, *uai);
+        if initializer == NONE return NONE;
+    } else {
+        if !gv_has_local_linkage(obj) {
+            if !gv_has_definitive_initializer(obj) || !glob(obj).is_const return NONE;
+        }
+        initializer = gv_initializer(obj);
     }
-    initializer := gv_initializer(obj);
     if range && !pi_range_offset_or_size_unknown(range.*) {
         storage := cast(s64) dl_type_store_size(ty);
         if storage != range.size return NONE;

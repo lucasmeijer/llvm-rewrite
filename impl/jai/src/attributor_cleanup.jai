@@ -473,6 +473,13 @@ drop_droppable_uses :: (x: Value_Id) {
 // ---------------------------------------------------------------- the CGSCC pass's call graph updates
 
 atr_cgscc_update :: (c_in: s32, ur: *Cgscc_Ur) -> s32 {
+    c := atr_cgscc_reanalyze(c_in, ur);
+    atr_cgscc_finalize();
+    return c;
+}
+// The CallGraphUpdater calls cleanupIR makes (replaceFunctionWith's LCG substitution, reanalyzeFunction of the
+// modified functions)
+atr_cgscc_reanalyze :: (c_in: s32, ur: *Cgscc_Ur) -> s32 {
     c := c_in;
     for pr: atr_cgscc_replaced {
         n := lcg_lookup(pr[0]);
@@ -488,6 +495,10 @@ atr_cgscc_update :: (c_in: s32, ur: *Cgscc_Ur) -> s32 {
         if n < 0 continue;
         c = update_cg_and_am_for_pass(c, n, ur, false);
     }
+    return c;
+}
+// CallGraphUpdater::finalize (the CallGraphUpdater's destructor at the end of the CGSCC pass)
+atr_cgscc_finalize :: () {
     for f: atr_cg_dead_functions {
         remove_dead_constant_users(f);
         md_as_value_deleted(f, false);
@@ -497,7 +508,6 @@ atr_cgscc_update :: (c_in: s32, ur: *Cgscc_Ur) -> s32 {
     }
     atr_cg_dead_functions.count = 0;
     table_reset(*atr_cg_replaced);
-    return c;
 }
 
 // ---------------------------------------------------------------- wrappers and internalization
@@ -575,6 +585,39 @@ atr_internalize_non_exact_functions :: () {
         }
     }
 }
+// Attributor::isInternalizable
+atr_is_internalizable :: (f: Value_Id) -> bool {
+    l := glob(f).linkage;
+    if is_declaration(f) || gv_has_local_linkage(f) || l == .WEAK_ANY || l == .LINKONCE_ANY || l == .COMMON || l == .EXTERN_WEAK return false;
+    return true;
+}
+// Attributor::internalizeFunctions(FnSet, FnMap). FnSet is a SmallPtrSet; its (address) order does not show: every
+// copy is inserted right before its original, and the use replacement only reads the complete FnMap.
+atr_internalize_functions :: (fns: [] Value_Id, map: *Table(Value_Id, Value_Id)) -> bool {
+    for fns if !atr_is_internalizable(it) return false;
+    table_reset(map);
+    for f: fns {
+        vm: Value_Map; vmap_init(*vm);
+        nf := clone_function(f, *vm, tprint("%.internalized", vname(f)), f);
+        gv_set_visibility(nf, 0);
+        gv_set_linkage(nf, .PRIVATE);
+        glob(nf).dso_local = true;
+        table_set(map, f, nf);
+    }
+    for f: fns {
+        _, nf := table_find(map, f);
+        us: [..] Use_Id; us.allocator = temp;
+        u := ir.v_first_use[f];
+        while u != NONE {
+            usr := ir.u_user[u];
+            if is_inst(usr) && is_call_base(usr) && !table_contains(map, inst_fn(usr)) array_add(*us, u);
+            u = ir.u_next[u];
+        }
+        for us use_set(it, nf);
+    }
+    return true;
+}
+
 // Function::hasAddressTaken(nullptr, IgnoreCallbackUses=false, IgnoreAssumeLikeCalls=true, IgnoreLLVMUsed=true,
 // IgnoreARCAttachedCall=false, IgnoreCastedDirectCall=true)
 fn_has_address_taken_for_attributor :: (f: Value_Id) -> bool {

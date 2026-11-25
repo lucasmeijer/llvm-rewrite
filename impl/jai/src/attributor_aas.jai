@@ -199,6 +199,8 @@ aa_construct :: (i: u32) {
         case .GLOBAL_VALUE_INFO; aa(i).x = atr_new(Gvi_Ext);
         case .INDIRECT_CALL_INFO; ici_construct(i);
         case .ALLOCATION_INFO; alloc_info_construct(i);
+        case .ICV_TRACKER; #through; case .EXECUTION_DOMAIN; #through; case .HEAP_TO_SHARED; #through;
+        case .KERNEL_INFO; #through; case .FOLD_RUNTIME_CALL; omp_aa_construct(i);
     }
 }
 
@@ -270,6 +272,8 @@ aa_initialize :: (i: u32) {
         case .ADDRESS_SPACE; as_initialize(i);
         case .NO_ALIAS_ADDR_SPACE; as_initialize(i);
         case .ALLOCATION_INFO; alloc_info_initialize(i);
+        case .ICV_TRACKER; #through; case .EXECUTION_DOMAIN; #through; case .HEAP_TO_SHARED; #through;
+        case .KERNEL_INFO; #through; case .FOLD_RUNTIME_CALL; omp_aa_initialize(i);
     }
 }
 
@@ -485,6 +489,8 @@ aa_update_impl :: (i: u32) -> bool {
         case .ALLOCATION_INFO; return alloc_info_update(i);
         case .INDIRECT_CALL_INFO; return ici_update(i);
         case .GLOBAL_VALUE_INFO; return gvi_update(i);
+        case .ICV_TRACKER; #through; case .EXECUTION_DOMAIN; #through; case .HEAP_TO_SHARED; #through;
+        case .KERNEL_INFO; #through; case .FOLD_RUNTIME_CALL; return omp_aa_update(i);
     }
     return ATR_UNCHANGED;
 }
@@ -1502,6 +1508,8 @@ aa_manifest :: (i: u32) -> bool {
         case .INVARIANT_LOAD_POINTER; return ilp_manifest(i);
         case .ALLOCATION_INFO; return alloc_info_manifest(i);
         case .INDIRECT_CALL_INFO; return ici_manifest(i);
+        case .ICV_TRACKER; #through; case .EXECUTION_DOMAIN; #through; case .HEAP_TO_SHARED; #through;
+        case .KERNEL_INFO; #through; case .FOLD_RUNTIME_CALL; return omp_aa_manifest(i);
     }
     return aa_ir_attribute_manifest(i);
 }

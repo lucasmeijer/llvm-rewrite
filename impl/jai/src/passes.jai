@@ -606,6 +606,7 @@ PASS_TABLE :: Pass_Info.[
     .{"coro-split", .CGSCC, .CORO_SPLIT, true, .DOMTREE},   // also coro-split<reuse-storage>
     .{"coro-annotation-elide", .CGSCC, .CORO_ANNOTATION_ELIDE, false, .DOMTREE},
     .{"openmp-opt", .MODULE, .OPENMP_OPT, false, .DOMTREE},
+    .{"openmp-opt-postlink", .MODULE, .OPENMP_OPT, false, .DOMTREE},   // OpenMPOptPass(FullLTOPostLink)
     .{"openmp-opt-cgscc", .CGSCC, .OPENMP_OPT_CGSCC, false, .DOMTREE},
     .{"annotation2metadata", .MODULE, .ANNOTATION2METADATA, false, .DOMTREE},
     .{"annotation-remarks", .FUNCTION, .ANNOTATION_REMARKS, true, .DOMTREE},
@@ -731,6 +732,7 @@ Pass_Node :: struct {
     no_lifetime: bool;             // always-inline: InsertLifetimeIntrinsics = false
     early_folds_only: bool;        // vector-combine: TryEarlyFoldsOnly
     in_lto: bool;                  // jump-table-to-switch: InLTO = isLTOPostLink(Phase)
+    omp_post_link: bool;           // openmp-opt(-cgscc): OpenMPPostLink (FullLTOPostLink, ThinLTOPostLink, ThinLTOPreLink)
     no_func_spec: bool;            // ipsccp: AllowFuncSpec = !isLTOPreLink(Phase)
     no_cl: bool;                   // lowertypetests / wholeprogramdevirt: built with (summary) arguments, not UseCommandLine
     late_first: s32 = -1;          // INLINER_WRAPPER_PM: the first of its late module passes (not printed)
@@ -1232,6 +1234,7 @@ parse_cl_opt :: (arg: string) -> bool {
     // -mattr is a cl::list (CommaSeparated): repeated options accumulate
     if name == "mattr" && has_value && tti_opts.mattr.count { tti_opts.mattr = sprint("%,%", tti_opts.mattr, value); return true; }
     if atr_parse_cl_opt(name, value, has_value) return true;   // attributor.jai
+    if omp_parse_cl_opt(name, value, has_value) return true;   // pass_openmp_opt.jai
     if ipo_parse_cl_opt(name, value, has_value) return true;   // cgscc_pm.jai, pass_function_attrs.jai, inliner
     if globals_parse_cl_opt(name, value, has_value) return true;   // pass_global_opt.jai, internalize, globaldce, ...
     if scalar_misc_parse_cl_opt(name, value, has_value) return true;   // scalar_misc_cl.jai (L1.scalar-misc passes)
@@ -1421,7 +1424,7 @@ run_module_pm :: (n: s32) {
             case .DEAD_ARG_ELIM; if should_run_pass(node, NONE) mam_invalidate(dead_arg_elim_run());
             case .CORO_EARLY; if should_run_pass(node, NONE) mam_invalidate(coro_early_run());
             case .CORO_CLEANUP; if should_run_pass(node, NONE) mam_invalidate(coro_cleanup_run());
-            case .OPENMP_OPT; if should_run_pass(node, NONE) mam_invalidate(openmp_opt_run());
+            case .OPENMP_OPT; if should_run_pass(node, NONE) mam_invalidate(openmp_opt_run(node.omp_post_link || node.name == "openmp-opt-postlink"));
             case .ANNOTATION2METADATA; if should_run_pass(node, NONE) mam_invalidate(annotation2metadata_run());
             case .FORCEATTRS; if should_run_pass(node, NONE) mam_invalidate(forceattrs_run());
             case .MEMPROF_REMOVE_INFO; if should_run_pass(node, NONE) mam_invalidate(memprof_remove_info_run());
