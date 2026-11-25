@@ -1807,6 +1807,53 @@ Still slow / next:
   --with-test-flags 10868/10927 (59 loud), simplifycfg, loop-rotate, make-guards-explicit, function(loop-mssa(licm)),
   dce/licm with --enable-knowledge-retention all 100%, slp-vectorizer --with-test-flags 10926/10982 (56 loud).
 
+## Whole-corpus sweeps, 2026-11-25 (/root/jai_silentfix)
+
+Every file whose `::roundtrip` passes (10817, tests/perf left out), plain and `--with-test-flags` (13633 runs);
+the remaining count to the totals is `llvm-failed` (LLVM's opt fails with those arguments). `failed` with test flags
+is almost all `unsupported option` for pass cl::opts we don't implement (-sbvec-*, -whole-program-visibility,
+-irce-*, -dfsan-*, ...). Each row is `./harness/run sweep --impl jai --passes <p> [--with-test-flags]`.
+
+| pass | plain: identical / differs / bad-ir / failed | --with-test-flags: identical / differs / bad-ir / failed |
+| --- | --- | --- |
+| `instsimplify` | 10816 / 0 / 0 / 1 | 13126 / 0 / 0 / 507 |
+| `instcombine` | 10754 / 0 / 0 / 1 | 13076 / 0 / 0 / 491 |
+| `simplifycfg` | 10817 / 0 / 0 / 0 | 13127 / 0 / 0 / 506 |
+| `sroa` | 10809 / 0 / 0 / 8 | 13116 / 0 / 0 / 517 |
+| `early-cse<memssa>` | 10816 / 0 / 0 / 1 | 13140 / 0 / 0 / 493 |
+| `gvn` | 10816 / 0 / 0 / 1 | 13126 / 0 / 0 / 507 |
+| `newgvn` | 10799 / 0 / 0 / 13 | 13123 / 0 / 0 / 505 |
+| `sccp` | 10817 / 0 / 0 / 0 | 13141 / 0 / 0 / 492 |
+| `ipsccp` | 10815 / 0 / 0 / 0 | 13138 / 0 / 0 / 492 |
+| `licm` | 10817 / 0 / 0 / 0 | 13141 / 0 / 0 / 492 |
+| `loop-rotate` | 10817 / 0 / 0 / 0 | 13141 / 0 / 0 / 492 |
+| `indvars` | 10816 / 0 / 0 / 0 | 13135 / 0 / 0 / 496 |
+| `loop-unroll` | 10816 / 0 / 0 / 1 | 13126 / 0 / 0 / 507 |
+| `simple-loop-unswitch<nontrivial>` | 10816 / 0 / 0 / 0 | 13136 / 0 / 0 / 496 |
+| `dse` | 10817 / 0 / 0 / 0 | 13141 / 0 / 0 / 492 |
+| `memcpyopt` | 10817 / 0 / 0 / 0 | 13127 / 0 / 0 / 506 |
+| `jump-threading` | 10816 / 0 / 0 / 0 | 13126 / 0 / 0 / 506 |
+| `correlated-propagation` | 10816 / 0 / 0 / 0 | 13126 / 0 / 0 / 506 |
+| `reassociate` | 10817 / 0 / 0 / 0 | 13127 / 0 / 0 / 506 |
+| `inline` | 10804 / 0 / 0 / 13 | 13118 / 0 / 0 / 515 |
+| `cgscc(function-attrs)` | 10817 / 0 / 0 / 0 | 13127 / 0 / 0 / 506 |
+| `globalopt` | 10814 / 0 / 0 / 0 | 13138 / 0 / 0 / 492 |
+| `loop-vectorize` | 10817 / 0 / 0 / 0 | 13126 / 0 / 0 / 507 |
+| `slp-vectorizer` | 10816 / 0 / 0 / 1 | 13127 / 0 / 0 / 506 |
+| `default<O2>` | 10721 / 0 / 0 / 87 | 13016 / 0 / 0 / 599 |
+
+- The silent mismatches reported before this task (instcombine on GlobalSplit inrange GEPs and DataFlowSanitizer,
+  sroa on SampleProfile and tests/lto/ipo/debug_info) were already fixed on main (f73aa02b and the dfsan work);
+  this sweep found no differs/bad-ir in any of the 25 pipelines, before or after.
+- `default<O2>` crashed on 4 files (loud, 91 -> 87 failed), all fixed with tests in `tests/pass/`:
+  MemCpyOpt's merged memset length `End-Start` and SLP's `static_cast<uint64_t>(Dist)` must wrap like LLVM's int64
+  arithmetic (Jai's checked `cast(u64)` of a negative s64 panics: use `cast,no_check`); `tti_instruction_cost` pads
+  a constant expression's operand list to 3 entries, so the GEP case must only pass the GEP's own `nops` indices; and
+  attribute intersection (SimplifyCFG hoist/sink) must drop `nofpclass` when the AND of the masks is 0 (LLVM's
+  `addNoFPClassAttr(fcNone)` adds nothing; we printed `nofpclass(none)`, which the verifier rejects).
+- Loud, not bugs: ScalarEvolution/avoid-assume-hang.ll under O2 (LLVM 15 s, our x64 build > 60 s CPU) and
+  LoopUnroll/pr77842.ll under loop-unroll (LLVM 5 s, us 73 s; see Performance) time out in the sweep's 60 s limit.
+
 ## NewGVN (L1.extra.newgvn COMPLETE 296/296; /root/jai_newgvn)
 
 - One file, `pass_newgvn.jai` (NewGVN.cpp + GVNExpression.h + VNCoercion's getConstantValueForLoad /
