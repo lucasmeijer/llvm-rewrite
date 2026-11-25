@@ -50,6 +50,8 @@ oracle cache is `/persistent/llvm-rewrite/oracle-cache` (safe to delete; it refi
    - If anything got in your way, write a challenge report (see below).
    - Commit, then `git pull --rebase`, then rerun the check on the rebased tree, then `git push origin main`. If the
      push is rejected, repeat. On a conflict in `passing.txt`, take the union of both sides and rerun the check.
+     `scripts/publish.sh --impl <lang> [--also <langs>]` does exactly this (in a separate worktree, with retries and
+     a check that the push really landed); prefer it over doing it by hand.
 
 You may push smaller steps before a unit is complete (for example, a parser that passes half of `L0.print-basic`), as
 long as the full ratchet passes for your implementation. Never push a regression.
