@@ -294,7 +294,7 @@ Pass_Kind :: enum u8 {
     // pass_loop_flatten.jai, pass_loop_fuse.jai
     LOOP_FLATTEN; LOOP_FUSE;
     // pass_loop_versioning.jai, ...
-    LOOP_VERSIONING; LOOP_BOUND_SPLIT; LOOP_VERSIONING_LICM;
+    LOOP_VERSIONING; LOOP_BOUND_SPLIT; LOOP_VERSIONING_LICM; HARDWARE_LOOPS;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -528,6 +528,7 @@ PASS_TABLE :: Pass_Info.[
     .{"loop-versioning", .FUNCTION, .LOOP_VERSIONING, false, .DOMTREE},
     .{"loop-bound-split", .LOOP, .LOOP_BOUND_SPLIT, false, .DOMTREE},
     .{"loop-versioning-licm", .LOOP, .LOOP_VERSIONING_LICM, false, .DOMTREE},
+    .{"hardware-loops", .FUNCTION, .HARDWARE_LOOPS, false, .DOMTREE},   // also hardware-loops<...> (lookup_pass)
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -693,6 +694,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "hwasan<") && name[name.count - 1] == #char ">" return lookup_pass("hwasan");
     if begins_with(name, "msan<") && name[name.count - 1] == #char ">" return lookup_pass("msan");
     if begins_with(name, "loop-extract<") && name[name.count - 1] == #char ">" return lookup_pass("loop-extract");
+    if begins_with(name, "hardware-loops<") && name[name.count - 1] == #char ">" return lookup_pass("hardware-loops");
     return null;
 }
 
@@ -1257,6 +1259,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if lf_parse_cl_opt(name, value, has_value) return true;     // pass_loop_flatten.jai (-loop-flatten-*)
     if lfu_parse_cl_opt(name, value, has_value) return true;    // pass_loop_fuse.jai (-loop-fusion-*)
     if lvlicm_parse_cl_opt(name, value, has_value) return true; // pass_loop_versioning_licm.jai (-licm-versioning-*)
+    if hwl_parse_cl_opt(name, value, has_value) return true;    // pass_hardware_loops.jai (legacy-pass options, ignored)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1649,6 +1652,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .GUARD_WIDENING; return guard_widening_run(f);
         case .LOOP_FUSE; return loop_fuse_run(f);
         case .LOOP_VERSIONING; return loop_versioning_run(f);
+        case .HARDWARE_LOOPS; return hardware_loops_run(node, f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

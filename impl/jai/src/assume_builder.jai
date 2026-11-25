@@ -38,7 +38,7 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     // DependenceAnalysis, LoopAccessAnalysis, BasicBlockUtils) never call salvageKnowledge
     if kind == .LOOP_FUSE || kind == .LOOP_FLATTEN return;
     // LoopVersioning.cpp, LoopBoundSplit.cpp (+ CloneFunction, LoopSimplify) never call salvageKnowledge
-    if kind == .LOOP_VERSIONING || kind == .LOOP_BOUND_SPLIT || kind == .LOOP_VERSIONING_LICM return;
+    if kind == .LOOP_VERSIONING || kind == .LOOP_BOUND_SPLIT || kind == .LOOP_VERSIONING_LICM || kind == .HARDWARE_LOOPS return;
     fatal("-enable-knowledge-retention is not supported with pass '%' yet", name);
 }
 

@@ -52,6 +52,7 @@ with ThreadPoolExecutor(max_workers=os.cpu_count() or 8) as ex:
 
 # Intrinsics that passes create but that no test input mentions (LoopVectorize's masked div/rem, WholeProgramDevirt's
 # debugtrap, the ObjC ARC runtime entry points): declared in a
+# debugtrap, HardwareLoops' loop-count intrinsics): declared in a
 # scratch module so their attributes are read the same way.
 EXTRA_DECLS = '''
 declare <4 x i32> @llvm.masked.udiv.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
@@ -77,6 +78,12 @@ declare void @llvm.objc.release(ptr)
 declare void @llvm.objc.storeStrong(ptr, ptr)
 declare ptr @llvm.objc.autoreleasePoolPush()
 declare void @llvm.objc.autoreleasePoolPop(ptr)
+declare void @llvm.set.loop.iterations.i32(i32)
+declare i1 @llvm.test.set.loop.iterations.i32(i32)
+declare i32 @llvm.start.loop.iterations.i32(i32)
+declare { i32, i1 } @llvm.test.start.loop.iterations.i32(i32)
+declare i1 @llvm.loop.decrement.i32(i32)
+declare i32 @llvm.loop.decrement.reg.i32(i32, i32)
 '''
 with tempfile.NamedTemporaryFile('w', suffix='.ll', delete=False) as _t:
     _t.write(EXTRA_DECLS)

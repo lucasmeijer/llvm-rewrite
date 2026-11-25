@@ -226,6 +226,7 @@
 #load "pass_loop_versioning.jai";
 #load "pass_loop_bound_split.jai";
 #load "pass_loop_versioning_licm.jai";
+#load "pass_hardware_loops.jai";
 #load "print_uselistorder.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";
