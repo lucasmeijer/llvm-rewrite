@@ -205,7 +205,7 @@ print_inline_cost_run :: (f: Value_Id) -> Preserved {
         if !is_call_base(cb) continue;
         callee := call_called_function(cb);
         if callee == NONE || is_declaration(callee) continue;
-        ca := cax_new(callee, cb, params, true, false, no_bfi = true);
+        ca := cax_new(callee, cb, params, true, false, no_bfi = true, has_ore = true);
         cax_analyze(ca);
         print_to_builder(*sb, "      Analyzing call of %... (caller:%)\n", vname(callee), vname(inst_fn(cb)));
         // the annotations first (printing a value of the caller moves the printer's slot state)
@@ -262,15 +262,38 @@ ic_annotation :: (ca: *Call_Analyzer, i: Value_Id) -> string {
         if k == .INST {
             append(*sb, inst_to_string(v));
             if inst_fn(v) != inst_fn(i) append(*sb, " (caller instruction)");
+        } else if k == .GLOBAL_VAR || k == .FUNCTION {
+            append(*sb, value_print_isolated(v));   // Value::print of a global prints its definition
         } else if is_global_value(k) {
-            fatal("print<inline-cost>: a value simplified to a global value (Value::print prints its definition) is not supported yet");
+            fatal("print<inline-cost>: a value simplified to an alias or ifunc is not supported yet");
         } else if k == .ARGUMENT {
             append(*sb, value_as_operand_typed(v));
             if arg_parent(v) != inst_fn(i) append(*sb, " (caller argument)");
         } else if is_constant_kind(k) {
+            // Value::print of a Constant uses a fresh TypePrinting without the module: an unnamed identified struct
+            // prints as %"type 0x<address>"
+            if ic_constant_has_unnamed_struct(v) fatal("print<inline-cost>: LLVM prints the unnamed struct type of a simplified constant by its address");
             append(*sb, value_as_operand_typed(v));
         } else fatal("print<inline-cost>: simplified to an unsupported kind of value");
     }
     append(*sb, "\n");
     return builder_to_string(*sb,, allocator = temp);
+}
+
+ic_type_has_unnamed_struct :: (t: Type_Id) -> bool {
+    r := ir.types[t];
+    if r.kind == .STRUCT && !(r.flags & TYF_LITERAL) && r.name.count == 0 return true;
+    if r.kind == .ARRAY || r.kind == .VECTOR || r.kind == .SVECTOR return ic_type_has_unnamed_struct(type_elem(t));
+    if r.kind == .STRUCT || r.kind == .FUNC || r.kind == .TARGET_EXT {
+        if r.nsub > 0 for i: 0..r.nsub - 1 if ic_type_has_unnamed_struct(type_sub(t, cast(u32) i)) return true;
+    }
+    return false;
+}
+ic_constant_has_unnamed_struct :: (v: Value_Id) -> bool {
+    if ic_type_has_unnamed_struct(vtype(v)) return true;
+    k := vkind(v);
+    if is_global_value(k) return false;
+    if k == .C_EXPR && cexpr(v).op == .GEP && ic_type_has_unnamed_struct(cexpr(v).ty2) return true;
+    if nops(v) > 0 for i: 0..nops(v) - 1 { o := op(v, i); if o != NONE && ic_constant_has_unnamed_struct(o) return true; }
+    return false;
 }

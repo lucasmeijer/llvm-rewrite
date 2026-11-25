@@ -380,7 +380,7 @@ ic_print_instruction_comments := false;
 // getInlineCost without PSI and GetBFI (the sample profile loader's calls)
 ic_no_profile_analyses := false;
 
-cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indirect: bool, ignore_threshold: bool, use_eph_cache := false, no_bfi := false) -> *Call_Analyzer {
+cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indirect: bool, ignore_threshold: bool, use_eph_cache := false, no_bfi := false, has_ore := false) -> *Call_Analyzer {
     ca := New(Call_Analyzer,, allocator = temp);
     ca.no_bfi = no_bfi;
     ca.details.allocator = temp;
@@ -394,7 +394,8 @@ cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indir
     ca.single_bb = true;
     ca.psi = ifx ic_no_profile_analyses then null else psi_cached_or_null();
     ca.cost_benefit_enabled = cax_is_cost_benefit_analysis_enabled(ca);
-    ca.compute_full_inline_cost = ic_opts.compute_full_inline_cost || params.compute_full_inline_cost || ca.cost_benefit_enabled;
+    // ComputeFullInlineCost = OptComputeFullInlineCost || Params.ComputeFullInlineCost || ORE || isCostBenefitAnalysisEnabled()
+    ca.compute_full_inline_cost = ic_opts.compute_full_inline_cost || params.compute_full_inline_cost || has_ore || ca.cost_benefit_enabled;
     ca.threshold = params.default_threshold;
     ca.boost_indirect_calls = boost_indirect;
     ca.ignore_threshold = ignore_threshold;

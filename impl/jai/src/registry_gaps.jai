@@ -124,7 +124,7 @@ GAP_PASS_TABLE :: Gap_Info.[
     .{"assume-simplify", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .ASSUME_SIMPLIFY},
     .{"flatten-cfg", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .FLATTEN_CFG},
     .{"strip-gc-relocates", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .STRIP_GC_RELOCATES},
-    .{"print<stack-lifetime>", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .PRINT_STACK_LIFETIME},   // PassInfoMixin; also <may>, <must>
+    .{"print<stack-lifetime>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_STACK_LIFETIME},   // also <may>, <must>
     .{"print<inline-cost>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_INLINE_COST},
     .{"print<module-debuginfo>", .MODULE, .GAP_MODULE, true, .DOMTREE, .PRINT_MODULE_DEBUGINFO},
     .{"print<domfrontier>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_DOMFRONTIER},

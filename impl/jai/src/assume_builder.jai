@@ -75,7 +75,7 @@ gep_max_preserved_alignment :: (g: Value_Id) -> u64 {
         if i > 1 && type_kind(prev) == .STRUCT {
             offset = dl_struct_offset(prev, cast(u32) ap_zext_value(const_ap(c)));
         } else {
-            count: u64 = ifx is_scalar_const_int(c) then ap_zext_value(const_ap(c)) else 1;
+            count: u64 = ifx is_scalar_const_int(c) then ap_limited(const_ap(c)) else 1;   // getLimitedValue()
             offset = gep_seq_stride(ifx i > 1 then prev else NONE, i, t) * count;
         }
         result = min_align(offset, result);
@@ -459,7 +459,8 @@ asm_merge_range :: (s: *Assume_Simplify, bb: Value_Id, range: [] Value_Id) {
     if range.count < 2 return;
     b: Assume_Builder; b.keys.allocator = temp;
     ip := block_first_non_phi(bb);
-    if inst_op(ip) == .LANDINGPAD ip = inst(ip).next;
+    head := true;   // getFirstNonPHIIt() has the head bit; every iterator derived below does not
+    if inst_op(ip) == .LANDINGPAD { ip = inst(ip).next; head = false; }
     for a: range {
         asm_cleanup_insert(s, a);
         for k: 0..cast(s64) inst(a).nidx - 1 {
@@ -468,21 +469,21 @@ asm_merge_range :: (s: *Assume_Simplify, bb: Value_Id, range: [] Value_Id) {
             ab_add_knowledge(*b, rk);
             if rk.was_on != NONE && is_inst(rk.was_on) {
                 w := rk.was_on;
-                if inst_block(w) == inst_block(ip) && (comes_before(ip, w) || ip == w) ip = inst(w).next;
+                if inst_block(w) == inst_block(ip) && (comes_before(ip, w) || ip == w) { ip = inst(w).next; head = false; }
             }
         }
     }
     if comes_before(ip, range[0]) {
         x := range[0];
         while x != ip {
-            if !is_guaranteed_to_transfer_execution(x) { ip = inst(x).next; break; }
+            if !is_guaranteed_to_transfer_execution(x) { ip = inst(x).next; head = false; break; }
             x = inst(x).prev;
         }
     }
     m := ab_build(*b);
     if m == NONE return;
     s.made_change = true;
-    inst_insert_before(m, ip);   // insertBefore(InsertPt): an iterator without the head bit
+    insert_at_position(m, inst_block(ip), ip, head);   // MergedAssume->insertBefore(InsertPt)
     ac_register_assumption(s.ac, m);
 }
 
