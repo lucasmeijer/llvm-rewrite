@@ -1598,6 +1598,7 @@ rw_vectorized_store :: (r: *Sroa_Rewriter, v_in: Value_Id, si: Value_Id, tags: A
     copy_loop_metadata(st, si);
     if aa_any(tags) set_aa_metadata(st, aa_adjust_for_access_ty(tags, r.nbegin - r.begin, vtype(v)));
     array_add(*r.pass.dead_insts, si);
+    sroa_migrate_debug_info(r.old_ai, r.is_split, r.nbegin * 8, r.slice_size * 8, si, st, op(st, 1), v_in);   // OrigV
     return true;
 }
 
@@ -1613,6 +1614,7 @@ rw_integer_store :: (r: *Sroa_Rewriter, v_in: Value_Id, si: Value_Id, tags: AA_T
     st := irb_store(*r.irb, v, r.new_ai, inst(r.new_ai).align);
     copy_loop_metadata(st, si);
     if aa_any(tags) set_aa_metadata(st, aa_adjust_for_access_ty(tags, r.nbegin - r.begin, vtype(v)));
+    sroa_migrate_debug_info(r.old_ai, r.is_split, r.nbegin * 8, r.slice_size * 8, si, st, op(st, 1), op(st, 0));
     array_add(*r.pass.dead_insts, si);
     return true;
 }
@@ -1645,6 +1647,7 @@ rw_visit_store :: (r: *Sroa_Rewriter, si: Value_Id) -> bool {
     if aa_any(tags) set_aa_metadata(nsi, aa_adjust_for_access_ty(tags, r.nbegin - r.begin, vtype(v)));
     if volatile set_atomic_from(nsi, si);
     if inst(nsi).ord1 != 0 inst(nsi).align = inst(si).align;
+    sroa_migrate_debug_info(r.old_ai, r.is_split, r.nbegin * 8, r.slice_size * 8, si, nsi, op(nsi, 1), op(nsi, 0));
     array_add(*r.pass.dead_insts, si);
     rw_delete_if_trivially_dead(r, old_op);
     return op(nsi, 1) == r.new_ai && vtype(op(nsi, 0)) == r.na_ty && !volatile;
@@ -1687,6 +1690,7 @@ rw_visit_memset :: (r: *Sroa_Rewriter, ii: Value_Id) -> bool {
         size := const_int(vtype(len), sz);
         nw := irb_memset(*r.irb, rw_new_alloca_slice_ptr(r, *r.irb, vtype(r.old_ptr)), op(ii, 1), size, rw_slice_align(r), volatile);
         if aa_any(tags) set_aa_metadata(nw, aa_adjust_for_access_size(tags, r.nbegin - r.begin, sz));
+        sroa_migrate_debug_info(r.old_ai, r.is_split, r.nbegin * 8, r.slice_size * 8, ii, nw, call_arg(nw, 0), NONE);
         return false;
     }
     v: Value_Id;
@@ -1716,6 +1720,7 @@ rw_visit_memset :: (r: *Sroa_Rewriter, ii: Value_Id) -> bool {
     st := irb_store(*r.irb, v, new_ptr, inst(r.new_ai).align, volatile);
     copy_loop_metadata(st, ii);
     if aa_any(tags) set_aa_metadata(st, aa_adjust_for_access_ty(tags, r.nbegin - r.begin, vtype(v)));
+    sroa_migrate_debug_info(r.old_ai, r.is_split, r.nbegin * 8, r.slice_size * 8, ii, st, op(st, 1), v);
     return !volatile;
 }
 
@@ -1726,6 +1731,17 @@ rw_visit_memtransfer :: (r: *Sroa_Rewriter, ii: Value_Id) -> bool {
     volatile := mem_is_volatile(ii);
     if !r.splittable {
         adj := rw_new_alloca_slice_ptr(r, *r.irb, vtype(r.old_ptr));
+        if is_dest {
+            // update the address component of linked dbg_assigns
+            markers: [..] u32; markers.allocator = temp;
+            at_markers(ii, *markers);
+            ops: [..] Value_Id; ops.allocator = temp;
+            d := op(ii, 0);
+            for markers {
+                dbgr_location_ops(it, *ops);
+                if block_set_contains(ops, d) || dbgr_address(it) == d dbgr_replace_variable_location_op(it, d, adj);
+            }
+        }
         if is_dest { set_op(ii, 0, adj); set_param_align(ii, 0, slice_align); }
         else { set_op(ii, 1, adj); set_param_align(ii, 1, slice_align); }
         rw_delete_if_trivially_dead(r, r.old_ptr);
@@ -1758,6 +1774,7 @@ rw_visit_memtransfer :: (r: *Sroa_Rewriter, ii: Value_Id) -> bool {
         else { dst = other_ptr; da = other_align; src = our; sa = slice_align; }
         nw := irb_memcpy(*r.irb, dst, da, src, sa, size, volatile);
         if aa_any(tags) set_aa_metadata(nw, aa_shift(tags, r.nbegin - r.begin));
+        rw_migrate_transfer(r, ii, is_dest, nw, dst, NONE);
         return false;
     }
     whole := r.nbegin == r.na_begin && r.nend == r.na_end;
@@ -1802,7 +1819,20 @@ rw_visit_memtransfer :: (r: *Sroa_Rewriter, ii: Value_Id) -> bool {
     st := irb_store(*r.irb, src, dst_ptr, dst_align, volatile);
     copy_loop_metadata(st, ii);
     if aa_any(tags) set_aa_metadata(st, aa_adjust_for_access_ty(tags, r.nbegin - r.begin, vtype(src)));
+    rw_migrate_transfer(r, ii, is_dest, st, dst_ptr, src);
     return !volatile;
+}
+
+// visitMemTransferInst's migrateDebugInfo: into the new slice, or into the alloca the destination points into
+rw_migrate_transfer :: (r: *Sroa_Rewriter, ii: Value_Id, is_dest: bool, new_inst: Value_Id, dst: Value_Id, val: Value_Id) {
+    if is_dest {
+        sroa_migrate_debug_info(r.old_ai, r.is_split, r.nbegin * 8, r.slice_size * 8, ii, new_inst, dst, val);
+        return;
+    }
+    off: u64 = 0;
+    base := sv_strip_and_accumulate(dst, *off, dl_index_type_size_bits(vtype(dst)), true);
+    if is_inst(base) && inst_op(base) == .ALLOCA
+        sroa_migrate_debug_info(base, r.is_split, off * 8, r.slice_size * 8, ii, new_inst, dst, val);
 }
 
 rw_visit_intrinsic :: (r: *Sroa_Rewriter, ii: Value_Id) -> bool {
@@ -2061,6 +2091,10 @@ emit_split_ops :: (s: *Op_Splitter, ty: Type_Id, agg: *Value_Id, name: string) {
             gep := irb_gep(s.irb, s.base_ty, s.ptr, s.gep_indices, tconcat(name, ".gep"), F_INBOUNDS);
             st := irb_store(s.irb, ev, gep, al);
             if aa_any(s.tags) set_aa_metadata(st, aa_adjust_for_access_ty(s.tags, off, vtype(ev)));
+            // migrateDebugInfo needs the base alloca (walked to from the aggregate store's pointer)
+            base := sv_strip_in_bounds_offsets(op(s.agg_store, 1));
+            if is_inst(base) && inst_op(base) == .ALLOCA
+                sroa_migrate_debug_info(base, true, off * 8, dl_type_size_bits(vtype(ev)), s.agg_store, st, gep, ev);
         } else {
             gep := irb_gep(s.irb, s.base_ty, s.ptr, s.gep_indices, tconcat(name, ".gep"), F_INBOUNDS);
             ld := irb_load(s.irb, ty, gep, al, false, tconcat(name, ".load"));
@@ -2121,6 +2155,7 @@ agg_visit_store :: (a: *Agg_Rw, si: Value_Id) -> bool {
     vv := v;
     emit_split_ops(*s, vtype(v), *vv, tconcat(vname(v), ".fca"));
     table_remove(*a.visited, si);
+    at_delete_markers(si);
     erase_inst_with_metadata(si);
     return true;
 }
@@ -2775,20 +2810,23 @@ pointer_offset_from :: (a: Value_Id, b: Value_Id) -> (bool, s64) {
 }
 
 migrate_one :: (pass: *Sroa, ai: Value_Id, r: u32, frags: [] Sroa_Fragment) {
-    if dbgr_is_kill_location(r) return;
-    rec := dbgr(r);
-    dbg_ptr := ir.mds[rec.loc].value;
+    is_assign := dbgr(r).kind == .ASSIGN;
+    if is_assign { if dbgr_is_kill_address(r) return; }
+    else if dbgr_is_kill_location(r) return;
+    rec := dbgr(r).*;   // a copy: records are added below
+    dbg_ptr := ifx is_assign then dbgr_address(r) else ir.mds[rec.loc].value;
+    addr_expr := ifx is_assign then rec.addr_expr else rec.expr;
     has_frag, fo, fs := diexpr_fragment(rec.expr);
     var_off, var_size := fo, fs;
     if !has_frag {
         ok, sz := divar_size_bits(rec.var);
         var_off = 0; var_size = ifx ok then sz else 0;
     }
-    ok, cur_off, post_ops := diexpr_extract_leading_offset(rec.expr);
+    ok, cur_off, post_ops := diexpr_extract_leading_offset(addr_expr);
     if !ok return;
     extract_off: s64 = 0;
     {
-        e := diexpr_elts(rec.expr);
+        e := diexpr_elts(addr_expr);
         i := 0;
         while i < e.count {
             if e[i] == DW_OP_LLVM_EXTRACT_BITS_ZEXT || e[i] == DW_OP_LLVM_EXTRACT_BITS_SEXT { extract_off = cast,no_check(s64) e[i + 1]; break; }
@@ -2843,9 +2881,17 @@ migrate_one :: (pass: *Sroa, ai: Value_Id, r: u32, frags: [] Sroa_Fragment) {
             if xr.var == rec.var && diloc_inlined_at(xr.dbg) == diloc_inlined_at(rec.dbg) dbgr_erase(x);
         }
         // insertNewDbgInst
-        fe := new_expr;
-        if new_has fe = create_or_replace_fragment(new_expr, new_off, new_size, bit_extract);
+        fe := ifx is_assign then rec.expr else new_expr;
+        if new_has fe = create_or_replace_fragment(fe, new_off, new_size, bit_extract);
         if fe == NONE continue;
+        if is_assign {
+            k_assign := md_fixed("DIAssignID");
+            if get_metadata(fr.ai, k_assign) == NONE set_metadata(fr.ai, k_assign, at_new_id());
+            v := dbgr_value(r);
+            if v == NONE fatal("SROA: a #dbg_assign without a location value is not supported yet");
+            at_create_linked_assign(fr.ai, v, rec.var, fe, fr.ai, new_expr, rec.dbg);
+            continue;
+        }
         nr: Dbg_Record;
         nr.kind = rec.kind;
         nr.loc = md_value(fr.ai);
@@ -2912,10 +2958,12 @@ split_alloca :: (pass: *Sroa, ai: Value_Id, as: *Sroa_Slices) -> bool {
         if !(rec.loc != NONE && ir.mds[rec.loc].kind == .VALUE && ir.mds[rec.loc].value == ai) continue;
         if rec.kind == .DECLARE array_add(*declares, it);
         else if rec.kind == .VALUE array_add(*values, it);
-        else if rec.kind == .ASSIGN fatal("SROA: assignment tracking (dbg_assign) is not supported yet");
     }
+    assigns: [..] u32; assigns.allocator = temp;
+    at_markers(ai, *assigns);
     for declares migrate_one(pass, ai, it, frags);
     for values migrate_one(pass, ai, it, frags);
+    for assigns migrate_one(pass, ai, it, frags);
     return changed;
 }
 
@@ -2980,6 +3028,7 @@ delete_dead_instructions :: (pass: *Sroa, deleted_allocas: *[..] Value_Id) -> bo
                 if xr.kind == .DECLARE && xr.owner != NONE && xr.loc != NONE && ir.mds[xr.loc].kind == .VALUE && ir.mds[xr.loc].value == i dbgr_erase(x);
             }
         }
+        at_delete_markers(i);
         rauw_with_metadata(i, const_undef(vtype(i)));
         n := nops(i);
         if n > 0 for k: 0..n-1 {
@@ -3028,10 +3077,6 @@ sroa_run :: (f: Value_Id, name: string) -> Preserved {
     dbgr_index_reset();
     sroa_pending_dt_updates.allocator = temp;
     sroa_pending_dt_updates.count = 0;
-    for b: fn_blocks(f) for i: block_insts(b) {
-        x := inst(i).records;
-        while x != 0 { if dbgr(x).kind == .ASSIGN fatal("SROA: assignment tracking (dbg_assign) is not supported yet"); x = dbgr(x).next; }
-    }
     entry := fn_entry(f);
     last := block(entry).last;
     i := block(entry).first;
@@ -3061,7 +3106,7 @@ sroa_run :: (f: Value_Id, name: string) -> Preserved {
     }
     sroa_flush_dt(pass.dt);
     if !changed return PRESERVE_ALL;
-    if module_has_flag("debug-info-assignment-tracking") fatal("SROA: assignment tracking (RemoveRedundantDbgInstrs) is not supported yet");
+    if assignment_tracking_enabled() for b: fn_blocks(f) remove_redundant_dbg_instrs(b);
     pa: Preserved;
     if !pass.cfg_changed pa = preserved_cfg();
     preserve(*pa, .DOMTREE);

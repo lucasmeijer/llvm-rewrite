@@ -129,7 +129,15 @@ remap_dbg_records :: (recs: [] u32, vm: *Table(Value_Id, Value_Id)) {
     for r: recs {
         rec := dbgr(r);
         if rec.kind == .LABEL continue;
-        if rec.kind == .ASSIGN fatal("remapping a #dbg_assign record is not implemented yet");
+        if rec.kind == .ASSIGN {
+            // the address (unmapped: unchanged); the DIAssignID maps to itself (RF_NoModuleLevelChanges)
+            a := rec.addr;
+            if a != NONE && ir.mds[a].kind == .VALUE {
+                found, nv := table_find(vm, ir.mds[a].value);
+                if found && nv != ir.mds[a].value { rec.addr = md_value(nv); if dbg_index.fn != NONE dbgr_index_add(nv, r); }
+            }
+            at_assign_restamp(r);
+        }
         loc := rec.loc;
         if loc == NONE continue;
         if ir.mds[loc].kind == .VALUE {

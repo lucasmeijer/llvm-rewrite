@@ -431,3 +431,91 @@ declare_to_assign_run :: (f: Value_Id) -> Preserved {
     at_set_module_flag();
     return preserved_cfg();
 }
+
+// ---------------------------------------------------------------- SROA's migrateDebugInfo (lib/Transforms/Scalar/SROA.cpp)
+
+Sroa_Frag_Calc :: enum u8 { USE_FRAG; USE_NO_FRAG; SKIP; }
+
+// calculateFragment: (result, target offset, target size)
+sroa_calculate_fragment :: (var: Md_Id, slice_off: u64, slice_size: u64, base_has: bool, base_off: u64, base_size: u64,
+                            cur_has_in: bool, cur_off_in: u64, cur_size_in: u64) -> (Sroa_Frag_Calc, u64, u64) {
+    t_off, t_size: u64;
+    if base_has { t_size = min(slice_size, base_size); t_off = slice_off + base_off; }
+    else { t_size = slice_size; t_off = slice_off; }
+    cur_has, cur_off, cur_size := cur_has_in, cur_off_in, cur_size_in;
+    if !cur_has {
+        ok, sz := divar_size_bits(var);
+        if ok {
+            cur_has = true; cur_off = 0; cur_size = sz;
+            if t_off == cur_off && t_size == cur_size return .USE_NO_FRAG, t_off, t_size;
+        }
+    }
+    if !cur_has || (t_off == cur_off && t_size == cur_size) return .USE_FRAG, t_off, t_size;
+    if t_off < cur_off || t_off + t_size > cur_off + cur_size return .SKIP, t_off, t_size;
+    return .USE_FRAG, t_off, t_size;
+}
+
+// migrateDebugInfo: the #dbg_assigns linked to old_inst are copied (split) or stolen (not split) for new_inst
+sroa_migrate_debug_info :: (old_ai: Value_Id, is_split: bool, off_bits: u64, size_bits: u64, old_inst: Value_Id,
+                            new_inst: Value_Id, dest: Value_Id, value: Value_Id) {
+    markers: [..] u32; markers.allocator = temp;
+    at_markers(old_inst, *markers);
+    if markers.count == 0 return;
+    Base_Frag :: struct { var: Md_Id; inlined: Md_Id; has: bool; off: u64; size: u64; }
+    bases: [..] Base_Frag; bases.allocator = temp;
+    am: [..] u32; am.allocator = temp;
+    at_markers(old_ai, *am);
+    for am {
+        h, o, z := diexpr_fragment(dbgr(it).expr);
+        bf := Base_Frag.{dbgr(it).var, diloc_inlined_at(dbgr(it).dbg), h, o, z};
+        found := false;
+        for * bases if it.var == bf.var && it.inlined == bf.inlined { it.* = bf; found = true; break; }
+        if !found array_add(*bases, bf);
+    }
+    k_assign := md_fixed("DIAssignID");
+    new_id: Md_Id = NONE;
+    for a: markers {
+        expr := dbgr(a).expr;
+        set_kill := false;
+        if is_split {
+            base: *Base_Frag = null;
+            v, inl := dbgr(a).var, diloc_inlined_at(dbgr(a).dbg);
+            for * bases if it.var == v && it.inlined == inl { base = it; break; }
+            if !base continue;
+            ch, co, cs := diexpr_fragment(expr);
+            res, t_off_in, t_size := sroa_calculate_fragment(v, off_bits, size_bits, base.has, base.off, base.size, ch, co, cs);
+            t_off := t_off_in;
+            if res == .SKIP continue;
+            if res == .USE_FRAG && !(ch && t_off == co && t_size == cs) {
+                if ch t_off -= co;
+                ok, e := diexpr_create_fragment_expression(expr, t_off, t_size);
+                if ok expr = e;
+                else {
+                    _, e2 := diexpr_create_fragment_expression(diexpr_get(.[]), t_off, t_size);
+                    expr = e2;
+                    set_kill = true;
+                }
+            }
+        }
+        if new_id == NONE { new_id = at_new_id(); set_metadata(new_inst, k_assign, new_id); }
+        na: u32;
+        if is_split {
+            nv := ifx value != NONE then value else dbgr_value(a);
+            if nv == NONE fatal("SROA: a #dbg_assign without a location value is not supported yet");
+            na = dbgr_new_assign(md_value(nv), dbgr(a).var, expr, new_id, md_value(dest), diexpr_get(.[]), dbgr(a).dbg);
+            // DIB.insertDbgAssign after Inst, then moveBefore(DbgAssign)
+            dbgr_insert_before_record(na, a);
+            dbgr_tracked(na);
+        } else {
+            na = a;
+            dbgr_set_assign_id(a, new_id);
+            dbgr_set_address(a, dest);
+            if value != NONE dbgr_replace_variable_location_op_idx(a, 0, value);
+        }
+        if value != NONE {
+            ok, _ := diexpr_single_location_elts(dbgr(a).expr);
+            if dbgr_has_arg_list(a) || !ok set_kill = true;
+        }
+        if set_kill dbgr_set_kill_location(na);
+    }
+}

@@ -1024,15 +1024,17 @@ aic_merge_consecutive_part_stores :: (parts: [] Aic_Part_Store, width: u64, tti:
     st := irb_store(*b, val, op(first.store, 1), inst(first.store).align);
     tags := get_aa_metadata(first.store);
     dbg := get_metadata(first.store, 0);
-    k_assign := md_fixed("DIAssignID");
+    stores: [..] Value_Id; stores.allocator = temp;
+    array_add(*stores, first.store);
     for p, k: parts {
         if k > 0 {
             tags = aa_tags_concat(tags, get_aa_metadata(p.store));
             if dbg != NONE dbg = merged_location(dbg, get_metadata(p.store, 0));
+            array_add(*stores, p.store);
         }
-        if get_metadata(p.store, k_assign) != NONE fatal("aggressive-instcombine: merging stores with DIAssignID is not supported yet");
     }
     set_aa_metadata(st, tags);
+    merge_di_assign_id(st, stores);
     set_metadata(st, 0, dbg);
     for parts erase_inst_with_metadata(it.store);
     return true;

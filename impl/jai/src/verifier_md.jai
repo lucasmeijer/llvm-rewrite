@@ -1368,18 +1368,27 @@ vf_visit_di_assign_id_metadata :: (i: Value_Id, m: Md_Id) {
     o := inst_op(i);
     is_ii := o == .CALL && intrinsic_id_of_call(i).count > 0;
     vcheck_di(o == .ALLOCA || o == .STORE || is_ii, "!DIAssignID attached to unexpected instruction kind", vq_val(i), vq_md(m));
-    // MetadataAsValue users of the DIAssignID: llvm.dbg.assign calls (upgraded to records by the parser)
+    // getAllDbgVariableRecordUsers of the DIAssignID (as location, address or ID; most recently tracked first)
     f := block(inst(i).parent).parent;
+    users: [..] u32; users.allocator = temp;
+    owners: [..] Value_Id; owners.allocator = temp;
     for g: ir.m_functions for b: fn_blocks(g) for i2: block_insts(b) {
         x := inst(i2).records;
         while x != 0 {
             r := *ir.dbg_records[x - 1];
-            if r.assign_id == m {
-                vcheck_di(r.kind == .ASSIGN, "!DIAssignID should only be used by Assign DVRs.", vq_md(m), vq_rec(x));
-                vcheck_di(g == f, "DVRAssign not in same function as inst", vq_rec(x), vq_val(i));
-            }
+            if r.assign_id == m || r.loc == m || r.addr == m { array_add(*users, x); array_add(*owners, g); }
             x = r.next;
         }
+    }
+    for k: 1..users.count-1 {
+        x := users[k]; ox := owners[k]; sx := at_assign_stamp(x);
+        j := k - 1;
+        while j >= 0 && at_assign_stamp(users[j]) < sx { users[j + 1] = users[j]; owners[j + 1] = owners[j]; j -= 1; }
+        users[j + 1] = x; owners[j + 1] = ox;
+    }
+    for x, k: users {
+        vcheck_di(ir.dbg_records[x - 1].kind == .ASSIGN, "!DIAssignID should only be used by Assign DVRs.", vq_md(m), vq_rec(x));
+        vcheck_di(owners[k] == f, "DVRAssign not in same function as inst", vq_rec(x), vq_val(i));
     }
 }
 

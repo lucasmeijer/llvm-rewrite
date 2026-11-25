@@ -563,7 +563,14 @@ lk_remap_dbg_record :: (x: u32) {
         return;
     }
     if dbgr(x).var != NONE dbgr(x).var = lk_map_md(dbgr(x).var);
-    if dbgr(x).kind == .ASSIGN lk_fail("llvm-link: #dbg_assign records are not supported yet");
+    if dbgr(x).kind == .ASSIGN {
+        a := dbgr(x).addr;
+        if a != NONE && ir.mds[a].kind == .VALUE {
+            na := lk_map_value(ir.mds[a].value);
+            if na != NONE && na != ir.mds[a].value dbgr(x).addr = md_value(na);
+        } else if a != NONE dbgr(x).addr = lk_map_md(a);
+        if dbgr(x).assign_id != NONE dbgr_set_assign_id(x, lk_map_md(dbgr(x).assign_id));
+    }
     vals: [..] Value_Id; vals.allocator = temp;
     dbgr_values_of_loc(dbgr(x).loc, *vals);
     new_vals: [..] Value_Id; new_vals.allocator = temp;
