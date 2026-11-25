@@ -2132,6 +2132,16 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   queue is moved into it), `code_mover_utils.jai`. Sweeps (whole corpus, plain + `--with-test-flags`, and after
   `loop(loop-rotate[,indvars])`, with `-loop-fusion-peel-max-count=8` / `-loop-flatten-widen-iv=false`; tests/perf/compile
   after `sroa,loop(loop-rotate)`): 0 differs.
+- **Loop-misc** (L1.extra.loop-misc COMPLETE 94/94): `pass_loop_versioning.jai`, `pass_loop_bound_split.jai`,
+  `pass_loop_versioning_licm.jai` (laa_compute gained `no_tti` / `no_tli`), `pass_hardware_loops.jai` (the
+  loop-count intrinsics were added to gen_intrinsics.py's EXTRA_DECLS), `pass_loop_unroll_and_jam.jai` (LoopNest pass
+  `LOOP_UNROLL_AND_JAM`); canon-freeze and transform-warning already existed. `invalidate<all>` inside a loop
+  pipeline is a no-op loop pass. Fixed on the way (shared): `block_single_successor` (value_tracking2.jai) had
+  getUniqueSuccessor semantics; it now counts successor edges like BasicBlock::getSingleSuccessor. Sweeps (whole
+  corpus, plain and with the unit's flags / `--with-test-flags`): loop-versioning, loop-bound-split,
+  loop-versioning-licm (+ `loop-mssa(licm)` after it), hardware-loops (forced, phi/guard/nested/64-bit variants),
+  loop-unroll-and-jam (`-allow-unroll-and-jam`, `-unroll-and-jam-count=4`, `-unroll-remainder`, `-unroll-runtime`,
+  after loop-rotate): 0 differs.
 
 ## CFI: LowerTypeTests, CrossDSOCFI, GlobalSplit, SimplifyTypeTests (L1.extra.lowertypetests COMPLETE; /root/jai_cfi)
 

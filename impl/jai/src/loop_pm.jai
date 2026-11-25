@@ -173,7 +173,7 @@ run_loop_pm :: (n: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater) -> 
         c = node.next;
         // a loop-nest pass (LoopPassManager::run): only on a top-level loop (runWithLoopNestPasses), on the
         // LoopNest of that loop; runWithoutLoopNestPasses skips it without instrumentation
-        if (node.kind == .LOOP_INTERCHANGE || node.kind == .LOOP_FLATTEN) && li_parent(lar.li, l) != NONE continue;
+        if (node.kind == .LOOP_INTERCHANGE || node.kind == .LOOP_FLATTEN || node.kind == .LOOP_UNROLL_AND_JAM) && li_parent(lar.li, l) != NONE continue;
         if !should_run_loop_pass(node, lar.li, l) continue;
         p := run_loop_pass(idx, l, lar, u);
         if !p.all printer_note_ir_changed();
@@ -220,6 +220,7 @@ run_loop_pass_inner :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Up
         case .LOOP_FLATTEN; return loop_flatten_run(node, l, lar, u);
         case .LOOP_BOUND_SPLIT; return loop_bound_split_run(node, l, lar, u);
         case .LOOP_VERSIONING_LICM; return loop_versioning_licm_run(node, l, lar, u);
+        case .LOOP_UNROLL_AND_JAM; return loop_unroll_and_jam_run(node, l, lar, u);
         case .LOOP_TERM_FOLD; return loop_term_fold_run(node, l, lar, u);
         case .LOOP_DELETION; return loop_deletion_run(node, l, lar, u);
         case .LOOP_INSTSIMPLIFY; return loop_instsimplify_run(node, l, lar, u);
@@ -279,7 +280,7 @@ run_loop_adaptor :: (n: s32, f: Value_Id) -> Preserved {
     loop_nest_mode := pipeline.nodes[n].first_child >= 0;
     {
         c := pipeline.nodes[n].first_child;
-        while c >= 0 { k := pipeline.nodes[c].kind; if k != .LNICM && k != .LOOP_FLATTEN loop_nest_mode = false; c = pipeline.nodes[c].next; }
+        while c >= 0 { k := pipeline.nodes[c].kind; if k != .LNICM && k != .LOOP_FLATTEN && k != .LOOP_UNROLL_AND_JAM loop_nest_mode = false; c = pipeline.nodes[c].next; }
     }
     if loop_nest_mode for li.top_level lwl_insert(*w, it);
     else append_loops_to_worklist_li(li, *w);

@@ -294,7 +294,7 @@ Pass_Kind :: enum u8 {
     // pass_loop_flatten.jai, pass_loop_fuse.jai
     LOOP_FLATTEN; LOOP_FUSE;
     // pass_loop_versioning.jai, ...
-    LOOP_VERSIONING; LOOP_BOUND_SPLIT; LOOP_VERSIONING_LICM; HARDWARE_LOOPS;
+    LOOP_VERSIONING; LOOP_BOUND_SPLIT; LOOP_VERSIONING_LICM; HARDWARE_LOOPS; LOOP_UNROLL_AND_JAM;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -529,6 +529,7 @@ PASS_TABLE :: Pass_Info.[
     .{"loop-bound-split", .LOOP, .LOOP_BOUND_SPLIT, false, .DOMTREE},
     .{"loop-versioning-licm", .LOOP, .LOOP_VERSIONING_LICM, false, .DOMTREE},
     .{"hardware-loops", .FUNCTION, .HARDWARE_LOOPS, false, .DOMTREE},   // also hardware-loops<...> (lookup_pass)
+    .{"loop-unroll-and-jam", .LOOP, .LOOP_UNROLL_AND_JAM, false, .DOMTREE},   // a LoopNest pass
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -959,6 +960,9 @@ parse_loop_pass :: (lpm: s32, last: *s32, e: s32) {
         }
         fatal("invalid use of '%' pass as loop pipeline", el.name);
     }
+    // invalidate<all> as a loop pass (InvalidateAllAnalysesPass): it drops the loop analyses, and the ones we have
+    // (LoopNest, IVUsers) are recomputed by every pass that reads them
+    if el.name == "invalidate<all>" { link_child(lpm, last, new_node(.NO_OP_LOOP, lookup_pass("no-op-loop"), el.name)); return; }
     p := lookup_pass(el.name);
     // a name registered both as FUNCTION_PASS and LOOP_PASS (guard-widening): the loop row
     if p != null && p.level != .LOOP for * pass_table if it.name == el.name && it.level == .LOOP { p = it; break; }
@@ -1260,6 +1264,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if lfu_parse_cl_opt(name, value, has_value) return true;    // pass_loop_fuse.jai (-loop-fusion-*)
     if lvlicm_parse_cl_opt(name, value, has_value) return true; // pass_loop_versioning_licm.jai (-licm-versioning-*)
     if hwl_parse_cl_opt(name, value, has_value) return true;    // pass_hardware_loops.jai (legacy-pass options, ignored)
+    if luj_parse_cl_opt(name, value, has_value) return true;    // pass_loop_unroll_and_jam.jai
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;

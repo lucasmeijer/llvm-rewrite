@@ -1904,15 +1904,13 @@ program_undefined_if_undef_or_poison :: (v: Value_Id, poison_only: bool) -> bool
     }
     return false;
 }
-// BasicBlock::getSingleSuccessor
+// BasicBlock::getSingleSuccessor: exactly one successor edge (`br i1 %c, label %a, label %a` has two: NONE;
+// getUniqueSuccessor is block_unique_successor)
 block_single_successor :: (b: Value_Id) -> Value_Id {
     t := block_terminator(b);
     if t == NONE return NONE;
-    n := num_successors(t);
-    if n == 0 return NONE;
-    s := get_successor(t, 0);
-    for i: 1..cast(s64) n - 1 if get_successor(t, cast(u32) i) != s return NONE;
-    return s;
+    if num_successors(t) != 1 return NONE;
+    return get_successor(t, 0);
 }
 program_undefined_if_poison :: (i: Value_Id) -> bool { return program_undefined_if_undef_or_poison(i, true); }
 

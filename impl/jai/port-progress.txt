@@ -49,6 +49,8 @@ lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.95
 lib/Analysis/TargetTransformInfo.cpp 0.3
 lib/Transforms/Utils/BasicBlockUtils.cpp 0.78  # + SplitCallBrEdge, SplitBlockAndInsertIfThen with a lazy DTU (jai_extras_b)
+lib/Analysis/TargetTransformInfo.cpp 0.32  # + HardwareLoopInfo::canAnalyze / isHardwareLoopCandidate (pass_hardware_loops.jai)
+lib/Transforms/Utils/BasicBlockUtils.cpp 0.75
 lib/Analysis/VectorUtils.cpp 0.7  # + InterleavedAccessInfo::analyzeInterleaving / invalidation, computeMinimumValueSizes, getMetadataToPropagate, isVectorIntrinsicWithOverloadTypeAtArg
 lib/IR/Intrinsics.cpp 0.8  # + isSignatureValid / matchIntrinsicType messages (verifier_intrinsics.jai)
 lib/IR/Instruction.cpp 0.7
@@ -143,7 +145,7 @@ lib/Transforms/Scalar/ConstraintElimination.cpp 0.92  # all but generateReproduc
 lib/Transforms/AggressiveInstCombine/AggressiveInstCombine.cpp 0.98  # all but mergeDIAssignID (fails loudly)
 lib/Analysis/LoopAccessAnalysis.cpp 0.85  # no sortPtrAccesses, getStrideFromPointer users outside LAA, LoopAccessInfoManager::clear/invalidate (one LAI per printer run), remarks only as Report text
 lib/Analysis/HashRecognize.cpp 0.85  # no print<hash-recognize> printer
-lib/Transforms/Utils/LoopVersioning.cpp 0.8  # versionLoop, addPHINodes, annotateLoopWithNoAlias; no LoopVersioningPass (loop-versioning) or LoopVersioningLICM
+lib/Transforms/Utils/LoopVersioning.cpp 0.95  # + LoopVersioningPass (pass_loop_versioning.jai); no legacy pass
 # L1.loop-unroll
 lib/Transforms/Scalar/LoopUnrollPass.cpp 0.9  # no optimization remarks, no PSI/BFI-based optsize (PGSO), no UniformityInfo, no legacy pass
 lib/Transforms/Utils/LoopUnroll.cpp 0.85  # no parallel-reduction accumulators (canParallelizeReductionWhenUnrolling, AddAdditionalAccumulators), no discriminator cloning for -fdebug-info-for-profiling
@@ -290,3 +292,7 @@ lib/Analysis/RegionInfo.cpp 0.8  # not verifyAnalysis / view; -verify-region-inf
 lib/Transforms/Scalar/Scalarizer.cpp 0.98  # untruncated ConstantInt::get indices fail loudly
 lib/Transforms/Scalar/LoopFuse.cpp 0.95  # no optimization remarks / verbose debug printing; gatherPeelingPreferences not called (only PeelCount is ever read)
 lib/Transforms/Scalar/LoopFlatten.cpp 0.97  # no optimization remarks
+lib/Transforms/Scalar/LoopVersioningLICM.cpp 0.95  # no optimization remarks
+lib/CodeGen/HardwareLoops.cpp 0.85  # new-PM pass only (the legacy pass and its cl::opts are not ported; the options are accepted and ignored as in the new PM); no remarks; TTI::isHardwareLoopProfitable is false for every target we model
+lib/Transforms/Scalar/LoopUnrollAndJamPass.cpp 0.95  # no optimization remarks
+lib/Transforms/Utils/LoopUnrollAndJam.cpp 0.97  # no optimization remarks

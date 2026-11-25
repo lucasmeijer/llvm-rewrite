@@ -57,3 +57,25 @@ whole-corpus sweeps.
   `descend()`, so the `while (!LDT.empty())` test is just "is there a loop vector on this level".
 - CodeMoverUtils' `collectInstructionsInBetween` uses a SmallPtrSet worklist, but the resulting set (everything
   reachable from the start without passing the end) does not depend on the visiting order.
+
+## Loop-misc extras (`loop-versioning`, `loop-bound-split`, `loop-versioning-licm`, `hardware-loops`, `loop-unroll-and-jam`)
+
+- `BasicBlock::getSingleSuccessor` counts successor *edges*: `br i1 %c, label %a, label %a` has none single
+  (getUniqueSuccessor gives `%a`). MergeBlockSuccessorsIntoGivenBlocks (unroll-and-jam) therefore stops at such a
+  block (sweep: Analysis/LoopNestAnalysis/duplicate-successors.ll with `-allow-unroll-and-jam -unroll-and-jam-count=4`).
+- UnrollAndJamLoop calls `UnrollRuntimeLoopRemainder(..., true, SCEVCheapExpansionBudget, EpilogueLoop)`: the
+  `Loop **EpilogueLoop` lands on the `bool RuntimeUnrollMultiExit` parameter (true) and `ResultLoop` keeps its
+  nullptr default, so the pass never sees the epilogue loop and never gives it the
+  `llvm.loop.unroll_and_jam.followup_remainder_outer` loop ID (LoopUnrollAndJam.cpp:241, UnrollLoop.h:94).
+- The unroll-and-jam BasicBlockSets (SmallPtrSet<BasicBlock *, 4>) and the MergeBlocks set (SmallPtrSet<..., 16>)
+  are pointer-ordered once they grow, but the output does not depend on it: the dependence pairs inside one set are
+  checked with Sequentialized = true (accepts a pair iff it accepts the reversed pair) and merging block chains is
+  confluent.
+- LoopVersioningLICM's LoopAccessInfoManager has no TTI and no TLI: MaxTargetVectorWidthInBits is UINT_MAX and only
+  intrinsics count as vectorizable calls. It asks for the info with AllowPartial = true.
+- HardwareLoops: the `-force-hardware-loops`, `-hardware-loop-decrement`, ... cl::opts only configure the legacy
+  pass; with the new PM only the `hardware-loops<...>` parameters count. Its `std::optional<bool>` options are tested
+  for presence (`if (Opts.ForcePhi)`). With the function `strictfp`, every intrinsic call it creates gets the
+  `strictfp` call-site attribute (IRBuilder::setIsFPConstrained -> setConstrainedFPCallAttr).
+- LoopBoundSplit adds the post-loop as a sibling loop (U.addSiblingLoops), so it is visited by the rest of the
+  loop pipeline.
