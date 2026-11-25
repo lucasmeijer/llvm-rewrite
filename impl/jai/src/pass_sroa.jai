@@ -4,7 +4,7 @@
 //
 // Data layout: slices are rows {begin, end, use, splittable} (use NONE = dead); partitions are formed on the fly
 // by the partition iterator (Sroa_Part_It); instructions are visited by `switch` on the opcode.
-// Not ported (fail loudly): scalable vectors, assignment tracking (dbg_assign), the escaped-read-only path
+// Not ported (fail loudly): scalable vectors without a known vscale (partitions of scalable types), assignment tracking (dbg_assign), the escaped-read-only path
 // (propagateStoredValuesToLoads / SSAUpdater), CFG-modifying select rewriting (modify-cfg with selects that cannot
 // be speculated), fake uses of split aggregates.
 
@@ -395,8 +395,10 @@ sb_visit :: (b: *Sroa_Builder, i: Value_Id) {
         if !b.known { b.escaped_ro = i; return; }
         t := vtype(i);
         if type_has_scalable(t) {
-            if fn_vscale_value(b.fn) == 0 { b.aborted = i; return; }
-            fatal("SROA: scalable loads with a known vscale are not supported yet");
+            vs := fn_vscale_value(b.fn);
+            if vs == 0 { b.aborted = i; return; }
+            sb_load_or_store(b, t, i, dl_type_store_size(t) * vs, (inst(i).flags & F_VOLATILE) != 0);
+            return;
         }
         sb_load_or_store(b, t, i, dl_type_store_size(t), (inst(i).flags & F_VOLATILE) != 0);
       case .STORE;
@@ -404,11 +406,12 @@ sb_visit :: (b: *Sroa_Builder, i: Value_Id) {
         if v == use_value(b.u) { b.escaped = i; b.aborted = i; return; }
         if !b.known { b.aborted = i; return; }
         t := vtype(v);
-        if type_has_scalable(t) {
-            if fn_vscale_value(b.fn) == 0 { b.aborted = i; return; }
-            fatal("SROA: scalable stores with a known vscale are not supported yet");
-        }
         size := dl_type_store_size(t);
+        if type_has_scalable(t) {
+            vs := fn_vscale_value(b.fn);
+            if vs == 0 { b.aborted = i; return; }
+            size *= vs;
+        }
         if size > b.alloc_size || b.offset > b.alloc_size - size { sb_mark_dead(b, i); return; }
         sb_load_or_store(b, t, i, size, (inst(i).flags & F_VOLATILE) != 0);
       case .BITCAST; #through;
@@ -599,14 +602,37 @@ find_common_type :: (S: [] Sroa_Slice, b: s64, e: s64, end_offset: u64) -> (Type
     return ifx common then ty else NONE, ity;
 }
 
-// canConvertValue (fixed-size types)
-can_convert_value :: (old_ty: Type_Id, new_ty: Type_Id) -> bool {
+// VectorType::getWithSizeAndScalar(SizeTy, EltTy); NONE when the size is not a multiple of the element size
+vector_with_size_and_scalar :: (size_ty: Type_Id, elt_ty: Type_Id) -> Type_Id {
+    se := scalar_type(size_ty); ee := scalar_type(elt_ty);
+    if se == ee return size_ty;
+    esz := ifx is_ptr_type(ee) then cast(u64) 0 else dl_type_size_bits(ee);
+    ssz := ifx is_ptr_type(se) then cast(u64) 0 else dl_type_size_bits(se);
+    bits := type_count(size_ty) * ssz;
+    if esz == 0 || bits % esz != 0 return NONE;
+    return type_vector(bits / esz, ee, type_kind(size_ty) == .SVECTOR);
+}
+
+// canConvertValue(DL, OldTy, NewTy, VScale)
+can_convert_value :: (old_ty: Type_Id, new_ty: Type_Id, vscale: u64 = 0) -> bool {
     if old_ty == new_ty return true;
     if is_int_type(old_ty) && is_int_type(new_ty) return false;
-    if type_kind(old_ty) == .SVECTOR || type_kind(new_ty) == .SVECTOR {
-        if type_kind(old_ty) == .VECTOR || type_kind(new_ty) == .VECTOR return false;   // no vscale known
+    new_size := dl_type_size_bits(new_ty); new_sc := type_has_scalable(new_ty);
+    old_size := dl_type_size_bits(old_ty); old_sc := type_has_scalable(old_ty);
+    nk := type_kind(new_ty); ok := type_kind(old_ty);
+    if (nk == .SVECTOR && ok == .VECTOR) || (ok == .SVECTOR && nk == .VECTOR) {
+        if vscale == 0 return false;
+        ovt := ifx is_ptr_type(scalar_type(old_ty)) then irb_int_ptr_type(old_ty) else old_ty;
+        nvt := ifx is_ptr_type(scalar_type(new_ty)) then irb_int_ptr_type(new_ty) else new_ty;
+        if nk == .SVECTOR {
+            if vector_with_size_and_scalar(nvt, ovt) == NONE return false;
+            new_size *= vscale; new_sc = false;
+        } else {
+            if vector_with_size_and_scalar(ovt, nvt) == NONE return false;
+            old_size *= vscale; old_sc = false;
+        }
     }
-    if dl_type_size_bits(new_ty) != dl_type_size_bits(old_ty) return false;
+    if new_size != old_size || new_sc != old_sc return false;
     if !is_single_value_type(new_ty) || !is_single_value_type(old_ty) return false;
     o := scalar_type(old_ty);
     n := scalar_type(new_ty);
@@ -622,6 +648,9 @@ can_convert_value :: (old_ty: Type_Id, new_ty: Type_Id) -> bool {
     if type_kind(o) == .TARGET_EXT || type_kind(n) == .TARGET_EXT return false;
     return true;
 }
+
+// the function's getVScaleValue() for isVectorPromotionViable (set per partition)
+sroa_vscale: u64;
 
 fixed_vec :: (elt: Type_Id, n: u64) -> Type_Id { return type_vector(n, elt, false); }
 
@@ -649,13 +678,13 @@ vector_viable_for_slice :: (P: *Sroa_Part, s: Sroa_Slice, vty: Type_Id, elt_size
         lty := vtype(user);
         if type_kind(lty) == .STRUCT return false;
         if P.begin > s.begin || P.end < s.end lty = split_int_ty;
-        if !can_convert_value(slice_ty, lty) return false;
+        if !can_convert_value(slice_ty, lty, sroa_vscale) return false;
     } else if inst_op(user) == .STORE {
         if inst(user).flags & F_VOLATILE return false;
         sty := vtype(op(user, 0));
         if type_kind(sty) == .STRUCT return false;
         if P.begin > s.begin || P.end < s.end sty = split_int_ty;
-        if !can_convert_value(sty, slice_ty) return false;
+        if !can_convert_value(sty, slice_ty, sroa_vscale) return false;
     } else return false;
     return true;
 }
@@ -2346,6 +2375,7 @@ try_struct_to_vector :: (sty: Type_Id, P: *Sroa_Part, S: [] Sroa_Slice) -> Type_
 // selectPartitionType: (type, integer widening, vector type)
 select_partition_type :: (P: *Sroa_Part, S: [] Sroa_Slice, ai: Value_Id, agg_to_vec: bool) -> (Type_Id, bool, Type_Id) {
     psize := P.end - P.begin;
+    sroa_vscale = fn_vscale_value(inst_fn(ai));
     vty := is_vector_promotion_viable(P, S);
     if vty != NONE && is_fp_type(type_elem(vty)) && type_count(vty) > 1 return vty, false, vty;
     common, largest := find_common_type(S, P.si, P.sj, P.end);

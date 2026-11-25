@@ -258,8 +258,11 @@ print<da> 10806/10807 (the 1 differs is stderr interleaving of a `+mpx` warning,
 - `Dbg_Record.owner` is maintained by `attach_records_before` and `erase_inst`; passes that move records must
   keep it. Use `rauw_with_metadata` / `erase_inst_with_metadata` (dbg_records.jai) instead of the plain ir.jai
   calls whenever debug records may refer to the value.
-- Remaining failures: the Mem2Reg test with `instcombine`, SROA tests with `debugify`/`gvn` (unported passes),
-  and SROA with a known vscale (`vscale_range(N,N)` + scalable loads/stores of fixed allocas) which fails loudly.
+- Known vscale (`vscale_range(N,N)`, jai_tails 2026-11): slice sizes of scalable loads/stores are min size x N,
+  `can_convert_value(old, new, vscale)` accepts fixed<->scalable vectors of equal known size (only from
+  isVectorPromotionViableForSlice, through the `sroa_vscale` global set in select_partition_type), and
+  `irb_bit_preserving_cast_chain` (ir_builder.jai) emits CreateBitCastLike's `llvm.vector.insert`/`extract` (no
+  folding: SROA's IRBuilder uses ConstantFolder, whose FoldIntrinsic returns null). L1.sroa COMPLETE 122/122.
   Assignment tracking (`#dbg_assign`, DIAssignID) fails loudly everywhere (3 imported files in the sweep).
 - Sweep (every round-tripping imported file, our output vs LLVM, canonicalized): mem2reg 6994/6994 identical;
   sroa, sroa<preserve-cfg>, sroa<aggregate-to-vector> 6989/6994 identical, the other 5 fail loudly (dbg_assign,

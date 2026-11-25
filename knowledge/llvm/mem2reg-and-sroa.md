@@ -75,3 +75,14 @@ PromoteMemoryToRegister.cpp, lib/Transforms/Scalar/SROA.cpp, include/llvm/ADT/De
   an insertion.
 - `CallBase::isByValArgument` / `paramHasAttr` look at the callee's parameter attributes too: a call to
   `@f(ptr byval(i32))` written without `byval` at the call site is still byval (readonly, captures nothing).
+
+## Scalable vectors with a known vscale
+- `Function::getVScaleValue()` is nonzero only for `vscale_range(N,N)`. Then SROA's slice builder counts a scalable
+  load/store as `minsize * N` bytes (else it aborts the alloca), and `canConvertValue(DL, Old, New, VScale)`
+  accepts a fixed<->scalable vector pair whose sizes agree after multiplying the scalable side by N, provided
+  `VectorType::getWithSizeAndScalar` exists (pointer sides go through `DL.getIntPtrType` first). Only
+  `isVectorPromotionViableForSlice` passes VScale; every other caller uses the default 0, so e.g. a scalable
+  store to a whole fixed `<4 x i32>` alloca vector-promotes, but an `i16` alloca loaded as `<vscale x 16 x i1>` stays.
+- `IRBuilder::CreateBitPreservingCastChain` turns fixed->scalable into `llvm.vector.insert(poison, v, 0)` of
+  `getWithSizeAndScalar(Dst, Src)` plus a bitcast, scalable->fixed into a bitcast plus `llvm.vector.extract(.., 0)`.
+  SROA's ConstantFolder never folds those intrinsics. Verified on SROA/scalable-vectors-with-known-vscale.ll.

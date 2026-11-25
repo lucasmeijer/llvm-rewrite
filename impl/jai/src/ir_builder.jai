@@ -264,23 +264,37 @@ irb_memcpy :: (b: *Irb, dst: Value_Id, dst_align: u64, src: Value_Id, src_align:
     return ci;
 }
 
-// CreateBitPreservingCastChain (fixed-size types only)
+// CreateBitPreservingCastChain (IRBuilder.cpp)
 irb_bit_preserving_cast_chain :: (b: *Irb, v: Value_Id, nt: Type_Id) -> Value_Id {
     ot := vtype(v);
     if ot == nt return v;
-    if type_kind(ot) == .SVECTOR || type_kind(nt) == .SVECTOR fatal("SROA: casts between scalable vector types are not supported yet");
+    // CreateBitCastLike: a bitcast that also converts between fixed and scalable vectors of the same known size
+    bitcast_like :: (b: *Irb, inv: Value_Id, ty: Type_Id) -> Value_Id {
+        it := vtype(inv);
+        if it == ty return inv;
+        if type_kind(it) == .VECTOR && type_kind(ty) == .SVECTOR {
+            vty := vector_with_size_and_scalar(ty, it);
+            ins := irb_intrinsic(b, "llvm.vector.insert", .[vty, it], .[const_poison(vty), inv, const_int(ir.t_i64, 0)]);
+            return irb_bitcast(b, ins, ty);
+        }
+        if type_kind(it) == .SVECTOR && type_kind(ty) == .VECTOR {
+            vty := vector_with_size_and_scalar(it, ty);
+            return irb_intrinsic(b, "llvm.vector.extract", .[ty, vty], .[irb_bitcast(b, inv, vty), const_int(ir.t_i64, 0)]);
+        }
+        return irb_bitcast(b, inv, ty);
+    }
     is_int_or_int_vec :: (t: Type_Id) -> bool { return is_int_type(scalar_type(t)); }
     if is_int_or_int_vec(ot) && is_ptr_or_ptr_vector(nt)
-        return irb_cast(b, .INTTOPTR, irb_bitcast(b, v, irb_int_ptr_type(nt)), nt);
+        return irb_cast(b, .INTTOPTR, bitcast_like(b, v, irb_int_ptr_type(nt)), nt);
     if is_ptr_or_ptr_vector(ot) && is_int_or_int_vec(nt)
-        return irb_bitcast(b, irb_cast(b, .PTRTOINT, v, irb_int_ptr_type(ot)), nt);
+        return bitcast_like(b, irb_cast(b, .PTRTOINT, v, irb_int_ptr_type(ot)), nt);
     if is_ptr_or_ptr_vector(ot) && is_ptr_or_ptr_vector(nt) {
         oas := ir.types[scalar_type(ot)].a;
         nas := ir.types[scalar_type(nt)].a;
         if oas != nas
-            return irb_cast(b, .INTTOPTR, irb_bitcast(b, irb_cast(b, .PTRTOINT, v, irb_int_ptr_type(ot)), irb_int_ptr_type(nt)), nt);
+            return irb_cast(b, .INTTOPTR, bitcast_like(b, irb_cast(b, .PTRTOINT, v, irb_int_ptr_type(ot)), irb_int_ptr_type(nt)), nt);
     }
-    return irb_bitcast(b, v, nt);
+    return bitcast_like(b, v, nt);
 }
 
 // DataLayout::getIntPtrType(Ty): integer (vector) of the pointer's size
