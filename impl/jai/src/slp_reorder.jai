@@ -887,6 +887,11 @@ slp_reorder_top_to_bottom :: () {
             t := *slp.entries[k];
             if t.scalars.count != vf {
                 if t.reuse_shuffle_indices.count == vf && t.state != TE_EXPAND_VECTORIZE {
+                    // REVEC: shufflevector users do no reorderOperands, so neither do their operands here
+                    if slp_cl.revec {
+                        u := t.user_tree_index.user;
+                        if u != TE_NONE && te_has_state(u) && inst_op(slp.entries[u].s.main) == .SHUFFLEVECTOR continue;
+                    }
                     slp_reorder_node_with_reuses(te, mask);
                     u := t.user_tree_index.user;
                     if u != TE_NONE && slp.entries[u].state == TE_SPLIT_VECTORIZE te_reorder_split_node(u, t.user_tree_index.edge, mask, mask_order);
@@ -896,7 +901,8 @@ slp_reorder_top_to_bottom :: () {
             vec_state := t.state == TE_VECTORIZE || t.state == TE_STRIDED_VECTORIZE || t.state == TE_EXPAND_VECTORIZE || t.state == TE_COMPRESS_VECTORIZE;
             mo := ifx te_has_state(te) then inst_op(t.s.main) else .NONE_OP;
             if (t.state == TE_SPLIT_VECTORIZE && t.reuse_shuffle_indices.count == 0) ||
-               (vec_state && (mo == .EXTRACTELEMENT || mo == .EXTRACTVALUE || mo == .LOAD || mo == .STORE || mo == .INSERTELEMENT || mo == .INSERTVALUE)) {
+               (vec_state && (mo == .EXTRACTELEMENT || mo == .EXTRACTVALUE || mo == .LOAD || mo == .STORE || mo == .INSERTELEMENT || mo == .INSERTVALUE ||
+                              (slp_cl.revec && mo == .SHUFFLEVECTOR))) {
                 slp_reorder_order(*t.reorder_indices, mask);
                 if mo == .INSERTELEMENT || mo == .INSERTVALUE || mo == .STORE te_reorder_operands(te, mask);
             } else {

@@ -158,8 +158,8 @@ scb_is_empty_or_identity :: (mask: [] s32, vf: s64) -> bool {
 // BaseShuffleAnalysis::createShuffle<InstructionCost>(V1, V2, Mask, ShuffleCostBuilder, ScalarTy, VL)
 bsa_create_shuffle_cost :: (v1_in: Value_Id, v2_in: Value_Id, mask_in: [] s32, sty: Type_Id, vl: [] Value_Id) -> Cost {
     v1 := v1_in; v2 := v2_in;
-    if slp_num_elements(sty) != 1 slp_fail("REVEC shuffles");
     mask := mask_copy(mask_in);
+    if slp_num_elements(sty) != 1 slp_transform_scalar_shuffle_indices_to_vector(slp_num_elements(sty), *mask);
     vf := mask.count;
     if type_kind(vtype(v1)) == .VECTOR vf = cast(s64) type_count(vtype(v1));
     if v2 != NONE && !all_bits(slp_is_undef_vector(v2, slp_build_use_mask(vf, mask, SLP_USE_MASK_SECOND_ARG), true)) {
@@ -254,6 +254,8 @@ sce_build_vector_cost :: (b: *Bv_Builder, vl: [] Value_Id, root: Value_Id) -> Co
         cnt := 0; for vl if it == x cnt += 1;
         rest_undef := true; for k: 1..vl.count-1 if !pm_undef_value(vl[k]) { rest_undef = false; break; }
         need_shuffle := cnt > 1 && (vl[0] != x || !rest_undef);
+        if !need_shuffle && type_kind(b.sty) == .VECTOR
+            return tti_shuffle_cost(slp.tti, SK_INSERT_SUBVECTOR, vec_ty, vec_ty, .[], TCK_RECIP_THROUGHPUT, it_idx * cast(s64) slp_num_elements(b.sty), b.sty, .[], NONE);
         if !need_shuffle return tti_vector_instr_cost(slp.tti, .INSERTELEMENT, vec_ty, TCK_RECIP_THROUGHPUT, cast(u32) it_idx, const_poison(vec_ty), x);
         sm := new_mask(vl.count);
         for v, i: vl sm[i] = ifx pm_poison(v) then PME else cast(s32) 0;
@@ -707,8 +709,8 @@ bv_gather :: (b: *Bv_Builder, vl: [] Value_Id, mask_vf: s64 = 0, root: Value_Id 
     if root == NONE {
         vf := vl.count;
         if mask_vf != 0 vf = min(vf, mask_vf);
-        vsty := vtype(vl[0]);
-        if is_vector_type(vsty) slp_fail("REVEC gathers");
+        vlsty := vtype(vl[0]);
+        vsty := scalar_type(vlsty);
         vals: [..] Value_Id; vals.allocator = temp;
         for k: 0..vf-1 {
             v := vl[k];
@@ -716,6 +718,8 @@ bv_gather :: (b: *Bv_Builder, vl: [] Value_Id, mask_vf: s64 = 0, root: Value_Id 
             else if pm_undef_value(v) array_add(*vals, const_undef(vsty));
             else array_add(*vals, const_null_value(vsty));
         }
+        // REVEC: every vector "element" expands to its lanes (replicateMask)
+        if type_kind(vlsty) == .VECTOR vals = slp_replicate_mask(vals, type_count(vlsty));
         return const_vector_of(vals);
     }
     return cf_get_splat(type_vector(type_count(vtype(root)), scalar_type(b.sty), false), sce_all_ones_value(scalar_type(b.sty)));

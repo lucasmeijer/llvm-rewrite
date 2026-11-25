@@ -342,6 +342,13 @@ slp_gather :: (vl: [] Value_Id, root_in: Value_Id, sty: Type_Id, b: *Bv_Builder)
     return vec;
 }
 
+// createExtractVector(Builder, Vec, SubVecVF, Index)
+slp_create_extract_vector :: (vec: Value_Id, sub_vf: u64, index: u64) -> Value_Id {
+    mask := new_mask(cast(s64) sub_vf);
+    for k: 0..cast(s64) sub_vf - 1 mask[k] = cast(s32) (cast(s64) index + k);
+    return sgb_shuffle(vec, NONE, mask);
+}
+
 // the CreateInsertElement lambda of gather
 gather_insert_element :: (vec_in: Value_Id, v: Value_Id, pos: u32, ty: Type_Id) -> Value_Id {
     vec := vec_in;
@@ -357,10 +364,17 @@ gather_insert_element :: (vec_in: Value_Id, v: Value_Id, pos: u32, ty: Type_Id) 
         vv = x;
         scalar = sgb_int_cast(x, ty, !is_known_non_negative(scalar, slp_simple_query()));
     }
-    if is_vector_type(vtype(scalar)) slp_fail("REVEC gathers");
-    vec = sgb_insert_element(vec, scalar, cast(u64) pos);
-    if !is_inst(vec) || inst_op(vec) != .INSERTELEMENT return vec;
-    ins := vec;
+    ins: Value_Id;
+    if type_kind(vtype(scalar)) == .VECTOR {
+        // REVEC: insert the whole subvector
+        vec = slp_create_insert_vector(vec, scalar, cast(s64) pos * cast(s64) type_count(vtype(scalar)));
+        if !is_inst(vec) return vec;
+        ins = vec;
+    } else {
+        vec = sgb_insert_element(vec, scalar, cast(u64) pos);
+        if !is_inst(vec) || inst_op(vec) != .INSERTELEMENT return vec;
+        ins = vec;
+    }
     slpg_add_gather_seq(ins);
     slpg_add_cse_block(inst_block(ins));
     if is_inst(vv) {
@@ -373,7 +387,24 @@ gather_insert_element :: (vec_in: Value_Id, v: Value_Id, pos: u32, ty: Type_Id) 
             if scalar != vv {
                 if is_inst(scalar) user_op = scalar;
             } else {
-                if is_vector_type(vtype(vv)) slp_fail("REVEC gathers");
+                if is_vector_type(vtype(vv)) {
+                    if inst_op(ins) == .SHUFFLEVECTOR && op(ins, 0) != vv && op(ins, 1) != vv {
+                        // the shufflevector caused by the resize
+                        find_operand :: (vec: Value_Id, v: Value_Id) -> Value_Id {
+                            if is_inst(vec) && inst_op(vec) == .SHUFFLEVECTOR && (op(vec, 0) == v || op(vec, 1) == v) return vec;
+                            return NONE;
+                        }
+                        u := find_operand(op(ins, 0), vv);
+                        if u == NONE u = find_operand(op(ins, 1), vv);
+                        if u == NONE fatal("internal: slp: failed to find shufflevector, caused by resize");
+                        ins = u;
+                    } else if slp_cl.revec && inst_op(ins) == .SHUFFLEVECTOR {
+                        // the gather used V directly as a shufflevector operand: every in-IR use is rewritten
+                        lane := te_find_lane_for_value(found, vv);
+                        array_add(*slpx.external_uses, .{vv, NONE, found, lane});
+                        if !slp_has(slpx.external_uses_with_non_users, vv) array_add(*slpx.external_uses_with_non_users, vv);
+                    }
+                }
                 user_op = ins;
             }
             if user_op != NONE {
@@ -430,8 +461,8 @@ sirb_resize_to_match :: (v1: *Value_Id, v2: *Value_Id) {
 // BaseShuffleAnalysis::createShuffle<Value *>(V1, V2, Mask, ShuffleIRBuilder, ScalarTy)
 bsa_create_shuffle_ir :: (v1_in: Value_Id, v2_in: Value_Id, mask_in: [] s32, sty: Type_Id) -> Value_Id {
     v1 := v1_in; v2 := v2_in;
-    if slp_num_elements(sty) != 1 slp_fail("REVEC shuffles");
     mask := mask_copy(mask_in);
+    if slp_num_elements(sty) != 1 slp_transform_scalar_shuffle_indices_to_vector(slp_num_elements(sty), *mask);
     if v2 != NONE sirb_resize_to_match(*v1, *v2);
     vf := mask.count;
     if type_kind(vtype(v1)) == .VECTOR vf = cast(s64) type_count(vtype(v1));
@@ -907,23 +938,25 @@ slp_vectorize_tree_entry :: (te: Te_Id) -> Value_Id {
         if e.reorder_indices.count == 0 {
             m := new_mask(te_vector_factor(te));
             for k: 0..off2-1 m[k] = cast(s32) k;
-            if slp_num_elements(sty) != 1 slp_fail("REVEC split nodes");
+            stn := slp_num_elements(sty);
+            if stn != 1 slp_transform_scalar_shuffle_indices_to_vector(stn, *m);
             vec := sgb_shuffle(op1, NONE, m);
-            vec = slp_create_insert_vector(vec, op2, off2);
+            vec = slp_create_insert_vector(vec, op2, off2 * cast(s64) stn);
             te_set_vv(te, vec);
             return vec;
         }
-        common_vf := max(te_vector_factor(t1), te_vector_factor(t2));
-        if cast(s64) slp_num_elements(vtype(op1)) != common_vf {
+        scale := cast(s64) slp_num_elements(sty);
+        common_vf := max(te_vector_factor(t1), te_vector_factor(t2)) * scale;
+        resize_mask :: (vf: s64, scale: s64, common_vf: s64) -> [..] s32 {
+            // copy(createReplicatedMask(Scale, VF * Scale), Mask.begin()) into CommonVF elements
+            r := slp_create_replicated_mask(cast(u64) scale, cast(u64) (vf * scale));
+            if r.count > common_vf fatal("slp-vectorizer: a REVEC split node resize mask longer than the common VF (LLVM writes past its mask) is not supported");
             m := new_mask(common_vf);
-            for k: 0..te_vector_factor(t1)-1 m[k] = cast(s32) k;
-            op1 = sgb_shuffle(op1, NONE, m);
+            for r m[it_index] = it;
+            return m;
         }
-        if cast(s64) slp_num_elements(vtype(op2)) != common_vf {
-            m := new_mask(common_vf);
-            for k: 0..te_vector_factor(t2)-1 m[k] = cast(s32) k;
-            op2 = sgb_shuffle(op2, NONE, m);
-        }
+        if cast(s64) slp_num_elements(vtype(op1)) != common_vf op1 = sgb_shuffle(op1, NONE, resize_mask(te_vector_factor(t1), scale, common_vf));
+        if cast(s64) slp_num_elements(vtype(op2)) != common_vf op2 = sgb_shuffle(op2, NONE, resize_mask(te_vector_factor(t2), scale, common_vf));
         vec := sgb_shuffle(op1, op2, te_split_mask(te));
         te_set_vv(te, vec);
         return vec;
@@ -1065,7 +1098,7 @@ slp_vectorize_tree_entry :: (te: Te_Id) -> Value_Id {
         if vtype(tv) != vec_ty tv = sgb_int_cast(tv, vec_ty, slp_operand_signedness(te, 1));
         if vtype(fv) != vec_ty fv = sgb_int_cast(fv, vec_ty, slp_operand_signedness(te, 2));
         cn := slp_num_elements(vtype(cond)); tn := slp_num_elements(vtype(tv));
-        if cn != tn slp_fail("REVEC select condition replication");
+        if cn != tn cond = sgb_shuffle(cond, NONE, slp_create_replicated_mask(tn / cn, cn));
         v := sgb_select_unknown_profile(cond, tv, fv);
         v = slp_final_shuffle(v, te, sty);
         te_set_vv(te, v);
@@ -1130,7 +1163,7 @@ slp_vectorize_tree_entry :: (te: Te_Id) -> Value_Id {
                 vals: [..] Value_Id; vals.allocator = temp;
                 for 1..lvf / cast(s64) slp_num_elements(vtype(li)) array_add(*vals, const_int(ir.t_i1, 0));
                 for mc.compress_mask vals[it] = const_int(ir.t_i1, 1);
-                if is_vector_type(vtype(li)) slp_fail("REVEC masked loads");
+                if type_kind(vtype(li)) == .VECTOR vals = slp_replicate_mask(vals, type_count(vtype(li)));
                 ptr := op(li, 0);
                 f := get_or_insert_intrinsic_declaration(IID_MASKED_LOAD, .[mc.load_vec_ty, vtype(ptr)]);
                 fty := glob(f).value_type;
@@ -1143,10 +1176,20 @@ slp_vectorize_tree_entry :: (te: Te_Id) -> Value_Id {
                 new_li = sgb_load(mc.load_vec_ty, op(li, 0), align);
             }
             new_li = slp_propagate_flags_for(te, new_li);
-            v = sgb_shuffle(new_li, NONE, mc.compress_mask);
+            cmask := mask_copy(mc.compress_mask);
+            if type_kind(vtype(li)) == .VECTOR slp_transform_scalar_shuffle_indices_to_vector(type_count(vtype(li)), *cmask);
+            v = sgb_shuffle(new_li, NONE, cmask);
         } else if e.state == TE_SCATTER_VECTORIZE {
             vec_ptr := slp_vectorize_operand(te, 0);
-            if is_vector_type(sty) slp_fail("REVEC masked gathers");
+            if type_kind(sty) == .VECTOR {
+                // REVEC: one pointer per lane, GEPs over the elements of each vector "scalar"
+                sn := slp_num_elements(sty);
+                vn := slp_num_elements(vec_ty);
+                idx: [..] Value_Id; idx.allocator = temp;
+                for i: 0..cast(s64) vn - 1 array_add(*idx, const_int(ir.t_i64, cast(u64) i % sn));
+                rep := sgb_shuffle(vec_ptr, NONE, slp_create_replicated_mask(sn, vn / sn));
+                vec_ptr = sgb_gep(to_scalarized_ty(vec_ty), rep, .[const_vector_of(idx)]);
+            }
             common_align: u64 = 0;
             for x: slp.entries[te].scalars if is_inst(x) && inst_op(x) == .LOAD { a := inst(x).align; if common_align == 0 || a < common_align common_align = a; }
             n := slp_num_elements(vec_ty);
@@ -1394,7 +1437,23 @@ slp_vectorize_call :: (te: Te_Id, sty: Type_Id, vec_ty: Type_Id, has_bw: bool, b
 slp_vectorize_alt_shuffle :: (te: Te_Id, sty: Type_Id, vec_ty: Type_Id, has_bw: bool, bw: Min_Bw) -> Value_Id {
     e := *slp.entries[te];
     vl0 := e.s.main;
-    if !is_alt_shuffle(e.s) slp_fail("REVEC shufflevector nodes");
+    if !is_alt_shuffle(e.s) {
+        // REVEC: one shufflevector over the (vectorized) source with the concatenated masks
+        slp_set_insert_point_after_bundle(te);
+        src := slp_vectorize_operand(te, 0);
+        this_mask := slp_calculate_shufflevector_mask(slp.entries[te].scalars);
+        v: Value_Id;
+        if is_inst(src) && inst_op(src) == .SHUFFLEVECTOR {
+            sm := slp_shuffle_mask_of(src);
+            nm := new_mask(this_mask.count);
+            for this_mask nm[it_index] = ifx it == PoisonMaskElem then PoisonMaskElem else sm[it];
+            v = sgb_shuffle(op(src, 0), op(src, 1), nm);
+        } else v = sgb_shuffle(src, NONE, this_mask);
+        v = slp_propagate_flags_for(te, v);
+        v = slp_final_shuffle(v, te, sty);
+        te_set_vv(te, v);
+        return v;
+    }
     opc := te_opcode(te);
     alt_opc := is_alt_opcode(e.s);
     is_cmp := inst_op(vl0) == .ICMP || inst_op(vl0) == .FCMP;
@@ -1442,6 +1501,7 @@ slp_vectorize_alt_shuffle :: (te: Te_Id, sty: Type_Id, vec_ty: Type_Id, has_bw: 
     mask, op_scalars, alt_scalars := te_build_alt_op_shuffle_mask(te);
     slp_propagate_flags_for(te, v0, opc, op_scalars);
     slp_propagate_flags_for(te, v1, alt_opc, alt_scalars);
+    if type_kind(sty) == .VECTOR slp_transform_scalar_shuffle_indices_to_vector(type_count(sty), *mask);
     v := sgb_shuffle(v0, v1, mask);
     slpg_record(v);
     te_set_vv(te, v);

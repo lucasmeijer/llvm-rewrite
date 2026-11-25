@@ -676,7 +676,8 @@ hr_try_to_reduce :: (h: *Hr_Reduction) -> Value_Id {
         }
         num_reduced := cast(u64) candidates.count;
         if num_reduced < h.reduction_limit && (num_reduced < 2 || !slp_is_splat(candidates)) continue;
-        h.is_supported_identity_op = h.rk == HR_UNORDERED && h.kind != .MUL && h.kind != .FMUL && h.kind != .FMULADD;
+        h.is_supported_identity_op = h.rk == HR_UNORDERED && h.kind != .MUL && h.kind != .FMUL && h.kind != .FMULADD &&
+                                     (!slp_cl.revec || !is_vector_type(vtype(candidates[0])));
         same_keys := hr_new_list();                                 // SmallMapVector<Value *, unsigned> SameValuesCounter
         same_cnts: [..] u32; same_cnts.allocator = temp;
         if h.is_supported_identity_op for v, idx: candidates vv_slot(*same_keys, *same_cnts, tracked_to_orig[idx]).* += 1;
@@ -1107,11 +1108,16 @@ hr_get_reduction_cost :: (h: *Hr_Reduction, reduced: [] Value_Id, svc_keys: [] V
     if k == .ADD || k == .MUL || k == .OR || k == .AND || k == .XOR || k == .FADD || k == .FMUL {
         rdx_opc := hr_kind_opcode(k);
         if !all_consts {
-            if is_vector_type(sty) slp_fail("REVEC reductions");
             red_ty := type_elem(vec_ty);
             has, rtype, signed := slp_root_node_type_with_no_cast();
             if !has { rtype = red_ty; signed = true; }
-            if does_require_reduction_op {
+            if does_require_reduction_op && type_kind(sty) == .VECTOR {
+                // REVEC: extract every reduced subvector and combine them with vector ops
+                n := cast(s64) type_count(sty);
+                for i: 0..redux - 1 vector_cost = cost_add(vector_cost, slp_shuffle_cost(SK_EXTRACT_SUBVECTOR, vec_ty, .[], K, i * n, sty));
+                for i: 0..redux - 2
+                    vector_cost = cost_add(vector_cost, tti_arith_cost(t, rdx_opc, sty, K, tti_operand_info(reduced[i]), tti_operand_info(reduced[i + 1]), .[], get_reduction_op(h, reduced[i])));
+            } else if does_require_reduction_op {
                 if rtype == red_ty vector_cost = tti_arithmetic_reduction_cost(t, rdx_opc, vec_ty, true, fmf, K);
                 else vector_cost = tti_extended_reduction_cost(t, rdx_opc, !signed, red_ty, slp_widened_type(rtype, cast(u64) redux), true, fmf, K);
             } else {
@@ -1401,8 +1407,18 @@ hr_emit_reduction :: (h: *Hr_Reduction, hb: *Hr_Builder, v: Value_Id, dest_ty: T
 hr_create_single_op :: (h: *Hr_Reduction, hb: *Hr_Builder, vec: Value_Id, scale: u32, is_signed: bool, dest_ty: Type_Id, reduced_in_tree: bool, start: Value_Id = NONE) -> Value_Id {
     rdx: Value_Id;
     if reduced_in_tree rdx = vec;
-    else {
-        if is_vector_type(dest_ty) slp_fail("REVEC reductions");
+    else if type_kind(dest_ty) == .VECTOR && slp_cl.revec {
+        // REVEC: the reduction is a chain of vector ops over the subvectors of Vec
+        dn := slp_num_elements(dest_ty);
+        vf := slp_num_elements(vtype(vec)) / dn;
+        rdx = start;
+        for i: 0..cast(s64) vf - 1 {
+            hrb_use(hb);
+            sub := slp_create_extract_vector(vec, dn, cast(u64) i * dn);
+            if rdx == NONE rdx = sub;
+            else rdx = hr_create_op(h, hb, rdx, sub, "rdx.op");
+        }
+    } else {
         rdx = hr_emit_reduction(h, hb, vec, dest_ty, start);
     }
     if vtype(rdx) != dest_ty { hrb_use(hb); rdx = sgb_int_cast(rdx, dest_ty, is_signed); }

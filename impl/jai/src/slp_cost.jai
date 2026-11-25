@@ -67,12 +67,17 @@ tti_cost_of_keeping_live_over_call :: (t: *Tti, ty: Type_Id) -> Cost { return 0;
 // ::getVectorInstrCost(TTI, ScalarTy, Opcode, Val, CostKind, Index, Scalar, ScalarUserAndIdx): X86 does not override
 // the ScalarUserAndIdx form, BasicTTI forwards it without the scalar.
 slp_vector_instr_cost :: (sty: Type_Id, opc: Opcode, val: Type_Id, index: u32) -> Cost {
-    if is_vector_type(sty) slp_fail("REVEC extract costs");
+    if opc == .EXTRACTELEMENT && type_kind(sty) == .VECTOR
+        return slp_shuffle_cost(SK_EXTRACT_SUBVECTOR, val, .[], TCK_RECIP_THROUGHPUT, cast(s64) index * cast(s64) type_count(sty), sty);
     return tti_vector_instr_cost(slp.tti, opc, val, TCK_RECIP_THROUGHPUT, index);
 }
 // ::getExtractWithExtendCost
 slp_extract_with_extend_cost :: (opc: Opcode, dst: Type_Id, vec_ty: Type_Id, index: u32) -> Cost {
-    if is_vector_type(dst) slp_fail("REVEC extract-with-extend costs");
+    if is_vectorized_ty(dst) {
+        sub := slp_widened_type(to_scalarized_ty(vec_ty), slp_num_elements(dst));
+        return cost_add(slp_shuffle_cost(SK_EXTRACT_SUBVECTOR, vec_ty, .[], TCK_RECIP_THROUGHPUT, cast(s64) index * cast(s64) slp_num_elements(dst), sub),
+                        tti_cast_cost(slp.tti, opc, dst, sub, CCH_NONE, TCK_RECIP_THROUGHPUT));
+    }
     return tti_extract_with_extend_cost(slp.tti, opc, dst, vec_ty, index);
 }
 
@@ -211,9 +216,11 @@ slp_gather_node_effective_scale :: (te: Te_Id, u: Value_Id = NONE) -> u64 {
 te_split_mask :: (te: Te_Id) -> [..] s32 {
     e := *slp.entries[te];
     back := cast(s64) e.combined_entries_with_indices[e.combined_entries_with_indices.count - 1][1];
-    common_vf := max(back, e.scalars.count - back);
-    mask := new_mask(te_vector_factor(te));
-    for i, idx: e.reorder_indices mask[i] = cast(s32) (idx + ifx idx >= back then common_vf - back else 0);
+    scale := cast(s64) slp_num_elements(vtype(e.scalars[0]));
+    common_vf := max(back, e.scalars.count - back) * scale;
+    mask := new_mask(te_vector_factor(te) * scale);
+    for i, idx: e.reorder_indices for k: 0..scale - 1
+        mask[scale * i + k] = cast(s32) (scale * idx + k + ifx idx >= back then common_vf - back * scale else 0);
     return mask;
 }
 // TreeEntry::hasEqualOperands(TE)
@@ -395,8 +402,10 @@ slp_entry_vec_ty :: (te: Te_Id) -> (Type_Id, Type_Id) {
     sty := slp_get_value_type(slp.entries[te].scalars[0]);
     found, bw := table_find(*slpx.min_bws, te);
     if found {
-        if is_vector_type(sty) slp_fail("REVEC minimum bit widths");
+        vec := type_kind(sty) == .VECTOR;
+        n := ifx vec then type_count(sty) else 1;
         sty = type_int(cast(u32) bw.bits);
+        if vec sty = slp_widened_type(sty, n);
     }
     return sty, slp_widened_type(sty, cast(u64) te_vector_factor(te));
 }
@@ -512,14 +521,21 @@ slp_get_entry_cost :: (te: Te_Id, vectorized_vals: [] Value_Id, checked_extracts
     e := *slp.entries[te];
     vl := e.scalars;
     sty := slp_get_value_type(vl[0]);
+    // REVEC: insertelements of scalars into a vector "scalar" are costed on the element type
+    if slp_cl.revec && e.state == TE_VECTORIZE && te_opcode(te) == .INSERTELEMENT {
+        o1 := e.operands[1];
+        if !is_vector_type(vtype(o1[o1.count - 1])) sty = scalar_type(sty);
+    }
     if !slp_is_valid_element_type(sty) return COST_INVALID;
     c: Slp_Ec;
     c.te = te;
     c.has_bw, c.bw = slp_min_bw_of(te);
     c.orig_sty = sty;
     if c.has_bw {
-        if is_vector_type(sty) slp_fail("REVEC minimum bit widths");
+        vec := type_kind(sty) == .VECTOR;
+        n := ifx vec then type_count(sty) else 1;
         sty = type_int(cast(u32) c.bw.bits);
+        if vec sty = slp_widened_type(sty, n);
     } else if te == 0 && slp_is_reduced_bitcast_root() {
         zext := slp_get_operand_entry(te, 0);
         sty = vtype(op(slp.entries[zext].s.main, 0));
@@ -624,9 +640,9 @@ slp_get_entry_cost :: (te: Te_Id, vectorized_vals: [] Value_Id, checked_extracts
             src_bw_sz := dl_type_size_bits(scalar_type(src_sty));
             if src_found {
                 src_bw_sz = src_bw.bits;
-                if is_vector_type(src_sty) slp_fail("REVEC minimum bit widths");
+                n := slp_num_elements(src_sty);
                 src_sty = type_int(cast(u32) src_bw_sz);
-                c.src_cast_vec_ty = slp_widened_type(src_sty, cast(u64) vl.count);
+                c.src_cast_vec_ty = slp_widened_type(src_sty, cast(u64) vl.count * n);
             }
             bw_sz := dl_type_size_bits(scalar_type(c.sty));
             if bw_sz == src_bw_sz c.vec_cast_opc = .BITCAST;
@@ -934,7 +950,7 @@ ec_scalar_elt_cost :: (c: *Slp_Ec, idx: s64) -> Cost {
         }
         return tti_call_instr_cost(t);
     }
-    if s == EC_SHUFFLE {
+    if s == EC_SHUFFLE || s == ec_op_s32(.SHUFFLEVECTOR) {
         if pm_poison(uv) return TCC_FREE;
         return tti_instruction_cost(t, uv, K);
     }
@@ -996,7 +1012,8 @@ ec_vector_cost :: (c: *Slp_Ec, common: Cost) -> Cost {
                                   slp_get_operand_info(e.operands[ifx is_sel then 1 else 0]), slp_get_operand_info(e.operands[ifx is_sel then 2 else 1]), c.vl0);
             if inst_op(c.vl0) == .SELECT {
                 cn := slp_num_elements(mask_ty); vn := slp_num_elements(c.vec_ty);
-                if cn != vn slp_fail("REVEC select condition replication");
+                // REVEC: a scalar i1 condition per vector "element" is replicated over its lanes
+                if cn != vn vc = cost_add(vc, slp_shuffle_cost(SK_PERMUTE_SINGLE_SRC, mask_ty, slp_create_replicated_mask(vn / cn, cn)));
             }
         }
         return cost_add(vc, common);
@@ -1119,6 +1136,26 @@ ec_vector_cost :: (c: *Slp_Ec, common: Cost) -> Cost {
         arg_tys := slp_build_intrinsic_arg_types(ci, id, slp_num_elements(c.vec_ty), ifx c.has_bw then cast(u32) c.bw.bits else 0);
         ic, lc := slp_vector_call_costs(ci, c.vec_ty, arg_tys);
         return cost_add(min(ic, lc), common);
+    }
+    if s == ec_op_s32(.SHUFFLEVECTOR) {
+        // REVEC, a non-alternate shufflevector node: free if every group extracts its source in order
+        sv := vl[0];
+        sv_n := cast(s64) type_count(vtype(op(sv, 0)));
+        gsz := sv_n / cast(s64) shuffle_mask(sv).count;
+        i := 0;
+        while i < vl.count {
+            next: s32 = 0;
+            for k: 0..gsz - 1 {
+                v := vl[i + k];
+                m := slp_shuffle_mask_of(v);
+                ok, idx := svm_is_extract_subvector(m, cast(s64) type_count(vtype(op(v, 0))));
+                if !ok fatal("internal: slp: not a supported shufflevector usage");
+                if next != idx return cost_add(slp_shuffle_cost(SK_PERMUTE_SINGLE_SRC, c.vec_ty, slp_calculate_shufflevector_mask(e.scalars)), 0);
+                next += cast(s32) m.count;
+            }
+            i += gsz;
+        }
+        return TCC_FREE;
     }
     if s == EC_SHUFFLE {
         vc: Cost = 0;

@@ -412,3 +412,17 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
   canVectorizeInstrs); the verdict is the same.
 - Passed remarks print as `remark: <DIFile filename or <unknown>>:<line>:<col>: vectorized loop (vectorization
   width: N, interleaved count: M)` (or `interleaved loop (interleaved count: M)` for VF 1) with Loop::getStartLoc.
+
+## SLP REVEC (`-slp-revec`), verified on SLPVectorizer/revec*.ll and -slp-revec sweeps
+- A vector-typed "scalar" `<n x T>` is vectorized as a wider `<VF*n x T>` (getWidenedType); every mask over
+  "elements" is expanded to lanes with transformScalarShuffleIndiciesToVector (createShuffle for cost and codegen,
+  split nodes, alternate shuffles, compress masks), constants with replicateMask, i1 select conditions with
+  createReplicatedMask. Inserting/extracting a "scalar" is SK_InsertSubvector / SK_ExtractSubvector costed and
+  emitted as shufflevectors (createInsertVector / createExtractVector), never llvm.vector.insert.
+- With REVEC, getValueType no longer looks through insertelement; non-alternate shufflevector bundles are
+  vectorizable when they form getShufflevectorNumGroups groups of extract-subvector shuffles of one source, and
+  are free when every group extracts its source in order (else a single-source permute of
+  calculateShufflevectorMask).
+- TreeEntry::getSplitMask and the split-node codegen scale by the scalar's element count; the split-node resize
+  copies createReplicatedMask(Scale, VF*Scale) into a CommonVF-sized mask, which overflows the buffer when
+  VF*Scale*Scale > CommonVF (only reachable with Scale > 1).

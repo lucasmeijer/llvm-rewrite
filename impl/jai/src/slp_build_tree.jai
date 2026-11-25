@@ -330,7 +330,7 @@ slp_get_scalars_vectorization_legality :: (vl: [] Value_Id, depth: u32, ei: Edge
         n := cast(u64) phi_num_incoming(s.main);
         if cast(u64) vl.count * n > cast(u64) slp_cl.phi_budget return .{s = s, is_legal = false};
     }
-    if is_vector_type(slp_get_value_type(vl[0])) return .{s = s, is_legal = false, try_to_find_duplicates = false};
+    if !slp_cl.revec && is_vector_type(slp_get_value_type(vl[0])) return .{s = s, is_legal = false, try_to_find_duplicates = false};
     bb := inst_block(s.main);
     term := block_terminator(bb);
     if is_eh_pad(block_first_non_phi(bb)) || (term != NONE && inst_op(term) == .UNREACHABLE) || !dt_is_reachable_from_entry(slp.dt, bb)
@@ -554,7 +554,7 @@ slp_can_build_split_node_full :: (vl: [] Value_Id, ls: Inst_State) -> (bool, [..
     // TTI::preferAlternateOpcodeVectorization: X86 false, the base implementation (no target) true
     prefer_alternate := slp.tti.kind != .X86;
     if vl.count <= SMALL_NODE_SIZE || prefer_alternate || !slp_cl.split_alternate return false, op1, op2, reorder;
-    if type_kind(slp_get_value_type(vl[0])) == .STRUCT return false, op1, op2, reorder;
+    if type_kind(slp_get_value_type(vl[0], slp_cl.revec)) == .STRUCT return false, op1, op2, reorder;
     for e: slp_get_split_tree_entries(ls.main) {
         if te_is_same(e, vl) return false, op1, op2, reorder;
         all := true;
@@ -1137,6 +1137,19 @@ slp_get_scalars_vectorization_state :: (s: Inst_State, vl: [] Value_Id, is_scatt
         case .FDIV; #through; case .UREM; #through; case .SREM; #through; case .FREM; #through; case .SHL; #through;
         case .LSHR; #through; case .ASHR; #through; case .AND; #through; case .OR; #through; case .XOR; #through;
         case .FREEZE;
+            // REVEC: selects (and zexts) whose conditions have different types are gathered
+            if shuffle_or_op == .SELECT && slp_cl.revec {
+                cond_ty: Type_Id = NONE;
+                for v: vl {
+                    if !is_inst(v) continue;
+                    c: Value_Id = NONE;
+                    if inst_op(v) == .SELECT c = op(v, 0);
+                    else if inst_op(v) == .ZEXT c = op(v, 0);
+                    else continue;
+                    if cond_ty == NONE cond_ty = vtype(c);
+                    else if vtype(c) != cond_ty return TE_NEED_TO_GATHER;
+                }
+            }
             // isFPVectorizationPotentiallyUnsafe is false on X86
             return TE_VECTORIZE;
         case .GEP;
@@ -1205,7 +1218,11 @@ slp_get_scalars_vectorization_state :: (s: Inst_State, vl: [] Value_Id, is_scatt
             if !cost_valid(ic) && !cost_valid(lc) return TE_NEED_TO_GATHER;
             return TE_VECTORIZE;
         case .SHUFFLEVECTOR;
-            if !is_alt_shuffle(s) return TE_NEED_TO_GATHER;
+            if !is_alt_shuffle(s) {
+                // REVEC can vectorize groups of extract-subvector shuffles
+                if slp_cl.revec && slp_shufflevector_num_groups(vl) return TE_VECTORIZE;
+                return TE_NEED_TO_GATHER;
+            }
             return TE_VECTORIZE;
     }
     return TE_NEED_TO_GATHER;
@@ -1611,6 +1628,10 @@ slp_is_fully_vectorizable_tiny_tree :: (for_reduction: bool) -> bool {
 
 // isTreeTinyAndNotFullyVectorizable(ForReduction)
 slp_is_tree_tiny_and_not_fully_vectorizable :: (for_reduction := false) -> bool {
+    // REVEC: do not revectorize the reduction pattern of shuffles (a shuffle root over a splat and constants)
+    if slp_cl.revec && for_reduction && slp.entries.count == 3 && slp.entries[0].state == TE_VECTORIZE && te_opcode(0) == .SHUFFLEVECTOR &&
+       te_is_gather(1) && slp_is_splat(slp.entries[1].scalars) && te_is_gather(2) && slp_all_constant(slp.entries[2].scalars)
+        return true;
     if slp.entries.count == 0 return true;
     for te: 0..slp.entries.count-1 if te_is_gather(cast(Te_Id) te) && type_kind(vtype(slp.entries[te].scalars[0])) == .STRUCT return true;
     tree_size := slp.entries.count;

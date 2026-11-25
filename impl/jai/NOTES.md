@@ -1071,7 +1071,7 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   `--per-function --with-test-flags` 93568 identical / 0 differs (3230 loud, same causes + 2 ppc_fp128 literals).
 - Perf: no `@perf` benchmark times vector-combine; on tests/perf the pass is a no-op walk.
 
-## SLPVectorizer (in progress; L1.vectorize.slp: 615/650 `::opt`)
+## SLPVectorizer (L1.vectorize.slp COMPLETE 1300/1300)
 
 - `-passes=slp-vectorizer` is registered (passes.jai) and its cl::opts are parsed (`slp_parse_cl_opt`). Files, in
   data-flow order (each names its LLVM functions in the header):
@@ -1114,7 +1114,7 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   the whole corpus with each file's test flags equals LLVM's (`tools/slp_cost_compare.py`, 0 of 10293 runs differ).
 - Frontier (fails loudly), per-function sweep: struct-typed scalars (42: calls returning structs, e.g.
   `llvm.sadd.with.overflow`, and the extractvalue nodes over them), target extension element types (7), VFDatabase
-  vector variants (4); with test flags also REVEC (20) and other passes' options. Strided / interleaved accesses are
+  vector variants (4); with test flags other passes' options. Strided / interleaved accesses are
   unreachable on X86 and fail loudly where LLVM would build them.
 - Next steps, in order:
   1. Struct-typed scalars: getWidenedType of a struct (a struct of vectors), checkEVsForVecCalls +
@@ -1122,7 +1122,7 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
      the struct paths of buildExternalUses (9644), getEntryCost (17303), getTreeCost's extract costs (20160-20320),
      vectorizeTree (23386, 23624, the call's TysForDecl 24326, the struct external-use extraction with
      StructFieldExtracts 24869-25169) and the driver (31471, 31939).
-  2. VFDatabase vector variants (`-vector-library`, vector-function-abi-variant), REVEC.
+  2. VFDatabase vector variants (`-vector-library`, vector-function-abi-variant).
   `tools/slp_cost_compare.py` compares whole decision sequences: run it with a `--with-test-flags` sweep's
   results.tsv after every change; DEBUG_SLP also dumps the module after each vectorizeTree ("DBG IR after
   vectorizeTree") and the CheckForShuffledLoads costs ("DBG cfsl").
@@ -1132,7 +1132,15 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   may not be a strict weak order (PHICompare, compareCmp); insertion sort elsewhere. Hash-ordered containers that
   decide results fail loudly when the order matters (collectUserStores with several store groups).
   calculateTreeCostAndTrimNonProfitable's PriorityQueue has distinct (cost, Idx) keys, so a sorted list is exact.
-- Fail loudly already in the helpers: REVEC, struct-typed scalars, VFDatabase vector variants, operand bundles in
+- REVEC (`-slp-revec`, jai_tails 2026-11): every `SLPReVec` site of SLPVectorizer.cpp is ported (gated on
+  `slp_cl.revec`), plus the generic vector-"scalar" paths the old guards rejected: getWidenedType of a vector,
+  transformScalarShuffleIndiciesToVector in createShuffle (cost and IR), subvector insert/extract costs and
+  codegen (createInsertVector / createExtractVector), replicateMask / createReplicatedMask (gathers, masked
+  loads, select conditions), getShufflevectorNumGroups / calculateShufflevectorMask (non-alternate shufflevector
+  nodes), REVEC reductions (createSingleOp, getReductionCost), split nodes (getSplitMask scaled; the resize mask
+  that LLVM copies past its buffer fails loudly). Sweeps with -slp-revec (plain, x86 avx2, skylake-avx512;
+  --with-test-flags; --per-function avx2 84653 functions; tests/perf/compile): 0 differs.
+- Fail loudly already in the helpers: struct-typed scalars, VFDatabase vector variants, operand bundles in
   getSameOpcode / generateKeySubkey, VP intrinsics, target extension element types.
 - Sweeps `--passes slp-vectorizer` (0 differs / 0 bad-ir in all): whole-file 7957 identical / 23 loud;
   `--with-test-flags` 10035 identical / 258 loud; `--per-function` 70407 identical / 55 loud; tests/perf/compile 4/4

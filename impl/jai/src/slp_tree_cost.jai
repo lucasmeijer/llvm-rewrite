@@ -172,7 +172,7 @@ slp_num_vector_insts :: () -> u32 {
     for eu: slpx.external_uses {
         if eu.user != NONE && inst_op(eu.user) == .INSERTELEMENT continue;
         if eu.user != NONE && table_contains(*slpx.eph_values, eu.user) continue;
-        if is_vectorized_ty(vtype(eu.scalar)) continue;
+        if is_vectorized_ty(vtype(eu.scalar)) && (!slp_cl.revec || (te_has_state(eu.te) && te_opcode(eu.te) == .INSERTELEMENT)) continue;
         if slp_has(slpx.external_uses_as_original_scalar, eu.scalar) continue;
         if slp_has(counted, eu.scalar) continue;
         array_add(*counted, eu.scalar);
@@ -605,7 +605,8 @@ slp_get_tree_cost :: (tree_cost: Cost, vectorized_vals: [] Value_Id = .[], reduc
     n := slp.entries.count;
     t := slp.tti;
     K :: TCK_RECIP_THROUGHPUT;
-    if slp_cl.inst_count_check && te_vector_factor(0) == 2 && slp_cl.threshold == 0 {   // (!SLPReVec || ...): REVEC is not supported
+    if slp_cl.inst_count_check && te_vector_factor(0) == 2 && slp_cl.threshold == 0 &&
+       (!slp_cl.revec || !is_vector_type(vtype(slp.entries[0].scalars[0]))) {
         num_scalar := slp_num_scalar_insts();
         num_vector := slp_num_vector_insts();
         #if DEBUG_SLP print("DBG inst count check: vector=% scalar=%\n", num_vector, num_scalar);
@@ -723,7 +724,7 @@ slp_get_tree_cost :: (tree_cost: Cost, vectorized_vals: [] Value_Id = .[], reduc
             up := inst_block(eu.user);
             if !dt_is_reachable_from_entry(slp.dt, up) || is_eh_pad(block_first_non_phi(up)) || block_ends_unreachable(up) continue;
         }
-        if is_vectorized_ty(vtype(eu.scalar)) continue;
+        if is_vectorized_ty(vtype(eu.scalar)) && (!slp_cl.revec || (te_has_state(eu.te) && te_opcode(eu.te) == .INSERTELEMENT)) continue;
         if is_inst(eu.scalar) && inst_op(eu.scalar) == .INSERTVALUE continue;
         if eu.user != NONE && inst_op(eu.user) == .INSERTELEMENT && op(eu.user, 1) == eu.scalar {
             vu := eu.user;
@@ -929,8 +930,9 @@ slp_get_tree_cost :: (tree_cost: Cost, vectorized_vals: [] Value_Id = .[], reduc
             if orig_sz != src_sz {
                 opc: Opcode = .TRUNC;
                 if orig_sz > src_sz opc = ifx rbw.signed then .SEXT else .ZEXT;
-                if is_vector_type(dst_ty) slp_fail("REVEC reduction resize");
-                cc := tti_cast_cost(t, opc, dst_ty, type_int(cast(u32) src_sz), CCH_NONE, K);
+                src_ty := type_int(cast(u32) src_sz);
+                if type_kind(dst_ty) == .VECTOR src_ty = slp_widened_type(src_ty, type_count(dst_ty));
+                cc := tti_cast_cost(t, opc, dst_ty, src_ty, CCH_NONE, K);
                 cost = cost_add(cost, scale_cost(cc, 0, NONE, reduction_root, *scale_keys, *scale_vals));
             }
         }

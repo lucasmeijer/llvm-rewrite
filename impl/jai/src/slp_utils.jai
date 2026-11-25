@@ -3,7 +3,7 @@
 // BinOpSameOpcodeHelper, InstructionsState, getSameOpcode, the small mask/order helpers) and
 // llvm/lib/Transforms/Vectorize/SLPVectorizer/SLPUtils.cpp (complete), plus getIntrinsicForCallSite
 // (llvm/lib/Analysis/ValueTracking.cpp) and getVectorIntrinsicIDForCall (llvm/lib/Analysis/VectorUtils.cpp).
-// Not ported (fail loudly when reached): REVEC (-slp-revec), struct-typed scalars, VFDatabase vector variants.
+// Not ported (fail loudly when reached): struct-typed scalars, VFDatabase vector variants.
 
 slp_cl: struct {
     run := true;                          // -vectorize-slp
@@ -88,7 +88,7 @@ slp_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
         case "view-slp-tree"; fatal("-view-slp-tree is not supported");
         case; return false;
     }
-    if slp_cl.revec fatal("slp-vectorizer: -slp-revec (REVEC) is not supported yet");
+
     return true;
 }
 
@@ -132,7 +132,11 @@ can_vectorize_ty :: (t: Type_Id) -> bool {
     return type_kind(t) == .VOID || vector_type_is_valid_element_type(t);
 }
 // isValidElementType
-slp_is_valid_element_type :: (t: Type_Id) -> bool {
+slp_is_valid_element_type :: (t_in: Type_Id) -> bool {
+    t := t_in;
+    // REVEC: the element type of a (fixed) vector or struct-of-vectors scalar
+    if slp_cl.revec && is_vectorized_ty(t) && type_kind(t) != .SVECTOR && !(type_kind(t) == .STRUCT && type_kind(type_sub(t, 0)) == .SVECTOR)
+        t = to_scalarized_ty(t);
     return can_vectorize_ty(t) && type_kind(t) != .X86_FP80 && type_kind(t) != .PPC_FP128 && type_kind(t) != .VOID;
 }
 // getValueType(V, LookThroughCmp)
@@ -141,7 +145,7 @@ slp_get_value_type :: (v: Value_Id, look_through_cmp := false) -> Type_Id {
         o := inst_op(v);
         if o == .STORE return vtype(op(v, 0));
         if look_through_cmp && (o == .ICMP || o == .FCMP) return vtype(op(v, 0));
-        if o == .INSERTELEMENT return vtype(op(v, 1));
+        if !slp_cl.revec && o == .INSERTELEMENT return vtype(op(v, 1));
         if o == .INSERTVALUE return vtype(op(v, 1));
     }
     return vtype(v);
@@ -157,16 +161,85 @@ slp_num_elements :: (t: Type_Id) -> u64 {
 }
 // getWidenedType(ScalarTy, VF)
 slp_widened_type :: (sty: Type_Id, vf: u64) -> Type_Id {
-    if is_vector_type(sty) slp_fail("vector-typed scalars (REVEC)");
-    if type_kind(sty) == .STRUCT {
-        // toVectorizedTy(StructTy, VF): a literal struct of <VF x ElTy> (VF == 1 included)
-        if is_vectorized_ty(sty) slp_fail("vector-typed scalars (REVEC)");
-        n := cast(s64) type_nsub(sty);
-        e := NewArray(n, Type_Id,, temp);
-        for k: 0..n-1 e[k] = type_vector(vf, type_sub(sty, cast(u32) k), false);
-        return type_literal_struct(e, false);
+    if vf == 1 && !is_vectorized_ty(sty) {
+        if type_kind(sty) == .STRUCT {
+            n := cast(s64) type_nsub(sty);
+            e := NewArray(n, Type_Id,, temp);
+            for k: 0..n-1 e[k] = type_vector(1, type_sub(sty, cast(u32) k), false);
+            return type_literal_struct(e, false);
+        }
+        return type_vector(1, sty, false);
     }
-    return type_vector(vf, sty, false);
+    // toVectorizedTy(toScalarizedTy(ScalarTy), VF * getNumElements(ScalarTy))
+    return to_vectorized_ty(to_scalarized_ty(sty), vf * slp_num_elements(sty));
+}
+// transformScalarShuffleIndiciesToVector: a mask over vector "elements" (REVEC) as a mask over their lanes
+slp_transform_scalar_shuffle_indices_to_vector :: (n: u64, mask: *[..] s32) {
+    m := mask.*;
+    nm: [..] s32; nm.allocator = temp;
+    for i: 0..m.count - 1 for j: 0..cast(s64) n - 1
+        array_add(*nm, ifx m[i] == PoisonMaskElem then PoisonMaskElem else m[i] * cast(s32) n + cast(s32) j);
+    mask.count = 0;
+    for nm array_add(mask, it);
+}
+// ShuffleVectorInst::getShuffleMask as SLP masks (PoisonMaskElem = -1)
+slp_shuffle_mask_of :: (sv: Value_Id) -> [] s32 {
+    m := shuffle_mask(sv);
+    r := NewArray(m.count, s32,, temp);
+    for m r[it_index] = ifx it == 0xFFFF_FFFF then PoisonMaskElem else cast(s32) it;
+    return r;
+}
+// llvm::createReplicatedMask(ReplicationFactor, VF)
+slp_create_replicated_mask :: (rf: u64, vf: u64) -> [..] s32 {
+    m: [..] s32; m.allocator = temp;
+    for i: 0..cast(s64) vf - 1 for 1..rf array_add(*m, cast(s32) i);
+    return m;
+}
+// replicateMask(Val, VF): every constant VF times in a row
+slp_replicate_mask :: (vals: [] Value_Id, n: u64) -> [..] Value_Id {
+    r: [..] Value_Id; r.allocator = temp;
+    for v: vals for 1..n array_add(*r, v);
+    return r;
+}
+// getShufflevectorNumGroups
+slp_shufflevector_num_groups :: (vl: [] Value_Id) -> u64 {
+    if vl.count == 0 return 0;
+    for vl if !is_inst(it) || inst_op(it) != .SHUFFLEVECTOR return 0;
+    sv := vl[0];
+    sv_n := cast(s64) type_count(vtype(op(sv, 0)));
+    msz := cast(s64) shuffle_mask(sv).count;
+    if msz == 0 || sv_n % msz != 0 return 0;
+    gsz := sv_n / msz;
+    if gsz == 0 || vl.count % gsz != 0 return 0;
+    groups: u64 = 0;
+    i := 0;
+    while i < vl.count {
+        src := op(vl[i], 0);
+        expected := NewArray(gsz, bool,, temp);
+        for k: 0..gsz - 1 {
+            v := vl[i + k];
+            if op(v, 0) != src return 0;
+            if type_kind(vtype(v)) == .SVECTOR return 0;
+            ok, idx := svm_is_extract_subvector(slp_shuffle_mask_of(v), cast(s64) type_count(vtype(op(v, 0))));
+            if !ok return 0;
+            expected[idx / msz] = true;
+        }
+        for expected if !it return 0;
+        groups += 1;
+        i += gsz;
+    }
+    return groups;
+}
+// calculateShufflevectorMask
+slp_calculate_shufflevector_mask :: (vl: [] Value_Id) -> [..] s32 {
+    sv_n := cast(s32) type_count(vtype(op(vl[0], 0)));
+    mask: [..] s32; mask.allocator = temp;
+    acc: s32 = 0;
+    for v: vl {
+        for slp_shuffle_mask_of(v) array_add(*mask, ifx it == PoisonMaskElem then PoisonMaskElem else acc + it);
+        acc += sv_n;
+    }
+    return mask;
 }
 // TTI::getNumberOfParts (BasicTTIImplBase: the legalization split count; 0 when invalid)
 tti_number_of_parts :: (t: *Tti, ty: Type_Id) -> u64 {

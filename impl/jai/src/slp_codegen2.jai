@@ -464,8 +464,10 @@ slp_extract_and_extend :: (scalar: Value_Id, user: Value_Id, vec_in: Value_Id, l
                 if etes.count v = te_vv(etes[0]);
                 if !is_inst(v) || v == vec || inst_block(v) != inst_block(vec) || comes_before(v, vec) ex = sgb_extract_element_v(v, op(scalar, 1));
                 else ex = sgb_extract_element(vec, cast(u64) lane);
-            } else if is_vector_type(vtype(scalar)) {
-                slp_fail("REVEC extracts");
+            } else if type_kind(vtype(scalar)) == .VECTOR {
+                // REVEC: extract the subvector (its element size may differ from Vec's)
+                n := type_count(vtype(scalar));
+                ex = slp_create_extract_vector(vec, n, cast(u64) lane * n);
             } else {
                 if type_kind(vtype(vec)) == .STRUCT {
                     ev_bb := slpg.b.bb;
@@ -480,7 +482,10 @@ slp_extract_and_extend :: (scalar: Value_Id, user: Value_Id, vec_in: Value_Id, l
                     }
                     vec = field_vec;
                 }
-                ex = sgb_extract_element(vec, cast(u64) lane);
+                if slp_cl.revec && is_vectorized_ty(vtype(scalar)) {
+                    n := slp_num_elements(vtype(scalar));
+                    ex = slp_create_extract_vector(vec, n, cast(u64) lane * n);
+                } else ex = sgb_extract_element(vec, cast(u64) lane);
             }
             exv = ex;
             if !is_struct && vtype(scalar) != vtype(ex) exv = sgb_int_cast(ex, vtype(scalar), !is_known_non_negative(scalar, slp_simple_query()));

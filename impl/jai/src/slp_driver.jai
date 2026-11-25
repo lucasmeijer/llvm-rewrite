@@ -1264,7 +1264,7 @@ slp_is_non_vectorizable_inst :: (i: Value_Id) -> bool {
             if all_non_inst return false;
             for k: 0..n-1 if is_ptr_type(vtype(call_arg(i, cast(u32) k))) return false;
         }
-        return !is_vector_type(vtype(i));
+        return slp_cl.revec || !is_vector_type(vtype(i));
     }
     if o == .ATOMICRMW || o == .CMPXCHG return true;
     if o == .EXTRACTVALUE {
@@ -1276,7 +1276,7 @@ slp_is_non_vectorizable_inst :: (i: Value_Id) -> bool {
             return false;
         }
     }
-    if o == .RET return nops(i) > 0 && !is_vector_type(vtype(op(i, 0))) && is_inst(op(i, 0));
+    if o == .RET return nops(i) > 0 && (slp_cl.revec || !is_vector_type(vtype(op(i, 0)))) && is_inst(op(i, 0));
     return false;
 }
 
@@ -1554,7 +1554,7 @@ slp_is_poor_throughput_op :: (i: Value_Id, cache: *Poor_Throughput_Cache) -> boo
     o := inst_op(i);
     if !is_binary_op(o) && o != .CALL return false;
     ty := vtype(i);
-    if is_vector_type(ty) || is_aggregate(ty) || !slp_is_valid_element_type(ty) return false;
+    if (is_vector_type(ty) && !slp_cl.revec) || is_aggregate(ty) || !slp_is_valid_element_type(ty) return false;
     analyze :: (i: Value_Id) -> bool {
         scalar_cost := tti_instruction_cost(slp.tti, i, TCK_RECIP_THROUGHPUT);
         if scalar_cost < TCC_EXPENSIVE return false;
@@ -1757,7 +1757,7 @@ slp_vectorize_chains_in_block :: (bb: Value_Id) -> bool {
         o := inst_op(it);
         if o == .INSERTELEMENT || o == .INSERTVALUE set_insert(*post_inserts, it);
         else if o == .ICMP || o == .FCMP set_insert(*post_cmps, it);
-        else if o == .STORE && !is_vector_type(vtype(op(it, 0))) && is_inst(op(it, 0)) set_insert(*post_stores, it);
+        else if o == .STORE && (slp_cl.revec || !is_vector_type(vtype(op(it, 0)))) && is_inst(op(it, 0)) set_insert(*post_stores, it);
         else if slp_is_non_vectorizable_inst(it) set_insert(*post_insts, it);
         else if slp_cl.poor_throughput && slp_is_poor_throughput_op(it, *poor_cache) set_insert(*poor_seeds, it);
     }

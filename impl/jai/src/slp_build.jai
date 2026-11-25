@@ -193,7 +193,17 @@ slp_main_alt_ops_no_state_vl :: (vl: [] Value_Id) -> (Value_Id, Value_Id) {
 // ::getScalarizationOverhead(TTI, ScalarTy, Ty, DemandedElts, Insert, Extract, CostKind, ForPoisonSrc, VL, VIC)
 slp_get_scalarization_overhead :: (sty: Type_Id, ty: Type_Id, dem: [] bool, insert: bool, extract: bool, kind: s64,
                                    for_poison_src := true, vl: [] Value_Id = .[], vic := VIC_NONE) -> Cost {
-    if is_vector_type(sty) slp_fail("REVEC scalarization overhead");
+    if type_kind(sty) == .VECTOR {
+        // REVEC: insert / extract whole subvectors
+        n := cast(s64) type_count(sty);
+        c: Cost = 0;
+        for d, k: dem {
+            if !d continue;
+            if insert c = cost_add(c, slp_shuffle_cost(SK_INSERT_SUBVECTOR, ty, .[], kind, k * n, sty));
+            if extract c = cost_add(c, slp_shuffle_cost(SK_EXTRACT_SUBVECTOR, ty, .[], kind, k * n, sty));
+        }
+        return c;
+    }
     if vic != VIC_NONE && slp.tti.kind == .X86 slp_check_vic_neutral(vic);
     return tti_scalarization_overhead(slp.tti, ty, dem, insert, extract, kind, for_poison_src, vl);
 }
