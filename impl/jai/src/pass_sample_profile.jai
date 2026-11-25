@@ -290,7 +290,7 @@ spl_do_initialization :: (file: string, remap: string) -> bool {
             else table_set(*spl.names_in_profile, it.s, true);
         }
     }
-    if sp_opts.inline_replay.count fatal("sample-profile: -sample-profile-inline-replay (ReplayInlineAdvisor) is not implemented yet");
+    if sp_opts.inline_replay.count spl_replay_load(sp_opts.inline_replay);
     if r.is_cs || r.is_preinlined || r.is_probe_based {
         o := *sp_opts;
         if !o.use_iterative_bfi_inference_given o.use_iterative_bfi_inference = true;
@@ -1012,6 +1012,8 @@ spl_should_inline_cold_callee :: (cb: Value_Id) -> bool {
 
 // shouldInlineCandidate
 spl_should_inline_candidate :: (c: *Spl_Inline_Candidate) -> Inline_Cost {
+    has_replay, replay_cost := spl_external_cost(c.call);
+    if has_replay return replay_cost;
     sample_threshold := sp_opts.cold_inline_threshold;
     if sp_opts.prioritized_inline {
         if c.callsite_count > spl.psi.hot sample_threshold = sp_opts.hot_inline_threshold;   // getHotCountThreshold
@@ -1066,7 +1068,7 @@ spl_try_inline_candidate :: (c: *Spl_Inline_Candidate, inlined_call_sites: *[..]
 spl_get_inline_candidate :: (out: *Spl_Inline_Candidate, cb: Value_Id) -> bool {
     if sp_is_intrinsic_inst(cb) return false;
     callee_samples := spl_find_callee_function_samples(cb);
-    if !callee_samples return false;
+    if !callee_samples && !spl_external_should_inline(cb) return false;
     factor: float32 = 1.0;
     ok, p := sp_extract_probe(cb);
     if ok factor = p.factor;
@@ -1102,9 +1104,11 @@ spl_inline_hot_functions :: (f: Value_Id, inlined_guids: *[..] u64) -> bool {
                     if fs_head_samples_estimate(fs) > 0 || sp_flags.cs spl_ni_insert(*local_not_inlined, i, fs);
                     if sp_callsite_is_hot(fs, spl.psi, spl.prof_acc_for_syms_in_list) hot = true;
                     else if spl_should_inline_cold_callee(i) array_add(*cold, i);
+                } else if spl_external_should_inline(i) {
+                    array_add(*all, i);
                 }
             }
-            src := ifx hot then all else cold;
+            src := ifx hot || spl_replay.active then all else cold;
             // CIS.insert(CIS.begin(), ...)
             n := src.count;
             if n {
@@ -1161,6 +1165,7 @@ spl_inline_hot_functions_with_priority :: (f: Value_Id, inlined_guids: *[..] u64
     size_limit: u64 = cast(u64) fn_instruction_count(f) * cast(u64) sp_opts.inline_growth_limit;
     size_limit = min(size_limit, cast(u64) sp_opts.inline_limit_max);
     size_limit = max(size_limit, cast(u64) sp_opts.inline_limit_min);
+    if spl_replay.active size_limit = 0xFFFF_FFFF;
     size_limit &= 0xFFFF_FFFF;
     local_not_inlined: [..] Spl_Not_Inlined; local_not_inlined.allocator = temp;
     changed := false;
@@ -1300,6 +1305,14 @@ spl_promote_merge_not_inlined_context_samples :: (sites: [] Spl_Not_Inlined, f: 
 // findExternalInlineCandidate
 spl_find_external_inline_candidate :: (cb: Value_Id, samples: *Fs, inlined_guids: *[..] u64, threshold_in: u64) {
     threshold := threshold_in;
+    if cb != NONE && spl_external_should_inline(cb) {
+        if !samples {
+            cf := call_called_function(cb);
+            sp_guid_set_add(inlined_guids, md5_hash_u64(vname(cf)));
+            return;
+        }
+        threshold = 0;
+    }
     if !samples return;
     if !sp_flags.cs {
         if sp_opts.use_preinliner threshold = 0;
@@ -1571,4 +1584,98 @@ pcg_scc_member_order :: (g: *Pcg, input: [] s32) -> [..] s32 {
     a := 0; b := nodes.count - 1;
     while a < b { t := nodes[a]; nodes[a] = nodes[b]; nodes[b] = t; a += 1; b -= 1; }
     return nodes;
+}
+
+// ---------------------------------------------------------------- ReplayInlineAdvisor
+// (llvm/lib/Analysis/ReplayInlineAdvisor.cpp, formatCallSiteLocation from llvm/lib/Analysis/InlineAdvisor.cpp, and
+// SampleProfileLoader::getExternalInlineAdvisorCost / ShouldInline; no original advisor, no remarks)
+
+spl_replay: struct {
+    active: bool;
+    sites: Table(string, bool);     // InlineSitesFromRemarks: callee + callsite -> positive remark
+    callers: Table(string, bool);   // CallersToReplay
+}
+
+spl_replay_load :: (path: string) {
+    text, ok := read_entire_file(path, log_errors = false);
+    if !ok fatal(tprint("could not open remarks file: %", path));
+    r := *spl_replay;
+    r.sites = .{}; r.callers = .{};
+    for raw: split(text, "\n") {
+        line := raw;
+        if line.count && line[line.count - 1] == #char "\r" line.count -= 1;
+        // line_iterator with SkipBlanks: lines of only whitespace count as blank too
+        blank := true;
+        for 0..line.count - 1 if line[it] != #char " " && line[it] != #char "\t" { blank = false; break; }
+        if blank continue;
+        first, second := str_split(line, " at callsite ");
+        negative :: "' will not be inlined into '";
+        positive :: "' inlined into '";
+        is_positive := !contains(first, negative);
+        cc_first, cc_second := str_split(first, ifx is_positive then positive else negative);
+        _, callee := str_rsplit(cc_first, ": '");
+        caller, _ := str_rsplit(cc_second, "'");
+        call_site, _ := str_split(second, ";");
+        if callee.count == 0 || caller.count == 0 || call_site.count == 0 fatal(tprint("invalid remark format: %", line));
+        table_set(*r.sites, copy_string(tconcat(callee, call_site)), is_positive);
+        if !sp_opts.inline_replay_scope_module table_set(*r.callers, copy_string(caller), true);
+    }
+    r.active = true;
+}
+// StringRef::split / rsplit: (before, after); not found = (s, "")
+str_split :: (s: string, sep: string) -> (string, string) {
+    i := find_index_from_left(s, sep);
+    if i < 0 return s, "";
+    return slice(s, 0, i), slice(s, i + sep.count, s.count - i - sep.count);
+}
+str_rsplit :: (s: string, sep: string) -> (string, string) {
+    i := find_index_from_right(s, sep);
+    if i < 0 return s, "";
+    return slice(s, 0, i), slice(s, i + sep.count, s.count - i - sep.count);
+}
+
+// formatCallSiteLocation(DLoc, Format)
+spl_format_call_site_location :: (dl: Md_Id) -> string {
+    sb: String_Builder; sb.allocator = temp;
+    f := sp_opts.inline_replay_format;   // Line, LineColumn, LineDiscriminator, LineColumnDiscriminator
+    out_col := f == 1 || f == 3;
+    out_disc := f == 2 || f == 3;
+    d := dl;
+    first := true;
+    while d != NONE {
+        if !first append(*sb, " @ ");
+        first = false;
+        sp := diloc_subprogram(d);
+        offset := cast(u32) ((diloc_line(d) - di_int(sp, 0)) & 0xFFFF_FFFF);
+        disc := diloc_base_discriminator(d);
+        print_to_builder(*sb, "%:%", sp_dil_subprogram_linkage_name(d), offset);
+        if out_col print_to_builder(*sb, ":%", diloc_col(d));
+        if out_disc && disc print_to_builder(*sb, ".%", disc);
+        d = diloc_inlined_at(d);
+    }
+    return builder_to_string(*sb,, temp);
+}
+
+// getExternalInlineAdvisorCost: (has a decision, the cost)
+spl_external_cost :: (cb: Value_Id) -> (bool, Inline_Cost) {
+    r := *spl_replay;
+    if !r.active return false, .{};
+    // ReplayInlineAdvisor::getAdviceImpl
+    caller := block_fn(inst_block(cb));
+    if !sp_opts.inline_replay_scope_module && !table_contains(*r.callers, vname(caller)) return false, .{};
+    callee := call_called_function(cb);
+    if callee == NONE fatal("sample-profile: inline replay on an indirect call (LLVM dereferences a null callee)");
+    combined := tconcat(vname(callee), spl_format_call_site_location(get_metadata(cb, 0)));
+    found, positive := table_find(*r.sites, combined);
+    recommended: bool;
+    if found recommended = positive;
+    else if sp_opts.inline_replay_fallback == 1 recommended = true;
+    else if sp_opts.inline_replay_fallback == 2 recommended = false;
+    else return false, .{};   // Original: no original advisor
+    if !recommended return true, inline_cost_never("not previously inlined");
+    return true, inline_cost_always("previously inlined");
+}
+spl_external_should_inline :: (cb: Value_Id) -> bool {
+    has, cost := spl_external_cost(cb);
+    return has && ic_is_always(cost);
 }
