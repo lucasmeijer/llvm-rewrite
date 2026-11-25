@@ -104,6 +104,7 @@
 #load "pass_remark_only.jai";
 #load "pass_misc_module.jai";
 #load "pass_inject_tli_mappings.jai";
+#load "pass_replace_with_veclib.jai";
 #load "pass_ee_instrument.jai";
 #load "sanitizer_common.jai";
 #load "demangle.jai";

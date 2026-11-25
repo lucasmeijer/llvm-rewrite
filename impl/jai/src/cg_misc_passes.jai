@@ -9,7 +9,7 @@
 //   InlineAsmPrepare (guard)    llvm/lib/CodeGen/InlineAsmPrepare.cpp: only callbr with a used result
 //   SafeStack / StackProtector (guards)  llvm/lib/CodeGen/SafeStack.cpp, StackProtector.cpp
 //   IndirectBrExpand (guard)    llvm/lib/CodeGen/IndirectBrExpandPass.cpp: only with retpoline features
-//   ReplaceWithVeclib           llvm/lib/CodeGen/ReplaceWithVeclib.cpp: a no-op without -vector-library
+//   ReplaceWithVeclib           pass_replace_with_veclib.jai
 //   DwarfEHPrepare (guard)      llvm/lib/CodeGen/DwarfEHPrepare.cpp: only functions with `resume`
 
 // ---------------------------------------------------------------- UnreachableBlockElim
@@ -113,9 +113,7 @@ stack_protector_check :: (f: Value_Id) -> Preserved {
 
 // IndirectBrExpandPass: pass_indirectbr_expand.jai
 
-// ReplaceWithVeclib::runImpl: `if (TLI.getVectorizationLibrary() == NoLibrary) return false` (llc has no
-// -vector-library here: TargetOptions::VecLib defaults to NoLibrary)
-replace_with_veclib_run :: (f: Value_Id) -> Preserved { return PRESERVE_ALL; }
+// ReplaceWithVeclib: pass_replace_with_veclib.jai
 
 // DwarfEHPrepare::InsertUnwindResumeCalls: nothing to do without `resume`
 dwarf_eh_prepare_run :: (f: Value_Id) -> Preserved {

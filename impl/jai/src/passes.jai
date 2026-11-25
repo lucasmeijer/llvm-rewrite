@@ -338,7 +338,7 @@ Pass_Kind :: enum u16 {
     // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
     ANNOTATION2METADATA; ANNOTATION_REMARKS; FORCEATTRS; MEMPROF_REMOVE_INFO; RECOMPUTE_GLOBALSAA; LOWER_COMMENT_STRING;
-    INJECT_TLI_MAPPINGS; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING; DROP_UNNECESSARY_ASSUMES; JUMP_TABLE_TO_SWITCH; MOVE_AUTO_INIT; ALIGNMENT_FROM_ASSUMPTIONS; LIBCALLS_SHRINKWRAP; CALLED_VALUE_PROPAGATION;
+    INJECT_TLI_MAPPINGS; REPLACE_WITH_VECLIB; EE_INSTRUMENT; REL_LOOKUP_TABLE_CONVERTER; CG_PROFILE; ALLOC_TOKEN; LOOP_SINK; TRANSFORM_WARNING; DROP_UNNECESSARY_ASSUMES; JUMP_TABLE_TO_SWITCH; MOVE_AUTO_INIT; ALIGNMENT_FROM_ASSUMPTIONS; LIBCALLS_SHRINKWRAP; CALLED_VALUE_PROPAGATION;
     // EarlyCSE (pass_early_cse.jai)
     EARLY_CSE;
     // sanitizers (pass_asan.jai, pass_msan.jai, ...)
@@ -669,6 +669,7 @@ PASS_TABLE :: Pass_Info.[
     .{"recompute-globalsaa", .MODULE, .RECOMPUTE_GLOBALSAA, false, .DOMTREE},
     .{"lower-comment-string", .MODULE, .LOWER_COMMENT_STRING, true, .DOMTREE},
     .{"inject-tli-mappings", .FUNCTION, .INJECT_TLI_MAPPINGS, false, .DOMTREE},
+    .{"replace-with-veclib", .FUNCTION, .REPLACE_WITH_VECLIB, false, .DOMTREE},
     .{"rel-lookup-table-converter", .MODULE, .REL_LOOKUP_TABLE_CONVERTER, false, .DOMTREE},
     .{"cg-profile", .MODULE, .CG_PROFILE, false, .DOMTREE},   // also cg-profile<in-lto-post-link>
     .{"alloc-token", .MODULE, .ALLOC_TOKEN, true, .DOMTREE},
@@ -1687,6 +1688,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .CORO_ELIDE; return coro_elide_run(f);
         case .ANNOTATION_REMARKS; return annotation_remarks_run(f);
         case .INJECT_TLI_MAPPINGS; return inject_tli_mappings_run(f);
+        case .REPLACE_WITH_VECLIB; return replace_with_veclib_run(f);
         case .EE_INSTRUMENT; return ee_instrument_run(f, node.name);
         case .TSAN; return tsan_run(f);
         case .WIN_EH_PREPARE; return win_eh_prepare_run(f);

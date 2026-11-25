@@ -1501,6 +1501,12 @@ Still slow / next:
   `-vplan-build-outerloop-stress-test`, `-force-vector-width=vscale x 4`, `-scalable-vectorization=on
   -force-target-supports-scalable-vectors`, avx2 / avx512 triples, epilogue-forced VFs: all 0 differs.
 
+- `replace-with-veclib` (pass_replace_with_veclib.jai, ReplaceWithVeclib.cpp; jai_tails 2026-11): also llc's IR
+  pass. It uses its own TTI-less isVectorIntrinsicWithOverloadTypeAtArg / ...ScalarOpAtArg (VP casts, EVL operands,
+  target intrinsics fall through to the generic rules), unlike vplan_execute.jai's, which fails loudly on VP/x86.
+  Sweeps: replace-with-veclib with -vector-library=AMDLIBM/SVML/LIBMVEC/sleefgnuabi/ArmPL -mattr=avx512f 10923/10923;
+  inject-tli-mappings,loop-vectorize,replace-with-veclib with SVML 10917/10917; --with-test-flags 0 differs.
+
 ### LoopVectorize next steps (each fails loudly with the quoted message today)
 
 1. Histograms (`-enable-histogram-loop-vectorization`, 1 test): LAA histogram detection, VPHistogramRecipe.

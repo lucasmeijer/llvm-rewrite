@@ -7,6 +7,24 @@ inject_tli_mappings_run :: (f: Value_Id) -> Preserved {
     return PRESERVE_ALL;
 }
 
+// appendToCompilerUsed(M, {V}) (appendToUsedList)
+itm_append_to_compiler_used :: (v: Value_Id) {
+    gv := module_get_global_variable("llvm.compiler.used");
+    init: [..] Value_Id; init.allocator = temp;   // SmallSetVector<Constant *>
+    if gv != NONE && glob(gv).has_init {
+        ca := gv_initializer(gv);
+        if vkind(ca) != .C_ARRAY fatal("llvm.compiler.used initializer that is not a ConstantArray is not supported");
+        for k: 0..nops(ca)-1 { e := op(ca, k); if !array_find(init, e) array_add(*init, e); }
+    }
+    if gv != NONE gv_erase_from_parent(gv);
+    pty := type_ptr(0);
+    e := ce_pointer_bitcast_or_addrspacecast(v, pty);
+    if !array_find(init, e) array_add(*init, e);
+    aty := type_array(cast(u64) init.count, pty);
+    nv := gv_create(aty, false, .APPENDING, const_aggregate(.C_ARRAY, aty, init), "llvm.compiler.used", NONE, 0, 0);
+    glob(nv).section = "llvm.metadata";
+}
+
 #scope_file
 
 // addVariantDeclaration(CI, VF, VD)
@@ -29,24 +47,6 @@ itm_add_variant_declaration :: (c: Value_Id, d: *Vec_Desc) {
     glob(vf).attrs = attr_list_get(attr_list_fn(l), ret, params);
     if d.cc >= 0 glob(vf).cc = cast(u32) d.cc;
     itm_append_to_compiler_used(vf);
-}
-
-// appendToCompilerUsed(M, {V}) (appendToUsedList)
-itm_append_to_compiler_used :: (v: Value_Id) {
-    gv := module_get_global_variable("llvm.compiler.used");
-    init: [..] Value_Id; init.allocator = temp;   // SmallSetVector<Constant *>
-    if gv != NONE && glob(gv).has_init {
-        ca := gv_initializer(gv);
-        if vkind(ca) != .C_ARRAY fatal("llvm.compiler.used initializer that is not a ConstantArray is not supported");
-        for k: 0..nops(ca)-1 { e := op(ca, k); if !array_find(init, e) array_add(*init, e); }
-    }
-    if gv != NONE gv_erase_from_parent(gv);
-    pty := type_ptr(0);
-    e := ce_pointer_bitcast_or_addrspacecast(v, pty);
-    if !array_find(init, e) array_add(*init, e);
-    aty := type_array(cast(u64) init.count, pty);
-    nv := gv_create(aty, false, .APPENDING, const_aggregate(.C_ARRAY, aty, init), "llvm.compiler.used", NONE, 0, 0);
-    glob(nv).section = "llvm.metadata";
 }
 
 // addMappingsFromTLI(TLI, CI)
