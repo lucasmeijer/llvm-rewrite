@@ -267,6 +267,9 @@
 #load "pass_global_merge.jai";
 #load "pass_expand_ir_insts.jai";
 #load "sandbox_vectorizer.jai";
+#load "sandbox_ir.jai";
+#load "sandbox_sched.jai";
+#load "sandbox_passes.jai";
 #load "print_uselistorder.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";
