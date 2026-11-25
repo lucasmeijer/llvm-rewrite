@@ -9,7 +9,8 @@
 //   emulated exactly (M2r_Phi_Map).
 // - PHIBlocks are sorted by block number; phis are inserted at the block front (last created first).
 // - The rename DFS uses an explicit worklist with successors pushed in reverse.
-// Assignment tracking (dbg_assign / DIAssignID) is not ported and fails loudly.
+// Assignment tracking: AssignmentTrackingInfo (one #dbg_assign per variable fragment of the alloca), demoting the
+// markers of deleted stores to #dbg_values (deleted at the end, cleanUpDbgAssigns).
 
 mem2reg_run :: (f: Value_Id) -> Preserved {
     dt := get_domtree(f);
@@ -102,6 +103,7 @@ M2r_Info :: struct {
     only_used_in_one_block := true;
     value_type: Type_Id = NONE;
     dp_users: [..] u32;
+    at_assigns: [..] u32;   // AssignmentTrackingInfo::DVRAssigns
 }
 
 M2r_Undo :: struct { idx: s64; old: u32; }
@@ -195,6 +197,8 @@ M2r :: struct {
     new_phis: M2r_Phi_Map;
     phi_to_alloca: Table(Value_Id, u32);
     dp_users: [..] [..] u32;
+    at_info: [..] [..] u32;            // AllocaATInfo
+    assigns_to_delete: [..] u32;       // DVRAssignsToDelete
     value_types: [..] Type_Id;
     visited: Table(Value_Id, bool);
     num_preds: Table(Value_Id, u32);
@@ -375,6 +379,7 @@ analyze_alloca :: (m: *M2r, ai: Value_Id, info: *M2r_Info) {
     info.only_used_in_one_block = true;
     info.value_type = NONE;
     info.dp_users.count = 0;
+    info.at_assigns.count = 0;
     u := ir.v_first_use[ai];
     while u != NONE {
         user := ir.u_user[u];
@@ -395,10 +400,55 @@ analyze_alloca :: (m: *M2r, ai: Value_Id, info: *M2r_Info) {
     }
     all: [..] u32; all.allocator = temp;
     find_dbg_users(m.f, ai, *all);
-    for all {
-        if dbgr(it).kind == .ASSIGN fatal("mem2reg: assignment tracking (dbg_assign) is not supported yet");
-        array_add(*info.dp_users, it);
+    for all if dbgr(it).kind != .ASSIGN array_add(*info.dp_users, it);
+    // AssignmentTrackingInfo::init
+    markers: [..] u32; markers.allocator = temp;
+    at_markers(ai, *markers);
+    vars: [..] Debug_Variable; vars.allocator = temp;
+    for markers {
+        k := debug_variable_of(it, true);
+        dup := false;
+        for v: vars if debug_variable_eq(v, k) { dup = true; break; }
+        if dup continue;
+        array_add(*vars, k);
+        array_add(*info.at_assigns, it);
     }
+}
+
+// AssignmentTrackingInfo::updateForDeletedStore
+m2r_at_update_for_deleted_store :: (m: *M2r, at_assigns: [] u32, si: Value_Id) {
+    if at_assigns.count == 0 return;
+    has_assign: [..] Debug_Variable; has_assign.allocator = temp;
+    markers: [..] u32; markers.allocator = temp;
+    at_markers(si, *markers);
+    for a: markers {
+        array_add(*has_assign, debug_variable_of(a, false));
+        dup := false;
+        for m.assigns_to_delete if it == a { dup = true; break; }
+        if !dup array_add(*m.assigns_to_delete, a);
+        // createDebugValue(DIB, DbgAssign->getValue(), ...) before the dbg_assign
+        v := dbgr_value(a);
+        if v == NONE fatal("mem2reg: a #dbg_assign without a location value is not supported yet");
+        nr: Dbg_Record;
+        nr.kind = .VALUE; nr.loc = md_value(v); nr.var = dbgr(a).var; nr.expr = dbgr(a).expr; nr.dbg = dbgr(a).dbg;
+        array_add(*ir.dbg_records, nr);
+        id := cast(u32) ir.dbg_records.count;
+        dbgr_insert_before_record(id, a);
+        dbgr_tracked(id);
+    }
+    for a: at_assigns {
+        k := debug_variable_of(a, false);
+        seen := false;
+        for has_assign if debug_variable_eq(it, k) { seen = true; break; }
+        if seen continue;
+        convert_debug_declare_to_debug_value_store(a, si);
+    }
+}
+
+// cleanUpDbgAssigns
+m2r_clean_up_dbg_assigns :: (m: *M2r) {
+    for m.assigns_to_delete if dbgr(it).owner != NONE dbgr_erase(it);
+    m.assigns_to_delete.count = 0;
 }
 
 // ---------------------------------------------------------------- rewriteSingleStoreAlloca
@@ -435,6 +485,7 @@ rewrite_single_store_alloca :: (m: *M2r, ai: Value_Id, info: *M2r_Info) -> bool 
         // the next use may have been the one just removed (a load using the alloca twice is impossible)
     }
     if info.using_blocks.count return false;
+    m2r_at_update_for_deleted_store(m, info.at_assigns, only_store);
     for r: info.dp_users {
         rec := dbgr(r);
         if rec.kind == .DECLARE {
@@ -447,6 +498,7 @@ rewrite_single_store_alloca :: (m: *M2r, ai: Value_Id, info: *M2r_Info) -> bool 
             dbgr_erase(r);
         }
     }
+    at_delete_markers(ai);
     erase_inst(only_store);
     lbi_delete(m, only_store);
     erase_inst_with_metadata(ai);
@@ -495,10 +547,12 @@ promote_single_block_alloca :: (m: *M2r, ai: Value_Id, info: *M2r_Info) -> bool 
     }
     while has_uses(ai) {
         si := ir.u_user[ir.v_first_use[ai]];
+        m2r_at_update_for_deleted_store(m, info.at_assigns, si);
         for r: info.dp_users if dbgr(r).kind == .DECLARE convert_debug_declare_to_debug_value_store(r, si);
         erase_inst(si);
         lbi_delete(m, si);
     }
+    at_delete_markers(ai);
     erase_inst_with_metadata(ai);
     for r: info.dp_users {
         rec := dbgr(r);
@@ -520,6 +574,7 @@ promote_mem_to_reg :: (allocas: [] Value_Id, dt: *Dom_Tree, ac: *Assumption_Cach
     m2r_cur_dt = dt; m2r_cur_ac = ac;
     m: M2r;
     m.allocas.allocator = temp; m.dp_users.allocator = temp; m.value_types.allocator = temp;
+    m.at_info.allocator = temp; m.assigns_to_delete.allocator = temp;
     m.worklist.allocator = temp;
     m.vals.vals.allocator = temp; m.vals.undo.allocator = temp; m.locs.vals.allocator = temp; m.locs.undo.allocator = temp;
     m.lookup.allocator = temp; m.phi_to_alloca.allocator = temp; m.visited.allocator = temp; m.num_preds.allocator = temp;
@@ -532,6 +587,8 @@ promote_mem_to_reg :: (allocas: [] Value_Id, dt: *Dom_Tree, ac: *Assumption_Cach
     dbgr_index_reset();
     array_resize(*m.dp_users, m.allocas.count);
     for * m.dp_users it.allocator = temp;
+    array_resize(*m.at_info, m.allocas.count);
+    for * m.at_info it.allocator = temp;
     array_resize(*m.value_types, m.allocas.count);
     m.no_signed_zeros = false;
     for attr_set_items(attr_list_fn(glob(f).attrs))
@@ -539,6 +596,7 @@ promote_mem_to_reg :: (allocas: [] Value_Id, dt: *Dom_Tree, ac: *Assumption_Cach
 
     info: M2r_Info;
     info.defining_blocks.allocator = temp; info.using_blocks.allocator = temp; info.dp_users.allocator = temp;
+    info.at_assigns.allocator = temp;
 
     n: s64 = -1;
     while true {
@@ -558,6 +616,10 @@ promote_mem_to_reg :: (allocas: [] Value_Id, dt: *Dom_Tree, ac: *Assumption_Cach
         if info.only_used_in_one_block && promote_single_block_alloca(*m, ai, *info) {
             remove_from_allocas(*m, *n);
             continue;
+        }
+        if info.at_assigns.count {
+            m.at_info[n].count = 0;
+            for info.at_assigns array_add(*m.at_info[n], it);
         }
         if info.dp_users.count {
             m.dp_users[n].count = 0;
@@ -583,7 +645,7 @@ promote_mem_to_reg :: (allocas: [] Value_Id, dt: *Dom_Tree, ac: *Assumption_Cach
         for bb: phi_blocks queue_phi_node(*m, bb, cast(u32) n, *version);
     }
 
-    if m.allocas.count == 0 return;
+    if m.allocas.count == 0 { m2r_clean_up_dbg_assigns(*m); return; }
     table_reset(*m.lbi);
 
     array_resize(*m.vals.vals, m.allocas.count);
@@ -601,6 +663,7 @@ promote_mem_to_reg :: (allocas: [] Value_Id, dt: *Dom_Tree, ac: *Assumption_Cach
     }
 
     for a: m.allocas {
+        at_delete_markers(a);
         if has_uses(a) rauw_with_metadata(a, const_poison(vtype(a)));
         erase_inst_with_metadata(a);
     }
@@ -664,6 +727,7 @@ promote_mem_to_reg :: (allocas: [] Value_Id, dt: *Dom_Tree, ac: *Assumption_Cach
             p = nxt;
         }
     }
+    m2r_clean_up_dbg_assigns(*m);
 }
 
 push_worklist :: (m: *M2r, bb: Value_Id, pred: Value_Id) {
@@ -750,6 +814,7 @@ rename_pass :: (m: *M2r, bb: Value_Id, pred: Value_Id) {
             for 1..num_edges phi_add_incoming(apn, m.vals.vals[alloca_no], pred);
             if m.no_signed_zeros && is_fp_math_type(vtype(apn)) inst(apn).flags |= FMF_NSZ << FMF_SHIFT;
             undo_vec_set(*m.vals, alloca_no, apn);
+            for r: m.at_info[alloca_no] convert_debug_declare_to_debug_value_phi(m.f, r, apn);   // updateForNewPhi
             for r: m.dp_users[alloca_no] if dbgr(r).kind == .DECLARE convert_debug_declare_to_debug_value_phi(m.f, r, apn);
             apn = inst(apn).next;
             if apn == NONE || inst_op(apn) != .PHI break;
@@ -780,6 +845,7 @@ rename_pass :: (m: *M2r, bb: Value_Id, pred: Value_Id) {
             if !found continue;
             undo_vec_set(*m.vals, idx, op(cur, 0));
             undo_vec_set(*m.locs, idx, get_metadata(cur, 0));
+            m2r_at_update_for_deleted_store(m, m.at_info[idx], cur);
             for r: m.dp_users[idx] if dbgr(r).kind == .DECLARE convert_debug_declare_to_debug_value_store(r, cur);
             erase_inst(cur);
         }

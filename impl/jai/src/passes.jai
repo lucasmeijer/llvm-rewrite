@@ -270,7 +270,7 @@ Pass_Kind :: enum u8 {
     // InferFunctionAttrs (pass_inferattrs.jai)
     INFERATTRS;
     // Debugify (pass_debugify.jai)
-    DEBUGIFY; CHECK_DEBUGIFY; REDUNDANT_DBG_INST_ELIM;
+    DEBUGIFY; CHECK_DEBUGIFY; REDUNDANT_DBG_INST_ELIM; DECLARE_TO_ASSIGN;
     // GVN (pass_gvn.jai)
     GVN;
     // NewGVN (pass_newgvn.jai), GVNSink (pass_gvn_sink.jai), GVNHoist (pass_gvn_hoist.jai)
@@ -396,6 +396,7 @@ PASS_TABLE :: Pass_Info.[
     .{"debugify", .MODULE, .DEBUGIFY, false, .DOMTREE},
     .{"check-debugify", .MODULE, .CHECK_DEBUGIFY, false, .DOMTREE},
     .{"redundant-dbg-inst-elim", .FUNCTION, .REDUNDANT_DBG_INST_ELIM, false, .DOMTREE},
+    .{"declare-to-assign", .FUNCTION, .DECLARE_TO_ASSIGN, false, .DOMTREE},
     .{"require<verify>", .MODULE, .REQUIRE_VERIFY, true, .DOMTREE},   // VerifierAnalysis: verifies and keeps the result
     .{"instsimplify", .FUNCTION, .INSTSIMPLIFY, false, .DOMTREE},
     .{"gvn", .FUNCTION, .GVN, false, .DOMTREE},   // also gvn<...> (lookup_pass)
@@ -1657,6 +1658,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .PRINT_PREDICATE_INFO; return print_predicate_info_run(f);
         case .INSTCOMBINE; return instcombine_run(f, node.name);
         case .REDUNDANT_DBG_INST_ELIM; return redundant_dbg_inst_elim_run(f);
+        case .DECLARE_TO_ASSIGN; return declare_to_assign_run(f);
         case .SIMPLIFYCFG; return simplifycfg_run(node, f);
         case .LOOP_ADAPTOR; return run_loop_adaptor(cast(s32) (node - pipeline.nodes.data), f);
         case .AA_EVAL;

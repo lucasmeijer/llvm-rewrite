@@ -290,6 +290,7 @@
 #load "pass_simplifycfg_switch.jai";
 #load "pass_debugify.jai";
 #load "salvage_debug.jai";
+#load "assignment_tracking.jai";
 #load "value_handles.jai";
 #load "scev_expander.jai";
 #load "simplify_indvar.jai";

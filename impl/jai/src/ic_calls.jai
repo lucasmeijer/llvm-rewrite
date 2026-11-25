@@ -171,7 +171,7 @@ ic_simplify_any_mem_transfer :: (mi: Value_Id) -> Value_Id {
     if lmp != NONE set_metadata(s, md_fixed("llvm.mem.parallel_loop_access"), lmp);
     if ag != NONE set_metadata(s, md_fixed("llvm.access.group"), ag);
     da := get_metadata(mi, md_fixed("DIAssignID"));
-    if da != NONE fatal("instcombine: SimplifyAnyMemTransfer with DIAssignID is not supported yet");
+    if da != NONE set_metadata(s, md_fixed("DIAssignID"), da);
     if !atomic {
         vol := ic_mem_is_volatile(mi);
         set_flag(l, F_VOLATILE, vol); set_flag(s, F_VOLATILE, vol);
@@ -203,7 +203,17 @@ ic_simplify_any_mem_set :: (mi: Value_Id) -> Value_Id {
         for k: 0..cast(s64) len - 1 fill = ap_or(fill, ap_shl(ap_from_u64(cast(u32) (len * 8), b), cast(u32) (k * 8)));
         fill_val := const_int_ap(type_int(cast(u32) (len * 8)), fill);
         s := icb_store_raw(fill_val, dest, alignment, ic_mem_is_volatile(mi));
-        if get_metadata(mi, md_fixed("DIAssignID")) != NONE fatal("instcombine: SimplifyAnyMemSet with DIAssignID is not supported yet");
+        da := get_metadata(mi, md_fixed("DIAssignID"));
+        if da != NONE {
+            set_metadata(s, md_fixed("DIAssignID"), da);
+            markers: [..] u32; markers.allocator = temp;
+            at_markers(s, *markers);
+            ops: [..] Value_Id; ops.allocator = temp;
+            for markers {
+                dbgr_location_ops(it, *ops);
+                if block_set_contains(ops, val) dbgr_replace_variable_location_op(it, val, fill_val);
+            }
+        }
         if atomic inst(s).ord1 = ORD_UNORDERED;
         ic_mem_set_length(mi, 0);
         return mi;

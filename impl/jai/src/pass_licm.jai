@@ -623,22 +623,7 @@ licm_is_not_used_or_foldable_in_loop :: (c: *Licm, i: Value_Id, foldable_in_loop
 }
 
 // Instruction::mergeDIAssignID(SourceInstructions)
-licm_merge_di_assign_id :: (k: Value_Id, sources: [] Value_Id) {
-    kind := md_fixed("DIAssignID");
-    ids: [..] Md_Id; ids.allocator = temp;
-    for sources { a := get_metadata(it, kind); if a != NONE array_add(*ids, a); }
-    b := get_metadata(k, kind); if b != NONE array_add(*ids, b);
-    if ids.count == 0 return;
-    merge := ids[0];
-    for ids {
-        if it_index == 0 || it == merge continue;
-        old := it;
-        f := inst_fn(k);
-        for bb: fn_blocks(f) for x: block_insts(bb) if get_metadata(x, kind) == old set_metadata(x, kind, merge);
-        for * r: ir.dbg_records if r.assign_id == old r.assign_id = merge;
-    }
-    set_metadata(k, kind, merge);
-}
+licm_merge_di_assign_id :: (k: Value_Id, sources: [] Value_Id) { merge_di_assign_id(k, sources); }
 
 // LoopInfo::wouldBeOutOfLoopUseRequiringLCSSA
 would_be_out_of_loop_use_requiring_lcssa :: (li: *Loop_Info, v: Value_Id, exit_bb: Value_Id) -> bool {

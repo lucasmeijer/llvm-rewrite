@@ -588,22 +588,7 @@ slp_perform_extracts_shuffle_ir :: (keys: [] Value_Id, masks: [] [..] s32, base:
 }
 
 // Instruction::mergeDIAssignID(SourceInstructions)
-slp_merge_di_assign_id :: (i: Value_Id, sources: [] Value_Id) {
-    kind := md_fixed("DIAssignID");
-    ids: [..] Md_Id; ids.allocator = temp;
-    for sources { m := get_metadata(it, kind); if m != NONE array_add(*ids, m); }
-    m := get_metadata(i, kind); if m != NONE array_add(*ids, m);
-    if ids.count == 0 return;
-    merge := ids[0];
-    for ids {
-        if it_index == 0 || it == merge continue;
-        old := it;
-        for bb: fn_blocks(slp.f) for x: block_insts(bb) if get_metadata(x, kind) == old set_metadata(x, kind, merge);
-        for sources if get_metadata(it, kind) == old set_metadata(it, kind, merge);
-        for * r: ir.dbg_records if r.assign_id == old r.assign_id = merge;
-    }
-    set_metadata(i, kind, merge);
-}
+slp_merge_di_assign_id :: (i: Value_Id, sources: [] Value_Id) { merge_di_assign_id(i, sources); }
 
 // removeInstructionsAndOperands(DeadVals, VectorValuesAndScales)
 slp_remove_instructions_and_operands :: (dead_vals: [] Value_Id, vector_values: [] Value_Id) {

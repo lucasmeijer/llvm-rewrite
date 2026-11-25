@@ -16,8 +16,7 @@
 // Also updateCallProfile / updateProfileCallee (ProfileSummaryInfo in psi.jai), scaleProfData (ProfDataUtils.cpp),
 // PGOIndirectCallVisitor::tryGetVTableInstruction and Function::setEntryCount.
 //
-// Not ported (fail loudly when reached): memprof metadata (!memprof / !callsite) propagation, assignment tracking
-// (DIAssignID), strictfp hosts
+// Not ported (fail loudly when reached): memprof metadata (!memprof / !callsite) propagation, strictfp hosts
 // (constrained-intrinsic cloning), ObjC ARC attached calls (inlineRetainOrClaimRVCalls), PGO contextual profiles.
 
 if_opts: struct {
@@ -981,6 +980,31 @@ sa_cloner_remap :: (s: *Sa_Cloner, start: Value_Id) {
     }
 }
 
+// trackInlinedStores with collectEscapedLocals: inlined stores to caller allocas (passed as arguments) whose
+// variables use assignment tracking become assignments
+inline_track_inlined_stores :: (blocks: [] Value_Id, cb: Value_Id) {
+    vars: [..] At_Storage_Vars; vars.allocator = temp;
+    seen: [..] Value_Id; seen.allocator = temp;
+    n := call_nargs(cb);
+    if n > 0 for k: 0..n-1 {
+        a := call_arg(cb, cast(u32) k);
+        if !is_ptr_type(vtype(a)) continue;
+        if !is_inst(a) continue;
+        off: u64 = 0;
+        base := sv_strip_and_accumulate(a, *off, dl_index_type_size_bits(vtype(a)), true);
+        if !(is_inst(base) && inst_op(base) == .ALLOCA) continue;
+        if block_set_contains(seen, base) continue;
+        array_add(*seen, base);
+        markers: [..] u32; markers.allocator = temp;
+        at_markers(base, *markers);
+        for markers {
+            if diloc_inlined_at(dbgr(it).dbg) != NONE continue;
+            at_vars_insert(*vars, base, .{dbgr(it).var, debug_value_loc(it)});
+        }
+    }
+    at_track_assignments(blocks, vars);
+}
+
 // MDBuilder::createAnonymousAliasScopeDomain / createAnonymousAliasScope (createAnonymousAARoot)
 md_anonymous_aa_root :: (name: string, extra: Md_Id) -> Md_Id {
     ops: [..] Md_Id; ops.allocator = temp;
@@ -1789,7 +1813,15 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
             }
         }
         fixup_line_numbers(caller, first_new_block, cb, fn_subprogram(called) != NONE);
-        if assignment_tracking_enabled() fatal("inline: assignment tracking (DIAssignID) is not implemented yet");
+        if assignment_tracking_enabled() {
+            blocks: [..] Value_Id; blocks.allocator = temp;
+            b := first_new_block;
+            while b != NONE { array_add(*blocks, b); b = block(b).next; }
+            inline_track_inlined_stores(blocks, cb);
+            // fixupAssignments
+            map: Table(Md_Id, Md_Id); map.allocator = temp;
+            for bb: blocks for i: block_insts(bb) at_remap_assign_id(*map, i);
+        }
         sa_cloner_clone(*sac);
         sa_cloner_remap(*sac, first_new_block);
         add_alias_scope_metadata(cb, *vm, callee_aar, *info);

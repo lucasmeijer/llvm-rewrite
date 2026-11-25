@@ -7,7 +7,6 @@
 // Data-oriented: one Mco state per run. The pass-wide EarliestEscapeAnalysis (EEA_) is an earliest-escape Aa_Query
 // (`ee`) whose capture cache backs every BatchAAResults(AA, EEA) (aa_query_new_sharing_ee); AA->... calls on the
 // AAResults get a fresh SimpleAAQueryInfo each (aa_query_new). MemsetRanges is an array of ranges sorted by start.
-// Not ported (unreachable here): DIAssignID merging (assignment tracking does not parse).
 
 mco_opts: struct {
     enable_without_libcalls := false;   // -enable-memcpyopt-without-libcalls
@@ -244,6 +243,7 @@ mco_try_merging_into_memset :: (s: *Mco, start_inst: Value_Id, start_ptr_in: Val
         if !mco_range_profitable(r) continue;
         start_ptr = r.start_ptr;
         a_mem_set = irb_memset(*b, start_ptr, byte_val, const_int(ir.t_i64, cast,no_check(u64)(r.end - r.start)), r.align, false);
+        merge_di_assign_id(a_mem_set, r.stores);
         if r.stores.count set_metadata(a_mem_set, 0, get_metadata(r.stores[0], 0));
         nd: s32;
         if s.m.acc[mem_insert_point].inst == bi nd = mssau_create_memory_access_before(*s.u, a_mem_set, -1, mem_insert_point);
@@ -343,6 +343,7 @@ mco_process_store_of_load :: (s: *Mco, si: Value_Id, li: Value_Id, bbi: *Value_I
             b: Irb; irb_set_before(*b, p);
             size := mco_type_size(*b, ir.t_i64, dl_type_store_size(t), type_is_scalable(t));
             mi := mco_create_mem_transfer(*b, ifx use_mem_move then IID_MEMMOVE else IID_MEMCPY, op(si, 1), inst(si).align, op(li, 0), inst(li).align, size, false);
+            set_metadata(mi, md_fixed("DIAssignID"), get_metadata(si, md_fixed("DIAssignID")));
             last_def := mssa_access_of(s.m, si);
             na := mssau_create_memory_access_after(*s.u, mi, -1, last_def);
             mssau_insert_def(*s.u, na, true);
@@ -387,6 +388,7 @@ mco_process_store :: (s: *Mco, si: Value_Id, bbi: *Value_Id) -> bool {
     if type_is_scalable(t) return false;
     b: Irb; irb_set_before(*b, si);
     mi := irb_memset(*b, op(si, 1), byte_val, const_int(ir.t_i64, dl_type_store_size(t)), inst(si).align, false);
+    set_metadata(mi, md_fixed("DIAssignID"), get_metadata(si, md_fixed("DIAssignID")));
     store_def := mssa_access_of(s.m, si);
     na := mssau_create_memory_access_before(*s.u, mi, -1, store_def);
     mssau_insert_def(*s.u, na, false);
@@ -554,6 +556,7 @@ mco_process_memcpy_memcpy_dependence :: (s: *Mco, m: Value_Id, mdep: Value_Id, b
     }
     id := ifx use_mem_move then IID_MEMMOVE else ifx is_inline then IID_MEMCPY_INLINE else IID_MEMCPY;
     new_m := mco_create_mem_transfer(*b, id, mi_dest(m), mi_param_align(m, 0), copy_source, copy_source_align, copy_length, mi_is_volatile(m));
+    set_metadata(new_m, md_fixed("DIAssignID"), get_metadata(m, md_fixed("DIAssignID")));
     last_def := mssa_access_of(s.m, m);
     na := mssau_create_memory_access_after(*s.u, new_m, -1, last_def);
     mssau_insert_def(*s.u, na, true);

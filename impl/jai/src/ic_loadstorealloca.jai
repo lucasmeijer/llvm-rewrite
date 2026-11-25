@@ -1067,11 +1067,6 @@ ic_merge_store_into_successor :: (si: Value_Id) -> bool {
             x = inst(x).next;
         }
     } else return false;
-    for k: 0..1 {
-        s := ifx k == 0 then si else other;
-        if get_metadata(s, md_fixed("DIAssignID")) != NONE
-            fatal("instcombine: mergeStoreIntoSuccessor with DIAssignID is not supported yet");
-    }
     merged_val := op(other, 0);
     merged_loc := merged_debug_loc(get_metadata(si, 0), get_metadata(other, 0));
     if merged_val != op(si, 0) {
@@ -1090,6 +1085,7 @@ ic_merge_store_into_successor :: (si: Value_Id) -> bool {
     if pos == NONE { ic_link_at_end(nsi, dest); wl_add(nsi); }
     else ic_insert_new_inst_before(nsi, pos, true);
     set_metadata(nsi, 0, merged_loc);
+    merge_di_assign_id(nsi, .[si, other]);
     tags := get_aa_metadata(si);
     if aa_any(tags) set_aa_metadata(nsi, aa_merge(tags, get_aa_metadata(other)));
     ic_erase_inst(si);

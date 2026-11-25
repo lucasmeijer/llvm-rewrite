@@ -38,7 +38,8 @@ is_fp_math_type :: (t: Type_Id) -> bool {
 }
 
 builder_insert :: (b: *Builder, i: Value_Id) {
-    inst_insert_before(i, b.before);
+    // IRBuilder at an Instruction*: no head bit, the new instruction adopts the records in front of b.before
+    insert_at_position(i, inst(b.before).parent, b.before, false);
     if b.dbg != NONE set_metadata(i, 0, b.dbg);
 }
 

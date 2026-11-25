@@ -292,12 +292,17 @@ adce_remove_dead_instructions :: (a: *Adce) -> Adce_Changed {
     ch: Adce_Changed;
     ch.control_flow = adce_update_dead_regions(a);
     a.worklist.count = 0;
+    // the DIAssignIDs attached to instructions (at::getAssignmentInsts(DVR) is not empty); nothing is erased
+    // before the loop ends
+    linked: Table(Md_Id, bool); linked.allocator = temp;
+    k_assign := md_fixed("DIAssignID");
+    for fn_insts(a.f) { id := get_metadata(it, k_assign); if id != NONE table_set(*linked, id, true); }
     for :reverse_early_inc fn_insts(a.f) {
-        // drop debug records whose scope isn't alive
+        // drop debug records whose scope isn't alive; a dbg_assign linked to an instruction stays
         r := inst(it).records;
         while r != 0 {
             nr := dbgr(r).next;
-            if dbgr(r).kind == .ASSIGN fatal("adce: #dbg_assign records are not supported yet");
+            if dbgr(r).kind == .ASSIGN && table_contains(*linked, dbgr(r).assign_id) { r = nr; continue; }
             if !table_contains(*a.alive_scopes, diloc_scope(dbgr(r).dbg)) dbgr_erase(r);
             r = nr;
         }

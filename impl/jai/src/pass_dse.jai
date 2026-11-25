@@ -7,8 +7,7 @@
 // Tables keyed by ids (ids are never reused, so the "reused MemoryAccess address" caveats of the LLVM code don't
 // apply). InstOverlapIntervalsTy (MapVector<Instruction *, std::map<int64_t, int64_t>>) is an insertion-ordered
 // array of entries, each with its interval map as an array sorted by the interval end.
-// Not ported (fail loudly): assignment tracking (shortenAssignment's dbg.assign updates; #dbg_assign does not parse),
-// -debug-counter.
+// Not ported (fail loudly): -debug-counter.
 
 dse_opts: struct {
     enable_partial_overwrite_tracking := true;   // -enable-dse-partial-overwrite-tracking
@@ -274,10 +273,43 @@ dse_try_to_shorten :: (dead_i: Value_Id, dead_start: *s64, dead_size: *u64, kill
         set_op(dead_i, 0, g);
         dse_adjust_arg_attributes(dead_i, 0, to_remove_size);
     }
-    // shortenAssignment: dbg.assign markers (assignment tracking does not parse)
+    dse_shorten_assignment(dead_i, orig_dest, cast,no_check(u64) dead_start.* * 8, dead_size.* * 8, new_size * 8, is_overwrite_end);
     if !is_overwrite_end dead_start.* += cast,no_check(s64) to_remove_size;
     dead_size.* = new_size;
     return true;
+}
+
+// shortenAssignment: an unlinked #dbg_assign for the dead fragment after each overlapping marker
+dse_shorten_assignment :: (i: Value_Id, orig_dest: Value_Id, old_off_bits: u64, old_size_bits: u64, new_size_bits: u64, is_overwrite_end: bool) {
+    dead_size := old_size_bits - new_size_bits;
+    dead_off := old_off_bits + (ifx is_overwrite_end then new_size_bits else 0);
+    link_to_nothing: Md_Id = NONE;
+    get_dead_link :: () -> Md_Id #expand { if `link_to_nothing == NONE `link_to_nothing = at_new_id(); return `link_to_nothing; }
+    markers: [..] u32; markers.allocator = temp;
+    at_markers(i, *markers);
+    for a: markers {
+        ok, nf := at_calculate_fragment_intersect(orig_dest, dead_off, dead_size, a);
+        if !ok || !nf.has {
+            dbgr_set_kill_address(a);
+            dbgr_set_assign_id(a, get_dead_link());
+            continue;
+        }
+        if nf.size == 0 continue;
+        na := dbgr_clone(a);
+        dbgr_insert_after_record(na, a);
+        dbgr_tracked(na);
+        dbgr_set_assign_id(na, get_dead_link());
+        // SetDeadFragExpr
+        _, co, _ := diexpr_fragment(dbgr(na).expr);
+        okf, ne := diexpr_create_fragment_expression(dbgr(na).expr, nf.offset - co, nf.size);
+        if okf dbgr(na).expr = ne;
+        else {
+            _, e := diexpr_create_fragment_expression(diexpr_get(.[]), nf.offset, nf.size);
+            dbgr(na).expr = e;
+            dbgr_set_kill_location(na);
+        }
+        dbgr_set_kill_address(na);
+    }
 }
 
 dse_try_to_shorten_end :: (dead_i: Value_Id, im: *[..] Dse_Interval, dead_start: *s64, dead_size: *u64) -> bool {

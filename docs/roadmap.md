@@ -433,6 +433,10 @@ copy under the test directory's `Inputs/` by a path relative to the repository (
 - deps: L2.inline, L1.extra.attributor
 - exit: tests/imported/llvm/Transforms/OpenMP/*::roundtrip, tests/imported/llvm/Transforms/OpenMP/*::opt, tests/pass/openmp-opt/*::roundtrip, tests/pass/openmp-opt/*::opt
 
+### L1.extra.assignment-tracking — Debug-info assignment tracking (#dbg_assign, !DIAssignID) through every pass that touches it, declare-to-assign
+- deps: L1.sroa, L2.inline
+- exit: tests/imported/llvm/DebugInfo/Generic/assignment-tracking/*::roundtrip, tests/imported/llvm/DebugInfo/Generic/assignment-tracking/*::opt
+
 ### L1.extra.codegen-ir-misc — Further IR passes llc and targets run: ConstantHoisting, InterleavedAccess, ExpandIRInsts, GlobalMerge, IndirectBrExpand, InferAddressSpaces, LowerInvoke, LowerAtomic
 - deps: L1.codegen-ir
 - exit: tests/imported/llvm/Transforms/ConstantHoisting/*::roundtrip, tests/imported/llvm/Transforms/ConstantHoisting/*::opt, tests/imported/llvm/Transforms/InterleavedAccess/*::roundtrip, tests/imported/llvm/Transforms/InterleavedAccess/*::opt, tests/imported/llvm/Transforms/ExpandIRInsts/*::roundtrip, tests/imported/llvm/Transforms/ExpandIRInsts/*::opt, tests/imported/llvm/Transforms/GlobalMerge/*::roundtrip, tests/imported/llvm/Transforms/GlobalMerge/*::opt, tests/imported/llvm/Transforms/IndirectBrExpand/*::roundtrip, tests/imported/llvm/Transforms/IndirectBrExpand/*::opt, tests/imported/llvm/Transforms/InferAddressSpaces/*::roundtrip, tests/imported/llvm/Transforms/InferAddressSpaces/*::opt, tests/imported/llvm/Transforms/LowerInvoke/*::roundtrip, tests/imported/llvm/Transforms/LowerInvoke/*::opt, tests/imported/llvm/Transforms/LowerAtomic/*::roundtrip, tests/imported/llvm/Transforms/LowerAtomic/*::opt
