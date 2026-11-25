@@ -1932,8 +1932,42 @@ is almost all `unsupported option` for pass cl::opts we don't implement (-sbvec-
   sweep `pgo-instr-gen` and `pgo-instr-gen,instrprof` 10810/10811 identical. The one differ
   (SampleProfile/profile-correlation-irreducible-loops.ll) is a **BFI bug on irreducible loops** (block_freq.jai):
   `print<block-freq>` already differs there (b3/b8 masses), so the MST weights differ. Not ported (loud):
-  -pgo-block-coverage (BlockCoverageInference.cpp), ctx-instr-gen, vtable value profiling.
+  ctx-instr-gen, vtable value profiling. `-pgo-block-coverage` is block_coverage_inference.jai (BlockSets are
+  SmallSetVectors: insertion-ordered arrays); sweep `pgo-instr-gen -pgo-block-coverage` 10811/10811 identical.
   `-jai-debug-cfgmst` prints the MST edges (jai-only debugging aid).
+- `pgo-icall-prom` (pass_pgo_icall_prom.jai: IndirectCallPromotion.cpp, IndirectCallPromotionAnalysis.cpp,
+  InstrProfSymtab::create for functions; pgo::promoteIndirectCall and versionCallSite in call_promotion.jai):
+  sweep `--with-test-flags` 0 differs. The symtab sorts by MD5 with an unstable llvm::sort: two *different*
+  functions with one PGO-name MD5 fail loudly. In the pipelines the node's `in_lto` / `icp_sample_pgo` carry
+  PGOIndirectCallPromotion(InLTO, SamplePGO). `-enable-vtable-profile-use` fails loudly when the module has type
+  tests (computeVirtualCallSiteTypeInfoMap / vtable comparison are not ported).
+- `pgo-memop-opt` (pass_pgo_memop_opt.jai, PGOMemOPSizeOpt.cpp; setProfMetadata): 4/4 tests, sweep 0 differs.
+  No DomTree updates (the function's analyses are invalidated instead).
+- `prof-inject` / `prof-verify` (pass_prof_verify.jai, ProfileVerify.cpp): sweep `prof-inject` 0 differs.
+  BPI probabilities all have the denominator 2^31, so the LCM/GCD weights are N / gcd(N...).
+  LLVMContext::emitError is `ctx_emit_error`: prints `error: ...`, and opt exits 1 without output after the
+  pipeline (NewPMDriver's HasErrors check) — reuse it for other passes that emitError.
+- Sample profile loader (pass_sample_profile.jai, sample_prof*.jai, sample_profile_inference.jai,
+  sample_profile_matcher.jai, pass_pseudo_probe.jai): text, raw binary, ext-binary (sections, zlib-compressed
+  sections, MD5 / fixed-length MD5 name tables, function offset table + module-driven partial reading, function
+  metadata, profile symbol list) and GCC (gcov V407) readers; profi; SampleProfileMatcher (anchors, Myers LCS,
+  call-graph matching, staleness report / llvm.stats); SampleUse PGOOptions in default / thinlto-pre-link /
+  thinlto pipelines. 83/91 opt. Not ported (loud): SampleContextTracker (CS profiles), the replay inliner,
+  the Itanium remapper (needs ItaniumManglingCanonicalizer), the Itanium demangler of the matcher (a mangled
+  name reaching getDemangledBaseName fails loudly; C names never parse as function encodings), SampleUse in the
+  O0 and full-LTO pipelines, print-profile-summary, remarks.
+  - Address-order policy: the SymbolMap is built from the value symbol table (a StringMap, hash order); when a
+    function's stripped name (`getCanonicalFnName(F)` with no suffix-elision attribute strips at the first '.')
+    is also another function's name, the entry ends up as that function or nullptr depending on the order. Such
+    keys go to `spl.symbol_order_dependent`, and `spl_symbol_lookup` of one fails loudly (eagerly failing made
+    ~60 corpus files fail for nothing).
+  - Text-format profiles have no partial reading: SampleProfileReader::read(FuncsToUse) returns not_implemented,
+    which makes functionMatchesProfileHelper give up (`spm_reader_read`).
+  - Jai trap: `a << 56 | b << 48` needs parentheses (sp_magic compared wrong, every binary profile was
+    "Unrecognized"). And `cast(float32) u64` of a value >= 2^63 is wrong: use `u64_to_f32`.
+  - Sweeps (whole corpus; few functions have `use-sample-profile`, so they mostly exercise the early exits):
+    `sample-profile -sample-profile-file=Inputs/inline.prof`, `pseudo-probe,sample-profile` with a probe profile,
+    `pseudo-probe --with-test-flags`: 0 differs.
 - Jai trap: an untyped constant `0xFFFF_FFFF_FFFF_FFFF :: ` is an s64 -1 in arithmetic (`X / 1000` = 0); give
   such constants an explicit `: u64 :` type.
 
@@ -2074,8 +2108,8 @@ coro_spill.jai (SuspendCrossingInfo `Sci`, MaterializationUtils, SpillUtils, lib
 stack_lifetime.jai (StackLifetime for `coro-split<reuse-storage>`), pass_coro_split.jai (CoroSplit, the cloner,
 CoroAnnotationElide).
 
-- The 12 failing `::opt` tests all need `pgo-instr-gen` / `instrprof` / `sample-profile` (another unit). Run on
-  LLVM's `pgo-instr-gen` output, the ten `coro-split-musttail*` pipelines give identical output.
+- The 12 `::opt` tests that needed `pgo-instr-gen` / `instrprof` / `sample-profile` pass since those landed
+  (155/155).
 - Sweeps (whole file, `--with-test-flags`): coro-early, coro-cleanup, coro-elide, `cgscc(coro-split)`,
   `cgscc(coro-split<reuse-storage>)`, `cgscc(coro-annotation-elide)`: 0 differs, 0 bad-ir; the failures are flag
   groups of other units. `module(coro-early),cgscc(coro-split<reuse-storage>,coro-annotation-elide),function(coro-elide),module(coro-cleanup)`:
@@ -2105,8 +2139,7 @@ CoroAnnotationElide).
 - Perf: not measured beyond the unit (no tests/perf shape contains coroutines).
 
 ### Coroutines next steps
-- Enable the 12 pgo tests once `pgo-instr-gen` / `instrprof` / `sample-profile` land (nothing coroutine-specific).
-
+- None left in the unit's tests.
 
 ## Layer-1b loop passes: IRCE, guards, fusion/flatten, loop-misc extras, strength reduction (/root/jai_loopextras)
 

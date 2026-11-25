@@ -666,6 +666,7 @@ build_per_module_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: O
     pb_add(mpm, *last, "annotation2metadata");
     pb_add(mpm, *last, "forceattrs");
     if pb_cl.opt_pipeline_trigger_crash pb_unsupported("-opt-pipeline-trigger-crash");
+    if pb_sample_use() pb_add(mpm, *last, "function(add-discriminators)");   // PGOOpt->DebugInfoForProfiling (true for SampleUse)
     build_module_simplification_pipeline(mpm, *last, level);
     build_module_optimization_pipeline(mpm, *last, level);
     pb_add(mpm, *last, "function(annotation-remarks)");   // addAnnotationRemarksPass
@@ -681,6 +682,7 @@ build_thinlto_pre_link_default_pipeline :: (mpm_outer: s32, last_outer: *s32, le
     if level.speed == 0 { build_o0_default_pipeline(mpm, *last); return; }
     pb_add(mpm, *last, "annotation2metadata");
     pb_add(mpm, *last, "forceattrs");
+    if pb_sample_use() pb_add(mpm, *last, "function(add-discriminators)");   // PGOOpt->DebugInfoForProfiling (true for SampleUse)
     build_module_simplification_pipeline(mpm, *last, level);
     if pb_cl.enable_partial_inlining pb_unsupported("partial-inliner (-enable-partial-inlining)");
     pb_add(mpm, *last, "function(annotation-remarks)");
