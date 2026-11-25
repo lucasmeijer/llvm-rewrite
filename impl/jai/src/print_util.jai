@@ -27,9 +27,10 @@ printer_reset :: () {
 // instruction that references an MDNode through an intrinsic operand): every function's metadata is numbered first.
 // Switching to another function of an unchanged module keeps the module part (TypeFinder, module slots, module
 // metadata and attribute groups) and drops only the previous function's slots, which gives the same numbering as a
-// fresh SlotTracker without redoing the module-wide work per printed function.
+// fresh SlotTracker without redoing the module-wide work per printed function. With all_md the module part also
+// holds every function's metadata (processFunctionMetadata only), so it is kept across functions too.
 printer_begin_function :: (f: Value_Id, all_md := false) {
-    if print_state.dirty || all_md != print_state.all_md || (print_state.fn != f && all_md) {
+    if print_state.dirty || all_md != print_state.all_md {
         printer_reset();
         print_state.dirty = false;
         print_state.all_md = all_md;
