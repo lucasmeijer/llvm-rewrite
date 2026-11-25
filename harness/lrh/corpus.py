@@ -3,6 +3,9 @@
 Directives are comment lines `; @key: value` in the file's leading comment block:
 
   @opt: <opt args>      IR->IR check `::opt` (repeatable; all must match). With @llc, at most one.
+  @opt-files: <opt args>   an @opt line (part of `::opt`) whose tool run writes files into its working directory
+                        (GCOVProfiling's .gcno): both opts run in fresh scratch directories, and the files they write
+                        must be byte-identical too (checks.py, "Tool runs that write files")
   @analysis: <opt args> analysis-printer check `::analysis` (repeatable; all must match): `opt <args> -disable-output`,
                         stdout and stderr compared
   @analysis-unordered: <opt args>   the same, but lines are compared as sorted multisets: for printers that iterate
@@ -50,6 +53,7 @@ class TestFile:
     opt: list[str] = field(default_factory=list)
     analysis: list[tuple[str, bool]] = field(default_factory=list)  # (opt args, unordered)
     error: list[str] = field(default_factory=list)  # opt args that must fail like LLVM (::error)
+    opt_files: list[str] = field(default_factory=list)  # the @opt-files lines (also in opt): run in a scratch cwd
     llc: str | None = None
     driver: str | None = None
     source: str | None = None
@@ -96,6 +100,9 @@ def parse(path: Path) -> TestFile:
             key, val = m.groups()
             if key == "opt":
                 t.opt.append(val)
+            elif key == "opt-files":
+                t.opt.append(val)
+                t.opt_files.append(val)
             elif key in ("analysis", "analysis-unordered"):
                 t.analysis.append((val, key == "analysis-unordered"))
             elif key == "error":

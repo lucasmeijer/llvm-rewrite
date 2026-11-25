@@ -9,6 +9,7 @@ A test is any `.ll` file under `tests/` (or a directory with a `test.lto` manife
 
 ```llvm
 ; @opt: -passes=instcombine     IR->IR check (repeatable for imported tests: all must match)
+; @opt-files: -passes=insert-gcov-profiling    an @opt line whose run writes files (see below); also part of ::opt
 ; @analysis: -passes='print<domtree>'               analysis-printer check (repeatable: all must match)
 ; @analysis-unordered: -passes='print<demanded-bits>'   the same, comparing lines as a sorted multiset
 ; @error: -passes=verify         expected failure: opt must fail with LLVM's stderr (repeatable; no ::roundtrip then)
@@ -24,6 +25,7 @@ A test ID is `<repo-relative path>::<check>`, e.g. `tests/e2e/O0/calls/varargs.l
 | --- | --- | --- |
 | `roundtrip` | yes | `opt -S in.ll` with no passes: our printed text is **byte-identical** to LLVM's. Tests the parser and printer. |
 | `opt` | if `@opt` | `opt <args> -S`: both outputs canonicalized via `llvm-as \| llvm-dis` (so value numbering etc. can't cause false failures), then identical. Our output must also pass LLVM's verifier. |
+| `opt` (`@opt-files` lines) | if `@opt-files` | The same, run in a fresh scratch directory, and every file opt writes there must be **byte-identical** to the files LLVM's opt writes (see "Tool runs that write files"). |
 | `analysis` | if `@analysis` | `opt <args> -disable-output in.ll`: exit status 0, and stdout and stderr **byte-identical** to LLVM's (see below). |
 | `error` | if `@error` | `opt <args> -disable-output in.ll` **fails** (nonzero exit, like LLVM) and stderr is byte-identical to LLVM's after two normalizations (see below). A file with `@error` has no `::roundtrip`. |
 | `isel-ir` | if `@llc` | The IR that reaches instruction selection, `llc <args> -stop-before=x86-isel`. Input is LLVM's opt output, so this is isolated from `opt`. Canonicalized and identical. |
@@ -72,6 +74,31 @@ and `tests/imported/llvm/Linker/<test>[.runN]/` from LLVM's own linker tests (`.
 directory per usable `llvm-link` RUN line, inputs `%s`, `%p/Inputs/*.ll`, `%t` files made by `llvm-as` from those
 or from `echo "..." | llvm-as`; skipped RUN lines are listed in its `SKIPPED.md`). `bisect` on an LTO test bisects
 the post-link pipeline on LLVM's linked module.
+
+### Tool runs that write files (`@opt-files`)
+
+Some passes write files into opt's working directory: GCOVProfiling writes `<compile unit>.gcno` (or the name an
+`!llvm.gcov` node gives), the Instrumentor its runtime stubs. An `@opt-files` line is an `@opt` line (it belongs to
+`::opt`, and everything that reads `@opt` lines sees it) whose tool runs go into a scratch cwd:
+
+- LLVM's opt and ours each run in a fresh directory `/tmp/lrh-cwd/<16 hex digits>` (one fixed root, so every scratch
+  path has the same length) that holds only a symlink `tests` -> `<repo>/tests`. The input is passed by its usual
+  repo-relative path through that symlink, so `; ModuleID`, relative `-flag=tests/...` files and relative existence
+  checks (GCOV's `getFilename` prefers a DIFile name that exists relative to the cwd) behave as in the repository.
+  `-o` points outside the directory.
+- Afterwards every file left in the directory (except the symlink; subdirectories included) is collected. In those
+  files and in the output IR the scratch path is replaced by the same-length placeholder
+  `/tmp/lrh-cwd/0000000000000000`: LLVM embeds the cwd (GCOV's gcda path `"<cwd>/a.gcda"` comes from
+  `sys::fs::current_path`), and the same length keeps `[N x i8]` string types and length-prefixed binary records
+  valid. LLVM's IR and files (base64) are cached under that normalization.
+- Pass: the canonicalized IR is identical (as for `@opt`), the same set of file names was written, and each file is
+  byte-identical. A mismatch reports the first differing offset and a hexdump diff; artifacts
+  `expected.file.<name>.hex`, `actual.file.<name>.hex`, `diff.file.<name>.txt`.
+- `import-llvm` turns a RUN line whose oracle run creates files in its cwd into an `@opt-files` line (typically
+  after a `mkdir -p %t && cd %t` RUN line, which is skipped as "not an opt invocation").
+
+`sweep --files` runs a whole sweep that way (IR mode, whole files: not with `--analysis` or `--per-function`), so the
+written files are compared over the corpus too; a plain sweep runs in the repository and leaves such files there.
 
 ### Analysis printers (`::analysis`)
 
@@ -142,8 +169,9 @@ How `import-llvm` turns a RUN line into an `@opt` line: `opt … -S < %s | FileC
 `-lowerswitch`, …, list in `harness/lrh/gen.py`) become `-passes=` when the line has none; `-flag=%S/Inputs/<file>`
 (sample profiles, devirtualization summaries, IR2Vec vocabularies) points at a copy in the test's directory,
 `-flag=tests/imported/llvm/<Dir>/Inputs/<file>`, a path relative to the repository, which is the tools' working
-directory. Lines that need `%t` files, other tools, other targets, or `REQUIRES: asserts` are skipped, and so are lines
-whose oracle run creates files in its working directory (GCOVProfiling's `.gcno`): the checks run in the repository.
+directory. Lines that need `%t` files, other tools, other targets, or `REQUIRES: asserts` are skipped. A line whose oracle run
+creates files in its working directory (GCOVProfiling's `.gcno`) becomes an `@opt-files` line (see "Tool runs that
+write files"; only `Transforms/GCOVProfiling` has been re-imported since this rule exists).
 Every kept line is run through LLVM's opt first; one that fails is listed in `SKIPPED.md` as `oracle fails`.
 Re-importing a directory imported before these rules existed can add `@opt` lines to files already in a `passing.txt`.
 
@@ -265,6 +293,7 @@ own tests never contain, shared ValueTracking/printer bugs). `sweep` does that:
 ./harness/run sweep --impl llvm --passes sroa                          # self-test: everything identical
 ./harness/run sweep --impl rust --passes instcombine --per-function    # one module per defined function (below)
 ./harness/run sweep --impl rust --passes instcombine --with-test-flags # plus each file's own -mtriple/-mattr/... (below)
+./harness/run sweep --impl rust --passes insert-gcov-profiling --files # scratch cwd; written files compared too
 ```
 
 Files: by default every file whose `::roundtrip` is in `impl/<lang>/passing.txt` (for `--impl llvm`, and with

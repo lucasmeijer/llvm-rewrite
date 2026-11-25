@@ -376,8 +376,8 @@ def printer_order(t: corpus.TestFile, args: str) -> str | None:
 
 
 def writes_files(t: corpus.TestFile, args: str) -> bool:
-    """Does LLVM's opt create files in its working directory (GCOVProfiling's a.gcno)? The checks run the tools in
-    the repository, in parallel, so such a line would litter the tree."""
+    """Does LLVM's opt create files in its working directory (GCOVProfiling's a.gcno)? Such a line becomes an
+    @opt-files line: the check runs it in a scratch cwd and compares the written files too."""
     with proc.Workdir() as wd:
         run = wd / "cwd"
         run.mkdir()
@@ -417,6 +417,7 @@ def import_one(src: Path, dst: Path) -> list[str]:
 
     def write(ls):
         head = ([f"; @origin: {origin} (llvmorg-{config.LLVM_VERSION})"] + [f"; @opt: {x}" for x in ls["opt"]]
+                + [f"; @opt-files: {x}" for x in ls.get("opt-files", [])]
                 + [f"; @analysis: {x}" for x in ls["analysis"]] + [f"; @analysis-unordered: {x}" for x in ls["analysis-unordered"]]
                 + [f"; @error: {x}" for x in ls["error"]])
         dst.write_text("\n".join(head) + "\n" + text)
@@ -424,7 +425,7 @@ def import_one(src: Path, dst: Path) -> list[str]:
     lines["analysis-unordered"] = []
     write(lines)
     t = corpus.parse(dst)
-    good = {"opt": [], "analysis": [], "analysis-unordered": [], "error": []}
+    good = {"opt": [], "opt-files": [], "analysis": [], "analysis-unordered": [], "error": []}
     for x in lines["error"]:
         t.error = [x]
         o = checks.check_error(config.REFERENCE_IMPL, t)
@@ -448,9 +449,14 @@ def import_one(src: Path, dst: Path) -> list[str]:
             dst.unlink()
             return notes + [f"- `{name}`: llvm opt rejects the file"]
     for x in lines["opt"]:
-        t.opt, t.analysis = [x], []
+        t.opt, t.analysis, t.opt_files = [x], [], []
         if writes_files(t, x):
-            notes.append(f"- `{name}` @opt `{x}`: writes files into the working directory")
+            # an @opt-files line: run in a scratch cwd, the written files are compared too (checks.check_opt_files)
+            t.opt_files = [x]
+            if checks.check_opt(config.REFERENCE_IMPL, t).status == checks.PASS:
+                good["opt-files"].append(x)
+            else:
+                notes.append(f"- `{name}` @opt-files `{x}`: oracle fails")
         elif checks.check_opt(config.REFERENCE_IMPL, t).status == checks.PASS:
             good["opt"].append(x)
         else:
@@ -468,6 +474,7 @@ def import_one(src: Path, dst: Path) -> list[str]:
     if not any(good.values()):
         dst.unlink()
         return notes + [f"- `{name}`: no working RUN lines"]
+    lines["opt-files"] = []
     if good != lines:
         write(good)
     return notes

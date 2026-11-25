@@ -175,11 +175,48 @@ def new_res(path: str, **extra) -> dict:
     return {"path": path, "status": IDENTICAL, "key": "", "message": "", "artifacts": {}, **extra}
 
 
-def sweep_one(impl: str, path: str, flags: str | None, args: str, analysis: bool, unordered: bool, timeout: float) -> dict:
+def sweep_one_files(impl: str, t: corpus.TestFile, args: str, timeout: float, res: dict) -> dict:
+    """--files: like an @opt-files line (checks.check_opt_files): scratch cwd, IR and the written files compared."""
+    exp = checks.oracle_opt_files(t, args)
+    if exp["ok"]:
+        ok, exp_c = checks.canon(exp["text"])
+        if not ok:
+            exp = {"ok": False, "text": "LLVM's output does not re-assemble:\n" + exp_c}
+    if not exp["ok"]:
+        res.update(status=LLVM_FAILED, message=exp["text"])
+        return res
+    opt = config.impl_bin(impl, "opt")
+    with proc.Workdir() as wd, checks.ScratchCwd() as cwd:
+        r = proc.run_limited([opt, *shlex.split(args), "-S", t.path, "-o", str(wd / "out.ll")], cwd=cwd, cpu_limit=timeout)
+        files = checks.written_files(cwd)
+        act = checks.cwd_normalize((wd / "out.ll").read_bytes(), cwd).decode(errors="replace") if (wd / "out.ll").exists() else ""
+    err = r.err.decode(errors="replace")
+    if not r.ok:
+        res.update(status=FAILED, key=error_key(err, t.path, r.rc, r.timeout_msg),
+                   message=f"{r.fail_msg('opt')}:\n{r.err_tail()}", artifacts={"stderr.txt": r.err_tail(20000)})
+        return res
+    ok, act_c = checks.canon(act)
+    if not ok:
+        res.update(status=BAD_IR, message="output is not valid IR according to llvm-as (assembler/verifier):\n" + act_c,
+                   artifacts={"actual.ll": act, "llvm-as.txt": act_c, "stderr.txt": err})
+        return res
+    problems, arts = checks.compare_files(exp["files"], files)
+    if act_c != exp_c:
+        problems.insert(0, "canonicalized IR differs:\n" + checks.diff(exp_c, act_c))
+        arts.update({"expected.ll": exp_c, "actual.ll": act_c, "diff.txt": checks.full_diff(exp_c, act_c)})
+    if problems:
+        res.update(status=DIFFERS, message="\n".join(problems), artifacts=arts)
+    return res
+
+
+def sweep_one(impl: str, path: str, flags: str | None, args: str, analysis: bool, unordered: bool, timeout: float,
+              files: bool = False) -> dict:
     """-> {path, flags, status, key (for failed), message, artifacts}. flags: from --with-test-flags (None: off)."""
     t = corpus.TestFile(path)
     res = new_res(path, flags=flags)
     args = join_args(args, flags or "")
+    if files:
+        return sweep_one_files(impl, t, args, timeout, res)
     exp = checks.oracle_analysis(t, args, unordered) if analysis else canon_expected(checks.oracle_opt(t, args))
     if not exp["ok"]:
         res.update(status=LLVM_FAILED, message=exp["text"])
@@ -305,9 +342,9 @@ def sweep_function(impl: str, path: str, idx: int, tok: str, flags: str | None, 
 
 
 def file_job(job) -> dict:
-    (path, flags), (impl, args, analysis, unordered, timeout) = job
+    (path, flags), (impl, args, analysis, unordered, timeout, files) = job
     try:
-        return sweep_one(impl, path, flags, args, analysis, unordered, timeout)
+        return sweep_one(impl, path, flags, args, analysis, unordered, timeout, files)
     except Exception as e:  # a harness bug; surface it loudly but keep going
         return new_res(path, flags=flags, status=FAILED, key=f"[harness exception] {type(e).__name__}: {e}",
                        message=f"[harness exception] {type(e).__name__}: {e}")
@@ -352,6 +389,8 @@ def cmd_sweep(a):
     args = " ".join(shlex.quote(p) if p.startswith("-passes=") else p for p in parts)
     if a.unordered:
         a.analysis = True
+    if a.files and (a.analysis or a.per_function):
+        raise SystemExit("sweep --files compares IR and written files of whole files: not with --analysis or --per-function")
 
     check_llvm_version()
     if not a.no_build:
@@ -365,6 +404,8 @@ def cmd_sweep(a):
     else:
         units = [(f, None) for f in files]
     mode = "analysis (stdout+stderr" + (", lines sorted" if a.unordered else "") + ")" if a.analysis else "IR (canonicalized)"
+    if a.files:
+        mode += " + files written into a scratch cwd"
     print(c(BOLD, f"impl/{a.impl}: sweep `opt {args}` over {len(files)} files, {mode}"))
     if a.with_test_flags:
         print(c(DIM, f"  with test flags: {len(units)} (file, flag set) runs, {len({fl for _, fl in units})} distinct flag sets, "
@@ -384,7 +425,7 @@ def cmd_sweep(a):
         if not a.per_function:
             # Worker processes, as for --per-function below (the harness's own Python work is GIL-bound in threads).
             with ProcessPoolExecutor(max_workers=a.jobs) as pex:
-                fixed = (a.impl, args, a.analysis, a.unordered, a.timeout)
+                fixed = (a.impl, args, a.analysis, a.unordered, a.timeout, a.files)
                 rs = pex.map(file_job, [(u, fixed) for u in units], chunksize=4)
                 for i, r in enumerate(rs, 1):
                     results.append(r)
@@ -417,6 +458,7 @@ def cmd_sweep(a):
 
     # Artifacts: .harness-out/sweep/<impl>/<args slug>/<test path>/[<index>-<function>/], plus results.tsv and summary.json.
     out = config.OUT / "sweep" / a.impl / slug(("per-function " if a.per_function else "") + ("analysis " if a.analysis else "")
+                                               + ("files " if a.files else "")
                                                + ("with-test-flags " if a.with_test_flags else "") + args)
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True, exist_ok=True)

@@ -19,9 +19,13 @@ Multi-module (LTO) tests (corpus.TestFile.is_lto; a directory with a test.lto ma
              runs; stdout and exit code must match the LLVM-built program.
 """
 
+import base64
 import difflib
+import os
 import re
+import secrets
 import shlex
+import shutil
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -254,6 +258,111 @@ def oracle_opt(t: TestFile, args: str) -> dict:
     return proc.cached(["opt", t.path, read(t.path), args], compute)
 
 
+# ---------------------------------------------------------------- tool runs that write files (@opt-files)
+#
+# Some passes write files into opt's working directory (GCOVProfiling's <cu>.gcno; the Instrumentor's runtime stubs).
+# Such a run gets a fresh scratch directory as its cwd, SCRATCH_ROOT/<16 hex digits> (one fixed root, so every scratch
+# path has the same length), holding only a symlink `tests` -> <repo>/tests: the input and any repo-relative flag
+# files (`-flag=tests/imported/.../Inputs/x`) resolve exactly as in the repository. The output IR goes outside it.
+# Afterwards every file in the directory (except the symlink) is collected; in those files and in the IR, the
+# scratch path is replaced by the same-length CWD_PLACEHOLDER (LLVM embeds the cwd, e.g. GCOV's gcda path
+# "<cwd>/x.gcda"), so LLVM's results can be cached and compared byte for byte.
+
+SCRATCH_ROOT = Path("/tmp/lrh-cwd")
+CWD_PLACEHOLDER = str(SCRATCH_ROOT / ("0" * 16))
+
+
+class ScratchCwd:
+    def __enter__(self) -> Path:
+        SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+        self.path = SCRATCH_ROOT / secrets.token_hex(8)
+        self.path.mkdir()
+        (self.path / "tests").symlink_to(config.TESTS)
+        return self.path
+
+    def __exit__(self, *exc):
+        shutil.rmtree(self.path, ignore_errors=True)
+
+
+def cwd_normalize(data: bytes, cwd: Path) -> bytes:
+    real = os.path.realpath(cwd).encode()
+    data = data.replace(real, CWD_PLACEHOLDER.encode()) if len(real) == len(CWD_PLACEHOLDER) else data
+    return data.replace(str(cwd).encode(), CWD_PLACEHOLDER.encode())
+
+
+def written_files(cwd: Path) -> dict[str, bytes]:
+    """name (relative to cwd) -> content (cwd-normalized) of everything the tool left in its working directory."""
+    out = {}
+    for root, dirs, files in os.walk(cwd):
+        rel = Path(root).relative_to(cwd)
+        if rel == Path("."):
+            dirs[:] = [d for d in dirs if d != "tests"]
+            files = [f for f in files if f != "tests"]
+        for f in files:
+            p = Path(root) / f
+            if p.is_symlink():
+                out[str(rel / f)] = b"<symlink> " + os.readlink(p).encode()
+            else:
+                out[str(rel / f)] = cwd_normalize(p.read_bytes(), cwd)
+    return dict(sorted(out.items()))
+
+
+def tool_opt_files(opt_bin: str, args: str, in_path: str, wd: Path) -> tuple[proc.Res, str, dict[str, bytes]]:
+    """`opt <args> -S <in_path> -o wd/out.ll` in a scratch cwd. -> (result, normalized IR text, written files)."""
+    with ScratchCwd() as cwd:
+        r = tool_opt(opt_bin, args, Path(in_path), wd / "out.ll", cwd)
+        files = written_files(cwd)
+        text = ""
+        if r.ok and (wd / "out.ll").exists():
+            text = cwd_normalize((wd / "out.ll").read_bytes(), cwd).decode(errors="replace")
+    return r, text, files
+
+
+def oracle_opt_files(t: TestFile, args: str) -> dict:
+    """LLVM's output for an @opt-files line: {ok, text, files: {name: bytes}}."""
+
+    def compute():
+        with proc.Workdir() as wd:
+            r, text, files = tool_opt_files(config.llvm("opt"), args, t.path, wd)
+            if not r.ok:
+                return {"ok": False, "text": r.err_tail()}
+            return {"ok": True, "text": text, "files": {k: base64.b64encode(v).decode() for k, v in files.items()}}
+
+    r = proc.cached(["opt-files", t.path, read(t.path), args], compute)
+    return {**r, "files": {k: base64.b64decode(v) for k, v in r["files"].items()}} if r["ok"] else r
+
+
+def hexdump(data: bytes) -> str:
+    """16 bytes per line, offset, hex, printable ASCII: a diffable view of a binary file."""
+    lines = []
+    for o in range(0, len(data), 16):
+        chunk = data[o:o + 16]
+        lines.append(f"{o:08x}  {chunk.hex(' '):<47}  " + "".join(chr(b) if 32 <= b < 127 else "." for b in chunk))
+    return "\n".join(lines) + "\n"
+
+
+def compare_files(exp: dict[str, bytes], act: dict[str, bytes]) -> tuple[list[str], dict]:
+    """-> (problems, artifacts) for the files written by LLVM's and the implementation's tool run."""
+    problems, arts = [], {}
+    for name in sorted(set(exp) | set(act)):
+        safe = name.replace("/", "_")
+        if name not in act:
+            problems.append(f"file {name}: written by LLVM, not by the implementation")
+            arts[f"expected.file.{safe}.hex"] = hexdump(exp[name])
+        elif name not in exp:
+            problems.append(f"file {name}: written by the implementation, not by LLVM")
+            arts[f"actual.file.{safe}.hex"] = hexdump(act[name])
+        elif exp[name] != act[name]:
+            e, a = hexdump(exp[name]), hexdump(act[name])
+            first = next((i for i in range(min(len(exp[name]), len(act[name]))) if exp[name][i] != act[name][i]),
+                         min(len(exp[name]), len(act[name])))
+            problems.append(f"file {name} differs ({len(exp[name])} vs {len(act[name])} bytes; first difference at "
+                            f"offset {first:#x}):\n" + diff(e, a, 20))
+            arts.update({f"expected.file.{safe}.hex": e, f"actual.file.{safe}.hex": a,
+                         f"diff.file.{safe}.txt": full_diff(e, a)})
+    return problems, arts
+
+
 def sort_lines(text: str) -> str:
     return "".join(sorted(text.splitlines(keepends=True)))
 
@@ -429,6 +538,11 @@ def check_opt(impl: str, t: TestFile) -> Outcome:
         return check_lto_opt(impl, t)
     tid = f"{t.path}::opt"
     for args in t.opt:
+        if args in t.opt_files:
+            o = check_opt_files(impl, t, args)
+            if o is not None:
+                return o
+            continue
         exp = oracle_opt(t, args)
         if not exp["ok"]:
             return Outcome(tid, INVALID, f"llvm opt {args} fails:\n" + exp["text"])
@@ -449,6 +563,33 @@ def check_opt(impl: str, t: TestFile) -> Outcome:
             return Outcome(tid, FAIL, f"[{args}] canonicalized IR differs:\n" + diff(exp_c, act_c),
                            {"args.txt": args, "expected.ll": exp_c, "actual.ll": act_c, "diff.txt": full_diff(exp_c, act_c)})
     return Outcome(tid, PASS)
+
+
+def check_opt_files(impl: str, t: TestFile, args: str) -> Outcome | None:
+    """One @opt-files line of ::opt: the IR as for @opt, plus the written files byte for byte. None = pass."""
+    tid = f"{t.path}::opt"
+    exp = oracle_opt_files(t, args)
+    if not exp["ok"]:
+        return Outcome(tid, INVALID, f"llvm opt {args} fails (in a scratch cwd):\n" + exp["text"])
+    ok, exp_c = canon(exp["text"])
+    if not ok:
+        return Outcome(tid, INVALID, f"llvm opt {args} output does not re-assemble:\n" + exp_c)
+    if impl == config.REFERENCE_IMPL:
+        return None
+    with proc.Workdir() as wd:
+        r, act, files = tool_opt_files(config.impl_bin(impl, "opt"), args, t.path, wd)
+    if not r.ok:
+        return Outcome(tid, FAIL, f"[{args}] {r.fail_msg('opt')}:\n{r.err_tail()}", {"stderr.txt": r.err_tail(20000)})
+    ok, act_c = canon(act)
+    if not ok:
+        return Outcome(tid, FAIL, f"[{args}] output is not valid IR according to llvm-as:\n{act_c}", {"actual.ll": act})
+    problems, arts = compare_files(exp["files"], files)
+    if act_c != exp_c:
+        problems.insert(0, "canonicalized IR differs:\n" + diff(exp_c, act_c))
+        arts.update({"expected.ll": exp_c, "actual.ll": act_c, "diff.txt": full_diff(exp_c, act_c)})
+    if problems:
+        return Outcome(tid, FAIL, f"[{args}] (scratch cwd) " + "\n".join(problems), {"args.txt": args, **arts})
+    return None
 
 
 def check_analysis(impl: str, t: TestFile) -> Outcome:

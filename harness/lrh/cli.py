@@ -387,6 +387,8 @@ def main(argv=None):
                    "(llvm-extract) and compare each piece separately")
     s.add_argument("--with-test-flags", action="store_true", help="run each file once per distinct set of extra flags in its "
                    "own @opt/@analysis directives (-mtriple, -mattr, -mcpu, -data-layout, pass cl::opts; not -passes/-O/-S/-o)")
+    s.add_argument("--files", action="store_true", help="run every file in a fresh scratch cwd and also compare the files "
+                   "opt writes there byte for byte (GCOV's .gcno), like an @opt-files line; IR mode, whole files only")
     s.add_argument("--timeout", type=float, default=60, help="CPU seconds per run of the implementation's opt (default 60; "
                    f"wall-clock backstop {config.TOOL_WALL_FACTOR}x that)")
     s.add_argument("-j", "--jobs", type=int, default=os.cpu_count())
