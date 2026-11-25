@@ -37,6 +37,7 @@ SANMD_FUNCTION_PREFIX :: string.["__sanitizer_metadata_covered", "__sanitizer_me
 SANMD_SECTION_SUFFIX :: string.["sanmd_covered", "sanmd_atomics"];
 
 Sanmd :: struct {
+    ignorelist: *Special_Case_List;
     covered, atomics, uar: bool;
     version: u32;
     mis: [..] s64;   // the MetadataInfoSet, in insertion order
@@ -138,6 +139,7 @@ sanmd_run_on_inst :: (s: *Sanmd, i: Value_Id, mask: *u64) -> bool {
 sanmd_run_on_function :: (s: *Sanmd, f: Value_Id) {
     if is_declaration(f) return;
     if fn_has_fn_attr(f, .Naked) || fn_has_fn_attr(f, .DisableSanitizerInstrumentation) return;
+    if s.ignorelist && scl_in_section(s.ignorelist, "metadata", "fun", vname(f)) return;
     if glob(f).linkage == .AVAILABLE_EXTERNALLY return;
     mask: u64 = 0;
     requires_covered := false;
@@ -153,8 +155,15 @@ sanmd_run_on_function :: (s: *Sanmd, f: Value_Id) {
 }
 
 // SanitizerBinaryMetadataPass::run / SanitizerBinaryMetadata::run
+// The SanitizerBinaryMetadataPass constructor's IgnorelistFiles; opt's "sanmd-module" passes none.
+sanmd_ignorelist_files: [..] string;
+
 sanmd_run :: () -> Preserved {
     s: Sanmd;
+    if sanmd_ignorelist_files.count {
+        s.ignorelist = scl_create_or_die(sanmd_ignorelist_files);
+        if scl_in_section(s.ignorelist, "metadata", "src", ir.source_filename) return PRESERVE_ALL;
+    }
     s.mis.allocator = temp;
     s.covered = sanmd_cl.emit_covered; s.atomics = sanmd_cl.emit_atomics; s.uar = sanmd_cl.emit_uar;
     s.version = 2;

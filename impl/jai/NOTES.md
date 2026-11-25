@@ -2053,8 +2053,15 @@ is almost all `unsupported option` for pass cl::opts we don't implement (-sbvec-
   DT recalculation after every conditional origin store is linear per store. No @perf benchmark times dfsan.
 - **Next steps (sanitizers / instrumentation)**, by value:
   1. L1.extra.instrumentation.coverage leftovers: Instrumentor (IPO/Instrumentor*.cpp, ~3000 lines with the JSON
-     config; 4 tests, all `-passes=instrumentor` with the default config) and GCOVProfiling (1 test, modules.ll:
-     a split-DWARF CU, so nothing is emitted; a faithful port also writes .gcno files).
+     config; 4 tests, all `-passes=instrumentor` with the default config) and the rest of GCOVProfiling.
+- **insert-gcov-profiling** (`pass_gcov.jai`): only the module-level part (runOnModule, AddFlushBeforeForkAndExec,
+  the split-DWARF skip of emitProfileNotes); a compile unit that would get coverage fails loudly (.gcno writing, the
+  counters and the gcda ctor are not ported). Sweep: 10422 identical, 0 differs, 404 loud (every file with a
+  non-DWO llvm.dbg.cu). Trap: LLVM's opt writes `<name>.gcno` files into the cwd, so a sweep leaves ~150 of them in
+  the worktree (delete them: `git ls-files --others | grep gcno`).
+- SanitizerCoverage's allow/block lists and SanitizerBinaryMetadata's ignore list go through special_case_list.jai
+  (`sancov_allowlist_files` / `sancov_blocklist_files` / `sanmd_ignorelist_files`, the pass constructors' file
+  lists); opt's PassRegistry entries pass none, so no test or sweep can reach them.
   2. msan: ARM SIMD handlers.
   None of these passes is timed by a tests/perf benchmark.
 

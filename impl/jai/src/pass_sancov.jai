@@ -95,6 +95,8 @@ sancov_options :: () -> Sancov_Options {
 }
 
 Sancov :: struct {
+    allowlist: *Special_Case_List;
+    blocklist: *Special_Case_List;
     o: Sancov_Options;
     intptr: Type_Id;
     trace_pc_indir, trace_pc, trace_pc_guard, trace_pc_entry, trace_pc_exit, stack_depth_callback: San_Callee;
@@ -405,6 +407,8 @@ sancov_instrument_function :: (s: *Sancov, f: Value_Id) {
     if n == "__local_stdio_printf_options" || n == "__local_stdio_scanf_options" return;
     if inst_op(block_terminator(fn_entry(f))) == .UNREACHABLE return;
     if glob(f).has_personality && is_asynchronous_eh_personality(classify_eh_personality(fn_personality(f))) return;
+    if s.allowlist && !scl_in_section(s.allowlist, "coverage", "fun", vname(f)) return;
+    if s.blocklist && scl_in_section(s.blocklist, "coverage", "fun", vname(f)) return;
     if fn_has_fn_attr(f, .Naked) || fn_has_fn_attr(f, .NoSanitizeCoverage) || fn_has_fn_attr(f, .DisableSanitizerInstrumentation) return;
     if s.o.coverage_type >= 3 {
         ceo: Crit_Edge_Options;
@@ -552,10 +556,20 @@ sancov_instrument_function :: (s: *Sancov, f: Value_Id) {
 }
 
 // SanitizerCoveragePass::run / ModuleSanitizerCoverage::instrumentModule
+// The SanitizerCoveragePass constructor's AllowlistFiles / BlocklistFiles (clang's -fsanitize-coverage-allowlist /
+// -ignorelist); opt's PassRegistry entry passes none, so these stay empty here.
+sancov_allowlist_files: [..] string;
+sancov_blocklist_files: [..] string;
+
 sancov_run :: () -> Preserved {
     s: Sancov;
     s.o = sancov_options();
+    // SanitizerCoveragePass(Options, AllowlistFiles, BlocklistFiles): opt's "sancov-module" passes no files
+    if sancov_allowlist_files.count s.allowlist = scl_create_or_die(sancov_allowlist_files);
+    if sancov_blocklist_files.count s.blocklist = scl_create_or_die(sancov_blocklist_files);
     if s.o.coverage_type == 0 return PRESERVE_ALL;
+    if s.allowlist && !scl_in_section(s.allowlist, "coverage", "src", ir.source_filename) return PRESERVE_ALL;
+    if s.blocklist && scl_in_section(s.blocklist, "coverage", "src", ir.source_filename) return PRESERVE_ALL;
     s.to_used.allocator = temp; s.to_compiler_used.allocator = temp;
     s.guard_array = NONE; s.counter_array = NONE; s.bool_array = NONE; s.pcs_array = NONE; s.cfs_array = NONE;
     s.intptr = type_int(dl_ptr_spec(0).bits);
