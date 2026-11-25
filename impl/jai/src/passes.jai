@@ -291,6 +291,8 @@ Pass_Kind :: enum u8 {
     LOWER_SWITCH; UNIFY_LOOP_EXITS; FIX_IRREDUCIBLE; STRUCTURIZECFG; PRINT_REGIONS; SCALARIZER; SCALARIZE_MASKED_MEM_INTRIN_OPT;
     // guards (guard_utils.jai, pass_loop_predication.jai, pass_guard_widening.jai)
     LOWER_GUARD_INTRINSIC; LOWER_WIDENABLE_CONDITION; GUARD_WIDENING; GUARD_WIDENING_LOOP; LOOP_PREDICATION;
+    // pass_loop_flatten.jai, pass_loop_fuse.jai
+    LOOP_FLATTEN; LOOP_FUSE;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -519,6 +521,8 @@ PASS_TABLE :: Pass_Info.[
     .{"guard-widening", .FUNCTION, .GUARD_WIDENING, false, .DOMTREE},
     .{"guard-widening", .LOOP, .GUARD_WIDENING_LOOP, false, .DOMTREE},   // LOOP_PASS of the same name (parse_loop_pass)
     .{"loop-predication", .LOOP, .LOOP_PREDICATION, false, .DOMTREE},
+    .{"loop-flatten", .LOOP, .LOOP_FLATTEN, false, .DOMTREE},   // a LoopNest pass
+    .{"loop-fusion", .FUNCTION, .LOOP_FUSE, false, .DOMTREE},
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -1245,6 +1249,8 @@ parse_cl_opt :: (arg: string) -> bool {
     if gcov_parse_cl_opt(name, value, has_value) return true;    // pass_gcov.jai
     if lp_parse_cl_opt(name, value, has_value) return true;     // pass_loop_predication.jai (-loop-predication-*)
     if gw_parse_cl_opt(name, value, has_value) return true;     // pass_guard_widening.jai (-guard-widening-*)
+    if lf_parse_cl_opt(name, value, has_value) return true;     // pass_loop_flatten.jai (-loop-flatten-*)
+    if lfu_parse_cl_opt(name, value, has_value) return true;    // pass_loop_fuse.jai (-loop-fusion-*)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1635,6 +1641,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .LOWER_GUARD_INTRINSIC; return lower_guard_intrinsic_run(f);
         case .LOWER_WIDENABLE_CONDITION; return lower_widenable_condition_run(f);
         case .GUARD_WIDENING; return guard_widening_run(f);
+        case .LOOP_FUSE; return loop_fuse_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

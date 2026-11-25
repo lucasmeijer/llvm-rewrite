@@ -288,3 +288,5 @@ lib/Transforms/ObjCARC/ObjCARCOpts.cpp 0.97  # not GatherStatistics / the BBStat
 lib/Transforms/Scalar/StructurizeCFG.cpp 0.95  # not skip-uniform-regions (UniformityInfo): fails loudly
 lib/Analysis/RegionInfo.cpp 0.8  # not verifyAnalysis / view; -verify-region-info is parsed and ignored
 lib/Transforms/Scalar/Scalarizer.cpp 0.98  # untruncated ConstantInt::get indices fail loudly
+lib/Transforms/Scalar/LoopFuse.cpp 0.95  # no optimization remarks / verbose debug printing; gatherPeelingPreferences not called (only PeelCount is ever read)
+lib/Transforms/Scalar/LoopFlatten.cpp 0.97  # no optimization remarks

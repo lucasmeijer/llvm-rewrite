@@ -220,6 +220,9 @@
 #load "guard_utils.jai";
 #load "pass_loop_predication.jai";
 #load "pass_guard_widening.jai";
+#load "pass_loop_flatten.jai";
+#load "code_mover_utils.jai";
+#load "pass_loop_fuse.jai";
 #load "print_uselistorder.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";

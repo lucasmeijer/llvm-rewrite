@@ -37,3 +37,23 @@ whole-corpus sweeps.
   the loop version runs (root = loop predecessor or header, blocks filtered to root + loop, no post-dominator tree).
 - None of these passes (nor IRCE / LoopConstrainer / SCEVExpander) call `salvageKnowledge`, so
   `-enable-knowledge-retention` changes nothing for them.
+
+## LoopFlatten (`loop-flatten`, a LoopNest pass) and LoopFusion (`loop-fusion`)
+
+- A loop pipeline made only of loop-nest passes (`loop(loop-flatten)`, `lnicm`, ...) runs in LoopNestMode: the
+  worklist gets the top-level loops in LoopInfo order and pops from the back, so the *last* top-level loop is
+  processed first (LoopPassManager.cpp:247). Otherwise loop-nest passes only run on outermost loops.
+- LoopFlatten computes `LAIM.getInfo(*OuterLoop)` for every (outer, inner) pair; the outer loop is never innermost,
+  so LoopAccessInfo stops at canAnalyzeLoop and the versioning has no SCEV predicates: the check block's condition is
+  `false` until LoopFlatten replaces it with the `umul.with.overflow` overflow bit. `versionLoop()` still adds the
+  LCSSA-style phis for `findDefsUsedOutsideOfLoop`.
+- LoopFlatten's `LinearIVUses` is a `SmallPtrSet<Value *, 4>` that is *not* cleared between the first
+  `CanFlattenLoopPair` and the one after IV widening, and DoFlattenLoopPair creates `flatten.trunciv` / GEPs in its
+  iteration order (insertion order up to 4 elements, pointer order beyond). The IV widening leaves its dead
+  instructions in place (DeadInsts is never cleaned).
+- LoopFuse's `moveInstructionsToTheEnd` loops forever if the front instruction of the block cannot be moved
+  (`while (FromBB.size() > 1)` with no progress); the Jai port fails loudly there.
+- LoopFuse's `LoopDepthTree::size()` is `LoopsOnLevel.size() - RemovedLoops.size()`; RemovedLoops is cleared on
+  `descend()`, so the `while (!LDT.empty())` test is just "is there a loop vector on this level".
+- CodeMoverUtils' `collectInstructionsInBetween` uses a SmallPtrSet worklist, but the resulting set (everything
+  reachable from the start without passing the end) does not depend on the visiting order.

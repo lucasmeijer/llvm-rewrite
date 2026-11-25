@@ -2125,6 +2125,13 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   `std_sort_by` on indices. Sweeps (whole corpus, plain and `--with-test-flags`): loop-predication,
   guard-widening, loop-mssa(guard-widening), lower-guard-intrinsic, lower-widenable-condition, make-guards-explicit:
   0 differs.
+- **LoopFlatten / LoopFusion** (L1.extra.loop-fusion-flatten COMPLETE 72/72): `pass_loop_flatten.jai` (LoopNest pass
+  `LOOP_FLATTEN`, added to loop_pm.jai's loop-nest checks next to LNICM / loop-interchange; fails loudly with more
+  than 4 linear IV uses (pointer-ordered SmallPtrSet) or when IV widening deleted one of them), `pass_loop_fuse.jai`
+  (`Lfu_Dtu` is a lazy DomTreeUpdater over DT *and* PDT; MergeBlockIntoPredecessor goes through a `Lazy_Dtu` whose
+  queue is moved into it), `code_mover_utils.jai`. Sweeps (whole corpus, plain + `--with-test-flags`, and after
+  `loop(loop-rotate[,indvars])`, with `-loop-fusion-peel-max-count=8` / `-loop-flatten-widen-iv=false`; tests/perf/compile
+  after `sroa,loop(loop-rotate)`): 0 differs.
 
 ## CFI: LowerTypeTests, CrossDSOCFI, GlobalSplit, SimplifyTypeTests (L1.extra.lowertypetests COMPLETE; /root/jai_cfi)
 

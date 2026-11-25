@@ -34,6 +34,9 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     // ScalarEvolutionExpander.cpp) never call salvageKnowledge
     if kind == .GUARD_WIDENING || kind == .GUARD_WIDENING_LOOP || kind == .LOOP_PREDICATION || kind == .LOWER_GUARD_INTRINSIC ||
        kind == .LOWER_WIDENABLE_CONDITION || kind == .MAKE_GUARDS_EXPLICIT || kind == .IRCE return;
+    // LoopFuse.cpp, LoopFlatten.cpp and what they call (CodeMoverUtils, LoopPeel, SimplifyIndVar, LoopVersioning,
+    // DependenceAnalysis, LoopAccessAnalysis, BasicBlockUtils) never call salvageKnowledge
+    if kind == .LOOP_FUSE || kind == .LOOP_FLATTEN return;
     fatal("-enable-knowledge-retention is not supported with pass '%' yet", name);
 }
 
