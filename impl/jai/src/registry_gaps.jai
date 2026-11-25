@@ -33,6 +33,8 @@ Gap_Kind :: enum u8 {
     // assume_builder.jai
     ASSUME_BUILDER; ASSUME_SIMPLIFY;
     DWARF_EH_PREPARE;   // pass_dwarf_eh_prepare.jai
+    // llc's codegen IR passes as opt passes (cg_*.jai): full ports or guards that fail loudly where LLVM would change IR
+    X86_PARTIAL_REDUCTION; X86_LOWER_AMX_INTRINSICS; X86_LOWER_AMX_TYPE; GC_LOWERING; SHADOW_STACK_GC_LOWERING; INLINE_ASM_PREPARE;
 }
 
 Gap_Info :: struct {
@@ -124,6 +126,12 @@ GAP_PASS_TABLE :: Gap_Info.[
     .{"assume-builder", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .ASSUME_BUILDER},
     .{"assume-simplify", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .ASSUME_SIMPLIFY},
     .{"dwarf-eh-prepare", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .DWARF_EH_PREPARE},
+    .{"x86-partial-reduction", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .X86_PARTIAL_REDUCTION},       // X86PassRegistry.def
+    .{"x86-lower-amx-intrinsics", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .X86_LOWER_AMX_INTRINSICS},
+    .{"x86-lower-amx-type", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .X86_LOWER_AMX_TYPE},
+    .{"gc-lowering", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .GC_LOWERING},
+    .{"shadow-stack-gc-lowering", .MODULE, .GAP_MODULE, true, .DOMTREE, .SHADOW_STACK_GC_LOWERING},
+    .{"inline-asm-prepare", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .INLINE_ASM_PREPARE},
     .{"flatten-cfg", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .FLATTEN_CFG},
     .{"strip-gc-relocates", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .STRIP_GC_RELOCATES},
     .{"print<stack-lifetime>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_STACK_LIFETIME},   // also <may>, <must>
@@ -202,6 +210,9 @@ gap_run_module :: (node: *Pass_Node) {
             s := print_module_fresh();
             write_string(s, to_standard_error = true);
         case .PRINT_MODULE_DEBUGINFO; print_module_debuginfo_run();
+        case .SHADOW_STACK_GC_LOWERING;
+            // CollectorMetadataAnalysis: only modules with a function using gc "shadow-stack"
+            for f: ir.m_functions if glob(f).gc == "shadow-stack" fatal("shadow-stack-gc-lowering: gc \"shadow-stack\" is not supported yet");
         case .TRIGGER_CRASH; gap_abort();
         case .TRIGGER_VERIFIER_ERROR;
             // GlobalAlias::create(ptr, 0, internal, "__bad_alias", /*Aliasee=*/nullptr, &M): our IR has no alias
@@ -241,6 +252,18 @@ gap_run_function :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .FLATTEN_CFG; return flatten_cfg_run(f);
         case .ASSUME_BUILDER; return assume_builder_run(f);
         case .DWARF_EH_PREPARE; return dwarf_eh_prepare_opt_run(f);
+        case .X86_PARTIAL_REDUCTION;
+            gap_require_x86_target(node.name);
+            pa := x86_partial_reduction_run(f);
+            if pa.all return pa;
+            return preserved_cfg();   // PreservedAnalyses::none() + CFGAnalyses
+        case .X86_LOWER_AMX_INTRINSICS;
+            // shouldRunLowerAMXIntrinsics: X86ScalarizeAMX (-enable-x86-scalar-amx, off and not accepted here)
+            gap_require_x86_target(node.name);
+            return PRESERVE_ALL;
+        case .X86_LOWER_AMX_TYPE; gap_require_x86_target(node.name); return x86_lower_amx_check(f, false);
+        case .GC_LOWERING; return gc_lowering_check(f);
+        case .INLINE_ASM_PREPARE; return inline_asm_prepare_run(f);
         case .ASSUME_SIMPLIFY; return assume_simplify_run(f);
         case .PRINT_DOMFRONTIER; return print_domfrontier_run(f);
         case .PRINT_INLINE_COST; return print_inline_cost_run(f);
@@ -316,4 +339,11 @@ gap_abort :: () {
 gap_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
     if registry_printers_parse_cl_opt(name, value, has_value) return true;
     return false;
+}
+
+// the X86PassRegistry.def passes are only registered when opt has an x86 TargetMachine
+gap_require_x86_target :: (name: string) {
+    t := ir.triple;
+    if opts.mtriple.count t = opts.mtriple;
+    if !tti_is_x86_triple(t) fatal("unknown pass name '%'", name);
 }
