@@ -9627,7 +9627,9 @@ tests/imported/llvm/Transforms/Inline/lifetime.ll::opt
 tests/imported/llvm/Transforms/Inline/lifetime.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/local-as-metadata-undominated-use.ll::opt
 tests/imported/llvm/Transforms/Inline/local-as-metadata-undominated-use.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/memprof_inline2.ll::opt
 tests/imported/llvm/Transforms/Inline/memprof_inline2.ll::roundtrip
+tests/imported/llvm/Transforms/Inline/memprof_inline3.ll::opt
 tests/imported/llvm/Transforms/Inline/memprof_inline3.ll::roundtrip
 tests/imported/llvm/Transforms/Inline/module-inliner-basic.ll::opt
 tests/imported/llvm/Transforms/Inline/module-inliner-basic.ll::roundtrip
