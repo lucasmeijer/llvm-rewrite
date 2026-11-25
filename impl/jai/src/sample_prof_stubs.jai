@@ -5,8 +5,8 @@ sp_ext_binary_has_format :: (data: string) -> bool { return sp_binary_magic(data
 sp_gcc_has_format :: (data: string) -> bool { return data.count >= 8 && sr_substr(data, 0, 8) == "adcg*704"; }
 // SPMagic(Format)
 sp_magic :: (format: u64) -> u64 {
-    return (cast(u64) #char "S") << 56 | (cast(u64) #char "P") << 48 | (cast(u64) #char "R") << 40 | (cast(u64) #char "O") << 32 |
-           (cast(u64) #char "F") << 24 | (cast(u64) #char "4") << 16 | (cast(u64) #char "2") << 8 | format;
+    return ((cast(u64) #char "S") << 56) | ((cast(u64) #char "P") << 48) | ((cast(u64) #char "R") << 40) | ((cast(u64) #char "O") << 32) |
+           ((cast(u64) #char "F") << 24) | ((cast(u64) #char "4") << 16) | ((cast(u64) #char "2") << 8) | format;
 }
 // the ULEB128 magic number at the start of a binary profile
 sp_binary_magic :: (data: string) -> u64 {
@@ -20,8 +20,6 @@ sp_binary_magic :: (data: string) -> u64 {
     }
     return 0;
 }
-sp_raw_binary_read :: () { fatal("sample-profile: the binary sample profile format is not implemented yet"); }
-sp_ext_binary_read :: () { fatal("sample-profile: the extensible binary sample profile format is not implemented yet"); }
 sp_gcc_read :: () { fatal("sample-profile: the GCC (gcov) sample profile format is not implemented yet"); }
 
 sp_remapper_create :: (file: string) { fatal("sample-profile: -sample-profile-remapping-file (SampleProfileReaderItaniumRemapper) is not implemented yet"); }
