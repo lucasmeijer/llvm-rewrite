@@ -181,6 +181,7 @@ Spl :: struct {
     use_flattened: bool;
     // SymbolMap: by the MD5 of the name (HashKeyMap); NONE = an ambiguous stripped name
     symbol_map: Table(u64, Value_Id);
+    symbol_order_dependent: Table(u64, string);   // keys whose value depends on the symbol table's hash order
     prof_acc_for_syms_in_list: bool;
     names_in_profile: Table(string, bool);
     guids_in_profile: Table(u64, bool);
@@ -369,6 +370,7 @@ spl_run_on_module :: (psi: *Psi) -> bool {
     if sp_flags.probe_based && spl_reject_high_staleness_profile() return false;
     // the symbol map
     table_reset(*spl.symbol_map);
+    table_reset(*spl.symbol_order_dependent);
     orig_names: Table(u64, Value_Id); orig_names.allocator = temp;
     for f: ir.m_functions if vname(f).count table_set(*orig_names, sp_fn_guid(vname(f)), f);
     for f: ir.m_functions {
@@ -383,8 +385,13 @@ spl_run_on_module :: (psi: *Psi) -> bool {
         if orig != nn && nn.count {
             g := sp_fn_guid(nn);
             found, other := table_find(*orig_names, g);
-            if found && other != f
-                fatal("sample-profile: the stripped name '%' of '%' is also the name of a function (the result depends on the symbol table's hash order)", nn, orig);
+            // SymbolMap[stripped] ends up as the other function or nullptr depending on the order of the value
+            // symbol table (a StringMap): a lookup of that name fails loudly
+            if found && other != f {
+                table_set(*spl.symbol_order_dependent, g, sprint("the stripped name '%' of '%' is also the name of a function", nn, orig));
+                orig = nn;
+                continue;
+            }
             ex := table_find_pointer(*spl.symbol_map, g);
             if ex ex.* = NONE; else table_set(*spl.symbol_map, g, f);
             orig = nn;
@@ -1303,6 +1310,8 @@ spl_find_external_inline_candidate :: (cb: Value_Id, samples: *Fs, inlined_guids
 }
 sp_guid_set_add :: (s: *[..] u64, g: u64) { for s.* if it == g return; array_add(s, g); }
 spl_symbol_lookup :: (f: Fid) -> Value_Id {
+    od, why := table_find(*spl.symbol_order_dependent, fid_hash(f));
+    if od fatal("sample-profile: % (the result depends on the symbol table's hash order)", why);
     found, v := table_find(*spl.symbol_map, fid_hash(f));
     if found return v;
     return NONE;
