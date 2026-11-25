@@ -247,6 +247,8 @@ fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
 Pass_Level :: enum u8 { MODULE; FUNCTION; LOOP; CGSCC; }
 
 Pass_Kind :: enum u16 {
+    // registry_gaps.jai (GAP_PASS_TABLE; Pass_Info.gap selects the pass), no-op-loopnest
+    GAP_MODULE; GAP_FUNCTION; GAP_LOOP; GAP_CGSCC; NO_OP_LOOPNEST;
     // structure
     MODULE_PM; FUNCTION_ADAPTOR; LOOP_ADAPTOR; LOOP_PM;
     // analysis utilities (required: they run on optnone functions and don't count for -opt-bisect-limit)
@@ -731,8 +733,9 @@ PASS_TABLE :: Pass_Info.[
 // Passes LLVM has that we don't: recognised so that the error says "not implemented" rather than "unknown".
 pass_table: [..] Pass_Info;   // PASS_TABLE copied into memory, so that pointers to rows stay valid
 lookup_pass :: (name: string) -> *Pass_Info {
-    if pass_table.count == 0 for PASS_TABLE array_add(*pass_table, it);
-    for * pass_table if it.name == name return it;
+    if pass_table.count == 0 { for PASS_TABLE array_add(*pass_table, it); gap_table_init(); }   // registry_gaps.jai
+    for * pass_table if it.name == name { gap_check_bare_name(it); return it; }
+    gp := gap_lookup_parametrized(name); if gp return gp;   // registry_gaps.jai
     if begins_with(name, "instcombine<") return lookup_pass("instcombine");
     if begins_with(name, "gvn<") && name[name.count - 1] == #char ">" return lookup_pass("gvn");
     if begins_with(name, "ipsccp<") && name[name.count - 1] == #char ">" return lookup_pass("ipsccp");
@@ -771,6 +774,18 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "global-merge<") && name[name.count - 1] == #char ">" return lookup_pass("global-merge");
     if name == "expand-ir-insts<O0>" || name == "expand-ir-insts<O1>" || name == "expand-ir-insts<O2>" || name == "expand-ir-insts<O3>" return lookup_pass("expand-ir-insts");
     return null;
+}
+
+// lookup_pass, preferring a row of the first level in `levels` that has one (names registered at several levels:
+// print, invalidate<all>, require<pass-instrumentation>, trigger-verifier-error, ...)
+lookup_pass_at :: (name: string, levels: .. Pass_Level) -> *Pass_Info {
+    p := lookup_pass(name);
+    if p == null return null;
+    for lv: levels {
+        if p.level == lv return p;
+        for * pass_table if it.name == name && it.level == lv return it;
+    }
+    return p;
 }
 
 // ---------------------------------------------------------------- pipeline text
@@ -968,7 +983,7 @@ parse_cgscc_pass :: (cgpm: s32, last: *s32, e: s32) {
         }
         fatal("invalid use of '%' pass as cgscc pipeline", el.name);
     }
-    p := lookup_pass(el.name);
+    p := lookup_pass_at(el.name, .CGSCC, .FUNCTION, .LOOP);
     if p == null || p.level == .MODULE unknown_pass(el.name);
     if p.level == .CGSCC { link_child(cgpm, last, new_node(p.kind, p, el.name)); return; }
     // createCGSCCToFunctionPassAdaptor(CREATE_PASS) (a loop pass: of createFunctionToLoopPassAdaptor(CREATE_PASS))
@@ -1017,8 +1032,9 @@ parse_function_pass :: (fpm: s32, last: *s32, e: s32) {
         }
         unknown_pass(el.name);
     }
-    p := lookup_pass(el.name);
+    p := lookup_pass_at(el.name, .FUNCTION, .LOOP);
     if p == null || p.level == .MODULE unknown_pass(el.name);
+    if gap_parse_function_element(fpm, last, p, el.name) return;   // registry_gaps.jai: function-simplification<O#>
     if p.level == .LOOP {
         // createFunctionToLoopPassAdaptor(CREATE_PASS, /*UseMemorySSA=*/false)
         la := new_node(.LOOP_ADAPTOR, null, "loop");
@@ -1047,7 +1063,7 @@ parse_loop_pass :: (lpm: s32, last: *s32, e: s32) {
     // invalidate<all> as a loop pass (InvalidateAllAnalysesPass): it drops the loop analyses, and the ones we have
     // (LoopNest, IVUsers) are recomputed by every pass that reads them
     if el.name == "invalidate<all>" { link_child(lpm, last, new_node(.NO_OP_LOOP, lookup_pass("no-op-loop"), el.name)); return; }
-    p := lookup_pass(el.name);
+    p := lookup_pass_at(el.name, .LOOP);
     // a name registered both as FUNCTION_PASS and LOOP_PASS (guard-widening): the loop row
     if p != null && p.level != .LOOP for * pass_table if it.name == el.name && it.level == .LOOP { p = it; break; }
     if p == null || p.level != .LOOP unknown_pass(el.name);
@@ -1133,7 +1149,7 @@ parse_module_pass :: (mpm: s32, last: *s32, e: s32) {
         // a function pass in a module pipeline gets its own ModuleToFunctionPassAdaptor
         fa := new_node(.FUNCTION_ADAPTOR, null, "function");
         flast: s32 = -1;
-        link_child(fa, *flast, new_node(p.kind, p, el.name));
+        parse_function_pass(fa, *flast, e);
         link_child(mpm, last, fa);
         return;
     }
@@ -1447,6 +1463,7 @@ run_module_pm :: (n: s32) {
             case .MODULE_PM; run_module_pm(c);
             case .FUNCTION_ADAPTOR; run_function_adaptor(c);
             case .NO_OP_MODULE; should_run_pass(node, NONE);
+            case .GAP_MODULE; gap_run_module(node);   // registry_gaps.jai
             case .VERIFY_MODULE; if should_run_pass(node, NONE) run_verifier_pass_module();
             case .REQUIRE_VERIFY; if should_run_pass(node, NONE) verifier_module_result();
             case .DEBUGIFY; if should_run_pass(node, NONE) { run_debugify_pass(); lcg_invalidate(); }
@@ -1623,6 +1640,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
     knowledge_retention_check(node.kind, node.name);
     if node.kind == {
         case .NO_OP_FUNCTION; return PRESERVE_ALL;
+        case .GAP_FUNCTION; return gap_run_function(node, f);   // registry_gaps.jai
         case .VERIFY_FUNCTION; run_verifier_pass_function(f); return PRESERVE_ALL;
         case .REQUIRE; fam_require(f, node.info.analysis); return PRESERVE_ALL;
         case .INVALIDATE; fam_invalidate_one(f, node.info.analysis); return PRESERVE_ALL;

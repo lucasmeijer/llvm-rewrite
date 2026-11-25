@@ -173,7 +173,7 @@ run_loop_pm :: (n: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Updater) -> 
         c = node.next;
         // a loop-nest pass (LoopPassManager::run): only on a top-level loop (runWithLoopNestPasses), on the
         // LoopNest of that loop; runWithoutLoopNestPasses skips it without instrumentation
-        if (node.kind == .LOOP_INTERCHANGE || node.kind == .LOOP_FLATTEN || node.kind == .LOOP_UNROLL_AND_JAM) && li_parent(lar.li, l) != NONE continue;
+        if (node.kind == .LOOP_INTERCHANGE || node.kind == .LOOP_FLATTEN || node.kind == .LOOP_UNROLL_AND_JAM || node.kind == .NO_OP_LOOPNEST) && li_parent(lar.li, l) != NONE continue;
         if !should_run_loop_pass(node, lar.li, l) continue;
         p := run_loop_pass(idx, l, lar, u);
         if !p.all printer_note_ir_changed();
@@ -202,6 +202,8 @@ run_loop_pass_inner :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Up
     if node.kind == {
         case .LOOP_PM; return run_loop_pm(idx, l, lar, u);
         case .NO_OP_LOOP; return PRESERVE_ALL;
+        case .NO_OP_LOOPNEST; return PRESERVE_ALL;
+        case .GAP_LOOP; return gap_run_loop(node, l, lar);   // registry_gaps.jai
         case .EXTRA_LOOP_UNSWITCH;
             // ExtraLoopPassManager<ShouldRunExtraSimpleLoopUnswitch>::run: the inner passes only when IndVarSimplify
             // left the marker analysis cached for L; the marker is abandoned either way
@@ -281,7 +283,7 @@ run_loop_adaptor :: (n: s32, f: Value_Id) -> Preserved {
     loop_nest_mode := pipeline.nodes[n].first_child >= 0;
     {
         c := pipeline.nodes[n].first_child;
-        while c >= 0 { k := pipeline.nodes[c].kind; if k != .LNICM && k != .LOOP_FLATTEN && k != .LOOP_UNROLL_AND_JAM loop_nest_mode = false; c = pipeline.nodes[c].next; }
+        while c >= 0 { k := pipeline.nodes[c].kind; if k != .LNICM && k != .LOOP_FLATTEN && k != .LOOP_UNROLL_AND_JAM && k != .NO_OP_LOOPNEST loop_nest_mode = false; c = pipeline.nodes[c].next; }
     }
     if loop_nest_mode for li.top_level lwl_insert(*w, it);
     else append_loops_to_worklist_li(li, *w);

@@ -643,14 +643,15 @@ module_inliner_run :: () -> Preserved {
 
 // ModuleInlinerWrapperPass (`inliner-wrapper`: MandatoryFirst, no devirt repetition): cgscc(inline<only-mandatory>,
 // inline) with the InlineAdvisorAnalysis's DefaultInlineAdvisor (the same advice as the passes' own)
-inliner_wrapper_run :: () {
+// ModuleInlinerWrapperPass(getInlineParams(), MandatoryFirst) (inliner-wrapper / inliner-wrapper-no-mandatory-first)
+inliner_wrapper_run :: (mandatory_first := true) {
     ad := new_node(.CGSCC_ADAPTOR, null, "cgscc");
     pm := new_node(.CGSCC_PM, null, "cgscc");
     p := lookup_pass("inline");
     m := new_node(.INLINE, p, "inline<only-mandatory>");
     i := new_node(.INLINE, p, "inline");
     alast: s32 = -1; plast: s32 = -1;
-    link_child(pm, *plast, m);
+    if mandatory_first link_child(pm, *plast, m);
     link_child(pm, *plast, i);
     link_child(ad, *alast, pm);
     mam_invalidate(run_cgscc_adaptor(ad));

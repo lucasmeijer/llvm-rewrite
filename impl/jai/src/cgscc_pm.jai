@@ -220,6 +220,7 @@ run_cgscc_pass_inner :: (n: s32, c: s32, ur: *Cgscc_Ur) -> Preserved {
         case .DEVIRT; return run_devirt(n, c, ur);
         case .CGSCC_FN_ADAPTOR; return run_cgscc_fn_adaptor(n, c, ur);
         case .NO_OP_CGSCC; return PRESERVE_ALL;
+        case .GAP_CGSCC; return gap_run_cgscc(node);   // registry_gaps.jai
         case .FUNCTION_ATTRS; return function_attrs_run_scc(node, c);
         case .ATTRIBUTOR_LIGHT_CGSCC; return attributor_light_cgscc_run(c);
         case .ATTRIBUTOR_CGSCC; return attributor_cgscc_run(c, ur);
