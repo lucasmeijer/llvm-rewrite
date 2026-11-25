@@ -267,6 +267,17 @@ lvp_process_best_plan :: (lp: *Lv_Planner, vf_in: Lv_Vf, plan: *Vp_Plan, user_ic
     }
     if interleave_loop && lvl_has_uncountable_exit_with_side_effects(lp.lvl) { interleave_loop = false; ic = 1; }
     if !vectorize_loop && !interleave_loop { lv_rt_checks_destroy(*checks); return false; }
+    // Report the vectorization decision (-pass-remarks=loop-vectorize)
+    if remarks_passed_enabled("loop-vectorize") {
+        loc := li_start_loc(lp.li, lp.l);
+        if ec_is_scalar(vf.width) remark_emit_passed("loop-vectorize", loc, tprint("interleaved loop (interleaved count: %)", ic));
+        else {
+            w := ifx vf.width.scalable then tprint("vscale x %", vf.width.n) else tprint("%", vf.width.n);
+            outer := ifx li_is_innermost(lp.li, lp.l) then "" else "outer ";
+            remark_emit_passed("loop-vectorize", loc, tprint("vectorized %loop (vectorization width: %, interleaved count: %)", outer, w, ic));
+        }
+    }
+    // (with remarks enabled, LLVM also runs checkMixedPrecision and emitInvalidCostRemarks: analysis remarks only)
     lv_dbg("LV: Vectorizing with VF % and IC %\n", lv_ec_str(vf.width), ic);
     epi_plan := lvp_select_best_epilogue_plan(lp, plan, vf.width, ic);
     latch := li_loop_latch(lp.li, lp.l);
@@ -365,6 +376,8 @@ lvp_update_loop_metadata_and_profile_info :: (lp: *Lv_Planner, vector_loop: Loop
             lvh_set_already_vectorized(li, l);
         }
     }
+    // ORE->enabled() (some -pass-remarks): tag the scalar remainder and the vector body
+    if remarks_enabled() && sph != NONE && vb(sph).preds.count > 0 li_add_int_loop_attribute(li, l, "llvm.loop.vectorize.epilogue", 1, .[]);
     if vector_loop == NONE return;
     has, vid := make_followup_loop_id(orig_loop_id, .[LV_FOLLOWUP_ALL, LV_FOLLOWUP_VECTORIZED]);
     if has li_set_loop_id(li, vector_loop, vid);
@@ -372,6 +385,7 @@ lvp_update_loop_metadata_and_profile_info :: (lp: *Lv_Planner, vector_loop: Loop
         if orig_loop_id != NONE li_set_loop_id(li, vector_loop, orig_loop_id);
         if !vectorizing_epilogue lvh_set_already_vectorized(li, vector_loop);
     }
+    if remarks_enabled() li_add_int_loop_attribute(li, vector_loop, "llvm.loop.vectorize.body", 1, .[]);
     // TTI.getUnrollingPreferences: UnrollVectorizedLoop is false for X86 and NoTTI
     lv_add_runtime_unroll_disable_metadata(li, vector_loop);
     ok_ec, ec := fn_entry_count(lp.cm.f);

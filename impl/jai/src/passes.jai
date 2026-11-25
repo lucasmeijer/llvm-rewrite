@@ -1380,6 +1380,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     if lc_parse_cl_opt(name, value, has_value) return true;   // loop_cache_analysis.jai
     if mpi_parse_cl_opt(name, value, has_value) return true;   // memory_profile_info.jai
+    if remarks_parse_cl_opt(name, value, has_value) return true;   // opt_remarks.jai
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {

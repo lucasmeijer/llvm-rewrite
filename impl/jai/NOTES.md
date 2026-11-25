@@ -1518,6 +1518,12 @@ Still slow / next:
   Sweeps: replace-with-veclib with -vector-library=AMDLIBM/SVML/LIBMVEC/sleefgnuabi/ArmPL -mattr=avx512f 10923/10923;
   inject-tli-mappings,loop-vectorize,replace-with-veclib with SVML 10917/10917; --with-test-flags 0 differs.
 
+- `--pass-remarks=loop-vectorize` (opt_remarks.jai; only this pattern, anything else fails loudly): prints LV's
+  passed remarks ("remark: <file>:<line>:<col>: vectorized loop (vectorization width: 4, interleaved count: 1)") on
+  stderr, turns on ORE->allowExtraAnalysis in legality (every check runs; `lv_do_extra_analysis`) and ORE->enabled(),
+  which tags the loops with `llvm.loop.vectorize.body` / `llvm.loop.vectorize.epilogue` (found by the sweep). Sweeps
+  with the flag: IR 10922/10922, --with-test-flags IR and --analysis (stderr compared) 0 differs.
+
 ### LoopVectorize next steps (each fails loudly with the quoted message today)
 
 1. Histograms (`-enable-histogram-loop-vectorization`, 1 test): LAA histogram detection, VPHistogramRecipe.

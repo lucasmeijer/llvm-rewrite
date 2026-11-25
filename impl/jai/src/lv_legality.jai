@@ -253,25 +253,33 @@ lv_is_uniform_loop_nest :: (li: *Loop_Info, lp: Loop_Id, outer: Loop_Id) -> bool
     for li_subloops(li, lp) if !lv_is_uniform_loop_nest(li, it, outer) return false;
     return true;
 }
+// ORE->allowExtraAnalysis("loop-vectorize"): keep checking after a failure, to report every reason
+lv_do_extra_analysis :: () -> bool { return remarks_any_enabled("loop-vectorize"); }
+
 // LoopVectorizationLegality::canVectorizeOuterLoop
 lvl_can_vectorize_outer_loop :: (v: *Lvl) -> bool {
     li := v.li; l := v.l;
+    extra := lv_do_extra_analysis();
+    result := true;
     for bb: li_blocks(li, l) {
         t := block_terminator(bb);
-        if inst_op(t) != .BR && inst_op(t) != .CONDBR return false;
+        if inst_op(t) != .BR && inst_op(t) != .CONDBR { if !extra return false; result = false; }
         if inst_op(t) == .CONDBR && !li_is_loop_invariant(li, l, op(t, 0)) &&
-           !li_is_loop_header(li, get_successor(t, 0)) && !li_is_loop_header(li, get_successor(t, 1)) return false;
+           !li_is_loop_header(li, get_successor(t, 0)) && !li_is_loop_header(li, get_successor(t, 1)) { if !extra return false; result = false; }
     }
-    if !lv_is_uniform_loop_nest(li, l, l) return false;
+    if !lv_is_uniform_loop_nest(li, l, l) { if !extra return false; result = false; }
     // setupOuterLoopInductions: every header phi must be an integer induction
     header := li_header(li, l);
+    ok := true;
     for phi: block_insts(header) {
         if !is_phi(phi) break;
         id: Ind_Desc;
         if ind_is_induction_phi(phi, li, l, v.pse, *id) && id.kind == .INT { lvl_add_induction_phi(v, phi, id); continue; }
-        return false;
+        ok = false;
+        break;
     }
-    return true;
+    if !ok { if !extra return false; result = false; }
+    return result;
 }
 
 // LoopVectorizationLegality::addInductionPhi
@@ -389,13 +397,18 @@ lv_tti_is_legal_nt :: (t: *Tti, ty: Type_Id, align: u64, store: bool) -> bool {
 
 // LoopVectorizationLegality::canVectorizeInstrs
 lvl_can_vectorize_instrs :: (v: *Lvl) -> bool {
-    for bb: li_blocks(v.li, v.l) for i: block_insts(bb) if !lvl_can_vectorize_instr(v, i) return false;
+    extra := lv_do_extra_analysis();
+    result := true;
+    for bb: li_blocks(v.li, v.l) for i: block_insts(bb) {
+        result &= lvl_can_vectorize_instr(v, i);
+        if !extra && !result return false;
+    }
     if v.primary_induction == NONE {
         if v.inductions.count == 0 return false;
         if v.widest_ind_ty == NONE return false;
     }
     if v.primary_induction != NONE && v.widest_ind_ty != vtype(v.primary_induction) v.primary_induction = NONE;
-    return true;
+    return result;
 }
 
 // LoopVectorizationLegality::canVectorizeIndirectUnsafeDependences
@@ -631,37 +644,45 @@ lv_deref_aligned_via_assumption_scev :: (ptr: Value_Id, align: u64, q: Simplify_
 
 // LoopVectorizationLegality::canVectorizeLoopCFG
 lvl_can_vectorize_loop_cfg :: (v: *Lvl, lp: Loop_Id) -> bool {
-    if li_loop_preheader(v.li, lp) == NONE return false;
-    if li_num_back_edges(v.li, lp) != 1 return false;
+    // the Result / DoExtraAnalysis pattern: with remarks enabled every check runs
+    extra := lv_do_extra_analysis();
+    result := true;
+    if li_loop_preheader(v.li, lp) == NONE { if !extra return false; result = false; }
+    if li_num_back_edges(v.li, lp) != 1 { if !extra return false; result = false; }
     latch := li_loop_latch(v.li, lp);
     if latch != NONE {
         t := block_terminator(latch);
-        if inst_op(t) != .BR && inst_op(t) != .CONDBR return false;
+        if inst_op(t) != .BR && inst_op(t) != .CONDBR { if !extra return false; result = false; }
     }
-    return true;
+    return result;
 }
 lvl_can_vectorize_loop_nest_cfg :: (v: *Lvl, lp: Loop_Id) -> bool {
-    if !lvl_can_vectorize_loop_cfg(v, lp) return false;
-    for li_subloops(v.li, lp) if !lvl_can_vectorize_loop_nest_cfg(v, it) return false;
-    return true;
+    extra := lv_do_extra_analysis();
+    result := true;
+    if !lvl_can_vectorize_loop_cfg(v, lp) { if !extra return false; result = false; }
+    for li_subloops(v.li, lp) if !lvl_can_vectorize_loop_nest_cfg(v, it) { if !extra return false; result = false; }
+    return result;
 }
 
 // LoopVectorizationLegality::canVectorize
 lvl_can_vectorize :: (v: *Lvl, use_vplan_native_path: bool) -> bool {
-    if !lvl_can_vectorize_loop_nest_cfg(v, v.l) return false;
+    extra := lv_do_extra_analysis();
+    result := true;
+    if !lvl_can_vectorize_loop_nest_cfg(v, v.l) { if !extra return false; result = false; }
     if !li_is_innermost(v.li, v.l) {
         assert(use_vplan_native_path, "VPlan-native path is not enabled.");
-        return lvl_can_vectorize_outer_loop(v);
+        if !lvl_can_vectorize_outer_loop(v) return false;
+        return result;
     }
-    if li_blocks(v.li, v.l).count != 1 && !lvl_can_vectorize_with_if_convert(v) return false;
-    if !lvl_can_vectorize_instrs(v) return false;
+    if li_blocks(v.li, v.l).count != 1 && !lvl_can_vectorize_with_if_convert(v) { if !extra return false; result = false; }
+    if !lvl_can_vectorize_instrs(v) { if !extra return false; result = false; }
     if sc_is_cnc(pse_get_backedge_taken_count(v.pse)) {
-        if li_exiting_block(v.li, v.l) != NONE return false;
-        if !lvl_is_vectorizable_early_exit_loop(v) return false;
+        if li_exiting_block(v.li, v.l) != NONE { if !extra return false; result = false; }
+        else if !lvl_is_vectorizable_early_exit_loop(v) { if !extra return false; result = false; }
     }
-    if !lvl_can_vectorize_memory(v) return false;
+    if !lvl_can_vectorize_memory(v) { if !extra return false; result = false; }
     if v.uncountable_exit != .NONE && v.laa.stores_to_invariant_addresses.count return false;
-    return true;
+    return result;
 }
 
 // LoopVectorizationLegality::isVectorizableEarlyExitLoop

@@ -207,6 +207,7 @@
 #load "delinearization.jai";
 #load "loop_cache_analysis.jai";
 #load "memory_profile_info.jai";
+#load "opt_remarks.jai";
 #load "pass_expand_memcmp.jai";
 #load "pass_chr.jai";
 #load "pass_ctx_prof_lowering.jai";
