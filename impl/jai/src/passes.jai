@@ -246,7 +246,7 @@ fam_invalidate_one :: (f: Value_Id, k: Analysis_Kind) {
 
 Pass_Level :: enum u8 { MODULE; FUNCTION; LOOP; CGSCC; }
 
-Pass_Kind :: enum u8 {
+Pass_Kind :: enum u16 {
     // structure
     MODULE_PM; FUNCTION_ADAPTOR; LOOP_ADAPTOR; LOOP_PM;
     // analysis utilities (required: they run on optnone functions and don't count for -opt-bisect-limit)
