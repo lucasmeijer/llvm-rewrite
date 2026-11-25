@@ -5575,6 +5575,7 @@ tests/imported/llvm/Transforms/Attributor/callbacks.ll::opt
 tests/imported/llvm/Transforms/Attributor/callbacks.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/callbr.ll::opt
 tests/imported/llvm/Transforms/Attributor/callbr.ll::roundtrip
+tests/imported/llvm/Transforms/Attributor/callgraph.ll::opt
 tests/imported/llvm/Transforms/Attributor/callgraph.ll::roundtrip
 tests/imported/llvm/Transforms/Attributor/cb_liveness_disabled.ll::opt
 tests/imported/llvm/Transforms/Attributor/cb_liveness_disabled.ll::roundtrip
@@ -15583,6 +15584,7 @@ tests/imported/llvm/Transforms/LoopVectorize/interleaved-accesses-uniform-load.l
 tests/imported/llvm/Transforms/LoopVectorize/interleaved-accesses-uniform-load.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/interleaved-accesses.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/interleaved-accesses.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/interleaved-acess-with-remarks.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/interleaved-acess-with-remarks.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/intrinsic.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/intrinsic.ll::roundtrip
