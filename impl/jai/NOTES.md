@@ -2672,7 +2672,8 @@ that prefixes `name<`.
 - IR printers `print` at module / function / loop level (IRPrintingPasses.cpp 78, LoopInfo.cpp printLoop).
   Printing a function is Value::print: ShouldInitializeAllMetadata, which numbers every function's *metadata* but
   not their call-site attribute groups (printer.jai `process_function(md_only)`; the verifier's slot tracker had
-  the same bug and is fixed too).
+  the same bug and is fixed too). That module part is now kept across functions (print_util.jai), so
+  `function(print)` is linear: 1.5 s on SPASS.ll where LLVM's per-call ModuleSlotTracker takes 25 s.
 - print<cfg-sccs> (CFGSCCPrinter.cpp 34), print<domfrontier> (DominanceFrontier.cpp 93 + Impl.h; see below),
   print<module-debuginfo> (ModuleDebugInfoPrinter.cpp 141 + DebugInfoFinder in debug_info_finder.jai),
   print<inline-cost> (InlineCost.cpp annotation writer: InstructionCostDetailMap in inline_cost.jai; the printer's
@@ -2685,13 +2686,16 @@ that prefixes `name<`.
   -codegen-opt-level>0), sjlj-eh-prepare (SjLjEHPrepare.cpp 525), gc-lowering (GCRootLowering.cpp, IR part) with
   collector-metadata (unknown GC strategies are a fatal error like LLVM's), shadow-stack-gc-lowering
   (ShadowStackGCLowering.cpp 426).
+- inline-asm-prepare (InlineAsmPrepare.cpp 268: callbr landing pads, SSAUpdater), cfguard (CFGuard.cpp 329: check
+  and dispatch mechanisms).
 - llc's codegen IR passes as opt passes: x86-partial-reduction (full port, cg_x86_partial_reduction.jai),
-  x86-lower-amx-type / inline-asm-prepare (llc's guards: loud only where LLVM would change the IR).
+  x86-lower-amx-type (llc's guard: loud only where LLVM would change the IR). llc itself still uses
+  cg_misc_passes.jai's guards for dwarf-eh-prepare, gc-lowering and inline-asm-prepare.
 - Passes that are provably no-ops on x86-64 and without a target, registered with the reason in a comment:
   loop-data-prefetch (TTI cache line size 0), loop-idiom-vectorize (needs scalable vectors), complex-deinterleaving
   (X86TargetLowering doesn't support it), x86-lower-amx-intrinsics (-enable-x86-scalar-amx off), rewrite-symbols
-  (no -rewrite-map-file), static-data-annotator (loud with a profile summary), cfguard (loud with the "cfguard"
-  module flag = Enabled), x86-winehstate (loud for funclet personalities with EH pads).
+  (no -rewrite-map-file), static-data-annotator (loud with a profile summary), x86-winehstate (loud for funclet
+  personalities with EH pads).
 - X86PassRegistry.def names fail as "unknown pass name" without an x86 triple, like LLVM (no TargetMachine).
 
 **Landed by other agents while this ran:** print<stack-lifetime><may|must> (extras_b; my copy was dropped),
@@ -2723,8 +2727,8 @@ TableGen'd RuntimeLibcalls.inc: needs a generator from `min-tblgen --gen-runtime
 Transforms/Util/DeclareRuntimeLibcalls), select-optimize (1469; X86 tests CodeGen/X86/select-optimize*.ll),
 typepromotion (1063; real work on x86 only for illegal integer widths), interleaved-load-combine (1373; x86 max
 interleave factor 4), global-merge-func (622 + StableFunctionMap hashing), the full x86-lower-amx-type (1368),
-x86-winehstate (868, i686-windows), cfguard (329) and inline-asm-prepare (268) beyond their guards, and an
-llc-side switch from cg_misc_passes.jai's dwarf-eh-prepare / gc-lowering guards to the new ports.
+x86-winehstate (868, i686-windows) beyond its guard, and an llc-side switch from cg_misc_passes.jai's
+dwarf-eh-prepare / gc-lowering / inline-asm-prepare guards to the new ports.
 
 **Sweeps (whole corpus, 10923 files unless noted; 0 differs unless noted):** print, function(print),
 function(loop(print)), print<cfg-sccs>: 1 differs each, `DebugInfo/Generic/assignment-tracking/parse-and-verify/
