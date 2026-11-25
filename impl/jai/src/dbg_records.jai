@@ -108,13 +108,14 @@ find_dbg_users :: (f: Value_Id, v: Value_Id, out: *[..] u32, values_and_assigns_
         }
     }
     sort_desc(*direct);
-    // arg-list users: the lists in reverse order of tracking, each list's records in reverse order of tracking
+    // arg-list users: the lists in ascending order of tracking (getAllArgListUsers sorts `<`), each list's records
+    // in reverse order of tracking
     for i: 1..via_list.count-1 {
         x := via_list[i]; ax := arglist_stamp(dbgr(x).loc); sx := dbgr_stamp(x);
         j := i - 1;
         while j >= 0 {
             aj := arglist_stamp(dbgr(via_list[j]).loc);
-            if !(aj < ax || (aj == ax && dbgr_stamp(via_list[j]) < sx)) break;
+            if !(aj > ax || (aj == ax && dbgr_stamp(via_list[j]) < sx)) break;
             via_list[j + 1] = via_list[j]; j -= 1;
         }
         via_list[j + 1] = x;

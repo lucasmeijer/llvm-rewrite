@@ -3576,6 +3576,7 @@ tests/imported/llvm/Analysis/ValueTracking/knownbits-shl-ctlz-msb.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownbits-shl-ctlz-msb.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/knownbits-trunc-with-min-max-clamp.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownbits-trunc-with-min-max-clamp.ll::roundtrip
+tests/imported/llvm/Analysis/ValueTracking/knownbits-x86-hadd-hsub.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownbits-x86-hadd-hsub.ll::roundtrip
 tests/imported/llvm/Analysis/ValueTracking/knownzero-addrspacecast.ll::opt
 tests/imported/llvm/Analysis/ValueTracking/knownzero-addrspacecast.ll::roundtrip

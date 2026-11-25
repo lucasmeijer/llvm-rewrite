@@ -130,3 +130,37 @@ the oracle unless noted).
   skips declares and keys on (variable, inlinedAt) without fragment, comparing the list of location values (a
   one-element DIArgList equals the plain value) and the expression. `redundant-dbg-inst-elim` (DCE.cpp) runs it on
   every block and preserves the CFG.
+
+## Assignment tracking (`#dbg_assign`, `!DIAssignID`; lib/IR/DebugInfo.cpp, SROA.cpp, PromoteMemoryToRegister.cpp)
+
+Verified with the imported DebugInfo/Generic/assignment-tracking tests (jai, all 124 checks) and
+`declare-to-assign,<pass>` sweeps on clang `-O2 -g -Xclang -disable-llvm-passes` IR.
+
+- `at::getDVRAssignmentMarkers(I)` = `DIAssignID::getAllDbgVariableRecordUsers()`: sorted by the use-map index of
+  the record's DIAssignID operand, **descending** (most recently tracked first; parsed records: reverse file order).
+  Location, address and ID are three separately tracked operands, each with its own index; `setAssignId` (also via
+  `at::RAUW`, which moves the users in ascending index order) re-tracks. The verifier's
+  visitDIAssignIDMetadata walks the same list (it also contains records using the ID as location or address), and
+  CheckDI returns at the first failure.
+- `BasicBlock::insertDbgRecordAfter(DR, I)` inserts at the **head** of the next instruction's marker, so
+  `createLinkedDVRAssign` for several variables of one store (trackAssignments) leaves them in reverse VarRecord order.
+- `declare-to-assign` (AssignmentTrackingPass, a function pass): skipped for optnone; only `#dbg_declare`s with an
+  empty expression on a static, non-scalable alloca (through stripPointerCasts); every alloca/store/memcpy/memmove/
+  memset whose destination strips (constant offsets, non-inbounds allowed, offset not negative) to such an alloca gets
+  a DIAssignID and one `#dbg_assign` per variable (value: stored value; `i1 poison` for alloca/memtransfer, `i8 0`
+  only for a zero memset); a fragment unless the store covers the whole variable; the declares are deleted. Sets the
+  module flag `!{i32 7, !"debug-info-assignment-tracking", i1 true}` only if something changed.
+- SROA: `migrateDebugInfo` steals the markers when the store is not split (new DIAssignID, address = new pointer,
+  value op 0 replaced) and otherwise creates new ones placed *before each old marker*; `RemoveRedundantDbgInstrs` on
+  every block at the end when the module flag is set. MigrateOne for an alloca's markers puts the fragment in the
+  value expression and the offset in the address expression and gives the new alloca a DIAssignID.
+- mem2reg: a deleted store's markers become `#dbg_value`s right before them (the markers are erased at the very end,
+  cleanUpDbgAssigns); variables of the alloca's markers without a marker on that store get
+  ConvertDebugDeclareToDebugValue; new phis get them too (updateForNewPhi).
+- DSE shortenAssignment: an unlinked clone (one fresh DIAssignID shared by all clones of one call) with the dead
+  fragment and a poison address after every overlapping marker; when the intersection cannot be computed, or covers
+  the whole variable, the marker itself loses its link and address.
+- Inliner: callee stores into caller allocas passed as arguments become assignments of the caller's variables
+  (trackInlinedStores, markers without inlinedAt only), then all inlined IDs are made unique (fixupAssignments).
+- ADCE keeps a `#dbg_assign` of a dead scope if an instruction carries its ID.
+- `mergeDIAssignID`: the first ID among the sources then the instruction itself wins; the others are RAUW'd.

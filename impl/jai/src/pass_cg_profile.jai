@@ -1,7 +1,7 @@
 // CGProfile: port of llvm/lib/Transforms/Instrumentation/CGProfile.cpp (addModuleFlags, runCGProfilePass).
-// Indirect calls with value-profile data fail loudly (InstrProfSymtab is not ported).
+// Indirect calls: their value-profile targets through InstrProfSymtab (icp_symtab_create, pass_pgo_icall_prom.jai).
 
-cg_profile_run :: () -> Preserved {
+cg_profile_run :: (in_lto: bool) -> Preserved {
     keys_a: [..] Value_Id; keys_a.allocator = temp;   // MapVector<pair<Function*, Function*>, uint64_t>
     keys_b: [..] Value_Id; keys_b.allocator = temp;
     counts: [..] u64; counts.allocator = temp;
@@ -17,6 +17,8 @@ cg_profile_run :: () -> Preserved {
         }
         array_add(*keys_a, f); array_add(*keys_b, called); array_add(*counts, n);
     }
+    symtab: [..] Icp_Symtab_Entry;
+    symtab_made := false;
     for f: ir.m_functions {
         if is_declaration(f) continue;
         has, _ := function_entry_count(f);
@@ -29,9 +31,9 @@ cg_profile_run :: () -> Preserved {
             for i: block_insts(bb) {
                 if !is_call_base(i) continue;
                 if call_is_indirect(i) {
-                    prof := get_metadata(i, md_fixed("prof"));
-                    if prof != NONE && md_nops(prof) > 0 && md_str_of(md_op(prof, 0)) == "VP"
-                        fatal("cg-profile: value-profile data of indirect calls is not supported yet");
+                    vds, _, _ := vp_get_value_prof_data(i, IPVK_INDIRECT_CALL_TARGET, 8, false);
+                    if vds.count && !symtab_made { symtab = icp_symtab_create(in_lto); symtab_made = true; }
+                    for vd: vds update(f, icp_symtab_get_function(symtab, vd.value), vd.count);
                     continue;
                 }
                 update(f, call_called_function(i), bb_count);

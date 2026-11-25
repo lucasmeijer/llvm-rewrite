@@ -694,7 +694,7 @@ build_module_optimization_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     pb_add(mpm, last, "globaldce");
     pb_add(mpm, last, "constmerge");
     if pto.merge_functions pb_add(mpm, last, "mergefunc");
-    if pto.call_graph_profile && !is_lto_pre_link() pb_add(mpm, last, "cg-profile");   // CGProfilePass(InLTOPostLink): only the symtab of value profiles differs
+    if pto.call_graph_profile && !is_lto_pre_link() pb_add(mpm, last, ifx is_lto_post_link() then "cg-profile<in-lto-post-link>" else "cg-profile");
     if !is_lto_pre_link() pb_add(mpm, last, "rel-lookup-table-converter");
     if pto.devirtualize_speculatively && pb_phase == .NONE pb_unsupported("wholeprogramdevirt (-enable-devirtualize-speculatively)");
     pb_add(mpm, last, "lower-comment-string");
@@ -961,7 +961,7 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
     pb_add(mpm, *last, "globaldce<vfe-linkage-unit-visibility>");
     if pto.merge_functions pb_add(mpm, *last, "mergefunc");
     pb_add(mpm, *last, "rel-lookup-table-converter");
-    if pto.call_graph_profile pb_add(mpm, *last, "cg-profile");
+    if pto.call_graph_profile pb_add(mpm, *last, "cg-profile<in-lto-post-link>");
     pb_add(mpm, *last, "coro-cleanup");
     pb_add(mpm, *last, "alloc-token");
     pb_add(mpm, *last, "function(annotation-remarks)");

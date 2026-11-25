@@ -664,6 +664,19 @@ replace_all_uses_with :: (old: Value_Id, new: Value_Id) {
         }
         use_set(u, new);
     }
+    // Value::replaceAllUsesWith also does ValueAsMetadata::handleRAUW (isUsedByMetadata). Not ported here (the
+    // callers handle it): a constant becoming a local value, and a local moving to another function (both drop the
+    // metadata, replaceAllUsesWith(nullptr)).
+    if !is_constant_kind(vkind(old)) {
+        fo := rauw_local_fn(old); fn := rauw_local_fn(new);
+        if !(fo != NONE && fn != NONE && fo != fn) md_value_replace(old, new);
+    }
+}
+rauw_local_fn :: (v: Value_Id) -> Value_Id {
+    k := vkind(v);
+    if k == .INST { p := inst(v).parent; if p == NONE return NONE; return block(p).parent; }
+    if k == .ARGUMENT return arg_parent(v);
+    return NONE;
 }
 
 // ---------------------------------------------------------------- names / symbol tables
@@ -828,6 +841,8 @@ inst_unlink :: (i: Value_Id) {
 
 erase_inst :: (i: Value_Id) {
     assert(!has_uses(i), "erasing an instruction that still has uses");
+    // ~Value: ValueAsMetadata::handleDeletion, the records that refer to it refer to poison
+    if vtype(i) != ir.t_void md_value_deleted(i);
     scev_note_erase(i);   // ScalarEvolution's value handles (scev_update.jai)
     vh_note_erase(i);     // WeakTrackingVH / TrackingVH (value_handles.jai)
     cg_vh_note_erase(i);  // CGSCCUpdateResult::IndirectVHs (cgscc_pm.jai)

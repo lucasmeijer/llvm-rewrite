@@ -916,12 +916,15 @@ known_bits_call :: (i: Value_Id, de: APInt, known_in: Known_Bits, q: Simplify_Qu
             known.zero = ap_copy(known.zero);
             ap_set_bits_from(*known.zero, 32);
         case IID_X86_SSSE3_PHADD_D_128; #through; case IID_X86_SSSE3_PHADD_W_128; #through;
-        case IID_X86_AVX2_PHADD_D; #through; case IID_X86_AVX2_PHADD_W; #through;
-        case IID_X86_SSSE3_PHADD_SW_128; #through; case IID_X86_AVX2_PHADD_SW; #through;
+        case IID_X86_AVX2_PHADD_D; #through; case IID_X86_AVX2_PHADD_W;
+            known = kb_horizontal_op(i, de, q, depth, 0);
+        case IID_X86_SSSE3_PHADD_SW_128; #through; case IID_X86_AVX2_PHADD_SW;
+            known = kb_horizontal_op(i, de, q, depth, 1);
         case IID_X86_SSSE3_PHSUB_D_128; #through; case IID_X86_SSSE3_PHSUB_W_128; #through;
-        case IID_X86_AVX2_PHSUB_D; #through; case IID_X86_AVX2_PHSUB_W; #through;
+        case IID_X86_AVX2_PHSUB_D; #through; case IID_X86_AVX2_PHSUB_W;
+            known = kb_horizontal_op(i, de, q, depth, 2);
         case IID_X86_SSSE3_PHSUB_SW_128; #through; case IID_X86_AVX2_PHSUB_SW;
-            fatal("known bits of x86 horizontal add/sub intrinsics are not supported yet");
+            known = kb_horizontal_op(i, de, q, depth, 3);
         case IID_VSCALE;
             if inst(i).parent == NONE return known;
             known = cr_to_known_bits(get_vscale_range(inst_fn(i), bits));
@@ -1920,4 +1923,40 @@ strip_null_test :: (v: Value_Id) -> Value_Id {
         if ap_popcount(c2) == ap_zext_value(c1) return x;
     }
     return NONE;
+}
+
+
+// getHorizDemandedEltsForFirstOperand (llvm/lib/Analysis/VectorUtils.cpp)
+horiz_demanded_elts_for_first_operand :: (vector_bits: u64, de: APInt) -> (APInt, APInt) {
+    num_lanes := cast(s64) (vector_bits / 128);
+    n := cast(s64) de.bits;
+    per_lane := n / num_lanes;
+    half := per_lane / 2;
+    lhs := ap_zero(de.bits); rhs := ap_zero(de.bits);
+    for idx: 0..n-1 {
+        if !ap_get_bit(de, cast(u32) idx) continue;
+        lane := (idx / per_lane) * per_lane;
+        local := idx % per_lane;
+        if local < half ap_set_bit(*lhs, cast(u32) (lane + 2 * local));
+        else ap_set_bit(*rhs, cast(u32) (lane + 2 * (local - half)));
+    }
+    return lhs, rhs;
+}
+
+// computeKnownBitsForHorizontalOperation; op: 0 add, 1 sadd_sat, 2 sub, 3 ssub_sat
+kb_horizontal_op :: (i: Value_Id, de: APInt, q: Simplify_Query, depth: u32, op_kind: s64) -> Known_Bits {
+    lhs, rhs := horiz_demanded_elts_for_first_operand(dl_type_size_bits(vtype(i)), de);
+    single :: (v: Value_Id, d: APInt, q: Simplify_Query, depth: u32, op_kind: s64) -> Known_Bits {
+        a := known_bits_de(v, d, q, depth + 1);
+        b := known_bits_de(v, ap_shl(d, 1), q, depth + 1);
+        if op_kind == {
+            case 0; return kb_add(a, b);
+            case 1; return kb_sadd_sat(a, b);
+            case 2; return kb_sub(a, b);
+        }
+        return kb_ssub_sat(a, b);
+    }
+    if ap_is_zero(rhs) return single(op(i, 0), lhs, q, depth, op_kind);
+    if ap_is_zero(lhs) return single(op(i, 1), rhs, q, depth, op_kind);
+    return kb_intersect(single(op(i, 0), lhs, q, depth, op_kind), single(op(i, 1), rhs, q, depth, op_kind));
 }

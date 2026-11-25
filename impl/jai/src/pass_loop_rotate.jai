@@ -210,8 +210,9 @@ analyze_basic_block :: (m: *Code_Metrics, t: *Tti, b: Value_Id, eph: *Table(Valu
                     m.num_inline_candidates += 1;
             }
         }
-        if type_kind(vtype(i)) == .TOKEN {
-            // isUsedOutsideOfBlock (convergence-control tokens are not special-cased here)
+        is_cci := is_call_base(i) && begins_with(call_intrinsic(i), "llvm.experimental.convergence.");   // ConvergenceControlInst
+        if type_kind(vtype(i)) == .TOKEN && !is_cci {
+            // isUsedOutsideOfBlock
             u := ir.v_first_use[i];
             while u != NONE {
                 user := ir.u_user[u];
@@ -223,10 +224,8 @@ analyze_basic_block :: (m: *Code_Metrics, t: *Tti, b: Value_Id, eph: *Table(Valu
         }
         if is_call_base(i) {
             if call_has_fn_attr(i, .NoDuplicate) m.not_duplicatable = true;
-            if call_has_fn_attr(i, .Convergent) {
-                if call_num_bundles(i) > 0 fatal("loop-rotate: convergence control tokens are not implemented yet");
-                m.convergent = true;
-            }
+            // any convergence kind (controlled, extended-loop or uncontrolled) stops the rotation
+            if call_has_fn_attr(i, .Convergent) m.convergent = true;
         }
         m.num_insts = cost_add(m.num_insts, tti_instruction_cost(t, i, TCK_CODE_SIZE));
     }

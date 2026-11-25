@@ -80,7 +80,7 @@ ir_failure :: (r: string) -> Inline_Result { return .{false, r}; }
 
 // BasicBlock::replaceAllUsesWith(New) (Value::doRAUW for a block: uses, then the successors' phis)
 block_rauw :: (old: Value_Id, new: Value_Id) {
-    replace_all_uses_with(old, new);
+    rauw_with_metadata(old, new);
     block_replace_successors_phi_uses_with(old, old, new);
 }
 // BasicBlock::hasAddressTaken: a blockaddress uses the block
@@ -150,7 +150,7 @@ pfc_clone_block :: (p: *Pruning_Cloner, bb: Value_Id, starting: Value_Id, to_clo
             v := cfo_instruction(nw);
             if v != NONE && is_instruction_trivially_dead(nw) {
                 vmap_set(p.vm, ii, v);
-                erase_inst(nw);
+                erase_inst_with_metadata(nw);
                 continue;
             }
         }
@@ -331,9 +331,9 @@ clone_and_prune_function_into :: (new_fn: Value_Id, old_fn: Value_Id, vm: *Value
             while x != NONE && inst_op(x) == .PHI {
                 nxt := inst(x).next;
                 nv := const_poison(vtype(x));
-                replace_all_uses_with(x, nv);
+                rauw_with_metadata(x, nv);
                 vmap_set(vm, oi, nv);
-                erase_inst(x);
+                erase_inst_with_metadata(x);
                 oi = inst(oi).next;
                 x = nxt;
             }
@@ -352,8 +352,9 @@ clone_and_prune_function_into :: (new_fn: Value_Id, old_fn: Value_Id, vm: *Value
         if ni == NONE || vkind(ni) != .INST continue;
         v := simplify_instruction(ni, q);
         if v != NONE {
-            replace_all_uses_with(ni, v);
-            if is_instruction_trivially_dead(ni) erase_inst(ni);
+            rauw_with_metadata(ni, v);
+            // VMap's WeakTrackingVH follows the RAUW: OrigV now maps to V
+            if is_instruction_trivially_dead(ni) { erase_inst_with_metadata(ni); vmap_set(vm, i, v); }
             else vmap_set(vm, i, ni);
         }
     }
@@ -396,7 +397,7 @@ clone_and_prune_function_into :: (new_fn: Value_Id, old_fn: Value_Id, vm: *Value
         // BI->eraseFromParent(): its records become the block's trailing records, which the splice at end()
         // then puts in front of Dest's first instruction
         trailing := records_take(t);
-        erase_inst(t);
+        erase_inst_with_metadata(t);
         block_rauw(dest, i);
         // I->splice(I->end(), Dest)
         dfirst := block_first(dest);
@@ -459,14 +460,14 @@ lpi_get_inner_resume_dest :: (l: *Lpad_Info) -> Value_Id {
         inner := create_phi(vtype(outer), 2);
         inst_insert_before(inner, insert_point);
         set_name(inner, tconcat(vname(outer), ".lpad-body"));
-        replace_all_uses_with(outer, inner);
+        rauw_with_metadata(outer, inner);
         phi_add_incoming(inner, outer, l.outer_resume_dest);
         x = inst(x).next;
     }
     l.inner_eh_values_phi = create_phi(vtype(l.caller_lpad), 2);
     inst_insert_before(l.inner_eh_values_phi, insert_point);
     set_name(l.inner_eh_values_phi, "eh.lpad-body");
-    replace_all_uses_with(l.caller_lpad, l.inner_eh_values_phi);
+    rauw_with_metadata(l.caller_lpad, l.inner_eh_values_phi);
     phi_add_incoming(l.inner_eh_values_phi, l.caller_lpad, l.outer_resume_dest);
     return l.inner_resume_dest;
 }
@@ -479,7 +480,7 @@ lpi_forward_resume :: (l: *Lpad_Info, ri: Value_Id) {
     copy_debug_loc(bi, ri);
     lpi_add_incoming_phi_values_for_into(l, src, dest);
     phi_add_incoming(l.inner_eh_values_phi, op(ri, 0), src);
-    erase_inst(ri);
+    erase_inst_with_metadata(ri);
 }
 
 // getParentPad
@@ -621,7 +622,7 @@ catchswitch_handlers :: (cs: Value_Id) -> [..] Value_Id {
 change_to_invoke_and_split_basic_block :: (ci: Value_Id, unwind_edge: Value_Id) -> Value_Id {
     bb := inst_block(ci);
     split := split_basic_block(bb, ci, tconcat(vname(ci), ".noexc"));
-    erase_inst(block_last(bb));
+    erase_inst_with_metadata(block_last(bb));
     n := nops(ci);   // [args, bundle inputs, callee]
     ii := new_inst(.INVOKE, vtype(ci), n + 2);
     for k: 0..cast(s64) n - 2 set_op(ii, cast(u32) k, op(ci, cast(u32) k));
@@ -735,8 +736,8 @@ handle_inlined_eh_pad :: (ii: Value_Id, first_new_block: Value_Id, info: *Cloned
             cleanup_pad := op(t, 0);
             ncr := new_inst(.CLEANUPRET, ir.t_void, 2);
             set_op(ncr, 0, cleanup_pad); set_op(ncr, 1, unwind_dest);
-            inst_insert_before(ncr, t);
-            erase_inst(t);
+            insert_at_position(ncr, inst_block(t), t, false);
+            erase_inst_with_metadata(t);
             update_phis(unwind_dest, vals, b);
             um_set(*memo, cleanup_pad, token_none());
         }
@@ -756,7 +757,7 @@ handle_inlined_eh_pad :: (ii: Value_Id, first_new_block: Value_Id, info: *Cloned
                 inst(ncs).flags |= F_HAS_UNWIND;
                 set_op(ncs, 0, pp); set_op(ncs, 1, unwind_dest);
                 for h, hk: handlers set_op(ncs, cast(u32)(2 + hk), h);
-                inst_insert_before(ncs, i);
+                insert_at_position(ncs, inst_block(i), i, false);
                 if vname(i).count set_name(ncs, vname(i));
                 um_set(*memo, ncs, token);
                 replacement = ncs;
@@ -764,8 +765,8 @@ handle_inlined_eh_pad :: (ii: Value_Id, first_new_block: Value_Id, info: *Cloned
         }
         if replacement != NONE {
             take_name(replacement, i);
-            replace_all_uses_with(i, replacement);
-            erase_inst(i);
+            rauw_with_metadata(i, replacement);
+            erase_inst_with_metadata(i);
             update_phis(unwind_dest, vals, b);
         }
     }
@@ -866,10 +867,10 @@ propagate_operand_bundles :: (bb: Value_Id, eh_pad: Value_Id) {
         cf := strip_pointer_casts(call_callee(i));
         if vkind(cf) == .FUNCTION && glob(cf).intrinsic && call_does_not_throw(i) && !begins_with(vname(cf), "llvm.objc.") continue;
         ni := call_add_bundle(i, "funclet", .[eh_pad]);
-        inst_insert_before(ni, i);
+        insert_at_position(ni, inst_block(i), i, false);   // CallBase::Create(.., I->getIterator()) adopts the records
         take_name(ni, i);
-        replace_all_uses_with(i, ni);
-        erase_inst(i);
+        rauw_with_metadata(i, ni);
+        erase_inst_with_metadata(i);
     }
 }
 // CallBase::Create(CB, Bundles + {tag, inputs}) (unlinked)
@@ -1810,11 +1811,11 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
                 ics := vmap_lookup(*info.bundle_calls, orig);
                 if ics == NONE || vkind(ics) != .INST || !is_call_base(ics) continue;
                 ni := call_with_merged_deopt(ics, cb, pbs, pbe);
-                inst_insert_before(ni, ics);
+                insert_at_position(ni, inst_block(ics), ics, false);   // CallBase::Create(.., ICS->getIterator()) adopts the records
                 if vname(ics).count set_name(ni, vname(ics));   // CallBase::Create(ICS, OpDefs, ICS) takes ICS's name
-                replace_all_uses_with(ics, ni);
+                rauw_with_metadata(ics, ni);
                 vmap_set(*info.bundle_calls, orig, NONE);
-                erase_inst(ics);
+                erase_inst_with_metadata(ics);
             }
         }
         fixup_line_numbers(caller, first_new_block, cb, fn_subprogram(called) != NONE);
@@ -1854,7 +1855,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
     }
     if ifi.convergence_control_token != NONE {
         ic := get_convergence_entry(first_new_block);
-        if ic != NONE { replace_all_uses_with(ic, ifi.convergence_control_token); erase_inst(ic); }
+        if ic != NONE { rauw_with_metadata(ic, ifi.convergence_control_token); erase_inst_with_metadata(ic); }
     }
     {
         entry := fn_entry(caller);
@@ -1920,7 +1921,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
                     inst(nci).attrs = new_attrs;
                     inst(nci).cc = inst(ci).cc;
                     rauw_with_metadata(ci, nci);
-                    erase_inst(ci);
+                    erase_inst_with_metadata(ci);
                     ci = nci;
                 }
                 cf := call_called_function(ci);
@@ -2000,7 +2001,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
                 cconv := glob(call_called_function(deopt_call)).cc;
                 glob(new_deopt).cc = cconv;
                 cur_bb := inst_block(ri);
-                erase_inst(ri);
+                erase_inst_with_metadata(ri);
                 // CreateCall(NewDeoptIntrinsic, args, bundles) at the end of the block (no debug location)
                 nc := ic_clone_inst(deopt_call);
                 clear_all_metadata(nc);
@@ -2009,7 +2010,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
                 inst(nc).flags &= ~((cast(u32) 3) << TAIL_SHIFT);
                 set_op(nc, nops(nc) - 1, new_deopt);
                 deopt_attrs := inst(deopt_call).attrs;
-                erase_inst(deopt_call);
+                erase_inst_with_metadata(deopt_call);
                 block_append_inst(cur_bb, nc);
                 inst(nc).cc = cconv;
                 inst(nc).attrs = deopt_attrs;
@@ -2060,17 +2061,17 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
         block_erase_from_parent(glob(caller).last_block);
         if inst_op(cb) == .INVOKE {
             nbr := create_br(invoke_normal_dest(cb));
-            inst_insert_before(nbr, cb);
+            insert_at_position(nbr, orig_bb, cb, false);   // UncondBrInst::Create(.., CB.getIterator()) adopts CB's records
             copy_debug_loc(nbr, returns[0]);
         }
         if has_uses(cb) {
             r := returns[0];
             rv := op(r, 0);
-            if rv == cb replace_all_uses_with(cb, const_poison(vtype(cb)));
+            if rv == cb rauw_with_metadata(cb, const_poison(vtype(cb)));
             else rauw_with_metadata(cb, rv);
         }
         erase_inst_with_metadata(cb);
-        erase_inst(returns[0]);
+        erase_inst_with_metadata(returns[0]);
         if merge_attributes merge_attributes_for_inlining(caller, called);
         return;
     }
@@ -2078,7 +2079,7 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
     created_br: Value_Id = NONE;
     if inst_op(cb) == .INVOKE {
         created_br = create_br(invoke_normal_dest(cb));
-        inst_insert_before(created_br, cb);
+        insert_at_position(created_br, orig_bb, cb, false);   // adopts CB's records
         after_call_bb = split_basic_block(orig_bb, created_br, tconcat(vname(called), ".exit"));
     } else {
         after_call_bb = split_basic_block(orig_bb, cb, tconcat(vname(called), ".exit"));
@@ -2104,13 +2105,13 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
             inst_insert_before_adopt(bi, ri);
             loc = get_metadata(ri, 0);
             set_metadata(bi, 0, loc);
-            erase_inst(ri);
+            erase_inst_with_metadata(ri);
         }
         if created_br != NONE set_metadata(created_br, 0, loc);
     } else if returns.count {
         if has_uses(cb) {
             rv := op(returns[0], 0);
-            if rv == cb replace_all_uses_with(cb, const_poison(vtype(cb)));
+            if rv == cb rauw_with_metadata(cb, const_poison(vtype(cb)));
             else rauw_with_metadata(cb, rv);
         }
         return_bb := inst_block(returns[0]);
@@ -2118,11 +2119,11 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
         // AfterCallBB->splice(AfterCallBB->begin(), ReturnBB)
         block_splice_all_at_begin(after_call_bb, return_bb);
         if created_br != NONE set_metadata(created_br, 0, get_metadata(returns[0], 0));
-        erase_inst(returns[0]);
+        erase_inst_with_metadata(returns[0]);
         block_erase_from_parent(return_bb);
     } else if has_uses(cb) {
         if created_br != NONE set_metadata(created_br, 0, NONE);
-        replace_all_uses_with(cb, const_poison(vtype(cb)));
+        rauw_with_metadata(cb, const_poison(vtype(cb)));
     }
     erase_inst_with_metadata(cb);
     if inlined_must_tail && block_num_predecessors(after_call_bb) == 0 block_erase_from_parent(after_call_bb);
@@ -2130,13 +2131,13 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
     block_rauw(callee_entry, orig_bb);
     // OrigBB->splice(Br->getIterator(), CalleeEntry)
     block_splice_all_before(orig_bb, br, callee_entry);
-    erase_inst(br);
+    erase_inst_with_metadata(br);
     block_erase_from_parent(callee_entry);
     if phi != NONE {
         q: Simplify_Query; q.have_tli = false;
         if ifi.use_assumption_cache q.ac = get_assumption_cache(caller);
         v := simplify_instruction(phi, q);
-        if v != NONE { rauw_with_metadata(phi, v); erase_inst(phi); }
+        if v != NONE { rauw_with_metadata(phi, v); erase_inst_with_metadata(phi); }
     }
     if merge_attributes merge_attributes_for_inlining(caller, called);
 }

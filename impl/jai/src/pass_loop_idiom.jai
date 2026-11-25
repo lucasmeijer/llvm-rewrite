@@ -262,7 +262,17 @@ lir_process_loop_stores :: (c: *Lir, sl: [] Value_Id, be_count: Scev_Id, for_mem
         is_neg := ap_eq(ss, ap_neg(stride));
         idx_ty := dl_index_type(vtype(ptr));
         size_scev := sc_get_constant(ap_from_u64(type_int_width(idx_ty), store_size));
-        if adjacent.count > 8 fatal("loop-idiom: a chain of more than 8 adjacent stores (SmallPtrSet iteration order) is not supported yet");
+        if adjacent.count > 8 {
+            // A SmallPtrSet of more than 8 iterates in pointer order. processLoopStridedStore only uses the order to
+            // merge the AA tags (order dependent for alias.scope / noalias lists) and to delete the stores (the result
+            // does not depend on it), so equal tags are fine.
+            t0 := get_aa_metadata(head);
+            for adjacent {
+                t := get_aa_metadata(it);
+                if t.tbaa != t0.tbaa || t.tbaa_struct != t0.tbaa_struct || t.scope != t0.scope || t.noalias != t0.noalias || t.noalias_as != t0.noalias_as
+                    fatal("loop-idiom: a chain of more than 8 adjacent stores with different AA metadata (SmallPtrSet iteration order) is not supported yet");
+            }
+        }
         if lir_process_loop_strided_store(c, ptr, size_scev, inst(head).align, stored, head, adjacent, ev, be_count, is_neg) {
             for adjacent table_set(*transformed, it, true);
             changed = true;

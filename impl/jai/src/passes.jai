@@ -1561,7 +1561,7 @@ run_module_pm :: (n: s32) {
             case .RECOMPUTE_GLOBALSAA; if should_run_pass(node, NONE) recompute_globalsaa_run();
             case .LOWER_COMMENT_STRING; if should_run_pass(node, NONE) mam_invalidate(lower_comment_string_run());
             case .REL_LOOKUP_TABLE_CONVERTER; if should_run_pass(node, NONE) mam_invalidate(rel_lookup_table_converter_run());
-            case .CG_PROFILE; if should_run_pass(node, NONE) mam_invalidate(cg_profile_run());
+            case .CG_PROFILE; if should_run_pass(node, NONE) mam_invalidate(cg_profile_run(node.name == "cg-profile<in-lto-post-link>"));
             case .GLOBAL_MERGE; if should_run_pass(node, NONE) mam_invalidate(global_merge_run(node.name));
             case .ASAN; if should_run_pass(node, NONE) mam_invalidate(asan_run(node.name));
             case .MSAN; if should_run_pass(node, NONE) mam_invalidate(msan_run(node.name));

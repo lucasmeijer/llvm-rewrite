@@ -27,7 +27,7 @@ lib/Transforms/Utils/SimplifyCFG.cpp 0.97
 lib/Analysis/InstructionSimplify.cpp 0.95
 lib/IR/AsmWriter.cpp 0.8  # manual: own printer structure; no summary-index printing (~17%) (heuristic 0.40)
 lib/Support/APFloat.cpp 0.55  # + DoubleAPFloat (apfloat_dd.jai); not hex string output, APFloat::Storage plumbing, E8M0/FP8/FP6/FP4 formats
-lib/Transforms/Scalar/SROA.cpp 0.82
+lib/Transforms/Scalar/SROA.cpp 0.88  # + assignment tracking (migrateDebugInfo, MigrateOne/insertNewDbgInst for dbg_assign)
 lib/Analysis/ConstantFolding.cpp 0.9
 lib/Transforms/InstCombine/InstCombineAndOrXor.cpp 1
 lib/Transforms/InstCombine/InstCombineSelect.cpp 0.95
@@ -40,7 +40,7 @@ lib/Transforms/InstCombine/InstCombineCasts.cpp 0.95
 lib/Support/APInt.cpp 0.5
 lib/IR/DebugInfoMetadata.cpp 0.45
 lib/Transforms/Utils/BuildLibCalls.cpp 0.95
-lib/IR/DebugInfo.cpp 0.2  # + DebugInfoFinder (pass_strip_dead_debug_info.jai)
+lib/IR/DebugInfo.cpp 0.35  # + DebugInfoFinder (pass_strip_dead_debug_info.jai), at:: assignment-tracking helpers, trackAssignments, AssignmentTrackingPass, mergeDIAssignID (assignment_tracking.jai)
 lib/Analysis/MemorySSA.cpp 0.9  # no loop-scoped MemorySSA(Loop&), dot printer, legacy pass
 lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95
 lib/IR/ConstantRange.cpp 0.8
@@ -62,7 +62,7 @@ lib/Analysis/MemorySSAUpdater.cpp 0.97  # all (updateForClonedLoop / updateExitB
 lib/Support/KnownBits.cpp 0.85
 lib/Analysis/LoopInfo.cpp 0.7
 lib/IR/DataLayout.cpp 0.3
-lib/Transforms/Utils/PromoteMemoryToRegister.cpp 0.8
+lib/Transforms/Utils/PromoteMemoryToRegister.cpp 0.9  # + AssignmentTrackingInfo
 lib/Analysis/GlobalsModRef.cpp 0.85
 lib/IR/BasicBlock.cpp 0.5
 lib/Analysis/AliasAnalysis.cpp 0.95
@@ -73,7 +73,7 @@ lib/Transforms/Utils/LoopSimplify.cpp 0.9
 lib/Analysis/TypeBasedAliasAnalysis.cpp 0.8
 lib/Analysis/DemandedBits.cpp 0.95
 lib/Transforms/InstCombine/InstCombineNegator.cpp 0.65
-lib/Transforms/Scalar/ADCE.cpp 0.85
+lib/Transforms/Scalar/ADCE.cpp 0.87
 lib/Transforms/Utils/SSAUpdater.cpp 0.75
 lib/Analysis/MemoryLocation.cpp 1
 lib/Transforms/Utils/LCSSA.cpp 0.75
@@ -122,8 +122,8 @@ lib/Target/X86/X86ISelLowering.cpp 0.03   # jai_simplifycfg: the X86TargetLoweri
 lib/IR/Attributes.cpp 0.5
 lib/IR/MemoryModelRelaxationAnnotations.cpp 0.5
 lib/Transforms/InstCombine/InstCombineAtomicRMW.cpp 1
-lib/Transforms/Scalar/DeadStoreElimination.cpp 0.97  # all but shortenAssignment's dbg.assign updates (assignment tracking does not parse)
-lib/Transforms/Scalar/MemCpyOptimizer.cpp 0.98  # all but DIAssignID merging/copying (assignment tracking does not parse)
+lib/Transforms/Scalar/DeadStoreElimination.cpp 0.99  # all but -debug-counter
+lib/Transforms/Scalar/MemCpyOptimizer.cpp 1
 lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.5  # salvageKnowledge / buildAssumeFromInst (with or without an AssumptionCache, DT = null); no assume-simplify / assume-builder passes
 lib/Transforms/Scalar/GVN.cpp 0.95  # jai_gvn: all of GVNPass incl. the MemorySSA load analysis; no optimization remarks (findMayClobberedPtrAccess/reportMayClobberedLoad/reportLoadElim), no legacy pass
 lib/Analysis/MemoryDependenceAnalysis.cpp 0.95  # no debug-only verifyRemoved/AssertSorted, no legacy wrapper; invalidate() n/a (per-run result)
@@ -140,7 +140,7 @@ lib/Analysis/BlockFrequencyInfoImpl.cpp 0.85  # no iterative inference (-use-ite
 lib/Analysis/BlockFrequencyInfo.cpp 0.4  # calculate/getBlockFreq/setBlockFreq/print; no views, profile-count queries, legacy pass
 lib/Support/ScaledNumber.cpp 0.85  # toStringAPFloat (tiny numbers) fails loudly
 lib/Transforms/Scalar/ConstraintElimination.cpp 0.92  # all but generateReproducer (-constraint-elimination-dump-reproducers) and debug dumps
-lib/Transforms/AggressiveInstCombine/AggressiveInstCombine.cpp 0.98  # all but mergeDIAssignID (fails loudly)
+lib/Transforms/AggressiveInstCombine/AggressiveInstCombine.cpp 1
 lib/Analysis/LoopAccessAnalysis.cpp 0.85  # no sortPtrAccesses, getStrideFromPointer users outside LAA, LoopAccessInfoManager::clear/invalidate (one LAI per printer run), remarks only as Report text
 lib/Analysis/HashRecognize.cpp 0.85  # no print<hash-recognize> printer
 lib/Transforms/Utils/LoopVersioning.cpp 0.95  # + LoopVersioningPass (pass_loop_versioning.jai); no legacy pass
@@ -165,7 +165,7 @@ lib/Analysis/InlineAdvisor.cpp 0.5  # default advisor, shouldBeDeferred, inline-
 lib/Analysis/InlineOrder.cpp 0.7  # manual: size/cost/cost-benefit priorities with the libstdc++ heap order (heuristic 0.55); not ML priority / plugin
 lib/Transforms/IPO/Inliner.cpp 0.85
 lib/Transforms/IPO/AlwaysInliner.cpp 0.95
-lib/Transforms/Utils/InlineFunction.cpp 0.95  # convergence edge cases, contextual profiles (fail loudly)
+lib/Transforms/Utils/InlineFunction.cpp 0.96  # + trackInlinedStores/fixupAssignments; convergence edge cases, contextual profiles (fail loudly)
 lib/Transforms/IPO/ModuleInliner.cpp 0.9  # manual: ModuleInlinerPass::run as module_inliner_run (heuristic 0.03: renamed)
 lib/Analysis/ProfileSummaryInfo.cpp 0.85  # not the legacy wrapper
 lib/IR/ProfileSummary.cpp 0.6  # getFromMD, getMD (sp_summary_md); no printSummary

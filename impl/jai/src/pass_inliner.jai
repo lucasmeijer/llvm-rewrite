@@ -228,8 +228,8 @@ inliner_run :: (node: *Pass_Node, initial_c: s32, ur: *Cgscc_Ur) -> Preserved {
                         if is_null_value(cst) cst = const_null_value(vtype(li));
                         else continue;
                     }
-                    replace_all_uses_with(li, cst);
-                    erase_inst(li);
+                    rauw_with_metadata(li, cst);
+                    erase_inst_with_metadata(li);
                 }
             }
             // InlineAdvisor::getAdvice

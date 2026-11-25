@@ -260,14 +260,19 @@ print<da> 10806/10807 (the 1 differs is stderr interleaving of a `+mpx` warning,
   `dbg_records.jai` (record owner/erase/insert, findDbgUsers order, RAUW/deletion of ValueAsMetadata,
   DIExpression queries, DILocation::getMergedLocation, ConvertDebugDeclareToDebugValue).
 - `Dbg_Record.owner` is maintained by `attach_records_before` and `erase_inst`; passes that move records must
-  keep it. Use `rauw_with_metadata` / `erase_inst_with_metadata` (dbg_records.jai) instead of the plain ir.jai
-  calls whenever debug records may refer to the value.
+  keep it. Since 2026-11 the plain ir.jai `replace_all_uses_with` and `erase_inst` do the ValueAsMetadata half too
+  (handleRAUW for an instruction/argument within one function, handleDeletion: records get poison), like LLVM's
+  Value::replaceAllUsesWith / ~Value; `rauw_with_metadata` / `erase_inst_with_metadata` are now equivalent. Not
+  done implicitly: a constant/global turning into a local and a local moving to another function (LLVM drops the
+  metadata there, replaceAllUsesWith(nullptr); callers like GlobalOpt handle it). Before, a forgotten `_with_metadata`
+  left `<badref>` records (13 bad-ir, ~100 differs in `debugify,default<O2>`). Code that must keep the old value in
+  the records uses `replace_non_metadata_uses_with`.
 - Known vscale (`vscale_range(N,N)`, jai_tails 2026-11): slice sizes of scalable loads/stores are min size x N,
   `can_convert_value(old, new, vscale)` accepts fixed<->scalable vectors of equal known size (only from
   isVectorPromotionViableForSlice, through the `sroa_vscale` global set in select_partition_type), and
   `irb_bit_preserving_cast_chain` (ir_builder.jai) emits CreateBitCastLike's `llvm.vector.insert`/`extract` (no
   folding: SROA's IRBuilder uses ConstantFolder, whose FoldIntrinsic returns null). L1.sroa COMPLETE 122/122.
-  Assignment tracking (`#dbg_assign`, DIAssignID) fails loudly everywhere (3 imported files in the sweep).
+  Assignment tracking: see "Assignment tracking" (assignment_tracking.jai).
 - Sweep (every round-tripping imported file, our output vs LLVM, canonicalized): mem2reg 6994/6994 identical;
   sroa, sroa<preserve-cfg>, sroa<aggregate-to-vector> 6989/6994 identical, the other 5 fail loudly (dbg_assign,
   known vscale).
@@ -363,7 +368,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - Files and APIs: see DESIGN.md "Loops". print<loopnest> is loop_nest.jai (needs ScalarEvolution).
 - What fails loudly (and the remaining L1.loop-canonical checks): passes not ported (indvars,
   simple-loop-unswitch, loop-deletion, loop-unroll, loop-idiom, loop-reduce, `require<domfrontier>`), LoopRotate's noalias-scope cloning, key-instruction
-  atom groups, DIArgList debug locations in remapping, `#dbg_assign`.
+  atom groups, DIArgList debug locations in remapping.
 - LoopRotate's header-size check uses the real cost model: CodeMetrics `num_insts` from
   `tti_instruction_cost(TCK_CODE_SIZE)` (tti.jai); the old 0..2 cost bounds are gone.
 - `isSafeToSpeculativelyExecute` (pass_loop_simplify.jai) has no load support (isDereferenceableAndAlignedPointer)
@@ -532,7 +537,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - `ic_phi.jai` ports InstCombinePHI.cpp completely (visitPHINode and every helper, LLVM's order). Shared pieces
   added there: `combine_metadata_for_cse` (Local.cpp combineMetadata; getMostGeneric{Range,AliasScope,NoFPClass,
   AlignmentOrDereferenceable}, MDNode::intersect, TBAA via tbaa_most_generic; merging !mmra/!prof/!memprof/
-  !callsite/!llvm.access.group/!captures/!callee_type/DIAssignID fails loudly), `erase_unlinked_inst` (`delete I`).
+  !callsite/!llvm.access.group/!captures/!callee_type fails loudly; DIAssignID: merge_di_assign_id), `erase_unlinked_inst` (`delete I`).
   SliceUpIllegalIntegerPHI sorts its records stably (LLVM's array_pod_sort = qsort; glibc sorts small arrays by
   insertion sort). Sweep after the phi port: no file regressed from identical; 5 more fail loudly (2 fixpoint
   differences that need other visitors, !annotation, !mmra, !llvm.access.group).
@@ -552,7 +557,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
   ptrauth folds, `gc.statepoint`, `experimental.vp.reverse`, the ARM/AArch64/Hexagon intrinsic cases and every
   non-x86 TTI::instCombineIntrinsic (fails loudly only when the module triple selects that target),
   objectsize with `dynamic=true` (left alone: ObjectSizeOffsetEvaluator is not ported), AAMDNodes::adjustForAccess
-  of `!tbaa`/`!tbaa.struct` in SimplifyAnyMemTransfer, DIAssignID updates.
+  of `!tbaa`/`!tbaa.struct` in SimplifyAnyMemTransfer.
 - Shared changes: the `ptrmask` case of SimplifyDemandedUseBits (ic_demanded.jai) and the x86 target hooks there;
   visitReturnInst uses `ic_simplify_non_null_operand`; `intrinsic_ids.jai` gained stacksave/va_*/matrix/trampoline/
   ptrauth ids; canBeCastedExactlyIntToFP moved from ic_compares.jai to ic_casts.jai.
@@ -579,7 +584,7 @@ allow_ephemerals, have_tli}` by value; `sq_with_instruction` / `sq_without_undef
 - Sweep `--passes instcombine` vs main before this work (a0f750d): identical 3716→6744, no identical→differs,
   1 identical→failed (gc.statepoint, a calls path). Remaining loud failures in these areas: LowerDbgDeclare
   (27 files, needs Local.cpp LowerDbgDeclare + RemoveRedundantDbgInstrs), the ptrauth `llvm.protected.field.ptr`
-  load/store folds, DIAssignID merging in mergeStoreIntoSuccessor, TargetExtType vector elements.
+  load/store folds, TargetExtType vector elements.
 - Fixed on the way (shared code): `create_shuffle`, `create_extract_value`, `icb_insert_value` copy their index
   arrays first (`shuffle_mask(sv)`/`inst_indices(i)` are views into `ir.u32_pool`; appending to the pool while
   reading such a view produced garbage masks); `ic_take_name` is a no-op on constants (LLVM's getSymTab fails, the
@@ -843,8 +848,8 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   matches LLVM (no extra "returns the call" check); fam_invalidate keeps the AssumptionCache while a surviving LVI
   holds it (LLVM never invalidates the AC; see knowledge/llvm/lazy-value-info-and-jump-threading.md);
   `-verify-each` (verifier.jai) and `-aa-pipeline X` (space form) are accepted.
-- Fail loudly: `-lvi-per-pred-ranges` (unknown flag), JumpThreading's SplitEdge through splitBlockBefore, `#dbg_assign`
-  remapping, key-instruction atom groups, trailing debug records after duplicating a block into its predecessor,
+- Fail loudly: `-lvi-per-pred-ranges` (unknown flag), JumpThreading's SplitEdge through splitBlockBefore,
+  key-instruction atom groups, trailing debug records after duplicating a block into its predecessor,
   ScaledNumber printing of numbers below 2^-120 (toStringAPFloat), `-use-iterative-bfi-inference` (unknown flag).
 - Value::print in annotation writers: `value_print_isolated` / `printer_isolated_inst_to_string` (value_lattice.jai)
   save and restore the AsmWriter state (`W`, `print_state`, the annotation hooks) around a print with a fresh
@@ -889,8 +894,8 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
 
 ## AggressiveInstCombine (L1.aggressive-instcombine COMPLETE 88/88)
 
-- `pass_aggressive_instcombine.jai` ports AggressiveInstCombine.cpp completely (only merging stores that carry
-  `!DIAssignID` fails loudly); `aic_trunc.jai` ports TruncInstCombine.cpp. Two TTI hooks live in the pass file
+- `pass_aggressive_instcombine.jai` ports AggressiveInstCombine.cpp completely (merged stores get
+  mergeDIAssignID); `aic_trunc.jai` ports TruncInstCombine.cpp. Two TTI hooks live in the pass file
   (`tti_have_fast_sqrt`, `tti_allows_misaligned_memory_accesses`), as do `split_block_dtu` (SplitBlock's
   DomTreeUpdater path), `aa_tags_concat` (AAMDNodes::concat), `gep_operator_collect_offset` users and
   `irb_zext_or_trunc_any` (CreateZExtOrTrunc for any int/vector type).
@@ -920,7 +925,8 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   Any pass that wrongly returns PRESERVE_ALL after changing IR (or the reverse) now changes InstCombine's output.
 - Loop passes in a module pipeline (`debugify,loop-idiom`) get their own function+loop adaptor (parse_module_pass).
 - Unported corners, all loud: SplitEdge through splitBlockBefore in breakLoopBackedge (never hit in the corpus),
-  LoopIdiom chains of more than 8 adjacent stores (SmallPtrSet iteration order); LoopSimplifyCFG with more than two
+  LoopIdiom chains of more than 8 adjacent stores (SmallPtrSet iteration order) whose AA tags differ (equal tags:
+  the order only feeds the tag merge and the deletion, so it is not observable); LoopSimplifyCFG with more than two
   dead successors uses insertion order where LLVM uses pointer order (DT child order only; sweeps identical).
 - Sweeps (all identical except pre-existing loud failures and the pr12351.ll diagnostic): `loop(loop-deletion)`,
   `loop-mssa(loop-deletion),print<memoryssa>` (-verify-memoryssa), `loop(loop-instsimplify)`,
@@ -990,7 +996,7 @@ call, not an interface with subclasses: PatternMatch predicates (`pm_int_pred`, 
   (module-level metadata cloning) and value handles in `Value_Map`: both fail loudly / are documented as missing.
 - Fail loudly: `-unroll-add-parallel-reductions` (parallel reduction phis; no x86 TTI enables AddAdditionalAccumulators),
   discriminator cloning for `debugInfoForProfiling` compile units (cloneByMultiplyingDuplicationFactor),
-  key-instruction atom groups, `#dbg_assign` remapping, ehAwareSplitEdge, the MDNodeMapper. `-pgso` /
+  key-instruction atom groups, ehAwareSplitEdge, the MDNodeMapper. `-pgso` /
   `require<profile-summary>` (PSI-based optsize) and `-O<n>` are not supported, which is what the 4 failing unit
   tests need.
 - Shared fixes made here: SCEV `prove_no_wrap_by_varying_start` used signed -2/-1 deltas (LLVM's are 32-bit unsigned,
@@ -1600,8 +1606,8 @@ Still slow / next:
   `jump-table-to-switch` (incl. value-profile weights and the !guid / MD5(PGO name) lookup), `move-auto-init`,
   `alignment-from-assumptions`, `libcalls-shrinkwrap` (incl. strictfp constrained compares),
   `called-value-propagation` (+ a SparseSolver specialized to its lattice; prefix `clv_`, `cvp_` is
-  CorrelatedValuePropagation), `rel-lookup-table-converter`, `cg-profile` (indirect calls with VP data fail
-  loudly), `ee-instrument<[post-inline]>`, `memprof-remove-attributes`, `recompute-globalsaa`.
+  CorrelatedValuePropagation), `rel-lookup-table-converter`, `cg-profile` (indirect calls: VP targets through
+  the pgo-icall-prom InstrProfSymtab, `cg-profile<in-lto-post-link>` for post-link pipelines), `ee-instrument<[post-inline]>`, `memprof-remove-attributes`, `recompute-globalsaa`.
 - Early exits that are exact for every module without the feature (and fail loudly otherwise): `alloc-token` (no
   sanitize_alloc_token, no llvm.alloc.token.id), `lower-comment-string` (non-AIX), `forceattrs` (its flags are
   rejected), `annotation2metadata` / `annotation-remarks` (remarks are never enabled), `inject-tli-mappings` (no
@@ -1659,7 +1665,7 @@ Still slow / next:
   it, function specialization fails loudly: OriginalFuncs with more than 8 functions calling each other).
 - FunctionSpecialization: CloneFunction maps metadata like the MDNodeMapper under createIdentityMDPredicate
   (distinct nodes reachable from the function are cloned, uniqued ones re-uniqued when an operand changed); the results
-  go into the Value_Map's MD map before RemapInstruction. `#dbg_assign` records and uniqued metadata cycles fail
+  go into the Value_Map's MD map before RemapInstruction. Uniqued metadata cycles fail
   loudly. The candidate selection uses libstdc++'s make_heap / push_heap / pop_heap (fs_make_heap & co.).
 - Sweeps (0 differs / 0 bad-ir; loud only ppc_fp128 folding, other passes' options): `sccp`, `ipsccp` whole-file
   7823/7826, `--with-test-flags` ~10000/10113, `function(sroa),sccp|ipsccp` on tests/perf/compile 4/4,
@@ -1749,7 +1755,7 @@ Still slow / next:
 - llvm-link fails loudly on: `-override`, `-import`, ARM/AArch64 module attributes (copyModuleAttrToFunctions),
   two-field `llvm.global_ctors`, blockaddress of a function whose body is not linked yet (DelayedBBs), intrinsics
   whose name mangles a struct type (remangleIntrinsicFunction), uniqued metadata cycles that change, inline asm whose
-  type changes, `#dbg_assign`.
+  type changes.
 - The LTO module passes expand-variadics and pgo-icall-prom are ported up to their early exits and fail loudly on
   variadic / value-profile input; drop-type-tests, canonicalize-aliases and name-anon-globals are complete. The CFI
   passes are complete (section "CFI" below).
@@ -1831,7 +1837,7 @@ Still slow / next:
   used by loop-unroll, loop-load-elim, the LibCallSimplifier and LoopVectorize (processLoop's OptForSize =
   shouldOptimizeForSize(header, PSI, BFI); the FAM-cached BFI is then the one getPredBlockCostDivisor reads too).
   `default<O2>` on the 54 corpus files with a ProfileSummary: 46 identical, 0 differs, 6 loud (cg-profile value
-  profiles), 2 llvm-failed; `require<profile-summary>,function(loop-vectorize)` on them + Transforms/LoopVectorize:
+  profiles; fixed since), 2 llvm-failed; `require<profile-summary>,function(loop-vectorize)` on them + Transforms/LoopVectorize:
   519/519 identical.
 - `-enable-knowledge-retention` is honoured by dce, licm (and allowed for loop-simplify, lcssa, loop-rotate,
   instcombine, the loop adaptor, which never salvage).
@@ -2077,8 +2083,8 @@ is almost all `unsupported option` for pass cl::opts we don't implement (-sbvec-
   dereferences an empty optional: UB), StackSafety on pointers whose index width differs from their size.
 - Traps found: `new GlobalVariable(M, ...)` without an address space uses the DataLayout's default globals address
   space (`dl.globals_as`), not 0; `ConstantExpr::getPointerCast` addrspacecasts (`san_ce_pointer_cast`); the stack
-  shadow constants depend on endianness; every RAUW of an instruction/argument must be `rauw_with_metadata` (debug
-  records); `moveBefore` is `inst_move_before_dbg`; BasicBlock::splitBasicBlock gives the new branch the split
+  shadow constants depend on endianness; every RAUW of an instruction/argument updates debug records (now done by
+  `replace_all_uses_with` itself); `moveBefore` is `inst_move_before_dbg`; BasicBlock::splitBasicBlock gives the new branch the split
   point's location **without its atom group** (fixed in ir_edit.jai `split_basic_block`, affects every pass);
   StackSafety's getInfo is lazy (computed on the first isSafe query, on the IR at that moment).
 - Intrinsics LLVM knows but gen_iit.jai does not (llvm.amdgcn.is.shared/private, declared by every asan run) get
@@ -2197,7 +2203,7 @@ CoroAnnotationElide).
 - Sweeps (whole file, `--with-test-flags`): coro-early, coro-cleanup, coro-elide, `cgscc(coro-split)`,
   `cgscc(coro-split<reuse-storage>)`, `cgscc(coro-annotation-elide)`: 0 differs, 0 bad-ir; the failures are flag
   groups of other units. `module(coro-early),cgscc(coro-split<reuse-storage>,coro-annotation-elide),function(coro-elide),module(coro-cleanup)`:
-  10808/10808 identical. `default<O2>` / `default<O0>` on Transforms/Coroutines: 0 differs (1 SROA dbg_assign loud).
+  10808/10808 identical. `default<O2>` / `default<O0>` on Transforms/Coroutines: 0 differs.
 - `coro-split` is a CGSCC pass that takes the `Cgscc_Ur` (cgscc_pm.jai dispatch): the clones go through
   `lcg_add_split_function` / `lcg_add_split_ref_recursive_functions`, then `update_cg_and_am_for_pass` (CGSCC, then
   function pass after `removeUnreachableBlocks` of the ramp), and the SCCs are pushed on `ur.cwl` like LLVM.
@@ -2589,3 +2595,34 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
 - Compile time: a chain of 4x4 double multiplies + fadds scales linearly (500/2000/8000 ops: 0.7/2.8/11.3 s with the
   x64 build, LLVM 0.3/1.4/6.9 s). Sinking transposes through deep add/multiply trees is exponential in LLVM too
   (it duplicates subtrees); both get killed on a 200-deep (A*A)^t + A*A chain. No tests/perf shape uses the pass.
+
+## Assignment tracking (L1.extra.assignment-tracking)
+
+- `assignment_tracking.jai`: the at:: helpers (getDVRAssignmentMarkers, deleteAssignmentMarkers, RAUW, remapAssignID,
+  calculateFragmentIntersect), DbgVariableRecord's assign-specific setters, mergeDIAssignID (`merge_di_assign_id`,
+  used by InstCombine, LICM, SLP, MemCpyOpt, AggressiveInstCombine), trackAssignments + the `declare-to-assign` pass,
+  and SROA's migrateDebugInfo / calculateFragment. Users: SROA (all rewriter call sites, MigrateOne, the aggregate
+  store splitter, deleteDeadInstructions, RemoveRedundantDbgInstrs at the end), mem2reg (AssignmentTrackingInfo,
+  cleanUpDbgAssigns), DSE (shortenAssignment), the inliner (trackInlinedStores, fixupAssignments), ADCE (linked
+  records stay), ValueMapper / llvm-link / LoopRotate remapping, the verifier.
+- Marker order: getAllDbgVariableRecordUsers sorts by the DIAssignID operand's use-map index, descending. Each
+  tracked operand has its own index in LLVM, so the DIAssignID stamp (`at_assign_stamp`, default = record index,
+  re-stamped by `dbgr_set_assign_id`) is separate from the location stamp (`dbgr_stamp`).
+- at::getAssignmentInsts is context-wide in LLVM; `at_rauw` scans every function, `dbg_assign_has_linked_insts`
+  only the record's function (an ID shared across functions is invalid IR anyway). ADCE precomputes the set.
+- Sweeps 2026-11 (corpus, plus 221 clang `-O2 -g -gno-key-instructions -Xclang -disable-llvm-passes` builds of
+  tests/e2e/src, not committed): `declare-to-assign,X` for sroa/mem2reg/instcombine/dse/memcpyopt/simplifycfg and
+  `function(declare-to-assign),cgscc(inline)`: 0 differs. `default<O2>` on the `-g` builds: 5 differs, identical with
+  and without declare-to-assign (plain dbg_value/DIArgList salvage differences in the O2 pipeline, not assignment
+  tracking: memory_static_local_volatile, 2003-04-22-Switch, puzzle, linpack-pc, richards_benchmark) and one loud
+  "remapping a DIArgList debug location" (memory_pointers). Not investigated.
+- `debugify,cgscc(inline)` (2026-11): 0 differs after making the inliner's `X::Create(.., I->getIterator())`
+  insertions adopt the records in front of I (`insert_at_position(.., false)`: the invoke's normal-dest branch,
+  merged deopt / funclet call rebuilds, cleanupret / catchswitch rebuilds), the CloneAndPrune simplification keep
+  VMap[OrigV] = V for an erased instruction (WeakTrackingVH), and the store-to-load forwarding RAUW with metadata.
+  AutoUpgrade's builder (`builder_insert`) adopts the same way (an upgraded `llvm.lifetime.start` ends up after the
+  `#dbg_assign` upgraded from the intrinsic in front of the old call).
+- findDbgUsers: the DIArgLists containing the value are visited in **ascending** tracking order (fixed 2026-11;
+  `debugify,instcombine` 14 -> 4 differs). Remaining `debugify,instcombine` differs: select debug locations
+  (2005-04-07-UDivSelectCrash, binop-cast, binop-select-cast-of-select-cond) and bswap.ll; `debugify,default<O2>`:
+  82 differs (not triaged).
