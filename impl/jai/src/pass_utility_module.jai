@@ -10,15 +10,16 @@
 
 // ---------------------------------------------------------------- reg2mem
 
-r2m_new_alloca :: (ty: Type_Id, name: string, before: Value_Id) -> Value_Id {
+r2m_new_alloca :: (ty: Type_Id, name: string, before: Value_Id, head := false) -> Value_Id {
     a := create_alloca_unlinked(ty, dl.alloca_as, dl_pref_align(ty));   // computeAllocaDefaultAlign
-    insert_at_position(a, inst_block(before), before, false);   // InsertPosition = an instruction: adopts its records
+    insert_at_position(a, inst_block(before), before, head);   // InsertPosition = an instruction: adopts its records
     if name.count set_name(a, name);
     return a;
 }
-r2m_new_load :: (ty: Type_Id, ptr: Value_Id, name: string, pos: Value_Id, head := false, bb: Value_Id = NONE) -> Value_Id {
+r2m_new_load :: (ty: Type_Id, ptr: Value_Id, name: string, pos: Value_Id, head := false, bb: Value_Id = NONE, volatile := false) -> Value_Id {
     l := new_inst(.LOAD, ty, 1);
     set_op(l, 0, ptr);
+    if volatile inst(l).flags |= F_VOLATILE;
     inst(l).align = dl_alignment(ty, true);   // computeLoadStoreDefaultAlign
     insert_at_position(l, ifx bb != NONE then bb else inst_block(pos), pos, head);
     set_name(l, name);
@@ -32,10 +33,11 @@ r2m_new_store :: (v: Value_Id, ptr: Value_Id, bb: Value_Id, pos: Value_Id, head:
     return s;
 }
 
-// DemoteRegToStack(I, VolatileLoads = false, AllocaPoint)
-demote_reg_to_stack :: (i: Value_Id, alloca_point: Value_Id) -> Value_Id {
+// DemoteRegToStack(I, VolatileLoads, AllocaPoint); alloca_head: AllocaPoint is an iterator with the head bit
+// (no AllocaPoint: F->getEntryBlock().begin())
+demote_reg_to_stack :: (i: Value_Id, alloca_point: Value_Id, volatile_loads := false, alloca_head := false) -> Value_Id {
     if !has_uses(i) { erase_inst_with_metadata(i); return NONE; }
-    slot := r2m_new_alloca(vtype(i), tconcat(vname(i), ".reg2mem"), alloca_point);
+    slot := r2m_new_alloca(vtype(i), tconcat(vname(i), ".reg2mem"), alloca_point, alloca_head);
     o: Crit_Edge_Options;
     if inst_op(i) == .INVOKE {
         nd := get_successor(i, 0);
@@ -66,13 +68,13 @@ demote_reg_to_stack :: (i: Value_Id, alloca_point: Value_Id) -> Value_Id {
                 v: Value_Id = NONE;
                 for loads if it.bb == pb { v = it.v; break; }
                 if v == NONE {
-                    v = r2m_new_load(vtype(i), slot, reload, block_terminator(pb));
+                    v = r2m_new_load(vtype(i), slot, reload, block_terminator(pb), volatile = volatile_loads);
                     array_add(*loads, .{pb, v});
                 }
                 phi_set_value(user, k, v);
             }
         } else {
-            v := r2m_new_load(vtype(i), slot, reload, user);
+            v := r2m_new_load(vtype(i), slot, reload, user, volatile = volatile_loads);
             replace_uses_of_with(user, i, v);
         }
     }
@@ -106,10 +108,10 @@ demote_reg_to_stack :: (i: Value_Id, alloca_point: Value_Id) -> Value_Id {
     return slot;
 }
 
-// DemotePHIToStack(P, AllocaPoint)
-demote_phi_to_stack :: (p: Value_Id, alloca_point: Value_Id) -> Value_Id {
+// DemotePHIToStack(P, AllocaPoint); alloca_head as for demote_reg_to_stack
+demote_phi_to_stack :: (p: Value_Id, alloca_point: Value_Id, alloca_head := false) -> Value_Id {
     if !has_uses(p) { erase_inst_with_metadata(p); return NONE; }
-    slot := r2m_new_alloca(vtype(p), tconcat(vname(p), ".reg2mem"), alloca_point);
+    slot := r2m_new_alloca(vtype(p), tconcat(vname(p), ".reg2mem"), alloca_point, alloca_head);
     n := nops(p);
     for k: 0..n - 1 {
         pb := phi_block(p, k);

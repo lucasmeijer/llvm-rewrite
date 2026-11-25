@@ -37,6 +37,7 @@ Gap_Kind :: enum u8 {
     // assume_builder.jai
     ASSUME_BUILDER; ASSUME_SIMPLIFY;
     DWARF_EH_PREPARE;   // pass_dwarf_eh_prepare.jai
+    SJLJ_EH_PREPARE;    // pass_sjlj_eh_prepare.jai
     // llc's codegen IR passes as opt passes (cg_*.jai): full ports or guards that fail loudly where LLVM would change IR
     X86_PARTIAL_REDUCTION; X86_LOWER_AMX_INTRINSICS; X86_LOWER_AMX_TYPE; GC_LOWERING; SHADOW_STACK_GC_LOWERING; INLINE_ASM_PREPARE;
 }
@@ -133,6 +134,7 @@ GAP_PASS_TABLE :: Gap_Info.[
     .{"print<cfg-sccs>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_CFG_SCCS},
     .{"assume-builder", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .ASSUME_BUILDER},
     .{"assume-simplify", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .ASSUME_SIMPLIFY},
+    .{"sjlj-eh-prepare", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .SJLJ_EH_PREPARE},
     .{"dwarf-eh-prepare", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .DWARF_EH_PREPARE},
     .{"x86-partial-reduction", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .X86_PARTIAL_REDUCTION},       // X86PassRegistry.def
     .{"x86-lower-amx-intrinsics", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .X86_LOWER_AMX_INTRINSICS},
@@ -280,6 +282,7 @@ gap_run_function :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .FLATTEN_CFG; return flatten_cfg_run(f);
         case .ASSUME_BUILDER; return assume_builder_run(f);
         case .DWARF_EH_PREPARE; return dwarf_eh_prepare_opt_run(f);
+        case .SJLJ_EH_PREPARE; return sjlj_eh_prepare_run(f);
         case .X86_PARTIAL_REDUCTION;
             gap_require_x86_target(node.name);
             pa := x86_partial_reduction_run(f);
