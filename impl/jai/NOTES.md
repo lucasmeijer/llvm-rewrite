@@ -2565,7 +2565,6 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   -global-merge-group-by-use=false / -global-merge-ignore-single-use=false 10860/10860; expand-ir-insts with
   -expand-div-rem-bits=0 -expand-fp-convert-bits=0 (x86_64 and i686) 10850/10850, --with-test-flags 5191.
 
-
 ## LowerMatrixIntrinsics (L1.extra.lower-matrix COMPLETE 98/98; /root/jai_matrix)
 
 - `pass_lower_matrix.jai`: `lower-matrix-intrinsics`, `lower-matrix-intrinsics<>`, `lower-matrix-intrinsics<minimal>`
