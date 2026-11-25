@@ -1967,7 +1967,12 @@ is almost all `unsupported option` for pass cl::opts we don't implement (-sbvec-
     "Unrecognized"). And `cast(float32) u64` of a value >= 2^63 is wrong: use `u64_to_f32`.
   - Sweeps (whole corpus; few functions have `use-sample-profile`, so they mostly exercise the early exits):
     `sample-profile -sample-profile-file=Inputs/inline.prof`, `pseudo-probe,sample-profile` with a probe profile,
-    `pseudo-probe --with-test-flags`: 0 differs.
+    `pseudo-probe --with-test-flags`: 0 differs. `default<O2>` and `thinlto-pre-link<O2>` with
+    `-pgo-kind=pgo-sample-use-pipeline -profile-file=Inputs/inline.prof`: 0 differs (the one thinlto-pre-link
+    differ was dfa-jump-threading: SSAUpdaterBulk's phis take the frontier block's first debug location; only
+    visible without full unrolling). The printed SampleUse pipelines equal LLVM's (`-jai-print-pipeline`).
+  - SampleUse implies `DebugInfoForProfiling` (PGOOptions constructor): `function(add-discriminators)` after
+    forceattrs in the per-module and ThinLTO pre-link pipelines.
 - Jai trap: an untyped constant `0xFFFF_FFFF_FFFF_FFFF :: ` is an s64 -1 in arithmetic (`X / 1000` = 0); give
   such constants an explicit `: u64 :` type.
 
