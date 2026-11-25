@@ -238,6 +238,9 @@
 #load "pass_loop_unroll_and_jam.jai";
 #load "extras_d_cl.jai";
 #load "pass_load_store_vectorizer.jai";
+#load "pass_nary_reassociate.jai";
+#load "pass_separate_const_offset.jai";
+#load "pass_slsr.jai";
 #load "print_uselistorder.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";

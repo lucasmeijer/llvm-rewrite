@@ -307,3 +307,6 @@ lib/Transforms/IPO/SampleProfileProbe.cpp 0.9  # jai_pgo: no probe verifier (-ve
 lib/Transforms/Instrumentation/IndirectCallPromotion.cpp 0.6  # jai_pgo: no vtable comparison (-enable-vtable-profile-use with type tests), no remarks
 lib/ProfileData/SampleProfReader.cpp 0.75  # jai_pgo: text, raw binary, ext-binary, gcc; no Itanium remapper, no CS partial reads, no dump
 lib/ProfileData/SampleProf.cpp 0.5  # jai_pgo: FunctionSamples merge/find/flatten pieces; no SampleContextTrimmer, ProfileSymbolList writing, dumps
+lib/Transforms/Scalar/NaryReassociate.cpp 0.95  # no legacy pass
+lib/Transforms/Scalar/SeparateConstOffsetFromGEP.cpp 0.95  # no legacy pass, no debug printing
+lib/Transforms/Scalar/StraightLineStrengthReduce.cpp 0.95  # no legacy pass, no -debug-counter slsr-counter, no debug printing

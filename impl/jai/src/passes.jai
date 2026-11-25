@@ -297,6 +297,8 @@ Pass_Kind :: enum u8 {
     LOOP_VERSIONING; LOOP_BOUND_SPLIT; LOOP_VERSIONING_LICM; HARDWARE_LOOPS; LOOP_UNROLL_AND_JAM;
     // L1.extra.load-store-vectorizer / codegen-ir-misc / sandbox-vectorizer (jai_extras_d)
     LOAD_STORE_VECTORIZER;
+    // strength reduction (pass_nary_reassociate.jai, pass_separate_const_offset.jai, pass_slsr.jai)
+    NARY_REASSOCIATE; SEPARATE_CONST_OFFSET; SLSR;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -536,6 +538,9 @@ PASS_TABLE :: Pass_Info.[
     .{"loop-unroll-and-jam", .LOOP, .LOOP_UNROLL_AND_JAM, false, .DOMTREE},   // a LoopNest pass
     // jai_extras_d
     .{"load-store-vectorizer", .FUNCTION, .LOAD_STORE_VECTORIZER, false, .DOMTREE},
+    .{"nary-reassociate", .FUNCTION, .NARY_REASSOCIATE, false, .DOMTREE},
+    .{"separate-const-offset-from-gep", .FUNCTION, .SEPARATE_CONST_OFFSET, false, .DOMTREE},   // also <lower-gep> (lookup_pass)
+    .{"slsr", .FUNCTION, .SLSR, false, .DOMTREE},
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -706,6 +711,7 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "msan<") && name[name.count - 1] == #char ">" return lookup_pass("msan");
     if begins_with(name, "loop-extract<") && name[name.count - 1] == #char ">" return lookup_pass("loop-extract");
     if begins_with(name, "hardware-loops<") && name[name.count - 1] == #char ">" return lookup_pass("hardware-loops");
+    if begins_with(name, "separate-const-offset-from-gep<") && name[name.count - 1] == #char ">" return lookup_pass("separate-const-offset-from-gep");
     return null;
 }
 
@@ -1283,6 +1289,8 @@ parse_cl_opt :: (arg: string) -> bool {
     if rs4gc_parse_cl_opt(name, value, has_value) return true;     // pass_rs4gc.jai
     if place_safepoints_parse_cl_opt(name, value, has_value) return true;   // pass_place_safepoints.jai
     if safepoint_ir_verifier_parse_cl_opt(name, value, has_value) return true;   // safepoint_ir_verifier.jai
+    if scof_parse_cl_opt(name, value, has_value) return true;   // pass_separate_const_offset.jai
+    if slsr_parse_cl_opt(name, value, has_value) return true;   // pass_slsr.jai
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1681,6 +1689,9 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .HARDWARE_LOOPS; return hardware_loops_run(node, f);
         // jai_extras_d
         case .LOAD_STORE_VECTORIZER; return load_store_vectorizer_run(f);
+        case .NARY_REASSOCIATE; return nary_reassociate_run(f);
+        case .SEPARATE_CONST_OFFSET; return separate_const_offset_run(node, f);
+        case .SLSR; return slsr_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

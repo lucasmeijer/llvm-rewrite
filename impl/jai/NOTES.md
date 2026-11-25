@@ -2180,6 +2180,13 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   loop-versioning-licm (+ `loop-mssa(licm)` after it), hardware-loops (forced, phi/guard/nested/64-bit variants),
   loop-unroll-and-jam (`-allow-unroll-and-jam`, `-unroll-and-jam-count=4`, `-unroll-remainder`, `-unroll-runtime`,
   after loop-rotate): 0 differs.
+- **Strength reduction** (L1.extra.strength-reduction COMPLETE 60/60): `pass_nary_reassociate.jai` (also has
+  `dt_blocks_preorder` = depth_first(DT)), `pass_separate_const_offset.jai` (`Scof_Gti` = gep_type_iterator, reused
+  by SLSR), `pass_slsr.jai` (candidates in an array, indices for Candidate *). Sweeps (whole corpus, plain,
+  `--with-test-flags`, with `-mtriple=x86_64-unknown-linux-gnu`, and after instcombine / each other): 0 differs.
+- Jai trap: `cast(u64) a << 32` is `cast(u64) (a << 32)` (the shift happens in a's own 32-bit type): build 64-bit
+  keys with a typed temporary (`hi: u64 = a; (hi << 32) | b`). It made SeparateConstOffsetFromGEP's map keys
+  collide (found by the whole-corpus sweep).
 
 ## CFI: LowerTypeTests, CrossDSOCFI, GlobalSplit, SimplifyTypeTests (L1.extra.lowertypetests COMPLETE; /root/jai_cfi)
 

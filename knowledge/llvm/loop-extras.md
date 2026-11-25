@@ -79,3 +79,14 @@ whole-corpus sweeps.
   `strictfp` call-site attribute (IRBuilder::setIsFPConstrained -> setConstrainedFPCallAttr).
 - LoopBoundSplit adds the post-loop as a sibling loop (U.addSiblingLoops), so it is visited by the rest of the
   loop pipeline.
+
+## Strength reduction (`nary-reassociate`, `separate-const-offset-from-gep[<lower-gep>]`, `slsr`)
+
+- NaryReassociate's tryReassociateGEPAtIndex reads the GEP index type with `GEP->getOperand(I)` where I is the
+  0-based index number, i.e. the operand *before* the index (the pointer for I = 0). Ported as is.
+- SeparateConstOffsetFromGEP's DominatingAdds key is a pointer-ordered pair, but only as a canonical map key: any
+  total order on the two values gives the same lookups. CastInst::CreateIntegerCast (`idxprom`) does not fold
+  constant indices: `sext i32 0 to i64` instructions are created and survive.
+- SLSR's maps (SCEVToInsts is a SmallSetVector, DependencyGraph a MapVector) all iterate in insertion order; the
+  others are lookups only. Without a target triple NoTTI says no addressing mode with a scale or offset is legal,
+  so `isFoldable` is false for every Add candidate.
