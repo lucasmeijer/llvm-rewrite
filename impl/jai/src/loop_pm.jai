@@ -234,6 +234,7 @@ run_loop_pass_inner :: (idx: s32, l: Loop_Id, lar: *Loop_Std_Results, u: *Lpm_Up
             while li_parent(lar.li, root) != NONE root = li_parent(lar.li, root);
             return licm_run(node, root, lar, u, true);
         case .PRINT_LOOPNEST; return loop_nest_printer_run(l, lar);
+        case .PRINT_HASH_RECOGNIZE; return print_hash_recognize_run(l, lar);   // analysis_printers_extras_b.jai
         case .PRINT_IV_USERS; return iv_users_printer_run(l, lar);
         case .REQUIRE_IV_USERS; return iv_users_require_run(l, lar);
     }

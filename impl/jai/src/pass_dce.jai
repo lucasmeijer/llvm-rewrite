@@ -60,7 +60,7 @@ Crit_Edge_Options :: struct {
     mssau: *Mssa_Updater;
     merge_identical_edges: bool;
     preserve_lcssa: bool;
-    preserve_loop_simplify: bool;
+    preserve_loop_simplify := true;   // CriticalEdgeSplittingOptions::PreserveLoopSimplify defaults to true
     keep_one_input_phis: bool;
     ignore_unreachable_dests: bool;
 }

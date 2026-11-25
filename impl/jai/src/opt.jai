@@ -228,6 +228,13 @@
 #load "pass_structurizecfg.jai";
 #load "pass_scalarizer.jai";
 #load "pass_scalarize_masked_mem_intrin.jai";
+#load "pass_utility_misc.jai";
+#load "pass_utility_module.jai";
+#load "pass_normalize.jai";
+#load "pass_strip_dead_debug_info.jai";
+#load "analysis_printers_extras_b.jai";
+#load "pass_lint.jai";
+#load "ir2vec.jai";
 #load "extras_b_cl.jai";
 #load "guard_utils.jai";
 #load "pass_loop_predication.jai";

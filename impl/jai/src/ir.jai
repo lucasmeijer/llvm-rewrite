@@ -701,10 +701,13 @@ arg_numbers: [..] u32;
 arg_parent :: inline (v: Value_Id) -> Value_Id { return arg_parents[ir.v_aux[v]]; }
 
 // ValueSymbolTable::makeUniqueName
-make_unique_name :: (tab: *Table(string, Value_Id), last: *u32, base: string, v: Value_Id, is_global: bool) -> string {
+make_unique_name :: (tab: *Table(string, Value_Id), last: *u32, base_in: string, v: Value_Id, is_global: bool, max_size: s64 = -1) -> string {
+    base := base_in;
     while true {
         last.* += 1;
         s := tconcat(base, ifx is_global then "." else "", tdec(last.*));
+        // retry with a shorter base when MaxNameSize is exceeded
+        if max_size > -1 && s.count > max_size { base = slice(base, 0, base.count - (s.count - max_size)); continue; }
         if !table_contains(tab, s) {
             s = copy_string(s);
             table_add(tab, s, v);
@@ -715,7 +718,8 @@ make_unique_name :: (tab: *Table(string, Value_Id), last: *u32, base: string, v:
 }
 
 // Value::setName: inserts into the symbol table, uniquing on conflict.
-set_name :: (v: Value_Id, name: string) {
+set_name :: (v: Value_Id, name_in: string) {
+    name := name_in;
     // Value::setNameImpl: getSymTab fails for constants (other than GlobalValues), so their name never changes
     if ir.v_kind[v] >= .C_INT && ir.v_kind[v] <= .INLINE_ASM return;
     old := ir.v_name[v];
@@ -723,22 +727,30 @@ set_name :: (v: Value_Id, name: string) {
     // Function::HasLLVMReservedName follows the name
     defer if ir.v_kind[v] == .FUNCTION glob(v).intrinsic = begins_with(ir.v_name[v], "llvm.");
     st := value_symtab(v);
-    if old.count != 0 {
+    remove_old :: (old: string, st: s32) {
+        if old.count == 0 return;
         if st == -1 table_remove(*ir.m_symtab, old);
         else if st >= 0 table_remove(*ir.symtabs[st], old);
     }
-    if name.count == 0 { ir.v_name[v] = ""; return; }
+    if name.count == 0 { remove_old(old, st); ir.v_name[v] = ""; return; }
     if st == -2 { ir.v_name[v] = intern_str(name); return; }
     tab := ifx st == -1 then *ir.m_symtab else *ir.symtabs[st];
     last := ifx st == -1 then *ir.m_last_unique else *ir.symtab_last[st];
+    // ValueSymbolTable::createValueName: a function's table caps names at -non-global-value-max-name-size (1024)
+    if st >= 0 && name.count > NON_GLOBAL_VALUE_MAX_NAME_SIZE name = slice(name, 0, NON_GLOBAL_VALUE_MAX_NAME_SIZE);
+    // Value::setNameImpl creates the new name while the old one is still in the table (so renaming %bb1 to "bb"
+    // when "bb" is taken gives "bb2", not "bb1"), then removes the old one
+    new_name: string;
     if !table_contains(tab, name) {
-        s := intern_str(name);
-        table_add(tab, s, v);
-        ir.v_name[v] = s;
-        return;
+        new_name = intern_str(name);
+        table_add(tab, new_name, v);
+    } else {
+        new_name = make_unique_name(tab, last, name, v, st == -1, ifx st >= 0 then NON_GLOBAL_VALUE_MAX_NAME_SIZE else -1);
     }
-    ir.v_name[v] = make_unique_name(tab, last, name, v, st == -1);
+    remove_old(old, st);
+    ir.v_name[v] = new_name;
 }
+NON_GLOBAL_VALUE_MAX_NAME_SIZE :: 1024;   // Function.cpp -non-global-value-max-name-size
 
 lookup_global :: (name: string) -> Value_Id {
     found, v := table_find(*ir.m_symtab, name);

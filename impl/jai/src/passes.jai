@@ -299,6 +299,9 @@ Pass_Kind :: enum u16 {
     // strength reduction (pass_nary_reassociate.jai, pass_separate_const_offset.jai, pass_slsr.jai)
     NARY_REASSOCIATE; SEPARATE_CONST_OFFSET; SLSR;
     LOAD_STORE_VECTORIZER; LOWER_ATOMIC; LOWER_INVOKE; INDIRECTBR_EXPAND; INTERLEAVED_ACCESS;
+    INSTNAMER; STRIP_CONVERGENCE_INTRINSICS; REG2MEM; STRIP_SYMBOLS; STRIP_NONDEBUG; STRIP_DEAD_CG_PROFILE; METARENAMER; LOWER_GLOBAL_DTORS; LOWER_IFUNC;
+    FATLTO_CLEANUP; HIPSTDPAR_INTERPOSE_ALLOC; HIPSTDPAR_MATH_FIXUP; NORMALIZE; STRIP_DEAD_DEBUG_INFO;
+    PRINT_HASH_RECOGNIZE; PRINT_STRUCTURAL_HASH; PRINT_PROFILE_SUMMARY; PRINT_STACK_SAFETY_LOCAL; PRINT_STACK_SAFETY; LINT; PRINT_STACK_LIFETIME; PRINT_FUNC_PROPERTIES; PRINT_IR2VEC; PRINT_IR2VEC_VOCAB; CTX_PROF_FLATTEN;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -548,6 +551,34 @@ PASS_TABLE :: Pass_Info.[
     .{"lower-invoke", .FUNCTION, .LOWER_INVOKE, false, .DOMTREE},
     .{"indirectbr-expand", .FUNCTION, .INDIRECTBR_EXPAND, true, .DOMTREE},   // RequiredPassInfoMixin
     .{"interleaved-access", .FUNCTION, .INTERLEAVED_ACCESS, false, .DOMTREE},
+    .{"instnamer", .FUNCTION, .INSTNAMER, false, .DOMTREE},
+    .{"strip-convergence-intrinsics", .FUNCTION, .STRIP_CONVERGENCE_INTRINSICS, false, .DOMTREE},
+    .{"reg2mem", .FUNCTION, .REG2MEM, false, .DOMTREE},
+    .{"normalize", .FUNCTION, .NORMALIZE, false, .DOMTREE},
+    .{"print<hash-recognize>", .LOOP, .PRINT_HASH_RECOGNIZE, true, .SCEV},
+    .{"print<structural-hash>", .MODULE, .PRINT_STRUCTURAL_HASH, true, .DOMTREE},
+    .{"print-profile-summary", .MODULE, .PRINT_PROFILE_SUMMARY, true, .DOMTREE},
+    .{"print<stack-safety-local>", .FUNCTION, .PRINT_STACK_SAFETY_LOCAL, true, .DOMTREE},
+    .{"print-stack-safety", .MODULE, .PRINT_STACK_SAFETY, true, .DOMTREE},
+    .{"print<ir2vec>", .MODULE, .PRINT_IR2VEC, true, .DOMTREE},
+    .{"ctx-prof-flatten", .MODULE, .CTX_PROF_FLATTEN, false, .DOMTREE},
+    .{"print<ir2vec-vocab>", .MODULE, .PRINT_IR2VEC_VOCAB, true, .DOMTREE},
+    .{"lint", .FUNCTION, .LINT, true, .DOMTREE},
+    .{"print<func-properties>", .FUNCTION, .PRINT_FUNC_PROPERTIES, true, .DOMTREE},
+    .{"print<stack-lifetime><may>", .FUNCTION, .PRINT_STACK_LIFETIME, true, .DOMTREE},
+    .{"print<stack-lifetime><must>", .FUNCTION, .PRINT_STACK_LIFETIME, true, .DOMTREE},
+    .{"print<structural-hash><detailed>", .MODULE, .PRINT_STRUCTURAL_HASH, true, .DOMTREE},
+    .{"print<structural-hash><call-target-ignored>", .MODULE, .PRINT_STRUCTURAL_HASH, true, .DOMTREE},
+    .{"strip", .MODULE, .STRIP_SYMBOLS, false, .DOMTREE},
+    .{"strip-nondebug", .MODULE, .STRIP_NONDEBUG, false, .DOMTREE},
+    .{"strip-dead-cg-profile", .MODULE, .STRIP_DEAD_CG_PROFILE, false, .DOMTREE},
+    .{"strip-dead-debug-info", .MODULE, .STRIP_DEAD_DEBUG_INFO, false, .DOMTREE},
+    .{"metarenamer", .MODULE, .METARENAMER, false, .DOMTREE},
+    .{"lower-global-dtors", .MODULE, .LOWER_GLOBAL_DTORS, false, .DOMTREE},
+    .{"lower-ifunc", .MODULE, .LOWER_IFUNC, false, .DOMTREE},
+    .{"fatlto-cleanup", .MODULE, .FATLTO_CLEANUP, true, .DOMTREE},   // RequiredPassInfoMixin
+    .{"hipstdpar-interpose-alloc", .MODULE, .HIPSTDPAR_INTERPOSE_ALLOC, true, .DOMTREE},
+    .{"hipstdpar-math-fixup", .MODULE, .HIPSTDPAR_MATH_FIXUP, true, .DOMTREE},
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -701,6 +732,8 @@ lookup_pass :: (name: string) -> *Pass_Info {
     // passes whose parameters are parsed by the pass itself (LOOP_PASS_WITH_PARAMS)
     if begins_with(name, "loop-rotate<") && name[name.count - 1] == #char ">" return lookup_pass("loop-rotate");
     if begins_with(name, "scalarizer<") && name[name.count - 1] == #char ">" return lookup_pass("scalarizer");
+    if begins_with(name, "normalize<") && name[name.count - 1] == #char ">" return lookup_pass("normalize");
+    if name == "lint<abort-on-error>" return lookup_pass("lint");
     if begins_with(name, "licm<") && name[name.count - 1] == #char ">" return lookup_pass("licm");
     if begins_with(name, "print<access-info><") && name[name.count - 1] == #char ">" return lookup_pass("print<access-info>");
     if begins_with(name, "lnicm<") && name[name.count - 1] == #char ">" return lookup_pass("lnicm");
@@ -1432,6 +1465,23 @@ run_module_pm :: (n: s32) {
             case .GLOBAL_DCE; if should_run_pass(node, NONE) mam_invalidate(global_dce_run(node));
             case .CONSTANT_MERGE; if should_run_pass(node, NONE) mam_invalidate(constant_merge_run());
             case .STRIP_DEAD_PROTOTYPES; if should_run_pass(node, NONE) mam_invalidate(strip_dead_prototypes_run());
+            // jai_extras_b
+            case .STRIP_SYMBOLS; if should_run_pass(node, NONE) mam_invalidate(strip_symbols_run());
+            case .STRIP_NONDEBUG; if should_run_pass(node, NONE) mam_invalidate(strip_nondebug_run());
+            case .STRIP_DEAD_CG_PROFILE; if should_run_pass(node, NONE) mam_invalidate(strip_dead_cg_profile_run());
+            case .STRIP_DEAD_DEBUG_INFO; if should_run_pass(node, NONE) mam_invalidate(strip_dead_debug_info_run());
+            case .PRINT_STRUCTURAL_HASH; should_run_pass(node, NONE); print_structural_hash_run(node.name);
+            case .PRINT_PROFILE_SUMMARY; should_run_pass(node, NONE); print_profile_summary_run();
+            case .PRINT_STACK_SAFETY; should_run_pass(node, NONE); print_stack_safety_global_run();
+            case .PRINT_IR2VEC; should_run_pass(node, NONE); print_ir2vec_run();
+            case .CTX_PROF_FLATTEN; if should_run_pass(node, NONE) mam_invalidate(ctx_prof_flatten_run());
+            case .PRINT_IR2VEC_VOCAB; should_run_pass(node, NONE); print_ir2vec_vocab_run();
+            case .METARENAMER; if should_run_pass(node, NONE) mam_invalidate(metarenamer_run());
+            case .LOWER_GLOBAL_DTORS; if should_run_pass(node, NONE) mam_invalidate(lower_global_dtors_run());
+            case .LOWER_IFUNC; if should_run_pass(node, NONE) mam_invalidate(lower_ifunc_run());
+            case .FATLTO_CLEANUP; if should_run_pass(node, NONE) mam_invalidate(fatlto_cleanup_run());
+            case .HIPSTDPAR_INTERPOSE_ALLOC; if should_run_pass(node, NONE) mam_invalidate(hipstdpar_interpose_alloc_run());
+            case .HIPSTDPAR_MATH_FIXUP; if should_run_pass(node, NONE) mam_invalidate(hipstdpar_math_fixup_run());
             case .ELIM_AVAIL_EXTERN; if should_run_pass(node, NONE) mam_invalidate(elim_avail_extern_run());
             case .INTERNALIZE; if should_run_pass(node, NONE) mam_invalidate(internalize_run(node));
             case .ASSIGN_GUID; if should_run_pass(node, NONE) mam_invalidate(assign_guid_run());
@@ -1720,6 +1770,14 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .LOWER_INVOKE; return lower_invoke_run(f);
         case .INDIRECTBR_EXPAND; return indirectbr_expand_run(f);
         case .INTERLEAVED_ACCESS; return interleaved_access_run(f);
+        case .INSTNAMER; return instnamer_run(f);
+        case .STRIP_CONVERGENCE_INTRINSICS; return strip_convergence_intrinsics_run(f);
+        case .REG2MEM; return reg2mem_run(f);
+        case .NORMALIZE; return normalize_run(f, node);
+        case .PRINT_STACK_SAFETY_LOCAL; return print_stack_safety_local_run(f);
+        case .LINT; return lint_run(f, node.name == "lint<abort-on-error>");
+        case .PRINT_FUNC_PROPERTIES; return print_func_properties_run(f);
+        case .PRINT_STACK_LIFETIME; return print_stack_lifetime_run(f, node.name == "print<stack-lifetime><must>");
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

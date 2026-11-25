@@ -40,7 +40,7 @@ lib/Transforms/InstCombine/InstCombineCasts.cpp 0.95
 lib/Support/APInt.cpp 0.5
 lib/IR/DebugInfoMetadata.cpp 0.45
 lib/Transforms/Utils/BuildLibCalls.cpp 0.95
-lib/IR/DebugInfo.cpp 0.1
+lib/IR/DebugInfo.cpp 0.2  # + DebugInfoFinder (pass_strip_dead_debug_info.jai)
 lib/Analysis/MemorySSA.cpp 0.9  # no loop-scoped MemorySSA(Loop&), dot printer, legacy pass
 lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95
 lib/IR/ConstantRange.cpp 0.8
@@ -167,7 +167,7 @@ lib/Transforms/IPO/Inliner.cpp 0.85
 lib/Transforms/IPO/AlwaysInliner.cpp 0.95
 lib/Transforms/Utils/InlineFunction.cpp 0.85  # not inlineRetainOrClaimRVCalls (ObjC ARC), memprof metadata, strictfp hosts, convergence edge cases (fail loudly)
 lib/Transforms/IPO/ModuleInliner.cpp 0.9  # manual: ModuleInlinerPass::run as module_inliner_run (heuristic 0.03: renamed)
-lib/Analysis/ProfileSummaryInfo.cpp 0.75  # not the legacy wrapper / print-profile-summary
+lib/Analysis/ProfileSummaryInfo.cpp 0.85  # not the legacy wrapper
 lib/IR/ProfileSummary.cpp 0.6  # getFromMD, getMD (sp_summary_md); no printSummary
 lib/Transforms/Vectorize/LoopVectorizationLegality.cpp 0.96  # incl. outer loops (canVectorizeOuterLoop, uniform loop nests, outer inductions); no histograms, canUncountableExitConditionLoadBeMoved (side-effect early exits)
 lib/Transforms/Vectorize/LoopVectorize.cpp 0.88  # driver, hints, max VF (fixed, scalable, outer-loop), decisions, legacy cost model (getInstructionCost family incl. getReductionPatternCost, collectInstsToScalarize, expectedCost, vector-library variants), precomputeCosts / cost / computeBestVF, selectInterleaveCount, plan building (inner and outer loops), processLoop tail, GeneratedRTChecks, executePlan, skeleton, epilogue vectorization, partial alias masking; no histograms, EVL, remarks
@@ -234,7 +234,7 @@ lib/Analysis/AssumeBundleQueries.cpp 0.4  # fillMapFromAssume, getKnowledgeFromU
 # L2.lto / L2.lto-passes (jai_lto, 2026-11)
 lib/Transforms/IPO/MergeFunctions.cpp 0.95  # no doFunctionalCheck (debug only), runOnFunctions
 lib/Transforms/Utils/FunctionComparator.cpp 0.95  # equality is exact; the order between unequal functions only approximately LLVM's (unused)
-lib/IR/StructuralHash.cpp 0.3  # StructuralHash(F) without DetailedHash
+lib/IR/StructuralHash.cpp 0.95  # detailed and call-target-ignored hashes too (analysis_printers_extras_b.jai)
 lib/Transforms/IPO/CrossDSOCFI.cpp 1.0
 lib/Transforms/IPO/GlobalSplit.cpp 1.0
 lib/Transforms/IPO/WholeProgramDevirt.cpp 0.75  # manual: DevirtModule complete (import/export without writing summaries); no DevirtIndex, index visibility updates, updatePublicTypeTestCalls, speculative / fallback devirtualization, remarks (heuristic 0.89)
@@ -256,8 +256,8 @@ lib/Transforms/Scalar/GVNSink.cpp 0.95  # jai_newgvn: complete except the addres
 lib/Transforms/Scalar/GVNHoist.cpp 0.97  # jai_newgvn: all but rank() and the (output-neutral) rank sort of the VNs
 lib/CodeGen/WinEHPrepare.cpp 0.45  # the IR preparation opt runs; not the EH state numbering (calculate*StateNumbers, only for MachineFunctions)
 lib/Transforms/Instrumentation/AddressSanitizer.cpp 0.9  # no AMDGPU paths, no Android ifunc shadow, no LLVM_DEBUG
-lib/Analysis/StackSafetyAnalysis.cpp 0.7  # no ModuleSummaryIndex (ThinLTO) paths, no printers / param summaries
-lib/Transforms/Utils/ModuleUtils.cpp 0.55  # appendTo*, ctors, kcfi; not transformGlobal*, removeFromUsedLists, embedBuffer, lowerGlobalIFunc
+lib/Analysis/StackSafetyAnalysis.cpp 0.8  # no ModuleSummaryIndex (ThinLTO) paths / param summaries; printers in analysis_printers_extras_b.jai
+lib/Transforms/Utils/ModuleUtils.cpp 0.6  # appendTo*, ctors, kcfi, lowerGlobalIFuncUsersAsGlobalCtor; not transformGlobal*, removeFromUsedLists, embedBuffer
 lib/Transforms/Utils/Instrumentation.cpp 1.0  # PrepareToSplitEntryBlock in pass_sancov.jai
 lib/Demangle/Demangle.cpp 0.3  # with a small subset of the Itanium / Microsoft demanglers (headers)
 lib/Transforms/Instrumentation/InstrProfiling.cpp 0.85  # jai_pgo: all but the GPU (offload) paths and vtable value profiling
@@ -266,7 +266,7 @@ lib/ProfileData/InstrProf.cpp 0.3  # jai_pgo: names, name vars, section names, n
 lib/Transforms/Coroutines/CoroSplit.cpp 0.97
 lib/Transforms/Coroutines/CoroElide.cpp 0.9  # remarks, -coro-elide-info-output-file
 lib/Transforms/Coroutines/CoroAnnotationElide.cpp 0.9  # remarks, -coro-elide-branch-ratio flag
-lib/Analysis/StackLifetime.cpp 0.75  # May (coro_frame) and Must (asan) liveness; no printer
+lib/Analysis/StackLifetime.cpp 0.95  # May and Must liveness, the annotated printer
 lib/Transforms/Instrumentation/PGOInstrumentation.cpp 0.45  # jai_pgo: pgo-instr-gen (FDO, block coverage) complete but ctx-instr-gen; setProfMetadata; no pgo-instr-use (PGOUseFunc, indexed profile reader)
 lib/Support/CRC.cpp 0.3  # jai_pgo: JamCRC
 lib/Transforms/Instrumentation/MemorySanitizer.cpp 0.75  # no ARM SIMD (NEON/SVE) handlers, no AArch64/PPC/SystemZ/i386/generic vararg helpers, no dumpInst
@@ -321,3 +321,10 @@ lib/Support/SipHash.cpp 0.5  # 64-bit getStableSipHash only
 lib/Target/X86/X86ISelLoweringCall.cpp 0.02  # only the stack guard / safestack hooks (hardening_target.jai)
 lib/Target/X86/X86ISelLowering.cpp 0.001  # useStackGuardMixFP
 lib/CodeGen/TargetLoweringBase.cpp 0.03  # the stack protector / safestack defaults
+lib/Transforms/Utils/IRNormalizer.cpp 0.97  # metadata operands and same-named commutative operands fail loudly
+lib/Transforms/IPO/StripSymbols.cpp 0.85  # not strip-debug-declare; more than one live CU fails loudly
+lib/Transforms/HipStdPar/HipStdPar.cpp 0.6  # not HipStdParAcceleratorCodeSelectionPass
+lib/Transforms/Instrumentation/PGOCtxProfFlattening.cpp 0.2  # removeInstrumentation only (no contextual profile)
+lib/Analysis/Lint.cpp 0.98  # AMDGPU const address spaces by number
+lib/Analysis/IR2Vec.cpp 0.95  # no Embedder invalidation / FunctionPropertiesInfo embedding
+lib/Analysis/FunctionPropertiesAnalysis.cpp 0.55  # not FunctionPropertiesUpdater (ML inliner)

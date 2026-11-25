@@ -28,6 +28,8 @@ Stack_Safety_Global :: struct {
     fns: [..] Ss_Fn;
     safe_allocas: Table(Value_Id, bool);
     unsafe_accesses: Table(Value_Id, bool);
+    // GVToSSI as printed: the data-flow ranges with the local (unresolved) calls (createGlobalStackSafetyInfo)
+    print_fns: [..] Ss_Fn;
 }
 
 stack_safety_global_init :: (g: *Stack_Safety_Global) {
@@ -35,6 +37,7 @@ stack_safety_global_init :: (g: *Stack_Safety_Global) {
     g.fns.allocator = temp;
     g.safe_allocas.allocator = temp;
     g.unsafe_accesses.allocator = temp;
+    g.print_fns.allocator = temp;
 }
 
 stack_safety_is_safe :: (g: *Stack_Safety_Global, ai: Value_Id) -> bool {
@@ -442,5 +445,11 @@ ss_get_info :: (g: *Stack_Safety_Global) {
             if cr_contains_range(ss_static_alloca_size_range(ai), a.range) table_set(*g.safe_allocas, ai, true);
             for x: a.unsafe table_set(*g.unsafe_accesses, x, true);
         }
+    }
+    for fs, i: d.fns {
+        pf := ss_copy_fn(fs);
+        for * pf.alloca_uses it.calls = fns[i].alloca_uses[it_index].calls;
+        for * pf.param_uses it.calls = fns[i].param_uses[it_index].calls;
+        array_add(*g.print_fns, pf);
     }
 }

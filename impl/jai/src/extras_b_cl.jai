@@ -18,7 +18,39 @@ extras_b_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool 
         case "structurizecfg-guess-address-order"; scz_guess_address_order = smisc_bool(name, value, has_value);   // ours
         case "structurizecfg-trace"; scz_trace = true;   // debugging aid (ours)
         case "verify-region-info"; ri_verify_region_info = smisc_bool(name, value, has_value);
+        case "strip-global-constants"; strip_global_constants = smisc_bool(name, value, has_value);
+        case "rename-exclude-function-prefixes"; mr_cl.exclude_function_prefixes = copy_string(value);
+        case "rename-exclude-alias-prefixes"; mr_cl.exclude_alias_prefixes = copy_string(value);
+        case "rename-exclude-global-prefixes"; mr_cl.exclude_global_prefixes = copy_string(value);
+        case "rename-exclude-struct-prefixes"; mr_cl.exclude_struct_prefixes = copy_string(value);
+        case "rename-only-inst"; mr_cl.only_inst = smisc_bool(name, value, has_value);
+        case "normalize-guess-address-order"; irn_guess_address_order = smisc_bool(name, value, has_value);   // ours
+        case "strip-dead-debug-info-guess-address-order"; sddi_guess_address_order = smisc_bool(name, value, has_value);   // ours
+        case "enable-detailed-function-properties"; fpi_detailed = smisc_bool(name, value, has_value);
+        case "big-basic-block-instruction-threshold"; fpi_big_bb_threshold = smisc_int(name, value, has_value);
+        case "medium-basic-block-instruction-threshold"; fpi_medium_bb_threshold = smisc_int(name, value, has_value);
+        case "call-with-many-arguments-threshold"; fpi_many_args_threshold = smisc_int(name, value, has_value);
+        case "stack-safety-guess-address-order"; ss_guess_address_order = smisc_bool(name, value, has_value);   // ours
+        case "ir2vec-vocab-path"; ir2vec_vocab_path = copy_string(value);
+        case "ir2vec-opc-weight"; ir2vec_opc_weight = extras_b_float(name, value);
+        case "ir2vec-type-weight"; ir2vec_type_weight = extras_b_float(name, value);
+        case "ir2vec-arg-weight"; ir2vec_arg_weight = extras_b_float(name, value);
+        case "ir2vec-kind";
+            if value == {
+                case "symbolic"; ir2vec_flow_aware = false;
+                case "flow-aware"; ir2vec_flow_aware = true;
+                case; fatal(tprint("opt: Cannot find option named '%'!", value));
+            }
         case; return false;
     }
     return true;
+}
+
+// cl::parser<float>: parseDouble, then (float)
+extras_b_float :: (name: string, value: string) -> float32 {
+    cs := temp_c_string(value);
+    end: *u8;
+    d := ir2vec_strtod(cs, *end);
+    if value.count == 0 || end != cs + value.count fatal(tprint("opt: for the --% option: '%' value invalid for floating point argument!", name, value));
+    return cast(float32) d;
 }

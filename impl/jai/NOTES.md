@@ -237,6 +237,9 @@ these flags, so they cannot be swept against the oracle; they exist to look at w
 | structurizecfg (SSAUpdaterBulk's deduplicatePass: a `SmallDenseMap<BasicBlock *, unsigned>` walk) | deduplicating one block's new phis changes whether another block's new phis are identical | `-structurizecfg-guess-address-order` |
 | structurizecfg (DenseMap walks with early exits in isPredictableTrue / dominatesPredicates) | only the dominator tree's slow-query count differs; `print<domtree>` of such a tree with invalid DFS numbers fails | none |
 | lower-switch (`SmallPtrSet<BasicBlock *, 8>` DeleteList) | more than 8 blocks to delete | none |
+| normalize (`reorderInstructionOperandsByNames` sorts `(name, Value *)` pairs) | two different operands of a commutative instruction with the same operand text | `-normalize-guess-address-order` |
+| strip-dead-debug-info (`std::set<DICompileUnit *>` LiveCUs rebuilds llvm.dbg.cu) | dead CUs are dropped and more than one CU stays live | `-strip-dead-debug-info-guess-address-order` |
+| print<stack-safety-local>, print-stack-safety (`UseInfo::Calls`, a `std::map` by `(ParamNo, Callee *)`) | two different callees for one argument number of a use (~220 corpus files) | `-stack-safety-guess-address-order` |
 | codegenprepare, function-specialization, InstCombine fsqrt, attributor (signature rewrites), SLP reorder | already fail loudly or check order independence where they meet pointer order (see their sections) | none |
 
 Audited and order-independent (no flag): memdep's NonLocalDepEntry sort (GVN only materializes unnamed values in
@@ -2435,3 +2438,36 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
 - SafeStack sizes and offsets are LLVM's `unsigned` (32-bit): huge allocas wrap exactly as there. StackLifetime's
   constructor collects the markers, so -safe-stack-coloring=0 still erases them and the full live range has
   Instructions.size() bits.
+
+## Utility passes and misc analysis printers (L1.extra.utility 41/44, L1.extra.analysis-misc COMPLETE 58/58; /root/jai_extras_b)
+
+- Files: pass_utility_misc.jai (instnamer, strip-convergence-intrinsics, strip, strip-nondebug,
+  strip-dead-cg-profile, metarenamer), pass_utility_module.jai (reg2mem, lower-global-dtors, lower-ifunc,
+  fatlto-cleanup, hipstdpar-interpose-alloc / -math-fixup, ctx-prof-flatten), pass_normalize.jai (IRNormalizer),
+  pass_strip_dead_debug_info.jai (+ DebugInfoFinder), pass_lint.jai (Lint + FindInsertedValue),
+  ir2vec.jai (vocabulary JSON reader, embedders, `print<ir2vec>`, `print<ir2vec-vocab>`),
+  analysis_printers_extras_b.jai (print<hash-recognize> (a loop pass), print<structural-hash>[<detailed>|
+  <call-target-ignored>], print-profile-summary, print<stack-safety-local>, print-stack-safety,
+  print<stack-lifetime><may|must>, print<func-properties>). The cl::opts are in extras_b_cl.jai.
+- Utility remaining: 3 strip-dead-debug-info tests keep several CUs live and fail loudly on the CU set's pointer
+  order (see the address-order table). Not ported: strip-debug-declare, hipstdpar-select-accelerator-code,
+  ctx-prof-flatten with a contextual profile (`-use-ctx-profile` is not an option of ours: unsupported-option
+  error) and ctx-prof-flatten-prethinlink (not registered).
+- Shared fixes: `set_name` creates the new name before dropping the old one (setNameImpl; metarenamer's numbering)
+  and caps local names at 1024 bytes; `Crit_Edge_Options.preserve_loop_simplify` defaults to true like LLVM's.
+- ir2vec.jai calls libc `strtod` (#foreign, for JSON numbers and `cl::opt<float>` values, like LLVM's parsers) and
+  formats `%.2f` itself, exactly (ir2vec_fmt2). Not a new dependency: libc is already linked.
+- Known residual (silent, 1 corpus file): LLVM 23 has two zero constants for FP vectors that print the same:
+  `ConstantAggregateZero` (AutoUpgrade's x86 maskz upgrades call `ConstantAggregateZero::get`) and a ConstantFP
+  splat (`Constant::getNullValue`, the parser). impl/jai has one, so print<func-properties> counts an upgraded
+  maskz zero as a ConstantFP operand (MemorySanitizer/X86/avx512-intrinsics-upgrade.ll, detailed only).
+- Sweeps (whole corpus, 10828 files): instnamer, strip-convergence-intrinsics, strip-dead-cg-profile,
+  lower-global-dtors, lower-ifunc, fatlto-cleanup, hipstdpar-*, metarenamer, `require<loops>,break-crit-edges`,
+  ctx-prof-flatten all identical; reg2mem 10821 + 7 llvm-failed; strip-dead-debug-info 10826 + 2 loud; normalize
+  10610 + 218 loud (metadata operands, same-named operands, unnamed struct types in constants), 0 differs;
+  lint 10821 + 1 loud (known bits of x86 hadd) + 6 llvm-failed; print<structural-hash> / <detailed> /
+  <call-target-ignored> 10828 each; print-profile-summary 10826; print<hash-recognize> 10828;
+  print<stack-safety-local> / print-stack-safety 10603 + 225 loud (callee order); print<stack-lifetime><may> /
+  <must> 10828; print<func-properties> (plain and detailed) identical but for the residual above; print<ir2vec>
+  symbolic and flow-aware 10828 (with the dummy_3D_nonzero_opc vocabulary).
+
