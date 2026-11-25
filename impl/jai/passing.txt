@@ -15513,6 +15513,7 @@ tests/imported/llvm/Transforms/LoopVectorize/global_alias.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/global_alias.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/hints-trans.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/hints-trans.ll::roundtrip
+tests/imported/llvm/Transforms/LoopVectorize/histograms.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/histograms.ll::roundtrip
 tests/imported/llvm/Transforms/LoopVectorize/hoist-and-sink-mem-ops-with-invariant-pointers.ll::opt
 tests/imported/llvm/Transforms/LoopVectorize/hoist-and-sink-mem-ops-with-invariant-pointers.ll::roundtrip
@@ -21922,6 +21923,8 @@ tests/pass/instcombine/phi-of-cmps-different-predicates.ll::opt
 tests/pass/instcombine/phi-of-cmps-different-predicates.ll::roundtrip
 tests/pass/instsimplify/fcmp-ranges-fp80-fp128.ll::opt
 tests/pass/instsimplify/fcmp-ranges-fp80-fp128.ll::roundtrip
+tests/pass/loop-vectorize/histogram-variants.ll::opt
+tests/pass/loop-vectorize/histogram-variants.ll::roundtrip
 tests/pass/mem2reg/phi-dbg-value-order.ll::opt
 tests/pass/mem2reg/phi-dbg-value-order.ll::roundtrip
 tests/pass/memcpyopt/memset-length-wraps.ll::opt
@@ -22072,6 +22075,7 @@ tests/roundtrip/intrinsics/pass-created-instrprof.ll::roundtrip
 tests/roundtrip/intrinsics/pass-created-loop-vectorize.ll::roundtrip
 tests/roundtrip/intrinsics/pass-created.ll::roundtrip
 tests/roundtrip/intrinsics/reloc-none.ll::roundtrip
+tests/roundtrip/intrinsics/vector-histogram.ll::roundtrip
 tests/roundtrip/intrinsics/verifier-decls.ll::roundtrip
 tests/roundtrip/intrinsics/x86-upgrade-targets.ll::roundtrip
 tests/roundtrip/metadata/named_and_attached.ll::roundtrip
