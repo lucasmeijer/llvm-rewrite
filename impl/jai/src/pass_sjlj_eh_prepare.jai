@@ -127,7 +127,7 @@ sjlj_setup_function_context :: (s: *Sjlj, f: Value_Id, lpads: [] Value_Id) {
     }
     b: Irb; irb_set_before(*b, block_terminator(entry));
     pers_ptr := sjlj_gep2(*b, s.fctx_ty, s.func_ctx, 0, 3, "pers_fn_gep");
-    irb_store(*b, fn_personality(f), pers_ptr, dl_abi_align(ir.t_ptr), true);
+    irb_store(*b, fn_personality(f), pers_ptr, dl_abi_align(vtype(fn_personality(f))), true);
     lsda := irb_insert(*b, sjlj_call(s.lsda_addr_fn, .[]), "lsda_addr");
     lsda_ptr := sjlj_gep2(*b, s.fctx_ty, s.func_ctx, 0, 4, "lsda_gep");
     irb_store(*b, lsda, lsda_ptr, dl_abi_align(ir.t_ptr), true);
