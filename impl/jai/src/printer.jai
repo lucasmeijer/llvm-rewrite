@@ -349,7 +349,9 @@ called_function :: (i: Value_Id) -> Value_Id {
 }
 callee_operand :: (i: Value_Id) -> Value_Id { return op(i, nops(i) - 1); }
 
-process_function :: (f: Value_Id) {
+// md_only: SlotTracker::processFunctionMetadata only (processModule with ShouldInitializeAllMetadata), no value or
+// call-site attribute slots
+process_function :: (f: Value_Id, md_only := false) {
     ensure_slot_arrays();
     for W.ftouched W.fslot[it] = -1;
     W.ftouched.count = 0;
@@ -382,6 +384,7 @@ process_function :: (f: Value_Id) {
         }
         b = block(b).next;
     }
+    if md_only return;
     if g.nargs > 0 for ai: 0..g.nargs-1 {
         a := fn_arg(f, ai);
         if vname(a).count == 0 { W.fslot[a] = next; next += 1; array_add(*W.ftouched, a); }

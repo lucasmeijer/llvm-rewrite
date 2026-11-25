@@ -37,7 +37,7 @@ printer_begin_function :: (f: Value_Id, all_md := false) {
     if !print_state.module_ready {
         type_printing_init();
         process_module();
-        if all_md for g: ir.m_functions process_function(g);
+        if all_md for g: ir.m_functions process_function(g, md_only = true);   // processFunctionMetadata
         print_state.module_ready = true;
         print_state.module_md_count = W.md_order.count;
         print_state.module_as_count = W.as_order.count;

@@ -44,7 +44,7 @@ vst_flush :: () {
         // function's metadata gets its slot when the module is processed, in function order
         vst.module_done = true;
         process_module();
-        for g: ir.m_functions process_function(g);
+        for g: ir.m_functions process_function(g, md_only = true);   // processFunctionMetadata
         for W.ftouched W.fslot[it] = -1;
         W.ftouched.count = 0;
     }

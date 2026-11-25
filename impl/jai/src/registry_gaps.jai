@@ -27,6 +27,8 @@ Gap_Kind :: enum u8 {
     INLINER_WRAPPER_NO_MANDATORY_FIRST;
     // registry_printers.jai
     PRINT_CFG_SCCS; PRINT_DOMFRONTIER;
+    // registry_small_passes.jai
+    STRIP_GC_RELOCATES; FLATTEN_CFG;
 }
 
 Gap_Info :: struct {
@@ -115,6 +117,8 @@ GAP_PASS_TABLE :: Gap_Info.[
 
     // ---- printers (registry_printers.jai; RequiredPassInfoMixin)
     .{"print<cfg-sccs>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_CFG_SCCS},
+    .{"flatten-cfg", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .FLATTEN_CFG},
+    .{"strip-gc-relocates", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .STRIP_GC_RELOCATES},
     .{"print<domfrontier>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_DOMFRONTIER},
 ];
 
@@ -212,6 +216,8 @@ gap_run_function :: (node: *Pass_Node, f: Value_Id) -> Preserved {
             write_string(tprint("%\n", vname(f)), to_standard_error = true);
             return PRESERVE_ALL;
         case .PRINT_CFG_SCCS; return print_cfg_sccs_run(f);
+        case .STRIP_GC_RELOCATES; return strip_gc_relocates_run(f);
+        case .FLATTEN_CFG; return flatten_cfg_run(f);
         case .PRINT_DOMFRONTIER; return print_domfrontier_run(f);
         case .TRIGGER_CRASH; gap_abort();
         case .TRIGGER_VERIFIER_ERROR;
