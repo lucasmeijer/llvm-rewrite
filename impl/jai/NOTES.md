@@ -2236,3 +2236,35 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   `ConstantInt::get` indices), `scalarizer<load-store;min-bits=32>` 10811, `scalarizer<load-store;min-bits=16>,dce`
   10810, `--with-test-flags scalarizer<load-store>` 13119 (rest: other passes' flags), tests/perf/compile 4/4;
   scalarize-masked-mem-intrin 10817, --with-test-flags 13129 (rest: other passes' flags).
+
+## GC statepoints (L1.extra.gc-statepoints COMPLETE 156/156; /root/jai_extras_c)
+
+- `pass_rs4gc.jai`: RewriteStatepointsForGC (module pass) with its liveness (`Rs_Liveness`: Kill/Live/LiveIn/LiveOut
+  SetVectors per block), findBasePointer's BDVState fixpoint, rematerialization (at uses and after statepoints,
+  TTI cast costs; getAddressComputationCost is 0 without a SCEV on every target), statepoint / gc.relocate /
+  gc.result creation (IRBuilder's CreateGCStatepointCall/Invoke), relocationViaAlloca + PromoteMemToReg, and
+  stripNonValidData. `pass_place_safepoints.jai`: PlaceSafepoints (fresh DT / LoopInfo / SCEV like its legacy FPM,
+  the poll is inlined with InlineFunction). `safepoint_ir_verifier.jai`: verify<safepoint-ir>.
+- Release-build semantics: RS4GC's asserts ("support for FCA unimplemented", "non-leaf call without deopt info")
+  are no-ops in LLVM's release build, so they are no-ops here (such values are never live).
+- Address order: relocationViaAlloca walks a DenseMap, but only to place loads and stores that PromoteMemToReg
+  removes; the allocas themselves are created in Live order. PlaceSafepoints sorts the poll locations by block name
+  with std::sort: below 17 elements that is an insertion sort (stable), so ties keep their order; with more and a
+  tie it fails loudly. verify<safepoint-ir> seeds its worklist from a DenseMap: the fixpoint is computed from both
+  block orders and fails loudly if the reports differ.
+- `for x: b..e-1` over a u32 operand range wraps when the range is empty at 0 (a zero-argument call with an empty
+  `"deopt"()` bundle): iterate in s64.
+- LoopInfo's `top_level` is already LLVM's TopLevelLoops order (`for (Loop *L : LI)`); iterating it reversed
+  placed the polls in another order (only visible with two loops: found by the stress run below).
+- `isa<IntrinsicInst>` is true for any callee named `llvm.*` (Function::isIntrinsic), also unknown ones whose
+  getIntrinsicID() is not_intrinsic: test `glob(f).intrinsic`, not `call_iid != NOT_INTRINSIC`.
+- Sweeps (whole-file): rewrite-statepoints-for-gc 10827/10827, place-safepoints 10743/10743, verify<safepoint-ir>
+  10825/10825, rewrite-statepoints-for-gc,verify<safepoint-ir> 10824/10824 identical; `--with-test-flags` 13363 / 13276
+  identical, 0 differs (280 loud: other passes' options); the RS4GC tests with -spp-rematerialization-threshold=0/100,
+  -rs4gc-clobber-non-live, -rs4gc-remat-derived-at-uses=false, -spp-print-base-pointers, and PlaceSafepoints with
+  every -spp-* option: 0 differs; `--per-function` 283 + 19 identical.
+- The corpus has almost no gc functions, so a stress run (/tmp script, not committed) added `gc "statepoint-example"`
+  to every definition of the passing files, optionally turned every `ptr` into `ptr addrspace(1)` and appended a
+  gc.safepoint_poll: rewrite-statepoints-for-gc 4903/4903 identical (the rest LLVM rejects), place-safepoints
+  1490/1490, function(place-safepoints),rewrite-statepoints-for-gc 796/796, + verify<safepoint-ir> 1058/1058. No perf
+  benchmark has gc functions (perf not run).

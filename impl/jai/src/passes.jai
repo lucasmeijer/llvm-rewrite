@@ -338,6 +338,8 @@ Pass_Kind :: enum u8 {
     ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN; TYSAN; NSAN; SANCOV; SANMD; JMC; HWASAN; WIN_EH_PREPARE; DFSAN; GCOV;
     // ObjC ARC (pass_objcarc.jai)
     OBJC_ARC; OBJC_ARC_CONTRACT; OBJC_ARC_EXPAND; PA_EVAL;
+    // GC statepoints (pass_rs4gc.jai, pass_place_safepoints.jai)
+    REWRITE_STATEPOINTS; PLACE_SAFEPOINTS; VERIFY_SAFEPOINT_IR;
     // SCCP, IPSCCP (pass_sccp.jai)
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
@@ -635,6 +637,9 @@ PASS_TABLE :: Pass_Info.[
     .{"sanmd-module", .MODULE, .SANMD, true, .DOMTREE},
     .{"jmc-instrumenter", .MODULE, .JMC, false, .DOMTREE},
     .{"hwasan", .MODULE, .HWASAN, true, .DOMTREE},
+    .{"rewrite-statepoints-for-gc", .MODULE, .REWRITE_STATEPOINTS, false, .DOMTREE},
+    .{"place-safepoints", .FUNCTION, .PLACE_SAFEPOINTS, false, .DOMTREE},
+    .{"verify<safepoint-ir>", .FUNCTION, .VERIFY_SAFEPOINT_IR, false, .DOMTREE},
     .{"objc-arc", .FUNCTION, .OBJC_ARC, false, .DOMTREE},
     .{"objc-arc-contract", .FUNCTION, .OBJC_ARC_CONTRACT, false, .DOMTREE},
     .{"objc-arc-expand", .FUNCTION, .OBJC_ARC_EXPAND, false, .DOMTREE},
@@ -1265,6 +1270,9 @@ parse_cl_opt :: (arg: string) -> bool {
     if lvlicm_parse_cl_opt(name, value, has_value) return true; // pass_loop_versioning_licm.jai (-licm-versioning-*)
     if hwl_parse_cl_opt(name, value, has_value) return true;    // pass_hardware_loops.jai (legacy-pass options, ignored)
     if luj_parse_cl_opt(name, value, has_value) return true;    // pass_loop_unroll_and_jam.jai
+    if rs4gc_parse_cl_opt(name, value, has_value) return true;     // pass_rs4gc.jai
+    if place_safepoints_parse_cl_opt(name, value, has_value) return true;   // pass_place_safepoints.jai
+    if safepoint_ir_verifier_parse_cl_opt(name, value, has_value) return true;   // safepoint_ir_verifier.jai
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1430,6 +1438,7 @@ run_module_pm :: (n: s32) {
             case .SANCOV; if should_run_pass(node, NONE) mam_invalidate(sancov_run());
             case .SANMD; if should_run_pass(node, NONE) mam_invalidate(sanmd_run());
             case .JMC; if should_run_pass(node, NONE) mam_invalidate(jmc_run());
+            case .REWRITE_STATEPOINTS; if should_run_pass(node, NONE) mam_invalidate(rewrite_statepoints_for_gc_run());
             case .HWASAN; if should_run_pass(node, NONE) mam_invalidate(hwasan_run(node.name));
             case .DFSAN; if should_run_pass(node, NONE) mam_invalidate(dfsan_run());
             case .GCOV; if should_run_pass(node, NONE) mam_invalidate(gcov_run());
@@ -1575,6 +1584,8 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .OBJC_ARC_CONTRACT; return objc_arc_contract_run(f);
         case .OBJC_ARC_EXPAND; return objc_arc_expand_run(f);
         case .PA_EVAL; return pa_eval_run(f);
+        case .PLACE_SAFEPOINTS; return place_safepoints_run(f);
+        case .VERIFY_SAFEPOINT_IR; return safepoint_ir_verifier_run(f);
         case .LOOP_SINK; return loop_sink_run(f);
         case .TRANSFORM_WARNING; return transform_warning_run(f);
         case .DROP_UNNECESSARY_ASSUMES; return drop_unnecessary_assumes_run(f, node.name);

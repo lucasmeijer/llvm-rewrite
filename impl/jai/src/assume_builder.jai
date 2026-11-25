@@ -39,6 +39,9 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     if kind == .LOOP_FUSE || kind == .LOOP_FLATTEN return;
     // LoopVersioning.cpp, LoopBoundSplit.cpp (+ CloneFunction, LoopSimplify) never call salvageKnowledge
     if kind == .LOOP_VERSIONING || kind == .LOOP_BOUND_SPLIT || kind == .LOOP_VERSIONING_LICM || kind == .HARDWARE_LOOPS || kind == .LOOP_UNROLL_AND_JAM return;
+    // RewriteStatepointsForGC.cpp never calls salvageKnowledge; PlaceSafepoints only through InlineFunction (which fails
+    // loudly in inline_function.jai under the flag)
+    if kind == .REWRITE_STATEPOINTS || kind == .PLACE_SAFEPOINTS || kind == .VERIFY_SAFEPOINT_IR return;
     fatal("-enable-knowledge-retention is not supported with pass '%' yet", name);
 }
 

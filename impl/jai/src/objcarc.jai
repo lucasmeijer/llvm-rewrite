@@ -425,7 +425,7 @@ arc_call_bundles :: (c: Value_Id, out: *[..] Arc_Bundle) {
     if n > 0 for k: 0..n-1 {
         b, e := call_bundle_range(c, k);
         ins := NewArray(cast(s64)(e - b), Value_Id,, allocator = temp);
-        for x: b..e-1 ins[x - b] = op(c, x);
+        for x: cast(s64) b..cast(s64) e - 1 ins[x - cast(s64) b] = op(c, cast(u32) x);
         array_add(out, .{call_bundle_tag(c, k), ins});
     }
 }
