@@ -2015,6 +2015,7 @@ tests/imported/llvm/Analysis/BranchProbabilityInfo/unreachable.ll::analysis
 tests/imported/llvm/Analysis/BranchProbabilityInfo/unreachable.ll::roundtrip
 tests/imported/llvm/Analysis/BranchProbabilityInfo/zero_heuristics.ll::analysis
 tests/imported/llvm/Analysis/BranchProbabilityInfo/zero_heuristics.ll::roundtrip
+tests/imported/llvm/Analysis/CallGraph/do-nothing-intrinsic.ll::opt
 tests/imported/llvm/Analysis/CallGraph/do-nothing-intrinsic.ll::roundtrip
 tests/imported/llvm/Analysis/CallGraph/printer.ll::analysis
 tests/imported/llvm/Analysis/CallGraph/printer.ll::roundtrip
@@ -21118,8 +21119,11 @@ tests/imported/llvm/Transforms/Util/PredicateInfo/unreachable.ll::analysis
 tests/imported/llvm/Transforms/Util/PredicateInfo/unreachable.ll::roundtrip
 tests/imported/llvm/Transforms/Util/add-TLI-mappings.ll::opt
 tests/imported/llvm/Transforms/Util/add-TLI-mappings.ll::roundtrip
+tests/imported/llvm/Transforms/Util/assume-builder-atomics.ll::opt
 tests/imported/llvm/Transforms/Util/assume-builder-atomics.ll::roundtrip
+tests/imported/llvm/Transforms/Util/assume-builder.ll::opt
 tests/imported/llvm/Transforms/Util/assume-builder.ll::roundtrip
+tests/imported/llvm/Transforms/Util/assume-simplify.ll::opt
 tests/imported/llvm/Transforms/Util/assume-simplify.ll::roundtrip
 tests/imported/llvm/Transforms/Util/cg-updater-dead-function-callees.ll::opt
 tests/imported/llvm/Transforms/Util/cg-updater-dead-function-callees.ll::roundtrip
@@ -21133,6 +21137,7 @@ tests/imported/llvm/Transforms/Util/dbg-call-bitcast.ll::opt
 tests/imported/llvm/Transforms/Util/dbg-call-bitcast.ll::roundtrip
 tests/imported/llvm/Transforms/Util/dbg-user-of-aext.ll::opt
 tests/imported/llvm/Transforms/Util/dbg-user-of-aext.ll::roundtrip
+tests/imported/llvm/Transforms/Util/flatten-cfg.ll::opt
 tests/imported/llvm/Transforms/Util/flatten-cfg.ll::roundtrip
 tests/imported/llvm/Transforms/Util/libcalls-fast-math-inf-loop.ll::opt
 tests/imported/llvm/Transforms/Util/libcalls-fast-math-inf-loop.ll::roundtrip
@@ -21152,6 +21157,7 @@ tests/imported/llvm/Transforms/Util/salvage-debuginfo.ll::opt
 tests/imported/llvm/Transforms/Util/salvage-debuginfo.ll::roundtrip
 tests/imported/llvm/Transforms/Util/store-first-op.ll::opt
 tests/imported/llvm/Transforms/Util/store-first-op.ll::roundtrip
+tests/imported/llvm/Transforms/Util/strip-gc-relocates.ll::opt
 tests/imported/llvm/Transforms/Util/strip-gc-relocates.ll::roundtrip
 tests/imported/llvm/Transforms/Util/strip-nonlinetable-debuginfo-cus.ll::roundtrip
 tests/imported/llvm/Transforms/Util/strip-nonlinetable-debuginfo-heapallocsite.ll::roundtrip
