@@ -1262,6 +1262,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if prof_verify_parse_cl_opt(name, value, has_value) return true;   // pass_prof_verify.jai
     if icp_parse_cl_opt(name, value, has_value) return true;   // pass_pgo_icall_prom.jai
     if memop_parse_cl_opt(name, value, has_value) return true;   // pass_pgo_memop_opt.jai
+    if chr_parse_cl_opt(name, value, has_value) return true;   // pass_chr.jai
     if spm_parse_cl_opt(name, value, has_value) return true;   // sample_profile_matcher.jai
     if merge_functions_parse_cl_opt(name, value, has_value) return true;   // pass_merge_functions.jai
     if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)

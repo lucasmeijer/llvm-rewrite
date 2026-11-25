@@ -1941,6 +1941,13 @@ is almost all `unsupported option` for pass cl::opts we don't implement (-sbvec-
   functions with one PGO-name MD5 fail loudly. In the pipelines the node's `in_lto` / `icp_sample_pgo` carry
   PGOIndirectCallPromotion(InLTO, SamplePGO). `-enable-vtable-profile-use` fails loudly when the module has type
   tests (computeVirtualCallSiteTypeInfoMap / vtable comparison are not ported).
+- `chr` (pass_chr.jai, ControlHeightReduction.cpp; regions from region_info.jai): 8/8 tests. Not ported: the
+  optimization remarks. The pass's DenseSets are only membership-tested, so no address-order dependence. The DT is
+  only updated by SplitBlock (the clones are not in it, so `Region::contains` and `dominates` see them as LLVM does).
+  Sweeps 0 differs: `require<profile-summary>,function(chr) -force-chr` (whole corpus and --with-test-flags), and
+  `sample-profile,prof-inject,require<profile-summary>,function(chr)` with `-force-chr -chr-bias-threshold=0.5
+  -profcheck-default-select-true-weight=1000 -profcheck-default-select-false-weight=1` (the sample profile only
+  provides a ProfileSummary; this is what makes CHR fire on corpus files), also over tests/perf/compile.
 - `pgo-memop-opt` (pass_pgo_memop_opt.jai, PGOMemOPSizeOpt.cpp; setProfMetadata): 4/4 tests, sweep 0 differs.
   No DomTree updates (the function's analyses are invalidated instead).
 - `prof-inject` / `prof-verify` (pass_prof_verify.jai, ProfileVerify.cpp): sweep `prof-inject` 0 differs.
