@@ -19,6 +19,10 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     // IPO passes that never call salvageKnowledge (GlobalOpt.cpp, GlobalDCE.cpp, ConstantMerge.cpp, ...)
     if kind == .GLOBAL_OPT || kind == .GLOBAL_DCE || kind == .CONSTANT_MERGE || kind == .STRIP_DEAD_PROTOTYPES ||
        kind == .ELIM_AVAIL_EXTERN || kind == .INTERNALIZE || kind == .DEAD_ARG_ELIM || kind == .ASSIGN_GUID || kind == .ARG_PROMOTION return;
+    // the CFI / devirtualization passes never call salvageKnowledge (LowerTypeTests.cpp, WholeProgramDevirt.cpp,
+    // CrossDSOCFI.cpp, GlobalSplit.cpp)
+    if kind == .CROSS_DSO_CFI || kind == .GLOBAL_SPLIT || kind == .WHOLE_PROGRAM_DEVIRT || kind == .LOWER_TYPE_TESTS ||
+       kind == .DROP_TYPE_TESTS || kind == .SIMPLIFY_TYPE_TESTS return;
     // the coroutine passes never call salvageKnowledge (their InlineFunction calls fail loudly in inline_function.jai)
     if kind == .CORO_EARLY || kind == .CORO_CLEANUP || kind == .CORO_ELIDE || kind == .CORO_SPLIT || kind == .CORO_ANNOTATION_ELIDE || kind == .CORO_COND return;
     // IROutliner.cpp, IRSimilarityIdentifier.cpp and CodeExtractor.cpp never call salvageKnowledge
