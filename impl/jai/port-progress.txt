@@ -47,10 +47,8 @@ lib/IR/ConstantRange.cpp 0.8
 lib/IR/Metadata.cpp 0.5
 lib/Transforms/InstCombine/InstCombineShifts.cpp 0.9
 lib/Analysis/BasicAliasAnalysis.cpp 0.95
-lib/Analysis/TargetTransformInfo.cpp 0.3
 lib/Transforms/Utils/BasicBlockUtils.cpp 0.78  # + SplitCallBrEdge, SplitBlockAndInsertIfThen with a lazy DTU (jai_extras_b)
 lib/Analysis/TargetTransformInfo.cpp 0.32  # + HardwareLoopInfo::canAnalyze / isHardwareLoopCandidate (pass_hardware_loops.jai)
-lib/Transforms/Utils/BasicBlockUtils.cpp 0.75
 lib/Analysis/VectorUtils.cpp 0.7  # + InterleavedAccessInfo::analyzeInterleaving / invalidation, computeMinimumValueSizes, getMetadataToPropagate, isVectorIntrinsicWithOverloadTypeAtArg
 lib/IR/Intrinsics.cpp 0.8  # + isSignatureValid / matchIntrinsicType messages (verifier_intrinsics.jai)
 lib/IR/Instruction.cpp 0.7

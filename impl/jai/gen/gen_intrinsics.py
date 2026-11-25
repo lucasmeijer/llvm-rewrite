@@ -51,8 +51,7 @@ with ThreadPoolExecutor(max_workers=os.cpu_count() or 8) as ex:
     outputs = list(ex.map(run_file, sorted(files)))
 
 # Intrinsics that passes create but that no test input mentions (LoopVectorize's masked div/rem, WholeProgramDevirt's
-# debugtrap, the ObjC ARC runtime entry points): declared in a
-# debugtrap, HardwareLoops' loop-count intrinsics): declared in a
+# debugtrap, the ObjC ARC runtime entry points, HardwareLoops' loop-count intrinsics): declared in a
 # scratch module so their attributes are read the same way.
 EXTRA_DECLS = '''
 declare <4 x i32> @llvm.masked.udiv.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
