@@ -22,6 +22,12 @@ diagnostics or struct-type addresses.
   intrinsic_addresstaken.ll`: `Just Ref` for `@llvm.stacksave` vs. a non-address-taken internal global).
 - GlobalsAA's CallGraph SCCs come from `scc_iterator` starting at the external calling node only; internal functions
   not reachable from it get no FunctionInfo.
+- That CallGraph knows `!callback` brokers (CallGraph.cpp `populateCallGraphNode`, `forEachCallbackFunction`): a call
+  to `__kmpc_fork_call(..., @outlined, ...)` gives the caller two edges, the broker and (with a null call) the
+  callback callee; the callback use itself is not address-taking (`hasAddressTaken(IgnoreCallbackUses=true)`), so an
+  internal outlined function is not called from the external node. AbstractCallSite only recognizes a broker through
+  `getCalledFunction()`, i.e. the call's function type must equal the callee's. Verified: `default<O2>` identical on
+  the 13 non-OpenMP corpus files with `!callback` (impl/jai).
 - `AnalyzeCallGraph` tests "declaration or optnone" on `SCC[0]`'s function for *every* member of an SCC (it
   uses `F`, not `SCC[i]`), and copies the SCC's FunctionInfo to the other members (`GlobalsModRef.cpp`).
 
