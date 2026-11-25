@@ -698,6 +698,18 @@ vp_execute_recipe :: (s: *Vp_State, r: Vp_Rec) {
             } else ld = irb_load(*s.b, dty, addr, vr(r).align, false, "wide.load");
             vp_apply_metadata(r, ld);
             vs_set(s, vr(r).def, ld);
+        case .HISTOGRAM;
+            // VPHistogramRecipe::execute
+            addr := vs_get(s, vp_op(r, 0));
+            inc := vs_get(s, vp_op(r, 1), true);
+            vty := vtype(addr);
+            mask: Value_Id;
+            if vp_nops(r) > 2 mask = vs_get(s, vp_op(r, 2));
+            else mask = const_all_ones_of(type_vector(type_count(vty), type_int(1), type_kind(vty) == .SVECTOR));
+            if vr(r).opcode == vp_opc(.SUB) inc = irb_binop(*s.b, .SUB, const_null_value(vtype(inc)), inc);
+            f := get_or_insert_intrinsic_declaration(iidn("llvm.experimental.vector.histogram.add"), .[vty, vtype(inc)]);
+            h := irb_call(*s.b, f, .[addr, inc, mask]);
+            vp_apply_metadata(r, h);
         case .WIDEN_STORE;
             gather := !vr(r).consecutive;
             mask: Value_Id = NONE;

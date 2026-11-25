@@ -1524,6 +1524,14 @@ Still slow / next:
   which tags the loops with `llvm.loop.vectorize.body` / `llvm.loop.vectorize.epilogue` (found by the sweep). Sweeps
   with the flag: IR 10922/10922, --with-test-flags IR and --analysis (stderr compared) 0 differs.
 
+- Histograms (`-enable-histogram-loop-vectorization`, jai_tails 2026-11): legality's
+  canVectorizeIndirectUnsafeDependences + findHistogram (`Lvl.histograms`), widenIfHistogram in
+  lvp_make_mem_op_widening_decisions (after the reduction stores and the scalar-VF clamp), VPHistogramRecipe
+  execute/cost (`lv_histogram_cost`, shared with the legacy CM's Add/Sub), the X86 type-based cost of
+  histogram.add (uadd.sat/umax/umin stay loud), no scalar interleaving with histograms. tests/pass/loop-vectorize/
+  histogram-variants.ll covers sub, constant increments, masks (tail folding, conditional) and X86 (avx512f).
+  Sweeps with the flag (plain, x86 avx2, -force-vector-width=4): 0 differs.
+
 ### LoopVectorize next steps (each fails loudly with the quoted message today)
 
 1. Histograms (`-enable-histogram-loop-vectorization`, 1 test): LAA histogram detection, VPHistogramRecipe.

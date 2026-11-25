@@ -1,7 +1,7 @@
 // BasicTTIImplBase::getIntrinsicInstrCost and getTypeBasedIntrinsicInstrCost, ported from
 // llvm/include/llvm/CodeGen/BasicTTIImpl.h. thisT() is always X86TTIImpl here (the only target), so the
 // recursive queries call the x86_* entry points. VP intrinsics, masked/strided/gather memory intrinsics,
-// histograms, cttz.elts, loop.dependence masks and multiple-result vector libcalls fail loudly.
+// histogram uadd.sat / umax / umin, cttz.elts, loop.dependence masks and multiple-result vector libcalls fail loudly.
 
 iidn :: (name: string) -> Intrinsic_Id { return intrinsic_id_by_name(name); }
 
@@ -385,8 +385,18 @@ bt_type_based_intrinsic_cost :: (t: *Tti, ica: *Ica, kind: s64) -> Cost {
         case "llvm.vector.reduce.fmin"; return x86_min_max_reduction_cost(t, iidn("llvm.minnum"), vec_op, fmf, kind);
         case "llvm.vector.reduce.fmaximum"; return x86_min_max_reduction_cost(t, iidn("llvm.maximum"), vec_op, fmf, kind);
         case "llvm.vector.reduce.fminimum"; return x86_min_max_reduction_cost(t, iidn("llvm.minimum"), vec_op, fmf, kind);
+        case "llvm.experimental.vector.histogram.add";
+            // scalarized: per lane, extract the pointer, load, add, store
+            ptrs := tys[0]; elt := tys[1];
+            if type_kind(ptrs) != .VECTOR return COST_INVALID;
+            al := dl_abi_align(elt);
+            c := x86_vector_instr_cost(t, .EXTRACTELEMENT, ptrs, kind, 1, NONE, NONE);
+            c = cost_add(c, x86_memory_op_cost(t, .LOAD, elt, al, 0, kind));
+            c = cost_add(c, x86_arith_cost(t, .ADD, elt, kind, OI_ANY, OI_ANY));
+            c = cost_add(c, x86_memory_op_cost(t, .STORE, elt, al, 0, kind));
+            return cost_mul(c, cast(Cost) type_count(ptrs));
         case "llvm.experimental.vector.match"; #through;
-        case "llvm.experimental.vector.histogram.add"; #through; case "llvm.experimental.vector.histogram.uadd.sat"; #through;
+        case "llvm.experimental.vector.histogram.uadd.sat"; #through;
         case "llvm.experimental.vector.histogram.umax"; #through; case "llvm.experimental.vector.histogram.umin";
             x86_np(tprint("getTypeBasedIntrinsicInstrCost of %", n));
         case "llvm.get.active.lane.mask";

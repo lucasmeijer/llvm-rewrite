@@ -161,6 +161,22 @@ vp_gep_flags_for_ptr :: (ptr_in: Vp_Val) -> u32 {
     }
     return 0;
 }
+// VPRecipeBuilder::widenIfHistogram: a VPHistogramRecipe (opcode, ops = bucket address, increment, [mask])
+lvp_widen_if_histogram :: (lp: *Lv_Planner, vpi: Vp_Rec) -> Vp_Rec {
+    if vr(vpi).opcode != vp_opc(.STORE) return NONE;
+    hg := lvl_histogram_info(lp.lvl, vp_underlying_instr(vpi));
+    if !hg return NONE;
+    o := inst_op(hg.update);
+    ops: [..] Vp_Val; ops.allocator = temp;
+    array_add(*ops, vp_op(vpi, 1));
+    array_add(*ops, vp_live_in(op(hg.update, 1)));
+    if lv_cm_is_mask_required(lp.cm, hg.store) { m := vp_mask_of(vpi); if m != NONE array_add(*ops, m); }
+    r := vp_new_recipe(.HISTOGRAM, ops, vr(vpi).dl);
+    vr(r).opcode = vp_opc(o);
+    for vr(vpi).md array_add(*vr(r).md, it);
+    return r;
+}
+
 // VPWidenLoadRecipe / VPWidenStoreRecipe constructors
 vp_new_widen_load :: (ld: Value_Id, addr: Vp_Val, mask: Vp_Val, consecutive: bool, md: [] Vp_Md, dl: Md_Id) -> Vp_Rec {
     r := vp_new_single_def(.WIDEN_LOAD, .[addr], vtype(ld), ld, dl);
@@ -299,7 +315,7 @@ lvp_try_to_create_widen_non_phi_recipe :: (lp: *Lv_Planner, r: Vp_Rec, range: *V
     return NONE;
 }
 
-// VPlanTransforms::makeMemOpWideningDecisions (no histograms / reduction stores / irregular types in the ported subset)
+// VPlanTransforms::makeMemOpWideningDecisions
 lvp_make_mem_op_widening_decisions :: (lp: *Lv_Planner, range: *Vf_Range) {
     mem_ops: [..] Vp_Rec; mem_ops.allocator = temp;
     for bb: vp_blocks_only_basic(vp_depth_first_shallow(vp_entry_basic_block(vp_vector_loop_region())))
@@ -333,6 +349,16 @@ lvp_make_mem_op_widening_decisions :: (lp: *Lv_Planner, range: *Vf_Range) {
     mem_ops = remaining;
     scalar :: (vf: Ec, d: *void) -> bool { return ec_is_scalar(vf); }
     if lvp_decision_and_clamp_range(range, scalar, null) return;
+    // widenIfHistogram (the rest of lowerMemoryIdioms; independent per store, so after the reduction stores)
+    if lp.lvl.histograms.count {
+        rem: [..] Vp_Rec; rem.allocator = temp;
+        for vpi: mem_ops {
+            h := lvp_widen_if_histogram(lp, vpi);
+            if h != NONE { replace_with(vpi, h); continue; }
+            array_add(*rem, vpi);
+        }
+        mem_ops = rem;
+    }
     // scalarizeMemOpsWithIrregularTypes
     remaining2: [..] Vp_Rec; remaining2.allocator = temp;
     for vpi: mem_ops {

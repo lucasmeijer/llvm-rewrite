@@ -152,12 +152,20 @@ Lvl :: struct {
     countable_exiting_blocks: [..] Value_Id;
     uncountable_exit: Uncountable_Exit_Trait;
     vec_call_variants_found: bool;
+    histograms: [..] Lv_Histogram;               // HistogramInfo list
+}
+Lv_Histogram :: struct { load: Value_Id; update: Value_Id; store: Value_Id; }
+
+// LoopVectorizationLegality::getHistogramInfo
+lvl_histogram_info :: (v: *Lvl, i: Value_Id) -> *Lv_Histogram {
+    for * v.histograms if it.load == i || it.update == i || it.store == i return it;
+    return null;
 }
 
 lvl_init :: (v: *Lvl) {
     v.inductions.allocator = temp; v.reductions.allocator = temp; v.fixed_order_recurrences.allocator = temp;
     v.induction_casts_to_ignore = iset_new(); v.conditionally_executed_ops = iset_new(); v.tail_folded_masked_ops = iset_new();
-    v.countable_exiting_blocks.allocator = temp;
+    v.countable_exiting_blocks.allocator = temp; v.histograms.allocator = temp;
 }
 
 lvl_add_exact_fp :: (v: *Lvl, i: Value_Id) { if v.exact_fp_inst == NONE v.exact_fp_inst = i; }
@@ -414,8 +422,52 @@ lvl_can_vectorize_instrs :: (v: *Lvl) -> bool {
 // LoopVectorizationLegality::canVectorizeIndirectUnsafeDependences
 lvl_can_vectorize_indirect_unsafe_dependences :: (v: *Lvl) -> bool {
     if !lvl_opts.enable_histogram return false;
-    fatal("loop-vectorize: -enable-histogram-loop-vectorization is not supported yet");
-    return false;
+    dc := *v.laa.dc;
+    if !dc.record_dependences return false;   // too many dependences: none recorded
+    iu: *Dependence = null;
+    for * dc.dependences {
+        if dep_is_safe_for_vectorization(it.type) != .UNSAFE continue;
+        if it.type != .IndirectUnsafe || iu return false;
+        iu = it;
+    }
+    if !iu return false;
+    li := dc.inst_map[iu.source];
+    si := dc.inst_map[iu.destination];
+    if inst_op(li) != .LOAD || inst_op(si) != .STORE return false;
+    return lv_find_histogram(v, li, si);
+}
+
+// findHistogram: buckets[indices[i]] += step
+lv_find_histogram :: (v: *Lvl, li: Value_Id, hst: Value_Id) -> bool {
+    // m_Store(m_BinOp(HBinOp), m_Instruction(HPtrInstr))
+    hbinop := op(hst, 0);
+    hptr := op(hst, 1);
+    if !is_inst(hbinop) || !is_binary_op(inst_op(hbinop)) || !is_inst(hptr) return false;
+    // m_Add / m_Sub of m_Load(m_Specific(HPtrInstr)) and the increment
+    o := inst_op(hbinop);
+    if o != .ADD && o != .SUB return false;
+    l0 := op(hbinop, 0);
+    if !is_inst(l0) || inst_op(l0) != .LOAD || op(l0, 0) != hptr return false;
+    inc := op(hbinop, 1);
+    if !li_is_loop_invariant(v.li, v.l, inc) return false;
+    if inst_op(hptr) != .GEP return false;
+    hidx: Value_Id = NONE;
+    for k: 1..nops(hptr) - 1 {
+        x := op(hptr, k);
+        if hidx != NONE return false;
+        if vkind(x) != .C_INT hidx = x;
+    }
+    if hidx == NONE return false;
+    // m_ZExtOrSExtOrSelf(m_Load(m_Value(VPtrVal)))
+    x := hidx;
+    if is_inst(x) && (inst_op(x) == .ZEXT || inst_op(x) == .SEXT) x = op(x, 0);
+    if !is_inst(x) || inst_op(x) != .LOAD return false;
+    ar := sc_get_scev(op(x, 0));
+    if !sc_is_addrec(ar) || sc_loop(ar) != v.l return false;
+    ld_bb := inst_block(l0);
+    if ld_bb != inst_block(hbinop) || ld_bb != inst_block(hst) return false;
+    array_add(*v.histograms, .{l0, hbinop, hst});
+    return true;
 }
 
 // LoopVectorizationLegality::isInvariantStoreOfReduction

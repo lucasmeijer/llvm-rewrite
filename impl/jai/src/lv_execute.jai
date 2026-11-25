@@ -258,7 +258,8 @@ lvp_process_best_plan :: (lp: *Lv_Planner, vf_in: Lv_Vf, plan: *Vp_Plan, user_ic
     else if !plan && user_ic > 1 interleave_loop = false;
     else if ic == 1 && user_ic <= 1 interleave_loop = false;
     else if ic > 1 && user_ic == 1 interleave_loop = false;
-    // histograms are not supported (legality)
+    // no scalar interleaving of histograms (the intrinsic exists only for VF > 1)
+    if !vectorize_loop && interleave_loop && lp.lvl.histograms.count interleave_loop = false;
     ic = ifx user_ic > 0 then user_ic else ic;
     if lv_cm_mask_partial_aliasing(lp.cm) {
         lv_dbg("LV: Not interleaving due to partial aliasing vectorization.\n");

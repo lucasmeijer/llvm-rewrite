@@ -303,7 +303,13 @@ vp_compute_cost :: (c: *Vp_Cost_Ctx, r: Vp_Rec, vf: Ec) -> Cost {
         return vp_reduction_cost(c, r, vf);
     case .INTERLEAVE; return vp_interleave_cost(c, r, vf);
     case .INTERLEAVE_EVL; vp_unported("EVL interleave group costs");
-    case .HISTOGRAM; vp_unported("histogram costs");
+    case .HISTOGRAM;
+        // VPHistogramRecipe::computeCost
+        addr_ty := vp_scalar_type(vp_op(r, 0));
+        inc := vp_op(r, 1);
+        inc_ty := vp_scalar_type(inc);
+        one := vp_is_constant_int(inc) && ap_is_one(vp_const_int_value(inc));
+        return lv_histogram_cost(t, kind, vf, addr_ty, inc_ty, cast(Opcode) vr(r).opcode, one, lv_to_vector_ty(inc_ty, vf));
     case .EXPRESSION; return vp_expression_cost(c, r, vf);
     case .REDUCTION_EVL; vp_unported("EVL reduction costs");
     }

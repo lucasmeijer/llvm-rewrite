@@ -601,7 +601,14 @@ lv_cmp_result_type :: (t: Type_Id) -> Type_Id {
 lv_cm_arith_instruction_cost :: (cm: *Lv_Cm, i: Value_Id, vf: Ec, vec_ty: Type_Id) -> Cost {
     t := cm.tti; kind := cm.cost_kind;
     o := inst_op(i);
-    // histograms are not supported (legality rejects them without -enable-histogram-loop-vectorization)
+    if (o == .ADD || o == .SUB) && ec_is_vector(vf) {
+        hg := lvl_histogram_info(cm.lvl, i);
+        if hg {
+            rhs := op(i, 1);
+            one := vkind(rhs) == .C_INT && ap_is_one(const_ap(rhs));
+            return lv_histogram_cost(t, kind, vf, vtype(op(hg.load, 0)), vtype(i), o, one, vec_ty);
+        }
+    }
     if o == .MUL {
         a := op(i, 0); b := op(i, 1);
         if (li_is_loop_invariant(cm.li, cm.l, a) && sc_is_one(pse_get_scev(cm.pse, a))) ||
@@ -617,6 +624,18 @@ lv_cm_arith_instruction_cost :: (cm: *Lv_Cm, i: Value_Id, vf: Ec, vec_ty: Type_I
     op2_info := tti_operand_info(op2);
     if op2_info.kind == OK_ANY_VALUE && lv_cm_should_consider_invariant(cm, op2) op2_info.kind = OK_UNIFORM_VALUE;
     return lt_arith_cost(t, o, vec_ty, kind, OI_ANY, op2_info, lv_inst_operands(i, false), i);
+}
+
+// The cost of a histogram update (LoopVectorizationCostModel::getInstructionCost for Add/Sub,
+// VPHistogramRecipe::computeCost): the experimental.vector.histogram.add intrinsic, a multiply unless the increment
+// is 1, and the add/sub itself
+lv_histogram_cost :: (t: *Tti, kind: s64, vf: Ec, addr_ty: Type_Id, inc_ty: Type_Id, opc: Opcode, inc_is_one: bool, vty: Type_Id) -> Lc {
+    mul: Lc = 0;
+    if !inc_is_one mul = lt_arith_cost(t, .MUL, vty, kind);
+    tys := NewArray(3, Type_Id,, temp);
+    tys[0] = lv_to_vector_ty(addr_ty, vf); tys[1] = inc_ty; tys[2] = lv_to_vector_ty(type_int(1), vf);
+    a: Ica; a.id = intrinsic_id_by_name("llvm.experimental.vector.histogram.add"); a.ret = ir.t_void; a.tys = tys; a.type_based_only = true;
+    return lc_add(lc_add(lt_intrinsic_cost(t, *a, kind), mul), lt_arith_cost(t, opc, vty, kind));
 }
 
 lv_cm_cast_instruction_cost :: (cm: *Lv_Cm, i: Value_Id, vf: Ec, vec_ty: Type_Id) -> Cost {
