@@ -2185,12 +2185,18 @@ is almost all `unsupported option` for pass cl::opts we don't implement (-sbvec-
   DT recalculation after every conditional origin store is linear per store. No @perf benchmark times dfsan.
 - **Next steps (sanitizers / instrumentation)**, by value:
   1. L1.extra.instrumentation.coverage leftovers: Instrumentor (IPO/Instrumentor*.cpp, ~3000 lines with the JSON
-     config; 4 tests, all `-passes=instrumentor` with the default config) and the rest of GCOVProfiling.
-- **insert-gcov-profiling** (`pass_gcov.jai`): only the module-level part (runOnModule, AddFlushBeforeForkAndExec,
-  the split-DWARF skip of emitProfileNotes); a compile unit that would get coverage fails loudly (.gcno writing, the
-  counters and the gcda ctor are not ported). Sweep: 10422 identical, 0 differs, 404 loud (every file with a
-  non-DWO llvm.dbg.cu). Trap: LLVM's opt writes `<name>.gcno` files into the cwd, so a sweep leaves ~150 of them in
-  the worktree (delete them: `git ls-files --others | grep gcno`).
+     config; 4 tests, all `-passes=instrumentor` with the default config).
+- **insert-gcov-profiling** (`pass_gcov.jai`, all of GCOVProfiling.cpp but XCOFF and the clang-only Filter/Exclude
+  regexes; /root/jai_instr_rest): the .gcno writer (`Gcov.out` buffer, written with libc open/write), counters,
+  writeout/reset/init functions; CFGMST from pass_pgo_instr_gen.jai with a gcov getInstrBB. All 10 GCOVProfiling and
+  5 tests/pass/insert-gcov-profiling tests pass, **including the .gcno bytes** (@opt-files, docs/testing.md "Tool
+  runs that write files"). Sweeps `--files` (scratch cwd, written files compared): plain 10918/10923 identical,
+  `--with-test-flags` 13664 identical, `-gcov-atomic-counter` on tests/e2e + PGOProfile 793/793; 0 differs. Loud: 5
+  files with two non-DWO compile units (LLVM reads `FileChecksums[1]` out of bounds: emitGlobalConstructor runs inside
+  the CU loop after the first CU). tests/perf/compile has no debug info (nothing to instrument).
+  Traps: FuncChecksum is `hash_value(std::string)` = xxh3_64bits ^ 0xff51afd7ed558ccd (release seed), truncated;
+  getFirstInsertionPt has the head bit; the `Funcs` list is never cleared between compile units; the cwd comes from
+  sys::fs::current_path ($PWD if it names "."); `cast(u32) x << 24` on a u8 shifts the u8 (parenthesize).
 - SanitizerCoverage's allow/block lists and SanitizerBinaryMetadata's ignore list go through special_case_list.jai
   (`sancov_allowlist_files` / `sancov_blocklist_files` / `sanmd_ignorelist_files`, the pass constructors' file
   lists); opt's PassRegistry entries pass none, so no test or sweep can reach them.

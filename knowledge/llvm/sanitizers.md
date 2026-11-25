@@ -46,3 +46,22 @@ and on whole-corpus sweeps (`./harness/run sweep --passes 'forceattrs,X' --extra
   `!`/`^`, `\` escapes; the last matching line of the newest matching section wins** (`inSection` walks sections in
   reverse; each section name is itself a glob, "*" for the implicit first one). `#!special-case-list-v1` switches
   patterns to regexes (`*` becomes `.*`). Verified: dfsan sweeps with hand-written ABI lists (jai NOTES.md).
+
+## GCOVProfiling (insert-gcov-profiling)
+
+Verified by byte-comparing the .gcno files with LLVM's (`@opt-files` tests, `sweep --files`; jai pass_gcov.jai).
+
+- **opt writes `<CU file stem>.gcno` into the cwd** and embeds `<cwd>/<stem>.gcda` in the IR (mangleName; the cwd is
+  `sys::fs::current_path`: `$PWD` when it names the same directory as `.`, else getcwd). An `!llvm.gcov` node
+  `!{!"path", CU}` gives both names (extension replaced); `!{!"x.gcno", !"y.gcda", CU}` gives them verbatim. A notes
+  file that cannot be opened is an `LLVMContext::emitError` (opt exits 1 after the pipeline).
+- The notes header is `oncg` + the version reversed (little endian) or `gcno` + version (big endian, from the
+  DataLayout), then the CRC stamp (JamCRC of the arc destination block numbers, byte-split), `"."` as the cwd
+  string, 0. Versions below 111 (the default `0000`) become `B11*`; the gcda version argument is `read32be("B11*")`.
+- FuncChecksum = `(uint32_t)hash_value(linkageName-or-name + line)`: xxh3_64bits of the bytes XOR the release
+  execution seed `0xff51afd7ed558ccd`.
+- Function EndLine is the line of the *first* instruction with a non-zero line (functionHasLines returns early),
+  not the maximum.
+- The function records accumulate across compile units (`Funcs` is never cleared) and FunctionIdent restarts per CU;
+  `emitGlobalConstructor` runs inside the CU loop right after the first non-DWO CU, so a second CU reads
+  `FileChecksums[1]` out of bounds (UB).

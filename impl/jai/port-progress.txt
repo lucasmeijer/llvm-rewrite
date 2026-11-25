@@ -284,7 +284,7 @@ lib/Support/SpecialCaseList.cpp 0.85  # v1 regexes only as literal text with `*`
 lib/Support/GlobPattern.cpp 0.95  # all but SlashAgnostic (Windows hosts only)
 lib/Transforms/Instrumentation/SanitizerCoverage.cpp 1.0  # allow/block lists via special_case_list.jai (constructor arguments; opt passes none)
 lib/Transforms/Instrumentation/SanitizerBinaryMetadata.cpp 1.0  # ignore list via special_case_list.jai (constructor argument; opt passes none)
-lib/Transforms/Instrumentation/GCOVProfiling.cpp 0.12  # runOnModule, AddFlushBeforeForkAndExec, the DWO-CU skip; notes/arcs emission fails loudly
+lib/Transforms/Instrumentation/GCOVProfiling.cpp 0.93  # all but the XCOFF covinit variant and the Filter/Exclude regexes (clang-only options)
 lib/CodeGen/JMCInstrumenter.cpp 1.0  # the legacy pass wrapper aside
 lib/Transforms/Instrumentation/HWAddressSanitizer.cpp 0.85  # no AArch64/RISC-V outlined checks or traps, no Android/Darwin slots, no -hwasan-random-rate, no DomTreeUpdater (analyses dropped)
 lib/Transforms/Utils/MemoryTaggingSupport.cpp 0.85  # no getDarwinSlotPtr / getAndroidSlotPtr, no AArch64 getPC
