@@ -1334,6 +1334,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if extras_b_parse_cl_opt(name, value, has_value) return true;   // extras_b_cl.jai (jai_extras_b's Layer-1b passes)
     if extras_d_parse_cl_opt(name, value, has_value) return true;   // extras_d_cl.jai (jai_extras_d's Layer-1b passes)
     if pb_parse_cl_opt(name, value, has_value) return true;
+    if gap_parse_cl_opt(name, value, has_value) return true;   // registry_gaps.jai
     if forceattrs_parse_cl_opt(name, value, has_value) return true;   // pass_misc_module.jai
     if pgo_parse_cl_opt(name, value, has_value) return true;   // pass_lto_misc.jai
     if ltt_parse_cl_opt(name, value, has_value) return true;   // pass_lower_type_tests.jai

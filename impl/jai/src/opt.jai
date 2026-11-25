@@ -420,6 +420,7 @@
 #load "pass_consthoist.jai";
 #load "pass_partially_inline_libcalls.jai";
 #load "registry_gaps.jai";
+#load "registry_printers.jai";
 
 // One binary for all three tools (build.sh copies bin/opt to bin/llc and bin/llvm-link): the tool is the base name
 // of argv[0]. Building one binary instead of three makes the optimized build 3x cheaper in time and memory.

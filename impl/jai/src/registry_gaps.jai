@@ -25,6 +25,8 @@ Gap_Kind :: enum u8 {
     TRIGGER_VERIFIER_ERROR;
     FUNCTION_SIMPLIFICATION;   // function-simplification<O#>: buildFunctionSimplificationPipeline (expanded at parse time)
     INLINER_WRAPPER_NO_MANDATORY_FIRST;
+    // registry_printers.jai
+    PRINT_CFG_SCCS; PRINT_DOMFRONTIER;
 }
 
 Gap_Info :: struct {
@@ -110,6 +112,10 @@ GAP_PASS_TABLE :: Gap_Info.[
     .{"trigger-verifier-error", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .TRIGGER_VERIFIER_ERROR},
     .{"function-simplification", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .FUNCTION_SIMPLIFICATION},
     .{"inliner-wrapper-no-mandatory-first", .MODULE, .GAP_MODULE, false, .DOMTREE, .INLINER_WRAPPER_NO_MANDATORY_FIRST},
+
+    // ---- printers (registry_printers.jai; RequiredPassInfoMixin)
+    .{"print<cfg-sccs>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_CFG_SCCS},
+    .{"print<domfrontier>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_DOMFRONTIER},
 ];
 
 // Name lookup for the rows above that take parameters: `name<params>` -> the row of `name` (parameters are checked
@@ -205,6 +211,8 @@ gap_run_function :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .HELLOWORLD;
             write_string(tprint("%\n", vname(f)), to_standard_error = true);
             return PRESERVE_ALL;
+        case .PRINT_CFG_SCCS; return print_cfg_sccs_run(f);
+        case .PRINT_DOMFRONTIER; return print_domfrontier_run(f);
         case .TRIGGER_CRASH; gap_abort();
         case .TRIGGER_VERIFIER_ERROR;
             // new UnreachableInst(Ctx, BB.getTerminator()->getIterator()) in the entry block
@@ -270,4 +278,10 @@ gap_abort :: () {
     // abort(): SIGABRT, exit status 134 from a shell (LLVM's signal handler also prints a stack dump)
     write_string("opt: trigger-crash: abort() as requested\n", to_standard_error = true);
     exit(134);
+}
+
+// cl::opts of the registry-gap passes
+gap_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
+    if registry_printers_parse_cl_opt(name, value, has_value) return true;
+    return false;
 }
