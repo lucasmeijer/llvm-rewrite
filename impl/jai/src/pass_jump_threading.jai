@@ -25,7 +25,7 @@ add_jt_cl_opts :: (list: [] Cl_Opt, start: s64) {
 Jt_Pref :: enum u8 { WANT_INTEGER; WANT_BLOCK_ADDRESS; }
 Jt_Pred_Value :: struct { c: Value_Id; bb: Value_Id; }   // PredValueInfo entry (constant, predecessor)
 
-JT_DEF_MAX_INSTS_TO_SCAN :: 6;   // DefMaxInstsToScan
+// DefMaxInstsToScan is def_max_insts_to_scan (loads.jai)
 
 Jt :: struct {
     f: Value_Id;
@@ -725,7 +725,7 @@ jt_simplify_partially_redundant_load :: (j: *Jt, load_i: Value_Id) -> bool {
     is_load_cse := false;
     // FindAvailableLoadedValue(LoadI, LoadBB, BBIt, DefMaxInstsToScan, &BatchAA, &IsLoadCSE)
     available, bb_it := find_available_ptr_load_store(mloc_get(load_i), vtype(load_i), inst(load_i).ord1 != 0, load_bb, load_i,
-                                                       JT_DEF_MAX_INSTS_TO_SCAN, aaq, *is_load_cse, null);
+                                                       def_max_insts_to_scan, aaq, *is_load_cse, null);
     if available != NONE {
         if is_load_cse {
             nl := available;
@@ -759,13 +759,13 @@ jt_simplify_partially_redundant_load :: (j: *Jt, load_i: Value_Id) -> bool {
         loc.size = ls_precise(dl_type_store_size(access_ty));
         loc.tags = aa_tags;
         pred_available, it_pos := find_available_ptr_load_store(loc, access_ty, inst(load_i).ord1 != 0, pred_bb, NONE,
-                                                                 JT_DEF_MAX_INSTS_TO_SCAN, aaq, *is_load_cse, *num_scaned);
+                                                                 def_max_insts_to_scan, aaq, *is_load_cse, *num_scaned);
         single_pred_bb := pred_bb;
-        while pred_available == NONE && single_pred_bb != NONE && it_pos == block_first(single_pred_bb) && num_scaned < JT_DEF_MAX_INSTS_TO_SCAN {
+        while pred_available == NONE && single_pred_bb != NONE && it_pos == block_first(single_pred_bb) && num_scaned < def_max_insts_to_scan {
             single_pred_bb = block_single_predecessor(single_pred_bb);
             if single_pred_bb != NONE {
                 pred_available, it_pos = find_available_ptr_load_store(loc, access_ty, inst(load_i).ord1 != 0, single_pred_bb, NONE,
-                                                                       JT_DEF_MAX_INSTS_TO_SCAN - num_scaned, aaq, *is_load_cse, *num_scaned);
+                                                                       def_max_insts_to_scan - num_scaned, aaq, *is_load_cse, *num_scaned);
             }
         }
         if pred_available == NONE { one_unavailable_pred = pred_bb; continue; }

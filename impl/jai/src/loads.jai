@@ -371,7 +371,10 @@ ap_insert_bits_trunc :: (r: APInt, v: APInt, pos: u32) -> APInt {
 is_mem_set_inst :: (i: Value_Id) -> bool { id := call_iid(i); return id == IID_MEMSET || id == IID_MEMSET_INLINE; }
 
 // FindAvailableLoadedValue(Load, BatchAA, IsLoadCSE, MaxInstsToScan = DefMaxInstsToScan)
-find_available_loaded_value :: (load: Value_Id, aaq: *Aa_Query, is_load_cse: *bool, max_insts_to_scan: u32 = 6) -> Value_Id {
+// -available-load-scan-limit (DefMaxInstsToScan, llvm/lib/Analysis/Loads.cpp)
+def_max_insts_to_scan: u32 = 6;
+find_available_loaded_value :: (load: Value_Id, aaq: *Aa_Query, is_load_cse: *bool, max_insts_to_scan_in: u32 = 0xFFFF_FFFF) -> Value_Id {
+    max_insts_to_scan := ifx max_insts_to_scan_in == 0xFFFF_FFFF then def_max_insts_to_scan else max_insts_to_scan_in;
     stripped := strip_pointer_casts(op(load, 0));
     access_ty := vtype(load);
     at_least_atomic := inst(load).ord1 != 0;

@@ -318,7 +318,7 @@ Pass_Kind :: enum u8 {
     GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
     // L1.scalar-misc (pass_lower_expect.jai, ...; options in scalar_misc_cl.jai)
     // the profile family (pass_add_discriminators.jai, profile_cl.jai, ...)
-    ADD_DISCRIMINATORS; MEMPROF; MEMPROF_MODULE; INSTRPROF; PGO_INSTR_GEN;
+    ADD_DISCRIMINATORS; MEMPROF; MEMPROF_MODULE; INSTRPROF; PGO_INSTR_GEN; SAMPLE_PROFILE; PSEUDO_PROBE; PSEUDO_PROBE_UPDATE;
     LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT; DIV_REM_PAIRS; FLOAT2INT; SINK; TAILCALLELIM; MLDST_MOTION; SPECULATIVE_EXECUTION; CALLSITE_SPLITTING;
     // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
@@ -549,6 +549,9 @@ PASS_TABLE :: Pass_Info.[
     .{"memprof-module", .MODULE, .MEMPROF_MODULE, true, .DOMTREE},
     .{"instrprof", .MODULE, .INSTRPROF, false, .DOMTREE},
     .{"pgo-instr-gen", .MODULE, .PGO_INSTR_GEN, false, .DOMTREE},
+    .{"sample-profile", .MODULE, .SAMPLE_PROFILE, false, .DOMTREE},
+    .{"pseudo-probe", .MODULE, .PSEUDO_PROBE, false, .DOMTREE},
+    .{"pseudo-probe-update", .MODULE, .PSEUDO_PROBE_UPDATE, false, .DOMTREE},
     .{"lower-expect", .FUNCTION, .LOWER_EXPECT, false, .DOMTREE},
     .{"lower-constant-intrinsics", .FUNCTION, .LOWER_CONSTANT_INTRINSICS, false, .DOMTREE},
     .{"infer-alignment", .FUNCTION, .INFER_ALIGNMENT, false, .DOMTREE},
@@ -681,6 +684,10 @@ Pass_Node :: struct {
     no_func_spec: bool;            // ipsccp: AllowFuncSpec = !isLTOPreLink(Phase)
     no_cl: bool;                   // lowertypetests / wholeprogramdevirt: built with (summary) arguments, not UseCommandLine
     late_first: s32 = -1;          // INLINER_WRAPPER_PM: the first of its late module passes (not printed)
+    sp_file: string;               // sample-profile: SampleProfileLoaderPass(File, RemappingFile, LTOPhase, ...)
+    sp_phase: Lto_Phase;
+    sp_disable_inlining: bool;
+    sp_use_flattened: bool;
 }
 
 pipeline: struct {
@@ -1177,6 +1184,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if pgo_parse_cl_opt(name, value, has_value) return true;   // pass_lto_misc.jai
     if ltt_parse_cl_opt(name, value, has_value) return true;   // pass_lower_type_tests.jai
     if profile_parse_cl_opt(name, value, has_value) return true;   // profile_cl.jai (sample profile, PGO, memprof)
+    if sp_parse_cl_opt(name, value, has_value) return true;   // pass_sample_profile.jai
     if merge_functions_parse_cl_opt(name, value, has_value) return true;   // pass_merge_functions.jai
     if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)
     if expand_memcmp_parse_cl_opt(name, value, has_value) return true;   // pass_expand_memcmp.jai
@@ -1322,6 +1330,9 @@ run_module_pm :: (n: s32) {
             case .MEMPROF_MODULE; if should_run_pass(node, NONE) mam_invalidate(memprof_module_run());
             case .INSTRPROF; if should_run_pass(node, NONE) mam_invalidate(instrprof_run());
             case .PGO_INSTR_GEN; if should_run_pass(node, NONE) mam_invalidate(pgo_instr_gen_run());
+            case .PSEUDO_PROBE; if should_run_pass(node, NONE) mam_invalidate(pseudo_probe_run());
+            case .PSEUDO_PROBE_UPDATE; if should_run_pass(node, NONE) mam_invalidate(pseudo_probe_update_run());
+            case .SAMPLE_PROFILE; if should_run_pass(node, NONE) mam_invalidate(sample_profile_run(node.sp_file, "", node.sp_phase, node.sp_disable_inlining, node.sp_use_flattened));
             case .CROSS_DSO_CFI; if should_run_pass(node, NONE) mam_invalidate(cross_dso_cfi_run());
             case .GLOBAL_SPLIT; if should_run_pass(node, NONE) mam_invalidate(global_split_run());
             case .WHOLE_PROGRAM_DEVIRT; if should_run_pass(node, NONE) mam_invalidate(whole_program_devirt_run(!node.no_cl));

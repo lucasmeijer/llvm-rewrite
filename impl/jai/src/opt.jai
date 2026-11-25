@@ -62,6 +62,13 @@
 #load "instrprof_common.jai";
 #load "pass_instrprof.jai";
 #load "pass_pgo_instr_gen.jai";
+#load "value_prof.jai";
+#load "sample_prof.jai";
+#load "sample_prof_util.jai";
+#load "sample_prof_stubs.jai";
+#load "pass_sample_profile.jai";
+#load "call_promotion.jai";
+#load "pass_pseudo_probe.jai";
 #load "pass_lower_constant_intrinsics.jai";
 #load "pass_infer_alignment.jai";
 #load "pass_div_rem_pairs.jai";

@@ -367,6 +367,9 @@ Call_Analyzer :: struct {
     has_cost_benefit: bool;      // CostBenefit (Size, CycleSavings) was computed
 }
 
+// getInlineCost without PSI and GetBFI (the sample profile loader's calls)
+ic_no_profile_analyses := false;
+
 cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indirect: bool, ignore_threshold: bool, use_eph_cache := false) -> *Call_Analyzer {
     ca := New(Call_Analyzer,, allocator = temp);
     ca.f = callee; ca.call = call;
@@ -377,7 +380,7 @@ cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indir
     ca.load_addr_set.allocator = temp; ca.sroa_arg_costs.allocator = temp;
     ca.enable_load_elimination = true;
     ca.single_bb = true;
-    ca.psi = psi_cached_or_null();
+    ca.psi = ifx ic_no_profile_analyses then null else psi_cached_or_null();
     ca.cost_benefit_enabled = cax_is_cost_benefit_analysis_enabled(ca);
     ca.compute_full_inline_cost = ic_opts.compute_full_inline_cost || params.compute_full_inline_cost || ca.cost_benefit_enabled;
     ca.threshold = params.default_threshold;
@@ -865,7 +868,7 @@ cax_update_threshold :: (ca: *Call_Analyzer) {
         has_hint := ifx fn_has_opt_size(caller) then p.has_opt_size_hint else p.has_hint;
         hint := ifx fn_has_opt_size(caller) then p.opt_size_hint_threshold else p.hint_threshold;
         if fn_has_fn_attr(ca.f, .InlineHint) ca.threshold = max_if(ca.threshold, has_hint, hint);
-        caller_bfi := get_bfi(caller);
+        caller_bfi := ifx ic_no_profile_analyses then null else get_bfi(caller);
         hot_ok, hot := cax_hot_call_site_threshold(ca, call, caller_bfi);
         if !fn_has_opt_size(caller) && hot_ok {
             ca.threshold = hot;
@@ -1171,7 +1174,7 @@ cax_visit_select :: (ca: *Call_Analyzer, si: Value_Id) -> bool {
 }
 cax_visit_switch :: (ca: *Call_Analyzer, sw: Value_Id) -> bool {
     if cax_direct_or_simplified(ca, op(sw, 0), .CONSTANT_INT) != NONE return true;
-    num_clusters, jt_size := tti_estimated_number_of_case_clusters(ca.tti, sw, ca.psi, get_bfi(ca.f));
+    num_clusters, jt_size := tti_estimated_number_of_case_clusters(ca.tti, sw, ca.psi, ifx ic_no_profile_analyses then null else get_bfi(ca.f));
     default_unreachable := switch_default_dest_unreachable(sw);
     // onFinalizeSwitch
     ic := ic_opts.instr_cost;
