@@ -16,8 +16,8 @@
 // Also updateCallProfile / updateProfileCallee (ProfileSummaryInfo in psi.jai), scaleProfData (ProfDataUtils.cpp),
 // PGOIndirectCallVisitor::tryGetVTableInstruction and Function::setEntryCount.
 //
-// Not ported (fail loudly when reached): memprof metadata (!memprof / !callsite) propagation, strictfp hosts
-// (constrained-intrinsic cloning), ObjC ARC attached calls (inlineRetainOrClaimRVCalls), PGO contextual profiles.
+// Not ported (fail loudly when reached): memprof metadata (!memprof / !callsite) propagation, PGO contextual
+// profiles.
 
 if_opts: struct {
     enable_noalias_to_md_conversion := true;       // -enable-noalias-to-md-conversion
@@ -142,9 +142,10 @@ pfc_clone_block :: (p: *Pruning_Cloner, bb: Value_Id, starting: Value_Id, to_clo
         nx := inst(ii).next;
         defer ii = nx;
         if call_iid(ii) == IID_FAKE_USE continue;
-        if p.host_strictfp fatal("inline: inlining into a strictfp function (constrained intrinsics) is not implemented yet");
-        nw := inst_clone(ii);
+        nw := ifx p.host_strictfp then pfc_clone_instruction_strictfp(ii) else inst_clone(ii);
         block_append_inst(nb, nw);
+        // all calls in a function inlined into a strictfp host get `strictfp`
+        if p.host_strictfp && inst_op(nw) == .CALL call_add_fn_attr(nw, Attr_Kind.StrictFP);
         if inst_op(nw) != .PHI {
             remap_instruction(p.vm, nw, RF_NO_MODULE_LEVEL_CHANGES);
             v := cfo_instruction(nw);
@@ -1788,10 +1789,15 @@ inline_function_impl :: (cb: Value_Id, ifi: *Inline_Function_Info, merge_attribu
             vmap_set(*vm, fn_arg(called, argno), actual);
         }
         add_alignment_assumptions(cb, ifi);
-        if knowledge_retention_enabled() fatal("inline: --enable-knowledge-retention (salvageKnowledge with an AssumptionCache) is not implemented yet");
+        // salvageKnowledge(&CB, AC): preserve the call's attributes in an llvm.assume
+        salvage_knowledge(cb, ifx ifi.use_assumption_cache then get_assumption_cache(caller) else null);
         clone_and_prune_function_into(caller, called, *vm, *returns, ".i", *info);
         first_new_block = block(last_block).next;
-        if call_bundle_index(cb, "clang.arc.attachedcall") >= 0 fatal("inline: ObjC ARC attached calls (inlineRetainOrClaimRVCalls) are not implemented yet");
+        // insert retainRV/claimRV runtime calls
+        if call_bundle_index(cb, "clang.arc.attachedcall") >= 0 {
+            rv_kind := arc_function_class(arc_attached_function(cb));
+            if rv_kind != .None inline_retain_or_claim_rv_calls(cb, rv_kind, returns);
+        }
         if ifi.update_profile {
             if ifi.caller_bfi && ifi.callee_bfi update_caller_bfi(orig_bb, *vm, ifi.caller_bfi, ifi.callee_bfi, fn_entry(called));
             ok, profile := function_entry_count(called);
@@ -2407,4 +2413,116 @@ clear_all_metadata :: (i: Value_Id) {
     all: [..] Kind_Md; all.allocator = temp;
     get_all_metadata(i, *all);
     for all set_metadata(i, it.kind, NONE);
+}
+
+// getConstrainedIntrinsicID (FPEnv.cpp over ConstrainedOps.def): the constrained intrinsic for an FP instruction
+constrained_intrinsic_id_for :: (i: Value_Id) -> (string, bool) {
+    // (intrinsic, has a rounding mode operand)
+    o := inst_op(i);
+    if o == {
+        case .FCMP; return "llvm.experimental.constrained.fcmp", false;
+        case .FADD; return "llvm.experimental.constrained.fadd", true;
+        case .FSUB; return "llvm.experimental.constrained.fsub", true;
+        case .FMUL; return "llvm.experimental.constrained.fmul", true;
+        case .FDIV; return "llvm.experimental.constrained.fdiv", true;
+        case .FREM; return "llvm.experimental.constrained.frem", true;
+        case .FPEXT; return "llvm.experimental.constrained.fpext", false;
+        case .SITOFP; return "llvm.experimental.constrained.sitofp", true;
+        case .UITOFP; return "llvm.experimental.constrained.uitofp", true;
+        case .FPTOSI; return "llvm.experimental.constrained.fptosi", false;
+        case .FPTOUI; return "llvm.experimental.constrained.fptoui", false;
+        case .FPTRUNC; return "llvm.experimental.constrained.fptrunc", true;
+        case .CALL;
+            if call_iid(i) == NOT_INTRINSIC return "", false;
+            n := intrinsic_name(call_iid(i));
+            FNS :: struct { name: string; round: bool; }
+            T :: FNS.[
+                .{"acos", true}, .{"asin", true}, .{"atan", true}, .{"atan2", true}, .{"ceil", false}, .{"cos", true},
+                .{"cosh", true}, .{"exp", true}, .{"exp2", true}, .{"floor", false}, .{"fma", true}, .{"log", true},
+                .{"log10", true}, .{"log2", true}, .{"lrint", true}, .{"llrint", true}, .{"lround", false},
+                .{"llround", false}, .{"maxnum", false}, .{"minnum", false}, .{"maximum", false}, .{"minimum", false},
+                .{"nearbyint", true}, .{"pow", true}, .{"powi", true}, .{"ldexp", true}, .{"rint", true},
+                .{"round", false}, .{"roundeven", false}, .{"sin", true}, .{"sinh", true}, .{"sqrt", true},
+                .{"tan", true}, .{"tanh", true}, .{"trunc", false}, .{"fmuladd", true},
+            ];
+            for T if n.count == it.name.count + 5 && begins_with(n, "llvm.") && slice(n, 5, n.count - 5) == it.name
+                return tconcat("llvm.experimental.constrained.", it.name), it.round;
+    }
+    return "", false;
+}
+
+// PruningFunctionCloner::cloneInstruction with HostFuncIsStrictFP: FP operations become constrained intrinsics
+// with the default environment (round.tonearest, fpexcept.ignore)
+pfc_clone_instruction_strictfp :: (ii: Value_Id) -> Value_Id {
+    cname, round := constrained_intrinsic_id_for(ii);
+    if cname == "" return inst_clone(ii);
+    args: [..] Value_Id; args.allocator = temp;
+    n := nops(ii);
+    if inst_op(ii) == .CALL n -= 1;
+    for k: 0..cast(s64) n - 1 array_add(*args, op(ii, cast(u32) k));
+    if inst_op(ii) == .FCMP array_add(*args, md_as_value(md_string(FCMP_PREDS[inst_pred(ii)])));
+    if round array_add(*args, md_as_value(md_string("round.tonearest")));
+    array_add(*args, md_as_value(md_string("fpexcept.ignore")));
+    tys: [..] Type_Id; tys.allocator = temp;
+    for args array_add(*tys, vtype(it));
+    ft := type_func(vtype(ii), tys, false);
+    id := intrinsic_id_by_name(cname);
+    otys: [..] Type_Id; otys.allocator = temp;
+    if !intrinsic_signature_valid(id, ft, *otys) fatal("internal: inline: no % with this signature", cname);
+    f := get_or_insert_intrinsic_declaration(id, otys);
+    c := new_inst(.CALL, vtype(ii), cast(u32) args.count + 1);
+    inst(c).ty2 = glob(f).value_type;
+    for args set_op(c, cast(u32) it_index, it);
+    set_op(c, cast(u32) args.count, f);
+    // (named `<name>.strict`, but CloneBlock renames it to `<name><suffix>` right after)
+    return c;
+}
+
+// inlineRetainOrClaimRVCalls (InlineFunction.cpp): the callee's returns cancel against the attached retainRV/claimRV
+inline_retain_or_claim_rv_calls :: (cb: Value_Id, rv_kind: Arc_Kind, returns: [] Value_Id) {
+    if rv_kind != .RetainRV && rv_kind != .UnsafeClaimRV fatal("internal: inline: unexpected ARC function on clang.arc.attachedcall");
+    is_retain_rv := rv_kind == .RetainRV;
+    for ri: returns {
+        ret_opnd := arc_rc_identity_root(op(ri, 0));
+        insert_retain := is_retain_rv;
+        b: Irb;
+        i := inst(ri).prev;
+        while i != NONE {
+            prev := inst(i).prev;
+            defer i = prev;
+            if is_cast_op(inst_op(i)) continue;
+            if inst_op(i) == .CALL && call_iid(i) != NOT_INTRINSIC {
+                if call_iid(i) != IID_OBJC_AUTORELEASERETURNVALUE || has_uses(i) || arc_rc_identity_root(op(i, 0)) != ret_opnd break;
+                if !is_retain_rv {
+                    irb_set_before(*b, i);
+                    irb_call(*b, get_or_insert_intrinsic_declaration(IID_OBJC_RELEASE), .[ret_opnd]);
+                }
+                erase_inst_with_metadata(i);
+                insert_retain = false;
+                break;
+            }
+            if inst_op(i) != .CALL break;
+            if arc_rc_identity_root(i) != ret_opnd || arc_has_attached_call_bundle(i) break;
+            // an unannotated call that defines RetOpnd gets the bundle (CallBase::addOperandBundle)
+            if call_bundle_index(i, "clang.arc.attachedcall") < 0 {
+                all: [..] Arc_Bundle; all.allocator = temp;
+                arc_call_bundles(i, *all);
+                ins := NewArray(1, Value_Id,, allocator = temp);
+                ins[0] = arc_attached_function(cb);
+                array_add(*all, .{"clang.arc.attachedcall", ins});
+                nc := arc_clone_call_with_bundles(i, all);
+                insert_at_position(nc, inst_block(i), i, false);
+                if vname(i).count set_name(nc, vname(i));
+                copy_metadata(nc, i);
+                rauw_with_metadata(i, nc);
+                erase_inst_with_metadata(i);
+            }
+            insert_retain = false;
+            break;
+        }
+        if insert_retain {
+            irb_set_before(*b, ri);
+            irb_call(*b, get_or_insert_intrinsic_declaration(IID_OBJC_RETAIN), .[ret_opnd]);
+        }
+    }
 }

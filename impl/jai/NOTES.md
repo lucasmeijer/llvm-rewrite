@@ -1277,10 +1277,15 @@ Still slow / next:
   (ValueHandleBase::ValueIsRAUWd without moving uses), `vmap_track_begin/_end` (tracking Value_Maps).
 - ProfileSummaryInfo: `psi_cached` (passes.jai) = the module analysis exists; `require<profile-summary>` and
   `always-inline` (MAM.getResult) set it.
-- Fail loudly: `--enable-knowledge-retention` under `cgscc`, X86TTIImpl::areTypesABICompatible with differing
-  features, `!memprof` / `!callsite`, strictfp callers, ObjC ARC attached calls, assignment tracking, the replay / ML
-  advisors, `promoteCall` (devirtualising an indirect call with a known callee), the MDNodeMapper. Remaining L2.inline
-  failures are those plus mergefunc and scc-oz-module-inliner.
+- Ported in jai_tails (2026-11): salvageKnowledge(&CB, AC) in InlineFunction (so `--enable-knowledge-retention` works
+  under cgscc / the inliners), X86TTIImpl::areTypesABICompatible in areInlineCompatible (reuses attributor_mem.jai's
+  ap_are_types_abi_compatible_for), tryPromoteCall's promoteCall (wpd_function_at_vtable_offset + atr_promote_call),
+  strictfp hosts (PruningFunctionCloner::cloneInstruction: constrained intrinsics with round.tonearest /
+  fpexcept.ignore, `strictfp` on every cloned call; the `.strict` name is overwritten by CloneBlock's suffix rename),
+  inlineRetainOrClaimRVCalls. Sweeps: inline 10915/10923 (8 loud: memprof), --with-test-flags 0 differs,
+  --enable-knowledge-retention 10915/10923.
+- Fail loudly: `!memprof` / `!callsite` propagation (needs MemoryProfileInfo.cpp's CallStackTrie), assignment
+  tracking, the replay / ML advisors, the MDNodeMapper.
 - Trap: InstCombine's transformConstExprCastCall must call `value_is_rauwd(call, new_call)` when the old call has no
   uses: the CGSCC devirt wrapper's WeakVH on the call follows it, otherwise devirt<N> sees a "new" direct call and
   repeats (Inline/inline-indirect-chain.ll).

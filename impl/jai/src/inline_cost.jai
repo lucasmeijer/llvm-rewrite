@@ -259,7 +259,10 @@ tti_are_inline_compatible :: (caller: Value_Id, callee: Value_Id) -> bool {
         rt := vtype(i);
         if type_kind(rt) != .VOID && (is_vector_type(rt) || type_kind(rt) == .STRUCT || type_kind(rt) == .ARRAY) simple = false;
         if simple continue;
-        fatal("inline: X86TTIImpl::areTypesABICompatible (vector/aggregate call types with differing target features) is not implemented yet");
+        types: [..] Type_Id; types.allocator = temp;
+        for k: 0..cast(s64) call_num_args(i) - 1 array_add(*types, vtype(call_arg(i, cast(u32) k)));
+        if type_kind(rt) != .VOID array_add(*types, rt);
+        if !ap_are_types_abi_compatible_for(caller, callee, types) return false;
     }
     return true;
 }

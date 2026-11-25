@@ -3,8 +3,8 @@
 // llvm/lib/Transforms/IPO/AlwaysInliner.cpp (`always-inline`), of the default advisor of
 // llvm/lib/Analysis/InlineAdvisor.cpp (DefaultInlineAdvisor::getAdviceImpl, getDefaultInlineAdvice, shouldInline,
 // shouldBeDeferred, InlineAdvisor::getAdvice / getMandatoryKind, setInlineRemark with -inline-remark-attribute,
-// -inline-deferral, -inline-deferral-scale), of tryPromoteCall (CallPromotionUtils.cpp; promoteCall itself fails
-// loudly) and of filterDeadComdatFunctions (ModuleUtils.cpp).
+// -inline-deferral, -inline-deferral-scale), of tryPromoteCall (CallPromotionUtils.cpp; promoteCall is atr_promote_call
+// in attributor_cleanup.jai) and of filterDeadComdatFunctions (ModuleUtils.cpp).
 //
 // The advisor's InlineAdvice objects only emit remarks and the inline-remark attribute here (opt prints no remarks
 // without -pass-remarks*), so recordUnsuccessfulInlining is the only record call with an effect.
@@ -134,8 +134,13 @@ try_promote_call :: (cb: Value_Id) -> bool {
     if vtable_ptr == NONE || !is_ptr_type(vtype(vtable_ptr)) return false;
     gvb, gvoff := strip_and_accumulate_constant_offsets(vtable_ptr, ap_zero(dl_index_type_size_bits(vtype(vtable_ptr))), true);
     if !(vkind(gvb) == .GLOBAL_VAR && glob(gvb).is_const && gv_has_definitive_initializer(gvb)) return false;
-    fatal("inline: promoting an indirect call through a constant vtable (tryPromoteCall / promoteCall) is not implemented yet");
-    return false;
+    off := ap_add(gvoff, voff);
+    if ap_active_bits(off) > 64 return false;
+    direct, _ := wpd_function_at_vtable_offset(gvb, ap_zext_value(off));
+    if direct == NONE return false;
+    if !cp_is_legal_to_promote(cb, direct) return false;
+    atr_promote_call(cb, direct);
+    return true;
 }
 // makeFunctionBodyUnreachable
 make_function_body_unreachable :: (f: Value_Id) {
