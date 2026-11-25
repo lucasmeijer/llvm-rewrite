@@ -5879,6 +5879,7 @@ tests/imported/llvm/Transforms/ConstantHoisting/X86/dbg-samebasicblock.ll::opt
 tests/imported/llvm/Transforms/ConstantHoisting/X86/dbg-samebasicblock.ll::roundtrip
 tests/imported/llvm/Transforms/ConstantHoisting/X86/delete-dead-cast-inst.ll::opt
 tests/imported/llvm/Transforms/ConstantHoisting/X86/delete-dead-cast-inst.ll::roundtrip
+tests/imported/llvm/Transforms/ConstantHoisting/X86/ehpad.ll::opt
 tests/imported/llvm/Transforms/ConstantHoisting/X86/ehpad.ll::roundtrip
 tests/imported/llvm/Transforms/ConstantHoisting/X86/ehphi.ll::opt
 tests/imported/llvm/Transforms/ConstantHoisting/X86/ehphi.ll::roundtrip
@@ -5886,7 +5887,9 @@ tests/imported/llvm/Transforms/ConstantHoisting/X86/large-immediate.ll::opt
 tests/imported/llvm/Transforms/ConstantHoisting/X86/large-immediate.ll::roundtrip
 tests/imported/llvm/Transforms/ConstantHoisting/X86/phi.ll::opt
 tests/imported/llvm/Transforms/ConstantHoisting/X86/phi.ll::roundtrip
+tests/imported/llvm/Transforms/ConstantHoisting/X86/pr43903-not-all-uses-rebased.ll::opt
 tests/imported/llvm/Transforms/ConstantHoisting/X86/pr43903-not-all-uses-rebased.ll::roundtrip
+tests/imported/llvm/Transforms/ConstantHoisting/X86/pr52689-not-all-uses-rebased.ll::opt
 tests/imported/llvm/Transforms/ConstantHoisting/X86/pr52689-not-all-uses-rebased.ll::roundtrip
 tests/imported/llvm/Transforms/ConstantHoisting/X86/stackmap.ll::opt
 tests/imported/llvm/Transforms/ConstantHoisting/X86/stackmap.ll::roundtrip
@@ -9003,6 +9006,7 @@ tests/imported/llvm/Transforms/IndVarSimplify/widen-nonnegative.ll::opt
 tests/imported/llvm/Transforms/IndVarSimplify/widen-nonnegative.ll::roundtrip
 tests/imported/llvm/Transforms/IndVarSimplify/zext-nuw.ll::opt
 tests/imported/llvm/Transforms/IndVarSimplify/zext-nuw.ll::roundtrip
+tests/imported/llvm/Transforms/IndirectBrExpand/basic.ll::opt
 tests/imported/llvm/Transforms/IndirectBrExpand/basic.ll::roundtrip
 tests/imported/llvm/Transforms/InferAddressSpaces/X86/noop-ptrint-pair.ll::roundtrip
 tests/imported/llvm/Transforms/InferAddressSpaces/fake-use.ll::roundtrip
@@ -13288,12 +13292,19 @@ tests/imported/llvm/Transforms/InstSimplify/vscale.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/vscale.ll::roundtrip
 tests/imported/llvm/Transforms/InstSimplify/xor.ll::opt
 tests/imported/llvm/Transforms/InstSimplify/xor.ll::roundtrip
+tests/imported/llvm/Transforms/InterleavedAccess/X86/interleave-load-extract-shuffle-changes.ll::opt
 tests/imported/llvm/Transforms/InterleavedAccess/X86/interleave-load-extract-shuffle-changes.ll::roundtrip
+tests/imported/llvm/Transforms/InterleavedAccess/X86/interleaved-accesses-64bits-avx-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InterleavedAccess/X86/interleaved-accesses-64bits-avx-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InterleavedAccess/X86/interleaved-accesses-64bits-avx.ll::opt
 tests/imported/llvm/Transforms/InterleavedAccess/X86/interleaved-accesses-64bits-avx.ll::roundtrip
+tests/imported/llvm/Transforms/InterleavedAccess/X86/interleavedLoad-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InterleavedAccess/X86/interleavedLoad-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InterleavedAccess/X86/interleavedLoad.ll::opt
 tests/imported/llvm/Transforms/InterleavedAccess/X86/interleavedLoad.ll::roundtrip
+tests/imported/llvm/Transforms/InterleavedAccess/X86/interleavedStore-inseltpoison.ll::opt
 tests/imported/llvm/Transforms/InterleavedAccess/X86/interleavedStore-inseltpoison.ll::roundtrip
+tests/imported/llvm/Transforms/InterleavedAccess/X86/interleavedStore.ll::opt
 tests/imported/llvm/Transforms/InterleavedAccess/X86/interleavedStore.ll::roundtrip
 tests/imported/llvm/Transforms/Internalize/2009-01-05-InternalizeAliases.ll::opt
 tests/imported/llvm/Transforms/Internalize/2009-01-05-InternalizeAliases.ll::roundtrip
@@ -15856,8 +15867,11 @@ tests/imported/llvm/Transforms/LoopVersioningLICM/metadata.ll::opt
 tests/imported/llvm/Transforms/LoopVersioningLICM/metadata.ll::roundtrip
 tests/imported/llvm/Transforms/LowerAllowCheck/lower-builtin-allow-check.ll::roundtrip
 tests/imported/llvm/Transforms/LowerAllowCheck/sanitize-check.ll::roundtrip
+tests/imported/llvm/Transforms/LowerAtomic/atomic-load.ll::opt
 tests/imported/llvm/Transforms/LowerAtomic/atomic-load.ll::roundtrip
+tests/imported/llvm/Transforms/LowerAtomic/atomic-swap.ll::opt
 tests/imported/llvm/Transforms/LowerAtomic/atomic-swap.ll::roundtrip
+tests/imported/llvm/Transforms/LowerAtomic/barrier.ll::opt
 tests/imported/llvm/Transforms/LowerAtomic/barrier.ll::roundtrip
 tests/imported/llvm/Transforms/LowerConstantIntrinsics/builtin-object-size-idxsize.ll::opt
 tests/imported/llvm/Transforms/LowerConstantIntrinsics/builtin-object-size-idxsize.ll::roundtrip
@@ -15907,7 +15921,9 @@ tests/imported/llvm/Transforms/LowerIFunc/ifunc-alias.ll::roundtrip
 tests/imported/llvm/Transforms/LowerIFunc/ifunc-nonsense-resolvers.ll::roundtrip
 tests/imported/llvm/Transforms/LowerIFunc/ifunc-program-addrspace.ll::roundtrip
 tests/imported/llvm/Transforms/LowerIFunc/lower-ifunc.ll::roundtrip
+tests/imported/llvm/Transforms/LowerInvoke/2003-12-10-Crash.ll::opt
 tests/imported/llvm/Transforms/LowerInvoke/2003-12-10-Crash.ll::roundtrip
+tests/imported/llvm/Transforms/LowerInvoke/lowerinvoke.ll::opt
 tests/imported/llvm/Transforms/LowerInvoke/lowerinvoke.ll::roundtrip
 tests/imported/llvm/Transforms/LowerMatrixIntrinsics/analysis-invalidation.ll::roundtrip
 tests/imported/llvm/Transforms/LowerMatrixIntrinsics/bigger-expressions-double.ll::roundtrip
@@ -20809,6 +20825,7 @@ tests/imported/llvm/Transforms/Util/libcalls-shrinkwrap-long-double.ll::opt
 tests/imported/llvm/Transforms/Util/libcalls-shrinkwrap-long-double.ll::roundtrip
 tests/imported/llvm/Transforms/Util/libcalls-shrinkwrap-strictfp.ll::opt
 tests/imported/llvm/Transforms/Util/libcalls-shrinkwrap-strictfp.ll::roundtrip
+tests/imported/llvm/Transforms/Util/lowerinvoke-funclet.ll::opt
 tests/imported/llvm/Transforms/Util/lowerinvoke-funclet.ll::roundtrip
 tests/imported/llvm/Transforms/Util/lowerswitch.ll::opt
 tests/imported/llvm/Transforms/Util/lowerswitch.ll::roundtrip

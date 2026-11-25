@@ -45,9 +45,9 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     // OpenMPOpt.cpp, Attributor.cpp and OMPIRBuilder.cpp never call salvageKnowledge
     if kind == .OPENMP_OPT || kind == .OPENMP_OPT_CGSCC return;
     // jai_extras_d's passes never call salvageKnowledge (LoadStoreVectorizer.cpp, ...)
-    if kind == .LOAD_STORE_VECTORIZER return;
     // NaryReassociate.cpp, SeparateConstOffsetFromGEP.cpp and StraightLineStrengthReduce.cpp never call salvageKnowledge
     if kind == .NARY_REASSOCIATE || kind == .SEPARATE_CONST_OFFSET || kind == .SLSR return;
+    if kind == .LOAD_STORE_VECTORIZER || kind == .CONSTHOIST || kind == .LOWER_ATOMIC || kind == .LOWER_INVOKE || kind == .INDIRECTBR_EXPAND || kind == .INTERLEAVED_ACCESS return;
     fatal("-enable-knowledge-retention is not supported with pass '%' yet", name);
 }
 

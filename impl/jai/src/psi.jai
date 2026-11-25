@@ -345,3 +345,34 @@ should_optimize_for_size_bb :: (bb: Value_Id, p: *Psi, bfi: *Bfi) -> bool {
     if psi_has_sample_profile(p) return ok && psi_is_cold_count_nth_percentile(p, psi_opts.pgso_cutoff_sample, c);
     return !(ok && psi_is_hot_count_nth_percentile(p, psi_opts.pgso_cutoff_instr, c));
 }
+
+// isFunctionHotOrColdInCallGraphNthPercentile<isHot>(PercentileCutoff, F, BFI)
+psi_is_function_hot_or_cold_in_call_graph_nth_percentile :: (p: *Psi, is_hot: bool, cutoff: s64, f: Value_Id, bfi: *Bfi) -> bool {
+    if f == NONE || !p.has_summary return false;
+    ok, c := function_entry_count(f);
+    if ok {
+        if is_hot && psi_is_hot_count_nth_percentile(p, cutoff, c) return true;
+        if !is_hot && !psi_is_cold_count_nth_percentile(p, cutoff, c) return false;
+    }
+    ok2, t := psi_total_call_count(p, f);
+    if ok2 {
+        if is_hot && psi_is_hot_count_nth_percentile(p, cutoff, t) return true;
+        if !is_hot && !psi_is_cold_count_nth_percentile(p, cutoff, t) return false;
+    }
+    for bb: fn_blocks(f) {
+        okb, cb := bfi_block_profile_count(bfi, bb);
+        if is_hot && okb && psi_is_hot_count_nth_percentile(p, cutoff, cb) return true;
+        if !is_hot && !(okb && psi_is_cold_count_nth_percentile(p, cutoff, cb)) return false;
+    }
+    return !is_hot;
+}
+// shouldOptimizeForSize(F, PSI, BFI, QueryType): optsize, else shouldFuncOptimizeForSizeImpl
+should_optimize_for_size_fn :: (f: Value_Id, p: *Psi, bfi: *Bfi) -> bool {
+    if fn_has_opt_size(f) return true;
+    if !p || !bfi || !p.has_summary return false;
+    if psi_opts.force_pgso return true;
+    if !psi_opts.enable_pgso return false;
+    if psi_is_pgso_cold_code_only(p) return psi_is_function_cold_in_call_graph(p, f, bfi);
+    if psi_has_sample_profile(p) return psi_is_function_hot_or_cold_in_call_graph_nth_percentile(p, false, psi_opts.pgso_cutoff_sample, f, bfi);
+    return !psi_is_function_hot_or_cold_in_call_graph_nth_percentile(p, true, psi_opts.pgso_cutoff_instr, f, bfi);
+}

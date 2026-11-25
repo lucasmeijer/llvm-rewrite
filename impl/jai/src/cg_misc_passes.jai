@@ -111,18 +111,7 @@ stack_protector_check :: (f: Value_Id) -> Preserved {
     return PRESERVE_ALL;
 }
 
-// IndirectBrExpandPass: `if (!STI.enableIndirectBrExpand()) return false` (X86: useIndirectThunkBranches, i.e. the
-// retpoline / lvi-cfi features), then nothing to do without indirectbr.
-indirectbr_expand_run :: (f: Value_Id) -> Preserved {
-    has_ibr := false;
-    for b: fn_blocks(f) { t := block_terminator(b); if t != NONE && inst_op(t) == .INDIRECTBR has_ibr = true; }
-    if !has_ibr return PRESERVE_ALL;
-    feats := "";
-    for attr_set_items(attr_list_fn(glob(f).attrs)) if it.kind == .STRING_ATTR && it.key == "target-features" feats = it.val;
-    if contains(feats, "+retpoline") || contains(feats, "+lvi-cfi") || contains(tti_opts.mattr, "retpoline") || contains(tti_opts.mattr, "lvi-cfi")
-        fatal("indirectbr-expand: indirectbr with retpoline / lvi-cfi is not supported yet");
-    return PRESERVE_ALL;
-}
+// IndirectBrExpandPass: pass_indirectbr_expand.jai
 
 // ReplaceWithVeclib::runImpl: `if (TLI.getVectorizationLibrary() == NoLibrary) return false` (llc has no
 // -vector-library here: TargetOptions::VecLib defaults to NoLibrary)

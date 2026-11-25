@@ -1,6 +1,7 @@
 // ConstantHoisting: port of llvm/lib/Transforms/Scalar/ConstantHoisting.cpp (ConstantHoistingPass::runImpl and its
-// helpers) with X86TTIImpl::getIntImmCostInst / getIntImmCostIntrin, isLegalAddImmediate, isLegalAddressingMode.
-// The constant-GEP path (-consthoist-gep, default off) fails loudly.
+// helpers, including the constant-GEP path of -consthoist-gep and the dominator-tree insertion point of
+// -consthoist-with-block-frequency=false) with X86TTIImpl::getIntImmCostInst / getIntImmCostIntrin,
+// isLegalAddImmediate, isLegalAddressingMode (TargetTransformInfoImplBase's answers without a target).
 
 Ch_User :: struct { inst: Value_Id; idx: u32; }
 Ch_Cand :: struct {
@@ -28,6 +29,9 @@ Ch_State :: struct {
     opt_for_size: bool;
     cand_vec: [..] Ch_Cand;       // ConstIntCandVec
     info_vec: [..] Ch_Info;       // ConstIntInfoVec
+    gep_gvs: [..] Value_Id;       // ConstGEPCandMap / ConstGEPInfoMap (MapVector<GlobalVariable *, ...>) keys
+    gep_cands: [..] [..] Ch_Cand;
+    gep_infos: [..] [..] Ch_Info;
     cloned_cast_keys: [..] Value_Id;   // ClonedCastMap (DenseMap; only erased at the end)
     cloned_cast_vals: [..] Value_Id;
 }
@@ -124,7 +128,7 @@ ch_find_constant_insertion_point :: (s: *Ch_State, info: *Ch_Info, mat_pts: [] V
     bbs: [..] Value_Id; bbs.allocator = temp;
     for mat_pts { b := inst_block(it); dup := false; for x: bbs if x == b dup = true; if !dup array_add(*bbs, b); }
     for bbs if it == s.entry {
-        array_add(*ips, .{s.entry, block_first(s.entry), false});   // Entry->begin()
+        array_add(*ips, .{s.entry, block_first(s.entry), true});   // Entry->begin() (head bit set)
         return ips;
     }
     if s.bfi {
@@ -137,7 +141,22 @@ ch_find_constant_insertion_point :: (s: *Ch_State, info: *Ch_Info, mat_pts: [] V
         }
         return ips;
     }
-    fatal("consthoist: -consthoist-with-block-frequency=false is not supported yet");
+    // nearest common dominators, popping the SetVector from the back
+    while bbs.count >= 2 {
+        bb1 := pop(*bbs);
+        bb2 := pop(*bbs);
+        bb := dt_find_nca(s.dt, bb1, bb2);
+        if bb == s.entry {
+            array_add(*ips, .{s.entry, block_first(s.entry), true});
+            return ips;
+        }
+        dup := false;
+        for bbs if it == bb { dup = true; break; }
+        if !dup array_add(*bbs, bb);
+    }
+    first := block_first(bbs[0]);
+    pt := ch_find_mat_insert_pt(s, first);
+    array_add(*ips, .{inst_block(pt), pt, false});
     return ips;
 }
 
@@ -187,88 +206,140 @@ ch_collect_operand :: (s: *Ch_State, map: *Table(Value_Id, s64), i: Value_Id, id
         if vkind(op(o, 0)) == .C_INT { ch_collect_const_int(s, map, i, idx, op(o, 0)); return; }
     }
     if vkind(o) == .C_EXPR {
-        if ch_cl.gep && cexpr(o).op == .GEP fatal("consthoist: -consthoist-gep is not supported yet");
+        if ch_cl.gep && cexpr(o).op == .GEP ch_collect_const_gep(s, map, i, idx, o);
         if !cgp_is_cast_op(cexpr(o).op) return;
         if vkind(op(o, 0)) == .C_INT { ch_collect_const_int(s, map, i, idx, op(o, 0)); return; }
     }
 }
 
+// collectConstantCandidates(ConstCandMap, Inst, Idx, ConstantExpr *): a constant GEP off a global variable
+ch_collect_const_gep :: (s: *Ch_State, map: *Table(Value_Id, s64), i: Value_Id, idx: u32, ce: Value_Id) {
+    if is_vector_type(vtype(ce)) return;
+    gv := op(ce, 0);
+    if vkind(gv) != .GLOBAL_VAR return;
+    off_ty := dl_index_type(vtype(gv));
+    if (cexpr(ce).flags & F_INBOUNDS) == 0 return;
+    ok, offset := gep_accumulate_constant_offset(ce, ap_zero(type_bits(off_ty)));
+    if !ok return;
+    if ap_active_bits(offset) > 32 return;   // isIntN(32)
+    cost := cast(s64) tti_int_imm_cost_inst(s.t, .ADD, true, 1, offset, off_ty, TCK_SIZE_AND_LATENCY, i);
+    g := -1;
+    for s.gep_gvs if it == gv { g = it_index; break; }
+    if g < 0 {
+        array_add(*s.gep_gvs, gv);
+        c: [..] Ch_Cand; c.allocator = temp; array_add(*s.gep_cands, c);
+        n: [..] Ch_Info; n.allocator = temp; array_add(*s.gep_infos, n);
+        g = s.gep_gvs.count - 1;
+    }
+    vec := *s.gep_cands[g];
+    found, k := table_find(map, ce);
+    if !found {
+        c: Ch_Cand;
+        c.uses.allocator = temp;
+        c.const_int = const_int(ir.t_i32, ap_limited(offset));
+        c.const_expr = ce;
+        array_add(vec, c);
+        k = vec.count - 1;
+        table_set(map, ce, k);
+    }
+    array_add(*vec.*[k].uses, .{i, idx});
+    vec.*[k].cumulative_cost += cost;
+}
+
 // maximizeConstantsInRange -> (NumUses, MaxCostItr)
-ch_maximize_constants_in_range :: (s: *Ch_State, b: s64, e: s64) -> (u32, s64) {
+ch_maximize_constants_in_range :: (s: *Ch_State, cands: *[..] Ch_Cand, b: s64, e: s64) -> (u32, s64) {
     num_uses: u32 = 0;
     max_itr := b;
     if !s.opt_for_size || e - b > 100 {
         for k: b..e-1 {
-            num_uses += cast(u32) s.cand_vec[k].uses.count;
-            if s.cand_vec[k].cumulative_cost > s.cand_vec[max_itr].cumulative_cost max_itr = k;
+            num_uses += cast(u32) cands.*[k].uses.count;
+            if cands.*[k].cumulative_cost > cands.*[max_itr].cumulative_cost max_itr = k;
         }
         return num_uses, max_itr;
     }
-    fatal("consthoist: maximizeConstantsInRange under optsize (getIntImmCodeSizeCost) is not supported yet");
-    return 0, b;
+    // getIntImmCodeSizeCost is TargetTransformInfoImplBase's 0 (X86 does not override it)
+    max_cost: s64 = -1;
+    for k: b..e-1 {
+        c := *cands.*[k];
+        v := const_ap(c.const_int);
+        ty := vtype(c.const_int);
+        cost: s64 = 0;
+        num_uses += cast(u32) c.uses.count;
+        for u: c.uses cost += cast(s64) tti_int_imm_cost_inst(s.t, inst_op(u.inst), false, cast(s32) u.idx, v, ty, TCK_SIZE_AND_LATENCY);
+        if cost > max_cost { max_cost = cost; max_itr = k; }
+    }
+    return num_uses, max_itr;
 }
 
 // findAndMakeBaseConstant
-ch_find_and_make_base_constant :: (s: *Ch_State, b: s64, e: s64) {
-    num_uses, max_itr := ch_maximize_constants_in_range(s, b, e);
+ch_find_and_make_base_constant :: (s: *Ch_State, cands: *[..] Ch_Cand, infos: *[..] Ch_Info, b: s64, e: s64) {
+    num_uses, max_itr := ch_maximize_constants_in_range(s, cands, b, e);
     if num_uses <= 1 return;
     info: Ch_Info;
     info.rebased.allocator = temp;
-    info.base_int = s.cand_vec[max_itr].const_int;
-    info.base_expr = s.cand_vec[max_itr].const_expr;
+    info.base_int = cands.*[max_itr].const_int;
+    info.base_expr = cands.*[max_itr].const_expr;
     ty := vtype(info.base_int);
     for k: b..e-1 {
-        diff := ap_sub(const_ap(s.cand_vec[k].const_int), const_ap(info.base_int));
+        diff := ap_sub(const_ap(cands.*[k].const_int), const_ap(info.base_int));
         off := ifx ap_is_zero(diff) then NONE else const_int_ap(ty, diff);
-        cty := ifx s.cand_vec[k].const_expr != NONE then vtype(s.cand_vec[k].const_expr) else NONE;
+        cty := ifx cands.*[k].const_expr != NONE then vtype(cands.*[k].const_expr) else NONE;
         r: Ch_Rebased;
-        r.uses = s.cand_vec[k].uses;
+        r.uses = cands.*[k].uses;
         r.offset = off; r.ty = cty;
         array_add(*info.rebased, r);
     }
-    array_add(*s.info_vec, info);
+    array_add(infos, info);
 }
 
-// findBaseConstants(nullptr)
-ch_find_base_constants :: (s: *Ch_State) {
+// isLegalAddImmediate / isLegalAddressingMode(Ty, nullptr, Offset, true, 0): X86, or TargetTransformInfoImplBase
+ch_is_legal_add_immediate :: (s: *Ch_State, d: s64) -> bool {
+    if s.t.kind != .X86 return false;
+    return d >= -0x8000_0000 && d <= 0x7FFF_FFFF;   // X86TargetLowering::isLegalAddImmediate: isInt<32>
+}
+ch_is_legal_addressing_mode :: (s: *Ch_State, ty: Type_Id, d: s64) -> bool {
+    if s.t.kind != .X86 return d == 0;
+    return x86_is_legal_addressing_mode(*s.t.xl, ty, NONE, d, true, 0, 0);
+}
+
+// findBaseConstants(BaseGV)
+ch_find_base_constants :: (s: *Ch_State, cands: *[..] Ch_Cand, infos: *[..] Ch_Info) {
     // stable_sort by (bit width, unsigned value)
     less :: (a: *Ch_Cand, b: *Ch_Cand) -> bool {
         ta := vtype(a.const_int); tb := vtype(b.const_int);
         if ta != tb return type_bits(ta) < type_bits(tb);
         return ap_ult(const_ap(a.const_int), const_ap(b.const_int));
     }
-    n := s.cand_vec.count;
+    n := cands.*.count;
     for i: 1..n-1 {
         j := i;
-        while j > 0 && less(*s.cand_vec[j], *s.cand_vec[j - 1]) {
-            tmp := s.cand_vec[j]; s.cand_vec[j] = s.cand_vec[j - 1]; s.cand_vec[j - 1] = tmp;
+        while j > 0 && less(*cands.*[j], *cands.*[j - 1]) {
+            tmp := cands.*[j]; cands.*[j] = cands.*[j - 1]; cands.*[j - 1] = tmp;
             j -= 1;
         }
     }
     min_itr := 0;
     for cc: 1..n-1 {
-        if vtype(s.cand_vec[min_itr].const_int) == vtype(s.cand_vec[cc].const_int) {
+        if vtype(cands.*[min_itr].const_int) == vtype(cands.*[cc].const_int) {
             mem_use_val_ty: Type_Id = NONE;
-            for u: s.cand_vec[cc].uses {
+            for u: cands.*[cc].uses {
                 ui := u.inst;
                 if inst_op(ui) == .LOAD { mem_use_val_ty = vtype(ui); break; }
                 if inst_op(ui) == .STORE {
                     if op(ui, 1) == op(ui, u.idx) { mem_use_val_ty = vtype(op(ui, 0)); break; }
                 }
             }
-            diff := ap_sub(const_ap(s.cand_vec[cc].const_int), const_ap(s.cand_vec[min_itr].const_int));
+            diff := ap_sub(const_ap(cands.*[cc].const_int), const_ap(cands.*[min_itr].const_int));
             if diff.bits <= 64 {
                 d := ap_sext_value(diff);
-                // X86TargetLowering::isLegalAddImmediate: isInt<32>
-                if d >= -0x8000_0000 && d <= 0x7FFF_FFFF &&
-                   (mem_use_val_ty == NONE || x86_is_legal_addressing_mode(*s.t.xl, mem_use_val_ty, NONE, d, true, 0, 0))
+                if ch_is_legal_add_immediate(s, d) && (mem_use_val_ty == NONE || ch_is_legal_addressing_mode(s, mem_use_val_ty, d))
                     continue;
             }
         }
-        ch_find_and_make_base_constant(s, min_itr, cc);
+        ch_find_and_make_base_constant(s, cands, infos, min_itr, cc);
         min_itr = cc;
     }
-    ch_find_and_make_base_constant(s, min_itr, n);
+    ch_find_and_make_base_constant(s, cands, infos, min_itr, n);
 }
 
 // updateOperand
@@ -291,10 +362,22 @@ ch_emit_base_constants_adj :: (s: *Ch_State, base: Value_Id, adj: *Ch_Adj) {
     mat := base;
     if adj.offset == NONE && adj.ty != NONE && adj.ty != vtype(base) adj.offset = const_int(ir.t_i32, 0);
     if adj.offset != NONE {
-        if adj.ty != NONE fatal("consthoist: rebasing constant expressions is not supported yet");
-        mat = create_binop(.ADD, base, adj.offset);
-        insert_at_position(mat, inst_block(adj.mat_insert_pt), adj.mat_insert_pt, false);
-        set_name(mat, "const_mat");
+        pt := adj.mat_insert_pt;
+        if adj.ty != NONE {
+            // GetElementPtrInst::Create(i8, Base, Offset, "mat_gep", MatInsertPt), hidden behind a bitcast
+            g := new_inst(.GEP, vtype(base), 2);
+            inst(g).ty2 = ir.t_i8;
+            set_op(g, 0, base); set_op(g, 1, adj.offset);
+            insert_at_position(g, inst_block(pt), pt, false);
+            set_name(g, "mat_gep");
+            mat = create_cast(.BITCAST, g, adj.ty);
+            insert_at_position(mat, inst_block(pt), pt, false);
+            set_name(mat, "mat_bitcast");
+        } else {
+            mat = create_binop(.ADD, base, adj.offset);
+            insert_at_position(mat, inst_block(pt), pt, false);
+            set_name(mat, "const_mat");
+        }
         set_metadata(mat, 0, get_metadata(adj.user.inst, 0));
     }
     o := op(adj.user.inst, adj.user.idx);
@@ -331,10 +414,10 @@ ch_emit_base_constants_adj :: (s: *Ch_State, base: Value_Id, adj: *Ch_Adj) {
     }
 }
 
-// emitBaseConstants(nullptr)
-ch_emit_base_constants :: (s: *Ch_State) -> bool {
+// emitBaseConstants(BaseGV)
+ch_emit_base_constants :: (s: *Ch_State, infos: *[..] Ch_Info) -> bool {
     made_change := false;
-    for * info: s.info_vec {
+    for * info: infos.* {
         mat_pts: [..] Value_Id; mat_pts.allocator = temp;
         for r: info.rebased for u: r.uses array_add(*mat_pts, ch_find_mat_insert_pt(s, u.inst, u.idx));
         ips := ch_find_constant_insertion_point(s, info, mat_pts);
@@ -349,9 +432,8 @@ ch_emit_base_constants :: (s: *Ch_State) -> bool {
                 if ips.count == 1 || dt_dominates(s.dt, ip.bb, orig_bb) array_add(*to_rebase, .{r.offset, r.ty, mp, u});
             }
             if cast(u64) to_rebase.count < ch_cl.min_num_to_rebase continue;
-            if info.base_expr != NONE fatal("consthoist: hoisting constant expressions is not supported yet");
-            ty := vtype(info.base_int);
-            base := create_cast(.BITCAST, info.base_int, ty);
+            bv := ifx info.base_expr != NONE then info.base_expr else info.base_int;
+            base := create_cast(.BITCAST, bv, vtype(bv));
             insert_at_position(base, ip.bb, ip.pt, ip.head);
             set_name(base, "const");
             set_metadata(base, 0, ifx ip.pt != NONE then get_metadata(ip.pt, 0) else NONE);
@@ -373,9 +455,11 @@ consthoist_run :: (f: Value_Id) -> Preserved {
     s.dt = get_domtree(f);
     s.bfi = ifx ch_cl.with_block_frequency then get_bfi(f) else null;
     s.entry = fn_entry(f);
-    s.opt_for_size = fn_has_fn_attr(f, .OptimizeForSize) || fn_has_fn_attr(f, .MinSize);
-    if psi_get().has_summary fatal("consthoist: modules with a profile summary are not supported yet");
+    // PSI = MAMProxy.getCachedResult<ProfileSummaryAnalysis>(M) (legacy llc: the ProfileSummaryInfoWrapperPass)
+    p := ifx tool_name == "llc" then psi_get() else psi_cached_or_null();
+    s.opt_for_size = should_optimize_for_size_fn(f, p, s.bfi);
     s.cand_vec.allocator = temp; s.info_vec.allocator = temp;
+    s.gep_gvs.allocator = temp; s.gep_cands.allocator = temp; s.gep_infos.allocator = temp;
     s.cloned_cast_keys.allocator = temp; s.cloned_cast_vals.allocator = temp;
     map: Table(Value_Id, s64); map.allocator = temp;
     for bb: fn_blocks(f) {
@@ -391,9 +475,11 @@ consthoist_run :: (f: Value_Id) -> Preserved {
             }
         }
     }
-    if s.cand_vec.count ch_find_base_constants(*s);
+    if s.cand_vec.count ch_find_base_constants(*s, *s.cand_vec, *s.info_vec);
+    for * s.gep_cands if it.count ch_find_base_constants(*s, it, *s.gep_infos[it_index]);
     made_change := false;
-    if s.info_vec.count made_change = ch_emit_base_constants(*s);
+    if s.info_vec.count made_change = ch_emit_base_constants(*s, *s.info_vec);
+    for * s.gep_infos if it.count made_change |= ch_emit_base_constants(*s, it);
     for s.cloned_cast_keys if !has_uses(it) erase_inst_with_metadata(it);
     if !made_change return PRESERVE_ALL;
     return preserved_cfg();

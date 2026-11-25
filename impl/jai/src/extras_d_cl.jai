@@ -4,6 +4,9 @@
 extras_d_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
     if name == {
         case "load-store-vectorizer-guess-address-order"; lsv_guess_address_order = smisc_bool(name, value, has_value);   // ours
+        case "consthoist-with-block-frequency"; ch_cl.with_block_frequency = smisc_bool(name, value, has_value);
+        case "consthoist-gep"; ch_cl.gep = smisc_bool(name, value, has_value);
+        case "consthoist-min-num-to-rebase"; ch_cl.min_num_to_rebase = cast(u64) smisc_int(name, value, has_value);
         case; return false;
     }
     return true;

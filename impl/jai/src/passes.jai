@@ -296,9 +296,9 @@ Pass_Kind :: enum u8 {
     // pass_loop_versioning.jai, ...
     LOOP_VERSIONING; LOOP_BOUND_SPLIT; LOOP_VERSIONING_LICM; HARDWARE_LOOPS; LOOP_UNROLL_AND_JAM;
     // L1.extra.load-store-vectorizer / codegen-ir-misc / sandbox-vectorizer (jai_extras_d)
-    LOAD_STORE_VECTORIZER;
     // strength reduction (pass_nary_reassociate.jai, pass_separate_const_offset.jai, pass_slsr.jai)
     NARY_REASSOCIATE; SEPARATE_CONST_OFFSET; SLSR;
+    LOAD_STORE_VECTORIZER; LOWER_ATOMIC; LOWER_INVOKE; INDIRECTBR_EXPAND; INTERLEAVED_ACCESS;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -541,6 +541,10 @@ PASS_TABLE :: Pass_Info.[
     .{"nary-reassociate", .FUNCTION, .NARY_REASSOCIATE, false, .DOMTREE},
     .{"separate-const-offset-from-gep", .FUNCTION, .SEPARATE_CONST_OFFSET, false, .DOMTREE},   // also <lower-gep> (lookup_pass)
     .{"slsr", .FUNCTION, .SLSR, false, .DOMTREE},
+    .{"lower-atomic", .FUNCTION, .LOWER_ATOMIC, true, .DOMTREE},   // RequiredPassInfoMixin
+    .{"lower-invoke", .FUNCTION, .LOWER_INVOKE, false, .DOMTREE},
+    .{"indirectbr-expand", .FUNCTION, .INDIRECTBR_EXPAND, true, .DOMTREE},   // RequiredPassInfoMixin
+    .{"interleaved-access", .FUNCTION, .INTERLEAVED_ACCESS, false, .DOMTREE},
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -1693,6 +1697,10 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .NARY_REASSOCIATE; return nary_reassociate_run(f);
         case .SEPARATE_CONST_OFFSET; return separate_const_offset_run(node, f);
         case .SLSR; return slsr_run(f);
+        case .LOWER_ATOMIC; return lower_atomic_run(f);
+        case .LOWER_INVOKE; return lower_invoke_run(f);
+        case .INDIRECTBR_EXPAND; return indirectbr_expand_run(f);
+        case .INTERLEAVED_ACCESS; return interleaved_access_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;
