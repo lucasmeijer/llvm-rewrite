@@ -28,8 +28,12 @@ Gap_Kind :: enum u8 {
     // registry_printers.jai
     PRINT_CFG_SCCS; PRINT_DOMFRONTIER; PRINT_INLINE_COST;
     PRINT_MODULE_DEBUGINFO;   // debug_info_finder.jai
+    PRINT_UNIFORMITY; PRINT_INLINE_ADVISOR; REQUIRE_INLINE_ADVISOR;
+    // passes that change nothing on the targets we support (x86, or no target); see the cases in gap_run_*
+    LOOP_DATA_PREFETCH; LOOP_IDIOM_VECTORIZE; COMPLEX_DEINTERLEAVING; REWRITE_SYMBOLS; STATIC_DATA_ANNOTATOR;
+    CFGUARD; X86_WINEHSTATE;
     // registry_small_passes.jai
-    STRIP_GC_RELOCATES; FLATTEN_CFG;
+    STRIP_GC_RELOCATES; FLATTEN_CFG; LOWER_EMUTLS;
     // assume_builder.jai
     ASSUME_BUILDER; ASSUME_SIMPLIFY;
     DWARF_EH_PREPARE;   // pass_dwarf_eh_prepare.jai
@@ -80,11 +84,12 @@ GAP_PASS_TABLE :: Gap_Info.[
     .{"require<no-op-module>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},
     .{"require<pass-instrumentation>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},
     .{"require<callgraph>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},             // CallGraphAnalysis
-    .{"require<inline-advisor>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},        // InlineAdvisorAnalysis: creates no advisor
+    .{"require<inline-advisor>", .MODULE, .GAP_MODULE, true, .DOMTREE, .REQUIRE_INLINE_ADVISOR},   // InlineAdvisorAnalysis: a result without an advisor
     .{"require<ir-similarity>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},         // IRSimilarityAnalysis
     .{"require<immutable-module-summary>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},   // opt registers it with no index
     .{"require<runtime-libcall-info>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},  // RuntimeLibraryAnalysis
     .{"require<collector-metadata>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},    // CollectorMetadataAnalysis
+    .{"require<static-data-profile-info>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},   // StaticDataProfileInfoAnalysis
     .{"require<no-op-cgscc>", .CGSCC, .GAP_CGSCC, true, .DOMTREE, .NO_OP},
     .{"require<fam-proxy>", .CGSCC, .GAP_CGSCC, true, .DOMTREE, .NO_OP},               // FunctionAnalysisManagerCGSCCProxy
     .{"require<pass-instrumentation>", .CGSCC, .GAP_CGSCC, true, .DOMTREE, .NO_OP},
@@ -92,11 +97,14 @@ GAP_PASS_TABLE :: Gap_Info.[
     .{"require<pass-instrumentation>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .NO_OP},
     .{"require<access-info>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .NO_OP},       // LoopAccessInfoManager: per-loop info is computed on demand
     .{"require<should-run-extra-vector-passes>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .NO_OP},   // only read by ExtraFunctionPassManager, empty from text
+    .{"require<ssp-layout>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .NO_OP},     // SSPLayoutAnalysis
+    .{"require<uniformity>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .NO_OP},     // UniformityInfoAnalysis (nothing computed without branch divergence)
     .{"require<ephemerals>", .FUNCTION, .REQUIRE, true, .EPHEMERAL_VALUES, .NONE},
     .{"require<verify>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .REQUIRE_VERIFY_FN},
     .{"require<no-op-loop>", .LOOP, .GAP_LOOP, true, .DOMTREE, .NO_OP},
     .{"require<pass-instrumentation>", .LOOP, .GAP_LOOP, true, .DOMTREE, .NO_OP},
     .{"require<should-run-extra-simple-loop-unswitch>", .LOOP, .GAP_LOOP, true, .DOMTREE, .REQUIRE_EXTRA_UNSWITCH},
+    .{"require<ddg>", .LOOP, .GAP_LOOP, true, .DOMTREE, .NO_OP},   // DDGAnalysis: builds the graph, changes no IR
     .{"no-op-loopnest", .LOOP, .NO_OP_LOOPNEST, false, .DOMTREE, .NONE},
 
     // ---- InvalidateAllAnalysesPass (not required; the loop version is in parse_loop_pass)
@@ -112,7 +120,7 @@ GAP_PASS_TABLE :: Gap_Info.[
     // ---- small passes
     .{"helloworld", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .HELLOWORLD},
     .{"count-visits", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .NO_OP},   // CountVisitsPass: a STATISTIC only
-    .{"instcount", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .INSTCOUNT},   // also instcount<pre-opt>
+    .{"instcount", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .INSTCOUNT},   // also instcount<pre-opt>
     .{"extra-vector-passes", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .EXTRA_VECTOR_PASSES},
     .{"trigger-crash-module", .MODULE, .GAP_MODULE, false, .DOMTREE, .TRIGGER_CRASH},
     .{"trigger-crash-function", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .TRIGGER_CRASH},
@@ -132,10 +140,20 @@ GAP_PASS_TABLE :: Gap_Info.[
     .{"gc-lowering", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .GC_LOWERING},
     .{"shadow-stack-gc-lowering", .MODULE, .GAP_MODULE, true, .DOMTREE, .SHADOW_STACK_GC_LOWERING},
     .{"inline-asm-prepare", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .INLINE_ASM_PREPARE},
+    .{"lower-emutls", .MODULE, .GAP_MODULE, true, .DOMTREE, .LOWER_EMUTLS},
     .{"flatten-cfg", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .FLATTEN_CFG},
     .{"strip-gc-relocates", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .STRIP_GC_RELOCATES},
     .{"print<inline-cost>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_INLINE_COST},
     .{"print<module-debuginfo>", .MODULE, .GAP_MODULE, true, .DOMTREE, .PRINT_MODULE_DEBUGINFO},
+    .{"print<uniformity>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_UNIFORMITY},
+    .{"print<inline-advisor>", .MODULE, .GAP_MODULE, true, .DOMTREE, .PRINT_INLINE_ADVISOR},
+    .{"loop-data-prefetch", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .LOOP_DATA_PREFETCH},
+    .{"loop-idiom-vectorize", .LOOP, .GAP_LOOP, false, .DOMTREE, .LOOP_IDIOM_VECTORIZE},
+    .{"complex-deinterleaving", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .COMPLEX_DEINTERLEAVING},
+    .{"rewrite-symbols", .MODULE, .GAP_MODULE, false, .DOMTREE, .REWRITE_SYMBOLS},
+    .{"static-data-annotator", .MODULE, .GAP_MODULE, false, .DOMTREE, .STATIC_DATA_ANNOTATOR},
+    .{"cfguard", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .CFGUARD},
+    .{"x86-winehstate", .MODULE, .GAP_MODULE, false, .DOMTREE, .X86_WINEHSTATE},
     .{"print<domfrontier>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_DOMFRONTIER},
 ];
 
@@ -201,6 +219,26 @@ gap_run_module :: (node: *Pass_Node) {
             s := print_module_fresh();
             write_string(s, to_standard_error = true);
         case .PRINT_MODULE_DEBUGINFO; print_module_debuginfo_run();
+        case .REQUIRE_INLINE_ADVISOR; inline_advisor_cached = true;
+        case .PRINT_INLINE_ADVISOR;
+            // InlineAdvisorAnalysisPrinterPass::run(Module &): the cached InlineAdvisorAnalysis
+            if inline_advisor_cached fatal("print<inline-advisor>: printing a cached InlineAdvisorAnalysis result is not supported yet");
+            write_string("No Inline Advisor\n", to_standard_error = true);
+        case .REWRITE_SYMBOLS;
+            // RewriteSymbolPass(): the maps of -rewrite-map-file (not accepted here), so no descriptors
+        case .STATIC_DATA_ANNOTATOR;
+            // annotateModule: nothing without a profile summary (getResult<ProfileSummaryAnalysis>)
+            if module_flag("ProfileSummary") != NONE fatal("static-data-annotator: modules with a profile summary are not supported yet");
+        case .X86_WINEHSTATE;
+            gap_require_x86_target(node.name);
+            // WinEHStateFnPassImpl::runOnFunction: only functions with a funclet personality and EH pads
+            for f: ir.m_functions {
+                if is_declaration(f) || glob(f).linkage == .AVAILABLE_EXTERNALLY continue;
+                p := fn_personality(f);
+                if p == NONE || vkind(strip_pointer_casts(p)) != .FUNCTION || !is_funclet_eh_personality(classify_eh_personality(p)) continue;
+                for b: fn_blocks(f) if block_is_eh_pad(b) fatal("x86-winehstate: funclet EH (WinEHStatePass) is not supported yet");
+            }
+        case .LOWER_EMUTLS; mam_invalidate(lower_emutls_run());
         case .SHADOW_STACK_GC_LOWERING;
             // CollectorMetadataAnalysis: only modules with a function using gc "shadow-stack"
             for f: ir.m_functions if glob(f).gc == "shadow-stack" fatal("shadow-stack-gc-lowering: gc \"shadow-stack\" is not supported yet");
@@ -258,6 +296,23 @@ gap_run_function :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .ASSUME_SIMPLIFY; return assume_simplify_run(f);
         case .PRINT_DOMFRONTIER; return print_domfrontier_run(f);
         case .PRINT_INLINE_COST; return print_inline_cost_run(f);
+        case .PRINT_UNIFORMITY;
+            // UniformityInfoPrinterPass::run: no target we support has branch divergence (TTI::hasBranchDivergence)
+            write_string(tprint("UniformityInfo for function '%':\n  Uniformity analysis not computed (no branch divergence).\n", vname(f)), to_standard_error = true);
+            return PRESERVE_ALL;
+        case .LOOP_DATA_PREFETCH;
+            // LoopDataPrefetch::run: nothing unless both the prefetch distance and TTI::getCacheLineSize are set;
+            // the cache line size is 0 for x86 subtargets (MCSubtargetInfo default) and without a target, and
+            // -prefetch-distance is not accepted here
+            return PRESERVE_ALL;
+        case .COMPLEX_DEINTERLEAVING;
+            // ComplexDeinterleaving::runOnFunction: X86TargetLowering::isComplexDeinterleavingSupported() is false
+            gap_require_x86_target(node.name);
+            return PRESERVE_ALL;
+        case .CFGUARD;
+            // CFGuardImpl::doInitialization: nothing unless the "cfguard" module flag is Enabled (2)
+            if module_flag_int("cfguard", 0) == 2 fatal("cfguard: modules with control-flow guard checks are not supported yet");
+            return PRESERVE_ALL;
         case .TRIGGER_CRASH; gap_abort();
         case .TRIGGER_VERIFIER_ERROR;
             // new UnreachableInst(Ctx, BB.getTerminator()->getIterator()) in the entry block
@@ -275,6 +330,10 @@ gap_run_loop :: (node: *Pass_Node, l: Loop_Id, lar: *Loop_Std_Results) -> Preser
         case .CALLBACK; #through;
         case .NO_OP; return PRESERVE_ALL;
         case .REQUIRE_EXTRA_UNSWITCH; table_set(*extra_unswitch_marker, l, true); return PRESERVE_ALL;
+        case .LOOP_IDIOM_VECTORIZE;
+            // LoopIdiomVectorize::recognizeByteCompare / recognizeFindFirstByte need scalable vectors
+            // (TTI::supportsScalableVectors is false for x86 and without a target)
+            return PRESERVE_ALL;
         case .PRINT_IR; gap_print_loop(lar.li, l); return PRESERVE_ALL;
     }
     fatal("internal: '%' is not a loop pass", node.name);
@@ -337,3 +396,7 @@ gap_require_x86_target :: (name: string) {
     if opts.mtriple.count t = opts.mtriple;
     if !tti_is_x86_triple(t) fatal("unknown pass name '%'", name);
 }
+
+// InlineAdvisorAnalysis has a cached result (require<inline-advisor>); the inliner wrappers' own results are
+// abandoned when they finish
+inline_advisor_cached := false;

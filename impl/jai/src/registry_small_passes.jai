@@ -232,3 +232,64 @@ fcfg_erase_block :: (bb: Value_Id) {
     for i: block_insts(bb) drop_all_references(i);
     block_erase_from_parent(bb);
 }
+
+// ---------------------------------------------------------------- lower-emutls
+// llvm/lib/CodeGen/LowerEmuTLS.cpp (LowerEmuTLSPass::run, addEmuTlsVar, copyLinkageVisibility). The new-PM pass
+// lowers every thread-local global (it does not ask the TargetMachine whether TLS is emulated).
+
+lower_emutls_run :: () -> Preserved {
+    tls: [..] Value_Id; tls.allocator = temp;
+    for ir.m_globals if glob(it).tls != 0 array_add(*tls, it);
+    changed := false;
+    for tls changed |= emutls_add_var(it);
+    if !changed return PRESERVE_ALL;
+    pa := PRESERVE_ALL;
+    pa.abandon_globals_aa = true;   // PA.abandon<GlobalsAA>() (and ModuleSummaryIndex, StackSafetyGlobal)
+    return pa;
+}
+
+emutls_copy_linkage_visibility :: (from: Value_Id, to: Value_Id) {
+    gv_set_linkage(to, glob(from).linkage);
+    glob(to).visibility = glob(from).visibility;
+    glob(to).dso_local = glob(from).dso_local;
+    if glob(from).comdat >= 0 {
+        c := get_comdat(vname(to));   // M.getOrInsertComdat(to->getName())
+        glob(to).comdat = c;
+        ir.comdats[c].kind = ir.comdats[glob(from).comdat].kind;
+    }
+}
+
+// addEmuTlsVar
+emutls_add_var :: (gv: Value_Id) -> bool {
+    name := tprint("__emutls_v.%", vname(gv));
+    ev := lookup_global(name);
+    if ev != NONE && vkind(ev) == .GLOBAL_VAR return false;   // M.getNamedGlobal: added before
+    if ev != NONE fatal("lower-emutls: '%' exists and is not a global variable", name);
+    null_ptr := const_null_value(ir.t_ptr);
+    init: Value_Id = NONE;
+    if glob(gv).has_init {
+        init = op(gv, 0);
+        if vkind(init) == .C_ZERO || (vkind(init) == .C_INT && !is_vector_type(vtype(init)) && is_null_value(init)) init = NONE;
+    }
+    word := dl_int_ptr_type(ir.t_ptr);
+    st := type_named_struct("");   // StructType::create(ElementTypes)
+    set_struct_body(st, .[word, word, ir.t_ptr, ir.t_ptr], false);
+    ev = module_get_or_insert_global(name, st);
+    emutls_copy_linkage_visibility(gv, ev);
+    if !glob(gv).has_init return true;
+    gty := glob(gv).value_type;
+    galign := pointer_alignment(gv);
+    tmpl: Value_Id = NONE;
+    if init != NONE {
+        tname := tprint("__emutls_t.%", vname(gv));
+        tmpl = module_get_or_insert_global(tname, gty);
+        glob(tmpl).is_const = true;
+        gv_set_initializer(tmpl, init);
+        glob(tmpl).align = galign;
+        emutls_copy_linkage_visibility(gv, tmpl);
+    }
+    vals := Value_Id.[const_int(word, dl_type_store_size(gty)), const_int(word, galign), null_ptr, ifx tmpl != NONE then tmpl else null_ptr];
+    gv_set_initializer(ev, const_aggregate(.C_STRUCT, st, vals));
+    glob(ev).align = max(dl_abi_align(word), dl_abi_align(ir.t_ptr));
+    return true;
+}
