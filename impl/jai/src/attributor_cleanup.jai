@@ -105,6 +105,8 @@ atr_register_function_signature_rewrite_ari :: (arg: Value_Id, ari: Arg_Replacem
     return true;
 }
 
+// rewritten functions are appended to A.Functions in ArgumentReplacementMap (DenseMap<Function *>) order
+atr_signature_rewrites_done: s64;
 // rewriteFunctionSignatures
 atr_rewrite_function_signatures :: (modified: *[..] Value_Id) -> bool {
     changed := ATR_UNCHANGED;
@@ -131,6 +133,7 @@ atr_rewrite_function_signatures :: (modified: *[..] Value_Id) -> bool {
         old_ty := glob(old_fn).value_type;
         nfty := type_func(func_ret(old_ty), new_types, func_vararg(old_ty));
         new_fn := ipo_fn_create(nfty, glob(old_fn).linkage, glob(old_fn).addrspace);
+        atr_signature_rewrites_done += 1;
         array_add(*atr.functions, new_fn);
         table_set(*atr.fn_set, new_fn, true);
         ipo_fn_insert_before(new_fn, old_fn);
@@ -663,8 +666,50 @@ fn_has_address_taken_for_attributor :: (f: Value_Id) -> bool {
 
 atr_print_dependencies :: () { fatal("attributor: -attributor-print-dep is not supported yet"); }
 atr_dump_dependency_graph :: () { fatal("attributor: -attributor-dump-dep-graph is not supported yet"); }
-atr_call_graph_populate_all :: () { fatal("attributor: -attributor-print-call-graph is not supported yet"); }
-atr_call_graph_print :: () {}
+// DOT::EscapeString (GraphWriter.cpp)
+dot_escape_string :: (s: string) -> string {
+    sb: String_Builder; sb.allocator = temp;
+    i := 0;
+    while i < s.count {
+        c := s[i];
+        if c == #char "\n" append(*sb, "\\n");
+        else if c == #char "\t" append(*sb, "  ");
+        else if c == #char "\\" && i + 1 < s.count && s[i + 1] == #char "l" append(*sb, c);
+        else if c == #char "\\" && i + 1 < s.count && (s[i + 1] == #char "|" || s[i + 1] == #char "{" || s[i + 1] == #char "}") {
+            append(*sb, s[i + 1]); i += 1;   // the backslash is erased and the next character kept as is
+        } else if c == #char "\\" || c == #char "{" || c == #char "}" || c == #char "<" || c == #char ">" || c == #char "|" || c == #char "\"" {
+            append(*sb, #char "\\"); append(*sb, c);
+        } else append(*sb, c);
+        i += 1;
+    }
+    return builder_to_string(*sb,, allocator = temp);
+}
+// AttributorCallGraph::populateAll: AACallEdges for every function of A.Functions (AACallEdgeIterator::operator*)
+atr_call_graph_populate_all :: () {
+    for f: atr.functions atr_get_aa(.CALL_EDGES, irp_function(f), NONE, DEP_NONE);
+}
+// AttributorCallGraph::print: llvm::WriteGraph(outs(), this). Nodes are the AACallEdges of A.Functions, children their
+// optimistic edges. LLVM prints node addresses (`Node0x...`); we print a made-up address per AA, so only the shape
+// can be compared.
+atr_call_graph_print :: () {
+    node_of :: (f: Value_Id) -> u32 {
+        e := atr_get_aa(.CALL_EDGES, irp_function(f), NONE, DEP_NONE);
+        if e == NONE fatal("attributor: -attributor-print-call-graph: no AACallEdges for @%", vname(f));
+        return e;
+    }
+    if atr_signature_rewrites_done > 1
+        fatal("attributor: -attributor-print-call-graph after several signature rewrites (A.Functions order follows DenseMap<Function *> addresses) is not supported");
+    addr :: (e: u32) -> string { return tprint("0x%", formatInt(0x10000000 + cast(u64) e * 0xa0, base = 16)); }
+    sb: String_Builder; sb.allocator = temp;
+    append(*sb, "digraph unnamed {\n\n");
+    for f: atr.functions {
+        e := node_of(f);
+        print_to_builder(*sb, "\tNode% [shape=record,label=\"{%}\"];\n", addr(e), dot_escape_string(vname(f)));
+        for c: aa(e).callees print_to_builder(*sb, "\tNode% -> Node%;\n", addr(e), addr(node_of(c)));
+    }
+    append(*sb, "}\n");
+    write_string(builder_to_string(*sb,, allocator = temp));
+}
 
 // AAIndirectCallInfo's specialization manifest
 // ---------------------------------------------------------------- indirect call specialization

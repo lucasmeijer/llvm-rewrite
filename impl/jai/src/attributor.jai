@@ -1669,6 +1669,7 @@ attributor_run_on :: (functions: [] Value_Id, delete_fns: bool, is_module_pass: 
 
 // Attributor::run
 atr_run :: () -> bool {
+    atr_signature_rewrites_done = 0;
     if atr_print_call_graph atr_call_graph_populate_all();
     atr.phase = .UPDATE;
     atr_run_till_fixpoint();

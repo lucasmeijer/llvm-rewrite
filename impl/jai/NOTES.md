@@ -240,6 +240,7 @@ these flags, so they cannot be swept against the oracle; they exist to look at w
 | normalize (`reorderInstructionOperandsByNames` sorts `(name, Value *)` pairs) | two different operands of a commutative instruction with the same operand text | `-normalize-guess-address-order` |
 | strip-dead-debug-info (`std::set<DICompileUnit *>` LiveCUs rebuilds llvm.dbg.cu) | dead CUs are dropped and more than one CU stays live | `-strip-dead-debug-info-guess-address-order` |
 | print<stack-safety-local>, print-stack-safety (`UseInfo::Calls`, a `std::map` by `(ParamNo, Callee *)`) | two different callees for one argument number of a use (~220 corpus files) | `-stack-safety-guess-address-order` |
+| attributor -attributor-print-call-graph (rewritten functions join A.Functions in DenseMap<Function *> order) | more than one signature rewrite | none |
 | codegenprepare, function-specialization, InstCombine fsqrt, attributor (signature rewrites), SLP reorder | already fail loudly or check order independence where they meet pointer order (see their sections) | none |
 
 Audited and order-independent (no flag): memdep's NonLocalDepEntry sort (GVN only materializes unnamed values in
@@ -1345,6 +1346,10 @@ Still slow / next:
   2. The privatizing-rewrite name order is a DenseMap<Function *> walk: only reachable by guessing allocation
      addresses; keep it loud.
   3. Profile the CGSCC pass with the optimized build (`harness/run perf` has no benchmark for it yet).
+
+- `-attributor-print-call-graph` (jai_tails 2026-11): populateAll creates AACallEdges for every function before the
+  fixpoint (this changes the IR, so it is not just a printer); print writes the DOT graph to stdout with made-up node
+  addresses (LLVM prints pointers). The node and edge order matched LLVM on all Attributor tests that don't fail.
 
 ## Code extraction: CodeExtractor, PartialInliner, HotColdSplitting, LoopExtractor, BlockExtractor (L1.extra.code-extraction COMPLETE 194/194)
 
