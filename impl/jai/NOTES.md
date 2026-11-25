@@ -2626,3 +2626,98 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   `debugify,instcombine` 14 -> 4 differs). Remaining `debugify,instcombine` differs: select debug locations
   (2005-04-07-UDivSelectCrash, binop-cast, binop-select-cast-of-select-cond) and bswap.ll; `debugify,default<O2>`:
   82 differs (not triaged).
+
+## Pass registry gaps (L1.extra.registry-gaps; /root/jai_registry_gap, 2026-11)
+
+**Method.** Every name in `lib/Passes/PassRegistry.def` (MODULE/CGSCC/FUNCTION/LOOP/LOOPNEST passes, analyses as
+`require<name>`, *_WITH_PARAMS, the *_CALLBACK pipeline names, alias analyses as `-aa-pipeline=`) and the IR passes
+of `lib/Target/X86/X86PassRegistry.def`, run by both opts on a trivial x86-64 module with a loop (script: a Python
+loop over the .def entries; MACHINE_FUNCTION_PASS rows are MIR and left out). A name counts as a gap when LLVM's opt
+accepts it and ours says "unknown pass name". Before: **159 gaps** (of 462 IR names). After this work: **58**, all
+excluded, owned by another agent, or listed under "still to port" below; LLVM itself rejects 31 names on that
+module without extra arguments (`default<O#>` etc. need parameters, `function-import` a summary file), checked
+separately.
+
+**Where.** `src/registry_gaps.jai` holds `GAP_PASS_TABLE` (rows appended to `pass_table` by `lookup_pass`, with a
+`Gap_Kind` per row in `pass_gap_kinds`) and the `gap_run_module/function/loop/cgscc` dispatch behind four Pass_Kind
+values (GAP_MODULE, GAP_FUNCTION, GAP_LOOP, GAP_CGSCC), so passes.jai only got a handful of lines. Names registered
+at several levels (`print`, `invalidate<all>`, `require<pass-instrumentation>`, `trigger-verifier-error`,
+`require<verify>`) are looked up with `lookup_pass_at(name, levels...)` in each parse_*_pass. Parametrized gap
+names (`*-callbacks<O#>`, `function-simplification<O#>`, `instcount<pre-opt>`) are matched by the longest row name
+that prefixes `name<`.
+
+**Ported (LLVM file, lines):**
+- Pass-manager names: the 11 extension-point callbacks (opt registers none: no-ops, with LLVM's opt-level parsing),
+  `require<>` of no-op / marker analyses (no-op-*, pass-instrumentation, fam-proxy, callgraph, inline-advisor,
+  ir-similarity, immutable-module-summary, runtime-libcall-info, collector-metadata, access-info, ephemerals,
+  should-run-extra-*, ssp-layout, uniformity, static-data-profile-info, ddg, function-level verify),
+  `invalidate<all>` (module / cgscc / function), `no-op-loopnest` (a loop-nest pass: top-level loops only),
+  `extra-vector-passes` (empty from text), `function-simplification<O1-3>` (expanded at parse time),
+  `inliner-wrapper-no-mandatory-first`, count-visits, instcount (statistics only), helloworld (18),
+  trigger-crash-*, function-level trigger-verifier-error.
+- IR printers `print` at module / function / loop level (IRPrintingPasses.cpp 78, LoopInfo.cpp printLoop).
+  Printing a function is Value::print: ShouldInitializeAllMetadata, which numbers every function's *metadata* but
+  not their call-site attribute groups (printer.jai `process_function(md_only)`; the verifier's slot tracker had
+  the same bug and is fixed too).
+- print<cfg-sccs> (CFGSCCPrinter.cpp 34), print<domfrontier> (DominanceFrontier.cpp 93 + Impl.h; see below),
+  print<module-debuginfo> (ModuleDebugInfoPrinter.cpp 141 + DebugInfoFinder in debug_info_finder.jai),
+  print<inline-cost> (InlineCost.cpp annotation writer: InstructionCostDetailMap in inline_cost.jai; the printer's
+  analyzer has an ORE, so ComputeFullInlineCost is on, and no GetBFI), print<uniformity> (no target we support has
+  branch divergence), print<inline-advisor> ("No Inline Advisor"; a cached advisor fails loudly).
+- strip-gc-relocates (StripGCRelocates.cpp 80), flatten-cfg (FlattenCFGPass.cpp 106 + Utils/FlattenCFG.cpp 525),
+  assume-builder / assume-simplify (AssumeBundleBuilder.cpp 562: salvageKnowledge now takes the DT too),
+  lower-emutls (LowerEmuTLS.cpp 173: the new-PM pass lowers every thread_local global, it never asks
+  useEmulatedTLS), dwarf-eh-prepare (DwarfEHPrepare.cpp 433, incl. pruneUnreachableResumes at
+  -codegen-opt-level>0), sjlj-eh-prepare (SjLjEHPrepare.cpp 525), gc-lowering (GCRootLowering.cpp, IR part) with
+  collector-metadata (unknown GC strategies are a fatal error like LLVM's), shadow-stack-gc-lowering
+  (ShadowStackGCLowering.cpp 426).
+- llc's codegen IR passes as opt passes: x86-partial-reduction (full port, cg_x86_partial_reduction.jai),
+  x86-lower-amx-type / inline-asm-prepare (llc's guards: loud only where LLVM would change the IR).
+- Passes that are provably no-ops on x86-64 and without a target, registered with the reason in a comment:
+  loop-data-prefetch (TTI cache line size 0), loop-idiom-vectorize (needs scalable vectors), complex-deinterleaving
+  (X86TargetLowering doesn't support it), x86-lower-amx-intrinsics (-enable-x86-scalar-amx off), rewrite-symbols
+  (no -rewrite-map-file), static-data-annotator (loud with a profile summary), cfguard (loud with the "cfguard"
+  module flag = Enabled), x86-winehstate (loud for funclet personalities with EH pads).
+- X86PassRegistry.def names fail as "unknown pass name" without an x86 triple, like LLVM (no TargetMachine).
+
+**Landed by other agents while this ran:** print<stack-lifetime><may|must> (extras_b; my copy was dropped),
+replace-with-veclib (jai_tails/L1.vectorize.loop; mine was dropped in the rebase), the utility and analysis-misc
+units, ctx-instr-gen/lower and noinline-nonprevailing (pgo).
+
+**Address order (fails loudly, NOTES "Heap/pointer address order"):** print<domfrontier> prints a
+`std::map<BasicBlock *, ...>`: more than one entry fails unless `-domfrontier-guess-address-order` (function block
+order; the frontier sets themselves are SetVectors and verified against LLVM). flatten-cfg iterates a
+`SmallPtrSet<BasicBlock *, 16>` of predecessors: beyond 16 only an ambiguous LastCondBlock fails.
+sjlj-eh-prepare demotes landing-pad phis from a `SmallPtrSet<PHINode *, 8>`: more than 8 fail. print<inline-cost>
+prints a simplified constant with a fresh TypePrinting: an unnamed struct type prints as `%"type 0x<addr>"`, fails.
+
+**Excluded (not portable or not x86):** MIR (mir-debugify, mir-check-debugify, mir-strip-debug, reg-usage,
+print<reg-usage>, machine-function-info, free-machine-function, bb-sections-profile-reader); non-x86 targets
+(dxil-*, wasm-eh-prepare, kernel-info, hipstdpar-select-accelerator-code); output contains heap addresses or
+spawns a viewer (print-callgraph `<<0x...>>`, dot-callgraph, view-callgraph, print-lcg-dot, dot-cfg*, view-cfg*,
+dot-dom*, view-dom*, dot-post-dom*, view-post-dom*, dot-ddg, print<ddg> "Node Address:0x..."); bitcode
+(embed-bitcode, fatlto-pre-link which runs it, function-import which reads a summary file); inliner-ml-advisor-release
+(not built into this LLVM).
+
+**Owned by other agents (not touched):** lower-matrix-intrinsics, strip-debug-declare, strip-nonlinetable-debuginfo,
+func-properties(-stats), stack-safety(-local), print<alias-sets>, ctx-prof-*, regions / verify<regions>,
+sandbox-vectorizer, memprof-context-disambiguation, instrumentor, debug-ata / print<debug-ata>, bare
+print<stack-lifetime> (LLVM defaults it to <may>; extras_b only registered the parametrized names).
+
+**Still to port (mine, with LLVM sizes):** declare-runtime-libcalls (81 + RuntimeLibcalls.cpp 503 and the
+TableGen'd RuntimeLibcalls.inc: needs a generator from `min-tblgen --gen-runtime-libcalls`, 4 x86 tests in
+Transforms/Util/DeclareRuntimeLibcalls), select-optimize (1469; X86 tests CodeGen/X86/select-optimize*.ll),
+typepromotion (1063; real work on x86 only for illegal integer widths), interleaved-load-combine (1373; x86 max
+interleave factor 4), global-merge-func (622 + StableFunctionMap hashing), the full x86-lower-amx-type (1368),
+x86-winehstate (868, i686-windows), cfguard (329) and inline-asm-prepare (268) beyond their guards, and an
+llc-side switch from cg_misc_passes.jai's dwarf-eh-prepare / gc-lowering guards to the new ports.
+
+**Sweeps (whole corpus, 10923 files unless noted; 0 differs unless noted):** print, function(print),
+function(loop(print)), print<cfg-sccs>: 1 differs each, `DebugInfo/Generic/assignment-tracking/parse-and-verify/
+verify.ll`, the verifier's message for an invalid #dbg_assign (also with no-op-module: not these printers);
+strip-gc-relocates; flatten-cfg (also debugify,flatten-cfg and the 4 perf programs); assume-builder and
+assume-builder+assume-simplify with --enable-knowledge-retention; function-simplification<O2> (0 differs, 62 loud:
+SROA dbg_assign, 3 Panics in the Attributor tests and an LVI assertion on SROA/select-load.ll that are not this
+pipeline's own code); dwarf-eh-prepare with -mtriple (and -codegen-opt-level=2); lower-emutls; print<inline-cost>
+(1 differs: LoopVectorize/X86/int128_no_gather.ll, LLVM's '+mpx' feature warning that our subtarget creation doesn't
+print); print<module-debuginfo> (7 differs fixed: M.debug_compile_units() skips NoDebug CUs), print<uniformity> (int128_no_gather.ll again), x86-partial-reduction, the no-op group, gc / sjlj.

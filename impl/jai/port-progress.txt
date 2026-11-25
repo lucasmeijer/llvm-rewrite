@@ -41,6 +41,7 @@ lib/Support/APInt.cpp 0.5
 lib/IR/DebugInfoMetadata.cpp 0.45
 lib/Transforms/Utils/BuildLibCalls.cpp 0.95
 lib/IR/DebugInfo.cpp 0.35  # + DebugInfoFinder (pass_strip_dead_debug_info.jai), at:: assignment-tracking helpers, trackAssignments, AssignmentTrackingPass, mergeDIAssignID (assignment_tracking.jai)
+lib/IR/DebugInfo.cpp 0.2  # + DebugInfoFinder (pass_strip_dead_debug_info.jai, debug_info_finder.jai)
 lib/Analysis/MemorySSA.cpp 0.9  # no loop-scoped MemorySSA(Loop&), dot printer, legacy pass
 lib/Transforms/InstCombine/InstCombineMulDivRem.cpp 0.95
 lib/IR/ConstantRange.cpp 0.8
@@ -125,6 +126,9 @@ lib/Transforms/InstCombine/InstCombineAtomicRMW.cpp 1
 lib/Transforms/Scalar/DeadStoreElimination.cpp 0.99  # all but -debug-counter
 lib/Transforms/Scalar/MemCpyOptimizer.cpp 1
 lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.5  # salvageKnowledge / buildAssumeFromInst (with or without an AssumptionCache, DT = null); no assume-simplify / assume-builder passes
+lib/Transforms/Scalar/DeadStoreElimination.cpp 0.97  # all but shortenAssignment's dbg.assign updates (assignment tracking does not parse)
+lib/Transforms/Scalar/MemCpyOptimizer.cpp 0.98  # all but DIAssignID merging/copying (assignment tracking does not parse)
+lib/Transforms/Utils/AssumeBundleBuilder.cpp 0.95  # salvageKnowledge (AC, DT), buildAssumeFromInst, AssumeBuilderPass, AssumeSimplify (registry_gaps)
 lib/Transforms/Scalar/GVN.cpp 0.95  # jai_gvn: all of GVNPass incl. the MemorySSA load analysis; no optimization remarks (findMayClobberedPtrAccess/reportMayClobberedLoad/reportLoadElim), no legacy pass
 lib/Analysis/MemoryDependenceAnalysis.cpp 0.95  # no debug-only verifyRemoved/AssertSorted, no legacy wrapper; invalidate() n/a (per-run result)
 lib/Transforms/Utils/ScalarEvolutionExpander.cpp 0.97  # manual: the SCEVPredicate expansions are in loop_versioning.jai (sx_expand_union_predicate etc.); the single-predicate entry point sx_expand_code_for_predicate still fails loudly
@@ -160,7 +164,7 @@ lib/Transforms/Vectorize/SLPVectorizer.cpp 0.78  # manual: pass driver, gathered
 lib/Analysis/LazyCallGraph.cpp 0.85  # manual: all of the graph and its incremental updates + print-lcg; not verify()/isAncestorOf (asserts), DOT printer (heuristic 0.78)
 lib/Analysis/CGSCCPassManager.cpp 0.95  # not the CGSCC analysis-manager proxies' outer-analysis invalidation bookkeeping
 lib/Transforms/IPO/FunctionAttrs.cpp 0.9
-lib/Analysis/InlineCost.cpp 0.85  # InlineCostCallAnalyzer + cost-benefit; not InlineCostFeaturesAnalyzer (ML), the -print-instruction-comments annotation writer
+lib/Analysis/InlineCost.cpp 0.9  # InlineCostCallAnalyzer + cost-benefit + print<inline-cost> (InlineCostAnnotationWriter); not InlineCostFeaturesAnalyzer (ML)
 lib/Analysis/InlineAdvisor.cpp 0.5  # default advisor, shouldBeDeferred, inline-remark attribute; not remarks emission, replay/ML/plugin advisors
 lib/Analysis/InlineOrder.cpp 0.7  # manual: size/cost/cost-benefit priorities with the libstdc++ heap order (heuristic 0.55); not ML priority / plugin
 lib/Transforms/IPO/Inliner.cpp 0.85
@@ -336,3 +340,6 @@ lib/Analysis/MemoryProfileInfo.cpp 0.7  # no addCallStack from profile data call
 lib/Transforms/IPO/SampleContextTracker.cpp 0.95  # all but dumps / createContextLessProfileMap
 lib/Analysis/ReplayInlineAdvisor.cpp 0.9  # no original advisor, no remarks
 lib/Transforms/Scalar/LowerMatrixIntrinsics.cpp 0.82  # all but the remarks (RemarkGenerator, ExprLinearizer, OpInfoTy counters)
+# registry gaps (jai_registry_gap, 2026-11)
+lib/Analysis/DominanceFrontier.cpp 0.9  # print<domfrontier>: the std::map<BasicBlock *> print order fails loudly
+lib/Analysis/InstCount.cpp 0.3  # instcount: statistics only, -stats is not accepted

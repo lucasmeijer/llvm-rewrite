@@ -1,10 +1,12 @@
-// DebugInfoFinder (llvm/lib/IR/DebugInfo.cpp: processModule, processCompileUnit, processGlobalVariableExpression,
+// DebugInfoFinder for print<module-debuginfo> (llvm/lib/IR/DebugInfo.cpp: processModule, processCompileUnit, processGlobalVariableExpression,
 // processInstruction, processLocation, processDbgRecord, processVariable, processType, processImportedEntity,
 // processMacroNode, processScope, processSubprogram, add*) and print<module-debuginfo>
 // (llvm/lib/Analysis/ModuleDebugInfoPrinter.cpp).
+// (pass_strip_dead_debug_info.jai has a second DebugInfoFinder port, without the macro files and scopes this printer
+// needs: a design debt, see NOTES.md "Pass registry gaps")
 // Operand positions are jai's DI layouts (debuginfo.jai parse_specialized_md), which follow LLVM's operand order.
 
-Di_Finder :: struct {
+Mdi_Finder :: struct {
     cus: [..] Md_Id;
     sps: [..] Md_Id;
     gvs: [..] Md_Id;         // DIGlobalVariableExpression
@@ -14,17 +16,17 @@ Di_Finder :: struct {
     seen: Table(Md_Id, bool);   // NodesSeen
 }
 
-dif_init :: (d: *Di_Finder) {
+mdi_init :: (d: *Mdi_Finder) {
     d.cus.allocator = temp; d.sps.allocator = temp; d.gvs.allocator = temp; d.tys.allocator = temp;
     d.scopes.allocator = temp; d.macros.allocator = temp; d.seen.allocator = temp;
 }
-dif_seen_insert :: (d: *Di_Finder, m: Md_Id) -> bool {
+mdi_seen_insert :: (d: *Mdi_Finder, m: Md_Id) -> bool {
     if table_contains(*d.seen, m) return false;
     table_set(*d.seen, m, true);
     return true;
 }
 // the elements of an MDTuple operand (null when absent)
-dif_tuple :: (t: Md_Id) -> [] Md_Id {
+mdi_tuple :: (t: Md_Id) -> [] Md_Id {
     r: [] Md_Id;
     if t == NONE || ir.mds[t].kind != .TUPLE return r;
     r.data = ir.md_ops.data + ir.mds[t].ops;
@@ -32,163 +34,164 @@ dif_tuple :: (t: Md_Id) -> [] Md_Id {
     return r;
 }
 
-dif_process_module :: (d: *Di_Finder) {
-    for nm: ir.named_md if nm.name == "llvm.dbg.cu" for nm.ops dif_process_compile_unit(d, it);
+mdi_process_module :: (d: *Mdi_Finder) {
+    // M.debug_compile_units(): DICompileUnitIterator skips CUs with emissionKind NoDebug
+    for nm: ir.named_md if nm.name == "llvm.dbg.cu" for nm.ops if is_di(it, .COMPILE_UNIT) && di_int(it, 6) != 0 mdi_process_compile_unit(d, it);
     for f: ir.m_functions {
         sp := get_metadata(f, 0);
-        if is_di(sp, .SUBPROGRAM) dif_process_subprogram(d, sp);
+        if is_di(sp, .SUBPROGRAM) mdi_process_subprogram(d, sp);
         for i: fn_insts(f) {
             // processInstruction (debug intrinsics are records after the upgrade)
             dl := get_metadata(i, 0);
-            if dl != NONE dif_process_location(d, dl);
+            if dl != NONE mdi_process_location(d, dl);
             r := inst(i).records;
             while r {
                 rec := dbgr(r);
-                if rec.kind != .LABEL dif_process_variable_di(d, rec.var);
-                if rec.dbg != NONE dif_process_location(d, rec.dbg);
+                if rec.kind != .LABEL mdi_process_variable_di(d, rec.var);
+                if rec.dbg != NONE mdi_process_location(d, rec.dbg);
                 r = rec.next;
             }
         }
     }
 }
 
-dif_process_compile_unit :: (d: *Di_Finder, cu: Md_Id) {
-    if !dif_add_compile_unit(d, cu) return;
-    for dif_tuple(di_op(cu, 6)) dif_process_gve(d, it);   // getGlobalVariables
-    for dif_tuple(di_op(cu, 4)) dif_process_type(d, it);  // getEnumTypes
-    for dif_tuple(di_op(cu, 5)) {                         // getRetainedTypes
-        if di_is_type(it) dif_process_type(d, it);
-        else dif_process_subprogram(d, it);
+mdi_process_compile_unit :: (d: *Mdi_Finder, cu: Md_Id) {
+    if !mdi_add_compile_unit(d, cu) return;
+    for mdi_tuple(di_op(cu, 6)) mdi_process_gve(d, it);   // getGlobalVariables
+    for mdi_tuple(di_op(cu, 4)) mdi_process_type(d, it);  // getEnumTypes
+    for mdi_tuple(di_op(cu, 5)) {                         // getRetainedTypes
+        if di_is_type(it) mdi_process_type(d, it);
+        else mdi_process_subprogram(d, it);
     }
-    for dif_tuple(di_op(cu, 7)) dif_process_imported_entity(d, it);
-    for dif_tuple(di_op(cu, 8)) dif_process_macro_node(d, it, NONE);
+    for mdi_tuple(di_op(cu, 7)) mdi_process_imported_entity(d, it);
+    for mdi_tuple(di_op(cu, 8)) mdi_process_macro_node(d, it, NONE);
 }
 
-dif_process_gve :: (d: *Di_Finder, gve: Md_Id) {
-    if !dif_seen_insert(d, gve) return;   // addGlobalVariable
+mdi_process_gve :: (d: *Mdi_Finder, gve: Md_Id) {
+    if !mdi_seen_insert(d, gve) return;   // addGlobalVariable
     array_add(*d.gvs, gve);
     gv := di_op(gve, 0);
-    dif_process_scope(d, di_op(gv, 0));
-    dif_process_type(d, di_op(gv, 3));
+    mdi_process_scope(d, di_op(gv, 0));
+    mdi_process_type(d, di_op(gv, 3));
 }
 
-dif_process_location :: (d: *Di_Finder, loc: Md_Id) {
+mdi_process_location :: (d: *Mdi_Finder, loc: Md_Id) {
     l := loc;
     while l != NONE && is_di(l, .LOCATION) {
-        dif_process_scope(d, di_op(l, 0));
+        mdi_process_scope(d, di_op(l, 0));
         l = di_op(l, 1);   // getInlinedAt
     }
 }
 
 // processVariable(DIVariable *): only DILocalVariables
-dif_process_variable_di :: (d: *Di_Finder, v: Md_Id) { if is_di(v, .LOCAL_VARIABLE) dif_process_local_variable(d, v); }
+mdi_process_variable_di :: (d: *Mdi_Finder, v: Md_Id) { if is_di(v, .LOCAL_VARIABLE) mdi_process_local_variable(d, v); }
 
-dif_process_local_variable :: (d: *Di_Finder, v: Md_Id) {
-    if !dif_seen_insert(d, v) return;
-    dif_process_scope(d, di_op(v, 0));
-    dif_process_type(d, di_op(v, 3));
+mdi_process_local_variable :: (d: *Mdi_Finder, v: Md_Id) {
+    if !mdi_seen_insert(d, v) return;
+    mdi_process_scope(d, di_op(v, 0));
+    mdi_process_type(d, di_op(v, 3));
 }
 
-dif_process_type :: (d: *Di_Finder, t: Md_Id) {
-    if !dif_add_type(d, t) return;
-    dif_process_scope(d, di_op(t, 1));
+mdi_process_type :: (d: *Mdi_Finder, t: Md_Id) {
+    if !mdi_add_type(d, t) return;
+    mdi_process_scope(d, di_op(t, 1));
     k := di_kind(t);
     if k == .SUBROUTINE_TYPE {
-        for dif_tuple(di_op(t, 5)) dif_process_type(d, it);
+        for mdi_tuple(di_op(t, 5)) mdi_process_type(d, it);
         return;
     }
     if k == .COMPOSITE_TYPE {
-        dif_process_type(d, di_op(t, 5));    // getBaseType
-        dif_process_type(d, di_op(t, 7));    // getVTableHolder
-        dif_process_type(d, di_op(t, 10));   // getDiscriminator
-        dif_process_type(d, di_op(t, 16));   // getSpecification
-        dif_process_variable_di(d, di_op(t, 11));   // getDataLocation (a DIVariable or null)
-        dif_process_variable_di(d, di_op(t, 12));   // getAssociated
-        dif_process_variable_di(d, di_op(t, 13));   // getAllocated
-        for e: dif_tuple(di_op(t, 6)) {
+        mdi_process_type(d, di_op(t, 5));    // getBaseType
+        mdi_process_type(d, di_op(t, 7));    // getVTableHolder
+        mdi_process_type(d, di_op(t, 10));   // getDiscriminator
+        mdi_process_type(d, di_op(t, 16));   // getSpecification
+        mdi_process_variable_di(d, di_op(t, 11));   // getDataLocation (a DIVariable or null)
+        mdi_process_variable_di(d, di_op(t, 12));   // getAssociated
+        mdi_process_variable_di(d, di_op(t, 13));   // getAllocated
+        for e: mdi_tuple(di_op(t, 6)) {
             if e == NONE continue;
-            if di_is_type(e) dif_process_type(d, e);
-            else if is_di(e, .SUBPROGRAM) dif_process_subprogram(d, e);
+            if di_is_type(e) mdi_process_type(d, e);
+            else if is_di(e, .SUBPROGRAM) mdi_process_subprogram(d, e);
             else if is_di(e, .SUBRANGE) || is_di(e, .GENERIC_SUBRANGE) {
                 // VisitBound(LowerBound), (Count), (UpperBound), (Stride): ops are (count, lower, upper, stride)
-                for idx: u32.[1, 0, 2, 3] dif_process_variable_di(d, di_op(e, idx));
+                for idx: u32.[1, 0, 2, 3] mdi_process_variable_di(d, di_op(e, idx));
             }
         }
         return;
     }
-    if k == .STRING_TYPE { dif_process_variable_di(d, di_op(t, 5)); return; }   // getStringLength
+    if k == .STRING_TYPE { mdi_process_variable_di(d, di_op(t, 5)); return; }   // getStringLength
     if k == .SUBRANGE_TYPE {
-        dif_process_type(d, di_op(t, 5));
+        mdi_process_type(d, di_op(t, 5));
         for idx: u32.[6, 7, 8, 9] {   // lower, upper, stride, bias: a DIVariable or a DIDerivedType
             b := di_op(t, idx);
-            if is_di(b, .LOCAL_VARIABLE) || is_di(b, .GLOBAL_VARIABLE) dif_process_variable_di(d, b);
-            else if is_di(b, .DERIVED_TYPE) dif_process_type(d, b);
+            if is_di(b, .LOCAL_VARIABLE) || is_di(b, .GLOBAL_VARIABLE) mdi_process_variable_di(d, b);
+            else if is_di(b, .DERIVED_TYPE) mdi_process_type(d, b);
         }
         return;
     }
-    if k == .DERIVED_TYPE dif_process_type(d, di_op(t, 5));
+    if k == .DERIVED_TYPE mdi_process_type(d, di_op(t, 5));
 }
 
-dif_process_imported_entity :: (d: *Di_Finder, ie: Md_Id) {
+mdi_process_imported_entity :: (d: *Mdi_Finder, ie: Md_Id) {
     e := di_op(ie, 1);
     if e == NONE return;
-    if di_is_type(e) dif_process_type(d, e);
-    else if is_di(e, .SUBPROGRAM) dif_process_subprogram(d, e);
-    else if is_di(e, .NAMESPACE) || is_di(e, .MODULE) dif_process_scope(d, di_op(e, 1));
+    if di_is_type(e) mdi_process_type(d, e);
+    else if is_di(e, .SUBPROGRAM) mdi_process_subprogram(d, e);
+    else if is_di(e, .NAMESPACE) || is_di(e, .MODULE) mdi_process_scope(d, di_op(e, 1));
 }
 
-dif_process_macro_node :: (d: *Di_Finder, m: Md_Id, cur_file: Md_Id) {
+mdi_process_macro_node :: (d: *Mdi_Finder, m: Md_Id, cur_file: Md_Id) {
     if m == NONE return;
     if is_di(m, .MACRO) {
-        if dif_seen_insert(d, m) array_add(*d.macros, .{m, cur_file});   // addMacro
+        if mdi_seen_insert(d, m) array_add(*d.macros, .{m, cur_file});   // addMacro
         return;
     }
     if !is_di(m, .MACRO_FILE) fatal("print<module-debuginfo>: unexpected macro node");
-    if !dif_seen_insert(d, m) return;
-    for dif_tuple(di_op(m, 1)) dif_process_macro_node(d, it, m);
+    if !mdi_seen_insert(d, m) return;
+    for mdi_tuple(di_op(m, 1)) mdi_process_macro_node(d, it, m);
 }
 
-dif_process_scope :: (d: *Di_Finder, s: Md_Id) {
+mdi_process_scope :: (d: *Mdi_Finder, s: Md_Id) {
     if s == NONE || ir.mds[s].kind != .SPECIAL return;
-    if di_is_type(s) { dif_process_type(d, s); return; }
+    if di_is_type(s) { mdi_process_type(d, s); return; }
     k := di_kind(s);
-    if k == .COMPILE_UNIT { dif_add_compile_unit(d, s); return; }
-    if k == .SUBPROGRAM { dif_process_subprogram(d, s); return; }
+    if k == .COMPILE_UNIT { mdi_add_compile_unit(d, s); return; }
+    if k == .SUBPROGRAM { mdi_process_subprogram(d, s); return; }
     // addScope (no DI scope has zero operands in LLVM's layouts)
-    if !dif_seen_insert(d, s) return;
+    if !mdi_seen_insert(d, s) return;
     array_add(*d.scopes, s);
-    if k == .LEXICAL_BLOCK || k == .LEXICAL_BLOCK_FILE || k == .NAMESPACE || k == .MODULE dif_process_scope(d, di_op(s, 1));
+    if k == .LEXICAL_BLOCK || k == .LEXICAL_BLOCK_FILE || k == .NAMESPACE || k == .MODULE mdi_process_scope(d, di_op(s, 1));
 }
 
-dif_process_subprogram :: (d: *Di_Finder, sp: Md_Id) {
-    if sp == NONE || !dif_seen_insert(d, sp) return;   // addSubprogram
+mdi_process_subprogram :: (d: *Mdi_Finder, sp: Md_Id) {
+    if sp == NONE || !mdi_seen_insert(d, sp) return;   // addSubprogram
     array_add(*d.sps, sp);
-    dif_process_scope(d, di_op(sp, 1));
-    dif_process_compile_unit(d, di_op(sp, 5));
-    dif_process_type(d, di_op(sp, 4));
-    for dif_tuple(di_op(sp, 9)) {
-        if is_di(it, .TEMPLATE_TYPE_PARAMETER) || is_di(it, .TEMPLATE_VALUE_PARAMETER) dif_process_type(d, di_op(it, 1));
+    mdi_process_scope(d, di_op(sp, 1));
+    mdi_process_compile_unit(d, di_op(sp, 5));
+    mdi_process_type(d, di_op(sp, 4));
+    for mdi_tuple(di_op(sp, 9)) {
+        if is_di(it, .TEMPLATE_TYPE_PARAMETER) || is_di(it, .TEMPLATE_VALUE_PARAMETER) mdi_process_type(d, di_op(it, 1));
     }
     // forEachRetainedNode
-    for n: dif_tuple(di_op(sp, 7)) {
+    for n: mdi_tuple(di_op(sp, 7)) {
         if n == NONE continue;
-        if is_di(n, .LOCAL_VARIABLE) dif_process_local_variable(d, n);
+        if is_di(n, .LOCAL_VARIABLE) mdi_process_local_variable(d, n);
         else if is_di(n, .LABEL) {}
-        else if is_di(n, .IMPORTED_ENTITY) dif_process_imported_entity(d, n);
-        else if di_is_type(n) dif_process_type(d, n);
-        else if is_di(n, .GLOBAL_VARIABLE_EXPRESSION) dif_process_gve(d, n);
+        else if is_di(n, .IMPORTED_ENTITY) mdi_process_imported_entity(d, n);
+        else if di_is_type(n) mdi_process_type(d, n);
+        else if is_di(n, .GLOBAL_VARIABLE_EXPRESSION) mdi_process_gve(d, n);
         else fatal("print<module-debuginfo>: unexpected retained node");
     }
 }
 
-dif_add_type :: (d: *Di_Finder, t: Md_Id) -> bool {
+mdi_add_type :: (d: *Mdi_Finder, t: Md_Id) -> bool {
     if t == NONE || !di_is_type(t) return false;
-    if !dif_seen_insert(d, t) return false;
+    if !mdi_seen_insert(d, t) return false;
     array_add(*d.tys, t);
     return true;
 }
-dif_add_compile_unit :: (d: *Di_Finder, cu: Md_Id) -> bool {
-    if cu == NONE || !dif_seen_insert(d, cu) return false;
+mdi_add_compile_unit :: (d: *Mdi_Finder, cu: Md_Id) -> bool {
+    if cu == NONE || !mdi_seen_insert(d, cu) return false;
     array_add(*d.cus, cu);
     return true;
 }
@@ -201,9 +204,9 @@ dwarf_name_lookup :: (table: [] Dwarf_Name, v: u64) -> string {
 }
 
 print_module_debuginfo_run :: () {
-    d: Di_Finder;
-    dif_init(*d);
-    dif_process_module(*d);
+    d: Mdi_Finder;
+    mdi_init(*d);
+    mdi_process_module(*d);
     sb: String_Builder; sb.allocator = temp;
     print_file :: (sb: *String_Builder, file: Md_Id, line: u64 = 0) {
         if file == NONE return;
