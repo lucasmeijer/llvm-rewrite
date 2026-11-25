@@ -27,6 +27,7 @@ Gap_Kind :: enum u8 {
     INLINER_WRAPPER_NO_MANDATORY_FIRST;
     // registry_printers.jai
     PRINT_CFG_SCCS; PRINT_DOMFRONTIER; PRINT_STACK_LIFETIME; PRINT_INLINE_COST;
+    PRINT_MODULE_DEBUGINFO;   // debug_info_finder.jai
     // registry_small_passes.jai
     STRIP_GC_RELOCATES; FLATTEN_CFG;
     // assume_builder.jai
@@ -125,6 +126,7 @@ GAP_PASS_TABLE :: Gap_Info.[
     .{"strip-gc-relocates", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .STRIP_GC_RELOCATES},
     .{"print<stack-lifetime>", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .PRINT_STACK_LIFETIME},   // PassInfoMixin; also <may>, <must>
     .{"print<inline-cost>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_INLINE_COST},
+    .{"print<module-debuginfo>", .MODULE, .GAP_MODULE, true, .DOMTREE, .PRINT_MODULE_DEBUGINFO},
     .{"print<domfrontier>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_DOMFRONTIER},
 ];
 
@@ -197,6 +199,7 @@ gap_run_module :: (node: *Pass_Node) {
             // PrintModulePass(errs()): no banner, isFunctionInPrintList("*") (no -filter-print-funcs)
             s := print_module_fresh();
             write_string(s, to_standard_error = true);
+        case .PRINT_MODULE_DEBUGINFO; print_module_debuginfo_run();
         case .TRIGGER_CRASH; gap_abort();
         case .TRIGGER_VERIFIER_ERROR;
             // GlobalAlias::create(ptr, 0, internal, "__bad_alias", /*Aliasee=*/nullptr, &M): our IR has no alias

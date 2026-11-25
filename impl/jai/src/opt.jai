@@ -422,6 +422,7 @@
 #load "registry_gaps.jai";
 #load "registry_printers.jai";
 #load "registry_small_passes.jai";
+#load "debug_info_finder.jai";
 
 // One binary for all three tools (build.sh copies bin/opt to bin/llc and bin/llvm-link): the tool is the base name
 // of argv[0]. Building one binary instead of three makes the optimized build 3x cheaper in time and memory.
