@@ -26,7 +26,7 @@ Gap_Kind :: enum u8 {
     FUNCTION_SIMPLIFICATION;   // function-simplification<O#>: buildFunctionSimplificationPipeline (expanded at parse time)
     INLINER_WRAPPER_NO_MANDATORY_FIRST;
     // registry_printers.jai
-    PRINT_CFG_SCCS; PRINT_DOMFRONTIER; PRINT_STACK_LIFETIME; PRINT_INLINE_COST;
+    PRINT_CFG_SCCS; PRINT_DOMFRONTIER; PRINT_INLINE_COST;
     PRINT_MODULE_DEBUGINFO;   // debug_info_finder.jai
     // registry_small_passes.jai
     STRIP_GC_RELOCATES; FLATTEN_CFG;
@@ -134,7 +134,6 @@ GAP_PASS_TABLE :: Gap_Info.[
     .{"inline-asm-prepare", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .INLINE_ASM_PREPARE},
     .{"flatten-cfg", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .FLATTEN_CFG},
     .{"strip-gc-relocates", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .STRIP_GC_RELOCATES},
-    .{"print<stack-lifetime>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_STACK_LIFETIME},   // also <may>, <must>
     .{"print<inline-cost>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_INLINE_COST},
     .{"print<module-debuginfo>", .MODULE, .GAP_MODULE, true, .DOMTREE, .PRINT_MODULE_DEBUGINFO},
     .{"print<domfrontier>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_DOMFRONTIER},
@@ -162,14 +161,6 @@ gap_lookup_parametrized :: (name: string) -> *Pass_Info {
             if !ok || level.speed == 0 fatal("invalid function-simplification parameter '%'", params);
         case .INSTCOUNT;
             if params != "pre-opt" && params.count != 0 fatal("invalid InstCountPass pass parameter '%'", params);
-        case .PRINT_STACK_LIFETIME;
-            rest := params;
-            while rest.count {
-                k := find_index_from_left(rest, #char ";");
-                pn := ifx k >= 0 then slice(rest, 0, k) else rest;
-                rest = ifx k >= 0 then slice(rest, k + 1, rest.count - k - 1) else "";
-                if pn != "may" && pn != "must" fatal("invalid StackLifetime parameter '%'", pn);
-            }
         case; return null;
     }
     return row;
@@ -267,7 +258,6 @@ gap_run_function :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .ASSUME_SIMPLIFY; return assume_simplify_run(f);
         case .PRINT_DOMFRONTIER; return print_domfrontier_run(f);
         case .PRINT_INLINE_COST; return print_inline_cost_run(f);
-        case .PRINT_STACK_LIFETIME; return print_stack_lifetime_run(f, node.name);
         case .TRIGGER_CRASH; gap_abort();
         case .TRIGGER_VERIFIER_ERROR;
             // new UnreachableInst(Ctx, BB.getTerminator()->getIterator()) in the entry block
