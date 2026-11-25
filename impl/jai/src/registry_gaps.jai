@@ -28,7 +28,7 @@ Gap_Kind :: enum u8 {
     // registry_printers.jai
     PRINT_CFG_SCCS; PRINT_DOMFRONTIER; PRINT_INLINE_COST;
     PRINT_MODULE_DEBUGINFO;   // debug_info_finder.jai
-    PRINT_UNIFORMITY; PRINT_INLINE_ADVISOR; REQUIRE_INLINE_ADVISOR;
+    PRINT_UNIFORMITY; PRINT_INLINE_ADVISOR; REQUIRE_INLINE_ADVISOR; REQUIRE_COLLECTOR_METADATA;
     // passes that change nothing on the targets we support (x86, or no target); see the cases in gap_run_*
     LOOP_DATA_PREFETCH; LOOP_IDIOM_VECTORIZE; COMPLEX_DEINTERLEAVING; REWRITE_SYMBOLS; STATIC_DATA_ANNOTATOR;
     CFGUARD; X86_WINEHSTATE;
@@ -88,7 +88,7 @@ GAP_PASS_TABLE :: Gap_Info.[
     .{"require<ir-similarity>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},         // IRSimilarityAnalysis
     .{"require<immutable-module-summary>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},   // opt registers it with no index
     .{"require<runtime-libcall-info>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},  // RuntimeLibraryAnalysis
-    .{"require<collector-metadata>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},    // CollectorMetadataAnalysis
+    .{"require<collector-metadata>", .MODULE, .GAP_MODULE, true, .DOMTREE, .REQUIRE_COLLECTOR_METADATA},   // CollectorMetadataAnalysis
     .{"require<static-data-profile-info>", .MODULE, .GAP_MODULE, true, .DOMTREE, .NO_OP},   // StaticDataProfileInfoAnalysis
     .{"require<no-op-cgscc>", .CGSCC, .GAP_CGSCC, true, .DOMTREE, .NO_OP},
     .{"require<fam-proxy>", .CGSCC, .GAP_CGSCC, true, .DOMTREE, .NO_OP},               // FunctionAnalysisManagerCGSCCProxy
@@ -220,6 +220,7 @@ gap_run_module :: (node: *Pass_Node) {
             write_string(s, to_standard_error = true);
         case .PRINT_MODULE_DEBUGINFO; print_module_debuginfo_run();
         case .REQUIRE_INLINE_ADVISOR; inline_advisor_cached = true;
+        case .REQUIRE_COLLECTOR_METADATA; collector_metadata_compute();
         case .PRINT_INLINE_ADVISOR;
             // InlineAdvisorAnalysisPrinterPass::run(Module &): the cached InlineAdvisorAnalysis
             if inline_advisor_cached fatal("print<inline-advisor>: printing a cached InlineAdvisorAnalysis result is not supported yet");
@@ -239,9 +240,7 @@ gap_run_module :: (node: *Pass_Node) {
                 for b: fn_blocks(f) if block_is_eh_pad(b) fatal("x86-winehstate: funclet EH (WinEHStatePass) is not supported yet");
             }
         case .LOWER_EMUTLS; mam_invalidate(lower_emutls_run());
-        case .SHADOW_STACK_GC_LOWERING;
-            // CollectorMetadataAnalysis: only modules with a function using gc "shadow-stack"
-            for f: ir.m_functions if glob(f).gc == "shadow-stack" fatal("shadow-stack-gc-lowering: gc \"shadow-stack\" is not supported yet");
+        case .SHADOW_STACK_GC_LOWERING; mam_invalidate(shadow_stack_gc_lowering_run());
         case .TRIGGER_CRASH; gap_abort();
         case .TRIGGER_VERIFIER_ERROR;
             // GlobalAlias::create(ptr, 0, internal, "__bad_alias", /*Aliasee=*/nullptr, &M): our IR has no alias
@@ -291,7 +290,7 @@ gap_run_function :: (node: *Pass_Node, f: Value_Id) -> Preserved {
             gap_require_x86_target(node.name);
             return PRESERVE_ALL;
         case .X86_LOWER_AMX_TYPE; gap_require_x86_target(node.name); return x86_lower_amx_check(f, false);
-        case .GC_LOWERING; return gc_lowering_check(f);
+        case .GC_LOWERING; return gc_lowering_run(f);
         case .INLINE_ASM_PREPARE; return inline_asm_prepare_run(f);
         case .ASSUME_SIMPLIFY; return assume_simplify_run(f);
         case .PRINT_DOMFRONTIER; return print_domfrontier_run(f);

@@ -293,3 +293,258 @@ emutls_add_var :: (gv: Value_Id) -> bool {
     glob(ev).align = max(dl_abi_align(word), dl_abi_align(ir.t_ptr));
     return true;
 }
+
+// ---------------------------------------------------------------- gc-lowering, collector-metadata
+// llvm/lib/CodeGen/GCRootLowering.cpp (GCLoweringPass::run, DoLowering, InsertRootInitializers,
+// CouldBecomeSafePoint), llvm/lib/CodeGen/GCMetadata.cpp (CollectorMetadataAnalysis::run, GCFunctionAnalysis::run),
+// llvm/lib/IR/GCStrategy.cpp (getGCStrategy) with the builtin strategies of llvm/lib/IR/BuiltinGCs.cpp.
+
+collector_metadata_cached := false;
+BUILTIN_GC_STRATEGIES :: string.["erlang", "ocaml", "shadow-stack", "statepoint-example", "coreclr"];
+
+// CollectorMetadataAnalysis::run: a strategy for every GC name of a defined function
+collector_metadata_compute :: () {
+    for f: ir.m_functions {
+        if is_declaration(f) || glob(f).gc.count == 0 continue;
+        known := false;
+        for BUILTIN_GC_STRATEGIES if it == glob(f).gc known = true;
+        if !known verifier_fatal(tprint("unsupported GC: %", glob(f).gc));
+    }
+    collector_metadata_cached = true;
+}
+
+gc_lowering_run :: (f: Value_Id) -> Preserved {
+    if glob(f).gc.count == 0 return PRESERVE_ALL;
+    // GCFunctionAnalysis::run: the cached CollectorMetadataAnalysis must exist (an assertion in LLVM)
+    if !collector_metadata_cached fatal("gc-lowering: the collector-metadata module analysis must be cached (require<collector-metadata>)");
+    // DoLowering
+    roots: [..] Value_Id; roots.allocator = temp;
+    changed := false;
+    iid_gcwrite := iid_by_name("llvm.gcwrite");
+    iid_gcread := iid_by_name("llvm.gcread");
+    iid_gcroot := iid_by_name("llvm.gcroot");
+    for bb: fn_blocks(f) for :early_inc i: block_insts(bb) {
+        if inst_op(i) != .CALL continue;
+        id := call_iid(i);
+        if id == NOT_INTRINSIC continue;
+        if id == iid_gcwrite {
+            st := new_inst(.STORE, ir.t_void, 2);
+            set_op(st, 0, call_arg(i, 0));
+            set_op(st, 1, call_arg(i, 2));
+            inst(st).align = dl_abi_align(vtype(call_arg(i, 0)));   // new StoreInst(Val, Ptr, InsertBefore): ABI alignment
+            insert_before_named(st, i, "");
+            replace_all_uses_with(i, st);
+            erase_inst_with_metadata(i);
+            changed = true;
+        } else if id == iid_gcread {
+            ld := new_inst(.LOAD, vtype(i), 1);
+            set_op(ld, 0, call_arg(i, 1));
+            inst(ld).align = dl_abi_align(vtype(i));
+            insert_before_named(ld, i, "");
+            take_name(ld, i);
+            replace_all_uses_with(i, ld);
+            erase_inst_with_metadata(i);
+            changed = true;
+        } else if id == iid_gcroot {
+            r := strip_pointer_casts(call_arg(i, 0));
+            if !is_inst(r) || inst_op(r) != .ALLOCA fatal("gc-lowering: llvm.gcroot of something that is not an alloca");
+            array_add(*roots, r);
+        }
+    }
+    if roots.count changed |= gc_insert_root_initializers(f, roots, iid_gcroot);
+    if !changed return PRESERVE_ALL;
+    pa: Preserved;
+    preserve(*pa, .DOMTREE);
+    return pa;
+}
+
+// InsertRootInitializers
+gc_insert_root_initializers :: (f: Value_Id, roots: [] Value_Id, iid_gcroot: Intrinsic_Id) -> bool {
+    ip := block_first(fn_entry(f));
+    while ip != NONE && inst_op(ip) == .ALLOCA ip = inst(ip).next;
+    // CouldBecomeSafePoint
+    could_be_safe_point :: (i: Value_Id, iid_gcroot: Intrinsic_Id) -> bool {
+        o := inst_op(i);
+        if o == .ALLOCA || o == .GEP || o == .STORE || o == .LOAD return false;
+        if o == .CALL && call_iid(i) == iid_gcroot return false;
+        return true;
+    }
+    inited: [..] Value_Id; inited.allocator = temp;
+    while ip != NONE && !could_be_safe_point(ip, iid_gcroot) {
+        if inst_op(ip) == .STORE {
+            a := strip_pointer_casts(op(ip, 1));
+            if is_inst(a) && inst_op(a) == .ALLOCA array_add_if_unique(*inited, a);
+        }
+        ip = inst(ip).next;
+    }
+    changed := false;
+    for root: roots {
+        found := false;
+        for inited if it == root found = true;
+        if found continue;
+        aty := inst(root).ty2;   // getAllocatedType
+        st := new_inst(.STORE, ir.t_void, 2);
+        set_op(st, 0, const_null_value(aty));
+        set_op(st, 1, root);
+        inst(st).align = dl_abi_align(aty);
+        // new StoreInst(..., std::next(Root->getIterator()))
+        nx := inst(root).next;
+        insert_at_position(st, inst_block(root), nx, false);
+        changed = true;
+    }
+    return changed;
+}
+
+// ---------------------------------------------------------------- shadow-stack-gc-lowering
+// llvm/lib/CodeGen/ShadowStackGCLowering.cpp (ShadowStackGCLoweringPass::run, ShadowStackGCLoweringImpl:
+// doInitialization, CollectRoots, ComputeFrameLayout, GetFrameMap, runOnFunction) with EscapeEnumerator
+// (pass_tsan.jai, which has no DomTreeUpdater: a cached dominator tree with new invokes fails loudly).
+
+Ssgc :: struct {
+    head: Value_Id;
+    frame_map_ty: Type_Id;
+    roots: [..] struct { call: Value_Id; alloca: Value_Id; };
+    offsets: [..] struct { off: u64; size: u64; };
+}
+
+shadow_stack_gc_lowering_run :: () -> Preserved {
+    // MAM.getResult<CollectorMetadataAnalysis>(M): Map.contains("shadow-stack")
+    collector_metadata_compute();
+    active := false;
+    for f: ir.m_functions if !is_declaration(f) && glob(f).gc == "shadow-stack" active = true;
+    if !active return PRESERVE_ALL;
+    s: Ssgc;
+    s.roots.allocator = temp; s.offsets.allocator = temp;
+    changed := ssgc_do_initialization(*s);
+    for f: ir.m_functions {
+        if ssgc_run_on_function(*s, f) { changed = true; fam_invalidate(f, ssgc_function_pa()); }
+    }
+    if !changed return PRESERVE_ALL;
+    pa := ssgc_function_pa();
+    pa.all_fn = true;   // the function analyses were invalidated per function above
+    return pa;
+}
+ssgc_function_pa :: () -> Preserved { pa: Preserved; preserve(*pa, .DOMTREE); return pa; }
+
+// doInitialization (only reached when a function uses gc "shadow-stack"; LLVM checks declarations too)
+ssgc_do_initialization :: (s: *Ssgc) -> bool {
+    any := false;
+    for f: ir.m_functions if glob(f).gc == "shadow-stack" any = true;
+    if !any return false;
+    s.frame_map_ty = type_named_struct("");
+    set_struct_body(s.frame_map_ty, .[ir.t_i32, ir.t_i32], false);
+    ctx_set_struct_name(s.frame_map_ty, "gc_map");
+    // M.getGlobalVariable("llvm_gc_root_chain"): AllowInternal = false
+    h := lookup_global("llvm_gc_root_chain");
+    if h != NONE && (vkind(h) != .GLOBAL_VAR || gv_has_local_linkage(h)) h = NONE;
+    if h == NONE {
+        h = gv_create(ir.t_ptr, false, .LINKONCE_ANY, const_null_value(ir.t_ptr), "llvm_gc_root_chain", NONE, 0, 0);
+    } else if glob(h).linkage == .EXTERNAL && !glob(h).has_init {
+        gv_set_initializer(h, const_null_value(ir.t_ptr));
+        gv_set_linkage(h, .LINKONCE_ANY);
+    }
+    s.head = h;
+    return true;
+}
+
+ssgc_run_on_function :: (s: *Ssgc, f: Value_Id) -> bool {
+    if glob(f).gc != "shadow-stack" return false;
+    // CollectRoots: roots with metadata first
+    s.roots.count = 0; s.offsets.count = 0;
+    meta: [..] type_of(s.roots[0]); meta.allocator = temp;
+    plain: [..] type_of(s.roots[0]); plain.allocator = temp;
+    iid_gcroot := iid_by_name("llvm.gcroot");
+    for i: fn_insts(f) {
+        if inst_op(i) != .CALL || call_iid(i) != iid_gcroot continue;
+        a := strip_pointer_casts(call_arg(i, 0));
+        if !is_inst(a) || inst_op(a) != .ALLOCA fatal("shadow-stack-gc-lowering: llvm.gcroot of something that is not an alloca");
+        m := call_arg(i, 1);
+        if is_constant_kind(vkind(m)) && is_null_value(m) array_add(*plain, .{i, a}); else array_add(*meta, .{i, a});
+    }
+    for meta array_add(*s.roots, it);
+    for plain array_add(*s.roots, it);
+    if !s.roots.count return false;
+    // ComputeFrameLayout
+    ptr_size := dl_type_store_size(ir.t_ptr);
+    ptr_align := dl_abi_align(ir.t_ptr);
+    max_align := ptr_align;
+    offset := 2 * ptr_size;
+    for s.roots {
+        ok, size := alloca_allocation_size_bytes(it.alloca);
+        if !ok verifier_fatal("Intrinsic::gcroot requires a fixed size stack object");
+        ra := inst(it.alloca).align;
+        max_align = max(max_align, ra);
+        aligned := align_to(offset, ra);
+        array_add(*s.offsets, .{aligned, size});
+        offset = aligned + size;
+    }
+    frame_size := align_to(offset, max_align);
+    frame_map := ssgc_get_frame_map(s, f, frame_size / ptr_size - 2);
+    cached_dt := cached_domtree(f);
+    nblocks := fn_num_blocks(f);
+
+    entry := fn_entry(f);
+    b: Irb;
+    irb_set_at(*b, entry, block_first(entry), true);   // IRBuilder<> AtEntry(IP->getParent(), IP), IP = begin()
+    frame := irb_alloca(*b, type_array(frame_size, ir.t_i8), NONE, "gc_frame");
+    inst(frame).align = max_align;
+    // SetInsertPointPastAllocas(&F) (the debug location stays)
+    b.bb = entry; b.pt = block_first_non_phi_or_dbg_or_alloca(entry); b.head = false;
+    ip := b.pt;
+    cur_head := irb_load(*b, ir.t_ptr, s.head, dl_abi_align(ir.t_ptr), name = "gc_currhead");
+    map_ptr := irb_ptr_add(*b, frame, const_int(ir.t_i64, ptr_size), "gc_frame.map");
+    irb_store(*b, frame_map, map_ptr, dl_abi_align(ir.t_ptr));
+    last_end := 2 * ptr_size;
+    for r, k: s.roots {
+        o := s.offsets[k];
+        if o.off > last_end {
+            pad := irb_ptr_add(*b, frame, const_int(ir.t_i64, last_end));
+            irb_memset(*b, pad, const_int(ir.t_i8, 0), const_int(ir.t_i64, o.off - last_end), 1, false);
+        }
+        slot := irb_ptr_add(*b, frame, const_int(ir.t_i64, o.off), "gc_root");
+        take_name(slot, r.alloca);
+        replace_all_uses_with(r.alloca, slot);
+        last_end = o.off + o.size;
+    }
+    if frame_size > last_end {
+        pad := irb_ptr_add(*b, frame, const_int(ir.t_i64, last_end));
+        irb_memset(*b, pad, const_int(ir.t_i8, 0), const_int(ir.t_i64, frame_size - last_end), 1, false);
+    }
+    while ip != NONE && inst_op(ip) == .STORE ip = inst(ip).next;
+    irb_set_at(*b, entry, ip, false);
+    irb_store(*b, cur_head, frame, dl_abi_align(ir.t_ptr));
+    irb_store(*b, frame, s.head, dl_abi_align(ir.t_ptr));
+    // EscapeEnumerator EE(F, "gc_cleanup", /*HandleExceptions=*/true, DTU)
+    ee := escape_enumerator(f, "gc_cleanup", true);
+    while true {
+        pt := escape_enumerator_next(*ee);
+        if pt == NONE break;
+        x: Irb; irb_set_before(*x, pt);
+        saved := irb_load(*x, ir.t_ptr, frame, dl_abi_align(ir.t_ptr), name = "gc_savedhead");
+        irb_store(*x, saved, s.head, dl_abi_align(ir.t_ptr));
+    }
+    if cached_dt && fn_num_blocks(f) != nblocks fatal("shadow-stack-gc-lowering: updating a cached dominator tree for new invokes is not supported yet");
+    for s.roots { erase_inst_with_metadata(it.call); erase_inst_with_metadata(it.alloca); }
+    s.roots.count = 0; s.offsets.count = 0;
+    return true;
+}
+
+// GetFrameMap
+ssgc_get_frame_map :: (s: *Ssgc, f: Value_Id, frame_size_in_ptrs: u64) -> Value_Id {
+    num_meta := 0;
+    md: [..] Value_Id; md.allocator = temp;
+    for s.roots {
+        c := call_arg(it.call, 1);
+        if !is_null_value(c) num_meta = it_index + 1;
+        array_add(*md, c);
+    }
+    md.count = num_meta;
+    base := const_aggregate(.C_STRUCT, s.frame_map_ty, .[const_int(ir.t_i32, frame_size_in_ptrs), const_int(ir.t_i32, cast(u64) num_meta)]);
+    arr_ty := type_array(cast(u64) num_meta, ir.t_ptr);
+    arr := const_aggregate(.C_ARRAY, arr_ty, md);
+    sty := type_named_struct("");
+    set_struct_body(sty, .[s.frame_map_ty, arr_ty], false);
+    ctx_set_struct_name(sty, tprint("gc_map.%", num_meta));
+    fm := const_aggregate(.C_STRUCT, sty, .[base, arr]);
+    return gv_create(sty, true, .INTERNAL, fm, tprint("__gc_%", vname(f)), NONE, 0, 0);
+}
