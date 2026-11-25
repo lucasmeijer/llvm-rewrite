@@ -402,3 +402,13 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - Redundant chains (two loads at one offset) give NumElem == 1: the "vector" is a scalar load and each original
   gets its own bitcast/inttoptr; the RAUW also retargets debug records (InstCombine/debuginfo-dce.ll).
 - The only heap-order dependence is mergeEquivalenceClasses' DenseMap walk (position of new target classes).
+
+## LoopVectorize with remarks enabled (verified by sweeping `--pass-remarks=loop-vectorize`)
+- Any `-pass-remarks*` option makes `ORE->enabled()` true, and VPlan.cpp's updateLoopMetadataAndProfileInfo then
+  adds `!{!"llvm.loop.vectorize.body", i32 1}` to the vector loop and `!{!"llvm.loop.vectorize.epilogue", i32 1}` to
+  a reachable scalar remainder: the IR changes, not just stderr.
+- `ORE->allowExtraAnalysis("loop-vectorize")` (remarks for LV enabled) makes legality run every check instead of
+  returning at the first failure (canVectorize, canVectorizeLoopCFG/NestCFG, canVectorizeOuterLoop,
+  canVectorizeInstrs); the verdict is the same.
+- Passed remarks print as `remark: <DIFile filename or <unknown>>:<line>:<col>: vectorized loop (vectorization
+  width: N, interleaved count: M)` (or `interleaved loop (interleaved count: M)` for VF 1) with Loop::getStartLoc.
