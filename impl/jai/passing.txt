@@ -21050,6 +21050,8 @@ tests/pass/instsimplify/fcmp-ranges-fp80-fp128.ll::opt
 tests/pass/instsimplify/fcmp-ranges-fp80-fp128.ll::roundtrip
 tests/pass/mem2reg/phi-dbg-value-order.ll::opt
 tests/pass/mem2reg/phi-dbg-value-order.ll::roundtrip
+tests/pass/memcpyopt/memset-length-wraps.ll::opt
+tests/pass/memcpyopt/memset-length-wraps.ll::roundtrip
 tests/pass/pass-manager/bpi-kept-with-cfg.ll::analysis
 tests/pass/pass-manager/bpi-kept-with-cfg.ll::roundtrip
 tests/pass/pass-manager/mssa-cached-across-adaptors.ll::roundtrip
@@ -21057,6 +21059,12 @@ tests/pass/pass-manager/scev-cached-across-adaptors.ll::opt
 tests/pass/pass-manager/scev-cached-across-adaptors.ll::roundtrip
 tests/pass/pipeline/blockaddress-outlives-its-uses.ll::opt
 tests/pass/pipeline/blockaddress-outlives-its-uses.ll::roundtrip
+tests/pass/simplifycfg/hoist-nofpclass-disjoint.ll::opt
+tests/pass/simplifycfg/hoist-nofpclass-disjoint.ll::roundtrip
+tests/pass/simplifycfg/speculate-constexpr-gep-cost.ll::opt
+tests/pass/simplifycfg/speculate-constexpr-gep-cost.ll::roundtrip
+tests/pass/slp-vectorizer/store-distance-overflow.ll::opt
+tests/pass/slp-vectorizer/store-distance-overflow.ll::roundtrip
 tests/perf/compile/SPASS.ll::opt
 tests/perf/compile/SPASS.ll::roundtrip
 tests/perf/compile/lua.ll::opt
