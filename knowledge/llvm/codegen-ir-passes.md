@@ -132,3 +132,28 @@ diffing our output against `llc -stop-before=x86-isel` (the `::isel-ir` check) o
   but getMask can still leave a dead `and` or `llvm.vector.extract` behind.
 - **LowerAtomic**: lowering atomic loads/stores (ordering and syncscope reset) does not make the pass report a
   change; fences, cmpxchg and atomicrmw do (PreservedAnalyses::none()).
+
+## Registry-gap codegen IR passes under opt (jai_registry_gap; verified by sweeps and the copied CodeGen tests)
+
+- **dwarf-eh-prepare** needs a cached `require<libcall-lowering-info>` (else "'LibcallLoweringModuleAnalysis'
+  analysis required") and a TargetMachine. Unreachable resumes are pruned (simplifyCFG on their block) only when
+  the TM opt level is not None: opt's TM uses `-codegen-opt-level` (default 0), so plain opt never prunes. One
+  resume becomes `call void @_Unwind_Resume(ptr %exn.obj)` (noreturn call-site attribute, C cc) + unreachable in
+  place; several get a shared `unwind_resume` block with an `exn.obj` phi.
+- **lower-emutls** (new PM) lowers every thread_local global, whatever `useEmulatedTLS()` says (only the legacy
+  pass checks it): `__emutls_v.<name> = { word, word, ptr, ptr }` (a new unnamed struct type per variable),
+  `__emutls_t.<name>` for a nonzero initializer, linkage / visibility / dso_local / comdat copied.
+- **gc-lowering** asserts a cached `require<collector-metadata>`; unknown GC names are a fatal "unsupported GC"
+  (builtins: erlang, ocaml, shadow-stack, statepoint-example, coreclr). **shadow-stack-gc-lowering** only acts
+  when some function uses gc "shadow-stack"; the frame maps are `%gc_map.N` named structs (N = roots with
+  metadata, uniqued names `gc_map.0.0`, ...), roots with metadata come first.
+- **sjlj-eh-prepare** runs without a TM (DataTy i32). It declares its 9 functions/intrinsics in every module with
+  a defined function, even when nothing changes (and then reports PreservedAnalyses::all()).
+- **cfguard** acts only with the module flag "cfguard" = 2 (Enabled); x86-64 defaults to the dispatch mechanism
+  (`cfguardtarget` bundle on a call through `__guard_dispatch_icall_fptr`); CallInst::Create(CI, Bundles) keeps the
+  name (uniqued while the old call exists), attributes, cc, tail kind, FMF and !dbg, but drops other metadata.
+- **inline-asm-prepare** (callbr with a used result): critical edges to indirect destinations split with
+  MergeIdenticalEdges, `llvm.callbr.landingpad` at the head of each indirect destination, SSAUpdater for the uses.
+- No-ops on x86 that are still registered: loop-data-prefetch (cache line size 0), loop-idiom-vectorize (needs
+  scalable vectors), complex-deinterleaving (X86TargetLowering doesn't support it), x86-lower-amx-intrinsics
+  (needs -enable-x86-scalar-amx). X86PassRegistry.def names are unknown to opt without an x86 TargetMachine.

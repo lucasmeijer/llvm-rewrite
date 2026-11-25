@@ -53,3 +53,18 @@ An assertions build of the same 23.1.5 sources is at `/persistent/llvm-rewrite/l
 It is a debugging aid only: the oracle for every check stays the release build (assertions builds can differ,
 e.g. extra verification, `-verify-memoryssa` actually verifying). Verified: the jai SLP port compared its cost
 decisions against `-debug-only=SLP` output from this binary.
+
+## Pass-registry corners (jai_registry_gap)
+
+- The `*-callbacks<O#>` names of PassRegistry.def (pipeline-start-callbacks, peephole-callbacks, ...) invoke the
+  extension-point callbacks opt registered: without `-passes-ep-*` options or plugins they add no passes. The
+  parameter is parseOptLevelParam (O0-O3; Os/Oz are a fatal usage error); a bare name prints
+  "<name>: invalid optimization level ''" and then "unknown pass name".
+- `function-simplification<O1|O2|O3>` is buildFunctionSimplificationPipeline(Level, ThinOrFullLTOPhase::None) as a
+  function pass; O0 and no parameter are rejected.
+- AssumeBuilderPass::run has `if (!Changed) PreservedAnalyses::all();` without `return`: it always returns
+  "CFG preserved".
+- InstCountPass, the IR printers, the analysis printers (CFGSCC, DominanceFrontier, Uniformity, ModuleDebugInfo,
+  InlineCost, InlineAdvisor) and DwarfEHPrepare / SjLjEHPrepare / GCLowering / LowerEmuTLS are
+  RequiredPassInfoMixin (run on optnone functions, not counted by -opt-bisect-limit); InvalidateAllAnalysesPass,
+  HelloWorld, CountVisits, FlattenCFG, StripGCRelocates, AssumeBuilder/Simplify and the trigger-* passes are not.
