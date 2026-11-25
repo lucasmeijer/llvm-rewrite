@@ -52,6 +52,8 @@ Instr_Lowerer :: struct {
     names_size: s64;
     profile_data_ty: Type_Id = NONE;
     promotion_candidates: [..] [2] Value_Id;   // (load, store)
+    vtable_data: Table(Value_Id, Value_Id);    // VTableDataMap
+    referenced_vtables: [..] Value_Id;
     total_promoted: s64;
 }
 
@@ -883,6 +885,49 @@ il_emit_vnodes :: (il: *Instr_Lowerer) {
     array_add(*il.used_vars, v);
 }
 
+// getOrCreateVTableProfData
+il_get_or_create_vtable_prof_data :: (il: *Instr_Lowerer, gv: Value_Id) {
+    if instrprof_lower_cl.profile_correlate == 1 fatal("instrprof: value profiling with -profile-correlate=debug-info (LLVM asserts)");
+    if is_declaration(gv) || glob(gv).linkage == .AVAILABLE_EXTERNALLY return;
+    n := vname(gv);
+    if begins_with(n, "llvm.") || begins_with(n, "__llvm") || begins_with(n, "__prof") return;
+    if table_contains(*il.vtable_data, gv) return;
+    linkage := glob(gv).linkage;
+    vis := glob(gv).visibility;
+    if il.tt.obj == .XCOFF { linkage = .INTERNAL; vis = 0; }
+    data_ty := type_literal_struct(.[ir.t_i64, type_ptr(0), ir.t_i32], false);
+    // getVTableAddrForProfData / shouldRecordVTableAddr
+    addr: Value_Id = gv;
+    record := il_prof_data_referenced_by_code();
+    if record && (glob(gv).linkage == .LINKONCE_ANY || glob(gv).linkage == .LINKONCE_ODR || gv_has_local_linkage(gv) || glob(gv).linkage == .AVAILABLE_EXTERNALLY) {
+        if gv_has_local_linkage(gv) && glob(gv).comdat >= 0 record = false;
+    }
+    if !record addr = const_null_value(type_ptr(0));
+    pgo_name := irpgo_object_name(gv);
+    size := dl_type_alloc_size(glob(gv).value_type);
+    init := const_aggregate(.C_STRUCT, data_ty, .[const_int(ir.t_i64, md5_hash_u64(pgo_name)), addr, const_int(ir.t_i32, size & 0xFFFF_FFFF)]);
+    data := gv_create(data_ty, false, linkage, init, tconcat("__profvt_", pgo_name), NONE, 0, dl.globals_as);
+    gv_set_visibility(data, vis);
+    glob(data).section = instrprof_section_name(.VTAB, il.tt.obj);
+    glob(data).align = 8;
+    il_maybe_set_comdat(il, data, gv, vname(data));
+    table_set(*il.vtable_data, gv, data);
+    array_add(*il.referenced_vtables, gv);
+    array_add(*il.used_vars, data);
+}
+// emitVTableNames
+il_emit_vtable_names :: (il: *Instr_Lowerer) {
+    if !instrprof_cl.enable_vtable_value_profiling || il.referenced_vtables.count == 0 return;
+    names: [..] string; names.allocator = temp;
+    for il.referenced_vtables array_add(*names, irpgo_object_name(it));
+    s := collect_global_object_name_strings(names, instrprof_cl.do_name_compression);
+    val := c_string_const(s, false);
+    v := gv_create(vtype(val), true, .PRIVATE, val, "__llvm_prf_vnm", NONE, 0, dl.globals_as);
+    glob(v).section = instrprof_section_name(.VNAME, il.tt.obj);
+    glob(v).align = 1;
+    array_add(*il.used_vars, v);
+}
+
 // emitNameData
 il_emit_name_data :: (il: *Instr_Lowerer) {
     if il.referenced_names.count == 0 return;
@@ -998,7 +1043,7 @@ instrprof_lower :: (is_cs := false) -> bool {
     il.pd.allocator = temp; il.pd_index.allocator = temp; il.bias_of.allocator = temp;
     il.compiler_used_vars.allocator = temp; il.used_vars.allocator = temp; il.referenced_names.allocator = temp;
     il.promotion_candidates.allocator = temp;
-    if instrprof_cl.enable_vtable_value_profiling fatal("instrprof: -enable-vtable-value-profiling is not supported");
+    il.vtable_data.allocator = temp; il.referenced_vtables.allocator = temp;
     made_change := false;
     needs_runtime_hook := il.tt.os != .Fuchsia;
     if needs_runtime_hook made_change = il_emit_runtime_hook(*il);
@@ -1019,11 +1064,18 @@ instrprof_lower :: (is_cs := false) -> bool {
         }
         if first != NONE il_get_or_create_region_counters(*il, first);
     }
+    if instrprof_cl.enable_vtable_value_profiling {
+        gvs: [..] Value_Id; gvs.allocator = temp;
+        for ir.m_globals array_add(*gvs, it);
+        // global variables with type metadata are virtual tables
+        for gv: gvs if get_metadata(gv, md_fixed("type")) != NONE il_get_or_create_vtable_prof_data(*il, gv);
+    }
     for f: ir.m_functions made_change |= il_lower_intrinsics(*il, f);
     if cov != NONE { il_lower_coverage_data(*il, cov); made_change = true; }
     if !made_change return false;
     il_emit_vnodes(*il);
     il_emit_name_data(*il);
+    il_emit_vtable_names(*il);
     if !needs_runtime_hook && contains il_emit_runtime_hook(*il);
     il_emit_registration(*il);
     il_emit_uses(*il);

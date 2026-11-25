@@ -26,7 +26,7 @@ ctx_instrprof_iid :: (i: Value_Id) -> string {
     if cf == NONE || !glob(cf).intrinsic return "";
     n := vname(cf);
     if n == "llvm.instrprof.increment" || n == "llvm.instrprof.increment.step" || n == "llvm.instrprof.callsite" ||
-       n == "llvm.instrprof.cover" || n == "llvm.instrprof.timestamp" return n;
+       n == "llvm.instrprof.cover" || n == "llvm.instrprof.timestamp" || n == "llvm.instrprof.value.profile" return n;
     return "";
 }
 ctx_is_increment :: (n: string) -> bool { return n == "llvm.instrprof.increment" || n == "llvm.instrprof.increment.step"; }

@@ -80,6 +80,10 @@ cp_version_call_site :: (cb: Value_Id, callee: Value_Id, weights: Md_Id) -> Valu
     d := get_metadata(cb, 0);
     if d != NONE set_metadata(cond, 0, d);
     insert_at_position(cond, inst_block(cb), cb, false);
+    return cp_version_call_site_with_cond(cb, cond, weights);
+}
+// versionCallSiteWithCond
+cp_version_call_site_with_cond :: (cb: Value_Id, cond: Value_Id, weights: Md_Id) -> Value_Id {
     orig_block := inst_block(cb);
     if call_is_must_tail(cb) {
         then_term := sbi_if_then(cond, cb, false, weights);
@@ -130,6 +134,19 @@ cp_version_call_site :: (cb: Value_Id, callee: Value_Id, weights: Md_Id) -> Valu
 // promoteCallWithIfThenElse
 cp_promote_call_with_if_then_else :: (cb: Value_Id, callee: Value_Id, weights: Md_Id) -> Value_Id {
     ni := cp_version_call_site(cb, callee, weights);
+    atr_promote_call(ni, callee);
+    return ni;
+}
+
+// promoteCallWithVTableCmp
+cp_promote_call_with_vtable_cmp :: (cb: Value_Id, vptr: Value_Id, callee: Value_Id, address_points: [] Value_Id, weights: Md_Id) -> Value_Id {
+    b: Irb; irb_set_before(*b, cb);
+    cond: Value_Id = NONE;
+    for ap: address_points {
+        c := irb_insert(*b, create_icmp(ICMP_EQ, vptr, ap));
+        cond = ifx cond == NONE then c else irb_binop(*b, .OR, cond, c);
+    }
+    ni := cp_version_call_site_with_cond(cb, cond, weights);
     atr_promote_call(ni, callee);
     return ni;
 }

@@ -3075,8 +3075,9 @@ sroa_run :: (f: Value_Id, name: string) -> Preserved {
     svec_init(*pass.worklist); svec_init(*pass.post_promotion); svec_init(*pass.promotable); svec_init(*pass.spec_phis);
     pass.dead_insts.allocator = temp; pass.selects.allocator = temp;
     dbgr_index_reset();
+    // a fresh array: the temporary storage of an earlier run may have been reset (stale capacity = corruption)
+    sroa_pending_dt_updates.data = null; sroa_pending_dt_updates.count = 0; sroa_pending_dt_updates.allocated = 0;
     sroa_pending_dt_updates.allocator = temp;
-    sroa_pending_dt_updates.count = 0;
     entry := fn_entry(f);
     last := block(entry).last;
     i := block(entry).first;

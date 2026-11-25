@@ -338,6 +338,10 @@ redirect_values_from_predecessors_to_phi :: (bb: Value_Id, bb_preds: [] Value_Id
 has_non_debug_loc_loop_metadata :: (t: Value_Id) -> bool {
     m := get_metadata(t, MD_LOOP_KIND);
     if m == NONE return false;
+    // a DILocation as the loop metadata: its MDNode operands are the scope and the optional inlinedAt (a
+    // DILocation), so nothing after the first is a non-DILocation
+    if is_di(m, .LOCATION) return false;
+    if ir.mds[m].kind == .SPECIAL fatal("Instruction::hasNonDebugLocLoopMetadata: a non-tuple debug-info node as !llvm.loop is not supported");
     n := md_nops(m);
     for k: 1..cast(s64) n - 1 {
         o := md_op(m, cast(u32) k);
@@ -583,6 +587,9 @@ remove_unwind_edge :: (bb: Value_Id, dtu: *Dtu) -> Value_Id {
         return NONE;
     }
     inst_insert_before(nti, ti);
+    // CatchSwitchInst::Create(..., CatchSwitch->getName(), ...): the name is uniqued against the old one (which bumps
+    // the symbol table's LastUnique counter) before takeName
+    if inst_op(ti) == .CATCHSWITCH && vname(ti).count set_name(nti, vname(ti));
     take_name(nti, ti);
     copy_debug_loc(nti, ti);
     block_remove_predecessor(unwind, bb);

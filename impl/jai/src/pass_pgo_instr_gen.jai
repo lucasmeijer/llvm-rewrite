@@ -7,7 +7,7 @@
 // llvm/lib/Transforms/Instrumentation/ValueProfileCollector.cpp + ValueProfilePlugins.inc and
 // llvm/include/llvm/Analysis/IndirectCallVisitor.h (findIndirectCalls). JamCRC from llvm/lib/Support/CRC.cpp.
 // -pgo-block-coverage: block_coverage_inference.jai. Not ported (loud): indirectbr critical edges
-// (SplitIndirectBrCriticalEdges with IgnoreBlocksWithoutPHI = false), vtable value profiling.
+// (SplitIndirectBrCriticalEdges with IgnoreBlocksWithoutPHI = false).
 
 pgo_gen_cl: struct {
     disable_vp := false;                    // -disable-vp
@@ -251,7 +251,20 @@ vp_collect :: (f: Value_Id, kind: u32, out: *[..] Vp_Candidate) {
             if !is_call_base(i) continue;
             if pgo_is_indirect_call(i) array_add(out, .{call_callee(i), i, i});
         }
-    } else fatal("pgo-instr-gen: vtable value profiling is not supported");
+    } else {
+        // VTableProfilingPlugin: findVTableAddrs (PGOIndirectCallVisitor::tryGetVTableInstruction)
+        for b: fn_blocks(f) for i: block_insts(b) {
+            if !is_call_base(i) || !pgo_is_indirect_call(i) continue;
+            ld := call_callee(i);
+            if !is_inst(ld) || inst_op(ld) != .LOAD continue;
+            vt := strip_in_bounds_constant_offsets(op(ld, 0));
+            if vt == NONE || !is_inst(vt) continue;
+            ip := inst_next(vt);
+            while ip != NONE && (inst_op(ip) == .PHI || is_eh_pad(ip)) ip = inst_next(ip);
+            if ip == NONE continue;
+            array_add(out, .{vt, ip, vt});
+        }
+    }
 }
 
 // ---------------------------------------------------------------- FuncPGOInstrumentation
@@ -648,6 +661,8 @@ pgo_skip_gen :: (f: Value_Id) -> bool {
 // InstrumentAllFunctions + PGOInstrumentationGen::run (FDO, or CTXPROF for ctx-instr-gen)
 pgo_instr_gen_run :: (is_ctx := false, is_cs := false) -> Preserved {
     if !is_ctx && !is_cs create_ir_level_profile_flag_var(false);
+    if instrprof_cl.enable_vtable_value_profiling && triple_parse(ir.triple).obj != .ELF
+        print_to_stderr("warning: %: VTable value profiling is presently not supported for non-ELF object formats\n", ir.module_id);
     members: Table(s32, [..] Value_Id); members.allocator = temp;
     if pgo_gen_cl.do_comdat_renaming {
         add :: (members: *Table(s32, [..] Value_Id), g: Value_Id) {
