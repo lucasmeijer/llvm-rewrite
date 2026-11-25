@@ -1689,7 +1689,7 @@ Still slow / next:
   helpers (`const_ap`, `type_bits`, `scalar_type`, attribute lookups, `call_*`), a word-wise
   `tli_are_inline_compatible` and a hashed libfunc name set cut callgrind Ir on n500 by 18%.
 
-## llvm-link, LTO pipelines, MergeFunctions (L2.link COMPLETE 574/574, L2.lto COMPLETE 144/144, L2.lto-passes 159/160, L2.phase-ordering 285/288)
+## llvm-link, LTO pipelines, MergeFunctions (L2.link COMPLETE 574/574, L2.lto COMPLETE 144/144, L2.lto-passes COMPLETE 160/160, L2.phase-ordering 285/288)
 
 - Files: `linker.jai` (llvm-link: llvm-link.cpp's main/linkFiles, ModuleLinker, IRMover/IRLinker, TypeMapTy,
   IdentifiedStructTypeSet and the IRMover half of ValueMapper), `llvm_link_main` (opt's program called as llvm-link), `pass_builder_pipelines.jai` (the four LTO aliases at O0-O3 next to `default<O#>`; the phase is the
@@ -1708,9 +1708,9 @@ Still slow / next:
   two-field `llvm.global_ctors`, blockaddress of a function whose body is not linked yet (DelayedBBs), intrinsics
   whose name mangles a struct type (remangleIntrinsicFunction), uniqued metadata cycles that change, inline asm whose
   type changes, `#dbg_assign`.
-- The LTO module passes (cross-dso-cfi, globalsplit, wholeprogramdevirt, lowertypetests, simplify-type-tests,
-  expand-variadics, pgo-icall-prom) are ported up to their early exits and fail loudly on CFI / devirtualization /
-  value-profile input; drop-type-tests, canonicalize-aliases and name-anon-globals are complete.
+- The LTO module passes expand-variadics and pgo-icall-prom are ported up to their early exits and fail loudly on
+  variadic / value-profile input; drop-type-tests, canonicalize-aliases and name-anon-globals are complete. The CFI
+  passes are complete (section "CFI" below).
 - MergeFunctions' FnTree is a list searched for an equal node (only equality decides merges; see
   knowledge/llvm/linker-and-lto.md). Its Deferred WeakTrackingVHs follow RAUW through `mf.fwd`.
 - `verify` is now also a module pass name (`verify,forceattrs` is a module pipeline, as in LLVM); before, such a
@@ -1722,7 +1722,7 @@ Still slow / next:
   other cloners (peeling, runtime unrolling, unswitch, loop versioning, DFA jump threading, function
   specialization, CodeGenPrepare, jump-threading, SimplifyCFG's foldBranchToCommonDest) still fail loudly on an atom
   group until each is checked against where LLVM remaps.
-- Remaining: MergeFunc/cfi-thunk-merging (lowertypetests CFI); phase-ordering: knowledge retention in loop passes,
+- Remaining: phase-ordering: knowledge retention in loop passes,
   ptrauth protected.field.ptr, LoopVectorize convertToStridedAccesses (preserve-access-group).
 
 ## llc's IR pipeline (L1.isel-ir-O0 COMPLETE; L1.codegen-ir COMPLETE)
@@ -2040,3 +2040,19 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   parsed by `irce_parse_cl_opt`. The range check's `Use` is kept as (user, operand number): use ids move when a phi
   grows. Sweeps: `irce` 10812/10812 identical, `-irce-skip-profitability-checks` 10812/10812, `--with-test-flags`
   12774/13628 (0 differs; the loud ones are other passes' options), tests/perf/compile `sroa,irce` 4/4.
+
+## CFI: LowerTypeTests, CrossDSOCFI, GlobalSplit, SimplifyTypeTests (L1.extra.lowertypetests COMPLETE; /root/jai_cfi)
+
+- Files: `pass_lower_type_tests.jai` (LowerTypeTests.cpp: BitSetBuilder, GlobalLayoutBuilder, ByteArrayBuilder,
+  LowerTypeTestsModule, x86 jump tables, branch funnels, summary import/export, dropTypeTests),
+  `pass_cfi_misc.jai` (CrossDSOCFI, GlobalSplit, SimplifyTypeTests), `module_summary.jai` (a small YAML reader and
+  the ModuleSummaryIndex queries for `-lowertypetests-read-summary` / `-wholeprogramdevirt-read-summary`),
+  `replace_constant.jai` (convertUsersOfConstantsToInstructions, ConstantExpr::getAsInstruction).
+- Fails loudly: `-lowertypetests-write-summary` (no YAML writer), non-x86 jump tables (ARM/Thumb/AArch64/RISC-V/
+  WASM), and a disjoint set with more than 16 type ids of equal UniqueId (std::sort's order there is
+  implementation-specific; see knowledge/llvm/cfi-and-devirt.md).
+- The EquivalenceClasses is `Ltt_Ec` (nodes in insertion order with leader / next links) so member iteration order
+  matches LLVM's without pointer-keyed sets.
+- Sweeps (whole-file, `--with-test-flags`): lowertypetests, cross-dso-cfi, globalsplit, simplify-type-tests: 0 differs
+  (13156 identical; failures are unrelated unsupported options).
+- MergeFunc/cfi-thunk-merging now passes (it needed lowertypetests), so L2.lto-passes is COMPLETE.

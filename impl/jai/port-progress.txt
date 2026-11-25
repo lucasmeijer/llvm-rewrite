@@ -232,10 +232,11 @@ lib/Analysis/AssumeBundleQueries.cpp 0.4  # fillMapFromAssume, getKnowledgeFromU
 lib/Transforms/IPO/MergeFunctions.cpp 0.95  # no doFunctionalCheck (debug only), runOnFunctions
 lib/Transforms/Utils/FunctionComparator.cpp 0.95  # equality is exact; the order between unequal functions only approximately LLVM's (unused)
 lib/IR/StructuralHash.cpp 0.3  # StructuralHash(F) without DetailedHash
-lib/Transforms/IPO/CrossDSOCFI.cpp 0.1  # early exit only
-lib/Transforms/IPO/GlobalSplit.cpp 0.1  # early exit only
+lib/Transforms/IPO/CrossDSOCFI.cpp 1.0
+lib/Transforms/IPO/GlobalSplit.cpp 1.0
 lib/Transforms/IPO/WholeProgramDevirt.cpp 0.02  # DevirtModule::run's early exit only
-lib/Transforms/IPO/LowerTypeTests.cpp 0.05  # dropTypeTests, the early exits of lower() and SimplifyTypeTests
+lib/Transforms/IPO/LowerTypeTests.cpp 0.9  # x86/x86-64 only (no ARM/Thumb/AArch64/RISC-V/WASM jump tables), no -lowertypetests-write-summary
+lib/IR/ModuleSummaryIndex.cpp 0.1  # only the queries LTT/WPD make on a YAML-read index (module_summary.jai)
 lib/Transforms/IPO/ExpandVariadics.cpp 0.03  # no VariadicABIInfo for x86: early exit
 lib/Transforms/IPO/ForceFunctionAttrs.cpp 0.85  # no -forceattrs-csv-path
 lib/Transforms/IPO/PartialInlining.cpp 0.95  # single- and multi-region; no optimization remarks, blockaddress users fail loudly
