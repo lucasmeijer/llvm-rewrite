@@ -2361,7 +2361,7 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   environment folding, `--data-layout=A5`, OptimisticAttributes): all pass. The GPU tests that use nvvm / amdgcn
   intrinsics were left out (gen_intrinsics.jai does not know them, so their attributes and AANoSync::isAlignedBarrier
   would differ).
-- Sweeps (whole corpus): `default<O2>` 10783 identical / 0 differs / 0 bad-ir / 35 loud (was 87 loud: the 25 OpenMP
+- Sweeps (whole corpus): `default<O2>` 10816 identical / 0 differs / 0 bad-ir / 35 loud (was 87 loud: the 25 OpenMP
   modules, 15 loop-vectorize-with-profile-summary and 13 GlobalsAA-with-!callback files all pass now); remaining
   loud: alloc-token 12, cg-profile value profiles 6, SROA dbg_assign 4, inline ObjC ARC 3, SROA known vscale 3,
   loop-rotate convergence tokens 2, 1 each: avoid-assume-hang timeout, inline strictfp, inline vtable promotion,
