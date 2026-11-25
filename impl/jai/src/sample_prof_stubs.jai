@@ -24,14 +24,8 @@ sp_remapper_create :: (file: string) { fatal("sample-profile: -sample-profile-re
 sp_remapper_apply :: () {}
 sp_remapper_lookup :: (name: string) -> (bool, string) { return false, ""; }
 
-sp_context_tracker_init :: () { fatal("sample-profile: context-sensitive profiles (SampleContextTracker) are not implemented yet"); }
-sp_ctx_get_base_samples_for :: (f: Value_Id) -> *Fs { return null; }
-sp_ctx_get_context_samples_for :: (dil: Md_Id) -> *Fs { return null; }
-sp_ctx_get_callee_context_samples_for :: (i: Value_Id, callee: string) -> *Fs { return null; }
-sp_ctx_get_indirect_callee_context_samples_for :: (dil: Md_Id) -> [..] *Fs { r: [..] *Fs; return r; }
-sp_ctx_mark_context_samples_inlined :: (fs: *Fs) {}
-sp_ctx_find_external_inline_candidate :: (fs: *Fs, s: *[..] u64, threshold: u64) {}
-sp_ctx_add_profiled_calls :: (g: *Pcg) {}
+// SampleContextTracker: sample_context_tracker.jai
+
 
 
 

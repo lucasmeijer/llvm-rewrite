@@ -2026,7 +2026,12 @@ is almost all `unsupported option` for pass cl::opts we don't implement (-sbvec-
   sections, MD5 / fixed-length MD5 name tables, function offset table + module-driven partial reading, function
   metadata, profile symbol list) and GCC (gcov V407) readers; profi; SampleProfileMatcher (anchors, Myers LCS,
   call-graph matching, staleness report / llvm.stats); SampleUse PGOOptions in default / thinlto-pre-link /
-  thinlto pipelines. 83/91 opt. Not ported (loud): SampleContextTracker (CS profiles), the replay inliner,
+  thinlto pipelines. jai_pgo_rest added SampleContextTracker (sample_context_tracker.jai: the CS trie, children
+  sorted by SampleContextFrame::getHashCode = libstdc++ _Hash_bytes; promote/merge of context trees; the CS
+  ProfiledCallGraph and import walk; the matcher on CS profiles) and the ReplayInlineAdvisor
+  (-sample-profile-inline-replay*, `spl_replay`): 89/91 opt. Differential check of every LLVM SampleProfile RUN line
+  that does not need lit substitutions: 128/132 identical, 4 loud. Sweeps `sample-profile` with a CS profile and
+  `thinlto-pre-link<O2>` SampleUse with csspgo-import-list.prof: 0 differs. Not ported (loud):
   the Itanium remapper (needs ItaniumManglingCanonicalizer), the Itanium demangler of the matcher (a mangled
   name reaching getDemangledBaseName fails loudly; C names never parse as function encodings), SampleUse in the
   O0 and full-LTO pipelines, print-profile-summary, remarks.

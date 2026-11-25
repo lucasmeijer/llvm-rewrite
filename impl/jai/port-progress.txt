@@ -301,8 +301,8 @@ lib/Transforms/Scalar/RewriteStatepointsForGC.cpp 0.98  # not -spp-print-liveset
 lib/IR/BuiltinGCs.cpp 0.4  # only what RS4GC / PlaceSafepoints ask: useRS4GC and isGCManagedPointer of the strategies
 
 # jai_pgo (profile family)
-lib/Transforms/IPO/SampleProfile.cpp 0.85  # jai_pgo: no SampleContextTracker use (CS profiles), replay inliner, remapper, -sample-profile-remove-probe, coverage checks
-lib/Transforms/IPO/SampleProfileMatcher.cpp 0.85  # jai_pgo: no CS profiles, no Itanium demangling (mangled names fail loudly)
+lib/Transforms/IPO/SampleProfile.cpp 0.92  # no remapper, -sample-profile-remove-probe, coverage checks, remarks
+lib/Transforms/IPO/SampleProfileMatcher.cpp 0.9  # no Itanium demangling (mangled names fail loudly)
 lib/Transforms/IPO/SampleProfileProbe.cpp 0.9  # jai_pgo: no probe verifier (-verify-pseudo-probe)
 lib/Transforms/Instrumentation/IndirectCallPromotion.cpp 0.9  # no remarks
 lib/ProfileData/SampleProfReader.cpp 0.75  # jai_pgo: text, raw binary, ext-binary, gcc; no Itanium remapper, no CS partial reads, no dump
@@ -333,3 +333,5 @@ lib/CodeGen/ExpandIRInsts.cpp 0.75  # no FRemExpander (frem is a libcall on x86)
 lib/Transforms/Utils/IntegerDivision.cpp 0.6  # expandDivision / expandRemainder; not the UpTo32/64Bits variants
 lib/Transforms/Instrumentation/PGOCtxProfLowering.cpp 0.95  # all but remarks
 lib/Analysis/MemoryProfileInfo.cpp 0.7  # no addCallStack from profile data callers beyond the trie, no remarks / hinted-size messages
+lib/Transforms/IPO/SampleContextTracker.cpp 0.95  # all but dumps / createContextLessProfileMap
+lib/Analysis/ReplayInlineAdvisor.cpp 0.9  # no original advisor, no remarks

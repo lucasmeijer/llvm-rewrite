@@ -67,6 +67,7 @@
 #load "sample_prof.jai";
 #load "sample_prof_util.jai";
 #load "sample_prof_stubs.jai";
+#load "sample_context_tracker.jai";
 #load "sample_prof_binary.jai";
 #load "sample_prof_gcc.jai";
 #load "sample_profile_matcher.jai";

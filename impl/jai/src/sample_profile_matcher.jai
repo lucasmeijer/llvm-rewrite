@@ -426,8 +426,9 @@ spm_function_matches_profile_helper :: (ir_func: Value_Id, prof: Fid) -> bool {
             c: Sample_Context; c.func = fs_func(fsm);
             t := sp_profiles_create(tmp, c);
             fs_merge(t, fsm);
-            if sp_flags.cs fatal("sample-profile: stale profile matching of context-sensitive profiles is not implemented yet");
-            for tmp.profiles sp_flatten_nested(spm.flattened, it);
+            if sp_flags.cs {
+                for tmp.profiles { cc: Sample_Context; cc.func = fs_func(it); x := sp_profiles_create(spm.flattened, cc); fs_merge(x, it, 1); }
+            } else for tmp.profiles sp_flatten_nested(spm.flattened, it);
             fsm = spm_get_flattened_samples_for_id(prof);
         }
     }
@@ -617,7 +618,6 @@ spm_compute_and_report_profile_staleness :: () {
 // SampleProfileMatcher(M, Reader, CG, ProbeManager, LTOPhase, SymbolMap, PSL, FuncNameToProfNameMap)
 sp_matcher_init :: () {
     spm = .{};
-    if sp_flags.cs fatal("sample-profile: stale profile matching of context-sensitive profiles is not implemented yet");
 }
 
 // runOnModule
