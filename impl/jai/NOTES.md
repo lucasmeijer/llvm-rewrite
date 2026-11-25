@@ -1565,7 +1565,7 @@ Still slow / next:
   `called-value-propagation` (+ a SparseSolver specialized to its lattice; prefix `clv_`, `cvp_` is
   CorrelatedValuePropagation), `rel-lookup-table-converter`, `cg-profile` (indirect calls with VP data fail
   loudly), `ee-instrument<[post-inline]>`, `memprof-remove-attributes`, `recompute-globalsaa`.
-- Early exits that are exact for every module without the feature (and fail loudly otherwise): `openmp-opt`, `openmp-opt-cgscc` (no "openmp" module flag), `alloc-token` (no
+- Early exits that are exact for every module without the feature (and fail loudly otherwise): `alloc-token` (no
   sanitize_alloc_token, no llvm.alloc.token.id), `lower-comment-string` (non-AIX), `forceattrs` (its flags are
   rejected), `annotation2metadata` / `annotation-remarks` (remarks are never enabled), `inject-tli-mappings` (no
   vector library).
@@ -2268,3 +2268,41 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   gc.safepoint_poll: rewrite-statepoints-for-gc 4903/4903 identical (the rest LLVM rejects), place-safepoints
   1490/1490, function(place-safepoints),rewrite-statepoints-for-gc 796/796, + verify<safepoint-ir> 1058/1058. No perf
   benchmark has gc functions (perf not run).
+## OpenMPOpt (L1.extra.openmp-opt 41/42; /root/jai_openmp)
+
+- Files: `pass_openmp_opt.jai` (the passes, OMPInformationCache = `omp_ic`, OpenMPOpt = `oo`, the host
+  transformations), `openmp_aas.jai` (AAICVTracker, AAExecutionDomain, AAHeapToShared, AAFoldRuntimeCall,
+  registerAAs / registerAAsForFunction, AA::isPotentiallyAffectedByBarrier, AANoSync::isAlignedBarrier),
+  `openmp_kernel_info.jai` (KernelInfoState, AAKernelInfo, SPMDization, the custom state machine,
+  getUniqueKernelFor, rewriteDeviceCodeStateMachine), `omp_ir_builder.jai` (OpenMPIRBuilder pieces),
+  `gen_omp_kinds.jai` (generated from OMPKinds.def by `gen/gen_omp_kinds.py`: runtime functions with signatures,
+  attribute sets in both OptimisticAttributes variants, ICVs). Facts: knowledge/llvm/openmp-opt.md.
+- Attributor hooks added for it (attributor*.jai): AttributorConfig fields on `atr` (`default_init_live_internals`,
+  `omp_init_callback`, `omp_ipo_amendable_kernels`, `max_fixpoint_iterations`), simplification callbacks with kinds
+  (`Atr_Simpl_Cb`: SCB_NULL, SCB_FOLD_RUNTIME_CALL; LLVM's getAssumedSimplifiedValues / getAssumedSimplified /
+  getAssumedConstant semantics), the kernel-environment GlobalVariableSimplificationCallback
+  (`atr.gv_simplification_cbs`), VirtualUseCallbacks (`atr.virtual_use_cbs`, checked by checkForAllUses and
+  checkForAllCallSites), the AAExecutionDomain lookups of AAIsDead (fences) and AAPointerInfo (aligned regions,
+  initial-thread-only, kernel lifetime of allocas), `atr_internalize_functions`, and the CGSCC CallGraphUpdater split
+  into `atr_cgscc_reanalyze` (at cleanupIR time) and `atr_cgscc_finalize` (at the end of the pass).
+- A KernelInfoState holds SetVectors: copies (`StateBefore = getState()`, `getState() = FnAA->getState()`) are deep
+  (`kis_assign`), Jai array copies would share buffers.
+- Fixed on the way: AAHeapToStack's isGlobalizedLocal read only the call-site `alloc-family` (LLVM's
+  CB.getFnAttr also looks at the callee, where OpenMPOpt puts it); AbstractCallSite recognized a broker through the
+  raw callee instead of getCalledFunction (type check).
+- Fails loudly: `-openmp-opt-enable-merging` (mergeParallelRegions: needs createParallel / createMaster /
+  finalize and CodeExtractor's aggregate arguments; one exit test), GPU triples (nvptx / amdgcn), a function named
+  `__last` matching OMPRTL___last. Remarks (`-pass-remarks=openmp-opt`) are not supported by opt here at all.
+- Tests: `tests/pass/openmp-opt/` (32 files) are LLVM's GPU-only OpenMP tests with the target triple and the
+  `-mtriple` / remark flags removed (custom state machines, SPMDization with guards, deglobalization, kernel
+  environment folding, `--data-layout=A5`, OptimisticAttributes): all pass. The GPU tests that use nvvm / amdgcn
+  intrinsics were left out (gen_intrinsics.jai does not know them, so their attributes and AANoSync::isAlignedBarrier
+  would differ).
+- Sweeps (whole corpus): `default<O2>` 10783 identical / 0 differs / 0 bad-ir / 35 loud (was 87 loud: the 25 OpenMP
+  modules, 15 loop-vectorize-with-profile-summary and 13 GlobalsAA-with-!callback files all pass now); remaining
+  loud: alloc-token 12, cg-profile value profiles 6, SROA dbg_assign 4, inline ObjC ARC 3, SROA known vscale 3,
+  loop-rotate convergence tokens 2, 1 each: avoid-assume-hang timeout, inline strictfp, inline vtable promotion,
+  x86 hadd known bits, loop-idiom store chain order. `default<O2> --with-test-flags` 13273 / 0 / 0 / 352 loud;
+  tests/perf/compile 4/4. `openmp-opt`, `openmp-opt-cgscc`, `openmp-opt-postlink` (plain and `--with-test-flags`)
+  and `default<O2>`, `lto<O2>` on the 25 OpenMP corpus files and on tests/pass/openmp-opt: 0 differs.
+- Perf: no benchmark has OpenMP (the passes exit early).

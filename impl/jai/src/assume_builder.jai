@@ -42,6 +42,8 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     // RewriteStatepointsForGC.cpp never calls salvageKnowledge; PlaceSafepoints only through InlineFunction (which fails
     // loudly in inline_function.jai under the flag)
     if kind == .REWRITE_STATEPOINTS || kind == .PLACE_SAFEPOINTS || kind == .VERIFY_SAFEPOINT_IR return;
+    // OpenMPOpt.cpp, Attributor.cpp and OMPIRBuilder.cpp never call salvageKnowledge
+    if kind == .OPENMP_OPT || kind == .OPENMP_OPT_CGSCC return;
     fatal("-enable-knowledge-retention is not supported with pass '%' yet", name);
 }
 
