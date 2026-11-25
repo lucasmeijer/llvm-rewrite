@@ -1170,7 +1170,7 @@ slp_get_scalars_vectorization_state :: (s: Inst_State, vl: [] Value_Id, is_scatt
                 align := inst(vl[0]).align;
                 for vl align = min(align, inst(it).align);
                 _, dist := get_pointers_diff(sty, ptr0, sty, ptrn);
-                if cast(u64) dist == cast(u64) (vl.count - 1) return TE_VECTORIZE;
+                if cast,no_check(u64) dist == cast(u64) (vl.count - 1) return TE_VECTORIZE;
                 // analyzeConstantStrideCandidate (-slp-enable-strided-stores): no legal strided stores on X86
                 if slp_cl.masked_stores && slp_is_masked_store_compress(vl, pointer_ops.*, current_order.*, align, reuse) return TE_EXPAND_VECTORIZE;
             }

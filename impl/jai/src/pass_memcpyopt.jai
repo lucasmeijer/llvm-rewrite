@@ -98,7 +98,7 @@ mco_range_profitable :: (r: *Memset_Range) -> bool {
     if r.stores.count < 2 return false;
     for r.stores if inst_op(it) != .STORE return true;
     if r.stores.count == 2 return false;
-    bytes := cast(u32)(r.end - r.start);
+    bytes := cast,no_check(u32)(r.end - r.start);   // LLVM: unsigned(End-Start), truncating
     max_int_size := cast(u32)(dl_largest_legal_int_bits() / 8);
     if max_int_size == 0 max_int_size = 1;
     num_ptr := bytes / max_int_size;
@@ -243,7 +243,7 @@ mco_try_merging_into_memset :: (s: *Mco, start_inst: Value_Id, start_ptr_in: Val
         if r.stores.count == 1 continue;
         if !mco_range_profitable(r) continue;
         start_ptr = r.start_ptr;
-        a_mem_set = irb_memset(*b, start_ptr, byte_val, const_int(ir.t_i64, cast(u64)(r.end - r.start)), r.align, false);
+        a_mem_set = irb_memset(*b, start_ptr, byte_val, const_int(ir.t_i64, cast,no_check(u64)(r.end - r.start)), r.align, false);
         if r.stores.count set_metadata(a_mem_set, 0, get_metadata(r.stores[0], 0));
         nd: s32;
         if s.m.acc[mem_insert_point].inst == bi nd = mssau_create_memory_access_before(*s.u, a_mem_set, -1, mem_insert_point);

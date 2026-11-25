@@ -460,7 +460,7 @@ attr_set_intersect :: (s0: u32, s1: u32) -> (bool, u32) {
                 case .Alignment; r.ival = min(max(x.ival, 1), max(y.ival, 1));
                 case .Memory; r.ival = x.ival | y.ival;
                 case .Captures; r.ival = x.ival | y.ival;
-                case .NoFPClass; r.ival = x.ival & y.ival;
+                case .NoFPClass; r.ival = x.ival & y.ival; if r.ival == 0 continue;   // addNoFPClassAttr(fcNone) adds nothing
                 case .Range;
                     nr := cr_union(attr_range(x), attr_range(y));
                     if cr_is_full_set(nr) continue;

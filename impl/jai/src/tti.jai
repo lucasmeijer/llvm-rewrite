@@ -889,7 +889,9 @@ tti_instruction_cost_ops :: (t: *Tti, u: Value_Id, uops: [] Value_Id, kind: s64)
                 while x != NONE { if ir.u_user[x] != first_user { one = false; break; } x = ir.u_next[x]; }
                 if one access = inst_access_type(first_user);
             }
-            return tti_gep_cost(t, inst(u).ty2, uops[0], array_view(uops, 1), access, kind);
+            // only the GEP's own operands: tti_instruction_cost pads a constant expression's list to 3 entries
+            n_idx := min(uops.count, cast(s64) nops(u)) - 1;
+            return tti_gep_cost(t, inst(u).ty2, uops[0], array_view(uops, 1, n_idx), access, kind);
         case .ADD; #through; case .FADD; #through; case .SUB; #through; case .FSUB; #through; case .MUL; #through;
         case .FMUL; #through; case .UDIV; #through; case .SDIV; #through; case .FDIV; #through; case .UREM; #through;
         case .SREM; #through; case .FREM; #through; case .SHL; #through; case .LSHR; #through; case .ASHR; #through;
