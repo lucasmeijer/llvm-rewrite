@@ -115,3 +115,162 @@ registry_printers_parse_cl_opt :: (name: string, value: string, has_value: bool)
     if name == "domfrontier-guess-address-order" { domfrontier_guess_address_order = !has_value || value == "true" || value == "1"; return true; }
     return false;
 }
+
+// StackLifetimePrinterPass::run (llvm/lib/Analysis/StackLifetime.cpp): StackLifetime(F, every alloca, Type), run(),
+// then F.print(OS, &LifetimeAnnotationWriter)
+sl_print_state: *Stack_Lifetime;
+sl_print_allocas: [] Value_Id;
+
+print_stack_lifetime_run :: (f: Value_Id, name: string) -> Preserved {
+    // parseStackLifetimeOptions: the last of may / must wins, May by default
+    must := false;
+    lt := "print<stack-lifetime>".count;
+    if name.count > lt {
+        params := slice(name, lt + 1, name.count - lt - 2);
+        while params.count {
+            k := find_index_from_left(params, #char ";");
+            pn := ifx k >= 0 then slice(params, 0, k) else params;
+            params = ifx k >= 0 then slice(params, k + 1, params.count - k - 1) else "";
+            must = pn == "must";
+        }
+    }
+    allocas: [..] Value_Id; allocas.allocator = temp;
+    for i: fn_insts(f) if inst_op(i) == .ALLOCA array_add(*allocas, i);
+    sl := stack_lifetime_run(f, allocas, may_liveness = !must);
+    sl_print_state = *sl;
+    sl_print_allocas = allocas;
+    printer_begin_function(f);
+    start := W.buf.count;
+    print_annot_block = sl_annot_block;
+    print_annot_info = sl_annot_info;
+    print_function(f);
+    print_annot_block = null;
+    print_annot_info = null;
+    s := copy_string(slice_of_buf(start),, allocator = temp);
+    W.buf.count = start;
+    sl_print_state = null;
+    write_string(s, to_standard_error = true);
+    return PRESERVE_ALL;
+}
+
+sl_print_alive :: (pick: (a: Value_Id, k: s64) -> bool) {
+    names: [..] string; names.allocator = temp;
+    for a, k: sl_print_allocas if pick(a, k) array_add(*names, vname(a));
+    quick_sort(names, compare_strings_bytewise);
+    for names { if it_index > 0 outc(#char " "); out(it); }
+}
+
+// emitBasicBlockStartAnnot: printInstrAlive(BlockInstRange[BB].first)
+sl_annot_block :: (b: Value_Id) {
+    sl := sl_print_state;
+    found, bi := table_find(*sl.block_index, b);
+    if !found return;   // unreachable
+    sl_annot_inst_no = sl.inst_start[bi];
+    out("  ; Alive: <");
+    sl_print_alive((a: Value_Id, k: s64) -> bool {
+        _, n := table_find(*sl_print_state.numbering, a);
+        return sl_print_state.ranges[n][sl_annot_inst_no];
+    });
+    out(">\n");
+}
+sl_annot_inst_no: s64;
+
+// printInfoComment
+sl_annot_info :: (i: Value_Id) {
+    sl := sl_print_state;
+    if !stack_lifetime_is_reachable(sl, i) return;
+    sl_annot_cur = i;
+    out("\n  ; Alive: <");
+    sl_print_alive((a: Value_Id, k: s64) -> bool { return stack_lifetime_is_alive_after(sl_print_state, a, sl_annot_cur); });
+    out(">\n");
+}
+sl_annot_cur: Value_Id;
+
+compare_strings_bytewise :: (a: string, b: string) -> s64 {
+    n := min(a.count, b.count);
+    for k: 0..n - 1 if a[k] != b[k] return cast(s64) a[k] - cast(s64) b[k];
+    return a.count - b.count;
+}
+
+// InlineCostAnnotationPrinterPass::run (llvm/lib/Analysis/InlineCost.cpp): for every direct call of a defined
+// function, an InlineCostCallAnalyzer with getInlineParams() (no GetBFI / GetTLI, the cached PSI), analyze(), then
+// InlineCostCallAnalyzer::print: the callee with InlineCostAnnotationWriter comments and the counters.
+ic_print_annots: Table(Value_Id, string);
+
+print_inline_cost_run :: (f: Value_Id) -> Preserved {
+    ic_print_instruction_comments = true;
+    params := get_inline_params();
+    sb: String_Builder; sb.allocator = temp;
+    for cb: fn_insts(f) {
+        if !is_call_base(cb) continue;
+        callee := call_called_function(cb);
+        if callee == NONE || is_declaration(callee) continue;
+        ca := cax_new(callee, cb, params, true, false, no_bfi = true);
+        cax_analyze(ca);
+        print_to_builder(*sb, "      Analyzing call of %... (caller:%)\n", vname(callee), vname(inst_fn(cb)));
+        // the annotations first (printing a value of the caller moves the printer's slot state)
+        ic_print_annots = .{}; ic_print_annots.allocator = temp;
+        for i: fn_insts(callee) table_set(*ic_print_annots, i, ic_annotation(ca, i));
+        printer_begin_function(callee);
+        start := W.buf.count;
+        print_annot_inst = ic_annot_inst;
+        print_function(callee);
+        print_annot_inst = null;
+        append(*sb, slice_of_buf(start));
+        W.buf.count = start;
+        stat :: (sb: *String_Builder, n: string, v: Any) { print_to_builder(sb, "      %: %\n", n, v); }
+        stat(*sb, "NumConstantArgs", ca.num_constant_args);
+        stat(*sb, "NumConstantOffsetPtrArgs", ca.num_constant_offset_ptr_args);
+        stat(*sb, "NumAllocaArgs", ca.num_alloca_args);
+        stat(*sb, "NumConstantPtrCmps", ca.num_constant_ptr_cmps);
+        stat(*sb, "NumConstantPtrDiffs", ca.num_constant_ptr_diffs);
+        stat(*sb, "NumInstructionsSimplified", ca.num_instructions_simplified);
+        stat(*sb, "NumInstructions", ca.num_instructions);
+        stat(*sb, "NumInlineAsmInstructions", ca.num_inline_asm_instructions);
+        stat(*sb, "SROACostSavings", ca.sroa_cost_savings);
+        stat(*sb, "SROACostSavingsLost", ca.sroa_cost_savings_lost);
+        stat(*sb, "LoadEliminationCost", ca.load_elimination_cost);
+        stat(*sb, "ContainsNoDuplicateCall", cast(s64) ca.contains_no_duplicate_call);
+        stat(*sb, "Cost", ca.cost);
+        stat(*sb, "Threshold", ca.threshold);
+        append(*sb, "\n");
+    }
+    write_string(builder_to_string(*sb,, allocator = temp), to_standard_error = true);
+    return PRESERVE_ALL;
+}
+
+ic_annot_inst :: (i: Value_Id) {
+    found, s := table_find(*ic_print_annots, i);
+    if found out(s);
+}
+
+// InlineCostAnnotationWriter::emitInstructionAnnot
+ic_annotation :: (ca: *Call_Analyzer, i: Value_Id) -> string {
+    sb: String_Builder; sb.allocator = temp;
+    d := table_find_pointer(*ca.details, i);
+    if !d append(*sb, "; No analysis for the instruction");
+    else {
+        print_to_builder(*sb, "; cost before = %, cost after = %, threshold before = %, threshold after = %, cost delta = %",
+            d.cost_before, d.cost_after, d.threshold_before, d.threshold_after, d.cost_after - d.cost_before);
+        if d.threshold_after != d.threshold_before print_to_builder(*sb, ", threshold delta = %", d.threshold_after - d.threshold_before);
+    }
+    v := cax_simplified_unchecked(ca, i);
+    if v != NONE {
+        append(*sb, ", simplified to ");
+        // V->print(OS, /*IsForDebug=*/true)
+        k := vkind(v);
+        if k == .INST {
+            append(*sb, inst_to_string(v));
+            if inst_fn(v) != inst_fn(i) append(*sb, " (caller instruction)");
+        } else if is_global_value(k) {
+            fatal("print<inline-cost>: a value simplified to a global value (Value::print prints its definition) is not supported yet");
+        } else if k == .ARGUMENT {
+            append(*sb, value_as_operand_typed(v));
+            if arg_parent(v) != inst_fn(i) append(*sb, " (caller argument)");
+        } else if is_constant_kind(k) {
+            append(*sb, value_as_operand_typed(v));
+        } else fatal("print<inline-cost>: simplified to an unsupported kind of value");
+    }
+    append(*sb, "\n");
+    return builder_to_string(*sb,, allocator = temp);
+}

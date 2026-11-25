@@ -26,9 +26,11 @@ Gap_Kind :: enum u8 {
     FUNCTION_SIMPLIFICATION;   // function-simplification<O#>: buildFunctionSimplificationPipeline (expanded at parse time)
     INLINER_WRAPPER_NO_MANDATORY_FIRST;
     // registry_printers.jai
-    PRINT_CFG_SCCS; PRINT_DOMFRONTIER;
+    PRINT_CFG_SCCS; PRINT_DOMFRONTIER; PRINT_STACK_LIFETIME; PRINT_INLINE_COST;
     // registry_small_passes.jai
     STRIP_GC_RELOCATES; FLATTEN_CFG;
+    // assume_builder.jai
+    ASSUME_BUILDER; ASSUME_SIMPLIFY;
 }
 
 Gap_Info :: struct {
@@ -117,21 +119,27 @@ GAP_PASS_TABLE :: Gap_Info.[
 
     // ---- printers (registry_printers.jai; RequiredPassInfoMixin)
     .{"print<cfg-sccs>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_CFG_SCCS},
+    .{"assume-builder", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .ASSUME_BUILDER},
+    .{"assume-simplify", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .ASSUME_SIMPLIFY},
     .{"flatten-cfg", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .FLATTEN_CFG},
     .{"strip-gc-relocates", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .STRIP_GC_RELOCATES},
+    .{"print<stack-lifetime>", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .PRINT_STACK_LIFETIME},   // PassInfoMixin; also <may>, <must>
+    .{"print<inline-cost>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_INLINE_COST},
     .{"print<domfrontier>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_DOMFRONTIER},
 ];
 
 // Name lookup for the rows above that take parameters: `name<params>` -> the row of `name` (parameters are checked
 // here the way PassBuilder's parsers do, and parsed again where the pass is built or run).
 gap_lookup_parametrized :: (name: string) -> *Pass_Info {
-    lt := find_index_from_left(name, #char "<");
-    if lt <= 0 || name[name.count - 1] != #char ">" return null;
-    base := slice(name, 0, lt);
-    params := slice(name, lt + 1, name.count - lt - 2);
+    if name.count == 0 || name[name.count - 1] != #char ">" return null;
     row: *Pass_Info;
-    for * pass_table if it.name == base && pass_gap(it) != .NONE { row = it; break; }
+    for * pass_table {
+        if pass_gap(it) == .NONE || name.count < it.name.count + 2 || !begins_with(name, it.name) || name[it.name.count] != #char "<" continue;
+        if !row || it.name.count > row.name.count row = it;   // the longest name: print<stack-lifetime><may>, not print<...>
+    }
     if !row return null;
+    base := row.name;
+    params := slice(name, base.count + 1, name.count - base.count - 2);
     if pass_gap(row) == {
         case .CALLBACK;
             // parsePassParameters(parseOptLevelParam, Name, NAME): "NAME: invalid optimization level '...'"
@@ -142,6 +150,14 @@ gap_lookup_parametrized :: (name: string) -> *Pass_Info {
             if !ok || level.speed == 0 fatal("invalid function-simplification parameter '%'", params);
         case .INSTCOUNT;
             if params != "pre-opt" && params.count != 0 fatal("invalid InstCountPass pass parameter '%'", params);
+        case .PRINT_STACK_LIFETIME;
+            rest := params;
+            while rest.count {
+                k := find_index_from_left(rest, #char ";");
+                pn := ifx k >= 0 then slice(rest, 0, k) else rest;
+                rest = ifx k >= 0 then slice(rest, k + 1, rest.count - k - 1) else "";
+                if pn != "may" && pn != "must" fatal("invalid StackLifetime parameter '%'", pn);
+            }
         case; return null;
     }
     return row;
@@ -218,7 +234,11 @@ gap_run_function :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .PRINT_CFG_SCCS; return print_cfg_sccs_run(f);
         case .STRIP_GC_RELOCATES; return strip_gc_relocates_run(f);
         case .FLATTEN_CFG; return flatten_cfg_run(f);
+        case .ASSUME_BUILDER; return assume_builder_run(f);
+        case .ASSUME_SIMPLIFY; return assume_simplify_run(f);
         case .PRINT_DOMFRONTIER; return print_domfrontier_run(f);
+        case .PRINT_INLINE_COST; return print_inline_cost_run(f);
+        case .PRINT_STACK_LIFETIME; return print_stack_lifetime_run(f, node.name);
         case .TRIGGER_CRASH; gap_abort();
         case .TRIGGER_VERIFIER_ERROR;
             // new UnreachableInst(Ctx, BB.getTerminator()->getIterator()) in the entry block

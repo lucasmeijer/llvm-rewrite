@@ -12,7 +12,8 @@
 // The ProfileSummaryInfo is the cached one (psi_cached_or_null): hot/cold call sites and callees, the cost-benefit
 // analysis (costBenefitAnalysis, with an instrumentation profile or -inline-enable-cost-benefit-analysis) and the
 // switch's shouldOptimizeForSize use it.
-// Not ported: -print-instruction-comments / print<inline-cost>.
+// print<inline-cost> (InlineCostAnnotationPrinterPass) is in registry_printers.jai; -print-instruction-comments is not
+// accepted (the printer turns the recording on).
 
 ic_opts: struct {
     default_threshold: s64 = 225;          // -inlinedefault-threshold
@@ -368,13 +369,21 @@ Call_Analyzer :: struct {
     cost_benefit_enabled: bool;  // CostBenefitAnalysisEnabled
     cold_size: s64;
     has_cost_benefit: bool;      // CostBenefit (Size, CycleSavings) was computed
+    no_bfi: bool;                // constructed without GetBFI (InlineCostAnnotationPrinterPass)
+    // InstructionCostDetailMap (only while ic_print_instruction_comments)
+    details: Table(Value_Id, Ic_Cost_Detail);
 }
+Ic_Cost_Detail :: struct { cost_before: s64; cost_after: s64; threshold_before: s64; threshold_after: s64; }
+// PrintInstructionComments (-print-instruction-comments): set for good by InlineCostAnnotationPrinterPass::run
+ic_print_instruction_comments := false;
 
 // getInlineCost without PSI and GetBFI (the sample profile loader's calls)
 ic_no_profile_analyses := false;
 
-cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indirect: bool, ignore_threshold: bool, use_eph_cache := false) -> *Call_Analyzer {
+cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indirect: bool, ignore_threshold: bool, use_eph_cache := false, no_bfi := false) -> *Call_Analyzer {
     ca := New(Call_Analyzer,, allocator = temp);
+    ca.no_bfi = no_bfi;
+    ca.details.allocator = temp;
     ca.f = callee; ca.call = call;
     ca.tti = tti_get(callee);
     ca.params = params;
@@ -397,6 +406,7 @@ cax_new :: (callee: Value_Id, call: Value_Id, params: Inline_Params, boost_indir
 // isCostBenefitAnalysisEnabled (GetBFI is always given)
 cax_is_cost_benefit_analysis_enabled :: (ca: *Call_Analyzer) -> bool {
     if !ca.psi || !ca.psi.has_summary return false;
+    if ca.no_bfi return false;   // !GetBFI
     if ic_opts.enable_cost_benefit_given {
         if !ic_opts.enable_cost_benefit return false;
     } else if !psi_has_instrumentation_profile(ca.psi) return false;
@@ -871,7 +881,7 @@ cax_update_threshold :: (ca: *Call_Analyzer) {
         has_hint := ifx fn_has_opt_size(caller) then p.has_opt_size_hint else p.has_hint;
         hint := ifx fn_has_opt_size(caller) then p.opt_size_hint_threshold else p.hint_threshold;
         if fn_has_fn_attr(ca.f, .InlineHint) ca.threshold = max_if(ca.threshold, has_hint, hint);
-        caller_bfi := ifx ic_no_profile_analyses then null else get_bfi(caller);
+        caller_bfi := ifx ic_no_profile_analyses || ca.no_bfi then null else get_bfi(caller);
         hot_ok, hot := cax_hot_call_site_threshold(ca, call, caller_bfi);
         if !fn_has_opt_size(caller) && hot_ok {
             ca.threshold = hot;
@@ -1177,7 +1187,7 @@ cax_visit_select :: (ca: *Call_Analyzer, si: Value_Id) -> bool {
 }
 cax_visit_switch :: (ca: *Call_Analyzer, sw: Value_Id) -> bool {
     if cax_direct_or_simplified(ca, op(sw, 0), .CONSTANT_INT) != NONE return true;
-    num_clusters, jt_size := tti_estimated_number_of_case_clusters(ca.tti, sw, ca.psi, ifx ic_no_profile_analyses then null else get_bfi(ca.f));
+    num_clusters, jt_size := tti_estimated_number_of_case_clusters(ca.tti, sw, ca.psi, ifx ic_no_profile_analyses || ca.no_bfi then null else get_bfi(ca.f));
     default_unreachable := switch_default_dest_unreachable(sw);
     // onFinalizeSwitch
     ic := ic_opts.instr_cost;
@@ -1256,8 +1266,12 @@ cax_analyze_block :: (ca: *Call_Analyzer, bb: Value_Id, eph: *Table(Value_Id, bo
         if table_contains(eph, i) continue;
         ca.num_instructions += 1;
         if inst_op(i) == .EXTRACTELEMENT || is_vector_type(vtype(i)) ca.num_vector_instructions += 1;
+        // onInstructionAnalysisStart
+        if ic_print_instruction_comments { d := ic_detail(ca, i); d.cost_before = ca.cost; d.threshold_before = ca.threshold; }
         if cax_visit(ca, i) ca.num_instructions_simplified += 1;
         else cax_add_cost(ca, ic_opts.instr_cost);   // onMissedSimplification
+        // onInstructionAnalysisFinish
+        if ic_print_instruction_comments { d := ic_detail(ca, i); d.cost_after = ca.cost; d.threshold_after = ca.threshold; }
         r := ir_success();
         if ca.is_recursive_call && !ca.allow_recursive_call r = ir_failure("recursive");
         else if ca.exposes_returns_twice r = ir_failure("exposes returns twice");
@@ -1270,6 +1284,14 @@ cax_analyze_block :: (ca: *Call_Analyzer, bb: Value_Id, eph: *Table(Value_Id, bo
         if cax_should_stop(ca) return ir_failure("Call site analysis is not favorable to inlining.");
     }
     return ir_success();
+}
+// InstructionCostDetailMap[I]
+ic_detail :: (ca: *Call_Analyzer, i: Value_Id) -> *Ic_Cost_Detail {
+    d := table_find_pointer(*ca.details, i);
+    if d return d;
+    blank: Ic_Cost_Detail;
+    table_set(*ca.details, i, blank);
+    return table_find_pointer(*ca.details, i);
 }
 // shouldStop
 cax_should_stop :: (ca: *Call_Analyzer) -> bool {

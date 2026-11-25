@@ -1,9 +1,8 @@
 // AssumeBundleBuilder: a port of the knowledge-salvaging half of llvm/lib/Transforms/Utils/AssumeBundleBuilder.cpp
 // (-enable-knowledge-retention; isUsefullToPreserve, canonicalizedKnowledge, AssumeBuilderState, buildAssumeFromInst,
 // salvageKnowledge) and of GEPOperator::getMaxPreservedAlignment (llvm/lib/IR/Operator.cpp).
-// Only the AC = DT = null form of salvageKnowledge is ported (tryToPreserveWithoutAddingAssume needs the assumption
-// cache's getKnowledgeForValue); a pass that passes an AssumptionCache must fail loudly (see knowledge_retention_check).
-// Not ported: the assume-simplify / assume-builder passes.
+// salvageKnowledge takes the AssumptionCache and DominatorTree (tryToPreserveWithoutAddingAssume); the assume-builder
+// and assume-simplify passes (AssumeBuilderPass, AssumeSimplify) are at the end of this file.
 
 knowledge_retention: struct {
     enabled := false;    // -enable-knowledge-retention
@@ -12,6 +11,9 @@ knowledge_retention: struct {
 // the passes that honour -enable-knowledge-retention here (the others call salvageKnowledge in ways not ported)
 knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     if !knowledge_retention.enabled return;
+    // registry_gaps.jai (assume-builder / assume-simplify are this file's; none of the others calls salvageKnowledge)
+    if kind == .GAP_MODULE || kind == .GAP_FUNCTION || kind == .GAP_LOOP || kind == .GAP_CGSCC || kind == .NO_OP_LOOPNEST return;
+    if kind == .VERIFY_FUNCTION || kind == .VERIFY_MODULE || kind == .REQUIRE_VERIFY return;   // the Verifier
     if kind == .DSE || kind == .EARLY_CSE || kind == .NEWGVN || kind == .SCCP || kind == .IPSCCP || kind == .REQUIRE || kind == .INVALIDATE || kind == .NO_OP_FUNCTION || kind == .NO_OP_MODULE ||
        kind == .MODULE_PM || kind == .FUNCTION_ADAPTOR || kind == .VERIFY_MEMORYSSA || kind == .PRINT_MEMORYSSA return;
     // DCE.cpp and LICM.cpp call salvageKnowledge(I) (no AC); the loop adaptor, LoopRotate and InstCombine never do
@@ -134,7 +136,8 @@ strip_pointer_casts_one_step_in_bounds :: (v: Value_Id) -> Value_Id {
 
 Assume_Builder :: struct {
     inst_being_modified: Value_Id = NONE;
-    ac: *Assumption_Cache;     // salvageKnowledge(I, AC, DT = nullptr): tryToPreserveWithoutAddingAssume
+    ac: *Assumption_Cache;     // salvageKnowledge(I, AC, DT): tryToPreserveWithoutAddingAssume
+    dt: *Dom_Tree;
     keys: [..] Ab_Knowledge;   // SmallMapVector<(WasOn, Kind), ArgValue>: insertion order
 }
 
@@ -202,7 +205,7 @@ ab_knowledge_from_bundle :: (assume: Value_Id, k: u32) -> Ab_Knowledge {
     return rk;
 }
 
-// tryToPreserveWithoutAddingAssume (getKnowledgeForValue over AC.assumptionsFor(WasOn), DT = nullptr)
+// tryToPreserveWithoutAddingAssume (getKnowledgeForValue over AC.assumptionsFor(WasOn))
 ab_try_to_preserve_without_adding_assume :: (b: *Assume_Builder, rk: Ab_Knowledge) -> bool {
     if b.inst_being_modified == NONE || rk.was_on == NONE || !b.ac return false;
     for e: ac_assumptions_for(b.ac, rk.was_on) {
@@ -211,9 +214,9 @@ ab_try_to_preserve_without_adding_assume :: (b: *Assume_Builder, rk: Ab_Knowledg
         if other.kind == .NONE_ATTR continue;   // RetainedKnowledge's operator bool
         if rk.was_on != other.was_on continue;
         if other.kind != rk.kind continue;
-        if !is_valid_assume_for_context(e.assume, b.inst_being_modified, null) continue;
+        if !is_valid_assume_for_context(e.assume, b.inst_being_modified, b.dt) continue;
         if other.arg >= rk.arg return true;
-        if is_valid_assume_for_context(b.inst_being_modified, e.assume, null) {
+        if is_valid_assume_for_context(b.inst_being_modified, e.assume, b.dt) {
             begin := ir.u32_pool[inst(e.assume).idx + 3 * e.index + 1];
             set_op(e.assume, begin + 1, const_int(ir.t_i64, rk.arg));   // ABA_Argument
             return true;
@@ -287,14 +290,225 @@ ab_build :: (b: *Assume_Builder) -> Value_Id {
     return i;
 }
 
-// salvageKnowledge(I, AC, DT = nullptr); AC may be null
-salvage_knowledge :: (i: Value_Id, ac: *Assumption_Cache = null) -> bool {
+// salvageKnowledge(I, AC, DT); AC and DT may be null
+salvage_knowledge :: (i: Value_Id, ac: *Assumption_Cache = null, dt: *Dom_Tree = null) -> bool {
     if !knowledge_retention.enabled || is_terminator(inst_op(i)) return false;
-    b: Assume_Builder; b.inst_being_modified = i; b.keys.allocator = temp; b.ac = ac;
+    b: Assume_Builder; b.inst_being_modified = i; b.keys.allocator = temp; b.ac = ac; b.dt = dt;
     ab_add_instruction(*b, i);
     a := ab_build(*b);
     if a == NONE return false;
     insert_at_position(a, inst_block(i), i, false);
     if ac ac_register_assumption(ac, a);
     return true;
+}
+
+// ---------------------------------------------------------------- AssumeBuilderPass, AssumeSimplifyPass
+
+// AssumeBuilderPass::run: salvageKnowledge(&I, AC, DT) for every instruction (DT: the cached tree). LLVM forgets the
+// `return` in `if (!Changed) PreservedAnalyses::all();`, so the result is always "CFG preserved".
+assume_builder_run :: (f: Value_Id) -> Preserved {
+    ac := get_assumption_cache(f);
+    dt := cached_domtree(f);
+    for :early_inc i: fn_insts(f) salvage_knowledge(i, ac, dt);
+    return preserved_cfg();
+}
+
+// AssumeSimplifyPass::run
+assume_simplify_run :: (f: Value_Id) -> Preserved {
+    if !knowledge_retention.enabled return PRESERVE_ALL;
+    s: Assume_Simplify;
+    s.f = f;
+    s.ac = get_assumption_cache(f);
+    s.dt = cached_domtree(f);
+    s.cleanup.allocator = temp;
+    // simplifyAssumes
+    asm_drop_redundant_knowledge(*s);
+    asm_run_cleanup(*s, false);
+    asm_merge_assumes(*s);
+    asm_run_cleanup(*s, true);
+    if !s.made_change return PRESERVE_ALL;
+    return preserved_cfg();
+}
+
+Assume_Simplify :: struct {
+    f: Value_Id;
+    ac: *Assumption_Cache;
+    dt: *Dom_Tree;
+    cleanup: [..] Value_Id;   // SmallDenseSet<IntrinsicInst *> CleanupToDo (erasing is order independent)
+    made_change: bool;
+    // BBToAssume: SmallDenseMap<BasicBlock *, SmallVector<IntrinsicInst *, 4>>; `bbs` keeps first-insertion order
+    bbs: [..] Value_Id;
+    by_bb: Table(Value_Id, [..] Value_Id);
+}
+
+asm_cleanup_insert :: (s: *Assume_Simplify, a: Value_Id) { array_add_if_unique(*s.cleanup, a); }
+
+// buildMapping
+asm_build_mapping :: (s: *Assume_Simplify, filter_boolean_argument: bool) {
+    nb: [..] Value_Id; nb.allocator = temp; s.bbs = nb;
+    nt: Table(Value_Id, [..] Value_Id); nt.allocator = temp; s.by_bb = nt;
+    for v: ac_assumptions(s.ac).* {
+        if v == NONE || vkind(v) == .DEAD continue;
+        if filter_boolean_argument {
+            a := op(v, 0);
+            if vkind(a) != .C_INT || is_null_value(a) continue;
+        }
+        bb := inst_block(v);
+        l := table_find_pointer(*s.by_bb, bb);
+        if !l {
+            e: [..] Value_Id; e.allocator = temp;
+            table_set(*s.by_bb, bb, e);
+            l = table_find_pointer(*s.by_bb, bb);
+            array_add(*s.bbs, bb);
+        }
+        array_add(l, v);
+    }
+    for bb: s.bbs {
+        l := table_find_pointer(*s.by_bb, bb);
+        // llvm::sort by comesBefore (a strict order within one block: any sort gives the same result)
+        quick_sort(l.*, (a: Value_Id, b: Value_Id) -> s64 { if a == b return 0; return ifx comes_before(a, b) then -1 else 1; });
+    }
+}
+
+// RunCleanup
+asm_run_cleanup :: (s: *Assume_Simplify, force: bool) {
+    for a: s.cleanup {
+        if vkind(a) == .DEAD continue;
+        c := op(a, 0);
+        if vkind(c) != .C_INT || is_null_value(c) || (!force && !is_assume_with_empty_bundle(a)) continue;
+        s.made_change = true;
+        erase_inst_with_metadata(a);
+    }
+    s.cleanup.count = 0;
+}
+
+// the BundleOpInfo fields of bundle k: (tag, begin, end) in u32_pool
+asm_bundle_begin :: (a: Value_Id, k: u32) -> u32 { return ir.u32_pool[inst(a).idx + 3 * k + 1]; }
+asm_bundle_end :: (a: Value_Id, k: u32) -> u32 { return ir.u32_pool[inst(a).idx + 3 * k + 2]; }
+
+// dropRedundantKnowledge
+asm_drop_redundant_knowledge :: (s: *Assume_Simplify) {
+    Map_Value :: struct { assume: Value_Id; arg: u64; k: u32; }
+    asm_build_mapping(s, false);
+    Key :: struct { v: Value_Id; kind: Attr_Kind; }
+    knowledge: [..] struct { key: Key; vals: [..] Map_Value; }; knowledge.allocator = temp;
+    lookup :: (kn: *type_of(knowledge), key: Key) -> *[..] Map_Value {
+        for * kn.* if it.key.v == key.v && it.key.kind == key.kind return *it.vals;
+        e: type_of(kn.*[0]); e.key = key; e.vals.allocator = temp;
+        array_add(kn, e);
+        return *kn.*[kn.count - 1].vals;
+    }
+    ignore_tag := bundle_tag_id("ignore");
+    entry_ip := block_first_insertion_pt(fn_entry(s.f));
+    order: [..] Value_Id; order.allocator = temp;
+    sl_depth_first(s.f, *order);   // depth_first(&F)
+    for bb: order {
+        l := table_find_pointer(*s.by_bb, bb);
+        if !l continue;
+        for assume: l.* {
+            nb := inst(assume).nidx;
+            for k: 0..cast(s64) nb - 1 {
+                bk := cast(u32) k;
+                remove_from_assume :: (s: *Assume_Simplify, assume: Value_Id, bk: u32, ignore_tag: u32) {
+                    asm_cleanup_insert(s, assume);
+                    b := asm_bundle_begin(assume, bk); e := asm_bundle_end(assume, bk);
+                    if b != e set_op(assume, b, const_poison(vtype(op(assume, b))));   // ABA_WasOn
+                    ir.u32_pool[inst(assume).idx + 3 * bk] = ignore_tag;
+                }
+                if ir.u32_pool[inst(assume).idx + 3 * bk] == ignore_tag { asm_cleanup_insert(s, assume); continue; }
+                rk := ab_knowledge_from_bundle(assume, bk);
+                if rk.was_on != NONE && vkind(rk.was_on) == .ARGUMENT {
+                    arg := rk.was_on;
+                    at := attr_set_find(arg_attrs(arg), rk.kind);
+                    has_same := at != null;
+                    if has_same && (!ab_is_int_attr_kind(rk.kind) || at.ival >= rk.arg) {
+                        remove_from_assume(s, assume, bk, ignore_tag);
+                        continue;
+                    }
+                    if is_valid_assume_for_context(assume, entry_ip, null) || assume == entry_ip {
+                        if has_same arg_remove_attr(arg, rk.kind);
+                        na: Attr; na.kind = rk.kind; na.ty = NONE;
+                        if ab_is_int_attr_kind(rk.kind) na.ival = rk.arg;
+                        arg_add_attr(arg, na);
+                        s.made_change = true;
+                        remove_from_assume(s, assume, bk, ignore_tag);
+                        continue;
+                    }
+                }
+                vals := lookup(*knowledge, .{rk.was_on, rk.kind});
+                for * elem: vals.* {
+                    if !is_valid_assume_for_context(elem.assume, assume, s.dt) continue;
+                    if elem.arg >= rk.arg {
+                        remove_from_assume(s, assume, bk, ignore_tag);
+                        continue;   // (LLVM continues the inner loop)
+                    } else if is_valid_assume_for_context(assume, elem.assume, s.dt) {
+                        set_op(elem.assume, asm_bundle_begin(elem.assume, elem.k) + 1, const_int(ir.t_i64, rk.arg));   // ABA_Argument
+                        s.made_change = true;
+                        remove_from_assume(s, assume, bk, ignore_tag);
+                        continue;
+                    }
+                }
+                array_add(vals, .{assume, rk.arg, bk});
+            }
+        }
+    }
+}
+
+// mergeRange
+asm_merge_range :: (s: *Assume_Simplify, bb: Value_Id, range: [] Value_Id) {
+    if range.count < 2 return;
+    b: Assume_Builder; b.keys.allocator = temp;
+    ip := block_first_non_phi(bb);
+    if inst_op(ip) == .LANDINGPAD ip = inst(ip).next;
+    for a: range {
+        asm_cleanup_insert(s, a);
+        for k: 0..cast(s64) inst(a).nidx - 1 {
+            rk := ab_knowledge_from_bundle(a, cast(u32) k);
+            if rk.kind == .NONE_ATTR continue;   // !RK
+            ab_add_knowledge(*b, rk);
+            if rk.was_on != NONE && is_inst(rk.was_on) {
+                w := rk.was_on;
+                if inst_block(w) == inst_block(ip) && (comes_before(ip, w) || ip == w) ip = inst(w).next;
+            }
+        }
+    }
+    if comes_before(ip, range[0]) {
+        x := range[0];
+        while x != ip {
+            if !is_guaranteed_to_transfer_execution(x) { ip = inst(x).next; break; }
+            x = inst(x).prev;
+        }
+    }
+    m := ab_build(*b);
+    if m == NONE return;
+    s.made_change = true;
+    inst_insert_before(m, ip);   // insertBefore(InsertPt): an iterator without the head bit
+    ac_register_assumption(s.ac, m);
+}
+
+// mergeAssumes. BBToAssume is walked in pointer order in LLVM; each block's merge only touches that block, so the
+// block order is not visible in the IR (only in the AssumptionCache's order, which no later output reads here).
+asm_merge_assumes :: (s: *Assume_Simplify) {
+    asm_build_mapping(s, true);
+    for bb: s.bbs {
+        l := table_find_pointer(*s.by_bb, bb).*;
+        if l.count < 2 continue;
+        splits: [..] s64; splits.allocator = temp;
+        array_add(*splits, 0);
+        last := 0;
+        x := l[0];
+        e := l[l.count - 1];
+        while x != e {
+            if !is_guaranteed_to_transfer_execution(x) {
+                while comes_before(l[last], x) last += 1;
+                if splits[splits.count - 1] != last array_add(*splits, last);
+            }
+            x = inst(x).next;
+        }
+        array_add(*splits, l.count);
+        for k: 0..splits.count - 2 {
+            r: [] Value_Id; r.data = l.data + splits[k]; r.count = splits[k + 1] - splits[k];
+            asm_merge_range(s, bb, r);
+        }
+    }
 }
