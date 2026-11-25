@@ -2683,6 +2683,7 @@ INTRINSIC_ATTRS :: Intrinsic_Attrs.[
     .{"llvm.ctlz", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .["", "immarg"]},
     .{"llvm.ctpop", "nocallback nocreateundeforpoison nofree nosync nounwind speculatable willreturn memory(none)", "", .[""]},
     .{"llvm.cttz", "nocallback nofree nosync nounwind speculatable willreturn memory(none)", "", .["", "immarg"]},
+    .{"llvm.debugtrap", "nounwind", "", .[]},
     .{"llvm.donothing", "nocallback nofree nosync nounwind willreturn memory(none)", "", .[]},
     .{"llvm.eh.exceptioncode", "nounwind memory(none)", "", .[""]},
     .{"llvm.eh.sjlj.callsite", "nounwind memory(none)", "", .["immarg"]},

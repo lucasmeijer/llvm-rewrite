@@ -2059,3 +2059,19 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
 - Sweeps (whole-file, `--with-test-flags`): lowertypetests, cross-dso-cfi, globalsplit, simplify-type-tests: 0 differs
   (13156 identical; failures are unrelated unsupported options).
 - MergeFunc/cfi-thunk-merging now passes (it needed lowertypetests), so L2.lto-passes is COMPLETE.
+
+## WholeProgramDevirt (L1.extra.wholeprogramdevirt COMPLETE 66/66; /root/jai_cfi)
+
+- `pass_wpd.jai`: DevirtModule (single-impl, uniform / unique return value, virtual constant propagation with the
+  Evaluator, branch funnels, summary import and export, `-wholeprogramdevirt-check=trap`), the TypeMetadataUtils
+  call finders, and `wpd_opt_startup` (optdriver's AssignGUID + updateVCallVisibilityInModule under
+  `-whole-program-visibility`; called in `opt_main` after `source_filename` is set, which the private GUIDs hash).
+- The Evaluator honours `cfo_no_tli` (const_folding_calls.jai): WPD's Evaluator has no TLI, so library calls do not
+  fold. `llvm.debugtrap` was added to gen/gen_intrinsics.py's EXTRA_DECLS (trap mode creates it).
+- Fails loudly: `-wholeprogramdevirt-write-summary`, `-devirtualize-speculatively`, `-wholeprogramdevirt-check=fallback`
+  (versionCallSite), devirtualizing a call with a ptrauth bundle. Export mode runs (summary-driven call slots,
+  `.llvm.merged` promotion, exported `__typeid_*` aliases) but the resolutions it records are never written.
+- Sweeps (whole-file): `wholeprogramdevirt --with-test-flags` 13226 identical / 0 differs, the same with
+  `-whole-program-visibility`; on the 92 files with type tests: trap + keep-unreachable=false, export (empty and
+  import-vcp.yaml summaries), import (vcp-branch-funnel, unique-ret-val1), threshold 1 + `-wholeprogramdevirt-skip`,
+  and `lto<O2>` with whole program visibility: 0 differs. No perf benchmark contains type tests (perf not run).

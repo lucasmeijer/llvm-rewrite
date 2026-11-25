@@ -1186,6 +1186,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if forceattrs_parse_cl_opt(name, value, has_value) return true;   // pass_misc_module.jai
     if pgo_parse_cl_opt(name, value, has_value) return true;   // pass_lto_misc.jai
     if ltt_parse_cl_opt(name, value, has_value) return true;   // pass_lower_type_tests.jai
+    if wpd_parse_cl_opt(name, value, has_value) return true;   // pass_wpd.jai
     if profile_parse_cl_opt(name, value, has_value) return true;   // profile_cl.jai (sample profile, PGO, memprof)
     if sp_parse_cl_opt(name, value, has_value) return true;   // pass_sample_profile.jai
     if merge_functions_parse_cl_opt(name, value, has_value) return true;   // pass_merge_functions.jai
@@ -1701,6 +1702,8 @@ opt_main :: () {
     tti_create_target_machine();
     opt_set_function_attributes();
     if ir.source_filename.count == 0 && !saw_source_filename ir.source_filename = input;
+    // optdriver.cpp: AssignGUIDPass and updateVCallVisibilityInModule under -whole-program-visibility
+    wpd_opt_startup();
     // NewPMDriver.cpp: -enable-debugify wraps the pipeline in debugify / check-debugify
     dbgify_check_level();
     if dbgify_opts.enable run_debugify_pass();

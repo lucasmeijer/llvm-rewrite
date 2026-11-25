@@ -35,3 +35,33 @@ imported tests `tests/imported/llvm/Transforms/{LowerTypeTests,CrossDSOCFI,Globa
   `__typeid_<T>_global_addr` it folds `sub (ptrtoint @f, ptrtoint @__typeid_..._global_addr)` to 0 and
   `icmp eq @f, @__typeid_..._global_addr` to true when `@f` (or `@f.cfi`) is a known member of T
   (LowerTypeTests.cpp:2607).
+
+## WholeProgramDevirt
+
+Verified against `/opt/llvm-project-23.1.5/llvm/lib/Transforms/IPO/WholeProgramDevirt.cpp`, `tools/opt/optdriver.cpp`
+and `tests/imported/llvm/Transforms/WholeProgramDevirt/` (all 33 `::opt` identical; sweeps below).
+
+- `-whole-program-visibility` is not read by the pass: opt itself (optdriver.cpp:628) runs `AssignGUIDPass` (every
+  definition gets `!guid !{i64 MD5("file;name" or "name")}`, globals first, then functions) and
+  `updateVCallVisibilityInModule`, which gives every global with `!type` and public vcall visibility a
+  `!vcall_visibility !{i64 1}`. This happens after the source file name is known (private/internal GUIDs hash
+  `source_filename;name`), before any pass, whatever the pipeline. The pass erases `!vcall_visibility` from all
+  global variables when it does not take its early exit, so without type tests the attachment stays in the output.
+- Without whole program visibility (and without `-devirtualize-speculatively`) every vtable is public and
+  `tryFindVirtualCallTargets` gives up: only the type test scanning (and the removal of assumes of type ids no global
+  has) changes the IR.
+- Order: `CallSlots` is a MapVector in the order the slots are first seen (type.test users in use-list order, then
+  type.checked.load, then .relative); per slot the constant-argument groups are a `std::map` (lexicographic on the
+  argument vector). VCP allocates per slot in that order, so the before/after byte layout of the rebuilt vtables
+  follows it. The two pointer-keyed `std::map`s (`NumUnsafeUsesForTypeTest`, and `CallBases` in
+  applyICallBranchFunnel) are only used for RAUW + erase, which is not order-sensitive in the printed IR.
+- `scanTypeCheckedLoadUsers` always declares `llvm.type.test` (getOrInsertDeclaration) even if nothing uses it.
+- VCP's loads: `getelementptr i8, ptr %vtable, i32 <byte>` (CreatePtrAdd: no inbounds), `load i8 ... align 1` for i1
+  (then `and` with the bit and `icmp ne 0`), otherwise a load with the ABI alignment of the return type. The vtable
+  becomes `@N = private constant { [B x i8], <init>, [A x i8] }` inserted before it, with `!type` offsets shifted by
+  B, and the old name becomes an alias to element 1.
+- The Evaluator runs with no TargetLibraryInfo: a call to a library function declaration is not constant folded.
+- Branch funnels: only on x86_64, at most `-wholeprogramdevirt-branch-funnel-threshold` (10) targets, and only call
+  sites in functions whose `target-features` contain `+retpoline` are rewritten (the funnel is created anyway). The
+  funnel gets `!prof !{!"function_entry_count", N}` from the callers' BFI-scaled entry counts when a call was
+  rewritten, else `!{!"unknown", !"wholeprogramdevirt"}`.

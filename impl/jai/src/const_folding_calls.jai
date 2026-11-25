@@ -1111,12 +1111,16 @@ cfc_struct_call :: (name: string, id: Intrinsic_Id, st: Type_Id, ops: [] Value_I
     return cfc_scalar_call(name, id, st, ops, call);
 }
 
-// ConstantFoldCall (TLI always present: opt's InstSimplify / InstCombine pass one)
+// The caller has no TargetLibraryInfo (WholeProgramDevirt's Evaluator(DL, nullptr))
+cfo_no_tli := false;
+
+// ConstantFoldCall (TLI present unless cfo_no_tli: opt's InstSimplify / InstCombine pass one)
 cfo_call :: (call: Value_Id, f: Value_Id, ops: [] Value_Id, allow_non_deterministic := true) -> Value_Id {
     if call_is_no_builtin(call) return NONE;
     if vname(f).count == 0 return NONE;
     id := fn_iid(f);
     if id == NOT_INTRINSIC {
+        if cfo_no_tli return NONE;   // ConstantFoldCall(..., TLI = nullptr): no library calls
         if !tli_get_lib_func(vname(f)) return NONE;
         if !tli_valid_proto(glob(f).value_type, vname(f)) return NONE;
     }

@@ -2,7 +2,7 @@
 // never has (CFI type tests, devirtualization intrinsics, value profiles, variadic lowering for GPU targets); they
 // are ported up to their early exit and fail loudly when the input has what they would transform.
 // - CrossDSOCFIPass, GlobalSplitPass, SimplifyTypeTestsPass: pass_cfi_misc.jai.
-// - WholeProgramDevirtPass (llvm/lib/Transforms/IPO/WholeProgramDevirt.cpp, DevirtModule::run without summaries).
+// - WholeProgramDevirtPass: pass_wpd.jai.
 // - LowerTypeTestsPass: pass_lower_type_tests.jai.
 // - DropTypeTestsPass (LowerTypeTests.cpp dropTypeTests): ported.
 // - ExpandVariadicsPass (llvm/lib/Transforms/IPO/ExpandVariadics.cpp): no VariadicABIInfo for x86.
@@ -14,14 +14,6 @@
 lto_used_decl :: (name: string) -> bool {
     f := lookup_global(name);
     return f != NONE && vkind(f) == .FUNCTION && has_uses(f);
-}
-
-whole_program_devirt_run :: (use_cl := true) -> Preserved {
-    // DevirtModule::run without an export summary (DevirtSpeculatively off: public type tests are not looked at)
-    no_tests := !lto_used_decl("llvm.type.test") || !lto_used_decl("llvm.assume");
-    if no_tests && !lto_used_decl("llvm.type.checked.load") && !lto_used_decl("llvm.type.checked.load.relative") return PRESERVE_ALL;
-    fatal("wholeprogramdevirt: devirtualization (type tests / type.checked.load) is not supported yet");
-    return PRESERVE_NONE;
 }
 
 // dropTypeTests(M, ShouldDropAll)

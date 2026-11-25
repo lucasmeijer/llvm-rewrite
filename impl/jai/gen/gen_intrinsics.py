@@ -50,7 +50,8 @@ from concurrent.futures import ThreadPoolExecutor
 with ThreadPoolExecutor(max_workers=os.cpu_count() or 8) as ex:
     outputs = list(ex.map(run_file, sorted(files)))
 
-# Intrinsics that passes create but that no test input mentions (LoopVectorize's masked div/rem): declared in a
+# Intrinsics that passes create but that no test input mentions (LoopVectorize's masked div/rem, WholeProgramDevirt's
+# debugtrap): declared in a
 # scratch module so their attributes are read the same way.
 EXTRA_DECLS = '''
 declare <4 x i32> @llvm.masked.udiv.v4i32(<4 x i32>, <4 x i32>, <4 x i1>)
@@ -62,6 +63,7 @@ declare <vscale x 4 x i32> @llvm.vector.splice.right.nxv4i32(<vscale x 4 x i32>,
 declare <vscale x 4 x i32> @llvm.vector.splice.left.nxv4i32(<vscale x 4 x i32>, <vscale x 4 x i32>, i32)
 declare <vscale x 4 x i32> @llvm.vector.interleave2.nxv4i32(<vscale x 2 x i32>, <vscale x 2 x i32>)
 declare { <vscale x 2 x i32>, <vscale x 2 x i32> } @llvm.vector.deinterleave2.nxv4i32(<vscale x 4 x i32>)
+declare void @llvm.debugtrap()
 '''
 with tempfile.NamedTemporaryFile('w', suffix='.ll', delete=False) as _t:
     _t.write(EXTRA_DECLS)

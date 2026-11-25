@@ -193,7 +193,7 @@ lib/Transforms/IPO/Internalize.cpp 1  # manual (heuristic 0.37); GlobPattern mat
 lib/Transforms/IPO/DeadArgumentElimination.cpp 0.95  # no optimization remarks
 lib/Transforms/IPO/ArgumentPromotion.cpp 0.95  # no optimization remarks; X86 areTypesABICompatible only for simple MVTs (fails loudly otherwise)
 lib/Transforms/Utils/AssignGUID.cpp 1  # manual
-lib/Analysis/TypeMetadataUtils.cpp 0.35  # getPointerAtOffset, replaceRelativePointerUsersWithZero
+lib/Analysis/TypeMetadataUtils.cpp 0.95  # + findDevirtualizableCallsForTypeTest / TypeCheckedLoad, getFunctionAtVTableOffset (pass_wpd.jai)
 lib/IR/Globals.cpp 0.35
 lib/IR/Function.cpp 0.2  # deleteBody, copyAttributesFrom, splice, createWithDefaultAttr
 lib/IR/Module.cpp 0.1  # getGlobalVariable, getFunction, global_values order
@@ -234,7 +234,7 @@ lib/Transforms/Utils/FunctionComparator.cpp 0.95  # equality is exact; the order
 lib/IR/StructuralHash.cpp 0.3  # StructuralHash(F) without DetailedHash
 lib/Transforms/IPO/CrossDSOCFI.cpp 1.0
 lib/Transforms/IPO/GlobalSplit.cpp 1.0
-lib/Transforms/IPO/WholeProgramDevirt.cpp 0.02  # DevirtModule::run's early exit only
+lib/Transforms/IPO/WholeProgramDevirt.cpp 0.75  # manual: DevirtModule complete (import/export without writing summaries); no DevirtIndex, index visibility updates, updatePublicTypeTestCalls, speculative / fallback devirtualization, remarks (heuristic 0.89)
 lib/Transforms/IPO/LowerTypeTests.cpp 0.9  # x86/x86-64 only (no ARM/Thumb/AArch64/RISC-V/WASM jump tables), no -lowertypetests-write-summary
 lib/IR/ModuleSummaryIndex.cpp 0.1  # only the queries LTT/WPD make on a YAML-read index (module_summary.jai)
 lib/Transforms/IPO/ExpandVariadics.cpp 0.03  # no VariadicABIInfo for x86: early exit
