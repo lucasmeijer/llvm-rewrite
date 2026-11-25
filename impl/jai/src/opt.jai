@@ -109,6 +109,8 @@
 #load "gen_msan_switch.jai";
 #load "pass_tsan.jai";
 #load "pass_win_eh_prepare.jai";
+#load "special_case_list.jai";
+#load "pass_dfsan.jai";
 #load "pass_tysan.jai";
 #load "pass_nsan.jai";
 #load "pass_sancov.jai";

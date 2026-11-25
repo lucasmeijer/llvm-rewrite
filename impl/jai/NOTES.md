@@ -2028,16 +2028,31 @@ is almost all `unsupported option` for pass cl::opts we don't implement (-sbvec-
   "-1" is not the canonical identity and `and %p, -1` stays an instruction (`hwasan_binop_wide_const`); for i128 it
   zero-extends. GlobalVariable::copyAttributesFrom does not copy the comdat. LLVM keeps DT/PDT/LoopInfo updated
   through a DomTreeUpdater; here every instrumented function's analyses are dropped (fam_invalidate) instead.
+- **dfsan** (L1.extra.sanitizers.dfsan, complete: 45/45 opt): `pass_dfsan.jai` (DataFlowSanitizer = `Dfs`,
+  DFSanFunction = `Dfsf`, the visitor is `dfsv_visit`), `special_case_list.jai` (SpecialCaseList + GlobPattern with
+  brace expansion; the -dfsan-abilist files). Sweeps with `-mtriple=x86_64-unknown-linux-gnu` (LLVM's dfsan aborts
+  without a Linux triple), 0 differs / 0 bad-ir: plain, --with-test-flags, track-origins=1, track-origins=2 + call
+  threshold 0, debug-nonzero-labels + event + conditional callbacks, reaches-function callbacks + origins, the
+  combine/gep/select/alignment flags, and ABI lists marking every function uninstrumented as custom / functional /
+  discard+warning, and a mixed list (sections, `{a,b}`, `[!a-f]`, escapes, force_zero_labels), each with and without
+  origins; tests/perf/compile with origins 4/4. Loud leftovers (LLVM is UB or prints unparsable IR there): origin
+  loads on big-endian targets (a 32-bit shift by 32), shadow-mapping constants that don't fit a 32-bit intptr,
+  extractvalue/insertvalue of an unsized aggregate (struct of mixed scalable vectors: shadow i8), wrapped calls whose
+  arguments don't fit the wrapped function's type; SpecialCaseList v1 regexes beyond literal text and `*`.
+- dfsan traps: LLVM 23's BlockAddress has only the block as operand, so `F.replaceUsesWithIf` does not touch
+  blockaddress constants (ours have the function as an operand: skip them); `setCalledFunction(&F)` changes the
+  call's function type but not its type (a call with another return type stays valid); a struct whose elements
+  include scalable vectors of different types is unsized (`type_is_sized` fixed, constfold.jai); the
+  DFSanFunction DominatorTree is exact during the visit (recalculated after storeOrigin's split and SplitEdge) but
+  stale in the -dfsan-debug-nonzero-labels post-pass (new blocks are "unreachable": dominated by everything).
+  Argument shadow loads are inserted before the entry's first instruction each time (so they appear in reverse).
+- Perf (x64 build): sqlite3 with -dfsan-track-origins=1 takes 4.2 s (LLVM 0.8 s; parse+print alone 1.1 s); the
+  DT recalculation after every conditional origin store is linear per store. No @perf benchmark times dfsan.
 - **Next steps (sanitizers / instrumentation)**, by value:
-  1. DataFlowSanitizer (L1.extra.sanitizers.dfsan, 45 files): DataFlowSanitizer.cpp is ~2500 lines without comments,
-     about msan's size; it needs a SpecialCaseList port first (llvm/lib/Support/SpecialCaseList.cpp +
-     GlobPattern.cpp: v2 default = globs with `*`, `?`, `[..]`, `\`, `{a,b}`; v1 = regexes; `inSection` is "any glob
-     of (section matching, prefix, category) matches"), read from `-dfsan-abilist=<file>` (a cl::list). Reuse
-     msan's shape (one state per function, shadow/origin maps, PHI fixups) and `escape_enumerator`, `san_callee`.
-  2. L1.extra.instrumentation.coverage leftovers: Instrumentor (IPO/Instrumentor*.cpp, ~3000 lines with the JSON
+  1. L1.extra.instrumentation.coverage leftovers: Instrumentor (IPO/Instrumentor*.cpp, ~3000 lines with the JSON
      config; 4 tests, all `-passes=instrumentor` with the default config) and GCOVProfiling (1 test, modules.ll:
      a split-DWARF CU, so nothing is emitted; a faithful port also writes .gcno files).
-  3. msan: ARM SIMD handlers.
+  2. msan: ARM SIMD handlers.
   None of these passes is timed by a tests/perf benchmark.
 
 ## Coroutines (L1.extra.coroutines 298/310: roundtrip 155/155, opt 143/155; /root/jai_coro)

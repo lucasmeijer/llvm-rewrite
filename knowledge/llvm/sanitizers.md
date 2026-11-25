@@ -30,3 +30,19 @@ and on whole-corpus sweeps (`./harness/run sweep --passes 'forceattrs,X' --extra
   llvm-failed).
 - **MSan without a Linux/FreeBSD/NetBSD triple aborts** ("unsupported operating system"), so whole-corpus msan sweeps
   need `-mtriple=x86_64-unknown-linux-gnu`.
+- **DFSan without a Linux triple aborts** ("unsupported operating system"), like MSan: sweep with
+  `-mtriple=x86_64-unknown-linux-gnu`.
+- **LLVM 23's `BlockAddress` has a single operand, the block** (the function is the block's parent), so it is not a
+  use of the function: DFSan's `F.replaceUsesWithIf(Wrapper, ...)` leaves `blockaddress(@F, %bb)` alone. An IR model
+  that keeps the function as an operand must skip blockaddress users there. Verified: dfsan with an ABI list marking
+  every function uninstrumented on tests/e2e/*/misc/computed_goto.ll.
+- **A struct with scalable-vector members of different types is unsized** (`StructType::isSized`: only homogeneous
+  scalable-vector structs are sized), so DFSan gives it the primitive shadow `i8`; an `extractvalue` of that shadow
+  then goes through `ConstantInt::getAggregateElement`'s unchecked `cast<VectorType>` (UB in a release build).
+- **`CallBase::setCalledFunction(Function *)` replaces the call's function type, not its result type**: a call
+  `call float @f(...)` of `i32 @f(...)` prints as `call i32 @f` afterwards and still verifies (DFSan's wrapper
+  kinds warning / discard / functional do this).
+- **SpecialCaseList (v2 default) = globs with `{a,b}` brace expansion (at most 1024 sub-patterns), `[..]` classes with
+  `!`/`^`, `\` escapes; the last matching line of the newest matching section wins** (`inSection` walks sections in
+  reverse; each section name is itself a glob, "*" for the implicit first one). `#!special-case-list-v1` switches
+  patterns to regexes (`*` becomes `.*`). Verified: dfsan sweeps with hand-written ABI lists (jai NOTES.md).

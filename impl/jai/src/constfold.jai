@@ -911,10 +911,33 @@ type_is_sized :: (t: Type_Id) -> bool {
     if k == .ARRAY || k == .VECTOR || k == .SVECTOR return type_is_sized(type_elem(t));
     if k == .STRUCT {
         if ir.types[t].flags & TYF_OPAQUE return false;
-        for i: 0..cast(s64) type_nsub(t) - 1 if !type_is_sized(type_sub(t, cast(u32) i)) return false;
+        n := type_nsub(t);
+        // containsHomogeneousScalableVectorTypes: the only sized struct with scalable members
+        if n > 0 && type_kind(type_sub(t, 0)) == .SVECTOR {
+            homogeneous := true;
+            for i: 1..cast(s64) n - 1 if type_sub(t, cast(u32) i) != type_sub(t, 0) { homogeneous = false; break; }
+            if homogeneous return true;
+        }
+        for i: 0..cast(s64) n - 1 {
+            e := type_sub(t, cast(u32) i);
+            if type_is_scalable_ty(e) return false;
+            if !type_is_sized(e) return false;
+        }
         return true;
     }
     if k == .TARGET_EXT return type_kind(target_ext_layout_type(t)) != .VOID;
+    return false;
+}
+// Type::isScalableTy (scalable vectors, and arrays / structs containing them)
+type_is_scalable_ty :: (t: Type_Id) -> bool {
+    k := type_kind(t);
+    if k == .SVECTOR return true;
+    if k == .ARRAY return type_is_scalable_ty(type_elem(t));
+    if k == .STRUCT {
+        for i: 0..cast(s64) type_nsub(t) - 1 if type_is_scalable_ty(type_sub(t, cast(u32) i)) return true;
+        return false;
+    }
+    if k == .TARGET_EXT return type_kind(target_ext_layout_type(t)) == .SVECTOR;
     return false;
 }
 // Type::isEmptyTy

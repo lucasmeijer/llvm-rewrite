@@ -327,7 +327,7 @@ Pass_Kind :: enum u8 {
     // EarlyCSE (pass_early_cse.jai)
     EARLY_CSE;
     // sanitizers (pass_asan.jai, pass_msan.jai, ...)
-    ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN; TYSAN; NSAN; SANCOV; SANMD; JMC; HWASAN; WIN_EH_PREPARE;
+    ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN; TYSAN; NSAN; SANCOV; SANMD; JMC; HWASAN; WIN_EH_PREPARE; DFSAN;
     // ObjC ARC (pass_objcarc.jai)
     OBJC_ARC; OBJC_ARC_CONTRACT; OBJC_ARC_EXPAND; PA_EVAL;
     // SCCP, IPSCCP (pass_sccp.jai)
@@ -610,6 +610,7 @@ PASS_TABLE :: Pass_Info.[
     .{"objc-arc-contract", .FUNCTION, .OBJC_ARC_CONTRACT, false, .DOMTREE},
     .{"objc-arc-expand", .FUNCTION, .OBJC_ARC_EXPAND, false, .DOMTREE},
     .{"pa-eval", .FUNCTION, .PA_EVAL, false, .DOMTREE},
+    .{"dfsan", .MODULE, .DFSAN, true, .DOMTREE},
     .{"win-eh-prepare", .FUNCTION, .WIN_EH_PREPARE, true, .DOMTREE},   // RequiredPassInfoMixin   // also hwasan<kernel;recover>
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
@@ -1214,9 +1215,10 @@ parse_cl_opt :: (arg: string) -> bool {
     if sancov_parse_cl_opt(name, value, has_value) return true;  // pass_sancov.jai (-sanitizer-coverage-*)
     if sanmd_parse_cl_opt(name, value, has_value) return true;   // pass_sanmd.jai (-sanitizer-metadata-*)
     if hwasan_parse_cl_opt(name, value, has_value) return true;  // pass_hwasan.jai (-hwasan-*)
-    if irce_parse_cl_opt(name, value, has_value) return true;
-    if objcarc_parse_cl_opt(name, value, has_value) return true;   // objcarc.jai   // pass_irce.jai (-irce-*)
-    if weh_parse_cl_opt(name, value, has_value) return true;   // pass_win_eh_prepare.jai
+    if irce_parse_cl_opt(name, value, has_value) return true;   // pass_irce.jai (-irce-*)
+    if objcarc_parse_cl_opt(name, value, has_value) return true;   // objcarc.jai
+    if weh_parse_cl_opt(name, value, has_value) return true;     // pass_win_eh_prepare.jai
+    if dfsan_parse_cl_opt(name, value, has_value) return true;   // pass_dfsan.jai (-dfsan-*)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1383,6 +1385,7 @@ run_module_pm :: (n: s32) {
             case .SANMD; if should_run_pass(node, NONE) mam_invalidate(sanmd_run());
             case .JMC; if should_run_pass(node, NONE) mam_invalidate(jmc_run());
             case .HWASAN; if should_run_pass(node, NONE) mam_invalidate(hwasan_run(node.name));
+            case .DFSAN; if should_run_pass(node, NONE) mam_invalidate(dfsan_run());
             case .ALLOC_TOKEN; if should_run_pass(node, NONE) mam_invalidate(alloc_token_run());
             case .CALLED_VALUE_PROPAGATION; if should_run_pass(node, NONE) mam_invalidate(called_value_propagation_run());
             case .IPSCCP; if should_run_pass(node, NONE) mam_invalidate(ipsccp_run(node.name, node.no_func_spec));
