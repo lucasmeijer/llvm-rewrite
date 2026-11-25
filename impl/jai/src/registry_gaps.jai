@@ -32,6 +32,7 @@ Gap_Kind :: enum u8 {
     STRIP_GC_RELOCATES; FLATTEN_CFG;
     // assume_builder.jai
     ASSUME_BUILDER; ASSUME_SIMPLIFY;
+    DWARF_EH_PREPARE;   // pass_dwarf_eh_prepare.jai
 }
 
 Gap_Info :: struct {
@@ -122,6 +123,7 @@ GAP_PASS_TABLE :: Gap_Info.[
     .{"print<cfg-sccs>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_CFG_SCCS},
     .{"assume-builder", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .ASSUME_BUILDER},
     .{"assume-simplify", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .ASSUME_SIMPLIFY},
+    .{"dwarf-eh-prepare", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .DWARF_EH_PREPARE},
     .{"flatten-cfg", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .FLATTEN_CFG},
     .{"strip-gc-relocates", .FUNCTION, .GAP_FUNCTION, false, .DOMTREE, .STRIP_GC_RELOCATES},
     .{"print<stack-lifetime>", .FUNCTION, .GAP_FUNCTION, true, .DOMTREE, .PRINT_STACK_LIFETIME},   // also <may>, <must>
@@ -238,6 +240,7 @@ gap_run_function :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .STRIP_GC_RELOCATES; return strip_gc_relocates_run(f);
         case .FLATTEN_CFG; return flatten_cfg_run(f);
         case .ASSUME_BUILDER; return assume_builder_run(f);
+        case .DWARF_EH_PREPARE; return dwarf_eh_prepare_opt_run(f);
         case .ASSUME_SIMPLIFY; return assume_simplify_run(f);
         case .PRINT_DOMFRONTIER; return print_domfrontier_run(f);
         case .PRINT_INLINE_COST; return print_inline_cost_run(f);
