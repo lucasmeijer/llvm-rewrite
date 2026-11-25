@@ -113,3 +113,22 @@ diffing our output against `llc -stop-before=x86-isel` (the `::isel-ir` check) o
 - Spill slots (`.wineh.spillslot`) go at `F.getEntryBlock().begin()` (head bit set: before the block's leading debug
   records), with the preferred alignment; `.wineh.reload` loads and the stores have the ABI alignment and no
   debug location.
+
+## Layer-1b codegen IR passes under opt (verified by the imported tests and whole-corpus sweeps, jai)
+
+- **GlobalMerge** (new PM): options come only from `global-merge<...>` (`max-offset` defaults to 0, so
+  `-passes=global-merge -global-merge-max-offset=100` changes nothing); `-global-merge-group-by-use` and
+  `-global-merge-ignore-single-use` are still read by doMerge. With a target machine, only dso_local globals merge
+  on ELF (shouldAssumeDSOLocal); zero-initialized non-constant globals without a section form the BSS group.
+- **InferAddressSpaces**: x86 and NoTTI have no flat address space, so the pass is a no-op without
+  `-assume-default-is-flat-addrspace`; X86's isNoopAddrSpaceCast is "both < 256".
+- **ExpandIRInsts**: x86-64 expands div/rem wider than 128 bits (64 on i686) and fp conversions wider than 128;
+  frem is never expanded. `CreateSelectWithUnknownProfile(C, T, F, "sign")` passes "sign" as the pass name.
+  Block renames (`fp-to-i-entry`, `itofp-entry`, `_udiv-special-cases`) accumulate; local names are capped at 1024
+  bytes and a capped name equal to the current one is uniquified (ValueSymbolTable::createValueName runs before the
+  old name is dropped).
+- **InterleavedAccess** as an opt pass needs a target machine; X86 lowers AVX factor-4 groups of 4 x 64-bit
+  elements and factor-3/4 groups of i8 (load: factor 3 only); masked/vp loads and stores are never lowered on x86
+  but getMask can still leave a dead `and` or `llvm.vector.extract` behind.
+- **LowerAtomic**: lowering atomic loads/stores (ordering and syncscope reset) does not make the pass report a
+  change; fences, cmpxchg and atomicrmw do (PreservedAnalyses::none()).

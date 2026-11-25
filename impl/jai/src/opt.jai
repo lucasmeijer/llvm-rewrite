@@ -256,6 +256,9 @@
 #load "pass_lower_invoke.jai";
 #load "pass_indirectbr_expand.jai";
 #load "x86_interleaved_access.jai";
+#load "pass_infer_address_spaces.jai";
+#load "pass_global_merge.jai";
+#load "pass_expand_ir_insts.jai";
 #load "print_uselistorder.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";

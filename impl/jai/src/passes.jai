@@ -298,10 +298,10 @@ Pass_Kind :: enum u16 {
     // L1.extra.load-store-vectorizer / codegen-ir-misc / sandbox-vectorizer (jai_extras_d)
     // strength reduction (pass_nary_reassociate.jai, pass_separate_const_offset.jai, pass_slsr.jai)
     NARY_REASSOCIATE; SEPARATE_CONST_OFFSET; SLSR;
-    LOAD_STORE_VECTORIZER; LOWER_ATOMIC; LOWER_INVOKE; INDIRECTBR_EXPAND; INTERLEAVED_ACCESS;
     INSTNAMER; STRIP_CONVERGENCE_INTRINSICS; REG2MEM; STRIP_SYMBOLS; STRIP_NONDEBUG; STRIP_DEAD_CG_PROFILE; METARENAMER; LOWER_GLOBAL_DTORS; LOWER_IFUNC;
     FATLTO_CLEANUP; HIPSTDPAR_INTERPOSE_ALLOC; HIPSTDPAR_MATH_FIXUP; NORMALIZE; STRIP_DEAD_DEBUG_INFO;
     PRINT_HASH_RECOGNIZE; PRINT_STRUCTURAL_HASH; PRINT_PROFILE_SUMMARY; PRINT_STACK_SAFETY_LOCAL; PRINT_STACK_SAFETY; LINT; PRINT_STACK_LIFETIME; PRINT_FUNC_PROPERTIES; PRINT_IR2VEC; PRINT_IR2VEC_VOCAB; CTX_PROF_FLATTEN;
+    LOAD_STORE_VECTORIZER; LOWER_ATOMIC; LOWER_INVOKE; INDIRECTBR_EXPAND; INTERLEAVED_ACCESS; INFER_ADDRESS_SPACES; GLOBAL_MERGE; EXPAND_IR_INSTS;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -579,6 +579,9 @@ PASS_TABLE :: Pass_Info.[
     .{"fatlto-cleanup", .MODULE, .FATLTO_CLEANUP, true, .DOMTREE},   // RequiredPassInfoMixin
     .{"hipstdpar-interpose-alloc", .MODULE, .HIPSTDPAR_INTERPOSE_ALLOC, true, .DOMTREE},
     .{"hipstdpar-math-fixup", .MODULE, .HIPSTDPAR_MATH_FIXUP, true, .DOMTREE},
+    .{"infer-address-spaces", .FUNCTION, .INFER_ADDRESS_SPACES, false, .DOMTREE},
+    .{"global-merge", .MODULE, .GLOBAL_MERGE, false, .DOMTREE},   // also global-merge<...>
+    .{"expand-ir-insts", .FUNCTION, .EXPAND_IR_INSTS, true, .DOMTREE},   // RequiredPassInfoMixin; also expand-ir-insts<O0..O3>
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<block-freq>", .FUNCTION, .REQUIRE, true, .BFI},
@@ -760,6 +763,8 @@ lookup_pass :: (name: string) -> *Pass_Info {
     if begins_with(name, "alloc-token<") && name[name.count - 1] == #char ">" return lookup_pass("alloc-token");
     if begins_with(name, "hardware-loops<") && name[name.count - 1] == #char ">" return lookup_pass("hardware-loops");
     if begins_with(name, "separate-const-offset-from-gep<") && name[name.count - 1] == #char ">" return lookup_pass("separate-const-offset-from-gep");
+    if begins_with(name, "global-merge<") && name[name.count - 1] == #char ">" return lookup_pass("global-merge");
+    if name == "expand-ir-insts<O0>" || name == "expand-ir-insts<O1>" || name == "expand-ir-insts<O2>" || name == "expand-ir-insts<O3>" return lookup_pass("expand-ir-insts");
     return null;
 }
 
@@ -1515,6 +1520,7 @@ run_module_pm :: (n: s32) {
             case .LOWER_COMMENT_STRING; if should_run_pass(node, NONE) mam_invalidate(lower_comment_string_run());
             case .REL_LOOKUP_TABLE_CONVERTER; if should_run_pass(node, NONE) mam_invalidate(rel_lookup_table_converter_run());
             case .CG_PROFILE; if should_run_pass(node, NONE) mam_invalidate(cg_profile_run());
+            case .GLOBAL_MERGE; if should_run_pass(node, NONE) mam_invalidate(global_merge_run(node.name));
             case .ASAN; if should_run_pass(node, NONE) mam_invalidate(asan_run(node.name));
             case .MSAN; if should_run_pass(node, NONE) mam_invalidate(msan_run(node.name));
             case .TSAN_MODULE; if should_run_pass(node, NONE) mam_invalidate(tsan_module_run());
@@ -1778,6 +1784,8 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .LINT; return lint_run(f, node.name == "lint<abort-on-error>");
         case .PRINT_FUNC_PROPERTIES; return print_func_properties_run(f);
         case .PRINT_STACK_LIFETIME; return print_stack_lifetime_run(f, node.name == "print<stack-lifetime><must>");
+        case .INFER_ADDRESS_SPACES; return infer_address_spaces_run(f);
+        case .EXPAND_IR_INSTS; return expand_ir_insts_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

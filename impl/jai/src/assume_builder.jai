@@ -47,10 +47,10 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     // jai_extras_d's passes never call salvageKnowledge (LoadStoreVectorizer.cpp, ...)
     // NaryReassociate.cpp, SeparateConstOffsetFromGEP.cpp and StraightLineStrengthReduce.cpp never call salvageKnowledge
     if kind == .NARY_REASSOCIATE || kind == .SEPARATE_CONST_OFFSET || kind == .SLSR return;
-    if kind == .LOAD_STORE_VECTORIZER || kind == .CONSTHOIST || kind == .LOWER_ATOMIC || kind == .LOWER_INVOKE || kind == .INDIRECTBR_EXPAND || kind == .INTERLEAVED_ACCESS return;
     // KCFI.cpp, LowerAllowCheckPass.cpp, BoundsChecking.cpp, AllocToken.cpp, StackProtector.cpp never call salvageKnowledge
     // (SafeStack.cpp only through InlineFunction, which fails loudly under the flag)
     if kind == .KCFI || kind == .LOWER_ALLOW_CHECK || kind == .BOUNDS_CHECKING || kind == .ALLOC_TOKEN || kind == .STACK_PROTECTOR || kind == .SAFE_STACK return;
+    if kind == .LOAD_STORE_VECTORIZER || kind == .CONSTHOIST || kind == .LOWER_ATOMIC || kind == .LOWER_INVOKE || kind == .INDIRECTBR_EXPAND || kind == .INTERLEAVED_ACCESS || kind == .INFER_ADDRESS_SPACES || kind == .GLOBAL_MERGE || kind == .EXPAND_IR_INSTS return;
     fatal("-enable-knowledge-retention is not supported with pass '%' yet", name);
 }
 

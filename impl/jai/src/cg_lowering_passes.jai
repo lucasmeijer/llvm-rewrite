@@ -279,31 +279,7 @@ pre_isel_intrinsic_lowering_run :: () -> bool {
     return changed;
 }
 
-// ---------------------------------------------------------------- ExpandIRInsts (guard)
-
-expand_ir_insts_run :: (f: Value_Id) -> Preserved {
-    // X86TargetLowering: setMaxDivRemBitWidthSupported(128) on x86-64, setMaxLargeFPConvertBitWidthSupported(128);
-    // FREM is a libcall for every ExpandableTypes type, so DisableFrem.
-    max_bits :: 128;
-    for i: fn_insts(f) {
-        o := inst_op(i);
-        t := vtype(i);
-        if type_kind(t) == .SVECTOR continue;
-        st := ifx is_vector_type(t) then type_elem(t) else t;
-        if o == .UDIV || o == .SDIV || o == .UREM || o == .SREM || o == .FPTOUI || o == .FPTOSI {
-            if type_kind(st) == .INT && type_bits(st) > max_bits fatal("expand-ir-insts: expanding % on i% is not supported yet", opcode_name(o), type_bits(st));
-        } else if o == .UITOFP || o == .SITOFP {
-            s := vtype(op(i, 0));
-            ss := ifx is_vector_type(s) then type_elem(s) else s;
-            if type_bits(ss) > max_bits fatal("expand-ir-insts: expanding % from i% is not supported yet", opcode_name(o), type_bits(ss));
-        } else if o == .CALL {
-            id := call_iid(i);
-            if (id == IID_FPTOUI_SAT || id == IID_FPTOSI_SAT) && type_kind(st) == .INT && type_bits(st) > max_bits
-                fatal("expand-ir-insts: expanding % to i% is not supported yet", iid_name(id), type_bits(st));
-        }
-    }
-    return PRESERVE_ALL;
-}
+// ExpandIRInsts: pass_expand_ir_insts.jai
 
 // ---------------------------------------------------------------- AtomicExpand (guard)
 

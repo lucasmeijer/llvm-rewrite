@@ -219,8 +219,6 @@ lib/Transforms/Scalar/LoopInterchange.cpp 0.95  # no CacheCostManager / the 'cac
 # --- jai_codegen_ir (2026-11): llc's IR passes
 lib/Transforms/Scalar/LoopStrengthReduce.cpp 0.88   # all but the SCEV debug-value salvage (DbgGatherSalvagableDVI/SalvageDVI/SCEVDbgValueBuilder: fails loudly) and vscale steps
 lib/CodeGen/CodeGenPrepare.cpp 0.95   # missing BFI verification, incremental BFI updates
-lib/CodeGen/InterleavedAccessPass.cpp 0.75   # getMask and the (de)interleave-intrinsic paths are no-ops on X86 and not ported
-lib/Target/X86/X86InterleavedAccess.cpp 0.05   # isSupported only; lowerIntoOptimizedSequence fails loudly
 lib/CodeGen/PreISelIntrinsicLowering.cpp 0.85   # x86 only; missing protected.field.ptr lowering, scalable-vector exp2/exp10
 lib/CodeGen/AtomicExpandPass.cpp 0.55   # the x86 paths (casts, cmpxchg loops, cmpxchg16b, libcalls); no LL/SC, partword, masked-intrinsic or fence-insertion paths
 lib/CodeGen/ExpandVectorPredication.cpp 0.85   # missing constrained-FP VP expansion
@@ -328,3 +326,6 @@ lib/Transforms/Instrumentation/PGOCtxProfFlattening.cpp 0.2  # removeInstrumenta
 lib/Analysis/Lint.cpp 0.98  # AMDGPU const address spaces by number
 lib/Analysis/IR2Vec.cpp 0.95  # no Embedder invalidation / FunctionPropertiesInfo embedding
 lib/Analysis/FunctionPropertiesAnalysis.cpp 0.55  # not FunctionPropertiesUpdater (ML inliner)
+lib/Transforms/Scalar/InferAddressSpaces.cpp 0.85  # x86/NoTTI hooks only: no assumed/predicated address spaces, no inttoptr mask pairs, narrowing ptrmask fails loudly
+lib/CodeGen/ExpandIRInsts.cpp 0.75  # no FRemExpander (frem is a libcall on x86)
+lib/Transforms/Utils/IntegerDivision.cpp 0.6  # expandDivision / expandRemainder; not the UpTo32/64Bits variants

@@ -74,7 +74,7 @@ call_callee :: inline (ci: Value_Id) -> Value_Id { return op(ci, nops(ci) - 1); 
 // Value::takeName
 take_name :: (dst: Value_Id, src: Value_Id) {
     n := vname(src);
-    if n.count == 0 return;
+    if n.count == 0 { if vname(dst).count set_name(dst, ""); return; }   // "If this value has a name, drop it."
     set_name(src, "");
     set_name(dst, n);
 }

@@ -2471,3 +2471,30 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   <must> 10828; print<func-properties> (plain and detailed) identical but for the residual above; print<ir2vec>
   symbolic and flow-aware 10828 (with the dummy_3D_nonzero_opc vocabulary).
 
+## Codegen IR passes, Layer 1b (L1.extra.codegen-ir-misc COMPLETE 116/116; /root/jai_extras_d)
+
+- Files: `pass_lower_atomic.jai`, `pass_lower_invoke.jai`, `pass_indirectbr_expand.jai` (replaces llc's guard),
+  `pass_consthoist.jai` (now also the -consthoist-gep path, -consthoist-with-block-frequency=false and the optsize
+  maximizeConstantsInRange; `should_optimize_for_size_fn` in psi.jai), `cg_interleaved_access.jai` (an opt pass
+  now; getMask's IR side effects for masked/vp accesses and the (de)interleave intrinsics) + `x86_interleaved_access.jai`
+  (X86InterleavedAccessGroup: AVX factor-3/4 lowering), `pass_infer_address_spaces.jai`, `pass_global_merge.jai`,
+  `pass_expand_ir_insts.jai` (replaces llc's guard; also IntegerDivision.cpp). cl::opts in `extras_d_cl.jai`.
+- Traps found: the new-PM GlobalMergePass ignores -global-merge-max-offset (MaxOffset comes only from
+  `global-merge<max-offset=N>`, default 0 = nothing merges) but doMerge reads -global-merge-group-by-use and
+  -global-merge-ignore-single-use directly. InferAddressSpaces does nothing on x86 unless
+  -assume-default-is-flat-addrspace. ExpandIRInsts' CreateSelectWithUnknownProfile calls pass "sign" / "saturated"
+  as the *pass name* argument (the selects stay unnamed). LowerAtomic's load/store lowering does not count as a change.
+- Shared fixes: `take_name` drops the destination's name when the source has none (Value::takeName);
+  `set_name` caps local names at 1024 bytes (-non-global-value-max-name-size) and, like createValueName, uniquifies
+  a truncated name that equals the current one (repeated block renames in ExpandIRInsts).
+- Order notes: InterleavedAccess's tryReplaceExtracts walks a DenseMap of extracts: only the new extracts' use-list
+  order depends on it (not printed); we use the load's user order. InferAddressSpaces / GlobalMerge maps are lookups.
+- Sweeps (0 differs, 0 bad-ir everywhere): lower-atomic / lower-invoke --with-test-flags 13535 / 13527 identical;
+  indirectbr-expand -mattr=+retpoline 2163/2163; consthoist --with-test-flags (also -consthoist-gep
+  -consthoist-with-block-frequency=false) 13521; interleaved-access --with-test-flags 5173, -mattr=+avx2 10853/10853,
+  sroa,instcombine,loop-vectorize,interleaved-access over LoopVectorize/X86 + perf + e2e 797/797;
+  infer-address-spaces -assume-default-is-flat-addrspace 10859/10859, plus LLVM's own InferAddressSpaces tests
+  (not imported: AMDGPU/NVPTX dirs) with the triple dropped: 44/44 identical (48/48 with -mtriple=x86_64);
+  global-merge<max-offset=100|1000;merge-const;merge-const-aggressive|64;...> --with-test-flags 13555, also with
+  -global-merge-group-by-use=false / -global-merge-ignore-single-use=false 10860/10860; expand-ir-insts with
+  -expand-div-rem-bits=0 -expand-fp-convert-bits=0 (x86_64 and i686) 10850/10850, --with-test-flags 5191.
