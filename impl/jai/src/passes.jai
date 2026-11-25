@@ -328,6 +328,8 @@ Pass_Kind :: enum u8 {
     EARLY_CSE;
     // sanitizers (pass_asan.jai, pass_msan.jai, ...)
     ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN; TYSAN; NSAN; SANCOV; SANMD; JMC; HWASAN; WIN_EH_PREPARE;
+    // ObjC ARC (pass_objcarc.jai)
+    OBJC_ARC; OBJC_ARC_CONTRACT; OBJC_ARC_EXPAND; PA_EVAL;
     // SCCP, IPSCCP (pass_sccp.jai)
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
@@ -604,6 +606,10 @@ PASS_TABLE :: Pass_Info.[
     .{"sanmd-module", .MODULE, .SANMD, true, .DOMTREE},
     .{"jmc-instrumenter", .MODULE, .JMC, false, .DOMTREE},
     .{"hwasan", .MODULE, .HWASAN, true, .DOMTREE},
+    .{"objc-arc", .FUNCTION, .OBJC_ARC, false, .DOMTREE},
+    .{"objc-arc-contract", .FUNCTION, .OBJC_ARC_CONTRACT, false, .DOMTREE},
+    .{"objc-arc-expand", .FUNCTION, .OBJC_ARC_EXPAND, false, .DOMTREE},
+    .{"pa-eval", .FUNCTION, .PA_EVAL, false, .DOMTREE},
     .{"win-eh-prepare", .FUNCTION, .WIN_EH_PREPARE, true, .DOMTREE},   // RequiredPassInfoMixin   // also hwasan<kernel;recover>
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
@@ -1208,7 +1214,8 @@ parse_cl_opt :: (arg: string) -> bool {
     if sancov_parse_cl_opt(name, value, has_value) return true;  // pass_sancov.jai (-sanitizer-coverage-*)
     if sanmd_parse_cl_opt(name, value, has_value) return true;   // pass_sanmd.jai (-sanitizer-metadata-*)
     if hwasan_parse_cl_opt(name, value, has_value) return true;  // pass_hwasan.jai (-hwasan-*)
-    if irce_parse_cl_opt(name, value, has_value) return true;   // pass_irce.jai (-irce-*)
+    if irce_parse_cl_opt(name, value, has_value) return true;
+    if objcarc_parse_cl_opt(name, value, has_value) return true;   // objcarc.jai   // pass_irce.jai (-irce-*)
     if weh_parse_cl_opt(name, value, has_value) return true;   // pass_win_eh_prepare.jai
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
@@ -1514,6 +1521,10 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .EE_INSTRUMENT; return ee_instrument_run(f, node.name);
         case .TSAN; return tsan_run(f);
         case .WIN_EH_PREPARE; return win_eh_prepare_run(f);
+        case .OBJC_ARC; return objc_arc_run(f);
+        case .OBJC_ARC_CONTRACT; return objc_arc_contract_run(f);
+        case .OBJC_ARC_EXPAND; return objc_arc_expand_run(f);
+        case .PA_EVAL; return pa_eval_run(f);
         case .LOOP_SINK; return loop_sink_run(f);
         case .TRANSFORM_WARNING; return transform_warning_run(f);
         case .DROP_UNNECESSARY_ASSUMES; return drop_unnecessary_assumes_run(f, node.name);

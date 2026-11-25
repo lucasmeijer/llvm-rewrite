@@ -27,6 +27,8 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     if kind == .CORO_EARLY || kind == .CORO_CLEANUP || kind == .CORO_ELIDE || kind == .CORO_SPLIT || kind == .CORO_ANNOTATION_ELIDE || kind == .CORO_COND return;
     // IROutliner.cpp, IRSimilarityIdentifier.cpp and CodeExtractor.cpp never call salvageKnowledge
     if kind == .IR_OUTLINER || kind == .PRINT_IR_SIMILARITY return;
+    // the ObjC ARC passes never call salvageKnowledge (lib/Transforms/ObjCARC/*.cpp)
+    if kind == .OBJC_ARC || kind == .OBJC_ARC_CONTRACT || kind == .OBJC_ARC_EXPAND || kind == .PA_EVAL return;
     fatal("-enable-knowledge-retention is not supported with pass '%' yet", name);
 }
 

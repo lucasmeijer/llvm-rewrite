@@ -2125,3 +2125,36 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   `-whole-program-visibility`; on the 92 files with type tests: trap + keep-unreachable=false, export (empty and
   import-vcp.yaml summaries), import (vcp-branch-funnel, unique-ret-val1), threshold 1 + `-wholeprogramdevirt-skip`,
   and `lto<O2>` with whole program visibility: 0 differs. No perf benchmark contains type tests (perf not run).
+
+## ObjC ARC (L1.extra.objcarc COMPLETE 104/104; /root/jai_extras_c)
+
+- `objcarc.jai`: ARCInstKind (ObjCARCInstKind.cpp), the ObjCARCAnalysisUtils / ObjCARCUtil helpers, the runtime entry
+  points, EraseInstruction, BundledRetainClaimRVs, ProvenanceAnalysis (`Arc_Pa`: the pair cache keyed by
+  `(A << 32) | B`, inserted as `true` before the recursive check exactly like LLVM, and the
+  GetUnderlyingObjCPtrCached cache with the WeakVH as a plain id and the WeakTrackingVH as a `Vh` slot),
+  DependencyAnalysis and PtrState (TopDown / BottomUp states are one struct with `arc_td_*` / `arc_bu_*` procedures),
+  objc-arc-aa (`Aa_Kind.OBJC_ARC` in aa.jai: only getModRefInfo(Call, Loc) and getMemoryEffects(F) do anything,
+  alias / getModRefInfoMask reduce to AAResultBase's MayAlias / ModRef).
+- `pass_objcarc.jai`: objc-arc (ObjCARCOpt), objc-arc-contract, objc-arc-expand, pa-eval. There is no
+  objc-arc-apelim in LLVM 23 (apelim.ll runs objc-arc). The cl::opts `-enable-objc-arc-opts`,
+  `-arc-opt-max-ptr-states`, `-arc-contract-use-objc-claim-rv` are parsed by `objcarc_parse_cl_opt`.
+- Value::stripPointerCasts looks through calls with a `returned` argument; autoupgrade.jai's `strip_pointer_casts`
+  does not, so the ARC code uses `arc_strip` (= `strip_pointer_casts_kind(v, .ZERO_INDICES)`). contract-marker.ll's
+  `@returnsArg(ptr returned)` needs it.
+- Address order: the RRInfo sets (SmallPtrSet<Instruction *, 2>) are insertion-ordered arrays. Past two elements
+  LLVM iterates them in pointer order, but nothing visible depends on it: MoveCalls inserts at distinct points,
+  DeadInsts erasure order and PairUpRetainsAndReleases' fixpoint are order-independent. The one place where the
+  order reaches state is VisitInstructionTopDown inserting the RC identity roots of a release insertion point into
+  the top-down BlotMapVector (its iteration order feeds ProvenanceAnalysis' cycle-breaking cache); that fails loudly
+  when more than two roots add more than one new pointer (never on the corpus). BundledRetainClaimRVs'
+  destructor walks a DenseMap, but each entry only touches its own calls.
+- Not ported (debug only): GatherStatistics, the BBState / Sequence printers. The AutoreleasePoolElimination
+  remark is not emitted (no -pass-remarks support).
+- `llvm.objc.*` runtime entry points were added to gen/gen_intrinsics.py's EXTRA_DECLS (claimAutoreleasedReturnValue
+  is declared by no test).
+- Sweeps (whole-file, 10823 files): objc-arc, objc-arc-contract, objc-arc-expand, objc-arc,objc-arc-contract,
+  pa-eval (default AA and `-aa-pipeline=`), gvn with `-aa-pipeline=basic-aa,objc-arc-aa`: all identical
+  (gvn: 1 loud, an x86 hadd known-bits gap); `--with-test-flags` objc-arc / objc-arc-contract 13325 identical,
+  0 differs (314 loud, all other passes' options); `--per-function` on the ObjCARC tests 375/375 for objc-arc,
+  objc-arc-contract and the pair; tests/perf/compile objc-arc / objc-arc-contract / sroa,objc-arc 4/4. No perf
+  benchmark contains ARC calls (perf not run).

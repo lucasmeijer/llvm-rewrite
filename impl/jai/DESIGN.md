@@ -150,6 +150,9 @@ src/
   coro_debug.jai, stack_lifetime.jai, pass_coro_split.jai   the coroutine passes (coro::Shape = `Coro_Shape`, the
                   BaseABI subclasses = its `abi` tag, BaseCloner / SwitchCloner = `Coro_Cloner` with a `kind`)
   pass_lto_misc.jai (the LTO pipelines' module passes), pass_merge_functions.jai (MergeFunctions, FunctionComparator)
+  objcarc.jai, pass_objcarc.jai   ObjC ARC: ARCInstKind, ProvenanceAnalysis (`Arc_Pa`), DependencyAnalysis, PtrState
+                  (`Arc_Ptr_State`, BlotMapVector = `Arc_Ptr_Map`), objc-arc-aa (`Aa_Kind.OBJC_ARC`); the objc-arc,
+                  objc-arc-contract, objc-arc-expand and pa-eval passes
   linker.jai      llvm-link: ModuleLinker, IRMover (IRLinker, TypeMapTy), its ValueMapper (see "llvm-link" below)
   opt.jai                             CLI entry point (one binary: opt, llc, llvm-link by argv[0])
 ```

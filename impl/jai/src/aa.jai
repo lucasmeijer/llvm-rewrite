@@ -355,7 +355,7 @@ is_writable_object :: (obj: Value_Id) -> (bool, bool) {
 
 // ---------------------------------------------------------------- AAResults and AAQueryInfo
 
-Aa_Kind :: enum u8 { BASIC; SCOPED_NOALIAS; TBAA; GLOBALS; SCEV; }
+Aa_Kind :: enum u8 { BASIC; SCOPED_NOALIAS; TBAA; GLOBALS; SCEV; OBJC_ARC; }
 
 // -aa-pipeline (opt's NewPMDriver; "default" = buildDefaultAAPipeline)
 aa_pipeline: struct {
@@ -376,7 +376,7 @@ aa_parse_pipeline :: (text: string) {
         else if name == "tbaa" array_add(*aa_pipeline.kinds, .TBAA);
         else if name == "globals-aa" array_add(*aa_pipeline.kinds, .GLOBALS);
         else if name == "scev-aa" array_add(*aa_pipeline.kinds, .SCEV);
-        else if name == "objc-arc-aa" fatal("-aa-pipeline: % is not implemented yet", name);
+        else if name == "objc-arc-aa" array_add(*aa_pipeline.kinds, .OBJC_ARC);   // objcarc.jai
         else fatal("unknown alias analysis name '%'", name);
     }
 }
@@ -384,7 +384,7 @@ aa_parse_pipeline :: (text: string) {
 // AAResults for one function (AAManager::run): the registered analyses, plus BasicAA's inputs.
 Aa_Results :: struct {
     f: Value_Id;
-    kinds: [5] Aa_Kind;
+    kinds: [8] Aa_Kind;
     nkinds: s32;
     se: *Scev_State;          // SCEVAA's ScalarEvolution (scev_aa.jai)
     dt: *Dom_Tree;            // BasicAA's DominatorTree (BasicAA::run always requests it)
@@ -617,6 +617,7 @@ aa_memory_effects_fn :: (q: *Aa_Query, f: Value_Id) -> u64 {
     for k: 0..q.aar.nkinds-1 {
         if q.aar.kinds[k] == .BASIC result &= basic_aa_memory_effects_fn(f);
         if q.aar.kinds[k] == .GLOBALS result &= globals_aa_memory_effects_fn(f);
+        if q.aar.kinds[k] == .OBJC_ARC result &= objc_arc_aa_memory_effects_fn(f);
         if result == 0 return result;
     }
     return result;
@@ -659,6 +660,7 @@ aa_mod_ref_call_loc :: (q: *Aa_Query, call: Value_Id, loc: Mem_Loc) -> u8 {
             case .SCOPED_NOALIAS; result &= scoped_noalias_mod_ref_inst_loc(call, loc);
             case .TBAA; result &= tbaa_mod_ref_call_loc(q.aar, call, loc);
             case .GLOBALS; result &= globals_aa_mod_ref_call_loc(q, call, loc);
+            case .OBJC_ARC; result &= objc_arc_aa_mod_ref_call_loc(call);
         }
         if result == MR_NO return MR_NO;
     }

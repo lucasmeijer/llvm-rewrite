@@ -115,6 +115,8 @@
 #load "pass_sanmd.jai";
 #load "sys_path.jai";
 #load "pass_jmc.jai";
+#load "objcarc.jai";
+#load "pass_objcarc.jai";
 #load "pass_hwasan.jai";
 #load "pass_loop_sink.jai";
 #load "pass_transform_warning.jai";
