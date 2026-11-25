@@ -1954,6 +1954,33 @@ is almost all `unsupported option` for pass cl::opts we don't implement (-sbvec-
   `sample-profile,prof-inject,require<profile-summary>,function(chr)` with `-force-chr -chr-bias-threshold=0.5
   -profcheck-default-select-true-weight=1000 -profcheck-default-select-false-weight=1` (the sample profile only
   provides a ProfileSummary; this is what makes CHR fire on corpus files), also over tests/perf/compile.
+- `ctx-instr-gen` (pass_pgo_instr_gen.jai, CTXPROF: the function itself as the name, llvm.instrprof.callsite, entry
+  counter, no value profiling), `ctx-instr-lower` and `noinline-nonprevailing` (pass_ctx_prof_lowering.jai). The GUID
+  must be assigned (assign-guid) or the lowering fails loudly (LLVM reads an empty optional). InstrProfCntrInstBase
+  includes llvm.instrprof.value.profile (the lowering erases it).
+- Instrumentation PGO pipelines: -pgo-kind=pgo-instr-gen-pipeline (pre-inliner = ModuleInlinerWrapperPass with its
+  own InlineParams `inl_preinline`, addPGOInstrPasses, post-PGO loop rotation, instrprof with InstrProfOptions on the
+  node: `ip_*`, InstrProfileOutput = `sp_file`), -O0 variant, -profile-context-root (ctx pipeline),
+  -cspgo-kind=cspgo-instr-gen-pipeline (PGOInstrumentationGenCreateVar, CS gen + instrprof with UseBFIInPromotion
+  after rpo-function-attrs / in the LTO pipeline). pgo-instr-use / cspgo-instr-use fail loudly (indexed profile
+  reader not ported; the harness skips all `%t.profdata` tests).
+- vtable value profiling (-enable-vtable-value-profiling: VTableProfilingPlugin, __profvt_ data, __llvm_prf_vnm) and
+  ICP vtable comparison (-enable-vtable-profile-use; Dm_U64 emulates LLVM 23's SmallDenseMap<uint64_t> bucket order
+  for updateVPtrValueProfiles).
+- Sweeps (jai_pgo_rest): `-O2 -pgo-kind=pgo-instr-gen-pipeline` 10793/10833 identical, 3 differs; `-O2
+  -profile-context-root=main` 3 differs; `ctx-instr-gen,assign-guid,ctx-instr-lower` and `pgo-instr-gen,instrprof
+  -enable-vtable-value-profiling`: 1 differs (the BFI irreducible-loop bug); `pgo-icall-prom -enable-vtable-profile-use
+  --with-test-flags` 0 differs; tests/perf/compile 0 differs. The remaining differs are analysis-state bugs outside
+  this unit, all reproducible only in the pipeline (standalone the pass agrees):
+  GVN/critical-edge-split-failure.ll (drop-unnecessary-assumes drops a peeled assume LLVM keeps: LLVM's
+  AssumptionCache is never invalidated and the peeled clone is not registered; ours is rebuilt),
+  IndVarSimplify/eliminate-comparison.ll (CVP: samesign missing, LVI/AC state), LoopVectorize/X86/
+  illegal-parallel-loop-uniform-write.ll (a leftover SCEVExpander `add %m, -2`, cached SCEV state), LICM/assume.ll.
+  Bugs found and fixed on the way: SROA's global `sroa_pending_dt_updates` kept a stale capacity into temporary storage
+  reset by the CGSCC pass manager (corrupted DT updates); removeUnwindEdge did not unique the new catchswitch's name
+  (LastUnique counter); hasNonDebugLocLoopMetadata on a DILocation used as !llvm.loop.
+- Trap: a global `[..]` array with `allocator = temp` must be reset with `data = null; allocated = 0`, not just
+  `count = 0`, at the start of each run: reset_temporary_storage between SCCs frees its buffer.
 - `pgo-memop-opt` (pass_pgo_memop_opt.jai, PGOMemOPSizeOpt.cpp; setProfMetadata): 4/4 tests, sweep 0 differs.
   No DomTree updates (the function's analyses are invalidated instead).
 - `prof-inject` / `prof-verify` (pass_prof_verify.jai, ProfileVerify.cpp): sweep `prof-inject` 0 differs.

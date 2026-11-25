@@ -258,7 +258,7 @@ lib/Analysis/StackSafetyAnalysis.cpp 0.8  # no ModuleSummaryIndex (ThinLTO) path
 lib/Transforms/Utils/ModuleUtils.cpp 0.6  # appendTo*, ctors, kcfi, lowerGlobalIFuncUsersAsGlobalCtor; not transformGlobal*, removeFromUsedLists, embedBuffer
 lib/Transforms/Utils/Instrumentation.cpp 1.0  # PrepareToSplitEntryBlock in pass_sancov.jai
 lib/Demangle/Demangle.cpp 0.3  # with a small subset of the Itanium / Microsoft demanglers (headers)
-lib/Transforms/Instrumentation/InstrProfiling.cpp 0.85  # jai_pgo: all but the GPU (offload) paths and vtable value profiling
+lib/Transforms/Instrumentation/InstrProfiling.cpp 0.9  # all but the GPU (offload) paths
 lib/ProfileData/InstrProf.cpp 0.3  # jai_pgo: names, name vars, section names, name blob (zlib), comdat rules, the function symtab (create/getFunction/getCanonicalName), annotateValueSite, getValueProfDataFromInst; no records / vtables
 # L1.extra.coroutines (no optimization remarks; no -pass-remarks support)
 lib/Transforms/Coroutines/CoroSplit.cpp 0.97
@@ -266,6 +266,8 @@ lib/Transforms/Coroutines/CoroElide.cpp 0.9  # remarks, -coro-elide-info-output-
 lib/Transforms/Coroutines/CoroAnnotationElide.cpp 0.9  # remarks, -coro-elide-branch-ratio flag
 lib/Analysis/StackLifetime.cpp 0.95  # May and Must liveness, the annotated printer
 lib/Transforms/Instrumentation/PGOInstrumentation.cpp 0.45  # jai_pgo: pgo-instr-gen (FDO, block coverage) complete but ctx-instr-gen; setProfMetadata; no pgo-instr-use (PGOUseFunc, indexed profile reader)
+lib/Analysis/StackLifetime.cpp 0.75  # May (coro_frame) and Must (asan) liveness; no printer
+lib/Transforms/Instrumentation/PGOInstrumentation.cpp 0.5  # pgo-instr-gen (FDO, CSFDO, CTXPROF, block coverage, vtable VP), GenCreateVar; no pgo-instr-use (PGOUseFunc, indexed profile reader)
 lib/Support/CRC.cpp 0.3  # jai_pgo: JamCRC
 lib/Transforms/Instrumentation/MemorySanitizer.cpp 0.75  # no ARM SIMD (NEON/SVE) handlers, no AArch64/PPC/SystemZ/i386/generic vararg helpers, no dumpInst
 lib/Transforms/Instrumentation/NumericalStabilitySanitizer.cpp 0.97  # not -check-functions-filter (Regex)
@@ -302,7 +304,7 @@ lib/IR/BuiltinGCs.cpp 0.4  # only what RS4GC / PlaceSafepoints ask: useRS4GC and
 lib/Transforms/IPO/SampleProfile.cpp 0.85  # jai_pgo: no SampleContextTracker use (CS profiles), replay inliner, remapper, -sample-profile-remove-probe, coverage checks
 lib/Transforms/IPO/SampleProfileMatcher.cpp 0.85  # jai_pgo: no CS profiles, no Itanium demangling (mangled names fail loudly)
 lib/Transforms/IPO/SampleProfileProbe.cpp 0.9  # jai_pgo: no probe verifier (-verify-pseudo-probe)
-lib/Transforms/Instrumentation/IndirectCallPromotion.cpp 0.6  # jai_pgo: no vtable comparison (-enable-vtable-profile-use with type tests), no remarks
+lib/Transforms/Instrumentation/IndirectCallPromotion.cpp 0.9  # no remarks
 lib/ProfileData/SampleProfReader.cpp 0.75  # jai_pgo: text, raw binary, ext-binary, gcc; no Itanium remapper, no CS partial reads, no dump
 lib/ProfileData/SampleProf.cpp 0.5  # jai_pgo: FunctionSamples merge/find/flatten pieces; no SampleContextTrimmer, ProfileSymbolList writing, dumps
 lib/Transforms/Scalar/NaryReassociate.cpp 0.95  # no legacy pass
@@ -329,3 +331,4 @@ lib/Analysis/FunctionPropertiesAnalysis.cpp 0.55  # not FunctionPropertiesUpdate
 lib/Transforms/Scalar/InferAddressSpaces.cpp 0.85  # x86/NoTTI hooks only: no assumed/predicated address spaces, no inttoptr mask pairs, narrowing ptrmask fails loudly
 lib/CodeGen/ExpandIRInsts.cpp 0.75  # no FRemExpander (frem is a libcall on x86)
 lib/Transforms/Utils/IntegerDivision.cpp 0.6  # expandDivision / expandRemainder; not the UpTo32/64Bits variants
+lib/Transforms/Instrumentation/PGOCtxProfLowering.cpp 0.95  # all but remarks
