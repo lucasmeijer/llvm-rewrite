@@ -19941,7 +19941,9 @@ tests/imported/llvm/Transforms/SampleProfile/csspgo-import-list-callee-samples.l
 tests/imported/llvm/Transforms/SampleProfile/csspgo-import-list-callee-samples.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/csspgo-import-list-preinliner.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/csspgo-import-list-preinliner.ll::roundtrip
+tests/imported/llvm/Transforms/SampleProfile/csspgo-import-list.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/csspgo-import-list.ll::roundtrip
+tests/imported/llvm/Transforms/SampleProfile/csspgo-summary.ll::analysis
 tests/imported/llvm/Transforms/SampleProfile/csspgo-summary.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/ctxsplit.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/ctxsplit.ll::roundtrip
@@ -19963,6 +19965,7 @@ tests/imported/llvm/Transforms/SampleProfile/fnptr.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/fnptr.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/fsafdo_test.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/fsafdo_test.ll::roundtrip
+tests/imported/llvm/Transforms/SampleProfile/function_metadata.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/function_metadata.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/gcc-simple.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/gcc-simple.ll::roundtrip
@@ -20012,7 +20015,9 @@ tests/imported/llvm/Transforms/SampleProfile/offset.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/offset.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/overflow.ll::analysis
 tests/imported/llvm/Transforms/SampleProfile/overflow.ll::roundtrip
+tests/imported/llvm/Transforms/SampleProfile/profile-context-order.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/profile-context-order.ll::roundtrip
+tests/imported/llvm/Transforms/SampleProfile/profile-context-tracker.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/profile-context-tracker.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/profile-correlation-irreducible-loops.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/profile-correlation-irreducible-loops.ll::roundtrip
@@ -20044,6 +20049,7 @@ tests/imported/llvm/Transforms/SampleProfile/pseudo-probe-desc-guid.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/pseudo-probe-desc-guid.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/pseudo-probe-eh.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/pseudo-probe-eh.ll::roundtrip
+tests/imported/llvm/Transforms/SampleProfile/pseudo-probe-icp-factor.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/pseudo-probe-icp-factor.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/pseudo-probe-instcombine.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/pseudo-probe-instcombine.ll::roundtrip
