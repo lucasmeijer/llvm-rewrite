@@ -17286,7 +17286,9 @@ tests/imported/llvm/Transforms/PGOProfile/critical-edge-threshold.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/critical-edge-threshold.ll::roundtrip
 tests/imported/llvm/Transforms/PGOProfile/criticaledge.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/criticaledge.ll::roundtrip
+tests/imported/llvm/Transforms/PGOProfile/ctx-instrumentation-block-inline.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/ctx-instrumentation-block-inline.ll::roundtrip
+tests/imported/llvm/Transforms/PGOProfile/ctx-instrumentation.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/ctx-instrumentation.ll::roundtrip
 tests/imported/llvm/Transforms/PGOProfile/declarations_only.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/declarations_only.ll::roundtrip
@@ -17294,6 +17296,7 @@ tests/imported/llvm/Transforms/PGOProfile/do-not-instrument.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/do-not-instrument.ll::roundtrip
 tests/imported/llvm/Transforms/PGOProfile/entry_alloca.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/entry_alloca.ll::roundtrip
+tests/imported/llvm/Transforms/PGOProfile/filename.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/filename.ll::roundtrip
 tests/imported/llvm/Transforms/PGOProfile/function_size_threshold.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/function_size_threshold.ll::roundtrip
@@ -17313,6 +17316,7 @@ tests/imported/llvm/Transforms/PGOProfile/icp_vararg.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/icp_vararg.ll::roundtrip
 tests/imported/llvm/Transforms/PGOProfile/icp_vararg_sret.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/icp_vararg_sret.ll::roundtrip
+tests/imported/llvm/Transforms/PGOProfile/icp_vtable_invoke.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/icp_vtable_invoke.ll::roundtrip
 tests/imported/llvm/Transforms/PGOProfile/indirect_call_profile.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/indirect_call_profile.ll::roundtrip
@@ -17374,6 +17378,7 @@ tests/imported/llvm/Transforms/PGOProfile/noprofile.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/noprofile.ll::roundtrip
 tests/imported/llvm/Transforms/PGOProfile/not_promote_ret_exit.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/not_promote_ret_exit.ll::roundtrip
+tests/imported/llvm/Transforms/PGOProfile/preinline.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/preinline.ll::roundtrip
 tests/imported/llvm/Transforms/PGOProfile/prof-inject-existing.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/prof-inject-existing.ll::roundtrip
@@ -17405,6 +17410,7 @@ tests/imported/llvm/Transforms/PGOProfile/switch.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/switch.ll::roundtrip
 tests/imported/llvm/Transforms/PGOProfile/timestamp.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/timestamp.ll::roundtrip
+tests/imported/llvm/Transforms/PGOProfile/vtable_profile.ll::opt
 tests/imported/llvm/Transforms/PGOProfile/vtable_profile.ll::roundtrip
 tests/imported/llvm/Transforms/PartialInlining/intrinsic-call-cost.ll::opt
 tests/imported/llvm/Transforms/PartialInlining/intrinsic-call-cost.ll::roundtrip
