@@ -7195,6 +7195,7 @@ tests/imported/llvm/Transforms/FunctionSpecialization/track-ptr-return.ll::opt
 tests/imported/llvm/Transforms/FunctionSpecialization/track-ptr-return.ll::roundtrip
 tests/imported/llvm/Transforms/FunctionSpecialization/track-return.ll::opt
 tests/imported/llvm/Transforms/FunctionSpecialization/track-return.ll::roundtrip
+tests/imported/llvm/Transforms/GCOVProfiling/modules.ll::opt
 tests/imported/llvm/Transforms/GCOVProfiling/modules.ll::roundtrip
 tests/imported/llvm/Transforms/GVN/2007-07-25-DominatedLoop.ll::opt
 tests/imported/llvm/Transforms/GVN/2007-07-25-DominatedLoop.ll::roundtrip
