@@ -40,5 +40,4 @@ sp_ctx_add_profiled_calls :: (g: *Pcg) {}
 sp_matcher_init :: () { fatal("sample-profile: stale profile matching (SampleProfileMatcher) is not implemented yet"); }
 sp_matcher_run_on_module :: () {}
 
-sp_apply_profi :: (f: Value_Id, sample_weights: *Table(Value_Id, u64)) { fatal("sample-profile: profile inference (-sample-profile-use-profi, SampleProfileInference) is not implemented yet"); }
 

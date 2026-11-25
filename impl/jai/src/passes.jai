@@ -318,7 +318,7 @@ Pass_Kind :: enum u8 {
     GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
     // L1.scalar-misc (pass_lower_expect.jai, ...; options in scalar_misc_cl.jai)
     // the profile family (pass_add_discriminators.jai, profile_cl.jai, ...)
-    ADD_DISCRIMINATORS; MEMPROF; MEMPROF_MODULE; INSTRPROF; PGO_INSTR_GEN; SAMPLE_PROFILE; PSEUDO_PROBE; PSEUDO_PROBE_UPDATE;
+    ADD_DISCRIMINATORS; MEMPROF; MEMPROF_MODULE; INSTRPROF; PGO_INSTR_GEN; SAMPLE_PROFILE; PSEUDO_PROBE; PSEUDO_PROBE_UPDATE; PROF_INJECT; PROF_VERIFY; PGO_MEMOP_OPT;
     LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT; DIV_REM_PAIRS; FLOAT2INT; SINK; TAILCALLELIM; MLDST_MOTION; SPECULATIVE_EXECUTION; CALLSITE_SPLITTING;
     // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
@@ -554,6 +554,9 @@ PASS_TABLE :: Pass_Info.[
     .{"sample-profile", .MODULE, .SAMPLE_PROFILE, false, .DOMTREE},
     .{"pseudo-probe", .MODULE, .PSEUDO_PROBE, false, .DOMTREE},
     .{"pseudo-probe-update", .MODULE, .PSEUDO_PROBE_UPDATE, false, .DOMTREE},
+    .{"prof-inject", .FUNCTION, .PROF_INJECT, false, .DOMTREE},
+    .{"pgo-memop-opt", .FUNCTION, .PGO_MEMOP_OPT, false, .DOMTREE},
+    .{"prof-verify", .MODULE, .PROF_VERIFY, false, .DOMTREE},
     .{"lower-expect", .FUNCTION, .LOWER_EXPECT, false, .DOMTREE},
     .{"lower-constant-intrinsics", .FUNCTION, .LOWER_CONSTANT_INTRINSICS, false, .DOMTREE},
     .{"infer-alignment", .FUNCTION, .INFER_ALIGNMENT, false, .DOMTREE},
@@ -691,6 +694,7 @@ Pass_Node :: struct {
     sp_phase: Lto_Phase;
     sp_disable_inlining: bool;
     sp_use_flattened: bool;
+    icp_sample_pgo: bool;          // pgo-icall-prom: PGOIndirectCallPromotion(InLTO = in_lto, SamplePGO)
 }
 
 pipeline: struct {
@@ -1189,6 +1193,9 @@ parse_cl_opt :: (arg: string) -> bool {
     if wpd_parse_cl_opt(name, value, has_value) return true;   // pass_wpd.jai
     if profile_parse_cl_opt(name, value, has_value) return true;   // profile_cl.jai (sample profile, PGO, memprof)
     if sp_parse_cl_opt(name, value, has_value) return true;   // pass_sample_profile.jai
+    if prof_verify_parse_cl_opt(name, value, has_value) return true;   // pass_prof_verify.jai
+    if icp_parse_cl_opt(name, value, has_value) return true;   // pass_pgo_icall_prom.jai
+    if memop_parse_cl_opt(name, value, has_value) return true;   // pass_pgo_memop_opt.jai
     if merge_functions_parse_cl_opt(name, value, has_value) return true;   // pass_merge_functions.jai
     if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)
     if expand_memcmp_parse_cl_opt(name, value, has_value) return true;   // pass_expand_memcmp.jai
@@ -1335,6 +1342,7 @@ run_module_pm :: (n: s32) {
             case .MEMPROF_MODULE; if should_run_pass(node, NONE) mam_invalidate(memprof_module_run());
             case .INSTRPROF; if should_run_pass(node, NONE) mam_invalidate(instrprof_run());
             case .PGO_INSTR_GEN; if should_run_pass(node, NONE) mam_invalidate(pgo_instr_gen_run());
+            case .PROF_VERIFY; if should_run_pass(node, NONE) mam_invalidate(prof_verify_run());
             case .PSEUDO_PROBE; if should_run_pass(node, NONE) mam_invalidate(pseudo_probe_run());
             case .PSEUDO_PROBE_UPDATE; if should_run_pass(node, NONE) mam_invalidate(pseudo_probe_update_run());
             case .SAMPLE_PROFILE; if should_run_pass(node, NONE) mam_invalidate(sample_profile_run(node.sp_file, "", node.sp_phase, node.sp_disable_inlining, node.sp_use_flattened));
@@ -1345,7 +1353,7 @@ run_module_pm :: (n: s32) {
             case .DROP_TYPE_TESTS; if should_run_pass(node, NONE) mam_invalidate(drop_type_tests_run());
             case .SIMPLIFY_TYPE_TESTS; if should_run_pass(node, NONE) mam_invalidate(simplify_type_tests_run());
             case .EXPAND_VARIADICS; if should_run_pass(node, NONE) mam_invalidate(expand_variadics_run());
-            case .PGO_ICALL_PROM; if should_run_pass(node, NONE) mam_invalidate(pgo_icall_prom_run());
+            case .PGO_ICALL_PROM; if should_run_pass(node, NONE) mam_invalidate(pgo_icall_prom_run(node.in_lto, node.icp_sample_pgo));   // PGOIndirectCallPromotion(InLTO, SamplePGO)
             case .CANONICALIZE_ALIASES; if should_run_pass(node, NONE) mam_invalidate(canonicalize_aliases_run());
             case .NAME_ANON_GLOBALS; if should_run_pass(node, NONE) mam_invalidate(name_anon_globals_run());
             case .MERGE_FUNCTIONS; if should_run_pass(node, NONE) mam_invalidate(merge_functions_run());
@@ -1474,6 +1482,8 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .ADD_DISCRIMINATORS; return add_discriminators_run(f);
         case .MEMPROF; return memprof_run(f);
         case .LOWER_EXPECT; return lower_expect_run(f);
+        case .PROF_INJECT; return prof_inject_run(f);
+        case .PGO_MEMOP_OPT; return pgo_memop_opt_run(f);
         case .LOWER_CONSTANT_INTRINSICS; return lower_constant_intrinsics_run(f);
         case .INFER_ALIGNMENT; return infer_alignment_run(f);
         case .DIV_REM_PAIRS; return div_rem_pairs_run(f);
@@ -1710,6 +1720,7 @@ opt_main :: () {
     if root >= 0 run_module_pm(root);
     // NewPMDriver.cpp: the VerifierPass at the end of the pipeline (unless -disable-verify)
     if !opt_disable_verify run_verifier_pass_module();
+    if ctx_has_errors exit(1);   // NewPMDriver: a pass reported an error via LLVMContext::emitError
     if dbgify_opts.enable check_debugify_metadata("", "CheckModuleDebugify");
     defer aa_eval_print_reports();
     tp_report();

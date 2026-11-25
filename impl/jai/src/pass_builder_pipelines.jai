@@ -463,7 +463,7 @@ build_module_inliner_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
 // ---------------------------------------------------------------- module pipelines
 
 build_module_simplification_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
-    if pb_phase == .THIN_POST_LINK pb_add(mpm, last, "pgo-icall-prom");   // PGOIndirectCallPromotion(InLTO = true)
+    if pb_phase == .THIN_POST_LINK { n := pb_add(mpm, last, "pgo-icall-prom"); pipeline.nodes[n].in_lto = true; }   // PGOIndirectCallPromotion(InLTO = true, HasSampleProfile)
     if pb_phase != .THIN_POST_LINK {
     pb_add(mpm, last, "inferattrs");
     pb_add(mpm, last, "coro-early");
@@ -711,7 +711,7 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
         fa := pb_function_adaptor(mpm, *last, pto.eagerly_invalidate_analyses);
         fl: s32 = -1;
         pb_add(fa, *fl, "callsite-splitting");
-        pb_add(mpm, *last, "pgo-icall-prom");
+        { n := pb_add(mpm, *last, "pgo-icall-prom"); pipeline.nodes[n].in_lto = true; }   // PGOIndirectCallPromotion(InLTO = true, SampleUse)
         pb_add(mpm, *last, "cgscc(function-attrs,argpromotion,function(sroa<modify-cfg>))");
         pb_add(mpm, *last, "ipsccp");   // AllowFuncSpec = true
         pb_add(mpm, *last, "called-value-propagation");

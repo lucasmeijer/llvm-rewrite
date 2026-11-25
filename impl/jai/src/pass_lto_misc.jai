@@ -58,22 +58,6 @@ expand_variadics_run :: () -> Preserved {
     return PRESERVE_ALL;
 }
 
-pgo_icall_prom_run :: () -> Preserved {
-    prof := md_fixed("prof");
-    for f: ir.m_functions {
-        if is_declaration(f) || fn_has_fn_attr(f, .OptimizeNone) continue;
-        for i: fn_insts(f) {
-            if !is_call_base(i) continue;
-            m := get_metadata(i, prof);
-            if m == NONE || ir.mds[m].nops == 0 continue;
-            k := md_op(m, 0);
-            if k != NONE && ir.mds[k].kind == .STRING && ir.mds[k].str == "VP"
-                fatal("pgo-icall-prom: indirect call promotion from value profiles is not supported yet");
-        }
-    }
-    return PRESERVE_ALL;
-}
-
 // canonicalizeAlias
 canonicalize_alias :: (c: Value_Id, changed: *bool) -> Value_Id {
     if vkind(c) == .ALIAS {

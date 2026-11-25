@@ -2769,6 +2769,7 @@ INTRINSIC_ATTRS :: Intrinsic_Attrs.[
     .{"llvm.instrprof.increment.step", "nounwind", "", .["", "", "", "", ""]},
     .{"llvm.instrprof.mcdc.parameters", "nounwind", "", .["", "", ""]},
     .{"llvm.instrprof.mcdc.tvbitmap.update", "nounwind", "", .["", "", "", ""]},
+    .{"llvm.instrprof.timestamp", "nounwind", "", .["", "", "", ""]},
     .{"llvm.instrprof.value.profile", "nounwind", "", .["", "", "", "", ""]},
     .{"llvm.invariant.end", "nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)", "", .["", "immarg", "captures(none)"]},
     .{"llvm.invariant.start", "nocallback nofree nosync nounwind willreturn memory(argmem: readwrite)", "", .["immarg", "captures(none)"]},

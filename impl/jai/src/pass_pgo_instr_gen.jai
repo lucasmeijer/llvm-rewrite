@@ -6,7 +6,7 @@
 // skipPGOGen, renameComdatFunction), llvm/include/llvm/Transforms/Instrumentation/CFGMST.h,
 // llvm/lib/Transforms/Instrumentation/ValueProfileCollector.cpp + ValueProfilePlugins.inc and
 // llvm/include/llvm/Analysis/IndirectCallVisitor.h (findIndirectCalls). JamCRC from llvm/lib/Support/CRC.cpp.
-// Not ported (loud): -pgo-block-coverage (BlockCoverageInference.cpp), indirectbr critical edges
+// -pgo-block-coverage: block_coverage_inference.jai. Not ported (loud): indirectbr critical edges
 // (SplitIndirectBrCriticalEdges with IgnoreBlocksWithoutPHI = false), vtable value profiling.
 
 pgo_gen_cl: struct {
@@ -265,6 +265,8 @@ Func_Pgo :: struct {
     func_name_var: Value_Id = NONE;
     function_hash: u64;
     mst: Cfg_Mst;
+    has_bci: bool;   // std::optional<BlockCoverageInference> BCI (HasSingleByteCoverage)
+    bci: Bci;
 }
 
 // SelectInstVisitor in VM_counting mode
@@ -299,8 +301,8 @@ fpi_compute_cfg_hash :: (fp: *Func_Pgo) {
     jch = upd(jch, fp.num_selects);
     jch = upd(jch, cast(u64) fp.value_sites[IPVK_INDIRECT_CALL_TARGET].count);
     jch = upd(jch, cast(u64) fp.value_sites[IPVK_MEMOP_SIZE].count);
-    if pgo_gen_cl.block_coverage fatal("pgo-instr-gen: -pgo-block-coverage (BlockCoverageInference) is not supported");
-    jch = upd(jch, cast(u64) fp.mst.edges.count);
+    if fp.has_bci jch = upd(jch, bci_instrumented_blocks_hash(*fp.bci));
+    else jch = upd(jch, cast(u64) fp.mst.edges.count);
     fp.function_hash = ((cast(u64) jch) << 28) + jc;
     fp.function_hash &= 0x0FFF_FFFF_FFFF_FFFF;   // NamedInstrProfRecord::FUNC_HASH_MASK
     if fp.is_cs fp.function_hash |= cast(u64) 1 << 60;   // setCSFlagInHash
@@ -350,6 +352,7 @@ fpi_init :: (fp: *Func_Pgo, f: Value_Id, members: *Table(s32, [..] Value_Id), cr
     fp.mst.instrument_func_entry = instrument_func_entry;
     fp.mst.instrument_loop_entries = instrument_loop_entries;
     cfg_mst_build(*fp.mst);
+    if pgo_gen_cl.block_coverage { fp.has_bci = true; bci_init(*fp.bci, f, instrument_func_entry); }
     fp.num_selects = pgo_count_selects(f);
     vp_collect(f, IPVK_MEMOP_SIZE, *fp.value_sites[IPVK_MEMOP_SIZE]);
     if !is_cs {
@@ -390,6 +393,10 @@ fpi_get_instr_bb :: (fp: *Func_Pgo, ei: s64) -> Value_Id {
 
 // getInstrumentBBs
 fpi_get_instrument_bbs :: (fp: *Func_Pgo, out: *[..] Value_Id) {
+    if fp.has_bci {
+        for bb: fn_blocks(fp.f) if bci_should_instrument_block(*fp.bci, bb) array_add(out, bb);
+        return;
+    }
     n := fp.mst.edges.count;   // the edge list is snapshotted: edges added while splitting are not visited
     for k: 0..n-1 {
         b := fpi_get_instr_bb(fp, k);
