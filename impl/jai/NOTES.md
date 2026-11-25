@@ -1892,8 +1892,11 @@ Still slow / next:
   `San_Callee` = FunctionCallee + `san_call`, `irb_alloca`, `irb_pointer_cast`, `san_takes_value` for `-opt value`
   options), `demangle.jai` (llvm::demangle subset), `stack_safety.jai` (StackSafetyGlobalInfo + StackLifetime Must),
   `pass_asan.jai`.
-- **asan** (L1.extra.sanitizers.asan): 146/151 exit RUN lines identical; the rest need win-eh-prepare,
-  require<basic-aa> or coro-early/coro-cleanup (not sanitizer code). Sweeps, 0 differs / 0 bad-ir: `asan` whole
+- **asan** (L1.extra.sanitizers.asan): complete (all 93 opt checks). `win-eh-prepare` (pass_win_eh_prepare.jai, the IR
+  part of CodeGen/WinEHPrepare.cpp; no EH state numbering) and `require<basic-aa>` were the last two; CodeGen/WinEH's
+  6 opt tests are imported and identical, `win-eh-prepare` sweeps 0 differs (plain, --with-test-flags,
+  -disable-cleanups). cloneCommonBlocks walks its ValueToValueMapTy in pointer order: when SSAUpdater PHIs are made
+  for two cloned values (named, or in one block) we fail loudly. Sweeps, 0 differs / 0 bad-ir: `asan` whole
   corpus; `forceattrs,asan -force-attribute=sanitize_address` (instruments every function: the real test of the
   function pass) plain, --with-test-flags, with -asan-use-after-scope/-asan-use-stack-safety=0, with
   -asan-instrumentation-with-call-threshold=0/-asan-use-after-return=always/-asan-stack-dynamic-alloca=0, with
@@ -1984,7 +1987,7 @@ Still slow / next:
   2. L1.extra.instrumentation.coverage leftovers: Instrumentor (IPO/Instrumentor*.cpp, ~3000 lines with the JSON
      config; 4 tests, all `-passes=instrumentor` with the default config) and GCOVProfiling (1 test, modules.ll:
      a split-DWARF CU, so nothing is emitted; a faithful port also writes .gcno files).
-  3. asan: the 3 RUN lines that need win-eh-prepare / require<basic-aa>; msan: ARM SIMD handlers.
+  3. msan: ARM SIMD handlers.
   None of these passes is timed by a tests/perf benchmark.
 
 ## Coroutines (L1.extra.coroutines 298/310: roundtrip 155/155, opt 143/155; /root/jai_coro)

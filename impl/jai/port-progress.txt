@@ -252,6 +252,7 @@ lib/IR/ConvergenceVerifier.cpp 1.0  # with GenericConvergenceVerifierImpl.h
 lib/Transforms/Scalar/NewGVN.cpp 0.93  # jai_newgvn: all of NewGVN; not the assertion-only verify* functions, statistics, debug printing
 lib/Transforms/Scalar/GVNSink.cpp 0.95  # jai_newgvn: complete except the address order of InstructionUseExpr users (fails loudly when it decides)
 lib/Transforms/Scalar/GVNHoist.cpp 0.97  # jai_newgvn: all but rank() and the (output-neutral) rank sort of the VNs
+lib/CodeGen/WinEHPrepare.cpp 0.45  # the IR preparation opt runs; not the EH state numbering (calculate*StateNumbers, only for MachineFunctions)
 lib/Transforms/Instrumentation/AddressSanitizer.cpp 0.9  # no AMDGPU paths, no Android ifunc shadow, no LLVM_DEBUG
 lib/Analysis/StackSafetyAnalysis.cpp 0.7  # no ModuleSummaryIndex (ThinLTO) paths, no printers / param summaries
 lib/Transforms/Utils/ModuleUtils.cpp 0.55  # appendTo*, ctors, kcfi; not transformGlobal*, removeFromUsedLists, embedBuffer, lowerGlobalIFunc

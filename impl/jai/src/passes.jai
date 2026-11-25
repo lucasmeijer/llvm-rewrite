@@ -327,7 +327,7 @@ Pass_Kind :: enum u8 {
     // EarlyCSE (pass_early_cse.jai)
     EARLY_CSE;
     // sanitizers (pass_asan.jai, pass_msan.jai, ...)
-    ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN; TYSAN; NSAN; SANCOV; SANMD; JMC; HWASAN;
+    ASAN; MSAN; TSAN; TSAN_MODULE; RTSAN; TYSAN; NSAN; SANCOV; SANMD; JMC; HWASAN; WIN_EH_PREPARE;
     // SCCP, IPSCCP (pass_sccp.jai)
     SCCP; IPSCCP; PRINT_PREDICATE_INFO;
     // MergeICmps (pass_mergeicmps.jai), DFAJumpThreading (pass_dfa_jump_threading.jai)
@@ -457,6 +457,8 @@ PASS_TABLE :: Pass_Info.[
     .{"require<target-ir>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     // AAManager: BasicAA requests the AssumptionCache, DominatorTree and TLI (no other state)
     .{"require<aa>", .FUNCTION, .REQUIRE, true, .DOMTREE},
+    // BasicAA alone (BasicAA.cpp BasicAA::run): the same AssumptionCache / DominatorTree / TLI requests, no state
+    .{"require<basic-aa>", .FUNCTION, .REQUIRE, true, .DOMTREE},
     // OptimizationRemarkEmitterAnalysis: computes BlockFrequencyInfo only when remarks are enabled
     .{"require<opt-remark-emit>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<target-lib-info>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
@@ -598,7 +600,8 @@ PASS_TABLE :: Pass_Info.[
     .{"sancov-module", .MODULE, .SANCOV, true, .DOMTREE},
     .{"sanmd-module", .MODULE, .SANMD, true, .DOMTREE},
     .{"jmc-instrumenter", .MODULE, .JMC, false, .DOMTREE},
-    .{"hwasan", .MODULE, .HWASAN, true, .DOMTREE},   // also hwasan<kernel;recover>
+    .{"hwasan", .MODULE, .HWASAN, true, .DOMTREE},
+    .{"win-eh-prepare", .FUNCTION, .WIN_EH_PREPARE, true, .DOMTREE},   // RequiredPassInfoMixin   // also hwasan<kernel;recover>
     // AAManager keeps no state here (aa_results_for builds the result per query)
     .{"invalidate<aa>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
     .{"require<should-not-run-function-passes>", .FUNCTION, .REQUIRE, true, .SHOULD_NOT_RUN},
@@ -1197,6 +1200,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if sanmd_parse_cl_opt(name, value, has_value) return true;   // pass_sanmd.jai (-sanitizer-metadata-*)
     if hwasan_parse_cl_opt(name, value, has_value) return true;  // pass_hwasan.jai (-hwasan-*)
     if irce_parse_cl_opt(name, value, has_value) return true;   // pass_irce.jai (-irce-*)
+    if weh_parse_cl_opt(name, value, has_value) return true;   // pass_win_eh_prepare.jai
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
     for cl_opts() {
         if it.name != name continue;
@@ -1501,6 +1505,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .INJECT_TLI_MAPPINGS; return inject_tli_mappings_run(f);
         case .EE_INSTRUMENT; return ee_instrument_run(f, node.name);
         case .TSAN; return tsan_run(f);
+        case .WIN_EH_PREPARE; return win_eh_prepare_run(f);
         case .LOOP_SINK; return loop_sink_run(f);
         case .TRANSFORM_WARNING; return transform_warning_run(f);
         case .DROP_UNNECESSARY_ASSUMES; return drop_unnecessary_assumes_run(f, node.name);

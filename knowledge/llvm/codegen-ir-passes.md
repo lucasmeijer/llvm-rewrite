@@ -99,3 +99,17 @@ diffing our output against `llc -stop-before=x86-isel` (the `::isel-ir` check) o
 - **CodeGenPrepare makeBitReverse** fires only when ISD::BITREVERSE is legal or custom for the instruction's own
   (simple) integer type: on x86 i8..i64 with GFNI, i128 with SSSE3 (X86ISelLowering.cpp constructor). It reuses
   `recognizeBSwapOrBitReverseIdiom(I, false, true)` from Local.cpp.
+
+## WinEHPrepare (`opt -passes=win-eh-prepare`)
+
+- Only functions with a scoped personality (MSVC C++/SEH, CoreCLR, Wasm C++) are touched. The IR work is
+  removeUnreachableBlocks, colorEHFunclets, cloneCommonBlocks, demotePHIsOnFunclets, removeImplausibleInstructions,
+  cleanupPreparedFunclets; the EH state numbering only fills WinEHFuncInfo for the MachineFunction.
+- cloneCommonBlocks rewrites out-of-funclet uses of every cloned instruction by iterating its `ValueToValueMapTy`
+  (a pointer-keyed DenseMap), one SSAUpdater per value. The output depends on that heap order only when PHIs are
+  made for two values (the PHI name suffixes share the function's uniquing counter; PHIs go to the front of their
+  block). CodeGen/WinEH/wineh-cloning.ll has several cloned values with uses outside, but none needing PHIs from
+  two values. Verified: the 6 imported CodeGen/WinEH opt tests match the oracle (jai, pass_win_eh_prepare.jai).
+- Spill slots (`.wineh.spillslot`) go at `F.getEntryBlock().begin()` (head bit set: before the block's leading debug
+  records), with the preferred alignment; `.wineh.reload` loads and the stores have the ABI alignment and no
+  debug location.
