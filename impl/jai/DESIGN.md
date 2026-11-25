@@ -157,6 +157,8 @@ src/
   objcarc.jai, pass_objcarc.jai   ObjC ARC: ARCInstKind, ProvenanceAnalysis (`Arc_Pa`), DependencyAnalysis, PtrState
                   (`Arc_Ptr_State`, BlotMapVector = `Arc_Ptr_Map`), objc-arc-aa (`Aa_Kind.OBJC_ARC`); the objc-arc,
                   objc-arc-contract, objc-arc-expand and pa-eval passes
+  pass_lower_matrix.jai  LowerMatrixIntrinsics (`Lm` state; ShapeMap / Inst2ColumnMatrix as Tables, MatrixTy =
+                  `Lm_Mat`, TileInfo = `Lm_Tile_Info`)
   pass_rs4gc.jai, pass_place_safepoints.jai, safepoint_ir_verifier.jai   RewriteStatepointsForGC (MapVector /
                   SetVector = `Rs_Map` / `Rs_Set`, BDVState fixpoint in `Bdv_Map`), PlaceSafepoints,
                   verify<safepoint-ir>

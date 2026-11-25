@@ -335,3 +335,4 @@ lib/Transforms/Instrumentation/PGOCtxProfLowering.cpp 0.95  # all but remarks
 lib/Analysis/MemoryProfileInfo.cpp 0.7  # no addCallStack from profile data callers beyond the trie, no remarks / hinted-size messages
 lib/Transforms/IPO/SampleContextTracker.cpp 0.95  # all but dumps / createContextLessProfileMap
 lib/Analysis/ReplayInlineAdvisor.cpp 0.9  # no original advisor, no remarks
+lib/Transforms/Scalar/LowerMatrixIntrinsics.cpp 0.82  # all but the remarks (RemarkGenerator, ExprLinearizer, OpInfoTy counters)

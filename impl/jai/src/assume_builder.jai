@@ -56,6 +56,8 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     // the CGSCC infrastructure and the inliners call salvageKnowledge only through InlineFunction (ported)
     if kind == .CGSCC_ADAPTOR || kind == .CGSCC_PM || kind == .CGSCC_FN_ADAPTOR || kind == .DEVIRT || kind == .NO_OP_CGSCC ||
        kind == .INLINE || kind == .ALWAYS_INLINE || kind == .MODULE_INLINE || kind == .INLINER_WRAPPER || kind == .INLINER_WRAPPER_PM return;
+    // LowerMatrixIntrinsics.cpp and MatrixUtils.cpp never call salvageKnowledge
+    if kind == .LOWER_MATRIX_INTRINSICS return;
     fatal("-enable-knowledge-retention is not supported with pass '%' yet", name);
 }
 

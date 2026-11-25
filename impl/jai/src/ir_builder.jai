@@ -10,6 +10,7 @@ Irb :: struct {
     head: bool;            // the insertion iterator has the head bit (insert before pt's debug records)
     dbg: Md_Id = NONE;     // StoredDL
     prefix: string;
+    fmf: u32;              // FastMathFlags set with setFastMathFlags (setFPAttrs on every FPMathOperator created)
 }
 
 // SetInsertPoint(Instruction *I)
@@ -46,6 +47,7 @@ irb_insert :: (b: *Irb, i: Value_Id, name: string = "") -> Value_Id {
     d := b.dbg;
     if d == NONE d = get_metadata(i, 0);
     set_metadata(i, 0, d);
+    if b.fmf && is_fp_math_inst(i) inst(i).flags |= b.fmf << FMF_SHIFT;
     return i;
 }
 

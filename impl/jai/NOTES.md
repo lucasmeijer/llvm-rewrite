@@ -2564,3 +2564,29 @@ Facts that decide output: knowledge/llvm/loop-extras.md.
   global-merge<max-offset=100|1000;merge-const;merge-const-aggressive|64;...> --with-test-flags 13555, also with
   -global-merge-group-by-use=false / -global-merge-ignore-single-use=false 10860/10860; expand-ir-insts with
   -expand-div-rem-bits=0 -expand-fp-convert-bits=0 (x86_64 and i686) 10850/10850, --with-test-flags 5191.
+
+
+## LowerMatrixIntrinsics (L1.extra.lower-matrix COMPLETE 98/98; /root/jai_matrix)
+
+- `pass_lower_matrix.jai`: `lower-matrix-intrinsics`, `lower-matrix-intrinsics<>`, `lower-matrix-intrinsics<minimal>`
+  (+ TileInfo from MatrixUtils.cpp), and `-enable-matrix` in the O1-3 pipelines (`lower-matrix-intrinsics,early-cse`
+  after lower-constant-intrinsics) and at -O0 (`function(lower-matrix-intrinsics<minimal>)`). All the pass's cl::opts
+  are parsed (`lm_cl`). Remarks (RemarkGenerator, ExprLinearizer, the OpInfoTy counters that only feed them) are not
+  ported: our opt rejects -pass-remarks*. `-matrix-print-after-transpose-opt` fails loudly.
+- `Irb.fmf` (ir_builder.jai) is IRBuilder::setFastMathFlags: irb_insert ORs it into every FPMathOperator it inserts
+  (what setFPAttrs does in CreateBinOp/CreateFNeg/CreateCast/CreateCall/CreateSelect/CreatePHI). 0 for every other
+  pass, so nothing else changed. The pass relies on the builder keeping the flags after emitMatrixMultiply.
+- The release-build LLVM we compare with has assertions off: `llvm.matrix.column.major.load/store` with
+  `-matrix-default-layout=row-major` is lowered (row-major), not rejected; we do the same.
+- Verified beyond the corpus: the 22 skipped LLVM tests of the directory (aarch64 triple / remarks / asserts) with
+  their RUN lines and the triple rewritten to x86_64 or removed: all identical (tiled loop nests, alias checks with
+  copies, dot products, remainder splitting, `<minimal>`); and every LLVM test file under 4 targets (none, x86_64,
+  +avx2, +avx512f) x 7 argument sets (default, row-major, force-fuse, loops threshold 0, `-O2 -enable-matrix`,
+  `-O0 -enable-matrix`, `<minimal>`): 1976 identical, 0 differs, 12 where LLVM itself crashes (`tools/lower_matrix_xcheck.sh`).
+- Sweeps (2026-11): `lower-matrix-intrinsics` 10923/10923 identical, `<minimal>` 10923/10923, `--with-test-flags`
+  13648 identical + 105 loud (other passes' flags), `-O2 -enable-matrix` 10842 identical + 71 loud (all pre-existing
+  -O2 gaps), `-O0 -enable-matrix` 10920 identical, `--with-test-flags -O2 -enable-matrix` 13530 identical + 204 loud;
+  0 differs / 0 bad-ir everywhere.
+- Compile time: a chain of 4x4 double multiplies + fadds scales linearly (500/2000/8000 ops: 0.7/2.8/11.3 s with the
+  x64 build, LLVM 0.3/1.4/6.9 s). Sinking transposes through deep add/multiply trees is exponential in LLVM too
+  (it duplicates subtrees); both get killed on a 200-deep (A*A)^t + A*A chain. No tests/perf shape uses the pass.

@@ -664,7 +664,7 @@ build_module_optimization_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     if pb_cl.enable_loop_versioning_licm pb_unsupported("loop-versioning-licm (-enable-loop-versioning-licm)");
     pb_add(fa, *l, "float2int");
     pb_add(fa, *l, "lower-constant-intrinsics");
-    if pb_cl.enable_matrix pb_unsupported("lower-matrix-intrinsics (-enable-matrix)");
+    if pb_cl.enable_matrix { pb_add(fa, *l, "lower-matrix-intrinsics"); pb_add(fa, *l, "early-cse"); }
     if pb_cl.enable_chr && level.speed == 3 pb_add(fa, *l, "chr");
     {
         ll: s32 = -1;
@@ -709,7 +709,7 @@ build_o0_default_pipeline :: (mpm: s32, last: *s32) {
     n := pb_add(mpm, last, "always-inline");   // AlwaysInlinerPass(InsertLifetimeIntrinsics = false)
     pipeline.nodes[n].no_lifetime = true;
     if pto.merge_functions pb_add(mpm, last, "mergefunc");
-    if pb_cl.enable_matrix pb_unsupported("lower-matrix-intrinsics (-enable-matrix)");
+    if pb_cl.enable_matrix pb_add(mpm, last, "function(lower-matrix-intrinsics<minimal>)");
     // buildCoroWrapper
     cw := pb_node(mpm, last, .CORO_COND, "coro-cond");
     pipeline.nodes[cw].info = lookup_pass("coro-cond");

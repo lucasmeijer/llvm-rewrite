@@ -233,6 +233,7 @@
 #load "region_info.jai";
 #load "pass_structurizecfg.jai";
 #load "pass_scalarizer.jai";
+#load "pass_lower_matrix.jai";
 #load "pass_scalarize_masked_mem_intrin.jai";
 #load "pass_utility_misc.jai";
 #load "pass_utility_module.jai";

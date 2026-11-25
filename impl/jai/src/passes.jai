@@ -290,7 +290,7 @@ Pass_Kind :: enum u16 {
     // L1.extra loop passes (pass_irce.jai, ...)
     IRCE;
     // L1.extra.cfg-structurize / scalarizer / lower-matrix / utility / analysis-misc (jai_extras_b)
-    LOWER_SWITCH; UNIFY_LOOP_EXITS; FIX_IRREDUCIBLE; STRUCTURIZECFG; PRINT_REGIONS; SCALARIZER; SCALARIZE_MASKED_MEM_INTRIN_OPT;
+    LOWER_SWITCH; UNIFY_LOOP_EXITS; FIX_IRREDUCIBLE; STRUCTURIZECFG; PRINT_REGIONS; SCALARIZER; SCALARIZE_MASKED_MEM_INTRIN_OPT; LOWER_MATRIX_INTRINSICS;
     // guards (guard_utils.jai, pass_loop_predication.jai, pass_guard_widening.jai)
     LOWER_GUARD_INTRINSIC; LOWER_WIDENABLE_CONDITION; GUARD_WIDENING; GUARD_WIDENING_LOOP; LOOP_PREDICATION;
     // pass_loop_flatten.jai, pass_loop_fuse.jai
@@ -532,6 +532,9 @@ PASS_TABLE :: Pass_Info.[
     .{"structurizecfg<skip-uniform-regions>", .FUNCTION, .STRUCTURIZECFG, true, .DOMTREE},
     .{"print<regions>", .FUNCTION, .PRINT_REGIONS, true, .DOMTREE},
     .{"scalarizer", .FUNCTION, .SCALARIZER, false, .DOMTREE},
+    .{"lower-matrix-intrinsics", .FUNCTION, .LOWER_MATRIX_INTRINSICS, false, .DOMTREE},
+    .{"lower-matrix-intrinsics<>", .FUNCTION, .LOWER_MATRIX_INTRINSICS, false, .DOMTREE},
+    .{"lower-matrix-intrinsics<minimal>", .FUNCTION, .LOWER_MATRIX_INTRINSICS, false, .DOMTREE},
     .{"scalarize-masked-mem-intrin", .FUNCTION, .SCALARIZE_MASKED_MEM_INTRIN_OPT, false, .DOMTREE},
     .{"lower-guard-intrinsic", .FUNCTION, .LOWER_GUARD_INTRINSIC, false, .DOMTREE},
     .{"lower-widenable-condition", .FUNCTION, .LOWER_WIDENABLE_CONDITION, false, .DOMTREE},
@@ -1331,7 +1334,8 @@ parse_cl_opt :: (arg: string) -> bool {
     if ipo_parse_cl_opt(name, value, has_value) return true;   // cgscc_pm.jai, pass_function_attrs.jai, inliner
     if globals_parse_cl_opt(name, value, has_value) return true;   // pass_global_opt.jai, internalize, globaldce, ...
     if scalar_misc_parse_cl_opt(name, value, has_value) return true;   // scalar_misc_cl.jai (L1.scalar-misc passes)
-    if extras_b_parse_cl_opt(name, value, has_value) return true;   // extras_b_cl.jai (jai_extras_b's Layer-1b passes)
+    if extras_b_parse_cl_opt(name, value, has_value) return true;
+    if lm_parse_cl_opt(name, value, has_value) return true;   // pass_lower_matrix.jai   // extras_b_cl.jai (jai_extras_b's Layer-1b passes)
     if extras_d_parse_cl_opt(name, value, has_value) return true;   // extras_d_cl.jai (jai_extras_d's Layer-1b passes)
     if pb_parse_cl_opt(name, value, has_value) return true;
     if gap_parse_cl_opt(name, value, has_value) return true;   // registry_gaps.jai
@@ -1801,6 +1805,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .STRUCTURIZECFG; return structurizecfg_run(f, node);
         case .PRINT_REGIONS; return print_regions_run(f);
         case .SCALARIZER; return scalarizer_run(f, node);
+        case .LOWER_MATRIX_INTRINSICS; return lower_matrix_intrinsics_run(f, node);
         case .SCALARIZE_MASKED_MEM_INTRIN_OPT; return scalarize_masked_mem_intrin_opt_run(f);
         case .LOWER_GUARD_INTRINSIC; return lower_guard_intrinsic_run(f);
         case .LOWER_WIDENABLE_CONDITION; return lower_widenable_condition_run(f);
