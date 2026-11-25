@@ -227,8 +227,9 @@ sp_fn_str_attr :: (f: Value_Id, key: string) -> string {
     if a return a.val;
     return "";
 }
+// isa<IntrinsicInst>: only a CallInst (not an invoke or callbr) whose callee is an intrinsic
 sp_is_intrinsic_inst :: (i: Value_Id) -> bool {
-    if !is_call_base(i) return false;
+    if inst_op(i) != .CALL return false;
     f := call_called_function(i);
     return f != NONE && begins_with(vname(f), "llvm.");
 }
