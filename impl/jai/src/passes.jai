@@ -303,7 +303,7 @@ Pass_Kind :: enum u16 {
     INSTNAMER; STRIP_CONVERGENCE_INTRINSICS; REG2MEM; STRIP_SYMBOLS; STRIP_NONDEBUG; STRIP_DEAD_CG_PROFILE; METARENAMER; LOWER_GLOBAL_DTORS; LOWER_IFUNC;
     FATLTO_CLEANUP; HIPSTDPAR_INTERPOSE_ALLOC; HIPSTDPAR_MATH_FIXUP; NORMALIZE; STRIP_DEAD_DEBUG_INFO;
     PRINT_HASH_RECOGNIZE; PRINT_STRUCTURAL_HASH; PRINT_PROFILE_SUMMARY; PRINT_STACK_SAFETY_LOCAL; PRINT_STACK_SAFETY; LINT; PRINT_STACK_LIFETIME; PRINT_FUNC_PROPERTIES; PRINT_IR2VEC; PRINT_IR2VEC_VOCAB; CTX_PROF_FLATTEN;
-    LOAD_STORE_VECTORIZER; LOWER_ATOMIC; LOWER_INVOKE; INDIRECTBR_EXPAND; INTERLEAVED_ACCESS; INFER_ADDRESS_SPACES; GLOBAL_MERGE; EXPAND_IR_INSTS;
+    LOAD_STORE_VECTORIZER; LOWER_ATOMIC; LOWER_INVOKE; INDIRECTBR_EXPAND; INTERLEAVED_ACCESS; INFER_ADDRESS_SPACES; GLOBAL_MERGE; EXPAND_IR_INSTS; SANDBOX_VECTORIZER;
     // Reassociate (pass_reassociate.jai)
     REASSOCIATE;
     // ConstraintElimination (pass_constraint_elimination.jai)
@@ -587,6 +587,7 @@ PASS_TABLE :: Pass_Info.[
     .{"hipstdpar-math-fixup", .MODULE, .HIPSTDPAR_MATH_FIXUP, true, .DOMTREE},
     .{"infer-address-spaces", .FUNCTION, .INFER_ADDRESS_SPACES, false, .DOMTREE},
     .{"global-merge", .MODULE, .GLOBAL_MERGE, false, .DOMTREE},   // also global-merge<...>
+    .{"sandbox-vectorizer", .FUNCTION, .SANDBOX_VECTORIZER, false, .DOMTREE},
     .{"expand-ir-insts", .FUNCTION, .EXPAND_IR_INSTS, true, .DOMTREE},   // RequiredPassInfoMixin; also expand-ir-insts<O0..O3>
     // DominanceFrontierAnalysis: no pass we have consumes it; computing it changes nothing
     .{"require<domfrontier>", .FUNCTION, .NO_OP_FUNCTION, true, .DOMTREE},
@@ -1832,6 +1833,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .PRINT_STACK_LIFETIME; return print_stack_lifetime_run(f, node.name == "print<stack-lifetime><must>");
         case .INFER_ADDRESS_SPACES; return infer_address_spaces_run(f);
         case .EXPAND_IR_INSTS; return expand_ir_insts_run(f);
+        case .SANDBOX_VECTORIZER; return sandbox_vectorizer_run(f);
     }
     fatal("internal: '%' is not a function pass", node.name);
     return PRESERVE_NONE;

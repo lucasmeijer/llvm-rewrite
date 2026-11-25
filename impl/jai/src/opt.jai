@@ -266,6 +266,7 @@
 #load "pass_infer_address_spaces.jai";
 #load "pass_global_merge.jai";
 #load "pass_expand_ir_insts.jai";
+#load "sandbox_vectorizer.jai";
 #load "print_uselistorder.jai";
 #load "alias_set_tracker.jai";
 #load "pass_licm.jai";

@@ -52,12 +52,12 @@ knowledge_retention_check :: (kind: Pass_Kind, name: string) {
     // KCFI.cpp, LowerAllowCheckPass.cpp, BoundsChecking.cpp, AllocToken.cpp, StackProtector.cpp never call salvageKnowledge
     // (SafeStack.cpp only through InlineFunction, which fails loudly under the flag)
     if kind == .KCFI || kind == .LOWER_ALLOW_CHECK || kind == .BOUNDS_CHECKING || kind == .ALLOC_TOKEN || kind == .STACK_PROTECTOR || kind == .SAFE_STACK return;
-    if kind == .LOAD_STORE_VECTORIZER || kind == .CONSTHOIST || kind == .LOWER_ATOMIC || kind == .LOWER_INVOKE || kind == .INDIRECTBR_EXPAND || kind == .INTERLEAVED_ACCESS || kind == .INFER_ADDRESS_SPACES || kind == .GLOBAL_MERGE || kind == .EXPAND_IR_INSTS return;
     // the CGSCC infrastructure and the inliners call salvageKnowledge only through InlineFunction (ported)
     if kind == .CGSCC_ADAPTOR || kind == .CGSCC_PM || kind == .CGSCC_FN_ADAPTOR || kind == .DEVIRT || kind == .NO_OP_CGSCC ||
        kind == .INLINE || kind == .ALWAYS_INLINE || kind == .MODULE_INLINE || kind == .INLINER_WRAPPER || kind == .INLINER_WRAPPER_PM return;
     // LowerMatrixIntrinsics.cpp and MatrixUtils.cpp never call salvageKnowledge
     if kind == .LOWER_MATRIX_INTRINSICS return;
+    if kind == .LOAD_STORE_VECTORIZER || kind == .CONSTHOIST || kind == .LOWER_ATOMIC || kind == .LOWER_INVOKE || kind == .INDIRECTBR_EXPAND || kind == .INTERLEAVED_ACCESS || kind == .INFER_ADDRESS_SPACES || kind == .GLOBAL_MERGE || kind == .EXPAND_IR_INSTS || kind == .SANDBOX_VECTORIZER return;
     fatal("-enable-knowledge-retention is not supported with pass '%' yet", name);
 }
 

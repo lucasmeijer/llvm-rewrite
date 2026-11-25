@@ -343,3 +343,8 @@ lib/Transforms/Scalar/LowerMatrixIntrinsics.cpp 0.82  # all but the remarks (Rem
 # registry gaps (jai_registry_gap, 2026-11)
 lib/Analysis/DominanceFrontier.cpp 0.9  # print<domfrontier>: the std::map<BasicBlock *> print order fails loudly
 lib/Analysis/InstCount.cpp 0.3  # instcount: statistics only, -stats is not accepted
+lib/Transforms/Vectorize/SandboxVectorizer/SandboxVectorizer.cpp 0.9  # all but the sandboxir::Context it builds
+lib/Transforms/Vectorize/SandboxVectorizer/SeedCollector.cpp 0.3  # seed grouping only; no getSlice / bundle sorting
+lib/Transforms/Vectorize/SandboxVectorizer/Passes/SeedCollection.cpp 0.4  # up to the first seed slice
+lib/SandboxIR/Region.cpp 0.6  # addRaw, setAux, createRegionsFromMD; no create/erase callbacks
+lib/SandboxIR/PassManager.cpp 1

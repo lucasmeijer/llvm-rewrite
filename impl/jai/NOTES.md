@@ -2739,3 +2739,21 @@ SROA dbg_assign, 3 Panics in the Attributor tests and an LVI assertion on SROA/s
 pipeline's own code); dwarf-eh-prepare with -mtriple (and -codegen-opt-level=2); lower-emutls; print<inline-cost>
 (1 differs: LoopVectorize/X86/int128_no_gather.ll, LLVM's '+mpx' feature warning that our subtarget creation doesn't
 print); print<module-debuginfo> (7 differs fixed: M.debug_compile_units() skips NoDebug CUs), print<uniformity> (int128_no_gather.ll again), x86-partial-reduction, the no-op group, gc / sjlj.
+## SandboxVectorizer (L1.extra.sandbox-vectorizer 31/48: roundtrip 24/24, opt 7/24; /root/jai_extras_d)
+
+- `sandbox_vectorizer.jai`: the framework (see DESIGN.md "SandboxVectorizer"). Passing: boilerplate,
+  default_pass_pipeline, user_pass_pipeline, region_pass_arg, regions-from-bbs, regions-from-metadata,
+  X86/no_implicit_float. The other 17 fail loudly: 16 reach a seed slice (bottom-up-vec / load-store-vec on a seed
+  bundle of >= 2 seeds), 1 runs pack-reuse.
+- Remaining work, in LLVM's layering: Tracker (change log + revert/accept), the Context callbacks, DependencyGraph
+  (MemDGNode chains, AA queries via BatchAA, the Interval of instructions), Scheduler (ReadyList, SchedBundles,
+  trySchedule), Legality (LegalityAnalysis::canVectorize with the Widen / Pack / DiamondReuse / ... results),
+  InstrMaps, SeedBundle::getSlice and MemSeedBundle's SCEV-offset sort, BottomUpVec (vectorizeRec,
+  createVectorInstr/createPack/createShuffle, tryEraseDeadInstrs, emitVectors), RegionWithScore (TTI cost deltas
+  for tr-accept-or-revert), PackReuse, LoadStoreVec.
+- Address order to watch: BottomUpVec::tryEraseDeadInstrs groups dead candidates in a `DenseMap<BasicBlock *, ...>`
+  and erases block by block; when a candidate in one block uses a candidate in another, the result depends on that
+  order (must fail loudly or be proven impossible).
+- Sweeps: default pipeline --with-test-flags 12087 identical, 0 differs, 1663 loud (seed slices);
+  `regions-from-bbs<print-instruction-count,null>` 10921/10921; `regions-from-metadata<print-instruction-count>`
+  10922/10922.

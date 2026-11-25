@@ -14,6 +14,7 @@ extras_d_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool 
         case "global-merge-group-by-use"; gm_cl.group_by_use = smisc_bool(name, value, has_value);
         case "global-merge-ignore-single-use"; gm_cl.ignore_single_use = smisc_bool(name, value, has_value);
         case;
+            if sbv_parse_cl_opt(name, value, has_value) return true;
             if gm_parse_legacy_only(name) return true;   // read only by the legacy GlobalMerge pass
             return false;
     }

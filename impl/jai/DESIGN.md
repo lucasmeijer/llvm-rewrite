@@ -806,3 +806,25 @@ IRMover uses. The world is the LLVMContext; modules differ only in their module-
 - The mapper's state (two value maps for the two mapping contexts, MD maps, the LIFO worklist of global initializers /
   appending variables / aliases / function bodies, flushed after each top-level map call) and the IRMover state
   that lives across files (IdentifiedStructTypeSet, SharedMDs, NamedMDNodes) are in the global `lk`.
+
+### SandboxVectorizer (sandbox_vectorizer.jai)
+
+LLVM's SandboxVectorizer runs on SandboxIR, a second class hierarchy (sandboxir::Value / User / Instruction with one
+subclass per opcode) that wraps every llvm::Value, forwards all edits to LLVM IR, records them in a Tracker for
+revert, and notifies registered callbacks (regions, the dependency graph, the scheduler, the seed collector). The
+port does not build a second object graph: SandboxIR values *are* jai Value_Ids, and the wrapper's extra state lives
+in tables.
+
+- **Passes**: one `Sbv_Pass` row per pass of the sandbox pipeline (`kind: Sbv_Kind` + name + aux argument + the
+  row indices of its region pass manager), parsed by `sbv_parse_pipeline` (PassManager::setPassPipeline's state
+  machine). runOnFunction / runOnRegion / printPipeline are `switch`es on the kind — no pass objects, no vtables.
+- **Regions**: `Sbv_Region` rows (instruction SetVector, the region's distinct `!sandboxvec` node, the Aux list).
+  Region::addRaw sets the metadata on the jai instruction directly, exactly when LLVM's does.
+- **Callbacks** (SandboxIR Context::register*Callback): to be a list of (kind, owner row) entries the IR-editing
+  helpers walk with a `switch` — needed once the transforming region passes are ported.
+- **Tracker** (to come with bottom-up-vec): a log of change rows `{kind: Sbv_Change_Kind, payload}` (set operand,
+  insert, erase, move, ...) undone in reverse with a `switch`; erased instructions stay unlinked rows until accept.
+- Ported so far: the pass manager, -sbvec-print-pass-pipeline, -sbvec-allow-files (a small POSIX-ERE matcher),
+  regions-from-bbs, regions-from-metadata, seed collection up to the first seed slice, and the non-transforming
+  region passes (null, print-instruction-count, print-region, tr-*). bottom-up-vec, load-store-vec, pack-reuse and
+  vectorizing a seed slice fail loudly.
