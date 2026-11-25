@@ -807,24 +807,32 @@ IRMover uses. The world is the LLVMContext; modules differ only in their module-
   appending variables / aliases / function bodies, flushed after each top-level map call) and the IRMover state
   that lives across files (IdentifiedStructTypeSet, SharedMDs, NamedMDNodes) are in the global `lk`.
 
-### SandboxVectorizer (sandbox_vectorizer.jai)
+### SandboxVectorizer (sandbox_vectorizer.jai, sandbox_ir.jai, sandbox_sched.jai, sandbox_passes.jai)
 
 LLVM's SandboxVectorizer runs on SandboxIR, a second class hierarchy (sandboxir::Value / User / Instruction with one
 subclass per opcode) that wraps every llvm::Value, forwards all edits to LLVM IR, records them in a Tracker for
 revert, and notifies registered callbacks (regions, the dependency graph, the scheduler, the seed collector). The
-port does not build a second object graph: SandboxIR values *are* jai Value_Ids, and the wrapper's extra state lives
-in tables.
+port does not build a second object graph: SandboxIR values *are* jai Value_Ids, uses are Use_Ids, and the wrapper's
+extra state lives in tables.
 
-- **Passes**: one `Sbv_Pass` row per pass of the sandbox pipeline (`kind: Sbv_Kind` + name + aux argument + the
-  row indices of its region pass manager), parsed by `sbv_parse_pipeline` (PassManager::setPassPipeline's state
-  machine). runOnFunction / runOnRegion / printPipeline are `switch`es on the kind — no pass objects, no vtables.
-- **Regions**: `Sbv_Region` rows (instruction SetVector, the region's distinct `!sandboxvec` node, the Aux list).
-  Region::addRaw sets the metadata on the jai instruction directly, exactly when LLVM's does.
-- **Callbacks** (SandboxIR Context::register*Callback): to be a list of (kind, owner row) entries the IR-editing
-  helpers walk with a `switch` — needed once the transforming region passes are ported.
-- **Tracker** (to come with bottom-up-vec): a log of change rows `{kind: Sbv_Change_Kind, payload}` (set operand,
-  insert, erase, move, ...) undone in reverse with a `switch`; erased instructions stay unlinked rows until accept.
-- Ported so far: the pass manager, -sbvec-print-pass-pipeline, -sbvec-allow-files (a small POSIX-ERE matcher),
-  regions-from-bbs, regions-from-metadata, seed collection up to the first seed slice, and the non-transforming
-  region passes (null, print-instruction-count, print-region, tr-*). bottom-up-vec, load-store-vec, pack-reuse and
-  vectorizing a seed slice fail loudly.
+- **Passes** (sandbox_vectorizer.jai): one `Sbv_Pass` row per pass of the sandbox pipeline (`kind: Sbv_Kind` + name +
+  aux argument + the row indices of its region pass manager + the pass object's own state, e.g. bottom-up-vec's
+  invocation counter), parsed by `sbv_parse_pipeline` (PassManager::setPassPipeline's state machine).
+  runOnFunction / runOnRegion / printPipeline are `switch`es on the kind — no pass objects, no vtables.
+- **Regions**: `Sbv_Region` rows (instruction SetVector, the region's distinct `!sandboxvec` node, Aux, the
+  ScoreBoard's before/after costs), alive from construction to destruction like LLVM's (regions-from-bbs keeps all
+  of a function's regions alive at once, so every one of them sees every created / erased instruction).
+- **Context callbacks** (sandbox_ir.jai): `Sbx_Callback` rows `{id, kind: CREATE/ERASE/MOVE/SET_USE, owner:
+  REGION/SEED_COLLECTOR/DAG/SCHEDULER, owner row}` in registration order (LLVM's MapVector by CallbackID); running
+  them is a `switch` on the owner kind.
+- **Tracker**: `Sbx_Change` rows `{kind: USE_SET/ERASE_FROM_PARENT/MOVE_INSTR/CREATE_AND_INSERT, payload}` plus the
+  snapshot stack, undone in reverse with a `switch`. A tracked erase removes the instruction from its block and drops
+  its operands but keeps the row alive until the change is accepted (then `v_kind = DEAD`), so a revert can re-link it.
+- **Dependency graph / scheduler** (sandbox_sched.jai): DGNode / MemDGNode are `Sdag_Node` rows with an `is_mem`
+  tag; SchedBundles are `Ssch_Bundle` rows; the ready list is libstdc++'s heap algorithm over node rows (so pop order
+  matches std::priority_queue). One DAG + scheduler is alive at a time (globals `sdag`, `ssch`). BottomUp only.
+- **Legality / Actions** (sandbox_passes.jai): a LegalityResult is the `kind` tag (+ payload: reused action, mask,
+  collect descriptors) of the `Sbv_Action` row it belongs to; actions are a post-order list, operands are row indices;
+  InstrMaps are two tables keyed by Value_Id.
+- Address-ordered containers in LLVM (DenseSet/DenseMap of pointers) are replaced by insertion-ordered lists, and
+  every place where their order can change the output fails loudly (NOTES.md "SandboxVectorizer").

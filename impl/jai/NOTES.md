@@ -2739,21 +2739,38 @@ SROA dbg_assign, 3 Panics in the Attributor tests and an LVI assertion on SROA/s
 pipeline's own code); dwarf-eh-prepare with -mtriple (and -codegen-opt-level=2); lower-emutls; print<inline-cost>
 (1 differs: LoopVectorize/X86/int128_no_gather.ll, LLVM's '+mpx' feature warning that our subtarget creation doesn't
 print); print<module-debuginfo> (7 differs fixed: M.debug_compile_units() skips NoDebug CUs), print<uniformity> (int128_no_gather.ll again), x86-partial-reduction, the no-op group, gc / sjlj.
-## SandboxVectorizer (L1.extra.sandbox-vectorizer 31/48: roundtrip 24/24, opt 7/24; /root/jai_extras_d)
+## SandboxVectorizer (L1.extra.sandbox-vectorizer 48/48; /root/jai_extras_d framework, /root/jai_sandbox the rest)
 
-- `sandbox_vectorizer.jai`: the framework (see DESIGN.md "SandboxVectorizer"). Passing: boilerplate,
-  default_pass_pipeline, user_pass_pipeline, region_pass_arg, regions-from-bbs, regions-from-metadata,
-  X86/no_implicit_float. The other 17 fail loudly: 16 reach a seed slice (bottom-up-vec / load-store-vec on a seed
-  bundle of >= 2 seeds), 1 runs pack-reuse.
-- Remaining work, in LLVM's layering: Tracker (change log + revert/accept), the Context callbacks, DependencyGraph
-  (MemDGNode chains, AA queries via BatchAA, the Interval of instructions), Scheduler (ReadyList, SchedBundles,
-  trySchedule), Legality (LegalityAnalysis::canVectorize with the Widen / Pack / DiamondReuse / ... results),
-  InstrMaps, SeedBundle::getSlice and MemSeedBundle's SCEV-offset sort, BottomUpVec (vectorizeRec,
-  createVectorInstr/createPack/createShuffle, tryEraseDeadInstrs, emitVectors), RegionWithScore (TTI cost deltas
-  for tr-accept-or-revert), PackReuse, LoadStoreVec.
-- Address order to watch: BottomUpVec::tryEraseDeadInstrs groups dead candidates in a `DenseMap<BasicBlock *, ...>`
-  and erases block by block; when a candidate in one block uses a candidate in another, the result depends on that
-  order (must fail loudly or be proven impossible).
-- Sweeps: default pipeline --with-test-flags 12087 identical, 0 differs, 1663 loud (seed slices);
-  `regions-from-bbs<print-instruction-count,null>` 10921/10921; `regions-from-metadata<print-instruction-count>`
-  10922/10922.
+- Files: sandbox_vectorizer.jai (pass manager, regions + ScoreBoard, seed collection, transactions),
+  sandbox_ir.jai (Tracker, callbacks, the IR edits and create() functions), sandbox_sched.jai (Interval,
+  DependencyGraph, Scheduler), sandbox_passes.jai (Legality, InstrMaps, BottomUpVec, LoadStoreVec, PackReuse).
+  Design: DESIGN.md "SandboxVectorizer"; LLVM facts: knowledge/llvm/vectorizers.md "SandboxVectorizer".
+- Everything that lives for one pass run is in `temp`, and global `[..]` arrays that are reused across runs must
+  drop their old buffer (`sbv_temp_array`), not just set `count = 0`: temporary storage is reset between function
+  pass runs and a stale buffer with capacity is silently written into (heap corruption in the next function).
+  The Tracker's arrays are on the heap (a pipeline without accept/revert keeps changes across functions).
+- Loud on purpose (all address-order or LLVM-UB cases, each checked to really matter):
+  - bottom-up-vec's dead-instruction erasure across blocks: dry-runs every block order (up to 5 blocks) and fails
+    only when they differ; LLVM's own output is nondeterministic there (15 corpus files, e.g. cs-cs-aliasing.ll).
+  - load-store-vec's >8 dead pointers (SmallPtrSet in address order): fails only when some order could erase more
+    than the initially dead ones.
+  - pack-reuse groups that share instructions (DenseMap group order).
+  - the seed collector's pointer-keyed SeedLookupMap after seeds were freed (accept) and a newer instruction of the
+    same kind is erased (sandbox_vectorizer.jai header): `maybe_extra` per bundle, loud only when allUsed /
+    getNumUnusedBits could change.
+  - a moved instruction still in the ready list (never seen), load-store-vec on load seeds (LLVM casts to StoreInst;
+    877 files with `-sbvec-collect-seeds=stores,loads` + load-store-vec, where LLVM also crashes on 292),
+    bottom-up-vec without Aux, tr-revert without tr-save, mixed-type constant vectors LLVM cannot build.
+- The DAG's create / erase / set-use callbacks are ported but cannot change the output: both passes emit only after
+  their last scheduling query. Only the move callback (SchedBundle::cluster) feeds back into scheduling.
+- Sweeps (`--with-test-flags`, 10925 files, 0 differs and 0 bad-ir in all): default pipeline 13682 identical / 73
+  loud (15 of them sandbox: the nondeterministic block order; the rest are test flags of other passes);
+  `-sbvec-vec-reg-bits=1024 -sbvec-allow-non-pow2` with `seed-collection<tr-save,bottom-up-vec,tr-accept>` 13678,
+  `...,tr-revert>` 13682, `...,pack-reuse,tr-accept>` 13678; `seed-collection(enable-diff-types)<load-store-vec>`
+  13674 (58 loud, none from this pass once the >8-candidates check was made exact); `-mattr=+avx2` default pipeline 12784; `regions-from-bbs<tr-save,pack-reuse,tr-accept-or-revert>`
+  13702 (32 loud on scalable vectors before getNumLanes/getElementType took the release-build
+  path for them, now identical); `-sbvec-collect-seeds=stores,loads ... seed-collection<tr-save,bottom-up-vec,tr-accept-or-revert>`
+  13364 (94 loud: 33 the
+  nondeterministic block order, 8 an over-strict int64->int cast in getPointerDiffInBytes, now identical; with
+  load-store-vec added instead, 877 files fail loudly on load seeds, see above).
+- Compile time: the pass is noise next to parsing/printing on sqlite3.ll and lua.ll (no perf benchmark times it).

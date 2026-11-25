@@ -208,6 +208,7 @@ sbx_delete_removed :: (i: Value_Id) {
     cg_vh_note_erase(i);
     vmap_note_erase(i);
     lvi_note_erase(i);
+    md_value_deleted(i);   // ~Value: ValueAsMetadata::handleDeletion
     sbv_note_freed(i, ir.v_kind.count);
     ir.v_name[i] = "";
     ir.v_md[i] = NONE;
@@ -228,7 +229,7 @@ sbx_erase :: (i: Value_Id) {
         drop_all_references(i);
     } else {
         sbv_note_freed(i, ir.v_kind.count);
-        erase_inst(i);
+        erase_inst_with_metadata(i);
     }
 }
 
@@ -257,7 +258,7 @@ sbx_rauw :: (old: Value_Id, new: Value_Id) {
         sbx_track(c);
         u = ir.u_next[u];
     }
-    replace_all_uses_with(old, new);
+    rauw_with_metadata(old, new);   // ValueAsMetadata::handleRAUW too (not undone by a revert, as in LLVM)
 }
 
 // ---------------------------------------------------------------- create() through the context's IRBuilder

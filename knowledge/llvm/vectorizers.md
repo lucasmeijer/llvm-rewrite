@@ -426,3 +426,36 @@ source (`llvm/lib/Transforms/Vectorize/*.cpp`) and the imported tests unless sta
 - TreeEntry::getSplitMask and the split-node codegen scale by the scalar's element count; the split-node resize
   copies createReplicatedMask(Scale, VF*Scale) into a CommonVF-sized mask, which overflows the buffer when
   VF*Scale*Scale > CommonVF (only reachable with Scale > 1).
+
+## SandboxVectorizer (lib/Transforms/Vectorize/SandboxVectorizer + lib/SandboxIR of 23.1.5; verified by the 24 imported tests and corpus sweeps with test flags, jai)
+
+- **Nondeterministic in LLVM itself**: BottomUpVec::tryEraseDeadInstrs groups the dead candidates per block in a
+  `DenseMap<BasicBlock *, ...>` and erases block by block (bottom-up within a block). When a candidate in one block
+  is only used by candidates in another (typically the GEP of a vectorized store that lives in the entry block),
+  whether it is erased depends on the block addresses, which ASLR changes: `opt -passes=sandbox-vectorizer
+  tests/imported/llvm/Transforms/DeadStoreElimination/cs-cs-aliasing.ll` printed 3 different outputs in 12 runs.
+  An implementation must fail loudly there (dry-running every block order shows when it matters).
+- The ScoreBoard only sees erasures: Region's create callback calls `addRaw` (not the virtual `add`), so created
+  vector instructions add no cost. Erasing an instruction of the region subtracts its cost from AfterCost, erasing
+  one outside the region adds it to BeforeCost; `tr-accept-or-revert` accepts iff `After - Before < -threshold`.
+  RegionsFromBBs uses `add` (all original instructions count in AfterCost). Every *live* region gets every
+  callback (regions-from-bbs keeps one region per block alive at once), so the last-registered region's
+  `!sandboxvec` node wins on created instructions.
+- Revert order effects: an erased instruction is removed (name out of the symbol table, operands dropped) and kept
+  until accept; reverting re-inserts it before its old next instruction and re-registers it, which runs the create
+  callbacks — so it gets `!sandboxvec` back but not `!sandboxaux` (dropped by removeFromAux, not tracked), and seeds
+  stay "used" in their SeedBundle after a revert. RAUW's metadata half (debug records) is not undone either.
+- SeedCollection builds `{SC.getStoreSeeds(), SC.getLoadSeeds()}` up front, so the load range's begin() is taken
+  before any store bundle is vectorized: the first load bundle is visited even if it is used up by then (LLVM then
+  reads `Seeds[size]`).
+- getInsertPointAfterInstrs, with no value of the list in the block, inserts *after* the block's first instruction
+  (after the PHIs if it starts with PHIs), not before it.
+- Scheduler::tryScheduleUntil walks its Retry SmallVector with make_early_inc_range while erasing from it: the walk's
+  end is fixed and slots past the shrunk size keep their old values (stale elements are visited); a `Finished`
+  result during the retry walk is ignored, and the bundle is then reported as not schedulable.
+- LoadStoreVec with mixed-type constant operands (`seed-collection(enable-diff-types)`): ConstantVector::get takes
+  the first constant's type; the identity-based zero/splat checks fail, and the ConstantDataVector path truncates
+  every value to that width (`store i8 42; store i16 43; store i8 44` -> `store <3 x i8> <i8 42, i8 43, i8 44>`).
+- emitUnpacksForExternalUses RAUWs inside a `users()` loop; the loop then continues on the unpack's use list, so the
+  net effect is exactly one unpack per lane that has any non-vectorized user.
+- `-sbvec-always-verify` only exists in assertion builds (release opt rejects it); there is no `-sbvec-allow-reuse`.

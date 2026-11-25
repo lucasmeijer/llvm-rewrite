@@ -28,14 +28,14 @@ sbv_expected_type :: (v: Value_Id) -> Type_Id {
 sbv_num_bits_type :: (t: Type_Id) -> u32 { return cast(u32) dl_type_size_bits(t); }
 sbv_num_bits :: (v: Value_Id) -> u32 { return sbv_num_bits_type(sbv_expected_type(v)); }
 // VecUtils::getElementType
+// (scalable vectors: an assert, so release builds take cast<FixedVectorType> on them)
 sbv_element_type :: (t: Type_Id) -> Type_Id {
-    if type_kind(t) == .SVECTOR fatal("sandbox-vectorizer: scalable vectors are not supported (LLVM asserts)");
-    if type_kind(t) == .VECTOR return type_elem(t);
+    if is_vector_type(t) return type_elem(t);
     return t;
 }
 // VecUtils::getNumLanes
+// (scalable vectors: an assert, so release builds get 1 from the dyn_cast<FixedVectorType>)
 sbv_num_lanes_type :: (t: Type_Id) -> u32 {
-    if type_kind(t) == .SVECTOR fatal("sandbox-vectorizer: scalable vectors are not supported (LLVM asserts)");
     if type_kind(t) == .VECTOR return cast(u32) type_count(t);
     return 1;
 }
@@ -44,7 +44,7 @@ sbv_num_lanes_bndl :: (b: [] Value_Id) -> u32 { n: u32 = 0; for b n += sbv_num_l
 // VecUtils::getWideType
 sbv_wide_type :: (elem_in: Type_Id, n_in: u32) -> Type_Id {
     elem := elem_in; n := n_in;
-    if type_kind(elem) == .VECTOR { n *= cast(u32) type_count(elem); elem = type_elem(elem); }
+    if is_vector_type(elem) { n *= cast(u32) type_count(elem); elem = type_elem(elem); }
     if !is_valid_vector_element_type(elem) fatal("sandbox-vectorizer: a vector of an invalid element type (LLVM asserts)");
     return type_vector(cast(u64) n, elem, false);
 }
@@ -64,7 +64,7 @@ sbv_pointer_diff_bytes :: (i0: Value_Id, i1: Value_Id) -> (bool, s64) {
     if get_underlying_object(p0) != get_underlying_object(p1) return true, 0;
     ok, d := get_pointers_diff(ir.t_i8, p0, ir.t_i8, p1, false, false);
     if !ok return false, 0;
-    return true, cast(s64) cast(s32) d;
+    return true, cast(s64) cast,trunc(s32) d;   // std::optional<int> from optional<int64_t>: truncated
 }
 // Utils::atLowerAddress
 sbv_at_lower_address :: (i0: Value_Id, i1: Value_Id) -> bool {
@@ -436,20 +436,8 @@ sbv_try_erase_dead :: () {
         for blocks if it == bb { found = true; break; }
         if !found array_add(*blocks, bb);
     }
-    if blocks.count > 1 {
-        // the blocks are visited in DenseMap (address) order: fine unless a candidate uses one of another block
-        for c: sbv_buv.dead for k: 0..cast(s64) nops(c) - 1 {
-            o := op(c, cast(u32) k);
-            if !is_inst(o) || inst_block(o) == inst_block(c) continue;
-            if !sbv_in(sbv_buv.dead, o) continue;
-            // `o` can become dead only through the erasure of its users, all of them candidates
-            all_cands := true;
-            u := ir.v_first_use[o];
-            while u != NONE { if !sbv_in(sbv_buv.dead, ir.u_user[u]) { all_cands = false; break; } u = ir.u_next[u]; }
-            if all_cands
-                fatal("sandbox-vectorizer: dead instructions in two blocks depend on each other (LLVM erases them in block address order)");
-        }
-    }
+    // sorted groups, one per block
+    groups: [..] [..] Value_Id; groups.allocator = temp;
     for bb: blocks {
         group: [..] Value_Id; group.allocator = temp;
         for sbv_buv.dead if inst_block(it) == bb array_add(*group, it);
@@ -457,6 +445,10 @@ sbv_try_erase_dead :: () {
             if a == b return 0;
             return ifx comes_before(a, b) then -1 else 1;
         });
+        array_add(*groups, group);
+    }
+    if blocks.count > 1 sbv_check_dead_block_order(groups);
+    for group: groups {
         k := group.count - 1;
         while k >= 0 {
             i := group[k];
@@ -465,6 +457,60 @@ sbv_try_erase_dead :: () {
         }
     }
     sbv_buv.dead.count = 0;
+}
+
+// The blocks of tryEraseDeadInstrs are visited in DenseMap (block address) order. Erasing a candidate can make a
+// candidate of another block dead, so dry-run every block order (up to 5 blocks) and fail loudly unless they all
+// erase the same instructions.
+sbv_check_dead_block_order :: (groups: [] [..] Value_Id) {
+    cross := false;
+    for c: sbv_buv.dead for k: 0..cast(s64) nops(c) - 1 {
+        o := op(c, cast(u32) k);
+        if is_inst(o) && inst_block(o) != inst_block(c) && sbv_in(sbv_buv.dead, o) cross = true;
+    }
+    if !cross return;
+    if groups.count > 5 fatal("sandbox-vectorizer: dead instructions in many blocks depend on each other (LLVM erases them in block address order)");
+    n := groups.count;
+    perm: [5] s64;
+    for 0..n - 1 perm[it] = it;
+    first: [..] bool; first.allocator = temp;
+    have_first := false;
+    while true {
+        // dry run in the order `perm`
+        uses: Table(Value_Id, s64); uses.allocator = temp;
+        for sbv_buv.dead table_set(*uses, it, num_uses(it));
+        erased: [..] bool; erased.allocator = temp;
+        for sbv_buv.dead array_add(*erased, false);
+        for g: 0..n - 1 {
+            group := groups[perm[g]];
+            k := group.count - 1;
+            while k >= 0 {
+                i := group[k];
+                _, cnt := table_find(*uses, i);
+                if cnt == 0 {
+                    for x: sbv_buv.dead if x == i erased[it_index] = true;
+                    for e: 0..cast(s64) nops(i) - 1 {
+                        o := op(i, cast(u32) e);
+                        p := table_find_pointer(*uses, o);
+                        if p p.* -= 1;
+                    }
+                }
+                k -= 1;
+            }
+        }
+        if !have_first { first = erased; have_first = true; }
+        else for erased if it != first[it_index]
+            fatal("sandbox-vectorizer: dead instructions in two blocks depend on each other (LLVM erases them in block address order; its output varies from run to run)");
+        // next permutation
+        x := n - 2;
+        while x >= 0 && perm[x] >= perm[x + 1] x -= 1;
+        if x < 0 break;
+        y := n - 1;
+        while perm[y] <= perm[x] y -= 1;
+        perm[x], perm[y] = perm[y], perm[x];
+        l := x + 1; r := n - 1;
+        while l < r { perm[l], perm[r] = perm[r], perm[l]; l += 1; r -= 1; }
+    }
 }
 
 // BottomUpVec::emitUnpacksForExternalUses
@@ -629,11 +675,27 @@ sbv_lsv_erase_dead :: (stores: [] Value_Id, operands: [] Value_Id) {
         }
     }
     if cands.count > 8 {
-        for c: cands for k: 0..cast(s64) nops(c) - 1 {
-            o := op(c, cast(u32) k);
-            for cands if it == o
-                fatal("sandbox-vectorizer: more than 8 dead pointer candidates that depend on each other (LLVM walks them in address order)");
+        // walked in address order: fine when the candidates dead from the start are all that any order can erase
+        uses: Table(Value_Id, s64); uses.allocator = temp;
+        for cands table_set(*uses, it, num_uses(it));
+        erased: [..] bool; erased.allocator = temp;
+        for cands array_add(*erased, false);
+        initially := 0;
+        for cands if num_uses(it) == 0 initially += 1;
+        total := 0;
+        progress := true;
+        while progress {
+            progress = false;
+            for c, ci: cands {
+                if erased[ci] continue;
+                _, n := table_find(*uses, c);
+                if n != 0 continue;
+                erased[ci] = true; total += 1; progress = true;
+                for k: 0..cast(s64) nops(c) - 1 { p := table_find_pointer(*uses, op(c, cast(u32) k)); if p p.* -= 1; }
+            }
         }
+        if total != initially
+            fatal("sandbox-vectorizer: more than 8 dead pointer candidates that depend on each other (LLVM walks them in address order)");
     }
     for cands if !has_uses(it) sbx_erase(it);
 }
