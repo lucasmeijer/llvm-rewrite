@@ -19562,10 +19562,13 @@ tests/imported/llvm/Transforms/SampleProfile/cold-indirect-call.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/cold-indirect-call.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/coro-annotate.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/coro-annotate.ll::roundtrip
+tests/imported/llvm/Transforms/SampleProfile/csspgo-import-list-callee-samples.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/csspgo-import-list-callee-samples.ll::roundtrip
+tests/imported/llvm/Transforms/SampleProfile/csspgo-import-list-preinliner.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/csspgo-import-list-preinliner.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/csspgo-import-list.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/csspgo-summary.ll::roundtrip
+tests/imported/llvm/Transforms/SampleProfile/ctxsplit.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/ctxsplit.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/discriminator.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/discriminator.ll::roundtrip
@@ -19577,6 +19580,7 @@ tests/imported/llvm/Transforms/SampleProfile/entry_counts_cold.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/entry_counts_cold.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/entry_counts_missing_dbginfo.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/entry_counts_missing_dbginfo.ll::roundtrip
+tests/imported/llvm/Transforms/SampleProfile/flattened.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/flattened.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/fn-alias.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/fn-alias.ll::roundtrip
@@ -19595,6 +19599,7 @@ tests/imported/llvm/Transforms/SampleProfile/indirect-call.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/indirect-call.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/inline-act.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/inline-act.ll::roundtrip
+tests/imported/llvm/Transforms/SampleProfile/inline-callee-update.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/inline-callee-update.ll::roundtrip
 tests/imported/llvm/Transforms/SampleProfile/inline-cold-callsite-samplepgo.ll::opt
 tests/imported/llvm/Transforms/SampleProfile/inline-cold-callsite-samplepgo.ll::roundtrip
