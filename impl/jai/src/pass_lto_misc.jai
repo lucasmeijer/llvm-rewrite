@@ -123,6 +123,9 @@ Cold_Func_Opt :: enum u8 { DEFAULT; OPT_SIZE; MIN_SIZE; OPT_NONE; }
 pgo_opts: struct {
     kind: Pgo_Kind;
     cold_opt: Cold_Func_Opt;
+    profile_file: string;            // -profile-file (NewPMDriver.cpp)
+    flattened_profile_used := false; // -flattened-profile-used (PassBuilderPipelines.cpp)
+    enable_pgo_inline_deferral := true;   // -enable-npm-pgo-inline-deferral (PassBuilderPipelines.cpp)
 };
 pgo_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
     if name == "pgo-kind" {
@@ -145,7 +148,10 @@ pgo_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
         }
         return true;
     }
-    if name == "profile-file" || name == "cspgo-kind" || name == "memory-profile-file" || name == "profile-remapping-file"
+    if name == "profile-file" { pgo_opts.profile_file = copy_string(prof_str(name, value, has_value)); return true; }
+    if name == "flattened-profile-used" { pgo_opts.flattened_profile_used = smisc_bool(name, value, has_value); return true; }
+    if name == "enable-npm-pgo-inline-deferral" { pgo_opts.enable_pgo_inline_deferral = smisc_bool(name, value, has_value); return true; }
+    if name == "cspgo-kind" || name == "memory-profile-file" || name == "profile-remapping-file"
         fatal("unsupported option '-%'", name);
     return false;
 }

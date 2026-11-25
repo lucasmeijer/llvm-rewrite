@@ -296,7 +296,8 @@ build_o1_function_simplification_pipeline :: (fpm: s32, last: *s32, level: Opt_L
     pb_add(lpm2, *lpm2_last, "loop-idiom");
     pb_add(lpm2, *lpm2_last, "indvars");
     pb_add(lpm2, *lpm2_last, "loop-deletion");
-    pb_loop_unroll_full(lpm2, *lpm2_last, level);
+    // no full unrolling in the ThinLTO pre-link of sample PGO
+    if pb_phase != .THIN_PRE_LINK || !pb_sample_use() pb_loop_unroll_full(lpm2, *lpm2_last, level);
 
     pb_add(fpm, last, "sroa<modify-cfg>");
     pb_add(fpm, last, "memcpyopt");
@@ -361,7 +362,7 @@ build_function_simplification_pipeline :: (fpm: s32, last: *s32, level: Opt_Leve
         pb_add(extra, *extra_last, unswitch);
     }
     pb_add(lpm2, *lpm2_last, "loop-deletion");
-    pb_loop_unroll_full(lpm2, *lpm2_last, level);
+    if pb_phase != .THIN_PRE_LINK || !pb_sample_use() pb_loop_unroll_full(lpm2, *lpm2_last, level);
 
     pb_add(fpm, last, "sroa<modify-cfg>");
     vcn := pb_add(fpm, last, "vector-combine");   // VectorCombinePass(TryEarlyFoldsOnly = true)
@@ -421,6 +422,9 @@ build_inliner_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     }
     n := pb_add(cg, *cglast, "inline");
     pipeline.nodes[n].opt_level = cast(s8) level.speed;   // the advisor's getInlineParamsFromOptLevel(Level)
+    // PreLink (Thin or Full) LTO + SamplePGO: IP.HotCallSiteThreshold = 0; any PGOOptions: IP.EnableDeferral
+    pipeline.nodes[n].inl_hot_cs_zero = is_lto_pre_link() && pb_sample_use();
+    pipeline.nodes[n].inl_pgo = pgo_options_present();
 
     if pb_cl.attributor_run == "cgscc" || pb_cl.attributor_run == "full" pb_unsupported("attributor-cgscc (-attributor-enable)");
     if pb_cl.attributor_run == "cgscc-light" || pb_cl.attributor_run == "light" pb_unsupported("attributor-light-cgscc (-attributor-enable)");
@@ -449,6 +453,7 @@ build_inliner_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
 
 // buildModuleInlinerPipeline (-enable-module-inliner)
 build_module_inliner_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
+    if pgo_options_present() pb_unsupported("the module inliner (-enable-module-inliner) with PGO options");
     n := pb_add(mpm, last, "module-inline");
     pipeline.nodes[n].opt_level = cast(s8) level.speed;
     fa := pb_function_adaptor(mpm, last, pto.eagerly_invalidate_analyses);
@@ -465,7 +470,9 @@ build_module_inliner_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
 // ---------------------------------------------------------------- module pipelines
 
 build_module_simplification_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
-    if pb_phase == .THIN_POST_LINK { n := pb_add(mpm, last, "pgo-icall-prom"); pipeline.nodes[n].in_lto = true; }   // PGOIndirectCallPromotion(InLTO = true, HasSampleProfile)
+    has_sample_profile := pb_sample_use();
+    load_sample_profile := has_sample_profile && !(pgo_opts.flattened_profile_used && pb_phase == .THIN_POST_LINK);
+    if pb_phase == .THIN_POST_LINK && !load_sample_profile pb_add_icp(mpm, last, true, has_sample_profile);
     if pb_phase != .THIN_POST_LINK {
     pb_add(mpm, last, "inferattrs");
     pb_add(mpm, last, "coro-early");
@@ -479,6 +486,11 @@ build_module_simplification_pipeline :: (mpm: s32, last: *s32, level: Opt_Level)
         pb_add(fa, *l, "early-cse<>");
         if level.speed == 3 pb_add(fa, *l, "callsite-splitting");
     }
+    }
+    if load_sample_profile {
+        pb_add_sample_profile_loader(mpm, last);
+        pb_add(mpm, last, "require<profile-summary>");
+        if !is_lto_pre_link() pb_add_icp(mpm, last, true, true);
     }
     { n := pb_add(mpm, last, "openmp-opt"); pipeline.nodes[n].omp_post_link = pb_omp_post_link(); }   // OpenMPOptPass(Phase)
     if pb_cl.attributor_run == "module" || pb_cl.attributor_run == "full" pb_unsupported("attributor (-attributor-enable)");
@@ -496,7 +508,8 @@ build_module_simplification_pipeline :: (mpm: s32, last: *s32, level: Opt_Level)
         pb_add(fa, *l, INSTCOMBINE);
         pb_add(fa, *l, pb_simplifycfg(SCFG_RANGE));
     }
-    // no PGO / contextual profiling: none of the PGO instrumentation passes
+    // no instrumentation PGO / contextual profiling: none of the PGO instrumentation passes
+    if pb_sample_use() pb_add(mpm, last, "pgo-force-function-attrs");   // PGOForceFunctionAttrsPass(PGOOpt->ColdOptType)
     n := pb_add(mpm, last, "always-inline");   // AlwaysInlinerPass(InsertLifetimeIntrinsics = true)
     _ = n;
     if pb_cl.enable_module_inliner build_module_inliner_pipeline(mpm, last, level);
@@ -597,6 +610,7 @@ build_module_optimization_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
 }
 
 build_o0_default_pipeline :: (mpm: s32, last: *s32) {
+    if pb_sample_use() pb_unsupported("a sample profile (-pgo-kind=pgo-sample-use-pipeline) in the O0 pipeline");
     pb_add(mpm, last, "function(ee-instrument<>)");
     n := pb_add(mpm, last, "always-inline");   // AlwaysInlinerPass(InsertLifetimeIntrinsics = false)
     pipeline.nodes[n].no_lifetime = true;
@@ -624,7 +638,23 @@ add_required_lto_pre_link_passes :: (mpm: s32, last: *s32) {
     pb_add(mpm, last, "assign-guid");
 }
 
-pb_check_pgo :: () { if pgo_options_present() pb_unsupported("PGO options (-pgo-kind) in a default pipeline"); }
+// PGOOptions: only SampleUse (without pseudo probes or debug info for profiling) is ported
+pb_check_pgo :: () {
+    if pgo_options_present() && pgo_opts.kind != .SAMPLE_USE pb_unsupported("instrumentation PGO options (-pgo-kind) in a default pipeline");
+}
+pb_sample_use :: () -> bool { return pgo_opts.kind == .SAMPLE_USE; }
+// a SampleProfileLoaderPass(PGOOpt->ProfileFile, PGOOpt->ProfileRemappingFile, Phase)
+pb_add_sample_profile_loader :: (mpm: s32, last: *s32) {
+    n := pb_add(mpm, last, "sample-profile");
+    pipeline.nodes[n].sp_file = pgo_opts.profile_file;
+    pipeline.nodes[n].sp_phase = pb_phase;
+}
+// PGOIndirectCallPromotion(InLTO, SamplePGO)
+pb_add_icp :: (mpm: s32, last: *s32, in_lto: bool, sample_pgo: bool) {
+    n := pb_add(mpm, last, "pgo-icall-prom");
+    pipeline.nodes[n].in_lto = in_lto;
+    pipeline.nodes[n].icp_sample_pgo = sample_pgo;
+}
 
 build_per_module_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Level) {
     pb_check_pgo();
@@ -692,6 +722,7 @@ pb_add_coro_wrapper :: (mpm: s32, last: *s32) {
 // buildLTODefaultPipeline(Level, ExportSummary = nullptr)
 build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Level) {
     pb_check_pgo();
+    if pb_sample_use() pb_unsupported("a sample profile (-pgo-kind=pgo-sample-use-pipeline) in the full LTO pipeline");
     pb_phase = .FULL_POST_LINK;
     mpm := pb_node(mpm_outer, last_outer, .MODULE_PM, "module");
     last: s32 = -1;

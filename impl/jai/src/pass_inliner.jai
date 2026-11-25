@@ -163,6 +163,8 @@ inliner_run :: (node: *Pass_Node, initial_c: s32, ur: *Cgscc_Ur) -> Preserved {
     // InlinerPass inside a ModuleInlinerWrapperPass of a default pipeline: the wrapper's InlineAdvisor has
     // getInlineParamsFromOptLevel(Level) (pass_builder_pipelines.jai)
     if node.opt_level >= 0 params = get_inline_params_from_opt_level(cast(u32) node.opt_level);
+    if node.inl_hot_cs_zero { params.hot_callsite_threshold = 0; params.has_hot_callsite = true; }
+    if node.inl_pgo { params.enable_deferral = pgo_opts.enable_pgo_inline_deferral; params.has_enable_deferral = true; }
     changed := false;
     calls: [..] Value_Id;
     defer array_free(calls);

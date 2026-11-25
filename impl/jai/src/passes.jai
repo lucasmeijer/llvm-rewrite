@@ -741,6 +741,8 @@ Pass_Node :: struct {
     sp_disable_inlining: bool;
     sp_use_flattened: bool;
     icp_sample_pgo: bool;          // pgo-icall-prom: PGOIndirectCallPromotion(InLTO = in_lto, SamplePGO)
+    inl_hot_cs_zero: bool;         // inline in a default pipeline: IP.HotCallSiteThreshold = 0
+    inl_pgo: bool;                 // inline in a default pipeline: IP.EnableDeferral = EnablePGOInlineDeferral
 }
 
 pipeline: struct {
