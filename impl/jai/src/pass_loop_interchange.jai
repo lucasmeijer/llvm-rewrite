@@ -1,10 +1,8 @@
 // LoopInterchangePass: a port of llvm/lib/Transforms/Scalar/LoopInterchange.cpp (LLVM 23.1.5), a LoopNest pass in
 // default<O1..O3> (PTO.LoopInterchange = -enable-loopinterchange, on by default): populateDependencyMatrix (with
-// DependenceInfo, dependence_analysis.jai), LoopInterchangeLegality, LoopInterchangeProfitability (the instorder
-// and vectorize rules) and LoopInterchangeTransform.
-//
-// Not ported, failing loudly: the `cache` profitability rule (CacheCost, LoopCacheAnalysis.cpp). Optimization remarks are never printed, so they are left
-// out.
+// DependenceInfo, dependence_analysis.jai), LoopInterchangeLegality, LoopInterchangeProfitability (the cache rule
+// through CacheCostManager + loop_cache_analysis.jai, the instorder and vectorize rules) and LoopInterchangeTransform.
+// Optimization remarks are never printed, so they are left out.
 
 Li_Rule :: enum u8 { CACHE; INSTORDER; VECTORIZE; IGNORE; }
 
@@ -76,6 +74,10 @@ Li_Ctx :: struct {
     dt: *Dom_Tree;
     di: *Da_Info;
     f: Value_Id;
+    // CacheCostManager: computed lazily once per loop nest (before any interchange of it)
+    cc_done: bool;
+    cc_root: Loop_Id;
+    cc: Lc_Result;
 }
 
 // populateDependencyMatrix
@@ -581,7 +583,13 @@ li_is_profitable :: (c: *Li_Ctx, inner: Loop_Id, outer: Loop_Id, inner_id: s64, 
     should := -1;   // nullopt
     for r: rules {
         if r == {
-            case .CACHE; fatal("loop-interchange: the 'cache' profitability rule (CacheCost, LoopCacheAnalysis) is not implemented yet");
+            case .CACHE;
+                // isProfitablePerLoopCacheAnalysis (CostMap = index in getLoopCosts())
+                if !c.cc_done { c.cc = lc_compute(c.li, c.di, c.cc_root); c.cc_done = true; }
+                ii := lc_loop_index(*c.cc, inner);
+                oi := lc_loop_index(*c.cc, outer);
+                if ii >= 0 && oi >= 0 && !lc_eq(lc_loop_cost(*c.cc, outer), lc_loop_cost(*c.cc, inner))
+                    should = ifx ii < oi then 1 else 0;
             case .INSTORDER;
                 cost := li_get_instr_order_cost(c, outer, inner);
                 if cost < 0 && cost < li_cl.cost_threshold should = 1;
@@ -928,6 +936,7 @@ li_process_loop_list :: (c: *Li_Ctx, loops: *[..] Loop_Id) -> bool {
     if !li_populate_dependency_matrix(c, *dep_matrix, depth, outermost) return false;
     if li_exit_block(c.li, outermost) == NONE return false;
     sel := loops.count - 1;
+    c.cc_done = false; c.cc_root = loops.*[0];
     j := sel;
     while j > 0 {
         changed_per_iter := false;

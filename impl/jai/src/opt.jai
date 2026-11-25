@@ -204,6 +204,7 @@
 #load "pass_loop_interchange.jai";
 #load "dependence_analysis.jai";
 #load "delinearization.jai";
+#load "loop_cache_analysis.jai";
 #load "pass_expand_memcmp.jai";
 #load "pass_chr.jai";
 #load "pass_ctx_prof_lowering.jai";

@@ -1655,7 +1655,7 @@ Still slow / next:
   -dfa-max-cloned-rate=1000` (also `,print<domtree>`); `function(sroa),<pass>` on tests/perf/compile 4/4 for both.
 - LoopInterchange, DependenceAnalysis and Delinearization: see "Default pipelines (L2.pipeline-O2)" below.
 
-## Default pipelines, DependenceAnalysis, LoopInterchange, ExpandMemCmp (L2.pipeline-O2 240/241, L2.phase-ordering 130/144, L1.o2-gaps 379/380, L2.perf-corpus 54/56)
+## Default pipelines, DependenceAnalysis, LoopInterchange, ExpandMemCmp (L2.pipeline-O2 240/241, L2.phase-ordering 130/144, L1.o2-gaps COMPLETE 380/380, L2.perf-corpus 54/56)
 
 - Files: `pass_builder_pipelines.jai` (PassBuilderPipelines.cpp: `-O#`, `default<O#>`; built as Pass_Node rows,
   `-jai-print-pipeline` diffs against `opt -print-pipeline-passes`), `dependence_analysis.jai` (DependenceAnalysis.cpp,
@@ -1678,13 +1678,16 @@ Still slow / next:
   (more than 62 levels fails loudly). `findArrayDimensions` sorts terms by SCEV pointer in LLVM; we use Scev_Id
   (creation order); the following llvm::sort is stable up to 16 terms and fails loudly above.
 - LoopInterchange: the LoopNest pass runs only when the LPM starts on a top-level loop; after an interchange the
-  current loop is the new inner loop and the rest of the LPM runs on it (LLVM does the same). `cache` profitability
-  (LoopCacheAnalysis) fails loudly; -loop-interchange-reduction-to-mem is ported. `is_constant` is a Jai builtin
+  current loop is the new inner loop and the rest of the LPM runs on it (LLVM does the same). `cache` profitability:
+  `loop_cache_analysis.jai` (LoopCacheAnalysis.cpp, also `print<loop-cache-cost>`; jai_tails 2026-11), computed lazily
+  once per nest in `Li_Ctx.cc` like CacheCostManager. Its own saturating fixed-point `Lc_Cost` (tti.jai's `Cost` is
+  unscaled). Sweeps: print<loop-cache-cost> 10860/10860 (also with -cache-line-size=64), --with-test-flags 13519
+  identical / 0 differs; loop-interchange with `-loop-interchange-profitabilities=cache,instorder,vectorize` (with and
+  without -cache-line-size=64) 10860/10860. -loop-interchange-reduction-to-mem is ported. `is_constant` is a Jai builtin
   (compile-time constness), not isa<Constant>: use `is_const`.
 - L2.pipeline-O2 and L2.perf-corpus are COMPLETE (2026-11-13). oggenc's mergeConditionalStores and sqlite3's SLP
   external store groups were hash-order spots that provably (resp. checked by permutation) cannot change LLVM's
-  output; see knowledge/llvm/simplifycfg.md and vectorizers.md. L1.o2-gaps: the `cache` profitability rule
-  (LoopCacheAnalysis) still fails loudly.
+  output; see knowledge/llvm/simplifycfg.md and vectorizers.md. L1.o2-gaps COMPLETE 380/380 (2026-11, the `cache` rule).
 - More pipeline-state fixes (each found with bisect + standalone rerun): the inliner's PHI trimming follows
   removeIncomingValueIf (backwards, last into the hole); LICM's call clones take the original name first (one
   LastUnique bump); CommonPointerBase's NW flags default to all(); ExpandMemCmp ported (pass_expand_memcmp.jai,

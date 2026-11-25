@@ -360,7 +360,7 @@ Pass_Kind :: enum u16 {
     // ControlHeightReduction (pass_chr.jai)
     INLINER_WRAPPER_PM; EXTRA_LOOP_UNSWITCH; CORO_COND; LOOP_INTERCHANGE; EXPAND_MEMCMP; CHR;
     // DependenceAnalysis (dependence_analysis.jai), Delinearization and SCEVDivision (delinearization.jai)
-    PRINT_DA; PRINT_DELINEARIZATION; PRINT_SCEV_DIVISION;
+    PRINT_DA; PRINT_DELINEARIZATION; PRINT_LOOP_CACHE_COST; PRINT_SCEV_DIVISION;
     // the LTO pipelines' module passes (pass_lto_misc.jai), MergeFunctions (pass_merge_functions.jai)
     CROSS_DSO_CFI; GLOBAL_SPLIT; WHOLE_PROGRAM_DEVIRT; LOWER_TYPE_TESTS; DROP_TYPE_TESTS; SIMPLIFY_TYPE_TESTS;
     EXPAND_VARIADICS; PGO_ICALL_PROM; CANONICALIZE_ALIASES; NAME_ANON_GLOBALS; MERGE_FUNCTIONS; PGO_FORCE_FUNCTION_ATTRS;
@@ -498,6 +498,7 @@ PASS_TABLE :: Pass_Info.[
     .{"print<da><normalized-results>", .FUNCTION, .PRINT_DA, true, .SCEV},
     .{"require<da>", .FUNCTION, .REQUIRE, true, .SCEV},   // DependenceInfo itself keeps nothing; it needs AA, SCEV, LoopInfo
     .{"print<delinearization>", .FUNCTION, .PRINT_DELINEARIZATION, true, .SCEV},
+    .{"print<loop-cache-cost>", .FUNCTION, .PRINT_LOOP_CACHE_COST, true, .SCEV},
     .{"print<scev-division>", .FUNCTION, .PRINT_SCEV_DIVISION, true, .SCEV},
     .{"loop-load-elim", .FUNCTION, .LOOP_LOAD_ELIM, false, .SCEV},
     .{"loop-distribute", .FUNCTION, .LOOP_DISTRIBUTE, false, .SCEV},
@@ -1359,6 +1360,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if hardening_parse_cl_opt(name, value, has_value) return true;   // pass_hardening.jai
     if stack_protector_parse_cl_opt(name, value, has_value) return true;   // pass_stack_protector.jai (+ safe-stack)
     if li_parse_cl_opt(name, value, has_value) return true;   // pass_loop_interchange.jai (-loop-interchange-*)   // pass_builder_pipelines.jai (PipelineTuningOptions, -enable-*)
+    if lc_parse_cl_opt(name, value, has_value) return true;   // loop_cache_analysis.jai
     for cl_opts() {
         if it.name != name continue;
         if it.kind == .BOOL {
@@ -1638,6 +1640,7 @@ run_function_pass_inner :: (node: *Pass_Node, f: Value_Id) -> Preserved {
         case .PRINT_ACCESS_INFO; return access_info_printer_run(f, node.name);
         case .PRINT_DA; return da_printer_run(f, node.name == "print<da><normalized-results>");
         case .PRINT_DELINEARIZATION; return delinearization_printer_run(f);
+        case .PRINT_LOOP_CACHE_COST; return loop_cache_printer_run(f);
         case .PRINT_SCEV_DIVISION; return scev_division_printer_run(f);
         case .LOOP_LOAD_ELIM; return loop_load_elim_run(f);
         case .LOOP_DISTRIBUTE; return loop_distribute_run(f);

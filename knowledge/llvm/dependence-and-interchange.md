@@ -68,3 +68,9 @@ Transforms/LoopInterchange (62/63).
 - X86TTIImpl has no cache model: TTI::getCacheLineSize() is 0 on x86-64 unless `-cache-line-size` is given, so
   LoopCacheAnalysis never finds consecutive accesses there and spatial reuse means a negative last-subscript
   difference. CacheCost loops print as `<unnamed loop>` when the header has no name.
+- LoopInterchange's CacheCostManager computes the CacheCost of the nest at most once, the first time the `cache`
+  rule is asked, and keeps it through later interchanges of the same nest (Loop objects survive the swap). The rule
+  answers nullopt when either loop has no cost or both costs are equal, else `index(inner) < index(outer)` in the
+  stable-sorted (largest cost first) list.
+- `print<loop-cache-cost>` writes its header before it requests TTI, so subtarget warnings (`'+mpx' is not a
+  recognized feature`) from a function's target-features come after the header (LoopVectorize/X86/int128_no_gather.ll).
