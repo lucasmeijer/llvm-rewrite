@@ -206,6 +206,7 @@
 #load "delinearization.jai";
 #load "pass_expand_memcmp.jai";
 #load "pass_chr.jai";
+#load "pass_ctx_prof_lowering.jai";
 #load "globals_aa.jai";
 #load "loop_info.jai";
 #load "cycle_info.jai";

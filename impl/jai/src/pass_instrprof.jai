@@ -111,13 +111,21 @@ il_runtime_counter_relocation :: (il: *Instr_Lowerer) -> bool {
     if instrprof_lower_cl.runtime_counter_relocation_set return instrprof_lower_cl.runtime_counter_relocation;
     return il.tt.os == .Fuchsia;
 }
+// InstrProfOptions of the running InstrProfilingLoweringPass (defaults for the `instrprof` pass name; addPGOInstrPasses
+// sets them)
+ip_options: struct {
+    sampling: bool;
+    do_counter_promotion: bool;
+    use_bfi_in_promotion: bool;
+    instr_profile_output: string;
+}
 il_sampling_enabled :: () -> bool {
     if instrprof_lower_cl.sampled_instr_set return instrprof_lower_cl.sampled_instr;
-    return false;   // Options.Sampling
+    return ip_options.sampling;   // Options.Sampling
 }
 il_counter_promotion_enabled :: () -> bool {
     if instrprof_lower_cl.do_counter_promotion_set return instrprof_lower_cl.do_counter_promotion;
-    return false;   // Options.DoCounterPromotion
+    return ip_options.do_counter_promotion;   // Options.DoCounterPromotion
 }
 il_is_atomic :: () -> bool { return instrprof_lower_cl.atomic_counter_update_all; }   // Options.Atomic || ...
 
@@ -229,6 +237,7 @@ Ip_Promoter :: struct {
     exit_blocks: [..] Value_Id;
     insert_pts: [..] Value_Id;
     is_atomic: bool;
+    bfi: *Bfi;   // Options.UseBFIInPromotion
 }
 
 ip_loop_cands :: (p: *Ip_Promoter, l: Loop_Id) -> *[..] [2] Value_Id {
@@ -266,7 +275,7 @@ ip_max_promotions_in_loop :: (p: *Ip_Promoter, l: Loop_Id) -> u32 {
     if !ip_is_promotion_possible(p, l, exits) return 0;
     exiting: [..] Value_Id; exiting.allocator = temp;
     li_exiting_blocks(p.li, l, *exiting);
-    // BFI is never set: Options.UseBFIInPromotion is false for the `instrprof` pass
+    if p.bfi return 0xFFFF_FFFF;   // more aggressive promotions with BFI
     if exiting.count == 1 return cast(u32) instrprof_lower_cl.max_promotions_per_loop;
     if exiting.count > instrprof_lower_cl.speculative_max_exiting return 0;
     if instrprof_lower_cl.speculative_to_loop return cast(u32) instrprof_lower_cl.max_promotions_per_loop;
@@ -342,6 +351,12 @@ ip_promote_candidates :: (p: *Ip_Promoter) -> bool {
         cand := ip_loop_cands(p, p.l).*[k];
         ld := cand[0]; st := cand[1];
         if ld == NONE continue;
+        if p.bfi {
+            ok, instr_count := bfi_block_profile_count(p.bfi, inst_block(ld));
+            if !ok continue;
+            pok, pre_count := bfi_block_profile_count(p.bfi, li_loop_preheader(p.li, p.l));
+            if pok && pre_count * 3 >= instr_count * 2 continue;
+        }
         ssa: Ssa_Updater;
         ssa_init(*ssa, vtype(ld), vname(ld));
         ssa_add_available(*ssa, li_loop_preheader(p.li, p.l), const_int(vtype(ld), 0));
@@ -374,11 +389,17 @@ il_promote_counter_load_stores :: (il: *Instr_Lowerer, f: Value_Id) {
         if !l { e: [..] [2] Value_Id; e.allocator = temp; l = table_add(*loop_cands, parent, e); }
         array_add(l, c);
     }
+    bfi: *Bfi = null;
+    if ip_options.use_bfi_in_promotion {
+        // a BranchProbabilityInfo + BlockFrequencyInfo of the function as it is now
+        fam_invalidate(f, PRESERVE_NONE);
+        bfi = get_bfi(f);
+    }
     loops: [..] Loop_Id; loops.allocator = temp;
     li_loops_in_preorder(li, *loops);
     for < l: loops {
         p: Ip_Promoter;
-        p.il = il; p.li = li; p.loop_cands = *loop_cands; p.l = l; p.is_atomic = il_is_atomic();
+        p.il = il; p.li = li; p.loop_cands = *loop_cands; p.l = l; p.is_atomic = il_is_atomic(); p.bfi = bfi;
         ip_promoter_init(*p);
         ip_promote_candidates(*p);
         if p.is_atomic {
@@ -939,7 +960,7 @@ il_emit_uses :: (il: *Instr_Lowerer) {
 
 // emitInitialization
 il_emit_initialization :: (il: *Instr_Lowerer) {
-    // createProfileFileNameVar(M, Options.InstrProfileOutput): empty for the `instrprof` pass
+    if !il.is_cs create_profile_file_name_var(ip_options.instr_profile_output);
     reg_f := module_get_function("__llvm_profile_register_functions");
     if reg_f == NONE return;
     f := new_function(type_func(ir.t_void, .[], false), "", dl.program_as);
@@ -1010,8 +1031,17 @@ instrprof_lower :: (is_cs := false) -> bool {
     return true;
 }
 
-instrprof_run :: () -> Preserved {
-    if !instrprof_lower() return PRESERVE_ALL;
+instrprof_run :: (node: *Pass_Node) -> Preserved {
+    ip_options = .{};
+    is_cs := false;
+    if node.ip_from_pipeline {
+        ip_options.sampling = node.ip_sampling;
+        ip_options.do_counter_promotion = node.ip_promotion;
+        ip_options.use_bfi_in_promotion = node.ip_use_bfi;
+        ip_options.instr_profile_output = node.sp_file;
+        is_cs = node.ip_cs;
+    }
+    if !instrprof_lower(is_cs) return PRESERVE_ALL;
     printer_note_ir_changed();
     return PRESERVE_NONE;
 }

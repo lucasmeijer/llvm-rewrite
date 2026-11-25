@@ -73,6 +73,11 @@ pb_cl: struct {
     attributor_run := "none";                 // -attributor-enable
     enable_loop_versioning_licm := false;     // -enable-loop-versioning-licm
     opt_pipeline_trigger_crash := false;      // -opt-pipeline-trigger-crash
+    disable_preinline := false;               // -disable-preinline
+    preinline_threshold: s64 = 75;            // -preinline-threshold
+    enable_sampled_instr := false;            // -enable-sampled-instrumentation
+    instrument_cold_func_only_path: string;   // -instrument-cold-function-only-path
+    use_ctx_profile: string;                  // -use-ctx-profile (CtxProfAnalysis.cpp)
 }
 
 pb_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
@@ -111,6 +116,11 @@ pb_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
         case "enable-constraint-elimination"; pb_cl.enable_constraint_elimination = b(name, value, has_value);
         case "enable-loop-versioning-licm"; pb_cl.enable_loop_versioning_licm = b(name, value, has_value);
         case "opt-pipeline-trigger-crash"; pb_cl.opt_pipeline_trigger_crash = b(name, value, has_value);
+        case "disable-preinline"; pb_cl.disable_preinline = b(name, value, has_value);
+        case "preinline-threshold"; pb_cl.preinline_threshold = smisc_int(name, value, has_value);
+        case "enable-sampled-instrumentation"; pb_cl.enable_sampled_instr = b(name, value, has_value);
+        case "instrument-cold-function-only-path"; pb_cl.instrument_cold_func_only_path = copy_string(value);
+        case "use-ctx-profile"; pb_cl.use_ctx_profile = copy_string(value);
         case "attributor-enable";
             if !has_value fatal("option -attributor-enable needs a value");
             if value != "none" && value != "full" && value != "light" && value != "module" && value != "module-light" && value != "cgscc" && value != "cgscc-light"
@@ -469,6 +479,54 @@ build_module_inliner_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
 
 // ---------------------------------------------------------------- module pipelines
 
+// addPreInlinerPasses: a ModuleInlinerWrapperPass(IP, MandatoryFirst = true, EarlyInliner) without module passes or
+// devirt wrapper, then globaldce
+pb_add_pre_inliner_passes :: (mpm: s32, last: *s32, level: Opt_Level) {
+    if pb_cl.disable_preinline return;
+    w := pb_node(mpm, last, .INLINER_WRAPPER_PM, "inliner-wrapper");
+    pipeline.nodes[w].info = lookup_pass("inliner-wrapper");
+    wlast: s32 = -1;
+    ad := pb_node(w, *wlast, .CGSCC_ADAPTOR, "cgscc");
+    adlast: s32 = -1;
+    cg := pb_node(ad, *adlast, .CGSCC_PM, "cgscc");
+    cglast: s32 = -1;
+    n := pb_add(cg, *cglast, "inline<only-mandatory>");
+    pipeline.nodes[n].inl_preinline = true;
+    n = pb_add(cg, *cglast, "inline");
+    pipeline.nodes[n].inl_preinline = true;
+    fa := pb_node(cg, *cglast, .CGSCC_FN_ADAPTOR, ifx pto.eagerly_invalidate_analyses then "function<eager-inv>" else "function");
+    pipeline.nodes[fa].eager_inv = pto.eagerly_invalidate_analyses;
+    fl: s32 = -1;
+    pb_add(fa, *fl, "sroa<modify-cfg>");
+    pb_add(fa, *fl, "early-cse<>");
+    pb_add(fa, *fl, pb_simplifycfg(SCFG_RANGE));
+    pb_add(fa, *fl, INSTCOMBINE);
+    pb_add(mpm, last, "globaldce");
+}
+// addPostPGOLoopRotation
+pb_add_post_pgo_loop_rotation :: (mpm: s32, last: *s32) {
+    if !pb_cl.enable_post_pgo_loop_rotation return;
+    fa := pb_function_adaptor(mpm, last, pto.eagerly_invalidate_analyses);
+    l: s32 = -1;
+    lp := pb_loop_adaptor(fa, *l, false);
+    ll: s32 = -1;
+    pb_add(lp, *ll, "loop-rotate<header-duplication;no-prepare-for-lto;no-check-exit-count>");
+}
+// addPGOInstrPasses(MPM, Level, RunProfileGen = true, IsCS, AtomicCounterUpdate = false, ProfileFile, ...)
+pb_add_pgo_instr_passes :: (mpm: s32, last: *s32, level: Opt_Level, is_cs: bool, profile_file: string, o0 := false) {
+    g := pb_add(mpm, last, "pgo-instr-gen");
+    pipeline.nodes[g].pgo_cs = is_cs;
+    if !o0 pb_add_post_pgo_loop_rotation(mpm, last);
+    n := pb_add(mpm, last, "instrprof");
+    nd := *pipeline.nodes[n];
+    nd.ip_from_pipeline = true;
+    nd.ip_cs = is_cs;
+    nd.sp_file = profile_file;   // Options.InstrProfileOutput
+    nd.ip_promotion = !o0;
+    nd.ip_use_bfi = is_cs;
+    if pb_cl.enable_sampled_instr && !o0 { nd.ip_sampling = true; nd.ip_promotion = false; }
+}
+
 build_module_simplification_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     has_sample_profile := pb_sample_use();
     load_sample_profile := has_sample_profile && !(pgo_opts.flattened_profile_used && pb_phase == .THIN_POST_LINK);
@@ -508,7 +566,35 @@ build_module_simplification_pipeline :: (mpm: s32, last: *s32, level: Opt_Level)
         pb_add(fa, *l, INSTCOMBINE);
         pb_add(fa, *l, pb_simplifycfg(SCFG_RANGE));
     }
-    // no instrumentation PGO / contextual profiling: none of the PGO instrumentation passes
+    // instrumentation PGO / contextual profiling
+    is_pre_link := pb_phase != .THIN_POST_LINK;
+    is_ctx_prof_gen := is_pre_link && ctx_prof_cl.context_roots.count > 0;
+    is_pgo_pre_link := !is_ctx_prof_gen && pgo_options_present() && is_pre_link;
+    is_pgo_instr_gen := is_pgo_pre_link && pgo_opts.kind == .INSTR_GEN;
+    is_pgo_instr_use := is_pgo_pre_link && pgo_opts.kind == .INSTR_USE;
+    is_ctx_prof_use := pb_cl.use_ctx_profile.count > 0 && pb_phase == .THIN_PRE_LINK;
+    is_cold_func_only_instr_gen := pgo_gen_cl.instrument_cold_function_only && is_pgo_pre_link && pb_cl.instrument_cold_func_only_path.count > 0;
+    if is_pgo_instr_use pb_unsupported("instrumentation PGO use (-pgo-kind=pgo-instr-use-pipeline; the indexed profile reader)");
+    if is_ctx_prof_use pb_unsupported("contextual profile use (-use-ctx-profile)");
+    if is_pgo_instr_gen || is_ctx_prof_gen || is_cold_func_only_instr_gen pb_add_pre_inliner_passes(mpm, last, level);
+    if is_pgo_instr_gen {
+        pb_add_pgo_instr_passes(mpm, last, level, false, pgo_opts.profile_file);
+    } else if is_ctx_prof_gen {
+        pb_add(mpm, last, "ctx-instr-gen");
+        pb_add(mpm, last, "noinline-nonprevailing");
+        pb_add_post_pgo_loop_rotation(mpm, last);
+        pb_add(mpm, last, "assign-guid");
+        pb_add(mpm, last, "ctx-instr-lower");
+    } else if is_cold_func_only_instr_gen {
+        pb_add_pgo_instr_passes(mpm, last, level, false, pb_cl.instrument_cold_func_only_path);
+    }
+    if is_pgo_instr_gen || is_ctx_prof_gen pb_add_icp(mpm, last, false, false);
+    if is_pgo_pre_link && pgo_opts.cs_kind == .CS_INSTR_GEN {
+        // PGOInstrumentationGenCreateVar(PGOOpt->CSProfileGenFile, EnableSampledInstr) (not a registered pass name)
+        n := pb_node(mpm, last, .PGO_INSTR_GEN_CREATE_VAR, "PGOInstrumentationGenCreateVar");
+        pipeline.nodes[n].sp_file = pgo_opts.cs_profilegen_file;
+        pipeline.nodes[n].ip_sampling = pb_cl.enable_sampled_instr;
+    }
     if pb_sample_use() pb_add(mpm, last, "pgo-force-function-attrs");   // PGOForceFunctionAttrsPass(PGOOpt->ColdOptType)
     n := pb_add(mpm, last, "always-inline");   // AlwaysInlinerPass(InsertLifetimeIntrinsics = true)
     _ = n;
@@ -565,6 +651,11 @@ build_module_optimization_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
     if pb_cl.enable_partial_inlining pb_unsupported("partial-inliner (-enable-partial-inlining)");
     if !is_lto_pre_link() pb_add(mpm, last, "elim-avail-extern");
     pb_add(mpm, last, "rpo-function-attrs");
+    // the context-sensitive PGO instrumentation after all inlining (not in LTO pre-link)
+    if !is_lto_pre_link() && pgo_options_present() {
+        if pgo_opts.cs_kind == .CS_INSTR_GEN pb_add_pgo_instr_passes(mpm, last, level, true, pgo_opts.cs_profilegen_file);
+        else if pgo_opts.cs_kind == .CS_INSTR_USE pb_unsupported("context-sensitive PGO use (-cspgo-kind=cspgo-instr-use-pipeline)");
+    }
     if pb_cl.enable_global_analyses pb_add(mpm, last, "recompute-globalsaa");
 
     fa := pb_function_adaptor(mpm, last, pto.eagerly_invalidate_analyses);
@@ -611,6 +702,9 @@ build_module_optimization_pipeline :: (mpm: s32, last: *s32, level: Opt_Level) {
 
 build_o0_default_pipeline :: (mpm: s32, last: *s32) {
     if pb_sample_use() pb_unsupported("a sample profile (-pgo-kind=pgo-sample-use-pipeline) in the O0 pipeline");
+    // addPGOInstrPassesForO0
+    if pgo_opts.kind == .INSTR_GEN pb_add_pgo_instr_passes(mpm, last, .{}, false, pgo_opts.profile_file, o0 = true);
+    else if pgo_opts.kind == .INSTR_USE pb_unsupported("instrumentation PGO use (-pgo-kind=pgo-instr-use-pipeline) in the O0 pipeline");
     pb_add(mpm, last, "function(ee-instrument<>)");
     n := pb_add(mpm, last, "always-inline");   // AlwaysInlinerPass(InsertLifetimeIntrinsics = false)
     pipeline.nodes[n].no_lifetime = true;
@@ -640,7 +734,8 @@ add_required_lto_pre_link_passes :: (mpm: s32, last: *s32) {
 
 // PGOOptions: only SampleUse (without pseudo probes or debug info for profiling) is ported
 pb_check_pgo :: () {
-    if pgo_options_present() && pgo_opts.kind != .SAMPLE_USE pb_unsupported("instrumentation PGO options (-pgo-kind) in a default pipeline");
+    if pgo_opts.kind == .INSTR_USE pb_unsupported("instrumentation PGO use (-pgo-kind=pgo-instr-use-pipeline; the indexed profile reader)");
+    if pgo_opts.cs_kind == .CS_INSTR_USE pb_unsupported("context-sensitive PGO use (-cspgo-kind=cspgo-instr-use-pipeline)");
 }
 pb_sample_use :: () -> bool { return pgo_opts.kind == .SAMPLE_USE; }
 // a SampleProfileLoaderPass(PGOOpt->ProfileFile, PGOOpt->ProfileRemappingFile, Phase)
@@ -798,6 +893,11 @@ build_lto_default_pipeline :: (mpm_outer: s32, last_outer: *s32, level: Opt_Leve
         first := cast(s32) pipeline.nodes.count;
         pb_add(mpm, *last, "cgscc(argpromotion,coro-split,coro-annotation-elide)");
         for k: first..cast(s32) pipeline.nodes.count - 1 pb_coro_split_reuse_storage(k, level);
+    }
+    // the context-sensitive PGO passes go to the MPM before this FPM's adaptor
+    if pgo_options_present() {
+        if pgo_opts.cs_kind == .CS_INSTR_GEN pb_add_pgo_instr_passes(mpm, *last, level, true, pgo_opts.cs_profilegen_file);
+        else if pgo_opts.cs_kind == .CS_INSTR_USE pb_unsupported("context-sensitive PGO use (-cspgo-kind=cspgo-instr-use-pipeline)");
     }
     {
         fa := pb_function_adaptor(mpm, *last, pto.eagerly_invalidate_analyses);

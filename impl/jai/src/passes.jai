@@ -333,7 +333,7 @@ Pass_Kind :: enum u16 {
     GLOBAL_OPT; GLOBAL_DCE; CONSTANT_MERGE; STRIP_DEAD_PROTOTYPES; ELIM_AVAIL_EXTERN; INTERNALIZE; DEAD_ARG_ELIM; ARG_PROMOTION; ASSIGN_GUID;
     // L1.scalar-misc (pass_lower_expect.jai, ...; options in scalar_misc_cl.jai)
     // the profile family (pass_add_discriminators.jai, profile_cl.jai, ...)
-    ADD_DISCRIMINATORS; MEMPROF; MEMPROF_MODULE; INSTRPROF; PGO_INSTR_GEN; SAMPLE_PROFILE; PSEUDO_PROBE; PSEUDO_PROBE_UPDATE; PROF_INJECT; PROF_VERIFY; PGO_MEMOP_OPT;
+    ADD_DISCRIMINATORS; MEMPROF; MEMPROF_MODULE; INSTRPROF; PGO_INSTR_GEN; CTX_INSTR_GEN; CTX_INSTR_LOWER; NOINLINE_NONPREVAILING; PGO_INSTR_GEN_CREATE_VAR; SAMPLE_PROFILE; PSEUDO_PROBE; PSEUDO_PROBE_UPDATE; PROF_INJECT; PROF_VERIFY; PGO_MEMOP_OPT;
     LOWER_EXPECT; LOWER_CONSTANT_INTRINSICS; INFER_ALIGNMENT; DIV_REM_PAIRS; FLOAT2INT; SINK; TAILCALLELIM; MLDST_MOTION; SPECULATIVE_EXECUTION; CALLSITE_SPLITTING;
     // the rest of the -O2 pipeline's small passes (pass_coroutines.jai, pass_openmp_opt.jai, pass_remark_only.jai, pass_misc_module.jai, ...)
     CORO_EARLY; CORO_CLEANUP; CORO_ELIDE; CORO_SPLIT; CORO_ANNOTATION_ELIDE; OPENMP_OPT; OPENMP_OPT_CGSCC;
@@ -634,6 +634,9 @@ PASS_TABLE :: Pass_Info.[
     .{"memprof-module", .MODULE, .MEMPROF_MODULE, true, .DOMTREE},
     .{"instrprof", .MODULE, .INSTRPROF, false, .DOMTREE},
     .{"pgo-instr-gen", .MODULE, .PGO_INSTR_GEN, false, .DOMTREE},
+    .{"ctx-instr-gen", .MODULE, .CTX_INSTR_GEN, false, .DOMTREE},
+    .{"ctx-instr-lower", .MODULE, .CTX_INSTR_LOWER, false, .DOMTREE},
+    .{"noinline-nonprevailing", .MODULE, .NOINLINE_NONPREVAILING, false, .DOMTREE},
     .{"sample-profile", .MODULE, .SAMPLE_PROFILE, false, .DOMTREE},
     .{"pseudo-probe", .MODULE, .PSEUDO_PROBE, false, .DOMTREE},
     .{"pseudo-probe-update", .MODULE, .PSEUDO_PROBE_UPDATE, false, .DOMTREE},
@@ -806,6 +809,13 @@ Pass_Node :: struct {
     icp_sample_pgo: bool;          // pgo-icall-prom: PGOIndirectCallPromotion(InLTO = in_lto, SamplePGO)
     inl_hot_cs_zero: bool;         // inline in a default pipeline: IP.HotCallSiteThreshold = 0
     inl_pgo: bool;                 // inline in a default pipeline: IP.EnableDeferral = EnablePGOInlineDeferral
+    inl_preinline: bool;           // inline in addPreInlinerPasses: its own InlineParams (-preinline-threshold)
+    pgo_cs: bool;                  // pgo-instr-gen: PGOInstrumentationType::CSFDO
+    ip_from_pipeline: bool;        // instrprof built by addPGOInstrPasses: InstrProfOptions below (sp_file = InstrProfileOutput)
+    ip_cs: bool;                   // instrprof: IsCS
+    ip_promotion: bool;            // instrprof: Options.DoCounterPromotion
+    ip_use_bfi: bool;              // instrprof: Options.UseBFIInPromotion
+    ip_sampling: bool;             // instrprof: Options.Sampling; PGOInstrumentationGenCreateVar: ProfileSampling
 }
 
 pipeline: struct {
@@ -1316,6 +1326,7 @@ parse_cl_opt :: (arg: string) -> bool {
     if icp_parse_cl_opt(name, value, has_value) return true;   // pass_pgo_icall_prom.jai
     if memop_parse_cl_opt(name, value, has_value) return true;   // pass_pgo_memop_opt.jai
     if chr_parse_cl_opt(name, value, has_value) return true;   // pass_chr.jai
+    if ctx_prof_parse_cl_opt(name, value, has_value) return true;   // pass_ctx_prof_lowering.jai
     if spm_parse_cl_opt(name, value, has_value) return true;   // sample_profile_matcher.jai
     if merge_functions_parse_cl_opt(name, value, has_value) return true;   // pass_merge_functions.jai
     if da_parse_cl_opt(name, value, has_value) return true;   // dependence_analysis.jai (-da-*, -delinearize-*)
@@ -1491,8 +1502,12 @@ run_module_pm :: (n: s32) {
             case .INTERNALIZE; if should_run_pass(node, NONE) mam_invalidate(internalize_run(node));
             case .ASSIGN_GUID; if should_run_pass(node, NONE) mam_invalidate(assign_guid_run());
             case .MEMPROF_MODULE; if should_run_pass(node, NONE) mam_invalidate(memprof_module_run());
-            case .INSTRPROF; if should_run_pass(node, NONE) mam_invalidate(instrprof_run());
-            case .PGO_INSTR_GEN; if should_run_pass(node, NONE) mam_invalidate(pgo_instr_gen_run());
+            case .INSTRPROF; if should_run_pass(node, NONE) mam_invalidate(instrprof_run(node));
+            case .PGO_INSTR_GEN; if should_run_pass(node, NONE) mam_invalidate(pgo_instr_gen_run(false, node.pgo_cs));
+            case .PGO_INSTR_GEN_CREATE_VAR; if should_run_pass(node, NONE) mam_invalidate(pgo_instr_gen_create_var_run(node.sp_file, node.ip_sampling));
+            case .CTX_INSTR_GEN; if should_run_pass(node, NONE) mam_invalidate(pgo_instr_gen_run(true));
+            case .CTX_INSTR_LOWER; if should_run_pass(node, NONE) mam_invalidate(ctx_instr_lower_run());
+            case .NOINLINE_NONPREVAILING; if should_run_pass(node, NONE) mam_invalidate(noinline_nonprevailing_run());
             case .PROF_VERIFY; if should_run_pass(node, NONE) mam_invalidate(prof_verify_run());
             case .PSEUDO_PROBE; if should_run_pass(node, NONE) mam_invalidate(pseudo_probe_run());
             case .PSEUDO_PROBE_UPDATE; if should_run_pass(node, NONE) mam_invalidate(pseudo_probe_update_run());
@@ -1887,6 +1902,7 @@ opt_main :: () {
         passes = tprint("default<%>", slice(opt_level_flag, k, opt_level_flag.count - k));
         have_passes = true;
     }
+    pgo_resolve_options();   // NewPMDriver.cpp: -cspgo-kind
     root: s32 = -1;
     if have_passes root = parse_pass_pipeline(passes);
     if jai_print_pipeline && root >= 0 {

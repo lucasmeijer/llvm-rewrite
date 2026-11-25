@@ -85,7 +85,7 @@ prof_str :: (name: string, value: string, has_value: bool) -> string {
 profile_takes_value :: (a: string) -> bool {
     n := a;
     if begins_with(n, "--") n = slice(n, 2, n.count - 2); else if begins_with(n, "-") n = slice(n, 1, n.count - 1); else return false;
-    if sp_takes_value(n) || prof_verify_takes_value(n) || icp_takes_value(n) || memop_takes_value(n) || spm_takes_value(n) || chr_takes_value(n) return true;
+    if sp_takes_value(n) || prof_verify_takes_value(n) || icp_takes_value(n) || memop_takes_value(n) || spm_takes_value(n) || chr_takes_value(n) || ctx_prof_takes_value(n) return true;
     for string.["memprof-memory-access-callback-prefix", "memprof-mapping-scale", "memprof-mapping-granularity",
                 "memprof-debug-func", "memprof-debug-min", "memprof-debug-max", "memprof-runtime-default-options",
                 "static-func-strip-dirname-prefix", "vp-counters-per-site", "max-counter-promotions-per-loop",

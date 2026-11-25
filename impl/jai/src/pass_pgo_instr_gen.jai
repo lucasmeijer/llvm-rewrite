@@ -1,4 +1,4 @@
-// IR PGO instrumentation (`pgo-instr-gen`, PGOInstrumentationGen; `ctx-instr-gen` is not ported): the CFG minimum
+// IR PGO instrumentation (`pgo-instr-gen`, PGOInstrumentationGen; `ctx-instr-gen` = the CTXPROF type): the CFG minimum
 // spanning tree, the CFG hash, llvm.instrprof.increment on the edges not in the MST (critical edges are split),
 // llvm.instrprof.increment.step for selects, llvm.instrprof.value.profile for indirect calls and memop sizes.
 // Ported from llvm/lib/Transforms/Instrumentation/PGOInstrumentation.cpp (FuncPGOInstrumentation,
@@ -500,11 +500,11 @@ split_indirectbr_critical_edges :: (f: Value_Id, ignore_blocks_without_phi: bool
 }
 
 // FunctionInstrumenter::instrument
-pgo_instrument_function :: (f: Value_Id, members: *Table(s32, [..] Value_Id), bpi: *Bpi, bfi: *Bfi, li: *Loop_Info, is_cs: bool) {
+pgo_instrument_function :: (f: Value_Id, members: *Table(s32, [..] Value_Id), bpi: *Bpi, bfi: *Bfi, li: *Loop_Info, is_cs: bool, is_ctx := false) {
     if !pgo_gen_cl.block_coverage split_indirectbr_critical_edges(f, false, bpi, bfi);
     fp: Func_Pgo;
-    fpi_init(*fp, f, members, true, bpi, bfi, li, is_cs, pgo_gen_cl.instrument_entry, pgo_gen_cl.instrument_loop_entries);
-    name := fp.func_name_var;
+    fpi_init(*fp, f, members, !is_ctx, bpi, bfi, li, is_cs, pgo_gen_cl.instrument_entry || is_ctx, pgo_gen_cl.instrument_loop_entries);
+    name := ifx is_ctx then f else fp.func_name_var;
     cfg_hash := const_int(ir.t_i64, fp.function_hash);
     np := ce_pointer_bitcast_or_addrspacecast(name, type_ptr(0));
     entry := fn_entry(f);
@@ -518,6 +518,24 @@ pgo_instrument_function :: (f: Value_Id, members: *Table(s32, [..] Value_Id), bp
     if pgo_debug_mst for e: fp.mst.edges print("edge % -> % w=% mst=% rm=% crit=%\n", ifx e.src == NONE then "-" else vname(e.src), ifx e.dest == NONE then "-" else vname(e.dest), e.weight, e.in_mst, e.removed, e.is_critical);
     fpi_get_instrument_bbs(*fp, *instrument_bbs);
     num_counters := cast(u32) instrument_bbs.count + fp.num_selects;
+    if is_ctx {
+        // the instrumentable callsites are counted, then instrumented (llvm.instrprof.callsite)
+        cs_intrinsic := get_or_insert_intrinsic_declaration(intrinsic_id_by_name("llvm.instrprof.callsite"));
+        sites: [..] Value_Id; sites.allocator = temp;
+        for bb: fn_blocks(f) for cs: block_insts(bb) {
+            if !is_call_base(cs) continue;
+            // InstrProfCallsite::canInstrumentCallsite
+            if vkind(call_callee(cs)) == .INLINE_ASM continue;
+            if !pgo_is_indirect_call(cs) && call_iid(cs) != NOT_INTRINSIC continue;
+            cf := call_called_function(cs);
+            if cf != NONE && array_find(ctx_prof_cl.skip_callsite_instr, vname(cf)) continue;
+            array_add(*sites, cs);
+        }
+        for cs, k: sites {
+            b: Irb; irb_set_before(*b, cs);
+            irb_call(*b, cs_intrinsic, .[name, cfg_hash, const_int(ir.t_i32, cast(u64) sites.count), const_int(ir.t_i32, cast(u64) k), call_callee(cs)]);
+        }
+    }
     i: u32 = 0;
     if pgo_gen_cl.temporal_instrumentation {
         num_counters += ifx pgo_gen_cl.block_coverage then cast(u32) 8 else 1;
@@ -534,7 +552,7 @@ pgo_instrument_function :: (f: Value_Id, members: *Table(s32, [..] Value_Id), bp
     }
     pgo_instrument_selects(f, *i, num_counters, name, fp.function_hash);
     assert(i == num_counters);
-    if pgo_gen_cl.disable_vp || il_is_gpu_triple() return;
+    if pgo_gen_cl.disable_vp || is_ctx || il_is_gpu_triple() return;
     block_colors: Table(Value_Id, [..] Value_Id); block_colors.allocator = temp;
     if glob(f).has_personality && is_scoped_eh_personality(classify_eh_personality(fn_personality(f))) color_eh_funclets(f, *block_colors);
     for kind: 0..IPVK_LAST {
@@ -627,9 +645,9 @@ pgo_skip_gen :: (f: Value_Id) -> bool {
     return false;
 }
 
-// InstrumentAllFunctions + PGOInstrumentationGen::run (FDO)
-pgo_instr_gen_run :: () -> Preserved {
-    create_ir_level_profile_flag_var(false);
+// InstrumentAllFunctions + PGOInstrumentationGen::run (FDO, or CTXPROF for ctx-instr-gen)
+pgo_instr_gen_run :: (is_ctx := false, is_cs := false) -> Preserved {
+    if !is_ctx && !is_cs create_ir_level_profile_flag_var(false);
     members: Table(s32, [..] Value_Id); members.allocator = temp;
     if pgo_gen_cl.do_comdat_renaming {
         add :: (members: *Table(s32, [..] Value_Id), g: Value_Id) {
@@ -650,8 +668,17 @@ pgo_instr_gen_run :: () -> Preserved {
         bpi := get_bpi(f);
         bfi := get_bfi(f);
         li := get_loop_info(f);
-        pgo_instrument_function(f, *members, bpi, bfi, li, false);
+        pgo_instrument_function(f, *members, bpi, bfi, li, is_cs, is_ctx);
     }
     printer_note_ir_changed();
     return PRESERVE_NONE;
+}
+
+// PGOInstrumentationGenCreateVar::run
+pgo_instr_gen_create_var_run :: (cs_instr_name: string, sampling: bool) -> Preserved {
+    create_profile_file_name_var(cs_instr_name);
+    append_to_compiler_used(create_ir_level_profile_flag_var(true));
+    if sampling create_profile_sampling_var();
+    printer_note_ir_changed();
+    return PRESERVE_NONE;   // all function analyses preserved
 }

@@ -126,7 +126,34 @@ pgo_opts: struct {
     profile_file: string;            // -profile-file (NewPMDriver.cpp)
     flattened_profile_used := false; // -flattened-profile-used (PassBuilderPipelines.cpp)
     enable_pgo_inline_deferral := true;   // -enable-npm-pgo-inline-deferral (PassBuilderPipelines.cpp)
+    cs_present := false;             // a PGOOptions made only for -cspgo-kind=cspgo-instr-gen-pipeline (NoAction)
+    cs_kind: Cspgo_Kind;             // -cspgo-kind: PGOOptions::CSAction
+    cs_profilegen_file: string;      // -cs-profilegen-file
+    cs_kind_flag: Cspgo_Kind;        // the flag itself (NewPMDriver resolves it into cs_kind)
 };
+Cspgo_Kind :: enum u8 { NO_CSPGO; CS_INSTR_GEN; CS_INSTR_USE; }
+// NewPMDriver.cpp: the CSPGOKind part of building the PGOOptions (after all options are parsed)
+pgo_resolve_options :: () {
+    if pgo_opts.cs_kind_flag == .NO_CSPGO return;
+    if pgo_opts.kind == .INSTR_GEN || pgo_opts.kind == .SAMPLE_USE {
+        write_string("CSPGOKind cannot be used with IRInstr or SampleUse", to_standard_error = true);
+        exit(1);
+    }
+    if pgo_opts.cs_kind_flag == .CS_INSTR_GEN {
+        if pgo_opts.cs_profilegen_file.count == 0 {
+            write_string("CSInstrGen needs to specify CSProfileGenFile", to_standard_error = true);
+            exit(1);
+        }
+        pgo_opts.cs_kind = .CS_INSTR_GEN;
+        pgo_opts.cs_present = true;
+    } else {
+        if pgo_opts.kind == .NO_PGO {
+            write_string("CSInstrUse needs to be together with InstrUse", to_standard_error = true);
+            exit(1);
+        }
+        pgo_opts.cs_kind = .CS_INSTR_USE;
+    }
+}
 pgo_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
     if name == "pgo-kind" {
         if value == {
@@ -151,15 +178,25 @@ pgo_parse_cl_opt :: (name: string, value: string, has_value: bool) -> bool {
     if name == "profile-file" { pgo_opts.profile_file = copy_string(prof_str(name, value, has_value)); return true; }
     if name == "flattened-profile-used" { pgo_opts.flattened_profile_used = smisc_bool(name, value, has_value); return true; }
     if name == "enable-npm-pgo-inline-deferral" { pgo_opts.enable_pgo_inline_deferral = smisc_bool(name, value, has_value); return true; }
-    if name == "cspgo-kind" || name == "memory-profile-file" || name == "profile-remapping-file"
+    if name == "cspgo-kind" {
+        if value == {
+            case "nocspgo"; pgo_opts.cs_kind_flag = .NO_CSPGO;
+            case "cspgo-instr-gen-pipeline"; pgo_opts.cs_kind_flag = .CS_INSTR_GEN;
+            case "cspgo-instr-use-pipeline"; pgo_opts.cs_kind_flag = .CS_INSTR_USE;
+            case; fatal("invalid value '%' for option -cspgo-kind", value);
+        }
+        return true;
+    }
+    if name == "cs-profilegen-file" { pgo_opts.cs_profilegen_file = copy_string(prof_str(name, value, has_value)); return true; }
+    if name == "memory-profile-file" || name == "profile-remapping-file"
         fatal("unsupported option '-%'", name);
     return false;
 }
 // Is there a PGOOptions? (only -pgo-kind creates one here; -debug-info-for-profiling and the like are rejected)
-pgo_options_present :: () -> bool { return pgo_opts.kind != .NO_PGO; }
+pgo_options_present :: () -> bool { return pgo_opts.kind != .NO_PGO || pgo_opts.cs_present; }
 
 pgo_force_function_attrs_run :: () -> Preserved {
-    cold := ifx pgo_options_present() then pgo_opts.cold_opt else .DEFAULT;
+    cold := ifx pgo_opts.kind != .NO_PGO then pgo_opts.cold_opt else .DEFAULT;   // a CS-only PGOOptions has the default
     if cold == .DEFAULT return PRESERVE_ALL;
     psi := psi_require();
     changed := false;
