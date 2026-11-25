@@ -163,8 +163,8 @@ Acs :: struct { cb: Value_Id = NONE; enc: [..] s32; }
 acs_md_int :: (m: Md_Id) -> s64 { ok, v := md_const_int_value(m); return cast,no_check(s64) v; }
 // AbstractCallSite::getCallbackUses
 acs_callback_uses :: (cb: Value_Id, out: *[..] Use_Id) {
-    callee := call_callee(cb);
-    if vkind(callee) != .FUNCTION return;
+    callee := call_called_function(cb);
+    if callee == NONE return;
     md := get_metadata(callee, md_fixed("callback"));
     if md == NONE return;
     for k: 0..cast(s64) md_nops(md) - 1 {
@@ -187,8 +187,8 @@ acs_from_use :: (use: Use_Id) -> Acs {
     }
     a.cb = usr;
     if u == op_use(usr, nops(usr) - 1) return a;
-    callee := call_callee(usr);
-    if vkind(callee) != .FUNCTION { a.cb = NONE; return a; }
+    callee := call_called_function(usr);
+    if callee == NONE { a.cb = NONE; return a; }
     md := get_metadata(callee, md_fixed("callback"));
     if md == NONE { a.cb = NONE; return a; }
     use_idx := cast(s64) use_arg_no(u);

@@ -7,7 +7,8 @@
 // only when it is cached, exactly like AAManager::getModuleAAResultImpl. GlobalsAA is stateless for the pass
 // manager (PreservedAnalyses::preservedWhenStateless), so nothing invalidates it here. LLVM's deletion callbacks
 // aren't needed: erased values keep their ids (never reused), so stale entries are never looked up again.
-// Callback calls (!callback metadata: AbstractCallSite, forEachCallbackFunction) fail loudly.
+// Callback calls (!callback metadata) go through AbstractCallSite (attributor_query.jai's acs_*): callback uses are
+// not address-taking, and every callback callee of a call is an extra CalledFunctions edge (forEachCallbackFunction).
 
 // CallGraph: node 0 = ExternalCallingNode (function NONE), node 1 = CallsExternalNode (function NONE)
 Cg_Node :: struct {
@@ -39,11 +40,10 @@ fn_has_address_taken_for_cg :: (f: Value_Id) -> bool {
     while u != NONE {
         defer u = ir.u_next[u];
         usr := ir.u_user[u];
+        // IgnoreCallbackUses: AbstractCallSite ACS(&U); if (ACS && ACS.isCallbackCall()) continue;
+        acs := acs_from_use(u);
+        if acs.cb != NONE && acs_is_callback(acs) continue;
         is_call := is_inst(usr) && is_call_base(usr);
-        if is_call && opno_of(u) != nops(usr) - 1 {
-            c := call_callee(usr);
-            if vkind(c) == .FUNCTION && fn_has_callback_md(c) fatal("GlobalsAA: callback calls (!callback) are not supported yet");
-        }
         if !is_call {
             o := opr_code(usr);
             if o == .BITCAST || o == .ADDRSPACECAST {
@@ -88,8 +88,13 @@ cg_build :: () -> Call_Graph {
                 cn := cg_get_or_insert(*cg, callee);
                 array_add(*cg.nodes[n].callees, cn);
             }
-            c := call_callee(i);
-            if vkind(c) == .FUNCTION && fn_has_callback_md(c) fatal("GlobalsAA: callback calls (!callback) are not supported yet");
+            // forEachCallbackFunction: Node->addCalledFunction(nullptr, getOrInsertFunction(CB))
+            cbu: [..] Use_Id; cbu.allocator = temp;
+            acs_callback_uses(i, *cbu);
+            for u: cbu {
+                cf := acs_called_function(acs_from_use(u));
+                if cf != NONE array_add(*cg.nodes[n].callees, cg_get_or_insert(*cg, cf));
+            }
         }
     }
     return cg;
